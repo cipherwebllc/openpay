@@ -4,7 +4,7 @@
 // 表示 UI は持たない (head/body どちらでも valid・LP page から render)。
 import { getLocale, getTranslations } from 'next-intl/server';
 
-const SITE_URL = 'https://open-pay.jp';
+export const SITE_URL = 'https://open-pay.jp';
 const FAQ_COUNT = 7;
 
 // FAQ 回答の rich タグ (<jpycEx>…</jpycEx> 等) を落として平文化する。
@@ -18,6 +18,19 @@ function stripTags(s: string): string {
 // (JSON.stringify は < を escape しない・Next.js 本体と同じ手当て)。
 function safeJsonLd(value: unknown): string {
   return JSON.stringify(value).replace(/</g, '\\u003c');
+}
+
+/**
+ * 任意の JSON-LD を安全に埋め込む汎用 Server/Client 兼用 component。
+ * escape は safeJsonLd に一本化 (script 文脈脱出の遮断を 1 箇所に保つ)。
+ */
+export function JsonLd({ value }: { value: unknown }) {
+  return (
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{ __html: safeJsonLd(value) }}
+    />
+  );
 }
 
 export async function StructuredData() {
@@ -53,14 +66,8 @@ export async function StructuredData() {
 
   return (
     <>
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: safeJsonLd(softwareApplication) }}
-      />
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: safeJsonLd(faqPage) }}
-      />
+      <JsonLd value={softwareApplication} />
+      <JsonLd value={faqPage} />
     </>
   );
 }

@@ -130,6 +130,60 @@ describe('POST /api/handle', () => {
     });
   });
 
+  it('passes a validated heading through the HTTP boundary to the store', async () => {
+    store.reserveOrUpdateHandle.mockResolvedValue({
+      status: 'created',
+      record: savedRecord(101),
+    });
+    const res = await POST(
+      postReq({
+        handle: 'alice',
+        config: CFG,
+        profile: {
+          links: [
+            { kind: 'heading', label: ' Projects ', emoji: ' 📌 ' },
+            { label: 'X', url: 'https://x.com/a', featured: true },
+          ],
+        },
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(store.reserveOrUpdateHandle.mock.calls[0][0].profile).toEqual({
+      links: [
+        { kind: 'heading', label: 'Projects', emoji: '📌' },
+        { label: 'X', url: 'https://x.com/a', featured: true },
+      ],
+    });
+  });
+
+  it.each([
+    [
+      'url property',
+      { kind: 'heading', label: 'Projects', url: 'https://example.com' },
+    ],
+    [
+      'featured property',
+      { kind: 'heading', label: 'Projects', featured: false },
+    ],
+    ['unknown kind', { kind: 'divider', label: 'Projects' }],
+  ])(
+    'rejects heading with %s before the store boundary',
+    async (_case, link) => {
+      const res = await POST(
+        postReq({
+          handle: 'alice',
+          config: CFG,
+          profile: { links: [link] },
+        }),
+      );
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe('invalid_profile');
+      expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
+    },
+  );
+
   it('invalid profile (non-https link) → 400 invalid_profile, no store hit', async () => {
     const res = await POST(
       postReq({

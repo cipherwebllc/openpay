@@ -10,13 +10,22 @@ import { MAX_PROFILE_LINKS, MAX_SOCIAL_LINKS } from '@/lib/handle';
 import { resolveHandleTheme, type HandleTheme } from '@/lib/handleTheme';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
-// ビルダーの下書きリンク (公開前の生入力)。emoji/featured は Phase 1 の表現力追加。
-export interface DraftLink {
+// ビルダーの下書きリンク (公開前の生入力)。既存 v1 保存値は kind 欠落の通常リンク。
+export interface DraftRegularLink {
+  kind?: never;
   label: string;
   url: string;
   emoji?: string;
   featured?: boolean;
 }
+
+export interface DraftHeading {
+  kind: 'heading';
+  label: string;
+  emoji?: string;
+}
+
+export type DraftLink = DraftRegularLink | DraftHeading;
 
 // 受取方法は JPYC Polygon / JPYC Kaia の ON/OFF (+ env.enableJpycAvalanche=ON で JPYC Avalanche)。
 // USDC (cross-chain) は着金チェーンを選べず Base 固定になるためビルダーから提供終了
@@ -81,9 +90,24 @@ function sanitizeLinks(loaded: unknown): DraftLink[] {
   // featured は最大 1 本。localStorage が破損して複数 true でも先頭 1 本だけ残す。
   let featuredTaken = false;
   for (const l of loaded) {
-    if (!l || typeof l !== 'object') continue;
+    if (!l || typeof l !== 'object' || Array.isArray(l)) continue;
     const ll = l as Record<string, unknown>;
-    const link: DraftLink = {
+    const hasKind = Object.hasOwn(ll, 'kind');
+    if (hasKind && ll.kind !== 'heading') continue;
+    if (ll.kind === 'heading') {
+      const heading: DraftHeading = {
+        kind: 'heading',
+        label: typeof ll.label === 'string' ? ll.label : '',
+      };
+      if (typeof ll.emoji === 'string' && ll.emoji.trim()) {
+        heading.emoji = ll.emoji;
+      }
+      // localStorage の壊れた url/featured は heading から除去し、他行へ波及させない。
+      out.push(heading);
+      if (out.length >= MAX_PROFILE_LINKS) break;
+      continue;
+    }
+    const link: DraftRegularLink = {
       label: typeof ll.label === 'string' ? ll.label : '',
       url: typeof ll.url === 'string' ? ll.url : '',
     };

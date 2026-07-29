@@ -5,6 +5,7 @@ import {
   EMPTY_HANDLE_PUBLISH_BASELINE,
   formatPublishedRelativeTime,
   handlePublishBaselineReducer,
+  hasDroppedProfileUrl,
   hasUnpublishedHandleChanges,
 } from '@/lib/handlePublish';
 
@@ -61,6 +62,24 @@ describe('buildPublishPayload', () => {
     );
   });
 
+  it('heading を canonical キー順 {kind,label,emoji} の exact JSON にする', () => {
+    const payload = buildPublishPayload(
+      draft({
+        links: [
+          { kind: 'heading', label: '  Projects  ', emoji: ' 📌 ' },
+          { label: 'Site', url: 'https://example.com' },
+        ],
+      }),
+      OPTIONS,
+    );
+
+    expect(payload).not.toBeNull();
+    const body = JSON.stringify({ handle: 'alice', ...payload });
+    expect(body).toBe(
+      `{"handle":"alice","config":{"to":"${ADDR}","color":"#2563eb","theme":"clean","methods":[{"token":"jpyc","chain":"polygon"},{"token":"jpyc","chain":"kaia"}],"presets":{"jpyc":["300","1000","3000"]}},"profile":{"links":[{"kind":"heading","label":"Projects","emoji":"📌"},{"label":"Site","url":"https://example.com"}],"theme":"clean"}}`,
+    );
+  });
+
   it('受取先未解決または受取方法 0 件は publish 不可 (null)', () => {
     expect(buildPublishPayload(draft(), { ...OPTIONS, receiver: null })).toBeNull();
     expect(
@@ -77,6 +96,19 @@ describe('buildPublishPayload', () => {
       OPTIONS,
     );
     expect(payload?.config.presets).toEqual({ jpyc: ['1000'] });
+  });
+
+  it('heading は URL drop 判定から隔離し、通常リンクだけを検査する', () => {
+    expect(
+      hasDroppedProfileUrl(
+        draft({ links: [{ kind: 'heading', label: 'Projects' }] }),
+      ),
+    ).toBe(false);
+    expect(
+      hasDroppedProfileUrl(
+        draft({ links: [{ label: 'Site', url: 'http://example.com' }] }),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -125,6 +157,66 @@ describe('handle publish baseline state machine', () => {
       OPTIONS,
     )!;
     expect(hasUnpublishedHandleChanges(state, 'alice', editedAfterSend)).toBe(true);
+  });
+
+  it('heading の trim 同値は非dirty、編集・追加・削除・並替は dirty', () => {
+    const links = [
+      { kind: 'heading', label: 'Projects', emoji: '📌' },
+      { label: 'Site', url: 'https://example.com' },
+    ] satisfies HandleProfileDraft['links'];
+    const loaded = buildPublishPayload(draft({ links }), OPTIONS)!;
+    const state = handlePublishBaselineReducer(EMPTY_HANDLE_PUBLISH_BASELINE, {
+      type: 'loaded',
+      snapshot: { handle: 'alice', payload: loaded, updatedAt: 100 },
+    });
+
+    expect(hasUnpublishedHandleChanges(state, 'alice', loaded)).toBe(false);
+    const trimEquivalent = buildPublishPayload(
+      draft({
+        links: [
+          { kind: 'heading', label: ' Projects ', emoji: ' 📌 ' },
+          { label: ' Site ', url: ' https://example.com ' },
+        ],
+      }),
+      OPTIONS,
+    )!;
+    expect(
+      hasUnpublishedHandleChanges(state, 'alice', trimEquivalent),
+    ).toBe(false);
+
+    const edited = buildPublishPayload(
+      draft({
+        links: [
+          { kind: 'heading', label: 'Selected projects', emoji: '📌' },
+          links[1],
+        ],
+      }),
+      OPTIONS,
+    )!;
+    expect(hasUnpublishedHandleChanges(state, 'alice', edited)).toBe(true);
+
+    const added = buildPublishPayload(
+      draft({
+        links: [
+          ...links,
+          { kind: 'heading', label: 'Contact' },
+        ],
+      }),
+      OPTIONS,
+    )!;
+    expect(hasUnpublishedHandleChanges(state, 'alice', added)).toBe(true);
+
+    const deleted = buildPublishPayload(
+      draft({ links: [links[1]] }),
+      OPTIONS,
+    )!;
+    expect(hasUnpublishedHandleChanges(state, 'alice', deleted)).toBe(true);
+
+    const reordered = buildPublishPayload(
+      draft({ links: [links[1], links[0]] }),
+      OPTIONS,
+    )!;
+    expect(hasUnpublishedHandleChanges(state, 'alice', reordered)).toBe(true);
   });
 
   it('handle 切替は旧 baseline を置換し、編集停止/解放の discard で破棄する', () => {

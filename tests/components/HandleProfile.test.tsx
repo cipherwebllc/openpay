@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent, within } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import { HandleProfileView } from '@/components/HandleProfile';
 import {
@@ -18,6 +18,8 @@ vi.mock('@/components/TipForm', () => ({
 }));
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+const EXPECTED_CLEAN_LINK_CLASS =
+  'flex w-full items-center justify-center rounded-2xl border border-slate-200/80 bg-white px-4 py-3.5 text-[0.95rem] font-semibold text-slate-800 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_10px_24px_-8px_rgba(15,23,42,0.2)] active:translate-y-0 active:shadow-sm';
 
 const multiConfig: HandleTipConfig = {
   to: ADDR,
@@ -86,9 +88,15 @@ describe('HandleProfileView', () => {
       <HandleProfileView config={multiConfig} profile={{ links }} />,
     );
     const noTheme = screen.getByRole('link', { name: 'My X' });
-    const cleanClass = noTheme.getAttribute('class');
-    // theme 無しのリンクは inline style を持たない (現行と一致)。
+    // class を実装から自己参照せずハードコードし、旧レコードの DOM 階層・属性も固定する。
+    expect(noTheme.getAttribute('class')).toBe(EXPECTED_CLEAN_LINK_CLASS);
     expect(noTheme.getAttribute('style')).toBeNull();
+    expect(noTheme.closest('ul')?.className).toBe(
+      'mt-7 flex w-full flex-col gap-2.5',
+    );
+    expect(noTheme.closest('ul')?.innerHTML).toBe(
+      `<li><a href="https://x.com/alice" target="_blank" rel="noopener noreferrer nofollow" class="${EXPECTED_CLEAN_LINK_CLASS}">My X</a></li>`,
+    );
     unmount();
     // 明示 theme:'clean' でも同一 className + inline style 無し。
     renderWithIntl(
@@ -98,7 +106,7 @@ describe('HandleProfileView', () => {
       />,
     );
     const cleanExplicit = screen.getByRole('link', { name: 'My X' });
-    expect(cleanExplicit.getAttribute('class')).toBe(cleanClass);
+    expect(cleanExplicit.getAttribute('class')).toBe(EXPECTED_CLEAN_LINK_CLASS);
     expect(cleanExplicit.getAttribute('style')).toBeNull();
   });
 
@@ -113,6 +121,58 @@ describe('HandleProfileView', () => {
     const link = screen.getByRole('link', { name: 'Site' });
     expect(link).toHaveTextContent('🌐');
     expect(link.querySelector('[aria-hidden="true"]')?.textContent).toBe('🌐');
+  });
+
+  it('renders a heading as a semantic, non-interactive list row', () => {
+    renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{
+          links: [
+            { kind: 'heading', label: 'Highlights', emoji: '✨' },
+            { label: 'Site', url: 'https://example.com' },
+          ],
+        }}
+      />,
+    );
+    const heading = screen.getByRole('heading', {
+      level: 2,
+      name: 'Highlights',
+    });
+    const row = heading.closest('li');
+    expect(row).not.toBeNull();
+    expect(within(row!).queryByRole('link')).not.toBeInTheDocument();
+    expect(heading.querySelector('[aria-hidden="true"]')?.textContent).toBe('✨');
+    expect(heading.className).toBe(
+      'w-full px-2 pb-1 pt-4 text-left text-xs font-semibold tracking-wide text-slate-500',
+    );
+    expect(heading.getAttribute('style')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Site' })).toBeInTheDocument();
+  });
+
+  it('renders a heading-only profile and keeps night headings readable', () => {
+    renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{
+          links: [{ kind: 'heading', label: 'About' }],
+          theme: 'night',
+        }}
+      />,
+    );
+    const heading = screen.getByRole('heading', { level: 2, name: 'About' });
+    expect(heading.closest('ul')).toHaveClass(
+      'mt-7',
+      'flex',
+      'w-full',
+      'flex-col',
+      'gap-2.5',
+    );
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(heading.className).toBe(
+      'w-full px-2 pb-1 pt-4 text-left text-xs font-semibold tracking-wide',
+    );
+    expect(heading.getAttribute('style')).toContain('rgb(203, 213, 225)');
   });
 
   it('featured link gets an inline style even under the clean theme (emphasis)', () => {

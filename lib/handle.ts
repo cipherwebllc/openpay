@@ -123,7 +123,9 @@ export interface HandleReceiveMethod {
 }
 
 // link-in-bio の外部リンク。url は https のみ (javascript:/data:/http: を排除)。
-export interface HandleLink {
+// 既存レコード/送信 payload のバイト列を維持するため、通常リンクには kind を付けない。
+export interface HandleRegularLink {
+  kind?: never;
   label: string;
   url: string;
   // 先頭に表示する絵文字 (任意・最大 2 code points)。テキストとして描画 (HTML 解釈なし)。
@@ -131,6 +133,15 @@ export interface HandleLink {
   // 「注目」= 少し大きく強調するリンク (プロフィール全体で最大 1 本・保存時に enforce)。
   featured?: boolean;
 }
+
+// リンク一覧内の非インタラクティブな区切り。url / featured は構造上も持たない。
+export interface HandleHeading {
+  kind: 'heading';
+  label: string;
+  emoji?: string;
+}
+
+export type HandleLink = HandleRegularLink | HandleHeading;
 
 // @handle プロフィール (link-in-bio)。tip パラメータではないので config の sibling。
 export interface HandleProfile {
@@ -487,19 +498,40 @@ export function validateProfile(raw: unknown): ValidatedProfile {
     // 以降は無視する (サーバ検証でも enforce = クライアントを信用しない)。
     let featuredTaken = false;
     for (const l of r.links) {
-      if (typeof l !== 'object' || l === null) {
+      if (typeof l !== 'object' || l === null || Array.isArray(l)) {
         return { ok: false, error: 'invalid link' };
       }
       const ll = l as Record<string, unknown>;
-      if (typeof ll.label !== 'string' || typeof ll.url !== 'string') {
+      const hasKind = Object.hasOwn(ll, 'kind');
+      if (hasKind && ll.kind !== 'heading') {
+        return { ok: false, error: 'unknown link kind' };
+      }
+      if (typeof ll.label !== 'string') {
         return { ok: false, error: 'invalid link' };
       }
       const label = ll.label.trim();
-      const url = ll.url.trim();
       if (!label) return { ok: false, error: 'link label is required' };
       if (label.length > MAX_LINK_LABEL_LEN) {
         return { ok: false, error: 'link label too long' };
       }
+      if (ll.kind === 'heading') {
+        // heading に url/featured が存在する payload は値にかかわらず構造違反。
+        if (Object.hasOwn(ll, 'url')) {
+          return { ok: false, error: 'heading must not have url' };
+        }
+        if (Object.hasOwn(ll, 'featured')) {
+          return { ok: false, error: 'heading must not be featured' };
+        }
+        const heading: HandleHeading = { kind: 'heading', label };
+        const emoji = sanitizeEmoji(ll.emoji);
+        if (emoji) heading.emoji = emoji;
+        links.push(heading);
+        continue;
+      }
+      if (typeof ll.url !== 'string') {
+        return { ok: false, error: 'invalid link' };
+      }
+      const url = ll.url.trim();
       if (url.length > MAX_LINK_URL_LEN) {
         return { ok: false, error: 'link url too long' };
       }
@@ -666,12 +698,28 @@ function parseStoredProfile(raw: unknown): HandleProfile | undefined {
     let featuredTaken = false;
     for (const l of r.links) {
       if (links.length >= MAX_PROFILE_LINKS) break;
-      if (typeof l !== 'object' || l === null) continue;
+      if (typeof l !== 'object' || l === null || Array.isArray(l)) continue;
       const ll = l as Record<string, unknown>;
-      if (typeof ll.label !== 'string' || typeof ll.url !== 'string') continue;
+      const hasKind = Object.hasOwn(ll, 'kind');
+      if (hasKind && ll.kind !== 'heading') continue;
+      if (typeof ll.label !== 'string') continue;
       const label = ll.label.trim();
+      if (!label) continue;
+      if (ll.kind === 'heading') {
+        // 壊れた heading だけを落とし、後続の正常なリンク/featured へ波及させない。
+        if (Object.hasOwn(ll, 'url') || Object.hasOwn(ll, 'featured')) continue;
+        const heading: HandleHeading = {
+          kind: 'heading',
+          label: label.slice(0, MAX_LINK_LABEL_LEN),
+        };
+        const emoji = sanitizeEmoji(ll.emoji);
+        if (emoji) heading.emoji = emoji;
+        links.push(heading);
+        continue;
+      }
+      if (typeof ll.url !== 'string') continue;
       const url = ll.url.trim();
-      if (!label || url.length > MAX_LINK_URL_LEN || !isHttpsUrl(url)) continue;
+      if (url.length > MAX_LINK_URL_LEN || !isHttpsUrl(url)) continue;
       const link: HandleLink = { label: label.slice(0, MAX_LINK_LABEL_LEN), url };
       const emoji = sanitizeEmoji(ll.emoji);
       if (emoji) link.emoji = emoji;

@@ -920,6 +920,11 @@
     "emojiAria": "絵文字 (任意)",
     "featuredToggle": "注目"
   },
+  "HandleProfileBuilder": {
+    "addHeading": "見出しを追加",
+    "headingLabelPlaceholder": "見出し (例: おすすめ)",
+    "removeHeading": "見出しを削除"
+  },
   "CheckoutForm": {
     "header": "ご注文のお支払い",
     "checkoutTitle": "OpenPay Checkout",
