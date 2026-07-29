@@ -264,6 +264,20 @@ export default async function HandlePage({
               {t('footerSafetyMore')}
             </Link>
           </p>
+          {/* 成長ループ: 訪問者 (チップを送る側) を作成側へ誘導する控えめな 1 行。
+              lit.link/Linktree の "create your own" と同型。主役はクリエイターなので
+              poweredBy と同じ控えめトーンに揃える。 */}
+          <Link
+            href={`/${locale}/create?tab=profile`}
+            prefetch={false}
+            className={`text-[11px] underline underline-offset-2 transition ${
+              darkFooter
+                ? 'text-slate-300 hover:text-white'
+                : 'text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            {t('createYourOwn')}
+          </Link>
           <Link
             href={`/${locale}`}
             aria-label={t('backToTop')}
