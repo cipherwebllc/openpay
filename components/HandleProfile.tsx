@@ -33,6 +33,9 @@ const THEMED_LINK_BASE =
 // featured は少し大きく (py 増し + text 大) して主役リンクを際立たせる。
 const FEATURED_LINK_BASE =
   'flex w-full items-center justify-center rounded-2xl px-4 py-4 text-base font-bold transition-all duration-200 hover:-translate-y-1';
+const HEADING_BASE =
+  'w-full px-2 pb-1 pt-4 text-left text-xs font-semibold tracking-wide';
+const CLEAN_HEADING_CLASS = `${HEADING_BASE} text-slate-500`;
 
 function initialOf(name?: string): string {
   const n = (name ?? '').trim();
@@ -130,6 +133,27 @@ export function HandleProfileView({
       {links.length > 0 && (
         <ul className="mt-7 flex w-full flex-col gap-2.5">
           {links.map((l, i) => {
+            if (l.kind === 'heading') {
+              return (
+                <li key={`heading-${l.label}-${i}`}>
+                  <h2
+                    className={isClean ? CLEAN_HEADING_CLASS : HEADING_BASE}
+                    style={
+                      isClean
+                        ? undefined
+                        : { color: tk.dark ? '#cbd5e1' : '#64748b' }
+                    }
+                  >
+                    {l.emoji && (
+                      <span className="mr-1.5" aria-hidden>
+                        {l.emoji}
+                      </span>
+                    )}
+                    {l.label}
+                  </h2>
+                </li>
+              );
+            }
             const featured = l.featured === true;
             // clean かつ非 featured のときだけ現行 className をそのまま使い inline style を付けない
             // (= 現行レコードのピクセル一致)。それ以外はテーマ/featured の inline style を適用。

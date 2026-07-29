@@ -41,6 +41,15 @@ export function buildPublishProfile(draft: HandleProfileDraft): HandleProfile {
   for (const entry of draft.links) {
     if (links.length >= MAX_PROFILE_LINKS) break;
     const label = entry.label.trim();
+    if (entry.kind === 'heading') {
+      if (!label) continue;
+      // JSON.stringify の canonical キー順を {kind,label,emoji} に固定する。
+      const heading: HandleLink = { kind: 'heading', label };
+      const emoji = entry.emoji?.trim();
+      if (emoji) heading.emoji = emoji;
+      links.push(heading);
+      continue;
+    }
     const url = entry.url.trim();
     if (!label || !isHttpsUrl(url)) continue;
     const link: HandleLink = { label, url };
@@ -125,6 +134,7 @@ export function hasDroppedProfileUrl(draft: HandleProfileDraft): boolean {
       return !!value && !isHttpsUrl(value);
     }) ||
     draft.links.some((entry) => {
+      if (entry.kind === 'heading') return false;
       const value = entry.url.trim();
       return !!value && !isHttpsUrl(value);
     })

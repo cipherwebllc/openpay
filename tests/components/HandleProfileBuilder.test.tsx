@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, within } from '@testing-library/react';
+import { screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { getAddress } from 'viem';
 import { renderWithIntl } from '../_helpers/i18n';
+import { MAX_PROFILE_LINKS } from '@/lib/handle';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const ADDR2 = '0x000000000000000000000000000000000000dead';
@@ -567,6 +568,132 @@ describe('HandleProfileBuilder', () => {
     const emoji = screen.getByLabelText('絵文字 (任意)');
     fireEvent.change(emoji, { target: { value: '🌐' } });
     expect(screen.getByLabelText('絵文字 (任意)')).toHaveValue('🌐');
+  });
+
+  it('見出しを追加・編集・削除でき、URL と featured UI を出さない', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(
+      screen.getByRole('button', { name: '＋ 見出しを追加' }),
+    );
+    const label = screen.getByPlaceholderText('見出し (例: おすすめ)');
+    const row = label.parentElement!;
+    expect(label).toHaveAttribute('maxlength', '40');
+    expect(within(row).queryByPlaceholderText('https://')).not.toBeInTheDocument();
+    expect(
+      within(row).queryByRole('button', { name: /注目/ }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(label, { target: { value: 'おすすめ' } });
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'おすすめ' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      within(row).getByRole('button', { name: '見出しを削除' }),
+    );
+    expect(
+      screen.queryByPlaceholderText('見出し (例: おすすめ)'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { level: 2, name: 'おすすめ' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('見出しと通常リンクを同じ既存 drag 機構で並べ替えできる', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(
+      screen.getByText('＋ リンクを追加'),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: '＋ 見出しを追加' }),
+    );
+    fireEvent.change(screen.getByPlaceholderText('ラベル (例: X)'), {
+      target: { value: 'Blog' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('見出し (例: おすすめ)'), {
+      target: { value: 'News' },
+    });
+
+    const grips = screen.getAllByLabelText('ドラッグで並べ替え');
+    expect(grips).toHaveLength(2);
+    fireEvent.dragStart(grips[1]);
+    fireEvent.drop(grips[0].parentElement!);
+
+    const reordered = screen.getAllByLabelText('ドラッグで並べ替え');
+    expect(
+      within(reordered[0].parentElement!).getByPlaceholderText(
+        '見出し (例: おすすめ)',
+      ),
+    ).toHaveValue('News');
+    expect(
+      within(reordered[1].parentElement!).getByPlaceholderText(
+        'ラベル (例: X)',
+      ),
+    ).toHaveValue('Blog');
+  });
+
+  it('見出しを含む全行で上限を共有し、満杯では両方の追加を止める', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    for (let i = 0; i < MAX_PROFILE_LINKS / 2; i += 1) {
+      fireEvent.click(
+        screen.getByText('＋ リンクを追加'),
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: '＋ 見出しを追加' }),
+      );
+    }
+
+    expect(
+      screen.getAllByLabelText('ドラッグで並べ替え'),
+    ).toHaveLength(MAX_PROFILE_LINKS);
+    expect(
+      screen.queryByText('＋ リンクを追加'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: '＋ 見出しを追加' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getAllByRole('button', { name: '見出しを削除' })[0],
+    );
+    expect(
+      screen.getByText('＋ リンクを追加'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '＋ 見出しを追加' }),
+    ).toBeInTheDocument();
+  });
+
+  it('featured は通常リンクだけに隔離し、見出しへプロパティを混入させない', async () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(
+      screen.getByText('＋ リンクを追加'),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: '＋ 見出しを追加' }),
+    );
+    fireEvent.click(
+      screen.getByText('＋ リンクを追加'),
+    );
+
+    const heading = screen.getByPlaceholderText('見出し (例: おすすめ)');
+    expect(
+      within(heading.parentElement!).queryByRole('button', { name: /注目/ }),
+    ).not.toBeInTheDocument();
+    const toggles = screen.getAllByRole('button', { name: /注目/ });
+    expect(toggles).toHaveLength(2);
+    fireEvent.click(toggles[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /注目/ })[1]);
+
+    const after = screen.getAllByRole('button', { name: /注目/ });
+    expect(after[0]).toHaveAttribute('aria-pressed', 'false');
+    expect(after[1]).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => {
+      const stored = JSON.parse(
+        localStorage.getItem('openpay:handle-profile-draft:v1') ?? '{}',
+      ) as { links?: Array<Record<string, unknown>> };
+      expect(stored.links?.[1]).toEqual({ kind: 'heading', label: '' });
+    });
   });
 
   it('「注目」トグルは 1 本だけ ON (別行を ON にすると前行は自動 OFF)', () => {

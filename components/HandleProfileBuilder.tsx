@@ -79,6 +79,7 @@ const inputClass =
 
 export function HandleProfileBuilder() {
   const t = useTranslations('HandleProfile');
+  const tb = useTranslations('HandleProfileBuilder');
   const tc = useTranslations('HandleClaim');
   const locale = useLocale();
   const { settings: draft, setSettings, hydrated } = useHandleProfileDraft();
@@ -174,10 +175,14 @@ export function HandleProfileBuilder() {
     setSettings((s) => ({ ...s, ...patch }));
 
   // 「注目」は最大 1 本。ある行を ON にしたら他行は自動 OFF (単一 enforce)。同じ行の再クリックで OFF。
-  const setFeatured = (index: number, on: boolean) =>
+  const setFeatured = (index: number, on: boolean) => {
+    if (draft.links[index]?.kind === 'heading') return;
     update({
-      links: draft.links.map((l, j) => ({ ...l, featured: on && j === index })),
+      links: draft.links.map((l, j) =>
+        l.kind === 'heading' ? l : { ...l, featured: on && j === index },
+      ),
     });
+  };
 
   // テーマピッカーのミニプレビュー用アクセント (無効色は既定ブルー)。
   const pickerAccent = colorValid ? draft.color : '#2563eb';
@@ -511,74 +516,118 @@ export function HandleProfileBuilder() {
                         {...linksReorder.rowProps(i, draft.links.length)}
                         labels={reorderLabels}
                       >
-                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                          <input
-                            type="text"
-                            value={l.emoji ?? ''}
-                            placeholder="🌐"
-                            aria-label={t('emojiAria')}
-                            maxLength={8}
-                            onChange={(e) => {
-                              const next = [...draft.links];
-                              next[i] = { ...next[i], emoji: e.target.value };
-                              update({ links: next });
-                            }}
-                            className="w-12 shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
-                          />
-                          <input
-                            type="text"
-                            value={l.label}
-                            placeholder={t('linkLabelPlaceholder')}
-                            maxLength={40}
-                            onChange={(e) => {
-                              const next = [...draft.links];
-                              next[i] = { ...next[i], label: e.target.value };
-                              update({ links: next });
-                            }}
-                            className={`${inputClass} min-w-[6rem] flex-[2]`}
-                          />
-                          <input
-                            type="url"
-                            value={l.url}
-                            placeholder="https://"
-                            onChange={(e) => {
-                              const next = [...draft.links];
-                              next[i] = { ...next[i], url: e.target.value };
-                              update({ links: next });
-                            }}
-                            className={`${inputClass} min-w-[8rem] flex-[3]`}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setFeatured(i, !l.featured)}
-                            aria-pressed={!!l.featured}
-                            className={`shrink-0 rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
-                              l.featured
-                                ? 'border-brand bg-brand/10 text-brand'
-                                : 'border-slate-200 text-slate-500 hover:border-slate-300'
-                            }`}
-                          >
-                            {l.featured ? '★' : '☆'} {t('featuredToggle')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => update({ links: draft.links.filter((_, j) => j !== i) })}
-                            className="shrink-0 rounded-md border border-slate-200 px-2 text-sm text-slate-500 hover:text-red-600"
-                            aria-label={t('removeLink')}
-                          >
-                            ×
-                          </button>
-                        </div>
+                        {l.kind === 'heading' ? (
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <input
+                              type="text"
+                              value={l.label}
+                              placeholder={tb('headingLabelPlaceholder')}
+                              maxLength={40}
+                              onChange={(e) => {
+                                const next = [...draft.links];
+                                next[i] = { ...l, label: e.target.value };
+                                update({ links: next });
+                              }}
+                              className={`${inputClass} min-w-[6rem] flex-1`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                update({
+                                  links: draft.links.filter((_, j) => j !== i),
+                                })
+                              }
+                              className="shrink-0 rounded-md border border-slate-200 px-2 text-sm text-slate-500 hover:text-red-600"
+                            >
+                              {tb('removeHeading')}
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                            <input
+                              type="text"
+                              value={l.emoji ?? ''}
+                              placeholder="🌐"
+                              aria-label={t('emojiAria')}
+                              maxLength={8}
+                              onChange={(e) => {
+                                const next = [...draft.links];
+                                next[i] = { ...l, emoji: e.target.value };
+                                update({ links: next });
+                              }}
+                              className="w-12 shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
+                            />
+                            <input
+                              type="text"
+                              value={l.label}
+                              placeholder={t('linkLabelPlaceholder')}
+                              maxLength={40}
+                              onChange={(e) => {
+                                const next = [...draft.links];
+                                next[i] = { ...l, label: e.target.value };
+                                update({ links: next });
+                              }}
+                              className={`${inputClass} min-w-[6rem] flex-[2]`}
+                            />
+                            <input
+                              type="url"
+                              value={l.url}
+                              placeholder="https://"
+                              onChange={(e) => {
+                                const next = [...draft.links];
+                                next[i] = { ...l, url: e.target.value };
+                                update({ links: next });
+                              }}
+                              className={`${inputClass} min-w-[8rem] flex-[3]`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setFeatured(i, !l.featured)}
+                              aria-pressed={!!l.featured}
+                              className={`shrink-0 rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
+                                l.featured
+                                  ? 'border-brand bg-brand/10 text-brand'
+                                  : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                              }`}
+                            >
+                              {l.featured ? '★' : '☆'} {t('featuredToggle')}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => update({ links: draft.links.filter((_, j) => j !== i) })}
+                              className="shrink-0 rounded-md border border-slate-200 px-2 text-sm text-slate-500 hover:text-red-600"
+                              aria-label={t('removeLink')}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )}
                       </ReorderableRow>
                     ))}
                     {draft.links.length < MAX_PROFILE_LINKS && (
-                      <button
-                        type="button"
-                        onClick={() => update({ links: [...draft.links, { label: '', url: '' }] })}
-                        className="text-xs font-medium text-brand hover:underline"
-                      >
-                        ＋ {t('addLink')}
-                      </button>
+                      <div className="flex flex-wrap gap-x-4 gap-y-2">
+                        <button
+                          type="button"
+                          onClick={() => update({ links: [...draft.links, { label: '', url: '' }] })}
+                          className="text-xs font-medium text-brand hover:underline"
+                        >
+                          ＋ {t('addLink')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            update({
+                              links: [
+                                ...draft.links,
+                                { kind: 'heading', label: '' },
+                              ],
+                            })
+                          }
+                          className="text-xs font-medium text-brand hover:underline"
+                        >
+                          ＋ {tb('addHeading')}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </Field>

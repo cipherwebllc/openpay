@@ -28,6 +28,7 @@ import { resolveHandle } from '@/lib/handleStore';
 import { readShopLive } from '@/lib/shopLiveStore';
 import { decodeAgentCart } from '@/lib/agentOrder';
 import { searchParamsFromNext, type RouteSearch } from '@/lib/url';
+import { JsonLd, SITE_URL } from '@/components/StructuredData';
 import {
   buildTipMeta,
   buildStorefrontMeta,
@@ -166,6 +167,30 @@ export default async function HandlePage({
   // menu との突合・グレース劣化・改ざん無害化は MobileOrderView (resolvePrefillCart) が担う。
   const cartParam = storefront ? searchParamsFromNext(await searchParams).get('cart') : null;
   const initialCart = cartParam ? decodeAgentCart(cartParam) : null;
+  // SEO/AIEO (S2): 公開プロフィールを ProfilePage.mainEntity=Person で機械可読化。
+  // gate はページ描画と同じ計算済み値 (!storefront && hasProfile) — 可視内容と構造化データを
+  // 一致させる。sameAs は SNS アイコン行と同じ情報源 (profile.socials) のみで、一般リンクは
+  // 含めない (エンティティ同定の誤爆防止)。escape は JsonLd (safeJsonLd) に委譲。
+  const avatarHttps =
+    profile?.avatar && profile.avatar.startsWith('https://')
+      ? profile.avatar
+      : undefined;
+  const profileJsonLd =
+    !storefront && hasProfile
+      ? {
+          '@context': 'https://schema.org',
+          '@type': 'ProfilePage',
+          mainEntity: {
+            '@type': 'Person',
+            ...(record.config.name ? { name: record.config.name } : {}),
+            alternateName: `@${normalized}`,
+            ...(profile?.bio ? { description: profile.bio } : {}),
+            ...(avatarHttps ? { image: avatarHttps } : {}),
+            url: `${SITE_URL}/@${normalized}`,
+            ...(profile?.socials?.length ? { sameAs: profile.socials } : {}),
+          },
+        }
+      : null;
   const t = await getTranslations({ locale, namespace: 'HandleProfile' });
   // クリエイターのアクセント色 (config.color)。link-in-bio の背景ウォッシュに薄く効かせ、
   // 各ページに固有の質感を与える (足し算)。不正値は既定ブルー。
@@ -184,6 +209,7 @@ export default async function HandlePage({
       className="mx-auto w-full max-w-md px-4 pb-12 pt-5"
       data-handle-theme={darkFooter ? 'night' : undefined}
     >
+      {profileJsonLd && <JsonLd value={profileJsonLd} />}
       {/* link-in-bio のみアクセントの背景ウォッシュ (storefront は独自の意匠なので付けない)。
           clean = 現行どおり上部 h-96 の淡いウォッシュ。他テーマは全画面 (inset-0) を覆う地色。 */}
       {!storefront && (

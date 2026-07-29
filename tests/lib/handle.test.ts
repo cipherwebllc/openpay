@@ -15,6 +15,7 @@ import {
   serializeHandleRecord,
   handleStorefrontConfig,
   MAX_HANDLES_PER_WALLET,
+  MAX_LINK_LABEL_LEN,
   MAX_PROFILE_LINKS,
   DEFAULT_RECEIVE_METHODS,
   type HandleRecord,
@@ -247,6 +248,58 @@ describe('validateProfile', () => {
       expect(res.profile.links).toEqual([{ label: 'X', url: 'https://x.com/alice' }]);
     }
   });
+  it('accepts and canonicalizes a heading without url/featured', () => {
+    const res = validateProfile({
+      links: [{ kind: 'heading', label: '  Projects  ', emoji: ' 📌 ' }],
+    });
+    expect(res).toEqual({
+      ok: true,
+      profile: {
+        links: [{ kind: 'heading', label: 'Projects', emoji: '📌' }],
+      },
+    });
+  });
+  it('uses the existing UTF-16 40-character label boundary for headings', () => {
+    expect(
+      validateProfile({
+        links: [{ kind: 'heading', label: 'x'.repeat(MAX_LINK_LABEL_LEN) }],
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateProfile({
+        links: [{ kind: 'heading', label: 'x'.repeat(MAX_LINK_LABEL_LEN + 1) }],
+      }).ok,
+    ).toBe(false);
+    // 補助平面文字は UTF-16 で 2 code units。code point 数へ誤変更するとこの境界を
+    // すり抜けるため、20 個 (=40) / 20 個 + ASCII 1 文字 (=41) も固定する。
+    expect(
+      validateProfile({
+        links: [{ kind: 'heading', label: '😀'.repeat(20) }],
+      }).ok,
+    ).toBe(true);
+    expect(
+      validateProfile({
+        links: [{ kind: 'heading', label: `${'😀'.repeat(20)}x` }],
+      }).ok,
+    ).toBe(false);
+  });
+  it('rejects heading url/featured by property presence and rejects unknown kind', () => {
+    expect(
+      validateProfile({
+        links: [{ kind: 'heading', label: 'A', url: '' }],
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateProfile({
+        links: [{ kind: 'heading', label: 'A', featured: false }],
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateProfile({
+        links: [{ kind: 'divider', label: 'A' }],
+      }).ok,
+    ).toBe(false);
+  });
   it('treats empty / undefined as {} (no profile)', () => {
     expect(validateProfile(undefined)).toEqual({ ok: true, profile: {} });
     expect(validateProfile({ bio: '   ', avatar: '', links: [] })).toEqual({
@@ -272,6 +325,19 @@ describe('validateProfile', () => {
     }));
     expect(validateProfile({ links: many }).ok).toBe(false);
     expect(validateProfile({ links: [{ label: '  ', url: 'https://x.com' }] }).ok).toBe(false);
+  });
+  it('shares MAX_PROFILE_LINKS across headings and regular links', () => {
+    const atLimit = Array.from({ length: MAX_PROFILE_LINKS }, (_, i) =>
+      i % 2 === 0
+        ? { kind: 'heading', label: `Heading ${i}` }
+        : { label: `Link ${i}`, url: `https://example.com/${i}` },
+    );
+    expect(validateProfile({ links: atLimit }).ok).toBe(true);
+    expect(
+      validateProfile({
+        links: [...atLimit, { kind: 'heading', label: 'Overflow' }],
+      }).ok,
+    ).toBe(false);
   });
   it('rejects an over-long link url', () => {
     const longUrl = 'https://x.com/' + 'a'.repeat(520);
@@ -335,9 +401,11 @@ describe('validateProfile', () => {
     });
     expect(res.ok).toBe(true);
     if (res.ok) {
-      expect(res.profile.links?.[0].featured).toBe(true);
-      expect(res.profile.links?.[1].featured).toBeUndefined();
-      expect(res.profile.links?.[2].featured).toBeUndefined();
+      expect(res.profile.links).toEqual([
+        { label: 'A', url: 'https://x.com/a', featured: true },
+        { label: 'B', url: 'https://x.com/b' },
+        { label: 'C', url: 'https://x.com/c' },
+      ]);
     }
   });
 
@@ -414,6 +482,39 @@ describe('parseHandleRecord', () => {
   it('parses a well-formed multi-method record (round-trip)', () => {
     expect(parseHandleRecord(serializeHandleRecord(good))).toEqual(good);
   });
+  it('round-trips a valid stored heading', () => {
+    const withHeading: HandleRecord = {
+      ...good,
+      profile: {
+        ...good.profile,
+        links: [
+          { kind: 'heading', label: 'Projects', emoji: '📌' },
+          { label: 'X', url: 'https://x.com/a' },
+        ],
+      },
+    };
+    expect(parseHandleRecord(serializeHandleRecord(withHeading))).toEqual(
+      withHeading,
+    );
+  });
+  it('truncates an overlong stored heading label to the existing read limit', () => {
+    const stored = {
+      ...good,
+      profile: {
+        links: [
+          {
+            kind: 'heading',
+            label: 'x'.repeat(MAX_LINK_LABEL_LEN + 1),
+          },
+        ],
+      },
+    };
+    expect(
+      parseHandleRecord(JSON.stringify(stored))?.profile?.links,
+    ).toEqual([
+      { kind: 'heading', label: 'x'.repeat(MAX_LINK_LABEL_LEN) },
+    ]);
+  });
   it('migrates a legacy single-config record to methods[1]', () => {
     const legacy = {
       owner: ADDR,
@@ -482,8 +583,31 @@ describe('parseHandleRecord', () => {
     };
     const parsed = parseHandleRecord(JSON.stringify(messy));
     expect(parsed?.profile?.theme).toBeUndefined();
-    expect(parsed?.profile?.links?.[0].featured).toBe(true);
-    expect(parsed?.profile?.links?.[1].featured).toBeUndefined();
+    expect(parsed?.profile?.links).toEqual([
+      { label: 'A', url: 'https://x.com/a', featured: true },
+      { label: 'B', url: 'https://x.com/b' },
+    ]);
+  });
+
+  it('drops only malformed/unknown stored heading rows without consuming featured', () => {
+    const messy = {
+      ...good,
+      profile: {
+        links: [
+          { kind: 'heading', label: 'Kept' },
+          { kind: 'divider', label: 'Unknown' },
+          { kind: 'heading', label: 'Broken', featured: true },
+          { label: 'Featured', url: 'https://x.com/a', featured: true },
+          { label: 'Second', url: 'https://x.com/b', featured: true },
+        ],
+      },
+    };
+    const parsed = parseHandleRecord(JSON.stringify(messy));
+    expect(parsed?.profile?.links).toEqual([
+      { kind: 'heading', label: 'Kept' },
+      { label: 'Featured', url: 'https://x.com/a', featured: true },
+      { label: 'Second', url: 'https://x.com/b' },
+    ]);
   });
 
   it('parses + round-trips a storefront (menu/chain/mode)', () => {

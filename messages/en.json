@@ -920,6 +920,11 @@
     "emojiAria": "Emoji (optional)",
     "featuredToggle": "Featured"
   },
+  "HandleProfileBuilder": {
+    "addHeading": "Add heading",
+    "headingLabelPlaceholder": "Heading (e.g. Featured)",
+    "removeHeading": "Remove heading"
+  },
   "CheckoutForm": {
     "header": "Order checkout",
     "checkoutTitle": "OpenPay Checkout",

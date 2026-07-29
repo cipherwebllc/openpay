@@ -21,7 +21,7 @@ import {
   reserveOrUpdateHandle,
   releaseHandle,
 } from '@/lib/handleStore';
-import type { HandleTipConfig } from '@/lib/handle';
+import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
 import type { StorefrontParts } from '@/lib/mobileOrder';
 
 const OWNER = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
@@ -322,6 +322,39 @@ describe('reserveOrUpdateHandle', () => {
     expect(res.record?.profile).toEqual(profile);
     const stored = JSON.parse(store.values.get('handle:alice') ?? '{}');
     expect(stored.profile).toEqual(profile);
+  });
+
+  it('検証済み heading profile を created/update ともそのまま serialize する', async () => {
+    const createdProfile: HandleProfile = {
+      links: [
+        { kind: 'heading', label: 'Projects', emoji: '📌' },
+        { label: 'X', url: 'https://x.com/a', featured: true },
+      ],
+    };
+    const created = await reserveOrUpdateHandle({
+      ...base,
+      profile: createdProfile,
+    });
+    expect(created.status).toBe('created');
+    expect(created.record?.profile).toEqual(createdProfile);
+    expect(
+      JSON.parse(store.values.get('handle:alice') ?? '{}').profile,
+    ).toEqual(createdProfile);
+
+    const updatedProfile: HandleProfile = {
+      links: [{ kind: 'heading', label: 'Selected projects' }],
+    };
+    const updated = await reserveOrUpdateHandle({
+      ...base,
+      profile: updatedProfile,
+      expectedUpdatedAt: 100,
+      nowMs: 101,
+    });
+    expect(updated.status).toBe('updated');
+    expect(updated.record?.profile).toEqual(updatedProfile);
+    expect(
+      JSON.parse(store.values.get('handle:alice') ?? '{}').profile,
+    ).toEqual(updatedProfile);
   });
 
   it('空 profile ({}) は record に持たせない', async () => {
