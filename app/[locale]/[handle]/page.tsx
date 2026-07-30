@@ -173,7 +173,8 @@ export default async function HandlePage({
       : Promise.resolve([]),
   ]);
   // 商品メタの障害をプロフィール/チップ本体へ波及させないため、null は商品節だけ省略する。
-  // owner/payTo/revision は client 境界へ渡さず、公開に必要な field だけを明示投影する。
+  // owner/revision は client 境界へ渡さない。payTo は 402 の merchant を署名前に照合する
+  // buyer guard の期待値としてだけ渡す（402 自体にも公開されるアドレス）。
   const creatorProducts: CreatorStorefrontProduct[] = (availableHosted ?? []).map(
     (product) => ({
       id: product.id,
@@ -181,6 +182,7 @@ export default async function HandlePage({
       ...(product.desc ? { desc: product.desc } : {}),
       ...(product.emoji ? { emoji: product.emoji } : {}),
       priceJpyc: product.priceJpyc,
+      payTo: product.payTo,
       contentKind: product.contentKind,
       label: product.label,
     }),
@@ -293,6 +295,7 @@ export default async function HandlePage({
               products={creatorProducts}
               accent={accent}
               theme={theme}
+              sellerDisclosureHref={`/${locale}/store/seller/${record.owner}`}
             />
           ) : null}
           {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。

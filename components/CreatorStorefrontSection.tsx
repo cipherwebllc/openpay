@@ -1,8 +1,10 @@
 import { useLocale, useTranslations } from 'next-intl';
+import type { Address } from 'viem';
 import {
   handleViewTheme,
   type HandleTheme,
 } from '@/lib/handleTheme';
+import { CreatorStorePurchaseLauncher } from '@/components/CreatorStorePurchaseLauncher';
 
 export type CreatorStorefrontProduct = {
   id: string;
@@ -10,6 +12,7 @@ export type CreatorStorefrontProduct = {
   desc?: string;
   emoji?: string;
   priceJpyc: string;
+  payTo: Address;
   contentKind: 'url' | 'text';
   label: 'download' | 'pdf' | 'zip' | 'prompt' | 'api' | 'external';
 };
@@ -18,10 +21,12 @@ export function CreatorStorefrontSection({
   products,
   accent,
   theme,
+  sellerDisclosureHref,
 }: {
   products: readonly CreatorStorefrontProduct[];
   accent: string;
   theme: HandleTheme;
+  sellerDisclosureHref: string;
 }) {
   const t = useTranslations('CreatorStorefront');
   const locale = useLocale();
@@ -111,17 +116,19 @@ export function CreatorStorefrontSection({
                   >
                     {t(`labels.${product.label}`)}
                   </span>
-                  <button
-                    type="button"
-                    disabled
-                    className={`rounded-lg px-3 py-2 text-xs font-semibold ${
-                      inverted
-                        ? 'bg-white/15 text-white/70'
-                        : 'bg-slate-100 text-slate-500'
-                    } disabled:cursor-not-allowed`}
-                  >
-                    {t('purchaseSoon')}
-                  </button>
+                  <CreatorStorePurchaseLauncher
+                    product={{
+                      id: product.id,
+                      title: product.title,
+                      ...(product.desc
+                        ? { description: product.desc }
+                        : {}),
+                      priceJpyc: product.priceJpyc,
+                      merchant: product.payTo,
+                    }}
+                    sellerDisclosureHref={sellerDisclosureHref}
+                    inverted={inverted}
+                  />
                 </div>
               </div>
             </div>
