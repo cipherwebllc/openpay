@@ -23,7 +23,7 @@ import 'server-only';
 //     署名させた後に必ず失敗する構成を作らない。
 
 import { getAddress, isAddress, type Address } from 'viem';
-import { kvDel, kvEval, kvGet, kvLrange, kvSet } from '@/lib/kv';
+import { kvDel, kvEval, kvGet, kvLrange, kvMget, kvSet } from '@/lib/kv';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 
@@ -161,6 +161,13 @@ const LABELS: readonly HostedLabel[] = [
   'api',
   'external',
 ];
+
+export function isHostedLabel(value: unknown): value is HostedLabel {
+  return (
+    typeof value === 'string' &&
+    (LABELS as readonly string[]).includes(value)
+  );
+}
 
 export type HostedProductInput = {
   owner: string;
@@ -376,6 +383,26 @@ export async function getHostedProduct(
   return parseStoredHostedProduct(res.value);
 }
 
+/**
+ * seller 更新用の CAS snapshot。token は KV の生文字列で、API 応答には出さない。
+ * 公開メタと秘密本文を同時更新するとき、読込後の並行更新を完全一致で検出する。
+ */
+export type HostedProductUpdateSnapshot = {
+  product: HostedProduct;
+  token: string;
+};
+
+export async function getHostedProductUpdateSnapshot(
+  id: string,
+): Promise<HostedProductUpdateSnapshot | null | 'storage'> {
+  if (!isHostedId(id)) return null;
+  const res = await kvGet(hostedProductKey(id));
+  if (!res.ok) return 'storage';
+  if (res.value === null) return null;
+  const product = parseStoredHostedProduct(res.value);
+  return product ? { product, token: res.value } : null;
+}
+
 export async function getHostedContent(
   id: string,
   revision: number,
@@ -414,6 +441,46 @@ export async function listHostedForOwner(
     const product = await getHostedProduct(id);
     if (product === 'storage') return null;
     if (product && product.owner.toLowerCase() === wallet.toLowerCase()) {
+      out.push(product);
+    }
+  }
+  return out;
+}
+
+/**
+ * 公開プロフィール向けの販売可能商品 snapshot。owner index + MGET の 2 round-trip にし、
+ * 公開ページへ最大 12 回の直列 REST GET を持ち込まない。本文 key は一切読まない。
+ */
+export async function listAvailableHostedForOwner(
+  wallet: string,
+): Promise<HostedProduct[] | null> {
+  if (!isAddress(wallet)) return null;
+  const ids = await kvLrange(
+    hostedOwnerIndexKey(wallet),
+    0,
+    MAX_HOSTED_PER_OWNER - 1,
+  );
+  if (!ids.ok) return null;
+  const validIds = (ids.value ?? []).filter(isHostedId);
+  if (validIds.length === 0) return [];
+  const values = await kvMget(validIds.map(hostedProductKey));
+  if (
+    !values.ok ||
+    !Array.isArray(values.value) ||
+    values.value.length !== validIds.length
+  ) {
+    return null;
+  }
+  const out: HostedProduct[] = [];
+  for (let index = 0; index < validIds.length; index += 1) {
+    const product = parseStoredHostedProduct(values.value[index]);
+    if (
+      product &&
+      product.id === validIds[index] &&
+      product.owner.toLowerCase() === wallet.toLowerCase() &&
+      product.saleActive &&
+      product.contentAvailable
+    ) {
       out.push(product);
     }
   }
@@ -477,6 +544,99 @@ export async function updateHostedProduct(input: {
   if (res.value === 0) return { ok: false, reason: 'not_found' };
   if (res.value === -1) return { ok: false, reason: 'forbidden' };
   if (res.value === -2) return { ok: false, reason: 'corrupt' };
+  return { ok: true, product: next };
+}
+
+// seller 管理画面の full edit を 1 EVAL で CAS 更新する。
+// 戻り: 1=更新 / 0=なし / -1=owner 不一致 / -2=破損 / -4=並行更新。
+// content が変わる場合も revision 本文 + 公開メタを同じ transaction で確定し、
+// buyer が「新本文 + 旧価格」等の中間状態を観測できないようにする。
+const REPLACE_HOSTED_SELLER_PRODUCT =
+  "local cur=redis.call('GET',KEYS[1]); if not cur then return 0 end; " +
+  'local ok,rec=pcall(cjson.decode,cur); if not ok then return -2 end; ' +
+  "if type(rec.owner)~='string' or string.lower(rec.owner)~=ARGV[1] then return -1 end; " +
+  'if cur~=ARGV[2] then return -4 end; ' +
+  "if ARGV[3]=='1' then " +
+  "if redis.call('EXISTS',KEYS[2])==1 then return -4 end; " +
+  "redis.call('SET',KEYS[2],ARGV[4]); end; " +
+  "redis.call('SET',KEYS[1],ARGV[5]); return 1";
+
+export type ReplaceHostedSellerProductResult =
+  | { ok: true; product: HostedProduct }
+  | {
+      ok: false;
+      reason:
+        | 'not_found'
+        | 'forbidden'
+        | 'corrupt'
+        | 'conflict'
+        | 'storage';
+    };
+
+/**
+ * 出品フォームが管理する公開メタを全置換し、必要なら新 content revision も原子的に
+ * 追加する。旧 revision は残し、payTo / contentAvailable は seller から変更できない。
+ */
+export async function replaceHostedSellerProduct(input: {
+  snapshot: HostedProductUpdateSnapshot;
+  owner: string;
+  metadata: Pick<
+    HostedProduct,
+    'title' | 'priceJpyc' | 'label' | 'saleActive'
+  > & {
+    desc?: string;
+    emoji?: string;
+  };
+  content?: HostedContent;
+  now?: number;
+}): Promise<ReplaceHostedSellerProductResult> {
+  const current = input.snapshot.product;
+  if (
+    !isAddress(input.owner) ||
+    current.owner.toLowerCase() !== input.owner.toLowerCase()
+  ) {
+    return { ok: false, reason: 'forbidden' };
+  }
+  const revision = current.contentRevision + (input.content ? 1 : 0);
+  const updatedAt = Math.max(
+    input.now ?? Date.now(),
+    (current.updatedAt ?? current.createdAt) + 1,
+  );
+  const next: HostedProduct = {
+    id: current.id,
+    owner: current.owner,
+    payTo: current.payTo,
+    title: input.metadata.title,
+    ...(input.metadata.desc ? { desc: input.metadata.desc } : {}),
+    ...(input.metadata.emoji ? { emoji: input.metadata.emoji } : {}),
+    priceJpyc: input.metadata.priceJpyc,
+    contentKind: input.content?.kind ?? current.contentKind,
+    label: input.metadata.label,
+    contentRevision: revision,
+    saleActive: input.metadata.saleActive,
+    contentAvailable: current.contentAvailable,
+    createdAt: current.createdAt,
+    updatedAt,
+  };
+  const res = await kvEval<number>(
+    REPLACE_HOSTED_SELLER_PRODUCT,
+    [
+      hostedProductKey(current.id),
+      hostedContentKey(current.id, revision),
+    ],
+    [
+      current.owner.toLowerCase(),
+      input.snapshot.token,
+      input.content ? '1' : '0',
+      input.content ? JSON.stringify(input.content) : '',
+      JSON.stringify(next),
+    ],
+  );
+  if (!res.ok) return { ok: false, reason: 'storage' };
+  if (res.value === 0) return { ok: false, reason: 'not_found' };
+  if (res.value === -1) return { ok: false, reason: 'forbidden' };
+  if (res.value === -2) return { ok: false, reason: 'corrupt' };
+  if (res.value === -4) return { ok: false, reason: 'conflict' };
   return { ok: true, product: next };
 }
 

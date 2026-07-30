@@ -5,6 +5,7 @@
 // AppShell が logo + nav + wallet badge を担うため、ここでは個別 header を持たない。
 
 import { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowRightLeft, ChevronRight, Fuel } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
@@ -24,6 +25,12 @@ import type { Locale } from '@/i18n';
 import { getExchangeLink } from '@/lib/links';
 import { TOKEN_SYMBOLS, type TokenSymbol } from '@/lib/tokens';
 import { resolveCreateTab, type CreateTab as Tab } from '@/lib/createTab';
+
+const CreatorStoreSellerPanel = dynamic(() =>
+  import('@/components/CreatorStoreSellerPanel').then(
+    (module) => module.CreatorStoreSellerPanel,
+  ),
+);
 
 export default function CreatePage() {
   const [tab, setTab] = useState<Tab>('qr');
@@ -119,7 +126,16 @@ export default function CreatePage() {
           <TipEmbedGenerator />
         </div>
       )}
-      {tab === 'profile' && env.enableHandles && <HandleProfileBuilder />}
+      {tab === 'profile' && env.enableHandles && (
+        env.enableCreatorStoreUi ? (
+          <div className="space-y-6">
+            <HandleProfileBuilder />
+            <CreatorStoreSellerPanel />
+          </div>
+        ) : (
+          <HandleProfileBuilder />
+        )
+      )}
       {tab === 'mobileOrder' && env.enableMobileOrder && (
         <MobileOrderBuilder
           onManageProducts={() => setTab('register')}

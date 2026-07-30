@@ -1,0 +1,133 @@
+import { useLocale, useTranslations } from 'next-intl';
+import {
+  handleViewTheme,
+  type HandleTheme,
+} from '@/lib/handleTheme';
+
+export type CreatorStorefrontProduct = {
+  id: string;
+  title: string;
+  desc?: string;
+  emoji?: string;
+  priceJpyc: string;
+  contentKind: 'url' | 'text';
+  label: 'download' | 'pdf' | 'zip' | 'prompt' | 'api' | 'external';
+};
+
+export function CreatorStorefrontSection({
+  products,
+  accent,
+  theme,
+}: {
+  products: readonly CreatorStorefrontProduct[];
+  accent: string;
+  theme: HandleTheme;
+}) {
+  const t = useTranslations('CreatorStorefront');
+  const locale = useLocale();
+  if (products.length === 0) return null;
+
+  const tokens = handleViewTheme(accent, theme);
+  const inverted = tokens.dark || theme === 'bold';
+
+  return (
+    <section
+      aria-labelledby="creator-storefront-heading"
+      className="mb-7 w-full"
+    >
+      <div className="mb-3 text-center">
+        <h2
+          id="creator-storefront-heading"
+          className={`text-base font-bold ${
+            tokens.dark ? 'text-slate-100' : 'text-slate-800'
+          }`}
+        >
+          {t('heading')}
+        </h2>
+        <p
+          className={`mt-1 text-xs ${
+            tokens.dark ? 'text-slate-300' : 'text-slate-500'
+          }`}
+        >
+          {t('subheading')}
+        </p>
+      </div>
+      <ul className="space-y-2.5">
+        {products.map((product) => (
+          <li
+            key={product.id}
+            className={`rounded-2xl px-4 py-4 text-left ${
+              tokens.linkStyle
+                ? ''
+                : 'border border-slate-200/80 bg-white shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)]'
+            }`}
+            style={tokens.linkStyle}
+          >
+            <div className="flex items-start gap-3">
+              <span
+                aria-hidden
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl ${
+                  inverted ? 'bg-white/15' : 'bg-slate-100'
+                }`}
+              >
+                {product.emoji ?? '✦'}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <h3
+                    className={`min-w-0 flex-1 font-bold ${
+                      inverted ? 'text-white' : 'text-slate-800'
+                    }`}
+                  >
+                    {product.title}
+                  </h3>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-1 text-xs font-bold ${
+                      inverted
+                        ? 'bg-white/15 text-white'
+                        : 'bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    {new Intl.NumberFormat(locale).format(
+                      Number(product.priceJpyc),
+                    )}{' '}
+                    JPYC
+                  </span>
+                </div>
+                {product.desc ? (
+                  <p
+                    className={`mt-1 text-sm leading-relaxed ${
+                      inverted ? 'text-white/80' : 'text-slate-600'
+                    }`}
+                  >
+                    {product.desc}
+                  </p>
+                ) : null}
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <span
+                    className={`text-[11px] font-semibold uppercase tracking-wide ${
+                      inverted ? 'text-white/70' : 'text-slate-500'
+                    }`}
+                  >
+                    {t(`labels.${product.label}`)}
+                  </span>
+                  <button
+                    type="button"
+                    disabled
+                    className={`rounded-lg px-3 py-2 text-xs font-semibold ${
+                      inverted
+                        ? 'bg-white/15 text-white/70'
+                        : 'bg-slate-100 text-slate-500'
+                    } disabled:cursor-not-allowed`}
+                  >
+                    {t('purchaseSoon')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}

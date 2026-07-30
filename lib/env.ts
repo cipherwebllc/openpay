@@ -666,8 +666,14 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_X402_FACILITATOR',
     process.env.NEXT_PUBLIC_ENABLE_X402_FACILITATOR,
   ),
-  // hosted creator store の money-path / status / reconciler 専用フラグ。
-  // **server-only・既定 OFF** = /api/paid/hosted/*、購入 status、reconcile cron は全て 404。
+  // hosted creator store の管理 UI / 公開プロフィール商品節だけを表示する client flag。
+  // **既定 OFF**。server API / money-path の認可には使わず、下の server-only flag と分離する。
+  enableCreatorStoreUi: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_CREATOR_STORE',
+    process.env.NEXT_PUBLIC_ENABLE_CREATOR_STORE,
+  ),
+  // hosted creator store の出品 API / money-path / status / reconciler 用フラグ。
+  // **server-only・既定 OFF** = seller を含む全 server surface が 404。
   // client bundle へ機能の点灯状態を公開しないため NEXT_PUBLIC_ は付けない。
   enableCreatorStore: parseBoolFlag(
     'ENABLE_CREATOR_STORE',

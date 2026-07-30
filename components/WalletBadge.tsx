@@ -40,6 +40,7 @@ export function WalletBadge() {
     env.enableCsvPass ||
     env.enablePushNotify ||
     env.enableTipMessage ||
+    env.enableCreatorStoreUi ||
     env.enableHandles; // P2-M/掟7: /api/handle は SIWE 必須ゆえヘッダのサインイン導線に含める
 
   // 署名失敗 (user reject 含む) は握りつぶしてエラー文言は signInError 経由で出す。

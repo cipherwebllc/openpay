@@ -22,6 +22,27 @@ const OFFRAMP_KEYS = [
   'japaneseUserHint',
 ] as const;
 
+function deepKeys(value: unknown, prefix = ''): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [prefix];
+  }
+  return Object.entries(value as Record<string, unknown>).flatMap(
+    ([key, nested]) =>
+      deepKeys(nested, prefix ? `${prefix}.${key}` : key),
+  );
+}
+
+describe('i18n: Creator Store namespace の完全 parity', () => {
+  it.each(['CreatorStoreSeller', 'CreatorStorefront'] as const)(
+    'ja/en の %s deep key 集合が一致する',
+    (namespace) => {
+      expect(deepKeys(ja[namespace]).sort()).toEqual(
+        deepKeys(en[namespace]).sort(),
+      );
+    },
+  );
+});
+
 describe('i18n: Landing namespace の全キー parity', () => {
   it('ja.Landing と en.Landing のキー集合が完全一致', () => {
     expect(Object.keys(ja.Landing).sort()).toEqual(

@@ -35,6 +35,7 @@ const flags = vi.hoisted(() => ({
   enableCsvPass: false,
   enablePushNotify: false,
   enableTipMessage: false,
+  enableCreatorStoreUi: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -59,6 +60,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableTipMessage() {
         return flags.enableTipMessage;
+      },
+      get enableCreatorStoreUi() {
+        return flags.enableCreatorStoreUi;
       },
     },
   };
@@ -149,6 +153,7 @@ beforeEach(() => {
   flags.enableCsvPass = false;
   flags.enablePushNotify = false;
   flags.enableTipMessage = false;
+  flags.enableCreatorStoreUi = false;
 });
 
 describe('WalletBadge: 接続済 branch', () => {
@@ -285,6 +290,7 @@ describe('WalletBadge: SIWE サインイン', () => {
     flags.enableCsvPass = false;
     flags.enablePushNotify = false;
     flags.enableTipMessage = false;
+    flags.enableCreatorStoreUi = false;
     setConnected();
     setSiwe({ isSignedIn: false }); // 仮にサインインしていなくてもログイン導線を出さない
     renderWithIntl(<WalletBadge />);
@@ -324,6 +330,23 @@ describe('WalletBadge: SIWE サインイン', () => {
     flags.enableCsvPass = false;
     flags.enablePushNotify = false;
     flags.enableTipMessage = true;
+    setConnected();
+    setSiwe({ isSignedIn: false });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    expect(
+      within(details).getByRole('menuitem', { name: 'ログイン (署名)' }),
+    ).toBeInTheDocument();
+  });
+
+  it('Creator Store UI のみ ON → 出品管理用のログイン UI を出す', () => {
+    flags.enableFreeeSync = false;
+    flags.enableBilling = false;
+    flags.enablePro = false;
+    flags.enableCsvPass = false;
+    flags.enablePushNotify = false;
+    flags.enableTipMessage = false;
+    flags.enableCreatorStoreUi = true;
     setConnected();
     setSiwe({ isSignedIn: false });
     renderWithIntl(<WalletBadge />);
