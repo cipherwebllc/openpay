@@ -1461,3 +1461,43 @@ opt-in (既定 OFF)。詳細は plans/a2hs-retention-roadmap.md Phase 2・memory
 - **ロールバック**: flag を **OFF** に戻す → 次の /create 訪問で `openpay:offline-disable` メッセージが marker を
   削除し fetch 介入が即停止する。SW を更新デプロイすれば fetch handler は marker 不在で恒久的に no-op 化する。
   push 購読 (§15.1–§15.6) はこの flag と独立で影響を受けない (同一 `sw.js` だが push/notificationclick は不変)。
+
+## §16 クリエイター・デジタルストア go-live SOP
+
+前提: #295-#301 + settle gate PR が main に merge 済み。単一情報源 = `plans/creator-store-v3.md`
+(v4 実装契約 A-J)。**flag は 2 系統・既定 OFF** で全 surface が 404/非表示。
+
+### 16.1 flag 構成
+
+| env | 種別 | 効果 |
+| --- | --- | --- |
+| `ENABLE_CREATOR_STORE` | **server-only** | 出品 CRUD (`/api/store/products`・`/api/store/seller`)・hosted paid route (`/api/paid/hosted/[id]`)・購入 status (`/api/store/purchase/status`)・library/content API・reconcile cron の全 server surface |
+| `NEXT_PUBLIC_ENABLE_CREATOR_STORE` | client | /create 管理セクション・@handle「販売中」節・/store/library ページ・WalletBadge の SIWE 導線 |
+
+点灯は **両方 '1'** (server だけ ON = UI 不在で不到達・client だけ ON = API 404 で全操作失敗)。
+
+### 16.2 点灯前チェック (順に)
+
+1. **settle gate PR が merge 済みであること** (点灯前 blocker ①)。`lib/x402/purchaseSettleGate.ts` が
+   存在し、`/api/facilitator/settle`・`/api/relay/jpyc` の両方に配線されていること。
+2. `vercel.json` の cron `/api/cron/store-reconcile` (0 21 * * * = 日次バックストップ。Hobby プランは
+   日次粒度のみ。**買い手のリアルタイム収束は status route の自動 polling が担う** — cron は放置
+   セッションの掃除役)。`CRON_SECRET` が Vercel に設定済みであること (reverify と共用)。
+3. **開示 3 点セット (掟 14)**: 点灯リリースと同一 deploy で ①LP (デジタル商品販売の言及) ②法務は
+   #298 で反映済み (Terms 13 条・特商法・Privacy — 施行日 2026-07-30) ③`public/llms.txt` に
+   hosted store (商品は OpenPay が本文保管・買い手手数料 x402 max(1 JPYC,1%)・売り手手数料なし) を
+   追記。③はテストフェンスが無いので目視必須。
+4. 残 blocker の裁定記録: ②forwarder rotation 後の旧 tuple settle (rotation 実施時まで inert・
+   deploymentVersion 保存済み) ④content purge×pending intent 協調 (現状 = 署名前 content 実在
+   確認 + settle 前 content_unavailable 409 + 所有者への「提供終了」表示 + Terms 13(7) 救済分離)。
+5. **testnet (Amoy) E2E**: 出品 (販売者情報→商品作成→販売開始) → @handle 販売中節に表示 →
+   購入 (402→最終確認→署名→settle→ライブラリ) → content 表示 → 二重購入で冪等 →
+   販売停止で新規購入 404・既購入者は取得可、を一巡。
+6. 掟 15: 上記すべての後、**user の明示 go 判断**で Vercel env を設定し redeploy。
+
+### 16.3 ロールバック
+
+両 flag を OFF → 全 surface 404/非表示。**進行中 intent は KV に残り無害** (settled は恒久・
+pending は cron/status が止まるだけで、再点灯後に reconciler が同じ entitlement へ収束させる)。
+署名済み authorization は validBefore (quote 期限 ≤10 分) で自然失効し、settle gate が
+汎用入口からの持ち込みを拒否する。
