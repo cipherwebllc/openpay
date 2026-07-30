@@ -87,16 +87,24 @@ export function CreatorStorefrontSection({
                     {product.title}
                   </h3>
                   <span
-                    className={`shrink-0 rounded-full px-2 py-1 text-xs font-bold ${
+                    className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ${
                       inverted
                         ? 'bg-white/15 text-white'
                         : 'bg-slate-100 text-slate-700'
                     }`}
                   >
+                    {/* 支払いチェーンの明示 (2026-07-30 user 要望): a11y 名は可視テキスト
+                        「Polygon」から導出し、ロゴは装飾 (掟 8)。 */}
+                    <img
+                      src="/chains/polygon.svg"
+                      alt=""
+                      aria-hidden
+                      className="h-3.5 w-3.5"
+                    />
                     {new Intl.NumberFormat(locale).format(
                       Number(product.priceJpyc),
                     )}{' '}
-                    JPYC
+                    JPYC · Polygon
                   </span>
                 </div>
                 {product.desc ? (
