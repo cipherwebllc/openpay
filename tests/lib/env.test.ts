@@ -57,22 +57,26 @@ describe('lib/env (module-load validation)', () => {
     expect(mod.env.enableWeb3Directory).toBe(true);
   });
 
-  it('Creator Store flag は server-only・既定 OFF で NEXT_PUBLIC 同名 flag では有効化できない', async () => {
+  it('Creator Store の server / UI flag は独立し、どちらも既定 OFF', async () => {
     vi.resetModules();
     delete process.env.ENABLE_CREATOR_STORE;
     delete process.env.NEXT_PUBLIC_ENABLE_CREATOR_STORE;
     let mod = await import('@/lib/env');
     expect(mod.env.enableCreatorStore).toBe(false);
+    expect(mod.env.enableCreatorStoreUi).toBe(false);
 
     vi.resetModules();
     process.env.NEXT_PUBLIC_ENABLE_CREATOR_STORE = '1';
     mod = await import('@/lib/env');
     expect(mod.env.enableCreatorStore).toBe(false);
+    expect(mod.env.enableCreatorStoreUi).toBe(true);
 
     vi.resetModules();
+    delete process.env.NEXT_PUBLIC_ENABLE_CREATOR_STORE;
     process.env.ENABLE_CREATOR_STORE = 'true';
     mod = await import('@/lib/env');
     expect(mod.env.enableCreatorStore).toBe(true);
+    expect(mod.env.enableCreatorStoreUi).toBe(false);
   });
 
   it('非公開 tip message flag は既定 OFF で literal の 1/true だけを受理する', async () => {

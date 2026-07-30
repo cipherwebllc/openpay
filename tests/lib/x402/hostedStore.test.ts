@@ -40,6 +40,14 @@ vi.mock('@/lib/kv', () => ({
       ? { ok: false as const }
       : { ok: true as const, value: kvMocks.lists.get(key) ?? [] },
   ),
+  kvMget: vi.fn(async (keys: readonly string[]) =>
+    kvMocks.fail
+      ? { ok: false as const }
+      : {
+          ok: true as const,
+          value: keys.map((key) => kvMocks.store.get(key) ?? null),
+        },
+  ),
   // Lua を JS で再現する (原子性は本番 Redis の保証・ここでは分岐の正しさを見る)。
   kvEval: vi.fn(async (script: string, keys: string[], args: string[]) => {
     if (kvMocks.fail) return { ok: false as const };
@@ -51,6 +59,23 @@ vi.mock('@/lib/kv', () => ({
       kvMocks.store.set(keys[0], args[0]);
       kvMocks.store.set(keys[1], args[1]);
       kvMocks.lists.set(keys[2], [args[2], ...list]);
+      return { ok: true as const, value: 1 };
+    }
+    if (script.includes('if cur~=ARGV[2] then return -4 end')) {
+      const cur = kvMocks.store.get(keys[0]);
+      if (!cur) return { ok: true as const, value: 0 };
+      const rec = JSON.parse(cur) as { owner: string };
+      if (rec.owner.toLowerCase() !== args[0]) {
+        return { ok: true as const, value: -1 };
+      }
+      if (cur !== args[1]) return { ok: true as const, value: -4 };
+      if (args[2] === '1') {
+        if (kvMocks.store.has(keys[1])) {
+          return { ok: true as const, value: -4 };
+        }
+        kvMocks.store.set(keys[1], args[3]);
+      }
+      kvMocks.store.set(keys[0], args[4]);
       return { ok: true as const, value: 1 };
     }
     // UPDATE_HOSTED
@@ -87,6 +112,7 @@ function baseInput(over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   kvMocks.store.clear();
   kvMocks.lists.clear();
   kvMocks.evalCalls.length = 0;
@@ -301,6 +327,149 @@ describe('hosted 更新・revision・moderation', () => {
     );
     const list = await m.listHostedForOwner(OWNER);
     expect(list?.map((p) => p.id)).toEqual([id]);
+  });
+
+  it('公開 snapshot は販売中かつ配信可能だけを MGET で返し、本文 key を読まない', async () => {
+    const { m, id } = await seed();
+    const inactiveId = 'h_' + 'e'.repeat(32);
+    const unavailableId = 'h_' + 'd'.repeat(32);
+    const base = await m.getHostedProduct(id);
+    if (!base || base === 'storage') throw new Error('setup');
+    kvMocks.lists.set(`x402:hosted:owner:${OWNER.toLowerCase()}`, [
+      id,
+      inactiveId,
+      unavailableId,
+    ]);
+    kvMocks.store.set(
+      `x402:hosted:${inactiveId}`,
+      JSON.stringify({ ...base, id: inactiveId, saleActive: false }),
+    );
+    kvMocks.store.set(
+      `x402:hosted:${unavailableId}`,
+      JSON.stringify({
+        ...base,
+        id: unavailableId,
+        contentAvailable: false,
+      }),
+    );
+
+    const products = await m.listAvailableHostedForOwner(OWNER);
+
+    expect(products?.map((product) => product.id)).toEqual([id]);
+    const { kvMget } = await import('@/lib/kv');
+    expect(kvMget).toHaveBeenCalledWith([
+      `x402:hosted:${id}`,
+      `x402:hosted:${inactiveId}`,
+      `x402:hosted:${unavailableId}`,
+    ]);
+    const mgetKeys = vi.mocked(kvMget).mock.calls.flatMap(([keys]) => keys);
+    expect(mgetKeys.every((key) => !key.includes(':content:'))).toBe(true);
+  });
+
+  it('公開 snapshot は owner index が空なら空配列を返し、空 MGET を発行しない', async () => {
+    const m = await mod();
+    const products = await m.listAvailableHostedForOwner(OWNER);
+    const { kvMget } = await import('@/lib/kv');
+
+    expect(products).toEqual([]);
+    expect(kvMget).not.toHaveBeenCalled();
+  });
+
+  it('seller full edit は公開メタと新 revision を 1 EVAL で確定し、旧 revision を残す', async () => {
+    const { m, id } = await seed();
+    const snapshot = await m.getHostedProductUpdateSnapshot(id);
+    if (!snapshot || snapshot === 'storage') throw new Error('setup');
+    const updated = await m.replaceHostedSellerProduct({
+      snapshot,
+      owner: OWNER,
+      metadata: {
+        title: '更新後',
+        desc: '説明',
+        emoji: '🧠',
+        priceJpyc: '500',
+        label: 'api',
+        saleActive: false,
+      },
+      content: { kind: 'text', value: '第 2 版' },
+      now: 3000,
+    });
+    expect(updated.ok && updated.product).toMatchObject({
+      title: '更新後',
+      desc: '説明',
+      emoji: '🧠',
+      priceJpyc: '500',
+      label: 'api',
+      saleActive: false,
+      contentRevision: 2,
+    });
+    expect(await m.getHostedContent(id, 1)).toEqual({
+      kind: 'text',
+      value: 'これが本文です',
+    });
+    expect(await m.getHostedContent(id, 2)).toEqual({
+      kind: 'text',
+      value: '第 2 版',
+    });
+    const atomicCall = kvMocks.evalCalls.at(-1);
+    expect(atomicCall?.keys).toEqual([
+      `x402:hosted:${id}`,
+      `x402:hosted:${id}:content:2`,
+    ]);
+  });
+
+  it('stale seller snapshot は 409 用 conflict にし、新 revision を上書きしない', async () => {
+    const { m, id } = await seed();
+    const snapshot = await m.getHostedProductUpdateSnapshot(id);
+    if (!snapshot || snapshot === 'storage') throw new Error('setup');
+    await m.updateHostedProduct({
+      owner: OWNER,
+      id,
+      patch: { saleActive: false },
+      now: 2000,
+    });
+    const result = await m.replaceHostedSellerProduct({
+      snapshot,
+      owner: OWNER,
+      metadata: {
+        title: 'stale',
+        priceJpyc: '500',
+        label: 'api',
+        saleActive: true,
+      },
+      content: { kind: 'text', value: '上書きしてはいけない' },
+    });
+    expect(result).toEqual({ ok: false, reason: 'conflict' });
+    expect(await m.getHostedContent(id, 2)).toBeNull();
+  });
+
+  it('孤児の next revision key が既にあれば上書きせず conflict にする', async () => {
+    const { m, id } = await seed();
+    const snapshot = await m.getHostedProductUpdateSnapshot(id);
+    if (!snapshot || snapshot === 'storage') throw new Error('setup');
+    kvMocks.store.set(
+      m.hostedContentKey(id, 2),
+      JSON.stringify({ kind: 'text', value: '既存の孤児 revision' }),
+    );
+
+    const result = await m.replaceHostedSellerProduct({
+      snapshot,
+      owner: OWNER,
+      metadata: {
+        title: '更新後',
+        priceJpyc: '500',
+        label: 'prompt',
+        saleActive: false,
+      },
+      content: { kind: 'text', value: '上書きしてはいけない' },
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'conflict' });
+    expect(await m.getHostedContent(id, 2)).toEqual({
+      kind: 'text',
+      value: '既存の孤児 revision',
+    });
+    const product = await m.getHostedProduct(id);
+    expect(product !== 'storage' && product?.contentRevision).toBe(1);
   });
 });
 

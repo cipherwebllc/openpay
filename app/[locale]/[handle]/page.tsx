@@ -20,12 +20,17 @@ import { HandleProfileView } from '@/components/HandleProfile';
 import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
 import { HandleShareButton } from '@/components/HandleShareButton';
 import { MobileOrderView } from '@/components/MobileOrderView';
+import {
+  CreatorStorefrontSection,
+  type CreatorStorefrontProduct,
+} from '@/components/CreatorStorefrontSection';
 import { isKvConfigured } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { normalizeHandle, decodeHandleSegment, handleStorefrontConfig } from '@/lib/handle';
 import { resolveHandleTheme, handlePageTheme } from '@/lib/handleTheme';
 import { resolveHandle } from '@/lib/handleStore';
 import { readShopLive } from '@/lib/shopLiveStore';
+import { listAvailableHostedForOwner } from '@/lib/x402/hostedStore';
 import { decodeAgentCart } from '@/lib/agentOrder';
 import { searchParamsFromNext, type RouteSearch } from '@/lib/url';
 import { JsonLd, SITE_URL } from '@/components/StructuredData';
@@ -157,9 +162,29 @@ export default async function HandlePage({
   const storefront = env.enableMobileOrder
     ? handleStorefrontConfig(record, normalized)
     : null;
-  // ライブ運用状態 (売り切れ / 受付一時停止) を同リクエストでサーバ読取し MobileOrderView へ渡す。
-  // flag OFF / storefront 非公開では読まず undefined (= 制限なし・従来どおり)。fail-open。
-  const live = storefront && env.enableShopLive ? await readShopLive(normalized) : undefined;
+  // ライブ状態と hosted 公開メタは独立なので並列取得。creator store は本文 key を一切読まず、
+  // server/client 両 flag ON かつ link-in-bio 経路のときだけ owner の販売可能商品を読む。
+  const [live, availableHosted] = await Promise.all([
+    storefront && env.enableShopLive
+      ? readShopLive(normalized)
+      : Promise.resolve(undefined),
+    !storefront && env.enableCreatorStoreUi && env.enableCreatorStore
+      ? listAvailableHostedForOwner(record.owner)
+      : Promise.resolve([]),
+  ]);
+  // 商品メタの障害をプロフィール/チップ本体へ波及させないため、null は商品節だけ省略する。
+  // owner/payTo/revision は client 境界へ渡さず、公開に必要な field だけを明示投影する。
+  const creatorProducts: CreatorStorefrontProduct[] = (availableHosted ?? []).map(
+    (product) => ({
+      id: product.id,
+      title: product.title,
+      ...(product.desc ? { desc: product.desc } : {}),
+      ...(product.emoji ? { emoji: product.emoji } : {}),
+      priceJpyc: product.priceJpyc,
+      contentKind: product.contentKind,
+      label: product.label,
+    }),
+  );
   // インバウンド・エージェント注文 (plans/inbound-agent-order.md §2): 旅行者の AI が組んだ注文を
   // `?cart=<base64url>` で受け、MobileOrderView に事前充填する。**self-contained ?s= トークンは使わず
   // @handle 経路に限定** (受取先・価格は KV 権威の handle レコードから再解決 = receiver スプーフィング
@@ -263,6 +288,13 @@ export default async function HandlePage({
               />
             </div>
           )}
+          {creatorProducts.length > 0 ? (
+            <CreatorStorefrontSection
+              products={creatorProducts}
+              accent={accent}
+              theme={theme}
+            />
+          ) : null}
           {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。
               theme は見出し/説明の可読色のみ調整 (night)・決済動作は不変 (掟12)。 */}
           <ReceiveMethodPicker config={record.config} theme={theme} />

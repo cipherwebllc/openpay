@@ -1,0 +1,901 @@
+'use client';
+
+// 「プロフ」タブ内のデジタル商品管理。SIWE owner の商品一覧・作成/編集・販売停止と、
+// 販売開始に必須の販売者情報を同じ場所で管理する。商品本文は一覧 API へ載せず、編集時だけ
+// owner 限定 detail API から取得する。保存後は server の値を再取得し、楽観更新しない。
+
+import { useState } from 'react';
+import { useTranslations } from 'next-intl';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { PackageOpen, Pencil, Store } from 'lucide-react';
+import { env } from '@/lib/env';
+import { useSiweSession } from '@/hooks/useSiweSession';
+
+type HostedLabel =
+  | 'download'
+  | 'pdf'
+  | 'zip'
+  | 'prompt'
+  | 'api'
+  | 'external';
+
+type ProductSummary = {
+  id: string;
+  title: string;
+  desc?: string;
+  emoji?: string;
+  priceJpyc: string;
+  contentKind: 'url' | 'text';
+  label: HostedLabel;
+  saleActive: boolean;
+  contentAvailable: boolean;
+  updatedAt?: number;
+};
+
+type HostedContent = {
+  kind: 'url' | 'text';
+  value: string;
+};
+
+type SellerDisclosure = {
+  name: string;
+  contact: string;
+  disclosure?: string;
+  updatedAt: number;
+};
+
+type ProductForm = {
+  title: string;
+  desc: string;
+  emoji: string;
+  priceJpyc: string;
+  contentKind: 'url' | 'text';
+  label: HostedLabel;
+  content: string;
+  saleActive: boolean;
+};
+
+type SellerForm = {
+  name: string;
+  contact: string;
+  disclosure: string;
+};
+
+type ProductsResponse = {
+  ok: true;
+  products: ProductSummary[];
+  max: number;
+};
+
+type SellerResponse = {
+  ok: true;
+  seller: SellerDisclosure | null;
+};
+
+type ProductDetailResponse = {
+  ok: true;
+  product: ProductSummary;
+  content: HostedContent | null;
+};
+
+const HOSTED_LABELS: readonly HostedLabel[] = [
+  'download',
+  'pdf',
+  'zip',
+  'prompt',
+  'api',
+  'external',
+];
+
+const EMPTY_PRODUCT_FORM: ProductForm = {
+  title: '',
+  desc: '',
+  emoji: '',
+  priceJpyc: '',
+  contentKind: 'url',
+  label: 'download',
+  content: '',
+  saleActive: false,
+};
+
+const EMPTY_SELLER_FORM: SellerForm = {
+  name: '',
+  contact: '',
+  disclosure: '',
+};
+
+const inputClass =
+  'mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400';
+
+class StoreRequestError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+  ) {
+    super(code);
+    this.name = 'StoreRequestError';
+  }
+}
+
+function errorCode(error: unknown): string {
+  return error instanceof StoreRequestError ? error.code : 'request_failed';
+}
+
+async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  // 非 JSON の障害応答で HTTP status を失う波及を断つ。ok:true を必須にするため偽成功にはしない。
+  const body = (await response.json().catch(() => null)) as
+    | (Record<string, unknown> & { ok?: boolean; error?: string })
+    | null;
+  if (!response.ok || body?.ok !== true) {
+    throw new StoreRequestError(
+      response.status,
+      typeof body?.error === 'string' ? body.error : `http_${response.status}`,
+    );
+  }
+  return body as unknown as T;
+}
+
+function sellerFormOf(seller: SellerDisclosure | null): SellerForm {
+  return seller
+    ? {
+        name: seller.name,
+        contact: seller.contact,
+        disclosure: seller.disclosure ?? '',
+      }
+    : EMPTY_SELLER_FORM;
+}
+
+export function CreatorStoreSellerPanel() {
+  if (!env.enableCreatorStoreUi) return null;
+  return <EnabledCreatorStoreSellerPanel />;
+}
+
+function EnabledCreatorStoreSellerPanel() {
+  const t = useTranslations('CreatorStoreSeller');
+  const {
+    isSignedIn,
+    sessionAddress,
+    signIn,
+    isSigningIn,
+    signInError,
+  } = useSiweSession();
+
+  return (
+    <section
+      aria-labelledby="creator-store-seller-heading"
+      className="rounded-3xl bg-white p-6 shadow-card ring-1 ring-slate-200/70 sm:p-8 print:hidden"
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
+          <Store className="h-5 w-5" aria-hidden />
+        </span>
+        <div className="min-w-0">
+          <h2
+            id="creator-store-seller-heading"
+            className="text-lg font-semibold text-slate-800"
+          >
+            {t('heading')}
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-slate-500">
+            {t('intro')}
+          </p>
+        </div>
+      </div>
+
+      {!isSignedIn || !sessionAddress ? (
+        <div className="mt-5">
+          <p className="text-sm text-slate-600">{t('signInPrompt')}</p>
+          <button
+            type="button"
+            onClick={() => {
+              // 拒否理由は hook の signInError で表示し、click handler の未処理 rejection だけを断つ。
+              void signIn(t('signInStatement')).catch(() => undefined);
+            }}
+            disabled={isSigningIn}
+            className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSigningIn ? t('signingIn') : t('signIn')}
+          </button>
+          {signInError ? (
+            <p className="mt-2 text-sm text-red-600">{t('signInError')}</p>
+          ) : null}
+        </div>
+      ) : (
+        // sessionAddress を key にして wallet 切替時に本文を含む全 local state を破棄する。
+        <SignedInSellerPanel
+          key={sessionAddress.toLowerCase()}
+          sessionAddress={sessionAddress}
+        />
+      )}
+    </section>
+  );
+}
+
+function SignedInSellerPanel({ sessionAddress }: { sessionAddress: string }) {
+  const t = useTranslations('CreatorStoreSeller');
+  const [sellerDraft, setSellerDraft] = useState<SellerForm | null>(null);
+  const [sellerSaved, setSellerSaved] = useState(false);
+  const [productForm, setProductForm] = useState<ProductForm>(
+    EMPTY_PRODUCT_FORM,
+  );
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [productSaved, setProductSaved] = useState(false);
+
+  const productsQuery = useQuery({
+    queryKey: ['creator-store', 'products', sessionAddress],
+    queryFn: async (): Promise<ProductsResponse> => {
+      const body = await requestJson<ProductsResponse>(
+        '/api/store/products',
+        { cache: 'no-store' },
+      );
+      if (!Array.isArray(body.products) || !Number.isSafeInteger(body.max)) {
+        throw new StoreRequestError(500, 'invalid_response');
+      }
+      return body;
+    },
+    retry: false,
+    gcTime: 0,
+  });
+
+  const sellerQuery = useQuery({
+    queryKey: ['creator-store', 'seller', sessionAddress],
+    queryFn: async (): Promise<SellerResponse> =>
+      requestJson<SellerResponse>('/api/store/seller', {
+        cache: 'no-store',
+      }),
+    retry: false,
+    gcTime: 0,
+  });
+
+  const seller = sellerQuery.data?.seller ?? null;
+  const sellerComplete = seller !== null;
+  const sellerForm = sellerDraft ?? sellerFormOf(seller);
+  const products = productsQuery.data?.products ?? [];
+  const maxProducts = productsQuery.data?.max ?? 12;
+  const atLimit = products.length >= maxProducts;
+
+  const updateSeller = (patch: Partial<SellerForm>) => {
+    setSellerSaved(false);
+    setSellerDraft((current) => ({
+      ...(current ?? sellerFormOf(seller)),
+      ...patch,
+    }));
+  };
+
+  const updateProduct = (patch: Partial<ProductForm>) => {
+    setProductSaved(false);
+    setProductForm((current) => ({ ...current, ...patch }));
+  };
+
+  const saveSeller = useMutation({
+    gcTime: 0,
+    mutationFn: async (form: SellerForm) =>
+      requestJson<SellerResponse>('/api/store/seller', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name,
+          contact: form.contact,
+          disclosure: form.disclosure.trim() || null,
+        }),
+      }),
+    onSuccess: async () => {
+      const refreshed = await sellerQuery.refetch();
+      if (refreshed.isSuccess) {
+        setSellerDraft(null);
+        setSellerSaved(true);
+      }
+    },
+  });
+
+  const loadProduct = useMutation({
+    gcTime: 0,
+    mutationFn: async (id: string) => {
+      const detail = await requestJson<ProductDetailResponse>(
+        `/api/store/products/${id}`,
+        {
+          cache: 'no-store',
+        },
+      );
+      if (!detail.content) {
+        throw new StoreRequestError(409, 'content_unavailable');
+      }
+      return { ...detail, content: detail.content };
+    },
+    onSuccess: ({ product, content }) => {
+      setEditingId(product.id);
+      setProductSaved(false);
+      setProductForm({
+        title: product.title,
+        desc: product.desc ?? '',
+        emoji: product.emoji ?? '',
+        priceJpyc: product.priceJpyc,
+        contentKind: content.kind,
+        label: product.label,
+        content: content.value,
+        saleActive: product.saleActive,
+      });
+    },
+  });
+
+  const saveProduct = useMutation({
+    gcTime: 0,
+    mutationFn: async ({
+      id,
+      form,
+    }: {
+      id: string | null;
+      form: ProductForm;
+    }) =>
+      requestJson<{ ok: true; product: ProductSummary }>(
+        id ? `/api/store/products/${id}` : '/api/store/products',
+        {
+          method: id ? 'PATCH' : 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            title: form.title,
+            desc: form.desc.trim() || null,
+            emoji: form.emoji.trim() || null,
+            priceJpyc: form.priceJpyc,
+            contentKind: form.contentKind,
+            label: form.label,
+            content: form.content,
+            saleActive: form.saleActive,
+          }),
+        },
+      ),
+    onSuccess: async () => {
+      const refreshed = await productsQuery.refetch();
+      if (refreshed.isSuccess) {
+        setEditingId(null);
+        setProductForm(EMPTY_PRODUCT_FORM);
+        setProductSaved(true);
+      }
+    },
+  });
+
+  const toggleSale = useMutation({
+    mutationFn: async ({
+      id,
+      saleActive,
+    }: {
+      id: string;
+      saleActive: boolean;
+    }) =>
+      requestJson<{ ok: true; product: ProductSummary }>(
+        `/api/store/products/${id}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ saleActive }),
+        },
+      ),
+    onSuccess: async () => {
+      await productsQuery.refetch();
+    },
+  });
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setProductForm(EMPTY_PRODUCT_FORM);
+    loadProduct.reset();
+    saveProduct.reset();
+  };
+
+  if (productsQuery.isPending || sellerQuery.isPending) {
+    return <p className="mt-5 text-sm text-slate-500">{t('loading')}</p>;
+  }
+
+  if (productsQuery.isError || sellerQuery.isError) {
+    return (
+      <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p>{t('loadError')}</p>
+        <button
+          type="button"
+          onClick={() => {
+            void productsQuery.refetch();
+            void sellerQuery.refetch();
+          }}
+          className="mt-2 font-semibold underline hover:text-red-900"
+        >
+          {t('retry')}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6 space-y-6">
+      <section
+        aria-labelledby="creator-store-seller-disclosure-heading"
+        className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3
+              id="creator-store-seller-disclosure-heading"
+              className="text-base font-semibold text-slate-800"
+            >
+              {t('sellerHeading')}
+            </h3>
+            <p className="mt-1 text-xs leading-relaxed text-slate-500">
+              {t('sellerIntro')}
+            </p>
+          </div>
+          <span
+            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+              sellerComplete
+                ? 'bg-emerald-100 text-emerald-800'
+                : 'bg-amber-100 text-amber-800'
+            }`}
+          >
+            {sellerComplete ? t('sellerRegistered') : t('sellerUnregistered')}
+          </span>
+        </div>
+
+        <form
+          className="mt-4 grid gap-4 sm:grid-cols-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveSeller.mutate(sellerForm);
+          }}
+        >
+          <label
+            htmlFor="creator-store-seller-name"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t('sellerNameLabel')}
+            <input
+              id="creator-store-seller-name"
+              type="text"
+              required
+              maxLength={60}
+              value={sellerForm.name}
+              onChange={(event) => updateSeller({ name: event.target.value })}
+              className={inputClass}
+            />
+          </label>
+          <label
+            htmlFor="creator-store-seller-contact"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t('sellerContactLabel')}
+            <input
+              id="creator-store-seller-contact"
+              type="text"
+              required
+              maxLength={200}
+              value={sellerForm.contact}
+              onChange={(event) =>
+                updateSeller({ contact: event.target.value })
+              }
+              className={inputClass}
+            />
+          </label>
+          <div className="sm:col-span-2">
+            <label
+              htmlFor="creator-store-seller-disclosure"
+              className="block text-sm font-medium text-slate-700"
+            >
+              {t('sellerDisclosureLabel')}
+            </label>
+            <textarea
+              id="creator-store-seller-disclosure"
+              aria-describedby="creator-store-seller-disclosure-hint"
+              rows={4}
+              maxLength={1000}
+              value={sellerForm.disclosure}
+              onChange={(event) =>
+                updateSeller({ disclosure: event.target.value })
+              }
+              className={inputClass}
+            />
+            <p
+              id="creator-store-seller-disclosure-hint"
+              className="mt-1 text-xs leading-relaxed text-slate-500"
+            >
+              {t('sellerDisclosureHint')}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
+            <button
+              type="submit"
+              disabled={saveSeller.isPending}
+              className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saveSeller.isPending ? t('saving') : t('saveSeller')}
+            </button>
+            {sellerSaved ? (
+              <p className="text-sm font-medium text-emerald-700">
+                {t('sellerSaved')}
+              </p>
+            ) : null}
+            {saveSeller.isError ? (
+              <p className="text-sm text-red-600">
+                {t('requestError', {
+                  error: errorCode(saveSeller.error),
+                })}
+              </p>
+            ) : null}
+          </div>
+        </form>
+      </section>
+
+      <section aria-labelledby="creator-store-products-heading">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h3
+              id="creator-store-products-heading"
+              className="text-base font-semibold text-slate-800"
+            >
+              {t('productsHeading')}
+            </h3>
+            <p className="mt-1 text-xs text-slate-500">
+              {t('productsCount', {
+                count: products.length,
+                max: maxProducts,
+              })}
+            </p>
+          </div>
+          {atLimit && !editingId ? (
+            <p className="text-xs font-medium text-amber-700">
+              {t('productLimitReached', { max: maxProducts })}
+            </p>
+          ) : null}
+        </div>
+
+        {products.length === 0 ? (
+          <div className="mt-4 rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center">
+            <PackageOpen
+              className="mx-auto h-6 w-6 text-slate-400"
+              aria-hidden
+            />
+            <p className="mt-2 text-sm text-slate-500">
+              {t('emptyProducts')}
+            </p>
+          </div>
+        ) : (
+          <ul className="mt-4 grid gap-3 md:grid-cols-2">
+            {products.map((product) => {
+              const cannotStart =
+                !product.saleActive &&
+                (!sellerComplete || !product.contentAvailable);
+              const toggling =
+                toggleSale.isPending &&
+                toggleSale.variables?.id === product.id;
+              return (
+                <li
+                  key={product.id}
+                  className="rounded-xl border border-slate-200 bg-white p-4"
+                >
+                  <div className="flex items-start gap-3">
+                    <span
+                      aria-hidden
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl"
+                    >
+                      {product.emoji ?? '📦'}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="break-words text-sm font-semibold text-slate-800">
+                        {product.title}
+                      </h4>
+                      {product.desc ? (
+                        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">
+                          {product.desc}
+                        </p>
+                      ) : null}
+                      <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+                        <span className="rounded-full bg-brand/10 px-2 py-0.5 font-semibold text-brand-dark">
+                          {t('priceValue', { price: product.priceJpyc })}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
+                          {t(`contentKinds.${product.contentKind}`)}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
+                          {t(`labels.${product.label}`)}
+                        </span>
+                        {!product.contentAvailable ? (
+                          <span className="rounded-full bg-red-100 px-2 py-0.5 font-semibold text-red-700">
+                            {t('contentUnavailable')}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={product.saleActive}
+                        disabled={toggling || cannotStart}
+                        onChange={(event) =>
+                          toggleSale.mutate({
+                            id: product.id,
+                            saleActive: event.target.checked,
+                          })
+                        }
+                      />
+                      <span>
+                        {product.saleActive
+                          ? t('saleActive')
+                          : t('saleInactive')}
+                      </span>
+                    </label>
+                    <button
+                      type="button"
+                      disabled={
+                        loadProduct.isPending || !product.contentAvailable
+                      }
+                      onClick={() => loadProduct.mutate(product.id)}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Pencil className="h-3.5 w-3.5" aria-hidden />
+                      {t('editProduct')}
+                    </button>
+                  </div>
+                  {cannotStart && !sellerComplete ? (
+                    <p className="mt-2 text-xs leading-relaxed text-amber-700">
+                      {t('sellerRequiredForSale')}
+                    </p>
+                  ) : null}
+                  {!product.contentAvailable ? (
+                    <p className="mt-2 text-xs leading-relaxed text-red-700">
+                      {t('contentUnavailableHint')}
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {toggleSale.isError ? (
+          <p className="mt-3 text-sm text-red-600">
+            {t('requestError', {
+              error: errorCode(toggleSale.error),
+            })}
+          </p>
+        ) : null}
+      </section>
+
+      <section
+        aria-labelledby="creator-store-product-form-heading"
+        className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5"
+      >
+        <h3
+          id="creator-store-product-form-heading"
+          className="text-base font-semibold text-slate-800"
+        >
+          {editingId ? t('editProductHeading') : t('newProductHeading')}
+        </h3>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">
+          {t('productFormIntro')}
+        </p>
+
+        <form
+          className="mt-4 grid gap-4 sm:grid-cols-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            saveProduct.mutate({ id: editingId, form: productForm });
+          }}
+        >
+          <label
+            htmlFor="creator-store-product-title"
+            className="block text-sm font-medium text-slate-700 sm:col-span-2"
+          >
+            {t('titleLabel')}
+            <input
+              id="creator-store-product-title"
+              type="text"
+              required
+              maxLength={60}
+              value={productForm.title}
+              onChange={(event) =>
+                updateProduct({ title: event.target.value })
+              }
+              className={inputClass}
+            />
+          </label>
+          <label
+            htmlFor="creator-store-product-desc"
+            className="block text-sm font-medium text-slate-700 sm:col-span-2"
+          >
+            {t('descLabel')}
+            <textarea
+              id="creator-store-product-desc"
+              rows={2}
+              maxLength={200}
+              value={productForm.desc}
+              onChange={(event) =>
+                updateProduct({ desc: event.target.value })
+              }
+              className={inputClass}
+            />
+          </label>
+          <label
+            htmlFor="creator-store-product-emoji"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t('emojiLabel')}
+            <input
+              id="creator-store-product-emoji"
+              type="text"
+              maxLength={8}
+              value={productForm.emoji}
+              onChange={(event) =>
+                updateProduct({ emoji: event.target.value })
+              }
+              className={inputClass}
+            />
+          </label>
+          <label
+            htmlFor="creator-store-product-price"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t('priceLabel')}
+            <input
+              id="creator-store-product-price"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]+"
+              required
+              maxLength={7}
+              value={productForm.priceJpyc}
+              onChange={(event) =>
+                updateProduct({ priceJpyc: event.target.value })
+              }
+              className={inputClass}
+            />
+          </label>
+          <label
+            htmlFor="creator-store-product-kind"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t('contentKindLabel')}
+            <select
+              id="creator-store-product-kind"
+              value={productForm.contentKind}
+              onChange={(event) => {
+                const contentKind = event.target.value as 'url' | 'text';
+                updateProduct({
+                  contentKind,
+                  label: contentKind === 'url' ? 'download' : 'prompt',
+                });
+              }}
+              className={inputClass}
+            >
+              <option value="url">{t('contentKinds.url')}</option>
+              <option value="text">{t('contentKinds.text')}</option>
+            </select>
+          </label>
+          <label
+            htmlFor="creator-store-product-label"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t('labelLabel')}
+            <select
+              id="creator-store-product-label"
+              value={productForm.label}
+              onChange={(event) =>
+                updateProduct({
+                  label: event.target.value as HostedLabel,
+                })
+              }
+              className={inputClass}
+            >
+              {HOSTED_LABELS.map((label) => (
+                <option key={label} value={label}>
+                  {t(`labels.${label}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="sm:col-span-2">
+            <label
+              htmlFor="creator-store-product-content"
+              className="block text-sm font-medium text-slate-700"
+            >
+              {productForm.contentKind === 'url'
+                ? t('contentUrlLabel')
+                : t('contentTextLabel')}
+            </label>
+            {productForm.contentKind === 'url' ? (
+              <input
+                id="creator-store-product-content"
+                aria-describedby="creator-store-product-content-hint"
+                type="url"
+                required
+                maxLength={512}
+                value={productForm.content}
+                onChange={(event) =>
+                  updateProduct({ content: event.target.value })
+                }
+                className={inputClass}
+              />
+            ) : (
+              <textarea
+                id="creator-store-product-content"
+                aria-describedby="creator-store-product-content-hint"
+                rows={8}
+                required
+                maxLength={20_000}
+                value={productForm.content}
+                onChange={(event) =>
+                  updateProduct({ content: event.target.value })
+                }
+                className={inputClass}
+              />
+            )}
+            <p
+              id="creator-store-product-content-hint"
+              className="mt-1 text-xs leading-relaxed text-slate-500"
+            >
+              {productForm.contentKind === 'url'
+                ? t('contentUrlHint')
+                : t('contentTextHint')}
+            </p>
+          </div>
+
+          <div className="sm:col-span-2">
+            <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+              <input
+                type="checkbox"
+                checked={productForm.saleActive}
+                disabled={!productForm.saleActive && !sellerComplete}
+                onChange={(event) =>
+                  updateProduct({ saleActive: event.target.checked })
+                }
+              />
+              <span>{t('startSellingAfterSave')}</span>
+            </label>
+            {!sellerComplete && !productForm.saleActive ? (
+              <p className="mt-1 text-xs leading-relaxed text-amber-700">
+                {t('sellerRequiredForSale')}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
+            <button
+              type="submit"
+              disabled={
+                saveProduct.isPending || (atLimit && editingId === null)
+              }
+              className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saveProduct.isPending
+                ? t('saving')
+                : editingId
+                  ? t('saveProduct')
+                  : t('createProduct')}
+            </button>
+            {editingId ? (
+              <button
+                type="button"
+                onClick={cancelEdit}
+                disabled={saveProduct.isPending}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-slate-400 disabled:opacity-50"
+              >
+                {t('cancelEdit')}
+              </button>
+            ) : null}
+            {productSaved ? (
+              <p className="text-sm font-medium text-emerald-700">
+                {t('productSaved')}
+              </p>
+            ) : null}
+          </div>
+          {loadProduct.isError || saveProduct.isError ? (
+            <p className="text-sm text-red-600 sm:col-span-2">
+              {t('requestError', {
+                error: errorCode(loadProduct.error ?? saveProduct.error),
+              })}
+            </p>
+          ) : null}
+        </form>
+      </section>
+    </div>
+  );
+}

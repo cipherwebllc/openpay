@@ -7,8 +7,13 @@ const state = vi.hoisted(() => ({
   enableHandles: true,
   enableMobileOrder: false,
   enableShopLive: false,
+  enableCreatorStore: false,
+  enableCreatorStoreUi: false,
+  hostedProducts: [] as unknown[] | null,
+  renderedStorefrontProducts: [] as unknown[],
   record: null as unknown,
 }));
+const listAvailableHostedForOwner = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -24,6 +29,12 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableShopLive() {
         return state.enableShopLive;
+      },
+      get enableCreatorStore() {
+        return state.enableCreatorStore;
+      },
+      get enableCreatorStoreUi() {
+        return state.enableCreatorStoreUi;
       },
     },
   };
@@ -44,6 +55,10 @@ vi.mock('@/lib/handle', async (importOriginal) => {
 
 vi.mock('@/lib/shopLiveStore', () => ({
   readShopLive: vi.fn(async () => undefined),
+}));
+
+vi.mock('@/lib/x402/hostedStore', () => ({
+  listAvailableHostedForOwner,
 }));
 
 vi.mock('next-intl/server', () => ({
@@ -70,6 +85,21 @@ vi.mock('@/components/HandleShareButton', () => ({
 
 vi.mock('@/components/MobileOrderView', () => ({
   MobileOrderView: () => null,
+}));
+
+vi.mock('@/components/CreatorStorefrontSection', () => ({
+  CreatorStorefrontSection: ({
+    products,
+  }: {
+    products: Array<{ id: string }>;
+  }) => {
+    state.renderedStorefrontProducts = products;
+    return (
+      <div data-testid="creator-storefront">
+        {products.map((product) => product.id).join(',')}
+      </div>
+    );
+  },
 }));
 
 vi.mock('next/link', () => ({
@@ -154,7 +184,14 @@ beforeEach(() => {
   state.enableHandles = true;
   state.enableMobileOrder = false;
   state.enableShopLive = false;
+  state.enableCreatorStore = false;
+  state.enableCreatorStoreUi = false;
+  state.hostedProducts = [];
+  state.renderedStorefrontProducts = [];
   state.record = null;
+  listAvailableHostedForOwner.mockImplementation(
+    async () => state.hostedProducts,
+  );
 });
 
 describe('@handle ProfilePage JSON-LD', () => {
@@ -269,5 +306,55 @@ describe('@handle ProfilePage JSON-LD', () => {
     expect(jsonLd.mainEntity).not.toHaveProperty('name');
     expect(jsonLd.mainEntity).not.toHaveProperty('description');
     expect(jsonLd.mainEntity).not.toHaveProperty('sameAs');
+  });
+
+  it('両 creator-store flag ON の link-in-bio だけ owner 商品を表示する', async () => {
+    state.enableCreatorStore = true;
+    state.enableCreatorStoreUi = true;
+    state.hostedProducts = [
+      {
+        id: `h_${'a'.repeat(32)}`,
+        owner: ADDR,
+        payTo: ADDR,
+        title: 'Prompt',
+        priceJpyc: '300',
+        contentKind: 'text',
+        label: 'prompt',
+        contentRevision: 1,
+        saleActive: true,
+        contentAvailable: true,
+        createdAt: 1,
+        content: { kind: 'text', value: '絶対に公開しない本文' },
+      },
+    ];
+
+    const { container } = await renderHandlePage(record());
+
+    expect(listAvailableHostedForOwner).toHaveBeenCalledWith(ADDR);
+    expect(
+      container.querySelector('[data-testid="creator-storefront"]'),
+    ).toHaveTextContent(`h_${'a'.repeat(32)}`);
+    expect(state.renderedStorefrontProducts).toEqual([
+      {
+        id: `h_${'a'.repeat(32)}`,
+        title: 'Prompt',
+        priceJpyc: '300',
+        contentKind: 'text',
+        label: 'prompt',
+      },
+    ]);
+  });
+
+  it('商品 storage 障害は既存ページへ波及させず節だけ省略する', async () => {
+    state.enableCreatorStore = true;
+    state.enableCreatorStoreUi = true;
+    state.hostedProducts = null;
+
+    const { container } = await renderHandlePage(record());
+
+    expect(jsonLdScripts(container)).toHaveLength(1);
+    expect(
+      container.querySelector('[data-testid="creator-storefront"]'),
+    ).toBeNull();
   });
 });
