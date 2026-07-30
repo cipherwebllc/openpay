@@ -339,6 +339,7 @@ describe('@handle ProfilePage JSON-LD', () => {
         id: `h_${'a'.repeat(32)}`,
         title: 'Prompt',
         priceJpyc: '300',
+        payTo: ADDR,
         contentKind: 'text',
         label: 'prompt',
       },

@@ -9,17 +9,19 @@ const PRODUCT = {
   desc: '仕事で使えるテンプレート',
   emoji: '🧠',
   priceJpyc: '1200',
+  payTo: '0x2222222222222222222222222222222222222222' as const,
   contentKind: 'text' as const,
   label: 'prompt' as const,
 };
 
 describe('CreatorStorefrontSection', () => {
-  it('販売中の商品カードと disabled の購入 placeholder を描画する', () => {
+  it('販売中の商品カードと有効な購入ボタンを描画する', () => {
     renderWithIntl(
       <CreatorStorefrontSection
         products={[PRODUCT]}
         accent="#2563eb"
         theme="clean"
+        sellerDisclosureHref="/ja/store/seller/0x1234"
       />,
     );
 
@@ -30,9 +32,7 @@ describe('CreatorStorefrontSection', () => {
     expect(screen.getByText('仕事で使えるテンプレート')).toBeInTheDocument();
     expect(screen.getByText('1,200 JPYC')).toBeInTheDocument();
     expect(screen.getByText('🧠')).toHaveAttribute('aria-hidden', 'true');
-    expect(
-      screen.getByRole('button', { name: 'まもなく購入可能' }),
-    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: '購入する' })).toBeEnabled();
   });
 
   it('商品ゼロは wrapper を描画せず、night は可読色を使う', () => {
@@ -41,6 +41,7 @@ describe('CreatorStorefrontSection', () => {
         products={[]}
         accent="#2563eb"
         theme="clean"
+        sellerDisclosureHref="/ja/store/seller/0x1234"
       />,
     );
     expect(empty.container).toBeEmptyDOMElement();
@@ -51,6 +52,7 @@ describe('CreatorStorefrontSection', () => {
         products={[PRODUCT]}
         accent="#2563eb"
         theme="night"
+        sellerDisclosureHref="/ja/store/seller/0x1234"
       />,
     );
     expect(screen.getByRole('heading', { name: '販売中' })).toHaveClass(
@@ -64,12 +66,11 @@ describe('CreatorStorefrontSection', () => {
         products={[PRODUCT]}
         accent="#2563eb"
         theme="soft"
+        sellerDisclosureHref="/en/store/seller/0x1234"
       />,
       { locale: 'en' },
     );
-    expect(
-      screen.getByRole('button', { name: 'Purchasing coming soon' }),
-    ).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Purchase' })).toBeEnabled();
     expect(screen.getByText('Prompt')).toBeInTheDocument();
   });
 });

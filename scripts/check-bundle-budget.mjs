@@ -24,7 +24,9 @@ const BUDGETS_KB = {
   //   で Sentry クライアント初期化チャンクが +4〜5kB (/pay 434・/tip 433)。First Load から
   //   外せない計測基盤の vendor 増分で code-split では削れないため +6kB 再調整。
   //   自作コード起因の増分には引き続き上の code-split 優先方針を適用する。
-  '/[locale]/pay': 436,
+  // 2026-07-30 creator-store P5b: /pay の import graph 不変のまま、store ページ追加による
+  // webpack chunk 再分割で共有 chunk が +1kB (revert 検証で直接 import 起因でないことを確認)。
+  '/[locale]/pay': 437,
   '/[locale]/tip/[address]': 434,
   '/manifest.webmanifest': 250,
   // shared chunks の総和。表の行 "First Load JS shared by all"

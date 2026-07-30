@@ -33,7 +33,15 @@ function deepKeys(value: unknown, prefix = ''): string[] {
 }
 
 describe('i18n: Creator Store namespace の完全 parity', () => {
-  it.each(['CreatorStoreSeller', 'CreatorStorefront'] as const)(
+  it.each(
+    [
+      'CreatorStoreSeller',
+      'CreatorStorefront',
+      'CreatorStorePurchase',
+      'CreatorStoreLibrary',
+      'CreatorStoreSellerDisclosure',
+    ] as const,
+  )(
     'ja/en の %s deep key 集合が一致する',
     (namespace) => {
       expect(deepKeys(ja[namespace]).sort()).toEqual(
