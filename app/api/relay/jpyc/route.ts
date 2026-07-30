@@ -53,6 +53,7 @@ import { formatJpycYenLabel } from '@/lib/format';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
 import { notifyPaymentReceived } from '@/lib/push/notify';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
+import { checkHostedIntentSettleAdmission } from '@/lib/x402/purchaseSettleGate';
 import {
   sanitizeTipMessage,
   storeTipMessage,
@@ -474,6 +475,25 @@ async function handleRecover(
   // recover 固有値だけ渡す: expectedFeeValue = 上で算出した recover 料率 /
   // callerFeeFloorValue = recover/mobile 共通の relay gas floor / forwarderFor = a1-aware /
   // idemPrefix = 'relay:idem:' (従来の冪等名前空間を維持)。
+  // creator-store hosted intent の署名を recover 入口へ転用して hosted CAS を迂回する
+  // 経路を broadcast 前に閉じる (v4 契約 A・store intent 不在の salt は 1 GET で素通し)。
+  const hostedAdmission = await checkHostedIntentSettleAdmission({
+    params,
+    chainId,
+    signature: raw.signature,
+  });
+  if (hostedAdmission === 'storage') {
+    return NextResponse.json(
+      { ok: false, error: 'storage_unavailable' },
+      { status: 503 },
+    );
+  }
+  if (hostedAdmission === 'denied') {
+    return NextResponse.json(
+      { ok: false, error: 'hosted_intent_required' },
+      { status: 409 },
+    );
+  }
   const result = await settleViaForwarder({
     chainId,
     params,
