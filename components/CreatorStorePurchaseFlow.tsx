@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { AlertTriangle, Loader2, WalletCards, X } from 'lucide-react';
 import { useAccount, useSwitchChain } from 'wagmi';
+import { ConnectButton } from '@/components/ConnectButton';
 import type { Address } from 'viem';
 import { CreatorStorePurchaseConfirmation } from '@/components/CreatorStorePurchaseConfirmation';
 import { CreatorStorePurchaseState } from '@/components/CreatorStorePurchaseState';
@@ -280,9 +281,16 @@ export function CreatorStorePurchaseFlow({
               {t('listedPrice', { price: product.priceJpyc })}
             </p>
             {!address ? (
-              <p className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
-                {t('walletRequired')}
-              </p>
+              <div className="mt-5 space-y-3">
+                <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                  {t('walletRequired')}
+                </p>
+                {/* @handle プロフはヘッダー (AppShell) を持たない専用レイアウトのため、
+                    接続導線を購入フロー内に置く (TipForm と同じ部品・2026-07-30 本番実害)。 */}
+                <div className="flex justify-center">
+                  <ConnectButton />
+                </div>
+              </div>
             ) : !isSignedIn ? (
               <button
                 type="button"

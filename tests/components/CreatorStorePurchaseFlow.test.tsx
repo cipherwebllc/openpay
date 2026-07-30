@@ -36,6 +36,11 @@ vi.mock('wagmi', () => ({
   }),
 }));
 
+vi.mock('@/components/ConnectButton', () => ({
+  // jsdom で wagmi ConnectButton を実 render すると OOM (PaymentForm の既知教訓)。
+  ConnectButton: () => <button type="button">接続</button>,
+}));
+
 vi.mock('@/hooks/useStoreCacheScope', () => ({
   // scope hook は wagmi/QueryClient に依存するため component テストでは no-op (専用テストで検証)
   useStoreCacheScope: () => {},
@@ -162,6 +167,18 @@ beforeEach(() => {
 });
 
 describe('CreatorStorePurchaseFlow', () => {
+  it('wallet 未接続時は接続ボタンをフロー内に表示する (ヘッダーなしプロフ対応)', () => {
+    state.address = undefined;
+    state.phase = 'idle';
+    state.quote = null;
+    renderFlow();
+    expect(
+      screen.getByText('購入するには、ウォレットを接続してください。'),
+    ).toBeInTheDocument();
+    // @handle プロフはヘッダーを持たないため、モーダル内の ConnectButton が唯一の接続導線。
+    expect(screen.getByRole('button', { name: '接続' })).toBeInTheDocument();
+  });
+
   it('検証済み quote を最終確認へ渡し、確定操作でのみ purchase を呼ぶ', () => {
     renderFlow();
 

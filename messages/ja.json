@@ -1020,7 +1020,7 @@
     "close": "閉じる",
     "startHeading": "購入の準備",
     "listedPrice": "表示価格 {price} JPYC",
-    "walletRequired": "購入するには、ヘッダーからウォレットを接続してください。",
+    "walletRequired": "購入するには、ウォレットを接続してください。",
     "signInStatement": "OpenPay でデジタル商品を購入するために署名します",
     "signInAndReview": "ログインして購入内容を確認",
     "reSignIn": "このウォレットで再ログイン",

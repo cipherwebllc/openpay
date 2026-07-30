@@ -1020,7 +1020,7 @@
     "close": "Close",
     "startHeading": "Prepare your purchase",
     "listedPrice": "Listed price: {price} JPYC",
-    "walletRequired": "Connect a wallet from the header to make this purchase.",
+    "walletRequired": "Connect a wallet to purchase.",
     "signInStatement": "Sign in to purchase a digital product on OpenPay",
     "signInAndReview": "Sign in and review purchase",
     "reSignIn": "Sign in again with this wallet",
