@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { Address } from 'viem';
 import { env } from '@/lib/env';
 import { createJpycPaymentRequirements } from '@/lib/x402/requirements';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
@@ -6,6 +7,7 @@ import {
   firstPartyAmount,
   firstPartyPayTo,
   firstPartyResourceUrl,
+  type FirstPartyOutputSchema,
   type FirstPartyResource,
 } from '@/lib/x402/firstParty';
 import { POST as verifyPayment } from '@/app/api/facilitator/verify/route';
@@ -32,6 +34,68 @@ import {
   v2PayloadToV1Body,
 } from '@/lib/x402/v2';
 
+/**
+ * 有料 route が wire を組むために必要な値だけを持つ **解決済み記述子**。
+ *
+ * なぜ導入するか (plans/creator-store-v3.md P1): 現在の実装は FirstPartyResource
+ * (静的カタログ) に直結しているため、hosted 商品 (KV 由来・per-merchant payTo) を
+ * 同じ money-path で扱えない。descriptor を境界にすると、first-party は**従来と同じ
+ * 順序・同じ値**で descriptor を作り (KV read を 1 回も増やさない)、hosted だけが
+ * 別経路で解決できる。
+ *
+ * ⚠️ wire 不変の担保: tests/app/api/paid-golden-wire.test.ts が 402/200/402(失敗)/404 の
+ * byte を凍結している。この分割で 1 byte でも変わればそこで落ちる。
+ */
+export type PaidDescriptor = {
+  /** canonical resource URL (accepts.resource / v2 resource.url に入る)。 */
+  url: string;
+  /** 売り手が受領する額 (atomic JPYC)。手数料はこれに上乗せされる。 */
+  amount: bigint;
+  /** 分割の売り手側受取先 (extra.openpay.merchant)。 */
+  payTo: Address;
+  description: string;
+  /** x402scan 等の payable-index 用の発見メタ (チャレンジ応答のみに添付)。 */
+  outputSchema: FirstPartyOutputSchema;
+};
+
+/**
+ * descriptor の供給元。**URL と支払い条件を分離**するのが要点:
+ * resource URL は静的メタ (常に解決可能) だが、payTo は設定依存で **throw し得る**。
+ * settled 再配信は payTo 設定が壊れていても成立しなければならない (既存契約) ため、
+ * redelivery binding には `url` を使い、`resolve()` は 402 を組む直前でのみ評価する。
+ */
+export type PaidDescriptorSource = {
+  /** canonical resource URL。throw しない。 */
+  url: string;
+  /** 支払い条件つき descriptor。設定ミス時は throw (呼び元が 503 へ倒す)。 */
+  resolve: () => PaidDescriptor;
+};
+
+/**
+ * first-party カタログ項目 → descriptor。**KV を読まない純関数**で、値の作り方も
+ * 従来の呼び出しと 1:1 (firstPartyAmount / firstPartyPayTo / firstPartyResourceUrl)。
+ */
+export function firstPartyDescriptorSource(
+  resource: FirstPartyResource,
+): PaidDescriptorSource {
+  return {
+    url: firstPartyResourceUrl(resource),
+    resolve: () => firstPartyDescriptor(resource),
+  };
+}
+
+export function firstPartyDescriptor(
+  resource: FirstPartyResource,
+): PaidDescriptor {
+  return {
+    url: firstPartyResourceUrl(resource),
+    amount: firstPartyAmount(resource),
+    payTo: firstPartyPayTo(),
+    description: resource.description,
+    outputSchema: resource.outputSchema,
+  };
+}
+
 type VerifyBody = {
   isValid?: boolean;
   invalidReason?: string;
@@ -50,6 +114,8 @@ type PaidContent = (ctx: { payer?: string }) => Promise<NextResponse> | NextResp
 type PreparedPayment = {
   body: Record<string, unknown>;
   accepts: ReturnType<typeof createJpycPaymentRequirements>;
+  /** paymentBody 時点で評価済みの descriptor (以後は再評価しない = throw し得ない)。 */
+  descriptor: PaidDescriptor;
 };
 
 function encodeJsonBase64(value: unknown): string {
@@ -71,14 +137,14 @@ function cloneForwardHeaders(req: Request): Headers {
 }
 
 function paymentBody(
-  resource: FirstPartyResource,
+  descriptor: PaidDescriptor,
   paymentPayload: unknown,
 ): PreparedPayment {
   const accepts = createJpycPaymentRequirements({
-    amount: firstPartyAmount(resource),
-    payTo: firstPartyPayTo(),
-    resource: firstPartyResourceUrl(resource),
-    description: resource.description,
+    amount: descriptor.amount,
+    payTo: descriptor.payTo,
+    resource: descriptor.url,
+    description: descriptor.description,
     chainId: x402FacilitatorConfig.chainId,
     mimeType: 'application/json',
   });
@@ -89,6 +155,7 @@ function paymentBody(
       paymentRequirements: accepts[0],
     },
     accepts,
+    descriptor,
   };
 }
 
@@ -165,16 +232,16 @@ function pendingRecoveryDetails(
 
 function setPaymentRequiredV2Header(
   res: NextResponse,
-  resource: FirstPartyResource,
+  descriptor: PaidDescriptor,
   accepts: ReturnType<typeof createJpycPaymentRequirements>,
   error: string,
 ): NextResponse {
   const paymentRequired = buildPaymentRequiredV2({
-    url: firstPartyResourceUrl(resource),
-    description: resource.description,
+    url: descriptor.url,
+    description: descriptor.description,
     mimeType: 'application/json',
     accepts: accepts.map(toV2Accept),
-    bazaarInfo: resource.outputSchema,
+    bazaarInfo: descriptor.outputSchema,
     error,
   });
   res.headers.set('PAYMENT-REQUIRED', encodePaymentRequiredHeaderValue(paymentRequired));
@@ -182,16 +249,17 @@ function setPaymentRequiredV2Header(
 }
 
 function paymentChallenge(
-  resource: FirstPartyResource,
+  descriptorOf: () => PaidDescriptor,
   error: string,
   status = 402,
 ): NextResponse {
   try {
+    const descriptor = descriptorOf();
     const accepts = createJpycPaymentRequirements({
-      amount: firstPartyAmount(resource),
-      payTo: firstPartyPayTo(),
-      resource: firstPartyResourceUrl(resource),
-      description: resource.description,
+      amount: descriptor.amount,
+      payTo: descriptor.payTo,
+      resource: descriptor.url,
+      description: descriptor.description,
       chainId: x402FacilitatorConfig.chainId,
       mimeType: 'application/json',
     });
@@ -199,14 +267,14 @@ function paymentChallenge(
     // verify/settle に渡す requirements (paymentBody) には含めない (facilitator parse を汚さない)。
     const discoverable = accepts.map((accept) => ({
       ...accept,
-      outputSchema: resource.outputSchema,
+      outputSchema: descriptor.outputSchema,
     }));
     return setPaymentRequiredV2Header(
       NextResponse.json(
         { x402Version: 1, accepts: discoverable, error },
         { status },
       ),
-      resource,
+      descriptor,
       accepts,
       error,
     );
@@ -248,12 +316,28 @@ export async function handleFirstPartyPaidGet(
   resource: FirstPartyResource,
   content: PaidContent,
 ): Promise<NextResponse> {
-  return noStore(await handleFirstPartyPaidGetInner(req, resource, content));
+  // 公開シグネチャは不変 (呼び出し側の 5 route は 1 文字も変えない)。
+  // descriptor は **thunk で遅延**渡す: firstPartyPayTo() は未設定時に throw するため、
+  // 入口で評価すると「settled 再配信は payTo 設定が壊れても成功する」既存契約を破る
+  // (実際に tests/app/api/paid-first-party.test.ts が検出した)。評価点は従来と同じ
+  // paymentChallenge / paymentBody の内側に保つ。
+  return noStore(
+    await handlePaidGetWithDescriptor(
+      req,
+      firstPartyDescriptorSource(resource),
+      content,
+    ),
+  );
 }
 
-async function handleFirstPartyPaidGetInner(
+/**
+ * 有料 GET のコア。descriptor は **thunk** (評価時に throw し得る) で受け、
+ * first-party / hosted (将来) が共用する。
+ * **制御フロー・呼び出し順・応答は分割前と同一** (golden wire fixture が byte で担保)。
+ */
+async function handlePaidGetWithDescriptor(
   req: Request,
-  resource: FirstPartyResource,
+  source: PaidDescriptorSource,
   content: PaidContent,
 ): Promise<NextResponse> {
   if (!env.enableX402Facilitator) {
@@ -263,7 +347,7 @@ async function handleFirstPartyPaidGetInner(
   const paymentSignatureHeader = req.headers.get('PAYMENT-SIGNATURE');
   const paymentHeader = req.headers.get('x-payment');
   if (!paymentSignatureHeader && !paymentHeader) {
-    return paymentChallenge(resource, 'payment_required');
+    return paymentChallenge(source.resolve, 'payment_required');
   }
 
   let paymentPayload: unknown;
@@ -272,18 +356,18 @@ async function handleFirstPartyPaidGetInner(
     try {
       paymentPayload = decodePaymentSignatureHeaderValue(paymentSignatureHeader);
     } catch {
-      return paymentChallenge(resource, 'invalid_payment_payload');
+      return paymentChallenge(source.resolve, 'invalid_payment_payload');
     }
   } else {
     try {
       paymentPayload = decodePaymentHeader(paymentHeader!);
     } catch {
-      return paymentChallenge(resource, 'invalid_payment_payload');
+      return paymentChallenge(source.resolve, 'invalid_payment_payload');
     }
   }
   const redeliveryIdentity = paymentRedeliveryIdentity(paymentPayload);
   if (!redeliveryIdentity) {
-    return paymentChallenge(resource, 'invalid_payment_payload');
+    return paymentChallenge(source.resolve, 'invalid_payment_payload');
   }
 
   // 検索 API の query が違う別コンテンツまで同じ支払いで解錠される波及を断つため、
@@ -291,14 +375,14 @@ async function handleFirstPartyPaidGetInner(
   const requestUrl = new URL(req.url);
   const redeliveryBinding: PaymentRedeliveryBinding = {
     scope: 'first-party',
-    resource: `${firstPartyResourceUrl(resource)}${requestUrl.search}`,
+    resource: `${source.url}${requestUrl.search}`,
   };
   const deliveryLookup = await lookupPaymentRedelivery(
     redeliveryIdentity,
     redeliveryBinding,
   );
   if (deliveryLookup.kind === 'conflict') {
-    return paymentChallenge(resource, 'payment_invalid');
+    return paymentChallenge(source.resolve, 'payment_invalid');
   }
   const delivery =
     deliveryLookup.kind === 'match' ? deliveryLookup.record : null;
@@ -328,7 +412,7 @@ async function handleFirstPartyPaidGetInner(
         delivery.facilitatorBody,
       );
       if (!pendingDetails) {
-        return paymentChallenge(resource, 'payment_invalid');
+        return paymentChallenge(source.resolve, 'payment_invalid');
       }
       // read-only status の想定外障害を pending payment の再 settle へ波及させず、
       // 二重 broadcast を避けるため同じ 202 回復待ちへ閉じる。
@@ -351,7 +435,7 @@ async function handleFirstPartyPaidGetInner(
         settlement: recoveredSettlement,
       });
       if (promotion.kind === 'conflict') {
-        return paymentChallenge(resource, 'payment_invalid');
+        return paymentChallenge(source.resolve, 'payment_invalid');
       }
       const settlement =
         promotion.kind === 'promoted' ||
@@ -371,14 +455,14 @@ async function handleFirstPartyPaidGetInner(
       ? status
       : pendingRecoveryDetails(delivery.facilitatorBody);
     if (!pendingDetails) {
-      return paymentChallenge(resource, 'payment_invalid');
+      return paymentChallenge(source.resolve, 'payment_invalid');
     }
     return pendingRecoveryResponse(pendingDetails);
   }
 
   let prepared: PreparedPayment;
   try {
-    prepared = paymentBody(resource, paymentPayload);
+    prepared = paymentBody(source.resolve(), paymentPayload);
   } catch (e) {
     // Misconfigured requirements must not pass an unverifiable body into verify/settle.
     return NextResponse.json(
@@ -393,7 +477,7 @@ async function handleFirstPartyPaidGetInner(
   if (usesV2Header) {
     const v1Body = v2PayloadToV1Body(paymentPayload, prepared.accepts);
     if (!v1Body) {
-      return paymentChallenge(resource, 'invalid_payment_payload');
+      return paymentChallenge(source.resolve, 'invalid_payment_payload');
     }
     prepared = { ...prepared, body: { ...v1Body } };
   }
@@ -421,7 +505,7 @@ async function handleFirstPartyPaidGetInner(
         },
         { status: 402 },
       ),
-      resource,
+      prepared.descriptor,
       prepared.accepts,
       error,
     );
@@ -435,7 +519,7 @@ async function handleFirstPartyPaidGetInner(
     facilitatorBody: prepared.body,
   });
   if (claim.kind === 'conflict') {
-    return paymentChallenge(resource, 'payment_invalid');
+    return paymentChallenge(source.resolve, 'payment_invalid');
   }
   if (claim.kind === 'match' && claim.record.state === 'settled') {
     return paidContentResponse(
@@ -449,7 +533,7 @@ async function handleFirstPartyPaidGetInner(
       claim.record.facilitatorBody,
     );
     if (!pendingDetails) {
-      return paymentChallenge(resource, 'payment_invalid');
+      return paymentChallenge(source.resolve, 'payment_invalid');
     }
     // lookup miss 同士の race で先行 request が claim 済みなら、後続を再 settle へ進めず
     // 先行 broadcast の完了待ちに閉じ、二重 broadcast と gas 消費への波及を断つ。
@@ -488,7 +572,7 @@ async function handleFirstPartyPaidGetInner(
           },
           { status: 402 },
         ),
-        resource,
+        prepared.descriptor,
         prepared.accepts,
         error,
       );
@@ -503,7 +587,7 @@ async function handleFirstPartyPaidGetInner(
     settlement: successfulSettlement,
   });
   if (promotion.kind === 'conflict') {
-    return paymentChallenge(resource, 'payment_invalid');
+    return paymentChallenge(source.resolve, 'payment_invalid');
   }
   const deliveredSettlement =
     promotion.kind === 'promoted' ||
