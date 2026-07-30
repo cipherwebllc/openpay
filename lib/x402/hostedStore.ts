@@ -662,3 +662,33 @@ export async function sellerDisclosureComplete(
   return d !== null;
 }
 
+/**
+ * 購入時点の表示メタ snapshot。content 本文は含めず、不変 revision の参照だけを
+ * PurchaseIntent / ownership 側に保存する (creator-store v4 契約 C/G)。
+ */
+export type HostedPurchaseMetadata = Pick<
+  HostedProduct,
+  | 'owner'
+  | 'payTo'
+  | 'title'
+  | 'desc'
+  | 'emoji'
+  | 'priceJpyc'
+  | 'contentKind'
+  | 'label'
+>;
+
+export function hostedPurchaseMetadata(
+  product: HostedProduct,
+): HostedPurchaseMetadata {
+  return {
+    owner: product.owner,
+    payTo: product.payTo,
+    title: product.title,
+    ...(product.desc === undefined ? {} : { desc: product.desc }),
+    ...(product.emoji === undefined ? {} : { emoji: product.emoji }),
+    priceJpyc: product.priceJpyc,
+    contentKind: product.contentKind,
+    label: product.label,
+  };
+}
