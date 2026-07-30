@@ -1,7 +1,21 @@
-import { describe, expect, it } from 'vitest';
-import { screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { screen, waitFor } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import { CreatorStorefrontSection } from '@/components/CreatorStorefrontSection';
+
+const { purchaseFlowSpy } = vi.hoisted(() => ({
+  purchaseFlowSpy: vi.fn(),
+}));
+
+vi.mock('@/components/CreatorStorePurchaseFlow', () => ({
+  CreatorStorePurchaseFlow: (props: {
+    open: boolean;
+    product: { id: string };
+  }) => {
+    purchaseFlowSpy(props);
+    return props.open ? <div role="dialog">購入フロー</div> : null;
+  },
+}));
 
 const PRODUCT = {
   id: `h_${'a'.repeat(32)}`,
@@ -15,6 +29,10 @@ const PRODUCT = {
 };
 
 describe('CreatorStorefrontSection', () => {
+  beforeEach(() => {
+    purchaseFlowSpy.mockClear();
+  });
+
   it('販売中の商品カードと有効な購入ボタンを描画する', () => {
     renderWithIntl(
       <CreatorStorefrontSection
@@ -72,5 +90,36 @@ describe('CreatorStorefrontSection', () => {
     );
     expect(screen.getByRole('button', { name: 'Purchase' })).toBeEnabled();
     expect(screen.getByText('Prompt')).toBeInTheDocument();
+  });
+
+  it('autoOpenProductId が一致する商品の購入フローだけを開く', async () => {
+    const secondProduct = {
+      ...PRODUCT,
+      id: `h_${'b'.repeat(32)}`,
+      title: '第2の商品',
+    };
+    renderWithIntl(
+      <CreatorStorefrontSection
+        products={[PRODUCT, secondProduct]}
+        accent="#2563eb"
+        theme="clean"
+        sellerDisclosureHref="/ja/store/seller/0x1234"
+        autoOpenProductId={secondProduct.id}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(purchaseFlowSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          open: true,
+          product: expect.objectContaining({ id: secondProduct.id }),
+        }),
+      );
+    });
+    expect(purchaseFlowSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        product: expect.objectContaining({ id: PRODUCT.id }),
+      }),
+    );
   });
 });

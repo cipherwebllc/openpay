@@ -1,8 +1,9 @@
 // @handle プロフィールページの動的 OG 画像 (1200x630)。SNS に open-pay.jp/@alice を
 // 貼ったとき、アバター・名前・@handle・bio・受取トークンのカードが表示される。
 //
-// パラメータは handle 名のみ受け、内容 (名前/色/bio/アバター) は **KV レコードから
-// サーバ権威的に解決**する — query で任意文言/任意画像のブランドカードを偽造させない。
+// パラメータは handle 名と任意の商品 ID のみ受け、内容 (名前/色/bio/アバター/商品名/
+// 価格/絵文字) は **KV レコードからサーバ権威的に解決**する — query で任意文言/任意画像の
+// ブランドカードを偽造させない。
 // アバターは保存時に https 検証済みの URL を route が取得して data URL 化する
 // (satori の外部 fetch 失敗でカード全体が壊れるのを防ぐ + サイズ/種別/ホストを検査)。
 
@@ -17,11 +18,16 @@ import {
 import { resolveHandle } from '@/lib/handleStore';
 import { readBodyCapped } from '@/lib/httpBodyCap';
 import { fetchSsrfSafe } from '@/lib/x402/moderation';
+import {
+  isHostedId,
+  listAvailableHostedForOwner,
+} from '@/lib/x402/hostedStore';
 import { displaySymbolFor } from '@/lib/tokens';
 import {
   buildTipOgModel,
   tipModelToCard,
   buildHandleOgModel,
+  buildProductOgModel,
   buildStorefrontOgModel,
   type TipOgLocale,
 } from '@/lib/ogTipCard';
@@ -135,6 +141,45 @@ export async function GET(req: Request): Promise<ImageResponse> {
           'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
       },
     });
+  }
+
+  // creator-store の商品 deep link。query からは ID だけを受け、表示文言/価格/絵文字は
+  // handle owner の販売可能商品 snapshot からサーバ権威で解決する。storefront 公開時は
+  // 上の店舗カードを最優先し、商品 query は無視する (モバイルオーダー経路を不変に保つ)。
+  const productId = searchParams.get('product');
+  if (
+    env.enableCreatorStoreUi &&
+    env.enableCreatorStore &&
+    productId &&
+    isHostedId(productId)
+  ) {
+    const products = await listAvailableHostedForOwner(record.owner);
+    const product = products?.find(
+      (candidate) =>
+        candidate.id === productId &&
+        candidate.saleActive &&
+        candidate.contentAvailable,
+    );
+    if (product) {
+      const productCard = buildProductOgModel({
+        handle,
+        name: record.config.name,
+        color: record.config.color,
+        title: product.title,
+        ...(product.emoji ? { emoji: product.emoji } : {}),
+        priceJpyc: product.priceJpyc,
+        locale,
+      });
+      return new ImageResponse(ogCardElement(productCard), {
+        width: OG_WIDTH,
+        height: OG_HEIGHT,
+        fonts: OG_FONTS,
+        headers: {
+          'cache-control':
+            'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
+        },
+      });
+    }
   }
 
   const card = buildHandleOgModel({

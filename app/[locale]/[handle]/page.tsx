@@ -38,6 +38,7 @@ import {
   buildTipMeta,
   buildStorefrontMeta,
   buildHandleOgImageUrl,
+  buildProductOgImageUrl,
   tokenLabelFor,
   type TipCardFacts,
   type TipOgLocale,
@@ -49,16 +50,23 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// generateMetadata と本体が同一リクエストで同じ handle を解決するため、React の cache() で
-// リクエスト単位にメモ化し KV への重複 REST I/O を1回に潰す (結果の不整合も防ぐ)。
+// generateMetadata と本体が同一リクエストで同じ handle / 商品一覧を解決するため、React の
+// cache() でリクエスト単位にメモ化し KV への重複 REST I/O を1回に潰す
+// (結果の不整合も防ぐ)。引数は primitive に限定し、両呼出しで同じ owner 文字列を渡す。
 const resolveHandleCached = cache(resolveHandle);
+const listAvailableHostedForOwnerCached = cache(listAvailableHostedForOwner);
 
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string; handle: string }>;
+  searchParams?: Promise<RouteSearch>;
 }): Promise<Metadata> {
-  const { locale, handle: rawSegment } = await params;
+  const [{ locale, handle: rawSegment }, rawSearch] = await Promise.all([
+    params,
+    searchParams ?? Promise.resolve({}),
+  ]);
   const segment = decodeHandleSegment(rawSegment);
   const ogLocale: TipOgLocale = locale === 'en' ? 'en' : 'ja';
   if (!env.enableHandles || !segment.startsWith('@')) {
@@ -76,22 +84,61 @@ export async function generateMetadata({
   // OGP 画像 (/api/og/handle) は同じ KV レコードから storefront を検出し、店舗カード or
   // プロフカードを描き分ける (URL は共通なのでここでは渡し分け不要)。
   const ogImage = buildHandleOgImageUrl(normalized, ogLocale);
-  const toMeta = (title: string, description: string): Metadata => ({
+  const toMeta = (
+    title: string,
+    description: string,
+    image: string = ogImage,
+  ): Metadata => ({
     title,
     description,
     openGraph: {
       title,
       description,
       type: 'website',
-      images: [{ url: ogImage, width: 1200, height: 630, alt: title }],
+      images: [{ url: image, width: 1200, height: 630, alt: title }],
     },
-    twitter: { card: 'summary_large_image', title, description, images: [ogImage] },
+    twitter: { card: 'summary_large_image', title, description, images: [image] },
   });
 
   // storefront 公開時はモバイルオーダー訴求の meta にする (プロフ link-in-bio ではなく)。
   const storefront = env.enableMobileOrder
     ? handleStorefrontConfig(record, normalized)
     : null;
+
+  // creator-store の商品 URL だけ商品 meta にする。product は untrusted なので、両 flag ON・
+  // link-in-bio 経路かつ KV 権威の販売可能 snapshot に同じ id がある場合だけ採用する。
+  // storefront 公開時や不一致 / storage 障害は既存 meta へ完全にフォールバックする。
+  const productId = searchParamsFromNext(rawSearch).get('product');
+  if (
+    !storefront &&
+    env.enableCreatorStoreUi &&
+    env.enableCreatorStore &&
+    productId
+  ) {
+    const products = await listAvailableHostedForOwnerCached(record.owner);
+    const product = products?.find((candidate) => candidate.id === productId);
+    if (product) {
+      const sellerName = c.name?.trim() || `@${normalized}`;
+      const title = `${product.title} — ${sellerName}`;
+      const productDescription = product.desc?.trim();
+      const descriptionBase =
+        productDescription ||
+        (
+          await getTranslations({
+            locale: ogLocale,
+            namespace: 'CreatorStorefront',
+          })
+        )('productMetaFallback');
+      const description = `${descriptionBase} ${product.priceJpyc} JPYC (Polygon)`;
+      const productImage = buildProductOgImageUrl(
+        normalized,
+        ogLocale,
+        product.id,
+      );
+      return toMeta(title, description, productImage);
+    }
+  }
+
   if (storefront) {
     const meta = buildStorefrontMeta(
       { handle: normalized, shopName: storefront.shopName, tagline: storefront.tagline },
@@ -128,7 +175,10 @@ export default async function HandlePage({
   searchParams: Promise<RouteSearch>;
 }) {
   if (!env.enableHandles) notFound();
-  const { locale, handle: rawSegment } = await params;
+  const [{ locale, handle: rawSegment }, rawSearch] = await Promise.all([
+    params,
+    searchParams,
+  ]);
   // Next.js は dynamic param を自動デコードしないため `@` が `%40` で届く。先にデコードする。
   const segment = decodeHandleSegment(rawSegment);
   if (!hasLocale(LOCALES, locale)) notFound();
@@ -136,6 +186,7 @@ export default async function HandlePage({
   if (!segment.startsWith('@')) notFound();
 
   const normalized = normalizeHandle(segment);
+  const routeSearch = searchParamsFromNext(rawSearch);
   const resolved = await resolveHandleCached(normalized);
   // KV 未設定/outage は誤って「存在しない (404)」と返さず 5xx に倒す (transient と gone を区別)。
   if (!resolved.ok) throw new Error('handle_store_unavailable');
@@ -169,7 +220,7 @@ export default async function HandlePage({
       ? readShopLive(normalized)
       : Promise.resolve(undefined),
     !storefront && env.enableCreatorStoreUi && env.enableCreatorStore
-      ? listAvailableHostedForOwner(record.owner)
+      ? listAvailableHostedForOwnerCached(record.owner)
       : Promise.resolve([]),
   ]);
   // 商品メタの障害をプロフィール/チップ本体へ波及させないため、null は商品節だけ省略する。
@@ -187,12 +238,21 @@ export default async function HandlePage({
       label: product.label,
     }),
   );
+  const requestedProductId =
+    !storefront && env.enableCreatorStoreUi && env.enableCreatorStore
+      ? routeSearch.get('product')
+      : null;
+  const autoOpenProductId =
+    requestedProductId &&
+    creatorProducts.some((product) => product.id === requestedProductId)
+      ? requestedProductId
+      : undefined;
   // インバウンド・エージェント注文 (plans/inbound-agent-order.md §2): 旅行者の AI が組んだ注文を
   // `?cart=<base64url>` で受け、MobileOrderView に事前充填する。**self-contained ?s= トークンは使わず
   // @handle 経路に限定** (受取先・価格は KV 権威の handle レコードから再解決 = receiver スプーフィング
   // 不成立・C1)。cart は untrusted ゆえ decodeAgentCart が全項目検証し不正は null (= 事前充填なし)。
   // menu との突合・グレース劣化・改ざん無害化は MobileOrderView (resolvePrefillCart) が担う。
-  const cartParam = storefront ? searchParamsFromNext(await searchParams).get('cart') : null;
+  const cartParam = storefront ? routeSearch.get('cart') : null;
   const initialCart = cartParam ? decodeAgentCart(cartParam) : null;
   // SEO/AIEO (S2): 公開プロフィールを ProfilePage.mainEntity=Person で機械可読化。
   // gate はページ描画と同じ計算済み値 (!storefront && hasProfile) — 可視内容と構造化データを
@@ -296,6 +356,7 @@ export default async function HandlePage({
               accent={accent}
               theme={theme}
               sellerDisclosureHref={`/${locale}/store/seller/${record.owner}`}
+              autoOpenProductId={autoOpenProductId}
             />
           ) : null}
           {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。

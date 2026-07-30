@@ -420,6 +420,69 @@ export function buildHandleOgImageUrl(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// クリエイター・デジタル商品カード。
+// 商品 deep link を SNS に貼ったとき、商品名/価格/出品者を KV 権威の事実から描く。
+// ─────────────────────────────────────────────────────────────────────────────
+
+const OG_PRODUCT_TITLE_DISPLAY_MAX = 30;
+
+export interface ProductOgInput {
+  handle: string; // normalize 済み ('alice')
+  name?: string;
+  color?: string;
+  title: string;
+  emoji?: string;
+  priceJpyc: string;
+  locale: TipOgLocale;
+}
+
+/** 販売可能な hosted 商品の OG カード描画モデル (純関数・単体テスト対象)。 */
+export function buildProductOgModel(input: ProductOgInput): OgCardModel {
+  const ja = input.locale === 'ja';
+  const titleClean = stripControlChars(input.title).trim();
+  const heading =
+    titleClean.length > 0
+      ? truncateGraphemes(titleClean, OG_PRODUCT_TITLE_DISPLAY_MAX)
+      : ja
+        ? 'デジタル商品'
+        : 'Digital product';
+  const name = displayName(input.name);
+  const emojiClean = input.emoji
+    ? stripControlChars(input.emoji).trim()
+    : '';
+  const price = new Intl.NumberFormat(input.locale).format(
+    Number(input.priceJpyc),
+  );
+  const color =
+    input.color && COLOR_PATTERN.test(input.color)
+      ? input.color
+      : OG_DEFAULT_COLOR;
+  return {
+    accent: color,
+    heading,
+    handleLine: name ? `${name} · @${input.handle}` : `@${input.handle}`,
+    chips: [`${price} JPYC · Polygon`],
+    initial: emojiClean || '✦',
+    footer: ja ? 'デジタル商品を購入' : 'Buy this digital product',
+    url: 'open-pay.jp',
+    brand: 'OpenPay',
+  };
+}
+
+/** 商品 deep link の generateMetadata 用 og:image 相対パス。 */
+export function buildProductOgImageUrl(
+  handle: string,
+  locale: TipOgLocale,
+  productId: string,
+): string {
+  const q = new URLSearchParams();
+  q.set('h', handle);
+  q.set('locale', locale);
+  q.set('product', productId);
+  return `/api/og/handle?${q.toString()}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // モバイルオーダー店舗カード (storefront 公開 @handle 用)。
 // 店舗ページ (open-pay.jp/@shop) を SNS に貼ったとき、link-in-bio のプロフカードではなく
 // 「スマホでメニューを見て JPYC で注文」を訴求する店舗カードを出す。page.tsx の

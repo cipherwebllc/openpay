@@ -960,6 +960,8 @@
     "saleActive": "On sale",
     "saleInactive": "Sales paused",
     "editProduct": "Edit",
+    "copyShareLink": "Copy share link",
+    "shareLinkCopied": "Copied",
     "sellerRequiredForSale": "Register the seller information above before starting sales.",
     "newProductHeading": "New product",
     "editProductHeading": "Edit product",
@@ -1006,6 +1008,7 @@
     "heading": "On sale",
     "subheading": "Digital products from this creator",
     "purchase": "Purchase",
+    "productMetaFallback": "Buy this digital product on OpenPay.",
     "labels": {
       "download": "Download",
       "pdf": "PDF",

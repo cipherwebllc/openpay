@@ -4,13 +4,14 @@
 // 販売開始に必須の販売者情報を同じ場所で管理する。商品本文は一覧 API へ載せず、編集時だけ
 // owner 限定 detail API から取得する。保存後は server の値を再取得し、楽観更新しない。
 
-import { useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useEffect, useState } from 'react';
+import { useLocale, useTranslations } from 'next-intl';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { PackageOpen, Pencil, Store } from 'lucide-react';
+import { Copy, PackageOpen, Pencil, Store } from 'lucide-react';
 import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
+import { useOrigin } from '@/hooks/useOrigin';
 
 type HostedLabel =
   | 'download'
@@ -172,12 +173,89 @@ function sellerFormOf(seller: SellerDisclosure | null): SellerForm {
     : EMPTY_SELLER_FORM;
 }
 
-export function CreatorStoreSellerPanel() {
-  if (!env.enableCreatorStoreUi) return null;
-  return <EnabledCreatorStoreSellerPanel />;
+function copyWithLegacySelection(value: string): boolean {
+  if (typeof document.execCommand !== 'function') return false;
+  const previousFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  try {
+    textarea.focus();
+    textarea.select();
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+    previousFocus?.focus();
+  }
 }
 
-function EnabledCreatorStoreSellerPanel() {
+async function copyProductLink(value: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return true;
+    } catch {
+      // Clipboard の許可拒否が共有導線全体へ波及しないよう、旧ブラウザ用の選択コピーへ退避する。
+    }
+  }
+  return copyWithLegacySelection(value);
+}
+
+function ProductShareButton({
+  url,
+  copyLabel,
+  copiedLabel,
+}: {
+  url: string;
+  copyLabel: string;
+  copiedLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timeout = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timeout);
+  }, [copied]);
+
+  const copy = async () => {
+    if (await copyProductLink(url)) setCopied(true);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
+    >
+      <Copy className="h-3.5 w-3.5" aria-hidden />
+      {copied ? copiedLabel : copyLabel}
+    </button>
+  );
+}
+
+export function CreatorStoreSellerPanel({
+  handle = null,
+}: {
+  handle?: string | null;
+}) {
+  if (!env.enableCreatorStoreUi) return null;
+  return <EnabledCreatorStoreSellerPanel handle={handle} />;
+}
+
+function EnabledCreatorStoreSellerPanel({
+  handle,
+}: {
+  handle: string | null;
+}) {
   const t = useTranslations('CreatorStoreSeller');
   const {
     isSignedIn,
@@ -233,14 +311,23 @@ function EnabledCreatorStoreSellerPanel() {
         <SignedInSellerPanel
           key={sessionAddress.toLowerCase()}
           sessionAddress={sessionAddress}
+          handle={handle}
         />
       )}
     </section>
   );
 }
 
-function SignedInSellerPanel({ sessionAddress }: { sessionAddress: string }) {
+function SignedInSellerPanel({
+  sessionAddress,
+  handle,
+}: {
+  sessionAddress: string;
+  handle: string | null;
+}) {
   const t = useTranslations('CreatorStoreSeller');
+  const locale = useLocale();
+  const origin = useOrigin();
   const [sellerDraft, setSellerDraft] = useState<SellerForm | null>(null);
   const [sellerSaved, setSellerSaved] = useState(false);
   const [productForm, setProductForm] = useState<ProductForm>(
@@ -281,6 +368,8 @@ function SignedInSellerPanel({ sessionAddress }: { sessionAddress: string }) {
   const products = productsQuery.data?.products ?? [];
   const maxProducts = productsQuery.data?.max ?? 12;
   const atLimit = products.length >= maxProducts;
+  const productShareBaseUrl =
+    handle && origin ? `${origin}/${locale}/@${handle}` : null;
 
   const updateSeller = (patch: Partial<SellerForm>) => {
     setSellerSaved(false);
@@ -666,6 +755,15 @@ function SignedInSellerPanel({ sessionAddress }: { sessionAddress: string }) {
                       <Pencil className="h-3.5 w-3.5" aria-hidden />
                       {t('editProduct')}
                     </button>
+                    {product.saleActive &&
+                    product.contentAvailable &&
+                    productShareBaseUrl ? (
+                      <ProductShareButton
+                        url={`${productShareBaseUrl}?product=${encodeURIComponent(product.id)}`}
+                        copyLabel={t('copyShareLink')}
+                        copiedLabel={t('shareLinkCopied')}
+                      />
+                    ) : null}
                   </div>
                   {cannotStart && !sellerComplete ? (
                     <p className="mt-2 text-xs leading-relaxed text-amber-700">

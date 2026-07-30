@@ -34,8 +34,13 @@ const CreatorStoreSellerPanel = dynamic(() =>
 
 export default function CreatePage() {
   const [tab, setTab] = useState<Tab>('qr');
+  const [publishedHandle, setPublishedHandle] = useState<string | null>(null);
   const t = useTranslations('Create');
   const locale = useLocale() as Locale;
+  const changeTab = (nextTab: Tab) => {
+    setTab(nextTab);
+    if (nextTab !== 'profile') setPublishedHandle(null);
+  };
 
   // `/create?tab=mobileOrder` 等の deep-link で初期タブを切替える (LP のバナー CTA 用)。
   // useSearchParams は Suspense 必須化を招くため使わず、マウント後に window から1回だけ読む
@@ -87,7 +92,7 @@ export default function CreatePage() {
           <button
             key={id}
             type="button"
-            onClick={() => setTab(id)}
+            onClick={() => changeTab(id)}
             className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-sm transition-all duration-200 ${
               tab === id
                 ? 'bg-white font-semibold text-brand-dark shadow-card ring-1 ring-slate-200/60'
@@ -110,7 +115,7 @@ export default function CreatePage() {
       {tab === 'register' && (
         <div className="space-y-5">
           <TodayCard />
-          <RegisterMode onEditCurrency={() => setTab('qr')} />
+          <RegisterMode onEditCurrency={() => changeTab('qr')} />
         </div>
       )}
       {tab === 'tip' && (
@@ -129,8 +134,10 @@ export default function CreatePage() {
       {tab === 'profile' && env.enableHandles && (
         env.enableCreatorStoreUi ? (
           <div className="space-y-6">
-            <HandleProfileBuilder />
-            <CreatorStoreSellerPanel />
+            <HandleProfileBuilder
+              onPublishedHandleChange={setPublishedHandle}
+            />
+            <CreatorStoreSellerPanel handle={publishedHandle} />
           </div>
         ) : (
           <HandleProfileBuilder />
@@ -138,8 +145,8 @@ export default function CreatePage() {
       )}
       {tab === 'mobileOrder' && env.enableMobileOrder && (
         <MobileOrderBuilder
-          onManageProducts={() => setTab('register')}
-          onGetHandle={() => setTab('profile')}
+          onManageProducts={() => changeTab('register')}
+          onGetHandle={() => changeTab('profile')}
         />
       )}
       {tab === 'orders' && (env.enableOrderRelay || env.enableShopLive) && <OrderFeedPanel />}
