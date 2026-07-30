@@ -36,6 +36,7 @@ import {
 } from '@/lib/x402/receipt';
 import { recordSettlement } from '@/lib/x402/registry';
 import { consumeFacilitatorPayment } from '@/lib/x402/facilitatorReservation';
+import { checkHostedIntentSettleAdmission } from '@/lib/x402/purchaseSettleGate';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -156,6 +157,27 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (reservation.status === 'invalid') {
     return NextResponse.json(
       { success: false, errorReason: 'reservation_invalid', network, payer },
+      { status: 409 },
+    );
+  }
+
+  // creator-store hosted intent の署名は、hosted paid route の settling CAS を経た本人
+  // broadcast だけをこの汎用入口から通す (v4 契約 A・store intent 不在の salt は素通し)。
+  // 迂回を fail-open で通すと CAS 全体が無意味になるため、KV 障害/破損は 503。
+  const hostedAdmission = await checkHostedIntentSettleAdmission({
+    params,
+    chainId,
+    signature,
+  });
+  if (hostedAdmission === 'storage') {
+    return NextResponse.json(
+      { success: false, errorReason: 'storage_unavailable', network, payer },
+      { status: 503 },
+    );
+  }
+  if (hostedAdmission === 'denied') {
+    return NextResponse.json(
+      { success: false, errorReason: 'hosted_intent_required', network, payer },
       { status: 409 },
     );
   }

@@ -48,6 +48,8 @@ vi.mock('@/lib/env', () => ({
 
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => true,
+  // settle 入口の hosted intent gate (purchaseSettleGate) が読む。null = hosted intent 不在 = 素通し。
+  kvGet: vi.fn(async () => ({ ok: true, value: null })),
 }));
 
 vi.mock('@/lib/logger', () => ({

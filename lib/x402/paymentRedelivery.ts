@@ -318,6 +318,19 @@ export function paymentRedeliveryIdentity(
   };
 }
 
+/**
+ * 生署名から credential と同一の導出 (正規化→sha256) を行う。x402 payload を持たない
+ * settle 入口 (relay recover 等) が、hosted PurchaseIntent の claim.signatureFingerprint と
+ * 同じ土俵で照合するために使う。導出式を 2 箇所に複製しないための単一ソース。
+ */
+export function paymentSignatureFingerprint(
+  signature: unknown,
+): string | null {
+  const normalized = normalizeSignature(signature);
+  if (normalized === null) return null;
+  return createHash('sha256').update(normalized).digest('hex');
+}
+
 function parseSettlement(value: unknown): PaymentSettlement | null {
   if (!isRecord(value) || value.success !== true) return null;
   if (
