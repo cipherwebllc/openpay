@@ -990,7 +990,17 @@
       "prompt": "プロンプト",
       "api": "API",
       "external": "外部リンク"
-    }
+    },
+    "detailPayToFeeReceiver": "受け取り先にこのウォレットは使えません (OpenPay の手数料受取アドレスと同一のため)。別のウォレットでログインしてください。",
+    "detailPayToForwarder": "受け取り先にこのアドレスは使えません (決済コントラクトのアドレスのため)。",
+    "detailInvalidTitle": "商品名は 1〜60 文字で入力してください。",
+    "detailInvalidDesc": "説明は 200 文字以内で入力してください。",
+    "detailInvalidPrice": "価格は 1〜1,000,000 の整数 (JPYC) で入力してください (小数・カンマは使えません)。",
+    "detailInvalidUrl": "URL は https:// で始まる 512 文字以内のアドレスを入力してください。",
+    "detailInvalidText": "本文テキストは 1〜20,000 文字で入力してください。",
+    "detailInvalidSellerName": "販売者名を入力してください。",
+    "detailInvalidSellerContact": "連絡先を入力してください。",
+    "detailInvalidDisclosure": "法定事項の記載は 1,000 文字以内で入力してください。"
   },
   "CreatorStorefront": {
     "heading": "販売中",

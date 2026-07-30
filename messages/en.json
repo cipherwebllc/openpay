@@ -990,7 +990,17 @@
       "prompt": "Prompt",
       "api": "API",
       "external": "External link"
-    }
+    },
+    "detailPayToFeeReceiver": "This wallet can't receive sales (it matches the OpenPay fee-receiver address). Please sign in with a different wallet.",
+    "detailPayToForwarder": "This address can't receive sales (it is the payment contract address).",
+    "detailInvalidTitle": "Product title must be 1–60 characters.",
+    "detailInvalidDesc": "Description must be at most 200 characters.",
+    "detailInvalidPrice": "Price must be a whole number of JPYC between 1 and 1,000,000 (no decimals or commas).",
+    "detailInvalidUrl": "URL must start with https:// and be at most 512 characters.",
+    "detailInvalidText": "Text content must be 1–20,000 characters.",
+    "detailInvalidSellerName": "Please enter the seller name.",
+    "detailInvalidSellerContact": "Please enter contact information.",
+    "detailInvalidDisclosure": "Legal notes must be at most 1,000 characters."
   },
   "CreatorStorefront": {
     "heading": "On sale",

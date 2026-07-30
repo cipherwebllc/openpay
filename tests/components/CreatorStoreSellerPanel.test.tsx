@@ -203,6 +203,55 @@ describe('CreatorStoreSellerPanel', () => {
     ).toBeDisabled();
   });
 
+  it('invalid_product の detail を具体的な理由メッセージで表示する (2026-07-30 本番実害)', async () => {
+    const fetchMock = vi.fn(
+      async (url: string, init?: RequestInit): Promise<Response> => {
+        if (url === '/api/store/seller') {
+          return response({
+            ok: true,
+            seller: {
+              name: '山田',
+              contact: 'seller@example.com',
+              updatedAt: 1,
+            },
+          });
+        }
+        if (url === '/api/store/products' && init?.method === 'POST') {
+          return response(
+            {
+              ok: false,
+              error: 'invalid_product',
+              detail: 'payTo must not be the fee receiver',
+            },
+            400,
+          );
+        }
+        if (url === '/api/store/products') {
+          return response({ ok: true, products: [], max: 12 });
+        }
+        return response({ ok: false, error: 'not_found' }, 404);
+      },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPanel();
+    await screen.findByText(/商品はまだありません/);
+    fireEvent.change(screen.getByRole('textbox', { name: '商品名' }), {
+      target: { value: 'テスト商品' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: '価格 (JPYC)' }), {
+      target: { value: '100' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: '提供する URL' }), {
+      target: { value: 'https://example.com/x' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '商品を登録' }));
+
+    // 生 code (invalid_product) ではなく、何を直せばよいか分かる文言を出す。
+    await screen.findByText(/受け取り先にこのウォレットは使えません/);
+    expect(screen.queryByText(/invalid_product/)).not.toBeInTheDocument();
+  });
+
   it('商品作成は POST 完了後も楽観追加せず、一覧 GET の再取得結果を表示する', async () => {
     let created = false;
     let resolvePost: ((value: Response) => void) | undefined;

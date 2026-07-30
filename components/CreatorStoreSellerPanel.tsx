@@ -112,6 +112,7 @@ class StoreRequestError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
+    readonly detail?: string,
   ) {
     super(code);
     this.name = 'StoreRequestError';
@@ -120,6 +121,29 @@ class StoreRequestError extends Error {
 
 function errorCode(error: unknown): string {
   return error instanceof StoreRequestError ? error.code : 'request_failed';
+}
+
+// parseHostedInput / parseSellerDisclosureInput の detail (安定した英語句) を i18n key へ
+// 対応付ける。未知 detail は requestError の code 表示に落とす — 本番実害 (2026-07-30):
+// detail を捨てて invalid_product だけ出すと、出品者は何を直せばよいか分からない。
+const DETAIL_MESSAGE_KEYS: Record<string, string> = {
+  'payTo must not be the fee receiver': 'detailPayToFeeReceiver',
+  'payTo must not be the forwarder': 'detailPayToForwarder',
+  'invalid title': 'detailInvalidTitle',
+  'invalid desc': 'detailInvalidDesc',
+  'invalid price': 'detailInvalidPrice',
+  'price out of range': 'detailInvalidPrice',
+  'content url must be https': 'detailInvalidUrl',
+  'invalid content text': 'detailInvalidText',
+  'invalid name': 'detailInvalidSellerName',
+  'invalid contact': 'detailInvalidSellerContact',
+  'invalid disclosure': 'detailInvalidDisclosure',
+  'disclosure too long': 'detailInvalidDisclosure',
+};
+
+function errorDetailKey(error: unknown): string | null {
+  if (!(error instanceof StoreRequestError) || !error.detail) return null;
+  return DETAIL_MESSAGE_KEYS[error.detail] ?? null;
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -132,6 +156,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
     throw new StoreRequestError(
       response.status,
       typeof body?.error === 'string' ? body.error : `http_${response.status}`,
+      typeof body?.detail === 'string' ? body.detail : undefined,
     );
   }
   return body as unknown as T;
@@ -515,9 +540,14 @@ function SignedInSellerPanel({ sessionAddress }: { sessionAddress: string }) {
             ) : null}
             {saveSeller.isError ? (
               <p className="text-sm text-red-600">
-                {t('requestError', {
-                  error: errorCode(saveSeller.error),
-                })}
+                {(() => {
+                  const detailKey = errorDetailKey(saveSeller.error);
+                  return detailKey
+                    ? t(detailKey)
+                    : t('requestError', {
+                        error: errorCode(saveSeller.error),
+                      });
+                })()}
               </p>
             ) : null}
           </div>
@@ -891,9 +921,13 @@ function SignedInSellerPanel({ sessionAddress }: { sessionAddress: string }) {
           </div>
           {loadProduct.isError || saveProduct.isError ? (
             <p className="text-sm text-red-600 sm:col-span-2">
-              {t('requestError', {
-                error: errorCode(loadProduct.error ?? saveProduct.error),
-              })}
+              {(() => {
+                const cause = loadProduct.error ?? saveProduct.error;
+                const detailKey = errorDetailKey(cause);
+                return detailKey
+                  ? t(detailKey)
+                  : t('requestError', { error: errorCode(cause) });
+              })()}
             </p>
           ) : null}
         </form>
