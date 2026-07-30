@@ -335,3 +335,49 @@ describe('KV 読込の untrusted 検証', () => {
     ).toBe(false);
   });
 });
+
+describe('出品者の販売者情報 (特商法対応)', () => {
+  it('name/contact 必須・上限・disclosure の任意記載', async () => {
+    const { parseSellerDisclosureInput } = await mod();
+    expect(parseSellerDisclosureInput({ name: '', contact: 'a@b.c' }).ok).toBe(false);
+    expect(parseSellerDisclosureInput({ name: '山田太郎', contact: '' }).ok).toBe(false);
+    expect(
+      parseSellerDisclosureInput({ name: 'x'.repeat(61), contact: 'a@b.c' }).ok,
+    ).toBe(false);
+    const ok = parseSellerDisclosureInput({
+      name: '山田太郎',
+      contact: 'seller@example.com',
+      disclosure: '住所: 東京都…\n電話: 03-xxxx-xxxx',
+    });
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.value.disclosure).toContain('住所');
+      // 改行は保持される (法定事項の列挙に必要)
+      expect(ok.value.disclosure).toContain('\n');
+    }
+    expect(
+      parseSellerDisclosureInput({
+        name: 'a',
+        contact: 'a@b.c',
+        disclosure: 'x'.repeat(1001),
+      }).ok,
+    ).toBe(false);
+  });
+
+  it('put→get round-trip・未登録は null・KV 障害は storage (黙って許可しない)', async () => {
+    const m = await mod();
+    expect(await m.sellerDisclosureComplete(OWNER)).toBe(false);
+    expect(
+      await m.putSellerDisclosure(
+        OWNER,
+        { name: '山田太郎', contact: 'seller@example.com' },
+        123,
+      ),
+    ).toBe(true);
+    const got = await m.getSellerDisclosure(OWNER);
+    expect(got !== 'storage' && got !== null && got.name).toBe('山田太郎');
+    expect(await m.sellerDisclosureComplete(OWNER)).toBe(true);
+    kvMocks.fail = true;
+    expect(await m.sellerDisclosureComplete(OWNER)).toBe('storage');
+  });
+});

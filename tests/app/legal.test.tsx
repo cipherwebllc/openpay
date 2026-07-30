@@ -615,11 +615,11 @@ describe('Legal pages', () => {
       //   常に負担しお客様は表示額のみ (per-QR トグル撤去)、チップ (/tip・@handle) はガス相当額
       //   (約 2 JPYC・1% 非適用) をチッパーが負担。料金性質に直接関わる Terms/Disclaimer/特商法 を
       //   改定 (実質的改定のため施行日/最終更新日を更新)。Privacy は料金モデルに直接言及しないため据置。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-07-14');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-06-13');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-07-30');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-07-30');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-13');
       // 2026-07-29: 非公開チップメッセージ追記 (取得/目的/保管) の実質的改定で更新
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-07-29');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-07-30');
     });
   });
 
