@@ -6,7 +6,11 @@ import { MAX_PROFILE_LINKS } from '@/lib/handle';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const ADDR2 = '0x000000000000000000000000000000000000dead';
-const h = vi.hoisted(() => ({ enableHandles: true, enableJpycAvalanche: false }));
+const h = vi.hoisted(() => ({
+  enableHandles: true,
+  enableJpycAvalanche: false,
+  connectedAddress: undefined as string | undefined,
+}));
 
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -23,7 +27,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
     },
   };
 });
-vi.mock('wagmi', () => ({ useAccount: () => ({ address: undefined }) }));
+vi.mock('wagmi', () => ({
+  useAccount: () => ({ address: h.connectedAddress }),
+}));
 // AddressInput: 入力時に onResolved を ADDR で発火する軽量スタブ。
 vi.mock('@/components/AddressInput', () => ({
   AddressInput: ({
@@ -146,6 +152,7 @@ import { HandleProfileBuilder } from '@/components/HandleProfileBuilder';
 beforeEach(() => {
   h.enableHandles = true;
   h.enableJpycAvalanche = false;
+  h.connectedAddress = undefined;
   localStorage.clear();
 });
 
@@ -376,6 +383,52 @@ describe('HandleProfileBuilder', () => {
     );
     expect(new URL(share.getAttribute('href')!).searchParams.get('text')).toBe(
       '@alice をシェア',
+    );
+  });
+
+  it('公開済み handle の選択と解除を親へ通知する', () => {
+    const onPublishedHandleChange = vi.fn();
+    renderWithIntl(
+      <HandleProfileBuilder
+        onPublishedHandleChange={onPublishedHandleChange}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('addr'), {
+      target: { value: ADDR },
+    });
+    fireEvent.click(screen.getByTestId('publish-mock'));
+
+    expect(onPublishedHandleChange).toHaveBeenLastCalledWith('alice');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: '編集をやめる' }),
+    );
+    expect(onPublishedHandleChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('接続 wallet が変わったら旧 owner の公開 handle を親から解除する', async () => {
+    h.connectedAddress = ADDR;
+    const onPublishedHandleChange = vi.fn();
+    const view = renderWithIntl(
+      <HandleProfileBuilder
+        onPublishedHandleChange={onPublishedHandleChange}
+      />,
+    );
+    fireEvent.change(screen.getByTestId('addr'), {
+      target: { value: ADDR },
+    });
+    fireEvent.click(screen.getByTestId('publish-mock'));
+    expect(onPublishedHandleChange).toHaveBeenLastCalledWith('alice');
+
+    h.connectedAddress = ADDR2;
+    view.rerender(
+      <HandleProfileBuilder
+        onPublishedHandleChange={onPublishedHandleChange}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(onPublishedHandleChange).toHaveBeenLastCalledWith(null),
     );
   });
 

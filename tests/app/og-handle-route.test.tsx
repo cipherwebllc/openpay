@@ -19,11 +19,16 @@ vi.mock('next/og', () => ({
 const h = vi.hoisted(() => ({
   enableHandles: true,
   enableMobileOrder: false,
+  enableCreatorStore: false,
+  enableCreatorStoreUi: false,
   record: null as unknown,
   resolveOk: true,
 }));
 const ssrf = vi.hoisted(() => ({
   fetchSafe: vi.fn(),
+}));
+const hosted = vi.hoisted(() => ({
+  listAvailableForOwner: vi.fn(),
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -37,6 +42,12 @@ vi.mock('@/lib/env', async (importOriginal) => {
       get enableMobileOrder() {
         return h.enableMobileOrder;
       },
+      get enableCreatorStore() {
+        return h.enableCreatorStore;
+      },
+      get enableCreatorStoreUi() {
+        return h.enableCreatorStoreUi;
+      },
     },
   };
 });
@@ -47,6 +58,11 @@ vi.mock('@/lib/handleStore', () => ({
 }));
 vi.mock('@/lib/x402/moderation', () => ({
   fetchSsrfSafe: ssrf.fetchSafe,
+}));
+vi.mock('@/lib/x402/hostedStore', () => ({
+  isHostedId: (value: unknown) =>
+    typeof value === 'string' && /^h_[0-9a-f]{32}$/.test(value),
+  listAvailableHostedForOwner: hosted.listAvailableForOwner,
 }));
 
 import { GET } from '@/app/api/og/handle/route';
@@ -121,6 +137,8 @@ const STORE_RECORD = {
 beforeEach(() => {
   h.enableHandles = true;
   h.enableMobileOrder = false;
+  h.enableCreatorStore = false;
+  h.enableCreatorStoreUi = false;
   h.resolveOk = true;
   h.record = RECORD;
   ssrf.fetchSafe.mockReset();
@@ -128,6 +146,8 @@ beforeEach(() => {
     if (new URL(url).hostname === 'localhost') return null;
     return fetch(url, { redirect: opts.redirect });
   });
+  hosted.listAvailableForOwner.mockReset();
+  hosted.listAvailableForOwner.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -255,6 +275,112 @@ describe('GET /api/og/handle', () => {
     h.enableHandles = true;
     const second = await callGet('h=!!&locale=ja');
     expect(collectText(second.element).join(' ')).toContain('チップを送る');
+  });
+
+  it('有効な商品 deep link は KV 権威の商品カードを描く', async () => {
+    const productId = `h_${'a'.repeat(32)}`;
+    h.enableCreatorStore = true;
+    h.enableCreatorStoreUi = true;
+    hosted.listAvailableForOwner.mockResolvedValue([
+      {
+        id: productId,
+        title: 'AI プロンプト集',
+        emoji: '🧠',
+        priceJpyc: '1200',
+        saleActive: true,
+        contentAvailable: true,
+      },
+    ]);
+
+    const { element } = await callGet(
+      `h=masia&locale=ja&product=${productId}&title=FORGED&price=999999`,
+    );
+    const text = collectText(element).join(' ');
+    expect(hosted.listAvailableForOwner).toHaveBeenCalledWith(RECORD.owner);
+    expect(text).toContain('AI プロンプト集');
+    expect(text).toContain('🧠');
+    expect(text).toContain('1,200 JPYC · Polygon');
+    expect(text).toContain('山田太郎 · @masia');
+    expect(text).not.toContain('Web3 クリエイター');
+    expect(text).not.toContain('FORGED');
+    expect(text).not.toContain('999999');
+    expect(ssrf.fetchSafe).not.toHaveBeenCalled();
+  });
+
+  it('商品不一致/販売不可/flag OFF は既存プロフカードへ fallback', async () => {
+    const productId = `h_${'b'.repeat(32)}`;
+    h.enableCreatorStore = true;
+    h.enableCreatorStoreUi = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response('x', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+      ),
+    );
+    hosted.listAvailableForOwner.mockResolvedValue([
+      {
+        id: productId,
+        title: '販売停止商品',
+        priceJpyc: '500',
+        saleActive: false,
+        contentAvailable: true,
+      },
+    ]);
+    const inactive = await callGet(
+      `h=masia&locale=ja&product=${productId}`,
+    );
+    expect(collectText(inactive.element).join(' ')).toContain('山田太郎');
+    expect(collectText(inactive.element).join(' ')).not.toContain('販売停止商品');
+
+    hosted.listAvailableForOwner.mockClear();
+    const invalid = await callGet('h=masia&locale=ja&product=not-a-hosted-id');
+    expect(collectText(invalid.element).join(' ')).toContain('Web3 クリエイター');
+    expect(hosted.listAvailableForOwner).not.toHaveBeenCalled();
+
+    h.enableCreatorStoreUi = false;
+    const flagOff = await callGet(
+      `h=masia&locale=ja&product=${productId}`,
+    );
+    expect(collectText(flagOff.element).join(' ')).toContain('JPYC で応援');
+    expect(hosted.listAvailableForOwner).not.toHaveBeenCalled();
+  });
+
+  it('storefront 公開時は商品 query より既存店舗カードを優先する', async () => {
+    const productId = `h_${'c'.repeat(32)}`;
+    h.enableMobileOrder = true;
+    h.enableCreatorStore = true;
+    h.enableCreatorStoreUi = true;
+    h.record = STORE_RECORD;
+    hosted.listAvailableForOwner.mockResolvedValue([
+      {
+        id: productId,
+        title: '店舗で出さない商品',
+        priceJpyc: '500',
+        saleActive: true,
+        contentAvailable: true,
+      },
+    ]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(new Uint8Array([137, 80, 78, 71]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        }),
+      ),
+    );
+
+    const { element } = await callGet(
+      `h=yamada&locale=ja&product=${productId}`,
+    );
+    const text = collectText(element).join(' ');
+    expect(text).toContain('山田カフェ');
+    expect(text).toContain('スマホで注文');
+    expect(text).not.toContain('店舗で出さない商品');
+    expect(hosted.listAvailableForOwner).not.toHaveBeenCalled();
   });
 
   it('storefront 公開 + enableMobileOrder ON: モバイルオーダー店舗カード (店名/ひとこと/JPYC + 店舗アバター)', async () => {

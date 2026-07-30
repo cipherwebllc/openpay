@@ -960,6 +960,8 @@
     "saleActive": "販売中",
     "saleInactive": "販売停止中",
     "editProduct": "編集",
+    "copyShareLink": "シェア用リンクをコピー",
+    "shareLinkCopied": "コピーしました",
     "sellerRequiredForSale": "販売を始める前に、上の販売者情報を登録してください。",
     "newProductHeading": "新しい商品",
     "editProductHeading": "商品を編集",
@@ -1006,6 +1008,7 @@
     "heading": "販売中",
     "subheading": "このクリエイターのデジタル商品",
     "purchase": "購入する",
+    "productMetaFallback": "このデジタル商品を OpenPay で購入できます。",
     "labels": {
       "download": "ダウンロード",
       "pdf": "PDF",

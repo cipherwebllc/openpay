@@ -26,16 +26,18 @@ export type CreatorStorePurchaseLauncherProps = {
   };
   sellerDisclosureHref: string;
   inverted: boolean;
+  autoOpen?: boolean;
 };
 
 export function CreatorStorePurchaseLauncher({
   product,
   sellerDisclosureHref,
   inverted,
+  autoOpen = false,
 }: CreatorStorePurchaseLauncherProps) {
   const t = useTranslations('CreatorStorefront');
-  const [loaded, setLoaded] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState(autoOpen);
+  const [open, setOpen] = useState(autoOpen);
 
   const showPurchase = () => {
     setLoaded(true);

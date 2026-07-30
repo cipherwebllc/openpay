@@ -22,11 +22,13 @@ export function CreatorStorefrontSection({
   accent,
   theme,
   sellerDisclosureHref,
+  autoOpenProductId,
 }: {
   products: readonly CreatorStorefrontProduct[];
   accent: string;
   theme: HandleTheme;
   sellerDisclosureHref: string;
+  autoOpenProductId?: string;
 }) {
   const t = useTranslations('CreatorStorefront');
   const locale = useLocale();
@@ -136,6 +138,7 @@ export function CreatorStorefrontSection({
                     }}
                     sellerDisclosureHref={sellerDisclosureHref}
                     inverted={inverted}
+                    autoOpen={product.id === autoOpenProductId}
                   />
                 </div>
               </div>

@@ -64,13 +64,13 @@ function response(body: unknown, status = 200): Response {
   } as Response;
 }
 
-function renderPanel() {
+function renderPanel(handle?: string | null) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   return renderWithIntl(
     <QueryClientProvider client={queryClient}>
-      <CreatorStoreSellerPanel />
+      <CreatorStoreSellerPanel handle={handle} />
     </QueryClientProvider>,
   );
 }
@@ -345,5 +345,154 @@ describe('CreatorStoreSellerPanel', () => {
           (init as RequestInit | undefined)?.method === undefined,
       ),
     ).toHaveLength(2);
+  });
+
+  it('公開 handle があれば販売中商品をコピーし、Clipboard 拒否時は fallback する', async () => {
+    const activeId = 'h_' + '5'.repeat(32);
+    const products: Product[] = [
+      {
+        id: activeId,
+        title: '販売中 PDF',
+        priceJpyc: '300',
+        contentKind: 'url',
+        label: 'pdf',
+        saleActive: true,
+        contentAvailable: true,
+      },
+      {
+        id: 'h_' + '6'.repeat(32),
+        title: '停止中 PDF',
+        priceJpyc: '400',
+        contentKind: 'url',
+        label: 'pdf',
+        saleActive: false,
+        contentAvailable: true,
+      },
+      {
+        id: 'h_' + '8'.repeat(32),
+        title: '提供終了 PDF',
+        priceJpyc: '500',
+        contentKind: 'url',
+        label: 'pdf',
+        saleActive: true,
+        contentAvailable: false,
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url === '/api/store/products'
+          ? response({ ok: true, products, max: 12 })
+          : response({
+              ok: true,
+              seller: {
+                name: '山田',
+                contact: 'seller@example.com',
+                updatedAt: 1,
+              },
+            }),
+      ),
+    );
+    const previousClipboard = Object.getOwnPropertyDescriptor(
+      navigator,
+      'clipboard',
+    );
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const previousExecCommand = Object.getOwnPropertyDescriptor(
+      document,
+      'execCommand',
+    );
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommand,
+    });
+
+    try {
+      renderPanel('alice');
+
+      const copyButton = await screen.findByRole('button', {
+        name: 'シェア用リンクをコピー',
+      });
+      expect(
+        screen.getAllByRole('button', {
+          name: 'シェア用リンクをコピー',
+        }),
+      ).toHaveLength(1);
+
+      fireEvent.click(copyButton);
+
+      await waitFor(() =>
+        expect(writeText).toHaveBeenCalledWith(
+          `https://test.local/ja/@alice?product=${activeId}`,
+        ),
+      );
+      expect(
+        await screen.findByRole('button', { name: 'コピーしました' }),
+      ).toBeInTheDocument();
+
+      writeText.mockRejectedValueOnce(new Error('clipboard_denied'));
+      fireEvent.click(
+        screen.getByRole('button', { name: 'コピーしました' }),
+      );
+      await waitFor(() => expect(execCommand).toHaveBeenCalledWith('copy'));
+    } finally {
+      if (previousExecCommand) {
+        Object.defineProperty(
+          document,
+          'execCommand',
+          previousExecCommand,
+        );
+      } else {
+        // @ts-expect-error テストで追加した legacy browser API を元へ戻す。
+        delete document.execCommand;
+      }
+      if (previousClipboard) {
+        Object.defineProperty(navigator, 'clipboard', previousClipboard);
+      } else {
+        // @ts-expect-error テストで追加した readonly browser API を元へ戻す。
+        delete navigator.clipboard;
+      }
+    }
+  });
+
+  it('公開 handle がなければ販売中の商品にもシェア導線を表示しない', async () => {
+    const products: Product[] = [
+      {
+        id: 'h_' + '7'.repeat(32),
+        title: '販売中 PDF',
+        priceJpyc: '300',
+        contentKind: 'url',
+        label: 'pdf',
+        saleActive: true,
+        contentAvailable: true,
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url === '/api/store/products'
+          ? response({ ok: true, products, max: 12 })
+          : response({
+              ok: true,
+              seller: {
+                name: '山田',
+                contact: 'seller@example.com',
+                updatedAt: 1,
+              },
+            }),
+      ),
+    );
+
+    renderPanel(null);
+
+    expect(await screen.findByText('販売中 PDF')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'シェア用リンクをコピー' }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -10,7 +10,7 @@
 // (lg で sticky 追従)。下書きは useHandleProfileDraft (localStorage・チップタブとは分離)。
 // flag OFF で何も描画しない。
 
-import { useMemo, useReducer, useRef, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { AtSign, Eye, UserRound, Wallet } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
@@ -77,7 +77,11 @@ function Field({
 const inputClass =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
 
-export function HandleProfileBuilder() {
+export function HandleProfileBuilder({
+  onPublishedHandleChange,
+}: {
+  onPublishedHandleChange?: (handle: string | null) => void;
+}) {
   const t = useTranslations('HandleProfile');
   const tb = useTranslations('HandleProfileBuilder');
   const tc = useTranslations('HandleClaim');
@@ -102,6 +106,13 @@ export function HandleProfileBuilder() {
     handlePublishBaselineReducer,
     EMPTY_HANDLE_PUBLISH_BASELINE,
   );
+
+  useEffect(() => {
+    // 接続 wallet が変わった後に旧 owner の handle を商品共有へ渡し続ける波及を断つ。
+    // 新 wallet で公開済み handle を明示選択 / 公開するまでは共有導線を隠す。
+    onPublishedHandleChange?.(null);
+  }, [connected, onPublishedHandleChange]);
+
   // SNS / リンクのドラッグ並べ替え (HTML5 DnD)。list ごとに 1 インスタンス — 各々が独自の
   // dragIndex を持つため drag はそのリスト内へ自然にスコープされる (別リストへは落とせない)。
   const socialsReorder = useDragReorderList(draft.socials, (socials) =>
@@ -208,6 +219,7 @@ export function HandleProfileBuilder() {
   // 無い (= 直接新規作成中に呼ばれた等) ときだけ既定へ (受取先は使い回せるので保持)。
   const onStopEditing = () => {
     setEditingHandle(null);
+    onPublishedHandleChange?.(null);
     setEditedHadUsdc(false);
     dispatchPublishBaseline({ type: 'discarded' });
     const snapshot = preEditDraftRef.current;
@@ -230,6 +242,7 @@ export function HandleProfileBuilder() {
     // 退避済みの「編集前」を保ったまま上書きしない)。
     if (editingHandle === null) preEditDraftRef.current = draft;
     setEditingHandle(handle);
+    onPublishedHandleChange?.(handle);
     // パネル (右カラム/モバイルは下部) から押すとフォームの書き換わりが見えないため、
     // フォーム先頭へスクロールして「いま編集している」ことを視覚的に伝える。
     headingRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
@@ -352,6 +365,7 @@ export function HandleProfileBuilder() {
               onStopEditing={onStopEditing}
               onPublished={(snapshot: PublishedHandleSnapshot) => {
                 setEditingHandle(snapshot.handle);
+                onPublishedHandleChange?.(snapshot.handle);
                 dispatchPublishBaseline({ type: 'published', snapshot });
                 // 公開後のレコードは builder 製 = USDC method を含まないため、旧レコード由来の
                 // 「USDC 提供終了」通知は以後 stale (更新で外れる、はもう外れた後)。

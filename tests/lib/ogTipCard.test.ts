@@ -3,6 +3,8 @@ import {
   buildTipOgModel,
   buildTipOgImageUrl,
   buildTipMeta,
+  buildProductOgImageUrl,
+  buildProductOgModel,
   buildStorefrontOgModel,
   buildStorefrontMeta,
   OG_DEFAULT_COLOR,
@@ -333,6 +335,46 @@ describe('buildHandleOgModel / buildHandleOgImageUrl', () => {
   it('og:image URL は /api/og/handle?h=&locale=', async () => {
     const { buildHandleOgImageUrl } = await import('@/lib/ogTipCard');
     expect(buildHandleOgImageUrl('masia', 'ja')).toBe('/api/og/handle?h=masia&locale=ja');
+  });
+});
+
+describe('buildProductOgModel / buildProductOgImageUrl', () => {
+  it('商品名・絵文字・価格/chain・出品者を商品カードへ載せる', () => {
+    const card = buildProductOgModel({
+      handle: 'masia',
+      name: '山田太郎',
+      color: '#2563eb',
+      title: 'AI プロンプト集',
+      emoji: '🧠',
+      priceJpyc: '1200',
+      locale: 'ja',
+    });
+    expect(card.heading).toBe('AI プロンプト集');
+    expect(card.initial).toBe('🧠');
+    expect(card.chips).toEqual(['1,200 JPYC · Polygon']);
+    expect(card.handleLine).toBe('山田太郎 · @masia');
+    expect(card.footer).toBe('デジタル商品を購入');
+    expect(card.accent).toBe('#2563eb');
+  });
+
+  it('名前/絵文字/色なしは @handle・記号・既定色へ fallback する', () => {
+    const card = buildProductOgModel({
+      handle: 'alice',
+      title: 'Download',
+      priceJpyc: '300',
+      locale: 'en',
+    });
+    expect(card.handleLine).toBe('@alice');
+    expect(card.initial).toBe('✦');
+    expect(card.footer).toBe('Buy this digital product');
+    expect(card.accent).toBe(OG_DEFAULT_COLOR);
+  });
+
+  it('商品 og:image URL は server authority route へ product ID だけを渡す', () => {
+    const productId = `h_${'a'.repeat(32)}`;
+    expect(buildProductOgImageUrl('masia', 'ja', productId)).toBe(
+      `/api/og/handle?h=masia&locale=ja&product=${productId}`,
+    );
   });
 });
 

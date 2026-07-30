@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   enableCreatorStoreUi: false,
   hostedProducts: [] as unknown[] | null,
   renderedStorefrontProducts: [] as unknown[],
+  renderedAutoOpenProductId: undefined as string | undefined,
   record: null as unknown,
 }));
 const listAvailableHostedForOwner = vi.hoisted(() => vi.fn());
@@ -90,10 +91,13 @@ vi.mock('@/components/MobileOrderView', () => ({
 vi.mock('@/components/CreatorStorefrontSection', () => ({
   CreatorStorefrontSection: ({
     products,
+    autoOpenProductId,
   }: {
     products: Array<{ id: string }>;
+    autoOpenProductId?: string;
   }) => {
     state.renderedStorefrontProducts = products;
+    state.renderedAutoOpenProductId = autoOpenProductId;
     return (
       <div data-testid="creator-storefront">
         {products.map((product) => product.id).join(',')}
@@ -154,14 +158,21 @@ function record(overrides: Partial<HandleRecord> = {}): HandleRecord {
 
 async function renderHandlePage(
   nextRecord: HandleRecord,
-  options: { mobileOrder?: boolean; handle?: string } = {},
+  options: {
+    mobileOrder?: boolean;
+    handle?: string;
+    product?: string;
+  } = {},
 ): Promise<RenderResult> {
   state.record = nextRecord;
   state.enableMobileOrder = options.mobileOrder ?? false;
+  state.renderedAutoOpenProductId = undefined;
   const handle = options.handle ?? `jsonld${handleSequence++}`;
   const ui = await HandlePage({
     params: Promise.resolve({ locale: 'ja', handle: `%40${handle}` }),
-    searchParams: Promise.resolve({}),
+    searchParams: Promise.resolve(
+      options.product ? { product: options.product } : {},
+    ),
   });
   return render(ui);
 }
@@ -188,6 +199,7 @@ beforeEach(() => {
   state.enableCreatorStoreUi = false;
   state.hostedProducts = [];
   state.renderedStorefrontProducts = [];
+  state.renderedAutoOpenProductId = undefined;
   state.record = null;
   listAvailableHostedForOwner.mockImplementation(
     async () => state.hostedProducts,
@@ -357,5 +369,34 @@ describe('@handle ProfilePage JSON-LD', () => {
     expect(
       container.querySelector('[data-testid="creator-storefront"]'),
     ).toBeNull();
+  });
+
+  it('product deep link は販売可能リストに一致する商品だけ auto open 対象にする', async () => {
+    state.enableCreatorStore = true;
+    state.enableCreatorStoreUi = true;
+    const productId = `h_${'c'.repeat(32)}`;
+    state.hostedProducts = [
+      {
+        id: productId,
+        owner: ADDR,
+        payTo: ADDR,
+        title: 'Deep link product',
+        priceJpyc: '500',
+        contentKind: 'url',
+        label: 'download',
+        contentRevision: 1,
+        saleActive: true,
+        contentAvailable: true,
+        createdAt: 1,
+      },
+    ];
+
+    await renderHandlePage(record(), { product: productId });
+    expect(state.renderedAutoOpenProductId).toBe(productId);
+
+    await renderHandlePage(record(), {
+      product: `h_${'d'.repeat(32)}`,
+    });
+    expect(state.renderedAutoOpenProductId).toBeUndefined();
   });
 });
