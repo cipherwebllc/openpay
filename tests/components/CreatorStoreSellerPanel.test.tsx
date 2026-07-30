@@ -24,6 +24,11 @@ vi.mock('@/lib/env', async (importOriginal) => {
   };
 });
 
+vi.mock('@/hooks/useStoreCacheScope', () => ({
+  // scope hook は wagmi/QueryClient に依存するため component テストでは no-op (専用テストで検証)
+  useStoreCacheScope: () => {},
+}));
+
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({
     isSignedIn: state.isSignedIn,

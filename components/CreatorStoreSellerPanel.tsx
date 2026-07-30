@@ -10,6 +10,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { PackageOpen, Pencil, Store } from 'lucide-react';
 import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
 
 type HostedLabel =
   | 'download'
@@ -160,6 +161,7 @@ function EnabledCreatorStoreSellerPanel() {
     isSigningIn,
     signInError,
   } = useSiweSession();
+  useStoreCacheScope(sessionAddress);
 
   return (
     <section
