@@ -11,8 +11,8 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ChevronDown } from 'lucide-react';
 
-type FaqKey = 'faqQ1' | 'faqQ7' | 'faqQ2' | 'faqQ3' | 'faqQ4' | 'faqQ5';
-type FaqAnswerKey = 'faqA1' | 'faqA7' | 'faqA2' | 'faqA3' | 'faqA4' | 'faqA5';
+type FaqKey = 'faqQ1' | 'faqQ7' | 'faqQ2' | 'faqQ3' | 'faqQ4' | 'faqQ5' | 'faqQ8';
+type FaqAnswerKey = 'faqA1' | 'faqA7' | 'faqA2' | 'faqA3' | 'faqA4' | 'faqA5' | 'faqA8';
 
 const QA: readonly { q: FaqKey; a: FaqAnswerKey }[] = [
   { q: 'faqQ1', a: 'faqA1' },
@@ -22,6 +22,9 @@ const QA: readonly { q: FaqKey; a: FaqAnswerKey }[] = [
   { q: 'faqQ3', a: 'faqA3' },
   { q: 'faqQ4', a: 'faqA4' },
   { q: 'faqQ5', a: 'faqA5' },
+  // B2B 請求 (開発費/保守費) の利用例 — Mi&T の法人 JPYC 受付 (2026-07-27) を受けた
+  // 訴求拡張 (user 承認 2026-07-30)。新機能の約束はせず既存の決済リンクの説明のみ。
+  { q: 'faqQ8', a: 'faqA8' },
 ];
 
 export async function LandingFaq() {

@@ -5,7 +5,7 @@
 import { getLocale, getTranslations } from 'next-intl/server';
 
 export const SITE_URL = 'https://open-pay.jp';
-const FAQ_COUNT = 7;
+const FAQ_COUNT = 8;
 
 // FAQ 回答の rich タグ (<jpycEx>…</jpycEx> 等) を落として平文化する。
 // JSON-LD の text にマークアップを残すと検証エラー/引用劣化になるのを防ぐ。
