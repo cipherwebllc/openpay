@@ -290,13 +290,25 @@ export default async function HandlePage({
               {t('footerSafetyMore')}
             </Link>
           </p>
-          {/* 成長ループ: 訪問者 (チップを送る側) を作成側へ誘導する控えめな 1 行。
-              lit.link/Linktree の "create your own" と同型。主役はクリエイターなので
-              poweredBy と同じ控えめトーンに揃える。 */}
+          {/* 成長ループ: 訪問者 (チップを送る側) を作成側へ誘導。lit.link/Linktree の
+              下部 "create your own" ピルと同型で、実 URL の形 (open-pay.jp/@you) を
+              見せて「何が手に入るか」を一瞬で伝える (user 提案 2026-07-29)。
+              主役はクリエイターなので、リンクボタン群より一段控えめなピルに留める。 */}
           <Link
             href={`/${locale}/create?tab=profile`}
             prefetch={false}
-            className={`text-[11px] underline underline-offset-2 transition ${
+            className={`inline-flex items-center rounded-full border px-4 py-2 font-mono text-xs font-semibold shadow-sm transition hover:-translate-y-0.5 ${
+              darkFooter
+                ? 'border-white/20 bg-white/10 text-slate-100 hover:bg-white/15'
+                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            open-pay.jp/<span className={darkFooter ? 'text-sky-300' : 'text-brand'}>@you</span>
+          </Link>
+          <Link
+            href={`/${locale}/create?tab=profile`}
+            prefetch={false}
+            className={`-mt-1 text-[11px] underline underline-offset-2 transition ${
               darkFooter
                 ? 'text-slate-300 hover:text-white'
                 : 'text-slate-400 hover:text-slate-600'
