@@ -1004,7 +1004,8 @@
     "detailInvalidText": "Text content must be 1–20,000 characters.",
     "detailInvalidSellerName": "Please enter the seller name.",
     "detailInvalidSellerContact": "Please enter contact information.",
-    "detailInvalidDisclosure": "Legal notes must be at most 1,000 characters."
+    "detailInvalidDisclosure": "Legal notes must be at most 1,000 characters.",
+    "guideLink": "Selling tips: guide to selling digital goods with free services"
   },
   "CreatorStorefront": {
     "heading": "On sale",
