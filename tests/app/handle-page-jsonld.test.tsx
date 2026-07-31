@@ -329,6 +329,7 @@ describe('@handle ProfilePage JSON-LD', () => {
         owner: ADDR,
         payTo: ADDR,
         title: 'Prompt',
+        imageUrl: 'https://cdn.example.com/product.png',
         priceJpyc: '300',
         contentKind: 'text',
         label: 'prompt',
@@ -350,6 +351,7 @@ describe('@handle ProfilePage JSON-LD', () => {
       {
         id: `h_${'a'.repeat(32)}`,
         title: 'Prompt',
+        imageUrl: 'https://cdn.example.com/product.png',
         priceJpyc: '300',
         payTo: ADDR,
         contentKind: 'text',

@@ -49,7 +49,7 @@ const SATORI_IMAGE_TYPES = new Set([
   'image/apng',
 ]);
 
-// 外部アバター → data URL。失敗は null (イニシャル円へフォールバック)。
+// 外部アバター / 商品画像 → data URL。失敗は null (イニシャル / 絵文字円へフォールバック)。
 async function fetchAvatarDataUrl(url: string): Promise<string | null> {
   try {
     const u = new URL(url);
@@ -167,10 +167,14 @@ export async function GET(req: Request): Promise<ImageResponse> {
         color: record.config.color,
         title: product.title,
         ...(product.emoji ? { emoji: product.emoji } : {}),
+        ...(product.imageUrl ? { imageUrl: product.imageUrl } : {}),
         priceJpyc: product.priceJpyc,
         locale,
       });
-      return new ImageResponse(ogCardElement(productCard), {
+      const productImage = productCard.imageUrl
+        ? await fetchAvatarDataUrl(productCard.imageUrl)
+        : null;
+      return new ImageResponse(ogCardElement(productCard, productImage), {
         width: OG_WIDTH,
         height: OG_HEIGHT,
         fonts: OG_FONTS,

@@ -32,6 +32,7 @@ const PRODUCT_PATCH_KEYS = new Set([
   'title',
   'desc',
   'emoji',
+  'imageUrl',
   'priceJpyc',
   'contentKind',
   'label',
@@ -244,6 +245,7 @@ export async function PATCH(
         title: product.title,
         ...(product.desc ? { desc: product.desc } : {}),
         ...(product.emoji ? { emoji: product.emoji } : {}),
+        ...(product.imageUrl ? { imageUrl: product.imageUrl } : {}),
         priceJpyc: product.priceJpyc,
         label: product.label,
         saleActive: nextSaleActive,
@@ -282,6 +284,8 @@ export async function PATCH(
           ? raw.desc
           : product.desc,
     emoji: raw.emoji !== undefined ? raw.emoji : product.emoji,
+    imageUrl:
+      raw.imageUrl !== undefined ? raw.imageUrl : product.imageUrl,
     priceJpyc:
       raw.priceJpyc !== undefined
         ? raw.priceJpyc
@@ -348,6 +352,9 @@ export async function PATCH(
       title: parsed.product.title,
       ...(parsed.product.desc ? { desc: parsed.product.desc } : {}),
       ...(parsed.product.emoji ? { emoji: parsed.product.emoji } : {}),
+      ...(parsed.product.imageUrl
+        ? { imageUrl: parsed.product.imageUrl }
+        : {}),
       priceJpyc: parsed.product.priceJpyc,
       label: parsed.product.label,
       saleActive,

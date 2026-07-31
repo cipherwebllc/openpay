@@ -5,12 +5,14 @@ import {
   type HandleTheme,
 } from '@/lib/handleTheme';
 import { CreatorStorePurchaseLauncher } from '@/components/CreatorStorePurchaseLauncher';
+import { CreatorStorefrontProductArtwork } from '@/components/CreatorStorefrontProductArtwork';
 
 export type CreatorStorefrontProduct = {
   id: string;
   title: string;
   desc?: string;
   emoji?: string;
+  imageUrl?: string;
   priceJpyc: string;
   payTo: Address;
   contentKind: 'url' | 'text';
@@ -71,14 +73,11 @@ export function CreatorStorefrontSection({
             style={tokens.linkStyle}
           >
             <div className="flex items-start gap-3">
-              <span
-                aria-hidden
-                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl ${
-                  inverted ? 'bg-white/15' : 'bg-slate-100'
-                }`}
-              >
-                {product.emoji ?? '✦'}
-              </span>
+              <CreatorStorefrontProductArtwork
+                imageUrl={product.imageUrl}
+                emoji={product.emoji}
+                inverted={inverted}
+              />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <h3
@@ -97,6 +96,7 @@ export function CreatorStorefrontSection({
                   >
                     {/* 支払いチェーンの明示 (2026-07-30 user 要望): a11y 名は可視テキスト
                         「Polygon」から導出し、ロゴは装飾 (掟 8)。 */}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src="/chains/polygon.svg"
                       alt=""

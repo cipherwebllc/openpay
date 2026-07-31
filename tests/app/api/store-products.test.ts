@@ -171,6 +171,9 @@ beforeEach(() => {
           ...(typeof input.emoji === 'string'
             ? { emoji: input.emoji }
             : {}),
+          ...(typeof input.imageUrl === 'string'
+            ? { imageUrl: input.imageUrl }
+            : {}),
           priceJpyc: input.priceJpyc,
           contentKind,
           label: input.label ?? 'prompt',
@@ -324,6 +327,27 @@ describe('creator store seller routes', () => {
     expect(createHostedProduct).not.toHaveBeenCalled();
   });
 
+  it('商品画像 URL を新規作成の server 検証へ渡す', async () => {
+    const imageUrl = 'https://cdn.example.com/product.png';
+    const response = await createProduct(
+      request(
+        '/api/store/products',
+        'POST',
+        validBody({ imageUrl }),
+      ),
+    );
+
+    expect(response.status).toBe(201);
+    expect(parseHostedInput).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: OWNER, imageUrl }),
+    );
+    expect(createHostedProduct).toHaveBeenCalledWith(
+      expect.objectContaining({
+        product: expect.objectContaining({ imageUrl }),
+      }),
+    );
+  });
+
   it('販売者情報未登録では新規 saleActive=true を拒否する', async () => {
     sellerDisclosureComplete.mockResolvedValue(false);
 
@@ -387,6 +411,15 @@ describe('creator store seller routes', () => {
   });
 
   it('停止中→販売中 toggle は disclosure を検査し、保存後 product を返す', async () => {
+    const productWithImage = {
+      ...baseProduct,
+      imageUrl: 'https://cdn.example.com/product.png',
+    };
+    getHostedProductUpdateSnapshot.mockResolvedValueOnce({
+      product: productWithImage,
+      token: JSON.stringify(productWithImage),
+    });
+
     const response = await patchProduct(
       request(`/api/store/products/${ID}`, 'PATCH', {
         saleActive: true,
@@ -398,12 +431,13 @@ describe('creator store seller routes', () => {
     expect(sellerDisclosureComplete).toHaveBeenCalledWith(OWNER);
     expect(replaceHostedSellerProduct).toHaveBeenCalledWith({
       snapshot: {
-        product: baseProduct,
-        token: JSON.stringify(baseProduct),
+        product: productWithImage,
+        token: JSON.stringify(productWithImage),
       },
       owner: OWNER,
       metadata: {
         title: 'Prompt',
+        imageUrl: 'https://cdn.example.com/product.png',
         priceJpyc: '300',
         label: 'prompt',
         saleActive: true,
@@ -455,11 +489,12 @@ describe('creator store seller routes', () => {
   });
 
   it('本文変更は新 revision と公開メタを 1 atomic helper で保存する', async () => {
+    const imageUrl = 'https://cdn.example.com/product-v2.png';
     const response = await patchProduct(
       request(
         `/api/store/products/${ID}`,
         'PATCH',
-        validBody({ content: 'version two' }),
+        validBody({ content: 'version two', imageUrl }),
       ),
       { params: Promise.resolve({ id: ID }) },
     );
@@ -474,6 +509,7 @@ describe('creator store seller routes', () => {
       metadata: {
         title: 'Prompt',
         emoji: '🧠',
+        imageUrl,
         priceJpyc: '300',
         label: 'prompt',
         saleActive: false,

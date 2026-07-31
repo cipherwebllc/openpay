@@ -339,6 +339,17 @@ describe('buildHandleOgModel / buildHandleOgImageUrl', () => {
 });
 
 describe('buildProductOgModel / buildProductOgImageUrl', () => {
+  it('絵文字なしの initial は商品名の先頭文字 (飾り glyph の豆腐化を防ぐ)', () => {
+    const card = buildProductOgModel({
+      handle: 'alice',
+      color: '#2563eb',
+      title: 'アイコン素材集',
+      priceJpyc: '120',
+      locale: 'ja',
+    });
+    expect(card.initial).toBe('ア');
+  });
+
   it('商品名・絵文字・価格/chain・出品者を商品カードへ載せる', () => {
     const card = buildProductOgModel({
       handle: 'masia',
@@ -346,11 +357,13 @@ describe('buildProductOgModel / buildProductOgImageUrl', () => {
       color: '#2563eb',
       title: 'AI プロンプト集',
       emoji: '🧠',
+      imageUrl: 'https://cdn.example.com/product.png',
       priceJpyc: '1200',
       locale: 'ja',
     });
     expect(card.heading).toBe('AI プロンプト集');
     expect(card.initial).toBe('🧠');
+    expect(card.imageUrl).toBe('https://cdn.example.com/product.png');
     expect(card.chips).toEqual(['1,200 JPYC · Polygon']);
     expect(card.handleLine).toBe('山田太郎 · @masia');
     expect(card.footer).toBe('デジタル商品を購入');
@@ -365,7 +378,9 @@ describe('buildProductOgModel / buildProductOgImageUrl', () => {
       locale: 'en',
     });
     expect(card.handleLine).toBe('@alice');
-    expect(card.initial).toBe('✦');
+    // 飾り glyph '✦' は satori で豆腐化するため、見出し先頭文字に fallback する (2026-07-31)。
+    expect(card.initial).toBe('D');
+    expect(card).not.toHaveProperty('imageUrl');
     expect(card.footer).toBe('Buy this digital product');
     expect(card.accent).toBe(OG_DEFAULT_COLOR);
   });
