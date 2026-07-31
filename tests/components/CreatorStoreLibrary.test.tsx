@@ -113,6 +113,8 @@ describe('CreatorStoreLibrary', () => {
             title: '購入済みプロンプト旧版',
             contentRevision: 1,
             intentSalt: `0x${'a'.repeat(64)}`,
+            purchasedAt: 1_700_000_000_000,
+            txHash: `0x${'ab'.repeat(32)}`,
             kind: 'text',
             value: '購入時 revision の本文',
           }),
@@ -133,6 +135,11 @@ describe('CreatorStoreLibrary', () => {
       screen.getByRole('button', { name: 'リビジョン 1 を表示' }),
     );
     expect(await screen.findByText('購入時 revision の本文')).toBeInTheDocument();
+    // 来歴の明示 (2026-08-01 裁定): 誰宛の提供かをウォレット短縮表示で示す。
+    expect(
+      screen.getByText(/この商品はウォレット .*宛に提供されています/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/購入ID 0xaaaaaaaa/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/store/content/h_product-a?revision=1',
       {

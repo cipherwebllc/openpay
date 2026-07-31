@@ -102,6 +102,8 @@ export async function GET(
       title: grant.metadata.title,
       contentRevision: grant.contentRevision,
       intentSalt: grant.intentSalt,
+      purchasedAt: grant.purchasedAt,
+      txHash: grant.txHash,
     });
   }
 
@@ -118,12 +120,16 @@ export async function GET(
       title: grant.metadata.title,
       contentRevision: grant.contentRevision,
       intentSalt: grant.intentSalt,
+      purchasedAt: grant.purchasedAt,
+      txHash: grant.txHash,
     });
   }
   if (content.kind !== grant.metadata.contentKind) {
     // 購入時 metadata と本文種別の不整合時に、別形式の本文を配信する偽成功を防ぐ。
     return storageUnavailable();
   }
+  // 来歴 (誰宛の提供か) の明示用 (2026-08-01 user 裁定: 二次流通対策は
+  // 「表示による抑止 + 購入記録との突き合わせ根拠」に限定し、ファイル埋め込みはしない)。
   return storePrivateJson({
     ok: true,
     state: 'ready',
@@ -131,6 +137,8 @@ export async function GET(
     title: grant.metadata.title,
     contentRevision: grant.contentRevision,
     intentSalt: grant.intentSalt,
+    purchasedAt: grant.purchasedAt,
+    txHash: grant.txHash,
     kind: content.kind,
     value: content.value,
   });

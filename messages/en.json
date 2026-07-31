@@ -1140,7 +1140,9 @@
       "prompt": "Prompt",
       "api": "API",
       "external": "External link"
-    }
+    },
+    "provenanceTitle": "This item is licensed to wallet {wallet}",
+    "provenanceMeta": "Purchased {date} · Purchase ID {id} · tx {tx}"
   },
   "CreatorStoreSellerDisclosure": {
     "back": "Back",
