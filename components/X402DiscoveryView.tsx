@@ -1102,18 +1102,26 @@ export function X402DiscoveryView({
                   {cardHead({
                     category: item.category,
                     priceNode: (
+                      // 買い手の意思決定基準は合計 (2026-07-31 user 裁定): 合計を太字主役・
+                      // 価格+手数料は細字の内訳。fee 不明 (非 JPYC 等) は従来の価格表示。
                       <div className="shrink-0 text-right">
-                        <div className="text-sm font-bold text-slate-900">
-                          {item.priceJpyc} JPYC
-                          {fee && (
-                            <span className="ml-1 text-[11px] font-normal text-slate-500">
-                              {t('feeNote', { fee })}
-                            </span>
-                          )}
-                        </div>
-                        {total && (
-                          <div className="text-[11px] text-slate-500">
-                            {t('payTotal', { total })}
+                        {total ? (
+                          <>
+                            <div className="text-sm font-bold text-slate-900">
+                              {t('payTotal', { total })}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {item.priceJpyc} JPYC
+                              {fee && (
+                                <span className="ml-1">
+                                  {t('feeNote', { fee })}
+                                </span>
+                              )}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-sm font-bold text-slate-900">
+                            {item.priceJpyc} JPYC
                           </div>
                         )}
                       </div>

@@ -79,6 +79,12 @@ vi.mock('@/hooks/useHostedStorePurchase', () => ({
 }));
 
 vi.mock('@/lib/x402/hostedPurchaseWire', () => ({
+  // start 画面の合計表示が使う実式 (max(1JPYC,1%)) を最小再現 (掟 6)。
+  hostedPurchaseFeeValue: (v: bigint) => {
+    const pct = (v * 100n) / 10_000n;
+    const floor = 10n ** 18n;
+    return pct > floor ? pct : floor;
+  },
   buildHostedPurchaseSignPreview: () => ({ preview: true }),
 }));
 

@@ -1,5 +1,7 @@
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
+import { formatUnits } from 'viem';
+import { hostedPurchaseFeeValue } from '@/lib/x402/hostedPurchaseWire';
 import type { Address } from 'viem';
 import {
   handleViewTheme,
@@ -19,6 +21,19 @@ export type CreatorStorefrontProduct = {
   contentKind: 'url' | 'text';
   label: 'download' | 'pdf' | 'zip' | 'prompt' | 'api' | 'external';
 };
+
+
+// 価格 (整数 JPYC) → 買い手手数料/合計の表示文字列。式は hostedPurchaseFeeValue の単一ソース
+// (購入 hook が server quote を同式で検証するため、ここの表示と実請求は乖離しない)。
+function feeWeiOf(priceJpyc: string): bigint {
+  return hostedPurchaseFeeValue(BigInt(priceJpyc) * 10n ** 18n);
+}
+function feeJpycOf(priceJpyc: string): string {
+  return formatUnits(feeWeiOf(priceJpyc), 18);
+}
+function totalJpycOf(priceJpyc: string): string {
+  return formatUnits(BigInt(priceJpyc) * 10n ** 18n + feeWeiOf(priceJpyc), 18);
+}
 
 export function CreatorStorefrontSection({
   products,
@@ -88,26 +103,44 @@ export function CreatorStorefrontSection({
                   >
                     {product.title}
                   </h3>
-                  <span
-                    className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ${
-                      inverted
-                        ? 'bg-white/15 text-white'
-                        : 'bg-slate-100 text-slate-700'
-                    }`}
-                  >
-                    {/* 支払いチェーンの明示 (2026-07-30 user 要望): a11y 名は可視テキスト
-                        「Polygon」から導出し、ロゴは装飾 (掟 8)。 */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src="/chains/polygon.svg"
-                      alt=""
-                      aria-hidden
-                      className="h-3.5 w-3.5"
-                    />
-                    {new Intl.NumberFormat(locale).format(
-                      Number(product.priceJpyc),
-                    )}{' '}
-                    JPYC · Polygon
+                  <span className="flex shrink-0 flex-col items-end gap-0.5">
+                    <span
+                      className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ${
+                        inverted
+                          ? 'bg-white/15 text-white'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      {/* 支払いチェーンの明示 (2026-07-30 user 要望): a11y 名は可視テキスト
+                          「Polygon」から導出し、ロゴは装飾 (掟 8)。 */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src="/chains/polygon.svg"
+                        alt=""
+                        aria-hidden
+                        className="h-3.5 w-3.5"
+                      />
+                      {/* 買い手の意思決定基準は実際に払う合計 (2026-07-31 user 裁定)。fee 式は
+                          購入 hook が server quote を照合するのと同一関数 = 表示と実請求の乖離なし。 */}
+                      {t('cardTotal', {
+                        total: new Intl.NumberFormat(locale).format(
+                          Number(totalJpycOf(product.priceJpyc)),
+                        ),
+                      })}
+                      {' · Polygon'}
+                    </span>
+                    <span
+                      className={`text-[10px] ${
+                        inverted ? 'text-white/70' : 'text-slate-500'
+                      }`}
+                    >
+                      {t('cardBreakdown', {
+                        price: new Intl.NumberFormat(locale).format(
+                          Number(product.priceJpyc),
+                        ),
+                        fee: feeJpycOf(product.priceJpyc),
+                      })}
+                    </span>
                   </span>
                 </div>
                 {product.desc ? (

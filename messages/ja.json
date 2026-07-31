@@ -1020,13 +1020,14 @@
       "api": "API",
       "external": "外部リンク"
     },
-    "libraryLink": "購入済みの商品はライブラリで見られます"
+    "libraryLink": "購入済みの商品はライブラリで見られます",
+    "cardTotal": "{total} JPYC",
+    "cardBreakdown": "(価格 {price} + 手数料 {fee})"
   },
   "CreatorStorePurchase": {
     "dialogLabel": "デジタル商品を購入",
     "close": "閉じる",
     "startHeading": "購入の準備",
-    "listedPrice": "表示価格 {price} JPYC",
     "walletRequired": "購入するには、ウォレットを接続してください。",
     "signInStatement": "OpenPay でデジタル商品を購入するために署名します",
     "signInAndReview": "ログインして購入内容を確認",
@@ -1100,7 +1101,9 @@
     "needsSupportTitle": "確認に時間がかかっています",
     "needsSupportConfirmedBody": "決済は成立していますが、商品の引き渡しを確認できません。二重に支払わず、販売者へお問い合わせください。",
     "needsSupportUnknownBody": "決済結果を確定できません。二重に支払わず、販売者へお問い合わせください。",
-    "contactSupport": "販売者へ問い合わせる"
+    "contactSupport": "販売者へ問い合わせる",
+    "payTotal": "お支払い合計 {total} JPYC",
+    "priceBreakdown": "価格 {price} JPYC + 手数料 {fee} JPYC"
   },
   "CreatorStoreLibrary": {
     "eyebrow": "購入済み",
