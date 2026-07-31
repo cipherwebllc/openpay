@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
+import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Copy, PackageOpen, Pencil, Store } from 'lucide-react';
 import { env } from '@/lib/env';
@@ -261,6 +262,7 @@ function EnabledCreatorStoreSellerPanel({
   handle: string | null;
 }) {
   const t = useTranslations('CreatorStoreSeller');
+  const guideLocale = useLocale();
   const {
     isSignedIn,
     sessionAddress,
@@ -288,6 +290,15 @@ function EnabledCreatorStoreSellerPanel({
           </h2>
           <p className="mt-1 text-sm leading-relaxed text-slate-500">
             {t('intro')}
+          </p>
+          <p className="mt-1 text-sm">
+            <Link
+              href={`/${guideLocale}/guide/store`}
+              prefetch={false}
+              className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+            >
+              {t('guideLink')}
+            </Link>
           </p>
         </div>
       </div>

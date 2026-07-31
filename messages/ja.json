@@ -1004,7 +1004,8 @@
     "detailInvalidText": "本文テキストは 1〜20,000 文字で入力してください。",
     "detailInvalidSellerName": "販売者名を入力してください。",
     "detailInvalidSellerContact": "連絡先を入力してください。",
-    "detailInvalidDisclosure": "法定事項の記載は 1,000 文字以内で入力してください。"
+    "detailInvalidDisclosure": "法定事項の記載は 1,000 文字以内で入力してください。",
+    "guideLink": "販売のヒント: 無料サービスで始めるデジタル商品販売ガイド"
   },
   "CreatorStorefront": {
     "heading": "販売中",

@@ -23,6 +23,7 @@ const PUBLIC_ROUTES = [
   '/guide/mobile-order',
   '/guide/ai-pay',
   '/guide/sell',
+  '/guide/store',
 ] as const;
 
 // 法務ページ。検索価値は低いが「サービス名 + 特商法/利用規約」で調べる
