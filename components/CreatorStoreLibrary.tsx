@@ -47,6 +47,8 @@ type ReadyContent = {
   title: string;
   contentRevision: number;
   intentSalt: string;
+  purchasedAt?: number;
+  txHash?: string;
   kind: 'url' | 'text';
   value: string;
 };
@@ -436,6 +438,30 @@ function EnabledCreatorStoreLibrary() {
                   {content.data.value}
                 </pre>
               )}
+              {/* 来歴の明示 (2026-08-01 user 裁定): ファイル埋め込みはせず「誰宛の提供か」を
+                  表示で示す。スクショ転載にも写り込む抑止 + 出品者の購入記録突き合わせ根拠。 */}
+              <div className="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-relaxed text-slate-500 ring-1 ring-slate-200/70">
+                <p className="font-semibold text-slate-600">
+                  {t('provenanceTitle', {
+                    wallet: sessionAddress
+                      ? `${sessionAddress.slice(0, 6)}…${sessionAddress.slice(-4)}`
+                      : '—',
+                  })}
+                </p>
+                <p className="mt-1">
+                  {t('provenanceMeta', {
+                    date: content.data.purchasedAt
+                      ? new Date(content.data.purchasedAt).toLocaleString(
+                          locale === 'en' ? 'en-US' : 'ja-JP',
+                        )
+                      : '—',
+                    id: `${content.data.intentSalt.slice(0, 10)}…`,
+                    tx: content.data.txHash
+                      ? `${content.data.txHash.slice(0, 10)}…`
+                      : '—',
+                  })}
+                </p>
+              </div>
             </>
           ) : null}
         </section>

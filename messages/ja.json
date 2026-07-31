@@ -1140,7 +1140,9 @@
       "prompt": "プロンプト",
       "api": "API",
       "external": "外部リンク"
-    }
+    },
+    "provenanceTitle": "この商品はウォレット {wallet} 宛に提供されています",
+    "provenanceMeta": "購入日時 {date} ・ 購入ID {id} ・ tx {tx}"
   },
   "CreatorStoreSellerDisclosure": {
     "back": "戻る",

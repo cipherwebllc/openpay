@@ -60,6 +60,7 @@ const grant = {
     label: 'prompt' as const,
   },
   purchasedAt: 1_700_000_000_000,
+  txHash: `0x${'ab'.repeat(32)}`,
 };
 const oldGrant = {
   ...grant,
@@ -389,6 +390,8 @@ describe('creator store entitlement routes', () => {
       title: 'Purchased prompt',
       contentRevision: 3,
       intentSalt: INTENT_SALT,
+      purchasedAt: 1_700_000_000_000,
+      txHash: '0xabababababababababababababababababababababababababababababababab',
       kind: 'text',
       value: 'secret body',
     });
@@ -429,6 +432,8 @@ describe('creator store entitlement routes', () => {
         title: 'Older purchased prompt',
         contentRevision: 1,
         intentSalt: OLD_INTENT_SALT,
+        purchasedAt: 1_699_999_999_000,
+        txHash: '0xabababababababababababababababababababababababababababababababab',
         kind: 'text',
         value: 'secret body',
       });
@@ -478,6 +483,8 @@ describe('creator store entitlement routes', () => {
       title: 'Purchased prompt',
       contentRevision: 3,
       intentSalt: INTENT_SALT,
+      purchasedAt: 1_700_000_000_000,
+      txHash: '0xabababababababababababababababababababababababababababababababab',
     });
     expect(state.calls).toEqual(['own', 'product']);
     expect(getHostedContent).not.toHaveBeenCalled();
