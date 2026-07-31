@@ -1021,8 +1021,8 @@
       "external": "External link"
     },
     "libraryLink": "View your purchased items in the library",
-    "cardTotal": "Total {total} JPYC",
-    "cardBreakdown": "Price {price} + fee {fee}"
+    "cardTotal": "{total} JPYC",
+    "cardBreakdown": "(Price {price} + fee {fee})"
   },
   "CreatorStorePurchase": {
     "dialogLabel": "Purchase digital product",

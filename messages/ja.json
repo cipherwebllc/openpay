@@ -1021,8 +1021,8 @@
       "external": "外部リンク"
     },
     "libraryLink": "購入済みの商品はライブラリで見られます",
-    "cardTotal": "合計 {total} JPYC",
-    "cardBreakdown": "価格 {price} + 手数料 {fee}"
+    "cardTotal": "{total} JPYC",
+    "cardBreakdown": "(価格 {price} + 手数料 {fee})"
   },
   "CreatorStorePurchase": {
     "dialogLabel": "デジタル商品を購入",
