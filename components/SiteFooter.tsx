@@ -67,6 +67,17 @@ export function SiteFooter() {
             {t('links.discovery')}
           </Link>
         )}
+        {/* /store/library も同様に flag OFF で notFound のため OFF 環境では出さない。
+            購入完了画面以外で唯一の常設導線 (2026-07-31 user 指摘で追加)。 */}
+        {env.enableCreatorStoreUi && (
+          <Link
+            href="/store/library"
+            className="hover:text-slate-700 hover:underline"
+            prefetch={false}
+          >
+            {t('links.storeLibrary')}
+          </Link>
+        )}
       </nav>
       <p className="mt-3 text-slate-500">
         {t('copyright', {

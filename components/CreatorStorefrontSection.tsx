@@ -1,4 +1,5 @@
 import { useLocale, useTranslations } from 'next-intl';
+import Link from 'next/link';
 import type { Address } from 'viem';
 import {
   handleViewTheme,
@@ -146,6 +147,20 @@ export function CreatorStorefrontSection({
           </li>
         ))}
       </ul>
+      {/* 購入済みの訪問者向けの常設導線 (購入完了画面以外からライブラリへ戻る唯一の入口の一つ)。 */}
+      <p className="mt-3 text-center">
+        <Link
+          href={`/${locale}/store/library`}
+          prefetch={false}
+          className={`text-xs font-medium underline underline-offset-2 ${
+            tokens.dark
+              ? 'text-slate-300 hover:text-white'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          {t('libraryLink')}
+        </Link>
+      </p>
     </section>
   );
 }
