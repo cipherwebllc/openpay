@@ -1,7 +1,10 @@
 import { fireEvent, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithIntl } from '../_helpers/i18n';
-import { CreatorStorePurchaseFlow } from '@/components/CreatorStorePurchaseFlow';
+import {
+  CreatorStorePurchaseFlow,
+  type CreatorStorePurchaseFlowProps,
+} from '@/components/CreatorStorePurchaseFlow';
 
 const state = vi.hoisted(() => ({
   address: '0x1111111111111111111111111111111111111111' as
@@ -139,11 +142,14 @@ const PRODUCT = {
   merchant: '0x2222222222222222222222222222222222222222' as const,
 };
 
-function renderFlow(locale: 'ja' | 'en' = 'ja') {
+function renderFlow(
+  locale: 'ja' | 'en' = 'ja',
+  product: CreatorStorePurchaseFlowProps['product'] = PRODUCT,
+) {
   return renderWithIntl(
     <CreatorStorePurchaseFlow
       open
-      product={PRODUCT}
+      product={product}
       sellerDisclosureHref={`/${locale}/store/seller/0xseller`}
       onClose={vi.fn()}
     />,
@@ -173,6 +179,65 @@ beforeEach(() => {
 });
 
 describe('CreatorStorePurchaseFlow', () => {
+  it('開始画面でメイン画像を表示し、サムネイルで切替・読込失敗時に fallback する', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const imageUrl = 'https://cdn.example.com/product.png';
+    const duplicateGalleryUrl = 'https://cdn.example.com/product-side.png';
+    const galleryUrls = [
+      duplicateGalleryUrl,
+      duplicateGalleryUrl,
+    ];
+    const { container } = renderFlow('ja', {
+      ...PRODUCT,
+      imageUrl,
+      galleryUrls,
+    });
+
+    const largeImage = () =>
+      container.querySelector<HTMLImageElement>('img.max-h-72');
+    expect(largeImage()).toHaveAttribute('src', imageUrl);
+    expect(largeImage()).toHaveAttribute('alt', '');
+    expect(largeImage()).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByRole('button', { name: '1' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    const secondThumbnail = screen.getByRole('button', { name: '2' });
+    fireEvent.click(secondThumbnail);
+
+    expect(largeImage()).toHaveAttribute('src', galleryUrls[0]);
+    expect(secondThumbnail).toHaveAttribute('aria-pressed', 'true');
+    expect(secondThumbnail).toHaveClass('ring-2');
+
+    fireEvent.error(largeImage()!);
+
+    expect(screen.queryByRole('button', { name: '2' })).toBeNull();
+    // 同じ URL の別 index は巻き込まず、失敗したサムネイルだけを除外する。
+    expect(screen.getByRole('button', { name: '3' })).toBeInTheDocument();
+    expect(largeImage()).toHaveAttribute('src', imageUrl);
+    expect(screen.getByRole('button', { name: '1' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('imageUrl がなければギャラリー先頭を大きく表示し、1 枚ではサムネイルを出さない', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const galleryUrl = 'https://cdn.example.com/product-side.png';
+    const { container } = renderFlow('ja', {
+      ...PRODUCT,
+      galleryUrls: [galleryUrl],
+    });
+
+    expect(
+      container.querySelector<HTMLImageElement>('img.max-h-72'),
+    ).toHaveAttribute('src', galleryUrl);
+    expect(screen.queryByRole('button', { name: '1' })).toBeNull();
+  });
+
   it('wallet 未接続時は接続ボタンをフロー内に表示する (ヘッダーなしプロフ対応)', () => {
     state.address = undefined;
     state.phase = 'idle';

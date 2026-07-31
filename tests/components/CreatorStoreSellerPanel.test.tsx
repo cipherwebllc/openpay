@@ -50,6 +50,7 @@ type Product = {
   desc?: string;
   emoji?: string;
   imageUrl?: string;
+  galleryUrls?: readonly string[];
   priceJpyc: string;
   contentKind: 'url' | 'text';
   label: 'download' | 'pdf' | 'zip' | 'prompt' | 'api' | 'external';
@@ -210,6 +211,8 @@ describe('CreatorStoreSellerPanel', () => {
       /受け取り先にこのウォレットは使えません/,
     ],
     ['invalid imageUrl', /画像 URL は https:\/\//],
+    ['too many gallery images', /追加画像は最大 4 枚/],
+    ['invalid gallery image', /追加画像 URL は 1 行ごとに https:\/\//],
   ])(
     'invalid_product の detail「%s」を具体的な理由メッセージで表示する',
     async (invalidDetail, expectedMessage) => {
@@ -326,6 +329,17 @@ describe('CreatorStoreSellerPanel', () => {
         target: { value: ' https://cdn.example.com/product.png ' },
       },
     );
+    fireEvent.change(
+      screen.getByRole('textbox', {
+        name: '追加画像 URL (任意・最大 4)',
+      }),
+      {
+        target: {
+          value:
+            ' https://cdn.example.com/angle-a.png \n\nhttps://cdn.example.com/angle-b.png  ',
+        },
+      },
+    );
     fireEvent.change(screen.getByRole('textbox', { name: '提供する URL' }), {
       target: { value: 'https://example.com/download' },
     });
@@ -349,6 +363,10 @@ describe('CreatorStoreSellerPanel', () => {
       JSON.parse((postCall?.[1] as RequestInit).body as string),
     ).toMatchObject({
       imageUrl: 'https://cdn.example.com/product.png',
+      galleryUrls: [
+        'https://cdn.example.com/angle-a.png',
+        'https://cdn.example.com/angle-b.png',
+      ],
     });
     expect(screen.getByText(/商品はまだありません/)).toBeInTheDocument();
     expect(screen.queryByText('新商品')).not.toBeInTheDocument();

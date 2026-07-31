@@ -32,6 +32,7 @@ export const MAX_HOSTED_PER_OWNER = 12;
 export const MAX_HOSTED_TITLE_LEN = 60;
 export const MAX_HOSTED_DESC_LEN = 200;
 export const MAX_HOSTED_URL_LEN = 512;
+export const MAX_HOSTED_GALLERY_IMAGES = 4;
 /** text 商品 (プロンプト / API キー / 手順) の上限 (Unicode code points)。 */
 export const MAX_HOSTED_TEXT_CODE_POINTS = 20_000;
 /** 価格の範囲 (human JPYC 整数)。 */
@@ -65,6 +66,7 @@ export type HostedProduct = {
   desc?: string;
   emoji?: string;
   imageUrl?: string;
+  galleryUrls?: readonly string[];
   /** human JPYC 整数の文字列 (売り手受領額。買い手は別途 x402 手数料を上乗せ)。 */
   priceJpyc: string;
   contentKind: HostedContentKind;
@@ -177,6 +179,7 @@ export type HostedProductInput = {
   desc?: unknown;
   emoji?: unknown;
   imageUrl?: unknown;
+  galleryUrls?: unknown;
   priceJpyc: unknown;
   contentKind: unknown;
   label?: unknown;
@@ -238,6 +241,31 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
     }
     imageUrl = candidate || undefined;
   }
+  let galleryUrls: string[] | undefined;
+  if (input.galleryUrls !== undefined) {
+    if (!Array.isArray(input.galleryUrls)) {
+      return { ok: false, error: 'invalid gallery image' };
+    }
+    if (input.galleryUrls.length > MAX_HOSTED_GALLERY_IMAGES) {
+      return { ok: false, error: 'too many gallery images' };
+    }
+    const candidates: string[] = [];
+    for (const value of input.galleryUrls) {
+      if (typeof value !== 'string') {
+        return { ok: false, error: 'invalid gallery image' };
+      }
+      const candidate = value.trim();
+      if (
+        !candidate ||
+        candidate.length > MAX_HOSTED_URL_LEN ||
+        !isHttpsUrl(candidate)
+      ) {
+        return { ok: false, error: 'invalid gallery image' };
+      }
+      candidates.push(candidate);
+    }
+    galleryUrls = candidates.length > 0 ? candidates : undefined;
+  }
 
   if (typeof input.priceJpyc !== 'string' || !DECIMAL_RE.test(input.priceJpyc)) {
     return { ok: false, error: 'invalid price' };
@@ -285,6 +313,7 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       ...(desc ? { desc } : {}),
       ...(sanitizeEmoji(input.emoji) ? { emoji: sanitizeEmoji(input.emoji) } : {}),
       ...(imageUrl ? { imageUrl } : {}),
+      ...(galleryUrls ? { galleryUrls } : {}),
       priceJpyc: price.toString(),
       contentKind,
       label,
@@ -338,6 +367,22 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
     isHttpsUrl(imageUrlCandidate)
       ? imageUrlCandidate
       : undefined;
+  const galleryUrls: string[] = [];
+  if (Array.isArray(r.galleryUrls)) {
+    for (const value of r.galleryUrls) {
+      if (galleryUrls.length >= MAX_HOSTED_GALLERY_IMAGES) break;
+      if (typeof value !== 'string') continue;
+      const candidate = value.trim();
+      if (
+        !candidate ||
+        candidate.length > MAX_HOSTED_URL_LEN ||
+        !isHttpsUrl(candidate)
+      ) {
+        continue;
+      }
+      galleryUrls.push(candidate);
+    }
+  }
   return {
     id: r.id,
     owner: getAddress(r.owner),
@@ -346,6 +391,7 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
     ...(desc ? { desc } : {}),
     ...(emoji ? { emoji } : {}),
     ...(imageUrl ? { imageUrl } : {}),
+    ...(galleryUrls.length > 0 ? { galleryUrls } : {}),
     priceJpyc: r.priceJpyc,
     contentKind: r.contentKind,
     label,
@@ -612,7 +658,12 @@ export async function replaceHostedSellerProduct(input: {
   owner: string;
   metadata: Pick<
     HostedProduct,
-    'title' | 'imageUrl' | 'priceJpyc' | 'label' | 'saleActive'
+    | 'title'
+    | 'imageUrl'
+    | 'galleryUrls'
+    | 'priceJpyc'
+    | 'label'
+    | 'saleActive'
   > & {
     desc?: string;
     emoji?: string;
@@ -640,6 +691,9 @@ export async function replaceHostedSellerProduct(input: {
     ...(input.metadata.desc ? { desc: input.metadata.desc } : {}),
     ...(input.metadata.emoji ? { emoji: input.metadata.emoji } : {}),
     ...(input.metadata.imageUrl ? { imageUrl: input.metadata.imageUrl } : {}),
+    ...(input.metadata.galleryUrls?.length
+      ? { galleryUrls: input.metadata.galleryUrls }
+      : {}),
     priceJpyc: input.metadata.priceJpyc,
     contentKind: input.content?.kind ?? current.contentKind,
     label: input.metadata.label,

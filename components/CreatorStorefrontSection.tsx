@@ -16,6 +16,7 @@ export type CreatorStorefrontProduct = {
   desc?: string;
   emoji?: string;
   imageUrl?: string;
+  galleryUrls?: readonly string[];
   priceJpyc: string;
   payTo: Address;
   contentKind: 'url' | 'text';
@@ -166,6 +167,12 @@ export function CreatorStorefrontSection({
                       title: product.title,
                       ...(product.desc
                         ? { description: product.desc }
+                        : {}),
+                      ...(product.imageUrl
+                        ? { imageUrl: product.imageUrl }
+                        : {}),
+                      ...(product.galleryUrls
+                        ? { galleryUrls: product.galleryUrls }
                         : {}),
                       priceJpyc: product.priceJpyc,
                       merchant: product.payTo,

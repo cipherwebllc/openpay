@@ -21,6 +21,8 @@ export type CreatorStorePurchaseFlowProps = {
     id: string;
     title: string;
     description?: string;
+    imageUrl?: string;
+    galleryUrls?: readonly string[];
     priceJpyc: string;
     merchant: Address;
   };
@@ -278,7 +280,18 @@ export function CreatorStorePurchaseFlow({
             <h2 className="mt-3 text-xl font-black text-slate-900">
               {t('startHeading')}
             </h2>
-            <p className="mt-2 font-bold text-slate-900">{product.title}</p>
+            <p
+              id="creator-store-purchase-product-title"
+              className="mt-2 font-bold text-slate-900"
+            >
+              {product.title}
+            </p>
+            <CreatorStorePurchaseGallery
+              key={product.id}
+              imageUrl={product.imageUrl}
+              galleryUrls={product.galleryUrls}
+              labelledBy="creator-store-purchase-product-title"
+            />
             {/* 買い手の意思決定基準は合計 (2026-07-31 user 裁定)。式は購入 hook の
                 server quote 照合と同一関数 = 表示と実請求の乖離なし。 */}
             <p className="mt-2 text-lg font-black text-slate-900">
@@ -354,6 +367,100 @@ export function CreatorStorePurchaseFlow({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function CreatorStorePurchaseGallery({
+  imageUrl,
+  galleryUrls,
+  labelledBy,
+}: {
+  imageUrl?: string;
+  galleryUrls?: readonly string[];
+  labelledBy: string;
+}) {
+  const images = [
+    ...(imageUrl ? [{ id: 'main', url: imageUrl }] : []),
+    ...(galleryUrls ?? []).map((url, index) => ({
+      id: `gallery-${index}`,
+      url,
+    })),
+  ].map((image, position) => ({ ...image, position }));
+  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const [failedImageIds, setFailedImageIds] = useState<readonly string[]>([]);
+  const visibleImages = images.filter(
+    (image) => !failedImageIds.includes(image.id),
+  );
+  const selectedImage =
+    visibleImages.find((image) => image.id === selectedImageId) ??
+    visibleImages[0] ??
+    null;
+
+  const hideFailedImage = (imageId: string) => {
+    // 第三者画像 1 枚の障害を残りのギャラリー表示へ波及させない。
+    setFailedImageIds((current) =>
+      current.includes(imageId) ? current : [...current, imageId],
+    );
+  };
+
+  if (!selectedImage) return null;
+
+  return (
+    <div className="mt-4">
+      {/* 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制する。 */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={selectedImage.url}
+        alt=""
+        aria-hidden
+        width={640}
+        height={360}
+        referrerPolicy="no-referrer"
+        className="h-52 max-h-72 w-full rounded-2xl bg-slate-100 object-cover sm:h-64"
+        onError={() => hideFailedImage(selectedImage.id)}
+      />
+      {visibleImages.length >= 2 ? (
+        <div
+          role="group"
+          aria-labelledby={labelledBy}
+          className="mt-3 flex flex-wrap justify-center gap-2"
+        >
+          {visibleImages.map((image) => {
+            const selected = image.id === selectedImage.id;
+            return (
+              <button
+                key={image.id}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => setSelectedImageId(image.id)}
+                className={`rounded-xl border bg-white p-1 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40 ${
+                  selected
+                    ? 'border-brand text-brand-dark ring-2 ring-brand/30'
+                    : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                }`}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={image.url}
+                  alt=""
+                  aria-hidden
+                  width={48}
+                  height={48}
+                  referrerPolicy="no-referrer"
+                  loading="lazy"
+                  className="h-12 w-12 rounded-lg object-cover"
+                  onError={() => hideFailedImage(image.id)}
+                />
+                {/* 掟 8: button の a11y 名は aria-label ではなく、この可視番号から導出する。 */}
+                <span className="mt-0.5 block text-center text-[10px] font-bold">
+                  {image.position + 1}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

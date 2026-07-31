@@ -19,6 +19,11 @@ const PRODUCT = {
   id: `h_${'a'.repeat(32)}`,
   title: 'AI プロンプト集',
   description: '仕事で使えるテンプレート',
+  imageUrl: 'https://cdn.example.com/product.png',
+  galleryUrls: [
+    'https://cdn.example.com/product-side.png',
+    'https://cdn.example.com/product-back.png',
+  ],
   priceJpyc: '1200',
   merchant: '0x2222222222222222222222222222222222222222' as const,
 };

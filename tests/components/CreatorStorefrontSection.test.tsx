@@ -135,6 +135,11 @@ describe('CreatorStorefrontSection', () => {
       ...PRODUCT,
       id: `h_${'b'.repeat(32)}`,
       title: '第2の商品',
+      imageUrl: 'https://cdn.example.com/product.png',
+      galleryUrls: [
+        'https://cdn.example.com/product-side.png',
+        'https://cdn.example.com/product-back.png',
+      ],
     };
     renderWithIntl(
       <CreatorStorefrontSection
@@ -150,7 +155,11 @@ describe('CreatorStorefrontSection', () => {
       expect(purchaseFlowSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           open: true,
-          product: expect.objectContaining({ id: secondProduct.id }),
+          product: expect.objectContaining({
+            id: secondProduct.id,
+            imageUrl: secondProduct.imageUrl,
+            galleryUrls: secondProduct.galleryUrls,
+          }),
         }),
       );
     });

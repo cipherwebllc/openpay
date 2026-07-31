@@ -28,6 +28,7 @@ type ProductSummary = {
   desc?: string;
   emoji?: string;
   imageUrl?: string;
+  galleryUrls?: readonly string[];
   priceJpyc: string;
   contentKind: 'url' | 'text';
   label: HostedLabel;
@@ -53,6 +54,7 @@ type ProductForm = {
   desc: string;
   emoji: string;
   imageUrl: string;
+  galleryUrls: string;
   priceJpyc: string;
   contentKind: 'url' | 'text';
   label: HostedLabel;
@@ -97,6 +99,7 @@ const EMPTY_PRODUCT_FORM: ProductForm = {
   desc: '',
   emoji: '',
   imageUrl: '',
+  galleryUrls: '',
   priceJpyc: '',
   contentKind: 'url',
   label: 'download',
@@ -137,6 +140,8 @@ const DETAIL_MESSAGE_KEYS: Record<string, string> = {
   'invalid title': 'detailInvalidTitle',
   'invalid desc': 'detailInvalidDesc',
   'invalid imageUrl': 'detailInvalidImageUrl',
+  'too many gallery images': 'detailTooManyGalleryImages',
+  'invalid gallery image': 'detailInvalidGalleryImage',
   'invalid price': 'detailInvalidPrice',
   'price out of range': 'detailInvalidPrice',
   'content url must be https': 'detailInvalidUrl',
@@ -442,6 +447,7 @@ function SignedInSellerPanel({
         desc: product.desc ?? '',
         emoji: product.emoji ?? '',
         imageUrl: product.imageUrl ?? '',
+        galleryUrls: product.galleryUrls?.join('\n') ?? '',
         priceJpyc: product.priceJpyc,
         contentKind: content.kind,
         label: product.label,
@@ -470,6 +476,10 @@ function SignedInSellerPanel({
             desc: form.desc.trim() || null,
             emoji: form.emoji.trim() || null,
             imageUrl: form.imageUrl.trim() || null,
+            galleryUrls: form.galleryUrls
+              .split(/\r?\n/)
+              .map((url) => url.trim())
+              .filter(Boolean),
             priceJpyc: form.priceJpyc,
             contentKind: form.contentKind,
             label: form.label,
@@ -890,6 +900,21 @@ function SignedInSellerPanel({
               value={productForm.imageUrl}
               onChange={(event) =>
                 updateProduct({ imageUrl: event.target.value })
+              }
+              className={inputClass}
+            />
+          </label>
+          <label
+            htmlFor="creator-store-product-gallery-urls"
+            className="block text-sm font-medium text-slate-700 sm:col-span-2"
+          >
+            {t('galleryUrlsLabel')}
+            <textarea
+              id="creator-store-product-gallery-urls"
+              rows={4}
+              value={productForm.galleryUrls}
+              onChange={(event) =>
+                updateProduct({ galleryUrls: event.target.value })
               }
               className={inputClass}
             />
