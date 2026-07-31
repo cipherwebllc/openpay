@@ -1019,7 +1019,8 @@
       "prompt": "Prompt",
       "api": "API",
       "external": "External link"
-    }
+    },
+    "libraryLink": "View your purchased items in the library"
   },
   "CreatorStorePurchase": {
     "dialogLabel": "Purchase digital product",
@@ -1466,7 +1467,8 @@
       "disclaimer": "Disclaimer",
       "tokutei": "Business Disclosure",
       "transparency": "Operational Transparency",
-      "discovery": "AI Store"
+      "discovery": "AI Store",
+      "storeLibrary": "Purchase library"
     },
     "sourceLink": "Source on GitHub",
     "xLink": "OpenPay on X",

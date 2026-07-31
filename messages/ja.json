@@ -1019,7 +1019,8 @@
       "prompt": "プロンプト",
       "api": "API",
       "external": "外部リンク"
-    }
+    },
+    "libraryLink": "購入済みの商品はライブラリで見られます"
   },
   "CreatorStorePurchase": {
     "dialogLabel": "デジタル商品を購入",
@@ -1466,7 +1467,8 @@
       "disclaimer": "免責事項",
       "tokutei": "特商法表記",
       "transparency": "運用透明性",
-      "discovery": "AIストア"
+      "discovery": "AIストア",
+      "storeLibrary": "購入済みライブラリ"
     },
     "sourceLink": "ソースコード (GitHub)",
     "xLink": "OpenPay の X (旧 Twitter)",
