@@ -5,6 +5,8 @@ import { useLocale, useTranslations } from 'next-intl';
 import { AlertTriangle, Loader2, WalletCards, X } from 'lucide-react';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from '@/components/ConnectButton';
+import { formatUnits } from 'viem';
+import { hostedPurchaseFeeValue } from '@/lib/x402/hostedPurchaseWire';
 import type { Address } from 'viem';
 import { CreatorStorePurchaseConfirmation } from '@/components/CreatorStorePurchaseConfirmation';
 import { CreatorStorePurchaseState } from '@/components/CreatorStorePurchaseState';
@@ -277,8 +279,29 @@ export function CreatorStorePurchaseFlow({
               {t('startHeading')}
             </h2>
             <p className="mt-2 font-bold text-slate-900">{product.title}</p>
-            <p className="mt-1 text-sm text-slate-600">
-              {t('listedPrice', { price: product.priceJpyc })}
+            {/* 買い手の意思決定基準は合計 (2026-07-31 user 裁定)。式は購入 hook の
+                server quote 照合と同一関数 = 表示と実請求の乖離なし。 */}
+            <p className="mt-2 text-lg font-black text-slate-900">
+              {t('payTotal', {
+                total: formatUnits(
+                  BigInt(product.priceJpyc) * 10n ** 18n +
+                    hostedPurchaseFeeValue(
+                      BigInt(product.priceJpyc) * 10n ** 18n,
+                    ),
+                  18,
+                ),
+              })}
+            </p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {t('priceBreakdown', {
+                price: product.priceJpyc,
+                fee: formatUnits(
+                  hostedPurchaseFeeValue(
+                    BigInt(product.priceJpyc) * 10n ** 18n,
+                  ),
+                  18,
+                ),
+              })}
             </p>
             {!address ? (
               <div className="mt-5 space-y-3">

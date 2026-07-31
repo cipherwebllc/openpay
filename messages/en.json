@@ -1020,13 +1020,14 @@
       "api": "API",
       "external": "External link"
     },
-    "libraryLink": "View your purchased items in the library"
+    "libraryLink": "View your purchased items in the library",
+    "cardTotal": "Total {total} JPYC",
+    "cardBreakdown": "Price {price} + fee {fee}"
   },
   "CreatorStorePurchase": {
     "dialogLabel": "Purchase digital product",
     "close": "Close",
     "startHeading": "Prepare your purchase",
-    "listedPrice": "Listed price: {price} JPYC",
     "walletRequired": "Connect a wallet to purchase.",
     "signInStatement": "Sign in to purchase a digital product on OpenPay",
     "signInAndReview": "Sign in and review purchase",
@@ -1100,7 +1101,9 @@
     "needsSupportTitle": "Confirmation is taking longer than expected",
     "needsSupportConfirmedBody": "Payment is confirmed, but delivery cannot be verified. Do not pay again; contact the seller.",
     "needsSupportUnknownBody": "The payment result cannot be determined. Do not pay again; contact the seller.",
-    "contactSupport": "Contact the seller"
+    "contactSupport": "Contact the seller",
+    "payTotal": "Total to pay: {total} JPYC",
+    "priceBreakdown": "Price {price} JPYC + fee {fee} JPYC"
   },
   "CreatorStoreLibrary": {
     "eyebrow": "Purchased",

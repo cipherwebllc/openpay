@@ -48,7 +48,7 @@ describe('CreatorStorefrontSection', () => {
     ).toBeInTheDocument();
     expect(screen.getByText('AI プロンプト集')).toBeInTheDocument();
     expect(screen.getByText('仕事で使えるテンプレート')).toBeInTheDocument();
-    expect(screen.getByText(/1,200 JPYC · Polygon/)).toBeInTheDocument();
+    expect(screen.getByText(/合計 1,212 JPYC · Polygon/)).toBeInTheDocument();
     expect(screen.getByText('🧠')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.getByRole('button', { name: '購入する' })).toBeEnabled();
   });
