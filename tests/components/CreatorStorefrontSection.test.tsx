@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import { CreatorStorefrontSection } from '@/components/CreatorStorefrontSection';
 
@@ -51,6 +51,44 @@ describe('CreatorStorefrontSection', () => {
     expect(screen.getByText(/1,200 JPYC · Polygon/)).toBeInTheDocument();
     expect(screen.getByText('🧠')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.getByRole('button', { name: '購入する' })).toBeEnabled();
+  });
+
+  it('商品画像を装飾表示し、読込失敗時は絵文字または ✦ へ戻す', () => {
+    const imageUrl = 'https://cdn.example.com/product.png';
+    const withEmoji = renderWithIntl(
+      <CreatorStorefrontSection
+        products={[{ ...PRODUCT, imageUrl }]}
+        accent="#2563eb"
+        theme="clean"
+        sellerDisclosureHref="/ja/store/seller/0x1234"
+      />,
+    );
+    const image = withEmoji.container.querySelector(`img[src="${imageUrl}"]`);
+    expect(image).toHaveClass('h-10', 'w-10', 'rounded-xl', 'object-cover');
+    expect(image).toHaveAttribute('alt', '');
+    expect(image).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByText('🧠')).not.toBeInTheDocument();
+
+    fireEvent.error(image!);
+
+    expect(
+      withEmoji.container.querySelector(`img[src="${imageUrl}"]`),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('🧠')).toHaveAttribute('aria-hidden', 'true');
+    withEmoji.unmount();
+
+    const withoutEmoji = renderWithIntl(
+      <CreatorStorefrontSection
+        products={[{ ...PRODUCT, emoji: undefined, imageUrl }]}
+        accent="#2563eb"
+        theme="clean"
+        sellerDisclosureHref="/ja/store/seller/0x1234"
+      />,
+    );
+    fireEvent.error(
+      withoutEmoji.container.querySelector(`img[src="${imageUrl}"]`)!,
+    );
+    expect(screen.getByText('✦')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('商品ゼロは wrapper を描画せず、night は可読色を使う', () => {

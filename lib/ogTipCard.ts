@@ -432,12 +432,17 @@ export interface ProductOgInput {
   color?: string;
   title: string;
   emoji?: string;
+  imageUrl?: string;
   priceJpyc: string;
   locale: TipOgLocale;
 }
 
+export interface ProductOgModel extends OgCardModel {
+  imageUrl?: string;
+}
+
 /** 販売可能な hosted 商品の OG カード描画モデル (純関数・単体テスト対象)。 */
-export function buildProductOgModel(input: ProductOgInput): OgCardModel {
+export function buildProductOgModel(input: ProductOgInput): ProductOgModel {
   const ja = input.locale === 'ja';
   const titleClean = stripControlChars(input.title).trim();
   const heading =
@@ -450,6 +455,7 @@ export function buildProductOgModel(input: ProductOgInput): OgCardModel {
   const emojiClean = input.emoji
     ? stripControlChars(input.emoji).trim()
     : '';
+  const imageUrl = input.imageUrl?.trim();
   const price = new Intl.NumberFormat(input.locale).format(
     Number(input.priceJpyc),
   );
@@ -462,7 +468,10 @@ export function buildProductOgModel(input: ProductOgInput): OgCardModel {
     heading,
     handleLine: name ? `${name} · @${input.handle}` : `@${input.handle}`,
     chips: [`${price} JPYC · Polygon`],
-    initial: emojiClean || '✦',
+    // '✦' 等の飾り glyph は NotoSansJP subset にも twemoji にも無く豆腐化する
+    // (2026-07-31 実 render で確認)。絵文字なしは商品名の先頭 1 文字 (プロフ/店舗と同じ導出)。
+    initial: emojiClean || firstGrapheme(heading).toUpperCase(),
+    ...(imageUrl ? { imageUrl } : {}),
     footer: ja ? 'デジタル商品を購入' : 'Buy this digital product',
     url: 'open-pay.jp',
     brand: 'OpenPay',

@@ -166,6 +166,40 @@ describe('hosted 入力検証', () => {
     expect(url(`https://x.example.com/${'a'.repeat(600)}`)).toBe(false);
   });
 
+  it('商品画像は任意で、trim 済み https URL のみ 512 文字まで受理する', async () => {
+    const { parseHostedInput, MAX_HOSTED_URL_LEN } = await mod();
+    for (const imageUrl of [undefined, null, '', '   ']) {
+      const parsed = parseHostedInput(baseInput({ imageUrl }));
+      expect(parsed.ok).toBe(true);
+      expect(parsed.ok && parsed.product).not.toHaveProperty('imageUrl');
+    }
+
+    const accepted = parseHostedInput(
+      baseInput({ imageUrl: '  https://cdn.example.com/product.png  ' }),
+    );
+    expect(accepted.ok && accepted.product.imageUrl).toBe(
+      'https://cdn.example.com/product.png',
+    );
+
+    const prefix = 'https://cdn.example.com/';
+    const atLimit = `${prefix}${'a'.repeat(MAX_HOSTED_URL_LEN - prefix.length)}`;
+    expect(atLimit).toHaveLength(MAX_HOSTED_URL_LEN);
+    expect(parseHostedInput(baseInput({ imageUrl: atLimit })).ok).toBe(true);
+
+    for (const imageUrl of [
+      'http://cdn.example.com/product.png',
+      'javascript:alert(1)',
+      'data:image/png;base64,AAAA',
+      42,
+      `${atLimit}a`,
+    ]) {
+      expect(parseHostedInput(baseInput({ imageUrl }))).toEqual({
+        ok: false,
+        error: 'invalid imageUrl',
+      });
+    }
+  });
+
   it('label 既定は kind から決まり、不正 label は既定へ倒す', async () => {
     const { parseHostedInput } = await mod();
     const textDefault = parseHostedInput(baseInput());
@@ -201,6 +235,25 @@ describe('hosted 作成と分離', () => {
     ]);
     expect(touched.some((k) => k.includes('x402:resources:index'))).toBe(false);
     expect(touched.some((k) => k === 'x402:resource')).toBe(false);
+  });
+
+  it('商品画像は購入時 snapshot に含めない (表示専用の不変 fence)', async () => {
+    const m = await mod();
+    const parsed = m.parseHostedInput(
+      baseInput({ imageUrl: 'https://cdn.example.com/product.png' }),
+    );
+    if (!parsed.ok) throw new Error('setup');
+    const created = await m.createHostedProduct(parsed, 1000);
+    if (!created.ok) throw new Error('setup');
+
+    expect(m.hostedPurchaseMetadata(created.product)).toEqual({
+      owner: OWNER,
+      payTo: OWNER,
+      title: 'AI プロンプト集',
+      priceJpyc: '300',
+      contentKind: 'text',
+      label: 'prompt',
+    });
   });
 
   it('owner あたり上限を超えたら too_many (cap は Lua 内で判定)', async () => {
@@ -335,6 +388,13 @@ describe('hosted 更新・revision・moderation', () => {
     const unavailableId = 'h_' + 'd'.repeat(32);
     const base = await m.getHostedProduct(id);
     if (!base || base === 'storage') throw new Error('setup');
+    kvMocks.store.set(
+      `x402:hosted:${id}`,
+      JSON.stringify({
+        ...base,
+        imageUrl: 'https://cdn.example.com/product.png',
+      }),
+    );
     kvMocks.lists.set(`x402:hosted:owner:${OWNER.toLowerCase()}`, [
       id,
       inactiveId,
@@ -356,6 +416,9 @@ describe('hosted 更新・revision・moderation', () => {
     const products = await m.listAvailableHostedForOwner(OWNER);
 
     expect(products?.map((product) => product.id)).toEqual([id]);
+    expect(products?.[0]?.imageUrl).toBe(
+      'https://cdn.example.com/product.png',
+    );
     const { kvMget } = await import('@/lib/kv');
     expect(kvMget).toHaveBeenCalledWith([
       `x402:hosted:${id}`,
@@ -386,6 +449,7 @@ describe('hosted 更新・revision・moderation', () => {
         title: '更新後',
         desc: '説明',
         emoji: '🧠',
+        imageUrl: 'https://cdn.example.com/product.png',
         priceJpyc: '500',
         label: 'api',
         saleActive: false,
@@ -397,6 +461,7 @@ describe('hosted 更新・revision・moderation', () => {
       title: '更新後',
       desc: '説明',
       emoji: '🧠',
+      imageUrl: 'https://cdn.example.com/product.png',
       priceJpyc: '500',
       label: 'api',
       saleActive: false,
@@ -490,7 +555,17 @@ describe('KV 読込の untrusted 検証', () => {
       contentAvailable: true,
       createdAt: 1,
     };
-    expect(parseStoredHostedProduct(JSON.stringify(valid))?.title).toBe('ok');
+    const legacy = parseStoredHostedProduct(JSON.stringify(valid));
+    expect(legacy?.title).toBe('ok');
+    expect(legacy).not.toHaveProperty('imageUrl');
+    expect(
+      parseStoredHostedProduct(
+        JSON.stringify({
+          ...valid,
+          imageUrl: ' https://cdn.example.com/product.png ',
+        }),
+      )?.imageUrl,
+    ).toBe('https://cdn.example.com/product.png');
     expect(
       parseStoredHostedProduct(JSON.stringify({ ...valid, priceJpyc: '01' })),
     ).toBeNull();

@@ -64,6 +64,7 @@ export type HostedProduct = {
   title: string;
   desc?: string;
   emoji?: string;
+  imageUrl?: string;
   /** human JPYC 整数の文字列 (売り手受領額。買い手は別途 x402 手数料を上乗せ)。 */
   priceJpyc: string;
   contentKind: HostedContentKind;
@@ -175,6 +176,7 @@ export type HostedProductInput = {
   title: unknown;
   desc?: unknown;
   emoji?: unknown;
+  imageUrl?: unknown;
   priceJpyc: unknown;
   contentKind: unknown;
   label?: unknown;
@@ -217,6 +219,24 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       : sanitizeLine(input.desc, MAX_HOSTED_DESC_LEN);
   if (input.desc !== undefined && input.desc !== null && !desc) {
     return { ok: false, error: 'invalid desc' };
+  }
+  let imageUrl: string | undefined;
+  if (
+    input.imageUrl !== undefined &&
+    input.imageUrl !== null &&
+    input.imageUrl !== ''
+  ) {
+    if (typeof input.imageUrl !== 'string') {
+      return { ok: false, error: 'invalid imageUrl' };
+    }
+    const candidate = input.imageUrl.trim();
+    if (
+      candidate &&
+      (candidate.length > MAX_HOSTED_URL_LEN || !isHttpsUrl(candidate))
+    ) {
+      return { ok: false, error: 'invalid imageUrl' };
+    }
+    imageUrl = candidate || undefined;
   }
 
   if (typeof input.priceJpyc !== 'string' || !DECIMAL_RE.test(input.priceJpyc)) {
@@ -264,6 +284,7 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       title,
       ...(desc ? { desc } : {}),
       ...(sanitizeEmoji(input.emoji) ? { emoji: sanitizeEmoji(input.emoji) } : {}),
+      ...(imageUrl ? { imageUrl } : {}),
       priceJpyc: price.toString(),
       contentKind,
       label,
@@ -309,6 +330,14 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
       : 'download';
   const desc = sanitizeLine(r.desc, MAX_HOSTED_DESC_LEN);
   const emoji = sanitizeEmoji(r.emoji);
+  const imageUrlCandidate =
+    typeof r.imageUrl === 'string' ? r.imageUrl.trim() : undefined;
+  const imageUrl =
+    imageUrlCandidate &&
+    imageUrlCandidate.length <= MAX_HOSTED_URL_LEN &&
+    isHttpsUrl(imageUrlCandidate)
+      ? imageUrlCandidate
+      : undefined;
   return {
     id: r.id,
     owner: getAddress(r.owner),
@@ -316,6 +345,7 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
     title,
     ...(desc ? { desc } : {}),
     ...(emoji ? { emoji } : {}),
+    ...(imageUrl ? { imageUrl } : {}),
     priceJpyc: r.priceJpyc,
     contentKind: r.contentKind,
     label,
@@ -582,7 +612,7 @@ export async function replaceHostedSellerProduct(input: {
   owner: string;
   metadata: Pick<
     HostedProduct,
-    'title' | 'priceJpyc' | 'label' | 'saleActive'
+    'title' | 'imageUrl' | 'priceJpyc' | 'label' | 'saleActive'
   > & {
     desc?: string;
     emoji?: string;
@@ -609,6 +639,7 @@ export async function replaceHostedSellerProduct(input: {
     title: input.metadata.title,
     ...(input.metadata.desc ? { desc: input.metadata.desc } : {}),
     ...(input.metadata.emoji ? { emoji: input.metadata.emoji } : {}),
+    ...(input.metadata.imageUrl ? { imageUrl: input.metadata.imageUrl } : {}),
     priceJpyc: input.metadata.priceJpyc,
     contentKind: input.content?.kind ?? current.contentKind,
     label: input.metadata.label,

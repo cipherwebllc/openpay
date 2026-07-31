@@ -307,6 +307,79 @@ describe('GET /api/og/handle', () => {
     expect(ssrf.fetchSafe).not.toHaveBeenCalled();
   });
 
+  it('商品画像は KV 権威 URL を既存 avatar pipeline で data URL 化して描く', async () => {
+    const productId = `h_${'d'.repeat(32)}`;
+    const imageUrl = 'https://cdn.example.com/product.png';
+    h.enableCreatorStore = true;
+    h.enableCreatorStoreUi = true;
+    hosted.listAvailableForOwner.mockResolvedValue([
+      {
+        id: productId,
+        title: '画像つき商品',
+        emoji: '🧠',
+        imageUrl,
+        priceJpyc: '800',
+        saleActive: true,
+        contentAvailable: true,
+      },
+    ]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(new Uint8Array([137, 80, 78, 71]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        }),
+      ),
+    );
+
+    const { element } = await callGet(
+      `h=masia&locale=ja&product=${productId}&imageUrl=https://evil.example/forged.png`,
+    );
+
+    expect(ssrf.fetchSafe).toHaveBeenCalledWith(imageUrl, {
+      redirect: 'error',
+      timeoutMs: 3000,
+      userAgent: 'OpenPay-og-avatar/1.0',
+    });
+    expect(
+      collectImgSrcs(element).filter((src) =>
+        src.startsWith('data:image/png;base64,'),
+      ),
+    ).toHaveLength(2);
+    expect(collectText(element).join(' ')).not.toContain('🧠');
+  });
+
+  it('商品画像の取得失敗は絵文字円へ fallback する', async () => {
+    const productId = `h_${'e'.repeat(32)}`;
+    const imageUrl = 'https://private-dns.example/product.png';
+    h.enableCreatorStore = true;
+    h.enableCreatorStoreUi = true;
+    hosted.listAvailableForOwner.mockResolvedValue([
+      {
+        id: productId,
+        title: 'fallback 商品',
+        emoji: '📦',
+        imageUrl,
+        priceJpyc: '500',
+        saleActive: true,
+        contentAvailable: true,
+      },
+    ]);
+    ssrf.fetchSafe.mockResolvedValueOnce(null);
+
+    const { element } = await callGet(
+      `h=masia&locale=ja&product=${productId}`,
+    );
+
+    expect(ssrf.fetchSafe).toHaveBeenCalledWith(
+      imageUrl,
+      expect.objectContaining({ redirect: 'error' }),
+    );
+    expect(collectImgSrcs(element)).toHaveLength(1);
+    expect(collectText(element).join(' ')).toContain('📦');
+  });
+
   it('商品不一致/販売不可/flag OFF は既存プロフカードへ fallback', async () => {
     const productId = `h_${'b'.repeat(32)}`;
     h.enableCreatorStore = true;

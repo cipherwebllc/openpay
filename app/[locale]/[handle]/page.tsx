@@ -232,6 +232,7 @@ export default async function HandlePage({
       title: product.title,
       ...(product.desc ? { desc: product.desc } : {}),
       ...(product.emoji ? { emoji: product.emoji } : {}),
+      ...(product.imageUrl ? { imageUrl: product.imageUrl } : {}),
       priceJpyc: product.priceJpyc,
       payTo: product.payTo,
       contentKind: product.contentKind,

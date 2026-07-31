@@ -26,6 +26,7 @@ type ProductSummary = {
   title: string;
   desc?: string;
   emoji?: string;
+  imageUrl?: string;
   priceJpyc: string;
   contentKind: 'url' | 'text';
   label: HostedLabel;
@@ -50,6 +51,7 @@ type ProductForm = {
   title: string;
   desc: string;
   emoji: string;
+  imageUrl: string;
   priceJpyc: string;
   contentKind: 'url' | 'text';
   label: HostedLabel;
@@ -93,6 +95,7 @@ const EMPTY_PRODUCT_FORM: ProductForm = {
   title: '',
   desc: '',
   emoji: '',
+  imageUrl: '',
   priceJpyc: '',
   contentKind: 'url',
   label: 'download',
@@ -132,6 +135,7 @@ const DETAIL_MESSAGE_KEYS: Record<string, string> = {
   'payTo must not be the forwarder': 'detailPayToForwarder',
   'invalid title': 'detailInvalidTitle',
   'invalid desc': 'detailInvalidDesc',
+  'invalid imageUrl': 'detailInvalidImageUrl',
   'invalid price': 'detailInvalidPrice',
   'price out of range': 'detailInvalidPrice',
   'content url must be https': 'detailInvalidUrl',
@@ -426,6 +430,7 @@ function SignedInSellerPanel({
         title: product.title,
         desc: product.desc ?? '',
         emoji: product.emoji ?? '',
+        imageUrl: product.imageUrl ?? '',
         priceJpyc: product.priceJpyc,
         contentKind: content.kind,
         label: product.label,
@@ -453,6 +458,7 @@ function SignedInSellerPanel({
             title: form.title,
             desc: form.desc.trim() || null,
             emoji: form.emoji.trim() || null,
+            imageUrl: form.imageUrl.trim() || null,
             priceJpyc: form.priceJpyc,
             contentKind: form.contentKind,
             label: form.label,
@@ -856,6 +862,23 @@ function SignedInSellerPanel({
               value={productForm.emoji}
               onChange={(event) =>
                 updateProduct({ emoji: event.target.value })
+              }
+              className={inputClass}
+            />
+          </label>
+          <label
+            htmlFor="creator-store-product-image-url"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t('imageUrlLabel')}
+            <input
+              id="creator-store-product-image-url"
+              type="url"
+              maxLength={512}
+              placeholder="https://"
+              value={productForm.imageUrl}
+              onChange={(event) =>
+                updateProduct({ imageUrl: event.target.value })
               }
               className={inputClass}
             />
