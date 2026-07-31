@@ -200,6 +200,56 @@ describe('hosted 入力検証', () => {
     }
   });
 
+  it('追加ギャラリー画像は最大 4 枚の trim 済み https URL のみ受理する', async () => {
+    const {
+      parseHostedInput,
+      MAX_HOSTED_GALLERY_IMAGES,
+      MAX_HOSTED_URL_LEN,
+    } = await mod();
+    expect(MAX_HOSTED_GALLERY_IMAGES).toBe(4);
+
+    const empty = parseHostedInput(baseInput({ galleryUrls: [] }));
+    expect(empty.ok).toBe(true);
+    expect(empty.ok && empty.product).not.toHaveProperty('galleryUrls');
+
+    const four = Array.from(
+      { length: MAX_HOSTED_GALLERY_IMAGES },
+      (_, index) => `  https://cdn.example.com/gallery-${index}.png  `,
+    );
+    const accepted = parseHostedInput(baseInput({ galleryUrls: four }));
+    expect(accepted.ok && accepted.product.galleryUrls).toEqual(
+      four.map((url) => url.trim()),
+    );
+
+    const five = Array.from(
+      { length: MAX_HOSTED_GALLERY_IMAGES + 1 },
+      (_, index) => `https://cdn.example.com/gallery-${index}.png`,
+    );
+    expect(parseHostedInput(baseInput({ galleryUrls: five }))).toEqual({
+      ok: false,
+      error: 'too many gallery images',
+    });
+
+    const prefix = 'https://cdn.example.com/';
+    const atLimit = `${prefix}${'a'.repeat(MAX_HOSTED_URL_LEN - prefix.length)}`;
+    expect(
+      parseHostedInput(baseInput({ galleryUrls: [atLimit] })).ok,
+    ).toBe(true);
+    for (const galleryUrls of [
+      null,
+      'https://cdn.example.com/gallery.png',
+      ['http://cdn.example.com/gallery.png'],
+      [''],
+      [42],
+      [`${atLimit}a`],
+    ]) {
+      expect(parseHostedInput(baseInput({ galleryUrls }))).toEqual({
+        ok: false,
+        error: 'invalid gallery image',
+      });
+    }
+  });
+
   it('label 既定は kind から決まり、不正 label は既定へ倒す', async () => {
     const { parseHostedInput } = await mod();
     const textDefault = parseHostedInput(baseInput());
@@ -240,7 +290,13 @@ describe('hosted 作成と分離', () => {
   it('商品画像は購入時 snapshot に含めない (表示専用の不変 fence)', async () => {
     const m = await mod();
     const parsed = m.parseHostedInput(
-      baseInput({ imageUrl: 'https://cdn.example.com/product.png' }),
+      baseInput({
+        imageUrl: 'https://cdn.example.com/product.png',
+        galleryUrls: [
+          'https://cdn.example.com/gallery-1.png',
+          'https://cdn.example.com/gallery-2.png',
+        ],
+      }),
     );
     if (!parsed.ok) throw new Error('setup');
     const created = await m.createHostedProduct(parsed, 1000);
@@ -283,9 +339,9 @@ describe('hosted 作成と分離', () => {
 });
 
 describe('hosted 更新・revision・moderation', () => {
-  async function seed() {
+  async function seed(over: Record<string, unknown> = {}) {
     const m = await mod();
-    const parsed = m.parseHostedInput(baseInput());
+    const parsed = m.parseHostedInput(baseInput(over));
     if (!parsed.ok) throw new Error('setup');
     const created = await m.createHostedProduct(parsed, 1000);
     if (!created.ok) throw new Error('setup');
@@ -393,6 +449,10 @@ describe('hosted 更新・revision・moderation', () => {
       JSON.stringify({
         ...base,
         imageUrl: 'https://cdn.example.com/product.png',
+        galleryUrls: [
+          'https://cdn.example.com/gallery-1.png',
+          'https://cdn.example.com/gallery-2.png',
+        ],
       }),
     );
     kvMocks.lists.set(`x402:hosted:owner:${OWNER.toLowerCase()}`, [
@@ -419,6 +479,10 @@ describe('hosted 更新・revision・moderation', () => {
     expect(products?.[0]?.imageUrl).toBe(
       'https://cdn.example.com/product.png',
     );
+    expect(products?.[0]?.galleryUrls).toEqual([
+      'https://cdn.example.com/gallery-1.png',
+      'https://cdn.example.com/gallery-2.png',
+    ]);
     const { kvMget } = await import('@/lib/kv');
     expect(kvMget).toHaveBeenCalledWith([
       `x402:hosted:${id}`,
@@ -450,6 +514,10 @@ describe('hosted 更新・revision・moderation', () => {
         desc: '説明',
         emoji: '🧠',
         imageUrl: 'https://cdn.example.com/product.png',
+        galleryUrls: [
+          'https://cdn.example.com/gallery-1.png',
+          'https://cdn.example.com/gallery-2.png',
+        ],
         priceJpyc: '500',
         label: 'api',
         saleActive: false,
@@ -462,6 +530,10 @@ describe('hosted 更新・revision・moderation', () => {
       desc: '説明',
       emoji: '🧠',
       imageUrl: 'https://cdn.example.com/product.png',
+      galleryUrls: [
+        'https://cdn.example.com/gallery-1.png',
+        'https://cdn.example.com/gallery-2.png',
+      ],
       priceJpyc: '500',
       label: 'api',
       saleActive: false,
@@ -480,6 +552,33 @@ describe('hosted 更新・revision・moderation', () => {
       `x402:hosted:${id}`,
       `x402:hosted:${id}:content:2`,
     ]);
+  });
+
+  it('seller full edit は空の追加ギャラリーで既存画像を削除する', async () => {
+    const { m, id } = await seed({
+      galleryUrls: ['https://cdn.example.com/gallery.png'],
+    });
+    const snapshot = await m.getHostedProductUpdateSnapshot(id);
+    if (!snapshot || snapshot === 'storage') throw new Error('setup');
+
+    const updated = await m.replaceHostedSellerProduct({
+      snapshot,
+      owner: OWNER,
+      metadata: {
+        title: snapshot.product.title,
+        galleryUrls: [],
+        priceJpyc: snapshot.product.priceJpyc,
+        label: snapshot.product.label,
+        saleActive: snapshot.product.saleActive,
+      },
+      now: 3000,
+    });
+
+    expect(updated.ok).toBe(true);
+    expect(updated.ok && updated.product).not.toHaveProperty('galleryUrls');
+    const stored = await m.getHostedProduct(id);
+    expect(stored).not.toBe('storage');
+    expect(stored).not.toHaveProperty('galleryUrls');
   });
 
   it('stale seller snapshot は 409 用 conflict にし、新 revision を上書きしない', async () => {
@@ -558,6 +657,7 @@ describe('KV 読込の untrusted 検証', () => {
     const legacy = parseStoredHostedProduct(JSON.stringify(valid));
     expect(legacy?.title).toBe('ok');
     expect(legacy).not.toHaveProperty('imageUrl');
+    expect(legacy).not.toHaveProperty('galleryUrls');
     expect(
       parseStoredHostedProduct(
         JSON.stringify({
@@ -566,6 +666,25 @@ describe('KV 読込の untrusted 検証', () => {
         }),
       )?.imageUrl,
     ).toBe('https://cdn.example.com/product.png');
+    expect(
+      parseStoredHostedProduct(
+        JSON.stringify({
+          ...valid,
+          galleryUrls: [
+            ' https://cdn.example.com/gallery-1.png ',
+            'https://cdn.example.com/gallery-2.png',
+          ],
+        }),
+      )?.galleryUrls,
+    ).toEqual([
+      'https://cdn.example.com/gallery-1.png',
+      'https://cdn.example.com/gallery-2.png',
+    ]);
+    const invalidGallery = parseStoredHostedProduct(
+      JSON.stringify({ ...valid, galleryUrls: 'https://cdn.example.com/a.png' }),
+    );
+    expect(invalidGallery?.title).toBe('ok');
+    expect(invalidGallery).not.toHaveProperty('galleryUrls');
     expect(
       parseStoredHostedProduct(JSON.stringify({ ...valid, priceJpyc: '01' })),
     ).toBeNull();

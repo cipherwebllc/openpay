@@ -174,6 +174,9 @@ beforeEach(() => {
           ...(typeof input.imageUrl === 'string'
             ? { imageUrl: input.imageUrl }
             : {}),
+          ...(Array.isArray(input.galleryUrls) && input.galleryUrls.length > 0
+            ? { galleryUrls: input.galleryUrls }
+            : {}),
           priceJpyc: input.priceJpyc,
           contentKind,
           label: input.label ?? 'prompt',
@@ -327,23 +330,27 @@ describe('creator store seller routes', () => {
     expect(createHostedProduct).not.toHaveBeenCalled();
   });
 
-  it('商品画像 URL を新規作成の server 検証へ渡す', async () => {
+  it('商品画像 URL と追加ギャラリーを新規作成の server 検証へ渡す', async () => {
     const imageUrl = 'https://cdn.example.com/product.png';
+    const galleryUrls = [
+      'https://cdn.example.com/gallery-1.png',
+      'https://cdn.example.com/gallery-2.png',
+    ];
     const response = await createProduct(
       request(
         '/api/store/products',
         'POST',
-        validBody({ imageUrl }),
+        validBody({ imageUrl, galleryUrls }),
       ),
     );
 
     expect(response.status).toBe(201);
     expect(parseHostedInput).toHaveBeenCalledWith(
-      expect.objectContaining({ owner: OWNER, imageUrl }),
+      expect.objectContaining({ owner: OWNER, imageUrl, galleryUrls }),
     );
     expect(createHostedProduct).toHaveBeenCalledWith(
       expect.objectContaining({
-        product: expect.objectContaining({ imageUrl }),
+        product: expect.objectContaining({ imageUrl, galleryUrls }),
       }),
     );
   });
@@ -414,6 +421,10 @@ describe('creator store seller routes', () => {
     const productWithImage = {
       ...baseProduct,
       imageUrl: 'https://cdn.example.com/product.png',
+      galleryUrls: [
+        'https://cdn.example.com/gallery-1.png',
+        'https://cdn.example.com/gallery-2.png',
+      ],
     };
     getHostedProductUpdateSnapshot.mockResolvedValueOnce({
       product: productWithImage,
@@ -438,6 +449,10 @@ describe('creator store seller routes', () => {
       metadata: {
         title: 'Prompt',
         imageUrl: 'https://cdn.example.com/product.png',
+        galleryUrls: [
+          'https://cdn.example.com/gallery-1.png',
+          'https://cdn.example.com/gallery-2.png',
+        ],
         priceJpyc: '300',
         label: 'prompt',
         saleActive: true,
@@ -490,11 +505,15 @@ describe('creator store seller routes', () => {
 
   it('本文変更は新 revision と公開メタを 1 atomic helper で保存する', async () => {
     const imageUrl = 'https://cdn.example.com/product-v2.png';
+    const galleryUrls = [
+      'https://cdn.example.com/gallery-v2-1.png',
+      'https://cdn.example.com/gallery-v2-2.png',
+    ];
     const response = await patchProduct(
       request(
         `/api/store/products/${ID}`,
         'PATCH',
-        validBody({ content: 'version two', imageUrl }),
+        validBody({ content: 'version two', imageUrl, galleryUrls }),
       ),
       { params: Promise.resolve({ id: ID }) },
     );
@@ -510,12 +529,60 @@ describe('creator store seller routes', () => {
         title: 'Prompt',
         emoji: '🧠',
         imageUrl,
+        galleryUrls,
         priceJpyc: '300',
         label: 'prompt',
         saleActive: false,
       },
       content: { kind: 'text', value: 'version two' },
     });
+  });
+
+  it('full edit は追加ギャラリー未指定なら既存値を保存し、空配列なら削除する', async () => {
+    const galleryUrls = ['https://cdn.example.com/gallery.png'];
+    const productWithGallery = { ...baseProduct, galleryUrls };
+    const snapshot = {
+      product: productWithGallery,
+      token: JSON.stringify(productWithGallery),
+    };
+    getHostedProductUpdateSnapshot.mockResolvedValue(snapshot);
+
+    const preserved = await patchProduct(
+      request(
+        `/api/store/products/${ID}`,
+        'PATCH',
+        validBody({ content: 'version two' }),
+      ),
+      { params: Promise.resolve({ id: ID }) },
+    );
+
+    expect(preserved.status).toBe(200);
+    expect(parseHostedInput).toHaveBeenLastCalledWith(
+      expect.objectContaining({ galleryUrls }),
+    );
+    expect(replaceHostedSellerProduct).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ galleryUrls }),
+      }),
+    );
+
+    const removed = await patchProduct(
+      request(
+        `/api/store/products/${ID}`,
+        'PATCH',
+        validBody({ content: 'version three', galleryUrls: [] }),
+      ),
+      { params: Promise.resolve({ id: ID }) },
+    );
+
+    expect(removed.status).toBe(200);
+    expect(parseHostedInput).toHaveBeenLastCalledWith(
+      expect.objectContaining({ galleryUrls: [] }),
+    );
+    const lastReplace = replaceHostedSellerProduct.mock.calls.at(-1)?.[0] as {
+      metadata: Record<string, unknown>;
+    };
+    expect(lastReplace.metadata).not.toHaveProperty('galleryUrls');
   });
 
   it('並行更新 conflict は 409 にし、成功として扱わない', async () => {
