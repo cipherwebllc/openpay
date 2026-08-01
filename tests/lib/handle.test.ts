@@ -277,6 +277,221 @@ describe('extractHandleEmbed', () => {
     });
   });
 
+  it.each([
+    ['https://nicovideo.jp/watch/sm9', 'sm9'],
+    ['https://www.nicovideo.jp/watch/so123456?from=share#player', 'so123456'],
+    ['https://sp.nicovideo.jp/watch/nm987654/', 'nm987654'],
+  ])('extracts a Niconico URL and builds its fixed src: %s', (url, id) => {
+    expect(extractHandleEmbed(url)).toEqual({
+      provider: 'niconico',
+      id,
+      src: `https://embed.nicovideo.jp/watch/${id}`,
+    });
+    expect(isHandleEmbedUrl(url)).toBe(true);
+  });
+
+  it.each([
+    ['https://vimeo.com/123456', '123456'],
+    ['https://vimeo.com/123456789012/', '123456789012'],
+    ['https://vimeo.com/987654321?share=copy#video', '987654321'],
+  ])('extracts a Vimeo URL and builds its fixed src: %s', (url, id) => {
+    expect(extractHandleEmbed(url)).toEqual({
+      provider: 'vimeo',
+      id,
+      src: `https://player.vimeo.com/video/${id}`,
+    });
+    expect(isHandleEmbedUrl(url)).toBe(true);
+  });
+
+  it.each([
+    [
+      'https://music.apple.com/us/album/an-album/123456789',
+      {
+        provider: 'apple-music',
+        storefront: 'us',
+        slug: 'an-album',
+        albumId: '123456789',
+        src: 'https://embed.music.apple.com/us/album/an-album/123456789',
+        height: 450,
+      },
+    ],
+    [
+      'https://music.apple.com/jp/album/song-name/123456789?i=987654321',
+      {
+        provider: 'apple-music',
+        storefront: 'jp',
+        slug: 'song-name',
+        albumId: '123456789',
+        itemId: '987654321',
+        src: 'https://embed.music.apple.com/jp/album/song-name/123456789?i=987654321',
+        height: 175,
+      },
+    ],
+    [
+      'https://music.apple.com/jp/album/%E6%9D%B1%E4%BA%AC%20hits%2F2026/42?i=7',
+      {
+        provider: 'apple-music',
+        storefront: 'jp',
+        slug: '%E6%9D%B1%E4%BA%AC%20hits%2F2026',
+        albumId: '42',
+        itemId: '7',
+        src: 'https://embed.music.apple.com/jp/album/%E6%9D%B1%E4%BA%AC%20hits%2F2026/42?i=7',
+        height: 175,
+      },
+    ],
+  ] as const)(
+    'extracts an Apple Music URL from validated, re-encoded path parts: %s',
+    (url, expected) => {
+      expect(extractHandleEmbed(url)).toEqual(expected);
+      expect(isHandleEmbedUrl(url)).toBe(true);
+    },
+  );
+
+  it.each([
+    ['https://tiktok.com/@alice/video/1234567890', '1234567890'],
+    // 実 URL は www 付きが標準 (2026-08-01 実機で null になり修正)。
+    ['https://www.tiktok.com/@tiktok/video/7106594312292453675', '7106594312292453675'],
+    ['https://tiktok.com/@alice.dev/video/987654321/', '987654321'],
+    ['https://tiktok.com/@alice_01/video/42?lang=ja#video', '42'],
+  ])('extracts a TikTok URL and builds its v2 src: %s', (url, id) => {
+    expect(extractHandleEmbed(url)).toEqual({
+      provider: 'tiktok',
+      id,
+      src: `https://www.tiktok.com/embed/v2/${id}`,
+      height: 580,
+    });
+    expect(isHandleEmbedUrl(url)).toBe(true);
+  });
+
+  it.each([
+    [
+      'https://suno.com/song/123e4567-e89b-42d3-a456-426614174000',
+      '123e4567-e89b-42d3-a456-426614174000',
+    ],
+    [
+      'https://suno.com/song/AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE/',
+      'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE',
+    ],
+    [
+      'https://suno.com/song/00000000-0000-4000-b000-000000000000?ref=share#song',
+      '00000000-0000-4000-b000-000000000000',
+    ],
+  ])('extracts a Suno v4 UUID and builds its fixed src: %s', (url, id) => {
+    expect(extractHandleEmbed(url)).toEqual({
+      provider: 'suno',
+      id,
+      src: `https://suno.com/embed/${id}`,
+      height: 152,
+    });
+    expect(isHandleEmbedUrl(url)).toBe(true);
+  });
+
+  it.each([
+    [
+      'https://soundcloud.com/artist/track',
+      'artist',
+      'track',
+    ],
+    [
+      'https://soundcloud.com/artist_name/track-slug/',
+      'artist_name',
+      'track-slug',
+    ],
+    [
+      'https://soundcloud.com/Artist-01/Track_02?utm_source=share#play',
+      'Artist-01',
+      'Track_02',
+    ],
+  ])(
+    'extracts SoundCloud from two validated path parts and rebuilds the player URL: %s',
+    (url, user, slug) => {
+      const canonicalUrl = `https://soundcloud.com/${user}/${slug}`;
+      const embed = extractHandleEmbed(url);
+      expect(embed).toEqual({
+        provider: 'soundcloud',
+        user,
+        slug,
+        src: `https://w.soundcloud.com/player/?url=${encodeURIComponent(canonicalUrl)}`,
+        height: 166,
+      });
+      expect(new URL(embed!.src).searchParams.get('url')).toBe(canonicalUrl);
+      expect(embed!.src).not.toContain('utm_source');
+      expect(embed!.src).not.toContain('#play');
+      expect(isHandleEmbedUrl(url)).toBe(true);
+    },
+  );
+
+  it.each([
+    'https://nicovideo.jp/watch/smabc',
+    'https://nicovideo.jp/watch/123456',
+    'https://www.nicovideo.jp.evil.example/watch/sm9',
+    'https://nico.example/watch/sm9',
+  ])('rejects an invalid Niconico ID or host: %s', (url) => {
+    expect(extractHandleEmbed(url)).toBeNull();
+    expect(isHandleEmbedUrl(url)).toBe(false);
+  });
+
+  it.each([
+    'https://vimeo.com/12345',
+    'https://vimeo.com/1234567890123',
+    'https://vimeo.com/channels/openpay/123456',
+    'https://www.vimeo.com/123456',
+    'https://vimeo.com.evil.example/123456',
+  ])('rejects an invalid Vimeo ID, path, or host: %s', (url) => {
+    expect(extractHandleEmbed(url)).toBeNull();
+    expect(isHandleEmbedUrl(url)).toBe(false);
+  });
+
+  it.each([
+    'https://music.apple.com/US/album/name/123',
+    'https://music.apple.com/usa/album/name/123',
+    'https://music.apple.com/us/album/name/not-a-number',
+    'https://music.apple.com/us/album/name/123?i=track',
+    'https://music.apple.com/us/album/name/123?i=1&i=2',
+    'https://music.apple.com/us/album/name/123?app=music',
+    'https://music.apple.com/us/album/%zz/123',
+    'https://www.music.apple.com/us/album/name/123',
+  ])('rejects invalid Apple Music path/query parts or host: %s', (url) => {
+    expect(extractHandleEmbed(url)).toBeNull();
+    expect(isHandleEmbedUrl(url)).toBe(false);
+  });
+
+  it.each([
+    'https://tiktok.com/@alice/video/not-a-number',
+    'https://tiktok.com/@alice-name/video/123',
+    'https://tiktok.com/@/video/123',
+    'https://tiktok.com/@alice/video/123/extra',
+    'https://m.tiktok.com/@alice/video/123',
+    'https://tiktok.com.evil.example/@alice/video/123',
+  ])('rejects an invalid TikTok ID, user, path, or host: %s', (url) => {
+    expect(extractHandleEmbed(url)).toBeNull();
+    expect(isHandleEmbedUrl(url)).toBe(false);
+  });
+
+  it.each([
+    'https://suno.com/song/123e4567-e89b-12d3-a456-426614174000',
+    'https://suno.com/song/123e4567-e89b-42d3-7456-426614174000',
+    'https://suno.com/song/123e4567e89b42d3a456426614174000',
+    'https://www.suno.com/song/123e4567-e89b-42d3-a456-426614174000',
+    'https://suno.com.evil.example/song/123e4567-e89b-42d3-a456-426614174000',
+  ])('rejects a non-v4 Suno UUID or invalid host: %s', (url) => {
+    expect(extractHandleEmbed(url)).toBeNull();
+    expect(isHandleEmbedUrl(url)).toBe(false);
+  });
+
+  it.each([
+    'https://soundcloud.com/artist',
+    'https://soundcloud.com/artist/track/extra',
+    'https://soundcloud.com/artist.name/track',
+    'https://soundcloud.com/artist/track.name',
+    'https://soundcloud.com/artist/track?secret_token=s-private',
+    'https://on.soundcloud.com/short-code',
+    'https://soundcloud.com.evil.example/artist/track',
+  ])('rejects invalid or private SoundCloud paths and hosts: %s', (url) => {
+    expect(extractHandleEmbed(url)).toBeNull();
+    expect(isHandleEmbedUrl(url)).toBe(false);
+  });
+
   it('builds an Audius compact track src only from the resolved record ID', () => {
     expect(
       extractHandleEmbed(`${AUDIUS_URL}?ref=profile#play`, {
@@ -289,7 +504,7 @@ describe('extractHandleEmbed', () => {
       kind: 'track',
       id: AUDIUS_ID,
       src: `https://audius.co/embed/track/${AUDIUS_ID}?flavor=compact`,
-      height: 120,
+      height: 152,
     });
   });
 

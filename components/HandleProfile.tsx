@@ -231,26 +231,41 @@ export function HandleProfileView({
                       )}
                       {l.label}
                     </a>
-                    {embed.provider === 'youtube' ? (
-                      <iframe
-                        src={embed.src}
-                        sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
-                        loading="lazy"
-                        // YouTube embed は Referer (origin) が無いと「エラー 153」で再生拒否する
-                        // (2026-08-01 実機で確認)。origin のみ送る既定相当に留める。
-                        referrerPolicy="strict-origin-when-cross-origin"
-                        title={l.label}
-                        className="block aspect-video w-full border-0"
-                      />
-                    ) : (
+                    {'height' in embed ? (
                       <iframe
                         src={embed.src}
                         height={embed.height}
                         sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
-                        loading="lazy"
+                        // 埋め込みは opt-in 最大 3 件の主役コンテンツ。lazy はブラウザ閾値
+                        // 依存で見え方が揺れる利益の薄い最適化のため、確定ロードにする。
                         referrerPolicy="no-referrer"
                         title={l.label}
-                        className="block w-full border-0"
+                        // 固定高 player の数 px 誤差がクラシックスクロールバー環境で
+                        // 縦横バーとして出る (2026-08-01 本番実害・Audius)。provider 公式の
+                        // 埋め込みコードに合わせ scrolling を明示的に切る。
+                        scrolling="no"
+                        className={`block w-full border-0${
+                          embed.provider === 'tiktok'
+                            ? ' mx-auto max-w-[325px]'
+                            : ''
+                        }`}
+                      />
+                    ) : (
+                      <iframe
+                        src={embed.src}
+                        sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
+                        // 埋め込みは opt-in 最大 3 件の主役コンテンツ。lazy はブラウザ閾値
+                        // 依存で見え方が揺れる利益の薄い最適化のため、確定ロードにする。
+                        // YouTube embed は Referer (origin) が無いと「エラー 153」で再生拒否する
+                        // (2026-08-01 実機で確認)。origin のみ送る既定相当に留める。
+                        referrerPolicy={
+                          embed.provider === 'youtube'
+                            ? 'strict-origin-when-cross-origin'
+                            : 'no-referrer'
+                        }
+                        title={l.label}
+                        scrolling="no"
+                        className="block aspect-video w-full border-0"
                       />
                     )}
                   </div>
