@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PROFILE_DRAFT, type HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
 import {
+  buildPublishProfile,
   buildPublishPayload,
   EMPTY_HANDLE_PUBLISH_BASELINE,
   formatPublishedRelativeTime,
@@ -8,6 +9,7 @@ import {
   hasDroppedProfileUrl,
   hasUnpublishedHandleChanges,
 } from '@/lib/handlePublish';
+import { MAX_LINK_IMAGE_URL_LEN, MAX_PROFILE_EMBEDS } from '@/lib/handle';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const OPTIONS = { receiver: ADDR, enableJpycAvalanche: false };
@@ -80,6 +82,83 @@ describe('buildPublishPayload', () => {
     );
   });
 
+  it('opt-in link media を canonical キー順の exact JSON に追加する', () => {
+    const payload = buildPublishPayload(
+      draft({
+        links: [
+          {
+            label: ' Video ',
+            url: ' https://youtu.be/dQw4w9WgXcQ ',
+            emoji: ' 🎬 ',
+            imageUrl: ' https://cdn.example.com/video.jpg ',
+            featured: true,
+            embed: true,
+          },
+        ],
+      }),
+      OPTIONS,
+    );
+
+    expect(payload).not.toBeNull();
+    const body = JSON.stringify({ handle: 'alice', ...payload });
+    expect(body).toBe(
+      `{"handle":"alice","config":{"to":"${ADDR}","color":"#2563eb","theme":"clean","methods":[{"token":"jpyc","chain":"polygon"},{"token":"jpyc","chain":"kaia"}],"presets":{"jpyc":["300","1000","3000"]}},"profile":{"links":[{"label":"Video","url":"https://youtu.be/dQw4w9WgXcQ","emoji":"🎬","imageUrl":"https://cdn.example.com/video.jpg","featured":true,"embed":true}],"theme":"clean"}}`,
+    );
+  });
+
+  it('link imageUrl は https かつ 512 文字以下だけ canonical に残す', () => {
+    const prefix = 'https://cdn.example.com/';
+    const atLimit = `${prefix}${'a'.repeat(MAX_LINK_IMAGE_URL_LEN - prefix.length)}`;
+    const profile = buildPublishProfile(
+      draft({
+        links: [
+          { label: 'Exact', url: 'https://example.com/1', imageUrl: atLimit },
+          {
+            label: 'Too long',
+            url: 'https://example.com/2',
+            imageUrl: `${atLimit}a`,
+          },
+          {
+            label: 'Insecure',
+            url: 'https://example.com/3',
+            imageUrl: 'http://cdn.example.com/image.jpg',
+          },
+        ],
+      }),
+    );
+
+    expect(profile.links?.[0]).toHaveProperty('imageUrl', atLimit);
+    expect(profile.links?.[1]).not.toHaveProperty('imageUrl');
+    expect(profile.links?.[2]).not.toHaveProperty('imageUrl');
+  });
+
+  it('supported embed の先頭 3 件だけを canonical に残す', () => {
+    const profile = buildPublishProfile(
+      draft({
+        links: [
+          ...Array.from({ length: MAX_PROFILE_EMBEDS + 1 }, (_, index) => ({
+            label: `Video ${index}`,
+            url: 'https://youtu.be/dQw4w9WgXcQ',
+            embed: true as const,
+          })),
+          {
+            label: 'Unsupported',
+            url: 'https://example.com/video',
+            embed: true,
+          },
+        ],
+      }),
+    );
+
+    expect(
+      profile.links?.filter(
+        (link) => link.kind !== 'heading' && link.embed === true,
+      ),
+    ).toHaveLength(MAX_PROFILE_EMBEDS);
+    expect(profile.links?.[MAX_PROFILE_EMBEDS]).not.toHaveProperty('embed');
+    expect(profile.links?.[MAX_PROFILE_EMBEDS + 1]).not.toHaveProperty('embed');
+  });
+
   it('受取先未解決または受取方法 0 件は publish 不可 (null)', () => {
     expect(buildPublishPayload(draft(), { ...OPTIONS, receiver: null })).toBeNull();
     expect(
@@ -109,6 +188,35 @@ describe('buildPublishPayload', () => {
         draft({ links: [{ label: 'Site', url: 'http://example.com' }] }),
       ),
     ).toBe(true);
+  });
+
+  it('非 https の link imageUrl も drop 警告の対象にする', () => {
+    expect(
+      hasDroppedProfileUrl(
+        draft({
+          links: [
+            {
+              label: 'Site',
+              url: 'https://example.com',
+              imageUrl: 'http://cdn.example.com/site.png',
+            },
+          ],
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      hasDroppedProfileUrl(
+        draft({
+          links: [
+            {
+              label: 'Site',
+              url: 'https://example.com',
+              imageUrl: 'https://cdn.example.com/site.png',
+            },
+          ],
+        }),
+      ),
+    ).toBe(false);
   });
 });
 
@@ -217,6 +325,35 @@ describe('handle publish baseline state machine', () => {
       OPTIONS,
     )!;
     expect(hasUnpublishedHandleChanges(state, 'alice', reordered)).toBe(true);
+  });
+
+  it('link image/embed の opt-in 変更も dirty にする', () => {
+    const baseLinks = [
+      { label: 'Video', url: 'https://youtu.be/dQw4w9WgXcQ' },
+    ] satisfies HandleProfileDraft['links'];
+    const loaded = buildPublishPayload(draft({ links: baseLinks }), OPTIONS)!;
+    const state = handlePublishBaselineReducer(EMPTY_HANDLE_PUBLISH_BASELINE, {
+      type: 'loaded',
+      snapshot: { handle: 'alice', payload: loaded, updatedAt: 100 },
+    });
+
+    const withImage = buildPublishPayload(
+      draft({
+        links: [
+          {
+            ...baseLinks[0],
+            imageUrl: 'https://cdn.example.com/video.jpg',
+          },
+        ],
+      }),
+      OPTIONS,
+    )!;
+    const withEmbed = buildPublishPayload(
+      draft({ links: [{ ...baseLinks[0], embed: true }] }),
+      OPTIONS,
+    )!;
+    expect(hasUnpublishedHandleChanges(state, 'alice', withImage)).toBe(true);
+    expect(hasUnpublishedHandleChanges(state, 'alice', withEmbed)).toBe(true);
   });
 
   it('handle 切替は旧 baseline を置換し、編集停止/解放の discard で破棄する', () => {

@@ -20,6 +20,8 @@ vi.mock('@/components/TipForm', () => ({
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const EXPECTED_CLEAN_LINK_CLASS =
   'flex w-full items-center justify-center rounded-2xl border border-slate-200/80 bg-white px-4 py-3.5 text-[0.95rem] font-semibold text-slate-800 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_10px_24px_-8px_rgba(15,23,42,0.2)] active:translate-y-0 active:shadow-sm';
+const EXPECTED_EMBED_SANDBOX =
+  'allow-scripts allow-same-origin allow-popups allow-presentation';
 
 const multiConfig: HandleTipConfig = {
   to: ADDR,
@@ -121,6 +123,240 @@ describe('HandleProfileView', () => {
     const link = screen.getByRole('link', { name: 'Site' });
     expect(link).toHaveTextContent('🌐');
     expect(link.querySelector('[aria-hidden="true"]')?.textContent).toBe('🌐');
+  });
+
+  it('renders a decorative link image and falls back to emoji / nothing on error', () => {
+    renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{
+          links: [
+            {
+              label: 'With emoji',
+              url: 'https://example.com/with',
+              emoji: '🌐',
+              imageUrl: 'https://cdn.example.com/link.png',
+            },
+            {
+              label: 'Without emoji',
+              url: 'https://example.com/without',
+              imageUrl: 'https://cdn.example.com/plain.png',
+            },
+          ],
+        }}
+      />,
+    );
+
+    const withEmoji = screen.getByRole('link', { name: 'With emoji' });
+    const image = withEmoji.querySelector('img');
+    expect(image).not.toBeNull();
+    expect(image).toHaveAttribute('src', 'https://cdn.example.com/link.png');
+    expect(image).toHaveAttribute('alt', '');
+    expect(image).toHaveAttribute('aria-hidden', 'true');
+    expect(image).toHaveAttribute('width', '20');
+    expect(image).toHaveAttribute('height', '20');
+    expect(image).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(image).toHaveAttribute('loading', 'lazy');
+    expect(image).toHaveClass('h-5', 'w-5', 'rounded', 'object-cover');
+    expect(withEmoji).not.toHaveTextContent('🌐');
+
+    fireEvent.error(image!);
+    expect(withEmoji.querySelector('img')).not.toBeInTheDocument();
+    expect(withEmoji.querySelector('[aria-hidden="true"]')).toHaveTextContent(
+      '🌐',
+    );
+    expect(screen.getByRole('link', { name: 'With emoji' })).toBe(withEmoji);
+
+    const withoutEmoji = screen.getByRole('link', { name: 'Without emoji' });
+    fireEvent.error(withoutEmoji.querySelector('img')!);
+    expect(withoutEmoji.querySelector('img')).not.toBeInTheDocument();
+    expect(
+      withoutEmoji.querySelector('[aria-hidden="true"]'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Without emoji' })).toBe(
+      withoutEmoji,
+    );
+  });
+
+  it('retries a link image when the builder changes its URL after an error', () => {
+    const { rerender } = renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{
+          links: [
+            {
+              label: 'Site',
+              url: 'https://example.com',
+              emoji: '🌐',
+              imageUrl: 'https://cdn.example.com/broken.png',
+            },
+          ],
+        }}
+      />,
+    );
+
+    const link = screen.getByRole('link', { name: 'Site' });
+    fireEvent.error(link.querySelector('img')!);
+    expect(link.querySelector('img')).not.toBeInTheDocument();
+    expect(link).toHaveTextContent('🌐');
+
+    rerender(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{
+          links: [
+            {
+              label: 'Site',
+              url: 'https://example.com',
+              emoji: '🌐',
+              imageUrl: 'https://cdn.example.com/fixed.png',
+            },
+          ],
+        }}
+      />,
+    );
+    expect(link.querySelector('img')).toHaveAttribute(
+      'src',
+      'https://cdn.example.com/fixed.png',
+    );
+    expect(link).not.toHaveTextContent('🌐');
+  });
+
+  it('renders a YouTube embed from the constructed nocookie URL with exact security attributes', () => {
+    renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{
+          links: [
+            {
+              label: 'Video',
+              url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+              embed: true,
+            },
+          ],
+        }}
+      />,
+    );
+
+    const labelLink = screen.getByRole('link', { name: 'Video' });
+    expect(labelLink).toHaveAttribute(
+      'href',
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    );
+    expect(labelLink).toHaveAttribute('target', '_blank');
+    expect(labelLink).toHaveAttribute('rel', 'noopener noreferrer nofollow');
+    const iframe = screen.getByTitle('Video');
+    expect(iframe).toHaveAttribute(
+      'src',
+      'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+    );
+    expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
+    expect(iframe).toHaveAttribute('loading', 'lazy');
+    // YouTube は Referer (origin) 無しだと error 153 で再生拒否 (2026-08-01 実機確認)。
+    expect(iframe).toHaveAttribute(
+      'referrerpolicy',
+      'strict-origin-when-cross-origin',
+    );
+    expect(iframe).toHaveClass('aspect-video', 'w-full');
+    expect(labelLink.parentElement).toContainElement(iframe);
+  });
+
+  it.each([
+    ['track', 152],
+    ['album', 352],
+  ] as const)(
+    'renders a Spotify %s embed with its exact constructed URL and height',
+    (type, height) => {
+      const id = '4uLU6hMCjMI75M1A2tKUQC';
+      renderWithIntl(
+        <HandleProfileView
+          config={multiConfig}
+          profile={{
+            links: [
+              {
+                label: `Spotify ${type}`,
+                url: `https://open.spotify.com/${type}/${id}`,
+                embed: true,
+              },
+            ],
+          }}
+        />,
+      );
+
+      const iframe = screen.getByTitle(`Spotify ${type}`);
+      expect(iframe).toHaveAttribute(
+        'src',
+        `https://open.spotify.com/embed/${type}/${id}`,
+      );
+      expect(iframe).toHaveAttribute('height', String(height));
+      expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
+      expect(iframe).toHaveAttribute('loading', 'lazy');
+      expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
+      expect(iframe).toHaveClass('w-full');
+    },
+  );
+
+  it.each([
+    ['clean', null],
+    ['gradient', '0 3px 10px -3px'],
+    ['bold', '0 4px 12px -4px'],
+    ['outline', '1.5px'],
+    ['night', 'rgba(255, 255, 255, 0.08)'],
+    ['soft', 'border-radius: 22px'],
+  ] as const)(
+    'applies the normal %s linkStyle token to an embed card even when featured',
+    (theme, styleMarker) => {
+      renderWithIntl(
+        <HandleProfileView
+          config={multiConfig}
+          profile={{
+            theme,
+            links: [
+              {
+                label: `Featured ${theme}`,
+                url: 'https://youtu.be/dQw4w9WgXcQ',
+                embed: true,
+                featured: true,
+              },
+            ],
+          }}
+        />,
+      );
+
+      const cardStyle = screen
+        .getByTitle(`Featured ${theme}`)
+        .parentElement?.getAttribute('style');
+      if (styleMarker === null) {
+        expect(cardStyle).toBeNull();
+      } else {
+        expect(cardStyle).toContain(styleMarker);
+      }
+    },
+  );
+
+  it('falls back to the exact regular button path when embed extraction is unsupported', () => {
+    renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{
+          links: [
+            {
+              label: 'Unsupported',
+              url: 'https://example.com/video',
+              embed: true,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.queryByTitle('Unsupported')).not.toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Unsupported' });
+    expect(link.getAttribute('class')).toBe(EXPECTED_CLEAN_LINK_CLASS);
+    expect(link.getAttribute('style')).toBeNull();
+    expect(link).toHaveAttribute('href', 'https://example.com/video');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer nofollow');
   });
 
   it('renders a heading as a semantic, non-interactive list row', () => {

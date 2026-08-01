@@ -6,7 +6,13 @@
 
 import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX } from '@/lib/url';
 import { DEFAULT_TIP_PRESETS } from '@/lib/url';
-import { MAX_PROFILE_LINKS, MAX_SOCIAL_LINKS } from '@/lib/handle';
+import {
+  extractHandleEmbed,
+  MAX_LINK_IMAGE_URL_LEN,
+  MAX_PROFILE_EMBEDS,
+  MAX_PROFILE_LINKS,
+  MAX_SOCIAL_LINKS,
+} from '@/lib/handle';
 import { resolveHandleTheme, type HandleTheme } from '@/lib/handleTheme';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
@@ -16,7 +22,9 @@ export interface DraftRegularLink {
   label: string;
   url: string;
   emoji?: string;
+  imageUrl?: string;
   featured?: boolean;
+  embed?: true;
 }
 
 export interface DraftHeading {
@@ -89,6 +97,8 @@ function sanitizeLinks(loaded: unknown): DraftLink[] {
   const out: DraftLink[] = [];
   // featured は最大 1 本。localStorage が破損して複数 true でも先頭 1 本だけ残す。
   let featuredTaken = false;
+  // embed も server と同じ上限に healing。非対応 URL の stale true は落とす。
+  let embedCount = 0;
   for (const l of loaded) {
     if (!l || typeof l !== 'object' || Array.isArray(l)) continue;
     const ll = l as Record<string, unknown>;
@@ -112,9 +122,25 @@ function sanitizeLinks(loaded: unknown): DraftLink[] {
       url: typeof ll.url === 'string' ? ll.url : '',
     };
     if (typeof ll.emoji === 'string' && ll.emoji.trim()) link.emoji = ll.emoji;
+    // 入力途中の非 https 値は警告のため保持。破損 localStorage の上限超過は
+    // publish 時に黙って消える状態を後続操作へ波及させないよう、復元時に除去する。
+    if (
+      typeof ll.imageUrl === 'string' &&
+      ll.imageUrl.trim().length <= MAX_LINK_IMAGE_URL_LEN
+    ) {
+      link.imageUrl = ll.imageUrl;
+    }
     if (ll.featured === true && !featuredTaken) {
       link.featured = true;
       featuredTaken = true;
+    }
+    if (
+      ll.embed === true &&
+      embedCount < MAX_PROFILE_EMBEDS &&
+      extractHandleEmbed(link.url.trim())
+    ) {
+      link.embed = true;
+      embedCount += 1;
     }
     out.push(link);
     if (out.length >= MAX_PROFILE_LINKS) break;

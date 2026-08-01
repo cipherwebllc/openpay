@@ -30,13 +30,17 @@ export const MAX_HANDLES_PER_WALLET = 3;
 
 // @handle プロフィール (link-in-bio) の上限。乱用・肥大化抑制。
 // 20 = lit.link 級のリンク集を収める実用上限 (見出し行と共有)。技術制約ではなく体験の上限:
-// 最悪ケース (20 本 × label40+url512) でも record は ~13KB と KV の余裕内・描画/OG 影響なし。
+// 最悪ケース (20 本 × label40+url512+imageUrl512) でも record は ~24KB と
+// KV の余裕内・描画/OG 影響なし。
 // 6 → 20 引き上げ (2026-07-29 user 要望・見出し行の導入でリスト長の整理が可能になったため)。
 export const MAX_PROFILE_LINKS = 20;
 export const MAX_BIO_LEN = 160;
 export const MAX_LINK_LABEL_LEN = 40;
 export const MAX_LINK_URL_LEN = 512;
 export const MAX_AVATAR_URL_LEN = 512;
+export const MAX_LINK_IMAGE_URL_LEN = 512;
+// 外部 iframe の同時読込・ページ重量を抑える profile 単位の上限。server 保存時に enforce。
+export const MAX_PROFILE_EMBEDS = 3;
 // SNS アイコンリンク (URL のみ保存・アイコンは lib/socialLinks がドメイン判定) の上限。
 // SNS アイコン行の上限。対応 22 プラットフォームに対し 6 は窮屈 (user 指摘)。10 なら
 // モバイル幅でも 2 行以内に収まり、record サイズも +~5KB 上限で問題なし。
@@ -137,6 +141,11 @@ export interface HandleRegularLink {
   emoji?: string;
   // 「注目」= 少し大きく強調するリンク (プロフィール全体で最大 1 本・保存時に enforce)。
   featured?: boolean;
+  // リンク先を示す小画像 (任意・https URL のみ・最大 512 文字)。
+  // 未指定なら従来どおり絵文字を表示する。
+  imageUrl?: string;
+  // 対応済み YouTube / Spotify URL だけを埋め込みカードとして描画する。
+  embed?: true;
 }
 
 // リンク一覧内の非インタラクティブな区切り。url / featured は構造上も持たない。
@@ -431,6 +440,103 @@ function isHttpsUrl(value: string): boolean {
   return u.protocol === 'https:';
 }
 
+const YOUTUBE_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+const SPOTIFY_ID_PATTERN = /^[A-Za-z0-9]{22}$/;
+const YOUTUBE_HOSTS = new Set(['youtube.com', 'www.youtube.com']);
+const SPOTIFY_EMBED_TYPES = [
+  'track',
+  'album',
+  'playlist',
+  'episode',
+  'show',
+  'artist',
+] as const;
+
+export type HandleEmbed =
+  | {
+      provider: 'youtube';
+      id: string;
+      src: string;
+    }
+  | {
+      provider: 'spotify';
+      type: (typeof SPOTIFY_EMBED_TYPES)[number];
+      id: string;
+      src: string;
+      height: 152 | 352;
+    };
+
+function isSpotifyEmbedType(
+  value: string,
+): value is (typeof SPOTIFY_EMBED_TYPES)[number] {
+  return (SPOTIFY_EMBED_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * 対応リンク URL から provider/ID を検証抽出し、安全な iframe 設定を返す。
+ * iframe src は user URL を転用せず、allowlist 済み type と regex 済み ID だけで構築する。
+ */
+export function extractHandleEmbed(url: string): HandleEmbed | null {
+  const value = url.trim();
+  // URL は既定 port (:443) を空文字へ正規化するため、parse 前の authority でも明示 port を拒否。
+  const rawAuthority = value.match(/^https:\/\/([^/?#]*)/i)?.[1];
+  if (!rawAuthority || rawAuthority.includes(':')) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  if (
+    parsed.protocol !== 'https:' ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.port !== ''
+  ) {
+    return null;
+  }
+
+  const host = parsed.hostname;
+  let youtubeId: string | null = null;
+  if (YOUTUBE_HOSTS.has(host)) {
+    if (/^\/watch\/?$/.test(parsed.pathname)) {
+      youtubeId = parsed.searchParams.get('v');
+    } else {
+      youtubeId =
+        parsed.pathname.match(/^\/shorts\/([A-Za-z0-9_-]{11})\/?$/)?.[1] ??
+        null;
+    }
+  } else if (host === 'youtu.be') {
+    youtubeId =
+      parsed.pathname.match(/^\/([A-Za-z0-9_-]{11})\/?$/)?.[1] ?? null;
+  }
+  if (youtubeId !== null) {
+    if (!YOUTUBE_ID_PATTERN.test(youtubeId)) return null;
+    return {
+      provider: 'youtube',
+      id: youtubeId,
+      src: `https://www.youtube-nocookie.com/embed/${youtubeId}`,
+    };
+  }
+
+  if (host !== 'open.spotify.com') return null;
+  const spotifyPath = parsed.pathname.match(
+    /^\/([^/]+)\/([A-Za-z0-9]{22})\/?$/,
+  );
+  if (!spotifyPath) return null;
+  const [, type, spotifyId] = spotifyPath;
+  if (!isSpotifyEmbedType(type) || !SPOTIFY_ID_PATTERN.test(spotifyId)) {
+    return null;
+  }
+  return {
+    provider: 'spotify',
+    type,
+    id: spotifyId,
+    src: `https://open.spotify.com/embed/${type}/${spotifyId}`,
+    height: type === 'track' || type === 'episode' ? 152 : 352,
+  };
+}
+
 export type ValidatedProfile =
   | { ok: true; profile: HandleProfile }
   | { ok: false; error: string };
@@ -502,6 +608,7 @@ export function validateProfile(raw: unknown): ValidatedProfile {
     // featured はプロフィール全体で最大 1 本。最初に featured=true を付けた 1 本だけを採用し、
     // 以降は無視する (サーバ検証でも enforce = クライアントを信用しない)。
     let featuredTaken = false;
+    let embedCount = 0;
     for (const l of r.links) {
       if (typeof l !== 'object' || l === null || Array.isArray(l)) {
         return { ok: false, error: 'invalid link' };
@@ -520,12 +627,18 @@ export function validateProfile(raw: unknown): ValidatedProfile {
         return { ok: false, error: 'link label too long' };
       }
       if (ll.kind === 'heading') {
-        // heading に url/featured が存在する payload は値にかかわらず構造違反。
+        // heading に通常リンク専用 field が存在する payload は値にかかわらず構造違反。
         if (Object.hasOwn(ll, 'url')) {
           return { ok: false, error: 'heading must not have url' };
         }
         if (Object.hasOwn(ll, 'featured')) {
           return { ok: false, error: 'heading must not be featured' };
+        }
+        if (Object.hasOwn(ll, 'imageUrl')) {
+          return { ok: false, error: 'heading must not have image' };
+        }
+        if (Object.hasOwn(ll, 'embed')) {
+          return { ok: false, error: 'heading must not be embedded' };
         }
         const heading: HandleHeading = { kind: 'heading', label };
         const emoji = sanitizeEmoji(ll.emoji);
@@ -543,13 +656,42 @@ export function validateProfile(raw: unknown): ValidatedProfile {
       if (!isHttpsUrl(url)) {
         return { ok: false, error: 'link url must be https' };
       }
-      const link: HandleLink = { label, url };
+      const link: HandleRegularLink = { label, url };
       // 絵文字は不正 (>2 code points 等) でも link 自体は残す (label/url を落とさない)。
       const emoji = sanitizeEmoji(ll.emoji);
       if (emoji) link.emoji = emoji;
       if (ll.featured === true && !featuredTaken) {
         link.featured = true;
         featuredTaken = true;
+      }
+      if (
+        ll.imageUrl !== undefined &&
+        ll.imageUrl !== null &&
+        ll.imageUrl !== ''
+      ) {
+        if (typeof ll.imageUrl !== 'string') {
+          return { ok: false, error: 'image must be string' };
+        }
+        const imageUrl = ll.imageUrl.trim();
+        if (imageUrl) {
+          if (imageUrl.length > MAX_LINK_IMAGE_URL_LEN) {
+            return { ok: false, error: 'image url too long' };
+          }
+          if (!isHttpsUrl(imageUrl)) {
+            return { ok: false, error: 'image must be an https url' };
+          }
+          link.imageUrl = imageUrl;
+        }
+      }
+      if (ll.embed === true) {
+        if (!extractHandleEmbed(url)) {
+          return { ok: false, error: 'embed not supported for this url' };
+        }
+        if (embedCount >= MAX_PROFILE_EMBEDS) {
+          return { ok: false, error: 'too many embeds' };
+        }
+        link.embed = true;
+        embedCount += 1;
       }
       links.push(link);
     }
@@ -701,6 +843,7 @@ function parseStoredProfile(raw: unknown): HandleProfile | undefined {
   if (Array.isArray(r.links)) {
     const links: HandleLink[] = [];
     let featuredTaken = false;
+    let embedCount = 0;
     for (const l of r.links) {
       if (links.length >= MAX_PROFILE_LINKS) break;
       if (typeof l !== 'object' || l === null || Array.isArray(l)) continue;
@@ -712,7 +855,14 @@ function parseStoredProfile(raw: unknown): HandleProfile | undefined {
       if (!label) continue;
       if (ll.kind === 'heading') {
         // 壊れた heading だけを落とし、後続の正常なリンク/featured へ波及させない。
-        if (Object.hasOwn(ll, 'url') || Object.hasOwn(ll, 'featured')) continue;
+        if (
+          Object.hasOwn(ll, 'url') ||
+          Object.hasOwn(ll, 'featured') ||
+          Object.hasOwn(ll, 'imageUrl') ||
+          Object.hasOwn(ll, 'embed')
+        ) {
+          continue;
+        }
         const heading: HandleHeading = {
           kind: 'heading',
           label: label.slice(0, MAX_LINK_LABEL_LEN),
@@ -725,13 +875,34 @@ function parseStoredProfile(raw: unknown): HandleProfile | undefined {
       if (typeof ll.url !== 'string') continue;
       const url = ll.url.trim();
       if (url.length > MAX_LINK_URL_LEN || !isHttpsUrl(url)) continue;
-      const link: HandleLink = { label: label.slice(0, MAX_LINK_LABEL_LEN), url };
+      const link: HandleRegularLink = {
+        label: label.slice(0, MAX_LINK_LABEL_LEN),
+        url,
+      };
       const emoji = sanitizeEmoji(ll.emoji);
       if (emoji) link.emoji = emoji;
       // featured は最大 1 本 (書込側で enforce 済みだが読込側も冪等に守る)。
       if (ll.featured === true && !featuredTaken) {
         link.featured = true;
         featuredTaken = true;
+      }
+      if (typeof ll.imageUrl === 'string') {
+        const imageUrl = ll.imageUrl.trim();
+        if (
+          imageUrl &&
+          imageUrl.length <= MAX_LINK_IMAGE_URL_LEN &&
+          isHttpsUrl(imageUrl)
+        ) {
+          link.imageUrl = imageUrl;
+        }
+      }
+      if (
+        ll.embed === true &&
+        embedCount < MAX_PROFILE_EMBEDS &&
+        extractHandleEmbed(url)
+      ) {
+        link.embed = true;
+        embedCount += 1;
       }
       links.push(link);
     }

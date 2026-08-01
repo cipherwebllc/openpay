@@ -1595,7 +1595,7 @@ describe('i18n: CsvPass 名前空間 (CSV 24時間パス paywall・ja/en parity)
   });
 });
 
-describe('i18n: HandleClaim / HandleProfile 名前空間 (@handle・ja/en parity)', () => {
+describe('i18n: @handle 名前空間 (ja/en parity)', () => {
   function deepKeys(o: Record<string, unknown>, prefix = ''): string[] {
     return Object.entries(o)
       .flatMap(([k, v]) =>
@@ -1606,7 +1606,12 @@ describe('i18n: HandleClaim / HandleProfile 名前空間 (@handle・ja/en parity
       .sort();
   }
 
-  for (const ns of ['HandleClaim', 'HandleProfile', 'MobileOrder'] as const) {
+  for (const ns of [
+    'HandleClaim',
+    'HandleProfile',
+    'HandleProfileBuilder',
+    'MobileOrder',
+  ] as const) {
     it(`${ns}: ja と en でキー集合が完全一致`, () => {
       expect(deepKeys(ja[ns] as Record<string, unknown>)).toEqual(
         deepKeys(en[ns] as Record<string, unknown>),

@@ -925,7 +925,9 @@
   "HandleProfileBuilder": {
     "addHeading": "Add heading",
     "headingLabelPlaceholder": "Heading (e.g. Featured)",
-    "removeHeading": "Remove heading"
+    "removeHeading": "Remove heading",
+    "imageUrlLabel": "Image URL (optional)",
+    "embedToggle": "Embed media"
   },
   "CreatorStoreSeller": {
     "heading": "Digital products",

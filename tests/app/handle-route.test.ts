@@ -48,6 +48,8 @@ import { GET as mineGET, POST } from '@/app/api/handle/route';
 import { GET as availGET, DELETE } from '@/app/api/handle/[handle]/route';
 
 const ADDR = OWNER;
+const YOUTUBE_ID = 'dQw4w9WgXcQ';
+const SPOTIFY_ID = '0123456789ABCDEFGHIJKL';
 // 新スキーマの最小有効 config (マルチ方法)。
 const CFG = { to: ADDR, methods: [{ token: 'jpyc', chain: 'polygon' }] };
 const savedRecord = (updatedAt: number) => ({
@@ -130,6 +132,48 @@ describe('POST /api/handle', () => {
     });
   });
 
+  it('passes normalized link image/embed fields through the HTTP boundary', async () => {
+    store.reserveOrUpdateHandle.mockResolvedValue({
+      status: 'created',
+      record: savedRecord(101),
+    });
+    const res = await POST(
+      postReq({
+        handle: 'alice',
+        config: CFG,
+        profile: {
+          links: [
+            {
+              label: ' Image ',
+              url: ' https://example.com ',
+              imageUrl: ' https://images.example/card.png ',
+            },
+            {
+              label: 'Video',
+              url: `https://youtu.be/${YOUTUBE_ID}?si=share`,
+              embed: true,
+            },
+          ],
+        },
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(store.reserveOrUpdateHandle.mock.calls[0][0].profile).toEqual({
+      links: [
+        {
+          label: 'Image',
+          url: 'https://example.com',
+          imageUrl: 'https://images.example/card.png',
+        },
+        {
+          label: 'Video',
+          url: `https://youtu.be/${YOUTUBE_ID}?si=share`,
+          embed: true,
+        },
+      ],
+    });
+  });
+
   it('passes a validated heading through the HTTP boundary to the store', async () => {
     store.reserveOrUpdateHandle.mockResolvedValue({
       status: 'created',
@@ -166,6 +210,11 @@ describe('POST /api/handle', () => {
       'featured property',
       { kind: 'heading', label: 'Projects', featured: false },
     ],
+    [
+      'imageUrl property',
+      { kind: 'heading', label: 'Projects', imageUrl: '' },
+    ],
+    ['embed property', { kind: 'heading', label: 'Projects', embed: false }],
     ['unknown kind', { kind: 'divider', label: 'Projects' }],
   ])(
     'rejects heading with %s before the store boundary',
@@ -196,6 +245,44 @@ describe('POST /api/handle', () => {
     expect((await res.json()).error).toBe('invalid_profile');
     expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      'unsupported embed',
+      [{ label: 'Site', url: 'https://example.com', embed: true }],
+      'embed not supported for this url',
+    ],
+    [
+      'four embeds',
+      [
+        ...Array.from({ length: 3 }, (_, index) => ({
+          label: `Video ${index}`,
+          url: `https://youtu.be/${YOUTUBE_ID}?n=${index}`,
+          embed: true,
+        })),
+        {
+          label: 'Song',
+          url: `https://open.spotify.com/track/${SPOTIFY_ID}`,
+          embed: true,
+        },
+      ],
+      'too many embeds',
+    ],
+  ])(
+    'rejects %s before the store boundary with the exact detail',
+    async (_case, links, detail) => {
+      const res = await POST(
+        postReq({ handle: 'alice', config: CFG, profile: { links } }),
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        ok: false,
+        error: 'invalid_profile',
+        detail,
+      });
+      expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
+    },
+  );
 
   it('passes a validated storefront through to the store (店舗公開)', async () => {
     store.reserveOrUpdateHandle.mockResolvedValue({

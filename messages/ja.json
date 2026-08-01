@@ -925,7 +925,9 @@
   "HandleProfileBuilder": {
     "addHeading": "見出しを追加",
     "headingLabelPlaceholder": "見出し (例: おすすめ)",
-    "removeHeading": "見出しを削除"
+    "removeHeading": "見出しを削除",
+    "imageUrlLabel": "画像 URL (任意)",
+    "embedToggle": "埋め込み表示"
   },
   "CreatorStoreSeller": {
     "heading": "デジタル商品",

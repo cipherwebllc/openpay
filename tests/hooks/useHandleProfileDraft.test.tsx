@@ -1,7 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useHandleProfileDraft } from '@/hooks/useHandleProfileDraft';
-import { MAX_PROFILE_LINKS } from '@/lib/handle';
+import {
+  MAX_LINK_IMAGE_URL_LEN,
+  MAX_PROFILE_EMBEDS,
+  MAX_PROFILE_LINKS,
+} from '@/lib/handle';
 
 const STORAGE_KEY = 'openpay:handle-profile-draft:v1';
 
@@ -68,7 +72,50 @@ describe('useHandleProfileDraft', () => {
     ]);
   });
 
-  it('drops unknown kinds and heals heading url/featured without consuming featured', async () => {
+  it('persists raw link image input and a supported embed in the existing v1 key', async () => {
+    const first = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(first.result.current.hydrated).toBe(true));
+    act(() => {
+      first.result.current.setSettings((current) => ({
+        ...current,
+        links: [
+          {
+            label: 'Video',
+            url: 'https://youtu.be/dQw4w9WgXcQ',
+            imageUrl: ' http://draft.example/video.jpg ',
+            embed: true,
+          },
+        ],
+      }));
+    });
+    await waitFor(() => {
+      const stored = JSON.parse(
+        window.localStorage.getItem(STORAGE_KEY) ?? '{}',
+      );
+      expect(stored.links).toEqual([
+        {
+          label: 'Video',
+          url: 'https://youtu.be/dQw4w9WgXcQ',
+          imageUrl: ' http://draft.example/video.jpg ',
+          embed: true,
+        },
+      ]);
+    });
+    first.unmount();
+
+    const restored = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(restored.result.current.hydrated).toBe(true));
+    expect(restored.result.current.settings.links).toEqual([
+      {
+        label: 'Video',
+        url: 'https://youtu.be/dQw4w9WgXcQ',
+        imageUrl: ' http://draft.example/video.jpg ',
+        embed: true,
+      },
+    ]);
+  });
+
+  it('drops unknown kinds and heals heading-only fields without consuming regular-link caps', async () => {
     window.localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({
@@ -80,6 +127,8 @@ describe('useHandleProfileDraft', () => {
             emoji: '📌',
             url: 'https://invalid.example',
             featured: true,
+            imageUrl: 'https://invalid.example/heading.png',
+            embed: true,
           },
           {
             label: 'Featured',
@@ -112,6 +161,67 @@ describe('useHandleProfileDraft', () => {
       );
       expect(stored.links).toEqual(result.current.settings.links);
     });
+  });
+
+  it('drops unsupported/stale embeds and keeps only the first MAX_PROFILE_EMBEDS', async () => {
+    const supported = Array.from(
+      { length: MAX_PROFILE_EMBEDS + 1 },
+      (_, index) => ({
+        label: `Video ${index}`,
+        url: 'https://youtu.be/dQw4w9WgXcQ',
+        embed: true,
+      }),
+    );
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        links: [
+          ...supported,
+          {
+            label: 'Unsupported',
+            url: 'https://example.com/video',
+            embed: true,
+          },
+        ],
+      }),
+    );
+
+    const { result } = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(
+      result.current.settings.links.filter(
+        (link) => link.kind !== 'heading' && link.embed === true,
+      ),
+    ).toHaveLength(MAX_PROFILE_EMBEDS);
+    expect(result.current.settings.links[MAX_PROFILE_EMBEDS]).toEqual({
+      label: `Video ${MAX_PROFILE_EMBEDS}`,
+      url: 'https://youtu.be/dQw4w9WgXcQ',
+    });
+    expect(result.current.settings.links[MAX_PROFILE_EMBEDS + 1]).toEqual({
+      label: 'Unsupported',
+      url: 'https://example.com/video',
+    });
+  });
+
+  it('drops an over-limit link image from corrupted localStorage on restore', async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        links: [
+          {
+            label: 'Image',
+            url: 'https://example.com',
+            imageUrl: `https://${'a'.repeat(MAX_LINK_IMAGE_URL_LEN)}`,
+          },
+        ],
+      }),
+    );
+
+    const { result } = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.links).toEqual([
+      { label: 'Image', url: 'https://example.com' },
+    ]);
   });
 
   it('shares MAX_PROFILE_LINKS between headings and regular links on reload', async () => {

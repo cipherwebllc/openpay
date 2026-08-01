@@ -5,6 +5,9 @@
 import { getAddress, isAddress } from 'viem';
 import type { HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
 import {
+  extractHandleEmbed,
+  MAX_LINK_IMAGE_URL_LEN,
+  MAX_PROFILE_EMBEDS,
   MAX_PROFILE_LINKS,
   MAX_SOCIAL_LINKS,
   type HandleLink,
@@ -37,6 +40,7 @@ function isHttpsUrl(value: string): boolean {
 
 export function buildPublishProfile(draft: HandleProfileDraft): HandleProfile {
   let featuredTaken = false;
+  let embedCount = 0;
   const links: HandleLink[] = [];
   for (const entry of draft.links) {
     if (links.length >= MAX_PROFILE_LINKS) break;
@@ -55,9 +59,25 @@ export function buildPublishProfile(draft: HandleProfileDraft): HandleProfile {
     const link: HandleLink = { label, url };
     const emoji = entry.emoji?.trim();
     if (emoji) link.emoji = emoji;
+    const imageUrl = entry.imageUrl?.trim();
+    if (
+      imageUrl &&
+      imageUrl.length <= MAX_LINK_IMAGE_URL_LEN &&
+      isHttpsUrl(imageUrl)
+    ) {
+      link.imageUrl = imageUrl;
+    }
     if (entry.featured && !featuredTaken) {
       link.featured = true;
       featuredTaken = true;
+    }
+    if (
+      entry.embed === true &&
+      embedCount < MAX_PROFILE_EMBEDS &&
+      extractHandleEmbed(url)
+    ) {
+      link.embed = true;
+      embedCount += 1;
     }
     links.push(link);
   }
@@ -136,7 +156,11 @@ export function hasDroppedProfileUrl(draft: HandleProfileDraft): boolean {
     draft.links.some((entry) => {
       if (entry.kind === 'heading') return false;
       const value = entry.url.trim();
-      return !!value && !isHttpsUrl(value);
+      const imageUrl = entry.imageUrl?.trim() ?? '';
+      return (
+        (!!value && !isHttpsUrl(value)) ||
+        (!!imageUrl && !isHttpsUrl(imageUrl))
+      );
     })
   );
 }

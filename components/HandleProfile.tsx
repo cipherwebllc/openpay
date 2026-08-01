@@ -17,7 +17,11 @@
 
 import { useEffect, useState } from 'react';
 import { SocialIconLinks } from '@/components/SocialIconLinks';
-import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
+import {
+  extractHandleEmbed,
+  type HandleProfile,
+  type HandleTipConfig,
+} from '@/lib/handle';
 import { handleViewTheme, resolveHandleTheme } from '@/lib/handleTheme';
 
 const DEFAULT_ACCENT = '#2563eb';
@@ -36,6 +40,46 @@ const FEATURED_LINK_BASE =
 const HEADING_BASE =
   'w-full px-2 pb-1 pt-4 text-left text-xs font-semibold tracking-wide';
 const CLEAN_HEADING_CLASS = `${HEADING_BASE} text-slate-500`;
+const EMBED_CARD_BASE = 'w-full overflow-hidden rounded-2xl';
+const CLEAN_EMBED_CARD_CLASS = `${EMBED_CARD_BASE} border border-slate-200/80 bg-white text-slate-800 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)]`;
+const EMBED_LABEL_CLASS =
+  'flex w-full items-center justify-center px-4 py-3.5 text-[0.95rem] font-semibold transition-opacity hover:opacity-80';
+
+// リンク画像は任意の第三者 https URL。失敗した URL だけを記録することで、ビルダーで URL を
+// 修正したときは新しい画像を直ちに再試行する。画像障害がリンク本文へ波及しないよう、絵文字
+// (無ければ何も無し) へ戻す。
+function HandleLinkImage({
+  imageUrl,
+  emoji,
+}: {
+  imageUrl: string;
+  emoji?: string;
+}) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+
+  if (failedUrl !== imageUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={imageUrl}
+        alt=""
+        aria-hidden
+        width={20}
+        height={20}
+        referrerPolicy="no-referrer"
+        loading="lazy"
+        className="mr-1.5 h-5 w-5 shrink-0 rounded object-cover"
+        onError={() => setFailedUrl(imageUrl)}
+      />
+    );
+  }
+
+  return emoji ? (
+    <span className="mr-1.5" aria-hidden>
+      {emoji}
+    </span>
+  ) : null;
+}
 
 function initialOf(name?: string): string {
   const n = (name ?? '').trim();
@@ -154,6 +198,62 @@ export function HandleProfileView({
                 </li>
               );
             }
+            const embed = l.embed === true ? extractHandleEmbed(l.url) : null;
+            if (embed) {
+              return (
+                <li key={`${l.url}-${i}`}>
+                  <div
+                    className={
+                      isClean ? CLEAN_EMBED_CARD_CLASS : EMBED_CARD_BASE
+                    }
+                    style={tk.linkStyle}
+                  >
+                    <a
+                      href={l.url}
+                      target="_blank"
+                      rel="noopener noreferrer nofollow"
+                      className={EMBED_LABEL_CLASS}
+                    >
+                      {l.imageUrl ? (
+                        <HandleLinkImage
+                          imageUrl={l.imageUrl}
+                          emoji={l.emoji}
+                        />
+                      ) : (
+                        l.emoji && (
+                          <span className="mr-1.5" aria-hidden>
+                            {l.emoji}
+                          </span>
+                        )
+                      )}
+                      {l.label}
+                    </a>
+                    {embed.provider === 'youtube' ? (
+                      <iframe
+                        src={embed.src}
+                        sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
+                        loading="lazy"
+                        // YouTube embed は Referer (origin) が無いと「エラー 153」で再生拒否する
+                        // (2026-08-01 実機で確認)。origin のみ送る既定相当に留める。
+                        referrerPolicy="strict-origin-when-cross-origin"
+                        title={l.label}
+                        className="block aspect-video w-full border-0"
+                      />
+                    ) : (
+                      <iframe
+                        src={embed.src}
+                        height={embed.height}
+                        sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        title={l.label}
+                        className="block w-full border-0"
+                      />
+                    )}
+                  </div>
+                </li>
+              );
+            }
             const featured = l.featured === true;
             // clean かつ非 featured のときだけ現行 className をそのまま使い inline style を付けない
             // (= 現行レコードのピクセル一致)。それ以外はテーマ/featured の inline style を適用。
@@ -177,12 +277,16 @@ export function HandleProfileView({
                   className={className}
                   style={style}
                 >
-                  {l.emoji && (
-                    // 絵文字はテキストノードとして描画 (HTML 解釈なし)。a11y 名は label から
-                    // 導出させるため aria-hidden (絵文字がリンク名に混ざるのを防ぐ)。
-                    <span className="mr-1.5" aria-hidden>
-                      {l.emoji}
-                    </span>
+                  {l.imageUrl ? (
+                    <HandleLinkImage imageUrl={l.imageUrl} emoji={l.emoji} />
+                  ) : (
+                    l.emoji && (
+                      // 絵文字はテキストノードとして描画 (HTML 解釈なし)。a11y 名は label から
+                      // 導出させるため aria-hidden (絵文字がリンク名に混ざるのを防ぐ)。
+                      <span className="mr-1.5" aria-hidden>
+                        {l.emoji}
+                      </span>
+                    )
                   )}
                   {l.label}
                 </a>
