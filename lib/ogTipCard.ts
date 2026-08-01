@@ -164,7 +164,9 @@ export function buildTipOgImageUrl(
   if (params.color) q.set('color', params.color);
   if (isHandleTheme(params.theme)) q.set('theme', params.theme);
   q.set('locale', locale);
-  return `/api/og/tip?${q.toString()}`;
+  // /og/ は /api/og/ への rewrite (next.config.mjs)。robots.txt の Disallow: /api/ を
+  // 前置一致だけで評価する SNS カード検証系の誤判定を避けるため、公開 URL は /og/ 側。
+  return `/og/tip?${q.toString()}`;
 }
 
 // generateMetadata の title/description を組み立てるための正規化済み事実。
@@ -416,7 +418,8 @@ export function buildHandleOgImageUrl(
   const q = new URLSearchParams();
   q.set('h', handle);
   q.set('locale', locale);
-  return `/api/og/handle?${q.toString()}`;
+  // 公開 URL は /og/ 側 (buildTipOgImageUrl の理由コメント参照)。
+  return `/og/handle?${q.toString()}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -488,7 +491,8 @@ export function buildProductOgImageUrl(
   q.set('h', handle);
   q.set('locale', locale);
   q.set('product', productId);
-  return `/api/og/handle?${q.toString()}`;
+  // 公開 URL は /og/ 側 (buildTipOgImageUrl の理由コメント参照)。
+  return `/og/handle?${q.toString()}`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

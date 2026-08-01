@@ -13,6 +13,10 @@ const nextConfig = {
     '/api/og/tip': ['./app/api/og/fonts/**', './public/icon-512.png'],
     '/api/og/handle': ['./app/api/og/fonts/**', './public/icon-512.png'],
   },
+  // ⚠️ rewrites() をここに定義しないこと: rewrites が 1 つでも存在すると client
+  // router に rewrite 解決コードが入り、全ルートの First Load JS が +3kB 太って
+  // bundle 予算を割る (2026-08-02 実測)。OG 画像の /og/* → /api/og/* 転送は
+  // middleware.ts で server rewrite している (client 影響ゼロ)。
   // frame 方針は default-deny: /tip/[address] だけが iframe 埋め込みを想定するため
   // frame-ancestors * を許可し (アクションは MetaMask 等のウォレットポップアップ内で
   // 行われるため、iframe 内でのクリックジャッキングは成立しない)、それ以外の全ページ

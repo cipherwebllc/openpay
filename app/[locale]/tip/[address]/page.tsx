@@ -39,7 +39,7 @@ export async function generateMetadata({
   // native (POL/KAIA) tip は ?native= の別系統で、送り手が自分のガスを払う = gasless
   // ではない。token tip (gasless) と分けて facts を組み、「ガス不要」の誤表示を防ぐ。
   let facts: TipCardFacts | null = null;
-  let ogImage = `/api/og/tip?locale=${ogLocale}`;
+  let ogImage = `/og/tip?locale=${ogLocale}`;
   if (sp.get('native') != null) {
     const native = parseNativeTipParams(address, sp);
     if (native.ok) {
