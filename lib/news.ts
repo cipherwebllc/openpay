@@ -34,6 +34,47 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'handle-embeds-2026-08-01',
+    date: '2026-08-01',
+    category: 'feature',
+    title: {
+      ja: '@handle プロフに動画・音楽の埋め込みとリンク画像を追加しました',
+      en: '@handle profiles now support media embeds and link images',
+    },
+    body: {
+      ja: 'クリエイターページ (open-pay.jp/@あなた) のリンクに、YouTube・Spotify・Audius・ニコニコ動画・Vimeo・Apple Music・TikTok・Suno・SoundCloud の 9 サービスの埋め込み表示 (リンクごとに ON/OFF・最大 3 件) と、絵文字の代わりの画像表示を追加しました。プロフがそのままメディアハブになります。\nあわせて、デジタル商品の商品ごとのシェアリンク (X などに貼ると商品カードが表示され、開くと購入画面が自動で開きます) と、無料サービスを活用した販売手順ガイドも公開しました。',
+      en: 'Links on creator pages (open-pay.jp/@you) can now render embedded players for nine services — YouTube, Spotify, Audius, Niconico, Vimeo, Apple Music, TikTok, Suno, and SoundCloud (opt-in per link, up to 3) — and show an image instead of an emoji.\nWe also added per-product share links for digital goods (pasting one on X shows a product card and opens the purchase dialog directly) and a step-by-step selling guide using free hosting services.',
+    },
+    link: { href: '/guide/store', labelJa: '販売ガイドを見る', labelEn: 'Read the selling guide' },
+  },
+  {
+    id: 'creator-store-launch-2026-07-30',
+    date: '2026-07-30',
+    category: 'pricing',
+    title: {
+      ja: 'デジタル商品ストアを公開しました（@handle プロフでデジタル商品を JPYC 販売）',
+      en: 'Digital goods store is live — sell digital items for JPYC on your @handle profile',
+    },
+    body: {
+      ja: 'クリエイターが @handle プロフィールで、URL (PDF・ZIP・動画などの共有リンク) やテキスト (プロンプト・テンプレートなど) のデジタル商品を JPYC で販売できるようになりました。購入者はウォレットだけで購入でき、購入品はライブラリからいつでも再取得できます。\n売り手手数料はありません。買い手は表示価格に x402 ファシリテーター利用料 (価格の 1%・最低 1 JPYC) を上乗せしてお支払いになります。商品代金は出品者のウォレットへ直接着金し、当社は売上を預かりません (ノンカストディ)。商品本文は購入者への引き渡しのために当社が保管します。技術的なコピー防止 (DRM) はありません。オンチェーン送金は取消できませんが、商品が提供されない場合等の出品者に対する契約上の救済を妨げません。出品には販売者情報 (氏名または名称・連絡先) の登録が必要です。\n詳しくは利用規約第 13 条・特定商取引法に基づく表記をご確認ください。',
+      en: 'Creators can now sell digital goods — URLs (share links to PDFs, ZIPs, videos) and text (prompts, templates) — for JPYC on their @handle profile. Buyers pay with just a wallet and can re-download purchases anytime from their library.\nThere is no seller fee; the buyer pays the listed price plus the x402 facilitator fee (1% of price, minimum 1 JPYC). Sales settle directly to the seller wallet (non-custodial); we store the product content solely to deliver it to buyers. There is no DRM. On-chain transfers are irreversible, but this does not affect contractual remedies against the seller when an item is not delivered. Sellers must register seller information (name and contact).\nSee Article 13 of the Terms and the Specified Commercial Transactions Act notice for details.',
+    },
+    link: { href: '/terms', labelJa: '利用規約を読む', labelEn: 'Read the Terms' },
+  },
+  {
+    id: 'tip-question-box-2026-07-29',
+    date: '2026-07-29',
+    category: 'feature',
+    title: {
+      ja: 'チップに非公開の質問・メッセージを添えられるようになりました（質問箱）',
+      en: 'Tips can now carry a private question or message',
+    },
+    body: {
+      ja: 'チップを送るとき、非公開の質問やメッセージを添えられるようになりました。読めるのは受け取った本人だけで、ウォレットでログインした受信箱で確認できます (保存は 180 日間)。\nクリエイターの「質問箱」としてもお使いいただけます。受け取り手数料は従来どおりかかりません。',
+      en: 'You can now attach a private question or message when sending a tip. Only the recipient can read it, in an inbox unlocked by wallet sign-in (messages are kept for 180 days).\nIt doubles as a creator question box. Receiving tips remains fee-free.',
+    },
+  },
+  {
     id: 'x402-fee-floor-2026-07-05',
     date: '2026-07-05',
     category: 'pricing',
