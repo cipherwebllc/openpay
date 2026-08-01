@@ -11,6 +11,8 @@ export default createMiddleware({
 });
 
 export const config = {
-  // _next, /api, /manifest.webmanifest, /icon-512.png などの静的・特殊ルートは除外
-  matcher: ['/((?!_next|api|.*\\..*).*)'],
+  // _next, /api, /manifest.webmanifest, /icon-512.png などの静的・特殊ルートは除外。
+  // /og/ は OG 画像の公開 URL (next.config.mjs の rewrite で /api/og/ へ内部転送)。
+  // 除外しないと next-intl が /ja/og/… へ locale リダイレクトして画像が 404 になる。
+  matcher: ['/((?!_next|api|og/|.*\\..*).*)'],
 };

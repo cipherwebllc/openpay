@@ -124,7 +124,7 @@ describe('buildTipOgImageUrl', () => {
       { token: 'jpyc', name: 'Alice', color: '#ff8800' },
       'ja',
     );
-    expect(url.startsWith('/api/og/tip?')).toBe(true);
+    expect(url.startsWith('/og/tip?')).toBe(true);
     const q = new URLSearchParams(url.split('?')[1]);
     expect(q.get('to')).toBe(ADDR);
     expect(q.get('token')).toBe('jpyc');
@@ -135,7 +135,7 @@ describe('buildTipOgImageUrl', () => {
 
   it('theme 無し URL は従来バイト列、theme ありだけ additive に出力', () => {
     expect(buildTipOgImageUrl(ADDR, { token: 'jpyc' }, 'ja')).toBe(
-      `/api/og/tip?to=${ADDR}&token=jpyc&locale=ja`,
+      `/og/tip?to=${ADDR}&token=jpyc&locale=ja`,
     );
     const themed = buildTipOgImageUrl(
       ADDR,
@@ -332,9 +332,9 @@ describe('buildHandleOgModel / buildHandleOgImageUrl', () => {
     expect(card.bio).toBe('x'.repeat(48) + '…');
     expect(card.chips[0]).toBe('JPYC / USDC で応援');
   });
-  it('og:image URL は /api/og/handle?h=&locale=', async () => {
+  it('og:image URL は /og/handle?h=&locale=', async () => {
     const { buildHandleOgImageUrl } = await import('@/lib/ogTipCard');
-    expect(buildHandleOgImageUrl('masia', 'ja')).toBe('/api/og/handle?h=masia&locale=ja');
+    expect(buildHandleOgImageUrl('masia', 'ja')).toBe('/og/handle?h=masia&locale=ja');
   });
 });
 
@@ -388,7 +388,7 @@ describe('buildProductOgModel / buildProductOgImageUrl', () => {
   it('商品 og:image URL は server authority route へ product ID だけを渡す', () => {
     const productId = `h_${'a'.repeat(32)}`;
     expect(buildProductOgImageUrl('masia', 'ja', productId)).toBe(
-      `/api/og/handle?h=masia&locale=ja&product=${productId}`,
+      `/og/handle?h=masia&locale=ja&product=${productId}`,
     );
   });
 });

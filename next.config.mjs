@@ -13,6 +13,17 @@ const nextConfig = {
     '/api/og/tip': ['./app/api/og/fonts/**', './public/icon-512.png'],
     '/api/og/handle': ['./app/api/og/fonts/**', './public/icon-512.png'],
   },
+  // OG 画像の公開 URL は /og/* とし、内部の /api/og/* へ rewrite する。
+  // 理由: robots.txt の Disallow: /api/ を前置一致だけで評価する SNS カード検証系
+  // (X Card Validator 等) が、longest-match の Allow: /api/og/ や Twitterbot 専用
+  // グループを無視して「restricted」と誤判定し続けた (2026-08-02 本番実害・#316/#321
+  // では解消せず)。/og/ はどの Disallow にも一致しないため、robots キャッシュや
+  // parser 実装に依存せずカード画像を取得できる。旧 /api/og/* URL も直アクセス可
+  // (既存シェア・キャッシュ済みカードの後方互換)。middleware の locale リダイレクト
+  // 除外 (middleware.ts の matcher) とセットで機能する。
+  async rewrites() {
+    return [{ source: '/og/:path*', destination: '/api/og/:path*' }];
+  },
   // frame 方針は default-deny: /tip/[address] だけが iframe 埋め込みを想定するため
   // frame-ancestors * を許可し (アクションは MetaMask 等のウォレットポップアップ内で
   // 行われるため、iframe 内でのクリックジャッキングは成立しない)、それ以外の全ページ

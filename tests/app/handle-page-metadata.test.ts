@@ -137,9 +137,12 @@ describe('@handle generateMetadata', () => {
     const m = await call('%40yamada');
     expect(m.title).toBe('山田カフェ のモバイルオーダー — OpenPay');
     expect(String(m.description)).toContain('JPYC');
-    // OG/Twitter 画像が付く (/api/og/handle)。
+    // OG/Twitter 画像が付く (/og/handle=公開 URL・rewrite で /api/og/handle へ)。
     expect(JSON.stringify(m.twitter)).toContain('summary_large_image');
-    expect(JSON.stringify(m.openGraph?.images)).toContain('/api/og/handle');
+    const ogImages = JSON.stringify(m.openGraph?.images);
+    expect(ogImages).toContain('/og/handle');
+    // 旧 /api/og/ を出すと crude robots parser の SNS カード検証で restricted 誤判定
+    expect(ogImages).not.toContain('/api/og/');
   });
 
   it('storefront あっても enableMobileOrder OFF はプロフ meta (本体ゲートと一致)', async () => {
