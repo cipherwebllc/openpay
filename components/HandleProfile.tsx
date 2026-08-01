@@ -236,7 +236,8 @@ export function HandleProfileView({
                         src={embed.src}
                         height={embed.height}
                         sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
-                        loading="lazy"
+                        // 埋め込みは opt-in 最大 3 件の主役コンテンツ。lazy はブラウザ閾値
+                        // 依存で見え方が揺れる利益の薄い最適化のため、確定ロードにする。
                         referrerPolicy="no-referrer"
                         title={l.label}
                         // 固定高 player の数 px 誤差がクラシックスクロールバー環境で
@@ -253,7 +254,8 @@ export function HandleProfileView({
                       <iframe
                         src={embed.src}
                         sandbox="allow-scripts allow-same-origin allow-popups allow-presentation"
-                        loading="lazy"
+                        // 埋め込みは opt-in 最大 3 件の主役コンテンツ。lazy はブラウザ閾値
+                        // 依存で見え方が揺れる利益の薄い最適化のため、確定ロードにする。
                         // YouTube embed は Referer (origin) が無いと「エラー 153」で再生拒否する
                         // (2026-08-01 実機で確認)。origin のみ送る既定相当に留める。
                         referrerPolicy={

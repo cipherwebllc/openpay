@@ -349,6 +349,8 @@ describe('extractHandleEmbed', () => {
 
   it.each([
     ['https://tiktok.com/@alice/video/1234567890', '1234567890'],
+    // 実 URL は www 付きが標準 (2026-08-01 実機で null になり修正)。
+    ['https://www.tiktok.com/@tiktok/video/7106594312292453675', '7106594312292453675'],
     ['https://tiktok.com/@alice.dev/video/987654321/', '987654321'],
     ['https://tiktok.com/@alice_01/video/42?lang=ja#video', '42'],
   ])('extracts a TikTok URL and builds its v2 src: %s', (url, id) => {
@@ -459,7 +461,7 @@ describe('extractHandleEmbed', () => {
     'https://tiktok.com/@alice-name/video/123',
     'https://tiktok.com/@/video/123',
     'https://tiktok.com/@alice/video/123/extra',
-    'https://www.tiktok.com/@alice/video/123',
+    'https://m.tiktok.com/@alice/video/123',
     'https://tiktok.com.evil.example/@alice/video/123',
   ])('rejects an invalid TikTok ID, user, path, or host: %s', (url) => {
     expect(extractHandleEmbed(url)).toBeNull();

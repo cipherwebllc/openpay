@@ -689,7 +689,7 @@ export function extractHandleEmbed(
     };
   }
 
-  if (host === 'tiktok.com') {
+  if (host === 'tiktok.com' || host === 'www.tiktok.com') {
     const path = parsed.pathname.match(/^\/@([^/]+)\/video\/(\d+)\/?$/);
     if (
       !path ||

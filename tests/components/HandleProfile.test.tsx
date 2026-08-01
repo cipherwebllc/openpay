@@ -251,7 +251,8 @@ describe('HandleProfileView', () => {
       'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
     );
     expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
-    expect(iframe).toHaveAttribute('loading', 'lazy');
+    // 埋め込み (最大 3 件) は確定ロード方針のため lazy を付けない。
+    expect(iframe).not.toHaveAttribute('loading');
     // YouTube は Referer (origin) 無しだと error 153 で再生拒否 (2026-08-01 実機確認)。
     expect(iframe).toHaveAttribute(
       'referrerpolicy',
@@ -287,7 +288,8 @@ describe('HandleProfileView', () => {
       expect(iframe).toHaveAttribute('src', src);
       expect(iframe).not.toHaveAttribute('height');
       expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
-      expect(iframe).toHaveAttribute('loading', 'lazy');
+      // 埋め込み (最大 3 件) は確定ロード方針のため lazy を付けない。
+    expect(iframe).not.toHaveAttribute('loading');
       expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
       expect(iframe).toHaveAttribute('scrolling', 'no');
       expect(iframe).toHaveClass('aspect-video', 'w-full');
@@ -323,7 +325,8 @@ describe('HandleProfileView', () => {
       );
       expect(iframe).toHaveAttribute('height', String(height));
       expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
-      expect(iframe).toHaveAttribute('loading', 'lazy');
+      // 埋め込み (最大 3 件) は確定ロード方針のため lazy を付けない。
+    expect(iframe).not.toHaveAttribute('loading');
       expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
       expect(iframe).toHaveAttribute('scrolling', 'no');
       expect(iframe).toHaveClass('w-full');
@@ -358,7 +361,8 @@ describe('HandleProfileView', () => {
     );
     expect(iframe).toHaveAttribute('height', '152');
     expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
-    expect(iframe).toHaveAttribute('loading', 'lazy');
+    // 埋め込み (最大 3 件) は確定ロード方針のため lazy を付けない。
+    expect(iframe).not.toHaveAttribute('loading');
     expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
     expect(iframe).toHaveAttribute('scrolling', 'no');
     expect(iframe).toHaveClass('w-full');
@@ -414,7 +418,8 @@ describe('HandleProfileView', () => {
       expect(iframe).toHaveAttribute('src', src);
       expect(iframe).toHaveAttribute('height', String(height));
       expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
-      expect(iframe).toHaveAttribute('loading', 'lazy');
+      // 埋め込み (最大 3 件) は確定ロード方針のため lazy を付けない。
+    expect(iframe).not.toHaveAttribute('loading');
       expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
       expect(iframe).toHaveAttribute('scrolling', 'no');
       expect(iframe).toHaveClass('w-full');
