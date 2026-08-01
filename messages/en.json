@@ -900,7 +900,7 @@
     "addSocial": "Add social link",
     "removeSocial": "Remove",
     "linksLabel": "Links",
-    "httpsOnlyHint": "Links must be https:// only. http and javascript are disabled for safety. YouTube / Spotify / Audius links can be embedded.",
+    "httpsOnlyHint": "Links must be https:// only. http and javascript are disabled for safety. YouTube / Spotify / Audius / Niconico Video / Vimeo / Apple Music / TikTok / Suno / SoundCloud links can be embedded.",
     "linkLabelPlaceholder": "Label (e.g. X)",
     "addLink": "Add link",
     "removeLink": "Remove",
@@ -925,9 +925,12 @@
   },
   "HandleProfileBuilder": {
     "addHeading": "Add heading",
+    "headingLabel": "Heading",
     "headingLabelPlaceholder": "Heading (e.g. Featured)",
     "removeHeading": "Remove heading",
     "imageUrlLabel": "Image URL (optional)",
+    "linkLabel": "Label",
+    "linkUrlLabel": "URL",
     "embedToggle": "Embed media"
   },
   "CreatorStoreSeller": {

@@ -257,9 +257,42 @@ describe('HandleProfileView', () => {
       'referrerpolicy',
       'strict-origin-when-cross-origin',
     );
+    expect(iframe).toHaveAttribute('scrolling', 'no');
     expect(iframe).toHaveClass('aspect-video', 'w-full');
     expect(labelLink.parentElement).toContainElement(iframe);
   });
+
+  it.each([
+    [
+      'Niconico video',
+      'https://www.nicovideo.jp/watch/sm9?from=share',
+      'https://embed.nicovideo.jp/watch/sm9',
+    ],
+    [
+      'Vimeo video',
+      'https://vimeo.com/123456789',
+      'https://player.vimeo.com/video/123456789',
+    ],
+  ] as const)(
+    'renders the %s aspect-video embed with a rebuilt URL and no referrer',
+    (label, url, src) => {
+      renderWithIntl(
+        <HandleProfileView
+          config={multiConfig}
+          profile={{ links: [{ label, url, embed: true }] }}
+        />,
+      );
+
+      const iframe = screen.getByTitle(label);
+      expect(iframe).toHaveAttribute('src', src);
+      expect(iframe).not.toHaveAttribute('height');
+      expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
+      expect(iframe).toHaveAttribute('loading', 'lazy');
+      expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
+      expect(iframe).toHaveAttribute('scrolling', 'no');
+      expect(iframe).toHaveClass('aspect-video', 'w-full');
+    },
+  );
 
   it.each([
     ['track', 152],
@@ -292,6 +325,7 @@ describe('HandleProfileView', () => {
       expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
       expect(iframe).toHaveAttribute('loading', 'lazy');
       expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
+      expect(iframe).toHaveAttribute('scrolling', 'no');
       expect(iframe).toHaveClass('w-full');
     },
   );
@@ -322,12 +356,75 @@ describe('HandleProfileView', () => {
       'src',
       'https://audius.co/embed/track/AbC123xYz?flavor=compact',
     );
-    expect(iframe).toHaveAttribute('height', '120');
+    expect(iframe).toHaveAttribute('height', '152');
     expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
     expect(iframe).toHaveAttribute('loading', 'lazy');
     expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(iframe).toHaveAttribute('scrolling', 'no');
     expect(iframe).toHaveClass('w-full');
   });
+
+  it.each([
+    [
+      'Apple Music album',
+      'https://music.apple.com/jp/album/%E6%9D%B1%E4%BA%AC%20hits/123456789',
+      'https://embed.music.apple.com/jp/album/%E6%9D%B1%E4%BA%AC%20hits/123456789',
+      450,
+      false,
+    ],
+    [
+      'Apple Music song',
+      'https://music.apple.com/us/album/song-name/123456789?i=987654321',
+      'https://embed.music.apple.com/us/album/song-name/123456789?i=987654321',
+      175,
+      false,
+    ],
+    [
+      'TikTok video',
+      'https://tiktok.com/@alice/video/1234567890',
+      'https://www.tiktok.com/embed/v2/1234567890',
+      580,
+      true,
+    ],
+    [
+      'Suno song',
+      'https://suno.com/song/123e4567-e89b-42d3-a456-426614174000',
+      'https://suno.com/embed/123e4567-e89b-42d3-a456-426614174000',
+      152,
+      false,
+    ],
+    [
+      'SoundCloud track',
+      'https://soundcloud.com/artist_name/track-slug?utm_source=share',
+      'https://w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Fartist_name%2Ftrack-slug',
+      166,
+      false,
+    ],
+  ] as const)(
+    'renders the %s fixed-height embed with exact provider dimensions',
+    (label, url, src, height, isTikTok) => {
+      renderWithIntl(
+        <HandleProfileView
+          config={multiConfig}
+          profile={{ links: [{ label, url, embed: true }] }}
+        />,
+      );
+
+      const iframe = screen.getByTitle(label);
+      expect(iframe).toHaveAttribute('src', src);
+      expect(iframe).toHaveAttribute('height', String(height));
+      expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
+      expect(iframe).toHaveAttribute('loading', 'lazy');
+      expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
+      expect(iframe).toHaveAttribute('scrolling', 'no');
+      expect(iframe).toHaveClass('w-full');
+      if (isTikTok) {
+        expect(iframe).toHaveClass('mx-auto', 'max-w-[325px]');
+      } else {
+        expect(iframe).not.toHaveClass('mx-auto', 'max-w-[325px]');
+      }
+    },
+  );
 
   it.each([
     ['clean', null],

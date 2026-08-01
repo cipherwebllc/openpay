@@ -144,7 +144,7 @@ export interface HandleRegularLink {
   // リンク先を示す小画像 (任意・https URL のみ・最大 512 文字)。
   // 未指定なら従来どおり絵文字を表示する。
   imageUrl?: string;
-  // 対応済み YouTube / Spotify / Audius URL だけを埋め込みカードとして描画する。
+  // 対応済み provider URL だけを埋め込みカードとして描画する。
   embed?: true;
   // Audius の公開 URL には track ID が無いため、保存時に server が解決した値だけを保持する。
   // client payload の値は route 層で除去・再導出する。
@@ -452,7 +452,21 @@ function isHttpsUrl(value: string): boolean {
 const YOUTUBE_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 const SPOTIFY_ID_PATTERN = /^[A-Za-z0-9]{22}$/;
 const AUDIUS_ID_PATTERN = /^[A-Za-z0-9]{3,16}$/;
+const NICONICO_ID_PATTERN = /^(?:sm|so|nm)\d+$/;
+const VIMEO_ID_PATTERN = /^\d{6,12}$/;
+const APPLE_MUSIC_ID_PATTERN = /^\d+$/;
+const TIKTOK_USER_PATTERN = /^[A-Za-z0-9._]+$/;
+const TIKTOK_ID_PATTERN = /^\d+$/;
+const SUNO_UUID_V4_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SOUNDCLOUD_PATH_PART_PATTERN = /^[A-Za-z0-9_-]+$/;
+const ENCODED_PATH_COMPONENT_PATTERN = /^(?:[^/%]|%[0-9A-Fa-f]{2})+$/u;
 const YOUTUBE_HOSTS = new Set(['youtube.com', 'www.youtube.com']);
+const NICONICO_HOSTS = new Set([
+  'nicovideo.jp',
+  'www.nicovideo.jp',
+  'sp.nicovideo.jp',
+]);
 const SPOTIFY_EMBED_TYPES = [
   'track',
   'album',
@@ -464,7 +478,7 @@ const SPOTIFY_EMBED_TYPES = [
 
 export type HandleEmbed =
   | {
-      provider: 'youtube';
+      provider: 'youtube' | 'niconico' | 'vimeo';
       id: string;
       src: string;
     }
@@ -480,7 +494,35 @@ export type HandleEmbed =
       kind: 'track';
       id: string;
       src: string;
-      height: 120;
+      height: 152;
+    }
+  | {
+      provider: 'apple-music';
+      storefront: string;
+      slug: string;
+      albumId: string;
+      itemId?: string;
+      src: string;
+      height: 175 | 450;
+    }
+  | {
+      provider: 'tiktok';
+      id: string;
+      src: string;
+      height: 580;
+    }
+  | {
+      provider: 'suno';
+      id: string;
+      src: string;
+      height: 152;
+    }
+  | {
+      provider: 'soundcloud';
+      user: string;
+      slug: string;
+      src: string;
+      height: 166;
     };
 
 function isSpotifyEmbedType(
@@ -523,6 +565,15 @@ function parseAudiusEmbedResolved(raw: unknown): HandleEmbedResolved | null {
     return null;
   }
   return { provider: 'audius', kind: 'track', id: resolved.id };
+}
+
+function encodeValidatedPathComponent(value: string): string | null {
+  if (!ENCODED_PATH_COMPONENT_PATTERN.test(value)) return null;
+  try {
+    return encodeURIComponent(decodeURIComponent(value));
+  } catch {
+    return null;
+  }
 }
 
 // Audius は公開 URL だけでは track ID を得られないため、builder/route が保存前候補を
@@ -583,13 +634,120 @@ export function extractHandleEmbed(
     };
   }
 
+  if (NICONICO_HOSTS.has(host)) {
+    const id = parsed.pathname.match(/^\/watch\/((?:sm|so|nm)\d+)\/?$/)?.[1];
+    if (!id || !NICONICO_ID_PATTERN.test(id)) return null;
+    return {
+      provider: 'niconico',
+      id,
+      src: `https://embed.nicovideo.jp/watch/${id}`,
+    };
+  }
+
+  if (host === 'vimeo.com') {
+    const id = parsed.pathname.match(/^\/(\d{6,12})\/?$/)?.[1];
+    if (!id || !VIMEO_ID_PATTERN.test(id)) return null;
+    return {
+      provider: 'vimeo',
+      id,
+      src: `https://player.vimeo.com/video/${id}`,
+    };
+  }
+
+  if (host === 'music.apple.com') {
+    const path = parsed.pathname.match(
+      /^\/([a-z]{2})\/album\/([^/]+)\/(\d+)\/?$/u,
+    );
+    if (!path) return null;
+    const [, storefront, rawSlug, albumId] = path;
+    const slug = encodeValidatedPathComponent(rawSlug);
+    if (!slug || !APPLE_MUSIC_ID_PATTERN.test(albumId)) return null;
+
+    const query = [...parsed.searchParams.entries()];
+    let itemId: string | undefined;
+    if (query.length > 0) {
+      if (
+        query.length !== 1 ||
+        query[0][0] !== 'i' ||
+        !APPLE_MUSIC_ID_PATTERN.test(query[0][1])
+      ) {
+        return null;
+      }
+      itemId = query[0][1];
+    }
+
+    return {
+      provider: 'apple-music',
+      storefront,
+      slug,
+      albumId,
+      ...(itemId ? { itemId } : {}),
+      src: `https://embed.music.apple.com/${storefront}/album/${slug}/${albumId}${
+        itemId ? `?i=${itemId}` : ''
+      }`,
+      height: itemId ? 175 : 450,
+    };
+  }
+
+  if (host === 'tiktok.com') {
+    const path = parsed.pathname.match(/^\/@([^/]+)\/video\/(\d+)\/?$/);
+    if (
+      !path ||
+      !TIKTOK_USER_PATTERN.test(path[1]) ||
+      !TIKTOK_ID_PATTERN.test(path[2])
+    ) {
+      return null;
+    }
+    const id = path[2];
+    return {
+      provider: 'tiktok',
+      id,
+      src: `https://www.tiktok.com/embed/v2/${id}`,
+      height: 580,
+    };
+  }
+
+  if (host === 'suno.com') {
+    const id = parsed.pathname.match(/^\/song\/([^/]+)\/?$/)?.[1];
+    if (!id || !SUNO_UUID_V4_PATTERN.test(id)) return null;
+    return {
+      provider: 'suno',
+      id,
+      src: `https://suno.com/embed/${id}`,
+      height: 152,
+    };
+  }
+
+  if (host === 'soundcloud.com') {
+    const path = parsed.pathname.match(/^\/([^/]+)\/([^/]+)\/?$/);
+    if (
+      !path ||
+      !SOUNDCLOUD_PATH_PART_PATTERN.test(path[1]) ||
+      !SOUNDCLOUD_PATH_PART_PATTERN.test(path[2]) ||
+      parsed.searchParams.has('secret_token')
+    ) {
+      return null;
+    }
+    const [, user, slug] = path;
+    const trackUrl = `https://soundcloud.com/${user}/${slug}`;
+    return {
+      provider: 'soundcloud',
+      user,
+      slug,
+      src: `https://w.soundcloud.com/player/?url=${encodeURIComponent(trackUrl)}`,
+      height: 166,
+    };
+  }
+
   if (host !== 'audius.co') return null;
   const audius = parseAudiusEmbedResolved(embedResolved);
   if (!audius) return null;
   return {
     ...audius,
     src: `https://audius.co/embed/track/${audius.id}?flavor=compact`,
-    height: 120,
+    // 120 だと実カード下端が切れてスクロールバーが出る (2026-08-01 本番実害)。
+    // Spotify track 行と同じ 152 に統一。
+    height: 152,
   };
 }
 

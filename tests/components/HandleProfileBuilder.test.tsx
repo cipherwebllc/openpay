@@ -623,9 +623,22 @@ describe('HandleProfileBuilder', () => {
     expect(screen.getByLabelText('絵文字 (任意)')).toHaveValue('🌐');
   });
 
-  it('通常リンクに可視 label 付きの画像 URL 入力を表示・保持する', () => {
+  it('通常リンクの全入力に同スタイルの可視 label を表示し、値を保持する', () => {
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.click(screen.getByText('＋ リンクを追加'));
+    const fields = [
+      screen.getByRole('textbox', { name: '絵文字 (任意)' }),
+      screen.getByRole('textbox', { name: '画像 URL (任意)' }),
+      screen.getByRole('textbox', { name: 'ラベル' }),
+      screen.getByRole('textbox', { name: 'URL' }),
+    ];
+    const fieldHeadingClasses = fields.map(
+      (input) => input.closest('label')?.querySelector('span')?.className,
+    );
+    expect(fieldHeadingClasses.every(Boolean)).toBe(true);
+    expect(new Set(fieldHeadingClasses).size).toBe(1);
+    expect(fields[0]).not.toHaveAttribute('aria-label');
+
     const imageUrl = screen.getByRole('textbox', {
       name: '画像 URL (任意)',
     });
@@ -643,9 +656,7 @@ describe('HandleProfileBuilder', () => {
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.click(screen.getByText('＋ リンクを追加'));
     const linksGroup = screen.getByRole('group', { name: 'リンク' });
-    const linkUrl = within(linksGroup)
-      .getAllByPlaceholderText('https://')
-      .find((input) => input.closest('label') === null)!;
+    const linkUrl = within(linksGroup).getByRole('textbox', { name: 'URL' });
 
     fireEvent.change(linkUrl, {
       target: { value: 'https://example.com/video' },
@@ -676,18 +687,16 @@ describe('HandleProfileBuilder', () => {
     });
   });
 
-  it('Audius URL に embed toggle と 3-provider hint を表示する', () => {
+  it('Audius URL に embed toggle と 9-provider hint を表示する', () => {
     renderWithIntl(<HandleProfileBuilder />);
     expect(
       screen.getByText(
-        'リンクは https:// のみ。安全のため http や javascript は無効です。YouTube / Spotify / Audius は埋め込み表示に対応しています。',
+        'リンクは https:// のみ。安全のため http や javascript は無効です。YouTube / Spotify / Audius / ニコニコ動画 / Vimeo / Apple Music / TikTok / Suno / SoundCloud は埋め込み表示に対応しています。',
       ),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByText('＋ リンクを追加'));
     const linksGroup = screen.getByRole('group', { name: 'リンク' });
-    const linkUrl = within(linksGroup)
-      .getAllByPlaceholderText('https://')
-      .find((input) => input.closest('label') === null)!;
+    const linkUrl = within(linksGroup).getByRole('textbox', { name: 'URL' });
 
     fireEvent.change(linkUrl, {
       target: { value: 'https://audius.co/openpay/test-track' },
@@ -697,15 +706,44 @@ describe('HandleProfileBuilder', () => {
     expect(toggle).toBeChecked();
   });
 
+  it('英語でも 9-provider hint と全入力の可視 label を表示する', () => {
+    renderWithIntl(<HandleProfileBuilder />, { locale: 'en' });
+    expect(
+      screen.getByText(
+        'Links must be https:// only. http and javascript are disabled for safety. YouTube / Spotify / Audius / Niconico Video / Vimeo / Apple Music / TikTok / Suno / SoundCloud links can be embedded.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByText('＋ Add link'));
+    for (const name of ['Emoji (optional)', 'Image URL (optional)', 'Label', 'URL']) {
+      expect(screen.getByRole('textbox', { name })).toBeInTheDocument();
+    }
+  });
+
+  it.each([
+    ['ニコニコ動画', 'https://nicovideo.jp/watch/sm9'],
+    ['Vimeo', 'https://vimeo.com/123456'],
+    ['Apple Music', 'https://music.apple.com/jp/album/song/123?i=456'],
+    ['TikTok', 'https://tiktok.com/@alice/video/123'],
+    ['Suno', 'https://suno.com/song/123e4567-e89b-42d3-a456-426614174000'],
+    ['SoundCloud', 'https://soundcloud.com/artist/track'],
+  ])('%s URL に embed toggle を表示する', (_provider, url) => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByText('＋ リンクを追加'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'URL' }), {
+      target: { value: url },
+    });
+    expect(
+      screen.getByRole('checkbox', { name: '埋め込み表示' }),
+    ).toBeInTheDocument();
+  });
+
   it('YouTube / Spotify / Audius の合算 3 件で 4 件目 toggle を disabled にする', () => {
     renderWithIntl(<HandleProfileBuilder />);
     for (let index = 0; index < 4; index += 1) {
       fireEvent.click(screen.getByText('＋ リンクを追加'));
     }
     const linksGroup = screen.getByRole('group', { name: 'リンク' });
-    const linkUrls = within(linksGroup)
-      .getAllByPlaceholderText('https://')
-      .filter((input) => input.closest('label') === null);
+    const linkUrls = within(linksGroup).getAllByRole('textbox', { name: 'URL' });
     const urls = [
       'https://youtu.be/dQw4w9WgXcQ',
       'https://open.spotify.com/track/0123456789ABCDEFGHIJKL',
@@ -732,9 +770,7 @@ describe('HandleProfileBuilder', () => {
       fireEvent.click(screen.getByText('＋ リンクを追加'));
     }
     const linksGroup = screen.getByRole('group', { name: 'リンク' });
-    const linkUrls = within(linksGroup)
-      .getAllByPlaceholderText('https://')
-      .filter((input) => input.closest('label') === null);
+    const linkUrls = within(linksGroup).getAllByRole('textbox', { name: 'URL' });
     for (const input of linkUrls) {
       fireEvent.change(input, {
         target: { value: 'https://youtu.be/dQw4w9WgXcQ' },
@@ -760,9 +796,18 @@ describe('HandleProfileBuilder', () => {
     fireEvent.click(
       screen.getByRole('button', { name: '＋ 見出しを追加' }),
     );
-    const label = screen.getByPlaceholderText('見出し (例: おすすめ)');
-    const row = label.parentElement!;
+    const label = screen.getByRole('textbox', { name: '見出し' });
+    const row = screen.getByRole('button', { name: '見出しを削除' })
+      .parentElement!;
     expect(label).toHaveAttribute('maxlength', '40');
+    expect(label).not.toHaveAttribute('aria-label');
+    expect(label.closest('label')?.querySelector('span')).toHaveClass(
+      'mb-1',
+      'block',
+      'text-xs',
+      'font-medium',
+      'text-slate-600',
+    );
     expect(within(row).queryByPlaceholderText('https://')).not.toBeInTheDocument();
     expect(
       within(row).queryByRole('textbox', { name: '画像 URL (任意)' }),
@@ -783,7 +828,7 @@ describe('HandleProfileBuilder', () => {
       within(row).getByRole('button', { name: '見出しを削除' }),
     );
     expect(
-      screen.queryByPlaceholderText('見出し (例: おすすめ)'),
+      screen.queryByRole('textbox', { name: '見出し' }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('heading', { level: 2, name: 'おすすめ' }),
@@ -798,10 +843,10 @@ describe('HandleProfileBuilder', () => {
     fireEvent.click(
       screen.getByRole('button', { name: '＋ 見出しを追加' }),
     );
-    fireEvent.change(screen.getByPlaceholderText('ラベル (例: X)'), {
+    fireEvent.change(screen.getByRole('textbox', { name: 'ラベル' }), {
       target: { value: 'Blog' },
     });
-    fireEvent.change(screen.getByPlaceholderText('見出し (例: おすすめ)'), {
+    fireEvent.change(screen.getByRole('textbox', { name: '見出し' }), {
       target: { value: 'News' },
     });
 
@@ -812,14 +857,14 @@ describe('HandleProfileBuilder', () => {
 
     const reordered = screen.getAllByLabelText('ドラッグで並べ替え');
     expect(
-      within(reordered[0].parentElement!).getByPlaceholderText(
-        '見出し (例: おすすめ)',
-      ),
+      within(reordered[0].parentElement!).getByRole('textbox', {
+        name: '見出し',
+      }),
     ).toHaveValue('News');
     expect(
-      within(reordered[1].parentElement!).getByPlaceholderText(
-        'ラベル (例: X)',
-      ),
+      within(reordered[1].parentElement!).getByRole('textbox', {
+        name: 'ラベル',
+      }),
     ).toHaveValue('Blog');
   });
 
@@ -867,9 +912,11 @@ describe('HandleProfileBuilder', () => {
       screen.getByText('＋ リンクを追加'),
     );
 
-    const heading = screen.getByPlaceholderText('見出し (例: おすすめ)');
+    const headingRow = screen.getByRole('button', {
+      name: '見出しを削除',
+    }).parentElement!;
     expect(
-      within(heading.parentElement!).queryByRole('button', { name: /注目/ }),
+      within(headingRow).queryByRole('button', { name: /注目/ }),
     ).not.toBeInTheDocument();
     const toggles = screen.getAllByRole('button', { name: /注目/ });
     expect(toggles).toHaveLength(2);

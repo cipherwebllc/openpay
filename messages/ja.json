@@ -900,7 +900,7 @@
     "addSocial": "SNS リンクを追加",
     "removeSocial": "削除",
     "linksLabel": "リンク",
-    "httpsOnlyHint": "リンクは https:// のみ。安全のため http や javascript は無効です。YouTube / Spotify / Audius は埋め込み表示に対応しています。",
+    "httpsOnlyHint": "リンクは https:// のみ。安全のため http や javascript は無効です。YouTube / Spotify / Audius / ニコニコ動画 / Vimeo / Apple Music / TikTok / Suno / SoundCloud は埋め込み表示に対応しています。",
     "linkLabelPlaceholder": "ラベル (例: X)",
     "addLink": "リンクを追加",
     "removeLink": "削除",
@@ -925,9 +925,12 @@
   },
   "HandleProfileBuilder": {
     "addHeading": "見出しを追加",
+    "headingLabel": "見出し",
     "headingLabelPlaceholder": "見出し (例: おすすめ)",
     "removeHeading": "見出しを削除",
     "imageUrlLabel": "画像 URL (任意)",
+    "linkLabel": "ラベル",
+    "linkUrlLabel": "URL",
     "embedToggle": "埋め込み表示"
   },
   "CreatorStoreSeller": {

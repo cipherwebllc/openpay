@@ -97,6 +97,8 @@ function FieldGroup({
 
 const inputClass =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
+const linkFieldLabelClass =
+  'mb-1 block text-xs font-medium text-slate-600';
 
 function stripResolvedEmbedsForDraft(
   links: HandleProfile['links'],
@@ -572,19 +574,24 @@ export function HandleProfileBuilder({
                         labels={reorderLabels}
                       >
                         {l.kind === 'heading' ? (
-                          <div className="flex min-w-0 flex-1 items-center gap-2">
-                            <input
-                              type="text"
-                              value={l.label}
-                              placeholder={tb('headingLabelPlaceholder')}
-                              maxLength={40}
-                              onChange={(e) => {
-                                const next = [...draft.links];
-                                next[i] = { ...l, label: e.target.value };
-                                update({ links: next });
-                              }}
-                              className={`${inputClass} min-w-[6rem] flex-1`}
-                            />
+                          <div className="flex min-w-0 flex-1 items-end gap-2">
+                            <label className="min-w-[6rem] flex-1">
+                              <span className={linkFieldLabelClass}>
+                                {tb('headingLabel')}
+                              </span>
+                              <input
+                                type="text"
+                                value={l.label}
+                                placeholder={tb('headingLabelPlaceholder')}
+                                maxLength={40}
+                                onChange={(e) => {
+                                  const next = [...draft.links];
+                                  next[i] = { ...l, label: e.target.value };
+                                  update({ links: next });
+                                }}
+                                className={inputClass}
+                              />
+                            </label>
                             <button
                               type="button"
                               onClick={() =>
@@ -598,22 +605,26 @@ export function HandleProfileBuilder({
                             </button>
                           </div>
                         ) : (
-                          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                            <input
-                              type="text"
-                              value={l.emoji ?? ''}
-                              placeholder="🌐"
-                              aria-label={t('emojiAria')}
-                              maxLength={8}
-                              onChange={(e) => {
-                                const next = [...draft.links];
-                                next[i] = { ...l, emoji: e.target.value };
-                                update({ links: next });
-                              }}
-                              className="w-12 shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
-                            />
+                          <div className="flex min-w-0 flex-1 flex-wrap items-end gap-2">
+                            <label className="w-14 shrink-0">
+                              <span className={linkFieldLabelClass}>
+                                {t('emojiAria')}
+                              </span>
+                              <input
+                                type="text"
+                                value={l.emoji ?? ''}
+                                placeholder="🌐"
+                                maxLength={8}
+                                onChange={(e) => {
+                                  const next = [...draft.links];
+                                  next[i] = { ...l, emoji: e.target.value };
+                                  update({ links: next });
+                                }}
+                                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
+                              />
+                            </label>
                             <label className="min-w-[10rem] flex-[2]">
-                              <span className="mb-1 block text-xs font-medium text-slate-600">
+                              <span className={linkFieldLabelClass}>
                                 {tb('imageUrlLabel')}
                               </span>
                               <input
@@ -629,35 +640,45 @@ export function HandleProfileBuilder({
                                 className={inputClass}
                               />
                             </label>
-                            <input
-                              type="text"
-                              value={l.label}
-                              placeholder={t('linkLabelPlaceholder')}
-                              maxLength={40}
-                              onChange={(e) => {
-                                const next = [...draft.links];
-                                next[i] = { ...l, label: e.target.value };
-                                update({ links: next });
-                              }}
-                              className={`${inputClass} min-w-[6rem] flex-[2]`}
-                            />
-                            <input
-                              type="url"
-                              value={l.url}
-                              placeholder="https://"
-                              onChange={(e) => {
-                                const next = [...draft.links];
-                                const nextLink = { ...l, url: e.target.value };
-                                // URL が非対応になったら、画面から消えた toggle の stale true が
-                                // publish を拒否する波及を断つためここで同時に外す。
-                                if (!isHandleEmbedUrl(e.target.value.trim())) {
-                                  delete nextLink.embed;
-                                }
-                                next[i] = nextLink;
-                                update({ links: next });
-                              }}
-                              className={`${inputClass} min-w-[8rem] flex-[3]`}
-                            />
+                            <label className="min-w-[6rem] flex-[2]">
+                              <span className={linkFieldLabelClass}>
+                                {tb('linkLabel')}
+                              </span>
+                              <input
+                                type="text"
+                                value={l.label}
+                                placeholder={t('linkLabelPlaceholder')}
+                                maxLength={40}
+                                onChange={(e) => {
+                                  const next = [...draft.links];
+                                  next[i] = { ...l, label: e.target.value };
+                                  update({ links: next });
+                                }}
+                                className={inputClass}
+                              />
+                            </label>
+                            <label className="min-w-[8rem] flex-[3]">
+                              <span className={linkFieldLabelClass}>
+                                {tb('linkUrlLabel')}
+                              </span>
+                              <input
+                                type="url"
+                                value={l.url}
+                                placeholder="https://"
+                                onChange={(e) => {
+                                  const next = [...draft.links];
+                                  const nextLink = { ...l, url: e.target.value };
+                                  // URL が非対応になったら、画面から消えた toggle の stale true が
+                                  // publish を拒否する波及を断つためここで同時に外す。
+                                  if (!isHandleEmbedUrl(e.target.value.trim())) {
+                                    delete nextLink.embed;
+                                  }
+                                  next[i] = nextLink;
+                                  update({ links: next });
+                                }}
+                                className={inputClass}
+                              />
+                            </label>
                             {isHandleEmbedUrl(l.url.trim()) && (
                               <label className="inline-flex min-h-6 shrink-0 cursor-pointer items-center gap-1.5 text-xs font-medium text-slate-600">
                                 <input
