@@ -144,8 +144,17 @@ export interface HandleRegularLink {
   // リンク先を示す小画像 (任意・https URL のみ・最大 512 文字)。
   // 未指定なら従来どおり絵文字を表示する。
   imageUrl?: string;
-  // 対応済み YouTube / Spotify URL だけを埋め込みカードとして描画する。
+  // 対応済み YouTube / Spotify / Audius URL だけを埋め込みカードとして描画する。
   embed?: true;
+  // Audius の公開 URL には track ID が無いため、保存時に server が解決した値だけを保持する。
+  // client payload の値は route 層で除去・再導出する。
+  embedResolved?: HandleEmbedResolved;
+}
+
+export interface HandleEmbedResolved {
+  provider: 'audius';
+  kind: 'track';
+  id: string;
 }
 
 // リンク一覧内の非インタラクティブな区切り。url / featured は構造上も持たない。
@@ -442,6 +451,7 @@ function isHttpsUrl(value: string): boolean {
 
 const YOUTUBE_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 const SPOTIFY_ID_PATTERN = /^[A-Za-z0-9]{22}$/;
+const AUDIUS_ID_PATTERN = /^[A-Za-z0-9]{3,16}$/;
 const YOUTUBE_HOSTS = new Set(['youtube.com', 'www.youtube.com']);
 const SPOTIFY_EMBED_TYPES = [
   'track',
@@ -464,6 +474,13 @@ export type HandleEmbed =
       id: string;
       src: string;
       height: 152 | 352;
+    }
+  | {
+      provider: 'audius';
+      kind: 'track';
+      id: string;
+      src: string;
+      height: 120;
     };
 
 function isSpotifyEmbedType(
@@ -472,11 +489,7 @@ function isSpotifyEmbedType(
   return (SPOTIFY_EMBED_TYPES as readonly string[]).includes(value);
 }
 
-/**
- * 対応リンク URL から provider/ID を検証抽出し、安全な iframe 設定を返す。
- * iframe src は user URL を転用せず、allowlist 済み type と regex 済み ID だけで構築する。
- */
-export function extractHandleEmbed(url: string): HandleEmbed | null {
+function parseHandleEmbedUrl(url: string): URL | null {
   const value = url.trim();
   // URL は既定 port (:443) を空文字へ正規化するため、parse 前の authority でも明示 port を拒否。
   const rawAuthority = value.match(/^https:\/\/([^/?#]*)/i)?.[1];
@@ -495,6 +508,39 @@ export function extractHandleEmbed(url: string): HandleEmbed | null {
   ) {
     return null;
   }
+  return parsed;
+}
+
+function parseAudiusEmbedResolved(raw: unknown): HandleEmbedResolved | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const resolved = raw as Record<string, unknown>;
+  if (
+    resolved.provider !== 'audius' ||
+    resolved.kind !== 'track' ||
+    typeof resolved.id !== 'string' ||
+    !AUDIUS_ID_PATTERN.test(resolved.id)
+  ) {
+    return null;
+  }
+  return { provider: 'audius', kind: 'track', id: resolved.id };
+}
+
+// Audius は公開 URL だけでは track ID を得られないため、builder/route が保存前候補を
+// 判定する関数を extractor と分離する。track 以外は server resolve の Location 検証で拒否する。
+export function isAudiusHandleEmbedUrl(url: string): boolean {
+  return parseHandleEmbedUrl(url)?.hostname === 'audius.co';
+}
+
+/**
+ * 対応リンク URL から provider/ID を検証抽出し、安全な iframe 設定を返す。
+ * iframe src は user URL を転用せず、allowlist 済み type と regex 済み ID だけで構築する。
+ */
+export function extractHandleEmbed(
+  url: string,
+  embedResolved?: unknown,
+): HandleEmbed | null {
+  const parsed = parseHandleEmbedUrl(url);
+  if (!parsed) return null;
 
   const host = parsed.hostname;
   let youtubeId: string | null = null;
@@ -519,22 +565,37 @@ export function extractHandleEmbed(url: string): HandleEmbed | null {
     };
   }
 
-  if (host !== 'open.spotify.com') return null;
-  const spotifyPath = parsed.pathname.match(
-    /^\/([^/]+)\/([A-Za-z0-9]{22})\/?$/,
-  );
-  if (!spotifyPath) return null;
-  const [, type, spotifyId] = spotifyPath;
-  if (!isSpotifyEmbedType(type) || !SPOTIFY_ID_PATTERN.test(spotifyId)) {
-    return null;
+  if (host === 'open.spotify.com') {
+    const spotifyPath = parsed.pathname.match(
+      /^\/([^/]+)\/([A-Za-z0-9]{22})\/?$/,
+    );
+    if (!spotifyPath) return null;
+    const [, type, spotifyId] = spotifyPath;
+    if (!isSpotifyEmbedType(type) || !SPOTIFY_ID_PATTERN.test(spotifyId)) {
+      return null;
+    }
+    return {
+      provider: 'spotify',
+      type,
+      id: spotifyId,
+      src: `https://open.spotify.com/embed/${type}/${spotifyId}`,
+      height: type === 'track' || type === 'episode' ? 152 : 352,
+    };
   }
+
+  if (host !== 'audius.co') return null;
+  const audius = parseAudiusEmbedResolved(embedResolved);
+  if (!audius) return null;
   return {
-    provider: 'spotify',
-    type,
-    id: spotifyId,
-    src: `https://open.spotify.com/embed/${type}/${spotifyId}`,
-    height: type === 'track' || type === 'episode' ? 152 : 352,
+    ...audius,
+    src: `https://audius.co/embed/track/${audius.id}?flavor=compact`,
+    height: 120,
   };
+}
+
+// builder/draft/publish は Audius の server ID がまだ無い段階なので、URL 候補だけを判定する。
+export function isHandleEmbedUrl(url: string): boolean {
+  return extractHandleEmbed(url) !== null || isAudiusHandleEmbedUrl(url);
 }
 
 export type ValidatedProfile =
@@ -640,6 +701,9 @@ export function validateProfile(raw: unknown): ValidatedProfile {
         if (Object.hasOwn(ll, 'embed')) {
           return { ok: false, error: 'heading must not be embedded' };
         }
+        if (Object.hasOwn(ll, 'embedResolved')) {
+          return { ok: false, error: 'heading must not have resolved embed' };
+        }
         const heading: HandleHeading = { kind: 'heading', label };
         const emoji = sanitizeEmoji(ll.emoji);
         if (emoji) heading.emoji = emoji;
@@ -684,13 +748,21 @@ export function validateProfile(raw: unknown): ValidatedProfile {
         }
       }
       if (ll.embed === true) {
-        if (!extractHandleEmbed(url)) {
+        const embed = extractHandleEmbed(url, ll.embedResolved);
+        if (!embed) {
           return { ok: false, error: 'embed not supported for this url' };
         }
         if (embedCount >= MAX_PROFILE_EMBEDS) {
           return { ok: false, error: 'too many embeds' };
         }
         link.embed = true;
+        if (embed.provider === 'audius') {
+          link.embedResolved = {
+            provider: embed.provider,
+            kind: embed.kind,
+            id: embed.id,
+          };
+        }
         embedCount += 1;
       }
       links.push(link);
@@ -859,7 +931,8 @@ function parseStoredProfile(raw: unknown): HandleProfile | undefined {
           Object.hasOwn(ll, 'url') ||
           Object.hasOwn(ll, 'featured') ||
           Object.hasOwn(ll, 'imageUrl') ||
-          Object.hasOwn(ll, 'embed')
+          Object.hasOwn(ll, 'embed') ||
+          Object.hasOwn(ll, 'embedResolved')
         ) {
           continue;
         }
@@ -896,12 +969,19 @@ function parseStoredProfile(raw: unknown): HandleProfile | undefined {
           link.imageUrl = imageUrl;
         }
       }
-      if (
-        ll.embed === true &&
-        embedCount < MAX_PROFILE_EMBEDS &&
-        extractHandleEmbed(url)
-      ) {
+      const embed =
+        ll.embed === true
+          ? extractHandleEmbed(url, ll.embedResolved)
+          : null;
+      if (embed && embedCount < MAX_PROFILE_EMBEDS) {
         link.embed = true;
+        if (embed.provider === 'audius') {
+          link.embedResolved = {
+            provider: embed.provider,
+            kind: embed.kind,
+            id: embed.id,
+          };
+        }
         embedCount += 1;
       }
       links.push(link);

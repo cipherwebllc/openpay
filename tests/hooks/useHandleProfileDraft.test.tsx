@@ -115,6 +115,42 @@ describe('useHandleProfileDraft', () => {
     ]);
   });
 
+  it('restores an Audius embed candidate but strips forged resolved data from v1 storage', async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        links: [
+          {
+            label: 'Audius',
+            url: 'https://audius.co/openpay/test-track',
+            embed: true,
+            embedResolved: {
+              provider: 'audius',
+              kind: 'track',
+              id: 'Forged999',
+            },
+          },
+        ],
+      }),
+    );
+
+    const { result } = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.links).toEqual([
+      {
+        label: 'Audius',
+        url: 'https://audius.co/openpay/test-track',
+        embed: true,
+      },
+    ]);
+    await waitFor(() => {
+      const stored = JSON.parse(
+        window.localStorage.getItem(STORAGE_KEY) ?? '{}',
+      ) as { links?: Array<Record<string, unknown>> };
+      expect(stored.links?.[0]).not.toHaveProperty('embedResolved');
+    });
+  });
+
   it('drops unknown kinds and heals heading-only fields without consuming regular-link caps', async () => {
     window.localStorage.setItem(
       STORAGE_KEY,

@@ -5,7 +5,7 @@
 import { getAddress, isAddress } from 'viem';
 import type { HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
 import {
-  extractHandleEmbed,
+  isHandleEmbedUrl,
   MAX_LINK_IMAGE_URL_LEN,
   MAX_PROFILE_EMBEDS,
   MAX_PROFILE_LINKS,
@@ -74,7 +74,7 @@ export function buildPublishProfile(draft: HandleProfileDraft): HandleProfile {
     if (
       entry.embed === true &&
       embedCount < MAX_PROFILE_EMBEDS &&
-      extractHandleEmbed(url)
+      isHandleEmbedUrl(url)
     ) {
       link.embed = true;
       embedCount += 1;

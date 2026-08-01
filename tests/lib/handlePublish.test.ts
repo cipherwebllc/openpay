@@ -106,6 +106,29 @@ describe('buildPublishPayload', () => {
     );
   });
 
+  it('Audius publish payload keeps embed opt-in but never invents embedResolved', () => {
+    const profile = buildPublishProfile(
+      draft({
+        links: [
+          {
+            label: 'Audius',
+            url: 'https://audius.co/openpay/test-track',
+            embed: true,
+          },
+        ],
+      }),
+    );
+
+    expect(profile.links).toEqual([
+      {
+        label: 'Audius',
+        url: 'https://audius.co/openpay/test-track',
+        embed: true,
+      },
+    ]);
+    expect(profile.links?.[0]).not.toHaveProperty('embedResolved');
+  });
+
   it('link imageUrl は https かつ 512 文字以下だけ canonical に残す', () => {
     const prefix = 'https://cdn.example.com/';
     const atLimit = `${prefix}${'a'.repeat(MAX_LINK_IMAGE_URL_LEN - prefix.length)}`;

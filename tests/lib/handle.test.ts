@@ -10,6 +10,7 @@ import {
   validateHandleTipConfig,
   validateProfile,
   extractHandleEmbed,
+  isHandleEmbedUrl,
   methodToPublishableConfig,
   configToSearchParams,
   parseHandleRecord,
@@ -31,6 +32,8 @@ import { parseTipParams } from '@/lib/url';
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const YOUTUBE_ID = 'dQw4w9WgXcQ';
 const SPOTIFY_ID = '0123456789ABCDEFGHIJKL';
+const AUDIUS_ID = 'AbC123xYz';
+const AUDIUS_URL = 'https://audius.co/openpay/test-track';
 
 describe('normalizeHandle', () => {
   it('strips leading @, lowercases, trims', () => {
@@ -274,6 +277,53 @@ describe('extractHandleEmbed', () => {
     });
   });
 
+  it('builds an Audius compact track src only from the resolved record ID', () => {
+    expect(
+      extractHandleEmbed(`${AUDIUS_URL}?ref=profile#play`, {
+        provider: 'audius',
+        kind: 'track',
+        id: AUDIUS_ID,
+      }),
+    ).toEqual({
+      provider: 'audius',
+      kind: 'track',
+      id: AUDIUS_ID,
+      src: `https://audius.co/embed/track/${AUDIUS_ID}?flavor=compact`,
+      height: 120,
+    });
+  });
+
+  it('recognizes an unresolved Audius URL as a builder candidate without extracting it', () => {
+    expect(isHandleEmbedUrl(AUDIUS_URL)).toBe(true);
+    expect(extractHandleEmbed(AUDIUS_URL)).toBeNull();
+    for (const invalidUrl of [
+      'http://audius.co/openpay/test-track',
+      'https://user:pass@audius.co/openpay/test-track',
+      'https://audius.co:443/openpay/test-track',
+      'https://audius.co.evil.example/openpay/test-track',
+    ]) {
+      expect(isHandleEmbedUrl(invalidUrl)).toBe(false);
+      expect(
+        extractHandleEmbed(invalidUrl, {
+          provider: 'audius',
+          kind: 'track',
+          id: AUDIUS_ID,
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it.each([
+    undefined,
+    { provider: 'audius', kind: 'track', id: 'Ab' },
+    { provider: 'audius', kind: 'track', id: 'AbcdefghijklmnoPQ' },
+    { provider: 'audius', kind: 'track', id: 'Abc-123' },
+    { provider: 'audius', kind: 'album', id: AUDIUS_ID },
+    { provider: 'spotify', kind: 'track', id: AUDIUS_ID },
+  ])('rejects an Audius embed with invalid resolved data: %j', (resolved) => {
+    expect(extractHandleEmbed(AUDIUS_URL, resolved)).toBeNull();
+  });
+
   it.each([
     `http://www.youtube.com/watch?v=${YOUTUBE_ID}`,
     `https://user:pass@www.youtube.com/watch?v=${YOUTUBE_ID}`,
@@ -289,6 +339,10 @@ describe('extractHandleEmbed', () => {
     'https://open.spotify.com/track/short',
     'https://open.spotify.com/track/0123456789ABCDEFGHIJK!',
     `https://spotify.com/track/${SPOTIFY_ID}`,
+    `http://audius.co/openpay/test-track`,
+    `https://user:pass@audius.co/openpay/test-track`,
+    `https://audius.co:443/openpay/test-track`,
+    `https://audius.co.evil.example/openpay/test-track`,
   ])('rejects unsupported or non-canonical embed URLs: %s', (url) => {
     expect(extractHandleEmbed(url)).toBeNull();
   });
@@ -487,6 +541,65 @@ describe('validateProfile', () => {
         ],
       },
     });
+  });
+  it('accepts Audius only with a valid resolved track and canonicalizes the server field', () => {
+    expect(
+      validateProfile({
+        links: [
+          {
+            label: 'Audius',
+            url: AUDIUS_URL,
+            embed: true,
+            embedResolved: {
+              provider: 'audius',
+              kind: 'track',
+              id: AUDIUS_ID,
+              ignored: 'client-extra',
+            },
+          },
+        ],
+      }),
+    ).toEqual({
+      ok: true,
+      profile: {
+        links: [
+          {
+            label: 'Audius',
+            url: AUDIUS_URL,
+            embed: true,
+            embedResolved: {
+              provider: 'audius',
+              kind: 'track',
+              id: AUDIUS_ID,
+            },
+          },
+        ],
+      },
+    });
+  });
+  it.each([
+    ['missing', undefined],
+    [
+      'invalid ID',
+      { provider: 'audius', kind: 'track', id: 'bad-id' },
+    ],
+    [
+      'wrong kind',
+      { provider: 'audius', kind: 'album', id: AUDIUS_ID },
+    ],
+  ])('rejects Audius embed with %s resolved data', (_case, embedResolved) => {
+    expect(
+      validateProfile({
+        links: [
+          {
+            label: 'Audius',
+            url: AUDIUS_URL,
+            embed: true,
+            embedResolved,
+          },
+        ],
+      }),
+    ).toEqual({ ok: false, error: 'embed not supported for this url' });
   });
   it('rejects embed=true on an unsupported URL with the exact error', () => {
     expect(
@@ -701,6 +814,59 @@ describe('parseHandleRecord', () => {
       },
     };
     expect(parseHandleRecord(serializeHandleRecord(withMedia))).toEqual(withMedia);
+  });
+  it('round-trips a stored Audius resolved track field', () => {
+    const withAudius: HandleRecord = {
+      ...good,
+      profile: {
+        links: [
+          {
+            label: 'Audius',
+            url: AUDIUS_URL,
+            embed: true,
+            embedResolved: {
+              provider: 'audius',
+              kind: 'track',
+              id: AUDIUS_ID,
+            },
+          },
+        ],
+      },
+    };
+    expect(parseHandleRecord(serializeHandleRecord(withAudius))).toEqual(
+      withAudius,
+    );
+  });
+  it('drops an invalid stored Audius embed without consuming the shared cap', () => {
+    const links = [
+      {
+        label: 'Broken Audius',
+        url: AUDIUS_URL,
+        embed: true,
+        embedResolved: {
+          provider: 'audius',
+          kind: 'track',
+          id: 'bad-id',
+        },
+      },
+      ...Array.from({ length: MAX_PROFILE_EMBEDS }, (_, index) => ({
+        label: `Video ${index}`,
+        url: `https://youtu.be/${YOUTUBE_ID}?n=${index}`,
+        embed: true,
+      })),
+    ];
+    const parsed = parseHandleRecord(
+      JSON.stringify({ ...good, profile: { links } }),
+    );
+    expect(parsed?.profile?.links?.[0]).toEqual({
+      label: 'Broken Audius',
+      url: AUDIUS_URL,
+    });
+    expect(
+      parsed?.profile?.links?.filter(
+        (link) => link.kind !== 'heading' && link.embed === true,
+      ),
+    ).toHaveLength(MAX_PROFILE_EMBEDS);
   });
   it('truncates an overlong stored heading label to the existing read limit', () => {
     const stored = {

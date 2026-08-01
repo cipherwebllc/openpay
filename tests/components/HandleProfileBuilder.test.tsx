@@ -676,6 +676,56 @@ describe('HandleProfileBuilder', () => {
     });
   });
 
+  it('Audius URL に embed toggle と 3-provider hint を表示する', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    expect(
+      screen.getByText(
+        'リンクは https:// のみ。安全のため http や javascript は無効です。YouTube / Spotify / Audius は埋め込み表示に対応しています。',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByText('＋ リンクを追加'));
+    const linksGroup = screen.getByRole('group', { name: 'リンク' });
+    const linkUrl = within(linksGroup)
+      .getAllByPlaceholderText('https://')
+      .find((input) => input.closest('label') === null)!;
+
+    fireEvent.change(linkUrl, {
+      target: { value: 'https://audius.co/openpay/test-track' },
+    });
+    const toggle = screen.getByRole('checkbox', { name: '埋め込み表示' });
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+  });
+
+  it('YouTube / Spotify / Audius の合算 3 件で 4 件目 toggle を disabled にする', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    for (let index = 0; index < 4; index += 1) {
+      fireEvent.click(screen.getByText('＋ リンクを追加'));
+    }
+    const linksGroup = screen.getByRole('group', { name: 'リンク' });
+    const linkUrls = within(linksGroup)
+      .getAllByPlaceholderText('https://')
+      .filter((input) => input.closest('label') === null);
+    const urls = [
+      'https://youtu.be/dQw4w9WgXcQ',
+      'https://open.spotify.com/track/0123456789ABCDEFGHIJKL',
+      'https://audius.co/openpay/track-one',
+      'https://audius.co/openpay/track-two',
+    ];
+    linkUrls.forEach((input, index) => {
+      fireEvent.change(input, { target: { value: urls[index] } });
+    });
+
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.click(
+        screen.getAllByRole('checkbox', { name: '埋め込み表示' })[index],
+      );
+    }
+    expect(
+      screen.getAllByRole('checkbox', { name: '埋め込み表示' })[3],
+    ).toBeDisabled();
+  });
+
   it('embed が 3 件 ON なら 4 件目の未選択 toggle を disabled にする', () => {
     renderWithIntl(<HandleProfileBuilder />);
     for (let index = 0; index < 4; index += 1) {

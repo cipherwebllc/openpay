@@ -198,7 +198,10 @@ export function HandleProfileView({
                 </li>
               );
             }
-            const embed = l.embed === true ? extractHandleEmbed(l.url) : null;
+            const embed =
+              l.embed === true
+                ? extractHandleEmbed(l.url, l.embedResolved)
+                : null;
             if (embed) {
               return (
                 <li key={`${l.url}-${i}`}>

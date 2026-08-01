@@ -296,6 +296,39 @@ describe('HandleProfileView', () => {
     },
   );
 
+  it('renders an Audius compact track from embedResolved with exact height and security attributes', () => {
+    renderWithIntl(
+      <HandleProfileView
+        config={multiConfig}
+        profile={{
+          links: [
+            {
+              label: 'Audius track',
+              url: 'https://audius.co/openpay/slug-without-id',
+              embed: true,
+              embedResolved: {
+                provider: 'audius',
+                kind: 'track',
+                id: 'AbC123xYz',
+              },
+            },
+          ],
+        }}
+      />,
+    );
+
+    const iframe = screen.getByTitle('Audius track');
+    expect(iframe).toHaveAttribute(
+      'src',
+      'https://audius.co/embed/track/AbC123xYz?flavor=compact',
+    );
+    expect(iframe).toHaveAttribute('height', '120');
+    expect(iframe).toHaveAttribute('sandbox', EXPECTED_EMBED_SANDBOX);
+    expect(iframe).toHaveAttribute('loading', 'lazy');
+    expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(iframe).toHaveClass('w-full');
+  });
+
   it.each([
     ['clean', null],
     ['gradient', '0 3px 10px -3px'],

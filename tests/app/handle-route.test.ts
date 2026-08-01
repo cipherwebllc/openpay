@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const OWNER = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 
@@ -50,6 +50,8 @@ import { GET as availGET, DELETE } from '@/app/api/handle/[handle]/route';
 const ADDR = OWNER;
 const YOUTUBE_ID = 'dQw4w9WgXcQ';
 const SPOTIFY_ID = '0123456789ABCDEFGHIJKL';
+const AUDIUS_URL = 'https://audius.co/openpay/test-track';
+const AUDIUS_ID = 'AbC123xYz';
 // 新スキーマの最小有効 config (マルチ方法)。
 const CFG = { to: ADDR, methods: [{ token: 'jpyc', chain: 'polygon' }] };
 const savedRecord = (updatedAt: number) => ({
@@ -79,6 +81,11 @@ beforeEach(() => {
   h.kvConfigured = true;
   h.authed = true;
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('POST /api/handle', () => {
@@ -172,6 +179,274 @@ describe('POST /api/handle', () => {
         },
       ],
     });
+  });
+
+  it('resolves an Audius track from a manual 302 Location and stores only the server ID', async () => {
+    store.reserveOrUpdateHandle.mockResolvedValue({
+      status: 'created',
+      record: savedRecord(101),
+    });
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
+    const fetchMock = vi.fn(async () =>
+      new Response(null, {
+        status: 302,
+        headers: {
+          // undici fetch の実挙動は相対 Location (2026-08-01 実機確認)。絶対化して検証すること。
+          location: `/v1/tracks/${AUDIUS_ID}?app_name=openpay`,
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const res = await POST(
+      postReq({
+        handle: 'alice',
+        config: CFG,
+        profile: {
+          links: [
+            {
+              label: 'Audius',
+              url: AUDIUS_URL,
+              embed: true,
+              embedResolved: {
+                provider: 'audius',
+                kind: 'track',
+                id: 'Forged999',
+              },
+            },
+            {
+              label: 'Video',
+              url: `https://youtu.be/${YOUTUBE_ID}`,
+              embed: true,
+              embedResolved: {
+                provider: 'audius',
+                kind: 'track',
+                id: 'Forged888',
+              },
+            },
+            {
+              label: 'Plain',
+              url: 'https://example.com',
+              embedResolved: {
+                provider: 'audius',
+                kind: 'track',
+                id: 'Forged777',
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://api.audius.co/v1/resolve?url=${encodeURIComponent(AUDIUS_URL)}&app_name=openpay`,
+      {
+        method: 'GET',
+        redirect: 'manual',
+        cache: 'no-store',
+        signal: expect.any(AbortSignal),
+      },
+    );
+    expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+    expect(store.reserveOrUpdateHandle.mock.calls[0][0].profile).toEqual({
+      links: [
+        {
+          label: 'Audius',
+          url: AUDIUS_URL,
+          embed: true,
+          embedResolved: {
+            provider: 'audius',
+            kind: 'track',
+            id: AUDIUS_ID,
+          },
+        },
+        {
+          label: 'Video',
+          url: `https://youtu.be/${YOUTUBE_ID}`,
+          embed: true,
+        },
+        { label: 'Plain', url: 'https://example.com' },
+      ],
+    });
+  });
+
+  it.each([
+    ['non-302 response', 200, null],
+    [
+      'different Location host',
+      302,
+      `https://evil.example/v1/tracks/${AUDIUS_ID}?x=1`,
+    ],
+    [
+      'non-track Location',
+      302,
+      `https://api.audius.co/v1/users/${AUDIUS_ID}?x=1`,
+    ],
+    ['missing Location', 302, null],
+    ['too-short ID', 302, 'https://api.audius.co/v1/tracks/Ab?x=1'],
+    [
+      'too-long ID',
+      302,
+      'https://api.audius.co/v1/tracks/AbcdefghijklmnoPQ?x=1',
+    ],
+    [
+      'invalid ID character',
+      302,
+      'https://api.audius.co/v1/tracks/Abc-123?x=1',
+    ],
+  ])(
+    'rejects Audius resolve with %s before storing',
+    async (_case, status, location) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () =>
+          new Response(null, {
+            status,
+            headers: location ? { location } : undefined,
+          }),
+        ),
+      );
+
+      const res = await POST(
+        postReq({
+          handle: 'alice',
+          config: CFG,
+          profile: {
+            links: [{ label: 'Audius', url: AUDIUS_URL, embed: true }],
+          },
+        }),
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        ok: false,
+        error: 'audius resolve failed',
+      });
+      expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
+    },
+  );
+
+  it('turns an Audius resolve timeout into the exact save error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new DOMException('timed out', 'TimeoutError')),
+    );
+    const res = await POST(
+      postReq({
+        handle: 'alice',
+        config: CFG,
+        profile: {
+          links: [{ label: 'Audius', url: AUDIUS_URL, embed: true }],
+        },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: 'audius resolve failed',
+    });
+    expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
+  });
+
+  it('does not let a forged Audius ID bypass a failed resolve', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 200 })),
+    );
+    const res = await POST(
+      postReq({
+        handle: 'alice',
+        config: CFG,
+        profile: {
+          links: [
+            {
+              label: 'Audius',
+              url: AUDIUS_URL,
+              embed: true,
+              embedResolved: {
+                provider: 'audius',
+                kind: 'track',
+                id: AUDIUS_ID,
+              },
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('audius resolve failed');
+    expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
+  });
+
+  it('enforces the provider-combined embed cap before any Audius fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await POST(
+      postReq({
+        handle: 'alice',
+        config: CFG,
+        profile: {
+          links: [
+            {
+              label: 'Video',
+              url: `https://youtu.be/${YOUTUBE_ID}`,
+              embed: true,
+            },
+            {
+              label: 'Spotify',
+              url: `https://open.spotify.com/track/${SPOTIFY_ID}`,
+              embed: true,
+            },
+            { label: 'Audius 1', url: AUDIUS_URL, embed: true },
+            {
+              label: 'Audius 2',
+              url: 'https://audius.co/openpay/second-track',
+              embed: true,
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: 'invalid_profile',
+      detail: 'too many embeds',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
+  });
+
+  it('re-resolves the same Audius URL on every explicit profile save', async () => {
+    store.reserveOrUpdateHandle.mockResolvedValue({
+      status: 'updated',
+      record: savedRecord(201),
+    });
+    const fetchMock = vi.fn(async () =>
+      new Response(null, {
+        status: 302,
+        headers: {
+          location: `https://api.audius.co/v1/tracks/${AUDIUS_ID}/stream`,
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const body = {
+      handle: 'alice',
+      config: CFG,
+      profile: {
+        links: [{ label: 'Audius', url: AUDIUS_URL, embed: true }],
+      },
+      expectedUpdatedAt: 200,
+    };
+
+    expect((await POST(postReq(body))).status).toBe(200);
+    expect((await POST(postReq(body))).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('passes a validated heading through the HTTP boundary to the store', async () => {

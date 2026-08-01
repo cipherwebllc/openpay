@@ -7,7 +7,7 @@
 import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX } from '@/lib/url';
 import { DEFAULT_TIP_PRESETS } from '@/lib/url';
 import {
-  extractHandleEmbed,
+  isHandleEmbedUrl,
   MAX_LINK_IMAGE_URL_LEN,
   MAX_PROFILE_EMBEDS,
   MAX_PROFILE_LINKS,
@@ -137,7 +137,7 @@ function sanitizeLinks(loaded: unknown): DraftLink[] {
     if (
       ll.embed === true &&
       embedCount < MAX_PROFILE_EMBEDS &&
-      extractHandleEmbed(link.url.trim())
+      isHandleEmbedUrl(link.url.trim())
     ) {
       link.embed = true;
       embedCount += 1;
