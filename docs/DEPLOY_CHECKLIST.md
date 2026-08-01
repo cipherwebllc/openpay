@@ -435,6 +435,30 @@ previous source map 自動読込が**ビルドマシン上の**任意 .map フ�
 - 第三者由来の CSS を build/postcss で処理する機能を追加 (**導入 PR で即再評価**)
 - build-time 以外の exploit 経路の報告
 
+### 7.11 Dependabot dev-scope 方針 (2026-08-01)
+
+audit-gate は `npm audit --omit=dev` = **本番依存のみ**を gate する。Dependabot は
+devDependencies も報告するため、本番 gate 外の dev advisory はここに裁定を記録し、
+GitHub 上の alert は本節を根拠に dismiss してよい。
+
+- **vitest CRITICAL (GHSA: Vitest UI server arbitrary file read/exec)**: 脆弱なのは
+  `@vitest/ui` の UI server が listen している時のみ。**本リポは @vitest/ui を導入して
+  おらず** (package-lock に不存在)、`vitest --ui` を実行しても server は起動できない =
+  攻撃面が存在しない。v2 系に修正版は無く fix は vitest@4 (major×2・config/API 破壊変更)。
+  → accepted。**vitest 4 移行は別タスク**として backlog (8,500+ tests の回帰確認込み)。
+- **vite HIGH/MODERATE (fs.deny Windows bypass / optimized-deps .map / launch-editor NTLM)**:
+  すべて dev server 経路。dev は macOS/Linux のみ・dev server は localhost 非公開・
+  Windows 固有条件は環境に存在しない。fix は vitest@4 連動 → 同上 backlog。
+- **esbuild MODERATE (dev server cross-origin read)**: 同じく dev server 限定・
+  localhost 非公開。fix は vite major 連動 → 同上。
+- **js-yaml / fast-uri / @babel/core / postcss(root 直依存分)**: 2026-08-01 に
+  semver 内で修正版へ更新済み (js-yaml 4.3.1 / fast-uri 3.1.5 / @babel/core 7.29.7 /
+  postcss 8.5.25。next 内包 postcss は §7.2/7.9/7.10 の受容が継続)。
+- **x402-mcp (公開パッケージ)**: @modelcontextprotocol/sdk 1.30.0 (DNS rebinding 既定
+  有効化・shared-transport leak 修正) / @hono/node-server 2.0.12 (SDK の宣言 range 内)
+  へ更新済み。stdio transport 運用のため旧版でも実害経路は薄いが、公開物のため更新を
+  優先した。**npm publish は user 承認後** (§14 の公開手順)。
+
 ### 7.7 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
