@@ -37,7 +37,10 @@ import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useDragReorderList } from '@/hooks/useDragReorderList';
 import { COLOR_PATTERN } from '@/lib/url';
 import {
+  isHandleEmbedUrl,
+  MAX_LINK_IMAGE_URL_LEN,
   MAX_BIO_LEN,
+  MAX_PROFILE_EMBEDS,
   MAX_PROFILE_LINKS,
   MAX_SOCIAL_LINKS,
   type HandleReceiveMethod,
@@ -74,8 +77,37 @@ function Field({
   );
 }
 
+function FieldGroup({
+  label,
+  children,
+  hint,
+}: {
+  label: string;
+  children: React.ReactNode;
+  hint?: string;
+}) {
+  return (
+    <fieldset className="block">
+      <legend className="text-sm font-medium text-slate-700">{label}</legend>
+      <div className="mt-1">{children}</div>
+      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
+    </fieldset>
+  );
+}
+
 const inputClass =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
+
+function stripResolvedEmbedsForDraft(
+  links: HandleProfile['links'],
+): NonNullable<HandleProfile['links']> {
+  return (links ?? []).map((link) => {
+    if (link.kind === 'heading') return link;
+    const draftLink = { ...link };
+    delete draftLink.embedResolved;
+    return draftLink;
+  });
+}
 
 export function HandleProfileBuilder({
   onPublishedHandleChange,
@@ -123,6 +155,15 @@ export function HandleProfileBuilder({
   );
 
   const colorValid = COLOR_PATTERN.test(draft.color);
+  const embedCount = draft.links.reduce(
+    (count, link) =>
+      link.kind !== 'heading' &&
+      link.embed === true &&
+      isHandleEmbedUrl(link.url.trim())
+        ? count + 1
+        : count,
+    0,
+  );
 
   const methods = useMemo(
     () => buildPublishMethods(draft, env.enableJpycAvalanche),
@@ -269,7 +310,7 @@ export function HandleProfileBuilder({
       bio: p?.bio ?? '',
       avatar: p?.avatar ?? '',
       socials: p?.socials ?? [],
-      links: p?.links ?? [],
+      links: stripResolvedEmbedsForDraft(p?.links),
       theme: p?.theme ?? DEFAULT_PROFILE_DRAFT.theme,
     };
     setSettings(() => loadedDraft);
@@ -522,7 +563,7 @@ export function HandleProfileBuilder({
                   )}
                 </div>
                 </Field>
-                <Field label={t('linksLabel')} hint={t('httpsOnlyHint')}>
+                <FieldGroup label={t('linksLabel')} hint={t('httpsOnlyHint')}>
                   <div className="space-y-2">
                     {draft.links.map((l, i) => (
                       <ReorderableRow
@@ -571,6 +612,23 @@ export function HandleProfileBuilder({
                               }}
                               className="w-12 shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-2 text-center text-sm focus:border-brand focus:outline-none"
                             />
+                            <label className="min-w-[10rem] flex-[2]">
+                              <span className="mb-1 block text-xs font-medium text-slate-600">
+                                {tb('imageUrlLabel')}
+                              </span>
+                              <input
+                                type="url"
+                                value={l.imageUrl ?? ''}
+                                placeholder="https://"
+                                maxLength={MAX_LINK_IMAGE_URL_LEN}
+                                onChange={(e) => {
+                                  const next = [...draft.links];
+                                  next[i] = { ...l, imageUrl: e.target.value };
+                                  update({ links: next });
+                                }}
+                                className={inputClass}
+                              />
+                            </label>
                             <input
                               type="text"
                               value={l.label}
@@ -589,11 +647,38 @@ export function HandleProfileBuilder({
                               placeholder="https://"
                               onChange={(e) => {
                                 const next = [...draft.links];
-                                next[i] = { ...l, url: e.target.value };
+                                const nextLink = { ...l, url: e.target.value };
+                                // URL が非対応になったら、画面から消えた toggle の stale true が
+                                // publish を拒否する波及を断つためここで同時に外す。
+                                if (!isHandleEmbedUrl(e.target.value.trim())) {
+                                  delete nextLink.embed;
+                                }
+                                next[i] = nextLink;
                                 update({ links: next });
                               }}
                               className={`${inputClass} min-w-[8rem] flex-[3]`}
                             />
+                            {isHandleEmbedUrl(l.url.trim()) && (
+                              <label className="inline-flex min-h-6 shrink-0 cursor-pointer items-center gap-1.5 text-xs font-medium text-slate-600">
+                                <input
+                                  type="checkbox"
+                                  checked={l.embed === true}
+                                  disabled={
+                                    l.embed !== true &&
+                                    embedCount >= MAX_PROFILE_EMBEDS
+                                  }
+                                  onChange={(e) => {
+                                    const next = [...draft.links];
+                                    const nextLink = { ...l };
+                                    if (e.target.checked) nextLink.embed = true;
+                                    else delete nextLink.embed;
+                                    next[i] = nextLink;
+                                    update({ links: next });
+                                  }}
+                                />
+                                <span>{tb('embedToggle')}</span>
+                              </label>
+                            )}
                             <button
                               type="button"
                               onClick={() => setFeatured(i, !l.featured)}
@@ -644,7 +729,7 @@ export function HandleProfileBuilder({
                       </div>
                     )}
                   </div>
-                </Field>
+                </FieldGroup>
                 {hasInsecure && (
                   <p className="text-xs text-amber-700">{t('insecureDropped')}</p>
                 )}

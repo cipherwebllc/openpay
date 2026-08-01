@@ -837,6 +837,7 @@
     "claiming": "取得中…",
     "limitReached": "取得できる handle は最大 {max} 個です。",
     "claimError": "取得に失敗しました ({error})",
+    "audiusResolveError": "Audius のトラックを確認できず、埋め込み表示を有効にできないため保存できませんでした。URL を確認して、もう一度お試しください。",
     "yourHandles": "取得済み ({count}/{max})",
     "copy": "コピー",
     "copied": "コピー済み",
@@ -899,7 +900,7 @@
     "addSocial": "SNS リンクを追加",
     "removeSocial": "削除",
     "linksLabel": "リンク",
-    "httpsOnlyHint": "リンクは https:// のみ。安全のため http や javascript は無効です。",
+    "httpsOnlyHint": "リンクは https:// のみ。安全のため http や javascript は無効です。YouTube / Spotify / Audius は埋め込み表示に対応しています。",
     "linkLabelPlaceholder": "ラベル (例: X)",
     "addLink": "リンクを追加",
     "removeLink": "削除",
@@ -925,7 +926,9 @@
   "HandleProfileBuilder": {
     "addHeading": "見出しを追加",
     "headingLabelPlaceholder": "見出し (例: おすすめ)",
-    "removeHeading": "見出しを削除"
+    "removeHeading": "見出しを削除",
+    "imageUrlLabel": "画像 URL (任意)",
+    "embedToggle": "埋め込み表示"
   },
   "CreatorStoreSeller": {
     "heading": "デジタル商品",

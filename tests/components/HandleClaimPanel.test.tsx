@@ -41,6 +41,7 @@ const CONFIG: HandleTipConfig = {
 function renderPanel(
   config: HandleTipConfig | null,
   extra?: Partial<Parameters<typeof HandleClaimPanel>[0]>,
+  locale: 'ja' | 'en' = 'ja',
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithIntl(
@@ -50,6 +51,7 @@ function renderPanel(
         {...extra}
       />
     </QueryClientProvider>,
+    { locale },
   );
 }
 
@@ -279,6 +281,56 @@ describe('HandleClaimPanel', () => {
       payload: { config: CONFIG, profile: {} },
       updatedAt: 201,
     });
+  });
+
+  it.each([
+    [
+      'ja' as const,
+      'この handle を取得',
+      'Audius のトラックを確認できず、埋め込み表示を有効にできないため保存できませんでした。URL を確認して、もう一度お試しください。',
+    ],
+    [
+      'en' as const,
+      'Claim this handle',
+      'Could not save because the Audius track could not be verified for embedding. Check the URL and try again.',
+    ],
+  ])('Audius resolve failure shows the dedicated %s builder error', async (locale, button, message) => {
+    h.isSignedIn = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+        if (String(url) === '/api/handle' && init?.method === 'POST') {
+          return new Response(
+            JSON.stringify({ ok: false, error: 'audius resolve failed' }),
+            {
+              status: 400,
+              headers: { 'content-type': 'application/json' },
+            },
+          );
+        }
+        if (String(url) === '/api/handle') {
+          return new Response(
+            JSON.stringify({ ok: true, handles: [], max: 3 }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          );
+        }
+        return new Response(
+          JSON.stringify({ ok: true, available: true }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }),
+    );
+    renderPanel(CONFIG, undefined, locale);
+    fireEvent.change(screen.getByPlaceholderText('alice'), {
+      target: { value: 'bob' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: button }));
+
+    await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
+    expect(screen.queryByText(/audius resolve failed/)).not.toBeInTheDocument();
   });
 
   it('publish 409 conflict → 専用文言・最新一覧を再取得・明示再読込で baseline を更新', async () => {

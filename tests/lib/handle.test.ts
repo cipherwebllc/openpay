@@ -9,6 +9,8 @@ import {
   validateTipConfig,
   validateHandleTipConfig,
   validateProfile,
+  extractHandleEmbed,
+  isHandleEmbedUrl,
   methodToPublishableConfig,
   configToSearchParams,
   parseHandleRecord,
@@ -16,7 +18,9 @@ import {
   handleStorefrontConfig,
   MAX_HANDLES_PER_WALLET,
   MAX_LINK_LABEL_LEN,
+  MAX_LINK_IMAGE_URL_LEN,
   MAX_PROFILE_LINKS,
+  MAX_PROFILE_EMBEDS,
   MAX_SOCIAL_LINKS,
   DEFAULT_RECEIVE_METHODS,
   type HandleRecord,
@@ -26,6 +30,10 @@ import {
 import { parseTipParams } from '@/lib/url';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+const YOUTUBE_ID = 'dQw4w9WgXcQ';
+const SPOTIFY_ID = '0123456789ABCDEFGHIJKL';
+const AUDIUS_ID = 'AbC123xYz';
+const AUDIUS_URL = 'https://audius.co/openpay/test-track';
 
 describe('normalizeHandle', () => {
   it('strips leading @, lowercases, trims', () => {
@@ -235,6 +243,111 @@ describe('validateHandleTipConfig', () => {
   });
 });
 
+describe('extractHandleEmbed', () => {
+  it.each([
+    `https://www.youtube.com/watch?v=${YOUTUBE_ID}&list=PL123#chapter`,
+    `https://youtu.be/${YOUTUBE_ID}/?si=share#chapter`,
+    `https://youtube.com/shorts/${YOUTUBE_ID}?feature=share`,
+  ])('extracts the three supported YouTube forms and builds a fixed nocookie src: %s', (url) => {
+    expect(extractHandleEmbed(url)).toEqual({
+      provider: 'youtube',
+      id: YOUTUBE_ID,
+      src: `https://www.youtube-nocookie.com/embed/${YOUTUBE_ID}`,
+    });
+  });
+
+  it.each([
+    ['track', 152],
+    ['album', 352],
+    ['playlist', 352],
+    ['episode', 152],
+    ['show', 352],
+    ['artist', 352],
+  ] as const)('extracts Spotify %s and returns its fixed src/height', (type, height) => {
+    expect(
+      extractHandleEmbed(
+        `https://open.spotify.com/${type}/${SPOTIFY_ID}/?si=share#details`,
+      ),
+    ).toEqual({
+      provider: 'spotify',
+      type,
+      id: SPOTIFY_ID,
+      src: `https://open.spotify.com/embed/${type}/${SPOTIFY_ID}`,
+      height,
+    });
+  });
+
+  it('builds an Audius compact track src only from the resolved record ID', () => {
+    expect(
+      extractHandleEmbed(`${AUDIUS_URL}?ref=profile#play`, {
+        provider: 'audius',
+        kind: 'track',
+        id: AUDIUS_ID,
+      }),
+    ).toEqual({
+      provider: 'audius',
+      kind: 'track',
+      id: AUDIUS_ID,
+      src: `https://audius.co/embed/track/${AUDIUS_ID}?flavor=compact`,
+      height: 120,
+    });
+  });
+
+  it('recognizes an unresolved Audius URL as a builder candidate without extracting it', () => {
+    expect(isHandleEmbedUrl(AUDIUS_URL)).toBe(true);
+    expect(extractHandleEmbed(AUDIUS_URL)).toBeNull();
+    for (const invalidUrl of [
+      'http://audius.co/openpay/test-track',
+      'https://user:pass@audius.co/openpay/test-track',
+      'https://audius.co:443/openpay/test-track',
+      'https://audius.co.evil.example/openpay/test-track',
+    ]) {
+      expect(isHandleEmbedUrl(invalidUrl)).toBe(false);
+      expect(
+        extractHandleEmbed(invalidUrl, {
+          provider: 'audius',
+          kind: 'track',
+          id: AUDIUS_ID,
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it.each([
+    undefined,
+    { provider: 'audius', kind: 'track', id: 'Ab' },
+    { provider: 'audius', kind: 'track', id: 'AbcdefghijklmnoPQ' },
+    { provider: 'audius', kind: 'track', id: 'Abc-123' },
+    { provider: 'audius', kind: 'album', id: AUDIUS_ID },
+    { provider: 'spotify', kind: 'track', id: AUDIUS_ID },
+  ])('rejects an Audius embed with invalid resolved data: %j', (resolved) => {
+    expect(extractHandleEmbed(AUDIUS_URL, resolved)).toBeNull();
+  });
+
+  it.each([
+    `http://www.youtube.com/watch?v=${YOUTUBE_ID}`,
+    `https://user:pass@www.youtube.com/watch?v=${YOUTUBE_ID}`,
+    `https://www.youtube.com:443/watch?v=${YOUTUBE_ID}`,
+    `https://www.youtube.com:8443/watch?v=${YOUTUBE_ID}`,
+    `https://music.youtube.com/watch?v=${YOUTUBE_ID}`,
+    `https://www.youtube.com.evil.example/watch?v=${YOUTUBE_ID}`,
+    `https://www.youtube.com/watch?v=short`,
+    'https://www.youtube.com/watch?v=bad%21bad%21bad',
+    `https://youtu.be/${YOUTUBE_ID}/extra`,
+    `https://youtube.com/videos/${YOUTUBE_ID}`,
+    `https://open.spotify.com/collection/${SPOTIFY_ID}`,
+    'https://open.spotify.com/track/short',
+    'https://open.spotify.com/track/0123456789ABCDEFGHIJK!',
+    `https://spotify.com/track/${SPOTIFY_ID}`,
+    `http://audius.co/openpay/test-track`,
+    `https://user:pass@audius.co/openpay/test-track`,
+    `https://audius.co:443/openpay/test-track`,
+    `https://audius.co.evil.example/openpay/test-track`,
+  ])('rejects unsupported or non-canonical embed URLs: %s', (url) => {
+    expect(extractHandleEmbed(url)).toBeNull();
+  });
+});
+
 describe('validateProfile', () => {
   it('accepts bio + https avatar + https links', () => {
     const res = validateProfile({
@@ -284,7 +397,7 @@ describe('validateProfile', () => {
       }).ok,
     ).toBe(false);
   });
-  it('rejects heading url/featured by property presence and rejects unknown kind', () => {
+  it('rejects regular-link-only fields on headings and rejects unknown kind', () => {
     expect(
       validateProfile({
         links: [{ kind: 'heading', label: 'A', url: '' }],
@@ -293,6 +406,16 @@ describe('validateProfile', () => {
     expect(
       validateProfile({
         links: [{ kind: 'heading', label: 'A', featured: false }],
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateProfile({
+        links: [{ kind: 'heading', label: 'A', imageUrl: '' }],
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateProfile({
+        links: [{ kind: 'heading', label: 'A', embed: false }],
       }).ok,
     ).toBe(false);
     expect(
@@ -343,6 +466,167 @@ describe('validateProfile', () => {
   it('rejects an over-long link url', () => {
     const longUrl = 'https://x.com/' + 'a'.repeat(520);
     expect(validateProfile({ links: [{ label: 'x', url: longUrl }] }).ok).toBe(false);
+  });
+  it('accepts a trimmed https link image at 512 chars and omits an empty image', () => {
+    const prefix = 'https://images.example/';
+    const imageUrl = prefix + 'a'.repeat(MAX_LINK_IMAGE_URL_LEN - prefix.length);
+    const res = validateProfile({
+      links: [
+        {
+          label: 'Image',
+          url: 'https://example.com/image',
+          imageUrl: ` ${imageUrl} `,
+        },
+        { label: 'Empty', url: 'https://example.com/empty', imageUrl: '   ' },
+      ],
+    });
+    expect(res).toEqual({
+      ok: true,
+      profile: {
+        links: [
+          { label: 'Image', url: 'https://example.com/image', imageUrl },
+          { label: 'Empty', url: 'https://example.com/empty' },
+        ],
+      },
+    });
+  });
+  it('rejects invalid link image type/protocol and the 513th character', () => {
+    const prefix = 'https://images.example/';
+    const tooLong =
+      prefix + 'a'.repeat(MAX_LINK_IMAGE_URL_LEN + 1 - prefix.length);
+    const base = { label: 'Image', url: 'https://example.com' };
+    expect(validateProfile({ links: [{ ...base, imageUrl: 42 }] })).toEqual({
+      ok: false,
+      error: 'image must be string',
+    });
+    expect(
+      validateProfile({ links: [{ ...base, imageUrl: 'http://images.example/a' }] }),
+    ).toEqual({ ok: false, error: 'image must be an https url' });
+    expect(validateProfile({ links: [{ ...base, imageUrl: tooLong }] })).toEqual({
+      ok: false,
+      error: 'image url too long',
+    });
+  });
+  it('accepts supported embed URLs and preserves only embed=true', () => {
+    const res = validateProfile({
+      links: [
+        {
+          label: 'Video',
+          url: ` https://youtu.be/${YOUTUBE_ID}?si=share `,
+          embed: true,
+        },
+        {
+          label: 'Song',
+          url: `https://open.spotify.com/track/${SPOTIFY_ID}`,
+          embed: true,
+        },
+        { label: 'Plain', url: 'https://example.com', embed: false },
+      ],
+    });
+    expect(res).toEqual({
+      ok: true,
+      profile: {
+        links: [
+          {
+            label: 'Video',
+            url: `https://youtu.be/${YOUTUBE_ID}?si=share`,
+            embed: true,
+          },
+          {
+            label: 'Song',
+            url: `https://open.spotify.com/track/${SPOTIFY_ID}`,
+            embed: true,
+          },
+          { label: 'Plain', url: 'https://example.com' },
+        ],
+      },
+    });
+  });
+  it('accepts Audius only with a valid resolved track and canonicalizes the server field', () => {
+    expect(
+      validateProfile({
+        links: [
+          {
+            label: 'Audius',
+            url: AUDIUS_URL,
+            embed: true,
+            embedResolved: {
+              provider: 'audius',
+              kind: 'track',
+              id: AUDIUS_ID,
+              ignored: 'client-extra',
+            },
+          },
+        ],
+      }),
+    ).toEqual({
+      ok: true,
+      profile: {
+        links: [
+          {
+            label: 'Audius',
+            url: AUDIUS_URL,
+            embed: true,
+            embedResolved: {
+              provider: 'audius',
+              kind: 'track',
+              id: AUDIUS_ID,
+            },
+          },
+        ],
+      },
+    });
+  });
+  it.each([
+    ['missing', undefined],
+    [
+      'invalid ID',
+      { provider: 'audius', kind: 'track', id: 'bad-id' },
+    ],
+    [
+      'wrong kind',
+      { provider: 'audius', kind: 'album', id: AUDIUS_ID },
+    ],
+  ])('rejects Audius embed with %s resolved data', (_case, embedResolved) => {
+    expect(
+      validateProfile({
+        links: [
+          {
+            label: 'Audius',
+            url: AUDIUS_URL,
+            embed: true,
+            embedResolved,
+          },
+        ],
+      }),
+    ).toEqual({ ok: false, error: 'embed not supported for this url' });
+  });
+  it('rejects embed=true on an unsupported URL with the exact error', () => {
+    expect(
+      validateProfile({
+        links: [{ label: 'Site', url: 'https://example.com', embed: true }],
+      }),
+    ).toEqual({ ok: false, error: 'embed not supported for this url' });
+  });
+  it('accepts three embeds and rejects the fourth with the exact error', () => {
+    const embeds = Array.from({ length: MAX_PROFILE_EMBEDS }, (_, index) => ({
+      label: `Video ${index}`,
+      url: `https://youtu.be/${YOUTUBE_ID}?n=${index}`,
+      embed: true,
+    }));
+    expect(validateProfile({ links: embeds }).ok).toBe(true);
+    expect(
+      validateProfile({
+        links: [
+          ...embeds,
+          {
+            label: 'Song',
+            url: `https://open.spotify.com/track/${SPOTIFY_ID}`,
+            embed: true,
+          },
+        ],
+      }),
+    ).toEqual({ ok: false, error: 'too many embeds' });
   });
   it('accepts https socials (trimmed) and treats empty array as no socials', () => {
     const res = validateProfile({
@@ -506,6 +790,84 @@ describe('parseHandleRecord', () => {
       withHeading,
     );
   });
+  it('round-trips valid link image and embed fields', () => {
+    const withMedia: HandleRecord = {
+      ...good,
+      profile: {
+        links: [
+          {
+            label: 'Image',
+            url: 'https://example.com',
+            imageUrl: 'https://images.example/card.png',
+          },
+          {
+            label: 'Video',
+            url: `https://www.youtube.com/watch?v=${YOUTUBE_ID}`,
+            embed: true,
+          },
+          {
+            label: 'Song',
+            url: `https://open.spotify.com/track/${SPOTIFY_ID}`,
+            embed: true,
+          },
+        ],
+      },
+    };
+    expect(parseHandleRecord(serializeHandleRecord(withMedia))).toEqual(withMedia);
+  });
+  it('round-trips a stored Audius resolved track field', () => {
+    const withAudius: HandleRecord = {
+      ...good,
+      profile: {
+        links: [
+          {
+            label: 'Audius',
+            url: AUDIUS_URL,
+            embed: true,
+            embedResolved: {
+              provider: 'audius',
+              kind: 'track',
+              id: AUDIUS_ID,
+            },
+          },
+        ],
+      },
+    };
+    expect(parseHandleRecord(serializeHandleRecord(withAudius))).toEqual(
+      withAudius,
+    );
+  });
+  it('drops an invalid stored Audius embed without consuming the shared cap', () => {
+    const links = [
+      {
+        label: 'Broken Audius',
+        url: AUDIUS_URL,
+        embed: true,
+        embedResolved: {
+          provider: 'audius',
+          kind: 'track',
+          id: 'bad-id',
+        },
+      },
+      ...Array.from({ length: MAX_PROFILE_EMBEDS }, (_, index) => ({
+        label: `Video ${index}`,
+        url: `https://youtu.be/${YOUTUBE_ID}?n=${index}`,
+        embed: true,
+      })),
+    ];
+    const parsed = parseHandleRecord(
+      JSON.stringify({ ...good, profile: { links } }),
+    );
+    expect(parsed?.profile?.links?.[0]).toEqual({
+      label: 'Broken Audius',
+      url: AUDIUS_URL,
+    });
+    expect(
+      parsed?.profile?.links?.filter(
+        (link) => link.kind !== 'heading' && link.embed === true,
+      ),
+    ).toHaveLength(MAX_PROFILE_EMBEDS);
+  });
   it('truncates an overlong stored heading label to the existing read limit', () => {
     const stored = {
       ...good,
@@ -565,6 +927,64 @@ describe('parseHandleRecord', () => {
     expect(parsed?.profile?.avatar).toBeUndefined();
     expect(parsed?.profile?.socials).toEqual(['https://x.com/good']);
     expect(parsed?.profile?.links).toEqual([{ label: 'good', url: 'https://x.com' }]);
+  });
+  it('drops only invalid/unsupported/over-cap media fields and keeps every valid link', () => {
+    const links = [
+      {
+        label: 'Unsupported',
+        url: 'https://example.com',
+        imageUrl: 'http://images.example/insecure.png',
+        embed: true,
+      },
+      {
+        label: 'Video 1',
+        url: `https://youtu.be/${YOUTUBE_ID}?n=1`,
+        imageUrl: 42,
+        embed: true,
+      },
+      {
+        label: 'Video 2',
+        url: `https://youtu.be/${YOUTUBE_ID}?n=2`,
+        embed: true,
+      },
+      {
+        label: 'Song',
+        url: `https://open.spotify.com/track/${SPOTIFY_ID}`,
+        embed: true,
+      },
+      {
+        label: 'Album over cap',
+        url: `https://open.spotify.com/album/${SPOTIFY_ID}`,
+        imageUrl: ' https://images.example/album.png ',
+        embed: true,
+      },
+    ];
+    const parsed = parseHandleRecord(
+      JSON.stringify({ ...good, profile: { links } }),
+    );
+    expect(parsed?.profile?.links).toEqual([
+      { label: 'Unsupported', url: 'https://example.com' },
+      {
+        label: 'Video 1',
+        url: `https://youtu.be/${YOUTUBE_ID}?n=1`,
+        embed: true,
+      },
+      {
+        label: 'Video 2',
+        url: `https://youtu.be/${YOUTUBE_ID}?n=2`,
+        embed: true,
+      },
+      {
+        label: 'Song',
+        url: `https://open.spotify.com/track/${SPOTIFY_ID}`,
+        embed: true,
+      },
+      {
+        label: 'Album over cap',
+        url: `https://open.spotify.com/album/${SPOTIFY_ID}`,
+        imageUrl: 'https://images.example/album.png',
+      },
+    ]);
   });
   it('round-trips theme + link emoji/featured and enforces single featured on read', () => {
     const themed: HandleRecord = {

@@ -603,7 +603,12 @@ export function HandleClaimPanel({
                 </div>
               ) : (
                 <p className="mt-2 text-xs text-red-600">
-                  {t('claimError', { error: (publish.error as Error).message })}
+                  {publish.error instanceof HandlePublishError &&
+                  publish.error.code === 'audius resolve failed'
+                    ? t('audiusResolveError')
+                    : t('claimError', {
+                        error: (publish.error as Error).message,
+                      })}
                 </p>
               )
             )}

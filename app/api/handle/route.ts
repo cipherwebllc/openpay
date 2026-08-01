@@ -12,7 +12,11 @@ import {
   validateHandle,
   validateHandleTipConfig,
   validateProfile,
+  isAudiusHandleEmbedUrl,
+  isHandleEmbedUrl,
   MAX_HANDLES_PER_WALLET,
+  MAX_PROFILE_EMBEDS,
+  MAX_PROFILE_LINKS,
   type HandleProfile,
 } from '@/lib/handle';
 import { validateStorefrontParts, type StorefrontParts } from '@/lib/mobileOrder';
@@ -26,6 +30,123 @@ export const maxDuration = 10;
 
 function notFound() {
   return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
+}
+
+const AUDIUS_RESOLVE_URL = 'https://api.audius.co/v1/resolve';
+const AUDIUS_TRACK_LOCATION =
+  /^https:\/\/api\.audius\.co\/v1\/tracks\/([A-Za-z0-9]{3,16})[/?]/;
+
+async function resolveAudiusTrackId(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(
+      `${AUDIUS_RESOLVE_URL}?url=${encodeURIComponent(url)}&app_name=openpay`,
+      {
+        method: 'GET',
+        redirect: 'manual',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(5_000),
+      },
+    );
+    if (response.status !== 302) return null;
+    const location = response.headers.get('location');
+    if (!location) return null;
+    // undici fetch の Location は相対パスで返る (2026-08-01 実機で確認)。resolve API の
+    // base で絶対化してから、host/path を含めて厳格検証する。
+    let absolute: string;
+    try {
+      absolute = new URL(location, AUDIUS_RESOLVE_URL).toString();
+    } catch {
+      return null;
+    }
+    return absolute.match(AUDIUS_TRACK_LOCATION)?.[1] ?? null;
+  } catch {
+    // timeout/network 障害を未解決 ID の保存へ波及させず、呼出側で明示的な保存失敗に統一する。
+    return null;
+  }
+}
+
+type ResolvedAudiusProfile =
+  | { ok: true; profile: unknown }
+  | { ok: false; error: 'audius resolve failed' | 'too many embeds' };
+
+async function resolveAudiusEmbeds(rawProfile: unknown): Promise<ResolvedAudiusProfile> {
+  if (
+    typeof rawProfile !== 'object' ||
+    rawProfile === null ||
+    Array.isArray(rawProfile)
+  ) {
+    return { ok: true, profile: rawProfile };
+  }
+
+  const source = rawProfile as Record<string, unknown>;
+  if (!Array.isArray(source.links)) {
+    return { ok: true, profile: rawProfile };
+  }
+  // 異常 payload による外向き fetch の fan-out を process/socket へ波及させない。
+  // 既存 validator が同じ上限エラーを返すので、I/O 前にそのまま戻す。
+  if (source.links.length > MAX_PROFILE_LINKS) {
+    return { ok: true, profile: rawProfile };
+  }
+
+  const strippedLinks = source.links.map((rawLink) => {
+    if (typeof rawLink !== 'object' || rawLink === null || Array.isArray(rawLink)) {
+      return rawLink;
+    }
+    const link = { ...(rawLink as Record<string, unknown>) };
+    // server 導出 field は全 provider で client 値を信用せず、保存ごとに strip する。
+    delete link.embedResolved;
+    return link;
+  });
+  const supportedEmbedCount = strippedLinks.reduce((count, rawLink) => {
+    if (typeof rawLink !== 'object' || rawLink === null || Array.isArray(rawLink)) {
+      return count;
+    }
+    const link = rawLink as Record<string, unknown>;
+    return link.embed === true &&
+      typeof link.url === 'string' &&
+      isHandleEmbedUrl(link.url)
+      ? count + 1
+      : count;
+  }, 0);
+  if (supportedEmbedCount > MAX_PROFILE_EMBEDS) {
+    return { ok: false, error: 'too many embeds' };
+  }
+
+  const resolvedLinks = await Promise.all(
+    strippedLinks.map(async (rawLink) => {
+      if (typeof rawLink !== 'object' || rawLink === null || Array.isArray(rawLink)) {
+        return { ok: true as const, link: rawLink };
+      }
+      const link = rawLink as Record<string, unknown>;
+      if (
+        link.embed !== true ||
+        typeof link.url !== 'string' ||
+        !isAudiusHandleEmbedUrl(link.url)
+      ) {
+        return { ok: true as const, link };
+      }
+
+      const id = await resolveAudiusTrackId(link.url.trim());
+      if (!id) {
+        return { ok: false as const, error: 'audius resolve failed' as const };
+      }
+      link.embedResolved = { provider: 'audius', kind: 'track', id };
+      return { ok: true as const, link };
+    }),
+  );
+  const links: unknown[] = [];
+  for (const result of resolvedLinks) {
+    if (!result.ok) return result;
+    links.push(result.link);
+  }
+
+  return {
+    ok: true,
+    profile: {
+      ...source,
+      links,
+    },
+  };
 }
 
 export async function GET() {
@@ -109,7 +230,24 @@ export async function POST(req: Request) {
   // 明示的に与えられた場合のみ検証して置換 (空 {} はクリア)。
   let profileArg: HandleProfile | undefined;
   if (rawProfile !== undefined && rawProfile !== null) {
-    const profile = validateProfile(rawProfile);
+    const resolvedProfile = await resolveAudiusEmbeds(rawProfile);
+    if (!resolvedProfile.ok) {
+      if (resolvedProfile.error === 'too many embeds') {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'invalid_profile',
+            detail: resolvedProfile.error,
+          },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json(
+        { ok: false, error: resolvedProfile.error },
+        { status: 400 },
+      );
+    }
+    const profile = validateProfile(resolvedProfile.profile);
     if (!profile.ok) {
       return NextResponse.json(
         { ok: false, error: 'invalid_profile', detail: profile.error },

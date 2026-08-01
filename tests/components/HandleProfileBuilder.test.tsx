@@ -623,6 +623,138 @@ describe('HandleProfileBuilder', () => {
     expect(screen.getByLabelText('絵文字 (任意)')).toHaveValue('🌐');
   });
 
+  it('通常リンクに可視 label 付きの画像 URL 入力を表示・保持する', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByText('＋ リンクを追加'));
+    const imageUrl = screen.getByRole('textbox', {
+      name: '画像 URL (任意)',
+    });
+    expect(imageUrl).toHaveAttribute('type', 'url');
+    expect(imageUrl).toHaveAttribute('maxlength', '512');
+    fireEvent.change(imageUrl, {
+      target: { value: 'https://cdn.example.com/link.jpg' },
+    });
+    expect(
+      screen.getByRole('textbox', { name: '画像 URL (任意)' }),
+    ).toHaveValue('https://cdn.example.com/link.jpg');
+  });
+
+  it('対応 URL のみ embed toggle を表示し、文字 click と非対応化の解除が動く', async () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByText('＋ リンクを追加'));
+    const linksGroup = screen.getByRole('group', { name: 'リンク' });
+    const linkUrl = within(linksGroup)
+      .getAllByPlaceholderText('https://')
+      .find((input) => input.closest('label') === null)!;
+
+    fireEvent.change(linkUrl, {
+      target: { value: 'https://example.com/video' },
+    });
+    expect(
+      screen.queryByRole('checkbox', { name: '埋め込み表示' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(linkUrl, {
+      target: { value: 'https://youtu.be/dQw4w9WgXcQ' },
+    });
+    const toggle = screen.getByRole('checkbox', { name: '埋め込み表示' });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(screen.getByText('埋め込み表示'));
+    expect(toggle).toBeChecked();
+
+    fireEvent.change(linkUrl, {
+      target: { value: 'https://example.com/video' },
+    });
+    expect(
+      screen.queryByRole('checkbox', { name: '埋め込み表示' }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      const stored = JSON.parse(
+        localStorage.getItem('openpay:handle-profile-draft:v1') ?? '{}',
+      ) as { links?: Array<Record<string, unknown>> };
+      expect(stored.links?.[0]).not.toHaveProperty('embed');
+    });
+  });
+
+  it('Audius URL に embed toggle と 3-provider hint を表示する', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    expect(
+      screen.getByText(
+        'リンクは https:// のみ。安全のため http や javascript は無効です。YouTube / Spotify / Audius は埋め込み表示に対応しています。',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByText('＋ リンクを追加'));
+    const linksGroup = screen.getByRole('group', { name: 'リンク' });
+    const linkUrl = within(linksGroup)
+      .getAllByPlaceholderText('https://')
+      .find((input) => input.closest('label') === null)!;
+
+    fireEvent.change(linkUrl, {
+      target: { value: 'https://audius.co/openpay/test-track' },
+    });
+    const toggle = screen.getByRole('checkbox', { name: '埋め込み表示' });
+    fireEvent.click(toggle);
+    expect(toggle).toBeChecked();
+  });
+
+  it('YouTube / Spotify / Audius の合算 3 件で 4 件目 toggle を disabled にする', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    for (let index = 0; index < 4; index += 1) {
+      fireEvent.click(screen.getByText('＋ リンクを追加'));
+    }
+    const linksGroup = screen.getByRole('group', { name: 'リンク' });
+    const linkUrls = within(linksGroup)
+      .getAllByPlaceholderText('https://')
+      .filter((input) => input.closest('label') === null);
+    const urls = [
+      'https://youtu.be/dQw4w9WgXcQ',
+      'https://open.spotify.com/track/0123456789ABCDEFGHIJKL',
+      'https://audius.co/openpay/track-one',
+      'https://audius.co/openpay/track-two',
+    ];
+    linkUrls.forEach((input, index) => {
+      fireEvent.change(input, { target: { value: urls[index] } });
+    });
+
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.click(
+        screen.getAllByRole('checkbox', { name: '埋め込み表示' })[index],
+      );
+    }
+    expect(
+      screen.getAllByRole('checkbox', { name: '埋め込み表示' })[3],
+    ).toBeDisabled();
+  });
+
+  it('embed が 3 件 ON なら 4 件目の未選択 toggle を disabled にする', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    for (let index = 0; index < 4; index += 1) {
+      fireEvent.click(screen.getByText('＋ リンクを追加'));
+    }
+    const linksGroup = screen.getByRole('group', { name: 'リンク' });
+    const linkUrls = within(linksGroup)
+      .getAllByPlaceholderText('https://')
+      .filter((input) => input.closest('label') === null);
+    for (const input of linkUrls) {
+      fireEvent.change(input, {
+        target: { value: 'https://youtu.be/dQw4w9WgXcQ' },
+      });
+    }
+
+    for (let index = 0; index < 3; index += 1) {
+      fireEvent.click(
+        screen.getAllByRole('checkbox', { name: '埋め込み表示' })[index],
+      );
+    }
+    const toggles = screen.getAllByRole('checkbox', {
+      name: '埋め込み表示',
+    });
+    for (const toggle of toggles.slice(0, 3)) {
+      expect(toggle).toBeChecked();
+    }
+    expect(toggles[3]).toBeDisabled();
+  });
+
   it('見出しを追加・編集・削除でき、URL と featured UI を出さない', () => {
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.click(
@@ -633,7 +765,13 @@ describe('HandleProfileBuilder', () => {
     expect(label).toHaveAttribute('maxlength', '40');
     expect(within(row).queryByPlaceholderText('https://')).not.toBeInTheDocument();
     expect(
+      within(row).queryByRole('textbox', { name: '画像 URL (任意)' }),
+    ).not.toBeInTheDocument();
+    expect(
       within(row).queryByRole('button', { name: /注目/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(row).queryByRole('checkbox', { name: '埋め込み表示' }),
     ).not.toBeInTheDocument();
 
     fireEvent.change(label, { target: { value: 'おすすめ' } });
