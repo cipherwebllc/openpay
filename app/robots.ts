@@ -10,7 +10,11 @@ export default function robots(): MetadataRoute.Robots {
     rules: [
       {
         userAgent: '*',
-        allow: '/',
+        // OG 画像 (/api/og/*) は SNS カードクローラーの取得対象。X (Twitterbot) は
+        // robots.txt を尊重するため、/api/ 一括 disallow のままだとカード画像の取得を
+        // 拒否して X だけカードが出ない (2026-08-01 本番実害・Threads は無視するため表示
+        // されて差が出る)。longest-match で allow が勝つよう明示する。
+        allow: ['/', '/api/og/'],
         disallow: ['/api/', '/ja/admin/', '/en/admin/', '/ja/checkout', '/en/checkout', '/ja/pay', '/en/pay', '/ja/order', '/en/order'],
       },
     ],
