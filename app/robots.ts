@@ -9,6 +9,15 @@ export default function robots(): MetadataRoute.Robots {
   return {
     rules: [
       {
+        // X の Card Validator は longest-match を評価せず「Disallow: /api/ が前置
+        // 一致したら警告」する crude 実装が疑われる (2026-08-02 実測: allow 追加後も
+        // WARN 継続)。UA 専用グループがあるとそのボットは * グループを参照しない
+        // (RFC 9309) ため、Twitterbot には Disallow を一切見せず確実に許可する。
+        // Twitterbot はツイートされた URL とカード画像しか取得しないため全許可で害なし。
+        userAgent: 'Twitterbot',
+        allow: '/',
+      },
+      {
         userAgent: '*',
         // OG 画像 (/api/og/*) は SNS カードクローラーの取得対象。X (Twitterbot) は
         // robots.txt を尊重するため、/api/ 一括 disallow のままだとカード画像の取得を
