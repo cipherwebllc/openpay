@@ -90,7 +90,7 @@ import {
   buildJpycRecoverSignPreview,
 } from '@/lib/signPreview';
 import { ShieldCheck, ChevronDown } from 'lucide-react';
-import { tipFormTheme } from '@/lib/tipFormTheme';
+import { tipFormTheme, HEADER_SHEEN } from '@/lib/tipFormTheme';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
 const TIP_MESSAGE_MIN_WEI = 10n ** 18n;
@@ -719,16 +719,36 @@ export function TipForm({
             ? `rounded-2xl p-5 text-white shadow-sm ${themed.headerClassName}`
             : 'rounded-2xl p-5 text-white shadow-sm'
         }
-        style={themed?.headerStyle ?? { backgroundColor: themeColor }}
+        style={
+          themed?.headerStyle ?? {
+            backgroundColor: themeColor,
+            backgroundImage: HEADER_SHEEN,
+          }
+        }
       >
-        <p className="text-xs uppercase tracking-wider opacity-80">
-          {t('header')}
-        </p>
-        <p className="mt-2 text-xl font-bold leading-tight">
-          {creatorName
-            ? t('headerNamed', { name: creatorName })
-            : t('headerGeneric')}
-        </p>
+        <div className="flex items-center gap-3">
+          {/* イニシャル円 = 「誰に送るか」の視覚アンカー。装飾なので読み上げ対象外。
+              bg-white/20 は着色ヘッダー用・ring-black/10 は outline 等の白地でも
+              円の輪郭が残るための保険。 */}
+          {creatorName && (
+            <span
+              aria-hidden
+              className="grid h-11 w-11 flex-shrink-0 select-none place-items-center rounded-full bg-white/20 text-lg font-bold ring-1 ring-black/10"
+            >
+              {[...creatorName][0]}
+            </span>
+          )}
+          <div className="min-w-0">
+            <p className="text-xs uppercase tracking-wider opacity-80">
+              {t('header')}
+            </p>
+            <p className="mt-1 text-xl font-bold leading-tight">
+              {creatorName
+                ? t('headerNamed', { name: creatorName })
+                : t('headerGeneric')}
+            </p>
+          </div>
+        </div>
         {creatorMessage && (
           <p className="mt-2 whitespace-pre-wrap text-sm opacity-90">
             {creatorMessage}
@@ -826,7 +846,14 @@ export function TipForm({
       </section>
 
       {showTipMessageComposer && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4">
+        <section
+          className={
+            themed
+              ? `rounded-2xl border border-slate-200 bg-white p-4 ${themed.sectionClassName}`
+              : 'rounded-2xl border border-slate-200 bg-white p-4'
+          }
+          style={themed?.sectionStyle}
+        >
           <label className="block">
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               {t('privateTipMessageLabel')}
@@ -852,7 +879,14 @@ export function TipForm({
         </section>
       )}
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
+      <section
+        className={
+          themed
+            ? `rounded-2xl border border-slate-200 bg-white p-4 text-sm ${themed.sectionClassName}`
+            : 'rounded-2xl border border-slate-200 bg-white p-4 text-sm'
+        }
+        style={themed?.sectionStyle}
+      >
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           {t('breakdownTitle')}
         </p>
@@ -942,8 +976,14 @@ export function TipForm({
       )}
 
       <section
-          ref={walletSectionRef}
-          className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4">
+        ref={walletSectionRef}
+        className={
+          themed
+            ? `space-y-2 rounded-2xl border border-slate-200 bg-white p-4 ${themed.sectionClassName}`
+            : 'space-y-2 rounded-2xl border border-slate-200 bg-white p-4'
+        }
+        style={themed?.sectionStyle}
+      >
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           {t('walletSection')}
         </p>

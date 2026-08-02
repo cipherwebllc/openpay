@@ -659,7 +659,7 @@
     "header": "OpenPay Tip",
     "headerNamed": "Send a tip to {name}",
     "headerGeneric": "Send a tip to the creator",
-    "reassuranceSummaryClosed": "Only one signature is requested — see how it works",
+    "reassuranceSummaryClosed": "Only one signature is requested",
     "reassuranceSummaryOpen": "How this payment works",
     "amountTitle": "Choose amount",
     "amountCustom": "Or custom amount",
