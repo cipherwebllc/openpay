@@ -8,12 +8,21 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { env } from '@/lib/env';
+import { isHandlePagePath } from '@/lib/handlePath';
 import { LEGAL_ENTITY } from '@/lib/legal';
 
 export function SiteFooter() {
   const t = useTranslations('Footer');
+  // @handle ページはクリエイターの「自分のページ」— OpenPay 側の宣伝味 (技術開示
+  // details・SNS/ソース行・AI ストア導線) は世界観を削るので legal + copyright に
+  // 絞る (受取ページ磨き上げ P3・AlphaNotice の @handle 非表示と同じ判定)。
+  // ライブラリ導線は購入者に有用なので残す。SSR/provider 無しは pathname が null
+  // → フル表示 (従来挙動) でテスト互換。
+  const pathname = usePathname();
+  const onHandlePage = isHandlePagePath(pathname);
   const currentYear = new Date().getFullYear();
   // copyrightStartYear と一致したら単年表示、それ以外はレンジ表示。
   const yearLabel =
@@ -58,7 +67,7 @@ export function SiteFooter() {
           {t('links.transparency')}
         </Link>
         {/* /discovery は flag OFF で notFound になるため、OFF 環境では 404 導線を出さない。 */}
-        {env.enableX402Facilitator && (
+        {env.enableX402Facilitator && !onHandlePage && (
           <Link
             href="/discovery"
             className="hover:text-slate-700 hover:underline"
@@ -88,6 +97,7 @@ export function SiteFooter() {
       {/* 一般店主には Web3 用語 (ERC-4337 等) は不要だが、開発者向け透明性は
           残したいので <details> で折り畳む。summary は soft な日本語/英語、
           展開時に技術ラベルを表示。review (2026-05-23) #15 対応。 */}
+      {onHandlePage ? null : (
       <details className="mt-1 inline-block text-slate-500 marker:hidden">
         {/* min-h + inline-flex で tap target 高さを 24px 以上に確保 (a11y target-size)。
             inline-flex のままなので <details> の inline-block レイアウトは不変。 */}
@@ -99,6 +109,8 @@ export function SiteFooter() {
         </summary>
         <span className="ml-1">{t('poweredByTech')}</span>
       </details>
+      )}
+      {onHandlePage ? null : (
       <p className="mt-1 flex items-center justify-center gap-3 text-slate-500">
         <a
           href="https://github.com/cipherwebllc/openpay"
@@ -138,6 +150,7 @@ export function SiteFooter() {
           {t('noteLink')}
         </a>
       </p>
+      )}
     </footer>
   );
 }

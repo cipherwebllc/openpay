@@ -871,7 +871,7 @@
   "HandleProfile": {
     "supportHeading": "Support",
     "supportSubtext": "The full amount goes directly to the creator.",
-    "supportQuestionHint": "Your support can carry a private question or message — only the recipient can read it.",
+    "supportQuestionHint": "Add a question or message — only they can read it.",
     "crossChain": "cross-chain",
     "selectCurrencyChain": "Choose a currency and chain",
     "share": "Share",

@@ -4,6 +4,14 @@ import { renderWithIntl } from '../_helpers/i18n';
 import { SiteFooter } from '@/components/SiteFooter';
 import { LEGAL_ENTITY } from '@/lib/legal';
 
+// @handle compact 判定 (P3) 用に usePathname だけ差し替え可能にする。既定 null =
+// 従来挙動 (フル footer) なので既存テストは無影響。
+const pathnameMock = vi.hoisted(() => ({ value: null as string | null }));
+vi.mock('next/navigation', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  usePathname: () => pathnameMock.value,
+}));
+
 describe('SiteFooter', () => {
   it('ja: legal link と運用透明性を露出', () => {
     renderWithIntl(<SiteFooter />, { locale: 'ja' });
@@ -202,5 +210,36 @@ describe('SiteFooter', () => {
       // 「Web3」が出現しないことを fence する。
       expect(footer.textContent).not.toMatch(/Web3/);
     });
+  });
+});
+
+describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () => {
+  it('@handle ページでは技術開示/SNS 行/AI ストア導線を出さず legal + copyright に絞る', () => {
+    pathnameMock.value = '/ja/@alice';
+    try {
+      renderWithIntl(<SiteFooter />, { locale: 'ja' });
+      // legal は残る (特商法/透明性への到達性は削らない)
+      expect(screen.getByRole('link', { name: '利用規約' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: '特商法表記' })).toBeInTheDocument();
+      expect(
+        screen.getByText(new RegExp(LEGAL_ENTITY.companyName)),
+      ).toBeInTheDocument();
+      // OpenPay 宣伝味の行は出さない
+      expect(screen.queryByText(/GitHub/)).toBeNull();
+      expect(screen.queryByText(/ステーブルコイン決済技術/)).toBeNull();
+      expect(screen.queryByRole('link', { name: 'AIストア' })).toBeNull();
+    } finally {
+      pathnameMock.value = null;
+    }
+  });
+
+  it('通常ページ (@handle 以外) は従来どおりフル footer', () => {
+    pathnameMock.value = '/ja/create';
+    try {
+      renderWithIntl(<SiteFooter />, { locale: 'ja' });
+      expect(screen.getByText(/ステーブルコイン決済技術/)).toBeInTheDocument();
+    } finally {
+      pathnameMock.value = null;
+    }
   });
 });
