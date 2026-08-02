@@ -793,9 +793,12 @@ export function TipForm({
                 } text-center text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   active
                     ? 'border-transparent text-white shadow-sm'
-                    : `border-slate-200 bg-white text-slate-700 hover:border-slate-300 ${
-                        themed?.inactivePillClassName ?? ''
-                      }`
+                    : themed
+                      ? // bg/text はテーマ側が必ず与える (bg-white 等をここに残すと
+                        // night の bg-slate-950 と class 競合し stylesheet 順で白が
+                        // 勝つ実害があった)。border は共通・テーマ側で上書き可。
+                        `border-slate-200 hover:border-slate-300 ${themed.inactivePillClassName}`
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                 }`}
                 style={
                   active

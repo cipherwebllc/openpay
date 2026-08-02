@@ -187,7 +187,12 @@ export function ReceiveMethodPicker({
                 className={`w-full rounded-2xl border px-4 py-3 text-sm font-bold transition-all duration-200 ${
                   isActive
                     ? 'border-2'
-                    : 'bg-white hover:-translate-y-0.5 hover:shadow-[0_8px_20px_-10px_rgba(15,23,42,0.25)]'
+                    : `${
+                        // night 等の暗色プロフでは白ボタンが浮きすぎる (P2 の tip
+                        // カードと同じパッチワーク)。地色だけ暗色に寄せ、accent の
+                        // 文字/枠 (inline style) は共通のまま。
+                        dark ? 'bg-slate-900/60' : 'bg-white'
+                      } hover:-translate-y-0.5 hover:shadow-[0_8px_20px_-10px_rgba(15,23,42,0.25)]`
                 }`}
               >
                 {multipleMethods ? (
