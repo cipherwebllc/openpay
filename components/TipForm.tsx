@@ -89,7 +89,7 @@ import {
   buildJpycRelaySignPreview,
   buildJpycRecoverSignPreview,
 } from '@/lib/signPreview';
-import { RecoverFeeNotice } from './RecoverFeeNotice';
+import { ShieldCheck, ChevronDown } from 'lucide-react';
 import { tipFormTheme } from '@/lib/tipFormTheme';
 
 const DEFAULT_THEME_COLOR = '#2563eb';
@@ -1016,17 +1016,36 @@ export function TipForm({
       )}
 
       {/* 署名安心パネル/ヒント (送信ボタン直上)。relay free=フルパネル / Circle USDC=usdc-permit。
-          recover/Pimlico 7702 はスコープ外で出さない。署名/確認待ち中は待機表示に置換する。
-          表示専用で決済ロジックには触れない。 */}
-      {signReassurance && <SignReassurance {...signReassurance} />}
-
-      {/* Recover モードの手数料開示 (送信ボタン直上)。tip は gas=customer 固定 (チッパーが
-          チップ + 手数料を負担)。free モード / 非 recover では何も描画しない。 */}
-      <RecoverFeeNotice
-        billAmount={useRecover && amountWei > 0n ? amountWei : null}
-        chainId={deployment.chainId}
-        gasMode="customer"
-      />
+          recover/Pimlico 7702 はスコープ外で出さない。表示専用で決済ロジックには触れない。
+          チップは折りたたみ既定 (CTA 前のスクロール量を 1 画面分減らす引き算)。署名/確認
+          待ち中はウォレット照合が本番になるため強制展開する (checkout/pay は常時展開のまま)。
+          手数料の重複開示 (旧 RecoverFeeNotice) は撤去 — 金額の単一ソースは直上の明細。 */}
+      {signReassurance &&
+        (signReassurance.awaiting ? (
+          <SignReassurance {...signReassurance} />
+        ) : (
+          <details className="group">
+            <summary className="flex cursor-pointer select-none items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100/70 [&::-webkit-details-marker]:hidden">
+              <ShieldCheck
+                className="h-4 w-4 flex-shrink-0 text-emerald-600"
+                aria-hidden
+              />
+              <span className="min-w-0 flex-1 group-open:hidden">
+                {t('reassuranceSummaryClosed')}
+              </span>
+              <span className="hidden min-w-0 flex-1 group-open:inline">
+                {t('reassuranceSummaryOpen')}
+              </span>
+              <ChevronDown
+                className="h-4 w-4 flex-shrink-0 text-emerald-600 transition-transform group-open:rotate-180"
+                aria-hidden
+              />
+            </summary>
+            <div className="mt-2">
+              <SignReassurance {...signReassurance} />
+            </div>
+          </details>
+        ))}
 
       <button
         type="button"

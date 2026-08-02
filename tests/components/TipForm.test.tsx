@@ -1463,10 +1463,8 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
       name: '質問やメッセージ (任意)',
     });
     expect(composer).toHaveAttribute('maxlength', '300');
-    expect(composer).toHaveAttribute(
-      'placeholder',
-      '質問やメッセージ (任意・受け取った本人だけが読めます)',
-    );
+    // placeholder は記入例 (ラベル/プライバシー行との三重復唱を解消・2026-08-02)。
+    expect(composer).toHaveAttribute('placeholder', '例: いつも応援しています！');
     expect(
       screen.getByText(
         '公開されません。受取ウォレットでサインインした画面にのみ表示されます。',
@@ -1599,22 +1597,20 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     });
   });
 
-  // --- F1: recover モードの手数料開示 (共有 RecoverFeeNotice・tip は customer 固定) ---
-  it('recover (forwarder 設定): 送信ボタン上に手数料開示 (顧客負担) を表示', () => {
+  // --- F1 改 (UI 引き算 2026-08-02): recover の手数料開示は明細 (breakdown) に一本化し、
+  // 送信ボタン上の重複箱 (旧 RecoverFeeNotice) は出さない。開示自体は明細の
+  // ガス相当行 + 顧客負担ヒントが担う (表示の単一ソース化・金額計算は不変)。---
+  it('recover (forwarder 設定): 手数料は明細に表示し、重複開示箱は出さない', () => {
     vi.mocked(jpycForwarderFor).mockReturnValue(
       '0x752B000000000000000000000000000000000000' as Address,
     );
     render(<TipForm params={JPYC_PARAMS} />);
-    // bps=0 → ガス相当の固定手数料。tip は gas=customer 固定 → チップ内訳 + チッパー負担の文言。
-    // L6: 数字の前後を境界で締める (`:\s*` 直後 + 後続 `（`) — 「12 JPYC（」等の部分一致を排除。
+    // 明細側の開示: ガス相当行 + チッパー負担ヒント (gaslessHintJpycRecover)。
     expect(
-      screen.getByText(/決済手数料:\s*2 JPYC（ガス相当）/),
+      screen.getByText(/チップをお送りになるお客様のご負担です/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/決済手数料:\s*12 JPYC/)).toBeNull();
-    // 確定モデル: チップ文脈の分担行 (チップ N + 手数料 M・お送りになるお客様のご負担)。
-    expect(
-      screen.getByText(/手数料はお送りになるお客様のご負担です/),
-    ).toBeInTheDocument();
+    // 旧 RecoverFeeNotice の重複箱は撤去済み。
+    expect(screen.queryByText(/決済手数料:/)).toBeNull();
   });
 
   it('FREE モード (forwarder null): 手数料開示は出さない', () => {
