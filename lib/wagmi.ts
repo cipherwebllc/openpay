@@ -1,5 +1,5 @@
 import { createConfig, createStorage, noopStorage } from 'wagmi';
-import { coinbaseWallet, injected, walletConnect } from 'wagmi/connectors';
+import { coinbaseWallet, injected, mock, walletConnect } from 'wagmi/connectors';
 import { supportedChains, transportForChain } from './chains';
 import { env } from './env';
 
@@ -42,7 +42,19 @@ const transports = Object.fromEntries(
   supportedChains.map((c) => [c.id, transportForChain(c.id)]),
 );
 
+// 接続後 UI の実機スクショ検証用 mock ウォレット (受取ページ磨き上げ P4)。
+// 二重ガード: production ビルドでは NODE_ENV 条件が build 時に false 確定して
+// dead code elimination で消える (本番バンドルに含まれない)。開発ビルドでも
+// env opt-in が無ければ出ない (誤有効化のまま検証する事故を防ぐ)。
+// アドレスは hardhat/anvil 既知のテストアカウント #0 (秘密鍵公知・資産を置かない)。
+const enableMockWallet =
+  process.env.NODE_ENV !== 'production' &&
+  process.env.NEXT_PUBLIC_ENABLE_MOCK_WALLET === '1';
+
 const connectors = [
+  ...(enableMockWallet
+    ? [mock({ accounts: ['0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'] })]
+    : []),
   injected(),
   injected({ target: 'rabby' }),
   coinbaseWallet({

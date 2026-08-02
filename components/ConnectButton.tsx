@@ -64,16 +64,21 @@ export function ConnectButton() {
 
   if (isConnected && address) {
     return (
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700">
-          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-          <span>{shortAddress(address)}</span>
-          {chain && <span className="text-slate-500">/ {chain.name}</span>}
+      // 1 行構成: 主役は「誰として接続しているか」(チップ)、切断は従属操作なので
+      // 右端のコンパクトなボタンに留める (モバイルで全幅の切断ボタンが主役化して
+      // いた問題の解消・受取ページ磨き上げ P4)。
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-700">
+          <span className="inline-block h-2 w-2 flex-shrink-0 rounded-full bg-emerald-500" />
+          <span className="truncate">{shortAddress(address)}</span>
+          {chain && (
+            <span className="truncate text-slate-500">/ {chain.name}</span>
+          )}
         </div>
         <button
           type="button"
           onClick={() => disconnect()}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className="flex-shrink-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
           {t('disconnect')}
         </button>
