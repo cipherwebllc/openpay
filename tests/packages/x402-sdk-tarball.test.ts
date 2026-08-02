@@ -44,10 +44,17 @@ describe('openpay-x402-sdk tarball consumer', () => {
       { cwd: PACKAGE_DIR, env },
     );
     expect(packed.status, packed.stderr).toBe(0);
-    const manifest = JSON.parse(packed.stdout) as Array<{
-      filename: string;
-      files: Array<{ path: string }>;
-    }>;
+    // npm pack --json は npm 11 まで配列・npm 12 (node 26 同梱) からパッケージ名 key の
+    // オブジェクト。ローカル node/npm 差で落とさないよう両形を受ける。
+    const parsed = JSON.parse(packed.stdout) as unknown;
+    const manifest = [
+      (Array.isArray(parsed)
+        ? parsed[0]
+        : Object.values(parsed as Record<string, unknown>)[0]) as {
+        filename: string;
+        files: Array<{ path: string }>;
+      },
+    ];
     const paths = manifest[0].files.map((file) => file.path);
     expect(paths).toEqual(
       expect.arrayContaining([
