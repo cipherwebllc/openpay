@@ -67,9 +67,9 @@ test.describe('/tip/[address] (creator tip widget)', () => {
     const form = page.locator('[data-tip-theme="night"]');
     await expect(form).toBeVisible();
     await expect(form).toHaveClass(/bg-slate-950/);
-    await expect(form.getByText('OpenPay Tip').locator('..')).toHaveClass(
-      /ring-white\/15/,
-    );
+    // P2 でヘッダー内にイニシャル円用の flex ラッパーが入ったため、「ラベルの親 =
+    // header」前提ではなく header 要素を直接見る。
+    await expect(form.locator('header')).toHaveClass(/ring-white\/15/);
   });
 
   test('USDC + 既定 preset (5/20/50)', async ({ page }) => {
