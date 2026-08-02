@@ -140,7 +140,7 @@ export function tipFormTheme(
         // 文字/罫線はカード内の既存クラス (Row の text-slate-*, border-slate-*) に
         // 後勝ちする必要があるため class 一致の nested variant で明示上書きする。
         sectionClassName:
-          'border-white/15 [&_.text-slate-500]:text-slate-300 [&_.text-slate-700]:text-slate-200 [&_.text-slate-900]:text-slate-50 [&_.border-slate-200]:border-white/15 [&_.border-slate-300]:border-white/25 [&_textarea]:border-white/25 [&_textarea]:bg-slate-900 [&_textarea]:text-slate-100',
+          'border-white/15 [&_.text-slate-500]:text-slate-300 [&_.text-slate-700]:text-slate-200 [&_.text-slate-900]:text-slate-50 [&_.border-slate-200]:border-white/15 [&_.border-slate-300]:border-white/25 [&_textarea]:border-white/25 [&_textarea]:bg-slate-900 [&_textarea]:text-slate-100 [&_.bg-slate-100]:bg-slate-800 [&_button.bg-white]:border-white/25 [&_button.bg-white]:bg-slate-900',
         sectionStyle: { backgroundColor: '#0f172a' },
         inactivePillClassName:
           'border-white/15 bg-slate-950 text-slate-200 hover:border-white/30',
