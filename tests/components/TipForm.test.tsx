@@ -379,13 +379,13 @@ describe('TipForm — レンダリング', () => {
 
   it('color パラメータがヘッダの背景色に適用される', () => {
     render(<TipForm params={JPYC_PARAMS} />);
-    const header = screen.getByText('OpenPay Tip').parentElement!;
+    const header = screen.getByText('OpenPay Tip').closest('header')!;
     expect(header.style.backgroundColor).toBe('rgb(30, 58, 138)'); // #1e3a8a
   });
 
   it('theme 未指定は導入前の class 出力を固定', () => {
     render(<TipForm params={JPYC_PARAMS} />);
-    const header = screen.getByText('OpenPay Tip').parentElement!;
+    const header = screen.getByText('OpenPay Tip').closest('header')!;
     const root = header.parentElement!;
     const amountSection = screen.getByText('金額を選択').parentElement!;
     const submit = Array.from(document.querySelectorAll('button')).find((el) =>
@@ -413,7 +413,7 @@ describe('TipForm — レンダリング', () => {
     ['soft', 'rounded-[2rem]', 'rounded-[1.5rem]'],
   ] as const)('%s theme の class をフォームへ適用', (theme, rootClass, headerClass) => {
     render(<TipForm params={{ ...JPYC_PARAMS, theme }} />);
-    const header = screen.getByText('OpenPay Tip').parentElement!;
+    const header = screen.getByText('OpenPay Tip').closest('header')!;
     const root = header.parentElement!;
     expect(root).toHaveAttribute('data-tip-theme', theme);
     expect(root.className).toContain(rootClass);
@@ -422,13 +422,21 @@ describe('TipForm — レンダリング', () => {
 
   it('night はヘッダ/ボタンの文字コントラストを明示し、preview は送信不可', () => {
     render(<TipForm params={{ ...JPYC_PARAMS, theme: 'night' }} preview />);
-    const header = screen.getByText('OpenPay Tip').parentElement!;
+    const header = screen.getByText('OpenPay Tip').closest('header')!;
     const submit = Array.from(document.querySelectorAll('button')).find((el) =>
       el.className.includes('text-base'),
     ) as HTMLButtonElement;
     expect(header.style.color).toBe('rgb(248, 250, 252)');
     expect(submit.disabled).toBe(true);
     expect(submit.style.color).not.toBe('');
+  });
+
+  it('night は明細/ウォレット節にもテーマ地色が波及する (白パッチワーク解消・P2)', () => {
+    render(<TipForm params={{ ...JPYC_PARAMS, theme: 'night' }} />);
+    const breakdown = screen.getByText('明細').parentElement!;
+    expect(breakdown.style.backgroundColor).toBe('rgb(15, 23, 42)');
+    const wallet = screen.getByText('ウォレット').parentElement!;
+    expect(wallet.style.backgroundColor).toBe('rgb(15, 23, 42)');
   });
 });
 

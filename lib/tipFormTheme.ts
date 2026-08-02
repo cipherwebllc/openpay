@@ -35,11 +35,23 @@ export interface TipFormTheme {
   // 地色をクラスで上書きするテーマ (night) 用。既存 bg-white とのクラス競合は stylesheet 順
   // 依存で不確実なため、確実に勝つ inline style で渡す。
   amountStyle?: CSSProperties;
+  // 金額以外のカード (メッセージ / 明細 / ウォレット) 用。テーマを全カードへ波及させ
+  // 「テーマはヘッダーと金額だけ・残りは白」のパッチワーク (特に night) を解消する
+  // (2026-08-02 受取ページ磨き上げ P2)。文字色はカード内の既存クラスに勝つ必要が
+  // あるため nested arbitrary variant で上書きする。
+  sectionClassName: string;
+  sectionStyle?: CSSProperties;
   inactivePillClassName: string;
   activePillStyle: CSSProperties;
   submitClassName: string;
   submitStyle: CSSProperties;
 }
+
+// ヘッダーの質感 (右上からの淡い光)。backgroundColor と独立した backgroundImage に
+// 分けることで、アクセント色の適用 (backgroundColor) を検証する既存フェンスを壊さず
+// 重ねられる。flat が美学の bold / 白地の outline には使わない。
+export const HEADER_SHEEN =
+  'radial-gradient(120% 150% at 100% 0%, rgba(255,255,255,0.18), rgba(255,255,255,0) 55%)';
 
 function readableTextColor(hex: string): '#ffffff' | '#0f172a' {
   const match = /^#([0-9a-fA-F]{6})$/.exec(hex);
@@ -70,6 +82,7 @@ export function tipFormTheme(
           color: accentText,
         },
         amountClassName: 'border-white/80 bg-white/90 shadow-sm',
+        sectionClassName: 'border-white/80 bg-white/90 shadow-sm',
         inactivePillClassName: 'bg-white/80 hover:bg-white',
         activePillStyle: { backgroundColor: accent, color: accentText },
         submitClassName: 'ring-1 ring-white/30',
@@ -81,6 +94,7 @@ export function tipFormTheme(
         headerClassName: 'rounded-xl shadow-[6px_6px_0_#0f172a]',
         headerStyle: { backgroundColor: accent, color: accentText },
         amountClassName: 'border-2 border-slate-900 shadow-[4px_4px_0_#0f172a]',
+        sectionClassName: 'border-2 border-slate-900 shadow-[4px_4px_0_#0f172a]',
         inactivePillClassName: 'border-slate-900 bg-white text-slate-900',
         activePillStyle: { backgroundColor: accent, color: accentText },
         submitClassName: 'rounded-lg shadow-[5px_5px_0_#0f172a]',
@@ -97,6 +111,7 @@ export function tipFormTheme(
           boxShadow: `inset 0 0 0 2px ${accent}`,
         },
         amountClassName: 'bg-transparent shadow-none',
+        sectionClassName: 'bg-transparent shadow-none',
         inactivePillClassName: 'bg-transparent',
         activePillStyle: {
           backgroundColor: `${accent}12`,
@@ -122,6 +137,11 @@ export function tipFormTheme(
         amountClassName:
           'border-white/15 [&>p]:text-slate-300 [&_label_span]:text-slate-300 [&_input]:text-slate-900',
         amountStyle: { backgroundColor: '#0f172a' },
+        // 文字/罫線はカード内の既存クラス (Row の text-slate-*, border-slate-*) に
+        // 後勝ちする必要があるため class 一致の nested variant で明示上書きする。
+        sectionClassName:
+          'border-white/15 [&_.text-slate-500]:text-slate-300 [&_.text-slate-700]:text-slate-200 [&_.text-slate-900]:text-slate-50 [&_.border-slate-200]:border-white/15 [&_.border-slate-300]:border-white/25 [&_textarea]:border-white/25 [&_textarea]:bg-slate-900 [&_textarea]:text-slate-100',
+        sectionStyle: { backgroundColor: '#0f172a' },
         inactivePillClassName:
           'border-white/15 bg-slate-950 text-slate-200 hover:border-white/30',
         activePillStyle: { backgroundColor: accent, color: accentText },
@@ -133,8 +153,13 @@ export function tipFormTheme(
         rootClassName: 'rounded-[2rem] bg-slate-100 p-3',
         rootStyle: { background: handlePreviewBackground(accent, theme) },
         headerClassName: 'rounded-[1.5rem] shadow-none',
-        headerStyle: { backgroundColor: accent, color: accentText },
+        headerStyle: {
+          backgroundColor: accent,
+          backgroundImage: HEADER_SHEEN,
+          color: accentText,
+        },
         amountClassName: 'rounded-[1.5rem] border-white bg-white/90 shadow-none',
+        sectionClassName: 'rounded-[1.5rem] border-white bg-white/90 shadow-none',
         inactivePillClassName: 'rounded-2xl border-transparent bg-slate-100',
         activePillStyle: { backgroundColor: accent, color: accentText },
         submitClassName: 'rounded-2xl shadow-none',
@@ -145,8 +170,13 @@ export function tipFormTheme(
       return {
         rootClassName: 'rounded-[1.75rem] bg-white p-3 ring-1 ring-slate-200/70',
         headerClassName: 'ring-1 ring-black/5',
-        headerStyle: { backgroundColor: accent, color: accentText },
+        headerStyle: {
+          backgroundColor: accent,
+          backgroundImage: HEADER_SHEEN,
+          color: accentText,
+        },
         amountClassName: 'bg-white',
+        sectionClassName: '',
         inactivePillClassName: 'bg-white',
         activePillStyle: { backgroundColor: accent, color: accentText },
         submitClassName: '',

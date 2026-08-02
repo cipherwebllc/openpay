@@ -659,7 +659,7 @@
     "header": "OpenPay Tip",
     "headerNamed": "{name} さんへチップを送る",
     "headerGeneric": "クリエイターへチップを送る",
-    "reassuranceSummaryClosed": "求められるのは署名 1 回だけ — しくみを見る",
+    "reassuranceSummaryClosed": "求められるのは署名 1 回だけ",
     "reassuranceSummaryOpen": "お支払いのしくみと安全性",
     "amountTitle": "金額を選択",
     "amountCustom": "またはカスタム金額",
