@@ -11,6 +11,7 @@ import { LandingAiAgents } from '@/components/LandingAiAgents';
 import { LandingBenefits } from '@/components/LandingBenefits';
 import { LandingCapabilities } from '@/components/LandingCapabilities';
 import { LandingCashComparison } from '@/components/LandingCashComparison';
+import { LandingSellables } from '@/components/LandingSellables';
 import { LandingUseCases } from '@/components/LandingUseCases';
 import { LandingHowItWorks } from '@/components/LandingHowItWorks';
 import { LandingMobileOrder } from '@/components/LandingMobileOrder';
@@ -50,6 +51,10 @@ export default async function HomePage({
       <LandingCapabilities />
       <LandingBenefits />
       <LandingCashComparison />
+      {/* 販売セクション (plans/lp-restructure-ruling.md P2)。店舗向けの後に
+          「決済だけでなく販売プラットフォーム」への広がりを見せる。カテゴリは
+          storeMeta から自動生成 (裁定 M2)・Store flag OFF では非表示。 */}
+      <LandingSellables />
       <LandingHowItWorks />
       <LandingFeatures />
       {/* 人の決済に加え、AI エージェント決済 (x402) と AI が注文を組む

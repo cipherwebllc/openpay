@@ -212,7 +212,18 @@
     "capStoreItem2": "AI エージェント向けカタログ",
     "capMeItem1": "履歴",
     "capMeItem2": "購入済みライブラリ",
-    "capMeItem3": "出品管理"
+    "capMeItem3": "出品管理",
+    "sellablesTitle": "販売できるもの",
+    "sellablesSubtitle": "デジタル商品なら、なんでも。@handle プロフィールから出品して、Store に自動掲載。",
+    "sellablesBody": "配布はお好みの場所で — Google ドライブや GitHub などの URL、テキスト (プロンプト・API キー) をそのまま販売できます。売上は JPYC でウォレットへ直接。",
+    "sellablesCtaSell": "出品をはじめる",
+    "sellablesCtaGuide": "販売ガイド",
+    "useCase6Title": "🛍️ デジタル販売",
+    "useCase6Body": "プロンプト・素材・ドキュメントを @handle から出品。Store に自動掲載され、売上は JPYC で直接届きます。",
+    "useCase6ImageAlt": "ノート PC に商品カードが並ぶデジタル商品ストアの画面、隣のスマホに購入完了のチェックマーク",
+    "useCase7Title": "🤖 AI 向け API 販売",
+    "useCase7Body": "既存 API を x402 で課金化して AI ストアに出品。AI エージェントが自分のウォレットで支払います。",
+    "useCase7ImageAlt": "ダッシュボードが映るモニターと小さなロボットのフィギュア、スマホに支払い画面"
   },
   "Market": {
     "title": "市場レート (参考)",
