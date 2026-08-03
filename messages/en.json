@@ -212,7 +212,12 @@
     "capStoreItem2": "Catalog for AI agents",
     "capMeItem1": "History",
     "capMeItem2": "Purchased library",
-    "capMeItem3": "Listings"
+    "capMeItem3": "Listings",
+    "sellablesTitle": "What you can sell",
+    "sellablesSubtitle": "Any digital goods. List from your @handle profile — automatically shown in the Store.",
+    "sellablesBody": "Deliver from anywhere you like — a URL (Google Drive, GitHub, etc.) or plain text (prompts, API keys). Sales go straight to your wallet in JPYC.",
+    "sellablesCtaSell": "Start selling",
+    "sellablesCtaGuide": "Selling guide"
   },
   "Market": {
     "title": "Market rate (reference)",
