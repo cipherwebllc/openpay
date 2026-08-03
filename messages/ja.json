@@ -83,7 +83,7 @@
     "faqQ2": "JPYC と USDC、どちらを受け取れますか?",
     "faqA2": "両方対応。円建てなら JPYC、Web3・海外向けなら USDC。JPYC は Polygon / Kaia / Avalanche / Ethereum（Ethereum は通常決済のみ）、USDC は Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche で受け取れます。チェーンは QR 作成時に選び、別チェーンからは Circle CCTP V2 で自動決済されます。",
     "faqQ3": "ウォレットを持っていない顧客はどうしますか?",
-    "faqA3": "MetaMask や Rabby、スマホでは HashPort Wallet / マイナウォレット / MetaMask Mobile 等をご案内ください。EIP-6963 で複数ウォレットを自動検出します。",
+    "faqA3": "MetaMask や Rabby、スマホでは HashPort Wallet / マイナウォレット / MetaMask Mobile 等をご案内ください。複数のウォレットは自動で検出します。",
     "faqQ4": "受け取った JPYC / USDC を日本円に換金するには?",
     "faqA4": "JPYC は <jpycEx>JPYC EX</jpycEx> で 1:1 換金、USDC は SBI VC トレード等で売却できます。取引所リンクは <create>受け取る</create> ページ下部にあります。",
     "faqQ5": "取引履歴はどこに保存されますか?",
@@ -112,10 +112,10 @@
     "supportFeeMobileFocal": "1% / 3%",
     "supportFeeMobileTitle": "モバイル注文",
     "supportFeeMobileBody": "店内は 1%、時間指定の事前注文は 3%（gas 込み）。",
-    "supportFeeTipFocal": "0%",
+    "supportFeeTipFocal": "約2JPYC",
     "supportFeeTipTitle": "チップ",
     "supportFeeTipBody": "受け取り手数料はなし。送るお客様がガス代相当（約 2 JPYC）を上乗せ（決済額の 1% は適用しません）。",
-    "supportFeeNote": "利用料は決済と同一取引内で分割され、商品代金はあなたのウォレットへ直接着金します（売上は預かりません）。クリエイターのデジタル商品販売は売り手手数料なし・買い手が x402 利用料（価格の 1%・最低 1 JPYC）を負担します。詳細は利用規約へ。",
+    "supportFeeNote": "利用料は決済と同一取引内で分割され、商品代金はあなたのウォレットへ直接着金します（売上は預かりません）。詳細は利用規約へ。",
     "supportTipRequest": "運営を持続させるため、応援いただけると励みになります（お試しにもどうぞ）。",
     "supportProfileTagline": "JPYC・USDC で直接応援できます",
     "supportProfileCta": "応援する",
@@ -223,7 +223,10 @@
     "useCase6ImageAlt": "ノート PC に商品カードが並ぶデジタル商品ストアの画面、隣のスマホに購入完了のチェックマーク",
     "useCase7Title": "🤖 AI 向け API 販売",
     "useCase7Body": "既存 API を x402 で課金化して AI ストアに出品。AI エージェントが自分のウォレットで支払います。",
-    "useCase7ImageAlt": "ダッシュボードが映るモニターと小さなロボットのフィギュア、スマホに支払い画面"
+    "useCase7ImageAlt": "ダッシュボードが映るモニターと小さなロボットのフィギュア、スマホに支払い画面",
+    "supportFeeStoreTitle": "デジタル商品",
+    "supportFeeStoreFocal": "1%",
+    "supportFeeStoreBody": "買い手が x402 利用料として価格の 1%・最低 1 JPYC を負担します。売り手手数料はありません。"
   },
   "Market": {
     "title": "市場レート (参考)",

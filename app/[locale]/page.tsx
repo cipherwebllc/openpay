@@ -55,12 +55,13 @@ export default async function HomePage({
           「決済だけでなく販売プラットフォーム」への広がりを見せる。カテゴリは
           storeMeta から自動生成 (裁定 M2)・Store flag OFF では非表示。 */}
       <LandingSellables />
-      <LandingHowItWorks />
-      <LandingFeatures />
-      {/* 人の決済に加え、AI エージェント決済 (x402) と AI が注文を組む
-          エージェント注文という将来面も LP のナラティブとして伝える。 */}
+      {/* 販売の直後に AI 時代 (x402/AIストア/API 販売) を続け、「人にも AI にも売れる」
+          流れで読ませる (LP 再構成 P3・提案順: 販売→AI→シーン→3 ステップ)。 */}
       <LandingAiAgents />
+      <LandingFeatures />
       <LandingUseCases />
+      {/* 3 ステップは「使いたくなった読者」への締め (シーンの後・FAQ の前)。 */}
+      <LandingHowItWorks />
       <LandingFaq />
       <LandingSupport />
       <LandingTrust />
