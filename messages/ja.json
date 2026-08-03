@@ -198,7 +198,21 @@
     "useCase4ImageAlt": "コミュニティ運営の作業テーブルで会費支払い用 QR を共有しているイラスト",
     "useCase5Title": "🎁 ポップアップ・少額決済",
     "useCase5Body": "クレカが割に合わない少額も、機器なしで今日から。",
-    "useCase5ImageAlt": "ポップアップストアの商品テーブルで少額決済用 QR をスマホで読み取っているイラスト"
+    "useCase5ImageAlt": "ポップアップストアの商品テーブルで少額決済用 QR をスマホで読み取っているイラスト",
+    "capabilitiesTitle": "OpenPay でできること",
+    "capabilitiesSubtitle": "メニューと同じ 4 つの入口。ここから全体像がつかめます。",
+    "capPayItem1": "QR をスキャンして支払う",
+    "capPayItem2": "ウォレットでそのまま決済",
+    "capSellItem1": "決済QR",
+    "capSellItem2": "レジ",
+    "capSellItem3": "モバイル注文",
+    "capSellItem4": "プロフィール",
+    "capSellItem5": "チップ",
+    "capStoreItem1": "デジタル商品を探して購入",
+    "capStoreItem2": "AI エージェント向けカタログ",
+    "capMeItem1": "履歴",
+    "capMeItem2": "購入済みライブラリ",
+    "capMeItem3": "出品管理"
   },
   "Market": {
     "title": "市場レート (参考)",

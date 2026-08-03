@@ -198,7 +198,21 @@
     "useCase4ImageAlt": "Illustration of a community operations table sharing a QR code for membership dues",
     "useCase5Title": "🎁 Pop-up & micropayments",
     "useCase5Body": "Small tickets that don't pay off on cards — live today, no hardware.",
-    "useCase5ImageAlt": "Illustration of a pop-up store product table where a shopper scans a QR code for a small payment"
+    "useCase5ImageAlt": "Illustration of a pop-up store product table where a shopper scans a QR code for a small payment",
+    "capabilitiesTitle": "What you can do with OpenPay",
+    "capabilitiesSubtitle": "The same four entrances as the menu — the whole picture at a glance.",
+    "capPayItem1": "Scan a QR and pay",
+    "capPayItem2": "Checkout straight from your wallet",
+    "capSellItem1": "Payment QR",
+    "capSellItem2": "Register",
+    "capSellItem3": "Mobile order",
+    "capSellItem4": "Profile",
+    "capSellItem5": "Tips",
+    "capStoreItem1": "Browse & buy digital goods",
+    "capStoreItem2": "Catalog for AI agents",
+    "capMeItem1": "History",
+    "capMeItem2": "Purchased library",
+    "capMeItem3": "Listings"
   },
   "Market": {
     "title": "Market rate (reference)",
