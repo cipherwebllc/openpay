@@ -2651,7 +2651,8 @@
     "discoveryLink": "AI エージェント向けカタログ",
     "ecosystemLink": "関連リンク集",
     "transparencyLink": "運用透明性",
-    "relatedLabel": "関連ページ"
+    "relatedLabel": "関連ページ",
+    "backToStore": "Store に戻る"
   },
   "MePage": {
     "metaTitle": "マイページ — OpenPay",

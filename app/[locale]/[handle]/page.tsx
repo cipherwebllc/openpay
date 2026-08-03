@@ -248,6 +248,10 @@ export default async function HandlePage({
     !storefront && env.enableCreatorStoreUi && env.enableCreatorStore
       ? routeSearch.get('product')
       : null;
+  // Store 一覧から来た訪問だけ「← Store に戻る」を出す (通常のプロフ訪問は
+  // クリエイターの世界観を保つため OpenPay 側の導線を足さない)。表示専用。
+  const fromStore =
+    requestedProductId !== null && routeSearch.get('from') === 'store';
   const autoOpenProductId =
     requestedProductId &&
     creatorProducts.some((product) => product.id === requestedProductId)
@@ -285,6 +289,9 @@ export default async function HandlePage({
         }
       : null;
   const t = await getTranslations({ locale, namespace: 'HandleProfile' });
+  const storeReturnLabel = (
+    await getTranslations({ locale, namespace: 'StorePage' })
+  )('backToStore');
   // クリエイターのアクセント色 (config.color)。link-in-bio の背景ウォッシュに薄く効かせ、
   // 各ページに固有の質感を与える (足し算)。不正値は既定ブルー。
   const accent =
@@ -313,6 +320,17 @@ export default async function HandlePage({
           }`}
           style={{ background: pageTheme.background }}
         />
+      )}
+      {fromStore && (
+        <div className="mb-3">
+          <Link
+            href={`/${locale}/store`}
+            prefetch={false}
+            className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-white"
+          >
+            ← {storeReturnLabel}
+          </Link>
+        </div>
       )}
       <div className="mb-3 flex items-center justify-between gap-2">
         {/* 店舗ページは入口として開かれるので OpenPay への戻り導線を上部に出す

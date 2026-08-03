@@ -116,7 +116,7 @@ export function StoreBrowser({
           {filtered.map((listing) => (
             <li key={listing.id}>
               <Link
-                href={`/${locale}/@${listing.handle}?product=${listing.id}`}
+                href={`/${locale}/@${listing.handle}?product=${listing.id}&from=store`}
                 prefetch={false}
                 className="flex h-full items-start gap-3 rounded-2xl border border-slate-200/80 bg-white px-4 py-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-[0_8px_20px_-10px_rgba(15,23,42,0.25)]"
               >

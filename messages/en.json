@@ -2651,7 +2651,8 @@
     "discoveryLink": "Catalog for AI agents",
     "ecosystemLink": "Related links",
     "transparencyLink": "Operational transparency",
-    "relatedLabel": "Related pages"
+    "relatedLabel": "Related pages",
+    "backToStore": "Back to Store"
   },
   "MePage": {
     "metaTitle": "My Page — OpenPay",
