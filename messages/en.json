@@ -1047,7 +1047,11 @@
     "categoryLabel": "Category (optional)",
     "categoryNone": "Not set",
     "tagsLabel": "Tags (optional, comma-separated, up to 5)",
-    "tagsPlaceholder": "e.g. prompt, image-gen, chatgpt"
+    "tagsPlaceholder": "e.g. prompt, image-gen, chatgpt",
+    "listingHandleLabel": "Listed on profile",
+    "listingHandleAll": "All of my profiles",
+    "featuredLabel": "Feature on profile",
+    "featuredHint": "If any product is featured, only featured products appear on your profile (the Store still lists everything)."
   },
   "CreatorStorefront": {
     "heading": "On sale",
@@ -1064,7 +1068,8 @@
     },
     "libraryLink": "View your purchased items in the library",
     "cardTotal": "{total} JPYC",
-    "cardBreakdown": "(Price {price} + fee {fee})"
+    "cardBreakdown": "(Price {price} + fee {fee})",
+    "viewAllProducts": "View all products ({count})"
   },
   "CreatorStorePurchase": {
     "dialogLabel": "Purchase digital product",

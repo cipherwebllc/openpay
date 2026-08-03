@@ -21,6 +21,7 @@ import {
   STORE_BODY_MAX_BYTES,
   storePrivateJson,
 } from '@/app/api/store/_shared';
+import { listHandlesForOwner } from '@/lib/handleStore';
 import { touchStoreIndex } from '@/lib/x402/storeIndex';
 
 export const runtime = 'nodejs';
@@ -40,6 +41,8 @@ const PRODUCT_PATCH_KEYS = new Set([
   'label',
   'category',
   'tags',
+  'handle',
+  'featured',
   'content',
   'saleActive',
 ]);
@@ -257,6 +260,8 @@ export async function PATCH(
         label: product.label,
         ...(product.category ? { category: product.category } : {}),
         ...(product.tags ? { tags: product.tags } : {}),
+        ...(product.handle ? { handle: product.handle } : {}),
+        ...(product.featured === true ? { featured: true } : {}),
         saleActive: nextSaleActive,
       },
     });
@@ -317,6 +322,8 @@ export async function PATCH(
     category:
       raw.category !== undefined ? raw.category : product.category,
     tags: raw.tags !== undefined ? raw.tags : product.tags,
+    handle: raw.handle !== undefined ? raw.handle : product.handle,
+    featured: raw.featured !== undefined ? raw.featured : product.featured,
     content: candidateContent,
   });
   if (!parsed.ok) {
@@ -366,6 +373,23 @@ export async function PATCH(
   const contentChanged =
     parsed.content.kind !== content.content.kind ||
     parsed.content.value !== content.content.value;
+  // 掲載先 handle を変更するときのみ所有検証 (POST と同じ fail-closed)。
+  if (raw.handle !== undefined && parsed.product.handle) {
+    const owned = await listHandlesForOwner(auth.address);
+    if (owned === null) {
+      return storePrivateJson(
+        { ok: false, error: 'storage_unavailable' },
+        503,
+      );
+    }
+    if (!owned.includes(parsed.product.handle)) {
+      return storePrivateJson(
+        { ok: false, error: 'invalid_product', detail: 'handle not owned' },
+        400,
+      );
+    }
+  }
+
   const updated = await replaceHostedSellerProduct({
     snapshot: owned.snapshot,
     owner: auth.address,
@@ -385,6 +409,8 @@ export async function PATCH(
         ? { category: parsed.product.category }
         : {}),
       ...(parsed.product.tags ? { tags: parsed.product.tags } : {}),
+      ...(parsed.product.handle ? { handle: parsed.product.handle } : {}),
+      ...(parsed.product.featured === true ? { featured: true } : {}),
       saleActive,
     },
     ...(contentChanged ? { content: parsed.content } : {}),

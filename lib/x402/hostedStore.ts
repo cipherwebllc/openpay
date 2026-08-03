@@ -23,6 +23,7 @@ import 'server-only';
 //     署名させた後に必ず失敗する構成を作らない。
 
 import { getAddress, isAddress, type Address } from 'viem';
+import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import {
   isHostedProductCategory,
   parseHostedTags,
@@ -32,8 +33,8 @@ import { kvDel, kvEval, kvGet, kvLrange, kvMget, kvSet } from '@/lib/kv';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 
-/** owner (SIWE wallet) あたりの hosted 商品上限。 */
-export const MAX_HOSTED_PER_OWNER = 12;
+/** owner (SIWE wallet) あたりの hosted 商品上限 (不正対策・2026-08-04 user 指示で 12→24)。 */
+export const MAX_HOSTED_PER_OWNER = 24;
 export const MAX_HOSTED_TITLE_LEN = 60;
 export const MAX_HOSTED_DESC_LEN = 200;
 export const MAX_HOSTED_URL_LEN = 512;
@@ -80,6 +81,12 @@ export type HostedProduct = {
   category?: HostedProductCategory;
   /** 検索/表示用タグ (表示専用・任意・購入 snapshot 非対象)。 */
   tags?: readonly string[];
+  /** 掲載先 @handle (表示専用・任意・購入 snapshot 非対象)。未設定 = 旧仕様どおり
+   * owner の全プロフに表示・Store 帰属は handles[0] (後方互換)。所有検証は API 層。 */
+  handle?: string;
+  /** プロフィールで優先表示 (表示専用)。同プロフの商品に 1 つでも true があれば
+   * featured のみ表示・無ければ全表示 (selectProfileProducts・既存商品は移行ゼロ)。 */
+  featured?: boolean;
   /** 現在配信する content の revision (1 始まり・編集で単調増加)。 */
   contentRevision: number;
   /** 新規購入を受け付けるか (販売停止しても既購入者の取得は続く)。 */
@@ -194,6 +201,8 @@ export type HostedProductInput = {
   label?: unknown;
   category?: unknown;
   tags?: unknown;
+  handle?: unknown;
+  featured?: unknown;
   content: unknown;
 };
 
@@ -309,6 +318,25 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
     isHostedProductCategory(input.category) ? input.category : undefined;
   const parsedTags = parseHostedTags(input.tags);
   if (!parsedTags.ok) return { ok: false, error: parsedTags.error };
+  // 掲載先 handle: 形式のみここで検証 (所有検証は KV を伴うため API 層の責務)。
+  let listingHandle: string | undefined;
+  if (
+    input.handle !== undefined &&
+    input.handle !== null &&
+    input.handle !== ''
+  ) {
+    if (typeof input.handle !== 'string') {
+      return { ok: false, error: 'invalid handle' };
+    }
+    const normalized = normalizeHandle(input.handle);
+    if (!isValidHandleFormat(normalized)) {
+      return { ok: false, error: 'invalid handle' };
+    }
+    listingHandle = normalized;
+  }
+  if (input.featured !== undefined && typeof input.featured !== 'boolean') {
+    return { ok: false, error: 'invalid featured' };
+  }
 
   let content: HostedContent;
   if (contentKind === 'url') {
@@ -341,6 +369,8 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       label,
       ...(category ? { category } : {}),
       ...(parsedTags.tags ? { tags: parsedTags.tags } : {}),
+      ...(listingHandle ? { handle: listingHandle } : {}),
+      ...(input.featured === true ? { featured: true } : {}),
       contentRevision: 1,
       saleActive: true,
       contentAvailable: true,
@@ -411,6 +441,10 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
   const category = isHostedProductCategory(r.category) ? r.category : undefined;
   const storedTags = parseHostedTags(r.tags);
   const tags = storedTags.ok ? storedTags.tags : undefined;
+  const storedHandle =
+    typeof r.handle === 'string' && isValidHandleFormat(normalizeHandle(r.handle))
+      ? normalizeHandle(r.handle)
+      : undefined;
   return {
     id: r.id,
     owner: getAddress(r.owner),
@@ -425,6 +459,8 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
     label,
     ...(category ? { category } : {}),
     ...(tags ? { tags } : {}),
+    ...(storedHandle ? { handle: storedHandle } : {}),
+    ...(r.featured === true ? { featured: true } : {}),
     contentRevision: r.contentRevision,
     // 旧レコードや壊れた値は「販売停止・配信可」に倒す (誤って売らない側へ)。
     saleActive: r.saleActive === true,
@@ -643,6 +679,21 @@ export async function getHostedProductsByIds(
   return out;
 }
 
+/**
+ * プロフィールに出す商品の選定 (厳選ショーケース・2026-08-04)。
+ * featured が 1 つでもあれば featured のみ・無ければ全件 (既存商品は移行ゼロ)。
+ * hidden は「Store には並ぶがプロフでは省いた」件数 (「すべての商品を見る」リンク用)。
+ */
+export function selectProfileProducts<T extends { featured?: boolean }>(
+  products: readonly T[],
+): { shown: T[]; hiddenCount: number } {
+  const featured = products.filter((product) => product.featured === true);
+  if (featured.length === 0) {
+    return { shown: [...products], hiddenCount: 0 };
+  }
+  return { shown: featured, hiddenCount: products.length - featured.length };
+}
+
 export async function updateHostedProduct(input: {
   id: string;
   owner: string;
@@ -729,6 +780,8 @@ export async function replaceHostedSellerProduct(input: {
     | 'label'
     | 'category'
     | 'tags'
+    | 'handle'
+    | 'featured'
     | 'saleActive'
   > & {
     desc?: string;
@@ -765,6 +818,8 @@ export async function replaceHostedSellerProduct(input: {
     label: input.metadata.label,
     ...(input.metadata.category ? { category: input.metadata.category } : {}),
     ...(input.metadata.tags?.length ? { tags: input.metadata.tags } : {}),
+    ...(input.metadata.handle ? { handle: input.metadata.handle } : {}),
+    ...(input.metadata.featured === true ? { featured: true } : {}),
     contentRevision: revision,
     saleActive: input.metadata.saleActive,
     contentAvailable: current.contentAvailable,

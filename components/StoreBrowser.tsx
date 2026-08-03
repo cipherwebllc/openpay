@@ -22,13 +22,16 @@ import type { StoreListing } from '@/lib/x402/storeListing';
 export function StoreBrowser({
   listings,
   locale,
+  initialQuery = '',
 }: {
   listings: readonly StoreListing[];
   locale: string;
+  /** /store?q= の事前入力 (プロフの「すべての商品を見る」導線)。 */
+  initialQuery?: string;
 }) {
   const t = useTranslations('StorePage');
   const tCatalog = useTranslations('StoreCatalog');
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
   const [category, setCategory] = useState('');
 
   const filtered = useMemo(() => {

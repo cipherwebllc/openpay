@@ -9,6 +9,7 @@ import {
   parseHostedInput,
   sellerDisclosureComplete,
 } from '@/lib/x402/hostedStore';
+import { listHandlesForOwner } from '@/lib/handleStore';
 import {
   hasOnlyKeys,
   objectValue,
@@ -33,6 +34,8 @@ const PRODUCT_INPUT_KEYS = new Set([
   'label',
   'category',
   'tags',
+  'handle',
+  'featured',
   'content',
   'saleActive',
 ]);
@@ -138,6 +141,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     label: raw.label,
     category: raw.category,
     tags: raw.tags,
+    handle: raw.handle,
+    featured: raw.featured,
     content: raw.content,
   });
   if (!parsed.ok) {
@@ -145,6 +150,24 @@ export async function POST(req: Request): Promise<NextResponse> {
       { ok: false, error: 'invalid_product', detail: parsed.error },
       400,
     );
+  }
+
+  // 掲載先 handle の所有検証 (他人の @handle への誤帰属を防ぐ)。KV 障害は
+  // fail-closed の 503 — 誤帰属した商品が Store に公開されるより欠落を選ぶ。
+  if (parsed.product.handle) {
+    const owned = await listHandlesForOwner(auth.address);
+    if (owned === null) {
+      return storePrivateJson(
+        { ok: false, error: 'storage_unavailable' },
+        503,
+      );
+    }
+    if (!owned.includes(parsed.product.handle)) {
+      return storePrivateJson(
+        { ok: false, error: 'invalid_product', detail: 'handle not owned' },
+        400,
+      );
+    }
   }
 
   const saleActive = raw.saleActive === true;

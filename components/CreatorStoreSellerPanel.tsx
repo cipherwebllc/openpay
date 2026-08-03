@@ -4,7 +4,7 @@
 // 販売開始に必須の販売者情報を同じ場所で管理する。商品本文は一覧 API へ載せず、編集時だけ
 // owner 限定 detail API から取得する。保存後は server の値を再取得し、楽観更新しない。
 
-import { useEffect, useState } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import Link from 'next/link';
@@ -35,6 +35,8 @@ type ProductSummary = {
   label: HostedLabel;
   category?: string;
   tags?: readonly string[];
+  handle?: string;
+  featured?: boolean;
   saleActive: boolean;
   contentAvailable: boolean;
   updatedAt?: number;
@@ -63,6 +65,8 @@ type ProductForm = {
   label: HostedLabel;
   category: string;
   tags: string;
+  listingHandle: string;
+  featured: boolean;
   content: string;
   saleActive: boolean;
 };
@@ -110,6 +114,8 @@ const EMPTY_PRODUCT_FORM: ProductForm = {
   label: 'download',
   category: '',
   tags: '',
+  listingHandle: '',
+  featured: false,
   content: '',
   saleActive: false,
 };
@@ -358,9 +364,13 @@ function SignedInSellerPanel({
   const origin = useOrigin();
   const [sellerDraft, setSellerDraft] = useState<SellerForm | null>(null);
   const [sellerSaved, setSellerSaved] = useState(false);
-  const [productForm, setProductForm] = useState<ProductForm>(
-    EMPTY_PRODUCT_FORM,
+  // 新規商品の掲載先は「いま編集中のプロフ (prop handle)」を既定にする —
+  // @cipherweb 編集中の登録が @openpay_jp にも出る誤帰属の修正 (2026-08-04 user 裁定)。
+  const emptyForm = useMemo<ProductForm>(
+    () => ({ ...EMPTY_PRODUCT_FORM, listingHandle: handle ?? '' }),
+    [handle],
   );
+  const [productForm, setProductForm] = useState<ProductForm>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [productSaved, setProductSaved] = useState(false);
 
@@ -461,6 +471,8 @@ function SignedInSellerPanel({
         label: product.label,
         category: product.category ?? '',
         tags: (product.tags ?? []).join(', '),
+        listingHandle: product.handle ?? '',
+        featured: product.featured === true,
         content: content.value,
         saleActive: product.saleActive,
       });
@@ -499,6 +511,8 @@ function SignedInSellerPanel({
               .split(/[,、]/)
               .map((tag) => tag.trim())
               .filter(Boolean),
+            handle: form.listingHandle || null,
+            featured: form.featured,
             content: form.content,
             saleActive: form.saleActive,
           }),
@@ -508,7 +522,7 @@ function SignedInSellerPanel({
       const refreshed = await productsQuery.refetch();
       if (refreshed.isSuccess) {
         setEditingId(null);
-        setProductForm(EMPTY_PRODUCT_FORM);
+        setProductForm(emptyForm);
         setProductSaved(true);
       }
     },
@@ -537,7 +551,7 @@ function SignedInSellerPanel({
 
   const cancelEdit = () => {
     setEditingId(null);
-    setProductForm(EMPTY_PRODUCT_FORM);
+    setProductForm(emptyForm);
     loadProduct.reset();
     saveProduct.reset();
   };
@@ -1017,6 +1031,46 @@ function SignedInSellerPanel({
                 </option>
               ))}
             </select>
+          </label>
+          <label
+            htmlFor="creator-store-product-listing-handle"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t('listingHandleLabel')}
+            <select
+              id="creator-store-product-listing-handle"
+              value={productForm.listingHandle}
+              onChange={(event) =>
+                updateProduct({ listingHandle: event.target.value })
+              }
+              className={inputClass}
+            >
+              <option value="">{t('listingHandleAll')}</option>
+              {handle ? <option value={handle}>@{handle}</option> : null}
+              {/* 編集中商品が別 handle 帰属のとき、その値を失わない選択肢を出す */}
+              {productForm.listingHandle &&
+              productForm.listingHandle !== handle ? (
+                <option value={productForm.listingHandle}>
+                  @{productForm.listingHandle}
+                </option>
+              ) : null}
+            </select>
+          </label>
+          <label className="flex items-start gap-2 text-sm text-slate-700 sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={productForm.featured}
+              onChange={(event) =>
+                updateProduct({ featured: event.target.checked })
+              }
+              className="mt-0.5 h-4 w-4 rounded border-slate-300"
+            />
+            <span>
+              <span className="font-medium">{t('featuredLabel')}</span>
+              <span className="mt-0.5 block text-xs text-slate-500">
+                {t('featuredHint')}
+              </span>
+            </span>
           </label>
           <label
             htmlFor="creator-store-product-tags"

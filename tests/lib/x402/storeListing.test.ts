@@ -70,6 +70,21 @@ describe('listStoreListings', () => {
     expect(JSON.stringify(out)).not.toContain(OWNER_A);
   });
 
+  it('product.handle が owner の所有なら帰属はそれを最優先・非所有なら先頭へ fallback', async () => {
+    const m = await mod();
+    mocks.ids = ['h_1', 'h_2'];
+    mocks.products = [
+      product('h_1', OWNER_A, { handle: 'alice2' }),
+      product('h_2', OWNER_A, { handle: 'gone' }),
+    ];
+    mocks.handles.set(OWNER_A.toLowerCase(), ['alice', 'alice2']);
+    const out = await m.listStoreListings();
+    expect(out?.map((l) => [l.id, l.handle])).toEqual([
+      ['h_1', 'alice2'],
+      ['h_2', 'alice'],
+    ]);
+  });
+
   it('handle を持たない owner の商品は掲載しない (契約: プロフィールで公開した商品のみ)', async () => {
     const m = await mod();
     mocks.ids = ['h_1', 'h_2'];

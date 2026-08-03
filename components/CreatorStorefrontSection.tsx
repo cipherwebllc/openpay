@@ -45,12 +45,17 @@ export function CreatorStorefrontSection({
   theme,
   sellerDisclosureHref,
   autoOpenProductId,
+  viewAllHref,
+  hiddenCount = 0,
 }: {
   products: readonly CreatorStorefrontProduct[];
   accent: string;
   theme: HandleTheme;
   sellerDisclosureHref: string;
   autoOpenProductId?: string;
+  /** 厳選ショーケースで省いた商品がある場合の「すべての商品を見る」導線 (/store?q=@handle)。 */
+  viewAllHref?: string;
+  hiddenCount?: number;
 }) {
   const t = useTranslations('CreatorStorefront');
   const tCatalog = useTranslations('StoreCatalog');
@@ -217,6 +222,19 @@ export function CreatorStorefrontSection({
           </li>
         ))}
       </ul>
+      {viewAllHref && hiddenCount > 0 ? (
+        <p className="mt-3 text-center">
+          <Link
+            href={viewAllHref}
+            prefetch={false}
+            className={`text-xs font-semibold underline-offset-2 hover:underline ${
+              inverted ? 'text-white/80' : 'text-brand'
+            }`}
+          >
+            {t('viewAllProducts', { count: hiddenCount + products.length })}
+          </Link>
+        </p>
+      ) : null}
       {/* 購入済みの訪問者向けの常設導線 (購入完了画面以外からライブラリへ戻る唯一の入口の一つ)。 */}
       <p className="mt-3 text-center">
         <Link

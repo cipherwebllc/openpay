@@ -59,6 +59,12 @@ vi.mock('@/lib/shopLiveStore', () => ({
 }));
 
 vi.mock('@/lib/x402/hostedStore', () => ({
+  selectProfileProducts: (products: ReadonlyArray<{ featured?: boolean }>) => {
+    const featured = products.filter((p) => p.featured === true);
+    return featured.length === 0
+      ? { shown: [...products], hiddenCount: 0 }
+      : { shown: featured, hiddenCount: products.length - featured.length };
+  },
   listAvailableHostedForOwner,
 }));
 

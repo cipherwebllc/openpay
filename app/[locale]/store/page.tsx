@@ -34,14 +34,22 @@ export async function generateMetadata({
 
 export default async function StorePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string }>;
+  searchParams?: Promise<{ q?: string | string[] }>;
 }) {
   if (!env.enableCreatorStore) notFound();
   const { locale } = await params;
   setRequestLocale(locale);
   const t = await getTranslations({ locale, namespace: 'StorePage' });
   const listings = await listStoreListings();
+  // ?q= で検索欄を事前入力 (プロフの「すべての商品を見る」→ /store?q=@handle 用)。
+  const sp = (await (searchParams ?? Promise.resolve({}))) as {
+    q?: string | string[];
+  };
+  const rawQ = sp.q;
+  const initialQuery = typeof rawQ === 'string' ? rawQ.slice(0, 100) : '';
 
   return (
     <AppShell>
@@ -60,7 +68,7 @@ export default async function StorePage({
               {t('storageError')}
             </p>
           ) : (
-            <StoreBrowser listings={listings} locale={locale} />
+            <StoreBrowser listings={listings} locale={locale} initialQuery={initialQuery} />
           )}
         </div>
 

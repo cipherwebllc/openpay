@@ -57,6 +57,20 @@ const ALLOWED_ADVISORIES = {
       'GHSA-6g55-p6wh-862q に build-time 以外の exploit 経路の報告',
     ],
   },
+  'GHSA-fxqj-rqcc-2cmp': {
+    pkg: 'postcss',
+    summary:
+      'PostCSS: incomplete fix of GHSA-6g55-p6wh-862q — attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset',
+    chain: 'next (exact pin postcss 8.4.31) → postcss ※GHSA-6g55 の不完全修正フォロー advisory・同一箇所',
+    reason:
+      'GHSA-6g55-p6wh-862q (受容済み・user 裁定 2026-07-24) の不完全修正を報告する同族 advisory で、到達性判断は完全に同一: postcss は Next build pipeline のビルド時にのみ動作し、処理する CSS は OpenPay 自身のソースのみ。第三者 CSS が postcss に流れる経路が無い。next 内包 exact pin のため単独更新不可 → next 側 bump 待ち accepted risk (2026-08-04 追加・同族拡張)。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.9',
+    reviewTriggers: [
+      'next が修正版 postcss を内包する版へ更新 → npm update で解消し allowlist 削除',
+      'OpenPay が第三者由来の CSS を build/postcss で処理する機能を追加 (即再評価)',
+      'build-time 以外の exploit 経路の報告',
+    ],
+  },
   'GHSA-r28c-9q8g-f849': {
     pkg: 'postcss',
     summary:
