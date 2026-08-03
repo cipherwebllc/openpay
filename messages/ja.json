@@ -2633,5 +2633,25 @@
       "api": "API",
       "other": "その他"
     }
+  },
+  "StorePage": {
+    "metaTitle": "OpenPay Store — デジタル商品を探す",
+    "metaDescription": "クリエイターが公開したデジタル商品 (プロンプト・素材・ドキュメント・3D など) を JPYC で購入できるマーケットプレイス。",
+    "title": "Store",
+    "subtitle": "クリエイターのデジタル商品を探して、JPYC でそのまま購入。",
+    "searchLabel": "商品を検索",
+    "searchPlaceholder": "キーワード・タグ・@handle で検索",
+    "categoryFilterLabel": "カテゴリーで絞り込み",
+    "categoryAll": "すべて",
+    "empty": "まだ商品がありません。最初の出品者になりませんか？",
+    "noMatch": "条件に合う商品が見つかりません。",
+    "storageError": "商品一覧を読み込めませんでした。時間をおいて再読み込みしてください。",
+    "cardTotal": "{total} JPYC",
+    "cardBreakdown": "(価格 {price} + 手数料 {fee})",
+    "discoveryHint": "AI エージェントに直接使わせる有料 API・データをお探しですか？",
+    "discoveryLink": "AI エージェント向けカタログ",
+    "ecosystemLink": "関連リンク集",
+    "transparencyLink": "運用透明性",
+    "relatedLabel": "関連ページ"
   }
 }
