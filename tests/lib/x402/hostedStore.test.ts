@@ -299,6 +299,7 @@ describe('hosted 作成と分離', () => {
         // P1 (Store 統合): 表示メタも snapshot 非対象であることを同じ fence で固定する
         category: 'ai',
         tags: ['prompt', '画像生成'],
+        handle: 'alice',
       }),
     );
     if (!parsed.ok) throw new Error('setup');
@@ -361,6 +362,45 @@ describe('hosted 作成と分離', () => {
     const clean = m.parseStoredHostedProduct(JSON.stringify(created.product));
     expect(clean?.category).toBe('ai');
     expect(clean?.tags).toEqual(['ok']);
+  });
+
+  it('handle (掲載先): 形式検証・寛容読込・replace 引継ぎ (誤帰属修正 2026-08-04)', async () => {
+    const m = await mod();
+    const okParsed = m.parseHostedInput(baseInput({ handle: 'Alice' }));
+    if (!okParsed.ok) throw new Error(okParsed.error);
+    expect(okParsed.product.handle).toBe('alice'); // normalize
+    expect(m.parseHostedInput(baseInput({ handle: 'a' }))).toEqual({
+      ok: false,
+      error: 'invalid handle',
+    });
+    const noneParsed = m.parseHostedInput(baseInput({ handle: '' }));
+    if (!noneParsed.ok) throw new Error(noneParsed.error);
+    expect(noneParsed.product.handle).toBeUndefined();
+
+    const created = await m.createHostedProduct(okParsed, 1000);
+    if (!created.ok) throw new Error('setup');
+    const raw = JSON.parse(JSON.stringify(created.product)) as Record<string, unknown>;
+    raw.handle = '!bad!';
+    expect(m.parseStoredHostedProduct(JSON.stringify(raw))?.handle).toBeUndefined();
+    expect(
+      m.parseStoredHostedProduct(JSON.stringify(created.product))?.handle,
+    ).toBe('alice');
+    const snapshot = await m.getHostedProductUpdateSnapshot(created.product.id);
+    if (!snapshot || snapshot === 'storage') throw new Error('setup');
+    const replaced = await m.replaceHostedSellerProduct({
+      snapshot,
+      owner: OWNER,
+      metadata: {
+        title: created.product.title,
+        priceJpyc: created.product.priceJpyc,
+        label: created.product.label,
+        handle: created.product.handle,
+        saleActive: false,
+      },
+      now: 2000,
+    });
+    if (!replaced.ok) throw new Error(replaced.reason);
+    expect(replaced.product.handle).toBe('alice');
   });
 
   it('replaceHostedSellerProduct: category/tags を metadata で引き継げる (編集/toggle で消えない)', async () => {

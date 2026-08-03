@@ -23,6 +23,7 @@ import 'server-only';
 //     署名させた後に必ず失敗する構成を作らない。
 
 import { getAddress, isAddress, type Address } from 'viem';
+import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import {
   isHostedProductCategory,
   parseHostedTags,
@@ -80,6 +81,9 @@ export type HostedProduct = {
   category?: HostedProductCategory;
   /** 検索/表示用タグ (表示専用・任意・購入 snapshot 非対象)。 */
   tags?: readonly string[];
+  /** 掲載先 @handle (表示専用・任意・購入 snapshot 非対象)。未設定 = 旧仕様どおり
+   * owner の全プロフに表示・Store 帰属は handles[0] (後方互換)。所有検証は API 層。 */
+  handle?: string;
   /** 現在配信する content の revision (1 始まり・編集で単調増加)。 */
   contentRevision: number;
   /** 新規購入を受け付けるか (販売停止しても既購入者の取得は続く)。 */
@@ -194,6 +198,7 @@ export type HostedProductInput = {
   label?: unknown;
   category?: unknown;
   tags?: unknown;
+  handle?: unknown;
   content: unknown;
 };
 
@@ -309,6 +314,22 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
     isHostedProductCategory(input.category) ? input.category : undefined;
   const parsedTags = parseHostedTags(input.tags);
   if (!parsedTags.ok) return { ok: false, error: parsedTags.error };
+  // 掲載先 handle: 形式のみここで検証 (所有検証は KV を伴うため API 層の責務)。
+  let listingHandle: string | undefined;
+  if (
+    input.handle !== undefined &&
+    input.handle !== null &&
+    input.handle !== ''
+  ) {
+    if (typeof input.handle !== 'string') {
+      return { ok: false, error: 'invalid handle' };
+    }
+    const normalized = normalizeHandle(input.handle);
+    if (!isValidHandleFormat(normalized)) {
+      return { ok: false, error: 'invalid handle' };
+    }
+    listingHandle = normalized;
+  }
 
   let content: HostedContent;
   if (contentKind === 'url') {
@@ -341,6 +362,7 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       label,
       ...(category ? { category } : {}),
       ...(parsedTags.tags ? { tags: parsedTags.tags } : {}),
+      ...(listingHandle ? { handle: listingHandle } : {}),
       contentRevision: 1,
       saleActive: true,
       contentAvailable: true,
@@ -411,6 +433,10 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
   const category = isHostedProductCategory(r.category) ? r.category : undefined;
   const storedTags = parseHostedTags(r.tags);
   const tags = storedTags.ok ? storedTags.tags : undefined;
+  const storedHandle =
+    typeof r.handle === 'string' && isValidHandleFormat(normalizeHandle(r.handle))
+      ? normalizeHandle(r.handle)
+      : undefined;
   return {
     id: r.id,
     owner: getAddress(r.owner),
@@ -425,6 +451,7 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
     label,
     ...(category ? { category } : {}),
     ...(tags ? { tags } : {}),
+    ...(storedHandle ? { handle: storedHandle } : {}),
     contentRevision: r.contentRevision,
     // 旧レコードや壊れた値は「販売停止・配信可」に倒す (誤って売らない側へ)。
     saleActive: r.saleActive === true,
@@ -729,6 +756,7 @@ export async function replaceHostedSellerProduct(input: {
     | 'label'
     | 'category'
     | 'tags'
+    | 'handle'
     | 'saleActive'
   > & {
     desc?: string;
@@ -765,6 +793,7 @@ export async function replaceHostedSellerProduct(input: {
     label: input.metadata.label,
     ...(input.metadata.category ? { category: input.metadata.category } : {}),
     ...(input.metadata.tags?.length ? { tags: input.metadata.tags } : {}),
+    ...(input.metadata.handle ? { handle: input.metadata.handle } : {}),
     contentRevision: revision,
     saleActive: input.metadata.saleActive,
     contentAvailable: current.contentAvailable,

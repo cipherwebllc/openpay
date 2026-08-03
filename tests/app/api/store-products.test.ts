@@ -24,6 +24,15 @@ const putSellerDisclosure = vi.hoisted(() => vi.fn());
 const checkIpRateLimit = vi.hoisted(() => vi.fn());
 const checkReadRateLimit = vi.hoisted(() => vi.fn());
 
+// 掲載先 handle の所有検証 (2026-08-04) は handleStore を boundary mock で切る
+// (実体は env 依存が深く、この route テストの env mock と衝突するため)。
+const handleMocks = vi.hoisted(() => ({
+  owned: ['cipherweb'] as string[] | null,
+}));
+vi.mock('@/lib/handleStore', () => ({
+  listHandlesForOwner: async () => handleMocks.owned,
+}));
+
 vi.mock('@/lib/env', () => ({
   env: {
     get enableCreatorStore() {

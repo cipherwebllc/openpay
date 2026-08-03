@@ -53,20 +53,26 @@ export async function listStoreListings(): Promise<StoreListing[] | null> {
   const owners = Array.from(
     new Set(products.map((product) => product.owner.toLowerCase())),
   );
-  const handleByOwner = new Map<string, string>();
+  const handlesByOwner = new Map<string, string[]>();
   await Promise.all(
     owners.map(async (owner) => {
       const handles = await listHandlesForOwner(owner);
       if (handles && handles.length > 0) {
-        handleByOwner.set(owner, handles[0]);
+        handlesByOwner.set(owner, handles);
       }
     }),
   );
 
   const out: StoreListing[] = [];
   for (const product of products) {
-    const handle = handleByOwner.get(product.owner.toLowerCase());
-    if (!handle) continue;
+    const ownedHandles = handlesByOwner.get(product.owner.toLowerCase());
+    if (!ownedHandles || ownedHandles.length === 0) continue;
+    // 帰属: 商品の掲載先 handle が現に owner の所有なら最優先 (誤帰属修正
+    // 2026-08-04)。解放済み等で所有から外れていれば従来どおり先頭 handle。
+    const handle =
+      product.handle && ownedHandles.includes(product.handle)
+        ? product.handle
+        : ownedHandles[0];
     out.push({
       id: product.id,
       title: product.title,

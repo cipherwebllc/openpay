@@ -1047,7 +1047,9 @@
     "categoryLabel": "Category (optional)",
     "categoryNone": "Not set",
     "tagsLabel": "Tags (optional, comma-separated, up to 5)",
-    "tagsPlaceholder": "e.g. prompt, image-gen, chatgpt"
+    "tagsPlaceholder": "e.g. prompt, image-gen, chatgpt",
+    "listingHandleLabel": "Listed on profile",
+    "listingHandleAll": "All of my profiles"
   },
   "CreatorStorefront": {
     "heading": "On sale",

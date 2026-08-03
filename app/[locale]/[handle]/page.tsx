@@ -226,7 +226,12 @@ export default async function HandlePage({
   // 商品メタの障害をプロフィール/チップ本体へ波及させないため、null は商品節だけ省略する。
   // owner/revision は client 境界へ渡さない。payTo は 402 の merchant を署名前に照合する
   // buyer guard の期待値としてだけ渡す（402 自体にも公開されるアドレス）。
-  const creatorProducts: CreatorStorefrontProduct[] = (availableHosted ?? []).map(
+  const creatorProducts: CreatorStorefrontProduct[] = (availableHosted ?? [])
+    // 掲載先 handle が設定された商品はそのプロフにだけ出す (未設定 = 旧仕様どおり
+    // owner の全プロフに表示・後方互換)。同一ウォレット複数 handle の誤帰属修正
+    // (2026-08-04 user 裁定・plans/product-handle-attribution.md)。
+    .filter((product) => !product.handle || product.handle === normalized)
+    .map(
     (product) => ({
       id: product.id,
       title: product.title,

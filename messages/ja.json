@@ -1047,7 +1047,9 @@
     "categoryLabel": "カテゴリー (任意)",
     "categoryNone": "未選択",
     "tagsLabel": "タグ (任意・カンマ区切り・最大 5 個)",
-    "tagsPlaceholder": "例: prompt, 画像生成, chatgpt"
+    "tagsPlaceholder": "例: prompt, 画像生成, chatgpt",
+    "listingHandleLabel": "掲載するプロフィール",
+    "listingHandleAll": "すべての自分のプロフィールに掲載"
   },
   "CreatorStorefront": {
     "heading": "販売中",
