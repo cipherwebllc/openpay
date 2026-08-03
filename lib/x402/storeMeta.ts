@@ -10,6 +10,13 @@
 
 import { stripControlChars } from '@/lib/sanitize';
 
+/**
+ * Store 通報の宛先 (P2 go-live 条件 G1)。lib/legal の LEGAL_ENTITY.contactEmail と
+ * 同一であること (legal は server 寄り依存を持つため client へ直接 import しない —
+ * ドリフトは tests/lib/x402/storeMeta.test.ts のフェンスが検出する)。
+ */
+export const STORE_REPORT_EMAIL = 'info@cipher-web.com';
+
 /** 商品カテゴリー (MVP 9 種・順序は Store のフィルタ表示順)。 */
 export const HOSTED_PRODUCT_CATEGORIES = [
   'ai',

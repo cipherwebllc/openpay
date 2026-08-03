@@ -7,6 +7,7 @@ import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from '@/components/ConnectButton';
 import { formatUnits } from 'viem';
 import { hostedPurchaseFeeValue } from '@/lib/x402/hostedPurchaseWire';
+import { STORE_REPORT_EMAIL } from '@/lib/x402/storeMeta';
 import type { Address } from 'viem';
 import { CreatorStorePurchaseConfirmation } from '@/components/CreatorStorePurchaseConfirmation';
 import { CreatorStorePurchaseState } from '@/components/CreatorStorePurchaseState';
@@ -364,6 +365,18 @@ export function CreatorStorePurchaseFlow({
                 }
               />
             ) : null}
+            {/* 通報導線 (Store 統合 P2・go-live 条件 G1): UGC を横断掲載する前提として、
+                権利侵害等を運営へ知らせる最小導線 (mailto・商品 ID 自動挿入)。 */}
+            <p className="mt-4 text-[11px]">
+              <a
+                href={`mailto:${STORE_REPORT_EMAIL}?subject=${encodeURIComponent(
+                  `[OpenPay Store 通報] ${product.id}`,
+                )}`}
+                className="text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline"
+              >
+                {t('reportProduct')}
+              </a>
+            </p>
           </div>
         )}
       </div>

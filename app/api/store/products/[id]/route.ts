@@ -21,6 +21,7 @@ import {
   STORE_BODY_MAX_BYTES,
   storePrivateJson,
 } from '@/app/api/store/_shared';
+import { touchStoreIndex } from '@/lib/x402/storeIndex';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -260,6 +261,11 @@ export async function PATCH(
       },
     });
     if (!toggled.ok) return updateError(toggled);
+    // Store 掲載インデックス (P2)。no-throw (掲載遅延のみ・本体へ波及させない)。
+    await touchStoreIndex(
+      toggled.product.id,
+      toggled.product.updatedAt ?? toggled.product.createdAt,
+    );
     return storePrivateJson({ ok: true, product: toggled.product });
   }
 
@@ -384,5 +390,10 @@ export async function PATCH(
     ...(contentChanged ? { content: parsed.content } : {}),
   });
   if (!updated.ok) return updateError(updated);
+  // Store 掲載インデックス (P2)。no-throw (掲載遅延のみ・本体へ波及させない)。
+  await touchStoreIndex(
+    updated.product.id,
+    updated.product.updatedAt ?? updated.product.createdAt,
+  );
   return storePrivateJson({ ok: true, product: updated.product });
 }

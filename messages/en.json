@@ -1118,7 +1118,8 @@
     "needsSupportUnknownBody": "The payment result cannot be determined. Do not pay again; contact the seller.",
     "contactSupport": "Contact the seller",
     "payTotal": "Total to pay: {total} JPYC",
-    "priceBreakdown": "Price {price} JPYC + fee {fee} JPYC"
+    "priceBreakdown": "Price {price} JPYC + fee {fee} JPYC",
+    "reportProduct": "Report this product"
   },
   "CreatorStoreLibrary": {
     "eyebrow": "Purchased",

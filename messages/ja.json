@@ -1118,7 +1118,8 @@
     "needsSupportUnknownBody": "決済結果を確定できません。二重に支払わず、販売者へお問い合わせください。",
     "contactSupport": "販売者へ問い合わせる",
     "payTotal": "お支払い合計 {total} JPYC",
-    "priceBreakdown": "価格 {price} JPYC + 手数料 {fee} JPYC"
+    "priceBreakdown": "価格 {price} JPYC + 手数料 {fee} JPYC",
+    "reportProduct": "この商品を通報する"
   },
   "CreatorStoreLibrary": {
     "eyebrow": "購入済み",
