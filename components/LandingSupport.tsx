@@ -28,16 +28,29 @@ const PROFILE_HANDLE = '@openpay_jp';
 const PROFILE_URL = `${TIP_ORIGIN}/${PROFILE_HANDLE}`;
 
 // 利用料カード。id から `supportFee${id}{Focal,Title,Body}` の 3 key を派生 (LandingBenefits と同型)。
+// audience = その料金を**実際に負担する側** (LandingBenefits の 店舗/顧客 ピルと同じ体系・
+// 2026-08-04 user 指示: 0% の売り手視点でなく、負担者と実料率を focal で見せる)。
 type FeeId = 'Pay' | 'Register' | 'Mobile' | 'Tip' | 'Store';
-const FEE_CARDS: readonly { id: FeeId; Icon: LucideIcon }[] = [
-  { id: 'Pay', Icon: QrCode },
-  { id: 'Register', Icon: Calculator },
-  { id: 'Mobile', Icon: Smartphone },
-  { id: 'Tip', Icon: Coins },
-  // デジタル商品 (LP 再構成 P3・2026-08-04 user 指示): supportFeeNote の文中開示を
-  // カードへ昇格。focal は他カードと同じ売り手視点 (売り手手数料 0%)。
-  { id: 'Store', Icon: ShoppingBag },
+type FeeAudience = 'merchant' | 'customer';
+const FEE_CARDS: readonly { id: FeeId; audience: FeeAudience; Icon: LucideIcon }[] = [
+  { id: 'Pay', audience: 'merchant', Icon: QrCode },
+  { id: 'Register', audience: 'merchant', Icon: Calculator },
+  { id: 'Mobile', audience: 'merchant', Icon: Smartphone },
+  // チップ/デジタル商品は負担が顧客側 (受け取り/売り手は 0 円) — focal に実負担を出す。
+  { id: 'Tip', audience: 'customer', Icon: Coins },
+  { id: 'Store', audience: 'customer', Icon: ShoppingBag },
 ];
+
+// LandingBenefits の TONE と同配色 (merchant=emerald / customer=blue)。
+const FEE_TONE = {
+  merchant: { focal: 'text-emerald-600', pillBg: 'bg-emerald-100', pillInk: 'text-emerald-800' },
+  customer: { focal: 'text-blue-600', pillBg: 'bg-blue-100', pillInk: 'text-blue-800' },
+} as const satisfies Record<FeeAudience, unknown>;
+
+const FEE_AUDIENCE_LABEL_KEY = {
+  merchant: 'benefitsAudienceMerchant',
+  customer: 'benefitsAudienceCustomer',
+} as const satisfies Record<FeeAudience, string>;
 
 export async function LandingSupport() {
   const t = await getTranslations('Landing');
@@ -54,13 +67,22 @@ export async function LandingSupport() {
       {/* 4 方法の利用料カード (導入メリットと同じビッグナンバー様式)。focal は "1% / 3%" が
           最も幅広いため text-3xl/4xl (benefits より一段小さめ) で 2 列でも 1 行に収める。 */}
       <ul className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {FEE_CARDS.map(({ id, Icon }) => (
+        {FEE_CARDS.map(({ id, audience, Icon }) => (
           <li
             key={id}
             className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6"
           >
-            <Icon className="h-5 w-5 text-brand" aria-hidden />
-            <p className="mt-4 whitespace-nowrap break-keep text-3xl font-extrabold leading-none text-brand sm:text-4xl">
+            <span className="flex items-center justify-between gap-2">
+              <Icon className="h-5 w-5 text-brand" aria-hidden />
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${FEE_TONE[audience].pillBg} ${FEE_TONE[audience].pillInk}`}
+              >
+                {t(FEE_AUDIENCE_LABEL_KEY[audience])}
+              </span>
+            </span>
+            <p
+              className={`mt-4 whitespace-nowrap break-keep text-3xl font-extrabold leading-none sm:text-4xl ${FEE_TONE[audience].focal}`}
+            >
               {t(`supportFee${id}Focal`)}
             </p>
             <h3 className="mt-3 text-sm font-semibold text-slate-900 sm:text-base">

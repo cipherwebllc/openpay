@@ -37,10 +37,13 @@ describe('LandingSupport 料率カード ↔ DISCLOSED 料率 (drift フェン�
       expect(L.supportFeeMobileBody).toContain(`${preorderPct}%`);
       // チップカード = ガス相当 約 2 JPYC (送るお客様が負担)
       expect(L.supportFeeTipBody).toContain(`${floorJpyc} JPYC`);
-      // デジタル商品カード (P3 で note 文中から昇格) = 売り手 0%・買い手 x402 1%・最低 1 JPYC
-      expect(L.supportFeeStoreFocal).toBe('0%');
+      // デジタル商品カード (P3 で note 文中から昇格・focal は顧客負担の実料率) =
+      // 買い手 x402 1%・最低 1 JPYC・売り手 0 円
+      expect(L.supportFeeStoreFocal).toBe(`${x402Pct}%`);
       expect(L.supportFeeStoreBody).toContain(`${x402Pct}%`);
       expect(L.supportFeeStoreBody).toContain(`${x402FloorJpyc} JPYC`);
+      // チップカードの focal も顧客負担の実額 (ガス相当 約 2 JPYC)
+      expect(L.supportFeeTipFocal).toContain(`${floorJpyc}`);
     });
   }
 

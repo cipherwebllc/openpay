@@ -112,7 +112,7 @@
     "supportFeeMobileFocal": "1% / 3%",
     "supportFeeMobileTitle": "Mobile order",
     "supportFeeMobileBody": "1% for in-store, 3% for time-specified pre-orders (gas included).",
-    "supportFeeTipFocal": "0%",
+    "supportFeeTipFocal": "≈2 JPYC",
     "supportFeeTipTitle": "Tips",
     "supportFeeTipBody": "No fee to receive. The customer sending the tip adds the gas-equivalent amount (about 2 JPYC); the 1% does not apply.",
     "supportFeeNote": "The fee is split within the same transaction; the sale itself lands directly in your wallet (we never hold funds). See the Terms for details.",
@@ -225,8 +225,8 @@
     "useCase7Body": "Gate your existing API with x402 and list it in the AI store. AI agents pay from their own wallets.",
     "useCase7ImageAlt": "A monitor showing a dashboard next to a small robot figurine, with a phone showing a payment screen",
     "supportFeeStoreTitle": "Digital goods",
-    "supportFeeStoreFocal": "0%",
-    "supportFeeStoreBody": "No seller fee. The buyer covers the x402 usage fee (1% of the price, minimum 1 JPYC)."
+    "supportFeeStoreFocal": "1%",
+    "supportFeeStoreBody": "The buyer pays the x402 usage fee: 1% of the price, minimum 1 JPYC. No seller fee."
   },
   "Market": {
     "title": "Market rate (reference)",
