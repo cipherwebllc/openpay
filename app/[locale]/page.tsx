@@ -9,6 +9,7 @@ import { LandingHero } from '@/components/LandingHero';
 import { LandingFeatures } from '@/components/LandingFeatures';
 import { LandingAiAgents } from '@/components/LandingAiAgents';
 import { LandingBenefits } from '@/components/LandingBenefits';
+import { LandingCapabilities } from '@/components/LandingCapabilities';
 import { LandingCashComparison } from '@/components/LandingCashComparison';
 import { LandingUseCases } from '@/components/LandingUseCases';
 import { LandingHowItWorks } from '@/components/LandingHowItWorks';
@@ -44,6 +45,9 @@ export default async function HomePage({
       <LandingMobileOrder />
       {/* モバイル注文昇格の直後に「売上を待たない」の一枚で、即時着金の価値を一文で刻む。 */}
       <LandingPayoutStatement />
+      {/* できること 4 区分 (ナビと同構造・plans/lp-restructure-ruling.md P1)。
+          モバイル注文昇格 (user 確定 positioning) の後・理由説明の前に全体像を一望させる。 */}
+      <LandingCapabilities />
       <LandingBenefits />
       <LandingCashComparison />
       <LandingHowItWorks />
