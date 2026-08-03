@@ -38,8 +38,9 @@ describe('StoreBrowser', () => {
       locale: 'ja',
     });
     const link = screen.getByRole('link', { name: /AI プロンプト集/ });
+    // from=store: プロフ側が「← Store に戻る」ピルを出すための目印 (通常訪問には付かない)
     expect(link.getAttribute('href')).toBe(
-      `/ja/@alice?product=h_${'a'.repeat(32)}`,
+      `/ja/@alice?product=h_${'a'.repeat(32)}&from=store`,
     );
     // 合計主役 + 内訳 (プロフカードと同形・2026-07-31 user 裁定)
     expect(screen.getByText('101 JPYC')).toBeInTheDocument();
