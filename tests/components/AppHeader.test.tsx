@@ -34,7 +34,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       get: (target, key) =>
         key === 'enableX402Facilitator'
           ? flagState.enableX402Facilitator
-          : target[key as keyof typeof target],
+          : key === 'enableCreatorStoreUi'
+            ? true // P4: Store nav 項目は本番相当 (flag ON) で検証
+            : target[key as keyof typeof target],
     }),
   };
 });
@@ -95,32 +97,18 @@ describe('AppHeader: ブランド / ナビ / 右側コントロール', () => {
     ).toBeInTheDocument();
   });
 
-  it('TopNav: x402 flag ON で 5 link (スキャン / 受け取る / 履歴 / 探す / AIストア)', () => {
-    flagState.enableX402Facilitator = true;
+  it('TopNav: 4 区分 (決済 / 販売 / Store / マイページ) — P4 fence', () => {
     renderWithIntl(<AppHeader />);
     const nav = screen.getByRole('navigation', { name: 'primary navigation' });
-    expect(nav.querySelectorAll('a').length).toBe(5);
-    // 各 link href が /ja prefix で正しい
+    // 各 link href が /ja prefix で正しい (Store は navItems の flag mock=ON 前提。
+    // x402 flag とは独立 — AIストア単独項目は廃止し Store の AI カテゴリー経由)
     const hrefs = Array.from(nav.querySelectorAll('a')).map((a) =>
       a.getAttribute('href'),
     );
-    expect(hrefs).toEqual([
-      '/ja/scan',
-      '/ja/create',
-      '/ja/history',
-      '/ja/explore',
-      '/ja/discovery',
-    ]);
-  });
-
-  it('TopNav: x402 flag OFF では /discovery link を出さない (notFound になるため)', () => {
-    flagState.enableX402Facilitator = false;
-    renderWithIntl(<AppHeader />);
-    const nav = screen.getByRole('navigation', { name: 'primary navigation' });
-    const hrefs = Array.from(nav.querySelectorAll('a')).map((a) =>
-      a.getAttribute('href'),
-    );
-    expect(hrefs).toEqual(['/ja/scan', '/ja/create', '/ja/history', '/ja/explore']);
+    expect(hrefs).toEqual(['/ja/scan', '/ja/create', '/ja/store', '/ja/me']);
+    expect(
+      Array.from(nav.querySelectorAll('a')).map((a) => a.textContent),
+    ).toEqual(['決済', '販売', 'Store', 'マイページ']);
   });
 
   it('右側に LocaleSwitcher (ja/en) + env pill (testnet) が出る', () => {

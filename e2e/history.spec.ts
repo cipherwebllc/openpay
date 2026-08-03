@@ -134,19 +134,20 @@ test.describe('/history (browser-level smoke)', () => {
     await expect(logoLink).toHaveAttribute('href', '/ja');
   });
 
-  test('AppShell BottomNav / TopNav から /history への nav link がある (旧 SiteFooter link の置換)', async ({
+  test('nav の「マイページ」→ /me ハブの「履歴」カード → /history に到達できる (P4 導線)', async ({
     page,
   }) => {
+    // P4 (Store 統合) でナビ直下の「履歴」は「マイページ (/me)」ハブ経由の 2 タップに
+    // 変更された (裁定 M2・plans/store-marketplace.md)。旧 URL /history 自体は不変。
     await page.goto('/ja');
-    // viewport 別: desktop は TopNav (md:flex / aria-label=primary navigation)、
-    // mobile は BottomNav (md:hidden / aria-label=bottom navigation) が visible に
-    // なる。両方の nav に同じ「履歴」 link が存在するため、role を nav 一般に広げて
-    // .first() で visible な方を取る。href は両 nav で同一 (/ja/history)。
-    const link = page
-      .getByRole('navigation')
-      .getByRole('link', { name: '履歴' })
-      .first();
-    await expect(link).toHaveAttribute('href', '/ja/history');
+    const nav = page.getByRole('navigation');
+    const meLink = nav.getByRole('link', { name: 'マイページ' }).first();
+    await expect(meLink).toHaveAttribute('href', '/ja/me');
+    await page.goto('/ja/me');
+    const historyCard = page.getByRole('link', { name: /履歴/ }).first();
+    await expect(historyCard).toHaveAttribute('href', '/ja/history');
+    await historyCard.click();
+    await expect(page).toHaveURL(/\/ja\/history$/);
   });
 
   test('/pay (bare, query 空) → PayEmptyLanding に「履歴を見る」link', async ({
