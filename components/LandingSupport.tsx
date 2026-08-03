@@ -17,6 +17,7 @@ import {
   Smartphone,
   Coins,
   ExternalLink,
+  ShoppingBag,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -27,12 +28,15 @@ const PROFILE_HANDLE = '@openpay_jp';
 const PROFILE_URL = `${TIP_ORIGIN}/${PROFILE_HANDLE}`;
 
 // 利用料カード。id から `supportFee${id}{Focal,Title,Body}` の 3 key を派生 (LandingBenefits と同型)。
-type FeeId = 'Pay' | 'Register' | 'Mobile' | 'Tip';
+type FeeId = 'Pay' | 'Register' | 'Mobile' | 'Tip' | 'Store';
 const FEE_CARDS: readonly { id: FeeId; Icon: LucideIcon }[] = [
   { id: 'Pay', Icon: QrCode },
   { id: 'Register', Icon: Calculator },
   { id: 'Mobile', Icon: Smartphone },
   { id: 'Tip', Icon: Coins },
+  // デジタル商品 (LP 再構成 P3・2026-08-04 user 指示): supportFeeNote の文中開示を
+  // カードへ昇格。focal は他カードと同じ売り手視点 (売り手手数料 0%)。
+  { id: 'Store', Icon: ShoppingBag },
 ];
 
 export async function LandingSupport() {

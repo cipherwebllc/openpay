@@ -83,7 +83,7 @@
     "faqQ2": "Can I receive both JPYC and USDC?",
     "faqA2": "Both are supported: JPYC for JPY-denominated receipts, USDC for Web3 or international customers. JPYC supports Polygon / Kaia / Avalanche / Ethereum (standard mode only on Ethereum); USDC supports Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche. Choose in the QR builder; Circle CCTP V2 handles other source chains.",
     "faqQ3": "What if the customer has no wallet?",
-    "faqA3": "Suggest MetaMask or Rabby, or HashPort Wallet / Myna Wallet / MetaMask Mobile on mobile. EIP-6963 detects multiple wallets.",
+    "faqA3": "Recommend MetaMask or Rabby on desktop, and HashPort Wallet / Myna Wallet / MetaMask Mobile on phones. Multiple wallets are detected automatically.",
     "faqQ4": "How do I convert JPYC / USDC to JPY?",
     "faqA4": "Redeem JPYC 1:1 at <jpycEx>JPYC EX</jpycEx>, or sell USDC via SBI VC Trade and other Japanese exchanges. Links are on the <create>Receive</create> page.",
     "faqQ5": "Where is transaction history stored?",
@@ -115,7 +115,7 @@
     "supportFeeTipFocal": "0%",
     "supportFeeTipTitle": "Tips",
     "supportFeeTipBody": "No fee to receive. The customer sending the tip adds the gas-equivalent amount (about 2 JPYC); the 1% does not apply.",
-    "supportFeeNote": "The fee is split within the same transaction; the sale itself lands directly in your wallet (we never hold funds). Creator digital-goods sales carry no seller fee — the buyer pays the x402 fee (1% of price, min 1 JPYC). See the Terms for details.",
+    "supportFeeNote": "The fee is split within the same transaction; the sale itself lands directly in your wallet (we never hold funds). See the Terms for details.",
     "supportTipRequest": "If you'd like to help keep OpenPay running, your support means a lot (also handy for a quick try).",
     "supportProfileTagline": "Support directly in JPYC or USDC",
     "supportProfileCta": "Support",
@@ -223,7 +223,10 @@
     "useCase6ImageAlt": "A laptop showing a digital goods store with product cards, and a phone with a purchase checkmark",
     "useCase7Title": "🤖 Paid APIs for AI",
     "useCase7Body": "Gate your existing API with x402 and list it in the AI store. AI agents pay from their own wallets.",
-    "useCase7ImageAlt": "A monitor showing a dashboard next to a small robot figurine, with a phone showing a payment screen"
+    "useCase7ImageAlt": "A monitor showing a dashboard next to a small robot figurine, with a phone showing a payment screen",
+    "supportFeeStoreTitle": "Digital goods",
+    "supportFeeStoreFocal": "0%",
+    "supportFeeStoreBody": "No seller fee. The buyer covers the x402 usage fee (1% of the price, minimum 1 JPYC)."
   },
   "Market": {
     "title": "Market rate (reference)",
