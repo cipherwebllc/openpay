@@ -215,7 +215,7 @@
     "lastReceived": "最終着金 {time}"
   },
   "Explore": {
-    "pageTitle": "探す",
+    "pageTitle": "関連リンク集",
     "pageDescription": "JPYC / USDC が使える取引所・dApp・bridge をカテゴリ別に。リンクは外部サイトです。",
     "filterAll": "すべて",
     "categoryExchange": "取引所 (CEX)",

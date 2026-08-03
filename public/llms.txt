@@ -20,6 +20,7 @@ OpenPay is an open-source, non-custodial payment layer for the Japanese yen stab
 - [モバイルオーダー / POS 併用ガイド](https://open-pay.jp/ja/guide/pos): 既存のPOSレジと併用する運用ガイド
 - [店頭キット](https://open-pay.jp/ja/kit): 決済QRポスター等の印刷キット
 - [受け取りを始める](https://open-pay.jp/ja/create): 決済QR・モバイルオーダーの作成
+- [OpenPay Store](https://open-pay.jp/ja/store): クリエイターが公開したデジタル商品 (プロンプト・素材・ドキュメント・3D 等) を横断検索して JPYC で購入できるマーケットプレイス。プロフィール (@handle) の公開商品と自動連動
 - [デジタル商品販売ガイド](https://open-pay.jp/ja/guide/store): 無料サービス (Google ドライブ・Notion・YouTube 限定公開等) と組み合わせてデジタル商品を JPYC 販売する 6 つの方法と手順
 - [English](https://open-pay.jp/en): English version of the site
 
