@@ -1016,7 +1016,11 @@
     "detailInvalidSellerName": "Please enter the seller name.",
     "detailInvalidSellerContact": "Please enter contact information.",
     "detailInvalidDisclosure": "Legal notes must be at most 1,000 characters.",
-    "guideLink": "Selling tips: guide to selling digital goods with free services"
+    "guideLink": "Selling tips: guide to selling digital goods with free services",
+    "categoryLabel": "Category (optional)",
+    "categoryNone": "Not set",
+    "tagsLabel": "Tags (optional, comma-separated, up to 5)",
+    "tagsPlaceholder": "e.g. prompt, image-gen, chatgpt"
   },
   "CreatorStorefront": {
     "heading": "On sale",
@@ -2609,5 +2613,24 @@
     "invalidLinkHint": "Please open this from the \"View order status\" link on the payment completion screen.",
     "updating": "Checking…",
     "retrying": "Update failed (retrying automatically)"
+  },
+  "StoreCatalog": {
+    "categories": {
+      "ai": "AI",
+      "documents": "Documents",
+      "software": "Software",
+      "images-nft": "Images & NFT",
+      "video": "Video",
+      "music": "Music",
+      "templates": "Templates",
+      "3d-game": "3D & Game Assets",
+      "other": "Other"
+    },
+    "types": {
+      "download": "Download",
+      "external-link": "External Link",
+      "api": "API",
+      "other": "Other"
+    }
   }
 }

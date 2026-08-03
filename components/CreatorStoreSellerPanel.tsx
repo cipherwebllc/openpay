@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
+import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Copy, PackageOpen, Pencil, Store } from 'lucide-react';
@@ -32,6 +33,8 @@ type ProductSummary = {
   priceJpyc: string;
   contentKind: 'url' | 'text';
   label: HostedLabel;
+  category?: string;
+  tags?: readonly string[];
   saleActive: boolean;
   contentAvailable: boolean;
   updatedAt?: number;
@@ -58,6 +61,8 @@ type ProductForm = {
   priceJpyc: string;
   contentKind: 'url' | 'text';
   label: HostedLabel;
+  category: string;
+  tags: string;
   content: string;
   saleActive: boolean;
 };
@@ -103,6 +108,8 @@ const EMPTY_PRODUCT_FORM: ProductForm = {
   priceJpyc: '',
   contentKind: 'url',
   label: 'download',
+  category: '',
+  tags: '',
   content: '',
   saleActive: false,
 };
@@ -346,6 +353,7 @@ function SignedInSellerPanel({
   handle: string | null;
 }) {
   const t = useTranslations('CreatorStoreSeller');
+  const tCatalog = useTranslations('StoreCatalog');
   const locale = useLocale();
   const origin = useOrigin();
   const [sellerDraft, setSellerDraft] = useState<SellerForm | null>(null);
@@ -451,6 +459,8 @@ function SignedInSellerPanel({
         priceJpyc: product.priceJpyc,
         contentKind: content.kind,
         label: product.label,
+        category: product.category ?? '',
+        tags: (product.tags ?? []).join(', '),
         content: content.value,
         saleActive: product.saleActive,
       });
@@ -483,6 +493,12 @@ function SignedInSellerPanel({
             priceJpyc: form.priceJpyc,
             contentKind: form.contentKind,
             label: form.label,
+            category: form.category || null,
+            // カンマ区切り入力 → 配列 (検証は server 権威・storeMeta.parseHostedTags)
+            tags: form.tags
+              .split(/[,、]/)
+              .map((tag) => tag.trim())
+              .filter(Boolean),
             content: form.content,
             saleActive: form.saleActive,
           }),
@@ -980,6 +996,41 @@ function SignedInSellerPanel({
                 </option>
               ))}
             </select>
+          </label>
+          <label
+            htmlFor="creator-store-product-category"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t('categoryLabel')}
+            <select
+              id="creator-store-product-category"
+              value={productForm.category}
+              onChange={(event) =>
+                updateProduct({ category: event.target.value })
+              }
+              className={inputClass}
+            >
+              <option value="">{t('categoryNone')}</option>
+              {HOSTED_PRODUCT_CATEGORIES.map((category) => (
+                <option key={category} value={category}>
+                  {tCatalog(`categories.${category}`)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label
+            htmlFor="creator-store-product-tags"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t('tagsLabel')}
+            <input
+              id="creator-store-product-tags"
+              type="text"
+              value={productForm.tags}
+              onChange={(event) => updateProduct({ tags: event.target.value })}
+              placeholder={t('tagsPlaceholder')}
+              className={inputClass}
+            />
           </label>
           <div className="sm:col-span-2">
             <label

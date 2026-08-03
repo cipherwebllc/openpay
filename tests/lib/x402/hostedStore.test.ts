@@ -287,7 +287,7 @@ describe('hosted 作成と分離', () => {
     expect(touched.some((k) => k === 'x402:resource')).toBe(false);
   });
 
-  it('商品画像は購入時 snapshot に含めない (表示専用の不変 fence)', async () => {
+  it('商品画像/カテゴリ/タグは購入時 snapshot に含めない (表示専用の不変 fence)', async () => {
     const m = await mod();
     const parsed = m.parseHostedInput(
       baseInput({
@@ -296,6 +296,9 @@ describe('hosted 作成と分離', () => {
           'https://cdn.example.com/gallery-1.png',
           'https://cdn.example.com/gallery-2.png',
         ],
+        // P1 (Store 統合): 表示メタも snapshot 非対象であることを同じ fence で固定する
+        category: 'ai',
+        tags: ['prompt', '画像生成'],
       }),
     );
     if (!parsed.ok) throw new Error('setup');
@@ -310,6 +313,54 @@ describe('hosted 作成と分離', () => {
       contentKind: 'text',
       label: 'prompt',
     });
+  });
+
+  it('category/tags: 正常系は保存され、寛容系は落ち、違反は明示エラー (P1)', async () => {
+    const m = await mod();
+    // 正常: enum カテゴリ + タグ (trim/dedupe)
+    const okParsed = m.parseHostedInput(
+      baseInput({ category: '3d-game', tags: [' vrm ', 'vrm', 'unity'] }),
+    );
+    if (!okParsed.ok) throw new Error(okParsed.error);
+    expect(okParsed.product.category).toBe('3d-game');
+    expect(okParsed.product.tags).toEqual(['vrm', 'unity']);
+
+    // 未指定/空文字は undefined (後方互換)
+    const noneParsed = m.parseHostedInput(baseInput({ category: '' }));
+    if (!noneParsed.ok) throw new Error(noneParsed.error);
+    expect(noneParsed.product.category).toBeUndefined();
+    expect(noneParsed.product.tags).toBeUndefined();
+
+    // 違反は明示エラー
+    expect(m.parseHostedInput(baseInput({ category: 'not-a-category' }))).toEqual({
+      ok: false,
+      error: 'invalid category',
+    });
+    expect(
+      m.parseHostedInput(baseInput({ tags: ['a', 'b', 'c', 'd', 'e', 'f'] })),
+    ).toEqual({ ok: false, error: 'too many tags' });
+    expect(
+      m.parseHostedInput(baseInput({ tags: ['x'.repeat(25)] })),
+    ).toEqual({ ok: false, error: 'tag too long' });
+  });
+
+  it('stored 読込: 不正な category/tags は落として商品自体は残す (寛容読込)', async () => {
+    const m = await mod();
+    const parsed = m.parseHostedInput(baseInput({ category: 'ai', tags: ['ok'] }));
+    if (!parsed.ok) throw new Error('setup');
+    const created = await m.createHostedProduct(parsed, 1000);
+    if (!created.ok) throw new Error('setup');
+    const raw = JSON.parse(JSON.stringify(created.product)) as Record<string, unknown>;
+    raw.category = 'bogus';
+    raw.tags = ['ok', 42];
+    const reread = m.parseStoredHostedProduct(JSON.stringify(raw));
+    expect(reread).not.toBeNull();
+    expect(reread?.category).toBeUndefined();
+    expect(reread?.tags).toBeUndefined();
+    // 正常値はそのまま読める
+    const clean = m.parseStoredHostedProduct(JSON.stringify(created.product));
+    expect(clean?.category).toBe('ai');
+    expect(clean?.tags).toEqual(['ok']);
   });
 
   it('owner あたり上限を超えたら too_many (cap は Lua 内で判定)', async () => {
