@@ -30,6 +30,8 @@ const PRODUCT_INPUT_KEYS = new Set([
   'priceJpyc',
   'contentKind',
   'label',
+  'category',
+  'tags',
   'content',
   'saleActive',
 ]);
@@ -133,6 +135,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     priceJpyc: raw.priceJpyc,
     contentKind: raw.contentKind,
     label: raw.label,
+    category: raw.category,
+    tags: raw.tags,
     content: raw.content,
   });
   if (!parsed.ok) {

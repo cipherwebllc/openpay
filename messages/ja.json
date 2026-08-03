@@ -1016,7 +1016,11 @@
     "detailInvalidSellerName": "販売者名を入力してください。",
     "detailInvalidSellerContact": "連絡先を入力してください。",
     "detailInvalidDisclosure": "法定事項の記載は 1,000 文字以内で入力してください。",
-    "guideLink": "販売のヒント: 無料サービスで始めるデジタル商品販売ガイド"
+    "guideLink": "販売のヒント: 無料サービスで始めるデジタル商品販売ガイド",
+    "categoryLabel": "カテゴリー (任意)",
+    "categoryNone": "未選択",
+    "tagsLabel": "タグ (任意・カンマ区切り・最大 5 個)",
+    "tagsPlaceholder": "例: prompt, 画像生成, chatgpt"
   },
   "CreatorStorefront": {
     "heading": "販売中",
@@ -2609,5 +2613,24 @@
     "invalidLinkHint": "決済完了画面の「注文状況を見る」リンクからお開きください。",
     "updating": "確認しています…",
     "retrying": "更新に失敗しました（自動で再試行します）"
+  },
+  "StoreCatalog": {
+    "categories": {
+      "ai": "AI",
+      "documents": "ドキュメント",
+      "software": "ソフトウェア",
+      "images-nft": "画像・NFT",
+      "video": "動画",
+      "music": "音楽",
+      "templates": "テンプレート",
+      "3d-game": "3D・ゲーム素材",
+      "other": "その他"
+    },
+    "types": {
+      "download": "ダウンロード",
+      "external-link": "外部リンク",
+      "api": "API",
+      "other": "その他"
+    }
   }
 }

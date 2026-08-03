@@ -21,6 +21,9 @@ export type CreatorStorefrontProduct = {
   payTo: Address;
   contentKind: 'url' | 'text';
   label: 'download' | 'pdf' | 'zip' | 'prompt' | 'api' | 'external';
+  /** Store カテゴリー (表示専用・storeMeta)。 */
+  category?: string;
+  tags?: readonly string[];
 };
 
 
@@ -50,6 +53,7 @@ export function CreatorStorefrontSection({
   autoOpenProductId?: string;
 }) {
   const t = useTranslations('CreatorStorefront');
+  const tCatalog = useTranslations('StoreCatalog');
   const locale = useLocale();
   if (products.length === 0) return null;
 
@@ -152,6 +156,32 @@ export function CreatorStorefrontSection({
                   >
                     {product.desc}
                   </p>
+                ) : null}
+                {product.category || (product.tags?.length ?? 0) > 0 ? (
+                  /* カテゴリ/タグ (P1・表示専用)。受け取り方 (label) は下段の既存表示が担う。 */
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    {product.category ? (
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                          inverted
+                            ? 'bg-white/15 text-white/90'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {tCatalog(`categories.${product.category}`)}
+                      </span>
+                    ) : null}
+                    {(product.tags ?? []).map((tag) => (
+                      <span
+                        key={tag}
+                        className={`text-[11px] ${
+                          inverted ? 'text-white/60' : 'text-slate-400'
+                        }`}
+                      >
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
                 ) : null}
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <span

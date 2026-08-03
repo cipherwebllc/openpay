@@ -23,6 +23,11 @@ import 'server-only';
 //     署名させた後に必ず失敗する構成を作らない。
 
 import { getAddress, isAddress, type Address } from 'viem';
+import {
+  isHostedProductCategory,
+  parseHostedTags,
+  type HostedProductCategory,
+} from '@/lib/x402/storeMeta';
 import { kvDel, kvEval, kvGet, kvLrange, kvMget, kvSet } from '@/lib/kv';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
@@ -71,6 +76,10 @@ export type HostedProduct = {
   priceJpyc: string;
   contentKind: HostedContentKind;
   label: HostedLabel;
+  /** Store カテゴリー (表示/検索専用・任意・購入 snapshot 非対象)。lib/x402/storeMeta。 */
+  category?: HostedProductCategory;
+  /** 検索/表示用タグ (表示専用・任意・購入 snapshot 非対象)。 */
+  tags?: readonly string[];
   /** 現在配信する content の revision (1 始まり・編集で単調増加)。 */
   contentRevision: number;
   /** 新規購入を受け付けるか (販売停止しても既購入者の取得は続く)。 */
@@ -183,6 +192,8 @@ export type HostedProductInput = {
   priceJpyc: unknown;
   contentKind: unknown;
   label?: unknown;
+  category?: unknown;
+  tags?: unknown;
   content: unknown;
 };
 
@@ -288,6 +299,17 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
         ? 'download'
         : 'prompt';
 
+  // category / tags は表示・検索専用 (購入 snapshot 非対象・掟 12/15)。
+  if (input.category !== undefined && input.category !== null && input.category !== '') {
+    if (!isHostedProductCategory(input.category)) {
+      return { ok: false, error: 'invalid category' };
+    }
+  }
+  const category: HostedProductCategory | undefined =
+    isHostedProductCategory(input.category) ? input.category : undefined;
+  const parsedTags = parseHostedTags(input.tags);
+  if (!parsedTags.ok) return { ok: false, error: parsedTags.error };
+
   let content: HostedContent;
   if (contentKind === 'url') {
     if (
@@ -317,6 +339,8 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       priceJpyc: price.toString(),
       contentKind,
       label,
+      ...(category ? { category } : {}),
+      ...(parsedTags.tags ? { tags: parsedTags.tags } : {}),
       contentRevision: 1,
       saleActive: true,
       contentAvailable: true,
@@ -383,6 +407,10 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
       galleryUrls.push(candidate);
     }
   }
+  // category/tags: 不正値は落として商品自体は残す (emoji と同じ寛容読込)。
+  const category = isHostedProductCategory(r.category) ? r.category : undefined;
+  const storedTags = parseHostedTags(r.tags);
+  const tags = storedTags.ok ? storedTags.tags : undefined;
   return {
     id: r.id,
     owner: getAddress(r.owner),
@@ -395,6 +423,8 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
     priceJpyc: r.priceJpyc,
     contentKind: r.contentKind,
     label,
+    ...(category ? { category } : {}),
+    ...(tags ? { tags } : {}),
     contentRevision: r.contentRevision,
     // 旧レコードや壊れた値は「販売停止・配信可」に倒す (誤って売らない側へ)。
     saleActive: r.saleActive === true,
@@ -663,6 +693,8 @@ export async function replaceHostedSellerProduct(input: {
     | 'galleryUrls'
     | 'priceJpyc'
     | 'label'
+    | 'category'
+    | 'tags'
     | 'saleActive'
   > & {
     desc?: string;
@@ -697,6 +729,8 @@ export async function replaceHostedSellerProduct(input: {
     priceJpyc: input.metadata.priceJpyc,
     contentKind: input.content?.kind ?? current.contentKind,
     label: input.metadata.label,
+    ...(input.metadata.category ? { category: input.metadata.category } : {}),
+    ...(input.metadata.tags?.length ? { tags: input.metadata.tags } : {}),
     contentRevision: revision,
     saleActive: input.metadata.saleActive,
     contentAvailable: current.contentAvailable,

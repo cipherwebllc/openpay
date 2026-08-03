@@ -240,6 +240,8 @@ export default async function HandlePage({
       payTo: product.payTo,
       contentKind: product.contentKind,
       label: product.label,
+      ...(product.category ? { category: product.category } : {}),
+      ...(product.tags ? { tags: product.tags } : {}),
     }),
   );
   const requestedProductId =

@@ -198,6 +198,29 @@ describe('CreatorStoreSellerPanel', () => {
     expect(
       screen.getByRole('textbox', { name: '提供する URL' }),
     ).toBeInTheDocument();
+    // P1 (Store 統合): カテゴリー select (9 種 + 未選択) とタグ入力
+    const categorySelect = screen.getByRole('combobox', {
+      name: 'カテゴリー (任意)',
+    });
+    expect(
+      within(categorySelect).getAllByRole('option').map((o) => o.textContent),
+    ).toEqual([
+      '未選択',
+      'AI',
+      'ドキュメント',
+      'ソフトウェア',
+      '画像・NFT',
+      '動画',
+      '音楽',
+      'テンプレート',
+      '3D・ゲーム素材',
+      'その他',
+    ]);
+    expect(
+      screen.getByRole('textbox', {
+        name: 'タグ (任意・カンマ区切り・最大 5 個)',
+      }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole('checkbox', {
         name: '保存後すぐ販売を開始する',

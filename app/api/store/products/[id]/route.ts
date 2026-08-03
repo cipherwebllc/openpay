@@ -37,6 +37,8 @@ const PRODUCT_PATCH_KEYS = new Set([
   'priceJpyc',
   'contentKind',
   'label',
+  'category',
+  'tags',
   'content',
   'saleActive',
 ]);
@@ -252,6 +254,8 @@ export async function PATCH(
           : {}),
         priceJpyc: product.priceJpyc,
         label: product.label,
+        ...(product.category ? { category: product.category } : {}),
+        ...(product.tags ? { tags: product.tags } : {}),
         saleActive: nextSaleActive,
       },
     });
@@ -304,6 +308,9 @@ export async function PATCH(
         : product.contentKind,
     label:
       raw.label !== undefined ? raw.label : product.label,
+    category:
+      raw.category !== undefined ? raw.category : product.category,
+    tags: raw.tags !== undefined ? raw.tags : product.tags,
     content: candidateContent,
   });
   if (!parsed.ok) {
@@ -368,6 +375,10 @@ export async function PATCH(
         : {}),
       priceJpyc: parsed.product.priceJpyc,
       label: parsed.product.label,
+      ...(parsed.product.category
+        ? { category: parsed.product.category }
+        : {}),
+      ...(parsed.product.tags ? { tags: parsed.product.tags } : {}),
       saleActive,
     },
     ...(contentChanged ? { content: parsed.content } : {}),
