@@ -1,7 +1,7 @@
 // /guide/store 「無料サービスで始めるデジタル商品販売」(クリエイター向け) の content SOT。
 // 長文を messages/*.json に置かない方針は lib/agentGuide.ts / lib/posGuide.ts と同じ。
 // 出典 = user 承認済みの記事 (2026-07-31)。仕様記述 (2 タイプ・手数料・DRM なし・提供終了・
-// 12 商品上限・価格帯) は本番実装と一致させること — 変えるときは実装と同時に。
+// 24 商品上限・価格帯) は本番実装と一致させること — 変えるときは実装と同時に。
 
 import type { Metadata } from 'next';
 
@@ -85,7 +85,7 @@ const JA: StoreGuideContent = {
   basicsBody:
     'OpenPay のデジタル商品は 2 タイプだけです。つまり「ファイルは無料サービスに置き、その共有リンクを商品にする」のが URL 型の基本戦略です。購入者は支払い完了と同時にリンク (または本文) を受け取り、以後もライブラリからいつでも再取得できます。',
   basicsPoint:
-    '出品はすべて共通で、「受け取る」ページの「プロフ」タブ →「デジタル商品」から。初回のみ販売者情報 (氏名または名称・連絡先) の登録が必要です (特定商取引法対応)。1 ウォレットにつき 12 商品まで、価格は 1〜1,000,000 の整数 JPYC。',
+    '出品はすべて共通で、「受け取る」ページの「プロフ」タブ →「デジタル商品」から。初回のみ販売者情報 (氏名または名称・連絡先) の登録が必要です (特定商取引法対応)。1 ウォレットにつき 24 商品まで、価格は 1〜1,000,000 の整数 JPYC。',
 
   methods: [
     {
@@ -256,7 +256,7 @@ const EN: StoreGuideContent = {
   basicsBody:
     'OpenPay digital products come in just two types. The core strategy for URL products: host the file on a free service and sell the share link. Buyers receive the link (or text) the moment payment completes, and can re-fetch it anytime from their library.',
   basicsPoint:
-    'All listings start from the Create page → Profile tab → Digital products. First-time sellers register seller information (name and contact — required by the Specified Commercial Transactions Act). Up to 12 products per wallet; prices are whole JPYC from 1 to 1,000,000.',
+    'All listings start from the Create page → Profile tab → Digital products. First-time sellers register seller information (name and contact — required by the Specified Commercial Transactions Act). Up to 24 products per wallet; prices are whole JPYC from 1 to 1,000,000.',
 
   methods: [
     {

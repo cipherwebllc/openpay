@@ -60,6 +60,12 @@ vi.mock('@/lib/x402/moderation', () => ({
   fetchSsrfSafe: ssrf.fetchSafe,
 }));
 vi.mock('@/lib/x402/hostedStore', () => ({
+  selectProfileProducts: (products: ReadonlyArray<{ featured?: boolean }>) => {
+    const featured = products.filter((p) => p.featured === true);
+    return featured.length === 0
+      ? { shown: [...products], hiddenCount: 0 }
+      : { shown: featured, hiddenCount: products.length - featured.length };
+  },
   isHostedId: (value: unknown) =>
     typeof value === 'string' && /^h_[0-9a-f]{32}$/.test(value),
   listAvailableHostedForOwner: hosted.listAvailableForOwner,

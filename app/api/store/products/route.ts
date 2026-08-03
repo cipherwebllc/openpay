@@ -35,6 +35,7 @@ const PRODUCT_INPUT_KEYS = new Set([
   'category',
   'tags',
   'handle',
+  'featured',
   'content',
   'saleActive',
 ]);
@@ -141,6 +142,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     category: raw.category,
     tags: raw.tags,
     handle: raw.handle,
+    featured: raw.featured,
     content: raw.content,
   });
   if (!parsed.ok) {

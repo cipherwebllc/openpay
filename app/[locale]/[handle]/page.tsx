@@ -30,7 +30,10 @@ import { normalizeHandle, decodeHandleSegment, handleStorefrontConfig } from '@/
 import { resolveHandleTheme, handlePageTheme } from '@/lib/handleTheme';
 import { resolveHandle } from '@/lib/handleStore';
 import { readShopLive } from '@/lib/shopLiveStore';
-import { listAvailableHostedForOwner } from '@/lib/x402/hostedStore';
+import {
+  listAvailableHostedForOwner,
+  selectProfileProducts,
+} from '@/lib/x402/hostedStore';
 import { decodeAgentCart } from '@/lib/agentOrder';
 import { searchParamsFromNext, type RouteSearch } from '@/lib/url';
 import { JsonLd, SITE_URL } from '@/components/StructuredData';
@@ -226,12 +229,15 @@ export default async function HandlePage({
   // 商品メタの障害をプロフィール/チップ本体へ波及させないため、null は商品節だけ省略する。
   // owner/revision は client 境界へ渡さない。payTo は 402 の merchant を署名前に照合する
   // buyer guard の期待値としてだけ渡す（402 自体にも公開されるアドレス）。
-  const creatorProducts: CreatorStorefrontProduct[] = (availableHosted ?? [])
+  const scopedHosted = (availableHosted ?? [])
     // 掲載先 handle が設定された商品はそのプロフにだけ出す (未設定 = 旧仕様どおり
     // owner の全プロフに表示・後方互換)。同一ウォレット複数 handle の誤帰属修正
     // (2026-08-04 user 裁定・plans/product-handle-attribution.md)。
-    .filter((product) => !product.handle || product.handle === normalized)
-    .map(
+    .filter((product) => !product.handle || product.handle === normalized);
+  // 厳選ショーケース: featured があればそれだけ表示し、残りは Store への
+  // 「すべての商品を見る」リンクが受ける (selectProfileProducts)。
+  const profileSelection = selectProfileProducts(scopedHosted);
+  const creatorProducts: CreatorStorefrontProduct[] = profileSelection.shown.map(
     (product) => ({
       id: product.id,
       title: product.title,
@@ -386,6 +392,12 @@ export default async function HandlePage({
               theme={theme}
               sellerDisclosureHref={`/${locale}/store/seller/${record.owner}`}
               autoOpenProductId={autoOpenProductId}
+              {...(profileSelection.hiddenCount > 0
+                ? {
+                    viewAllHref: `/${locale}/store?q=${encodeURIComponent(`@${normalized}`)}`,
+                    hiddenCount: profileSelection.hiddenCount,
+                  }
+                : {})}
             />
           ) : null}
           {/* 受取方法メニュー (複数なら選択ボタン、1つなら TipForm 直描画)。決済本体は TipForm に委譲。

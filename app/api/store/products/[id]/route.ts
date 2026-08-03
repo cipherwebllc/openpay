@@ -42,6 +42,7 @@ const PRODUCT_PATCH_KEYS = new Set([
   'category',
   'tags',
   'handle',
+  'featured',
   'content',
   'saleActive',
 ]);
@@ -260,6 +261,7 @@ export async function PATCH(
         ...(product.category ? { category: product.category } : {}),
         ...(product.tags ? { tags: product.tags } : {}),
         ...(product.handle ? { handle: product.handle } : {}),
+        ...(product.featured === true ? { featured: true } : {}),
         saleActive: nextSaleActive,
       },
     });
@@ -321,6 +323,7 @@ export async function PATCH(
       raw.category !== undefined ? raw.category : product.category,
     tags: raw.tags !== undefined ? raw.tags : product.tags,
     handle: raw.handle !== undefined ? raw.handle : product.handle,
+    featured: raw.featured !== undefined ? raw.featured : product.featured,
     content: candidateContent,
   });
   if (!parsed.ok) {
@@ -407,6 +410,7 @@ export async function PATCH(
         : {}),
       ...(parsed.product.tags ? { tags: parsed.product.tags } : {}),
       ...(parsed.product.handle ? { handle: parsed.product.handle } : {}),
+      ...(parsed.product.featured === true ? { featured: true } : {}),
       saleActive,
     },
     ...(contentChanged ? { content: parsed.content } : {}),

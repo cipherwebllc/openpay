@@ -36,6 +36,7 @@ type ProductSummary = {
   category?: string;
   tags?: readonly string[];
   handle?: string;
+  featured?: boolean;
   saleActive: boolean;
   contentAvailable: boolean;
   updatedAt?: number;
@@ -65,6 +66,7 @@ type ProductForm = {
   category: string;
   tags: string;
   listingHandle: string;
+  featured: boolean;
   content: string;
   saleActive: boolean;
 };
@@ -113,6 +115,7 @@ const EMPTY_PRODUCT_FORM: ProductForm = {
   category: '',
   tags: '',
   listingHandle: '',
+  featured: false,
   content: '',
   saleActive: false,
 };
@@ -469,6 +472,7 @@ function SignedInSellerPanel({
         category: product.category ?? '',
         tags: (product.tags ?? []).join(', '),
         listingHandle: product.handle ?? '',
+        featured: product.featured === true,
         content: content.value,
         saleActive: product.saleActive,
       });
@@ -508,6 +512,7 @@ function SignedInSellerPanel({
               .map((tag) => tag.trim())
               .filter(Boolean),
             handle: form.listingHandle || null,
+            featured: form.featured,
             content: form.content,
             saleActive: form.saleActive,
           }),
@@ -1050,6 +1055,22 @@ function SignedInSellerPanel({
                 </option>
               ) : null}
             </select>
+          </label>
+          <label className="flex items-start gap-2 text-sm text-slate-700 sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={productForm.featured}
+              onChange={(event) =>
+                updateProduct({ featured: event.target.checked })
+              }
+              className="mt-0.5 h-4 w-4 rounded border-slate-300"
+            />
+            <span>
+              <span className="font-medium">{t('featuredLabel')}</span>
+              <span className="mt-0.5 block text-xs text-slate-500">
+                {t('featuredHint')}
+              </span>
+            </span>
           </label>
           <label
             htmlFor="creator-store-product-tags"

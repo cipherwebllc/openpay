@@ -1049,7 +1049,9 @@
     "tagsLabel": "タグ (任意・カンマ区切り・最大 5 個)",
     "tagsPlaceholder": "例: prompt, 画像生成, chatgpt",
     "listingHandleLabel": "掲載するプロフィール",
-    "listingHandleAll": "すべての自分のプロフィールに掲載"
+    "listingHandleAll": "すべての自分のプロフィールに掲載",
+    "featuredLabel": "プロフィールで優先表示",
+    "featuredHint": "1 つ以上選ぶと、選んだ商品だけがプロフィールに表示されます (Store にはすべての商品が並びます)。"
   },
   "CreatorStorefront": {
     "heading": "販売中",
@@ -1066,7 +1068,8 @@
     },
     "libraryLink": "購入済みの商品はライブラリで見られます",
     "cardTotal": "{total} JPYC",
-    "cardBreakdown": "(価格 {price} + 手数料 {fee})"
+    "cardBreakdown": "(価格 {price} + 手数料 {fee})",
+    "viewAllProducts": "すべての商品を見る ({count} 件)"
   },
   "CreatorStorePurchase": {
     "dialogLabel": "デジタル商品を購入",

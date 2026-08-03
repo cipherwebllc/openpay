@@ -364,6 +364,22 @@ describe('hosted 作成と分離', () => {
     expect(clean?.tags).toEqual(['ok']);
   });
 
+  it('selectProfileProducts: featured が 1 つでもあればそれだけ・無ければ全件 (厳選ショーケース)', async () => {
+    const m = await mod();
+    const a = { id: 'a', featured: true };
+    const b: { id: string; featured?: boolean } = { id: 'b' };
+    const c = { id: 'c', featured: false };
+    expect(m.selectProfileProducts([a, b, c])).toEqual({
+      shown: [a],
+      hiddenCount: 2,
+    });
+    expect(m.selectProfileProducts([b, c])).toEqual({
+      shown: [b, c],
+      hiddenCount: 0,
+    });
+    expect(m.selectProfileProducts([])).toEqual({ shown: [], hiddenCount: 0 });
+  });
+
   it('handle (掲載先): 形式検証・寛容読込・replace 引継ぎ (誤帰属修正 2026-08-04)', async () => {
     const m = await mod();
     const okParsed = m.parseHostedInput(baseInput({ handle: 'Alice' }));

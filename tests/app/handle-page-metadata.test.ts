@@ -41,6 +41,12 @@ vi.mock('@/lib/handleStore', () => ({
   resolveHandle: vi.fn(async () => (h.ok ? { ok: true, record: h.record } : { ok: false })),
 }));
 vi.mock('@/lib/x402/hostedStore', () => ({
+  selectProfileProducts: (products: ReadonlyArray<{ featured?: boolean }>) => {
+    const featured = products.filter((p) => p.featured === true);
+    return featured.length === 0
+      ? { shown: [...products], hiddenCount: 0 }
+      : { shown: featured, hiddenCount: products.length - featured.length };
+  },
   listAvailableHostedForOwner,
 }));
 vi.mock('next-intl/server', () => ({
