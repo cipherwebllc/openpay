@@ -41,6 +41,18 @@ const USE_CASES = [
     image: '/landing/usecase-popup-payment.avif',
     altKey: 'useCase5ImageAlt',
   },
+  // LP 再構成 P2 (2026-08-04): 販売プラットフォーム化の 2 シーン。画像は Codex image_gen
+  // で既存 5 枚とスタイルを揃えて生成 (960x540 avif)。
+  {
+    id: '6',
+    image: '/landing/usecase-digital-goods.avif',
+    altKey: 'useCase6ImageAlt',
+  },
+  {
+    id: '7',
+    image: '/landing/usecase-ai-api.avif',
+    altKey: 'useCase7ImageAlt',
+  },
 ] as const;
 
 export async function LandingUseCases() {
@@ -55,9 +67,8 @@ export async function LandingUseCases() {
         <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('useCasesSubtitle')}</p>
       </div>
 
-      {/* 5 件 grid。mobile 1 col / sm 2 col / lg 3 col。5 件目は 3 col 行では
-          独立して左寄せになる (素直な flow)。デザイン上 6 件目で揃えるよりも
-          5 件を本気で並べる方が「内容が薄められない」感を出せる。 */}
+      {/* 7 件 grid。mobile 1 col / sm 2 col / lg 3 col。端数は flex-wrap の
+          justify-center で中央寄せ (素直な flow)。 */}
       <ul className="mt-10 flex flex-wrap justify-center gap-4">
         {USE_CASES.map((useCase) => (
           <li

@@ -217,7 +217,13 @@
     "sellablesSubtitle": "Any digital goods. List from your @handle profile — automatically shown in the Store.",
     "sellablesBody": "Deliver from anywhere you like — a URL (Google Drive, GitHub, etc.) or plain text (prompts, API keys). Sales go straight to your wallet in JPYC.",
     "sellablesCtaSell": "Start selling",
-    "sellablesCtaGuide": "Selling guide"
+    "sellablesCtaGuide": "Selling guide",
+    "useCase6Title": "🛍️ Digital goods",
+    "useCase6Body": "Sell prompts, assets, and documents from your @handle. Listed in the Store automatically — sales arrive in JPYC.",
+    "useCase6ImageAlt": "A laptop showing a digital goods store with product cards, and a phone with a purchase checkmark",
+    "useCase7Title": "🤖 Paid APIs for AI",
+    "useCase7Body": "Gate your existing API with x402 and list it in the AI store. AI agents pay from their own wallets.",
+    "useCase7ImageAlt": "A monitor showing a dashboard next to a small robot figurine, with a phone showing a payment screen"
   },
   "Market": {
     "title": "Market rate (reference)",
