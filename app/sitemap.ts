@@ -13,6 +13,7 @@ const PUBLIC_ROUTES = [
   '/scan',
   '/history',
   '/explore',
+  '/store',
   '/kit',
   '/discovery',
   '/directory',

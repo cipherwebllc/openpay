@@ -45,8 +45,10 @@ test.describe('/explore (Web3 サービス directory)', () => {
     await page.goto('/en/explore');
     // h1 を level + exact name で固定 (h2 "Resources (explore & analyze)" との
     // 部分一致衝突を回避)
+    // P5 (Store 統合): ナビから外れた後の役割を表題で明示 (探す→関連リンク集 /
+    // Explore→Related links)。URL・掲載リンクは不変。
     await expect(
-      page.getByRole('heading', { level: 1, name: 'Explore' }),
+      page.getByRole('heading', { level: 1, name: 'Related links' }),
     ).toBeVisible();
     await expect(
       page.getByRole('heading', { name: /Exchanges \(CEX\)/ }),

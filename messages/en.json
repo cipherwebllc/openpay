@@ -215,7 +215,7 @@
     "lastReceived": "Last received {time}"
   },
   "Explore": {
-    "pageTitle": "Explore",
+    "pageTitle": "Related links",
     "pageDescription": "Exchanges, dApps, and bridges that support JPYC / USDC, by category. Links are external.",
     "filterAll": "All",
     "categoryExchange": "Exchanges (CEX)",
