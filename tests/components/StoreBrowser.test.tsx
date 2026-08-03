@@ -73,6 +73,15 @@ describe('StoreBrowser', () => {
     expect(screen.getByText('条件に合う商品が見つかりません。')).toBeInTheDocument();
   });
 
+  it('@ 付き handle 検索 (プロフの「すべての商品を見る」?q=@handle 経由) がヒットする', () => {
+    renderWithIntl(
+      <StoreBrowser listings={LISTINGS} locale="ja" initialQuery="@alice" />,
+      { locale: 'ja' },
+    );
+    expect(screen.getByRole('link', { name: /AI プロンプト集/ })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /VRM アバター/ })).toBeNull();
+  });
+
   it('商品ゼロは empty 表示', () => {
     renderWithIntl(<StoreBrowser listings={[]} locale="ja" />, { locale: 'ja' });
     expect(

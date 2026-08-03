@@ -42,7 +42,9 @@ export function StoreBrowser({
       const haystack = [
         listing.title,
         listing.desc ?? '',
-        listing.handle,
+        // '@' 付きで持つ — プロフの「すべての商品を見る」リンク (?q=@handle) と
+        // 素の handle 入力の両方に substring 一致させる
+        `@${listing.handle}`,
         ...(listing.tags ?? []),
       ]
         .join('\n')
