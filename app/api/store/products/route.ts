@@ -16,6 +16,7 @@ import {
   STORE_BODY_MAX_BYTES,
   storePrivateJson,
 } from '@/app/api/store/_shared';
+import { touchStoreIndex } from '@/lib/x402/storeIndex';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -174,6 +175,8 @@ export async function POST(req: Request): Promise<NextResponse> {
       503,
     );
   }
+  // Store 掲載インデックス (P2)。no-throw: 障害は掲載遅延にしかならず出品本体へ波及させない。
+  await touchStoreIndex(created.product.id, created.product.createdAt);
   return storePrivateJson(
     { ok: true, product: created.product },
     201,
