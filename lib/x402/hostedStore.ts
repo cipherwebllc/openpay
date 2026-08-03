@@ -609,6 +609,40 @@ export type UpdateHostedResult =
  * 公開メタの更新 (owner 限定)。saleActive の切替と title/desc/emoji/price の変更に使う。
  * **contentAvailable は運営のみが下げる**ため、ここでは受け付けない。
  */
+/**
+ * Store 一覧 (P3) 用: index が返した id 列から公開可能な商品を引く。
+ * **index はヒント・ここが権威**: parse 成功 + id 一致 + saleActive + contentAvailable
+ * のみ通す (販売停止/moderation 抹消/壊れた行は表示に載らない)。順序は ids を保つ
+ * (index の newest-first を尊重)。KV 障害は 'storage' (空と区別)。
+ */
+export async function getHostedProductsByIds(
+  ids: readonly string[],
+): Promise<HostedProduct[] | 'storage'> {
+  const validIds = ids.filter(isHostedId);
+  if (validIds.length === 0) return [];
+  const values = await kvMget(validIds.map(hostedProductKey));
+  if (
+    !values.ok ||
+    !Array.isArray(values.value) ||
+    values.value.length !== validIds.length
+  ) {
+    return 'storage';
+  }
+  const out: HostedProduct[] = [];
+  for (let index = 0; index < validIds.length; index += 1) {
+    const product = parseStoredHostedProduct(values.value[index]);
+    if (
+      product &&
+      product.id === validIds[index] &&
+      product.saleActive &&
+      product.contentAvailable
+    ) {
+      out.push(product);
+    }
+  }
+  return out;
+}
+
 export async function updateHostedProduct(input: {
   id: string;
   owner: string;

@@ -2633,5 +2633,25 @@
       "api": "API",
       "other": "Other"
     }
+  },
+  "StorePage": {
+    "metaTitle": "OpenPay Store — Browse digital goods",
+    "metaDescription": "A marketplace of creator-published digital goods (prompts, assets, documents, 3D and more), purchasable with JPYC.",
+    "title": "Store",
+    "subtitle": "Browse creators' digital goods and buy with JPYC.",
+    "searchLabel": "Search products",
+    "searchPlaceholder": "Search by keyword, tag, or @handle",
+    "categoryFilterLabel": "Filter by category",
+    "categoryAll": "All",
+    "empty": "No products yet. Be the first seller!",
+    "noMatch": "No products match your filters.",
+    "storageError": "Could not load the product list. Please reload in a moment.",
+    "cardTotal": "{total} JPYC",
+    "cardBreakdown": "(Price {price} + fee {fee})",
+    "discoveryHint": "Looking for paid APIs and data your AI agent can consume directly?",
+    "discoveryLink": "Catalog for AI agents",
+    "ecosystemLink": "Related links",
+    "transparencyLink": "Operational transparency",
+    "relatedLabel": "Related pages"
   }
 }
