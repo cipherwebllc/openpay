@@ -5,11 +5,6 @@
     "ogImageAlt": "OpenPay — JPYCで、店舗まるごと。店舗向けQR決済・モバイルオーダー"
   },
   "Nav": {
-    "scan": "スキャン",
-    "create": "受取る",
-    "history": "履歴",
-    "explore": "探す",
-    "discovery": "AIストア",
     "connect": "接続",
     "disconnect": "切断",
     "signIn": "ログイン (署名)",
@@ -17,7 +12,11 @@
     "signedIn": "ログイン済",
     "reSignIn": "別アドレスでログイン中 — 再ログイン",
     "siweStatement": "OpenPay にこのウォレットでログインします。",
-    "signInError": "ログインに失敗しました"
+    "signInError": "ログインに失敗しました",
+    "pay": "決済",
+    "sell": "販売",
+    "store": "Store",
+    "me": "マイページ"
   },
   "Landing": {
     "tagline": "導入費用0円・即時着金・契約不要・オープンソース",
@@ -2653,5 +2652,26 @@
     "ecosystemLink": "関連リンク集",
     "transparencyLink": "運用透明性",
     "relatedLabel": "関連ページ"
+  },
+  "MePage": {
+    "metaTitle": "マイページ — OpenPay",
+    "metaDescription": "支払い・受け取りの履歴、購入済みのデジタル商品、プロフィールと出品の管理をまとめて確認できます。",
+    "title": "マイページ",
+    "subtitle": "履歴・購入・出品をここから。",
+    "cards": {
+      "history": {
+        "title": "履歴",
+        "desc": "この端末で行った支払い・受け取りの記録と会計 CSV。"
+      },
+      "library": {
+        "title": "購入済みライブラリ",
+        "desc": "購入したデジタル商品の再取得と購入証明。"
+      },
+      "selling": {
+        "title": "プロフィールと出品",
+        "desc": "@handle プロフィールの編集・デジタル商品の登録と管理。"
+      }
+    },
+    "note": "アカウント登録は不要です。履歴はこの端末に保存され、購入や出品の確認にはウォレット接続を使います。"
   }
 }

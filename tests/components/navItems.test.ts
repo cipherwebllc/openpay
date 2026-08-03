@@ -1,4 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Store 項目は client flag (enableCreatorStoreUi) で出し分けるため、この fence は
+// 本番相当 = flag ON で検証する (OFF の 3 枠は下の専用 it で担保)。
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return { ...actual, env: { ...actual.env, enableCreatorStoreUi: true } };
+});
 import {
   NAV_ITEMS,
   DESKTOP_NAV_ITEMS,
@@ -11,15 +18,17 @@ describe('navItems: NAV_ITEMS shape (regression fence)', () => {
     expect(NAV_ITEMS).toHaveLength(4);
   });
 
-  it('1 slot 目は「スキャン (/scan)」で支払う動線', () => {
-    expect(NAV_ITEMS[0]).toMatchObject({ key: 'scan', href: '/scan' });
+  it('1 slot 目は「決済 (/scan)」で支払う動線 (P4 4 区分)', () => {
+    expect(NAV_ITEMS[0]).toMatchObject({ key: 'pay', href: '/scan' });
   });
 
-  it('全 item key は { scan / create / history / explore } のいずれか', () => {
-    const valid = new Set(['scan', 'create', 'history', 'explore']);
-    for (const item of NAV_ITEMS) {
-      expect(valid.has(item.key)).toBe(true);
-    }
+  it('4 区分 = pay(/scan) / sell(/create) / store(/store) / me(/me) の順 (P4 fence)', () => {
+    expect(NAV_ITEMS.map((i) => [i.key, i.href])).toEqual([
+      ['pay', '/scan'],
+      ['sell', '/create'],
+      ['store', '/store'],
+      ['me', '/me'],
+    ]);
   });
 
   it('href はすべて /[name] 形式で先頭 slash 1 つだけ', () => {
@@ -106,32 +115,24 @@ describe('NAV_ITEMS active state (integration: pathRestForLocale → pathMatches
   // 各 nav item が想定する path での active 判定が正しく動くこと。
   // 「/ja」(LP) では全 nav item が inactive (ロゴ click で /ja に戻る設計)。
   it.each([
-    ['/ja', '', { scan: false, create: false, history: false, explore: false }],
-    [
-      '/ja/scan',
-      '/scan',
-      { scan: true, create: false, history: false, explore: false },
-    ],
+    ['/ja', '', { pay: false, sell: false, store: false, me: false }],
+    ['/ja/scan', '/scan', { pay: true, sell: false, store: false, me: false }],
     [
       '/ja/scan/help',
       '/scan/help',
-      { scan: true, create: false, history: false, explore: false },
+      { pay: true, sell: false, store: false, me: false },
     ],
+    ['/ja/create', '/create', { pay: false, sell: true, store: false, me: false }],
+    ['/ja/store', '/store', { pay: false, sell: false, store: true, me: false }],
     [
-      '/ja/create',
-      '/create',
-      { scan: false, create: true, history: false, explore: false },
+      '/ja/store/library',
+      '/store/library',
+      { pay: false, sell: false, store: true, me: false },
     ],
-    [
-      '/ja/history',
-      '/history',
-      { scan: false, create: false, history: true, explore: false },
-    ],
-    [
-      '/ja/explore',
-      '/explore',
-      { scan: false, create: false, history: false, explore: true },
-    ],
+    ['/ja/me', '/me', { pay: false, sell: false, store: false, me: true }],
+    // 旧ナビの行き先はどれもハイライトしない (URL は維持・導線は /me と /store 下部)
+    ['/ja/history', '/history', { pay: false, sell: false, store: false, me: false }],
+    ['/ja/explore', '/explore', { pay: false, sell: false, store: false, me: false }],
   ])('pathname=%s → rest=%s, 期待 active=%j', (pathname, expectedRest, active) => {
     const rest = pathRestForLocale(pathname, 'ja');
     expect(rest).toBe(expectedRest);
@@ -141,13 +142,11 @@ describe('NAV_ITEMS active state (integration: pathRestForLocale → pathMatches
       );
     }
   });
-});
 
 describe('navItems: DESKTOP_NAV_ITEMS (PC 専用拡張)', () => {
-  it('モバイル NAV_ITEMS は 4 枠のまま・PC は +AIストア (/discovery) の 5 枠', () => {
+  it('モバイル/PC とも同じ 4 枠 (AIストア単独項目は廃止・Store 経由 = P4)', () => {
     expect(NAV_ITEMS).toHaveLength(4);
-    expect(DESKTOP_NAV_ITEMS).toHaveLength(5);
-    expect(DESKTOP_NAV_ITEMS.slice(0, 4)).toEqual(NAV_ITEMS);
-    expect(DESKTOP_NAV_ITEMS[4]).toMatchObject({ key: 'discovery', href: '/discovery' });
+    expect(DESKTOP_NAV_ITEMS).toEqual(NAV_ITEMS);
   });
+});
 });

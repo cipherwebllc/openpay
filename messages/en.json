@@ -5,11 +5,6 @@
     "ogImageAlt": "OpenPay — Run your whole store on JPYC. QR payments and mobile ordering for stores"
   },
   "Nav": {
-    "scan": "Scan",
-    "create": "Receive",
-    "history": "History",
-    "explore": "Explore",
-    "discovery": "AI Store",
     "connect": "Connect",
     "disconnect": "Disconnect",
     "signIn": "Sign in (signature)",
@@ -17,7 +12,11 @@
     "signedIn": "Signed in",
     "reSignIn": "Different address — sign in again",
     "siweStatement": "Sign in to OpenPay with this wallet.",
-    "signInError": "Sign-in failed"
+    "signInError": "Sign-in failed",
+    "pay": "Pay",
+    "sell": "Sell",
+    "store": "Store",
+    "me": "My Page"
   },
   "Landing": {
     "tagline": "No setup cost · instant settlement · no contract · open source",
@@ -2653,5 +2652,26 @@
     "ecosystemLink": "Related links",
     "transparencyLink": "Operational transparency",
     "relatedLabel": "Related pages"
+  },
+  "MePage": {
+    "metaTitle": "My Page — OpenPay",
+    "metaDescription": "Your payment history, purchased digital goods, and profile / listing management in one place.",
+    "title": "My Page",
+    "subtitle": "History, purchases, and selling — all here.",
+    "cards": {
+      "history": {
+        "title": "History",
+        "desc": "Payments and receipts recorded on this device, with accounting CSV."
+      },
+      "library": {
+        "title": "Purchased library",
+        "desc": "Re-download purchased digital goods and view purchase proof."
+      },
+      "selling": {
+        "title": "Profile & listings",
+        "desc": "Edit your @handle profile, register and manage digital goods."
+      }
+    },
+    "note": "No account needed. History is stored on this device; purchases and selling use your wallet connection."
   }
 }

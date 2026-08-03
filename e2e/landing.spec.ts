@@ -53,7 +53,7 @@ test.describe('landing / (LP)', () => {
     ).toBeVisible();
   });
 
-  test('mobile: BottomNav に 4 link (ホーム/受け取る/履歴/探す) が出る', async ({
+  test('mobile: BottomNav に 決済/販売/マイページ が出る (P4・Store は flag 連動)', async ({
     page,
   }, testInfo) => {
     test.skip(
@@ -63,12 +63,14 @@ test.describe('landing / (LP)', () => {
     await page.goto('/ja');
     const bottomNav = page.getByRole('navigation', { name: 'bottom navigation' });
     await expect(bottomNav).toBeVisible();
-    // ホームへの戻りは AppHeader 左上のロゴクリックに集約。Nav 1 slot 目は「スキャン」。
-    await expect(bottomNav.getByRole('link', { name: /スキャン/ })).toBeVisible();
-    // Nav の受取導線ラベルは「受取る」(Nav.create)。
-    await expect(bottomNav.getByRole('link', { name: /受取る/ })).toBeVisible();
-    await expect(bottomNav.getByRole('link', { name: /履歴/ })).toBeVisible();
-    await expect(bottomNav.getByRole('link', { name: /探す/ })).toBeVisible();
+    // ホームへの戻りは AppHeader 左上のロゴクリックに集約。Nav 1 slot 目は「決済」。
+    // Store 項目は NEXT_PUBLIC_ENABLE_CREATOR_STORE 連動のため CI (flag OFF・掟 2) では
+    // 出ない — 常時 3 項目だけを検証し、Store の出し分けは unit (navItems.test) が担う。
+    await expect(bottomNav.getByRole('link', { name: /決済/ })).toBeVisible();
+    await expect(bottomNav.getByRole('link', { name: /販売/ })).toBeVisible();
+    await expect(
+      bottomNav.getByRole('link', { name: /マイページ/ }),
+    ).toBeVisible();
   });
 
   test('ja: Features セクションに 3 カード (ガスレス/マルチチェーン/ノンカストディ) が出る', async ({
