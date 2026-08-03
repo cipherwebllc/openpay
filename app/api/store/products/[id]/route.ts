@@ -254,6 +254,8 @@ export async function PATCH(
           : {}),
         priceJpyc: product.priceJpyc,
         label: product.label,
+        ...(product.category ? { category: product.category } : {}),
+        ...(product.tags ? { tags: product.tags } : {}),
         saleActive: nextSaleActive,
       },
     });
@@ -373,6 +375,10 @@ export async function PATCH(
         : {}),
       priceJpyc: parsed.product.priceJpyc,
       label: parsed.product.label,
+      ...(parsed.product.category
+        ? { category: parsed.product.category }
+        : {}),
+      ...(parsed.product.tags ? { tags: parsed.product.tags } : {}),
       saleActive,
     },
     ...(contentChanged ? { content: parsed.content } : {}),

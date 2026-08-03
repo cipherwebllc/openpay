@@ -693,6 +693,8 @@ export async function replaceHostedSellerProduct(input: {
     | 'galleryUrls'
     | 'priceJpyc'
     | 'label'
+    | 'category'
+    | 'tags'
     | 'saleActive'
   > & {
     desc?: string;
@@ -727,6 +729,8 @@ export async function replaceHostedSellerProduct(input: {
     priceJpyc: input.metadata.priceJpyc,
     contentKind: input.content?.kind ?? current.contentKind,
     label: input.metadata.label,
+    ...(input.metadata.category ? { category: input.metadata.category } : {}),
+    ...(input.metadata.tags?.length ? { tags: input.metadata.tags } : {}),
     contentRevision: revision,
     saleActive: input.metadata.saleActive,
     contentAvailable: current.contentAvailable,

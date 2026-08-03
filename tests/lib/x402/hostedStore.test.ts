@@ -363,6 +363,33 @@ describe('hosted 作成と分離', () => {
     expect(clean?.tags).toEqual(['ok']);
   });
 
+  it('replaceHostedSellerProduct: category/tags を metadata で引き継げる (編集/toggle で消えない)', async () => {
+    const m = await mod();
+    const parsed = m.parseHostedInput(baseInput({ category: 'ai', tags: ['prompt'] }));
+    if (!parsed.ok) throw new Error('setup');
+    const created = await m.createHostedProduct(parsed, 1000);
+    if (!created.ok) throw new Error('setup');
+    const snapshot = await m.getHostedProductUpdateSnapshot(created.product.id);
+    if (!snapshot || snapshot === 'storage') throw new Error('setup');
+    const replaced = await m.replaceHostedSellerProduct({
+      snapshot,
+      owner: OWNER,
+      metadata: {
+        title: created.product.title,
+        priceJpyc: created.product.priceJpyc,
+        label: created.product.label,
+        category: created.product.category,
+        tags: created.product.tags,
+        saleActive: false,
+      },
+      now: 2000,
+    });
+    if (!replaced.ok) throw new Error(replaced.reason);
+    expect(replaced.product.category).toBe('ai');
+    expect(replaced.product.tags).toEqual(['prompt']);
+    expect(replaced.product.saleActive).toBe(false);
+  });
+
   it('owner あたり上限を超えたら too_many (cap は Lua 内で判定)', async () => {
     const m = await mod();
     const parsed = m.parseHostedInput(baseInput());
