@@ -36,7 +36,7 @@ export const metadata: Metadata = {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'OpenPay — JPYCで、店舗まるごと。店舗向けQR決済・モバイルオーダー',
+        alt: 'OpenPay — スマホひとつで、JPYCを支払いにも販売にも。QR決済・モバイルオーダー・デジタル商品販売',
       },
     ],
   },

@@ -36,7 +36,7 @@ export async function LandingHero() {
 
         <div className="mx-auto mt-8 max-w-3xl overflow-hidden rounded-[1.75rem] bg-white shadow-lift ring-1 ring-slate-200/60 sm:mt-11">
           <Image
-            src="/landing/hero-qr-payment.avif"
+            src="/landing/hero-overview.avif"
             alt={t('heroVisualAlt')}
             width={1400}
             height={787}

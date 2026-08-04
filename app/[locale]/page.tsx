@@ -10,6 +10,8 @@ import { LandingFeatures } from '@/components/LandingFeatures';
 import { LandingAiAgents } from '@/components/LandingAiAgents';
 import { LandingBenefits } from '@/components/LandingBenefits';
 import { LandingCapabilities } from '@/components/LandingCapabilities';
+import { LandingEntryPoints } from '@/components/LandingEntryPoints';
+import { LandingWhyStablecoin } from '@/components/LandingWhyStablecoin';
 import { LandingCashComparison } from '@/components/LandingCashComparison';
 import { LandingSellables } from '@/components/LandingSellables';
 import { LandingUseCases } from '@/components/LandingUseCases';
@@ -46,9 +48,15 @@ export default async function HomePage({
       <LandingMobileOrder />
       {/* モバイル注文昇格の直後に「売上を待たない」の一枚で、即時着金の価値を一文で刻む。 */}
       <LandingPayoutStatement />
+      {/* 総合案内化 P1 (plans/site-ia-guides-ruling.md): 初訪問者の前提知識
+          「なぜステーブルコイン/JPYCとは」を、できること一覧の前に置く。 */}
+      <LandingWhyStablecoin />
       {/* できること 4 区分 (ナビと同構造・plans/lp-restructure-ruling.md P1)。
           モバイル注文昇格 (user 確定 positioning) の後・理由説明の前に全体像を一望させる。 */}
       <LandingCapabilities />
+      {/* 用途別 3 入口 (総合案内化 P1)。機能一覧 (できること) の直後に
+          「自分はどれから始めるか」を選ばせる。 */}
+      <LandingEntryPoints />
       <LandingBenefits />
       <LandingCashComparison />
       {/* 販売セクション (plans/lp-restructure-ruling.md P2)。店舗向けの後に
