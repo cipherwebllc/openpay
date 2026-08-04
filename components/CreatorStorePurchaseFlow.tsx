@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { AlertTriangle, Loader2, WalletCards, X } from 'lucide-react';
+import { AlertTriangle, Loader2, X } from 'lucide-react';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from '@/components/ConnectButton';
 import { formatUnits } from 'viem';
@@ -276,23 +276,32 @@ export function CreatorStorePurchaseFlow({
             ) : null}
           </div>
         ) : (
-          <div className="rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-2xl sm:p-8">
-            <WalletCards className="mx-auto h-9 w-9 text-brand" aria-hidden />
-            <h2 className="mt-3 text-xl font-black text-slate-900">
-              {t('startHeading')}
-            </h2>
-            <p
-              id="creator-store-purchase-product-title"
-              className="mt-2 font-bold text-slate-900"
-            >
-              {product.title}
-            </p>
+          // ショーケース調 (plans/store-showcase-polish.md P3): 画像をフルブリードで
+          // 主役化し、見出しの重複 (dialogLabel/購入の準備/商品名) を整理 — 商品名を
+          // 主見出しに昇格し「購入の準備」は eyebrow へ。説明全文をここで表示する
+          // (プロフカードの line-clamp-2 の受け皿)。金額開示・CTA・通報は不変。
+          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white text-center shadow-2xl">
             <CreatorStorePurchaseGallery
               key={product.id}
               imageUrl={product.imageUrl}
               galleryUrls={product.galleryUrls}
               labelledBy="creator-store-purchase-product-title"
             />
+            <div className="p-6 sm:p-8">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-brand">
+              {t('startHeading')}
+            </p>
+            <h2
+              id="creator-store-purchase-product-title"
+              className="mt-1.5 text-xl font-black text-slate-900"
+            >
+              {product.title}
+            </h2>
+            {product.description ? (
+              <p className="mx-auto mt-3 max-w-prose whitespace-pre-wrap break-words text-left text-sm leading-relaxed text-slate-600">
+                {product.description}
+              </p>
+            ) : null}
             {/* 買い手の意思決定基準は合計 (2026-07-31 user 裁定)。式は購入 hook の
                 server quote 照合と同一関数 = 表示と実請求の乖離なし。 */}
             <p className="mt-2 text-lg font-black text-slate-900">
@@ -377,6 +386,7 @@ export function CreatorStorePurchaseFlow({
                 {t('reportProduct')}
               </a>
             </p>
+            </div>
           </div>
         )}
       </div>
@@ -420,8 +430,9 @@ function CreatorStorePurchaseGallery({
   if (!selectedImage) return null;
 
   return (
-    <div className="mt-4">
-      {/* 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制する。 */}
+    <div>
+      {/* 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制する。
+          パネル最上部のフルブリード (P3 ショーケース化・角丸は親の overflow-hidden)。 */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={selectedImage.url}
@@ -430,14 +441,14 @@ function CreatorStorePurchaseGallery({
         width={640}
         height={360}
         referrerPolicy="no-referrer"
-        className="h-52 max-h-72 w-full rounded-2xl bg-slate-100 object-cover sm:h-64"
+        className="aspect-[16/9] max-h-80 w-full bg-slate-100 object-cover"
         onError={() => hideFailedImage(selectedImage.id)}
       />
       {visibleImages.length >= 2 ? (
         <div
           role="group"
           aria-labelledby={labelledBy}
-          className="mt-3 flex flex-wrap justify-center gap-2"
+          className="mt-3 flex flex-wrap justify-center gap-2 px-4"
         >
           {visibleImages.map((image) => {
             const selected = image.id === selectedImage.id;
