@@ -29,7 +29,7 @@ test.describe('middleware: next-intl locale prefix / redirect', () => {
     // Phase 1 で / は QR タブから LP に置換。LP の英語 leadline + Hero CTA を
     // assert する (旧「Payment QR (merchant)」タブ button は /create に移動)。
     await expect(
-      page.getByRole('heading', { name: /Run your whole store on JPYC/ }),
+      page.getByRole('heading', { name: /One phone to pay and sell with JPYC/ }),
     ).toBeVisible();
     await expect(
       page.getByRole('link', { name: /Pay \(Scan\)/ }),

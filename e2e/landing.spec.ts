@@ -11,9 +11,9 @@ test.describe('landing / (LP)', () => {
     // AppHeader: logo は alt='OpenPay' の h1
     await expect(page.getByRole('heading', { name: 'OpenPay' }).first()).toBeVisible();
 
-    // Hero leadline (h2) — 「JPYCで、店舗まるごと。」(店舗レイヤー positioning)
+    // Hero leadline (h2) — 「スマホひとつで、JPYCを支払いにも販売にも」(総合案内化 P1)
     await expect(
-      page.getByRole('heading', { name: /JPYCで、店舗まるごと/ }),
+      page.getByRole('heading', { name: /スマホひとつで、JPYCを支払いにも販売にも/ }),
     ).toBeVisible();
     await expect(
       page.getByRole('heading', { name: '売上を待たない。' }),
