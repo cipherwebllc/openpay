@@ -2709,7 +2709,6 @@
     "noMatch": "No products match your filters.",
     "storageError": "Could not load the product list. Please reload in a moment.",
     "cardTotal": "{total} JPYC",
-    "cardBreakdown": "(Price {price} + fee {fee})",
     "discoveryHint": "Looking for paid APIs and data your AI agent can consume directly?",
     "discoveryLink": "Catalog for AI agents",
     "ecosystemLink": "Related links",
