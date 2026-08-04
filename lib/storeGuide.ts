@@ -4,6 +4,12 @@
 // 24 商品上限・価格帯) は本番実装と一致させること — 変えるときは実装と同時に。
 
 import type { Metadata } from 'next';
+import { DISCLOSED_X402_FEE } from '@/lib/legal';
+
+// 手数料の文言は開示済み定数から組み立てる (率の直書きを増やさない —
+// plans/site-ia-guides-ruling.md N7。改定時は legal.ts 側の変更に自動追随)。
+const X402_RATE_JA = `価格の ${DISCLOSED_X402_FEE.bps / 100}%・最低 ${DISCLOSED_X402_FEE.floorJpyc} JPYC`;
+const X402_RATE_EN = `${DISCLOSED_X402_FEE.bps / 100}% of the price, minimum ${DISCLOSED_X402_FEE.floorJpyc} JPYC`;
 
 export type StoreGuideMethod = {
   readonly n: number;
@@ -20,6 +26,27 @@ export type StoreGuideContent = {
   readonly metaTitle: string;
   readonly metaDescription: string;
   readonly backHome: string;
+
+  // --- LP 前半 (P2 総合案内化・plans/site-ia-guides-ruling.md N5/N11) ---
+  readonly heroTitle: string;
+  readonly heroLead: string;
+  readonly heroCtaProfile: string;
+  readonly heroCtaStore: string;
+  readonly forWhoTitle: string;
+  readonly forWhoChips: readonly string[];
+  readonly featuresTitle: string;
+  readonly features: readonly {
+    readonly title: string;
+    readonly body: string;
+  }[];
+  readonly categoriesTitle: string;
+  readonly categoriesExamples: string;
+  readonly feeTitle: string;
+  readonly feeBody: string;
+  readonly startTitle: string;
+  readonly startSteps: readonly string[];
+  /** 後半 = 既存の操作ガイド (6 つの方法) の通し見出し */
+  readonly opsTitle: string;
 
   readonly title: string;
   readonly subtitle: string;
@@ -54,11 +81,66 @@ export type StoreGuideContent = {
 };
 
 const JA: StoreGuideContent = {
-  metaTitle:
-    '無料サービスで始めるデジタル商品販売 — 6 つの方法と手順 | OpenPay',
+  metaTitle: 'JPYCでチップ・デジタル商品販売 — クリエイター向け | OpenPay',
   metaDescription:
-    'サーバーも決済契約も不要。Google ドライブ・Notion・YouTube 限定公開などの無料サービスにコンテンツを置き、OpenPay の @handle プロフィールで JPYC 販売する実践レシピ集。',
+    'ウォレットアドレスだけで、プロフィール作成・チップ受付・デジタル商品販売。無料サービスと組み合わせる 6 つの販売レシピつき。売り手手数料なし・公開商品は OpenPay Store にも掲載。',
   backHome: '← OpenPay トップへ',
+
+  heroTitle: 'プロフィールひとつで、応援もデジタル商品販売も',
+  heroLead:
+    'ウォレットアドレスだけで、プロフィール作成・チップ受付・デジタル商品販売を始められます。アカウント登録も月額費用も不要です。',
+  heroCtaProfile: 'プロフィールを作る',
+  heroCtaStore: 'Store を見る',
+  forWhoTitle: 'こんな人に向いています',
+  forWhoChips: [
+    '個人クリエイター',
+    'イラストレーター',
+    '音楽・動画制作者',
+    '3D・ゲーム素材制作者',
+    'AI 開発者',
+    '個人開発者',
+    'テンプレート制作者',
+    'コミュニティ運営者',
+  ],
+  featuresTitle: 'クリエイター機能でできること',
+  features: [
+    {
+      title: 'プロフィール (リンクまとめ)',
+      body: 'SNS や外部リンクをひとつのページにまとめ、@handle の恒久 URL で共有できます。テーマは 6 種類。',
+    },
+    {
+      title: 'チップ・応援',
+      body: 'JPYC でチップを受け取れます。メッセージ付きの応援にも対応。受け取り手数料はありません。',
+    },
+    {
+      title: 'デジタル商品販売',
+      body: 'テキスト・ファイル・外部 URL のデジタル商品を JPYC で販売。数十円の少額商品も売りやすい価格帯です。',
+    },
+    {
+      title: 'OpenPay Store への掲載',
+      body: '公開した商品は OpenPay Store にも並び、プロフィールの外からも見つけてもらえます。',
+    },
+    {
+      title: '購入済みライブラリ',
+      body: '買い手は購入した商品をいつでもライブラリから開き直せます。再ダウンロードの問い合わせ対応は不要です。',
+    },
+    {
+      title: '外部クラウドで配布',
+      body: 'Google ドライブ・Notion・YouTube 限定公開など、無料サービスと組み合わせて配布できます。',
+    },
+  ],
+  categoriesTitle: '販売できる商品の例',
+  categoriesExamples:
+    'PDF・電子書籍・プロンプト・ソースコード・API・MCP サーバー・イラスト・NFT・動画・音源・BGM・テンプレート・3D モデル・VRM・Unity 素材・ゲーム素材 など。',
+  feeTitle: '手数料',
+  feeBody: `売り手手数料はありません。買い手が商品価格に加えて x402 利用料 (${X402_RATE_JA}) を負担します。チップの受け取りにも手数料はありません。`,
+  startTitle: '始め方 (3 ステップ)',
+  startSteps: [
+    'ウォレットを接続して、プロフィール (@handle) を作る',
+    '販売者情報を登録して、商品を追加する',
+    'プロフィールの URL を SNS で共有する — 公開した商品は Store にも並びます',
+  ],
+  opsTitle: '販売のヒント: 無料サービスで始めるデジタル商品販売',
 
   title: '無料サービスで始めるデジタル商品販売',
   subtitle: '6 つの方法と手順',
@@ -225,11 +307,66 @@ const JA: StoreGuideContent = {
 };
 
 const EN: StoreGuideContent = {
-  metaTitle:
-    'Sell digital goods with free services — 6 methods, step by step | OpenPay',
+  metaTitle: 'Tips & digital product sales with JPYC — for creators | OpenPay',
   metaDescription:
-    'No server, no merchant contract. Host your content on free services like Google Drive, Notion, or unlisted YouTube, and sell it for JPYC on your OpenPay @handle profile.',
+    'All you need is a wallet address: create a profile, receive tips, and sell digital products for JPYC. Includes 6 practical recipes using free services. No seller fee; published products also appear in the OpenPay Store.',
   backHome: '← Back to OpenPay',
+
+  heroTitle: 'One profile for tips and digital product sales',
+  heroLead:
+    'All you need is a wallet address: create a profile, receive tips, and sell digital products. No account signup, no monthly fee.',
+  heroCtaProfile: 'Create your profile',
+  heroCtaStore: 'Browse the Store',
+  forWhoTitle: 'Who this is for',
+  forWhoChips: [
+    'Independent creators',
+    'Illustrators',
+    'Music & video makers',
+    '3D & game asset artists',
+    'AI developers',
+    'Indie developers',
+    'Template makers',
+    'Community organizers',
+  ],
+  featuresTitle: 'What creator features can do',
+  features: [
+    {
+      title: 'Profile (link in bio)',
+      body: 'Gather your social and external links on one page and share it with a permanent @handle URL. Six themes available.',
+    },
+    {
+      title: 'Tips & support',
+      body: 'Receive tips in JPYC, including support with messages. No fee on receiving tips.',
+    },
+    {
+      title: 'Digital product sales',
+      body: 'Sell text, files, and external-URL products for JPYC. Small-ticket items work well too.',
+    },
+    {
+      title: 'Listed on the OpenPay Store',
+      body: 'Published products also appear in the OpenPay Store, so buyers can discover them beyond your profile.',
+    },
+    {
+      title: 'Buyer library',
+      body: 'Buyers can reopen purchased products anytime from their library — no re-download support needed.',
+    },
+    {
+      title: 'Deliver via free cloud services',
+      body: 'Combine with free services such as Google Drive, Notion, or unlisted YouTube for delivery.',
+    },
+  ],
+  categoriesTitle: 'Examples of what you can sell',
+  categoriesExamples:
+    'PDFs, e-books, prompts, source code, APIs, MCP servers, illustrations, NFTs, videos, music, BGM, templates, 3D models, VRM, Unity assets, game assets, and more.',
+  feeTitle: 'Fees',
+  feeBody: `No seller fee. Buyers pay an x402 usage fee (${X402_RATE_EN}) on top of the product price. Receiving tips is also free of fees.`,
+  startTitle: 'Get started in 3 steps',
+  startSteps: [
+    'Connect a wallet and create your profile (@handle)',
+    'Register seller information and add products',
+    'Share your profile URL on social media — published products also appear in the Store',
+  ],
+  opsTitle: 'Selling tips: digital product sales with free services',
 
   title: 'Sell digital goods with free services',
   subtitle: '6 methods, step by step',
@@ -401,8 +538,26 @@ export function storeGuideContentFor(locale: string): StoreGuideContent {
 
 export function storeGuideMetadata(locale: string): Metadata {
   const c = storeGuideContentFor(locale);
+  // OG はページ専用の静的画像 (public/og-creator.webp・P2 で Codex 生成)。
+  const ogImage = {
+    url: '/og-creator.webp',
+    width: 1200,
+    height: 630,
+    alt: c.heroTitle,
+  };
   return {
     title: c.metaTitle,
     description: c.metaDescription,
+    openGraph: {
+      title: c.metaTitle,
+      description: c.metaDescription,
+      images: [ogImage],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: c.metaTitle,
+      description: c.metaDescription,
+      images: ['/og-creator.webp'],
+    },
   };
 }

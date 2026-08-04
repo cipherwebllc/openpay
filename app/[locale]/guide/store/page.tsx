@@ -7,10 +7,12 @@
 
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { setRequestLocale } from 'next-intl/server';
+import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { BulletList, Section } from '@/components/guide/PosGuidePieces';
 import { storeGuideContentFor, storeGuideMetadata } from '@/lib/storeGuide';
+import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
+import { env } from '@/lib/env';
 
 export async function generateMetadata({
   params,
@@ -30,6 +32,7 @@ export default async function GuideStorePage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = storeGuideContentFor(locale);
+  const tCatalog = await getTranslations({ locale, namespace: 'StoreCatalog' });
 
   return (
     <AppShell>
@@ -42,10 +45,106 @@ export default async function GuideStorePage({
           {c.backHome}
         </Link>
 
+        {/* --- LP 前半 (P2 総合案内化): Hero → 誰向け → できること → 商品例 →
+            手数料 → 始め方。後半は既存の操作ガイド (opsTitle 以下) を全て保持。 --- */}
         <header className="mt-4">
-          <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-            {c.title}
+          <h1 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
+            {c.heroTitle}
           </h1>
+          <p className="mt-4 max-w-2xl text-sm leading-relaxed text-slate-700 sm:text-base">
+            {c.heroLead}
+          </p>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Link
+              href={`/${locale}/create?tab=profile`}
+              prefetch={false}
+              className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+            >
+              {c.heroCtaProfile}
+            </Link>
+            {env.enableCreatorStoreUi ? (
+              <Link
+                href={`/${locale}/store`}
+                prefetch={false}
+                className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                {c.heroCtaStore}
+              </Link>
+            ) : null}
+          </div>
+        </header>
+
+        <Section title={c.forWhoTitle}>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {c.forWhoChips.map((chip) => (
+              <span
+                key={chip}
+                className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700"
+              >
+                {chip}
+              </span>
+            ))}
+          </div>
+        </Section>
+
+        <Section title={c.featuresTitle}>
+          <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {c.features.map((f) => (
+              <div
+                key={f.title}
+                className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)]"
+              >
+                <h3 className="text-sm font-bold text-slate-900">{f.title}</h3>
+                <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                  {f.body}
+                </p>
+              </div>
+            ))}
+          </div>
+        </Section>
+
+        <Section title={c.categoriesTitle}>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {HOSTED_PRODUCT_CATEGORIES.map((category) => (
+              <span
+                key={category}
+                className="rounded-full bg-white px-3.5 py-1.5 text-sm font-semibold text-slate-700 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] ring-1 ring-slate-200"
+              >
+                {tCatalog(`categories.${category}`)}
+              </span>
+            ))}
+          </div>
+          <p className="mt-4 text-sm leading-relaxed text-slate-700">
+            {c.categoriesExamples}
+          </p>
+        </Section>
+
+        <Section title={c.feeTitle}>
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">
+            {c.feeBody}
+          </p>
+        </Section>
+
+        <Section title={c.startTitle}>
+          <ol className="mt-4 space-y-3">
+            {c.startSteps.map((step, i) => (
+              <li key={step} className="flex items-start gap-3">
+                <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">
+                  {i + 1}
+                </span>
+                <span className="text-sm leading-relaxed text-slate-700">
+                  {step}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </Section>
+
+        {/* --- ここから既存の操作ガイド (6 つの方法・全文維持) --- */}
+        <header className="mt-14 border-t border-slate-200 pt-10">
+          <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+            {c.opsTitle}
+          </h2>
           <p className="mt-2 text-base font-medium text-emerald-700">
             {c.subtitle}
           </p>
