@@ -201,7 +201,18 @@ export default async function HandlePage({
     process.env.STORE_DEV_FIXTURES === '1' &&
     normalized === 'fixture';
   const resolved = devFixtureProfile
-    ? { ok: true as const, record: DEV_FIXTURE_HANDLE_RECORD }
+    ? {
+        ok: true as const,
+        // ?theme=night 等でテーマ総点検できるようにする (fixture 時のみ・不正値は
+        // resolveHandleTheme が既定へ落とすので検証不要)。
+        record: {
+          ...DEV_FIXTURE_HANDLE_RECORD,
+          profile: {
+            ...DEV_FIXTURE_HANDLE_RECORD.profile,
+            theme: routeSearch.get('theme') ?? undefined,
+          },
+        } as typeof DEV_FIXTURE_HANDLE_RECORD,
+      }
     : await resolveHandleCached(normalized);
   // KV 未設定/outage は誤って「存在しない (404)」と返さず 5xx に倒す (transient と gone を区別)。
   if (!resolved.ok) throw new Error('handle_store_unavailable');
