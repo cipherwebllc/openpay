@@ -195,7 +195,7 @@ describe('CreatorStorePurchaseFlow', () => {
     });
 
     const largeImage = () =>
-      container.querySelector<HTMLImageElement>('img.max-h-72');
+      container.querySelector<HTMLImageElement>('img.max-h-80');
     expect(largeImage()).toHaveAttribute('src', imageUrl);
     expect(largeImage()).toHaveAttribute('alt', '');
     expect(largeImage()).toHaveAttribute('aria-hidden', 'true');
@@ -233,7 +233,7 @@ describe('CreatorStorePurchaseFlow', () => {
     });
 
     expect(
-      container.querySelector<HTMLImageElement>('img.max-h-72'),
+      container.querySelector<HTMLImageElement>('img.max-h-80'),
     ).toHaveAttribute('src', galleryUrl);
     expect(screen.queryByRole('button', { name: '1' })).toBeNull();
   });
