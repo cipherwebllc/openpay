@@ -387,6 +387,12 @@
         "linkLabel": "Open MetaMask Swap",
         "disclaimer": "Note: Availability, supported chains, and success of MetaMask features depend on MetaMask itself; OpenPay is not involved. Network congestion or unsupported token routes on any chain may cause the swap to fail."
       }
+    },
+    "guideLinks": {
+      "title": "Guides by use case",
+      "qr": "Start with a payment QR",
+      "shop": "Start POS & mobile ordering",
+      "store": "Start creator features"
     }
   },
   "QrGenerator": {

@@ -7,6 +7,8 @@
 // - Claude Desktop の設定 JSON は packages/x402-mcp/README.md の x402 profile と同一にする。
 // - JPYC 入手セクションは lib/agentGuide.ts の文言を直接再利用し、ガイド間の drift を防ぐ。
 
+import type { Metadata } from 'next';
+import { guidePageMetadata } from '@/lib/guideMetadata';
 import type { GuideStep } from './posGuide';
 import {
   agentGuideContentFor,
@@ -405,10 +407,13 @@ export function aiPayGuideContentFor(locale: string): AiPayGuideContent {
 }
 
 /** /guide/ai-pay の <title>/<description> を組み立てる。 */
-export function guideAiPayMetadata(locale: string): {
-  title: string;
-  description: string;
-} {
+export function guideAiPayMetadata(locale: string): Metadata {
   const c = aiPayGuideContentFor(locale);
-  return { title: `${c.metaTitle} · OpenPay`, description: c.metaDescription };
+  // OG/Twitter/canonical/hreflang は guide 共通ビルダーで (P5・N9)。
+  return guidePageMetadata({
+    locale,
+    path: '/guide/ai-pay',
+    title: `${c.metaTitle} · OpenPay`,
+    description: c.metaDescription,
+  });
 }

@@ -10,6 +10,9 @@
 // - POS アフィリエイトは affiliate=true のとき 景表法「広告」開示が要る (lib/explore.ts と同じ思想)。
 //   承認前は posExamples を非広告の参考列挙にとどめる。
 
+import type { Metadata } from 'next';
+import { guidePageMetadata } from '@/lib/guideMetadata';
+
 export type GuideLocale = 'ja' | 'en';
 
 export type GuideStep = { readonly n: number; readonly title: string; readonly body: string };
@@ -90,6 +93,9 @@ export type GuideContent = {
   readonly ctaButtonHref: string;
 
   readonly backHome: string;
+  readonly relatedTitle: string;
+  readonly relatedQr: string;
+  readonly relatedShop: string;
 };
 
 // スマレジ (クラウド POS) の A8.net アフィリエイトリンク。ja/en 共通。クリック計測は a8mat 付き
@@ -249,6 +255,9 @@ const ja: GuideContent = {
   ctaButtonHref: '/create',
 
   backHome: '← トップにもどる',
+  relatedTitle: '関連ガイド',
+  relatedQr: 'まずはシンプルに — 決済QRガイド',
+  relatedShop: '商品登録から注文受付まで — レジ・モバイルオーダー',
 };
 
 const en: GuideContent = {
@@ -402,6 +411,9 @@ const en: GuideContent = {
   ctaButtonHref: '/create',
 
   backHome: '← Back to home',
+  relatedTitle: 'Related guides',
+  relatedQr: 'Keep it simple — the payment QR guide',
+  relatedShop: 'From product setup to order intake — POS & mobile ordering',
 };
 
 export const POS_GUIDE: Record<GuideLocale, GuideContent> = { ja, en };
@@ -412,10 +424,13 @@ export function guideContentFor(locale: string): GuideContent {
 }
 
 /** /guide/pos の <title>/<description> を組み立てる (page の generateMetadata が利用)。 */
-export function guidePosMetadata(locale: string): {
-  title: string;
-  description: string;
-} {
+export function guidePosMetadata(locale: string): Metadata {
   const c = guideContentFor(locale);
-  return { title: `${c.metaTitle} · OpenPay`, description: c.metaDescription };
+  // OG/Twitter/canonical/hreflang は guide 共通ビルダーで (P5・N9)。
+  return guidePageMetadata({
+    locale,
+    path: '/guide/pos',
+    title: `${c.metaTitle} · OpenPay`,
+    description: c.metaDescription,
+  });
 }
