@@ -8,6 +8,8 @@
 // - x402 利用料の表現は messages/*.json と lib/legal.ts の開示に合わせ、売り手の満額着金と
 //   買い手上乗せを混同しない。
 
+import type { Metadata } from 'next';
+import { guidePageMetadata } from '@/lib/guideMetadata';
 import type { GuideStep } from './posGuide';
 
 export type SellGuideLocale = 'ja' | 'en';
@@ -438,10 +440,13 @@ export function sellGuideContentFor(locale: string): SellGuideContent {
 }
 
 /** /guide/sell の <title>/<description> を組み立てる (page の generateMetadata が利用)。 */
-export function guideSellMetadata(locale: string): {
-  title: string;
-  description: string;
-} {
+export function guideSellMetadata(locale: string): Metadata {
   const c = sellGuideContentFor(locale);
-  return { title: `${c.metaTitle} · OpenPay`, description: c.metaDescription };
+  // OG/Twitter/canonical/hreflang は guide 共通ビルダーで (P5・N9)。
+  return guidePageMetadata({
+    locale,
+    path: '/guide/sell',
+    title: `${c.metaTitle} · OpenPay`,
+    description: c.metaDescription,
+  });
 }

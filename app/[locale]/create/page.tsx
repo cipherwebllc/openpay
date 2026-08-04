@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowRightLeft, ChevronRight, Fuel } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
@@ -236,6 +237,32 @@ export default function CreatePage() {
         </details>
       </section>
       )}
+
+      {/* 販売ハブとしての用途別ガイド入口 (P5・plans/site-ia-guides-ruling.md N10)。 */}
+      <section className="mt-10">
+        <h2 className="text-sm font-semibold text-slate-500">
+          {t('guideLinks.title')}
+        </h2>
+        <ul className="mt-2 space-y-1.5">
+          {(
+            [
+              ['qr', 'qr'],
+              ['shop', 'shop'],
+              ['store', 'store'],
+            ] as const
+          ).map(([key, slug]) => (
+            <li key={key}>
+              <Link
+                href={`/${locale}/guide/${slug}`}
+                prefetch={false}
+                className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
+              >
+                {t(`guideLinks.${key}`)} →
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
     </AppShell>
   );
 }

@@ -17,11 +17,13 @@ OpenPay is an open-source, non-custodial payment layer for the Japanese yen stab
 
 - [OpenPay トップ](https://open-pay.jp/ja): サービス概要・導入メリット・使い方・FAQ・利用料
 - [運用の透明性](https://open-pay.jp/ja/transparency): 資金を保管しない仕組み・対応コントラクト・決済検証と確定・手数料の決め方・返金不可・掲載審査と通報の 1 ページ集約
+- [決済QRガイド](https://open-pay.jp/ja/guide/qr): 金額を入力して QR を提示するだけのシンプルな JPYC 受け取り。小規模店舗・個人事業主・イベント出店・対面販売向け LP 兼ガイド
+- [レジ・モバイルオーダーガイド](https://open-pay.jp/ja/guide/shop): 商品・メニューを一度登録して店頭レジとモバイルオーダーで共通利用する店舗運営者向け LP 兼ガイド (受注管理・売上履歴・電子レシート・会計 CSV)
 - [モバイルオーダー / POS 併用ガイド](https://open-pay.jp/ja/guide/pos): 既存のPOSレジと併用する運用ガイド
 - [店頭キット](https://open-pay.jp/ja/kit): 決済QRポスター等の印刷キット
 - [受け取りを始める](https://open-pay.jp/ja/create): 決済QR・モバイルオーダーの作成
 - [OpenPay Store](https://open-pay.jp/ja/store): クリエイターが公開したデジタル商品 (プロンプト・素材・ドキュメント・3D 等) を横断検索して JPYC で購入できるマーケットプレイス。プロフィール (@handle) の公開商品と自動連動
-- [デジタル商品販売ガイド](https://open-pay.jp/ja/guide/store): 無料サービス (Google ドライブ・Notion・YouTube 限定公開等) と組み合わせてデジタル商品を JPYC 販売する 6 つの方法と手順
+- [クリエイターガイド](https://open-pay.jp/ja/guide/store): プロフィール (@handle)・チップ受付・デジタル商品販売の LP 兼ガイド。無料サービス (Google ドライブ・Notion・YouTube 限定公開等) と組み合わせて JPYC 販売する 6 つの方法と手順つき
 - [English](https://open-pay.jp/en): English version of the site
 
 ## AI エージェント向け

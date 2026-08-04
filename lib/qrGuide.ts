@@ -6,6 +6,7 @@
 // フェンス済みの Landing.supportFeePay* / Landing.faqA2 (messages) を描画する。
 
 import type { Metadata } from 'next';
+import { guidePageMetadata } from '@/lib/guideMetadata';
 
 export type QrGuideContent = {
   readonly metaTitle: string;
@@ -210,25 +211,11 @@ export function qrGuideContentFor(locale: string): QrGuideContent {
 /** /guide/qr の metadata。OG 画像は現行トップの og-image.png を流用 (裁定 N8)。 */
 export function qrGuideMetadata(locale: string): Metadata {
   const c = qrGuideContentFor(locale);
-  const ogImage = {
-    url: '/og-image.png',
-    width: 1200,
-    height: 630,
-    alt: c.heroVisualAlt,
-  };
-  return {
+  // OG/Twitter/canonical/hreflang は guide 共通ビルダーで (P5・N9)。
+  return guidePageMetadata({
+    locale,
+    path: '/guide/qr',
     title: c.metaTitle,
     description: c.metaDescription,
-    openGraph: {
-      title: c.metaTitle,
-      description: c.metaDescription,
-      images: [ogImage],
-    },
-    twitter: {
-      card: 'summary_large_image',
-      title: c.metaTitle,
-      description: c.metaDescription,
-      images: ['/og-image.png'],
-    },
-  };
+  });
 }

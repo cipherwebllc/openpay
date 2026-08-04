@@ -258,6 +258,33 @@ export default async function GuidePosPage({
             {c.ctaButton}
           </Link>
         </section>
+
+        {/* 関連ガイド (P5 相互リンク): 決済QR LP / レジ・モバイルオーダー LP へ。 */}
+        <section className="mt-10">
+          <h2 className="text-sm font-semibold text-slate-500">
+            {c.relatedTitle}
+          </h2>
+          <ul className="mt-2 space-y-1.5">
+            <li>
+              <Link
+                href={`/${locale}/guide/qr`}
+                prefetch={false}
+                className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
+              >
+                {c.relatedQr} →
+              </Link>
+            </li>
+            <li>
+              <Link
+                href={`/${locale}/guide/shop`}
+                prefetch={false}
+                className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
+              >
+                {c.relatedShop} →
+              </Link>
+            </li>
+          </ul>
+        </section>
       </article>
     </AppShell>
   );

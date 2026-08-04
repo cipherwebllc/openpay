@@ -387,6 +387,12 @@
         "linkLabel": "MetaMask Swap を開く",
         "disclaimer": "※ MetaMask 機能の動作可否・対応 chain は MetaMask 提供であり、OpenPay は関与しません。各 chain の混雑状況や対応トークン経路により swap が成立しない場合があります。"
       }
+    },
+    "guideLinks": {
+      "title": "用途別ガイド",
+      "qr": "決済QRを始める",
+      "shop": "レジ・モバイルオーダーを始める",
+      "store": "クリエイター機能を始める"
     }
   },
   "QrGenerator": {

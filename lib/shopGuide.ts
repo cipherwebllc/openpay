@@ -7,6 +7,7 @@
 // Landing.supportFeeRegister*/supportFeeMobile* (messages) を描画する。
 
 import type { Metadata } from 'next';
+import { guidePageMetadata } from '@/lib/guideMetadata';
 
 export type ShopGuideContent = {
   readonly metaTitle: string;
@@ -222,25 +223,17 @@ export function shopGuideContentFor(locale: string): ShopGuideContent {
 /** /guide/shop の metadata (title/description/OG/Twitter)。OG は user 提供の静的画像。 */
 export function shopGuideMetadata(locale: string): Metadata {
   const c = shopGuideContentFor(locale);
-  const ogImage = {
-    url: '/og-image-mobileorder.webp',
-    width: 1280,
-    height: 670,
-    alt: c.heroVisualAlt,
-  };
-  return {
+  // OG/Twitter/canonical/hreflang は guide 共通ビルダーで (P5・N9)。
+  return guidePageMetadata({
+    locale,
+    path: '/guide/shop',
     title: c.metaTitle,
     description: c.metaDescription,
-    openGraph: {
-      title: c.metaTitle,
-      description: c.metaDescription,
-      images: [ogImage],
+    ogImage: {
+      url: '/og-image-mobileorder.webp',
+      width: 1280,
+      height: 670,
+      alt: c.heroVisualAlt,
     },
-    twitter: {
-      card: 'summary_large_image',
-      title: c.metaTitle,
-      description: c.metaDescription,
-      images: ['/og-image-mobileorder.webp'],
-    },
-  };
+  });
 }

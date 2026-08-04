@@ -3,6 +3,9 @@
 // 画像は public/guide/mobile-order/ の実機スクリーンショット (サンプル店舗と同一メニューの
 // 実描画・390px モバイル幅)。文言変更時はスクショとの整合も確認する。
 
+import type { Metadata } from 'next';
+import { guidePageMetadata } from '@/lib/guideMetadata';
+
 export type MobileOrderGuideStep = {
   readonly n: number;
   readonly title: string;
@@ -259,10 +262,13 @@ export function mobileOrderGuideContentFor(locale: string): MobileOrderGuideCont
   return locale === 'en' ? EN : JA;
 }
 
-export function mobileOrderGuideMetadata(locale: string): {
-  title: string;
-  description: string;
-} {
+export function mobileOrderGuideMetadata(locale: string): Metadata {
   const c = mobileOrderGuideContentFor(locale);
-  return { title: `${c.metaTitle} · OpenPay`, description: c.metaDescription };
+  // OG/Twitter/canonical/hreflang は guide 共通ビルダーで (P5・N9)。
+  return guidePageMetadata({
+    locale,
+    path: '/guide/mobile-order',
+    title: `${c.metaTitle} · OpenPay`,
+    description: c.metaDescription,
+  });
 }

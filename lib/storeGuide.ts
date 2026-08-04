@@ -4,6 +4,7 @@
 // 24 商品上限・価格帯) は本番実装と一致させること — 変えるときは実装と同時に。
 
 import type { Metadata } from 'next';
+import { guidePageMetadata } from '@/lib/guideMetadata';
 import { DISCLOSED_X402_FEE } from '@/lib/legal';
 
 // 手数料の文言は開示済み定数から組み立てる (率の直書きを増やさない —
@@ -543,26 +544,17 @@ export function storeGuideContentFor(locale: string): StoreGuideContent {
 
 export function storeGuideMetadata(locale: string): Metadata {
   const c = storeGuideContentFor(locale);
-  // OG はページ専用の静的画像 (public/og-creator.webp・P2 で Codex 生成)。
-  const ogImage = {
-    url: '/og-creator.webp',
-    width: 1200,
-    height: 630,
-    alt: c.heroTitle,
-  };
-  return {
+  // OG/Twitter/canonical/hreflang は guide 共通ビルダーで (P5・N9)。
+  return guidePageMetadata({
+    locale,
+    path: '/guide/store',
     title: c.metaTitle,
     description: c.metaDescription,
-    openGraph: {
-      title: c.metaTitle,
-      description: c.metaDescription,
-      images: [ogImage],
+    ogImage: {
+      url: '/og-creator.webp',
+      width: 1200,
+      height: 630,
+      alt: c.heroTitle,
     },
-    twitter: {
-      card: 'summary_large_image',
-      title: c.metaTitle,
-      description: c.metaDescription,
-      images: ['/og-creator.webp'],
-    },
-  };
+  });
 }

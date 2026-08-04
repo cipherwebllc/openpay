@@ -18,6 +18,8 @@
 //   資金喪失に直結)。全 chain で同一 (JPYC v3 cross-chain consistency)。
 // - 「交換業回避」の法的第一条 (plans §1): OpenPay は通貨変換を実行しない。ガイドは自助 swap の案内のみ。
 
+import type { Metadata } from 'next';
+import { guidePageMetadata } from '@/lib/guideMetadata';
 import type { GuideStep, GuideFaq } from './posGuide';
 import { defaultDeploymentForSymbol } from './tokens';
 
@@ -455,10 +457,13 @@ export function agentGuideContentFor(locale: string): AgentGuideContent {
 }
 
 /** /guide/agent の <title>/<description> を組み立てる (page の generateMetadata が利用)。 */
-export function guideAgentMetadata(locale: string): {
-  title: string;
-  description: string;
-} {
+export function guideAgentMetadata(locale: string): Metadata {
   const c = agentGuideContentFor(locale);
-  return { title: `${c.metaTitle} · OpenPay`, description: c.metaDescription };
+  // OG/Twitter/canonical/hreflang は guide 共通ビルダーで (P5・N9)。
+  return guidePageMetadata({
+    locale,
+    path: '/guide/agent',
+    title: `${c.metaTitle} · OpenPay`,
+    description: c.metaDescription,
+  });
 }

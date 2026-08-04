@@ -63,11 +63,19 @@ describe('guideAiPayMetadata: metadata 組立', () => {
   it.each(LOCALES)('%s: title と description を content SOT から組み立てる', (loc) => {
     const c = AI_PAY_GUIDE[loc];
     const metadata = guideAiPayMetadata(loc);
-    expect(metadata).toEqual({
-      title: `${c.metaTitle} · OpenPay`,
-      description: c.metaDescription,
-    });
-    expect(Object.keys(metadata).sort()).toEqual(['description', 'title']);
+    expect(metadata.title).toBe(`${c.metaTitle} · OpenPay`);
+    expect(metadata.description).toBe(c.metaDescription);
+    // P5: OG/Twitter/canonical/hreflang は guide 共通ビルダー (lib/guideMetadata.ts) が付与
+    expect(metadata.alternates?.canonical).toBe(`/${loc}/guide/ai-pay`);
+    expect(metadata.openGraph?.images).toEqual([
+      {
+        url: '/og-image.png',
+        width: 1200,
+        height: 630,
+        alt: `${c.metaTitle} · OpenPay`,
+      },
+    ]);
+    expect(JSON.stringify(metadata.twitter)).toContain('summary_large_image');
   });
 
   it('未知ロケールは ja の metadata に一致', () => {
