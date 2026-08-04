@@ -31,6 +31,7 @@ export type StoreGuideContent = {
   readonly heroTitle: string;
   readonly heroLead: string;
   readonly heroCtaProfile: string;
+  readonly heroVisualAlt: string;
   readonly heroCtaStore: string;
   readonly forWhoTitle: string;
   readonly forWhoChips: readonly string[];
@@ -90,6 +91,8 @@ const JA: StoreGuideContent = {
   heroLead:
     'ウォレットアドレスだけで、プロフィール作成・チップ受付・デジタル商品販売を始められます。アカウント登録も月額費用も不要です。',
   heroCtaProfile: 'プロフィールを作る',
+  heroVisualAlt:
+    '自宅デスクでノート PC にクリエイタープロフィールとデジタル商品カードを表示し、スマホで OpenPay を開いているイラスト',
   heroCtaStore: 'Store を見る',
   forWhoTitle: 'こんな人に向いています',
   forWhoChips: [
@@ -316,6 +319,8 @@ const EN: StoreGuideContent = {
   heroLead:
     'All you need is a wallet address: create a profile, receive tips, and sell digital products. No account signup, no monthly fee.',
   heroCtaProfile: 'Create your profile',
+  heroVisualAlt:
+    'Illustration of a creator at a home desk with a laptop showing a creator profile and digital product cards, holding a phone with OpenPay open',
   heroCtaStore: 'Browse the Store',
   forWhoTitle: 'Who this is for',
   forWhoChips: [

@@ -6,6 +6,7 @@
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
 import type { Metadata } from 'next';
+import Image from 'next/image';
 import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
@@ -71,6 +72,17 @@ export default async function GuideStorePage({
                 {c.heroCtaStore}
               </Link>
             ) : null}
+          </div>
+          <div className="mt-7 overflow-hidden rounded-[1.75rem] bg-white shadow-lift ring-1 ring-slate-200/60">
+            <Image
+              src="/guide/hero-creator.avif"
+              alt={c.heroVisualAlt}
+              width={1400}
+              height={787}
+              priority
+              sizes="(min-width: 768px) 768px, calc(100vw - 2rem)"
+              className="h-auto w-full object-cover"
+            />
           </div>
         </header>
 
