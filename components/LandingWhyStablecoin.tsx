@@ -4,7 +4,17 @@
 // 投資・価格上昇の訴求はしない。1 JPYC = 1 円は言い切る (2026-08-05 user 裁定)。
 
 import { getTranslations } from 'next-intl/server';
-import { JapaneseYen, Wallet, Coins, Users, type LucideIcon } from 'lucide-react';
+import {
+  JapaneseYen,
+  Wallet,
+  Coins,
+  Users,
+  ExternalLink,
+  type LucideIcon,
+} from 'lucide-react';
+
+// JPYC 入門+運用・ウォレット選びの note 記事 (2026-08-05 user 指示で追加)。
+const JPYC_NOTE_ARTICLE_URL = 'https://note.com/masia02/n/ned04a4cdb00a';
 
 const ITEMS: readonly { key: 1 | 2 | 3 | 4; icon: LucideIcon }[] = [
   { key: 1, icon: JapaneseYen },
@@ -54,6 +64,15 @@ export async function LandingWhyStablecoin() {
         <p className="mt-2 text-sm leading-relaxed text-blue-800/90">
           {t('jpycNoteBody')}
         </p>
+        <a
+          href={JPYC_NOTE_ARTICLE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-brand underline-offset-2 hover:underline"
+        >
+          {t('jpycNoteLink')}
+          <ExternalLink className="h-4 w-4" aria-hidden />
+        </a>
       </div>
     </section>
   );

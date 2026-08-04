@@ -225,6 +225,7 @@
     "whyItem4Body": "店舗の決済だけでなく、個人・クリエイター・AI エージェントへと用途が広がっています。",
     "jpycNoteTitle": "JPYCとは",
     "jpycNoteBody": "日本円と連動するステーブルコインで、1 JPYC = 1 円として使えます。対応ウォレットから送受信でき、OpenPay では決済にもデジタル商品の販売にも、そのまま利用できます。",
+    "jpycNoteLink": "JPYCのすすめ — 個人向けの運用・ウォレット選びガイド (note)",
     "entryTitle": "用途から選ぶ",
     "entrySubtitle": "はじめる目的に合わせて、3 つの入口を用意しています",
     "entryQrTitle": "決済QR",
