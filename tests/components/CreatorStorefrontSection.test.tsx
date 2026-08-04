@@ -64,7 +64,8 @@ describe('CreatorStorefrontSection', () => {
       />,
     );
     const image = withEmoji.container.querySelector(`img[src="${imageUrl}"]`);
-    expect(image).toHaveClass('h-10', 'w-10', 'rounded-xl', 'object-cover');
+    // P2 ショーケース化: 画像あり商品は cover variant (image-top の大サムネイル)
+    expect(image).toHaveClass('aspect-[4/3]', 'w-full', 'object-cover');
     expect(image).toHaveAttribute('alt', '');
     expect(image).toHaveAttribute('aria-hidden', 'true');
     expect(screen.queryByText('🧠')).not.toBeInTheDocument();

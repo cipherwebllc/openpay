@@ -27,7 +27,7 @@ export const STORE_DEV_FIXTURE_LISTINGS: readonly StoreListing[] = [
     title: 'ローポリ カフェ内装キット',
     priceJpyc: '4950',
     imageUrl: '/landing/usecase-digital-goods.avif',
-    category: 'threed',
+    category: '3d-game',
     tags: ['GLB', 'Unity'],
     desc: 'GLTF 3D モデル (.glb)。商用利用可。',
   }),

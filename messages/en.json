@@ -1098,7 +1098,6 @@
     },
     "libraryLink": "View your purchased items in the library",
     "cardTotal": "{total} JPYC",
-    "cardBreakdown": "(Price {price} + fee {fee})",
     "viewAllProducts": "View all products ({count})"
   },
   "CreatorStorePurchase": {

@@ -32,9 +32,6 @@ export type CreatorStorefrontProduct = {
 function feeWeiOf(priceJpyc: string): bigint {
   return hostedPurchaseFeeValue(BigInt(priceJpyc) * 10n ** 18n);
 }
-function feeJpycOf(priceJpyc: string): string {
-  return formatUnits(feeWeiOf(priceJpyc), 18);
-}
 function totalJpycOf(priceJpyc: string): string {
   return formatUnits(BigInt(priceJpyc) * 10n ** 18n + feeWeiOf(priceJpyc), 18);
 }
@@ -58,7 +55,6 @@ export function CreatorStorefrontSection({
   hiddenCount?: number;
 }) {
   const t = useTranslations('CreatorStorefront');
-  const tCatalog = useTranslations('StoreCatalog');
   const locale = useLocale();
   if (products.length === 0) return null;
 
@@ -87,33 +83,64 @@ export function CreatorStorefrontSection({
           {t('subheading')}
         </p>
       </div>
-      <ul className="space-y-2.5">
+      {/* ショーケース調 (plans/store-showcase-polish.md P2): 画像がある商品は image-top の
+          大サムネイルで主役化し、無い商品はコンパクト行のまま (空タイルのノイズを作らない)。
+          引き算 = カテゴリ/#タグ・手数料内訳をカードから除去 (内訳は購入モーダルの開示に
+          一本化・合計額表示は維持 = 2026-07-31 user 裁定)。説明は 2 行でクランプ
+          (生 URL などの長文ノイズを抑える。全文は購入モーダルが表示する)。 */}
+      <ul className="space-y-3">
         {products.map((product) => (
           <li
             key={product.id}
-            className={`rounded-2xl px-4 py-4 text-left ${
+            className={`group overflow-hidden rounded-2xl text-left ${
               tokens.linkStyle
                 ? ''
                 : 'border border-slate-200/80 bg-white shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)]'
             }`}
             style={tokens.linkStyle}
           >
-            <div className="flex items-start gap-3">
+            {product.imageUrl ? (
               <CreatorStorefrontProductArtwork
                 imageUrl={product.imageUrl}
                 emoji={product.emoji}
                 inverted={inverted}
+                variant="cover"
               />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-start justify-between gap-2">
+            ) : null}
+            <div className={`px-4 pb-4 ${product.imageUrl ? 'pt-3' : 'pt-4'}`}>
+              <div className="flex items-start gap-3">
+                {!product.imageUrl ? (
+                  <CreatorStorefrontProductArtwork
+                    imageUrl={product.imageUrl}
+                    emoji={product.emoji}
+                    inverted={inverted}
+                  />
+                ) : null}
+                <div className="min-w-0 flex-1">
                   <h3
-                    className={`min-w-0 flex-1 font-bold ${
+                    className={`font-bold ${
                       inverted ? 'text-white' : 'text-slate-800'
                     }`}
                   >
                     {product.title}
                   </h3>
-                  <span className="flex shrink-0 flex-col items-end gap-0.5">
+                  <span
+                    className={`mt-0.5 block text-[11px] font-semibold uppercase tracking-wide ${
+                      inverted ? 'text-white/70' : 'text-slate-500'
+                    }`}
+                  >
+                    {t(`labels.${product.label}`)}
+                  </span>
+                  {product.desc ? (
+                    <p
+                      className={`mt-1.5 line-clamp-2 text-sm leading-relaxed ${
+                        inverted ? 'text-white/80' : 'text-slate-600'
+                      }`}
+                    >
+                      {product.desc}
+                    </p>
+                  ) : null}
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <span
                       className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ${
                         inverted
@@ -139,83 +166,27 @@ export function CreatorStorefrontSection({
                       })}
                       {' · Polygon'}
                     </span>
-                    <span
-                      className={`text-[10px] ${
-                        inverted ? 'text-white/70' : 'text-slate-500'
-                      }`}
-                    >
-                      {t('cardBreakdown', {
-                        price: new Intl.NumberFormat(locale).format(
-                          Number(product.priceJpyc),
-                        ),
-                        fee: feeJpycOf(product.priceJpyc),
-                      })}
-                    </span>
-                  </span>
-                </div>
-                {product.desc ? (
-                  <p
-                    className={`mt-1 text-sm leading-relaxed ${
-                      inverted ? 'text-white/80' : 'text-slate-600'
-                    }`}
-                  >
-                    {product.desc}
-                  </p>
-                ) : null}
-                {product.category || (product.tags?.length ?? 0) > 0 ? (
-                  /* カテゴリ/タグ (P1・表示専用)。受け取り方 (label) は下段の既存表示が担う。 */
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {product.category ? (
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          inverted
-                            ? 'bg-white/15 text-white/90'
-                            : 'bg-slate-100 text-slate-600'
-                        }`}
-                      >
-                        {tCatalog(`categories.${product.category}`)}
-                      </span>
-                    ) : null}
-                    {(product.tags ?? []).map((tag) => (
-                      <span
-                        key={tag}
-                        className={`text-[11px] ${
-                          inverted ? 'text-white/60' : 'text-slate-400'
-                        }`}
-                      >
-                        #{tag}
-                      </span>
-                    ))}
+                    <CreatorStorePurchaseLauncher
+                      product={{
+                        id: product.id,
+                        title: product.title,
+                        ...(product.desc
+                          ? { description: product.desc }
+                          : {}),
+                        ...(product.imageUrl
+                          ? { imageUrl: product.imageUrl }
+                          : {}),
+                        ...(product.galleryUrls
+                          ? { galleryUrls: product.galleryUrls }
+                          : {}),
+                        priceJpyc: product.priceJpyc,
+                        merchant: product.payTo,
+                      }}
+                      sellerDisclosureHref={sellerDisclosureHref}
+                      inverted={inverted}
+                      autoOpen={product.id === autoOpenProductId}
+                    />
                   </div>
-                ) : null}
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                  <span
-                    className={`text-[11px] font-semibold uppercase tracking-wide ${
-                      inverted ? 'text-white/70' : 'text-slate-500'
-                    }`}
-                  >
-                    {t(`labels.${product.label}`)}
-                  </span>
-                  <CreatorStorePurchaseLauncher
-                    product={{
-                      id: product.id,
-                      title: product.title,
-                      ...(product.desc
-                        ? { description: product.desc }
-                        : {}),
-                      ...(product.imageUrl
-                        ? { imageUrl: product.imageUrl }
-                        : {}),
-                      ...(product.galleryUrls
-                        ? { galleryUrls: product.galleryUrls }
-                        : {}),
-                      priceJpyc: product.priceJpyc,
-                      merchant: product.payTo,
-                    }}
-                    sellerDisclosureHref={sellerDisclosureHref}
-                    inverted={inverted}
-                    autoOpen={product.id === autoOpenProductId}
-                  />
                 </div>
               </div>
             </div>
