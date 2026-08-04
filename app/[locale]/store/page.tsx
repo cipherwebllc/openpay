@@ -15,6 +15,7 @@ import { AppShell } from '@/components/AppShell';
 import { StoreBrowser } from '@/components/StoreBrowser';
 import { env } from '@/lib/env';
 import { listStoreListings } from '@/lib/x402/storeListing';
+import { STORE_DEV_FIXTURE_LISTINGS } from '@/lib/devStoreFixtures';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,7 +44,13 @@ export default async function StorePage({
   const { locale } = await params;
   setRequestLocale(locale);
   const t = await getTranslations({ locale, namespace: 'StorePage' });
-  const listings = await listStoreListings();
+  // 【開発専用】UI 磨きのスクショ用フィクスチャ。VERCEL 上では構造的に無効の
+  // 二重ガード (dev mock wallet #327 と同型) — 偽の商品が本番に出る波及を断つ。
+  const useDevFixtures =
+    !process.env.VERCEL && process.env.STORE_DEV_FIXTURES === '1';
+  const listings = useDevFixtures
+    ? [...STORE_DEV_FIXTURE_LISTINGS]
+    : await listStoreListings();
   // ?q= で検索欄を事前入力 (プロフの「すべての商品を見る」→ /store?q=@handle 用)。
   const sp = (await (searchParams ?? Promise.resolve({}))) as {
     q?: string | string[];

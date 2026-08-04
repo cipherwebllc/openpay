@@ -42,9 +42,10 @@ describe('StoreBrowser', () => {
     expect(link.getAttribute('href')).toBe(
       `/ja/@alice?product=h_${'a'.repeat(32)}&from=store`,
     );
-    // 合計主役 + 内訳 (プロフカードと同形・2026-07-31 user 裁定)
+    // 合計主役 (2026-07-31 user 裁定)。手数料内訳はショーケース化 (P1) でカードから
+    // 除去し、購入モーダル側の開示に一本化 (plans/store-showcase-polish.md)
     expect(screen.getByText('101 JPYC')).toBeInTheDocument();
-    expect(screen.getByText('(価格 100 + 手数料 1)')).toBeInTheDocument();
+    expect(screen.queryByText('(価格 100 + 手数料 1)')).toBeNull();
   });
 
   it('カテゴリーフィルターと AI カテゴリーの /discovery 導線 (裁定 M1)', () => {

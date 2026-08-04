@@ -2709,7 +2709,6 @@
     "noMatch": "条件に合う商品が見つかりません。",
     "storageError": "商品一覧を読み込めませんでした。時間をおいて再読み込みしてください。",
     "cardTotal": "{total} JPYC",
-    "cardBreakdown": "(価格 {price} + 手数料 {fee})",
     "discoveryHint": "AI エージェントに直接使わせる有料 API・データをお探しですか？",
     "discoveryLink": "AI エージェント向けカタログ",
     "ecosystemLink": "関連リンク集",

@@ -247,6 +247,7 @@ The table below is a **curated subset** (core setup + production feature flags).
 | `X402_*` | x402 paid-API config | x402 only |
 | `NEXT_PUBLIC_ENABLE_CREATOR_STORE` | Shows the creator-store seller manager and active-product section on `@handle` profiles. Client UI only and default **off**; it never enables server APIs by itself. | optional |
 | `NEXT_PUBLIC_ENABLE_MOCK_WALLET` | **Dev only.** Adds a wagmi mock connector (hardhat test account #0) so connected-state UI can be screenshotted / e2e-driven without a real wallet. Ignored in production builds (`NODE_ENV` guard strips it), never set on Vercel. | dev only |
+| `STORE_DEV_FIXTURES` | **Dev only.** Renders the /store list with local fixture products for UI screenshots. Structurally disabled when the `VERCEL` env var is present, so fake products can never appear in production. | dev only |
 | `ENABLE_CREATOR_STORE` | Server-only creator-store seller, purchase, public purchase-status, and reconciler routes. Default **off**; every surface returns 404 while disabled. | optional |
 | `CRON_SECRET` | Server-only bearer secret for the hourly `/api/cron/reverify` catalog maintenance job. If unset, the route is inert and returns 401. | production cron |
 | `ALERT_WEBHOOK_URL` | Optional Slack/Discord-compatible webhook for revalidation violations, transient checks, and hidden/restored transitions. Receives `{text, content}`. | optional |
