@@ -287,7 +287,9 @@ function EnabledCreatorStoreLibrary() {
                       </span>
                     </div>
                     {item.desc ? (
-                      <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                      // P4: プロフカード (P2) と同じ 2 行クランプ — 長い説明や生 URL が
+                      // 購入済み一覧の見通しを塞がないようにする (全文は商品側で読める)。
+                      <p className="mt-1 line-clamp-2 text-sm leading-relaxed text-slate-600">
                         {item.desc}
                       </p>
                     ) : null}
