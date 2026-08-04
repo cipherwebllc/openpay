@@ -29,6 +29,10 @@ import { logger } from '@/lib/logger';
 import { normalizeHandle, decodeHandleSegment, handleStorefrontConfig } from '@/lib/handle';
 import { resolveHandleTheme, handlePageTheme } from '@/lib/handleTheme';
 import { resolveHandle } from '@/lib/handleStore';
+import {
+  DEV_FIXTURE_HANDLE_RECORD,
+  DEV_FIXTURE_HOSTED_PRODUCTS,
+} from '@/lib/devProfileFixtures';
 import { readShopLive } from '@/lib/shopLiveStore';
 import {
   listAvailableHostedForOwner,
@@ -190,7 +194,15 @@ export default async function HandlePage({
 
   const normalized = normalizeHandle(segment);
   const routeSearch = searchParamsFromNext(rawSearch);
-  const resolved = await resolveHandleCached(normalized);
+  // 【開発専用】/@fixture: ショーケース磨きのスクショ用フィクスチャ (三重ガード —
+  // VERCEL 上では構造的に無効。plans/store-showcase-polish.md 検証インフラ)。
+  const devFixtureProfile =
+    !process.env.VERCEL &&
+    process.env.STORE_DEV_FIXTURES === '1' &&
+    normalized === 'fixture';
+  const resolved = devFixtureProfile
+    ? { ok: true as const, record: DEV_FIXTURE_HANDLE_RECORD }
+    : await resolveHandleCached(normalized);
   // KV 未設定/outage は誤って「存在しない (404)」と返さず 5xx に倒す (transient と gone を区別)。
   if (!resolved.ok) throw new Error('handle_store_unavailable');
   if (!resolved.record) {
@@ -222,9 +234,11 @@ export default async function HandlePage({
     storefront && env.enableShopLive
       ? readShopLive(normalized)
       : Promise.resolve(undefined),
-    !storefront && env.enableCreatorStoreUi && env.enableCreatorStore
-      ? listAvailableHostedForOwnerCached(record.owner)
-      : Promise.resolve([]),
+    devFixtureProfile
+      ? Promise.resolve(DEV_FIXTURE_HOSTED_PRODUCTS)
+      : !storefront && env.enableCreatorStoreUi && env.enableCreatorStore
+        ? listAvailableHostedForOwnerCached(record.owner)
+        : Promise.resolve([]),
   ]);
   // 商品メタの障害をプロフィール/チップ本体へ波及させないため、null は商品節だけ省略する。
   // owner/revision は client 境界へ渡さない。payTo は 402 の merchant を署名前に照合する

@@ -1098,7 +1098,6 @@
     },
     "libraryLink": "購入済みの商品はライブラリで見られます",
     "cardTotal": "{total} JPYC",
-    "cardBreakdown": "(価格 {price} + 手数料 {fee})",
     "viewAllProducts": "すべての商品を見る ({count} 件)"
   },
   "CreatorStorePurchase": {
