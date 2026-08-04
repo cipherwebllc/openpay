@@ -1,6 +1,5 @@
 // LP「用途から選ぶ」— 用途別 LP への 3 入口 (plans/site-ia-guides-ruling.md N1③)。
-//   決済QR → /create (P4 で /guide/qr へ差し替え予定の暫定リンク)
-//   レジ・モバイルオーダー → /guide/shop (P3)
+//   決済QR → /guide/qr (P4) / レジ・モバイルオーダー → /guide/shop (P3) /
 //   クリエイター → /guide/store (P2)
 
 import Link from 'next/link';
@@ -18,7 +17,7 @@ export async function LandingEntryPoints() {
   const locale = await getLocale();
 
   const cards: readonly EntryCard[] = [
-    { key: 'Qr', href: `/${locale}/create`, icon: QrCode },
+    { key: 'Qr', href: `/${locale}/guide/qr`, icon: QrCode },
     { key: 'Shop', href: `/${locale}/guide/shop`, icon: Store },
     { key: 'Creator', href: `/${locale}/guide/store`, icon: Palette },
   ];
