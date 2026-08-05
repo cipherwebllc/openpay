@@ -973,6 +973,10 @@ function SignedInSellerPanel({
               className={inputClass}
             />
           </label>
+          {/* 税込総額での登録案内 (Terms 13 条 (4) 2026-08-05 改定と同期・label 外 = a11y 名不変)。 */}
+          <p className="-mt-3 text-xs text-slate-500">
+            {t('priceHint')}
+          </p>
           <label
             htmlFor="creator-store-product-kind"
             className="block text-sm font-medium text-slate-700"
