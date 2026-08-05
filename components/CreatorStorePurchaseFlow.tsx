@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { AlertTriangle, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Copy, Loader2, Share2, X } from 'lucide-react';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from '@/components/ConnectButton';
 import { formatUnits } from 'viem';
@@ -374,6 +374,17 @@ export function CreatorStorePurchaseFlow({
                 }
               />
             ) : null}
+            {/* 商品ディープリンクのシェア (2026-08-05 user 提案)。購入前の閲覧者が
+                そのまま拡散できるバイラル導線。コピー/X/ネイティブ共有 — 失敗は
+                ページ本体へ波及させない (掟 13・HandleShareButton と同じ握り方)。 */}
+            <ProductShareRow
+              productId={product.id}
+              productTitle={product.title}
+              copyLabel={t('shareCopy')}
+              copiedLabel={t('shareCopied')}
+              xLabel={t('shareOnX')}
+              nativeLabel={t('shareMore')}
+            />
             {/* 通報導線 (Store 統合 P2・go-live 条件 G1): UGC を横断掲載する前提として、
                 権利侵害等を運営へ知らせる最小導線 (mailto・商品 ID 自動挿入)。 */}
             <p className="mt-4 text-[11px]">
@@ -484,6 +495,92 @@ function CreatorStorePurchaseGallery({
             );
           })}
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+function productShareUrl(productId: string): string {
+  if (typeof window === 'undefined') return '';
+  // 現在のプロフィール URL に ?product= だけを付けた正規ディープリンク
+  // (from=store 等の一時パラメータは共有 URL に持ち込まない)。
+  return `${window.location.origin}${window.location.pathname}?product=${encodeURIComponent(productId)}`;
+}
+
+function ProductShareRow({
+  productId,
+  productTitle,
+  copyLabel,
+  copiedLabel,
+  xLabel,
+  nativeLabel,
+}: {
+  productId: string;
+  productTitle: string;
+  copyLabel: string;
+  copiedLabel: string;
+  xLabel: string;
+  nativeLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const url = productShareUrl(productId);
+  const shareText = `${productTitle} | OpenPay`;
+  const canNativeShare =
+    typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+  if (!url) return null;
+
+  const copyUrl = async () => {
+    if (!navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard の許可拒否は X/ネイティブ共有の代替導線が残るため黙殺で害がない。
+    }
+  };
+
+  const shareNative = async () => {
+    if (!navigator.share) return;
+    try {
+      await navigator.share({ title: shareText, text: shareText, url });
+    } catch {
+      // ユーザ取消 (AbortError) は正常系。共有失敗を購入フローへ波及させない。
+    }
+  };
+
+  const itemClass =
+    'inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition-colors hover:border-brand/40 hover:text-brand';
+
+  return (
+    <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+      <button type="button" onClick={() => void copyUrl()} className={itemClass}>
+        <Copy className="h-3.5 w-3.5" aria-hidden />
+        {copied ? copiedLabel : copyLabel}
+      </button>
+      <a
+        href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(url)}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={itemClass}
+      >
+        <span
+          className="flex h-3.5 w-3.5 items-center justify-center text-[11px] font-bold"
+          aria-hidden
+        >
+          X
+        </span>
+        {xLabel}
+      </a>
+      {canNativeShare ? (
+        <button
+          type="button"
+          onClick={() => void shareNative()}
+          className={itemClass}
+        >
+          <Share2 className="h-3.5 w-3.5" aria-hidden />
+          {nativeLabel}
+        </button>
       ) : null}
     </div>
   );
