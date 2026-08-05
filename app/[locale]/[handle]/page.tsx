@@ -262,7 +262,22 @@ export default async function HandlePage({
   // 厳選ショーケース: featured があればそれだけ表示し、残りは Store への
   // 「すべての商品を見る」リンクが受ける (selectProfileProducts)。
   const profileSelection = selectProfileProducts(scopedHosted);
-  const creatorProducts: CreatorStorefrontProduct[] = profileSelection.shown.map(
+  // ?product= ディープリンク (Store カード等) が厳選で隠れた商品を指す場合は、その商品
+  // だけ末尾に足して描画する — カード (= 購入モーダルの土台) が無いと autoOpen が
+  // 成立せず「Store から開くとモーダルが出ない」実害 (2026-08-05 iPhone 実機・user 報告)。
+  const deepLinkProductId = routeSearch.get('product');
+  const deepLinkedHidden =
+    deepLinkProductId &&
+    !profileSelection.shown.some((p) => p.id === deepLinkProductId)
+      ? scopedHosted.find((p) => p.id === deepLinkProductId)
+      : undefined;
+  const shownProducts = deepLinkedHidden
+    ? [...profileSelection.shown, deepLinkedHidden]
+    : profileSelection.shown;
+  // viewAll の件数 (hidden + shown = 全商品数) が追加表示分で二重計上されないよう調整。
+  const hiddenCountForView =
+    profileSelection.hiddenCount - (deepLinkedHidden ? 1 : 0);
+  const creatorProducts: CreatorStorefrontProduct[] = shownProducts.map(
     (product) => ({
       id: product.id,
       title: product.title,
@@ -417,10 +432,10 @@ export default async function HandlePage({
               theme={theme}
               sellerDisclosureHref={`/${locale}/store/seller/${record.owner}`}
               autoOpenProductId={autoOpenProductId}
-              {...(profileSelection.hiddenCount > 0
+              {...(hiddenCountForView > 0
                 ? {
                     viewAllHref: `/${locale}/store?q=${encodeURIComponent(`@${normalized}`)}`,
-                    hiddenCount: profileSelection.hiddenCount,
+                    hiddenCount: hiddenCountForView,
                   }
                 : {})}
             />
