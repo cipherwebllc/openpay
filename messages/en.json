@@ -1162,7 +1162,11 @@
     "contactSupport": "Contact the seller",
     "payTotal": "Total to pay: {total} JPYC",
     "priceBreakdown": "Price {price} JPYC + fee {fee} JPYC",
-    "reportProduct": "Report this product"
+    "reportProduct": "Report this product",
+    "shareCopy": "Copy link",
+    "shareCopied": "Copied",
+    "shareOnX": "Share on X",
+    "shareMore": "More options"
   },
   "CreatorStoreLibrary": {
     "eyebrow": "Purchased",
