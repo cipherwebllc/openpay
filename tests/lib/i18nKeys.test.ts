@@ -878,15 +878,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'ctaCreateBody',
     'ctaCreateButton',
     'wipNote',
-    // Features section (3 cards)
-    'featuresTitle',
-    'featuresSubtitle',
-    'featuresGaslessTitle',
-    'featuresGaslessBody',
-    'featuresMultichainTitle',
-    'featuresMultichainBody',
-    'featuresNoncustodyTitle',
-    'featuresNoncustodyBody',
     // HowItWorks (merchant + customer, 3 steps each)
     'howItWorksTitle',
     'howItWorksSubtitle',
@@ -967,13 +958,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'benefitsNoSignupFocal',
     'benefitsNoSignupTitle',
     'benefitsNoSignupBody',
-    // Benefits 「なぜ店舗決済に OpenPay が必要か」narrative (lead + 2 points)
-    'benefitsWhyTitle',
-    'benefitsWhyLead',
-    'benefitsWhyPoint1Title',
-    'benefitsWhyPoint1Body',
-    'benefitsWhyPoint2Title',
-    'benefitsWhyPoint2Body',
     // Use cases section (5 用途 × {title, body} + meta)
     'useCasesTitle',
     'useCasesSubtitle',

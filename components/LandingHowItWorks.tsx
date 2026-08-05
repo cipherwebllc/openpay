@@ -49,7 +49,9 @@ export async function LandingHowItWorks() {
       <p className="mt-6 text-center text-xs font-medium text-slate-500">
         {t('howItWorksDemoCaption')}
       </p>
-      <div className="mt-3 grid gap-5 sm:grid-cols-3">
+      {/* モバイルは横スクロール 1 行 (縦積み 3 本 ≒ 3 画面分の縦長を 1 画面に圧縮 —
+          plans/lp-jobs-pass2.md P1)。sm 以上は従来どおり 3 カラム。 */}
+      <div className="-mx-4 mt-3 flex snap-x snap-mandatory gap-5 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0 sm:pb-0">
         {[
           {
             src: '/demo/create-qr-mobile.mp4',
@@ -70,7 +72,7 @@ export async function LandingHowItWorks() {
             alt: t('howItWorksDemoPayAlt'),
           },
         ].map((d) => (
-          <figure key={d.src} className="flex flex-col items-center">
+          <figure key={d.src} className="flex shrink-0 snap-center flex-col items-center sm:shrink">
             {/* 動画は 330x560 で白パディング済み・3 本とも同寸。枠は白カードで
                 グレー余白を出さない (overflow-hidden で角丸クリップ)。 */}
             <div className="overflow-hidden rounded-2xl border border-slate-200 shadow-card">

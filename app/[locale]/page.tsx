@@ -6,10 +6,8 @@ import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { StructuredData } from '@/components/StructuredData';
 import { LandingHero } from '@/components/LandingHero';
-import { LandingFeatures } from '@/components/LandingFeatures';
 import { LandingAiAgents } from '@/components/LandingAiAgents';
 import { LandingBenefits } from '@/components/LandingBenefits';
-import { LandingCapabilities } from '@/components/LandingCapabilities';
 import { LandingEntryPoints } from '@/components/LandingEntryPoints';
 import { LandingWhyStablecoin } from '@/components/LandingWhyStablecoin';
 import { LandingCashComparison } from '@/components/LandingCashComparison';
@@ -51,11 +49,8 @@ export default async function HomePage({
       {/* 総合案内化 P1 (plans/site-ia-guides-ruling.md): 初訪問者の前提知識
           「なぜステーブルコイン/JPYCとは」を、できること一覧の前に置く。 */}
       <LandingWhyStablecoin />
-      {/* できること 4 区分 (ナビと同構造・plans/lp-restructure-ruling.md P1)。
-          モバイル注文昇格 (user 確定 positioning) の後・理由説明の前に全体像を一望させる。 */}
-      <LandingCapabilities />
-      {/* 用途別 3 入口 (総合案内化 P1)。機能一覧 (できること) の直後に
-          「自分はどれから始めるか」を選ばせる。 */}
+      {/* 用途別 3 入口 (総合案内化 P1)。「できること 4 区分」はジョブズ・パス第 2 弾で
+          削除 (下部ナビが常時同じ 4 入口 = ページ内複製は冗長。plans/lp-jobs-pass2.md P1)。 */}
       <LandingEntryPoints />
       <LandingBenefits />
       <LandingCashComparison />
@@ -66,7 +61,6 @@ export default async function HomePage({
       {/* 販売の直後に AI 時代 (x402/AIストア/API 販売) を続け、「人にも AI にも売れる」
           流れで読ませる (LP 再構成 P3・提案順: 販売→AI→シーン→3 ステップ)。 */}
       <LandingAiAgents />
-      <LandingFeatures />
       <LandingUseCases />
       {/* 3 ステップは「使いたくなった読者」への締め (シーンの後・FAQ の前)。 */}
       <LandingHowItWorks />
