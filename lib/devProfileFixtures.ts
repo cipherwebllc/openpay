@@ -51,6 +51,8 @@ export const DEV_FIXTURE_HOSTED_PRODUCTS: HostedProduct[] = [
     desc: 'GLTF 3D モデル (.glb) ▼プレビュー https://example.com/preview/1406f421-46e5-4c9d-b715-323f50f0b325 商用利用可・クレジット不要です。',
     category: '3d-game',
     tags: ['GLB', 'Unity'],
+    // featured 厳選の再現用 (これ以外の 3 商品はプロフで隠れる = ディープリンク検証)。
+    featured: true,
   }),
   fx(2, {
     title: '和風ジングル素材集 vol.2',
