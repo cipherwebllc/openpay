@@ -73,6 +73,21 @@ test.describe('landing / (LP)', () => {
     ).toBeVisible();
   });
 
+  test('ja: Features セクションに 3 カード (ガスレス/マルチチェーン/ノンカストディ) が出る', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    await expect(page.getByRole('heading', { name: 'OpenPay の特長' })).toBeVisible();
+    // ガスレス特長カードの見出しは「ガス代不要」(featuresGaslessTitle)。
+    await expect(page.getByRole('heading', { name: 'ガス代不要' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'マルチチェーン対応' }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'ノンカストディ設計' }),
+    ).toBeVisible();
+  });
+
   test('ja: HowItWorks セクションに merchant + customer の 3-step が出る', async ({
     page,
   }) => {

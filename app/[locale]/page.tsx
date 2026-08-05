@@ -9,6 +9,7 @@ import { LandingHero } from '@/components/LandingHero';
 import { LandingAiAgents } from '@/components/LandingAiAgents';
 import { LandingBenefits } from '@/components/LandingBenefits';
 import { LandingEntryPoints } from '@/components/LandingEntryPoints';
+import { LandingFeatures } from '@/components/LandingFeatures';
 import { LandingWhyStablecoin } from '@/components/LandingWhyStablecoin';
 import { LandingCashComparison } from '@/components/LandingCashComparison';
 import { LandingSellables } from '@/components/LandingSellables';
@@ -61,6 +62,8 @@ export default async function HomePage({
       {/* 販売の直後に AI 時代 (x402/AIストア/API 販売) を続け、「人にも AI にも売れる」
           流れで読ませる (LP 再構成 P3・提案順: 販売→AI→シーン→3 ステップ)。 */}
       <LandingAiAgents />
+      {/* 特長 3 カードは FAQ 等と一部重複するが「わかりやすさ優先で残す」(2026-08-05 user 裁定)。 */}
+      <LandingFeatures />
       <LandingUseCases />
       {/* 3 ステップは「使いたくなった読者」への締め (シーンの後・FAQ の前)。 */}
       <LandingHowItWorks />

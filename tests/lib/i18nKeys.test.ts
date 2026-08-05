@@ -878,6 +878,15 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'ctaCreateBody',
     'ctaCreateButton',
     'wipNote',
+    // Features section (3 cards)
+    'featuresTitle',
+    'featuresSubtitle',
+    'featuresGaslessTitle',
+    'featuresGaslessBody',
+    'featuresMultichainTitle',
+    'featuresMultichainBody',
+    'featuresNoncustodyTitle',
+    'featuresNoncustodyBody',
     // HowItWorks (merchant + customer, 3 steps each)
     'howItWorksTitle',
     'howItWorksSubtitle',
