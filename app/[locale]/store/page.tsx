@@ -16,6 +16,7 @@ import { StoreBrowser } from '@/components/StoreBrowser';
 import { env } from '@/lib/env';
 import { listStoreListings } from '@/lib/x402/storeListing';
 import { STORE_DEV_FIXTURE_LISTINGS } from '@/lib/devStoreFixtures';
+import { guidePageMetadata } from '@/lib/guideMetadata';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,10 +28,20 @@ export async function generateMetadata({
   const { locale } = await params;
   setRequestLocale(locale);
   const t = await getTranslations({ locale, namespace: 'StorePage' });
-  return {
+  // 専用 OG (og-store.webp・2026-08-05 user 提案) + canonical/hreflang。
+  // ビルダーは guide 共通のものを再利用 (パスは /store)。
+  return guidePageMetadata({
+    locale,
+    path: '/store',
     title: t('metaTitle'),
     description: t('metaDescription'),
-  };
+    ogImage: {
+      url: '/og-store.webp',
+      width: 1200,
+      height: 630,
+      alt: t('metaTitle'),
+    },
+  });
 }
 
 export default async function StorePage({
@@ -78,6 +89,32 @@ export default async function StorePage({
             <StoreBrowser listings={listings} locale={locale} initialQuery={initialQuery} />
           )}
         </div>
+
+        {/* 出品者獲得 CTA (2026-08-05 user 提案): 買い手として来た訪問者を供給側へ。 */}
+        <section className="mt-12 rounded-[1.5rem] bg-gradient-to-br from-blue-50 to-indigo-50/60 p-6 text-center ring-1 ring-blue-200/60 sm:p-8">
+          <h2 className="text-lg font-bold text-slate-900">
+            {t('sellCtaTitle')}
+          </h2>
+          <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-600">
+            {t('sellCtaBody')}
+          </p>
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              href={`/${locale}/create?tab=profile`}
+              prefetch={false}
+              className="inline-flex items-center justify-center rounded-xl bg-brand px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0"
+            >
+              {t('sellCtaStart')}
+            </Link>
+            <Link
+              href={`/${locale}/guide/store`}
+              prefetch={false}
+              className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+            >
+              {t('sellCtaGuide')}
+            </Link>
+          </div>
+        </section>
 
         {/* 関連導線: エージェント向けカタログ (裁定 M1)・関連リンク集 (P4 でナビから
             探すが外れる受け皿)・透明性 (掲載審査/通報の方針)。 */}
