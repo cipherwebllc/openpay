@@ -38,7 +38,7 @@ export async function generateMetadata({
       locale: locale === 'ja' ? 'ja_JP' : 'en_US',
       alternateLocale: locale === 'ja' ? ['en_US'] : ['ja_JP'],
       images: [
-        { url: '/og-image.png', width: 1200, height: 630, alt: t('ogImageAlt') },
+        { url: '/og-home.webp', width: 1200, height: 630, alt: t('ogImageAlt') },
       ],
     },
     twitter: { card: 'summary_large_image', title, description },
