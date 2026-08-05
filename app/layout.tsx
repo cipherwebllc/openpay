@@ -33,7 +33,8 @@ export const metadata: Metadata = {
     alternateLocale: ['en_US'],
     images: [
       {
-        url: '/og-image.png',
+        // 総合版 OG (2026-08-05)。旧 og-image.png (店頭決済) は /guide/qr 等が使い続ける。
+        url: '/og-home.webp',
         width: 1200,
         height: 630,
         alt: 'OpenPay — スマホひとつで、JPYCを支払いにも販売にも。QR決済・モバイルオーダー・デジタル商品販売',
@@ -44,7 +45,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: OG_TITLE,
     description: OG_DESCRIPTION,
-    images: ['/og-image.png'],
+    images: ['/og-home.webp'],
   },
 };
 
