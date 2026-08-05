@@ -67,27 +67,27 @@ export async function LandingUseCases() {
         <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('useCasesSubtitle')}</p>
       </div>
 
-      {/* 7 件 grid。mobile 1 col / sm 2 col / lg 3 col。端数は flex-wrap の
-          justify-center で中央寄せ (素直な flow)。 */}
-      <ul className="mt-10 flex flex-wrap justify-center gap-4">
+      {/* 7 件 grid。mobile も 2 col (縦積み 1 col ≒ 3 画面分の縦長を半減 —
+          plans/lp-jobs-pass2.md P3)。lg 3 col。端数は justify-center で中央寄せ。 */}
+      <ul className="mt-10 flex flex-wrap justify-center gap-3 sm:gap-4">
         {USE_CASES.map((useCase) => (
           <li
             key={useCase.id}
-            className="w-full overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 sm:w-[calc(50%-0.5rem)] lg:w-[calc((100%-2rem)/3)]"
+            className="w-[calc(50%-0.375rem)] overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 sm:w-[calc(50%-0.5rem)] lg:w-[calc((100%-2rem)/3)]"
           >
             <Image
               src={useCase.image}
               alt={t(useCase.altKey)}
               width={960}
               height={540}
-              sizes="(min-width: 1024px) 31vw, (min-width: 640px) 46vw, calc(100vw - 2rem)"
+              sizes="(min-width: 1024px) 31vw, 46vw"
               className="aspect-video w-full object-cover"
             />
-            <div className="flex flex-col gap-2 p-5">
-              <h3 className="text-base font-semibold text-slate-900">
+            <div className="flex flex-col gap-1.5 p-3.5 sm:gap-2 sm:p-5">
+              <h3 className="text-sm font-semibold text-slate-900 sm:text-base">
                 {t(`useCase${useCase.id}Title`)}
               </h3>
-              <p className="text-sm leading-relaxed text-slate-600">
+              <p className="text-xs leading-relaxed text-slate-600 sm:text-sm">
                 {t(`useCase${useCase.id}Body`)}
               </p>
             </div>
