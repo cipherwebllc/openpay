@@ -7,7 +7,7 @@ import { logger } from '@/lib/logger';
 import { sendPushToWallet, type PushPayload } from '@/lib/push/server';
 import type { PushLocale } from '@/lib/push/store';
 
-export type PaymentNotificationKind = 'payment' | 'order';
+export type PaymentNotificationKind = 'payment' | 'order' | 'store';
 
 export const PUSH_NOTIFY_PENDING_TTL_SEC = 120;
 export const PUSH_NOTIFY_COALESCE_TTL_SEC = 60;
@@ -141,6 +141,28 @@ function copyFor(
 
     return {
       title: locale === 'ja' ? '新しい注文があります' : 'New order received',
+    };
+  }
+
+  if (kind === 'store') {
+    if (count >= 2) {
+      return {
+        title:
+          locale === 'ja'
+            ? `商品が ${count} 件売れました`
+            : `${count} products sold`,
+      };
+    }
+    if (amountLabel) {
+      return {
+        title:
+          locale === 'ja'
+            ? `商品が売れました (${amountLabel})`
+            : `Product sold (${amountLabel})`,
+      };
+    }
+    return {
+      title: locale === 'ja' ? '商品が売れました' : 'Product sold',
     };
   }
 
