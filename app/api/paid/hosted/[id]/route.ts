@@ -20,6 +20,7 @@ import {
 } from '@/lib/x402/hostedStore';
 import { recordHostedPurchase } from '@/lib/x402/purchaseStats';
 import { notifyPaymentReceived } from '@/lib/push/notify';
+import { recordMetric } from '@/lib/metrics';
 import { formatJpycYenLabel } from '@/lib/format';
 
 // 応答後に付帯処理を予約する (掟 12)。after() はリクエストスコープ外 (テスト等) で
@@ -217,6 +218,7 @@ async function settledContentResponse(input: {
         const healedIntent = healed.intent;
         scheduleAfterResponse(() => {
           void recordHostedPurchase(healedIntent.resourceId);
+          void recordMetric('store_purchase');
           void notifyPaymentReceived(
             healedIntent.merchant,
             'store',
@@ -748,6 +750,7 @@ async function submittedPaymentResponse(input: {
     const soldIntent = finalized.intent;
     scheduleAfterResponse(() => {
       void recordHostedPurchase(soldIntent.resourceId);
+      void recordMetric('store_purchase');
       void notifyPaymentReceived(
         soldIntent.merchant,
         'store',

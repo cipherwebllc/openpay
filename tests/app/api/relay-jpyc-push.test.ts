@@ -52,6 +52,12 @@ vi.mock('@/lib/kv', () => ({
   kvGet: vi.fn(async () => ({ ok: true, value: null })),
 }));
 
+// 月次メトリクスは after を経由するため mock で無効化 — 本 suite の after 計数フェンスは
+// push 通知の after だけを対象にする (メトリクス自体は tests/lib/metrics.test.ts が検証)。
+vi.mock('@/lib/metrics', () => ({
+  recordMetricAfterResponse: vi.fn(),
+}));
+
 vi.mock('@/lib/logger', () => ({
   logger: {
     warn: vi.fn(),
