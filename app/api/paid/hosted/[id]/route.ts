@@ -4,7 +4,7 @@
 // first-party と同じく直接 import する。hosted では PurchaseIntent が権威であり、
 // verify 成功後の quoted→signed CAS と signed→settling CAS が完了するまで settle を呼ばない。
 
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { getAddress, isAddress, isAddressEqual, type Address, type Hex } from 'viem';
 import { POST as settlePayment } from '@/app/api/facilitator/settle/route';
 import { POST as verifyPayment } from '@/app/api/facilitator/verify/route';
@@ -18,6 +18,17 @@ import {
   sellerDisclosureComplete,
   type HostedContent,
 } from '@/lib/x402/hostedStore';
+import { recordHostedPurchase } from '@/lib/x402/purchaseStats';
+
+// 応答後に付帯処理を予約する (掟 12)。after() はリクエストスコープ外 (テスト等) で
+// throw するため、その場合は直接 fire-and-forget に落とす (task は no-throw 前提)。
+function scheduleAfterResponse(task: () => void): void {
+  try {
+    after(task);
+  } catch {
+    task();
+  }
+}
 import {
   buildPurchaseAuthorizationClaim,
   checkPurchaseQuoteRateLimit,
@@ -199,6 +210,10 @@ async function settledContentResponse(input: {
       settledAt: input.intent.settledAt,
     });
     if (healed.ok) {
+      if (healed.kind === 'finalized') {
+        // heal で初めて確定した購入もカウント (idempotent は増えない)。
+        scheduleAfterResponse(() => void recordHostedPurchase(healed.intent.resourceId));
+      }
       access = await readSettledPurchaseAccess(
         input.intent.intentSalt,
       );
@@ -716,6 +731,11 @@ async function submittedPaymentResponse(input: {
       txHash,
     });
     return errorResponse('purchase_provisioning', 503);
+  }
+  if (finalized.kind === 'finalized') {
+    // 表示専用の購入数カウンタ (Brain 裁定)。初回確定のみ計上・応答後 (掟 12)・
+    // no-throw (掟 13: カウンタ障害を解錠応答へ波及させない)。
+    scheduleAfterResponse(() => void recordHostedPurchase(finalized.intent.resourceId));
   }
   return settledContentResponse({
     intent: finalized.intent,
