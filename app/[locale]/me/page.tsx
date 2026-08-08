@@ -17,6 +17,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
+import { TipInboxCard } from '@/components/TipInboxCard';
 import { env } from '@/lib/env';
 
 export async function generateMetadata({
@@ -75,7 +76,12 @@ export default async function MePage({
           </div>
         </header>
 
-        <ul className="mt-6 space-y-3">
+        {/* 受け取った応援・メッセージ (①-a)。flag OFF なら component 側で null。 */}
+        <div className="mt-6">
+          <TipInboxCard />
+        </div>
+
+        <ul className="mt-3 space-y-3">
           {cards.map(({ key, href, icon: Icon }) => (
             <li key={key}>
               <Link

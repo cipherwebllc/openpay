@@ -2724,6 +2724,15 @@
         "desc": "Edit your @handle profile, register and manage digital goods."
       }
     },
-    "note": "No account needed. History is stored on this device; purchases and selling use your wallet connection."
+    "note": "No account needed. History is stored on this device; purchases and selling use your wallet connection.",
+    "tipInbox": {
+      "title": "Tips & messages received",
+      "signInDesc": "See questions and messages attached to your tips (sign-in required)",
+      "empty": "No messages yet",
+      "unread": "{count} new",
+      "allRead": "{count} total (nothing new)",
+      "loadError": "Failed to load. Please reopen",
+      "openAll": "Open the full inbox"
+    }
   }
 }

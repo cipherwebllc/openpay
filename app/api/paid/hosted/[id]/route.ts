@@ -19,6 +19,8 @@ import {
   type HostedContent,
 } from '@/lib/x402/hostedStore';
 import { recordHostedPurchase } from '@/lib/x402/purchaseStats';
+import { notifyPaymentReceived } from '@/lib/push/notify';
+import { formatJpycYenLabel } from '@/lib/format';
 
 // 応答後に付帯処理を予約する (掟 12)。after() はリクエストスコープ外 (テスト等) で
 // throw するため、その場合は直接 fire-and-forget に落とす (task は no-throw 前提)。
@@ -211,8 +213,16 @@ async function settledContentResponse(input: {
     });
     if (healed.ok) {
       if (healed.kind === 'finalized') {
-        // heal で初めて確定した購入もカウント (idempotent は増えない)。
-        scheduleAfterResponse(() => void recordHostedPurchase(healed.intent.resourceId));
+        // heal で初めて確定した購入も同じ付帯処理 (idempotent は増えない/飛ばない)。
+        const healedIntent = healed.intent;
+        scheduleAfterResponse(() => {
+          void recordHostedPurchase(healedIntent.resourceId);
+          void notifyPaymentReceived(
+            healedIntent.merchant,
+            'store',
+            formatJpycYenLabel(BigInt(healedIntent.merchantValue)),
+          );
+        });
       }
       access = await readSettledPurchaseAccess(
         input.intent.intentSalt,
@@ -733,9 +743,17 @@ async function submittedPaymentResponse(input: {
     return errorResponse('purchase_provisioning', 503);
   }
   if (finalized.kind === 'finalized') {
-    // 表示専用の購入数カウンタ (Brain 裁定)。初回確定のみ計上・応答後 (掟 12)・
-    // no-throw (掟 13: カウンタ障害を解錠応答へ波及させない)。
-    scheduleAfterResponse(() => void recordHostedPurchase(finalized.intent.resourceId));
+    // 初回確定のみの付帯処理 (応答後・掟 12・いずれも no-throw = 掟 13):
+    // ①表示専用の購入数カウンタ ②出品者への「商品が売れました」push (opt-in 購読者のみ)。
+    const soldIntent = finalized.intent;
+    scheduleAfterResponse(() => {
+      void recordHostedPurchase(soldIntent.resourceId);
+      void notifyPaymentReceived(
+        soldIntent.merchant,
+        'store',
+        formatJpycYenLabel(BigInt(soldIntent.merchantValue)),
+      );
+    });
   }
   return settledContentResponse({
     intent: finalized.intent,
