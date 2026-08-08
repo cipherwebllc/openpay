@@ -133,6 +133,12 @@ vi.mock('@/lib/push/notify', () => ({
   notifyPaymentReceived: vi.fn(),
 }));
 
+// 月次メトリクスは after を経由するため mock で無効化 — 本 suite の after 計数フェンスは
+// tipMessage 保存の after だけを対象にする (メトリクス自体は tests/lib/metrics.test.ts が検証)。
+vi.mock('@/lib/metrics', () => ({
+  recordMetricAfterResponse: vi.fn(),
+}));
+
 vi.mock('@/lib/tipMessages', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('@/lib/tipMessages')>();

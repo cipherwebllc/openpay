@@ -52,6 +52,7 @@ import { env } from '@/lib/env';
 import { formatJpycYenLabel } from '@/lib/format';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
 import { notifyPaymentReceived } from '@/lib/push/notify';
+import { recordMetricAfterResponse } from '@/lib/metrics';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { checkHostedIntentSettleAdmission } from '@/lib/x402/purchaseSettleGate';
 import {
@@ -387,6 +388,8 @@ async function handleFree(
         const amountLabel = formatJpycYenLabel(auth.value);
         after(() => notifyPaymentReceived(auth.to, 'payment', amountLabel));
       }
+      // 月次メトリクス (運営ヒント・掟 13 no-throw)。fee 支払い tx は上の除外に含む。
+      recordMetricAfterResponse('relay_jpyc');
     }
   }
   if (result.kind === 'success') {
@@ -505,6 +508,10 @@ async function handleRecover(
     idemPrefix: 'relay:idem:',
   });
   const isFeePayment = params.merchant.toLowerCase() === feeReceiver.toLowerCase();
+  if (result.kind === 'success' && !isFeePayment) {
+    // 月次メトリクス (運営ヒント・掟 13 no-throw)。fee 支払い tx は除外。
+    recordMetricAfterResponse('relay_jpyc');
+  }
   if (result.kind === 'success' && !isFeePayment && env.enablePushNotify) {
     // recover 経路の店主実受取額 = 検証済み params.merchantValue (forwarder.settle が店舗へ
     // 送る額・署名対象で settleViaForwarder が照合済み)。gas 回収分 (feeValue) は含めない。

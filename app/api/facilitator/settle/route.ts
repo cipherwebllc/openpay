@@ -7,6 +7,7 @@
 //
 // 受領証明 (receipt) の署名・添付は X4 (lib/x402/receipt) で success 分岐に配線する。
 
+import { recordMetric } from '@/lib/metrics';
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { isKvConfigured } from '@/lib/kv';
@@ -225,6 +226,8 @@ export async function POST(req: Request): Promise<NextResponse> {
           error: e instanceof Error ? e.message : String(e),
         });
       }
+      // 月次メトリクス (運営ヒント・fail-quiet)。
+      void recordMetric('x402_settle');
       return NextResponse.json({
         success: true,
         transaction: result.txHash,
