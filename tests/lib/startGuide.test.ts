@@ -6,7 +6,7 @@
 // 変えないと落ちる = ドリフト検出フェンス。
 
 import { describe, it, expect } from 'vitest';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { startGuideContentFor, startGuideMetadata } from '@/lib/startGuide';
 import { ORDER_LIST_MAX, ORDER_LIST_TTL_SEC } from '@/lib/orderRelay';
@@ -124,6 +124,33 @@ describe('startGuide content', () => {
       expect(JSON.stringify(images)).toContain('/og-start.webp');
     }
     expect(existsSync(join(process.cwd(), 'public', 'og-start.webp'))).toBe(true);
+  });
+
+  // OG 画像は本文と別に手で作るため、文言変更時に取り残されやすい (実際 2026-08-09 に
+  // 「テスト返金」がページだけ直り OG に残った)。チップは checklist 項目の短縮形なので、
+  // 「共通する連続 3 文字以上が元項目に存在する」を対応の証拠として要求する。
+  it('OG 画像のチップが checklist 項目と対応している (ドリフト検出)', () => {
+    const svg = readFileSync(join(process.cwd(), 'assets', 'og', 'og-start.svg'), 'utf8');
+    const chips = [...svg.matchAll(/<text[^>]*font-size="25"[^>]*>([^<]+)<\/text>/g)].map(
+      (m) => m[1],
+    );
+    const items = startGuideContentFor('ja').checklistItems;
+    expect(chips).toHaveLength(items.length);
+
+    const sharesRun = (chip: string, item: string): boolean => {
+      for (let i = 0; i + 3 <= chip.length; i += 1) {
+        if (item.includes(chip.slice(i, i + 3))) return true;
+      }
+      return false;
+    };
+    // ⚠️ 「どれかの項目と一致」では弱い — 旧「テスト返金」は別項目の「テスト決済」に
+    // 誤マッチして検出をすり抜けた。チップは項目と同順なので位置対応を要求する。
+    chips.forEach((chip, i) => {
+      expect(
+        sharesRun(chip, items[i]),
+        `OG のチップ ${i + 1} 「${chip}」が checklist 項目「${items[i]}」と対応していない (文言変更時は assets/og/og-start.svg を直して public/og-start.webp を再生成する)`,
+      ).toBe(true);
+    });
   });
 
   it('本文中の図版ファイルが実在する (リンク切れ防止)', () => {
