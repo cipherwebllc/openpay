@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <style>text{font-family:system-ui,-apple-system,'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;}</style>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ecfdf5"/>
+      <stop offset="55%" stop-color="#f0fdfa"/>
+      <stop offset="100%" stop-color="#ffffff"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1200" height="10" fill="#059669"/>
+
+  <!-- brand -->
+  <circle cx="86" cy="80" r="24" fill="#1447e6"/>
+  <circle cx="86" cy="80" r="10" fill="#ffffff"/>
+  <text x="124" y="92" font-size="34" font-weight="700" fill="#0f172a">OpenPay</text>
+
+  <!-- title -->
+  <text x="86" y="212" font-size="60" font-weight="700" fill="#0f172a">導入前チェックリスト</text>
+  <text x="86" y="290" font-size="40" font-weight="700" fill="#047857">JPYC決済を始める前に、</text>
+  <text x="86" y="348" font-size="40" font-weight="700" fill="#047857">確認しておきたい 8 つのこと</text>
+
+  <!-- checklist card -->
+  <rect x="86" y="396" width="1028" height="150" rx="24" fill="#ffffff" stroke="#a7f3d0" stroke-width="3"/>
+
+  <g>
+    <rect x="126" y="428" width="26" height="26" rx="7" fill="#ffffff" stroke="#34d399" stroke-width="3"/>
+    <text x="170" y="450" font-size="25" fill="#334155">ウォレット準備</text>
+    <rect x="410" y="428" width="26" height="26" rx="7" fill="#ffffff" stroke="#34d399" stroke-width="3"/>
+    <text x="454" y="450" font-size="25" fill="#334155">少額テスト決済</text>
+    <rect x="718" y="428" width="26" height="26" rx="7" fill="#ffffff" stroke="#34d399" stroke-width="3"/>
+    <text x="762" y="450" font-size="25" fill="#334155">返金ルールを決める</text>
+  </g>
+  <g>
+    <rect x="126" y="490" width="26" height="26" rx="7" fill="#ffffff" stroke="#34d399" stroke-width="3"/>
+    <text x="170" y="512" font-size="25" fill="#334155">日本円へ償還</text>
+    <rect x="410" y="490" width="26" height="26" rx="7" fill="#ffffff" stroke="#34d399" stroke-width="3"/>
+    <text x="454" y="512" font-size="25" fill="#334155">会計記録の残し方</text>
+  </g>
+
+  <text x="86" y="596" font-size="26" fill="#475569">導入費用 0 円・契約不要・売上はウォレットへ直接着金</text>
+</svg>
