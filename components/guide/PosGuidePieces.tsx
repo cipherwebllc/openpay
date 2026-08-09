@@ -18,6 +18,7 @@ export const FIGURE_DIMS: Record<string, { w: number; h: number }> = {
   'payment-success.svg': { w: 420, h: 720 },
   'history-reconcile.svg': { w: 1000, h: 420 },
   'cost-compare.svg': { w: 900, h: 360 },
+  'refund-not-reversal.svg': { w: 1000, h: 500 },
 };
 
 // 標準セクション (mt-10 + 見出し)。カード型の できること/cannot・CTA は独自スタイルなので使わない。

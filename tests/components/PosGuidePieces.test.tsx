@@ -14,6 +14,7 @@ import {
   StepList,
 } from '@/components/guide/PosGuidePieces';
 import { POS_GUIDE } from '@/lib/posGuide';
+import { startGuideContentFor } from '@/lib/startGuide';
 
 describe('GuideFigure', () => {
   it('img を /guide/<file> + FIGURE_DIMS の width/height + alt + lazy で描画', () => {
@@ -125,7 +126,7 @@ describe('Section', () => {
 });
 
 // ── L2: FIGURE_DIMS と POS_GUIDE 参照の整合 (黙殺フォールバック防止) ──
-describe('FIGURE_DIMS: POS_GUIDE 参照との整合', () => {
+describe('FIGURE_DIMS: guide content 参照との整合', () => {
   function collect(value: unknown, acc: Set<string>): void {
     if (Array.isArray(value)) {
       value.forEach((v) => collect(v, acc));
@@ -140,6 +141,9 @@ describe('FIGURE_DIMS: POS_GUIDE 参照との整合', () => {
   const referenced = new Set<string>();
   collect(POS_GUIDE.ja, referenced);
   collect(POS_GUIDE.en, referenced);
+  // FIGURE_DIMS は guide/* 共用テーブル。孤児検出を維持するため他ガイドの参照も集める。
+  collect(startGuideContentFor('ja'), referenced);
+  collect(startGuideContentFor('en'), referenced);
 
   it('参照される全 file が FIGURE_DIMS に entry を持つ (?? フォールバック未到達)', () => {
     for (const f of referenced) {

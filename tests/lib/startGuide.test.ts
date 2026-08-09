@@ -6,6 +6,8 @@
 // 変えないと落ちる = ドリフト検出フェンス。
 
 import { describe, it, expect } from 'vitest';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { startGuideContentFor, startGuideMetadata } from '@/lib/startGuide';
 import { ORDER_LIST_MAX, ORDER_LIST_TTL_SEC } from '@/lib/orderRelay';
 import { TIP_MESSAGE_TTL_SEC } from '@/lib/tipMessages';
@@ -112,12 +114,39 @@ describe('startGuide content', () => {
     expect(enText).toContain(`${TIP_MESSAGE_TTL_SEC / 86400} days`);
   });
 
-  it('metadata は canonical / hreflang / OG 画像を持つ', () => {
+  it('metadata は canonical / hreflang / 専用 OG 画像を持ち、実ファイルが存在する', () => {
     for (const locale of LOCALES) {
       const m = startGuideMetadata(locale);
       expect(m.alternates?.canonical).toContain('/guide/start');
       expect(m.alternates?.languages).toBeDefined();
-      expect(m.openGraph?.images).toBeDefined();
+      const images = m.openGraph?.images;
+      // 既定の og-image.png (/guide/qr と共用) ではなく専用画像であること。
+      expect(JSON.stringify(images)).toContain('/og-start.webp');
+    }
+    expect(existsSync(join(process.cwd(), 'public', 'og-start.webp'))).toBe(true);
+  });
+
+  it('本文中の図版ファイルが実在する (リンク切れ防止)', () => {
+    for (const locale of LOCALES) {
+      for (const s of startGuideContentFor(locale).sections) {
+        if (!s.figure) continue;
+        const path = join(process.cwd(), 'public', 'guide', s.figure.file);
+        expect(existsSync(path), `${s.figure.file} が無い`).toBe(true);
+        expect(s.figure.alt.trim().length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('外部リンクは https で、JPYC 公式と運用ガイドを案内する', () => {
+    for (const locale of LOCALES) {
+      const links = startGuideContentFor(locale).sections.flatMap(
+        (s) => s.externalLinks ?? [],
+      );
+      expect(links.length).toBeGreaterThanOrEqual(2);
+      for (const l of links) expect(l.href).toMatch(/^https:\/\//);
+      const hrefs = links.map((l) => l.href);
+      expect(hrefs).toContain('https://jpyc.co.jp/');
+      expect(hrefs).toContain('https://note.com/masia02/n/ned04a4cdb00a');
     }
   });
 });
