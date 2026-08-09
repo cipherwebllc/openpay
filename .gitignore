@@ -55,3 +55,7 @@ contracts/lib/
 # forge script の broadcast 記録 (deploy tx ログ。機密値は contracts/cache/ 側で ignore 済)。
 broadcast/
 
+.env*
+
+# 実装計画・調査メモ (CLAUDE.md「参照」で ignore 対象と規定済み。ローカル限定・公開しない)。
+plans/
