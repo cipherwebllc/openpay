@@ -201,6 +201,32 @@ export default async function GuideStartPage({
                 ))}
               </ul>
             ) : null}
+            {section.afterBullets ? (
+              <>
+                <p className="mt-4 text-sm leading-relaxed text-slate-700">
+                  {section.afterBullets.body}
+                </p>
+                {/* 参考情報は地色付きの小箱に落として、決めごと (bullets) と主従を保つ。 */}
+                <div className="mt-4 rounded-2xl bg-slate-50 px-4 py-3.5">
+                  <p className="text-xs font-bold text-slate-500">
+                    {section.afterBullets.title}
+                  </p>
+                  <ul className="mt-2 space-y-1.5">
+                    {section.afterBullets.items.map((item) => (
+                      <li
+                        key={item}
+                        className="flex items-start gap-2 text-sm leading-relaxed text-slate-600"
+                      >
+                        <span aria-hidden className="mt-0.5 text-slate-400">
+                          ・
+                        </span>
+                        <span>{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </>
+            ) : null}
             {section.defs ? (
               <dl className="mt-4 space-y-3">
                 {section.defs.map((d) => (
