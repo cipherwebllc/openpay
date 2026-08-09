@@ -27,6 +27,10 @@ const hold = vi.hoisted(() => ({
     | { ok: true; record: { config: { to: string }; storefront?: unknown } | null }
     | { ok: false },
   rateAllowed: true,
+  // 受注一覧の保持ポリシー検証用 (掟 14 隣接: /guide/start が「直近 200 件・最後の
+  // 注文から 72 時間」と開示しているため、実装側の上限と TTL 張り直しを固定する)。
+  ltrimCalls: [] as unknown[][],
+  expireCalls: [] as unknown[][],
   kvConfigured: true,
   claimValue: 'OK' as 'OK' | null, // pending nx クレーム: 'OK'=fresh, null=衝突 (既存マーカーあり)
   usedMarker: 'done' as 'pending' | 'done' | null, // 衝突時に kvGet(usedKey) が返す既存マーカー
@@ -208,8 +212,14 @@ vi.mock('@/lib/kv', () => ({
     hold.listValues[index] = args[1];
     return Promise.resolve({ ok: true, value: 1 });
   },
-  kvLtrim: () => Promise.resolve({ ok: true, value: 'OK' }),
-  kvExpire: () => Promise.resolve({ ok: true, value: 1 }),
+  kvLtrim: (...args: unknown[]) => {
+    hold.ltrimCalls.push(args);
+    return Promise.resolve({ ok: true, value: 'OK' });
+  },
+  kvExpire: (...args: unknown[]) => {
+    hold.expireCalls.push(args);
+    return Promise.resolve({ ok: true, value: 1 });
+  },
 }));
 vi.mock('@/lib/logger', () => ({
   logger: { info: vi.fn(), warn: warnSpy, error: vi.fn(), debug: vi.fn() },
@@ -296,6 +306,8 @@ beforeEach(() => {
   hold.usedMarker = 'done';
   hold.pointerSetFails = false;
   hold.listValues = [];
+  hold.ltrimCalls = [];
+  hold.expireCalls = [];
   hold.feeUsedKeys = new Set();
   hold.evalResults = [];
   hold.verify = {
@@ -321,6 +333,18 @@ beforeEach(() => {
 });
 
 describe('POST /api/order/notify', () => {
+  // /guide/start が「直近 200 件を保持・一覧全体は最後の注文から 72 時間で消える」と
+  // 開示している。その 2 点は実装のこの 2 呼び出しに依存するため固定する
+  // (TTL を張り直さなくなると「最後の注文から」が嘘になる)。
+  it('受注保存ごとに 上限 200 件で trim し TTL 72h を張り直す (開示との整合)', async () => {
+    const res = await POST(req(goodBody()));
+    expect(res.status).toBe(200);
+    expect(hold.ltrimCalls).toHaveLength(1);
+    expect(hold.ltrimCalls[0].slice(1)).toEqual([0, 199]);
+    expect(hold.expireCalls).toHaveLength(1);
+    expect(hold.expireCalls[0][1]).toBe(72 * 60 * 60);
+  });
+
   it('flag OFF → 404', async () => {
     hold.enableOrderRelay = false;
     expect((await POST(req(goodBody()))).status).toBe(404);
