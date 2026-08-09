@@ -263,15 +263,32 @@ export default async function GuideStorePage({
                   </p>
                 ) : null}
                 {section.bullets ? (
+                  // ✓ は「確認して潰す」チェックリスト用。本文を伴うセクションの箇条書きは
+                  // 事実の列挙 (できなくなること等) なので、• にして推奨と読ませない。
                   <BulletList
                     items={section.bullets}
-                    marker="✓"
+                    marker={section.body ? '•' : '✓'}
                     markerClassName="text-emerald-600"
                   />
                 ) : null}
               </div>
             ))}
           </div>
+        </Section>
+
+        <Section title={c.startLinkTitle}>
+          <p className="mt-2 text-sm leading-relaxed text-slate-700">
+            {c.startLinkBody}
+          </p>
+          <p className="mt-3">
+            <Link
+              href={`/${locale}/guide/start`}
+              prefetch={false}
+              className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
+            >
+              {c.startLinkLabel} →
+            </Link>
+          </p>
         </Section>
 
         <Section title={c.promoTitle}>
