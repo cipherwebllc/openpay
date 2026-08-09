@@ -94,6 +94,7 @@ export type GuideContent = {
 
   readonly backHome: string;
   readonly relatedTitle: string;
+  readonly relatedStart: string;
   readonly relatedQr: string;
   readonly relatedShop: string;
 };
@@ -256,6 +257,7 @@ const ja: GuideContent = {
 
   backHome: '← トップにもどる',
   relatedTitle: '関連ガイド',
+  relatedStart: '導入前チェックリスト — 始める前に確認する 8 つのこと',
   relatedQr: 'まずはシンプルに — 決済QRガイド',
   relatedShop: '商品登録から注文受付まで — レジ・モバイルオーダー',
 };
@@ -412,6 +414,7 @@ const en: GuideContent = {
 
   backHome: '← Back to home',
   relatedTitle: 'Related guides',
+  relatedStart: 'Before you start — eight things to check',
   relatedQr: 'Keep it simple — the payment QR guide',
   relatedShop: 'From product setup to order intake — POS & mobile ordering',
 };

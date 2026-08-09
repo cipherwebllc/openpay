@@ -48,6 +48,7 @@ export default async function GuideShopPage({
   ];
 
   const guideLinks = [
+    { href: `/${locale}/guide/start`, label: c.guideLinkStart },
     { href: `/${locale}/guide/pos`, label: c.guideLinkPos },
     { href: `/${locale}/guide/mobile-order`, label: c.guideLinkCustomer },
     { href: `/${locale}/guide/agent`, label: c.guideLinkAgent },

@@ -51,6 +51,7 @@ export default async function GuideQrPage({
   const tLanding = await getTranslations({ locale, namespace: 'Landing' });
 
   const guideLinks = [
+    { href: `/${locale}/guide/start`, label: c.guideLinkStart },
     { href: `/${locale}/guide/pos`, label: c.guideLinkPos },
     { href: `/${locale}/guide/shop`, label: c.guideLinkShop },
   ];
