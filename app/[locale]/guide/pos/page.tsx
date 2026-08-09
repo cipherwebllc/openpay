@@ -267,6 +267,15 @@ export default async function GuidePosPage({
           <ul className="mt-2 space-y-1.5">
             <li>
               <Link
+                href={`/${locale}/guide/start`}
+                prefetch={false}
+                className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
+              >
+                {c.relatedStart} →
+              </Link>
+            </li>
+            <li>
+              <Link
                 href={`/${locale}/guide/qr`}
                 prefetch={false}
                 className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
