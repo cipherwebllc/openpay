@@ -149,14 +149,14 @@ const JA: StartGuideContent = {
       n: 5,
       title: 'キャンセルと返金は「取消」ではない',
       body: [
-        'ここがカード決済との一番の違いです。ブロックチェーン上で完了した送金は、後から取り消せません。',
+        'ここがカード決済との一番の違いです。ブロックチェーン上で完了した送金は、後から取り消せません。OpenPay は売上を預からないため、運営が代わりに返金することもできません。',
         '決済前に、金額・受取先・チェーンを確認してから支払ってください。決済後に返金する場合は、元の決済を取り消すのではなく、店舗から顧客へ別途返金を送金します。',
         '送金先を間違えた場合、相手のウォレットを店舗が管理していなければ、技術的に取り戻せないことがあります。',
         '導入前に、次の運用ルールを決めておくことをおすすめします。',
       ],
       figure: {
         file: 'refund-not-reversal.svg',
-        alt: 'カード決済は同じ取引を取り消せるのに対し、JPYC は取り消せず、返金は別の取引として送ることを示す図',
+        alt: 'カード決済は同じ取引を取り消せるのに対し、OpenPay の JPYC 決済は取り消せず、返金は別の取引として送ることを示す図',
       },
       bullets: [
         '注文キャンセルの扱い',
@@ -325,14 +325,14 @@ const EN: StartGuideContent = {
       n: 5,
       title: 'Refunds are not reversals',
       body: [
-        'This is the biggest difference from card payments. A transfer completed on a blockchain cannot be undone afterwards.',
+        'This is the biggest difference from card payments. A transfer completed on a blockchain cannot be undone afterwards, and because OpenPay never holds your sales, there is no operator balance we could refund from either.',
         'Check the amount, the recipient, and the chain before paying. To refund after the fact, you do not reverse the original payment — the shop sends a separate refund transfer to the customer.',
         'If funds go to the wrong address and the shop does not control that wallet, recovery may be technically impossible.',
         'Decide these operational rules before you roll out.',
       ],
       figure: {
         file: 'refund-not-reversal.svg',
-        alt: 'Diagram showing that a card payment can reverse the same transaction while a JPYC payment cannot, so a refund is sent as a separate transaction',
+        alt: 'Diagram showing that a card payment can reverse the same transaction while a JPYC payment on OpenPay cannot, so a refund is sent as a separate transaction',
       },
       bullets: [
         'How order cancellations are handled',
