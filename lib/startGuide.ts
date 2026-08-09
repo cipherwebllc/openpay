@@ -227,7 +227,7 @@ const JA: StartGuideContent = {
         },
         {
           term: 'モバイル注文の受注データ',
-          desc: 'OpenPay のサーバに保存されます。保存期間は 72 時間・最大 200 件で、お客様の個人情報は保存しません。',
+          desc: 'OpenPay のサーバに保存されます。直近 200 件までを保持し、それを超えると古い注文から一覧に出なくなります (売上はオンチェーンに残ります)。一覧全体は最後の注文から 72 時間で消えます。お客様の個人情報は保存しません。',
         },
         {
           term: 'チップに添えられたメッセージ',
@@ -413,7 +413,7 @@ const EN: StartGuideContent = {
         },
         {
           term: 'Mobile-order intake data',
-          desc: 'Stored on OpenPay servers, retained for 72 hours with a cap of 200 entries. No customer personal data is stored.',
+          desc: 'Stored on OpenPay servers. The list keeps the most recent 200 entries; beyond that the oldest orders drop off the list (the sales themselves remain on-chain). The whole list expires 72 hours after the most recent order. No customer personal data is stored.',
         },
         {
           term: 'Messages attached to tips',
