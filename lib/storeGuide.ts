@@ -71,6 +71,11 @@ export type StoreGuideContent = {
     readonly bullets?: readonly string[];
   }[];
 
+  /** JPYC そのものの扱い (準備・償還・会計・返金) は /guide/start へ送る導線。 */
+  readonly startLinkTitle: string;
+  readonly startLinkBody: string;
+  readonly startLinkLabel: string;
+
   readonly promoTitle: string;
   readonly promoBullets: readonly string[];
   readonly promoPoint: string;
@@ -281,6 +286,10 @@ const JA: StoreGuideContent = {
         '価格は整数 JPYC か (購入者は別途 利用料 最低 1 JPYC・価格の 1% を負担します)',
         '課税事業者の場合、価格は消費税を含む総額 (税込) で登録しているか',
         '無料サービス側の規約で商用利用・再配布形態が許されているか',
+        '配布 URL に期限が設定されていないか (期限付きリンクは購入者が後から開けなくなります)',
+        'ファイル形式と必要な環境を説明に書いたか (例: PSD・要 Photoshop / 動画は MP4・約 2GB)',
+        '再配布や商用利用を認めるかを説明に明記したか',
+        '商品名と説明が中身と一致しているか (説明と著しく異なると、購入者は解除・返金を求められます)',
       ],
     },
     {
@@ -291,7 +300,29 @@ const JA: StoreGuideContent = {
       title: '4. 内容を更新したいとき',
       body: 'OpenPay の商品編集で URL や本文を変更すると新しい版として保存されます。Notion や Google ドライブのようにリンクはそのままで中身だけ更新できるサービスを選んでおくと、更新運用がいちばん楽です。',
     },
+    {
+      title: '5. 販売者としての表示義務',
+      body: 'デジタル商品を継続的・反復的に販売する場合、特定商取引法にもとづく表示が必要になることがあります。OpenPay は購入画面に、販売者のウォレットアドレス・価格・提供方法・撤回の可否などを自動で表示します。これに加えて、あなた自身の氏名または名称・住所・連絡先などは、出品時の「法定表示の追加事項」欄に記載してください。事業として販売するかどうか、開示がどこまで必要かは個々の状況で変わります。判断がつかない場合は専門家にご確認ください。',
+    },
+    {
+      title: '6. 提供開始後は自己都合の撤回ができない',
+      body: 'デジタル商品の性質上、提供を開始した後の自己都合による申込みの撤回・契約解除はできません。オンチェーンの送金も技術上取り消せません。ただし、これは「売り切ったら終わり」という意味ではありません。商品が提供されない場合や、説明と著しく異なる場合、購入者は解除・返金・代替提供を求めることができます。その際の返金は、元の取引を取り消すのではなく、あなたから購入者へ別途送金する形になります。だからこそ、説明を正確に書くことが最大の防御になります。',
+    },
+    {
+      title: '7. 購入者のライブラリを守る',
+      body: '購入者は「ライブラリ」から、購入した商品をあとから何度でも受け取れます。この仕組みは、あなたが用意した外部の URL が生きていることが前提です。',
+      bullets: [
+        '外部サービス側でファイルやリンクを削除すると、購入済みの人への提供が止まります',
+        'OpenPay 側で販売を停止しても、購入済みの人はライブラリから受け取り続けられます',
+        'OpenPay のサービス自体が停止した場合、ライブラリからの受け取りはできなくなります。高額商品や長期提供を約束する商品では、購入者への直接の連絡手段も併せて用意しておくと安全です',
+      ],
+    },
   ],
+
+  startLinkTitle: 'JPYC そのものの扱いについて',
+  startLinkBody:
+    'ウォレットの準備、日本円への償還、会計記録の残し方、返金の考え方は、販売でも店舗決済でも共通です。',
+  startLinkLabel: '導入前チェックリスト — 始める前に確認する 8 つのこと',
 
   promoTitle: '売れるための一工夫',
   promoBullets: [
@@ -510,6 +541,10 @@ const EN: StoreGuideContent = {
         'Is the price whole JPYC? (Buyers additionally pay the fee: 1% of price, min 1 JPYC.)',
         'If you are a taxable business for Japanese consumption tax, is the price tax-inclusive?',
         'Do the free service’s terms allow commercial use in this form?',
+        'Does the delivery URL have an expiry? (Expiring links stop working for buyers later.)',
+        'Did you state the file format and what is needed to open it? (e.g. PSD, requires Photoshop / MP4 video, ~2GB)',
+        'Did you state whether redistribution and commercial use are allowed?',
+        'Do the title and description match the contents? (If they differ materially, buyers can seek cancellation or a refund.)',
       ],
     },
     {
@@ -520,7 +555,29 @@ const EN: StoreGuideContent = {
       title: '4. When updating content',
       body: 'Editing the URL or text on OpenPay saves a new revision. Services like Notion or Google Drive, where the link stays stable while the content changes, make update operations easiest.',
     },
+    {
+      title: '5. Your disclosure duties as a seller',
+      body: 'Selling digital products on a continuing, repeated basis may require disclosures under Japan’s Act on Specified Commercial Transactions. OpenPay automatically shows the seller wallet address, price, delivery method, and withdrawal terms on the purchase screen. Beyond that, your own name or business name, address, and contact details go in the "additional statutory disclosures" field when you list. Whether you are selling as a business, and how much disclosure is required, depends on your situation — consult a professional if you are unsure.',
+    },
+    {
+      title: '6. No change of mind after delivery starts',
+      body: 'Given the nature of digital products, a buyer cannot withdraw or cancel for their own convenience once delivery has started, and on-chain transfers cannot be reversed. That does not mean the sale is the end of your obligations: if the product is not delivered, or differs materially from its description, buyers can seek cancellation, a refund, or a replacement. Such a refund is not a reversal of the original transaction — you send a separate transfer to the buyer. Writing an accurate description is therefore your best protection.',
+    },
+    {
+      title: '7. Protect your buyers’ library',
+      body: 'Buyers can re-download what they purchased from their library at any time. That depends on the external URL you provided staying alive.',
+      bullets: [
+        'Deleting the file or link on the external service cuts off buyers who already paid',
+        'Stopping the sale on OpenPay does not affect existing buyers — they keep receiving from the library',
+        'If the OpenPay service itself stops, library retrieval stops with it. For high-value products or long-term commitments, keep a direct channel to reach your buyers as well',
+      ],
+    },
   ],
+
+  startLinkTitle: 'About handling JPYC itself',
+  startLinkBody:
+    'Setting up a wallet, redeeming to yen, keeping accounting records, and how refunds work are the same whether you sell products or accept payments in a shop.',
+  startLinkLabel: 'Before you start — eight things to check',
 
   promoTitle: 'Small moves that sell',
   promoBullets: [

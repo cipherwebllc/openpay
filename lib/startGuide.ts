@@ -77,9 +77,9 @@ const JA: StartGuideContent = {
 
   checklistTitle: 'まず、この 5 つを一周してみる',
   checklistLead:
-    'この一周を自分で経験しておくと、お客様に質問されたときに迷いません。',
+    'この一周を自分で経験しておくと、相手に質問されたときに迷いません。',
   checklistItems: [
-    '店舗用ウォレットを準備する',
+    '受け取り用のウォレットを準備する',
     '少額でテスト決済してみる',
     'テスト返金をしてみる',
     'JPYC EX で少額を日本円に戻してみる',
@@ -91,7 +91,7 @@ const JA: StartGuideContent = {
       n: 1,
       title: 'JPYC を準備する',
       body: [
-        'OpenPay で JPYC を受け取るには、対応ウォレットを用意します。店舗側の流れは 3 ステップです。',
+        'OpenPay で JPYC を受け取るには、対応ウォレットを用意します。店舗でもクリエイターでも、受け取る側の流れは 3 ステップです。',
         'JPYC そのものを手に入れるなら、発行元の JPYC EX が使えます。本人確認のうえ発行予約をし、指定の銀行口座へ日本円を振り込むと、登録したウォレットに JPYC が届きます。',
       ],
       flow: ['ウォレットを準備', 'OpenPay に接続', '受取先を設定'],
@@ -129,7 +129,7 @@ const JA: StartGuideContent = {
         '手数料・所要時間・上限額などの条件は変わることがあります。実際に償還するときは JPYC 公式の最新条件を確認してください。',
       ],
       flow: [
-        '店舗ウォレット',
+        '受け取ったウォレット',
         'JPYC EX で償還予約',
         '指定アドレスへ送付',
         '登録銀行口座へ払い戻し',
@@ -250,9 +250,9 @@ const EN: StartGuideContent = {
 
   checklistTitle: 'Start by doing these five once',
   checklistLead:
-    'Going through the loop yourself means you will not be caught out when a customer asks.',
+    'Going through the loop yourself means you will not be caught out when someone asks.',
   checklistItems: [
-    'Set up a wallet for the shop',
+    'Set up a wallet to receive into',
     'Make a small test payment',
     'Try a test refund',
     'Convert a small amount back to yen via JPYC EX',
@@ -264,7 +264,7 @@ const EN: StartGuideContent = {
       n: 1,
       title: 'Get JPYC ready',
       body: [
-        'To receive JPYC through OpenPay you need a supported wallet. On the shop side it is three steps.',
+        'To receive JPYC through OpenPay you need a supported wallet. Whether you run a shop or sell as a creator, receiving is three steps.',
         'To obtain JPYC itself, you can use JPYC EX, run by the issuer. After identity verification you reserve an issuance and wire yen to the specified bank account; JPYC then arrives in your registered wallet.',
       ],
       flow: ['Set up a wallet', 'Connect to OpenPay', 'Set the receiving address'],
@@ -305,7 +305,7 @@ const EN: StartGuideContent = {
         'Fees, processing time, and limits can change. Check the current terms on JPYC official channels when you actually redeem.',
       ],
       flow: [
-        'Shop wallet',
+        'Your wallet',
         'Reserve redemption on JPYC EX',
         'Send JPYC to the given address',
         'Yen paid out to your bank account',
