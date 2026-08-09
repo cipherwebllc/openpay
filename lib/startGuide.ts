@@ -20,6 +20,15 @@ export type StartGuideSection = {
   /** 矢印で繋ぐ短い流れ (「お客様のウォレット → 店舗のウォレット」等)。 */
   readonly flow?: readonly string[];
   readonly bullets?: readonly string[];
+  /**
+   * bullets (= 決めておく運用ルール) の後に置く補足。主従を保つための構造で、
+   * 「決めごとが主・技術的な手順は参考」という関係を描画側でも崩さない。
+   */
+  readonly afterBullets?: {
+    readonly body: string;
+    readonly title: string;
+    readonly items: readonly string[];
+  };
   readonly callout?: { readonly kind: 'warn' | 'tip'; readonly text: string };
   /** 用語 + 説明の対 (どこに何が残るか)。 */
   readonly defs?: readonly { readonly term: string; readonly desc: string }[];
@@ -81,7 +90,7 @@ const JA: StartGuideContent = {
   checklistItems: [
     '受け取り用のウォレットを準備する',
     '少額でテスト決済してみる',
-    'テスト返金をしてみる',
+    '返金になったときの進め方を決める',
     'JPYC EX で少額を日本円に戻してみる',
     '履歴と会計記録の残し方を決める',
   ],
@@ -165,6 +174,16 @@ const JA: StartGuideContent = {
         '決済後の返品',
         '返金時のネットワーク手数料を誰が負担するか',
       ],
+      afterBullets: {
+        body: '実際に返金が必要になったときは、返す金額・方法・ネットワーク手数料の負担をお客様と確認したうえで進めます。決まった手順があるわけではなく、お店のルールとお客様とのやり取りで決まります。',
+        title: '参考: JPYC で返す場合',
+        items: [
+          '送金は OpenPay ではなく、あなたのウォレットアプリから行います (OpenPay に返金機能はありません)',
+          '送り先は、受け取った取引の送金元アドレス。ウォレットの受信履歴かブロックエクスプローラで確認できます',
+          'ネットワーク手数料は送る側 (お店) の負担になります',
+          '会計上は元の売上が消えるのではなく、返金が別の記録として増えます',
+        ],
+      },
     },
     {
       n: 6,
@@ -254,7 +273,7 @@ const EN: StartGuideContent = {
   checklistItems: [
     'Set up a wallet to receive into',
     'Make a small test payment',
-    'Try a test refund',
+    'Decide how you will handle refunds',
     'Convert a small amount back to yen via JPYC EX',
     'Decide how you will keep history and accounting records',
   ],
@@ -341,6 +360,16 @@ const EN: StartGuideContent = {
         'Returns after payment',
         'Who absorbs the network fee on a refund',
       ],
+      afterBullets: {
+        body: 'When a refund actually comes up, you agree the amount, the method, and who absorbs the network fee with the customer before proceeding. There is no fixed procedure — it follows your own rules and the conversation with the buyer.',
+        title: 'For reference: refunding in JPYC',
+        items: [
+          'You send from your own wallet app, not from OpenPay (OpenPay has no refund function)',
+          'The destination is the sender address of the payment you received — check your wallet’s incoming history or a block explorer',
+          'The network fee is paid by the sender, which is the shop',
+          'In your books the original sale is not erased; the refund is added as a separate record',
+        ],
+      },
     },
     {
       n: 6,
