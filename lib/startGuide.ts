@@ -90,7 +90,7 @@ const JA: StartGuideContent = {
   checklistItems: [
     '受け取り用のウォレットを準備する',
     '少額でテスト決済してみる',
-    '返金になったときの進め方を決める (一度送り返して試すと確実)',
+    '返金になったときの進め方を決める',
     'JPYC EX で少額を日本円に戻してみる',
     '履歴と会計記録の残し方を決める',
   ],
@@ -273,7 +273,7 @@ const EN: StartGuideContent = {
   checklistItems: [
     'Set up a wallet to receive into',
     'Make a small test payment',
-    'Decide how you will handle refunds (sending one back yourself makes it concrete)',
+    'Decide how you will handle refunds',
     'Convert a small amount back to yen via JPYC EX',
     'Decide how you will keep history and accounting records',
   ],
