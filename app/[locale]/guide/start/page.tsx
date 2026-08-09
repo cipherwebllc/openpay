@@ -11,7 +11,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
-import { Section } from '@/components/guide/PosGuidePieces';
+import { GuideFigure, Section } from '@/components/guide/PosGuidePieces';
 import {
   startGuideContentFor,
   startGuideMetadata,
@@ -180,6 +180,10 @@ export default async function GuideStartPage({
                 {p}
               </p>
             ))}
+            {/* 図版は本文直後 — 概念の理解を助けるものなので、箇条書きより前に置く。 */}
+            {section.figure ? (
+              <GuideFigure image={section.figure} className="mt-5" />
+            ) : null}
             {section.flow ? <Flow steps={section.flow} /> : null}
             {renderSlot(section)}
             {section.bullets ? (
@@ -215,17 +219,21 @@ export default async function GuideStartPage({
             {section.callout ? (
               <Callout kind={section.callout.kind} text={section.callout.text} />
             ) : null}
-            {section.externalLink ? (
-              <p className="mt-3">
-                <a
-                  href={section.externalLink.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
-                >
-                  {section.externalLink.label} →
-                </a>
-              </p>
+            {section.externalLinks ? (
+              <ul className="mt-3 space-y-1.5">
+                {section.externalLinks.map((link) => (
+                  <li key={link.href}>
+                    <a
+                      href={link.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm font-semibold text-emerald-700 underline-offset-2 hover:underline"
+                    >
+                      {link.label} →
+                    </a>
+                  </li>
+                ))}
+              </ul>
             ) : null}
           </Section>
         ))}

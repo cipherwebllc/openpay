@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { POS_GUIDE, guideContentFor, guidePosMetadata } from '@/lib/posGuide';
+import { startGuideContentFor } from '@/lib/startGuide';
 
 const GUIDE_DIR = join(process.cwd(), 'public', 'guide');
 const LOCALES = ['ja', 'en'] as const;
@@ -62,9 +63,12 @@ function collectImageFiles(value: unknown, acc: Set<string>): void {
   }
 }
 
+// public/guide は /guide/pos 専用ではなく guide/* 共用の図版置き場。孤児検出を意味の
+// あるまま保つため、他ガイドの content SOT からの参照もここに集約する。
 function referencedFiles(): Set<string> {
   const acc = new Set<string>();
   for (const loc of LOCALES) collectImageFiles(POS_GUIDE[loc], acc);
+  for (const loc of LOCALES) collectImageFiles(startGuideContentFor(loc), acc);
   return acc;
 }
 
@@ -183,7 +187,7 @@ describe('public/guide: 図版ファイルの実在と整合 (リンク切れ防
     }
   });
 
-  it('7 枚の想定図版がすべて存在する', () => {
+  it('想定図版がすべて存在する (pos 7 枚 + start 1 枚)', () => {
     const expected = [
       'hero.webp',
       'overview-flow.svg',
@@ -192,6 +196,8 @@ describe('public/guide: 図版ファイルの実在と整合 (リンク切れ防
       'payment-success.svg',
       'history-reconcile.svg',
       'cost-compare.svg',
+      // /guide/start (返金は取消ではない の概念図)
+      'refund-not-reversal.svg',
     ];
     for (const f of expected) expect(filesOnDisk.has(f)).toBe(true);
     expect(filesOnDisk.size).toBe(expected.length);

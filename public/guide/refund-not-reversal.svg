@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="1000" height="500" role="img" aria-label="カード決済は同じ取引を取り消せるが、JPYC は取り消せないため別の取引として返金を送る、という違いの図">
+  <style>text{font-family:system-ui,-apple-system,'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;}</style>
+  <rect width="1000" height="500" fill="#ffffff"/>
+
+  <!-- ── 上段: カード決済 (取消できる) ────────────────────────── -->
+  <text x="40" y="66" font-size="26" font-weight="700" fill="#475569">カード決済</text>
+
+  <rect x="230" y="40" width="200" height="90" rx="14" fill="#f8fafc" stroke="#e2e8f0" stroke-width="2"/>
+  <text x="330" y="94" font-size="24" font-weight="700" fill="#334155" text-anchor="middle">お客様</text>
+
+  <rect x="640" y="40" width="200" height="90" rx="14" fill="#f8fafc" stroke="#e2e8f0" stroke-width="2"/>
+  <text x="740" y="94" font-size="24" font-weight="700" fill="#334155" text-anchor="middle">お店</text>
+
+  <!-- 支払い (右向き) -->
+  <text x="535" y="52" font-size="20" fill="#64748b" text-anchor="middle">支払い</text>
+  <line x1="445" y1="70" x2="608" y2="70" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+  <polygon points="606,60 626,70 606,80" fill="#94a3b8"/>
+
+  <!-- 取消 (左向き・できる) -->
+  <line x1="625" y1="110" x2="462" y2="110" stroke="#94a3b8" stroke-width="4" stroke-linecap="round"/>
+  <polygon points="464,100 444,110 464,120" fill="#94a3b8"/>
+  <text x="535" y="146" font-size="20" fill="#475569" text-anchor="middle">同じ取引を取り消せる</text>
+
+  <line x1="40" y1="186" x2="960" y2="186" stroke="#e2e8f0" stroke-width="2"/>
+
+  <!-- ── 下段: JPYC (取消できない) ────────────────────────────── -->
+  <text x="40" y="286" font-size="26" font-weight="700" fill="#047857">JPYC</text>
+
+  <rect x="230" y="260" width="200" height="90" rx="14" fill="#ffffff" stroke="#a7f3d0" stroke-width="3"/>
+  <text x="330" y="314" font-size="24" font-weight="700" fill="#065f46" text-anchor="middle">お客様</text>
+
+  <rect x="640" y="260" width="200" height="90" rx="14" fill="#ffffff" stroke="#a7f3d0" stroke-width="3"/>
+  <text x="740" y="314" font-size="24" font-weight="700" fill="#065f46" text-anchor="middle">お店</text>
+
+  <!-- 支払い (右向き・確定) -->
+  <text x="535" y="272" font-size="20" fill="#047857" text-anchor="middle">支払い</text>
+  <line x1="445" y1="290" x2="608" y2="290" stroke="#059669" stroke-width="4" stroke-linecap="round"/>
+  <polygon points="606,280 626,290 606,300" fill="#059669"/>
+
+  <!-- 取消 (左向き・できない) -->
+  <line x1="625" y1="330" x2="462" y2="330" stroke="#cbd5e1" stroke-width="4" stroke-linecap="round" stroke-dasharray="10 9"/>
+  <polygon points="464,320 444,330 464,340" fill="#cbd5e1"/>
+  <g stroke="#dc2626" stroke-width="6" stroke-linecap="round">
+    <line x1="519" y1="314" x2="551" y2="346"/>
+    <line x1="551" y1="314" x2="519" y2="346"/>
+  </g>
+  <text x="535" y="374" font-size="20" font-weight="700" fill="#b45309" text-anchor="middle">取り消せない</text>
+
+  <!-- 返金 = 別の取引 (U 字の新しい矢印) -->
+  <path d="M 740 358 C 740 448, 330 448, 330 366" fill="none" stroke="#059669" stroke-width="4" stroke-linecap="round"/>
+  <polygon points="320,382 330,358 340,382" fill="#059669"/>
+  <text x="535" y="486" font-size="22" font-weight="700" fill="#047857" text-anchor="middle">返金するときは「別の取引」として送る</text>
+</svg>

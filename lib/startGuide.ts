@@ -11,6 +11,7 @@
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
+import type { GuideImage } from '@/lib/posGuide';
 
 export type StartGuideSection = {
   readonly n: number;
@@ -22,7 +23,12 @@ export type StartGuideSection = {
   readonly callout?: { readonly kind: 'warn' | 'tip'; readonly text: string };
   /** 用語 + 説明の対 (どこに何が残るか)。 */
   readonly defs?: readonly { readonly term: string; readonly desc: string }[];
-  readonly externalLink?: { readonly label: string; readonly href: string };
+  readonly externalLinks?: readonly {
+    readonly label: string;
+    readonly href: string;
+  }[];
+  /** 本文中の図版 (public/guide/*.svg・寸法は PosGuidePieces の FIGURE_DIMS)。 */
+  readonly figure?: GuideImage;
   /** messages 側の開示を差し込む位置 (数値の直書きを増やさないため)。 */
   readonly slot?: 'fee' | 'chains';
 };
@@ -53,6 +59,9 @@ export type StartGuideContent = {
 };
 
 const JPYC_OFFICIAL = 'https://jpyc.co.jp/';
+// 運営者 (masia) が書いた JPYC 運用ガイド。ウォレット準備から換金・運用までを 1 本で追える
+// 補足資料として項目 1 から案内する (トップの「なぜ今、ステーブルコインなのか」と同じ記事)。
+const JPYC_NOTE_GUIDE = 'https://note.com/masia02/n/ned04a4cdb00a';
 
 const JA: StartGuideContent = {
   metaTitle: 'OpenPay 導入前チェックリスト — JPYC決済を始める前に | OpenPay',
@@ -90,7 +99,13 @@ const JA: StartGuideContent = {
         kind: 'warn',
         text: 'JPYC EX が対応するチェーンと、OpenPay が決済に対応するチェーンは同じではありません。受け取ったチェーンと決済で使うチェーンが噛み合うかは、導入時に必ず確認してください。',
       },
-      externalLink: { label: 'JPYC 公式サイトで最新条件を見る', href: JPYC_OFFICIAL },
+      externalLinks: [
+        { label: 'JPYC 公式サイトで最新条件を見る', href: JPYC_OFFICIAL },
+        {
+          label: 'JPYC 運用ガイド (ウォレット準備〜換金・運用) — note',
+          href: JPYC_NOTE_GUIDE,
+        },
+      ],
       slot: 'chains',
     },
     {
@@ -139,6 +154,10 @@ const JA: StartGuideContent = {
         '送金先を間違えた場合、相手のウォレットを店舗が管理していなければ、技術的に取り戻せないことがあります。',
         '導入前に、次の運用ルールを決めておくことをおすすめします。',
       ],
+      figure: {
+        file: 'refund-not-reversal.svg',
+        alt: 'カード決済は同じ取引を取り消せるのに対し、JPYC は取り消せず、返金は別の取引として送ることを示す図',
+      },
       bullets: [
         '注文キャンセルの扱い',
         '金額を間違えたとき',
@@ -253,10 +272,16 @@ const EN: StartGuideContent = {
         kind: 'warn',
         text: 'The chains JPYC EX supports and the chains OpenPay settles on are not the same set. Before you roll out, confirm that the chain you receive on matches the chain you intend to accept payments on.',
       },
-      externalLink: {
-        label: 'Check current terms on the JPYC official site',
-        href: JPYC_OFFICIAL,
-      },
+      externalLinks: [
+        {
+          label: 'Check current terms on the JPYC official site',
+          href: JPYC_OFFICIAL,
+        },
+        {
+          label: 'JPYC handling guide (wallet setup to redemption) — note (Japanese)',
+          href: JPYC_NOTE_GUIDE,
+        },
+      ],
       slot: 'chains',
     },
     {
@@ -305,6 +330,10 @@ const EN: StartGuideContent = {
         'If funds go to the wrong address and the shop does not control that wallet, recovery may be technically impossible.',
         'Decide these operational rules before you roll out.',
       ],
+      figure: {
+        file: 'refund-not-reversal.svg',
+        alt: 'Diagram showing that a card payment can reverse the same transaction while a JPYC payment cannot, so a refund is sent as a separate transaction',
+      },
       bullets: [
         'How order cancellations are handled',
         'What to do when an amount is wrong',
@@ -395,5 +424,13 @@ export function startGuideMetadata(locale: string): Metadata {
     path: '/guide/start',
     title: c.metaTitle,
     description: c.metaDescription,
+    // 専用 OG (チェックリスト意匠)。既定の og-image.png は /guide/qr と共用のため、
+    // 共有時にどちらの面か見分けがつかない — この面は「送って読んでもらう」用途が主。
+    ogImage: {
+      url: '/og-start.webp',
+      width: 1200,
+      height: 630,
+      alt: c.metaTitle,
+    },
   });
 }
