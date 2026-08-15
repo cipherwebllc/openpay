@@ -201,6 +201,7 @@ describe('lib/x402/config', () => {
         'network',
         'payTo',
         'testMode',
+        'vanillaFacilitator',
       ].sort(),
     );
   });
