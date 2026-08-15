@@ -22,6 +22,7 @@
 
 import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
+import { generateCdpJwt } from './cdpJwt';
 import { x402Config } from './config';
 import {
   buildPaymentRequiredV2,
@@ -207,9 +208,22 @@ async function postFacilitator(
   path: '/verify' | '/settle',
   body: FacilitatorV1Body,
 ): Promise<Record<string, unknown>> {
-  const res = await fetch(`${x402Config.facilitatorUrl}${path}`, {
+  const { url: baseUrl, cdpAuth } = x402Config.vanillaFacilitator;
+  const url = `${baseUrl}${path}`;
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (cdpAuth) {
+    // CDP は uri claim をリクエストに束縛した 2 分 JWT を要求する — 呼び出しごとに生成。
+    // 生成失敗 (鍵形式不正等) は throw → 呼び出し側の catch で 503 (課金は発生しない)。
+    headers.authorization = `Bearer ${generateCdpJwt({
+      keyId: cdpAuth.keyId,
+      keySecret: cdpAuth.keySecret,
+      method: 'POST',
+      url,
+    })}`;
+  }
+  const res = await fetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(FACILITATOR_TIMEOUT_MS),
   });

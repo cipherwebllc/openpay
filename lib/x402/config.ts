@@ -88,6 +88,45 @@ function buildDefaultPrice(
   return nonEmpty(raw) ?? '$0.001';
 }
 
+// vanilla x402 (Base USDC・外部 facilitator) の facilitator 選択 (agentic.market 掲載裁定
+// 2026-08-16)。既定 = 従来の X402_FACILITATOR_URL (payai) で挙動完全不変。
+// X402_VANILLA_FACILITATOR=cdp で Coinbase CDP facilitator へ切替 — CDP が settle を
+// 処理したエンドポイントだけが x402 Bazaar → agentic.market に自動掲載されるため。
+// cdp を選んだのに鍵が無い設定は起動時に throw (無言で payai に落ちて「掲載されない」を
+// 防ぐ・fail-loud)。JPYC 側 (forwarder-split・自前 facilitator) には一切影響しない。
+const CDP_FACILITATOR_URL = 'https://api.cdp.coinbase.com/platform/v2/x402';
+
+export type VanillaFacilitatorConfig = {
+  url: string;
+  /** CDP のときだけ存在。リクエストごとの Bearer JWT 生成に使う (lib/x402/cdpJwt)。 */
+  cdpAuth?: { keyId: string; keySecret: string };
+};
+
+export function parseVanillaFacilitator(env: {
+  mode: string | undefined;
+  fallbackUrl: string;
+  cdpKeyId: string | undefined;
+  cdpKeySecret: string | undefined;
+}): VanillaFacilitatorConfig {
+  const mode = nonEmpty(env.mode);
+  if (mode === undefined) return { url: env.fallbackUrl };
+  if (mode !== 'cdp') {
+    throw new Error(
+      `X402_VANILLA_FACILITATOR must be unset or 'cdp' (got: ${mode})`,
+    );
+  }
+  const keyId = nonEmpty(env.cdpKeyId);
+  const keySecret = nonEmpty(env.cdpKeySecret);
+  if (!keyId || !keySecret) {
+    throw new Error(
+      'X402_VANILLA_FACILITATOR=cdp requires CDP_API_KEY_ID and CDP_API_KEY_SECRET. ' +
+        'Without them settle would silently stay on the fallback facilitator and the ' +
+        'endpoints would never be indexed into the x402 Bazaar.',
+    );
+  }
+  return { url: CDP_FACILITATOR_URL, cdpAuth: { keyId, keySecret } };
+}
+
 const isProd = process.env.NODE_ENV === 'production';
 const testMode = process.env.X402_TEST_MODE === 'true';
 
@@ -105,11 +144,19 @@ const facilitatorUrl = parseFacilitatorUrl(
   isProd,
 );
 const defaultPrice = buildDefaultPrice(network, process.env.X402_PRICE);
+const vanillaFacilitator = parseVanillaFacilitator({
+  mode: process.env.X402_VANILLA_FACILITATOR,
+  fallbackUrl: facilitatorUrl,
+  cdpKeyId: process.env.CDP_API_KEY_ID,
+  cdpKeySecret: process.env.CDP_API_KEY_SECRET,
+});
 
 export const x402Config = {
   network,
   payTo,
   facilitatorUrl,
+  /** vanilla USDC gate 専用の facilitator (既定 = facilitatorUrl と同一・cdp 切替可)。 */
+  vanillaFacilitator,
   defaultPrice,
   // X402_ASSET 未設定なら network 既定 (Base→USDC / Polygon→JPYC) を使う。
   asset: nonEmpty(process.env.X402_ASSET),
