@@ -12,6 +12,8 @@ const hold = vi.hoisted(() => ({
 
 const getIntentSpy = vi.hoisted(() => vi.fn());
 const reconcileSpy = vi.hoisted(() => vi.fn());
+const getUsdcIntentSpy = vi.hoisted(() => vi.fn());
+const reconcileUsdcSpy = vi.hoisted(() => vi.fn());
 const rateLimitSpy = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/env', () => ({
@@ -32,14 +34,19 @@ vi.mock('@/lib/x402/purchaseIntent', () => ({
 vi.mock('@/lib/x402/facilitatorStatusRateLimit', () => ({
   checkFacilitatorStatusRateLimit: rateLimitSpy,
 }));
+vi.mock('@/lib/x402/storeUsdcIntent', () => ({
+  getStoreUsdcIntent: getUsdcIntentSpy,
+  reconcileStoreUsdcIntent: reconcileUsdcSpy,
+}));
 
 import { GET } from '@/app/api/store/purchase/status/route';
 
-function request(intentSalt?: string): Request {
+function request(intentSalt?: string, rail?: string): Request {
   const url = new URL('https://open-pay.jp/api/store/purchase/status');
   if (intentSalt !== undefined) {
     url.searchParams.set('intentSalt', intentSalt);
   }
+  if (rail !== undefined) url.searchParams.set('rail', rail);
   return new Request(url);
 }
 
@@ -51,6 +58,8 @@ beforeEach(() => {
   hold.reconcileResult = { ok: true, state: 'pending' };
   getIntentSpy.mockImplementation(async () => hold.reads.shift() ?? null);
   reconcileSpy.mockImplementation(async () => hold.reconcileResult);
+  getUsdcIntentSpy.mockResolvedValue(null);
+  reconcileUsdcSpy.mockResolvedValue({ ok: true, state: 'pending' });
   rateLimitSpy.mockImplementation(async () => hold.rateAllowed);
 });
 
@@ -169,6 +178,37 @@ describe('GET /api/store/purchase/status', () => {
       error: 'storage_unavailable',
     });
     expect(getIntentSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('rail=usdc は専用 intent/reconciler だけを使い coarse pending→settled へ収束する', async () => {
+    getUsdcIntentSpy
+      .mockResolvedValueOnce({ state: 'indeterminate' })
+      .mockResolvedValueOnce({ state: 'settled', txHash: TX_HASH });
+    reconcileUsdcSpy.mockResolvedValue({ ok: true, state: 'settled' });
+
+    const response = await GET(request(INTENT_SALT, 'usdc'));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      state: 'settled',
+      txHash: TX_HASH,
+    });
+    expect(reconcileUsdcSpy).toHaveBeenCalledWith(INTENT_SALT);
+    expect(getUsdcIntentSpy).toHaveBeenCalledTimes(2);
+    expect(getIntentSpy).not.toHaveBeenCalled();
+    expect(reconcileSpy).not.toHaveBeenCalled();
+  });
+
+  it('rail=usdc の storage/corrupt は pending に偽装せず 503', async () => {
+    getUsdcIntentSpy.mockResolvedValue('corrupt');
+    const response = await GET(request(INTENT_SALT, 'usdc'));
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: 'storage_unavailable',
+    });
+    expect(reconcileUsdcSpy).not.toHaveBeenCalled();
   });
 
   it.each([

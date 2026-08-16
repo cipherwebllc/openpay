@@ -24,6 +24,8 @@ export type StoreListing = {
   emoji?: string;
   imageUrl?: string;
   priceJpyc: string;
+  /** 保存値 true のときだけ Base USDC rail を提示できる。 */
+  usdcEnabled?: true;
   label: HostedProduct['label'];
   category?: string;
   tags?: readonly string[];
@@ -80,6 +82,7 @@ export async function listStoreListings(): Promise<StoreListing[] | null> {
       ...(product.emoji ? { emoji: product.emoji } : {}),
       ...(product.imageUrl ? { imageUrl: product.imageUrl } : {}),
       priceJpyc: product.priceJpyc,
+      ...(product.usdcEnabled === true ? { usdcEnabled: true } : {}),
       label: product.label,
       ...(product.category ? { category: product.category } : {}),
       ...(product.tags ? { tags: product.tags } : {}),

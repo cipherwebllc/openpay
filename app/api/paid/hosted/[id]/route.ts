@@ -69,6 +69,11 @@ import {
   toV2Accept,
   v2PayloadToV1Body,
 } from '@/lib/x402/v2';
+import {
+  associateStoreRailIntent,
+  claimStoreRailSelection,
+  releaseActiveStoreRail,
+} from '@/lib/x402/storeRailSelection';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -90,6 +95,10 @@ type SettleBody = {
 } & Record<string, unknown>;
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
+
+function jpycPurchaseIntentKey(intentSalt: string): string {
+  return `store:intent:${intentSalt.toLowerCase()}`;
+}
 
 function noStore(response: NextResponse): NextResponse {
   response.headers.set('Cache-Control', 'no-store');
@@ -355,6 +364,14 @@ async function quoteResponse(input: {
       503,
     );
   }
+  const parent = await associateStoreRailIntent({
+    intentSalt: quoted.intent.intentSalt,
+    intentKey: jpycPurchaseIntentKey(quoted.intent.intentSalt),
+    payer,
+    resourceId: quoted.intent.resourceId,
+    contentRevision: quoted.intent.contentRevision,
+  });
+  if (!parent.ok) return errorResponse('storage_unavailable', 503);
   return challenge(quoted.intent);
 }
 
@@ -591,11 +608,49 @@ async function submittedPaymentResponse(input: {
     return pendingResponse();
   }
 
+  const railParent = await associateStoreRailIntent({
+    intentSalt,
+    intentKey: jpycPurchaseIntentKey(intentSalt),
+    payer: signedIntent.claim.payer,
+    resourceId: signedIntent.resourceId,
+    contentRevision: signedIntent.contentRevision,
+  });
+  if (!railParent.ok) return errorResponse('storage_unavailable', 503);
+  const selected = await claimStoreRailSelection({
+    parentIntentId: railParent.parentIntentId,
+    intentSalt,
+    intentKey: jpycPurchaseIntentKey(intentSalt),
+    payer: signedIntent.claim.payer,
+    resourceId: signedIntent.resourceId,
+    contentRevision: signedIntent.contentRevision,
+    rail: 'jpyc',
+    authorizationHash: signedIntent.authorizationHash,
+  });
+  if (!selected.ok) {
+    return errorResponse(
+      selected.reason === 'conflict'
+        ? 'purchase_rail_conflict'
+        : 'storage_unavailable',
+      selected.reason === 'conflict' ? 409 : 503,
+    );
+  }
+
   const settlementClaim = await claimPurchaseSettlement({
     intentSalt,
     claim: exact.claim,
   });
   if (!settlementClaim.ok) {
+    if (settlementClaim.reason === 'expired') {
+      await releaseActiveStoreRail({
+        parentIntentId: railParent.parentIntentId,
+        intentSalt,
+        payer: signedIntent.claim.payer,
+        resourceId: signedIntent.resourceId,
+        contentRevision: signedIntent.contentRevision,
+        rail: 'jpyc',
+        authorizationHash: signedIntent.authorizationHash,
+      });
+    }
     const status =
       settlementClaim.reason === 'storage' ||
       settlementClaim.reason === 'corrupt'
@@ -689,6 +744,15 @@ async function submittedPaymentResponse(input: {
         return pendingResponse();
       }
     }
+    await releaseActiveStoreRail({
+      parentIntentId: railParent.parentIntentId,
+      intentSalt,
+      payer: signedIntent.claim.payer,
+      resourceId: signedIntent.resourceId,
+      contentRevision: signedIntent.contentRevision,
+      rail: 'jpyc',
+      authorizationHash: signedIntent.authorizationHash,
+    });
     return NextResponse.json(settleBody, { status: settleResponse.status });
   }
 
@@ -777,6 +841,12 @@ async function handleHostedPaidGet(
     return errorResponse('invalid_payer', 422);
   }
   const payer = getAddress(payerRaw);
+  if (new URL(req.url).searchParams.get('rail') === 'usdc') {
+    const { handleHostedUsdcPaidGet } = await import(
+      '@/lib/x402/hostedUsdcPaidRoute'
+    );
+    return handleHostedUsdcPaidGet(req, id, payer);
+  }
   const hasPayment = Boolean(
     req.headers.get('PAYMENT-SIGNATURE') || req.headers.get('x-payment'),
   );

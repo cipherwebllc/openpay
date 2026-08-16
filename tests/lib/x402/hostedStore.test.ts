@@ -264,6 +264,60 @@ describe('hosted 入力検証', () => {
 });
 
 describe('hosted 作成と分離', () => {
+  it('usdcEnabled は保存値 true だけが ON で create/read/list/full-replace を伝播する', async () => {
+    const m = await mod();
+    expect(m.parseHostedInput(baseInput()).ok).toBe(true);
+    const off = m.parseHostedInput(baseInput({ usdcEnabled: false }));
+    expect(off.ok && off.product).not.toHaveProperty('usdcEnabled');
+    expect(m.parseHostedInput(baseInput({ usdcEnabled: 'true' }))).toEqual({
+      ok: false,
+      error: 'invalid usdcEnabled',
+    });
+
+    const parsed = m.parseHostedInput(baseInput({ usdcEnabled: true }));
+    if (!parsed.ok) throw new Error('setup');
+    const created = await m.createHostedProduct(parsed, 1000);
+    if (!created.ok) throw new Error('setup');
+    expect(created.product.usdcEnabled).toBe(true);
+    expect((await m.getHostedProduct(created.product.id))).toMatchObject({
+      usdcEnabled: true,
+    });
+    expect(await m.listHostedForOwner(OWNER)).toEqual([
+      expect.objectContaining({ usdcEnabled: true }),
+    ]);
+    expect(await m.listAvailableHostedForOwner(OWNER)).toEqual([
+      expect.objectContaining({ usdcEnabled: true }),
+    ]);
+
+    const raw = JSON.parse(
+      kvMocks.store.get(`x402:hosted:${created.product.id}`) ?? '{}',
+    ) as Record<string, unknown>;
+    raw.usdcEnabled = false;
+    expect(m.parseStoredHostedProduct(JSON.stringify(raw))).not.toHaveProperty(
+      'usdcEnabled',
+    );
+    delete raw.usdcEnabled;
+    expect(m.parseStoredHostedProduct(JSON.stringify(raw))).not.toHaveProperty(
+      'usdcEnabled',
+    );
+
+    const snapshot = await m.getHostedProductUpdateSnapshot(created.product.id);
+    if (!snapshot || snapshot === 'storage') throw new Error('setup');
+    const replaced = await m.replaceHostedSellerProduct({
+      snapshot,
+      owner: OWNER,
+      metadata: {
+        title: created.product.title,
+        priceJpyc: created.product.priceJpyc,
+        label: created.product.label,
+        usdcEnabled: true,
+        saleActive: false,
+      },
+      now: 2000,
+    });
+    expect(replaced.ok && replaced.product.usdcEnabled).toBe(true);
+  });
+
   it('作成は product/content/owner index を 1 EVAL で書き、**global discovery index に触れない**', async () => {
     const m = await mod();
     const parsed = m.parseHostedInput(baseInput());

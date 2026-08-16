@@ -204,7 +204,7 @@ function v2HeaderToBody(
   };
 }
 
-async function postFacilitator(
+export async function postFacilitator(
   path: '/verify' | '/settle',
   body: FacilitatorV1Body,
 ): Promise<Record<string, unknown>> {

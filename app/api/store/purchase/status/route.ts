@@ -37,6 +37,49 @@ async function handleStatus(req: Request): Promise<NextResponse> {
     );
   }
 
+  if (new URL(req.url).searchParams.get('rail') === 'usdc') {
+    const {
+      getStoreUsdcIntent,
+      reconcileStoreUsdcIntent,
+    } = await import('@/lib/x402/storeUsdcIntent');
+    let usdcIntent = await getStoreUsdcIntent(intentSalt);
+    if (usdcIntent === 'storage' || usdcIntent === 'corrupt') {
+      return errorResponse('storage_unavailable', 503);
+    }
+    if (!usdcIntent) return errorResponse('not_found', 404);
+    if (
+      usdcIntent.state === 'signed' ||
+      usdcIntent.state === 'settling' ||
+      usdcIntent.state === 'indeterminate'
+    ) {
+      const reconciled = await reconcileStoreUsdcIntent(intentSalt);
+      if (!reconciled.ok) {
+        return errorResponse(
+          reconciled.reason === 'not_found'
+            ? 'not_found'
+            : 'storage_unavailable',
+          reconciled.reason === 'not_found' ? 404 : 503,
+        );
+      }
+      usdcIntent = await getStoreUsdcIntent(intentSalt);
+      if (usdcIntent === 'storage' || usdcIntent === 'corrupt') {
+        return errorResponse('storage_unavailable', 503);
+      }
+      if (!usdcIntent) return errorResponse('not_found', 404);
+    }
+    if (usdcIntent.state === 'settled') {
+      return NextResponse.json({
+        ok: true,
+        state: 'settled',
+        txHash: usdcIntent.txHash,
+      });
+    }
+    if (usdcIntent.state === 'failed_prebroadcast') {
+      return NextResponse.json({ ok: true, state: 'failed' });
+    }
+    return NextResponse.json({ ok: true, state: 'pending' });
+  }
+
   let intent = await getPurchaseIntent(intentSalt);
   if (intent === 'storage' || intent === 'corrupt') {
     return errorResponse('storage_unavailable', 503);

@@ -23,6 +23,7 @@ const parseSellerDisclosureInput = vi.hoisted(() => vi.fn());
 const putSellerDisclosure = vi.hoisted(() => vi.fn());
 const checkIpRateLimit = vi.hoisted(() => vi.fn());
 const checkReadRateLimit = vi.hoisted(() => vi.fn());
+const checkUsdcReachability = vi.hoisted(() => vi.fn());
 
 // 掲載先 handle の所有検証 (2026-08-04) は handleStore を boundary mock で切る
 // (実体は env 依存が深く、この route テストの env mock と衝突するため)。
@@ -50,6 +51,9 @@ vi.mock('@/lib/net/ipHash', () => ({
 vi.mock('@/lib/relay/relayGuards', () => ({
   checkIpRateLimit,
   checkReadRateLimit,
+}));
+vi.mock('@/lib/x402/storeUsdcReachability', () => ({
+  checkStoreUsdcPayToReachability: checkUsdcReachability,
 }));
 vi.mock('@/lib/x402/hostedStore', () => ({
   MAX_HOSTED_PER_OWNER: 12,
@@ -129,6 +133,7 @@ beforeEach(() => {
   requireSession.mockResolvedValue({ ok: true, address: OWNER });
   checkIpRateLimit.mockResolvedValue(true);
   checkReadRateLimit.mockResolvedValue(true);
+  checkUsdcReachability.mockResolvedValue({ ok: true, payTo: OWNER });
   listHostedForOwner.mockResolvedValue([baseProduct]);
   getHostedProduct.mockResolvedValue(baseProduct);
   getHostedProductUpdateSnapshot.mockResolvedValue({
@@ -186,6 +191,7 @@ beforeEach(() => {
           ...(Array.isArray(input.galleryUrls) && input.galleryUrls.length > 0
             ? { galleryUrls: input.galleryUrls }
             : {}),
+          ...(input.usdcEnabled === true ? { usdcEnabled: true } : {}),
           priceJpyc: input.priceJpyc,
           contentKind,
           label: input.label ?? 'prompt',
@@ -398,6 +404,63 @@ describe('creator store seller routes', () => {
     expect(createHostedProduct).not.toHaveBeenCalled();
   });
 
+  it('新規作成は明示 usdcEnabled=true だけを ON にし、公開時に Polygon payTo を検査する', async () => {
+    const enabled = await createProduct(
+      request(
+        '/api/store/products',
+        'POST',
+        validBody({ usdcEnabled: true, saleActive: true }),
+      ),
+    );
+    expect(enabled.status).toBe(201);
+    expect(checkUsdcReachability).toHaveBeenCalledWith(OWNER);
+    expect(createHostedProduct).toHaveBeenCalledWith(
+      expect.objectContaining({
+        product: expect.objectContaining({
+          usdcEnabled: true,
+          saleActive: true,
+        }),
+      }),
+    );
+
+    vi.clearAllMocks();
+    parseHostedInput.mockReturnValue({
+      ok: true,
+      product: baseProduct,
+      content: { kind: 'text', value: 'secret body' },
+    });
+    sellerDisclosureComplete.mockResolvedValue(true);
+    createHostedProduct.mockResolvedValue({ ok: true, product: baseProduct });
+    const omitted = await createProduct(
+      request('/api/store/products', 'POST', validBody({ saleActive: true })),
+    );
+    expect(omitted.status).toBe(201);
+    expect(checkUsdcReachability).not.toHaveBeenCalled();
+    expect(createHostedProduct.mock.calls[0]?.[0].product).not.toHaveProperty(
+      'usdcEnabled',
+    );
+  });
+
+  it.each([
+    [{ ok: false, reason: 'contract_wallet' }, 409, 'usdc_pay_to_contract_wallet'],
+    [{ ok: false, reason: 'rpc_unavailable' }, 503, 'payment_facility_unavailable'],
+  ])(
+    'USDC 公開時の payTo 到達性 %j は status=%s',
+    async (reachability, status, error) => {
+      checkUsdcReachability.mockResolvedValue(reachability);
+      const response = await createProduct(
+        request(
+          '/api/store/products',
+          'POST',
+          validBody({ usdcEnabled: true, saleActive: true }),
+        ),
+      );
+      expect(response.status).toBe(status);
+      await expect(response.json()).resolves.toEqual({ ok: false, error });
+      expect(createHostedProduct).not.toHaveBeenCalled();
+    },
+  );
+
   it('他人の商品は GET/PATCH とも本文・更新へ進む前に 403', async () => {
     getHostedProduct.mockResolvedValue({
       ...baseProduct,
@@ -486,6 +549,81 @@ describe('creator store seller routes', () => {
       error: 'seller_disclosure_required',
     });
     expect(replaceHostedSellerProduct).not.toHaveBeenCalled();
+  });
+
+  it('通常 PATCH 省略と saleActiveOnly は usdcEnabled=true を保持する', async () => {
+    const current = { ...baseProduct, usdcEnabled: true } as const;
+    getHostedProductUpdateSnapshot.mockResolvedValue({
+      product: current,
+      token: JSON.stringify(current),
+    });
+
+    const normal = await patchProduct(
+      request(`/api/store/products/${ID}`, 'PATCH', { title: 'Updated' }),
+      { params: Promise.resolve({ id: ID }) },
+    );
+    expect(normal.status).toBe(200);
+    expect(parseHostedInput).toHaveBeenCalledWith(
+      expect.objectContaining({ usdcEnabled: true }),
+    );
+    expect(replaceHostedSellerProduct).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ usdcEnabled: true }),
+      }),
+    );
+
+    const toggled = await patchProduct(
+      request(`/api/store/products/${ID}`, 'PATCH', { saleActive: true }),
+      { params: Promise.resolve({ id: ID }) },
+    );
+    expect(toggled.status).toBe(200);
+    expect(checkUsdcReachability).toHaveBeenCalledWith(OWNER);
+    expect(replaceHostedSellerProduct).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          usdcEnabled: true,
+          saleActive: true,
+        }),
+      }),
+    );
+  });
+
+  it('USDC の OFF→ON は停止中商品の明示再公開だけ許可する', async () => {
+    const active = { ...baseProduct, saleActive: true };
+    getHostedProductUpdateSnapshot.mockResolvedValue({
+      product: active,
+      token: JSON.stringify(active),
+    });
+    const normalEdit = await patchProduct(
+      request(`/api/store/products/${ID}`, 'PATCH', { usdcEnabled: true }),
+      { params: Promise.resolve({ id: ID }) },
+    );
+    expect(normalEdit.status).toBe(409);
+    await expect(normalEdit.json()).resolves.toEqual({
+      ok: false,
+      error: 'usdc_enable_requires_republish',
+    });
+    expect(replaceHostedSellerProduct).not.toHaveBeenCalled();
+
+    getHostedProductUpdateSnapshot.mockResolvedValue({
+      product: baseProduct,
+      token: JSON.stringify(baseProduct),
+    });
+    const republished = await patchProduct(
+      request(`/api/store/products/${ID}`, 'PATCH', {
+        ...validBody(),
+        usdcEnabled: true,
+        saleActive: true,
+      }),
+      { params: Promise.resolve({ id: ID }) },
+    );
+    expect(republished.status).toBe(200);
+    expect(checkUsdcReachability).toHaveBeenCalledWith(OWNER);
+    expect(replaceHostedSellerProduct).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ usdcEnabled: true }),
+      }),
+    );
   });
 
   it('提供終了の商品は残存本文があっても full edit を拒否する', async () => {

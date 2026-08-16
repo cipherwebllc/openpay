@@ -290,6 +290,60 @@ describe('store library stable cursor', () => {
       'intentSalt',
     );
   });
+
+  it('USDC payment snapshot を item/revision に伝播し、旧 grant には既定値を足さない', async () => {
+    const resourceId = resource(1);
+    const base = JSON.parse(ownership(resourceId)) as {
+      grants: Array<Record<string, unknown>>;
+      latestGrant: Record<string, unknown>;
+    };
+    const payment = {
+      version: 1,
+      rail: 'usdc',
+      asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      assetSymbol: 'USDC',
+      chainId: 8453,
+      paidAtomic: '2000000',
+      priceJpyc: '300',
+      quote: {
+        rateScaled: '150000000',
+        rateFetchedAt: SCORE - 180_000,
+        fxQuoteExpiresAt: SCORE - 1,
+        rounding: 'ceil',
+      },
+    };
+    base.grants[0] = { ...base.grants[0], payment };
+    base.latestGrant = { ...base.latestGrant, payment };
+    kvEval.mockResolvedValueOnce({
+      ok: true,
+      value: [resourceId, String(SCORE)],
+    });
+    kvMget.mockResolvedValueOnce({
+      ok: true,
+      value: [JSON.stringify(base)],
+    });
+
+    const result = await listStoreLibraryPage({ payer: PAYER, cursor: null });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected page');
+    expect(result.page.items[0]?.payment).toEqual(payment);
+    expect(result.page.items[0]?.revisions[0]?.payment).toEqual(payment);
+
+    const legacyResource = resource(2);
+    kvEval.mockResolvedValueOnce({
+      ok: true,
+      value: [legacyResource, String(SCORE)],
+    });
+    kvMget.mockResolvedValueOnce({
+      ok: true,
+      value: [ownership(legacyResource)],
+    });
+    const legacy = await listStoreLibraryPage({ payer: PAYER, cursor: null });
+    expect(legacy.ok).toBe(true);
+    if (!legacy.ok) throw new Error('expected page');
+    expect(legacy.page.items[0]).not.toHaveProperty('payment');
+    expect(legacy.page.items[0]?.revisions[0]).not.toHaveProperty('payment');
+  });
 });
 
 describe('store ownership revision selection', () => {

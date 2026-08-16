@@ -23,6 +23,7 @@ import {
 } from '@/app/api/store/_shared';
 import { listHandlesForOwner } from '@/lib/handleStore';
 import { touchStoreIndex } from '@/lib/x402/storeIndex';
+import { checkStoreUsdcPayToReachability } from '@/lib/x402/storeUsdcReachability';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -43,12 +44,27 @@ const PRODUCT_PATCH_KEYS = new Set([
   'tags',
   'handle',
   'featured',
+  'usdcEnabled',
   'content',
   'saleActive',
 ]);
 
 function notFound(): NextResponse {
   return storePrivateJson({ ok: false, error: 'not_found' }, 404);
+}
+
+async function usdcPayToAllowsSale(payTo: string): Promise<NextResponse | null> {
+  const reachable = await checkStoreUsdcPayToReachability(payTo);
+  if (reachable.ok) return null;
+  return reachable.reason === 'contract_wallet'
+    ? storePrivateJson(
+        { ok: false, error: 'usdc_pay_to_contract_wallet' },
+        409,
+      )
+    : storePrivateJson(
+        { ok: false, error: 'payment_facility_unavailable' },
+        503,
+      );
 }
 
 function updateError(
@@ -205,6 +221,15 @@ export async function PATCH(
       400,
     );
   }
+  if (
+    raw.usdcEnabled !== undefined &&
+    typeof raw.usdcEnabled !== 'boolean'
+  ) {
+    return storePrivateJson(
+      { ok: false, error: 'invalid_usdc_enabled' },
+      400,
+    );
+  }
   if (raw.payTo !== undefined && typeof raw.payTo !== 'string') {
     return storePrivateJson(
       { ok: false, error: 'invalid_product', detail: 'invalid payTo' },
@@ -244,6 +269,10 @@ export async function PATCH(
           409,
         );
       }
+      if (product.usdcEnabled === true) {
+        const unreachable = await usdcPayToAllowsSale(product.payTo);
+        if (unreachable) return unreachable;
+      }
     }
     const toggled = await replaceHostedSellerProduct({
       snapshot: owned.snapshot,
@@ -262,6 +291,7 @@ export async function PATCH(
         ...(product.tags ? { tags: product.tags } : {}),
         ...(product.handle ? { handle: product.handle } : {}),
         ...(product.featured === true ? { featured: true } : {}),
+        ...(product.usdcEnabled === true ? { usdcEnabled: true } : {}),
         saleActive: nextSaleActive,
       },
     });
@@ -324,6 +354,10 @@ export async function PATCH(
     tags: raw.tags !== undefined ? raw.tags : product.tags,
     handle: raw.handle !== undefined ? raw.handle : product.handle,
     featured: raw.featured !== undefined ? raw.featured : product.featured,
+    usdcEnabled:
+      raw.usdcEnabled !== undefined
+        ? raw.usdcEnabled
+        : product.usdcEnabled === true,
     content: candidateContent,
   });
   if (!parsed.ok) {
@@ -346,6 +380,17 @@ export async function PATCH(
     typeof raw.saleActive === 'boolean'
       ? raw.saleActive
       : product.saleActive;
+  const usdcEnabled = parsed.product.usdcEnabled === true;
+  if (
+    raw.usdcEnabled === true &&
+    product.usdcEnabled !== true &&
+    (product.saleActive || !saleActive)
+  ) {
+    return storePrivateJson(
+      { ok: false, error: 'usdc_enable_requires_republish' },
+      409,
+    );
+  }
   if (saleActive && !product.contentAvailable) {
     return storePrivateJson(
       { ok: false, error: 'content_unavailable' },
@@ -367,6 +412,10 @@ export async function PATCH(
         { ok: false, error: 'seller_disclosure_required' },
         409,
       );
+    }
+    if (usdcEnabled) {
+      const unreachable = await usdcPayToAllowsSale(product.payTo);
+      if (unreachable) return unreachable;
     }
   }
 
@@ -411,6 +460,7 @@ export async function PATCH(
       ...(parsed.product.tags ? { tags: parsed.product.tags } : {}),
       ...(parsed.product.handle ? { handle: parsed.product.handle } : {}),
       ...(parsed.product.featured === true ? { featured: true } : {}),
+      ...(usdcEnabled ? { usdcEnabled: true } : {}),
       saleActive,
     },
     ...(contentChanged ? { content: parsed.content } : {}),

@@ -5,10 +5,14 @@ import { isHostedId } from '@/lib/x402/hostedStore';
 import {
   purchaseLibraryKey,
   purchaseOwnershipKey,
-  parsePurchaseOwnership,
   type PurchaseGrant,
-  type PurchaseOwnership,
 } from '@/lib/x402/purchaseIntent';
+import {
+  parseStorePurchaseOwnership,
+  type StorePurchaseGrant,
+  type StorePurchaseOwnership,
+  type StoreUsdcPaymentSnapshot,
+} from '@/lib/x402/storePaymentSnapshot';
 
 export const STORE_LIBRARY_PAGE_SIZE = 24;
 
@@ -27,6 +31,7 @@ export type StoreLibraryItem = {
   label: 'download' | 'pdf' | 'zip' | 'prompt' | 'api' | 'external';
   purchasedAt: number;
   contentRevision: number;
+  payment?: StoreUsdcPaymentSnapshot;
   revisions: StoreLibraryRevision[];
 };
 
@@ -39,6 +44,7 @@ export type StoreLibraryRevision = {
   contentKind: 'url' | 'text';
   label: 'download' | 'pdf' | 'zip' | 'prompt' | 'api' | 'external';
   purchasedAt: number;
+  payment?: StoreUsdcPaymentSnapshot;
 };
 
 export type StoreLibraryPage = {
@@ -153,7 +159,7 @@ function parseIndexEntries(raw: unknown): LibraryIndexEntry[] | null {
   return entries;
 }
 
-function libraryRevision(grant: PurchaseGrant): StoreLibraryRevision {
+function libraryRevision(grant: StorePurchaseGrant): StoreLibraryRevision {
   return {
     contentRevision: grant.contentRevision,
     title: grant.metadata.title,
@@ -167,6 +173,7 @@ function libraryRevision(grant: PurchaseGrant): StoreLibraryRevision {
     contentKind: grant.metadata.contentKind,
     label: grant.metadata.label,
     purchasedAt: grant.purchasedAt,
+    ...(grant.payment ? { payment: grant.payment } : {}),
   };
 }
 
@@ -175,9 +182,9 @@ function libraryRevision(grant: PurchaseGrant): StoreLibraryRevision {
  * grant の安全な metadata を表示する。秘密でない表示項目だけを API へ渡す。
  */
 function libraryRevisions(
-  ownership: PurchaseOwnership,
+  ownership: StorePurchaseOwnership,
 ): StoreLibraryRevision[] {
-  const latestByRevision = new Map<number, PurchaseGrant>();
+  const latestByRevision = new Map<number, StorePurchaseGrant>();
   for (const grant of ownership.grants) {
     const current = latestByRevision.get(grant.contentRevision);
     if (!current || grant.purchasedAt > current.purchasedAt) {
@@ -198,7 +205,7 @@ function libraryRevisions(
 }
 
 function libraryItem(
-  ownership: PurchaseOwnership,
+  ownership: StorePurchaseOwnership,
 ): StoreLibraryItem {
   const grant = ownership.latestGrant;
   return {
@@ -213,7 +220,7 @@ function libraryItem(
  * 偽成功させない exact selector、revision はライブラリから過去版を開く selector。
  */
 export function selectStorePurchaseGrant(
-  ownership: PurchaseOwnership,
+  ownership: StorePurchaseOwnership,
   selector: {
     revision: number | null;
     intentSalt: string | null;
@@ -315,11 +322,11 @@ export async function listStoreLibraryPage(input: {
     return { ok: false, reason: 'storage' };
   }
 
-  const ownerships: PurchaseOwnership[] = [];
+  const ownerships: StorePurchaseOwnership[] = [];
   for (let index = 0; index < visible.length; index += 1) {
     const entry = visible[index]!;
     const raw = ownershipResult.value[index];
-    const ownership = parsePurchaseOwnership(raw);
+    const ownership = parseStorePurchaseOwnership(raw);
     if (
       !ownership ||
       ownership.payer.toLowerCase() !== input.payer.toLowerCase() ||
@@ -348,7 +355,7 @@ export async function listStoreLibraryPage(input: {
 }
 
 export type StoreOwnershipReadResult =
-  | { ok: true; ownership: PurchaseOwnership | null }
+  | { ok: true; ownership: StorePurchaseOwnership | null }
   | { ok: false; reason: 'storage' | 'corrupt' };
 
 /** content route が本文より先に行う authoritative own key read。 */
@@ -362,7 +369,7 @@ export async function readStoreOwnership(
   const result = await kvGet(purchaseOwnershipKey(payer, resourceId));
   if (!result.ok) return { ok: false, reason: 'storage' };
   if (result.value === null) return { ok: true, ownership: null };
-  const ownership = parsePurchaseOwnership(result.value);
+  const ownership = parseStorePurchaseOwnership(result.value);
   if (
     !ownership ||
     ownership.payer.toLowerCase() !== payer.toLowerCase() ||

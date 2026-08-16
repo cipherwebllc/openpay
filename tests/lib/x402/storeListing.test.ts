@@ -85,6 +85,19 @@ describe('listStoreListings', () => {
     ]);
   });
 
+  it('Store index DTO は usdcEnabled=true だけを伝播し、OFF/旧商品へ既定値を足さない', async () => {
+    const m = await mod();
+    mocks.ids = ['h_1', 'h_2'];
+    mocks.products = [
+      product('h_1', OWNER_A, { usdcEnabled: true }),
+      product('h_2', OWNER_A),
+    ];
+    mocks.handles.set(OWNER_A.toLowerCase(), ['alice']);
+    const out = await m.listStoreListings();
+    expect(out?.[0]).toMatchObject({ id: 'h_1', usdcEnabled: true });
+    expect(out?.[1]).not.toHaveProperty('usdcEnabled');
+  });
+
   it('handle を持たない owner の商品は掲載しない (契約: プロフィールで公開した商品のみ)', async () => {
     const m = await mod();
     mocks.ids = ['h_1', 'h_2'];
