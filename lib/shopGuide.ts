@@ -42,6 +42,7 @@ export type ShopGuideContent = {
 
   readonly guidesTitle: string;
   readonly guideLinkStart: string;
+  readonly guideLinkImage: string;
   readonly guideLinkPos: string;
   readonly guideLinkCustomer: string;
   readonly guideLinkAgent: string;
@@ -125,6 +126,7 @@ const JA: ShopGuideContent = {
 
   guidesTitle: '詳しい操作ガイド',
   guideLinkStart: '導入前チェックリスト — 始める前に確認する 8 つのこと',
+  guideLinkImage: '画像 URL の用意のしかた (アイコン・商品画像)',
   guideLinkPos: '今お使いの POS レジと併用する運用ガイド',
   guideLinkCustomer: 'お客様向け: モバイルオーダーのやり方',
   guideLinkAgent: 'お客様向け: AI に相談して注文する (訪日客向け)',
@@ -209,6 +211,7 @@ const EN: ShopGuideContent = {
 
   guidesTitle: 'Detailed guides',
   guideLinkStart: 'Before you start — eight things to check',
+  guideLinkImage: 'How to prepare an image URL (icons & product images)',
   guideLinkPos: 'Running alongside your current POS register',
   guideLinkCustomer: 'For customers: how to order from your phone',
   guideLinkAgent: 'For customers: order by asking your AI (for visitors to Japan)',

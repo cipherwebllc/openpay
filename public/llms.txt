@@ -18,6 +18,7 @@ OpenPay is an open-source, non-custodial payment layer for the Japanese yen stab
 - [OpenPay トップ](https://open-pay.jp/ja): サービス概要・導入メリット・使い方・FAQ・利用料
 - [運用の透明性](https://open-pay.jp/ja/transparency): 資金を保管しない仕組み・対応コントラクト・決済検証と確定・手数料の決め方・返金不可・掲載審査と通報の 1 ページ集約
 - [導入前チェックリスト](https://open-pay.jp/ja/guide/start): JPYC決済を始める前に店舗が確認すべき 8 項目 (JPYC の入手と対応チェーンの噛み合わせ・売上の直接着金・JPYC EX での日本円償還・利用料・返金は取消でなく別送金・会計記録・サービス停止時の資金と運用データの違い・情報の保存場所と保存期間)
+- [画像URLの用意のしかた](https://open-pay.jp/ja/guide/image-url): OpenPay は画像を預からず https:// の画像 URL を設定する方式。Imgur 等へのアップロード・直リンク URL の取得・確認方法 (プロフィール/商品/店舗アイコン共通)
 - [決済QRガイド](https://open-pay.jp/ja/guide/qr): 金額を入力して QR を提示するだけのシンプルな JPYC 受け取り。小規模店舗・個人事業主・イベント出店・対面販売向け LP 兼ガイド
 - [レジ・モバイルオーダーガイド](https://open-pay.jp/ja/guide/shop): 商品・メニューを一度登録して店頭レジとモバイルオーダーで共通利用する店舗運営者向け LP 兼ガイド (受注管理・売上履歴・電子レシート・会計 CSV)
 - [モバイルオーダー / POS 併用ガイド](https://open-pay.jp/ja/guide/pos): 既存のPOSレジと併用する運用ガイド

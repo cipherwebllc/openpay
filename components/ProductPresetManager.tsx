@@ -5,7 +5,8 @@
 // (同一タブ内で 2 つ hook を持つと storage event が飛ばず state が乖離するため)。
 
 import { useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import Link from 'next/link';
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { Field } from './Field';
 import { ProductOptionEditor } from './ProductOptionEditor';
@@ -49,6 +50,7 @@ export function ProductPresetManager({
   shopLive,
 }: Props) {
   const t = useTranslations('ProductPresetManager');
+  const locale = useLocale();
   const tTax = useTranslations('Tax');
   const [draft, setDraft] = useState(EMPTY_DRAFT);
 
@@ -327,7 +329,16 @@ export function ProductPresetManager({
             {t('addButton')}
           </button>
         </div>
-        <p className="mt-2 text-xs text-slate-500">{t('imageHint')}</p>
+        <p className="mt-2 text-xs text-slate-500">
+          {t('imageHint')}{' '}
+          <Link
+            href={`/${locale}/guide/image-url`}
+            prefetch={false}
+            className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+          >
+            {t('imageGuideLink')}
+          </Link>
+        </p>
       </div>
     </div>
   );

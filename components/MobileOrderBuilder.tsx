@@ -9,7 +9,8 @@
 // ⚠️ 手数料率 (店頭/モバイル) はここでは扱わない/表示しない — 課金の実行と開示は P0/P2 ゲート後。
 
 import { useCallback, useMemo, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
+import Link from 'next/link';
 import {
   ChevronDown,
   ChevronUp,
@@ -87,6 +88,7 @@ export function MobileOrderBuilder({
   onGetHandle?: () => void;
 } = {}) {
   const t = useTranslations('MobileOrder');
+  const locale = useLocale();
   const { settings: draft, setSettings, hydrated, setReceiver } = useMobileOrderDraft();
   const { presets, replaceAll } = useProductPresets();
   // 決済QR タブの受取先 (レジと同じく「引き継ぐ」ショートカット用)。
@@ -364,6 +366,17 @@ export function MobileOrderBuilder({
                   />
                 </div>
               </Field>
+              {/* 画像 URL の用意ガイドへの導線。Field の hint は label 内に描画されるため、
+                  リンクは label の外に置く (label 内の <a> はクリック挙動が入力と衝突する)。 */}
+              <p className="-mt-3 text-xs">
+                <Link
+                  href={`/${locale}/guide/image-url`}
+                  prefetch={false}
+                  className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+                >
+                  {t('imageGuideLink')}
+                </Link>
+              </p>
 
               {/* 店舗カバー (ヘッダー背景画像・https URL・任意)。横長プレビュー。 */}
               <Field label={t('coverLabel')} hint={t('coverHint')}>

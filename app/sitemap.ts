@@ -20,6 +20,7 @@ const PUBLIC_ROUTES = [
   '/news',
   '/transparency',
   '/guide/start',
+  '/guide/image-url',
   '/guide/pos',
   '/guide/qr',
   '/guide/shop',

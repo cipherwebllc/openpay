@@ -937,7 +937,14 @@ function SignedInSellerPanel({
           {/* アップロード先の案内 (レジ商品プリセットの imageHint と同文言・2026-08-05 user 指示)。
               label の外に置き、input の a11y 名 (「画像 URL (任意)」) に混ざらないようにする。 */}
           <p className="-mt-3 text-xs text-slate-500 sm:col-span-2">
-            {t('imageUrlHint')}
+            {t('imageUrlHint')}{' '}
+            <Link
+              href={`/${locale}/guide/image-url`}
+              prefetch={false}
+              className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+            >
+              {t('imageGuideLink')}
+            </Link>
           </p>
           <label
             htmlFor="creator-store-product-gallery-urls"
