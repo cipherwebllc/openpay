@@ -48,6 +48,37 @@ describe('CreatorStorePurchaseState', () => {
     expect(screen.getByText('利用可能')).toBeInTheDocument();
   });
 
+  it('USDC 購入完了は P1 payment snapshot の実払額と JPYC 価格を描画する', () => {
+    render(
+      <CreatorStorePurchaseState
+        {...base}
+        paymentStatus="confirmed"
+        accessStatus="ready"
+        ownershipReadBack
+        payment={{
+          version: 1,
+          rail: 'usdc',
+          asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          assetSymbol: 'USDC',
+          chainId: 8453,
+          paidAtomic: '2000000',
+          priceJpyc: '300',
+          quote: {
+            rateScaled: '150000000',
+            rateFetchedAt: 1_800_000_000_000,
+            fxQuoteExpiresAt: 1_800_000_180_000,
+            rounding: 'ceil',
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('決済スナップショット v1')).toBeInTheDocument();
+    expect(screen.getByText('2 USDC')).toBeInTheDocument();
+    expect(screen.getByText('300 JPYC')).toBeInTheDocument();
+    expect(screen.getByText('USDC · Base (8453)')).toBeInTheDocument();
+  });
+
   it('failed_prebroadcast は支払い未実行を明示する', () => {
     render(
       <CreatorStorePurchaseState

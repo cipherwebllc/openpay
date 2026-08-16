@@ -93,6 +93,7 @@ export type NormalizedHostedPaymentRequirements = {
 };
 
 export type HostedPurchaseQuote = {
+  rail: 'jpyc';
   requirements: NormalizedHostedPaymentRequirements;
   chainId: number;
   asset: Address;
@@ -391,6 +392,7 @@ export function normalizeHostedPaymentRequired(
   };
 
   return {
+    rail: 'jpyc',
     requirements,
     chainId,
     asset,

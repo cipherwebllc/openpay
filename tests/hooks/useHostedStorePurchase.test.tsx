@@ -5,7 +5,12 @@ import {
   QueryClientProvider,
 } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Address, Hex } from 'viem';
+import {
+  keccak256,
+  stringToHex,
+  type Address,
+  type Hex,
+} from 'viem';
 
 const FORWARDER =
   '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4' as Address;
@@ -21,9 +26,19 @@ const INTENT_SALT = `0x${'ab'.repeat(32)}` as Hex;
 const SIGNATURE = `0x${'cd'.repeat(65)}` as Hex;
 const TX_HASH = `0x${'ef'.repeat(32)}` as Hex;
 const RESOURCE_ID = 'h_fixture';
+const TITLE = 'Fixture product';
 const PRICE_JPYC = '1200';
 const PRICE = 1_200n * 10n ** 18n;
 const FEE = 12n * 10n ** 18n;
+const USDC =
+  '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as Address;
+const USDC_INTENT_SALT = `0x${'34'.repeat(32)}` as Hex;
+const USDC_SERVER_NONCE = keccak256(
+  stringToHex(
+    `openpay:creator-store-usdc-vanilla-v1:${USDC_INTENT_SALT}`,
+  ),
+);
+const USDC_NOW = 1_800_000_000_000;
 
 const account = vi.hoisted(() => ({
   address: '0x1111111111111111111111111111111111111111' as
@@ -111,6 +126,48 @@ function paymentRequired(): Record<string, unknown> {
   };
 }
 
+function usdcPaymentRequired(): Record<string, unknown> {
+  const rateFetchedAt = USDC_NOW - 60_000;
+  const fxQuoteExpiresAt = USDC_NOW + 120_000;
+  return {
+    x402Version: 1,
+    accepts: [
+      {
+        scheme: 'exact',
+        network: 'base',
+        maxAmountRequired: '8000000',
+        resource: `https://open-pay.jp/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}&rail=usdc`,
+        description: TITLE,
+        mimeType: 'application/json',
+        payTo: MERCHANT,
+        maxTimeoutSeconds: 180,
+        asset: USDC,
+        extra: {
+          name: 'USD Coin',
+          version: '2',
+          decimals: 6,
+          assetTransferMethod: 'eip3009',
+          openpay: {
+            rail: 'usdc',
+            deploymentVersion: 'creator-store-usdc-vanilla-v1',
+            intentSalt: USDC_INTENT_SALT,
+            nonce: USDC_SERVER_NONCE,
+            usdcQuoteAtomic: '8000000',
+            priceJpyc: PRICE_JPYC,
+            rateScaled: '150000000',
+            rateFetchedAt,
+            fxQuoteExpiresAt,
+            rounding: 'ceil',
+            authorizationValidBeforeMax: String(
+              Math.floor(fxQuoteExpiresAt / 1_000),
+            ),
+          },
+        },
+      },
+    ],
+  };
+}
+
 function settledPaidBody(): Record<string, unknown> {
   return {
     ok: true,
@@ -148,14 +205,16 @@ function createWrapper() {
   };
 }
 
-function renderPurchase() {
+function renderPurchase(rail: 'jpyc' | 'usdc' = 'jpyc') {
   return renderHook(
     () =>
       useHostedStorePurchase({
         resourceId: RESOURCE_ID,
+        title: TITLE,
         merchant: MERCHANT,
         priceJpyc: PRICE_JPYC,
         sessionAddress: PAYER,
+        rail,
       }),
     { wrapper: createWrapper() },
   );
@@ -179,6 +238,98 @@ beforeEach(() => {
 });
 
 describe('useHostedStorePurchase quote fence', () => {
+  it('USDC は ?rail=usdc の 402 を Base native USDC と server nonce へ束縛してから署名する', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(USDC_NOW);
+    account.chainId = 8453;
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (url.startsWith('/api/paid/hosted/')) {
+          return new Headers(init?.headers).has('X-PAYMENT')
+            ? jsonResponse({ ok: true, state: 'pending' }, 202)
+            : jsonResponse(usdcPaymentRequired(), 402);
+        }
+        if (
+          url ===
+          `/api/store/purchase/status?intentSalt=${encodeURIComponent(
+            USDC_INTENT_SALT,
+          )}&rail=usdc`
+        ) {
+          return jsonResponse(
+            { ok: true, state: 'settled', txHash: TX_HASH },
+            200,
+          );
+        }
+        if (url.startsWith('/api/store/content/')) {
+          return jsonResponse(
+            {
+              ok: true,
+              state: 'ready',
+              resourceId: RESOURCE_ID,
+              intentSalt: USDC_INTENT_SALT,
+              title: TITLE,
+              contentRevision: 1,
+              kind: 'text',
+              value: 'paid with USDC',
+            },
+            200,
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      });
+    const { result } = renderPurchase('usdc');
+
+    await prepare(result);
+    expect(result.current.quote).toMatchObject({
+      rail: 'usdc',
+      chainId: 8453,
+      asset: USDC,
+      merchant: MERCHANT,
+      nonce: USDC_SERVER_NONCE,
+      usdcQuoteAtomic: 8_000_000n,
+      paidUsdc: '8',
+      priceJpyc: PRICE_JPYC,
+    });
+
+    await act(async () => {
+      await result.current.purchase();
+    });
+    await waitFor(() => expect(result.current.phase).toBe('ready'));
+
+    expect(signTypedData).toHaveBeenCalledOnce();
+    expect(signTypedData.mock.calls[0]?.[0]).toMatchObject({
+      domain: {
+        name: 'USD Coin',
+        version: '2',
+        chainId: 8453,
+        verifyingContract: USDC,
+      },
+      primaryType: 'TransferWithAuthorization',
+      message: {
+        from: PAYER,
+        to: MERCHANT,
+        value: 8_000_000n,
+        validAfter: 0n,
+        nonce: USDC_SERVER_NONCE,
+      },
+    });
+    const paidCall = fetchMock.mock.calls.find(([, init]) =>
+      new Headers(init?.headers).has('X-PAYMENT'),
+    );
+    expect(paidCall?.[0]).toBe(
+      `/api/paid/hosted/${RESOURCE_ID}?payer=${encodeURIComponent(PAYER)}&rail=usdc`,
+    );
+    expect(paidCall?.[1]?.method).toBe('GET');
+    const header = new Headers(paidCall?.[1]?.headers).get('X-PAYMENT');
+    const payload = JSON.parse(
+      Buffer.from(header ?? '', 'base64').toString('utf8'),
+    );
+    expect(payload.payload.authorization.nonce).toBe(USDC_SERVER_NONCE);
+    expect(payload.payload.authorization.value).toBe('8000000');
+    expect(result.current.content?.value).toBe('paid with USDC');
+  });
+
   it('prepare は validated quote を返すだけで、最終確認前に署名しない', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       jsonResponse(paymentRequired(), 402),
@@ -296,6 +447,49 @@ describe('useHostedStorePurchase quote fence', () => {
 });
 
 describe('useHostedStorePurchase settlement and read-back', () => {
+  it('status が解決しない場合は D2 の timeout state へ移り、新 quote/reset を封鎖する', async () => {
+    vi.useFakeTimers();
+    try {
+      const statusHold = new Promise<Response>(() => undefined);
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
+        async (input, init) => {
+          const url = String(input);
+          if (url.startsWith('/api/store/purchase/status')) {
+            return statusHold;
+          }
+          return new Headers(init?.headers).has('X-PAYMENT')
+            ? jsonResponse({ ok: true, state: 'pending' }, 202)
+            : jsonResponse(paymentRequired(), 402);
+        },
+      );
+      const { result } = renderPurchase();
+      await act(async () => {
+        await result.current.prepare();
+      });
+      await act(async () => {
+        await result.current.purchase();
+      });
+      expect(result.current.phase).toBe('indeterminate');
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(90_000);
+      });
+      expect(result.current.phase).toBe('indeterminate-exhausted');
+      expect(result.current.paymentStatus).toBe('unknown');
+      expect(result.current.accessStatus).toBe('needs-support');
+      expect(result.current.needsSupportReason).toBe(
+        'payment-status-timeout',
+      );
+      expect(result.current.canRetrySignedPayment).toBe(true);
+
+      act(() => result.current.reset());
+      expect(result.current.phase).toBe('indeterminate-exhausted');
+      expect(signTypedData).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('202 は status を自動 pollingし、settled後の own content 200 でのみ ready', async () => {
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

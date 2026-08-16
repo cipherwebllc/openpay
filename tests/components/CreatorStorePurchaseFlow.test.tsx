@@ -29,6 +29,7 @@ const state = vi.hoisted(() => ({
   error: null as Error | null,
   isWrongChain: false,
   canRetrySignedPayment: false,
+  hookInput: null as Record<string, unknown> | null,
 }));
 
 vi.mock('wagmi', () => ({
@@ -61,7 +62,9 @@ vi.mock('@/hooks/useSiweSession', () => ({
 }));
 
 vi.mock('@/hooks/useHostedStorePurchase', () => ({
-  useHostedStorePurchase: () => ({
+  useHostedStorePurchase: (input: Record<string, unknown>) => {
+    state.hookInput = input;
+    return {
     phase: state.phase,
     paymentStatus: state.paymentStatus,
     accessStatus: state.accessStatus,
@@ -70,7 +73,7 @@ vi.mock('@/hooks/useHostedStorePurchase', () => ({
     txHash: null,
     needsSupportReason: null,
     error: state.error,
-    requiredChainId: state.quote ? 80002 : null,
+    requiredChainId: state.quote ? Number(state.quote.chainId) : null,
     isWrongChain: state.isWrongChain,
     isBusy: false,
     canRetrySignedPayment: state.canRetrySignedPayment,
@@ -78,7 +81,8 @@ vi.mock('@/hooks/useHostedStorePurchase', () => ({
     purchase: state.purchase,
     retry: state.retry,
     reset: state.reset,
-  }),
+    };
+  },
 }));
 
 vi.mock('@/lib/x402/hostedPurchaseWire', () => ({
@@ -96,6 +100,8 @@ vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
     priceJpyc,
     feeJpyc,
     totalJpyc,
+    rail,
+    paidUsdc,
     sellerDisclosureHref,
     onBack,
     onConfirm,
@@ -103,12 +109,18 @@ vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
     priceJpyc: string;
     feeJpyc: string;
     totalJpyc: string;
+    rail?: 'jpyc' | 'usdc';
+    paidUsdc?: string;
     sellerDisclosureHref: string;
     onBack: () => void;
     onConfirm: () => void;
   }) => (
     <div data-testid="confirmation">
-      <span>{`${priceJpyc}/${feeJpyc}/${totalJpyc}`}</span>
+      <span>
+        {rail === 'usdc'
+          ? `usdc:${priceJpyc}/${paidUsdc}`
+          : `${priceJpyc}/${feeJpyc}/${totalJpyc}`}
+      </span>
       <a href={sellerDisclosureHref}>seller</a>
       <button type="button" onClick={onBack}>
         back
@@ -164,6 +176,7 @@ beforeEach(() => {
   state.paymentStatus = 'not-started';
   state.accessStatus = 'none';
   state.quote = {
+    rail: 'jpyc',
     chainId: 80002,
     merchantValueJpyc: '100',
     feeValueJpyc: '1',
@@ -173,6 +186,7 @@ beforeEach(() => {
   state.error = null;
   state.isWrongChain = false;
   state.canRetrySignedPayment = false;
+  state.hookInput = null;
   state.switchChainAsync.mockResolvedValue(undefined);
   state.purchase.mockResolvedValue(undefined);
   state.retry.mockResolvedValue(undefined);
@@ -248,6 +262,67 @@ describe('CreatorStorePurchaseFlow', () => {
     ).toBeInTheDocument();
     // @handle プロフはヘッダーを持たないため、モーダル内の ConnectButton が唯一の接続導線。
     expect(screen.getByRole('button', { name: '接続' })).toBeInTheDocument();
+  });
+
+  it('usdcEnabled=true の modal 内だけ JPYC 既定の支払い方法選択を表示する', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const { rerender } = renderFlow('ja', {
+      ...PRODUCT,
+      usdcEnabled: true,
+    });
+
+    const jpyc = screen.getByRole('radio', { name: /JPYC で支払う/ });
+    const usdc = screen.getByRole('radio', { name: /USDC で支払う/ });
+    expect(jpyc).toBeChecked();
+    expect(usdc).not.toBeChecked();
+    expect(state.hookInput).toMatchObject({
+      title: PRODUCT.title,
+      rail: 'jpyc',
+    });
+
+    fireEvent.click(usdc);
+    rerender(
+      <CreatorStorePurchaseFlow
+        open
+        product={{ ...PRODUCT, usdcEnabled: true }}
+        sellerDisclosureHref="/ja/store/seller/0xseller"
+        onClose={vi.fn()}
+      />,
+    );
+    expect(usdc).toBeChecked();
+    expect(state.hookInput).toMatchObject({ rail: 'usdc' });
+    expect(screen.getByText('商品価格 100 JPYC')).toBeInTheDocument();
+  });
+
+  it('単一レール商品では支払い方法選択を表示しない', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    renderFlow();
+    expect(screen.queryByText('支払い方法')).toBeNull();
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(state.hookInput).toMatchObject({ rail: 'jpyc' });
+  });
+
+  it('USDC quote は実払額と JPYC 商品価格を最終確認へ渡す', () => {
+    state.quote = {
+      rail: 'usdc',
+      chainId: 8453,
+      priceJpyc: '100',
+      paidUsdc: '0.67',
+      merchant: PRODUCT.merchant,
+      payment: {
+        quote: {
+          rateScaled: '150000000',
+          rateFetchedAt: 1_800_000_000_000,
+          fxQuoteExpiresAt: 1_800_000_180_000,
+        },
+      },
+    };
+    renderFlow('ja', { ...PRODUCT, usdcEnabled: true });
+    expect(screen.getByTestId('confirmation')).toHaveTextContent(
+      'usdc:100/0.67',
+    );
   });
 
   it('検証済み quote を最終確認へ渡し、確定操作でのみ purchase を呼ぶ', () => {

@@ -288,6 +288,7 @@ export default async function HandlePage({
         ? { galleryUrls: product.galleryUrls }
         : {}),
       priceJpyc: product.priceJpyc,
+      ...(product.usdcEnabled === true ? { usdcEnabled: true as const } : {}),
       payTo: product.payTo,
       contentKind: product.contentKind,
       label: product.label,

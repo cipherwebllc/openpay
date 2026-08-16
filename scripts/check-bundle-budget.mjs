@@ -26,8 +26,13 @@ const BUDGETS_KB = {
   //   自作コード起因の増分には引き続き上の code-split 優先方針を適用する。
   // 2026-07-30 creator-store P5b: /pay の import graph 不変のまま、store ページ追加による
   // webpack chunk 再分割で共有 chunk が +1kB (revert 検証で直接 import 起因でないことを確認)。
-  '/[locale]/pay': 437,
-  '/[locale]/tip/[address]': 434,
+  // 2026-08-18 store USDC P2: 同型の再分割 +1kB (/pay から新規 USDC モジュールへの import 経路
+  // なしを grep で確認・PaymentForm も store 系 import なし)。自作コード起因の増分には
+  // 引き続き code-split 優先方針を適用する。
+  '/[locale]/pay': 438,
+  // 2026-08-18 store USDC P2: /pay と同型の chunk 再分割 +1kB (tip から新規 USDC モジュール
+  // への import 経路なしを grep で確認)。
+  '/[locale]/tip/[address]': 435,
   '/manifest.webmanifest': 250,
   // shared chunks の総和。表の行 "First Load JS shared by all"
   '__shared__': 250,

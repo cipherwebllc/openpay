@@ -78,6 +78,21 @@ describe('CreatorStoreLibrary', () => {
                 label: 'prompt',
                 purchasedAt: 1_750_000_000_000,
                 contentRevision: 2,
+                payment: {
+                  version: 1,
+                  rail: 'usdc',
+                  asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+                  assetSymbol: 'USDC',
+                  chainId: 8453,
+                  paidAtomic: '2000000',
+                  priceJpyc: '300',
+                  quote: {
+                    rateScaled: '150000000',
+                    rateFetchedAt: 1_749_999_900_000,
+                    fxQuoteExpiresAt: 1_750_000_080_000,
+                    rounding: 'ceil',
+                  },
+                },
                 revisions: [
                   {
                     title: '購入済みプロンプト',
@@ -88,6 +103,21 @@ describe('CreatorStoreLibrary', () => {
                     label: 'prompt',
                     purchasedAt: 1_750_000_000_000,
                     contentRevision: 2,
+                    payment: {
+                      version: 1,
+                      rail: 'usdc',
+                      asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+                      assetSymbol: 'USDC',
+                      chainId: 8453,
+                      paidAtomic: '2000000',
+                      priceJpyc: '300',
+                      quote: {
+                        rateScaled: '150000000',
+                        rateFetchedAt: 1_749_999_900_000,
+                        fxQuoteExpiresAt: 1_750_000_080_000,
+                        rounding: 'ceil',
+                      },
+                    },
                   },
                   {
                     title: '購入済みプロンプト旧版',
@@ -130,6 +160,9 @@ describe('CreatorStoreLibrary', () => {
     ).toBeDefined();
     expect(screen.getByText('リビジョン 2')).toBeInTheDocument();
     expect(screen.getByText('リビジョン 1')).toBeInTheDocument();
+    expect(screen.getByText('2 USDC · 300 JPYC')).toBeInTheDocument();
+    expect(screen.getByText('決済スナップショット v1')).toBeInTheDocument();
+    expect(screen.getByText('1 USDC = 150 JPYC')).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'リビジョン 1 を表示' }),

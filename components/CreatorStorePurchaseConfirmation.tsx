@@ -4,44 +4,67 @@
 // 署名 preview と callback だけを受け取り、402 の取得や署名自体は行わない。
 // 特商法 12 条の 6 に必要な表示をこの 1 component に集約し、購入導線ごとの文言欠落を防ぐ。
 
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { ArrowLeft, ExternalLink, ReceiptText } from 'lucide-react';
 import { SignReassurance } from '@/components/SignReassurance';
 import type { JpycRecoverSignPreview } from '@/lib/signPreview';
 
-export type CreatorStorePurchaseConfirmationProps = {
+type CreatorStorePurchaseConfirmationCommonProps = {
   product: {
     title: string;
     description?: string;
   };
-  /** 402 の merchantValue と一致する、人間可読の JPYC 額。 */
-  priceJpyc: string;
-  /** 402 の feeValue と一致する、買い手負担 x402 手数料の JPYC 額。 */
-  feeJpyc: string;
-  /** priceJpyc + feeJpyc。hook が署名前に検証した値をそのまま表示する。 */
-  totalJpyc: string;
   sellerDisclosureHref: string;
   supportHref: string;
-  /** Hosted は常に買い手上乗せ。署名 wire と同じ値から作った preview だけを受け取る。 */
-  signPreview: JpycRecoverSignPreview & { gasMode: 'customer' };
   isSubmitting: boolean;
   onBack: () => void;
   onConfirm: () => void;
 };
 
-export function CreatorStorePurchaseConfirmation({
-  product,
-  priceJpyc,
-  feeJpyc,
-  totalJpyc,
-  sellerDisclosureHref,
-  supportHref,
-  signPreview,
-  isSubmitting,
-  onBack,
-  onConfirm,
-}: CreatorStorePurchaseConfirmationProps) {
+export type CreatorStorePurchaseConfirmationProps =
+  CreatorStorePurchaseConfirmationCommonProps &
+    (
+      | {
+          rail?: 'jpyc';
+          /** 402 の merchantValue と一致する、人間可読の JPYC 額。 */
+          priceJpyc: string;
+          /** 402 の feeValue と一致する、買い手負担 x402 手数料の JPYC 額。 */
+          feeJpyc: string;
+          /** priceJpyc + feeJpyc。検証済み値をそのまま表示する。 */
+          totalJpyc: string;
+          /** Hosted JPYC は買い手上乗せ。wallet wire と同じ値から作った preview。 */
+          signPreview: JpycRecoverSignPreview & { gasMode: 'customer' };
+        }
+      | {
+          rail: 'usdc';
+          priceJpyc: string;
+          paidUsdc: string;
+          merchant: string;
+          quoteRate: string;
+          quoteFetchedAt: number;
+          quoteExpiresAt: number;
+        }
+    );
+
+export function CreatorStorePurchaseConfirmation(
+  props: CreatorStorePurchaseConfirmationProps,
+) {
   const t = useTranslations('CreatorStorePurchase');
+  const locale = useLocale();
+  const {
+    product,
+    priceJpyc,
+    sellerDisclosureHref,
+    supportHref,
+    isSubmitting,
+    onBack,
+    onConfirm,
+  } = props;
+  const isUsdc = props.rail === 'usdc';
+  const quoteDate = new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+  });
 
   return (
     <section
@@ -98,13 +121,15 @@ export function CreatorStorePurchaseConfirmation({
             </h3>
             {/* 支払いチェーンの明示 (2026-07-30 user 要望)。a11y 名は可視テキストから (掟 8)。 */}
             <span className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+              {/* public の固定 SVG は寸法を CSS で固定した装飾アイコン。画像最適化対象外。 */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src="/chains/polygon.svg"
+                src={isUsdc ? '/chains/base.svg' : '/chains/polygon.svg'}
                 alt=""
                 aria-hidden
                 className="h-3.5 w-3.5"
               />
-              JPYC · Polygon
+              {isUsdc ? t('usdcChainBadge') : 'JPYC · Polygon'}
             </span>
           </div>
           <dl className="mt-2 overflow-hidden rounded-2xl border border-slate-200">
@@ -114,24 +139,60 @@ export function CreatorStorePurchaseConfirmation({
                 {priceJpyc} JPYC
               </dd>
             </div>
-            <div className="flex items-start justify-between gap-4 border-t border-slate-100 px-4 py-3 text-sm">
-              <dt className="text-slate-600">
-                {t('feeLabel')}
-                <span className="mt-0.5 block text-xs text-slate-500">
-                  {t('feeRule')}
-                </span>
-              </dt>
-              <dd className="shrink-0 font-semibold tabular-nums text-slate-900">
-                {feeJpyc} JPYC
-              </dd>
-            </div>
+            {isUsdc ? (
+              <div className="flex items-start justify-between gap-4 border-t border-slate-100 px-4 py-3 text-sm">
+                <dt className="text-slate-600">
+                  {t('feeLabel')}
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    {t('usdcFeeRule')}
+                  </span>
+                </dt>
+                <dd className="shrink-0 font-semibold tabular-nums text-slate-900">
+                  0 USDC
+                </dd>
+              </div>
+            ) : (
+              <div className="flex items-start justify-between gap-4 border-t border-slate-100 px-4 py-3 text-sm">
+                <dt className="text-slate-600">
+                  {t('feeLabel')}
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    {t('feeRule')}
+                  </span>
+                </dt>
+                <dd className="shrink-0 font-semibold tabular-nums text-slate-900">
+                  {props.feeJpyc} JPYC
+                </dd>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-4 border-t border-slate-200 bg-blue-50 px-4 py-3">
-              <dt className="font-bold text-slate-900">{t('totalLabel')}</dt>
+              <dt className="font-bold text-slate-900">
+                {isUsdc ? t('usdcTotalLabel') : t('totalLabel')}
+              </dt>
               <dd className="text-lg font-black tabular-nums text-brand-dark">
-                {totalJpyc} JPYC
+                {isUsdc ? `${props.paidUsdc} USDC` : `${props.totalJpyc} JPYC`}
               </dd>
             </div>
           </dl>
+          {isUsdc ? (
+            <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-600 ring-1 ring-slate-200/70">
+              <dt>{t('quoteRateLabel')}</dt>
+              <dd className="text-right font-semibold tabular-nums text-slate-800">
+                {t('quoteRateValue', { rate: props.quoteRate })}
+              </dd>
+              <dt>{t('quoteFetchedLabel')}</dt>
+              <dd className="text-right font-semibold text-slate-800">
+                {quoteDate.format(props.quoteFetchedAt)}
+              </dd>
+              <dt>{t('quoteExpiryLabel')}</dt>
+              <dd className="text-right font-semibold text-slate-800">
+                {quoteDate.format(props.quoteExpiresAt)}
+              </dd>
+              <dt>{t('quoteRoundingLabel')}</dt>
+              <dd className="text-right font-semibold text-slate-800">
+                {t('quoteRoundingCeil')}
+              </dd>
+            </dl>
+          ) : null}
         </section>
 
         <section aria-labelledby="creator-store-purchase-terms-heading">
@@ -147,7 +208,9 @@ export function CreatorStorePurchaseConfirmation({
                 {t('paymentTimingLabel')}
               </dt>
               <dd className="mt-1 text-sm leading-relaxed text-slate-700">
-                {t('paymentTimingValue')}
+                {isUsdc
+                  ? t('usdcPaymentTimingValue')
+                  : t('paymentTimingValue')}
               </dd>
             </div>
             <div className="py-3">
@@ -215,11 +278,23 @@ export function CreatorStorePurchaseConfirmation({
           {t('supportNote')}
         </p>
 
-        <SignReassurance
-          kind="jpyc-relay-recover"
-          preview={signPreview}
-          awaiting={isSubmitting}
-        />
+        {isUsdc ? (
+          <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-950">
+            <h3 className="font-bold">{t('usdcSignatureHeading')}</h3>
+            <p className="mt-1 leading-relaxed">
+              {t('usdcSignatureBody', { amount: props.paidUsdc })}
+            </p>
+            <p className="mt-2 break-all text-xs text-blue-800">
+              {t('usdcRecipient', { merchant: props.merchant })}
+            </p>
+          </section>
+        ) : (
+          <SignReassurance
+            kind="jpyc-relay-recover"
+            preview={props.signPreview}
+            awaiting={isSubmitting}
+          />
+        )}
 
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
           <button

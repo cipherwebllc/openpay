@@ -45,6 +45,36 @@ function renderConfirmation(over?: {
 }
 
 describe('CreatorStorePurchaseConfirmation — 特商法 12 条の 6 fence', () => {
+  it('USDC rail は Base 実払額・JPYC 商品価格・quote snapshot を両記する', () => {
+    render(
+      <CreatorStorePurchaseConfirmation
+        rail="usdc"
+        product={{ title: '旅の写真 ZIP' }}
+        priceJpyc="300"
+        paidUsdc="2"
+        merchant="0x1234567890123456789012345678901234567890"
+        quoteRate="150"
+        quoteFetchedAt={1_800_000_000_000}
+        quoteExpiresAt={1_800_000_180_000}
+        sellerDisclosureHref="/ja/store/seller/0x1234"
+        supportHref="mailto:seller@example.com"
+        isSubmitting={false}
+        onBack={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('USDC · Base')).toBeInTheDocument();
+    expect(screen.getByText('300 JPYC')).toBeInTheDocument();
+    expect(screen.getByText('2 USDC')).toBeInTheDocument();
+    expect(screen.getByText('1 USDC = 150 JPYC')).toBeInTheDocument();
+    expect(screen.getByText('USDC 支払い署名の内容')).toBeInTheDocument();
+    expect(
+      screen.getByText(/nonce はサーバー発行値/),
+    ).toHaveTextContent('transferWithAuthorization');
+    expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
+  });
+
   it('署名前の最終確認に必須事項と数値の総額をすべて表示する', () => {
     renderConfirmation();
 

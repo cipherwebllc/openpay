@@ -26,6 +26,7 @@ export type CreatorStorePurchaseFlowProps = {
     galleryUrls?: readonly string[];
     priceJpyc: string;
     merchant: Address;
+    usdcEnabled?: true;
   };
   sellerDisclosureHref: string;
   onClose: () => void;
@@ -50,11 +51,16 @@ export function CreatorStorePurchaseFlow({
     signInError,
   } = useSiweSession();
   useStoreCacheScope(sessionAddress);
+  const [paymentRail, setPaymentRail] = useState<'jpyc' | 'usdc'>('jpyc');
+  const selectedPaymentRail =
+    product.usdcEnabled === true ? paymentRail : 'jpyc';
   const buyer = useHostedStorePurchase({
     resourceId: product.id,
+    title: product.title,
     merchant: product.merchant,
     priceJpyc: product.priceJpyc,
     sessionAddress,
+    rail: selectedPaymentRail,
   });
   const [flowError, setFlowError] = useState<Error | null>(null);
   const [previewNowSec, setPreviewNowSec] = useState(() =>
@@ -80,7 +86,7 @@ export function CreatorStorePurchaseFlow({
   );
   const signPreview = useMemo(
     () =>
-      buyer.quote
+      buyer.quote?.rail === 'jpyc'
         ? buildHostedPurchaseSignPreview(
             buyer.quote,
             undefined,
@@ -153,13 +159,14 @@ export function CreatorStorePurchaseFlow({
 
   const showConfirmation =
     buyer.quote !== null &&
-    signPreview !== null &&
+    (buyer.quote.rail === 'usdc' || signPreview !== null) &&
     (buyer.phase === 'review' ||
       buyer.phase === 'signing' ||
       buyer.phase === 'submitting') &&
     !buyer.isWrongChain;
   const showState =
     buyer.phase === 'indeterminate' ||
+    buyer.phase === 'indeterminate-exhausted' ||
     buyer.phase === 'provisioning' ||
     buyer.phase === 'ready' ||
     buyer.phase === 'needs-support' ||
@@ -191,30 +198,59 @@ export function CreatorStorePurchaseFlow({
           </button>
         </div>
 
-        {showConfirmation && buyer.quote && signPreview ? (
+        {showConfirmation && buyer.quote ? (
           <>
             {displayedError ? (
               <ErrorNotice message={t('signatureError')} />
             ) : null}
-            <CreatorStorePurchaseConfirmation
-              product={{
-                title: product.title,
-                ...(product.description
-                  ? { description: product.description }
-                  : {}),
-              }}
-              priceJpyc={buyer.quote.merchantValueJpyc}
-              feeJpyc={buyer.quote.feeValueJpyc}
-              totalJpyc={buyer.quote.totalValueJpyc}
-              sellerDisclosureHref={sellerDisclosureHref}
-              supportHref={sellerDisclosureHref}
-              signPreview={signPreview}
-              isSubmitting={
-                buyer.phase === 'signing' || buyer.phase === 'submitting'
-              }
-              onBack={closeAndResetReview}
-              onConfirm={confirmPurchase}
-            />
+            {buyer.quote.rail === 'usdc' ? (
+              <CreatorStorePurchaseConfirmation
+                rail="usdc"
+                product={{
+                  title: product.title,
+                  ...(product.description
+                    ? { description: product.description }
+                    : {}),
+                }}
+                priceJpyc={buyer.quote.priceJpyc}
+                paidUsdc={buyer.quote.paidUsdc}
+                merchant={buyer.quote.merchant}
+                quoteRate={formatUnits(
+                  BigInt(buyer.quote.payment.quote.rateScaled),
+                  6,
+                )}
+                quoteFetchedAt={buyer.quote.payment.quote.rateFetchedAt}
+                quoteExpiresAt={buyer.quote.payment.quote.fxQuoteExpiresAt}
+                sellerDisclosureHref={sellerDisclosureHref}
+                supportHref={sellerDisclosureHref}
+                isSubmitting={
+                  buyer.phase === 'signing' || buyer.phase === 'submitting'
+                }
+                onBack={closeAndResetReview}
+                onConfirm={confirmPurchase}
+              />
+            ) : signPreview ? (
+              <CreatorStorePurchaseConfirmation
+                rail="jpyc"
+                product={{
+                  title: product.title,
+                  ...(product.description
+                    ? { description: product.description }
+                    : {}),
+                }}
+                priceJpyc={buyer.quote.merchantValueJpyc}
+                feeJpyc={buyer.quote.feeValueJpyc}
+                totalJpyc={buyer.quote.totalValueJpyc}
+                sellerDisclosureHref={sellerDisclosureHref}
+                supportHref={sellerDisclosureHref}
+                signPreview={signPreview}
+                isSubmitting={
+                  buyer.phase === 'signing' || buyer.phase === 'submitting'
+                }
+                onBack={closeAndResetReview}
+                onConfirm={confirmPurchase}
+              />
+            ) : null}
           </>
         ) : showState ? (
           <div className="rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
@@ -226,6 +262,10 @@ export function CreatorStorePurchaseFlow({
               }
               libraryHref={`/${locale}/store/library`}
               supportHref={sellerDisclosureHref}
+              {...(buyer.paymentStatus === 'confirmed' &&
+              buyer.quote?.rail === 'usdc'
+                ? { payment: buyer.quote.payment }
+                : {})}
             />
             {buyer.canRetrySignedPayment ? (
               <button
@@ -254,10 +294,15 @@ export function CreatorStorePurchaseFlow({
               aria-hidden
             />
             <h2 className="mt-3 text-xl font-black text-slate-900">
-              {t('switchNetworkHeading')}
+              {t('switchNetworkHeading', {
+                network: buyer.quote?.rail === 'usdc' ? 'Base' : 'Polygon',
+              })}
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              {t('switchNetworkBody')}
+              {t('switchNetworkBody', {
+                asset: buyer.quote?.rail === 'usdc' ? 'USDC' : 'JPYC',
+                network: buyer.quote?.rail === 'usdc' ? 'Base' : 'Polygon',
+              })}
             </p>
             <button
               type="button"
@@ -267,7 +312,10 @@ export function CreatorStorePurchaseFlow({
             >
               {isSwitchingChain
                 ? t('switchingNetwork')
-                : t('switchNetwork')}
+                : t('switchNetwork', {
+                    network:
+                      buyer.quote?.rail === 'usdc' ? 'Base' : 'Polygon',
+                  })}
             </button>
             {displayedError ? (
               <p className="mt-3 text-xs text-red-600">
@@ -302,30 +350,98 @@ export function CreatorStorePurchaseFlow({
                 {product.description}
               </p>
             ) : null}
+            {product.usdcEnabled === true ? (
+              <fieldset className="mx-auto mt-5 max-w-md text-left">
+                <legend className="text-sm font-bold text-slate-800">
+                  {t('paymentMethodHeading')}
+                </legend>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <label className={`cursor-pointer rounded-xl border p-3 transition-colors ${
+                    selectedPaymentRail === 'jpyc'
+                      ? 'border-brand bg-blue-50 ring-1 ring-brand/20'
+                      : 'border-slate-200 hover:border-slate-300'
+                  }`}>
+                    <span className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                      <input
+                        type="radio"
+                        name={`store-payment-rail-${product.id}`}
+                        value="jpyc"
+                        checked={selectedPaymentRail === 'jpyc'}
+                        disabled={buyer.phase === 'loading-quote'}
+                        onChange={() => {
+                          setPaymentRail('jpyc');
+                          setFlowError(null);
+                        }}
+                      />
+                      {t('paymentMethodJpyc')}
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      {t('paymentMethodJpycHint')}
+                    </span>
+                  </label>
+                  <label className={`cursor-pointer rounded-xl border p-3 transition-colors ${
+                    selectedPaymentRail === 'usdc'
+                      ? 'border-brand bg-blue-50 ring-1 ring-brand/20'
+                      : 'border-slate-200 hover:border-slate-300'
+                  }`}>
+                    <span className="flex items-center gap-2 text-sm font-bold text-slate-900">
+                      <input
+                        type="radio"
+                        name={`store-payment-rail-${product.id}`}
+                        value="usdc"
+                        checked={selectedPaymentRail === 'usdc'}
+                        disabled={buyer.phase === 'loading-quote'}
+                        onChange={() => {
+                          setPaymentRail('usdc');
+                          setFlowError(null);
+                        }}
+                      />
+                      {t('paymentMethodUsdc')}
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      {t('paymentMethodUsdcHint')}
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+            ) : null}
             {/* 買い手の意思決定基準は合計 (2026-07-31 user 裁定)。式は購入 hook の
                 server quote 照合と同一関数 = 表示と実請求の乖離なし。 */}
-            <p className="mt-2 text-lg font-black text-slate-900">
-              {t('payTotal', {
-                total: formatUnits(
-                  BigInt(product.priceJpyc) * 10n ** 18n +
-                    hostedPurchaseFeeValue(
-                      BigInt(product.priceJpyc) * 10n ** 18n,
+            {selectedPaymentRail === 'usdc' ? (
+              <>
+                <p className="mt-4 text-lg font-black text-slate-900">
+                  {t('usdcProductPrice', { price: product.priceJpyc })}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {t('usdcQuoteNotice')}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="mt-2 text-lg font-black text-slate-900">
+                  {t('payTotal', {
+                    total: formatUnits(
+                      BigInt(product.priceJpyc) * 10n ** 18n +
+                        hostedPurchaseFeeValue(
+                          BigInt(product.priceJpyc) * 10n ** 18n,
+                        ),
+                      18,
                     ),
-                  18,
-                ),
-              })}
-            </p>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {t('priceBreakdown', {
-                price: product.priceJpyc,
-                fee: formatUnits(
-                  hostedPurchaseFeeValue(
-                    BigInt(product.priceJpyc) * 10n ** 18n,
-                  ),
-                  18,
-                ),
-              })}
-            </p>
+                  })}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {t('priceBreakdown', {
+                    price: product.priceJpyc,
+                    fee: formatUnits(
+                      hostedPurchaseFeeValue(
+                        BigInt(product.priceJpyc) * 10n ** 18n,
+                      ),
+                      18,
+                    ),
+                  })}
+                </p>
+              </>
+            )}
             {!address ? (
               <div className="mt-5 space-y-3">
                 <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">

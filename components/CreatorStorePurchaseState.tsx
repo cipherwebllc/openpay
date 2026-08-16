@@ -3,8 +3,10 @@
 // 決済状態と access 状態を別々に見せる表示専用 component。hook が返す二軸の状態を受け、
 // own/content API の read-back が成功する前には「購入完了」とライブラリ導線を絶対に出さない。
 
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
+import { formatUnits } from 'viem';
+import type { HostedUsdcPaymentSnapshot } from '@/lib/x402/hostedUsdcPurchaseWire';
 
 export type CreatorStorePaymentStatus =
   | 'not-started'
@@ -25,6 +27,8 @@ export type CreatorStorePurchaseStateProps = {
   ownershipReadBack: boolean;
   libraryHref: string;
   supportHref: string;
+  /** USDC 成立時は P1 grant と同じ versioned payment snapshot を描画する。 */
+  payment?: HostedUsdcPaymentSnapshot;
 };
 
 export function CreatorStorePurchaseState({
@@ -33,8 +37,16 @@ export function CreatorStorePurchaseState({
   ownershipReadBack,
   libraryHref,
   supportHref,
+  payment,
 }: CreatorStorePurchaseStateProps) {
   const t = useTranslations('CreatorStorePurchase');
+  const locale = useLocale();
+  const paymentDate = payment
+    ? new Intl.DateTimeFormat(locale, {
+        dateStyle: 'medium',
+        timeStyle: 'medium',
+      })
+    : null;
   if (paymentStatus === 'not-started' && accessStatus === 'none') return null;
 
   const ready =
@@ -108,6 +120,45 @@ export function CreatorStorePurchaseState({
               )}
             </dd>
           </dl>
+          {payment ? (
+            <div className="mt-4 rounded-xl bg-white/70 p-3 ring-1 ring-current/10">
+              <p className="text-xs font-bold uppercase tracking-wide opacity-70">
+                {t('paymentSnapshotHeading')}
+              </p>
+              <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+                <dt className="opacity-70">{t('paidAmountLabel')}</dt>
+                <dd className="text-right font-semibold tabular-nums">
+                  {formatUnits(BigInt(payment.paidAtomic), 6)} USDC
+                </dd>
+                <dt className="opacity-70">{t('productPriceLabel')}</dt>
+                <dd className="text-right font-semibold tabular-nums">
+                  {payment.priceJpyc} JPYC
+                </dd>
+                <dt className="opacity-70">{t('paymentRailLabel')}</dt>
+                <dd className="text-right font-semibold">
+                  USDC · Base (8453)
+                </dd>
+                <dt className="opacity-70">{t('quoteRateLabel')}</dt>
+                <dd className="text-right font-semibold tabular-nums">
+                  {t('quoteRateValue', {
+                    rate: formatUnits(BigInt(payment.quote.rateScaled), 6),
+                  })}
+                </dd>
+                <dt className="opacity-70">{t('quoteFetchedLabel')}</dt>
+                <dd className="text-right font-semibold">
+                  {paymentDate?.format(payment.quote.rateFetchedAt)}
+                </dd>
+                <dt className="opacity-70">{t('quoteExpiryLabel')}</dt>
+                <dd className="text-right font-semibold">
+                  {paymentDate?.format(payment.quote.fxQuoteExpiresAt)}
+                </dd>
+                <dt className="opacity-70">{t('quoteRoundingLabel')}</dt>
+                <dd className="text-right font-semibold">
+                  {t('quoteRoundingCeil')}
+                </dd>
+              </dl>
+            </div>
+          ) : null}
           {ready ? (
             <a
               href={libraryHref}

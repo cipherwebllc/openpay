@@ -3,7 +3,7 @@
 // Creator Store hosted 商品専用の buyer hook。recover/relay hook とは署名 wire・retry 契約を共有しない。
 //
 // flow:
-//   prepare()  = payer を付けて v1 402 を取得し、card price / asset / forwarder / fee / commit / salt を検証
+//   prepare()  = 選択 rail と payer を付けて v1 402 を取得し、rail 専用 normalizer で card/intent を検証
 //   purchase() = 最終確認 UI の確定操作後に初めて EIP-3009 typed-data を署名し、X-PAYMENT 付き GET
 //   retry()    = 保持済みの同一 X-PAYMENT header で同じ GET を再送するだけ（再署名しない）
 //   202/通信断 = intentSalt の status を自動 polling。settled 後も own content API の 200 read-back まで
@@ -27,11 +27,26 @@ import {
   normalizeHostedPaymentRequired,
   type HostedPurchaseQuote,
 } from '@/lib/x402/hostedPurchaseWire';
+import {
+  buildHostedUsdcPurchaseTypedData,
+  createHostedUsdcAuthorization,
+  encodeHostedUsdcPaymentHeader,
+  hostedUsdcPaymentSnapshotMatchesQuote,
+  HostedUsdcPurchaseWireError,
+  normalizeHostedUsdcPaymentRequired,
+  type HostedUsdcPurchaseQuote,
+} from '@/lib/x402/hostedUsdcPurchaseWire';
 
 // status route は 30 req/min/IP。初回即時 fetch を含めても limiter を踏まない余白を持たせる。
 const STATUS_POLL_INTERVAL_MS = 3_000;
 const CONTENT_POLL_INTERVAL_MS = 2_000;
 const OWNERSHIP_READ_BACK_TIMEOUT_MS = 60_000;
+const PAYMENT_STATUS_RECOVERY_TIMEOUT_MS = 90_000;
+
+export type HostedStorePaymentRail = 'jpyc' | 'usdc';
+export type HostedStorePurchaseQuote =
+  | HostedPurchaseQuote
+  | HostedUsdcPurchaseQuote;
 
 export type HostedStorePurchasePhase =
   | 'idle'
@@ -40,6 +55,7 @@ export type HostedStorePurchasePhase =
   | 'signing'
   | 'submitting'
   | 'indeterminate'
+  | 'indeterminate-exhausted'
   | 'provisioning'
   | 'ready'
   | 'needs-support'
@@ -80,7 +96,8 @@ export type HostedProvidedEnded = {
 
 export type HostedStoreNeedsSupportReason =
   | 'provided-ended'
-  | 'ownership-readback-timeout';
+  | 'ownership-readback-timeout'
+  | 'payment-status-timeout';
 
 export type HostedStorePurchaseErrorCode =
   | 'disabled'
@@ -127,16 +144,35 @@ type SignedHostedRequest = {
   header: string;
   intentSalt: Hex;
   payer: Address;
+  quote: HostedStorePurchaseQuote;
 };
+
+type PreparedHostedSigning =
+  | {
+      rail: 'jpyc';
+      quote: HostedPurchaseQuote;
+      authorization: ReturnType<typeof createHostedPurchaseAuthorization>;
+      typedData: ReturnType<typeof buildHostedPurchaseTypedData>;
+    }
+  | {
+      rail: 'usdc';
+      quote: HostedUsdcPurchaseQuote;
+      authorization: ReturnType<typeof createHostedUsdcAuthorization>;
+      typedData: ReturnType<typeof buildHostedUsdcPurchaseTypedData>;
+    };
 
 type UseHostedStorePurchaseInput = {
   resourceId: string;
+  /** card に表示した商品名。USDC 402 description と照合する。 */
+  title: string;
   /** profile の hosted product metadata にある seller payTo。402 merchant と照合する。 */
   merchant: Address;
   /** profile card に表示した human JPYC 整数。402 merchantValue と署名前に一致確認する。 */
   priceJpyc: string;
   /** 現在の SIWE session。connected wallet と一致しない限り quote を取得しない。 */
   sessionAddress: Address | null;
+  /** modal 内で明示選択した rail。未指定時は既存 JPYC 経路。 */
+  rail?: HostedStorePaymentRail;
   enabled?: boolean;
 };
 
@@ -241,6 +277,7 @@ function paymentStatusForPhase(
     return 'confirmed';
   }
   if (phase === 'submitting' || phase === 'indeterminate') return 'unknown';
+  if (phase === 'indeterminate-exhausted') return 'unknown';
   if (phase === 'failed-prebroadcast' || phase === 'error') {
     return 'not-executed';
   }
@@ -252,6 +289,7 @@ function accessStatusForPhase(
 ): HostedStoreAccessStatus {
   if (phase === 'ready') return 'ready';
   if (phase === 'needs-support') return 'needs-support';
+  if (phase === 'indeterminate-exhausted') return 'needs-support';
   if (
     phase === 'submitting' ||
     phase === 'indeterminate' ||
@@ -264,9 +302,11 @@ function accessStatusForPhase(
 
 export function useHostedStorePurchase({
   resourceId,
+  title,
   merchant,
   priceJpyc,
   sessionAddress,
+  rail = 'jpyc',
   enabled = true,
 }: UseHostedStorePurchaseInput) {
   const queryClient = useQueryClient();
@@ -274,7 +314,8 @@ export function useHostedStorePurchase({
   const { data: walletClient } = useWalletClient();
   const [phase, setPhase] =
     useState<HostedStorePurchasePhase>('idle');
-  const [quote, setQuote] = useState<HostedPurchaseQuote | null>(null);
+  const [quote, setQuote] =
+    useState<HostedStorePurchaseQuote | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [txHash, setTxHash] = useState<Hex | null>(null);
   const [content, setContent] =
@@ -286,6 +327,7 @@ export function useHostedStorePurchase({
   const currentAddressRef = useRef<Address | undefined>(address);
   const currentSessionRef = useRef<Address | null>(sessionAddress);
   const confirmedAtRef = useRef<number | null>(null);
+  const indeterminateAtRef = useRef<number | null>(null);
   const scopeRef = useRef<string | null>(null);
   const productScopeRef = useRef<string | null>(null);
   currentAddressRef.current = address;
@@ -294,6 +336,7 @@ export function useHostedStorePurchase({
   const clearPurchaseState = useCallback(() => {
     signedRequestRef.current = null;
     confirmedAtRef.current = null;
+    indeterminateAtRef.current = null;
     setPhase('idle');
     setQuote(null);
     setError(null);
@@ -319,7 +362,7 @@ export function useHostedStorePurchase({
   }, [address, sessionAddress, queryClient, clearPurchaseState]);
 
   useEffect(() => {
-    const productScope = `${resourceId}:${merchant.toLowerCase()}:${priceJpyc}`;
+    const productScope = `${resourceId}:${title}:${merchant.toLowerCase()}:${priceJpyc}:${rail}`;
     if (productScopeRef.current === null) {
       productScopeRef.current = productScope;
       return;
@@ -327,9 +370,9 @@ export function useHostedStorePurchase({
     if (productScopeRef.current === productScope) return;
     productScopeRef.current = productScope;
     clearPurchaseState();
-  }, [resourceId, merchant, priceJpyc, clearPurchaseState]);
+  }, [resourceId, title, merchant, priceJpyc, rail, clearPurchaseState]);
 
-  const prepare = useCallback(async (): Promise<HostedPurchaseQuote> => {
+  const prepare = useCallback(async (): Promise<HostedStorePurchaseQuote> => {
     if (!enabled) {
       throw new HostedStorePurchaseError(
         'disabled',
@@ -351,6 +394,7 @@ export function useHostedStorePurchase({
 
     signedRequestRef.current = null;
     confirmedAtRef.current = null;
+    indeterminateAtRef.current = null;
     setPhase('loading-quote');
     setQuote(null);
     setError(null);
@@ -360,7 +404,9 @@ export function useHostedStorePurchase({
 
     const url = `/api/paid/hosted/${encodeURIComponent(
       resourceId,
-    )}?payer=${encodeURIComponent(address)}`;
+    )}?payer=${encodeURIComponent(address)}${
+      rail === 'usdc' ? '&rail=usdc' : ''
+    }`;
     let response: Response;
     try {
       response = await fetch(url, {
@@ -400,16 +446,23 @@ export function useHostedStorePurchase({
       throw next;
     }
 
-    let validated: HostedPurchaseQuote;
+    let validated: HostedStorePurchaseQuote;
     try {
-      validated = normalizeHostedPaymentRequired(
-        raw,
-        priceJpyc,
-        merchant,
-      );
+      validated =
+        rail === 'usdc'
+          ? normalizeHostedUsdcPaymentRequired(raw, {
+              selectedRail: 'usdc',
+              resourceId,
+              title,
+              priceJpyc,
+              merchant,
+              payer: getAddress(address),
+            })
+          : normalizeHostedPaymentRequired(raw, priceJpyc, merchant);
     } catch (cause) {
       const next =
-        cause instanceof HostedPurchaseWireError
+        cause instanceof HostedPurchaseWireError ||
+        cause instanceof HostedUsdcPurchaseWireError
           ? cause
           : new HostedStorePurchaseError(
               'quote_invalid',
@@ -443,15 +496,28 @@ export function useHostedStorePurchase({
     address,
     sessionAddress,
     resourceId,
+    title,
     merchant,
     priceJpyc,
+    rail,
   ]);
 
   const markConfirmed = useCallback((settledTxHash?: Hex) => {
     confirmedAtRef.current = Date.now();
+    indeterminateAtRef.current = null;
     if (settledTxHash) setTxHash(settledTxHash);
     setError(null);
     setPhase('provisioning');
+  }, []);
+
+  const markIndeterminate = useCallback((cause?: unknown) => {
+    if (indeterminateAtRef.current === null) {
+      indeterminateAtRef.current = Date.now();
+    }
+    if (cause !== undefined) {
+      setError(cause instanceof Error ? cause : new Error(String(cause)));
+    }
+    setPhase('indeterminate');
   }, []);
 
   const submitSignedRequest = useCallback(
@@ -478,8 +544,7 @@ export function useHostedStorePurchase({
         }
         // header が server に届いた可能性を client だけでは否定できない。新しい署名へ倒さず、
         // 同じ intent の public status polling に収束させる。
-        setError(cause instanceof Error ? cause : new Error(String(cause)));
-        setPhase('indeterminate');
+        markIndeterminate(cause);
         return;
       }
 
@@ -502,15 +567,19 @@ export function useHostedStorePurchase({
           (body.kind === 'url' || body.kind === 'text') &&
           typeof body.value === 'string' &&
           typeof body.txHash === 'string' &&
-          /^0x[0-9a-fA-F]{64}$/.test(body.txHash)
+          /^0x[0-9a-fA-F]{64}$/.test(body.txHash) &&
+          (signed.quote.rail === 'jpyc' ||
+            hostedUsdcPaymentSnapshotMatchesQuote(
+              body.payment,
+              signed.quote,
+            ))
         ) {
           markConfirmed(body.txHash as Hex);
           return;
         }
         // 署名送信後の壊れた/proxy 200 を payment success と偽表示しない。
         // coarse status が on-chain/KV の権威ある settled/failed へ収束させる。
-        setError(new Error('hosted_purchase_invalid_success'));
-        setPhase('indeterminate');
+        markIndeterminate(new Error('hosted_purchase_invalid_success'));
         return;
       }
       if (
@@ -524,7 +593,7 @@ export function useHostedStorePurchase({
         return;
       }
       if (response.status === 202) {
-        setPhase('indeterminate');
+        markIndeterminate();
         return;
       }
       if (
@@ -572,9 +641,9 @@ export function useHostedStorePurchase({
             : `hosted_purchase_http_${response.status}`,
         ),
       );
-      setPhase('indeterminate');
+      markIndeterminate();
     },
-    [markConfirmed, resourceId],
+    [markConfirmed, markIndeterminate, resourceId],
   );
 
   const purchase = useCallback(async (): Promise<void> => {
@@ -612,33 +681,58 @@ export function useHostedStorePurchase({
       throw next;
     }
 
-    let authorization;
+    let prepared: PreparedHostedSigning;
     try {
-      authorization = createHostedPurchaseAuthorization(
-        quote,
-        getAddress(address),
-      );
+      if (quote.rail === 'usdc') {
+        const authorization = createHostedUsdcAuthorization(
+          quote,
+          getAddress(address),
+        );
+        prepared = {
+          rail: 'usdc',
+          quote,
+          authorization,
+          typedData: buildHostedUsdcPurchaseTypedData(quote, authorization),
+        };
+      } else {
+        const authorization = createHostedPurchaseAuthorization(
+          quote,
+          getAddress(address),
+        );
+        prepared = {
+          rail: 'jpyc',
+          quote,
+          authorization,
+          typedData: buildHostedPurchaseTypedData(quote, authorization),
+        };
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause : new Error(String(cause)));
       setPhase('error');
       throw cause;
     }
-    const typedData = buildHostedPurchaseTypedData(
-      quote,
-      authorization,
-    );
     setError(null);
     setPhase('signing');
 
     let signature: Hex;
     try {
-      signature = (await walletClient.signTypedData({
-        account: authorization.from,
-        domain: typedData.domain,
-        types: typedData.types,
-        primaryType: typedData.primaryType,
-        message: typedData.message,
-      })) as Hex;
+      if (prepared.rail === 'usdc') {
+        signature = (await walletClient.signTypedData({
+          account: prepared.authorization.from,
+          domain: prepared.typedData.domain,
+          types: prepared.typedData.types,
+          primaryType: prepared.typedData.primaryType,
+          message: prepared.typedData.message,
+        })) as Hex;
+      } else {
+        signature = (await walletClient.signTypedData({
+          account: prepared.authorization.from,
+          domain: prepared.typedData.domain,
+          types: prepared.typedData.types,
+          primaryType: prepared.typedData.primaryType,
+          message: prepared.typedData.message,
+        })) as Hex;
+      }
     } catch (cause) {
       const next = new HostedStorePurchaseError(
         'signature_rejected',
@@ -664,18 +758,30 @@ export function useHostedStorePurchase({
       throw next;
     }
 
-    const payload = hostedPaymentPayload(
-      quote,
-      authorization,
-      signature,
-    );
+    const header =
+      prepared.rail === 'usdc'
+        ? encodeHostedUsdcPaymentHeader(
+            prepared.quote,
+            prepared.authorization,
+            signature,
+          )
+        : encodeHostedPaymentHeader(
+            hostedPaymentPayload(
+              prepared.quote,
+              prepared.authorization,
+              signature,
+            ),
+          );
     const signed: SignedHostedRequest = {
       url: `/api/paid/hosted/${encodeURIComponent(
         resourceId,
-      )}?payer=${encodeURIComponent(address)}`,
-      header: encodeHostedPaymentHeader(payload),
+      )}?payer=${encodeURIComponent(address)}${
+        quote.rail === 'usdc' ? '&rail=usdc' : ''
+      }`,
+      header,
       intentSalt: quote.intentSalt,
       payer: getAddress(address),
+      quote,
     };
     signedRequestRef.current = signed;
     await submitSignedRequest(signed);
@@ -709,6 +815,7 @@ export function useHostedStorePurchase({
       'store',
       'purchase-status',
       sessionAddress,
+      quote?.rail ?? null,
       quote?.intentSalt ?? null,
     ],
     queryFn: async (): Promise<PurchaseStatusResponse> => {
@@ -716,7 +823,7 @@ export function useHostedStorePurchase({
       const response = await fetch(
         `/api/store/purchase/status?intentSalt=${encodeURIComponent(
           quote.intentSalt,
-        )}`,
+        )}${quote.rail === 'usdc' ? '&rail=usdc' : ''}`,
         {
           method: 'GET',
           headers: { accept: 'application/json' },
@@ -740,6 +847,21 @@ export function useHostedStorePurchase({
       : false,
     retry: false,
   });
+
+  useEffect(() => {
+    if (phase !== 'indeterminate') return;
+    const startedAt = indeterminateAtRef.current;
+    if (startedAt === null) return;
+    const remaining = Math.max(
+      0,
+      PAYMENT_STATUS_RECOVERY_TIMEOUT_MS - (Date.now() - startedAt),
+    );
+    const timeout = window.setTimeout(() => {
+      setNeedsSupportReason('payment-status-timeout');
+      setPhase('indeterminate-exhausted');
+    }, remaining);
+    return () => window.clearTimeout(timeout);
+  }, [phase]);
 
   useEffect(() => {
     if (!statusQuery.data) return;
@@ -847,7 +969,9 @@ export function useHostedStorePurchase({
     // broadcast 有無が不明な間に新 quote/signature へ進ませない。解決経路は status と同一header retry。
     if (
       signedRequestRef.current &&
-      (phase === 'submitting' || phase === 'indeterminate')
+      (phase === 'submitting' ||
+        phase === 'indeterminate' ||
+        phase === 'indeterminate-exhausted')
     ) {
       return;
     }
@@ -873,7 +997,8 @@ export function useHostedStorePurchase({
       phase === 'signing' ||
       phase === 'submitting',
     canRetrySignedPayment:
-      signedRequestRef.current !== null && phase === 'indeterminate',
+      signedRequestRef.current !== null &&
+      (phase === 'indeterminate' || phase === 'indeterminate-exhausted'),
     prepare,
     purchase,
     retry,

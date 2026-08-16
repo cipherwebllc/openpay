@@ -14,9 +14,11 @@ import {
   PackageOpen,
   RefreshCw,
 } from 'lucide-react';
+import { formatUnits } from 'viem';
 import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
+import { normalizeHostedUsdcPaymentSnapshot } from '@/lib/x402/hostedUsdcPurchaseWire';
 
 type LibraryRevision = {
   title: string;
@@ -27,6 +29,7 @@ type LibraryRevision = {
   label: 'download' | 'pdf' | 'zip' | 'prompt' | 'api' | 'external';
   purchasedAt: number;
   contentRevision: number;
+  payment?: unknown;
 };
 
 type LibraryItem = LibraryRevision & {
@@ -282,9 +285,10 @@ function EnabledCreatorStoreLibrary() {
                       <h2 className="min-w-0 flex-1 font-bold text-slate-900">
                         {item.title}
                       </h2>
-                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
-                        {item.priceJpyc} JPYC
-                      </span>
+                      <LibraryPriceBadge
+                        priceJpyc={item.priceJpyc}
+                        payment={item.payment}
+                      />
                     </div>
                     {item.desc ? (
                       // P4: プロフカード (P2) と同じ 2 行クランプ — 長い説明や生 URL が
@@ -318,9 +322,12 @@ function EnabledCreatorStoreLibrary() {
                                 </p>
                               ) : null}
                               <p className="mt-0.5">
-                                {revision.priceJpyc} JPYC ·{' '}
                                 {t(`labels.${revision.label}`)}
                               </p>
+                              <LibraryPaymentSnapshot
+                                priceJpyc={revision.priceJpyc}
+                                payment={revision.payment}
+                              />
                               <p className="mt-0.5">
                                 {t('purchasedAt')}{' '}
                                 <time
@@ -469,5 +476,74 @@ function EnabledCreatorStoreLibrary() {
         </section>
       ) : null}
     </section>
+  );
+}
+
+function LibraryPriceBadge({
+  priceJpyc,
+  payment,
+}: {
+  priceJpyc: string;
+  payment?: unknown;
+}) {
+  const snapshot = normalizeHostedUsdcPaymentSnapshot(payment);
+  return (
+    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">
+      {snapshot
+        ? `${formatUnits(BigInt(snapshot.paidAtomic), 6)} USDC · ${snapshot.priceJpyc} JPYC`
+        : `${priceJpyc} JPYC`}
+    </span>
+  );
+}
+
+function LibraryPaymentSnapshot({
+  priceJpyc,
+  payment,
+}: {
+  priceJpyc: string;
+  payment?: unknown;
+}) {
+  const t = useTranslations('CreatorStoreLibrary');
+  const locale = useLocale();
+  const snapshot = normalizeHostedUsdcPaymentSnapshot(payment);
+  if (!snapshot) {
+    return <p className="mt-0.5">{priceJpyc} JPYC</p>;
+  }
+  const quoteDate = new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+  return (
+    <div className="mt-2 rounded-lg bg-blue-50 p-2 text-[11px] text-blue-950 ring-1 ring-blue-100">
+      <p className="font-bold">{t('paymentSnapshotHeading')}</p>
+      <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
+        <dt>{t('paidAmountLabel')}</dt>
+        <dd className="text-right font-semibold tabular-nums">
+          {formatUnits(BigInt(snapshot.paidAtomic), 6)} USDC
+        </dd>
+        <dt>{t('productPriceLabel')}</dt>
+        <dd className="text-right font-semibold tabular-nums">
+          {snapshot.priceJpyc} JPYC
+        </dd>
+        <dt>{t('paymentRailLabel')}</dt>
+        <dd className="text-right font-semibold">USDC · Base (8453)</dd>
+        <dt>{t('quoteRateLabel')}</dt>
+        <dd className="text-right font-semibold tabular-nums">
+          {t('quoteRateValue', {
+            rate: formatUnits(BigInt(snapshot.quote.rateScaled), 6),
+          })}
+        </dd>
+        <dt>{t('quoteFetchedLabel')}</dt>
+        <dd className="text-right font-semibold">
+          {quoteDate.format(snapshot.quote.rateFetchedAt)}
+        </dd>
+        <dt>{t('quoteExpiryLabel')}</dt>
+        <dd className="text-right font-semibold">
+          {quoteDate.format(snapshot.quote.fxQuoteExpiresAt)}
+        </dd>
+        <dt>{t('quoteRoundingLabel')}</dt>
+        <dd className="text-right font-semibold">{t('quoteRoundingCeil')}</dd>
+      </dl>
+    </div>
   );
 }
