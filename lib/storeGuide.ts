@@ -99,7 +99,7 @@ const JA: StoreGuideContent = {
     'ウォレットアドレスだけで、プロフィール作成・チップ受付・デジタル商品販売。無料サービスと組み合わせる 6 つの販売レシピつき。売り手手数料なし・公開商品は OpenPay Store にも掲載。',
   backHome: '← OpenPay トップへ',
 
-  heroTitle: 'プロフィールひとつで、応援もデジタル商品販売も',
+  heroTitle: 'プロフィールひとつで、世界から応援もデジタル商品販売も',
   heroLead:
     'ウォレットアドレスだけで、プロフィール作成・チップ受付・デジタル商品販売を始められます。アカウント登録も月額費用も不要です。',
   heroCtaProfile: 'プロフィールを作る',
@@ -364,7 +364,7 @@ const EN: StoreGuideContent = {
     'All you need is a wallet address: create a profile, receive tips, and sell digital products for JPYC. Includes 6 practical recipes using free services. No seller fee; published products also appear in the OpenPay Store.',
   backHome: '← Back to OpenPay',
 
-  heroTitle: 'One profile for tips and digital product sales',
+  heroTitle: 'One profile — tips and digital product sales, from anywhere in the world',
   heroLead:
     'All you need is a wallet address: create a profile, receive tips, and sell digital products. No account signup, no monthly fee.',
   heroCtaProfile: 'Create your profile',

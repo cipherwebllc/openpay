@@ -109,6 +109,11 @@ export function buildPublishMethods(
   if (enableJpycAvalanche && draft.jpycAvalanche) {
     methods.push({ token: 'jpyc', chain: 'avalanche' });
   }
+  // USDC は Base 固定 (2026-08-17 復活・user 決定)。crossChain: true は旧レコードと同形で、
+  // 支払者が他チェーンの USDC からでも CCTP 経由で応援できる (着金は常に Base の同一アドレス)。
+  if (draft.usdcBase) {
+    methods.push({ token: 'usdc', chain: 'base', crossChain: true });
+  }
   return methods;
 }
 
