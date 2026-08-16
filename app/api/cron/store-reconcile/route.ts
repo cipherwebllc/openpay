@@ -4,6 +4,7 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { reconcilePendingPurchases } from '@/lib/x402/purchaseIntent';
+import { reconcilePendingStoreUsdcPurchases } from '@/lib/x402/storeUsdcIntent';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,19 +29,20 @@ async function handleReconcile(req: Request): Promise<NextResponse> {
   }
 
   const summary = await reconcilePendingPurchases();
-  if (summary === 'storage') {
+  const usdc = await reconcilePendingStoreUsdcPurchases();
+  if (summary === 'storage' || usdc === 'storage') {
     return NextResponse.json(
       { error: 'storage_unavailable' },
       { status: 503 },
     );
   }
-  if (summary.storageErrors > 0) {
+  if (summary.storageErrors > 0 || usdc.storageErrors > 0) {
     return NextResponse.json(
-      { ...summary, error: 'storage_unavailable' },
+      { ...summary, usdc, error: 'storage_unavailable' },
       { status: 503 },
     );
   }
-  return NextResponse.json(summary);
+  return NextResponse.json({ ...summary, usdc });
 }
 
 export async function GET(req: Request): Promise<NextResponse> {

@@ -18,6 +18,7 @@ import {
   storePrivateJson,
 } from '@/app/api/store/_shared';
 import { touchStoreIndex } from '@/lib/x402/storeIndex';
+import { checkStoreUsdcPayToReachability } from '@/lib/x402/storeUsdcReachability';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +37,7 @@ const PRODUCT_INPUT_KEYS = new Set([
   'tags',
   'handle',
   'featured',
+  'usdcEnabled',
   'content',
   'saleActive',
 ]);
@@ -61,6 +63,20 @@ async function disclosureAllowsSale(
     : storePrivateJson(
         { ok: false, error: 'seller_disclosure_required' },
         409,
+      );
+}
+
+async function usdcPayToAllowsSale(payTo: string): Promise<NextResponse | null> {
+  const reachable = await checkStoreUsdcPayToReachability(payTo);
+  if (reachable.ok) return null;
+  return reachable.reason === 'contract_wallet'
+    ? storePrivateJson(
+        { ok: false, error: 'usdc_pay_to_contract_wallet' },
+        409,
+      )
+    : storePrivateJson(
+        { ok: false, error: 'payment_facility_unavailable' },
+        503,
       );
 }
 
@@ -115,6 +131,15 @@ export async function POST(req: Request): Promise<NextResponse> {
       400,
     );
   }
+  if (
+    raw.usdcEnabled !== undefined &&
+    typeof raw.usdcEnabled !== 'boolean'
+  ) {
+    return storePrivateJson(
+      { ok: false, error: 'invalid_usdc_enabled' },
+      400,
+    );
+  }
   if (raw.payTo !== undefined && typeof raw.payTo !== 'string') {
     return storePrivateJson(
       { ok: false, error: 'invalid_product', detail: 'invalid payTo' },
@@ -143,6 +168,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     tags: raw.tags,
     handle: raw.handle,
     featured: raw.featured,
+    usdcEnabled: raw.usdcEnabled,
     content: raw.content,
   });
   if (!parsed.ok) {
@@ -174,6 +200,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (saleActive) {
     const denied = await disclosureAllowsSale(auth.address);
     if (denied) return denied;
+    if (parsed.product.usdcEnabled === true) {
+      const unreachable = await usdcPayToAllowsSale(parsed.product.payTo);
+      if (unreachable) return unreachable;
+    }
   }
   const created = await createHostedProduct({
     ...parsed,

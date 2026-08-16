@@ -10,7 +10,8 @@ export type PaymentClaimKind =
   | 'csvpass'
   | 'billing'
   | 'order'
-  | 'register';
+  | 'register'
+  | 'store';
 
 export function paymentClaimKey(chainId: number, txHash: string): string {
   return `${PAYMENT_CLAIMED_KEY_PREFIX}${chainId}:${txHash.toLowerCase()}`;
@@ -70,7 +71,8 @@ function isPaymentClaimKind(value: unknown): value is PaymentClaimKind {
     value === 'csvpass' ||
     value === 'billing' ||
     value === 'order' ||
-    value === 'register'
+    value === 'register' ||
+    value === 'store'
   );
 }
 

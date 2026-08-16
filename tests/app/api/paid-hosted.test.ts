@@ -30,6 +30,9 @@ const routeMocks = vi.hoisted(() => ({
   reconcile: vi.fn(),
   recordTransaction: vi.fn(),
   preBroadcastRejection: vi.fn(),
+  associateRail: vi.fn(),
+  claimRail: vi.fn(),
+  releaseRail: vi.fn(),
   claimedFacilitatorBody: null as Record<string, unknown> | null,
 }));
 
@@ -89,6 +92,12 @@ vi.mock('@/lib/relay/forwarderIntent', () => ({
 
 vi.mock('@/lib/x402/paymentRedelivery', () => ({
   isFacilitatorPreBroadcastRejection: routeMocks.preBroadcastRejection,
+}));
+
+vi.mock('@/lib/x402/storeRailSelection', () => ({
+  associateStoreRailIntent: routeMocks.associateRail,
+  claimStoreRailSelection: routeMocks.claimRail,
+  releaseActiveStoreRail: routeMocks.releaseRail,
 }));
 
 const RESOURCE_ID = `h_${'1'.repeat(32)}`;
@@ -357,6 +366,9 @@ beforeEach(() => {
     routeMocks.reconcile,
     routeMocks.recordTransaction,
     routeMocks.preBroadcastRejection,
+    routeMocks.associateRail,
+    routeMocks.claimRail,
+    routeMocks.releaseRail,
   ]) {
     mock.mockReset();
   }
@@ -441,6 +453,12 @@ beforeEach(() => {
     }),
   );
   routeMocks.preBroadcastRejection.mockReturnValue(false);
+  routeMocks.associateRail.mockResolvedValue({
+    ok: true,
+    parentIntentId: 'e'.repeat(64),
+  });
+  routeMocks.claimRail.mockResolvedValue({ ok: true, kind: 'claimed' });
+  routeMocks.releaseRail.mockResolvedValue(true);
   routeMocks.recordTransaction.mockResolvedValue('updated');
   routeMocks.markIndeterminate.mockResolvedValue('updated');
   routeMocks.markFailedPrebroadcast.mockResolvedValue('updated');
@@ -509,7 +527,28 @@ describe('hosted creator-store paid route', () => {
       `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`,
     );
     expect(response.status).toBe(402);
-    const body = (await response.json()) as {
+    const responseBytes = await response.text();
+    const baseRequirement = requirementFixture();
+    const expectedRequirement = {
+      ...baseRequirement,
+      extra: {
+        ...baseRequirement.extra,
+        openpay: {
+          ...baseRequirement.extra.openpay,
+          intentSalt: INTENT_SALT,
+          authorizationValidBeforeMax: '2000000000',
+          deploymentVersion: 'creator-store.purchase.v1',
+        },
+      },
+    };
+    expect(responseBytes).toBe(
+      JSON.stringify({
+        x402Version: 1,
+        accepts: [expectedRequirement],
+        error: 'payment_required',
+      }),
+    );
+    const body = JSON.parse(responseBytes) as {
       accepts: Array<{
         resource: string;
         extra: {

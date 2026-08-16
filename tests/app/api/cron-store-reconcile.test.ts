@@ -12,6 +12,7 @@ const hold = vi.hoisted(() => ({
 }));
 
 const reconcilePendingSpy = vi.hoisted(() => vi.fn());
+const reconcileUsdcSpy = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/env', () => ({
   env: {
@@ -23,6 +24,9 @@ vi.mock('@/lib/env', () => ({
 
 vi.mock('@/lib/x402/purchaseIntent', () => ({
   reconcilePendingPurchases: reconcilePendingSpy,
+}));
+vi.mock('@/lib/x402/storeUsdcIntent', () => ({
+  reconcilePendingStoreUsdcPurchases: reconcileUsdcSpy,
 }));
 
 import { GET } from '@/app/api/cron/store-reconcile/route';
@@ -48,6 +52,13 @@ beforeEach(() => {
     storageErrors: 0,
   };
   reconcilePendingSpy.mockImplementation(async () => hold.result);
+  reconcileUsdcSpy.mockResolvedValue({
+    checked: 0,
+    settled: 0,
+    failed: 0,
+    pending: 0,
+    storageErrors: 0,
+  });
 });
 
 afterEach(() => {
@@ -64,6 +75,7 @@ describe('GET /api/cron/store-reconcile', () => {
     expect(await response.json()).toEqual({ error: 'not_found' });
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(reconcilePendingSpy).not.toHaveBeenCalled();
+    expect(reconcileUsdcSpy).not.toHaveBeenCalled();
   });
 
   it('CRON_SECRET 未設定は bearer の有無にかかわらず 401', async () => {
@@ -76,6 +88,7 @@ describe('GET /api/cron/store-reconcile', () => {
     expect(guessed.status).toBe(401);
     expect(await guessed.json()).toEqual({ error: 'unauthorized' });
     expect(reconcilePendingSpy).not.toHaveBeenCalled();
+    expect(reconcileUsdcSpy).not.toHaveBeenCalled();
   });
 
   it('CRON_SECRET 不一致は 401 で reconciler を呼ばない', async () => {
@@ -85,6 +98,7 @@ describe('GET /api/cron/store-reconcile', () => {
     expect(await response.json()).toEqual({ error: 'unauthorized' });
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(reconcilePendingSpy).not.toHaveBeenCalled();
+    expect(reconcileUsdcSpy).not.toHaveBeenCalled();
   });
 
   it('正しい bearer は pending ZSET batch の core を一度だけ呼び summary を返す', async () => {
@@ -97,10 +111,18 @@ describe('GET /api/cron/store-reconcile', () => {
       pending: 1,
       failedPrebroadcast: 1,
       storageErrors: 0,
+      usdc: {
+        checked: 0,
+        settled: 0,
+        failed: 0,
+        pending: 0,
+        storageErrors: 0,
+      },
     });
     expect(response.headers.get('Cache-Control')).toBe('no-store');
     expect(reconcilePendingSpy).toHaveBeenCalledTimes(1);
     expect(reconcilePendingSpy).toHaveBeenCalledWith();
+    expect(reconcileUsdcSpy).toHaveBeenCalledTimes(1);
   });
 
   it('pending ZSET の取得障害は 503', async () => {
@@ -133,6 +155,13 @@ describe('GET /api/cron/store-reconcile', () => {
       pending: 0,
       failedPrebroadcast: 0,
       storageErrors: 1,
+      usdc: {
+        checked: 0,
+        settled: 0,
+        failed: 0,
+        pending: 0,
+        storageErrors: 0,
+      },
       error: 'storage_unavailable',
     });
     expect(response.headers.get('Cache-Control')).toBe('no-store');

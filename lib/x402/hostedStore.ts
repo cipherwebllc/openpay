@@ -91,6 +91,8 @@ export type HostedProduct = {
   contentRevision: number;
   /** 新規購入を受け付けるか (販売停止しても既購入者の取得は続く)。 */
   saleActive: boolean;
+  /** Base native USDC rail を明示的に提供する。保存値 true だけが ON。 */
+  usdcEnabled?: true;
   /** content を配信できるか。moderation 抹消時のみ false。 */
   contentAvailable: boolean;
   createdAt: number;
@@ -203,6 +205,7 @@ export type HostedProductInput = {
   tags?: unknown;
   handle?: unknown;
   featured?: unknown;
+  usdcEnabled?: unknown;
   content: unknown;
 };
 
@@ -337,6 +340,12 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
   if (input.featured !== undefined && typeof input.featured !== 'boolean') {
     return { ok: false, error: 'invalid featured' };
   }
+  if (
+    input.usdcEnabled !== undefined &&
+    typeof input.usdcEnabled !== 'boolean'
+  ) {
+    return { ok: false, error: 'invalid usdcEnabled' };
+  }
 
   let content: HostedContent;
   if (contentKind === 'url') {
@@ -371,6 +380,7 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       ...(parsedTags.tags ? { tags: parsedTags.tags } : {}),
       ...(listingHandle ? { handle: listingHandle } : {}),
       ...(input.featured === true ? { featured: true } : {}),
+      ...(input.usdcEnabled === true ? { usdcEnabled: true } : {}),
       contentRevision: 1,
       saleActive: true,
       contentAvailable: true,
@@ -461,6 +471,8 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
     ...(tags ? { tags } : {}),
     ...(storedHandle ? { handle: storedHandle } : {}),
     ...(r.featured === true ? { featured: true } : {}),
+    // 保存値 true だけを ON とし、false / undefined / 旧 record は OFF。
+    ...(r.usdcEnabled === true ? { usdcEnabled: true } : {}),
     contentRevision: r.contentRevision,
     // 旧レコードや壊れた値は「販売停止・配信可」に倒す (誤って売らない側へ)。
     saleActive: r.saleActive === true,
@@ -783,6 +795,7 @@ export async function replaceHostedSellerProduct(input: {
     | 'handle'
     | 'featured'
     | 'saleActive'
+    | 'usdcEnabled'
   > & {
     desc?: string;
     emoji?: string;
@@ -820,6 +833,7 @@ export async function replaceHostedSellerProduct(input: {
     ...(input.metadata.tags?.length ? { tags: input.metadata.tags } : {}),
     ...(input.metadata.handle ? { handle: input.metadata.handle } : {}),
     ...(input.metadata.featured === true ? { featured: true } : {}),
+    ...(input.metadata.usdcEnabled === true ? { usdcEnabled: true } : {}),
     contentRevision: revision,
     saleActive: input.metadata.saleActive,
     contentAvailable: current.contentAvailable,
