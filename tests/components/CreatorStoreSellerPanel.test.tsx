@@ -46,6 +46,7 @@ import { CreatorStoreSellerPanel } from '@/components/CreatorStoreSellerPanel';
 
 type Product = {
   id: string;
+  payTo: string;
   title: string;
   desc?: string;
   emoji?: string;
@@ -55,6 +56,7 @@ type Product = {
   contentKind: 'url' | 'text';
   label: 'download' | 'pdf' | 'zip' | 'prompt' | 'api' | 'external';
   saleActive: boolean;
+  usdcEnabled?: true;
   contentAvailable: boolean;
 };
 
@@ -117,6 +119,7 @@ describe('CreatorStoreSellerPanel', () => {
     const products: Product[] = [
       {
         id: 'h_' + '1'.repeat(32),
+        payTo: ADDRESS,
         title: 'プロンプト集',
         desc: '毎日の執筆に使えるプロンプト',
         emoji: '✍️',
@@ -128,6 +131,7 @@ describe('CreatorStoreSellerPanel', () => {
       },
       {
         id: 'h_' + '2'.repeat(32),
+        payTo: ADDRESS,
         title: '配布中 PDF',
         priceJpyc: '300',
         contentKind: 'url',
@@ -137,6 +141,7 @@ describe('CreatorStoreSellerPanel', () => {
       },
       {
         id: 'h_' + '3'.repeat(32),
+        payTo: ADDRESS,
         title: '提供終了商品',
         priceJpyc: '100',
         contentKind: 'text',
@@ -226,6 +231,20 @@ describe('CreatorStoreSellerPanel', () => {
         name: '保存後すぐ販売を開始する',
       }),
     ).toBeDisabled();
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'USDC での購入も許可する',
+      }),
+    ).toBeChecked();
+    expect(
+      screen.getByText(
+        'この受取アドレスが Base チェーンで USDC を受け取ります。',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(ADDRESS)).toBeInTheDocument();
+    expect(
+      screen.getByText(/受取後の USDC の価格変動・保有リスクは販売者が負担/),
+    ).toBeInTheDocument();
   });
 
   it.each([
@@ -321,6 +340,7 @@ describe('CreatorStoreSellerPanel', () => {
               ? [
                   {
                     id: 'h_' + '4'.repeat(32),
+                    payTo: ADDRESS,
                     title: '新商品',
                     priceJpyc: '200',
                     contentKind: 'url',
@@ -390,6 +410,7 @@ describe('CreatorStoreSellerPanel', () => {
         'https://cdn.example.com/angle-a.png',
         'https://cdn.example.com/angle-b.png',
       ],
+      usdcEnabled: true,
     });
     expect(screen.getByText(/商品はまだありません/)).toBeInTheDocument();
     expect(screen.queryByText('新商品')).not.toBeInTheDocument();
@@ -400,6 +421,7 @@ describe('CreatorStoreSellerPanel', () => {
           ok: true,
           product: {
             id: 'h_' + '4'.repeat(32),
+            payTo: ADDRESS,
             title: '新商品',
           },
         },
@@ -417,11 +439,156 @@ describe('CreatorStoreSellerPanel', () => {
     ).toHaveLength(2);
   });
 
+  it('既存商品の USDC 現在値を表示し、停止中商品の明示再公開時だけ変更して PATCH する', async () => {
+    const id = 'h_' + '9'.repeat(32);
+    const product: Product = {
+      id,
+      payTo: ADDRESS,
+      title: 'USDC 対応前の商品',
+      priceJpyc: '250',
+      contentKind: 'url',
+      label: 'download',
+      saleActive: false,
+      contentAvailable: true,
+    };
+    const fetchMock = vi.fn(
+      async (url: string, init?: RequestInit): Promise<Response> => {
+        if (url === '/api/store/seller') {
+          return response({
+            ok: true,
+            seller: {
+              name: '山田',
+              contact: 'seller@example.com',
+              updatedAt: 1,
+            },
+          });
+        }
+        if (url === `/api/store/products/${id}` && init?.method === 'PATCH') {
+          return response({
+            ok: true,
+            product: { ...product, saleActive: true, usdcEnabled: true },
+          });
+        }
+        if (url === `/api/store/products/${id}`) {
+          return response({
+            ok: true,
+            product,
+            content: { kind: 'url', value: 'https://example.com/download' },
+          });
+        }
+        if (url === '/api/store/products') {
+          return response({ ok: true, products: [product], max: 12 });
+        }
+        return response({ ok: false, error: 'not_found' }, 404);
+      },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPanel();
+    const card = (await screen.findByText(product.title)).closest('li');
+    expect(card).not.toBeNull();
+    fireEvent.click(within(card!).getByRole('button', { name: '編集' }));
+
+    await screen.findByRole('heading', { name: '商品を編集' });
+    const usdcCheckbox = screen.getByRole('checkbox', {
+      name: 'USDC での購入も許可する',
+    });
+    expect(usdcCheckbox).not.toBeChecked();
+    expect(usdcCheckbox).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: '保存後すぐ販売を開始する',
+      }),
+    );
+    expect(usdcCheckbox).not.toBeDisabled();
+    fireEvent.click(usdcCheckbox);
+    expect(usdcCheckbox).toBeChecked();
+    expect(screen.getByText(ADDRESS)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '変更を保存' }));
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            url === `/api/store/products/${id}` &&
+            (init as RequestInit | undefined)?.method === 'PATCH',
+        ),
+      ).toBe(true);
+    });
+    const patchCall = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        url === `/api/store/products/${id}` &&
+        (init as RequestInit | undefined)?.method === 'PATCH',
+    );
+    expect(
+      JSON.parse((patchCall?.[1] as RequestInit).body as string),
+    ).toMatchObject({
+      saleActive: true,
+      usdcEnabled: true,
+    });
+  });
+
+  it('USDC 公開を contract wallet で拒否された場合は人が読める理由を表示する', async () => {
+    const fetchMock = vi.fn(
+      async (url: string, init?: RequestInit): Promise<Response> => {
+        if (url === '/api/store/seller') {
+          return response({
+            ok: true,
+            seller: {
+              name: '山田',
+              contact: 'seller@example.com',
+              updatedAt: 1,
+            },
+          });
+        }
+        if (url === '/api/store/products' && init?.method === 'POST') {
+          return response(
+            { ok: false, error: 'usdc_pay_to_contract_wallet' },
+            409,
+          );
+        }
+        if (url === '/api/store/products') {
+          return response({ ok: true, products: [], max: 12 });
+        }
+        return response({ ok: false, error: 'not_found' }, 404);
+      },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPanel();
+    await screen.findByText(/商品はまだありません/);
+    fireEvent.change(screen.getByRole('textbox', { name: '商品名' }), {
+      target: { value: 'テスト商品' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: '価格 (JPYC)' }), {
+      target: { value: '100' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: '提供する URL' }), {
+      target: { value: 'https://example.com/download' },
+    });
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: '保存後すぐ販売を開始する',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '商品を登録' }));
+
+    expect(
+      await screen.findByText(
+        /Polygon 上のコントラクトウォレットのため、Base で USDC を受け取れることを確認できません/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/usdc_pay_to_contract_wallet/),
+    ).not.toBeInTheDocument();
+  });
+
   it('公開 handle があれば販売中商品をコピーし、Clipboard 拒否時は fallback する', async () => {
     const activeId = 'h_' + '5'.repeat(32);
     const products: Product[] = [
       {
         id: activeId,
+        payTo: ADDRESS,
         title: '販売中 PDF',
         priceJpyc: '300',
         contentKind: 'url',
@@ -431,6 +598,7 @@ describe('CreatorStoreSellerPanel', () => {
       },
       {
         id: 'h_' + '6'.repeat(32),
+        payTo: ADDRESS,
         title: '停止中 PDF',
         priceJpyc: '400',
         contentKind: 'url',
@@ -440,6 +608,7 @@ describe('CreatorStoreSellerPanel', () => {
       },
       {
         id: 'h_' + '8'.repeat(32),
+        payTo: ADDRESS,
         title: '提供終了 PDF',
         priceJpyc: '500',
         contentKind: 'url',
@@ -534,6 +703,7 @@ describe('CreatorStoreSellerPanel', () => {
     const products: Product[] = [
       {
         id: 'h_' + '7'.repeat(32),
+        payTo: ADDRESS,
         title: '販売中 PDF',
         priceJpyc: '300',
         contentKind: 'url',

@@ -32,7 +32,9 @@ const BUDGETS_KB = {
   '/[locale]/pay': 438,
   // 2026-08-18 store USDC P2: /pay と同型の chunk 再分割 +1kB (tip から新規 USDC モジュール
   // への import 経路なしを grep で確認)。
-  '/[locale]/tip/[address]': 435,
+  // 2026-08-17 store USDC P3: Terms 13 条追記 (messages 増) による再分割 +1kB (tip から
+  // lib/legal への直接 import なしを grep 確認)。自作コード起因なら code-split 優先の方針は不変。
+  '/[locale]/tip/[address]': 436,
   '/manifest.webmanifest': 250,
   // shared chunks の総和。表の行 "First Load JS shared by all"
   '__shared__': 250,

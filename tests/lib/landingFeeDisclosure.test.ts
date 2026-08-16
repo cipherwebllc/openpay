@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   DISCLOSED_RECOVER_FEE,
   DISCLOSED_MOBILE_ORDER_FEE,
+  DISCLOSED_STORE_USDC_PAYMENT,
   DISCLOSED_X402_FEE,
 } from '@/lib/legal';
 import ja from '../../messages/ja.json';
@@ -21,6 +22,7 @@ const storefrontPct = DISCLOSED_MOBILE_ORDER_FEE.storefrontBps / 100; // 1 (%)
 const preorderPct = DISCLOSED_MOBILE_ORDER_FEE.preorderBps / 100; // 3 (%)
 const x402Pct = DISCLOSED_X402_FEE.bps / 100; // 1 (%)
 const x402FloorJpyc = DISCLOSED_X402_FEE.floorJpyc; // 1 (JPYC)
+const storeUsdcPct = DISCLOSED_STORE_USDC_PAYMENT.openPayFeeBps / 100; // 0 (%)
 
 describe('LandingSupport 料率カード ↔ DISCLOSED 料率 (drift フェンス)', () => {
   for (const [loc, msgs] of [
@@ -37,11 +39,15 @@ describe('LandingSupport 料率カード ↔ DISCLOSED 料率 (drift フェン�
       expect(L.supportFeeMobileBody).toContain(`${preorderPct}%`);
       // チップカード = ガス相当 約 2 JPYC (送るお客様が負担)
       expect(L.supportFeeTipBody).toContain(`${floorJpyc} JPYC`);
-      // デジタル商品カード (P3 で note 文中から昇格・focal は顧客負担の実料率) =
-      // 買い手 x402 1%・最低 1 JPYC・売り手 0 円
-      expect(L.supportFeeStoreFocal).toBe(`${x402Pct}%`);
+      // デジタル商品カード: JPYC を主表示にして買い手 x402 1%・最低 1 JPYC、
+      // USDC (Base) は OpenPay x402 利用料 0%・売り手手数料なし。
+      expect(L.supportFeeStoreFocal).toBe(`JPYC ${x402Pct}%`);
       expect(L.supportFeeStoreBody).toContain(`${x402Pct}%`);
       expect(L.supportFeeStoreBody).toContain(`${x402FloorJpyc} JPYC`);
+      expect(L.supportFeeStoreBody).toContain(
+        DISCLOSED_STORE_USDC_PAYMENT.chainName,
+      );
+      expect(L.supportFeeStoreBody).toContain(`${storeUsdcPct}%`);
       // チップカードの focal も顧客負担の実額 (ガス相当 約 2 JPYC)
       expect(L.supportFeeTipFocal).toContain(`${floorJpyc}`);
     });

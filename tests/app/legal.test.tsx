@@ -6,7 +6,11 @@ import PrivacyPage from '@/app/[locale]/privacy/page';
 import DisclaimerPage from '@/app/[locale]/disclaimer/page';
 import TokuteiPage from '@/app/[locale]/tokutei/page';
 import { polygon, avalanche } from 'viem/chains';
-import { LEGAL_ENTITY, DISCLOSED_RECOVER_FEE } from '@/lib/legal';
+import {
+  LEGAL_ENTITY,
+  DISCLOSED_RECOVER_FEE,
+  DISCLOSED_STORE_USDC_PAYMENT,
+} from '@/lib/legal';
 import { TOKEN_DEPLOYMENTS } from '@/lib/tokens';
 import { USDC_CHAINS, chainForSlug } from '@/lib/chains';
 
@@ -54,6 +58,36 @@ describe('Legal pages', () => {
           new RegExp(`施行日:\\s*${LEGAL_ENTITY.termsEffectiveDate}`),
         ),
       ).toBeInTheDocument();
+    });
+
+    it('第13条: Store USDC の Base・0%・JPYC換算・取消不能・損失帰属を ja/en で固定する', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      const disclosed = DISCLOSED_STORE_USDC_PAYMENT;
+      const feePercent = disclosed.openPayFeeBps / 100;
+
+      expect(disclosed.chainId).toBe(8453);
+      expect(ja.Terms.article13.body).toContain(disclosed.chainName);
+      expect(ja.Terms.article13.body).toContain(disclosed.asset);
+      expect(ja.Terms.article13.body).toContain(`${feePercent}%（無料）`);
+      expect(ja.Terms.article13.body).toContain(
+        `${disclosed.priceAsset} 建ての表示価格`,
+      );
+      expect(ja.Terms.article13.body).toContain('技術上取り消すことができません');
+      expect(ja.Terms.article13.body).toContain('受取後の USDC の価格変動および保有リスクは出品者が負担');
+      expect(ja.Terms.article13.body).toContain('脱ペッグ');
+
+      expect(en.Terms.article13.body).toContain(disclosed.chainName);
+      expect(en.Terms.article13.body).toContain(disclosed.asset);
+      expect(en.Terms.article13.body).toContain(`${feePercent}% (free)`);
+      expect(en.Terms.article13.body).toContain(
+        `${disclosed.priceAsset}-denominated listed price`,
+      );
+      expect(en.Terms.article13.body).toMatch(/technically irreversible/i);
+      expect(en.Terms.article13.body).toMatch(
+        /seller bears USDC price and holding risk after receipt/i,
+      );
+      expect(en.Terms.article13.body).toMatch(/de-peg/i);
     });
   });
 
@@ -615,8 +649,8 @@ describe('Legal pages', () => {
       //   常に負担しお客様は表示額のみ (per-QR トグル撤去)、チップ (/tip・@handle) はガス相当額
       //   (約 2 JPYC・1% 非適用) をチッパーが負担。料金性質に直接関わる Terms/Disclaimer/特商法 を
       //   改定 (実質的改定のため施行日/最終更新日を更新)。Privacy は料金モデルに直接言及しないため据置。
-      // 2026-08-05: デジタル商品ストアの税込総額表示 (課税事業者の出品者) を 13 条 (4) に明文化。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-08-05');
+      // 2026-08-17: デジタル商品ストアの Base USDC 決済を 13 条に追加。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-08-17');
       expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-07-30');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-13');
       // 2026-07-29: 非公開チップメッセージ追記 (取得/目的/保管) の実質的改定で更新

@@ -12,7 +12,7 @@
 // (recoverFee.ts ではなく env から読むことで、recoverFee を mock する下流テストに影響しない)。
 // forwarderConfig / env は legal を import し返さないため循環は生じない (legal → {forwarderConfig, env})。
 
-import { polygon, kaia, avalanche } from 'viem/chains';
+import { polygon, kaia, avalanche, base } from 'viem/chains';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { STOREFRONT_FEE_BPS, PREORDER_FEE_BPS } from '@/lib/mobileOrderFee';
 import { env } from '@/lib/env';
@@ -118,7 +118,9 @@ export const LEGAL_ENTITY = {
   // 機能は flag 既定 OFF だが、条項の掲出自体が実質的改定のため施行日を更新。
   // 2026-08-05 改定: デジタル商品ストアの販売価格の税込総額表示 (課税事業者の出品者) を
   //   Terms 第 13 条 (4) に明文化。価格表示義務の主体は出品者 (当社は売買契約の当事者でない)。
-  termsEffectiveDate: '2026-08-05',
+  // 2026-08-17 改定: デジタル商品ストアの Base USDC 決済を Terms 第 13 条に追加。
+  //   JPYC 建て価格からの換算・OpenPay x402 利用料 0%・取消不能・レート/保有リスクを開示。
+  termsEffectiveDate: '2026-08-17',
   // 2026-07-29 改定: 非公開チップメッセージ (質問箱 Phase 1) の取得項目 (2-1(7))・
   //   利用目的 (2-2(9))・保管期間 (最長 180 日+本人削除) を追加。実質的改定のため施行日を更新。
   privacyEffectiveDate: '2026-07-30',
@@ -267,6 +269,17 @@ export function mobileOrderFeeDisclosureDivergence(): string | null {
 export const DISCLOSED_X402_FEE = {
   bps: 100, // 1%
   floorJpyc: 1, // 下限 1 JPYC (2026-07-05 改定で 2→1。実測 settle ガス ~0.5 円の 2 倍を確保しつつマイクロ決済の割高感を低減)
+} as const;
+
+// デジタル商品ストアの USDC 決済 leg に関する開示 SOT。出品価格は JPYC 建てのまま、
+// Base native USDC へ換算し、OpenPay の x402 利用料は徴収しない。Terms 第 13 条・LP・
+// /guide/store・public/llms.txt はこのチェーン/資産/料率と一致しなければならない。
+export const DISCLOSED_STORE_USDC_PAYMENT = {
+  chainId: base.id,
+  chainName: 'Base',
+  asset: 'USDC',
+  priceAsset: 'JPYC',
+  openPayFeeBps: 0,
 } as const;
 
 // 実 x402 料率 (env 由来・lib/x402/facilitatorConfig.ts) が開示済みの数値 (DISCLOSED_X402_FEE) と乖離して
