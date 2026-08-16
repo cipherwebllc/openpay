@@ -25,6 +25,7 @@ type HostedLabel =
 
 type ProductSummary = {
   id: string;
+  payTo: string;
   title: string;
   desc?: string;
   emoji?: string;
@@ -38,6 +39,7 @@ type ProductSummary = {
   handle?: string;
   featured?: boolean;
   saleActive: boolean;
+  usdcEnabled?: true;
   contentAvailable: boolean;
   updatedAt?: number;
 };
@@ -55,6 +57,7 @@ type SellerDisclosure = {
 };
 
 type ProductForm = {
+  payTo: string;
   title: string;
   desc: string;
   emoji: string;
@@ -69,6 +72,12 @@ type ProductForm = {
   featured: boolean;
   content: string;
   saleActive: boolean;
+  usdcEnabled: boolean;
+};
+
+type EditingProductState = {
+  saleActive: boolean;
+  usdcEnabled: boolean;
 };
 
 type SellerForm = {
@@ -104,6 +113,7 @@ const HOSTED_LABELS: readonly HostedLabel[] = [
 ];
 
 const EMPTY_PRODUCT_FORM: ProductForm = {
+  payTo: '',
   title: '',
   desc: '',
   emoji: '',
@@ -118,6 +128,7 @@ const EMPTY_PRODUCT_FORM: ProductForm = {
   featured: false,
   content: '',
   saleActive: false,
+  usdcEnabled: true,
 };
 
 const EMPTY_SELLER_FORM: SellerForm = {
@@ -165,9 +176,18 @@ const DETAIL_MESSAGE_KEYS: Record<string, string> = {
   'disclosure too long': 'detailInvalidDisclosure',
 };
 
+const ERROR_MESSAGE_KEYS: Record<string, string> = {
+  usdc_pay_to_contract_wallet: 'usdcContractWalletError',
+};
+
 function errorDetailKey(error: unknown): string | null {
   if (!(error instanceof StoreRequestError) || !error.detail) return null;
   return DETAIL_MESSAGE_KEYS[error.detail] ?? null;
+}
+
+function errorMessageKey(error: unknown): string | null {
+  if (!(error instanceof StoreRequestError)) return null;
+  return ERROR_MESSAGE_KEYS[error.code] ?? null;
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -367,11 +387,17 @@ function SignedInSellerPanel({
   // 新規商品の掲載先は「いま編集中のプロフ (prop handle)」を既定にする —
   // @cipherweb 編集中の登録が @openpay_jp にも出る誤帰属の修正 (2026-08-04 user 裁定)。
   const emptyForm = useMemo<ProductForm>(
-    () => ({ ...EMPTY_PRODUCT_FORM, listingHandle: handle ?? '' }),
-    [handle],
+    () => ({
+      ...EMPTY_PRODUCT_FORM,
+      payTo: sessionAddress,
+      listingHandle: handle ?? '',
+    }),
+    [handle, sessionAddress],
   );
   const [productForm, setProductForm] = useState<ProductForm>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingProductState, setEditingProductState] =
+    useState<EditingProductState | null>(null);
   const [productSaved, setProductSaved] = useState(false);
 
   const productsQuery = useQuery({
@@ -459,8 +485,13 @@ function SignedInSellerPanel({
     },
     onSuccess: ({ product, content }) => {
       setEditingId(product.id);
+      setEditingProductState({
+        saleActive: product.saleActive,
+        usdcEnabled: product.usdcEnabled === true,
+      });
       setProductSaved(false);
       setProductForm({
+        payTo: product.payTo,
         title: product.title,
         desc: product.desc ?? '',
         emoji: product.emoji ?? '',
@@ -475,6 +506,7 @@ function SignedInSellerPanel({
         featured: product.featured === true,
         content: content.value,
         saleActive: product.saleActive,
+        usdcEnabled: product.usdcEnabled === true,
       });
     },
   });
@@ -515,6 +547,8 @@ function SignedInSellerPanel({
             featured: form.featured,
             content: form.content,
             saleActive: form.saleActive,
+            // 新規 UI の既定 ON も含め、server の暗黙 default に依存せず常に明示する。
+            usdcEnabled: form.usdcEnabled,
           }),
         },
       ),
@@ -522,6 +556,7 @@ function SignedInSellerPanel({
       const refreshed = await productsQuery.refetch();
       if (refreshed.isSuccess) {
         setEditingId(null);
+        setEditingProductState(null);
         setProductForm(emptyForm);
         setProductSaved(true);
       }
@@ -551,10 +586,15 @@ function SignedInSellerPanel({
 
   const cancelEdit = () => {
     setEditingId(null);
+    setEditingProductState(null);
     setProductForm(emptyForm);
     loadProduct.reset();
     saveProduct.reset();
   };
+
+  const canChangeUsdc =
+    editingId === null ||
+    (editingProductState?.saleActive === false && productForm.saleActive);
 
   if (productsQuery.isPending || sellerQuery.isPending) {
     return <p className="mt-5 text-sm text-slate-500">{t('loading')}</p>;
@@ -840,9 +880,14 @@ function SignedInSellerPanel({
 
         {toggleSale.isError ? (
           <p className="mt-3 text-sm text-red-600">
-            {t('requestError', {
-              error: errorCode(toggleSale.error),
-            })}
+            {(() => {
+              const messageKey = errorMessageKey(toggleSale.error);
+              return messageKey
+                ? t(messageKey)
+                : t('requestError', {
+                    error: errorCode(toggleSale.error),
+                  });
+            })()}
           </p>
         ) : null}
       </section>
@@ -1149,14 +1194,59 @@ function SignedInSellerPanel({
           </div>
 
           <div className="sm:col-span-2">
+            <label
+              htmlFor="creator-store-product-usdc-enabled"
+              className="inline-flex items-center gap-2 text-sm font-medium text-slate-700"
+            >
+              <input
+                id="creator-store-product-usdc-enabled"
+                type="checkbox"
+                aria-describedby="creator-store-product-usdc-hint"
+                checked={productForm.usdcEnabled}
+                disabled={!canChangeUsdc}
+                onChange={(event) =>
+                  updateProduct({ usdcEnabled: event.target.checked })
+                }
+                className="mt-0.5 h-4 w-4 rounded border-slate-300"
+              />
+              <span>{t('usdcEnabledLabel')}</span>
+            </label>
+            <p
+              id="creator-store-product-usdc-hint"
+              className="mt-1 text-xs leading-relaxed text-slate-500"
+            >
+              {editingId
+                ? t('usdcRepublishHint')
+                : t('usdcNewProductHint')}
+            </p>
+            {productForm.usdcEnabled ? (
+              <div className="mt-3 space-y-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs leading-relaxed text-slate-700">
+                <p>{t('usdcPayToNotice')}</p>
+                <code className="block break-all font-mono text-[11px] text-slate-800">
+                  {productForm.payTo}
+                </code>
+                <p>{t('usdcRiskNotice')}</p>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="sm:col-span-2">
             <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
               <input
                 type="checkbox"
                 checked={productForm.saleActive}
                 disabled={!productForm.saleActive && !sellerComplete}
-                onChange={(event) =>
-                  updateProduct({ saleActive: event.target.checked })
-                }
+                onChange={(event) => {
+                  const saleActive = event.target.checked;
+                  updateProduct({
+                    saleActive,
+                    ...(editingProductState && !saleActive
+                      ? {
+                          usdcEnabled: editingProductState.usdcEnabled,
+                        }
+                      : {}),
+                  });
+                }}
               />
               <span>{t('startSellingAfterSave')}</span>
             </label>
@@ -1202,9 +1292,12 @@ function SignedInSellerPanel({
               {(() => {
                 const cause = loadProduct.error ?? saveProduct.error;
                 const detailKey = errorDetailKey(cause);
+                const messageKey = errorMessageKey(cause);
                 return detailKey
                   ? t(detailKey)
-                  : t('requestError', { error: errorCode(cause) });
+                  : messageKey
+                    ? t(messageKey)
+                    : t('requestError', { error: errorCode(cause) });
               })()}
             </p>
           ) : null}
