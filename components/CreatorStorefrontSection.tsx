@@ -18,6 +18,8 @@ export type CreatorStorefrontProduct = {
   imageUrl?: string;
   galleryUrls?: readonly string[];
   priceJpyc: string;
+  /** 保存値 true の商品だけ、購入 modal 内で USDC rail を選べる。 */
+  usdcEnabled?: true;
   payTo: Address;
   contentKind: 'url' | 'text';
   label: 'download' | 'pdf' | 'zip' | 'prompt' | 'api' | 'external';
@@ -181,6 +183,9 @@ export function CreatorStorefrontSection({
                           : {}),
                         priceJpyc: product.priceJpyc,
                         merchant: product.payTo,
+                        ...(product.usdcEnabled === true
+                          ? { usdcEnabled: true as const }
+                          : {}),
                       }}
                       sellerDisclosureHref={sellerDisclosureHref}
                       inverted={inverted}

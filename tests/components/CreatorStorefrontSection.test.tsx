@@ -141,6 +141,7 @@ describe('CreatorStorefrontSection', () => {
         'https://cdn.example.com/product-side.png',
         'https://cdn.example.com/product-back.png',
       ],
+      usdcEnabled: true as const,
     };
     renderWithIntl(
       <CreatorStorefrontSection
@@ -160,6 +161,7 @@ describe('CreatorStorefrontSection', () => {
             id: secondProduct.id,
             imageUrl: secondProduct.imageUrl,
             galleryUrls: secondProduct.galleryUrls,
+            usdcEnabled: true,
           }),
         }),
       );

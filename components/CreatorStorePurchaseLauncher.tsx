@@ -25,6 +25,7 @@ export type CreatorStorePurchaseLauncherProps = {
     galleryUrls?: readonly string[];
     priceJpyc: string;
     merchant: Address;
+    usdcEnabled?: true;
   };
   sellerDisclosureHref: string;
   inverted: boolean;

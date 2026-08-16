@@ -53,6 +53,8 @@ export const DEV_FIXTURE_HOSTED_PRODUCTS: HostedProduct[] = [
     tags: ['GLB', 'Unity'],
     // featured 厳選の再現用 (これ以外の 3 商品はプロフで隠れる = ディープリンク検証)。
     featured: true,
+    // USDC 購入 UI (P2) の dev 検証用: 支払い方法選択が出る側の代表。
+    usdcEnabled: true,
   }),
   fx(2, {
     title: '和風ジングル素材集 vol.2',
