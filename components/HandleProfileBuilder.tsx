@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { AtSign, Eye, UserRound, Wallet } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
+import Link from 'next/link';
 import { useAccount } from 'wagmi';
 import { getAddress, isAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
@@ -519,6 +520,17 @@ export function HandleProfileBuilder({
                   className={inputClass}
                 />
               </Field>
+              {/* 画像 URL の用意ガイドへの導線。Field の hint は label 内に描画されるため、
+                  リンクは label の外に置く (label 内の <a> はクリック挙動が入力と衝突する)。 */}
+              <p className="-mt-3 text-xs">
+                <Link
+                  href={`/${locale}/guide/image-url`}
+                  prefetch={false}
+                  className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+                >
+                  {t('imageGuideLink')}
+                </Link>
+              </p>
               {/* SNS アイコンリンク (URL のみ・アイコンはドメイン自動判定) */}
               <Field label={t('socialsLabel')} hint={t('socialsHint')}>
                 <div className="space-y-2">
