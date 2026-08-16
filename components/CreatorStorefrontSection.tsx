@@ -166,7 +166,10 @@ export function CreatorStorefrontSection({
                           Number(totalJpycOf(product.priceJpyc)),
                         ),
                       })}
-                      {' · Polygon'}
+                      {/* USDC 可の商品だけ控えめに追記 (一覧では目立たせない — 契約 表示階層)。 */}
+                      {product.usdcEnabled === true
+                        ? ' · Polygon +USDC'
+                        : ' · Polygon'}
                     </span>
                     <CreatorStorePurchaseLauncher
                       product={{

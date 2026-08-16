@@ -49,8 +49,24 @@ describe('CreatorStorefrontSection', () => {
     expect(screen.getByText('AI プロンプト集')).toBeInTheDocument();
     expect(screen.getByText('仕事で使えるテンプレート')).toBeInTheDocument();
     expect(screen.getByText(/1,212 JPYC · Polygon/)).toBeInTheDocument();
+    // usdcEnabled でない商品に +USDC バッジは出ない (既定表示の回帰)。
+    expect(screen.queryByText(/\+USDC/)).not.toBeInTheDocument();
     expect(screen.getByText('🧠')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.getByRole('button', { name: '購入する' })).toBeEnabled();
+  });
+
+  it('usdcEnabled 商品は価格行に控えめな +USDC を追記する', () => {
+    renderWithIntl(
+      <CreatorStorefrontSection
+        products={[{ ...PRODUCT, usdcEnabled: true as const }]}
+        accent="#2563eb"
+        theme="clean"
+        sellerDisclosureHref="/ja/store/seller/0x1234"
+      />,
+    );
+    expect(
+      screen.getByText(/1,212 JPYC · Polygon \+USDC/),
+    ).toBeInTheDocument();
   });
 
   it('商品画像を装飾表示し、読込失敗時は絵文字または ✦ へ戻す', () => {

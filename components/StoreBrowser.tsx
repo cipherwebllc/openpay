@@ -149,7 +149,8 @@ export function StoreBrowser({
                   <span className="mt-1.5 truncate whitespace-nowrap text-sm font-black text-slate-900">
                     {t('cardTotal', { total: listing.totalJpyc })}
                     <span className="ml-1 text-[10px] font-semibold text-slate-500">
-                      · Polygon
+                      {/* USDC 可の商品だけ控えめに追記 (一覧では目立たせない — 契約 表示階層)。 */}
+                      {listing.usdcEnabled === true ? '· Polygon +USDC' : '· Polygon'}
                     </span>
                   </span>
                 </span>
