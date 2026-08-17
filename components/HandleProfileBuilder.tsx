@@ -128,8 +128,6 @@ export function HandleProfileBuilder({
   const [resolved, setResolved] = useState<Address | null>(null);
   // ④ プレビュー下の QR モーダル開閉 (編集中 handle のフル URL を提示)。
   const [showQr, setShowQr] = useState(false);
-  // 編集中レコードが旧 USDC (cross-chain) method を持つか。更新で外れることを明示する。
-  const [editedHadUsdc, setEditedHadUsdc] = useState(false);
   // どの @handle を編集中か (null = 新規作成)。「編集」でフォームが黙って書き換わるのが
   // 混乱源だったため、ヘッダのバッジ + パネルのバナーで対象を常時明示する。
   const [editingHandle, setEditingHandle] = useState<string | null>(null);
@@ -177,7 +175,10 @@ export function HandleProfileBuilder({
   // env.enableJpycAvalanche=ON のときだけ表示 (既定 OFF=非表示で完全 inert)。実際に受取可能か
   // (forwarder 設定で gasless 成立) は公開ページ/publish 時の parseTipParams が判定する。
   const methodOptions: Array<
-    ['jpycPolygon' | 'jpycKaia' | 'jpycAvalanche', HandleReceiveMethod]
+    [
+      'jpycPolygon' | 'jpycKaia' | 'jpycAvalanche' | 'usdcBase',
+      HandleReceiveMethod,
+    ]
   > = [
     ['jpycPolygon', { token: 'jpyc', chain: 'polygon' }],
     ['jpycKaia', { token: 'jpyc', chain: 'kaia' }],
@@ -185,6 +186,8 @@ export function HandleProfileBuilder({
   if (env.enableJpycAvalanche) {
     methodOptions.push(['jpycAvalanche', { token: 'jpyc', chain: 'avalanche' }]);
   }
+  // USDC (Base 固定) — 2026-08-17 復活 (撤去理由「Base 固定」を user が明示的に許容)。
+  methodOptions.push(['usdcBase', { token: 'usdc', chain: 'base' }]);
 
   // 受取先: 生 0x アドレスは**入力値を最優先**で採用する。AddressInput は ENS 名以外で
   // onResolved を再発火しないため、「接続ウォレットを使う」/編集 prefill で resolved に入った
@@ -264,7 +267,6 @@ export function HandleProfileBuilder({
   const onStopEditing = () => {
     setEditingHandle(null);
     onPublishedHandleChange?.(null);
-    setEditedHadUsdc(false);
     dispatchPublishBaseline({ type: 'discarded' });
     const snapshot = preEditDraftRef.current;
     preEditDraftRef.current = null;
@@ -293,7 +295,6 @@ export function HandleProfileBuilder({
     const loadedReceiver = isAddress(c.to) ? getAddress(c.to) : null;
     setResolved(loadedReceiver);
     // 旧レコードの USDC method はビルダーで編集できない → 更新で外れることを明示する。
-    setEditedHadUsdc(c.methods.some((m) => m.token === 'usdc'));
     // 編集対象レコードに無いフィールドは「前の下書き値」(s.*) ではなく **builder 既定**へ戻す。
     // でないと別プロフィールの色/プリセットが update 時にこの handle へ混入する。
     const loadedDraft: typeof draft = {
@@ -309,6 +310,7 @@ export function HandleProfileBuilder({
       jpycAvalanche: c.methods.some(
         (m) => m.token === 'jpyc' && m.chain === 'avalanche',
       ),
+      usdcBase: c.methods.some((m) => m.token === 'usdc'),
       presetsJpyc: c.presets?.jpyc ?? DEFAULT_PROFILE_DRAFT.presetsJpyc,
       bio: p?.bio ?? '',
       avatar: p?.avatar ?? '',
@@ -411,9 +413,6 @@ export function HandleProfileBuilder({
                 setEditingHandle(snapshot.handle);
                 onPublishedHandleChange?.(snapshot.handle);
                 dispatchPublishBaseline({ type: 'published', snapshot });
-                // 公開後のレコードは builder 製 = USDC method を含まないため、旧レコード由来の
-                // 「USDC 提供終了」通知は以後 stale (更新で外れる、はもう外れた後)。
-                setEditedHadUsdc(false);
               }}
             />
           </StepCard>
@@ -455,8 +454,8 @@ export function HandleProfileBuilder({
                 {methods.length === 0 && (
                   <p className="mt-1 text-xs text-red-600">{t('atLeastOneMethod')}</p>
                 )}
-                {editedHadUsdc && (
-                  <p className="mt-1 text-xs text-amber-700">{t('usdcDiscontinued')}</p>
+                {draft.usdcBase && (
+                  <p className="mt-1 text-xs text-slate-500">{t('usdcTipHint')}</p>
                 )}
               </fieldset>
             </div>

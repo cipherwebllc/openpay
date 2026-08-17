@@ -182,6 +182,28 @@ describe('buildPublishPayload', () => {
     expect(profile.links?.[MAX_PROFILE_EMBEDS + 1]).not.toHaveProperty('embed');
   });
 
+  it('usdcBase は usdc/base/crossChain:true の method を追加する (2026-08-17 復活・Base 固定)', () => {
+    const payload = buildPublishPayload(draft({ usdcBase: true }), {
+      receiver: ADDR,
+      enableJpycAvalanche: false,
+    });
+    expect(payload?.config.methods).toEqual([
+      { token: 'jpyc', chain: 'polygon' },
+      { token: 'jpyc', chain: 'kaia' },
+      { token: 'usdc', chain: 'base', crossChain: true },
+    ]);
+  });
+
+  it('usdcBase=false (既定) では usdc method を含まない (既存プロフ無変更の回帰)', () => {
+    const payload = buildPublishPayload(draft({}), {
+      receiver: ADDR,
+      enableJpycAvalanche: false,
+    });
+    expect(
+      payload?.config.methods.some((m) => m.token === 'usdc'),
+    ).toBe(false);
+  });
+
   it('受取先未解決または受取方法 0 件は publish 不可 (null)', () => {
     expect(buildPublishPayload(draft(), { ...OPTIONS, receiver: null })).toBeNull();
     expect(

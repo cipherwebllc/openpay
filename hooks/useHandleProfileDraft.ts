@@ -43,6 +43,8 @@ export interface HandleProfileDraft {
   name: string;
   color: string;
   jpycPolygon: boolean;
+  /** USDC (Base) チップの受け入れ (2026-08-17 復活・Base 固定は user 決定)。 */
+  usdcBase: boolean;
   jpycKaia: boolean;
   // Avalanche は env.enableJpycAvalanche=ON のときだけビルダーで提供 (Phase 2・既定 OFF)。
   jpycAvalanche: boolean;
@@ -66,6 +68,7 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
   name: '',
   color: '#2563eb',
   jpycPolygon: true,
+  usdcBase: false,
   jpycKaia: true,
   jpycAvalanche: false, // opt-in (flag ON でも既定 OFF)
   presetsJpyc: defaultPresets().jpyc,
@@ -171,6 +174,7 @@ function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
         ? loaded.color.toLowerCase()
         : DEFAULT_PROFILE_DRAFT.color,
     jpycPolygon: bool(loaded.jpycPolygon, true),
+    usdcBase: bool(loaded.usdcBase, false),
     jpycKaia: bool(loaded.jpycKaia, true),
     jpycAvalanche: bool(loaded.jpycAvalanche, false),
     presetsJpyc: sanitizePresetList(loaded.presetsJpyc, d.jpyc),

@@ -507,13 +507,17 @@ describe('HandleProfileBuilder', () => {
     expect(screen.getByText('受取方法を 1 つ以上選んでください。')).toBeInTheDocument();
   });
 
-  it('旧 USDC method 持ちレコードの編集時は「更新で外れる」通知を表示', () => {
+  it('旧 USDC method 持ちレコードの編集時は USDC (Base) チェックが ON で引き継がれる (2026-08-17 復活)', () => {
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    // 廃止通知は撤去済み (提供再開により偽になるため)
     expect(
-      screen.getByText(/プロフでの USDC 提供は終了しました/),
+      screen.queryByText(/プロフでの USDC 提供は終了しました/),
+    ).not.toBeInTheDocument();
+    // usdc method → usdcBase チェックへマップされ、注意ヒントが出る
+    expect(
+      screen.getByText(/応援メッセージ機能は JPYC チップのみ対応/),
     ).toBeInTheDocument();
-    // ビルダーが組む methods には usdc が含まれない (JPYC のみで config 完成)
     expect(screen.getByTestId('claim')).toHaveTextContent('config-ready');
   });
 
@@ -545,19 +549,15 @@ describe('HandleProfileBuilder', () => {
     }
   });
 
-  it('公開成功後は旧レコード由来の「USDC 提供終了」通知が消える (stale 通知防止)', () => {
+  it('旧 USDC レコードを再公開しても USDC は維持される (更新で外れない)', () => {
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
-    expect(
-      screen.getByText(/プロフでの USDC 提供は終了しました/),
-    ).toBeInTheDocument();
-    // 更新/取得が成功 → 公開後のレコードに usdc は無いので通知は stale
     fireEvent.click(screen.getByTestId('publish-mock'));
-    expect(
-      screen.queryByText(/プロフでの USDC 提供は終了しました/),
-    ).not.toBeInTheDocument();
-    // 編集モード自体は継続 (公開した handle を編集中)
+    // 公開後も編集モード継続+USDC ヒント表示 = チェックは ON のまま
     expect(screen.getByText('公開中 @alice')).toBeInTheDocument();
+    expect(
+      screen.getByText(/応援メッセージ機能は JPYC チップのみ対応/),
+    ).toBeInTheDocument();
   });
 
   it('編集開始でヘッダに「編集中」バッジ・「編集をやめる」でフォームを既定へ戻す', () => {
@@ -565,7 +565,7 @@ describe('HandleProfileBuilder', () => {
     expect(screen.queryByText('公開中 @alice')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
     expect(screen.getByText('公開中 @alice')).toBeInTheDocument();
-    // やめる → バッジと USDC 通知が消え、新規作成モードへ
+    // やめる → バッジが消え、新規作成モードへ
     fireEvent.click(screen.getByRole('button', { name: '編集をやめる' }));
     expect(screen.queryByText('公開中 @alice')).not.toBeInTheDocument();
     expect(
