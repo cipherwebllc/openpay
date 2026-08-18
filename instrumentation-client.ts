@@ -37,6 +37,13 @@ if (dsn) {
     // 投げる (throw new Error(...)) ため、実シグナルの取りこぼしリスクは実質ゼロ。
     ignoreErrors: [
       /Non-Error promise rejection captured/,
+      // 同族の兄弟パターン: 拒否理由が DOM Event のとき Sentry は上とは別の文言
+      // 「Event `Event` (type=error) captured as promise rejection」を生成し、上の
+      // フィルタをすり抜ける (2026-08-18 mainnet 実観測: 存在しない /en/faq への
+      // 旧 UA Chrome 123 アクセスの 404 上・スタックなし・非アクショナブル)。
+      // script/リソース読込失敗の promise 化やウォレット拡張が典型で、自前コードは
+      // Error 以外で reject しないため実シグナルは落ちない。
+      /captured as promise rejection/,
       // ウォレット拡張/SDK の接続・再接続失敗 (MetaMask 等)。ページ読込時の自動再接続
       // (wagmi reconnectOnMount=true) や、ロック中/権限未付与/接続キャンセルのウォレットで
       // 日常的に発生する。スタックはウォレット拡張内 (chrome-extension://…/inpage.js) を指し
