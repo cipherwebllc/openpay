@@ -15,6 +15,25 @@ describe('instrumentation-client telemetry hooks', () => {
     sentry.replayIntegration.mockClear();
   });
 
+  it('ignoreErrors が non-Error 拒否の両文言 (value 形式 / DOM Event 形式) を落とす', async () => {
+    await import('@/instrumentation-client');
+    const options = sentry.init.mock.calls[0][0] as {
+      ignoreErrors: RegExp[];
+    };
+    const matches = (msg: string) =>
+      options.ignoreErrors.some((re) => re.test(msg));
+    // 既存: 値付きの non-Error 拒否
+    expect(
+      matches('Non-Error promise rejection captured with value: undefined'),
+    ).toBe(true);
+    // 2026-08-18 実観測の兄弟パターン: DOM Event が拒否理由のときの別文言
+    expect(
+      matches('Event `Event` (type=error) captured as promise rejection'),
+    ).toBe(true);
+    // 実シグナル (自前 Error) は落とさない
+    expect(matches('Error: relay settle failed')).toBe(false);
+  });
+
   it('beforeBreadcrumb / beforeSendTransaction に URL scrubber を設定する', async () => {
     await import('@/instrumentation-client');
 
