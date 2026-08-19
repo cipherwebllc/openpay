@@ -207,6 +207,10 @@ function v2HeaderToBody(
 export async function postFacilitator(
   path: '/verify' | '/settle',
   body: FacilitatorV1Body,
+  cdpWire: {
+    accept: ReturnType<typeof toV2Accept>;
+    resource: { resourceUrl: string; description: string };
+  },
 ): Promise<Record<string, unknown>> {
   const { url: baseUrl, cdpAuth } = x402Config.vanillaFacilitator;
   const url = `${baseUrl}${path}`;
@@ -221,10 +225,32 @@ export async function postFacilitator(
       url,
     })}`;
   }
+  // ワイヤは facilitator ごとに異なる (2026-08-20 本番実測):
+  //   - payai: v1 命名 ('base'・maxAmountRequired) のみ受理 (CAIP-2 body は 500)
+  //   - CDP (/platform/v2/x402): v1 命名 body を 400 invalid_request で拒否。
+  //     canonical は v2 (CAIP-2・amount・payload に accepted/resource を同梱)
+  // 署名は EIP-3009 authorization のみを覆うため、v1 client の支払いを v2 封筒へ
+  // 詰め替えても署名検証には影響しない。
+  const wireBody = cdpAuth
+    ? {
+        x402Version: 2,
+        paymentPayload: {
+          x402Version: 2,
+          accepted: cdpWire.accept,
+          payload: body.paymentPayload.payload,
+          resource: {
+            url: cdpWire.resource.resourceUrl,
+            description: cdpWire.resource.description,
+            mimeType: 'application/json',
+          },
+        },
+        paymentRequirements: cdpWire.accept,
+      }
+    : body;
   const res = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify(wireBody),
     signal: AbortSignal.timeout(FACILITATOR_TIMEOUT_MS),
   });
   const parsed: unknown = await res.json();
@@ -279,7 +305,10 @@ async function handleVanillaPaidGetInner(
 
   let verify: Record<string, unknown>;
   try {
-    verify = await postFacilitator('/verify', facilitatorBody);
+    verify = await postFacilitator('/verify', facilitatorBody, {
+      accept: toV2Accept(accepts.v1Caip2),
+      resource,
+    });
   } catch (e) {
     logger.warn('x402.vanilla.verify_unavailable', {
       error: e instanceof Error ? e.message : String(e),
@@ -304,7 +333,10 @@ async function handleVanillaPaidGetInner(
 
   let settle: Record<string, unknown>;
   try {
-    settle = await postFacilitator('/settle', facilitatorBody);
+    settle = await postFacilitator('/settle', facilitatorBody, {
+      accept: toV2Accept(accepts.v1Caip2),
+      resource,
+    });
   } catch (e) {
     logger.warn('x402.vanilla.settle_unavailable', {
       error: e instanceof Error ? e.message : String(e),
