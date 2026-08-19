@@ -253,11 +253,22 @@ export async function postFacilitator(
     body: JSON.stringify(wireBody),
     signal: AbortSignal.timeout(FACILITATOR_TIMEOUT_MS),
   });
-  const parsed: unknown = await res.json();
-  if (!res.ok || !isRecord(parsed)) {
-    throw new Error(`facilitator ${path} HTTP ${res.status}`);
+  const parsed: unknown = await res.json().catch(() => null);
+  if (res.ok && isRecord(parsed)) return parsed;
+  // CDP は invalid な支払いを 200 でなく 4xx + 正規の判定 body で返す (2026-08-20 本番実測:
+  // 400 {isValid:false, invalidReason:'invalid_payload', payer:...})。これは facilitator
+  // 障害ではなく「判定が出た」状態なので結果として呼び出し側へ返す — isValid/success の
+  // 真偽判定は呼び出し側の fail-closed (true 以外は解錠・settle しない) が担う。
+  // 5xx はこれまでどおり障害として throw → 503 (課金は発生しない)。
+  if (
+    cdpAuth &&
+    res.status < 500 &&
+    isRecord(parsed) &&
+    ('isValid' in parsed || 'success' in parsed)
+  ) {
+    return parsed;
   }
-  return parsed;
+  throw new Error(`facilitator ${path} HTTP ${res.status}`);
 }
 
 /**
