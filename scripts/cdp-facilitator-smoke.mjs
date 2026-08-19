@@ -30,8 +30,11 @@ function parseKey(secret) {
   if (trimmed.includes('-----BEGIN')) {
     return { alg: 'ES256', key: createPrivateKey(trimmed.replace(/\\n/g, '\n')) };
   }
-  const der = Buffer.from(trimmed, 'base64');
-  if (der.length === 64) {
+  // 内部の空白/改行を除去してから復号 (コピー時の混入対策)。
+  const compact = trimmed.replace(/\s+/g, '');
+  const der = Buffer.from(compact, 'base64');
+  if (der.length === 64 || der.length === 32) {
+    // Ed25519: 完全形 (seed+public 64byte) または seed のみ 32byte (表示形の揺れ)。
     return {
       alg: 'EdDSA',
       key: createPrivateKey({
@@ -50,13 +53,29 @@ function parseKey(secret) {
   };
 }
 
+// 解釈失敗時の安全な診断 (秘密の値そのものは一切出力しない)。
+function describeSecretShape(secret) {
+  const trimmed = secret.trim();
+  const compact = trimmed.replace(/\s+/g, '');
+  const decoded = Buffer.from(compact, 'base64');
+  return [
+    `文字数=${trimmed.length}`,
+    `内部空白=${trimmed.length !== compact.length ? 'あり' : 'なし'}`,
+    `PEMヘッダ=${trimmed.includes('-----BEGIN') ? 'あり' : 'なし'}`,
+    `base64url文字(-_)=${/[-_]/.test(compact) ? 'あり' : 'なし'}`,
+    `base64復号後=${decoded.length}byte`,
+  ].join(' / ');
+}
+
 function jwtFor(method, url) {
   let parsed;
   try {
     parsed = parseKey(keySecret);
   } catch (e) {
     console.error(`鍵の形式を解釈できません: ${e.message}`);
-    console.error('対応形式: Ed25519 (base64 64byte) / ECDSA P-256 (PEM or base64 PKCS8 DER)');
+    console.error(`形状診断 (秘密は含まない): ${describeSecretShape(keySecret)}`);
+    console.error('対応形式: Ed25519 (base64 32/64byte) / ECDSA P-256 (PEM or base64 PKCS8 DER)');
+    console.error('CDP ポータルの「Secret API Key」の secret を使っているか確認してください');
     process.exit(1);
   }
   const { alg, key } = parsed;
