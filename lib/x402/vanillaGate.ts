@@ -25,6 +25,7 @@ import { logger } from '@/lib/logger';
 import { generateCdpJwt } from './cdpJwt';
 import { x402Config } from './config';
 import {
+  buildBazaarQueryExtensionV2,
   buildPaymentRequiredV2,
   decodePaymentSignatureHeaderValue,
   encodePaymentRequiredHeaderValue,
@@ -132,7 +133,9 @@ function paymentChallenge(
     description: resource.description,
     mimeType: 'application/json',
     accepts: [toV2Accept(accepts.v1Caip2)],
-    ...(resource.outputSchema ? { bazaarInfo: resource.outputSchema } : {}),
+    // v1 body の outputSchema (x402scan 互換) はそのまま・v2 面だけ公式形 {info, schema}。
+    // CDP Bazaar は schema 無しを severity=required で掲載拒否する (validate API 実測)。
+    ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2() } : {}),
     error,
   });
   res.headers.set(
