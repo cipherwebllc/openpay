@@ -154,6 +154,86 @@ describe('vanillaGate facilitator 切替', () => {
     expect(body.paymentPayload.accepted).toBeUndefined();
   });
 
+  // CDP は invalid な支払いを 200 でなく 4xx + 正規の判定 body で返す (2026-08-20 本番実測)。
+  it('cdp: verify 400 + isValid:false は 503 でなく 402 challenge (settle は呼ばれない)', async () => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        isValid: false,
+        invalidReason: 'invalid_payload',
+        payer: '0xabc',
+      }),
+    });
+    const req = new Request(RESOURCE.resourceUrl, {
+      headers: { 'x-payment': v1PaymentHeader() },
+    });
+    const res = await handleVanillaPaidGet(req, RESOURCE, () =>
+      NextResponse.json({ ok: true }),
+    );
+    expect(res.status).toBe(402);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('invalid_payload');
+  });
+
+  it('cdp: verify 400 でも判定 body でなければ従来どおり 503', async () => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ errorType: 'invalid_request' }),
+    });
+    const req = new Request(RESOURCE.resourceUrl, {
+      headers: { 'x-payment': v1PaymentHeader() },
+    });
+    const res = await handleVanillaPaidGet(req, RESOURCE, () =>
+      NextResponse.json({ ok: true }),
+    );
+    expect(res.status).toBe(503);
+  });
+
+  it('cdp: verify 500 は判定 body があっても 503 (障害は fail-closed)', async () => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      json: async () => ({ isValid: false }),
+    });
+    const req = new Request(RESOURCE.resourceUrl, {
+      headers: { 'x-payment': v1PaymentHeader() },
+    });
+    const res = await handleVanillaPaidGet(req, RESOURCE, () =>
+      NextResponse.json({ ok: true }),
+    );
+    expect(res.status).toBe(503);
+  });
+
+  it('既定 (payai): 非 2xx は従来どおり 503 (v1 挙動不変の回帰)', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ isValid: false, invalidReason: 'x' }),
+    });
+    const req = new Request(RESOURCE.resourceUrl, {
+      headers: { 'x-payment': v1PaymentHeader() },
+    });
+    const res = await handleVanillaPaidGet(req, RESOURCE, () =>
+      NextResponse.json({ ok: true }),
+    );
+    expect(res.status).toBe(503);
+  });
+
   it('cdp: JWT 生成が throw したら 503 (課金なし・fail-closed)', async () => {
     configHold.vanillaFacilitator = {
       url: 'https://api.cdp.coinbase.com/platform/v2/x402',

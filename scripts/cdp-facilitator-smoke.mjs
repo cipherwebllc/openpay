@@ -145,8 +145,18 @@ if (res.status === 401 || res.status === 403) {
   console.error('\n判定: 認証 NG — 鍵か JWT 形式を確認');
   process.exit(1);
 }
-if (res.status === 200) {
+// CDP は invalid な支払いを 200 でなく 4xx + 正規の判定 body で返す (2026-08-20 実測:
+// 400 {isValid:false, invalidReason:'invalid_payload', payer:...})。判定 body が読めれば
+// 認証もワイヤも通っている — 資金ゼロの捨て鍵なので isValid:false が正常。
+let judged = null;
+try {
+  judged = JSON.parse(text);
+} catch {
+  judged = null;
+}
+if (judged && typeof judged === 'object' && 'isValid' in judged) {
   console.log('\n判定: 全通 — 認証もワイヤも OK (isValid:false は資金ゼロのため想定どおり)');
 } else {
   console.log('\n判定: 認証は OK・ワイヤが拒否されている — 上の body の errorMessage が原因');
+  process.exit(1);
 }
