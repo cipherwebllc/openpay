@@ -143,6 +143,18 @@ describe('GET /api/paid/usdc/japan-web3-directory', () => {
     expect(v2.resource.url).toBe(RESOURCE);
     expect(v2.accepts[0].network).toBe('eip155:8453');
     expect(v2.accepts[0].amount).toBe('20000');
+    // CDP Bazaar 掲載の必須形: extensions.bazaar = {info, schema} (schema 欠落は
+    // validate API が severity=required で拒否・2026-08-20 実測)。info.input は
+    // 公式 createQueryDiscoveryExtension と同形 (discoverable フィールドは持たない —
+    // schema の additionalProperties:false に違反するため)。
+    const bazaar = (
+      v2 as unknown as {
+        extensions: { bazaar: { info: Record<string, unknown>; schema: Record<string, unknown> } };
+      }
+    ).extensions.bazaar;
+    expect(bazaar.info).toEqual({ input: { type: 'http', method: 'GET' } });
+    expect(bazaar.schema.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
+    expect(bazaar.schema.required).toEqual(['input']);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

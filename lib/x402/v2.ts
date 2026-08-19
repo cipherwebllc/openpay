@@ -67,6 +67,40 @@ export type BazaarInfoV2 = {
   output?: unknown;
 };
 
+/**
+ * CDP x402 Bazaar が必須にする discovery extension の公式形 (coinbase/x402
+ * createQueryDiscoveryExtension と同形・2026-08-20 の validate API 実測で
+ * schema 欠落は severity=required で掲載拒否)。info と schema は対で、
+ * schema は info を検証する JSON Schema (draft 2020-12)。
+ */
+export type BazaarExtensionV2 = {
+  info: Record<string, unknown>;
+  schema: Record<string, unknown>;
+};
+
+/** 引数なし GET 資源の公式 bazaar 宣言。queryParams を宣言しない最小形。 */
+export function buildBazaarQueryExtensionV2(): BazaarExtensionV2 {
+  return {
+    info: { input: { type: 'http', method: 'GET' } },
+    schema: {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      properties: {
+        input: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', const: 'http' },
+            method: { type: 'string', enum: ['GET'] },
+          },
+          required: ['type', 'method'],
+          additionalProperties: false,
+        },
+      },
+      required: ['input'],
+    },
+  };
+}
+
 const BASE64_ENCODED_REGEX = /^[A-Za-z0-9+/]*={0,2}$/;
 
 function encodeJsonBase64(value: unknown): string {
@@ -151,6 +185,8 @@ export function buildPaymentRequiredV2(input: {
   mimeType?: string;
   accepts: readonly PaymentRequirementsV2[];
   bazaarInfo?: BazaarInfoV2;
+  /** 公式形 (info+schema)。指定時は bazaarInfo より優先 — CDP Bazaar 掲載に必須。 */
+  bazaar?: BazaarExtensionV2;
   error?: string;
 }): PaymentRequiredV2 {
   const resource: ResourceInfoV2 = { url: input.url };
@@ -163,7 +199,9 @@ export function buildPaymentRequiredV2(input: {
     accepts: [...input.accepts],
   };
   if (input.error !== undefined) paymentRequired.error = input.error;
-  if (input.bazaarInfo !== undefined) {
+  if (input.bazaar !== undefined) {
+    paymentRequired.extensions = { bazaar: input.bazaar };
+  } else if (input.bazaarInfo !== undefined) {
     paymentRequired.extensions = {
       bazaar: {
         info: input.bazaarInfo,
