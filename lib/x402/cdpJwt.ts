@@ -45,9 +45,12 @@ export function parseCdpKeySecret(secret: string): ParsedKey {
       key: createPrivateKey(trimmed.replace(/\\n/g, '\n')),
     };
   }
-  const der = Buffer.from(trimmed, 'base64');
-  if (der.length === 64) {
-    // Ed25519: seed(32) + public(32)。seed を PKCS8 に包む。
+  // コピー時に混入し得る内部の空白/改行を除去してから復号 (端の trim だけでは不足)。
+  const compact = trimmed.replace(/\s+/g, '');
+  const der = Buffer.from(compact, 'base64');
+  if (der.length === 64 || der.length === 32) {
+    // Ed25519: seed(32)+public(32) の完全形、または seed のみの 32 byte 形
+    // (CDP ポータルの表示形に揺れがある・公開鍵は seed から導出されるため不要)。
     return {
       alg: 'EdDSA',
       key: createPrivateKey({

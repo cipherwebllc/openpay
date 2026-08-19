@@ -65,6 +65,48 @@ describe('generateCdpJwt', () => {
     expect(ok).toBe(true);
   });
 
+  it('Ed25519 の seed のみ 32byte 形式も受理し、完全形と同じ鍵に解決する', () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const seed = Buffer.from(
+      (privateKey.export({ format: 'jwk' }) as { d: string }).d,
+      'base64url',
+    );
+    const jwt = generateCdpJwt({
+      keyId: 'k-seed',
+      keySecret: seed.toString('base64'),
+      method: 'POST',
+      url: URL_UNDER_TEST,
+    });
+    const [h, c, sig] = jwt.split('.');
+    expect(decodeSegment(h).alg).toBe('EdDSA');
+    const ok = cryptoVerify(
+      null,
+      Buffer.from(`${h}.${c}`),
+      publicKey,
+      Buffer.from(sig, 'base64url'),
+    );
+    expect(ok).toBe(true);
+  });
+
+  it('内部に改行/空白が混入した base64 も受理する (コピー事故対策)', () => {
+    const { secret, publicKey } = makeEd25519Secret();
+    const messy = `${secret.slice(0, 20)}\n${secret.slice(20, 44)} ${secret.slice(44)}`;
+    const jwt = generateCdpJwt({
+      keyId: 'k-messy',
+      keySecret: messy,
+      method: 'POST',
+      url: URL_UNDER_TEST,
+    });
+    const [h, c, sig] = jwt.split('.');
+    const ok = cryptoVerify(
+      null,
+      Buffer.from(`${h}.${c}`),
+      publicKey,
+      Buffer.from(sig, 'base64url'),
+    );
+    expect(ok).toBe(true);
+  });
+
   it('ECDSA P-256 (旧形式・PKCS8 DER base64): ES256 + ieee-p1363 署名が検証を通る', () => {
     const { privateKey, publicKey } = generateKeyPairSync('ec', {
       namedCurve: 'P-256',
