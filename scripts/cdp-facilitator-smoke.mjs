@@ -91,27 +91,47 @@ function jwtFor(method, url) {
   return `${h}.${c}.${sig.toString('base64url')}`;
 }
 
+// 本番 (lib/x402/vanillaGate) と同一の v2 封筒を、本番 hello の実 402 から組む。
+// 署名は資金ゼロの捨て鍵による本物の EIP-3009 — 全通なら CDP は 200 {isValid:false}
+// (insufficient_funds 等) を返すはず。4xx なら body に理由が書かれているので全文表示する。
+const { privateKeyToAccount, generatePrivateKey } = await import('viem/accounts');
+
+const helloRes = await fetch('https://open-pay.jp/api/paid/hello');
+const hello = await helloRes.json();
+const a = hello.accepts[0];
+const caip2 = a.network === 'base' ? 'eip155:8453' : a.network;
+const account = privateKeyToAccount(generatePrivateKey());
+const validBefore = BigInt(Math.floor(Date.now() / 1000) + 300);
+const nonce = '0x' + [...crypto.getRandomValues(new Uint8Array(32))]
+  .map((b) => b.toString(16).padStart(2, '0')).join('');
+const signature = await account.signTypedData({
+  domain: { name: a.extra.name, version: a.extra.version, chainId: 8453, verifyingContract: a.asset },
+  types: { TransferWithAuthorization: [
+    { name: 'from', type: 'address' }, { name: 'to', type: 'address' },
+    { name: 'value', type: 'uint256' }, { name: 'validAfter', type: 'uint256' },
+    { name: 'validBefore', type: 'uint256' }, { name: 'nonce', type: 'bytes32' }] },
+  primaryType: 'TransferWithAuthorization',
+  message: { from: account.address, to: a.payTo, value: BigInt(a.maxAmountRequired),
+    validAfter: 0n, validBefore, nonce },
+});
+const accept = {
+  scheme: 'exact', network: caip2, amount: a.maxAmountRequired, asset: a.asset,
+  payTo: a.payTo, maxTimeoutSeconds: a.maxTimeoutSeconds, extra: a.extra,
+};
 const url = `${BASE}/verify`;
 const body = {
-  x402Version: 1,
+  x402Version: 2,
   paymentPayload: {
-    x402Version: 1,
-    scheme: 'exact',
-    network: 'base',
-    payload: { signature: `0x${'11'.repeat(65)}`, authorization: {
-      from: '0x1111111111111111111111111111111111111111',
-      to: '0x2222222222222222222222222222222222222222',
-      value: '1', validAfter: '0', validBefore: '1', nonce: `0x${'22'.repeat(32)}`,
-    } },
+    x402Version: 2,
+    accepted: accept,
+    payload: { signature, authorization: {
+      from: account.address, to: a.payTo, value: a.maxAmountRequired,
+      validAfter: '0', validBefore: validBefore.toString(), nonce } },
+    resource: { url: a.resource, description: a.description, mimeType: 'application/json' },
   },
-  paymentRequirements: {
-    scheme: 'exact', network: 'base', maxAmountRequired: '1',
-    resource: 'https://open-pay.jp/api/paid/usdc/stores', description: 'auth smoke',
-    mimeType: 'application/json', payTo: '0x2222222222222222222222222222222222222222',
-    maxTimeoutSeconds: 300, asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-    extra: { name: 'USD Coin', version: '2' },
-  },
+  paymentRequirements: accept,
 };
+console.log(`署名者 (資金ゼロ捨て鍵): ${account.address}`);
 
 const res = await fetch(url, {
   method: 'POST',
@@ -120,9 +140,13 @@ const res = await fetch(url, {
 });
 const text = await res.text();
 console.log(`HTTP ${res.status}`);
-console.log(text.slice(0, 400));
+console.log(text.slice(0, 1200));
 if (res.status === 401 || res.status === 403) {
   console.error('\n判定: 認証 NG — 鍵か JWT 形式を確認');
   process.exit(1);
 }
-console.log('\n判定: 認証 OK (支払いが invalid なのは想定どおり)');
+if (res.status === 200) {
+  console.log('\n判定: 全通 — 認証もワイヤも OK (isValid:false は資金ゼロのため想定どおり)');
+} else {
+  console.log('\n判定: 認証は OK・ワイヤが拒否されている — 上の body の errorMessage が原因');
+}
