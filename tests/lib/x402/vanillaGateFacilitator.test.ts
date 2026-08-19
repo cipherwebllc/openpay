@@ -127,11 +127,31 @@ describe('vanillaGate facilitator 切替', () => {
       'POST api.cdp.coinbase.com/platform/v2/x402/verify',
       'POST api.cdp.coinbase.com/platform/v2/x402/settle',
     ]);
-    // wire body は従来と同一 (network は v1 命名のまま)。
+    // CDP へは v2 ワイヤ (2026-08-20 実測: v1 body は 400 invalid_request)。
     const body = JSON.parse(
       (fetchMock.mock.calls[0][1] as { body: string }).body,
     );
+    expect(body.x402Version).toBe(2);
+    expect(body.paymentPayload.x402Version).toBe(2);
+    expect(body.paymentRequirements.network).toBe('eip155:8453');
+    expect(body.paymentRequirements.amount).toBe(body.paymentRequirements.amount);
+    expect(typeof body.paymentRequirements.amount).toBe('string');
+    expect(body.paymentRequirements.maxAmountRequired).toBeUndefined();
+    expect(body.paymentPayload.accepted).toEqual(body.paymentRequirements);
+    expect(body.paymentPayload.resource.url).toBe(RESOURCE.resourceUrl);
+    // 署名部 (payload) は client の値をそのまま同梱
+    expect(body.paymentPayload.payload.signature).toBe('0xsig');
+  });
+
+  it('既定 (payai): wire body は v1 のまま (network=base・maxAmountRequired)', async () => {
+    await run();
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0][1] as { body: string }).body,
+    );
+    expect(body.x402Version).toBe(1);
     expect(body.paymentRequirements.network).toBe('base');
+    expect(typeof body.paymentRequirements.maxAmountRequired).toBe('string');
+    expect(body.paymentPayload.accepted).toBeUndefined();
   });
 
   it('cdp: JWT 生成が throw したら 503 (課金なし・fail-closed)', async () => {

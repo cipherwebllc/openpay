@@ -85,6 +85,22 @@ function scheduleAfterResponse(task: () => void): void {
   }
 }
 
+// CDP facilitator は v2 ワイヤを要求する (vanillaGate.postFacilitator の実測コメント参照)。
+// v2 封筒の accepted/resource をこの経路の intent から組む。
+function cdpWireFor(intent: StoreUsdcIntent): {
+  accept: ReturnType<typeof toV2Accept>;
+  resource: { resourceUrl: string; description: string };
+} {
+  const requirements = requirementsForIntent(intent);
+  return {
+    accept: toV2Accept(requirements.caip2),
+    resource: {
+      resourceUrl: resourceUrl(intent),
+      description: 'OpenPay creator store digital product',
+    },
+  };
+}
+
 function resourceUrl(intent: Pick<StoreUsdcIntent, 'resourceId' | 'payerHint'>): string {
   return `https://open-pay.jp/api/paid/hosted/${intent.resourceId}?payer=${intent.payerHint}&rail=usdc`;
 }
@@ -438,7 +454,7 @@ async function submittedResponse(input: {
   if (found.state === 'quoted') {
     let verify: RecordValue;
     try {
-      verify = await postFacilitator('/verify', body);
+      verify = await postFacilitator('/verify', body, cdpWireFor(found));
     } catch {
       return errorResponse('payment_verification_unavailable', 503);
     }
@@ -497,7 +513,7 @@ async function submittedResponse(input: {
   const settling = settlementClaim.intent;
   let settle: RecordValue;
   try {
-    settle = await postFacilitator('/settle', body);
+    settle = await postFacilitator('/settle', body, cdpWireFor(settling));
   } catch {
     await markStoreUsdcIndeterminate({
       intentSalt: settling.intentSalt,
