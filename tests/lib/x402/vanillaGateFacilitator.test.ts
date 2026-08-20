@@ -143,6 +143,55 @@ describe('vanillaGate facilitator 切替', () => {
     expect(body.paymentPayload.payload.signature).toBe('0xsig');
   });
 
+  // Bazaar カタログ登録は facilitator に送る paymentPayload.extensions から抽出される
+  // (coinbase/x402 bazaar/facilitator.ts extractDiscoveryInfo)。402 応答に載せるだけでは
+  // 登録されない (2026-08-20 未掲載の真因)。
+  it('cdp: 宣言のある resource は verify/settle 双方の paymentPayload.extensions.bazaar を運ぶ', async () => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    const req = new Request(RESOURCE.resourceUrl, {
+      headers: { 'x-payment': v1PaymentHeader() },
+    });
+    await handleVanillaPaidGet(
+      req,
+      { ...RESOURCE, outputSchema: { input: { type: 'http', method: 'GET' } } },
+      () => NextResponse.json({ ok: true }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) {
+      const sent = JSON.parse((call[1] as { body: string }).body) as {
+        paymentPayload: {
+          resource: { url: string };
+          extensions: {
+            bazaar: { info: Record<string, unknown>; schema: Record<string, unknown> };
+          };
+        };
+      };
+      // 抽出側は resource.url と extensions.bazaar の両方を要求する
+      expect(sent.paymentPayload.resource.url).toBe(RESOURCE.resourceUrl);
+      expect(sent.paymentPayload.extensions.bazaar.info).toEqual({
+        input: { type: 'http', method: 'GET' },
+      });
+      expect(sent.paymentPayload.extensions.bazaar.schema.$schema).toBe(
+        'https://json-schema.org/draft/2020-12/schema',
+      );
+    }
+  });
+
+  it('cdp: 宣言のない resource は extensions を積まない (store 商品など)', async () => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    await run();
+    const sent = JSON.parse(
+      (fetchMock.mock.calls[0][1] as { body: string }).body,
+    ) as { paymentPayload: { extensions?: unknown } };
+    expect(sent.paymentPayload.extensions).toBeUndefined();
+  });
+
   it('既定 (payai): wire body は v1 のまま (network=base・maxAmountRequired)', async () => {
     await run();
     const body = JSON.parse(
