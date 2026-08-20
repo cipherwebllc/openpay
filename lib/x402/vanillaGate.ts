@@ -32,6 +32,7 @@ import {
   encodePaymentResponseHeaderValue,
   toV2Accept,
   v2PayloadToV1Body,
+  type BazaarExtensionV2,
   type FacilitatorV1Body,
   type PaymentRequirementsV1,
 } from './v2';
@@ -213,6 +214,8 @@ export async function postFacilitator(
   cdpWire: {
     accept: ReturnType<typeof toV2Accept>;
     resource: { resourceUrl: string; description: string };
+    /** Bazaar カタログ登録メタ。指定時のみ paymentPayload.extensions に載せる。 */
+    bazaar?: BazaarExtensionV2;
   },
 ): Promise<Record<string, unknown>> {
   const { url: baseUrl, cdpAuth } = x402Config.vanillaFacilitator;
@@ -234,6 +237,13 @@ export async function postFacilitator(
   //     canonical は v2 (CAIP-2・amount・payload に accepted/resource を同梱)
   // 署名は EIP-3009 authorization のみを覆うため、v1 client の支払いを v2 封筒へ
   // 詰め替えても署名検証には影響しない。
+  // Bazaar のカタログ登録は 402 応答でなく **facilitator に送る paymentPayload.extensions**
+  // から抽出される (coinbase/x402 bazaar/facilitator.ts extractDiscoveryInfo: v2 は
+  // paymentPayload.extensions['bazaar'] と paymentPayload.resource.url を読む)。公式 client は
+  // 402 の extensions を payload へ写して verify/settle 両方に同じ payload を送るため、
+  // v1 client を v2 封筒へ詰め替える我々も同じ形にする。
+  // 出所は client でなく**自分の resource 宣言**に限定する (client 由来の値を載せると
+  // 他人が我々の payTo で任意 URL をカタログ登録できる = catalog poisoning)。
   const wireBody = cdpAuth
     ? {
         x402Version: 2,
@@ -246,6 +256,7 @@ export async function postFacilitator(
             description: cdpWire.resource.description,
             mimeType: 'application/json',
           },
+          ...(cdpWire.bazaar ? { extensions: { bazaar: cdpWire.bazaar } } : {}),
         },
         paymentRequirements: cdpWire.accept,
       }
@@ -322,6 +333,8 @@ async function handleVanillaPaidGetInner(
     verify = await postFacilitator('/verify', facilitatorBody, {
       accept: toV2Accept(accepts.v1Caip2),
       resource,
+      // 402 で配ったのと同じ宣言を facilitator にも渡す (Bazaar カタログ登録の入力)。
+      ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2() } : {}),
     });
   } catch (e) {
     logger.warn('x402.vanilla.verify_unavailable', {
@@ -350,6 +363,8 @@ async function handleVanillaPaidGetInner(
     settle = await postFacilitator('/settle', facilitatorBody, {
       accept: toV2Accept(accepts.v1Caip2),
       resource,
+      // カタログ登録は settle 時に確定する — verify と同じ payload 形で送る。
+      ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2() } : {}),
     });
   } catch (e) {
     logger.warn('x402.vanilla.settle_unavailable', {
