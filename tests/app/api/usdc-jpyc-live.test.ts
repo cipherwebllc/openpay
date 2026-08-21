@@ -113,17 +113,36 @@ describe('query 検証は支払い要求より先 (400・facilitator 不呼出)'
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('balance: address 欠落 / 不正', async () => {
+  it('balance: address 不正は 400・**欠落は 402** (CDP クローラは引数なしで 402 を検査する)', async () => {
     const route = await load('balance');
-    expect((await route.GET(req('/api/paid/usdc/jpyc/balance'))).status).toBe(400);
     expect((await route.GET(req('/api/paid/usdc/jpyc/balance?address=0x12'))).status).toBe(400);
+    const bare = await route.GET(req('/api/paid/usdc/jpyc/balance'));
+    expect(bare.status).toBe(402);
+    expect(bare.headers.get('PAYMENT-REQUIRED')).toBeTruthy();
   });
 
-  it('transfers: chain 欠落 / limit 0 / address 不正', async () => {
+  it('transfers: limit 0 / address 不正は 400・chain 欠落は 402', async () => {
     const route = await load('transfers');
-    expect((await route.GET(req('/api/paid/usdc/jpyc/transfers'))).status).toBe(400);
     expect((await route.GET(req('/api/paid/usdc/jpyc/transfers?chain=polygon&limit=0'))).status).toBe(400);
     expect((await route.GET(req('/api/paid/usdc/jpyc/transfers?chain=polygon&address=zz'))).status).toBe(400);
+    expect((await route.GET(req('/api/paid/usdc/jpyc/transfers'))).status).toBe(402);
+  });
+
+  it('支払い付きでも必須引数が無ければ 400 で settle しない (verify のみ・課金なし)', async () => {
+    facilitatorOk();
+    const balance = await load('balance');
+    const res = await balance.GET(req('/api/paid/usdc/jpyc/balance', { 'x-payment': b64(v1Payment('2000')) }));
+    expect(res.status).toBe(400);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/verify$/);
+    expect(liveMocks.readBalance).not.toHaveBeenCalled();
+
+    fetchMock.mockClear();
+    const transfers = await load('transfers');
+    const res2 = await transfers.GET(req('/api/paid/usdc/jpyc/transfers', { 'x-payment': b64(v1Payment('5000')) }));
+    expect(res2.status).toBe(400);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(liveMocks.readTransfers).not.toHaveBeenCalled();
   });
 });
 
