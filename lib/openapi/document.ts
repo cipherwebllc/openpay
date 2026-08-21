@@ -20,6 +20,11 @@ import {
   USDC_DIRECTORY_SEARCH,
 } from '@/lib/directory/usdcResource';
 import { USDC_STORES } from '@/lib/x402/usdcStores';
+import {
+  USDC_JPYC_BALANCE,
+  USDC_JPYC_SUPPLY,
+  USDC_JPYC_TRANSFERS,
+} from '@/lib/jpyc/liveResources';
 import { x402Config } from '@/lib/x402/config';
 import { usdPriceToAtomic } from '@/lib/x402/vanillaGate';
 import { FIRST_PARTY_RESOURCES } from '@/lib/x402/firstParty';
@@ -327,7 +332,111 @@ const DISCOVERY_OPENAPI_SCHEMAS = {
 
 // vanilla x402 (USDC/Base・外部 facilitator・OpenPay 手数料なし) の直接販売面。
 // JPYC facilitator の flag に依存しないため、doc が配信される限り常に載せる。
+// JPYC オンチェーン・ライブデータ (lib/jpyc/liveResources.ts が SoT・応答例も共用)。
+const JPYC_LIVE_402 = {
+  description:
+    'Standard x402 payment challenge (USDC on Base, exact scheme, single transferWithAuthorization).',
+};
+const JPYC_LIVE_503 = {
+  description:
+    'All configured RPC endpoints failed for the requested chains. Nothing is settled; the buyer is not charged.',
+};
+const JPYC_LIVE_400 = { description: 'Unknown query key, unsupported chain, or malformed address/limit.' };
+const JPYC_CHAIN_PARAM = {
+  name: 'chain',
+  in: 'query',
+  required: false,
+  schema: { type: 'string', enum: ['polygon', 'kaia', 'avalanche', 'ethereum'] },
+  description: 'Omit for all supported chains.',
+};
+
 const VANILLA_OPENAPI_PATHS = {
+  [USDC_JPYC_SUPPLY.path]: {
+    get: {
+      tags: ['x402 Vanilla (USDC)', 'JPYC Live Data'],
+      summary: 'Live JPYC total supply per chain (USDC on Base)',
+      description: `${USDC_JPYC_SUPPLY.description} Facts only — no advice, quote or price interpretation. Standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
+      parameters: [JPYC_CHAIN_PARAM],
+      'x-payment-info': usdcPaymentInfo(USDC_JPYC_SUPPLY.priceUsd),
+      'x-payment-protocol': 'x402',
+      'x-payment-asset': 'USDC',
+      'x-payment-chains': ['Base'],
+      responses: {
+        '200': {
+          description: 'Per-chain totalSupply after settlement (rows with status "error" are RPC failures on that chain only)',
+          content: { 'application/json': { example: USDC_JPYC_SUPPLY.bazaar.output.example } },
+        },
+        '400': JPYC_LIVE_400,
+        '402': JPYC_LIVE_402,
+        '503': JPYC_LIVE_503,
+      },
+    },
+  },
+  [USDC_JPYC_BALANCE.path]: {
+    get: {
+      tags: ['x402 Vanilla (USDC)', 'JPYC Live Data'],
+      summary: 'JPYC balance of any address across chains (USDC on Base)',
+      description: `${USDC_JPYC_BALANCE.description} Facts only — no advice. Standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
+      parameters: [
+        {
+          name: 'address',
+          in: 'query',
+          required: true,
+          schema: { type: 'string', pattern: '^0x[a-fA-F0-9]{40}$' },
+        },
+        JPYC_CHAIN_PARAM,
+      ],
+      'x-payment-info': usdcPaymentInfo(USDC_JPYC_BALANCE.priceUsd),
+      'x-payment-protocol': 'x402',
+      'x-payment-asset': 'USDC',
+      'x-payment-chains': ['Base'],
+      responses: {
+        '200': {
+          description: 'Per-chain balance after settlement',
+          content: { 'application/json': { example: USDC_JPYC_BALANCE.bazaar.output.example } },
+        },
+        '400': JPYC_LIVE_400,
+        '402': JPYC_LIVE_402,
+        '503': JPYC_LIVE_503,
+      },
+    },
+  },
+  [USDC_JPYC_TRANSFERS.path]: {
+    get: {
+      tags: ['x402 Vanilla (USDC)', 'JPYC Live Data'],
+      summary: 'Latest JPYC Transfer events on one chain (USDC on Base)',
+      description: `${USDC_JPYC_TRANSFERS.description} The block window is fixed per chain (about one hour) to bound RPC cost. Facts only — no advice. Standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
+      parameters: [
+        { ...JPYC_CHAIN_PARAM, required: true, description: 'Chain to scan.' },
+        {
+          name: 'limit',
+          in: 'query',
+          required: false,
+          schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+        },
+        {
+          name: 'address',
+          in: 'query',
+          required: false,
+          schema: { type: 'string', pattern: '^0x[a-fA-F0-9]{40}$' },
+          description: 'Only transfers where this address is sender or recipient.',
+        },
+      ],
+      'x-payment-info': usdcPaymentInfo(USDC_JPYC_TRANSFERS.priceUsd),
+      'x-payment-protocol': 'x402',
+      'x-payment-asset': 'USDC',
+      'x-payment-chains': ['Base'],
+      responses: {
+        '200': {
+          description: 'Newest-first Transfer events within the block window after settlement',
+          content: { 'application/json': { example: USDC_JPYC_TRANSFERS.bazaar.output.example } },
+        },
+        '400': JPYC_LIVE_400,
+        '402': JPYC_LIVE_402,
+        '503': JPYC_LIVE_503,
+      },
+    },
+  },
   [USDC_STORES.path]: {
     get: {
       tags: ['x402 Vanilla (USDC)'],
