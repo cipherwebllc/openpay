@@ -50,6 +50,15 @@ export const TRANSFER_WINDOW_BLOCKS: Readonly<Record<JpycChainSlug, bigint>> = {
 export const TRANSFERS_DEFAULT_LIMIT = 20;
 export const TRANSFERS_MAX_LIMIT = 100;
 
+/**
+ * eth_getLogs の 1 リクエスト当たりブロック数。公開 RPC は範囲を厳しく制限する
+ * (Polygon の viem 既定 drpc 無料枠は ≈100 ブロック超で拒否・2026-08-21 実測: 1,800 一括は
+ * 即エラー、100×18 逐次で 2.95s / JPYC 56 件)。100 にしておけばどの公開 RPC でも通る。
+ */
+export const TRANSFER_CHUNK_BLOCKS = 100n;
+/** チャンクの同時実行数。公開 RPC の rate limit と timeout (5s) の折り合い。 */
+const TRANSFER_CHUNK_CONCURRENCY = 4;
+
 const TRANSFER_EVENT = parseAbiItem(
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 );
@@ -265,38 +274,58 @@ export async function readTransfers(
         const toBlock = await client.getBlockNumber();
         const window = TRANSFER_WINDOW_BLOCKS[chain];
         const fromBlock = toBlock > window ? toBlock - window : 0n;
-        const common = { address: dep.address, event: TRANSFER_EVENT, fromBlock, toBlock } as const;
-        // address 絞り込みは from/to どちらか一致 = 2 クエリの和集合 (eth_getLogs は OR できない)。
-        const logs = opts.address
-          ? (
-              await Promise.all([
-                client.getLogs({ ...common, args: { from: opts.address } }),
-                client.getLogs({ ...common, args: { to: opts.address } }),
-              ])
-            ).flat()
-          : await client.getLogs(common);
+
+        // 窓を新しい順のチャンクに割る。limit に達したら残りは読まない (早期終了)。
+        const ranges: { from: bigint; to: bigint }[] = [];
+        for (let end = toBlock; end >= fromBlock; end -= TRANSFER_CHUNK_BLOCKS) {
+          const start = end - TRANSFER_CHUNK_BLOCKS + 1n;
+          ranges.push({ from: start > fromBlock ? start : fromBlock, to: end });
+          if (start <= fromBlock) break;
+        }
+        const fetchChunk = async (r: { from: bigint; to: bigint }) => {
+          const common = {
+            address: dep.address,
+            event: TRANSFER_EVENT,
+            fromBlock: r.from,
+            toBlock: r.to,
+          } as const;
+          // address 絞り込みは from/to どちらか一致 = 2 クエリの和集合 (eth_getLogs は OR できない)。
+          return opts.address
+            ? (
+                await Promise.all([
+                  client.getLogs({ ...common, args: { from: opts.address } }),
+                  client.getLogs({ ...common, args: { to: opts.address } }),
+                ])
+              ).flat()
+            : client.getLogs(common);
+        };
+
         const seen = new Set<string>();
         const items: TransferItem[] = [];
-        // 新しい順 (blockNumber desc → logIndex desc)
-        logs.sort((a, b) => {
-          if (a.blockNumber !== b.blockNumber) return a.blockNumber > b.blockNumber ? -1 : 1;
-          return (b.logIndex ?? 0) - (a.logIndex ?? 0);
-        });
-        for (const log of logs) {
-          const key = `${log.transactionHash}:${log.logIndex}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const { from, to, value } = log.args as { from: Address; to: Address; value: bigint };
-          items.push({
-            blockNumber: log.blockNumber.toString(),
-            txHash: log.transactionHash,
-            logIndex: log.logIndex,
-            from,
-            to,
-            value: value.toString(),
-            valueFormatted: formatUnits(value, dep.decimals),
+        for (let i = 0; i < ranges.length && items.length < opts.limit; i += TRANSFER_CHUNK_CONCURRENCY) {
+          const batch = ranges.slice(i, i + TRANSFER_CHUNK_CONCURRENCY);
+          const logs = (await Promise.all(batch.map(fetchChunk))).flat();
+          // 新しい順 (blockNumber desc → logIndex desc)
+          logs.sort((a, b) => {
+            if (a.blockNumber !== b.blockNumber) return a.blockNumber > b.blockNumber ? -1 : 1;
+            return (b.logIndex ?? 0) - (a.logIndex ?? 0);
           });
-          if (items.length >= opts.limit) break;
+          for (const log of logs) {
+            const key = `${log.transactionHash}:${log.logIndex}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const { from, to, value } = log.args as { from: Address; to: Address; value: bigint };
+            items.push({
+              blockNumber: log.blockNumber.toString(),
+              txHash: log.transactionHash,
+              logIndex: log.logIndex,
+              from,
+              to,
+              value: value.toString(),
+              valueFormatted: formatUnits(value, dep.decimals),
+            });
+            if (items.length >= opts.limit) break;
+          }
         }
         return { fromBlock: fromBlock.toString(), toBlock: toBlock.toString(), items };
       })(),
