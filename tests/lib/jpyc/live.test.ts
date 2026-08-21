@@ -26,6 +26,7 @@ import { JPYC_CHAINS, chainForSlug } from '@/lib/chains';
 import {
   TRANSFERS_DEFAULT_LIMIT,
   TRANSFERS_MAX_LIMIT,
+  TRANSFER_CHUNK_BLOCKS,
   TRANSFER_WINDOW_BLOCKS,
   allFailed,
   parseAddressParam,
@@ -161,16 +162,21 @@ describe('readTransfers', () => {
     args: { from, to, value },
   });
 
-  it('固定窓で getLogs し、新しい順・limit 件で返す', async () => {
-    setAll(() =>
-      okClient({
-        getLogs: vi.fn().mockResolvedValue([
-          log(999_990n, 1, ADDR, OTHER, 1n * 10n ** 18n),
-          log(999_999n, 0, OTHER, ADDR, 2n * 10n ** 18n),
-          log(999_999n, 3, ADDR, OTHER, 3n * 10n ** 18n),
-        ]),
-      }),
+  // 公開 RPC の範囲制限 (drpc ≈100 ブロック) に合わせ、窓を 100 ブロックのチャンクで新しい順に読む。
+  // mock は「要求範囲に含まれる log だけ返す」= 実 RPC と同じ振る舞い。
+  const ALL_LOGS = [
+    log(999_990n, 1, ADDR, OTHER, 1n * 10n ** 18n),
+    log(999_999n, 0, OTHER, ADDR, 2n * 10n ** 18n),
+    log(999_999n, 3, ADDR, OTHER, 3n * 10n ** 18n),
+    log(999_500n, 0, ADDR, OTHER, 4n * 10n ** 18n),
+  ];
+  const rangedGetLogs = () =>
+    vi.fn(async (q: { fromBlock: bigint; toBlock: bigint }) =>
+      ALL_LOGS.filter((l) => l.blockNumber >= q.fromBlock && l.blockNumber <= q.toBlock),
     );
+
+  it('窓を ≤100 ブロックのチャンクで新しい順に読み、limit に達したら残りを読まない', async () => {
+    setAll(() => okClient({ getLogs: rangedGetLogs() }));
     const slug = JPYC_CHAINS[0];
     const r = await readTransfers(slug, { limit: 2 });
     expect(r.status).toBe('ok');
@@ -179,22 +185,46 @@ describe('readTransfers', () => {
     expect(BigInt(r.toBlock) - BigInt(r.fromBlock)).toBe(TRANSFER_WINDOW_BLOCKS[slug]);
     expect(r.items.map((i) => i.valueFormatted)).toEqual(['3', '2']);
     const c = clients.get(chainForSlug(slug).id)!;
-    expect(c.getLogs).toHaveBeenCalledTimes(1);
-    expect(c.getLogs.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ fromBlock: 1_000_000n - TRANSFER_WINDOW_BLOCKS[slug], toBlock: 1_000_000n }),
-    );
+    const totalChunks = Number(TRANSFER_WINDOW_BLOCKS[slug] / TRANSFER_CHUNK_BLOCKS) + 1;
+    expect(c.getLogs.mock.calls.length).toBeLessThan(totalChunks); // 早期終了
+    for (const [q] of c.getLogs.mock.calls as [{ fromBlock: bigint; toBlock: bigint }][]) {
+      expect(q.toBlock - q.fromBlock + 1n).toBeLessThanOrEqual(TRANSFER_CHUNK_BLOCKS);
+      expect(q.toBlock).toBeLessThanOrEqual(1_000_000n);
+      expect(q.fromBlock).toBeGreaterThanOrEqual(1_000_000n - TRANSFER_WINDOW_BLOCKS[slug]);
+    }
+    // 最初のチャンクは最新ブロックから
+    expect((c.getLogs.mock.calls[0][0] as { toBlock: bigint }).toBlock).toBe(1_000_000n);
   });
 
-  it('address 指定は from/to の 2 クエリを和集合し重複を除く', async () => {
+  it('limit に満たなければ窓全体を読み切り、窓外の log は含めない', async () => {
+    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    const slug = JPYC_CHAINS[0];
+    const r = await readTransfers(slug, { limit: 100 });
+    expect(r.status).toBe('ok');
+    if (r.status !== 'ok') return;
+    const inWindow = ALL_LOGS.filter((l) => l.blockNumber >= 1_000_000n - TRANSFER_WINDOW_BLOCKS[slug]);
+    expect(r.items).toHaveLength(inWindow.length);
+    expect(r.items.map((i) => i.valueFormatted)).toEqual(['3', '2', '1', '4'].slice(0, inWindow.length));
+    const c = clients.get(chainForSlug(slug).id)!;
+    expect(c.getLogs.mock.calls.length).toBe(Number(TRANSFER_WINDOW_BLOCKS[slug] / TRANSFER_CHUNK_BLOCKS) + 1);
+  });
+
+  it('address 指定はチャンクごとに from/to の 2 クエリを和集合し重複を除く', async () => {
     const dup = log(999_999n, 0, ADDR, ADDR, 1n);
-    setAll(() => okClient({ getLogs: vi.fn().mockResolvedValue([dup]) }));
+    setAll(() =>
+      okClient({
+        getLogs: vi.fn(async (q: { fromBlock: bigint; toBlock: bigint }) =>
+          dup.blockNumber >= q.fromBlock && dup.blockNumber <= q.toBlock ? [dup] : [],
+        ),
+      }),
+    );
     const slug = JPYC_CHAINS[0];
     const r = await readTransfers(slug, { limit: 10, address: ADDR });
     expect(r.status).toBe('ok');
     if (r.status !== 'ok') return;
     expect(r.items).toHaveLength(1);
     const c = clients.get(chainForSlug(slug).id)!;
-    expect(c.getLogs).toHaveBeenCalledTimes(2);
+    expect(c.getLogs.mock.calls.length % 2).toBe(0);
     expect(c.getLogs.mock.calls[0][0]).toEqual(expect.objectContaining({ args: { from: ADDR } }));
     expect(c.getLogs.mock.calls[1][0]).toEqual(expect.objectContaining({ args: { to: ADDR } }));
   });
