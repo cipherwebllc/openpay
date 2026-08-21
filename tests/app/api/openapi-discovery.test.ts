@@ -117,6 +117,9 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
     const expected: [string, string][] = [
       ['/api/paid/usdc/japan-web3-directory/search', '0.02'],
       ['/api/paid/usdc/stores', '0.04'],
+      ['/api/paid/usdc/jpyc/supply', '0.002'],
+      ['/api/paid/usdc/jpyc/balance', '0.002'],
+      ['/api/paid/usdc/jpyc/transfers', '0.005'],
       ['/api/paid/hello', '0.01'], // X402_PRICE stub に一致
     ];
     for (const [path, amount] of expected) {
