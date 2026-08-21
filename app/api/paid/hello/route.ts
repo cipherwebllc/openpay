@@ -43,7 +43,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     request,
     {
       resourceUrl: `${OPENPAY_CANONICAL_ORIGIN}/api/paid/hello`,
-      description: 'OpenPay demo paid endpoint: returns hello + timestamp.',
+      // 掲載面 (CDP Bazaar / agentic.market) のカード文言 = この description (2026-08-20 実測)。
+      description:
+        'End-to-end smoke test for x402 clients: returns a greeting plus the settlement timestamp, so an agent can prove its payment path works before spending on real data.',
       price,
       outputSchema: {
         input: { type: 'http', method: 'GET', discoverable: true },

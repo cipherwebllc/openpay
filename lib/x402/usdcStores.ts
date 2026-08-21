@@ -5,6 +5,10 @@ export const USDC_STORES = {
   path: '/api/paid/usdc/stores',
   price: '$0.04',
   priceUsd: '0.04',
+  // 掲載面 (CDP Bazaar / agentic.market) のカード文言はこの description がそのまま出る
+  // (2026-08-20 実測)。買い手は英語圏の AI エージェントなので、①何が返るか ②JPYC が何か
+  // ③検索キーワード (JPYC/Japan/stablecoin) を優先し、カード側に別フィールドがある
+  // 「x402・USDC on Base」の重複は削る。
   description:
-    'Directory of JPYC-accepting exchanges, dApps and bridges (curated JSON with attribution). Standard x402, USDC on Base.',
+    "Where JPYC (Japan's yen-pegged stablecoin) is accepted: curated exchanges, DEXes, dApps and bridges as JSON, each with category, supported assets and an official URL.",
 } as const;
