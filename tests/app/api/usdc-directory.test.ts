@@ -152,7 +152,9 @@ describe('GET /api/paid/usdc/japan-web3-directory', () => {
         extensions: { bazaar: { info: Record<string, unknown>; schema: Record<string, unknown> } };
       }
     ).extensions.bazaar;
-    expect(bazaar.info).toEqual({ input: { type: 'http', method: 'GET' } });
+    expect(bazaar.info.input).toEqual({ type: 'http', method: 'GET' });
+    // 応答例 (info.output) は CDP validate の advisory 項目 = 掲載品質スコアに効く
+    expect((bazaar.info.output as { type: string }).type).toBe('json');
     expect(bazaar.schema.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
     expect(bazaar.schema.required).toEqual(['input']);
     expect(fetchMock).not.toHaveBeenCalled();
