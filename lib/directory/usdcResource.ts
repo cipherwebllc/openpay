@@ -29,3 +29,73 @@ export const USDC_DIRECTORY_SEARCH = {
   description:
     "Filter the Japan Web3 Directory by category, token, chain or capability — the same sourced, date-stamped records as the full export, without pulling rows your agent doesn't need.",
 } as const;
+
+/** 応答 1 行の例 (実データ jpyc-ex を短縮)。一覧と検索で共用。 */
+const DIRECTORY_ROW_EXAMPLE = {
+  slug: 'jpyc-ex',
+  name: 'JPYC EX',
+  nameJa: 'JPYC EX',
+  status: 'published',
+  sourceUrl: 'https://jpyc.co.jp/',
+  sourceType: 'official',
+  verifiedAt: '2026-07-13',
+  facts: {
+    category: 'exchange',
+    tags: ['Japan', 'issuance', 'redemption'],
+    tokens: ['jpyc'],
+    chains: ['avalanche', 'ethereum', 'polygon'],
+    supportsJpyc: true,
+    supportsUsdc: false,
+    supportsX402: false,
+    supportsMcp: false,
+  },
+  editorial: {
+    summaryEn: 'The official starting point for JPYC issuance and redemption.',
+  },
+  sourceCheckedAt: '2026-08-20T01:27:11.803Z',
+  sourceOk: true,
+} as const;
+
+const DIRECTORY_ENVELOPE_EXAMPLE = {
+  schemaVersion: '1.0',
+  query: { limit: 20, offset: 0 },
+  items: [DIRECTORY_ROW_EXAMPLE],
+  total: 19,
+  generatedAt: '2026-08-21T00:32:38.608Z',
+} as const;
+
+/**
+ * CDP Bazaar / agentic.market 向け宣言。**引数は lib/directory/query.ts の QUERY_KEYS と
+ * 許容値 (types.ts の enum) に一致させる** — ここが実装とずれるとエージェントが 400 を踏む。
+ * 売れている検索系は全て schema に引数がある (2026-08-21 カタログ集計)。
+ */
+export const USDC_DIRECTORY_SEARCH_BAZAAR = {
+  queryParams: { category: 'exchange', token: 'jpyc', chain: 'polygon', limit: '20' },
+  queryParamsSchema: {
+    properties: {
+      keyword: { type: 'string', maxLength: 100, description: 'Free-text match on name/summary' },
+      category: {
+        type: 'string',
+        enum: ['api', 'bridge', 'developer-tool', 'exchange', 'network', 'payment', 'stablecoin', 'wallet'],
+      },
+      token: { type: 'string', enum: ['jpyc', 'usdc'] },
+      chain: {
+        type: 'string',
+        enum: ['arbitrum', 'avalanche', 'base', 'ethereum', 'kaia', 'optimism', 'polygon'],
+      },
+      language: { type: 'string', enum: ['en', 'ja'] },
+      supportsJpyc: { type: 'string', enum: ['true', 'false'] },
+      supportsUsdc: { type: 'string', enum: ['true', 'false'] },
+      supportsX402: { type: 'string', enum: ['true', 'false'] },
+      supportsMcp: { type: 'string', enum: ['true', 'false'] },
+      limit: { type: 'string', description: '1-50 (default 20)' },
+      offset: { type: 'string', description: '0-1000 (default 0)' },
+    },
+    additionalProperties: false,
+  },
+  output: { example: DIRECTORY_ENVELOPE_EXAMPLE },
+} as const;
+
+export const USDC_DIRECTORY_LIST_BAZAAR = {
+  output: { example: DIRECTORY_ENVELOPE_EXAMPLE },
+} as const;

@@ -23,7 +23,10 @@ import {
   queryDirectory,
 } from '@/lib/directory/query';
 import type { DirectoryQuery } from '@/lib/directory/types';
-import { USDC_DIRECTORY_LIST } from '@/lib/directory/usdcResource';
+import {
+  USDC_DIRECTORY_LIST,
+  USDC_DIRECTORY_LIST_BAZAAR,
+} from '@/lib/directory/usdcResource';
 import { readDirectoryVerificationSnapshot } from '@/lib/directory/verification';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
 import { handleVanillaPaidGet } from '@/lib/x402/vanillaGate';
@@ -71,6 +74,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       outputSchema: {
         input: { type: 'http', method: 'GET', discoverable: true },
       },
+      bazaar: USDC_DIRECTORY_LIST_BAZAAR,
     },
     directoryListContent,
   );

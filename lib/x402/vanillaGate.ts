@@ -33,6 +33,7 @@ import {
   toV2Accept,
   v2PayloadToV1Body,
   type BazaarExtensionV2,
+  type BazaarQueryDeclaration,
   type FacilitatorV1Body,
   type PaymentRequirementsV1,
 } from './v2';
@@ -62,8 +63,13 @@ export type VanillaPaidResource = {
   description: string;
   /** "$0.02" 形式 (USD)。USDC 6 桁 atomic へ厳密変換する。 */
   price: string;
-  /** x402scan bazaar 向けの発見メタ (任意)。 */
+  /** x402scan bazaar 向けの発見メタ (任意)。v1 body の accepts[].outputSchema に載る。 */
   outputSchema?: { input: unknown; output?: unknown };
+  /**
+   * CDP Bazaar / agentic.market 向けの v2 宣言 (引数スキーマ・応答例)。
+   * outputSchema がある資源でのみ使われ、未指定なら引数なし GET の最小形。
+   */
+  bazaar?: BazaarQueryDeclaration;
 };
 
 /** "$0.02" → "20000"。float を経由しない厳密変換 (6 桁超の端数は設定ミスとして throw)。 */
@@ -136,7 +142,7 @@ function paymentChallenge(
     accepts: [toV2Accept(accepts.v1Caip2)],
     // v1 body の outputSchema (x402scan 互換) はそのまま・v2 面だけ公式形 {info, schema}。
     // CDP Bazaar は schema 無しを severity=required で掲載拒否する (validate API 実測)。
-    ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2() } : {}),
+    ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2(resource.bazaar) } : {}),
     error,
   });
   res.headers.set(
@@ -334,7 +340,7 @@ async function handleVanillaPaidGetInner(
       accept: toV2Accept(accepts.v1Caip2),
       resource,
       // 402 で配ったのと同じ宣言を facilitator にも渡す (Bazaar カタログ登録の入力)。
-      ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2() } : {}),
+      ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2(resource.bazaar) } : {}),
     });
   } catch (e) {
     logger.warn('x402.vanilla.verify_unavailable', {
@@ -364,7 +370,7 @@ async function handleVanillaPaidGetInner(
       accept: toV2Accept(accepts.v1Caip2),
       resource,
       // カタログ登録は settle 時に確定する — verify と同じ payload 形で送る。
-      ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2() } : {}),
+      ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2(resource.bazaar) } : {}),
     });
   } catch (e) {
     logger.warn('x402.vanilla.settle_unavailable', {

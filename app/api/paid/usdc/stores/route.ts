@@ -6,7 +6,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { EXPLORE_ENTRIES } from '@/lib/explore';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
-import { USDC_STORES } from '@/lib/x402/usdcStores';
+import { USDC_STORES, USDC_STORES_BAZAAR } from '@/lib/x402/usdcStores';
 import { handleVanillaPaidGet } from '@/lib/x402/vanillaGate';
 
 export const runtime = 'nodejs';
@@ -22,6 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       outputSchema: {
         input: { type: 'http', method: 'GET', discoverable: true },
       },
+      bazaar: USDC_STORES_BAZAAR,
     },
     () =>
       NextResponse.json({

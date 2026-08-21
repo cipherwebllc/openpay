@@ -50,6 +50,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       outputSchema: {
         input: { type: 'http', method: 'GET', discoverable: true },
       },
+      bazaar: {
+        output: {
+          example: {
+            message: 'Hello, paid AI agent.',
+            timestamp: '2026-08-20T23:02:04.176Z',
+          },
+        },
+      },
     },
     helloContent,
   );

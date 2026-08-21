@@ -12,3 +12,27 @@ export const USDC_STORES = {
   description:
     "Where JPYC (Japan's yen-pegged stablecoin) is accepted: curated exchanges, DEXes, dApps and bridges as JSON, each with category, supported assets and an official URL.",
 } as const;
+
+/** CDP Bazaar / agentic.market 向けの応答例 (実データ先頭 2 件・形は route と同一)。 */
+export const USDC_STORES_BAZAAR = {
+  output: {
+    example: {
+      items: [
+        {
+          name: 'JPYC EX',
+          category: 'exchange',
+          url: 'https://jpyc.co.jp/',
+          badges: ['jp-only'],
+          assets: ['jpyc'],
+        },
+        {
+          name: 'Uniswap',
+          category: 'dex',
+          url: 'https://app.uniswap.org/',
+          badges: ['global'],
+          assets: ['usdc'],
+        },
+      ],
+    },
+  },
+} as const;

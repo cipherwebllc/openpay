@@ -15,7 +15,10 @@ import {
   queryDirectory,
   validateDirectoryQuery,
 } from '@/lib/directory/query';
-import { USDC_DIRECTORY_SEARCH } from '@/lib/directory/usdcResource';
+import {
+  USDC_DIRECTORY_SEARCH,
+  USDC_DIRECTORY_SEARCH_BAZAAR,
+} from '@/lib/directory/usdcResource';
 import { readDirectoryVerificationSnapshot } from '@/lib/directory/verification';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
 import { handleVanillaPaidGet } from '@/lib/x402/vanillaGate';
@@ -66,6 +69,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       outputSchema: {
         input: { type: 'http', method: 'GET', discoverable: true },
       },
+      bazaar: USDC_DIRECTORY_SEARCH_BAZAAR,
     },
     () => searchContent(parsed.value),
   );

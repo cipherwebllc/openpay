@@ -78,24 +78,59 @@ export type BazaarExtensionV2 = {
   schema: Record<string, unknown>;
 };
 
-/** 引数なし GET 資源の公式 bazaar 宣言。queryParams を宣言しない最小形。 */
-export function buildBazaarQueryExtensionV2(): BazaarExtensionV2 {
+/**
+ * GET 資源の bazaar 宣言に載せる任意メタ。coinbase/x402 の
+ * createQueryDiscoveryExtension の引数と同じ意味:
+ *   - queryParams: 例示値 (info 側)・queryParamsSchema: その JSON Schema (schema 側)
+ *   - output: 応答例 (info.output.example) と任意の JSON Schema
+ * 引数を宣言しないと、エージェントには「絞り込める」ことが見えない
+ * (agentic.market で売れている検索系は全て schema に引数がある・2026-08-21 実測)。
+ */
+export type BazaarQueryDeclaration = {
+  queryParams?: Record<string, string>;
+  queryParamsSchema?: Record<string, unknown>;
+  output?: { example: Record<string, unknown>; schema?: Record<string, unknown> };
+};
+
+/** GET 資源の公式 bazaar 宣言。宣言なしなら引数なし GET の最小形。 */
+export function buildBazaarQueryExtensionV2(
+  decl: BazaarQueryDeclaration = {},
+): BazaarExtensionV2 {
+  const inputProps: Record<string, unknown> = {
+    type: { type: 'string', const: 'http' },
+    method: { type: 'string', enum: ['GET'] },
+  };
+  const inputInfo: Record<string, unknown> = { type: 'http', method: 'GET' };
+  if (decl.queryParams) {
+    inputInfo.queryParams = decl.queryParams;
+    inputProps.queryParams = { type: 'object', ...(decl.queryParamsSchema ?? {}) };
+  }
+  const info: Record<string, unknown> = { input: inputInfo };
+  const properties: Record<string, unknown> = {
+    input: {
+      type: 'object',
+      properties: inputProps,
+      required: ['type', 'method'],
+      additionalProperties: false,
+    },
+  };
+  if (decl.output) {
+    info.output = { type: 'json', example: decl.output.example };
+    properties.output = {
+      type: 'object',
+      properties: {
+        type: { type: 'string' },
+        example: { type: 'object', ...(decl.output.schema ?? {}) },
+      },
+      required: ['type'],
+    };
+  }
   return {
-    info: { input: { type: 'http', method: 'GET' } },
+    info,
     schema: {
       $schema: 'https://json-schema.org/draft/2020-12/schema',
       type: 'object',
-      properties: {
-        input: {
-          type: 'object',
-          properties: {
-            type: { type: 'string', const: 'http' },
-            method: { type: 'string', enum: ['GET'] },
-          },
-          required: ['type', 'method'],
-          additionalProperties: false,
-        },
-      },
+      properties,
       required: ['input'],
     },
   };
