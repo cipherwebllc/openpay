@@ -121,6 +121,12 @@ export type SellGuideContent = {
   readonly listingSteps: readonly GuideStep[];
   readonly registrationLink: SellGuideLink;
 
+  /** x402 Bazaar / agentic.market は別の発見面 (USDC・Base・CDP settle が条件) — 誤解を先回りで解く。 */
+  readonly bazaarTitle: string;
+  readonly bazaarIntro: string;
+  readonly bazaarItems: readonly string[];
+  readonly bazaarNote: string;
+
   readonly jobDescTitle: string;
   readonly jobDescIntro: string;
   readonly jobDescItems: readonly string[];
@@ -237,6 +243,17 @@ const ja: SellGuideContent = {
     label: 'open-pay.jp/discovery で登録する',
     href: '/discovery',
   },
+
+  bazaarTitle: 'x402 Bazaar / agentic.market に載せたい場合',
+  bazaarIntro:
+    'このページの出品（JPYC・Polygon）は /api/discovery と OpenPay の MCP / SDK からエージェントに発見されます。Coinbase の x402 Bazaar と agentic.market は別の発見面で、掲載には次の条件があります（OpenPay への出品では載りません）:',
+  bazaarItems: [
+    '標準 x402（exact スキーム）・USDC（Base mainnet）で 402 を返すこと',
+    'CDP（Coinbase Developer Platform）の facilitator 経由で verify / settle し、実購入が 1 件 settle されること',
+    '402 応答と settle の paymentPayload に掲載メタ（サービス名・480 字以内の説明・入出力スキーマ）を含めること',
+  ],
+  bazaarNote:
+    'つまり Bazaar 掲載は「自前の標準 x402 ゲート + 自分の CDP 鍵」で実現します。OpenPay 公式の USDC 商品（Base）はこの方式で掲載済みです。両方に載せたい場合は、JPYC 出品と USDC ゲートを並走させてください。',
 
   jobDescTitle: '説明文は「何を完了するか」で書く',
   jobDescIntro:
@@ -381,6 +398,17 @@ const en: SellGuideContent = {
     label: 'Register at open-pay.jp/discovery',
     href: '/discovery',
   },
+
+  bazaarTitle: 'If you also want to be listed on the x402 Bazaar / agentic.market',
+  bazaarIntro:
+    'Listings on this page (JPYC on Polygon) are discovered by agents via /api/discovery and the OpenPay MCP / SDK. Coinbase’s x402 Bazaar and agentic.market are a separate discovery surface with their own requirements (an OpenPay listing alone does not appear there):',
+  bazaarItems: [
+    'Return a 402 with standard x402 (exact scheme) in USDC on Base mainnet',
+    'Verify / settle through the CDP (Coinbase Developer Platform) facilitator, with at least one real settled purchase',
+    'Carry listing metadata (service name, a description within 480 characters, input/output schemas) in the 402 response and the settle paymentPayload',
+  ],
+  bazaarNote:
+    'In short, Bazaar listing comes from your own standard x402 gate plus your own CDP keys — independent of your OpenPay JPYC listing. OpenPay’s official USDC products on Base are listed this way. To appear on both, run the JPYC listing and a USDC gate side by side.',
 
   jobDescTitle: 'Describe the job your listing completes',
   jobDescIntro:

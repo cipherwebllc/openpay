@@ -174,6 +174,17 @@ export default async function GuideSellPage({
           >
             {c.registrationLink.label}
           </Link>
+          {/* Bazaar は別の発見面 (USDC/Base/CDP)。出品者の「Bazaar にも載る?」の誤解を先回りで解く。 */}
+          <div className="mt-6 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
+            <h3 className="text-base font-semibold text-slate-900">{c.bazaarTitle}</h3>
+            <p className="mt-2 text-sm leading-relaxed text-slate-700">{c.bazaarIntro}</p>
+            <BulletList
+              items={c.bazaarItems}
+              marker="•"
+              markerClassName="text-emerald-600"
+            />
+            <p className="mt-3 text-sm leading-relaxed text-slate-700">{c.bazaarNote}</p>
+          </div>
         </Section>
 
         {/* 業務完了型の説明の書き方 (2026-07-23 朝刊裁定 P2: モデル紹介でなく完了する仕事を書く) */}

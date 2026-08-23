@@ -2584,6 +2584,7 @@
     "pillDirect": "受取は直接着金",
     "registerTitle": "API を出品する",
     "registerSubtitle": "402 ゲートを置くだけ。エージェントが見つけて JPYC で支払い、受取は直接着金。",
+    "listingDiscoveryNote": "出品は /api/discovery と OpenPay の MCP / SDK からエージェントに発見されます（JPYC・Polygon）。x402 Bazaar / agentic.market に載るのは USDC（Base・標準 x402）商品のみで、本フォームの出品は対象外です。",
     "listingPolicySummary": "掲載条件: 実在する 402 ゲート・提供と課金の正当な権利・OpenPay 方式。",
     "sellGuideCta": "出品ガイドを見る（実売事例つき）",
     "aiPayGuideCta": "セットアップ手順: AIが支払うガイド",
