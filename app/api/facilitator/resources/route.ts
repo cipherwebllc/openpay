@@ -43,7 +43,10 @@ export async function GET(): Promise<NextResponse> {
   // スニペットは URL から決定的に再生成できる。登録時 1 回きりだった表示を owner 一覧から
   // いつでも再取得できるようにする (加盟店の実組み込みで「もう一度見たい」が発生)。
   return NextResponse.json({
-    resources: resources.map((r) => ({ ...r, paywallSnippet: buildPaywallSnippet(r.url) })),
+    resources: resources.map((r) => ({
+      ...r,
+      paywallSnippet: buildPaywallSnippet(r.url, { usdcResourceId: r.usdc ? r.id : undefined }),
+    })),
   });
 }
 
@@ -147,7 +150,9 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // paywall スニペット: 外部サーバーがコピペで動く自己完結ゲート (旧: リポ内 import 前提の
   // 骨子例 → 実加盟店で動かず差し替え)。
-  const paywallSnippet = buildPaywallSnippet(resource.url);
+  const paywallSnippet = buildPaywallSnippet(resource.url, {
+    usdcResourceId: resource.usdc ? resource.id : undefined,
+  });
 
   return NextResponse.json({ resource, paywallSnippet }, { status: 201 });
 }

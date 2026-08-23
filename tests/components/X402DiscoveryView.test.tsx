@@ -22,6 +22,20 @@ vi.mock('@/hooks/useSiweSession', () => ({
 vi.mock('@/components/ConnectButton', () => ({
   ConnectButton: () => <button type="button">ウォレットを接続</button>,
 }));
+// dual-rail UI flag だけ差し替え可能にする (他の env は実値)。既定 OFF = 従来描画。
+const envState = vi.hoisted(() => ({ enableX402DualRailUi: false }));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...mod,
+    env: new Proxy(mod.env, {
+      get: (t, p) =>
+        p === 'enableX402DualRailUi'
+          ? envState.enableX402DualRailUi
+          : (t as Record<string | symbol, unknown>)[p],
+    }),
+  };
+});
 
 import { X402DiscoveryView } from '@/components/X402DiscoveryView';
 import { MAX_RESOURCES_PER_MERCHANT } from '@/lib/x402/registry';
@@ -83,6 +97,7 @@ beforeEach(() => {
   state.connected = false;
   state.address = undefined;
   state.signedIn = false;
+  envState.enableX402DualRailUi = false;
   // onEdit は window.scrollTo を呼ぶ (jsdom 未実装) → no-op で stub。
   window.scrollTo = vi.fn() as unknown as typeof window.scrollTo;
   global.fetch = vi.fn(async () => ({
@@ -783,5 +798,104 @@ describe('X402DiscoveryView', () => {
     expect(
       await screen.findByText('まだ登録されたリソースはありません。'),
     ).toBeInTheDocument();
+  });
+});
+
+describe('X402DiscoveryView dual-rail USDC 面 (flag ゲート)', () => {
+  const USDC_OWNED = {
+    ...OWNED,
+    usdc: {
+      payTo: '0x3333333333333333333333333333333333333333',
+      priceUsd: '0.005',
+      serviceName: 'My API',
+    },
+  };
+
+  it('flag OFF (既定): opt-in は出ない (従来フォームのまま)', async () => {
+    renderAsOwner([]);
+    expect(await screen.findByRole('button', { name: '登録する' })).toBeInTheDocument();
+    expect(
+      screen.queryByText('USDC (Base) でも販売する — x402 Bazaar に掲載'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('flag ON: opt-in → 価格入力 → POST body に usdc が乗る', async () => {
+    envState.enableX402DualRailUi = true;
+    state.connected = true;
+    state.address = '0x2222222222222222222222222222222222222222';
+    state.signedIn = true;
+    const fetchFn = installRoutingFetch([]);
+    renderView();
+
+    fireEvent.change(await screen.findByPlaceholderText(/リソース URL/), {
+      target: { value: 'https://api.example.jp/paid/new' },
+    });
+    // flag ON では発見面の注記も dual-rail 版 (「対象外」の否定文と矛盾させない)。
+    expect(screen.getByText(/「USDC \(Base\) でも販売する」を有効にすると/)).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('説明 (何を提供するか)'), {
+      target: { value: '新しい有料 API' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('価格 (JPYC・整数)'), {
+      target: { value: '500' },
+    });
+    // opt-in を有効化 → USDC 入力欄が現れる。
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'USDC (Base) でも販売する — x402 Bazaar に掲載' }),
+    );
+    fireEvent.change(screen.getByPlaceholderText('0.005'), {
+      target: { value: '0.01' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('例: Weather Forecast API'), {
+      target: { value: 'New API' },
+    });
+    // 正当性表明 (既存 checkbox) → 送信。
+    fireEvent.click(screen.getByRole('checkbox', { name: /正当な権利/ }));
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+
+    await waitFor(() =>
+      expect(fetchFn).toHaveBeenCalledWith(
+        '/api/facilitator/resources',
+        expect.objectContaining({ method: 'POST' }),
+      ),
+    );
+    const postCall = fetchFn.mock.calls.find(
+      ([u, init]) =>
+        u === '/api/facilitator/resources' &&
+        (init as RequestInit | undefined)?.method === 'POST',
+    );
+    const sentBody = JSON.parse(String((postCall![1] as RequestInit).body));
+    expect(sentBody.usdc).toEqual({ priceUsd: '0.01', serviceName: 'New API' });
+  });
+
+  it('flag OFF でも既存の USDC 面は編集 (PATCH) で黙って消えない (prefill 維持)', async () => {
+    const fetchFn = renderAsOwner([USDC_OWNED]);
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    // flag OFF でも prefill された面は見える (見えない状態で消させない)。
+    expect(
+      screen.getByRole('checkbox', { name: 'USDC (Base) でも販売する — x402 Bazaar に掲載' }),
+    ).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: '更新する' }));
+    await waitFor(() =>
+      expect(fetchFn).toHaveBeenCalledWith(
+        `/api/facilitator/resources/${USDC_OWNED.id}`,
+        expect.objectContaining({ method: 'PATCH' }),
+      ),
+    );
+    const patchCall = fetchFn.mock.calls.find(
+      ([u, init]) =>
+        String(u).startsWith('/api/facilitator/resources/') &&
+        (init as RequestInit | undefined)?.method === 'PATCH',
+    );
+    const sentBody = JSON.parse(String((patchCall![1] as RequestInit).body));
+    expect(sentBody.usdc).toEqual({
+      priceUsd: '0.005',
+      payTo: '0x3333333333333333333333333333333333333333',
+      serviceName: 'My API',
+    });
+  });
+
+  it('owned カードに USDC 面の価格を併記する', async () => {
+    renderAsOwner([USDC_OWNED]);
+    expect(await screen.findByText('+ 0.005 USDC')).toBeInTheDocument();
   });
 });
