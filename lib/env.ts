@@ -690,6 +690,16 @@ export const env = {
     'ENABLE_AGENT_ORDER',
     process.env.ENABLE_AGENT_ORDER,
   ),
+  // dual-rail 出品 (AI ストア出品の USDC/Base 面を CDP facilitator へ中継する
+  // /api/x402/relay/{requirements,verify,settle})。**server-only** (client は参照しない)。
+  // **既定 OFF で完全 inert** = 全 route 404。enableX402Facilitator (レジストリの親 flag) と
+  // AND でゲートし、動作には X402_VANILLA_FACILITATOR=cdp (CDP 鍵) が必要 (無ければ 503)。
+  // 掲載メタはレジストリ側から注入 (client 由来値を載せない = catalog poisoning 防止)。
+  // 計画: plans/dual-rail-listing.md。'1' / 'true' で ON。
+  enableX402DualRail: parseBoolFlag(
+    'ENABLE_X402_DUAL_RAIL',
+    process.env.ENABLE_X402_DUAL_RAIL,
+  ),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。

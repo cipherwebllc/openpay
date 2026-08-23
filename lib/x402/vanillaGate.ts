@@ -98,28 +98,56 @@ function vanillaNetwork(): { name: VanillaNetwork } & (typeof VANILLA_NETWORKS)[
   return { name, ...VANILLA_NETWORKS[name] };
 }
 
-type PreparedAccepts = {
+export type PreparedAccepts = {
   /** v1 命名 (network='base') — v1 JSON body と facilitator body に使う。 */
   v1: PaymentRequirementsV1;
   /** CAIP-2 命名 — v2 ヘッダと accepted 照合に使う。 */
   v1Caip2: PaymentRequirementsV1;
 };
 
-function buildAccepts(resource: VanillaPaidResource): PreparedAccepts {
+function buildAcceptsCore(args: {
+  resourceUrl: string;
+  description: string;
+  price: string;
+  payTo: string;
+}): PreparedAccepts {
   const net = vanillaNetwork();
   const v1: PaymentRequirementsV1 = {
     scheme: 'exact',
     network: net.name,
-    maxAmountRequired: usdPriceToAtomic(resource.price),
-    resource: resource.resourceUrl,
-    description: resource.description,
+    maxAmountRequired: usdPriceToAtomic(args.price),
+    resource: args.resourceUrl,
+    description: args.description,
     mimeType: 'application/json',
-    payTo: x402Config.payTo,
+    payTo: args.payTo,
     maxTimeoutSeconds: 300,
     asset: net.usdc,
     extra: { ...net.extra },
   };
   return { v1, v1Caip2: { ...v1, network: net.caip2 } };
+}
+
+function buildAccepts(resource: VanillaPaidResource): PreparedAccepts {
+  return buildAcceptsCore({
+    resourceUrl: resource.resourceUrl,
+    description: resource.description,
+    price: resource.price,
+    payTo: x402Config.payTo,
+  });
+}
+
+/**
+ * dual-rail リレー (出品者の USDC 面) 用: payTo を出品者受取先に差し替えた accepts。
+ * first-party の buildAccepts と同一の生成規則 (asset/extra/network/期限) を共有し、
+ * リレーと 402 表面の要件がずれる余地を残さない。設定不正 (network が base 系でない等) は throw。
+ */
+export function buildRelayAccepts(args: {
+  resourceUrl: string;
+  description: string;
+  price: string;
+  payTo: string;
+}): PreparedAccepts {
+  return buildAcceptsCore(args);
 }
 
 function noStore(res: NextResponse): NextResponse {
@@ -222,6 +250,20 @@ function v2HeaderToBody(
     },
     paymentRequirements: accepts.v1,
   };
+}
+
+/**
+ * 支払いヘッダ (v2 PAYMENT-SIGNATURE 優先・v1 X-PAYMENT fallback) を facilitator body へ
+ * デコードする。handleVanillaPaidGet 内部と同じ規則の公開版 (dual-rail リレーが使う)。
+ * 形が違えば null (呼び出し側が 400/402 に変換する)。
+ */
+export function decodeVanillaPaymentHeader(
+  headers: { v2: string | null; v1: string | null },
+  accepts: PreparedAccepts,
+): FacilitatorV1Body | null {
+  if (headers.v2) return v2HeaderToBody(headers.v2, accepts);
+  if (headers.v1) return v1HeaderToBody(headers.v1, accepts);
+  return null;
 }
 
 export async function postFacilitator(

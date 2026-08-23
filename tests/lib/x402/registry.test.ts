@@ -75,6 +75,8 @@ vi.mock('@/lib/kv', () => ({
       else delete o.docsUrl;
       if (args[7]) o.license = args[7];
       else delete o.license;
+      if (args[9]) o.usdc = JSON.parse(args[9]);
+      else delete o.usdc;
       o.updatedAt = Number(args[8]);
       const enc = JSON.stringify(o);
       store.kv.set(keys[0], enc);
@@ -583,5 +585,95 @@ describe('lib/x402/registry countMerchantResources (上限判定・soft-delete �
   it('KV エラー → null (0 件と誤認して上限 bypass させない)', async () => {
     store.failLrange = true;
     expect(await countMerchantResources(OWNER)).toBeNull();
+  });
+});
+
+describe('lib/x402/registry usdc (dual-rail 面)', () => {
+  const base = {
+    url: 'https://a.jp/x',
+    description: 'd',
+    priceJpyc: '100',
+    category: 'api',
+  };
+  const SELLER_USDC = '0x3333333333333333333333333333333333333333';
+
+  it('parse: usdc 省略 → input.usdc なし (これまで通り)', () => {
+    const r = parseResourceInput(base, OWNER);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.input.usdc).toBeUndefined();
+  });
+
+  it('parse: usdc 指定 (payTo 省略 → JPYC 側 payTo を継承・serviceName 任意)', () => {
+    const r = parseResourceInput(
+      { ...base, usdc: { priceUsd: '0.005', serviceName: ' My API ' } },
+      OWNER,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.input.usdc).toEqual({
+        payTo: OWNER,
+        priceUsd: '0.005',
+        serviceName: 'My API',
+      });
+    }
+  });
+
+  it('parse: usdc.payTo 指定 → checksum 化される', () => {
+    const r = parseResourceInput(
+      { ...base, usdc: { priceUsd: '1', payTo: SELLER_USDC } },
+      OWNER,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.input.usdc).toEqual({
+        payTo: getAddress(SELLER_USDC),
+        priceUsd: '1',
+      });
+    }
+  });
+
+  it.each([
+    [{ priceUsd: '0' }, 'invalid_usdc_price'], // 0 額 settle を作らない
+    [{ priceUsd: '0.0' }, 'invalid_usdc_price'],
+    [{ priceUsd: '$0.005' }, 'invalid_usdc_price'], // 保存形は $ なしに限定
+    [{ priceUsd: '0.0000001' }, 'invalid_usdc_price'], // 小数 7 桁 (USDC decimals 超)
+    [{ priceUsd: '1000000' }, 'invalid_usdc_price'], // 整数部 7 桁
+    [{ priceUsd: '01' }, 'invalid_usdc_price'],
+    [{ priceUsd: 5 }, 'invalid_usdc_price'], // 数値型は不可 (文字列のみ)
+    [{}, 'invalid_usdc_price'],
+    [{ priceUsd: '1', payTo: 'not-an-address' }, 'invalid_usdc_pay_to'],
+    [{ priceUsd: '1', serviceName: 'x'.repeat(61) }, 'invalid_usdc_service_name'],
+    [{ priceUsd: '1', serviceName: 42 }, 'invalid_usdc_service_name'],
+  ])('parse: 不正 usdc %j → %s', (usdc, reason) => {
+    expect(parseResourceInput({ ...base, usdc }, OWNER)).toEqual({ ok: false, reason });
+  });
+
+  it('parse: usdc が object 以外 → invalid_usdc', () => {
+    expect(parseResourceInput({ ...base, usdc: 'yes' }, OWNER)).toEqual({
+      ok: false,
+      reason: 'invalid_usdc',
+    });
+    expect(parseResourceInput({ ...base, usdc: [1] }, OWNER)).toEqual({
+      ok: false,
+      reason: 'invalid_usdc',
+    });
+  });
+
+  it('store: create → get 往復で usdc が保存される', async () => {
+    const usdc = { payTo: getAddress(SELLER_USDC), priceUsd: '0.01', serviceName: 'S' };
+    const res = await createResource(input({ usdc }), 'u1', 1000);
+    expect(res.ok).toBe(true);
+    expect((await getResource('u1'))?.usdc).toEqual(usdc);
+  });
+
+  it('store: update で usdc を追加・除去できる (空 = 面を外す)', async () => {
+    await createResource(input(), 'u2', 1000);
+    const usdc = { payTo: OWNER, priceUsd: '2' };
+    const up = await updateResource('u2', OWNER, input({ usdc }), 2000);
+    expect(up.ok).toBe(true);
+    expect((await getResource('u2'))?.usdc).toEqual(usdc);
+    const off = await updateResource('u2', OWNER, input(), 3000);
+    expect(off.ok).toBe(true);
+    expect((await getResource('u2'))?.usdc).toBeUndefined();
   });
 });

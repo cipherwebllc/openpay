@@ -42,6 +42,14 @@ export type X402Verification = {
   probedUrl: string;
 };
 
+// dual-rail (JPYC + USDC/Base) 出品の USDC 面。指定した resource だけが CDP リレー
+// (/api/x402/relay/*) を使える。payTo は出品者の受取先 (OpenPay は USDC 側の手数料を取らない)。
+export type X402ResourceUsdc = {
+  payTo: string; // USDC (Base) 受取先 (checksum)
+  priceUsd: string; // "0.005" 形式 (USD・$ なし・小数 6 桁まで)
+  serviceName?: string; // CDP Bazaar の検索・カード表示名 (任意・≤60 字)
+};
+
 export type X402Resource = {
   id: string;
   merchant: string; // owner wallet (SIWE・checksum)
@@ -58,6 +66,7 @@ export type X402Resource = {
   updatedAt?: number;
   verification?: X402Verification;
   hidden?: boolean;
+  usdc?: X402ResourceUsdc;
 };
 
 export type X402ResourceInput = {
@@ -69,6 +78,7 @@ export type X402ResourceInput = {
   docsUrl?: string;
   license?: string;
   payTo: string;
+  usdc?: X402ResourceUsdc;
 };
 
 export type X402Settlement = {
@@ -89,7 +99,11 @@ const MAX_DESC = 280;
 const MAX_CATEGORY = 40;
 export const MAX_RESOURCE_DOCS_URL = 512;
 export const MAX_RESOURCE_LICENSE = 60;
+export const MAX_USDC_SERVICE_NAME = 60;
 const MAX_PRICE_DIGITS = 9; // ≤ 999,999,999 JPYC (fat-finger 上限)
+// USD 価格 ("0.005" 形式・$ なし)。整数部 ≤6 桁 (≤ $999,999)・小数 ≤6 桁 (USDC decimals)。
+// vanillaGate.usdPriceToAtomic が受理する形の部分集合 (先頭 $ を許さない = 保存形を一意に)。
+const USDC_PRICE_RE = /^(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,6})?$/;
 
 export type ParseResourceResult =
   | { ok: true; input: X402ResourceInput }
@@ -188,6 +202,39 @@ export function parseResourceInput(
     }
     payTo = getAddress(r.payTo as string);
   }
+  // dual-rail (USDC/Base) 面 (任意)。未指定 = JPYC のみ (これまで通り)。指定時は 3 項目を検証:
+  // priceUsd は保存形を一意にする ($ なし・"0" 単独は不可 = 0 額 settle を作らない)。
+  // payTo 未指定は JPYC 側の payTo (= 出品者) を既定にする。
+  let usdc: X402ResourceUsdc | undefined;
+  if (r.usdc !== undefined && r.usdc !== null && r.usdc !== '') {
+    if (typeof r.usdc !== 'object' || Array.isArray(r.usdc)) {
+      return { ok: false, reason: 'invalid_usdc' };
+    }
+    const u = r.usdc as Record<string, unknown>;
+    const priceUsd = typeof u.priceUsd === 'string' ? u.priceUsd.trim() : '';
+    if (!USDC_PRICE_RE.test(priceUsd) || !/[1-9]/.test(priceUsd)) {
+      return { ok: false, reason: 'invalid_usdc_price' };
+    }
+    let usdcPayTo = payTo;
+    if (u.payTo !== undefined && u.payTo !== '') {
+      if (!isAddress(u.payTo as string)) {
+        return { ok: false, reason: 'invalid_usdc_pay_to' };
+      }
+      usdcPayTo = getAddress(u.payTo as string);
+    }
+    let serviceName: string | undefined;
+    if (u.serviceName !== undefined && u.serviceName !== '') {
+      if (typeof u.serviceName !== 'string') {
+        return { ok: false, reason: 'invalid_usdc_service_name' };
+      }
+      const cleaned = stripControlChars(u.serviceName).trim();
+      if (cleaned.length < 1 || cleaned.length > MAX_USDC_SERVICE_NAME) {
+        return { ok: false, reason: 'invalid_usdc_service_name' };
+      }
+      serviceName = cleaned;
+    }
+    usdc = { payTo: usdcPayTo, priceUsd, ...(serviceName ? { serviceName } : {}) };
+  }
   return {
     ok: true,
     input: {
@@ -199,6 +246,7 @@ export function parseResourceInput(
       docsUrl,
       license,
       payTo,
+      usdc,
     },
   };
 }
@@ -248,6 +296,7 @@ export async function createResource(
     category: input.category,
     ...(input.docsUrl ? { docsUrl: input.docsUrl } : {}),
     ...(input.license ? { license: input.license } : {}),
+    ...(input.usdc ? { usdc: input.usdc } : {}),
     payTo: input.payTo,
     network: caip2ForChainId(x402FacilitatorConfig.chainId),
     active: true,
@@ -331,7 +380,7 @@ const CAS_OWNER_GUARD =
   "if type(o)~='table' or type(o.merchant)~='string' then return -2 end; " +
   'if string.lower(o.merchant)~=string.lower(ARGV[1]) then return 0 end; ';
 
-// owner 一致時のみ編集可能フィールド (url/description/priceJpyc/category/docsUrl/license/payTo) を更新する CAS。
+// owner 一致時のみ編集可能フィールド (url/description/priceJpyc/category/docsUrl/license/payTo/usdc) を更新する CAS。
 // read→write を atomic にし (handleStore と同流儀)、特に soft-delete (active:false) との競合で
 // 削除済 resource を復活させない — active/id/merchant/network/createdAt は Lua が現値を保持する。
 // soft-delete 済 (active:false) は編集不可 (-3) = 保持した監査データ (settlement が参照する当時の
@@ -344,6 +393,8 @@ const CAS_UPDATE =
   'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
   "if ARGV[7]=='' then o.docsUrl=nil else o.docsUrl=ARGV[7] end; " +
   "if ARGV[8]=='' then o.license=nil else o.license=ARGV[8] end; " +
+  // usdc (dual-rail 面) は検証済み input を JSON で受け取り丸ごと置換 (空 = 面を外す)。
+  "if ARGV[10]=='' then o.usdc=nil else o.usdc=cjson.decode(ARGV[10]) end; " +
   'o.updatedAt=tonumber(ARGV[9]); ' +
   "redis.call('SET',KEYS[1],cjson.encode(o)); return cjson.encode(o)";
 
@@ -360,7 +411,7 @@ export type UpdateResourceResult =
   | { ok: true; resource: X402Resource }
   | { ok: false; reason: 'not_found' | 'forbidden' | 'storage' };
 
-// owner 限定で編集可能フィールド (url/description/priceJpyc/category/docsUrl/license/payTo) を更新する。
+// owner 限定で編集可能フィールド (url/description/priceJpyc/category/docsUrl/license/payTo/usdc) を更新する。
 // id/merchant/network/createdAt/active は不変。**merchant !== owner は forbidden** = 他人の掲載や
 // payTo (送金先) を書き換えさせない (認可の要)。owner 確認と書込を CAS で原子化し、KV エラー/破損は
 // not_found ではなく storage に倒す (outage を「未存在」と誤魔化さない)。input は検証済を渡す。
@@ -380,6 +431,7 @@ export async function updateResource(
     input.docsUrl ?? '',
     input.license ?? '',
     String(nowMs),
+    input.usdc ? JSON.stringify(input.usdc) : '',
   ]);
   if (!cas.ok) return { ok: false, reason: 'storage' };
   // -1=未存在 / -3=削除済 → どちらも「編集可能な resource は無い」= not_found。
