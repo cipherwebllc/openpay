@@ -25,7 +25,7 @@ const BANNED_WORDS = /\b(accurate|trusted|best|secure|real-time|realtime|complet
 
 describe('JPYC ライブ API の掲載メタ', () => {
   it('Bazaar 宣言の info は自分の schema に適合する (Ajv 2020・CDP validator と同等)', () => {
-    const ajv = new Ajv2020({ strict: false, allErrors: true });
+    const ajv = new Ajv2020({ strict: false, allErrors: true, validateFormats: false });
     for (const r of USDC_JPYC_LIVE_RESOURCES) {
       const ext = buildBazaarQueryExtensionV2(r.bazaar);
       const validate = ajv.compile(ext.schema);

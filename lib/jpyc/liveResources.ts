@@ -14,16 +14,23 @@
 //   - operationId / summary: エージェントが自然文を読まずに呼べるよう、決済レールを混ぜない
 
 import { JPYC_CHAINS } from '@/lib/chains';
-import { TRANSFERS_DEFAULT_LIMIT, TRANSFERS_MAX_LIMIT } from './live';
+import {
+  JPYC_LIVE_NOTICE_CODE,
+  JPYC_LIVE_TERMS_URL,
+  TRANSFERS_DEFAULT_LIMIT,
+  TRANSFERS_MAX_LIMIT,
+} from './live';
+import {
+  JPYC_BALANCE_RESPONSE_SCHEMA,
+  JPYC_SUPPLY_RESPONSE_SCHEMA,
+  JPYC_TRANSFERS_RESPONSE_SCHEMA,
+} from './liveSchema';
 
 const CHAIN_ENUM = [...JPYC_CHAINS];
 const CHAIN_LIST_TEXT = 'polygon, kaia, avalanche, ethereum';
 
 /** 掲載カードのアイコン (public/icon-512.png・本番到達確認済み)。 */
 export const JPYC_LIVE_ICON_URL = 'https://open-pay.jp/icon-512.png';
-
-const NOTICE_EXAMPLE =
-  'On-chain facts read directly from public RPC endpoints at request time. Informational only — not financial advice, not an offer, quote or solicitation. Verify independently before acting.';
 
 /** 購入ルール (Call / Repeat / Prefer / Do not call)。OpenAPI x-agent-usage と llms.txt に投影する。 */
 export type AgentUsage = {
@@ -78,8 +85,9 @@ export const USDC_JPYC_SUPPLY = {
       additionalProperties: false,
     },
     output: {
+      schema: JPYC_SUPPLY_RESPONSE_SCHEMA,
       example: {
-        schemaVersion: '1.0',
+        schemaVersion: '2.0',
         token: { symbol: 'JPYC', decimals: 18 },
         items: [
           {
@@ -93,7 +101,8 @@ export const USDC_JPYC_SUPPLY = {
           },
         ],
         generatedAt: '2026-08-21T04:30:45.340Z',
-        notice: NOTICE_EXAMPLE,
+        notice: JPYC_LIVE_NOTICE_CODE,
+        termsUrl: JPYC_LIVE_TERMS_URL,
       },
     },
   },
@@ -139,8 +148,9 @@ export const USDC_JPYC_BALANCE = {
       additionalProperties: false,
     },
     output: {
+      schema: JPYC_BALANCE_RESPONSE_SCHEMA,
       example: {
-        schemaVersion: '1.0',
+        schemaVersion: '2.0',
         token: { symbol: 'JPYC', decimals: 18 },
         address: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
         items: [
@@ -155,7 +165,8 @@ export const USDC_JPYC_BALANCE = {
           },
         ],
         generatedAt: '2026-08-21T04:30:45.340Z',
-        notice: NOTICE_EXAMPLE,
+        notice: JPYC_LIVE_NOTICE_CODE,
+        termsUrl: JPYC_LIVE_TERMS_URL,
       },
     },
   },
@@ -211,8 +222,9 @@ export const USDC_JPYC_TRANSFERS = {
       additionalProperties: false,
     },
     output: {
+      schema: JPYC_TRANSFERS_RESPONSE_SCHEMA,
       example: {
-        schemaVersion: '1.0',
+        schemaVersion: '2.0',
         token: { symbol: 'JPYC', decimals: 18 },
         chain: 'polygon',
         chainId: 137,
@@ -231,7 +243,8 @@ export const USDC_JPYC_TRANSFERS = {
           },
         ],
         generatedAt: '2026-08-21T04:30:45.340Z',
-        notice: NOTICE_EXAMPLE,
+        notice: JPYC_LIVE_NOTICE_CODE,
+        termsUrl: JPYC_LIVE_TERMS_URL,
       },
     },
   },

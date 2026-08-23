@@ -202,11 +202,19 @@ describe('支払い後の content と買い手保護', () => {
       req('/api/paid/usdc/jpyc/supply?chain=polygon', { 'x-payment': b64(v1Payment('2000')) }),
     );
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { schemaVersion: string; notice: string; items: unknown[]; token: { symbol: string } };
-    expect(body.schemaVersion).toBe('1.0');
+    const body = (await res.json()) as {
+      schemaVersion: string;
+      notice: string;
+      termsUrl: string;
+      items: unknown[];
+      token: { symbol: string };
+    };
+    expect(body.schemaVersion).toBe('2.0');
     expect(body.token.symbol).toBe('JPYC');
     expect(body.items).toHaveLength(1);
-    expect(body.notice).toMatch(/not financial advice/);
+    // notice は短いコード + 規約 URL (全文は OpenAPI/Schema の description・反復購入のトークン節約)
+    expect(body.notice).toBe('onchain-facts-only');
+    expect(body.termsUrl).toBe('https://open-pay.jp/en/terms');
     expect(liveMocks.readSupply).toHaveBeenCalledWith(['polygon']);
     expect(fetchMock).toHaveBeenCalledTimes(2); // verify + settle
     expect(res.headers.get('X-PAYMENT-RESPONSE')).toBeTruthy();
@@ -228,7 +236,7 @@ describe('支払い後の content と買い手保護', () => {
 
   it('全チェーン RPC 失敗 → 503 で settle しない (課金されない)', async () => {
     facilitatorOk();
-    liveMocks.readSupply.mockResolvedValue([{ ...okSupplyRow, status: 'error', error: 'down' }]);
+    liveMocks.readSupply.mockResolvedValue([{ ...okSupplyRow, status: 'unavailable', errorCode: 'rpc_unavailable', retryable: true }]);
     const route = await load('supply');
     const res = await route.GET(req('/api/paid/usdc/jpyc/supply', { 'x-payment': b64(v1Payment('2000')) }));
     expect(res.status).toBe(503);
@@ -238,7 +246,7 @@ describe('支払い後の content と買い手保護', () => {
 
   it('1 チェーンだけ失敗は 200 (部分成功・その行に error)', async () => {
     facilitatorOk();
-    liveMocks.readSupply.mockResolvedValue([okSupplyRow, { ...okSupplyRow, chain: 'kaia', status: 'error', error: 'x' }]);
+    liveMocks.readSupply.mockResolvedValue([okSupplyRow, { ...okSupplyRow, chain: 'kaia', status: 'unavailable', errorCode: 'rpc_unavailable', retryable: true }]);
     const route = await load('supply');
     const res = await route.GET(req('/api/paid/usdc/jpyc/supply', { 'x-payment': b64(v1Payment('2000')) }));
     expect(res.status).toBe(200);
@@ -248,7 +256,7 @@ describe('支払い後の content と買い手保護', () => {
   it('transfers: status=error は 503・ok は status を剥がして envelope に展開', async () => {
     facilitatorOk();
     const route = await load('transfers');
-    liveMocks.readTransfers.mockResolvedValueOnce({ chain: 'polygon', chainId: 137, contract: SELLER, status: 'error', error: 'x' });
+    liveMocks.readTransfers.mockResolvedValueOnce({ chain: 'polygon', chainId: 137, contract: SELLER, status: 'unavailable', errorCode: 'rpc_unavailable', retryable: true });
     expect(
       (await route.GET(req('/api/paid/usdc/jpyc/transfers?chain=polygon', { 'x-payment': b64(v1Payment('5000')) }))).status,
     ).toBe(503);

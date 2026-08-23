@@ -27,10 +27,18 @@ import {
   type JpycChainSlug,
 } from '@/lib/chains';
 import { deploymentsForSymbol, type TokenDeployment } from '@/lib/tokens';
+import type { JpycLiveErrorCode } from './liveSchema';
 
-export const JPYC_LIVE_SCHEMA_VERSION = '1.0';
-export const JPYC_LIVE_NOTICE =
+export const JPYC_LIVE_SCHEMA_VERSION = '2.0';
+/**
+ * 応答に載せる notice は短いコードにする (反復購入する AI の入力トークンを毎回消費しないため)。
+ * 全文は JPYC_LIVE_NOTICE_TEXT として OpenAPI の description と Schema の description に置き、
+ * 法的表示は termsUrl (利用規約) が担う — 表示を消すのでなく置き場所を変える (2026-08-23 裁定)。
+ */
+export const JPYC_LIVE_NOTICE_CODE = 'onchain-facts-only';
+export const JPYC_LIVE_NOTICE_TEXT =
   'On-chain facts read directly from public RPC endpoints at request time. Informational only — not financial advice, not an offer, quote or solicitation. Verify independently before acting.';
+export const JPYC_LIVE_TERMS_URL = 'https://open-pay.jp/en/terms';
 
 /** 公開 RPC の hang 対策 (lib/walletBalances の BALANCE_TIMEOUT_MS と同じ発想・少し長め)。 */
 const RPC_TIMEOUT_MS = 5_000;
@@ -77,7 +85,7 @@ export type SupplyRow = ChainRowBase &
         totalSupply: string;
         totalSupplyFormatted: string;
       }
-    | { status: 'error'; error: string }
+    | { status: 'unavailable'; errorCode: JpycLiveErrorCode; retryable: boolean }
   );
 
 export type BalanceRow = ChainRowBase &
@@ -88,7 +96,7 @@ export type BalanceRow = ChainRowBase &
         balance: string;
         balanceFormatted: string;
       }
-    | { status: 'error'; error: string }
+    | { status: 'unavailable'; errorCode: JpycLiveErrorCode; retryable: boolean }
   );
 
 export type TransferItem = {
@@ -109,7 +117,7 @@ export type TransfersResult = ChainRowBase &
         toBlock: string;
         items: TransferItem[];
       }
-    | { status: 'error'; error: string }
+    | { status: 'unavailable'; errorCode: JpycLiveErrorCode; retryable: boolean }
   );
 
 // ---------- 入力の検証 (純関数・route は支払い要求より先にこれで 400 を返す) ----------
@@ -178,14 +186,26 @@ function withTimeout<T>(p: Promise<T>): Promise<T> {
   return Promise.race([p, timeout]);
 }
 
-function errorMessage(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+export type JpycLiveFailure = { errorCode: JpycLiveErrorCode; retryable: boolean };
+
+/**
+ * RPC 失敗を応答用の errorCode に分類する。**生のメッセージは応答に載せない**
+ * (viem のメッセージは RPC URL を含み得る)。
+ *   - contract_read_failed: コントラクト呼び出し自体が revert / ABI 不一致 (再試行しても同じ) → retryable=false
+ *   - rpc_unavailable: timeout・HTTP・transport 障害 (時間を置けば直り得る) → retryable=true
+ */
+export function classifyFailure(e: unknown): JpycLiveFailure {
+  const name = e instanceof Error ? e.name : '';
+  if (name === 'ContractFunctionExecutionError' || name === 'ContractFunctionRevertedError') {
+    return { errorCode: 'contract_read_failed', retryable: false };
+  }
+  return { errorCode: 'rpc_unavailable', retryable: true };
 }
 
 async function perChain<T>(
   chains: readonly JpycChainSlug[],
   read: (slug: JpycChainSlug, dep: TokenDeployment) => Promise<T>,
-  onError: (base: ChainRowBase, error: string) => T,
+  onError: (base: ChainRowBase, failure: JpycLiveFailure) => T,
 ): Promise<T[]> {
   const settled = await Promise.allSettled(
     chains.map((slug) => {
@@ -198,7 +218,7 @@ async function perChain<T>(
     const dep = deploymentFor(chains[i]);
     return onError(
       { chain: chains[i], chainId: dep.chainId, contract: dep.address },
-      errorMessage(r.reason),
+      classifyFailure(r.reason),
     );
   });
 }
@@ -226,7 +246,7 @@ export async function readSupply(chains: readonly JpycChainSlug[]): Promise<Supp
         totalSupplyFormatted: formatUnits(totalSupply, dep.decimals),
       };
     },
-    (base, error) => ({ ...base, status: 'error', error }),
+    (base, failure) => ({ ...base, status: 'unavailable', ...failure }),
   );
 }
 
@@ -257,7 +277,7 @@ export async function readBalance(
         balanceFormatted: formatUnits(balance, dep.decimals),
       };
     },
-    (base, error) => ({ ...base, status: 'error', error }),
+    (base, failure) => ({ ...base, status: 'unavailable', ...failure }),
   );
 }
 
@@ -332,11 +352,11 @@ export async function readTransfers(
     );
     return { ...base, status: 'ok', ...result };
   } catch (e) {
-    return { ...base, status: 'error', error: errorMessage(e) };
+    return { ...base, status: 'unavailable', ...classifyFailure(e) };
   }
 }
 
-/** 全チェーンが error なら「RPC 到達不能」= route は 503 (settle されない)。 */
-export function allFailed(rows: readonly { status: 'ok' | 'error' }[]): boolean {
-  return rows.length > 0 && rows.every((r) => r.status === 'error');
+/** 全チェーンが unavailable なら「RPC 到達不能」= route は 503 (settle されない)。 */
+export function allFailed(rows: readonly { status: 'ok' | 'unavailable' }[]): boolean {
+  return rows.length > 0 && rows.every((r) => r.status === 'unavailable');
 }

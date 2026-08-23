@@ -31,7 +31,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     // 支払い付きで chain が無い場合はここで 400 → gate は settle しない (課金されない)。
     if (!chain) return invalidQuery();
     const result = await readTransfers(chain, { limit, address });
-    if (result.status === 'error') return rpcUnavailable();
+    if (result.status === 'unavailable') return rpcUnavailable();
     const { status: _status, ...rest } = result;
     return envelope(rest);
   });

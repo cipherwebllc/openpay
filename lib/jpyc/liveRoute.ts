@@ -9,7 +9,11 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
 import { handleVanillaPaidGet } from '@/lib/x402/vanillaGate';
 import type { BazaarQueryDeclaration } from '@/lib/x402/v2';
-import { JPYC_LIVE_NOTICE, JPYC_LIVE_SCHEMA_VERSION } from './live';
+import {
+  JPYC_LIVE_NOTICE_CODE,
+  JPYC_LIVE_SCHEMA_VERSION,
+  JPYC_LIVE_TERMS_URL,
+} from './live';
 import { JPYC_LIVE_ICON_URL } from './liveResources';
 
 export type JpycLiveResource = {
@@ -36,7 +40,8 @@ export function envelope(body: Record<string, unknown>): NextResponse {
     token: { symbol: 'JPYC', decimals: 18 },
     ...body,
     generatedAt: new Date().toISOString(),
-    notice: JPYC_LIVE_NOTICE,
+    notice: JPYC_LIVE_NOTICE_CODE,
+    termsUrl: JPYC_LIVE_TERMS_URL,
   });
 }
 
