@@ -139,7 +139,17 @@ const body = {
     payload: { signature, authorization: {
       from: account.address, to: a.payTo, value: a.maxAmountRequired,
       validAfter: '0', validBefore: validBefore.toString(), nonce } },
-    resource: pr?.resource ?? { url: a.resource, description: a.description, mimeType: 'application/json' },
+    resource: (() => {
+      const r = pr?.resource ?? { url: a.resource, description: a.description, mimeType: 'application/json' };
+      // SMOKE_DESCRIPTION_MAX=N で description を N 字に切って送る (CDP の上限の二分探索用・
+      // 2026-08-23: 655 字は x402V2PaymentPayload 不一致で 400・486 字は settle 成功)。
+      const max = Number(process.env.SMOKE_DESCRIPTION_MAX ?? '');
+      if (Number.isFinite(max) && max > 0 && r.description && r.description.length > max) {
+        console.log(`description を ${r.description.length} → ${max} 字に切って送信`);
+        return { ...r, description: r.description.slice(0, max) };
+      }
+      return r;
+    })(),
     ...(pr?.extensions ? { extensions: pr.extensions } : {}),
   },
   paymentRequirements: accept,
