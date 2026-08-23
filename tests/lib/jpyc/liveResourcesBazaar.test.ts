@@ -54,8 +54,14 @@ describe('JPYC ライブ API の掲載メタ', () => {
     }
   });
 
-  it('serviceName は仕事を表し、description は 3 文で禁止語を含まない', () => {
+  // CDP facilitator は resource.description が長いと verify を 400 (判定 body なし) で拒否する
+  // (2026-08-23 本番実測: 486 字は settle 成功・655 字は verify 400)。上限は非公開なので、
+  // 成功実績の 486 字を下回る 480 字をフェンスにする。
+  const DESCRIPTION_MAX = 480;
+
+  it('serviceName は仕事を表し、description は 3 文・480 字以内で禁止語を含まない', () => {
     for (const r of USDC_JPYC_LIVE_RESOURCES) {
+      expect(r.description.length, `${r.path} description length`).toBeLessThanOrEqual(DESCRIPTION_MAX);
       expect(r.serviceName).not.toMatch(/openpay|api|endpoint|premium/i);
       expect(r.serviceName).toMatch(/JPYC/);
       expect(r.description.split(/\.\s+/).length).toBeGreaterThanOrEqual(3);

@@ -91,14 +91,26 @@ function jwtFor(method, url) {
   return `${h}.${c}.${sig.toString('base64url')}`;
 }
 
-// 本番 (lib/x402/vanillaGate) と同一の v2 封筒を、本番 hello の実 402 から組む。
-// 署名は資金ゼロの捨て鍵による本物の EIP-3009 — 全通なら CDP は 200 {isValid:false}
-// (insufficient_funds 等) を返すはず。4xx なら body に理由が書かれているので全文表示する。
+// 本番 (lib/x402/vanillaGate) と同一の v2 封筒を、本番の実 402 から組む。
+//   - accepts は v1 JSON body から、resource (serviceName/tags/iconUrl 含む) と extensions.bazaar は
+//     v2 PAYMENT-REQUIRED ヘッダから写す = 本番が verify/settle に送るものと同じ
+//   - TARGET_URL で任意の endpoint を検査できる (既定 hello)。2026-08-23 の transfers verify 400
+//     (resource.description が長すぎ) のような「形式で拒否」を、資金を動かさずに CDP の
+//     errorMessage として読むのが目的
+// 署名は資金ゼロの捨て鍵による本物の EIP-3009 — 全通なら CDP は 4xx {isValid:false}
+// (insufficient_funds 等) を返すはず。判定 body が無い 4xx なら形式拒否 = body を全文表示する。
 const { privateKeyToAccount, generatePrivateKey } = await import('viem/accounts');
 
-const helloRes = await fetch('https://open-pay.jp/api/paid/hello');
+const TARGET = process.env.TARGET_URL ?? 'https://open-pay.jp/api/paid/hello';
+const helloRes = await fetch(TARGET);
 const hello = await helloRes.json();
 const a = hello.accepts[0];
+const prHeader = helloRes.headers.get('payment-required');
+const pr = prHeader ? JSON.parse(Buffer.from(prHeader, 'base64').toString('utf8')) : null;
+console.log(`target: ${TARGET}`);
+if (pr?.resource?.description) {
+  console.log(`resource.description: ${pr.resource.description.length} chars | serviceName: ${pr.resource.serviceName ?? '-'} | tags: ${(pr.resource.tags ?? []).length} | extensions: ${pr.extensions ? Object.keys(pr.extensions).join(',') : '-'}`);
+}
 const caip2 = a.network === 'base' ? 'eip155:8453' : a.network;
 const account = privateKeyToAccount(generatePrivateKey());
 const validBefore = BigInt(Math.floor(Date.now() / 1000) + 300);
@@ -127,7 +139,18 @@ const body = {
     payload: { signature, authorization: {
       from: account.address, to: a.payTo, value: a.maxAmountRequired,
       validAfter: '0', validBefore: validBefore.toString(), nonce } },
-    resource: { url: a.resource, description: a.description, mimeType: 'application/json' },
+    resource: (() => {
+      const r = pr?.resource ?? { url: a.resource, description: a.description, mimeType: 'application/json' };
+      // SMOKE_DESCRIPTION_MAX=N で description を N 字に切って送る (CDP の上限の二分探索用・
+      // 2026-08-23: 655 字は x402V2PaymentPayload 不一致で 400・486 字は settle 成功)。
+      const max = Number(process.env.SMOKE_DESCRIPTION_MAX ?? '');
+      if (Number.isFinite(max) && max > 0 && r.description && r.description.length > max) {
+        console.log(`description を ${r.description.length} → ${max} 字に切って送信`);
+        return { ...r, description: r.description.slice(0, max) };
+      }
+      return r;
+    })(),
+    ...(pr?.extensions ? { extensions: pr.extensions } : {}),
   },
   paymentRequirements: accept,
 };
