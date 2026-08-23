@@ -30,7 +30,7 @@ import { deploymentsForSymbol, type TokenDeployment } from '@/lib/tokens';
 import { logger } from '@/lib/logger';
 import type { JpycLiveErrorCode } from './liveSchema';
 
-export const JPYC_LIVE_SCHEMA_VERSION = '2.1';
+export const JPYC_LIVE_SCHEMA_VERSION = '2.2';
 /**
  * 応答に載せる notice は短いコードにする (反復購入する AI の入力トークンを毎回消費しないため)。
  * 全文は JPYC_LIVE_NOTICE_TEXT として OpenAPI の description と Schema の description に置き、
@@ -142,6 +142,8 @@ export type TransfersResult = ChainRowBase &
         fromBlock: string;
         toBlock: string;
         items: TransferItem[];
+        /** snapshot (cursor なし・新しい順) / delta (cursor あり・古い順)。hasMore の意味が異なる。 */
+        mode: 'snapshot' | 'delta';
         /** 次回 `cursor` に渡すと、この応答より新しい Transfer だけが返る。入力 cursor より後退しない。 */
         nextCursor: string;
         /** limit で打ち切った (cursor 付きなら nextCursor で続きを取る)。 */
@@ -227,6 +229,24 @@ export type JpycLiveFailure = { errorCode: JpycLiveErrorCode; retryable: boolean
  *   - contract_read_failed: コントラクト呼び出し自体が revert / ABI 不一致 (再試行しても同じ) → retryable=false
  *   - rpc_unavailable: timeout・HTTP・transport 障害 (時間を置けば直り得る) → retryable=true
  */
+/**
+ * ログ用に RPC エラー文を無害化する。URL は host だけ残す (Alchemy 等の鍵付き RPC URL を
+ * Vercel ログに残さない)・`api_key|apikey|token|authorization=…` は伏せる・300 字に切る。
+ */
+export function sanitizeRpcError(message: string): string {
+  return message
+    .replace(/https?:\/\/[^\s)"'`]+/g, (url) => {
+      try {
+        const u = new URL(url);
+        return `${u.protocol}//${u.host}/[redacted]`;
+      } catch {
+        return '[redacted-url]';
+      }
+    })
+    .replace(/\b(api[_-]?key|token|authorization|secret)=([^&\s"']+)/gi, '$1=[redacted]')
+    .slice(0, 300);
+}
+
 export function classifyFailure(
   e: unknown,
   ctx?: { op: 'supply' | 'balance' | 'transfers'; chain: JpycChainSlug },
@@ -237,14 +257,14 @@ export function classifyFailure(
       ? { errorCode: 'contract_read_failed', retryable: false }
       : { errorCode: 'rpc_unavailable', retryable: true };
   // 応答には分類コードだけを出すが、**サーバログには原因を残す** (2026-08-23 の本番 503 は
-  // ログが無く切り分けできなかった)。メッセージは先頭 300 字に切る (viem は URL/body を含めて長い)。
+  // ログが無く切り分けできなかった)。メッセージは sanitizeRpcError で URL/鍵を伏せて 300 字に切る。
   if (ctx) {
     logger.warn('jpyc.live.rpc_failed', {
       op: ctx.op,
       chain: ctx.chain,
       errorCode: failure.errorCode,
       errorName: name || typeof e,
-      message: (e instanceof Error ? e.message : String(e)).slice(0, 300),
+      message: sanitizeRpcError(e instanceof Error ? e.message : String(e)),
     });
   }
   return failure;
@@ -439,6 +459,7 @@ export async function readTransfers(
           fromBlock: fromBlock.toString(),
           toBlock: toBlock.toString(),
           items,
+          mode: delta ? ('delta' as const) : ('snapshot' as const),
           nextCursor: formatCursor(next),
           hasMore,
           truncated,

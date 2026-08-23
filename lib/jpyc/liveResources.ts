@@ -90,7 +90,7 @@ export const USDC_JPYC_SUPPLY = {
     output: {
       schema: JPYC_SUPPLY_RESPONSE_SCHEMA,
       example: {
-        schemaVersion: '2.1',
+        schemaVersion: '2.2',
         token: { symbol: 'JPYC', decimals: 18 },
         items: [
           {
@@ -153,7 +153,7 @@ export const USDC_JPYC_BALANCE = {
     output: {
       schema: JPYC_BALANCE_RESPONSE_SCHEMA,
       example: {
-        schemaVersion: '2.1',
+        schemaVersion: '2.2',
         token: { symbol: 'JPYC', decimals: 18 },
         address: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
         items: [
@@ -184,7 +184,7 @@ export const USDC_JPYC_TRANSFERS = {
   priceUsd: '0.005',
   tags: ['jpyc', 'token-transfers', 'wallet-activity', 'payment-reconciliation', 'transaction-monitoring', 'onchain-data'],
   description:
-    'List recent JPYC Transfer events on one supported chain from roughly the last hour of blocks, optionally filtered to one address as sender or recipient — tx hash, from, to, amount, block. Newest first without a cursor; with a cursor, only events after that position, oldest first, so repeated calls with nextCursor miss nothing. Use to confirm a recent JPYC payment or monitor wallet activity. Not for history beyond the window, sanctions screening, identity, or finality proof.',
+    'List recent JPYC Transfer events on one supported chain from roughly the last hour of blocks, optionally filtered by address — tx hash, from, to, amount, block. Without a cursor: newest first. With a cursor: only events after that position, oldest first, so each observed event is returned once within the scanned window. Use to confirm a recent JPYC payment or monitor wallet activity. Not for history beyond the window, sanctions screening, identity, or finality proof.',
   trigger: {
     callWhen: [
       'An agent must confirm a recent JPYC transfer',
@@ -192,8 +192,8 @@ export const USDC_JPYC_TRANSFERS = {
       'The latest JPYC flows on one chain must be inspected',
     ],
     repeatWhen: [
-      'Pass the previous nextCursor as cursor to receive only transfers that appeared after the previous purchase (oldest first)',
-      'hasMore is true — call again with nextCursor to continue without gaps',
+      'Pass the previous nextCursor as cursor to receive only transfers that appeared after the previous purchase (mode=delta, oldest first)',
+      'mode is delta and hasMore is true — call again with nextCursor to continue; in mode=snapshot hasMore only means older events were omitted, so start monitoring from nextCursor',
       'The chain has advanced beyond the previous toBlock value',
       'Deduplicate results by txHash and logIndex',
     ],
@@ -226,7 +226,7 @@ export const USDC_JPYC_TRANSFERS = {
           type: 'string',
           pattern: TRANSFER_CURSOR_PATTERN,
           description:
-            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first, so repeated calls pay only for new events and never skip one; continue with nextCursor while hasMore is true.',
+            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), so repeated calls pay only for new events and return each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true.',
         },
       },
       required: ['chain'],
@@ -235,13 +235,14 @@ export const USDC_JPYC_TRANSFERS = {
     output: {
       schema: JPYC_TRANSFERS_RESPONSE_SCHEMA,
       example: {
-        schemaVersion: '2.1',
+        schemaVersion: '2.2',
         token: { symbol: 'JPYC', decimals: 18 },
         chain: 'polygon',
         chainId: 137,
         contract: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
         fromBlock: '92385945',
         toBlock: '92387745',
+        mode: 'snapshot',
         nextCursor: '92387695:286',
         hasMore: false,
         truncated: false,

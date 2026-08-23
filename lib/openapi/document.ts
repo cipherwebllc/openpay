@@ -454,7 +454,7 @@ const VANILLA_OPENAPI_PATHS = {
           required: false,
           schema: { type: 'string', pattern: '^[0-9]+:(?:-1|[0-9]+)$' },
           description:
-            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first, so repeated calls pay only for new events and never skip one; continue with nextCursor while hasMore is true. If the cursor is older than the scanned window, the response sets truncated=true.',
+            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), so repeated calls pay only for new events and return each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true. If the cursor is older than the scanned window, the response sets truncated=true. Without a cursor (mode=snapshot) hasMore only means older events in the window were omitted; start monitoring from nextCursor.',
           example: '92387695:286',
         },
       ],
