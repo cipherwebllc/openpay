@@ -120,7 +120,11 @@ export const LEGAL_ENTITY = {
   //   Terms 第 13 条 (4) に明文化。価格表示義務の主体は出品者 (当社は売買契約の当事者でない)。
   // 2026-08-17 改定: デジタル商品ストアの Base USDC 決済を Terms 第 13 条に追加。
   //   JPYC 建て価格からの換算・OpenPay x402 利用料 0%・取消不能・レート/保有リスクを開示。
-  termsEffectiveDate: '2026-08-17',
+  // 2026-08-24 改定: dual-rail 出品 (第三者出品の USDC/Base 併売・CDP 中継) を Terms 第 5 条 (10)
+  //   に追加。当社利用料 0%・購入者 → 出品者直接送金 (ノンカストディ)・将来改定は第 10 条の
+  //   変更手続で事前告知・(9) の x402 ファシリテーター利用料 (JPYC) は不適用。機能は flag 既定 OFF
+  //   だが、条項の掲出自体が実質的改定のため施行日を更新。SOT は DISCLOSED_DUAL_RAIL_USDC。
+  termsEffectiveDate: '2026-08-24',
   // 2026-07-29 改定: 非公開チップメッセージ (質問箱 Phase 1) の取得項目 (2-1(7))・
   //   利用目的 (2-2(9))・保管期間 (最長 180 日+本人削除) を追加。実質的改定のため施行日を更新。
   privacyEffectiveDate: '2026-07-30',
@@ -279,6 +283,18 @@ export const DISCLOSED_STORE_USDC_PAYMENT = {
   chainName: 'Base',
   asset: 'USDC',
   priceAsset: 'JPYC',
+  openPayFeeBps: 0,
+} as const;
+
+// dual-rail 出品 (AI ストア第三者出品の USDC/Base 併売) の開示 SOT。当社は CDP facilitator への
+// verify/settle 中継と掲載メタ提供のみを行い、支払いは購入者 → 出品者 payTo へ直接 (ノンカストディ)・
+// 当社利用料 0%。Terms 第 5 条 (10)・/guide/sell・public/llms.txt はこのチェーン/資産/料率と
+// 一致しなければならない (フェンス: tests/app/legal.test.tsx)。
+// ⚠️ 料率を変える = 開示の変更ゆえ、必ず Terms 改定 (第 10 条の手続) + フェンス更新を伴うこと。
+export const DISCLOSED_DUAL_RAIL_USDC = {
+  chainId: base.id,
+  chainName: 'Base',
+  asset: 'USDC',
   openPayFeeBps: 0,
 } as const;
 

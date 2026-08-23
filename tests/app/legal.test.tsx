@@ -10,6 +10,7 @@ import {
   LEGAL_ENTITY,
   DISCLOSED_RECOVER_FEE,
   DISCLOSED_STORE_USDC_PAYMENT,
+  DISCLOSED_DUAL_RAIL_USDC,
 } from '@/lib/legal';
 import { TOKEN_DEPLOYMENTS } from '@/lib/tokens';
 import { USDC_CHAINS, chainForSlug } from '@/lib/chains';
@@ -88,6 +89,28 @@ describe('Legal pages', () => {
         /seller bears USDC price and holding risk after receipt/i,
       );
       expect(en.Terms.article13.body).toMatch(/de-peg/i);
+    });
+
+    it('第5条(10): dual-rail USDC 併売の Base・0%・直接送金・(9) 不適用・取消不能を ja/en で固定する', async () => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      const disclosed = DISCLOSED_DUAL_RAIL_USDC;
+      const feePercent = disclosed.openPayFeeBps / 100;
+
+      expect(disclosed.chainId).toBe(8453);
+      expect(ja.Terms.article5.body).toContain(`${disclosed.chainName} チェーン上の ${disclosed.asset}`);
+      expect(ja.Terms.article5.body).toContain(`USDC 決済における当社の利用料は ${feePercent}%（無料）`);
+      expect(ja.Terms.article5.body).toContain('出品者の指定ウォレットへ直接送金');
+      expect(ja.Terms.article5.body).toContain('x402 ファシリテーター利用料（JPYC）は適用されません');
+      expect(ja.Terms.article5.body).toContain('第 10 条の変更手続に従い事前に告知');
+      expect(ja.Terms.article5.body).toContain('USDC 送金は技術上取り消すことができません');
+
+      expect(en.Terms.article5.body).toContain(`${disclosed.asset} on the ${disclosed.chainName} chain`);
+      expect(en.Terms.article5.body).toContain(`fee on these USDC payments is ${feePercent}% (free)`);
+      expect(en.Terms.article5.body).toMatch(/directly from the buyer to the lister's designated wallet/);
+      expect(en.Terms.article5.body).toMatch(/x402 facilitator fee \(JPYC\) in paragraph \(9\) does not apply/);
+      expect(en.Terms.article5.body).toMatch(/amendment procedure in Article 10/);
+      expect(en.Terms.article5.body).toMatch(/USDC transfers are technically irreversible/);
     });
   });
 
@@ -650,7 +673,8 @@ describe('Legal pages', () => {
       //   (約 2 JPYC・1% 非適用) をチッパーが負担。料金性質に直接関わる Terms/Disclaimer/特商法 を
       //   改定 (実質的改定のため施行日/最終更新日を更新)。Privacy は料金モデルに直接言及しないため据置。
       // 2026-08-17: デジタル商品ストアの Base USDC 決済を 13 条に追加。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-08-17');
+      // 2026-08-24: dual-rail 出品 (第三者出品の USDC/Base 併売・利用料 0%) を 5 条 (10) に追加。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-08-24');
       expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-07-30');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-13');
       // 2026-07-29: 非公開チップメッセージ追記 (取得/目的/保管) の実質的改定で更新
