@@ -22,6 +22,9 @@ vi.mock('viem', async () => {
   };
 });
 
+vi.mock('@/lib/logger', () => ({ logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
+
+import { logger } from '@/lib/logger';
 import { JPYC_CHAINS, chainForSlug } from '@/lib/chains';
 import {
   TRANSFERS_DEFAULT_LIMIT,
@@ -337,5 +340,10 @@ describe('readTransfers', () => {
       expect(r.retryable).toBe(true);
       expect(JSON.stringify(r)).not.toContain('rate limited');
     }
+    // ただしサーバログには原因を残す (本番 503 の切り分け用)
+    expect(logger.warn).toHaveBeenCalledWith(
+      'jpyc.live.rpc_failed',
+      expect.objectContaining({ op: 'transfers', chain: JPYC_CHAINS[0], errorCode: 'rpc_unavailable', message: expect.stringContaining('rate limited') }),
+    );
   });
 });
