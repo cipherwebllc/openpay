@@ -1,5 +1,7 @@
 // /api/paid/usdc/jpyc/* (JPYC オンチェーン事実の有料 API・USDC/Base・vanilla x402) の
-// 単一情報源。route・/openapi.json・Bazaar 宣言・llms.txt が共用する。
+// 単一情報源。route・/openapi.json・Bazaar 宣言はここから生成する。**public/llms.txt は手動同期**
+// (静的ファイル) — path と宣言した引数名が llms.txt に載っていることを
+// tests/lib/jpyc/liveResourcesBazaar.test.ts がフェンスする。
 //
 // 価格の根拠 (2026-08-21・agentic.market 30 日集計): 売れている RPC 系コモディティは
 // $0.001〜0.008。supply/balance は eth_call 1 発なので $0.002、transfers は getLogs の
@@ -88,7 +90,7 @@ export const USDC_JPYC_SUPPLY = {
     output: {
       schema: JPYC_SUPPLY_RESPONSE_SCHEMA,
       example: {
-        schemaVersion: '2.0',
+        schemaVersion: '2.1',
         token: { symbol: 'JPYC', decimals: 18 },
         items: [
           {
@@ -151,7 +153,7 @@ export const USDC_JPYC_BALANCE = {
     output: {
       schema: JPYC_BALANCE_RESPONSE_SCHEMA,
       example: {
-        schemaVersion: '2.0',
+        schemaVersion: '2.1',
         token: { symbol: 'JPYC', decimals: 18 },
         address: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
         items: [
@@ -182,7 +184,7 @@ export const USDC_JPYC_TRANSFERS = {
   priceUsd: '0.005',
   tags: ['jpyc', 'token-transfers', 'wallet-activity', 'payment-reconciliation', 'transaction-monitoring', 'onchain-data'],
   description:
-    'List recent JPYC Transfer events on one supported chain (Polygon, Kaia, Avalanche or Ethereum) within a fixed block window of roughly the last hour, newest first, optionally filtered to a single address as sender or recipient — tx hash, from, to, amount and block. Use to confirm a recent JPYC payment, monitor incoming or outgoing wallet activity, or inspect recent on-chain flows. Not for historical indexing beyond the window, sanctions screening, wallet identity, or finality proof.',
+    'List recent JPYC Transfer events on one supported chain (Polygon, Kaia, Avalanche or Ethereum) within a fixed block window of roughly the last hour, optionally filtered to a single address as sender or recipient — tx hash, from, to, amount and block. Without a cursor the newest events come first; with a cursor the events after that position come oldest first, so repeated calls with nextCursor receive every new event exactly once. Use to confirm a recent JPYC payment, monitor incoming or outgoing wallet activity, or inspect recent on-chain flows. Not for historical indexing beyond the window, sanctions screening, wallet identity, or finality proof.',
   trigger: {
     callWhen: [
       'An agent must confirm a recent JPYC transfer',
@@ -190,7 +192,8 @@ export const USDC_JPYC_TRANSFERS = {
       'The latest JPYC flows on one chain must be inspected',
     ],
     repeatWhen: [
-      'Pass the previous nextCursor as cursor to receive only transfers that appeared after the previous purchase',
+      'Pass the previous nextCursor as cursor to receive only transfers that appeared after the previous purchase (oldest first)',
+      'hasMore is true — call again with nextCursor to continue without gaps',
       'The chain has advanced beyond the previous toBlock value',
       'Deduplicate results by txHash and logIndex',
     ],
@@ -223,7 +226,7 @@ export const USDC_JPYC_TRANSFERS = {
           type: 'string',
           pattern: TRANSFER_CURSOR_PATTERN,
           description:
-            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, so repeated calls pay only for new events.',
+            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first, so repeated calls pay only for new events and never skip one; continue with nextCursor while hasMore is true.',
         },
       },
       required: ['chain'],
@@ -232,7 +235,7 @@ export const USDC_JPYC_TRANSFERS = {
     output: {
       schema: JPYC_TRANSFERS_RESPONSE_SCHEMA,
       example: {
-        schemaVersion: '2.0',
+        schemaVersion: '2.1',
         token: { symbol: 'JPYC', decimals: 18 },
         chain: 'polygon',
         chainId: 137,
@@ -240,6 +243,7 @@ export const USDC_JPYC_TRANSFERS = {
         fromBlock: '92385945',
         toBlock: '92387745',
         nextCursor: '92387695:286',
+        hasMore: false,
         truncated: false,
         items: [
           {

@@ -6,6 +6,8 @@
 //   - operationId が動詞始まりで一意
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
 import { JPYC_CHAINS } from '@/lib/chains';
 import { buildBazaarQueryExtensionV2 } from '@/lib/x402/v2';
@@ -79,6 +81,20 @@ describe('JPYC ライブ API の掲載メタ', () => {
     // transfers だけ dedupeKey を持つ (再購入時の重複除去)
     const transfers = USDC_JPYC_LIVE_RESOURCES.find((r) => r.path.endsWith('/transfers'))!;
     expect((transfers.trigger as AgentUsage).dedupeKey).toEqual(['txHash', 'logIndex']);
+  });
+
+  it('public/llms.txt は手動同期 — 各 path と宣言した全引数名が載っている (cursor 導入時の漏れの再発防止)', () => {
+    const llms = readFileSync(join(process.cwd(), 'public', 'llms.txt'), 'utf8');
+    for (const r of USDC_JPYC_LIVE_RESOURCES) {
+      expect(llms, `${r.path} が llms.txt に無い`).toContain(`GET ${r.path}`);
+      const params = Object.keys(r.bazaar.queryParamsSchema.properties);
+      for (const p of params) {
+        expect(llms, `${r.path} の引数 ${p}= が llms.txt に無い`).toMatch(new RegExp(`${r.path}\\?[^\\s\`]*\\b${p}=`));
+      }
+    }
+    // transfers の差分取得 (nextCursor / hasMore) も説明されている
+    expect(llms).toMatch(/nextCursor/);
+    expect(llms).toMatch(/hasMore/);
   });
 
   it('operationId は動詞始まりで一意', () => {

@@ -454,7 +454,7 @@ const VANILLA_OPENAPI_PATHS = {
           required: false,
           schema: { type: 'string', pattern: '^[0-9]+:(?:-1|[0-9]+)$' },
           description:
-            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, so repeated calls pay only for new events. If the cursor is older than the scanned window, the response sets truncated=true.',
+            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first, so repeated calls pay only for new events and never skip one; continue with nextCursor while hasMore is true. If the cursor is older than the scanned window, the response sets truncated=true.',
           example: '92387695:286',
         },
       ],
