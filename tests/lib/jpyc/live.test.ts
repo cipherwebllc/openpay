@@ -116,7 +116,7 @@ describe('readSupply / readBalance', () => {
     const bad = chainForSlug(JPYC_CHAINS[0]).id;
     clients.set(bad, okClient({ readContract: vi.fn().mockRejectedValue(new Error('boom')) }));
     const rows = await readBalance(ADDR, JPYC_CHAINS);
-    const failed = rows.filter((r) => r.status === 'error');
+    const failed = rows.filter((r) => r.status === 'unavailable');
     expect(failed).toHaveLength(1);
     expect(failed[0].chainId).toBe(bad);
     expect(rows.filter((r) => r.status === 'ok')).toHaveLength(JPYC_CHAINS.length - 1);
@@ -132,7 +132,7 @@ describe('readSupply / readBalance', () => {
       const p = readSupply(JPYC_CHAINS);
       await vi.advanceTimersByTimeAsync(5_100);
       const rows = await p;
-      expect(rows.find((r) => r.chainId === hang)?.status).toBe('error');
+      expect(rows.find((r) => r.chainId === hang)?.status).toBe('unavailable');
     } finally {
       vi.useRealTimers();
     }
@@ -232,7 +232,12 @@ describe('readTransfers', () => {
   it('RPC 失敗は throw せず status=error で返す', async () => {
     setAll(() => okClient({ getLogs: vi.fn().mockRejectedValue(new Error('rate limited')) }));
     const r = await readTransfers(JPYC_CHAINS[0], { limit: 5 });
-    expect(r.status).toBe('error');
-    if (r.status === 'error') expect(r.error).toContain('rate limited');
+    expect(r.status).toBe('unavailable');
+    if (r.status === 'unavailable') {
+      // 生のメッセージ ('rate limited' や RPC URL) は応答に出さず、分類コードだけを返す
+      expect(r.errorCode).toBe('rpc_unavailable');
+      expect(r.retryable).toBe(true);
+      expect(JSON.stringify(r)).not.toContain('rate limited');
+    }
   });
 });

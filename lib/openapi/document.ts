@@ -369,7 +369,12 @@ const VANILLA_OPENAPI_PATHS = {
       responses: {
         '200': {
           description: 'Per-chain totalSupply after settlement (rows with status "error" are RPC failures on that chain only)',
-          content: { 'application/json': { example: USDC_JPYC_SUPPLY.bazaar.output.example } },
+          content: {
+            'application/json': {
+              schema: USDC_JPYC_SUPPLY.bazaar.output.schema,
+              example: USDC_JPYC_SUPPLY.bazaar.output.example,
+            },
+          },
         },
         '400': JPYC_LIVE_400,
         '402': JPYC_LIVE_402,
@@ -402,7 +407,12 @@ const VANILLA_OPENAPI_PATHS = {
       responses: {
         '200': {
           description: 'Per-chain balance after settlement',
-          content: { 'application/json': { example: USDC_JPYC_BALANCE.bazaar.output.example } },
+          content: {
+            'application/json': {
+              schema: USDC_JPYC_BALANCE.bazaar.output.schema,
+              example: USDC_JPYC_BALANCE.bazaar.output.example,
+            },
+          },
         },
         '400': JPYC_LIVE_400,
         '402': JPYC_LIVE_402,
@@ -447,7 +457,12 @@ const VANILLA_OPENAPI_PATHS = {
       responses: {
         '200': {
           description: 'Newest-first Transfer events within the block window after settlement',
-          content: { 'application/json': { example: USDC_JPYC_TRANSFERS.bazaar.output.example } },
+          content: {
+            'application/json': {
+              schema: USDC_JPYC_TRANSFERS.bazaar.output.schema,
+              example: USDC_JPYC_TRANSFERS.bazaar.output.example,
+            },
+          },
         },
         '400': JPYC_LIVE_400,
         '402': JPYC_LIVE_402,
