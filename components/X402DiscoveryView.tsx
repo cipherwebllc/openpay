@@ -32,6 +32,7 @@ import {
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { ConnectButton } from '@/components/ConnectButton';
 import { Field } from '@/components/Field';
+import { env } from '@/lib/env';
 import { shortAddress } from '@/lib/format';
 import { AGENTIC_MARKET_URL, type UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
 
@@ -91,6 +92,8 @@ type OwnedResource = {
   license?: string;
   paywallSnippet?: string;
   hidden?: boolean;
+  /** dual-rail の USDC/Base 面 (任意)。 */
+  usdc?: { payTo: string; priceUsd: string; serviceName?: string };
 };
 
 const EMPTY_FORM = {
@@ -101,6 +104,11 @@ const EMPTY_FORM = {
   payTo: '',
   docsUrl: '',
   license: '',
+  // dual-rail USDC 面 (NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL 点灯時のみ UI に出る)。
+  usdcEnabled: false,
+  usdcPriceUsd: '',
+  usdcPayTo: '',
+  usdcServiceName: '',
 };
 const RESOURCE_DOCS_URL_MAX = 512;
 const RESOURCE_LICENSE_MAX = 60;
@@ -339,6 +347,10 @@ export function X402DiscoveryView({
       payTo: r.payTo,
       docsUrl: r.docsUrl ?? '',
       license: r.license ?? '',
+      usdcEnabled: Boolean(r.usdc),
+      usdcPriceUsd: r.usdc?.priceUsd ?? '',
+      usdcPayTo: r.usdc?.payTo ?? '',
+      usdcServiceName: r.usdc?.serviceName ?? '',
     });
     setCreated(null);
     setNotice(null);
@@ -371,6 +383,19 @@ export function X402DiscoveryView({
         ...(form.payTo ? { payTo: form.payTo } : {}),
         ...(form.docsUrl ? { docsUrl: form.docsUrl } : {}),
         ...(form.license ? { license: form.license } : {}),
+        // USDC 面は checkbox ON のときだけ送る (OFF = 編集で面を外す)。UI flag ではなく
+        // form 状態で判定 — flag OFF 中の編集でも既存の USDC 面 (prefill) を黙って消さない。
+        ...(form.usdcEnabled
+          ? {
+              usdc: {
+                priceUsd: form.usdcPriceUsd.trim(),
+                ...(form.usdcPayTo.trim() ? { payTo: form.usdcPayTo.trim() } : {}),
+                ...(form.usdcServiceName.trim()
+                  ? { serviceName: form.usdcServiceName.trim() }
+                  : {}),
+              },
+            }
+          : {}),
         // 新規登録のみ正当性表明を送る (サーバは POST でのみ必須・編集では無視)。
         ...(editId ? {} : { attested }),
       };
@@ -482,9 +507,13 @@ export function X402DiscoveryView({
           ? t('errorAttestationRequired')
           : error === 'too_many_resources'
             ? t('errorTooManyResources', { limit: maxResourcesPerMerchant })
-            : error
-              ? t('errorGeneric', { reason: error })
-              : null;
+            : error === 'invalid_usdc_price'
+              ? t('errorUsdcPrice')
+              : error === 'invalid_usdc_pay_to'
+                ? t('errorUsdcPayTo')
+                : error
+                  ? t('errorGeneric', { reason: error })
+                  : null;
   const [mcpSdkNotePrefix, mcpSdkPackageName, mcpSdkNoteSuffix] = t(
     'mcpSdkNote',
   ).split(/(openpay-x402-sdk)/);
@@ -653,7 +682,9 @@ export function X402DiscoveryView({
             {/* 発見面の明示: 出品は /api/discovery + OpenPay MCP/SDK。Bazaar は USDC (Base) 商品
                 のみの別面で、本フォームの出品では載らない — 期待違いを先回りで解く。 */}
             <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-              {t('listingDiscoveryNote')}
+              {env.enableX402DualRailUi
+                ? t('listingDiscoveryNoteDualRail')
+                : t('listingDiscoveryNote')}
             </p>
             {/* 出品の詳細手順+実売事例は /guide/sell が持つ (フォームは要点のみ)。 */}
             <Link
@@ -757,6 +788,70 @@ export function X402DiscoveryView({
                 {t('formPayToHint')}
               </p>
             </Field>
+            {/* dual-rail USDC 面 (opt-in)。UI flag OFF でも既存面 (prefill) があれば出す —
+                見えない状態で面を消させない。 */}
+            {(env.enableX402DualRailUi || form.usdcEnabled) && (
+              <div className="rounded-xl border border-sky-200/80 bg-sky-50/50 px-3 py-2.5">
+                <label className="flex cursor-pointer items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={form.usdcEnabled}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, usdcEnabled: e.target.checked }))
+                    }
+                    className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand focus:ring-brand/30"
+                  />
+                  <span className="text-xs font-semibold text-slate-700">
+                    {t('formUsdcEnable')}
+                  </span>
+                </label>
+                <p className="mt-1.5 pl-6 text-xs leading-relaxed text-slate-500">
+                  {t('formUsdcHint')}
+                </p>
+                {form.usdcEnabled && (
+                  <div className="mt-2.5 space-y-3 border-t border-sky-100 pt-3">
+                    <Field label={t('formUsdcPriceLabel')}>
+                      <input
+                        className={inputCls}
+                        inputMode="decimal"
+                        placeholder={t('formUsdcPrice')}
+                        value={form.usdcPriceUsd}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, usdcPriceUsd: e.target.value }))
+                        }
+                      />
+                      <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+                        {t('formUsdcPriceHint')}
+                      </p>
+                    </Field>
+                    <Field label={t('formUsdcPayToLabel')}>
+                      <input
+                        className={inputCls}
+                        placeholder={t('formUsdcPayTo')}
+                        value={form.usdcPayTo}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, usdcPayTo: e.target.value }))
+                        }
+                      />
+                      <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+                        {t('formUsdcPayToHint')}
+                      </p>
+                    </Field>
+                    <Field label={t('formUsdcServiceNameLabel')}>
+                      <input
+                        className={inputCls}
+                        maxLength={60}
+                        placeholder={t('formUsdcServiceName')}
+                        value={form.usdcServiceName}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, usdcServiceName: e.target.value }))
+                        }
+                      />
+                    </Field>
+                  </div>
+                )}
+              </div>
+            )}
             {/* 任意項目は折りたたみ (既定で閉じる)。編集中か入力済みなら開いた状態で見せる。 */}
             <details
               className="group rounded-xl border border-slate-200/70"
@@ -929,8 +1024,13 @@ export function X402DiscoveryView({
                 {cardHead({
                   category: r.category,
                   priceNode: (
-                    <span className="shrink-0 text-sm font-bold text-slate-900">
+                    <span className="shrink-0 text-right text-sm font-bold text-slate-900">
                       {r.priceJpyc} JPYC
+                      {r.usdc && (
+                        <span className="block text-[11px] font-semibold text-sky-700">
+                          {t('usdcFaceMeta', { price: r.usdc.priceUsd })}
+                        </span>
+                      )}
                     </span>
                   ),
                   description: r.description,

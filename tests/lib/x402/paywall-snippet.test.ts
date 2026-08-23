@@ -46,3 +46,46 @@ describe('lib/x402/paywallSnippet', () => {
     expect(snippet).toContain('open-pay.jp');
   });
 });
+
+describe('lib/x402/paywallSnippet dual-rail (usdcResourceId 指定時)', () => {
+  const dual = buildPaywallSnippet('https://api.example.jp/paid/translate', {
+    usdcResourceId: 'res-abc',
+  });
+
+  it('opts なしの JPYC 版出力は dual 化の影響を受けない (回帰フェンス)', () => {
+    const jpycOnly = buildPaywallSnippet('https://api.example.jp/paid/translate');
+    expect(jpycOnly).toContain('export async function jpycGate');
+    expect(jpycOnly).not.toContain('/api/x402/relay/');
+    expect(jpycOnly).not.toContain('MY_RESOURCE_ID');
+  });
+
+  it('URL と出品 ID が焼き込まれ、リレー 3 endpoint を使う', () => {
+    expect(dual).toContain('MY_RESOURCE_URL = "https://api.example.jp/paid/translate"');
+    expect(dual).toContain('MY_RESOURCE_ID = "res-abc"');
+    expect(dual).toContain('/api/x402/relay/requirements?resourceId=');
+    expect(dual).toContain("'/api/x402/relay/' + path");
+    expect(dual).toContain('export async function x402Gate');
+    expect(dual).not.toContain('@/lib');
+  });
+
+  it('USDC 面の障害隔離: 取得失敗は null → JPYC のみで継続する記述を含む', () => {
+    // usdcFace() が try-catch + !res.ok → null で、accepts は usdc なしでも JPYC で成立する。
+    expect(dual).toContain('async function usdcFace()');
+    expect(dual).toContain('return null');
+    expect(dual).toContain('usdc ? [...jpycAccepts, usdc.v1Accepts] : jpycAccepts');
+  });
+
+  it('v2 ヘッダ (PAYMENT-SIGNATURE) と v1 (x-payment) の両レール分岐を含む', () => {
+    expect(dual).toContain("request.headers.get('payment-signature')");
+    expect(dual).toContain("request.headers.get('x-payment')");
+    expect(dual).toContain('PAYMENT-REQUIRED');
+    expect(dual).toContain('paymentSignatureHeader');
+    expect(dual).toContain('paymentHeader');
+  });
+
+  it('P2-K 同等: 出品 ID の特殊文字も注入不成立 (JSON.stringify エスケープ)', () => {
+    const evilId = 'x"; process.exit(1); const y="';
+    const s = buildPaywallSnippet('https://x.test/ok', { usdcResourceId: evilId });
+    expect(s).toContain(`MY_RESOURCE_ID = ${JSON.stringify(evilId)};`);
+  });
+});

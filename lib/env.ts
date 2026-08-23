@@ -700,6 +700,13 @@ export const env = {
     'ENABLE_X402_DUAL_RAIL',
     process.env.ENABLE_X402_DUAL_RAIL,
   ),
+  // dual-rail 出品の **UI 面** (出品フォームの USDC/Base opt-in)。server-only の
+  // ENABLE_X402_DUAL_RAIL (リレー本体) と対で、点灯は両方同時 (P3)。UI だけ先に出すと
+  // 「USDC 面を登録したのにリレーが 404」の期待違いを作るため、既定 OFF で完全に隠す。
+  enableX402DualRailUi: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL',
+    process.env.NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL,
+  ),
   // Sentry browser DSN。未設定なら instrumentation-client.ts:7-12 が no-op に
   // 倒れ、logger.warn/error は console のみで Sentry へ送られない。本番では
   // 観測ゼロ = 事故検知不能のため、mainnet では下記の guard で deploy を中止。
