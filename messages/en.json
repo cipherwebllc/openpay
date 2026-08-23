@@ -2584,6 +2584,7 @@
     "pillDirect": "Paid straight to the seller",
     "registerTitle": "List your API",
     "registerSubtitle": "Put a 402 gate in front of it. Agents find it and pay in JPYC, straight to your wallet.",
+    "listingDiscoveryNote": "Listings are discovered by agents via /api/discovery and the OpenPay MCP / SDK (JPYC on Polygon). The x402 Bazaar / agentic.market only lists USDC products (Base, standard x402), which this form does not cover.",
     "listingPolicySummary": "Listing requires a real 402 gate, the right to sell and charge, and the OpenPay scheme.",
     "sellGuideCta": "Seller guide (with a real sale case study)",
     "aiPayGuideCta": "Setup guide: let your AI pay",

@@ -650,6 +650,11 @@ export function X402DiscoveryView({
             <p className="mt-0.5 text-sm leading-relaxed text-slate-500">
               {t('registerSubtitle')}
             </p>
+            {/* 発見面の明示: 出品は /api/discovery + OpenPay MCP/SDK。Bazaar は USDC (Base) 商品
+                のみの別面で、本フォームの出品では載らない — 期待違いを先回りで解く。 */}
+            <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+              {t('listingDiscoveryNote')}
+            </p>
             {/* 出品の詳細手順+実売事例は /guide/sell が持つ (フォームは要点のみ)。 */}
             <Link
               href={`/${locale}/guide/sell`}
