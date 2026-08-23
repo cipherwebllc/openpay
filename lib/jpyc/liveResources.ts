@@ -184,7 +184,7 @@ export const USDC_JPYC_TRANSFERS = {
   priceUsd: '0.005',
   tags: ['jpyc', 'token-transfers', 'wallet-activity', 'payment-reconciliation', 'transaction-monitoring', 'onchain-data'],
   description:
-    'List recent JPYC Transfer events on one supported chain (Polygon, Kaia, Avalanche or Ethereum) within a fixed block window of roughly the last hour, optionally filtered to a single address as sender or recipient — tx hash, from, to, amount and block. Without a cursor the newest events come first; with a cursor the events after that position come oldest first, so repeated calls with nextCursor receive every new event exactly once. Use to confirm a recent JPYC payment, monitor incoming or outgoing wallet activity, or inspect recent on-chain flows. Not for historical indexing beyond the window, sanctions screening, wallet identity, or finality proof.',
+    'List recent JPYC Transfer events on one supported chain from roughly the last hour of blocks, optionally filtered to one address as sender or recipient — tx hash, from, to, amount, block. Newest first without a cursor; with a cursor, only events after that position, oldest first, so repeated calls with nextCursor miss nothing. Use to confirm a recent JPYC payment or monitor wallet activity. Not for history beyond the window, sanctions screening, identity, or finality proof.',
   trigger: {
     callWhen: [
       'An agent must confirm a recent JPYC transfer',
