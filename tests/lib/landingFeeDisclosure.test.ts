@@ -69,15 +69,22 @@ describe('LandingSupport 料率カード ↔ DISCLOSED 料率 (drift フェン�
     expect(enNote).toContain(`about ${floorJpyc} JPYC`);
   });
 
+  // 2026-08-24 磨き上げで、開示は見出し (subtitle) からカタログ脚注 (catalogFeeNote*) へ移した。
+  // JPYC のみ / JPYC+USDC 混在の両脚注に料率・最低額・支払う側の上乗せが載ることを固定する。
   it('AIストア: x402 利用料率・最低額・支払う側の上乗せを ja/en で固定する', () => {
-    const jaSubtitle = ja.Facilitator.subtitle;
-    expect(jaSubtitle).toContain(`${x402Pct}%`);
-    expect(jaSubtitle).toContain(`最低 ${x402FloorJpyc} JPYC`);
-    expect(jaSubtitle).toContain('支払う側の上乗せ');
+    for (const key of ['catalogFeeNoteJpyc', 'catalogFeeNoteBoth'] as const) {
+      const jaNote = ja.Facilitator[key];
+      expect(jaNote, `ja ${key}`).toContain(`${x402Pct}%`);
+      expect(jaNote, `ja ${key}`).toContain(`最低 ${x402FloorJpyc} JPYC`);
+      expect(jaNote, `ja ${key}`).toContain('支払う側の上乗せ');
 
-    const enSubtitle = en.Facilitator.subtitle;
-    expect(enSubtitle).toContain(`${x402Pct}%`);
-    expect(enSubtitle).toContain(`minimum ${x402FloorJpyc} JPYC`);
-    expect(enSubtitle).toContain("added on the payer's side");
+      const enNote = en.Facilitator[key];
+      expect(enNote, `en ${key}`).toContain(`${x402Pct}%`);
+      expect(enNote, `en ${key}`).toContain(`min ${x402FloorJpyc} JPYC`);
+      expect(enNote, `en ${key}`).toContain('paid by the buyer');
+    }
+    // USDC 混在の脚注は「上乗せなし」も明示する (JPYC との違いを買い手が誤認しない)
+    expect(ja.Facilitator.catalogFeeNoteBoth).toContain('USDC は上乗せなし');
+    expect(en.Facilitator.catalogFeeNoteBoth).toContain('no markup');
   });
 });
