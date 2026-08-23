@@ -124,16 +124,16 @@ describe('X402DiscoveryView', () => {
     // fee 注記 (手数料 10 JPYC)。
     expect(screen.getByText(/手数料 10 JPYC/)).toBeInTheDocument();
     // 未接続 → 登録には接続を促す。
-    expect(screen.getByText('登録にはウォレット接続が必要です')).toBeInTheDocument();
+    expect(screen.getByText('出品するにはウォレットを接続')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'ウォレットを接続' })).toBeInTheDocument();
     expect(global.fetch).toHaveBeenCalledWith('/api/discovery', { cache: 'no-store' });
   });
 
   it('未接続: 公開カタログを登録フォームより前に表示', async () => {
     renderView();
-    const catalogHeading = await screen.findByRole('heading', { name: '公開カタログ' });
+    const catalogHeading = await screen.findByRole('heading', { name: 'カタログ' });
     const registrationHeading = screen.getByRole('heading', {
-      name: 'リソースを登録する',
+      name: 'API を出品する',
     });
     expect(
       catalogHeading.compareDocumentPosition(registrationHeading) &
@@ -145,9 +145,9 @@ describe('X402DiscoveryView', () => {
     state.connected = true;
     state.address = OWNED.payTo;
     renderView();
-    const catalogHeading = await screen.findByRole('heading', { name: '公開カタログ' });
+    const catalogHeading = await screen.findByRole('heading', { name: 'カタログ' });
     const registrationHeading = screen.getByRole('heading', {
-      name: 'リソースを登録する',
+      name: 'API を出品する',
     });
     expect(
       registrationHeading.compareDocumentPosition(catalogHeading) &
@@ -345,7 +345,7 @@ describe('X402DiscoveryView', () => {
     ).toBeInTheDocument();
     expect(screen.getByPlaceholderText('例: 商用利用可・要帰属')).toBeInTheDocument();
     expect(
-      screen.getByText(/詳細は README の掲載ルールをご確認ください/),
+      screen.getByText(/掲載条件: 実在する 402 ゲート/),
     ).toBeInTheDocument();
     expect(screen.getByText('サインイン済: 0x1111…1111')).toHaveAttribute(
       'title',
@@ -357,7 +357,7 @@ describe('X402DiscoveryView', () => {
       screen.getByText('価格'),
       screen.getByText('カテゴリー'),
       screen.getByText('受取アドレス'),
-      screen.getByText('掲載を充実させる（任意）'),
+      screen.getByText('任意項目（Docs・利用条件）'),
       screen.getByText('Docs URL（任意）'),
       screen.getByText('利用条件（任意）'),
     ];

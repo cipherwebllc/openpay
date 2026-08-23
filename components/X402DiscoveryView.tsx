@@ -33,6 +33,7 @@ import { useSiweSession } from '@/hooks/useSiweSession';
 import { ConnectButton } from '@/components/ConnectButton';
 import { Field } from '@/components/Field';
 import { shortAddress } from '@/lib/format';
+import { AGENTIC_MARKET_URL, type UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
 
 // カテゴリー文字列 → 視覚アイコン (api / data / mcp / content)。未知は汎用 (Code2)。
 function categoryIcon(category: string) {
@@ -59,6 +60,15 @@ type DiscoveryItem = {
 };
 
 const EMPTY_DISCOVERY_ITEMS: DiscoveryItem[] = [];
+const EMPTY_USDC_ITEMS: UsdcCatalogItem[] = [];
+
+/** カタログの通貨フィルタ。JPYC = /api/discovery (Polygon・facilitator) / USDC = Base・標準 x402。 */
+type CatalogCurrency = 'all' | 'jpyc' | 'usdc';
+
+/** JPYC と USDC を同じ一覧に並べるための共通形。 */
+type CatalogEntry =
+  | { kind: 'jpyc'; key: string; category: string; searchText: string; item: DiscoveryItem }
+  | { kind: 'usdc'; key: string; category: string; searchText: string; item: UsdcCatalogItem };
 
 type RegisteredResource = {
   url: string;
@@ -195,9 +205,12 @@ function PaywallSnippet({
 export function X402DiscoveryView({
   maxResourcesPerMerchant,
   featured,
+  usdcItems = EMPTY_USDC_ITEMS,
 }: {
   maxResourcesPerMerchant: number;
   featured?: ReactNode;
+  /** USDC (Base・標準 x402) 商品。server が静的に渡す (lib/x402/usdcCatalog)。 */
+  usdcItems?: readonly UsdcCatalogItem[];
 }) {
   const t = useTranslations('Facilitator');
   const locale = useLocale();
@@ -222,6 +235,7 @@ export function X402DiscoveryView({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogCategory, setCatalogCategory] = useState<CatalogCategory | null>(null);
+  const [catalogCurrency, setCatalogCurrency] = useState<CatalogCurrency>('all');
   const copyText = useCallback((key: string, text: string) => {
     try {
       void navigator.clipboard?.writeText(text);
@@ -265,14 +279,41 @@ export function X402DiscoveryView({
   const loading = catalogQuery.isFetching;
   const owned = ownedQuery.data ?? [];
   const atResourceLimit = owned.length >= maxResourcesPerMerchant;
+  // JPYC (動的) と USDC (静的) を 1 つの一覧に。並びは JPYC (first-party 先頭の server 順) → USDC。
+  const entries = useMemo<CatalogEntry[]>(
+    () => [
+      ...items.map((item) => ({
+        kind: 'jpyc' as const,
+        key: `jpyc:${item.resource}`,
+        category: item.category.trim().toLowerCase(),
+        searchText: `${item.description} ${item.resource}`.toLowerCase(),
+        item,
+      })),
+      ...usdcItems.map((item) => ({
+        kind: 'usdc' as const,
+        key: `usdc:${item.resource}`,
+        category: item.category,
+        searchText: `${item.title} ${item.description} ${item.resource}`.toLowerCase(),
+        item,
+      })),
+    ],
+    [items, usdcItems],
+  );
+  // 通貨チップは USDC 商品があるときだけ出す (無ければ従来どおりカテゴリのみ)。
+  const showCurrencyChips = usdcItems.length > 0 && items.length > 0;
+  const currencyCounts = { jpyc: items.length, usdc: usdcItems.length };
+  const effectiveCurrency: CatalogCurrency = showCurrencyChips ? catalogCurrency : 'all';
+  const currencyEntries = useMemo(
+    () => (effectiveCurrency === 'all' ? entries : entries.filter((e) => e.kind === effectiveCurrency)),
+    [effectiveCurrency, entries],
+  );
   const categoryCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const item of items) {
-      const category = item.category.trim().toLowerCase();
-      counts.set(category, (counts.get(category) ?? 0) + 1);
+    for (const entry of currencyEntries) {
+      counts.set(entry.category, (counts.get(entry.category) ?? 0) + 1);
     }
     return counts;
-  }, [items]);
+  }, [currencyEntries]);
   const availableCategories = CATALOG_CATEGORIES.filter(
     (category) => (categoryCounts.get(category) ?? 0) > 0,
   );
@@ -280,22 +321,13 @@ export function X402DiscoveryView({
     catalogCategory && availableCategories.includes(catalogCategory)
       ? catalogCategory
       : null;
-  const visibleItems = useMemo(() => {
+  const visibleEntries = useMemo(() => {
     const search = catalogSearch.trim().toLowerCase();
-    return items.filter((item) => {
-      if (
-        effectiveCatalogCategory &&
-        item.category.trim().toLowerCase() !== effectiveCatalogCategory
-      ) {
-        return false;
-      }
-      return (
-        search === '' ||
-        item.description.toLowerCase().includes(search) ||
-        item.resource.toLowerCase().includes(search)
-      );
+    return currencyEntries.filter((entry) => {
+      if (effectiveCatalogCategory && entry.category !== effectiveCatalogCategory) return false;
+      return search === '' || entry.searchText.includes(search);
     });
-  }, [catalogSearch, effectiveCatalogCategory, items]);
+  }, [catalogSearch, effectiveCatalogCategory, currencyEntries]);
 
   const onEdit = useCallback((r: OwnedResource) => {
     setEditId(r.id);
@@ -490,30 +522,75 @@ export function X402DiscoveryView({
     </button>
   );
 
+  // フィルタチップ (通貨 / 種類で共用)。component でなく関数で返し no-unstable-nested-components を避ける。
+  const chip = (opts: {
+    key?: string;
+    label: string;
+    count: number;
+    active: boolean;
+    onClick: () => void;
+    tone?: 'primary' | 'secondary';
+  }) => {
+    const secondary = opts.tone === 'secondary';
+    return (
+      <button
+        key={opts.key ?? opts.label}
+        type="button"
+        onClick={opts.onClick}
+        aria-pressed={opts.active}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+          opts.active
+            ? secondary
+              ? 'border-slate-800 bg-slate-800 text-white'
+              : 'border-brand bg-brand text-white'
+            : 'border-slate-300 bg-white text-slate-600 hover:border-brand'
+        }`}
+      >
+        {opts.label}
+        <span className={opts.active ? 'text-white/75' : 'text-slate-400'}>{opts.count}</span>
+      </button>
+    );
+  };
+
   // resource カード共通の頭部 (アイコン + カテゴリ + 価格 + 説明 + URL/コピー)。owned 一覧と公開カタログで
   // 共有する。priceNode は右肩の価格表示 (owned=価格のみ / catalog=価格+手数料+合計) を呼び元が差し込む。
   const cardHead = (opts: {
     category: string;
     priceNode: ReactNode;
+    /** カードの見出し。未指定なら description を見出しにする (JPYC 掲載は名前を持たない)。 */
+    title?: string;
     description: string;
-    /** 購入トリガー (任意)。説明より前に出し、エージェントが仕様を読む前に判断できるようにする。 */
+    /** 購入トリガー (任意)。見出しの下に控えめに出す (JA ページで英文が主役にならないように)。 */
     trigger?: string;
     url: string;
     copyKey: string;
     official?: boolean;
+    /** 通貨チップ (JPYC/USDC 混在時のみ)。 */
+    currency?: 'jpyc' | 'usdc';
   }) => {
     const Icon = categoryIcon(opts.category);
     const urlIsHttps = isHttpsUrl(opts.url);
-    // チップ行と価格を 1 行目に、説明はカード全幅の独立行に置く。説明を価格の隣の狭い列に
-    // 入れると英語の長文説明が 1 語ずつ折り返して読めなくなる (2 カラム時に実害)。
+    // 階層: チップ行 + 価格 → 見出し → 補足 (トリガー / title があるときの説明) → URL。
+    // 説明を価格の隣の狭い列に入れると英文が 1 語ずつ折り返して読めない (2 カラム時に実害)。
     return (
       <div>
         <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
               <Icon className="h-3 w-3 text-brand" aria-hidden />
               {opts.category}
             </span>
+            {opts.currency && (
+              <span
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold tracking-wide ${
+                  opts.currency === 'usdc'
+                    ? 'bg-sky-50 text-sky-700 ring-1 ring-sky-200'
+                    : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
+                }`}
+              >
+                {opts.currency === 'usdc' ? 'USDC' : 'JPYC'}
+              </span>
+            )}
             {opts.official && (
               <span className="shrink-0 rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-semibold text-brand-dark">
                 {t('officialBadge')}
@@ -522,16 +599,21 @@ export function X402DiscoveryView({
           </div>
           {opts.priceNode}
         </div>
-        {opts.trigger && (
-          <p className="mt-2 flex items-start gap-1.5 text-sm font-semibold leading-snug text-brand-dark">
-            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-            <span>{opts.trigger}</span>
+        <p className="mt-2 text-sm font-bold leading-snug text-slate-900">
+          {opts.title ?? opts.description}
+        </p>
+        {opts.title && (
+          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">
+            {opts.description}
           </p>
         )}
-        <p className="mt-2 text-sm font-bold leading-snug text-slate-900">
-          {opts.description}
-        </p>
-        <div className="mt-1 flex items-center gap-1.5">
+        {opts.trigger && (
+          <p className="mt-1 flex items-start gap-1.5 text-xs leading-relaxed text-slate-500">
+            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" aria-hidden />
+            <span className="line-clamp-2">{opts.trigger}</span>
+          </p>
+        )}
+        <div className="mt-1.5 flex items-center gap-1.5">
           {urlIsHttps ? (
             <a
               href={opts.url}
@@ -567,9 +649,6 @@ export function X402DiscoveryView({
             </h3>
             <p className="mt-0.5 text-sm leading-relaxed text-slate-500">
               {t('registerSubtitle')}
-            </p>
-            <p className="mt-2 text-xs leading-relaxed text-slate-500">
-              {t('listingPolicySummary')}
             </p>
             {/* 出品の詳細手順+実売事例は /guide/sell が持つ (フォームは要点のみ)。 */}
             <Link
@@ -626,6 +705,7 @@ export function X402DiscoveryView({
                 {t('registrationLimitReached')}
               </p>
             )}
+            <p className="text-xs leading-relaxed text-slate-500">{t('listingPolicySummary')}</p>
             <Field label={t('formUrlLabel')}>
               <input
                 className={inputCls}
@@ -672,34 +752,46 @@ export function X402DiscoveryView({
                 {t('formPayToHint')}
               </p>
             </Field>
-            <h4 className="pt-1 text-sm font-semibold text-slate-700">
-              {t('formOptionalGroupTitle')}
-            </h4>
-            <Field label={t('formDocsUrlLabel')}>
-              <input
-                type="url"
-                className={inputCls}
-                placeholder={t('formDocsUrl')}
-                maxLength={RESOURCE_DOCS_URL_MAX}
-                value={form.docsUrl}
-                onChange={(e) => setForm((f) => ({ ...f, docsUrl: e.target.value }))}
-              />
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-                {t('formDocsUrlHint')}
-              </p>
-            </Field>
-            <Field label={t('formLicenseLabel')}>
-              <input
-                className={inputCls}
-                placeholder={t('formLicense')}
-                maxLength={RESOURCE_LICENSE_MAX}
-                value={form.license}
-                onChange={(e) => setForm((f) => ({ ...f, license: e.target.value }))}
-              />
-              <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
-                {t('formLicenseHint')}
-              </p>
-            </Field>
+            {/* 任意項目は折りたたみ (既定で閉じる)。編集中か入力済みなら開いた状態で見せる。 */}
+            <details
+              className="group rounded-xl border border-slate-200/70"
+              open={Boolean(editId || form.docsUrl || form.license)}
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-semibold text-slate-700">
+                {t('formOptionalGroupTitle')}
+                <ChevronDown
+                  className="h-4 w-4 shrink-0 text-slate-400 transition group-open:rotate-180"
+                  aria-hidden
+                />
+              </summary>
+              <div className="space-y-3 border-t border-slate-100 px-3 py-3">
+                <Field label={t('formDocsUrlLabel')}>
+                  <input
+                    type="url"
+                    className={inputCls}
+                    placeholder={t('formDocsUrl')}
+                    maxLength={RESOURCE_DOCS_URL_MAX}
+                    value={form.docsUrl}
+                    onChange={(e) => setForm((f) => ({ ...f, docsUrl: e.target.value }))}
+                  />
+                  <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+                    {t('formDocsUrlHint')}
+                  </p>
+                </Field>
+                <Field label={t('formLicenseLabel')}>
+                  <input
+                    className={inputCls}
+                    placeholder={t('formLicense')}
+                    maxLength={RESOURCE_LICENSE_MAX}
+                    value={form.license}
+                    onChange={(e) => setForm((f) => ({ ...f, license: e.target.value }))}
+                  />
+                  <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+                    {t('formLicenseHint')}
+                  </p>
+                </Field>
+              </div>
+            </details>
 
             {/* 出品の正当性表明 (新規登録のみ・必須)。サーバ側でも attested を強制する。 */}
             {!editId && (
@@ -960,18 +1052,44 @@ export function X402DiscoveryView({
     <>
       {/* 公開カタログ */}
       <section>
-        <h3 className="text-base font-bold text-slate-900">{t('catalogTitle')}</h3>
-        <p className="mt-1 text-sm text-slate-500">{t('catalogSubtitle')}</p>
-        {/* 自律購入で買い手が最初に知りたいのは「暴走しないか」。カタログを見る前に、
-            SDK 側が実施するガードを明示する。実装済みの事実だけを書き、売り手のあらゆる
-            挙動を防ぐ保証とは書かない (誇大な安全表現を作らない)。 */}
-        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
-            <ShieldCheck className="h-4 w-4 shrink-0 text-brand" aria-hidden />
-            {t('guardsTitle')}
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h3 className="text-base font-bold text-slate-900">{t('catalogTitle')}</h3>
+          {/* 発見面: JPYC は /api/discovery、USDC は CDP Bazaar / agentic.market。1 行で済ませる。 */}
+          <p className="text-xs text-slate-500">
+            {t('catalogDiscoverPrefix')}
+            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px] text-slate-600">
+              /api/discovery
+            </code>
+            {usdcItems.length > 0 && (
+              <>
+                {t('catalogDiscoverJoin')}
+                <a
+                  href={AGENTIC_MARKET_URL}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
+                >
+                  {t('catalogDiscoverBazaar')}
+                </a>
+              </>
+            )}
           </p>
-          <p className="mt-1 text-xs text-slate-600">{t('guardsIntro')}</p>
-          <ul className="mt-2 space-y-1">
+        </div>
+        {/* 自律購入の買い手が最初に知りたい「暴走しないか」を 1 行で答え、詳細は折りたたむ
+            (実装済みの事実だけを書き、売り手のあらゆる挙動を防ぐ保証とは書かない)。 */}
+        <details className="group mt-3 rounded-xl border border-slate-200 bg-slate-50/70">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs text-slate-600">
+            <ShieldCheck className="h-4 w-4 shrink-0 text-brand" aria-hidden />
+            <span className="min-w-0 flex-1">
+              <span className="font-semibold text-slate-800">{t('guardsTitle')}</span>
+              <span className="ml-1.5 text-slate-500">{t('guardsSummary')}</span>
+            </span>
+            <ChevronDown
+              className="h-3.5 w-3.5 shrink-0 text-slate-400 transition group-open:rotate-180"
+              aria-hidden
+            />
+          </summary>
+          <ul className="space-y-1 border-t border-slate-200/70 px-3 py-2.5">
             {[
               t('guardsLimit'),
               t('guardsMatch'),
@@ -990,69 +1108,87 @@ export function X402DiscoveryView({
                 <span>{line}</span>
               </li>
             ))}
+            <li className="pt-1 text-[11px] leading-relaxed text-slate-500">{t('guardsNote')}</li>
           </ul>
-          <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-            {t('guardsNote')}
-          </p>
-        </div>
-        {!loading && items.length > 0 && (
-          <div className="mt-4 space-y-3 rounded-2xl bg-white p-3 shadow-card ring-1 ring-slate-200/70 sm:p-4">
-            <label className="block">
-              <span className="mb-1.5 block text-xs font-medium text-slate-500">
-                {t('catalogSearchLabel')}
-              </span>
-              <span className="relative block">
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
-                  aria-hidden
-                />
-                <input
-                  type="search"
-                  value={catalogSearch}
-                  onChange={(event) => setCatalogSearch(event.target.value)}
-                  placeholder={t('catalogSearchPlaceholder')}
-                  className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
-                />
-              </span>
+        </details>
+        {!loading && entries.length > 0 && (
+          <div className="mt-4 space-y-2.5">
+            <label className="relative block">
+              <span className="sr-only">{t('catalogSearchLabel')}</span>
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                aria-hidden
+              />
+              <input
+                type="search"
+                value={catalogSearch}
+                onChange={(event) => setCatalogSearch(event.target.value)}
+                placeholder={t('catalogSearchPlaceholder')}
+                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 shadow-card placeholder:text-slate-400 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
+              />
             </label>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                onClick={() => setCatalogCategory(null)}
-                aria-pressed={effectiveCatalogCategory === null}
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                  effectiveCatalogCategory === null
-                    ? 'border-brand bg-brand text-white'
-                    : 'border-slate-300 bg-white text-slate-600 hover:border-brand'
-                }`}
-              >
-                {t('catalogCategoryAll')}
-                <span className={effectiveCatalogCategory === null ? 'text-white/75' : 'text-slate-500'}>
-                  {items.length}
-                </span>
-              </button>
-              {availableCategories.map((category) => {
-                const active = effectiveCatalogCategory === category;
-                return (
-                  <button
-                    key={category}
-                    type="button"
-                    onClick={() => setCatalogCategory(category)}
-                    aria-pressed={active}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition ${
-                      active
-                        ? 'border-brand bg-brand text-white'
-                        : 'border-slate-300 bg-white text-slate-600 hover:border-brand'
-                    }`}
-                  >
-                    {category}
-                    <span className={active ? 'text-white/75' : 'text-slate-500'}>
-                      {categoryCounts.get(category)}
-                    </span>
-                  </button>
-                );
+            {/* 1 行目 = 通貨 (すべて / JPYC / USDC)、2 行目 = 種類。USDC が無い環境は従来の 1 行
+                (すべて + 種類)。「すべて」は常に 1 つだけ (2 つあると何の「すべて」か迷う)。 */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {chip({
+                label: t('catalogCategoryAll'),
+                count: showCurrencyChips ? entries.length : currencyEntries.length,
+                active: showCurrencyChips
+                  ? effectiveCurrency === 'all'
+                  : effectiveCatalogCategory === null,
+                onClick: () => {
+                  setCatalogCurrency('all');
+                  setCatalogCategory(null);
+                },
               })}
+              {showCurrencyChips &&
+                (
+                  [
+                    ['jpyc', t('currencyJpyc'), currencyCounts.jpyc],
+                    ['usdc', t('currencyUsdc'), currencyCounts.usdc],
+                  ] as const
+                ).map(([value, label, count]) =>
+                  chip({
+                    key: value,
+                    label,
+                    count,
+                    active: effectiveCurrency === value,
+                    onClick: () => {
+                      setCatalogCurrency(value);
+                      setCatalogCategory(null);
+                    },
+                  }),
+                )}
+              {!showCurrencyChips &&
+                availableCategories.map((category) =>
+                  chip({
+                    key: category,
+                    label: category,
+                    count: categoryCounts.get(category) ?? 0,
+                    active: effectiveCatalogCategory === category,
+                    onClick: () => setCatalogCategory(category),
+                  }),
+                )}
             </div>
+            {showCurrencyChips && availableCategories.length > 1 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {availableCategories.map((category) => {
+                  const active = effectiveCatalogCategory === category;
+                  return chip({
+                    key: category,
+                    label: category,
+                    count: categoryCounts.get(category) ?? 0,
+                    active,
+                    tone: 'secondary',
+                    onClick: () => setCatalogCategory(active ? null : category),
+                  });
+                })}
+              </div>
+            )}
+            {/* 利用料の脚注 (JPYC は買い手上乗せ 1%・最低 1 JPYC / USDC は上乗せなし)。開示 SoT は LP・法務。 */}
+            <p className="text-[11px] leading-relaxed text-slate-500">
+              {showCurrencyChips ? t('catalogFeeNoteBoth') : t('catalogFeeNoteJpyc')}
+            </p>
           </div>
         )}
         {loading ? (
@@ -1060,14 +1196,14 @@ export function X402DiscoveryView({
             <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
             <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
           </div>
-        ) : items.length === 0 ? (
+        ) : entries.length === 0 ? (
           <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl bg-white px-6 py-10 text-center shadow-card ring-1 ring-slate-200/70">
             <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand/5 text-brand">
               <Boxes className="h-6 w-6" aria-hidden />
             </span>
             <p className="mt-1 text-sm text-slate-500">{t('catalogEmpty')}</p>
           </div>
-        ) : visibleItems.length === 0 ? (
+        ) : visibleEntries.length === 0 ? (
           <div className="mt-4 flex flex-col items-center gap-2 rounded-2xl bg-white px-6 py-10 text-center shadow-card ring-1 ring-slate-200/70">
             <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand/5 text-brand">
               <Search className="h-6 w-6" aria-hidden />
@@ -1076,7 +1212,45 @@ export function X402DiscoveryView({
           </div>
         ) : (
           <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {visibleItems.map((item) => {
+            {visibleEntries.map((entry) => {
+              if (entry.kind === 'usdc') {
+                const u = entry.item;
+                return (
+                  <li
+                    key={entry.key}
+                    className="group rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-card-hover"
+                  >
+                    {cardHead({
+                      category: u.category,
+                      currency: 'usdc',
+                      title: u.title,
+                      description: u.description,
+                      url: u.resource,
+                      copyKey: `cat-${entry.key}`,
+                      priceNode: (
+                        <div className="shrink-0 text-right">
+                          <div className="text-sm font-bold text-slate-900">
+                            {t('payUsdc', { amount: u.priceUsd })}
+                          </div>
+                          <div className="text-[11px] text-slate-500">{t('usdcNoFee')}</div>
+                        </div>
+                      ),
+                    })}
+                    <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-slate-500">
+                      <a
+                        href={AGENTIC_MARKET_URL}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="shrink-0 font-medium text-brand hover:text-brand-dark hover:underline"
+                      >
+                        {t('bazaarListed')}
+                      </a>
+                      <span>{t('usdcNetworkMeta')}</span>
+                    </div>
+                  </li>
+                );
+              }
+              const item = entry.item;
               const feeAtomic = feeAtomicOf(item);
               const verifiedDays = verifiedDaysAgo(item.verifiedAt, Date.now());
               const updatedDate = isoDate(item.updatedAt);
@@ -1096,11 +1270,12 @@ export function X402DiscoveryView({
               }
               return (
                 <li
-                  key={item.resource}
+                  key={entry.key}
                   className="group rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 transition hover:-translate-y-0.5 hover:shadow-card-hover"
                 >
                   {cardHead({
                     category: item.category,
+                    currency: showCurrencyChips ? 'jpyc' : undefined,
                     priceNode: (
                       // 買い手の意思決定基準は合計 (2026-07-31 user 裁定): 合計を太字主役・
                       // 価格+手数料は細字の内訳。fee 不明 (非 JPYC 等) は従来の価格表示。
