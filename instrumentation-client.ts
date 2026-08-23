@@ -53,6 +53,16 @@ if (dsn) {
       /MetaMask extension not found/i,
       /Failed to connect to MetaMask/i,
       /Error restoring session/i,
+      // ブラウザ内蔵のページ翻訳 (Whale / Chrome / Safari) が React 管理下のテキストノードを
+      // <font> 等で包み替えた後、React のアンマウントが removeChild で「もう子でないノード」を
+      // 触って落ちる既知症状 (React #11538 系)。WebKit の文言が "The object can not be found here"
+      // (NotFoundError・code 8)。2026-08-23 mainnet 実観測: iPhone/Whale 3.9.17・ChatGPT 流入・
+      // /ja — 同一セッションで翻訳機能が文書に注入したスクリプトの "null is not an object
+      // (evaluating 'e.contentDocument.body')" も同時発生 (我々のコードに contentDocument 参照は無い)。
+      // 自前コードは removeChild / contentDocument を直接呼ばないので実シグナルは落ちない。
+      // 翻訳を禁止する (translate="no") 案は訪日客の利用を損なうため不採用。
+      /The object can not be found here/,
+      /evaluating 'e\.contentDocument\.body'/,
     ],
     // ブラウザ拡張 (ウォレット/広告ブロッカー/パスワードマネージャ等) が注入したスクリプト由来の
     // エラーは自前アプリのバグではない。スタック該当フレームの URL が拡張スキームのイベントを drop。

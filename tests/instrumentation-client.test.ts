@@ -34,6 +34,20 @@ describe('instrumentation-client telemetry hooks', () => {
     expect(matches('Error: relay settle failed')).toBe(false);
   });
 
+  it('ignoreErrors がブラウザ内蔵翻訳起因の 2 文言 (React removeChild / 注入 iframe) を落とす', async () => {
+    await import('@/instrumentation-client');
+    const options = sentry.init.mock.calls[0][0] as { ignoreErrors: RegExp[] };
+    const matches = (msg: string) => options.ignoreErrors.some((re) => re.test(msg));
+    // 2026-08-23 mainnet 実観測 (iPhone / Whale・ページ翻訳)
+    expect(matches('NotFoundError: The object can not be found here.')).toBe(true);
+    expect(
+      matches("TypeError: null is not an object (evaluating 'e.contentDocument.body')"),
+    ).toBe(true);
+    // 似て非なる実シグナルは落とさない
+    expect(matches('NotFoundError: order not found')).toBe(false);
+    expect(matches("TypeError: null is not an object (evaluating 'order.items')")).toBe(false);
+  });
+
   it('beforeBreadcrumb / beforeSendTransaction に URL scrubber を設定する', async () => {
     await import('@/instrumentation-client');
 
