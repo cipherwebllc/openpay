@@ -19,6 +19,7 @@ import {
   JPYC_LIVE_TERMS_URL,
   TRANSFERS_DEFAULT_LIMIT,
   TRANSFERS_MAX_LIMIT,
+  TRANSFER_CURSOR_PATTERN,
 } from './live';
 import {
   JPYC_BALANCE_RESPONSE_SCHEMA,
@@ -189,6 +190,7 @@ export const USDC_JPYC_TRANSFERS = {
       'The latest JPYC flows on one chain must be inspected',
     ],
     repeatWhen: [
+      'Pass the previous nextCursor as cursor to receive only transfers that appeared after the previous purchase',
       'The chain has advanced beyond the previous toBlock value',
       'Deduplicate results by txHash and logIndex',
     ],
@@ -217,6 +219,12 @@ export const USDC_JPYC_TRANSFERS = {
           pattern: '^0x[a-fA-F0-9]{40}$',
           description: 'Only transfers where this address is the sender or the recipient.',
         },
+        cursor: {
+          type: 'string',
+          pattern: TRANSFER_CURSOR_PATTERN,
+          description:
+            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, so repeated calls pay only for new events.',
+        },
       },
       required: ['chain'],
       additionalProperties: false,
@@ -231,6 +239,8 @@ export const USDC_JPYC_TRANSFERS = {
         contract: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
         fromBlock: '92385945',
         toBlock: '92387745',
+        nextCursor: '92387695:286',
+        truncated: false,
         items: [
           {
             blockNumber: '92387695',

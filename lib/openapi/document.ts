@@ -448,6 +448,15 @@ const VANILLA_OPENAPI_PATHS = {
           schema: { type: 'string', pattern: '^0x[a-fA-F0-9]{40}$' },
           description: 'Only transfers where this address is the sender or the recipient.',
         },
+        {
+          name: 'cursor',
+          in: 'query',
+          required: false,
+          schema: { type: 'string', pattern: '^[0-9]+:(?:-1|[0-9]+)$' },
+          description:
+            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, so repeated calls pay only for new events. If the cursor is older than the scanned window, the response sets truncated=true.',
+          example: '92387695:286',
+        },
       ],
       'x-agent-usage': USDC_JPYC_TRANSFERS.trigger,
       'x-payment-info': usdcPaymentInfo(USDC_JPYC_TRANSFERS.priceUsd),

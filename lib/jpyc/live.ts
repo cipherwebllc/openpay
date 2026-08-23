@@ -109,6 +109,31 @@ export type TransferItem = {
   valueFormatted: string;
 };
 
+/**
+ * 差分取得の位置。「(block, logIndex) までは見た」を表し、次回はそれより新しい Transfer だけ返す。
+ * logIndex=-1 は「その block のログは 1 件も見ていない (= block 内の全ログが新しい)」。
+ * 文字列表現は `${block}:${logIndex}` (応答 nextCursor をそのまま cursor に渡せる)。
+ */
+export type TransferCursor = { block: bigint; logIndex: number };
+
+export const TRANSFER_CURSOR_PATTERN = '^[0-9]+:(?:-1|[0-9]+)$';
+
+export function formatCursor(c: TransferCursor): string {
+  return `${c.block.toString()}:${c.logIndex}`;
+}
+
+/** 省略は undefined、形式不正は null (= 400)。 */
+export function parseCursorParam(raw: string | null): TransferCursor | undefined | null {
+  if (raw === null || raw === '') return undefined;
+  const m = /^([0-9]+):(-1|[0-9]+)$/.exec(raw);
+  if (!m) return null;
+  return { block: BigInt(m[1]), logIndex: Number(m[2]) };
+}
+
+function isNewerThan(block: bigint, logIndex: number, c: TransferCursor): boolean {
+  return block > c.block || (block === c.block && logIndex > c.logIndex);
+}
+
 export type TransfersResult = ChainRowBase &
   (
     | {
@@ -116,6 +141,10 @@ export type TransfersResult = ChainRowBase &
         fromBlock: string;
         toBlock: string;
         items: TransferItem[];
+        /** 次回 `cursor` に渡すと、この応答より新しい Transfer だけが返る。 */
+        nextCursor: string;
+        /** cursor が走査窓より古く、cursor〜fromBlock の間のイベントは走査していない。 */
+        truncated: boolean;
       }
     | { status: 'unavailable'; errorCode: JpycLiveErrorCode; retryable: boolean }
   );
@@ -283,7 +312,7 @@ export async function readBalance(
 
 export async function readTransfers(
   chain: JpycChainSlug,
-  opts: { limit: number; address?: Address },
+  opts: { limit: number; address?: Address; cursor?: TransferCursor },
 ): Promise<TransfersResult> {
   const dep = deploymentFor(chain);
   const base: ChainRowBase = { chain, chainId: dep.chainId, contract: dep.address };
@@ -294,13 +323,19 @@ export async function readTransfers(
         const toBlock = await client.getBlockNumber();
         const window = TRANSFER_WINDOW_BLOCKS[chain];
         const fromBlock = toBlock > window ? toBlock - window : 0n;
+        // cursor があれば走査の下端を cursor.block まで縮める (それより古い block は読まない)。
+        // cursor が窓より古い場合は窓の下端までしか読めない = truncated。
+        const cursor = opts.cursor;
+        const truncated = cursor !== undefined && cursor.block < fromBlock;
+        const scanFrom =
+          cursor !== undefined && cursor.block > fromBlock ? cursor.block : fromBlock;
 
         // 窓を新しい順のチャンクに割る。limit に達したら残りは読まない (早期終了)。
         const ranges: { from: bigint; to: bigint }[] = [];
-        for (let end = toBlock; end >= fromBlock; end -= TRANSFER_CHUNK_BLOCKS) {
+        for (let end = toBlock; end >= scanFrom; end -= TRANSFER_CHUNK_BLOCKS) {
           const start = end - TRANSFER_CHUNK_BLOCKS + 1n;
-          ranges.push({ from: start > fromBlock ? start : fromBlock, to: end });
-          if (start <= fromBlock) break;
+          ranges.push({ from: start > scanFrom ? start : scanFrom, to: end });
+          if (start <= scanFrom) break;
         }
         const fetchChunk = async (r: { from: bigint; to: bigint }) => {
           const common = {
@@ -331,6 +366,8 @@ export async function readTransfers(
             return (b.logIndex ?? 0) - (a.logIndex ?? 0);
           });
           for (const log of logs) {
+            // cursor 以前 (見た分) は除外。同一 block 内は logIndex で厳密に比較する
+            if (cursor !== undefined && !isNewerThan(log.blockNumber, log.logIndex, cursor)) continue;
             const key = `${log.transactionHash}:${log.logIndex}`;
             if (seen.has(key)) continue;
             seen.add(key);
@@ -347,7 +384,14 @@ export async function readTransfers(
             if (items.length >= opts.limit) break;
           }
         }
-        return { fromBlock: fromBlock.toString(), toBlock: toBlock.toString(), items };
+        // nextCursor: 返した中で最新の位置。何も無ければ「toBlock まで全部見た」= (toBlock, -1)
+        // ではなく toBlock 内のログも無かったので (toBlock, +∞) 相当だが、-1 表現だと toBlock の
+        // ログが次回重複し得る。ログが無かった block なので重複は起きない (block は確定済み)。
+        const nextCursor =
+          items.length > 0
+            ? formatCursor({ block: BigInt(items[0].blockNumber), logIndex: items[0].logIndex })
+            : formatCursor({ block: toBlock, logIndex: -1 });
+        return { fromBlock: fromBlock.toString(), toBlock: toBlock.toString(), items, nextCursor, truncated };
       })(),
     );
     return { ...base, status: 'ok', ...result };

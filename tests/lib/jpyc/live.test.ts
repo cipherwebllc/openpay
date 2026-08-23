@@ -29,8 +29,10 @@ import {
   TRANSFER_CHUNK_BLOCKS,
   TRANSFER_WINDOW_BLOCKS,
   allFailed,
+  formatCursor,
   parseAddressParam,
   parseChainParam,
+  parseCursorParam,
   parseLimitParam,
   parseOptionalAddressParam,
   parseRequiredChainParam,
@@ -227,6 +229,59 @@ describe('readTransfers', () => {
     expect(c.getLogs.mock.calls.length % 2).toBe(0);
     expect(c.getLogs.mock.calls[0][0]).toEqual(expect.objectContaining({ args: { from: ADDR } }));
     expect(c.getLogs.mock.calls[1][0]).toEqual(expect.objectContaining({ args: { to: ADDR } }));
+  });
+
+  // cursor (P2): 「(block, logIndex) までは見た」を渡すと、それより新しい Transfer だけを返す。
+  it('cursor: 形式検証 (省略 undefined / 不正 null / "<block>:<logIndex>" と -1 を受理)', () => {
+    expect(parseCursorParam(null)).toBeUndefined();
+    expect(parseCursorParam('')).toBeUndefined();
+    expect(parseCursorParam('abc')).toBeNull();
+    expect(parseCursorParam('12:')).toBeNull();
+    expect(parseCursorParam('12:-2')).toBeNull();
+    expect(parseCursorParam('999999:3')).toEqual({ block: 999_999n, logIndex: 3 });
+    expect(parseCursorParam('999999:-1')).toEqual({ block: 999_999n, logIndex: -1 });
+    expect(formatCursor({ block: 5n, logIndex: -1 })).toBe('5:-1');
+  });
+
+  it('cursor より新しい Transfer だけを返し、同一 block 内は logIndex で厳密比較・nextCursor は最新位置', async () => {
+    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    const slug = JPYC_CHAINS[0];
+    // ALL_LOGS: (999999,3) (999999,0) (999990,1) (999500,0)。cursor=(999999,0) → (999999,3) だけ
+    const r = await readTransfers(slug, { limit: 100, cursor: { block: 999_999n, logIndex: 0 } });
+    expect(r.status).toBe('ok');
+    if (r.status !== 'ok') return;
+    expect(r.items.map((i) => `${i.blockNumber}:${i.logIndex}`)).toEqual(['999999:3']);
+    expect(r.nextCursor).toBe('999999:3');
+    expect(r.truncated).toBe(false);
+    // 走査は cursor.block まで (それより古い block のチャンクは読まない)
+    const c = clients.get(chainForSlug(slug).id)!;
+    for (const [q] of c.getLogs.mock.calls as [{ fromBlock: bigint }][]) {
+      expect(q.fromBlock).toBeGreaterThanOrEqual(999_999n);
+    }
+  });
+
+  it('cursor 以降に何も無ければ items 空・nextCursor は "toBlock:-1" (次回も差分だけ)', async () => {
+    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    const r = await readTransfers(JPYC_CHAINS[0], { limit: 20, cursor: { block: 999_999n, logIndex: 3 } });
+    expect(r.status).toBe('ok');
+    if (r.status !== 'ok') return;
+    expect(r.items).toEqual([]);
+    expect(r.nextCursor).toBe('1000000:-1');
+    expect(r.truncated).toBe(false);
+  });
+
+  it('cursor が走査窓より古いと truncated=true (窓の下端までしか読まない)', async () => {
+    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    const slug = JPYC_CHAINS[0];
+    const r = await readTransfers(slug, { limit: 100, cursor: { block: 1n, logIndex: -1 } });
+    expect(r.status).toBe('ok');
+    if (r.status !== 'ok') return;
+    expect(r.truncated).toBe(true);
+    expect(BigInt(r.fromBlock)).toBe(1_000_000n - TRANSFER_WINDOW_BLOCKS[slug]);
+    const c = clients.get(chainForSlug(slug).id)!;
+    for (const [q] of c.getLogs.mock.calls as [{ fromBlock: bigint }][]) {
+      expect(q.fromBlock).toBeGreaterThanOrEqual(BigInt(r.fromBlock));
+    }
   });
 
   it('RPC 失敗は throw せず status=error で返す', async () => {
