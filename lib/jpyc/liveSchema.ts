@@ -128,6 +128,17 @@ export const JPYC_TRANSFERS_RESPONSE_SCHEMA = {
     ...CHAIN_ROW_BASE,
     fromBlock: UINT_STRING,
     toBlock: UINT_STRING,
+    nextCursor: {
+      type: 'string',
+      pattern: '^[0-9]+:(?:-1|[0-9]+)$',
+      description:
+        'Pass as the cursor query parameter on the next call to receive only transfers newer than this response ("<block>:<logIndex>").',
+    },
+    truncated: {
+      type: 'boolean',
+      description:
+        'true when the supplied cursor is older than the scanned block window; events between the cursor and fromBlock were not scanned.',
+    },
     items: {
       type: 'array',
       items: {
@@ -146,6 +157,6 @@ export const JPYC_TRANSFERS_RESPONSE_SCHEMA = {
       },
     },
   },
-  required: [...ENVELOPE_REQUIRED, 'chain', 'chainId', 'contract', 'fromBlock', 'toBlock', 'items'],
+  required: [...ENVELOPE_REQUIRED, 'chain', 'chainId', 'contract', 'fromBlock', 'toBlock', 'nextCursor', 'truncated', 'items'],
   additionalProperties: false,
 } as const;

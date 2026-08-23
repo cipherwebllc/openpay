@@ -3,6 +3,7 @@
 
 import { type NextRequest, type NextResponse } from 'next/server';
 import {
+  parseCursorParam,
   parseLimitParam,
   parseOptionalAddressParam,
   parseRequiredChainParam,
@@ -14,7 +15,7 @@ import { envelope, gated, invalidQuery, rpcUnavailable } from '@/lib/jpyc/liveRo
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const KEYS = new Set(['chain', 'limit', 'address']);
+const KEYS = new Set(['chain', 'limit', 'address', 'cursor']);
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const sp = new URL(request.url).searchParams;
@@ -25,12 +26,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const chain = chainRaw ? parseRequiredChainParam(chainRaw) : undefined;
   const limit = parseLimitParam(sp.get('limit'));
   const address = parseOptionalAddressParam(sp.get('address'));
-  if (chain === null || limit === null || address === null) return invalidQuery();
+  const cursor = parseCursorParam(sp.get('cursor'));
+  if (chain === null || limit === null || address === null || cursor === null) return invalidQuery();
 
   return gated(request, USDC_JPYC_TRANSFERS, async () => {
     // 支払い付きで chain が無い場合はここで 400 → gate は settle しない (課金されない)。
     if (!chain) return invalidQuery();
-    const result = await readTransfers(chain, { limit, address });
+    const result = await readTransfers(chain, { limit, address, cursor });
     if (result.status === 'unavailable') return rpcUnavailable();
     const { status: _status, ...rest } = result;
     return envelope(rest);

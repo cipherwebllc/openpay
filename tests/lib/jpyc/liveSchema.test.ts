@@ -131,6 +131,7 @@ describe('route の実応答が Schema に適合する', () => {
   it('transfers', async () => {
     liveMocks.readTransfers.mockResolvedValue({
       chain: 'polygon', chainId: 137, contract: CONTRACT, status: 'ok', fromBlock: '1', toBlock: '100',
+      nextCursor: '99:0', truncated: false,
       items: [{ blockNumber: '99', txHash: `0x${'ab'.repeat(32)}`, logIndex: 0, from: ADDR, to: SELLER, value: '1', valueFormatted: '0.000000000000000001' }],
     });
     const route = await load('transfers');

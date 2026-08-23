@@ -125,6 +125,7 @@ describe('query 検証は支払い要求より先 (400・facilitator 不呼出)'
     const route = await load('transfers');
     expect((await route.GET(req('/api/paid/usdc/jpyc/transfers?chain=polygon&limit=0'))).status).toBe(400);
     expect((await route.GET(req('/api/paid/usdc/jpyc/transfers?chain=polygon&address=zz'))).status).toBe(400);
+    expect((await route.GET(req('/api/paid/usdc/jpyc/transfers?chain=polygon&cursor=abc'))).status).toBe(400);
     expect((await route.GET(req('/api/paid/usdc/jpyc/transfers'))).status).toBe(402);
   });
 
@@ -261,16 +262,23 @@ describe('支払い後の content と買い手保護', () => {
       (await route.GET(req('/api/paid/usdc/jpyc/transfers?chain=polygon', { 'x-payment': b64(v1Payment('5000')) }))).status,
     ).toBe(503);
     liveMocks.readTransfers.mockResolvedValueOnce({
-      chain: 'polygon', chainId: 137, contract: SELLER, status: 'ok', fromBlock: '1', toBlock: '2', items: [],
+      chain: 'polygon', chainId: 137, contract: SELLER, status: 'ok', fromBlock: '1', toBlock: '2',
+      nextCursor: '2:-1', truncated: false, items: [],
     });
     const res = await route.GET(
-      req(`/api/paid/usdc/jpyc/transfers?chain=polygon&limit=5&address=${ADDR}`, { 'x-payment': b64(v1Payment('5000')) }),
+      req(`/api/paid/usdc/jpyc/transfers?chain=polygon&limit=5&address=${ADDR}&cursor=1:4`, { 'x-payment': b64(v1Payment('5000')) }),
     );
     expect(res.status).toBe(200);
-    expect(liveMocks.readTransfers).toHaveBeenLastCalledWith('polygon', { limit: 5, address: ADDR });
+    expect(liveMocks.readTransfers).toHaveBeenLastCalledWith('polygon', {
+      limit: 5,
+      address: ADDR,
+      cursor: { block: 1n, logIndex: 4 },
+    });
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.status).toBeUndefined();
     expect(body.items).toEqual([]);
     expect(body.toBlock).toBe('2');
+    expect(body.nextCursor).toBe('2:-1');
+    expect(body.truncated).toBe(false);
   });
 });
