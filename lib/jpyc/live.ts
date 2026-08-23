@@ -27,6 +27,7 @@ import {
   type JpycChainSlug,
 } from '@/lib/chains';
 import { deploymentsForSymbol, type TokenDeployment } from '@/lib/tokens';
+import { logger } from '@/lib/logger';
 import type { JpycLiveErrorCode } from './liveSchema';
 
 export const JPYC_LIVE_SCHEMA_VERSION = '2.1';
@@ -226,15 +227,31 @@ export type JpycLiveFailure = { errorCode: JpycLiveErrorCode; retryable: boolean
  *   - contract_read_failed: コントラクト呼び出し自体が revert / ABI 不一致 (再試行しても同じ) → retryable=false
  *   - rpc_unavailable: timeout・HTTP・transport 障害 (時間を置けば直り得る) → retryable=true
  */
-export function classifyFailure(e: unknown): JpycLiveFailure {
+export function classifyFailure(
+  e: unknown,
+  ctx?: { op: 'supply' | 'balance' | 'transfers'; chain: JpycChainSlug },
+): JpycLiveFailure {
   const name = e instanceof Error ? e.name : '';
-  if (name === 'ContractFunctionExecutionError' || name === 'ContractFunctionRevertedError') {
-    return { errorCode: 'contract_read_failed', retryable: false };
+  const failure: JpycLiveFailure =
+    name === 'ContractFunctionExecutionError' || name === 'ContractFunctionRevertedError'
+      ? { errorCode: 'contract_read_failed', retryable: false }
+      : { errorCode: 'rpc_unavailable', retryable: true };
+  // 応答には分類コードだけを出すが、**サーバログには原因を残す** (2026-08-23 の本番 503 は
+  // ログが無く切り分けできなかった)。メッセージは先頭 300 字に切る (viem は URL/body を含めて長い)。
+  if (ctx) {
+    logger.warn('jpyc.live.rpc_failed', {
+      op: ctx.op,
+      chain: ctx.chain,
+      errorCode: failure.errorCode,
+      errorName: name || typeof e,
+      message: (e instanceof Error ? e.message : String(e)).slice(0, 300),
+    });
   }
-  return { errorCode: 'rpc_unavailable', retryable: true };
+  return failure;
 }
 
 async function perChain<T>(
+  op: 'supply' | 'balance',
   chains: readonly JpycChainSlug[],
   read: (slug: JpycChainSlug, dep: TokenDeployment) => Promise<T>,
   onError: (base: ChainRowBase, failure: JpycLiveFailure) => T,
@@ -250,13 +267,14 @@ async function perChain<T>(
     const dep = deploymentFor(chains[i]);
     return onError(
       { chain: chains[i], chainId: dep.chainId, contract: dep.address },
-      classifyFailure(r.reason),
+      classifyFailure(r.reason, { op, chain: chains[i] }),
     );
   });
 }
 
 export async function readSupply(chains: readonly JpycChainSlug[]): Promise<SupplyRow[]> {
   return perChain<SupplyRow>(
+    'supply',
     chains,
     async (slug, dep) => {
       const client = clientFor(dep.chainId);
@@ -287,6 +305,7 @@ export async function readBalance(
   chains: readonly JpycChainSlug[],
 ): Promise<BalanceRow[]> {
   return perChain<BalanceRow>(
+    'balance',
     chains,
     async (slug, dep) => {
       const client = clientFor(dep.chainId);
@@ -428,7 +447,7 @@ export async function readTransfers(
     );
     return { ...base, status: 'ok', ...result };
   } catch (e) {
-    return { ...base, status: 'unavailable', ...classifyFailure(e) };
+    return { ...base, status: 'unavailable', ...classifyFailure(e, { op: 'transfers', chain }) };
   }
 }
 
