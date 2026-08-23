@@ -180,6 +180,50 @@ describe('vanillaGate facilitator 切替', () => {
     }
   });
 
+  // 掲載カードの serviceName/tags/iconUrl は settle 時に確定する (#384 と同じ経路) ので、
+  // 402 だけでなく facilitator へ送る paymentPayload.resource にも同じ値を載せる。
+  it('cdp: serviceName/tags/iconUrl は verify/settle の paymentPayload.resource にも載る', async () => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    const req = new Request(RESOURCE.resourceUrl, {
+      headers: { 'x-payment': v1PaymentHeader() },
+    });
+    await handleVanillaPaidGet(
+      req,
+      {
+        ...RESOURCE,
+        outputSchema: { input: { type: 'http', method: 'GET' } },
+        serviceName: 'JPYC Supply by Chain',
+        tags: ['jpyc', 'token-supply'],
+        iconUrl: 'https://open-pay.jp/icon-512.png',
+      },
+      () => NextResponse.json({ ok: true }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const call of fetchMock.mock.calls) {
+      const sent = JSON.parse((call[1] as { body: string }).body) as {
+        paymentPayload: { resource: { url: string; serviceName?: string; tags?: string[]; iconUrl?: string } };
+      };
+      expect(sent.paymentPayload.resource.serviceName).toBe('JPYC Supply by Chain');
+      expect(sent.paymentPayload.resource.tags).toEqual(['jpyc', 'token-supply']);
+      expect(sent.paymentPayload.resource.iconUrl).toBe('https://open-pay.jp/icon-512.png');
+    }
+  });
+
+  it('cdp: メタ未指定の resource は resource に serviceName/tags/iconUrl を持たない (既存 4 本の挙動不変)', async () => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    await run();
+    const sent = JSON.parse(
+      (fetchMock.mock.calls[0][1] as { body: string }).body,
+    ) as { paymentPayload: { resource: Record<string, unknown> } };
+    expect(Object.keys(sent.paymentPayload.resource).sort()).toEqual(['description', 'mimeType', 'url']);
+  });
+
   it('cdp: 宣言のない resource は extensions を積まない (store 商品など)', async () => {
     configHold.vanillaFacilitator = {
       url: 'https://api.cdp.coinbase.com/platform/v2/x402',

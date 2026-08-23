@@ -167,6 +167,11 @@ describe('402 dual-stack と Bazaar 宣言', () => {
     };
     expect(v2.accepts[0].amount).toBe('2000');
     expect(v2.accepts[0].network).toBe('eip155:8453');
+    // 検索・カード表示用メタ (CDP 拡張) が 402 の resource に載る
+    const resource = (v2 as unknown as { resource: { serviceName: string; tags: string[]; iconUrl: string } }).resource;
+    expect(resource.serviceName).toBe('JPYC Supply by Chain');
+    expect(resource.tags).toContain('japanese-yen');
+    expect(resource.iconUrl).toBe('https://open-pay.jp/icon-512.png');
     expect(v2.extensions.bazaar.info.input.queryParams).toEqual({ chain: 'polygon' });
     expect(v2.extensions.bazaar.info.output.type).toBe('json');
     expect(v2.extensions.bazaar.schema.properties.input.properties.queryParams.properties.chain.enum).toEqual([

@@ -122,6 +122,24 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
       ['/api/paid/usdc/jpyc/transfers', '0.005'],
       ['/api/paid/hello', '0.01'], // X402_PRICE stub に一致
     ];
+    // JPYC ライブ API は operationId (動詞始まり・不変) と x-agent-usage (購入ルール) を持ち、
+    // summary に決済レール (USDC/Base/価格) を混ぜない (x-payment-info の担当)。
+    const agentReady: [string, string][] = [
+      ['/api/paid/usdc/jpyc/supply', 'getJpycSupply'],
+      ['/api/paid/usdc/jpyc/balance', 'getJpycBalance'],
+      ['/api/paid/usdc/jpyc/transfers', 'listRecentJpycTransfers'],
+    ];
+    for (const [path, opId] of agentReady) {
+      const op = body.paths[path]?.get as Record<string, unknown> | undefined;
+      expect(op?.operationId, path).toBe(opId);
+      const usage = op?.['x-agent-usage'] as { callWhen: string[]; repeatWhen: string[]; avoidWhen: string[] };
+      expect(usage.callWhen.length, path).toBeGreaterThan(0);
+      expect(usage.repeatWhen.length, path).toBeGreaterThan(0);
+      expect(usage.avoidWhen.length, path).toBeGreaterThan(0);
+      expect(String(op?.summary)).not.toMatch(/USDC|Base|\$/);
+    }
+    const priced: [string, string][] = [
+    ];
     for (const [path, amount] of expected) {
       const op = body.paths[path]?.get;
       expect(op, `${path} が openapi.json に無い`).toBeDefined();
