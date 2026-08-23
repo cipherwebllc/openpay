@@ -42,6 +42,7 @@ import {
   readBalance,
   readSupply,
   readTransfers,
+  sanitizeRpcError,
 } from '@/lib/jpyc/live';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
@@ -255,6 +256,7 @@ describe('readTransfers', () => {
     expect(r.status).toBe('ok');
     if (r.status !== 'ok') return;
     expect(r.items.map((i) => `${i.blockNumber}:${i.logIndex}`)).toEqual(['999999:0', '999999:3']);
+    expect(r.mode).toBe('delta');
     expect(r.nextCursor).toBe('999999:3');
     expect(r.hasMore).toBe(false);
     expect(r.truncated).toBe(false);
@@ -310,8 +312,21 @@ describe('readTransfers', () => {
     expect(r.status).toBe('ok');
     if (r.status !== 'ok') return;
     expect(r.items.map((i) => i.valueFormatted)).toEqual(['3', '2']); // 新しい順
+    expect(r.mode).toBe('snapshot');
     expect(r.hasMore).toBe(true); // 窓内にあと (999990,1) (999500,0)
     expect(r.nextCursor).toBe('999999:3');
+  });
+
+  it('sanitizeRpcError: URL は host だけ残し、鍵付き query と長文を伏せる (Vercel ログに鍵を残さない)', () => {
+    const raw =
+      'HTTP request failed. URL: https://polygon-mainnet.g.alchemy.com/v2/SECRETKEY123 Request body: {"method":"eth_getLogs"} api_key=ABC token=XYZ ' +
+      'x'.repeat(500);
+    const out = sanitizeRpcError(raw);
+    expect(out).not.toContain('SECRETKEY123');
+    expect(out).toContain('https://polygon-mainnet.g.alchemy.com/[redacted]');
+    expect(out).toContain('api_key=[redacted]');
+    expect(out).toContain('token=[redacted]');
+    expect(out.length).toBeLessThanOrEqual(300);
   });
 
   it('cursor が走査窓より古いと truncated=true (窓の下端までしか読まない)', async () => {

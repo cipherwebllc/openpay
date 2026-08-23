@@ -211,7 +211,7 @@ describe('支払い後の content と買い手保護', () => {
       items: unknown[];
       token: { symbol: string };
     };
-    expect(body.schemaVersion).toBe('2.1');
+    expect(body.schemaVersion).toBe('2.2');
     expect(body.token.symbol).toBe('JPYC');
     expect(body.items).toHaveLength(1);
     // notice は短いコード + 規約 URL (全文は OpenAPI/Schema の description・反復購入のトークン節約)
@@ -264,7 +264,7 @@ describe('支払い後の content と買い手保護', () => {
     ).toBe(503);
     liveMocks.readTransfers.mockResolvedValueOnce({
       chain: 'polygon', chainId: 137, contract: SELLER, status: 'ok', fromBlock: '1', toBlock: '2',
-      nextCursor: '2:-1', hasMore: false, truncated: false, items: [],
+      mode: 'delta', nextCursor: '2:-1', hasMore: false, truncated: false, items: [],
     });
     const res = await route.GET(
       req(`/api/paid/usdc/jpyc/transfers?chain=polygon&limit=5&address=${ADDR}&cursor=1:4`, { 'x-payment': b64(v1Payment('5000')) }),
@@ -280,6 +280,7 @@ describe('支払い後の content と買い手保護', () => {
     expect(body.items).toEqual([]);
     expect(body.toBlock).toBe('2');
     expect(body.nextCursor).toBe('2:-1');
+    expect(body.mode).toBe('delta');
     expect(body.hasMore).toBe(false);
     expect(body.truncated).toBe(false);
   });

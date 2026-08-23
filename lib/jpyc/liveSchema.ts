@@ -21,7 +21,7 @@ export const JPYC_LIVE_ERROR_CODES = ['rpc_unavailable', 'contract_read_failed']
 export type JpycLiveErrorCode = (typeof JPYC_LIVE_ERROR_CODES)[number];
 
 const ENVELOPE_COMMON = {
-  schemaVersion: { type: 'string', const: '2.1' },
+  schemaVersion: { type: 'string', const: '2.2' },
   token: {
     type: 'object',
     properties: {
@@ -128,16 +128,22 @@ export const JPYC_TRANSFERS_RESPONSE_SCHEMA = {
     ...CHAIN_ROW_BASE,
     fromBlock: UINT_STRING,
     toBlock: UINT_STRING,
+    mode: {
+      type: 'string',
+      enum: ['snapshot', 'delta'],
+      description:
+        'snapshot = no cursor was supplied; items are newest first. delta = a cursor was supplied; items are the events after that position, oldest first.',
+    },
     nextCursor: {
       type: 'string',
       pattern: '^[0-9]+:(?:-1|[0-9]+)$',
       description:
-        'Pass as the cursor query parameter on the next call to receive only transfers newer than this response ("<block>:<logIndex>"). Never moves backwards relative to the cursor you supplied.',
+        'Pass as the cursor query parameter on the next call to receive only transfers newer than this response ("<block>:<logIndex>"). In snapshot mode this is where monitoring starts (after the newest returned event). Never moves backwards relative to the cursor you supplied.',
     },
     hasMore: {
       type: 'boolean',
       description:
-        'true when more matching transfers exist than limit. With a cursor, call again with nextCursor to continue in order; without a cursor, older events in the window were not returned.',
+        'delta: more events exist after the returned ones — call again with nextCursor to continue. snapshot: older events in the window were omitted and are NOT retrievable via nextCursor (it starts after the newest returned event).',
     },
     truncated: {
       type: 'boolean',
@@ -162,6 +168,6 @@ export const JPYC_TRANSFERS_RESPONSE_SCHEMA = {
       },
     },
   },
-  required: [...ENVELOPE_REQUIRED, 'chain', 'chainId', 'contract', 'fromBlock', 'toBlock', 'nextCursor', 'hasMore', 'truncated', 'items'],
+  required: [...ENVELOPE_REQUIRED, 'chain', 'chainId', 'contract', 'fromBlock', 'toBlock', 'mode', 'nextCursor', 'hasMore', 'truncated', 'items'],
   additionalProperties: false,
 } as const;
