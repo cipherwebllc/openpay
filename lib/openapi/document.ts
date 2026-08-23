@@ -24,6 +24,7 @@ import {
   USDC_JPYC_BALANCE,
   USDC_JPYC_SUPPLY,
   USDC_JPYC_TRANSFERS,
+  agentUsageText,
 } from '@/lib/jpyc/liveResources';
 import { x402Config } from '@/lib/x402/config';
 import { usdPriceToAtomic } from '@/lib/x402/vanillaGate';
@@ -347,16 +348,20 @@ const JPYC_CHAIN_PARAM = {
   in: 'query',
   required: false,
   schema: { type: 'string', enum: ['polygon', 'kaia', 'avalanche', 'ethereum'] },
-  description: 'Omit for all supported chains.',
+  description:
+    'Chain to query. Omit to query all supported chains. Supported values: polygon, kaia, avalanche, ethereum.',
+  example: 'polygon',
 };
 
 const VANILLA_OPENAPI_PATHS = {
   [USDC_JPYC_SUPPLY.path]: {
     get: {
       tags: ['x402 Vanilla (USDC)', 'JPYC Live Data'],
-      summary: 'Live JPYC total supply per chain (USDC on Base)',
-      description: `${USDC_JPYC_SUPPLY.description} Facts only — no advice, quote or price interpretation. Standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
+      operationId: USDC_JPYC_SUPPLY.operationId,
+      summary: USDC_JPYC_SUPPLY.summary,
+      description: `${USDC_JPYC_SUPPLY.description} ${agentUsageText(USDC_JPYC_SUPPLY.trigger)} Payment: standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
       parameters: [JPYC_CHAIN_PARAM],
+      'x-agent-usage': USDC_JPYC_SUPPLY.trigger,
       'x-payment-info': usdcPaymentInfo(USDC_JPYC_SUPPLY.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',
@@ -375,17 +380,21 @@ const VANILLA_OPENAPI_PATHS = {
   [USDC_JPYC_BALANCE.path]: {
     get: {
       tags: ['x402 Vanilla (USDC)', 'JPYC Live Data'],
-      summary: 'JPYC balance of any address across chains (USDC on Base)',
-      description: `${USDC_JPYC_BALANCE.description} Facts only — no advice. Standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
+      operationId: USDC_JPYC_BALANCE.operationId,
+      summary: USDC_JPYC_BALANCE.summary,
+      description: `${USDC_JPYC_BALANCE.description} ${agentUsageText(USDC_JPYC_BALANCE.trigger)} Payment: standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
       parameters: [
         {
           name: 'address',
           in: 'query',
           required: true,
           schema: { type: 'string', pattern: '^0x[a-fA-F0-9]{40}$' },
+          description: 'EVM address to read the JPYC balance of.',
+          example: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
         },
         JPYC_CHAIN_PARAM,
       ],
+      'x-agent-usage': USDC_JPYC_BALANCE.trigger,
       'x-payment-info': usdcPaymentInfo(USDC_JPYC_BALANCE.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',
@@ -404,24 +413,33 @@ const VANILLA_OPENAPI_PATHS = {
   [USDC_JPYC_TRANSFERS.path]: {
     get: {
       tags: ['x402 Vanilla (USDC)', 'JPYC Live Data'],
-      summary: 'Latest JPYC Transfer events on one chain (USDC on Base)',
-      description: `${USDC_JPYC_TRANSFERS.description} The block window is fixed per chain (about one hour) to bound RPC cost. Facts only — no advice. Standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
+      operationId: USDC_JPYC_TRANSFERS.operationId,
+      summary: USDC_JPYC_TRANSFERS.summary,
+      description: `${USDC_JPYC_TRANSFERS.description} The block window is fixed per chain (about one hour) to bound RPC cost. ${agentUsageText(USDC_JPYC_TRANSFERS.trigger)} Payment: standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
       parameters: [
-        { ...JPYC_CHAIN_PARAM, required: true, description: 'Chain to scan.' },
+        {
+          ...JPYC_CHAIN_PARAM,
+          required: true,
+          description: 'Chain to scan. Supported values: polygon, kaia, avalanche, ethereum.',
+        },
         {
           name: 'limit',
           in: 'query',
           required: false,
           schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          description:
+            'Maximum number of transfer events to return, newest first (1-100, default 20). This is not a page number.',
+          example: 20,
         },
         {
           name: 'address',
           in: 'query',
           required: false,
           schema: { type: 'string', pattern: '^0x[a-fA-F0-9]{40}$' },
-          description: 'Only transfers where this address is sender or recipient.',
+          description: 'Only transfers where this address is the sender or the recipient.',
         },
       ],
+      'x-agent-usage': USDC_JPYC_TRANSFERS.trigger,
       'x-payment-info': usdcPaymentInfo(USDC_JPYC_TRANSFERS.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',

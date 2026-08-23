@@ -70,6 +70,13 @@ export type VanillaPaidResource = {
    * outputSchema がある資源でのみ使われ、未指定なら引数なし GET の最小形。
    */
   bazaar?: BazaarQueryDeclaration;
+  /**
+   * 検索・カード表示用メタ (CDP 拡張)。402 の resource と settle 封筒の resource の両方に載せる —
+   * 掲載メタは settle 時に確定するため (#384)。名前は「ブランド」でなく「実行する仕事」で付ける。
+   */
+  serviceName?: string;
+  tags?: readonly string[];
+  iconUrl?: string;
 };
 
 /** "$0.02" → "20000"。float を経由しない厳密変換 (6 桁超の端数は設定ミスとして throw)。 */
@@ -139,6 +146,9 @@ function paymentChallenge(
     url: resource.resourceUrl,
     description: resource.description,
     mimeType: 'application/json',
+    ...(resource.serviceName ? { serviceName: resource.serviceName } : {}),
+    ...(resource.tags ? { tags: resource.tags } : {}),
+    ...(resource.iconUrl ? { iconUrl: resource.iconUrl } : {}),
     accepts: [toV2Accept(accepts.v1Caip2)],
     // v1 body の outputSchema (x402scan 互換) はそのまま・v2 面だけ公式形 {info, schema}。
     // CDP Bazaar は schema 無しを severity=required で掲載拒否する (validate API 実測)。
@@ -219,7 +229,13 @@ export async function postFacilitator(
   body: FacilitatorV1Body,
   cdpWire: {
     accept: ReturnType<typeof toV2Accept>;
-    resource: { resourceUrl: string; description: string };
+    resource: {
+      resourceUrl: string;
+      description: string;
+      serviceName?: string;
+      tags?: readonly string[];
+      iconUrl?: string;
+    };
     /** Bazaar カタログ登録メタ。指定時のみ paymentPayload.extensions に載せる。 */
     bazaar?: BazaarExtensionV2;
   },
@@ -261,6 +277,10 @@ export async function postFacilitator(
             url: cdpWire.resource.resourceUrl,
             description: cdpWire.resource.description,
             mimeType: 'application/json',
+            // 検索・カード表示用メタ (CDP 拡張)。402 と同じ値を settle にも載せる。
+            ...(cdpWire.resource.serviceName ? { serviceName: cdpWire.resource.serviceName } : {}),
+            ...(cdpWire.resource.tags ? { tags: [...cdpWire.resource.tags] } : {}),
+            ...(cdpWire.resource.iconUrl ? { iconUrl: cdpWire.resource.iconUrl } : {}),
           },
           ...(cdpWire.bazaar ? { extensions: { bazaar: cdpWire.bazaar } } : {}),
         },

@@ -218,6 +218,10 @@ export function buildPaymentRequiredV2(input: {
   url: string;
   description?: string;
   mimeType?: string;
+  /** CDP Bazaar の検索・カード表示用 (上流 core の ResourceInfo には無い CDP 拡張・掲載 100 件中 58 件が保持)。 */
+  serviceName?: string;
+  tags?: readonly string[];
+  iconUrl?: string;
   accepts: readonly PaymentRequirementsV2[];
   bazaarInfo?: BazaarInfoV2;
   /** 公式形 (info+schema)。指定時は bazaarInfo より優先 — CDP Bazaar 掲載に必須。 */
@@ -227,6 +231,9 @@ export function buildPaymentRequiredV2(input: {
   const resource: ResourceInfoV2 = { url: input.url };
   if (input.description !== undefined) resource.description = input.description;
   if (input.mimeType !== undefined) resource.mimeType = input.mimeType;
+  if (input.serviceName !== undefined) resource.serviceName = input.serviceName;
+  if (input.tags !== undefined) resource.tags = [...input.tags];
+  if (input.iconUrl !== undefined) resource.iconUrl = input.iconUrl;
 
   const paymentRequired: PaymentRequiredV2 = {
     x402Version: 2,

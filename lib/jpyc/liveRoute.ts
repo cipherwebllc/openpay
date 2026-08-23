@@ -10,11 +10,14 @@ import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
 import { handleVanillaPaidGet } from '@/lib/x402/vanillaGate';
 import type { BazaarQueryDeclaration } from '@/lib/x402/v2';
 import { JPYC_LIVE_NOTICE, JPYC_LIVE_SCHEMA_VERSION } from './live';
+import { JPYC_LIVE_ICON_URL } from './liveResources';
 
 export type JpycLiveResource = {
   path: string;
   price: string;
   description: string;
+  serviceName: string;
+  tags: readonly string[];
   bazaar: BazaarQueryDeclaration;
 };
 
@@ -52,6 +55,9 @@ export function gated(
         input: { type: 'http', method: 'GET', discoverable: true },
       },
       bazaar: resource.bazaar,
+      serviceName: resource.serviceName,
+      tags: resource.tags,
+      iconUrl: JPYC_LIVE_ICON_URL,
     },
     content,
   );

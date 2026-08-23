@@ -327,9 +327,9 @@ Do not add data through unauthorized scraping, access-control or paywall bypasse
 | x402 | `GET /api/paid/japan-web3-directory` | Full published list | 2 JPYC |
 | x402 (USDC) | `GET /api/paid/usdc/japan-web3-directory` | Full published list — standard x402, USDC on Base mainnet, no OpenPay fee (listed price is the full charge) | 0.02 USDC |
 | x402 (USDC) | `GET /api/paid/usdc/japan-web3-directory/search` | Filtered search — standard x402, USDC on Base mainnet, no OpenPay fee | 0.02 USDC |
-| x402 (USDC) | `GET /api/paid/usdc/jpyc/supply` | Live JPYC totalSupply per chain (Polygon / Kaia / Avalanche / Ethereum), read from the token contracts at request time | 0.002 USDC |
-| x402 (USDC) | `GET /api/paid/usdc/jpyc/balance?address=` | JPYC balance of any address across chains (live balanceOf) | 0.002 USDC |
-| x402 (USDC) | `GET /api/paid/usdc/jpyc/transfers?chain=` | Latest JPYC Transfer events on one chain (≈ last hour of blocks, newest first, optional address filter) | 0.005 USDC |
+| x402 (USDC) | `GET /api/paid/usdc/jpyc/supply` | JPYC Supply by Chain — current contract-reported totalSupply per chain (Polygon / Kaia / Avalanche / Ethereum) with the observed block number | 0.002 USDC |
+| x402 (USDC) | `GET /api/paid/usdc/jpyc/balance?address=` | JPYC Wallet Balance — current balanceOf of any address across chains with the observed block number | 0.002 USDC |
+| x402 (USDC) | `GET /api/paid/usdc/jpyc/transfers?chain=` | Recent JPYC Transfers — Transfer events on one chain within ≈ the last hour of blocks, newest first, optional address filter | 0.005 USDC |
 | x402 | `GET /api/paid/japan-web3-directory/search` | Filtered search | 2 JPYC |
 | x402 | `GET /api/paid/japan-web3-directory/:slug` | One published record | 1 JPYC |
 
