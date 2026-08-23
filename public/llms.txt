@@ -30,7 +30,7 @@ OpenPay is an open-source, non-custodial payment layer for the Japanese yen stab
 
 ## AI エージェント向け
 
-- [AIストア（x402 カタログ）](https://open-pay.jp/ja/discovery): x402 プロトコルで支払い可能なリソースの公開カタログ
+- [AIストア（x402 カタログ）](https://open-pay.jp/ja/discovery): x402 プロトコルで支払い可能なリソースの公開カタログ。第三者の出品は JPYC（Polygon）に加え、出品者が「USDC (Base) でも販売する」を有効にすると USDC（Base・標準 x402）でも販売でき、x402 Bazaar / agentic.market にも掲載される（OpenPay の USDC 側手数料 0%・支払いは購入者から出品者のウォレットへ直接・掲載は最初の購入の精算後）
 - [AI で注文するガイド](https://open-pay.jp/ja/guide/agent): 訪日客が自分の AI（Claude 等）に母国語で相談し、OpenPay モバイルオーダー対応店に注文して自分のウォレットで JPYC 決済する手順（MCP 設定・JPYC 入手）
 - [AI が支払うガイド](https://open-pay.jp/ja/guide/ai-pay): Claude などの AI エージェントに JPYC の支払い能力を持たせる設定手順 (openpay-x402-mcp・専用少額ウォレット or Steward・金銭ガードの仕組み・実例)
 - [API を売るガイド](https://open-pay.jp/ja/guide/sell): 既存 API や AI エージェントを 402 ゲートで JPYC 課金化し AI ストアに出品する手順 (SDK createJpycGate / コピペスニペット / ノーコードゲートウェイの 3 経路・実売事例つき)

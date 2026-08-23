@@ -244,16 +244,16 @@ const ja: SellGuideContent = {
     href: '/discovery',
   },
 
-  bazaarTitle: 'x402 Bazaar / agentic.market に載せたい場合',
+  bazaarTitle: 'x402 Bazaar / agentic.market にも載せる（USDC 併売）',
   bazaarIntro:
-    'このページの出品（JPYC・Polygon）は /api/discovery と OpenPay の MCP / SDK からエージェントに発見されます。Coinbase の x402 Bazaar と agentic.market は別の発見面で、掲載には次の条件があります（OpenPay への出品では載りません）:',
+    'このページの出品（JPYC・Polygon）は /api/discovery と OpenPay の MCP / SDK からエージェントに発見されます。さらに出品フォームの「USDC (Base) でも販売する」を有効にすると、同じ API を Coinbase の x402 Bazaar / agentic.market にも掲載できます:',
   bazaarItems: [
-    '標準 x402（exact スキーム）・USDC（Base mainnet）で 402 を返すこと',
-    'CDP（Coinbase Developer Platform）の facilitator 経由で verify / settle し、実購入が 1 件 settle されること',
-    '402 応答と settle の paymentPayload に掲載メタ（サービス名・480 字以内の説明・入出力スキーマ）を含めること',
+    '出品フォームで USDC 価格（USD）と受取アドレス（Base）を設定 — OpenPay の USDC 側手数料は 0%',
+    '発行される dual-rail スニペット（x402Gate）をあなたのサーバーに設置 — 402 に JPYC と USDC が並び、USDC 支払いは OpenPay が CDP（Coinbase Developer Platform）の facilitator へ中継',
+    '実購入が 1 件 settle されると Bazaar のカタログに反映（掲載メタは OpenPay が出品情報から自動で付与）',
   ],
   bazaarNote:
-    'つまり Bazaar 掲載は「自前の標準 x402 ゲート + 自分の CDP 鍵」で実現します。OpenPay 公式の USDC 商品（Base）はこの方式で掲載済みです。両方に載せたい場合は、JPYC 出品と USDC ゲートを並走させてください。',
+    '自前の CDP 鍵や標準 x402 ゲートの自作は不要です。支払いは購入者からあなたの Base アドレスへ直接届き、OpenPay は売上を預かりません（USDC 送金は取消不能）。',
 
   jobDescTitle: '説明文は「何を完了するか」で書く',
   jobDescIntro:
@@ -399,16 +399,16 @@ const en: SellGuideContent = {
     href: '/discovery',
   },
 
-  bazaarTitle: 'If you also want to be listed on the x402 Bazaar / agentic.market',
+  bazaarTitle: 'Also appear on the x402 Bazaar / agentic.market (sell in USDC too)',
   bazaarIntro:
-    'Listings on this page (JPYC on Polygon) are discovered by agents via /api/discovery and the OpenPay MCP / SDK. Coinbase’s x402 Bazaar and agentic.market are a separate discovery surface with their own requirements (an OpenPay listing alone does not appear there):',
+    'Listings on this page (JPYC on Polygon) are discovered by agents via /api/discovery and the OpenPay MCP / SDK. In addition, enable “Also sell in USDC (Base)” on the listing form to put the same API on Coinbase’s x402 Bazaar / agentic.market:',
   bazaarItems: [
-    'Return a 402 with standard x402 (exact scheme) in USDC on Base mainnet',
-    'Verify / settle through the CDP (Coinbase Developer Platform) facilitator, with at least one real settled purchase',
-    'Carry listing metadata (service name, a description within 480 characters, input/output schemas) in the 402 response and the settle paymentPayload',
+    'Set a USDC price (USD) and a receiving address (Base) on the listing form — OpenPay takes 0% on the USDC side',
+    'Install the generated dual-rail snippet (x402Gate) on your server — the 402 carries both JPYC and USDC, and OpenPay relays USDC payments to the CDP (Coinbase Developer Platform) facilitator',
+    'After one real purchase settles, the listing appears in the Bazaar catalog (OpenPay attaches the listing metadata from your registration automatically)',
   ],
   bazaarNote:
-    'In short, Bazaar listing comes from your own standard x402 gate plus your own CDP keys — independent of your OpenPay JPYC listing. OpenPay’s official USDC products on Base are listed this way. To appear on both, run the JPYC listing and a USDC gate side by side.',
+    'No CDP keys or hand-rolled standard x402 gate needed. Payments go directly from the buyer to your Base address; OpenPay never holds your proceeds (USDC transfers are irreversible).',
 
   jobDescTitle: 'Describe the job your listing completes',
   jobDescIntro:
