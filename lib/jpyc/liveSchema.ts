@@ -21,7 +21,7 @@ export const JPYC_LIVE_ERROR_CODES = ['rpc_unavailable', 'contract_read_failed']
 export type JpycLiveErrorCode = (typeof JPYC_LIVE_ERROR_CODES)[number];
 
 const ENVELOPE_COMMON = {
-  schemaVersion: { type: 'string', const: '2.0' },
+  schemaVersion: { type: 'string', const: '2.1' },
   token: {
     type: 'object',
     properties: {
@@ -132,7 +132,12 @@ export const JPYC_TRANSFERS_RESPONSE_SCHEMA = {
       type: 'string',
       pattern: '^[0-9]+:(?:-1|[0-9]+)$',
       description:
-        'Pass as the cursor query parameter on the next call to receive only transfers newer than this response ("<block>:<logIndex>").',
+        'Pass as the cursor query parameter on the next call to receive only transfers newer than this response ("<block>:<logIndex>"). Never moves backwards relative to the cursor you supplied.',
+    },
+    hasMore: {
+      type: 'boolean',
+      description:
+        'true when more matching transfers exist than limit. With a cursor, call again with nextCursor to continue in order; without a cursor, older events in the window were not returned.',
     },
     truncated: {
       type: 'boolean',
@@ -157,6 +162,6 @@ export const JPYC_TRANSFERS_RESPONSE_SCHEMA = {
       },
     },
   },
-  required: [...ENVELOPE_REQUIRED, 'chain', 'chainId', 'contract', 'fromBlock', 'toBlock', 'nextCursor', 'truncated', 'items'],
+  required: [...ENVELOPE_REQUIRED, 'chain', 'chainId', 'contract', 'fromBlock', 'toBlock', 'nextCursor', 'hasMore', 'truncated', 'items'],
   additionalProperties: false,
 } as const;

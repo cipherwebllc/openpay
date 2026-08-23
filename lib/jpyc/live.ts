@@ -29,7 +29,7 @@ import {
 import { deploymentsForSymbol, type TokenDeployment } from '@/lib/tokens';
 import type { JpycLiveErrorCode } from './liveSchema';
 
-export const JPYC_LIVE_SCHEMA_VERSION = '2.0';
+export const JPYC_LIVE_SCHEMA_VERSION = '2.1';
 /**
  * 応答に載せる notice は短いコードにする (反復購入する AI の入力トークンを毎回消費しないため)。
  * 全文は JPYC_LIVE_NOTICE_TEXT として OpenAPI の description と Schema の description に置き、
@@ -141,8 +141,10 @@ export type TransfersResult = ChainRowBase &
         fromBlock: string;
         toBlock: string;
         items: TransferItem[];
-        /** 次回 `cursor` に渡すと、この応答より新しい Transfer だけが返る。 */
+        /** 次回 `cursor` に渡すと、この応答より新しい Transfer だけが返る。入力 cursor より後退しない。 */
         nextCursor: string;
+        /** limit で打ち切った (cursor 付きなら nextCursor で続きを取る)。 */
+        hasMore: boolean;
         /** cursor が走査窓より古く、cursor〜fromBlock の間のイベントは走査していない。 */
         truncated: boolean;
       }
@@ -184,8 +186,9 @@ export function parseLimitParam(raw: string | null): number | null {
   if (raw === null || raw === '') return TRANSFERS_DEFAULT_LIMIT;
   if (!/^[0-9]+$/.test(raw)) return null;
   const n = Number(raw);
-  if (!Number.isSafeInteger(n) || n < 1) return null;
-  return Math.min(n, TRANSFERS_MAX_LIMIT);
+  // 上限超は黙って丸めず 400 (Schema/OpenAPI の契約と一致・AI 向けは補正より予測可能性)。
+  if (!Number.isSafeInteger(n) || n < 1 || n > TRANSFERS_MAX_LIMIT) return null;
+  return n;
 }
 
 // ---------- RPC ----------
@@ -330,12 +333,24 @@ export async function readTransfers(
         const scanFrom =
           cursor !== undefined && cursor.block > fromBlock ? cursor.block : fromBlock;
 
-        // 窓を新しい順のチャンクに割る。limit に達したら残りは読まない (早期終了)。
+        // 2 モード (2026-08-23 裁定):
+        //   - snapshot (cursor なし): 新しい順。直近の様子を見る用途
+        //   - delta (cursor あり): **古い順**。cursor 直後から limit 件ずつ消化する差分ストリーム。
+        //     新しい順で limit 打ち切りにすると、間のイベントが永久に返らない (取りこぼし)
+        // チャンク列もモードに合わせて並べ、limit に達したら残りは読まない (早期終了)。
+        const delta = cursor !== undefined;
         const ranges: { from: bigint; to: bigint }[] = [];
-        for (let end = toBlock; end >= scanFrom; end -= TRANSFER_CHUNK_BLOCKS) {
-          const start = end - TRANSFER_CHUNK_BLOCKS + 1n;
-          ranges.push({ from: start > scanFrom ? start : scanFrom, to: end });
-          if (start <= scanFrom) break;
+        if (delta) {
+          for (let start = scanFrom; start <= toBlock; start += TRANSFER_CHUNK_BLOCKS) {
+            const end = start + TRANSFER_CHUNK_BLOCKS - 1n;
+            ranges.push({ from: start, to: end < toBlock ? end : toBlock });
+          }
+        } else {
+          for (let end = toBlock; end >= scanFrom; end -= TRANSFER_CHUNK_BLOCKS) {
+            const start = end - TRANSFER_CHUNK_BLOCKS + 1n;
+            ranges.push({ from: start > scanFrom ? start : scanFrom, to: end });
+            if (start <= scanFrom) break;
+          }
         }
         const fetchChunk = async (r: { from: bigint; to: bigint }) => {
           const common = {
@@ -357,13 +372,16 @@ export async function readTransfers(
 
         const seen = new Set<string>();
         const items: TransferItem[] = [];
-        for (let i = 0; i < ranges.length && items.length < opts.limit; i += TRANSFER_CHUNK_CONCURRENCY) {
+        // limit+1 件まで集めて hasMore を判定する (余分の 1 件は返さない)。
+        const want = opts.limit + 1;
+        for (let i = 0; i < ranges.length && items.length < want; i += TRANSFER_CHUNK_CONCURRENCY) {
           const batch = ranges.slice(i, i + TRANSFER_CHUNK_CONCURRENCY);
           const logs = (await Promise.all(batch.map(fetchChunk))).flat();
-          // 新しい順 (blockNumber desc → logIndex desc)
+          // snapshot: 新しい順 (desc) / delta: 古い順 (asc)。blockNumber → logIndex
           logs.sort((a, b) => {
-            if (a.blockNumber !== b.blockNumber) return a.blockNumber > b.blockNumber ? -1 : 1;
-            return (b.logIndex ?? 0) - (a.logIndex ?? 0);
+            const sign = delta ? 1 : -1;
+            if (a.blockNumber !== b.blockNumber) return a.blockNumber > b.blockNumber ? sign : -sign;
+            return ((a.logIndex ?? 0) - (b.logIndex ?? 0)) * sign;
           });
           for (const log of logs) {
             // cursor 以前 (見た分) は除外。同一 block 内は logIndex で厳密に比較する
@@ -381,17 +399,31 @@ export async function readTransfers(
               value: value.toString(),
               valueFormatted: formatUnits(value, dep.decimals),
             });
-            if (items.length >= opts.limit) break;
+            if (items.length >= want) break;
           }
         }
-        // nextCursor: 返した中で最新の位置。何も無ければ「toBlock まで全部見た」= (toBlock, -1)
-        // ではなく toBlock 内のログも無かったので (toBlock, +∞) 相当だが、-1 表現だと toBlock の
-        // ログが次回重複し得る。ログが無かった block なので重複は起きない (block は確定済み)。
-        const nextCursor =
+        const hasMore = items.length > opts.limit;
+        if (hasMore) items.length = opts.limit;
+
+        // nextCursor = 返した中で**最新**の位置 (delta は末尾・snapshot は先頭)。0 件なら
+        // 「toBlock まで見た」= (toBlock, -1)。ただし**入力 cursor より後退させない**
+        // (同一 block で 0 件だと (block,-1) < (block,k) となり既読ログを次回再取得してしまう)。
+        let next: TransferCursor =
           items.length > 0
-            ? formatCursor({ block: BigInt(items[0].blockNumber), logIndex: items[0].logIndex })
-            : formatCursor({ block: toBlock, logIndex: -1 });
-        return { fromBlock: fromBlock.toString(), toBlock: toBlock.toString(), items, nextCursor, truncated };
+            ? (() => {
+                const edge = delta ? items[items.length - 1] : items[0];
+                return { block: BigInt(edge.blockNumber), logIndex: edge.logIndex };
+              })()
+            : { block: toBlock, logIndex: -1 };
+        if (cursor !== undefined && !isNewerThan(next.block, next.logIndex, cursor)) next = cursor;
+        return {
+          fromBlock: fromBlock.toString(),
+          toBlock: toBlock.toString(),
+          items,
+          nextCursor: formatCursor(next),
+          hasMore,
+          truncated,
+        };
       })(),
     );
     return { ...base, status: 'ok', ...result };
