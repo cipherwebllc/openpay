@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased (0.6.0 予定 — publish 時に version bump + x402-mcp の依存追従を同一 PR で行う)
+
+- Add `createDualGate` — a dual-rail seller gate that serves both JPYC (Polygon,
+  OpenPay facilitator) and USDC (Base, standard x402 relayed via OpenPay to the
+  CDP facilitator). USDC payments settle directly to the seller wallet with 0%
+  OpenPay fee; if the USDC face cannot be fetched, the gate degrades to
+  JPYC-only and never blocks JPYC payments.
+- Add `createListingClient` — programmatic marketplace listing (register, list,
+  update, deactivate) with built-in SIWE sign-in, so sellers and agents can
+  publish listings without the web form. `register` requires an explicit
+  `attested: true` (the SDK never attests on your behalf); set `usdc` to also
+  appear on the x402 Bazaar after the first settled purchase.
+
 ## 0.5.0
 
 - Reserve session and daily capacity immediately before exposing a signed

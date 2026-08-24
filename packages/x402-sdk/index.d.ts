@@ -296,6 +296,94 @@ export interface JpycGate {
 
 export function createJpycGate(options: JpycGateOptions): JpycGate;
 
+export interface DualGateOptions extends JpycGateOptions {
+  /** OpenPay listing id (MY_RESOURCE_ID in the generated snippet). Enables the USDC (Base) rail. */
+  resourceId: string;
+}
+
+/**
+ * Dual-rail seller gate: JPYC (Polygon, OpenPay facilitator) plus USDC (Base, standard x402
+ * relayed to the CDP facilitator via OpenPay). If the USDC face cannot be fetched (relay off
+ * or unavailable), the gate degrades to JPYC-only — the USDC side never blocks JPYC payments.
+ */
+export function createDualGate(options: DualGateOptions): JpycGate;
+
+export interface ListingUsdcInput {
+  /** USD price without a $ sign, up to 6 decimals (e.g. "0.005"). */
+  priceUsd: string;
+  /** USDC (Base) receiving address. Defaults to the JPYC payTo. */
+  payTo?: string;
+  /** Display name for x402 Bazaar search (max 60 chars). */
+  serviceName?: string;
+}
+
+export interface ListingInput {
+  url: string;
+  description: string;
+  /** Integer JPYC price as a string (e.g. "100"). */
+  priceJpyc: string;
+  category: string;
+  docsUrl?: string;
+  license?: string;
+  /** JPYC receiving address. Defaults to the signed-in wallet. */
+  payTo?: string;
+  /** Enable the USDC (Base) face — also lists on the x402 Bazaar after the first settle. */
+  usdc?: ListingUsdcInput;
+}
+
+export interface RegisterListingInput extends ListingInput {
+  /**
+   * Required, must be literally true: your personal attestation that you have the right to
+   * provide and charge for this resource and that it is payment-gated (HTTP 402).
+   * The SDK never sets this for you.
+   */
+  attested: true;
+}
+
+export interface ListingRecord {
+  id: string;
+  url: string;
+  description: string;
+  priceJpyc: string;
+  category: string;
+  payTo: string;
+  docsUrl?: string;
+  license?: string;
+  usdc?: { payTo: string; priceUsd: string; serviceName?: string };
+  paywallSnippet?: string;
+  hidden?: boolean;
+}
+
+export interface RegisterListingResult {
+  resource: ListingRecord;
+  /** Copy-paste 402 gate for your server (dual-rail x402Gate when usdc is set). */
+  paywallSnippet: string;
+}
+
+export interface ListingClient {
+  /** The seller wallet address that signs in via SIWE (checksummed). */
+  address: Address;
+  register(input: RegisterListingInput): Promise<RegisterListingResult>;
+  list(): Promise<ListingRecord[]>;
+  update(id: string, input: ListingInput): Promise<{ resource: ListingRecord }>;
+  deactivate(id: string): Promise<boolean>;
+}
+
+/**
+ * Programmatic listing client — register, list, update, and deactivate OpenPay marketplace
+ * listings without the web form. Signs in with SIWE using the given private key on first use;
+ * the key is only used to sign locally and is never transmitted.
+ */
+export function createListingClient(options: {
+  privateKey: string;
+  openpayOrigin?: string;
+  fetchImpl?: typeof globalThis.fetch;
+  /** SIWE chainId (default 137 = Polygon). */
+  chainId?: number;
+  statement?: string;
+  now?: () => number;
+}): ListingClient;
+
 export const RECEIVE_WITH_AUTHORIZATION_TYPES: {
   ReceiveWithAuthorization: Array<{ name: string; type: string }>;
 };
