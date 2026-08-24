@@ -899,3 +899,90 @@ describe('X402DiscoveryView dual-rail USDC 面 (flag ゲート)', () => {
     expect(await screen.findByText('+ 0.005 USDC')).toBeInTheDocument();
   });
 });
+
+describe('X402DiscoveryView 公開カタログの dual (USDC 併売) 表示', () => {
+  const DUAL_ITEM = {
+    ...ITEM,
+    resource: 'https://api.example.jp/paid/dual',
+    description: 'USDC でも買える API',
+    usdc: { priceUsd: '0.02' },
+  };
+
+  it('dual 出品カードに USDC チップと「+ 0.02 USDC」を併記する', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [ITEM, DUAL_ITEM] }),
+    })) as unknown as typeof fetch;
+    renderView();
+    const card = (await screen.findByText(DUAL_ITEM.description)).closest('li');
+    expect(within(card!).getByText('USDC')).toBeInTheDocument();
+    expect(within(card!).getByText('+ 0.02 USDC')).toBeInTheDocument();
+    // 非 dual カードには付かない。
+    const plain = screen.getByText(ITEM.description).closest('li');
+    expect(within(plain!).queryByText('USDC')).not.toBeInTheDocument();
+  });
+
+  it('通貨フィルタ: USDC を選ぶと dual 出品もマッチする (件数にも数える)', async () => {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [ITEM, DUAL_ITEM] }),
+    })) as unknown as typeof fetch;
+    renderView();
+    await screen.findByText(DUAL_ITEM.description);
+    // usdcItems (公式) が無くても dual があれば通貨チップが出る。USDC 件数 = dual 1 件。
+    fireEvent.click(screen.getByRole('button', { name: 'USDC 1' }));
+    expect(screen.getByText(DUAL_ITEM.description)).toBeInTheDocument();
+    expect(screen.queryByText(ITEM.description)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'JPYC 2' }));
+    expect(screen.getByText(ITEM.description)).toBeInTheDocument();
+    expect(screen.getByText(DUAL_ITEM.description)).toBeInTheDocument();
+  });
+
+  it('USDC 面つきで登録成功 → ゲート貼り替えリマインダーを表示する', async () => {
+    envState.enableX402DualRailUi = true;
+    state.connected = true;
+    state.address = '0x2222222222222222222222222222222222222222';
+    state.signedIn = true;
+    installRoutingFetch([]);
+    renderView();
+    fireEvent.change(await screen.findByPlaceholderText(/リソース URL/), {
+      target: { value: 'https://api.example.jp/paid/new' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('説明 (何を提供するか)'), {
+      target: { value: '新しい有料 API' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('価格 (JPYC・整数)'), {
+      target: { value: '500' },
+    });
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'USDC (Base) でも販売する — x402 Bazaar に掲載' }),
+    );
+    fireEvent.change(screen.getByPlaceholderText('0.005'), { target: { value: '0.01' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /正当な権利/ }));
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    expect(
+      await screen.findByText(/dual-rail 版スニペット（x402Gate）に貼り替えて/),
+    ).toBeInTheDocument();
+  });
+
+  it('USDC 面なしの登録では貼り替えリマインダーを出さない', async () => {
+    state.connected = true;
+    state.address = '0x2222222222222222222222222222222222222222';
+    state.signedIn = true;
+    installRoutingFetch([]);
+    renderView();
+    fireEvent.change(await screen.findByPlaceholderText(/リソース URL/), {
+      target: { value: 'https://api.example.jp/paid/new' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('説明 (何を提供するか)'), {
+      target: { value: '新しい有料 API' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('価格 (JPYC・整数)'), {
+      target: { value: '500' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /正当な権利/ }));
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    expect(await screen.findByText('登録しました。')).toBeInTheDocument();
+    expect(screen.queryByText(/貼り替えて/)).not.toBeInTheDocument();
+  });
+});

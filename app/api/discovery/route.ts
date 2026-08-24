@@ -154,6 +154,11 @@ export async function GET(): Promise<NextResponse> {
       ...(r.docsUrl ? { docsUrl: r.docsUrl } : {}),
       ...(r.license ? { license: r.license } : {}),
       ...(updatedAt ? { updatedAt } : {}),
+      // dual-rail の USDC/Base 面 (表示用・価格のみ)。リレー flag OFF 中は出さない —
+      // 「USDC 対応」と見せて実際は買えない期待違いを作らないため。
+      ...(env.enableX402DualRail && r.usdc
+        ? { usdc: { priceUsd: r.usdc.priceUsd } }
+        : {}),
       network: r.network,
       accepts,
       verifiedAt: r.verification?.lastOkAt ?? null,

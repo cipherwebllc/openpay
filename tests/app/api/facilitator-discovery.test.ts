@@ -1092,3 +1092,34 @@ describe('x402 /discovery', () => {
     );
   });
 });
+
+describe('discovery の dual-rail USDC 面公開', () => {
+  it('flag ON: usdc 面つき登録は catalog item に価格のみ載る (payTo/serviceName は出さない)', async () => {
+    vi.stubEnv('ENABLE_X402_DUAL_RAIL', '1');
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const res = await resources.POST(
+      postReq({ ...validBody, usdc: { priceUsd: '0.01', serviceName: 'S' } }),
+    );
+    expect(res.status).toBe(201);
+    const body = (await (await discovery()).json()) as {
+      items: Array<{ resource: string; usdc?: Record<string, unknown> }>;
+    };
+    const item = body.items.find((i) => i.resource === validBody.url);
+    expect(item?.usdc).toEqual({ priceUsd: '0.01' });
+  });
+
+  it('flag OFF: usdc 面は catalog に出ない (買えないのに USDC 対応と見せない)', async () => {
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    await resources.POST(
+      postReq({ ...validBody, usdc: { priceUsd: '0.01' } }),
+    );
+    const body = (await (await discovery()).json()) as {
+      items: Array<{ resource: string; usdc?: Record<string, unknown> }>;
+    };
+    const item = body.items.find((i) => i.resource === validBody.url);
+    expect(item).toBeDefined();
+    expect(item?.usdc).toBeUndefined();
+  });
+});
