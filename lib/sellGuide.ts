@@ -253,7 +253,7 @@ const ja: SellGuideContent = {
     '実購入が 1 件 settle されると Bazaar のカタログに反映（掲載メタは OpenPay が出品情報から自動で付与）',
   ],
   bazaarNote:
-    '自前の CDP 鍵や標準 x402 ゲートの自作は不要です。支払いは購入者からあなたの Base アドレスへ直接届き、OpenPay は売上を預かりません（USDC 送金は取消不能）。',
+    '自前の CDP 鍵や標準 x402 ゲートの自作は不要です。支払いは購入者からあなたの Base アドレスへ直接届き、OpenPay は売上を預かりません（USDC 送金は取消不能）。すでに JPYC で出品済みの API を後から USDC 対応にした場合も、サーバーのゲートを dual-rail 版スニペット（x402Gate）へ貼り替えてください — 貼り替えるまで USDC では購入できません。',
 
   jobDescTitle: '説明文は「何を完了するか」で書く',
   jobDescIntro:
@@ -408,7 +408,7 @@ const en: SellGuideContent = {
     'After one real purchase settles, the listing appears in the Bazaar catalog (OpenPay attaches the listing metadata from your registration automatically)',
   ],
   bazaarNote:
-    'No CDP keys or hand-rolled standard x402 gate needed. Payments go directly from the buyer to your Base address; OpenPay never holds your proceeds (USDC transfers are irreversible).',
+    'No CDP keys or hand-rolled standard x402 gate needed. Payments go directly from the buyer to your Base address; OpenPay never holds your proceeds (USDC transfers are irreversible). If you enable USDC on an API that was already listed for JPYC, replace the gate on your server with the dual-rail snippet (x402Gate) — buyers cannot pay in USDC until you do.',
 
   jobDescTitle: 'Describe the job your listing completes',
   jobDescIntro:

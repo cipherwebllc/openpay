@@ -57,6 +57,8 @@ type DiscoveryItem = {
   updatedAt?: string;
   verifiedAt?: string | null;
   official?: boolean;
+  /** dual-rail の USDC/Base 面 (表示用・リレー点灯中のみ server が返す)。 */
+  usdc?: { priceUsd: string };
   accepts: Array<{ extra?: { openpay?: { feeValue?: string } } }>;
 };
 
@@ -232,6 +234,9 @@ export function X402DiscoveryView({
     paywallSnippet: string;
   } | null>(null);
   const [notice, setNotice] = useState<'updated' | 'deleted' | null>(null);
+  // USDC 面つきで登録/更新した直後の「サーバーのゲート貼り替え」リマインダー。
+  // 貼り替えるまで実サーバーの 402 は JPYC のみ = USDC では買えない (実運用で発覚した期待違い)。
+  const [usdcReminder, setUsdcReminder] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorSnippet, setErrorSnippet] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -294,7 +299,8 @@ export function X402DiscoveryView({
         kind: 'jpyc' as const,
         key: `jpyc:${item.resource}`,
         category: item.category.trim().toLowerCase(),
-        searchText: `${item.description} ${item.resource}`.toLowerCase(),
+        // dual (USDC 併売) 出品は "usdc" のテキスト検索でも見つかるようにする。
+        searchText: `${item.description} ${item.resource}${item.usdc ? ' usdc' : ''}`.toLowerCase(),
         item,
       })),
       ...usdcItems.map((item) => ({
@@ -307,12 +313,21 @@ export function X402DiscoveryView({
     ],
     [items, usdcItems],
   );
-  // 通貨チップは USDC 商品があるときだけ出す (無ければ従来どおりカテゴリのみ)。
-  const showCurrencyChips = usdcItems.length > 0 && items.length > 0;
-  const currencyCounts = { jpyc: items.length, usdc: usdcItems.length };
+  // 通貨チップは USDC で買える商品があるときだけ出す (無ければ従来どおりカテゴリのみ)。
+  // dual (JPYC 出品の USDC 併売) は両方の通貨フィルタにマッチし、USDC 側の件数にも数える。
+  const dualCount = useMemo(() => items.filter((i) => i.usdc).length, [items]);
+  const showCurrencyChips = (usdcItems.length > 0 || dualCount > 0) && items.length > 0;
+  const currencyCounts = { jpyc: items.length, usdc: usdcItems.length + dualCount };
   const effectiveCurrency: CatalogCurrency = showCurrencyChips ? catalogCurrency : 'all';
   const currencyEntries = useMemo(
-    () => (effectiveCurrency === 'all' ? entries : entries.filter((e) => e.kind === effectiveCurrency)),
+    () =>
+      effectiveCurrency === 'all'
+        ? entries
+        : entries.filter(
+            (e) =>
+              e.kind === effectiveCurrency ||
+              (effectiveCurrency === 'usdc' && e.kind === 'jpyc' && Boolean(e.item.usdc)),
+          ),
     [effectiveCurrency, entries],
   );
   const categoryCounts = useMemo(() => {
@@ -437,6 +452,7 @@ export function X402DiscoveryView({
       setError(null);
       setErrorSnippet('');
       setNotice(null);
+      setUsdcReminder(false);
     },
     onSuccess: (result) => {
       if (!result.ok) {
@@ -444,6 +460,9 @@ export function X402DiscoveryView({
         setErrorSnippet(result.paywallSnippet);
         return;
       }
+      // 送信時点の form 状態で判定 (成功後は form がリセットされるため onSuccess 内で参照しない
+      // ように submit 前の値を使う — mutationFn closure の form は submit 時のもの)。
+      setUsdcReminder(form.usdcEnabled);
       if (result.wasEdit) {
         setNotice('updated');
         setCreated(null);
@@ -596,6 +615,8 @@ export function X402DiscoveryView({
     official?: boolean;
     /** 通貨チップ (JPYC/USDC 混在時のみ)。 */
     currency?: 'jpyc' | 'usdc';
+    /** dual (JPYC 出品の USDC 併売): JPYC チップの隣に USDC チップも出す。 */
+    dualUsdc?: boolean;
   }) => {
     const Icon = categoryIcon(opts.category);
     const urlIsHttps = isHttpsUrl(opts.url);
@@ -618,6 +639,11 @@ export function X402DiscoveryView({
                 }`}
               >
                 {opts.currency === 'usdc' ? 'USDC' : 'JPYC'}
+              </span>
+            )}
+            {opts.dualUsdc && opts.currency !== 'usdc' && (
+              <span className="shrink-0 rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold tracking-wide text-sky-700 ring-1 ring-sky-200">
+                USDC
               </span>
             )}
             {opts.official && (
@@ -974,10 +1000,17 @@ export function X402DiscoveryView({
                 </p>
               ))}
             {notice === 'updated' && (
-              <p className="inline-flex items-center gap-1.5 text-sm text-emerald-700">
-                <CheckCircle2 className="h-4 w-4" aria-hidden />
-                {t('updated')}
-              </p>
+              <div className="space-y-2">
+                <p className="inline-flex items-center gap-1.5 text-sm text-emerald-700">
+                  <CheckCircle2 className="h-4 w-4" aria-hidden />
+                  {t('updated')}
+                </p>
+                {usdcReminder && (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+                    {t('usdcGateReminder')}
+                  </p>
+                )}
+              </div>
             )}
             {notice === 'deleted' && (
               <p className="inline-flex items-center gap-1.5 text-sm text-emerald-700">
@@ -991,6 +1024,11 @@ export function X402DiscoveryView({
                   <CheckCircle2 className="h-4 w-4" aria-hidden />
                   {t('created')}
                 </p>
+                {usdcReminder && (
+                  <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900">
+                    {t('usdcGateReminder')}
+                  </p>
+                )}
                 <PaywallSnippet
                   snippet={created.paywallSnippet}
                   copyKey="snippet"
@@ -1381,6 +1419,7 @@ export function X402DiscoveryView({
                   {cardHead({
                     category: item.category,
                     currency: showCurrencyChips ? 'jpyc' : undefined,
+                    dualUsdc: Boolean(item.usdc),
                     priceNode: (
                       // 買い手の意思決定基準は合計 (2026-07-31 user 裁定): 合計を太字主役・
                       // 価格+手数料は細字の内訳。fee 不明 (非 JPYC 等) は従来の価格表示。
@@ -1402,6 +1441,11 @@ export function X402DiscoveryView({
                         ) : (
                           <div className="text-sm font-bold text-slate-900">
                             {item.priceJpyc} JPYC
+                          </div>
+                        )}
+                        {item.usdc && (
+                          <div className="text-[11px] font-semibold text-sky-700">
+                            {t('usdcFaceMeta', { price: item.usdc.priceUsd })}
                           </div>
                         )}
                       </div>
