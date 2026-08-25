@@ -110,14 +110,17 @@ export async function probeForReverify(
 
   if (res.status === 404 || res.status === 410) return 'violation_gone';
   if (res.status === 402) {
+    // v2 (PAYMENT-REQUIRED ヘッダ) → v1 (JSON body) の順に見て、**どちらかが** OpenPay 方式なら
+    // 成功とする — 登録時 probeGate と同じフォールバック。dual-rail 出品の 402 は v2 面が
+    // USDC のみ (extra.openpay を持たない) で正常なため、v2 だけで foreign 判定すると
+    // dual-rail 化した瞬間に 3 巡で hidden → カタログ喪失 → 出品者ゲート 500 のデッドロックに
+    // 陥る (2026-08-24 Aegis / gateway.open-pay.jp で実害)。
     const v2Accepts = parsedV2Accepts(res);
-    if (v2Accepts) {
-      return acceptsLookLikeOpenPay(v2Accepts)
-        ? 'ok_402_openpay'
-        : 'violation_foreign_402';
-    }
+    if (v2Accepts && acceptsLookLikeOpenPay(v2Accepts)) return 'ok_402_openpay';
     const body = await readJsonBodyCapped(res, GATE_BODY_MAX_BYTES);
     if (!body.ok || typeof body.value !== 'object' || body.value === null) {
+      // v1 body を解釈できない 402 は hidden へ進めず transient に留める (v2 ヘッダが
+      // foreign に見えても、確定違反の根拠としては不十分)。
       return 'transient';
     }
     return acceptsLookLikeOpenPay((body.value as { accepts?: unknown }).accepts)
