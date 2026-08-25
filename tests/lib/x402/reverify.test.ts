@@ -54,6 +54,55 @@ describe('probeForReverify', () => {
     ).toBe('violation_foreign_402');
   });
 
+  it('dual-rail 402 (v2 ヘッダ=USDC のみ + v1 body=JPYC) は成功 — v2 だけで foreign にしない', async () => {
+    // dual-rail 出品の正常形: PAYMENT-REQUIRED は USDC accept のみ (extra.openpay なし)、
+    // v1 JSON body には JPYC (forwarder-split) が載る。v2 単独判定だと 3 巡で hidden になり
+    // カタログ喪失 → 出品者ゲート 500 のデッドロック (2026-08-24 実害) — その回帰フェンス。
+    const usdcOnlyHeader = Buffer.from(
+      JSON.stringify({ accepts: [{ scheme: 'exact', network: 'eip155:8453' }] }),
+      'utf8',
+    ).toString('base64');
+    const dual = (async () =>
+      new Response(
+        JSON.stringify({
+          accepts: [...openpayAccepts, { scheme: 'exact', network: 'base' }],
+        }),
+        { status: 402, headers: { 'payment-required': usdcOnlyHeader } },
+      )) as typeof fetch;
+    expect(
+      await probeForReverify('https://x.test/paid', {
+        fetchImpl: dual,
+        lookup: lookupPublic,
+      }),
+    ).toBe('ok_402_openpay');
+
+    // v2 も v1 も OpenPay 方式でない → これは確定 foreign のまま。
+    const bothForeign = (async () =>
+      new Response(
+        JSON.stringify({ accepts: [{ scheme: 'exact', network: 'base' }] }),
+        { status: 402, headers: { 'payment-required': usdcOnlyHeader } },
+      )) as typeof fetch;
+    expect(
+      await probeForReverify('https://x.test/paid', {
+        fetchImpl: bothForeign,
+        lookup: lookupPublic,
+      }),
+    ).toBe('violation_foreign_402');
+
+    // v2 が foreign 風でも v1 body が読めない場合は transient (hidden へ進めない)。
+    const headerOnlyNoBody = (async () =>
+      new Response('', {
+        status: 402,
+        headers: { 'payment-required': usdcOnlyHeader },
+      })) as typeof fetch;
+    expect(
+      await probeForReverify('https://x.test/paid', {
+        fetchImpl: headerOnlyNoBody,
+        lookup: lookupPublic,
+      }),
+    ).toBe('transient');
+  });
+
   it.each([
     [200, 'violation_200_ungated'],
     [404, 'violation_gone'],
