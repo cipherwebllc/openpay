@@ -67,6 +67,7 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
       '/api/paid/stores',
       '/api/paid/japan-web3-directory',
       '/api/paid/japan-web3-directory/search',
+      '/api/paid/jpyc/services',
       '/api/paid/jpyc-shops/search',
     ]);
     for (const resource of FIRST_PARTY_RESOURCES) {

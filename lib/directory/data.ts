@@ -5,16 +5,20 @@ import type {
 
 const VERIFIED_AT = '2026-07-13';
 
+// 週次運用 (JPYC Service Monitor) では、再検証したエントリだけ verifiedAt を、事実を書き換えた
+// エントリだけ updatedAt を per-entry で進める。更新時は lib/directory/serviceMonitor.ts の
+// MANUAL_CHANGELOG に同一 PR でイベントを追記すること (運用 runbook: plans/jpyc-service-monitor.md)。
 function provenance(
   sourceUrl: string,
   attribution: string,
   sourceType: DirectorySourceType = 'official',
+  dates: { verifiedAt?: string; updatedAt?: string } = {},
 ) {
   return {
     sourceUrl,
     sourceType,
-    verifiedAt: VERIFIED_AT,
-    updatedAt: VERIFIED_AT,
+    verifiedAt: dates.verifiedAt ?? VERIFIED_AT,
+    updatedAt: dates.updatedAt ?? VERIFIED_AT,
     attribution,
   } as const;
 }

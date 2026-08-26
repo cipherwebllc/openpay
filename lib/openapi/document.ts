@@ -13,9 +13,12 @@ import {
   DIRECTORY_DETAIL_PRICE_JPYC,
   DIRECTORY_LIST_RESOURCE,
   DIRECTORY_SEARCH_RESOURCE,
+  JPYC_SERVICES_RESOURCE,
 } from '@/lib/directory/paidResources';
 import { JPYC_SHOPS_SEARCH_RESOURCE } from '@/lib/shops/paidResources';
 import {
+  USDC_SERVICE_MONITOR,
+  USDC_SERVICE_MONITOR_BAZAAR,
   USDC_DIRECTORY_LIST,
   USDC_DIRECTORY_SEARCH,
 } from '@/lib/directory/usdcResource';
@@ -196,6 +199,27 @@ const DIRECTORY_QUERY_PARAMETERS = [
   },
   { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50 } },
   { name: 'offset', in: 'query', schema: { type: 'integer', minimum: 0, maximum: 1000 } },
+] as const;
+
+// JPYC Service Monitor (両通貨版共通)。実装 (lib/directory/serviceMonitor.ts の
+// parseServiceMonitorQuery) と一致させる — ずれるとエージェントが 400 を踏む。
+const SERVICE_MONITOR_PARAMS = [
+  {
+    name: 'changedSince',
+    in: 'query',
+    required: false,
+    schema: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+    description:
+      'Return only change events dated on/after this date (YYYY-MM-DD, inclusive). Set to the date of your previous run. Omit for the full monitor snapshot (mode=snapshot).',
+    example: '2026-08-20',
+  },
+  {
+    name: 'limit',
+    in: 'query',
+    required: false,
+    schema: { type: 'integer', minimum: 1, maximum: 200, default: 200 },
+    description: 'Maximum number of change events to return.',
+  },
 ] as const;
 
 const ERROR_RESPONSES = {
@@ -475,6 +499,60 @@ const VANILLA_OPENAPI_PATHS = {
         },
         '400': JPYC_LIVE_400,
         '402': JPYC_LIVE_402,
+        '503': JPYC_LIVE_503,
+      },
+    },
+  },
+  [USDC_SERVICE_MONITOR.path]: {
+    get: {
+      tags: ['x402 Vanilla (USDC)', 'Japan Web3 Directory'],
+      operationId: 'getJpycServiceMonitorUsdc',
+      summary: 'JPYC Service Monitor — weekly change feed (USDC on Base)',
+      description: `${USDC_SERVICE_MONITOR.description} Payment: standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
+      parameters: SERVICE_MONITOR_PARAMS,
+      'x-agent-usage':
+        'Run on a weekly schedule. Pass changedSince set to the date of your previous run to fetch only new change events and pay only for deltas; dedupe by slug+date+changeType. When changes is empty, report "no significant change" — do not re-fetch the snapshot. Do not use as an availability guarantee; verify with each event sourceUrl before acting on a change.',
+      'x-payment-info': usdcPaymentInfo(USDC_SERVICE_MONITOR.priceUsd),
+      'x-payment-protocol': 'x402',
+      'x-payment-asset': 'USDC',
+      'x-payment-chains': ['Base'],
+      responses: {
+        '200': {
+          description: 'Monitor snapshot or change delta after settlement',
+          content: {
+            'application/json': {
+              example: USDC_SERVICE_MONITOR_BAZAAR.output.example,
+            },
+          },
+        },
+        '400': JPYC_LIVE_400,
+        '402': JPYC_LIVE_402,
+        '503': JPYC_LIVE_503,
+      },
+    },
+  },
+  '/api/paid/jpyc/services': {
+    get: {
+      tags: ['x402 (JPYC)', 'Japan Web3 Directory'],
+      operationId: 'getJpycServiceMonitor',
+      summary: 'JPYC Service Monitor — weekly change feed (JPYC)',
+      description:
+        'Same data and contract as the USDC variant: dated change events (added / updated / removed / verified) for Japan-related JPYC/Web3 services, each tied to an official source URL. Pass changedSince=YYYY-MM-DD to fetch only what changed; an empty changes list explicitly means no change. Paid in JPYC via the OpenPay facilitator (buyer pays price + x402 facilitator fee).',
+      parameters: SERVICE_MONITOR_PARAMS,
+      'x-agent-usage':
+        'Run on a weekly schedule. Pass changedSince set to the date of your previous run to fetch only new change events; dedupe by slug+date+changeType. When changes is empty, report "no significant change".',
+      'x-payment-info': paymentInfo(JPYC_SERVICES_RESOURCE.priceJpyc),
+      responses: {
+        '200': {
+          description: 'Monitor snapshot or change delta after settlement',
+          content: {
+            'application/json': {
+              example: USDC_SERVICE_MONITOR_BAZAAR.output.example,
+            },
+          },
+        },
+        '400': JPYC_LIVE_400,
+        '402': { description: 'Payment required (x402 challenge with accepts)' },
         '503': JPYC_LIVE_503,
       },
     },
