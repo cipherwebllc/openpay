@@ -99,3 +99,76 @@ export const USDC_DIRECTORY_SEARCH_BAZAAR = {
 export const USDC_DIRECTORY_LIST_BAZAAR = {
   output: { example: DIRECTORY_ENVELOPE_EXAMPLE },
 } as const;
+
+// ── JPYC Service Monitor (更新型・USDC 面) ─────────────────────────────────
+// 静的一覧でなく「変更の差分」を売る週次購読型 (2026-08-27 裁定)。JPYC 版
+// /api/paid/jpyc/services と同一データ・同一契約 (lib/directory/serviceMonitor.ts)。
+// 価格 $0.01: 週 1 の反復購入前提で directory 全件 ($0.02) より安く、hello 級の
+// マイクロ価格。説明は 480 字以内 (CDP 上限・#396 フェンスと同じ制約を目視で守る)。
+export const USDC_SERVICE_MONITOR = {
+  path: '/api/paid/usdc/jpyc/services',
+  price: '$0.01',
+  priceUsd: '0.01',
+  description:
+    'JPYC Service Monitor: weekly change feed for Japan-related JPYC and Web3 services. Each event is dated, typed (added / updated / removed / verified) and tied to an official source URL. Call with changedSince=YYYY-MM-DD set to your last run date to fetch only what changed since then; an empty changes list explicitly means no change, so a scheduled agent can report "no significant change" without guessing. Without changedSince you get the full monitor snapshot of every tracked service.',
+} as const;
+
+const SERVICE_MONITOR_DELTA_EXAMPLE = {
+  schemaVersion: '1.0',
+  mode: 'delta',
+  query: { changedSince: '2026-08-20', limit: 200 },
+  services: [
+    {
+      slug: 'jpyc-ex',
+      name: 'JPYC EX',
+      nameJa: 'JPYC EX',
+      status: 'published',
+      category: 'exchange',
+      supportsJpyc: true,
+      supportsUsdc: false,
+      supportsX402: false,
+      chains: ['avalanche', 'ethereum', 'polygon'],
+      sourceUrl: 'https://jpyc.co.jp/',
+      verifiedAt: '2026-08-27',
+      sourceCheckedAt: '2026-08-27T01:00:00.000Z',
+      sourceOk: true,
+    },
+  ],
+  changes: [
+    {
+      date: '2026-08-27',
+      slug: 'jpyc-ex',
+      changeType: 'verified',
+      summary: 'Re-verified against the official source; no factual change.',
+      summaryJa: '公式ソースで再確認。事実関係の変更なし。',
+      sourceUrl: 'https://jpyc.co.jp/',
+    },
+  ],
+  totalServices: 20,
+  generatedAt: '2026-08-27T01:23:45.000Z',
+  notice: {
+    code: 'sourced-facts-only',
+    detail:
+      'Change events and rows summarize what official sources state; they are not availability guarantees or endorsements.',
+    termsUrl: 'https://open-pay.jp/en/terms',
+  },
+  licenseNotice: 'Facts summarized from official sources; source rights remain with their owners.',
+  attribution: ['JPYC株式会社'],
+} as const;
+
+export const USDC_SERVICE_MONITOR_BAZAAR = {
+  queryParams: { changedSince: '2026-08-20' },
+  queryParamsSchema: {
+    properties: {
+      changedSince: {
+        type: 'string',
+        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+        description:
+          'Return only changes on/after this date (YYYY-MM-DD). Set to your last run date. Omit for the full snapshot.',
+      },
+      limit: { type: 'string', description: '1-200 (default 200)' },
+    },
+    additionalProperties: false,
+  },
+  output: { example: SERVICE_MONITOR_DELTA_EXAMPLE },
+} as const;

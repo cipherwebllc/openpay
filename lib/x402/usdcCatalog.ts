@@ -6,7 +6,11 @@
 // 発見面: これらは CDP facilitator で settle されているため x402 Bazaar と agentic.market に
 // 掲載済み (2026-08-21〜)。カタログ上は「Bazaar で見つかる」印を付ける。
 
-import { USDC_DIRECTORY_LIST, USDC_DIRECTORY_SEARCH } from '@/lib/directory/usdcResource';
+import {
+  USDC_DIRECTORY_LIST,
+  USDC_DIRECTORY_SEARCH,
+  USDC_SERVICE_MONITOR,
+} from '@/lib/directory/usdcResource';
 import { USDC_JPYC_LIVE_RESOURCES } from '@/lib/jpyc/liveResources';
 import { USDC_STORES } from '@/lib/x402/usdcStores';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
@@ -45,6 +49,13 @@ export const USDC_CATALOG_ITEMS: readonly UsdcCatalogItem[] = [
     title: 'Japan Web3 Directory Search',
     description: USDC_DIRECTORY_SEARCH.description,
     priceUsd: USDC_DIRECTORY_SEARCH.priceUsd,
+    category: 'data',
+  },
+  {
+    resource: `${OPENPAY_CANONICAL_ORIGIN}${USDC_SERVICE_MONITOR.path}`,
+    title: 'JPYC Service Monitor',
+    description: USDC_SERVICE_MONITOR.description,
+    priceUsd: USDC_SERVICE_MONITOR.priceUsd,
     category: 'data',
   },
   {

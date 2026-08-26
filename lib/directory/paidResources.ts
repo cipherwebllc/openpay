@@ -97,3 +97,85 @@ export function directoryDetailResource(slug: string): FirstPartyResource {
     },
   };
 }
+
+// JPYC Service Monitor (更新型商品・2026-08-27 裁定)。ディレクトリ本体 (全件データ) を
+// 売るのではなく「JPYC 対応サービスの追加・変更・終了・再確認」の差分を週次購入で追わせる。
+// changedSince で delta を返す契約は lib/directory/serviceMonitor.ts が単一情報源。
+const SERVICE_MONITOR_OUTPUT = {
+  type: 'object',
+  properties: {
+    schemaVersion: { type: 'string' },
+    mode: {
+      type: 'string',
+      enum: ['snapshot', 'delta'],
+      description:
+        'snapshot = full monitor view (no changedSince). delta = only what changed on/after changedSince; changes:[] explicitly means no change.',
+    },
+    query: { type: 'object' },
+    services: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          slug: { type: 'string' },
+          status: { type: 'string' },
+          supportsJpyc: { type: 'boolean' },
+          verifiedAt: { type: 'string' },
+          sourceCheckedAt: { type: ['string', 'null'], format: 'date-time' },
+          sourceOk: { type: ['boolean', 'null'] },
+        },
+        required: ['slug', 'status', 'supportsJpyc', 'verifiedAt'],
+      },
+    },
+    changes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          date: { type: 'string', description: 'YYYY-MM-DD' },
+          slug: { type: 'string' },
+          changeType: {
+            type: 'string',
+            enum: ['added', 'updated', 'removed', 'verified'],
+          },
+          summary: { type: 'string' },
+          summaryJa: { type: 'string' },
+        },
+        required: ['date', 'slug', 'changeType', 'summary'],
+      },
+    },
+    totalServices: { type: 'integer' },
+    generatedAt: { type: 'string' },
+    notice: { type: 'object' },
+    licenseNotice: { type: 'string' },
+    attribution: { type: 'array', items: { type: 'string' } },
+  },
+  required: [
+    'schemaVersion',
+    'mode',
+    'query',
+    'services',
+    'changes',
+    'totalServices',
+    'generatedAt',
+    'notice',
+    'licenseNotice',
+    'attribution',
+  ],
+};
+
+export const JPYC_SERVICES_RESOURCE = {
+  path: '/api/paid/jpyc/services',
+  priceJpyc: '2',
+  category: 'data',
+  description:
+    'JPYC Service Monitor: weekly change feed for Japan-related JPYC/Web3 services — additions, updates, removals and re-verifications, each dated and tied to an official source URL. Pass changedSince=YYYY-MM-DD to fetch only what changed; an empty changes list explicitly means no change.',
+  trigger:
+    'On a weekly schedule: pass changedSince set to your last run date to fetch only new changes; report "no significant change" when changes is empty.',
+  docsUrl: 'https://open-pay.jp/api/openapi.json',
+  license: 'Attributed metadata; source rights remain with owners.',
+  outputSchema: {
+    input: { type: 'http', method: 'GET', discoverable: true },
+    output: SERVICE_MONITOR_OUTPUT,
+  },
+} as const satisfies FirstPartyResource;
