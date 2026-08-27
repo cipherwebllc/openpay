@@ -96,7 +96,7 @@ describe('createServiceMonitorEnvelope', () => {
 
   it('delta: baseline より後の日付なら changes:[] を明示 (「変更なし」の契約)', () => {
     const env = createServiceMonitorEnvelope(
-      { changedSince: '2026-08-01', limit: SERVICE_MONITOR_MAX_LIMIT },
+      { changedSince: '9999-12-31', limit: SERVICE_MONITOR_MAX_LIMIT },
       {},
       NOW,
     );

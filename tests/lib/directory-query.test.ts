@@ -148,7 +148,7 @@ describe('directory query pure functions', () => {
       generatedAt: '2026-07-13T00:00:00.000Z',
       dataFreshness: {
         oldest: '2026-07-13',
-        newestVerifiedAt: '2026-07-13',
+        newestVerifiedAt: '2026-08-27', // 週次更新 (第 1 回) の再検証日
         oldestSourceCheckedAt: null,
       },
     });
@@ -206,7 +206,7 @@ describe('directory query pure functions', () => {
     expect(directoryStats(DIRECTORY_ENTRIES)).toEqual({
       entryCount: publishedDirectoryEntries(DIRECTORY_ENTRIES).length,
       categoryCount: directoryCategoryCounts(DIRECTORY_ENTRIES).length,
-      lastUpdated: '2026-07-13',
+      lastUpdated: '2026-08-27', // 週次更新 (第 1 回)
     });
   });
 

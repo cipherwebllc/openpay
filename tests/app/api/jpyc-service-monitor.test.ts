@@ -92,7 +92,7 @@ describe('GET /api/paid/usdc/jpyc/services (test mode)', () => {
 
   it('delta: 未来側の changedSince は changes:[] を明示 (変更なし契約)', async () => {
     const route = await loadUsdc();
-    const res = await route.GET(req(PATH, '?changedSince=2026-08-01'));
+    const res = await route.GET(req(PATH, '?changedSince=9999-12-31'));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.mode).toBe('delta');
