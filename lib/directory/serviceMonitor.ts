@@ -41,20 +41,74 @@ export type ServiceChangeEvent = {
 // 週次運用で追記する手書き changelog (新しいものを**末尾**に追加する — 日付昇順を保つ)。
 // 掟: 事実のみ・一次ソース URL 必須級・エントリ本体 (data.ts) の変更と同一 PR で追記する。
 // removed の場合は data.ts の status を 'archived' にし、ここに removed イベントを足す。
+// 新規エントリは必ず 'added' イベントをここに書く (baseline の自動 added から除外される)。
 const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
-  // (運用開始後、週次でここに追記)
+  // ── 2026-08-27 (第 1 回週次更新・初回は 2026-07-13 baseline 以降の 6 週分) ──
+  {
+    date: '2026-08-27',
+    slug: 'jpyc',
+    changeType: 'updated',
+    summary:
+      'JPYC now also circulates on Kaia; issuance and circulation cover 4 chains (Polygon, Ethereum, Avalanche, Kaia).',
+    summaryJa:
+      'JPYC が Kaia にも対応し、発行・流通は 4 チェーン (Polygon/Ethereum/Avalanche/Kaia) に。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000315.000054018.html',
+  },
+  {
+    date: '2026-08-27',
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    summary:
+      'JPYC EX added Kaia support (issuance, redemption, wallet-address registration) and changed the issuance cap from 1M JPY per day to 1M JPY per transaction.',
+    summaryJa:
+      'JPYC EX が Kaia に対応 (発行・償還・アドレス登録)。発行上限を「1日100万円」から「1回100万円」へ変更。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000315.000054018.html',
+  },
+  {
+    date: '2026-08-27',
+    slug: 'aegis-ai',
+    changeType: 'updated',
+    summary:
+      'Aegis now also sells its briefing API in USDC on Base via standard x402, alongside JPYC.',
+    summaryJa: 'Aegis が JPYC に加えて USDC (Base・標準 x402) での販売を開始。',
+    sourceUrl: 'https://aegis-ai.xyz/',
+  },
+  {
+    date: '2026-08-27',
+    slug: 'dg-sps',
+    changeType: 'added',
+    summary:
+      'DG Stablecoin Payment Service (Digital Garage) added: a merchant stablecoin payment platform, initially USDC on Base, first offered to JCB and DGFT.',
+    summaryJa:
+      'デジタルガレージの DG Stablecoin Payment Service を追加。加盟店向けステーブルコイン決済基盤 (当初は Base 上の USDC・JCB/DGFT へ先行提供)。',
+    sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
+  },
 ];
 
-/** 初期 baseline: data.ts の各エントリを updatedAt 日の 'added' として導出する。 */
+// ディレクトリ初期公開日。baseline の 'added' はこの固定日に立てる — entry.updatedAt 由来に
+// すると週次更新で updatedAt を進めた瞬間に「追加日」まで動いてしまう (第 1 回運用で発覚)。
+const BASELINE_DATE = '2026-07-13';
+
+/**
+ * 初期 baseline: MANUAL_CHANGELOG に 'added' を持たないエントリを BASELINE_DATE の
+ * 'added' として導出する。後から追加したエントリは手書き added が唯一の追加イベント。
+ */
 function baselineEvents(entries: readonly DirectoryEntry[]): ServiceChangeEvent[] {
-  return entries.map((entry) => ({
-    date: entry.updatedAt,
-    slug: entry.slug,
-    changeType: 'added' as const,
-    summary: `${entry.name} added to the directory.`,
-    summaryJa: `${entry.nameJa || entry.name} をディレクトリに追加。`,
-    sourceUrl: entry.sourceUrl,
-  }));
+  const manuallyAdded = new Set(
+    MANUAL_CHANGELOG.filter((event) => event.changeType === 'added').map(
+      (event) => event.slug,
+    ),
+  );
+  return entries
+    .filter((entry) => !manuallyAdded.has(entry.slug))
+    .map((entry) => ({
+      date: BASELINE_DATE,
+      slug: entry.slug,
+      changeType: 'added' as const,
+      summary: `${entry.name} added to the directory.`,
+      summaryJa: `${entry.nameJa || entry.name} をディレクトリに追加。`,
+      sourceUrl: entry.sourceUrl,
+    }));
 }
 
 /** 全 changelog (baseline + 手書き) を日付昇順・決定的順序で返す。 */
