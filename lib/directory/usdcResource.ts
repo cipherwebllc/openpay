@@ -110,7 +110,7 @@ export const USDC_SERVICE_MONITOR = {
   price: '$0.01',
   priceUsd: '0.01',
   description:
-    'JPYC Service Monitor: weekly change feed for Japan-related JPYC and Web3 services. Each event is dated, typed (added / updated / removed / verified) and tied to an official source URL. Call with changedSince=YYYY-MM-DD set to your last run date to fetch only what changed since then; an empty changes list explicitly means no change, so a scheduled agent can report "no significant change" without guessing. Without changedSince you get the full monitor snapshot of every tracked service.',
+    'JPYC Service Monitor: weekly change feed for Japan-related JPYC and Web3 services. Each event is dated, typed (added / updated / removed / verified) and tied to an official source URL. Call with changedSince=YYYY-MM-DD set to your last run date to fetch only what changed; an empty changes list explicitly means no change, so a scheduled agent can report that without guessing. Without changedSince you get the full monitor snapshot.',
 } as const;
 
 const SERVICE_MONITOR_DELTA_EXAMPLE = {
