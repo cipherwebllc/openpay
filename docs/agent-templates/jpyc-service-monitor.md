@@ -7,6 +7,7 @@ A weekly change feed for Japan-related JPYC/Web3 services, designed to be wired 
 - `changedSince=<前回実行日>` を渡すと**差分だけ**を返し、`changes: []` が「重要な変更なし」を明示します(エージェントが推測なしで報告できる)
 - 実購入で検証済み: 同一 payer による snapshot → delta の 2 周を Base mainnet の実 settle で確認
   (tx `0xf62b736e…7833` / `0x3577035c…ac88`)
+- 姉妹商品: 決済事業者に特化した [Japan Stablecoin Payment Monitor](#japan-stablecoin-payment-monitor)(本ページ後半)— 同じ週次収集・共通 changelog から生成される別ビューです
 
 ## 目的と想定利用者 / Purpose
 
@@ -110,6 +111,64 @@ Claude Code なら `/schedule`(cron)や Hermes Agent の定期ジョブに上の
     }
   ],
   "totalServices": 20,
+  "notice": { "code": "sourced-facts-only" }
+}
+```
+
+## Japan Stablecoin Payment Monitor
+
+同じ週次収集・共通 changelog から生成される 2 本目のモニターです。**完了する仕事が異なります** — Service Monitor が「JPYC 関連サービス全体の変更を知る」のに対し、こちらは「**日本のステーブルコイン決済事業者・手数料・対応レールを監視する**」ためのフィードです。
+A second monitor generated from the same weekly collection: it completes a different job — watching Japan's stablecoin **payment providers** (launches, pilots, partnerships, fee changes, supported assets/chains, closures).
+
+- イベントは `provider` 中心で、`changeCategory`(service_launch / pilot / partnership / fee_change / assets_change / chains_change / closure)と `assets` / `chains` が付きます
+- ディレクトリに載らない業界イベント(実証実験・提携)も対象です(例: JCB×Circle MOU、DG・JCB・りそなの実店舗実証)
+- 履歴は 2025 年 11 月まで遡って収録済み。実購入検証済み(settle tx `0xef1f0969…546b`)
+
+### エンドポイント / Endpoints
+
+| レール | URL | 価格 |
+|---|---|---|
+| JPYC (Polygon) | `GET https://open-pay.jp/api/paid/stablecoin-payments?changedSince=YYYY-MM-DD` | 2 JPYC + x402 手数料(買い手計 3 JPYC) |
+| USDC (Base・手数料なし) | `GET https://open-pay.jp/api/paid/usdc/stablecoin-payments?changedSince=YYYY-MM-DD` | $0.01 |
+
+`changedSince` の意味・`changes: []` = 「重要な変更なし」・推奨頻度(週 1)・支払い上限・MCP/スクリプトの使い方は Service Monitor と同一です(URL を差し替えるだけ)。OpenAPI operationId: `getStablecoinPaymentMonitor` / `getStablecoinPaymentMonitorUsdc`。
+
+### コピー用プロンプト / Copy-paste prompt
+
+**日本語:**
+
+> 毎週月曜 9 時に Japan Stablecoin Payment Monitor を実行してください。
+> `https://open-pay.jp/api/paid/stablecoin-payments?changedSince=<前回実行日 YYYY-MM-DD>` を x402 で購入し(1 回の支払い上限 3 JPYC)、`changes` を日本語で要約してください。
+> `changes` が空なら「重要な変更なし」とだけ報告してください。
+> 変更がある場合は provider・changeCategory・対象資産/チェーン・変更内容・sourceUrl を表にし、判断に使う前に sourceUrl で裏取りしてください。
+
+**English:**
+
+> Every Monday at 09:00, run the Japan Stablecoin Payment Monitor.
+> Buy `https://open-pay.jp/api/paid/usdc/stablecoin-payments?changedSince=<last run date YYYY-MM-DD>` via x402 (spend cap $0.01 per run) and summarize `changes`.
+> If `changes` is empty, report exactly "no significant change".
+> Otherwise, tabulate provider, changeCategory, assets/chains, what changed, and sourceUrl — verify against the sourceUrl before acting on any change.
+
+### サンプルレスポンス(実応答の抜粋・mode=snapshot)
+
+```json
+{
+  "schemaVersion": "1.0",
+  "mode": "snapshot",
+  "changes": [
+    {
+      "date": "2026-08-10",
+      "provider": "DG Stablecoin Payment Service",
+      "changeType": "added",
+      "changeCategory": "service_launch",
+      "assets": ["USDC"],
+      "chains": ["base"],
+      "summary": "Digital Garage started commercial rollout of DG Stablecoin Payment Service (API-based merchant integration; initially USDC on Base, first offered to JCB and DGFT).",
+      "summaryJa": "デジタルガレージが DG Stablecoin Payment Service の商用展開を開始 (API 接続の加盟店向け・当初は Base 上の USDC・JCB/DGFT へ先行提供)。",
+      "sourceUrl": "https://www.garage.co.jp/pr/release/20260810/"
+    }
+  ],
+  "totalEvents": 4,
   "notice": { "code": "sourced-facts-only" }
 }
 ```
