@@ -45,9 +45,13 @@ describe('parseServiceMonitorQuery', () => {
 });
 
 describe('serviceChangelog', () => {
-  it('baseline: published 全エントリの added イベントが data.ts から導出される', () => {
+  it('baseline: published 全エントリの added イベントが data.ts から導出される (jpyc-services スコープ)', () => {
     const changelog = serviceChangelog();
-    const added = changelog.filter((e) => e.changeType === 'added');
+    // 決済スコープ専用の added (実証・提携等の backfill) は数えない — ディレクトリの
+    // 追加イベントは jpyc-services スコープに 1 エントリ 1 件。
+    const added = changelog.filter(
+      (e) => e.changeType === 'added' && e.scopes.includes('jpyc-services'),
+    );
     const published = DIRECTORY_ENTRIES.filter((e) => e.status === 'published');
     expect(added.length).toBe(published.length);
     for (const event of added) {
@@ -62,9 +66,10 @@ describe('serviceChangelog', () => {
     for (let i = 1; i < changelog.length; i++) {
       const prev = changelog[i - 1];
       const cur = changelog[i];
+      const prevKey = prev.slug ?? prev.provider ?? '';
+      const curKey = cur.slug ?? cur.provider ?? '';
       expect(
-        prev.date < cur.date ||
-          (prev.date === cur.date && prev.slug <= cur.slug),
+        prev.date < cur.date || (prev.date === cur.date && prevKey <= curKey),
       ).toBe(true);
     }
   });

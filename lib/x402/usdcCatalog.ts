@@ -9,6 +9,7 @@
 import {
   USDC_DIRECTORY_LIST,
   USDC_DIRECTORY_SEARCH,
+  USDC_PAYMENT_MONITOR,
   USDC_SERVICE_MONITOR,
 } from '@/lib/directory/usdcResource';
 import { USDC_JPYC_LIVE_RESOURCES } from '@/lib/jpyc/liveResources';
@@ -56,6 +57,13 @@ export const USDC_CATALOG_ITEMS: readonly UsdcCatalogItem[] = [
     title: 'JPYC Service Monitor',
     description: USDC_SERVICE_MONITOR.description,
     priceUsd: USDC_SERVICE_MONITOR.priceUsd,
+    category: 'data',
+  },
+  {
+    resource: `${OPENPAY_CANONICAL_ORIGIN}${USDC_PAYMENT_MONITOR.path}`,
+    title: 'Japan Stablecoin Payment Monitor',
+    description: USDC_PAYMENT_MONITOR.description,
+    priceUsd: USDC_PAYMENT_MONITOR.priceUsd,
     category: 'data',
   },
   {

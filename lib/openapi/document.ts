@@ -13,10 +13,13 @@ import {
   DIRECTORY_DETAIL_PRICE_JPYC,
   DIRECTORY_LIST_RESOURCE,
   DIRECTORY_SEARCH_RESOURCE,
+  JPYC_PAYMENTS_RESOURCE,
   JPYC_SERVICES_RESOURCE,
 } from '@/lib/directory/paidResources';
 import { JPYC_SHOPS_SEARCH_RESOURCE } from '@/lib/shops/paidResources';
 import {
+  USDC_PAYMENT_MONITOR,
+  USDC_PAYMENT_MONITOR_BAZAAR,
   USDC_SERVICE_MONITOR,
   USDC_SERVICE_MONITOR_BAZAAR,
   USDC_DIRECTORY_LIST,
@@ -548,6 +551,60 @@ const VANILLA_OPENAPI_PATHS = {
           content: {
             'application/json': {
               example: USDC_SERVICE_MONITOR_BAZAAR.output.example,
+            },
+          },
+        },
+        '400': JPYC_LIVE_400,
+        '402': { description: 'Payment required (x402 challenge with accepts)' },
+        '503': JPYC_LIVE_503,
+      },
+    },
+  },
+  [USDC_PAYMENT_MONITOR.path]: {
+    get: {
+      tags: ['x402 Vanilla (USDC)', 'Japan Web3 Directory'],
+      operationId: 'getStablecoinPaymentMonitorUsdc',
+      summary: 'Japan Stablecoin Payment Monitor — weekly change feed (USDC on Base)',
+      description: `${USDC_PAYMENT_MONITOR.description} Payment: standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
+      parameters: SERVICE_MONITOR_PARAMS,
+      'x-agent-usage':
+        'Run on a weekly schedule when monitoring Japanese stablecoin payment providers. Pass changedSince set to the date of your previous run to fetch only new events; dedupe by provider+date+changeCategory. When changes is empty, report "no significant change". Verify with each event sourceUrl before acting on a change.',
+      'x-payment-info': usdcPaymentInfo(USDC_PAYMENT_MONITOR.priceUsd),
+      'x-payment-protocol': 'x402',
+      'x-payment-asset': 'USDC',
+      'x-payment-chains': ['Base'],
+      responses: {
+        '200': {
+          description: 'Payment-scope change events after settlement',
+          content: {
+            'application/json': {
+              example: USDC_PAYMENT_MONITOR_BAZAAR.output.example,
+            },
+          },
+        },
+        '400': JPYC_LIVE_400,
+        '402': JPYC_LIVE_402,
+        '503': JPYC_LIVE_503,
+      },
+    },
+  },
+  '/api/paid/stablecoin-payments': {
+    get: {
+      tags: ['x402 (JPYC)', 'Japan Web3 Directory'],
+      operationId: 'getStablecoinPaymentMonitor',
+      summary: 'Japan Stablecoin Payment Monitor — weekly change feed (JPYC)',
+      description:
+        'Same data and contract as the USDC variant: dated, categorized events (launches, pilots, partnerships, fee changes, closures) for stablecoin payment services in Japan, each tied to an official source URL. Pass changedSince=YYYY-MM-DD to fetch only new events; an empty changes list explicitly means no change. Paid in JPYC via the OpenPay facilitator (buyer pays price + x402 facilitator fee).',
+      parameters: SERVICE_MONITOR_PARAMS,
+      'x-agent-usage':
+        'Run on a weekly schedule when monitoring Japanese stablecoin payment providers. Pass changedSince set to the date of your previous run; report "no significant change" when changes is empty.',
+      'x-payment-info': paymentInfo(JPYC_PAYMENTS_RESOURCE.priceJpyc),
+      responses: {
+        '200': {
+          description: 'Payment-scope change events after settlement',
+          content: {
+            'application/json': {
+              example: USDC_PAYMENT_MONITOR_BAZAAR.output.example,
             },
           },
         },

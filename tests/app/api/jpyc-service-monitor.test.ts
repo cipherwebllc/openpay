@@ -139,3 +139,77 @@ describe('GET /api/paid/jpyc/services (facilitator gate)', () => {
     expect(accept.extra.openpay.merchantValue).toBe((2n * 10n ** 18n).toString());
   });
 });
+
+describe('GET /api/paid/usdc/stablecoin-payments (test mode・2 商品目)', () => {
+  const PATH = '/api/paid/usdc/stablecoin-payments';
+
+  async function loadPaymentUsdc(flags: { directory?: string } = {}): Promise<Route> {
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', flags.directory ?? '1');
+    vi.stubEnv('X402_NETWORK', 'base');
+    vi.stubEnv('X402_PAY_TO_ADDRESS', SELLER);
+    vi.stubEnv('X402_TEST_MODE', 'true');
+    vi.resetModules();
+    return (await import(
+      '@/app/api/paid/usdc/stablecoin-payments/route'
+    )) as unknown as Route;
+  }
+
+  it('flag OFF → 404', async () => {
+    const route = await loadPaymentUsdc({ directory: '' });
+    expect((await route.GET(req(PATH))).status).toBe(404);
+  });
+
+  it('不正 query → 400', async () => {
+    const route = await loadPaymentUsdc();
+    expect((await route.GET(req(PATH, '?changedSince=bad'))).status).toBe(400);
+  });
+
+  it('snapshot: 決済スコープの履歴が provider 中心の行で返る', async () => {
+    const route = await loadPaymentUsdc();
+    const res = await route.GET(req(PATH));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.mode).toBe('snapshot');
+    expect(body.changes.length).toBeGreaterThanOrEqual(4);
+    expect(body.changes[0]).toHaveProperty('provider');
+    expect(body.changes[0]).toHaveProperty('assets');
+    expect(body.notice.code).toBe('sourced-facts-only');
+  });
+
+  it('delta: 未来日は changes:[] を明示', async () => {
+    const route = await loadPaymentUsdc();
+    const body = await (await route.GET(req(PATH, '?changedSince=9999-12-31'))).json();
+    expect(body.mode).toBe('delta');
+    expect(body.changes).toEqual([]);
+  });
+});
+
+describe('GET /api/paid/stablecoin-payments (JPYC facilitator gate・2 商品目)', () => {
+  const PATH = '/api/paid/stablecoin-payments';
+
+  async function loadPaymentJpyc(): Promise<Route> {
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', '1');
+    vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', FORWARDER);
+    vi.stubEnv('NEXT_PUBLIC_FEE_RECEIVER_ADDRESS', FEE_RECEIVER);
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '');
+    vi.stubEnv('NEXT_PUBLIC_JPYC_TESTNET_ADDRESS', JPYC_AMOY);
+    vi.stubEnv('X402_FEE_BPS', '100');
+    vi.stubEnv('X402_FEE_FLOOR_JPYC', '1');
+    vi.stubEnv('X402_PAY_TO_ADDRESS', SELLER);
+    vi.resetModules();
+    return (await import(
+      '@/app/api/paid/stablecoin-payments/route'
+    )) as unknown as Route;
+  }
+
+  it('支払いなし → 402。価格 2 JPYC + 手数料 = 3 JPYC・resource は本 route', async () => {
+    const route = await loadPaymentJpyc();
+    const res = await route.GET(req(PATH, '?changedSince=2026-08-01'));
+    expect(res.status).toBe(402);
+    const body = await res.json();
+    const accept = body.accepts[0];
+    expect(accept.resource).toBe(`https://open-pay.jp${PATH}`);
+    expect(accept.maxAmountRequired).toBe((3n * 10n ** 18n).toString());
+  });
+});

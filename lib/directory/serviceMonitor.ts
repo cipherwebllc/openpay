@@ -26,11 +26,39 @@ export const SERVICE_MONITOR_LICENSE_NOTICE =
 export const SERVICE_CHANGE_TYPES = ['added', 'updated', 'removed', 'verified'] as const;
 export type ServiceChangeType = (typeof SERVICE_CHANGE_TYPES)[number];
 
+// 商品スコープ: 1 つの共通 changelog から用途別ビューを切り出すためのタグ (2026-08-27 裁定
+// 「1 回の週次更新から複数の用途別ビューを生成」)。イベントは複数スコープに属してよい。
+export const SERVICE_CHANGE_SCOPES = ['jpyc-services', 'stablecoin-payments'] as const;
+export type ServiceChangeScope = (typeof SERVICE_CHANGE_SCOPES)[number];
+
+// 決済監視ビュー用の変更分類 (何が起きたか)。changeType (ディレクトリ操作) と直交する。
+export const SERVICE_CHANGE_CATEGORIES = [
+  'service_launch',
+  'pilot',
+  'partnership',
+  'fee_change',
+  'assets_change',
+  'chains_change',
+  'closure',
+  'update',
+] as const;
+export type ServiceChangeCategory = (typeof SERVICE_CHANGE_CATEGORIES)[number];
+
 export type ServiceChangeEvent = {
   /** YYYY-MM-DD (JST 運用日)。changedSince との比較は文字列比較 (同形式ゆえ安全)。 */
   date: string;
-  slug: string;
+  /** どの商品ビューに載せるか (必須・明示)。 */
+  scopes: readonly ServiceChangeScope[];
+  /** ディレクトリエントリに紐づくイベントのみ。業界イベント (実証実験等) は provider を使う。 */
+  slug?: string;
+  /** slug 無しイベントの表示名 (例: 'JCB / Digital Garage / Resona HD')。 */
+  provider?: string;
   changeType: ServiceChangeType;
+  /** 決済監視ビュー用の分類 (任意)。 */
+  changeCategory?: ServiceChangeCategory;
+  /** イベント固有の対象資産/チェーン (任意・省略時は entry の facts から導出)。 */
+  assets?: readonly string[];
+  chains?: readonly string[];
   /** 何が変わったか (英語・1 文・事実のみ)。 */
   summary: string;
   summaryJa: string;
@@ -43,11 +71,67 @@ export type ServiceChangeEvent = {
 // removed の場合は data.ts の status を 'archived' にし、ここに removed イベントを足す。
 // 新規エントリは必ず 'added' イベントをここに書く (baseline の自動 added から除外される)。
 const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
+  // ── stablecoin-payments backfill (2026-08-27 収集・一次ソース確認済み。初回購入者が
+  //     空フィードを掴まないよう、決済スコープの過去イベントを遡って積む) ──
+  {
+    date: '2025-11-14',
+    scopes: ['stablecoin-payments'],
+    provider: 'TIS / JPYC',
+    changeType: 'added',
+    changeCategory: 'partnership',
+    assets: ['JPYC'],
+    summary:
+      'TIS and JPYC signed a basic agreement toward real-world deployment of JPY-stablecoin payments.',
+    summaryJa: 'TIS と JPYC が、日本円ステーブルコイン決済の社会実装に向けた基本合意書を締結。',
+    sourceUrl: 'https://www.tis.co.jp/news/2025/tis_news/20251114_1.html',
+  },
+  {
+    date: '2026-02-19',
+    scopes: ['stablecoin-payments'],
+    provider: 'Digital Garage / JCB / Resona HD',
+    changeType: 'added',
+    changeCategory: 'pilot',
+    assets: ['USDC', 'JPYC'],
+    summary:
+      'Digital Garage, JCB and Resona HD announced an in-store stablecoin payment pilot using USDC and JPYC.',
+    summaryJa:
+      'デジタルガレージ・JCB・りそな HD が、USDC と JPYC を用いた実店舗ステーブルコイン決済の実証実験を発表。',
+    sourceUrl: 'https://www.garage.co.jp/pr/release/20260219/',
+  },
+  {
+    date: '2026-07-15',
+    scopes: ['stablecoin-payments'],
+    provider: 'JCB / Circle',
+    changeType: 'added',
+    changeCategory: 'partnership',
+    assets: ['USDC'],
+    summary:
+      'JCB signed an MOU with a Circle affiliate to explore stablecoin-based collaboration, starting with internal USDC transfers and looking at cross-border and merchant payments.',
+    summaryJa:
+      'JCB が Circle 関連会社とステーブルコイン活用の協業検討に関する基本合意書 (MOU) を締結。社内 USDC 資金移動の実証から、クロスボーダー・加盟店決済も検討対象に。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000001423.000011361.html',
+  },
+  {
+    date: '2026-08-10',
+    scopes: ['stablecoin-payments'],
+    slug: 'dg-sps',
+    changeType: 'added',
+    changeCategory: 'service_launch',
+    assets: ['USDC'],
+    chains: ['base'],
+    summary:
+      'Digital Garage started commercial rollout of DG Stablecoin Payment Service (API-based merchant integration; initially USDC on Base, first offered to JCB and DGFT).',
+    summaryJa:
+      'デジタルガレージが DG Stablecoin Payment Service の商用展開を開始 (API 接続の加盟店向け・当初は Base 上の USDC・JCB/DGFT へ先行提供)。',
+    sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
+  },
   // ── 2026-08-27 (第 1 回週次更新・初回は 2026-07-13 baseline 以降の 6 週分) ──
   {
     date: '2026-08-27',
+    scopes: ['jpyc-services'],
     slug: 'jpyc',
     changeType: 'updated',
+    changeCategory: 'chains_change',
     summary:
       'JPYC now also circulates on Kaia; issuance and circulation cover 4 chains (Polygon, Ethereum, Avalanche, Kaia).',
     summaryJa:
@@ -56,8 +140,10 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   },
   {
     date: '2026-08-27',
+    scopes: ['jpyc-services'],
     slug: 'jpyc-ex',
     changeType: 'updated',
+    changeCategory: 'chains_change',
     summary:
       'JPYC EX added Kaia support (issuance, redemption, wallet-address registration) and changed the issuance cap from 1M JPY per day to 1M JPY per transaction.',
     summaryJa:
@@ -66,8 +152,10 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   },
   {
     date: '2026-08-27',
+    scopes: ['jpyc-services'],
     slug: 'aegis-ai',
     changeType: 'updated',
+    changeCategory: 'assets_change',
     summary:
       'Aegis now also sells its briefing API in USDC on Base via standard x402, alongside JPYC.',
     summaryJa: 'Aegis が JPYC に加えて USDC (Base・標準 x402) での販売を開始。',
@@ -75,6 +163,7 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   },
   {
     date: '2026-08-27',
+    scopes: ['jpyc-services'],
     slug: 'dg-sps',
     changeType: 'added',
     summary:
@@ -103,6 +192,7 @@ function baselineEvents(entries: readonly DirectoryEntry[]): ServiceChangeEvent[
     .filter((entry) => !manuallyAdded.has(entry.slug))
     .map((entry) => ({
       date: BASELINE_DATE,
+      scopes: ['jpyc-services'] as const,
       slug: entry.slug,
       changeType: 'added' as const,
       summary: `${entry.name} added to the directory.`,
@@ -119,9 +209,17 @@ export function serviceChangelog(
   return all.sort(
     (a, b) =>
       a.date.localeCompare(b.date) ||
-      a.slug.localeCompare(b.slug) ||
+      (a.slug ?? a.provider ?? '').localeCompare(b.slug ?? b.provider ?? '') ||
       a.changeType.localeCompare(b.changeType),
   );
+}
+
+/** 指定スコープのイベントだけを返す (共通 changelog → 用途別ビュー)。 */
+export function scopedChangelog(
+  scope: ServiceChangeScope,
+  entries: readonly DirectoryEntry[] = DIRECTORY_ENTRIES,
+): ServiceChangeEvent[] {
+  return serviceChangelog(entries).filter((event) => event.scopes.includes(scope));
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -191,6 +289,9 @@ function toRow(
   };
 }
 
+/** 応答に載せるイベント形 (内部ルーティング用の scopes を除いたもの)。 */
+export type ServiceChangeEventOutput = Omit<ServiceChangeEvent, 'scopes'>;
+
 export type ServiceMonitorEnvelope = {
   schemaVersion: string;
   mode: 'snapshot' | 'delta';
@@ -198,7 +299,7 @@ export type ServiceMonitorEnvelope = {
   /** snapshot: 全 published / delta: changedSince 以降に変更のあったエントリの現況のみ。 */
   services: ServiceMonitorRow[];
   /** snapshot: 直近イベント (limit 件) / delta: changedSince 以降の全イベント (limit 件まで)。 */
-  changes: ServiceChangeEvent[];
+  changes: ServiceChangeEventOutput[];
   totalServices: number;
   generatedAt: string;
   notice: { code: string; detail: string; termsUrl: string };
@@ -220,10 +321,14 @@ export function createServiceMonitorEnvelope(
   entries: readonly DirectoryEntry[] = DIRECTORY_ENTRIES,
 ): ServiceMonitorEnvelope {
   const published = publishedDirectoryEntries(entries);
-  const changelog = serviceChangelog(entries);
+  // 本ビューは 'jpyc-services' スコープのみ (決済スコープ専用イベントを混ぜない)。
+  // scopes は内部ルーティング用のため応答から外す。
+  const changelog = scopedChangelog('jpyc-services', entries).map(
+    ({ scopes: _scopes, ...event }) => event,
+  );
   const mode = query.changedSince === undefined ? 'snapshot' : 'delta';
 
-  let changes: ServiceChangeEvent[];
+  let changes: ServiceChangeEventOutput[];
   let services: ServiceMonitorRow[];
   if (mode === 'snapshot') {
     changes = changelog.slice(-query.limit);

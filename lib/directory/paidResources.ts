@@ -179,3 +179,82 @@ export const JPYC_SERVICES_RESOURCE = {
     output: SERVICE_MONITOR_OUTPUT,
   },
 } as const satisfies FirstPartyResource;
+
+// Japan Stablecoin Payment Monitor (2 商品目・2026-08-27 裁定)。共通 changelog の
+// 決済スコープを provider 中心の行で返す。契約は lib/directory/paymentMonitor.ts。
+const PAYMENT_MONITOR_OUTPUT = {
+  type: 'object',
+  properties: {
+    schemaVersion: { type: 'string' },
+    mode: {
+      type: 'string',
+      enum: ['snapshot', 'delta'],
+      description:
+        'snapshot = full dated history (no changedSince). delta = only events on/after changedSince; changes:[] explicitly means no change.',
+    },
+    query: { type: 'object' },
+    changes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          date: { type: 'string', description: 'YYYY-MM-DD (announcement date)' },
+          provider: { type: 'string' },
+          changeType: {
+            type: 'string',
+            enum: ['added', 'updated', 'removed', 'verified'],
+          },
+          changeCategory: {
+            type: 'string',
+            enum: [
+              'service_launch',
+              'pilot',
+              'partnership',
+              'fee_change',
+              'assets_change',
+              'chains_change',
+              'closure',
+              'update',
+            ],
+          },
+          assets: { type: 'array', items: { type: 'string' } },
+          chains: { type: 'array', items: { type: 'string' } },
+          summary: { type: 'string' },
+          summaryJa: { type: 'string' },
+          sourceUrl: { type: 'string' },
+        },
+        required: ['date', 'provider', 'changeType', 'assets', 'chains', 'summary', 'sourceUrl'],
+      },
+    },
+    totalEvents: { type: 'integer' },
+    generatedAt: { type: 'string' },
+    notice: { type: 'object' },
+    licenseNotice: { type: 'string' },
+  },
+  required: [
+    'schemaVersion',
+    'mode',
+    'query',
+    'changes',
+    'totalEvents',
+    'generatedAt',
+    'notice',
+    'licenseNotice',
+  ],
+};
+
+export const JPYC_PAYMENTS_RESOURCE = {
+  path: '/api/paid/stablecoin-payments',
+  priceJpyc: '2',
+  category: 'data',
+  description:
+    'Japan Stablecoin Payment Monitor: weekly change feed for stablecoin payment services in Japan — new launches, pilots, partnerships, fee changes, supported assets/chains and closures, each dated and tied to an official source URL. Pass changedSince=YYYY-MM-DD to fetch only new events; an empty changes list explicitly means no change.',
+  trigger:
+    'On a weekly schedule when monitoring Japanese stablecoin payment providers: pass changedSince set to your last run date; report "no significant change" when changes is empty.',
+  docsUrl: 'https://open-pay.jp/api/openapi.json',
+  license: 'Attributed metadata; source rights remain with owners.',
+  outputSchema: {
+    input: { type: 'http', method: 'GET', discoverable: true },
+    output: PAYMENT_MONITOR_OUTPUT,
+  },
+} as const satisfies FirstPartyResource;

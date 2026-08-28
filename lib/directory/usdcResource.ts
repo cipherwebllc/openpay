@@ -172,3 +172,62 @@ export const USDC_SERVICE_MONITOR_BAZAAR = {
   },
   output: { example: SERVICE_MONITOR_DELTA_EXAMPLE },
 } as const;
+
+// ── Japan Stablecoin Payment Monitor (2 商品目・USDC 面) ─────────────────────
+// 共通 changelog の 'stablecoin-payments' スコープ (lib/directory/paymentMonitor.ts)。
+// 「日本の決済事業者・手数料・対応レールを監視する」という Service Monitor とは別の仕事。
+export const USDC_PAYMENT_MONITOR = {
+  path: '/api/paid/usdc/stablecoin-payments',
+  price: '$0.01',
+  priceUsd: '0.01',
+  description:
+    'Japan Stablecoin Payment Monitor: weekly change feed for stablecoin payment services in Japan — new launches, pilots, partnerships, fee changes, supported assets and chains, and closures. Each event is dated, categorized and tied to an official source URL. Pass changedSince=YYYY-MM-DD (your last run date) to fetch only new events; an empty changes list explicitly means no change. Without changedSince you get the full dated history back to late 2025.',
+} as const;
+
+const PAYMENT_MONITOR_DELTA_EXAMPLE = {
+  schemaVersion: '1.0',
+  mode: 'delta',
+  query: { changedSince: '2026-08-01', limit: 200 },
+  changes: [
+    {
+      date: '2026-08-10',
+      provider: 'DG Stablecoin Payment Service',
+      changeType: 'added',
+      changeCategory: 'service_launch',
+      assets: ['USDC'],
+      chains: ['base'],
+      summary:
+        'Digital Garage started commercial rollout of DG Stablecoin Payment Service (API-based merchant integration; initially USDC on Base, first offered to JCB and DGFT).',
+      summaryJa:
+        'デジタルガレージが DG Stablecoin Payment Service の商用展開を開始 (API 接続の加盟店向け・当初は Base 上の USDC・JCB/DGFT へ先行提供)。',
+      sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
+    },
+  ],
+  totalEvents: 4,
+  generatedAt: '2026-08-27T02:00:00.000Z',
+  notice: {
+    code: 'sourced-facts-only',
+    detail:
+      'Events summarize official announcements about stablecoin payment services in Japan; verify with each sourceUrl before relying on a change.',
+    termsUrl: 'https://open-pay.jp/en/terms',
+  },
+  licenseNotice:
+    'Events summarize what official sources state; they are not availability guarantees or endorsements. Source rights remain with their owners.',
+} as const;
+
+export const USDC_PAYMENT_MONITOR_BAZAAR = {
+  queryParams: { changedSince: '2026-08-01' },
+  queryParamsSchema: {
+    properties: {
+      changedSince: {
+        type: 'string',
+        pattern: '^\\d{4}-\\d{2}-\\d{2}$',
+        description:
+          'Return only events on/after this date (YYYY-MM-DD). Set to your last run date. Omit for the full history.',
+      },
+      limit: { type: 'string', description: '1-200 (default 200)' },
+    },
+    additionalProperties: false,
+  },
+  output: { example: PAYMENT_MONITOR_DELTA_EXAMPLE },
+} as const;

@@ -2,6 +2,7 @@ import { getAddress, isAddress, type Address } from 'viem';
 import {
   DIRECTORY_LIST_RESOURCE,
   DIRECTORY_SEARCH_RESOURCE,
+  JPYC_PAYMENTS_RESOURCE,
   JPYC_SERVICES_RESOURCE,
 } from '@/lib/directory/paidResources';
 import { env } from '@/lib/env';
@@ -27,6 +28,7 @@ export type FirstPartyResource = {
     | '/api/paid/japan-web3-directory/search'
     | '/api/paid/jpyc-shops/search'
     | '/api/paid/jpyc/services'
+    | '/api/paid/stablecoin-payments'
     | `/api/paid/japan-web3-directory/${string}`;
   priceJpyc: string;
   category: 'api' | 'data';
@@ -103,7 +105,7 @@ export const FIRST_PARTY_RESOURCES = [
   // 詳細 API は slug ごとに resource URL が変わる。代表 slug を固定掲載すると accepts が
   // 他 slug の支払い条件を表せないため、AI ストアには固定 URL の一覧/検索だけを掲載する。
   ...(env.enableWeb3Directory
-    ? [DIRECTORY_LIST_RESOURCE, DIRECTORY_SEARCH_RESOURCE, JPYC_SERVICES_RESOURCE]
+    ? [DIRECTORY_LIST_RESOURCE, DIRECTORY_SEARCH_RESOURCE, JPYC_SERVICES_RESOURCE, JPYC_PAYMENTS_RESOURCE]
     : []),
   ...(shopsApiEnabled() ? [JPYC_SHOPS_SEARCH_RESOURCE] : []),
 ] as const satisfies readonly FirstPartyResource[];
