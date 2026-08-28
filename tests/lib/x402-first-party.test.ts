@@ -36,6 +36,7 @@ describe('x402 first-party directory resources', () => {
       '/api/paid/japan-web3-directory',
       '/api/paid/japan-web3-directory/search',
       '/api/paid/jpyc/services',
+      '/api/paid/stablecoin-payments',
     ]);
     expectComparisonMetadata(resources);
     expect(resources.slice(2).every((resource) => resource.license.includes('Attributed metadata'))).toBe(true);

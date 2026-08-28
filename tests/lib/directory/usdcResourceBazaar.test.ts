@@ -86,7 +86,7 @@ describe('USDC directory の bazaar 宣言は実装と一致する', () => {
 describe('USDC 面 description の CDP 上限フェンス', () => {
   it('全 USDC resource の description ≤ 480 字 (超過は settle 時に CDP が形式拒否しうる — #396 実測)', async () => {
     const mod = await import('@/lib/directory/usdcResource');
-    for (const r of [mod.USDC_DIRECTORY_LIST, mod.USDC_DIRECTORY_SEARCH, mod.USDC_SERVICE_MONITOR]) {
+    for (const r of [mod.USDC_DIRECTORY_LIST, mod.USDC_DIRECTORY_SEARCH, mod.USDC_SERVICE_MONITOR, mod.USDC_PAYMENT_MONITOR]) {
       expect(r.description.length, r.path).toBeLessThanOrEqual(480);
     }
   });
