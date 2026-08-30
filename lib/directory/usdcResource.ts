@@ -203,7 +203,7 @@ const PAYMENT_MONITOR_DELTA_EXAMPLE = {
       sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
     },
   ],
-  totalEvents: 4,
+  totalEvents: 7,
   generatedAt: '2026-08-27T02:00:00.000Z',
   notice: {
     code: 'sourced-facts-only',
