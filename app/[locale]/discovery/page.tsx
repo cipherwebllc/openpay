@@ -11,6 +11,7 @@ import {
   DirectoryFeaturedCard,
   type DirectoryFeaturedCopy,
 } from '@/components/DirectoryFeaturedCard';
+import { WebMcpDiscoveryTools } from '@/components/WebMcpDiscoveryTools';
 import { X402DiscoveryView } from '@/components/X402DiscoveryView';
 import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
 import { directoryStats } from '@/lib/directory/query';
@@ -77,6 +78,8 @@ export default async function DiscoveryPage({
             </span>
           </div>
         </div>
+        {/* WebMCP 対応エージェント向けの read-only tools (未対応ブラウザでは no-op・描画なし) */}
+        <WebMcpDiscoveryTools usdcItems={usdcItems} />
         <X402DiscoveryView
           maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT}
           usdcItems={usdcItems}
