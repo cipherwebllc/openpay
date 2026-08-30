@@ -67,8 +67,10 @@ describe('createPaymentMonitorEnvelope', () => {
       NOW,
     );
     expect(delta.mode).toBe('delta');
-    expect(delta.changes).toHaveLength(1); // DG SPS launch のみ
+    // 8/10 DG SPS launch + 8/26 大阪府採択 3 件 (当日含む・以前の backfill 3 件は含まない)
+    expect(delta.changes).toHaveLength(4);
     expect(delta.changes[0].date).toBe('2026-08-10');
+    expect(delta.changes.every((c) => c.date >= '2026-08-10')).toBe(true);
 
     const empty = createPaymentMonitorEnvelope(
       { changedSince: '9999-12-31', limit: SERVICE_MONITOR_MAX_LIMIT },

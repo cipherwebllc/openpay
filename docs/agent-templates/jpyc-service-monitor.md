@@ -168,7 +168,7 @@ A second monitor generated from the same weekly collection: it completes a diffe
       "sourceUrl": "https://www.garage.co.jp/pr/release/20260810/"
     }
   ],
-  "totalEvents": 4,
+  "totalEvents": 7,
   "notice": { "code": "sourced-facts-only" }
 }
 ```
@@ -178,4 +178,5 @@ A second monitor generated from the same weekly collection: it completes a diffe
 - イベントは公式ソースの記載を要約した**事実**であり、可用性の保証や推奨ではありません。判断に使う前に各 `sourceUrl` で裏取りしてください
 - `sourceOk` はソース URL の到達性のみを示し、情報の真偽を示しません
 - 支払いは取消不能です。上限(MAX)は必ずクライアント側でも設定してください
+- **プロンプトに書いた上限指示は防御になりません**(エージェントは承認文言を捏造し得ます)。上限は本テンプレのようにスクリプト/SDK の引数と**少額専用ウォレットの残高**で技術的に効かせてください
 - 利用規約: https://open-pay.jp/ja/terms(英語版 /en/terms)
