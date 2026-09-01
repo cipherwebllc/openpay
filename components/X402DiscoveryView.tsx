@@ -12,6 +12,7 @@ import { useAccount } from 'wagmi';
 import { formatUnits } from 'viem';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  Activity,
   Boxes,
   Check,
   Code2,
@@ -35,6 +36,7 @@ import { Field } from '@/components/Field';
 import { env } from '@/lib/env';
 import { shortAddress } from '@/lib/format';
 import { AGENTIC_MARKET_URL, type UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
+import type { MonitorFreshness } from '@/lib/directory/monitorFreshness';
 
 // カテゴリー文字列 → 視覚アイコン (api / data / mcp / content)。未知は汎用 (Code2)。
 function categoryIcon(category: string) {
@@ -216,14 +218,26 @@ export function X402DiscoveryView({
   maxResourcesPerMerchant,
   featured,
   usdcItems = EMPTY_USDC_ITEMS,
+  freshnessByPath,
 }: {
   maxResourcesPerMerchant: number;
   featured?: ReactNode;
   /** USDC (Base・標準 x402) 商品。server が静的に渡す (lib/x402/usdcCatalog)。 */
   usdcItems?: readonly UsdcCatalogItem[];
+  /** 更新型商品の鮮度 (path キー)。server が静的に渡す (lib/directory/monitorFreshness)。 */
+  freshnessByPath?: Readonly<Record<string, MonitorFreshness>>;
 }) {
   const t = useTranslations('Facilitator');
   const locale = useLocale();
+  // 絶対 URL のカードを path キーの鮮度表に引く (JPYC 面と USDC 面で同じ商品を指す)。
+  const freshnessFor = (url: string): MonitorFreshness | undefined => {
+    if (!freshnessByPath) return undefined;
+    try {
+      return freshnessByPath[new URL(url).pathname];
+    } catch {
+      return undefined; // 出品 URL が不正でもカード描画本体を巻き込まない (owned 一覧の入力途中値)
+    }
+  };
   const { address, isConnected } = useAccount();
   const { isSignedIn, signIn, isSigningIn } = useSiweSession();
 
@@ -620,6 +634,8 @@ export function X402DiscoveryView({
   }) => {
     const Icon = categoryIcon(opts.category);
     const urlIsHttps = isHttpsUrl(opts.url);
+    // 更新型商品の「生きている」証拠 (最終イベント日・総件数)。該当商品にだけ出す。
+    const freshness = freshnessFor(opts.url);
     // 階層: チップ行 + 価格 → 見出し → 補足 (トリガー / title があるときの説明) → URL。
     // 説明を価格の隣の狭い列に入れると英文が 1 語ずつ折り返して読めない (2 カラム時に実害)。
     return (
@@ -666,6 +682,17 @@ export function X402DiscoveryView({
           <p className="mt-1 flex items-start gap-1.5 text-xs leading-relaxed text-slate-500">
             <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" aria-hidden />
             <span className="line-clamp-2">{opts.trigger}</span>
+          </p>
+        )}
+        {freshness && (
+          <p className="mt-1 flex items-center gap-1.5 text-xs leading-relaxed text-emerald-700">
+            <Activity className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            <span>
+              {t('monitorFreshness', {
+                date: freshness.latestEventDate,
+                count: freshness.totalEvents,
+              })}
+            </span>
           </p>
         )}
         <div className="mt-1.5 flex items-center gap-1.5">

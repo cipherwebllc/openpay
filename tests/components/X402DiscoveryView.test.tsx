@@ -986,3 +986,57 @@ describe('X402DiscoveryView 公開カタログの dual (USDC 併売) 表示', ()
     expect(screen.queryByText(/貼り替えて/)).not.toBeInTheDocument();
   });
 });
+
+// 更新型商品の鮮度 (改善提案 #4・2026-09-01): server が渡す freshnessByPath に該当する
+// 商品カードにだけ「最終イベント日・全 N 件・週次更新」を出す。
+describe('X402DiscoveryView — Monitor の鮮度表示', () => {
+  const MONITOR_URL = 'https://open-pay.jp/api/paid/usdc/jpyc/services';
+  const OTHER_URL = 'https://open-pay.jp/api/paid/usdc/jpyc/supply';
+  const usdcItems = [
+    {
+      resource: MONITOR_URL,
+      title: 'JPYC Service Monitor',
+      description: 'weekly change feed',
+      priceUsd: '0.01',
+      category: 'data' as const,
+    },
+    {
+      resource: OTHER_URL,
+      title: 'JPYC Supply by Chain',
+      description: 'live supply',
+      priceUsd: '0.002',
+      category: 'data' as const,
+    },
+  ];
+
+  function renderWithFreshness(freshnessByPath?: Record<string, { latestEventDate: string; totalEvents: number }>) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return renderWithIntl(
+      <QueryClientProvider client={qc}>
+        <X402DiscoveryView
+          maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT}
+          usdcItems={usdcItems}
+          freshnessByPath={freshnessByPath}
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  it('該当商品にだけ最終イベント日と件数が出る (他商品・JPYC 出品には出ない)', async () => {
+    renderWithFreshness({
+      '/api/paid/usdc/jpyc/services': { latestEventDate: '2026-08-27', totalEvents: 11 },
+    });
+    await waitFor(() => expect(screen.getByText('JPYC Service Monitor')).toBeInTheDocument());
+    const line = screen.getByText('最終イベント 2026-08-27・全 11 件・週次更新');
+    expect(line).toBeInTheDocument();
+    // 同じ文言が他カードに漏れていない (1 箇所のみ)。
+    expect(screen.getAllByText(/最終イベント/)).toHaveLength(1);
+    expect(line.closest('li')).toHaveTextContent('JPYC Service Monitor');
+  });
+
+  it('freshnessByPath 省略時 (flag OFF 等) は何も出ない', async () => {
+    renderWithFreshness(undefined);
+    await waitFor(() => expect(screen.getByText('JPYC Service Monitor')).toBeInTheDocument());
+    expect(screen.queryByText(/最終イベント/)).toBeNull();
+  });
+});

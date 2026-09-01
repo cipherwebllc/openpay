@@ -14,6 +14,7 @@ import {
 import { WebMcpDiscoveryTools } from '@/components/WebMcpDiscoveryTools';
 import { X402DiscoveryView } from '@/components/X402DiscoveryView';
 import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
+import { monitorFreshnessByPath } from '@/lib/directory/monitorFreshness';
 import { directoryStats } from '@/lib/directory/query';
 import { env } from '@/lib/env';
 import { MAX_RESOURCES_PER_MERCHANT } from '@/lib/x402/registry';
@@ -83,6 +84,7 @@ export default async function DiscoveryPage({
         <X402DiscoveryView
           maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT}
           usdcItems={usdcItems}
+          freshnessByPath={env.enableWeb3Directory ? monitorFreshnessByPath() : undefined}
           featured={
             featuredCopy ? (
               <DirectoryFeaturedCard
