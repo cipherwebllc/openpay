@@ -1180,3 +1180,126 @@ describe('MobileOrderView 時間系 (Phase 4・flag enablePreorderTime)', () => 
     });
   });
 });
+
+// 「前回と同じ注文」(改善提案 #3・2026-09-01): ハンドオフ時に id カートを保存し、支払い済み
+// (同店舗の confirmed 控え) のときだけボタンを出して現在のメニューに突合して復元する。
+describe('MobileOrderView 前回と同じ注文', () => {
+  const RECEIPT_KEY = 'openpay:payerReceipts:v1';
+  const RECORD_KEY = 'openpay:last-order:v1:h:coffee';
+  const tx = `0x${'cd'.repeat(32)}`;
+  const confirmedReceipt = (at: Date, merchant = config.receiver) =>
+    buildPayerReceipt(
+      { asset: 'jpyc', amount: '1100', merchantAddress: merchant, txHash: tx },
+      at,
+    );
+  const seed = (opts: { receipt?: boolean; cart?: AgentCartItem[]; ts?: number } = {}) => {
+    const ts = opts.ts ?? Date.now() - 60_000;
+    window.localStorage.setItem(
+      RECORD_KEY,
+      JSON.stringify({
+        receiver: config.receiver.toLowerCase(),
+        cart: opts.cart ?? [{ id: 'a', qty: 2 }, { id: 'c', qty: 1 }],
+        ts,
+      }),
+    );
+    if (opts.receipt ?? true) {
+      window.localStorage.setItem(
+        RECEIPT_KEY,
+        JSON.stringify([confirmedReceipt(new Date(ts + 30_000))]),
+      );
+    }
+  };
+  const reorderButton = () => screen.queryByRole('button', { name: /前回と同じ注文/ });
+
+  it('記録が無ければ出ない (inert)', () => {
+    renderWithIntl(<MobileOrderView config={config} handle="coffee" />);
+    expect(reorderButton()).toBeNull();
+  });
+
+  it('記録はあるが支払い控えが無い (未払い) なら出ない', () => {
+    seed({ receipt: false });
+    renderWithIntl(<MobileOrderView config={config} handle="coffee" />);
+    expect(reorderButton()).toBeNull();
+  });
+
+  it('別店舗の控えでは出ない', () => {
+    seed({ receipt: false });
+    window.localStorage.setItem(
+      RECEIPT_KEY,
+      JSON.stringify([
+        confirmedReceipt(new Date(), '0x2222222222222222222222222222222222222222'),
+      ]),
+    );
+    renderWithIntl(<MobileOrderView config={config} handle="coffee" />);
+    expect(reorderButton()).toBeNull();
+  });
+
+  it('支払い済みの記録があれば「前回と同じ注文（2 品）」→ タップで復元・明細を開く・送信しない', () => {
+    seed();
+    renderWithIntl(<MobileOrderView config={config} handle="coffee" />);
+    const btn = screen.getByRole('button', { name: '前回と同じ注文（2 品）' });
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull(); // まだ空カート
+    fireEvent.click(btn);
+    // 合計 = 500×2 + 100 = 1100 JPYC・明細は開いた状態・ボタンはカートが埋まったので消える。
+    expect(screen.getByText('1100 JPYC')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ご注文内容' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(reorderButton()).toBeNull();
+    expect(screen.queryByText(/今のメニューにない商品は外しました/)).toBeNull();
+    // /checkout の href に品目が乗る (価格は menu 由来)。
+    const pay = screen.getByRole('link', { name: '支払いへ進む' });
+    const parsed = parseCheckoutParams(
+      new URL(pay.getAttribute('href') ?? '', 'http://localhost').searchParams,
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.params.items.map((i) => [i.name, i.qty, i.price])).toEqual([
+        ['ブレンド', 2, '500'],
+        ['水', 1, '100'],
+      ]);
+    }
+  });
+
+  it('メニューから消えた商品は落として通知 (一部復元)', () => {
+    seed({ cart: [{ id: 'a', qty: 1 }, { id: 'GONE', qty: 3 }] });
+    renderWithIntl(<MobileOrderView config={config} handle="coffee" />);
+    fireEvent.click(screen.getByRole('button', { name: '前回と同じ注文（2 品）' }));
+    expect(screen.getByText('500 JPYC')).toBeInTheDocument();
+    expect(screen.getByText(/今のメニューにない商品は外しました/)).toBeInTheDocument();
+  });
+
+  it('全商品がメニューに無ければ復元せず通知だけ・ボタンは消える', () => {
+    seed({ cart: [{ id: 'GONE', qty: 1 }] });
+    renderWithIntl(<MobileOrderView config={config} handle="coffee" />);
+    fireEvent.click(screen.getByRole('button', { name: '前回と同じ注文（1 品）' }));
+    expect(screen.getByText(/今のメニューにありません/)).toBeInTheDocument();
+    expect(reorderButton()).toBeNull();
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+  });
+
+  it('「支払いへ進む」タップ (ハンドオフ) で id カートを店舗キーに保存する', () => {
+    renderWithIntl(<MobileOrderView config={config} handle="coffee" />);
+    // 1 回目のタップで「＋」がステッパに差し替わるので毎回取り直す。
+    const plus = (i: number) => screen.getAllByRole('button', { name: '数量を増やす' })[i];
+    fireEvent.click(plus(0)); // ブレンド ×1
+    fireEvent.click(plus(0)); // ブレンド ×2
+    fireEvent.click(plus(2)); // 水 ×1
+    expect(window.localStorage.getItem(RECORD_KEY)).toBeNull();
+    fireEvent.click(screen.getByRole('link', { name: '支払いへ進む' }));
+    const saved = JSON.parse(window.localStorage.getItem(RECORD_KEY) ?? 'null');
+    expect(saved.receiver).toBe(config.receiver.toLowerCase());
+    expect(saved.cart).toEqual([{ id: 'a', qty: 2 }, { id: 'c', qty: 1 }]);
+    expect(saved.ts).toBeGreaterThan(0);
+  });
+
+  it('?s= 経路 (handle 無し) は受取先アドレスをキーにする', () => {
+    renderWithIntl(<MobileOrderView config={config} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    fireEvent.click(screen.getByRole('link', { name: '支払いへ進む' }));
+    expect(
+      window.localStorage.getItem(`openpay:last-order:v1:addr:${config.receiver.toLowerCase()}`),
+    ).not.toBeNull();
+  });
+});

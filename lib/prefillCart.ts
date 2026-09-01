@@ -31,6 +31,8 @@ export type PrefillOptionEntry = {
   qty: number;
   taxRate?: number;
   taxCategory?: MenuItem['taxCategory'];
+  /** 選択 (groupId/choiceId)。「前回と同じ注文」の保存で wire 形式に戻すために保持する。 */
+  selections?: { groupId: string; choiceId: string }[];
 };
 
 export type PrefillCart = {
@@ -97,6 +99,7 @@ export function resolvePrefillCart(
       qty: Math.min(CHECKOUT_QTY_MAX, line.qty),
       taxRate: m.taxRate,
       taxCategory: m.taxCategory,
+      selections: resolved.selections,
     };
     entryByKey.set(key, entry);
     optionEntries.push(entry);
