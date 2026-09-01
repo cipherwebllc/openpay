@@ -127,7 +127,7 @@ const SERVICE_MONITOR_DELTA_EXAMPLE = {
       supportsJpyc: true,
       supportsUsdc: false,
       supportsX402: false,
-      chains: ['avalanche', 'ethereum', 'polygon'],
+      chains: ['avalanche', 'ethereum', 'kaia', 'polygon'],
       sourceUrl: 'https://jpyc.co.jp/',
       verifiedAt: '2026-08-27',
       sourceCheckedAt: '2026-08-27T01:00:00.000Z',
@@ -138,10 +138,23 @@ const SERVICE_MONITOR_DELTA_EXAMPLE = {
     {
       date: '2026-08-27',
       slug: 'jpyc-ex',
-      changeType: 'verified',
-      summary: 'Re-verified against the official source; no factual change.',
-      summaryJa: '公式ソースで再確認。事実関係の変更なし。',
-      sourceUrl: 'https://jpyc.co.jp/',
+      changeType: 'updated',
+      summary:
+        'JPYC EX added Kaia support and changed the issuance cap from 1M JPY per day to 1M JPY per transaction.',
+      summaryJa: 'JPYC EX が Kaia に対応。発行上限を「1日100万円」から「1回100万円」へ変更。',
+      sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000315.000054018.html',
+      diffs: [
+        {
+          field: 'chains',
+          previousValue: ['avalanche', 'ethereum', 'polygon'],
+          currentValue: ['avalanche', 'ethereum', 'polygon', 'kaia'],
+        },
+        {
+          field: 'limit',
+          previousValue: '1,000,000 JPY per day (issuance)',
+          currentValue: '1,000,000 JPY per transaction (issuance)',
+        },
+      ],
     },
   ],
   totalServices: 20,
@@ -202,6 +215,7 @@ const PAYMENT_MONITOR_DELTA_EXAMPLE = {
       summaryJa:
         'デジタルガレージが DG Stablecoin Payment Service の商用展開を開始 (API 接続の加盟店向け・当初は Base 上の USDC・JCB/DGFT へ先行提供)。',
       sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
+      diffs: [{ field: 'status', previousValue: null, currentValue: 'commercial' }],
     },
   ],
   totalEvents: 7,

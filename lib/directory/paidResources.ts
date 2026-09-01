@@ -140,6 +140,26 @@ const SERVICE_MONITOR_OUTPUT = {
           },
           summary: { type: 'string' },
           summaryJa: { type: 'string' },
+          diffs: {
+            type: 'array',
+            description:
+              'Value-level diffs, present only when the official source states the before/after values (never inferred).',
+            items: {
+              type: 'object',
+              properties: {
+                field: {
+                  type: 'string',
+                  enum: ['assets', 'chains', 'fee', 'limit', 'status', 'feature'],
+                },
+                previousValue: {
+                  description: 'string, string[] or null (null = no prior value)',
+                },
+                currentValue: { description: 'string or string[]' },
+                effectiveAt: { type: 'string', description: 'YYYY-MM-DD, only when it differs from date' },
+              },
+              required: ['field', 'previousValue', 'currentValue'],
+            },
+          },
         },
         required: ['date', 'slug', 'changeType', 'summary'],
       },
@@ -228,6 +248,26 @@ const PAYMENT_MONITOR_OUTPUT = {
           summary: { type: 'string' },
           summaryJa: { type: 'string' },
           sourceUrl: { type: 'string' },
+          diffs: {
+            type: 'array',
+            description:
+              'Value-level diffs, present only when the official source states the before/after values (never inferred).',
+            items: {
+              type: 'object',
+              properties: {
+                field: {
+                  type: 'string',
+                  enum: ['assets', 'chains', 'fee', 'limit', 'status', 'feature'],
+                },
+                previousValue: {
+                  description: 'string, string[] or null (null = no prior value)',
+                },
+                currentValue: { description: 'string or string[]' },
+                effectiveAt: { type: 'string', description: 'YYYY-MM-DD, only when it differs from date' },
+              },
+              required: ['field', 'previousValue', 'currentValue'],
+            },
+          },
         },
         required: ['date', 'provider', 'changeType', 'assets', 'chains', 'summary', 'sourceUrl'],
       },

@@ -40,6 +40,13 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(launch.assets).toEqual(['USDC']);
     expect(launch.chains).toEqual(['base']);
     expect(launch.date).toBe('2026-08-10'); // 発表日 (ディレクトリ追加日 8/27 ではない)
+    // 値レベルの差分 (status: null → commercial) が決済ビューの行にも載る。
+    expect(launch.diffs).toEqual([
+      { field: 'status', previousValue: null, currentValue: 'commercial' },
+    ]);
+    // 前後の値が一次ソースに無い提携イベントには diffs キー自体が無い。
+    const mou = env.changes.find((c) => c.provider === 'JCB / Circle')!;
+    expect('diffs' in mou).toBe(false);
   });
 
   it('スコープ分離: JPYC 専用イベント (Kaia 対応等) は決済ビューに載らない', () => {
