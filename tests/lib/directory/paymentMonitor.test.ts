@@ -84,4 +84,13 @@ describe('createPaymentMonitorEnvelope', () => {
     const env = createPaymentMonitorEnvelope({ limit: 2 }, NOW);
     expect(env.changes).toHaveLength(2);
   });
+
+  it('nextChangedSince = generatedAt の UTC 日付 (空 delta でも付く)', () => {
+    expect(createPaymentMonitorEnvelope(Q, NOW).nextChangedSince).toBe('2026-08-27');
+    const empty = createPaymentMonitorEnvelope(
+      { changedSince: '9999-12-31', limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+    );
+    expect(empty.nextChangedSince).toBe('2026-08-27');
+  });
 });

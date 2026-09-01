@@ -146,6 +146,7 @@ const SERVICE_MONITOR_DELTA_EXAMPLE = {
   ],
   totalServices: 20,
   generatedAt: '2026-08-27T01:23:45.000Z',
+  nextChangedSince: '2026-08-27',
   notice: {
     code: 'sourced-facts-only',
     detail:
@@ -205,6 +206,7 @@ const PAYMENT_MONITOR_DELTA_EXAMPLE = {
   ],
   totalEvents: 7,
   generatedAt: '2026-08-27T02:00:00.000Z',
+  nextChangedSince: '2026-08-27',
   notice: {
     code: 'sourced-facts-only',
     detail:

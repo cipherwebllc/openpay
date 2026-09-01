@@ -53,6 +53,8 @@ export type PaymentMonitorEnvelope = {
   /** 決済スコープの全イベント数 (limit で切っても母数が分かる)。 */
   totalEvents: number;
   generatedAt: string;
+  /** 次回の delta 購入でそのまま changedSince に渡す値。 */
+  nextChangedSince: string;
   notice: { code: string; detail: string; termsUrl: string };
   licenseNotice: string;
 };
@@ -101,6 +103,7 @@ export function createPaymentMonitorEnvelope(
     changes: filtered.map((event) => toRow(event, bySlug)),
     totalEvents: changelog.length,
     generatedAt: generatedAtIso,
+    nextChangedSince: generatedAtIso.slice(0, 10),
     notice: { ...PAYMENT_MONITOR_NOTICE },
     licenseNotice: PAYMENT_MONITOR_LICENSE_NOTICE,
   };

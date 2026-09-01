@@ -459,6 +459,38 @@ GitHub 上の alert は本節を根拠に dismiss してよい。
   へ更新済み。stdio transport 運用のため旧版でも実害経路は薄いが、公開物のため更新を
   優先した。**npm publish は user 承認後** (§14 の公開手順)。
 
+### 7.12 MODERATE: `decode-uri-component` (GHSA-vcc3-ghjq-m6fr)
+
+**Root advisory**: [GHSA-vcc3-ghjq-m6fr](https://github.com/advisories/GHSA-vcc3-ghjq-m6fr)
+— "decode-uri-component: Denial of service via exponential decoding of malformed
+percent-encoded input" (decode-uri-component <=0.4.2・修正版 0.5.0)
+
+**Propagation chain**:
+```
+wagmi → @wagmi/connectors → @walletconnect/ethereum-provider@2.21.1 (exact pin)
+  → @walletconnect/utils@2.21.1 → query-string@7.1.3 → decode-uri-component@0.2.2
+```
+
+**Exploit mechanism**: 不正な percent-encoding を含む入力のデコードが指数時間になり、
+呼び出したプロセスの CPU を枯渇させる DoS。
+
+**Reachability for OpenPay**: クライアントのみ —
+- server 側 (app/api・lib) に @walletconnect / query-string / decode-uri-component の
+  import はゼロ (grep 確認 2026-09-01)。WalletConnect の URI 解析として**ブラウザ内で
+  のみ**動作する
+- 最悪ケースは「細工された wc: URI を処理したユーザ自身のタブが固まる」= 資金・
+  サーバへの影響なし (§7.5 ws client-only DoS と同型の判断)
+- 修正版 0.5.0 は ESM 専用で、CJS の query-string@7 が `require` で読むため override は
+  ウォレット接続導線を壊すリスク。@walletconnect/ethereum-provider@2.24.0 (query-string
+  撤去済) への override は接続スタック 3 minor 一括差し替えで moderate/client-only には
+  リスク不相応 → wagmi/connectors 側の bump 待ち accepted risk (user 裁定 2026-09-01)
+
+**Reassess triggers**:
+- @wagmi/connectors が @walletconnect/ethereum-provider>=2.24.0 を pin する版へ更新
+  → npm update で解消し allowlist 削除
+- server 側コードに WalletConnect URI / query-string 解析を追加 (**導入 PR で即再評価**)
+- 本 advisory にタブのフリーズを超える exploit 経路 (RCE 等) の報告
+
 ### 7.7 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
@@ -479,6 +511,7 @@ allowlist 追加 / 削除は本 §7 の update と必ず同期させること (=
 | GHSA-f88m-g3jw-g9cj | sharp | HIGH | §7.8 |
 | GHSA-6g55-p6wh-862q | postcss | HIGH | §7.9 |
 | GHSA-r28c-9q8g-f849 | postcss | HIGH | §7.10 |
+| GHSA-vcc3-ghjq-m6fr | decode-uri-component | MODERATE | §7.12 |
 
 (§7.1 js-cookie / §7.4 ws〔GHSA-58qx〕/ §7.6 otel core〔GHSA-8988〕は upstream fix 済で
 allowlist から削除済 = 上表は現行の実体。)

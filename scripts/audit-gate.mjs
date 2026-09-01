@@ -127,6 +127,21 @@ const ALLOWED_ADVISORIES = {
       'GHSA-f88m-g3jw-g9cj に next/image 経由の exploit PoC 公開',
     ],
   },
+  'GHSA-vcc3-ghjq-m6fr': {
+    pkg: 'decode-uri-component',
+    summary:
+      'decode-uri-component: Denial of service via exponential decoding of malformed percent-encoded input (<=0.4.2)',
+    chain:
+      'wagmi → @wagmi/connectors → @walletconnect/ethereum-provider@2.21.1 (exact pin) → @walletconnect/utils → query-string@7.1.3 → decode-uri-component@0.2.2',
+    reason:
+      '到達性はクライアントのみ: server 側 (app/api・lib) に @walletconnect / query-string / decode-uri-component の import はゼロで、WalletConnect の URI 解析としてブラウザ内でのみ動作する。最悪ケースは「細工された wc: URI を処理したユーザ自身のタブが固まる」= 資金・サーバへの影響なし (§7.5 ws client-only DoS と同型)。修正版 0.5.0 は ESM 専用で CJS の query-string@7 を壊すため override 不可、@walletconnect/ethereum-provider@2.24.0 (query-string 撤去済) への override は接続スタック 3 minor 一括差し替えで moderate/client-only にはリスク不相応 → wagmi/connectors 側の bump 待ち accepted risk とする (user 裁定 2026-09-01)。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.12',
+    reviewTriggers: [
+      '@wagmi/connectors が @walletconnect/ethereum-provider>=2.24.0 を pin する版へ更新 → npm update で解消し allowlist 削除',
+      'server 側コードに WalletConnect URI / query-string 解析を追加 (即再評価)',
+      'GHSA-vcc3-ghjq-m6fr にタブのフリーズを超える exploit 経路 (RCE 等) の報告',
+    ],
+  },
 };
 
 // CI gate 対象 severity。LOW は監視対象外 (Section 1 のコメント参照)。

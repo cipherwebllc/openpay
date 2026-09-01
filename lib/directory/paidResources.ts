@@ -146,6 +146,11 @@ const SERVICE_MONITOR_OUTPUT = {
     },
     totalServices: { type: 'integer' },
     generatedAt: { type: 'string' },
+    nextChangedSince: {
+      type: 'string',
+      description:
+        'Echo this value as changedSince on your next call to fetch only new events (inclusive; duplicates are removed by the documented dedupe key).',
+    },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },
     attribution: { type: 'array', items: { type: 'string' } },
@@ -158,6 +163,7 @@ const SERVICE_MONITOR_OUTPUT = {
     'changes',
     'totalServices',
     'generatedAt',
+    'nextChangedSince',
     'notice',
     'licenseNotice',
     'attribution',
@@ -228,6 +234,11 @@ const PAYMENT_MONITOR_OUTPUT = {
     },
     totalEvents: { type: 'integer' },
     generatedAt: { type: 'string' },
+    nextChangedSince: {
+      type: 'string',
+      description:
+        'Echo this value as changedSince on your next call to fetch only new events (inclusive; duplicates are removed by the documented dedupe key).',
+    },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },
   },
@@ -238,6 +249,7 @@ const PAYMENT_MONITOR_OUTPUT = {
     'changes',
     'totalEvents',
     'generatedAt',
+    'nextChangedSince',
     'notice',
     'licenseNotice',
   ],
