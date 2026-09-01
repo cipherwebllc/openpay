@@ -2582,6 +2582,7 @@
     "pillJpyc": "JPYC · Polygon",
     "pillUsdc": "USDC · Base",
     "pillDirect": "Paid straight to the seller",
+    "monitorFreshness": "Latest event {date} · {count} events · updated weekly",
     "registerTitle": "List your API",
     "registerSubtitle": "Put a 402 gate in front of it. Agents find it and pay in JPYC, straight to your wallet.",
     "listingDiscoveryNote": "Listings are discovered by agents via /api/discovery and the OpenPay MCP / SDK (JPYC on Polygon). The x402 Bazaar / agentic.market only lists USDC products (Base, standard x402), which this form does not cover.",

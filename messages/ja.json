@@ -2582,6 +2582,7 @@
     "pillJpyc": "JPYC · Polygon",
     "pillUsdc": "USDC · Base",
     "pillDirect": "受取は直接着金",
+    "monitorFreshness": "最終イベント {date}・全 {count} 件・週次更新",
     "registerTitle": "API を出品する",
     "registerSubtitle": "402 ゲートを置くだけ。エージェントが見つけて JPYC で支払い、受取は直接着金。",
     "listingDiscoveryNote": "出品は /api/discovery と OpenPay の MCP / SDK からエージェントに発見されます（JPYC・Polygon）。x402 Bazaar / agentic.market に載るのは USDC（Base・標準 x402）商品のみで、本フォームの出品は対象外です。",
