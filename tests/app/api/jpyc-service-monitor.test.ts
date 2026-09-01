@@ -88,6 +88,8 @@ describe('GET /api/paid/usdc/jpyc/services (test mode)', () => {
     expect(body.services.length).toBe(body.totalServices);
     expect(body.changes.length).toBeGreaterThan(0);
     expect(body.notice.code).toBe('sourced-facts-only');
+    // 次回エコー用カーソル (route 境界でも generatedAt の UTC 日付が出る)。
+    expect(body.nextChangedSince).toBe(body.generatedAt.slice(0, 10));
   });
 
   it('delta: 未来側の changedSince は changes:[] を明示 (変更なし契約)', async () => {

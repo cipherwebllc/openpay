@@ -99,6 +99,23 @@ describe('createServiceMonitorEnvelope', () => {
     expect(env.attribution.length).toBeGreaterThan(0);
   });
 
+  it('nextChangedSince = generatedAt の UTC 日付 (エージェントは次回そのままエコーする)', () => {
+    const env = createServiceMonitorEnvelope(
+      { limit: SERVICE_MONITOR_MAX_LIMIT },
+      {},
+      NOW,
+    );
+    expect(env.nextChangedSince).toBe('2026-08-27');
+    expect(env.generatedAt.startsWith(env.nextChangedSince)).toBe(true);
+    // delta (変更なし) でも必ず付く — 空応答でも次回のカーソルが途切れない。
+    const empty = createServiceMonitorEnvelope(
+      { changedSince: '9999-12-31', limit: SERVICE_MONITOR_MAX_LIMIT },
+      {},
+      NOW,
+    );
+    expect(empty.nextChangedSince).toBe('2026-08-27');
+  });
+
   it('delta: baseline より後の日付なら changes:[] を明示 (「変更なし」の契約)', () => {
     const env = createServiceMonitorEnvelope(
       { changedSince: '9999-12-31', limit: SERVICE_MONITOR_MAX_LIMIT },

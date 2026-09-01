@@ -346,6 +346,8 @@ export type ServiceMonitorEnvelope = {
   changes: ServiceChangeEventOutput[];
   totalServices: number;
   generatedAt: string;
+  /** 次回の delta 購入でそのまま changedSince に渡す値 (当日含む契約なので取りこぼしなし)。 */
+  nextChangedSince: string;
   notice: { code: string; detail: string; termsUrl: string };
   licenseNotice: string;
   attribution: string[];
@@ -401,6 +403,9 @@ export function createServiceMonitorEnvelope(
     changes,
     totalServices: published.length,
     generatedAt: generatedAtIso,
+    // UTC 日付。イベント date (JST 運用日) 以下になるため inclusive 比較で取りこぼしなし
+    // (同日イベントの重複は slug+date+changeType の dedupe が吸収する)。
+    nextChangedSince: generatedAtIso.slice(0, 10),
     notice: { ...SERVICE_MONITOR_NOTICE },
     licenseNotice: SERVICE_MONITOR_LICENSE_NOTICE,
     attribution: [...attribution],
