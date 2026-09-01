@@ -57,6 +57,11 @@ describe('monitor teasers', () => {
     expect(body.fullFeed.priceJpyc).toBe(JPYC_SERVICES_RESOURCE.priceJpyc);
     expect(body.fullFeed.priceUsd).toBe(USDC_SERVICE_MONITOR.priceUsd);
     expect(body.fullFeed.hint).toContain('nextChangedSince');
+    // 「買う前に確かめる」契約: latestChanges は日付昇順の末尾 (= 最大日付) なので、
+    // 最終日付 < 保存済み nextChangedSince なら有料 delta は空 = 買わなくてよい。
+    expect(body.fullFeed.hint).toContain('skip the purchase');
+    const dates = body.latestChanges.map((e: { date: string }) => e.date);
+    expect([...dates].sort()).toEqual(dates);
     expect(body.notice.code).toBe('sourced-facts-only');
     // teaser の各行も一次ソース必須の契約を保つ。
     for (const event of body.latestChanges) {
@@ -77,5 +82,6 @@ describe('monitor teasers', () => {
     expect(body.fullFeed.priceJpyc).toBe(JPYC_PAYMENTS_RESOURCE.priceJpyc);
     expect(body.fullFeed.priceUsd).toBe(USDC_PAYMENT_MONITOR.priceUsd);
     expect(body.fullFeed.hint).toContain('nextChangedSince');
+    expect(body.fullFeed.hint).toContain('skip the purchase');
   });
 });

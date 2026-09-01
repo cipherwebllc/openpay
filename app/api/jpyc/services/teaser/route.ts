@@ -42,7 +42,7 @@ export async function GET(): Promise<NextResponse> {
         usdc: 'https://open-pay.jp/api/paid/usdc/jpyc/services',
         priceJpyc: JPYC_SERVICES_RESOURCE.priceJpyc,
         priceUsd: USDC_SERVICE_MONITOR.priceUsd,
-        hint: 'The paid feed returns every event plus the current monitor row for each service. Pass changedSince=<the nextChangedSince from your previous paid response> to buy only deltas; changes:[] explicitly means no change.',
+        hint: 'Check before you buy: if the latest date in latestChanges is before the nextChangedSince you stored from your last paid response, the paid delta would be empty — skip the purchase. Otherwise pass changedSince=<that nextChangedSince> to buy only deltas. The paid feed returns every event plus the current monitor row for each service.',
       },
       notice: full.notice,
       licenseNotice: full.licenseNotice,
