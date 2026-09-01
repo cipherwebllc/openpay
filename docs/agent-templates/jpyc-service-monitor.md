@@ -15,7 +15,7 @@ A weekly change feed for Japan-related JPYC/Web3 services, designed to be wired 
 |---|---|
 | 想定利用者 | JPYC・日本の Web3 動向を業務で追う AI エージェント運用者(リサーチ・事業開発・決済導入検討) |
 | 実行頻度 | **週 1 回**(それ以上の頻度は差分が空になるだけで課金が無駄) |
-| 支払い上限の目安 | 1 回 3 JPYC(JPYC 版・手数料込)/ $0.01(USDC 版)・月あたり約 12〜15 JPYC / $0.05 |
+| 支払い上限の目安 | 1 回 3 JPYC(JPYC 版・手数料込)/ $0.01(USDC 版)・月あたり最大 12〜15 JPYC / $0.05(teaser で事前確認すれば変更のあった週のみ) |
 
 ## エンドポイント / Endpoints
 
@@ -26,6 +26,7 @@ A weekly change feed for Japan-related JPYC/Web3 services, designed to be wired 
 
 - `changedSince` は **YYYY-MM-DD・その日を含む**。省略すると全件スナップショット(`mode: "snapshot"`)。**応答の `nextChangedSince` をそのまま次回に渡すのが正**(取りこぼしなし)
 - **無料 teaser(購入前に実データを確認・支払い不要)**: `GET /api/jpyc/services/teaser` / `GET /api/stablecoin-payments/teaser`(直近 3 イベント)
+- **買う前に確かめる(空振り課金ゼロ)**: teaser の最終イベント日が手元の `nextChangedSince` より**前(古い)なら**その週は買わない(有料 delta は空になる)。同日以降のイベントがあるときだけ有料 delta を購入する — 「変更なし」に支払う週が無くなります
 - 重複排除キーは `slug + date + changeType`
 - OpenAPI(機械可読・`x-agent-usage` つき): `https://open-pay.jp/api/openapi.json`(operationId: `getJpycServiceMonitor` / `getJpycServiceMonitorUsdc`)
 - 外部カタログ: [x402 Bazaar / agentic.market](https://agentic.market/services/open-pay-jp) に掲載(USDC 面)
@@ -35,14 +36,16 @@ A weekly change feed for Japan-related JPYC/Web3 services, designed to be wired 
 **日本語:**
 
 > 毎週月曜 9 時に JPYC Service Monitor を実行してください。
-> `https://open-pay.jp/api/paid/jpyc/services?changedSince=<前回応答の nextChangedSince>` を x402 で購入し(1 回の支払い上限 3 JPYC)、`changes` を日本語で要約してください。応答の `nextChangedSince` を保存し、次回はその値をそのまま渡してください(初回は changedSince なしで可)。
+> まず無料の `https://open-pay.jp/api/jpyc/services/teaser` を取得し、`latestChanges` の最終日付が保存済みの `nextChangedSince` より前(古い)なら「重要な変更なし」と報告して終了してください(購入しない・有料 delta は空になります)。
+> その日以降のイベントがある場合のみ `https://open-pay.jp/api/paid/jpyc/services?changedSince=<前回応答の nextChangedSince>` を x402 で購入し(1 回の支払い上限 3 JPYC)、`changes` を日本語で要約してください。応答の `nextChangedSince` を保存し、次回はその値をそのまま渡してください(初回は changedSince なしで可)。
 > `changes` が空なら「重要な変更なし」とだけ報告してください。
 > 変更がある場合は changeType・事業者名・変更内容・sourceUrl を表にし、判断に使う前に sourceUrl で裏取りしてください。
 
 **English:**
 
 > Every Monday at 09:00, run the JPYC Service Monitor.
-> Buy `https://open-pay.jp/api/paid/usdc/jpyc/services?changedSince=<nextChangedSince from your previous response>` via x402 (spend cap $0.01 per run) and summarize `changes`. Store the response's `nextChangedSince` and echo it next run (first run: omit changedSince).
+> First GET the free `https://open-pay.jp/api/jpyc/services/teaser`; if the latest date in `latestChanges` is before your stored `nextChangedSince`, report "no significant change" and stop (do not buy — the paid delta would be empty).
+> Only if it is on or after that date, buy `https://open-pay.jp/api/paid/usdc/jpyc/services?changedSince=<nextChangedSince from your previous response>` via x402 (spend cap $0.01 per run) and summarize `changes`. Store the response's `nextChangedSince` and echo it next run (first run: omit changedSince).
 > If `changes` is empty, report exactly "no significant change".
 > Otherwise, tabulate changeType, service name, what changed, and sourceUrl — verify against the sourceUrl before acting on any change.
 
@@ -139,14 +142,16 @@ A second monitor generated from the same weekly collection: it completes a diffe
 **日本語:**
 
 > 毎週月曜 9 時に Japan Stablecoin Payment Monitor を実行してください。
-> `https://open-pay.jp/api/paid/stablecoin-payments?changedSince=<前回応答の nextChangedSince>` を x402 で購入し(1 回の支払い上限 3 JPYC)、`changes` を日本語で要約してください。応答の `nextChangedSince` を保存し、次回はその値をそのまま渡してください(初回は changedSince なしで可)。
+> まず無料の `https://open-pay.jp/api/stablecoin-payments/teaser` を取得し、`latestChanges` の最終日付が保存済みの `nextChangedSince` より前(古い)なら「重要な変更なし」と報告して終了してください(購入しない・有料 delta は空になります)。
+> その日以降のイベントがある場合のみ `https://open-pay.jp/api/paid/stablecoin-payments?changedSince=<前回応答の nextChangedSince>` を x402 で購入し(1 回の支払い上限 3 JPYC)、`changes` を日本語で要約してください。応答の `nextChangedSince` を保存し、次回はその値をそのまま渡してください(初回は changedSince なしで可)。
 > `changes` が空なら「重要な変更なし」とだけ報告してください。
 > 変更がある場合は provider・changeCategory・対象資産/チェーン・変更内容・sourceUrl を表にし、判断に使う前に sourceUrl で裏取りしてください。
 
 **English:**
 
 > Every Monday at 09:00, run the Japan Stablecoin Payment Monitor.
-> Buy `https://open-pay.jp/api/paid/usdc/stablecoin-payments?changedSince=<nextChangedSince from your previous response>` via x402 (spend cap $0.01 per run) and summarize `changes`. Store the response's `nextChangedSince` and echo it next run (first run: omit changedSince).
+> First GET the free `https://open-pay.jp/api/stablecoin-payments/teaser`; if the latest date in `latestChanges` is before your stored `nextChangedSince`, report "no significant change" and stop (do not buy — the paid delta would be empty).
+> Only if it is on or after that date, buy `https://open-pay.jp/api/paid/usdc/stablecoin-payments?changedSince=<nextChangedSince from your previous response>` via x402 (spend cap $0.01 per run) and summarize `changes`. Store the response's `nextChangedSince` and echo it next run (first run: omit changedSince).
 > If `changes` is empty, report exactly "no significant change".
 > Otherwise, tabulate provider, changeCategory, assets/chains, what changed, and sourceUrl — verify against the sourceUrl before acting on any change.
 
