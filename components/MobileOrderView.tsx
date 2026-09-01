@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
-import { Clock, MapPin, Phone } from 'lucide-react';
+import { Clock, MapPin, Phone, RotateCcw } from 'lucide-react';
 import { SocialIconLinks } from '@/components/SocialIconLinks';
 import { env } from '@/lib/env';
 import { useOrigin } from '@/hooks/useOrigin';
@@ -49,6 +49,15 @@ import {
 } from '@/lib/menuOptions';
 import { resolvePrefillCart } from '@/lib/prefillCart';
 import type { AgentCartItem } from '@/lib/agentOrder';
+import {
+  cartFromState,
+  isLastOrderRecord,
+  lastOrderPaid,
+  lastOrderStorageKey,
+  type LastOrderRecord,
+} from '@/lib/lastOrder';
+import { useLocalStorageRecord } from '@/hooks/useLocalStorageRecord';
+import { usePayerReceipts } from '@/hooks/usePayerReceipts';
 import { OptionSelectModal } from '@/components/OptionSelectModal';
 import { MenuItemCard } from '@/components/MenuItemCard';
 import { MobileOrderCartBar } from '@/components/MobileOrderCartBar';
@@ -63,6 +72,8 @@ type OptionCartEntry = {
   qty: number;
   taxRate?: number;
   taxCategory?: MenuItem['taxCategory'];
+  /** 選択 (groupId/choiceId)。「前回と同じ注文」の保存で wire 形式に戻す。 */
+  selections?: { groupId: string; choiceId: string }[];
 };
 export type CartLineView = OptionCartEntry & { isOption: boolean };
 
@@ -335,6 +346,7 @@ export function MobileOrderView({
           qty: 1,
           taxRate: item.taxRate,
           taxCategory: item.taxCategory,
+          selections,
         },
       ];
     });
@@ -368,6 +380,45 @@ export function MobileOrderView({
     // hasOptions は optionsEnabled に依存 (deps に含める)。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.menu, qty, soldOutSet, optionEntries, optionsEnabled]);
+
+  // 「前回と同じ注文」(改善提案 #3)。店舗ごとに 1 件・ハンドオフ時に保存・支払われた注文だけ
+  // 復元対象にする (顧客の電子レシートに同店舗・保存以降の confirmed 控えがあるとき)。
+  // 復元は resolvePrefillCart (?cart= 事前充填と同じ突合: 未知 id/オプション不整合は drop・
+  // 価格は menu 由来) で、送信は一切しない。カートが空のときだけ出す (編集中の内容を上書きしない)。
+  // load/save は key 単位で安定 (useCallback) — 返り値オブジェクトは毎 render 新しいので関数を取り出す。
+  const { load: loadLastOrder, save: saveLastOrder } = useLocalStorageRecord(
+    lastOrderStorageKey(handle, config.receiver),
+    isLastOrderRecord,
+  );
+  const [lastOrder, setLastOrder] = useState<LastOrderRecord | null>(null);
+  useEffect(() => {
+    setLastOrder(loadLastOrder());
+  }, [loadLastOrder]);
+  const { receipts: payerReceipts, hydrated: receiptsHydrated } = usePayerReceipts();
+  const [reorderNotice, setReorderNotice] = useState<'partial' | 'none' | null>(null);
+  const reorderAvailable =
+    receiptsHydrated &&
+    lastOrder !== null &&
+    cartLines.length === 0 &&
+    reorderNotice !== 'none' &&
+    lastOrderPaid(lastOrder, payerReceipts);
+  const applyLastOrder = () => {
+    if (!lastOrder) return;
+    const restored = resolvePrefillCart(config.menu, lastOrder.cart, optionsEnabled);
+    const restoredQty = Object.fromEntries(
+      Object.entries(restored.qty).filter(([id]) => !soldOutSet.has(id)),
+    );
+    const restoredEntries = restored.optionEntries.filter((e) => !soldOutSet.has(e.itemId));
+    const restoredCount = Object.keys(restoredQty).length + restoredEntries.length;
+    if (restoredCount === 0) {
+      setReorderNotice('none');
+      return;
+    }
+    setQty(restoredQty);
+    setOptionEntries(restoredEntries);
+    setCartOpen(true);
+    setReorderNotice(restoredCount < lastOrder.cart.length ? 'partial' : null);
+  };
 
   // cartLines → CheckoutItem[] (決済額は /checkout が items から再計算)。税率/税区分も引き継ぐ。
   const cartItems = useMemo<CheckoutItem[]>(
@@ -455,6 +506,15 @@ export function MobileOrderView({
       : baseCheckoutUrl;
   const checkOrderAdmission = useCallback(
     async (event: React.MouseEvent<HTMLAnchorElement>) => {
+      // 「前回と同じ注文」用に id カートを保存 (ハンドオフ点・送信はしない)。save は no-throw
+      // (storage 拒否を決済導線へ波及させない)。支払い完了の判定は次回訪問時に控えと突合する。
+      if (cartItems.length > 0) {
+        saveLastOrder({
+          receiver: config.receiver.toLowerCase(),
+          cart: cartFromState(qty, optionEntries),
+          ts: Date.now(),
+        });
+      }
       // 時間 admission は @handle + flag ON だけ。flag OFF / self-contained token は従来の直リンク。
       if (!handle || !timeEnabled) return;
       event.preventDefault();
@@ -486,11 +546,15 @@ export function MobileOrderView({
     },
     [
       admissionPending,
+      cartItems.length,
       checkoutUrl,
       config.mode,
       config.receiver,
       handle,
+      optionEntries,
       pickupAt,
+      qty,
+      saveLastOrder,
       timeEnabled,
     ],
   );
@@ -645,6 +709,25 @@ export function MobileOrderView({
       {prefilled && (
         <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-center text-sm font-medium text-blue-800">
           {t('prefillNotice')}
+        </div>
+      )}
+
+      {/* 前回と同じ注文 (支払い済みの前回注文がこの端末にあり、カートが空のときだけ)。
+          タップで現在のメニューに突合して復元 (送信しない)。可視テキストのみ (掟8)。 */}
+      {reorderAvailable && accepting && (
+        <button
+          type="button"
+          onClick={applyLastOrder}
+          className="flex w-full items-center justify-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition hover:bg-slate-50"
+          style={{ borderColor: accent, color: accentText }}
+        >
+          <RotateCcw className="h-4 w-4" aria-hidden />
+          {t('reorderButton', { count: lastOrder.cart.length })}
+        </button>
+      )}
+      {reorderNotice && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm font-medium text-amber-800">
+          {t(reorderNotice === 'partial' ? 'reorderPartialNotice' : 'reorderNoneNotice')}
         </div>
       )}
 
