@@ -8,6 +8,7 @@
 // x402FeeBreakdown から導出する (literal を書くと掟 14 のドリフト源になるため)。
 
 import { env } from '@/lib/env';
+import { JPYC_CHAINS } from '@/lib/chains';
 import { shopsApiEnabled } from '@/lib/shops/flags';
 import {
   DIRECTORY_DETAIL_PRICE_JPYC,
@@ -221,7 +222,8 @@ const SERVICE_MONITOR_PARAMS = [
     in: 'query',
     required: false,
     schema: { type: 'integer', minimum: 1, maximum: 200, default: 200 },
-    description: 'Maximum number of change events to return.',
+    description:
+      'Maximum number of change events to return. In delta mode (changedSince set) the limit is rounded up to a date boundary: a single day is never split, so a day holding more events than limit is returned whole. While hasMore is true, call again with changedSince set to nextChangedSince.',
   },
 ] as const;
 
@@ -373,13 +375,16 @@ const JPYC_LIVE_503 = {
     'All configured RPC endpoints failed for the requested chains. Nothing is settled; the buyer is not charged.',
 };
 const JPYC_LIVE_400 = { description: 'Unknown query key, unsupported chain, or malformed address/limit.' };
+// enum は SoT (lib/chains.ts の JPYC_CHAINS) から導出する。literal で固定すると env flag
+// (enableJpycAvalanche/enableJpycEthereum) 未点灯時に「宣言はあるが 400 になるチェーン」を
+// 広告してしまう (E7: parseRequiredChainParam は JPYC_CHAINS にない値を拒否する)。
+const JPYC_CHAIN_LIST = [...JPYC_CHAINS];
 const JPYC_CHAIN_PARAM = {
   name: 'chain',
   in: 'query',
   required: false,
-  schema: { type: 'string', enum: ['polygon', 'kaia', 'avalanche', 'ethereum'] },
-  description:
-    'Chain to query. Omit to query all supported chains. Supported values: polygon, kaia, avalanche, ethereum.',
+  schema: { type: 'string', enum: JPYC_CHAIN_LIST },
+  description: `Chain to query. Omit to query all supported chains. Supported values: ${JPYC_CHAIN_LIST.join(', ')}.`,
   example: 'polygon',
 };
 
@@ -460,7 +465,7 @@ const VANILLA_OPENAPI_PATHS = {
         {
           ...JPYC_CHAIN_PARAM,
           required: true,
-          description: 'Chain to scan. Supported values: polygon, kaia, avalanche, ethereum.',
+          description: `Chain to scan. Supported values: ${JPYC_CHAIN_LIST.join(', ')}.`,
         },
         {
           name: 'limit',
@@ -484,7 +489,7 @@ const VANILLA_OPENAPI_PATHS = {
           required: false,
           schema: { type: 'string', pattern: '^[0-9]+:(?:-1|[0-9]+)$' },
           description:
-            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), so repeated calls pay only for new events and return each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true. If the cursor is older than the scanned window, the response sets truncated=true. Without a cursor (mode=snapshot) hasMore only means older events in the window were omitted; start monitoring from nextCursor.',
+            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), so repeated calls pay only for new events and return each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true. If the cursor is older than the scanned window, the response sets truncated=true. A cursor slightly beyond the current chain head (up to 64 blocks, which normal polling against a lagging node can produce) returns no items and echoes your cursor back unchanged; further ahead than that is rejected with 400 and error cursor_ahead_of_head before settlement. Without a cursor (mode=snapshot) hasMore only means older events in the window were omitted; start monitoring from nextCursor.',
           example: '92387695:286',
         },
       ],
@@ -509,6 +514,15 @@ const VANILLA_OPENAPI_PATHS = {
       },
     },
   },
+} as const;
+
+// Monitor の **USDC レール**と無料 teaser 2 本は env.enableWeb3Directory だけに依存する
+// (各 route の enableWeb3Directory チェックで 404 に倒れる。精算は外部 facilitator なので
+// x402 facilitator flag とは無関係)。flag OFF でも掲載していると、実際には 404 する
+// エンドポイントをインデクサに広告してしまう (E6)。
+// JPYC レールの 2 本は guardPaidDirectoryApi が **両 flag** を要求するため別集合
+// (JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS) にする。
+const VANILLA_DIRECTORY_OPENAPI_PATHS = {
   [USDC_SERVICE_MONITOR.path]: {
     get: {
       tags: ['x402 Vanilla (USDC)', 'Japan Web3 Directory'],
@@ -561,32 +575,6 @@ const VANILLA_OPENAPI_PATHS = {
       },
     },
   },
-  '/api/paid/jpyc/services': {
-    get: {
-      tags: ['x402 (JPYC)', 'Japan Web3 Directory'],
-      operationId: 'getJpycServiceMonitor',
-      summary: 'JPYC Service Monitor — weekly change feed (JPYC)',
-      description:
-        'Same data and contract as the USDC variant: dated change events (added / updated / removed / verified) for Japan-related JPYC/Web3 services, each tied to an official source URL. Pass changedSince=YYYY-MM-DD to fetch only what changed; an empty changes list explicitly means no change. Paid in JPYC via the OpenPay facilitator (buyer pays price + x402 facilitator fee).',
-      parameters: SERVICE_MONITOR_PARAMS,
-      'x-agent-usage':
-        'Run on a weekly schedule. Before paying, GET the free /api/jpyc/services/teaser and compare the latest event date with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; dedupe by slug+date+changeType. When changes is empty, report "no significant change".',
-      'x-payment-info': paymentInfo(JPYC_SERVICES_RESOURCE.priceJpyc),
-      responses: {
-        '200': {
-          description: 'Monitor snapshot or change delta after settlement',
-          content: {
-            'application/json': {
-              example: USDC_SERVICE_MONITOR_BAZAAR.output.example,
-            },
-          },
-        },
-        '400': JPYC_LIVE_400,
-        '402': { description: 'Payment required (x402 challenge with accepts)' },
-        '503': JPYC_LIVE_503,
-      },
-    },
-  },
   [USDC_PAYMENT_MONITOR.path]: {
     get: {
       tags: ['x402 Vanilla (USDC)', 'Japan Web3 Directory'],
@@ -611,6 +599,38 @@ const VANILLA_OPENAPI_PATHS = {
         },
         '400': JPYC_LIVE_400,
         '402': JPYC_LIVE_402,
+        '503': JPYC_LIVE_503,
+      },
+    },
+  },
+} as const;
+
+// JPYC レールの Monitor 2 本は guardPaidDirectoryApi (app/api/paid/japan-web3-directory/
+// _shared.ts) が **enableWeb3Directory かつ enableX402Facilitator** を要求する。directory
+// flag だけで掲載すると、facilitator OFF の構成で 404 する有料エンドポイントを広告してしまう。
+const JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS = {
+  '/api/paid/jpyc/services': {
+    get: {
+      tags: ['x402 (JPYC)', 'Japan Web3 Directory'],
+      operationId: 'getJpycServiceMonitor',
+      summary: 'JPYC Service Monitor — weekly change feed (JPYC)',
+      description:
+        'Same data and contract as the USDC variant: dated change events (added / updated / removed / verified) for Japan-related JPYC/Web3 services, each tied to an official source URL. Pass changedSince=YYYY-MM-DD to fetch only what changed; an empty changes list explicitly means no change. Paid in JPYC via the OpenPay facilitator (buyer pays price + x402 facilitator fee).',
+      parameters: SERVICE_MONITOR_PARAMS,
+      'x-agent-usage':
+        'Run on a weekly schedule. Before paying, GET the free /api/jpyc/services/teaser and compare the latest event date with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; dedupe by slug+date+changeType. When changes is empty, report "no significant change".',
+      'x-payment-info': paymentInfo(JPYC_SERVICES_RESOURCE.priceJpyc),
+      responses: {
+        '200': {
+          description: 'Monitor snapshot or change delta after settlement',
+          content: {
+            'application/json': {
+              example: USDC_SERVICE_MONITOR_BAZAAR.output.example,
+            },
+          },
+        },
+        '400': JPYC_LIVE_400,
+        '402': { description: 'Payment required (x402 challenge with accepts)' },
         '503': JPYC_LIVE_503,
       },
     },
@@ -641,6 +661,10 @@ const VANILLA_OPENAPI_PATHS = {
       },
     },
   },
+} as const;
+
+// USDC 版 stores は directory flag に依存しない (JPYC 受入先の別カタログ)。
+const VANILLA_STORES_OPENAPI_PATHS = {
   [USDC_STORES.path]: {
     get: {
       tags: ['x402 Vanilla (USDC)'],
@@ -765,7 +789,7 @@ const SHOPS_OPENAPI_PATHS = {
         'A paid request snapshots the shop index and summaries before x402 verification and settlement. acceptingNow is true when all required checks pass, false for a definite stop condition, and null when live state or required legacy summary data is unavailable. Phone numbers are never returned.',
       parameters: SHOPS_QUERY_PARAMETERS,
       'x-payment-info': paymentInfo(JPYC_SHOPS_SEARCH_RESOURCE.priceJpyc),
-      'x-price-jpyc': 2,
+      'x-price-jpyc': Number(JPYC_SHOPS_SEARCH_RESOURCE.priceJpyc),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'JPYC',
       'x-payment-chains': ['Polygon', 'Polygon Amoy'],
@@ -979,7 +1003,8 @@ const OPENAPI_DOCUMENT = {
       get: {
         tags: ['Directory Free'],
         summary: 'Get a free directory teaser',
-        description: 'Returns full entry fields but forces limit to at most 5.',
+        description:
+          'Returns full entry fields but forces limit to at most 5 and offset to 0 (any provided offset is ignored).',
         parameters: DIRECTORY_QUERY_PARAMETERS,
         responses: {
           '200': {
@@ -1091,7 +1116,7 @@ const OPENAPI_DOCUMENT = {
         tags: ['Directory Paid'],
         summary: 'Unlock the full published directory',
         'x-payment-info': paymentInfo(DIRECTORY_LIST_RESOURCE.priceJpyc),
-        'x-price-jpyc': 2,
+        'x-price-jpyc': Number(DIRECTORY_LIST_RESOURCE.priceJpyc),
         'x-payment-protocol': 'x402',
         'x-payment-asset': 'JPYC',
         'x-payment-chains': ['Polygon', 'Polygon Amoy'],
@@ -1114,7 +1139,7 @@ const OPENAPI_DOCUMENT = {
         summary: 'Search and unlock published directory results',
         parameters: DIRECTORY_QUERY_PARAMETERS,
         'x-payment-info': paymentInfo(DIRECTORY_SEARCH_RESOURCE.priceJpyc),
-        'x-price-jpyc': 2,
+        'x-price-jpyc': Number(DIRECTORY_SEARCH_RESOURCE.priceJpyc),
         'x-payment-protocol': 'x402',
         'x-payment-asset': 'JPYC',
         'x-payment-chains': ['Polygon', 'Polygon Amoy'],
@@ -1453,6 +1478,12 @@ export function buildOpenApiDocument(): Record<string, unknown> | null {
       ...(shopsEnabled ? SHOPS_OPENAPI_PATHS : {}),
       ...(facilitatorEnabled ? DISCOVERY_OPENAPI_PATHS : {}),
       ...VANILLA_OPENAPI_PATHS,
+      ...(env.enableWeb3Directory ? VANILLA_DIRECTORY_OPENAPI_PATHS : {}),
+      // JPYC レールは guardPaidDirectoryApi と同じ条件 (両 flag) でのみ掲載する (E6)。
+      ...(env.enableWeb3Directory && facilitatorEnabled
+        ? JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS
+        : {}),
+      ...VANILLA_STORES_OPENAPI_PATHS,
       ...vanillaHelloPath(),
     },
     components: {

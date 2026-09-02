@@ -111,7 +111,18 @@ const SERVICE_MONITOR_OUTPUT = {
       description:
         'snapshot = full monitor view (no changedSince). delta = only what changed on/after changedSince; changes:[] explicitly means no change.',
     },
-    query: { type: 'object' },
+    query: {
+      type: 'object',
+      description: 'The accepted query, echoed back.',
+      properties: {
+        changedSince: { type: 'string', description: 'YYYY-MM-DD (inclusive), as requested.' },
+        limit: {
+          type: 'integer',
+          description:
+            'Requested maximum number of change events. In delta mode the limit is rounded up to a date boundary: a single day is never split, so a day holding more events than limit is still returned whole and changes can exceed limit.',
+        },
+      },
+    },
     services: {
       type: 'array',
       items: {
@@ -133,7 +144,11 @@ const SERVICE_MONITOR_OUTPUT = {
         type: 'object',
         properties: {
           date: { type: 'string', description: 'YYYY-MM-DD' },
-          slug: { type: 'string' },
+          slug: { type: 'string', description: 'Present when the event is tied to a directory entry.' },
+          provider: {
+            type: 'string',
+            description: 'Present instead of slug for industry events not tied to a directory entry.',
+          },
           changeType: {
             type: 'string',
             enum: ['added', 'updated', 'removed', 'verified'],
@@ -161,15 +176,20 @@ const SERVICE_MONITOR_OUTPUT = {
             },
           },
         },
-        required: ['date', 'slug', 'changeType', 'summary'],
+        required: ['date', 'changeType', 'summary'],
       },
     },
     totalServices: { type: 'integer' },
     generatedAt: { type: 'string' },
+    hasMore: {
+      type: 'boolean',
+      description:
+        'True when events remain that this response did not return; call again with changedSince set to nextChangedSince to continue.',
+    },
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call to fetch only new events (inclusive; duplicates are removed by the documented dedupe key).',
+        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the date of the first event NOT returned here, which is strictly later than the last returned date because a single day is never split — so continuing always makes progress and never re-delivers. When hasMore is false it is the response generation date (UTC).',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },
@@ -183,6 +203,7 @@ const SERVICE_MONITOR_OUTPUT = {
     'changes',
     'totalServices',
     'generatedAt',
+    'hasMore',
     'nextChangedSince',
     'notice',
     'licenseNotice',
@@ -218,7 +239,18 @@ const PAYMENT_MONITOR_OUTPUT = {
       description:
         'snapshot = full dated history (no changedSince). delta = only events on/after changedSince; changes:[] explicitly means no change.',
     },
-    query: { type: 'object' },
+    query: {
+      type: 'object',
+      description: 'The accepted query, echoed back.',
+      properties: {
+        changedSince: { type: 'string', description: 'YYYY-MM-DD (inclusive), as requested.' },
+        limit: {
+          type: 'integer',
+          description:
+            'Requested maximum number of change events. In delta mode the limit is rounded up to a date boundary: a single day is never split, so a day holding more events than limit is still returned whole and changes can exceed limit.',
+        },
+      },
+    },
     providers: {
       type: 'array',
       description:
@@ -309,10 +341,15 @@ const PAYMENT_MONITOR_OUTPUT = {
     },
     totalEvents: { type: 'integer' },
     generatedAt: { type: 'string' },
+    hasMore: {
+      type: 'boolean',
+      description:
+        'True when events remain that this response did not return; call again with changedSince set to nextChangedSince to continue.',
+    },
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call to fetch only new events (inclusive; duplicates are removed by the documented dedupe key).',
+        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the date of the first event NOT returned here, which is strictly later than the last returned date because a single day is never split — so continuing always makes progress and never re-delivers. When hasMore is false it is the response generation date (UTC).',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },
@@ -324,6 +361,7 @@ const PAYMENT_MONITOR_OUTPUT = {
     'changes',
     'totalEvents',
     'generatedAt',
+    'hasMore',
     'nextChangedSince',
     'notice',
     'licenseNotice',

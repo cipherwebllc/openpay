@@ -12,6 +12,7 @@ import { DIRECTORY_ENTRIES } from './data';
 import {
   type ServiceChangeDiff,
   scopedChangelog,
+  takeDeltaByDateGroups,
   type ServiceChangeCategory,
   type ServiceChangeType,
   type ServiceMonitorQuery,
@@ -59,12 +60,17 @@ export type PaymentMonitorEnvelope = {
   providers: PaymentProviderRow[];
   /** 監視対象の事業者数 (delta で絞っても母数が分かる)。 */
   totalProviders: number;
-  /** snapshot: 全履歴 (limit 件・新しい順ではなく日付昇順) / delta: changedSince 以降のみ。 */
+  /** snapshot: 全履歴 (limit 件・新しい順ではなく日付昇順) / delta: changedSince 以降のみ。
+   * delta の limit は**日付境界に切り上げ**られる (1 日が分割されることはない)。 */
   changes: PaymentChangeRow[];
   /** 決済スコープの全イベント数 (limit で切っても母数が分かる)。 */
   totalEvents: number;
   generatedAt: string;
-  /** 次回の delta 購入でそのまま changedSince に渡す値。 */
+  /** まだ返していないイベントが残っている (snapshot: totalEvents > limit・
+   * delta: 日付境界で切り上げても入り切らないイベントがある)。 */
+  hasMore: boolean;
+  /** 次回の delta 購入でそのまま changedSince に渡す値。hasMore=true の delta では
+   * **最初の未返却イベントの date** (返した最後の date より必ず後 = 前進が保証され再配信なし)。 */
   nextChangedSince: string;
   notice: { code: string; detail: string; termsUrl: string };
   licenseNotice: string;
@@ -121,12 +127,22 @@ export function createPaymentMonitorEnvelope(
   const changelog = scopedChangelog('stablecoin-payments', entries);
   const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
   const mode = query.changedSince === undefined ? 'snapshot' : 'delta';
-  const filtered =
-    mode === 'snapshot'
-      ? changelog.slice(-query.limit)
-      : changelog
-          .filter((event) => event.date >= (query.changedSince as string))
-          .slice(0, query.limit);
+  let filtered: ReturnType<typeof scopedChangelog>;
+  let hasMore: boolean;
+  // 既定は UTC 日付 (serviceMonitor.ts と同じ inclusive 比較の理屈)。打ち切られた delta だけ
+  // 「最初の未返却イベントの date」に差し替える (打ち切り分の永久ロス防止・前進の保証)。
+  let nextChangedSince = generatedAtIso.slice(0, 10);
+  if (mode === 'snapshot') {
+    hasMore = changelog.length > query.limit;
+    filtered = changelog.slice(-query.limit);
+  } else {
+    const matched = changelog.filter((event) => event.date >= (query.changedSince as string));
+    // 同一 date のグループは分割しない (serviceMonitor.ts の takeDeltaByDateGroups が単一情報源)。
+    const page = takeDeltaByDateGroups(matched, query.limit);
+    filtered = page.taken;
+    hasMore = page.hasMore;
+    if (page.nextChangedSince !== null) nextChangedSince = page.nextChangedSince;
+  }
 
   return {
     schemaVersion: PAYMENT_MONITOR_SCHEMA_VERSION,
@@ -139,7 +155,8 @@ export function createPaymentMonitorEnvelope(
     ...providerRows(filtered.map((event) => toRow(event, bySlug)), changelog, bySlug, mode),
     totalEvents: changelog.length,
     generatedAt: generatedAtIso,
-    nextChangedSince: generatedAtIso.slice(0, 10),
+    hasMore,
+    nextChangedSince,
     notice: { ...PAYMENT_MONITOR_NOTICE },
     licenseNotice: PAYMENT_MONITOR_LICENSE_NOTICE,
   };

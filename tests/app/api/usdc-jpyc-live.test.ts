@@ -284,4 +284,45 @@ describe('支払い後の content と買い手保護', () => {
     expect(body.hasMore).toBe(false);
     expect(body.truncated).toBe(false);
   });
+
+  it('E10: cursor が head より僅かに先行 (許容量以内) は 200・items:[] + 同じ cursor を echo', async () => {
+    facilitatorOk();
+    const route = await load('transfers');
+    // 許容量以内は lib が「新着なし」の ok 応答を返す (route はそのまま envelope に展開)。
+    liveMocks.readTransfers.mockResolvedValueOnce({
+      chain: 'polygon', chainId: 137, contract: SELLER, status: 'ok', fromBlock: '1', toBlock: '1000000',
+      mode: 'delta', nextCursor: '1000010:7', hasMore: false, truncated: false, items: [],
+    });
+    const res = await route.GET(
+      req(`/api/paid/usdc/jpyc/transfers?chain=polygon&cursor=1000010:7`, {
+        'x-payment': b64(v1Payment('5000')),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body.items).toEqual([]);
+    expect(body.nextCursor).toBe('1000010:7');
+  });
+
+  it('E10: cursor が head を許容量を超えて先行すると 400 cursor_ahead_of_head・settle しない', async () => {
+    facilitatorOk();
+    const route = await load('transfers');
+    liveMocks.readTransfers.mockResolvedValueOnce({
+      chain: 'polygon',
+      chainId: 137,
+      contract: SELLER,
+      status: 'cursor_ahead_of_head',
+    });
+    const res = await route.GET(
+      req(`/api/paid/usdc/jpyc/transfers?chain=polygon&cursor=99999999999:0`, {
+        'x-payment': b64(v1Payment('5000')),
+      }),
+    );
+    expect(res.status).toBe(400);
+    // 形式不正 (invalid_query) と区別できる専用コード。
+    expect(await res.json()).toEqual({ ok: false, error: 'cursor_ahead_of_head' });
+    // verify は署名検証のため呼ばれるが settle (2 回目の facilitator 呼出) は起きない = 課金されない。
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/verify$/);
+  });
 });

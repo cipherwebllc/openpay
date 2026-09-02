@@ -29,6 +29,12 @@ export function invalidQuery(): NextResponse {
   return NextResponse.json({ ok: false, error: 'invalid_query' }, { status: 400 });
 }
 
+/** cursor が chain head を許容量を超えて先行している。買い手が「壊れた cursor 文字列」と
+ * 誤解しないよう invalid_query とは別コードで返す (どちらも settle 前の 400)。 */
+export function cursorAheadOfHead(): NextResponse {
+  return NextResponse.json({ ok: false, error: 'cursor_ahead_of_head' }, { status: 400 });
+}
+
 /** 全チェーン RPC 失敗。5xx なので gate は settle しない (買い手保護)。 */
 export function rpcUnavailable(): NextResponse {
   return NextResponse.json({ ok: false, error: 'rpc_unavailable' }, { status: 503 });

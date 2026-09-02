@@ -152,7 +152,23 @@ export type TransfersResult = ChainRowBase &
         truncated: boolean;
       }
     | { status: 'unavailable'; errorCode: JpycLiveErrorCode; retryable: boolean }
+    /** cursor.block が現在の chain head を **許容量を超えて** 先行している = 実運用の
+     * ラグ/リオーグでは説明できない位置。items:[] のまま同じ cursor を echo し続けると
+     * 買い手が空振り課金し続けるので settle 前に 400 で止める。形式不正 (invalid_query) と
+     * 区別できるよう別コードにする (route が cursorAheadOfHead() を返す)。 */
+    | { status: 'cursor_ahead_of_head' }
   );
+
+/**
+ * cursor が chain head より先行していても「まだ新着なし」として扱うブロック数。
+ *
+ * なぜ必要か (E10 の残欠陥): 「新着なし」応答の nextCursor はその時点の head (live.ts の
+ * items 0 件分岐) なので、正常な polling でも **次の呼び出しが head より前を見ている RPC
+ * ノードに当たる**ことがある (負荷分散された複数ノードのラグ・リオーグ後の巻き戻し)。
+ * これを一律 400 にすると、買い手側に非がないのにフィードが止まる。数ブロック程度の
+ * 先行は空応答 (課金は発生するが状態は壊れない) で吸収し、それを超える場合だけ 400 にする。
+ */
+export const CURSOR_HEAD_TOLERANCE_BLOCKS = 64n;
 
 // ---------- 入力の検証 (純関数・route は支払い要求より先にこれで 400 を返す) ----------
 
@@ -358,9 +374,21 @@ export async function readTransfers(
 ): Promise<TransfersResult> {
   const dep = deploymentFor(chain);
   const base: ChainRowBase = { chain, chainId: dep.chainId, contract: dep.address };
+  type TransferContent =
+    | { kind: 'cursor_ahead_of_head' }
+    | {
+        kind: 'ok';
+        fromBlock: string;
+        toBlock: string;
+        items: TransferItem[];
+        mode: 'snapshot' | 'delta';
+        nextCursor: string;
+        hasMore: boolean;
+        truncated: boolean;
+      };
   try {
-    const result = await withTimeout(
-      (async () => {
+    const result = await withTimeout<TransferContent>(
+      (async (): Promise<TransferContent> => {
         const client = clientFor(dep.chainId);
         const toBlock = await client.getBlockNumber();
         const window = TRANSFER_WINDOW_BLOCKS[chain];
@@ -368,6 +396,26 @@ export async function readTransfers(
         // cursor があれば走査の下端を cursor.block まで縮める (それより古い block は読まない)。
         // cursor が窓より古い場合は窓の下端までしか読めない = truncated。
         const cursor = opts.cursor;
+        // cursor が現在の chain head より新しい = 未来の位置 (E10)。
+        //   - 許容量以内: RPC ノードのラグやリオーグで通常の polling でも起こるので
+        //     「まだ新着なし」= items:[] + **入力 cursor をそのまま echo** で返す
+        //     (getLogs は呼ばない。cursor を head へ後退させると既読分を再取得させてしまう)
+        //   - 許容量超: 実運用では説明できないので settle 前に 400 (課金されない)
+        if (cursor !== undefined && cursor.block > toBlock) {
+          if (cursor.block > toBlock + CURSOR_HEAD_TOLERANCE_BLOCKS) {
+            return { kind: 'cursor_ahead_of_head' };
+          }
+          return {
+            kind: 'ok',
+            fromBlock: fromBlock.toString(),
+            toBlock: toBlock.toString(),
+            items: [],
+            mode: 'delta',
+            nextCursor: formatCursor(cursor),
+            hasMore: false,
+            truncated: false,
+          };
+        }
         const truncated = cursor !== undefined && cursor.block < fromBlock;
         const scanFrom =
           cursor !== undefined && cursor.block > fromBlock ? cursor.block : fromBlock;
@@ -456,6 +504,7 @@ export async function readTransfers(
             : { block: toBlock, logIndex: -1 };
         if (cursor !== undefined && !isNewerThan(next.block, next.logIndex, cursor)) next = cursor;
         return {
+          kind: 'ok',
           fromBlock: fromBlock.toString(),
           toBlock: toBlock.toString(),
           items,
@@ -466,7 +515,11 @@ export async function readTransfers(
         };
       })(),
     );
-    return { ...base, status: 'ok', ...result };
+    if (result.kind === 'cursor_ahead_of_head') {
+      return { ...base, status: 'cursor_ahead_of_head' };
+    }
+    const { kind: _kind, ...rest } = result;
+    return { ...base, status: 'ok', ...rest };
   } catch (e) {
     return { ...base, status: 'unavailable', ...classifyFailure(e, { op: 'transfers', chain }) };
   }

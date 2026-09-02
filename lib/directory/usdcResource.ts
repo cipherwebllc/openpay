@@ -88,6 +88,11 @@ export const USDC_DIRECTORY_SEARCH_BAZAAR = {
       supportsUsdc: { type: 'string', enum: ['true', 'false'] },
       supportsX402: { type: 'string', enum: ['true', 'false'] },
       supportsMcp: { type: 'string', enum: ['true', 'false'] },
+      status: {
+        type: 'string',
+        description: 'Only published entries can be returned, regardless of this filter.',
+        enum: ['draft', 'review', 'published', 'rejected', 'archived'],
+      },
       limit: { type: 'string', description: '1-50 (default 20)' },
       offset: { type: 'string', description: '0-1000 (default 0)' },
     },
@@ -159,6 +164,7 @@ const SERVICE_MONITOR_DELTA_EXAMPLE = {
   ],
   totalServices: 20,
   generatedAt: '2026-08-27T01:23:45.000Z',
+  hasMore: false,
   nextChangedSince: '2026-08-27',
   notice: {
     code: 'sourced-facts-only',
@@ -180,7 +186,11 @@ export const USDC_SERVICE_MONITOR_BAZAAR = {
         description:
           'Return only changes on/after this date (YYYY-MM-DD). Set to your last run date. Omit for the full snapshot.',
       },
-      limit: { type: 'string', description: '1-200 (default 200)' },
+      limit: {
+        type: 'string',
+        description:
+          '1-200 (default 200). In delta mode the limit is rounded up to a date boundary: a single day is never split, so a day holding more events is returned whole. Continue with nextChangedSince while hasMore is true.',
+      },
     },
     additionalProperties: false,
   },
@@ -241,6 +251,7 @@ const PAYMENT_MONITOR_DELTA_EXAMPLE = {
   ],
   totalEvents: 7,
   generatedAt: '2026-08-27T02:00:00.000Z',
+  hasMore: false,
   nextChangedSince: '2026-08-27',
   notice: {
     code: 'sourced-facts-only',
@@ -262,7 +273,11 @@ export const USDC_PAYMENT_MONITOR_BAZAAR = {
         description:
           'Return only events on/after this date (YYYY-MM-DD). Set to your last run date. Omit for the full history.',
       },
-      limit: { type: 'string', description: '1-200 (default 200)' },
+      limit: {
+        type: 'string',
+        description:
+          '1-200 (default 200). In delta mode the limit is rounded up to a date boundary: a single day is never split, so a day holding more events is returned whole. Continue with nextChangedSince while hasMore is true.',
+      },
     },
     additionalProperties: false,
   },

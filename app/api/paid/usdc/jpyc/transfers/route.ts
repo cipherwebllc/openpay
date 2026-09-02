@@ -10,7 +10,13 @@ import {
   readTransfers,
 } from '@/lib/jpyc/live';
 import { USDC_JPYC_TRANSFERS } from '@/lib/jpyc/liveResources';
-import { envelope, gated, invalidQuery, rpcUnavailable } from '@/lib/jpyc/liveRoute';
+import {
+  cursorAheadOfHead,
+  envelope,
+  gated,
+  invalidQuery,
+  rpcUnavailable,
+} from '@/lib/jpyc/liveRoute';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +40,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (!chain) return invalidQuery();
     const result = await readTransfers(chain, { limit, address, cursor });
     if (result.status === 'unavailable') return rpcUnavailable();
+    // cursor が chain head を許容量 (CURSOR_HEAD_TOLERANCE_BLOCKS) を超えて先行している場合のみ
+    // 400。数ブロックのラグは lib 側が「新着なし」の空応答で吸収する。まだ settle 前
+    // (gate 内の content フェーズ) なので買い手は課金されない (E10)。
+    if (result.status === 'cursor_ahead_of_head') return cursorAheadOfHead();
     const { status: _status, ...rest } = result;
     return envelope(rest);
   });

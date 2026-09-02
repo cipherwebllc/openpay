@@ -155,6 +155,102 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
     }
   });
 
+  it('E7: JPYC ライブ API の chain enum は lib/chains.ts の JPYC_CHAINS と完全一致する (SoT からの導出)', async () => {
+    const body = await doc();
+    const { JPYC_CHAINS } = await import('@/lib/chains');
+    for (const path of [
+      '/api/paid/usdc/jpyc/supply',
+      '/api/paid/usdc/jpyc/balance',
+      '/api/paid/usdc/jpyc/transfers',
+    ]) {
+      const params = body.paths[path]?.get?.parameters as
+        | Array<{ name: string; schema?: { enum?: string[] } }>
+        | undefined;
+      const chainParam = params?.find((p) => p.name === 'chain');
+      expect(chainParam?.schema?.enum, path).toEqual([...JPYC_CHAINS]);
+    }
+  });
+
+  // E6: 掲載条件は route の 404 条件と一致させる。
+  //   - JPYC レール 2 本: guardPaidDirectoryApi = directory **かつ** facilitator
+  //   - USDC レール 2 本 + 無料 teaser 2 本: 各 route の directory チェックのみ
+  // ずれると、実際には 404 する有料エンドポイントをインデクサに広告してしまう。
+  const JPYC_RAIL_MONITOR_PATHS = ['/api/paid/jpyc/services', '/api/paid/stablecoin-payments'];
+  const DIRECTORY_ONLY_MONITOR_PATHS = [
+    '/api/paid/usdc/jpyc/services',
+    '/api/paid/usdc/stablecoin-payments',
+    '/api/jpyc/services/teaser',
+    '/api/stablecoin-payments/teaser',
+  ];
+
+  /** 文書自体が消える構成 (directory も facilitator も OFF) では null を返す。 */
+  async function monitorDoc(directory: boolean, facilitator: boolean): Promise<Doc | null> {
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', directory ? '1' : '');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', facilitator ? '1' : '');
+    // 全機能 OFF は 404 になるため、文書自体は常に存在させる (shops は Monitor と無関係)。
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_SHOPS_API', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_ORDER_RELAY', '1');
+    vi.stubEnv('ENABLE_AGENT_ORDER', '1');
+    vi.stubEnv('X402_PAY_TO_ADDRESS', SELLER);
+    vi.resetModules();
+    const mod = (await import('@/app/openapi.json/route')) as { GET: () => Promise<Response> };
+    const res = await mod.GET();
+    // shops は facilitator にも依存する (lib/shops/flags.ts) ため、両 OFF は文書ごと 404。
+    if (!directory && !facilitator) {
+      expect(res.status).toBe(404);
+      return null;
+    }
+    expect(res.status, `directory=${directory} facilitator=${facilitator}`).toBe(200);
+    return (await res.json()) as Doc;
+  }
+
+  it('E6: Monitor 6 本の掲載は directory × facilitator の 2×2 で route の 404 条件と一致する', async () => {
+    for (const [directory, facilitator, jpycRail] of [
+      [true, true, true],
+      [true, false, false],
+      [false, true, false],
+      [false, false, false],
+    ] as const) {
+      const body = await monitorDoc(directory, facilitator);
+      const label = `directory=${directory} facilitator=${facilitator}`;
+      if (body === null) continue; // 文書ごと 404 = 6 本とも広告されない
+
+      for (const path of JPYC_RAIL_MONITOR_PATHS) {
+        if (jpycRail) expect(body.paths[path], `${label}: ${path}`).toBeDefined();
+        else expect(body.paths[path], `${label}: ${path}`).toBeUndefined();
+      }
+      for (const path of DIRECTORY_ONLY_MONITOR_PATHS) {
+        if (directory) expect(body.paths[path], `${label}: ${path}`).toBeDefined();
+        else expect(body.paths[path], `${label}: ${path}`).toBeUndefined();
+      }
+      // 常設面 (JPYC ライブデータ・stores) はどちらの flag にも依存しない。
+      expect(body.paths['/api/paid/usdc/jpyc/supply'], label).toBeDefined();
+      expect(body.paths['/api/paid/usdc/stores'], label).toBeDefined();
+    }
+  });
+
+  it('E16: x-price-jpyc は literal ではなくカタログ価格 (SoT) と一致する', async () => {
+    const body = await doc();
+    const { DIRECTORY_LIST_RESOURCE, DIRECTORY_SEARCH_RESOURCE, DIRECTORY_DETAIL_PRICE_JPYC } =
+      await import('@/lib/directory/paidResources');
+    const { JPYC_SHOPS_SEARCH_RESOURCE } = await import('@/lib/shops/paidResources');
+    const expectedPriceByPath: Record<string, string> = {
+      '/api/paid/japan-web3-directory': DIRECTORY_LIST_RESOURCE.priceJpyc,
+      '/api/paid/japan-web3-directory/search': DIRECTORY_SEARCH_RESOURCE.priceJpyc,
+      '/api/paid/japan-web3-directory/{slug}': DIRECTORY_DETAIL_PRICE_JPYC,
+      '/api/paid/jpyc-shops/search': JPYC_SHOPS_SEARCH_RESOURCE.priceJpyc,
+    };
+    let checked = 0;
+    for (const [path, methods] of Object.entries(body.paths)) {
+      const price = methods.get?.['x-price-jpyc'];
+      if (price === undefined) continue;
+      expect(expectedPriceByPath, `${path} に期待値が未登録 (テストの網羅漏れ)`).toHaveProperty(path);
+      expect(price, path).toBe(Number(expectedPriceByPath[path]));
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThanOrEqual(Object.keys(expectedPriceByPath).length);
+  });
+
   it('slug テンプレート path は有料登録しない (probe が必ず 404 になるため)', async () => {
     const body = await doc();
     const templated = body.paths['/api/paid/japan-web3-directory/{slug}']?.get;

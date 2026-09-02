@@ -5,15 +5,23 @@
 // を振る舞いで固定する。
 
 import { describe, it, expect } from 'vitest';
+import Ajv2020 from 'ajv/dist/2020';
 import {
   USDC_DIRECTORY_SEARCH_BAZAAR,
   USDC_DIRECTORY_LIST_BAZAAR,
+  USDC_PAYMENT_MONITOR_BAZAAR,
+  USDC_SERVICE_MONITOR_BAZAAR,
 } from '@/lib/directory/usdcResource';
-import { validateDirectoryQuery } from '@/lib/directory/query';
+import {
+  JPYC_PAYMENTS_RESOURCE,
+  JPYC_SERVICES_RESOURCE,
+} from '@/lib/directory/paidResources';
+import { QUERY_KEYS, validateDirectoryQuery } from '@/lib/directory/query';
 import {
   DIRECTORY_CATEGORIES,
   DIRECTORY_CHAINS,
   DIRECTORY_LANGUAGES,
+  DIRECTORY_STATUSES,
   DIRECTORY_TOKENS,
 } from '@/lib/directory/types';
 import { buildBazaarQueryExtensionV2 } from '@/lib/x402/v2';
@@ -40,11 +48,17 @@ describe('USDC directory の bazaar 宣言は実装と一致する', () => {
     expect([...props.token.enum!].sort()).toEqual([...DIRECTORY_TOKENS].sort());
     expect([...props.chain.enum!].sort()).toEqual([...DIRECTORY_CHAINS].sort());
     expect([...props.language.enum!].sort()).toEqual([...DIRECTORY_LANGUAGES].sort());
+    // status も types.ts が SoT (宣言だけ増減すると「宣言どおりに呼んで 400」が起きる)。
+    expect([...props.status.enum!].sort()).toEqual([...DIRECTORY_STATUSES].sort());
   });
 
   it('queryParams の例示値はそのまま有効なクエリである', () => {
     const sp = new URLSearchParams(USDC_DIRECTORY_SEARCH_BAZAAR.queryParams);
     expect(validateDirectoryQuery(sp).ok).toBe(true);
+  });
+
+  it('E27: 宣言した引数キー集合は実装の QUERY_KEYS と完全一致する (欠落キーの取りこぼし検出)', () => {
+    expect(Object.keys(props).sort()).toEqual([...QUERY_KEYS].sort());
   });
 
   it('宣言しない引数は実装も拒否する (宣言が「全部」であることの裏取り)', () => {
@@ -80,6 +94,23 @@ describe('USDC directory の bazaar 宣言は実装と一致する', () => {
     const info = ext.info as { input: Record<string, unknown>; output?: unknown };
     expect(info.input).toEqual({ type: 'http', method: 'GET' });
     expect(info.output).toBeDefined();
+  });
+});
+
+// W7: 掲載カードの output.example は「買い手が最初に見る応答の形」。有料応答の宣言スキーマ
+// (paidResources.ts の *_OUTPUT) と食い違うと、エージェントは例を信じて実応答を誤読する。
+// tests/lib/jpyc/liveResourcesBazaar.test.ts と同じ Ajv 2020 (CDP validator 相当) で検証する。
+describe('Monitor の Bazaar output.example は有料応答スキーマに適合する (W7)', () => {
+  const ajv = new Ajv2020({ strict: false, allErrors: true, validateFormats: false });
+
+  it.each([
+    ['service monitor', JPYC_SERVICES_RESOURCE.outputSchema.output, USDC_SERVICE_MONITOR_BAZAAR.output.example],
+    ['payment monitor', JPYC_PAYMENTS_RESOURCE.outputSchema.output, USDC_PAYMENT_MONITOR_BAZAAR.output.example],
+  ])('%s', (_label, schema, example) => {
+    const validate = ajv.compile(schema as Record<string, unknown>);
+    expect(validate(example), JSON.stringify(validate.errors)).toBe(true);
+    // 空オブジェクトが通るなら required が効いておらず、上の合格は無意味 (フェンスの自己検査)。
+    expect(validate({}), 'スキーマが required を課していない').toBe(false);
   });
 });
 

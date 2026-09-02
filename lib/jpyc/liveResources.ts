@@ -30,7 +30,20 @@ import {
 } from './liveSchema';
 
 const CHAIN_ENUM = [...JPYC_CHAINS];
-const CHAIN_LIST_TEXT = 'polygon, kaia, avalanche, ethereum';
+// enum と同じ SoT から導出する (E7: 別々に書くと env flag 未点灯時に enum とテキストがずれ、
+// 実際には 400 になるチェーンを説明文に書いてしまう)。
+const CHAIN_LIST_TEXT = CHAIN_ENUM.join(', ');
+// 散文 (description) 用の表記も同じ SoT から導出する (E7 残件: ここを手書きしていたため
+// flag で ethereum/avalanche が外れても "Polygon, Kaia, Avalanche or Ethereum" と広告し続け、
+// 実際には 400 になるチェーンを説明していた)。
+const CHAIN_TITLES = CHAIN_ENUM.map((slug) => slug.charAt(0).toUpperCase() + slug.slice(1));
+/** 'Polygon, Kaia, Avalanche, Ethereum' */
+const CHAIN_PROSE_LIST = CHAIN_TITLES.join(', ');
+/** 'Polygon, Kaia, Avalanche or Ethereum' */
+const CHAIN_PROSE_OR =
+  CHAIN_TITLES.length > 1
+    ? `${CHAIN_TITLES.slice(0, -1).join(', ')} or ${CHAIN_TITLES[CHAIN_TITLES.length - 1]}`
+    : CHAIN_TITLES[0];
 
 /** 掲載カードのアイコン (public/icon-512.png・本番到達確認済み)。 */
 export const JPYC_LIVE_ICON_URL = 'https://open-pay.jp/icon-512.png';
@@ -59,7 +72,7 @@ export const USDC_JPYC_SUPPLY = {
   priceUsd: '0.002',
   tags: ['jpyc', 'japanese-yen', 'stablecoin', 'token-supply', 'onchain-data', 'multi-chain'],
   description:
-    'Read the current contract-reported JPYC totalSupply on Polygon, Kaia, Avalanche or Ethereum, with the token contract address and the block number observed at request time. Use for periodic supply monitoring, cross-chain comparison, or verifying a current JPYC supply figure before citing it. Not for market price, reserve backing, circulating-supply analysis, or financial advice.',
+    `Read the current contract-reported JPYC totalSupply on ${CHAIN_PROSE_OR}, with the token contract address and the block number observed at request time. Use for periodic supply monitoring, cross-chain comparison, or verifying a current JPYC supply figure before citing it. Not for market price, reserve backing, circulating-supply analysis, or financial advice.`,
   trigger: {
     callWhen: [
       'The task requires the current contract-reported JPYC supply on a specific chain',
@@ -120,7 +133,7 @@ export const USDC_JPYC_BALANCE = {
   priceUsd: '0.002',
   tags: ['jpyc', 'wallet-balance', 'payment-reconciliation', 'treasury', 'onchain-data', 'multi-chain'],
   description:
-    'Read the current on-chain JPYC balance of any EVM address on one or all supported chains (Polygon, Kaia, Avalanche, Ethereum), with the token contract and the block number observed at request time. Use before or after a payment, for treasury checks, wallet monitoring, and payment reconciliation. The result does not prove wallet ownership and is not a transaction-finality certificate.',
+    `Read the current on-chain JPYC balance of any EVM address on one or all supported chains (${CHAIN_PROSE_LIST}), with the token contract and the block number observed at request time. Use before or after a payment, for treasury checks, wallet monitoring, and payment reconciliation. The result does not prove wallet ownership and is not a transaction-finality certificate.`,
   trigger: {
     callWhen: [
       'An agent must check whether a wallet currently holds JPYC',
@@ -226,7 +239,7 @@ export const USDC_JPYC_TRANSFERS = {
           type: 'string',
           pattern: TRANSFER_CURSOR_PATTERN,
           description:
-            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), so repeated calls pay only for new events and return each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true.',
+            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), so repeated calls pay only for new events and return each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true. A cursor up to 64 blocks beyond the current chain head (normal when a node lags) returns no items and echoes the cursor back; further ahead is rejected with 400 cursor_ahead_of_head.',
         },
       },
       required: ['chain'],
