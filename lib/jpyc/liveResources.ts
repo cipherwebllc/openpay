@@ -30,7 +30,9 @@ import {
 } from './liveSchema';
 
 const CHAIN_ENUM = [...JPYC_CHAINS];
-const CHAIN_LIST_TEXT = 'polygon, kaia, avalanche, ethereum';
+// enum と同じ SoT から導出する (E7: 別々に書くと env flag 未点灯時に enum とテキストがずれ、
+// 実際には 400 になるチェーンを説明文に書いてしまう)。
+const CHAIN_LIST_TEXT = CHAIN_ENUM.join(', ');
 
 /** 掲載カードのアイコン (public/icon-512.png・本番到達確認済み)。 */
 export const JPYC_LIVE_ICON_URL = 'https://open-pay.jp/icon-512.png';

@@ -318,14 +318,32 @@ export type ServiceMonitorQuery = {
   limit: number;
 };
 
-/** クエリ検証。不正は null (呼び元が 400)。 */
+const SERVICE_MONITOR_QUERY_KEYS = new Set(['changedSince', 'limit']);
+
+/** YYYY-MM-DD が暦上の実在日か (2026-02-30 等を弾く・Date.UTC の round-trip で判定)。 */
+function isCalendarDate(raw: string): boolean {
+  const [y, m, d] = raw.split('-').map(Number);
+  const ms = Date.UTC(y, m - 1, d);
+  const check = new Date(ms);
+  return (
+    check.getUTCFullYear() === y &&
+    check.getUTCMonth() === m - 1 &&
+    check.getUTCDate() === d
+  );
+}
+
+/** クエリ検証。不正は null (呼び元が 400)。openapi/Bazaar が宣言する引数以外は拒否する
+ * (未知キーを黙って無視すると、宣言と実装がずれても気づけない)。 */
 export function parseServiceMonitorQuery(
   params: URLSearchParams,
 ): ServiceMonitorQuery | null {
+  for (const key of params.keys()) {
+    if (!SERVICE_MONITOR_QUERY_KEYS.has(key)) return null;
+  }
   const query: ServiceMonitorQuery = { limit: SERVICE_MONITOR_MAX_LIMIT };
   const changedSince = params.get('changedSince');
   if (changedSince !== null) {
-    if (!DATE_RE.test(changedSince)) return null;
+    if (!DATE_RE.test(changedSince) || !isCalendarDate(changedSince)) return null;
     query.changedSince = changedSince;
   }
   const limit = params.get('limit');
@@ -391,7 +409,11 @@ export type ServiceMonitorEnvelope = {
   changes: ServiceChangeEventOutput[];
   totalServices: number;
   generatedAt: string;
-  /** 次回の delta 購入でそのまま changedSince に渡す値 (当日含む契約なので取りこぼしなし)。 */
+  /** limit で打ち切られた (snapshot: 全イベント数 > limit・delta: changedSince 以降の件数 > limit)。
+   * true のとき nextChangedSince は generatedAt でなく最後に返したイベントの date になる。 */
+  hasMore: boolean;
+  /** 次回の delta 購入でそのまま changedSince に渡す値 (当日含む契約なので取りこぼしなし)。
+   * hasMore=true の delta では最後に返したイベントの date (inclusive 比較 + dedupe で重複吸収)。 */
   nextChangedSince: string;
   notice: { code: string; detail: string; termsUrl: string };
   licenseNotice: string;
@@ -421,12 +443,23 @@ export function createServiceMonitorEnvelope(
 
   let changes: ServiceChangeEventOutput[];
   let services: ServiceMonitorRow[];
+  let hasMore: boolean;
+  // 既定は UTC 日付。イベント date (JST 運用日) 以下になるため inclusive 比較で取りこぼしなし
+  // (同日イベントの重複は slug+date+changeType の dedupe が吸収する)。limit で打ち切られた
+  // delta だけは下で「最後に返したイベントの date」に差し替える (打ち切り分の永久ロス防止)。
+  let nextChangedSince = generatedAtIso.slice(0, 10);
   if (mode === 'snapshot') {
+    hasMore = changelog.length > query.limit;
     changes = changelog.slice(-query.limit);
     services = published.map((entry) => toRow(entry, snapshot));
   } else {
     const since = query.changedSince as string;
-    changes = changelog.filter((event) => event.date >= since).slice(0, query.limit);
+    const matched = changelog.filter((event) => event.date >= since);
+    hasMore = matched.length > query.limit;
+    changes = matched.slice(0, query.limit);
+    if (hasMore && changes.length > 0) {
+      nextChangedSince = changes[changes.length - 1].date;
+    }
     const changedSlugs = new Set(changes.map((event) => event.slug));
     // removed (archived) は published に居ないので現況行は出ない — イベント側が真実を運ぶ。
     services = published
@@ -448,9 +481,8 @@ export function createServiceMonitorEnvelope(
     changes,
     totalServices: published.length,
     generatedAt: generatedAtIso,
-    // UTC 日付。イベント date (JST 運用日) 以下になるため inclusive 比較で取りこぼしなし
-    // (同日イベントの重複は slug+date+changeType の dedupe が吸収する)。
-    nextChangedSince: generatedAtIso.slice(0, 10),
+    hasMore,
+    nextChangedSince,
     notice: { ...SERVICE_MONITOR_NOTICE },
     licenseNotice: SERVICE_MONITOR_LICENSE_NOTICE,
     attribution: [...attribution],

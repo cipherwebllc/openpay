@@ -102,6 +102,7 @@ describe('free Japan Web3 Directory APIs', () => {
     };
     expect(body.schemaVersion).toBe('1.0');
     expect(body.query).toMatchObject({ limit: 5, offset: 0 });
+    expect((body as { teaser?: boolean }).teaser).toBe(true);
     expect(body.items).toHaveLength(5);
     expect(body.total).toBeGreaterThan(body.items.length);
     expect(Date.parse(body.generatedAt)).not.toBeNaN();
@@ -175,6 +176,8 @@ describe('free Japan Web3 Directory APIs', () => {
       ),
     ).toBe(true);
 
+    // E5: offset は無料 teaser では常に 0 に固定する — 指定しても無視される
+    // (limit だけ絞っても offset を進める複数リクエストで有料枠を素通りできてしまうため)。
     const jpycBody = await (
       await directory.GET(
         req('/api/directory?token=JPYC&supportsJpyc=true&limit=2&offset=1'),
@@ -184,7 +187,7 @@ describe('free Japan Web3 Directory APIs', () => {
       token: 'jpyc',
       supportsJpyc: true,
       limit: 2,
-      offset: 1,
+      offset: 0,
     });
     expect(
       jpycBody.items.every(
@@ -192,6 +195,20 @@ describe('free Japan Web3 Directory APIs', () => {
           item.facts.tokens.includes('jpyc') && item.facts.supportsJpyc,
       ),
     ).toBe(true);
+  });
+
+  it('E5: offset を進めても常に先頭 5 件しか返らない (limit のみを絞る回避策を塞ぐ)', async () => {
+    const { directory } = await load();
+    const first = await (await directory.GET(req('/api/directory'))).json();
+    for (const offset of [1, 5, 100, 1000]) {
+      const body = await (
+        await directory.GET(req(`/api/directory?offset=${offset}`))
+      ).json();
+      expect(body.query.offset).toBe(0);
+      expect(body.items.map((i: { slug: string }) => i.slug)).toEqual(
+        first.items.map((i: { slug: string }) => i.slug),
+      );
+    }
   });
 
   it('不正 query は内部情報なしの400を返す', async () => {

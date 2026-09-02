@@ -8,6 +8,7 @@
 // x402FeeBreakdown から導出する (literal を書くと掟 14 のドリフト源になるため)。
 
 import { env } from '@/lib/env';
+import { JPYC_CHAINS } from '@/lib/chains';
 import { shopsApiEnabled } from '@/lib/shops/flags';
 import {
   DIRECTORY_DETAIL_PRICE_JPYC,
@@ -373,13 +374,16 @@ const JPYC_LIVE_503 = {
     'All configured RPC endpoints failed for the requested chains. Nothing is settled; the buyer is not charged.',
 };
 const JPYC_LIVE_400 = { description: 'Unknown query key, unsupported chain, or malformed address/limit.' };
+// enum は SoT (lib/chains.ts の JPYC_CHAINS) から導出する。literal で固定すると env flag
+// (enableJpycAvalanche/enableJpycEthereum) 未点灯時に「宣言はあるが 400 になるチェーン」を
+// 広告してしまう (E7: parseRequiredChainParam は JPYC_CHAINS にない値を拒否する)。
+const JPYC_CHAIN_LIST = [...JPYC_CHAINS];
 const JPYC_CHAIN_PARAM = {
   name: 'chain',
   in: 'query',
   required: false,
-  schema: { type: 'string', enum: ['polygon', 'kaia', 'avalanche', 'ethereum'] },
-  description:
-    'Chain to query. Omit to query all supported chains. Supported values: polygon, kaia, avalanche, ethereum.',
+  schema: { type: 'string', enum: JPYC_CHAIN_LIST },
+  description: `Chain to query. Omit to query all supported chains. Supported values: ${JPYC_CHAIN_LIST.join(', ')}.`,
   example: 'polygon',
 };
 
@@ -460,7 +464,7 @@ const VANILLA_OPENAPI_PATHS = {
         {
           ...JPYC_CHAIN_PARAM,
           required: true,
-          description: 'Chain to scan. Supported values: polygon, kaia, avalanche, ethereum.',
+          description: `Chain to scan. Supported values: ${JPYC_CHAIN_LIST.join(', ')}.`,
         },
         {
           name: 'limit',
@@ -484,7 +488,7 @@ const VANILLA_OPENAPI_PATHS = {
           required: false,
           schema: { type: 'string', pattern: '^[0-9]+:(?:-1|[0-9]+)$' },
           description:
-            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), so repeated calls pay only for new events and return each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true. If the cursor is older than the scanned window, the response sets truncated=true. Without a cursor (mode=snapshot) hasMore only means older events in the window were omitted; start monitoring from nextCursor.',
+            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), so repeated calls pay only for new events and return each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true. If the cursor is older than the scanned window, the response sets truncated=true. A cursor referencing a block beyond the current chain head is rejected with 400 before settlement. Without a cursor (mode=snapshot) hasMore only means older events in the window were omitted; start monitoring from nextCursor.',
           example: '92387695:286',
         },
       ],
@@ -509,6 +513,13 @@ const VANILLA_OPENAPI_PATHS = {
       },
     },
   },
+} as const;
+
+// JPYC Service Monitor / Payment Monitor (JPYC・USDC 両面) と無料 teaser 2 本は
+// env.enableWeb3Directory 配下の商品 (route は guardPaidDirectoryApi / 各 route の
+// enableWeb3Directory チェックで 404 に倒れる)。flag OFF でも常に掲載していると、
+// 実際には 404 するエンドポイントをインデクサに広告してしまう (E6)。
+const VANILLA_DIRECTORY_OPENAPI_PATHS = {
   [USDC_SERVICE_MONITOR.path]: {
     get: {
       tags: ['x402 Vanilla (USDC)', 'Japan Web3 Directory'],
@@ -641,6 +652,10 @@ const VANILLA_OPENAPI_PATHS = {
       },
     },
   },
+} as const;
+
+// USDC 版 stores は directory flag に依存しない (JPYC 受入先の別カタログ)。
+const VANILLA_STORES_OPENAPI_PATHS = {
   [USDC_STORES.path]: {
     get: {
       tags: ['x402 Vanilla (USDC)'],
@@ -765,7 +780,7 @@ const SHOPS_OPENAPI_PATHS = {
         'A paid request snapshots the shop index and summaries before x402 verification and settlement. acceptingNow is true when all required checks pass, false for a definite stop condition, and null when live state or required legacy summary data is unavailable. Phone numbers are never returned.',
       parameters: SHOPS_QUERY_PARAMETERS,
       'x-payment-info': paymentInfo(JPYC_SHOPS_SEARCH_RESOURCE.priceJpyc),
-      'x-price-jpyc': 2,
+      'x-price-jpyc': Number(JPYC_SHOPS_SEARCH_RESOURCE.priceJpyc),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'JPYC',
       'x-payment-chains': ['Polygon', 'Polygon Amoy'],
@@ -979,7 +994,8 @@ const OPENAPI_DOCUMENT = {
       get: {
         tags: ['Directory Free'],
         summary: 'Get a free directory teaser',
-        description: 'Returns full entry fields but forces limit to at most 5.',
+        description:
+          'Returns full entry fields but forces limit to at most 5 and offset to 0 (any provided offset is ignored).',
         parameters: DIRECTORY_QUERY_PARAMETERS,
         responses: {
           '200': {
@@ -1091,7 +1107,7 @@ const OPENAPI_DOCUMENT = {
         tags: ['Directory Paid'],
         summary: 'Unlock the full published directory',
         'x-payment-info': paymentInfo(DIRECTORY_LIST_RESOURCE.priceJpyc),
-        'x-price-jpyc': 2,
+        'x-price-jpyc': Number(DIRECTORY_LIST_RESOURCE.priceJpyc),
         'x-payment-protocol': 'x402',
         'x-payment-asset': 'JPYC',
         'x-payment-chains': ['Polygon', 'Polygon Amoy'],
@@ -1114,7 +1130,7 @@ const OPENAPI_DOCUMENT = {
         summary: 'Search and unlock published directory results',
         parameters: DIRECTORY_QUERY_PARAMETERS,
         'x-payment-info': paymentInfo(DIRECTORY_SEARCH_RESOURCE.priceJpyc),
-        'x-price-jpyc': 2,
+        'x-price-jpyc': Number(DIRECTORY_SEARCH_RESOURCE.priceJpyc),
         'x-payment-protocol': 'x402',
         'x-payment-asset': 'JPYC',
         'x-payment-chains': ['Polygon', 'Polygon Amoy'],
@@ -1453,6 +1469,8 @@ export function buildOpenApiDocument(): Record<string, unknown> | null {
       ...(shopsEnabled ? SHOPS_OPENAPI_PATHS : {}),
       ...(facilitatorEnabled ? DISCOVERY_OPENAPI_PATHS : {}),
       ...VANILLA_OPENAPI_PATHS,
+      ...(env.enableWeb3Directory ? VANILLA_DIRECTORY_OPENAPI_PATHS : {}),
+      ...VANILLA_STORES_OPENAPI_PATHS,
       ...vanillaHelloPath(),
     },
     components: {

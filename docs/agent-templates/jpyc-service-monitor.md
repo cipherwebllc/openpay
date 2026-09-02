@@ -120,6 +120,8 @@ Claude Code なら `/schedule`(cron)や Hermes Agent の定期ジョブに上の
     }
   ],
   "totalServices": 20,
+  "hasMore": false,
+  "nextChangedSince": "2026-08-27",
   "notice": { "code": "sourced-facts-only" }
 }
 ```
@@ -203,6 +205,8 @@ A second monitor generated from the same weekly collection: it completes a diffe
     }
   ],
   "totalEvents": 7,
+  "hasMore": false,
+  "nextChangedSince": "2026-08-27",
   "notice": { "code": "sourced-facts-only" }
 }
 ```

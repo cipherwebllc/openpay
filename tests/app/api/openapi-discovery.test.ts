@@ -155,6 +155,73 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
     }
   });
 
+  it('E7: JPYC ライブ API の chain enum は lib/chains.ts の JPYC_CHAINS と完全一致する (SoT からの導出)', async () => {
+    const body = await doc();
+    const { JPYC_CHAINS } = await import('@/lib/chains');
+    for (const path of [
+      '/api/paid/usdc/jpyc/supply',
+      '/api/paid/usdc/jpyc/balance',
+      '/api/paid/usdc/jpyc/transfers',
+    ]) {
+      const params = body.paths[path]?.get?.parameters as
+        | Array<{ name: string; schema?: { enum?: string[] } }>
+        | undefined;
+      const chainParam = params?.find((p) => p.name === 'chain');
+      expect(chainParam?.schema?.enum, path).toEqual([...JPYC_CHAINS]);
+    }
+  });
+
+  it('E6: JPYC Service/Payment Monitor (JPYC・USDC 両面) と無料 teaser 2 本は directory flag 配下のみ掲載', async () => {
+    const gatedPaths = [
+      '/api/paid/jpyc/services',
+      '/api/paid/stablecoin-payments',
+      '/api/paid/usdc/jpyc/services',
+      '/api/paid/usdc/stablecoin-payments',
+      '/api/jpyc/services/teaser',
+      '/api/stablecoin-payments/teaser',
+    ];
+
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', '');
+    vi.stubEnv('X402_PAY_TO_ADDRESS', SELLER);
+    vi.resetModules();
+    const off = (await import('@/app/openapi.json/route')) as { GET: () => Promise<Response> };
+    const offBody = (await (await off.GET()).json()) as Doc;
+    for (const path of gatedPaths) {
+      expect(offBody.paths[path], `directory OFF で ${path} が掲載されている`).toBeUndefined();
+    }
+    // 常設面 (JPYC ライブデータ・stores) は directory flag に依存しないので掲載され続ける。
+    expect(offBody.paths['/api/paid/usdc/jpyc/supply']).toBeDefined();
+    expect(offBody.paths['/api/paid/usdc/stores']).toBeDefined();
+
+    const onBody = await doc();
+    for (const path of gatedPaths) {
+      expect(onBody.paths[path], `directory ON で ${path} が消えている`).toBeDefined();
+    }
+  });
+
+  it('E16: x-price-jpyc は literal ではなくカタログ価格 (SoT) と一致する', async () => {
+    const body = await doc();
+    const { DIRECTORY_LIST_RESOURCE, DIRECTORY_SEARCH_RESOURCE, DIRECTORY_DETAIL_PRICE_JPYC } =
+      await import('@/lib/directory/paidResources');
+    const { JPYC_SHOPS_SEARCH_RESOURCE } = await import('@/lib/shops/paidResources');
+    const expectedPriceByPath: Record<string, string> = {
+      '/api/paid/japan-web3-directory': DIRECTORY_LIST_RESOURCE.priceJpyc,
+      '/api/paid/japan-web3-directory/search': DIRECTORY_SEARCH_RESOURCE.priceJpyc,
+      '/api/paid/japan-web3-directory/{slug}': DIRECTORY_DETAIL_PRICE_JPYC,
+      '/api/paid/jpyc-shops/search': JPYC_SHOPS_SEARCH_RESOURCE.priceJpyc,
+    };
+    let checked = 0;
+    for (const [path, methods] of Object.entries(body.paths)) {
+      const price = methods.get?.['x-price-jpyc'];
+      if (price === undefined) continue;
+      expect(expectedPriceByPath, `${path} に期待値が未登録 (テストの網羅漏れ)`).toHaveProperty(path);
+      expect(price, path).toBe(Number(expectedPriceByPath[path]));
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThanOrEqual(Object.keys(expectedPriceByPath).length);
+  });
+
   it('slug テンプレート path は有料登録しない (probe が必ず 404 になるため)', async () => {
     const body = await doc();
     const templated = body.paths['/api/paid/japan-web3-directory/{slug}']?.get;

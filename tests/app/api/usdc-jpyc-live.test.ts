@@ -284,4 +284,25 @@ describe('支払い後の content と買い手保護', () => {
     expect(body.hasMore).toBe(false);
     expect(body.truncated).toBe(false);
   });
+
+  it('E10: transfers の cursor が chain head より新しい (invalid_cursor) は 400・settle しない', async () => {
+    facilitatorOk();
+    const route = await load('transfers');
+    liveMocks.readTransfers.mockResolvedValueOnce({
+      chain: 'polygon',
+      chainId: 137,
+      contract: SELLER,
+      status: 'invalid_cursor',
+    });
+    const res = await route.GET(
+      req(`/api/paid/usdc/jpyc/transfers?chain=polygon&cursor=99999999999:0`, {
+        'x-payment': b64(v1Payment('5000')),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_query' });
+    // verify は署名検証のため呼ばれるが settle (2 回目の facilitator 呼出) は起きない = 課金されない。
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/verify$/);
+  });
 });

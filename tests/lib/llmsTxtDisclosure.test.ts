@@ -8,7 +8,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DISCLOSED_DUAL_RAIL_USDC,
   DISCLOSED_MOBILE_ORDER_FEE,
@@ -17,7 +17,6 @@ import {
   DISCLOSED_X402_FEE,
 } from '@/lib/legal';
 import {
-  DIRECTORY_LIST_RESOURCE,
   JPYC_PAYMENTS_RESOURCE,
   JPYC_SERVICES_RESOURCE,
 } from '@/lib/directory/paidResources';
@@ -32,7 +31,6 @@ import {
   USDC_JPYC_SUPPLY,
   USDC_JPYC_TRANSFERS,
 } from '@/lib/jpyc/liveResources';
-import { JPYC_SHOPS_SEARCH_RESOURCE } from '@/lib/shops/paidResources';
 import { USDC_STORES } from '@/lib/x402/usdcStores';
 
 const llms = readFileSync(join(process.cwd(), 'public', 'llms.txt'), 'utf8');
@@ -55,6 +53,13 @@ function expectEveryMatch(re: RegExp, expected: string[], label: string): void {
 }
 
 const pct = (bps: number): string => String(bps / 100);
+
+const SELLER = '0x00000000000000000000000000000000000000A1';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
 describe('public/llms.txt 開示同期 (掟 14③)', () => {
   it('決済 QR (recover) 利用料 = DISCLOSED_RECOVER_FEE', () => {
@@ -106,13 +111,22 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
     expect(llms).toContain(`USDC（${DISCLOSED_DUAL_RAIL_USDC.chainName}・標準 x402）`);
   });
 
-  it('有料 API の価格 = 各リソース SoT (JPYC 建て)', () => {
-    for (const r of [
-      DIRECTORY_LIST_RESOURCE,
-      JPYC_SERVICES_RESOURCE,
-      JPYC_PAYMENTS_RESOURCE,
-      JPYC_SHOPS_SEARCH_RESOURCE,
-    ]) {
+  // E17: FIRST_PARTY_RESOURCES はカタログ flag で伸び縮みするので、全 flag を ON にして
+  // 最大のカタログ (openapi-discovery.test.ts の load() と同じ手順) で網羅性を検証する。
+  // 個別 named import の手書きリストだと新規追加時の載せ忘れ (/api/paid/demo・/stores 等) を
+  // 検出できない — カタログそのものを SoT にする。
+  it('有料 API の価格 = 各リソース SoT (JPYC 建て・FIRST_PARTY_RESOURCES 全件を網羅)', async () => {
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_SHOPS_API', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_ORDER_RELAY', '1');
+    vi.stubEnv('ENABLE_AGENT_ORDER', '1');
+    vi.stubEnv('X402_PAY_TO_ADDRESS', SELLER);
+    vi.resetModules();
+    const { FIRST_PARTY_RESOURCES } = await import('@/lib/x402/firstParty');
+    // flag の stub 漏れでカタログが縮んだまま「全件 OK」になるのを防ぐ (openapi-discovery.test.ts と同じ数)。
+    expect(FIRST_PARTY_RESOURCES.length).toBe(7);
+    for (const r of FIRST_PARTY_RESOURCES) {
       expect(lineMentioning(r.path), r.path).toContain(`${r.priceJpyc} JPYC`);
     }
   });

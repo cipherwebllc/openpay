@@ -64,7 +64,11 @@ export type PaymentMonitorEnvelope = {
   /** 決済スコープの全イベント数 (limit で切っても母数が分かる)。 */
   totalEvents: number;
   generatedAt: string;
-  /** 次回の delta 購入でそのまま changedSince に渡す値。 */
+  /** limit で打ち切られた (snapshot: totalEvents > limit・delta: changedSince 以降の件数 > limit)。
+   * true のとき nextChangedSince は generatedAt でなく最後に返したイベントの date になる。 */
+  hasMore: boolean;
+  /** 次回の delta 購入でそのまま changedSince に渡す値。hasMore=true の delta では
+   * 最後に返したイベントの date (inclusive 比較 + dedupe で重複吸収)。 */
   nextChangedSince: string;
   notice: { code: string; detail: string; termsUrl: string };
   licenseNotice: string;
@@ -121,12 +125,22 @@ export function createPaymentMonitorEnvelope(
   const changelog = scopedChangelog('stablecoin-payments', entries);
   const bySlug = new Map(entries.map((entry) => [entry.slug, entry]));
   const mode = query.changedSince === undefined ? 'snapshot' : 'delta';
-  const filtered =
-    mode === 'snapshot'
-      ? changelog.slice(-query.limit)
-      : changelog
-          .filter((event) => event.date >= (query.changedSince as string))
-          .slice(0, query.limit);
+  let filtered: ReturnType<typeof scopedChangelog>;
+  let hasMore: boolean;
+  // 既定は UTC 日付 (serviceMonitor.ts と同じ inclusive 比較の理屈)。limit で打ち切られた delta
+  // だけ「最後に返したイベントの date」に差し替える (打ち切り分の永久ロス防止)。
+  let nextChangedSince = generatedAtIso.slice(0, 10);
+  if (mode === 'snapshot') {
+    hasMore = changelog.length > query.limit;
+    filtered = changelog.slice(-query.limit);
+  } else {
+    const matched = changelog.filter((event) => event.date >= (query.changedSince as string));
+    hasMore = matched.length > query.limit;
+    filtered = matched.slice(0, query.limit);
+    if (hasMore && filtered.length > 0) {
+      nextChangedSince = filtered[filtered.length - 1].date;
+    }
+  }
 
   return {
     schemaVersion: PAYMENT_MONITOR_SCHEMA_VERSION,
@@ -139,7 +153,8 @@ export function createPaymentMonitorEnvelope(
     ...providerRows(filtered.map((event) => toRow(event, bySlug)), changelog, bySlug, mode),
     totalEvents: changelog.length,
     generatedAt: generatedAtIso,
-    nextChangedSince: generatedAtIso.slice(0, 10),
+    hasMore,
+    nextChangedSince,
     notice: { ...PAYMENT_MONITOR_NOTICE },
     licenseNotice: PAYMENT_MONITOR_LICENSE_NOTICE,
   };

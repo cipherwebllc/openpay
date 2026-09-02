@@ -133,7 +133,11 @@ const SERVICE_MONITOR_OUTPUT = {
         type: 'object',
         properties: {
           date: { type: 'string', description: 'YYYY-MM-DD' },
-          slug: { type: 'string' },
+          slug: { type: 'string', description: 'Present when the event is tied to a directory entry.' },
+          provider: {
+            type: 'string',
+            description: 'Present instead of slug for industry events not tied to a directory entry.',
+          },
           changeType: {
             type: 'string',
             enum: ['added', 'updated', 'removed', 'verified'],
@@ -161,15 +165,20 @@ const SERVICE_MONITOR_OUTPUT = {
             },
           },
         },
-        required: ['date', 'slug', 'changeType', 'summary'],
+        required: ['date', 'changeType', 'summary'],
       },
     },
     totalServices: { type: 'integer' },
     generatedAt: { type: 'string' },
+    hasMore: {
+      type: 'boolean',
+      description:
+        'True when this response was truncated by limit; more events exist beyond nextChangedSince.',
+    },
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call to fetch only new events (inclusive; duplicates are removed by the documented dedupe key).',
+        'Echo this value as changedSince on your next call to fetch only new events (inclusive; duplicates are removed by the documented dedupe key). When hasMore is true, this is the date of the last event in this response (not the response generation time), so the truncated remainder is included on the next call.',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },
@@ -183,6 +192,7 @@ const SERVICE_MONITOR_OUTPUT = {
     'changes',
     'totalServices',
     'generatedAt',
+    'hasMore',
     'nextChangedSince',
     'notice',
     'licenseNotice',
@@ -309,10 +319,15 @@ const PAYMENT_MONITOR_OUTPUT = {
     },
     totalEvents: { type: 'integer' },
     generatedAt: { type: 'string' },
+    hasMore: {
+      type: 'boolean',
+      description:
+        'True when this response was truncated by limit; more events exist beyond nextChangedSince.',
+    },
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call to fetch only new events (inclusive; duplicates are removed by the documented dedupe key).',
+        'Echo this value as changedSince on your next call to fetch only new events (inclusive; duplicates are removed by the documented dedupe key). When hasMore is true, this is the date of the last event in this response (not the response generation time), so the truncated remainder is included on the next call.',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },
@@ -324,6 +339,7 @@ const PAYMENT_MONITOR_OUTPUT = {
     'changes',
     'totalEvents',
     'generatedAt',
+    'hasMore',
     'nextChangedSince',
     'notice',
     'licenseNotice',

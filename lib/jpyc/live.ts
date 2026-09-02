@@ -152,6 +152,10 @@ export type TransfersResult = ChainRowBase &
         truncated: boolean;
       }
     | { status: 'unavailable'; errorCode: JpycLiveErrorCode; retryable: boolean }
+    /** cursor.block が現在の chain head (toBlock) より新しい = 存在しない未来の位置。
+     * items:[] のまま同じ cursor を echo し続けると買い手が空振り課金し続けるので、
+     * 通常の cursor 形式不正と同じ 400 扱いにする (route が invalidQuery() を返す)。 */
+    | { status: 'invalid_cursor' }
   );
 
 // ---------- 入力の検証 (純関数・route は支払い要求より先にこれで 400 を返す) ----------
@@ -358,9 +362,21 @@ export async function readTransfers(
 ): Promise<TransfersResult> {
   const dep = deploymentFor(chain);
   const base: ChainRowBase = { chain, chainId: dep.chainId, contract: dep.address };
+  type TransferContent =
+    | { kind: 'invalid_cursor' }
+    | {
+        kind: 'ok';
+        fromBlock: string;
+        toBlock: string;
+        items: TransferItem[];
+        mode: 'snapshot' | 'delta';
+        nextCursor: string;
+        hasMore: boolean;
+        truncated: boolean;
+      };
   try {
-    const result = await withTimeout(
-      (async () => {
+    const result = await withTimeout<TransferContent>(
+      (async (): Promise<TransferContent> => {
         const client = clientFor(dep.chainId);
         const toBlock = await client.getBlockNumber();
         const window = TRANSFER_WINDOW_BLOCKS[chain];
@@ -368,6 +384,12 @@ export async function readTransfers(
         // cursor があれば走査の下端を cursor.block まで縮める (それより古い block は読まない)。
         // cursor が窓より古い場合は窓の下端までしか読めない = truncated。
         const cursor = opts.cursor;
+        // cursor が現在の chain head より新しい = 未来の位置 (存在しない)。空の範囲で
+        // items:[] を返すと同じ cursor が echo され続け、買い手が空振り課金し続ける
+        // (E10)。settle 前の content フェーズなので、ここで打ち切れば課金されない。
+        if (cursor !== undefined && cursor.block > toBlock) {
+          return { kind: 'invalid_cursor' };
+        }
         const truncated = cursor !== undefined && cursor.block < fromBlock;
         const scanFrom =
           cursor !== undefined && cursor.block > fromBlock ? cursor.block : fromBlock;
@@ -456,6 +478,7 @@ export async function readTransfers(
             : { block: toBlock, logIndex: -1 };
         if (cursor !== undefined && !isNewerThan(next.block, next.logIndex, cursor)) next = cursor;
         return {
+          kind: 'ok',
           fromBlock: fromBlock.toString(),
           toBlock: toBlock.toString(),
           items,
@@ -466,7 +489,9 @@ export async function readTransfers(
         };
       })(),
     );
-    return { ...base, status: 'ok', ...result };
+    if (result.kind === 'invalid_cursor') return { ...base, status: 'invalid_cursor' };
+    const { kind: _kind, ...rest } = result;
+    return { ...base, status: 'ok', ...rest };
   } catch (e) {
     return { ...base, status: 'unavailable', ...classifyFailure(e, { op: 'transfers', chain }) };
   }

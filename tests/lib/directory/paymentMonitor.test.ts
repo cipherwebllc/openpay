@@ -100,6 +100,34 @@ describe('createPaymentMonitorEnvelope', () => {
     );
     expect(empty.nextChangedSince).toBe('2026-08-27');
   });
+
+  // E3: limit で打ち切られた delta は打ち切り分を永久に取りこぼさない — nextChangedSince を
+  // generatedAt でなく最後に返したイベントの date にし、hasMore で「続きがある」を明示する。
+  it('E3: limit で打ち切られた delta は hasMore:true・nextChangedSince=最後に返したイベントの date', () => {
+    // 2026-08-10 (dg-sps launch) + 2026-08-26 (大阪府 3 件) = 4 件を limit=2 で切る。
+    const capped = createPaymentMonitorEnvelope(
+      { changedSince: '2026-08-10', limit: 2 },
+      NOW,
+    );
+    expect(capped.changes).toHaveLength(2);
+    expect(capped.hasMore).toBe(true);
+    expect(capped.nextChangedSince).toBe(capped.changes[1].date);
+    expect(capped.nextChangedSince).not.toBe(NOW.slice(0, 10));
+
+    const uncapped = createPaymentMonitorEnvelope(
+      { changedSince: '2026-08-10', limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+    );
+    expect(uncapped.hasMore).toBe(false);
+    expect(uncapped.nextChangedSince).toBe(NOW.slice(0, 10));
+  });
+
+  it('E3: snapshot の hasMore は「全イベント数 > limit」・nextChangedSince は常に generatedAt', () => {
+    const total = createPaymentMonitorEnvelope(Q, NOW).totalEvents;
+    const capped = createPaymentMonitorEnvelope({ limit: 1 }, NOW);
+    expect(capped.hasMore).toBe(total > 1);
+    expect(capped.nextChangedSince).toBe(NOW.slice(0, 10));
+  });
 });
 
 // 事業者の現況行 providers (2026-09-02 裁定 2/2): 固定項目・null = 確認したが公表なし・

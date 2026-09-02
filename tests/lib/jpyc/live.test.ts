@@ -345,6 +345,22 @@ describe('readTransfers', () => {
     }
   });
 
+  it('E10: cursor.block が現在の chain head (toBlock) より新しいと status=invalid_cursor・getLogs を呼ばない (空振り課金の防止)', async () => {
+    const getLogs = vi.fn().mockResolvedValue([]);
+    setAll(() => okClient({ getLogs })); // getBlockNumber は既定の 1_000_000n
+    const slug = JPYC_CHAINS[0];
+    const r = await readTransfers(slug, { limit: 20, cursor: { block: 1_000_001n, logIndex: 0 } });
+    expect(r.status).toBe('invalid_cursor');
+    expect(getLogs).not.toHaveBeenCalled();
+  });
+
+  it('E10: cursor.block === toBlock (現在の head と同一) は invalid_cursor にならない (境界値)', async () => {
+    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    const slug = JPYC_CHAINS[0];
+    const r = await readTransfers(slug, { limit: 20, cursor: { block: 1_000_000n, logIndex: -1 } });
+    expect(r.status).toBe('ok');
+  });
+
   it('RPC 失敗は throw せず status=error で返す', async () => {
     setAll(() => okClient({ getLogs: vi.fn().mockRejectedValue(new Error('rate limited')) }));
     const r = await readTransfers(JPYC_CHAINS[0], { limit: 5 });

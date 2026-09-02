@@ -34,6 +34,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (!chain) return invalidQuery();
     const result = await readTransfers(chain, { limit, address, cursor });
     if (result.status === 'unavailable') return rpcUnavailable();
+    // cursor が現在の chain head より新しい (未来の位置) は通常の cursor 形式不正と同じ 400。
+    // まだ settle 前 (gate 内の content フェーズ) なので買い手は課金されない (E10)。
+    if (result.status === 'invalid_cursor') return invalidQuery();
     const { status: _status, ...rest } = result;
     return envelope(rest);
   });

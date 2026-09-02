@@ -9,7 +9,7 @@ import {
   USDC_DIRECTORY_SEARCH_BAZAAR,
   USDC_DIRECTORY_LIST_BAZAAR,
 } from '@/lib/directory/usdcResource';
-import { validateDirectoryQuery } from '@/lib/directory/query';
+import { QUERY_KEYS, validateDirectoryQuery } from '@/lib/directory/query';
 import {
   DIRECTORY_CATEGORIES,
   DIRECTORY_CHAINS,
@@ -45,6 +45,10 @@ describe('USDC directory の bazaar 宣言は実装と一致する', () => {
   it('queryParams の例示値はそのまま有効なクエリである', () => {
     const sp = new URLSearchParams(USDC_DIRECTORY_SEARCH_BAZAAR.queryParams);
     expect(validateDirectoryQuery(sp).ok).toBe(true);
+  });
+
+  it('E27: 宣言した引数キー集合は実装の QUERY_KEYS と完全一致する (欠落キーの取りこぼし検出)', () => {
+    expect(Object.keys(props).sort()).toEqual([...QUERY_KEYS].sort());
   });
 
   it('宣言しない引数は実装も拒否する (宣言が「全部」であることの裏取り)', () => {

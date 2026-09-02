@@ -88,6 +88,11 @@ export const USDC_DIRECTORY_SEARCH_BAZAAR = {
       supportsUsdc: { type: 'string', enum: ['true', 'false'] },
       supportsX402: { type: 'string', enum: ['true', 'false'] },
       supportsMcp: { type: 'string', enum: ['true', 'false'] },
+      status: {
+        type: 'string',
+        description: 'Only published entries can be returned, regardless of this filter.',
+        enum: ['draft', 'review', 'published', 'rejected', 'archived'],
+      },
       limit: { type: 'string', description: '1-50 (default 20)' },
       offset: { type: 'string', description: '0-1000 (default 0)' },
     },
@@ -159,6 +164,7 @@ const SERVICE_MONITOR_DELTA_EXAMPLE = {
   ],
   totalServices: 20,
   generatedAt: '2026-08-27T01:23:45.000Z',
+  hasMore: false,
   nextChangedSince: '2026-08-27',
   notice: {
     code: 'sourced-facts-only',
@@ -241,6 +247,7 @@ const PAYMENT_MONITOR_DELTA_EXAMPLE = {
   ],
   totalEvents: 7,
   generatedAt: '2026-08-27T02:00:00.000Z',
+  hasMore: false,
   nextChangedSince: '2026-08-27',
   notice: {
     code: 'sourced-facts-only',

@@ -12,6 +12,7 @@ import {
   SERVICE_DIFF_FIELDS,
   SERVICE_MONITOR_MAX_LIMIT,
 } from '@/lib/directory/serviceMonitor';
+import { JPYC_SERVICES_RESOURCE } from '@/lib/directory/paidResources';
 
 const NOW = '2026-08-27T01:00:00.000Z';
 
@@ -41,6 +42,23 @@ describe('parseServiceMonitorQuery', () => {
     expect(parseServiceMonitorQuery(params('limit=200'))?.limit).toBe(200);
     for (const bad of ['0', '201', '-1', '1.5', 'abc']) {
       expect(parseServiceMonitorQuery(params(`limit=${bad}`))).toBeNull();
+    }
+  });
+
+  // E4: openapi/Bazaar は changedSince/limit の 2 引数だけを宣言する。宣言に無いキーを
+  // 黙って無視すると「宣言と実装がずれても気づけない」ため未知キーは 400 にする。
+  it('宣言 (changedSince/limit) 以外のキーは null (未知キーは黙って無視しない)', () => {
+    expect(parseServiceMonitorQuery(params('since=2026-08-20'))).toBeNull();
+    expect(parseServiceMonitorQuery(params('changedSince=2026-08-20&extra=1'))).toBeNull();
+  });
+
+  // E4: 2026-02-30 のような形式は正しいが実在しない日付を Date.UTC の round-trip で弾く。
+  it('changedSince は暦上の実在日のみ受理する (2026-02-30 等は null)', () => {
+    expect(parseServiceMonitorQuery(params('changedSince=2026-02-28'))?.changedSince).toBe(
+      '2026-02-28',
+    );
+    for (const bad of ['2026-02-30', '2026-13-01', '2026-00-10', '2026-04-31']) {
+      expect(parseServiceMonitorQuery(params(`changedSince=${bad}`))).toBeNull();
     }
   });
 });
@@ -153,6 +171,45 @@ describe('createServiceMonitorEnvelope', () => {
     expect(env.changes.length).toBe(3);
   });
 
+  // E3: limit で打ち切られた delta は「取りこぼしを永久ロス」しない — nextChangedSince を
+  // generatedAt でなく最後に返したイベントの date にし、hasMore で「まだ続きがある」を明示する。
+  it('E3: limit で打ち切られた delta は hasMore:true・nextChangedSince=最後に返したイベントの date', () => {
+    const baselineDate = serviceChangelog()[0].date;
+    const capped = createServiceMonitorEnvelope(
+      { changedSince: baselineDate, limit: 3 },
+      {},
+      NOW,
+    );
+    expect(capped.hasMore).toBe(true);
+    expect(capped.nextChangedSince).toBe(capped.changes[2].date);
+    // generatedAt の日付そのものではない (打ち切り分を取りこぼさないための差し替え)。
+    expect(capped.nextChangedSince).not.toBe(NOW.slice(0, 10));
+
+    const uncapped = createServiceMonitorEnvelope(
+      { changedSince: baselineDate, limit: SERVICE_MONITOR_MAX_LIMIT },
+      {},
+      NOW,
+    );
+    expect(uncapped.hasMore).toBe(false);
+    expect(uncapped.nextChangedSince).toBe(NOW.slice(0, 10));
+  });
+
+  it('E3: snapshot の hasMore は「全イベント数 > limit」', () => {
+    const total = serviceChangelog().length;
+    const capped = createServiceMonitorEnvelope({ limit: 1 }, {}, NOW);
+    expect(capped.hasMore).toBe(total > 1);
+    // snapshot は打ち切られても nextChangedSince を generatedAt のまま維持する
+    // (snapshot に changedSince の概念が無いため、changes の date に差し替える意味が無い)。
+    expect(capped.nextChangedSince).toBe(NOW.slice(0, 10));
+
+    const uncapped = createServiceMonitorEnvelope(
+      { limit: SERVICE_MONITOR_MAX_LIMIT },
+      {},
+      NOW,
+    );
+    expect(uncapped.hasMore).toBe(total > SERVICE_MONITOR_MAX_LIMIT);
+  });
+
   it('検証スナップショットの sourceCheckedAt/sourceOk が行に載る (URL 一致時のみ)', () => {
     const entry = DIRECTORY_ENTRIES.find((e) => e.status === 'published')!;
     const env = createServiceMonitorEnvelope(
@@ -202,5 +259,39 @@ describe('ServiceChangeEvent.diffs (値レベルの差分)', () => {
     const base = serviceChangelog().find((e) => e.changeType === 'added' && !e.diffs)!;
     expect(base).toBeDefined();
     expect('diffs' in base).toBe(false);
+  });
+});
+
+// E26: SERVICE_MONITOR_OUTPUT (paidResources.ts の Bazaar/openapi 向け宣言) の
+// changes.items.required は「実際のイベントに常に存在するキー」の部分集合でなければならない。
+// slug はディレクトリエントリに紐づかない業界イベント (provider のみ) では欠落し得るので
+// 必須にしてはいけない (serviceMonitor.ts:75-77 の slug?/provider?)。
+describe('SERVICE_MONITOR_OUTPUT スキーマ (E26): required ⊆ 常に存在するキー', () => {
+  const itemSchema = JPYC_SERVICES_RESOURCE.outputSchema.output as unknown as {
+    properties: {
+      changes: {
+        items: { required: readonly string[]; properties: Record<string, unknown> };
+      };
+    };
+  };
+  const changeItemSchema = itemSchema.properties.changes.items;
+
+  it('required に slug を含まない (provider-only イベントを許す)・provider が properties にある', () => {
+    expect(changeItemSchema.required).not.toContain('slug');
+    expect(changeItemSchema.properties).toHaveProperty('provider');
+    expect(changeItemSchema.properties).toHaveProperty('slug');
+  });
+
+  it('required の全キーは実際の envelope イベント全件に常に存在する (snapshot で検証)', () => {
+    const env = createServiceMonitorEnvelope({ limit: SERVICE_MONITOR_MAX_LIMIT }, {}, NOW);
+    expect(env.changes.length).toBeGreaterThan(0);
+    for (const event of env.changes) {
+      for (const key of changeItemSchema.required) {
+        expect(
+          event,
+          `${key} が欠けているイベントがある: ${JSON.stringify(event)}`,
+        ).toHaveProperty(key);
+      }
+    }
   });
 });

@@ -22,7 +22,8 @@ export const DIRECTORY_MAX_KEYWORD_LENGTH = 100;
 export const DIRECTORY_LICENSE_NOTICE =
   'Directory metadata is provided for informational purposes. Verify current details with each cited source before use. sourceOk reports source URL reachability only, not whether the information is true.';
 
-const QUERY_KEYS = new Set([
+/** 受理するクエリキーの単一情報源 (openapi/Bazaar 宣言がここからずれると 400 を踏む)。 */
+export const QUERY_KEYS = new Set([
   'keyword',
   'category',
   'token',

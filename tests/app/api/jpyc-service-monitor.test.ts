@@ -79,6 +79,17 @@ describe('GET /api/paid/usdc/jpyc/services (test mode)', () => {
     }
   });
 
+  // E4: openapi/Bazaar は changedSince/limit の 2 引数だけを宣言する。未知キーや暦上
+  // 実在しない日付を黙って通すと宣言とのずれに気づけないので、支払い要求より先に 400。
+  it('E4: 未知キー・暦上実在しない日付は 400 (402/署名より先に弾く)', async () => {
+    const route = await loadUsdc();
+    for (const qs of ['?since=2026-08-20', '?changedSince=2026-08-20&extra=1', '?changedSince=2026-02-30']) {
+      const res = await route.GET(req(PATH, qs));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error: 'invalid_query' });
+    }
+  });
+
   it('snapshot: mode=snapshot・全 published 行 + baseline changes', async () => {
     const route = await loadUsdc();
     const res = await route.GET(req(PATH));
@@ -126,6 +137,13 @@ describe('GET /api/paid/jpyc/services (facilitator gate)', () => {
     const route = await loadJpyc();
     const res = await route.GET(req(PATH, '?changedSince=nope'));
     expect(res.status).toBe(400);
+  });
+
+  it('E4: 未知キー・暦上実在しない日付は 400 (402 より先)', async () => {
+    const route = await loadJpyc();
+    for (const qs of ['?since=2026-08-20', '?changedSince=2026-02-30']) {
+      expect((await route.GET(req(PATH, qs))).status).toBe(400);
+    }
   });
 
   it('支払いなし → 402。accepts の resource は本 route・価格 2 JPYC + 手数料', async () => {
