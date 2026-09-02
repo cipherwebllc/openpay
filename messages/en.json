@@ -167,7 +167,7 @@
     "cashFlowNote": "1 JPYC = ¥1.00 (1:1 peg). Redeem at <jpycEx>JPYC EX</jpycEx>.",
     "cashSimTitle": "How much do you keep?",
     "cashSimMonthlyLabel": "Monthly sales",
-    "cashSimManValue": "¥{yen}",
+    "cashSimManValue": "¥{value}",
     "cashSimCompareLabel": "Your current method",
     "cashSimChipCard": "Card 3.24%",
     "cashSimChipCode": "QR pay 1.98%",

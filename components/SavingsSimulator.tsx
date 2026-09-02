@@ -66,9 +66,11 @@ export function SavingsSimulator() {
             {t('cashSimMonthlyLabel')}
           </label>
           <span className="tabular-nums text-sm font-bold text-slate-900">
+            {/* ja/en とも同じ引数名 {value} を使う (ja=万円の数値・en=full 円の
+                カンマ区切り)。引数名が locale ごとに違うと、片方を落としたときに
+                片方の locale だけ壊れて気付けない。 */}
             {t('cashSimManValue', {
-              man: monthlyMan,
-              yen: formatYen(monthlyYen),
+              value: isJa ? monthlyMan : formatYen(monthlyYen),
             })}
           </span>
         </div>
