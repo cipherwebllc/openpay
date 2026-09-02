@@ -231,11 +231,40 @@ describe('env to options characterization', () => {
     { ALLOWED_HOSTS: 'https://open-pay.jp' },
     { BUYER_PRIVATE_KEY: '0x1234' },
     { DISCOVERY_URL: 'ftp://open-pay.jp/catalog' },
+    { DISCOVERY_URL: 'http://catalog.example/api/discovery' },
   ])('throws at the same point with the same message for %#', async (env) => {
     const sdk = await loadModule<GuardsModule>(SDK_DIR, 'guards.mjs');
     expect(
       outcome(() => sdk.parseClientOptions?.(equivalentOptions(env))),
     ).toEqual(outcome(() => sdk.readRuntimeConfig(env)));
+  });
+
+  // B14: DISCOVERY_URL は catalog trust の権威 (載っている URL は ALLOWED_HOSTS 無しで
+  // 支払える) なので、平文 http で差し替えられると攻撃者のカタログが「審査済み」に化ける。
+  // http はローカル開発 (localhost / 127.0.0.1) だけに限る。
+  it.each([
+    ['https://catalog.example/api/discovery', true],
+    ['http://localhost:3900/api/discovery', true],
+    ['http://127.0.0.1:3900/api/discovery', true],
+    ['http://catalog.example/api/discovery', false],
+    ['http://open-pay.jp/api/discovery', false],
+    ['http://127.0.0.2/api/discovery', false],
+    ['http://localhost.evil.example/api/discovery', false],
+  ])('DISCOVERY_URL %s accepted=%s', async (DISCOVERY_URL, accepted) => {
+    const sdk = await loadModule<GuardsModule>(SDK_DIR, 'guards.mjs');
+    const result = outcome(() => sdk.readRuntimeConfig({ DISCOVERY_URL }));
+    if (accepted) {
+      expect(result.type).toBe('return');
+    } else {
+      expect(result).toEqual({
+        type: 'throw',
+        message: 'DISCOVERY_URL must use https (http is allowed only for localhost)',
+      });
+    }
+    // options 経路 (parseClientOptions) も同じ判定であること。
+    expect(outcome(() => sdk.parseClientOptions?.({ discoveryUrl: DISCOVERY_URL }))).toEqual(
+      result,
+    );
   });
 
   it('creates the same valid local signer from env and options', async () => {

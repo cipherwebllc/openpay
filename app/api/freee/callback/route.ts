@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { freeeEnv, exchangeCode, getCompanies } from '@/lib/freee';
 import { logger } from '@/lib/logger';
 import { env as appEnv } from '@/lib/env';
+import { safeInternalPath } from '@/lib/url/shared';
 import { requireSession } from '../../auth/siwe/_session';
 import { consumeState, setToken, setMeta, getMeta, delMapping } from '../_store';
 
@@ -79,10 +80,8 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   // returnTo は authorize で相対パス検証済だが、redirect を実行する**この地点でも再検証**する
   // (永続化した値を信頼しない・同一オリジン相対パスのみ許可で open-redirect を多層防御。
-  //  '//evil' や 'https://evil' は弾いて '/' に倒す)。
-  const ret = stateValue.returnTo;
-  const safeReturn =
-    typeof ret === 'string' && ret.startsWith('/') && !ret.startsWith('//') ? ret : '/';
+  //  '//evil' / '/\evil' / 'https://evil' は弾いて '/' に倒す)。判定は safeInternalPath が SoT。
+  const safeReturn = safeInternalPath(stateValue.returnTo) ?? '/';
   const dest = new URL(safeReturn, req.url);
   dest.searchParams.set('freee', 'connected');
   return NextResponse.redirect(dest);

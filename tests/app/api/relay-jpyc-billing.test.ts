@@ -76,6 +76,8 @@ vi.mock('@/lib/env', async (importOriginal) => {
     env: {
       ...actual.env,
       feeReceiver: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      // relay POST は status route と同じく flag + provider の双方を要求する (A5)。
+      enableJpycEip3009: true,
       enableBilling: true,
       enableUsageFee: true,
       feeReceiverConfigured: true,

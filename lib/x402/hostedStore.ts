@@ -573,6 +573,10 @@ export async function getHostedContent(
     const r = parsed as Record<string, unknown>;
     if (r.kind !== 'url' && r.kind !== 'text') return null;
     if (typeof r.value !== 'string' || r.value.length === 0) return null;
+    // 保存値は書込時に https 検証済みだが、読出でも再検証する (KV 改竄や旧レコードの
+    // javascript:/data: が購入者ブラウザの遷移先に化けるのを、配信の直前で断つ。
+    // imageUrl の読出再検証と同じ方針)。
+    if (r.kind === 'url' && !isHttpsUrl(r.value)) return null;
     return { kind: r.kind, value: r.value };
   } catch {
     return null;

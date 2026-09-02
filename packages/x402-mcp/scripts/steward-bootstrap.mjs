@@ -98,9 +98,12 @@ const tenantHeaders = (extra = {}) => ({
   ...extra,
 });
 
-async function jsonOrThrow(res, label) {
+export async function jsonOrThrow(res, label) {
   const body = await res.json().catch(() => ({}));
-  if (!res.ok && body?.ok !== true) {
+  // Steward の API は成功時に必ず ok:true を返す。&& だと「HTTP 200 + ok:false」も
+  // 「HTTP 5xx + ok:true」も成功扱いになり、失敗した段階 (owner 昇格・MFA・signer 発行) を
+  // 素通りして後段が意味不明に壊れる。setAndVerifyJpycPolicy と同じ || 判定に揃える。
+  if (!res.ok || body?.ok !== true) {
     throw new Error(`${label} failed (${res.status}): ${JSON.stringify(body).slice(0, 200)}`);
   }
   return body;

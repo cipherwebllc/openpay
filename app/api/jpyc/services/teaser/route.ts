@@ -8,6 +8,7 @@ import { env } from '@/lib/env';
 import { JPYC_SERVICES_RESOURCE } from '@/lib/directory/paidResources';
 import {
   createServiceMonitorEnvelope,
+  scopedChangelog,
   SERVICE_MONITOR_MAX_LIMIT,
 } from '@/lib/directory/serviceMonitor';
 import { USDC_SERVICE_MONITOR } from '@/lib/directory/usdcResource';
@@ -34,7 +35,10 @@ export async function GET(): Promise<NextResponse> {
       product: 'jpyc-service-monitor',
       teaser: true,
       latestChanges: full.changes.slice(-TEASER_EVENTS),
-      totalEvents: full.changes.length,
+      // full.changes は limit で切られた view なので総数の権威にならない (件数が
+      // SERVICE_MONITOR_MAX_LIMIT を超えると開示が過少になる)。changelog の実数を使う
+      // (payments teaser が full.totalEvents を使うのと同じ意味)。
+      totalEvents: scopedChangelog('jpyc-services').length,
       totalServices: full.totalServices,
       generatedAt: full.generatedAt,
       fullFeed: {

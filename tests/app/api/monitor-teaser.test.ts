@@ -7,6 +7,7 @@ import {
   JPYC_PAYMENTS_RESOURCE,
   JPYC_SERVICES_RESOURCE,
 } from '@/lib/directory/paidResources';
+import { scopedChangelog } from '@/lib/directory/serviceMonitor';
 import {
   USDC_PAYMENT_MONITOR,
   USDC_SERVICE_MONITOR,
@@ -51,6 +52,9 @@ describe('monitor teasers', () => {
     expect(body.teaser).toBe(true);
     expect(body.latestChanges).toHaveLength(3);
     expect(body.totalEvents).toBeGreaterThan(3); // teaser が全量でないことの開示
+    // E28: totalEvents は limit で切られた view (envelope.changes) ではなく changelog の実数。
+    // limit 上限を超えて成長したときに開示が過少にならないよう SoT に固定する。
+    expect(body.totalEvents).toBe(scopedChangelog('jpyc-services').length);
     // 有料版の価値をここに出さない。
     expect(body).not.toHaveProperty('services');
     expect(body).not.toHaveProperty('changes');

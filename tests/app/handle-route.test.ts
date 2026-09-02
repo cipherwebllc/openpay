@@ -7,7 +7,14 @@ const h = vi.hoisted(() => ({
   enableHandles: true,
   kvConfigured: true,
   authed: true,
+  rateLimitAllowed: true,
 }));
+
+vi.mock('@/lib/relay/relayGuards', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/relay/relayGuards')>();
+  return { ...actual, checkReadRateLimit: async () => h.rateLimitAllowed };
+});
 
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -80,6 +87,7 @@ beforeEach(() => {
   h.enableHandles = true;
   h.kvConfigured = true;
   h.authed = true;
+  h.rateLimitAllowed = true;
   vi.clearAllMocks();
 });
 
@@ -743,6 +751,15 @@ describe('GET /api/handle/[handle] (availability)', () => {
   it('flag OFF → 404', async () => {
     h.enableHandles = false;
     expect((await availGET(new Request('http://x'), params('alice'))).status).toBe(404);
+  });
+  // C10: 無認証・無制限の read は @handle 空間の総当り列挙と KV read 圧力を招く。
+  // IP 固定窓を store 参照の前に置く (429・列挙結果は返さない)。
+  it('IP 固定窓の上限超過 → 429 rate_limited (store に触れない)', async () => {
+    h.rateLimitAllowed = false;
+    const res = await availGET(new Request('http://x'), params('alice'));
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ ok: false, error: 'rate_limited' });
+    expect(store.resolveHandle).not.toHaveBeenCalled();
   });
 });
 

@@ -563,6 +563,33 @@ describe('hosted 更新・revision・moderation', () => {
     });
   });
 
+  // D2: 書込時に https 検証済みでも、読出側で scheme を再検証する。KV 改竄や旧レコードの
+  // javascript:/data: が購入者の遷移先として配信されるのを配信直前で断つ (imageUrl と同じ方針)。
+  it.each([
+    ['javascript:alert(1)'],
+    ['data:text/html,<script>alert(1)</script>'],
+    ['http://r2.example.com/a.pdf'],
+  ])('url content の読出で非 https (%s) は null に倒す', async (value) => {
+    const { m, id } = await seed({
+      contentKind: 'url',
+      content: 'https://r2.example.com/a.pdf',
+    });
+    // 書込経路を迂回して KV の生値を差し替える (改竄 / 旧レコードの再現)。
+    kvMocks.store.set(m.hostedContentKey(id, 1), JSON.stringify({ kind: 'url', value }));
+    expect(await m.getHostedContent(id, 1)).toBeNull();
+  });
+
+  it('url content の読出は https ならそのまま返す', async () => {
+    const { m, id } = await seed({
+      contentKind: 'url',
+      content: 'https://r2.example.com/a.pdf',
+    });
+    expect(await m.getHostedContent(id, 1)).toEqual({
+      kind: 'url',
+      value: 'https://r2.example.com/a.pdf',
+    });
+  });
+
   it('content 編集は新 revision を作り、旧 revision を消さない', async () => {
     const { m, id } = await seed();
     const res = await m.putHostedContentRevision({

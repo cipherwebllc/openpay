@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireCronAuth } from '@/lib/cronAuth';
 import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
 import { publishedDirectoryEntries } from '@/lib/directory/query';
 import {
@@ -226,9 +227,8 @@ async function runDirectoryVerification(
 }
 
 export async function GET(req: Request): Promise<NextResponse> {
-  // CRON_SECRET は server route だけが直接読む。client 共有 env object には載せない。
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret || req.headers.get('authorization') !== `Bearer ${cronSecret}`) {
+  // cron 認証は lib/cronAuth に集約 (CRON_SECRET は server 専用・比較は timing-safe)。
+  if (!requireCronAuth(req)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 

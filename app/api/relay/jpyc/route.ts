@@ -181,8 +181,10 @@ function scheduleTipMessageStorage(input: {
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
-  // relay 未構成なら早期に signal (client が fallback 判定できるよう専用コード)。
-  if (PROVIDER === null) {
+  // relay 未構成 / flag OFF なら早期に signal (client が fallback 判定できるよう専用コード)。
+  // flag は status route (/api/relay/jpyc/status) と同じ条件を敷き、client が relay を選べない
+  // 環境で直接 POST だけが通る非対称を消す。応答形は既存の未構成ケースと byte-identical。
+  if (!env.enableJpycEip3009 || PROVIDER === null) {
     return NextResponse.json(
       { ok: false, error: 'relay_not_configured' },
       { status: 503 },

@@ -167,9 +167,20 @@ function parseHttpUrl(raw, label) {
   }
 }
 
-function requireHttpUrl(raw, label) {
+// DISCOVERY_URL は catalog trust の権威 (ここに載る URL は ALLOWED_HOSTS への手動追加なしで
+// 支払える)。平文 http はネットワーク上で差し替え可能なので、攻撃者のカタログが「審査済み」に
+// 化けて支払い先を乗っ取る波及を断つため https に限る。例外はローカル開発 (localhost /
+// 127.0.0.1) のみ — 自機の facilitator/カタログを立てて配線を確かめる用途。
+function requireDiscoveryUrl(raw, label) {
   const url = parseHttpUrl(raw, label);
   if (url === null) throw new Error(`${label} must be an http(s) URL`);
+  if (
+    url.protocol === 'http:' &&
+    url.hostname !== 'localhost' &&
+    url.hostname !== '127.0.0.1'
+  ) {
+    throw new Error(`${label} must use https (http is allowed only for localhost)`);
+  }
   return url.toString();
 }
 
@@ -206,7 +217,7 @@ export function readMoneyConfig(env = process.env) {
 export function readRuntimeConfig(env = process.env) {
   return {
     ...readMoneyConfig(env),
-    discoveryUrl: requireHttpUrl(
+    discoveryUrl: requireDiscoveryUrl(
       nonEmpty(env.DISCOVERY_URL) ?? DEFAULT_DISCOVERY_URL,
       'DISCOVERY_URL',
     ),
@@ -264,7 +275,7 @@ export function parseClientOptions(options = {}) {
         : parseJpycToAtomic(options.maxDailyJpyc, 'MAX_DAILY_JPYC'),
     allowedHosts: parseAllowedHosts(options.allowedHosts),
     catalogTrust: options.catalogTrust ?? DEFAULT_CATALOG_TRUST,
-    discoveryUrl: requireHttpUrl(
+    discoveryUrl: requireDiscoveryUrl(
       nonEmpty(options.discoveryUrl) ?? DEFAULT_DISCOVERY_URL,
       'DISCOVERY_URL',
     ),
