@@ -219,6 +219,41 @@ const PAYMENT_MONITOR_OUTPUT = {
         'snapshot = full dated history (no changedSince). delta = only events on/after changedSince; changes:[] explicitly means no change.',
     },
     query: { type: 'object' },
+    providers: {
+      type: 'array',
+      description:
+        'Current state of each monitored provider on a fixed set of fields, re-checked weekly. null = checked but not published by the source (never inferred). snapshot: all providers; delta: only providers that appear in changes.',
+      items: {
+        type: 'object',
+        properties: {
+          provider: { type: 'string' },
+          slug: { type: 'string' },
+          stage: { type: 'string', enum: ['partnership', 'pilot', 'commercial', 'closed'] },
+          assets: { type: 'array', items: { type: 'string' } },
+          chains: { type: 'array', items: { type: 'string' } },
+          settlementCurrency: { type: ['string', 'null'] },
+          merchantFee: { type: ['string', 'null'] },
+          integrations: {
+            type: 'array',
+            items: { type: 'string', enum: ['api', 'in-store', 'ec', 'wallet'] },
+          },
+          posIntegration: { type: ['boolean', 'null'] },
+          region: { type: ['string', 'null'] },
+          announcedAt: { type: 'string', description: 'YYYY-MM-DD' },
+          startedAt: { type: ['string', 'null'] },
+          plannedPeriod: { type: ['string', 'null'], description: 'e.g. 2027-01..2027-03' },
+          sourceUrl: { type: 'string' },
+          verifiedAt: { type: 'string', description: 'YYYY-MM-DD, last re-check of the source' },
+          lastEventDate: { type: 'string', description: 'YYYY-MM-DD' },
+        },
+        required: [
+          'provider', 'stage', 'assets', 'chains', 'settlementCurrency', 'merchantFee',
+          'integrations', 'posIntegration', 'region', 'announcedAt', 'startedAt',
+          'plannedPeriod', 'sourceUrl', 'verifiedAt', 'lastEventDate',
+        ],
+      },
+    },
+    totalProviders: { type: 'integer' },
     changes: {
       type: 'array',
       items: {
