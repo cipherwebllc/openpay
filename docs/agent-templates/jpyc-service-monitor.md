@@ -27,6 +27,7 @@ A weekly change feed for Japan-related JPYC/Web3 services, designed to be wired 
 - `changedSince` は **YYYY-MM-DD・その日を含む**。省略すると全件スナップショット(`mode: "snapshot"`)。**応答の `nextChangedSince` をそのまま次回に渡すのが正**(取りこぼしなし)
 - **無料 teaser(購入前に実データを確認・支払い不要)**: `GET /api/jpyc/services/teaser` / `GET /api/stablecoin-payments/teaser`(直近 3 イベント)
 - **買う前に確かめる(空振り課金ゼロ)**: teaser の最終イベント日が手元の `nextChangedSince` より**前(古い)なら**その週は買わない(有料 delta は空になる)。同日以降のイベントがあるときだけ有料 delta を購入する — 「変更なし」に支払う週が無くなります
+- **変更は値でも返ります**: 一次ソースが前後の値を明示する場合、`diffs: [{ field, previousValue, currentValue, effectiveAt? }]`(field は assets / chains / fee / limit / status / feature の固定語彙)が付きます。推測では埋めません(無い場合は summary のみ)
 - 重複排除キーは `slug + date + changeType`
 - OpenAPI(機械可読・`x-agent-usage` つき): `https://open-pay.jp/api/openapi.json`(operationId: `getJpycServiceMonitor` / `getJpycServiceMonitorUsdc`)
 - 外部カタログ: [x402 Bazaar / agentic.market](https://agentic.market/services/open-pay-jp) に掲載(USDC 面)
@@ -101,7 +102,11 @@ Claude Code なら `/schedule`(cron)や Hermes Agent の定期ジョブに上の
       "changeType": "updated",
       "summary": "JPYC EX added Kaia support (issuance, redemption, wallet-address registration) and changed the issuance cap from 1M JPY per day to 1M JPY per transaction.",
       "summaryJa": "JPYC EX が Kaia に対応 (発行・償還・アドレス登録)。発行上限を「1日100万円」から「1回100万円」へ変更。",
-      "sourceUrl": "https://prtimes.jp/main/html/rd/p/000000315.000054018.html"
+      "sourceUrl": "https://prtimes.jp/main/html/rd/p/000000315.000054018.html",
+      "diffs": [
+        { "field": "chains", "previousValue": ["avalanche", "ethereum", "polygon"], "currentValue": ["avalanche", "ethereum", "polygon", "kaia"] },
+        { "field": "limit", "previousValue": "1,000,000 JPY per day (issuance)", "currentValue": "1,000,000 JPY per transaction (issuance)" }
+      ]
     }
   ],
   "services": [
@@ -171,7 +176,8 @@ A second monitor generated from the same weekly collection: it completes a diffe
       "chains": ["base"],
       "summary": "Digital Garage started commercial rollout of DG Stablecoin Payment Service (API-based merchant integration; initially USDC on Base, first offered to JCB and DGFT).",
       "summaryJa": "デジタルガレージが DG Stablecoin Payment Service の商用展開を開始 (API 接続の加盟店向け・当初は Base 上の USDC・JCB/DGFT へ先行提供)。",
-      "sourceUrl": "https://www.garage.co.jp/pr/release/20260810/"
+      "sourceUrl": "https://www.garage.co.jp/pr/release/20260810/",
+      "diffs": [{ "field": "status", "previousValue": null, "currentValue": "commercial" }]
     }
   ],
   "totalEvents": 7,

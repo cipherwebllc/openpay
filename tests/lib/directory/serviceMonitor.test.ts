@@ -9,6 +9,7 @@ import {
   createServiceMonitorEnvelope,
   parseServiceMonitorQuery,
   serviceChangelog,
+  SERVICE_DIFF_FIELDS,
   SERVICE_MONITOR_MAX_LIMIT,
 } from '@/lib/directory/serviceMonitor';
 
@@ -169,5 +170,37 @@ describe('createServiceMonitorEnvelope', () => {
     const row = env.services.find((r) => r.slug === entry.slug)!;
     expect(row.sourceCheckedAt).toBe('2026-08-26T00:00:00.000Z');
     expect(row.sourceOk).toBe(true);
+  });
+});
+
+// 構造化差分 (変更台帳化・2026-09-02): 一次ソースが前後の値を明示する変更だけ diffs を持ち、
+// field は固定語彙・previousValue≠currentValue・effectiveAt は日付形式。出力にもそのまま載る。
+describe('ServiceChangeEvent.diffs (値レベルの差分)', () => {
+  it('全 diffs が契約を満たす (固定語彙・前後の値が異なる・日付形式)', () => {
+    const withDiffs = serviceChangelog().filter((e) => e.diffs && e.diffs.length > 0);
+    expect(withDiffs.length).toBeGreaterThanOrEqual(4); // backfill: jpyc / jpyc-ex / aegis / dg-sps
+    for (const event of withDiffs) {
+      for (const d of event.diffs!) {
+        expect(SERVICE_DIFF_FIELDS).toContain(d.field);
+        expect(JSON.stringify(d.previousValue)).not.toBe(JSON.stringify(d.currentValue));
+        expect(Array.isArray(d.currentValue) ? d.currentValue.length : d.currentValue.length).toBeGreaterThan(0);
+        if (d.effectiveAt !== undefined) expect(d.effectiveAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      }
+    }
+  });
+
+  it('jpyc-ex 2026-08-27 は chains + limit の 2 差分・delta 出力に載る', () => {
+    const env = createServiceMonitorEnvelope(
+      { changedSince: '2026-08-27', limit: SERVICE_MONITOR_MAX_LIMIT },
+      {},
+      NOW,
+    );
+    const ex = env.changes.find((c) => c.slug === 'jpyc-ex' && c.changeType === 'updated')!;
+    expect(ex.diffs?.map((d) => d.field)).toEqual(['chains', 'limit']);
+    expect(ex.diffs?.[0].currentValue).toContain('kaia');
+    // diffs を持たないイベントは省略 (null や空配列を出さない)。
+    const base = serviceChangelog().find((e) => e.changeType === 'added' && !e.diffs)!;
+    expect(base).toBeDefined();
+    expect('diffs' in base).toBe(false);
   });
 });

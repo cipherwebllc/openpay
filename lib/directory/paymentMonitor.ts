@@ -10,6 +10,7 @@
 
 import { DIRECTORY_ENTRIES } from './data';
 import {
+  type ServiceChangeDiff,
   scopedChangelog,
   type ServiceChangeCategory,
   type ServiceChangeType,
@@ -42,6 +43,8 @@ export type PaymentChangeRow = {
   summary: string;
   summaryJa: string;
   sourceUrl: string;
+  /** 値レベルの差分 (一次ソースが前後の値を明示する場合のみ)。 */
+  diffs?: readonly ServiceChangeDiff[];
 };
 
 export type PaymentMonitorEnvelope = {
@@ -75,6 +78,7 @@ function toRow(
     summary: event.summary,
     summaryJa: event.summaryJa,
     sourceUrl: event.sourceUrl ?? entry?.sourceUrl ?? '',
+    ...(event.diffs ? { diffs: event.diffs } : {}),
   };
 }
 

@@ -44,6 +44,28 @@ export const SERVICE_CHANGE_CATEGORIES = [
 ] as const;
 export type ServiceChangeCategory = (typeof SERVICE_CHANGE_CATEGORIES)[number];
 
+// 構造化差分 (変更台帳化・2026-09-02 裁定)。散文 summary に加え、一次ソースが「前の値 → 今の値」を
+// 明示する場合にだけ値で書く (推測で埋めない = sourced-facts-only)。field は固定語彙 — 同じ分類
+// 基準で継続監視することが商品価値なので自由文字列にしない。
+export const SERVICE_DIFF_FIELDS = [
+  'assets', // 対応ステーブルコイン (例 ['JPYC'] → ['JPYC','USDC'])
+  'chains', // 対応チェーン
+  'fee', // 手数料・料率 (正規化した文字列・例 '1.0%' / '2 JPYC min')
+  'limit', // 上限・下限 (発行上限・送金上限など)
+  'status', // 提供状態 (例 null → 'commercial' / 'pilot' / 'closed')
+  'feature', // 機能の追加・廃止 (例 'redemption', 'pos-integration')
+] as const;
+export type ServiceDiffField = (typeof SERVICE_DIFF_FIELDS)[number];
+
+export type ServiceChangeDiff = {
+  field: ServiceDiffField;
+  /** 変更前の値 (無かった場合は null)。 */
+  previousValue: string | readonly string[] | null;
+  currentValue: string | readonly string[];
+  /** 適用日 (YYYY-MM-DD)。発表日 (event.date) と異なる場合のみ。 */
+  effectiveAt?: string;
+};
+
 export type ServiceChangeEvent = {
   /** YYYY-MM-DD (JST 運用日)。changedSince との比較は文字列比較 (同形式ゆえ安全)。 */
   date: string;
@@ -64,6 +86,8 @@ export type ServiceChangeEvent = {
   summaryJa: string;
   /** 変更の根拠 URL。省略時はエントリの sourceUrl。 */
   sourceUrl?: string;
+  /** 値レベルの差分 (一次ソースが前後の値を明示する場合のみ・任意)。 */
+  diffs?: readonly ServiceChangeDiff[];
 };
 
 // 週次運用で追記する手書き changelog (新しいものを**末尾**に追加する — 日付昇順を保つ)。
@@ -124,6 +148,7 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summaryJa:
       'デジタルガレージが DG Stablecoin Payment Service の商用展開を開始 (API 接続の加盟店向け・当初は Base 上の USDC・JCB/DGFT へ先行提供)。',
     sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
+    diffs: [{ field: 'status', previousValue: null, currentValue: 'commercial' }],
   },
   // ── 2026-08-26 大阪府「先駆的金融市場等形成支援事業補助金」採択 (公式発表・4 事業のうち
   //     ステーブルコイン決済関連 3 件。一次ソース = 大阪府公式ページ) ──
@@ -181,6 +206,13 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summaryJa:
       'JPYC が Kaia にも対応し、発行・流通は 4 チェーン (Polygon/Ethereum/Avalanche/Kaia) に。',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000315.000054018.html',
+    diffs: [
+      {
+        field: 'chains',
+        previousValue: ['polygon', 'ethereum', 'avalanche'],
+        currentValue: ['polygon', 'ethereum', 'avalanche', 'kaia'],
+      },
+    ],
   },
   {
     date: '2026-08-27',
@@ -193,6 +225,18 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summaryJa:
       'JPYC EX が Kaia に対応 (発行・償還・アドレス登録)。発行上限を「1日100万円」から「1回100万円」へ変更。',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000315.000054018.html',
+    diffs: [
+      {
+        field: 'chains',
+        previousValue: ['avalanche', 'ethereum', 'polygon'],
+        currentValue: ['avalanche', 'ethereum', 'polygon', 'kaia'],
+      },
+      {
+        field: 'limit',
+        previousValue: '1,000,000 JPY per day (issuance)',
+        currentValue: '1,000,000 JPY per transaction (issuance)',
+      },
+    ],
   },
   {
     date: '2026-08-27',
@@ -204,6 +248,7 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'Aegis now also sells its briefing API in USDC on Base via standard x402, alongside JPYC.',
     summaryJa: 'Aegis が JPYC に加えて USDC (Base・標準 x402) での販売を開始。',
     sourceUrl: 'https://aegis-ai.xyz/',
+    diffs: [{ field: 'assets', previousValue: ['JPYC'], currentValue: ['JPYC', 'USDC'] }],
   },
   {
     date: '2026-08-27',
