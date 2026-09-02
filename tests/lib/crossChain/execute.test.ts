@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { decodeFunctionData, getAddress, zeroAddress, type Address, type Hex } from 'viem';
+import { decodeFunctionData, getAddress, pad, zeroAddress, type Address, type Hex } from 'viem';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
 import { logger } from '@/lib/logger';
 import { CCTP_V2_TOKEN_MESSENGER_ABI } from '@/lib/crossChain/cctp';
@@ -1628,6 +1628,284 @@ describe('lib/crossChain/execute: burn hash を receipt 待ち前に永続化 (�
     // → 再開時は再 burn せず保存済 hash の attestation を poll する。
     expect(steps.some((s) => s.burnTxHash === '0xburn')).toBe(true);
   });
+});
+
+// A1 (2026-09-02 review): burn hash の永続化には「broadcast したのに hash が一切残らない」
+// 窓が残る (sendTransaction の promise が broadcast 後に reject / タブが閉じる)。
+// broadcast **直前** に intent marker を永続化し、resume で marker あり・hash なしなら
+// source chain の DepositForBurn log で実送信を照会してから判断する。
+describe('lib/crossChain/execute: CCTP burn intent marker (応答不明からの二重 burn 防止)', () => {
+  const IRIS_OK = () =>
+    vi.fn(
+      async (_url: string) =>
+        new Response(
+          JSON.stringify({
+            messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+          }),
+          { status: 200 },
+        ),
+    );
+
+  // depositForBurn の log 1 件を模す (viem の decoded log 形状)。
+  function depositForBurnLog(opts: {
+    value: bigint;
+    recipient: Address;
+    transactionHash: Hex;
+  }) {
+    return {
+      args: {
+        amount: opts.value,
+        mintRecipient: pad(getAddress(opts.recipient), { size: 32 }),
+        destinationDomain: CIRCLE_DOMAIN_POLYGON,
+      },
+      transactionHash: opts.transactionHash,
+    };
+  }
+
+  // 「broadcast 後に応答を失った」1 回目を実際に走らせ、永続化された marker を取り出す。
+  // marker を手で組み立てず実コードの出力を使うことで、指紋の drift もここで検出できる。
+  async function runUntilBurnResponseLost(): Promise<Record<string, unknown>> {
+    const walletClient = {
+      chain: { id: 84532 },
+      getChainId: vi.fn(async () => mockChainId),
+      signTypedData: vi.fn(),
+      // burn の sendTransaction が broadcast 後に応答喪失した想定で reject する。
+      sendTransaction: vi.fn(async () => {
+        throw new Error('socket hang up');
+      }),
+      writeContract: vi.fn(async () => '0xapprove' as Hex),
+    };
+    const sourcePublic = makePublicClient();
+    const steps: Array<Record<string, unknown>> = [];
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: makePublicClient() as never,
+        switchChainAsync: trackSwitch(),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1_000_000n,
+        onStep: (s) => steps.push({ ...s }),
+        fetch: vi.fn() as unknown as typeof fetch,
+        pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+      }),
+    ).rejects.toThrow(/socket hang up/);
+
+    const last = steps.at(-1)!;
+    // marker は broadcast 前に永続化され、hash は残っていない (= 応答不明の状態)。
+    expect(last.burnIntent).toBeDefined();
+    expect(last.burnTxHash).toBeUndefined();
+    return last;
+  }
+
+  it('marker あり・hash なし + log で burn 発見 → 再 burn せず発見した hash で継続', async () => {
+    const resume = await runUntilBurnResponseLost();
+
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xapprove2', '0xmint'], // writeContract(approve) + sendTransaction(mint)
+    });
+    const sourcePublic = {
+      ...makePublicClient(),
+      getLogs: vi.fn(async () => [
+        depositForBurnLog({
+          value: 1_000_000n,
+          recipient: RECIPIENT,
+          transactionHash: '0xburn_broadcast' as Hex,
+        }),
+      ]),
+    };
+    const mockFetch = IRIS_OK();
+
+    const result = await executeCctpTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: makePublicClient() as never,
+      switchChainAsync: trackSwitch(),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      sourceToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 1_000_000n,
+      resume,
+      fetch: mockFetch as unknown as typeof fetch,
+      pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    });
+
+    // sendTransaction は mint の 1 本だけ = 2 本目の burn は出していない (二重支払い防止)。
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+    expect(result.burnTxHash).toBe('0xburn_broadcast');
+    // 発見した burn hash で attestation を poll している。
+    expect(String(mockFetch.mock.calls[0][0])).toContain(
+      'transactionHash=0xburn_broadcast',
+    );
+  });
+
+  it('marker あり・hash なし + log 無し → burn を 1 本だけ出す', async () => {
+    const resume = await runUntilBurnResponseLost();
+
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xapprove2', '0xburn_retry', '0xmint'],
+    });
+    const sourcePublic = {
+      ...makePublicClient(),
+      getLogs: vi.fn(async () => []),
+    };
+
+    const result = await executeCctpTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: makePublicClient() as never,
+      switchChainAsync: trackSwitch(),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      sourceToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 1_000_000n,
+      resume,
+      fetch: IRIS_OK() as unknown as typeof fetch,
+      pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    });
+
+    expect(sourcePublic.getLogs).toHaveBeenCalledTimes(1);
+    // burn 1 本 + mint 1 本。
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(2);
+    expect(result.burnTxHash).toBe('0xburn_retry');
+  });
+
+  it('marker あり・hash なし + log 照会自体が失敗 → 再 burn しない (未送信を証明できない)', async () => {
+    const resume = await runUntilBurnResponseLost();
+
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xapprove2', '0xburn_retry'],
+    });
+    const sourcePublic = {
+      ...makePublicClient(),
+      getLogs: vi.fn(async () => {
+        throw new Error('eth_getLogs failed');
+      }),
+    };
+    const mockFetch = vi.fn();
+
+    await expect(
+      executeCctpTransfer({
+        walletClient: walletClient as never,
+        sourcePublicClient: sourcePublic as never,
+        destPublicClient: makePublicClient() as never,
+        switchChainAsync: trackSwitch(),
+        account: ACCOUNT,
+        sourceChainId: 84532,
+        destChainId: 80002,
+        destDomain: CIRCLE_DOMAIN_POLYGON,
+        sourceDomain: CIRCLE_DOMAIN_BASE,
+        sourceToken: SOURCE_TOKEN,
+        recipient: RECIPIENT,
+        valueAtomic: 1_000_000n,
+        resume,
+        fetch: mockFetch as unknown as typeof fetch,
+        pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+      }),
+    ).rejects.toThrow(/eth_getLogs failed/);
+
+    // burn の sendTransaction は 1 本も出ていない (approve のみ writeContract)。
+    expect(walletClient.sendTransaction).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('永続済 burnTxHash が revert 済 → hash を破棄して再 burn する (Iris 永久 poll の wedge 解消)', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xapprove2', '0xburn_retry', '0xmint'],
+    });
+    const sourcePublic = {
+      ...makePublicClient(),
+      // 保存済 burn は on-chain で revert していた (= 資金は動いていない)。
+      getTransactionReceipt: vi.fn(async () => ({ status: 'reverted' })),
+    };
+    const steps: Array<Record<string, unknown>> = [];
+
+    const result = await executeCctpTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: makePublicClient() as never,
+      switchChainAsync: trackSwitch(),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      sourceToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 1_000_000n,
+      resume: { approveTxHash: '0xa', burnTxHash: '0xburn_reverted' },
+      onStep: (s) => steps.push({ ...s }),
+      fetch: IRIS_OK() as unknown as typeof fetch,
+      pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    });
+
+    expect(sourcePublic.getTransactionReceipt).toHaveBeenCalledWith({
+      hash: '0xburn_reverted',
+    });
+    // revert 済 hash は破棄され、新しい burn が出る (burn 1 + mint 1)。
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(2);
+    expect(result.burnTxHash).toBe('0xburn_retry');
+    expect(steps.some((s) => s.burnTxHash === undefined)).toBe(true);
+  });
+
+  it('永続済 burnTxHash が未 mine (not-found) → 再 burn せず従来どおり待つ', async () => {
+    const walletClient = makeWalletClient({
+      signature: '0x',
+      txHashes: ['0xmint'],
+    });
+    const notFound = new Error('not found');
+    notFound.name = 'TransactionReceiptNotFoundError';
+    const sourcePublic = {
+      ...makePublicClient(),
+      getTransactionReceipt: vi.fn(async () => {
+        throw notFound;
+      }),
+    };
+
+    const result = await executeCctpTransfer({
+      walletClient: walletClient as never,
+      sourcePublicClient: sourcePublic as never,
+      destPublicClient: makePublicClient() as never,
+      switchChainAsync: trackSwitch(),
+      account: ACCOUNT,
+      sourceChainId: 84532,
+      destChainId: 80002,
+      destDomain: CIRCLE_DOMAIN_POLYGON,
+      sourceDomain: CIRCLE_DOMAIN_BASE,
+      sourceToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      valueAtomic: 1_000_000n,
+      resume: { approveTxHash: '0xa', burnTxHash: '0xburn_pending' },
+      fetch: IRIS_OK() as unknown as typeof fetch,
+      pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    });
+
+    // approve も burn も再実行しない (mint だけ)。
+    expect(walletClient.writeContract).not.toHaveBeenCalled();
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+    expect(result.burnTxHash).toBe('0xburn_pending');
+  });
+
+  // 「hash あり・landed 済 → burn skip」は既存テスト
+  // ('CCTP resume: burn 済なら approve/burn を skip し mint だけ実行') が担保する。
 });
 
 // 2026-05-27 (codex review 2nd round P2): mint hash も broadcast 直後に永続化し、

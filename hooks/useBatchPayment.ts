@@ -14,7 +14,7 @@
 //   - erc20 mode: 顧客の USDC 出費上限の保護 (Base 1 gwei = 約 1.6 USDC、
 //     spike 時の高額決済を防ぐ)
 import { useMutation } from '@tanstack/react-query';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   encodeAbiParameters,
   encodeFunctionData,
@@ -96,6 +96,12 @@ type BatchPaymentResult = {
 export const PIMLICO_PENDING_KEY_PREFIX = 'openpay.pimlico.pending.';
 const PIMLICO_PENDING_SCHEMA_VERSION = 1 as const;
 
+// pending record の最大保持期間 (updatedAt 起点)。bundler が UserOp を drop して永久に
+// mine されない場合、latch だけが残って gasless 決済が恒久ロックされる。24h = bundler の
+// 再送・再 org 猶予より十分長く、かつ顧客が翌日には再決済できる長さ。これを過ぎた record は
+// 読み出し時に無視 + 破棄する。
+const PIMLICO_PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 type StoredBatchPaymentParams = {
   tokenAddress: Address;
   merchant: Address;
@@ -123,7 +129,10 @@ type PimlicoPendingRecord = {
 };
 
 type LatchedPimlicoPending = {
+  /** record を書いた account 単位のキー (既存 record との後方互換用)。 */
   storageKey: string;
+  /** account 非依存の照合キー。account 切替でも latch を維持するために使う。 */
+  scopeKey: string;
   record: PimlicoPendingRecord;
 };
 
@@ -154,6 +163,26 @@ export function isPimlicoResponseUnknownError(
   return error instanceof PimlicoResponseUnknownError;
 }
 
+/** pending record store (localStorage) 自体が読めない状態。未解決 UserOp の有無を
+ * 判定できないため gasless 送信を fail-closed で止める (lib/circlePending の
+ * requireStorage と同じ方針)。何の波及を断つか: storage 障害で latch を失った端末が、
+ * broadcast 済 UserOp の上に 2 本目を重ねる二重支払いを断つ。 */
+export class PimlicoPendingStoreUnavailableError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string) {
+    super('pending-store-unavailable');
+    this.name = 'PimlicoPendingStoreUnavailableError';
+    this.reason = reason;
+  }
+}
+
+export function isPimlicoPendingStoreUnavailableError(
+  error: unknown,
+): error is PimlicoPendingStoreUnavailableError {
+  return error instanceof PimlicoPendingStoreUnavailableError;
+}
+
 function pendingStorageKey(args: {
   chainId: number;
   customer: Address | undefined;
@@ -166,6 +195,20 @@ function pendingStorageKey(args: {
       args.customer?.toLowerCase() ?? 'disconnected',
       args.tokenAddress.toLowerCase(),
     ].join(':')
+  );
+}
+
+// account 非依存の scope key (chain + token)。account 単位キーと **併記** して書き、
+// 読み出しでは両方を参照する。何の波及を断つか: broadcast 後 receipt timeout の状態で
+// 接続 account を切り替えると account 単位キーが変わり latch が消えて 2 本目の UserOp が
+// 出る — その二重支払いを断つ。既存キーは後方互換のためそのまま残す。
+function pendingScopeStorageKey(args: {
+  chainId: number;
+  tokenAddress: Address;
+}): string {
+  return (
+    PIMLICO_PENDING_KEY_PREFIX +
+    ['any', args.chainId, args.tokenAddress.toLowerCase()].join(':')
   );
 }
 
@@ -312,57 +355,110 @@ function isPimlicoPendingRecord(
   );
 }
 
-function loadPimlicoPending(storageKey: string): PimlicoPendingRecord | null {
-  if (typeof window === 'undefined') return null;
+// 読み出し結果の 3 状態。'none' (記録なし) と 'unavailable' (storage 自体が読めない) を
+// 区別するのが要点 — 従来は両方 null に潰れて fail-open だった。
+type PimlicoPendingRead =
+  | { kind: 'record'; record: PimlicoPendingRecord }
+  | { kind: 'none' }
+  | { kind: 'unavailable'; error: unknown };
+
+function readPimlicoPendingAt(storageKey: string): PimlicoPendingRead {
+  if (typeof window === 'undefined') return { kind: 'none' };
+  let raw: string | null;
   try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (raw === null) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (isPimlicoPendingRecord(parsed)) return parsed;
-    logger.warn('pimlico.pending.corrupt-record', { storageKey });
+    raw = window.localStorage.getItem(storageKey);
   } catch (error) {
+    // storage が読めない = 未解決 UserOp の有無を判定できない。呼出側は fail-closed で
+    // 送信を止める (何の波及を断つか: latch を失った端末の二重送金)。
     logger.warn('pimlico.pending.load-failed', { storageKey, error });
+    return { kind: 'unavailable', error };
   }
-  return null;
+  if (raw === null) return { kind: 'none' };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (error) {
+    // corrupt な 1 件は storage 障害ではない。従来どおり「記録なし」に倒して
+    // 決済開始を止めない。
+    logger.warn('pimlico.pending.load-failed', { storageKey, error });
+    return { kind: 'none' };
+  }
+  if (!isPimlicoPendingRecord(parsed)) {
+    logger.warn('pimlico.pending.corrupt-record', { storageKey });
+    return { kind: 'none' };
+  }
+  if (Date.now() - parsed.updatedAt > PIMLICO_PENDING_MAX_AGE_MS) {
+    // 期限切れ = 解決不能になった残骸。無視 + 破棄して恒久ロックアウトを避ける。
+    logger.warn('pimlico.pending.expired', {
+      storageKey,
+      userOpHash: parsed.userOpHash,
+      updatedAt: parsed.updatedAt,
+    });
+    try {
+      window.localStorage.removeItem(storageKey);
+    } catch {
+      // 破棄失敗は判定に影響しない (次回読み出しでも expired として無視される)。
+    }
+    return { kind: 'none' };
+  }
+  return { kind: 'record', record: parsed };
+}
+
+// account 単位キー → scope キーの順に参照する。どちらかが 'unavailable' なら
+// fail-closed 判定を優先し、record は account 単位を優先する (後方互換)。
+function readPimlicoPending(
+  accountKey: string,
+  scopeKey: string,
+): PimlicoPendingRead {
+  const primary = readPimlicoPendingAt(accountKey);
+  if (primary.kind !== 'none') return primary;
+  return readPimlicoPendingAt(scopeKey);
 }
 
 function persistPimlicoPending(
-  storageKey: string,
+  storageKeys: readonly string[],
   record: PimlicoPendingRecord,
 ): void {
   if (typeof window === 'undefined') return;
-  try {
-    const serialized = JSON.stringify(record);
-    window.localStorage.setItem(storageKey, serialized);
-    if (window.localStorage.getItem(storageKey) !== serialized) {
-      throw new Error('read-back mismatch');
+  const serialized = JSON.stringify(record);
+  for (const storageKey of storageKeys) {
+    try {
+      window.localStorage.setItem(storageKey, serialized);
+      if (window.localStorage.getItem(storageKey) !== serialized) {
+        throw new Error('read-back mismatch');
+      }
+    } catch (error) {
+      // storage 障害を broadcast 済み決済の通常 failure へ波及させず、呼出元 hook の
+      // memory latch は維持する (同一タブでの二重送金防止を失わない)。
+      logger.warn('pimlico.pending.persist-failed', {
+        storageKey,
+        userOpHash: record.userOpHash,
+        error,
+      });
     }
-  } catch (error) {
-    // storage 障害を broadcast 済み決済の通常 failure へ波及させず、呼出元 hook の
-    // memory latch は維持する (同一タブでの二重送金防止を失わない)。
-    logger.warn('pimlico.pending.persist-failed', {
-      storageKey,
-      userOpHash: record.userOpHash,
-      error,
-    });
   }
 }
 
-function clearPimlicoPending(storageKey: string, userOpHash: Hex): void {
+function clearPimlicoPending(
+  storageKeys: readonly string[],
+  userOpHash: Hex,
+): void {
   if (typeof window === 'undefined') return;
-  try {
-    const current = loadPimlicoPending(storageKey);
-    if (current?.userOpHash === userOpHash) {
-      window.localStorage.removeItem(storageKey);
+  for (const storageKey of storageKeys) {
+    try {
+      const current = readPimlicoPendingAt(storageKey);
+      if (current.kind === 'record' && current.record.userOpHash === userOpHash) {
+        window.localStorage.removeItem(storageKey);
+      }
+    } catch (error) {
+      // confirmed/reverted の本体結果へ localStorage housekeeping 障害を波及させない。
+      // record が残った場合は安全側の unknown latch として次回 receipt 再照会に収束する。
+      logger.warn('pimlico.pending.clear-failed', {
+        storageKey,
+        userOpHash,
+        error,
+      });
     }
-  } catch (error) {
-    // confirmed/reverted の本体結果へ localStorage housekeeping 障害を波及させない。
-    // record が残った場合は安全側の unknown latch として次回 receipt 再照会に収束する。
-    logger.warn('pimlico.pending.clear-failed', {
-      storageKey,
-      userOpHash,
-      error,
-    });
   }
 }
 
@@ -384,20 +480,43 @@ export function useBatchPayment(
     customer,
     tokenAddress: deployment.address,
   });
+  const pimlicoScopeKey = pendingScopeStorageKey({
+    chainId: chainId ?? deployment.chainId,
+    tokenAddress: deployment.address,
+  });
+  // 書込 / 破棄は両キーへ。account 単位キーは既存 record との後方互換、scope キーは
+  // account 切替をまたいだ latch 維持のため。
+  const pimlicoStorageKeys = useMemo(
+    () => [pimlicoStorageKey, pimlicoScopeKey],
+    [pimlicoStorageKey, pimlicoScopeKey],
+  );
   const pendingRef = useRef<LatchedPimlicoPending | null>(null);
   const [unknownPending, setUnknownPending] =
     useState<LatchedPimlicoPending | null>(null);
+  // pending store が読めないまま送信要求が来た状態 (fail-closed)。unknown 表示へ束ね、
+  // storage が再び読めた時点で解除する。
+  const [pendingStoreUnavailable, setPendingStoreUnavailable] = useState(false);
 
   useEffect(() => {
-    const restored = loadPimlicoPending(pimlicoStorageKey);
-    const latched = restored
-      ? { storageKey: pimlicoStorageKey, record: restored }
-      : null;
+    const read = readPimlicoPending(pimlicoStorageKey, pimlicoScopeKey);
+    if (read.kind === 'unavailable') {
+      // 読めない間は memory latch を上書きしない (誤って解除すると二重送金へ波及する)。
+      return;
+    }
+    const latched =
+      read.kind === 'record'
+        ? {
+            storageKey: pimlicoStorageKey,
+            scopeKey: pimlicoScopeKey,
+            record: read.record,
+          }
+        : null;
     pendingRef.current = latched;
     // reload 後は前回の receipt waiter が存在しないため、永続 record は pending/unknown
     // どちらでも「結果不確定」として復元する。
     setUnknownPending(latched);
-  }, [pimlicoStorageKey]);
+    setPendingStoreUnavailable(false);
+  }, [pimlicoStorageKey, pimlicoScopeKey]);
 
   const mutation = useMutation<BatchPaymentResult, Error, BatchPaymentParams>({
     mutationFn: async (params) => {
@@ -407,14 +526,29 @@ export function useBatchPayment(
         );
       }
 
-      const retained =
-        pendingRef.current?.storageKey === pimlicoStorageKey
-          ? pendingRef.current.record
-          : loadPimlicoPending(pimlicoStorageKey);
+      let retained: PimlicoPendingRecord | null = null;
+      if (pendingRef.current?.scopeKey === pimlicoScopeKey) {
+        retained = pendingRef.current.record;
+      } else {
+        const read = readPimlicoPending(pimlicoStorageKey, pimlicoScopeKey);
+        if (read.kind === 'unavailable') {
+          // fail-closed: 未解決 UserOp の有無を判定できない状態では新規送信しない。
+          // 何の波及を断つか: latch を失った端末が broadcast 済 UserOp の上に 2 本目を
+          // 重ねる二重支払いを断つ (lib/circlePending の requireStorage と同じ方針)。
+          setPendingStoreUnavailable(true);
+          throw new PimlicoPendingStoreUnavailableError(String(read.error));
+        }
+        setPendingStoreUnavailable(false);
+        retained = read.kind === 'record' ? read.record : null;
+      }
       if (retained && clients.provider === 'circle') {
         // provider が切り替わっても、未解決の Pimlico UserOp から Circle の新規送信へ
         // 波及させない。Pimlico client が再び利用可能になるまで hash を保持する。
-        const latched = { storageKey: pimlicoStorageKey, record: retained };
+        const latched = {
+          storageKey: pimlicoStorageKey,
+          scopeKey: pimlicoScopeKey,
+          record: retained,
+        };
         pendingRef.current = latched;
         setUnknownPending(latched);
         throw new PimlicoResponseUnknownError({
@@ -457,11 +591,12 @@ export function useBatchPayment(
           };
           const latched = {
             storageKey: pimlicoStorageKey,
+            scopeKey: pimlicoScopeKey,
             record: unknownRecord,
           };
           pendingRef.current = latched;
           setUnknownPending(latched);
-          persistPimlicoPending(pimlicoStorageKey, unknownRecord);
+          persistPimlicoPending(pimlicoStorageKeys, unknownRecord);
           logger.warn('pimlico.receipt.response-unknown', {
             userOpHash: record.userOpHash,
             callFingerprint: record.callFingerprint,
@@ -476,15 +611,15 @@ export function useBatchPayment(
 
         // success / reverted の receipt 判定は従来どおり。どちらも on-chain 終端なので
         // unknown latch を解除し、次回の正規決済だけを許可する。
-        clearPimlicoPending(pimlicoStorageKey, record.userOpHash);
+        clearPimlicoPending(pimlicoStorageKeys, record.userOpHash);
         if (
-          pendingRef.current?.storageKey === pimlicoStorageKey &&
+          pendingRef.current?.scopeKey === pimlicoScopeKey &&
           pendingRef.current.record.userOpHash === record.userOpHash
         ) {
           pendingRef.current = null;
         }
         setUnknownPending((current) =>
-          current?.storageKey === pimlicoStorageKey &&
+          current?.scopeKey === pimlicoScopeKey &&
           current.record.userOpHash === record.userOpHash
             ? null
             : current,
@@ -502,7 +637,11 @@ export function useBatchPayment(
       if (retained) {
         const calls = buildTransferCalls(params);
         const callFingerprint = fingerprintTransferCalls(calls);
-        const latched = { storageKey: pimlicoStorageKey, record: retained };
+        const latched = {
+          storageKey: pimlicoStorageKey,
+          scopeKey: pimlicoScopeKey,
+          record: retained,
+        };
         pendingRef.current = latched;
         setUnknownPending(latched);
         if (callFingerprint !== retained.callFingerprint) {
@@ -551,9 +690,10 @@ export function useBatchPayment(
       // memory latch を残して二重送金への波及を止める。
       pendingRef.current = {
         storageKey: pimlicoStorageKey,
+        scopeKey: pimlicoScopeKey,
         record: pendingRecord,
       };
-      persistPimlicoPending(pimlicoStorageKey, pendingRecord);
+      persistPimlicoPending(pimlicoStorageKeys, pendingRecord);
 
       return waitForRetainedReceipt(pendingRecord);
     },
@@ -607,24 +747,25 @@ export function useBatchPayment(
 
   const retryReceipt = useCallback(() => {
     const retained =
-      pendingRef.current?.storageKey === pimlicoStorageKey
+      pendingRef.current?.scopeKey === pimlicoScopeKey
         ? pendingRef.current.record
         : null;
     if (!retained || mutation.isPending) return;
     mutation.mutate(deserializeBatchPaymentParams(retained.params));
-  }, [mutation, pimlicoStorageKey]);
+  }, [mutation, pimlicoScopeKey]);
 
   const activeUnknown =
-    unknownPending?.storageKey === pimlicoStorageKey
-      ? unknownPending.record
-      : null;
+    unknownPending?.scopeKey === pimlicoScopeKey ? unknownPending.record : null;
+  // storage を読めずに送信を止めた状態も「結果不確定」として同じ UI に束ねる
+  // (成功にも通常 failure にも倒さない = 偽成功も再送誘発もしない)。
+  const unknownState = activeUnknown !== null || pendingStoreUnavailable;
 
   return {
     ...mutation,
     // response-unknown を通常 failure として履歴/汎用 error UI へ流さない。フォームは
     // isUnknown を relayAmbiguous と同じ pending/unknown 表示へ束ねる。
-    error: activeUnknown ? null : mutation.error,
-    isUnknown: activeUnknown !== null,
+    error: unknownState ? null : mutation.error,
+    isUnknown: unknownState,
     pendingUserOpHash: activeUnknown?.userOpHash,
     retryReceipt,
   };

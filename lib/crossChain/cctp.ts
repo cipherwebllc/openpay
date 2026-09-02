@@ -82,6 +82,27 @@ export const CCTP_V2_TOKEN_MESSENGER_ABI = [
   },
 ] as const;
 
+// depositForBurn の成功時に TokenMessenger が出す event (CCTP v2)。broadcast したが
+// tx hash を永続化できなかったケースで「本当に burn が出たか」を source chain の log から
+// 事後確認するために使う (execute.ts の burn intent marker)。indexed は burnToken /
+// depositor / minFinalityThreshold の 3 つ。
+export const CCTP_V2_DEPOSIT_FOR_BURN_EVENT = {
+  type: 'event',
+  name: 'DepositForBurn',
+  inputs: [
+    { name: 'burnToken', type: 'address', indexed: true },
+    { name: 'amount', type: 'uint256', indexed: false },
+    { name: 'depositor', type: 'address', indexed: true },
+    { name: 'mintRecipient', type: 'bytes32', indexed: false },
+    { name: 'destinationDomain', type: 'uint32', indexed: false },
+    { name: 'destinationTokenMessenger', type: 'bytes32', indexed: false },
+    { name: 'destinationCaller', type: 'bytes32', indexed: false },
+    { name: 'maxFee', type: 'uint256', indexed: false },
+    { name: 'minFinalityThreshold', type: 'uint32', indexed: true },
+    { name: 'hookData', type: 'bytes', indexed: false },
+  ],
+} as const;
+
 export const CCTP_V2_MESSAGE_TRANSMITTER_ABI = [
   {
     inputs: [

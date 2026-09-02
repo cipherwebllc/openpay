@@ -15,6 +15,10 @@
 
 import {
   erc20Abi,
+  getAddress,
+  keccak256,
+  pad,
+  toHex,
   zeroAddress,
   type Address,
   type Chain,
@@ -25,6 +29,7 @@ import {
 import { chainObjectForId } from '../chains';
 import { logger } from '../logger';
 import {
+  CCTP_V2_DEPOSIT_FOR_BURN_EVENT,
   CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS,
   CCTP_V2_TOKEN_MESSENGER_ADDRESS,
   encodeDepositForBurnCalldata,
@@ -177,11 +182,25 @@ async function txAlreadySucceeded(
   client: PublicClient,
   hash: Hex,
 ): Promise<boolean> {
+  return (await txLandedState(client, hash)) === 'success';
+}
+
+// txAlreadySucceeded の 3 値版。burn 側は「revert 済 (= 資金は動いていない → 再 burn 可)」と
+// 「未 mine (= まだ landed しうる → 待つ)」を区別する必要があるため分離する。
+// transport 障害は従来どおり throw (未着と区別できないため false に潰さない)。
+type TxLandedState = 'success' | 'reverted' | 'not-found';
+
+async function txLandedState(
+  client: PublicClient,
+  hash: Hex,
+): Promise<TxLandedState> {
   try {
     const receipt = await client.getTransactionReceipt({ hash });
-    return receipt.status === 'success';
+    return receipt.status === 'success' ? 'success' : 'reverted';
   } catch (e) {
-    if ((e as { name?: unknown })?.name === 'TransactionReceiptNotFoundError') return false;
+    if ((e as { name?: unknown })?.name === 'TransactionReceiptNotFoundError') {
+      return 'not-found';
+    }
     throw e;
   }
 }
@@ -227,6 +246,88 @@ async function settleMint(args: {
   const hash = await args.broadcast();
   args.onBroadcast(hash);
   await waitForReceiptOrThrow(args.client, hash, args.label);
+}
+
+// ---- CCTP burn の「送信したかもしれない」回復 (二重 burn 防止) --------------------
+//
+// depositForBurn は nonce 単位で独立 = 冪等でないため、1 本余分に出れば即 二重支払い。
+// burn hash は broadcast 直後に永続化しているが、`sendTransaction` の promise が
+// broadcast **後** に reject する / タブが閉じる場合、hash が一切残らない window がある。
+// そこで broadcast 直前に intent marker を永続化し、resume で「marker あり・hash なし」を
+// 検出したら、再 burn する前に source chain の DepositForBurn log を照会して実送信の
+// 有無を確定させる。照会自体が失敗したら (RPC 障害) **再 burn しない** — 未送信を証明
+// できないため。marker が無い resume は従来どおり素直に burn する。
+
+// marker と現在の burn args が同一 intent かを照合するための指紋。
+function fingerprintBurnArgs(args: {
+  recipient: Address;
+  value: bigint;
+  destinationDomain: number;
+  burnToken: Address;
+}): Hex {
+  return keccak256(
+    toHex(
+      [
+        args.recipient.toLowerCase(),
+        args.value.toString(),
+        String(args.destinationDomain),
+        args.burnToken.toLowerCase(),
+      ].join('|'),
+    ),
+  );
+}
+
+// marker に block を残せなかった場合の log 照会 lookback 幅。source chain の finality
+// (~数分) を跨いで拾える程度に広く、getLogs の provider 制限 (多くは 10k blocks) に
+// 収まる程度に狭く取る。
+const BURN_LOG_LOOKBACK_BLOCKS = 5_000n;
+
+/** marker が示す burn が実際に broadcast されていたかを DepositForBurn log で照会する。
+ *  - 見つかった: その tx hash を返す (= 再 burn してはいけない)
+ *  - 見つからない: undefined (= 未送信が確認できたので burn してよい)
+ *  - 照会自体が失敗: throw (呼出側は再 burn せず resume 再試行に倒す) */
+async function findBroadcastBurn(args: {
+  client: PublicClient;
+  depositor: Address;
+  burnToken: Address;
+  recipient: Address;
+  value: bigint;
+  destinationDomain: number;
+  fromBlock: bigint | undefined;
+}): Promise<Hex | undefined> {
+  const latest = await args.client.getBlockNumber();
+  const floor =
+    args.fromBlock ??
+    (latest > BURN_LOG_LOOKBACK_BLOCKS ? latest - BURN_LOG_LOOKBACK_BLOCKS : 0n);
+  const logs = await args.client.getLogs({
+    address: CCTP_V2_TOKEN_MESSENGER_ADDRESS,
+    event: CCTP_V2_DEPOSIT_FOR_BURN_EVENT,
+    args: { depositor: args.depositor, burnToken: args.burnToken },
+    fromBlock: floor,
+    toBlock: latest,
+  });
+  const mintRecipient = pad(getAddress(args.recipient), { size: 32 });
+  const match = logs.find(
+    (log) =>
+      log.args.amount === args.value &&
+      typeof log.args.mintRecipient === 'string' &&
+      log.args.mintRecipient.toLowerCase() === mintRecipient.toLowerCase() &&
+      log.args.destinationDomain === args.destinationDomain,
+  );
+  return match?.transactionHash ?? undefined;
+}
+
+// broadcast 直前の block number を best-effort で取る。取得失敗を burn 前に決済停止へ
+// 波及させない (marker 自体は必ず残す・block 不明なら resume 側が lookback で探す)。
+async function currentBlockOrUndefined(
+  client: PublicClient,
+): Promise<string | undefined> {
+  try {
+    return (await client.getBlockNumber()).toString();
+  } catch (error) {
+    logger.warn('cross-chain.burn.intent-block-unavailable', { error });
+    return undefined;
+  }
 }
 
 // ========== Gateway path ==========
@@ -476,6 +577,24 @@ export interface CctpResumeState {
   mintTxHash?: Hex;
   /** fee mint 完了 tx */
   feeMintTxHash?: Hex;
+  /** merchant burn の送信意図 marker (broadcast **直前** に永続化)。marker があって
+   *  burnTxHash が無い = 「broadcast されたかもしれない」状態を表す。 */
+  burnIntent?: BurnIntentMarker;
+  /** fee burn の送信意図 marker (同上)。 */
+  feeBurnIntent?: BurnIntentMarker;
+}
+
+/** burn の送信意図 marker。resume で「この args の burn を出そうとした」ことを識別し、
+ *  hash が残っていない場合に source chain の log で実送信を照会するために使う。 */
+export interface BurnIntentMarker {
+  /** 送信を試みた時刻 (ms)。監査/デバッグ用。 */
+  at: number;
+  /** burn args (recipient / value / destinationDomain / token) の指紋。別 intent の
+   *  marker を誤って流用しないための照合キー。 */
+  argsHash: Hex;
+  /** 送信直前に観測した source chain の block number (10 進文字列・JSON 可搬)。
+   *  log 照会の下限に使う。取得できなかった場合は undefined。 */
+  fromBlock?: string;
 }
 
 export interface ExecuteCctpTransferArgs {
@@ -551,6 +670,30 @@ export async function executeCctpTransfer(
   const sourceChain = resolveChainOrThrow(args.sourceChainId, 'source');
   const destChain = resolveChainOrThrow(args.destChainId, 'destination');
 
+  // resume 時、永続済 burn hash が本当に landed したかを mint 側 (txAlreadySucceeded) と
+  // 同じ基準で検証する。revert 済 burn を「送信済」として抱えたままだと、資金は動いて
+  // いないのに Iris を永久 poll する wedge になるため hash を破棄して再 burn を許す。
+  // 未 mine (not-found) は従来どおり hash を保持して待つ (再 burn しない = 二重支払い防止)。
+  if (state.burnTxHash) {
+    if ((await txLandedState(args.sourcePublicClient, state.burnTxHash)) === 'reverted') {
+      logger.warn('cross-chain.burn.reverted-resume', {
+        burnTxHash: state.burnTxHash,
+      });
+      persist({ burnTxHash: undefined });
+    }
+  }
+  if (state.feeBurnTxHash) {
+    if (
+      (await txLandedState(args.sourcePublicClient, state.feeBurnTxHash)) ===
+      'reverted'
+    ) {
+      logger.warn('cross-chain.fee-burn.reverted-resume', {
+        feeBurnTxHash: state.feeBurnTxHash,
+      });
+      persist({ feeBurnTxHash: undefined });
+    }
+  }
+
   const needMerchantBurn = !state.burnTxHash;
   const needFeeBurn = bridgeFee && !state.feeBurnTxHash;
 
@@ -611,22 +754,85 @@ export async function executeCctpTransfer(
     // 再 burn してしまう = 二重支払いになるため。CCTP の depositForBurn は nonce
     // 単位で独立 (idempotent でない) なので、ここが二重支払いの唯一の防御線。
     // 再開時は保存済 hash の attestation を poll して mint へ進む。
+    // marker (broadcast 直前に永続) → burn → hash 永続 の順で 1 本の burn を出す。
+    // marker が既にあり hash が無い resume では、burn する前に log で実送信を照会する。
+    const settleBurn = async (opts: {
+      recipient: Address;
+      value: bigint;
+      marker: BurnIntentMarker | undefined;
+      onIntent: (marker: BurnIntentMarker) => void;
+      onBroadcast: (hash: Hex) => void;
+      progress: (hash: Hex) => void;
+      label: string;
+    }): Promise<void> => {
+      const argsHash = fingerprintBurnArgs({
+        recipient: opts.recipient,
+        value: opts.value,
+        destinationDomain: args.destDomain,
+        burnToken: args.sourceToken,
+      });
+      if (opts.marker && opts.marker.argsHash === argsHash) {
+        // 照会が throw したら再 burn せずそのまま伝播する (未送信を証明できないため)。
+        const broadcast = await findBroadcastBurn({
+          client: args.sourcePublicClient,
+          depositor: args.account,
+          burnToken: args.sourceToken,
+          recipient: opts.recipient,
+          value: opts.value,
+          destinationDomain: args.destDomain,
+          fromBlock:
+            opts.marker.fromBlock === undefined
+              ? undefined
+              : BigInt(opts.marker.fromBlock),
+        });
+        if (broadcast !== undefined) {
+          logger.warn('cross-chain.burn.recovered-from-log', {
+            label: opts.label,
+            burnTxHash: broadcast,
+          });
+          opts.onBroadcast(broadcast);
+          opts.progress(broadcast);
+          await waitForReceiptOrThrow(
+            args.sourcePublicClient,
+            broadcast,
+            opts.label,
+          );
+          return;
+        }
+      }
+      opts.onIntent({
+        at: Date.now(),
+        argsHash,
+        fromBlock: await currentBlockOrUndefined(args.sourcePublicClient),
+      });
+      const hash = await burn(opts.recipient, opts.value);
+      opts.onBroadcast(hash);
+      opts.progress(hash);
+      await waitForReceiptOrThrow(args.sourcePublicClient, hash, opts.label);
+    };
+
     if (needMerchantBurn) {
-      const burnHash = await burn(args.recipient, args.valueAtomic);
-      persist({ burnTxHash: burnHash });
-      onProgress({ kind: 'source_tx_pending', hash: burnHash });
-      await waitForReceiptOrThrow(args.sourcePublicClient, burnHash, 'cctp burn');
+      await settleBurn({
+        recipient: args.recipient,
+        value: args.valueAtomic,
+        marker: state.burnIntent,
+        onIntent: (marker) => persist({ burnIntent: marker }),
+        onBroadcast: (hash) => persist({ burnTxHash: hash }),
+        progress: (hash) => onProgress({ kind: 'source_tx_pending', hash }),
+        label: 'cctp burn',
+      });
     }
     if (needFeeBurn) {
       // needFeeBurn → bridgeFee=true → isFeeReceiverBridgeable が feeReceiver!==undefined を保証
-      const feeBurnHash = await burn(feeReceiver!, feeAmount);
-      persist({ feeBurnTxHash: feeBurnHash });
-      onProgress({ kind: 'fee_source_tx_pending', hash: feeBurnHash });
-      await waitForReceiptOrThrow(
-        args.sourcePublicClient,
-        feeBurnHash,
-        'cctp fee burn',
-      );
+      await settleBurn({
+        recipient: feeReceiver!,
+        value: feeAmount,
+        marker: state.feeBurnIntent,
+        onIntent: (marker) => persist({ feeBurnIntent: marker }),
+        onBroadcast: (hash) => persist({ feeBurnTxHash: hash }),
+        progress: (hash) => onProgress({ kind: 'fee_source_tx_pending', hash }),
+        label: 'cctp fee burn',
+      });
     }
   }
 

@@ -83,6 +83,83 @@ describe('useUsageFeePayment (実コード)', () => {
     await expect(result.current.mutateAsync({ value: FEE })).rejects.toThrow('fee_required');
   });
 
+  // A2 (2026-09-02 review): 応答不明 (network throw / 非 JSON 2xx / 非構造化 non-2xx) を
+  // 通常 Error に倒すと、呼出側の再試行が **新しい nonce** で署名し直し、server の冪等キー
+  // (chainId+from+nonce) が変わって二重課金になる。専用状態 + 同一 payload 再 POST で封じる。
+  describe('応答不明 (response-unknown) の扱い', () => {
+    it('fetch が throw (応答喪失) → RelayResponseUnknownError', async () => {
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Failed to fetch'));
+      const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
+      await expect(result.current.mutateAsync({ value: FEE })).rejects.toMatchObject({
+        name: 'RelayResponseUnknownError',
+        message: 'response-unknown',
+      });
+    });
+
+    it('非 JSON の 200 も成功にせず RelayResponseUnknownError', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('<html>gateway</html>', { status: 200 }),
+      );
+      const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
+      await expect(result.current.mutateAsync({ value: FEE })).rejects.toMatchObject({
+        name: 'RelayResponseUnknownError',
+      });
+    });
+
+    it('応答不明の後の再試行は再署名せず同一 payload (同 nonce) を再 POST する', async () => {
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValueOnce(new Error('Failed to fetch'))
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ ok: true, txHash: '0xdead' }), { status: 200 }),
+        );
+      const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
+      await expect(result.current.mutateAsync({ value: FEE })).rejects.toMatchObject({
+        name: 'RelayResponseUnknownError',
+      });
+      expect(h.signTypedData).toHaveBeenCalledTimes(1);
+
+      const r = await result.current.mutateAsync({ value: FEE });
+      expect(r).toEqual({ txHash: '0xdead', success: true, pending: false });
+      // 再署名していない = 新しい nonce を作っていない (server 冪等キーが変わらない)。
+      expect(h.signTypedData).toHaveBeenCalledTimes(1);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      const first = (fetchSpy.mock.calls[0][1] as RequestInit).body as string;
+      const second = (fetchSpy.mock.calls[1][1] as RequestInit).body as string;
+      expect(second).toBe(first);
+      expect(JSON.parse(second).nonce).toBe(JSON.parse(first).nonce);
+    });
+
+    it('構造化 4xx (fallback-safe) の後は latch を解除し新規署名で再試行できる', async () => {
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ ok: false, error: 'fee_required' }), {
+            status: 402,
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ ok: true, txHash: '0xok' }), { status: 200 }),
+        );
+      const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
+      await expect(result.current.mutateAsync({ value: FEE })).rejects.toThrow('fee_required');
+      const r = await result.current.mutateAsync({ value: FEE });
+      expect(r.success).toBe(true);
+      expect(h.signTypedData).toHaveBeenCalledTimes(2);
+    });
+
+    it('応答不明の間は別 amount の新規署名も出さない (二重課金防止)', async () => {
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Failed to fetch'));
+      const { result } = renderHook(() => useUsageFeePayment(deployment), { wrapper });
+      await expect(result.current.mutateAsync({ value: FEE })).rejects.toMatchObject({
+        name: 'RelayResponseUnknownError',
+      });
+      await expect(result.current.mutateAsync({ value: FEE * 2n })).rejects.toMatchObject({
+        name: 'RelayResponseUnknownError',
+      });
+      expect(h.signTypedData).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('ウォレット未接続 → throw (署名・relay しない)', async () => {
     h.account = { address: undefined, chainId: undefined };
     const fetchSpy = mockFetch({ body: { ok: true, txHash: '0x' } });
