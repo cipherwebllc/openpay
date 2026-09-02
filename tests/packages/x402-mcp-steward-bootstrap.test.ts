@@ -24,10 +24,15 @@ interface SetPolicyArgs {
 
 interface BootstrapModule {
   setAndVerifyJpycPolicy(args: SetPolicyArgs): Promise<void>;
+  jsonOrThrow(res: Response, label: string): Promise<Record<string, unknown>>;
+}
+
+async function bootstrapModule(): Promise<BootstrapModule> {
+  return await import(pathToFileURL(SCRIPT).href) as BootstrapModule;
 }
 
 async function setAndVerifyJpycPolicy(args: SetPolicyArgs) {
-  const bootstrap = await import(pathToFileURL(SCRIPT).href) as BootstrapModule;
+  const bootstrap = await bootstrapModule();
   return bootstrap.setAndVerifyJpycPolicy(args);
 }
 
@@ -97,9 +102,9 @@ function storedPolicy(): StoredPolicy {
   };
 }
 
-function jsonResponse(body: unknown) {
+function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { 'content-type': 'application/json' },
   });
 }
@@ -115,6 +120,28 @@ describe('steward-bootstrap input validation', () => {
     const r = run({ STEWARD_PLATFORM_KEY: 'k', OWNER_PRIVATE_KEY: 'not-hex' });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/OWNER_PRIVATE_KEY must be/);
+  });
+});
+
+// B3: jsonOrThrow は `!res.ok && body?.ok !== true` だったため、「200 + ok:false」も
+// 「5xx + ok:true」も成功扱いになり、失敗した段階を素通りして後段が壊れていた。
+describe('steward-bootstrap jsonOrThrow', () => {
+  it.each([
+    ['200 + ok:false', 200, { ok: false, error: 'nope' }],
+    ['500 + ok:true', 500, { ok: true }],
+    ['401 + body なし', 401, {}],
+  ])('%s は throw する', async (_case, status, body) => {
+    const { jsonOrThrow } = await bootstrapModule();
+    await expect(
+      jsonOrThrow(jsonResponse(body, status), 'promote owner'),
+    ).rejects.toThrow(new RegExp(`promote owner failed \\(${status}\\)`));
+  });
+
+  it('200 + ok:true だけ body を返す', async () => {
+    const { jsonOrThrow } = await bootstrapModule();
+    await expect(
+      jsonOrThrow(jsonResponse({ ok: true, data: { id: 'x' } }), 'signer issuance'),
+    ).resolves.toEqual({ ok: true, data: { id: 'x' } });
   });
 });
 

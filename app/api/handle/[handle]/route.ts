@@ -9,6 +9,8 @@ import { isKvConfigured } from '@/lib/kv';
 import { requireSession } from '../../auth/siwe/_session';
 import { validateHandle } from '@/lib/handle';
 import { resolveHandle, releaseHandle } from '@/lib/handleStore';
+import { checkReadRateLimit } from '@/lib/relay/relayGuards';
+import { anonymizeIp } from '@/lib/relay/relayRoute';
 
 export const runtime = 'nodejs';
 export const maxDuration = 10;
@@ -18,10 +20,22 @@ function notFound() {
 }
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ handle: string }> },
 ) {
   if (!env.enableHandles) return notFound();
+  // IP 固定窓 (公開・無認証の予約可否 read)。@handle 空間の総当り列挙と、それによる KV read
+  // 圧力が予約/公開の本体機能へ波及するのを入口で止める。dashboard の入力中チェック
+  // (1 handle あたり数回) の遥か上の上限。
+  const ipPrefix = anonymizeIp(
+    req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
+  );
+  if (!(await checkReadRateLimit(`handleavail:${ipPrefix}`, 60, 60))) {
+    return NextResponse.json(
+      { ok: false, error: 'rate_limited' },
+      { status: 429 },
+    );
+  }
   const { handle: raw } = await params;
   const validated = validateHandle(raw);
   if (!validated.ok) {

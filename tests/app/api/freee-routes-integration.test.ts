@@ -61,6 +61,7 @@ vi.mock('next/headers', () => ({
 
 import { POST as syncPOST } from '@/app/api/freee/sync/route';
 import { GET as mappingGET, POST as mappingPOST } from '@/app/api/freee/mapping/route';
+import { GET as authorizeGET } from '@/app/api/freee/authorize/route';
 import { GET as callbackGET } from '@/app/api/freee/callback/route';
 import { encryptStoredToken, type StoredToken } from '@/lib/freee';
 
@@ -426,6 +427,56 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
       new Request('http://localhost/api/freee/callback?code=CODE&state=STATE5'),
     );
     expect(new URL(res.headers.get('location') ?? '').origin).toBe('http://localhost');
+  });
+
+  // WHATWG URL は '\' を '/' と同等に扱うため '/\evil.com' は "//evil.com" として解決され、
+  // startsWith('//') だけの旧判定を素通りしていた (C1)。safeInternalPath に寄せて塞ぐ。
+  it.each([
+    ['バックスラッシュ /\\evil.com', '/\\evil.com'],
+    ['二重バックスラッシュ /\\\\evil.com', '/\\\\evil.com'],
+  ])('open-redirect 防御: %s も同一オリジン / に倒す', async (_case, returnTo) => {
+    seedSession();
+    h.store.set(
+      'freee:state:STATE_BS',
+      JSON.stringify({ wallet: MERCHANT, returnTo }),
+    );
+    mockFreeeFetch();
+    const res = await callbackGET(
+      new Request('http://localhost/api/freee/callback?code=CODE&state=STATE_BS'),
+    );
+    expect(res.status).toBe(307);
+    const loc = new URL(res.headers.get('location') ?? '');
+    expect(loc.origin).toBe('http://localhost'); // evil.com へは飛ばさない
+    expect(loc.pathname).toBe('/');
+    expect(loc.searchParams.get('freee')).toBe('connected');
+  });
+
+  it.each([
+    ['/\\evil.com'],
+    ['/\\\\evil.com'],
+    ['https://evil.com/phish'],
+  ])('authorize: returnTo=%s は state に載せず / に倒す', async (returnTo) => {
+    seedSession();
+    const res = await authorizeGET(
+      new Request(
+        `http://localhost/api/freee/authorize?returnTo=${encodeURIComponent(returnTo)}`,
+      ),
+    );
+    // freee 認可画面への 302。state に保存された returnTo が '/' に落ちていること。
+    expect(res.status).toBe(302);
+    const stateKeys = [...h.store.keys()].filter((k) => k.startsWith('freee:state:'));
+    expect(stateKeys).toHaveLength(1);
+    expect(JSON.parse(h.store.get(stateKeys[0])!).returnTo).toBe('/');
+  });
+
+  it('authorize: 正当な相対パスはそのまま state に載る', async () => {
+    seedSession();
+    const res = await authorizeGET(
+      new Request('http://localhost/api/freee/authorize?returnTo=/ja/history'),
+    );
+    expect(res.status).toBe(302);
+    const stateKeys = [...h.store.keys()].filter((k) => k.startsWith('freee:state:'));
+    expect(JSON.parse(h.store.get(stateKeys[0])!).returnTo).toBe('/ja/history');
   });
 
   it('別会社で再連携 → 旧会社の mapping を破棄 (再マッピング要求)', async () => {

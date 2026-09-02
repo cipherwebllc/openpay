@@ -85,6 +85,8 @@ vi.mock('@/lib/env', () => ({
     enableUsageFee: false,
     enableMobileOrderFee: false,
     enablePushNotify: false,
+    // relay POST は status route と同じく flag + provider の双方を要求する (A5)。
+    enableJpycEip3009: true,
     enableCsvPass: true,
     feeReceiverConfigured: true,
     feeReceiver: hold.feeReceiver,

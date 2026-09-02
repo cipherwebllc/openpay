@@ -78,7 +78,13 @@ vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
     ...actual,
-    env: { ...actual.env, feeReceiver: FEE_RECEIVER, feeReceiverConfigured: true },
+    env: {
+      ...actual.env,
+      feeReceiver: FEE_RECEIVER,
+      feeReceiverConfigured: true,
+      // relay POST は status route と同じく flag + provider の双方を要求する (A5)。
+      enableJpycEip3009: true,
+    },
   };
 });
 

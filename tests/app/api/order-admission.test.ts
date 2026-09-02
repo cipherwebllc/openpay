@@ -10,6 +10,8 @@ const TOKYO_NOON = Date.UTC(2026, 6, 10, 3, 0);
 
 const hold = vi.hoisted(() => ({
   preorderTime: true,
+  mobileOrder: true,
+  rateLimitAllowed: true,
   resolved: null as unknown as
     | { ok: true; record: HandleRecord | null }
     | { ok: false },
@@ -24,8 +26,17 @@ vi.mock('@/lib/env', async (importOriginal) => {
       get enablePreorderTime() {
         return hold.preorderTime;
       },
+      get enableMobileOrder() {
+        return hold.mobileOrder;
+      },
     },
   };
+});
+
+vi.mock('@/lib/relay/relayGuards', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/relay/relayGuards')>();
+  return { ...actual, checkReadRateLimit: async () => hold.rateLimitAllowed };
 });
 
 vi.mock('@/lib/handleStore', () => ({
@@ -82,6 +93,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(TOKYO_NOON);
   hold.preorderTime = true;
+  hold.mobileOrder = true;
+  hold.rateLimitAllowed = true;
   hold.resolved = { ok: true, record: record(preorder()) };
 });
 
@@ -90,6 +103,27 @@ afterEach(() => {
 });
 
 describe('POST /api/order/admission', () => {
+  // C5: flag OFF の間は API 自体を閉じる (UI 非表示だけでは直接 POST を防げない)。
+  it('モバイル注文 flag OFF → 404 not_found (KV に触れない)', async () => {
+    hold.mobileOrder = false;
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ ok: false, error: 'not_found' });
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
+  // C5: 公開・無認証 endpoint の volumetric flood を body 解析と KV 参照の前で止める。
+  it('IP 固定窓の上限超過 → 429 rate_limited (handle 解決へ進まない)', async () => {
+    hold.rateLimitAllowed = false;
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({ ok: false, error: 'rate_limited' });
+  });
+
   it('最新 storefront と server 時刻で利用可能な preorder は許可', async () => {
     const pickupAt = Date.UTC(2026, 6, 10, 3, 30);
     const response = await POST(request({ pickupAt }));

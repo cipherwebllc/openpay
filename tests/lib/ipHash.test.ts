@@ -1,5 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
+
+const logger = vi.hoisted(() => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }));
+vi.mock('@/lib/logger', () => ({ logger }));
 
 const SECRET = '0123456789abcdef0123456789abcdef';
 
@@ -38,6 +41,54 @@ describe('hashIp', () => {
       '9e38a0b5dc99bdf0d3f291c6185964bc9809c5c65e5a6693a70cc0ee58c440bc',
     );
     expect(hashIp('2001:db8::1')).toBe(expanded);
+  });
+});
+
+// C3: secret 欠落/過短は「IP レート制限が全 endpoint で無効」を意味するが、hashIp=null は
+// checkIpRateLimit で無音の allow になる。許可挙動は変えずに、構成ミスをプロセス 1 回だけ
+// warn で可視化する (relay hot path のログスパムを避けるため 1 回限り)。
+describe('hashIp の IP_HASH_SECRET 欠落警告', () => {
+  beforeEach(() => {
+    vi.resetModules(); // module-level の warned フラグを毎テストで初期化する
+    logger.warn.mockClear();
+  });
+
+  it('secret 欠落は 2 回呼んでも warn は 1 回だけ (許可挙動は不変)', async () => {
+    vi.stubEnv('IP_HASH_SECRET', '');
+    const { hashIp: fresh } = await import('@/lib/net/ipHash');
+
+    expect(fresh('203.0.113.9')).toBeNull();
+    expect(fresh('198.51.100.4')).toBeNull();
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('ratelimit.ip_hash_disabled', {
+      reason: 'secret_missing',
+      minBytes: 32,
+    });
+  });
+
+  it('secret 過短は reason=secret_too_short で 1 回だけ warn', async () => {
+    vi.stubEnv('IP_HASH_SECRET', 'short-secret');
+    const { hashIp: fresh } = await import('@/lib/net/ipHash');
+
+    expect(fresh('203.0.113.9')).toBeNull();
+    expect(fresh('203.0.113.9')).toBeNull();
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('ratelimit.ip_hash_disabled', {
+      reason: 'secret_too_short',
+      minBytes: 32,
+    });
+  });
+
+  it('secret が正しければ warn を出さない', async () => {
+    vi.stubEnv('IP_HASH_SECRET', SECRET);
+    const { hashIp: fresh } = await import('@/lib/net/ipHash');
+
+    expect(fresh('203.0.113.9')).not.toBeNull();
+    // IP 側が不正で null になるケースでも secret 起因の warn は出さない。
+    expect(fresh('not-an-ip')).toBeNull();
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });
 

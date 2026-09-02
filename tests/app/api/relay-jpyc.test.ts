@@ -1,10 +1,15 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { POST } from '@/app/api/relay/jpyc/route';
 
 // RELAYER_PRIVATE_KEY も GELATO_SPONSOR_API_KEY もテスト env に無いため、provider は起動時に
 // null と判定され route は 503 relay_not_configured を返す = 設定するまで inert (client は
 // 他 provider に fallback)。鍵が要る検証/submit/poll の分岐は DI コア (jpycRelay.test.ts) と
 // self-host I/O (selfHostRelayer.test.ts) で担保。
+//
+// A5: POST の入口ゲートは status route (/api/relay/jpyc/status) と同じく
+// 「flag (NEXT_PUBLIC_ENABLE_JPYC_EIP3009) + provider」の双方を要求する。本番は flag ON なので、
+// ゲートより先を検証するテストは flag を明示 stub して本番と同じ前提で走らせる。
+const EIP3009_ON = 'NEXT_PUBLIC_ENABLE_JPYC_EIP3009';
+
 function req(body: unknown): Request {
   return new Request('http://localhost/api/relay/jpyc', {
     method: 'POST',
@@ -14,13 +19,49 @@ function req(body: unknown): Request {
 }
 
 describe('POST /api/relay/jpyc (env-gate)', () => {
+  const DUMMY_RELAYER_KEY = `0x${'11'.repeat(32)}`;
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
   it('GELATO_SPONSOR_API_KEY 未設定なら 503 relay_not_configured (inert・fallback signal)', async () => {
-    const res = await POST(req({ chainId: 137 }));
+    vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
+    const mod = await import('@/app/api/relay/jpyc/route');
+    const res = await mod.POST(req({ chainId: 137 }));
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({
       ok: false,
       error: 'relay_not_configured',
     });
+  });
+
+  // A5: client は flag OFF では relay を選ばないのに、直接 POST だけが provider さえあれば
+  // 通っていた。status route と同じ条件を敷き、応答形は provider 未構成と byte-identical。
+  it('flag OFF は provider があっても provider-null と同一の 503 relay_not_configured', async () => {
+    vi.resetModules();
+    // flag は stub しない (= 既定 OFF)。provider だけ有効にする。
+    vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY); // PROVIDER='self-host'
+    const mod = await import('@/app/api/relay/jpyc/route');
+    const res = await mod.POST(req({ chainId: 80002 }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: 'relay_not_configured',
+    });
+  });
+
+  it('flag ON + provider あり → 入口ゲートを抜けて通常フローへ (503 relay_not_configured にならない)', async () => {
+    vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
+    vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
+    const mod = await import('@/app/api/relay/jpyc/route');
+    // body 不足なので free 経路の payload 検証で 400 になる = ゲートは抜けている。
+    const res = await mod.POST(req({ chainId: 80002 }));
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('invalid_payload');
   });
 });
 
@@ -30,7 +71,7 @@ describe('POST /api/relay/jpyc (env-gate)', () => {
 // (config guard が顧客の決済を壊すのは誤り)。両方を設定した運営の構成ミスは起動時 logger
 // (configuredJpycForwarderFor 基準) で可視化される。
 // module load では throw しない (開発 .env.local の併設や next build を壊さない)。
-// 静的 import 済みの POST binding は resetModules の影響を受けないので他テストとは独立。
+// 各 it は stub → resetModules → dynamic import で route を新規評価するので他テストとは独立。
 describe('recover × a1 同時設定の排他 (a1 優先で graceful free 化)', () => {
   // 検証用 self-host 鍵 (秘密情報ではない・テスト専用の決定論値)。
   const DUMMY_RELAYER_KEY = `0x${'11'.repeat(32)}`;
@@ -43,6 +84,7 @@ describe('recover × a1 同時設定の排他 (a1 優先で graceful free 化)',
 
   it('mainnet forwarder + a1 + self-host → 503 relay_misconfigured を出さない (a1 優先で free モードに倒す)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '1');
     vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_POLYGON', DUMMY_FORWARDER);
     vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
@@ -58,6 +100,7 @@ describe('recover × a1 同時設定の排他 (a1 優先で graceful free 化)',
 
   it('mainnet forwarder + a1 でも module load は throw しない (next build を壊さない)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '1');
     vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_POLYGON', DUMMY_FORWARDER);
     const mod = await import('@/app/api/relay/jpyc/route');
@@ -66,6 +109,7 @@ describe('recover × a1 同時設定の排他 (a1 優先で graceful free 化)',
 
   it('testnet forwarder (Amoy) + a1 → relay_misconfigured にはならない (free モードに倒れる)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '1');
     vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', DUMMY_FORWARDER);
     vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
@@ -79,6 +123,7 @@ describe('recover × a1 同時設定の排他 (a1 優先で graceful free 化)',
 
   it('a1 のみ (forwarder 無し) + self-host → mainnet でも relay_misconfigured にならない', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '1');
     vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
     const mod = await import('@/app/api/relay/jpyc/route');
@@ -90,6 +135,7 @@ describe('recover × a1 同時設定の排他 (a1 優先で graceful free 化)',
 
   it('forwarder のみ (a1 無し) + self-host → relay_misconfigured にならない (recover 構成は許可)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_POLYGON', DUMMY_FORWARDER);
     vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
     const mod = await import('@/app/api/relay/jpyc/route');
@@ -128,6 +174,7 @@ describe('L5: forwarder 設定 + relayer 鍵欠落 → 明示 503 relay_not_conf
 
   it('forwarder 設定 + GELATO 鍵あり (self-host でない) → recover payload は 503 relay_not_configured (400 invalid_payload にしない)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', DUMMY_FORWARDER);
     vi.stubEnv('GELATO_SPONSOR_API_KEY', DUMMY_GELATO_KEY);
     // RELAYER_PRIVATE_KEY は設定しない → PROVIDER='gelato' (recover 不可)。
@@ -140,6 +187,7 @@ describe('L5: forwarder 設定 + relayer 鍵欠落 → 明示 503 relay_not_conf
 
   it('forwarder 設定 + 鍵なし (relayer も gelato も無し) → 503 relay_not_configured', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', DUMMY_FORWARDER);
     // RELAYER_PRIVATE_KEY も GELATO も無し → PROVIDER=null。recover 構成だが鍵が無いので 503。
     const mod = await import('@/app/api/relay/jpyc/route');
@@ -151,6 +199,7 @@ describe('L5: forwarder 設定 + relayer 鍵欠落 → 明示 503 relay_not_conf
 
   it('a1 ON + forwarder 設定 + GELATO 鍵あり → L5 の 503 は出さない (free 経路へ・invalid_payload で落ちる)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '1');
     vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', DUMMY_FORWARDER);
     vi.stubEnv('GELATO_SPONSOR_API_KEY', DUMMY_GELATO_KEY);
@@ -165,6 +214,7 @@ describe('L5: forwarder 設定 + relayer 鍵欠落 → 明示 503 relay_not_conf
 
   it('a1 ON + forwarder 設定 + GELATO 鍵あり → free payload は通常フロー (503 を出さない)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', '1');
     vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', DUMMY_FORWARDER);
     vi.stubEnv('GELATO_SPONSOR_API_KEY', DUMMY_GELATO_KEY);
@@ -198,6 +248,7 @@ describe('Avalanche recover-required: 直接 POST の server ガード (P1#1 / P
 
   it('Fuji (43113) + flag ON + self-host + forwarder 未設定 → 503 relay_not_configured (free に倒さない)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE', '1');
     vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY); // PROVIDER=self-host
     // Fuji forwarder は未設定 → recoverMode=false。Fuji は testnet で MAINNET_CHAINS 外 (B5 回避) なので
@@ -210,6 +261,7 @@ describe('Avalanche recover-required: 直接 POST の server ガード (P1#1 / P
 
   it('Avalanche mainnet (43114) + flag ON + self-host + per-chain ceiling 未設定 → 503 gas_ceiling_required (B5/P1#3)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE', '1');
     vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
     // RELAY_MAX_GAS_COST_WEI_AVALANCHE 未設定 → relayMaxGasCostWei(43114)=0n (recover-required は
@@ -222,6 +274,7 @@ describe('Avalanche recover-required: 直接 POST の server ガード (P1#1 / P
 
   it('flag OFF (既定): Avalanche mainnet (43114) は SUPPORTED_CHAINS 外 → recover-required ガードに到達しない (inert)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
     // flag OFF では avalanche は SUPPORTED_CHAINS/MAINNET_CHAINS に出ない → recoverMode=false だが
     // recover-required ガードは flag 非依存で 503 relay_not_configured を返す (free に倒れない = 安全)。
@@ -245,6 +298,7 @@ describe('Ethereum L1 standard 固定: 直接 POST の server ガード (free re
 
   it('Ethereum mainnet (1) + flag ON + self-host → 503 relay_not_configured (free relay に倒さない)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM', '1');
     vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY); // PROVIDER=self-host (ETH 持ち出しの危険ケース)
     // Ethereum は SUPPORTED_CHAINS 外 (relay 非対応) + forwarder 永久未設定 → recoverMode=false。
@@ -257,6 +311,7 @@ describe('Ethereum L1 standard 固定: 直接 POST の server ガード (free re
 
   it('flag OFF (既定): Ethereum mainnet (1) + self-host → 503 relay_not_configured (flag 非依存・inert)', async () => {
     vi.resetModules();
+    vi.stubEnv(EIP3009_ON, '1');
     vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
     // enableJpycEthereum 無しでも isRecoverRequiredChain(1)=true で free relay を拒否する。
     const mod = await import('@/app/api/relay/jpyc/route');

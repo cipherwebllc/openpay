@@ -118,6 +118,7 @@ async function loadRoute(bps: number): Promise<(req: Request) => Promise<Respons
   vi.stubEnv('NEXT_PUBLIC_ENABLE_USAGE_FEE', ''); // a1 OFF (ON だと forwarder=null)
   vi.stubEnv('NEXT_PUBLIC_RECOVER_FEE_BPS', String(bps)); // 実 recoverFeeValue の bps
   vi.stubEnv('NEXT_PUBLIC_JPYC_TESTNET_ADDRESS', JPYC_AMOY); // 署名 domain と一致させる
+  vi.stubEnv('NEXT_PUBLIC_ENABLE_JPYC_EIP3009', '1'); // POST は flag + provider 双方を要求 (A5)
   vi.resetModules();
   // 自己検証: route が使う resolveDeployment が署名 domain と同一アドレスを返すことを確認する。
   // (これがずれていると署名検証が必ず通らず、本テストは LARP になる)。

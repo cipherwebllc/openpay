@@ -5,6 +5,7 @@ import { isKvConfigured } from '@/lib/kv';
 import { freeeEnv, buildAuthorizeUrl } from '@/lib/freee';
 import { newSessionToken } from '@/lib/siwe';
 import { env as appEnv } from '@/lib/env';
+import { safeInternalPath } from '@/lib/url/shared';
 import { requireSession } from '../../auth/siwe/_session';
 import { setState } from '../_store';
 
@@ -38,8 +39,9 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   const url = new URL(req.url);
   const raw = url.searchParams.get('returnTo') ?? '/';
-  // open-redirect 防止: 同一オリジン相対パスのみ許可 ('//evil' も弾く)。
-  const returnTo = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/';
+  // open-redirect 防止: 同一オリジン相対パスのみ許可。判定は safeInternalPath が単一情報源
+  // ('//evil' に加え WHATWG が '/' 同等に扱う '/\evil'・制御文字・過長も弾く)。
+  const returnTo = safeInternalPath(raw) ?? '/';
 
   const state = newSessionToken();
   const reserved = await setState(state, { wallet: session.address, returnTo });

@@ -3,15 +3,8 @@
 // auth は untrusted 入力境界なので status code / error 文字列は厳密に保持すること
 // (`_` prefix のため Next.js の route 探索対象外)。
 import { NextResponse } from 'next/server';
-import { createHash, timingSafeEqual } from 'node:crypto';
 import { isKvConfigured } from '@/lib/kv';
-
-function safeEqual(a: string, b: string): boolean {
-  return timingSafeEqual(
-    createHash('sha256').update(a).digest(),
-    createHash('sha256').update(b).digest(),
-  );
-}
+import { safeEqual } from '@/lib/net/safeEqual';
 
 /** 認証 / 設定が NG なら error の NextResponse を、OK なら null を返す。
  * caller は `const err = requireAdminAuth(req); if (err) return err;` で使う。 */
