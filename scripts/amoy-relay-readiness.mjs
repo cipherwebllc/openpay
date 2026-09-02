@@ -8,9 +8,11 @@ import { polygonAmoy } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadTestnetEnv } from './lib/load-testnet-env.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-process.loadEnvFile(join(__dirname, '..', '.env.local'));
+// .env.local.testnet を優先 (無ければ .env.local)。読んだ env と KV ホストを表示してから走る。
+loadTestnetEnv(join(__dirname, '..'));
 
 const JPYC = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
 const RPC = process.env.NEXT_PUBLIC_POLYGON_AMOY_RPC_URL || 'https://rpc-amoy.polygon.technology';

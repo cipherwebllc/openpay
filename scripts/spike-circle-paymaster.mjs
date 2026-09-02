@@ -53,6 +53,7 @@ import {
   entryPoint08Address,
   entryPoint07Address,
 } from 'viem/account-abstraction';
+import { writeGeneratedKey } from './lib/write-generated-key.mjs';
 
 // ---- 設定 (Arbitrum Sepolia / Circle Paymaster v0.8) ------------------------
 const CHAIN = arbitrumSepolia; // chainId 421614
@@ -143,17 +144,21 @@ async function main() {
     const freshPk = generatePrivateKey();
     const freshAddr = privateKeyToAccount(freshPk).address;
     keygenOnly = true;
+    // 鍵は stdout に出さず 0600 のファイルへ (ターミナル履歴・CI ログ・スクショへの波及を断つ)。
+    const { path: keyPath } = writeGeneratedKey(freshPk, 'spike', {
+      ADDRESS: freshAddr,
+    });
     log('SPIKE_PRIVATE_KEY が未設定 → 使い捨てのテスト専用鍵を生成しました。\n');
     log('  ┌─────────────────────────────────────────────────────────────');
-    log(`  │ SPIKE_PRIVATE_KEY=${freshPk}`);
-    log(`  │ ADDRESS          =${freshAddr}`);
+    log(`  │ ADDRESS           =${freshAddr}`);
+    log(`  │ 秘密鍵の書き出し先 =${keyPath} (mode 0600・stdout には出しません)`);
     log('  └─────────────────────────────────────────────────────────────');
     log('\n次の手順:');
     log(`  1) 既存ウォレットから上記 ADDRESS へ Arbitrum Sepolia USDC を ~1 送金`);
     log('     (testnet・無価値。faucet: https://faucet.circle.com)');
     log(`     USDC コントラクト: ${USDC}`);
-    log('  2) 同じ鍵で再実行 (PIMLICO_API_KEY も設定):');
-    log(`     SPIKE_PRIVATE_KEY=${freshPk} \\`);
+    log('  2) 書き出しファイルの PRIVATE_KEY を SPIKE_PRIVATE_KEY に設定して再実行:');
+    log('     SPIKE_PRIVATE_KEY=$(...) \\');
     log('       PIMLICO_API_KEY=<your-key> node scripts/spike-circle-paymaster.mjs');
     log('\n⚠️ これは使い捨て鍵です。mainnet 資産は絶対に入れないこと (漏れても価値ゼロ)。');
     return;

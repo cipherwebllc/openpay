@@ -3,11 +3,15 @@
 // broadcast とガスは facilitator 側。買い手ウォレットに ETH は不要・USDC のみ。
 //
 // 実行 (このファイルに秘密鍵は書かない・env で渡す):
-//   PRIVATE_KEY=0x... node scripts/x402-vanilla-buyer-smoke.mjs
-//   PRIVATE_KEY=0x... TARGET_URL=https://open-pay.jp/api/paid/usdc/stores \
+//   SMOKE_MAINNET_OK=1 PRIVATE_KEY=0x... node scripts/x402-vanilla-buyer-smoke.mjs
+//   SMOKE_MAINNET_OK=1 PRIVATE_KEY=0x... TARGET_URL=https://open-pay.jp/api/paid/usdc/stores \
 //     node scripts/x402-vanilla-buyer-smoke.mjs
 //
-// env: TARGET_URL (既定 /api/paid/hello)・MAX_USDC (支払い上限・既定 0.05)。
+// ⚠️ 既定の TARGET_URL は **本番 (open-pay.jp)**・署名するのは Base mainnet の実 USDC。
+// fat-finger で実マネーを動かさないよう、本番ホスト / Base mainnet を叩くには
+// SMOKE_MAINNET_OK=1 の明示 opt-in が必要 (scripts/smoke-circle-crossswitch.mjs と同じ規約)。
+//
+// env: TARGET_URL (既定 /api/paid/hello)・MAX_USDC (支払い上限・既定 0.05)・SMOKE_MAINNET_OK。
 // 成功 = HTTP 200 + 本文 + settlement に tx hash。
 //
 // 用途: CDP Bazaar / agentic.market への掲載は **settle 時に確定する** (2026-08-20 実測) ため、
@@ -37,7 +41,31 @@ if (!pk || !pk.startsWith('0x')) {
   process.exit(1);
 }
 
-const signer = await createSigner('base', pk);
+// 実マネー保護: 本 smoke は Base **mainnet** の signer で署名するため、既定 target を
+// 含む本番ホストへの実行は常に実 USDC を消費する。明示 opt-in が無ければ何も送らない。
+const SIGNER_NETWORK = 'base'; // Base mainnet (chainId 8453)
+const targetHost = (() => {
+  try {
+    return new URL(TARGET).hostname.toLowerCase();
+  } catch {
+    console.error(`TARGET_URL が URL として不正です: ${TARGET}`);
+    process.exit(1);
+  }
+})();
+const isProdHost = targetHost === 'open-pay.jp' || targetHost.endsWith('.open-pay.jp');
+if ((isProdHost || SIGNER_NETWORK === 'base') && process.env.SMOKE_MAINNET_OK !== '1') {
+  console.error(
+    `この smoke は ${TARGET} を Base mainnet の実 USDC (上限 ${MAX_USDC}) で購入します。`,
+  );
+  console.error('意図的なら SMOKE_MAINNET_OK=1 を付けて再実行してください:');
+  console.error(
+    `  SMOKE_MAINNET_OK=1 PRIVATE_KEY=0x... TARGET_URL=${TARGET} node scripts/x402-vanilla-buyer-smoke.mjs`,
+  );
+  console.error('使い捨て・低残高ウォレットのみ使用すること。');
+  process.exit(2);
+}
+
+const signer = await createSigner(SIGNER_NETWORK, pk);
 const fetchWithPay = wrapFetchWithPayment(fetch, signer, MAX_VALUE);
 
 console.log('buying:', TARGET);

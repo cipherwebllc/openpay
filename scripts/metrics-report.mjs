@@ -12,6 +12,8 @@
 // ⚠️ 表示されるのは「server が観測できた範囲」: relay/gasless 決済・x402 settle・
 // 受注保存・商品購入確定。standard 決済 (お客様 gas 負担の直接送金) は含まれない。
 
+import { monthOf } from './lib/month-of.mjs';
+
 const KINDS = [
   ['relay_jpyc', 'JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)'],
   ['x402_settle', 'x402 settle (AI ストア/有料 API)'],
@@ -36,12 +38,6 @@ async function kv(command) {
   if (!res.ok) throw new Error(`KV ${res.status}: ${await res.text()}`);
   const body = await res.json();
   return body.result;
-}
-
-function monthOf(offset = 0) {
-  const d = new Date();
-  d.setUTCMonth(d.getUTCMonth() + offset);
-  return d.toISOString().slice(0, 7);
 }
 
 const months = process.argv[2] ? [process.argv[2]] : [monthOf(0), monthOf(-1)];

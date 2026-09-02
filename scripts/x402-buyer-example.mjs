@@ -1,4 +1,16 @@
 #!/usr/bin/env node
+// OpenPay の JPYC forwarder-split 402 を 1 回購入するリファレンス買い手。
+//
+// 使い方 (鍵はファイルに書かない・env で渡す):
+//   BUYER_PRIVATE_KEY=0x... [RESOURCE_URL=https://open-pay.jp/api/paid/x] [MAX_JPYC=5] \
+//     node scripts/x402-buyer-example.mjs
+//
+// 金銭ガード (署名の前に必ず通す。402 の自己申告を鵜呑みにしない):
+//   - 総額 (merchantValue + feeValue) が MAX_JPYC (既定 5 JPYC) を超えたら署名しない
+//   - asset / forwarder が SDK の既知値 (SUPPORTED_JPYC_ASSETS / SUPPORTED_JPYC_FORWARDERS) と
+//     一致しなければ署名しない (別 token の署名・攻撃者 EOA への総額付け替えを止める)
+//   - validBefore は min(402 の maxTimeoutSeconds, facilitator 上限) で頭打ちにする
+//   - RESOURCE_URL は SDK の parseSafePaymentUrl を通してから fetch する (SSRF ガード)
 
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -12,8 +24,16 @@ import {
   keccak256,
 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import {
+  SUPPORTED_JPYC_ASSETS,
+  SUPPORTED_JPYC_FORWARDERS,
+} from '../packages/x402-sdk/src/guards.mjs';
+import { MAX_AUTHORIZATION_TIMEOUT_SECONDS } from '../packages/x402-sdk/src/payment.mjs';
+import { parseSafePaymentUrl } from '../packages/x402-sdk/src/network.mjs';
 
 const DEFAULT_RESOURCE_URL = 'https://open-pay.jp/api/paid/demo';
+export const DEFAULT_MAX_JPYC = '5';
+const JPYC_DECIMALS = 18;
 
 export const RECEIVE_WITH_AUTHORIZATION_TYPES = {
   ReceiveWithAuthorization: [
@@ -216,6 +236,60 @@ export function createAuthorization(
   };
 }
 
+// MAX_JPYC (人間可読の JPYC) を atomic 単位へ。402 の要求額から導出しないのが要点で、
+// 改竄された requirements をここで止めるための独立した上限。
+export function parseJpycCap(raw, label = 'MAX_JPYC') {
+  const value = typeof raw === 'number' ? String(raw) : raw;
+  if (typeof value !== 'string' || !/^[0-9]+(?:\.[0-9]{1,18})?$/.test(value)) {
+    throw new Error(`${label} must be a JPYC decimal with up to 18 decimals (例: 5)`);
+  }
+  const [whole, frac = ''] = value.split('.');
+  return BigInt(whole) * 10n ** BigInt(JPYC_DECIMALS) + BigInt(frac.padEnd(JPYC_DECIMALS, '0'));
+}
+
+export function assertWithinCap(totalAtomic, capAtomic, capLabel) {
+  if (totalAtomic > capAtomic) {
+    throw new Error(
+      `要求額 ${formatUnits(totalAtomic, JPYC_DECIMALS)} JPYC が上限 MAX_JPYC=${capLabel} を超過 — 署名せず中止します`,
+    );
+  }
+}
+
+// 402 が自己申告した asset / forwarder をそのまま信じると、売り手は別 token の署名を
+// 引き出したり、表示した分配を迂回して総額を攻撃者 EOA へ付け替えられる。SDK の
+// 既知値 (単一情報源) へ束縛してその波及を断つ。
+export function assertSupportedAssetAndForwarder(accept) {
+  const known = SUPPORTED_JPYC_ASSETS[accept.network];
+  if (!known) {
+    throw new Error(`未対応 network ${accept.network} — 署名せず中止します`);
+  }
+  if (accept.asset.toLowerCase() !== known.address.toLowerCase()) {
+    throw new Error(
+      `asset ${accept.asset} が ${accept.network} の既知 JPYC (${known.address}) と一致しません — 署名せず中止します`,
+    );
+  }
+  const forwarder = SUPPORTED_JPYC_FORWARDERS[accept.network];
+  if (!forwarder) {
+    throw new Error(
+      `${accept.network} の OpenPay forwarder が未掲載です — 署名せず中止します`,
+    );
+  }
+  // normalizePaymentRequirements が payTo === extra.openpay.forwarder を保証済なので、
+  // forwarder の一致確認が payTo の確認を兼ねる。
+  if (accept.extra.openpay.forwarder.toLowerCase() !== forwarder.toLowerCase()) {
+    throw new Error(
+      `forwarder/payTo ${accept.extra.openpay.forwarder} が既知の OpenPay forwarder (${forwarder}) と一致しません — 署名せず中止します`,
+    );
+  }
+  return accept;
+}
+
+// 売り手が長い有効期限を要求しても、facilitator の上限を超える authorization には
+// 署名しない (後日 facilitator を迂回して直接 settle される波及を断つ)。
+export function clampAuthorizationTimeout(maxTimeoutSeconds) {
+  return Math.min(maxTimeoutSeconds, MAX_AUTHORIZATION_TIMEOUT_SECONDS);
+}
+
 export function encodePaymentPayload(payload) {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
 }
@@ -252,7 +326,17 @@ export async function main() {
   if (!privateKey || !isHex(privateKey) || privateKey.length !== 66) {
     throw new Error('BUYER_PRIVATE_KEY=0x... is required');
   }
-  const resourceUrl = process.env.RESOURCE_URL || DEFAULT_RESOURCE_URL;
+  const rawResourceUrl = process.env.RESOURCE_URL || DEFAULT_RESOURCE_URL;
+  // SSRF ガード: 内部/リンクローカル/認証情報付き URL へは 1 バイトも送らない。
+  const safeUrl = parseSafePaymentUrl(rawResourceUrl);
+  if (!safeUrl) {
+    throw new Error(
+      `RESOURCE_URL ${rawResourceUrl} は支払い先として不正です (http/https の公開ホストのみ・認証情報付き不可) — 中止します`,
+    );
+  }
+  const resourceUrl = safeUrl.toString();
+  const maxJpyc = process.env.MAX_JPYC ?? DEFAULT_MAX_JPYC;
+  const capAtomic = parseJpycCap(maxJpyc);
   const account = privateKeyToAccount(privateKey);
 
   console.log(`[1/3] Requesting ${resourceUrl}`);
@@ -261,8 +345,18 @@ export async function main() {
   if (first.status !== 402 || !isObject(challenge) || !Array.isArray(challenge.accepts)) {
     throw new Error(`expected HTTP 402 challenge, got ${first.status}`);
   }
-  const accept = normalizePaymentRequirements(challenge.accepts[0]);
-  const authorization = createAuthorization(account.address, accept.maxTimeoutSeconds);
+  const accept = assertSupportedAssetAndForwarder(
+    normalizePaymentRequirements(challenge.accepts[0]),
+  );
+  assertWithinCap(
+    accept.extra.openpay.merchantValue + accept.extra.openpay.feeValue,
+    capAtomic,
+    maxJpyc,
+  );
+  const authorization = createAuthorization(
+    account.address,
+    clampAuthorizationTimeout(accept.maxTimeoutSeconds),
+  );
   const { typedData } = buildTypedDataFromPaymentRequirements(
     challenge.accepts[0],
     authorization,
@@ -271,7 +365,7 @@ export async function main() {
     `[1/3] 402 received: price ${formatUnits(
       accept.extra.openpay.merchantValue,
       18,
-    )} JPYC + fee ${formatUnits(accept.extra.openpay.feeValue, 18)} JPYC`,
+    )} JPYC + fee ${formatUnits(accept.extra.openpay.feeValue, 18)} JPYC (上限 MAX_JPYC=${maxJpyc})`,
   );
 
   console.log('[2/3] Signing receiveWithAuthorization');
