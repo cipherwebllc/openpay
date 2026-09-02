@@ -43,6 +43,21 @@ function lineMentioning(path: string): string {
   return hit!;
 }
 
+/**
+ * `GET <path>` の言及位置から、その直後の「x402 利用料」までの断片。
+ *
+ * 素朴に「行が `<price> JPYC` を含む」で検査すると、行末の「x402 利用料 1%・最低 1 JPYC」に
+ * 誤マッチして price='1' の検査が常に真になり (フェンスとして無意味)、1 行に 2 商品が並ぶ行
+ * (demo と stores) では隣の商品の価格でも通ってしまう。商品名の直後だけを見る。
+ */
+function priceSegment(path: string): string {
+  const line = lineMentioning(path);
+  const from = line.indexOf(`\`GET ${path}`);
+  const rest = line.slice(from);
+  const feeAt = rest.indexOf('x402 利用料');
+  return feeAt === -1 ? rest : rest.slice(0, feeAt);
+}
+
 /** regex の全一致について、捕捉した数値が期待どおりであることを検証 (少なくとも 1 件)。 */
 function expectEveryMatch(re: RegExp, expected: string[], label: string): void {
   const matches = [...llms.matchAll(re)];
@@ -127,7 +142,7 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
     // flag の stub 漏れでカタログが縮んだまま「全件 OK」になるのを防ぐ (openapi-discovery.test.ts と同じ数)。
     expect(FIRST_PARTY_RESOURCES.length).toBe(7);
     for (const r of FIRST_PARTY_RESOURCES) {
-      expect(lineMentioning(r.path), r.path).toContain(`${r.priceJpyc} JPYC`);
+      expect(priceSegment(r.path), r.path).toContain(`${r.priceJpyc} JPYC`);
     }
   });
 

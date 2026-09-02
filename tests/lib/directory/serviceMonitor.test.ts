@@ -8,7 +8,9 @@ import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
 import {
   createServiceMonitorEnvelope,
   parseServiceMonitorQuery,
+  scopedChangelog,
   serviceChangelog,
+  takeDeltaByDateGroups,
   SERVICE_DIFF_FIELDS,
   SERVICE_MONITOR_MAX_LIMIT,
 } from '@/lib/directory/serviceMonitor';
@@ -161,29 +163,36 @@ describe('createServiceMonitorEnvelope', () => {
     expect(env.services.length).toBe(changedSlugs.size);
   });
 
-  it('limit が changes を cap する', () => {
-    const baselineDate = serviceChangelog()[0].date;
+  it('limit が changes を cap する (ただし日付境界で切り上げ)', () => {
     const env = createServiceMonitorEnvelope(
-      { changedSince: baselineDate, limit: 3 },
+      { changedSince: '2026-08-27', limit: 3 },
       {},
       NOW,
     );
-    expect(env.changes.length).toBe(3);
+    // 2026-08-27 の 4 件は 1 日ぶんなので分割されない (limit=3 を超えて 4 件返る)。
+    expect(env.changes.length).toBe(4);
+    expect(new Set(env.changes.map((e) => e.date))).toEqual(new Set(['2026-08-27']));
+    expect(env.hasMore).toBe(false);
   });
 
-  // E3: limit で打ち切られた delta は「取りこぼしを永久ロス」しない — nextChangedSince を
-  // generatedAt でなく最後に返したイベントの date にし、hasMore で「まだ続きがある」を明示する。
-  it('E3: limit で打ち切られた delta は hasMore:true・nextChangedSince=最後に返したイベントの date', () => {
-    const baselineDate = serviceChangelog()[0].date;
+  // E3: limit で打ち切られた delta は「取りこぼしを永久ロス」しない。かつ **同一 date を
+  // 分割しない**ので、次の changedSince は必ず前進する (同じ日を無限に返し続けない)。
+  it('E3(a): 同一 date の件数が limit を超えてもその日を丸ごと返し、次は必ず後の日付になる', () => {
+    // jpyc-services スコープの最古日 = baseline 日 (2026-07-13・19 件が同日)。
+    const baselineDate = scopedChangelog('jpyc-services')[0].date;
     const capped = createServiceMonitorEnvelope(
-      { changedSince: baselineDate, limit: 3 },
+      { changedSince: baselineDate, limit: 5 },
       {},
       NOW,
     );
+    // 1 日が分割されないので limit=5 を超えて baseline 全件が返る。
+    expect(capped.changes.length).toBeGreaterThan(5);
+    expect(capped.changes.every((e) => e.date === baselineDate)).toBe(true);
     expect(capped.hasMore).toBe(true);
-    expect(capped.nextChangedSince).toBe(capped.changes[2].date);
-    // generatedAt の日付そのものではない (打ち切り分を取りこぼさないための差し替え)。
-    expect(capped.nextChangedSince).not.toBe(NOW.slice(0, 10));
+    // 次のカーソルは「最後に返した date」ではなく「最初の未返却イベントの date」= 厳密に後。
+    expect(capped.nextChangedSince > baselineDate).toBe(true);
+    // その日のイベントは 1 件も返していない = 次回に再配信は起きない。
+    expect(capped.changes.some((e) => e.date === capped.nextChangedSince)).toBe(false);
 
     const uncapped = createServiceMonitorEnvelope(
       { changedSince: baselineDate, limit: SERVICE_MONITOR_MAX_LIMIT },
@@ -192,6 +201,38 @@ describe('createServiceMonitorEnvelope', () => {
     );
     expect(uncapped.hasMore).toBe(false);
     expect(uncapped.nextChangedSince).toBe(NOW.slice(0, 10));
+  });
+
+  it('E3(b): 2 回呼び出しで前進する — 重複ゼロ・最後は hasMore:false', () => {
+    const baselineDate = scopedChangelog('jpyc-services')[0].date;
+    const all = createServiceMonitorEnvelope(
+      { changedSince: baselineDate, limit: SERVICE_MONITOR_MAX_LIMIT },
+      {},
+      NOW,
+    ).changes;
+
+    const first = createServiceMonitorEnvelope(
+      { changedSince: baselineDate, limit: 5 },
+      {},
+      NOW,
+    );
+    expect(first.hasMore).toBe(true);
+    const second = createServiceMonitorEnvelope(
+      { changedSince: first.nextChangedSince, limit: 5 },
+      {},
+      NOW,
+    );
+    expect(second.changes.length).toBeGreaterThan(0);
+    expect(second.hasMore).toBe(false);
+
+    const key = (e: { slug?: string; date: string; changeType: string }) =>
+      `${e.slug ?? ''}|${e.date}|${e.changeType}`;
+    const firstKeys = first.changes.map(key);
+    const secondKeys = second.changes.map(key);
+    // 2 回目に 1 件も再配信されない (inclusive 比較でも重複ゼロ)。
+    expect(secondKeys.filter((k) => firstKeys.includes(k))).toEqual([]);
+    // 2 回で全件を回収する (取りこぼしゼロ)。
+    expect([...firstKeys, ...secondKeys].sort()).toEqual(all.map(key).sort());
   });
 
   it('E3: snapshot の hasMore は「全イベント数 > limit」', () => {
@@ -227,6 +268,53 @@ describe('createServiceMonitorEnvelope', () => {
     const row = env.services.find((r) => r.slug === entry.slug)!;
     expect(row.sourceCheckedAt).toBe('2026-08-26T00:00:00.000Z');
     expect(row.sourceOk).toBe(true);
+  });
+});
+
+// 日付境界の切り上げ規則そのもの (実データに依存しない性質を合成データで固定する)。
+describe('takeDeltaByDateGroups (delta の切り出し規則)', () => {
+  const ev = (date: string, id: number) => ({ date, id });
+
+  it('日付グループを分割しない — 先頭グループが limit を超えても丸ごと返す', () => {
+    const events = [ev('2026-01-01', 1), ev('2026-01-01', 2), ev('2026-01-01', 3), ev('2026-01-02', 4)];
+    const page = takeDeltaByDateGroups(events, 2);
+    expect(page.taken.map((e) => e.id)).toEqual([1, 2, 3]);
+    expect(page.hasMore).toBe(true);
+    // 最初の未返却イベントの date = 返した最後の date より厳密に後 → 必ず前進する。
+    expect(page.nextChangedSince).toBe('2026-01-02');
+  });
+
+  it('累計が limit 以下の間だけグループを足す', () => {
+    const events = [ev('2026-01-01', 1), ev('2026-01-02', 2), ev('2026-01-02', 3), ev('2026-01-03', 4)];
+    expect(takeDeltaByDateGroups(events, 2).taken.map((e) => e.id)).toEqual([1]);
+    expect(takeDeltaByDateGroups(events, 3).taken.map((e) => e.id)).toEqual([1, 2, 3]);
+    expect(takeDeltaByDateGroups(events, 3).nextChangedSince).toBe('2026-01-03');
+  });
+
+  it('全件入るなら hasMore:false・nextChangedSince は null (呼び元が generatedAt を使う)', () => {
+    const events = [ev('2026-01-01', 1), ev('2026-01-02', 2)];
+    const page = takeDeltaByDateGroups(events, 200);
+    expect(page.taken).toHaveLength(2);
+    expect(page.hasMore).toBe(false);
+    expect(page.nextChangedSince).toBeNull();
+    const empty = takeDeltaByDateGroups([], 5);
+    expect(empty).toEqual({ taken: [], hasMore: false, nextChangedSince: null });
+  });
+});
+
+// N4: 公開している重複排除キー (slug + date + changeType) が jpyc-services スコープ内で
+// 実データ上も一意でなければ、エージェントは正しい dedupe をしても取りこぼす。
+describe('dedupe キーの一意性 (jpyc-services)', () => {
+  it('slug+date+changeType は一意・全イベントに slug がある', () => {
+    const events = scopedChangelog('jpyc-services');
+    expect(events.length).toBeGreaterThan(0);
+    const keys = events.map((e) => {
+      expect(e.slug, `slug の無い jpyc-services イベント: ${JSON.stringify(e)}`).toBeTruthy();
+      return `${e.slug}|${e.date}|${e.changeType}`;
+    });
+    expect(new Set(keys).size, `重複キー: ${keys.filter((k, i) => keys.indexOf(k) !== i)}`).toBe(
+      keys.length,
+    );
   });
 });
 

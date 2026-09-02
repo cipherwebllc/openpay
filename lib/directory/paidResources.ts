@@ -111,7 +111,18 @@ const SERVICE_MONITOR_OUTPUT = {
       description:
         'snapshot = full monitor view (no changedSince). delta = only what changed on/after changedSince; changes:[] explicitly means no change.',
     },
-    query: { type: 'object' },
+    query: {
+      type: 'object',
+      description: 'The accepted query, echoed back.',
+      properties: {
+        changedSince: { type: 'string', description: 'YYYY-MM-DD (inclusive), as requested.' },
+        limit: {
+          type: 'integer',
+          description:
+            'Requested maximum number of change events. In delta mode the limit is rounded up to a date boundary: a single day is never split, so a day holding more events than limit is still returned whole and changes can exceed limit.',
+        },
+      },
+    },
     services: {
       type: 'array',
       items: {
@@ -173,12 +184,12 @@ const SERVICE_MONITOR_OUTPUT = {
     hasMore: {
       type: 'boolean',
       description:
-        'True when this response was truncated by limit; more events exist beyond nextChangedSince.',
+        'True when events remain that this response did not return; call again with changedSince set to nextChangedSince to continue.',
     },
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call to fetch only new events (inclusive; duplicates are removed by the documented dedupe key). When hasMore is true, this is the date of the last event in this response (not the response generation time), so the truncated remainder is included on the next call.',
+        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the date of the first event NOT returned here, which is strictly later than the last returned date because a single day is never split — so continuing always makes progress and never re-delivers. When hasMore is false it is the response generation date (UTC).',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },
@@ -228,7 +239,18 @@ const PAYMENT_MONITOR_OUTPUT = {
       description:
         'snapshot = full dated history (no changedSince). delta = only events on/after changedSince; changes:[] explicitly means no change.',
     },
-    query: { type: 'object' },
+    query: {
+      type: 'object',
+      description: 'The accepted query, echoed back.',
+      properties: {
+        changedSince: { type: 'string', description: 'YYYY-MM-DD (inclusive), as requested.' },
+        limit: {
+          type: 'integer',
+          description:
+            'Requested maximum number of change events. In delta mode the limit is rounded up to a date boundary: a single day is never split, so a day holding more events than limit is still returned whole and changes can exceed limit.',
+        },
+      },
+    },
     providers: {
       type: 'array',
       description:
@@ -322,12 +344,12 @@ const PAYMENT_MONITOR_OUTPUT = {
     hasMore: {
       type: 'boolean',
       description:
-        'True when this response was truncated by limit; more events exist beyond nextChangedSince.',
+        'True when events remain that this response did not return; call again with changedSince set to nextChangedSince to continue.',
     },
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call to fetch only new events (inclusive; duplicates are removed by the documented dedupe key). When hasMore is true, this is the date of the last event in this response (not the response generation time), so the truncated remainder is included on the next call.',
+        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the date of the first event NOT returned here, which is strictly later than the last returned date because a single day is never split — so continuing always makes progress and never re-delivers. When hasMore is false it is the response generation date (UTC).',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },

@@ -186,7 +186,11 @@ export const USDC_SERVICE_MONITOR_BAZAAR = {
         description:
           'Return only changes on/after this date (YYYY-MM-DD). Set to your last run date. Omit for the full snapshot.',
       },
-      limit: { type: 'string', description: '1-200 (default 200)' },
+      limit: {
+        type: 'string',
+        description:
+          '1-200 (default 200). In delta mode the limit is rounded up to a date boundary: a single day is never split, so a day holding more events is returned whole. Continue with nextChangedSince while hasMore is true.',
+      },
     },
     additionalProperties: false,
   },
@@ -269,7 +273,11 @@ export const USDC_PAYMENT_MONITOR_BAZAAR = {
         description:
           'Return only events on/after this date (YYYY-MM-DD). Set to your last run date. Omit for the full history.',
       },
-      limit: { type: 'string', description: '1-200 (default 200)' },
+      limit: {
+        type: 'string',
+        description:
+          '1-200 (default 200). In delta mode the limit is rounded up to a date boundary: a single day is never split, so a day holding more events is returned whole. Continue with nextChangedSince while hasMore is true.',
+      },
     },
     additionalProperties: false,
   },

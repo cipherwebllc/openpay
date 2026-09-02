@@ -101,17 +101,19 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(empty.nextChangedSince).toBe('2026-08-27');
   });
 
-  // E3: limit で打ち切られた delta は打ち切り分を永久に取りこぼさない — nextChangedSince を
-  // generatedAt でなく最後に返したイベントの date にし、hasMore で「続きがある」を明示する。
-  it('E3: limit で打ち切られた delta は hasMore:true・nextChangedSince=最後に返したイベントの date', () => {
-    // 2026-08-10 (dg-sps launch) + 2026-08-26 (大阪府 3 件) = 4 件を limit=2 で切る。
+  // E3: limit で打ち切られた delta は打ち切り分を永久に取りこぼさない。かつ **同一 date を
+  // 分割しない**ので次の changedSince は必ず前進する (同じ日を無限に返し続けない)。
+  it('E3: 打ち切られた delta は hasMore:true・nextChangedSince=最初の未返却イベントの date', () => {
+    // 2026-08-10 (dg-sps launch) + 2026-08-26 (大阪府 3 件)。limit=2 では 8/26 の 3 件が
+    // 入り切らないので、日付境界で切って 8/10 の 1 件だけを返す。
     const capped = createPaymentMonitorEnvelope(
       { changedSince: '2026-08-10', limit: 2 },
       NOW,
     );
-    expect(capped.changes).toHaveLength(2);
+    expect(capped.changes.map((c) => c.date)).toEqual(['2026-08-10']);
     expect(capped.hasMore).toBe(true);
-    expect(capped.nextChangedSince).toBe(capped.changes[1].date);
+    expect(capped.nextChangedSince).toBe('2026-08-26');
+    expect(capped.nextChangedSince > capped.changes[0].date).toBe(true);
     expect(capped.nextChangedSince).not.toBe(NOW.slice(0, 10));
 
     const uncapped = createPaymentMonitorEnvelope(
@@ -120,6 +122,50 @@ describe('createPaymentMonitorEnvelope', () => {
     );
     expect(uncapped.hasMore).toBe(false);
     expect(uncapped.nextChangedSince).toBe(NOW.slice(0, 10));
+  });
+
+  it('E3(a): 同一 date の件数が limit を超えてもその日を分割しない (limit は日付境界に切り上げ)', () => {
+    // 2026-08-26 は 3 件 (大阪府採択)。limit=1 でも 3 件まとめて返す。
+    const env = createPaymentMonitorEnvelope({ changedSince: '2026-08-26', limit: 1 }, NOW);
+    expect(env.changes).toHaveLength(3);
+    expect(env.changes.every((c) => c.date === '2026-08-26')).toBe(true);
+    // その日より後のイベントは無いので続きは無く、カーソルは generatedAt に戻る。
+    expect(env.hasMore).toBe(false);
+    expect(env.nextChangedSince).toBe(NOW.slice(0, 10));
+  });
+
+  it('E3(b): 2 回呼び出しで前進する — 重複ゼロ・最後は hasMore:false', () => {
+    const all = createPaymentMonitorEnvelope(
+      { changedSince: '2026-08-10', limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+    ).changes;
+
+    const first = createPaymentMonitorEnvelope({ changedSince: '2026-08-10', limit: 2 }, NOW);
+    expect(first.hasMore).toBe(true);
+    const second = createPaymentMonitorEnvelope(
+      { changedSince: first.nextChangedSince, limit: 2 },
+      NOW,
+    );
+    expect(second.changes.length).toBeGreaterThan(0);
+    expect(second.hasMore).toBe(false);
+
+    const key = (c: { provider: string; date: string; changeCategory?: string }) =>
+      `${c.provider}|${c.date}|${c.changeCategory ?? ''}`;
+    const firstKeys = first.changes.map(key);
+    const secondKeys = second.changes.map(key);
+    expect(secondKeys.filter((k) => firstKeys.includes(k))).toEqual([]);
+    expect([...firstKeys, ...secondKeys].sort()).toEqual(all.map(key).sort());
+  });
+
+  // N4: 公開している重複排除キー (provider + date + changeCategory) が実データ上も一意
+  // でなければ、エージェントは正しく dedupe しても取りこぼす。
+  it('dedupe キー provider+date+changeCategory は snapshot 全件で一意', () => {
+    const rows = createPaymentMonitorEnvelope(Q, NOW).changes;
+    expect(rows.length).toBeGreaterThan(0);
+    const keys = rows.map((c) => `${c.provider}|${c.date}|${c.changeCategory ?? ''}`);
+    expect(new Set(keys).size, `重複キー: ${keys.filter((k, i) => keys.indexOf(k) !== i)}`).toBe(
+      keys.length,
+    );
   });
 
   it('E3: snapshot の hasMore は「全イベント数 > limit」・nextChangedSince は常に generatedAt', () => {

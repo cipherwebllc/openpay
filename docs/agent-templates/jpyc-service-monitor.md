@@ -29,6 +29,7 @@ A weekly change feed for Japan-related JPYC/Web3 services, designed to be wired 
 - **買う前に確かめる(空振り課金ゼロ)**: teaser の最終イベント日が手元の `nextChangedSince` より**前(古い)なら**その週は買わない(有料 delta は空になる)。同日以降のイベントがあるときだけ有料 delta を購入する — 「変更なし」に支払う週が無くなります
 - **変更は値でも返ります**: 一次ソースが前後の値を明示する場合、`diffs: [{ field, previousValue, currentValue, effectiveAt? }]`(field は assets / chains / fee / limit / status / feature の固定語彙)が付きます。推測では埋めません(無い場合は summary のみ)
 - 重複排除キーは `slug + date + changeType`
+- `limit` は**日付境界で丸められます**(1 日が途中で分割されることはないため、1 日の件数が `limit` を超える場合は `changes` が `limit` を超えます)。`hasMore` が `true` なら応答の `nextChangedSince`(= まだ返していない最初のイベントの日付・返した最後の日付より必ず後)で続きを購入してください — 同じ範囲が再送されることも、取りこぼされることもありません
 - OpenAPI(機械可読・`x-agent-usage` つき): `https://open-pay.jp/api/openapi.json`(operationId: `getJpycServiceMonitor` / `getJpycServiceMonitorUsdc`)
 - 外部カタログ: [x402 Bazaar / agentic.market](https://agentic.market/services/open-pay-jp) に掲載(USDC 面)
 

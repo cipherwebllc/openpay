@@ -27,6 +27,7 @@ vi.mock('@/lib/logger', () => ({ logger: { warn: vi.fn(), info: vi.fn(), error: 
 import { logger } from '@/lib/logger';
 import { JPYC_CHAINS, chainForSlug } from '@/lib/chains';
 import {
+  CURSOR_HEAD_TOLERANCE_BLOCKS,
   TRANSFERS_DEFAULT_LIMIT,
   TRANSFERS_MAX_LIMIT,
   TRANSFER_CHUNK_BLOCKS,
@@ -345,16 +346,42 @@ describe('readTransfers', () => {
     }
   });
 
-  it('E10: cursor.block が現在の chain head (toBlock) より新しいと status=invalid_cursor・getLogs を呼ばない (空振り課金の防止)', async () => {
+  // E10: cursor が head より先行していても、許容量以内は「まだ新着なし」= 空応答。
+  // 「新着なし」の nextCursor はその時点の head なので、次の呼び出しが遅れた RPC ノードや
+  // リオーグ後の head に当たると正常な polling でも数ブロック先行し得る (一律 400 にすると
+  // 買い手に非が無いのにフィードが止まる)。
+  it('E10: cursor が head より先行しても許容量以内なら items:[] + 同じ cursor を echo・getLogs を呼ばない', async () => {
     const getLogs = vi.fn().mockResolvedValue([]);
     setAll(() => okClient({ getLogs })); // getBlockNumber は既定の 1_000_000n
     const slug = JPYC_CHAINS[0];
-    const r = await readTransfers(slug, { limit: 20, cursor: { block: 1_000_001n, logIndex: 0 } });
-    expect(r.status).toBe('invalid_cursor');
+    for (const ahead of [1n, CURSOR_HEAD_TOLERANCE_BLOCKS]) {
+      const cursor = { block: 1_000_000n + ahead, logIndex: 7 };
+      const r = await readTransfers(slug, { limit: 20, cursor });
+      expect(r.status, `ahead=${ahead}`).toBe('ok');
+      if (r.status !== 'ok') return;
+      expect(r.items).toEqual([]);
+      expect(r.hasMore).toBe(false);
+      expect(r.truncated).toBe(false);
+      expect(r.mode).toBe('delta');
+      // cursor を head へ後退させない (後退させると既読ログを再取得させてしまう)。
+      expect(r.nextCursor).toBe(formatCursor(cursor));
+    }
     expect(getLogs).not.toHaveBeenCalled();
   });
 
-  it('E10: cursor.block === toBlock (現在の head と同一) は invalid_cursor にならない (境界値)', async () => {
+  it('E10: 許容量を超えて先行する cursor は status=cursor_ahead_of_head・getLogs を呼ばない (空振り課金の防止)', async () => {
+    const getLogs = vi.fn().mockResolvedValue([]);
+    setAll(() => okClient({ getLogs }));
+    const slug = JPYC_CHAINS[0];
+    const r = await readTransfers(slug, {
+      limit: 20,
+      cursor: { block: 1_000_000n + CURSOR_HEAD_TOLERANCE_BLOCKS + 1n, logIndex: 0 },
+    });
+    expect(r.status).toBe('cursor_ahead_of_head');
+    expect(getLogs).not.toHaveBeenCalled();
+  });
+
+  it('E10: cursor.block === toBlock (現在の head と同一) は通常走査 (境界値)', async () => {
     setAll(() => okClient({ getLogs: rangedGetLogs() }));
     const slug = JPYC_CHAINS[0];
     const r = await readTransfers(slug, { limit: 20, cursor: { block: 1_000_000n, logIndex: -1 } });

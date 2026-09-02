@@ -356,6 +356,40 @@ export function parseServiceMonitorQuery(
   return query;
 }
 
+/**
+ * delta の切り出し (2026-09-03 裁定・E3 の残欠陥の修正)。**同一 date のグループを分割しない**。
+ *
+ * 何を防ぐ防御か: 「打ち切り時の nextChangedSince = 最後に返したイベントの date」だけでは、
+ * **1 つの date に limit より多いイベントがある**と次回も同じ日の同じ先頭 limit 件が返り、
+ * hasMore:true のまま永久に前進しない (毎回課金される)。実データで現実に起こる —
+ * baseline 19 件は全て 2026-07-13、決済スコープの 2026-08-26 は 3 件。
+ *
+ * 規則: date 昇順のイベントを日付グループ単位で取り、累計が limit 以下の間だけ含める。
+ * **先頭グループだけで limit を超える場合はそのグループ全体を含める** (limit を超過する)
+ * = 「limit は日付境界に切り上げられる。1 日が分割されることはない」。
+ * こうすると未返却の先頭イベントの date は**必ず**返した最後の date より後になるので、
+ * 次回の changedSince は前進し (無限ループなし)、inclusive でも再配信が発生しない。
+ */
+export function takeDeltaByDateGroups<T extends { date: string }>(
+  events: readonly T[],
+  limit: number,
+): { taken: T[]; hasMore: boolean; nextChangedSince: string | null } {
+  let count = 0;
+  while (count < events.length) {
+    const date = events[count].date;
+    let end = count;
+    while (end < events.length && events[end].date === date) end += 1;
+    // 2 つ目以降のグループは limit を超えるなら足さない (先頭グループだけは必ず含める)。
+    if (end > limit && count > 0) break;
+    count = end;
+  }
+  return {
+    taken: events.slice(0, count),
+    hasMore: count < events.length,
+    nextChangedSince: count < events.length ? events[count].date : null,
+  };
+}
+
 /** 監視ビュー 1 行 (editorial の全文は含めない — 詳細は directory 本体商品の領分)。 */
 export type ServiceMonitorRow = {
   slug: string;
@@ -405,15 +439,18 @@ export type ServiceMonitorEnvelope = {
   query: { changedSince?: string; limit: number };
   /** snapshot: 全 published / delta: changedSince 以降に変更のあったエントリの現況のみ。 */
   services: ServiceMonitorRow[];
-  /** snapshot: 直近イベント (limit 件) / delta: changedSince 以降の全イベント (limit 件まで)。 */
+  /** snapshot: 直近イベント (limit 件) / delta: changedSince 以降のイベント。
+   * delta の limit は**日付境界に切り上げ**られる (1 日が分割されることはない) ため、
+   * 1 日の件数が limit を超える場合だけ changes.length > limit になり得る。 */
   changes: ServiceChangeEventOutput[];
   totalServices: number;
   generatedAt: string;
-  /** limit で打ち切られた (snapshot: 全イベント数 > limit・delta: changedSince 以降の件数 > limit)。
-   * true のとき nextChangedSince は generatedAt でなく最後に返したイベントの date になる。 */
+  /** まだ返していないイベントが残っている (snapshot: 全イベント数 > limit・
+   * delta: 日付境界で切り上げても入り切らないイベントがある)。 */
   hasMore: boolean;
   /** 次回の delta 購入でそのまま changedSince に渡す値 (当日含む契約なので取りこぼしなし)。
-   * hasMore=true の delta では最後に返したイベントの date (inclusive 比較 + dedupe で重複吸収)。 */
+   * hasMore=true の delta では**最初の未返却イベントの date** (返した最後の date より必ず後 =
+   * 前進が保証され、再配信も起きない)。それ以外は generatedAt の UTC 日付。 */
   nextChangedSince: string;
   notice: { code: string; detail: string; termsUrl: string };
   licenseNotice: string;
@@ -445,8 +482,8 @@ export function createServiceMonitorEnvelope(
   let services: ServiceMonitorRow[];
   let hasMore: boolean;
   // 既定は UTC 日付。イベント date (JST 運用日) 以下になるため inclusive 比較で取りこぼしなし
-  // (同日イベントの重複は slug+date+changeType の dedupe が吸収する)。limit で打ち切られた
-  // delta だけは下で「最後に返したイベントの date」に差し替える (打ち切り分の永久ロス防止)。
+  // (同日イベントの重複は slug+date+changeType の dedupe が吸収する)。打ち切られた delta だけは
+  // 下で「最初の未返却イベントの date」に差し替える (打ち切り分の永久ロス防止・前進の保証)。
   let nextChangedSince = generatedAtIso.slice(0, 10);
   if (mode === 'snapshot') {
     hasMore = changelog.length > query.limit;
@@ -455,11 +492,10 @@ export function createServiceMonitorEnvelope(
   } else {
     const since = query.changedSince as string;
     const matched = changelog.filter((event) => event.date >= since);
-    hasMore = matched.length > query.limit;
-    changes = matched.slice(0, query.limit);
-    if (hasMore && changes.length > 0) {
-      nextChangedSince = changes[changes.length - 1].date;
-    }
+    const page = takeDeltaByDateGroups(matched, query.limit);
+    changes = page.taken;
+    hasMore = page.hasMore;
+    if (page.nextChangedSince !== null) nextChangedSince = page.nextChangedSince;
     const changedSlugs = new Set(changes.map((event) => event.slug));
     // removed (archived) は published に居ないので現況行は出ない — イベント側が真実を運ぶ。
     services = published

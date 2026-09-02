@@ -171,32 +171,61 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
     }
   });
 
-  it('E6: JPYC Service/Payment Monitor (JPYC・USDC 両面) と無料 teaser 2 本は directory flag 配下のみ掲載', async () => {
-    const gatedPaths = [
-      '/api/paid/jpyc/services',
-      '/api/paid/stablecoin-payments',
-      '/api/paid/usdc/jpyc/services',
-      '/api/paid/usdc/stablecoin-payments',
-      '/api/jpyc/services/teaser',
-      '/api/stablecoin-payments/teaser',
-    ];
+  // E6: 掲載条件は route の 404 条件と一致させる。
+  //   - JPYC レール 2 本: guardPaidDirectoryApi = directory **かつ** facilitator
+  //   - USDC レール 2 本 + 無料 teaser 2 本: 各 route の directory チェックのみ
+  // ずれると、実際には 404 する有料エンドポイントをインデクサに広告してしまう。
+  const JPYC_RAIL_MONITOR_PATHS = ['/api/paid/jpyc/services', '/api/paid/stablecoin-payments'];
+  const DIRECTORY_ONLY_MONITOR_PATHS = [
+    '/api/paid/usdc/jpyc/services',
+    '/api/paid/usdc/stablecoin-payments',
+    '/api/jpyc/services/teaser',
+    '/api/stablecoin-payments/teaser',
+  ];
 
-    vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', '1');
-    vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', '');
+  /** 文書自体が消える構成 (directory も facilitator も OFF) では null を返す。 */
+  async function monitorDoc(directory: boolean, facilitator: boolean): Promise<Doc | null> {
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', directory ? '1' : '');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_X402_FACILITATOR', facilitator ? '1' : '');
+    // 全機能 OFF は 404 になるため、文書自体は常に存在させる (shops は Monitor と無関係)。
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_SHOPS_API', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_ORDER_RELAY', '1');
+    vi.stubEnv('ENABLE_AGENT_ORDER', '1');
     vi.stubEnv('X402_PAY_TO_ADDRESS', SELLER);
     vi.resetModules();
-    const off = (await import('@/app/openapi.json/route')) as { GET: () => Promise<Response> };
-    const offBody = (await (await off.GET()).json()) as Doc;
-    for (const path of gatedPaths) {
-      expect(offBody.paths[path], `directory OFF で ${path} が掲載されている`).toBeUndefined();
+    const mod = (await import('@/app/openapi.json/route')) as { GET: () => Promise<Response> };
+    const res = await mod.GET();
+    // shops は facilitator にも依存する (lib/shops/flags.ts) ため、両 OFF は文書ごと 404。
+    if (!directory && !facilitator) {
+      expect(res.status).toBe(404);
+      return null;
     }
-    // 常設面 (JPYC ライブデータ・stores) は directory flag に依存しないので掲載され続ける。
-    expect(offBody.paths['/api/paid/usdc/jpyc/supply']).toBeDefined();
-    expect(offBody.paths['/api/paid/usdc/stores']).toBeDefined();
+    expect(res.status, `directory=${directory} facilitator=${facilitator}`).toBe(200);
+    return (await res.json()) as Doc;
+  }
 
-    const onBody = await doc();
-    for (const path of gatedPaths) {
-      expect(onBody.paths[path], `directory ON で ${path} が消えている`).toBeDefined();
+  it('E6: Monitor 6 本の掲載は directory × facilitator の 2×2 で route の 404 条件と一致する', async () => {
+    for (const [directory, facilitator, jpycRail] of [
+      [true, true, true],
+      [true, false, false],
+      [false, true, false],
+      [false, false, false],
+    ] as const) {
+      const body = await monitorDoc(directory, facilitator);
+      const label = `directory=${directory} facilitator=${facilitator}`;
+      if (body === null) continue; // 文書ごと 404 = 6 本とも広告されない
+
+      for (const path of JPYC_RAIL_MONITOR_PATHS) {
+        if (jpycRail) expect(body.paths[path], `${label}: ${path}`).toBeDefined();
+        else expect(body.paths[path], `${label}: ${path}`).toBeUndefined();
+      }
+      for (const path of DIRECTORY_ONLY_MONITOR_PATHS) {
+        if (directory) expect(body.paths[path], `${label}: ${path}`).toBeDefined();
+        else expect(body.paths[path], `${label}: ${path}`).toBeUndefined();
+      }
+      // 常設面 (JPYC ライブデータ・stores) はどちらの flag にも依存しない。
+      expect(body.paths['/api/paid/usdc/jpyc/supply'], label).toBeDefined();
+      expect(body.paths['/api/paid/usdc/stores'], label).toBeDefined();
     }
   });
 
