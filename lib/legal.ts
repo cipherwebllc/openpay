@@ -265,7 +265,7 @@ export function mobileOrderFeeDisclosureDivergence(): string | null {
 }
 
 // 開示済みの「x402 ファシリテーター利用料」料率 (SOT)。Terms/Disclaimer/特商法/お知らせ/README の本文に
-// 書かれた数値そのもので、これらの文書はこの定数と矛盾してはならない。決済額の 1% (100bps)・下限 2 JPYC・
+// 書かれた数値そのもので、これらの文書はこの定数と矛盾してはならない。決済額の 1% (100bps)・下限 1 JPYC・
 // **買い手上乗せ** (seller は表示額をそのまま受領)。実装は lib/x402/facilitatorConfig.ts
 // (X402_FEE_BPS / X402_FEE_FLOOR_JPYC) で、既定は本定数と一致する。gas-recovery (DISCLOSED_RECOVER_FEE) /
 // モバイル注文 (DISCLOSED_MOBILE_ORDER_FEE) とは独立の別対価 (managed x402 facilitator の運用対価)。

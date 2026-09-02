@@ -167,7 +167,7 @@
     "cashFlowNote": "1 JPYC = ¥1.00（1:1 ペッグ）。<jpycEx>JPYC EX</jpycEx> で円に戻せます。",
     "cashSimTitle": "いくら手元に残る？",
     "cashSimMonthlyLabel": "月商",
-    "cashSimManValue": "{man}万円",
+    "cashSimManValue": "{value}万円",
     "cashSimCompareLabel": "今の決済手段",
     "cashSimChipCard": "カード 3.24%",
     "cashSimChipCode": "コード決済 1.98%",

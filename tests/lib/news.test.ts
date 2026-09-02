@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { NEWS_ITEMS, sortedNews, latestNewsId } from '@/lib/news';
-import { DISCLOSED_RECOVER_FEE, DISCLOSED_MOBILE_ORDER_FEE } from '@/lib/legal';
+import {
+  DISCLOSED_RECOVER_FEE,
+  DISCLOSED_MOBILE_ORDER_FEE,
+  DISCLOSED_X402_FEE,
+} from '@/lib/legal';
 
 describe('lib/news: コンテンツ規約 (SOT 不変条件)', () => {
   it('id が重複しない', () => {
@@ -126,6 +130,38 @@ describe('lib/news: sortedNews / latestNewsId', () => {
     expect(mo!.body.ja).toMatch(/経路を問わず|通常決済/);
     expect(mo!.body.ja).toMatch(/重複|加算され/);
     expect(mo!.body.ja).toMatch(/対象外/);
+  });
+
+  // x402 ファシリテーター利用料のお知らせ (別 SOT = DISCLOSED_X402_FEE)。料率 (bps→%) と
+  // 下限 (floorJpyc) を定数から導出してフェンスする。下限は 2026-07-05 に 2→1 へ改定済みで、
+  // 定数だけ・本文だけの片側変更 (お知らせが古い下限を語り続ける等) で fail させる。
+  it('x402 fee のお知らせが DISCLOSED_X402_FEE の料率 (1% / 下限 1 JPYC) を ja/en で含む (L4 フェンス)', () => {
+    const percent = DISCLOSED_X402_FEE.bps / 100; // 1 (%)
+    const floorJpyc = DISCLOSED_X402_FEE.floorJpyc; // 1
+    const revision = NEWS_ITEMS.find((n) => n.id === 'x402-fee-floor-2026-07-05');
+    expect(revision).toBeDefined();
+    expect(revision!.category).toBe('pricing');
+    // 改定後の下限は title / body の両方で現行値と一致する。
+    expect(revision!.title.ja).toContain(`${floorJpyc} JPYC`);
+    expect(revision!.title.en).toContain(`${floorJpyc} JPYC`);
+    expect(revision!.body.ja).toContain(`${floorJpyc} JPYC`);
+    expect(revision!.body.en).toContain(`${floorJpyc} JPYC`);
+    expect(revision!.body.ja).toContain(`${percent}%`);
+    expect(revision!.body.en).toContain(`${percent}%`);
+    // 買い手上乗せ方式 (seller は表示額をそのまま受領) の開示が残っている。
+    expect(revision!.body.ja).toMatch(/上乗せ/);
+    expect(revision!.body.en).toMatch(/buyer/i);
+
+    // 公開告知 (旧下限 2 JPYC 記載) 側も、現行料率と改定後の下限への言及を伴う
+    // (旧値だけが残る = AI/読者が古い下限を引用し続ける事故を防ぐ)。
+    const launch = NEWS_ITEMS.find(
+      (n) => n.id === 'x402-facilitator-launch-2026-06-28',
+    );
+    expect(launch).toBeDefined();
+    expect(launch!.body.ja).toContain(`${percent}%`);
+    expect(launch!.body.en).toContain(`${percent}%`);
+    expect(launch!.body.ja).toContain(`${floorJpyc} JPYC`);
+    expect(launch!.body.en).toContain(`${floorJpyc} JPYC`);
   });
 
   it('置き換え済みの旧 pricing/feature お知らせは superseded 注記を持つ (黙った書き換え禁止)', () => {

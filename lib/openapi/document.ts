@@ -271,7 +271,10 @@ const DISCOVERY_OPENAPI_PATHS = {
           description: 'Unlock greeting after settlement',
           content: {
             'application/json': {
-              example: { message: 'hello', paidAt: '2026-07-28T00:00:00.000Z' },
+              example: {
+                message: 'Payment verified — welcome to the x402 + JPYC rail.',
+                paidAt: '2026-07-28T00:00:00.000Z',
+              },
             },
           },
         },

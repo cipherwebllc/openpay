@@ -1115,13 +1115,12 @@ graceful skip) で気付けないため、`verify-production-config.mjs` で必�
 
 | Env var | 必須? | 未設定時の影響 |
 |---|---|---|
-| `NEXT_PUBLIC_SENTRY_DSN` | **必須** | browser 側 logger.warn/error が console のみ。本番 error 検知ゼロ (`smart_account.*`, `cross-chain.*`, `payment.*` 全 event 喪失) |
-| `SENTRY_DSN` | **必須** | server side (Route Handler) の error 検知ゼロ。/api/log/payment 等の障害が観測不能 |
+| `NEXT_PUBLIC_SENTRY_DSN` | **必須** | browser 側 logger.warn/error が console のみ。本番 error 検知ゼロ (`smart_account.*`, `cross-chain.*`, `payment.*` 全 event 喪失)。**server / edge も同じ変数を読む** (`instrumentation.ts` の `register()` / `onRequestError`) ため、未設定なら Route Handler 側の error 検知もゼロ (/api/log/payment 等の障害が観測不能) |
 | `NEXT_PUBLIC_PIMLICO_API_KEY` | **必須** | gasless 決済全 fail (bundler 認証不能) |
 | `NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` | **必須** | 案A: JPYC sponsorship のガス代 reimbursement 送り先。未設定で build fail (lib/env.ts:guard)。0x...dEaD fallback に送ると運営が立替えた gas を回収できず赤字 |
 | `NEXT_PUBLIC_NETWORK_ENV` | **必須** | `mainnet` 想定 (testnet は preview/dev のみ) |
-| `PIMLICO_SPONSORSHIP_POLICY_ID` | 推奨 | 未設定で sponsorship policy なし運用 (chain ごとの上限なし) |
-| `NEXT_PUBLIC_PAYMENT_LOG_TOKEN` | 任意 | 設定すれば /api/log/payment の auth 強化 |
+| `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | **必須** (mainnet) | mainnet では未設定/空で `lib/env.ts` の guard が throw (sponsorship 残高悪用防止)。testnet のみ未設定可 = policy なし運用 (chain ごとの上限なし) |
+| `PAYMENT_LOG_ADMIN_TOKEN` | 任意 | `/api/log/payment/export` + `/stats` の Bearer 認証トークン (`app/api/log/payment/_auth.ts`)。未設定なら両 admin endpoint が 503 `admin_token_not_configured` を返し log を取り出せない (`/api/log/payment` への POST 自体は認証不要) |
 
 確認: Vercel dashboard → Project Settings → Environment Variables → Production scope
 を目視 + `node scripts/verify-production-config.mjs` で実行時 active を検証。
@@ -1192,7 +1191,7 @@ npm run load-test -- --url http://localhost:3000 -c 20 -d 15
 
 | Risk | 現状の緩和 | 将来の選択肢 |
 |---|---|---|
-| `/api/log/payment` に明示 rate limit なし (DDoS で Vercel function 実行費用 spike 可能) | Vercel platform DDoS protection (built-in、attack mode 設定可)、`MAX_BODY_BYTES=2KB` で body 制限 (route.ts:99)、Bearer auth (`NEXT_PUBLIC_PAYMENT_LOG_TOKEN` 設定時) | (a) Vercel Firewall WAF rule で per-IP rate limit、(b) Upstash Ratelimit (Vercel Marketplace) で sliding window、(c) /api/log/payment は KV write 量 cap で kill switch 化済 (paymentLog.ts fire-and-forget) |
+| `/api/log/payment` の rate limit は KV 障害時 fail-open (KV 停止中は DDoS で Vercel function 実行費用 spike 可能) | 匿名化 IP prefix ごとに 60 req / 60s (`checkReadRateLimit`、route.ts:228)、`MAX_BODY_BYTES=8KB` で body 制限 (route.ts:17)、Vercel platform DDoS protection (built-in、attack mode 設定可) | (a) Vercel Firewall WAF rule で per-IP rate limit (KV 非依存の層を足す)、(b) Upstash Ratelimit (Vercel Marketplace) で sliding window、(c) /api/log/payment は KV write 量 cap で kill switch 化済 (paymentLog.ts fire-and-forget) |
 | `setup-sentry-alerts.mjs` 自動実行 CI なし (idempotent script を operator 手動実行に依存) | script は idempotent (既存 rule は skip)、人為的に rule が消えない限り再実行不要 | GH Actions workflow に sentry-setup を追加 (SENTRY_AUTH_TOKEN secret 必要) |
 | punycode deprecation build warning | §10.11 受容済 noise (修正不能、機能無影響) | upstream packages (whatwg-url / uri-js) が `require('punycode/')` 採用するまで wait |
 
