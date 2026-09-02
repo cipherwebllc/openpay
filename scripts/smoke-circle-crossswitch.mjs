@@ -80,6 +80,7 @@ import { createSmartAccountClient } from 'permissionless';
 import { to7702SimpleSmartAccount } from 'permissionless/accounts';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { prepareUserOperationForErc20Paymaster } from 'permissionless/experimental/pimlico';
+import { writeGeneratedKey } from './lib/write-generated-key.mjs';
 
 // SMOKE_CHAIN で対象 chain を選択 (既定: arbitrum-sepolia = 従来挙動)。
 // 各値は **本番 SoT と一致** させること:
@@ -472,12 +473,16 @@ async function main() {
   if (!pkEnv) {
     const freshPk = generatePrivateKey();
     const freshAddr = privateKeyToAccount(freshPk).address;
+    // 鍵は stdout に出さず 0600 のファイルへ (ターミナル履歴・CI ログ・スクショへの波及を断つ)。
+    const { path: keyPath } = writeGeneratedKey(freshPk, 'smoke', {
+      ADDRESS: freshAddr,
+    });
     log('SMOKE_PRIVATE_KEY が未設定 → 使い捨て鍵を生成しました。\n');
-    log(`  SMOKE_PRIVATE_KEY=${freshPk}`);
     log(`  ADDRESS          =${freshAddr}`);
+    log(`  秘密鍵の書き出し先 =${keyPath} (mode 0600・stdout には出しません)`);
     log(`\n  1) 上記 ADDRESS へ ${CFG.funding} 送金`);
     log(`     chain: ${CHAIN.name} (${CHAIN.id}) / USDC: ${USDC}`);
-    log('  2) 同じ鍵 + PIMLICO_API_KEY で再実行');
+    log('  2) 上記ファイルの PRIVATE_KEY を SMOKE_PRIVATE_KEY に設定し、PIMLICO_API_KEY と共に再実行');
     log(
       `\n⚠️ 使い捨て鍵専用。${CFG.isMainnet ? 'mainnet は低残高の捨て鍵のみ・大金は絶対に入れない。' : 'mainnet 資産は絶対に入れない。'}`,
     );

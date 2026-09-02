@@ -10,7 +10,8 @@
 //  4. relayer の latest nonce 増分 == 成功件数 (nonce hole / stuck が無い)。
 //  5. pending/error はあってよいが、その分は上記 success 件数から除外して照合。
 //
-// 前提: .env.local に RELAYER_PRIVATE_KEY / KV_REST_API_* / NEXT_PUBLIC_JPYC_FORWARDER_AMOY 設定済、
+// 前提: .env.local.testnet (無ければ .env.local) に RELAYER_PRIVATE_KEY / KV_REST_API_* /
+//       NEXT_PUBLIC_JPYC_FORWARDER_AMOY 設定済 — KV は **testnet 用**を指すこと (起動時に表示する)、
 //       relayer に POL、buyer (AMOY_TEST_BUYER_KEY) に N×(merchant+fee) JPYC、dev server 起動。
 // 使い方: RELAY_URL=http://localhost:3000/api/relay/jpyc N=6 \
 //         node scripts/amoy-concurrent-settle.mjs
@@ -29,9 +30,11 @@ import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadTestnetEnv } from './lib/load-testnet-env.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-process.loadEnvFile(join(__dirname, '..', '.env.local'));
+// .env.local.testnet を優先 (無ければ .env.local)。読んだ env と KV ホストを表示してから走る。
+loadTestnetEnv(join(__dirname, '..'));
 
 const CHAIN_ID = 80002;
 const JPYC = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';

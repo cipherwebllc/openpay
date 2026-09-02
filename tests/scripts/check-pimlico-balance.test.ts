@@ -377,7 +377,7 @@ describe('check-pimlico-balance: production CHAIN_CONFIGS 検証 (Codex audit)',
 });
 
 describe('check-pimlico-balance: 並列 fetch + chain ごとの独立性', () => {
-  it('複数 chain の readContract は並列実行 (Promise.all)', async () => {
+  it('複数 chain の readContract は並列実行 (Promise.allSettled)', async () => {
     process.env.PIMLICO_PAYMASTER_POLYGON =
       '0x000000000000000000000000000000000000B011';
     process.env.PIMLICO_PAYMASTER_BASE =
@@ -385,7 +385,7 @@ describe('check-pimlico-balance: 並列 fetch + chain ごとの独立性', () =>
     process.env.PIMLICO_PAYMASTER_KAIA =
       '0x000000000000000000000000000000000000Ca1A';
 
-    // 各 chain の readContract に小さな遅延を入れ、Promise.all による
+    // 各 chain の readContract に小さな遅延を入れ、Promise.allSettled による
     // 並列実行を「総時間が 3 倍未満」 で確認する。
     let resolveOrder = 0;
     const delays = [50, 30, 10];
@@ -410,23 +410,76 @@ describe('check-pimlico-balance: 並列 fetch + chain ごとの独立性', () =>
     expect(readContractMock).toHaveBeenCalledTimes(3);
   });
 
-  it('1 chain 失敗で全体が rejection (failure isolation を意図しない、fail-fast 設計)', async () => {
+  // 旧実装は Promise.all で 1 chain の RPC 障害が全体を throw させ、他 chain の
+  // 残高割れアラートまで握り潰していた (通知が 1 件も飛ばない)。allSettled で
+  // chain ごとに隔離し、取得できなかった chain は「取得不能」として通知に載せる。
+  it('1 chain の RPC 失敗は隔離され、他 chain のアラートは送信される', async () => {
     process.env.PIMLICO_PAYMASTER_POLYGON =
       '0x000000000000000000000000000000000000B011';
     process.env.PIMLICO_PAYMASTER_BASE =
       '0x000000000000000000000000000000000000bA5e';
 
-    readContractMock.mockResolvedValueOnce(10n ** 19n); // polygon OK
+    readContractMock.mockResolvedValueOnce(10n ** 18n); // polygon 1 POL < 5 → alert
     readContractMock.mockRejectedValueOnce(new Error('base RPC timeout'));
 
     const { runBalanceCheck } = await loadScript();
-    await expect(
-      runBalanceCheck({
-        configs: makeConfigs(),
-        webhookUrl: 'https://hook.example.com',
-        logger: { log: vi.fn(), error: vi.fn() },
-      }),
-    ).rejects.toThrow(/base RPC timeout/);
+    const result = await runBalanceCheck({
+      configs: makeConfigs(),
+      webhookUrl: 'https://hook.example.com',
+      logger: { log: vi.fn(), error: vi.fn() },
+    });
+
+    expect(result.breached).toBe(true);
+    expect(result.alerts).toHaveLength(1);
+    expect(result.alerts[0]).toContain('Polygon');
+    expect(result.failures).toEqual(['Base: base RPC timeout']);
+    expect(result.lines.join('\n')).toContain('Base: 取得不能 (base RPC timeout)');
+
+    // 通知は 1 回だけ・本文に残高割れと取得不能の両方が載る
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [, init] = fetchMock.mock.calls[0];
+    if (!init) throw new Error('fetch called without init');
+    const body = JSON.parse(init.body as string);
+    expect(body.text).toContain('Polygon');
+    expect(body.text).toContain('取得不能');
+  });
+
+  it('全 chain 正常なら failures は空 (取得不能の混入なし)', async () => {
+    process.env.PIMLICO_PAYMASTER_POLYGON =
+      '0x000000000000000000000000000000000000B011';
+    process.env.PIMLICO_PAYMASTER_BASE =
+      '0x000000000000000000000000000000000000bA5e';
+    readContractMock.mockResolvedValue(10n ** 19n);
+
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck({
+      configs: makeConfigs(),
+      webhookUrl: 'https://hook.example.com',
+      logger: { log: vi.fn(), error: vi.fn() },
+    });
+
+    expect(result.failures).toEqual([]);
+    expect(result.breached).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('全 chain が RPC 失敗 → breached=false でも取得不能アラートは飛ぶ', async () => {
+    process.env.PIMLICO_PAYMASTER_POLYGON =
+      '0x000000000000000000000000000000000000B011';
+    process.env.PIMLICO_PAYMASTER_BASE =
+      '0x000000000000000000000000000000000000bA5e';
+    readContractMock.mockRejectedValue(new Error('RPC down'));
+
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck({
+      configs: makeConfigs(),
+      webhookUrl: 'https://hook.example.com',
+      logger: { log: vi.fn(), error: vi.fn() },
+    });
+
+    expect(result.breached).toBe(false); // 残高割れは 1 件も確認できていない
+    expect(result.failures).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 監視の穴として通知する
   });
 
   // 2026-05-24 GH Actions 実 run で発見: Variables 未設定時に env var が空文字列

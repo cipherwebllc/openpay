@@ -162,18 +162,34 @@ export async function runBalanceCheck({
 } = {}) {
   const targets = resolveTargets(configs);
 
-  const balances = await Promise.all(
+  // allSettled: 1 chain の RPC 障害が他 chain のアラートを巻き添えにしない
+  // (旧 Promise.all は 1 件 reject で全体が throw → 残高枯渇の通知そのものが飛ばなかった)。
+  // 取得できなかった chain は「取得不能」として通知本文に載せ、監視の穴を可視化する。
+  const settled = await Promise.allSettled(
     targets.map((t) => getBalance(t.config.chain, t.rpcUrl, t.paymasterAddress)),
   );
 
   const lines = ['Pimlico Sponsorship Paymaster 残高:'];
   const alerts = [];
+  const failures = [];
 
   for (let i = 0; i < targets.length; i++) {
     const t = targets[i];
-    const balance = balances[i];
-    const display = `${formatEther(balance)} ${t.config.nativeSymbol}`;
+    const outcome = settled[i];
     const limit = `${formatEther(t.threshold)} ${t.config.nativeSymbol}`;
+
+    if (outcome.status === 'rejected') {
+      const reason =
+        outcome.reason instanceof Error
+          ? outcome.reason.message
+          : String(outcome.reason);
+      failures.push(`${t.config.chain.name}: ${reason}`);
+      lines.push(`- ${t.config.chain.name}: 取得不能 (${reason})`);
+      continue;
+    }
+
+    const balance = outcome.value;
+    const display = `${formatEther(balance)} ${t.config.nativeSymbol}`;
     lines.push(`- ${t.config.chain.name}: ${display} (しきい値 ${limit})`);
 
     if (balance < t.threshold) {
@@ -186,20 +202,25 @@ export async function runBalanceCheck({
 
   logger.log(lines.join('\n'));
 
-  if (alerts.length > 0) {
+  const failureAlerts = failures.map(
+    (f) => `⚠️ ${f} — 残高を取得できませんでした (RPC 障害の可能性・監視の穴)。`,
+  );
+
+  if (alerts.length > 0 || failureAlerts.length > 0) {
     const message = [
       '🚨 OpenPay Pimlico 残高アラート',
       ...alerts,
+      ...failureAlerts,
       '',
       ...lines,
     ].join('\n');
     await notify(webhookUrl, message);
     logger.error('アラート送信済み');
-    return { breached: true, message, lines, alerts };
+    return { breached: alerts.length > 0, message, lines, alerts, failures };
   }
 
   logger.log('✅ 残高は十分です');
-  return { breached: false, message: null, lines, alerts };
+  return { breached: false, message: null, lines, alerts, failures };
 }
 
 // CLI entry — vitest からは import 時に main() が走らないようにガード。
@@ -212,7 +233,9 @@ const isCli =
 if (isCli) {
   const webhookUrl = requireEnv('ALERT_WEBHOOK_URL');
   const result = await runBalanceCheck({ webhookUrl });
-  if (result.breached) {
+  // 残高割れだけでなく「取得不能」でも workflow は赤にする (旧 fail-fast と同じ可視性を
+  // 保つ)。通知自体は取得できた chain の分も含めて既に送信済み。
+  if (result.breached || result.failures.length > 0) {
     process.exit(1);
   }
 }

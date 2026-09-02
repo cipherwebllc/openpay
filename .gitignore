@@ -16,6 +16,10 @@ yarn-error.log*
 
 .DS_Store
 *.pem
+
+# scripts/lib/write-generated-key.mjs が書き出す使い捨て秘密鍵 (mode 0600)。
+# env へ移したら削除する想定だが、消し忘れても commit されないようにする。
+*-key.*.txt
 .vercel
 *.tsbuildinfo
 next-env.d.ts

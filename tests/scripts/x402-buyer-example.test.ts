@@ -9,7 +9,26 @@ import {
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
 
+type NormalizedAccept = {
+  network: string;
+  asset: Address;
+  maxTimeoutSeconds: number;
+  extra: {
+    openpay: {
+      forwarder: Address;
+      merchantValue: bigint;
+      feeValue: bigint;
+    };
+  };
+};
+
 type BuyerScript = {
+  DEFAULT_MAX_JPYC: string;
+  parseJpycCap: (raw: string, label?: string) => bigint;
+  assertWithinCap: (total: bigint, cap: bigint, capLabel: string) => void;
+  assertSupportedAssetAndForwarder: (accept: NormalizedAccept) => NormalizedAccept;
+  clampAuthorizationTimeout: (maxTimeoutSeconds: number) => number;
+  normalizePaymentRequirements: (raw: Record<string, unknown>) => NormalizedAccept;
   buildForwarderNonce: (
     params: ForwarderSettleParams,
     chainId: number,
@@ -115,5 +134,75 @@ describe('scripts/x402-buyer-example.mjs', () => {
     );
     expect(out.params).toEqual(p);
     expect(out.typedData).toEqual(expected);
+  });
+});
+
+// 署名前の金銭ガード (Phase 0a)。402 の自己申告を鵜呑みにせず、上限・既知 asset/
+// forwarder・有効期限の 3 点で止まることを検証する。
+describe('scripts/x402-buyer-example.mjs: 署名前ガード', () => {
+  // SDK guards.mjs の SUPPORTED_JPYC_FORWARDERS['eip155:80002'] と同値。
+  const KNOWN_AMOY_FORWARDER = getAddress(
+    '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4',
+  );
+
+  function guardedAccept(
+    overrides: { asset?: Address; forwarder?: Address } = {},
+  ): Record<string, unknown> {
+    const forwarder = overrides.forwarder ?? KNOWN_AMOY_FORWARDER;
+    const base = accept();
+    const extra = base.extra as Record<string, unknown>;
+    const openpay = extra.openpay as Record<string, unknown>;
+    return {
+      ...base,
+      asset: overrides.asset ?? TOKEN,
+      payTo: forwarder,
+      extra: { ...extra, openpay: { ...openpay, forwarder } },
+    };
+  }
+
+  it('総額が MAX_JPYC を超えたら署名前に中止する', async () => {
+    const buyer = await loadBuyerScript();
+    const normalized = buyer.assertSupportedAssetAndForwarder(
+      buyer.normalizePaymentRequirements(guardedAccept()),
+    );
+    const total =
+      normalized.extra.openpay.merchantValue + normalized.extra.openpay.feeValue;
+    expect(total).toBe(7n * JPYC); // merchant 5 + fee 2
+
+    expect(() =>
+      buyer.assertWithinCap(total, buyer.parseJpycCap('5'), '5'),
+    ).toThrow(/MAX_JPYC=5/);
+    // 既定 5 JPYC は現行カタログを想定した保守値。上限内なら通る。
+    expect(buyer.DEFAULT_MAX_JPYC).toBe('5');
+    expect(() =>
+      buyer.assertWithinCap(total, buyer.parseJpycCap('10'), '10'),
+    ).not.toThrow();
+    // 小数の上限も atomic に落として比較する
+    expect(buyer.parseJpycCap('0.5')).toBe(5n * 10n ** 17n);
+  });
+
+  it('validBefore の元になる timeout は facilitator 上限 (1200s) で頭打ちにする', async () => {
+    const buyer = await loadBuyerScript();
+    expect(buyer.clampAuthorizationTimeout(3600)).toBe(1200);
+    expect(buyer.clampAuthorizationTimeout(600)).toBe(600);
+  });
+
+  it('未知の asset は署名前に中止する (別 token の署名を引き出させない)', async () => {
+    const buyer = await loadBuyerScript();
+    const rogueToken = getAddress('0x5555555555555555555555555555555555555555');
+    expect(() =>
+      buyer.assertSupportedAssetAndForwarder(
+        buyer.normalizePaymentRequirements(guardedAccept({ asset: rogueToken })),
+      ),
+    ).toThrow(/既知 JPYC/);
+  });
+
+  it('未知の forwarder/payTo は署名前に中止する (総額の付け替えを止める)', async () => {
+    const buyer = await loadBuyerScript();
+    expect(() =>
+      buyer.assertSupportedAssetAndForwarder(
+        buyer.normalizePaymentRequirements(guardedAccept({ forwarder: FORWARDER })),
+      ),
+    ).toThrow(/既知の OpenPay forwarder/);
   });
 });

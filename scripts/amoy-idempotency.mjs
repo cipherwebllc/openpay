@@ -7,7 +7,8 @@
 // _authorizationStates で revert (二重支払いは防げるが gas を浪費)。KV 有りだと duplicate を
 // submit 前に弾き pending を返す。
 //
-// 前提: .env.local に KV_REST_API_*・RELAYER_PRIVATE_KEY・AMOY_TEST_BUYER_KEY(JPYC保有) 設定済、
+// 前提: .env.local.testnet (無ければ .env.local) に KV_REST_API_*・RELAYER_PRIVATE_KEY・
+//       AMOY_TEST_BUYER_KEY(JPYC保有) 設定済 — KV は **testnet 用**を指すこと (起動時に表示する)、
 //       dev server を KV 設定後に再起動済。
 // 使い方: RELAY_URL=http://localhost:3000/api/relay/jpyc node scripts/amoy-idempotency.mjs
 
@@ -19,9 +20,11 @@ import { privateKeyToAccount, generatePrivateKey } from 'viem/accounts';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadTestnetEnv } from './lib/load-testnet-env.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-process.loadEnvFile(join(__dirname, '..', '.env.local'));
+// .env.local.testnet を優先 (無ければ .env.local)。読んだ env と KV ホストを表示してから走る。
+loadTestnetEnv(join(__dirname, '..'));
 
 const CHAIN_ID = 80002;
 const JPYC = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';

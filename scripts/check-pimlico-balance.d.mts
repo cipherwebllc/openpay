@@ -29,6 +29,8 @@ export interface BalanceCheckResult {
   message: string | null;
   lines: string[];
   alerts: string[];
+  /** 残高を取得できなかった chain (`chain名: 理由`)。RPC 障害の隔離用。 */
+  failures: string[];
 }
 
 export function runBalanceCheck(
