@@ -17,6 +17,7 @@ import {
   type ServiceMonitorQuery,
 } from './serviceMonitor';
 import type { DirectoryEntry } from './types';
+import { PAYMENT_PROVIDERS, type PaymentProviderRecord } from './paymentProviders';
 
 export const PAYMENT_MONITOR_SCHEMA_VERSION = '1.0';
 export const PAYMENT_MONITOR_LICENSE_NOTICE =
@@ -47,10 +48,17 @@ export type PaymentChangeRow = {
   diffs?: readonly ServiceChangeDiff[];
 };
 
+/** 事業者の現況行 = 固定項目の記録 + changelog から導出した最終イベント日。 */
+export type PaymentProviderRow = PaymentProviderRecord & { lastEventDate: string };
+
 export type PaymentMonitorEnvelope = {
   schemaVersion: string;
   mode: 'snapshot' | 'delta';
   query: { changedSince?: string; limit: number };
+  /** 事業者の現況 (固定項目・null = 確認したが公表なし)。snapshot: 全社 / delta: 変更のあった社のみ。 */
+  providers: PaymentProviderRow[];
+  /** 監視対象の事業者数 (delta で絞っても母数が分かる)。 */
+  totalProviders: number;
   /** snapshot: 全履歴 (limit 件・新しい順ではなく日付昇順) / delta: changedSince 以降のみ。 */
   changes: PaymentChangeRow[];
   /** 決済スコープの全イベント数 (limit で切っても母数が分かる)。 */
@@ -82,6 +90,29 @@ function toRow(
   };
 }
 
+/**
+ * 事業者の現況行。snapshot は全社、delta は今回の changes に provider が現れた社だけ
+ * (Service Monitor の services 行と同じ考え方)。lastEventDate は同名 provider の最新イベント日。
+ */
+function providerRows(
+  rows: readonly PaymentChangeRow[],
+  changelog: ReturnType<typeof scopedChangelog>,
+  bySlug: ReadonlyMap<string, DirectoryEntry>,
+  mode: 'snapshot' | 'delta',
+): { providers: PaymentProviderRow[]; totalProviders: number } {
+  const lastEventByProvider = new Map<string, string>();
+  for (const event of changelog) {
+    const name = toRow(event, bySlug).provider;
+    const prev = lastEventByProvider.get(name);
+    if (!prev || event.date > prev) lastEventByProvider.set(name, event.date);
+  }
+  const changed = new Set(rows.map((r) => r.provider));
+  const providers = PAYMENT_PROVIDERS.filter(
+    (p) => mode === 'snapshot' || changed.has(p.provider),
+  ).map((p) => ({ ...p, lastEventDate: lastEventByProvider.get(p.provider) ?? p.announcedAt }));
+  return { providers, totalProviders: PAYMENT_PROVIDERS.length };
+}
+
 export function createPaymentMonitorEnvelope(
   query: ServiceMonitorQuery,
   generatedAtIso: string,
@@ -105,6 +136,7 @@ export function createPaymentMonitorEnvelope(
       limit: query.limit,
     },
     changes: filtered.map((event) => toRow(event, bySlug)),
+    ...providerRows(filtered.map((event) => toRow(event, bySlug)), changelog, bySlug, mode),
     totalEvents: changelog.length,
     generatedAt: generatedAtIso,
     nextChangedSince: generatedAtIso.slice(0, 10),

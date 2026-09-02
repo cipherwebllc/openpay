@@ -132,6 +132,7 @@ A second monitor generated from the same weekly collection: it completes a diffe
 - イベントは `provider` 中心で、`changeCategory`(service_launch / pilot / partnership / fee_change / assets_change / chains_change / closure)と `assets` / `chains` が付きます
 - ディレクトリに載らない業界イベント(実証実験・提携)も対象です(例: JCB×Circle MOU、DG・JCB・りそなの実店舗実証)
 - 履歴は 2025 年 11 月まで遡って収録済み。実購入検証済み(settle tx `0xef1f0969…546b`)
+- **事業者の現況行 `providers`**(固定項目・毎週再確認): stage(partnership / pilot / commercial / closed)・assets・chains・settlementCurrency・merchantFee・integrations(api / in-store / ec / wallet)・posIntegration・region・announcedAt・startedAt・plannedPeriod・sourceUrl・verifiedAt・lastEventDate。**null は「確認したが一次ソースに公表がない」**という確認結果です(推測で埋めません)。snapshot は全社、delta は変更のあった社のみ・`totalProviders` で母数を開示
 
 ### エンドポイント / Endpoints
 
@@ -166,6 +167,27 @@ A second monitor generated from the same weekly collection: it completes a diffe
 {
   "schemaVersion": "1.0",
   "mode": "snapshot",
+  "providers": [
+    {
+      "provider": "DG Stablecoin Payment Service",
+      "slug": "dg-sps",
+      "stage": "commercial",
+      "assets": ["USDC"],
+      "chains": ["base"],
+      "settlementCurrency": null,
+      "merchantFee": null,
+      "integrations": ["api"],
+      "posIntegration": null,
+      "region": "Japan",
+      "announcedAt": "2026-08-10",
+      "startedAt": "2026-08-10",
+      "plannedPeriod": null,
+      "sourceUrl": "https://www.garage.co.jp/pr/release/20260810/",
+      "verifiedAt": "2026-08-27",
+      "lastEventDate": "2026-08-10"
+    }
+  ],
+  "totalProviders": 7,
   "changes": [
     {
       "date": "2026-08-10",

@@ -101,3 +101,63 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(empty.nextChangedSince).toBe('2026-08-27');
   });
 });
+
+// 事業者の現況行 providers (2026-09-02 裁定 2/2): 固定項目・null = 確認したが公表なし・
+// provider 名は changelog と双方向に一致・delta は変更のあった社のみ・lastEventDate は導出。
+import { PAYMENT_PROVIDERS, PAYMENT_INTEGRATIONS, PAYMENT_PROVIDER_STAGES } from '@/lib/directory/paymentProviders';
+
+describe('createPaymentMonitorEnvelope.providers (事業者の現況行)', () => {
+  it('snapshot: 全社が固定項目つきで載り、母数 totalProviders と一致', () => {
+    const env = createPaymentMonitorEnvelope(Q, NOW);
+    expect(env.providers).toHaveLength(PAYMENT_PROVIDERS.length);
+    expect(env.totalProviders).toBe(PAYMENT_PROVIDERS.length);
+    for (const p of env.providers) {
+      expect(PAYMENT_PROVIDER_STAGES).toContain(p.stage);
+      for (const i of p.integrations) expect(PAYMENT_INTEGRATIONS).toContain(i);
+      expect(p.sourceUrl).toMatch(/^https:\/\//);
+      expect(p.announcedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(p.verifiedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(p.lastEventDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      // 固定項目は「無い」を null で明示 (undefined で欠落させない)。
+      for (const key of ['settlementCurrency', 'merchantFee', 'posIntegration', 'region', 'startedAt', 'plannedPeriod'] as const) {
+        expect(p).toHaveProperty(key);
+      }
+    }
+  });
+
+  it('provider 名は changelog の provider と双方向に一致 (行の結合キー)', () => {
+    const env = createPaymentMonitorEnvelope(Q, NOW);
+    const inChanges = new Set(env.changes.map((c) => c.provider));
+    const inProviders = new Set(env.providers.map((p) => p.provider));
+    expect([...inProviders].sort()).toEqual([...inChanges].sort());
+  });
+
+  it('lastEventDate は同名 provider の最新イベント日・一次ソースが開始を明示した社だけ startedAt', () => {
+    const env = createPaymentMonitorEnvelope(Q, NOW);
+    const dg = env.providers.find((p) => p.slug === 'dg-sps')!;
+    expect(dg.stage).toBe('commercial');
+    expect(dg.startedAt).toBe('2026-08-10');
+    expect(dg.lastEventDate).toBe('2026-08-10');
+    const hashport = env.providers.find((p) => p.provider.startsWith('HashPort'))!;
+    expect(hashport.settlementCurrency).toBe('JPY'); // 一次ソースが「日本円で清算」と明示
+    expect(hashport.startedAt).toBeNull(); // 予定のみ
+    expect(hashport.plannedPeriod).toBe('2027-01..2027-03');
+    expect(hashport.merchantFee).toBeNull(); // 非公表 = null
+  });
+
+  it('delta: 変更のあった社の現況行だけ・空 delta は providers:[] だが母数は開示', () => {
+    const delta = createPaymentMonitorEnvelope(
+      { changedSince: '2026-08-26', limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+    );
+    expect(delta.changes).toHaveLength(3); // 大阪府 3 件
+    expect(delta.providers.map((p) => p.region)).toEqual(['Osaka', 'Osaka', 'Osaka']);
+    expect(delta.totalProviders).toBe(PAYMENT_PROVIDERS.length);
+    const empty = createPaymentMonitorEnvelope(
+      { changedSince: '9999-12-31', limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+    );
+    expect(empty.providers).toEqual([]);
+    expect(empty.totalProviders).toBe(PAYMENT_PROVIDERS.length);
+  });
+});

@@ -202,6 +202,27 @@ const PAYMENT_MONITOR_DELTA_EXAMPLE = {
   schemaVersion: '1.0',
   mode: 'delta',
   query: { changedSince: '2026-08-01', limit: 200 },
+  providers: [
+    {
+      provider: 'DG Stablecoin Payment Service',
+      slug: 'dg-sps',
+      stage: 'commercial',
+      assets: ['USDC'],
+      chains: ['base'],
+      settlementCurrency: null,
+      merchantFee: null,
+      integrations: ['api'],
+      posIntegration: null,
+      region: 'Japan',
+      announcedAt: '2026-08-10',
+      startedAt: '2026-08-10',
+      plannedPeriod: null,
+      sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
+      verifiedAt: '2026-08-27',
+      lastEventDate: '2026-08-10',
+    },
+  ],
+  totalProviders: 7,
   changes: [
     {
       date: '2026-08-10',
