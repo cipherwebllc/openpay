@@ -106,6 +106,16 @@ function memoryStore(initial: Record<string, string> = {}) {
   };
 }
 
+// 実時計を使うと UTC 日付境界 (23:59 頃) で「署名の有効期限が翌日にまたがる」仕様どおりの拒否が
+// 起きてフレークする (2026-09-02 実害)。時刻を指定しないテストは全てこの固定時計を使う。
+const FIXED_NOW = new Date('2026-07-17T12:00:00.000Z');
+function fixedClock() {
+  return {
+    now: () => FIXED_NOW,
+    nowSec: () => Math.floor(FIXED_NOW.getTime() / 1000),
+  };
+}
+
 describe('openpay-x402-sdk daily executor', () => {
   it('fails construction when a direct executor silently omits the configured store', async () => {
     const sdk = await loadSdk();
@@ -190,6 +200,7 @@ describe('openpay-x402-sdk daily executor', () => {
       spendStore: store,
       catalogTrust: false,
       fetchImpl,
+      ...fixedClock(),
     });
 
     await expect(
@@ -214,6 +225,7 @@ describe('openpay-x402-sdk daily executor', () => {
       spendStore: store,
       catalogTrust: false,
       fetchImpl: successfulFetch(),
+      ...fixedClock(),
     });
 
     const result = await client.pay(RESOURCE, { maxTotalJpyc: '6' });
@@ -237,6 +249,7 @@ describe('openpay-x402-sdk daily executor', () => {
       spendStore: store,
       catalogTrust: false,
       fetchImpl: successfulFetch(),
+      ...fixedClock(),
     });
 
     await expect(
@@ -272,6 +285,7 @@ describe('openpay-x402-sdk daily executor', () => {
       spendStore: store,
       catalogTrust: false,
       fetchImpl: successfulFetch(),
+      ...fixedClock(),
     });
 
     const result = await client.pay(RESOURCE, { maxTotalJpyc: '7' });
@@ -305,6 +319,7 @@ describe('openpay-x402-sdk daily executor', () => {
       spendStore: store,
       catalogTrust: false,
       fetchImpl,
+      ...fixedClock(),
     });
 
     const result = await client.pay(RESOURCE, { maxTotalJpyc: '7' });
@@ -334,6 +349,7 @@ describe('openpay-x402-sdk daily executor', () => {
       spendStore: store,
       catalogTrust: false,
       fetchImpl,
+      ...fixedClock(),
     });
 
     const result = await client.pay(RESOURCE, { maxTotalJpyc: '7' });
@@ -457,6 +473,7 @@ describe('openpay-x402-sdk daily executor', () => {
       spendStore: store,
       catalogTrust: false,
       fetchImpl: successfulFetch(),
+      ...fixedClock(),
     });
 
     await expect(client.quote(RESOURCE)).resolves.toMatchObject({ ok: true });
