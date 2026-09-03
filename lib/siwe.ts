@@ -13,8 +13,28 @@ import { getAddress, isAddress, isHex, type Address, type Hex } from 'viem';
 import { parseSiweMessage } from 'viem/siwe';
 import { LEGAL_ENTITY } from './legal';
 
-/** セッション cookie 名。httpOnly のため client JS からは読めない。 */
-export const SESSION_COOKIE = 'op_sess';
+/** セッション cookie 名の基底 (dev/test はこの素の名前をそのまま使う)。 */
+const SESSION_COOKIE_BASE = 'op_sess';
+
+/**
+ * セッション cookie 名 (reader/writer 共通の単一情報源)。httpOnly のため client JS からは読めない。
+ *
+ * 本番は `__Host-` prefix を付ける。この prefix の付いた cookie をブラウザは
+ * 「Secure + Path=/ + Domain 属性なし」でしか受理せず、**サブドメインからの上書き**も拒否する。
+ * 何の波及を断つための防御か: 乗っ取られた/別運用のサブドメインが親ドメイン向けに
+ * op_sess を書き込んで店主のセッションを固定する (session fixation) 経路を構造的に塞ぐ。
+ *
+ * dev (NODE_ENV!=='production') は http://localhost で prefix 付き cookie がブラウザに
+ * 拒否されるため素の名前へ落とす。判定を NODE_ENV 一本に閉じているのは、cookies() しか
+ * 持たない reader (_session.ts / logout) と writer (verify) が**必ず同じ名前**に合意する
+ * 必要があるため — 本番で素の名前も読みに行けば上で塞いだ注入経路がそのまま開く。
+ * 「本番かつ非 https」は cookie 自体が secure:true で成立しない構成なので分岐を増やさない。
+ */
+export function sessionCookieName(): string {
+  return process.env.NODE_ENV === 'production'
+    ? `__Host-${SESSION_COOKIE_BASE}`
+    : SESSION_COOKIE_BASE;
+}
 /** verifySiweLogin で許容する最大有効期間 (issued→exp の差)。正規クライアントは 10 分以内。 */
 const MAX_SIWE_VALIDITY_MS = 15 * 60 * 1000;
 /** セッション有効期間 (KV TTL と cookie maxAge を揃える)。 */

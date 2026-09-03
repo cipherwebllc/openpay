@@ -219,6 +219,19 @@ describe('SIWE routes', () => {
     expect(setCookie.toLowerCase()).toContain('max-age=0');
   });
 
+  // C7: 本番の cookie 名は `__Host-op_sess`。ブラウザの受理条件 (Secure + Path=/ +
+  // Domain 属性なし) を 3 つとも満たしていなければ prefix cookie は黙って捨てられる。
+  it('logout: 本番は __Host-op_sess を Secure + Path=/ + Domain 無しで失効させる', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const res = await logoutPOST();
+    const setCookie = res.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('__Host-op_sess=');
+    const lower = setCookie.toLowerCase();
+    expect(lower).toContain('secure');
+    expect(lower).toContain('path=/');
+    expect(lower).not.toContain('domain=');
+  });
+
   it('logout: セッションが既に無い (DEL=0) → 200 (冪等) + cookie 失効', async () => {
     h.cookieToken = 'already-revoked';
     const res = await logoutPOST();

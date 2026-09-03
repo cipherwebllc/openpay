@@ -55,14 +55,16 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(env.changes.some((c) => c.provider === 'Aegis')).toBe(false);
   });
 
-  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 第 1 回の delta は 4 件のまま', () => {
+  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 2 件', () => {
     const jpyc = createServiceMonitorEnvelope(
       { changedSince: '2026-08-01', limit: SERVICE_MONITOR_MAX_LIMIT },
       {},
       NOW,
     );
-    // backfill (8/10 DG SPS launch) が混ざると 5 件になる — 4 件がスコープ分離の証明。
-    expect(jpyc.changes).toHaveLength(4);
+    // E11 (2026-09-03 の日付訂正) 後、jpyc-services スコープで 8/01 以降に残るのは
+    // dg-sps 追加 (発表日 8/10) と aegis (8/27) の 2 件。決済スコープ専用の
+    // 8/10 DG SPS launch・8/26 大阪府採択 3 件が混ざれば 6 件になる = スコープ分離の証明。
+    expect(jpyc.changes).toHaveLength(2);
     expect(jpyc.changes.every((c) => c.slug !== undefined)).toBe(true);
     // 応答に内部ルーティング用 scopes を漏らさない。
     expect(jpyc.changes[0]).not.toHaveProperty('scopes');

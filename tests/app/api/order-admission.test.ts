@@ -13,6 +13,7 @@ const hold = vi.hoisted(() => {
     preorderTime: true,
     mobileOrder: true,
     rateLimitAllowed: true,
+    lastRateLimitKey: '',
     resolved: null as unknown as
       | { ok: true; record: HandleRecord | null }
       | { ok: false },
@@ -41,7 +42,13 @@ vi.mock('@/lib/env', async (importOriginal) => {
 vi.mock('@/lib/relay/relayGuards', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('@/lib/relay/relayGuards')>();
-  return { ...actual, checkReadRateLimit: async () => hold.rateLimitAllowed };
+  return {
+    ...actual,
+    checkReadRateLimit: async (key: string) => {
+      hold.lastRateLimitKey = key;
+      return hold.rateLimitAllowed;
+    },
+  };
 });
 
 // vi.fn で包む: 「KV を読まずに 400/404/429 で返す」テストを非空虚にする (呼ばれていない
@@ -81,10 +88,11 @@ function preorder(
 
 function request(
   over: Record<string, unknown> = {},
+  headers: Record<string, string> = {},
 ): Request {
   return new Request('https://open-pay.jp/api/order/admission', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify({
       handle: 'coffee_shop',
       merchant: MERCHANT,
@@ -128,6 +136,22 @@ describe('POST /api/order/admission', () => {
 
     expect(response.status).toBe(429);
     expect(await response.json()).toEqual({ ok: false, error: 'rate_limited' });
+  });
+
+  // C6: limiter の IP は clientIp (lib/net/ipHash) 経由で取る。x-vercel-forwarded-for が
+  // あればそれが権威 — client が偽装できる x-forwarded-for を先に読むと limiter を回避できる。
+  it('limiter キーの IP は x-vercel-forwarded-for が x-forwarded-for に優先する', async () => {
+    await POST(
+      request(
+        {},
+        {
+          'x-vercel-forwarded-for': '198.51.100.7',
+          'x-forwarded-for': '203.0.113.9',
+        },
+      ),
+    );
+
+    expect(hold.lastRateLimitKey).toBe('admission:198.51.100.0/24');
   });
 
   it('最新 storefront と server 時刻で利用可能な preorder は許可', async () => {

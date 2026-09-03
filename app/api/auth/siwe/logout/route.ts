@@ -4,14 +4,15 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { kvDel } from '@/lib/kv';
-import { SESSION_COOKIE, sessionKey } from '@/lib/siwe';
+import { sessionCookieName, sessionKey } from '@/lib/siwe';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(): Promise<NextResponse> {
   const store = await cookies();
-  const token = store.get(SESSION_COOKIE)?.value;
+  const cookieName = sessionCookieName();
+  const token = store.get(cookieName)?.value;
   let revoked = true;
   if (token) {
     const del = await kvDel(sessionKey(token));
@@ -24,7 +25,8 @@ export async function POST(): Promise<NextResponse> {
         { ok: false, error: 'session_revoke_failed' },
         { status: 503 },
       );
-  res.cookies.set(SESSION_COOKIE, '', {
+  // 失効も発行と同じ属性で出す (`__Host-` は Secure + Path=/ + Domain 無しが受理条件)。
+  res.cookies.set(cookieName, '', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',

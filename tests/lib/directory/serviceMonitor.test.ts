@@ -22,6 +22,13 @@ function params(qs: string): URLSearchParams {
   return new URL(`https://x.test/api?${qs}`).searchParams;
 }
 
+/** baseline (data.ts 由来の added) の日付。1 日に 19 件が集中する唯一のグループ。 */
+function baselineAddedDate(): string {
+  return scopedChangelog('jpyc-services').find(
+    (e) => e.slug === 'jpyc' && e.changeType === 'added',
+  )!.date;
+}
+
 describe('parseServiceMonitorQuery', () => {
   it('省略時は snapshot 用の既定 (limit=max)', () => {
     expect(parseServiceMonitorQuery(params(''))).toEqual({
@@ -163,23 +170,26 @@ describe('createServiceMonitorEnvelope', () => {
     expect(env.services.length).toBe(changedSlugs.size);
   });
 
+  // E11 (2026-09-03 の日付訂正) 後: jpyc / jpyc-ex は発表日 2026-05-15 の 2 件に移った。
+  // limit=1 でもこの日は分割されず 2 件返る (残りは次ページ = hasMore)。
   it('limit が changes を cap する (ただし日付境界で切り上げ)', () => {
     const env = createServiceMonitorEnvelope(
-      { changedSince: '2026-08-27', limit: 3 },
+      { changedSince: '2026-05-15', limit: 1 },
       {},
       NOW,
     );
-    // 2026-08-27 の 4 件は 1 日ぶんなので分割されない (limit=3 を超えて 4 件返る)。
-    expect(env.changes.length).toBe(4);
-    expect(new Set(env.changes.map((e) => e.date))).toEqual(new Set(['2026-08-27']));
-    expect(env.hasMore).toBe(false);
+    expect(env.changes.length).toBe(2);
+    expect(new Set(env.changes.map((e) => e.date))).toEqual(new Set(['2026-05-15']));
+    expect(env.hasMore).toBe(true);
+    expect(env.nextChangedSince > '2026-05-15').toBe(true);
   });
 
   // E3: limit で打ち切られた delta は「取りこぼしを永久ロス」しない。かつ **同一 date を
   // 分割しない**ので、次の changedSince は必ず前進する (同じ日を無限に返し続けない)。
   it('E3(a): 同一 date の件数が limit を超えてもその日を丸ごと返し、次は必ず後の日付になる', () => {
-    // jpyc-services スコープの最古日 = baseline 日 (2026-07-13・19 件が同日)。
-    const baselineDate = scopedChangelog('jpyc-services')[0].date;
+    // baseline 日 (2026-07-13) に 19 件が集中する。E11 の日付訂正でスコープ最古日は
+    // baseline より前 (発表日 2026-05-15) になったので、jpyc の baseline added から取る。
+    const baselineDate = baselineAddedDate();
     const capped = createServiceMonitorEnvelope(
       { changedSince: baselineDate, limit: 5 },
       {},
@@ -204,7 +214,7 @@ describe('createServiceMonitorEnvelope', () => {
   });
 
   it('E3(b): 2 回呼び出しで前進する — 重複ゼロ・最後は hasMore:false', () => {
-    const baselineDate = scopedChangelog('jpyc-services')[0].date;
+    const baselineDate = baselineAddedDate();
     const all = createServiceMonitorEnvelope(
       { changedSince: baselineDate, limit: SERVICE_MONITOR_MAX_LIMIT },
       {},
@@ -334,9 +344,9 @@ describe('ServiceChangeEvent.diffs (値レベルの差分)', () => {
     }
   });
 
-  it('jpyc-ex 2026-08-27 は chains + limit の 2 差分・delta 出力に載る', () => {
+  it('jpyc-ex 2026-05-15 は chains + limit の 2 差分・delta 出力に載る', () => {
     const env = createServiceMonitorEnvelope(
-      { changedSince: '2026-08-27', limit: SERVICE_MONITOR_MAX_LIMIT },
+      { changedSince: '2026-05-15', limit: SERVICE_MONITOR_MAX_LIMIT },
       {},
       NOW,
     );
@@ -347,6 +357,43 @@ describe('ServiceChangeEvent.diffs (値レベルの差分)', () => {
     const base = serviceChangelog().find((e) => e.changeType === 'added' && !e.diffs)!;
     expect(base).toBeDefined();
     expect('diffs' in base).toBe(false);
+  });
+});
+
+// E11 (2026-09-03 裁定): date = 一次ソースの発表日・collectedAt = 記録日。両者を取り違えると
+// 「発表から何日で追えたか」も「いつ何が起きたか」も答えられなくなるので、収集日で date を
+// 埋めない (収集日は collectedAt に分離する)。
+describe('ServiceChangeEvent.date / collectedAt (発表日と収集日の分離)', () => {
+  it('collectedAt を持つイベントは date (発表日) 以上の収集日を持つ', () => {
+    const collected = serviceChangelog().filter((e) => e.collectedAt);
+    expect(collected.length).toBeGreaterThanOrEqual(4);
+    for (const event of collected) {
+      expect(event.collectedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(event.collectedAt! >= event.date).toBe(true);
+    }
+  });
+
+  it('JPYC / JPYC EX の Kaia 対応は PR TIMES の発表日 2026-05-15 に置く', () => {
+    const kaia = serviceChangelog().filter(
+      (e) => e.sourceUrl === 'https://prtimes.jp/main/html/rd/p/000000315.000054018.html',
+    );
+    expect(kaia.map((e) => e.slug).sort()).toEqual(['jpyc', 'jpyc-ex']);
+    for (const event of kaia) {
+      expect(event.date).toBe('2026-05-15');
+      expect(event.collectedAt).toBe('2026-08-27');
+    }
+  });
+
+  it('collectedAt は応答イベントにもそのまま載る (scopes だけ落とす)', () => {
+    const env = createServiceMonitorEnvelope(
+      { changedSince: '2026-05-15', limit: SERVICE_MONITOR_MAX_LIMIT },
+      {},
+      NOW,
+    );
+    const jpyc = env.changes.find(
+      (c) => c.slug === 'jpyc' && c.changeType === 'updated',
+    )!;
+    expect(jpyc.collectedAt).toBe('2026-08-27');
   });
 });
 

@@ -32,8 +32,10 @@ export const PAYMENT_MONITOR_NOTICE = {
 } as const;
 
 export type PaymentChangeRow = {
-  /** YYYY-MM-DD (発表日ベース)。 */
+  /** YYYY-MM-DD = **一次ソースの発表日** (Service Monitor と同一定義・2026-09-03 統一)。 */
   date: string;
+  /** YYYY-MM-DD = こちらが記録した日 (収集日)。発表日と乖離する場合の監査用・任意。 */
+  collectedAt?: string;
   /** 事業者/主体の表示名。 */
   provider: string;
   changeType: ServiceChangeType;
@@ -83,6 +85,7 @@ function toRow(
   const entry = event.slug ? bySlug.get(event.slug) : undefined;
   return {
     date: event.date,
+    ...(event.collectedAt ? { collectedAt: event.collectedAt } : {}),
     provider: event.provider ?? entry?.name ?? event.slug ?? 'unknown',
     changeType: event.changeType,
     ...(event.changeCategory ? { changeCategory: event.changeCategory } : {}),

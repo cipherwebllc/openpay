@@ -29,6 +29,7 @@ A weekly change feed for Japan-related JPYC/Web3 services, designed to be wired 
 - **買う前に確かめる(空振り課金ゼロ)**: teaser の最終イベント日が手元の `nextChangedSince` より**前(古い)なら**その週は買わない(有料 delta は空になる)。同日以降のイベントがあるときだけ有料 delta を購入する — 「変更なし」に支払う週が無くなります
 - **変更は値でも返ります**: 一次ソースが前後の値を明示する場合、`diffs: [{ field, previousValue, currentValue, effectiveAt? }]`(field は assets / chains / fee / limit / status / feature の固定語彙)が付きます。推測では埋めません(無い場合は summary のみ)
 - 重複排除キーは `slug + date + changeType`
+- **日付の定義**: `date` は**一次ソースの発表日**、`collectedAt` は**こちらが記録した日**(収集日・発表日と異なるときだけ付きます)。2026-09-03 に過去イベントの `date` を発表日基準へ訂正しました
 - `limit` は**日付境界で丸められます**(1 日が途中で分割されることはないため、1 日の件数が `limit` を超える場合は `changes` が `limit` を超えます)。`hasMore` が `true` なら応答の `nextChangedSince`(= まだ返していない最初のイベントの日付・返した最後の日付より必ず後)で続きを購入してください — 同じ範囲が再送されることも、取りこぼされることもありません
 - OpenAPI(機械可読・`x-agent-usage` つき): `https://open-pay.jp/api/openapi.json`(operationId: `getJpycServiceMonitor` / `getJpycServiceMonitorUsdc`)
 - 外部カタログ: [x402 Bazaar / agentic.market](https://agentic.market/services/open-pay-jp) に掲載(USDC 面)
@@ -95,10 +96,11 @@ Claude Code なら `/schedule`(cron)や Hermes Agent の定期ジョブに上の
 {
   "schemaVersion": "1.0",
   "mode": "delta",
-  "query": { "changedSince": "2026-08-27", "limit": 200 },
+  "query": { "changedSince": "2026-05-15", "limit": 200 },
   "changes": [
     {
-      "date": "2026-08-27",
+      "date": "2026-05-15",
+      "collectedAt": "2026-08-27",
       "slug": "jpyc-ex",
       "changeType": "updated",
       "summary": "JPYC EX added Kaia support (issuance, redemption, wallet-address registration) and changed the issuance cap from 1M JPY per day to 1M JPY per transaction.",
@@ -219,3 +221,11 @@ A second monitor generated from the same weekly collection: it completes a diffe
 - 支払いは取消不能です。上限(MAX)は必ずクライアント側でも設定してください
 - **プロンプトに書いた上限指示は防御になりません**(エージェントは承認文言を捏造し得ます)。上限は本テンプレのようにスクリプト/SDK の引数と**少額専用ウォレットの残高**で技術的に効かせてください
 - 利用規約: https://open-pay.jp/ja/terms(英語版 /en/terms)
+
+## 変更履歴 / Changelog (フィード自体の変更)
+
+- **2026-09-03**: `date` の定義を「一次ソースの発表日」に統一し、収集日で入っていた過去イベントの日付を訂正しました
+  (JPYC / JPYC EX の Kaia 対応 = PR TIMES の発表日 `2026-05-15`、DG Stablecoin Payment Service の追加 = `2026-08-10`)。
+  併せて任意フィールド `collectedAt`(= こちらが記録した日)を追加。**保存済みの `nextChangedSince` は変更不要**です
+  (訂正された日付は過去に移動したため、次回以降の delta には再登場しません。過去分を取り直したい場合のみ
+  `changedSince=2026-05-15` で再購入してください)。

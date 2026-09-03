@@ -121,7 +121,7 @@ export const USDC_SERVICE_MONITOR = {
 const SERVICE_MONITOR_DELTA_EXAMPLE = {
   schemaVersion: '1.0',
   mode: 'delta',
-  query: { changedSince: '2026-08-20', limit: 200 },
+  query: { changedSince: '2026-05-15', limit: 200 },
   services: [
     {
       slug: 'jpyc-ex',
@@ -141,7 +141,9 @@ const SERVICE_MONITOR_DELTA_EXAMPLE = {
   ],
   changes: [
     {
-      date: '2026-08-27',
+      // date = 一次ソースの発表日 / collectedAt = 記録日 (2026-09-03 統一)。
+      date: '2026-05-15',
+      collectedAt: '2026-08-27',
       slug: 'jpyc-ex',
       changeType: 'updated',
       summary:

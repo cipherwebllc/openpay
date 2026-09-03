@@ -8,6 +8,7 @@ import {
   sessionKey,
   nonceKey,
   parseSessionRecord,
+  sessionCookieName,
   verifySiweLogin,
   isAllowedSiweDomain,
   type SiweVerifyDeps,
@@ -68,6 +69,17 @@ describe('lib/siwe helpers', () => {
     expect(parseSessionRecord(null)).toBeNull();
     expect(parseSessionRecord('{not json')).toBeNull();
     expect(parseSessionRecord(JSON.stringify({ address: 'nope' }))).toBeNull();
+  });
+
+  // C7: 本番は `__Host-` prefix (サブドメインからのセッション固定を構造的に塞ぐ)。
+  // dev/test は http://localhost で prefix 付き cookie が拒否されるため素の名前。
+  it('sessionCookieName: 本番は __Host- prefix・dev/test は素の名前', () => {
+    expect(sessionCookieName()).toBe('op_sess');
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(sessionCookieName()).toBe('__Host-op_sess');
+    vi.stubEnv('NODE_ENV', 'development');
+    expect(sessionCookieName()).toBe('op_sess');
+    vi.unstubAllEnvs();
   });
 });
 
