@@ -7,6 +7,11 @@
 // $0.001〜0.008。supply/balance は eth_call 1 発なので $0.002、transfers は getLogs の
 // 走査を伴うので $0.005。OpenPay 手数料は無く表示価格の 100% が payTo に届く。
 //
+// ⚠️ vanilla x402 の authorization は resource URL を束縛しない (EIP-3009 の署名対象は
+// from/to/value/nonce のみ)。同額 resource 間の署名使い回しの本当の対策は resource 束縛
+// (plans/full-review-2026-09-02.md B5(b)) であって価格の分離ではない — 価格を分けても
+// exact verify は value ≥ required を通すうえ、同額ペアは他にも存在する。
+//
 // 文言の型 (2026-08-23 裁定): 4 層を別目的で最適化する。
 //   - serviceName / tags: Bazaar 検索で「検索される言葉」に寄せる (ブランドでなく実行する仕事)
 //   - description: 3 文 = ①何を返すか ②どんなタスクで使うか ③何には使えないか。

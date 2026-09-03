@@ -288,6 +288,25 @@ describe('pre-submit の retry / abandon', () => {
     expect(ab.status).toBe('abandoned');
   });
 
+  it('signed → awaiting_signature に戻れる (再署名 supersede・A8)', () => {
+    // markSigned と markSubmitting の間でタブを閉じると record は signed のまま残る。
+    // 同一 attemptId で再開したとき markAwaitingSignature が throw すると、送金が
+    // 一切起きていないのに恒久的に詰む → signed からの再入を許可する。
+    const { key } = setup();
+    markAwaitingSignature({ key, sender: SENDER, now: 1_100 });
+    markSigned({
+      key,
+      sender: SENDER,
+      signedUserOp: SIGNED_OP,
+      userOpHash: '0xhash' as Hex,
+      now: 1_200,
+    });
+    const again = markAwaitingSignature({ key, sender: SENDER, now: 1_250 });
+    expect(again.status).toBe('awaiting_signature');
+    // 再署名で上書きされるまで旧署名は残る (markSigned が patch で差し替える)。
+    expect(again.signedUserOp).toEqual(SIGNED_OP);
+  });
+
   it('markSubmitting は冪等再入できる (rebroadcast retry)', () => {
     const { key } = setup();
     advanceToSubmitting(key);

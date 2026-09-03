@@ -6,6 +6,9 @@
 // idempotency は route ごとに専用 prefix を持つ (決済=relay:idem: / パス=csvpassrelay:idem:)。これは
 // idem が「同一 authorization の重複 POST」を区別するための per-payload キーで、別 route の同 nonce と
 // 衝突させない方が安全なため (prefix を引数化し makeIdempotency で束ねる)。
+// **例外は recover (forwarder.settle)**: nonce が決定論的コミットメント = 同 nonce は同一支払いなので、
+// 決済 relay と x402 facilitator の二入口が並行 broadcast しないよう共有 claim
+// (SHARED_RECOVER_IDEM_PREFIX) を route 別 claim に重ねる (makeRecoverIdempotency・A7)。
 //
 // 抽出元は app/api/relay/jpyc/route.ts の同名関数。**挙動は完全に同一** (決済 route の既存テストが
 // 無改変で green であることが受け入れ条件)。実依存 (KV) は lib/kv をそのまま使う。
@@ -316,7 +319,13 @@ export async function readIdempotency(
 }
 
 // 指定 prefix で idempotency 3 関数を生成する。挙動は抽出元 (relay route) と完全に同一。
-export function makeIdempotency(prefix: string): IdempotencyHelpers {
+// onClaimUnavailable は claim の SET が KV 障害で不確定になり fail-safe で duplicate に
+// 倒したときだけ呼ばれる観測 hook (任意・応答には一切影響しない)。正当な重複 POST と
+// 「KV が落ちて重複扱いになった」を運用ログで区別するために足した (A7)。
+export function makeIdempotency(
+  prefix: string,
+  onClaimUnavailable?: (info: { chainId: number; nonce: Hex }) => void,
+): IdempotencyHelpers {
   const idemKey = (chainId: number, from: Address, nonce: Hex) =>
     `${prefix}${chainId}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
 
@@ -344,6 +353,7 @@ export function makeIdempotency(prefix: string): IdempotencyHelpers {
       }
       return { status: 'first' };
     }
+    onClaimUnavailable?.({ chainId, nonce });
     return { status: 'duplicate', txHash: null }; // fail-safe
   }
 
@@ -371,4 +381,60 @@ export function makeIdempotency(prefix: string): IdempotencyHelpers {
   }
 
   return { claimIdempotency, recordRelayHash, releaseIdempotency };
+}
+
+// A7: recover (forwarder.settle) の **入口非依存**な共有 claim 名前空間。
+//
+// なぜ要るか: recover の nonce は buildForwarderNonce による決定論的コミットメント
+// (COMMIT_VERSION/from/merchant/各額/validity/intentSalt/chainId/forwarder) なので、
+// **同じ nonce = 同じ支払い**。ところが冪等 claim は route ごとに別 prefix
+// (決済 relay = 'relay:idem:' / x402 facilitator = 'x402fac:idem:') で互いを見ないため、
+// 同一の署名済 authorization を両入口へ同時 POST すると 2 本とも claim に成功し 2 本 broadcast
+// される。2 本目は on-chain の authorizationState で revert するが、その revert 応答で client の
+// 送信ラッチが解け「失敗したので standard で送り直す」導線に入りうる (= 二重支払いの窓)。
+// route 別 claim は**そのまま残し** (同一入口の重複 POST 応答を一切変えない)、その直後に
+// この共有 claim を重ねて入口跨ぎの並行 broadcast だけを止める。
+export const SHARED_RECOVER_IDEM_PREFIX = 'relay:recover:idem:';
+
+/** recover 経路用の冪等ヘルパ。route 別 claim (従来) + 入口跨ぎ共有 claim (A7) の二段。
+ * 応答形は従来と同一 ('duplicate' → 呼び元は pending を返す)。新しいエラーコードは足さない。 */
+export function makeRecoverIdempotency(routePrefix: string): IdempotencyHelpers {
+  const route = makeIdempotency(routePrefix);
+  const shared = makeIdempotency(SHARED_RECOVER_IDEM_PREFIX, ({ chainId, nonce }) => {
+    // A7 (可用性トレードオフの明示): 共有 claim の SET が KV 障害で不確定になると
+    // claimIdempotency は fail-safe で duplicate を返すため、**一過性の KV 障害中は
+    // 正当な recover が 1 回だけ 202 pending に落ちる**。それでも fail-safe を選ぶのは、
+    // ここで first に倒すと入口跨ぎの二重 broadcast (= 2 本目 revert → client の送信
+    // ラッチが解けて standard 再送 → 二重支払い) を素通りさせるため。
+    // 正当な重複 POST と KV 障害を運用で切り分けられるよう、専用イベント名で warn する。
+    logger.warn('relay.recover.shared_claim_unavailable', { chainId, nonce });
+  });
+  return {
+    async claimIdempotency(chainId, from, nonce) {
+      // 従来の route 別 claim を先に評価する (同一入口の重複 POST が受け取る
+      // 「記録済 txHash 付き pending」を完全に維持するため)。
+      const own = await route.claimIdempotency(chainId, from, nonce);
+      if (own.status === 'duplicate') return own;
+      const cross = await shared.claimIdempotency(chainId, from, nonce);
+      if (cross.status === 'duplicate') {
+        // もう一方の入口が同じ nonce を保持している (= 進行中 or broadcast 済)、または
+        // 共有 claim の SET が KV 障害で不確定 (上の fail-safe)。どちらも自分は
+        // broadcast しないので、いま取った route 別 claim は解放する (未送信なのに
+        // 30 分の false tombstone を残さない)。応答は従来の重複と同じ pending。
+        await route.releaseIdempotency(chainId, from, nonce);
+        return cross;
+      }
+      return { status: 'first' };
+    },
+    async recordRelayHash(chainId, from, nonce, txHash) {
+      await route.recordRelayHash(chainId, from, nonce, txHash);
+      // 共有 claim にも hash を載せ、もう一方の入口への重複 POST でも explorer 追跡できるようにする。
+      await shared.recordRelayHash(chainId, from, nonce, txHash);
+    },
+    async releaseIdempotency(chainId, from, nonce) {
+      // broadcast 前の失敗でのみ呼ばれる (jpycRelay/forwarderRecover の契約)。両方解放する。
+      await route.releaseIdempotency(chainId, from, nonce);
+      await shared.releaseIdempotency(chainId, from, nonce);
+    },
+  };
 }

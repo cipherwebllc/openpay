@@ -1191,6 +1191,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             ...(params.pickupAt === undefined
               ? {}
               : { pickupAt: params.pickupAt }),
+            // URL 発行時点の手数料負担者。server が最新 storefront と突合し、店舗が
+            // feePayer を切り替えていれば署名前に 409 で止める (notify の
+            // 「手数料未収」誤検出 → 二重徴収を防ぐ)。URL に無ければ送らない (従来動作)。
+            ...(params.feePayer === undefined
+              ? {}
+              : { feePayer: params.feePayer }),
           }),
         });
         const body = (await response.json().catch(() => null)) as {

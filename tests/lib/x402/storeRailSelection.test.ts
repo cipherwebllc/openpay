@@ -37,6 +37,7 @@ vi.mock('@/lib/kv', () => ({
   }),
 }));
 
+import { kvEval } from '@/lib/kv';
 import {
   associateStoreRailIntent,
   claimStoreRailSelection,
@@ -139,5 +140,48 @@ describe('Store payment rail exclusion CAS', () => {
       ok: true,
       kind: 'idempotent',
     });
+  });
+
+  // B15: rail 確定後の active slot を PERSIST (無期限) にすると、terminal に到達しない
+  // intent (indeterminate 等) が同じ payer×resource×revision を恒久的に塞ぎ KV も膨らむ。
+  //
+  // ⚠️ このテストは意図的に white-box (Lua スクリプト本文と ARGV の位置を直接見る)。TTL は
+  // 実 Redis 無しでは観測できず、in-memory の kvEval モックは EXPIRE を解釈しないため、
+  // 「スクリプトが TTL を張る形になっていること」以上は検証できない。スクリプトの整形や
+  // ARGV 番号を変えたらこのテストも一緒に直す (壊れたら仕様違反ではなくテストの追随漏れ)。
+  it('rail 確定後の active slot / intent 対応は無期限にせず 30 日 TTL を張る', async () => {
+    const associated = await associateStoreRailIntent({
+      intentSalt: USDC_SALT,
+      intentKey: `store:usdc:intent:${USDC_SALT}`,
+      payer: PAYER,
+      resourceId: RESOURCE,
+      contentRevision: 1,
+    });
+    if (!associated.ok) throw new Error('association failed');
+    await claimStoreRailSelection({
+      parentIntentId: associated.parentIntentId,
+      intentSalt: USDC_SALT,
+      intentKey: `store:usdc:intent:${USDC_SALT}`,
+      payer: PAYER,
+      resourceId: RESOURCE,
+      contentRevision: 1,
+      rail: 'usdc',
+      authorizationHash: 'b'.repeat(64),
+    });
+
+    const claimCall = vi
+      .mocked(kvEval)
+      .mock.calls.find(([script]) =>
+        String(script).includes('active.selectedRail = ARGV[6]'),
+      );
+    const [script, , args] = claimCall!;
+    expect(String(script)).not.toContain('PERSIST');
+    expect(String(script)).toContain("redis.call('EXPIRE', KEYS[3], ARGV[13])");
+    expect(String(script)).toContain(
+      "redis.call('SET', KEYS[1], selectedRaw, 'EX', ARGV[13])",
+    );
+    expect((args as string[])[12]).toBe(String(30 * 24 * 60 * 60));
+    // archive (KEYS[2]) は監査用に無期限のまま。
+    expect(String(script)).toContain("redis.call('SET', KEYS[2], selectedRaw)");
   });
 });

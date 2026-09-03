@@ -18,6 +18,17 @@ const hold = vi.hoisted(() => ({
   checkSubfloorPayerRateLimit: vi.fn(async () => true),
   checkSubfloorBudget: vi.fn(),
   refundSubfloorBudget: vi.fn(),
+  // hoisted に置いて「どちらのファクトリがどの prefix で呼ばれたか」を検証可能にする。
+  makeIdempotency: vi.fn(() => ({
+    claimIdempotency: vi.fn(),
+    recordRelayHash: vi.fn(),
+    releaseIdempotency: vi.fn(),
+  })),
+  makeRecoverIdempotency: vi.fn(() => ({
+    claimIdempotency: vi.fn(),
+    recordRelayHash: vi.fn(),
+    releaseIdempotency: vi.fn(),
+  })),
 }));
 
 const FORWARDER = '0x2222222222222222222222222222222222222222' as Address;
@@ -54,11 +65,10 @@ vi.mock('@/lib/relay/relayGuards', () => ({
   refundSubfloorBudget: hold.refundSubfloorBudget,
   checkGasBudget: vi.fn(),
   refundGasBudget: vi.fn(),
-  makeIdempotency: () => ({
-    claimIdempotency: vi.fn(),
-    recordRelayHash: vi.fn(),
-    releaseIdempotency: vi.fn(),
-  }),
+  // A7: settleViaForwarder は route 別 claim に入口跨ぎの共有 claim を重ねた
+  // makeRecoverIdempotency を使う (実合成は tests/lib/relayGuards.test.ts が検証)。
+  makeIdempotency: hold.makeIdempotency,
+  makeRecoverIdempotency: hold.makeRecoverIdempotency,
 }));
 vi.mock('@/lib/relay/forwarderRecover', () => ({
   recoverViaForwarder: hold.recoverViaForwarder,
@@ -101,6 +111,19 @@ async function settle(
 
 beforeEach(() => {
   hold.recoverViaForwarder.mockClear();
+  hold.makeIdempotency.mockClear();
+  hold.makeRecoverIdempotency.mockClear();
+});
+
+// A7: recover の冪等は route 別 claim 単独 (makeIdempotency) では入口跨ぎの二重 broadcast を
+// 止められない。makeIdempotency へ戻したら落ちるように、どちらが呼ばれたかを固定する。
+describe('settleViaForwarder の冪等ファクトリ', () => {
+  it('route 別 prefix で makeRecoverIdempotency を使う (makeIdempotency 単独ではない)', async () => {
+    await settle(JPY, JPY);
+
+    expect(hold.makeRecoverIdempotency).toHaveBeenCalledWith('test:idem:');
+    expect(hold.makeIdempotency).not.toHaveBeenCalled();
+  });
 });
 
 describe('settleViaForwarder caller 別 sub-floor', () => {

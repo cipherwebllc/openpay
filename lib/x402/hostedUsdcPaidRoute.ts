@@ -35,6 +35,9 @@ import {
   type StoreUsdcAuthorizationClaim,
   type StoreUsdcIntent,
   type SettledStoreUsdcIntent,
+  type SettlingStoreUsdcIntent,
+  type SignedStoreUsdcIntent,
+  type IndeterminateStoreUsdcIntent,
 } from '@/lib/x402/storeUsdcIntent';
 import {
   readStoreUsdcAnchorBlock,
@@ -288,10 +291,32 @@ function nonceFromPayment(decoded: unknown): Hex | null {
     : null;
 }
 
+/** 期限判定を飛ばす「既に claim 済みの intent への完全一致 redelivery」の対象 state (B4)。
+ * failed_prebroadcast は **含めない**: 従来どおり期限判定を先に通し、既存のエラーコード
+ * 優先順位 (期限切れ → purchase_intent_expired) を変えないため (掟 12)。 */
+function isExistingClaimRecovery(
+  intent: StoreUsdcIntent,
+): intent is
+  | SignedStoreUsdcIntent
+  | SettlingStoreUsdcIntent
+  | IndeterminateStoreUsdcIntent
+  | SettledStoreUsdcIntent {
+  return (
+    intent.state === 'signed' ||
+    intent.state === 'settling' ||
+    intent.state === 'indeterminate' ||
+    intent.state === 'settled'
+  );
+}
+
 function exactClaim(input: {
   decoded: unknown;
   intent: StoreUsdcIntent;
   now: number;
+  /** 期限判定の用途 (既定 = broadcast-admission)。JPYC 側 buildPurchaseAuthorizationClaim と
+   * 同じ語彙。'existing-claim-recovery' は「既に claim 済みの intent への完全一致 redelivery」で、
+   * 期限は新規 broadcast の入場条件でしかないため適用しない。 */
+  use?: 'broadcast-admission' | 'existing-claim-recovery';
 }):
   | { ok: true; claim: StoreUsdcAuthorizationClaim; authorizationHash: string }
   | { ok: false; error: string } {
@@ -346,9 +371,14 @@ function exactClaim(input: {
   ) {
     return { ok: false, error: 'authorization_conflict' };
   }
+  // 期限 (FX quote / authorization validBefore) は **新規 broadcast の入場条件**。
+  // settled/settling/indeterminate へ完全一致で再送された claim を期限切れで 409 にすると、
+  // 支払い済みの恒久 entitlement と indeterminate からの回復の両方を遮断してしまう
+  // (JPYC 側 buildPurchaseAuthorizationClaim の existing-claim-recovery と同じ理由)。
   if (
-    input.now >= input.intent.fxQuoteExpiresAt ||
-    BigInt(claim.validBefore) <= BigInt(Math.floor(input.now / 1_000) + 5)
+    input.use !== 'existing-claim-recovery' &&
+    (input.now >= input.intent.fxQuoteExpiresAt ||
+      BigInt(claim.validBefore) <= BigInt(Math.floor(input.now / 1_000) + 5))
   ) {
     return { ok: false, error: 'purchase_intent_expired' };
   }
@@ -441,8 +471,32 @@ async function submittedResponse(input: {
   }
   const body = paymentBody({ intent: found, decoded, v2: Boolean(v2Raw) });
   if (!body) return errorResponse('invalid_payment_payload', 400);
-  const exact = exactClaim({ decoded: payload, intent: found, now: Date.now() });
+  const exact = exactClaim({
+    decoded: payload,
+    intent: found,
+    now: Date.now(),
+    // 既に claim 済みの state (signed/settling/indeterminate/settled) への再送は期限を
+    // 適用せず、下の state 分岐 (settled → content / settling・indeterminate → 202) に流す。
+    // quoted と failed_prebroadcast は従来どおり新規 broadcast の入場判定 (期限が先)。
+    use: isExistingClaimRecovery(found)
+      ? 'existing-claim-recovery'
+      : 'broadcast-admission',
+  });
   if (!exact.ok) return errorResponse(exact.error, 409);
+  // 期限を飛ばす recovery は **完全一致のみ** に限る。exactClaim の照合は intent 側の値
+  // (payer/merchant/value/nonce/validBefore 上限) だけを見るため、署名そのものは比較して
+  // いない。ここで authorizationHash と署名 fingerprint を保存済 claim と突き合わせないと、
+  // nonce を知った第三者が「任意の validBefore + 形式が正しいだけの署名」を投げて支払い済
+  // コンテンツを恒久的に引き出せる (= settled intent が bearer 化する)。JPYC 側
+  // purchaseAuthorizationMatches の非 quoted 分岐と同じ照合。不一致は quoted 経路の
+  // claim 不一致と同じ 409 authorization_conflict。
+  if (
+    isExistingClaimRecovery(found) &&
+    (exact.authorizationHash !== found.authorizationHash ||
+      exact.claim.signatureFingerprint !== found.claim.signatureFingerprint)
+  ) {
+    return errorResponse('authorization_conflict', 409);
+  }
   if (found.state === 'settled') return settledResponse(found);
   if (found.state === 'settling' || found.state === 'indeterminate') {
     return pendingResponse();
@@ -515,6 +569,10 @@ async function submittedResponse(input: {
   try {
     settle = await postFacilitator('/settle', body, cdpWireFor(settling));
   } catch {
+    // settle 呼出開始後の例外は broadcast 有無を断定できない → indeterminate を永続して
+    // reconciler に委ねる。marker の保存可否に関わらず 202 (従来応答・掟 12): intent は
+    // claimStoreUsdcSettlement で既に settling として pending index + lease に載っており、
+    // 「後で reconciler が解決する」約束は marker 無しでも果たされる。
     await markStoreUsdcIndeterminate({
       intentSalt: settling.intentSalt,
       attemptId: settling.attemptId,
@@ -526,6 +584,8 @@ async function submittedResponse(input: {
       ? (settle.transaction.toLowerCase() as Hex)
       : undefined;
   if (settle.success !== true || !txHash) {
+    // 上の catch と同じ理由で 202 (従来応答・掟 12)。settling の lease が切れれば
+    // reconciler が同じ intent を拾う。
     await markStoreUsdcIndeterminate({
       intentSalt: settling.intentSalt,
       attemptId: settling.attemptId,
@@ -546,12 +606,17 @@ async function submittedResponse(input: {
     txHash,
   });
   if (!finalized.ok) {
+    // B13: settle は成功して txHash がある。ここで 202 pending を返すと「支払いは通った」
+    // という以上に「あとで解錠される」ことまで約束してしまうので、JPYC 側
+    // (app/api/paid/hosted/[id] の finalize 失敗分岐) と同じ 503 purchase_provisioning に
+    // 揃える。txHash 付き intent を pending index に残し、KV 復旧後の status/cron が
+    // 同じ entitlement へ原子的に収束させる。
     await markStoreUsdcIndeterminate({
       intentSalt: settling.intentSalt,
       attemptId: settling.attemptId,
       txHash,
     });
-    return pendingResponse();
+    return errorResponse('purchase_provisioning', 503);
   }
   if (finalized.kind === 'finalized') {
     scheduleAfterResponse(() => {

@@ -403,7 +403,12 @@ function transition(args: {
   return next;
 }
 
-/** reserved → awaiting_signature (permit/UserOp 署名 popup を出す直前)。 */
+/** reserved → awaiting_signature (permit/UserOp 署名 popup を出す直前)。
+ * `signed` からの再入も許可する: broadcast 前 (PRE_SUBMIT_STATES) は同一署名者が安全に
+ * **再署名 (supersede)** できるという FSM の設計意図どおりの遷移。markSigned と
+ * markSubmitting の間でタブを閉じると record は `signed` のまま残り、同一 attemptId で
+ * 再開すると circleSend の通常フローが markAwaitingSignature を呼ぶ。ここに `signed` が
+ * 無いと PendingStateError で恒久的に詰む (送金は一切起きていないのに再開不能)。 */
 export function markAwaitingSignature(args: {
   key: string;
   sender: Address;
@@ -412,7 +417,7 @@ export function markAwaitingSignature(args: {
   return transition({
     key: args.key,
     sender: args.sender,
-    from: ['reserved', 'awaiting_signature'],
+    from: ['reserved', 'awaiting_signature', 'signed'],
     to: 'awaiting_signature',
     now: args.now,
   });

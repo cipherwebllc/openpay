@@ -34,7 +34,7 @@ import {
   refundSubfloorBudget,
   checkGasBudget,
   refundGasBudget,
-  makeIdempotency,
+  makeRecoverIdempotency,
 } from './relayGuards';
 import { recoverViaForwarder, type ForwarderRecoverDeps } from './forwarderRecover';
 import {
@@ -65,7 +65,8 @@ export type SettleViaForwarderInput = {
   callerFeeFloorValue: bigint;
   // a1-aware (recover relay) か raw (facilitator) かを呼び元が選ぶ。
   forwarderFor: (chainId: number) => Address | null;
-  // 冪等名前空間 ('relay:idem:' / 'x402fac:idem:')。rate-limit / 日次予算は relayGuards 内で共有キー。
+  // route 別の冪等名前空間 ('relay:idem:' / 'x402fac:idem:')。rate-limit / 日次予算は relayGuards 内で
+  // 共有キー。recover の入口跨ぎ共有 claim (relay:recover:idem:) は makeRecoverIdempotency が重ねる。
   idemPrefix: string;
 };
 
@@ -99,8 +100,12 @@ export async function settleViaForwarder(
   }
 
   const io = selfHostIoFor(chainId);
+  // A7: route 別 claim (idemPrefix・従来) に加え、入口非依存の共有 claim を重ねる。recover の
+  // nonce は決定論的コミットメントなので、決済 relay と x402 facilitator の両入口へ同じ
+  // authorization を並行 POST しても broadcast は 1 本に収束する (2 本目は従来の重複と同じ
+  // pending 応答で返る = wire に新しいエラーコードを足さない)。
   const { claimIdempotency, recordRelayHash, releaseIdempotency } =
-    makeIdempotency(idemPrefix);
+    makeRecoverIdempotency(idemPrefix);
   // server 権威で算出済みの回収額を、同じ caller の料金体系に属する floor と比較する。recover 用
   // gas floor を x402 に流用して正規小口 x402 が専用 cap を枯らし、他 payer の settle を止める
   // 波及を断つ。mobile/recover 側は従来どおり relay gas floor を caller から渡す。

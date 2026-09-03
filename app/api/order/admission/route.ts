@@ -9,7 +9,7 @@ import { getAddress, isAddress } from 'viem';
 import { env } from '@/lib/env';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
-import type { MobileOrderMode } from '@/lib/mobileOrder';
+import type { FeePayer, MobileOrderMode } from '@/lib/mobileOrder';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 import { isBeforeOpen, isPastLastOrder, pickupSlots } from '@/lib/shopTime';
@@ -22,6 +22,8 @@ type AdmissionBody = {
   merchant: string;
   mode: MobileOrderMode;
   pickupAt?: number;
+  /** URL 発行時点の手数料負担者 (任意)。古い client は送らないので absent = 従来動作。 */
+  feePayer?: FeePayer;
 };
 
 function json(body: Record<string, unknown>, status: number): NextResponse {
@@ -50,11 +52,19 @@ function parseBody(value: unknown): AdmissionBody | null {
   ) {
     return null;
   }
+  if (
+    raw.feePayer !== undefined &&
+    raw.feePayer !== 'merchant' &&
+    raw.feePayer !== 'customer'
+  ) {
+    return null;
+  }
   return {
     handle: raw.handle,
     merchant: raw.merchant,
     mode: raw.mode,
     ...(raw.pickupAt !== undefined ? { pickupAt: raw.pickupAt } : {}),
+    ...(raw.feePayer !== undefined ? { feePayer: raw.feePayer } : {}),
   };
 }
 
@@ -108,6 +118,24 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const storefront = record.storefront;
   if (storefront.mode !== body.mode) {
+    return json({ ok: false, error: 'storefront_changed' }, 409);
+  }
+  // 手数料負担者のドリフト検出 (A4)。URL 発行後に店舗が feePayer を切り替えると、顧客は
+  // 発行時点の負担者で inline 支払いをするのに /api/order/notify は最新 storefront の
+  // feePayer を権威として obligation を組むため「手数料未収」を誤検出し二重徴収を誘発する。
+  // client が feePayer を送ってきたときだけ mode と同じ 409 で署名前に止める
+  // (送らない旧 client は absent = 従来動作のまま)。
+  //
+  // ⚠️ **preorder のときだけ比較する**。storefront mode では feePayer は obligation に
+  // 一切効かない (lib/mobileOrderFee.ts mobileOrderGasMode: kind!=='preorder' は常に
+  // merchant 負担・notify も同じ判定) のに、MobileOrderView は mode に関係なく URL へ
+  // feePayer を載せる。storefront の店舗が設定画面のラジオに触れただけで、発行済 URL が
+  // 全部 409 になり注文を止める波及を断つ。
+  if (
+    body.mode === 'preorder' &&
+    body.feePayer !== undefined &&
+    storefront.feePayer !== body.feePayer
+  ) {
     return json({ ok: false, error: 'storefront_changed' }, 409);
   }
   if (storefront.acceptingOrders === false) {

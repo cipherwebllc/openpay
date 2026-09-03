@@ -802,6 +802,42 @@ describe('CheckoutForm — 送信', () => {
     vi.unstubAllGlobals();
   });
 
+  it('A4: URL の feePayer を admission body に載せる (負担者ドリフトを署名前に検出)', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{
+          ...USDC_PARAMS,
+          storeHandle: 'coffee_shop',
+          feeKind: 'preorder',
+          feePayer: 'customer',
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1].body))).toEqual({
+      handle: 'coffee_shop',
+      merchant: MERCHANT,
+      mode: 'preorder',
+      feePayer: 'customer',
+    });
+    vi.unstubAllGlobals();
+  });
+
   it('ERC20 mode (USDC mainnet 相当): feeAmount に gas を含めない', async () => {
     vi.mocked(resolvePaymasterMode).mockImplementation((dep) =>
       dep.symbol === 'usdc' ? 'erc20' : 'sponsorship',
