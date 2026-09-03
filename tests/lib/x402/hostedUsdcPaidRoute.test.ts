@@ -1,5 +1,16 @@
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress, type Hex } from 'viem';
+
+// 署名 fingerprint と authorizationHash は **入力に依存する** 形で fake する (定数を返すと
+// 「別の署名で settled intent の内容を引き出せるか」を一切検証できない = B4 の穴が素通りする)。
+// 実装 (paymentRedelivery / storeUsdcIntent の canonicalHash) と同じ sha256 の性質だけ模す。
+function fakeFingerprint(signature: unknown): string {
+  return createHash('sha256').update(String(signature)).digest('hex');
+}
+function fakeAuthHash(claim: unknown): string {
+  return createHash('sha256').update(JSON.stringify(claim)).digest('hex');
+}
 
 const mocks = vi.hoisted(() => ({
   getProduct: vi.fn(),
@@ -41,7 +52,7 @@ vi.mock('@/lib/x402/hostedStore', () => ({
   sellerDisclosureComplete: mocks.disclosure,
 }));
 vi.mock('@/lib/x402/paymentRedelivery', () => ({
-  paymentSignatureFingerprint: () => '5'.repeat(64),
+  paymentSignatureFingerprint: (signature: unknown) => fakeFingerprint(signature),
 }));
 vi.mock('@/lib/x402/purchaseIntent', () => ({
   checkPurchaseQuoteRateLimit: mocks.quoteLimit,
@@ -60,7 +71,7 @@ vi.mock('@/lib/x402/storeUsdcIntent', () => ({
   markStoreUsdcIndeterminate: mocks.markIndeterminate,
   readSettledStoreUsdcAccess: mocks.readAccess,
   recordStoreUsdcTransaction: mocks.recordTransaction,
-  storeUsdcAuthorizationHash: () => '6'.repeat(64),
+  storeUsdcAuthorizationHash: (claim: unknown) => fakeAuthHash(claim),
 }));
 vi.mock('@/lib/x402/storeUsdcOnchain', () => ({
   STORE_USDC_ADDRESS: getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'),
@@ -85,6 +96,8 @@ const PAYER = getAddress('0x1111111111111111111111111111111111111111');
 const SELLER = getAddress('0x2222222222222222222222222222222222222222');
 const USDC = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
 const SIGNATURE = `0x${'55'.repeat(65)}`;
+// 形式だけ正しい別署名 (nonce を知った第三者が投げうる payload の再現用)。
+const FORGED_SIGNATURE = `0x${'66'.repeat(65)}`;
 
 const paymentSnapshot = {
   version: 1,
@@ -155,19 +168,23 @@ function intent(state: string = 'quoted') {
     bindingHash: '8'.repeat(64),
   };
   if (state === 'quoted') return base;
+  // claim の key 順は route の exactClaim が組む literal と揃える (canonicalHash が
+  // JSON.stringify 依存のため)。authorizationHash は claim から導出する = 保存済 claim と
+  // 1 文字でも違う payload は hash 不一致になる。
+  const claim = {
+    payer: PAYER,
+    to: SELLER,
+    value: '2000000',
+    validAfter: '0',
+    validBefore: base.authorizationValidBeforeMax,
+    nonce: NONCE,
+    signatureFingerprint: fakeFingerprint(SIGNATURE),
+  };
   const claimed = {
     ...base,
     state,
-    claim: {
-      payer: PAYER,
-      to: SELLER,
-      value: '2000000',
-      validAfter: '0',
-      validBefore: base.authorizationValidBeforeMax,
-      nonce: NONCE,
-      signatureFingerprint: '5'.repeat(64),
-    },
-    authorizationHash: '6'.repeat(64),
+    claim,
+    authorizationHash: fakeAuthHash(claim),
     signedAt: NOW + 1_000,
   };
   if (state === 'signed') return claimed;
@@ -182,14 +199,14 @@ function intent(state: string = 'quoted') {
   return { ...claimed, state, txHash: TX_HASH, settledAt: NOW + 3_000 };
 }
 
-function paymentHeader(value = '2000000'): string {
+function paymentHeader(value = '2000000', signature = SIGNATURE): string {
   return Buffer.from(
     JSON.stringify({
       x402Version: 1,
       scheme: 'exact',
       network: 'base',
       payload: {
-        signature: SIGNATURE,
+        signature,
         authorization: {
           from: PAYER,
           to: SELLER,
@@ -395,6 +412,8 @@ describe('hosted USDC paid route', () => {
     expect(mocks.postFacilitator).not.toHaveBeenCalled();
   });
 
+  // settle 開始後は intent が settling として pending index + lease に載っているので、marker が
+  // 書けなくても reconciler が拾える → 従来どおり 202 (掟 12: 既存応答を変えない)。
   it.each(['throw', 'non-success', 'missing-tx'] as const)(
     'settle 開始後の %s は marker 保存失敗でも 202 pending',
     async (mode) => {
@@ -417,21 +436,32 @@ describe('hosted USDC paid route', () => {
     },
   );
 
-  it('finality 未達は entitlement/content を返さず 202 pending', async () => {
-    mocks.finalize.mockResolvedValue({ ok: false, reason: 'pending_finality' });
-    const response = await handleHostedUsdcPaidGet(
-      request({ 'X-PAYMENT': paymentHeader() }),
-      RESOURCE_ID,
-      PAYER,
-    );
-    expect(response.status).toBe(202);
-    expect(mocks.readAccess).not.toHaveBeenCalled();
-    expect(mocks.markIndeterminate).toHaveBeenCalledWith({
-      intentSalt: INTENT_SALT,
-      attemptId: '9'.repeat(64),
-      txHash: TX_HASH,
-    });
-  });
+  // B13: settle 成功 (txHash 有) 後の finalize 失敗だけは 202 にしない。「支払いは通った」に
+  // 加えて「あとで解錠される」まで約束しないため、JPYC 側 (app/api/paid/hosted/[id] の
+  // finalize 失敗分岐) と同一の 503 purchase_provisioning に揃える。
+  it.each(['updated', 'storage'] as const)(
+    'finality 未達は marker=%s でも entitlement/content を返さず 503 purchase_provisioning',
+    async (marker) => {
+      mocks.finalize.mockResolvedValue({ ok: false, reason: 'pending_finality' });
+      mocks.markIndeterminate.mockResolvedValue(marker);
+      const response = await handleHostedUsdcPaidGet(
+        request({ 'X-PAYMENT': paymentHeader() }),
+        RESOURCE_ID,
+        PAYER,
+      );
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: 'purchase_provisioning',
+      });
+      expect(mocks.readAccess).not.toHaveBeenCalled();
+      expect(mocks.markIndeterminate).toHaveBeenCalledWith({
+        intentSalt: INTENT_SALT,
+        attemptId: '9'.repeat(64),
+        txHash: TX_HASH,
+      });
+    },
+  );
 
   it('settle success 後の tx marker 保存障害も課金なしと断定せず 202 pending', async () => {
     mocks.recordTransaction.mockResolvedValue('storage');
@@ -446,6 +476,172 @@ describe('hosted USDC paid route', () => {
       state: 'pending',
     });
     expect(mocks.finalize).not.toHaveBeenCalled();
+  });
+
+  // B4: 期限は「新規 broadcast の入場条件」であって、既に claim 済みの intent への
+  // 完全一致 redelivery には適用しない (JPYC 側 existing-claim-recovery と同じ)。
+  describe('B4: 期限切れ後の完全一致 redelivery', () => {
+    const EXPIRED_NOW = NOW + 200_000; // fxQuoteExpiresAt (NOW+180s) を過ぎている
+
+    it('settled + FX quote 期限切れでも content を返す (恒久 entitlement)', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(EXPIRED_NOW);
+      mocks.findIntent.mockResolvedValue(intent('settled'));
+      const response = await handleHostedUsdcPaidGet(
+        request({ 'X-PAYMENT': paymentHeader() }),
+        RESOURCE_ID,
+        PAYER,
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: true,
+        state: 'settled',
+        value: 'paid content',
+        txHash: TX_HASH,
+      });
+      expect(mocks.postFacilitator).not.toHaveBeenCalled();
+    });
+
+    it.each(['settling', 'indeterminate'] as const)(
+      '%s + 期限切れでも 409 ではなく 202 pending (回復導線を塞がない)',
+      async (state) => {
+        vi.spyOn(Date, 'now').mockReturnValue(EXPIRED_NOW);
+        mocks.findIntent.mockResolvedValue(intent(state));
+        const response = await handleHostedUsdcPaidGet(
+          request({ 'X-PAYMENT': paymentHeader() }),
+          RESOURCE_ID,
+          PAYER,
+        );
+        expect(response.status).toBe(202);
+        await expect(response.json()).resolves.toEqual({
+          ok: true,
+          state: 'pending',
+        });
+        expect(mocks.postFacilitator).not.toHaveBeenCalled();
+      },
+    );
+
+    it('quoted (未 claim) は従来どおり期限切れで 409 (回帰)', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(EXPIRED_NOW);
+      mocks.findIntent.mockResolvedValue(intent());
+      const response = await handleHostedUsdcPaidGet(
+        request({ 'X-PAYMENT': paymentHeader() }),
+        RESOURCE_ID,
+        PAYER,
+      );
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: 'purchase_intent_expired',
+      });
+      expect(mocks.postFacilitator).not.toHaveBeenCalled();
+    });
+
+    it('claim 済みでも authorization が不一致なら期限に関係なく 409', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(EXPIRED_NOW);
+      mocks.findIntent.mockResolvedValue(intent('settled'));
+      const response = await handleHostedUsdcPaidGet(
+        request({ 'X-PAYMENT': paymentHeader('1999999') }),
+        RESOURCE_ID,
+        PAYER,
+      );
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: 'authorization_conflict',
+      });
+    });
+
+    // 期限を飛ばす recovery は **保存済 claim との完全一致** が条件。nonce を知った第三者が
+    // 形式だけ正しい別署名を投げても、支払い済みコンテンツは出さない (settled intent の
+    // bearer 化を防ぐ)。exactClaim は intent 側の値しか照合しないので、この照合が無いと通る。
+    it.each(['settled', 'settling', 'indeterminate', 'signed'] as const)(
+      '%s + 期限切れでも署名 fingerprint が違えば 409 (内容を bearer にしない)',
+      async (state) => {
+        vi.spyOn(Date, 'now').mockReturnValue(EXPIRED_NOW);
+        mocks.findIntent.mockResolvedValue(intent(state));
+        const response = await handleHostedUsdcPaidGet(
+          request({
+            'X-PAYMENT': paymentHeader('2000000', FORGED_SIGNATURE),
+          }),
+          RESOURCE_ID,
+          PAYER,
+        );
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toEqual({
+          ok: false,
+          error: 'authorization_conflict',
+        });
+        expect(mocks.getContent).not.toHaveBeenCalled();
+        expect(mocks.readAccess).not.toHaveBeenCalled();
+        expect(mocks.postFacilitator).not.toHaveBeenCalled();
+      },
+    );
+
+    it('validBefore だけ差し替えた完全一致でない再送も 409', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(EXPIRED_NOW);
+      mocks.findIntent.mockResolvedValue(intent('settled'));
+      const header = Buffer.from(
+        JSON.stringify({
+          x402Version: 1,
+          scheme: 'exact',
+          network: 'base',
+          payload: {
+            signature: SIGNATURE,
+            authorization: {
+              from: PAYER,
+              to: SELLER,
+              value: '2000000',
+              validAfter: '0',
+              // 上限以下だが保存済 claim とは違う値 (exactClaim 単体では通ってしまう)。
+              validBefore: String(Math.floor((NOW + 179_000) / 1_000)),
+              nonce: NONCE,
+            },
+          },
+        }),
+        'utf8',
+      ).toString('base64');
+      const response = await handleHostedUsdcPaidGet(
+        request({ 'X-PAYMENT': header }),
+        RESOURCE_ID,
+        PAYER,
+      );
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: 'authorization_conflict',
+      });
+      expect(mocks.readAccess).not.toHaveBeenCalled();
+    });
+
+    // failed_prebroadcast は recovery 対象に含めない = 期限判定が先 (B4 以前と同じコード)。
+    it('failed_prebroadcast + 期限切れは従来どおり purchase_intent_expired', async () => {
+      vi.spyOn(Date, 'now').mockReturnValue(EXPIRED_NOW);
+      mocks.findIntent.mockResolvedValue(intent('failed_prebroadcast'));
+      const response = await handleHostedUsdcPaidGet(
+        request({ 'X-PAYMENT': paymentHeader() }),
+        RESOURCE_ID,
+        PAYER,
+      );
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: 'purchase_intent_expired',
+      });
+    });
+
+    it('failed_prebroadcast + 期限内は従来どおり purchase_intent_failed', async () => {
+      mocks.findIntent.mockResolvedValue(intent('failed_prebroadcast'));
+      const response = await handleHostedUsdcPaidGet(
+        request({ 'X-PAYMENT': paymentHeader() }),
+        RESOURCE_ID,
+        PAYER,
+      );
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: 'purchase_intent_failed',
+      });
+    });
   });
 
   it('レール CAS の敗者と quote amount 改竄は broadcast 前に拒否', async () => {

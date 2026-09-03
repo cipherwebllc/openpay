@@ -22,7 +22,15 @@ const { kvMod, store } = vi.hoisted(() => {
   const incrCalls: Array<{ key: string; opts?: { initialTtlSec: number } }> = [];
   const expireCalls: Array<{ key: string; ttlSec: number }> = [];
   // fail-open テスト用トグル (既定は健全・beforeEach でリセット)。既存テストは触らない。
-  const flags = { kvConfigured: true, incrOk: true, lpushOk: true, getOk: true };
+  // setFailPrefix: この prefix で始まるキーへの SET だけを KV 障害にする (共有 claim だけを
+  // 落として route 別 claim は成功させる、を再現するため)。
+  const flags = {
+    kvConfigured: true,
+    incrOk: true,
+    lpushOk: true,
+    getOk: true,
+    setFailPrefix: null as string | null,
+  };
   const kvMod = {
     isKvConfigured: () => flags.kvConfigured,
     kvGet: async (k: string) =>
@@ -35,6 +43,9 @@ const { kvMod, store } = vi.hoisted(() => {
       opts: { nx?: boolean; ttlSec?: number } = {},
     ) => {
       setCalls.push({ key: k, value: v, opts: { ...opts } });
+      if (flags.setFailPrefix && k.startsWith(flags.setFailPrefix)) {
+        return { ok: false as const, reason: 'network_error' as const };
+      }
       if (opts.nx && vals.has(k)) return { ok: true as const, value: null };
       vals.set(k, v);
       return { ok: true as const, value: 'OK' as const };
@@ -115,6 +126,8 @@ import {
   checkGasBudget,
   refundGasBudget,
   makeIdempotency,
+  makeRecoverIdempotency,
+  SHARED_RECOVER_IDEM_PREFIX,
   readIdempotency,
   gasBudgetKey,
   subfloorBudgetKey,
@@ -124,6 +137,7 @@ import {
   RELAY_SUBFLOOR_PAYER_DAILY_TX_CAP,
   IDEM_TTL_SEC,
 } from '@/lib/relay/relayGuards';
+import { logger } from '@/lib/logger';
 import type { Address, Hex } from 'viem';
 
 const FROM = '0x000000000000000000000000000000000000abcd' as Address;
@@ -141,6 +155,7 @@ beforeEach(() => {
   store.flags.incrOk = true;
   store.flags.lpushOk = true;
   store.flags.getOk = true;
+  store.flags.setFailPrefix = null;
 });
 
 afterEach(() => {
@@ -555,5 +570,86 @@ describe('relayGuards idempotency (prefix 名前空間分離)', () => {
     // release で claim が消える → 再 claim が first に戻る (false tombstone 防止)。
     await pass.releaseIdempotency(137, FROM, NONCE);
     expect((await pass.claimIdempotency(137, FROM, NONCE)).status).toBe('first');
+  });
+});
+
+// A7: recover は nonce が決定論的コミットメント (= 同 nonce は同一支払い) なので、決済 relay と
+// x402 facilitator の二入口が並行 broadcast しないよう共有 claim を route 別 claim に重ねる。
+describe('makeRecoverIdempotency (入口跨ぎの共有 claim)', () => {
+  const relayKey = `relay:idem:137:${FROM.toLowerCase()}:${NONCE.toLowerCase()}`;
+  const facKey = `x402fac:idem:137:${FROM.toLowerCase()}:${NONCE.toLowerCase()}`;
+  const sharedKey = `${SHARED_RECOVER_IDEM_PREFIX}137:${FROM.toLowerCase()}:${NONCE.toLowerCase()}`;
+
+  it('別入口の同 nonce は 2 本目が duplicate になり、route 別 claim は残さない', async () => {
+    const relay = makeRecoverIdempotency('relay:idem:');
+    const facilitator = makeRecoverIdempotency('x402fac:idem:');
+
+    expect((await relay.claimIdempotency(137, FROM, NONCE)).status).toBe('first');
+    expect(store.vals.has(relayKey)).toBe(true);
+    expect(store.vals.has(sharedKey)).toBe(true);
+
+    // 2 本目 (別入口・同 nonce) は共有 claim で止まる。
+    expect((await facilitator.claimIdempotency(137, FROM, NONCE)).status).toBe(
+      'duplicate',
+    );
+    // 未 broadcast なので facilitator 側の route 別 claim は残さない (false tombstone 防止)。
+    expect(store.vals.has(facKey)).toBe(false);
+  });
+
+  it('共有 claim にも txHash を記録し、別入口の重複 POST が hash を受け取れる', async () => {
+    const relay = makeRecoverIdempotency('relay:idem:');
+    const facilitator = makeRecoverIdempotency('x402fac:idem:');
+    const TX = ('0x' + 'e'.repeat(64)) as Hex;
+    await relay.claimIdempotency(137, FROM, NONCE);
+    await relay.recordRelayHash(137, FROM, NONCE, TX);
+
+    const dup = await facilitator.claimIdempotency(137, FROM, NONCE);
+    expect(dup.status).toBe('duplicate');
+    expect(dup.status === 'duplicate' && dup.txHash).toBe(TX);
+  });
+
+  it('broadcast 前失敗の release は route 別と共有の両方を解放する', async () => {
+    const relay = makeRecoverIdempotency('relay:idem:');
+    const facilitator = makeRecoverIdempotency('x402fac:idem:');
+    await relay.claimIdempotency(137, FROM, NONCE);
+    await relay.releaseIdempotency(137, FROM, NONCE);
+    expect(store.vals.has(relayKey)).toBe(false);
+    expect(store.vals.has(sharedKey)).toBe(false);
+    // 解放後は別入口からも通常どおり claim できる。
+    expect((await facilitator.claimIdempotency(137, FROM, NONCE)).status).toBe(
+      'first',
+    );
+  });
+
+  // A7 の可用性トレードオフ (レビューで明示的に受容): 共有 claim の SET が KV 障害で不確定に
+  // なると fail-safe で duplicate に倒れ、正当な recover が 1 回 202 pending になる。二重
+  // broadcast を素通りさせるより良いが、正当な重複 POST と区別できるログを残す。
+  it('共有 claim の KV 障害は fail-safe で duplicate + 専用イベントで warn', async () => {
+    vi.mocked(logger.warn).mockClear();
+    store.flags.setFailPrefix = SHARED_RECOVER_IDEM_PREFIX;
+    const relay = makeRecoverIdempotency('relay:idem:');
+
+    const claim = await relay.claimIdempotency(137, FROM, NONCE);
+
+    expect(claim.status).toBe('duplicate');
+    // 未 broadcast の route 別 claim は残さない (false tombstone 防止)。
+    expect(store.vals.has(relayKey)).toBe(false);
+    expect(vi.mocked(logger.warn).mock.calls[0]?.[0]).toBe(
+      'relay.recover.shared_claim_unavailable',
+    );
+    expect(vi.mocked(logger.warn).mock.calls[0]?.[1]).toMatchObject({
+      chainId: 137,
+      nonce: NONCE,
+    });
+  });
+
+  it('同一入口の重複 POST は従来どおり route 別 claim で duplicate + hash を返す', async () => {
+    const relay = makeRecoverIdempotency('relay:idem:');
+    const TX = ('0x' + 'd'.repeat(64)) as Hex;
+    await relay.claimIdempotency(137, FROM, NONCE);
+    await relay.recordRelayHash(137, FROM, NONCE, TX);
+    const dup = await relay.claimIdempotency(137, FROM, NONCE);
+    expect(dup.status).toBe('duplicate');
+    expect(dup.status === 'duplicate' && dup.txHash).toBe(TX);
   });
 });

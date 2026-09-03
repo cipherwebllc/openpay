@@ -276,7 +276,15 @@ export async function executeCirclePayment(
     if (rec.status === 'confirmed') {
       // 直近 confirmed = reload/再クリックによる偶発二重 → 既支払い結果を返す (冪等)。
       // 窓を過ぎた古い confirmed = 正規の同額リピート決済 → 抑止せず新規決済を許可。
-      if (now() - rec.updatedAt <= CONFIRMED_DEDUP_WINDOW_MS) {
+      // ⚠️ confirmed は「included された」だけで **成功とは限らない** (success:false =
+      // revert)。revert 済 record で dedup すると、支払いが起きていないのに 90 秒間
+      // 再試行が全部ブロックされる。**除外するのは success:false と断定できる record だけ**:
+      // success を持たない旧 record / 想定外の値で dedup を外すと、支払い済みなのに
+      // 二重決済へ通してしまう (取り違えたときの被害が非対称なので dedup 側に倒す)。
+      if (
+        rec.success !== false &&
+        now() - rec.updatedAt <= CONFIRMED_DEDUP_WINDOW_MS
+      ) {
         return await resultFromConfirmed(bundle, rec);
       }
       continue;

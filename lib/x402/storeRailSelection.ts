@@ -8,6 +8,14 @@ export type StorePaymentRail = 'jpyc' | 'usdc';
 
 const RAIL_PARENT_VERSION = 1;
 const RAIL_PARENT_TTL_SEC = 7 * 24 * 60 * 60;
+
+// rail を確定した (selected) 後の active slot / intent→parent 対応の保持期間 (B15)。
+// 以前は PERSIST で無期限にしていたが、settling/indeterminate のまま終端に到達しない intent が
+// 出ると同じ payer×resource×revision の slot が **恒久的に**塞がり (releaseActiveStoreRail は
+// terminal しか解放しない)、KV も単調増加する。30 日は settle → reconciler → 手動調査まで
+// 含めたどの正規フローよりも遥かに長く、生存中の排他 (JPYC/USDC 二重 broadcast 防止) には
+// 一切影響しない。archive (KEYS[2]) は監査用に従来どおり無期限で残す。
+const RAIL_SELECTED_TTL_SEC = 30 * 24 * 60 * 60;
 const HASH_RE = /^(?:0x)?[0-9a-f]{64}$/;
 
 type RailParent = {
@@ -160,10 +168,9 @@ active.authorizationHash = ARGV[8]
 local selectedRaw = cjson.encode(active)
 local archived = redis.call('GET', KEYS[2])
 if archived and archived ~= selectedRaw then return tonumber(ARGV[5]) end
-redis.call('SET', KEYS[1], selectedRaw)
-redis.call('PERSIST', KEYS[1])
+redis.call('SET', KEYS[1], selectedRaw, 'EX', ARGV[13])
 redis.call('SET', KEYS[2], selectedRaw)
-redis.call('PERSIST', KEYS[3])
+redis.call('EXPIRE', KEYS[3], ARGV[13])
 return tonumber(ARGV[12])
 `;
 
@@ -211,6 +218,7 @@ export async function claimStoreRailSelection(input: {
       '-1',
       input.intentKey,
       '1',
+      String(RAIL_SELECTED_TTL_SEC),
     ],
   );
   if (!result.ok) return { ok: false, reason: 'storage' };

@@ -32,6 +32,7 @@ import {
   markSigned,
   markSubmitting,
   markConfirmed,
+  PENDING_KEY_PREFIX,
   type PendingStatus,
 } from '@/lib/circlePending';
 
@@ -127,6 +128,30 @@ describe('happy path', () => {
     });
     expect(loadPendingRecord(key)?.status).toBe('confirmed');
     expect(loadPendingRecord(key)?.txHash).toBe(TX);
+  });
+
+  // A8: markSubmitting (broadcast_intent の永続) は **bundler 送信より前**。この順序が崩れると
+  // 応答ロスト時に「送ったかもしれない op」が submitting として残らず、fallback/新規 op を
+  // 許してしまう。下の「broadcast 前に永続される」テストは expect を mock 実装の中で投げるため、
+  // 失敗しても circleSend の broadcast try-catch に飲まれて recovery 扱いになりうる (= 空虚に
+  // pass しうる)。順序は値として持ち出して mock の外で検証する。
+  it('broadcast 時点の record status は submitting (順序を mock 外で固定)', async () => {
+    happyMocks();
+    const key = computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      paymentAttemptId: 'attempt-1',
+      callHash: computeCallHash(CALLS),
+    });
+    const statusAtBroadcast: Array<PendingStatus | undefined> = [];
+    mockBroadcast.mockImplementation(async () => {
+      statusAtBroadcast.push(loadPendingRecord(key)?.status);
+      return UOH;
+    });
+
+    await run();
+
+    expect(statusAtBroadcast).toEqual(['submitting']);
   });
 
   it('署名済 op は broadcast 前に永続される (signed 経由)', async () => {
@@ -258,6 +283,38 @@ describe('同一 attemptId の resume', () => {
   });
 });
 
+describe('A8: signed のまま中断した自 attempt の resume', () => {
+  it('signed record を同一 attemptId で再開 → throw せず再署名して送信できる', async () => {
+    happyMocks();
+    const callHash = computeCallHash(CALLS);
+    const key = computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      paymentAttemptId: 'attempt-1',
+      callHash,
+    });
+    // markSigned と markSubmitting の間でタブが閉じた状態を再現する。
+    reserveOrResume({
+      key,
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      callHash,
+      paymentAttemptId: 'attempt-1',
+      paymaster: PAYMASTER,
+      now: 900,
+    });
+    markAwaitingSignature({ key, sender: OWNER, now: 900 });
+    markSigned({ key, sender: OWNER, signedUserOp: SIGNED_OP, userOpHash: UOH, now: 900 });
+    expect(loadPendingRecord(key)?.status).toBe('signed');
+
+    const res = await run(); // 同一 attempt-1 で再開
+    expect(res.txHash).toBe(TX);
+    expect(mockPermit).toHaveBeenCalled(); // 再署名した (未 broadcast なので安全)
+    expect(mockBroadcast).toHaveBeenCalledTimes(1);
+    expect(loadPendingRecord(key)?.status).toBe('confirmed');
+  });
+});
+
 describe('cross-invocation 二重決済ガード (別 attemptId・同 callHash)', () => {
   // 同一 callHash だが別 paymentAttemptId の record を任意状態で seed する
   // (別タブ/別デバイス/reload で paymentAttemptId が変わった他 attempt を模す)。
@@ -385,6 +442,74 @@ describe('cross-invocation ガード — 時間窓 + status 優先 (再レビュ
     // sort で confirmed が先に評価され既支払い結果を返す (CirclePendingError にならない)
     expect(res.txHash).toBe(TX);
     expect(mockPermit).not.toHaveBeenCalled();
+  });
+});
+
+describe('A9: confirmed dedup は success:false を除外する (それ以外は dedup)', () => {
+  function seedConfirmed(attemptId: string, success: boolean, at: number) {
+    const callHash = computeCallHash(CALLS);
+    const key = computeIdempotencyKey({
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      paymentAttemptId: attemptId,
+      callHash,
+    });
+    reserveOrResume({
+      key,
+      chainId: CHAIN_ID,
+      sender: OWNER,
+      callHash,
+      paymentAttemptId: attemptId,
+      paymaster: PAYMASTER,
+      now: at,
+    });
+    markAwaitingSignature({ key, sender: OWNER, now: at });
+    markSigned({ key, sender: OWNER, signedUserOp: SIGNED_OP, userOpHash: UOH, now: at });
+    markSubmitting({ key, sender: OWNER, now: at });
+    markConfirmed({ key, sender: OWNER, txHash: TX, success, now: at });
+    return key;
+  }
+
+  it('窓内でも confirmed+success:false (revert 済) なら新規 UserOp を組む', async () => {
+    happyMocks();
+    seedConfirmed('reverted', false, 990); // clock 1000 開始 → 窓内
+    const res = await run();
+    expect(res.txHash).toBe(TX);
+    expect(res.success).toBe(true);
+    // revert 済は「支払い済み」ではない → 再試行を 90 秒ブロックしない。
+    expect(mockPermit).toHaveBeenCalled();
+    expect(mockPrepare).toHaveBeenCalled();
+    expect(mockBroadcast).toHaveBeenCalledTimes(1);
+  });
+
+  it('窓内の confirmed+success:true は従来どおり既支払い結果を返す (回帰)', async () => {
+    happyMocks();
+    seedConfirmed('paid', true, 990);
+    const res = await run();
+    expect(res.txHash).toBe(TX);
+    expect(mockPermit).not.toHaveBeenCalled();
+    expect(mockBroadcast).not.toHaveBeenCalled();
+  });
+
+  // success を持たない旧 record は「revert と断定できない」= 支払い済みかもしれない。
+  // dedup を外すと二重決済へ通してしまうので、除外するのは success:false のときだけ。
+  it('success を持たない旧 confirmed record も窓内なら dedup する (新規 UserOp を組まない)', async () => {
+    happyMocks();
+    const key = seedConfirmed('legacy', true, 990);
+    // 旧 record を再現: 永続済 record から success フィールドだけ落とす。
+    const storageKey = PENDING_KEY_PREFIX + key;
+    const raw = window.localStorage.getItem(storageKey);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw!) as Record<string, unknown>;
+    delete parsed.success;
+    window.localStorage.setItem(storageKey, JSON.stringify(parsed));
+    expect(loadPendingRecord(key)?.success).toBeUndefined();
+
+    const res = await run();
+
+    expect(res.txHash).toBe(TX);
+    expect(mockPermit).not.toHaveBeenCalled();
+    expect(mockBroadcast).not.toHaveBeenCalled();
   });
 });
 

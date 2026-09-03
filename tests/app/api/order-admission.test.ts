@@ -8,14 +8,19 @@ const OTHER_MERCHANT = getAddress(
 );
 const TOKYO_NOON = Date.UTC(2026, 6, 10, 3, 0);
 
-const hold = vi.hoisted(() => ({
-  preorderTime: true,
-  mobileOrder: true,
-  rateLimitAllowed: true,
-  resolved: null as unknown as
-    | { ok: true; record: HandleRecord | null }
-    | { ok: false },
-}));
+const hold = vi.hoisted(() => {
+  const state = {
+    preorderTime: true,
+    mobileOrder: true,
+    rateLimitAllowed: true,
+    resolved: null as unknown as
+      | { ok: true; record: HandleRecord | null }
+      | { ok: false },
+    resolveHandle: vi.fn(),
+  };
+  state.resolveHandle.mockImplementation(async () => state.resolved);
+  return state;
+});
 
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -39,9 +44,9 @@ vi.mock('@/lib/relay/relayGuards', async (importOriginal) => {
   return { ...actual, checkReadRateLimit: async () => hold.rateLimitAllowed };
 });
 
-vi.mock('@/lib/handleStore', () => ({
-  resolveHandle: async () => hold.resolved,
-}));
+// vi.fn で包む: 「KV を読まずに 400/404/429 で返す」テストを非空虚にする (呼ばれていない
+// ことを実際に検証できるようにする)。
+vi.mock('@/lib/handleStore', () => ({ resolveHandle: hold.resolveHandle }));
 
 import { POST } from '@/app/api/order/admission/route';
 
@@ -96,6 +101,7 @@ beforeEach(() => {
   hold.mobileOrder = true;
   hold.rateLimitAllowed = true;
   hold.resolved = { ok: true, record: record(preorder()) };
+  hold.resolveHandle.mockClear();
 });
 
 afterEach(() => {
@@ -178,6 +184,70 @@ describe('POST /api/order/admission', () => {
       ok: false,
       error: 'storefront_changed',
     });
+  });
+
+  // A4: URL 発行後に店舗が feePayer を切り替えると、顧客は発行時点の負担者で inline 支払い
+  // するのに notify は最新 storefront を権威に obligation を組み「手数料未収」を誤検出する。
+  // このテストは parseBody が feePayer を保持していることも同時に固定する (落としていれば
+  // 比較が走らず 200 になり失敗する)。
+  it('preorder: feePayer が最新 storefront と食い違えば mode と同じ 409 で止める', async () => {
+    // storefront は feePayer='merchant' (preorder() の既定)。
+    const response = await POST(request({ feePayer: 'customer' }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: 'storefront_changed',
+    });
+  });
+
+  it('preorder: feePayer が一致すれば通す', async () => {
+    const response = await POST(
+      request({
+        feePayer: 'merchant',
+        pickupAt: Date.UTC(2026, 6, 10, 3, 30),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
+  // storefront mode では feePayer は obligation に効かない (mobileOrderGasMode は
+  // kind!=='preorder' を常に merchant 負担として扱う) のに、MobileOrderView は mode に
+  // 関係なく URL へ載せる。ここで比較すると、店主がラジオに触れただけで発行済 URL が
+  // 全部 409 になる。
+  it('storefront: feePayer が食い違っても比較せず通す (発行済 URL を壊さない)', async () => {
+    hold.resolved = {
+      ok: true,
+      record: record(preorder({ mode: 'storefront', feePayer: 'merchant' })),
+    };
+
+    const response = await POST(
+      request({ mode: 'storefront', feePayer: 'customer' }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it('feePayer 未送信 (旧 client) は従来どおり通す', async () => {
+    hold.resolved = {
+      ok: true,
+      record: record(preorder({ feePayer: 'customer' })),
+    };
+
+    const response = await POST(
+      request({ pickupAt: Date.UTC(2026, 6, 10, 3, 30) }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it('feePayer が enum 外なら KV を読まず 400', async () => {
+    expect((await POST(request({ feePayer: 'nobody' }))).status).toBe(400);
+    expect(hold.resolveHandle).not.toHaveBeenCalled();
   });
 
   it('静的受付停止は時間 flag と独立して拒否', async () => {
