@@ -4,13 +4,14 @@
 // execute を一括提供する hook。queryKey に networkEnv/account/target を含め
 // 環境横断 cache 衝突を防ぐ。
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Address, Hex } from 'viem';
 import { useAccount, usePublicClient, useSwitchChain, useWalletClient } from 'wagmi';
 import { env } from '@/lib/env';
 import { readAllCrossChainBalances } from '@/lib/crossChain/balance';
 import {
+  CrossChainBurnUnresolvedError,
   executeCctpTransfer,
   executeGatewayTransfer,
   type CctpResumeState,
@@ -22,6 +23,8 @@ import {
   type GatewayResumeState,
   type OnMerchantMint,
 } from '@/lib/crossChain/execute';
+import { CROSS_CHAIN_BURN_AUTORESUME } from '@/lib/crossChain/config';
+import type { BurnIntentMarker, BurnSlot } from '@/lib/crossChain/burnMarker';
 import { buildPaymentLogEvent, logPaymentEvent } from '@/lib/paymentLog';
 import { estimateCctpMaxFee } from '@/lib/crossChain/cctp';
 import { estimateGatewayMaxFee } from '@/lib/crossChain/gateway';
@@ -38,6 +41,7 @@ import {
   hasResumeState,
   loadResumeState,
   saveResumeState,
+  saveResumeStateStrict,
   type ResumeSessionKey,
   type ResumeState,
 } from '@/lib/crossChain/resumeStore';
@@ -82,6 +86,26 @@ export interface UseCrossChainPaymentReturn {
   executeOption: (option: PathOption) => Promise<ExecuteResult | null>;
   /** 指定 option に中断再開可能な保存 state があるか (再 Pay で続きから再開可)。 */
   isOptionResumable: (option: PathOption) => boolean;
+  /** A1: 前回 burn の状態を自動判定できず money-path を止めた状態。UI が専用パネルを出す。
+   *  'wait' = 時間を置いて再試行 / 'manual' = 買い手が explorer で確認して二段確認。 */
+  burnUnresolved: BurnUnresolvedInfo | undefined;
+  /** manual パネルの二段確認完了。次の execute だけ曖昧な状態からの再 burn を許可する。 */
+  armManualReburn: () => void;
+  /** 二段確認が武装済みか (UI の表示切替用)。 */
+  isManualReburnArmed: boolean;
+}
+
+/** burnUnresolved の表示に必要な最小情報 (Error からの抽出結果)。 */
+export interface BurnUnresolvedInfo {
+  kind: 'wait' | 'manual';
+  slot: BurnSlot;
+  /** 決定表の行番号 (設計 §4)。サポート問い合わせ時の識別子にもなる。 */
+  row: number;
+  /** 二段確認で再 burn を開けてよい状態か (false = 一致 burn が複数見つかっている等)。 */
+  reburnable: boolean;
+  sourceChainId: number;
+  depositor: Address;
+  burnTxHash?: Hex;
 }
 
 export function useCrossChainPayment(
@@ -99,6 +123,13 @@ export function useCrossChainPayment(
   const [isCommitted, setIsCommitted] = useState(false);
   const [result, setResult] = useState<ExecuteResult | undefined>();
   const [error, setError] = useState<Error | undefined>();
+  const [burnUnresolved, setBurnUnresolved] = useState<
+    BurnUnresolvedInfo | undefined
+  >();
+  // 二段確認は「次の 1 回の execute」にだけ効かせる (押しっぱなしで常時 auto 再 burn に
+  // ならないよう、execute 開始時に消費する)。render を跨いで即時に読みたいので ref。
+  const manualReburnArmedRef = useRef(false);
+  const [isManualReburnArmed, setIsManualReburnArmed] = useState(false);
 
   const balancesQuery = useQuery({
     queryKey: [
@@ -195,12 +226,18 @@ export function useCrossChainPayment(
         valueAtomic: bridgedAmount,
         feeAtomic: feeAmount,
       };
+      // commitBurnIntent が marker を混ぜ込むために、直近の resume state を保持する。
+      let latestState: ResumeState = { ...(loadResumeState(sessionKey) ?? {}) };
       const onStep = (s: ResumeState) => {
+        latestState = s;
         // D4a: 親子 UI の同一 mount 排他は storage 成否より先に確定する。CCTP は
-        // merchant burn hash、Gateway は merchant attestation が送金の不可逆境界。
-        // approveTxHash だけでは資金移動前なので committed にせず、失敗時の通常 Pay を許す。
+        // merchant burn hash / burn-intent marker、Gateway は merchant attestation が
+        // 送金の不可逆境界。approveTxHash だけでは資金移動前なので committed にせず、
+        // 失敗時の通常 Pay を許す。
         if (
-          (core.kind === 'cctp-v2' && 'burnTxHash' in s && !!s.burnTxHash) ||
+          (core.kind === 'cctp-v2' &&
+            (('burnTxHash' in s && !!s.burnTxHash) ||
+              ('burnIntent' in s && !!s.burnIntent))) ||
           (core.kind === 'gateway' &&
             'merchantAttestation' in s &&
             !!s.merchantAttestation)
@@ -210,6 +247,24 @@ export function useCrossChainPayment(
         // D4b は見送り: resume 保存は best-effort のまま。保存失敗後に reload すると
         // committed state を復元できず、同一 mount 外の二重送金窓が残る。
         saveResumeState(sessionKey, s);
+      };
+
+      // A1: burn-intent marker の fail-closed 永続化。read-back まで確認できた場合だけ
+      // 「送るつもり」を確定させ、そこで初めて親 UI を排他する。
+      // ※ 上の D4a コメント (排他は storage 成否より先) とは順序が逆になるが、理由が違う:
+      //   D4a は best-effort 保存が前提で「保存できなくても送金は起きた」側に倒す。marker は
+      //   fail-closed なので「書けた ⇒ 送る ⇒ 塞ぐ」で一貫する (書けなければ burn しないので
+      //   塞ぐ必要もなく、親の通常決済を使わせる方が正しい)。
+      const commitBurnIntent = (marker: BurnIntentMarker, slot: BurnSlot) => {
+        const next: CctpResumeState = {
+          ...(latestState as CctpResumeState),
+          ...(slot === 'merchant'
+            ? { burnIntent: marker }
+            : { feeBurnIntent: marker }),
+        };
+        saveResumeStateStrict(sessionKey, next); // 失敗は throw → burn しない
+        latestState = next;
+        setIsCommitted(true);
       };
 
       // merchant mint 確定時に会計ログ (KV) を発火する。cross-chain は買い手の端末で実行され
@@ -275,7 +330,13 @@ export function useCrossChainPayment(
       }
       // cctp-v2
       const resume = loadResumeState<CctpResumeState>(sessionKey);
-      if (resume?.burnTxHash) setIsCommitted(true);
+      // marker (送るつもり) だけでも不可逆境界の一歩手前なので、親フォームの直接決済・
+      // 別チェーン決済を塞ぐ (hash が残っていない中断からの復元も含めて排他する)。
+      if (resume?.burnTxHash || resume?.burnIntent) setIsCommitted(true);
+      // 二段確認は 1 回の execute で消費する (arm したまま放置しても次回以降に効かない)。
+      const allowManualReburn = manualReburnArmedRef.current;
+      manualReburnArmedRef.current = false;
+      setIsManualReburnArmed(false);
       const cctpArgs: ExecuteCctpTransferArgs = {
         walletClient,
         sourcePublicClient,
@@ -295,6 +356,9 @@ export function useCrossChainPayment(
         onStep,
         onProgress: reportProgress,
         onMerchantMint,
+        commitBurnIntent,
+        allowManualReburn,
+        allowAutoReburn: CROSS_CHAIN_BURN_AUTORESUME,
       };
       const result = await executeCctpTransfer(cctpArgs);
       clearResumeState(sessionKey);
@@ -318,6 +382,7 @@ export function useCrossChainPayment(
     setResult(undefined);
     setProgress(undefined);
     setIsCommitted(false);
+    setBurnUnresolved(undefined);
 
     if (!decision) return null;
     if (decision.path === 'direct' || decision.path === 'onramp') {
@@ -388,30 +453,52 @@ export function useCrossChainPayment(
     [args.targetChainId, runCore],
   );
 
+  // burn 状態未確定の throw は UI 専用パネルに回す (Iris timeout 等の一般エラーとは別扱い)。
+  const captureBurnUnresolved = useCallback((e: unknown) => {
+    if (!(e instanceof CrossChainBurnUnresolvedError)) return;
+    setBurnUnresolved({
+      kind: e.kind,
+      slot: e.slot,
+      row: e.row,
+      reburnable: e.reburnable,
+      sourceChainId: e.sourceChainId,
+      depositor: e.depositor,
+      burnTxHash: e.burnTxHash,
+    });
+  }, []);
+
   // execute 系の共通 wrapper: 内部 throw を error state に取り込んで rethrow
   // (UI 側でも catch できるように、かつ setIsExecuting=false を保証するため)。
   const safeExecute = useCallback(async () => {
     try {
       return await execute();
     } catch (e) {
+      captureBurnUnresolved(e);
       setError(e instanceof Error ? e : new Error(String(e)));
       setIsExecuting(false);
       throw e;
     }
-  }, [execute]);
+  }, [execute, captureBurnUnresolved]);
 
   const safeExecuteOption = useCallback(
     async (option: PathOption) => {
       try {
         return await executeOption(option);
       } catch (e) {
+        captureBurnUnresolved(e);
         setError(e instanceof Error ? e : new Error(String(e)));
         setIsExecuting(false);
         throw e;
       }
     },
-    [executeOption],
+    [executeOption, captureBurnUnresolved],
   );
+
+  // manual パネルの二段確認完了。次の execute だけ、曖昧な状態からの再 burn を許可する。
+  const armManualReburn = useCallback(() => {
+    manualReburnArmedRef.current = true;
+    setIsManualReburnArmed(true);
+  }, []);
 
   // 指定 option (cross-chain) に保存済みの中断 state があるか。runCore と同じ
   // session key で localStorage を確認する。UI が「続きから再開」を案内するため。
@@ -452,5 +539,8 @@ export function useCrossChainPayment(
     execute: safeExecute,
     executeOption: safeExecuteOption,
     isOptionResumable,
+    burnUnresolved,
+    armManualReburn,
+    isManualReburnArmed,
   };
 }

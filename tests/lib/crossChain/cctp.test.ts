@@ -1,8 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { decodeFunctionData, getAddress, type Hex } from 'viem';
+import {
+  decodeEventLog,
+  decodeFunctionData,
+  getAddress,
+  keccak256,
+  toHex,
+  type Hex,
+} from 'viem';
 import {
   CCTP_V2_TOKEN_MESSENGER_ABI,
   CCTP_V2_MESSAGE_TRANSMITTER_ABI,
+  CCTP_V2_DEPOSIT_FOR_BURN_EVENT,
+  CCTP_V2_DEPOSIT_FOR_BURN_TOPIC0,
   CCTP_FINALITY_FAST,
   CCTP_FINALITY_STANDARD,
   encodeDepositForBurnCalldata,
@@ -10,6 +19,7 @@ import {
   fetchIrisAttestation,
   pollIrisAttestation,
 } from '@/lib/crossChain/cctp';
+import depositForBurnLog from './fixtures/depositForBurn-base-mainnet.json';
 import { CIRCLE_DOMAIN_BASE, CIRCLE_DOMAIN_POLYGON } from '@/lib/crossChain/types';
 
 const RECIPIENT = getAddress('0x000000000000000000000000000000000000aBcd');
@@ -494,5 +504,64 @@ describe('lib/crossChain/cctp: edge cases + 境界条件', () => {
       }),
     ]);
     expect(results.map((r) => r.message)).toEqual(['0x1', '0x2', '0x3']);
+  });
+});
+
+// A1: DepositForBurn (CCTP v2) の event 定数を **実ログ** で pin する。
+// burn 再開判定 (lib/crossChain/burnMarker.ts) は「この topic0 の log が無い = 未 broadcast」
+// を根拠に再 burn するので、topic0 を v1 のものと取り違えると二重支払いになる。定数の
+// 記憶違い / 上流の event 変更をここで一発検出する。
+describe('lib/crossChain/cctp: DepositForBurn v2 event (実ログ fixture)', () => {
+  it('fixture の topic0 が CCTP_V2_DEPOSIT_FOR_BURN_TOPIC0 と一致する', () => {
+    expect(depositForBurnLog.topics[0]).toBe(CCTP_V2_DEPOSIT_FOR_BURN_TOPIC0);
+  });
+
+  it('topic0 は keccak(signature) と一致し、v1 の topic0 とは一致しない', () => {
+    expect(CCTP_V2_DEPOSIT_FOR_BURN_TOPIC0).toBe(
+      keccak256(
+        toHex(
+          'DepositForBurn(address,uint256,address,bytes32,uint32,bytes32,bytes32,uint256,uint32,bytes)',
+        ),
+      ),
+    );
+    // v1: 先頭に uint64 indexed nonce を持つ別 event
+    const v1Topic0 = keccak256(
+      toHex(
+        'DepositForBurn(uint64,address,uint256,address,bytes32,uint32,bytes32,bytes32)',
+      ),
+    );
+    expect(CCTP_V2_DEPOSIT_FOR_BURN_TOPIC0).not.toBe(v1Topic0);
+  });
+
+  it('実ログを decode すると既知の値 (amount / mintRecipient / destinationDomain / maxFee) になる', () => {
+    const decoded = decodeEventLog({
+      abi: [CCTP_V2_DEPOSIT_FOR_BURN_EVENT],
+      topics: depositForBurnLog.topics as [Hex, ...Hex[]],
+      data: depositForBurnLog.data as Hex,
+    });
+    const args = decoded.args as unknown as {
+      burnToken: string;
+      amount: bigint;
+      depositor: string;
+      mintRecipient: Hex;
+      destinationDomain: number;
+      maxFee: bigint;
+      minFinalityThreshold: number;
+    };
+    // indexed 3 本 (burnToken / depositor / minFinalityThreshold) = getLogs の絞り込みに使う
+    expect(args.burnToken).toBe(
+      getAddress('0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'), // Base mainnet USDC
+    );
+    expect(args.depositor).toBe(
+      getAddress('0x782edfa8fbfb075f500cd01a8f211815fd0998de'),
+    );
+    expect(args.minFinalityThreshold).toBe(CCTP_FINALITY_FAST);
+    // data 側 = burnMarker の照合条件 3 (amount / destinationDomain / mintRecipient) に使う値
+    expect(args.amount).toBe(29_152_697n);
+    expect(args.mintRecipient).toBe(
+      '0x72bd20ff2f8281801bb05b7c29179026933256fabafeb13e94efd8ddbcfcf291',
+    );
+    expect(args.destinationDomain).toBe(27);
+    expect(args.maxFee).toBe(4_546n);
   });
 });

@@ -3,9 +3,15 @@
 // 再実行すれば完了済みステップを skip して続きから再開できる (execute.ts の
 // resume / onStep と対で使う)。
 //
-// resume state は Hex (tx hash / attestation) のみで bigint を含まないため JSON で
-// そのまま serialize できる。session key に金額・chain・recipient を含めるので、
-// 別の決済に stale state が誤適用されることはない。
+// resume state は Hex (tx hash / attestation) と 10 進文字列 (burn-intent marker の
+// block / amount) だけで bigint を含まないため JSON でそのまま serialize できる。
+// session key に金額・chain・recipient を含めるので、別の決済に stale state が誤適用される
+// ことはない。
+//
+// 書込は 2 系統ある:
+//   - saveResumeState      : best-effort (失敗しても決済本体を止めない)。既存の step 記録用。
+//   - saveResumeStateStrict: fail-closed (read-back 検証、失敗は throw)。CCTP burn の
+//     burn-intent marker 専用 — 「marker を書けないなら burn しない」を成立させるため。
 
 import type { Address } from 'viem';
 import type { CctpResumeState, GatewayResumeState } from './execute';
@@ -81,6 +87,42 @@ export function saveResumeState(k: ResumeSessionKey, state: ResumeState): void {
     // 巻き込まない (永続化は best-effort、resume が効かなくなるだけ)。決済本体は
     // 続行させる。
     logger.warn('cross-chain.resume.save-failed', { error });
+  }
+}
+
+/** 記録できないまま送金させないための例外 (掟 13: 偽成功を作らない)。 */
+export class ResumeStoreWriteError extends Error {
+  constructor(detail: string) {
+    super(`cross-chain resume state を保存できません: ${detail}`);
+    this.name = 'ResumeStoreWriteError';
+  }
+}
+
+/** fail-closed 書込: setItem 後に read-back して書けたことを確証する。private mode の
+ *  silent drop / quota 超過をここで検出し、確証できなければ throw する。
+ *  何の波及を断つ防御か: 「marker を書けていないのに burn を broadcast する」= 再開時に
+ *  未 burn と誤判定して二重支払いになる経路そのものを断つ (lib/circlePending.ts と同型)。 */
+export function saveResumeStateStrict(
+  k: ResumeSessionKey,
+  state: ResumeState,
+): void {
+  const s = storage();
+  if (!s) throw new ResumeStoreWriteError('localStorage が使えません (SSR / private mode)');
+  const key = keyString(k);
+  const serialized = JSON.stringify(state);
+  try {
+    s.setItem(key, serialized);
+  } catch (error) {
+    throw new ResumeStoreWriteError(`setItem throw: ${String(error)}`);
+  }
+  let back: string | null;
+  try {
+    back = s.getItem(key);
+  } catch (error) {
+    throw new ResumeStoreWriteError(`read-back throw: ${String(error)}`);
+  }
+  if (back !== serialized) {
+    throw new ResumeStoreWriteError('read-back 不一致 (quota silent drop の疑い)');
   }
 }
 

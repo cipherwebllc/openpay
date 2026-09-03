@@ -1497,7 +1497,19 @@
     "errorPrefix": "エラー",
     "successTitle": "{bridge} 経由で着金しました",
     "successDescription": "{amount} USDC を {recipient} (chainId {chainId}) に送金完了",
-    "viewOnExplorer": "Explorer で確認"
+    "viewOnExplorer": "Explorer で確認",
+    "progressBurnProbe": "前回の送金状況を確認中",
+    "progressBurnUnconfirmed": "前回の送金状況を確認できませんでした",
+    "burnWaitTitle": "前回の送金を確認しています",
+    "burnWaitBody": "前回の送金がまだネットワークに残っている可能性があります。二重に支払わないため、確定するまで再送金しません。数分おいてから、もう一度「続きから支払う」を押してください。",
+    "burnManualTitle": "前回の送金を自動で確認できませんでした",
+    "burnManualBody": "二重支払いを避けるため、自動では再送金しません。Explorer でご自身のアドレスを開き、この決済ぶんの USDC が減っているかどうかを確認してください。減っていれば送金は完了しているので、もう一度支払う必要はありません。",
+    "burnManualCheckExplorer": "Explorer で自分の取引を確認する",
+    "burnManualConfirmLabel": "Explorer を確認し、この決済ぶんの USDC が減っていないことを確認しました",
+    "burnManualReburn": "確認したので、もう一度送金する",
+    "burnManualArmedHint": "確認を受け付けました。「続きから支払う」を押すと送金します。",
+    "burnManualBlocked": "一致する送金が複数見つかったため、自動での再送金はできません。上の Explorer で着金状況を確認のうえ、店舗またはサポートにお問い合わせください。",
+    "errorStorageBlocked": "支払い記録をこのブラウザに保存できなかったため、二重支払いを防ぐために送金を中止しました。プライベートモードを解除するか別のブラウザでお試しください。"
   },
   "CrossChainSourceChooser": {
     "title": "支払元チェーンを選ぶ",

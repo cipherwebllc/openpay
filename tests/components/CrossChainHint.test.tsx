@@ -901,3 +901,164 @@ describe('CrossChainHint: CROSS_CHAIN_DISABLED kill switch', () => {
     ).not.toBeInTheDocument();
   });
 });
+
+// ---- A1: burn-intent marker と未確定パネル ---------------------------------
+
+// cctp-v2 (polygonAmoy → baseSepolia) の session key。Phase 1 は fee=0。
+const A1_SESSION_KEY = {
+  account: ACCOUNT,
+  kind: 'cctp-v2' as const,
+  sourceChainId: polygonAmoyId,
+  destChainId: baseSepoliaId,
+  recipient: RECIPIENT,
+  valueAtomic: 5_000_000n,
+  feeAtomic: 0n,
+};
+
+const A1_MARKER = {
+  v: 1 as const,
+  chainId: polygonAmoyId,
+  block: '1000',
+  nonceLatest: 5,
+  noncePending: 5,
+  at: 0,
+  depositor: ACCOUNT,
+  burnToken: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582' as `0x${string}`,
+  mintRecipient: RECIPIENT,
+  amount: '5000000',
+  destinationDomain: 6,
+};
+
+// polygon にだけ残高 → cctp-v2 option が既定選択になる配置。
+function setupCctpOnly(publicClientOver: Record<string, unknown> = {}) {
+  setReadContractByChain({
+    [baseSepoliaId]: 0n,
+    [polygonAmoyId]: 10_000_000n,
+    [arbitrumSepoliaId]: 0n,
+    [optimismSepoliaId]: 0n,
+  });
+  const publicClient = { ...makePublicClient(), ...publicClientOver };
+  setupConnected({ publicClient });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ balances: [] }), { status: 200 }),
+    ),
+  );
+  return publicClient;
+}
+
+describe('CrossChainHint: A1 burn 未確定パネル', () => {
+  it('marker だけの resume state でも committed 扱い (burn hash 無しでも親 lock を維持)', async () => {
+    const user = userEvent.setup();
+    const onExecutingChange = vi.fn();
+    // 実行は row 5 (mempool 有り) で止まる = 送金していないのに終わるので、
+    // 「lock が残るのは marker のおかげ」だけを切り出して観測できる。
+    setupCctpOnly({
+      getTransactionCount: vi.fn(async ({ blockTag }: { blockTag: string }) =>
+        blockTag === 'pending' ? 6 : 5,
+      ),
+      getTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+      getLogs: vi.fn(async () => []),
+    });
+    // hash は無く marker だけ = 「送るつもり」で中断した状態。
+    saveResumeState(A1_SESSION_KEY, {
+      approveTxHash: '0xapprove',
+      burnIntent: A1_MARKER,
+    });
+
+    renderWithIntl(
+      withQueryClient(
+        <CrossChainHint {...baseProps} onExecutingChange={onExecutingChange} />,
+      ),
+    );
+    // marker があるので resume 可能 = 「続きから支払う」が出て押せる
+    const button = await screen.findByRole('button', {
+      name: /続きから支払う/,
+    });
+    expect(button).not.toBeDisabled();
+    await user.click(button);
+
+    await screen.findByText(/前回の送金を確認しています/);
+    // 実行は終わっている (isExecuting=false) が、marker により committed=true が続く
+    await waitFor(() => {
+      expect(onExecutingChange).toHaveBeenLastCalledWith(true);
+    });
+  });
+
+  it("burnUnresolved='wait' で wait パネル表示 + Pay ボタン無効", async () => {
+    const user = userEvent.setup();
+    // pending > latest = mempool に自分の tx が居る (row 5)
+    setupCctpOnly({
+      getTransactionCount: vi.fn(async ({ blockTag }: { blockTag: string }) =>
+        blockTag === 'pending' ? 6 : 5,
+      ),
+      getTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+      getLogs: vi.fn(async () => []),
+    });
+    saveResumeState(A1_SESSION_KEY, {
+      approveTxHash: '0xapprove',
+      burnIntent: A1_MARKER,
+    });
+
+    renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
+    await user.click(
+      await screen.findByRole('button', { name: /続きから支払う/ }),
+    );
+
+    expect(
+      await screen.findByText(/前回の送金を確認しています/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/数分おいてから、もう一度/),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /続きから支払う/ }),
+      ).toBeDisabled();
+    });
+  });
+
+  it("burnUnresolved='manual' で二段確認 UI (チェック → ボタン活性)", async () => {
+    const user = userEvent.setup();
+    // nonce だけ進んで log 無し (row 8) → manual
+    setupCctpOnly({
+      getTransactionCount: vi.fn(async () => 9),
+      getTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+      getLogs: vi.fn(async () => []),
+    });
+    saveResumeState(A1_SESSION_KEY, {
+      approveTxHash: '0xapprove',
+      burnIntent: A1_MARKER,
+    });
+
+    renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
+    await user.click(
+      await screen.findByRole('button', { name: /続きから支払う/ }),
+    );
+
+    expect(
+      await screen.findByText(/前回の送金を自動で確認できませんでした/),
+    ).toBeInTheDocument();
+    // Explorer で自分の取引を確認する導線 (二重に払わせないための一次情報)
+    expect(
+      screen.getByRole('link', { name: /Explorer で自分の取引を確認する/ }),
+    ).toBeInTheDocument();
+    // 二段確認: チェックを入れるまでボタンは押せない
+    const reburn = screen.getByRole('button', {
+      name: /確認したので、もう一度送金する/,
+    });
+    expect(reburn).toBeDisabled();
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: /USDC が減っていないことを確認しました/,
+      }),
+    );
+    expect(reburn).not.toBeDisabled();
+    await user.click(reburn);
+    expect(
+      await screen.findByText(/確認を受け付けました/),
+    ).toBeInTheDocument();
+  });
+});

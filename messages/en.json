@@ -1497,7 +1497,19 @@
     "errorPrefix": "Error",
     "successTitle": "Received via {bridge}",
     "successDescription": "Sent {amount} USDC to {recipient} on chainId {chainId}",
-    "viewOnExplorer": "View on explorer"
+    "viewOnExplorer": "View on explorer",
+    "progressBurnProbe": "Checking the previous transfer",
+    "progressBurnUnconfirmed": "Could not confirm the previous transfer",
+    "burnWaitTitle": "Checking your previous transfer",
+    "burnWaitBody": "Your previous transfer may still be in the network. To avoid paying twice we will not re-send until it settles. Wait a few minutes, then tap \"Resume payment\" again.",
+    "burnManualTitle": "We could not verify your previous transfer",
+    "burnManualBody": "To avoid a double payment we will not re-send automatically. Open your address on the explorer and check whether the USDC for this payment already left your wallet. If it did, the transfer went through and you do not need to pay again.",
+    "burnManualCheckExplorer": "Check my transactions on the explorer",
+    "burnManualConfirmLabel": "I checked the explorer and the USDC for this payment has not left my wallet",
+    "burnManualReburn": "I checked — send it again",
+    "burnManualArmedHint": "Confirmed. Tap \"Resume payment\" to send.",
+    "burnManualBlocked": "We found more than one matching transfer, so we cannot re-send automatically. Check the explorer above and contact the merchant or support.",
+    "errorStorageBlocked": "We could not save the payment record in this browser, so the transfer was cancelled to prevent a double payment. Turn off private mode or try another browser."
   },
   "CrossChainSourceChooser": {
     "title": "Choose payment source chain",

@@ -102,6 +102,16 @@ export const CROSS_CHAIN_DISABLED: boolean = parseBoolFlag(
   process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED,
 );
 
+// A1 Phase 2 の点灯スイッチ: CCTP burn の再開判定で「未 broadcast と結論できた」状態
+// (burnMarker の決定表 row 9 / 12 / 18) の **自動** 再 burn を許す。既定 OFF = 同じ状況を
+// manual に落とし、買い手が explorer で自分の USDC を確認して二段確認した場合だけ再 burn
+// できる (Phase 1)。marker 書込・revert 検出・log 走査・adopt は flag と無関係に常時 ON
+// (flag OFF が「二重 burn バグをそのまま残す設定」にならないようにするため)。
+export const CROSS_CHAIN_BURN_AUTORESUME: boolean = parseBoolFlag(
+  'NEXT_PUBLIC_CROSS_CHAIN_BURN_AUTORESUME',
+  process.env.NEXT_PUBLIC_CROSS_CHAIN_BURN_AUTORESUME,
+);
+
 // chainId → Circle domain (CCTP/Gateway 共通、mainnet/testnet 同一 domain ID)。
 const CHAIN_ID_TO_DOMAIN: Record<number, CircleDomain> = {
   [polygon.id]: CIRCLE_DOMAIN_POLYGON,

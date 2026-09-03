@@ -1,9 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { decodeFunctionData, getAddress, zeroAddress, type Address, type Hex } from 'viem';
+import {
+  decodeFunctionData,
+  encodeAbiParameters,
+  getAddress,
+  pad,
+  zeroAddress,
+  type Address,
+  type Hex,
+} from 'viem';
 import { baseSepolia, polygonAmoy } from 'viem/chains';
 import { logger } from '@/lib/logger';
 import { CCTP_V2_TOKEN_MESSENGER_ABI } from '@/lib/crossChain/cctp';
 import {
+  CrossChainBurnUnresolvedError,
   ensureWalletChain,
   executeCctpTransfer,
   executeGatewayTransfer,
@@ -17,6 +26,7 @@ import {
   GATEWAY_MINTER_ADDRESS,
 } from '@/lib/crossChain/config';
 import {
+  CCTP_V2_DEPOSIT_FOR_BURN_TOPIC0,
   CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS,
   CCTP_V2_TOKEN_MESSENGER_ADDRESS,
 } from '@/lib/crossChain/cctp';
@@ -285,6 +295,7 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
     const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
 
     const result = await executeCctpTransfer({
+      commitBurnIntent: () => {},
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -375,6 +386,7 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -412,6 +424,7 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
     );
 
     await executeCctpTransfer({
+      commitBurnIntent: () => {},
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -661,6 +674,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -709,6 +723,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -753,6 +768,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -814,6 +830,7 @@ describe('lib/crossChain/execute: chain resolution from chainId (stale walletCli
     );
 
     await executeCctpTransfer({
+      commitBurnIntent: () => {},
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -910,6 +927,7 @@ describe('lib/crossChain/execute: chain resolution from chainId (stale walletCli
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -1028,6 +1046,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     );
 
     const result = await executeCctpTransfer({
+      commitBurnIntent: () => {},
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -1108,6 +1127,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     const steps: Array<Record<string, unknown>> = [];
 
     const result = await executeCctpTransfer({
+      commitBurnIntent: () => {},
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -1165,6 +1185,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
 
     const result = await executeCctpTransfer({
+      commitBurnIntent: () => {},
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -1227,6 +1248,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -1317,6 +1339,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -1450,6 +1473,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     );
 
     const result = await executeCctpTransfer({
+      commitBurnIntent: () => {},
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -1560,6 +1584,7 @@ describe('lib/crossChain/execute: receipt status 検証 (revert を成功扱い�
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -1606,6 +1631,7 @@ describe('lib/crossChain/execute: burn hash を receipt 待ち前に永続化 (�
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -1662,6 +1688,7 @@ describe('lib/crossChain/execute: mint hash を broadcast 時に永続化 + resu
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -1707,6 +1734,7 @@ describe('lib/crossChain/execute: mint hash を broadcast 時に永続化 + resu
     );
 
     const result = await executeCctpTransfer({
+      commitBurnIntent: () => {},
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -1836,6 +1864,7 @@ describe('lib/crossChain/execute: resume の receipt 障害区別 (transport vs 
     );
 
     const result = await executeCctpTransfer({
+      commitBurnIntent: () => {},
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -1891,6 +1920,7 @@ describe('lib/crossChain/execute: resume の receipt 障害区別 (transport vs 
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -1994,6 +2024,7 @@ describe('lib/crossChain/execute: feeReceiver burn-address ガード', () => {
       );
 
       const result = await executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -2085,6 +2116,7 @@ describe('lib/crossChain/execute: CCTP resume の attestation poll 非直列化 
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -2132,6 +2164,7 @@ describe('lib/crossChain/execute: CCTP resume の attestation poll 非直列化 
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -2183,6 +2216,7 @@ describe('lib/crossChain/execute: CCTP resume の attestation poll 非直列化 
 
     await expect(
       executeCctpTransfer({
+        commitBurnIntent: () => {},
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -2211,5 +2245,429 @@ describe('lib/crossChain/execute: CCTP resume の attestation poll 非直列化 
     expect(walletClient.sendTransaction).not.toHaveBeenCalled();
     // 両 reject なら chain switch せず即 throw する (dest への switch は呼ばれない)。
     expect(switchChainAsync).not.toHaveBeenCalledWith({ chainId: 80002 });
+  });
+});
+
+// ============================================================================
+// A1: burn の再開安全化 (二重 burn / 恒久 wedge の同時封鎖)
+// ============================================================================
+
+// scanForBurnLog が受理する DepositForBurn log を実 ABI レイアウトで組み立てる。
+function makeDepositForBurnLog(hash: Hex) {
+  return {
+    address: CCTP_V2_TOKEN_MESSENGER_ADDRESS,
+    topics: [
+      CCTP_V2_DEPOSIT_FOR_BURN_TOPIC0,
+      pad(SOURCE_TOKEN, { size: 32 }),
+      pad(ACCOUNT, { size: 32 }),
+      pad('0x03e8', { size: 32 }),
+    ],
+    data: encodeAbiParameters(
+      [
+        { name: 'amount', type: 'uint256' },
+        { name: 'mintRecipient', type: 'bytes32' },
+        { name: 'destinationDomain', type: 'uint32' },
+        { name: 'destinationTokenMessenger', type: 'bytes32' },
+        { name: 'destinationCaller', type: 'bytes32' },
+        { name: 'maxFee', type: 'uint256' },
+        { name: 'hookData', type: 'bytes' },
+      ],
+      [
+        9_900_000n,
+        pad(RECIPIENT, { size: 32 }),
+        CIRCLE_DOMAIN_POLYGON,
+        pad('0x00', { size: 32 }),
+        pad('0x00', { size: 32 }),
+        1000n,
+        '0x',
+      ],
+    ),
+    transactionHash: hash,
+    blockNumber: 1_010n,
+  };
+}
+
+const IRIS_OK = () =>
+  new Response(
+    JSON.stringify({
+      messages: [{ status: 'complete', message: '0xmsg', attestation: '0xatt' }],
+    }),
+    { status: 200 },
+  );
+
+function notFoundError(): Error {
+  const e = new Error('Transaction receipt not found');
+  e.name = 'TransactionReceiptNotFoundError';
+  return e;
+}
+
+// marker を持つ resume state から再開する CCTP 実行の共通 fixture。
+function makeA1Fixture(opts: {
+  /** source chain の probe が返す値 */
+  receipt?: 'success' | 'reverted' | 'notfound';
+  noncePending?: number;
+  nonceLatest?: number;
+  head?: bigint;
+  logs?: unknown[];
+  txByHash?: Record<string, { nonce: number; from: Address }>;
+  txHashes?: Hex[];
+}) {
+  const walletClient = makeWalletClient({
+    signature: '0x',
+    txHashes: opts.txHashes ?? ['0xapprove', '0xburn_new', '0xmint_m'],
+  });
+  const sourcePublic = {
+    getBlockNumber: vi.fn(async () => opts.head ?? 1_100n),
+    waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    getTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => {
+      const known = opts.txByHash?.[hash];
+      if (known) return { status: 'success' };
+      if (opts.receipt === 'notfound') throw notFoundError();
+      return { status: opts.receipt ?? 'success' };
+    }),
+    getTransactionCount: vi.fn(async ({ blockTag }: { blockTag: string }) =>
+      blockTag === 'pending' ? (opts.noncePending ?? 5) : (opts.nonceLatest ?? 5),
+    ),
+    getLogs: vi.fn(async () => opts.logs ?? []),
+    getTransaction: vi.fn(async ({ hash }: { hash: Hex }) => {
+      const tx = opts.txByHash?.[hash];
+      if (!tx) throw new Error(`test: no tx for ${hash}`);
+      return tx;
+    }),
+    getCode: vi.fn(async () => '0x60016000' as Hex),
+  };
+  const destPublic = makePublicClient();
+  return { walletClient, sourcePublic, destPublic };
+}
+
+const A1_MARKER = {
+  v: 1 as const,
+  chainId: 84532,
+  block: '1000',
+  nonceLatest: 5,
+  noncePending: 5,
+  at: 0,
+  depositor: ACCOUNT,
+  burnToken: SOURCE_TOKEN,
+  mintRecipient: RECIPIENT,
+  amount: '9900000',
+  destinationDomain: CIRCLE_DOMAIN_POLYGON,
+};
+
+function runA1(
+  fx: ReturnType<typeof makeA1Fixture>,
+  over: Partial<Parameters<typeof executeCctpTransfer>[0]> = {},
+) {
+  return executeCctpTransfer({
+    walletClient: fx.walletClient as never,
+    sourcePublicClient: fx.sourcePublic as never,
+    destPublicClient: fx.destPublic as never,
+    switchChainAsync: trackSwitch(),
+    account: ACCOUNT,
+    sourceChainId: 84532,
+    destChainId: 80002,
+    destDomain: CIRCLE_DOMAIN_POLYGON,
+    sourceDomain: CIRCLE_DOMAIN_BASE,
+    sourceToken: SOURCE_TOKEN,
+    recipient: RECIPIENT,
+    valueAtomic: 9_900_000n,
+    commitBurnIntent: () => {},
+    fetch: vi.fn(async () => IRIS_OK()) as unknown as typeof fetch,
+    pollOptions: { sleep: vi.fn(async () => undefined), now: () => 0 },
+    // gap 充足 (marker.at=0 + MIN_GAP_MS 超え) を既定にする
+    now: () => 200_000,
+    ...over,
+  });
+}
+
+describe('lib/crossChain/execute: A1 burn 再開安全化', () => {
+  it('marker 書込に失敗したら burn を broadcast しない (fail-closed)', async () => {
+    const fx = makeA1Fixture({});
+    const boom = new Error('storage blocked');
+    await expect(
+      runA1(fx, {
+        commitBurnIntent: () => {
+          throw boom;
+        },
+      }),
+    ).rejects.toThrow('storage blocked');
+    // approve までは走るが burn (sendTransaction) は 0 回。
+    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+    expect(fx.walletClient.writeContract).toHaveBeenCalledTimes(1); // approve のみ
+  });
+
+  it('marker は burn broadcast の前に書かれる (順序が逆転していない)', async () => {
+    const order: string[] = [];
+    const fx = makeA1Fixture({});
+    fx.walletClient.sendTransaction = vi.fn(async () => {
+      order.push('broadcast');
+      return '0xburn_new' as Hex;
+    }) as never;
+    const steps: Array<Record<string, unknown>> = [];
+    await runA1(fx, {
+      commitBurnIntent: (m, slot) => {
+        order.push(`commit:${slot}`);
+        expect(m.v).toBe(1);
+        expect(m.amount).toBe('9900000');
+        expect(m.mintRecipient).toBe(RECIPIENT);
+      },
+      onStep: (s) => steps.push({ ...s }),
+    });
+    expect(order[0]).toBe('commit:merchant');
+    expect(order[1]).toBe('broadcast');
+    // marker は resume state にも載る (reload 後の排他 / 再判定のため)
+    expect(steps.some((s) => s.burnIntent !== undefined)).toBe(true);
+  });
+
+  it('row 5: marker あり + mempool 有り → wait で止まり burn しない', async () => {
+    const fx = makeA1Fixture({ noncePending: 6, nonceLatest: 5 });
+    const progress: CrossChainProgress[] = [];
+    await expect(
+      runA1(fx, {
+        resume: { approveTxHash: '0xa', burnIntent: A1_MARKER },
+        onProgress: (p) => progress.push(p),
+      }),
+    ).rejects.toMatchObject({
+      name: 'CrossChainBurnUnresolvedError',
+      kind: 'wait',
+      slot: 'merchant',
+      row: 5,
+    });
+    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+    expect(fx.walletClient.writeContract).not.toHaveBeenCalled();
+    expect(progress.map((p) => p.kind)).toEqual(['burn_probe', 'burn_unconfirmed']);
+  });
+
+  it('row 9: cold (nonce 不変・mempool 空・log 無し・gap 充足) は flag ON で 1 回だけ burn', async () => {
+    const fx = makeA1Fixture({});
+    const result = await runA1(fx, {
+      resume: { approveTxHash: '0xa', burnIntent: A1_MARKER },
+      allowAutoReburn: true,
+    });
+    // approve 1 + burn 1 + mint 1
+    expect(fx.walletClient.writeContract).toHaveBeenCalledTimes(1);
+    const burnCalls = fx.walletClient.sendTransaction.mock.calls.filter(
+      (c) => (c[0] as { to: string }).to === CCTP_V2_TOKEN_MESSENGER_ADDRESS,
+    );
+    expect(burnCalls).toHaveLength(1);
+    expect(result.burnTxHash).toBe('0xburn_new');
+  });
+
+  it('row 9: flag OFF (既定) では再 burn せず manual に落ちる', async () => {
+    const fx = makeA1Fixture({});
+    await expect(
+      runA1(fx, {
+        resume: { approveTxHash: '0xa', burnIntent: A1_MARKER },
+        allowAutoReburn: false,
+      }),
+    ).rejects.toMatchObject({ kind: 'manual', row: 9, reburnable: true });
+    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('row 9: flag OFF + 二段確認 (allowManualReburn) なら burn する', async () => {
+    const fx = makeA1Fixture({});
+    const result = await runA1(fx, {
+      resume: { approveTxHash: '0xa', burnIntent: A1_MARKER },
+      allowAutoReburn: false,
+      allowManualReburn: true,
+    });
+    expect(result.burnTxHash).toBe('0xburn_new');
+  });
+
+  it('row 10: gap 未充足 → wait (broadcast 直後の可能性)', async () => {
+    const fx = makeA1Fixture({});
+    await expect(
+      runA1(fx, {
+        resume: { approveTxHash: '0xa', burnIntent: A1_MARKER },
+        allowAutoReburn: true,
+        now: () => 1_000, // marker.at=0 から 1 秒しか経っていない
+      }),
+    ).rejects.toMatchObject({ kind: 'wait', row: 10 });
+    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('row 12: hash が revert・log 無し・mempool 空 → flag ON で再 burn して mint まで完走', async () => {
+    const fx = makeA1Fixture({
+      receipt: 'reverted',
+      txHashes: ['0xapprove', '0xburn_new', '0xmint_m'],
+    });
+    const result = await runA1(fx, {
+      resume: {
+        approveTxHash: '0xa',
+        burnTxHash: '0xburn_reverted',
+        burnIntent: A1_MARKER,
+      },
+      allowAutoReburn: true,
+    });
+    expect(result.burnTxHash).toBe('0xburn_new');
+    expect(result.mintTxHash).toBe('0xmint_m');
+  });
+
+  it('row 12: flag OFF なら revert でも自動再 burn しない (manual)', async () => {
+    const fx = makeA1Fixture({ receipt: 'reverted' });
+    await expect(
+      runA1(fx, {
+        resume: {
+          approveTxHash: '0xa',
+          burnTxHash: '0xburn_reverted',
+          burnIntent: A1_MARKER,
+        },
+        allowAutoReburn: false,
+      }),
+    ).rejects.toMatchObject({ kind: 'manual', row: 12 });
+    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('row 13: revert 済でも一致 log 1 件なら再 burn せず adopt した hash で Iris poll', async () => {
+    const adopted = '0xburn_adopted' as Hex;
+    const mockFetch = vi.fn(async (_url: string) => IRIS_OK());
+    const fx = makeA1Fixture({
+      receipt: 'reverted',
+      logs: [makeDepositForBurnLog(adopted)],
+      txByHash: { [adopted]: { nonce: 5, from: ACCOUNT } },
+      txHashes: ['0xmint_m'], // burn は起きないので mint だけ
+    });
+    const result = await runA1(fx, {
+      resume: {
+        approveTxHash: '0xa',
+        burnTxHash: '0xburn_reverted',
+        burnIntent: A1_MARKER,
+      },
+      allowAutoReburn: true,
+      fetch: mockFetch as unknown as typeof fetch,
+    });
+    expect(result.burnTxHash).toBe(adopted);
+    // approve も burn も行われない
+    expect(fx.walletClient.writeContract).not.toHaveBeenCalled();
+    // Iris は adopt した hash で引く
+    expect(String(mockFetch.mock.calls[0][0])).toContain(adopted);
+  });
+
+  it('row 17: hash が notfound + mempool 有り → wait (再 burn 無し)', async () => {
+    const fx = makeA1Fixture({ receipt: 'notfound', noncePending: 6, nonceLatest: 5 });
+    await expect(
+      runA1(fx, {
+        resume: {
+          approveTxHash: '0xa',
+          burnTxHash: '0xburn_pending',
+          burnIntent: A1_MARKER,
+        },
+        allowAutoReburn: true,
+      }),
+    ).rejects.toMatchObject({ kind: 'wait', row: 17 });
+    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('row 20: 走査範囲 cap 超過 → manual (Iris timeout ではなく Unresolved 型)', async () => {
+    const fx = makeA1Fixture({ receipt: 'notfound', head: 1_000_000n });
+    const err = await runA1(fx, {
+      resume: {
+        approveTxHash: '0xa',
+        burnTxHash: '0xburn_old',
+        burnIntent: A1_MARKER,
+      },
+      allowAutoReburn: true,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(CrossChainBurnUnresolvedError);
+    expect(err).toMatchObject({ kind: 'manual', row: 20 });
+    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+    expect(fx.sourcePublic.getLogs).not.toHaveBeenCalled();
+  });
+
+  it('row 21: probe 中の transport 障害は throw する (未 burn に潰さない)', async () => {
+    const fx = makeA1Fixture({});
+    fx.sourcePublic.getTransactionCount = vi.fn(async () => {
+      throw new Error('RPC 503');
+    }) as never;
+    await expect(
+      runA1(fx, {
+        resume: { approveTxHash: '0xa', burnIntent: A1_MARKER },
+        allowAutoReburn: true,
+      }),
+    ).rejects.toThrow('RPC 503');
+    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('fee burn も merchant と同じ判定 (fee slot だけ wait でも burn しない)', async () => {
+    const feeMarker = {
+      ...A1_MARKER,
+      mintRecipient: FEE_RECEIVER,
+      amount: '100000',
+      nonceLatest: 6,
+    };
+    const fx = makeA1Fixture({ noncePending: 8, nonceLatest: 7 });
+    await expect(
+      runA1(fx, {
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 100_000n,
+        resume: {
+          approveTxHash: '0xa',
+          burnTxHash: '0xburn_m',
+          feeBurnIntent: feeMarker,
+        },
+        allowAutoReburn: true,
+      }),
+    ).rejects.toMatchObject({ kind: 'wait', slot: 'fee', row: 5 });
+    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('fee burn も marker を書いてから broadcast する (merchant と完全対称)', async () => {
+    const order: string[] = [];
+    const fx = makeA1Fixture({
+      txHashes: ['0xapprove', '0xburn_m', '0xburn_f', '0xmint_m', '0xmint_f'],
+    });
+    await runA1(fx, {
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 100_000n,
+      commitBurnIntent: (m, slot) => {
+        order.push(`${slot}:${m.amount}:${m.mintRecipient}`);
+      },
+    });
+    expect(order).toEqual([
+      `merchant:9900000:${RECIPIENT}`,
+      `fee:100000:${FEE_RECEIVER}`,
+    ]);
+  });
+
+  it('後方互換 (row 2): marker 無し + burn 済 hash の旧 state は従来どおり mint に進む', async () => {
+    const fx = makeA1Fixture({ receipt: 'success', txHashes: ['0xmint_m'] });
+    const result = await runA1(fx, {
+      resume: { approveTxHash: '0xapprove_prev', burnTxHash: '0xburn_prev' },
+    });
+    expect(result.burnTxHash).toBe('0xburn_prev');
+    expect(result.mintTxHash).toBe('0xmint_m');
+    // 旧 state では nonce / log 走査を一切行わない (RPC を増やさない)
+    expect(fx.sourcePublic.getTransactionCount).not.toHaveBeenCalled();
+    expect(fx.sourcePublic.getLogs).not.toHaveBeenCalled();
+  });
+
+  it('後方互換 (row 3): marker 無し + revert した hash は manual (勝手に再 burn しない)', async () => {
+    const fx = makeA1Fixture({ receipt: 'reverted' });
+    await expect(
+      runA1(fx, {
+        resume: { approveTxHash: '0xa', burnTxHash: '0xburn_prev' },
+        allowAutoReburn: true,
+      }),
+    ).rejects.toMatchObject({ kind: 'manual', row: 3 });
+    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('初回 (marker も hash も無い) は probe の RPC を打たずに従来どおり burn する', async () => {
+    const fx = makeA1Fixture({});
+    const progress: CrossChainProgress[] = [];
+    await runA1(fx, { onProgress: (p) => progress.push(p) });
+    // log 走査は無し。nonce 読みは marker 生成 (latest/pending の 2 本) のみで、
+    // probe (再開判定) 由来の追加 RPC は発生しない。
+    expect(fx.sourcePublic.getLogs).not.toHaveBeenCalled();
+    expect(fx.sourcePublic.getTransactionCount).toHaveBeenCalledTimes(2);
+    expect(fx.sourcePublic.getTransactionReceipt).not.toHaveBeenCalled();
+    expect(progress.map((p) => p.kind)).toEqual([
+      'switch_chain',
+      'approve',
+      'source_tx_pending',
+      'poll_attestation',
+      'switch_chain',
+      'dest_tx_pending',
+    ]);
   });
 });

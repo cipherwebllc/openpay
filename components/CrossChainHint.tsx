@@ -12,6 +12,7 @@
 // に委譲するため execute は no-op (= 既存 Pay button が処理する)。
 
 import { useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { formatUnits, type Address } from 'viem';
 import { useTranslations } from 'next-intl';
 import { useCrossChainPayment } from '@/hooks/useCrossChainPayment';
@@ -19,10 +20,21 @@ import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
 import type { CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathOption } from '@/lib/crossChain/pathEnumerator';
 import { CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
+import { ResumeStoreWriteError } from '@/lib/crossChain/resumeStore';
 import { blockExplorerUrl } from '@/lib/chains';
 import { CrossChainSourceChooser } from './CrossChainSourceChooser';
 import { shortAddress } from '@/lib/format';
 import { logger } from '@/lib/logger';
+
+// 中断再開でしか描画されない説明パネルなので、/pay・/tip の First Load JS には載せない
+// (予算は既に上限張り付き — 掟: 増えたら予算を上げる前にまず code-split)。
+const CrossChainBurnUnresolvedPanel = dynamic(
+  () =>
+    import('./CrossChainBurnUnresolvedPanel').then(
+      (m) => m.CrossChainBurnUnresolvedPanel,
+    ),
+  { ssr: false },
+);
 
 export interface CrossChainHintProps {
   /** PaymentForm の token (token !== 'usdc' なら hint を出さない) */
@@ -223,9 +235,13 @@ export function CrossChainHint(props: CrossChainHintProps) {
     !isDirectSelected &&
     selectedOption !== null &&
     hook.isOptionResumable(selectedOption);
+  const burnUnresolved = hook.burnUnresolved;
   const payButtonDisabled =
     isExecuting ||
     !!props.executionDisabled ||
+    // 前回 burn が mempool に居る可能性がある間は、再 Pay 自体を押させない (押しても
+    // 同じ wait に落ちるだけで、買い手には「二重に払うのでは」という不安だけが残る)。
+    burnUnresolved?.kind === 'wait' ||
     // 同一 mount で committed を観測したのに resume 保存が無い場合、再 execute は
     // 二重 burn/debit になり得る。D4b は行わず、この mount の子ボタンだけ fail-closed。
     (isCommitted && !resumable) ||
@@ -247,10 +263,21 @@ export function CrossChainHint(props: CrossChainHintProps) {
           {t('directSelectedHint')}
         </p>
       )}
-      {resumable && !isExecuting && (
+      {resumable && !isExecuting && !burnUnresolved && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
           {t('resumeHint')}
         </p>
+      )}
+      {burnUnresolved && (
+        <CrossChainBurnUnresolvedPanel
+          kind={burnUnresolved.kind}
+          sourceChainId={burnUnresolved.sourceChainId}
+          depositor={burnUnresolved.depositor}
+          burnTxHash={burnUnresolved.burnTxHash}
+          reburnable={burnUnresolved.reburnable}
+          armed={hook.isManualReburnArmed}
+          onArm={hook.armManualReburn}
+        />
       )}
       {!isDirectSelected && (
         <button
@@ -266,9 +293,14 @@ export function CrossChainHint(props: CrossChainHintProps) {
               : t('payWithSelected')}
         </button>
       )}
-      {error && (
+      {error && !burnUnresolved && (
         <p className="text-xs text-red-700">
-          {t('errorPrefix')}: {error.message}
+          {t('errorPrefix')}:{' '}
+          {error instanceof ResumeStoreWriteError
+            ? // marker を書けない = 二重 burn を防げないので送金しなかった、という
+              // 「安全側に倒した」旨を専用文言で伝える (生の例外文は買い手に無意味)。
+              t('errorStorageBlocked')
+            : error.message}
         </p>
       )}
     </div>
@@ -302,6 +334,10 @@ function formatProgress(
       return t('progressFeeSourceTxPending');
     case 'fee_dest_tx_pending':
       return t('progressFeeDestTxPending');
+    case 'burn_probe':
+      return t('progressBurnProbe');
+    case 'burn_unconfirmed':
+      return t('progressBurnUnconfirmed');
   }
 }
 
