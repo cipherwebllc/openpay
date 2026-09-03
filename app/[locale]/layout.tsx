@@ -5,6 +5,8 @@ import { setRequestLocale, getTranslations } from 'next-intl/server';
 import { Analytics } from '@vercel/analytics/next';
 import { SpeedInsights } from '@vercel/speed-insights/next';
 import { LOCALES } from '@/i18n';
+import { clientMessagesFor } from '@/i18n/clientMessages';
+import { SHARED_CLIENT_NAMESPACES } from '@/i18n/clientNamespaces';
 import { AlphaNotice } from '@/components/AlphaNotice';
 import { SiteFooter } from '@/components/SiteFooter';
 import { Providers } from '../providers';
@@ -59,10 +61,16 @@ export default async function LocaleLayout({
   // Static rendering を有効にする (next-intl v4)
   setRequestLocale(locale);
 
+  // messages は「この layout 直下の client component (AlphaNotice / SiteFooter) が使う分」
+  // だけに絞る。省略すると messages 全量 (71 namespace ≈ 268 KB) が全ページの HTML に
+  // inline される。各ページ固有の namespace は route segment の layout.tsx が
+  // <RouteMessages> で入れ子の provider として配る (i18n/clientNamespaces.ts が一覧の SoT)。
+  const sharedMessages = await clientMessagesFor(SHARED_CLIENT_NAMESPACES);
+
   return (
     <html lang={locale}>
       <body>
-        <NextIntlClientProvider>
+        <NextIntlClientProvider messages={sharedMessages}>
           <AlphaNotice />
           <Providers>{children}</Providers>
           <SiteFooter />
