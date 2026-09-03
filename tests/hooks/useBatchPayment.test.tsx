@@ -856,9 +856,7 @@ describe('useBatchPayment', () => {
       expect(waitForUserOperationReceipt).toHaveBeenCalledOnce();
 
       const keys = pimlicoPendingKeys();
-      // account 単位キー + account 非依存 scope キーの 2 本に同じ record を書く
-      // (account 切替で latch が消えないようにするため・A3)。
-      expect(keys).toHaveLength(2);
+      expect(keys).toHaveLength(1);
       const stored = JSON.parse(
         window.localStorage.getItem(keys[0]) ?? '{}',
       ) as Record<string, unknown>;
@@ -957,10 +955,10 @@ describe('useBatchPayment', () => {
     });
   });
 
-  // A3 / A10 (2026-09-02 review): pending record の読み出しは fail-closed、latch は
-  // account 非依存キーでも保持、record は 24h で失効。
-  describe('pending record の fail-closed 読み出しと account 非依存 latch', () => {
-    it('storage の getItem が throw → gasless 送信を止め unknown に倒す (fail-closed)', async () => {
+  // A3 / A10 (2026-09-02 review・2026-09-03 rescope): pending record の読み出しは
+  // fail-closed (ただし止めるのは gasless のみ)、record は 7 日で失効。
+  describe('pending record の fail-closed 読み出しと失効', () => {
+    it('storage の getItem が throw → gasless 送信を止める (fail-closed・専用 flag)', async () => {
       mountReady();
       const getItem = vi
         .spyOn(Storage.prototype, 'getItem')
@@ -979,47 +977,19 @@ describe('useBatchPayment', () => {
         feeAmount: 1n,
       });
 
-      await waitFor(() => expect(result.current.isUnknown).toBe(true));
+      await waitFor(() =>
+        expect(result.current.pendingStoreUnavailable).toBe(true),
+      );
       // 未解決 UserOp の有無を判定できない = 新規 UserOp を出さない (二重支払い防止)。
       expect(sendUserOperation).not.toHaveBeenCalled();
-      // 通常 failure へも流さない (履歴/汎用 error UI に出さず unknown へ束ねる)。
+      // broadcast 済とは言い切れないので unknown (= standard も封鎖) には倒さない。
+      expect(result.current.isUnknown).toBe(false);
+      // 通常 failure へも流さない (履歴/汎用 error UI に出さず専用文言へ束ねる)。
       expect(result.current.error).toBeNull();
       getItem.mockRestore();
     });
 
-    it('latch は account 切替 (同一 chain/token) をまたいで維持される', async () => {
-      const customerA = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' as Address;
-      const customerB = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' as Address;
-      mountReady();
-      mockHook(useAccount, { chainId: baseSepolia.id, address: customerA });
-      waitForUserOperationReceipt.mockRejectedValueOnce(
-        new Error('UserOperationReceiptTimeoutError'),
-      );
-
-      const { result, rerender } = renderHook(() => useBatchPayment(usdcDep), {
-        wrapper: makeWrapper(),
-      });
-      result.current.mutate({
-        tokenAddress: TOKEN,
-        merchant: MERCHANT,
-        merchantAmount: 7n,
-        feeReceiver: FEE_RECV,
-        feeAmount: 1n,
-      });
-      await waitFor(() => expect(result.current.isUnknown).toBe(true));
-
-      // account だけ切り替える (chain/token は同一)。account 単位キーは変わるが、
-      // 併記した scope キーの record で latch は維持されなければならない。
-      mockHook(useAccount, { chainId: baseSepolia.id, address: customerB });
-      rerender();
-      await waitFor(() =>
-        expect(result.current.pendingUserOpHash).toBe(`0x${'a'.repeat(64)}`),
-      );
-      expect(result.current.isUnknown).toBe(true);
-      expect(sendUserOperation).toHaveBeenCalledOnce();
-    });
-
-    it('24h を超えた record は無視して破棄する (恒久ロックアウト回避)', async () => {
+    it('7 日を超えた record は無視して破棄する (恒久ロックアウト回避)', async () => {
       mountReady();
       waitForUserOperationReceipt.mockRejectedValueOnce(
         new Error('UserOperationReceiptTimeoutError'),
@@ -1037,8 +1007,8 @@ describe('useBatchPayment', () => {
       await waitFor(() => expect(first.result.current.isUnknown).toBe(true));
       first.unmount();
 
-      // 保存済 record の updatedAt を 24h + 1 分前に巻き戻す。
-      const stale = Date.now() - (24 * 60 * 60 * 1000 + 60_000);
+      // 保存済 record の updatedAt を 7 日 + 1 分前に巻き戻す。
+      const stale = Date.now() - (7 * 24 * 60 * 60 * 1000 + 60_000);
       for (const key of pimlicoPendingKeys()) {
         const rec = JSON.parse(
           window.localStorage.getItem(key) ?? '{}',
@@ -1068,7 +1038,7 @@ describe('useBatchPayment', () => {
       expect(sendUserOperation).toHaveBeenCalledOnce();
     });
 
-    it('24h 以内の record は従来どおり latch として復元する', async () => {
+    it('7 日以内の record は従来どおり latch として復元する', async () => {
       mountReady();
       waitForUserOperationReceipt.mockRejectedValueOnce(
         new Error('UserOperationReceiptTimeoutError'),
@@ -1086,7 +1056,7 @@ describe('useBatchPayment', () => {
       await waitFor(() => expect(first.result.current.isUnknown).toBe(true));
       first.unmount();
 
-      const fresh = Date.now() - (23 * 60 * 60 * 1000);
+      const fresh = Date.now() - 6 * 24 * 60 * 60 * 1000;
       for (const key of pimlicoPendingKeys()) {
         const rec = JSON.parse(
           window.localStorage.getItem(key) ?? '{}',

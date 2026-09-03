@@ -4,6 +4,7 @@ import type { Address, Hex } from 'viem';
 
 export const RELAY_INTENT_STORAGE_KEY = 'openpay:relay-intent:v1';
 export const STANDARD_INTENT_STORAGE_KEY = 'openpay:standard-intent:v1';
+export const USAGE_FEE_INTENT_STORAGE_KEY = 'openpay:usage-fee-intent:v1';
 
 export type RelayIntentMetadata = {
   chainId: number;
@@ -54,6 +55,8 @@ export type StandardIntentMetadata = {
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const HEX_32 = /^0x[0-9a-fA-F]{64}$/;
 const DECIMAL = /^\d+$/;
+// EIP-712 署名 (65 byte = 132 文字) だが、wallet 実装差を許容するため長さは緩く bound する。
+const SIGNATURE = /^0x[0-9a-fA-F]{100,600}$/;
 
 function isAddressText(value: unknown): value is Address {
   return typeof value === 'string' && ADDRESS.test(value);
@@ -299,4 +302,80 @@ export function saveStandardIntent(intent: StandardIntentMetadata): void {
 
 export function clearStandardIntent(): void {
   clear(STANDARD_INTENT_STORAGE_KEY);
+}
+
+// --- OpenPay 利用料 (a1) のガスレス支払い ---
+// relay intent (顧客決済) と違い署名まで保存する。理由: 利用料の応答不明後の再試行は
+// **同じ nonce の同一 payload を再 POST** して server 冪等キー (chainId+from+nonce) に当てる
+// 必要があり、公開 metadata だけでは payload を再構成できない (再署名 = 新 nonce = 二重課金)。
+// 露出範囲は sessionStorage (同一タブ・同一 origin) に限定され、authorization 自体も
+// to=FEE_RECEIVER / 固定額 / 単発 nonce に縛られる。確定応答で必ず破棄する。
+export type UsageFeeIntentMetadata = {
+  version: 1;
+  chainId: number;
+  from: Address;
+  to: Address;
+  value: string;
+  validAfter: string;
+  validBefore: string;
+  nonce: Hex;
+  signature: Hex;
+  issuedAt: number;
+};
+
+function parseUsageFeeIntent(value: unknown): UsageFeeIntentMetadata | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const o = value as Record<string, unknown>;
+  if (
+    o.version !== 1 ||
+    typeof o.chainId !== 'number' ||
+    !Number.isInteger(o.chainId) ||
+    !isAddressText(o.from) ||
+    !isAddressText(o.to) ||
+    !isDecimal(o.value) ||
+    !isDecimal(o.validAfter) ||
+    !isDecimal(o.validBefore) ||
+    !isHex32(o.nonce) ||
+    typeof o.signature !== 'string' ||
+    !SIGNATURE.test(o.signature) ||
+    !isIssuedAt(o.issuedAt)
+  ) {
+    return null;
+  }
+  return {
+    version: 1,
+    chainId: o.chainId,
+    from: o.from,
+    to: o.to,
+    value: o.value,
+    validAfter: o.validAfter,
+    validBefore: o.validBefore,
+    nonce: o.nonce,
+    signature: o.signature as Hex,
+    issuedAt: o.issuedAt,
+  };
+}
+
+export function loadUsageFeeIntent(): UsageFeeIntentMetadata | null {
+  return load(USAGE_FEE_INTENT_STORAGE_KEY, parseUsageFeeIntent);
+}
+
+export function saveUsageFeeIntent(intent: UsageFeeIntentMetadata): void {
+  // 呼出側の将来フィールドを意図せず永続化しないよう、保存値を whitelist で再構成する。
+  save(USAGE_FEE_INTENT_STORAGE_KEY, {
+    version: 1,
+    chainId: intent.chainId,
+    from: intent.from,
+    to: intent.to,
+    value: intent.value,
+    validAfter: intent.validAfter,
+    validBefore: intent.validBefore,
+    nonce: intent.nonce,
+    signature: intent.signature,
+    issuedAt: intent.issuedAt,
+  });
+}
+
+export function clearUsageFeeIntent(): void {
+  clear(USAGE_FEE_INTENT_STORAGE_KEY);
 }
