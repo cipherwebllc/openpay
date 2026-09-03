@@ -1441,6 +1441,10 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - `listResourcesForMerchant` (owner 一覧) は有界並列 (同時 25) で取得。1 件でも KV 取得失敗なら null →
   GET 503 (outage 中に「登録ゼロ」と誤表示して重複登録させない)。
 - 料金性質の登録不要は memory:project_fsa_clearance (金融庁回答)・税務は別 (税理士)。
+- **KV 未設定 = vanilla USDC の二重解錠防御 (resource 束縛 claim) が OFF になる (fail-open・warn 1 回)**。
+  未設定時は `x402.vanilla.claim_unconfigured` をプロセス 1 回だけ warn し、同一 authorization の
+  別 resource 同時再利用 (同額の組) を弾けない。課金は settle の原子性で 1 回のままだが、
+  コンテンツは複数解錠されうる。`KV_REST_API_URL` / `KV_REST_API_TOKEN` を必ず設定する。
 
 ### §14.7 エージェント注文 (agent-order) の運用注記
 - **範囲**: `@handle` 店舗のモバイルオーダーを openpay-x402-mcp から x402 で支払う。新レールは作らず、

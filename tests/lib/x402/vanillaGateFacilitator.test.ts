@@ -27,6 +27,47 @@ vi.mock('@/lib/x402/config', () => ({
   },
 }));
 
+// resource 束縛 claim (B5(b)) の KV を in-memory で「構成済み」にする。
+// 既定 (kv.down = false) では本来の SET NX / CAS DEL 経路を通し、down = true で
+// fail-open (claim 無しで従来どおり通す) を検証する。
+const kvHold = vi.hoisted(() => ({
+  store: new Map<string, string>(),
+  down: false,
+  unconfigured: false,
+  lastTtlSec: null as number | null,
+}));
+
+vi.mock('@/lib/kv', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/kv')>('@/lib/kv');
+  return {
+    ...actual,
+    kvSetNxGet: async (key: string, value: string, ttlSec: number) => {
+      if (kvHold.unconfigured) return { ok: false, reason: 'unconfigured' as const };
+      if (kvHold.down) return { ok: false, reason: 'network_error' as const };
+      kvHold.lastTtlSec = ttlSec;
+      const existing = kvHold.store.get(key);
+      if (existing !== undefined) return { ok: true, value: existing };
+      kvHold.store.set(key, value);
+      return { ok: true, value: null };
+    },
+    kvEval: async (_script: string, keys: string[], args: string[]) => {
+      if (kvHold.down) return { ok: false, reason: 'network_error' as const };
+      const current = kvHold.store.get(keys[0]);
+      if (current === undefined) return { ok: true, value: 0 };
+      const parsed = JSON.parse(current) as {
+        bindingHash: string;
+        credential: string;
+      };
+      if (parsed.bindingHash !== args[0] || parsed.credential !== args[1]) {
+        return { ok: true, value: -1 };
+      }
+      kvHold.store.delete(keys[0]);
+      return { ok: true, value: 1 };
+    },
+  };
+});
+
+import { logger } from '@/lib/logger';
 import { handleVanillaPaidGet } from '@/lib/x402/vanillaGate';
 
 function ed25519Secret(): string {
@@ -69,6 +110,10 @@ beforeEach(() => {
     json: async () => ({ isValid: true, payer: '0xabc', success: true, transaction: '0xtx' }),
   });
   configHold.vanillaFacilitator = { url: 'https://facilitator.payai.network' };
+  kvHold.store.clear();
+  kvHold.down = false;
+  kvHold.unconfigured = false;
+  kvHold.lastTtlSec = null;
 });
 
 async function run(): Promise<void> {
@@ -340,5 +385,329 @@ describe('vanillaGate facilitator 切替', () => {
     );
     expect(res.status).toBe(503);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// B5(b): exact scheme の verify は value >= maxAmountRequired しか見ず resource を含まない。
+// 1 通の署名済み X-PAYMENT が同額・別 resource で二重解錠されるのを、resource + query
+// 束縛の claim で断つ。KV は money truth ではないので障害時は fail-open。
+describe('vanillaGate resource 束縛 claim', () => {
+  const SUPPLY = {
+    resourceUrl: 'https://open-pay.jp/api/paid/usdc/jpyc/supply',
+    description: 'jpyc supply',
+    price: '$0.002',
+  };
+  const BALANCE = {
+    resourceUrl: 'https://open-pay.jp/api/paid/usdc/jpyc/balance',
+    description: 'jpyc balance',
+    price: '$0.002',
+  };
+  const SIGNATURE = `0x${'0'.repeat(63)}1${'0'.repeat(63)}21b`;
+  const PAYER = '0xabcabcabcabcabcabcabcabcabcabcabcabcabca';
+  const NONCE = `0x${'cd'.repeat(32)}`;
+
+  function paidHeader(signature = SIGNATURE): string {
+    return Buffer.from(
+      JSON.stringify({
+        x402Version: 1,
+        scheme: 'exact',
+        network: 'base',
+        payload: {
+          signature,
+          authorization: {
+            from: PAYER,
+            to: '0x1111111111111111111111111111111111111111',
+            value: '2000',
+            validAfter: '0',
+            validBefore: '9999999999',
+            nonce: NONCE,
+          },
+        },
+      }),
+    ).toString('base64');
+  }
+
+  // v2 (PAYMENT-SIGNATURE) 版。accepted は toV2Accept(accepts.v1Caip2) と完全一致が要る。
+  // 同じ authorization なので、v1 経路と**同じ claim キー**を導かなければならない。
+  function v2PaidHeader(from = PAYER): string {
+    return Buffer.from(
+      JSON.stringify({
+        x402Version: 2,
+        accepted: {
+          scheme: 'exact',
+          network: 'eip155:8453',
+          amount: '2000',
+          asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          payTo: '0x1111111111111111111111111111111111111111',
+          maxTimeoutSeconds: 300,
+          extra: { name: 'USD Coin', version: '2' },
+        },
+        payload: {
+          signature: SIGNATURE,
+          authorization: {
+            from,
+            to: '0x1111111111111111111111111111111111111111',
+            value: '2000',
+            validAfter: '0',
+            validBefore: '9999999999',
+            nonce: NONCE,
+          },
+        },
+      }),
+    ).toString('base64');
+  }
+
+  async function get(
+    resource: typeof SUPPLY,
+    opts: {
+      query?: string;
+      header?: string;
+      v2Header?: string;
+      content?: () => NextResponse;
+    } = {},
+  ): Promise<NextResponse> {
+    const req = new Request(`${resource.resourceUrl}${opts.query ?? ''}`, {
+      headers: opts.v2Header
+        ? { 'PAYMENT-SIGNATURE': opts.v2Header }
+        : { 'x-payment': opts.header ?? paidHeader() },
+    });
+    return handleVanillaPaidGet(
+      req,
+      resource,
+      opts.content ?? (() => NextResponse.json({ ok: true })),
+    );
+  }
+
+  // claim は verify の**後**なので、conflict の判定にも verify 1 回分のコストがかかる
+  // (未認証の誰でも KV に 30 分キーを作れる書き込み経路を作らないための代償)。
+  it('同じ authorization を別 resource へ = 2 本目は 409 (settle は呼ばれない)', async () => {
+    const first = await get(SUPPLY);
+    expect(first.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const second = await get(BALANCE);
+    expect(second.status).toBe(409);
+    // 追加されるのは verify 1 回だけ = 2 本目のコンテンツ生成も課金も起きない。
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2][0]).toBe(
+      'https://facilitator.payai.network/verify',
+    );
+    const body = (await second.json()) as { error?: string };
+    expect(body.error).toBe('authorization_conflict');
+  });
+
+  it('claim の TTL は再配信 cache と別定数の 30 分 (VANILLA_CLAIM_TTL_SEC)', async () => {
+    await get(SUPPLY);
+    expect(kvHold.lastTtlSec).toBe(1800);
+  });
+
+  it('同じ authorization を同じ resource へ再送 = 従来どおり通る (再配信の挙動不変)', async () => {
+    expect((await get(SUPPLY)).status).toBe(200);
+    const again = await get(SUPPLY);
+    expect(again.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(again.headers.get('X-PAYMENT-RESPONSE')).not.toBeNull();
+  });
+
+  it('query の並び順だけが違う再送は同一束縛 (正直な再送を 409 にしない)', async () => {
+    expect((await get(SUPPLY, { query: '?chain=polygon&x=1' })).status).toBe(200);
+    const again = await get(SUPPLY, { query: '?x=1&chain=polygon' });
+    expect(again.status).toBe(200);
+  });
+
+  it('同じ resource でも別 query は別束縛 = 409', async () => {
+    expect((await get(SUPPLY, { query: '?chain=polygon' })).status).toBe(200);
+    const other = await get(SUPPLY, { query: '?chain=base' });
+    expect(other.status).toBe(409);
+  });
+
+  it('KV 障害時は claim せず従来どおり通す (fail-open)', async () => {
+    kvHold.down = true;
+    expect((await get(SUPPLY)).status).toBe(200);
+    const second = await get(BALANCE);
+    expect(second.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  // このファイルで unconfigured を起こすのはこの 1 本だけ (warn 抑止フラグはモジュール
+  // 単位の状態なので、先に別テストが warn を消費すると偽陰性になる)。
+  it('KV 未構成は fail-open + warn はプロセス 1 回だけ (運用に気づかせつつログを埋めない)', async () => {
+    kvHold.unconfigured = true;
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    try {
+      expect((await get(SUPPLY)).status).toBe(200);
+      // 二重解錠の防御は OFF = 別 resource へも通る (docs/DEPLOY_CHECKLIST §14 に明記)。
+      expect((await get(BALANCE)).status).toBe(200);
+      const unconfiguredWarns = warn.mock.calls.filter(
+        ([msg]) => msg === 'x402.vanilla.claim_unconfigured',
+      );
+      expect(unconfiguredWarns).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('verify 失敗ではそもそも claim を張らない (未使用の署名を人質にしない)', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ isValid: false, invalidReason: 'insufficient_funds' }),
+    });
+    const failed = await get(SUPPLY);
+    expect(failed.status).toBe(402);
+    // claim は verify 通過後にしか張らない = KV には何も書かれない。
+    expect(kvHold.store.size).toBe(0);
+    // 署名は未使用のまま = 同じ authorization を別 resource で正直に使い直せる。
+    const second = await get(BALANCE);
+    expect(second.status).toBe(200);
+  });
+
+  it('content 4xx も claim を解放する (引数を直した同一支払いの再送を塞がない)', async () => {
+    const invalid = await get(SUPPLY, {
+      content: () => NextResponse.json({ error: 'invalid_query' }, { status: 400 }),
+    });
+    expect(invalid.status).toBe(400);
+    const retried = await get(SUPPLY, { query: '?address=0x1' });
+    expect(retried.status).toBe(200);
+  });
+
+  it('claim を持たない request (match) の content 4xx は claim を消さない', async () => {
+    // 1 本目が claim を張って 200 で配信済み。
+    expect((await get(SUPPLY)).status).toBe(200);
+    // 同一束縛の 2 本目は 'match' = 解放権を持たない。ここで 400 を返させても claim は残る。
+    const conflictingRetry = await get(SUPPLY, {
+      content: () => NextResponse.json({ error: 'bad' }, { status: 400 }),
+    });
+    expect(conflictingRetry.status).toBe(400);
+    // よって別 resource への流用は依然として塞がれたまま。
+    expect((await get(BALANCE)).status).toBe(409);
+  });
+
+  it('同じ nonce・別署名は credential 不一致で 409 (key を知るだけでは横取りできない)', async () => {
+    expect((await get(SUPPLY)).status).toBe(200);
+    const otherSignature = `0x${'1'.repeat(63)}2${'0'.repeat(63)}31b`;
+    // 束縛 (resource + query) は同一なので、弾かれる理由は credential 不一致だけ。
+    const hijack = await get(SUPPLY, {
+      header: paidHeader(otherSignature),
+    });
+    expect(hijack.status).toBe(409);
+  });
+
+  it('v1 X-PAYMENT と v2 PAYMENT-SIGNATURE は同じ claim キーを導く', async () => {
+    expect((await get(SUPPLY)).status).toBe(200);
+    // 封筒 (v1/v2) が違うだけの同一 authorization。別 resource への流用は 409。
+    const viaV2 = await get(BALANCE, { v2Header: v2PaidHeader() });
+    expect(viaV2.status).toBe(409);
+  });
+
+  it('from の checksum 大文字小文字は同じ claim キーを導く', async () => {
+    expect((await get(SUPPLY)).status).toBe(200);
+    const checksummed = `0x${PAYER.slice(2).toUpperCase()}`;
+    const header = Buffer.from(
+      JSON.stringify({
+        x402Version: 1,
+        scheme: 'exact',
+        network: 'base',
+        payload: {
+          signature: SIGNATURE,
+          authorization: {
+            from: checksummed,
+            to: '0x1111111111111111111111111111111111111111',
+            value: '2000',
+            validAfter: '0',
+            validBefore: '9999999999',
+            nonce: NONCE,
+          },
+        },
+      }),
+    ).toString('base64');
+    expect((await get(BALANCE, { header })).status).toBe(409);
+  });
+
+  it('settle 障害 (503) は claim を保持する (broadcast 済みかもしれない)', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ isValid: true, payer: '0xabc' }),
+    });
+    fetchMock.mockRejectedValueOnce(new Error('settle timeout'));
+    expect((await get(SUPPLY)).status).toBe(503);
+    // 使用済みかもしれない authorization を別 resource へ回させない。
+    expect((await get(BALANCE)).status).toBe(409);
+  });
+
+  it('settle の broadcast 前拒否だけ claim を解放する (未送信が確実な reason)', async () => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ isValid: true, payer: '0xabc' }),
+    });
+    // CDP は broadcast 前の拒否を 4xx + errorReason で返す (2026-08-20 実測の形)。
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ success: false, errorReason: 'insufficient_balance' }),
+    });
+    const failed = await get(SUPPLY);
+    expect(failed.status).toBe(402);
+    // 署名は未送信が確実 = 正直に別 resource で使い直せる。
+    expect((await get(BALANCE)).status).toBe(200);
+  });
+
+  it('settle の未知 reason は claim を保持する (broadcast 済みの可能性)', async () => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ isValid: true, payer: '0xabc' }),
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => ({ success: false, errorReason: 'unexpected_state' }),
+    });
+    expect((await get(SUPPLY)).status).toBe(402);
+    expect((await get(BALANCE)).status).toBe(409);
+  });
+
+  // record は sha256 束縛 + fingerprint の固定長。生の query を保存していた頃は 4KB 超の
+  // ゴミ query で record が MAX_RECORD_BYTES を越え、claim ごと fail-open で無効化できた。
+  it('5KB のゴミ query でも claim は書かれる (record は固定長・防御を外せない)', async () => {
+    const query = `?q=${'a'.repeat(5000)}`;
+    expect((await get(SUPPLY, { query })).status).toBe(200);
+    expect(kvHold.store.size).toBe(1);
+    const stored = [...kvHold.store.values()][0];
+    // 生 query は KV に残らない (hash のみ) ので record は常に小さい。
+    expect(stored.length).toBeLessThan(256);
+    expect(stored).not.toContain('aaaa');
+    // よって別 resource への流用は塞がれる。
+    expect((await get(BALANCE)).status).toBe(409);
+  });
+
+  it('nonce/署名を読めない payload は claim せず従来どおり facilitator 判定へ', async () => {
+    const header = Buffer.from(
+      JSON.stringify({
+        x402Version: 1,
+        scheme: 'exact',
+        network: 'base',
+        payload: { signature: '0xsig', authorization: {} },
+      }),
+    ).toString('base64');
+    const first = await get(SUPPLY, { header });
+    expect(first.status).toBe(200);
+    const second = await get(BALANCE, { header });
+    expect(second.status).toBe(200);
+    // claim を挟まないだけで、verify → settle は両 request とも従来どおり走る。
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'https://facilitator.payai.network/verify',
+      'https://facilitator.payai.network/settle',
+      'https://facilitator.payai.network/verify',
+      'https://facilitator.payai.network/settle',
+    ]);
+    expect(first.headers.get('X-PAYMENT-RESPONSE')).not.toBeNull();
+    expect(second.headers.get('X-PAYMENT-RESPONSE')).not.toBeNull();
   });
 });
