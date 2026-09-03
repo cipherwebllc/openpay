@@ -19,6 +19,10 @@ type SignerModule = {
 
 type ToolRuntime = {
   x402Pay: (args: unknown) => Promise<unknown>;
+  callTool: (
+    name: string,
+    args: unknown,
+  ) => Promise<{ content: Array<{ type: string; text: string }>; isError: boolean }>;
 };
 
 type ToolsModule = {
@@ -339,5 +343,79 @@ describe('packages/x402-mcp steward signer', () => {
     const rejected = results.find((r) => Array.isArray(r.reasons));
     expect(succeeded).toHaveLength(1); // 直列化が無ければ 2 本とも成功してしまう
     expect(rejected?.reasons).toContain('session_limit_exceeded');
+  });
+
+  // B9 / 掟 15: `status: 200` を「支払い済み」と読ませない。SDK の settlement をそのまま返し、
+  // tool 結果テキストに「verified 以外は支払い証明ではない」の 1 文を必ず添える。
+  it('x402_pay の結果に settlement と「支払い証明ではない」注記を添える', async () => {
+    const { createToolRuntime } = await loadTools();
+    const fetchImpl = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = requestUrl(input);
+        if (url !== RESOURCE) throw new Error(`unexpected fetch: ${url}`);
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        if ('X-PAYMENT' in headers) return jsonResponse({ ok: true }, 200);
+        return jsonResponse({ accepts: [accept()] }, 402);
+      },
+    );
+    const runtime = createToolRuntime({
+      env: {
+        BUYER_PRIVATE_KEY,
+        ALLOWED_HOSTS: 'open-pay.jp',
+        MAX_PER_CALL_JPYC: '10',
+        MAX_SESSION_JPYC: '100', // 同一 runtime で 2 回払うため session 上限に当てない
+      },
+      fetchImpl,
+      nowSec: () => 1_000_000_000,
+    });
+
+    const result = (await runtime.x402Pay({
+      url: RESOURCE,
+      maxTotalJpyc: '7',
+    })) as Record<string, unknown>;
+
+    // 売り手は受領証ヘッダを返していない → verified ではない。
+    expect(result.settlement).toBe('receipt_unavailable');
+    // B9: verified の意味 (discovery origin の署名鍵で領収書署名が検証できただけ = オンチェーン
+    // 証明ではない) をその場の 1 文に含める。
+    expect(result.settlementNote).toBe(
+      'settlement: receipt_unavailable — verified only means the receipt signature is valid for the signer published by the discovery origin, not on-chain proof; treat unverified/receipt_unavailable as not proven paid',
+    );
+
+    const tool = await runtime.callTool('x402_pay', {
+      url: RESOURCE,
+      maxTotalJpyc: '7',
+    });
+    expect(tool.content[0].text).toContain(
+      'treat unverified/receipt_unavailable as not proven paid',
+    );
+  });
+
+  it('guard 拒否 (支払い未発生) には settlement 注記を付けない', async () => {
+    const { createToolRuntime } = await loadTools();
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url !== RESOURCE) throw new Error(`unexpected fetch: ${url}`);
+      return jsonResponse({ accepts: [accept()] }, 402);
+    });
+    const runtime = createToolRuntime({
+      env: {
+        BUYER_PRIVATE_KEY,
+        ALLOWED_HOSTS: 'open-pay.jp',
+        MAX_PER_CALL_JPYC: '10',
+        MAX_SESSION_JPYC: '10',
+      },
+      fetchImpl,
+      nowSec: () => 1_000_000_000,
+    });
+
+    const result = (await runtime.x402Pay({
+      url: RESOURCE,
+      maxTotalJpyc: '6', // 7 JPYC 必要 → guard で拒否
+    })) as Record<string, unknown>;
+
+    expect(result.reasons).toContain('total_exceeds_max_total');
+    expect(result).not.toHaveProperty('settlement');
+    expect(result).not.toHaveProperty('settlementNote');
   });
 });

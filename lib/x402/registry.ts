@@ -17,6 +17,11 @@ import { normalizeHost } from '@/lib/net/privateHost';
 import { caip2ForChainId } from './network';
 import { x402FacilitatorConfig } from './facilitatorConfig';
 import { OPENPAY_CANONICAL_ORIGIN } from './firstParty';
+import {
+  hiddenUrlLedgerKey,
+  HIDDEN_URL_LEDGER_TTL_SEC,
+  HIDDEN_URL_LEDGER_VALUE,
+} from './hiddenUrlLedger';
 import { isPrivateHost } from './moderation';
 
 export const RESOURCES_INDEX = 'x402:resources:index';
@@ -38,6 +43,9 @@ export type X402Verification = {
   lastOkAt?: string;
   lastCheckedAt: string;
   failures: number;
+  // 401/403/別 origin への redirect が連続した回数 (cloaking 検出・B8)。既存レコードには存在しない
+  // ため **欠落 = 0** として読む (後方互換)。0 のときは書かない = 従来と同じ JSON 形を保つ。
+  authFailures?: number;
   lastRunId: string;
   probedUrl: string;
 };
@@ -264,12 +272,18 @@ function safeParse<T>(raw: string | null): T | null {
 // (作成しない = 並列 POST が cap を擦り抜けるレースを塞ぐ)。それ以外は SET(resource) + LPUSH(discovery
 // index) + LPUSH(merchant index) を実行 (Redis Lua は原子的なので「SET 成功・LPUSH 失敗」の orphan も
 // 起きない)。戻り: 1=作成 / -2=cap 超過。
+// N-5: KEYS[4] = hidden URL 台帳。台帳に載っている URL は hidden 済 (ARGV[4]) の JSON で作成し、
+// 「DELETE → 同一 URL で再登録」でモデレーション状態を洗い流す経路を塞ぐ。判定と保存を同じ
+// script に閉じるので、削除と再登録を並走させても台帳を跨げない。戻り: 1=作成 / 3=hidden 継承で
+// 作成 / -2=cap 超過。
 const CAS_CREATE =
   'local cap=tonumber(ARGV[3]); ' +
   "if redis.call('LLEN',KEYS[3])>=cap then return -2 end; " +
-  "redis.call('SET',KEYS[1],ARGV[1]); " +
+  "local doc=ARGV[1]; local code=1; " +
+  "if redis.call('EXISTS',KEYS[4])==1 then doc=ARGV[4]; code=3 end; " +
+  "redis.call('SET',KEYS[1],doc); " +
   "redis.call('LPUSH',KEYS[2],ARGV[2]); " +
-  "redis.call('LPUSH',KEYS[3],ARGV[2]); return 1";
+  "redis.call('LPUSH',KEYS[3],ARGV[2]); return code";
 
 export type CreateResourceResult =
   | { ok: true; resource: X402Resource }
@@ -303,13 +317,26 @@ export async function createResource(
     createdAt: nowMs,
     updatedAt: nowMs,
   };
+  const hiddenResource: X402Resource = { ...resource, hidden: true };
   const cas = await kvEval<number>(
     CAS_CREATE,
-    [resourceKey(id), RESOURCES_INDEX, merchantResourcesKey(input.merchant)],
-    [JSON.stringify(resource), id, String(MAX_RESOURCES_PER_MERCHANT)],
+    [
+      resourceKey(id),
+      RESOURCES_INDEX,
+      merchantResourcesKey(input.merchant),
+      hiddenUrlLedgerKey(input.url),
+    ],
+    [
+      JSON.stringify(resource),
+      id,
+      String(MAX_RESOURCES_PER_MERCHANT),
+      JSON.stringify(hiddenResource),
+    ],
   );
   if (!cas.ok) return { ok: false, reason: 'storage' };
   if (cas.value === -2) return { ok: false, reason: 'too_many' };
+  // 3 = 台帳に載っていた URL なので hidden を継承して作成した (公開カタログには出ない)。
+  if (cas.value === 3) return { ok: true, resource: hiddenResource };
   if (cas.value !== 1) return { ok: false, reason: 'storage' };
   return { ok: true, resource };
 }
@@ -385,11 +412,15 @@ const CAS_OWNER_GUARD =
 // 削除済 resource を復活させない — active/id/merchant/network/createdAt は Lua が現値を保持する。
 // soft-delete 済 (active:false) は編集不可 (-3) = 保持した監査データ (settlement が参照する当時の
 // payTo/価格) を後から書き換えさせない。
+// ⚠️ URL 変更時にリセットするのは **verification (連続失敗カウンタ) だけ**で、`hidden` は残す。
+// hidden は cron 再検証 (lib/x402/reverify.ts) が付けたモデレーション状態であり、owner が別 URL へ
+// PATCH → 元 URL へ PATCH し直すだけで解除できると自動 hidden が無意味になる (B6)。復帰は
+// 「再検証が ok_402_openpay を観測する」正規経路のみ (reverify の CAS が hidden=false に倒す)。
 // 戻り: 更新後 JSON 文字列=成功 / -1=未存在 / -2=malformed / -3=削除済 / 0=owner 不一致。
 const CAS_UPDATE =
   CAS_OWNER_GUARD +
   'if o.active==false then return -3 end; ' +
-  'if o.url~=ARGV[2] then o.verification=nil; o.hidden=nil end; ' +
+  'if o.url~=ARGV[2] then o.verification=nil end; ' +
   'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
   "if ARGV[7]=='' then o.docsUrl=nil else o.docsUrl=ARGV[7] end; " +
   "if ARGV[8]=='' then o.license=nil else o.license=ARGV[8] end; " +
@@ -401,11 +432,20 @@ const CAS_UPDATE =
 // owner 一致時のみ soft-delete (active:false) する CAS。既に無効なら 2 (冪等)。
 // discovery index は active 一覧用なので LREM で掃除する。merchant index は登録総数 cap 用に残す。
 // 戻り: 1=無効化 / 2=既に無効 / -1=未存在 / -2=malformed / 0=owner 不一致。
-const CAS_DEACTIVATE =
-  CAS_OWNER_GUARD +
+const CAS_DEACTIVATE_BODY =
   "if o.active==false then redis.call('LREM',KEYS[2],0,ARGV[2]); return 2 end; " +
   "o.active=false; redis.call('SET',KEYS[1],cjson.encode(o)); " +
   "redis.call('LREM',KEYS[2],0,ARGV[2]); return 1";
+
+const CAS_DEACTIVATE = CAS_OWNER_GUARD + CAS_DEACTIVATE_BODY;
+
+// N-5: hidden 済の掲載を削除するときだけ URL 台帳 (KEYS[3]) に印を残す。owner が
+// 「DELETE → 同一 URL で再登録」で hidden を消せないようにする (createResource が継承する)。
+// hidden の判定は権威レコード (o.hidden) 側で行うので、呼び元の読取と競合しても誤って印を残さない。
+const CAS_DEACTIVATE_WITH_LEDGER =
+  CAS_OWNER_GUARD +
+  "if o.hidden==true then redis.call('SET',KEYS[3],ARGV[3],'EX',ARGV[4]) end; " +
+  CAS_DEACTIVATE_BODY;
 
 export type UpdateResourceResult =
   | { ok: true; resource: X402Resource }
@@ -453,11 +493,27 @@ export async function deactivateResource(
   id: string,
   owner: string,
 ): Promise<DeactivateResourceResult> {
-  const cas = await kvEval<number>(
-    CAS_DEACTIVATE,
-    [resourceKey(id), RESOURCES_INDEX],
-    [getAddress(owner), id],
-  );
+  // 台帳キーは URL の sha256 なので Lua 側では作れない (Redis Lua は sha1 のみ)。先に URL を
+  // 読んで鍵を渡し、**印を残すか否かの判定 (o.hidden) は Lua が権威レコードで**行う。URL を
+  // 読めなかった (未存在 / KV エラー) ときは従来どおりの 2 keys 版に倒す。
+  const existing = await getResource(id);
+  const ledgerKey = existing?.url ? hiddenUrlLedgerKey(existing.url) : null;
+  const cas = ledgerKey
+    ? await kvEval<number>(
+        CAS_DEACTIVATE_WITH_LEDGER,
+        [resourceKey(id), RESOURCES_INDEX, ledgerKey],
+        [
+          getAddress(owner),
+          id,
+          HIDDEN_URL_LEDGER_VALUE,
+          String(HIDDEN_URL_LEDGER_TTL_SEC),
+        ],
+      )
+    : await kvEval<number>(
+        CAS_DEACTIVATE,
+        [resourceKey(id), RESOURCES_INDEX],
+        [getAddress(owner), id],
+      );
   if (!cas.ok) return { ok: false, reason: 'storage' };
   if (cas.value === -1) return { ok: false, reason: 'not_found' };
   if (cas.value === -2) return { ok: false, reason: 'storage' }; // 破損 JSON

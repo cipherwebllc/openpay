@@ -63,6 +63,7 @@ type OwnedFixture = typeof OWNED & {
   license?: string;
   hidden?: boolean;
   paywallSnippet?: string;
+  verification?: { authFailures?: number };
 };
 
 // URL+method でルーティングする fetch モック (編集/削除の呼び出しを検証)。
@@ -444,6 +445,45 @@ describe('X402DiscoveryView', () => {
       screen.getByText(/公開カタログから一時的に非表示/),
     ).toBeInTheDocument();
     expect(screen.getByText(repairSnippet)).toBeInTheDocument();
+  });
+
+  // N-4: 401/403・別ドメイン転送で締め出されて hidden になった掲載に「JPYC ゲートを確認できな
+  // かった」と出すのは誤案内。直し方 (probe を通す) が違うので文面とスニペットの有無を分ける。
+  it('owner: 締め出しで hidden になった掲載には再検証拒否の案内を出しスニペットは出さない', async () => {
+    const repairSnippet = 'export async function GET() { return new Response(null, { status: 402 }); }';
+    renderAsOwner([
+      {
+        ...OWNED,
+        hidden: true,
+        paywallSnippet: repairSnippet,
+        verification: { authFailures: 6 },
+      },
+    ]);
+
+    expect(await screen.findByText('要対応')).toBeInTheDocument();
+    expect(
+      screen.getByText(/再検証のアクセスが拒否（401\/403、または別ドメインへの転送）された/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/公開カタログから一時的に非表示/)).not.toBeInTheDocument();
+    expect(screen.queryByText(repairSnippet)).not.toBeInTheDocument();
+  });
+
+  it('owner: 閾値未満の authFailures では従来のゲート文面のまま', async () => {
+    renderAsOwner([
+      {
+        ...OWNED,
+        hidden: true,
+        paywallSnippet: 'snippet',
+        verification: { authFailures: 5 },
+      },
+    ]);
+
+    expect(
+      await screen.findByText(/公開カタログから一時的に非表示/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/再検証のアクセスが拒否/),
+    ).not.toBeInTheDocument();
   });
 
   it('登録上限: N/100 を amber 表示し、警告とともに新規登録を事前 disable', async () => {

@@ -2690,6 +2690,7 @@
     "yourResourcesSubtitle": "Edit or remove your registered listings. Removing one takes it off the public catalog.",
     "requiresActionBadge": "Action required",
     "requiresActionBody": "Reverification could not confirm an OpenPay JPYC gate, so this listing is temporarily hidden from the public catalog. Check the snippet below. It will return automatically after a successful check.",
+    "requiresActionAuthBody": "Listing paused because our re-verification requests were refused (401/403 or a redirect to another domain). Allow the re-verification requests and it will be restored on the next check.",
     "editCta": "Edit",
     "deleteCta": "Remove",
     "deleteConfirm": "Remove this listing?",

@@ -240,6 +240,25 @@ export async function fetchPaymentTarget(
     normalizedAddresses(
       await lookupWithSignal(resolver, parsed.hostname, signal),
     );
+  } else {
+    // A custom fetchImpl used to skip pre-resolution entirely, so a public hostname pointing at
+    // 169.254.169.254 or another private target reached the injected transport unchecked. Resolve
+    // with the default resolver and reject a proven-private target before the transport runs.
+    // A resolver failure is not itself proof of a private target and the custom transport resolves
+    // independently, so it does not block here; connection-time rebinding protection still
+    // requires supplying `lookup` (documented in the README).
+    let addresses = null;
+    try {
+      addresses = await lookupWithSignal(resolver, parsed.hostname, signal);
+    } catch (error) {
+      // An aborted pre-resolution is the caller's timeout, not a DNS verdict; continuing would
+      // hand the transport a dead signal.
+      if (signal.aborted) throw error;
+      addresses = null;
+    }
+    if (Array.isArray(addresses) && addresses.length > 0) {
+      normalizedAddresses(addresses);
+    }
   }
 
   const init = {

@@ -2690,6 +2690,7 @@
     "yourResourcesSubtitle": "登録済みの掲載を編集・削除できます。削除すると公開カタログから消えます。",
     "requiresActionBadge": "要対応",
     "requiresActionBody": "再検証で OpenPay の JPYC ゲートを確認できなかったため、公開カタログから一時的に非表示です。下のスニペットを確認してください。次回の検証成功で自動復帰します。",
+    "requiresActionAuthBody": "再検証のアクセスが拒否（401/403、または別ドメインへの転送）されたため掲載を一時停止しています。再検証のリクエストを許可すると次回の確認で復帰します。",
     "editCta": "編集",
     "deleteCta": "削除",
     "deleteConfirm": "この掲載を削除しますか？",

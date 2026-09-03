@@ -238,6 +238,7 @@ describe('openpay-x402-sdk executor', () => {
       status: 200,
       body: { unlocked: true },
       receipt,
+      settlement: 'verified',
     });
     expect(client.session).toEqual({
       spentAtomic: 7n * JPYC,
@@ -432,6 +433,8 @@ describe('openpay-x402-sdk executor', () => {
       status: 200,
       body: { unlocked: true },
       receipt: null,
+      // 売り手が受領証ヘッダを名乗ったが検証できなかった = 「受領証なし」ではない。
+      settlement: 'unverified',
     });
     expect(client.session.spentJpyc).toBe('7');
   });
@@ -452,8 +455,125 @@ describe('openpay-x402-sdk executor', () => {
 
     const result = await client.pay(RESOURCE, { maxTotalJpyc: '7' });
 
-    expect(result).toEqual({ status: 204, body: null, receipt: null });
+    expect(result).toEqual({
+      status: 204,
+      body: null,
+      receipt: null,
+      settlement: 'receipt_unavailable',
+    });
     expect(client.session.spentJpyc).toBe('7');
+  });
+
+  // B9: `status: 200` は「売り手が本文を返した」以上を意味しない。LLM がそれを「支払い済み」と
+  // 読むのを塞ぐため、settlement を決済結果の明示フィールドとして返す。
+  describe('settlement truth', () => {
+    it('reports receipt_unavailable when the facilitator signer cannot be resolved', async () => {
+      const sdk = await loadSdk();
+      const fetchImpl = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (
+            String(input) === 'https://open-pay.jp/api/facilitator/supported'
+          ) {
+            return jsonResponse({ error: 'unavailable' }, 503);
+          }
+          if (!requestHeaders(init).has('X-PAYMENT')) {
+            return jsonResponse({ accepts: [accept()] }, 402);
+          }
+          return jsonResponse({ unlocked: true }, 200, {
+            'x-payment-response': Buffer.from(
+              JSON.stringify({ success: true }),
+            ).toString('base64'),
+          });
+        },
+      );
+      const client = sdk.createOpenPayClient({
+        privateKey: PRIVATE_KEY,
+        catalogTrust: false,
+        fetchImpl,
+      });
+
+      const result = await client.pay(RESOURCE, { maxTotalJpyc: '7' });
+
+      expect(result).toMatchObject({
+        status: 200,
+        receipt: null,
+        settlement: 'receipt_unavailable',
+      });
+    });
+
+    it('reports unverified for a receipt signed by the wrong signer', async () => {
+      const sdk = await loadSdk();
+      const impostor = privateKeyToAccount(`0x${'3'.repeat(64)}` as Hex);
+      const fetchImpl = vi.fn(
+        async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (
+            String(input) === 'https://open-pay.jp/api/facilitator/supported'
+          ) {
+            return jsonResponse({ receiptSigner: receiptAccount.address }, 200);
+          }
+          const payment = requestHeaders(init).get('X-PAYMENT');
+          if (!payment) return jsonResponse({ accepts: [accept()] }, 402);
+          const payload = JSON.parse(
+            Buffer.from(payment, 'base64').toString('utf8'),
+          ) as { payload: { authorization: Record<string, unknown> } };
+          const { typedData } = sdk.buildTypedDataFromPaymentRequirements(
+            accept(),
+            payload.payload.authorization,
+          );
+          const nonce = typedData.message.nonce as Hex;
+          const message = {
+            txHash: RECEIPT_TX,
+            payer: account.address,
+            payTo: MERCHANT,
+            amount: 5n * JPYC,
+            fee: 2n * JPYC,
+            asset: TOKEN,
+            chainId: 80002n,
+            timestamp: 1_000_000_001n,
+            nonce,
+          };
+          const forged = {
+            success: true,
+            transaction: RECEIPT_TX,
+            network: 'eip155:80002',
+            payer: account.address,
+            receipt: {
+              ...message,
+              amount: (5n * JPYC).toString(),
+              fee: (2n * JPYC).toString(),
+              chainId: 80002,
+              timestamp: 1_000_000_001,
+              // 施設者ではない鍵の署名 = 受領証を名乗るが証明になっていない。
+              signature: await impostor.signTypedData({
+                domain: { name: 'OpenPay x402 Facilitator', version: '1' },
+                types: RECEIPT_TYPES,
+                primaryType: 'Receipt',
+                message,
+              }),
+            },
+          };
+          return jsonResponse({ unlocked: true }, 200, {
+            'x-payment-response': Buffer.from(JSON.stringify(forged)).toString(
+              'base64',
+            ),
+          });
+        },
+      );
+      const client = sdk.createOpenPayClient({
+        privateKey: PRIVATE_KEY,
+        catalogTrust: false,
+        fetchImpl,
+        nowSec: () => 1_000_000_000,
+      });
+
+      const result = await client.pay(RESOURCE, { maxTotalJpyc: '7' });
+
+      expect(result).toMatchObject({
+        status: 200,
+        receipt: null,
+        settlement: 'unverified',
+      });
+    });
   });
 });
 

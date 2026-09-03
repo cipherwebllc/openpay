@@ -610,12 +610,23 @@ export function createToolRuntime({
     return paymentExecutor.quote(input.url);
   }
 
+  // 掟 15: 決済状態の真実は facilitator の verify/settle とオンチェーンのみ。x402_pay の結果を読む
+  // LLM は `status: 200` を「支払い済み」と解釈しがちなので、SDK が返す settlement を **その場の
+  // 1 文で** 明示し、verified 以外を支払い証明として扱わせない。B9: `verified` も「discovery
+  // origin が公開する署名鍵で領収書の署名が検証できた」だけで、オンチェーンの証明ではない。
+  function settlementNote(settlement) {
+    return `settlement: ${settlement} — verified only means the receipt signature is valid for the signer published by the discovery origin, not on-chain proof; treat unverified/receipt_unavailable as not proven paid`;
+  }
+
   async function x402Pay(args) {
     const input = requireArgsObject(args);
     if (typeof input.url !== 'string') throw new Error('url is required');
-    return paymentExecutor.pay(input.url, {
+    const result = await paymentExecutor.pay(input.url, {
       maxTotalJpyc: input.maxTotalJpyc,
     });
+    // guard 拒否 (settlement を持たない quote 形) はそのまま返す — 支払いは発生していない。
+    if (!isObject(result) || typeof result.settlement !== 'string') return result;
+    return { ...result, settlementNote: settlementNote(result.settlement) };
   }
 
   async function callTool(name, args) {
