@@ -14,19 +14,49 @@ import { BillingDueBanner } from '@/components/BillingDueBanner';
 import { MarketRates } from '@/components/MarketRates';
 import { MiniHistoryRecent } from '@/components/MiniHistoryRecent';
 import { QrGenerator } from '@/components/QrGenerator';
-import { RegisterMode } from '@/components/RegisterMode';
-import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
-import { HandleProfileBuilder } from '@/components/HandleProfileBuilder';
-import { MobileOrderBuilder } from '@/components/MobileOrderBuilder';
-import { OrderFeedPanel } from '@/components/OrderFeedPanel';
 import { OrdersTabBadge } from '@/components/OrdersTabBadge';
-import { TodayCard } from '@/components/TodayCard';
 import { env } from '@/lib/env';
 import type { Locale } from '@/i18n';
 import { getExchangeLink } from '@/lib/links';
 import { TOKEN_SYMBOLS, type TokenSymbol } from '@/lib/tokens';
 import { resolveCreateTab, type CreateTab as Tab } from '@/lib/createTab';
 
+// タブ本体の遅延ロード (First Load JS 削減)。既定タブ 'qr' の QrGenerator だけは
+// 初回ペイントそのものなので静的 import のまま残す。他パネルは SSR 時点では
+// 必ず tab==='qr' (deep-link の ?tab= はマウント後の useEffect で反映) なので
+// HTML には元から出ておらず、ssr:false による描画差分は生じない。
+// SEO 対象の本文も持たない (ログイン後の作成ハブ)。
+const TabPanelFallback = () => <div className="min-h-[200px]" />;
+
+const RegisterMode = dynamic(
+  () => import('@/components/RegisterMode').then((m) => m.RegisterMode),
+  { ssr: false, loading: TabPanelFallback },
+);
+const TodayCard = dynamic(
+  () => import('@/components/TodayCard').then((m) => m.TodayCard),
+  { ssr: false },
+);
+const TipEmbedGenerator = dynamic(
+  () =>
+    import('@/components/TipEmbedGenerator').then((m) => m.TipEmbedGenerator),
+  { ssr: false, loading: TabPanelFallback },
+);
+const HandleProfileBuilder = dynamic(
+  () =>
+    import('@/components/HandleProfileBuilder').then(
+      (m) => m.HandleProfileBuilder,
+    ),
+  { ssr: false, loading: TabPanelFallback },
+);
+const MobileOrderBuilder = dynamic(
+  () =>
+    import('@/components/MobileOrderBuilder').then((m) => m.MobileOrderBuilder),
+  { ssr: false, loading: TabPanelFallback },
+);
+const OrderFeedPanel = dynamic(
+  () => import('@/components/OrderFeedPanel').then((m) => m.OrderFeedPanel),
+  { ssr: false, loading: TabPanelFallback },
+);
 const CreatorStoreSellerPanel = dynamic(() =>
   import('@/components/CreatorStoreSellerPanel').then(
     (module) => module.CreatorStoreSellerPanel,
