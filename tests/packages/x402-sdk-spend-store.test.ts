@@ -291,10 +291,10 @@ describe('openpay-x402-sdk file spend store', () => {
       await expect(access(lockPath)).resolves.toBeUndefined();
     });
 
-    // N-1: unlink → open('wx') の takeover は、同じ stale を見た 2 プロセスが
-    // 「A が作り直したロックを B の unlink が消す」形で交錯し、**両者が臨界区間に入る**
-    // (PoC 再現済み)。rename は 1 プロセスしか成功しないので奪取の所有権が証明される。
-    // 両者の stale 判定 (stat) をバリアで揃えてから rename に進ませ、交錯を必ず作る。
+    // N-1: 同じ stale を見た 2 プロセスの takeover は、片方が奪取を終えて **作り直した新しい
+    // ロック** をもう片方が「stale だ」と信じて退避してしまうと、両者が臨界区間に入る
+    // (unlink 実装なら unlink で、rename 実装なら rename で同じ形になる)。
+    // 交錯はタイマーではなく工程ごとの明示 promise で組み立て、毎回必ず再現させる。
     it('admits exactly one of two racing stale takeovers', async () => {
       const sdk = await loadSdk();
       const path = await temporaryPath('spend.json');
@@ -304,44 +304,70 @@ describe('openpay-x402-sdk file spend store', () => {
       const when = new Date(Date.now() - 120_000);
       await utimes(lockPath, when, when);
 
-      // ① 両者が「stale だ」と判定し終えるまで次に進ませない。
-      let seenStale = 0;
-      let releaseBarrier = () => {};
-      const bothSawStale = new Promise<void>((resolve) => {
-        releaseBarrier = resolve;
-      });
-      // ② 2 番目の unlink を「1 人目がロックを作り終える」まで遅らせる = PoC の交錯そのもの。
-      //    unlink → open('wx') 実装ならここで 2 人目が 1 人目のロックを消して両者が入る。
-      //    rename 実装は takeover で lockPath を unlink しないので、この遅延に当たらない。
-      let unlinkCalls = 0;
-      let markOpened = () => {};
-      const someoneHoldsLock = new Promise<void>((resolve) => {
-        markOpened = resolve;
-      });
+      function step() {
+        let release = () => {};
+        const reached = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return { reached, release: () => release() };
+      }
+      // ① 両者が lockPath を stat し「stale だ」と判定し終えるまで次に進ませない。
+      const bothSawStale = step();
+      let staleChecks = 0;
+      // ② 2 人目の takeover rename を「1 人目がロックを作り終える」まで待たせる = 交錯そのもの。
+      //    ここで 2 人目が掴むのは stale ではなく「1 人目が作り直した新しいロック」になる。
+      const firstHoldsLock = step();
+      let lockRenames = 0;
+      // ③ 2 人目の takeover が決着する (退避を戻した / rename が空振った / 握ってしまった) まで
+      //    1 人目にロックを解放させない。先に解放されるとこの交錯自体が起きない。
+      const raceSettled = step();
+      let lockOpens = 0;
       // 臨界区間に入った回数 = lockPath の 'wx' open に成功した回数。
       const acquisitions: string[] = [];
       const fsImpl = {
         access,
         mkdir,
         readFile,
-        rename,
         writeFile,
         async open(target: string, flags: string) {
           const handle = await open(target, flags);
-          acquisitions.push(target);
-          markOpened();
+          if (target === lockPath) {
+            acquisitions.push(target);
+            lockOpens += 1;
+            if (lockOpens === 1) firstHoldsLock.release();
+            else raceSettled.release();
+          }
           return handle;
         },
+        async rename(from: string, to: string) {
+          if (from === lockPath) {
+            lockRenames += 1;
+            if (lockRenames === 2) {
+              await firstHoldsLock.reached;
+              try {
+                return await rename(from, to);
+              } catch (error) {
+                raceSettled.release();
+                throw error;
+              }
+            }
+          }
+          const result = await rename(from, to);
+          // 退避ファイルを lockPath に戻した = 2 人目が奪取を取り消して撤退した。
+          if (to === lockPath) raceSettled.release();
+          return result;
+        },
         async unlink(target: string) {
-          unlinkCalls += 1;
-          if (unlinkCalls === 2) await someoneHoldsLock;
+          if (target === lockPath) await raceSettled.reached;
           return unlink(target);
         },
         async stat(target: string) {
           const stats = await stat(target);
-          seenStale += 1;
-          if (seenStale >= 2) releaseBarrier();
-          await bothSawStale;
+          if (target === lockPath) {
+            staleChecks += 1;
+            if (staleChecks >= 2) bothSawStale.release();
+            await bothSawStale.reached;
+          }
           return stats;
         },
       } as unknown as NonNullable<
