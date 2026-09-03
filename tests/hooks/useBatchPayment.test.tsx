@@ -955,6 +955,129 @@ describe('useBatchPayment', () => {
     });
   });
 
+  // A3 / A10 (2026-09-02 review・2026-09-03 rescope): pending record の読み出しは
+  // fail-closed (ただし止めるのは gasless のみ)、record は 7 日で失効。
+  describe('pending record の fail-closed 読み出しと失効', () => {
+    it('storage の getItem が throw → gasless 送信を止める (fail-closed・専用 flag)', async () => {
+      mountReady();
+      const getItem = vi
+        .spyOn(Storage.prototype, 'getItem')
+        .mockImplementation(() => {
+          throw new Error('SecurityError');
+        });
+
+      const { result } = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 1n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+
+      await waitFor(() =>
+        expect(result.current.pendingStoreUnavailable).toBe(true),
+      );
+      // 未解決 UserOp の有無を判定できない = 新規 UserOp を出さない (二重支払い防止)。
+      expect(sendUserOperation).not.toHaveBeenCalled();
+      // broadcast 済とは言い切れないので unknown (= standard も封鎖) には倒さない。
+      expect(result.current.isUnknown).toBe(false);
+      // 通常 failure へも流さない (履歴/汎用 error UI に出さず専用文言へ束ねる)。
+      expect(result.current.error).toBeNull();
+      getItem.mockRestore();
+    });
+
+    it('7 日を超えた record は無視して破棄する (恒久ロックアウト回避)', async () => {
+      mountReady();
+      waitForUserOperationReceipt.mockRejectedValueOnce(
+        new Error('UserOperationReceiptTimeoutError'),
+      );
+      const first = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      first.result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 5n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(first.result.current.isUnknown).toBe(true));
+      first.unmount();
+
+      // 保存済 record の updatedAt を 7 日 + 1 分前に巻き戻す。
+      const stale = Date.now() - (7 * 24 * 60 * 60 * 1000 + 60_000);
+      for (const key of pimlicoPendingKeys()) {
+        const rec = JSON.parse(
+          window.localStorage.getItem(key) ?? '{}',
+        ) as Record<string, unknown>;
+        window.localStorage.setItem(
+          key,
+          JSON.stringify({ ...rec, updatedAt: stale }),
+        );
+      }
+
+      mountReady();
+      const restored = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      await waitFor(() => expect(restored.result.current.isUnknown).toBe(false));
+      // 期限切れ record は読み捨て + 破棄される (次の決済を block しない)。
+      expect(pimlicoPendingKeys()).toHaveLength(0);
+
+      restored.result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 5n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(restored.result.current.isSuccess).toBe(true));
+      expect(sendUserOperation).toHaveBeenCalledOnce();
+    });
+
+    it('7 日以内の record は従来どおり latch として復元する', async () => {
+      mountReady();
+      waitForUserOperationReceipt.mockRejectedValueOnce(
+        new Error('UserOperationReceiptTimeoutError'),
+      );
+      const first = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      first.result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 5n,
+        feeReceiver: FEE_RECV,
+        feeAmount: 1n,
+      });
+      await waitFor(() => expect(first.result.current.isUnknown).toBe(true));
+      first.unmount();
+
+      const fresh = Date.now() - 6 * 24 * 60 * 60 * 1000;
+      for (const key of pimlicoPendingKeys()) {
+        const rec = JSON.parse(
+          window.localStorage.getItem(key) ?? '{}',
+        ) as Record<string, unknown>;
+        window.localStorage.setItem(
+          key,
+          JSON.stringify({ ...rec, updatedAt: fresh }),
+        );
+      }
+
+      mountReady();
+      const restored = renderHook(() => useBatchPayment(usdcDep), {
+        wrapper: makeWrapper(),
+      });
+      await waitFor(() => expect(restored.result.current.isUnknown).toBe(true));
+      expect(restored.result.current.pendingUserOpHash).toBe(
+        `0x${'a'.repeat(64)}`,
+      );
+    });
+  });
+
   describe('calls の構築 (データ整合性)', () => {
     it('複数 extraRecipients の順序保存 + bigint amount 整合性', async () => {
       mountReady();

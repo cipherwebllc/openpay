@@ -59,6 +59,9 @@ export function OpenPayFeePanel() {
   const payTxByPeriod = useRef<Map<string, Hex>>(new Map());
   // pending (relay 未確定) になった期間。再送せず確定待ちを促す。
   const [pendingPeriod, setPendingPeriod] = useState<string | null>(null);
+  // on-chain で revert した期間 (送金は成立していない)。throw ではなく success=false の
+  // 結果で返るため、明示表示しないと「押しても何も起きない」無反応に見える。
+  const [revertedPeriod, setRevertedPeriod] = useState<string | null>(null);
   // 今どの期間を清算中か (settle mutation の状態を期間別に表示するため)。
   const [activePeriod, setActivePeriod] = useState<string | null>(null);
 
@@ -91,6 +94,7 @@ export function OpenPayFeePanel() {
     if (!payDeployment) return;
     setActivePeriod(line.period);
     setPendingPeriod(null);
+    setRevertedPeriod(null);
     const r = await pay
       .mutateAsync({ value: BigInt(line.feeWei) })
       .catch(() => null);
@@ -102,7 +106,10 @@ export function OpenPayFeePanel() {
     if (r.success && r.txHash) {
       payTxByPeriod.current.set(line.period, r.txHash);
       settle.mutate({ txHash: r.txHash, period: line.period });
+      return;
     }
+    // relay は成立したが tx が revert = 送金未成立。再署名して再試行してよい。
+    setRevertedPeriod(line.period);
   }
 
   // settle 失敗後の再試行 (再送金せず、保持済み txHash で settle のみ再実行)。
@@ -184,6 +191,11 @@ export function OpenPayFeePanel() {
         {isActive && pay.isError && (
           <p className="text-[11px] text-red-600">
             {t('payError', { reason: (pay.error as Error)?.message ?? 'error' })}
+          </p>
+        )}
+        {revertedPeriod === line.period && !pay.isError && (
+          <p className="text-[11px] text-red-600">
+            {t('payError', { reason: 'reverted' })}
           </p>
         )}
       </>

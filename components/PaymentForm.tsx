@@ -450,6 +450,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // Pimlico は broadcast 後の receipt 取得失敗を relay と同じ unknown として保持する。
   // current route が後から変わってもラッチを外さず、2 本目の UserOperation 送信を防ぐ。
   const gaslessAmbiguous = gasless.isUnknown;
+  // pending record store (localStorage) が読めず未解決 UserOp の有無を判定できない状態。
+  // broadcast 済みとは言い切れないので ambiguous とは別扱いにし、gasless 経路だけを塞ぐ
+  // (standard は localStorage に依存しないため、この fail-closed を波及させない)。
+  const gaslessStoreUnavailable =
+    !isStandard && !useRelay && gasless.pendingStoreUnavailable;
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
@@ -501,6 +506,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
     gasQuoteReady &&
     !merchantUnderflow &&
     !settledNoRetry &&
+    // gasless 経路のみ封鎖 (standard へ切り替えれば支払える)。
+    !gaslessStoreUnavailable &&
     // 正規 /pay UI では期限目安超過後の支払いをブロック (固定レートが陳腐化しているため)。
     // 未署名 exp のため、これは敵対的な支払者へサーバ強制できる防御ではない。
     !expired &&
@@ -1388,6 +1395,16 @@ function PaymentDetails({ params }: { params: PayParams }) {
           actionLabel={t('responseUnknownRetryButton')}
           actionDisabled={gasless.isPending}
           onAction={gasless.retryReceipt}
+        />
+      )}
+
+      {/* 支払い記録を保存できない端末では gasless だけを止める (通常送信は使える)。
+          「支払い確認中」とは別文言 — 送信済みかもしれない状態ではないため。 */}
+      {gaslessStoreUnavailable && (
+        <PaymentStatusPanel
+          title={t('pendingStoreUnavailableTitle')}
+          body={t('pendingStoreUnavailableBody')}
+          titleWithIcon
         />
       )}
 

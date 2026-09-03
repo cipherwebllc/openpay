@@ -186,7 +186,13 @@ let standardRetryFee: ReturnType<typeof vi.fn>;
 let standardRetryReceipt: ReturnType<typeof vi.fn>;
 let gaslessRetryReceipt: ReturnType<typeof vi.fn>;
 function setPayment(
-  state: 'idle' | 'pending' | 'unknown' | 'success' | 'error',
+  state:
+    | 'idle'
+    | 'pending'
+    | 'unknown'
+    | 'store-unavailable'
+    | 'success'
+    | 'error',
   err?: Error,
 ) {
   mutate = vi.fn();
@@ -195,6 +201,8 @@ function setPayment(
     mutate,
     isPending: state === 'pending',
     isUnknown: state === 'unknown',
+    // pending record store が読めない fail-closed 状態 (isUnknown とは別 flag)。
+    pendingStoreUnavailable: state === 'store-unavailable',
     pendingUserOpHash:
       state === 'unknown' ? `0x${'c'.repeat(64)}` : undefined,
     retryReceipt: gaslessRetryReceipt,
@@ -804,6 +812,50 @@ describe('PaymentForm — 送信フロー', () => {
     );
     expect(gaslessRetryReceipt).toHaveBeenCalledOnce();
     expect(mutate).not.toHaveBeenCalled();
+  });
+
+  // A3 rescope (2026-09-03): pending record store が読めない fail-closed 状態は
+  // 「支払い確認中」と混ぜず専用文言にし、封鎖するのは gasless 経路だけにする。
+  it('pending 記録を保存できない端末: gasless は封鎖し専用文言を出す', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setPayment('store-unavailable');
+    setGasQuote('ready', 0n);
+    render(<PaymentForm />);
+
+    expect(
+      screen.getByText('この端末では記録を保存できません'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'この端末では支払い記録を保存できないため、ガスレス送信を止めています。通常送信をご利用ください。',
+      ),
+    ).toBeInTheDocument();
+    // 「支払い確認中」(broadcast 済かもしれない状態) とは別表示にする。
+    expect(screen.queryByText('送信結果を確認中')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /10 USDC を支払う/ }),
+    ).toBeDisabled();
+  });
+
+  it('pending 記録を保存できなくても standard (通常送信) は使える', async () => {
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setPayment('store-unavailable');
+    render(<PaymentForm />);
+
+    const payButton = screen.getByRole('button', { name: /10 USDC を支払う/ });
+    expect(payButton).not.toBeDisabled();
+    // gasless 専用の案内は standard では出さない。
+    expect(
+      screen.queryByText('この端末では記録を保存できません'),
+    ).not.toBeInTheDocument();
+    await user.click(payButton);
+    expect(standardMutate).toHaveBeenCalledOnce();
   });
 
   it('送信成功 → tx hash と block 番号が表示される', () => {

@@ -96,6 +96,14 @@ type BatchPaymentResult = {
 export const PIMLICO_PENDING_KEY_PREFIX = 'openpay.pimlico.pending.';
 const PIMLICO_PENDING_SCHEMA_VERSION = 1 as const;
 
+// pending record の最大保持期間 (updatedAt 起点)。bundler が UserOp を drop して永久に
+// mine されない場合、latch だけが残って gasless 決済が恒久ロックされる。7 日 = Circle の
+// 未決済 attestation 保持期間に合わせた上限で、(a) bundler は drop 後も数日単位で再送を
+// 試みうる、(b) UserOp の nonce は新しい op と一意性が保証されない — の 2 点から、24h では
+// 「まだ mine されうる op」を先に捨てて二重送金を許す窓ができる。これを過ぎた record は
+// 読み出し時に無視 + 破棄する。
+const PIMLICO_PENDING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 type StoredBatchPaymentParams = {
   tokenAddress: Address;
   merchant: Address;
@@ -152,6 +160,20 @@ export function isPimlicoResponseUnknownError(
   error: unknown,
 ): error is PimlicoResponseUnknownError {
   return error instanceof PimlicoResponseUnknownError;
+}
+
+/** pending record store (localStorage) 自体が読めない状態。未解決 UserOp の有無を
+ * 判定できないため gasless 送信を fail-closed で止める (lib/circlePending の
+ * requireStorage と同じ方針)。何の波及を断つか: storage 障害で latch を失った端末が、
+ * broadcast 済 UserOp の上に 2 本目を重ねる二重支払いを断つ。 */
+export class PimlicoPendingStoreUnavailableError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string) {
+    super('pending-store-unavailable');
+    this.name = 'PimlicoPendingStoreUnavailableError';
+    this.reason = reason;
+  }
 }
 
 function pendingStorageKey(args: {
@@ -312,18 +334,53 @@ function isPimlicoPendingRecord(
   );
 }
 
-function loadPimlicoPending(storageKey: string): PimlicoPendingRecord | null {
-  if (typeof window === 'undefined') return null;
+// 読み出し結果の 3 状態。'none' (記録なし) と 'unavailable' (storage 自体が読めない) を
+// 区別するのが要点 — 従来は両方 null に潰れて fail-open だった。
+type PimlicoPendingRead =
+  | { kind: 'record'; record: PimlicoPendingRecord }
+  | { kind: 'none' }
+  | { kind: 'unavailable'; error: unknown };
+
+function readPimlicoPending(storageKey: string): PimlicoPendingRead {
+  if (typeof window === 'undefined') return { kind: 'none' };
+  let raw: string | null;
   try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (raw === null) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    if (isPimlicoPendingRecord(parsed)) return parsed;
-    logger.warn('pimlico.pending.corrupt-record', { storageKey });
+    raw = window.localStorage.getItem(storageKey);
   } catch (error) {
+    // storage が読めない = 未解決 UserOp の有無を判定できない。呼出側は fail-closed で
+    // 送信を止める (何の波及を断つか: latch を失った端末の二重送金)。
     logger.warn('pimlico.pending.load-failed', { storageKey, error });
+    return { kind: 'unavailable', error };
   }
-  return null;
+  if (raw === null) return { kind: 'none' };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch (error) {
+    // corrupt な 1 件は storage 障害ではない。従来どおり「記録なし」に倒して
+    // 決済開始を止めない。
+    logger.warn('pimlico.pending.load-failed', { storageKey, error });
+    return { kind: 'none' };
+  }
+  if (!isPimlicoPendingRecord(parsed)) {
+    logger.warn('pimlico.pending.corrupt-record', { storageKey });
+    return { kind: 'none' };
+  }
+  if (Date.now() - parsed.updatedAt > PIMLICO_PENDING_MAX_AGE_MS) {
+    // 期限切れ = 解決不能になった残骸。無視 + 破棄して恒久ロックアウトを避ける。
+    logger.warn('pimlico.pending.expired', {
+      storageKey,
+      userOpHash: parsed.userOpHash,
+      updatedAt: parsed.updatedAt,
+    });
+    try {
+      window.localStorage.removeItem(storageKey);
+    } catch {
+      // 破棄失敗は判定に影響しない (次回読み出しでも expired として無視される)。
+    }
+    return { kind: 'none' };
+  }
+  return { kind: 'record', record: parsed };
 }
 
 function persistPimlicoPending(
@@ -351,8 +408,8 @@ function persistPimlicoPending(
 function clearPimlicoPending(storageKey: string, userOpHash: Hex): void {
   if (typeof window === 'undefined') return;
   try {
-    const current = loadPimlicoPending(storageKey);
-    if (current?.userOpHash === userOpHash) {
+    const current = readPimlicoPending(storageKey);
+    if (current.kind === 'record' && current.record.userOpHash === userOpHash) {
       window.localStorage.removeItem(storageKey);
     }
   } catch (error) {
@@ -387,16 +444,25 @@ export function useBatchPayment(
   const pendingRef = useRef<LatchedPimlicoPending | null>(null);
   const [unknownPending, setUnknownPending] =
     useState<LatchedPimlicoPending | null>(null);
+  // pending store が読めないまま送信要求が来た状態 (fail-closed)。broadcast 済 UserOp の
+  // 有無を判定できないので gasless だけを止める。storage が再び読めた時点で解除する。
+  const [pendingStoreUnavailable, setPendingStoreUnavailable] = useState(false);
 
   useEffect(() => {
-    const restored = loadPimlicoPending(pimlicoStorageKey);
-    const latched = restored
-      ? { storageKey: pimlicoStorageKey, record: restored }
-      : null;
+    const read = readPimlicoPending(pimlicoStorageKey);
+    if (read.kind === 'unavailable') {
+      // 読めない間は memory latch を上書きしない (誤って解除すると二重送金へ波及する)。
+      return;
+    }
+    const latched =
+      read.kind === 'record'
+        ? { storageKey: pimlicoStorageKey, record: read.record }
+        : null;
     pendingRef.current = latched;
     // reload 後は前回の receipt waiter が存在しないため、永続 record は pending/unknown
     // どちらでも「結果不確定」として復元する。
     setUnknownPending(latched);
+    setPendingStoreUnavailable(false);
   }, [pimlicoStorageKey]);
 
   const mutation = useMutation<BatchPaymentResult, Error, BatchPaymentParams>({
@@ -407,10 +473,23 @@ export function useBatchPayment(
         );
       }
 
-      const retained =
-        pendingRef.current?.storageKey === pimlicoStorageKey
-          ? pendingRef.current.record
-          : loadPimlicoPending(pimlicoStorageKey);
+      let retained: PimlicoPendingRecord | null = null;
+      if (pendingRef.current?.storageKey === pimlicoStorageKey) {
+        retained = pendingRef.current.record;
+      } else {
+        const read = readPimlicoPending(pimlicoStorageKey);
+        if (read.kind === 'unavailable') {
+          // fail-closed: 未解決 UserOp の有無を判定できない状態では新規送信しない。
+          // 何の波及を断つか: latch を失った端末が broadcast 済 UserOp の上に 2 本目を
+          // 重ねる二重支払いを断つ (lib/circlePending の requireStorage と同じ方針)。
+          // 止めるのは gasless のみ — standard は localStorage に依存しないので、
+          // この fail-closed を通常決済へ波及させない (呼出元 UI で分岐する)。
+          setPendingStoreUnavailable(true);
+          throw new PimlicoPendingStoreUnavailableError(String(read.error));
+        }
+        setPendingStoreUnavailable(false);
+        retained = read.kind === 'record' ? read.record : null;
+      }
       if (retained && clients.provider === 'circle') {
         // provider が切り替わっても、未解決の Pimlico UserOp から Circle の新規送信へ
         // 波及させない。Pimlico client が再び利用可能になるまで hash を保持する。
@@ -623,8 +702,12 @@ export function useBatchPayment(
     ...mutation,
     // response-unknown を通常 failure として履歴/汎用 error UI へ流さない。フォームは
     // isUnknown を relayAmbiguous と同じ pending/unknown 表示へ束ねる。
-    error: activeUnknown ? null : mutation.error,
+    // storage 不能 (fail-closed) は isUnknown に混ぜない — broadcast 済 UserOp が在ると
+    // 言い切れる状態ではなく、混ぜると通常決済まで封鎖してしまうため別 flag で返す。
+    error: activeUnknown || pendingStoreUnavailable ? null : mutation.error,
     isUnknown: activeUnknown !== null,
+    // gasless だけを止めるための専用 flag (呼出元は standard 経路を塞がない)。
+    pendingStoreUnavailable,
     pendingUserOpHash: activeUnknown?.userOpHash,
     retryReceipt,
   };

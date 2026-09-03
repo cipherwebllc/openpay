@@ -302,6 +302,10 @@ export function TipForm({
   // Pimlico は broadcast 後の receipt 取得失敗を relay と同じ unknown として保持する。
   // latch 中は新しい UserOperation ではなく、保持済み hash の receipt 再照会だけを許可する。
   const gaslessAmbiguous = gasless.isUnknown;
+  // pending record store (localStorage) が読めず未解決 UserOp の有無を判定できない状態。
+  // broadcast 済みとは言い切れないので ambiguous とは別扱いにし、gasless 経路だけを塞ぐ
+  // (relay は localStorage に依存しないため、この fail-closed を波及させない)。
+  const gaslessStoreUnavailable = !useRelay && gasless.pendingStoreUnavailable;
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
@@ -363,7 +367,9 @@ export function TipForm({
     !insufficientBalance &&
     !flowPending &&
     gasQuoteReady &&
-    !settledNoRetry;
+    !settledNoRetry &&
+    // gasless 経路のみ封鎖 (relay へ切り替えれば支払える)。
+    !gaslessStoreUnavailable;
 
   // gas congested はチェーン別の早期 abort なので、生のエラーメッセージ
   // (デバッグ向け詳細) ではなく i18n された案内文に差し替える。
@@ -1147,6 +1153,16 @@ export function TipForm({
           actionLabel={t('responseUnknownRetryButton')}
           actionDisabled={gasless.isPending}
           onAction={gasless.retryReceipt}
+        />
+      )}
+
+      {/* 支払い記録を保存できない端末では gasless だけを止める (relay 経路は使える)。
+          「支払い確認中」とは別文言 — 送信済みかもしれない状態ではないため。 */}
+      {gaslessStoreUnavailable && (
+        <PaymentStatusPanel
+          title={t('pendingStoreUnavailableTitle')}
+          body={t('pendingStoreUnavailableBody')}
+          titleWithIcon
         />
       )}
 
