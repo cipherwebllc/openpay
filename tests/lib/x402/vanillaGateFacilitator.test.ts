@@ -27,6 +27,42 @@ vi.mock('@/lib/x402/config', () => ({
   },
 }));
 
+// resource 束縛 claim (B5(b)) の KV を in-memory で「構成済み」にする。
+// 既定 (kv.down = false) では本来の SET NX / CAS DEL 経路を通し、down = true で
+// fail-open (claim 無しで従来どおり通す) を検証する。
+const kvHold = vi.hoisted(() => ({
+  store: new Map<string, string>(),
+  down: false,
+}));
+
+vi.mock('@/lib/kv', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/kv')>('@/lib/kv');
+  return {
+    ...actual,
+    kvSetNxGet: async (key: string, value: string) => {
+      if (kvHold.down) return { ok: false, reason: 'network_error' as const };
+      const existing = kvHold.store.get(key);
+      if (existing !== undefined) return { ok: true, value: existing };
+      kvHold.store.set(key, value);
+      return { ok: true, value: null };
+    },
+    kvEval: async (_script: string, keys: string[], args: string[]) => {
+      if (kvHold.down) return { ok: false, reason: 'network_error' as const };
+      const current = kvHold.store.get(keys[0]);
+      if (current === undefined) return { ok: true, value: 0 };
+      const parsed = JSON.parse(current) as {
+        binding: string;
+        credential: string;
+      };
+      if (parsed.binding !== args[0] || parsed.credential !== args[1]) {
+        return { ok: true, value: -1 };
+      }
+      kvHold.store.delete(keys[0]);
+      return { ok: true, value: 1 };
+    },
+  };
+});
+
 import { handleVanillaPaidGet } from '@/lib/x402/vanillaGate';
 
 function ed25519Secret(): string {
@@ -69,6 +105,8 @@ beforeEach(() => {
     json: async () => ({ isValid: true, payer: '0xabc', success: true, transaction: '0xtx' }),
   });
   configHold.vanillaFacilitator = { url: 'https://facilitator.payai.network' };
+  kvHold.store.clear();
+  kvHold.down = false;
 });
 
 async function run(): Promise<void> {
@@ -340,5 +378,135 @@ describe('vanillaGate facilitator 切替', () => {
     );
     expect(res.status).toBe(503);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// B5(b): exact scheme の verify は value >= maxAmountRequired しか見ず resource を含まない。
+// 1 通の署名済み X-PAYMENT が同額・別 resource で二重解錠されるのを、resource + query
+// 束縛の claim で断つ。KV は money truth ではないので障害時は fail-open。
+describe('vanillaGate resource 束縛 claim', () => {
+  const SUPPLY = {
+    resourceUrl: 'https://open-pay.jp/api/paid/usdc/jpyc/supply',
+    description: 'jpyc supply',
+    price: '$0.002',
+  };
+  const BALANCE = {
+    resourceUrl: 'https://open-pay.jp/api/paid/usdc/jpyc/balance',
+    description: 'jpyc balance',
+    price: '$0.002',
+  };
+  const SIGNATURE = `0x${'0'.repeat(63)}1${'0'.repeat(63)}21b`;
+  const PAYER = '0xabcabcabcabcabcabcabcabcabcabcabcabcabca';
+  const NONCE = `0x${'cd'.repeat(32)}`;
+
+  function paidHeader(signature = SIGNATURE): string {
+    return Buffer.from(
+      JSON.stringify({
+        x402Version: 1,
+        scheme: 'exact',
+        network: 'base',
+        payload: {
+          signature,
+          authorization: {
+            from: PAYER,
+            to: '0x1111111111111111111111111111111111111111',
+            value: '2000',
+            validAfter: '0',
+            validBefore: '9999999999',
+            nonce: NONCE,
+          },
+        },
+      }),
+    ).toString('base64');
+  }
+
+  async function get(
+    resource: typeof SUPPLY,
+    opts: { query?: string; header?: string; content?: () => NextResponse } = {},
+  ): Promise<NextResponse> {
+    const req = new Request(`${resource.resourceUrl}${opts.query ?? ''}`, {
+      headers: { 'x-payment': opts.header ?? paidHeader() },
+    });
+    return handleVanillaPaidGet(
+      req,
+      resource,
+      opts.content ?? (() => NextResponse.json({ ok: true })),
+    );
+  }
+
+  it('同じ authorization を別 resource へ = 2 本目は 409 (facilitator も呼ばない)', async () => {
+    const first = await get(SUPPLY);
+    expect(first.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const second = await get(BALANCE);
+    expect(second.status).toBe(409);
+    // verify も settle も追加で呼ばれない = 2 本目のコンテンツ生成も課金も起きない。
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const body = (await second.json()) as { error?: string };
+    expect(body.error).toBe('authorization_conflict');
+  });
+
+  it('同じ authorization を同じ resource へ再送 = 従来どおり通る (再配信の挙動不変)', async () => {
+    expect((await get(SUPPLY)).status).toBe(200);
+    const again = await get(SUPPLY);
+    expect(again.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(again.headers.get('X-PAYMENT-RESPONSE')).not.toBeNull();
+  });
+
+  it('query の並び順だけが違う再送は同一束縛 (正直な再送を 409 にしない)', async () => {
+    expect((await get(SUPPLY, { query: '?chain=polygon&x=1' })).status).toBe(200);
+    const again = await get(SUPPLY, { query: '?x=1&chain=polygon' });
+    expect(again.status).toBe(200);
+  });
+
+  it('同じ resource でも別 query は別束縛 = 409', async () => {
+    expect((await get(SUPPLY, { query: '?chain=polygon' })).status).toBe(200);
+    const other = await get(SUPPLY, { query: '?chain=base' });
+    expect(other.status).toBe(409);
+  });
+
+  it('KV 障害時は claim せず従来どおり通す (fail-open)', async () => {
+    kvHold.down = true;
+    expect((await get(SUPPLY)).status).toBe(200);
+    const second = await get(BALANCE);
+    expect(second.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it('verify 失敗は claim を解放する (未使用の署名を人質にしない)', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ isValid: false, invalidReason: 'insufficient_funds' }),
+    });
+    const failed = await get(SUPPLY);
+    expect(failed.status).toBe(402);
+    // 署名は未使用のまま = 同じ authorization を別 resource で正直に使い直せる。
+    const second = await get(BALANCE);
+    expect(second.status).toBe(200);
+  });
+
+  it('content 4xx も claim を解放する (引数を直した同一支払いの再送を塞がない)', async () => {
+    const invalid = await get(SUPPLY, {
+      content: () => NextResponse.json({ error: 'invalid_query' }, { status: 400 }),
+    });
+    expect(invalid.status).toBe(400);
+    const retried = await get(SUPPLY, { query: '?address=0x1' });
+    expect(retried.status).toBe(200);
+  });
+
+  it('nonce/署名を読めない payload は claim せず従来どおり facilitator 判定へ', async () => {
+    const header = Buffer.from(
+      JSON.stringify({
+        x402Version: 1,
+        scheme: 'exact',
+        network: 'base',
+        payload: { signature: '0xsig', authorization: {} },
+      }),
+    ).toString('base64');
+    expect((await get(SUPPLY, { header })).status).toBe(200);
+    expect((await get(BALANCE, { header })).status).toBe(200);
+    expect(kvHold.store.size).toBe(0);
   });
 });

@@ -16,9 +16,17 @@
 //
 // 買い手保護: verify → content → (content が 2xx/3xx のときだけ) settle の順。
 // x402-next と同一の順序で、データ不能 (503) 時に課金されない。settle 応答の喪失時に
-// 再配信する仕組み (first-party の redelivery KV) は**意図的に持たない** — 標準 x402
-// サーバー (x402-next 含む) と同じ残余リスクで、EIP-3009 nonce はオンチェーンで消費済みの
-// ため二重課金にはならない (再リクエストは verify で落ち 402 に戻るだけ)。
+// **成功応答を再配信する cache** (first-party の settled redelivery) は**意図的に持たない** —
+// 標準 x402 サーバー (x402-next 含む) と同じ残余リスクで、EIP-3009 nonce はオンチェーンで
+// 消費済みのため二重課金にはならない (再リクエストは verify で落ち 402 に戻るだけ)。
+//
+// ただし **resource 束縛の claim は持つ** (lib/x402/vanillaResourceClaim.ts・B5(b)):
+// exact scheme の verify は `value >= maxAmountRequired` しか見ず resource を署名に含めない
+// ため、1 通の署名済み X-PAYMENT を同額・別 resource へ**同時に**投げると両方が verify を
+// 通り、settle の原子性が 2 本目の課金を止める頃には 2 本目のコンテンツ生成が終わっている。
+// verify の前に「payment identity → resource + canonical query」を KV へ原子的に束縛し、
+// 別束縛での再利用だけを 409 で弾く (同一束縛の再送は従来どおり素通り)。KV は money truth
+// ではないので、未構成・障害時は fail-open (warn のみ) で従来経路を止めない。
 
 import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
@@ -37,6 +45,13 @@ import {
   type FacilitatorV1Body,
   type PaymentRequirementsV1,
 } from './v2';
+import {
+  claimVanillaResource,
+  releaseVanillaResource,
+  vanillaPaymentIdentity,
+  vanillaResourceBinding,
+  type VanillaResourceClaimIdentity,
+} from './vanillaResourceClaim';
 
 const FACILITATOR_TIMEOUT_MS = 20_000;
 
@@ -188,6 +203,23 @@ function paymentChallenge(
     encodePaymentRequiredHeaderValue(paymentRequired),
   );
   return res;
+}
+
+/**
+ * 同じ authorization が**別 resource / 別 query** に再利用されたときだけ返す 409。
+ * 402 challenge に混ぜないのは、同じ支払いを署名し直しても解決しない (= 再挑戦させても
+ * 無意味な) 状態だから。code は hostedUsdcPaidRoute の同義ケースと同じ語彙を使う。
+ */
+function authorizationConflict(): NextResponse {
+  return NextResponse.json(
+    {
+      x402Version: 1,
+      error: 'authorization_conflict',
+      message:
+        'This payment authorization is already bound to a different resource.',
+    },
+    { status: 409 },
+  );
 }
 
 function facilitatorUnavailable(message: string): NextResponse {
@@ -396,6 +428,32 @@ async function handleVanillaPaidGetInner(
     return paymentChallenge(resource, accepts, 'invalid_payment_payload');
   }
 
+  // verify の前に payment identity を resource + canonical query へ原子的に束縛する (B5(b))。
+  // 断つ波及: 同額・別 resource への同時再利用で 2 本目のコンテンツ生成が済んでしまうこと。
+  // identity を導出できない payload (nonce/署名を読めない形) は claim せず、判定は従来どおり
+  // facilitator に委ねる — 既存の応答・順序を 1 つも変えないため。
+  const claimIdentity = vanillaPaymentIdentity(facilitatorBody.paymentPayload);
+  const claimBinding = vanillaResourceBinding(resource.resourceUrl, req.url);
+  let ownedClaim: VanillaResourceClaimIdentity | null = null;
+  if (claimIdentity) {
+    const claim = await claimVanillaResource({
+      identity: claimIdentity,
+      binding: claimBinding,
+    });
+    if (claim.kind === 'conflict') return authorizationConflict();
+    // 'match' (同一束縛の再送) は従来どおり verify/settle へ進む。claim を張ったのが
+    // 自分の request のときだけ、settle 前に落ちた場合の解放権を持つ。
+    if (claim.kind === 'claimed') ownedClaim = claimIdentity;
+  }
+  const releaseClaim = async (): Promise<void> => {
+    if (!ownedClaim) return;
+    await releaseVanillaResource({
+      identity: ownedClaim,
+      binding: claimBinding,
+    });
+    ownedClaim = null;
+  };
+
   let verify: Record<string, unknown>;
   try {
     verify = await postFacilitator('/verify', facilitatorBody, {
@@ -409,6 +467,9 @@ async function handleVanillaPaidGetInner(
       error: e instanceof Error ? e.message : String(e),
       resource: resource.resourceUrl,
     });
+    // settle は始まっていない = 署名は未使用。正直な買い手が同じ authorization を
+    // 使い直せるよう claim を戻す。
+    await releaseClaim();
     return facilitatorUnavailable('Payment verification failed. Please retry later.');
   }
   if (verify.isValid !== true) {
@@ -416,13 +477,16 @@ async function handleVanillaPaidGetInner(
       typeof verify.invalidReason === 'string'
         ? verify.invalidReason
         : 'payment_invalid';
+    await releaseClaim();
     return paymentChallenge(resource, accepts, reason);
   }
   const payer = typeof verify.payer === 'string' ? verify.payer : undefined;
 
   const res = await content({ payer });
   if (res.status >= 400) {
-    // settle しない = 課金しない。
+    // settle しない = 課金しない。署名も未使用なので claim を戻す (引数不足 400 の後に
+    // 引数を足して同じ支払いで叩き直す正直な再送を、別 query = 別束縛で塞がないため)。
+    await releaseClaim();
     return res;
   }
 
@@ -439,6 +503,8 @@ async function handleVanillaPaidGetInner(
       error: e instanceof Error ? e.message : String(e),
       resource: resource.resourceUrl,
     });
+    // settle 以降は broadcast 済みの可能性がある = 署名が使用済みかもしれない。claim は
+    // **戻さない** (使用済みかもしれない authorization を別 resource へ流用させない)。
     return facilitatorUnavailable('Payment settlement failed. Please retry later.');
   }
   if (settle.success !== true) {
