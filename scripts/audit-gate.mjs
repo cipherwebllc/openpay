@@ -142,6 +142,21 @@ const ALLOWED_ADVISORIES = {
       'GHSA-vcc3-ghjq-m6fr にタブのフリーズを超える exploit 経路 (RCE 等) の報告',
     ],
   },
+  'GHSA-528h-pc64-c93x': {
+    pkg: 'stream-json',
+    summary:
+      'stream-json: quadratic path recomputation in path filters (pick/ignore/filter/replace) lets deeply nested JSON block the event loop (<=3.4.0)',
+    chain:
+      'wagmi → @wagmi/connectors@6.2.0 → @walletconnect/ethereum-provider@2.21.1 → @reown/appkit@1.7.8 (optional) → @reown/appkit-utils → @solana/web3.js@1.98.4 (optional) → jayson@4.3.0 → stream-json@1.9.1 (optional)',
+    reason:
+      '到達性ゼロ: OpenPay は EVM のみで Solana adapter を構成せず、app/api・lib・hooks・components・packages・scripts に @solana / jayson / stream-json の import はゼロ (grep 確認 2026-09-04)。仮に @solana/web3.js が読まれても jayson が stream-json を使うのは TCP/TLS トランスポート (server/tcp・tls) の StreamValues パーサだけで、本 advisory の脆弱経路である path filter (pick/ignore/filter/replace) は呼ばれず、OpenPay は jayson の TCP/TLS server も起動しない。修正版 3.5.0 は major (jayson@latest 4.3.0 も ^1.9.1 を pin) で in-range の fix が無く、override は到達しないコードのために依存 API を跨ぐリスクとなり不相応 → jayson / @solana 側の bump 待ち accepted risk とする (user 裁定 2026-09-04)。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.13',
+    reviewTriggers: [
+      'jayson が stream-json>=3.5.0 を pin する版へ更新 → npm update で解消し allowlist 削除',
+      'OpenPay に Solana adapter / jayson の TCP・TLS トランスポートを導入 (即再評価)',
+      'stream-json の Parser / StreamValues 本体 (path filter 以外) に同種の DoS 報告',
+    ],
+  },
 };
 
 // CI gate 対象 severity。LOW は監視対象外 (Section 1 のコメント参照)。

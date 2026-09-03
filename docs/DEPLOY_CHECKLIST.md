@@ -509,6 +509,39 @@ wagmi → @wagmi/connectors → @walletconnect/ethereum-provider@2.21.1 (exact p
 - server 側コードに WalletConnect URI / query-string 解析を追加 (**導入 PR で即再評価**)
 - 本 advisory にタブのフリーズを超える exploit 経路 (RCE 等) の報告
 
+### 7.13 MODERATE: `stream-json` (GHSA-528h-pc64-c93x)
+
+**Root advisory**: [GHSA-528h-pc64-c93x](https://github.com/advisories/GHSA-528h-pc64-c93x)
+— "stream-json: path filters recompute the full path on every token (quadratic in
+nesting depth)" (stream-json <=3.4.0・修正版 3.5.0 = major・CVE-2026-71429)
+
+**Propagation chain** (すべて optional 依存):
+```
+wagmi → @wagmi/connectors@6.2.0 → @walletconnect/ethereum-provider@2.21.1
+  → @reown/appkit@1.7.8 (optional) → @reown/appkit-utils@1.7.8
+  → @solana/web3.js@1.98.4 (optional) → jayson@4.3.0 → stream-json@1.9.1 (optional)
+```
+
+**Exploit mechanism**: path filter (`pick` / `ignore` / `filter` / `replace`) が token ごとに
+ネスト stack から path 文字列を再構築するため深いネストの JSON で O(D²) となり、
+数百 KB の入力で event loop が数秒〜数分止まる DoS。
+
+**Reachability for OpenPay**: ゼロ —
+- OpenPay は EVM のみで Solana adapter を構成しない。app/api・lib・hooks・components・
+  packages・scripts に @solana / jayson / stream-json の import はゼロ (grep 確認 2026-09-04)
+- 仮に @solana/web3.js が読まれても、jayson が stream-json を使うのは TCP/TLS
+  トランスポート (`lib/server/tcp.js`・`tls.js`・`client/tcp.js`・`tls.js`) の
+  `StreamValues` パーサだけで、脆弱経路の path filter は呼ばれない。OpenPay は jayson の
+  TCP/TLS server も起動しない
+- 修正版 3.5.0 は major で、jayson@latest (4.3.0) も `^1.9.1` を pin するため in-range の
+  fix が無い。override は到達しないコードのために依存 API を跨ぐリスクとなり不相応
+  → jayson / @solana 側の bump 待ち accepted risk (user 裁定 2026-09-04)
+
+**Reassess triggers**:
+- jayson が stream-json>=3.5.0 を pin する版へ更新 → npm update で解消し allowlist 削除
+- OpenPay に Solana adapter / jayson の TCP・TLS トランスポートを導入 (**導入 PR で即再評価**)
+- stream-json の Parser / StreamValues 本体 (path filter 以外) に同種の DoS 報告
+
 ### 7.7 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
@@ -530,6 +563,7 @@ allowlist 追加 / 削除は本 §7 の update と必ず同期させること (=
 | GHSA-6g55-p6wh-862q | postcss | HIGH | §7.9 |
 | GHSA-r28c-9q8g-f849 | postcss | HIGH | §7.10 |
 | GHSA-vcc3-ghjq-m6fr | decode-uri-component | MODERATE | §7.12 |
+| GHSA-528h-pc64-c93x | stream-json | MODERATE | §7.13 |
 
 (§7.1 js-cookie / §7.4 ws〔GHSA-58qx〕/ §7.6 otel core〔GHSA-8988〕は upstream fix 済で
 allowlist から削除済 = 上表は現行の実体。)
