@@ -438,7 +438,9 @@ export async function readFirstPartyVerification(
 
 // transitionVerification と同一のカウンタ遷移を Lua 側にも持たせる (両者は必ず一緒に直す)。
 // ARGV = [probedUrl, checkedAt, runId, verdictClass, authClass]。
-const REVERIFY_COUNTER_TRANSITION =
+// export しているのは tests/lib/x402/reverify-cas.test.ts が **本物の Lua** を wasmoon で
+// 実行するため (tests/_helpers/redisLua.ts)。runtime の挙動には影響しない。
+export const REVERIFY_COUNTER_TRANSITION =
   'local same=(type(o.verification)==\'table\' and o.verification.probedUrl==ARGV[1]); ' +
   // ⚠️ before は same で絞らない — URL を変えても hidden (モデレーション状態) は引き継ぐ (B6)。
   'local before=(o.hidden==true); local failures=0; local authFailures=0; local lastOk=nil; ' +
@@ -455,17 +457,17 @@ const REVERIFY_COUNTER_TRANSITION =
   'if lastOk then v.lastOkAt=lastOk end; o.verification=v; o.hidden=hidden; ' +
   "redis.call('SET',KEYS[1],cjson.encode(o)); ";
 
-const REVERIFY_TRANSITION_RESULT =
+export const REVERIFY_TRANSITION_RESULT =
   'return cjson.encode({failures=failures,authFailures=authFailures,before=before,after=hidden})';
 
 // N-5: hidden の間は URL 台帳 (KEYS[2]) を TTL つきで立て直す。DELETE → 同一 URL で再登録して
 // hidden を洗い流す経路を塞ぐ (createResource が台帳を見て hidden を継承する)。hidden の観測ごとに
 // TTL を延ばすので、隠されたままの掲載は台帳も生き続ける。first-party (path) は再登録できないので
 // この節は external 側にだけ足す。
-const REVERIFY_HIDDEN_URL_LEDGER =
+export const REVERIFY_HIDDEN_URL_LEDGER =
   "if hidden then redis.call('SET',KEYS[2],ARGV[6],'EX',ARGV[7]) end; ";
 
-const CAS_EXTERNAL_REVERIFY =
+export const CAS_EXTERNAL_REVERIFY =
   "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
   'local ok,o=pcall(cjson.decode,c); if not ok or type(o)~=\'table\' then return -2 end; ' +
   'if o.active~=true then return 0 end; if o.url~=ARGV[1] then return -3 end; ' +
@@ -474,7 +476,7 @@ const CAS_EXTERNAL_REVERIFY =
   REVERIFY_HIDDEN_URL_LEDGER +
   REVERIFY_TRANSITION_RESULT;
 
-const CAS_FIRST_PARTY_REVERIFY =
+export const CAS_FIRST_PARTY_REVERIFY =
   "local c=redis.call('GET',KEYS[1]); local o={}; if c then " +
   'local ok,decoded=pcall(cjson.decode,c); if not ok or type(decoded)~=\'table\' then return -2 end; o=decoded; end; ' +
   'if type(o.verification)==\'table\' and o.verification.lastRunId==ARGV[3] then return -4 end; ' +

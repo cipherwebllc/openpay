@@ -1,90 +1,41 @@
-// ⚠️ このファイルは **Lua を実行しない**。vi.mock('@/lib/kv') の kvEval が CAS_*_REVERIFY の
-// セマンティクスを TypeScript で再実装しているだけなので、Lua 文字列そのものの構文誤り・
-// KEYS/ARGV のズレ・redis.call の綴り間違いはここでは捕まらない (本物の Redis / Upstash に当てて
-// 初めて出る)。Lua を実際に走らせる runner (embedded Redis や lua vm の依存追加) を入れるかは
-// plans/full-review-2026-09-02.md の「Lua-runner の判断」に記録してある — **依存は足さない**方針の
-// 現状では、Lua を変えたら必ず script 文字列と本モックの両方を手で突き合わせること。
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+// @vitest-environment node
+// このファイルは **本物の Lua を実行する**。vi.mock('@/lib/kv') の kvEval は
+// tests/_helpers/redisLua.ts (wasmoon = C Lua 5.4) に script 文字列をそのまま渡すので、
+// CAS_EXTERNAL_REVERIFY / CAS_FIRST_PARTY_REVERIFY の構文誤り・KEYS/ARGV のズレ・
+// redis.call の綴り間違いはここで落ちる (以前は Lua を TypeScript で再実装していたため
+// 実 Redis に当てるまで出なかった)。
+// ⚠️ エミュレータであって Upstash 実機ではない。既知の差異は redisLua.ts の
+// KNOWN DIVERGENCES を参照 — money-path の CAS は実機 smoke (掟 15) を省略しない。
+// ⚠️ node 環境が必須 (wasmoon の WASM 初期化が jsdom では失敗する)。
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const store = vi.hoisted(() => new Map<string, string>());
+import {
+  closeRedisLuaEngine,
+  createFakeRedisStore,
+  runRedisLua,
+  type FakeRedisStore,
+} from '../../_helpers/redisLua';
+
+// vi.mock の factory は import より前に巻き上がるので、store の実体は holder 越しに渡す
+// (factory 本体が走るのは '@/lib/kv' が最初に import された時点 = 下の代入より後)。
+const holder = vi.hoisted(() => ({ store: null as FakeRedisStore | null }));
 
 vi.mock('@/lib/kv', () => ({
   kvGet: async (key: string) => ({
     ok: true as const,
-    value: store.get(key) ?? null,
+    value: holder.store!.strings.get(key) ?? null,
   }),
   kvLrange: async () => ({ ok: true as const, value: [] }),
   kvSet: async (key: string, value: string) => {
-    store.set(key, value);
+    holder.store!.strings.set(key, value);
     return { ok: true as const, value: 'OK' as const };
   },
   kvLpush: vi.fn(),
-  kvEval: async (script: string, keys: string[], args: string[]) => {
-    const external = script.includes("o.active~=true");
-    const raw = store.get(keys[0]);
-    if (!raw && external) return { ok: true as const, value: -1 };
-    let record: Record<string, unknown> = {};
-    try {
-      if (raw) record = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      return { ok: true as const, value: -2 };
-    }
-    if (external) {
-      if (record.active !== true) return { ok: true as const, value: 0 };
-      if (record.url !== args[0]) return { ok: true as const, value: -3 };
-    }
-    const verification = record.verification as
-      | {
-          failures?: number;
-          authFailures?: number;
-          lastRunId?: string;
-          probedUrl?: string;
-          lastOkAt?: string;
-        }
-      | undefined;
-    if (verification?.lastRunId === args[2]) {
-      return { ok: true as const, value: -4 };
-    }
-    const sameUrl = verification?.probedUrl === args[0];
-    // B6: hidden は URL が変わっても引き継ぐ (same で絞らない)。
-    const before = record.hidden === true;
-    let failures = sameUrl ? verification?.failures ?? 0 : 0;
-    let authFailures = sameUrl ? verification?.authFailures ?? 0 : 0;
-    let hidden = before;
-    let lastOkAt = sameUrl ? verification?.lastOkAt : undefined;
-    if (args[3] === 'ok') {
-      failures = 0;
-      hidden = false;
-      lastOkAt = args[1];
-    } else if (args[3] === 'violation') {
-      failures += 1;
-      if (failures >= 3) hidden = true;
-    }
-    if (args[4] === 'clear') {
-      authFailures = 0;
-    } else if (args[4] === 'block') {
-      authFailures += 1;
-      if (authFailures >= 6) hidden = true;
-    }
-    record.hidden = hidden;
-    record.verification = {
-      ...(lastOkAt ? { lastOkAt } : {}),
-      lastCheckedAt: args[1],
-      failures,
-      ...(authFailures > 0 ? { authFailures } : {}),
-      lastRunId: args[2],
-      probedUrl: args[0],
-    };
-    store.set(keys[0], JSON.stringify(record));
-    // N-5: external の script だけが hidden URL 台帳 (KEYS[2]) を立てる。
-    if (hidden && script.includes("redis.call('SET',KEYS[2]")) {
-      store.set(keys[1], args[5]);
-    }
-    return {
-      ok: true as const,
-      value: JSON.stringify({ failures, authFailures, before, after: hidden }),
-    };
-  },
+  // ここが本題: 受け取った script 文字列を **そのまま** Lua VM で実行する。
+  kvEval: async (script: string, keys: string[], args: string[]) => ({
+    ok: true as const,
+    value: await runRedisLua(script, keys, args, holder.store!),
+  }),
 }));
 
 import {
@@ -92,14 +43,20 @@ import {
   applyFirstPartyReverify,
   firstPartyVerificationKey,
   readExternalReverifyTarget,
+  CAS_EXTERNAL_REVERIFY,
+  CAS_FIRST_PARTY_REVERIFY,
+  REVERIFY_COUNTER_TRANSITION,
+  REVERIFY_HIDDEN_URL_LEDGER,
 } from '@/lib/x402/reverify';
 import { resourceKey } from '@/lib/x402/registry';
 import { hiddenUrlLedgerKey } from '@/lib/x402/hiddenUrlLedger';
 
 const URL = 'https://api.example.jp/paid';
 
+let store: FakeRedisStore;
+
 function seed(overrides: Record<string, unknown> = {}) {
-  store.set(
+  store.strings.set(
     resourceKey('r1'),
     JSON.stringify({
       id: 'r1',
@@ -117,7 +74,39 @@ function seed(overrides: Record<string, unknown> = {}) {
   );
 }
 
-beforeEach(() => store.clear());
+beforeEach(() => {
+  store = createFakeRedisStore(1_700_000_000_000);
+  holder.store = store;
+});
+
+afterAll(async () => {
+  await closeRedisLuaEngine();
+});
+
+describe('CAS script の合成', () => {
+  it('external / first-party とも共通のカウンタ遷移断片を含む', () => {
+    expect(CAS_EXTERNAL_REVERIFY).toContain(REVERIFY_COUNTER_TRANSITION);
+    expect(CAS_FIRST_PARTY_REVERIFY).toContain(REVERIFY_COUNTER_TRANSITION);
+    // N-5 の URL 台帳は external 側にだけ足す。
+    expect(CAS_EXTERNAL_REVERIFY).toContain(REVERIFY_HIDDEN_URL_LEDGER);
+    expect(CAS_FIRST_PARTY_REVERIFY).not.toContain(REVERIFY_HIDDEN_URL_LEDGER);
+  });
+
+  it('CAS_FIRST_PARTY_REVERIFY を直接実行しても state を作る', async () => {
+    const key = firstPartyVerificationKey('/api/paid/demo');
+    const result = await runRedisLua(
+      CAS_FIRST_PARTY_REVERIFY,
+      [key],
+      ['https://open-pay.jp/api/paid/demo', '2026-07-14T00:00:00.000Z', 'run1', 'violation', 'neutral'],
+      store,
+    );
+    expect(JSON.parse(result as string)).toMatchObject({ failures: 1, after: false });
+    expect(JSON.parse(store.strings.get(key)!)).toMatchObject({
+      hidden: false,
+      verification: { failures: 1, lastRunId: 'run1' },
+    });
+  });
+});
 
 describe('external reverify CAS', () => {
   it('probe 後に DELETE された record へは書かない', async () => {
@@ -134,9 +123,21 @@ describe('external reverify CAS', () => {
       '2026071400',
     );
     expect(result).toEqual({ applied: false, reason: 'inactive' });
-    expect(JSON.parse(store.get(resourceKey('r1'))!)).not.toHaveProperty(
+    expect(JSON.parse(store.strings.get(resourceKey('r1'))!)).not.toHaveProperty(
       'verification',
     );
+  });
+
+  it('未存在 record は not_found・壊れた JSON は malformed', async () => {
+    expect(
+      await applyExternalReverify('missing', URL, 'violation_gone', 'now', 'run1'),
+    ).toEqual({ applied: false, reason: 'not_found' });
+
+    store.strings.set(resourceKey('r1'), '{broken');
+    expect(await applyExternalReverify('r1', URL, 'violation_gone', 'now', 'run1')).toEqual({
+      applied: false,
+      reason: 'malformed',
+    });
   });
 
   // N-5: hidden にした瞬間に URL 台帳を立てる (delete → 同一 URL 再登録で洗い流させない)。
@@ -159,7 +160,7 @@ describe('external reverify CAS', () => {
       '2026-07-14T00:00:00.000Z',
       '2026071400',
     );
-    expect(store.get(ledgerKey)).toBeUndefined();
+    expect(store.strings.get(ledgerKey)).toBeUndefined();
 
     await applyExternalReverify(
       'r1',
@@ -168,7 +169,9 @@ describe('external reverify CAS', () => {
       '2026-07-14T01:00:00.000Z',
       '2026071401',
     );
-    expect(store.get(ledgerKey)).toBe('1');
+    expect(store.strings.get(ledgerKey)).toBe('1');
+    // 台帳は TTL つき (30 日) — Lua の SET ... 'EX' が効いていることを実測する。
+    expect(store.getTtl(ledgerKey)).toBe(30 * 24 * 60 * 60);
   });
 
   it('first-party の hidden は URL 台帳を書かない', async () => {
@@ -180,7 +183,7 @@ describe('external reverify CAS', () => {
       '2026071400',
     );
     expect(
-      [...store.keys()].filter((key) => key.startsWith('x402:hidden-url:')),
+      store.keys().filter((key) => key.startsWith('x402:hidden-url:')),
     ).toEqual([]);
   });
 
@@ -194,7 +197,7 @@ describe('external reverify CAS', () => {
       '2026071400',
     );
     expect(result).toEqual({ applied: false, reason: 'url_changed' });
-    expect(JSON.parse(store.get(resourceKey('r1'))!)).not.toHaveProperty(
+    expect(JSON.parse(store.strings.get(resourceKey('r1'))!)).not.toHaveProperty(
       'verification',
     );
   });
@@ -233,7 +236,7 @@ describe('external reverify CAS', () => {
     );
     expect(duplicate).toEqual({ applied: false, reason: 'duplicate' });
     expect(
-      (JSON.parse(store.get(resourceKey('r1'))!) as { verification: { failures: number } })
+      (JSON.parse(store.strings.get(resourceKey('r1'))!) as { verification: { failures: number } })
         .verification.failures,
     ).toBe(3);
 
@@ -313,7 +316,7 @@ describe('external reverify CAS', () => {
     expect(cleared).toMatchObject({ authFailures: 0, hiddenAfter: false });
     // 0 のときは書かない = 既存レコードと同じ JSON 形 (後方互換)。
     expect(
-      (JSON.parse(store.get(resourceKey('r1'))!) as {
+      (JSON.parse(store.strings.get(resourceKey('r1'))!) as {
         verification: { authFailures?: number };
       }).verification.authFailures,
     ).toBeUndefined();
@@ -343,6 +346,48 @@ describe('external reverify CAS', () => {
       hiddenBefore: false,
       hiddenAfter: true,
     });
+  });
+
+  // Lua は `tonumber(o.verification.failures) or 0` でカウンタを読む。旧 JS 模倣は
+  // `verification.failures ?? 0` のまま加算していたので、値が文字列で保存されていた場合に
+  // '2'+1='21' の文字列連結になり、本物の Lua (=3) と食い違っていた。
+  it('failures が文字列で保存されていても tonumber で数値として加算する', async () => {
+    seed({
+      verification: {
+        failures: '2',
+        lastCheckedAt: 'old',
+        lastRunId: '2026071323',
+        probedUrl: URL,
+      },
+    });
+    const result = await applyExternalReverify(
+      'r1',
+      URL,
+      'violation_gone',
+      '2026-07-14T00:00:00.000Z',
+      '2026071400',
+    );
+    expect(result).toMatchObject({ applied: true, failures: 3, hiddenAfter: true });
+  });
+
+  // 壊れたカウンタ (数値化できない値) は 0 起点に倒れる (`or 0`)。
+  it('failures が数値化できない値なら 0 起点で数え直す', async () => {
+    seed({
+      verification: {
+        failures: 'oops',
+        lastCheckedAt: 'old',
+        lastRunId: '2026071323',
+        probedUrl: URL,
+      },
+    });
+    const result = await applyExternalReverify(
+      'r1',
+      URL,
+      'violation_gone',
+      '2026-07-14T00:00:00.000Z',
+      '2026071400',
+    );
+    expect(result).toMatchObject({ applied: true, failures: 1, hiddenAfter: false });
   });
 
   // 5xx (neutral) は authFailures を動かさない = 一時障害で cloaking 扱いしない。
@@ -421,9 +466,23 @@ describe('first-party reverify CAS', () => {
       hiddenBefore: true,
       hiddenAfter: false,
     });
-    expect(JSON.parse(store.get(firstPartyVerificationKey(path))!)).toMatchObject({
+    expect(JSON.parse(store.strings.get(firstPartyVerificationKey(path))!)).toMatchObject({
       hidden: false,
       verification: { failures: 0, lastOkAt: '2026-07-14T03:00:00.000Z' },
     });
+  });
+
+  it('壊れた JSON は malformed (external と同じ -2)', async () => {
+    const path = '/api/paid/demo';
+    store.strings.set(firstPartyVerificationKey(path), 'not json');
+    expect(
+      await applyFirstPartyReverify(
+        path,
+        'https://open-pay.jp/api/paid/demo',
+        'violation_gone',
+        'now',
+        'run1',
+      ),
+    ).toEqual({ applied: false, reason: 'malformed' });
   });
 });

@@ -108,6 +108,11 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  // `// @vitest-environment node` を宣言したファイル (Lua ランナー系: wasmoon の
+  // emscripten glue は jsdom 下だと document.baseURI から scriptDirectory を組み立てて
+  // createRequire に食わせ、初期化に失敗する) では window が無い。DOM 前提の後始末が
+  // node 環境のテストを巻き込んで落とすのを断つ — jsdom 側では従来どおり実行される。
+  if (typeof window === 'undefined') return;
   window.localStorage.clear();
   // 次テストが既定 stub から始まるよう matchMedia をリセット (matches=true を残さない)。
   delete (window as unknown as { matchMedia?: unknown }).matchMedia;
