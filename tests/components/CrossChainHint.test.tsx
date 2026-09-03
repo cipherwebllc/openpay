@@ -19,7 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { type Address, type Hex } from 'viem';
+import { encodeAbiParameters, pad, type Address, type Hex } from 'viem';
 import type { ReactNode } from 'react';
 
 vi.mock('wagmi', () => ({
@@ -86,6 +86,10 @@ import { renderWithIntl } from '../_helpers/i18n';
 import { CrossChainHint } from '@/components/CrossChainHint';
 import { logger } from '@/lib/logger';
 import { saveResumeState } from '@/lib/crossChain/resumeStore';
+import {
+  CCTP_V2_DEPOSIT_FOR_BURN_TOPIC0,
+  CCTP_V2_TOKEN_MESSENGER_ADDRESS,
+} from '@/lib/crossChain/cctp';
 
 const ACCOUNT: Address = '0x1234567890123456789012345678901234567890';
 const RECIPIENT: Address = '0x000000000000000000000000000000000000aBcd';
@@ -1060,5 +1064,230 @@ describe('CrossChainHint: A1 burn 未確定パネル', () => {
     expect(
       await screen.findByText(/確認を受け付けました/),
     ).toBeInTheDocument();
+  });
+
+  it('D9: reload 後も marker が残っていれば mount 時点で親 lock を復元する', async () => {
+    // クリック (runCore) を経ずに committed=true になること。復元しないと、再読込しただけで
+    // 親フォームの直接決済が解禁され、marker 済の決済を別経路で二重に払えてしまう。
+    const publicClient = setupCctpOnly();
+    saveResumeState(A1_SESSION_KEY, {
+      approveTxHash: '0xapprove',
+      burnIntent: A1_MARKER,
+    });
+    const onExecutingChange = vi.fn();
+    renderWithIntl(
+      withQueryClient(
+        <CrossChainHint {...baseProps} onExecutingChange={onExecutingChange} />,
+      ),
+    );
+    await screen.findByRole('button', { name: /続きから支払う/ });
+    await waitFor(() => {
+      expect(onExecutingChange).toHaveBeenLastCalledWith(true);
+    });
+    // execute は走っていない (probe の RPC が 1 本も出ていない)
+    expect(publicClient.getBlockNumber).not.toHaveBeenCalled();
+  });
+
+  it('D2: wait パネルから再確認すると判定をやり直す (未確定 state が消える)', async () => {
+    const user = userEvent.setup();
+    // 1 回目: mempool 有り (row 5 wait)。2 回目: mempool 空 + gap 充足 (row 9 → flag OFF で manual)。
+    const nonces = { pending: 6, latest: 5 };
+    setupCctpOnly({
+      getBlockNumber: vi.fn(async () => 2_000n),
+      getTransactionCount: vi.fn(async ({ blockTag }: { blockTag: string }) =>
+        blockTag === 'pending' ? nonces.pending : nonces.latest,
+      ),
+      getLogs: vi.fn(async () => []),
+    });
+    saveResumeState(A1_SESSION_KEY, {
+      approveTxHash: '0xapprove',
+      burnIntent: A1_MARKER,
+    });
+
+    renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
+    await user.click(
+      await screen.findByRole('button', { name: /続きから支払う/ }),
+    );
+    await screen.findByText(/前回の送金を確認しています/);
+
+    // mempool が空になった後、wait パネルの再確認ボタンで判定し直せる
+    nonces.pending = 5;
+    await user.click(screen.getByRole('button', { name: /もう一度確認する/ }));
+    expect(
+      await screen.findByText(/前回の送金を自動で確認できませんでした/),
+    ).toBeInTheDocument();
+    // wait パネルは消えている (未確定 state が execute 開始時に捨てられた)
+    expect(
+      screen.queryByText(/前回の送金を確認しています/),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// ---- D4: burn tx hash の貼り付け採用 ------------------------------------------
+
+// A1_MARKER と一致する DepositForBurn log を持つ receipt を返す client を作る。
+function makeAdoptClient(over: { amount?: bigint; from?: Address } = {}) {
+  const log = {
+    address: CCTP_V2_TOKEN_MESSENGER_ADDRESS,
+    topics: [
+      CCTP_V2_DEPOSIT_FOR_BURN_TOPIC0,
+      pad(A1_MARKER.burnToken, { size: 32 }),
+      pad(ACCOUNT, { size: 32 }),
+      pad('0x03e8', { size: 32 }),
+    ],
+    data: encodeAbiParameters(
+      [
+        { name: 'amount', type: 'uint256' },
+        { name: 'mintRecipient', type: 'bytes32' },
+        { name: 'destinationDomain', type: 'uint32' },
+        { name: 'destinationTokenMessenger', type: 'bytes32' },
+        { name: 'destinationCaller', type: 'bytes32' },
+        { name: 'maxFee', type: 'uint256' },
+        { name: 'hookData', type: 'bytes' },
+      ],
+      [
+        over.amount ?? 5_000_000n,
+        pad(RECIPIENT, { size: 32 }),
+        6,
+        pad('0x00', { size: 32 }),
+        pad('0x00', { size: 32 }),
+        1000n,
+        '0x',
+      ],
+    ),
+  };
+  return {
+    ...makePublicClient(),
+    // row 8 (nonce 進行 + log 無し) に落として manual パネルを出す
+    getTransactionCount: vi.fn(async () => 9),
+    getLogs: vi.fn(async () => []),
+    getTransactionReceipt: vi.fn(async () => ({
+      status: 'success',
+      from: over.from ?? ACCOUNT,
+      logs: [log],
+    })),
+    getTransaction: vi.fn(async () => ({ nonce: 9, from: over.from ?? ACCOUNT })),
+  };
+}
+
+const ADOPTED_HASH = `0x${'ab'.repeat(32)}`;
+
+describe('CrossChainHint: A1 burn tx hash の貼り付け採用 (D4)', () => {
+  async function openManualPanel(publicClient: Record<string, unknown>) {
+    const user = userEvent.setup();
+    setReadContractByChain({
+      [baseSepoliaId]: 0n,
+      [polygonAmoyId]: 10_000_000n,
+      [arbitrumSepoliaId]: 0n,
+      [optimismSepoliaId]: 0n,
+    });
+    const { walletClient } = setupConnected({
+      publicClient: publicClient as never,
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('/v2/messages')) {
+          return new Response(
+            JSON.stringify({
+              messages: [
+                { status: 'complete', message: '0xmsg', attestation: '0xatt' },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(JSON.stringify({ balances: [] }), { status: 200 });
+      }),
+    );
+    saveResumeState(A1_SESSION_KEY, {
+      approveTxHash: '0xapprove',
+      burnIntent: A1_MARKER,
+    });
+    renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
+    await user.click(
+      await screen.findByRole('button', { name: /続きから支払う/ }),
+    );
+    await screen.findByText(/前回の送金を自動で確認できませんでした/);
+    return { user, walletClient };
+  }
+
+  it('marker と一致する tx hash を貼ると採用して続き (mint) まで進む', async () => {
+    const publicClient = makeAdoptClient();
+    const { user, walletClient } = await openManualPanel(publicClient);
+
+    await user.type(
+      screen.getByLabelText(/送金済みの取引 ID/),
+      ADOPTED_HASH,
+    );
+    await user.click(
+      screen.getByRole('button', { name: /この取引で続きから支払う/ }),
+    );
+
+    // 採用後はそのまま attestation → mint に進み成功パネルが出る
+    expect(await screen.findByText(/経由で着金しました/)).toBeInTheDocument();
+    // 再 burn していない: approve は無く、送信は dest chain の mint 1 本だけ
+    expect(walletClient.writeContract).not.toHaveBeenCalled();
+    expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('marker と一致しない tx hash は拒否し、state を変えない', async () => {
+    const publicClient = makeAdoptClient({ amount: 1n }); // 金額違いの burn
+    const { user } = await openManualPanel(publicClient);
+
+    await user.type(screen.getByLabelText(/送金済みの取引 ID/), ADOPTED_HASH);
+    await user.click(
+      screen.getByRole('button', { name: /この取引で続きから支払う/ }),
+    );
+
+    expect(
+      await screen.findByText(/今回の決済の送金と一致しません/),
+    ).toBeInTheDocument();
+    const raw = localStorage.getItem(
+      'openpay.xchain.resume.cctp-v2:80002:84532:' +
+        `${ACCOUNT}:${RECIPIENT}:5000000:0`.toLowerCase(),
+    );
+    expect(raw && JSON.parse(raw).burnTxHash).toBeUndefined();
+  });
+
+  it('書式不正な hash は RPC を引く前に弾く', async () => {
+    const publicClient = makeAdoptClient();
+    const { user } = await openManualPanel(publicClient);
+    (publicClient.getTransactionReceipt as ReturnType<typeof vi.fn>).mockClear();
+
+    await user.type(screen.getByLabelText(/送金済みの取引 ID/), '0x1234');
+    await user.click(
+      screen.getByRole('button', { name: /この取引で続きから支払う/ }),
+    );
+
+    expect(
+      await screen.findByText(/取引 ID の形式が違います/),
+    ).toBeInTheDocument();
+    expect(publicClient.getTransactionReceipt).not.toHaveBeenCalled();
+  });
+});
+
+describe('CrossChainHint: marker を保存できない環境 (fail-closed)', () => {
+  it('localStorage への保存が失敗したら送金せず専用文言を出す', async () => {
+    const user = userEvent.setup();
+    setupCctpOnly();
+    // marker の read-back 検証 (saveResumeStateStrict) を落とす = private mode 等。
+    const setItem = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('QuotaExceededError');
+      });
+    try {
+      renderWithIntl(withQueryClient(<CrossChainHint {...baseProps} />));
+      const payBtn = await screen.findByRole('button', {
+        name: /選択したチェーンで支払う/,
+      });
+      await user.click(payBtn);
+      expect(
+        await screen.findByText(/支払い記録をこのブラウザに保存できなかった/),
+      ).toBeInTheDocument();
+    } finally {
+      setItem.mockRestore();
+    }
   });
 });

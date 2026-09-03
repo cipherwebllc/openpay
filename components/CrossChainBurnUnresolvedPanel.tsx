@@ -11,13 +11,22 @@
 //            「もう一度払う」ことを勧める UI ではないので、文面で明確に「二重に払わない」
 //            ことを最優先に伝える。
 
-import { useState } from 'react';
+import { useId, useState, type FormEvent } from 'react';
 import { useTranslations } from 'next-intl';
 import type { Address, Hex } from 'viem';
 import { blockExplorerUrl } from '@/lib/chains';
+import type { AdoptBurnTxHashResult } from '@/hooks/useCrossChainPayment';
+
+type AdoptResult = AdoptBurnTxHashResult;
 
 export interface CrossChainBurnUnresolvedPanelProps {
   kind: 'wait' | 'manual';
+  /** D4: 買い手が explorer で見つけた burn tx hash を貼って続きから再開する。
+   *  検証は on-chain (receipt + DepositForBurn log) で行われ、一致しなければ
+   *  reason が返り、state は変わらない。 */
+  onAdoptHash?: (hash: string) => Promise<AdoptResult>;
+  /** wait パネルの「もう一度確認する」。判定をやり直す (送金はしない)。 */
+  onRetry?: () => void;
   /** 送金元 chain (explorer link の解決に使う) */
   sourceChainId: number;
   /** 買い手のアドレス (burn tx が特定できないときの確認先) */
@@ -45,9 +54,20 @@ export function CrossChainBurnUnresolvedPanel(
 
   if (props.kind === 'wait') {
     return (
-      <div className="space-y-1 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+      <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
         <p className="font-semibold text-amber-900">{t('burnWaitTitle')}</p>
         <p className="text-xs text-amber-800">{t('burnWaitBody')}</p>
+        {/* wait の間は親の Pay ボタンを無効にしているので、再確認の導線はここに置く。
+            置かないと「数分おいてからもう一度」と書いてあるのに押す先が無い (D2)。 */}
+        {props.onRetry && (
+          <button
+            type="button"
+            onClick={props.onRetry}
+            className="w-full rounded-lg border border-amber-400 bg-white px-3 py-2 text-xs font-semibold text-amber-900"
+          >
+            {t('burnWaitRetry')}
+          </button>
+        )}
       </div>
     );
   }
@@ -95,6 +115,89 @@ export function CrossChainBurnUnresolvedPanel(
       ) : (
         <p className="text-xs text-amber-900">{t('burnManualBlocked')}</p>
       )}
+      {props.onAdoptHash && <AdoptHashForm onAdoptHash={props.onAdoptHash} />}
     </div>
   );
+}
+
+/** 「USDC は減っている (= burn は着弾した) が hash が判らない」買い手の自己救済入力。
+ *  再送金 (二段確認) とは逆向きの出口 — こちらは **送らずに** 続きから進める。 */
+function AdoptHashForm({
+  onAdoptHash,
+}: {
+  onAdoptHash: (hash: string) => Promise<AdoptResult>;
+}) {
+  const t = useTranslations('CrossChainHint');
+  const inputId = useId();
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<AdoptErrorKey | null>(null);
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await onAdoptHash(value);
+      if (!res.ok) setError(adoptErrorKey(res.reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-1 border-t border-amber-200 pt-2">
+      <label
+        htmlFor={inputId}
+        className="block text-xs font-semibold text-amber-900"
+      >
+        {t('burnAdoptLabel')}
+      </label>
+      <p className="text-xs text-amber-800">{t('burnAdoptHint')}</p>
+      <input
+        id={inputId}
+        type="text"
+        inputMode="text"
+        autoComplete="off"
+        spellCheck={false}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="0x…"
+        className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1.5 font-mono text-xs text-slate-800"
+      />
+      <button
+        type="submit"
+        disabled={busy || value.trim() === ''}
+        className="w-full rounded-lg border border-amber-400 bg-white px-3 py-2 text-xs font-semibold text-amber-900 disabled:opacity-50"
+      >
+        {busy ? t('burnAdoptChecking') : t('burnAdoptSubmit')}
+      </button>
+      {error && <p className="text-xs text-red-700">{t(error)}</p>}
+    </form>
+  );
+}
+
+type AdoptErrorKey =
+  | 'burnAdoptErrorFormat'
+  | 'burnAdoptErrorNotFound'
+  | 'burnAdoptErrorReverted'
+  | 'burnAdoptErrorMismatch'
+  | 'burnAdoptErrorUnavailable';
+
+function adoptErrorKey(
+  reason: Extract<AdoptResult, { ok: false }>['reason'],
+): AdoptErrorKey {
+  switch (reason) {
+    case 'format':
+      return 'burnAdoptErrorFormat';
+    case 'notfound':
+      return 'burnAdoptErrorNotFound';
+    case 'reverted':
+      return 'burnAdoptErrorReverted';
+    case 'mismatch':
+      return 'burnAdoptErrorMismatch';
+    case 'unavailable':
+      return 'burnAdoptErrorUnavailable';
+  }
 }

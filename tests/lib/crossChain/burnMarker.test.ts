@@ -12,9 +12,12 @@ import {
   burnScanCapBlocks,
   classifyBurnState,
   isRangeError,
+  isRateLimitError,
   minGapBlocks,
+  normalizeBurnTxHash,
   reorgMarginBlocks,
   scanForBurnLog,
+  verifyBurnTxHash,
   MAX_SCAN_CALLS,
   MIN_GAP_MS,
   type BurnIntentMarker,
@@ -60,6 +63,8 @@ function classify(over: Partial<ClassifyBurnStateInput>): ReturnType<typeof clas
     pendingAhead: false,
     nonceAdvanced: false,
     gapSatisfied: false,
+    // 既定は「marker から十分時間が経った」= 二段確認の時間条件は満たす状態。
+    timeGapSatisfied: true,
     scan: ok([]),
     autoReburnEnabled: true, // 決定表そのものの検証では flag ON (OFF の効果は別 describe)
     allowManualReburn: false,
@@ -241,6 +246,115 @@ describe('lib/crossChain/burnMarker: mempool (P=true) は決して burn にな�
       }
     }
   }
+
+  // D1: row 3 (旧 state) / row 4 (marker.block=null) は決定表の上で pendingAhead 判定より
+  // **前** に返るため、「二段確認 (allowManualReburn) さえ通れば burn」を許すと mempool に
+  // burn が居ても再 burn してしまう。marker の有無・block の有無に関わらず、mempool 有りの
+  // 間は burn を出さないことを固定する。
+  const preemptiveRows: Array<{ name: string; input: Partial<ClassifyBurnStateInput> }> = [
+    {
+      name: 'row 3 (marker 無し + hash reverted)',
+      input: { marker: undefined, hash: HASH_A, receipt: 'reverted' as const },
+    },
+    {
+      name: 'row 3 (marker 無し + hash notfound)',
+      input: { marker: undefined, hash: HASH_A, receipt: 'notfound' as const },
+    },
+    {
+      name: 'row 4 (marker.block=null)',
+      input: { marker: marker({ block: null }) },
+    },
+    {
+      name: 'row 4 (marker.nonceLatest=null)',
+      input: { marker: marker({ nonceLatest: null }) },
+    },
+  ];
+  for (const { name, input } of preemptiveRows) {
+    it(`${name} + mempool 有り + 二段確認済み → burn ではない`, () => {
+      const d = classify({
+        ...input,
+        pendingAhead: true,
+        scan: undefined,
+        allowManualReburn: true,
+        autoReburnEnabled: true,
+      });
+      expect(d.action).not.toBe('burn');
+      expect((d as { reburnable?: boolean }).reburnable ?? false).toBe(false);
+    });
+  }
+
+  it('pendingAhead が未計測 (undefined) なら二段確認でも burn しない', () => {
+    // 「計測していない」を「mempool は空」に潰さない (D1)。
+    const d = classify({
+      marker: undefined,
+      hash: HASH_A,
+      receipt: 'reverted',
+      pendingAhead: undefined,
+      scan: undefined,
+      allowManualReburn: true,
+      autoReburnEnabled: true,
+    });
+    expect(d.action).toBe('manual');
+    expect((d as { reburnable: boolean }).reburnable).toBe(false);
+  });
+});
+
+describe('lib/crossChain/burnMarker: 二段確認で開ける条件 (D1)', () => {
+  it('row 3 (旧 state) は mempool 実測が取れていれば開く', () => {
+    const d = classify({
+      marker: undefined,
+      hash: HASH_A,
+      receipt: 'reverted',
+      pendingAhead: false,
+      scan: undefined,
+      allowManualReburn: false,
+    });
+    expect(d).toMatchObject({ action: 'manual', row: 3, reburnable: true });
+  });
+
+  it('row 4 は marker からの最小経過時間が未達なら開かない', () => {
+    const d = classify({
+      marker: marker({ block: null }),
+      scan: undefined,
+      timeGapSatisfied: false,
+      allowManualReburn: true,
+    });
+    expect(d.action).toBe('manual');
+    expect((d as { reburnable: boolean }).reburnable).toBe(false);
+  });
+
+  it('row 4 は mempool 実測 + gap 経過なら開く', () => {
+    const d = classify({
+      marker: marker({ block: null }),
+      scan: undefined,
+      pendingAhead: false,
+      timeGapSatisfied: true,
+      allowManualReburn: true,
+    });
+    expect(d).toMatchObject({ action: 'burn', row: 4 });
+  });
+
+  it('row 20 (走査 cap 超過) は「見ていない」ので二段確認でも開かない', () => {
+    const d = classify({
+      hash: HASH_A,
+      receipt: 'notfound',
+      scan: RANGE,
+      allowManualReburn: true,
+    });
+    expect(d.action).toBe('manual');
+    expect(d.row).toBe(20);
+    expect((d as { reburnable: boolean }).reburnable).toBe(false);
+  });
+
+  it('row 22: 走査が rate limit で失敗 → manual ではなく wait (一過性)', () => {
+    const d = classify({
+      hash: HASH_A,
+      receipt: 'notfound',
+      scan: { status: 'ratelimited' },
+      allowManualReburn: true,
+    });
+    expect(d).toMatchObject({ action: 'wait', row: 22 });
+  });
 });
 
 describe('lib/crossChain/burnMarker: auto 再 burn flag (既定 OFF)', () => {
@@ -390,6 +504,7 @@ describe('lib/crossChain/burnMarker: buildBurnMarker', () => {
       pendingAhead: false,
       nonceAdvanced: false,
       gapSatisfied: true,
+      timeGapSatisfied: true,
       scan: undefined,
       autoReburnEnabled: true,
       allowManualReburn: false,
@@ -764,7 +879,7 @@ describe('lib/crossChain/burnMarker: scanForBurnLog', () => {
   });
 });
 
-describe('lib/crossChain/burnMarker: isRangeError', () => {
+describe('lib/crossChain/burnMarker: isRangeError / isRateLimitError (D6)', () => {
   it('範囲超過の代表的な message を拾う', () => {
     expect(isRangeError(new Error('query returned more than 10000 results'))).toBe(true);
     expect(isRangeError(new Error('eth_getLogs block range too large'))).toBe(true);
@@ -773,9 +888,298 @@ describe('lib/crossChain/burnMarker: isRangeError', () => {
     );
   });
 
-  it('transport 障害は範囲エラーとして扱わない', () => {
+  // provider 3 種の実文面。範囲超過 (manual に倒す) と rate limit (wait に倒す) の
+  // 取り違えは、①一過性の障害で買い手に explorer 確認を強いる ②範囲超過を永遠に
+  // 再試行させる、の両方向で実害になる。
+  it('QuickNode の "limited to a 10,000 blocks range" を範囲超過として拾う', () => {
+    const e = Object.assign(new Error('RPC Request failed.'), {
+      metaMessages: [
+        'eth_getLogs is limited to a 10,000 blocks range. Please check the parameter requirements at ...',
+      ],
+    });
+    expect(isRangeError(e)).toBe(true);
+    expect(isRateLimitError(e)).toBe(false);
+  });
+
+  it('viem の details / metaMessages に入った provider 文面も見る', () => {
+    const e = { message: 'HTTP request failed.', details: 'block range is too large' };
+    expect(isRangeError(e)).toBe(true);
+  });
+
+  it('rate limit (-32005 / "limit exceeded") は範囲超過ではなく rate limit', () => {
+    const e = {
+      message: 'RPC Request failed.',
+      cause: { code: -32005, message: 'limit exceeded' },
+    };
+    expect(isRateLimitError(e)).toBe(true);
+    // 'limit exceeded' は範囲超過の文面でもあるが、rate limit 判定が優先される
+    expect(isRangeError(e)).toBe(false);
+  });
+
+  it('Alchemy の compute unit 超過 / HTTP 429 も rate limit', () => {
+    expect(
+      isRateLimitError(
+        new Error('Your app has exceeded its compute units per second capacity'),
+      ),
+    ).toBe(true);
+    expect(isRateLimitError({ status: 429, message: 'Too Many Requests' })).toBe(true);
+  });
+
+  it('transport 障害は範囲エラーとしても rate limit としても扱わない', () => {
     expect(isRangeError(new Error('ECONNRESET'))).toBe(false);
     expect(isRangeError(new Error('HTTP 503 Service Unavailable'))).toBe(false);
     expect(isRangeError(undefined)).toBe(false);
+    expect(isRateLimitError(new Error('ECONNRESET'))).toBe(false);
+  });
+});
+
+// ---- D5: 候補 tx の読み取りも call 予算に載せ、notfound は候補を飛ばす ----------
+
+function notFound(name: string): Error {
+  const e = new Error(`${name}: not found`);
+  e.name = name;
+  return e;
+}
+
+describe('lib/crossChain/burnMarker: 候補 tx 読み取りの隔離 (D5)', () => {
+  it('候補 tx が notfound (reorg) なら走査を throw せずその候補だけ飛ばす', async () => {
+    const client = makeScanClient({
+      logs: [
+        makeLog({ hash: HASH_A, blockNumber: 1_005n }),
+        makeLog({ hash: HASH_B, blockNumber: 1_010n }),
+      ],
+      txByHash: { [HASH_B]: { nonce: 6, from: DEPOSITOR } },
+    });
+    client.getTransaction = vi.fn(async ({ hash }: { hash: Hex }) => {
+      if (hash === HASH_A) throw notFound('TransactionNotFoundError');
+      return { nonce: 6, from: DEPOSITOR };
+    }) as never;
+    const r = await scanForBurnLog({
+      client: client as never,
+      marker: marker(),
+      head: 1_020n,
+      tokenMessenger: MESSENGER,
+    });
+    expect(r).toEqual({ status: 'ok', matches: [HASH_B] });
+  });
+
+  it('候補 receipt が notfound でもその候補だけ飛ばす', async () => {
+    const client = makeScanClient({
+      logs: [makeLog({ hash: HASH_A, blockNumber: 1_005n })],
+      txByHash: { [HASH_A]: { nonce: 5, from: DEPOSITOR } },
+    });
+    client.getTransactionReceipt = vi.fn(async () => {
+      throw notFound('TransactionReceiptNotFoundError');
+    }) as never;
+    const r = await scanForBurnLog({
+      client: client as never,
+      marker: marker(),
+      head: 1_020n,
+      tokenMessenger: MESSENGER,
+    });
+    expect(r).toEqual({ status: 'ok', matches: [] });
+  });
+
+  it('候補読み取りの transport 障害は throw する (未 burn に潰さない)', async () => {
+    const client = makeScanClient({
+      logs: [makeLog({ hash: HASH_A, blockNumber: 1_005n })],
+      txByHash: { [HASH_A]: { nonce: 5, from: DEPOSITOR } },
+    });
+    client.getTransaction = vi.fn(async () => {
+      throw new Error('fetch failed: ECONNRESET');
+    }) as never;
+    await expect(
+      scanForBurnLog({
+        client: client as never,
+        marker: marker(),
+        head: 1_020n,
+        tokenMessenger: MESSENGER,
+      }),
+    ).rejects.toThrow('ECONNRESET');
+  });
+
+  it('候補 tx / receipt の読み取りも MAX_SCAN_CALLS に載る (打ち切って RANGE)', async () => {
+    // 1 chunk (getLogs 1 call) で候補 20 件 → 候補読み取りは 2 call/件。予算 24 を
+    // 超えた時点で走査を打ち切り、範囲不明として RANGE を返す。
+    const hashes = Array.from(
+      { length: 20 },
+      (_, i) => (`0x${(i + 1).toString(16).padStart(4, '0')}`) as Hex,
+    );
+    const client = makeScanClient({
+      logs: hashes.map((h, i) => makeLog({ hash: h, blockNumber: 1_001n + BigInt(i) })),
+      txByHash: Object.fromEntries(
+        hashes.map((h) => [h, { nonce: 9, from: DEPOSITOR }]),
+      ),
+    });
+    const r = await scanForBurnLog({
+      client: client as never,
+      marker: marker(),
+      head: 1_100n,
+      tokenMessenger: MESSENGER,
+    });
+    expect(r).toEqual({ status: 'range' });
+    const reads =
+      client.getTransaction.mock.calls.length +
+      client.getTransactionReceipt.mock.calls.length;
+    expect(client.getLogs.mock.calls.length + reads).toBeLessThanOrEqual(
+      MAX_SCAN_CALLS,
+    );
+  });
+
+  it('getLogs が rate limit で失敗したら ratelimited (chunk 縮小もしない)', async () => {
+    const client = {
+      getLogs: vi.fn(async () => {
+        throw Object.assign(new Error('RPC Request failed.'), {
+          cause: { code: -32005, message: 'limit exceeded' },
+        });
+      }),
+    };
+    const r = await scanForBurnLog({
+      client: client as never,
+      marker: marker(),
+      head: 1_020n,
+      tokenMessenger: MESSENGER,
+    });
+    expect(r).toEqual({ status: 'ratelimited' });
+    expect(client.getLogs).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---- D4: 買い手が貼った tx hash の検証 ----------------------------------------
+
+describe('lib/crossChain/burnMarker: normalizeBurnTxHash / verifyBurnTxHash (D4)', () => {
+  const GOOD_HASH = `0x${'ab'.repeat(32)}` as Hex;
+
+  function receiptClient(opts: {
+    status?: 'success' | 'reverted';
+    logs?: FakeLog[];
+    from?: Address;
+    nonce?: number;
+    notfound?: boolean;
+  }) {
+    return {
+      getTransactionReceipt: vi.fn(async () => {
+        if (opts.notfound) throw notFound('TransactionReceiptNotFoundError');
+        return {
+          status: opts.status ?? 'success',
+          from: opts.from ?? DEPOSITOR,
+          logs: opts.logs ?? [makeLog({ hash: GOOD_HASH, blockNumber: 1_010n })],
+        };
+      }),
+      getTransaction: vi.fn(async () => ({
+        nonce: opts.nonce ?? 5,
+        from: opts.from ?? DEPOSITOR,
+      })),
+    };
+  }
+
+  it('書式不正は receipt を引く前に弾く', () => {
+    expect(normalizeBurnTxHash('0x1234')).toBeUndefined();
+    expect(normalizeBurnTxHash('deadbeef')).toBeUndefined();
+    expect(normalizeBurnTxHash(`0x${'zz'.repeat(32)}`)).toBeUndefined();
+    expect(normalizeBurnTxHash(`  ${GOOD_HASH}  `)).toBe(GOOD_HASH);
+  });
+
+  it('marker と一致する成功 tx は採用する', async () => {
+    const client = receiptClient({});
+    const r = await verifyBurnTxHash({
+      client: client as never,
+      hash: GOOD_HASH,
+      marker: marker(),
+      tokenMessenger: MESSENGER,
+    });
+    expect(r).toEqual({ ok: true, hash: GOOD_HASH });
+  });
+
+  it('金額が違う burn log は採用しない (mismatch)', async () => {
+    const client = receiptClient({
+      logs: [makeLog({ hash: GOOD_HASH, blockNumber: 1_010n, amount: 1n })],
+    });
+    const r = await verifyBurnTxHash({
+      client: client as never,
+      hash: GOOD_HASH,
+      marker: marker(),
+      tokenMessenger: MESSENGER,
+    });
+    expect(r).toEqual({ ok: false, reason: 'mismatch' });
+  });
+
+  it('宛先が違う / TokenMessenger 以外の log は採用しない', async () => {
+    for (const logs of [
+      [makeLog({ hash: GOOD_HASH, blockNumber: 1_010n, mintRecipient: OTHER_RECIPIENT })],
+      [
+        makeLog({
+          hash: GOOD_HASH,
+          blockNumber: 1_010n,
+          address: getAddress('0x00000000000000000000000000000000deadbeef'),
+        }),
+      ],
+      [],
+    ]) {
+      const r = await verifyBurnTxHash({
+        client: receiptClient({ logs }) as never,
+        hash: GOOD_HASH,
+        marker: marker(),
+        tokenMessenger: MESSENGER,
+      });
+      expect(r).toEqual({ ok: false, reason: 'mismatch' });
+    }
+  });
+
+  it('marker より前の nonce (過去の同額 burn) は採用しない', async () => {
+    const client = receiptClient({ nonce: 4 }); // marker.nonceLatest = 5
+    const r = await verifyBurnTxHash({
+      client: client as never,
+      hash: GOOD_HASH,
+      marker: marker(),
+      tokenMessenger: MESSENGER,
+    });
+    expect(r).toEqual({ ok: false, reason: 'mismatch' });
+  });
+
+  it('別 sender の tx は採用しない', async () => {
+    const client = receiptClient({ from: OTHER_RECIPIENT });
+    const r = await verifyBurnTxHash({
+      client: client as never,
+      hash: GOOD_HASH,
+      marker: marker(),
+      tokenMessenger: MESSENGER,
+    });
+    expect(r).toEqual({ ok: false, reason: 'mismatch' });
+  });
+
+  it('revert した tx / 見つからない tx はそれぞれの理由を返す', async () => {
+    expect(
+      await verifyBurnTxHash({
+        client: receiptClient({ status: 'reverted' }) as never,
+        hash: GOOD_HASH,
+        marker: marker(),
+        tokenMessenger: MESSENGER,
+      }),
+    ).toEqual({ ok: false, reason: 'reverted' });
+    expect(
+      await verifyBurnTxHash({
+        client: receiptClient({ notfound: true }) as never,
+        hash: GOOD_HASH,
+        marker: marker(),
+        tokenMessenger: MESSENGER,
+      }),
+    ).toEqual({ ok: false, reason: 'notfound' });
+  });
+
+  it('transport 障害は throw する (「一致しなかった」に潰さない)', async () => {
+    const client = {
+      getTransactionReceipt: vi.fn(async () => {
+        throw new Error('fetch failed: ECONNRESET');
+      }),
+    };
+    await expect(
+      verifyBurnTxHash({
+        client: client as never,
+        hash: GOOD_HASH,
+        marker: marker(),
+        tokenMessenger: MESSENGER,
+      }),
+    ).rejects.toThrow('ECONNRESET');
   });
 });

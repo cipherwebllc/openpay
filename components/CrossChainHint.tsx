@@ -180,6 +180,11 @@ export function CrossChainHint(props: CrossChainHintProps) {
         destChainId={result.destChainId}
         mintTxHash={result.mintTxHash}
         explorerBase={explorer}
+        // D3: 利用料 (付帯) だけが未確定でも決済は成立している。買い手には「追加の支払いは
+        // 不要」を二次通知として伝える (本送金の成功表示を濁さない)。
+        feeUnresolved={
+          result.path === 'cctp-v2' && result.feeBurnUnresolved !== undefined
+        }
       />
     );
   }
@@ -226,6 +231,15 @@ export function CrossChainHint(props: CrossChainHintProps) {
     } catch {
       // 実行エラーは hook.error に反映される (ここでは何もしない)。
     }
+  }
+
+  // D4: 買い手が貼った burn tx hash が on-chain 検証を通ったら、そのまま続き
+  // (Iris poll → mint) を走らせる。検証に落ちた場合は panel が inline error を出すだけで
+  // 実行しない (state も変えない)。
+  async function onAdoptHash(hash: string) {
+    const res = await hook.adoptBurnTxHash(hash);
+    if (res.ok) void onPay();
+    return res;
   }
 
   const isDirectSelected = selectedOption?.kind === 'direct';
@@ -277,6 +291,8 @@ export function CrossChainHint(props: CrossChainHintProps) {
           reburnable={burnUnresolved.reburnable}
           armed={hook.isManualReburnArmed}
           onArm={hook.armManualReburn}
+          onAdoptHash={onAdoptHash}
+          onRetry={() => void onPay()}
         />
       )}
       {!isDirectSelected && (
@@ -338,6 +354,8 @@ function formatProgress(
       return t('progressBurnProbe');
     case 'burn_unconfirmed':
       return t('progressBurnUnconfirmed');
+    case 'fee_burn_unconfirmed':
+      return t('progressFeeBurnUnconfirmed');
   }
 }
 
@@ -349,6 +367,7 @@ function SuccessPanel({
   destChainId,
   mintTxHash,
   explorerBase,
+  feeUnresolved,
 }: {
   bridge: 'gateway' | 'cctp-v2';
   recipient: Address;
@@ -357,6 +376,7 @@ function SuccessPanel({
   destChainId: number;
   mintTxHash: `0x${string}`;
   explorerBase: string | undefined;
+  feeUnresolved?: boolean;
 }) {
   const t = useTranslations('CrossChainHint');
   return (
@@ -373,6 +393,9 @@ function SuccessPanel({
           chainId: destChainId,
         })}
       </p>
+      {feeUnresolved && (
+        <p className="text-xs text-emerald-800">{t('feeUnresolvedNotice')}</p>
+      )}
       {explorerBase && (
         <a
           href={`${explorerBase}/tx/${mintTxHash}`}

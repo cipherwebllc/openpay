@@ -180,13 +180,21 @@ export type BurnScanResult =
   /** 走査できた: matches は「marker と完全一致し、かつ marker 以降の nonce で成功した」burn tx */
   | { status: 'ok'; matches: Hex[] }
   /** 走査範囲が chain 別 cap / call 上限を超えた。throw せず manual に倒すための signal */
-  | { status: 'range' };
+  | { status: 'range' }
+  /** provider の rate limit で走査できなかった。時間を置けば同じ走査が通るので
+   *  manual (人間の二段確認) ではなく wait に倒す (D6)。 */
+  | { status: 'ratelimited' };
 
 // provider が「範囲が広すぎる」を返したかの判定。message / code の表現は provider ごとに
 // バラバラなので実測ベースの部分一致で拾う。ここで拾えなかった error は transport 障害として
 // throw する (「log 無し = 未 broadcast」に潰すと二重 burn になるため、握り潰さない)。
+// ⚠ 'limit exceeded' は Alchemy 等の **rate limit** (-32005) の文面でもある。rate limit を
+// 「範囲超過 → manual」に落とすと、時間を置けば解決する一過性の障害で買い手に explorer 確認を
+// 強いることになるため、判定は必ず rate limit を先に見る (isRateLimitError → isRangeError)。
 const RANGE_ERROR_PATTERNS = [
   'block range',
+  // QuickNode: "eth_getLogs is limited to a 10,000 blocks range" (複数形・語順が別)
+  'blocks range',
   'range is too large',
   'range too large',
   'too many blocks',
@@ -199,19 +207,84 @@ const RANGE_ERROR_PATTERNS = [
   'log response size exceeded',
 ];
 
-export function isRangeError(error: unknown): boolean {
+// rate limit (一過性) の判定。JSON-RPC code -32005 / HTTP 429 と、主要 provider の文面。
+const RATE_LIMIT_PATTERNS = [
+  'rate limit',
+  'rate-limit',
+  'ratelimit',
+  'too many requests',
+  'exceeded its compute units',
+  'compute units per second',
+  'request limit reached',
+  'throttled',
+  'over quota',
+];
+const RATE_LIMIT_CODES = new Set([-32005, 429]);
+
+/** error の全 message 系フィールド (viem は details / shortMessage / metaMessages に
+ *  provider の生文面を分けて入れる) を 1 本の小文字テキストに畳む。 */
+function errorText(error: unknown): string {
   const parts: string[] = [];
   const visit = (e: unknown, depth: number): void => {
     if (depth > 4 || e === null || typeof e !== 'object') return;
-    const rec = e as { message?: unknown; details?: unknown; shortMessage?: unknown; cause?: unknown };
+    const rec = e as {
+      message?: unknown;
+      details?: unknown;
+      shortMessage?: unknown;
+      metaMessages?: unknown;
+      cause?: unknown;
+    };
     for (const v of [rec.message, rec.details, rec.shortMessage]) {
       if (typeof v === 'string') parts.push(v.toLowerCase());
+    }
+    // viem は provider の生 error を metaMessages (string[]) に積む。
+    if (Array.isArray(rec.metaMessages)) {
+      for (const v of rec.metaMessages) {
+        if (typeof v === 'string') parts.push(v.toLowerCase());
+      }
     }
     visit(rec.cause, depth + 1);
   };
   visit(error, 0);
-  const text = parts.join(' | ');
+  return parts.join(' | ');
+}
+
+/** error chain 上の JSON-RPC code / HTTP status を集める。 */
+function errorCodes(error: unknown): number[] {
+  const codes: number[] = [];
+  const visit = (e: unknown, depth: number): void => {
+    if (depth > 4 || e === null || typeof e !== 'object') return;
+    const rec = e as { code?: unknown; status?: unknown; cause?: unknown };
+    for (const v of [rec.code, rec.status]) {
+      if (typeof v === 'number') codes.push(v);
+    }
+    visit(rec.cause, depth + 1);
+  };
+  visit(error, 0);
+  return codes;
+}
+
+export function isRateLimitError(error: unknown): boolean {
+  if (errorCodes(error).some((c) => RATE_LIMIT_CODES.has(c))) return true;
+  const text = errorText(error);
+  return RATE_LIMIT_PATTERNS.some((p) => text.includes(p));
+}
+
+export function isRangeError(error: unknown): boolean {
+  // rate limit が先 ('limit exceeded' は両方の文面に現れる)。
+  if (isRateLimitError(error)) return false;
+  const text = errorText(error);
   return RANGE_ERROR_PATTERNS.some((p) => text.includes(p));
+}
+
+/** tx / receipt が「その RPC からは見えない」= not found を表す error か。
+ *  transport 障害と区別するため viem の error name のみで判定する。 */
+function isNotFoundError(error: unknown): boolean {
+  const name = (error as { name?: unknown })?.name;
+  return (
+    name === 'TransactionNotFoundError' ||
+    name === 'TransactionReceiptNotFoundError'
+  );
 }
 
 export interface ScanForBurnLogArgs {
@@ -278,6 +351,9 @@ export async function scanForBurnLog(
         toBlock: chunkEnd,
       })) as unknown as typeof logs;
     } catch (error) {
+      // rate limit は「時間を置けば同じ走査が通る」一過性の障害。chunk を縮めても
+      // 解決しないので縮小 loop に入れず、wait に倒すための signal を返す (D6)。
+      if (isRateLimitError(error)) return { status: 'ratelimited' };
       if (!isRangeError(error)) throw error;
       if (sizeIdx + 1 >= SCAN_CHUNK_SIZES.length) return { status: 'range' };
       sizeIdx += 1;
@@ -311,12 +387,35 @@ export async function scanForBurnLog(
   }
 
   // 条件 4 / 5 (tx.nonce・tx.from・receipt) は候補 tx だけに対して確認する。
+  // この 2 本も RPC なので getLogs と同じ call 予算 (MAX_SCAN_CALLS) に載せる —
+  // 載せないと「1 chunk で 100 件マッチ = 200 call」のように上限が実質無効になり、
+  // provider の rate limit / コスト上限を踏む (D5)。
   const matches: Hex[] = [];
   for (const hash of hashes) {
-    const tx = await args.client.getTransaction({ hash });
+    if (calls + 2 > MAX_SCAN_CALLS) return { status: 'range' };
+    let tx: { nonce: number; from: Address };
+    try {
+      calls += 1;
+      tx = await args.client.getTransaction({ hash });
+    } catch (error) {
+      if (isRateLimitError(error)) return { status: 'ratelimited' };
+      // reorg 等でこの候補だけが消えた場合は「一致しなかった」として飛ばす。走査全体を
+      // throw で落とすと、他の候補で確定できたはずの判定まで巻き添えになる (D5)。
+      // transport 障害は握り潰さず throw する (未 burn に潰さない)。
+      if (!isNotFoundError(error)) throw error;
+      continue;
+    }
     if (tx.nonce < marker.nonceLatest) continue;
     if (tx.from.toLowerCase() !== marker.depositor.toLowerCase()) continue;
-    const receipt = await args.client.getTransactionReceipt({ hash });
+    let receipt: { status: string };
+    try {
+      calls += 1;
+      receipt = await args.client.getTransactionReceipt({ hash });
+    } catch (error) {
+      if (isRateLimitError(error)) return { status: 'ratelimited' };
+      if (!isNotFoundError(error)) throw error;
+      continue;
+    }
     if (receipt.status !== 'success') continue;
     matches.push(hash);
   }
@@ -346,12 +445,18 @@ export interface ClassifyBurnStateInput {
   hash: Hex | undefined;
   /** hash の receipt 状態 (hash が無ければ undefined) */
   receipt: BurnReceiptState | undefined;
-  /** P: getTransactionCount(pending) > getTransactionCount(latest) */
-  pendingAhead: boolean;
+  /** P: getTransactionCount(pending) > getTransactionCount(latest)。
+   *  **undefined = 未計測**。「計測していない」を「mempool は空」に潰すと、二段確認だけで
+   *  mempool 滞留中の再 burn が通ってしまうため、両者を型で区別する (D1)。 */
+  pendingAhead: boolean | undefined;
   /** N: latest > marker.nonceLatest (marker 以降にこの送信者の tx が mined) */
   nonceAdvanced: boolean;
   /** G: head − marker.block ≥ minGapBlocks かつ now − marker.at ≥ MIN_GAP_MS */
   gapSatisfied: boolean;
+  /** G の時間成分のみ: now − marker.at ≥ MIN_GAP_MS。marker.block が無く block gap を
+   *  測れない row 4 でも「marker からの最小経過時間」だけは判定できるので分けて持つ。
+   *  marker 自体が無い (旧 state) 場合は基準時刻が無いので false。 */
+  timeGapSatisfied: boolean;
   /** L: log 走査結果 (走査していなければ undefined) */
   scan: BurnScanResult | undefined;
   /** flag: row 9 / 12 / 18 の **自動** 再 burn を許すか (既定 OFF) */
@@ -360,11 +465,44 @@ export interface ClassifyBurnStateInput {
   allowManualReburn: boolean;
 }
 
-// manual に落ちた状態を、買い手の二段確認 (explorer で USDC が減っていないことを確認) で
-// 再 burn に開けてよいか。「一致する成功 burn が実際に見つかっている (L≥2)」場合だけは
-// 開けない — 人間の申告より on-chain の事実を優先する (掟 15 と同じ思想)。
-function manualDecision(row: number, reason: string, reburnable: boolean): BurnDecision {
-  return { action: 'manual', row, reason, reburnable };
+/** manual に落ちた状態を、買い手の二段確認 (explorer で USDC が減っていないことを確認) で
+ *  再 burn に開けてよいか。人間の申告は「on-chain を実際に見た上での補助」に限る (掟 15):
+ *
+ *   1. mempool が空であることを **実測済み** (pendingAhead === false)。未計測 (undefined)
+ *      は開けない — row 3 (旧 state) / row 4 (marker.block 欠落) は決定表の上で
+ *      pendingAhead 判定より **前** に返るため、計測しないまま override すると
+ *      「mempool に burn が居るのに再 burn」= 二重支払いが成立してしまう (D1)。
+ *   2. log 走査をしたなら「一致 0」であること。'range' (cap 超過) / 'ratelimited' は
+ *      **見ていない** のと同じなので開けない。marker.block/nonce 欠落で走査自体を
+ *      行わなかった (scan === undefined) 場合だけは 1. と 3. を代わりの根拠にする。
+ *   3. marker があるなら marker からの最小経過時間 (MIN_GAP_MS) が経過していること
+ *      — broadcast 直後は pending nonce に反映されない窓があるため。marker が無い
+ *      旧 state は基準時刻が存在しないので、この条件は課さない (課すと恒久 wedge)。
+ */
+function canManuallyReburn(input: ClassifyBurnStateInput): boolean {
+  if (input.pendingAhead !== false) return false;
+  if (input.scan !== undefined) {
+    if (input.scan.status !== 'ok') return false;
+    if (input.scan.matches.length > 0) return false;
+  }
+  if (input.marker && !input.timeGapSatisfied) return false;
+  return true;
+}
+
+// manual 決定。reburnable は「その row の性質上開けてよいか (byRow)」と「実測が揃っているか
+// (canManuallyReburn)」の AND。UI はこの値でだけ二段確認ボタンを出す。
+function manualDecision(
+  row: number,
+  reason: string,
+  byRow: boolean,
+  input: ClassifyBurnStateInput,
+): BurnDecision {
+  return {
+    action: 'manual',
+    row,
+    reason,
+    reburnable: byRow && canManuallyReburn(input),
+  };
 }
 
 /** 設計 §4 の決定表そのもの (純粋関数)。row 21 (transport 障害) は呼出側の probe が
@@ -384,10 +522,11 @@ export function classifyBurnState(
   if (!marker && !hash) {
     return { action: 'burn', row: 1, reason: 'first burn' };
   }
-  // row 3: marker 導入前の旧 state で hash が revert / 未発見 → 走査範囲不明なので再 burn 不可。
+  // row 3: marker 導入前の旧 state で hash が revert / 未発見 → 走査範囲不明。
+  // 二段確認で開けるのは mempool 空を実測できている場合だけ (canManuallyReburn)。
   if (!marker) {
     return applyManualOverride(
-      manualDecision(3, 'legacy state without burn marker', true),
+      manualDecision(3, 'legacy state without burn marker', true, input),
       input,
     );
   }
@@ -395,14 +534,20 @@ export function classifyBurnState(
   // row 4: 走査範囲 (marker.block) / 同定条件 (marker.nonceLatest) が欠けている。
   if (marker.block === null || marker.nonceLatest === null) {
     return applyManualOverride(
-      manualDecision(4, 'marker without block/nonce baseline', true),
+      manualDecision(4, 'marker without block/nonce baseline', true, input),
       input,
     );
   }
-  // row 20: cap 超過 / call 上限。throw せず manual (恒久 wedge 回避)。
+  // row 22 (D6): provider の rate limit で走査できなかった。時間を置けば同じ走査が通るので
+  // manual (人間の二段確認) ではなく wait。一過性の障害を買い手の explorer 確認に転嫁しない。
+  if (scan?.status === 'ratelimited') {
+    return { action: 'wait', row: 22, reason: 'burn log scan rate limited' };
+  }
+  // row 20: cap 超過 / call 上限。throw せず manual (恒久 wedge 回避)。走査を **していない**
+  // ので二段確認でも開かない (canManuallyReburn の 2.) — 開けるのはサポート経由の照合。
   if (scan?.status === 'range') {
     return applyManualOverride(
-      manualDecision(20, 'scan range exceeded cap', true),
+      manualDecision(20, 'scan range exceeded cap', true, input),
       input,
     );
   }
@@ -420,7 +565,7 @@ export function classifyBurnState(
 
   // row 6 / 15: 同定不能 (別タブ等での並行 burn 疑い)。人間の申告でも開けない。
   if (matches.length >= 2) {
-    return manualDecision(hash ? 15 : 6, 'multiple matching burns', false);
+    return manualDecision(hash ? 15 : 6, 'multiple matching burns', false, input);
   }
   // row 7 / 13 / 16: 一意特定 → 採用 (再 burn しない)。
   if (matches.length === 1) {
@@ -437,7 +582,12 @@ export function classifyBurnState(
   // row 8 / 19: nonce だけ進んで log 無し = 「revert した burn」と「無関係 tx」が区別できない。
   if (input.nonceAdvanced) {
     return applyManualOverride(
-      manualDecision(hash ? 19 : 8, 'nonce advanced without a matching burn', true),
+      manualDecision(
+        hash ? 19 : 8,
+        'nonce advanced without a matching burn',
+        true,
+        input,
+      ),
       input,
     );
   }
@@ -458,13 +608,126 @@ function gatedReburn(
 ): BurnDecision {
   if (input.autoReburnEnabled) return { action: 'burn', row, reason };
   return applyManualOverride(
-    manualDecision(row, `${reason} (auto re-burn flag off)`, true),
+    manualDecision(row, `${reason} (auto re-burn flag off)`, true, input),
     input,
   );
 }
 
-// manual を買い手の二段確認で開ける。mempool 有りは既に wait で先に返っているので、ここに
-// 来る manual は「mempool 空」が確認済み。
+// ---- 買い手が貼り付けた burn tx hash の検証 (D4) ------------------------------
+
+/** 0x + 64 hex だけを受理する (explorer から貼るときの前後空白は落とす)。 */
+export function normalizeBurnTxHash(input: string): Hex | undefined {
+  const t = input.trim();
+  return /^0x[0-9a-fA-F]{64}$/.test(t) ? (t.toLowerCase() as Hex) : undefined;
+}
+
+export type BurnTxVerification =
+  | { ok: true; hash: Hex }
+  | {
+      ok: false;
+      /** format=書式不正 / notfound=この chain に無い / reverted=失敗 tx /
+       *  mismatch=この決済の burn ではない (金額・宛先・chain・送信者・nonce のいずれかが不一致) */
+      reason: 'format' | 'notfound' | 'reverted' | 'mismatch';
+    };
+
+/** 「burn は着弾したが hash が resume state に残らなかった」(決定表 row 4 / 20) 買い手の
+ *  自己救済経路。買い手が explorer から貼った tx hash を **on-chain の事実だけ** で検証し、
+ *  marker と一致したときだけ採用する。人間の申告 (「これが私の burn です」) は入口に過ぎず、
+ *  採否は receipt と DepositForBurn log が決める (掟 15)。
+ *
+ *  受理条件 (すべて AND、§5 の候補受理条件と同一):
+ *    1. receipt が取得でき status === 'success'
+ *    2. その receipt の log に TokenMessenger / v2 DepositForBurn topic0 のものがある
+ *    3. その log の burnToken / depositor / amount / destinationDomain / mintRecipient が
+ *       marker と一致 (depositor は tx 送信者でもある)
+ *    4. marker.nonceLatest が判っていれば tx.nonce >= marker.nonceLatest
+ *       (= marker より前の「過去の同額 burn」を貼っても採用されない) */
+export async function verifyBurnTxHash(args: {
+  client: PublicClient;
+  hash: Hex;
+  marker: BurnIntentMarker;
+  tokenMessenger: Address;
+}): Promise<BurnTxVerification> {
+  const { marker } = args;
+  let receipt: {
+    status: string;
+    from?: Address;
+    logs: readonly { address: Address; topics: readonly Hex[]; data: Hex }[];
+  };
+  try {
+    receipt = (await args.client.getTransactionReceipt({
+      hash: args.hash,
+    })) as unknown as typeof receipt;
+  } catch (error) {
+    if (isNotFoundError(error)) return { ok: false, reason: 'notfound' };
+    throw error; // transport 障害は「無かった」に潰さない
+  }
+  if (receipt.status !== 'success') return { ok: false, reason: 'reverted' };
+  if (
+    receipt.from &&
+    receipt.from.toLowerCase() !== marker.depositor.toLowerCase()
+  ) {
+    return { ok: false, reason: 'mismatch' };
+  }
+
+  const messenger = getAddress(args.tokenMessenger).toLowerCase();
+  const wantRecipient = pad(getAddress(marker.mintRecipient), {
+    size: 32,
+  }).toLowerCase();
+  const wantAmount = BigInt(marker.amount);
+  const matched = receipt.logs.some((log) => {
+    if (log.address.toLowerCase() !== messenger) return false;
+    if (log.topics[0]?.toLowerCase() !== CCTP_V2_DEPOSIT_FOR_BURN_TOPIC0) {
+      return false;
+    }
+    let a: {
+      burnToken: Address;
+      amount: bigint;
+      depositor: Address;
+      mintRecipient: Hex;
+      destinationDomain: number;
+    };
+    try {
+      a = decodeEventLog({
+        abi: [CCTP_V2_DEPOSIT_FOR_BURN_EVENT],
+        topics: log.topics as [Hex, ...Hex[]],
+        data: log.data,
+      }).args as unknown as typeof a;
+    } catch {
+      // 同 topic0 で decode できない log は「一致しない」として無視する
+      // (走査対象外の別 event を掴んで誤採用しないための隔離)。
+      return false;
+    }
+    return (
+      a.amount === wantAmount &&
+      a.destinationDomain === marker.destinationDomain &&
+      a.mintRecipient.toLowerCase() === wantRecipient &&
+      a.burnToken.toLowerCase() === marker.burnToken.toLowerCase() &&
+      a.depositor.toLowerCase() === marker.depositor.toLowerCase()
+    );
+  });
+  if (!matched) return { ok: false, reason: 'mismatch' };
+
+  if (marker.nonceLatest !== null) {
+    let tx: { nonce: number; from: Address };
+    try {
+      tx = await args.client.getTransaction({ hash: args.hash });
+    } catch (error) {
+      if (isNotFoundError(error)) return { ok: false, reason: 'notfound' };
+      throw error;
+    }
+    if (tx.from.toLowerCase() !== marker.depositor.toLowerCase()) {
+      return { ok: false, reason: 'mismatch' };
+    }
+    // marker より前の burn (= 過去の同額送金) を貼っても採用しない。
+    if (tx.nonce < marker.nonceLatest) return { ok: false, reason: 'mismatch' };
+  }
+  return { ok: true, hash: args.hash };
+}
+
+// manual を買い手の二段確認で開ける。「開けてよいか」は manualDecision が
+// canManuallyReburn (mempool 実測 + 走査結果 + gap) で既に決めているので、ここでは
+// reburnable フラグだけを見る。
 function applyManualOverride(
   decision: BurnDecision,
   input: ClassifyBurnStateInput,

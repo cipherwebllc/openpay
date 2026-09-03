@@ -2303,8 +2303,12 @@ function notFoundError(): Error {
 
 // marker を持つ resume state から再開する CCTP 実行の共通 fixture。
 function makeA1Fixture(opts: {
-  /** source chain の probe が返す値 */
+  /** source chain の probe が返す既定値 (hash 個別指定が無い場合) */
   receipt?: 'success' | 'reverted' | 'notfound';
+  /** hash ごとの receipt。merchant / fee の hash 取り違えを検出できるようにするため、
+   *  fixture は「どの hash を問い合わせたか」で応答を変える (全 hash 同一応答だと
+   *  fee の hash で merchant の判定をしていても test が通ってしまう)。 */
+  receiptByHash?: Record<string, 'success' | 'reverted' | 'notfound'>;
   noncePending?: number;
   nonceLatest?: number;
   head?: bigint;
@@ -2316,14 +2320,20 @@ function makeA1Fixture(opts: {
     signature: '0x',
     txHashes: opts.txHashes ?? ['0xapprove', '0xburn_new', '0xmint_m'],
   });
+  const receiptQueries: Hex[] = [];
   const sourcePublic = {
     getBlockNumber: vi.fn(async () => opts.head ?? 1_100n),
     waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    receiptQueries,
     getTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => {
-      const known = opts.txByHash?.[hash];
-      if (known) return { status: 'success' };
-      if (opts.receipt === 'notfound') throw notFoundError();
-      return { status: opts.receipt ?? 'success' };
+      receiptQueries.push(hash);
+      const explicit = opts.receiptByHash?.[hash];
+      const status =
+        explicit ??
+        // 走査で拾った候補 tx は成功済 burn として扱う (scan の受理条件 5)
+        (opts.txByHash?.[hash] ? 'success' : (opts.receipt ?? 'success'));
+      if (status === 'notfound') throw notFoundError();
+      return { status };
     }),
     getTransactionCount: vi.fn(async ({ blockTag }: { blockTag: string }) =>
       blockTag === 'pending' ? (opts.noncePending ?? 5) : (opts.nonceLatest ?? 5),
@@ -2588,27 +2598,38 @@ describe('lib/crossChain/execute: A1 burn 再開安全化', () => {
     expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
   });
 
-  it('fee burn も merchant と同じ判定 (fee slot だけ wait でも burn しない)', async () => {
+  it('fee burn も merchant と同じ決定表で判定される (fee slot だけ wait → 再 burn せず記録)', async () => {
+    // 判定そのものは merchant と対称 (mempool 有り = row 5 の wait) だが、fee は付帯なので
+    // 本送金を止めない (D3)。fee burn は broadcast されず、未確定として記録されるだけ。
     const feeMarker = {
       ...A1_MARKER,
       mintRecipient: FEE_RECEIVER,
       amount: '100000',
       nonceLatest: 6,
     };
-    const fx = makeA1Fixture({ noncePending: 8, nonceLatest: 7 });
-    await expect(
-      runA1(fx, {
-        feeReceiver: FEE_RECEIVER,
-        feeAmount: 100_000n,
-        resume: {
-          approveTxHash: '0xa',
-          burnTxHash: '0xburn_m',
-          feeBurnIntent: feeMarker,
-        },
-        allowAutoReburn: true,
-      }),
-    ).rejects.toMatchObject({ kind: 'wait', slot: 'fee', row: 5 });
-    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+    const fx = makeA1Fixture({
+      receiptByHash: { '0xburn_m': 'success' },
+      noncePending: 8,
+      nonceLatest: 7,
+      txHashes: ['0xmint_m'],
+    });
+    const result = await runA1(fx, {
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 100_000n,
+      resume: {
+        approveTxHash: '0xa',
+        burnTxHash: '0xburn_m',
+        feeBurnIntent: feeMarker,
+      },
+      allowAutoReburn: true,
+    });
+    expect(result.feeBurnUnresolved).toMatchObject({ kind: 'wait', row: 5 });
+    expect(result.feeBurnTxHash).toBeUndefined();
+    expect(result.feeMintTxHash).toBeUndefined();
+    // 送信は merchant mint の 1 本だけ (fee burn も approve も無い)
+    expect(fx.walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+    expect(fx.walletClient.writeContract).not.toHaveBeenCalled();
+    expect(result.mintTxHash).toBe('0xmint_m');
   });
 
   it('fee burn も marker を書いてから broadcast する (merchant と完全対称)', async () => {
@@ -2650,6 +2671,71 @@ describe('lib/crossChain/execute: A1 burn 再開安全化', () => {
       }),
     ).rejects.toMatchObject({ kind: 'manual', row: 3 });
     expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('後方互換 (row 3): 二段確認済みでも mempool に tx が居るなら再 burn しない (D1)', async () => {
+    // 旧 state (marker 無し) は決定表上 pendingAhead 判定より前に manual を返す。
+    // 「二段確認さえ通れば burn」だと、mempool に burn が残っているのに再送金して
+    // 二重支払いになる。legacy 経路でも nonce を実測して塞ぐ。
+    const fx = makeA1Fixture({
+      receiptByHash: { '0xburn_prev': 'reverted' },
+      noncePending: 6,
+      nonceLatest: 5,
+    });
+    const err = await runA1(fx, {
+      resume: { approveTxHash: '0xa', burnTxHash: '0xburn_prev' },
+      allowAutoReburn: true,
+      allowManualReburn: true,
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(CrossChainBurnUnresolvedError);
+    expect(err).toMatchObject({ kind: 'manual', row: 3, reburnable: false });
+    expect(fx.walletClient.sendTransaction).not.toHaveBeenCalled();
+    expect(fx.walletClient.writeContract).not.toHaveBeenCalled();
+    // legacy 経路でも pending/latest nonce を実測している (未計測のまま開けない)
+    expect(fx.sourcePublic.getTransactionCount).toHaveBeenCalledTimes(2);
+  });
+
+  it('D3: fee slot が未確定でも merchant の mint は進む (fee は二次通知として記録)', async () => {
+    // merchant burn は成功済 (proceed)、fee burn hash は revert (flag OFF → manual)。
+    // 付帯である利用料が本送金を人質に取らないこと = 掟 13。
+    const fx = makeA1Fixture({
+      receiptByHash: { '0xburn_m': 'success', '0xburn_f': 'reverted' },
+      txHashes: ['0xmint_m'],
+    });
+    const steps: Array<Record<string, unknown>> = [];
+    const progress: CrossChainProgress[] = [];
+    const result = await runA1(fx, {
+      feeReceiver: FEE_RECEIVER,
+      feeAmount: 100_000n,
+      resume: {
+        approveTxHash: '0xa',
+        burnTxHash: '0xburn_m',
+        burnIntent: A1_MARKER,
+        feeBurnTxHash: '0xburn_f',
+        feeBurnIntent: {
+          ...A1_MARKER,
+          mintRecipient: FEE_RECEIVER,
+          amount: '100000',
+          nonceLatest: 6,
+        },
+      },
+      onStep: (s) => steps.push({ ...s }),
+      onProgress: (p) => progress.push(p),
+      allowAutoReburn: false,
+    });
+    // merchant は attestation → mint まで完走する
+    expect(result.mintTxHash).toBe('0xmint_m');
+    expect(result.burnTxHash).toBe('0xburn_m');
+    // fee は自動で再 burn しない (送信は merchant mint の 1 本だけ)
+    expect(fx.walletClient.sendTransaction).toHaveBeenCalledTimes(1);
+    expect(fx.walletClient.writeContract).not.toHaveBeenCalled();
+    // fee の未確定は結果と resume state の両方に残る
+    expect(result.feeBurnUnresolved).toMatchObject({ kind: 'manual', row: 12 });
+    expect(steps.some((s) => s.feeBurnUnresolved !== undefined)).toBe(true);
+    expect(progress.map((p) => p.kind)).toContain('fee_burn_unconfirmed');
+    // merchant / fee の hash を取り違えていない (両方それぞれ問い合わせている)
+    expect(fx.sourcePublic.receiptQueries).toContain('0xburn_m');
+    expect(fx.sourcePublic.receiptQueries).toContain('0xburn_f');
   });
 
   it('初回 (marker も hash も無い) は probe の RPC を打たずに従来どおり burn する', async () => {
