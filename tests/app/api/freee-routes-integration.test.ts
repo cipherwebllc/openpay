@@ -62,6 +62,7 @@ vi.mock('next/headers', () => ({
 import { POST as syncPOST } from '@/app/api/freee/sync/route';
 import { GET as mappingGET, POST as mappingPOST } from '@/app/api/freee/mapping/route';
 import { GET as authorizeGET } from '@/app/api/freee/authorize/route';
+import { GET as statusGET } from '@/app/api/freee/status/route';
 import { GET as callbackGET } from '@/app/api/freee/callback/route';
 import { encryptStoredToken, type StoredToken } from '@/lib/freee';
 
@@ -314,6 +315,19 @@ describe('POST /api/freee/sync (実グルー: session→entitlement→token→ru
     const res = await syncPOST(req('http://localhost/api/freee/sync', { entries: [income()] }));
     expect(res.status).toBe(502);
     expect(h.store.has(`freee:tok:${MERCHANT.toLowerCase()}`)).toBe(true); // 残す
+  });
+});
+
+// C11: セッション (店主ウォレット) 固有の連携状態を共有キャッシュに載せない。
+describe('GET /api/freee/status (実グルー)', () => {
+  it('連携済み → 200 + Cache-Control: private, no-store', async () => {
+    seedSession();
+    seedFreeeConnected();
+    seedMapping();
+    const res = await statusGET();
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(await res.json()).toMatchObject({ ok: true, connected: true, mappingSet: true });
   });
 });
 

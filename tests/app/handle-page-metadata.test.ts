@@ -166,6 +166,36 @@ describe('@handle generateMetadata', () => {
     expect(String(m.description)).toContain('Web3 クリエイター');
   });
 
+  // D7: bio は店主入力。UTF-16 slice だと絵文字/補助面漢字を割って孤立サロゲートが
+  // meta に載る (encodeURIComponent が throw する不正 Unicode)。制御文字も落とす。
+  it('bio の切詰めはコードポイント単位 (境界の絵文字を割らない)', async () => {
+    // 90 コードポイント目が絵文字 (サロゲートペア) になるように詰める。
+    const bio = `${'あ'.repeat(89)}🌸${'い'.repeat(20)}`;
+    h.record = { ...PROFILE_RECORD, profile: { bio } };
+    const m = await call('%40masia');
+    const desc = String(m.description);
+    // 孤立サロゲート (lone surrogate) が残っていないこと。
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(desc)).toBe(false);
+    expect(() => encodeURIComponent(desc)).not.toThrow();
+    expect(desc).toBe(`${'あ'.repeat(89)}🌸…`);
+  });
+
+  it('bio の制御文字は meta から除去する', async () => {
+    h.record = {
+      ...PROFILE_RECORD,
+      profile: { bio: '  コーヒー\u0000屋\u001b です  ' },
+    };
+    const m = await call('%40masia');
+    expect(String(m.description)).toBe('コーヒー屋 です');
+  });
+
+  it('bio が制御文字だけなら tip の既定 description に倒す', async () => {
+    h.record = { ...PROFILE_RECORD, profile: { bio: '\u0000\u0001  ' } };
+    const m = await call('%40masia');
+    expect(String(m.description)).not.toBe('');
+    expect(String(m.description)).not.toContain('\u0000');
+  });
+
   it('販売可能な owner 商品の product 指定は商品 meta と商品 OG URL を返す', async () => {
     h.enableCreatorStore = true;
     h.enableCreatorStoreUi = true;

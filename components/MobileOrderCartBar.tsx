@@ -174,7 +174,6 @@ export function MobileOrderCartBar({
               type="button"
               onClick={cart.onToggle}
               aria-expanded={cart.open}
-              aria-label={t('orderItemsToggle')}
               className="flex w-full items-center justify-between gap-2"
             >
               <span className="flex items-center gap-1.5 text-sm font-medium text-slate-700">

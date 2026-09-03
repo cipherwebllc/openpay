@@ -22,11 +22,15 @@ export async function GET(): Promise<NextResponse> {
     getMapping(session.address),
   ]);
 
-  return NextResponse.json({
-    ok: true,
-    connected: !!token,
-    companyId: meta?.companyId ?? token?.companyId ?? null,
-    companyName: meta?.companyName ?? null,
-    mappingSet: !!mapping,
-  });
+  // セッション (店主ウォレット) 固有の連携状態 → 共有キャッシュに載せない。
+  return NextResponse.json(
+    {
+      ok: true,
+      connected: !!token,
+      companyId: meta?.companyId ?? token?.companyId ?? null,
+      companyName: meta?.companyName ?? null,
+      mappingSet: !!mapping,
+    },
+    { headers: { 'Cache-Control': 'private, no-store' } },
+  );
 }

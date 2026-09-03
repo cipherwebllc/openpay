@@ -158,17 +158,21 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: 'kv_error' }, { status: 502 });
   }
   // 編集 prefill のため config/profile も返す (公開ページと同じレコード)。
-  return NextResponse.json({
-    ok: true,
-    handles: owned.map((o) => ({
-      handle: o.handle,
-      config: o.record.config,
-      profile: o.record.profile,
-      storefront: o.record.storefront, // 店舗公開済みかの prefill (ビルダーの「公開済み」表示)
-      updatedAt: o.record.updatedAt,
-    })),
-    max: MAX_HANDLES_PER_WALLET,
-  });
+  // セッション固有の応答なので共有キャッシュ (CDN/proxy) に載せない。
+  return NextResponse.json(
+    {
+      ok: true,
+      handles: owned.map((o) => ({
+        handle: o.handle,
+        config: o.record.config,
+        profile: o.record.profile,
+        storefront: o.record.storefront, // 店舗公開済みかの prefill (ビルダーの「公開済み」表示)
+        updatedAt: o.record.updatedAt,
+      })),
+      max: MAX_HANDLES_PER_WALLET,
+    },
+    { headers: { 'Cache-Control': 'private, no-store' } },
+  );
 }
 
 export async function POST(req: Request) {

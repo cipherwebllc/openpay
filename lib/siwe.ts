@@ -112,7 +112,7 @@ export type SiweVerifyDeps = {
 
 /**
  * SIWE ログインの検証フロー (純粋コア)。
- * 順序: 構造検証 (400) → domain 一致 → 署名検証 → nonce 消費 → セッション発行。
+ * 順序: 構造検証 (400) → domain 一致 → uri 束縛 → 署名検証 → nonce 消費 → セッション発行。
  * 署名検証を nonce 消費より前に置くのは、署名失敗で nonce を焼かない (再送可能) ため。
  * replay は「有効な (message,signature) の 2 回目」で consumeNonce が false になり弾かれる。
  */
@@ -144,6 +144,29 @@ export async function verifySiweLogin(
   }
   if (!deps.isAllowedDomain(domain)) {
     return { ok: false, status: 401, error: 'domain_mismatch' };
+  }
+
+  // uri 束縛 (defense-in-depth): EIP-4361 の uri は「どのリソースへサインインするか」を宣言する
+  // 必須フィールドだが、これまで未検証だった。domain だけ正しく uri を攻撃者オリジンにした
+  // message を署名させ、その署名を別サイトで再利用する余地を塞ぐ。判定は domain と同じ
+  // サーバ制御の許可リスト (Host ヘッダ非依存)。scheme は https 必須 —
+  // 許可 host が localhost/127.0.0.1 (開発) のときだけ http も許す。
+  const { uri } = fields;
+  if (!uri) {
+    return { ok: false, status: 400, error: 'invalid_message' };
+  }
+  let uriUrl: URL;
+  try {
+    uriUrl = new URL(uri);
+  } catch {
+    return { ok: false, status: 400, error: 'invalid_message' };
+  }
+  if (!deps.isAllowedDomain(uriUrl.host)) {
+    return { ok: false, status: 400, error: 'invalid_message' };
+  }
+  const uriIsLocal = /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(uriUrl.host);
+  if (uriUrl.protocol !== 'https:' && !(uriUrl.protocol === 'http:' && uriIsLocal)) {
+    return { ok: false, status: 400, error: 'invalid_message' };
   }
 
   // 鮮度束縛 (defense-in-depth): expirationTime を必須化し issuedAt+15分以内に cap。

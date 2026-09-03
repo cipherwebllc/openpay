@@ -725,6 +725,12 @@ describe('GET /api/handle (mine)', () => {
     store.listHandleRecordsForOwner.mockResolvedValue(null);
     expect((await mineGET()).status).toBe(502);
   });
+  // C11: セッション固有の応答を共有キャッシュ (CDN/proxy) に載せない。
+  it('成功応答に Cache-Control: private, no-store', async () => {
+    store.listHandleRecordsForOwner.mockResolvedValue([]);
+    const res = await mineGET();
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+  });
 });
 
 describe('GET /api/handle/[handle] (availability)', () => {

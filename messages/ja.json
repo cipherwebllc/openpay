@@ -2444,6 +2444,8 @@
     "useQrReceiver": "決済QRの受取先を使う",
     "viewChainBadge": "{chain} で JPYC を受け取り",
     "viewChainPick": "お支払いチェーンを選択",
+    "viewReceiverLabel": "受取先",
+    "viewReceiverNotice": "この店舗情報は QR に含まれる申告です。受取先をご確認ください",
     "viewAddressLabel": "住所",
     "viewHoursLabel": "営業時間",
     "viewPhoneLabel": "電話番号",

@@ -8,7 +8,18 @@ vi.mock('@/lib/kv', () => ({
   kvLrange: vi.fn(),
   kvLlen: vi.fn(),
   kvLtrim: vi.fn(),
+  kvExpire: vi.fn(),
   isKvConfigured: vi.fn(),
+}));
+// rate limiter は key 引数の検証のみ (許可挙動は常に true = 現行と同じ)。
+// vi.fn ではなく素の関数にするのは、afterEach の vi.restoreAllMocks() で
+// 実装が消えて全 test が 429 になるのを避けるため。
+const rl = vi.hoisted(() => ({ calls: [] as unknown[][] }));
+vi.mock('@/lib/relay/relayGuards', () => ({
+  checkReadRateLimit: async (...args: unknown[]) => {
+    rl.calls.push(args);
+    return true;
+  },
 }));
 vi.mock('@/lib/logger', () => ({
   logger: {
@@ -21,7 +32,15 @@ vi.mock('@/lib/logger', () => ({
 
 import { POST } from '@/app/api/log/payment/route';
 import { GET } from '@/app/api/log/payment/export/route';
-import { kvLpush, kvLrange, kvLlen, kvLtrim, isKvConfigured } from '@/lib/kv';
+import {
+  kvLpush,
+  kvLrange,
+  kvLlen,
+  kvLtrim,
+  kvExpire,
+  isKvConfigured,
+} from '@/lib/kv';
+import { paymentLogDailyKey, listPaymentLogKeys } from '@/lib/paymentLog';
 
 const validBody = {
   flow: 'batch' as const,
@@ -50,6 +69,7 @@ describe('POST /api/log/payment', () => {
   beforeEach(() => {
     vi.mocked(kvLpush).mockReset().mockResolvedValue({ ok: true, value: 1 });
     vi.mocked(kvLtrim).mockReset().mockResolvedValue({ ok: true, value: 'OK' });
+    vi.mocked(kvExpire).mockReset().mockResolvedValue({ ok: true, value: 1 });
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -59,7 +79,8 @@ describe('POST /api/log/payment', () => {
     const res = await POST(req(validBody));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(kvLpush).toHaveBeenCalledOnce();
+    // レガシー単一リスト + 日次パーティションの 2 本 (レガシーが先)。
+    expect(kvLpush).toHaveBeenCalledTimes(2);
     const [key, value] = vi.mocked(kvLpush).mock.calls[0];
     expect(key).toBe('openpay:payments:log');
     const entry = JSON.parse(value);
@@ -203,6 +224,112 @@ describe('POST /api/log/payment', () => {
   it('LPUSH 成功時は LTRIM で list を 100K に cap', async () => {
     await POST(req(validBody));
     expect(kvLtrim).toHaveBeenCalledWith('openpay:payments:log', 0, 99999);
+  });
+
+  // C2: 未認証 write が単一 cap 付きリストを押し出す (古い正規 entry の eviction) のを、
+  // 日次パーティション + TTL で断つ。レガシーキーは export/stats のため据え置き (追加のみ)。
+  describe('C2: 日次パーティション / errorMessage cap / limiter key', () => {
+    it('レガシーキーと日次キーの両方へ同じ entry を LPUSH する', async () => {
+      await POST(req(validBody));
+      const keys = vi.mocked(kvLpush).mock.calls.map((c) => c[0]);
+      expect(keys[0]).toBe('openpay:payments:log');
+      expect(keys[1]).toBe(paymentLogDailyKey());
+      expect(keys[1]).toMatch(/^openpay:payments:log:\d{8}$/);
+      // 中身は同一 (reader がどちらを読んでも同じ)。
+      expect(vi.mocked(kvLpush).mock.calls[1][1]).toBe(
+        vi.mocked(kvLpush).mock.calls[0][1],
+      );
+    });
+
+    it('日次キーには TTL (400 日) を張る', async () => {
+      await POST(req(validBody));
+      expect(kvExpire).toHaveBeenCalledWith(
+        paymentLogDailyKey(),
+        400 * 24 * 60 * 60,
+      );
+    });
+
+    it('日次 LPUSH が失敗しても 200 (付帯処理を本体へ波及させない)', async () => {
+      vi.mocked(kvLpush)
+        .mockReset()
+        .mockResolvedValueOnce({ ok: true, value: 1 })
+        .mockResolvedValueOnce({ ok: false, reason: 'http_error', status: 500 });
+      const res = await POST(req(validBody));
+      expect(res.status).toBe(200);
+      expect(kvExpire).not.toHaveBeenCalled();
+    });
+
+    it('errorMessage は 500 字に切詰めて保存する (reject しない)', async () => {
+      const res = await POST(
+        // 8KB の body 上限内 (2000 字 = 6000 bytes) で 500 字超を送る。
+        req({ ...validBody, result: 'error', errorMessage: 'あ'.repeat(2000) }),
+      );
+      expect(res.status).toBe(200);
+      const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+      expect(entry.errorMessage).toHaveLength(500);
+      expect(entry.errorMessage).toBe('あ'.repeat(500));
+    });
+
+    it('500 字以内の errorMessage はそのまま保存する', async () => {
+      await POST(req({ ...validBody, result: 'error', errorMessage: 'boom' }));
+      const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+      expect(entry.errorMessage).toBe('boom');
+    });
+
+    it('limiter key は IP_HASH_SECRET があれば hashIp (IPv6 /64 相乗りを避ける)', async () => {
+      const orig = process.env.IP_HASH_SECRET;
+      process.env.IP_HASH_SECRET = 'x'.repeat(32);
+      try {
+        rl.calls.length = 0;
+        await POST(
+          new Request('http://localhost/api/log/payment', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-forwarded-for': '2001:db8::1',
+            },
+            body: JSON.stringify(validBody),
+          }),
+        );
+        const [key, max, win] = rl.calls[0];
+        expect(key).toMatch(/^logpay:[0-9a-f]{64}$/); // HMAC-SHA256 hex
+        expect(max).toBe(60);
+        expect(win).toBe(60);
+      } finally {
+        if (orig === undefined) delete process.env.IP_HASH_SECRET;
+        else process.env.IP_HASH_SECRET = orig;
+      }
+    });
+
+    it('IP_HASH_SECRET 未設定なら従来の anonymizeIp prefix に fallback', async () => {
+      const orig = process.env.IP_HASH_SECRET;
+      delete process.env.IP_HASH_SECRET;
+      try {
+        rl.calls.length = 0;
+        await POST(
+          new Request('http://localhost/api/log/payment', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-forwarded-for': '203.0.113.7',
+            },
+            body: JSON.stringify(validBody),
+          }),
+        );
+        expect(rl.calls[0][0]).toBe('logpay:203.0.113.0/24');
+      } finally {
+        if (orig !== undefined) process.env.IP_HASH_SECRET = orig;
+      }
+    });
+
+    it('listPaymentLogKeys は直近 n 日分の日次キーを新しい順に返す', () => {
+      const now = new Date('2026-01-02T03:04:05.000Z');
+      expect(listPaymentLogKeys(3, now)).toEqual([
+        'openpay:payments:log:20260102',
+        'openpay:payments:log:20260101',
+        'openpay:payments:log:20251231',
+      ]);
+    });
   });
 
   it('LTRIM 失敗でも 200 を返す (UI 影響回避)', async () => {
@@ -669,6 +796,7 @@ describe('POST /api/log/payment: bridge field validation (phase 2)', () => {
   beforeEach(() => {
     vi.mocked(kvLpush).mockReset().mockResolvedValue({ ok: true, value: 1 });
     vi.mocked(kvLtrim).mockReset().mockResolvedValue({ ok: true, value: 'OK' });
+    vi.mocked(kvExpire).mockReset().mockResolvedValue({ ok: true, value: 1 });
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -779,6 +907,7 @@ describe('POST /api/log/payment — Circle Paymaster 監査フィールド (Phas
   beforeEach(() => {
     vi.mocked(kvLpush).mockReset().mockResolvedValue({ ok: true, value: 1 });
     vi.mocked(kvLtrim).mockReset().mockResolvedValue({ ok: true, value: 'OK' });
+    vi.mocked(kvExpire).mockReset().mockResolvedValue({ ok: true, value: 1 });
   });
   afterEach(() => {
     vi.restoreAllMocks();
