@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.14.0
+
+- Attach a `settlementNote` to every `x402_pay` result that carries the SDK's new
+  `settlement` field (`openpay-x402-sdk` 0.6.x). An LLM reading `status: 200`
+  assumes the call was paid; the note states in one sentence that `verified` only
+  means the receipt signature is valid for the signer published by the discovery
+  origin — not on-chain proof — and that `unverified` and `receipt_unavailable`
+  are not proof of payment. Guard rejections carry no `settlement` and are
+  returned unchanged.
+- Inherit the SDK 0.6.x buyer changes: pre-connection DNS checks for an injected
+  custom transport, `https`-only `DISCOVERY_URL` (plaintext `http` only for
+  localhost), and takeover of a spend lock left behind by a killed process, which
+  removes the case where `MAX_DAILY_JPYC` blocked every payment until the lock
+  file was deleted by hand.
+- Fix `steward-bootstrap` success detection: a `&&` accepted both `HTTP 200` with
+  `ok: false` and `HTTP 5xx` with `ok: true`, letting a failed owner promotion,
+  MFA step, or signer issuance pass silently and break a later step. It now
+  requires `res.ok` *and* `ok: true`, matching `setAndVerifyJpycPolicy`.
+- Fence the `Eip3009Forwarder` address across the three places it is written —
+  the SDK allowlist, this package's `steward-bootstrap` default, and the server's
+  env-resolved value — against the deployed-address table in `contracts/README.md`.
+  A drift used to let a buyer sign a `to` for the wrong contract, or make a valid
+  listing unpayable with `invalid_openpay_forwarder`.
+- Tool wire (names, descriptions, input schemas) is unchanged.
+
+## 0.13.1
+
+- Adopt `@modelcontextprotocol/sdk` 1.30.0 (DNS-rebinding protection on by
+  default, shared-transport leak fix). No functional change.
+
 ## 0.13.0
 
 - Inherit SDK pre-send authorization reservations, cross-process atomic daily

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.6.0 予定 — publish 時に version bump + x402-mcp の依存追従を同一 PR で行う)
+## 0.6.0
 
 - Add `createDualGate` — a dual-rail seller gate that serves both JPYC (Polygon,
   OpenPay facilitator) and USDC (Base, standard x402 relayed via OpenPay to the
@@ -12,6 +12,41 @@
   publish listings without the web form. `register` requires an explicit
   `attested: true` (the SDK never attests on your behalf); set `usdc` to also
   appear on the x402 Bazaar after the first settled purchase.
+- Return an explicit `settlement` field from `pay()`, because HTTP `200` only
+  means the seller returned a body and is not evidence that the payment settled.
+  `verified` means a receipt header was present and the facilitator signature
+  bound it to this payment, `unverified` means a header was present but
+  unsigned, malformed, forged, or mismatched, and `receipt_unavailable` means no
+  header was returned or the facilitator signer could not be resolved. Treat
+  anything but `verified` as not proven paid. `receipt` keeps its previous
+  meaning and an unlocked response body is still never discarded.
+- Take over a spend lock left behind by a killed process instead of failing
+  budgeted payments forever. A lock whose last modification is older than
+  `SPEND_LOCK_STALE_MS` (60s, now exported) is moved aside with an atomic
+  `rename` — never `unlink` — and the mover re-inspects the moved file to prove
+  it took the very lock it measured, so two processes that observe the same
+  stale lock cannot both enter the critical section. A lock younger than the
+  window is left alone, so a live holder is never displaced.
+- Record the owning `pid` and `createdAt` in the lock file, name the lock path in
+  a new `detail` on `{ ok: false, reason: 'unavailable' }`, and treat an
+  already-absent lock at release time as a completed release. A custom `fsImpl`
+  without `stat`/`rename` keeps the previous fail-closed behavior and now warns
+  once instead of disabling the takeover silently.
+- Resolve the target hostname before calling an injected custom `fetchImpl`, so a
+  public name pointing at a private or link-local address is rejected before the
+  custom transport runs. Connection-time rebinding protection still requires
+  supplying `lookup`; a resolver failure does not block, since only the transport
+  that opens the socket can re-validate the address it connects to.
+- Require `DISCOVERY_URL` to be `https`, with plaintext `http` allowed only for
+  `localhost` / `127.0.0.1`. The discovery origin is the authority for catalog
+  trust — URLs it lists are payable without an `ALLOWED_HOSTS` entry — so a
+  substitutable plaintext catalog could pass an attacker's resource off as
+  reviewed. Both `readRuntimeConfig` and `parseClientOptions` enforce it.
+- Declare the new surface in `index.d.ts` (`SETTLEMENT`, `SettlementStatus`,
+  `PaymentResult.settlement`, `SPEND_LOCK_STALE_MS`, `SpendReservationResult.detail`,
+  `fsImpl.stat`, `createDualGate`, `createListingClient` and their inputs) and
+  document dual-rail selling, code-side listing, settlement truth, stale-lock
+  takeover, and the custom-transport boundary in the README.
 
 ## 0.5.0
 
