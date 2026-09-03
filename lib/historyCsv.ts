@@ -16,6 +16,8 @@ import { buildCsv } from './csv';
 export { CSV_BOM, CSV_NEWLINE } from './csv';
 import type { HistoryEntry } from './history';
 import {
+  entryLineItems,
+  entryTotals,
   formatHistoryTimestamp,
   hasSeparatedBreakdown,
   HISTORY_ASSET_DECIMALS,
@@ -24,7 +26,11 @@ import {
 } from './history';
 import { isIncomeSaleEntry } from './historyFilters';
 import { entryYenValue } from './historyYen';
-import { taxAmountYen, taxCategoryShortLabel } from './tax';
+import {
+  taxAmountDecimal,
+  taxAmountYen,
+  taxCategoryShortLabel,
+} from './tax';
 
 const HEADER: readonly string[] = [
   '日時',
@@ -149,14 +155,39 @@ function breakdownVersionLabel(e: HistoryEntry): string {
   return hasSeparatedBreakdown(e) ? '分離済' : '内訳不明 (旧データ)';
 }
 
-// v5 税額(円): 内税を円換算値 (entryYenValue) と taxRate から算出。円換算不能 (USDC レート無) /
+// v5 税額(円): 内税を円換算値 (entryYenValue) から算出。円換算不能 (USDC レート無) /
 // 税率未指定は空 (USDC を無理に税JPY変換しない方針)。
+//
+// 明細 (entryLineItems) がある entry は **行ごとの税率** で按分して合算する。以前は entry 単位の
+// 単一税率を合計額に掛けていたため、10% と 8% が混在する取引で明細CSV (lineItemsCsv) /
+// 仕訳CSV (accountingCsv) / 履歴表示 (entryTotals) と税額が食い違っていた。按分の基準は
+// entryTotals().total (= 着金額の token 単位) で、円換算比率を掛けて行ごとの円額を作る。
 function taxAmountCell(e: HistoryEntry, usdcJpy: number | undefined): string {
-  if (!isIncomeSaleEntry(e) || e.taxRate == null) return '';
+  if (!isIncomeSaleEntry(e)) return '';
   const yv = entryYenValue(e, usdcJpy);
   if (yv.kind === 'unavailable') return '';
-  const amt = taxAmountYen(yv.yen, e.taxRate);
-  return amt == null ? '' : String(amt);
+
+  const items = entryLineItems(e);
+  if (items.length === 0) {
+    // 明細も商品名も無い legacy → entry 単位の税率のみ (従来どおり)。
+    if (e.taxRate == null) return '';
+    const amt = taxAmountYen(yv.yen, e.taxRate);
+    return amt == null ? '' : String(amt);
+  }
+  if (items.every((li) => li.taxRate == null)) return '';
+
+  const totalToken = Number(entryTotals(e).total);
+  if (!Number.isFinite(totalToken) || totalToken <= 0) return '';
+  let tax = 0;
+  for (const li of items) {
+    const amountToken = Number(li.amount);
+    if (!Number.isFinite(amountToken)) continue;
+    // 円換算は entry 単位でしか出来ない (anchor / レートは取引単位) ので、行の token 額の
+    // 構成比で円額へ割り戻してから行税率を適用する。単一税率なら従来値と一致する。
+    const lineYen = (amountToken / totalToken) * yv.yen;
+    tax += taxAmountDecimal(lineYen, li.taxRate, 0) ?? 0;
+  }
+  return String(tax);
 }
 
 // 単一明細の数量/単価のみセル化 (複数明細は「明細」列に要約)。

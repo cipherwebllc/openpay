@@ -35,6 +35,13 @@ const BUDGETS_KB = {
   // 2026-08-17 store USDC P3: Terms 13 条追記 (messages 増) による再分割 +1kB (tip から
   // lib/legal への直接 import なしを grep 確認)。自作コード起因なら code-split 優先の方針は不変。
   '/[locale]/tip/[address]': 436,
+  // 2026-09-02 全コードベースレビュー Phase 5 (F1): 予算対象が 5 route しかなく、実際に最も重い
+  //   3 route (/create・/[handle]・/checkout) が無監視だった。/pay と同じ「余裕ゼロ」慣行で
+  //   実測 +2kB を上限に据える (実測: create 546 / [handle] 475 / checkout 442 kB)。
+  //   超えたら安易に上げず、まず code-split (next/dynamic) を検討すること。
+  '/[locale]/create': 550,
+  '/[locale]/[handle]': 479,
+  '/[locale]/checkout': 446,
   '/manifest.webmanifest': 250,
   // shared chunks の総和。表の行 "First Load JS shared by all"
   '__shared__': 250,

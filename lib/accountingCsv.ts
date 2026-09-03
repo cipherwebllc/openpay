@@ -14,7 +14,7 @@
 // 呼出側がバイト変換)。それ以外は UTF-8 BOM。⚠️ 列順・税区分コード・文字コードは実取込で検証すること
 // (勘定科目/税区分は各社の取込ウィザードで再マッピング可)。
 
-import { buildCsv } from './csv';
+import { ACCOUNTING_MAX_ROWS, buildCsv } from './csv';
 import { pad } from './pad';
 import { shortAddress } from './format';
 import { isIncomeSaleEntry } from './historyFilters';
@@ -37,8 +37,8 @@ export type AccountingFormat = 'freee' | 'yayoi' | 'mf' | 'yayoi-native';
 /** 書き出しバイト列の文字コード。Shift_JIS は弥生インストール版ネイティブのみ。 */
 export type AccountingCharset = 'utf-8' | 'shift_jis';
 
-// freee / 弥生 とも CSV 取込は概ね 5000 行上限。
-export const ACCOUNTING_MAX_ROWS = 5000;
+// freee / 弥生 とも CSV 取込は概ね 5000 行上限。定義は lib/csv.ts (明細CSV と共有・循環 import 回避)。
+export { ACCOUNTING_MAX_ROWS } from './csv';
 
 export type AccountingCsvOptions = {
   /** USDC・anchor 無し行の円換算に使う現レート (useMarketRates 由来・未取得は undefined)。 */

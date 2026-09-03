@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { CSV_BOM, CSV_NEWLINE } from '@/lib/csv';
+import { ACCOUNTING_MAX_ROWS, CSV_BOM, CSV_NEWLINE } from '@/lib/csv';
 import { toLineItemsCsv, lineItemsCsvFilename } from '@/lib/lineItemsCsv';
 import type { HistoryEntry } from '@/lib/history';
 
@@ -176,6 +176,30 @@ describe('toLineItemsCsv (1 商品 1 行)', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.rowCount).toBe(4); // 2 entry × 2 明細
+  });
+
+  it('取込上限 (5000 行) 超過は中断 — 仕訳CSV と同じ扱い', () => {
+    // 明細CSV は 1 entry が複数行に展開されるので、判定は entry 数ではなく行数。
+    // 2 明細 × 2500 entry = ちょうど 5000 行 → 通る。
+    const exact = toLineItemsCsv(
+      Array.from({ length: ACCOUNTING_MAX_ROWS / 2 }, (_, i) =>
+        entry({ id: `ok-${i}` }),
+      ),
+    );
+    expect(exact.ok).toBe(true);
+    expect(exact.ok && exact.rowCount).toBe(ACCOUNTING_MAX_ROWS);
+
+    // +1 entry (= 5002 行) → too-many-rows
+    const over = toLineItemsCsv(
+      Array.from({ length: ACCOUNTING_MAX_ROWS / 2 + 1 }, (_, i) =>
+        entry({ id: `over-${i}` }),
+      ),
+    );
+    expect(over).toEqual({
+      ok: false,
+      reason: 'too-many-rows',
+      rowCount: ACCOUNTING_MAX_ROWS + 2,
+    });
   });
 
   it('CSV escape: 商品名のカンマは quote・先頭 = は defang', () => {

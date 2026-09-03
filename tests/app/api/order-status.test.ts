@@ -48,9 +48,13 @@ vi.mock('@/lib/kv', () => ({
 }));
 
 // IP 固定窓レート制限 (route が pointer 参照前に呼ぶ)。既定は許可・上限超過テストでのみ false。
-const rateHold = vi.hoisted(() => ({ allowed: true }));
+// key も控える: クライアント IP の導出元 (x-vercel-forwarded-for 優先) を固定するため。
+const rateHold = vi.hoisted(() => ({ allowed: true, keys: [] as string[] }));
 vi.mock('@/lib/relay/relayGuards', () => ({
-  checkReadRateLimit: () => Promise.resolve(rateHold.allowed),
+  checkReadRateLimit: (key: string) => {
+    rateHold.keys.push(key);
+    return Promise.resolve(rateHold.allowed);
+  },
 }));
 
 const warnSpy = vi.hoisted(() => vi.fn());
@@ -89,6 +93,7 @@ beforeEach(() => {
   getSpy.mockClear();
   lrangeSpy.mockClear();
   rateHold.allowed = true;
+  rateHold.keys = [];
   warnSpy.mockClear();
 });
 
@@ -98,6 +103,30 @@ describe('GET /api/order/status', () => {
     const res = await GET(getReq(TOKEN));
     expect(res.status).toBe(404);
     expect(res.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  // クライアント IP は lib/net/ipHash の clientIp() に一本化した (旧: 各ルートで
+  // x-forwarded-for ?? x-real-ip を直読み)。Vercel が付ける x-vercel-forwarded-for が
+  // 常に優先されないと、クライアントが送れる x-forwarded-for / x-real-ip でレート制限の
+  // バケットを自由に割れてしまう。
+  it('レート制限キーは x-vercel-forwarded-for を優先する (偽装ヘッダに従わない)', async () => {
+    const req = new Request(`http://localhost/api/order/status?t=${TOKEN}`, {
+      headers: {
+        'x-vercel-forwarded-for': '198.51.100.7',
+        'x-forwarded-for': '203.0.113.9',
+        'x-real-ip': '192.0.2.5',
+      },
+    });
+    await GET(req);
+    expect(rateHold.keys).toEqual(['orderstatus:198.51.100.0/24']);
+  });
+
+  it('x-vercel-forwarded-for が無ければ x-forwarded-for の先頭を使う', async () => {
+    const req = new Request(`http://localhost/api/order/status?t=${TOKEN}`, {
+      headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' },
+    });
+    await GET(req);
+    expect(rateHold.keys).toEqual(['orderstatus:203.0.113.0/24']);
   });
 
   it('KV 未設定 → 503 + warn (deploy 観測性)', async () => {

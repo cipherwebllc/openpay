@@ -1689,6 +1689,7 @@
     "accountingRateUnavailable": "為替レート未取得のため USDC を円換算できません。しばらくして再度お試しください。",
     "accountingNoRows": "書き出せる売上 (成功・収入) がありません。",
     "accountingTooManyRows": "{max} 件を超えるため書き出せません。期間で絞り込んでください。",
+    "sjisLossyWarning": "弥生ネイティブ（Shift_JIS）で表現できない文字が {count} 種類あります（{chars}）。書き出したファイルでは「?」に置き換わります。",
     "summaryTitle": "集計",
     "summaryGmvLabel": "円換算 GMV",
     "summaryCountsLine": "総数 {total} 件（成功 {success} / 差し戻し {reverted} / エラー {error} / 確認待ち {pending}）",

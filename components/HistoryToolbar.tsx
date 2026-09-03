@@ -7,9 +7,10 @@
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { downloadBlob } from '@/lib/download';
-import { encodeShiftJis } from '@/lib/sjis';
+import { encodeShiftJis, sjisLossyChars } from '@/lib/sjis';
 import { clearHistory, type HistoryEntry } from '@/lib/history';
 import { historyCsvFilename, toCsv } from '@/lib/historyCsv';
+import { ACCOUNTING_MAX_ROWS } from '@/lib/csv';
 import {
   accountingCsvFilename,
   toAccountingCsv,
@@ -102,6 +103,8 @@ export function HistoryToolbar({
   const [fromDay, setFromDay] = useState('');
   const [toDay, setToDay] = useState('');
   const [acctFormat, setAcctFormat] = useState<AccountingFormat>('freee');
+  // 弥生ネイティブ (Shift_JIS) 書き出しで `?` に置換される文字。ダウンロードは止めず警告のみ出す。
+  const [sjisLossy, setSjisLossy] = useState<string[] | null>(null);
 
   // pass ロック (CSV 24時間パス未保持) は **ボタンを無効化せず** 🔒 を付けて click で購入モーダルを開く。
   // fee ロック (a1 利用料延滞) は従来どおり disabled (支払いは /billing 経由)。
@@ -152,19 +155,28 @@ export function HistoryToolbar({
           ? t('accountingRateUnavailable')
           : r.reason === 'no-rows'
             ? t('accountingNoRows')
-            : t('accountingTooManyRows', { max: 5000 });
+            : t('accountingTooManyRows', { max: ACCOUNTING_MAX_ROWS });
       window.alert(msg);
       return;
     }
     const filename = accountingCsvFilename(acctFormat);
+    setSjisLossy(null);
     if (r.charset === 'shift_jis') {
       // 弥生ネイティブ: encoding-japanese を遅延ロードし Shift_JIS バイト列で書き出す。
-      void encodeShiftJis(r.csv).then((bytes) => {
+      void (async () => {
+        // 文字化け予告は付帯処理。判定が失敗しても書き出し本体は止めない (掟13 の隔離)。
+        try {
+          const lossy = await sjisLossyChars(r.csv);
+          if (lossy.length > 0) setSjisLossy(lossy);
+        } catch {
+          // 判定不能なら警告を出さないだけ (ダウンロードは通常どおり継続)。
+        }
+        const bytes = await encodeShiftJis(r.csv);
         downloadBlob(
           new Blob([bytes], { type: 'text/csv;charset=shift_jis' }),
           filename,
         );
-      });
+      })();
       return;
     }
     downloadBlob(new Blob([r.csv], { type: 'text/csv;charset=utf-8' }), filename);
@@ -175,7 +187,11 @@ export function HistoryToolbar({
     if (exportGuard()) return;
     const r = toLineItemsCsv(entries);
     if (!r.ok) {
-      window.alert(t('accountingNoRows'));
+      window.alert(
+        r.reason === 'too-many-rows'
+          ? t('accountingTooManyRows', { max: ACCOUNTING_MAX_ROWS })
+          : t('accountingNoRows'),
+      );
       return;
     }
     downloadBlob(
@@ -358,6 +374,16 @@ export function HistoryToolbar({
       {!csvLocked && csvPassExpiresAt != null && (
         <p className="text-[11px] font-medium text-emerald-700">
           {t('csvPassValidUntil', { date: formatPassDate(csvPassExpiresAt) })}
+        </p>
+      )}
+      {/* 弥生ネイティブ (Shift_JIS) は絵文字・JIS 外字を `?` に落とす。ダウンロードは成立するので
+          ブロックせず、置換される文字数と実物を出して差し替え判断できるようにする。 */}
+      {sjisLossy !== null && sjisLossy.length > 0 && (
+        <p role="status" className="text-[11px] font-medium text-amber-700">
+          {t('sjisLossyWarning', {
+            count: sjisLossy.length,
+            chars: sjisLossy.slice(0, 10).join(' '),
+          })}
         </p>
       )}
       <p className="text-[11px] text-slate-500">{t('accountingIncomeOnlyNote')}</p>

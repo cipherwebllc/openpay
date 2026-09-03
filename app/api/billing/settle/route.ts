@@ -8,6 +8,7 @@ import { NextResponse, after } from 'next/server';
 import { createPublicClient, isHex, type Hex } from 'viem';
 import { requireSession } from '../../auth/siwe/_session';
 import { env } from '@/lib/env';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { grantFeeCurrent, markPeriodPaid } from '@/lib/feeCurrent';
 import { loadUsageInvoice } from '@/lib/billingMeter';
 import { recordFeeRevenue } from '@/lib/feeRevenue';
@@ -32,6 +33,9 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 20;
+
+// body 上限 (逐次読みで打ち切る)。受理するのは {txHash, chainId, period} の 3 項目のみ。
+const BILLING_SETTLE_BODY_MAX_BYTES = 4 * 1024;
 
 // idempotency は fee/verify と同方針: 短い処理ロック (nx) → 付与確定後に結果へ昇格。
 const SETTLE_LOCK_TTL_SEC = 120;
@@ -103,15 +107,25 @@ export async function POST(req: Request): Promise<NextResponse> {
   const session = await requireSession();
   if (!session.ok) return session.response;
 
-  let body: { txHash?: unknown; chainId?: unknown; period?: unknown };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
+  const capped = await readJsonBodyCapped(req, BILLING_SETTLE_BODY_MAX_BYTES);
+  if (!capped.ok) {
+    if (capped.reason === 'too_large') {
+      return NextResponse.json(
+        { ok: false, error: 'payload_too_large' },
+        { status: 413 },
+      );
+    }
     return NextResponse.json(
       { ok: false, error: 'invalid_json' },
       { status: 400 },
     );
   }
+  // 既存の分解代入・検証順序は不変に保つ (掟12: money-path は追加のみ)。
+  const body = capped.value as {
+    txHash?: unknown;
+    chainId?: unknown;
+    period?: unknown;
+  };
 
   const { txHash, chainId, period: periodIn } = body;
   if (typeof chainId !== 'number' || !Number.isInteger(chainId)) {

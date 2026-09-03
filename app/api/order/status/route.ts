@@ -24,6 +24,7 @@ import {
 } from '@/lib/orderRelay';
 import { isOrderTokenLike } from '@/lib/orderToken';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
+import { clientIp } from '@/lib/net/ipHash';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 import { logger } from '@/lib/logger';
 
@@ -49,7 +50,7 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   // IP 固定窓 (公開・無認証 read の volumetric flood 抑制)。正当な 8s ポーリングの遥か上の寛容な上限。
   const ipPrefix = anonymizeIp(
-    req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
+    clientIp(req) ?? '',
   );
   if (!(await checkReadRateLimit(`orderstatus:${ipPrefix}`, 120, 60))) {
     return err('rate_limited', 429);

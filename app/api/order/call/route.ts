@@ -6,6 +6,7 @@ import { env } from '@/lib/env';
 import { validateHandle } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import { kvEval, kvLrange, isKvConfigured } from '@/lib/kv';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { randomId } from '@/lib/id';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
 import {
@@ -25,6 +26,9 @@ import { readShopLive } from '@/lib/shopLiveStore';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
+
+// body 上限 (逐次読みで打ち切る)。受理するのは {h, orderId, txHash, table} の 4 項目のみ。
+const ORDER_CALL_BODY_MAX_BYTES = 4 * 1024;
 
 const ORDER_WINDOW_MS = 2 * 60 * 60 * 1000;
 const COOLDOWN_SEC = 30;
@@ -90,12 +94,12 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableOrderCall) return fail('not_found', 404);
   if (!isKvConfigured()) return fail('kv_unavailable', 503);
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  const capped = await readJsonBodyCapped(req, ORDER_CALL_BODY_MAX_BYTES);
+  if (!capped.ok) {
+    if (capped.reason === 'too_large') return fail('payload_too_large', 413);
     return fail('invalid_json', 400);
   }
+  const body: unknown = capped.value;
   if (!body || typeof body !== 'object') return fail('invalid_body', 400);
   const o = body as Record<string, unknown>;
   if (

@@ -6,6 +6,7 @@
 
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { logger } from '@/lib/logger';
 import { requireSession } from '../auth/siwe/_session';
 import {
@@ -27,6 +28,10 @@ import {
 
 export const runtime = 'nodejs';
 export const maxDuration = 10;
+
+// body 上限 (逐次読みで打ち切る)。@handle レコードは profile (リンク/埋め込み) に加えて
+// storefront (メニュー全体・画像 URL・オプション) を含むため他ルートより大きめ。
+const HANDLE_BODY_MAX_BYTES = 256 * 1024;
 
 function notFound() {
   return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
@@ -180,12 +185,17 @@ export async function POST(req: Request) {
   const session = await requireSession();
   if (!session.ok) return session.response;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  const capped = await readJsonBodyCapped(req, HANDLE_BODY_MAX_BYTES);
+  if (!capped.ok) {
+    if (capped.reason === 'too_large') {
+      return NextResponse.json(
+        { ok: false, error: 'payload_too_large' },
+        { status: 413 },
+      );
+    }
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
+  const body: unknown = capped.value;
   if (typeof body !== 'object' || body === null) {
     return NextResponse.json({ ok: false, error: 'invalid_body' }, { status: 400 });
   }

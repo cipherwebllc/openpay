@@ -343,7 +343,26 @@ describe('POST /api/log/payment', () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
-  it('x-forwarded-for 欠落時は x-real-ip を fallback で読む', async () => {
+  // C6 (2026-09-02): クライアント IP の導出を lib/net/ipHash の clientIp() に一本化した。
+  // x-real-ip は Vercel が付けないヘッダで、クライアントが任意に送れるため信用しない
+  // (旧実装は x-forwarded-for 欠落時に fallback していた)。
+  it('x-vercel-forwarded-for を最優先で読む (偽装 x-forwarded-for に従わない)', async () => {
+    const r = new Request('http://localhost/api/log/payment', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-vercel-forwarded-for': '198.51.100.42',
+        'x-forwarded-for': '203.0.113.9',
+        'x-real-ip': '192.0.2.5',
+      },
+      body: JSON.stringify(validBody),
+    });
+    await POST(r);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
+    expect(entry.ipPrefix).toBe('198.51.100.0/24');
+  });
+
+  it('x-real-ip しか無ければ IP 不明扱い (信用しない)', async () => {
     const r = new Request('http://localhost/api/log/payment', {
       method: 'POST',
       headers: {
@@ -354,7 +373,7 @@ describe('POST /api/log/payment', () => {
     });
     await POST(r);
     const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
-    expect(entry.ipPrefix).toBe('198.51.100.0/24');
+    expect(entry.ipPrefix).toBe('unknown');
   });
 
   it('IP header が完全に欠落していても degrade する (P3: 単一 anonymizeIp の fallback = unknown)', async () => {

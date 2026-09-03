@@ -358,6 +358,17 @@ describe('POST /api/billing/settle', () => {
     expect(await res.json()).toMatchObject({ error: 'invalid_json' });
   });
 
+  it('body 上限超過 → JSON parse 前に 413 payload_too_large', async () => {
+    const huge = new Request('http://localhost/api/billing/settle', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ txHash: TXHASH, chainId: 137, pad: 'x'.repeat(5 * 1024) }),
+    });
+    const res = await POST(huge);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: 'payload_too_large' });
+  });
+
   it('chainId 非整数 → 400 invalid_chain', async () => {
     const res = await POST(req({ txHash: TXHASH, chainId: 'x' }));
     expect(res.status).toBe(400);
