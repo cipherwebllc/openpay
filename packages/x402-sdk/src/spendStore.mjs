@@ -144,16 +144,28 @@ export function createFileSpendStore({ path, fsImpl } = {}) {
     }
   }
 
-  async function lockAgeMs(fileSystem, lockPath) {
+  // 「そのロックファイルが何者か」を age と同一性 (inode + mtime) の両方で捉える。takeover は
+  // 「stat した stale そのものを奪えたか」を後段で照合する必要があるため、age だけでは足りない。
+  async function lockIdentity(fileSystem, lockPath) {
     try {
       const stats = await fileSystem.stat(lockPath);
       const modified = Number(stats?.mtimeMs ?? stats?.mtime);
       if (!Number.isFinite(modified)) return null;
-      return Date.now() - modified;
+      return { ageMs: Date.now() - modified, modified, ino: stats?.ino };
     } catch {
       // A lock that vanished or cannot be inspected is not provably stale.
       return null;
     }
+  }
+
+  // inode が取れる実 fs では inode 一致が同一ファイルの証明。inode を返さない fsImpl では
+  // mtime 一致で代替する (takeover 直後の新しいロックは必ず mtime が今なので判別できる)。
+  function isSameLockFile(observed, moved) {
+    if (observed === null || moved === null) return false;
+    if (observed.ino !== undefined && moved.ino !== undefined) {
+      return observed.ino === moved.ino && observed.modified === moved.modified;
+    }
+    return observed.modified === moved.modified;
   }
 
   async function acquireLock(fileSystem, lockPath) {
@@ -179,15 +191,22 @@ export function createFileSpendStore({ path, fsImpl } = {}) {
     // so both run the critical section at once and one reservation is lost. `rename` is atomic and
     // exactly one process can move the stale file away, so ownership of the takeover is proven
     // before lockPath is recreated.
+    //
+    // ⚠️ rename が原子的なのは「移動」だけで、「stat した stale を移動した」ことまでは保証しない。
+    // stat と rename の間に相手が takeover を終えていると、掴むのは相手の **新しい** ロックになる
+    // (A: rename → open(保持) / B: rename で A のロックを退避 → open 成功 = 両者が臨界区間)。
+    // だから移動先を stat し直し、奪ったのが stat した stale 本人であることを照合する。
     if (!supportsStaleTakeover(fileSystem)) {
       warnStaleTakeoverUnavailable();
       throw lockUnavailable(lockPath, 'held (stale takeover unavailable)');
     }
-    const age = await lockAgeMs(fileSystem, lockPath);
-    if (age === null || age < SPEND_LOCK_STALE_MS) {
+    const observed = await lockIdentity(fileSystem, lockPath);
+    if (observed === null || observed.ageMs < SPEND_LOCK_STALE_MS) {
       throw lockUnavailable(
         lockPath,
-        age === null ? 'held' : `held for ${Math.round(age / 1000)}s`,
+        observed === null
+          ? 'held'
+          : `held for ${Math.round(observed.ageMs / 1000)}s`,
       );
     }
     const stalePath = `${lockPath}.stale-${process.pid}-${randomUUID()}`;
@@ -202,6 +221,17 @@ export function createFileSpendStore({ path, fsImpl } = {}) {
           ? 'reacquired by another process'
           : 'stale, takeover failed',
       );
+    }
+    // 退避したのが stat した stale 本人でなければ、生きた保持者のロックを奪ってしまっている。
+    // 元に戻してから撤退する (戻さないと保持者の解放が空振りし、次の到着者が素通りで入れてしまう)。
+    if (!isSameLockFile(observed, await lockIdentity(fileSystem, stalePath))) {
+      try {
+        await fileSystem.rename(stalePath, lockPath);
+      } catch {
+        // 復元できないケースまで握るのは危険だが、ここで投げても保持者のロックは戻らない。
+        // 呼び出し側には下の unavailable で「入れなかった」と伝わる方が安全側。
+      }
+      throw lockUnavailable(lockPath, 'reacquired by another process');
     }
     let handle;
     try {
@@ -234,7 +264,14 @@ export function createFileSpendStore({ path, fsImpl } = {}) {
       try {
         await handle.close();
       } finally {
-        await runtime.fileSystem.unlink(runtime.lockPath);
+        try {
+          await runtime.fileSystem.unlink(runtime.lockPath);
+        } catch (error) {
+          // ENOENT = ロックは既に無い (takeover を試みた相手が一瞬退避した等) = 解放の目的は達成済み。
+          // 解放の空振りで、書き込みまで終えた予約を unavailable に化けさせない。ENOENT 以外は
+          // 「ロックが残る」ので握りつぶさず投げる。
+          if (!isMissingFile(error)) throw error;
+        }
       }
     }
   }
