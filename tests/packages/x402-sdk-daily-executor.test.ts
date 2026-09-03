@@ -294,6 +294,7 @@ describe('openpay-x402-sdk daily executor', () => {
       status: 200,
       body: { unlocked: true },
       receipt: null,
+      settlement: 'receipt_unavailable',
     });
     expect(client.session.spentJpyc).toBe('7');
   });

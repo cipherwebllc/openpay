@@ -1,7 +1,9 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getAddress } from 'viem';
+import { polygon, polygonAmoy } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 
 type MoneyConfig = {
@@ -274,6 +276,86 @@ describe('env to options characterization', () => {
         mode: sdk.createSigner({ BUYER_PRIVATE_KEY: PRIVATE_KEY }).mode,
         address: ADDRESS,
       }),
+    );
+  });
+});
+
+// B11: forwarder アドレスは「サーバが env から解決する値」「SDK の allowlist リテラル」
+// 「steward-bootstrap の既定リテラル」の 3 箇所に散っている。ズレると買い手は署名の `to` を
+// 誤ったコントラクトに向け、あるいは正しい出品を invalid_openpay_forwarder で払えなくなる。
+// deploy の単一情報源は contracts/README.md の Deployed addresses 表なので、そこから読み取って
+// 3 者の一致をフェンスする (ズレたら **allowlist を書き換えて通すのではなく** 報告して人が直す)。
+describe('Eip3009Forwarder address parity', () => {
+  const CONTRACTS_README = resolve(process.cwd(), 'contracts/README.md');
+  const STEWARD_BOOTSTRAP = resolve(
+    process.cwd(),
+    'packages/x402-mcp/scripts/steward-bootstrap.mjs',
+  );
+
+  // | Polygon (137) | `0x...` | `0x...` | 備考 | の 2 列目 (forwarder) を chainId で引く。
+  function deployedForwarder(chainId: number): string {
+    const table = readFileSync(CONTRACTS_README, 'utf8');
+    const row = new RegExp(
+      `^\\|[^|]*\\(${chainId}\\)\\s*\\|\\s*\`(0x[0-9a-fA-F]{40})\`\\s*\\|`,
+      'm',
+    ).exec(table);
+    if (row === null) {
+      throw new Error(
+        `contracts/README.md に chainId ${chainId} の Deployed addresses 行が無い`,
+      );
+    }
+    return getAddress(row[1]);
+  }
+
+  async function sdkForwarders(): Promise<Record<string, string>> {
+    const guards = await loadModule<{
+      SUPPORTED_JPYC_FORWARDERS: Record<string, string>;
+    }>(SDK_DIR, 'guards.mjs');
+    return guards.SUPPORTED_JPYC_FORWARDERS;
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it.each([
+    ['eip155:137', polygon.id],
+    ['eip155:80002', polygonAmoy.id],
+  ])('SDK allowlist %s は deploy 済みアドレスと一致する', async (caip2, chainId) => {
+    const forwarders = await sdkForwarders();
+    expect(forwarders[caip2 as string]).toBe(
+      deployedForwarder(chainId as number),
+    );
+  });
+
+  it('steward-bootstrap の既定 FORWARDER_ADDRESS は SDK の mainnet 値と一致する', async () => {
+    const source = readFileSync(STEWARD_BOOTSTRAP, 'utf8');
+    const literal =
+      /FORWARDER_ADDRESS\s*=\s*env\.FORWARDER_ADDRESS\s*\|\|\s*'(0x[0-9a-fA-F]{40})'/.exec(
+        source,
+      );
+    expect(literal).not.toBeNull();
+    const forwarders = await sdkForwarders();
+    expect(getAddress((literal as RegExpExecArray)[1])).toBe(
+      forwarders['eip155:137'],
+    );
+  });
+
+  // サーバ側は env 由来なので「定数」は無い。SDK のリテラルを env に入れたとき
+  // configuredJpycForwarderFor が **その文字列のまま** 返る = checksum 形も含めて一致することを見る
+  // (非 checksum の allowlist は guards の `to` 比較を静かに落とす)。
+  it('サーバの forwarder 解決は SDK のリテラルをそのまま返す (checksum 形も一致)', async () => {
+    const forwarders = await sdkForwarders();
+    vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_POLYGON', forwarders['eip155:137']);
+    vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', forwarders['eip155:80002']);
+    vi.resetModules();
+    const server = await import('@/lib/relay/forwarderConfig');
+    expect(server.configuredJpycForwarderFor(polygon.id)).toBe(
+      forwarders['eip155:137'],
+    );
+    expect(server.configuredJpycForwarderFor(polygonAmoy.id)).toBe(
+      forwarders['eip155:80002'],
     );
   });
 });

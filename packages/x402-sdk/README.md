@@ -207,9 +207,12 @@ atomic `reserve(key, amount, limit, reservation)` method; legacy
 config readers.
 
 An abrupt process or machine stop can leave `spend.json.lock`; reservations then
-fail closed instead of paying without a limit. Stop every process that uses the
-same store before inspecting and manually removing a stale lock. Never remove
-the lock while another process may still own it.
+fail closed instead of paying without a limit. The lock file records the owning
+`pid` and `createdAt`, and a lock whose last modification is older than 60
+seconds is taken over automatically on the next reservation, so a killed process
+no longer blocks budgeted payments forever. A lock younger than that is left
+alone and the rejection names the lock path in its `detail`. Stop every process
+that uses the same store before removing a lock by hand.
 
 The client also rejects non-JPYC metadata, unsupported networks or schemes,
 non-canonical JPYC contracts or EIP-712 domains, seller timeouts above
@@ -220,15 +223,28 @@ signature. `MAX_TIMEOUT_SECONDS` is the equivalent setting for the exported
 environment config readers. Target host/catalog admission and private-address
 checks run before buyer target requests. Those requests require HTTPS, do not
 follow redirects, and have a 15-second timeout. The default Node transport also
-validates DNS before and during connection to block rebinding; an explicitly
-injected custom `fetchImpl` is a trusted transport boundary and is responsible
-for equivalent connect-time enforcement.
+validates DNS before and during connection to block rebinding. A custom
+`fetchImpl` still gets the pre-connection resolution check — a hostname that
+resolves to a private or link-local address is rejected before the injected
+transport is called — but connection-time rebinding protection requires also
+supplying `lookup`, because only the transport that opens the socket can
+re-validate the address it actually connects to. A custom `fetchImpl` without
+`lookup` therefore remains a trusted transport boundary for connect-time
+enforcement.
 
 `pay()` returns a non-null `receipt` only when the facilitator signer advertised
 by `/api/facilitator/supported` signed it and the transaction, payer, network,
 asset, merchant amount, fee, chain, and authorization nonce all match this
 payment. A missing, malformed, forged, or mismatched seller response header
 becomes `receipt: null` without discarding the unlocked response body.
+
+`pay()` also returns an explicit `settlement` field, because an HTTP `200` only
+means the seller returned a body and is not evidence that the payment settled.
+`verified` means a receipt header was present and its facilitator signature was
+bound to this payment; `unverified` means a header was present but unsigned,
+malformed, forged, or mismatched; `receipt_unavailable` means no header was
+returned or the facilitator signer could not be resolved. Treat `unverified` and
+`receipt_unavailable` as not proven paid.
 
 ## Signers
 

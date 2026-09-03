@@ -96,6 +96,9 @@ export type SsrfSafeFetchOptions = {
   lookup?: LookupFn;
   timeoutMs?: number;
   userAgent?: string;
+  // user-agent 以外に添える固定ヘッダ (再検証の身元トークン等)。user-agent を上書きしたい場合は
+  // userAgent を使う (ここで 'user-agent' を渡すと後勝ちで上書きされる)。
+  extraHeaders?: Record<string, string>;
   redirect?: RequestRedirect;
 };
 
@@ -129,6 +132,7 @@ export async function fetchSsrfSafe(
       signal: AbortSignal.timeout(opts.timeoutMs ?? PROBE_TIMEOUT_MS),
       headers: {
         'user-agent': opts.userAgent ?? 'OpenPay-x402-facilitator-moderation/1.0',
+        ...(opts.extraHeaders ?? {}),
       },
     });
   } catch {

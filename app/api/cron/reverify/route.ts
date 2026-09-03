@@ -20,12 +20,13 @@ import {
   isViolationVerdict,
   listExternalReverifyIds,
   mapWithConcurrency,
-  probeForReverify,
   readExternalReverifyTarget,
   readFirstPartyVerification,
   readReverifyCursor,
+  probeForReverifyDetailed,
   releaseReverifyLock,
   REVERIFY_CONCURRENCY,
+  REVERIFY_STORAGE_ERROR_QUARANTINE,
   selectReverifyBatch,
   sendReverifyAlert,
   utcDateId,
@@ -87,13 +88,14 @@ async function processTarget(
       };
     }
     const probedUrl = read.resource.url;
-    const verdict = await probeForReverify(probedUrl);
+    const { verdict, authClass } = await probeForReverifyDetailed(probedUrl);
     const apply = await applyExternalReverify(
       target.id,
       probedUrl,
       verdict,
       checkedAt,
       runId,
+      authClass,
     );
     return {
       target,
@@ -116,13 +118,14 @@ async function processTarget(
     };
   }
   const probedUrl = firstPartyResourceUrl(resource);
-  const verdict = await probeForReverify(probedUrl);
+  const { verdict, authClass } = await probeForReverifyDetailed(probedUrl);
   const apply = await applyFirstPartyReverify(
     target.path,
     probedUrl,
     verdict,
     checkedAt,
     runId,
+    authClass,
   );
   return {
     target,
@@ -273,17 +276,34 @@ export async function GET(req: Request): Promise<NextResponse> {
         : await runDirectoryVerification(checkedAt);
     const storageError =
       outcomes.some((outcome) => outcome.storageError) || !directoryResult.saved;
-    const nextCursor = {
-      offset: selected.nextOffset,
-      ...(directoryResult.saved && directoryResult.summary.ran
+    const directoryPart =
+      directoryResult.saved && directoryResult.summary.ran
         ? { directoryDate: today }
         : cursor.directoryDate
           ? { directoryDate: cursor.directoryDate }
-          : {}),
-    };
-    const cursorSaved = storageError
-      ? false
-      : await writeReverifyCursor(nextCursor);
+          : {};
+    // storage エラー中は cursor を進めない (取りこぼした record を次回もう一度見るため) が、
+    // 同じ offset で永続的に失敗する record が 1 件あると cursor が永久に凍結し、その先の
+    // record が二度と再検証されなくなる (B12)。3 回連続で同じ offset が失敗したら warn を出して
+    // その batch を quarantine し、cursor を進めて巡回を再開する。
+    const storageErrorStreak = storageError
+      ? (cursor.storageErrorStreak ?? 0) + 1
+      : 0;
+    const quarantined =
+      storageError && storageErrorStreak >= REVERIFY_STORAGE_ERROR_QUARANTINE;
+    if (quarantined) {
+      logger.warn('x402.reverify.cursor_quarantined', {
+        runId,
+        offset: cursor.offset,
+        nextOffset: selected.nextOffset,
+        streak: storageErrorStreak,
+      });
+    }
+    const nextCursor =
+      storageError && !quarantined
+        ? { offset: cursor.offset, ...directoryPart, storageErrorStreak }
+        : { offset: selected.nextOffset, ...directoryPart };
+    const cursorSaved = await writeReverifyCursor(nextCursor);
     const summary = summarize(runId, outcomes, directoryResult.summary);
     logger.info('x402.reverify.completed', {
       ...summary,

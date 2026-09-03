@@ -3,6 +3,12 @@ import { randomUUID } from 'node:crypto';
 const RESERVATIONS_KEY = '__openpayReservations';
 const LOCK_RETRY_COUNT = 40;
 const LOCK_RETRY_MS = 25;
+// A lock older than this cannot belong to a live holder: the retry loop above waits only
+// LOCK_RETRY_COUNT * LOCK_RETRY_MS (1s) and every critical section is a small read plus an
+// atomic replace, so a live process either finishes or dies far inside this window. Without the
+// takeover a SIGKILL leaves spend.json.lock behind and every budgeted payment fails forever.
+export const SPEND_LOCK_STALE_MS = 60_000;
+const LOCK_ERROR_CODE = 'ESPENDLOCK';
 
 function isObject(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -40,6 +46,14 @@ function reservationMatches(existing, reservation) {
     existing.asset === reservation.asset &&
     existing.validBefore === reservation.validBefore
   );
+}
+
+// Only a lock error carries a path we raised ourselves; arbitrary errors stay opaque so a
+// filesystem message cannot leak into a caller-visible field.
+function unavailableDetail(error) {
+  return isObject(error) && error.code === LOCK_ERROR_CODE
+    ? { detail: error.message }
+    : {};
 }
 
 function supportsAtomicFileUpdates(fileSystem) {
@@ -87,17 +101,77 @@ export function createFileSpendStore({ path, fsImpl } = {}) {
     return document;
   }
 
+  function lockUnavailable(lockPath, detail) {
+    return Object.assign(
+      new Error(
+        `spend store lock unavailable: ${lockPath}${detail === undefined ? '' : ` (${detail})`}`,
+      ),
+      { code: LOCK_ERROR_CODE, lockPath },
+    );
+  }
+
+  // Record who holds the lock so an operator inspecting a stuck store can tell whether the pid
+  // is still alive. Failure to annotate must not release a lock we successfully created.
+  async function annotateLock(handle, lockPath) {
+    if (typeof handle?.writeFile !== 'function') return;
+    try {
+      await handle.writeFile(
+        JSON.stringify({ pid: process.pid, createdAt: new Date().toISOString() }),
+        'utf8',
+      );
+    } catch {
+      // The lock is held either way; the owner note is diagnostic only.
+    }
+  }
+
+  async function lockAgeMs(fileSystem, lockPath) {
+    if (typeof fileSystem.stat !== 'function') return null;
+    try {
+      const stats = await fileSystem.stat(lockPath);
+      const modified = Number(stats?.mtimeMs ?? stats?.mtime);
+      if (!Number.isFinite(modified)) return null;
+      return Date.now() - modified;
+    } catch {
+      // A lock that vanished or cannot be inspected is not provably stale.
+      return null;
+    }
+  }
+
   async function acquireLock(fileSystem, lockPath) {
     for (let attempt = 0; attempt < LOCK_RETRY_COUNT; attempt += 1) {
       try {
-        return await fileSystem.open(lockPath, 'wx');
+        const handle = await fileSystem.open(lockPath, 'wx');
+        await annotateLock(handle, lockPath);
+        return handle;
       } catch (error) {
         if (!isLockHeld(error)) throw error;
-        if (attempt === LOCK_RETRY_COUNT - 1) throw error;
+        if (attempt === LOCK_RETRY_COUNT - 1) break;
         await wait(LOCK_RETRY_MS);
       }
     }
-    throw new Error('spend store lock unavailable');
+
+    // Stale takeover: unlink once and retry a single open. A fresh lock is left alone, so a live
+    // holder is never displaced; only a lock that outlived the 1s contention window is removed.
+    const age = await lockAgeMs(fileSystem, lockPath);
+    if (age === null || age < SPEND_LOCK_STALE_MS) {
+      throw lockUnavailable(
+        lockPath,
+        age === null ? 'held' : `held for ${Math.round(age / 1000)}s`,
+      );
+    }
+    try {
+      await fileSystem.unlink(lockPath);
+    } catch (error) {
+      if (!isMissingFile(error)) throw lockUnavailable(lockPath, 'stale, unlink failed');
+    }
+    try {
+      const handle = await fileSystem.open(lockPath, 'wx');
+      await annotateLock(handle, lockPath);
+      return handle;
+    } catch (error) {
+      if (!isLockHeld(error)) throw error;
+    }
+    throw lockUnavailable(lockPath, 'reacquired by another process');
   }
 
   async function withLock(operation) {
@@ -237,8 +311,10 @@ export function createFileSpendStore({ path, fsImpl } = {}) {
         await writeDocument(runtime, current);
         return { ok: true, totalAtomic: next.toString() };
       });
-    } catch {
-      return { ok: false, reason: 'unavailable' };
+    } catch (error) {
+      // Name the lock file when the block came from it. A bare "unavailable" sends operators
+      // hunting through the payment path for a failure that is one leftover file.
+      return { ok: false, reason: 'unavailable', ...unavailableDetail(error) };
     }
   }
 

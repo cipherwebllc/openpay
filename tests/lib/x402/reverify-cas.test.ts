@@ -28,14 +28,22 @@ vi.mock('@/lib/kv', () => ({
       if (record.url !== args[0]) return { ok: true as const, value: -3 };
     }
     const verification = record.verification as
-      | { failures?: number; lastRunId?: string; probedUrl?: string; lastOkAt?: string }
+      | {
+          failures?: number;
+          authFailures?: number;
+          lastRunId?: string;
+          probedUrl?: string;
+          lastOkAt?: string;
+        }
       | undefined;
     if (verification?.lastRunId === args[2]) {
       return { ok: true as const, value: -4 };
     }
     const sameUrl = verification?.probedUrl === args[0];
-    const before = sameUrl && record.hidden === true;
+    // B6: hidden は URL が変わっても引き継ぐ (same で絞らない)。
+    const before = record.hidden === true;
     let failures = sameUrl ? verification?.failures ?? 0 : 0;
+    let authFailures = sameUrl ? verification?.authFailures ?? 0 : 0;
     let hidden = before;
     let lastOkAt = sameUrl ? verification?.lastOkAt : undefined;
     if (args[3] === 'ok') {
@@ -44,20 +52,27 @@ vi.mock('@/lib/kv', () => ({
       lastOkAt = args[1];
     } else if (args[3] === 'violation') {
       failures += 1;
-      hidden = failures >= 3;
+      if (failures >= 3) hidden = true;
+    }
+    if (args[4] === 'clear') {
+      authFailures = 0;
+    } else if (args[4] === 'block') {
+      authFailures += 1;
+      if (authFailures >= 6) hidden = true;
     }
     record.hidden = hidden;
     record.verification = {
       ...(lastOkAt ? { lastOkAt } : {}),
       lastCheckedAt: args[1],
       failures,
+      ...(authFailures > 0 ? { authFailures } : {}),
       lastRunId: args[2],
       probedUrl: args[0],
     };
     store.set(keys[0], JSON.stringify(record));
     return {
       ok: true as const,
-      value: JSON.stringify({ failures, before, after: hidden }),
+      value: JSON.stringify({ failures, authFailures, before, after: hidden }),
     };
   },
 }));
@@ -148,6 +163,7 @@ describe('external reverify CAS', () => {
     expect(hidden).toEqual({
       applied: true,
       failures: 3,
+      authFailures: 0,
       hiddenBefore: false,
       hiddenAfter: true,
     });
@@ -178,6 +194,121 @@ describe('external reverify CAS', () => {
       hiddenBefore: true,
       hiddenAfter: false,
     });
+  });
+
+  // B6: owner が URL を変えると verification (カウンタ) は消えるが hidden は残る。CAS は残った
+  // hidden を出発点にし、transient/violation では解除しない — 復帰は ok の 1 経路のみ。
+  it('URL 変更で verification が消えても hidden を引き継ぎ、成功だけが解除する', async () => {
+    seed({ hidden: true }); // updateResource が verification を消し hidden を残した後の形
+
+    const stillHidden = await applyExternalReverify(
+      'r1',
+      URL,
+      'transient',
+      '2026-07-14T00:00:00.000Z',
+      '2026071400',
+    );
+    expect(stillHidden).toMatchObject({
+      applied: true,
+      failures: 0,
+      hiddenBefore: true,
+      hiddenAfter: true,
+    });
+
+    const restored = await applyExternalReverify(
+      'r1',
+      URL,
+      'ok_402_openpay',
+      '2026-07-14T01:00:00.000Z',
+      '2026071401',
+    );
+    expect(restored).toMatchObject({ hiddenBefore: true, hiddenAfter: false });
+  });
+
+  // B8: 403 を返し続ける cloaking 出品は verdict が常に transient なので failures では捕まらない。
+  // authFailures が 6 連続で hidden になり、素の 402 が 1 回入れば 0 に戻る。
+  it('auth block 6 連続で hidden、素の 402 で counter がリセットされる', async () => {
+    seed();
+    for (let run = 1; run <= 5; run += 1) {
+      const result = await applyExternalReverify(
+        'r1',
+        URL,
+        'transient',
+        `2026-07-14T0${run}:00:00.000Z`,
+        `202607140${run}`,
+        'block',
+      );
+      expect(result).toMatchObject({
+        applied: true,
+        failures: 0,
+        authFailures: run,
+        hiddenAfter: false,
+      });
+    }
+
+    const cleared = await applyExternalReverify(
+      'r1',
+      URL,
+      'ok_402_openpay',
+      '2026-07-14T06:00:00.000Z',
+      '2026071406',
+      'clear',
+    );
+    expect(cleared).toMatchObject({ authFailures: 0, hiddenAfter: false });
+    // 0 のときは書かない = 既存レコードと同じ JSON 形 (後方互換)。
+    expect(
+      (JSON.parse(store.get(resourceKey('r1'))!) as {
+        verification: { authFailures?: number };
+      }).verification.authFailures,
+    ).toBeUndefined();
+
+    for (let run = 1; run <= 5; run += 1) {
+      await applyExternalReverify(
+        'r1',
+        URL,
+        'transient',
+        `2026-07-15T0${run}:00:00.000Z`,
+        `202607150${run}`,
+        'block',
+      );
+    }
+    const hiddenByAuth = await applyExternalReverify(
+      'r1',
+      URL,
+      'transient',
+      '2026-07-15T06:00:00.000Z',
+      '2026071506',
+      'block',
+    );
+    expect(hiddenByAuth).toMatchObject({
+      applied: true,
+      failures: 0, // 契約違反は 1 度も観測していない
+      authFailures: 6,
+      hiddenBefore: false,
+      hiddenAfter: true,
+    });
+  });
+
+  // 5xx (neutral) は authFailures を動かさない = 一時障害で cloaking 扱いしない。
+  it('5xx は authFailures を加算しない', async () => {
+    seed();
+    await applyExternalReverify(
+      'r1',
+      URL,
+      'transient',
+      '2026-07-14T00:00:00.000Z',
+      '2026071400',
+      'block',
+    );
+    const neutral = await applyExternalReverify(
+      'r1',
+      URL,
+      'transient',
+      '2026-07-14T01:00:00.000Z',
+      '2026071401',
+      'neutral',
+    );
+    expect(neutral).toMatchObject({ authFailures: 1, hiddenAfter: false });
   });
 });
 

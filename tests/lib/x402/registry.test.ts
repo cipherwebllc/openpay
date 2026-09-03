@@ -62,10 +62,8 @@ vi.mock('@/lib/kv', () => ({
     }
     if (script.includes('o.url=ARGV[2]')) {
       if (o.active === false) return { ok: true as const, value: -3 }; // 削除済は編集不可
-      if (o.url !== args[1]) {
-        delete o.verification;
-        delete o.hidden;
-      }
+      // B6: URL 変更でリセットするのは verification だけ (hidden は moderation 状態なので残す)。
+      if (o.url !== args[1]) delete o.verification;
       o.url = args[1];
       o.description = args[2];
       o.priceJpyc = args[3];
@@ -431,7 +429,7 @@ describe('lib/x402/registry updateResource (owner 編集)', () => {
     expect((await listResourcesForMerchant(OWNER))![0].priceJpyc).toBe('777');
   });
 
-  it('URL 変更時だけ verification/hidden をリセットする', async () => {
+  it('URL 変更時だけ verification をリセットし、hidden は保持する', async () => {
     const current = (await getResource('id1'))!;
     store.kv.set(
       resourceKey('id1'),
@@ -458,8 +456,38 @@ describe('lib/x402/registry updateResource (owner 編集)', () => {
       input({ url: 'https://a.jp/new-paid', priceJpyc: '3' }),
     );
     const changed = await getResource('id1');
-    expect(changed).not.toHaveProperty('hidden');
+    // 連続失敗カウンタは新 URL 用に仕切り直す。
     expect(changed).not.toHaveProperty('verification');
+    // B6: hidden (cron が付けた moderation 状態) は URL 変更では落ちない。
+    expect(changed).toMatchObject({ hidden: true });
+  });
+
+  // B6 の要: hidden を「別 URL へ PATCH → 元 URL へ PATCH し直す」往復で洗い流せてはならない。
+  // 復帰は cron 再検証が ok_402_openpay を観測する正規経路のみ。
+  it('URL の往復 PATCH で hidden を解除できない', async () => {
+    const original = (await getResource('id1'))!;
+    store.kv.set(
+      resourceKey('id1'),
+      JSON.stringify({
+        ...original,
+        hidden: true,
+        verification: {
+          lastCheckedAt: '2026-07-14T00:00:00.000Z',
+          failures: 3,
+          lastRunId: '2026071400',
+          probedUrl: original.url,
+        },
+      }),
+    );
+
+    await updateResource('id1', OWNER, input({ url: 'https://a.jp/decoy' }));
+    await updateResource('id1', OWNER, input({ url: original.url }));
+
+    expect(await getResource('id1')).toMatchObject({
+      url: original.url,
+      hidden: true,
+    });
+    expect((await listActiveResources())!.map((r) => r.id)).not.toContain('id1');
   });
 
   it('他人 (merchant !== owner) → forbidden で更新させない', async () => {

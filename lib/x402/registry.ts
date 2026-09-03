@@ -38,6 +38,9 @@ export type X402Verification = {
   lastOkAt?: string;
   lastCheckedAt: string;
   failures: number;
+  // 401/403/別 origin への redirect が連続した回数 (cloaking 検出・B8)。既存レコードには存在しない
+  // ため **欠落 = 0** として読む (後方互換)。0 のときは書かない = 従来と同じ JSON 形を保つ。
+  authFailures?: number;
   lastRunId: string;
   probedUrl: string;
 };
@@ -385,11 +388,15 @@ const CAS_OWNER_GUARD =
 // 削除済 resource を復活させない — active/id/merchant/network/createdAt は Lua が現値を保持する。
 // soft-delete 済 (active:false) は編集不可 (-3) = 保持した監査データ (settlement が参照する当時の
 // payTo/価格) を後から書き換えさせない。
+// ⚠️ URL 変更時にリセットするのは **verification (連続失敗カウンタ) だけ**で、`hidden` は残す。
+// hidden は cron 再検証 (lib/x402/reverify.ts) が付けたモデレーション状態であり、owner が別 URL へ
+// PATCH → 元 URL へ PATCH し直すだけで解除できると自動 hidden が無意味になる (B6)。復帰は
+// 「再検証が ok_402_openpay を観測する」正規経路のみ (reverify の CAS が hidden=false に倒す)。
 // 戻り: 更新後 JSON 文字列=成功 / -1=未存在 / -2=malformed / -3=削除済 / 0=owner 不一致。
 const CAS_UPDATE =
   CAS_OWNER_GUARD +
   'if o.active==false then return -3 end; ' +
-  'if o.url~=ARGV[2] then o.verification=nil; o.hidden=nil end; ' +
+  'if o.url~=ARGV[2] then o.verification=nil end; ' +
   'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
   "if ARGV[7]=='' then o.docsUrl=nil else o.docsUrl=ARGV[7] end; " +
   "if ARGV[8]=='' then o.license=nil else o.license=ARGV[8] end; " +

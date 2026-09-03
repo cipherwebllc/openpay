@@ -127,36 +127,53 @@ function utcDate(value) {
   return instant.toISOString().slice(0, 10);
 }
 
-async function safeReceipt(
+// Settlement truth for one paid call. HTTP 200 only means the seller returned a body; it is not
+// evidence that the facilitator settled on chain, and an LLM reading `status: 200` will assume it is.
+//   'verified'            — a receipt header was present and the facilitator signature bound it to this payment
+//   'unverified'          — a receipt header was present but unsigned, malformed, forged, or mismatched
+//   'receipt_unavailable' — no receipt header, or the facilitator signer could not be resolved
+export const SETTLEMENT = Object.freeze({
+  verified: 'verified',
+  unverified: 'unverified',
+  unavailable: 'receipt_unavailable',
+});
+
+async function settlementOutcome(
   raw,
   reservation,
   normalizedAccept,
   resolveReceiptSigner,
 ) {
+  if (typeof raw !== 'string' || raw.length === 0) {
+    return { receipt: null, settlement: SETTLEMENT.unavailable };
+  }
   try {
     const decoded = decodePaymentResponse(raw);
-    if (decoded === null) return null;
-    const expectedSigner = await resolveReceiptSigner();
-    if (
-      expectedSigner === null ||
-      !(await verifyBoundPaymentResponse(decoded, {
-        expectedSigner,
-        payer: reservation.payer,
-        network: reservation.network,
-        asset: reservation.asset,
-        chainId: normalizedAccept.chainId,
-        merchant: normalizedAccept.extra.openpay.merchant,
-        merchantValue: normalizedAccept.extra.openpay.merchantValue,
-        feeValue: normalizedAccept.extra.openpay.feeValue,
-        nonce: reservation.id,
-      }))
-    ) {
-      return null;
+    // A header that cannot be decoded is a seller claim we could not check, not an absent claim.
+    if (decoded === null) {
+      return { receipt: null, settlement: SETTLEMENT.unverified };
     }
-    return decoded;
+    const expectedSigner = await resolveReceiptSigner();
+    if (expectedSigner === null) {
+      return { receipt: null, settlement: SETTLEMENT.unavailable };
+    }
+    const bound = await verifyBoundPaymentResponse(decoded, {
+      expectedSigner,
+      payer: reservation.payer,
+      network: reservation.network,
+      asset: reservation.asset,
+      chainId: normalizedAccept.chainId,
+      merchant: normalizedAccept.extra.openpay.merchant,
+      merchantValue: normalizedAccept.extra.openpay.merchantValue,
+      feeValue: normalizedAccept.extra.openpay.feeValue,
+      nonce: reservation.id,
+    });
+    return bound
+      ? { receipt: decoded, settlement: SETTLEMENT.verified }
+      : { receipt: null, settlement: SETTLEMENT.unverified };
   } catch {
     // A seller-controlled receipt header must not erase an unlocked body and invite a duplicate payment.
-    return null;
+    return { receipt: null, settlement: SETTLEMENT.unverified };
   }
 }
 
@@ -533,7 +550,7 @@ export function createPaymentExecutor({
         await confirmDailyReservation(reservation.id);
       }
     }
-    const receipt = await safeReceipt(
+    const { receipt, settlement } = await settlementOutcome(
       unlocked.headers.get('x-payment-response'),
       reservation,
       normalizedAccept,
@@ -543,6 +560,7 @@ export function createPaymentExecutor({
       status: unlocked.status,
       body: unlockedBody,
       receipt,
+      settlement,
     };
   }
 

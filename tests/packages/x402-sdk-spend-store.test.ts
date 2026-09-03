@@ -1,8 +1,14 @@
 import {
+  access,
   mkdtemp,
   mkdir,
+  open,
   readFile,
+  rename,
   rm,
+  stat,
+  unlink,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,7 +25,7 @@ type SpendStore = {
     reservation: Record<string, string>,
   ) => Promise<
     | { ok: true; totalAtomic: string }
-    | { ok: false; reason: string; totalAtomic?: string }
+    | { ok: false; reason: string; totalAtomic?: string; detail?: string }
   >;
   confirm: (id: string) => Promise<boolean>;
   save: (key: string, atomicString: string) => Promise<void>;
@@ -36,8 +42,10 @@ type SdkModule = {
         data: string,
         encoding: string,
       ) => Promise<unknown>;
+      [method: string]: unknown;
     };
   }) => SpendStore;
+  SPEND_LOCK_STALE_MS: number;
 };
 
 const SDK_ENTRY = resolve(process.cwd(), 'packages/x402-sdk/src/index.mjs');
@@ -227,6 +235,102 @@ describe('openpay-x402-sdk file spend store', () => {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, '{}', 'utf8');
     await expect(store.load('0xabc:2026-07-17')).resolves.toBe('0');
+  });
+
+  // B10: SIGKILL で残った spend.json.lock が「予算つき支払いを永久に止める」のを防ぐ。
+  // ロック取得の待ちは 40×25ms=1s しかなく、臨界区間は小さな read+atomic replace なので、
+  // 60s 以上更新の無いロックに生きた保持者はいない。
+  describe('stale lock recovery', () => {
+    const RESERVATION = {
+      id: '0xnonce',
+      payer: '0xabc',
+      network: 'eip155:80002',
+      asset: '0xdef',
+      validBefore: '2000000000',
+    };
+
+    async function storeWithLock(age: number) {
+      const sdk = await loadSdk();
+      const path = await temporaryPath('spend.json');
+      await mkdir(dirname(path), { recursive: true });
+      const lockPath = `${path}.lock`;
+      await writeFile(
+        lockPath,
+        JSON.stringify({ pid: 999_999, createdAt: '2026-09-01T00:00:00.000Z' }),
+        'utf8',
+      );
+      const when = new Date(Date.now() - age);
+      await utimes(lockPath, when, when);
+      return { store: sdk.createFileSpendStore({ path }), path, lockPath };
+    }
+
+    it('takes over a lock left behind by a killed process', async () => {
+      const { store, lockPath } = await storeWithLock(120_000);
+
+      await expect(
+        store.reserve('0xabc:2026-07-17', '7', '10', RESERVATION),
+      ).resolves.toMatchObject({ ok: true, totalAtomic: '7' });
+      // 取得したロックは通常どおり解放される。
+      await expect(access(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('leaves a fresh lock alone and names it in the rejection detail', async () => {
+      const { store, lockPath } = await storeWithLock(0);
+
+      const result = await store.reserve(
+        '0xabc:2026-07-17',
+        '7',
+        '10',
+        RESERVATION,
+      );
+
+      expect(result).toMatchObject({ ok: false, reason: 'unavailable' });
+      expect(result.ok === false && result.detail).toContain(lockPath);
+      // 生きた保持者のロックを奪わない。
+      await expect(access(lockPath)).resolves.toBeUndefined();
+    });
+
+    it('records the owning pid in the lock file', async () => {
+      const sdk = await loadSdk();
+      const path = await temporaryPath('spend.json');
+      const lockWrites: string[] = [];
+      // ロックファイルへの書き込みだけを覗くため、handle を薄く包んだ fs を渡す。
+      const fsImpl = {
+        access,
+        mkdir,
+        readFile,
+        rename,
+        stat,
+        unlink,
+        writeFile,
+        async open(target: string, flags: string) {
+          const handle = await open(target, flags);
+          return {
+            async writeFile(data: string, encoding: BufferEncoding) {
+              lockWrites.push(String(data));
+              return handle.writeFile(data, encoding);
+            },
+            close: () => handle.close(),
+          };
+        },
+      };
+      const store = sdk.createFileSpendStore({
+        path,
+        fsImpl: fsImpl as unknown as NonNullable<
+          Parameters<SdkModule['createFileSpendStore']>[0]
+        >['fsImpl'],
+      });
+
+      await expect(
+        store.reserve('0xabc:2026-07-17', '7', '10', RESERVATION),
+      ).resolves.toMatchObject({ ok: true });
+
+      expect(lockWrites).toHaveLength(1);
+      expect(JSON.parse(lockWrites[0])).toMatchObject({
+        pid: process.pid,
+        createdAt: expect.any(String),
+      });
+    });
   });
 
   it('does not throw when writing fails after a completed payment', async () => {

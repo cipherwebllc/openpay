@@ -243,10 +243,19 @@ export interface InvalidChallengeQuote {
 
 export type QuoteResult = GuardedQuote | InvalidChallengeQuote;
 
+/**
+ * Settlement truth for one paid call. `status: 200` alone is not evidence of settlement.
+ * - `verified`: a receipt header was present and the facilitator signature bound it to this payment.
+ * - `unverified`: a receipt header was present but unsigned, malformed, forged, or mismatched.
+ * - `receipt_unavailable`: no receipt header, or the facilitator signer could not be resolved.
+ */
+export type SettlementStatus = 'verified' | 'unverified' | 'receipt_unavailable';
+
 export interface PaymentResult {
   status: number;
   body: unknown;
   receipt: unknown;
+  settlement: SettlementStatus;
 }
 
 export interface OpenPayClient {
