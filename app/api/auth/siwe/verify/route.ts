@@ -14,7 +14,7 @@ import { logger } from '@/lib/logger';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import {
-  SESSION_COOKIE,
+  sessionCookieName,
   SESSION_TTL_SEC,
   isAllowedSiweDomain,
   newSessionToken,
@@ -119,7 +119,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   const res = NextResponse.json({ ok: true, address: result.address });
-  res.cookies.set(SESSION_COOKIE, result.token, {
+  // 本番の cookie 名は `__Host-` prefix 付き (lib/siwe sessionCookieName)。ブラウザの受理条件
+  // = Secure + Path=/ + Domain 属性なし。この 3 つを満たす属性でのみ発行する。
+  res.cookies.set(sessionCookieName(), result.token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',

@@ -12,6 +12,7 @@ import {
   x402VerifyDeps,
 } from '@/lib/x402/facilitatorSettle';
 import { verifyForwarderSettle } from '@/lib/relay/forwarderRecover';
+import { clientIp } from '@/lib/net/ipHash';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { MAX_BODY_BYTES, anonymizeIp } from '@/lib/relay/relayRoute';
 import { reserveFacilitatorPayment } from '@/lib/x402/facilitatorReservation';
@@ -25,9 +26,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   try {
-    const ipPrefix = anonymizeIp(
-      req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
-    );
+    const ipPrefix = anonymizeIp(clientIp(req) ?? '');
     if (!(await checkReadRateLimit(`x402verify:${ipPrefix}`, 60, 60))) {
       return NextResponse.json(
         { isValid: false, invalidReason: 'rate_limited' },

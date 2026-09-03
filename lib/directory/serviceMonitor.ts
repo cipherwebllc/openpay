@@ -10,6 +10,7 @@
 //   - 変更なしの delta は changes: [] を明示的に返す (エージェントは「重要な変更なし」と報告できる)
 //   - dedupe は slug + date + changeType で決定的
 //   - changedSince は YYYY-MM-DD (その日を**含む**)。イベント date も YYYY-MM-DD で単調。
+//   - date = 一次ソースの発表日 / collectedAt = こちらが記録した日 (2026-09-03 統一)。
 
 import { DIRECTORY_ENTRIES } from './data';
 import { publishedDirectoryEntries } from './query';
@@ -67,8 +68,11 @@ export type ServiceChangeDiff = {
 };
 
 export type ServiceChangeEvent = {
-  /** YYYY-MM-DD (JST 運用日)。changedSince との比較は文字列比較 (同形式ゆえ安全)。 */
+  /** YYYY-MM-DD = **一次ソースの発表日** (2026-09-03 統一。収集日ではない)。
+   *  changedSince との比較は文字列比較 (同形式ゆえ安全)。 */
   date: string;
+  /** YYYY-MM-DD = こちらが記録した日 (収集日)。発表日と乖離する場合の監査用・任意。 */
+  collectedAt?: string;
   /** どの商品ビューに載せるか (必須・明示)。 */
   scopes: readonly ServiceChangeScope[];
   /** ディレクトリエントリに紐づくイベントのみ。業界イベント (実証実験等) は provider を使う。 */
@@ -122,6 +126,53 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'デジタルガレージ・JCB・りそな HD が、USDC と JPYC を用いた実店舗ステーブルコイン決済の実証実験を発表。',
     sourceUrl: 'https://www.garage.co.jp/pr/release/20260219/',
   },
+  // ── JPYC / JPYC EX の Kaia 対応 (PR TIMES 2026-05-15 発表・2026-08-27 に第 1 回週次更新で
+  //     収集。2026-09-03 の日付訂正で date を収集日から発表日へ直し collectedAt を分離) ──
+  {
+    date: '2026-05-15',
+    collectedAt: '2026-08-27',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'chains_change',
+    summary:
+      'JPYC now also circulates on Kaia; issuance and circulation cover 4 chains (Polygon, Ethereum, Avalanche, Kaia).',
+    summaryJa:
+      'JPYC が Kaia にも対応し、発行・流通は 4 チェーン (Polygon/Ethereum/Avalanche/Kaia) に。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000315.000054018.html',
+    diffs: [
+      {
+        field: 'chains',
+        previousValue: ['polygon', 'ethereum', 'avalanche'],
+        currentValue: ['polygon', 'ethereum', 'avalanche', 'kaia'],
+      },
+    ],
+  },
+  {
+    date: '2026-05-15',
+    collectedAt: '2026-08-27',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'chains_change',
+    summary:
+      'JPYC EX added Kaia support (issuance, redemption, wallet-address registration) and changed the issuance cap from 1M JPY per day to 1M JPY per transaction.',
+    summaryJa:
+      'JPYC EX が Kaia に対応 (発行・償還・アドレス登録)。発行上限を「1日100万円」から「1回100万円」へ変更。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000315.000054018.html',
+    diffs: [
+      {
+        field: 'chains',
+        previousValue: ['avalanche', 'ethereum', 'polygon'],
+        currentValue: ['avalanche', 'ethereum', 'polygon', 'kaia'],
+      },
+      {
+        field: 'limit',
+        previousValue: '1,000,000 JPY per day (issuance)',
+        currentValue: '1,000,000 JPY per transaction (issuance)',
+      },
+    ],
+  },
   {
     date: '2026-07-15',
     scopes: ['stablecoin-payments'],
@@ -149,6 +200,20 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'デジタルガレージが DG Stablecoin Payment Service の商用展開を開始 (API 接続の加盟店向け・当初は Base 上の USDC・JCB/DGFT へ先行提供)。',
     sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
     diffs: [{ field: 'status', previousValue: null, currentValue: 'commercial' }],
+  },
+  {
+    // 発表日は同じ一次ソース (garage.co.jp/pr/release/20260810) の上の決済スコープ行と同一。
+    // ディレクトリ追加として記録したのは 2026-08-27 (第 1 回週次更新)。
+    date: '2026-08-10',
+    collectedAt: '2026-08-27',
+    scopes: ['jpyc-services'],
+    slug: 'dg-sps',
+    changeType: 'added',
+    summary:
+      'DG Stablecoin Payment Service (Digital Garage) added: a merchant stablecoin payment platform, initially USDC on Base, first offered to JCB and DGFT.',
+    summaryJa:
+      'デジタルガレージの DG Stablecoin Payment Service を追加。加盟店向けステーブルコイン決済基盤 (当初は Base 上の USDC・JCB/DGFT へ先行提供)。',
+    sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
   },
   // ── 2026-08-26 大阪府「先駆的金融市場等形成支援事業補助金」採択 (公式発表・4 事業のうち
   //     ステーブルコイン決済関連 3 件。一次ソース = 大阪府公式ページ) ──
@@ -194,52 +259,10 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
-  // ── 2026-08-27 (第 1 回週次更新・初回は 2026-07-13 baseline 以降の 6 週分) ──
+  // ── 2026-08-27 (第 1 回週次更新)。自社面の観測 = 発表日 == 収集日 ──
   {
     date: '2026-08-27',
-    scopes: ['jpyc-services'],
-    slug: 'jpyc',
-    changeType: 'updated',
-    changeCategory: 'chains_change',
-    summary:
-      'JPYC now also circulates on Kaia; issuance and circulation cover 4 chains (Polygon, Ethereum, Avalanche, Kaia).',
-    summaryJa:
-      'JPYC が Kaia にも対応し、発行・流通は 4 チェーン (Polygon/Ethereum/Avalanche/Kaia) に。',
-    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000315.000054018.html',
-    diffs: [
-      {
-        field: 'chains',
-        previousValue: ['polygon', 'ethereum', 'avalanche'],
-        currentValue: ['polygon', 'ethereum', 'avalanche', 'kaia'],
-      },
-    ],
-  },
-  {
-    date: '2026-08-27',
-    scopes: ['jpyc-services'],
-    slug: 'jpyc-ex',
-    changeType: 'updated',
-    changeCategory: 'chains_change',
-    summary:
-      'JPYC EX added Kaia support (issuance, redemption, wallet-address registration) and changed the issuance cap from 1M JPY per day to 1M JPY per transaction.',
-    summaryJa:
-      'JPYC EX が Kaia に対応 (発行・償還・アドレス登録)。発行上限を「1日100万円」から「1回100万円」へ変更。',
-    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000315.000054018.html',
-    diffs: [
-      {
-        field: 'chains',
-        previousValue: ['avalanche', 'ethereum', 'polygon'],
-        currentValue: ['avalanche', 'ethereum', 'polygon', 'kaia'],
-      },
-      {
-        field: 'limit',
-        previousValue: '1,000,000 JPY per day (issuance)',
-        currentValue: '1,000,000 JPY per transaction (issuance)',
-      },
-    ],
-  },
-  {
-    date: '2026-08-27',
+    collectedAt: '2026-08-27',
     scopes: ['jpyc-services'],
     slug: 'aegis-ai',
     changeType: 'updated',
@@ -249,17 +272,6 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summaryJa: 'Aegis が JPYC に加えて USDC (Base・標準 x402) での販売を開始。',
     sourceUrl: 'https://aegis-ai.xyz/',
     diffs: [{ field: 'assets', previousValue: ['JPYC'], currentValue: ['JPYC', 'USDC'] }],
-  },
-  {
-    date: '2026-08-27',
-    scopes: ['jpyc-services'],
-    slug: 'dg-sps',
-    changeType: 'added',
-    summary:
-      'DG Stablecoin Payment Service (Digital Garage) added: a merchant stablecoin payment platform, initially USDC on Base, first offered to JCB and DGFT.',
-    summaryJa:
-      'デジタルガレージの DG Stablecoin Payment Service を追加。加盟店向けステーブルコイン決済基盤 (当初は Base 上の USDC・JCB/DGFT へ先行提供)。',
-    sourceUrl: 'https://www.garage.co.jp/pr/release/20260810/',
   },
 ];
 
@@ -481,7 +493,7 @@ export function createServiceMonitorEnvelope(
   let changes: ServiceChangeEventOutput[];
   let services: ServiceMonitorRow[];
   let hasMore: boolean;
-  // 既定は UTC 日付。イベント date (JST 運用日) 以下になるため inclusive 比較で取りこぼしなし
+  // 既定は UTC 日付。イベント date (一次ソースの発表日) 以下になるため inclusive 比較で取りこぼしなし
   // (同日イベントの重複は slug+date+changeType の dedupe が吸収する)。打ち切られた delta だけは
   // 下で「最初の未返却イベントの date」に差し替える (打ち切り分の永久ロス防止・前進の保証)。
   let nextChangedSince = generatedAtIso.slice(0, 10);

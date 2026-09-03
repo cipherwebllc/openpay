@@ -27,7 +27,7 @@ node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--onc
 6. **広く render される component / hook に依存を足したら full vitest 必須**。兄弟テストの vi.mock が新依存を欠いて落ちる（wagmi useAccount 追加で HistoryView 系 3 file が破壊）。jsdom には `tests/setup.ts` に matchMedia 既定 stub あり。
 7. **SIWE を要する flag を新設したら `components/WalletBadge.tsx` の `siweEnabled` に追加**。忘れるとヘッダからサインインできず機能が不到達になる（CsvPassPaywall・PushNotifyPanel で計 3 回発生）。機能パネル側にも自前 sign-in ボタンを検討。
 8. **可視テキストを含まない aria-label 単独付与は禁止**。Lighthouse の label-content-name-mismatch（WCAG 2.5.3）で CI が hard fail（#66 実害）。a11y 名は可視テキストから導出する。
-9. **env を足したら `.env.local.example` と README の env テーブルを同時更新**（ドリフト厳禁）。server 秘密（VAPID 秘密鍵等）は client 共有の `lib/env.ts` に入れず `import 'server-only'` モジュールに閉じる。
+9. **env を足したら `.env.local.example` と README の env テーブルを同時更新**（ドリフト厳禁・`tests/lib/envDocs.test.ts` が CI で検査する）。server 秘密（VAPID 秘密鍵等）は client 共有の `lib/env.ts` に入れず `import 'server-only'` モジュールに閉じる。
 10. **commitlint: subject は 100 字以内**（詳細は body へ・body の行長制限なし）。
 11. **開発サーバでの検証はポートを明示**（`next start -p XXXX`）し、**そのポートの URL で readiness を確認してから**テストする。port 3000 が占有済みだと next は無言で 3001 に逃げ、古いサーバを検証して誤診断する（push E2E で実害）。
 12. **money-path（relay/settle/fee/order 検証）への変更は「追加のみ」を原則**とし、既存の制御フロー・応答・エラー処理を変えない。post-response 処理は `after()`（next/server）を使う（unawaited promise は serverless で凍結・応答内 await は latency 悪化）。

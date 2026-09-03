@@ -8,12 +8,19 @@ const h = vi.hoisted(() => ({
   kvConfigured: true,
   authed: true,
   rateLimitAllowed: true,
+  lastRateLimitKey: '',
 }));
 
 vi.mock('@/lib/relay/relayGuards', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('@/lib/relay/relayGuards')>();
-  return { ...actual, checkReadRateLimit: async () => h.rateLimitAllowed };
+  return {
+    ...actual,
+    checkReadRateLimit: async (key: string) => {
+      h.lastRateLimitKey = key;
+      return h.rateLimitAllowed;
+    },
+  };
 });
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -775,6 +782,21 @@ describe('GET /api/handle/[handle] (availability)', () => {
     expect(res.status).toBe(429);
     expect(await res.json()).toEqual({ ok: false, error: 'rate_limited' });
     expect(store.resolveHandle).not.toHaveBeenCalled();
+  });
+  // C6: limiter の IP は clientIp (lib/net/ipHash) 経由。x-vercel-forwarded-for が権威で、
+  // client が自由に付けられる x-forwarded-for では limiter バケツを変えられない。
+  it('limiter キーの IP は x-vercel-forwarded-for が x-forwarded-for に優先する', async () => {
+    store.resolveHandle.mockResolvedValue({ ok: true, record: null });
+    await availGET(
+      new Request('http://x', {
+        headers: {
+          'x-vercel-forwarded-for': '198.51.100.7',
+          'x-forwarded-for': '203.0.113.9',
+        },
+      }),
+      params('alice'),
+    );
+    expect(h.lastRateLimitKey).toBe('handleavail:198.51.100.0/24');
   });
 });
 

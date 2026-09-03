@@ -1194,10 +1194,27 @@ npm run load-test -- --url http://localhost:3000 -c 20 -d 15
 | `/api/log/payment` の rate limit は KV 障害時 fail-open (KV 停止中は DDoS で Vercel function 実行費用 spike 可能) | 匿名化 IP prefix ごとに 60 req / 60s (`checkReadRateLimit`、route.ts:228)、`MAX_BODY_BYTES=8KB` で body 制限 (route.ts:17)、Vercel platform DDoS protection (built-in、attack mode 設定可) | (a) Vercel Firewall WAF rule で per-IP rate limit (KV 非依存の層を足す)、(b) Upstash Ratelimit (Vercel Marketplace) で sliding window、(c) /api/log/payment は KV write 量 cap で kill switch 化済 (paymentLog.ts fire-and-forget) |
 | `setup-sentry-alerts.mjs` 自動実行 CI なし (idempotent script を operator 手動実行に依存) | script は idempotent (既存 rule は skip)、人為的に rule が消えない限り再実行不要 | GH Actions workflow に sentry-setup を追加 (SENTRY_AUTH_TOKEN secret 必要) |
 | punycode deprecation build warning | §10.11 受容済 noise (修正不能、機能無影響) | upstream packages (whatwg-url / uri-js) が `require('punycode/')` 採用するまで wait |
+| **A3 デバイス共通ラッチ (2026-09-03 レビュー裁定・受容)**: 同一端末で wallet を切り替えた同一人物が、状態不明のガスレス送金の直後にもう一方の wallet で再送すると二重支払いになり得る | ラッチは wallet 単位 (端末単位にしていない)。端末単位にすると共用 POS タブレット (店頭の 1 台を客が順に使う) で**他人の支払いを誤って阻止/誤帰属**するため、被害の大きい側を避けている。pending 応答は client の standard fallback を禁止済 (relayRoute) | 再評価トリガ = メトリクスで**同一端末の複数 wallet 利用**が観測されたとき (その時点で端末ラッチ or 端末+wallet の複合キーを再検討) |
+| **A6 feeKind 束縛 (2026-09-03 レビュー裁定・受容)**: 改造クライアントは `feeKind` を送らないことで 1%/3% ではなく 2 JPYC フロアだけを払える | @handle 経由の注文は notify の `feeUncollected` で検出できる (受注側に不足が記録される)。@handle を使わない直接利用は現状ほぼ皆無で、実損は最大でも 1 注文あたり数十円規模 | 再評価トリガ = モバイル注文の流量が増えたとき、または `feeUncollected` の alert が実際に出たとき (その時点で feeKind を注文レコード側の権威値から server 決定に変える) |
 
 **判断根拠**: いずれも `validate demand before building speculative features`
 方針 + 「現状障害なし + 緩和層あり」のため、demand signal 出現前の preemptive
-engineering を避ける。将来 incident で demand 確認後に対処する。
+engineering を避ける。将来 incident で demand 確認後に対処する。A3/A6 は加えて
+「塞ぐ側の副作用 (他人の決済を止める・money-path の制御フロー変更) の方が現状の実害より
+大きい」ため、上記トリガまで現状維持とする。
+
+### §11.7 SIWE セッション cookie の `__Host-` 化 (2026-09-03 投入・一度だけ全員サインアウト)
+
+- 本番の SIWE セッション cookie 名を `op_sess` → **`__Host-op_sess`** に変更した
+  (`lib/siwe.ts` の `sessionCookieName()` が唯一の情報源。dev/test は `op_sess` のまま —
+  http://localhost では `__Host-` prefix がブラウザに拒否されるため)。
+- **この変更を deploy すると、既存の `op_sess` cookie を持つ全員が一度だけサインアウトされる**
+  (新しい名前しか読まないため。KV 側のセッションレコードは 7 日 TTL で自然消滅する)。
+  再サインインは通常の SIWE 署名 1 回。deploy 直後に「/history が未ログインになった」問い合わせが
+  来た場合はこれが原因なので、障害ではないと案内する。
+- 発行属性は `Secure` + `Path=/` + `Domain` 属性なし の 3 点が必須 (`__Host-` の受理条件)。
+  1 つでも欠けるとブラウザが cookie を黙って捨て、**ログインできない**状態になる。
+  検証は `tests/app/api/auth-siwe.test.ts` (本番名 + 3 属性) と `tests/lib/siwe.test.ts`。
 
 ## §12 Phase B billing (2段階 後払い利用権) go-live SOP
 

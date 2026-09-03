@@ -10,6 +10,7 @@ import { env } from '@/lib/env';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import type { FeePayer, MobileOrderMode } from '@/lib/mobileOrder';
+import { clientIp } from '@/lib/net/ipHash';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 import { isBeforeOpen, isPastLastOrder, pickupSlots } from '@/lib/shopTime';
@@ -75,9 +76,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   // IP 固定窓 (公開・無認証の handle 解決を伴う endpoint)。単一 IP の flood が KV read を
   // 押し上げて正規の注文導線に波及するのを、body 解析と KV 参照の前で止める。上限は正当な
   // CTA/submit (数回/注文) の遥か上に置く (/api/order/status と同じ 120/分)。
-  const ipPrefix = anonymizeIp(
-    req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
-  );
+  const ipPrefix = anonymizeIp(clientIp(req) ?? '');
   if (!(await checkReadRateLimit(`admission:${ipPrefix}`, 120, 60))) {
     return json({ ok: false, error: 'rate_limited' }, 429);
   }

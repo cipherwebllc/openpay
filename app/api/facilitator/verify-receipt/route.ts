@@ -8,6 +8,7 @@ import { NextResponse } from 'next/server';
 import { isHex, type Hex } from 'viem';
 import { env } from '@/lib/env';
 import { parseReceipt, verifyReceipt } from '@/lib/x402/receipt';
+import { clientIp } from '@/lib/net/ipHash';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { MAX_BODY_BYTES, anonymizeIp } from '@/lib/relay/relayRoute';
 
@@ -22,9 +23,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   // DoS ガード (兄弟 /verify・/settle と同型): 無認証エンドポイントなので IP レート制限 + body 上限を
   // 前段に置く。レート制限ストレージ障害は本体判定を止めない (fail-open・掟13)。
   try {
-    const ipPrefix = anonymizeIp(
-      req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
-    );
+    const ipPrefix = anonymizeIp(clientIp(req) ?? '');
     if (!(await checkReadRateLimit(`x402receipt:${ipPrefix}`, 60, 60))) {
       return NextResponse.json(
         { valid: false, error: 'rate_limited' },

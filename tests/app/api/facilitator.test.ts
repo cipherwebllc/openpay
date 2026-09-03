@@ -184,6 +184,37 @@ function reqOf(url: string, body: Record<string, unknown>): Request {
   });
 }
 
+// C6: limiter に渡す IP は clientIp (lib/net/ipHash) 経由で取る。checkReadRateLimit を
+// 差し替えてキーだけ捕まえる (許可は true 固定なので route 本体の分岐には影響しない)。
+const IP_PRECEDENCE_HEADERS = {
+  'content-type': 'application/json',
+  'x-vercel-forwarded-for': '198.51.100.7',
+  'x-forwarded-for': '203.0.113.9',
+} as const;
+
+async function captureRateLimitKey(
+  run: (handlers: Handlers) => Promise<unknown>,
+): Promise<string> {
+  const keys: string[] = [];
+  vi.doMock('@/lib/relay/relayGuards', async (importOriginal) => {
+    const actual =
+      await importOriginal<typeof import('@/lib/relay/relayGuards')>();
+    return {
+      ...actual,
+      checkReadRateLimit: async (key: string) => {
+        keys.push(key);
+        return true;
+      },
+    };
+  });
+  try {
+    await run(await loadFacilitator());
+  } finally {
+    vi.doUnmock('@/lib/relay/relayGuards');
+  }
+  return keys[0] ?? '';
+}
+
 function facilitatorBody(
   params: ForwarderSettleParams,
   signature: Hex,
@@ -314,6 +345,19 @@ describe('x402 facilitator /verify', () => {
       payer: CUSTOMER,
       reservationToken: RESERVATION_TOKEN,
     });
+  });
+
+  it('limiter キーの IP は x-vercel-forwarded-for が x-forwarded-for に優先する', async () => {
+    const key = await captureRateLimitKey(({ verify }) =>
+      verify(
+        new Request('http://x/verify', {
+          method: 'POST',
+          headers: IP_PRECEDENCE_HEADERS,
+          body: '{}',
+        }),
+      ),
+    );
+    expect(key).toBe('x402verify:198.51.100.0/24');
   });
 
   it('authorizationState を追加の verify 必須条件にしない', async () => {
@@ -868,6 +912,19 @@ describe('x402 facilitator /verify-receipt (入力検証)', () => {
     } finally {
       vi.doUnmock('@/lib/relay/relayGuards');
     }
+  });
+
+  it('limiter キーの IP は x-vercel-forwarded-for が x-forwarded-for に優先する', async () => {
+    const key = await captureRateLimitKey(({ verifyReceipt }) =>
+      verifyReceipt(
+        new Request('http://x/verify-receipt', {
+          method: 'POST',
+          headers: IP_PRECEDENCE_HEADERS,
+          body: '{}',
+        }),
+      ),
+    );
+    expect(key).toBe('x402receipt:198.51.100.0/24');
   });
 
   it('object でない body (JSON number) → {valid:false, signer:null}', async () => {

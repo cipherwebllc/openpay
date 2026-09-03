@@ -143,7 +143,16 @@ const SERVICE_MONITOR_OUTPUT = {
       items: {
         type: 'object',
         properties: {
-          date: { type: 'string', description: 'YYYY-MM-DD' },
+          date: {
+            type: 'string',
+            description:
+              'YYYY-MM-DD. date = announcement date per source; collectedAt = when we recorded it.',
+          },
+          collectedAt: {
+            type: 'string',
+            description:
+              'YYYY-MM-DD when this change was recorded, present when it differs from the announcement date.',
+          },
           slug: { type: 'string', description: 'Present when the event is tied to a directory entry.' },
           provider: {
             type: 'string',
@@ -291,7 +300,16 @@ const PAYMENT_MONITOR_OUTPUT = {
       items: {
         type: 'object',
         properties: {
-          date: { type: 'string', description: 'YYYY-MM-DD (announcement date)' },
+          date: {
+            type: 'string',
+            description:
+              'YYYY-MM-DD. date = announcement date per source; collectedAt = when we recorded it.',
+          },
+          collectedAt: {
+            type: 'string',
+            description:
+              'YYYY-MM-DD when this change was recorded, present when it differs from the announcement date.',
+          },
           provider: { type: 'string' },
           changeType: {
             type: 'string',
