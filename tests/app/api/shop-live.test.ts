@@ -101,6 +101,14 @@ describe('PATCH /api/shop/live', () => {
   it('不正 patch → 400', async () => {
     expect((await PATCH(req('PATCH', 'alice', { op: 'nope' }))).status).toBe(400);
   });
+  it('body 上限超過 → patch 解析前に 413', async () => {
+    const res = await PATCH(
+      req('PATCH', 'alice', { ...patch, pad: 'x'.repeat(33 * 1024) }),
+    );
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: 'payload_too_large' });
+    expect(applySpy).not.toHaveBeenCalled();
+  });
   it('所有者でない → 403', async () => {
     hold.resolve = { ok: true, record: { owner: '0x0000000000000000000000000000000000000001' } };
     expect((await PATCH(req('PATCH', 'alice', patch))).status).toBe(403);

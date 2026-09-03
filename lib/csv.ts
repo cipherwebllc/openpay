@@ -10,6 +10,11 @@
 export const CSV_BOM = '﻿';
 export const CSV_NEWLINE = '\r\n';
 
+// freee / 弥生 とも CSV 取込は概ね 5000 行上限。会計仕訳CSV (accountingCsv) と
+// 会計明細CSV (lineItemsCsv) が同じ上限を共有する。定義をここに置くのは、
+// accountingCsv → lineItemsCsv の import があるため逆向き import が循環になるため。
+export const ACCOUNTING_MAX_ROWS = 5000;
+
 const INJECTION_PREFIX = /^[=+\-@\t\r]/;
 
 export function escapeCsvCell(value: string): string {

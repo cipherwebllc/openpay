@@ -36,9 +36,11 @@ jobs:
       # "Worker exited unexpectedly" は全 assertion が pass している状態の
       # cleanup OOM なので fail とは扱わない (script 内で別途 warning を残す)。
       - run: node scripts/run-tests.mjs
-      - name: Coverage (best-effort)
+      # カバレッジは gate (2026-09-02): 以前は continue-on-error で赤くならず、
+      # 閾値 (vitest.config.ts の coverage.thresholds) が事実上無効だった。
+      # 閾値は実測 -2pt で回帰のみを検出する設定なので、割れたら「テストの無い分岐が増えた」の合図。
+      - name: Coverage
         run: node --max-old-space-size=6144 ./node_modules/.bin/vitest run --coverage --pool=forks --poolOptions.forks.minForks=1 --poolOptions.forks.maxForks=2
-        continue-on-error: true
       - name: Build (production) + bundle budget check
         env:
           NEXT_PUBLIC_NETWORK_ENV: testnet

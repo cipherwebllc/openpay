@@ -292,6 +292,90 @@ describe('HistoryToolbar', () => {
     );
   });
 
+  it('会計CSV (弥生ネイティブ): 変換不能文字があれば警告を出しつつダウンロードは継続', async () => {
+    const user = userEvent.setup();
+    const downloadSpy = vi
+      .spyOn(downloadModule, 'downloadBlob')
+      .mockImplementation(() => undefined);
+    renderToolbar({
+      // メモ / 店舗名は自由入力。絵文字は Shift_JIS で ? に落ちる。
+      entries: [entry({ asset: 'jpyc', storeName: '珈琲店', memo: 'テイクアウト🍣' })],
+      counts: { all: 1, jpyc: 1, usdc: 0 },
+      usdcJpy: 150,
+    });
+    await user.selectOptions(screen.getByLabelText('会計ソフト形式'), 'yayoi-native');
+    await user.click(screen.getByRole('button', { name: '会計CSVを書き出し' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent(
+        /表現できない文字が 1 種類あります.*🍣/,
+      ),
+    );
+    // 警告は非ブロッキング — 書き出し自体は行われる。
+    await waitFor(() => expect(downloadSpy).toHaveBeenCalledOnce());
+  });
+
+  it('会計CSV (弥生ネイティブ): 変換可能な文字だけなら警告を出さない', async () => {
+    const user = userEvent.setup();
+    const downloadSpy = vi
+      .spyOn(downloadModule, 'downloadBlob')
+      .mockImplementation(() => undefined);
+    renderToolbar({
+      entries: [entry({ asset: 'jpyc', storeName: '珈琲店' })],
+      counts: { all: 1, jpyc: 1, usdc: 0 },
+      usdcJpy: 150,
+    });
+    await user.selectOptions(screen.getByLabelText('会計ソフト形式'), 'yayoi-native');
+    await user.click(screen.getByRole('button', { name: '会計CSVを書き出し' }));
+
+    await waitFor(() => expect(downloadSpy).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('会計明細CSV: 5000 行超は alert・downloadBlob は呼ばれない', async () => {
+    const user = userEvent.setup();
+    const downloadSpy = vi
+      .spyOn(downloadModule, 'downloadBlob')
+      .mockImplementation(() => undefined);
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    // 明細 2 行 × 2501 entry = 5002 行 (仕訳CSV と同じ 5000 行上限)。
+    const entries = Array.from({ length: 2501 }, (_, i) =>
+      entry({
+        id: `many-${i}`,
+        lineItems: [
+          {
+            name: 'A',
+            quantity: 1,
+            unitPrice: '500',
+            amount: '500',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+          },
+          {
+            name: 'B',
+            quantity: 1,
+            unitPrice: '500',
+            amount: '500',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+          },
+        ],
+      }),
+    );
+    renderToolbar({
+      entries,
+      counts: { all: entries.length, jpyc: entries.length, usdc: 0 },
+    });
+    await user.click(screen.getByRole('button', { name: '会計明細CSV' }));
+
+    expect(alertSpy).toHaveBeenCalledWith(
+      '5000 件を超えるため書き出せません。期間で絞り込んでください。',
+    );
+    expect(downloadSpy).not.toHaveBeenCalled();
+  });
+
   it('会計CSV: USDC無anchor + レート無 → alert・downloadBlob は呼ばれない', async () => {
     const user = userEvent.setup();
     const downloadSpy = vi

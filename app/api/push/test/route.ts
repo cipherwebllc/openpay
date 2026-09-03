@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { env } from '@/lib/env';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
+import { clientIp } from '@/lib/net/ipHash';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 import { sendPushToWallet } from '@/lib/push/server';
 
@@ -22,7 +23,7 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   try {
     const ipPrefix = anonymizeIp(
-      req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
+      clientIp(req) ?? '',
     );
     const key = `pushtest:${session.address.toLowerCase()}:${ipPrefix}`;
     if (!(await checkReadRateLimit(key, 1, 60))) {

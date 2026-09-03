@@ -22,11 +22,16 @@ import {
   type StoredOrder,
 } from '@/lib/orderRelay';
 import { logger } from '@/lib/logger';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { resolveOrderFeedMerchant } from '@/lib/orderFeedAuth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 15;
+
+// body 上限 (逐次読みで打ち切る)。受理するのは {txHash, op} / {txHash, fulfilled} の
+// 小さな進捗更新のみなので十分な余裕を見ても 16KB で足りる。
+const ORDER_FEED_BODY_MAX_BYTES = 16 * 1024;
 
 function notFound() {
   return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
@@ -78,12 +83,17 @@ export async function POST(req: Request): Promise<NextResponse> {
   const actor = await resolveOrderFeedMerchant(req);
   if ('response' in actor) return actor.response;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  const capped = await readJsonBodyCapped(req, ORDER_FEED_BODY_MAX_BYTES);
+  if (!capped.ok) {
+    if (capped.reason === 'too_large') {
+      return NextResponse.json(
+        { ok: false, error: 'payload_too_large' },
+        { status: 413 },
+      );
+    }
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
+  const body: unknown = capped.value;
   // 構造化 {op:...} は Phase 3 (受注フルフィルメント) のオペレーション。enableOrderFulfillment が
   // OFF のときは受け付けない = kitchen/hall ルート (両フラグ必須) と同じ二重ゲートで完全 inert に。
   // 旧 {txHash, fulfilled} (base relay の OrderFeedPanel) は op を持たず enableOrderRelay のみで不変。

@@ -9,6 +9,8 @@
 //   2. numTotalTests === 0 (silent global skip)
 //   3. passed + failed < total かつ 未 run の test が KNOWN_BROKEN_FILES の
 //      範囲外 (= 新規 partial silent skip。regression 検知用 fence)
+//   4. ディスク上の tests/**/*.test.{ts,tsx} のうち reporter に 1 件も現れないファイルがある
+//      (= collection 前に worker が死んだ / 誤除外。3. は test 数ベースなのでこの経路を見逃す)
 //
 // KNOWN_BROKEN_FILES: worker OOM 等で collect 後に run されないファイルを file→期待 missing
 // test 数の Map で登録する暫定 allowlist。KNOWN_MAX_MISSING はこの Map から導出するので、
@@ -25,6 +27,11 @@ import { spawn } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  checkTestFileCoverage,
+  listTestFiles,
+  normalizeReportedFiles,
+} from './lib/testFileFence.mjs';
 
 // 既知の worker-OOM 等で未 run のファイル → 期待 missing test 数 (Map)。空 = 全ファイル run 前提
 // (missing が 1 件でも出れば fail)。ここに足す操作は PR レビューで明示同意が必要。
@@ -32,8 +39,16 @@ const KNOWN_BROKEN_FILES = new Map([
   // 例: ['tests/components/Foo.test.tsx', 42], // OOM 等で未 run のファイルと collect 済 test 数
 ]);
 
+// ファイル数フェンス (下記 3.) の allowlist。CI で意図的に走らせない test ファイルがあればここへ。
+// vitest.config.ts の exclude は node_modules / e2e / .next (いずれも tests/ 外) だけなので、
+// 現状は空 = tests/ 配下の全ファイルが reporter に現れることを要求する。
+const KNOWN_UNREPORTED_FILES = [];
+
 const tmp = mkdtempSync(join(tmpdir(), 'vitest-out-'));
 const jsonOut = join(tmp, 'result.json');
+
+// CLI から渡された追加引数 (path / -t 等の絞り込み)。空 = full run。
+const extraArgs = process.argv.slice(2);
 
 const args = [
   '--max-old-space-size=6144',
@@ -45,7 +60,7 @@ const args = [
   '--reporter=default',
   '--reporter=json',
   `--outputFile=${jsonOut}`,
-  ...process.argv.slice(2),
+  ...extraArgs,
 ];
 
 const child = spawn('node', args, { stdio: 'inherit' });
@@ -73,6 +88,30 @@ child.on('exit', (code) => {
   if (numTotalTests === 0) {
     console.error('[run-tests] FAIL: 0 tests ran');
     process.exit(1);
+  }
+  // ファイル数フェンス: worker が **collection の前に** 死んだファイルは numTotalTests にも
+  // 載らないため、下の「partial silent skip」検出 (test 数ベース) では検出できない。ディスク上の
+  // test ファイル一覧と reporter が報告したファイル一覧を突き合わせ、1 件でも欠けたら fail。
+  // 引数付き実行 (path/-t での絞り込み) は full run ではないので適用しない。
+  if (extraArgs.length === 0) {
+    const onDisk = listTestFiles(process.cwd());
+    const reported = normalizeReportedFiles(testResults, process.cwd());
+    const coverage = checkTestFileCoverage({
+      onDisk,
+      reported,
+      allowlist: KNOWN_UNREPORTED_FILES,
+    });
+    console.log(
+      `[run-tests] test files: onDisk=${onDisk.length} reported=${reported.length}`,
+    );
+    if (!coverage.ok) {
+      console.error(
+        `[run-tests] FAIL: ${coverage.missing.length} 件の test ファイルが reporter に現れていない ` +
+          '(collection 前に worker が死んだ / 誤って除外された可能性)。',
+      );
+      for (const f of coverage.missing) console.error(`  - ${f}`);
+      process.exit(1);
+    }
   }
   // Partial silent skip 検出: collection で出てきた test が JSON 上 pass にも fail にも
   // 数えられていない (= worker が collect 後・assertion 前に die)。numPassedTests +

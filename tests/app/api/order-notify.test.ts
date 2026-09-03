@@ -355,6 +355,13 @@ describe('POST /api/order/notify', () => {
     expect(res.status).toBe(400);
   });
 
+  it('body 上限超過 → JSON parse・検証前に 413 (payload_too_large)', async () => {
+    const res = await POST(req(goodBody({ pad: 'x'.repeat(65 * 1024) })));
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: 'payload_too_large' });
+    expect(hold.ltrimCalls).toHaveLength(0);
+  });
+
   it('token != jpyc → 400', async () => {
     expect((await POST(req(goodBody({ token: 'usdc' })))).status).toBe(400);
   });

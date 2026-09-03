@@ -110,6 +110,15 @@ describe('POST /api/handle', () => {
     expect(res.status).toBe(401);
   });
 
+  it('oversized body → 413 before the store is touched', async () => {
+    const res = await POST(
+      postReq({ handle: 'alice', config: CFG, pad: 'x'.repeat(257 * 1024) }),
+    );
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: 'payload_too_large' });
+    expect(store.reserveOrUpdateHandle).not.toHaveBeenCalled();
+  });
+
   it('reserve success → 201 with owner from session', async () => {
     store.reserveOrUpdateHandle.mockResolvedValue({
       status: 'created',

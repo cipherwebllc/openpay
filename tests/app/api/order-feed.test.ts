@@ -356,6 +356,18 @@ describe('POST /api/order/feed (fulfill フラグ・削除でなくフラグ化)
     expect(evalSpy).not.toHaveBeenCalled();
   });
 
+  it('body 上限超過 → JSON parse 前に 413 (payload_too_large)', async () => {
+    const req = new Request('http://localhost/api/order/feed', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ txHash: TXA, fulfilled: true, pad: 'x'.repeat(17 * 1024) }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: 'payload_too_large' });
+    expect(evalSpy).not.toHaveBeenCalled();
+  });
+
   it('KV 未設定 → 503 (有効な op でも書けない) + logger.warn(kv_unavailable)', async () => {
     hold.kvConfigured = false;
     const res = await POST(postReq({ txHash: TXA, op: { kind: 'fulfill', value: true } }));

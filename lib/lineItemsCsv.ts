@@ -8,7 +8,7 @@
 // 対象: 収入売上 (isIncomeSaleEntry)。明細の無い entry (productName も無い legacy) は
 // 取引合計のみの 1 行にフォールバックし、income tx を取りこぼさない。
 
-import { buildCsv } from './csv';
+import { ACCOUNTING_MAX_ROWS, buildCsv } from './csv';
 import { pad } from './pad';
 import { isIncomeSaleEntry } from './historyFilters';
 import { taxCategoryShortLabel } from './tax';
@@ -96,7 +96,8 @@ function rowsForEntry(e: HistoryEntry): string[][] {
 
 export type LineItemsCsvResult =
   | { ok: true; csv: string; rowCount: number }
-  | { ok: false; reason: 'no-rows' };
+  | { ok: false; reason: 'no-rows' }
+  | { ok: false; reason: 'too-many-rows'; rowCount: number };
 
 export function toLineItemsCsv(
   entries: ReadonlyArray<HistoryEntry>,
@@ -104,6 +105,11 @@ export function toLineItemsCsv(
   const income = entries.filter(isIncomeSaleEntry);
   if (income.length === 0) return { ok: false, reason: 'no-rows' };
   const dataRows = income.flatMap(rowsForEntry);
+  // 仕訳CSV と同じ取込上限。明細CSV は 1 entry が複数行に展開されるため、entry 数ではなく
+  // 実際に書き出す行数で判定する (会計ソフト側が弾くのは行数)。
+  if (dataRows.length > ACCOUNTING_MAX_ROWS) {
+    return { ok: false, reason: 'too-many-rows', rowCount: dataRows.length };
+  }
   return {
     ok: true,
     csv: buildCsv([HEADER, ...dataRows]),

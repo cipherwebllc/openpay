@@ -129,6 +129,25 @@ describe('POST /api/order/call', () => {
     expect(hold.evalScript).toContain("redis.call('LTRIM'");
   });
 
+  it('body 上限超過は検証前に 413 (payload_too_large)', async () => {
+    const res = await POST(
+      new Request('http://localhost/api/order/call', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          h: 'coffee',
+          table: '12',
+          orderId: 'ORDER1',
+          txHash: TX,
+          pad: 'x'.repeat(5 * 1024),
+        }),
+      }),
+    );
+    expect(res.status).toBe(413);
+    expect(await res.json()).toMatchObject({ error: 'payload_too_large' });
+    expect(hold.calls).toHaveLength(0);
+  });
+
   it('handle 形式不正は 400', async () => {
     expect((await POST(request({ h: '!' }))).status).toBe(400);
   });

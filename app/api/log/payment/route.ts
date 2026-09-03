@@ -232,7 +232,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   const ipPrefix = anonymizeIp(
-    req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
+    clientIp(req) ?? '',
   );
   // limiter は IP 単位 (HMAC 済み) で刻む。anonymizeIp は IPv6 を /64 に丸めるため、
   // 単一の攻撃者が持つ /64 全体が 1 バケツに見え、逆に同一 /64 の正規ユーザ同士が

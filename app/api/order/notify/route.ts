@@ -31,6 +31,8 @@ import {
 } from '@/lib/kv';
 import { checkRateLimit } from '@/lib/relay/relayGuards';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
+import { clientIp } from '@/lib/net/ipHash';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 import { resolveHandle } from '@/lib/handleStore';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
@@ -73,6 +75,10 @@ import { notifyPaymentReceived } from '@/lib/push/notify';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 20;
+
+// body 上限 (逐次読みで打ち切る)。受注 payload は明細 (ORDER_ITEMS_MAX) + オプション名 + メモが
+// 上限で、64KB あれば正当な注文は通る。money-path は不変 (追加の 413 分岐のみ)。
+const ORDER_NOTIFY_BODY_MAX_BYTES = 64 * 1024;
 
 const AMOUNT_ADVISORY_BPS_CAP = 300;
 const FEE_RECONCILE_RETRY_MS = [0, 1_000, 4_000, 10_000] as const;
@@ -336,12 +342,12 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!handle) return fail('handle_required', 400);
   if (!isValidHandleFormat(handle)) return fail('invalid_handle', 400);
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  const capped = await readJsonBodyCapped(req, ORDER_NOTIFY_BODY_MAX_BYTES);
+  if (!capped.ok) {
+    if (capped.reason === 'too_large') return fail('payload_too_large', 413);
     return fail('invalid_json', 400);
   }
+  const body: unknown = capped.value;
   if (typeof body !== 'object' || body === null) return fail('invalid_body', 400);
   const o = body as Record<string, unknown>;
 
@@ -370,7 +376,7 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // レート制限 (IP のみ): 単一クライアントの flood は弾くが、別客 (別 IP) の正当な注文は制限しない。
   const ipPrefix = anonymizeIp(
-    req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
+    clientIp(req) ?? '',
   );
   const allowed = await checkRateLimit([`order:${ipPrefix}`]);
   if (!allowed) return fail('rate_limited', 429);

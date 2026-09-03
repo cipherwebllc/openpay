@@ -5,6 +5,7 @@
 // 設計: plans/restaurant-pos-roadmap.md §3-A。
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { requireSession } from '../../auth/siwe/_session';
 import { resolveHandle } from '@/lib/handleStore';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
@@ -15,6 +16,9 @@ import { logger } from '@/lib/logger';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 10;
+
+// body 上限 (逐次読みで打ち切る)。PATCH は単一操作 (ShopLivePatch) のみを受理する。
+const SHOP_LIVE_BODY_MAX_BYTES = 32 * 1024;
 
 function notFound() {
   return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
@@ -47,13 +51,17 @@ export async function PATCH(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'invalid_handle' }, { status: 400 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
+  const capped = await readJsonBodyCapped(req, SHOP_LIVE_BODY_MAX_BYTES);
+  if (!capped.ok) {
+    if (capped.reason === 'too_large') {
+      return NextResponse.json(
+        { ok: false, error: 'payload_too_large' },
+        { status: 413 },
+      );
+    }
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
-  const patch = parseShopLivePatch(body);
+  const patch = parseShopLivePatch(capped.value);
   if (!patch) return NextResponse.json({ ok: false, error: 'invalid_patch' }, { status: 400 });
 
   // 所有者照合: handle の owner === サインイン中ウォレットのみ操作可 (他人の店舗を改変させない)。

@@ -1689,6 +1689,7 @@
     "accountingRateUnavailable": "FX rate unavailable — USDC can’t be converted to yen right now. Try again shortly.",
     "accountingNoRows": "No sales (successful income) to export.",
     "accountingTooManyRows": "Can't export more than {max} rows. Please narrow by period.",
+    "sjisLossyWarning": "{count} character(s) can't be represented in Yayoi native (Shift_JIS): {chars}. They are replaced with \"?\" in the exported file.",
     "summaryTitle": "Summary",
     "summaryGmvLabel": "Volume (JPY)",
     "summaryCountsLine": "{total} total (success {success} / reverted {reverted} / error {error} / pending {pending})",

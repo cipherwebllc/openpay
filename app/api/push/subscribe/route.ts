@@ -3,6 +3,7 @@ import { requireSession } from '@/app/api/auth/siwe/_session';
 import { env } from '@/lib/env';
 import { isPrivateHost } from '@/lib/net/privateHost';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
+import { clientIp } from '@/lib/net/ipHash';
 import { MAX_BODY_BYTES, anonymizeIp } from '@/lib/relay/relayRoute';
 import {
   removePushSubscription,
@@ -102,7 +103,7 @@ async function rateLimited(
 ): Promise<NextResponse | null> {
   try {
     const ipPrefix = anonymizeIp(
-      req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
+      clientIp(req) ?? '',
     );
     const key = `pushsub:${wallet.toLowerCase()}:${ipPrefix}`;
     if (!(await checkReadRateLimit(key, 20, 60))) {

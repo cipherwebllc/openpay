@@ -24,7 +24,9 @@ export default defineConfig({
     exclude: ['node_modules', 'e2e/**', '.next/**'],
     coverage: {
       provider: 'v8',
-      include: ['hooks/**', 'lib/**', 'components/**'],
+      // app/api/** は「money-path と認可の実装がある層」なので計測対象に含める
+      // (2026-09-02 レビュー F3: 除外されていたため route の未テスト分岐が可視化されなかった)。
+      include: ['hooks/**', 'lib/**', 'components/**', 'app/api/**'],
       // 構造化ログや middleware など runtime に直接動かない / e2e で見る系は除外
       exclude: [
         'instrumentation*.ts',
@@ -32,15 +34,17 @@ export default defineConfig({
         '**/*.d.ts',
         '**/*.config.*',
       ],
-      // 現状値 (2026-04-27, components+hooks+lib): statements 95.89 /
-      // branches 94.87 / functions 89.25 / lines 95.89。functions が低めなのは
-      // QrGenerator / TipEmbedGenerator の inner handler が未テストなため。
-      // 現状値 - 1% を下限にして回帰のみ検出 (新規コードに無理なテスト追加を強要しない)。
+      // 現状値 (2026-09-02, components+hooks+lib+app/api): statements 89.51 /
+      // branches 86.56 / functions 90.67 / lines 89.51。app/api/** を include に
+      // 加えたため以前の数字 (lib 中心で 95 台) からは下がっている — 実測が下がった
+      // のではなく計測範囲が広がった。
+      // 実測 -2pt を下限にして回帰のみ検出 (新規コードに無理なテスト追加を強要しない)。
+      // CI の Coverage ステップは continue-on-error を外したので、この下限割れは fail する。
       thresholds: {
-        statements: 95,
-        branches: 93,
+        statements: 87,
+        branches: 84,
         functions: 88,
-        lines: 95,
+        lines: 87,
       },
     },
     // 環境変数はモジュール評価より前にセットされる必要があるため、

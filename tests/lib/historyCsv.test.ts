@@ -5,7 +5,8 @@ import {
   historyCsvFilename,
   toCsv,
 } from '@/lib/historyCsv';
-import type { HistoryEntry } from '@/lib/history';
+import { entryTotals, type HistoryEntry } from '@/lib/history';
+import { toLineItemsCsv } from '@/lib/lineItemsCsv';
 
 function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
@@ -666,6 +667,98 @@ describe('CSV v5: 記帳補助メタ列 (商品名/税/明細・末尾追加で�
       { usdcJpy: 156.25 }, // 6.4 * 156.25 = 1000円 → 内税 91
     );
     expect(cellsByHeader(csv)('税額(円)')).toBe('91');
+  });
+
+  // 混在税率 (10% と 8%) の税額は「行ごとに計算して合算」が正。以前は entry 単位の単一税率を
+  // 合計額に掛けていたため、明細CSV (lineItemsCsv) / 仕訳CSV / 履歴表示 (entryTotals) と食い違っていた。
+  const mixedLineItems = [
+    {
+      name: 'コーヒー',
+      quantity: 2,
+      unitPrice: '500',
+      amount: '1000',
+      taxRate: 10,
+      taxCategory: 'taxable_10' as const,
+      memo: null,
+    },
+    {
+      name: '食品',
+      quantity: 1,
+      unitPrice: '3000',
+      amount: '3000',
+      taxRate: 8,
+      taxCategory: 'taxable_8' as const,
+      memo: null,
+    },
+  ];
+
+  it('混在税率: 税額(円) は行別税額の合計 (10% 91 + 8% 222 = 313)', () => {
+    const csv = toCsv([
+      entry({
+        merchantAmount: '4000000000000000000000', // 4000 JPYC
+        saleAmount: '4000000000000000000000',
+        taxRate: null, // 明細が税率を持つ (entry 単位の税率は無い)
+        lineItems: mixedLineItems,
+      }),
+    ]);
+    expect(cellsByHeader(csv)('税額(円)')).toBe('313');
+  });
+
+  it('混在税率: entry 単位の税率が残っていても行別合計を優先する', () => {
+    const csv = toCsv([
+      entry({
+        merchantAmount: '4000000000000000000000',
+        saleAmount: '4000000000000000000000',
+        taxRate: 10, // 旧実装ならこの単一税率で 4000 → 364 になっていた
+        taxCategory: 'taxable_10',
+        lineItems: mixedLineItems,
+      }),
+    ]);
+    const at = cellsByHeader(csv);
+    expect(at('税率(%)')).toBe('10'); // 税率列は entry 値のまま (列の意味は不変)
+    expect(at('税額(円)')).toBe('313');
+  });
+
+  it('混在税率: 明細CSV / entryTotals の税額と一致する', () => {
+    const e = entry({
+      merchantAmount: '4000000000000000000000',
+      saleAmount: '4000000000000000000000',
+      taxRate: null,
+      lineItems: mixedLineItems,
+    });
+    const perLine = toLineItemsCsv([e]);
+    expect(perLine.ok).toBe(true);
+    if (!perLine.ok) return;
+    const lineTaxSum = parseCsv(perLine.csv.slice(CSV_BOM.length))
+      .slice(1)
+      .filter((r) => r.length > 1)
+      .reduce((sum, r) => sum + Number(r[11]), 0);
+
+    expect(cellsByHeader(toCsv([e]))('税額(円)')).toBe(String(lineTaxSum));
+    expect(entryTotals(e).totalTax).toBe(String(lineTaxSum));
+  });
+
+  it('単一税率の明細は従来値のまま (回帰): gross 按分でも 1100 → 100', () => {
+    const csv = toCsv([
+      entry({
+        merchantAmount: '990000000000000000000', // net 990
+        saleAmount: '1100000000000000000000', // gross 1100
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+        lineItems: [
+          {
+            name: 'コーヒー',
+            quantity: 1,
+            unitPrice: '990',
+            amount: '990',
+            taxRate: 10,
+            taxCategory: 'taxable_10',
+            memo: null,
+          },
+        ],
+      }),
+    ]);
+    expect(cellsByHeader(csv)('税額(円)')).toBe('100');
   });
 
   it('旧 entry (記帳補助メタ無し) は v5 列が空 (後方互換)', () => {
