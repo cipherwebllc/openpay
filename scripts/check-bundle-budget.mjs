@@ -35,7 +35,7 @@ const BUDGETS_KB = {
   // 切り分け実測: 同 PR の i18n pick (F12) のみを適用したビルドでは /pay 438kB のまま増分ゼロ、
   // /create の code-split を戻すと 438kB に戻る。code-split を「やった上で」出た再分割分なので
   // 予算側を +2kB する。自作コードの直接 import 増には引き続き code-split 優先方針を適用する。
-  '/[locale]/pay': 440,
+  '/[locale]/pay': 442,
   // 2026-08-18 store USDC P2: /pay と同型の chunk 再分割 +1kB (tip から新規 USDC モジュール
   // への import 経路なしを grep で確認)。
   // 2026-08-17 store USDC P3: Terms 13 条追記 (messages 増) による再分割 +1kB (tip から
