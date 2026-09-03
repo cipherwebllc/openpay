@@ -12,6 +12,24 @@ npm run typecheck && npm run lint && npm run test:run   # local 全 pass
 ./scripts/predeploy-backup.sh               # .env.local を backup (Vercel CLI 上書き対策)
 ```
 
+### 1.1 Lua-backed テスト (CAS スクリプト)
+
+`lib/x402/**` の CAS は Upstash の `EVAL` に渡す Lua 文字列なので、以前は kv モックが Lua の
+セマンティクスを TypeScript で再実装しており、構文誤り・KEYS/ARGV の添字ズレ・`redis.call` の
+綴り間違いは実機に当てるまで出なかった。現在は `tests/_helpers/redisLua.ts` (devDependency
+`wasmoon` = C Lua 5.4 の WASM ビルド) が **本物の Lua を vitest 内で実行**する:
+`npx vitest run tests/_helpers/redisLua.test.ts tests/lib/x402/reverify-cas.test.ts
+tests/lib/x402/registry-lua.test.ts` (通常の `npm run test:run` にも含まれる・追加の env や
+起動手順は不要)。これらのファイルは先頭に `// @vitest-environment node` が必要 —
+wasmoon の emscripten glue は jsdom 下だと `document.baseURI` から scriptDirectory を組み立てて
+`createRequire` に渡すため WASM 初期化に失敗する。**既知の差異** (詳細は `redisLua.ts` 冒頭の
+KNOWN DIVERGENCES): ①本番 Redis は Lua 5.1 (全数値 double)・wasmoon は Lua 5.4 (整数 subtype あり)
+②`cjson` は `JSON.stringify/parse` の shim なので数値書式が本物の `%.14g` と異なり (1/3 が
+`0.3333333333333333` vs `0.33333333333333`)、JSON の `null` は `cjson.null` ではなくキーごと落ちる
+③`redis.call` のエラー文言は実 Redis と一致しない。**エミュレータであって Upstash 実機ではない**ので、
+money-path の CAS (registry / reverify / purchaseIntent / storeUsdcIntent) は掟 15 の実機 smoke を
+引き続き省略しない。
+
 ## 2. Deploy (user-manual)
 
 Vercel CLI deploy は `feedback_vercel_cli_env_local.md` の方針で常に user-manual。

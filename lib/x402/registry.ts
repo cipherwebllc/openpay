@@ -276,7 +276,7 @@ function safeParse<T>(raw: string | null): T | null {
 // 「DELETE → 同一 URL で再登録」でモデレーション状態を洗い流す経路を塞ぐ。判定と保存を同じ
 // script に閉じるので、削除と再登録を並走させても台帳を跨げない。戻り: 1=作成 / 3=hidden 継承で
 // 作成 / -2=cap 超過。
-const CAS_CREATE =
+export const CAS_CREATE =
   'local cap=tonumber(ARGV[3]); ' +
   "if redis.call('LLEN',KEYS[3])>=cap then return -2 end; " +
   "local doc=ARGV[1]; local code=1; " +
@@ -401,7 +401,7 @@ export async function countMerchantResources(wallet: string): Promise<number | n
 // owner 認可つき CAS の共通前段: 取得 → decode → 形検査 → owner 一致確認。一致時は decoded table を
 // ローカル o に残し、続く本処理 (更新 / 無効化) が o を書き換える。途中脱出の戻り値は両 CAS で共通:
 // -1=未存在 / -2=malformed / 0=owner 不一致。
-const CAS_OWNER_GUARD =
+export const CAS_OWNER_GUARD =
   "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
   'local ok,o=pcall(cjson.decode,c); if not ok then return -2 end; ' +
   "if type(o)~='table' or type(o.merchant)~='string' then return -2 end; " +
@@ -417,7 +417,7 @@ const CAS_OWNER_GUARD =
 // PATCH → 元 URL へ PATCH し直すだけで解除できると自動 hidden が無意味になる (B6)。復帰は
 // 「再検証が ok_402_openpay を観測する」正規経路のみ (reverify の CAS が hidden=false に倒す)。
 // 戻り: 更新後 JSON 文字列=成功 / -1=未存在 / -2=malformed / -3=削除済 / 0=owner 不一致。
-const CAS_UPDATE =
+export const CAS_UPDATE =
   CAS_OWNER_GUARD +
   'if o.active==false then return -3 end; ' +
   'if o.url~=ARGV[2] then o.verification=nil end; ' +
@@ -432,17 +432,17 @@ const CAS_UPDATE =
 // owner 一致時のみ soft-delete (active:false) する CAS。既に無効なら 2 (冪等)。
 // discovery index は active 一覧用なので LREM で掃除する。merchant index は登録総数 cap 用に残す。
 // 戻り: 1=無効化 / 2=既に無効 / -1=未存在 / -2=malformed / 0=owner 不一致。
-const CAS_DEACTIVATE_BODY =
+export const CAS_DEACTIVATE_BODY =
   "if o.active==false then redis.call('LREM',KEYS[2],0,ARGV[2]); return 2 end; " +
   "o.active=false; redis.call('SET',KEYS[1],cjson.encode(o)); " +
   "redis.call('LREM',KEYS[2],0,ARGV[2]); return 1";
 
-const CAS_DEACTIVATE = CAS_OWNER_GUARD + CAS_DEACTIVATE_BODY;
+export const CAS_DEACTIVATE = CAS_OWNER_GUARD + CAS_DEACTIVATE_BODY;
 
 // N-5: hidden 済の掲載を削除するときだけ URL 台帳 (KEYS[3]) に印を残す。owner が
 // 「DELETE → 同一 URL で再登録」で hidden を消せないようにする (createResource が継承する)。
 // hidden の判定は権威レコード (o.hidden) 側で行うので、呼び元の読取と競合しても誤って印を残さない。
-const CAS_DEACTIVATE_WITH_LEDGER =
+export const CAS_DEACTIVATE_WITH_LEDGER =
   CAS_OWNER_GUARD +
   "if o.hidden==true then redis.call('SET',KEYS[3],ARGV[3],'EX',ARGV[4]) end; " +
   CAS_DEACTIVATE_BODY;
