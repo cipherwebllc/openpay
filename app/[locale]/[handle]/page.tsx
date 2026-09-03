@@ -47,9 +47,11 @@ import {
   buildHandleOgImageUrl,
   buildProductOgImageUrl,
   tokenLabelFor,
+  truncateGraphemes,
   type TipCardFacts,
   type TipOgLocale,
 } from '@/lib/ogTipCard';
+import { stripControlChars } from '@/lib/sanitize';
 
 // catch-all かつ KV を実行時に読むため、静的最適化させず必ず Node ランタイムでリクエスト時に
 // 解決する (API route と揃える)。これがないと環境によって KV env が解決時に見えない/
@@ -164,12 +166,12 @@ export async function generateMetadata({
     tokenLabel: tokenLabelFor(primary.token),
     gasless: true,
   };
-  const bio = record.profile?.bio?.trim();
+  // bio は店主入力なので、制御文字を落としてからコードポイント単位で切る。
+  // UTF-16 slice は絵文字・補助面漢字を割って孤立サロゲートを meta に載せる (OG カードと同型)。
+  const bio = stripControlChars(record.profile?.bio ?? '');
   const description =
-    bio && bio.length > 0
-      ? bio.length > 90
-        ? `${bio.slice(0, 90)}…`
-        : bio
+    bio.length > 0
+      ? truncateGraphemes(bio, 90)
       : buildTipMeta(facts, ogLocale).description;
   return toMeta(title, description);
 }

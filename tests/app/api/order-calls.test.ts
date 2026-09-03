@@ -121,6 +121,12 @@ describe('/api/order/calls', () => {
     expect(json.calls.map((call: { id: string }) => call.id)).toEqual(['new', 'middle']);
   });
 
+  // C11: 店主固有の呼出一覧を共有キャッシュ (CDN/proxy) に載せない。
+  it('GET 成功応答に Cache-Control: private, no-store', async () => {
+    const res = await GET(get());
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+  });
+
   it('POST {id,done:true} は原子削除し、再実行は removed=0 の冪等', async () => {
     hold.rows = [JSON.stringify({ id: 'call-1', handle: 'coffee', table: '2', ts: Date.now() })];
     const first = await POST(post('call-1'));

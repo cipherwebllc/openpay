@@ -98,6 +98,12 @@ describe('GET /api/order/token (現行トークンの再表示)', () => {
     const res = await GET();
     expect(await res.json()).toEqual({ ok: true, token: 'x'.repeat(43) });
   });
+  // C11: トークンは秘密。共有キャッシュ (CDN/proxy) に載せない。
+  it('成功応答に Cache-Control: private, no-store', async () => {
+    hold.store[orderTokenKey(SESSION)] = 'x'.repeat(43);
+    const res = await GET();
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+  });
 });
 
 describe('POST /api/order/token (発行 / 再発行)', () => {

@@ -51,7 +51,11 @@ export async function GET(req: Request): Promise<NextResponse> {
     .map((raw) => parseStoredOrder(raw))
     .filter((o): o is StoredOrder => o !== null)
     .sort((a, b) => b.ts - a.ts);
-  return NextResponse.json({ ok: true, orders });
+  // 店主 (セッション/トークン) 固有の受注一覧 → 共有キャッシュに載せない。
+  return NextResponse.json(
+    { ok: true, orders },
+    { headers: { 'Cache-Control': 'private, no-store' } },
+  );
 }
 
 // 対象要素を **位置維持 + キー TTL 保持** で原子置換する Lua: LPOS で旧 raw の index を引き、LSET で

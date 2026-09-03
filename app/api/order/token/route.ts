@@ -42,7 +42,11 @@ export async function GET(): Promise<NextResponse> {
     logger.warn('order.token.kv_error', { reason: res.reason, op: 'get' });
     return kvError();
   }
-  return NextResponse.json({ ok: true, token: res.value });
+  // 受注トークン = 秘密。セッション固有かつ機密なので共有キャッシュに載せない。
+  return NextResponse.json(
+    { ok: true, token: res.value },
+    { headers: { 'Cache-Control': 'private, no-store' } },
+  );
 }
 
 /** 発行 / 再発行 (rotate)。旧トークンは現行一致検証で即失効する。新トークンを 1 度だけ返す。 */

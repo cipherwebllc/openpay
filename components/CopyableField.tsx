@@ -23,12 +23,13 @@ export function CopyableField({
 
   const shown = displayValue ?? value;
 
+  // a11y 名は可視テキスト (= 表示中のハッシュ) から導出する (掟 8)。何のフィールドか /
+  // 押すと何が起きるかは sr-only テキストで補い、aria-label で上書きしない
+  // (label-content-name-mismatch / WCAG 2.5.3)。
   if (!available) {
     return (
-      <span
-        className={`break-all font-mono ${className}`}
-        aria-label={label}
-      >
+      <span className={`break-all font-mono ${className}`}>
+        <span className="sr-only">{label}: </span>
         {shown}
       </span>
     );
@@ -38,10 +39,10 @@ export function CopyableField({
     <button
       type="button"
       onClick={() => copy(value)}
-      aria-label={t('copyAria', { label })}
       className={`group inline-flex items-center gap-1 break-all font-mono text-left transition hover:bg-slate-100/60 rounded px-1 -mx-1 ${className}`}
     >
       <span className="break-all">{shown}</span>
+      <span className="sr-only">{t('copyAria', { label })}</span>
       <span
         aria-hidden="true"
         className={`shrink-0 text-xs font-sans transition ${

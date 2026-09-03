@@ -73,10 +73,43 @@ describe('CopyableField', () => {
     expect(writeText).toHaveBeenCalledOnce();
   });
 
-  it('aria-label に label プロパティを含む (a11y)', () => {
+  // 掟 8: 可視テキストを含まない aria-label 単独付与は禁止 (WCAG 2.5.3)。
+  // a11y 名は「可視のハッシュ + sr-only の説明」から導出する。
+  it('aria-label を使わず、可視テキスト + sr-only で a11y 名を作る (a11y)', () => {
     render(<CopyableField value={TX_HASH} label="UserOp Hash" />);
     const btn = screen.getByRole('button');
-    expect(btn.getAttribute('aria-label')).toContain('UserOp Hash');
+    expect(btn.hasAttribute('aria-label')).toBe(false);
+    // 可視のハッシュが a11y 名に含まれる (label-content-name-mismatch を起こさない)。
+    expect(btn.textContent).toContain(TX_HASH);
+    expect(btn.textContent).toContain('UserOp Hash をコピー');
+    const srOnly = screen.getByText('UserOp Hash をコピー');
+    expect(srOnly.className).toContain('sr-only');
+  });
+
+  it('clipboard 不在の span でも aria-label でなく sr-only ラベルを使う', () => {
+    const desc = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(navigator),
+      'clipboard',
+    );
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      get: () => undefined,
+    });
+    try {
+      const { container } = render(
+        <CopyableField value={TX_HASH} label="Tx Hash" />,
+      );
+      expect(container.querySelector('[aria-label]')).toBeNull();
+      const srOnly = screen.getByText('Tx Hash:');
+      expect(srOnly.className).toContain('sr-only');
+    } finally {
+      if (desc) {
+        Object.defineProperty(navigator, 'clipboard', desc);
+      } else {
+        // @ts-expect-error: navigator.clipboard は通常 readonly だがテスト用
+        delete navigator.clipboard;
+      }
+    }
   });
 
   it('navigator.clipboard 不在の環境では button ではなく span として描画 (graceful degrade)', () => {

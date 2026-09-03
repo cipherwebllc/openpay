@@ -231,7 +231,7 @@ describe('MobileOrderView', () => {
     renderWithIntl(<MobileOrderView config={config} />);
     // 空のときは sticky カートバー自体を描画しない (メニューが主役・アプリ風)。
     expect(screen.queryByText('支払いへ進む')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'ご注文内容' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /ご注文内容/ })).toBeNull();
     // 「このお店は OpenPay で受け取っています」の OpenPay をテキストリンク化 (→ トップ)。
     const op = screen.getByRole('link', { name: 'OpenPay' });
     expect(op).toHaveAttribute('href', '/');
@@ -406,7 +406,7 @@ describe('MobileOrderView', () => {
     // ブレンド(500) を +2。
     fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
     fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
-    const toggle = screen.getByRole('button', { name: 'ご注文内容' });
+    const toggle = screen.getByRole('button', { name: /ご注文内容/ });
     expect(toggle).toHaveAttribute('aria-expanded', 'false'); // 既定は明細を畳む
     expect(screen.getByText('1000 JPYC')).toBeInTheDocument(); // 500×2 (トグルの総額)
     // タップで明細を開く → 数量ステッパが menu(3) + カート(1=ブレンド) = 4 に増える。
@@ -479,6 +479,77 @@ describe('MobileOrderView', () => {
     renderWithIntl(<MobileOrderView config={config} handle="alice" />);
     fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
     expect(screen.queryByPlaceholderText('アレルギー・要望など（任意）')).toBeNull();
+  });
+
+  // D3: メモは orderId (受注リレー + @handle) 経由でしか店主に届かない。self-contained ?s=
+  // 注文では orderId が発番されず「書いても届かない」ので入力欄自体を出さない。
+  it('注文メモ: ?s= (handle 無し) は flag ON でも入力を表示しない (届かないため)', () => {
+    envHold.enableOrderRelay = true;
+    envHold.enableOrderMemo = true;
+    renderWithIntl(<MobileOrderView config={config} />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.queryByPlaceholderText('アレルギー・要望など（任意）')).toBeNull();
+  });
+
+  it('注文メモ: handle あり + 受注リレー ON なら入力を表示する', () => {
+    envHold.enableOrderRelay = true;
+    envHold.enableOrderMemo = true;
+    renderWithIntl(<MobileOrderView config={config} handle="alice" />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(
+      screen.getByPlaceholderText('アレルギー・要望など（任意）'),
+    ).toBeInTheDocument();
+  });
+
+  it('注文メモ: handle ありでも受注リレー OFF なら入力を表示しない', () => {
+    envHold.enableOrderMemo = true;
+    renderWithIntl(<MobileOrderView config={config} handle="alice" />);
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    expect(screen.queryByPlaceholderText('アレルギー・要望など（任意）')).toBeNull();
+  });
+
+  // D1: ?s= の注文トークンは店舗情報 (店名/アイコン/SNS/受取先) をすべて QR 作成者が
+  // 自由に書ける。受取先アドレスと「申告である」旨を出して、払う前に確認できるようにする。
+  it('?s= (handle 無し): 受取先アドレスの短縮表示 + QR 申告の注意書きを出す', () => {
+    renderWithIntl(<MobileOrderView config={config} />);
+    expect(screen.getByText('受取先')).toBeInTheDocument();
+    expect(screen.getByText('0x1111…1111')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'この店舗情報は QR に含まれる申告です。受取先をご確認ください',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('@handle 経路 (handle あり): 受取先行と注意書きは出さない (server 権威のレコード)', () => {
+    renderWithIntl(<MobileOrderView config={config} handle="alice" />);
+    expect(screen.queryByText('受取先')).toBeNull();
+    expect(screen.queryByText('0x1111…1111')).toBeNull();
+    expect(
+      screen.queryByText(
+        'この店舗情報は QR に含まれる申告です。受取先をご確認ください',
+      ),
+    ).toBeNull();
+  });
+
+  // D11: lucide アイコンは装飾 (aria-hidden)。項目名は sr-only の可視テキストで補う
+  // (可視テキストを含まない aria-label 単独付与の禁止・掟 8)。
+  it('店舗情報のアイコンは aria-hidden で、項目名は sr-only テキストで読める', () => {
+    const { container } = renderWithIntl(
+      <MobileOrderView
+        config={{
+          ...config,
+          hours: '10:00-18:00',
+          address: '東京都渋谷区1-1-1',
+          phone: '03-1234-5678',
+        }}
+      />,
+    );
+    expect(container.querySelector('svg[aria-label]')).toBeNull();
+    for (const label of ['営業時間:', '住所:', '電話番号:']) {
+      const el = screen.getByText(label);
+      expect(el.className).toContain('sr-only');
+    }
   });
 
   it('受付番号は同一 mount の再描画・チェーン切替でも不変', () => {
@@ -681,7 +752,7 @@ describe('MobileOrderView 事前充填 (initialCart / ?cart=)', () => {
   it('cart 不在 (initialCart 未指定): 従来どおり空カート・通知バナー無し (inert)', () => {
     renderWithIntl(<MobileOrderView config={config} />);
     expect(screen.queryByText(/AI が選んだご注文を読み込みました/)).toBeNull();
-    expect(screen.queryByRole('button', { name: 'ご注文内容' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /ご注文内容/ })).toBeNull();
     expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
   });
 
@@ -698,7 +769,7 @@ describe('MobileOrderView 事前充填 (initialCart / ?cart=)', () => {
     // 合計 = 500×2 + 100 = 1100 JPYC。
     expect(screen.getByText('1100 JPYC')).toBeInTheDocument();
     // 事前充填時は明細を既定で開く (人が確認してから払える)。
-    expect(screen.getByRole('button', { name: 'ご注文内容' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: /ご注文内容/ })).toHaveAttribute(
       'aria-expanded',
       'true',
     );
@@ -1242,7 +1313,7 @@ describe('MobileOrderView 前回と同じ注文', () => {
     fireEvent.click(btn);
     // 合計 = 500×2 + 100 = 1100 JPYC・明細は開いた状態・ボタンはカートが埋まったので消える。
     expect(screen.getByText('1100 JPYC')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'ご注文内容' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: /ご注文内容/ })).toHaveAttribute(
       'aria-expanded',
       'true',
     );

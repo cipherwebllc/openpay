@@ -3,9 +3,15 @@
 
 import { NextResponse } from 'next/server';
 import { isAddress, isHex, type Address, type Hex } from 'viem';
-import { kvLpush, kvLtrim } from '@/lib/kv';
+import { kvExpire, kvLpush, kvLtrim } from '@/lib/kv';
 import { logger } from '@/lib/logger';
-import type { ClientReportedCircleVerification } from '@/lib/paymentLog';
+import { clientIp, hashIp } from '@/lib/net/ipHash';
+import {
+  PAYMENT_LOG_KV_KEY,
+  PAYMENT_LOG_DAILY_TTL_SEC,
+  paymentLogDailyKey,
+  type ClientReportedCircleVerification,
+} from '@/lib/paymentLog';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 // P3: anonymizeIp を単一情報源化 (旧 local 実装は fallback が '' で relayRoute の 'unknown' と乖離し、
 // 不正形式 IP が同一空文字バケツを共有する rate-limit 相乗りの恐れがあった)。
@@ -13,10 +19,12 @@ import { anonymizeIp } from '@/lib/relay/relayRoute';
 
 export const runtime = 'nodejs';
 
-const KV_KEY = 'openpay:payments:log';
 const MAX_BODY_BYTES = 8 * 1024;
 // alpha 6 ヶ月 + 余裕。古い entry は LPUSH 後の LTRIM で自動破棄。
 const LIST_CAP = 100_000;
+// errorMessage は client 申告の自由文字列。body 上限 (8KB) 内でも 1 entry が肥大化して
+// 共有リストの容量を食い潰すため、保存前に切詰める (reject はしない — ログは best-effort)。
+const ERROR_MESSAGE_MAX = 500;
 
 // flow 一覧:
 //   batch:             gasless 経路 (UserOp で merchant + fee を 1 batch 送信、
@@ -176,7 +184,9 @@ function validate(raw: unknown): Payload | null {
   if (r.txHash !== undefined) clean.txHash = r.txHash;
   if (r.feeTxHash !== undefined) clean.feeTxHash = r.feeTxHash;
   if (r.blockNumber !== undefined) clean.blockNumber = r.blockNumber;
-  if (r.errorMessage !== undefined) clean.errorMessage = r.errorMessage;
+  // 自由文字列は保存前に切詰める (拒否はしない — ログ欠落より短縮を選ぶ)。
+  if (r.errorMessage !== undefined)
+    clean.errorMessage = r.errorMessage.slice(0, ERROR_MESSAGE_MAX);
   if (r.bridge !== undefined) clean.bridge = r.bridge;
   if (r.sourceChainId !== undefined) clean.sourceChainId = r.sourceChainId;
   if (r.bridgedAmount !== undefined) clean.bridgedAmount = r.bridgedAmount;
@@ -224,8 +234,12 @@ export async function POST(req: Request): Promise<NextResponse> {
   const ipPrefix = anonymizeIp(
     req.headers.get('x-forwarded-for') ?? req.headers.get('x-real-ip') ?? '',
   );
+  // limiter は IP 単位 (HMAC 済み) で刻む。anonymizeIp は IPv6 を /64 に丸めるため、
+  // 単一の攻撃者が持つ /64 全体が 1 バケツに見え、逆に同一 /64 の正規ユーザ同士が
+  // 相乗りして詰まる。IP_HASH_SECRET 未設定 (hashIp=null) のときだけ従来の /64 に戻す。
+  const limiterKey = hashIp(clientIp(req)) ?? ipPrefix;
   try {
-    if (!(await checkReadRateLimit(`logpay:${ipPrefix}`, 60, 60))) {
+    if (!(await checkReadRateLimit(`logpay:${limiterKey}`, 60, 60))) {
       return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
     }
   } catch {
@@ -241,15 +255,45 @@ export async function POST(req: Request): Promise<NextResponse> {
   };
   logger.info('payment.event', entry);
 
-  const kv = await kvLpush(KV_KEY, JSON.stringify(entry));
+  const serialized = JSON.stringify(entry);
+  const kv = await kvLpush(PAYMENT_LOG_KV_KEY, serialized);
   if (!kv.ok && kv.reason !== 'unconfigured') {
     logger.warn('payment-log.kv-write-failed', { reason: kv.reason, status: kv.status });
   } else if (kv.ok) {
     // 古い entry を捨てて list size を有界化。失敗しても client には返さない。
     // LPUSH 成功時点で env は確定設定なので unconfigured 分岐は到達不能。
-    const trim = await kvLtrim(KV_KEY, 0, LIST_CAP - 1);
+    const trim = await kvLtrim(PAYMENT_LOG_KV_KEY, 0, LIST_CAP - 1);
     if (!trim.ok) {
       logger.warn('payment-log.kv-trim-failed', { reason: trim.reason, status: trim.status });
+    }
+
+    // 日次パーティションへの二重書き (追加のみ)。未認証 write が単一 cap 付きリストを
+    // 押し出す (古い正規 entry の eviction) のを、日ごとに独立したキー + TTL で断つ。
+    // 既存の読み出し口 (export / stats) は上のレガシーキーのままなので挙動不変。
+    // 付帯処理なので失敗しても 200 を返す (決済 UI へ波及させない)。
+    const dailyKey = paymentLogDailyKey();
+    const daily = await kvLpush(dailyKey, serialized);
+    if (!daily.ok) {
+      logger.warn('payment-log.kv-daily-write-failed', {
+        reason: daily.reason,
+        status: daily.status,
+      });
+    } else {
+      // 日次キーも同じ cap で有界化 (1 日分の flood がメモリを食い潰さないように)。
+      const dailyTrim = await kvLtrim(dailyKey, 0, LIST_CAP - 1);
+      if (!dailyTrim.ok) {
+        logger.warn('payment-log.kv-daily-trim-failed', {
+          reason: dailyTrim.reason,
+          status: dailyTrim.status,
+        });
+      }
+      const ttl = await kvExpire(dailyKey, PAYMENT_LOG_DAILY_TTL_SEC);
+      if (!ttl.ok) {
+        logger.warn('payment-log.kv-daily-ttl-failed', {
+          reason: ttl.reason,
+          status: ttl.status,
+        });
+      }
     }
   }
 

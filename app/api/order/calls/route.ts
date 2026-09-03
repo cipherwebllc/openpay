@@ -51,7 +51,11 @@ export async function GET(req: Request): Promise<NextResponse> {
     .map(parseStoredCall)
     .filter((call): call is StoredCall => call !== null && call.ts >= cutoff)
     .sort((a, b) => b.ts - a.ts);
-  return NextResponse.json({ ok: true, calls });
+  // 店主 (セッション/トークン) 固有の呼出一覧 → 共有キャッシュに載せない。
+  return NextResponse.json(
+    { ok: true, calls },
+    { headers: { 'Cache-Control': 'private, no-store' } },
+  );
 }
 
 export async function POST(req: Request): Promise<NextResponse> {

@@ -175,6 +175,12 @@ describe('GET /api/order/feed', () => {
     const json = await res.json();
     expect(json.orders.map((o: StoredOrder) => o.orderId)).toEqual(['new', 'old']); // ts 降順
   });
+
+  // C11: 店主固有の受注一覧を共有キャッシュ (CDN/proxy) に載せない。
+  it('成功応答に Cache-Control: private, no-store', async () => {
+    const res = await GET(getReq());
+    expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+  });
 });
 
 describe('POST /api/order/feed (fulfill フラグ・削除でなくフラグ化)', () => {

@@ -101,6 +101,61 @@ describe('isAllowedSiweDomain (Host ヘッダ非依存・サーバ制御)', () =
   });
 });
 
+// C12: EIP-4361 の uri 束縛。domain だけ正しく uri を攻撃者オリジンにした message を
+// 署名させ、その署名を別サイトで再利用する余地を塞ぐ。判定は domain と同じ許可リスト。
+describe('verifySiweLogin: uri 束縛', () => {
+  it('uri が domain と同じ許可 host + https → ok', async () => {
+    const r = await verifySiweLogin(
+      { message: message({ uri: `https://${DOMAIN}/signin` }), signature: '0xdead' },
+      deps(),
+    );
+    expect(r).toMatchObject({ ok: true });
+  });
+
+  it('uri が別オリジン (許可外 host) → invalid_message・署名検証に到達しない', async () => {
+    const d = deps();
+    const r = await verifySiweLogin(
+      { message: message({ uri: 'https://evil.com/steal' }), signature: '0xdead' },
+      d,
+    );
+    expect(r).toMatchObject({ ok: false, status: 400, error: 'invalid_message' });
+    expect(d.verify).not.toHaveBeenCalled();
+  });
+
+  it('uri が許可 host でも http (非 localhost) → invalid_message', async () => {
+    const r = await verifySiweLogin(
+      { message: message({ uri: `http://${DOMAIN}` }), signature: '0xdead' },
+      deps(),
+    );
+    expect(r).toMatchObject({ ok: false, status: 400, error: 'invalid_message' });
+  });
+
+  it('localhost (開発 config) は http を許可', async () => {
+    const local = 'localhost:3000';
+    const r = await verifySiweLogin(
+      {
+        message: message({ domain: local, uri: `http://${local}` }),
+        signature: '0xdead',
+      },
+      deps({ isAllowedDomain: (d) => d === local }),
+    );
+    expect(r).toMatchObject({ ok: true });
+  });
+
+  it('uri が URL として parse 不能 → invalid_message', async () => {
+    // createSiweMessage は不正 uri を throw するので、正規 message の URI 行だけ差し替える。
+    const broken = message().replace(
+      `URI: https://${DOMAIN}`,
+      'URI: not-a-url',
+    );
+    const r = await verifySiweLogin(
+      { message: broken, signature: '0xdead' },
+      deps(),
+    );
+    expect(r).toMatchObject({ ok: false, status: 400, error: 'invalid_message' });
+  });
+});
+
 describe('verifySiweLogin (DI core)', () => {
   it('成功: 構造 OK + domain 一致 + 署名 OK + nonce 消費 OK → token + checksum address', async () => {
     const d = deps();

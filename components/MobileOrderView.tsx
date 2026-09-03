@@ -15,6 +15,7 @@ import { formatUnits } from 'viem';
 import { Clock, MapPin, Phone, RotateCcw } from 'lucide-react';
 import { SocialIconLinks } from '@/components/SocialIconLinks';
 import { env } from '@/lib/env';
+import { shortAddress } from '@/lib/format';
 import { useOrigin } from '@/hooks/useOrigin';
 import { deploymentForSlug } from '@/lib/tokens';
 import type { JpycChainSlug } from '@/lib/chains';
@@ -696,6 +697,18 @@ export function MobileOrderView({
             {t('viewChainBadge', { chain: JPYC_CHAIN_LABEL[config.chain] })}
           </p>
         )}
+        {/* self-contained な注文トークン (?s=) 経路のみ: 店舗名/アイコン/SNS/受取先はすべて
+            QR 作成者の申告で、server 権威 (@handle レコード) の裏付けが無い。払う前に受取先
+            アドレスを客が確認できるよう可視化する。@handle 経路 (handle あり) では出さない。 */}
+        {!handle && (
+          <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            <p>
+              <span>{t('viewReceiverLabel')}</span>{' '}
+              <span className="font-mono">{shortAddress(config.receiver)}</span>
+            </p>
+            <p className="mt-1">{t('viewReceiverNotice')}</p>
+          </div>
+        )}
         {socialUrls.length > 0 && (
           <div className="mt-3">
             <SocialIconLinks urls={socialUrls} />
@@ -745,13 +758,17 @@ export function MobileOrderView({
         <section className="space-y-1.5 rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
           {config.hours && (
             <p className="flex items-start gap-2">
-              <Clock className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-label={t('viewHoursLabel')} />
-              <span>{config.hours}</span>
+              <Clock className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+              <span>
+                <span className="sr-only">{t('viewHoursLabel')}: </span>
+                {config.hours}
+              </span>
             </p>
           )}
           {config.address && (
             <p className="flex items-start gap-2">
-              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-label={t('viewAddressLabel')} />
+              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+              <span className="sr-only">{t('viewAddressLabel')}: </span>
               {mapHref ? (
                 <a
                   href={mapHref}
@@ -768,7 +785,8 @@ export function MobileOrderView({
           )}
           {config.phone && (
             <p className="flex items-start gap-2">
-              <Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-label={t('viewPhoneLabel')} />
+              <Phone className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+              <span className="sr-only">{t('viewPhoneLabel')}: </span>
               {tel ? (
                 <a href={tel} className="text-[var(--mo-accent-text)] hover:underline">
                   {config.phone}
@@ -823,7 +841,10 @@ export function MobileOrderView({
         ))}
       </section>
 
-      {env.enableOrderMemo && cartItems.length > 0 ? (
+      {/* 注文メモは orderId 経由でしか店主に届かない (sessionStorage → 受注リレー)。orderId は
+          受注リレー flag ON + @handle 公開時にしか発番されないため、self-contained ?s= 注文では
+          入力しても届かない。届かない入力欄を出さないよう handle + relay flag で閉じる。 */}
+      {env.enableOrderMemo && env.enableOrderRelay && handle && cartItems.length > 0 ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
           <label
             htmlFor="order-customer-memo"

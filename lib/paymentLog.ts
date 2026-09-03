@@ -10,6 +10,34 @@ import { logger } from './logger';
 // localStorage 側 (lib/history.FEE_BREAKDOWN_VERSION) とは独立の store・独立の版管理。
 export const LOG_FEE_BREAKDOWN_VERSION = 1 as const;
 
+// KV 保存先のキー導出 (単一情報源)。
+// - PAYMENT_LOG_KV_KEY: 既存の単一リスト。export / stats が読む現役の読み出し口。
+//   未認証 write を 1 本の cap 付きリストに集約しているため、量で押されると古い entry が
+//   LTRIM で押し出される (eviction)。
+// - paymentLogDailyKey: 日次パーティション。1 日分が別キー + TTL なので、ある日の flood が
+//   他の日の記録を押し出さない。将来 reader をこちらへ寄せるための土台。
+export const PAYMENT_LOG_KV_KEY = 'openpay:payments:log';
+const PAYMENT_LOG_DAILY_PREFIX = `${PAYMENT_LOG_KV_KEY}:`;
+/** 日次パーティションの保持期間 (会計/法定保存の 7 年ではなく、alpha 運用の 400 日)。 */
+export const PAYMENT_LOG_DAILY_TTL_SEC = 400 * 24 * 60 * 60;
+
+/** UTC 日付 (YYYYMMDD) の日次パーティションキー。 */
+export function paymentLogDailyKey(now: Date = new Date()): string {
+  return `${PAYMENT_LOG_DAILY_PREFIX}${now.toISOString().slice(0, 10).replace(/-/g, '')}`;
+}
+
+/**
+ * 直近 days 日分の日次パーティションキー (新しい順)。将来の reader (export / stats /
+ * 月次メトリクス) が単一の巨大リストではなく日次キーを走査できるようにするための導出。
+ */
+export function listPaymentLogKeys(days = 30, now: Date = new Date()): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < days; i++) {
+    keys.push(paymentLogDailyKey(new Date(now.getTime() - i * 24 * 60 * 60 * 1000)));
+  }
+  return keys;
+}
+
 // 'pending': broadcast 済だが未確定 (EIP-3009 relay の receipt timeout 等)。確定したら
 // Explorer / 再照合で success/reverted に解決する想定 (現状は手動確認)。
 export type PaymentResult = 'success' | 'reverted' | 'error' | 'pending';

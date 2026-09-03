@@ -2444,6 +2444,8 @@
     "useQrReceiver": "Use the payment QR's receiver",
     "viewChainBadge": "Receives JPYC on {chain}",
     "viewChainPick": "Choose a chain to pay on",
+    "viewReceiverLabel": "Receiving address",
+    "viewReceiverNotice": "Shop details come from the QR itself. Please check the receiving address.",
     "viewAddressLabel": "Address",
     "viewHoursLabel": "Hours",
     "viewPhoneLabel": "Phone",
