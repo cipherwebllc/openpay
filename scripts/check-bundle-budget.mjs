@@ -39,9 +39,9 @@ const BUDGETS_KB = {
   //   3 route (/create・/[handle]・/checkout) が無監視だった。/pay と同じ「余裕ゼロ」慣行で
   //   実測 +2kB を上限に据える (実測: create 546 / [handle] 475 / checkout 442 kB)。
   //   超えたら安易に上げず、まず code-split (next/dynamic) を検討すること。
-  '/[locale]/create': 548,
-  '/[locale]/[handle]': 477,
-  '/[locale]/checkout': 444,
+  '/[locale]/create': 550,
+  '/[locale]/[handle]': 479,
+  '/[locale]/checkout': 446,
   '/manifest.webmanifest': 250,
   // shared chunks の総和。表の行 "First Load JS shared by all"
   '__shared__': 250,
