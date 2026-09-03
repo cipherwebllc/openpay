@@ -5,9 +5,17 @@ import { getAddress } from 'viem';
 const store = vi.hoisted(() => ({
   kv: new Map<string, string>(),
   lists: new Map<string, string[]>(),
+  // TTL つきキー (hidden URL 台帳) の失効を再現する仮想時計。tick で進める。
+  expiry: new Map<string, number>(),
+  clockMs: 0,
   failEval: false, // true で kvEval(CAS) を fail させ storage エラー枝を検証
   failLrange: false, // true で kvLrange を fail させ count の KV エラー枝を検証
   failGet: false, // true で kvGet を fail させ record 単体取得失敗 → null 枝を検証
+  alive(key: string): boolean {
+    if (!this.kv.has(key)) return false;
+    const at = this.expiry.get(key);
+    return at === undefined || at > this.clockMs;
+  },
 }));
 vi.mock('@/lib/kv', () => ({
   kvGet: async (k: string) =>
@@ -38,13 +46,15 @@ vi.mock('@/lib/kv', () => ({
       const cap = Number(args[2]);
       const merchantList = store.lists.get(keys[2]) ?? [];
       if (merchantList.length >= cap) return { ok: true as const, value: -2 };
-      store.kv.set(keys[0], args[0]);
+      // N-5: hidden URL 台帳 (KEYS[4]) に生きた印があれば hidden 済 JSON (ARGV[4]) で作る。
+      const inherited = store.alive(keys[3]);
+      store.kv.set(keys[0], inherited ? args[3] : args[0]);
       const idx = store.lists.get(keys[1]) ?? [];
       idx.unshift(args[1]);
       store.lists.set(keys[1], idx);
       merchantList.unshift(args[1]);
       store.lists.set(keys[2], merchantList);
-      return { ok: true as const, value: 1 };
+      return { ok: true as const, value: inherited ? 3 : 1 };
     }
     const raw = store.kv.get(keys[0]);
     if (raw === undefined) return { ok: true as const, value: -1 };
@@ -85,6 +95,11 @@ vi.mock('@/lib/kv', () => ({
       const idx = store.lists.get(keys[1]) ?? [];
       store.lists.set(keys[1], idx.filter((x) => x !== id));
     };
+    // N-5: hidden 済の削除だけ URL 台帳 (KEYS[3]) に TTL つきで印を残す。
+    if (script.includes("if o.hidden==true then redis.call('SET',KEYS[3]") && o.hidden === true) {
+      store.kv.set(keys[2], args[2]);
+      store.expiry.set(keys[2], store.clockMs + Number(args[3]) * 1000);
+    }
     if (o.active === false) {
       removeFromDiscovery();
       return { ok: true as const, value: 2 };
@@ -148,6 +163,8 @@ function input(over: Partial<X402ResourceInput> = {}): X402ResourceInput {
 beforeEach(() => {
   store.kv.clear();
   store.lists.clear();
+  store.expiry.clear();
+  store.clockMs = 0;
   store.failEval = false;
   store.failLrange = false;
   store.failGet = false;
@@ -364,6 +381,77 @@ describe('lib/x402/registry store', () => {
     expect(store.lists.get(RESOURCES_INDEX)).toContain('hidden');
     expect((await listActiveResources())!.map((r) => r.id)).not.toContain('hidden');
     expect((await listResourcesForMerchant(OWNER))!.map((r) => r.id)).toContain('hidden');
+  });
+
+  // N-5: hidden は resource の状態なので、owner が DELETE → 同一 URL で再登録すれば
+  // まっさらな掲載を作り直せた。hidden 済の削除は URL 台帳 (30 日) に記録し、同じ URL の
+  // 新規登録に hidden を継承させる。
+  describe('hidden URL 台帳 (delete → 再登録での hidden 洗い流しを塞ぐ)', () => {
+    const HIDDEN_URL = 'https://a.jp/hidden-listing';
+
+    async function hideAndDelete(id: string, url = HIDDEN_URL) {
+      await createResource(input({ url }), id, 1);
+      const current = (await getResource(id))!;
+      store.kv.set(resourceKey(id), JSON.stringify({ ...current, hidden: true }));
+      expect(await deactivateResource(id, OWNER)).toEqual({ ok: true });
+    }
+
+    it('hide → delete → 同一 URL で再登録すると hidden を継承する', async () => {
+      await hideAndDelete('old');
+
+      const created = await createResource(input({ url: HIDDEN_URL }), 'new', 2);
+
+      expect(created).toMatchObject({ ok: true });
+      expect(created.ok && created.resource.hidden).toBe(true);
+      // 保存側も hidden = 公開カタログに出ない (owner 一覧には出る)。
+      expect((await getResource('new'))!.hidden).toBe(true);
+      expect((await listActiveResources())!.map((r) => r.id)).not.toContain('new');
+      expect((await listResourcesForMerchant(OWNER))!.map((r) => r.id)).toContain('new');
+    });
+
+    it('別 URL の登録は hidden にならない', async () => {
+      await hideAndDelete('old');
+
+      const created = await createResource(
+        input({ url: 'https://a.jp/other-listing' }),
+        'other',
+        2,
+      );
+
+      expect(created.ok && created.resource.hidden).toBeUndefined();
+      expect((await listActiveResources())!.map((r) => r.id)).toContain('other');
+    });
+
+    it('hidden でない掲載の削除は台帳に載せない', async () => {
+      await createResource(input({ url: HIDDEN_URL }), 'plain', 1);
+      expect(await deactivateResource('plain', OWNER)).toEqual({ ok: true });
+
+      const created = await createResource(input({ url: HIDDEN_URL }), 'again', 2);
+
+      expect(created.ok && created.resource.hidden).toBeUndefined();
+    });
+
+    it('台帳が失効した後 (30 日超) は hidden を継承しない', async () => {
+      await hideAndDelete('old');
+      store.clockMs = 30 * 24 * 60 * 60 * 1000 + 1;
+
+      const created = await createResource(input({ url: HIDDEN_URL }), 'later', 2);
+
+      expect(created.ok && created.resource.hidden).toBeUndefined();
+      expect((await listActiveResources())!.map((r) => r.id)).toContain('later');
+    });
+
+    it('fragment / 既定ポート違いは同じ URL とみなす (台帳の正規化)', async () => {
+      await hideAndDelete('old', 'https://a.jp/hidden-listing');
+
+      const created = await createResource(
+        input({ url: 'https://a.jp:443/hidden-listing#frag' }),
+        'variant',
+        2,
+      );
+
+      expect(created.ok && created.resource.hidden).toBe(true);
+    });
   });
 
   it('recordSettlement 保存 (会計記録)', async () => {

@@ -376,8 +376,10 @@ describe('packages/x402-mcp steward signer', () => {
 
     // 売り手は受領証ヘッダを返していない → verified ではない。
     expect(result.settlement).toBe('receipt_unavailable');
+    // B9: verified の意味 (discovery origin の署名鍵で領収書署名が検証できただけ = オンチェーン
+    // 証明ではない) をその場の 1 文に含める。
     expect(result.settlementNote).toBe(
-      'settlement: receipt_unavailable — treat unverified/receipt_unavailable as not proven paid',
+      'settlement: receipt_unavailable — verified only means the receipt signature is valid for the signer published by the discovery origin, not on-chain proof; treat unverified/receipt_unavailable as not proven paid',
     );
 
     const tool = await runtime.callTool('x402_pay', {

@@ -612,9 +612,10 @@ export function createToolRuntime({
 
   // 掟 15: 決済状態の真実は facilitator の verify/settle とオンチェーンのみ。x402_pay の結果を読む
   // LLM は `status: 200` を「支払い済み」と解釈しがちなので、SDK が返す settlement を **その場の
-  // 1 文で** 明示し、verified 以外を支払い証明として扱わせない。
+  // 1 文で** 明示し、verified 以外を支払い証明として扱わせない。B9: `verified` も「discovery
+  // origin が公開する署名鍵で領収書の署名が検証できた」だけで、オンチェーンの証明ではない。
   function settlementNote(settlement) {
-    return `settlement: ${settlement} — treat unverified/receipt_unavailable as not proven paid`;
+    return `settlement: ${settlement} — verified only means the receipt signature is valid for the signer published by the discovery origin, not on-chain proof; treat unverified/receipt_unavailable as not proven paid`;
   }
 
   async function x402Pay(args) {

@@ -342,20 +342,47 @@ describe('Eip3009Forwarder address parity', () => {
     );
   });
 
-  // サーバ側は env 由来なので「定数」は無い。SDK のリテラルを env に入れたとき
-  // configuredJpycForwarderFor が **その文字列のまま** 返る = checksum 形も含めて一致することを見る
-  // (非 checksum の allowlist は guards の `to` 比較を静かに落とす)。
-  it('サーバの forwarder 解決は SDK のリテラルをそのまま返す (checksum 形も一致)', async () => {
-    const forwarders = await sdkForwarders();
-    vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_POLYGON', forwarders['eip155:137']);
-    vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', forwarders['eip155:80002']);
+  // B11: 旧版はここで「SDK のリテラルを env に入れて、SDK のリテラルが返る」ことを見ており
+  // 恒真だった (SDK が間違っていても必ず pass する)。サーバ側の値は env 由来で「定数」が無いので、
+  // deploy の単一情報源 (contracts/README.md) から読んだアドレスを env に入れ、
+  // **サーバの解決結果が SDK リテラルと一致する**ことを見る = README・env 名・SDK の 3 者を繋ぐ。
+  //
+  // ⚠️ .env.local.example の forwarder 行は **値を持たない** (未 deploy = free モードが既定・
+  //    掟 9 の例示ファイルにデプロイ済アドレスは書かない方針)。そこから値は読めないので、
+  //    example からは **env 名が生きているか** だけをフェンスする (名前が変わると server は
+  //    静かに forwarder 未設定 = standard へ倒れる)。
+  const ENV_EXAMPLE = resolve(process.cwd(), '.env.local.example');
+
+  it('サーバの forwarder 解決は deploy 済みアドレス (README) を SDK リテラルとして返す', async () => {
+    const example = readFileSync(ENV_EXAMPLE, 'utf8');
+    for (const name of [
+      'NEXT_PUBLIC_JPYC_FORWARDER_POLYGON',
+      'NEXT_PUBLIC_JPYC_FORWARDER_AMOY',
+    ]) {
+      expect(
+        new RegExp(`^${name}=`, 'm').test(example),
+        `${name} が .env.local.example から消えている`,
+      ).toBe(true);
+    }
+
+    // env に入れるのは **README から読んだ** deploy 済アドレス (SDK の値ではない)。
+    vi.stubEnv(
+      'NEXT_PUBLIC_JPYC_FORWARDER_POLYGON',
+      deployedForwarder(polygon.id),
+    );
+    vi.stubEnv(
+      'NEXT_PUBLIC_JPYC_FORWARDER_AMOY',
+      deployedForwarder(polygonAmoy.id),
+    );
     vi.resetModules();
     const server = await import('@/lib/relay/forwarderConfig');
+    const forwarders = await sdkForwarders();
+    // 非 checksum の allowlist は guards の `to` 比較を静かに落とすので checksum 形まで見る。
     expect(server.configuredJpycForwarderFor(polygon.id)).toBe(
-      forwarders['eip155:137'],
+      getAddress(forwarders['eip155:137']),
     );
     expect(server.configuredJpycForwarderFor(polygonAmoy.id)).toBe(
-      forwarders['eip155:80002'],
+      getAddress(forwarders['eip155:80002']),
     );
   });
 });

@@ -3,6 +3,7 @@ import {
   probeForReverify,
   probeForReverifyDetailed,
   REVERIFY_AUTH_HIDE_THRESHOLD,
+  REVERIFY_IDENTIFYING_USER_AGENT,
   REVERIFY_IDENTITY_HEADER,
   REVERIFY_USER_AGENTS,
   reverifyUserAgent,
@@ -394,7 +395,9 @@ describe('cloaking (auth block) detection', () => {
     });
   });
 
-  it('UA を 1 時間ごとに交代させ、身元は専用ヘッダで常に名乗る', async () => {
+  // N-2: 身元ヘッダを毎回付けると cloaker は UA ではなくヘッダで選別すれば足り、UA 交代が
+  // 無意味になる。ヘッダは identifying UA の回だけ・ブラウザ UA の回は素の probe にする。
+  it('UA を 1 時間ごとに交代させ、身元ヘッダは identifying UA の回だけ付ける', async () => {
     const hour = 3_600_000;
     const seen = new Set(
       Array.from({ length: REVERIFY_USER_AGENTS.length }, (_, i) =>
@@ -405,19 +408,65 @@ describe('cloaking (auth block) detection', () => {
     expect(REVERIFY_USER_AGENTS.length).toBeGreaterThan(1);
     // 同一バケット内は同じ UA (1 run 内で揺れない)。
     expect(reverifyUserAgent(hour + 1)).toBe(reverifyUserAgent(hour + hour - 1));
+    expect(reverifyUserAgent(0)).toBe(REVERIFY_IDENTIFYING_USER_AGENT);
+    expect(reverifyUserAgent(hour)).not.toBe(REVERIFY_IDENTIFYING_USER_AGENT);
 
-    const fetchImpl = vi.fn(async () => new Response('', { status: 503 }));
-    await probeForReverify('https://x.test/paid', {
-      fetchImpl: fetchImpl as unknown as typeof fetch,
+    async function headersAt(probeAtMs: number) {
+      const fetchImpl = vi.fn(async () => new Response('', { status: 503 }));
+      await probeForReverify('https://x.test/paid', {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+        lookup: lookupPublic,
+        probeAtMs,
+      });
+      const [, init] = fetchImpl.mock.calls[0] as unknown as [
+        string,
+        { headers: Record<string, string> },
+      ];
+      return init.headers;
+    }
+
+    // identifying バケット: UA も身元ヘッダも名乗る (正直な運用者が allow-list できる)。
+    const identifying = await headersAt(0);
+    expect(identifying['user-agent']).toBe(REVERIFY_IDENTIFYING_USER_AGENT);
+    expect(identifying[REVERIFY_IDENTITY_HEADER]).toBe('1');
+
+    // ブラウザ UA バケット: 身元ヘッダを付けない (ヘッダで選別する cloaker に見えない)。
+    const browserLike = await headersAt(hour);
+    expect(browserLike['user-agent']).toBe(reverifyUserAgent(hour));
+    expect(browserLike[REVERIFY_IDENTITY_HEADER]).toBeUndefined();
+  });
+
+  // N-3: 別ホストへの転送だけを block にする。apex→www / http→https の 301 まで block にすると、
+  // 正当な出品が 6 時間で hidden になり、hidden は monotone なので dual-rail の USDC 購入が
+  // 404 になる (lib/x402/dualRailRelay.ts の resolveTarget)。
+  // ⚠️ この分類は fetchSsrfSafe の redirect:'manual' に依存する — undici が 3xx を追跡せず
+  //    そのまま返すからこそ Location を読める。追跡モードに変えると本判定は死ぬ。
+  it.each([
+    ['https://www.x.test/paid', 'neutral'],
+    ['https://x.test/paid', 'neutral'],
+    ['/login', 'neutral'],
+    ['https://elsewhere.test/blocked', 'block'],
+    ['https://x.test.evil.example/paid', 'block'],
+  ] as const)('301 Location %s → authClass %s', async (location, authClass) => {
+    // 登録 URL は apex の http。www 付与・https 昇格・相対はいずれも正当な正規化。
+    const probe = await probeForReverifyDetailed('http://x.test/paid', {
+      fetchImpl: (async () =>
+        new Response('', { status: 301, headers: { location } })) as typeof fetch,
       lookup: lookupPublic,
-      probeAtMs: hour,
     });
-    const [, init] = fetchImpl.mock.calls[0] as unknown as [
-      string,
-      { headers: Record<string, string> },
-    ];
-    expect(init.headers['user-agent']).toBe(reverifyUserAgent(hour));
-    expect(init.headers[REVERIFY_IDENTITY_HEADER]).toBe('1');
+    expect(probe).toEqual({ verdict: 'transient', authClass });
+  });
+
+  it('www 付きで登録された URL の apex への 301 も neutral', async () => {
+    const probe = await probeForReverifyDetailed('https://www.x.test/paid', {
+      fetchImpl: (async () =>
+        new Response('', {
+          status: 308,
+          headers: { location: 'https://x.test/paid' },
+        })) as typeof fetch,
+      lookup: lookupPublic,
+    });
+    expect(probe.authClass).toBe('neutral');
   });
 });
 

@@ -1,3 +1,9 @@
+// ⚠️ このファイルは **Lua を実行しない**。vi.mock('@/lib/kv') の kvEval が CAS_*_REVERIFY の
+// セマンティクスを TypeScript で再実装しているだけなので、Lua 文字列そのものの構文誤り・
+// KEYS/ARGV のズレ・redis.call の綴り間違いはここでは捕まらない (本物の Redis / Upstash に当てて
+// 初めて出る)。Lua を実際に走らせる runner (embedded Redis や lua vm の依存追加) を入れるかは
+// plans/full-review-2026-09-02.md の「Lua-runner の判断」に記録してある — **依存は足さない**方針の
+// 現状では、Lua を変えたら必ず script 文字列と本モックの両方を手で突き合わせること。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const store = vi.hoisted(() => new Map<string, string>());
@@ -70,6 +76,10 @@ vi.mock('@/lib/kv', () => ({
       probedUrl: args[0],
     };
     store.set(keys[0], JSON.stringify(record));
+    // N-5: external の script だけが hidden URL 台帳 (KEYS[2]) を立てる。
+    if (hidden && script.includes("redis.call('SET',KEYS[2]")) {
+      store.set(keys[1], args[5]);
+    }
     return {
       ok: true as const,
       value: JSON.stringify({ failures, authFailures, before, after: hidden }),
@@ -84,6 +94,7 @@ import {
   readExternalReverifyTarget,
 } from '@/lib/x402/reverify';
 import { resourceKey } from '@/lib/x402/registry';
+import { hiddenUrlLedgerKey } from '@/lib/x402/hiddenUrlLedger';
 
 const URL = 'https://api.example.jp/paid';
 
@@ -126,6 +137,51 @@ describe('external reverify CAS', () => {
     expect(JSON.parse(store.get(resourceKey('r1'))!)).not.toHaveProperty(
       'verification',
     );
+  });
+
+  // N-5: hidden にした瞬間に URL 台帳を立てる (delete → 同一 URL 再登録で洗い流させない)。
+  // first-party (path) 側は再登録できないので台帳を書かない。
+  it('hidden にした URL は台帳に載り、hidden でない間は載らない', async () => {
+    seed({
+      verification: {
+        failures: 2,
+        lastCheckedAt: 'old',
+        lastRunId: '2026071323',
+        probedUrl: URL,
+      },
+    });
+    const ledgerKey = hiddenUrlLedgerKey(URL);
+
+    await applyExternalReverify(
+      'r1',
+      URL,
+      'transient',
+      '2026-07-14T00:00:00.000Z',
+      '2026071400',
+    );
+    expect(store.get(ledgerKey)).toBeUndefined();
+
+    await applyExternalReverify(
+      'r1',
+      URL,
+      'violation_gone',
+      '2026-07-14T01:00:00.000Z',
+      '2026071401',
+    );
+    expect(store.get(ledgerKey)).toBe('1');
+  });
+
+  it('first-party の hidden は URL 台帳を書かない', async () => {
+    await applyFirstPartyReverify(
+      '/api/paid/demo',
+      'https://open-pay.jp/api/paid/demo',
+      'violation_gone',
+      '2026-07-14T00:00:00.000Z',
+      '2026071400',
+    );
+    expect(
+      [...store.keys()].filter((key) => key.startsWith('x402:hidden-url:')),
+    ).toEqual([]);
   });
 
   it('probe 後に URL が変わった record へは旧 URL の結果を書かない', async () => {

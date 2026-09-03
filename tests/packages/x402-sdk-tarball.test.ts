@@ -132,7 +132,9 @@ if (typeof createFileSpendStore !== 'function') process.exit(4);
   MAX_SUPPORTED_TIMEOUT_SECONDS,
   REASONS,
   RECEIVE_WITH_AUTHORIZATION_TYPES,
+  SETTLEMENT,
   SIGNER_MODES,
+  SPEND_LOCK_STALE_MS,
   SUPPORTED_JPYC_ASSETS,
   SUPPORTED_JPYC_FORWARDERS,
   SUPPORTED_NETWORKS,
@@ -180,8 +182,10 @@ if (typeof createFileSpendStore !== 'function') process.exit(4);
   type JpycGatePaymentResponse,
   type OpenPayClient,
   type PaymentLookup,
+  type PaymentResult,
   type QuoteResult,
   type ReceiptSignerResolver,
+  type SettlementStatus,
   type SpendReservation,
   type SpendReservationResult,
   type SpendStore,
@@ -207,6 +211,14 @@ const spendReservationResult: SpendReservationResult = {
   ok: true,
   totalAtomic: '1',
 };
+const lockedReservationResult: SpendReservationResult = {
+  ok: false,
+  reason: 'unavailable',
+  detail: 'spend store lock unavailable: /tmp/spend.json.lock (held for 3s)',
+};
+const settlementStatus: SettlementStatus = SETTLEMENT.unavailable;
+// settlement is optional so a result built before the field existed still typechecks.
+const legacyPaymentResult: PaymentResult = { status: 200, body: null, receipt: null };
 const receiptSignerResolver: ReceiptSignerResolver = createReceiptSignerResolver({
   discoveryUrl: 'https://open-pay.jp/api/discovery',
 });
@@ -239,8 +251,12 @@ void fileSpendStore;
 void paymentLookup;
 void spendReservation;
 void spendReservationResult;
+void lockedReservationResult;
+void settlementStatus;
+void legacyPaymentResult;
 void receiptSignerResolver;
 void [
+  SETTLEMENT, SPEND_LOCK_STALE_MS,
   CATALOG_CACHE_MS, DEFAULT_ALLOWED_HOSTS, DEFAULT_CATALOG_TRUST,
   DEFAULT_DISCOVERY_URL, DEFAULT_MAX_PER_CALL_JPYC, DEFAULT_MAX_SESSION_JPYC,
   DEFAULT_MAX_TIMEOUT_SECONDS, DEFAULT_PAYMENT_FETCH_TIMEOUT_MS, JPYC_DECIMALS,

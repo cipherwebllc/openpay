@@ -64,6 +64,26 @@ function supportsAtomicFileUpdates(fileSystem) {
   );
 }
 
+// stale takeover は「古さの判定 (stat)」と「奪取の原子化 (rename)」の両方を要する。
+function supportsStaleTakeover(fileSystem) {
+  return (
+    typeof fileSystem.stat === 'function' && typeof fileSystem.rename === 'function'
+  );
+}
+
+let staleTakeoverWarned = false;
+
+// 掟13: takeover が無効な fsImpl を **黙って** 素通りさせない。無効なら「SIGKILL で残った
+// ロックが予算つき支払いを永久に止める」状態に戻るので、運用者が気づけるよう一度だけ警告する。
+function warnStaleTakeoverUnavailable() {
+  if (staleTakeoverWarned) return;
+  staleTakeoverWarned = true;
+  console.warn(
+    'openpay-x402-sdk: fsImpl lacks stat/rename — stale spend-lock takeover is disabled; ' +
+      'a lock left behind by a killed process will block budgeted payments until it is removed.',
+  );
+}
+
 export function createFileSpendStore({ path, fsImpl } = {}) {
   let runtimePromise;
 
@@ -125,7 +145,6 @@ export function createFileSpendStore({ path, fsImpl } = {}) {
   }
 
   async function lockAgeMs(fileSystem, lockPath) {
-    if (typeof fileSystem.stat !== 'function') return null;
     try {
       const stats = await fileSystem.stat(lockPath);
       const modified = Number(stats?.mtimeMs ?? stats?.mtime);
@@ -150,8 +169,20 @@ export function createFileSpendStore({ path, fsImpl } = {}) {
       }
     }
 
-    // Stale takeover: unlink once and retry a single open. A fresh lock is left alone, so a live
-    // holder is never displaced; only a lock that outlived the 1s contention window is removed.
+    // Stale takeover. A fresh lock is left alone, so a live holder is never displaced; only a lock
+    // that outlived the 1s contention window is taken over.
+    //
+    // ⚠️ The takeover MUST NOT unlink lockPath. `unlink(lockPath)` then `open(lockPath,'wx')` lets
+    // two processes that both saw the same stale lock interleave as
+    //   A: unlink → open (holds the lock)
+    //   B: unlink (deletes A's *fresh* lock) → open (succeeds)
+    // so both run the critical section at once and one reservation is lost. `rename` is atomic and
+    // exactly one process can move the stale file away, so ownership of the takeover is proven
+    // before lockPath is recreated.
+    if (!supportsStaleTakeover(fileSystem)) {
+      warnStaleTakeoverUnavailable();
+      throw lockUnavailable(lockPath, 'held (stale takeover unavailable)');
+    }
     const age = await lockAgeMs(fileSystem, lockPath);
     if (age === null || age < SPEND_LOCK_STALE_MS) {
       throw lockUnavailable(
@@ -159,19 +190,35 @@ export function createFileSpendStore({ path, fsImpl } = {}) {
         age === null ? 'held' : `held for ${Math.round(age / 1000)}s`,
       );
     }
+    const stalePath = `${lockPath}.stale-${process.pid}-${randomUUID()}`;
     try {
-      await fileSystem.unlink(lockPath);
+      await fileSystem.rename(lockPath, stalePath);
     } catch (error) {
-      if (!isMissingFile(error)) throw lockUnavailable(lockPath, 'stale, unlink failed');
+      // ENOENT = another process won the same takeover and its lock is now fresh. Report the
+      // contention instead of guessing; the caller retries from the normal acquisition loop.
+      throw lockUnavailable(
+        lockPath,
+        isMissingFile(error)
+          ? 'reacquired by another process'
+          : 'stale, takeover failed',
+      );
     }
+    let handle;
     try {
-      const handle = await fileSystem.open(lockPath, 'wx');
-      await annotateLock(handle, lockPath);
-      return handle;
+      handle = await fileSystem.open(lockPath, 'wx');
     } catch (error) {
       if (!isLockHeld(error)) throw error;
+      throw lockUnavailable(lockPath, 'reacquired by another process');
+    } finally {
+      try {
+        await fileSystem.unlink(stalePath);
+      } catch {
+        // The stale file is already out of the lock path, so a leftover copy cannot hand the
+        // critical section to anyone; only disk tidiness suffers.
+      }
     }
-    throw lockUnavailable(lockPath, 'reacquired by another process');
+    await annotateLock(handle, lockPath);
+    return handle;
   }
 
   async function withLock(operation) {

@@ -75,6 +75,11 @@ export type SpendReservationResult =
       ok: false;
       reason: 'limit_exceeded' | 'unavailable';
       totalAtomic?: string;
+      /**
+       * Operator-facing hint for `unavailable`, present only when the block came from the
+       * lock file (it names the lock path). Never parse it; it is diagnostic text.
+       */
+      detail?: string;
     };
 
 export type PaymentLookup = (
@@ -97,8 +102,20 @@ export interface FileSpendStoreOptions {
     ): Promise<{ close(): Promise<unknown> }>;
     rename?(from: string, to: string): Promise<unknown>;
     unlink?(path: string): Promise<unknown>;
+    /**
+     * Required (together with `rename`) for taking over a lock left behind by a killed
+     * process. When either is missing the takeover is disabled and the SDK warns once —
+     * a stale lock then blocks budgeted payments until it is removed by hand.
+     */
+    stat?(path: string): Promise<{ mtimeMs?: number; mtime?: Date | number }>;
   };
 }
+
+/**
+ * A spend lock older than this cannot belong to a live holder, so it may be taken over.
+ * Exported so operators and tests can reason about the same window as the store.
+ */
+export const SPEND_LOCK_STALE_MS: number;
 
 interface ClientCommonOptions {
   maxPerCallJpyc?: JpycAmount;
@@ -251,11 +268,22 @@ export type QuoteResult = GuardedQuote | InvalidChallengeQuote;
  */
 export type SettlementStatus = 'verified' | 'unverified' | 'receipt_unavailable';
 
+/** The `SettlementStatus` values as a runtime object (`unavailable` = `receipt_unavailable`). */
+export const SETTLEMENT: {
+  readonly verified: 'verified';
+  readonly unverified: 'unverified';
+  readonly unavailable: 'receipt_unavailable';
+};
+
 export interface PaymentResult {
   status: number;
   body: unknown;
   receipt: unknown;
-  settlement: SettlementStatus;
+  /**
+   * Optional so objects built before this field existed stay source-compatible. Absent must be
+   * read the same way as `receipt_unavailable`: no settlement was proven.
+   */
+  settlement?: SettlementStatus;
 }
 
 export interface OpenPayClient {

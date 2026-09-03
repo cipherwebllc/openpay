@@ -53,13 +53,15 @@ vi.mock('@/lib/kv', () => ({
       const cap = Number(args[2]);
       const merchantList = store.lists.get(keys[2]) ?? [];
       if (merchantList.length >= cap) return { ok: true as const, value: -2 };
-      store.kv.set(keys[0], args[0]);
+      // N-5: hidden URL 台帳 (KEYS[4]) に印があれば hidden 済 JSON (ARGV[4]) で作る。
+      const inherited = store.kv.has(keys[3]);
+      store.kv.set(keys[0], inherited ? args[3] : args[0]);
       const idx = store.lists.get(keys[1]) ?? [];
       idx.unshift(args[1]);
       store.lists.set(keys[1], idx);
       merchantList.unshift(args[1]);
       store.lists.set(keys[2], merchantList);
-      return { ok: true as const, value: 1 };
+      return { ok: true as const, value: inherited ? 3 : 1 };
     }
     const raw = store.kv.get(keys[0]);
     if (raw === undefined) return { ok: true as const, value: -1 };
@@ -90,6 +92,10 @@ vi.mock('@/lib/kv', () => ({
       const enc = JSON.stringify(o);
       store.kv.set(keys[0], enc);
       return { ok: true as const, value: enc };
+    }
+    // N-5: hidden 済の削除だけ URL 台帳 (KEYS[3]) に印を残す。
+    if (script.includes("if o.hidden==true then redis.call('SET',KEYS[3]") && o.hidden === true) {
+      store.kv.set(keys[2], args[2]);
     }
     if (o.active === false) return { ok: true as const, value: 2 };
     o.active = false;

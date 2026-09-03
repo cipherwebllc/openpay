@@ -14,6 +14,15 @@ import {
   type X402Resource,
   type X402Verification,
 } from '@/lib/x402/registry';
+import {
+  hiddenUrlLedgerKey,
+  HIDDEN_URL_LEDGER_TTL_SEC,
+  HIDDEN_URL_LEDGER_VALUE,
+} from '@/lib/x402/hiddenUrlLedger';
+import {
+  REVERIFY_AUTH_HIDE_THRESHOLD,
+  REVERIFY_HIDE_THRESHOLD,
+} from '@/lib/x402/reverifyThresholds';
 
 export type ReverifyVerdict =
   | 'ok_402_openpay'
@@ -24,8 +33,8 @@ export type ReverifyVerdict =
 
 // 契約判定 (verdict) とは独立した「こちらが締め出されているか」の軸 (B8)。
 //   'clear'   = 素の 200/402 に到達した = 締め出されていない → authFailures を 0 に戻す
-//   'block'   = 401/403・別 origin への redirect = この UA/IP を選別して拒否している疑い
-//   'neutral' = 429/5xx・DNS/接続失敗・同一 origin redirect・challenge = どちらとも確定できない
+//   'block'   = 401/403・別ホストへの redirect = この UA/IP を選別して拒否している疑い
+//   'neutral' = 429/5xx・DNS/接続失敗・同一ホスト/正規化 redirect・challenge = どちらとも確定できない
 export type ReverifyAuthClass = 'clear' | 'block' | 'neutral';
 
 export type ReverifyProbe = {
@@ -78,11 +87,9 @@ export const REVERIFY_CURSOR_KEY = 'reverify:cursor';
 export const REVERIFY_LOCK_KEY = 'reverify:lock';
 export const REVERIFY_BATCH_LIMIT = 25;
 export const REVERIFY_CONCURRENCY = 5;
-// 確定違反の連続回数で hidden にする閾値 (従来どおり 3)。
-export const REVERIFY_HIDE_THRESHOLD = 3;
-// 401/403/別 origin redirect の連続回数で hidden にする閾値 (B8)。cron は毎時なので 6 = 約 6 時間。
-// 契約違反 (3) より緩いのは、正当な運用でも一時的に 403 を返す構成 (WAF の誤検知等) があるため。
-export const REVERIFY_AUTH_HIDE_THRESHOLD = 6;
+// hidden の閾値は client component (出品者向けの「要対応」表示) とも共有するため
+// server 依存を持たない ./reverifyThresholds に置き、ここから再 export する。
+export { REVERIFY_AUTH_HIDE_THRESHOLD, REVERIFY_HIDE_THRESHOLD };
 // 同一 offset で storage エラーが連続したら quarantine して cursor を進める閾値 (B12)。
 export const REVERIFY_STORAGE_ERROR_QUARANTINE = 3;
 const REVERIFY_INDEX_CAP = 500;
@@ -91,15 +98,30 @@ const REVERIFY_UA_ROTATION_MS = 3_600_000; // 1 時間 = cron の 1 周期
 
 // 再検証 probe が名乗る User-Agent の集合 (B8)。固定 UA だけだと、200 を誰にでも返しつつ
 // この UA にだけ 403/302 を返す cloaking 出品が「transient のまま永久掲載」になる。1 時間ごとに
-// 素の identifying UA と一般的なブラウザ UA を交代させ、UA 選別を成立させない。
-// **身元は UA ではなく専用ヘッダ (REVERIFY_IDENTITY_HEADER) で常に名乗る**ので、正直な運用者は
-// ブラウザ UA の周回もヘッダで allow-list できる。
+// 素の identifying UA と一般的なブラウザ UA を交代させる。
+// ⚠️ 交代が無効化できるのは **素朴な UA ブロックだけ**。IP レンジ・TLS 指紋・行動での選別は
+// これでは崩せない (そこまでやる出品は authFailures の閾値で最終的に hidden になる)。
 export const REVERIFY_USER_AGENTS: readonly string[] = [
   'OpenPay-x402-reverify/1.0',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
 ];
 
+// 名乗る側の UA。この UA の回だけ身元ヘッダを付ける。
+export const REVERIFY_IDENTIFYING_USER_AGENT = REVERIFY_USER_AGENTS[0];
+
+// N-2: 身元ヘッダを **毎回** 付けると、cloaker は UA ではなくヘッダで選別すれば足りるので
+// UA 交代が無意味になる。ヘッダは identifying UA の回にだけ付け、ブラウザ UA の回は素の
+// ブラウザと見分けがつかない probe にする。正直な運用者は identifying の回をヘッダで
+// allow-list でき、選別する出品は「ブラウザ UA の回」で必ず露見する。
 export const REVERIFY_IDENTITY_HEADER = 'x-openpay-reverify';
+
+export function reverifyIdentityHeaders(
+  userAgent: string,
+): Record<string, string> {
+  return userAgent === REVERIFY_IDENTIFYING_USER_AGENT
+    ? { [REVERIFY_IDENTITY_HEADER]: '1' }
+    : {};
+}
 
 // 1 時間バケットで UA を選ぶ。同一 run 内は全対象が同じ UA (原因切り分けが容易)、run をまたぐと
 // 交代する (cloaking が 1 つの UA を弾き続けても 6 連続 auth block には別 UA の回も混ざる)。
@@ -137,17 +159,37 @@ function parsedV2Accepts(res: Response): unknown[] | null {
   }
 }
 
-// 3xx の Location が別 origin を指すか。redirect:'manual' で追跡しないため、ここでしか
-// 「別ドメインへ飛ばして締め出す」cloaking を観測できない。相対 Location は同一 origin。
-function redirectsToForeignOrigin(res: Response, url: string): boolean {
+function withoutWww(hostname: string): string {
+  return hostname.startsWith('www.') ? hostname.slice(4) : hostname;
+}
+
+// 3xx の Location を「別ドメインへ飛ばして締め出している」か「正当な正規化」かに分ける。
+// fetchSsrfSafe は redirect:'manual' なので undici は 3xx を **そのまま** 返す (追跡しない)。
+// ここでしか cloaking の転送を観測できない代わりに、正当な 301 まで block にすると実害が出る:
+//   apex→www / 旧ドメイン→新ドメイン / http→https の 301 を返す普通の出品が 6 時間で hidden に
+//   なり、hidden は monotone (成功 probe まで解除されない) なので dual-rail の USDC 購入が
+//   resolveTarget (lib/x402/dualRailRelay.ts) で 404 になる。
+// よって block は **別ホストへ飛ばす場合だけ**。次は neutral (どちらとも確定しない):
+//   (a) 相対 Location (= 同一ホスト)
+//   (b) 同一ホストの http→https 昇格 (origin は変わるがホストは同じ)
+//   (c) www. の付与/除去 (apex ⇄ www)
+function redirectAuthClass(res: Response, url: string): ReverifyAuthClass {
   const location = res.headers.get('location');
-  if (!location) return false;
+  if (!location) return 'neutral';
+  let source: URL;
+  let target: URL;
   try {
-    return new URL(location, url).origin !== new URL(url).origin;
+    source = new URL(url);
+    target = new URL(location, url);
   } catch {
     // Location が URL として解釈できない = 到達先を確定できない。block と決めつけない。
-    return false;
+    return 'neutral';
   }
+  const from = source.hostname.toLowerCase();
+  const to = target.hostname.toLowerCase();
+  if (to === from) return 'neutral'; // (a) (b)
+  if (withoutWww(to) === withoutWww(from)) return 'neutral'; // (c)
+  return 'block';
 }
 
 // 定期再検証専用 probe。登録時 moderation と同じ SSRF-safe fetch を使う一方、確定的契約違反と
@@ -157,11 +199,15 @@ export async function probeForReverifyDetailed(
   url: string,
   opts: SsrfSafeFetchOptions & { probeAtMs?: number } = {},
 ): Promise<ReverifyProbe> {
+  const userAgent = opts.userAgent ?? reverifyUserAgent(opts.probeAtMs);
   const res = await fetchSsrfSafe(url, {
     ...opts,
     timeoutMs: opts.timeoutMs ?? REVERIFY_TIMEOUT_MS,
-    userAgent: opts.userAgent ?? reverifyUserAgent(opts.probeAtMs),
-    extraHeaders: { [REVERIFY_IDENTITY_HEADER]: '1', ...(opts.extraHeaders ?? {}) },
+    userAgent,
+    extraHeaders: {
+      ...reverifyIdentityHeaders(userAgent),
+      ...(opts.extraHeaders ?? {}),
+    },
   });
   if (!res) return { verdict: 'transient', authClass: 'neutral' };
 
@@ -172,10 +218,7 @@ export async function probeForReverifyDetailed(
     return { verdict: 'transient', authClass: 'block' };
   }
   if (res.status >= 300 && res.status < 400) {
-    return {
-      verdict: 'transient',
-      authClass: redirectsToForeignOrigin(res, url) ? 'block' : 'neutral',
-    };
+    return { verdict: 'transient', authClass: redirectAuthClass(res, url) };
   }
   if (res.status === 402) {
     return { verdict: await verdictFor402(res), authClass: 'clear' };
@@ -410,21 +453,33 @@ const REVERIFY_COUNTER_TRANSITION =
   'local v={lastCheckedAt=ARGV[2],failures=failures,lastRunId=ARGV[3],probedUrl=ARGV[1]}; ' +
   'if authFailures>0 then v.authFailures=authFailures end; ' +
   'if lastOk then v.lastOkAt=lastOk end; o.verification=v; o.hidden=hidden; ' +
-  "redis.call('SET',KEYS[1],cjson.encode(o)); " +
+  "redis.call('SET',KEYS[1],cjson.encode(o)); ";
+
+const REVERIFY_TRANSITION_RESULT =
   'return cjson.encode({failures=failures,authFailures=authFailures,before=before,after=hidden})';
+
+// N-5: hidden の間は URL 台帳 (KEYS[2]) を TTL つきで立て直す。DELETE → 同一 URL で再登録して
+// hidden を洗い流す経路を塞ぐ (createResource が台帳を見て hidden を継承する)。hidden の観測ごとに
+// TTL を延ばすので、隠されたままの掲載は台帳も生き続ける。first-party (path) は再登録できないので
+// この節は external 側にだけ足す。
+const REVERIFY_HIDDEN_URL_LEDGER =
+  "if hidden then redis.call('SET',KEYS[2],ARGV[6],'EX',ARGV[7]) end; ";
 
 const CAS_EXTERNAL_REVERIFY =
   "local c=redis.call('GET',KEYS[1]); if not c then return -1 end; " +
   'local ok,o=pcall(cjson.decode,c); if not ok or type(o)~=\'table\' then return -2 end; ' +
   'if o.active~=true then return 0 end; if o.url~=ARGV[1] then return -3 end; ' +
   'if type(o.verification)==\'table\' and o.verification.lastRunId==ARGV[3] then return -4 end; ' +
-  REVERIFY_COUNTER_TRANSITION;
+  REVERIFY_COUNTER_TRANSITION +
+  REVERIFY_HIDDEN_URL_LEDGER +
+  REVERIFY_TRANSITION_RESULT;
 
 const CAS_FIRST_PARTY_REVERIFY =
   "local c=redis.call('GET',KEYS[1]); local o={}; if c then " +
   'local ok,decoded=pcall(cjson.decode,c); if not ok or type(decoded)~=\'table\' then return -2 end; o=decoded; end; ' +
   'if type(o.verification)==\'table\' and o.verification.lastRunId==ARGV[3] then return -4 end; ' +
-  REVERIFY_COUNTER_TRANSITION;
+  REVERIFY_COUNTER_TRANSITION +
+  REVERIFY_TRANSITION_RESULT;
 
 function verdictClass(verdict: ReverifyVerdict): 'ok' | 'violation' | 'transient' {
   if (verdict === 'ok_402_openpay') return 'ok';
@@ -477,8 +532,16 @@ export async function applyExternalReverify(
 ): Promise<ReverifyApplyResult> {
   const applied = await kvEval<number | string>(
     CAS_EXTERNAL_REVERIFY,
-    [resourceKey(id)],
-    [probedUrl, checkedAt, runId, verdictClass(verdict), authClass],
+    [resourceKey(id), hiddenUrlLedgerKey(probedUrl)],
+    [
+      probedUrl,
+      checkedAt,
+      runId,
+      verdictClass(verdict),
+      authClass,
+      HIDDEN_URL_LEDGER_VALUE,
+      String(HIDDEN_URL_LEDGER_TTL_SEC),
+    ],
   );
   return applied.ok
     ? parseApplyResult(applied.value)

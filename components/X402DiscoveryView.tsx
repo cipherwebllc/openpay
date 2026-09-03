@@ -36,6 +36,7 @@ import { Field } from '@/components/Field';
 import { env } from '@/lib/env';
 import { shortAddress } from '@/lib/format';
 import { AGENTIC_MARKET_URL, type UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
+import { REVERIFY_AUTH_HIDE_THRESHOLD } from '@/lib/x402/reverifyThresholds';
 import type { MonitorFreshness } from '@/lib/directory/monitorFreshness';
 
 // カテゴリー文字列 → 視覚アイコン (api / data / mcp / content)。未知は汎用 (Code2)。
@@ -96,9 +97,19 @@ type OwnedResource = {
   license?: string;
   paywallSnippet?: string;
   hidden?: boolean;
+  /** 定期再検証の状態。authFailures は 401/403/別ドメイン転送の連続回数 (欠落 = 0)。 */
+  verification?: { authFailures?: number };
   /** dual-rail の USDC/Base 面 (任意)。 */
   usdc?: { payTo: string; priceUsd: string; serviceName?: string };
 };
+
+// hidden の理由が「ゲートを確認できなかった」ではなく「再検証を締め出された」ケース。
+// ゲートのスニペットを見せても直らない (出品側が probe を通す必要がある) ので文面を分ける。
+function isAuthBlockedHide(resource: OwnedResource): boolean {
+  return (
+    (resource.verification?.authFailures ?? 0) >= REVERIFY_AUTH_HIDE_THRESHOLD
+  );
+}
 
 const EMPTY_FORM = {
   url: '',
@@ -1121,24 +1132,29 @@ export function X402DiscoveryView({
                     )}
                   </div>
                 )}
-                {r.hidden === true && r.paywallSnippet ? (
+                {r.hidden === true && (isAuthBlockedHide(r) || r.paywallSnippet) ? (
                   <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
                     <p className="inline-flex items-center gap-1.5 rounded-full bg-amber-200 px-2.5 py-1 text-xs font-bold text-amber-900">
                       <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
                       {t('requiresActionBadge')}
                     </p>
                     <p className="mt-2 text-sm leading-relaxed text-amber-900">
-                      {t('requiresActionBody')}
+                      {isAuthBlockedHide(r)
+                        ? t('requiresActionAuthBody')
+                        : t('requiresActionBody')}
                     </p>
-                    <PaywallSnippet
-                      snippet={r.paywallSnippet}
-                      copyKey={`repair-snippet-${r.id}`}
-                      copied={copiedKey === `repair-snippet-${r.id}`}
-                      onCopy={copyText}
-                      title={t('snippetTitle')}
-                      copyLabel={t('copy')}
-                      copiedLabel={t('copied')}
-                    />
+                    {/* 締め出しが理由のときはゲートのスニペットを出しても直らない。 */}
+                    {!isAuthBlockedHide(r) && r.paywallSnippet ? (
+                      <PaywallSnippet
+                        snippet={r.paywallSnippet}
+                        copyKey={`repair-snippet-${r.id}`}
+                        copied={copiedKey === `repair-snippet-${r.id}`}
+                        onCopy={copyText}
+                        title={t('snippetTitle')}
+                        copyLabel={t('copy')}
+                        copiedLabel={t('copied')}
+                      />
+                    ) : null}
                   </div>
                 ) : null}
                 {snippetOpenId === r.id && r.paywallSnippet ? (
