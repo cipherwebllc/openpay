@@ -7,8 +7,10 @@ import 'server-only';
 // `value >= maxAmountRequired` しか見ず、resource/description は署名にも facilitator の
 // 判定にも入らない (lib/x402/v2.ts toV2Accept は resource を落とす)。settle の原子性は
 // 2 本目の**課金**だけを止めるが、そのときには 2 本目のコンテンツ生成は既に終わっている。
-// そこで verify の前に「payment identity → resource + canonical query」を KV へ原子的に
-// 束縛し、別束縛での再利用だけを弾く。
+// そこで **verify が isValid:true を返した後・content 生成の前**に「payment identity →
+// resource + canonical query」を KV へ原子的に束縛し、別束縛での再利用だけを弾く。
+// (verify の前に置くと、署名を検証していない誰でも KV に 30 分キーを作れてしまう。
+// first-party JPYC 経路 app/api/paid/_shared.ts の claim 位置と同じ。)
 //
 // first-party JPYC 経路の claimPaymentRedelivery (lib/x402/paymentRedelivery.ts) と同じ
 // 意味論 (同一束縛 = 再配信を許す / 別束縛 = 拒否) を、vanilla の authorization 形
@@ -19,15 +21,33 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 import { kvEval, kvSetNxGet } from '@/lib/kv';
 import { logger } from '@/lib/logger';
-import {
-  PAYMENT_REDELIVERY_TTL_SEC,
-  paymentSignatureFingerprint,
-} from '@/lib/x402/paymentRedelivery';
+import { paymentSignatureFingerprint } from '@/lib/x402/paymentRedelivery';
 
 const RECORD_VERSION = 1;
+/**
+ * 読み出し側だけのガード。record は sha256 束縛 + fingerprint の固定長になったので書き込みが
+ * ここを超えることは無い。KV から異常に大きい値が返った場合 (別用途キーの衝突・破損) を
+ * 「一致しない」として扱い、巨大文字列の JSON.parse を避ける。
+ */
 const MAX_RECORD_BYTES = 4 * 1024;
+/**
+ * claim の TTL。値は PAYMENT_REDELIVERY_TTL_SEC と同じ 30 分だが**別定数**にする —
+ * 再配信 cache のチューニング (短縮) が、二重解錠を防ぐ claim の有効窓を巻き添えで
+ * 縮める波及を断つため (掟 13)。
+ */
+export const VANILLA_CLAIM_TTL_SEC = 30 * 60;
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 const NONCE_PATTERN = /^0x[0-9a-fA-F]{64}$/;
+
+// KV 未構成 (fail-open) の warn はプロセスに 1 回だけ。有料 GET ごとにログを吐いて
+// 本番ログを埋めるのを避ける。
+let warnedUnconfigured = false;
+
+function warnUnconfiguredOnce(): void {
+  if (warnedUnconfigured) return;
+  warnedUnconfigured = true;
+  logger.warn('x402.vanilla.claim_unconfigured');
+}
 
 export type VanillaResourceClaimIdentity = {
   /** KV key。authorization (network + from + nonce) から導出し、署名の malleability に依存しない。 */
@@ -48,7 +68,7 @@ export type VanillaResourceReleaseResult =
   | { kind: 'not-owner' }
   | { kind: 'unavailable' };
 
-// 自分が置いた record (version + binding + credential が完全一致) のときだけ DEL する。
+// 自分が置いた record (version + bindingHash + credential が完全一致) のときだけ DEL する。
 // 遅れて返った別 request が、後から張られた別束縛の claim を消す波及を断つ。
 const RELEASE_VANILLA_CLAIM = `
 local current = redis.call('GET', KEYS[1])
@@ -60,7 +80,7 @@ local decodedOk, decoded = pcall(cjson.decode, current)
 if not decodedOk or type(decoded) ~= 'table' then
   return -1
 end
-if decoded.version ~= 1 or decoded.binding ~= ARGV[1] or
+if decoded.version ~= 1 or decoded.bindingHash ~= ARGV[1] or
     decoded.credential ~= ARGV[2] then
   return -1
 end
@@ -134,13 +154,28 @@ export function vanillaPaymentIdentity(
   return { key: `x402:vanilla:claim:${digest}`, credential };
 }
 
-function serialize(binding: string, credential: string): string {
-  return JSON.stringify({ version: RECORD_VERSION, binding, credential });
+/**
+ * 束縛は**生文字列でなく sha256 (hex) で保存する**。断つ波及: query は長さ無制限なので、
+ * 生の束縛を持つ record は 4KB 超の query で MAX_RECORD_BYTES を越え、claim が
+ * 'unavailable' → fail-open となり **claim ごと無効化できてしまう** (ゴミ query を足した
+ * 1 通の authorization で複数 resource が解錠できる)。hash なら record は常に固定長。
+ * 副作用: 生 query (検索語・アドレス等) は KV に残らない — 照合は hash 一致で足りる。
+ */
+function bindingHash(binding: string): string {
+  return createHash('sha256').update(binding).digest('hex');
+}
+
+function serialize(bindingDigest: string, credential: string): string {
+  return JSON.stringify({
+    version: RECORD_VERSION,
+    bindingHash: bindingDigest,
+    credential,
+  });
 }
 
 function storedMatches(
   raw: string,
-  binding: string,
+  bindingDigest: string,
   credential: string,
 ): boolean {
   if (Buffer.byteLength(raw, 'utf8') > MAX_RECORD_BYTES) return false;
@@ -153,7 +188,7 @@ function storedMatches(
   return (
     isRecord(value) &&
     value.version === RECORD_VERSION &&
-    value.binding === binding &&
+    value.bindingHash === bindingDigest &&
     value.credential === credential
   );
 }
@@ -166,25 +201,24 @@ export async function claimVanillaResource(input: {
   identity: VanillaResourceClaimIdentity;
   binding: string;
 }): Promise<VanillaResourceClaimResult> {
-  const raw = serialize(input.binding, input.identity.credential);
-  if (Buffer.byteLength(raw, 'utf8') > MAX_RECORD_BYTES) {
-    logger.warn('x402.vanilla.claim_record_too_large');
-    return { kind: 'unavailable' };
-  }
+  const digest = bindingHash(input.binding);
+  const raw = serialize(digest, input.identity.credential);
   try {
     const result = await kvSetNxGet(
       input.identity.key,
       raw,
-      PAYMENT_REDELIVERY_TTL_SEC,
+      VANILLA_CLAIM_TTL_SEC,
     );
     if (!result.ok) {
-      if (result.reason !== 'unconfigured') {
+      if (result.reason === 'unconfigured') {
+        warnUnconfiguredOnce();
+      } else {
         logger.warn('x402.vanilla.claim_failed', { reason: result.reason });
       }
       return { kind: 'unavailable' };
     }
     if (result.value === null) return { kind: 'claimed' };
-    return storedMatches(result.value, input.binding, input.identity.credential)
+    return storedMatches(result.value, digest, input.identity.credential)
       ? { kind: 'match' }
       : { kind: 'conflict' };
   } catch (error) {
@@ -209,10 +243,12 @@ export async function releaseVanillaResource(input: {
     const result = await kvEval<unknown>(
       RELEASE_VANILLA_CLAIM,
       [input.identity.key],
-      [input.binding, input.identity.credential],
+      [bindingHash(input.binding), input.identity.credential],
     );
     if (!result.ok) {
-      if (result.reason !== 'unconfigured') {
+      if (result.reason === 'unconfigured') {
+        warnUnconfiguredOnce();
+      } else {
         logger.warn('x402.vanilla.claim_release_failed', {
           reason: result.reason,
         });

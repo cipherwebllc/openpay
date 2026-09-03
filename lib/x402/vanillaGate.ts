@@ -24,14 +24,17 @@
 // exact scheme の verify は `value >= maxAmountRequired` しか見ず resource を署名に含めない
 // ため、1 通の署名済み X-PAYMENT を同額・別 resource へ**同時に**投げると両方が verify を
 // 通り、settle の原子性が 2 本目の課金を止める頃には 2 本目のコンテンツ生成が終わっている。
-// verify の前に「payment identity → resource + canonical query」を KV へ原子的に束縛し、
-// 別束縛での再利用だけを 409 で弾く (同一束縛の再送は従来どおり素通り)。KV は money truth
+// **verify が isValid:true を返した後・content 生成の前**に「payment identity →
+// resource + canonical query」を KV へ原子的に束縛し、別束縛での再利用だけを 409 で弾く
+// (同一束縛の再送は従来どおり素通り)。claim を verify の後に置くのは、未認証の書き込み経路を
+// 作らないため — first-party JPYC 経路 (app/api/paid/_shared.ts) と同じ位置。KV は money truth
 // ではないので、未構成・障害時は fail-open (warn のみ) で従来経路を止めない。
 
 import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
 import { generateCdpJwt } from './cdpJwt';
 import { x402Config } from './config';
+import { isFacilitatorPreBroadcastRejection } from './paymentRedelivery';
 import {
   buildBazaarQueryExtensionV2,
   buildPaymentRequiredV2,
@@ -298,22 +301,41 @@ export function decodeVanillaPaymentHeader(
   return null;
 }
 
+type FacilitatorCdpWire = {
+  accept: ReturnType<typeof toV2Accept>;
+  resource: {
+    resourceUrl: string;
+    description: string;
+    serviceName?: string;
+    tags?: readonly string[];
+    iconUrl?: string;
+  };
+  /** Bazaar カタログ登録メタ。指定時のみ paymentPayload.extensions に載せる。 */
+  bazaar?: BazaarExtensionV2;
+};
+
+/**
+ * 既存の呼び出し規約 (判定 body だけを返す) をそのまま保つ薄いラッパ。dualRailRelay /
+ * hostedUsdcPaidRoute はこちらを使い続ける (掟 12: 既存 money-path の署名を変えない)。
+ */
 export async function postFacilitator(
   path: '/verify' | '/settle',
   body: FacilitatorV1Body,
-  cdpWire: {
-    accept: ReturnType<typeof toV2Accept>;
-    resource: {
-      resourceUrl: string;
-      description: string;
-      serviceName?: string;
-      tags?: readonly string[];
-      iconUrl?: string;
-    };
-    /** Bazaar カタログ登録メタ。指定時のみ paymentPayload.extensions に載せる。 */
-    bazaar?: BazaarExtensionV2;
-  },
+  cdpWire: FacilitatorCdpWire,
 ): Promise<Record<string, unknown>> {
+  return (await postFacilitatorWithStatus(path, body, cdpWire)).body;
+}
+
+/**
+ * postFacilitator と同一のワイヤで、判定 body に **HTTP status** を添えて返す。
+ * status が要るのは settle 失敗の broadcast 前後判定 (isFacilitatorPreBroadcastRejection)
+ * だけで、ワイヤ・順序・応答は 1 つも変わらない。
+ */
+export async function postFacilitatorWithStatus(
+  path: '/verify' | '/settle',
+  body: FacilitatorV1Body,
+  cdpWire: FacilitatorCdpWire,
+): Promise<{ status: number; body: Record<string, unknown> }> {
   const { url: baseUrl, cdpAuth } = x402Config.vanillaFacilitator;
   const url = `${baseUrl}${path}`;
   const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -368,7 +390,7 @@ export async function postFacilitator(
     signal: AbortSignal.timeout(FACILITATOR_TIMEOUT_MS),
   });
   const parsed: unknown = await res.json().catch(() => null);
-  if (res.ok && isRecord(parsed)) return parsed;
+  if (res.ok && isRecord(parsed)) return { status: res.status, body: parsed };
   // CDP は invalid な支払いを 200 でなく 4xx + 正規の判定 body で返す (2026-08-20 本番実測:
   // 400 {isValid:false, invalidReason:'invalid_payload', payer:...})。これは facilitator
   // 障害ではなく「判定が出た」状態なので結果として呼び出し側へ返す — isValid/success の
@@ -380,7 +402,7 @@ export async function postFacilitator(
     isRecord(parsed) &&
     ('isValid' in parsed || 'success' in parsed)
   ) {
-    return parsed;
+    return { status: res.status, body: parsed };
   }
   throw new Error(`facilitator ${path} HTTP ${res.status}`);
 }
@@ -428,32 +450,6 @@ async function handleVanillaPaidGetInner(
     return paymentChallenge(resource, accepts, 'invalid_payment_payload');
   }
 
-  // verify の前に payment identity を resource + canonical query へ原子的に束縛する (B5(b))。
-  // 断つ波及: 同額・別 resource への同時再利用で 2 本目のコンテンツ生成が済んでしまうこと。
-  // identity を導出できない payload (nonce/署名を読めない形) は claim せず、判定は従来どおり
-  // facilitator に委ねる — 既存の応答・順序を 1 つも変えないため。
-  const claimIdentity = vanillaPaymentIdentity(facilitatorBody.paymentPayload);
-  const claimBinding = vanillaResourceBinding(resource.resourceUrl, req.url);
-  let ownedClaim: VanillaResourceClaimIdentity | null = null;
-  if (claimIdentity) {
-    const claim = await claimVanillaResource({
-      identity: claimIdentity,
-      binding: claimBinding,
-    });
-    if (claim.kind === 'conflict') return authorizationConflict();
-    // 'match' (同一束縛の再送) は従来どおり verify/settle へ進む。claim を張ったのが
-    // 自分の request のときだけ、settle 前に落ちた場合の解放権を持つ。
-    if (claim.kind === 'claimed') ownedClaim = claimIdentity;
-  }
-  const releaseClaim = async (): Promise<void> => {
-    if (!ownedClaim) return;
-    await releaseVanillaResource({
-      identity: ownedClaim,
-      binding: claimBinding,
-    });
-    ownedClaim = null;
-  };
-
   let verify: Record<string, unknown>;
   try {
     verify = await postFacilitator('/verify', facilitatorBody, {
@@ -467,9 +463,6 @@ async function handleVanillaPaidGetInner(
       error: e instanceof Error ? e.message : String(e),
       resource: resource.resourceUrl,
     });
-    // settle は始まっていない = 署名は未使用。正直な買い手が同じ authorization を
-    // 使い直せるよう claim を戻す。
-    await releaseClaim();
     return facilitatorUnavailable('Payment verification failed. Please retry later.');
   }
   if (verify.isValid !== true) {
@@ -477,22 +470,53 @@ async function handleVanillaPaidGetInner(
       typeof verify.invalidReason === 'string'
         ? verify.invalidReason
         : 'payment_invalid';
-    await releaseClaim();
     return paymentChallenge(resource, accepts, reason);
   }
   const payer = typeof verify.payer === 'string' ? verify.payer : undefined;
+
+  // verify が isValid:true を返した後・content 生成の前に、payment identity を
+  // resource + canonical query へ原子的に束縛する (B5(b))。
+  // 断つ波及: 同額・別 resource への同時再利用で 2 本目のコンテンツ生成が済んでしまうこと。
+  // verify の後に置くのは、署名を検証していない誰でも 30 分の KV キーを作れる未認証の
+  // 書き込み経路を作らないため (first-party JPYC 経路 app/api/paid/_shared.ts と同じ位置)。
+  // identity を導出できない payload (nonce/署名を読めない形) は claim せず、判定は従来どおり
+  // facilitator に委ねる — 既存の応答・順序を 1 つも変えないため。
+  const claimIdentity = vanillaPaymentIdentity(facilitatorBody.paymentPayload);
+  const claimBinding = vanillaResourceBinding(resource.resourceUrl, req.url);
+  let ownedClaim: VanillaResourceClaimIdentity | null = null;
+  if (claimIdentity) {
+    const claim = await claimVanillaResource({
+      identity: claimIdentity,
+      binding: claimBinding,
+    });
+    if (claim.kind === 'conflict') return authorizationConflict();
+    // 'match' (同一束縛の再送) は従来どおり content/settle へ進む。claim を張ったのが
+    // 自分の request のときだけ、settle 前に落ちた場合の解放権を持つ。
+    if (claim.kind === 'claimed') ownedClaim = claimIdentity;
+  }
+  const releaseClaim = async (): Promise<void> => {
+    if (!ownedClaim) return;
+    await releaseVanillaResource({
+      identity: ownedClaim,
+      binding: claimBinding,
+    });
+    ownedClaim = null;
+  };
 
   const res = await content({ payer });
   if (res.status >= 400) {
     // settle しない = 課金しない。署名も未使用なので claim を戻す (引数不足 400 の後に
     // 引数を足して同じ支払いで叩き直す正直な再送を、別 query = 別束縛で塞がないため)。
+    // 残余リスク (受容): 解放は content が**走った後**なので、4xx を返す resource を踏み台に
+    // claim を外して別 resource へ回すことはできる。ただし 4xx body は有料コンテンツでは
+    // なく (エラー封筒)、settle も走らない = 課金もされないため、二重「解錠」にはならない。
     await releaseClaim();
     return res;
   }
 
-  let settle: Record<string, unknown>;
+  let settle: { status: number; body: Record<string, unknown> };
   try {
-    settle = await postFacilitator('/settle', facilitatorBody, {
+    settle = await postFacilitatorWithStatus('/settle', facilitatorBody, {
       accept: toV2Accept(accepts.v1Caip2),
       resource,
       // カタログ登録は settle 時に確定する — verify と同じ payload 形で送る。
@@ -507,19 +531,30 @@ async function handleVanillaPaidGetInner(
     // **戻さない** (使用済みかもしれない authorization を別 resource へ流用させない)。
     return facilitatorUnavailable('Payment settlement failed. Please retry later.');
   }
-  if (settle.success !== true) {
+  if (settle.body.success !== true) {
     const reason =
-      typeof settle.errorReason === 'string'
-        ? settle.errorReason
+      typeof settle.body.errorReason === 'string'
+        ? settle.body.errorReason
         : 'settlement_failed';
+    // 「broadcast 前の拒否と契約上保証される」reason (insufficient_balance 等) のときだけ
+    // claim を戻す。pending/reverted/未知 reason は broadcast 済みかもしれないので保持し、
+    // 使用済みかもしれない authorization が別 resource へ回るのを防ぐ。判定式は
+    // first-party 経路と同一 (lib/x402/paymentRedelivery.ts)。
+    if (isFacilitatorPreBroadcastRejection(settle.status, settle.body)) {
+      await releaseClaim();
+    }
     return paymentChallenge(resource, accepts, reason);
   }
 
   const settlement = {
     success: true,
-    transaction: typeof settle.transaction === 'string' ? settle.transaction : null,
-    network: typeof settle.network === 'string' ? settle.network : accepts.v1.network,
-    payer: typeof settle.payer === 'string' ? settle.payer : payer,
+    transaction:
+      typeof settle.body.transaction === 'string' ? settle.body.transaction : null,
+    network:
+      typeof settle.body.network === 'string'
+        ? settle.body.network
+        : accepts.v1.network,
+    payer: typeof settle.body.payer === 'string' ? settle.body.payer : payer,
   };
   res.headers.set(
     'X-PAYMENT-RESPONSE',
