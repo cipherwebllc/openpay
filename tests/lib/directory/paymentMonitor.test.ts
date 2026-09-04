@@ -35,7 +35,10 @@ describe('createPaymentMonitorEnvelope', () => {
 
   it('entry 紐づけイベント (dg-sps) は provider をエントリ名から導出し、イベント固有の assets/chains を優先', () => {
     const env = createPaymentMonitorEnvelope(Q, NOW);
-    const launch = env.changes.find((c) => c.changeCategory === 'service_launch')!;
+    // service_launch は NetStars (7/13 backfill) もあるので発表日で dg-sps の行を選ぶ。
+    const launch = env.changes.find(
+      (c) => c.changeCategory === 'service_launch' && c.date === '2026-08-10',
+    )!;
     expect(launch.provider).toBe('DG Stablecoin Payment Service'); // entry.name 由来
     expect(launch.assets).toEqual(['USDC']);
     expect(launch.chains).toEqual(['base']);
@@ -55,16 +58,18 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(env.changes.some((c) => c.provider === 'Aegis')).toBe(false);
   });
 
-  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 2 件', () => {
+  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 7 件', () => {
     const jpyc = createServiceMonitorEnvelope(
       { changedSince: '2026-08-01', limit: SERVICE_MONITOR_MAX_LIMIT },
       {},
       NOW,
     );
     // E11 (2026-09-03 の日付訂正) 後、jpyc-services スコープで 8/01 以降に残るのは
-    // dg-sps 追加 (発表日 8/10) と aegis (8/27) の 2 件。決済スコープ専用の
-    // 8/10 DG SPS launch・8/26 大阪府採択 3 件が混ざれば 6 件になる = スコープ分離の証明。
-    expect(jpyc.changes).toHaveLength(2);
+    // dg-sps 追加 (発表日 8/10)・aegis (8/27)・coincheck 登録 (8/27・第 2 回週次)・
+    // 9/04 の verified 4 件 (sbi-vc-trade/jpyc/jpyc-ex/aegis) の 7 件。決済スコープ専用の
+    // 8/10 DG SPS launch・8/26 大阪府採択 3 件・8/31 Mi&T・9/04 verified 2 件が混ざれば
+    // 14 件になる = スコープ分離の証明。
+    expect(jpyc.changes).toHaveLength(7);
     expect(jpyc.changes.every((c) => c.slug !== undefined)).toBe(true);
     // 応答に内部ルーティング用 scopes を漏らさない。
     expect(jpyc.changes[0]).not.toHaveProperty('scopes');
@@ -76,8 +81,9 @@ describe('createPaymentMonitorEnvelope', () => {
       NOW,
     );
     expect(delta.mode).toBe('delta');
-    // 8/10 DG SPS launch + 8/26 大阪府採択 3 件 (当日含む・以前の backfill 3 件は含まない)
-    expect(delta.changes).toHaveLength(4);
+    // 8/10 DG SPS launch + 8/26 大阪府採択 3 件 + 8/31 Mi&T 手数料開示 + 9/04 verified 2 件
+    // (当日含む・以前の backfill 4 件 = TIS/DG 実証/NetStars/JCB は含まない)
+    expect(delta.changes).toHaveLength(7);
     expect(delta.changes[0].date).toBe('2026-08-10');
     expect(delta.changes.every((c) => c.date >= '2026-08-10')).toBe(true);
 
@@ -131,32 +137,34 @@ describe('createPaymentMonitorEnvelope', () => {
     const env = createPaymentMonitorEnvelope({ changedSince: '2026-08-26', limit: 1 }, NOW);
     expect(env.changes).toHaveLength(3);
     expect(env.changes.every((c) => c.date === '2026-08-26')).toBe(true);
-    // その日より後のイベントは無いので続きは無く、カーソルは generatedAt に戻る。
-    expect(env.hasMore).toBe(false);
-    expect(env.nextChangedSince).toBe(NOW.slice(0, 10));
+    // その日より後にもイベント (8/31 Mi&T) があるので続きがあり、カーソルは次の未返却日。
+    expect(env.hasMore).toBe(true);
+    expect(env.nextChangedSince).toBe('2026-08-31');
   });
 
-  it('E3(b): 2 回呼び出しで前進する — 重複ゼロ・最後は hasMore:false', () => {
+  it('E3(b): nextChangedSince を回し続けると前進する — 重複ゼロ・最後は hasMore:false', () => {
     const all = createPaymentMonitorEnvelope(
       { changedSince: '2026-08-10', limit: SERVICE_MONITOR_MAX_LIMIT },
       NOW,
     ).changes;
 
-    const first = createPaymentMonitorEnvelope({ changedSince: '2026-08-10', limit: 2 }, NOW);
-    expect(first.hasMore).toBe(true);
-    const second = createPaymentMonitorEnvelope(
-      { changedSince: first.nextChangedSince, limit: 2 },
-      NOW,
-    );
-    expect(second.changes.length).toBeGreaterThan(0);
-    expect(second.hasMore).toBe(false);
-
     const key = (c: { provider: string; date: string; changeCategory?: string }) =>
       `${c.provider}|${c.date}|${c.changeCategory ?? ''}`;
-    const firstKeys = first.changes.map(key);
-    const secondKeys = second.changes.map(key);
-    expect(secondKeys.filter((k) => firstKeys.includes(k))).toEqual([]);
-    expect([...firstKeys, ...secondKeys].sort()).toEqual(all.map(key).sort());
+    // 買い手の週次ジョブと同じ回し方: 応答の nextChangedSince をそのままエコーする。
+    const pages: string[][] = [];
+    let cursor = '2026-08-10';
+    for (let i = 0; i < 10; i++) {
+      const page = createPaymentMonitorEnvelope({ changedSince: cursor, limit: 2 }, NOW);
+      expect(page.changes.length).toBeGreaterThan(0);
+      pages.push(page.changes.map(key));
+      if (!page.hasMore) break;
+      expect(page.nextChangedSince > cursor).toBe(true); // 必ず前進 (同じ日を返し続けない)
+      cursor = page.nextChangedSince;
+    }
+    expect(pages.length).toBeGreaterThan(1); // 実際にページングが起きている
+    const seen = pages.flat();
+    expect(new Set(seen).size).toBe(seen.length); // 重複ゼロ
+    expect([...seen].sort()).toEqual(all.map(key).sort()); // 取りこぼしゼロ
   });
 
   // N4: 公開している重複排除キー (provider + date + changeCategory) が実データ上も一意
@@ -226,8 +234,18 @@ describe('createPaymentMonitorEnvelope.providers (事業者の現況行)', () =>
       { changedSince: '2026-08-26', limit: SERVICE_MONITOR_MAX_LIMIT },
       NOW,
     );
-    expect(delta.changes).toHaveLength(3); // 大阪府 3 件
+    // 大阪府 3 件 + 8/31 Mi&T 手数料開示 + 9/04 verified 2 件 = 6 イベント・現況行は 3 社分
+    expect(delta.changes).toHaveLength(6);
     expect(delta.providers.map((p) => p.region)).toEqual(['Osaka', 'Osaka', 'Osaka']);
+    // 第 2 回週次更新: 現況が変わった社は changelog の diffs と行の値が一致する (同一 PR の掟)。
+    const mit = delta.providers.find((p) => p.provider.startsWith('Mi&T'))!;
+    expect(mit.merchantFee).toBe('1.0%');
+    expect(mit.plannedPeriod).toBe('2026-11..2027-03');
+    const mitFee = delta.changes.find(
+      (c) => c.provider.startsWith('Mi&T') && c.changeCategory === 'fee_change',
+    )!;
+    expect(mitFee.date).toBe('2026-08-31');
+    expect(mitFee.diffs).toEqual([{ field: 'fee', previousValue: null, currentValue: '1.0%' }]);
     expect(delta.totalProviders).toBe(PAYMENT_PROVIDERS.length);
     const empty = createPaymentMonitorEnvelope(
       { changedSince: '9999-12-31', limit: SERVICE_MONITOR_MAX_LIMIT },

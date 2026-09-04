@@ -35,7 +35,7 @@ export const DIRECTORY_ENTRIES = [
     status: 'published',
     // 2026-08-27: Kaia 対応 (発行・償還・アドレス登録) + 発行上限 1日→1回 100万円 (PR TIMES 2026-05-15)
     ...provenance('https://jpyc.co.jp/', 'JPYC株式会社', 'official', {
-      verifiedAt: '2026-08-27',
+      verifiedAt: '2026-09-04',
       updatedAt: '2026-08-27',
     }),
     facts: {
@@ -60,7 +60,9 @@ export const DIRECTORY_ENTRIES = [
     name: 'SBI VC Trade',
     nameJa: 'SBI VCトレード',
     status: 'published',
-    ...provenance('https://www.sbivc.co.jp/', 'SBI VCトレード株式会社'),
+    ...provenance('https://www.sbivc.co.jp/', 'SBI VCトレード株式会社', 'official', {
+      verifiedAt: '2026-09-04',
+    }),
     facts: {
       description: '日本円建ての取引を提供し、USDCを取り扱う国内暗号資産交換業者。',
       category: 'exchange',
@@ -106,9 +108,15 @@ export const DIRECTORY_ENTRIES = [
     name: 'Coincheck',
     nameJa: 'コインチェック',
     status: 'published',
-    ...provenance('https://coincheck.com/', 'コインチェック株式会社'),
+    // 2026-08-27: 電子決済手段等取引業者に登録 (金融庁登録一覧・第00002号・取扱 USDC)。
+    // 取扱開始時期は未発表のため tokens は空のまま (sourced-facts-only)。
+    ...provenance('https://coincheck.com/', 'コインチェック株式会社', 'official', {
+      verifiedAt: '2026-09-04',
+      updatedAt: '2026-09-04',
+    }),
     facts: {
-      description: '日本国内で暗号資産の売買サービスを提供する暗号資産交換業者。',
+      description:
+        '日本国内で暗号資産の売買サービスを提供する暗号資産交換業者。2026年8月27日に電子決済手段等取引業者 (関東財務局長第00002号・取扱電子決済手段: USDC) として登録。',
       category: 'exchange',
       tags: ['Japan', 'JPY', 'exchange'],
       tokens: [],
@@ -188,7 +196,7 @@ export const DIRECTORY_ENTRIES = [
       'https://www.garage.co.jp/pr/release/20260810/',
       '株式会社デジタルガレージ',
       'official',
-      { verifiedAt: '2026-08-27', updatedAt: '2026-08-27' },
+      { verifiedAt: '2026-09-04', updatedAt: '2026-08-27' },
     ),
     facts: {
       description:
@@ -218,7 +226,7 @@ export const DIRECTORY_ENTRIES = [
       'https://corporate.jpyc.co.jp/news/posts/jpyc-ex-launch',
       'JPYC株式会社',
       'official',
-      { verifiedAt: '2026-08-27', updatedAt: '2026-08-27' },
+      { verifiedAt: '2026-09-04', updatedAt: '2026-08-27' },
     ),
     facts: {
       description: '日本円と連動するよう設計された電子決済手段のステーブルコイン。',
@@ -444,7 +452,7 @@ export const DIRECTORY_ENTRIES = [
     status: 'published',
     // 2026-08-27: USDC (Base・標準 x402) 販売開始 — 実 402/実購入で確認 (dual-rail 掲載)
     ...provenance('https://aegis-ai.xyz/', 'Aegis', 'official', {
-      verifiedAt: '2026-08-27',
+      verifiedAt: '2026-09-04',
       updatedAt: '2026-08-27',
     }),
     facts: {

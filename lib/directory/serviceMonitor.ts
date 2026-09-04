@@ -174,6 +174,26 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     ],
   },
   {
+    // 第 2 回週次更新 (2026-09-04) で未追跡だった商用サービスを backfill。発表日 = PR TIMES。
+    date: '2026-07-13',
+    collectedAt: '2026-09-04',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'added',
+    changeCategory: 'service_launch',
+    assets: ['USDC', 'USDT', 'JPYC'],
+    chains: ['solana', 'polygon'],
+    summary:
+      'NetStars launched Stablecoin Pay for its StarPay merchants: USDC, USDT and JPYC accepted via one app on Solana and Polygon (Aptos planned for summer 2026), merchant fee 0.98% (tax-exempt).',
+    summaryJa:
+      'ネットスターズが StarPay 加盟店向けに「Stablecoin Pay」を本格始動。USDC・USDT・JPYC を 1 つのアプリで受け付け (Solana/Polygon・Aptos は 2026 年夏予定)、加盟店手数料 0.98% (非課税)。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000185.000019526.html',
+    diffs: [
+      { field: 'status', previousValue: null, currentValue: 'commercial' },
+      { field: 'fee', previousValue: null, currentValue: '0.98% (tax-exempt)' },
+    ],
+  },
+  {
     date: '2026-07-15',
     scopes: ['stablecoin-payments'],
     provider: 'JCB / Circle',
@@ -272,6 +292,112 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summaryJa: 'Aegis が JPYC に加えて USDC (Base・標準 x402) での販売を開始。',
     sourceUrl: 'https://aegis-ai.xyz/',
     diffs: [{ field: 'assets', previousValue: ['JPYC'], currentValue: ['JPYC', 'USDC'] }],
+  },
+  // ── 第 2 回週次更新 (収集 2026-09-04・収集窓 2026-08-27〜09-04) ──
+  {
+    // 一次ソース = 金融庁「電子決済手段等取引業者登録一覧」(令和 8 年 8 月 27 日現在)。
+    date: '2026-08-27',
+    collectedAt: '2026-09-04',
+    scopes: ['jpyc-services'],
+    slug: 'coincheck',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['USDC'],
+    summary:
+      'Coincheck was registered as an Electronic Payment Instruments Exchange Service Provider (Kanto Local Finance Bureau No. 00002; handled instrument: USDC), the second such registrant in Japan after SBI VC Trade.',
+    summaryJa:
+      'コインチェックが電子決済手段等取引業者として登録 (関東財務局長第00002号・取扱電子決済手段: USDC)。国内 2 社目 (1 社目は SBI VC トレード)。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+    diffs: [
+      {
+        field: 'status',
+        previousValue: null,
+        currentValue: 'registered Electronic Payment Instruments Exchange Service Provider (USDC)',
+      },
+    ],
+  },
+  {
+    // 大阪府採択 (8/26) の後、Mi&T 自身の PR TIMES で手数料・期間・規模が初めて数値開示された。
+    date: '2026-08-31',
+    collectedAt: '2026-09-04',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'updated',
+    changeCategory: 'fee_change',
+    assets: ['JPYC'],
+    summary:
+      'Mi&T disclosed details of its Osaka-subsidized in-store JPYC pilot: merchant fee 1.0% of the payment amount, about 5 restaurants and shops around Osaka Metropolitan University, planned mid-November 2026 to mid-March 2027.',
+    summaryJa:
+      'Mi&T が大阪府補助の JPYC 実店舗決済実証の詳細を公表: 店舗側の決済手数料は決済額の 1.0% のみ、大阪公立大学キャンパス周辺の飲食店・小売店 5 店舗程度、2026 年 11 月中旬〜2027 年 3 月中旬 (予定)。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000003.000187870.html',
+    diffs: [{ field: 'fee', previousValue: null, currentValue: '1.0%' }],
+  },
+  {
+    date: '2026-09-04',
+    scopes: ['jpyc-services'],
+    slug: 'sbi-vc-trade',
+    changeType: 'verified',
+    summary:
+      'Re-verified against the FSA registry (as of 2026-08-27): SBI VC Trade remains registrant No. 00001 handling USDC, RLUSD and JPYSC.',
+    summaryJa:
+      '金融庁の登録一覧 (令和 8 年 8 月 27 日現在) で再確認: SBI VC トレードは第00001号として USDC・RLUSD・JPYSC を取扱い。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+  },
+  {
+    date: '2026-09-04',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'verified',
+    summary:
+      'Re-verified: no new official JPYC announcement found for 2026-08-27 to 2026-09-04; facts unchanged.',
+    summaryJa:
+      '再確認: 2026-08-27〜09-04 に JPYC の新規公式発表は見つからず、記載事実に変更なし。',
+  },
+  {
+    date: '2026-09-04',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'verified',
+    summary:
+      'Re-verified: no new official JPYC EX announcement found for 2026-08-27 to 2026-09-04; facts unchanged.',
+    summaryJa:
+      '再確認: 2026-08-27〜09-04 に JPYC EX の新規公式発表は見つからず、記載事実に変更なし。',
+  },
+  {
+    date: '2026-09-04',
+    scopes: ['jpyc-services'],
+    slug: 'aegis-ai',
+    changeType: 'verified',
+    summary:
+      'Re-verified: the x402 briefing endpoint still answers 402 (JPYC and USDC sales continue); the landing page was redesigned but the paid API is unchanged.',
+    summaryJa:
+      '再確認: x402 ブリーフィング API は引き続き 402 応答 (JPYC/USDC 販売継続)。LP は刷新されたが有料 API は変更なし。',
+  },
+  {
+    date: '2026-09-04',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (last updated 2026-08-26): 12 applications, 4 grants, JPY 28,890 thousand in total; HashPort pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新 2026-08-26) で再確認: 応募 12 件・交付決定 4 件・総額 28,890 千円。HashPort の実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-09-04',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (last updated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新 2026-08-26) で再確認: マイナウォレット / 三井住友カードの実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
 ];
 
