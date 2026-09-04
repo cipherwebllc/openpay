@@ -12,6 +12,7 @@
 // に委譲するため execute は no-op (= 既存 Pay button が処理する)。
 
 import { useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { formatUnits, type Address } from 'viem';
 import { useTranslations } from 'next-intl';
 import { useCrossChainPayment } from '@/hooks/useCrossChainPayment';
@@ -19,10 +20,21 @@ import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
 import type { CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathOption } from '@/lib/crossChain/pathEnumerator';
 import { CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
+import { ResumeStoreWriteError } from '@/lib/crossChain/resumeStore';
 import { blockExplorerUrl } from '@/lib/chains';
 import { CrossChainSourceChooser } from './CrossChainSourceChooser';
 import { shortAddress } from '@/lib/format';
 import { logger } from '@/lib/logger';
+
+// 中断再開でしか描画されない説明パネルなので、/pay・/tip の First Load JS には載せない
+// (予算は既に上限張り付き — 掟: 増えたら予算を上げる前にまず code-split)。
+const CrossChainBurnUnresolvedPanel = dynamic(
+  () =>
+    import('./CrossChainBurnUnresolvedPanel').then(
+      (m) => m.CrossChainBurnUnresolvedPanel,
+    ),
+  { ssr: false },
+);
 
 export interface CrossChainHintProps {
   /** PaymentForm の token (token !== 'usdc' なら hint を出さない) */
@@ -168,6 +180,11 @@ export function CrossChainHint(props: CrossChainHintProps) {
         destChainId={result.destChainId}
         mintTxHash={result.mintTxHash}
         explorerBase={explorer}
+        // D3: 利用料 (付帯) だけが未確定でも決済は成立している。買い手には「追加の支払いは
+        // 不要」を二次通知として伝える (本送金の成功表示を濁さない)。
+        feeUnresolved={
+          result.path === 'cctp-v2' && result.feeBurnUnresolved !== undefined
+        }
       />
     );
   }
@@ -216,6 +233,15 @@ export function CrossChainHint(props: CrossChainHintProps) {
     }
   }
 
+  // D4: 買い手が貼った burn tx hash が on-chain 検証を通ったら、そのまま続き
+  // (Iris poll → mint) を走らせる。検証に落ちた場合は panel が inline error を出すだけで
+  // 実行しない (state も変えない)。
+  async function onAdoptHash(hash: string) {
+    const res = await hook.adoptBurnTxHash(hash);
+    if (res.ok) void onPay();
+    return res;
+  }
+
   const isDirectSelected = selectedOption?.kind === 'direct';
   // 中断再開: 選択中 option に保存済みの途中 state があれば、再 Pay で続きから
   // 再開できる (送金済みは再送しない)。UI で明示して二重支払いの不安を消す。
@@ -223,9 +249,13 @@ export function CrossChainHint(props: CrossChainHintProps) {
     !isDirectSelected &&
     selectedOption !== null &&
     hook.isOptionResumable(selectedOption);
+  const burnUnresolved = hook.burnUnresolved;
   const payButtonDisabled =
     isExecuting ||
     !!props.executionDisabled ||
+    // 前回 burn が mempool に居る可能性がある間は、再 Pay 自体を押させない (押しても
+    // 同じ wait に落ちるだけで、買い手には「二重に払うのでは」という不安だけが残る)。
+    burnUnresolved?.kind === 'wait' ||
     // 同一 mount で committed を観測したのに resume 保存が無い場合、再 execute は
     // 二重 burn/debit になり得る。D4b は行わず、この mount の子ボタンだけ fail-closed。
     (isCommitted && !resumable) ||
@@ -247,10 +277,23 @@ export function CrossChainHint(props: CrossChainHintProps) {
           {t('directSelectedHint')}
         </p>
       )}
-      {resumable && !isExecuting && (
+      {resumable && !isExecuting && !burnUnresolved && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
           {t('resumeHint')}
         </p>
+      )}
+      {burnUnresolved && (
+        <CrossChainBurnUnresolvedPanel
+          kind={burnUnresolved.kind}
+          sourceChainId={burnUnresolved.sourceChainId}
+          depositor={burnUnresolved.depositor}
+          burnTxHash={burnUnresolved.burnTxHash}
+          reburnable={burnUnresolved.reburnable}
+          armed={hook.isManualReburnArmed}
+          onArm={hook.armManualReburn}
+          onAdoptHash={onAdoptHash}
+          onRetry={() => void onPay()}
+        />
       )}
       {!isDirectSelected && (
         <button
@@ -266,9 +309,14 @@ export function CrossChainHint(props: CrossChainHintProps) {
               : t('payWithSelected')}
         </button>
       )}
-      {error && (
+      {error && !burnUnresolved && (
         <p className="text-xs text-red-700">
-          {t('errorPrefix')}: {error.message}
+          {t('errorPrefix')}:{' '}
+          {error instanceof ResumeStoreWriteError
+            ? // marker を書けない = 二重 burn を防げないので送金しなかった、という
+              // 「安全側に倒した」旨を専用文言で伝える (生の例外文は買い手に無意味)。
+              t('errorStorageBlocked')
+            : error.message}
         </p>
       )}
     </div>
@@ -302,6 +350,12 @@ function formatProgress(
       return t('progressFeeSourceTxPending');
     case 'fee_dest_tx_pending':
       return t('progressFeeDestTxPending');
+    case 'burn_probe':
+      return t('progressBurnProbe');
+    case 'burn_unconfirmed':
+      return t('progressBurnUnconfirmed');
+    case 'fee_burn_unconfirmed':
+      return t('progressFeeBurnUnconfirmed');
   }
 }
 
@@ -313,6 +367,7 @@ function SuccessPanel({
   destChainId,
   mintTxHash,
   explorerBase,
+  feeUnresolved,
 }: {
   bridge: 'gateway' | 'cctp-v2';
   recipient: Address;
@@ -321,6 +376,7 @@ function SuccessPanel({
   destChainId: number;
   mintTxHash: `0x${string}`;
   explorerBase: string | undefined;
+  feeUnresolved?: boolean;
 }) {
   const t = useTranslations('CrossChainHint');
   return (
@@ -337,6 +393,9 @@ function SuccessPanel({
           chainId: destChainId,
         })}
       </p>
+      {feeUnresolved && (
+        <p className="text-xs text-emerald-800">{t('feeUnresolvedNotice')}</p>
+      )}
       {explorerBase && (
         <a
           href={`${explorerBase}/tx/${mintTxHash}`}

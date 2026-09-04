@@ -11,6 +11,7 @@ import {
   encodeFunctionData,
   getAddress,
   pad,
+  parseAbiItem,
   type Address,
   type Hex,
 } from 'viem';
@@ -94,6 +95,21 @@ export const CCTP_V2_MESSAGE_TRANSMITTER_ABI = [
     type: 'function',
   },
 ] as const;
+
+// TokenMessengerV2.depositForBurn が出す event。中断再開時に「burn を broadcast したか」を
+// on-chain の事実で確かめるための唯一の手掛かり (lib/crossChain/burnMarker.ts の log 走査)。
+// indexed は burnToken / depositor / minFinalityThreshold の 3 本なので、getLogs の
+// args でこの 3 本まで絞り込める (残りは data を decode して照合する)。
+// ⚠ CCTP v1 の同名 event は先頭に `uint64 indexed nonce` を持つ別物 (topic0 が異なる)。
+// v1 の topic0 を誤って使うと「log 無し = 未 broadcast」と誤判定して二重 burn になるため、
+// tests/lib/crossChain/cctp.test.ts が Base mainnet の実ログ fixture で topic0 を pin する。
+export const CCTP_V2_DEPOSIT_FOR_BURN_EVENT = parseAbiItem(
+  'event DepositForBurn(address indexed burnToken, uint256 amount, address indexed depositor, bytes32 mintRecipient, uint32 destinationDomain, bytes32 destinationTokenMessenger, bytes32 destinationCaller, uint256 maxFee, uint32 indexed minFinalityThreshold, bytes hookData)',
+);
+
+// keccak256("DepositForBurn(address,uint256,address,bytes32,uint32,bytes32,bytes32,uint256,uint32,bytes)")
+export const CCTP_V2_DEPOSIT_FOR_BURN_TOPIC0: Hex =
+  '0x0c8c1cbdc5190613ebd485511d4e2812cfa45eecb79d845893331fedad5130a5';
 
 // 1 tx で複数 message を burn しうるため messages は array (Circle iris OpenAPI 由来)。
 export interface CctpIrisMessage {

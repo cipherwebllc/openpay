@@ -33,7 +33,23 @@ import {
   type BuildDepositForBurnOverrides,
   type PollIrisAttestationOptions,
 } from './cctp';
-import { GATEWAY_MINTER_ADDRESS, GATEWAY_WALLET_ADDRESS } from './config';
+import {
+  buildBurnMarker,
+  classifyBurnState,
+  minGapBlocks,
+  scanForBurnLog,
+  MIN_GAP_MS,
+  type BurnDecision,
+  type BurnIntentMarker,
+  type BurnReceiptState,
+  type BurnScanResult,
+  type BurnSlot,
+} from './burnMarker';
+import {
+  CROSS_CHAIN_BURN_AUTORESUME,
+  GATEWAY_MINTER_ADDRESS,
+  GATEWAY_WALLET_ADDRESS,
+} from './config';
 import { assertContractDeployed } from './deploycheck';
 import {
   buildBurnIntent,
@@ -62,7 +78,14 @@ export type CrossChainProgress =
   | { kind: 'fee_sign' }
   | { kind: 'fee_attest' }
   | { kind: 'fee_source_tx_pending'; hash: Hex }
-  | { kind: 'fee_dest_tx_pending'; hash: Hex };
+  | { kind: 'fee_dest_tx_pending'; hash: Hex }
+  // A1: 再開時に「前回 burn を broadcast したか」を on-chain で確かめている最中 / 確かめ
+  // きれなかった状態。買い手には「送金し直しているのではない」ことを伝える必要がある。
+  | { kind: 'burn_probe' }
+  | { kind: 'burn_unconfirmed' }
+  // D3: 利用料 (fee) 側だけが未確定。merchant 送金は止めずに進むので、本送金の失敗
+  // (burn_unconfirmed) とは別の kind にして UI が二次通知として出せるようにする。
+  | { kind: 'fee_burn_unconfirmed' };
 
 export type ProgressCallback = (p: CrossChainProgress) => void;
 
@@ -476,6 +499,271 @@ export interface CctpResumeState {
   mintTxHash?: Hex;
   /** fee mint 完了 tx */
   feeMintTxHash?: Hex;
+  /** merchant burn の「送るつもり」marker (broadcast 直前に fail-closed で書く)。
+   *  hash が残らなかった中断からの再開で、二重 burn を防ぐ唯一の手掛かり。 */
+  burnIntent?: BurnIntentMarker;
+  /** fee burn の同 marker (merchant と完全対称) */
+  feeBurnIntent?: BurnIntentMarker;
+  /** D3: fee burn の状態を自動判定できなかった記録。merchant 送金は進めた上で残す
+   *  (次回の再開・サポート照合用)。自動再 burn の根拠には**しない** — 再開のたびに
+   *  決定表を引き直す。 */
+  feeBurnUnresolved?: BurnUnresolvedNote;
+}
+
+/** 未確定 burn の記録 (resume state / 実行結果に載せる最小情報)。 */
+export interface BurnUnresolvedNote {
+  kind: 'wait' | 'manual';
+  /** 決定表 (設計 §4) の行番号 */
+  row: number;
+  reason: string;
+  /** 二段確認で再 burn を開けてよい状態か */
+  reburnable: boolean;
+}
+
+/** 再開時に「前回 burn したか」を自動判定できなかった状態。money-path を進めずここで止め、
+ *  UI が買い手に説明する (kind='wait' は時間を置いて再試行、'manual' は explorer 確認 +
+ *  二段確認)。Iris timeout 等の他の失敗と UI で区別するために専用型にしている。 */
+export class CrossChainBurnUnresolvedError extends Error {
+  readonly kind: 'wait' | 'manual';
+  readonly slot: BurnSlot;
+  readonly detail: string;
+  /** 決定表 (設計 §4) の行番号。Sentry で遭遇頻度を行ごとに観測する。 */
+  readonly row: number;
+  /** 二段確認 (allowManualReburn) で再 burn を開けてよい状態か。 */
+  readonly reburnable: boolean;
+  readonly sourceChainId: number;
+  readonly depositor: Address;
+  readonly burnTxHash?: Hex;
+
+  constructor(args: {
+    kind: 'wait' | 'manual';
+    slot: BurnSlot;
+    detail: string;
+    row: number;
+    reburnable: boolean;
+    sourceChainId: number;
+    depositor: Address;
+    burnTxHash?: Hex;
+  }) {
+    super(
+      `cross-chain execute: ${args.slot} burn の状態を確定できません ` +
+        `(${args.kind}, row ${args.row}: ${args.detail})`,
+    );
+    this.name = 'CrossChainBurnUnresolvedError';
+    this.kind = args.kind;
+    this.slot = args.slot;
+    this.detail = args.detail;
+    this.row = args.row;
+    this.reburnable = args.reburnable;
+    this.sourceChainId = args.sourceChainId;
+    this.depositor = args.depositor;
+    this.burnTxHash = args.burnTxHash;
+  }
+}
+
+/** burn-intent marker を fail-closed で永続化する契約。書けなければ **throw** すること
+ *  (呼出側はこの throw を burn 中止として扱う)。 */
+export type CommitBurnIntentFn = (
+  marker: BurnIntentMarker,
+  slot: BurnSlot,
+) => void;
+
+// hash の receipt 状態を 3 値で読む。TransactionReceiptNotFoundError のみ 'notfound'、
+// それ以外の reject (RPC ダウン / timeout) は transport 障害で「未着」と区別できないため
+// throw で伝播する (決定表 row 21・txAlreadySucceeded と同じ CR-2 の区別)。
+async function readBurnReceiptState(
+  client: PublicClient,
+  hash: Hex,
+): Promise<BurnReceiptState> {
+  try {
+    const receipt = await client.getTransactionReceipt({ hash });
+    return receipt.status === 'success' ? 'success' : 'reverted';
+  } catch (e) {
+    if ((e as { name?: unknown })?.name === 'TransactionReceiptNotFoundError') {
+      return 'notfound';
+    }
+    throw e;
+  }
+}
+
+interface ResolveBurnSlotArgs {
+  client: PublicClient;
+  slot: BurnSlot;
+  marker: BurnIntentMarker | undefined;
+  hash: Hex | undefined;
+  depositor: Address;
+  sourceChainId: number;
+  autoReburnEnabled: boolean;
+  allowManualReburn: boolean;
+  onProgress: ProgressCallback;
+  now: () => number;
+}
+
+/** 決定表の入力 (nonce / gap / log) を on-chain から集めて classifyBurnState に渡す。
+ *  RPC 障害は握り潰さず throw する (「観測できなかった」を「起きていない」に潰すと二重
+ *  burn になる)。 */
+async function resolveBurnSlot(args: ResolveBurnSlotArgs): Promise<BurnDecision> {
+  // 初回 (marker も hash も無い) は probe 不要 — 余計な RPC を打たずに従来どおり burn。
+  if (!args.marker && !args.hash) {
+    return classifyBurnState({
+      marker: undefined,
+      hash: undefined,
+      receipt: undefined,
+      pendingAhead: undefined,
+      nonceAdvanced: false,
+      gapSatisfied: false,
+      timeGapSatisfied: false,
+      scan: undefined,
+      autoReburnEnabled: args.autoReburnEnabled,
+      allowManualReburn: args.allowManualReburn,
+    });
+  }
+
+  args.onProgress({ kind: 'burn_probe' });
+
+  // D7 (受容したコスト): marker 導入前の旧 state (決定表 row 2) も、ここで source chain の
+  // receipt を 1 本読む。以前は「hash があれば無条件に mint へ進む」だったので source RPC に
+  // 一切依存しなかったが、revert / 置換された burn を掴んだまま Iris を永久 poll する恒久
+  // wedge (A1-(ii)) を塞ぐには receipt の確認が要る。source RPC が落ちていると旧 state の
+  // 再開も止まる (throw) — 「観測できなかった」を「成功していた」に潰さないための意図的な
+  // 可用性コストとして受け入れる。
+  const receipt = args.hash
+    ? await readBurnReceiptState(args.client, args.hash)
+    : undefined;
+  // 成功済 hash は proceed 一択なので nonce も log も見ない (無駄な RPC を打たない)。
+  if (receipt === 'success') {
+    return classifyBurnState({
+      marker: args.marker,
+      hash: args.hash,
+      receipt,
+      pendingAhead: undefined,
+      nonceAdvanced: false,
+      gapSatisfied: false,
+      timeGapSatisfied: false,
+      scan: undefined,
+      autoReburnEnabled: args.autoReburnEnabled,
+      allowManualReburn: args.allowManualReburn,
+    });
+  }
+
+  // 旧 state (marker 無し・row 3): 走査範囲が無いので log は見られないが、mempool だけは
+  // 実測する。二段確認による再 burn を許すかどうかがこの実測 1 点に懸かっているため
+  // (未計測のまま override すると mempool 滞留中の再 burn = 二重支払い・D1)。
+  if (!args.marker) {
+    const [noncePending, nonceLatest] = await Promise.all([
+      args.client.getTransactionCount({
+        address: args.depositor,
+        blockTag: 'pending',
+      }),
+      args.client.getTransactionCount({
+        address: args.depositor,
+        blockTag: 'latest',
+      }),
+    ]);
+    return classifyBurnState({
+      marker: undefined,
+      hash: args.hash,
+      receipt,
+      pendingAhead: noncePending > nonceLatest,
+      nonceAdvanced: false,
+      gapSatisfied: false,
+      timeGapSatisfied: false, // marker が無い = 基準時刻が無い
+      scan: undefined,
+      autoReburnEnabled: args.autoReburnEnabled,
+      allowManualReburn: args.allowManualReburn,
+    });
+  }
+
+  const marker = args.marker;
+  const [noncePending, nonceLatest, head] = await Promise.all([
+    args.client.getTransactionCount({ address: args.depositor, blockTag: 'pending' }),
+    args.client.getTransactionCount({ address: args.depositor, blockTag: 'latest' }),
+    args.client.getBlockNumber(),
+  ]);
+  const pendingAhead = noncePending > nonceLatest;
+  const nonceAdvanced =
+    marker.nonceLatest !== null && nonceLatest > marker.nonceLatest;
+  const markerBlock = marker.block === null ? null : BigInt(marker.block);
+  const timeGapSatisfied = args.now() - marker.at >= MIN_GAP_MS;
+  const gapSatisfied =
+    markerBlock !== null &&
+    head - markerBlock >= BigInt(minGapBlocks(marker.chainId)) &&
+    timeGapSatisfied;
+
+  // mempool に居るうちは log を走査しても意味がない (まだ mined していない) ので RPC を節約。
+  // 走査範囲 (block) / 同定条件 (nonce) を欠く marker (row 4) も走査しない — scan を
+  // undefined のままにすることで「走査できなかった」と「走査して 0 件だった」を
+  // classifyBurnState 側で区別できる (二段確認を開けてよいかの判断が変わる・D1)。
+  let scan: BurnScanResult | undefined;
+  if (!pendingAhead && markerBlock !== null && marker.nonceLatest !== null) {
+    scan = await scanForBurnLog({
+      client: args.client,
+      marker,
+      head,
+      tokenMessenger: CCTP_V2_TOKEN_MESSENGER_ADDRESS,
+    });
+  }
+
+  return classifyBurnState({
+    marker,
+    hash: args.hash,
+    receipt,
+    pendingAhead,
+    nonceAdvanced,
+    gapSatisfied,
+    timeGapSatisfied,
+    scan,
+    autoReburnEnabled: args.autoReburnEnabled,
+    allowManualReburn: args.allowManualReburn,
+  });
+}
+
+// 決定が wait / manual なら money-path を進めず専用 error で止める。
+function assertBurnResolved(
+  decision: BurnDecision,
+  ctx: { slot: BurnSlot; sourceChainId: number; depositor: Address; hash?: Hex },
+  onProgress: ProgressCallback,
+): void {
+  if (decision.action !== 'wait' && decision.action !== 'manual') return;
+  onProgress({ kind: 'burn_unconfirmed' });
+  logger.warn('cross-chain.burn.unresolved', {
+    kind: decision.action,
+    slot: ctx.slot,
+    row: decision.row,
+    reason: decision.reason,
+    sourceChainId: ctx.sourceChainId,
+  });
+  throw new CrossChainBurnUnresolvedError({
+    kind: decision.action,
+    slot: ctx.slot,
+    detail: decision.reason,
+    row: decision.row,
+    reburnable: decision.action === 'manual' ? decision.reburnable : false,
+    sourceChainId: ctx.sourceChainId,
+    depositor: ctx.depositor,
+    burnTxHash: ctx.hash,
+  });
+}
+
+/** source chain の burn 1 本を「再開安全」に送り出す (settleMint と対称)。
+ *  marker を fail-closed で書いてから broadcast → hash 永続化 → receipt 検証、の順で、
+ *  「記録の無い burn」も「burn の無い記録」も作らない。
+ *  adopt (走査で一意特定した hash の採用) / proceed (既存 hash が成功済) は送金を伴わない
+ *  ので呼出側で persist するだけ — ここには 'burn' decision しか来ない。 */
+async function settleBurn(args: {
+  client: PublicClient;
+  buildMarker: () => Promise<BurnIntentMarker>;
+  commit: (marker: BurnIntentMarker) => void;
+  broadcast: () => Promise<Hex>;
+  onBroadcast: (hash: Hex) => void;
+  label: string;
+}): Promise<void> {
+  const marker = await args.buildMarker();
+  // 書けなければ throw され、broadcast には到達しない (= 記録の無い burn を作らない)。
+  args.commit(marker);
+  const hash = await args.broadcast();
+  args.onBroadcast(hash);
+  await waitForReceiptOrThrow(args.client, hash, args.label);
 }
 
 export interface ExecuteCctpTransferArgs {
@@ -510,6 +798,15 @@ export interface ExecuteCctpTransferArgs {
   onProgress?: ProgressCallback;
   /** merchant mint 確定時に発火 (fee mint より前)。会計ログ用。詳細は OnMerchantMint。 */
   onMerchantMint?: OnMerchantMint;
+  /** burn-intent marker の fail-closed 永続化 (必須)。throw したら burn を broadcast しない。 */
+  commitBurnIntent: CommitBurnIntentFn;
+  /** 買い手が manual パネルの二段確認を通した場合のみ true。曖昧な状態の再 burn を開ける。 */
+  allowManualReburn?: boolean;
+  /** 決定表 row 9/12/18 の自動再 burn を許すか。既定は env flag
+   *  (NEXT_PUBLIC_CROSS_CHAIN_BURN_AUTORESUME, 既定 OFF)。test 用に上書きできる。 */
+  allowAutoReburn?: boolean;
+  /** test 用 (default Date.now)。marker の gap 判定に使う。 */
+  now?: () => number;
 }
 
 export interface ExecuteCctpTransferResult {
@@ -523,6 +820,9 @@ export interface ExecuteCctpTransferResult {
   /** fee burn を行った場合の source burn / dest mint tx hash。 */
   feeBurnTxHash?: Hex;
   feeMintTxHash?: Hex;
+  /** D3: merchant 送金は完了したが、利用料 (fee) 側の burn 状態を確定できなかった場合の
+   *  記録。UI は成功パネルの二次通知として出す (決済自体は成立している)。 */
+  feeBurnUnresolved?: BurnUnresolvedNote;
   destChainId: number;
 }
 
@@ -551,8 +851,78 @@ export async function executeCctpTransfer(
   const sourceChain = resolveChainOrThrow(args.sourceChainId, 'source');
   const destChain = resolveChainOrThrow(args.destChainId, 'destination');
 
-  const needMerchantBurn = !state.burnTxHash;
-  const needFeeBurn = bridgeFee && !state.feeBurnTxHash;
+  // A1: 「burnTxHash が無い = 未 burn」という素朴な判定を廃し、marker + on-chain の事実
+  // (receipt / nonce / DepositForBurn log) で slot ごとに分岐を決める。決定表は
+  // burnMarker.classifyBurnState (設計 §4)。判定は送金前なので chain switch より先に行い、
+  // wait / manual なら wallet popup を一切出さずに止める。
+  const allowAutoReburn = args.allowAutoReburn ?? CROSS_CHAIN_BURN_AUTORESUME;
+  const allowManualReburn = args.allowManualReburn === true;
+  const nowFn = args.now ?? Date.now;
+  const resolveSlot = (slot: BurnSlot): Promise<BurnDecision> =>
+    resolveBurnSlot({
+      client: args.sourcePublicClient,
+      slot,
+      marker: slot === 'merchant' ? state.burnIntent : state.feeBurnIntent,
+      hash: slot === 'merchant' ? state.burnTxHash : state.feeBurnTxHash,
+      depositor: args.account,
+      sourceChainId: args.sourceChainId,
+      autoReburnEnabled: allowAutoReburn,
+      allowManualReburn,
+      onProgress,
+      now: nowFn,
+    });
+
+  const merchantDecision = await resolveSlot('merchant');
+  assertBurnResolved(
+    merchantDecision,
+    {
+      slot: 'merchant',
+      sourceChainId: args.sourceChainId,
+      depositor: args.account,
+      hash: state.burnTxHash,
+    },
+    onProgress,
+  );
+  // D3: fee slot の未確定は **merchant を人質に取らない**。merchant 側が確定している限り、
+  // fee が wait / manual でも merchant の attestation + mint はそのまま進める (掟 13: 付帯
+  // 処理の障害を本体に波及させない)。fee は自動で再 burn せず、resume state と結果に
+  // 「未確定」を記録して UI が二次通知を出す (人間が後で解決する)。
+  const feeDecision = bridgeFee ? await resolveSlot('fee') : undefined;
+  const feeUnresolved: BurnUnresolvedNote | undefined =
+    feeDecision && (feeDecision.action === 'wait' || feeDecision.action === 'manual')
+      ? {
+          kind: feeDecision.action,
+          row: feeDecision.row,
+          reason: feeDecision.reason,
+          reburnable:
+            feeDecision.action === 'manual' ? feeDecision.reburnable : false,
+        }
+      : undefined;
+  if (feeUnresolved) {
+    onProgress({ kind: 'fee_burn_unconfirmed' });
+    logger.warn('cross-chain.burn.unresolved', {
+      kind: feeUnresolved.kind,
+      slot: 'fee',
+      row: feeUnresolved.row,
+      reason: feeUnresolved.reason,
+      sourceChainId: args.sourceChainId,
+      blocking: false,
+    });
+    persist({ feeBurnUnresolved: feeUnresolved });
+  }
+
+  const needMerchantBurn = merchantDecision.action === 'burn';
+  const needFeeBurn = feeDecision?.action === 'burn';
+  // adopt は「走査で見つけた成功済 burn hash を採用する」だけなので wallet も chain switch
+  // も要らない。approve/burn block の外で先に永続化しておく。
+  if (merchantDecision.action === 'adopt') {
+    persist({ burnTxHash: merchantDecision.hash });
+    onProgress({ kind: 'source_tx_pending', hash: merchantDecision.hash });
+  }
+  if (feeDecision?.action === 'adopt') {
+    persist({ feeBurnTxHash: feeDecision.hash });
+    onProgress({ kind: 'fee_source_tx_pending', hash: feeDecision.hash });
+  }
 
   // 1. source chain 上で approve + burn (まだ burn していない分だけ)。
   if (needMerchantBurn || needFeeBurn) {
@@ -609,24 +979,54 @@ export async function executeCctpTransfer(
     // burn hash は broadcast 直後 (receipt 待ち前) に永続化する。receipt 待ちの間に
     // tab を閉じる / RPC が落ちると resume state に burn hash が残らず、再開時に
     // 再 burn してしまう = 二重支払いになるため。CCTP の depositForBurn は nonce
-    // 単位で独立 (idempotent でない) なので、ここが二重支払いの唯一の防御線。
-    // 再開時は保存済 hash の attestation を poll して mint へ進む。
+    // 単位で独立 (idempotent でない) ので、ここが二重支払いの防御線。
+    // A1: hash 永続化の **さらに手前** に marker (送るつもり) を fail-closed で置き、
+    // 「broadcast したが hash を書けなかった」窓も塞ぐ。再開時は保存済 hash の
+    // attestation を poll して mint へ進む。
+    const makeMarker = (recipient: Address, value: bigint) => () =>
+      buildBurnMarker({
+        client: args.sourcePublicClient,
+        chainId: args.sourceChainId,
+        depositor: args.account,
+        burnToken: args.sourceToken,
+        mintRecipient: recipient,
+        amount: value,
+        destinationDomain: args.destDomain,
+        now: nowFn,
+      });
+
     if (needMerchantBurn) {
-      const burnHash = await burn(args.recipient, args.valueAtomic);
-      persist({ burnTxHash: burnHash });
-      onProgress({ kind: 'source_tx_pending', hash: burnHash });
-      await waitForReceiptOrThrow(args.sourcePublicClient, burnHash, 'cctp burn');
+      await settleBurn({
+        client: args.sourcePublicClient,
+        buildMarker: makeMarker(args.recipient, args.valueAtomic),
+        commit: (marker) => {
+          args.commitBurnIntent(marker, 'merchant');
+          persist({ burnIntent: marker });
+        },
+        broadcast: () => burn(args.recipient, args.valueAtomic),
+        onBroadcast: (hash) => {
+          persist({ burnTxHash: hash });
+          onProgress({ kind: 'source_tx_pending', hash });
+        },
+        label: 'cctp burn',
+      });
     }
     if (needFeeBurn) {
       // needFeeBurn → bridgeFee=true → isFeeReceiverBridgeable が feeReceiver!==undefined を保証
-      const feeBurnHash = await burn(feeReceiver!, feeAmount);
-      persist({ feeBurnTxHash: feeBurnHash });
-      onProgress({ kind: 'fee_source_tx_pending', hash: feeBurnHash });
-      await waitForReceiptOrThrow(
-        args.sourcePublicClient,
-        feeBurnHash,
-        'cctp fee burn',
-      );
+      await settleBurn({
+        client: args.sourcePublicClient,
+        buildMarker: makeMarker(feeReceiver!, feeAmount),
+        commit: (marker) => {
+          args.commitBurnIntent(marker, 'fee');
+          persist({ feeBurnIntent: marker });
+        },
+        broadcast: () => burn(feeReceiver!, feeAmount),
+        onBroadcast: (hash) => {
+          persist({ feeBurnTxHash: hash });
+          onProgress({ kind: 'fee_source_tx_pending', hash });
+        },
+        label: 'cctp fee burn',
+      });
     }
   }
 
@@ -644,7 +1044,11 @@ export async function executeCctpTransfer(
   const merchantMintLanded = state.mintTxHash
     ? await txAlreadySucceeded(args.destPublicClient, state.mintTxHash)
     : false;
-  const feeMintLanded = !bridgeFee
+  // D3: fee slot が未確定の run では fee を「この run の対象外」に倒す (poll も mint も
+  // しない)。未確定 = burn したかどうかが判らない状態なので、その hash で Iris を poll すると
+  // timeout まで待たされ、merchant の mint が fee に人質を取られる。
+  const feeInScope = bridgeFee && feeUnresolved === undefined;
+  const feeMintLanded = !feeInScope
     ? true
     : state.feeMintTxHash
       ? await txAlreadySucceeded(args.destPublicClient, state.feeMintTxHash)
@@ -808,6 +1212,7 @@ export async function executeCctpTransfer(
     mintTxHash: state.mintTxHash,
     feeBurnTxHash: state.feeBurnTxHash,
     feeMintTxHash: state.feeMintTxHash,
+    feeBurnUnresolved: feeUnresolved,
     destChainId: args.destChainId,
   };
 }
