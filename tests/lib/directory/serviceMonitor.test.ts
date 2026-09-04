@@ -96,8 +96,12 @@ describe('serviceChangelog', () => {
       const cur = changelog[i];
       const prevKey = prev.slug ?? prev.provider ?? '';
       const curKey = cur.slug ?? cur.provider ?? '';
+      // 実装 (serviceChangelog) と同じ localeCompare で比較する。同日に slug (小文字) と
+      // provider 表示名 (大文字始まり) が混在する日 (第 2 回週次の verified 群) では
+      // バイト順 (<=) と localeCompare が食い違うため、比較器を揃える。
       expect(
-        prev.date < cur.date || (prev.date === cur.date && prevKey <= curKey),
+        prev.date < cur.date ||
+          (prev.date === cur.date && prevKey.localeCompare(curKey) <= 0),
       ).toBe(true);
     }
   });
@@ -213,7 +217,7 @@ describe('createServiceMonitorEnvelope', () => {
     expect(uncapped.nextChangedSince).toBe(NOW.slice(0, 10));
   });
 
-  it('E3(b): 2 回呼び出しで前進する — 重複ゼロ・最後は hasMore:false', () => {
+  it('E3(b): nextChangedSince を回し続けると前進する — 重複ゼロ・最後は hasMore:false', () => {
     const baselineDate = baselineAddedDate();
     const all = createServiceMonitorEnvelope(
       { changedSince: baselineDate, limit: SERVICE_MONITOR_MAX_LIMIT },
@@ -221,28 +225,24 @@ describe('createServiceMonitorEnvelope', () => {
       NOW,
     ).changes;
 
-    const first = createServiceMonitorEnvelope(
-      { changedSince: baselineDate, limit: 5 },
-      {},
-      NOW,
-    );
-    expect(first.hasMore).toBe(true);
-    const second = createServiceMonitorEnvelope(
-      { changedSince: first.nextChangedSince, limit: 5 },
-      {},
-      NOW,
-    );
-    expect(second.changes.length).toBeGreaterThan(0);
-    expect(second.hasMore).toBe(false);
-
     const key = (e: { slug?: string; date: string; changeType: string }) =>
       `${e.slug ?? ''}|${e.date}|${e.changeType}`;
-    const firstKeys = first.changes.map(key);
-    const secondKeys = second.changes.map(key);
-    // 2 回目に 1 件も再配信されない (inclusive 比較でも重複ゼロ)。
-    expect(secondKeys.filter((k) => firstKeys.includes(k))).toEqual([]);
-    // 2 回で全件を回収する (取りこぼしゼロ)。
-    expect([...firstKeys, ...secondKeys].sort()).toEqual(all.map(key).sort());
+    // 買い手の週次ジョブと同じ回し方: 応答の nextChangedSince をそのままエコーする。
+    const pages: string[][] = [];
+    let cursor = baselineDate;
+    for (let i = 0; i < 20; i++) {
+      const page = createServiceMonitorEnvelope({ changedSince: cursor, limit: 5 }, {}, NOW);
+      expect(page.changes.length).toBeGreaterThan(0);
+      pages.push(page.changes.map(key));
+      if (!page.hasMore) break;
+      expect(page.nextChangedSince > cursor).toBe(true); // 必ず前進 (同じ日を返し続けない)
+      cursor = page.nextChangedSince;
+    }
+    expect(pages.length).toBeGreaterThan(1); // 実際にページングが起きている
+    const seen = pages.flat();
+    // 再配信ゼロ (inclusive 比較でも重複しない)・取りこぼしゼロ。
+    expect(new Set(seen).size).toBe(seen.length);
+    expect([...seen].sort()).toEqual(all.map(key).sort());
   });
 
   it('E3: snapshot の hasMore は「全イベント数 > limit」', () => {
