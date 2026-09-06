@@ -45,7 +45,9 @@ vi.mock('@/lib/x402/reverify', async (importOriginal) => {
     listExternalReverifyIds: async () => io.externalIds,
     // storage エラー枝: record 取得が失敗し続ける 1 件を再現する。
     readExternalReverifyTarget: async () =>
-      io.targetStorageError ? { ok: false as const } : { ok: true as const, resource: null },
+      io.targetStorageError
+        ? { ok: false as const, detail: 'http_error 500 ERR simulated' }
+        : { ok: true as const, resource: null },
     probeForReverifyDetailed: async () => ({
       verdict: 'ok_402_openpay' as const,
       authClass: 'clear' as const,
@@ -116,7 +118,11 @@ describe('GET /api/cron/reverify cursor quarantine', () => {
       offset: 0,
       storageErrorStreak: 2,
     });
-    expect(logs.warn).toHaveLength(0);
+    // 1〜2 回目は quarantine しない (storage 失敗の内訳 warn は毎回出る)。
+    expect(logs.warn.map(([event]) => event)).toEqual([
+      'x402.reverify.storage_error',
+      'x402.reverify.storage_error',
+    ]);
   });
 
   it('3 回目の連続失敗で warn を出し batch を quarantine して cursor を進める', async () => {
@@ -130,11 +136,34 @@ describe('GET /api/cron/reverify cursor quarantine', () => {
     const quarantined = io.writes.at(-1) as ReverifyCursor;
     expect(quarantined.offset).toBe(25);
     expect(quarantined.storageErrorStreak).toBeUndefined();
-    expect(logs.warn).toEqual([
-      [
-        'x402.reverify.cursor_quarantined',
-        expect.objectContaining({ offset: 0, nextOffset: 25, streak: 3 }),
-      ],
+    expect(logs.warn).toContainEqual([
+      'x402.reverify.cursor_quarantined',
+      expect.objectContaining({ offset: 0, nextOffset: 25, streak: 3 }),
+    ]);
+  });
+
+  // 2026-09-06: 3 日間 503 が続いたのに「どの対象の・どの段階の KV 操作が失敗したか」が
+  // 応答にもログにも無く原因を特定できなかった。503 応答 (GitHub Actions の cron ログに
+  // 出る) と warn の両方に内訳を残す。
+  it('503 応答と warn に storage 失敗の内訳 (対象・段階・KV の文言) を載せる', async () => {
+    io.cursor = { offset: 0 };
+    io.externalIds = ['r0'];
+    const route = await load();
+
+    const response = await route.GET(request('secret'));
+
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as { storageFailures: unknown };
+    expect(body.storageFailures).toEqual([
+      { target: 'external:r0', stage: 'read', detail: 'http_error 500 ERR simulated' },
+    ]);
+    expect(logs.warn).toContainEqual([
+      'x402.reverify.storage_error',
+      expect.objectContaining({
+        failures: [
+          { target: 'external:r0', stage: 'read', detail: 'http_error 500 ERR simulated' },
+        ],
+      }),
     ]);
   });
 
@@ -156,6 +185,7 @@ describe('GET /api/cron/reverify cursor quarantine', () => {
     io.targetStorageError = true;
     expect((await route.GET(request('secret'))).status).toBe(503);
     expect(io.writes.at(-1)).toMatchObject({ storageErrorStreak: 1 });
-    expect(logs.warn).toHaveLength(0);
+    // storage 失敗の内訳 warn は出るが、quarantine の warn は出ない。
+    expect(logs.warn.map(([event]) => event)).toEqual(['x402.reverify.storage_error']);
   });
 });
