@@ -14,6 +14,8 @@ const hold = vi.hoisted(() => {
     mobileOrder: true,
     rateLimitAllowed: true,
     lastRateLimitKey: '',
+    limiterFails: false,
+    counters: new Map<string, number>(),
     resolved: null as unknown as
       | { ok: true; record: HandleRecord | null }
       | { ok: false },
@@ -44,12 +46,23 @@ vi.mock('@/lib/relay/relayGuards', async (importOriginal) => {
     await importOriginal<typeof import('@/lib/relay/relayGuards')>();
   return {
     ...actual,
-    checkReadRateLimit: async (key: string) => {
+    checkReadRateLimit: async (key: string, max: number, windowSec: number) => {
       hold.lastRateLimitKey = key;
-      return hold.rateLimitAllowed;
+      return hold.rateLimitAllowed && actual.checkReadRateLimit(key, max, windowSec);
     },
   };
 });
+
+vi.mock('@/lib/kv', () => ({
+  isKvConfigured: () => true,
+  kvIncr: async (key: string) => {
+    if (hold.limiterFails) return { ok: false, reason: 'network_error' };
+    const value = (hold.counters.get(key) ?? 0) + 1;
+    hold.counters.set(key, value);
+    return { ok: true, value };
+  },
+  kvExpire: async () => ({ ok: true, value: 1 }),
+}));
 
 // vi.fn で包む: 「KV を読まずに 400/404/429 で返す」テストを非空虚にする (呼ばれていない
 // ことを実際に検証できるようにする)。
@@ -108,6 +121,8 @@ beforeEach(() => {
   hold.preorderTime = true;
   hold.mobileOrder = true;
   hold.rateLimitAllowed = true;
+  hold.limiterFails = false;
+  hold.counters.clear();
   hold.resolved = { ok: true, record: record(preorder()) };
   hold.resolveHandle.mockClear();
 });
@@ -152,6 +167,24 @@ describe('POST /api/order/admission', () => {
     );
 
     expect(hold.lastRateLimitKey).toBe('admission:198.51.100.0/24');
+  });
+
+  it('同じ /24 の 600 回まで許可し 601 回目は handle 解決前に 429', async () => {
+    for (let i = 0; i < 600; i++) {
+      expect((await POST(request({}, {
+        'x-vercel-forwarded-for': '172.71.0.1',
+        'cf-connecting-ip': `198.51.100.${i % 16 + 1}`,
+      }))).status).toBe(200);
+    }
+    hold.resolveHandle.mockClear();
+    expect((await POST(request({}, { 'x-vercel-forwarded-for': '198.51.100.99' }))).status).toBe(429);
+    expect(hold.resolveHandle).not.toHaveBeenCalled();
+  });
+
+  it('limiter KV 障害は fail-open で受付確認を止めない', async () => {
+    hold.limiterFails = true;
+    expect((await POST(request())).status).toBe(200);
+    expect(hold.resolveHandle).toHaveBeenCalled();
   });
 
   it('最新 storefront と server 時刻で利用可能な preorder は許可', async () => {

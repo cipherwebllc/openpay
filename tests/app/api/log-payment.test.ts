@@ -41,6 +41,7 @@ import {
   isKvConfigured,
 } from '@/lib/kv';
 import { paymentLogDailyKey, listPaymentLogKeys } from '@/lib/paymentLog';
+import { logger } from '@/lib/logger';
 
 const validBody = {
   flow: 'batch' as const,
@@ -67,12 +68,16 @@ function req(body: unknown): Request {
 
 describe('POST /api/log/payment', () => {
   beforeEach(() => {
+    vi.stubEnv('IP_HASH_SECRET', '');
+    rl.calls = [];
+    vi.mocked(logger.info).mockClear();
     vi.mocked(kvLpush).mockReset().mockResolvedValue({ ok: true, value: 1 });
     vi.mocked(kvLtrim).mockReset().mockResolvedValue({ ok: true, value: 'OK' });
     vi.mocked(kvExpire).mockReset().mockResolvedValue({ ok: true, value: 1 });
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('正常 payload を受理し KV に LPUSH する', async () => {
@@ -358,8 +363,7 @@ describe('POST /api/log/payment', () => {
       body: JSON.stringify(validBody),
     });
     await POST(r);
-    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
-    expect(entry.ipPrefix).toBe('198.51.100.0/24');
+    expect(rl.calls).toEqual([['logpay:198.51.100.0/24', 60, 60]]);
   });
 
   it('x-real-ip しか無ければ IP 不明扱い (信用しない)', async () => {
@@ -372,16 +376,14 @@ describe('POST /api/log/payment', () => {
       body: JSON.stringify(validBody),
     });
     await POST(r);
-    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
-    expect(entry.ipPrefix).toBe('unknown');
+    expect(rl.calls).toEqual([['logpay:unknown', 60, 60]]);
   });
 
   it('IP header が完全に欠落していても degrade する (P3: 単一 anonymizeIp の fallback = unknown)', async () => {
     await POST(req(validBody));
-    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
     // P3: relayRoute の anonymizeIp に単一情報源化。不正/欠落 IP の fallback は '' から 'unknown' へ
     // (空文字バケツ相乗りを避ける明示値)。
-    expect(entry.ipPrefix).toBe('unknown');
+    expect(rl.calls).toEqual([['logpay:unknown', 60, 60]]);
   });
 
   it('userAgent は 200 文字で truncate', async () => {
@@ -566,6 +568,7 @@ describe('POST /api/log/payment', () => {
       maliciousField: '<script>alert(1)</script>',
       __proto__pollution: { x: 1 },
       arbitrary: 'should not be stored',
+      ipPrefix: '203.0.113.0/24',
     };
     await POST(req(polluted));
     const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
@@ -573,7 +576,7 @@ describe('POST /api/log/payment', () => {
     expect(entry.arbitrary).toBeUndefined();
     // server 側 field は当然含まれる
     expect(entry.serverTs).toBeDefined();
-    expect(entry.ipPrefix).toBeDefined();
+    expect(entry).not.toHaveProperty('ipPrefix');
     // 正規 field は維持
     expect(entry.userOpHash).toBe(validBody.userOpHash);
   });
@@ -589,7 +592,7 @@ describe('POST /api/log/payment', () => {
     expect(entry.hijack).toBeUndefined();
   });
 
-  it('IPv4 を /24 で匿名化する', async () => {
+  it('IPv4 を limiter の fallback では /24 で匿名化する', async () => {
     const r = new Request('http://localhost/api/log/payment', {
       method: 'POST',
       headers: {
@@ -599,23 +602,33 @@ describe('POST /api/log/payment', () => {
       body: JSON.stringify(validBody),
     });
     await POST(r);
-    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
-    expect(entry.ipPrefix).toBe('203.0.113.0/24');
+    expect(rl.calls).toEqual([['logpay:203.0.113.0/24', 60, 60]]);
   });
 
-  it('IPv6 を /64 で匿名化する', async () => {
-    const r = new Request('http://localhost/api/log/payment', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-forwarded-for': '2001:db8:1:2:3:4:5:6',
-      },
-      body: JSON.stringify(validBody),
-    });
-    await POST(r);
-    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
-    expect(entry.ipPrefix).toBe('2001:db8:1:2::/64');
-  });
+  it.each(['203.0.113.45', '2001:db8:1:2:3:4:5:6'])(
+    '利用者 IP %s の prefix は main / daily list と logger に保存しない',
+    async (ip) => {
+      const r = new Request('http://localhost/api/log/payment', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-vercel-forwarded-for': '172.71.0.1',
+          'cf-connecting-ip': ip,
+        },
+        body: JSON.stringify(validBody),
+      });
+      await POST(r);
+      expect(kvLpush).toHaveBeenCalledTimes(2);
+      for (const [, serialized] of vi.mocked(kvLpush).mock.calls) {
+        expect(JSON.parse(serialized)).not.toHaveProperty('ipPrefix');
+        expect(serialized).not.toContain(ip);
+      }
+      expect(logger.info).toHaveBeenCalledTimes(1);
+      expect(logger.info).toHaveBeenCalledWith(
+        'payment.event', expect.not.objectContaining({ ipPrefix: expect.anything() }),
+      );
+    },
+  );
 });
 
 describe('GET /api/log/payment/export', () => {

@@ -8,7 +8,7 @@
 
 import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
-import { anonymizedIpPrefix } from '@/lib/net/cloudflareIps';
+import { anonymizedIpPrefix } from '@/lib/net/ipPrefix';
 import type { RelayResult } from './jpycRelay';
 
 // body サイズ上限 (両 route 共通)。
@@ -29,7 +29,7 @@ export function isDecWithin(v: unknown, maxDigits: number): v is string {
 
 // IPv4 は /24・IPv6 は /64 (展開してから切る)。IP でなければ 'unknown'。
 // 2026-09-06: 旧実装は圧縮 IPv6 (`2001:db8::1`) を `2001:db8::1::/64` にして完全なアドレスを残していた
-// (cf-connecting-ip で真の利用者 IP が流れるようになり実害化) → lib/net/cloudflareIps の展開版へ。
+// (cf-connecting-ip で真の利用者 IP が流れるようになり実害化) → lib/net/ipPrefix の展開版へ。
 export function anonymizeIp(ip: string): string {
   const first = ip.split(',')[0].trim();
   return anonymizedIpPrefix(first) ?? 'unknown';

@@ -75,9 +75,11 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // IP 固定窓 (公開・無認証の handle 解決を伴う endpoint)。単一 IP の flood が KV read を
   // 押し上げて正規の注文導線に波及するのを、body 解析と KV 参照の前で止める。上限は正当な
-  // CTA/submit (数回/注文) の遥か上に置く (/api/order/status と同じ 120/分)。
+  // CTA/submit (数回/注文) と共有 NAT の同時客を許容する 600/分に置く。admission body は
+  // 注文トークンを持たないため subnet backstop のみ。storage 障害は helper の fail-open で
+  // 署名前の受付確認へ波及させない。
   const ipPrefix = anonymizeIp(clientIp(req) ?? '');
-  if (!(await checkReadRateLimit(`admission:${ipPrefix}`, 120, 60))) {
+  if (!(await checkReadRateLimit(`admission:${ipPrefix}`, 600, 60))) {
     return json({ ok: false, error: 'rate_limited' }, 429);
   }
 

@@ -39,6 +39,9 @@ describe('ipInCidr', () => {
     expect(ipInCidr('104.16.0.1', '104.16.0.0/')).toBe(false);
     expect(ipInCidr('104.16.0.1', '104.16.0.0/0/junk')).toBe(false);
     expect(ipInCidr('104.16.0.1', '104.16.0.0/ 13')).toBe(false);
+    expect(ipInCidr('104.16.0.1', '104.16.0.0/00')).toBe(false);
+    expect(ipInCidr('104.16.0.1', '104.16.0.0/013')).toBe(false);
+    expect(ipInCidr('2606:4700::1', '2606:4700::/032')).toBe(false);
   });
 
   it('IPv4-mapped IPv6 は IPv4 として判定する (レビュー指摘: Node/Vercel が ::ffff: 形で渡す場合)', () => {

@@ -6,9 +6,9 @@
 // 返さない = トークンが万一漏れてもプライバシー被害を最小化する。書込・送金は一切しない (read only)。
 // flag OFF=404・KV 未設定/障害=503・不正トークン=400・未知/失効/受注消滅=404。設計: plans/order-pickup-notify.md。
 //
-// rate-limit: IP 単位の固定窓 (120/分・checkReadRateLimit) を pointer 参照の前に置く。秘密トークン
-// ゆえ列挙はできないが、公開・無認証の read ゆえ単一 IP の volumetric flood による KV read 圧力を
-// 上限で抑える。8s ポーリング (≒8/分・複数タブ/復帰再取得を含めても上限の遥か下) は阻害しない。
+// rate-limit: 注文トークンごと 120/分 + subnet backstop 600/分を pointer 参照の前に置く。
+// 公開 read の flood が KV read 圧力へ波及するのを抑え、共有 NAT の 16 客が 8s ごとに
+// poll する 128 req/分 (複数タブ/復帰再取得も含む余裕) を共有枠で止めない。
 
 import { NextResponse } from 'next/server';
 import { isAddress } from 'viem';
@@ -48,11 +48,15 @@ export async function GET(req: Request): Promise<NextResponse> {
   const token = new URL(req.url).searchParams.get('t') ?? '';
   if (!isOrderTokenLike(token)) return err('invalid_token', 400);
 
-  // IP 固定窓 (公開・無認証 read の volumetric flood 抑制)。正当な 8s ポーリングの遥か上の寛容な上限。
+  // token を替える flood は subnet、単一注文の連打は token ごとに抑える。
+  // limiter storage 障害は helper の fail-open で注文状況の取得へ波及させない。
   const ipPrefix = anonymizeIp(
     clientIp(req) ?? '',
   );
-  if (!(await checkReadRateLimit(`orderstatus:${ipPrefix}`, 120, 60))) {
+  if (!(await checkReadRateLimit(`orderstatus:${ipPrefix}`, 600, 60))) {
+    return err('rate_limited', 429);
+  }
+  if (!(await checkReadRateLimit(`orderstatus:token:${token}`, 120, 60))) {
     return err('rate_limited', 429);
   }
 

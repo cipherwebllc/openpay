@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { anonymizedIpPrefix } from '@/lib/net/cloudflareIps';
+import { anonymizedIpPrefix } from '@/lib/net/ipPrefix';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 
 // 2026-09-06: cf-connecting-ip で真の利用者 IP が流れるようになったため、匿名化が「文字列の切り出し」

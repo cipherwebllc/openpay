@@ -12,6 +12,7 @@ export const LOG_FEE_BREAKDOWN_VERSION = 1 as const;
 
 // KV 保存先のキー導出 (単一情報源)。
 // - PAYMENT_LOG_KV_KEY: 既存の単一リスト。export / stats が読む現役の読み出し口。
+//   TTL がないため利用者の ipPrefix は保存しない (reader がない日次 list / logger も同じ)。
 //   未認証 write を 1 本の cap 付きリストに集約しているため、量で押されると古い entry が
 //   LTRIM で押し出される (eviction)。
 // - paymentLogDailyKey: 日次パーティション。1 日分が別キー + TTL なので、ある日の flood が

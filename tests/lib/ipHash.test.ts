@@ -42,6 +42,14 @@ describe('hashIp', () => {
     );
     expect(hashIp('2001:db8::1')).toBe(expanded);
   });
+
+  it.each(['::ffff:203.0.113.9', '::ffff:cb00:7109', '0:0:0:0:0:ffff:cb00:7109'])(
+    'IPv4-mapped IPv6 %s は dotted IPv4 と同じ bucket に入る',
+    (ip) => {
+      vi.stubEnv('IP_HASH_SECRET', SECRET);
+      expect(hashIp(ip)).toBe(hashIp('203.0.113.9'));
+    },
+  );
 });
 
 // C3: secret 欠落/過短は「IP レート制限が全 endpoint で無効」を意味するが、hashIp=null は
@@ -106,6 +114,29 @@ describe('clientIp', () => {
     expect(clientIp(req)).toBe('198.51.100.7');
   });
 
+  it.each(['172.71.0.1, 10.0.0.1', '::ffff:172.71.0.1', '::ffff:ac47:1'])(
+    'Vercel 接続元 %s を正規化して Cloudflare の trust を判定する',
+    (connecting) => {
+      const req = new Request('https://example.test', {
+        headers: {
+          'x-vercel-forwarded-for': connecting,
+          'cf-connecting-ip': '::ffff:cb00:7109',
+        },
+      });
+      expect(clientIp(req)).toBe('203.0.113.9');
+    },
+  );
+
+  it('XFF だけの Cloudflare IP は cf-connecting-ip を信頼しない', () => {
+    const req = new Request('https://example.test', {
+      headers: {
+        'x-forwarded-for': '172.71.0.1, 10.0.0.1',
+        'cf-connecting-ip': '198.51.100.7',
+      },
+    });
+    expect(clientIp(req)).toBe('172.71.0.1');
+  });
+
   it('接続元が Cloudflare でなければ cf-connecting-ip を無視する (Vercel 直叩きの偽装を通さない)', () => {
     const req = new Request('https://example.test', {
       headers: {
@@ -160,10 +191,48 @@ describe('clientIp', () => {
       headers: {
         'x-vercel-forwarded-for': 'invalid',
         'x-forwarded-for': '203.0.113.8',
+        'cf-connecting-ip': '198.51.100.7',
       },
     });
 
     expect(clientIp(invalidPreferred)).toBeNull();
     expect(clientIp(new Request('https://example.test'))).toBeNull();
+  });
+});
+
+describe('clientIp の Cloudflare trust 退化警告', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    logger.warn.mockClear();
+  });
+
+  it.each([
+    ['x-vercel-forwarded-for', '203.0.113.9', 4, true],
+    ['x-vercel-forwarded-for', '2001:db8::1', 6, true],
+    ['x-vercel-forwarded-for', 'invalid', null, true],
+    ['x-forwarded-for', '172.71.0.1', 4, false],
+  ] as const)('信頼できない %s=%s は IP を記録せず 1 回だけ warn', async (header, ip, version, vercel) => {
+    const { clientIp: fresh } = await import('@/lib/net/ipHash');
+    const req = new Request('https://example.test', {
+      headers: { [header]: ip, 'cf-connecting-ip': '198.51.100.7' },
+    });
+    fresh(req);
+    fresh(req);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('ratelimit.cf_ip_untrusted', {
+      connectingIpVersion: version,
+      hasVercelForwardedFor: vercel,
+    });
+  });
+
+  it('信頼できる Cloudflare 接続元、または CF header 無しなら warn しない', async () => {
+    const { clientIp: fresh } = await import('@/lib/net/ipHash');
+    fresh(new Request('https://example.test', {
+      headers: { 'x-vercel-forwarded-for': '172.71.0.1', 'cf-connecting-ip': '198.51.100.7' },
+    }));
+    fresh(new Request('https://example.test', {
+      headers: { 'x-vercel-forwarded-for': '203.0.113.9' },
+    }));
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });
