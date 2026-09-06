@@ -470,17 +470,21 @@ export const REVERIFY_COUNTER_TRANSITION =
   'local before=(o.hidden==true); local failures=0; local authFailures=0; local lastOk=nil; ' +
   'if same then failures=tonumber(o.verification.failures) or 0; ' +
   'authFailures=tonumber(o.verification.authFailures) or 0; lastOk=o.verification.lastOkAt; end; ' +
-  // ⚠️ elseif ブロックの中に入れ子の `if ... end` を書かない (2026-09-06 実害): Upstash 本番エンジンの
-  // Lua パーサが `elseif ... then X; if C then Y end; end;` を「near 'if': syntax error」で拒否し、
-  // 再検証の CAS が 9/3 から 3 日間すべて失敗した (dev DB のエンジンと wasmoon の Lua 5.4 は受理する
-  // ので、テストでは検出できない)。monotone な hidden は boolean 式 `hidden=(hidden or cond)` で書く。
-  // tests/lib/x402/reverify-cas.test.ts がこの構文をフェンスする。
+  // ⚠️ Upstash 本番エンジンの Lua パーサは Lua 5.1 の全構文を受理しない (2026-09-06 実害・再検証の
+  // CAS が 9/3 から 3 日間すべて 400)。拒否が確認された形:
+  //   (1) elseif 分岐内の入れ子 if   `elseif C then X; if D then Y end; end;`  → near 'if'
+  //   (2) 代入右辺の括弧内 or       `hidden=(hidden or failures>=3);`         → near 'hidden'
+  // dev DB のエンジンと wasmoon (Lua 5.4) は両方受理するので、テストでは検出できない。ここでは
+  // **旧スクリプト (2026-09-03 以前に本番で通っていた) に存在した構文だけ** を使う:
+  // `if A then s; s; elseif B then s; end;` / `if A and B then s end;` / `x=(A and B)`。
+  // monotone な hidden は分岐の外の単文 if で立てる (意味は JS 側 transitionVerification と同一)。
+  // tests/lib/x402/reverify-cas.test.ts が (1)(2) の構文をフェンスする。
   'local hidden=before; if ARGV[4]==\'ok\' then failures=0; hidden=false; lastOk=ARGV[2]; ' +
-  'elseif ARGV[4]==\'violation\' then failures=failures+1; ' +
-  `hidden=(hidden or failures>=${REVERIFY_HIDE_THRESHOLD}); end; ` +
+  'elseif ARGV[4]==\'violation\' then failures=failures+1; end; ' +
+  `if ARGV[4]=='violation' and failures>=${REVERIFY_HIDE_THRESHOLD} then hidden=true end; ` +
   'if ARGV[5]==\'clear\' then authFailures=0; ' +
-  'elseif ARGV[5]==\'block\' then authFailures=authFailures+1; ' +
-  `hidden=(hidden or authFailures>=${REVERIFY_AUTH_HIDE_THRESHOLD}); end; ` +
+  'elseif ARGV[5]==\'block\' then authFailures=authFailures+1; end; ' +
+  `if ARGV[5]=='block' and authFailures>=${REVERIFY_AUTH_HIDE_THRESHOLD} then hidden=true end; ` +
   'local v={lastCheckedAt=ARGV[2],failures=failures,lastRunId=ARGV[3],probedUrl=ARGV[1]}; ' +
   'if authFailures>0 then v.authFailures=authFailures end; ' +
   'if lastOk then v.lastOkAt=lastOk end; o.verification=v; o.hidden=hidden; ' +

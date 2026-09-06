@@ -96,9 +96,12 @@ describe('CAS script の合成', () => {
   // (elseif ブロック内の入れ子 if) を「near 'if': syntax error」で拒否し、reverify の CAS が 9/3 から
   // 3 日間すべて失敗した。wasmoon (Lua 5.4) も dev DB も受理するので実行テストでは検出できない —
   // 構文そのものをフェンスする。monotone な hidden は boolean 式で書く。
-  it('Upstash 本番が拒否する構文 (elseif ブロック内の入れ子 if・"end; end") を含まない', () => {
+  it('Upstash 本番が拒否する構文 (elseif 内の入れ子 if・"end; end"・代入右辺の括弧内 or) を含まない', () => {
     for (const script of [CAS_EXTERNAL_REVERIFY, CAS_FIRST_PARTY_REVERIFY]) {
       expect(script).not.toMatch(/end;\s*end\b/);
+      // (2) `x=(a or b)` — 2026-09-06 の 2 回目の 400 (near 'hidden')。`x=(a and b)` は旧スクリプトで
+      // 本番実績があるので許す。
+      expect(script).not.toMatch(/=\([^()]*\bor\b/);
       // 素の `if` ブロック内の入れ子 if (first-party の pcall 判定) は旧スクリプトから本番で通っている。
       // 拒否されたのは **elseif** 分岐の中の `if ... end`。1 行スクリプトなので
       // 「elseif ... then から次の end; までに `if` トークンが無い」で近似する。
