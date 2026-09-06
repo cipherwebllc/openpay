@@ -92,6 +92,26 @@ describe('CAS script の合成', () => {
     expect(CAS_FIRST_PARTY_REVERIFY).not.toContain(REVERIFY_HIDDEN_URL_LEDGER);
   });
 
+  // 2026-09-06 実害: Upstash 本番エンジンの Lua パーサは `elseif ... then X; if C then Y end; end;`
+  // (elseif ブロック内の入れ子 if) を「near 'if': syntax error」で拒否し、reverify の CAS が 9/3 から
+  // 3 日間すべて失敗した。wasmoon (Lua 5.4) も dev DB も受理するので実行テストでは検出できない —
+  // 構文そのものをフェンスする。monotone な hidden は boolean 式で書く。
+  it('Upstash 本番が拒否する構文 (elseif ブロック内の入れ子 if・"end; end") を含まない', () => {
+    for (const script of [CAS_EXTERNAL_REVERIFY, CAS_FIRST_PARTY_REVERIFY]) {
+      expect(script).not.toMatch(/end;\s*end\b/);
+      // 素の `if` ブロック内の入れ子 if (first-party の pcall 判定) は旧スクリプトから本番で通っている。
+      // 拒否されたのは **elseif** 分岐の中の `if ... end`。1 行スクリプトなので
+      // 「elseif ... then から次の end; までに `if` トークンが無い」で近似する。
+      for (const block of script.split(/\bend;/)) {
+        const elseifAt = block.indexOf('elseif ');
+        if (elseifAt === -1) continue;
+        const thenAt = block.indexOf(' then ', elseifAt);
+        expect(thenAt, block).toBeGreaterThan(-1);
+        expect(block.slice(thenAt + 6), block).not.toMatch(/\bif\b/);
+      }
+    }
+  });
+
   it('CAS_FIRST_PARTY_REVERIFY を直接実行しても state を作る', async () => {
     const key = firstPartyVerificationKey('/api/paid/demo');
     const result = await runRedisLua(

@@ -29,6 +29,12 @@ KNOWN DIVERGENCES): ①本番 Redis は Lua 5.1 (全数値 double)・wasmoon は
 ③`redis.call` のエラー文言は実 Redis と一致しない。**エミュレータであって Upstash 実機ではない**ので、
 money-path の CAS (registry / reverify / purchaseIntent / storeUsdcIntent) は掟 15 の実機 smoke を
 引き続き省略しない。
+④ **Upstash 本番エンジンの Lua パーサは `elseif ... then X; if C then Y end; end;` (elseif 分岐内の
+入れ子 if) を「near 'if': syntax error」で拒否する** (2026-09-06 実害: reverify の CAS が 9/3〜9/6 の
+3 日間すべて 400 で失敗・wasmoon と dev DB は受理するため事前検出不能だった)。1 行 CAS では elseif
+分岐の中に `if` を書かず boolean 式 (`hidden=(hidden or cond)`) で書く。`tests/lib/x402/reverify-cas.test.ts`
+がこの構文をフェンスする。新しい Lua 構文を足したら **本番 DB と同じエンジンで 1 回実行して確かめる**
+(dev DB は別エンジン版のことがある)。storage 失敗の内訳は cron 応答 `storageFailures[].detail` に出る。
 
 ## 2. Deploy (user-manual)
 

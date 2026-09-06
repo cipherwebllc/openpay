@@ -470,12 +470,17 @@ export const REVERIFY_COUNTER_TRANSITION =
   'local before=(o.hidden==true); local failures=0; local authFailures=0; local lastOk=nil; ' +
   'if same then failures=tonumber(o.verification.failures) or 0; ' +
   'authFailures=tonumber(o.verification.authFailures) or 0; lastOk=o.verification.lastOkAt; end; ' +
+  // ⚠️ elseif ブロックの中に入れ子の `if ... end` を書かない (2026-09-06 実害): Upstash 本番エンジンの
+  // Lua パーサが `elseif ... then X; if C then Y end; end;` を「near 'if': syntax error」で拒否し、
+  // 再検証の CAS が 9/3 から 3 日間すべて失敗した (dev DB のエンジンと wasmoon の Lua 5.4 は受理する
+  // ので、テストでは検出できない)。monotone な hidden は boolean 式 `hidden=(hidden or cond)` で書く。
+  // tests/lib/x402/reverify-cas.test.ts がこの構文をフェンスする。
   'local hidden=before; if ARGV[4]==\'ok\' then failures=0; hidden=false; lastOk=ARGV[2]; ' +
   'elseif ARGV[4]==\'violation\' then failures=failures+1; ' +
-  `if failures>=${REVERIFY_HIDE_THRESHOLD} then hidden=true end; end; ` +
+  `hidden=(hidden or failures>=${REVERIFY_HIDE_THRESHOLD}); end; ` +
   'if ARGV[5]==\'clear\' then authFailures=0; ' +
   'elseif ARGV[5]==\'block\' then authFailures=authFailures+1; ' +
-  `if authFailures>=${REVERIFY_AUTH_HIDE_THRESHOLD} then hidden=true end; end; ` +
+  `hidden=(hidden or authFailures>=${REVERIFY_AUTH_HIDE_THRESHOLD}); end; ` +
   'local v={lastCheckedAt=ARGV[2],failures=failures,lastRunId=ARGV[3],probedUrl=ARGV[1]}; ' +
   'if authFailures>0 then v.authFailures=authFailures end; ' +
   'if lastOk then v.lastOkAt=lastOk end; o.verification=v; o.hidden=hidden; ' +
