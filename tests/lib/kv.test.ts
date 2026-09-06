@@ -10,12 +10,43 @@ describe('lib/kv', () => {
     vi.resetModules();
     delete process.env.KV_REST_API_URL;
     delete process.env.KV_REST_API_TOKEN;
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
   });
 
   afterEach(() => {
     if (ORIGINAL.url) process.env.KV_REST_API_URL = ORIGINAL.url;
     if (ORIGINAL.token) process.env.KV_REST_API_TOKEN = ORIGINAL.token;
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
     vi.restoreAllMocks();
+  });
+
+  // 2026-09-06: 本番の KV_REST_API_* は Vercel Storage 連携が旧プロキシに戻すため、連携に触られない
+  // UPSTASH_REDIS_REST_* を優先する。両方あれば UPSTASH 側、無ければ KV_* に fallback。
+  it('UPSTASH_REDIS_REST_URL/TOKEN が KV_REST_API_URL/TOKEN より優先される', async () => {
+    process.env.KV_REST_API_URL = 'https://legacy.kv.vercel-storage.com';
+    process.env.KV_REST_API_TOKEN = 'legacy-token';
+    process.env.UPSTASH_REDIS_REST_URL = 'https://direct.upstash.io/';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'direct-token';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ result: 1 }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { isKvConfigured, kvGet } = await import('@/lib/kv');
+    expect(isKvConfigured()).toBe(true);
+    await kvGet('k');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://direct.upstash.io/');
+    expect(init.headers.Authorization).toBe('Bearer direct-token');
+  });
+
+  it('UPSTASH_REDIS_REST_* が無ければ KV_REST_API_* に fallback する', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ result: 1 }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvGet } = await import('@/lib/kv');
+    await kvGet('k');
+    expect(fetchMock.mock.calls[0][0]).toBe('https://example.upstash.io/');
   });
 
   it('env 未設定時は isKvConfigured=false、kvLpush は unconfigured を返す', async () => {
