@@ -30,9 +30,14 @@ function errInfo(e: unknown): { name: string; detail: string } {
   };
 }
 
+// 接続先の解決順: UPSTASH_REDIS_REST_URL/TOKEN (Upstash 直結・優先) → KV_REST_API_URL/TOKEN (互換)。
+// 2026-09-06: 本番の KV_REST_API_* は Vercel の Storage 連携 (旧 Vercel KV) が管理する値で、手で
+// Upstash 直結 URL に書き換えてもデプロイ時に旧プロキシ (*.kv.vercel-storage.com) へ戻り、
+// プロキシ経由の EVAL が構文エラー (400) を返し続けた。連携に触られない別名を先に読むことで、
+// 直結を確実にする (docs/DEPLOY_CHECKLIST.md §1.1 ④)。
 function endpoint(): { url: string; token: string } | null {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
+  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
   if (!url || !token) return null;
   return { url: url.replace(/\/$/, ''), token };
 }
