@@ -94,6 +94,29 @@ describe('lib/kv', () => {
     expect(res).toEqual({ ok: false, reason: 'http_error', status: 500 });
   });
 
+  // 2026-09-06: Upstash は Redis レベルの失敗 (Lua 実行エラー等) を HTTP 400 + {error} で返す。
+  // body を読まないと detail が「400」だけになり、reverify の 3 日間 503 の原因が追えなかった。
+  it('HTTP 非 2xx でも body の {error} 文字列は detail として保持する (値は含めない)', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'ERR user_script:1: attempt to index a nil value' }),
+      }),
+    );
+    const { kvEval } = await import('@/lib/kv');
+    const res = await kvEval('return 1', [], []);
+    expect(res).toEqual({
+      ok: false,
+      reason: 'http_error',
+      status: 400,
+      detail: 'ERR user_script:1: attempt to index a nil value',
+    });
+  });
+
   it('Upstash 形式 {error: ...} は http_error として detail に文字列を保持', async () => {
     process.env.KV_REST_API_URL = 'https://example.upstash.io';
     process.env.KV_REST_API_TOKEN = 'secret';
