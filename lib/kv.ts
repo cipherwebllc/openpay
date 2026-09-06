@@ -64,7 +64,23 @@ async function call<T>(body: unknown[]): Promise<KvResult<T>> {
     return { ok: false, reason: timedOut ? 'timeout' : 'network_error', detail };
   }
   if (!res.ok) {
-    return { ok: false, reason: 'http_error', status: res.status };
+    // Upstash は Redis レベルの失敗 (WRONGTYPE / Lua 実行エラー / 引数不正 等) も非 2xx +
+    // {error: "ERR ..."} で返す。body を捨てると detail が「400」だけになり、どのコマンドが
+    // なぜ拒否されたか追えない (2026-09-06: reverify が 3 日間 503 で文言ゼロの実害)。
+    // body の error 文字列だけを bounded に保持する (値・鍵は含めない)。
+    let detail: string | undefined;
+    try {
+      const json = (await res.json()) as { error?: unknown };
+      if (typeof json.error === 'string') detail = json.error.slice(0, 300);
+    } catch {
+      // body が JSON でない (proxy の HTML 等) 場合は status のみ。
+    }
+    return {
+      ok: false,
+      reason: 'http_error',
+      status: res.status,
+      ...(detail !== undefined ? { detail } : {}),
+    };
   }
   try {
     const json = (await res.json()) as { result?: T; error?: string };
