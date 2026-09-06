@@ -29,7 +29,7 @@ import {
   kvEval,
   isKvConfigured,
 } from '@/lib/kv';
-import { checkRateLimit } from '@/lib/relay/relayGuards';
+import { checkRateLimit, checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { clientIp } from '@/lib/net/ipHash';
@@ -374,12 +374,18 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   if (configTo !== merchant) return fail('merchant_mismatch', 403);
 
-  // レート制限 (IP のみ): 単一クライアントの flood は弾くが、別客 (別 IP) の正当な注文は制限しない。
+  // 決済後の登録なので 5/分の枠は txHash ごと: 同じ NAT / 店内 Wi-Fi の別客の通知が
+  // 互いの枠を消費して受注喪失へ波及するのを断つ。同一決済の連打は既存の制限で抑える。
+  // txHash を替える flood が RPC/KV 負荷へ波及するのは寛容な subnet backstop (120/分) で断つ。
+  // 両 limiter の storage 障害は既存 helper と同じ fail-open で受注登録へ波及させない。
   const ipPrefix = anonymizeIp(
     clientIp(req) ?? '',
   );
-  const allowed = await checkRateLimit([`order:${ipPrefix}`]);
+  const allowed = await checkRateLimit([`order:tx:${txHash.toLowerCase()}`]);
   if (!allowed) return fail('rate_limited', 429);
+  if (!(await checkReadRateLimit(`order:${ipPrefix}`, 120, 60))) {
+    return fail('rate_limited', 429);
+  }
 
   const chain = chainObjectForId(chainId);
   const deployment = resolveDeployment('jpyc', chainId);

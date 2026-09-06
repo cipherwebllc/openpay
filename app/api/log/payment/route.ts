@@ -248,8 +248,8 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const entry = {
     serverTs: new Date().toISOString(),
-    // 短期トラブルシュート用に subnet 粒度 (IPv4 /24 / IPv6 /64) で保管。
-    ipPrefix,
+    // ipPrefix は limiter 専用。reader が無く、TTL のない main list への利用者 subnet の
+    // 恒久保存を避けるため、日次 list / logger を含む決済記録には載せない。
     userAgent: (req.headers.get('user-agent') ?? '').slice(0, 200),
     ...payload,
   };
@@ -299,4 +299,3 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   return NextResponse.json({ ok: true });
 }
-

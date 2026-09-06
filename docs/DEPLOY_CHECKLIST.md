@@ -48,9 +48,14 @@ vitest (wasmoon)・dev DB・本番 DB への直接 EVAL は全部「ソースの
     `KV_REST_API_*` は Vercel Storage 連携が管理する名前で手編集が戻されることがある。⚠️ 切替先は必ず
     `x402:resources:index` 等の本番キーが在る DB (2026-09-06 に誤って空 DB へ切り替えて商品/出品が消えた →
     元に戻して復旧)。
-  - open-pay.jp は Cloudflare 配下 (`server: cloudflare`) のため、`clientIp()` が返す IP は Cloudflare の
-    エッジ IP になり IP 固定窓レート制限のキーがリクエストごとにばらける (429 に達しない)。`cf-connecting-ip`
-    優先の修正は別 PR (2026-09-06 発見)。
+  - open-pay.jp は Cloudflare 配下 (`server: cloudflare`) のため、接続元 (`x-vercel-forwarded-for`) は
+    Cloudflare のエッジ IP になりリクエストごとに変わる → IP 固定窓レート制限のキーがばらけて 429 に達しない
+    (2026-09-06 発見・修正済み)。`clientIp()` は **接続元が Cloudflare の公開レンジのときだけ**
+    `cf-connecting-ip` を採用する (`lib/net/cloudflareIps.ts`・Vercel 直叩きでの偽装は通さない)。レンジは
+    https://www.cloudflare.com/ips-v4 / ips-v6 から貼り直す (変わっても従来挙動に退化するだけ・fail-safe)。
+    修正後の確認 = 同一 IP から 60 秒に 61 回以上 `/api/handle/<存在しない handle>` を叩いて 429 が出ること。
+  - Cloudflare origin 保護の follow-up (運用作業・未実施): Vercel Firewall / Authenticated Origin Pulls
+    の適用可否を確認し、Cloudflare を迂回する origin 直接アクセスを閉じる。
 
 ## 2. Deploy (user-manual)
 

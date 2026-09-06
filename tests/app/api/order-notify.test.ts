@@ -2,7 +2,7 @@
 // flag OFF=404 / handle 束縛 / txHash 冪等 / on-chain 検証 (pass/fail/rpc) / KV 必須 (mainnet) /
 // レート制限。chains/tokens は実値 (chainId=137)・verifyJpycTransferToOnChain と KV は mock。
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const JPYC = 10n ** 18n;
 const MERCHANT = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -27,6 +27,10 @@ const hold = vi.hoisted(() => ({
     | { ok: true; record: { config: { to: string }; storefront?: unknown } | null }
     | { ok: false },
   rateAllowed: true,
+  realRateLimits: false,
+  limiterFails: false,
+  rateLists: new Map<string, string[]>(),
+  rateCounters: new Map<string, number>(),
   // 受注一覧の保持ポリシー検証用 (掟 14 隣接: /guide/start が「直近 200 件・最後の
   // 注文から 72 時間」と開示しているため、実装側の上限と TTL 張り直しを固定する)。
   ltrimCalls: [] as unknown[][],
@@ -132,10 +136,16 @@ vi.mock('@/lib/feeVerify', () => ({
 vi.mock('@/lib/handleStore', () => ({
   resolveHandle: vi.fn(async () => hold.handle),
 }));
-vi.mock('@/lib/relay/relayGuards', () => ({
-  checkRateLimit: vi.fn(async () => hold.rateAllowed),
-}));
-vi.mock('@/lib/relay/relayRoute', () => ({ anonymizeIp: () => 'ip-1' }));
+vi.mock('@/lib/relay/relayGuards', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/relay/relayGuards')>();
+  return {
+    ...actual,
+    checkRateLimit: async (keys: string[]) => hold.realRateLimits
+      ? actual.checkRateLimit(keys) : hold.rateAllowed,
+    checkReadRateLimit: async (key: string, max: number, windowSec: number) => hold.realRateLimits
+      ? actual.checkReadRateLimit(key, max, windowSec) : true,
+  };
+});
 
 const lpushSpy = vi.hoisted(() => vi.fn());
 const delSpy = vi.hoisted(() => vi.fn());
@@ -146,6 +156,12 @@ const evalSpy = vi.hoisted(() => vi.fn());
 const warnSpy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => hold.kvConfigured,
+  kvIncr: async (key: string) => {
+    if (hold.limiterFails) return { ok: false, reason: 'network_error' };
+    const value = (hold.rateCounters.get(key) ?? 0) + 1;
+    hold.rateCounters.set(key, value);
+    return { ok: true, value };
+  },
   kvSet: (...a: unknown[]) => {
     setSpy(...a);
     if (hold.pointerSetFails && String(a[0]).startsWith('order:sv:')) {
@@ -171,11 +187,22 @@ vi.mock('@/lib/kv', () => ({
     return Promise.resolve({ ok: true, value: 1 });
   },
   kvLpush: (...a: unknown[]) => {
+    if (String(a[0]).startsWith('relay:rl:')) {
+      if (hold.limiterFails) return Promise.resolve({ ok: false, reason: 'network_error' });
+      const list = hold.rateLists.get(a[0] as string) ?? [];
+      list.unshift(a[1] as string);
+      hold.rateLists.set(a[0] as string, list);
+      return Promise.resolve({ ok: true, value: list.length });
+    }
     lpushSpy(...a);
     hold.listValues.unshift(a[1] as string);
     return Promise.resolve({ ok: true, value: 1 });
   },
   kvLrange: (...a: unknown[]) => {
+    if (String(a[0]).startsWith('relay:rl:')) {
+      const list = hold.rateLists.get(a[0] as string) ?? [];
+      return Promise.resolve({ ok: true, value: list.slice(a[1] as number, (a[2] as number) + 1) });
+    }
     lrangeSpy(...a);
     return Promise.resolve({ ok: true, value: [...hold.listValues] });
   },
@@ -230,10 +257,14 @@ vi.mock('@/lib/push/notify', () => ({
 
 import { POST } from '@/app/api/order/notify/route';
 
-function req(body: unknown, query = '?h=alice'): Request {
+function req(body: unknown, query = '?h=alice', ip = '198.51.100.7'): Request {
   return new Request(`http://localhost/api/order/notify${query}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'x-vercel-forwarded-for': '172.71.0.1',
+      'cf-connecting-ip': ip,
+    },
     body: JSON.stringify(body),
   });
 }
@@ -282,6 +313,8 @@ function latestStoredOrder(): Record<string, unknown> {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-09-06T12:00:00Z'));
   hold.enableOrderRelay = true;
   hold.enableOrderPickup = true;
   hold.enablePushNotify = true;
@@ -301,6 +334,10 @@ beforeEach(() => {
     },
   };
   hold.rateAllowed = true;
+  hold.realRateLimits = false;
+  hold.limiterFails = false;
+  hold.rateLists.clear();
+  hold.rateCounters.clear();
   hold.kvConfigured = true;
   hold.claimValue = 'OK';
   hold.usedMarker = 'done';
@@ -331,6 +368,8 @@ beforeEach(() => {
   pushNotify.notify.mockReset();
   pushNotify.notify.mockResolvedValue(undefined);
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe('POST /api/order/notify', () => {
   // /guide/start が「直近 200 件を保持・一覧全体は最後の注文から 72 時間で消える」と
@@ -385,6 +424,51 @@ describe('POST /api/order/notify', () => {
   it('レート制限 → 429', async () => {
     hold.rateAllowed = false;
     expect((await POST(req(goodBody()))).status).toBe(429);
+  });
+
+  it('同じ NAT の別決済は 16 客すべて登録できる', async () => {
+    hold.realRateLimits = true;
+    for (let i = 1; i <= 16; i++) {
+      const txHash = `0x${i.toString(16).padStart(64, '0')}`;
+      expect((await POST(req(goodBody({ txHash })))).status).toBe(200);
+    }
+    expect(hold.listValues).toHaveLength(16);
+    expect(verifySpy).toHaveBeenCalledTimes(16);
+  });
+
+  it('同じ決済の大文字小文字や IP を替えても 6 回目は 429・別決済は通る', async () => {
+    hold.realRateLimits = true;
+    hold.claimValue = null;
+    for (let i = 0; i < 5; i++) {
+      const res = await POST(req(goodBody()));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ duplicate: true });
+    }
+    const upper = `0x${'A'.repeat(64)}`;
+    expect((await POST(req(goodBody({ txHash: upper }), '?h=alice', '203.0.113.9'))).status).toBe(429);
+    expect((await POST(req(goodBody({ txHash: SECOND_TXHASH })))).status).toBe(200);
+    expect(verifySpy).not.toHaveBeenCalled();
+  });
+
+  it('txHash を替える flood は同一 /24 の 121 回目に 429・検証へ進まない', async () => {
+    hold.realRateLimits = true;
+    hold.claimValue = null;
+    for (let i = 0; i < 120; i++) {
+      const txHash = `0x${i.toString(16).padStart(64, '0')}`;
+      expect((await POST(req(goodBody({ txHash }), '?h=alice', `198.51.100.${i % 16 + 1}`))).status).toBe(200);
+    }
+    getSpy.mockClear();
+    expect((await POST(req(goodBody()))).status).toBe(429);
+    expect(getSpy).not.toHaveBeenCalled();
+    expect(verifySpy).not.toHaveBeenCalled();
+  });
+
+  it('両 limiter の storage 障害は fail-open で支払い済の注文を登録する', async () => {
+    hold.realRateLimits = true;
+    hold.limiterFails = true;
+    expect((await POST(req(goodBody()))).status).toBe(200);
+    expect(hold.listValues).toHaveLength(1);
+    expect(verifySpy).toHaveBeenCalledTimes(1);
   });
 
   it('mainnet + KV 未設定 → 503 (fail-open 封じ)', async () => {

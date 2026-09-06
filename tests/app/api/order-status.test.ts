@@ -2,7 +2,7 @@
 // flag OFF=404 / KV 未設定=503 / 不正トークン=400 / 未知・失効・受注消滅=404 / 状態導出 / 最小返却
 // (items/table/amount/from は返さない) / no-store。orderRelay は実コード・env と KV は mock。
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { serializeOrder, type StoredOrder } from '@/lib/orderRelay';
 
 const MERCHANT = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -12,6 +12,8 @@ const TX = `0x${'a'.repeat(64)}`;
 const hold = vi.hoisted(() => ({
   enableOrderPickup: true,
   kvConfigured: true,
+  limiterFails: false,
+  counters: new Map<string, number>(),
   pointer: { ok: true, value: null } as
     | { ok: true; value: string | null }
     | { ok: false; reason: string },
@@ -37,6 +39,13 @@ const getSpy = vi.hoisted(() => vi.fn());
 const lrangeSpy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => hold.kvConfigured,
+  kvIncr: async (key: string) => {
+    if (hold.limiterFails) return { ok: false, reason: 'network_error' };
+    const value = (hold.counters.get(key) ?? 0) + 1;
+    hold.counters.set(key, value);
+    return { ok: true, value };
+  },
+  kvExpire: async () => ({ ok: true, value: 1 }),
   kvGet: (...a: unknown[]) => {
     getSpy(...a);
     return Promise.resolve(hold.pointer);
@@ -50,12 +59,16 @@ vi.mock('@/lib/kv', () => ({
 // IP 固定窓レート制限 (route が pointer 参照前に呼ぶ)。既定は許可・上限超過テストでのみ false。
 // key も控える: クライアント IP の導出元 (x-vercel-forwarded-for 優先) を固定するため。
 const rateHold = vi.hoisted(() => ({ allowed: true, keys: [] as string[] }));
-vi.mock('@/lib/relay/relayGuards', () => ({
-  checkReadRateLimit: (key: string) => {
-    rateHold.keys.push(key);
-    return Promise.resolve(rateHold.allowed);
-  },
-}));
+vi.mock('@/lib/relay/relayGuards', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/relay/relayGuards')>();
+  return {
+    ...actual,
+    checkReadRateLimit: (key: string, max: number, windowSec: number) => {
+      rateHold.keys.push(key);
+      return rateHold.allowed ? actual.checkReadRateLimit(key, max, windowSec) : Promise.resolve(false);
+    },
+  };
+});
 
 const warnSpy = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/logger', () => ({
@@ -86,8 +99,12 @@ function pointer(merchant = MERCHANT, txHash = TX, chainId = 137): string {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-09-06T12:00:00Z'));
   hold.enableOrderPickup = true;
   hold.kvConfigured = true;
+  hold.limiterFails = false;
+  hold.counters.clear();
   hold.pointer = { ok: true, value: pointer() };
   hold.list = { ok: true, value: [serializeOrder(order({}))] };
   getSpy.mockClear();
@@ -96,6 +113,7 @@ beforeEach(() => {
   rateHold.keys = [];
   warnSpy.mockClear();
 });
+afterEach(() => vi.useRealTimers());
 
 describe('GET /api/order/status', () => {
   it('flag OFF → 404 + no-store (CDN に stale 404 を残さない・Codex)', async () => {
@@ -118,7 +136,7 @@ describe('GET /api/order/status', () => {
       },
     });
     await GET(req);
-    expect(rateHold.keys).toEqual(['orderstatus:198.51.100.0/24']);
+    expect(rateHold.keys).toEqual(['orderstatus:198.51.100.0/24', `orderstatus:token:${TOKEN}`]);
   });
 
   it('x-vercel-forwarded-for が無ければ x-forwarded-for の先頭を使う', async () => {
@@ -126,7 +144,46 @@ describe('GET /api/order/status', () => {
       headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' },
     });
     await GET(req);
-    expect(rateHold.keys).toEqual(['orderstatus:203.0.113.0/24']);
+    expect(rateHold.keys).toEqual(['orderstatus:203.0.113.0/24', `orderstatus:token:${TOKEN}`]);
+  });
+
+  it('同一 /24 の 16 客が 8s 間隔で各 8 回 poll しても全件 200', async () => {
+    for (let poll = 0; poll < 8; poll++) {
+      for (let customer = 0; customer < 16; customer++) {
+        const token = String(customer).padStart(43, 'p');
+        const req = new Request(`http://localhost/api/order/status?t=${token}`, {
+          headers: { 'x-vercel-forwarded-for': '172.71.0.1', 'cf-connecting-ip': `198.51.100.${customer + 1}` },
+        });
+        expect((await GET(req)).status).toBe(200);
+      }
+      vi.setSystemTime(Date.now() + 8_000);
+    }
+  });
+
+  it('同じ token の 121 回目は IP を替えても 429・別 token は通る', async () => {
+    for (let i = 0; i < 120; i++) expect((await GET(getReq(TOKEN))).status).toBe(200);
+    getSpy.mockClear();
+    const req = new Request(`http://localhost/api/order/status?t=${TOKEN}`, {
+      headers: { 'x-vercel-forwarded-for': '203.0.113.9' },
+    });
+    expect((await GET(req)).status).toBe(429);
+    expect(getSpy).not.toHaveBeenCalled();
+    expect((await GET(getReq('q'.repeat(43)))).status).toBe(200);
+  });
+
+  it('token を替えても subnet の 601 回目は 429 (pointer を引かない)', async () => {
+    for (let i = 0; i < 600; i++) {
+      expect((await GET(getReq(String(i).padStart(43, 'p')))).status).toBe(200);
+    }
+    getSpy.mockClear();
+    expect((await GET(getReq('q'.repeat(43)))).status).toBe(429);
+    expect(getSpy).not.toHaveBeenCalled();
+  });
+
+  it('limiter KV 障害は fail-open で状態取得を止めない', async () => {
+    hold.limiterFails = true;
+    expect((await GET(getReq(TOKEN))).status).toBe(200);
+    expect(getSpy).toHaveBeenCalled();
   });
 
   it('KV 未設定 → 503 + warn (deploy 観測性)', async () => {
