@@ -54,8 +54,11 @@ vitest (wasmoon)・dev DB・本番 DB への直接 EVAL は全部「ソースの
     `cf-connecting-ip` を採用する (`lib/net/cloudflareIps.ts`・Vercel 直叩きでの偽装は通さない)。レンジは
     https://www.cloudflare.com/ips-v4 / ips-v6 から貼り直す (変わっても従来挙動に退化するだけ・fail-safe)。
     修正後の確認 = 同一 IP から 60 秒に 61 回以上 `/api/handle/<存在しない handle>` を叩いて 429 が出ること。
-  - Cloudflare origin 保護の follow-up (運用作業・未実施): Vercel Firewall / Authenticated Origin Pulls
-    の適用可否を確認し、Cloudflare を迂回する origin 直接アクセスを閉じる。
+  - Cloudflare origin 保護: `vercel.json` の WAF route で実装済み (host が `open-pay.jp` AND
+    `cf-connecting-ip` ヘッダーが無い → deny)。Vercel cron は `*.vercel.app` 宛てなので影響なし。
+    deploy 後の確認 = Cloudflare 経由の `https://open-pay.jp/api/discovery` → 200、origin 直接の
+    `curl --resolve open-pay.jp:443:<vercel ip> https://open-pay.jp/api/discovery` → 403。
+    ロールバック = 当該 route を revert して redeploy。
 
 ## 2. Deploy (user-manual)
 
