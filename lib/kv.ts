@@ -31,10 +31,9 @@ function errInfo(e: unknown): { name: string; detail: string } {
 }
 
 // 接続先の解決順: UPSTASH_REDIS_REST_URL/TOKEN (Upstash 直結・優先) → KV_REST_API_URL/TOKEN (互換)。
-// 2026-09-06: 本番の KV_REST_API_* は Vercel の Storage 連携 (旧 Vercel KV) が管理する値で、手で
-// Upstash 直結 URL に書き換えてもデプロイ時に旧プロキシ (*.kv.vercel-storage.com) へ戻り、
-// プロキシ経由の EVAL が構文エラー (400) を返し続けた。連携に触られない別名を先に読むことで、
-// 直結を確実にする (docs/DEPLOY_CHECKLIST.md §1.1 ④)。
+// KV_REST_API_* は Vercel の Storage 連携が注入・管理する名前で、手で書き換えた値が連携に戻される
+// ことがある。連携に触られない別名を先に読み、接続先を運用者が確実に決められるようにする
+// (2026-09-06 の障害対応で導入。障害の真因自体は minifier による Lua 破損 = lib/x402/reverify.ts)。
 function endpoint(): { url: string; token: string } | null {
   const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;

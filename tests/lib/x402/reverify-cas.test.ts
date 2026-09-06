@@ -7,6 +7,8 @@
 // ⚠️ エミュレータであって Upstash 実機ではない。既知の差異は redisLua.ts の
 // KNOWN DIVERGENCES を参照 — money-path の CAS は実機 smoke (掟 15) を省略しない。
 // ⚠️ node 環境が必須 (wasmoon の WASM 初期化が jsdom では失敗する)。
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -92,27 +94,32 @@ describe('CAS script の合成', () => {
     expect(CAS_FIRST_PARTY_REVERIFY).not.toContain(REVERIFY_HIDDEN_URL_LEDGER);
   });
 
-  // 2026-09-06 実害: Upstash 本番エンジンの Lua パーサは `elseif ... then X; if C then Y end; end;`
-  // (elseif ブロック内の入れ子 if) を「near 'if': syntax error」で拒否し、reverify の CAS が 9/3 から
-  // 3 日間すべて失敗した。wasmoon (Lua 5.4) も dev DB も受理するので実行テストでは検出できない —
-  // 構文そのものをフェンスする。monotone な hidden は boolean 式で書く。
-  it('Upstash 本番が拒否する構文 (elseif 内の入れ子 if・"end; end"・代入右辺の括弧内 or) を含まない', () => {
-    for (const script of [CAS_EXTERNAL_REVERIFY, CAS_FIRST_PARTY_REVERIFY]) {
-      expect(script).not.toMatch(/end;\s*end\b/);
-      // (2) `x=(a or b)` — 2026-09-06 の 2 回目の 400 (near 'hidden')。`x=(a and b)` は旧スクリプトで
-      // 本番実績があるので許す。
-      expect(script).not.toMatch(/=\([^()]*\bor\b/);
-      // 素の `if` ブロック内の入れ子 if (first-party の pcall 判定) は旧スクリプトから本番で通っている。
-      // 拒否されたのは **elseif** 分岐の中の `if ... end`。1 行スクリプトなので
-      // 「elseif ... then から次の end; までに `if` トークンが無い」で近似する。
-      for (const block of script.split(/\bend;/)) {
-        const elseifAt = block.indexOf('elseif ');
-        if (elseifAt === -1) continue;
-        const thenAt = block.indexOf(' then ', elseifAt);
-        expect(thenAt, block).toBeGreaterThan(-1);
-        expect(block.slice(thenAt + 6), block).not.toMatch(/\bif\b/);
-      }
-    }
+  // 2026-09-03〜06 実害: Next.js の minifier が `+` 連結中のテンプレートリテラルの `${}` 以降と後続の
+  // 文字列片を落とし、本番バンドルだけ Lua が壊れて EVAL が構文エラー (400) になった (3 日間 503)。
+  // 実行テストはソースの文字列を使うので検出できない — **ソースにテンプレートリテラルが無い**ことを
+  // フェンスする (ビルド成果物は scripts/check-lua-bundle.mjs が検査)。
+  it('Lua 定数の定義にテンプレートリテラルを使わない (minifier が連結を壊す)', () => {
+    const src = readFileSync(
+      resolve(process.cwd(), 'lib/x402/reverify.ts'),
+      'utf8',
+    );
+    const start = src.indexOf('export const REVERIFY_COUNTER_TRANSITION');
+    const end = src.indexOf('function verdictClass(');
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    // コメント行 (説明にバッククォートを含む) は除いて、コードだけを見る。
+    const luaDefinitions = src
+      .slice(start, end)
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+    expect(luaDefinitions).not.toContain('`');
+    // 期待する完成形 (閾値込み) がソース上でも連続していること。
+    expect(REVERIFY_COUNTER_TRANSITION).toContain(
+      "and failures>=3 then hidden=true end; if ARGV[5]=='clear' then authFailures=0; " +
+        "elseif ARGV[5]=='block' then authFailures=authFailures+1; end; " +
+        "if ARGV[5]=='block' and authFailures>=6 then hidden=true end; ",
+    );
   });
 
   it('CAS_FIRST_PARTY_REVERIFY を直接実行しても state を作る', async () => {

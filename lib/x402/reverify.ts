@@ -464,27 +464,34 @@ export async function readFirstPartyVerification(
 // ARGV = [probedUrl, checkedAt, runId, verdictClass, authClass]。
 // export しているのは tests/lib/x402/reverify-cas.test.ts が **本物の Lua** を wasmoon で
 // 実行するため (tests/_helpers/redisLua.ts)。runtime の挙動には影響しない。
+// Lua に埋め込む閾値 (文字列)。テンプレートリテラルを避けるため事前に文字列化する (下記の注意)。
+const HIDE_THRESHOLD_LUA = String(REVERIFY_HIDE_THRESHOLD);
+const AUTH_HIDE_THRESHOLD_LUA = String(REVERIFY_AUTH_HIDE_THRESHOLD);
+
 export const REVERIFY_COUNTER_TRANSITION =
   'local same=(type(o.verification)==\'table\' and o.verification.probedUrl==ARGV[1]); ' +
   // ⚠️ before は same で絞らない — URL を変えても hidden (モデレーション状態) は引き継ぐ (B6)。
   'local before=(o.hidden==true); local failures=0; local authFailures=0; local lastOk=nil; ' +
   'if same then failures=tonumber(o.verification.failures) or 0; ' +
   'authFailures=tonumber(o.verification.authFailures) or 0; lastOk=o.verification.lastOkAt; end; ' +
-  // ⚠️ Upstash 本番エンジンの Lua パーサは Lua 5.1 の全構文を受理しない (2026-09-06 実害・再検証の
-  // CAS が 9/3 から 3 日間すべて 400)。拒否が確認された形:
-  //   (1) elseif 分岐内の入れ子 if   `elseif C then X; if D then Y end; end;`  → near 'if'
-  //   (2) 代入右辺の括弧内 or       `hidden=(hidden or failures>=3);`         → near 'hidden'
-  // dev DB のエンジンと wasmoon (Lua 5.4) は両方受理するので、テストでは検出できない。ここでは
-  // **旧スクリプト (2026-09-03 以前に本番で通っていた) に存在した構文だけ** を使う:
-  // `if A then s; s; elseif B then s; end;` / `if A and B then s end;` / `x=(A and B)`。
+  // ⚠️ この連結の中で **テンプレートリテラル (`...${x}...`) を使わない** (2026-09-03〜06 実害)。
+  // Next.js の minifier が `+` 連結中のテンプレートの `${}` 以降の末尾と後続の文字列片を落とし、本番
+  // バンドルだけ Lua が `failures>=3if ARGV[5]==...` に化けて EVAL が構文エラー (400) → 再検証 cron が
+  // 3 日間 503 になった。vitest / dev / 本番 DB への直接 EVAL は全部「ソースの文字列」を使うので通り、
+  // ビルド成果物でしか再現しない。閾値は String() で普通の連結にし、scripts/check-lua-bundle.mjs
+  // (CI の build ステップ) がバンドル内の断片を検査、tests/lib/x402/reverify-cas.test.ts がソースに
+  // テンプレートリテラルが無いことをフェンスする。
   // monotone な hidden は分岐の外の単文 if で立てる (意味は JS 側 transitionVerification と同一)。
-  // tests/lib/x402/reverify-cas.test.ts が (1)(2) の構文をフェンスする。
   'local hidden=before; if ARGV[4]==\'ok\' then failures=0; hidden=false; lastOk=ARGV[2]; ' +
   'elseif ARGV[4]==\'violation\' then failures=failures+1; end; ' +
-  `if ARGV[4]=='violation' and failures>=${REVERIFY_HIDE_THRESHOLD} then hidden=true end; ` +
+  'if ARGV[4]==\'violation\' and failures>=' +
+  HIDE_THRESHOLD_LUA +
+  ' then hidden=true end; ' +
   'if ARGV[5]==\'clear\' then authFailures=0; ' +
   'elseif ARGV[5]==\'block\' then authFailures=authFailures+1; end; ' +
-  `if ARGV[5]=='block' and authFailures>=${REVERIFY_AUTH_HIDE_THRESHOLD} then hidden=true end; ` +
+  'if ARGV[5]==\'block\' and authFailures>=' +
+  AUTH_HIDE_THRESHOLD_LUA +
+  ' then hidden=true end; ' +
   'local v={lastCheckedAt=ARGV[2],failures=failures,lastRunId=ARGV[3],probedUrl=ARGV[1]}; ' +
   'if authFailures>0 then v.authFailures=authFailures end; ' +
   'if lastOk then v.lastOkAt=lastOk end; o.verification=v; o.hidden=hidden; ' +
