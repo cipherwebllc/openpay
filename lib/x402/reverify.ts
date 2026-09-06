@@ -81,7 +81,27 @@ export type ReverifyApplyResult =
         | 'url_changed'
         | 'duplicate'
         | 'storage';
+      /** storage 失敗の要約 (KV の reason/status/エラー文言)。運用ログ・cron 応答用。 */
+      detail?: string;
     };
+
+// KV 失敗を 1 行に要約する (値は含めない・reason / HTTP status / Upstash のエラー文言のみ)。
+// 2026-09-03 から reverify が毎時 503 (storage_unavailable) を返し続けたが、apply/read の
+// 失敗理由をどこにも残していなかったため、Sentry も cron ログも「storage」以上を語れず
+// 3 日間原因を特定できなかった。観測できない障害は直せない (掟 13 の逆側)。
+export function kvFailureDetail(failure: {
+  reason: string;
+  status?: number;
+  detail?: string;
+}): string {
+  return [
+    failure.reason,
+    failure.status !== undefined ? String(failure.status) : '',
+    (failure.detail ?? '').slice(0, 200),
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
 
 export const REVERIFY_CURSOR_KEY = 'reverify:cursor';
 export const REVERIFY_LOCK_KEY = 'reverify:lock';
@@ -419,21 +439,25 @@ export async function listExternalReverifyIds(): Promise<string[] | null> {
 
 export async function readExternalReverifyTarget(
   id: string,
-): Promise<{ ok: true; resource: X402Resource | null } | { ok: false }> {
+): Promise<
+  { ok: true; resource: X402Resource | null } | { ok: false; detail: string }
+> {
   const got = await kvGet(resourceKey(id));
-  if (!got.ok) return { ok: false };
+  if (!got.ok) return { ok: false, detail: kvFailureDetail(got) };
   const resource = safeParse<X402Resource>(got.value);
   return { ok: true, resource: resource?.active === true ? resource : null };
 }
 
 export async function readFirstPartyVerification(
   path: string,
-): Promise<{ ok: true; state: VerificationState | null } | { ok: false }> {
+): Promise<
+  { ok: true; state: VerificationState | null } | { ok: false; detail: string }
+> {
   const got = await kvGet(firstPartyVerificationKey(path));
-  if (!got.ok) return { ok: false };
+  if (!got.ok) return { ok: false, detail: kvFailureDetail(got) };
   if (got.value === null) return { ok: true, state: null };
   const state = safeParse<VerificationState>(got.value);
-  return state ? { ok: true, state } : { ok: false };
+  return state ? { ok: true, state } : { ok: false, detail: 'unparseable state' };
 }
 
 // transitionVerification と同一のカウンタ遷移を Lua 側にも持たせる (両者は必ず一緒に直す)。
@@ -502,7 +526,9 @@ function parseApplyResult(value: number | string): ReverifyApplyResult {
               : value === -4
                 ? 'duplicate'
                 : 'storage';
-    return { applied: false, reason };
+    return reason === 'storage'
+      ? { applied: false, reason, detail: `unexpected code ${value}` }
+      : { applied: false, reason };
   }
   const parsed = safeParse<{
     failures: number;
@@ -511,7 +537,11 @@ function parseApplyResult(value: number | string): ReverifyApplyResult {
     after: boolean;
   }>(value);
   if (!parsed || !Number.isFinite(parsed.failures)) {
-    return { applied: false, reason: 'storage' };
+    return {
+      applied: false,
+      reason: 'storage',
+      detail: `unparseable result ${String(value).slice(0, 120)}`,
+    };
   }
   return {
     applied: true,
@@ -547,7 +577,7 @@ export async function applyExternalReverify(
   );
   return applied.ok
     ? parseApplyResult(applied.value)
-    : { applied: false, reason: 'storage' };
+    : { applied: false, reason: 'storage', detail: kvFailureDetail(applied) };
 }
 
 export async function applyFirstPartyReverify(
@@ -565,7 +595,7 @@ export async function applyFirstPartyReverify(
   );
   return applied.ok
     ? parseApplyResult(applied.value)
-    : { applied: false, reason: 'storage' };
+    : { applied: false, reason: 'storage', detail: kvFailureDetail(applied) };
 }
 
 export async function acquireReverifyLock(

@@ -47,7 +47,23 @@ type ProbeOutcome = {
   verdict?: ReverifyVerdict;
   apply?: ReverifyApplyResult;
   storageError?: boolean;
+  /** storageError の要約 (KV の reason/status/文言)。cron 応答と warn ログに載せる。 */
+  storageDetail?: string;
 };
+
+// storage 失敗の内訳 (503 応答・x402.reverify.storage_error warn)。操作者だけが読む
+// (cron 認証の内側) ので Upstash のエラー文言をそのまま載せる。値 (record 本体) は載せない。
+type StorageFailure = {
+  target: string;
+  stage: 'read' | 'apply' | 'write';
+  detail: string | null;
+};
+
+function targetLabel(target: ReverifyTarget): string {
+  return target.kind === 'external'
+    ? `external:${target.id}`
+    : `first-party:${target.path}`;
+}
 
 type ReverifySummary = {
   runId: string;
@@ -78,7 +94,9 @@ async function processTarget(
 ): Promise<ProbeOutcome> {
   if (target.kind === 'external') {
     const read = await readExternalReverifyTarget(target.id);
-    if (!read.ok) return { target, checked: false, storageError: true };
+    if (!read.ok) {
+      return { target, checked: false, storageError: true, storageDetail: read.detail };
+    }
     if (!read.resource) return { target, checked: false };
     if (read.resource.verification?.lastRunId === runId) {
       return {
@@ -97,19 +115,23 @@ async function processTarget(
       runId,
       authClass,
     );
+    const storageError = !apply.applied && apply.reason === 'storage';
     return {
       target,
       checked: true,
       verdict,
       apply,
-      storageError: !apply.applied && apply.reason === 'storage',
+      storageError,
+      ...(storageError && !apply.applied ? { storageDetail: apply.detail } : {}),
     };
   }
 
   const resource = firstPartyByPath.get(target.path);
   if (!resource) return { target, checked: false };
   const read = await readFirstPartyVerification(target.path);
-  if (!read.ok) return { target, checked: false, storageError: true };
+  if (!read.ok) {
+    return { target, checked: false, storageError: true, storageDetail: read.detail };
+  }
   if (read.state?.verification?.lastRunId === runId) {
     return {
       target,
@@ -127,12 +149,14 @@ async function processTarget(
     runId,
     authClass,
   );
+  const storageError = !apply.applied && apply.reason === 'storage';
   return {
     target,
     checked: true,
     verdict,
     apply,
-    storageError: !apply.applied && apply.reason === 'storage',
+    storageError,
+    ...(storageError && !apply.applied ? { storageDetail: apply.detail } : {}),
   };
 }
 
@@ -310,6 +334,28 @@ export async function GET(req: Request): Promise<NextResponse> {
       storageError: storageError || !cursorSaved,
     });
 
+    // どの対象の・どの段階の KV 操作が失敗したかを応答と warn に残す。summary だけでは
+    // 「checked 9 / ok 9 なのに 503」の理由が読めず、原因特定に 3 日を要した (2026-09-06)。
+    const storageFailures: StorageFailure[] = outcomes
+      .filter((outcome) => outcome.storageError)
+      .map((outcome) => ({
+        target: targetLabel(outcome.target),
+        stage: outcome.checked ? 'apply' : 'read',
+        detail: outcome.storageDetail ?? null,
+      }));
+    if (!directoryResult.saved) {
+      storageFailures.push({ target: 'directory-snapshot', stage: 'write', detail: null });
+    }
+    if (!cursorSaved) {
+      storageFailures.push({ target: 'cursor', stage: 'write', detail: null });
+    }
+    if (storageFailures.length > 0) {
+      logger.warn('x402.reverify.storage_error', {
+        runId,
+        failures: storageFailures.slice(0, 20),
+      });
+    }
+
     const shouldAlert =
       summary.violations > 0 ||
       summary.transient > 0 ||
@@ -327,7 +373,11 @@ export async function GET(req: Request): Promise<NextResponse> {
 
     if (storageError || !cursorSaved) {
       return NextResponse.json(
-        { ...summary, error: 'storage_unavailable' },
+        {
+          ...summary,
+          error: 'storage_unavailable',
+          storageFailures: storageFailures.slice(0, 20),
+        },
         { status: 503 },
       );
     }
