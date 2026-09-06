@@ -29,20 +29,25 @@ KNOWN DIVERGENCES): ①本番 Redis は Lua 5.1 (全数値 double)・wasmoon は
 ③`redis.call` のエラー文言は実 Redis と一致しない。**エミュレータであって Upstash 実機ではない**ので、
 money-path の CAS (registry / reverify / purchaseIntent / storeUsdcIntent) は掟 15 の実機 smoke を
 引き続き省略しない。
-④ **本番 KV は Upstash REST に直結する (`https://<db>.upstash.io`)。旧 Vercel KV プロキシ
-(`*.kv.vercel-storage.com`) は使わない** (2026-09-03〜06 実害: reverify の CAS EVAL がプロキシ経由でだけ
-`ERR Error running script: ... syntax error` (HTTP 400) になり、再検証 cron が 3 日間 503・post-deploy verify
-が連鎖して赤)。同じスクリプトを本番 DB (`OpenPay-mainnet`・upstash 1.18 / redis 8.4) に REST 直結で EVAL
-すると正常に完走する (2026-09-06 に scratch キーで確認)。プロキシは Vercel KV 廃止 (2024-12) 後に保守されて
-おらず、エンジン更新 (build 2026-09-02) 以降 EVAL のスクリプト転送が壊れた。切替手順 = Upstash コンソール →
-DB → Connect → `.env` の `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` を Vercel の
-`KV_REST_API_URL` / `KV_REST_API_TOKEN` (Production) に設定 → 新規デプロイ。⚠️ 切替先は必ず
-`x402:resources:index` 等の本番キーが在る DB (別 DB に向けると全データが見えなくなる・2026-09-06 に誤って
-空 DB へ切り替えて商品/出品が消えた → 元に戻して復旧)。
-  - 併せて分かった運用上の掟: 1 行 CAS Lua を変えたら **本番 DB に REST 直結で scratch キーに EVAL** して
-    確かめる (dev DB / wasmoon は別エンジン)。storage 失敗の内訳は cron 応答 `storageFailures[].detail` に出る。
-    `tests/lib/x402/reverify-cas.test.ts` は elseif 内入れ子 if と `=(... or ...)` をフェンスしている (プロキシ
-    経由で拒否された形・直結では受理される)。
+④ **Lua (EVAL 用 CAS) の連結にテンプレートリテラルを使わない・ビルド成果物の Lua を検査する**
+(2026-09-03〜06 実害: 再検証 cron が 3 日間毎時 503・post-deploy verify が連鎖して赤)。
+**真因** = Next.js の minifier が `+` 連結中のテンプレートリテラル (`` `...${REVERIFY_HIDE_THRESHOLD} then
+hidden=true end; ` `` + '...') の `${}` 以降の末尾と後続の文字列片を落とし、本番バンドルの Lua だけが
+`failures>=3if ARGV[5]==...` に化けて Upstash が `ERR Error running script: ... syntax error` (400) を返した。
+vitest (wasmoon)・dev DB・本番 DB への直接 EVAL は全部「ソースの文字列」を使うので通り、**ビルド成果物
+(`.next/server/chunks/*.js`) を読むまで再現しなかった** (#432 → #445 → #446 の 3 回の書き換えはすべて
+同じ形で壊れ、Upstash エンジン / 旧 Vercel KV プロキシ / env 切替を疑って 3 サイクル空振りした)。
+  - 対策: `lib/x402/reverify.ts` は閾値を `String()` で普通の連結に (テンプレート禁止)。
+    `scripts/check-lua-bundle.mjs` が `next build` 直後にバンドル内の Lua 断片を検査 (CI の build ステップ・
+    `>=3if` 型の連結崩れも検出)。`tests/lib/x402/reverify-cas.test.ts` がソースにテンプレートリテラルが
+    無いことをフェンス。
+  - 教訓: 「本番だけ壊れる・ソースは正しい」ときは **バンドルの実物** を最初に見る (`npm run build` →
+    `.next/server` を grep)。storage 失敗の内訳は cron 応答 `storageFailures[].detail`、接続先は
+    `kv.host` / `kv.source` に出る。
+  - 副産物: 本番 KV の接続先は `UPSTASH_REDIS_REST_URL/TOKEN` (Upstash 直結・優先) に統一した。
+    `KV_REST_API_*` は Vercel Storage 連携が管理する名前で手編集が戻されることがある。⚠️ 切替先は必ず
+    `x402:resources:index` 等の本番キーが在る DB (2026-09-06 に誤って空 DB へ切り替えて商品/出品が消えた →
+    元に戻して復旧)。
   - open-pay.jp は Cloudflare 配下 (`server: cloudflare`) のため、`clientIp()` が返す IP は Cloudflare の
     エッジ IP になり IP 固定窓レート制限のキーがリクエストごとにばらける (429 に達しない)。`cf-connecting-ip`
     優先の修正は別 PR (2026-09-06 発見)。

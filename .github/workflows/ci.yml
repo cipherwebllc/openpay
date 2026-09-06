@@ -51,6 +51,8 @@ jobs:
           npm run build 2>&1 | tee build.log
           # Route 別 First Load JS の予算超過を fail させる
           node scripts/check-bundle-budget.mjs < build.log
+          # サーバーバンドル内の Lua (EVAL 用 CAS) が minifier に壊されていないか (2026-09-06 実害)
+          node scripts/check-lua-bundle.mjs
 
   audit:
     runs-on: ubuntu-latest
