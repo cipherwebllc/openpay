@@ -29,14 +29,23 @@ KNOWN DIVERGENCES): ①本番 Redis は Lua 5.1 (全数値 double)・wasmoon は
 ③`redis.call` のエラー文言は実 Redis と一致しない。**エミュレータであって Upstash 実機ではない**ので、
 money-path の CAS (registry / reverify / purchaseIntent / storeUsdcIntent) は掟 15 の実機 smoke を
 引き続き省略しない。
-④ **Upstash 本番エンジンの Lua パーサは Lua 5.1 の全構文を受理しない** (2026-09-06 実害: reverify の
-CAS が 9/3〜9/6 の 3 日間すべて 400・wasmoon と dev DB は受理するため事前検出不能だった)。拒否が確認
-された形: (1) elseif 分岐内の入れ子 if `elseif C then X; if D then Y end; end;` → near 'if' /
-(2) 代入右辺の括弧内 or `hidden=(hidden or cond);` → near 'hidden'。1 行 CAS は **本番で通った実績の
-ある構文だけ** で書く (`if A then s; s; elseif B then s; end;` / `if A and B then s end;` / `x=(A and B)`)。
-`tests/lib/x402/reverify-cas.test.ts` が (1)(2) をフェンスする。新しい Lua 構文を足したら **本番 DB と同じ
-エンジンで 1 回実行して確かめる** (Upstash コンソールの CLI で scratch キーに EVAL・dev DB は別エンジン版
-のことがある)。storage 失敗の内訳は cron 応答 `storageFailures[].detail` に出る。
+④ **本番 KV は Upstash REST に直結する (`https://<db>.upstash.io`)。旧 Vercel KV プロキシ
+(`*.kv.vercel-storage.com`) は使わない** (2026-09-03〜06 実害: reverify の CAS EVAL がプロキシ経由でだけ
+`ERR Error running script: ... syntax error` (HTTP 400) になり、再検証 cron が 3 日間 503・post-deploy verify
+が連鎖して赤)。同じスクリプトを本番 DB (`OpenPay-mainnet`・upstash 1.18 / redis 8.4) に REST 直結で EVAL
+すると正常に完走する (2026-09-06 に scratch キーで確認)。プロキシは Vercel KV 廃止 (2024-12) 後に保守されて
+おらず、エンジン更新 (build 2026-09-02) 以降 EVAL のスクリプト転送が壊れた。切替手順 = Upstash コンソール →
+DB → Connect → `.env` の `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` を Vercel の
+`KV_REST_API_URL` / `KV_REST_API_TOKEN` (Production) に設定 → 新規デプロイ。⚠️ 切替先は必ず
+`x402:resources:index` 等の本番キーが在る DB (別 DB に向けると全データが見えなくなる・2026-09-06 に誤って
+空 DB へ切り替えて商品/出品が消えた → 元に戻して復旧)。
+  - 併せて分かった運用上の掟: 1 行 CAS Lua を変えたら **本番 DB に REST 直結で scratch キーに EVAL** して
+    確かめる (dev DB / wasmoon は別エンジン)。storage 失敗の内訳は cron 応答 `storageFailures[].detail` に出る。
+    `tests/lib/x402/reverify-cas.test.ts` は elseif 内入れ子 if と `=(... or ...)` をフェンスしている (プロキシ
+    経由で拒否された形・直結では受理される)。
+  - open-pay.jp は Cloudflare 配下 (`server: cloudflare`) のため、`clientIp()` が返す IP は Cloudflare の
+    エッジ IP になり IP 固定窓レート制限のキーがリクエストごとにばらける (429 に達しない)。`cf-connecting-ip`
+    優先の修正は別 PR (2026-09-06 発見)。
 
 ## 2. Deploy (user-manual)
 
