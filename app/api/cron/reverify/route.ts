@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireCronAuth } from '@/lib/cronAuth';
+import { kvEndpointInfo } from '@/lib/kv';
 import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
 import { publishedDirectoryEntries } from '@/lib/directory/query';
 import {
@@ -329,6 +330,9 @@ export async function GET(req: Request): Promise<NextResponse> {
         : { offset: selected.nextOffset, ...directoryPart };
     const cursorSaved = await writeReverifyCursor(nextCursor);
     const summary = summarize(runId, outcomes, directoryResult.summary);
+    // 接続先の診断 (ホスト名と採用 env 名のみ)。env を切り替えたつもりで旧プロキシに残っていた
+    // 障害 (2026-09-06) で、応答から接続先が読めず特定に時間を要した。cron 認証の内側のみ。
+    const kv = kvEndpointInfo();
     logger.info('x402.reverify.completed', {
       ...summary,
       storageError: storageError || !cursorSaved,
@@ -377,11 +381,12 @@ export async function GET(req: Request): Promise<NextResponse> {
           ...summary,
           error: 'storage_unavailable',
           storageFailures: storageFailures.slice(0, 20),
+          kv,
         },
         { status: 503 },
       );
     }
-    return NextResponse.json(summary);
+    return NextResponse.json({ ...summary, kv });
   } finally {
     await releaseReverifyLock(runId);
   }

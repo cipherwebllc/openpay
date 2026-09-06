@@ -153,10 +153,12 @@ describe('GET /api/cron/reverify cursor quarantine', () => {
     const response = await route.GET(request('secret'));
 
     expect(response.status).toBe(503);
-    const body = (await response.json()) as { storageFailures: unknown };
+    const body = (await response.json()) as { storageFailures: unknown; kv: unknown };
     expect(body.storageFailures).toEqual([
       { target: 'external:r0', stage: 'read', detail: 'http_error 500 ERR simulated' },
     ]);
+    // 接続先の診断 (ホスト名 + 採用 env 名)。この test では KV env 未設定なので null。
+    expect(body.kv).toEqual({ host: null, source: null });
     expect(logs.warn).toContainEqual([
       'x402.reverify.storage_error',
       expect.objectContaining({

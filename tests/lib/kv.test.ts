@@ -39,6 +39,22 @@ describe('lib/kv', () => {
     expect(init.headers.Authorization).toBe('Bearer direct-token');
   });
 
+  it('kvEndpointInfo は接続先ホストと採用 env 名だけを返す (トークンは含めない)', async () => {
+    const mod = await import('@/lib/kv');
+    expect(mod.kvEndpointInfo()).toEqual({ host: null, source: null });
+    process.env.KV_REST_API_URL = 'https://legacy.kv.vercel-storage.com/';
+    process.env.KV_REST_API_TOKEN = 'legacy-token';
+    expect(mod.kvEndpointInfo()).toEqual({
+      host: 'legacy.kv.vercel-storage.com',
+      source: 'KV_REST_API_URL',
+    });
+    process.env.UPSTASH_REDIS_REST_URL = 'https://direct.upstash.io';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'direct-token';
+    const info = mod.kvEndpointInfo();
+    expect(info).toEqual({ host: 'direct.upstash.io', source: 'UPSTASH_REDIS_REST_URL' });
+    expect(JSON.stringify(info)).not.toContain('token');
+  });
+
   it('UPSTASH_REDIS_REST_* が無ければ KV_REST_API_* に fallback する', async () => {
     process.env.KV_REST_API_URL = 'https://example.upstash.io';
     process.env.KV_REST_API_TOKEN = 'secret';
