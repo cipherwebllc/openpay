@@ -46,6 +46,27 @@ export function isKvConfigured(): boolean {
   return endpoint() !== null;
 }
 
+/** 接続先の診断情報 (ホスト名と採用した env 名のみ・トークンは含めない)。cron 応答や運用ログで
+ *  「どの KV を叩いているか」を確かめるため (2026-09-06: env を切り替えても旧プロキシに残り続け、
+ *  応答から接続先が読めず原因特定が遅れた)。 */
+export function kvEndpointInfo(): {
+  host: string | null;
+  source: 'UPSTASH_REDIS_REST_URL' | 'KV_REST_API_URL' | null;
+} {
+  const ep = endpoint();
+  if (!ep) return { host: null, source: null };
+  let host: string | null = null;
+  try {
+    host = new URL(ep.url).host;
+  } catch {
+    host = null;
+  }
+  return {
+    host,
+    source: process.env.UPSTASH_REDIS_REST_URL ? 'UPSTASH_REDIS_REST_URL' : 'KV_REST_API_URL',
+  };
+}
+
 async function call<T>(body: unknown[]): Promise<KvResult<T>> {
   const ep = endpoint();
   if (!ep) return { ok: false, reason: 'unconfigured' };
