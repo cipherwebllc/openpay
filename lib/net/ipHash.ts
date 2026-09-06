@@ -4,6 +4,7 @@ import { createHmac } from 'node:crypto';
 import { isIP } from 'node:net';
 
 import { logger } from '@/lib/logger';
+import { isCloudflareIp } from '@/lib/net/cloudflareIps';
 
 const MIN_SECRET_BYTES = 32;
 
@@ -27,13 +28,28 @@ function normalizeIp(ip: string): string | null {
   }
 }
 
-export function clientIp(req: Request): string | null {
+// Vercel が見た接続元 (Cloudflare 配下ならエッジ IP)。
+function connectingIp(req: Request): string | null {
   const vercelForwardedFor = req.headers.get('x-vercel-forwarded-for');
   if (vercelForwardedFor !== null) return normalizeIp(vercelForwardedFor);
 
   const forwardedFor = req.headers.get('x-forwarded-for');
   if (forwardedFor === null) return null;
   return normalizeIp(forwardedFor.split(',', 1)[0]);
+}
+
+export function clientIp(req: Request): string | null {
+  const connecting = connectingIp(req);
+  // open-pay.jp は Cloudflare 配下 (2026-09-06 発覚): 接続元はエッジ IP で毎回変わり、IP 固定窓の
+  // レート制限が効かなかった。真の利用者 IP は `cf-connecting-ip` にあるが、無条件に信じると Vercel
+  // 直叩きで偽装できるので、**接続元が Cloudflare の公開レンジのときだけ** 採用する
+  // (lib/net/cloudflareIps.ts)。それ以外 (直叩き・レンジ更新漏れ) は従来どおり接続元 IP。
+  const cfConnectingIp = req.headers.get('cf-connecting-ip');
+  if (cfConnectingIp !== null && connecting !== null && isCloudflareIp(connecting)) {
+    const real = normalizeIp(cfConnectingIp);
+    if (real !== null) return real;
+  }
+  return connecting;
 }
 
 export function hashIp(ip: string | null): string | null {

@@ -93,10 +93,11 @@ function decodePaymentHeader(raw: string): unknown {
 // verify/settle へ渡す転送ヘッダ (レート制限の IP 判定用に元 IP を引き継ぐ・_shared と同形)。
 function cloneForwardHeaders(req: Request): Headers {
   const h = new Headers({ 'content-type': 'application/json' });
-  const forwardedFor = req.headers.get('x-forwarded-for');
-  const realIp = req.headers.get('x-real-ip');
-  if (forwardedFor) h.set('x-forwarded-for', forwardedFor);
-  if (realIp) h.set('x-real-ip', realIp);
+  // Cloudflare 配下では接続元 (x-vercel-forwarded-for) と cf-connecting-ip の両方が要る (lib/net/ipHash.ts)。
+  for (const name of ['x-forwarded-for', 'x-real-ip', 'x-vercel-forwarded-for', 'cf-connecting-ip']) {
+    const value = req.headers.get(name);
+    if (value) h.set(name, value);
+  }
   return h;
 }
 

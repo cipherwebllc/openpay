@@ -93,6 +93,49 @@ describe('hashIp の IP_HASH_SECRET 欠落警告', () => {
 });
 
 describe('clientIp', () => {
+  // 2026-09-06: open-pay.jp は Cloudflare 配下。接続元 (エッジ IP) がリクエストごとに変わり、IP 固定窓の
+  // レート制限が効かなかった。cf-connecting-ip は「接続元が Cloudflare のレンジ」のときだけ信じる。
+  it('接続元が Cloudflare のレンジなら cf-connecting-ip (真の利用者 IP) を返す', () => {
+    const req = new Request('https://example.test', {
+      headers: {
+        'x-vercel-forwarded-for': '172.71.0.1', // Cloudflare edge
+        'x-forwarded-for': '198.51.100.7, 172.71.0.1',
+        'cf-connecting-ip': '198.51.100.7',
+      },
+    });
+    expect(clientIp(req)).toBe('198.51.100.7');
+  });
+
+  it('接続元が Cloudflare でなければ cf-connecting-ip を無視する (Vercel 直叩きの偽装を通さない)', () => {
+    const req = new Request('https://example.test', {
+      headers: {
+        'x-vercel-forwarded-for': '203.0.113.9', // 攻撃者の実 IP
+        'cf-connecting-ip': '198.51.100.7', // 偽装
+      },
+    });
+    expect(clientIp(req)).toBe('203.0.113.9');
+  });
+
+  it('接続元が Cloudflare でも cf-connecting-ip が不正なら接続元 IP に戻す', () => {
+    const req = new Request('https://example.test', {
+      headers: {
+        'x-vercel-forwarded-for': '2606:4700::1',
+        'cf-connecting-ip': 'not-an-ip',
+      },
+    });
+    expect(clientIp(req)).toBe('2606:4700::1');
+  });
+
+  it('IPv6 の cf-connecting-ip も正規化して返す', () => {
+    const req = new Request('https://example.test', {
+      headers: {
+        'x-vercel-forwarded-for': '2a06:98c1::5',
+        'cf-connecting-ip': '2001:0DB8:0000:0000:0000:0000:0000:0001',
+      },
+    });
+    expect(clientIp(req)).toBe('2001:db8::1');
+  });
+
   it('x-vercel-forwarded-for を x-forwarded-for より優先する', () => {
     const req = new Request('https://example.test', {
       headers: {

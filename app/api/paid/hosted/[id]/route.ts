@@ -125,11 +125,14 @@ function cloneForwardHeaders(req: Request): Headers {
   const forwardedFor = req.headers.get('x-forwarded-for');
   const realIp = req.headers.get('x-real-ip');
   const vercelForwardedFor = req.headers.get('x-vercel-forwarded-for');
+  // Cloudflare 配下では接続元 (x-vercel-forwarded-for) と cf-connecting-ip の両方が要る (lib/net/ipHash.ts)。
+  const cfConnectingIp = req.headers.get('cf-connecting-ip');
   if (forwardedFor) headers.set('x-forwarded-for', forwardedFor);
   if (realIp) headers.set('x-real-ip', realIp);
   if (vercelForwardedFor) {
     headers.set('x-vercel-forwarded-for', vercelForwardedFor);
   }
+  if (cfConnectingIp) headers.set('cf-connecting-ip', cfConnectingIp);
   return headers;
 }
 
