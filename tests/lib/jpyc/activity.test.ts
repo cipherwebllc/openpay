@@ -27,21 +27,25 @@ beforeEach(async () => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('固定バケット・純粋集計', () => {
-  it('1799 / 1800 境界と必要集合は [N-24,N]', () => {
+  it('1799 / 1800 境界、窓は24h・lookbackは60件', () => {
     expect(activity.newestActivityBucket(1_799n)).toBe(-1);
     expect(activity.newestActivityBucket(1_800n)).toBe(0);
     expect(activity.activityBucketRange(1)).toEqual({ fromBlock: 1_800n, toBlock: 3_599n });
-    expect(activity.requiredActivityBuckets(100)).toEqual(Array.from({ length: 25 }, (_, i) => 76 + i));
+    expect(activity.ACTIVITY_WINDOW_MS).toBe(86_400_000);
+    expect(activity.ACTIVITY_MAX_BUCKETS).toBe(60);
     expect(activity.activityBucketKey(100)).toBe('jpyc:activity:polygon:b:100');
   });
 
-  it('窓の下端は toTimestamp > T-86400 (ちょうどは除外)', () => {
+  it('集計は渡された必要集合 [M, N] 全体 (境界 M を丸ごと含む・M〜N の選択は reader)・順序不変', () => {
     const rows = activityWindow();
     const result = activity.aggregateActivity(rows);
-    expect(result.transferCount).toBe(24);
-    expect(result.fromBlock).toBe(rows[1].fromBlock);
-    rows[0].toTimestamp = new Date(ACTIVITY_NOW - 86_400_000 + 1).toISOString();
-    expect(activity.aggregateActivity(rows).transferCount).toBe(25);
+    expect(result.transferCount).toBe(rows.length);
+    expect(result.fromBlock).toBe(rows[0].fromBlock);
+    expect(result.fromTimestamp).toBe(rows[0].fromTimestamp);
+    expect(result.toTimestamp).toBe(rows[rows.length - 1].toTimestamp);
+    // 境界がバケット末尾に一致 (toTimestamp == T−24h) しても M は落ちない (v2.1 裁定)。
+    rows[0].toTimestamp = new Date(Date.parse(rows[rows.length - 1].toTimestamp) - 86_400_000).toISOString();
+    expect(activity.aggregateActivity(rows).transferCount).toBe(rows.length);
     expect(activity.aggregateActivity([...rows].reverse())).toEqual(activity.aggregateActivity(rows));
   });
 
@@ -117,25 +121,29 @@ describe('バケット検証と共有 reader', () => {
       { fromTimestamp: 'NaN' }, { toTimestamp: '2026-02-30T00:00:00.000Z' },
       { toTimestamp: '2026-09-08' }, { toTimestamp: bucket().fromTimestamp.slice(0, 10) },
       { fromBlock: '-1' }, { toBlock: '1e9' }, { fromBlock: '180001' },
-      { eventCount: -1 }, { eventCount: 0.5 }, { items: [[SENDER, RECEIVER, '1e18']] },
+      { eventCount: -1 }, { eventCount: 0.5 }, { eventCount: Number.MAX_SAFE_INTEGER + 1 },
+      { items: [[SENDER, RECEIVER, '1e18']] },
       { items: [[SENDER, '0x12', '1']] }, { overflow: true },
     ]) expect(activity.validActivityBucket({ ...bucket(), ...fields }, 100), JSON.stringify(fields)).toBe(false);
     expect(activity.parseActivityBucket('{', 100)).toBeNull();
     expect(activity.parseActivityBucket('null', 100)).toBeNull();
   });
 
-  it('正常窓は GET + 25-key MGET、observedAt は保存 timestamp のまま', async () => {
+  it('正常窓は GET + 60-key MGET、observedAt は保存 timestamp のまま', async () => {
     const result = await activity.readActivityWindow();
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.aggregate.observedAt).toBe(new Date(ACTIVITY_NOW).toISOString());
-      expect(result.aggregate.transferCount).toBe(24);
+      expect(result.aggregate.transferCount).toBe(25);
     }
-    expect(mocks.mget).toHaveBeenCalledWith(activity.requiredActivityBuckets(100).map(activity.activityBucketKey));
+    expect(mocks.get).toHaveBeenCalledOnce();
+    expect(mocks.get).toHaveBeenCalledWith(activity.ACTIVITY_NEWEST_KEY);
+    expect(mocks.mget).toHaveBeenCalledOnce();
+    expect(mocks.mget).toHaveBeenCalledWith(Array.from({ length: 60 }, (_, i) => activity.activityBucketKey(41 + i)));
     expect(mocks.getBlock).not.toHaveBeenCalled();
   });
 
-  it('pointer P の完全窓 [P-24,P] は P+1 が未保存でも読める', async () => {
+  it('pointer P の完全窓 [M,P] は P+1 が未保存でも読める', async () => {
     const stored = new Map(activityWindow().map((b) => [activity.activityBucketKey(b.index), JSON.stringify(b)]));
     stored.set(activity.ACTIVITY_NEWEST_KEY, '100');
     mocks.get.mockImplementation(async (key: string) => ({ ok: true, value: stored.get(key) ?? null }));
@@ -144,35 +152,89 @@ describe('バケット検証と共有 reader', () => {
 
     expect(stored.has(activity.activityBucketKey(101))).toBe(false);
     expect(await activity.readActivityWindow()).toMatchObject({
-      ok: true, aggregate: { observedAt: new Date(ACTIVITY_NOW).toISOString(), transferCount: 24 },
+      ok: true, aggregate: { observedAt: new Date(ACTIVITY_NOW).toISOString(), transferCount: 25 },
     });
     expect(mocks.get).toHaveBeenCalledWith(activity.ACTIVITY_NEWEST_KEY);
-    expect(mocks.mget).toHaveBeenCalledWith(activity.requiredActivityBuckets(100).map(activity.activityBucketKey));
+    expect(mocks.mget).toHaveBeenCalledWith(Array.from({ length: 60 }, (_, i) => activity.activityBucketKey(41 + i)));
     expect(mocks.getBlock).not.toHaveBeenCalled();
     expect(mocks.getLogs).not.toHaveBeenCalled();
   });
 
-  it.each([0, 12, 24])('先頭・中間・末尾の欠落 (%s) は incomplete', async (offset) => {
+  it.each([35, 48, 59])('必要範囲の先頭・中間・末尾の欠落 (%s) は incomplete', async (offset) => {
     const values: (string | null)[] = activityWindow().map((b) => JSON.stringify(b));
     values[offset] = null;
     mocks.mget.mockResolvedValue({ ok: true, value: values });
     expect(await activity.readActivityWindow()).toEqual({ ok: false, reason: 'data_incomplete' });
   });
 
-  it.each(['overflow', 'malformed', 'schema', 'stale', 'future', 'reversed'])('%s は販売不可', async (kind) => {
+  it.each(['overflow', 'numeric_overflow', 'malformed', 'schema', 'stale', 'future', 'reversed', 'inverted_header'])('%s は販売不可', async (kind) => {
     const rows = activityWindow(kind === 'stale' ? ACTIVITY_NOW - 14_400_001 : kind === 'future' ? ACTIVITY_NOW + 60_001 : ACTIVITY_NOW);
-    if (kind === 'overflow') Object.assign(rows[0], { items: [], overflow: true, eventCount: 5_001 });
-    if (kind === 'schema') Object.assign(rows[0], { schema: 2 });
-    if (kind === 'reversed') rows[1].fromTimestamp = rows[0].fromTimestamp;
+    if (kind === 'overflow') Object.assign(rows[36], { items: [], overflow: true, eventCount: 5_001 });
+    if (kind === 'numeric_overflow') rows[36].eventCount = Number.MAX_SAFE_INTEGER + 1;
+    if (kind === 'schema') Object.assign(rows[36], { schema: 2 });
+    if (kind === 'reversed') rows[48].fromTimestamp = rows[47].fromTimestamp;
+    if (kind === 'inverted_header') rows[36].fromTimestamp = rows[37].toTimestamp;
     const raw = rows.map((b) => JSON.stringify(b));
-    if (kind === 'malformed') raw[0] = '{';
+    if (kind === 'malformed') raw[36] = '{';
     mocks.mget.mockResolvedValue({ ok: true, value: raw });
     expect(await activity.readActivityWindow()).toEqual({ ok: false, reason: kind === 'stale' ? 'data_stale' : 'data_unavailable' });
   });
 
+  it.each([1, 1.5, 2, 3])('%ss/block でも窓は24h以上・24h+1バケット未満', async (blockTimeSeconds) => {
+    const rows = activityWindow(ACTIVITY_NOW, blockTimeSeconds);
+    mocks.mget.mockResolvedValue({ ok: true, value: rows.map((b) => JSON.stringify(b)) });
+    const result = await activity.readActivityWindow();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.reason);
+    const duration = Date.parse(result.aggregate.toTimestamp) - Date.parse(result.aggregate.fromTimestamp);
+    const bucketDuration = 1_800 * blockTimeSeconds * 1_000;
+    expect(duration).toBeGreaterThanOrEqual(86_400_000);
+    expect(duration).toBeLessThan(86_400_000 + bucketDuration);
+    // fixture は各バケットが 1,799 ブロック分 + 次バケットまで 1 ブロックの隙間。M は
+    // fromTimestamp ≤ T−24h を満たす最初のバケット = 24h に届くまでの個数 + 1 (M 丸ごと)。
+    const span = 1_799 * blockTimeSeconds * 1_000;
+    expect(result.aggregate.transferCount).toBe(Math.ceil((86_400_000 - span) / bucketDuration) + 1);
+    expect(result.aggregate.volume).toBe(String(result.aggregate.transferCount));
+  });
+
+  it('fromTimestamp == T-24h の最大indexを M として含め、それより古い破損・欠けは読まない', async () => {
+    const rows = activityWindow(ACTIVITY_NOW, 1.5);
+    const boundaryOffset = 28;
+    rows[boundaryOffset].fromTimestamp = new Date(ACTIVITY_NOW - 86_400_000).toISOString();
+    expect(rows[boundaryOffset].fromTimestamp).toBe(new Date(ACTIVITY_NOW - 86_400_000).toISOString());
+    const values: (string | null)[] = rows.map((b, i) => i < boundaryOffset ? (i % 2 === 0 ? null : '{') : JSON.stringify(b));
+    mocks.mget.mockResolvedValue({ ok: true, value: values });
+    expect(await activity.readActivityWindow()).toMatchObject({
+      ok: true, aggregate: { fromBlock: rows[boundaryOffset].fromBlock, fromTimestamp: rows[boundaryOffset].fromTimestamp, transferCount: 32 },
+    });
+  });
+
+  it('60件目が M なら読めるが、M が lookback 外なら incomplete・追加MGETなし', async () => {
+    for (const blockTimeSeconds of [0.81, 0.5]) {
+      const rows = activityWindow(ACTIVITY_NOW, blockTimeSeconds);
+      mocks.mget.mockResolvedValue({ ok: true, value: rows.map((b) => JSON.stringify(b)) });
+      mocks.mget.mockClear();
+      const result = await activity.readActivityWindow();
+      if (blockTimeSeconds === 0.81) expect(result).toMatchObject({ ok: true, aggregate: { fromBlock: rows[0].fromBlock, transferCount: 60 } });
+      else expect(result).toEqual({ ok: false, reason: 'data_incomplete' });
+      expect(mocks.mget).toHaveBeenCalledOnce();
+      expect(mocks.mget).toHaveBeenCalledWith(Array.from({ length: 60 }, (_, i) => activity.activityBucketKey(41 + i)));
+    }
+  });
+
+  it('N から下へ検証し、古い欠損より新しい破損の unavailable を先に返す', async () => {
+    const values: (string | null)[] = activityWindow().map((b) => JSON.stringify(b));
+    values[36] = null;
+    values[58] = '{';
+    mocks.mget.mockResolvedValue({ ok: true, value: values });
+    expect(await activity.readActivityWindow()).toEqual({ ok: false, reason: 'data_unavailable' });
+    values[59] = null;
+    expect(await activity.readActivityWindow()).toEqual({ ok: false, reason: 'data_incomplete' });
+  });
+
   it('KV 障害 / target 不正 / MGET 不正形 / throw は unavailable', async () => {
     for (const value of [{ ok: false, reason: 'unconfigured' }, { ok: true, value: null },
-      { ok: true, value: '1e2' }, { ok: true, value: '23' }, { ok: true, value: '999999999999999999' }]) {
+      { ok: true, value: '1e2' }, { ok: true, value: '58' }, { ok: true, value: '999999999999999999' }]) {
       mocks.get.mockResolvedValue(value);
       expect(await activity.readActivityWindow()).toEqual({ ok: false, reason: 'data_unavailable' });
     }

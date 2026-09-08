@@ -1,4 +1,4 @@
-// JPYC Network Activity の固定バケットを保存・検証し、約 24 時間の集計を返す。
+// JPYC Network Activity の固定バケットを最大 60 個遡り、timestamp で約 24 時間の窓を決める。
 //
 // 設計の肝:
 //   - **finalized 固定バケット**。確定済みブロックだけを扱い、確定後の内容は不変。
@@ -17,14 +17,15 @@ import { kvGet, kvMget } from '@/lib/kv';
 import { TRANSFER_CHUNK_BLOCKS, TRANSFER_EVENT } from './live';
 
 export const ACTIVITY_BUCKET_BLOCKS = 1_800n;
+export const ACTIVITY_WINDOW_MS = 86_400_000;
+export const ACTIVITY_MAX_BUCKETS = 60;
 export const ACTIVITY_TTL_SEC = 30 * 60 * 60;
 export const ACTIVITY_MAX_ITEMS = 5_000;
 export const ACTIVITY_VALIDITY_MS = 4 * 60 * 60 * 1_000;
 export const ACTIVITY_LOCK_KEY = 'jpyc:activity:polygon:lock';
-// 固定キーの N は時刻から推測できないため、必要な 25 バケットが揃った時だけ公開する。
-// reader は公開後も 25 バケットと鮮度を検証し、ポインタ更新だけでは鮮度を延ばさない。
+// N の toTimestamp から 24h 前に届く境界 M まで、連続した [M, N] が揃った時だけ公開する。
+// reader も最大 60 バケットで境界・完全性・鮮度を検証し、ポインタ更新だけでは鮮度を延ばさない。
 export const ACTIVITY_NEWEST_KEY = 'jpyc:activity:polygon:newest';
-const WINDOW_MS = 24 * 60 * 60 * 1_000;
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const DIGITS = /^[0-9]+$/;
@@ -66,10 +67,6 @@ export function newestActivityBucket(finalized: bigint): number {
   // 不正な RPC ブロック番号を丸めて別バケットを走査する波及を断つ。
   if (finalized < 0n || index > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('invalid finalized block');
   return Number(index);
-}
-
-export function requiredActivityBuckets(newest: number): number[] {
-  return Array.from({ length: 25 }, (_, offset) => newest - 24 + offset);
 }
 
 export function activityBucketKey(index: number): string {
@@ -205,9 +202,12 @@ export function activityFreshness(toTimestamp: string, now = Date.now()): Activi
 }
 
 export function aggregateActivity(buckets: readonly ActivityBucket[]) {
+  // 窓 = 渡された必要集合 [M, N] 全体。境界バケット M (fromTimestamp ≤ T−24h) は丸ごと含める —
+  // toTimestamp で再度絞ると境界がバケット末尾に一致した時に M が落ちて 24h を割る (v2.1 裁定)。
+  // M〜N の選択と完全性の検証は readActivityWindow が担い、ここは集計だけを行う。
   const sorted = [...buckets].sort((a, b) => a.index - b.index);
   const newest = sorted[sorted.length - 1];
-  const selected = sorted.filter((b) => Date.parse(b.toTimestamp) > Date.parse(newest.toTimestamp) - WINDOW_MS);
+  const selected = sorted;
   const senders = new Set<string>();
   const receivers = new Map<string, { address: string; count: number; volume: bigint }>();
   const values: bigint[] = [];
@@ -259,26 +259,30 @@ export async function readActivityWindow(): Promise<ActivityWindow> {
     // storage 障害・未設定・未 bootstrap をゼロ件として販売しない。
     if (!head.ok || typeof head.value !== 'string' || !DIGITS.test(head.value)) return { ok: false, reason: 'data_unavailable' };
     const newest = Number(head.value);
-    if (!Number.isSafeInteger(newest) || newest < 24) return { ok: false, reason: 'data_unavailable' };
-    const indices = requiredActivityBuckets(newest);
+    if (!Number.isSafeInteger(newest) || newest < ACTIVITY_MAX_BUCKETS - 1) return { ok: false, reason: 'data_unavailable' };
+    const indices = Array.from({ length: ACTIVITY_MAX_BUCKETS }, (_, offset) => newest - ACTIVITY_MAX_BUCKETS + 1 + offset);
     const result = await kvMget(indices.map(activityBucketKey));
     // MGET の不正形・通信障害を部分的な成功へ波及させない。
     if (!result.ok || !Array.isArray(result.value) || result.value.length !== indices.length) {
       return { ok: false, reason: 'data_unavailable' };
     }
     const buckets: ActivityBucket[] = [];
-    for (const [offset, index] of indices.entries()) {
+    for (let offset = indices.length - 1; offset >= 0; offset--) {
       if (result.value[offset] === null) return { ok: false, reason: 'data_incomplete' };
-      const bucket = parseActivityBucket(result.value[offset], index);
+      const bucket = parseActivityBucket(result.value[offset], indices[offset]);
+      const later = buckets[buckets.length - 1];
       // 破損・overflow・時刻逆転を完全な集計と見なして課金する波及を断つ。
-      if (!bucket || bucket.overflow || (offset > 0 && buckets[offset - 1].toTimestamp > bucket.fromTimestamp)) {
+      if (!bucket || bucket.overflow || (later && bucket.toTimestamp > later.fromTimestamp)) {
         return { ok: false, reason: 'data_unavailable' };
       }
       buckets.push(bucket);
+      if (Date.parse(bucket.fromTimestamp) <= Date.parse(buckets[0].toTimestamp) - ACTIVITY_WINDOW_MS) {
+        const reason = activityFreshness(buckets[0].toTimestamp);
+        if (reason) return { ok: false, reason };
+        return { ok: true, aggregate: aggregateActivity(buckets) };
+      }
     }
-    const reason = activityFreshness(buckets[buckets.length - 1].toTimestamp);
-    if (reason) return { ok: false, reason };
-    return { ok: true, aggregate: aggregateActivity(buckets) };
+    return { ok: false, reason: 'data_incomplete' };
   } catch {
     // content に例外ハンドラが無い gate へ KV / 集計例外を伝播させず、settle 前の 503 にする。
     return { ok: false, reason: 'data_unavailable' };
