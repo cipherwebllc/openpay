@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.0
+
+- Add `hasLicense` for standard ERC-1155 ownership with a required chain/contract/
+  uint256 token identity, block-pinned reads, and typed RPC errors. Token IDs
+  accept bigint or hex, never JS numbers.
+- Add `verifyLicense` for the trusted HTTPS v1 status API, with schema and
+  address/product identity validation. Preserve `entitled: null` as unknown and
+  reject redirects; allow HTTP only on localhost/127.0.0.1.
+- Add `createLicenseGate`: five-minute EIP-4361-style EOA challenges, atomic
+  single-use nonces, on-chain ownership, and HMAC sessions bound to the service
+  origin and full license identity. Default sessions last five minutes; support
+  an injectable nonce store without adding other persistence.
+- Add TypeScript declarations, mocked RPC/fetch and real-signature unit tests,
+  and the entry-license + x402 pay-per-use README pattern. Keep existing exports'
+  behavior and spend defaults unchanged; add no dependencies.
+- Keep licenses standard ERC-1155; the ERC-8217 agent-binding format will be
+  published later. This release does not implement binding metadata.
+
 ## 0.6.0
 
 - Add `createDualGate` — a dual-rail seller gate that serves both JPYC (Polygon,

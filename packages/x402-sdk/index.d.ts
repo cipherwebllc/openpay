@@ -1,4 +1,4 @@
-import type { Address, Hex } from 'viem';
+import type { Address, Hex, PublicClient } from 'viem';
 
 export type JpycAmount = string | number;
 
@@ -332,6 +332,127 @@ export interface JpycGate {
 }
 
 export function createJpycGate(options: JpycGateOptions): JpycGate;
+
+/** uint256 identity; JS numbers and decimal strings are intentionally unsupported. */
+export type LicenseTokenId = bigint | Hex;
+
+export interface LicenseIdentity {
+  chainId: number;
+  contract: Address;
+  tokenId: LicenseTokenId;
+}
+
+export type LicensePublicClient = Pick<PublicClient, 'getChainId' | 'getBlockNumber' | 'readContract'>;
+
+/** Polygon/Amoy public RPC defaults; other chains require an explicit transport. */
+export type LicenseTransport =
+  | { rpcUrl?: string; publicClient?: never }
+  | { rpcUrl?: never; publicClient: LicensePublicClient };
+
+export type HasLicenseOptions = LicenseIdentity & LicenseTransport & { address: Address };
+
+export interface LicenseBalance {
+  holder: boolean;
+  balance: bigint;
+  /** The block used for balanceOf, fetched without the viem block-number cache. */
+  blockNumber: bigint;
+}
+
+export type LicenseErrorCode =
+  | 'rpc_error' | 'network_error' | 'http_error' | 'redirect' | 'invalid_response'
+  | 'nonce_store_error' | 'invalid_challenge' | 'challenge_expired'
+  | 'invalid_signature' | 'invalid_nonce' | 'no_license'
+  | 'invalid_session' | 'session_expired';
+
+export class LicenseError extends Error {
+  readonly code: LicenseErrorCode;
+  constructor(code: LicenseErrorCode, message: string, options?: { cause?: unknown });
+}
+
+export class LicenseRpcError extends LicenseError {
+  readonly code: 'rpc_error';
+  constructor(message?: string, options?: { cause?: unknown });
+}
+
+/** RPC failures (including a wrong chain or malformed result) throw LicenseRpcError. */
+export function hasLicense(options: HasLicenseOptions): Promise<LicenseBalance>;
+
+export type LicenseNftStatus =
+  | 'awaiting_finality' | 'pending' | 'submitted' | 'minted' | 'registered'
+  | 'retryable' | 'needs_repair' | 'unknown';
+
+export interface VerifyLicenseOptions {
+  address: Address;
+  /** OpenPay hosted product ID: h_ followed by 32 lowercase hex digits. */
+  product: string;
+  /** Trusted HTTPS authority. Default: https://open-pay.jp. HTTP only on localhost/127.0.0.1. */
+  origin?: string;
+  /** Must honor redirect: 'manual' and the AbortSignal. */
+  fetch?: typeof globalThis.fetch;
+}
+
+export interface LicenseVerification {
+  version: 1;
+  address: Address;
+  license: { chainId: number; contract: Address; tokenId: Hex; productId: string };
+  /** null means UNKNOWN, never false. This status response is not authentication. */
+  entitled: boolean | null;
+  basis: 'purchase' | 'holder' | null;
+  nft: { status: LicenseNftStatus; mintTxHash?: Hex };
+  observedBlock?: string;
+  checkedAt: string;
+}
+
+/** Validates the v1 response and address/product identity. Rejects all redirects. */
+export function verifyLicense(options: VerifyLicenseOptions): Promise<LicenseVerification>;
+
+export interface LicenseNonceRecord {
+  message: string;
+  /** Unix milliseconds. */
+  expiresAt: number;
+}
+
+export interface LicenseNonceStore {
+  /** Persist until expiresAt. Throw on failure. */
+  set(nonce: string, record: LicenseNonceRecord): void | Promise<void>;
+  /** Atomically return AND delete once across workers. Never implement as separate get/delete. */
+  consume(nonce: string): LicenseNonceRecord | null | undefined | Promise<LicenseNonceRecord | null | undefined>;
+}
+
+export type LicenseGateOptions = LicenseIdentity & LicenseTransport & {
+  session: {
+    /** Server-only random secret, at least 32 UTF-8 bytes. */
+    secret: string;
+    /** Seconds, 1–86400. Default 300. Ownership is cached for this lifetime. */
+    ttlSeconds?: number;
+  };
+  /** Your service's signing origin and session audience. Default https://open-pay.jp. */
+  origin?: string;
+  /** Single-line ASCII SIWE statement. */
+  statement?: string;
+  /** Default: a bounded in-memory store for this gate instance. */
+  nonceStore?: LicenseNonceStore;
+  /** Clock in Unix milliseconds. Default Date.now. */
+  now?: () => number;
+};
+
+export interface LicenseSession {
+  address: Address;
+  tokenId: bigint;
+  /** Unix seconds. */
+  exp: number;
+}
+
+export interface LicenseGate {
+  /** An EIP-4361-style message, valid for five minutes. */
+  challenge(address: Address): Promise<string>;
+  /** EOA signature recovery, atomic nonce consumption, balanceOf, then HMAC session issuance. */
+  verify(input: { message: string; signature: Hex }): Promise<string>;
+  /** Synchronous signature/scope/expiry validation; no RPC and no ownership refresh. */
+  check(token: string): LicenseSession;
+}
+
+export function createLicenseGate(options: LicenseGateOptions): LicenseGate;
 
 export interface DualGateOptions extends JpycGateOptions {
   /** OpenPay listing id (MY_RESOURCE_ID in the generated snippet). Enables the USDC (Base) rail. */

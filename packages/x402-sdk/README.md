@@ -169,6 +169,162 @@ and `deactivate(id)` complete the lifecycle; `update` without `usdc` removes the
 USDC face, so pass the previous value to keep it. The private key signs locally
 and is never transmitted.
 
+## 利用ライセンス (License NFT)
+
+SDK 0.7.0 adds license reads and a server-side entry gate. The two-line pattern is:
+
+```js
+const entry = createLicenseGate({ ...licenseIdentity, origin: 'https://service.example', session: { secret: sessionSecret } });
+const usage = createJpycGate({ resourceUrl: 'https://service.example/api/paid' });
+```
+
+Import these helpers from `openpay-x402-sdk`. `licenseIdentity` is the full
+`{ chainId, contract, tokenId }` tuple for your product; obtain it from the product
+definition or the trusted Verify API. `tokenId` must be a `bigint` or `0x` hex
+string representing a uint256, never a JS number or decimal string. OpenPay
+derives it as `keccak256(UTF8('openpay:license:' + productId))`, including the
+entire `h_…` product ID. A token ID alone does not identify a license across
+chains and contracts.
+
+### Read ownership or purchase rights
+
+```js
+import { hasLicense, verifyLicense, LicenseRpcError } from 'openpay-x402-sdk';
+
+const status = await verifyLicense({ address: walletAddress, product: productId });
+if (status.entitled === null) {
+  // UNKNOWN: retry later; do not treat this as non-ownership or ask for repurchase.
+} else if (status.entitled === true) {
+  // The trusted API reports rights. Authenticate the wallet separately.
+}
+
+try {
+  const { holder, balance, blockNumber } = await hasLicense({
+    address: walletAddress,
+    chainId: status.license.chainId,
+    contract: status.license.contract,
+    tokenId: status.license.tokenId,
+  });
+  console.log({ holder, balance, blockNumber });
+} catch (error) {
+  if (error instanceof LicenseRpcError) {
+    // Ownership is unconfirmed. Report/retry the failure; do not convert it to false.
+  } else throw error;
+}
+```
+
+`hasLicense` calls standard ERC-1155 `balanceOf(address, tokenId)` at the returned
+`blockNumber`, using the latest block (not a finality guarantee). It checks the
+RPC chain ID and returns `{ holder: boolean, balance: bigint, blockNumber: bigint }`.
+Zero balance is a successful negative result; network errors, a wrong chain,
+reverts and malformed RPC results throw `LicenseRpcError` (`code: 'rpc_error'`).
+Pass either `rpcUrl` or a viem `publicClient` implementing `getChainId`,
+`getBlockNumber` and `readContract`. Polygon (137) and Amoy (80002) use viem's
+public RPC defaults if neither is supplied; other chains need an explicit
+transport. Treat the chosen RPC/client as a trusted read source.
+
+`verifyLicense({ address, product, origin?, fetch? })` calls
+`GET /api/license/verify?address=…&product=…`. It validates version `1`, the
+address/product echoes, the full license identity and token derivation,
+`entitled`, `basis`, NFT status, optional mint transaction/observed block, and
+`checkedAt`. The typed response keeps `entitled: boolean | null`; **null means
+unknown**. `basis` is `purchase`, `holder` or `null`. NFT status is
+`awaiting_finality`, `pending`, `submitted`, `minted`, `registered`, `retryable`,
+`needs_repair` or `unknown`.
+
+This is a trusted HTTPS status API, not wallet authentication or portable signed
+proof. The default origin is `https://open-pay.jp`; an override must be a bare
+HTTPS origin without credentials, path, query or fragment. HTTP is allowed only
+for `localhost` and `127.0.0.1`. All redirects, including same-origin redirects,
+are rejected. Injected `fetch` must honor `redirect: 'manual'` and the 15-second
+AbortSignal. Invalid schemas, HTTP failures and transport failures throw
+`LicenseError` with `invalid_response`, `http_error` or `network_error`; redirects
+use `redirect`. Invalid caller options throw `TypeError`.
+
+### Authenticate at entry, charge separately for use
+
+Create one `entry` instance on your server using the two-line pattern above.
+Set `origin` to **your service's origin** (default `https://open-pay.jp`) so the
+signing domain and session audience are correct. `sessionSecret` must be a
+server-only, cryptographically random secret of at least 32 UTF-8 bytes, for
+example a random 32-byte value encoded as hex. All workers must use the same
+configuration and secret.
+
+```js
+// Server challenge endpoint: send this message to the wallet.
+const message = await entry.challenge(walletAddress);
+// Wallet: sign the exact message with signMessage({ message }).
+// Server verify endpoint: receive the message and signature from the wallet.
+const token = await entry.verify({ message, signature });
+// On protected requests, extract the token from your cookie or Authorization header.
+const { address, tokenId, exp } = entry.check(token);
+// After entry.check succeeds, charge each paid call with the existing usage gate.
+const payment = await usage.handle(request);
+if (payment instanceof Response) return payment;
+// Return the paid content with payment.paymentResponseHeader as X-PAYMENT-RESPONSE.
+```
+
+`challenge` returns a five-minute [EIP-4361-style message](https://eips.ethereum.org/EIPS/eip-4361)
+with a random nonce and the full license identity in its Resources field.
+`verify` uses viem's EOA `verifyMessage` recovery, checks the exact issued message,
+domain, URI, identity and expiry, atomically consumes its nonce, reads ownership,
+then returns an HMAC-SHA256 session token. This version supports EOA signatures;
+contract-wallet ERC-1271 verification is not implemented. The optional
+`statement` must be single-line ASCII.
+
+`check` is synchronous and returns `{ address, tokenId: bigint, exp }`, with `exp`
+in Unix seconds. It authenticates the token and checks its audience, full license
+identity and expiry. It performs no RPC: a transfer/burn after entry remains
+effective in an existing session until expiry. `session.ttlSeconds` defaults to
+300 (allowed 1–86400); use a short lifetime or call `hasLicense` again when fresh
+ownership is required. The helper does not set cookies or expose HTTP endpoints;
+your framework handles token transport, secure cookies and endpoint rate limits.
+
+Authentication failures throw `LicenseError`: `invalid_challenge`,
+`challenge_expired`, `invalid_signature`, `invalid_nonce`, `no_license`,
+`invalid_session` or `session_expired`. RPC failures remain `LicenseRpcError`.
+Once a valid signature consumes a nonce, even an RPC failure or zero balance
+requires a fresh challenge. No session is issued on a nonce-store failure
+(`nonce_store_error`).
+
+The default nonce store is in memory per gate instance, prunes expired entries
+on challenge creation and caps pending entries at 10,000. For multiple workers
+or restarts, inject only a `nonceStore` with:
+
+```ts
+set(nonce: string, record: { message: string; expiresAt: number }): void | Promise<void>;
+consume(nonce: string): LicenseNonceRecord | null | undefined | Promise<LicenseNonceRecord | null | undefined>;
+```
+
+`expiresAt` is Unix milliseconds. `consume` must return and delete the record
+**atomically** across workers (for example with a Redis GETDEL); a separate
+get/delete pair is unsafe. Expire records at `expiresAt` and throw on storage
+failure. The SDK has no other persistence. Session tokens are bearer credentials;
+keep the HMAC secret on the server and use HTTPS to carry the token.
+
+`hasLicense` and `createLicenseGate` check NFT ownership only. OpenPay purchase
+rights can exist before minting, and non-transferable licenses retain purchase
+rights after burn; use the Verify API after separately authenticating the wallet
+if your service needs that purchase-rights policy. For transferable licenses,
+post-mint rights follow the current holder. Licenses carry no usage allowance or
+spend balance; `createJpycGate` handles separate x402 pay-per-use. SDK spend
+defaults remain unchanged.
+
+ERC-8217 note: the license remains a standard ERC-1155. The agent-binding format
+will be published later; SDK 0.7.0 does not emit or validate binding metadata.
+
+### SDK verification in this repository
+
+```bash
+npm test --prefix packages/x402-sdk
+npx vitest run tests/packages/x402-sdk-*.test.ts
+```
+
+The package's unit tests use Node's built-in test runner with mocked RPC/fetch
+and real EOA signatures. Existing buyer/seller regression and tarball tests
+remain in the root Vitest suite; `npm run typecheck` also checks license API
+consumer types.
+
 ## Money guards
 
 | Option | Default | Guard |
