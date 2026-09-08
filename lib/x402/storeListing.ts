@@ -1,4 +1,8 @@
 import 'server-only';
+import type { StoreLicenseSummary, SellerRole } from '@/lib/licenseUi';
+import { env } from '@/lib/env';
+import { sellerRoleFor } from '@/lib/license/sellerRole';
+import { licenseSummariesFor } from '@/lib/license/display';
 
 // /store 一覧 (P3) の組み立て。plans/store-marketplace.md。
 //
@@ -19,6 +23,8 @@ import { listStoreIndexIds } from '@/lib/x402/storeIndex';
 /** Store カードの描画に必要な公開情報のみ (owner ウォレットは client へ渡さない)。 */
 export type StoreListing = {
   productKind?: 'license';
+  license?: StoreLicenseSummary;
+  sellerRole?: SellerRole;
   id: string;
   title: string;
   desc?: string;
@@ -57,14 +63,15 @@ export async function listStoreListings(): Promise<StoreListing[] | null> {
     new Set(products.map((product) => product.owner.toLowerCase())),
   );
   const handlesByOwner = new Map<string, string[]>();
-  await Promise.all(
-    owners.map(async (owner) => {
+  const [licenseSummaries] = await Promise.all([
+    env.enableLicenseNftUi ? licenseSummariesFor(products) : Promise.resolve(new Map()),
+    Promise.all(owners.map(async (owner) => {
       const handles = await listHandlesForOwner(owner);
       if (handles && handles.length > 0) {
         handlesByOwner.set(owner, handles);
       }
-    }),
-  );
+    })),
+  ]);
 
   const out: StoreListing[] = [];
   for (const product of products) {
@@ -78,7 +85,11 @@ export async function listStoreListings(): Promise<StoreListing[] | null> {
         : ownedHandles[0];
     out.push({
       id: product.id,
-      ...(product.productKind === 'license' ? { productKind: product.productKind } : {}),
+      ...(product.productKind === 'license' && product.license ? {
+        productKind: product.productKind,
+        sellerRole: sellerRoleFor(product.owner),
+        ...(licenseSummaries.has(product.id) ? { license: licenseSummaries.get(product.id) } : {}),
+      } : {}),
       title: product.title,
       ...(product.desc ? { desc: product.desc } : {}),
       ...(product.emoji ? { emoji: product.emoji } : {}),

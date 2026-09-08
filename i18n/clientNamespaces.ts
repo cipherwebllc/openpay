@@ -25,6 +25,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
   '[handle]': [
     'ConnectButton',
     'CopyableField',
+    'CreatorStoreLicense',
     'CreatorStorePurchase',
     'CreatorStorefront',
     'CrossChainHint',
@@ -300,12 +301,14 @@ export const ROUTE_CLIENT_NAMESPACES = {
   'store/library': [
     'ConnectButton',
     'CreatorStoreLibrary',
+    'CreatorStoreLicense',
     'LocaleSwitcher',
     'Nav',
     'News',
   ],
   'store': [
     'ConnectButton',
+    'CreatorStoreLicense',
     'LocaleSwitcher',
     'Nav',
     'News',

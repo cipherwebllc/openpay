@@ -1075,7 +1075,33 @@
     "listingHandleLabel": "Listed on profile",
     "listingHandleAll": "All of my profiles",
     "featuredLabel": "Feature on profile",
-    "featuredHint": "If any product is featured, only featured products appear on your profile (the Store still lists everything)."
+    "featuredHint": "If any product is featured, only featured products appear on your profile (the Store still lists everything).",
+    "productTypeLabel": "Product type",
+    "digitalProduct": "Digital product",
+    "licenseProduct": "Usage license NFT",
+    "licenseTitleLabel": "License name",
+    "licenseSupplyLabel": "Supply (1–10,000)",
+    "licensePriceLabel": "Price (JPYC, at least 1,000)",
+    "licenseTransferLabel": "Transfer",
+    "licenseTransferYes": "Allowed",
+    "licenseTransferNo": "Not allowed",
+    "licenseTermsUrlLabel": "Terms URL (https)",
+    "licenseTermsVersionLabel": "Terms version",
+    "licenseInstructionsLabel": "Getting started (text, optional)",
+    "licenseInstructionsHint": "If blank, instructions referring to the terms URL will be saved.",
+    "licenseUsdcNotice": "Licenses are paid in JPYC only. USDC is not available.",
+    "licenseImmutableNotice": "After creation, payout wallet, price, supply, transfer rules, terms and getting-started instructions cannot be changed. Once registered, select “Publish” in the product list to start selling.",
+    "licenseValidationError": "Enter an integer supply of 1–10,000, an integer price of 1,000–1,000,000 JPYC, an https terms URL a nonempty version and a valid payout wallet.",
+    "licenseRegistrationLabel": "Registration: {state}",
+    "licenseRegistrationPending": "Pending registration",
+    "licenseRegistrationRegistered": "Registered",
+    "licenseRegistrationFailed": "Failed",
+    "licenseRefresh": "Refresh registration",
+    "licensePublish": "Publish",
+    "licensePause": "Stop selling",
+    "licenseRegistrationHint": "Publishing is available after registration completes. Contact support if registration continues to fail.",
+    "licensePayToLabel": "Sales payout wallet",
+    "licensePayToHint": "Sales proceeds go directly to this wallet. It must differ from OpenPay’s fee receiver. The seller role follows the listing account and does not change with the payout wallet."
   },
   "CreatorStorefront": {
     "heading": "On sale",
@@ -1202,7 +1228,14 @@
     "shareCopy": "Copy link",
     "shareCopied": "Copied",
     "shareOnX": "Share on X",
-    "shareMore": "More options"
+    "shareMore": "More options",
+    "licenseErrors": {
+      "sold_out": "Sold out",
+      "reservation_quota": "You have reached the simultaneous reservation limit. Please try again later.",
+      "recipient_unsupported": "This wallet cannot receive this NFT. Please use a supported wallet.",
+      "license_registration_pending": "Getting ready",
+      "license_simulation_unavailable": "Could not verify. Please try again later."
+    }
   },
   "CreatorStoreLibrary": {
     "eyebrow": "Purchased",
@@ -1251,7 +1284,14 @@
       "external": "External link"
     },
     "provenanceTitle": "This item is licensed to wallet {wallet}",
-    "provenanceMeta": "Purchased {date} · Purchase ID {id} · tx {tx}"
+    "provenanceMeta": "Purchased {date} · Purchase ID {id} · tx {tx}",
+    "receivedHeading": "Received licenses",
+    "receivedEmpty": "No received licenses on this page. Load more if another page is available.",
+    "receivedIntro": "Transferable licenses currently held by this wallet, listed separately from purchase history.",
+    "receivedLoadError": "Could not check received licenses. Please try again later.",
+    "openLicense": "Open getting-started instructions",
+    "holderProvenance": "Delivered based on current NFT ownership, not a purchase record for this wallet.",
+    "receivedLink": "View received licenses"
   },
   "CreatorStoreSellerDisclosure": {
     "back": "Back",
@@ -2843,5 +2883,47 @@
       "loadError": "Failed to load. Please reopen",
       "openAll": "Open the full inbox"
     }
+  },
+  "CreatorStoreLicense": {
+    "badge": "Usage license NFT",
+    "transferable": "Transferable",
+    "nonTransferable": "Non-transferable",
+    "termsLink": "License terms (version {version})",
+    "deliveryNotice": "The NFT usually arrives in the wallet used for payment within a few minutes of purchase. Your rights take effect at purchase.",
+    "nftState": "NFT status: {state}",
+    "mintTransaction": "View mint transaction",
+    "purchaseRights": "Your purchase record establishes your rights. For transferable licenses, the current holder exercises the rights after minting.",
+    "holderRights": "Rights to a received license are based on current NFT ownership.",
+    "transferredRights": "This holding was transferred or burned and no longer grants access to this wallet. Your purchase record remains.",
+    "providerLabel": "Provider",
+    "providerUnverified": "Check the provider in the seller information",
+    "scopeLabel": "Scope and duration",
+    "scopeBody": "Check this version of the terms for scope, duration, the deadline for addressing mint failures, and refunds, termination notices and remedies.",
+    "meteredLabel": "Usage is billed separately",
+    "meteredBody": "This price covers the license. It includes no usage credits or balance. Metered usage, if offered, is charged at the disclosed rate in separate x402 payments.",
+    "issueLabel": "NFT delivery and mint failure",
+    "issueBody": "A delayed or failed mint does not invalidate purchase rights. Minting will be repaired; the seller’s terms set the response deadline and remedies. Delivery cannot be redirected to another wallet.",
+    "refundLabel": "Refunds and termination",
+    "refundBody": "Refunds are separate transfers funded by the seller, not reversals or automatic NFT recovery. The terms govern notice, termination and remedies. Rights to cancellation, refunds or other remedies for non-delivery or material misdescription remain available.",
+    "transferLabel": "Transfer and burn",
+    "transferBody": "After minting, rights belong to the NFT holder. Transfer removes the former holder’s rights to that license; burning removes rights for the burned units. Refunds and burns do not replenish supply.",
+    "nonTransferBody": "The license is bound to the purchasing wallet and cannot be transferred. Burning abandons the proof but does not extinguish purchase rights. Refunds and burns do not replenish supply.",
+    "publicLabel": "Public ledger and Verify API",
+    "publicBody": "Wallet addresses, NFT identifiers, and mint, transfer and burn history are public on the ledger. The public Verify API exposes entitlement status, basis and NFT status; others may correlate this information. The API is not identity authentication or portable signed proof.",
+    "quantity": "One license for “{title}”",
+    "providerThirdPartyNote": "OpenPay is not a party to third-party license agreements and does not guarantee service delivery or external integrations.",
+    "providerOperatorNote": "OpenPay is the seller and is responsible for service delivery and seller obligations.",
+    "states": {
+      "pending": "Awaiting mint",
+      "minted": "Minted",
+      "repair": "Under repair",
+      "transferred": "Transferred",
+      "unknown": "Could not verify"
+    },
+    "remaining": "{remaining} of {supply} remaining",
+    "remainingUnknown": "Remaining supply could not be checked",
+    "sellerOperator": "Seller: OpenPay (operator)",
+    "sellerThirdParty": "Seller: Third-party seller ({name})",
+    "providerThirdParty": "Seller: Third-party seller"
   }
 }

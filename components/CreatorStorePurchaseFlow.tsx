@@ -9,6 +9,9 @@ import { formatUnits } from 'viem';
 import { hostedPurchaseFeeValue } from '@/lib/x402/hostedPurchaseWire';
 import { STORE_REPORT_EMAIL } from '@/lib/x402/storeMeta';
 import type { Address } from 'viem';
+import { licensePurchaseErrorCode, type StoreLicenseProduct } from '@/lib/licenseUi';
+import { env } from '@/lib/env';
+import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { CreatorStorePurchaseConfirmation } from '@/components/CreatorStorePurchaseConfirmation';
 import { CreatorStorePurchaseState } from '@/components/CreatorStorePurchaseState';
 import { useHostedStorePurchase } from '@/hooks/useHostedStorePurchase';
@@ -18,7 +21,7 @@ import { buildHostedPurchaseSignPreview } from '@/lib/x402/hostedPurchaseWire';
 
 export type CreatorStorePurchaseFlowProps = {
   open: boolean;
-  product: {
+  product: StoreLicenseProduct & {
     id: string;
     title: string;
     description?: string;
@@ -52,8 +55,9 @@ export function CreatorStorePurchaseFlow({
   } = useSiweSession();
   useStoreCacheScope(sessionAddress);
   const [paymentRail, setPaymentRail] = useState<'jpyc' | 'usdc'>('jpyc');
+  const isLicense = env.enableLicenseNftUi && product.productKind === 'license';
   const selectedPaymentRail =
-    product.usdcEnabled === true ? paymentRail : 'jpyc';
+    !isLicense && product.usdcEnabled === true ? paymentRail : 'jpyc';
   const buyer = useHostedStorePurchase({
     resourceId: product.id,
     title: product.title,
@@ -96,7 +100,7 @@ export function CreatorStorePurchaseFlow({
     [buyer.quote, effectivePreviewNowSec],
   );
 
-  if (!open) return null;
+  if (!open || (product.productKind === 'license' && !env.enableLicenseNftUi)) return null;
 
   const closeAndResetReview = () => {
     buyer.reset();
@@ -172,6 +176,8 @@ export function CreatorStorePurchaseFlow({
     buyer.phase === 'needs-support' ||
     buyer.phase === 'failed-prebroadcast';
   const displayedError = flowError ?? buyer.error ?? signInError;
+  const licenseError = isLicense ? licensePurchaseErrorCode(displayedError) : null;
+  const licenseErrorMessage = licenseError ? t(`licenseErrors.${licenseError}`) : null;
 
   return (
     <div
@@ -201,7 +207,7 @@ export function CreatorStorePurchaseFlow({
         {showConfirmation && buyer.quote ? (
           <>
             {displayedError ? (
-              <ErrorNotice message={t('signatureError')} />
+              <ErrorNotice message={licenseErrorMessage ?? t('signatureError')} />
             ) : null}
             {buyer.quote.rail === 'usdc' ? (
               <CreatorStorePurchaseConfirmation
@@ -232,7 +238,8 @@ export function CreatorStorePurchaseFlow({
             ) : signPreview ? (
               <CreatorStorePurchaseConfirmation
                 rail="jpyc"
-                product={{
+                      product={{
+                  ...(isLicense ? { productKind: product.productKind, license: product.license, sellerRole: buyer.sellerRole ?? product.sellerRole, sellerName: product.sellerName } : {}),
                   title: product.title,
                   ...(product.description
                     ? { description: product.description }
@@ -254,7 +261,9 @@ export function CreatorStorePurchaseFlow({
           </>
         ) : showState ? (
           <div className="rounded-3xl bg-white p-5 shadow-2xl sm:p-7">
+            {licenseErrorMessage ? <ErrorNotice message={licenseErrorMessage} /> : null}
             <CreatorStorePurchaseState
+              productKind={isLicense ? 'license' : undefined}
               paymentStatus={buyer.paymentStatus}
               accessStatus={buyer.accessStatus}
               ownershipReadBack={
@@ -350,7 +359,8 @@ export function CreatorStorePurchaseFlow({
                 {product.description}
               </p>
             ) : null}
-            {product.usdcEnabled === true ? (
+            <CreatorStoreLicenseDetails product={product} />
+            {!isLicense && product.usdcEnabled === true ? (
               <fieldset className="mx-auto mt-5 max-w-md text-left">
                 <legend className="text-sm font-bold text-slate-800">
                   {t('paymentMethodHeading')}
@@ -484,9 +494,9 @@ export function CreatorStorePurchaseFlow({
             {displayedError ? (
               <ErrorNotice
                 message={
-                  isSigningIn || signInError
+                  licenseErrorMessage ?? (isSigningIn || signInError
                     ? t('signInError')
-                    : t('prepareError')
+                    : t('prepareError'))
                 }
               />
             ) : null}

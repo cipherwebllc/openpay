@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { licenseNftEnabled } from '@/lib/license/config';
+import { withSellerRole } from '@/lib/license/sellerRole';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import {
   createHostedProduct,
@@ -97,7 +98,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
   return storePrivateJson({
     ok: true,
-    products,
+    products: products.map(withSellerRole),
     max: MAX_HOSTED_PER_OWNER,
   });
 }
@@ -238,7 +239,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   // Store 掲載インデックス (P2)。no-throw: 障害は掲載遅延にしかならず出品本体へ波及させない。
   await touchStoreIndex(created.product.id, created.product.createdAt);
   return storePrivateJson(
-    { ok: true, product: created.product },
+    { ok: true, product: withSellerRole(created.product) },
     201,
   );
 }

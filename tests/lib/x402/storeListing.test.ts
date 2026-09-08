@@ -6,7 +6,15 @@ const mocks = vi.hoisted(() => ({
   ids: [] as string[] | null,
   products: [] as unknown[] | 'storage',
   handles: new Map<string, string[] | null>(),
+  licenseEnabled: true,
+  stocks: vi.fn(),
 }));
+
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return { ...actual, env: { ...actual.env, feeReceiver: `0x${'1'.repeat(40)}`, get enableLicenseNftUi() { return mocks.licenseEnabled; } } };
+});
+vi.mock('@/lib/kv', () => ({ kvMget: mocks.stocks }));
 
 vi.mock('@/lib/x402/storeIndex', () => ({
   listStoreIndexIds: async () => mocks.ids,
@@ -49,6 +57,9 @@ beforeEach(() => {
   mocks.ids = [];
   mocks.products = [];
   mocks.handles = new Map();
+  mocks.licenseEnabled = true;
+  mocks.stocks.mockReset();
+  mocks.stocks.mockResolvedValue({ ok: true, value: [JSON.stringify({ supply: 10, sold: 3, reserved: 2, gen: 'private-to-card' })] });
 });
 
 describe('listStoreListings', () => {
@@ -130,4 +141,29 @@ describe('listStoreListings', () => {
     mocks.ids = [];
     expect(await m.listStoreListings()).toEqual([]);
   });
+});
+
+it('license 公開メタは既読の定義から必要な項目だけを投影する', async () => {
+  const m = await mod();
+  mocks.ids = ['h_license', 'h_digital'];
+  const publicLicense = { supply: 10, transferable: true, termsUrl: 'https://example.com/terms', termsVersion: '1', tokenChainId: 137 };
+  mocks.products = [product('h_license', OWNER_A, { productKind: 'license', license: { ...publicLicense, contract: OWNER_B, tokenId: '123', definitionHash: 'private-to-card' } }), product('h_digital', OWNER_A)];
+  mocks.handles.set(OWNER_A, ['alice']);
+  const out = await m.listStoreListings();
+  expect(out?.[0].license).toEqual({ ...publicLicense, remaining: 5 });
+  expect(out?.[0].sellerRole).toBe('operator');
+  expect(out?.[1]).not.toHaveProperty('license');
+  expect(out?.[1]).not.toHaveProperty('productKind');
+  expect(out?.[1]).not.toHaveProperty('sellerRole');
+  expect(JSON.stringify(out)).not.toMatch(/definitionHash|tokenId|contract|private-to-card/);
+});
+
+it('販売者区分は表示名・受取先ではなく owner から返し、OFF は在庫を取得しない', async () => {
+  mocks.licenseEnabled = false;
+  mocks.ids = ['h_license'];
+  mocks.products = [product('h_license', OWNER_B, { title: 'OpenPay', payTo: OWNER_A, productKind: 'license', license: { supply: 10 } })];
+  mocks.handles.set(OWNER_B, ['seller']);
+  const out = await (await mod()).listStoreListings();
+  expect(out?.[0].sellerRole).toBe('third_party');
+  expect(mocks.stocks).not.toHaveBeenCalled();
 });

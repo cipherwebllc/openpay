@@ -6,7 +6,9 @@
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useTranslations } from 'next-intl';
+import { env } from '@/lib/env';
 import type { Address } from 'viem';
+import type { StoreLicenseProduct } from '@/lib/licenseUi';
 
 const CreatorStorePurchaseFlow = dynamic(
   () =>
@@ -17,7 +19,7 @@ const CreatorStorePurchaseFlow = dynamic(
 );
 
 export type CreatorStorePurchaseLauncherProps = {
-  product: {
+  product: StoreLicenseProduct & {
     id: string;
     title: string;
     description?: string;
@@ -47,12 +49,14 @@ export function CreatorStorePurchaseLauncher({
     setOpen(true);
   };
 
+  if (product.productKind === 'license' && !env.enableLicenseNftUi) return null;
+
   return (
     <>
       <button
         type="button"
         onClick={showPurchase}
-        className={`rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
+        className={`${product.productKind === 'license' ? 'min-h-11 ' : ''}rounded-lg px-3 py-2 text-xs font-bold transition-colors ${
           inverted
             ? 'bg-white text-slate-900 hover:bg-slate-100'
             : 'bg-brand text-white hover:bg-brand-dark'

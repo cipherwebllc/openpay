@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { BulletList, Section } from '@/components/guide/PosGuidePieces';
-import { storeGuideContentFor, storeGuideMetadata } from '@/lib/storeGuide';
+import { storeGuideContentFor, storeGuideMetadata, licenseStoreGuideContentFor } from '@/lib/storeGuide';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { env } from '@/lib/env';
 
@@ -33,6 +33,7 @@ export default async function GuideStorePage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = storeGuideContentFor(locale);
+  const licenseGuide = env.enableLicenseNftUi ? licenseStoreGuideContentFor(locale) : null;
   const tCatalog = await getTranslations({ locale, namespace: 'StoreCatalog' });
 
   return (
@@ -249,6 +250,24 @@ export default async function GuideStorePage({
             ) : null}
           </Section>
         ))}
+
+        {licenseGuide ? <Section title={licenseGuide.heading}>
+          <div className="space-y-4 text-sm leading-relaxed text-slate-700">
+            <p>{licenseGuide.intro}</p>
+            <h3 className="font-semibold text-slate-900">{licenseGuide.fieldsHeading}</h3>
+            <p>{licenseGuide.fields}</p>
+            <p>{licenseGuide.publish}</p>
+            <h3 className="font-semibold text-slate-900">{licenseGuide.integrationHeading}</h3>
+            <p>{licenseGuide.integration}</p>
+            <ul className="list-disc space-y-2 pl-5"><li>{licenseGuide.entry}</li><li>{licenseGuide.metered}</li></ul>
+            <h3 className="font-semibold text-slate-900">{licenseGuide.verifyHeading}</h3>
+            <p>{licenseGuide.verifyBody}</p>
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-xl bg-slate-950 p-4 text-xs text-slate-100"><code>{licenseGuide.verifyCommand}</code></pre>
+            <h3 className="font-semibold text-slate-900">{licenseGuide.policyHeading}</h3>
+            <p>{licenseGuide.policy}</p>
+            <p>{licenseGuide.rights}</p>
+          </div>
+        </Section> : null}
 
         <Section title={c.commonTitle}>
           <div className="mt-2 space-y-6">

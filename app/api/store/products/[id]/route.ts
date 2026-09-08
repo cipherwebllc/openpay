@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { licenseVisible, licenseSellerAllowed } from '@/lib/license/config';
+import { withSellerRole } from '@/lib/license/sellerRole';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import {
   getHostedContent,
@@ -180,7 +181,7 @@ export async function GET(
   if (!content.ok) return content.response;
   return storePrivateJson({
     ok: true,
-    product: owned.product,
+    product: withSellerRole(owned.product),
     content: content.content,
   });
 }
@@ -309,7 +310,7 @@ export async function PATCH(
       toggled.product.id,
       toggled.product.updatedAt ?? toggled.product.createdAt,
     );
-    return storePrivateJson({ ok: true, product: toggled.product });
+    return storePrivateJson({ ok: true, product: withSellerRole(toggled.product) });
   }
 
   if (!product.contentAvailable) {
@@ -479,5 +480,5 @@ export async function PATCH(
     updated.product.id,
     updated.product.updatedAt ?? updated.product.createdAt,
   );
-  return storePrivateJson({ ok: true, product: updated.product });
+  return storePrivateJson({ ok: true, product: withSellerRole(updated.product) });
 }

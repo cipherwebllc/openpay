@@ -6,11 +6,14 @@
 
 import { useLocale, useTranslations } from 'next-intl';
 import { ArrowLeft, ExternalLink, ReceiptText } from 'lucide-react';
+import { env } from '@/lib/env';
+import type { StoreLicenseProduct } from '@/lib/licenseUi';
+import { CreatorStoreLicenseDisclosures } from '@/components/CreatorStoreLicenseDisclosures';
 import { SignReassurance } from '@/components/SignReassurance';
 import type { JpycRecoverSignPreview } from '@/lib/signPreview';
 
 type CreatorStorePurchaseConfirmationCommonProps = {
-  product: {
+  product: StoreLicenseProduct & {
     title: string;
     description?: string;
   };
@@ -50,6 +53,7 @@ export function CreatorStorePurchaseConfirmation(
   props: CreatorStorePurchaseConfirmationProps,
 ) {
   const t = useTranslations('CreatorStorePurchase');
+  const tl = useTranslations('CreatorStoreLicense');
   const locale = useLocale();
   const {
     product,
@@ -61,6 +65,7 @@ export function CreatorStorePurchaseConfirmation(
     onConfirm,
   } = props;
   const isUsdc = props.rail === 'usdc';
+  const license = env.enableLicenseNftUi && !isUsdc && product.productKind === 'license' ? product.license : undefined;
   const quoteDate = new Intl.DateTimeFormat(locale, {
     dateStyle: 'medium',
     timeStyle: 'medium',
@@ -103,10 +108,10 @@ export function CreatorStorePurchaseConfirmation(
               </p>
             ) : null}
             <p className="mt-3 text-sm leading-relaxed text-slate-700">
-              {t('quantity', { title: product.title })}
+              {license ? tl('quantity', { title: product.title }) : t('quantity', { title: product.title })}
             </p>
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              {t('redownload')}
+              {license ? tl('deliveryNotice') : t('redownload')}
             </p>
           </div>
         </section>
@@ -202,7 +207,7 @@ export function CreatorStorePurchaseConfirmation(
           >
             {t('termsHeading')}
           </h3>
-          <dl className="mt-2 divide-y divide-slate-100 rounded-2xl border border-slate-200 px-4">
+          {license ? <CreatorStoreLicenseDisclosures license={license} sellerRole={product.sellerRole} sellerName={product.sellerName} sellerDisclosureHref={sellerDisclosureHref} /> : <dl className="mt-2 divide-y divide-slate-100 rounded-2xl border border-slate-200 px-4">
             <div className="py-3">
               <dt className="text-xs font-bold text-slate-500">
                 {t('paymentTimingLabel')}
@@ -245,10 +250,10 @@ export function CreatorStorePurchaseConfirmation(
                 {t('availabilityValue')}
               </dd>
             </div>
-          </dl>
+          </dl>}
         </section>
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <a
             href={sellerDisclosureHref}
             className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:border-brand/40 hover:text-brand"

@@ -6,6 +6,13 @@ const SCORE = 1_700_000_000_000;
 const kvEval = vi.hoisted(() => vi.fn());
 const kvGet = vi.hoisted(() => vi.fn());
 const kvMget = vi.hoisted(() => vi.fn());
+const licenseState = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return { ...actual, env: { ...actual.env, enableCreatorStore: true, get enableLicenseNft() { return licenseState.enabled; } } };
+});
+vi.mock('@/lib/license/rights', () => ({ resolveLicenseRights: vi.fn(async () => ({ entitled: true, basis: 'purchase', nft: { status: 'minted' } })) }));
 
 vi.mock('@/lib/kv', () => ({
   kvEval,
@@ -71,6 +78,7 @@ function flatIndex(resourceIds: string[]): string[] {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  licenseState.enabled = false;
 });
 
 describe('store library stable cursor', () => {
@@ -430,4 +438,19 @@ it('filters disabled licenses without poisoning digital pages or the next cursor
   expect(result.page.items).toHaveLength(STORE_LIBRARY_PAGE_SIZE / 2);
   expect(result.page.nextCursor).not.toBeNull();
   expect(kvEval).toHaveBeenCalledTimes(1); expect(kvMget).toHaveBeenCalledTimes(1);
+});
+
+it('購入時のライセンスチェーンを表示用に投影し、デジタルの履歴は変えない', async () => {
+  licenseState.enabled = true;
+  const ids = [resource(2), resource(1)];
+  const own = JSON.parse(ownership(ids[0]));
+  own.latestGrant.metadata = { ...own.latestGrant.metadata, productKind: 'license', license: { tokenChainId: 80002 } };
+  own.grants[0].metadata = own.latestGrant.metadata;
+  kvEval.mockResolvedValue({ ok: true, value: flatIndex(ids) });
+  kvMget.mockResolvedValue({ ok: true, value: [JSON.stringify(own), ownership(ids[1])] });
+  const result = await listStoreLibraryPage({ payer: PAYER, cursor: null });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error('expected page');
+  expect(result.page.items[0]).toMatchObject({ productKind: 'license', tokenChainId: 80002, nft: { status: 'minted' } });
+  expect(result.page.items[1]).not.toHaveProperty('tokenChainId');
 });

@@ -17,6 +17,12 @@ vi.mock('@/components/CreatorStorePurchaseFlow', () => ({
   },
 }));
 
+const licenseFlags = vi.hoisted(() => ({ enabled: false }));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return { ...actual, env: { ...actual.env, get enableLicenseNftUi() { return licenseFlags.enabled; } } };
+});
+
 const PRODUCT = {
   id: `h_${'a'.repeat(32)}`,
   title: 'AI プロンプト集',
@@ -31,6 +37,7 @@ const PRODUCT = {
 describe('CreatorStorefrontSection', () => {
   beforeEach(() => {
     purchaseFlowSpy.mockClear();
+    licenseFlags.enabled = false;
   });
 
   it('販売中の商品カードと有効な購入ボタンを描画する', () => {
@@ -188,4 +195,20 @@ describe('CreatorStorefrontSection', () => {
       }),
     );
   });
+});
+
+
+it('ライセンス公開情報と sellerRole を購入 launcher から modal へ渡す', async () => {
+  licenseFlags.enabled = true;
+  const product = { ...PRODUCT, productKind: 'license' as const, sellerRole: 'operator' as const, license: { supply: 15, remaining: 11, transferable: false, termsUrl: 'https://example.com/terms', termsVersion: '1' } };
+  const props = { products: [product], accent: '#2563eb', theme: 'clean' as const, sellerDisclosureHref: '/ja/store/seller/0x1234' };
+  const { container, rerender } = renderWithIntl(<CreatorStorefrontSection {...props} />);
+  expect(screen.getByText('残り 11 / 15 · 譲渡不可')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '購入する' })).toHaveClass('min-h-11');
+  fireEvent.click(screen.getByRole('button', { name: '購入する' }));
+  await screen.findByRole('dialog');
+  expect(purchaseFlowSpy).toHaveBeenLastCalledWith(expect.objectContaining({ product: expect.objectContaining({ productKind: 'license', sellerRole: 'operator', license: product.license }) }));
+  licenseFlags.enabled = false;
+  rerender(<CreatorStorefrontSection {...props} />);
+  expect(container).toBeEmptyDOMElement();
 });

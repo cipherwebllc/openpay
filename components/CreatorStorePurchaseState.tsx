@@ -6,6 +6,7 @@
 import { useLocale, useTranslations } from 'next-intl';
 import { AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react';
 import { formatUnits } from 'viem';
+import { env } from '@/lib/env';
 import type { HostedUsdcPaymentSnapshot } from '@/lib/x402/hostedUsdcPurchaseWire';
 
 export type CreatorStorePaymentStatus =
@@ -21,6 +22,7 @@ export type CreatorStoreAccessStatus =
   | 'needs-support';
 
 export type CreatorStorePurchaseStateProps = {
+  productKind?: 'license';
   paymentStatus: CreatorStorePaymentStatus;
   accessStatus: CreatorStoreAccessStatus;
   /** content API 200 により ownership と購入 revision を read-back 済みのときだけ true。 */
@@ -32,6 +34,7 @@ export type CreatorStorePurchaseStateProps = {
 };
 
 export function CreatorStorePurchaseState({
+  productKind,
   paymentStatus,
   accessStatus,
   ownershipReadBack,
@@ -40,6 +43,7 @@ export function CreatorStorePurchaseState({
   payment,
 }: CreatorStorePurchaseStateProps) {
   const t = useTranslations('CreatorStorePurchase');
+  const tl = useTranslations('CreatorStoreLicense');
   const locale = useLocale();
   const paymentDate = payment
     ? new Intl.DateTimeFormat(locale, {
@@ -104,6 +108,7 @@ export function CreatorStorePurchaseState({
         <div className="min-w-0 flex-1">
           <h2 className="font-bold">{title}</h2>
           <p className="mt-1 text-sm leading-relaxed">{body}</p>
+          {env.enableLicenseNftUi && productKind === 'license' && paymentStatus === 'confirmed' ? <p className="mt-2 text-sm leading-relaxed">{tl('deliveryNotice')}</p> : null}
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
             <dt className="opacity-70">{t('paymentStateLabel')}</dt>
             <dd className="font-semibold">{t(`paymentStates.${paymentStatus}`)}</dd>

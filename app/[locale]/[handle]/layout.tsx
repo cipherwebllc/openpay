@@ -5,6 +5,10 @@
 import { setRequestLocale } from 'next-intl/server';
 import { RouteMessages } from '@/i18n/RouteMessages';
 
+// 公開プロフィールはリクエスト時に KV を読む。page の export は画面・metadata のみにする。
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export default async function Layout({
   children,
   params,
