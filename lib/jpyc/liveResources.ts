@@ -29,6 +29,7 @@ import {
   TRANSFER_CURSOR_PATTERN,
 } from './live';
 import {
+  JPYC_ACTIVITY_RESPONSE_SCHEMA,
   JPYC_BALANCE_RESPONSE_SCHEMA,
   JPYC_SUPPLY_RESPONSE_SCHEMA,
   JPYC_TRANSFERS_RESPONSE_SCHEMA,
@@ -283,10 +284,62 @@ export const USDC_JPYC_TRANSFERS = {
   },
 } as const;
 
+// client も読む掲載メタには KV helper を import しない。
+export const ACTIVITY_CHAINS = ['polygon'] as const;
+
+export const USDC_JPYC_ACTIVITY = {
+  path: '/api/paid/usdc/jpyc/activity',
+  operationId: 'getJpycNetworkActivity',
+  serviceName: 'JPYC Network Activity',
+  summary: 'Get JPYC network transfer metrics for approximately 24 hours',
+  price: '$0.01',
+  priceUsd: '0.01',
+  tags: ['jpyc', 'network-activity', 'token-transfers', 'polygon', 'onchain-data'],
+  description:
+    'JPYC transfer metrics computed hourly from finalized Polygon blocks: event count, unique senders and receivers, volume, median and top receivers. Covers approximately 24 hours ending at the newest finalized hourly bucket; exact block and time range are in the response. Use for current JPYC usage metrics; not for wallet balances, price, news, supply or financial advice.',
+  trigger: {
+    callWhen: ['Current JPYC network usage metrics are needed'],
+    repeatWhen: ['The free preview observedAt advances; skip unchanged data or data past expiresAt'],
+    preferOver: ['Decoding and aggregating thousands of Transfer events yourself'],
+    avoidWhen: ['Single-wallet balances, price, news or token supply are needed'],
+    freshnessKey: ['observedAt', 'expiresAt'],
+  } satisfies AgentUsage,
+  bazaar: {
+    queryParams: { chain: 'polygon', window: '24h' },
+    queryParamsSchema: {
+      properties: {
+        chain: { type: 'string', enum: ACTIVITY_CHAINS, description: 'Polygon mainnet only.' },
+        window: { type: 'string', enum: ['24h'], default: '24h', description: 'Approximately 24 hours in whole finalized hourly buckets.' },
+      },
+      required: ['chain'], additionalProperties: false,
+    },
+    output: {
+      schema: JPYC_ACTIVITY_RESPONSE_SCHEMA,
+      example: {
+        schemaVersion: '2.2', token: { symbol: 'JPYC', decimals: 18 },
+        chain: 'polygon', chainId: 137, contract: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29', window: '24h',
+        fromBlock: '92343600', toBlock: '92386799',
+        fromTimestamp: '2026-09-07T03:00:00.000Z', toTimestamp: '2026-09-08T02:59:58.000Z',
+        transferCount: 1, uniqueSenders: 1, uniqueReceivers: 1,
+        volume: '1000000000000000000', volumeFormatted: '1',
+        medianTransfer: '1000000000000000000', medianTransferFormatted: '1',
+        topReceivers: [{ address: '0x52d4901142e2b5680027da5eb47c86cb02a3ca81', count: 1, volume: '1000000000000000000', volumeFormatted: '1' }],
+        definitions: {
+          eligible: 'positive-value transfers with distinct sender and receiver, excluding the zero address',
+          countUnit: 'events', median: 'floored atomic average for even counts',
+        },
+        observedAt: '2026-09-08T02:59:58.000Z', expiresAt: '2026-09-08T06:59:58.000Z',
+        generatedAt: '2026-09-08T03:20:00.000Z', notice: JPYC_LIVE_NOTICE_CODE, termsUrl: JPYC_LIVE_TERMS_URL,
+      },
+    },
+  },
+} as const;
+
 export const USDC_JPYC_LIVE_RESOURCES = [
   USDC_JPYC_SUPPLY,
   USDC_JPYC_BALANCE,
   USDC_JPYC_TRANSFERS,
+  USDC_JPYC_ACTIVITY,
 ] as const;
 
 /** trigger を 1 段落の英文に圧縮する (description 末尾・llms.txt 用)。 */

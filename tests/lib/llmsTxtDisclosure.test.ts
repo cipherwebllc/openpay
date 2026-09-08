@@ -27,6 +27,7 @@ import {
   USDC_SERVICE_MONITOR,
 } from '@/lib/directory/usdcResource';
 import {
+  USDC_JPYC_ACTIVITY,
   USDC_JPYC_BALANCE,
   USDC_JPYC_SUPPLY,
   USDC_JPYC_TRANSFERS,
@@ -155,6 +156,7 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
       USDC_JPYC_SUPPLY,
       USDC_JPYC_BALANCE,
       USDC_JPYC_TRANSFERS,
+      USDC_JPYC_ACTIVITY,
       USDC_STORES,
     ]) {
       expect(lineMentioning(r.path), r.path).toContain(`${r.priceUsd} USDC`);
@@ -170,5 +172,16 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
       expect(line).toContain(`\`GET ${teaser}\``);
       expect(line).toContain('nextChangedSince');
     }
+  });
+
+  it('Activity は独立した価格・preview・observedAt/expiresAt の再購入ルールを持つ', () => {
+    const line = lineMentioning(USDC_JPYC_ACTIVITY.path);
+    expect(line).toContain(USDC_JPYC_ACTIVITY.priceUsd + ' USDC');
+    expect(line.match(/\b[0-9.]+ USDC\b/g)).toEqual([USDC_JPYC_ACTIVITY.priceUsd + ' USDC']);
+    expect(line).toContain('GET /api/jpyc/activity/preview?chain=polygon');
+    expect(line).toContain('observedAt');
+    expect(line).toContain('expiresAt');
+    expect(line).toContain('同じなら買わない');
+    expect(line).toContain('settle なし');
   });
 });

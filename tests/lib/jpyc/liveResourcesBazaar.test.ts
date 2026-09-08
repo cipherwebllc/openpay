@@ -17,6 +17,7 @@ import {
 } from '@/lib/jpyc/live';
 import {
   TRANSFERS_LIMIT_PATTERN,
+  USDC_JPYC_ACTIVITY,
   USDC_JPYC_LIVE_RESOURCES,
   agentUsageText,
   type AgentUsage,
@@ -39,7 +40,13 @@ describe('JPYC ライブ API の掲載メタ', () => {
   it('chain enum は JPYC_CHAINS と一致・limit の pattern は実装上限と一致', () => {
     for (const r of USDC_JPYC_LIVE_RESOURCES) {
       const props = r.bazaar.queryParamsSchema.properties as Record<string, { enum?: readonly string[]; pattern?: string }>;
-      expect([...props.chain.enum!]).toEqual([...JPYC_CHAINS]);
+      if (r === USDC_JPYC_ACTIVITY) {
+        expect([...props.chain.enum!]).toEqual(['polygon']);
+        expect(props.chain.enum!.every((chain) => (JPYC_CHAINS as readonly string[]).includes(chain))).toBe(true);
+        expect(props.window.enum).toEqual(['24h']);
+      } else {
+        expect([...props.chain.enum!]).toEqual([...JPYC_CHAINS]);
+      }
     }
     const re = new RegExp(TRANSFERS_LIMIT_PATTERN);
     expect(re.test('1')).toBe(true);
@@ -107,5 +114,16 @@ describe('JPYC ライブ API の掲載メタ', () => {
     const ids = USDC_JPYC_LIVE_RESOURCES.map((r) => r.operationId);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(id).toMatch(/^(get|list)[A-Z]/);
+  });
+
+  it('activity の掲載は cached-data と再購入ルール・README 行を開示する', () => {
+    expect(USDC_JPYC_ACTIVITY.description).toContain('computed hourly from finalized Polygon blocks');
+    expect(USDC_JPYC_ACTIVITY.description).not.toContain('request time');
+    expect(USDC_JPYC_ACTIVITY.description.split(/\.\s+/)).toHaveLength(3);
+    expect(USDC_JPYC_ACTIVITY.trigger.freshnessKey).toEqual(['observedAt', 'expiresAt']);
+    const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
+    const line = readme.split('\n').find((value) => value.includes('GET ' + USDC_JPYC_ACTIVITY.path));
+    expect(line).toContain(USDC_JPYC_ACTIVITY.priceUsd + ' USDC');
+    expect(line).toContain('/api/jpyc/activity/preview');
   });
 });

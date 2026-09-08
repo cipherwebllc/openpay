@@ -68,7 +68,7 @@ export const TRANSFER_CHUNK_BLOCKS = 100n;
 /** チャンクの同時実行数。公開 RPC の rate limit と timeout (5s) の折り合い。 */
 const TRANSFER_CHUNK_CONCURRENCY = 4;
 
-const TRANSFER_EVENT = parseAbiItem(
+export const TRANSFER_EVENT = parseAbiItem(
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 );
 

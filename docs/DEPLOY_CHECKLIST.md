@@ -1513,6 +1513,11 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
   カタログ増でも 1 リクエスト当たりの KV ファンアウトは有界。
 
 ### §14.6 既知の前提 / 制約 (accepted)
+- JPYC Activity: `.github/workflows/jpyc-activity-cron.yml` が毎時 20 分に `/api/cron/jpyc-activity` を呼ぶ (既存 `CRON_SECRET`)。
+- bootstrap は 25 バケット・1 run 最大 6 件で約 4〜5 時間。欠けが残る間は有料 503 (settle なし)。
+- cron 停止時は最新バケットの `toTimestamp` から 4h を超えると 503 `data_stale` (settle なし)。
+- 復旧は `workflow_dispatch` を繰り返す (lock 中は 55 秒待つ)。`missing:[]` と preview の `available:true` を確認。
+- GitHub schedule は遅延・欠落しうる。run の緑だけで判断せず、preview の `observedAt` / `expiresAt` も監視する。
 - **resource server は加盟店が自前で 402 ゲートする前提**。facilitator はリソースを proxy / ゲートしない
   (verify / settle / discovery のみ)。登録時に正当性表明 (権利 + ゲート実装) を必須化し、無料公開 URL を
   probe で弾く (moderation・SSRF 多層防御済) が、ゲート実装の最終責任は登録者。

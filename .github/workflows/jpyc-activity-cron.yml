@@ -1,0 +1,28 @@
+# JPYC Activity の毎時収集。finalized バケットの独立保存 + 55 秒 lease で再送可能。
+# 必要 secret: CRON_SECRET (Vercel env と同じ値)。復旧は workflow_dispatch を繰り返す。
+name: jpyc-activity-cron
+on:
+  schedule:
+    - cron: '20 * * * *' # 毎時 20 分
+  workflow_dispatch: {}
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Trigger /api/cron/jpyc-activity
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_SECRET secret is not set. Hourly jpyc-activity cannot run."
+            exit 1
+          fi
+          code=$(curl -s -o /tmp/out.json -w "%{http_code}" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            --max-time 90 \
+            https://open-pay.jp/api/cron/jpyc-activity)
+          echo "HTTP $code"
+          cat /tmp/out.json || true
+          # 401 = secret 不一致 (設定ミスを赤で知らせる)。5xx も失敗扱い。
+          [ "$code" = "200" ]
