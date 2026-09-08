@@ -126,6 +126,7 @@ export function parseStorePurchaseOwnership(
     }
     const paymentRaw = (rawGrant as Record<string, unknown>).payment;
     if (paymentRaw === undefined) return grant;
+    if (grant.metadata.productKind === 'license') return null;
     const payment = parseStorePaymentSnapshot(paymentRaw);
     return payment ? { ...grant, payment } : null;
   });

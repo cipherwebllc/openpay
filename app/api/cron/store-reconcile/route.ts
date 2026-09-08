@@ -4,6 +4,8 @@
 import { NextResponse } from 'next/server';
 import { requireCronAuth } from '@/lib/cronAuth';
 import { env } from '@/lib/env';
+import { licenseNftEnabled } from '@/lib/license/config';
+import { repairLicenseIndexes } from '@/lib/license/repair';
 import { reconcilePendingPurchases } from '@/lib/x402/purchaseIntent';
 import { reconcilePendingStoreUsdcPurchases } from '@/lib/x402/storeUsdcIntent';
 
@@ -25,6 +27,11 @@ async function handleReconcile(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
+  // license の index 復旧障害を既存デジタル/USDC reconciler へ波及させない。
+  let licenseRepairOk = true;
+  if (licenseNftEnabled()) {
+    try { licenseRepairOk = await repairLicenseIndexes(); } catch { licenseRepairOk = false; }
+  }
   const summary = await reconcilePendingPurchases();
   const usdc = await reconcilePendingStoreUsdcPurchases();
   if (summary === 'storage' || usdc === 'storage') {
@@ -33,7 +40,7 @@ async function handleReconcile(req: Request): Promise<NextResponse> {
       { status: 503 },
     );
   }
-  if (summary.storageErrors > 0 || usdc.storageErrors > 0) {
+  if (!licenseRepairOk || summary.storageErrors > 0 || usdc.storageErrors > 0) {
     return NextResponse.json(
       { ...summary, usdc, error: 'storage_unavailable' },
       { status: 503 },

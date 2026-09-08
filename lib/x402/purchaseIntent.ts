@@ -14,6 +14,11 @@ import 'server-only';
 //   store:purchase:<chainId>:<txHash>         authoritative purchase record
 
 import { createHash, randomBytes } from 'node:crypto';
+import { JPYC_V3_ASSET } from '@/lib/x402/types';
+import { parseLicenseDefinition } from '@/lib/license/definition';
+import { licenseNftEnabled } from '@/lib/license/config';
+import { licenseLuaVariant, licenseEvalContext } from '@/lib/license/stock';
+import { reconcileLicensePurchase, type LicenseReconcileChain } from '@/lib/license/reconcile';
 import {
   createPublicClient,
   getAddress,
@@ -126,6 +131,10 @@ function parseHex32(value: unknown): Hex | null {
 
 function parseMetadata(value: unknown): HostedPurchaseMetadata | null {
   if (!isRecord(value)) return null;
+  if (value.productKind !== undefined && value.productKind !== 'license') return null;
+  const license = value.productKind === 'license' ? parseLicenseDefinition(value.license) : null;
+  if (value.productKind === 'license' && (!license || value.contentKind !== 'text' || typeof value.priceJpyc !== 'string' || !DECIMAL_RE.test(value.priceJpyc) || BigInt(value.priceJpyc) < 1000n)) return null;
+  if (value.productKind === undefined && value.license !== undefined) return null;
   const owner = parseAddress(value.owner);
   const payTo = parseAddress(value.payTo);
   if (!owner || !payTo) return null;
@@ -147,6 +156,7 @@ function parseMetadata(value: unknown): HostedPurchaseMetadata | null {
   if (value.desc !== undefined && typeof value.desc !== 'string') return null;
   if (value.emoji !== undefined && typeof value.emoji !== 'string') return null;
   return {
+    ...(license ? { productKind: 'license' as const, license } : {}),
     owner,
     payTo,
     title: value.title,
@@ -451,6 +461,7 @@ function parseIntentBase(
   ) {
     return null;
   }
+  if (metadata.license && (!isAddressEqual(token, JPYC_V3_ASSET.address) || metadata.license.contentRef !== value.contentRef || value.contentRevision !== 1 || metadata.license.tokenChainId !== value.chainId || metadata.priceJpyc + '000000000000000000' !== merchantValue)) return null;
   const optionalNumber = (
     key: 'lastCheckedAt' | 'nextReconcileAt' | 'reconcileLeaseUntil',
   ): number | undefined => {
@@ -791,6 +802,7 @@ export async function createQuotedPurchaseIntent(
   ) {
     return { ok: false, reason: 'invalid' };
   }
+  if (normalizedMetadata.license && (!isAddressEqual(input.token, JPYC_V3_ASSET.address) || !licenseNftEnabled() || normalizedMetadata.license.contentRef !== hostedContentKey(input.resourceId, input.contentRevision) || normalizedMetadata.license.tokenChainId !== input.chainId || input.merchantValue !== BigInt(normalizedMetadata.priceJpyc) * 10n ** 18n)) return { ok: false, reason: 'invalid' };
   const now = input.now ?? Date.now();
   if (
     !isSafeTimestamp(now) ||
@@ -1150,7 +1162,7 @@ export type ClaimSignedPurchaseResult =
   | { ok: true; kind: 'claimed' | 'idempotent'; intent: PurchaseIntent }
   | {
       ok: false;
-      reason: 'not_found' | 'expired' | 'conflict' | 'storage' | 'corrupt';
+      reason: 'not_found' | 'expired' | 'conflict' | 'storage' | 'corrupt' | 'sold_out' | 'reservation_quota';
     };
 
 export async function claimSignedPurchaseIntent(input: {
@@ -1174,6 +1186,7 @@ export async function claimSignedPurchaseIntent(input: {
   if (!read.ok) return { ok: false, reason: read.reason };
   const current = read.intent;
   if (!current) return { ok: false, reason: 'not_found' };
+  if (current.metadata.productKind === 'license' && !licenseNftEnabled()) return { ok: false, reason: 'not_found' };
   if (
     canonicalHash(normalizedClaim) !== input.authorizationHash ||
     !purchaseAuthorizationMatches(current, normalizedClaim)
@@ -1236,7 +1249,7 @@ export async function claimSignedPurchaseIntent(input: {
           nextReconcileAt: now,
         };
   const result = await kvEval<number>(
-    CLAIM_SIGNED_INTENT,
+    current.metadata.productKind === 'license' ? licenseLuaVariant(CLAIM_SIGNED_INTENT) : CLAIM_SIGNED_INTENT,
     [purchaseIntentKey(input.intentSalt), PENDING_INDEX_KEY],
     [
       '0',
@@ -1260,9 +1273,12 @@ export async function claimSignedPurchaseIntent(input: {
       '2',
       'none',
       'zset',
+      ...(current.metadata.productKind === 'license' ? [licenseEvalContext(signed, 'claim', now)] : []),
     ],
   );
   if (!result.ok) return { ok: false, reason: 'storage' };
+  if (result.value === -4) return { ok: false, reason: 'sold_out' };
+  if (result.value === -5) return { ok: false, reason: 'reservation_quota' };
   if (result.value === 0) return { ok: false, reason: 'not_found' };
   if (result.value === -3) return { ok: false, reason: 'corrupt' };
   if (result.value === -2) return { ok: false, reason: 'expired' };
@@ -1353,6 +1369,7 @@ export async function claimPurchaseSettlement(input: {
   if (!read.ok) return { ok: false, reason: read.reason };
   const current = read.intent;
   if (!current) return { ok: false, reason: 'not_found' };
+  if (current.metadata.productKind === 'license' && !licenseNftEnabled()) return { ok: false, reason: 'not_found' };
   if (
     current.state === 'quoted' ||
     !purchaseAuthorizationMatches(current, normalizedClaim)
@@ -1384,7 +1401,7 @@ export async function claimPurchaseSettlement(input: {
       now + PURCHASE_SETTLEMENT_LEASE_SEC * 1000,
   };
   const result = await kvEval<number>(
-    CLAIM_SETTLEMENT,
+    current.metadata.productKind === 'license' ? licenseLuaVariant(CLAIM_SETTLEMENT) : CLAIM_SETTLEMENT,
     [purchaseIntentKey(input.intentSalt), PENDING_INDEX_KEY],
     [
       '0',
@@ -1408,6 +1425,7 @@ export async function claimPurchaseSettlement(input: {
       '3',
       'none',
       'zset',
+      ...(current.metadata.productKind === 'license' ? [licenseEvalContext(settling, 'settle', now)] : []),
     ],
   );
   if (!result.ok) return { ok: false, reason: 'storage' };
@@ -1732,6 +1750,7 @@ export async function markPurchaseFailedPrebroadcast(input: {
   attemptId: string;
   reason: string;
   now?: number;
+  licenseIntent?: PurchaseIntent;
 }): Promise<'updated' | 'idempotent' | 'conflict' | 'storage'> {
   if (
     !isPurchaseIntentSalt(input.intentSalt) ||
@@ -1743,8 +1762,10 @@ export async function markPurchaseFailedPrebroadcast(input: {
   }
   const now = input.now ?? Date.now();
   if (!isSafeTimestamp(now)) return 'conflict';
+  const licenseIntent = input.licenseIntent ? parsePurchaseIntent(JSON.stringify(input.licenseIntent)) : null;
+  if (input.licenseIntent && (!licenseIntent || licenseIntent.intentSalt !== input.intentSalt || licenseIntent.metadata.productKind !== 'license')) return 'conflict';
   const result = await kvEval<number>(
-    MARK_PURCHASE_FAILED_PREBROADCAST,
+    licenseIntent ? licenseLuaVariant(MARK_PURCHASE_FAILED_PREBROADCAST) : MARK_PURCHASE_FAILED_PREBROADCAST,
     [purchaseIntentKey(input.intentSalt), PENDING_INDEX_KEY],
     [
       '0',
@@ -1762,6 +1783,7 @@ export async function markPurchaseFailedPrebroadcast(input: {
       '1',
       'none',
       'zset',
+      ...(licenseIntent ? [licenseEvalContext(licenseIntent, 'fail', now)] : []),
     ],
   );
   if (!result.ok || result.value === 0 || result.value === -3) {
@@ -1995,6 +2017,7 @@ async function finalizeHostedPurchaseInternal(
   if (!read.ok) return { ok: false, reason: read.reason };
   const current = read.intent;
   if (!current || !read.raw) return { ok: false, reason: 'not_found' };
+  if (current.metadata.productKind === 'license' && !licenseNftEnabled()) return { ok: false, reason: 'not_found' };
   if (current.state === 'quoted' || current.state === 'signed') {
     return { ok: false, reason: 'conflict' };
   }
@@ -2093,7 +2116,7 @@ async function finalizeHostedPurchaseInternal(
   delete settled.reconcileLeaseUntil;
 
   const result = await kvEval<number>(
-    FINALIZE_PURCHASE,
+    current.metadata.productKind === 'license' ? licenseLuaVariant(FINALIZE_PURCHASE) : FINALIZE_PURCHASE,
     [
       purchaseIntentKey(input.intentSalt),
       ownershipKey,
@@ -2131,6 +2154,7 @@ async function finalizeHostedPurchaseInternal(
       '',
       'none',
       'zset',
+      ...(current.metadata.productKind === 'license' ? [licenseEvalContext(settled, 'finalize', settledAt)] : []),
     ],
   );
   if (!result.ok) return { ok: false, reason: 'storage' };
@@ -2139,6 +2163,7 @@ async function finalizeHostedPurchaseInternal(
       input.intentSalt,
     );
     if (
+      current.metadata.productKind !== 'license' &&
       racedAccess.ok &&
       racedAccess.intent.txHash === txHash
     ) {
@@ -2213,6 +2238,7 @@ function parseGrant(value: unknown): PurchaseGrant | null {
   ) {
     return null;
   }
+  if (metadata.license && (metadata.license.contentRef !== value.contentRef || value.contentRevision !== 1 || metadata.license.tokenChainId !== value.chainId)) return null;
   return {
     intentSalt,
     contentRevision: value.contentRevision,
@@ -2537,12 +2563,14 @@ async function claimReconcileLease(
   now: number,
 ): Promise<
   | { ok: true; intent: Exclude<PurchaseIntent, QuotedPurchaseIntent | SettledPurchaseIntent | FailedPrebroadcastPurchaseIntent>; raw: string; leaseId: string }
+  | { ok: false; reason: 'license'; intent: PurchaseIntent; raw: string }
   | { ok: false; reason: 'not_found' | 'storage' | 'busy' | 'terminal' | 'corrupt' }
 > {
   const read = await readPurchaseIntent(intentSalt);
   if (!read.ok) return { ok: false, reason: read.reason };
   const current = read.intent;
   if (!current || !read.raw) return { ok: false, reason: 'not_found' };
+  if (current.metadata.productKind === 'license') return licenseNftEnabled() ? { ok: false, reason: 'license', intent: current, raw: read.raw } : { ok: false, reason: 'busy' };
   if (
     current.state === 'quoted' ||
     current.state === 'settled' ||
@@ -2706,12 +2734,14 @@ export async function reconcilePurchaseIntent(
   options: {
     now?: number;
     chain?: PurchaseReconcileChain;
+    licenseChain?: LicenseReconcileChain;
   } = {},
 ): Promise<ReconcilePurchaseIntentResult> {
   const now = options.now ?? Date.now();
   const chain = options.chain ?? defaultPurchaseReconcileChain;
   const leased = await claimReconcileLease(intentSalt, now);
   if (!leased.ok) {
+    if (leased.reason === 'license') return reconcileLicensePurchase(leased.intent, leased.raw, now, finalizeHostedPurchase, options.licenseChain);
     if (leased.reason === 'terminal') {
       const current = await getPurchaseIntent(intentSalt);
       if (current === 'storage' || current === 'corrupt') {

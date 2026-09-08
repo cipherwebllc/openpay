@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { licenseVisible } from '@/lib/license/config';
+
 import { kvEval, kvGet, kvMget } from '@/lib/kv';
 import { isHostedId } from '@/lib/x402/hostedStore';
 import {
@@ -22,6 +24,8 @@ type LibraryCursor = {
 };
 
 export type StoreLibraryItem = {
+  productKind?: 'license';
+  entitled?: boolean | null;
   resourceId: string;
   title: string;
   desc?: string;
@@ -335,14 +339,22 @@ export async function listStoreLibraryPage(input: {
     ) {
       return { ok: false, reason: 'corrupt' };
     }
-    ownerships.push(ownership);
+    if (licenseVisible(ownership.latestGrant.metadata)) ownerships.push(ownership);
   }
 
+  const items: StoreLibraryItem[] = [];
+  for (const ownership of ownerships) {
+    const definition = ownership.latestGrant.metadata.license;
+    if (!definition) { items.push(libraryItem(ownership)); continue; }
+    const { resolveLicenseRights } = await import('@/lib/license/rights');
+    const rights = await resolveLicenseRights({ address: ownership.payer, productId: ownership.resourceId, definition, ownership });
+    items.push({ ...libraryItem(ownership), productKind: 'license', entitled: rights.entitled });
+  }
   const last = visible.at(-1)!;
   return {
     ok: true,
     page: {
-      items: ownerships.map(libraryItem),
+      items,
       nextCursor:
         indexed.length > STORE_LIBRARY_PAGE_SIZE
           ? encodeLibraryCursor({
@@ -377,5 +389,5 @@ export async function readStoreOwnership(
   ) {
     return { ok: false, reason: 'corrupt' };
   }
-  return { ok: true, ownership };
+  return { ok: true, ownership: licenseVisible(ownership.latestGrant.metadata) ? ownership : null };
 }

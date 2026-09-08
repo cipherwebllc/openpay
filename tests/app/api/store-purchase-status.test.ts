@@ -144,7 +144,7 @@ describe('GET /api/store/purchase/status', () => {
   it.each(['signed', 'settling', 'indeterminate'])(
     '%s は status read から reconciler を起動し、再読込後の settled へ収束する',
     async (state) => {
-      hold.reads = [{ state }, { state: 'settled', txHash: TX_HASH }];
+      hold.reads = [{ state, metadata: {} }, { state: 'settled', txHash: TX_HASH, metadata: {} }];
       hold.reconcileResult = {
         ok: true,
         state: 'settled',
@@ -167,7 +167,7 @@ describe('GET /api/store/purchase/status', () => {
   );
 
   it('reconciler の storage 障害は pending 成功へ偽装せず 503', async () => {
-    hold.reads = [{ state: 'indeterminate' }];
+    hold.reads = [{ state: 'indeterminate', metadata: {} }];
     hold.reconcileResult = { ok: false, reason: 'storage' };
 
     const response = await GET(request(INTENT_SALT));
@@ -224,6 +224,7 @@ describe('GET /api/store/purchase/status', () => {
       intent: {
         state: 'failed_prebroadcast',
         failureReason: 'secret-reason',
+        metadata: {},
       },
       expected: { ok: true, state: 'failed' },
     },
@@ -249,4 +250,11 @@ describe('GET /api/store/purchase/status', () => {
       expect(reconcileSpy).not.toHaveBeenCalled();
     },
   );
+});
+
+
+it('license flag OFF hides a persisted intent before reconciliation', async () => {
+  hold.reads = [{ state: 'settling', metadata: { productKind: 'license' } }];
+  const response = await GET(request(INTENT_SALT));
+  expect(response.status).toBe(404); expect(reconcileSpy).not.toHaveBeenCalled();
 });

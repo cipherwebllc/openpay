@@ -5,6 +5,7 @@ import { getAddress } from 'viem';
 const routeMocks = vi.hoisted(() => ({
   env: {
     enableCreatorStore: true,
+    enableLicenseNft: false,
     enableX402Facilitator: true,
   },
   verify: vi.fn(),
@@ -845,5 +846,40 @@ describe('hosted creator-store paid route', () => {
     expect(routeMocks.getHostedContent).not.toHaveBeenCalled();
     expect(routeMocks.verify).not.toHaveBeenCalled();
     expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+});
+
+// license の追加分岐でも、デジタルの既存 payload/error は上の固定テストで維持する。
+describe('license hosted admission', () => {
+  afterEach(() => { routeMocks.env.enableLicenseNft = false; vi.unstubAllEnvs(); });
+  it('returns 404 while disabled before any quote or verify work', async () => {
+    routeMocks.getHostedProduct.mockResolvedValue({ ...productFixture(), productKind: 'license' });
+    const { GET } = await import('@/app/api/paid/hosted/[id]/route');
+    const response = await GET(new Request(`https://open-pay.jp/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`), { params: Promise.resolve({ id: RESOURCE_ID }) });
+    expect(response.status).toBe(404); expect(routeMocks.createQuoted).not.toHaveBeenCalled(); expect(routeMocks.verify).not.toHaveBeenCalled();
+  });
+  it('returns 409 for pending registration instead of issuing a 402', async () => {
+    routeMocks.env.enableLicenseNft = true; vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', SELLER);
+    routeMocks.getHostedProduct.mockResolvedValue({ ...productFixture(), productKind: 'license', saleActive: false, registration: { status: 'pending', attempts: 0 } });
+    const { GET } = await import('@/app/api/paid/hosted/[id]/route');
+    const response = await GET(new Request(`https://open-pay.jp/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`), { params: Promise.resolve({ id: RESOURCE_ID }) });
+    expect(response.status).toBe(409); expect(await response.json()).toEqual({ ok: false, error: 'license_registration_pending' }); expect(routeMocks.createQuoted).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('license sold-out response', () => {
+  it('returns the exact sold_out marker after verify and before settlement', async () => {
+    routeMocks.claimSigned.mockResolvedValue({ ok: false, reason: 'sold_out' });
+    const route = await loadRoute();
+    const response = await callHosted(route, `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`, { 'x-payment': paymentHeader() });
+    expect(response.status).toBe(409); expect(await response.json()).toEqual({ ok: false, error: 'sold_out' });
+    expect(routeMocks.verify).toHaveBeenCalledTimes(1); expect(routeMocks.claimSettlement).not.toHaveBeenCalled(); expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+  it('denies persisted license replay while OFF without looking up current product or settling', async () => {
+    const original = intentFixture('settled'); routeMocks.getIntent.mockResolvedValue({ ...original, metadata: { ...original.metadata, productKind: 'license' } });
+    const route = await loadRoute();
+    const response = await callHosted(route, `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`, { 'x-payment': paymentHeader() });
+    expect(response.status).toBe(404); expect(routeMocks.getHostedProduct).not.toHaveBeenCalled(); expect(routeMocks.settle).not.toHaveBeenCalled(); expect(routeMocks.readSettledAccess).not.toHaveBeenCalled();
   });
 });

@@ -100,6 +100,7 @@ function hex32(value: unknown): Hex | null {
 
 function metadata(value: unknown): HostedPurchaseMetadata | null {
   if (!isRecord(value)) return null;
+  if (value.productKind !== undefined || value.license !== undefined) return null;
   const owner = address(value.owner);
   const payTo = address(value.payTo);
   if (
