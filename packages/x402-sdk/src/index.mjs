@@ -4,6 +4,8 @@ export * from './dualGate.mjs';
 export * from './listing.mjs';
 export * from './executor.mjs';
 export * from './gate.mjs';
+export * from './license.mjs';
+export * from './licenseGate.mjs';
 export * from './guards.mjs';
 export * from './network.mjs';
 export * from './payment.mjs';

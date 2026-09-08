@@ -213,17 +213,27 @@ describe('x402-mcp entrypoints', () => {
       'openpay-x402-mcp': 'src/index.mjs',
       'openpay-order-mcp': 'src/order.mjs',
     });
-    const sdkPkg = JSON.parse(
-      readFileSync(resolve(PACKAGE_DIR, '../x402-sdk/package.json'), 'utf8'),
-    ) as { version: string };
     const lock = JSON.parse(
       readFileSync(resolve(PACKAGE_DIR, 'package-lock.json'), 'utf8'),
     ) as {
-      packages: Record<string, { version?: string }>;
+      packages: Record<string, {
+        version?: string;
+        dependencies?: Record<string, string>;
+        resolved?: string;
+        integrity?: string;
+      }>;
     };
-    expect(pkg.dependencies['openpay-x402-sdk']).toBe(`^${sdkPkg.version}`);
-    expect(lock.packages['node_modules/openpay-x402-sdk']?.version).toBe(
-      sdkPkg.version,
+    // SDK の作業ツリーは未公開の次版を持てる。MCP の取得契約は、公開済み依存の
+    // manifest・lock・registry tarball に束縛し、未公開版への依存更新を要求しない。
+    const lockedSdk = lock.packages['node_modules/openpay-x402-sdk'];
+    expect(lockedSdk?.version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(pkg.dependencies['openpay-x402-sdk']).toBe(`^${lockedSdk.version}`);
+    expect(lock.packages[''].dependencies?.['openpay-x402-sdk']).toBe(
+      pkg.dependencies['openpay-x402-sdk'],
     );
+    expect(lockedSdk.resolved).toBe(
+      `https://registry.npmjs.org/openpay-x402-sdk/-/openpay-x402-sdk-${lockedSdk.version}.tgz`,
+    );
+    expect(lockedSdk.integrity).toMatch(/^sha512-[A-Za-z0-9+/]+={0,2}$/);
   });
 });
