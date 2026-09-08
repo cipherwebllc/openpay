@@ -1,5 +1,8 @@
 import 'server-only';
 
+import { licenseNftEnabled } from '@/lib/license/config';
+import { parseLicenseDefinition } from '@/lib/license/definition';
+
 // creator-store v4 実装契約 A「全 settle 入口 fail-closed」の choke point。
 //
 // hosted PurchaseIntent の intentSalt は server 発行で、署名の nonce にコミットされる。
@@ -44,6 +47,7 @@ export function hostedSettleGateIntentKey(intentSalt: string): string {
 
 type GateRecord = {
   state: string;
+  license: boolean;
   chainId: number;
   forwarder: `0x${string}`;
   nonce: string | null;
@@ -71,6 +75,9 @@ function parseGateRecord(raw: string): GateRecord | null {
   ) {
     return null;
   }
+  const metadata = record.metadata as Record<string, unknown> | undefined;
+  const license = metadata?.productKind === 'license';
+  if (license && !parseLicenseDefinition(metadata.license)) return null;
   const claim =
     typeof record.claim === 'object' &&
     record.claim !== null &&
@@ -89,6 +96,7 @@ function parseGateRecord(raw: string): GateRecord | null {
       : null;
   return {
     state: record.state,
+    license,
     chainId: record.chainId,
     forwarder: record.forwarder as `0x${string}`,
     nonce,
@@ -126,6 +134,7 @@ export async function checkHostedIntentSettleAdmission(input: {
     // hosted intent の key に破損 record: 素通しすると CAS 迂回になるため fail-closed。
     return 'storage';
   }
+  if (record.license && !licenseNftEnabled()) return 'denied';
   if (record.state === 'settling' || record.state === 'settled') {
     const fingerprint = paymentSignatureFingerprint(input.signature);
     const nonce = buildForwarderNonce(

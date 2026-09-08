@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { licenseVisible, licenseSellerAllowed } from '@/lib/license/config';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import {
   getHostedContent,
@@ -31,6 +32,8 @@ export const dynamic = 'force-dynamic';
 type RouteContext = { params: Promise<{ id: string }> };
 
 const PRODUCT_PATCH_KEYS = new Set([
+  'productKind',
+  'license',
   'payTo',
   'title',
   'desc',
@@ -104,7 +107,7 @@ async function ownedProduct(
       ),
     };
   }
-  if (!product) return { ok: false, response: notFound() };
+  if (!product || !licenseVisible(product)) return { ok: false, response: notFound() };
   if (product.owner.toLowerCase() !== owner.toLowerCase()) {
     return {
       ok: false,
@@ -131,7 +134,7 @@ async function ownedProductSnapshot(
       ),
     };
   }
-  if (!snapshot) return { ok: false, response: notFound() };
+  if (!snapshot || !licenseVisible(snapshot.product)) return { ok: false, response: notFound() };
   if (snapshot.product.owner.toLowerCase() !== owner.toLowerCase()) {
     return {
       ok: false,
@@ -242,6 +245,11 @@ export async function PATCH(
       400,
     );
   }
+
+  if (raw.productKind !== undefined && raw.productKind !== product.productKind) return storePrivateJson({ ok: false, error: 'product_kind_immutable' }, 400);
+  if (raw.license !== undefined || (product.productKind === 'license' && (raw.usdcEnabled === true || raw.content !== undefined || raw.contentKind !== undefined || raw.priceJpyc !== undefined))) return storePrivateJson({ ok: false, error: 'license_definition_immutable' }, 400);
+  if (product.productKind === 'license' && raw.saleActive === true && !licenseSellerAllowed(auth.address)) return storePrivateJson({ ok: false, error: 'forbidden' }, 403);
+  if (product.productKind === 'license' && raw.saleActive === true && product.registration?.status !== 'registered') return storePrivateJson({ ok: false, error: 'license_registration_pending' }, 409);
 
   const saleActiveOnly =
     Object.keys(raw).length === 1 && typeof raw.saleActive === 'boolean';

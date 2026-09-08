@@ -414,3 +414,20 @@ describe('store ownership revision selection', () => {
     ).toBeNull();
   });
 });
+
+
+it('filters disabled licenses without poisoning digital pages or the next cursor', async () => {
+  const ids = Array.from({ length: STORE_LIBRARY_PAGE_SIZE + 1 }, (_, i) => resource(100 - i));
+  kvEval.mockResolvedValue({ ok: true, value: flatIndex(ids) });
+  kvMget.mockResolvedValue({ ok: true, value: ids.slice(0, STORE_LIBRARY_PAGE_SIZE).map((id, index) => {
+    const own = JSON.parse(ownership(id));
+    if (index % 2 === 0) { own.latestGrant.metadata.productKind = 'license'; own.grants[0].metadata.productKind = 'license'; }
+    return JSON.stringify(own);
+  }) });
+  const result = await listStoreLibraryPage({ payer: PAYER, cursor: null });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error('invalid fixture');
+  expect(result.page.items).toHaveLength(STORE_LIBRARY_PAGE_SIZE / 2);
+  expect(result.page.nextCursor).not.toBeNull();
+  expect(kvEval).toHaveBeenCalledTimes(1); expect(kvMget).toHaveBeenCalledTimes(1);
+});

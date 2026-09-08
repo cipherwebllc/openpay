@@ -184,6 +184,7 @@ async function quoteResponse(input: {
     !product ||
     !product.saleActive ||
     !product.contentAvailable ||
+    product.productKind === 'license' ||
     product.usdcEnabled !== true
   ) {
     return errorResponse('not_found', 404);

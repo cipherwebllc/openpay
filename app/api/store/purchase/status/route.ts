@@ -3,6 +3,7 @@
 
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { licenseVisible } from '@/lib/license/config';
 import {
   getPurchaseIntent,
   isPurchaseIntentSalt,
@@ -84,12 +85,13 @@ async function handleStatus(req: Request): Promise<NextResponse> {
   if (intent === 'storage' || intent === 'corrupt') {
     return errorResponse('storage_unavailable', 503);
   }
-  if (!intent) return errorResponse('not_found', 404);
+  if (!intent || !licenseVisible(intent.metadata)) return errorResponse('not_found', 404);
 
   if (
     intent.state === 'signed' ||
     intent.state === 'settling' ||
-    intent.state === 'indeterminate'
+    intent.state === 'indeterminate' ||
+    (intent.metadata.productKind === 'license' && intent.state === 'failed_prebroadcast')
   ) {
     const reconciled = await reconcilePurchaseIntent(intentSalt);
     if (!reconciled.ok) {

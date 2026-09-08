@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { licenseNftEnabled } from '@/lib/license/config';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import {
   createHostedProduct,
@@ -24,6 +25,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const PRODUCT_INPUT_KEYS = new Set([
+  'productKind',
+  'license',
   'payTo',
   'title',
   'desc',
@@ -119,6 +122,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!raw) {
     return storePrivateJson({ ok: false, error: 'invalid_body' }, 400);
   }
+  if (raw.productKind === 'license' && !licenseNftEnabled()) return notFound();
   if (!hasOnlyKeys(raw, PRODUCT_INPUT_KEYS)) {
     return storePrivateJson({ ok: false, error: 'invalid_body' }, 400);
   }
@@ -155,6 +159,8 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const parsed = parseHostedInput({
     owner: auth.address,
+    productKind: raw.productKind,
+    license: raw.license,
     payTo: raw.payTo,
     title: raw.title,
     desc: raw.desc === '' ? undefined : raw.desc,
@@ -196,7 +202,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
   }
 
-  const saleActive = raw.saleActive === true;
+  // 登録 job が確認するまで販売不可。作成は pending を返し、登録後の PATCH で公開する。
+  const saleActive = raw.saleActive === true && parsed.product.productKind !== 'license';
   if (saleActive) {
     const denied = await disclosureAllowsSale(auth.address);
     if (denied) return denied;

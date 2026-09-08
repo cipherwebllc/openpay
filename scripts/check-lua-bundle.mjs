@@ -31,6 +31,11 @@ if (!hide || !authHide) {
 // バンドルで `"..."+String(3)+"..."` のまま残る (畳み込まれない) ことがあるので、閾値を含めずに前後の
 // 定数片だけを検査し、閾値が `>=3 then` に畳み込まれた場合も `>="+String(3)+" then` の場合も通す。
 const EXPECTED = [
+  'stock.reserved+stock.sold>=stock.supply then return -4 end;',
+  'stock.sold=stock.sold+1; quota=quota-1;',
+  'reservation.state=',
+  'for _,w in ipairs(writes) do realRedis.call(unpack(w)) end; return result;',
+
   "if ARGV[4]=='violation' and failures>=",
   " then hidden=true end; if ARGV[5]=='clear' then authFailures=0; " +
     "elseif ARGV[5]=='block' then authFailures=authFailures+1; end; " +
@@ -44,7 +49,7 @@ const THRESHOLD_FORMS = [
   [`authFailures>=${authHide} then`, `authFailures>="+String(${authHide})+" then`],
 ];
 // 文が連結された壊れ方 (数字の直後に空白なしで if/local/return が続く)。
-const BROKEN = /(?:>=|==)\d+(?:if|local|return|elseif)\b/;
+const BROKEN = /(?:(?:>=|==)\d+|stock\.supply|stock\.sold\+1)(?:if|local|return|elseif)\b/;
 
 function walk(dir, out) {
   for (const name of readdirSync(dir)) {

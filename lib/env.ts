@@ -679,6 +679,13 @@ export const env = {
     'ENABLE_CREATOR_STORE',
     process.env.ENABLE_CREATOR_STORE,
   ),
+  // ライセンス NFT は Creator Store の子。秘密鍵は lib/license の server-only module に隔離する。
+  enableLicenseNft: parseBoolFlag('ENABLE_LICENSE_NFT', process.env.ENABLE_LICENSE_NFT),
+  enableLicenseNftUi:
+    parseBoolFlag('NEXT_PUBLIC_ENABLE_CREATOR_STORE', process.env.NEXT_PUBLIC_ENABLE_CREATOR_STORE) &&
+    parseBoolFlag('NEXT_PUBLIC_ENABLE_LICENSE_NFT', process.env.NEXT_PUBLIC_ENABLE_LICENSE_NFT),
+  licenseNftPolygon: nonEmpty(process.env.NEXT_PUBLIC_LICENSE_NFT_POLYGON),
+  licenseNftAmoy: nonEmpty(process.env.NEXT_PUBLIC_LICENSE_NFT_AMOY),
   // エージェント注文 (Claude Desktop/Code の openpay-x402-mcp から @handle 店舗のモバイルオーダーを
   // x402 で支払い、既存の受注リレーへ届ける) の有効化フラグ。**server-only** (NEXT_PUBLIC を付けない =
   // client bundle に出さない・/api/agent-order/* のみが参照。client 側は常に undefined→false で無害)。

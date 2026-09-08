@@ -23,6 +23,9 @@ import 'server-only';
 //     署名させた後に必ず失敗する構成を作らない。
 
 import { getAddress, isAddress, type Address } from 'viem';
+import { LICENSE_DEFAULT_INSTRUCTIONS, parseLicenseDefinition, parseLicenseRegistration, parseLicenseCreationTerms, type LicenseDefinition, type LicenseRegistration, type LicenseTermsInput } from '@/lib/license/definition';
+import { licenseDeployment, licenseSellerAllowed, licenseVisible } from '@/lib/license/config';
+import { createLicenseProduct } from '@/lib/license/product';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import {
   isHostedProductCategory,
@@ -63,6 +66,9 @@ export type HostedLabel =
 export type HostedContentKind = 'url' | 'text';
 
 export type HostedProduct = {
+  productKind?: 'license';
+  license?: LicenseDefinition;
+  registration?: LicenseRegistration;
   id: string;
   /** 出品者の SIWE wallet (checksum)。所有・編集権の主体。 */
   owner: Address;
@@ -191,6 +197,8 @@ export function isHostedLabel(value: unknown): value is HostedLabel {
 }
 
 export type HostedProductInput = {
+  productKind?: unknown;
+  license?: unknown;
   owner: string;
   payTo?: string;
   title: unknown;
@@ -210,7 +218,7 @@ export type HostedProductInput = {
 };
 
 export type ParsedHostedInput =
-  | { ok: true; product: Omit<HostedProduct, 'id' | 'createdAt'>; content: HostedContent }
+  | { ok: true; product: Omit<HostedProduct, 'id' | 'createdAt'>; content: HostedContent; licenseInput?: LicenseTermsInput }
   | { ok: false; error: string };
 
 /**
@@ -221,6 +229,13 @@ export type ParsedHostedInput =
 export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
   if (!isAddress(input.owner)) return { ok: false, error: 'invalid owner' };
   const owner = getAddress(input.owner);
+  if (input.productKind !== undefined && input.productKind !== 'license') return { ok: false, error: 'invalid productKind' };
+  const isLicense = input.productKind === 'license';
+  const licenseInput = isLicense ? parseLicenseCreationTerms(input.license) : null;
+  if (isLicense && (!licenseSellerAllowed(owner) || !licenseDeployment())) return { ok: false, error: 'license_unavailable' };
+  if (isLicense && (!licenseInput || Object.keys(input.license as object).some((key) => !['supply', 'transferable', 'termsUrl', 'termsVersion'].includes(key)))) return { ok: false, error: 'invalid license' };
+  if (!isLicense && input.license !== undefined) return { ok: false, error: 'invalid license' };
+  if (isLicense && (input.contentKind !== 'text' || input.usdcEnabled === true)) return { ok: false, error: 'license_jpyc_text_only' };
 
   const payToRaw = input.payTo ?? input.owner;
   if (typeof payToRaw !== 'string' || !isAddress(payToRaw)) {
@@ -294,6 +309,7 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
     return { ok: false, error: 'invalid price' };
   }
   const price = BigInt(input.priceJpyc);
+  if (isLicense && price < 1000n) return { ok: false, error: 'license_price_minimum' };
   if (price < MIN_HOSTED_PRICE_JPYC || price > MAX_HOSTED_PRICE_JPYC) {
     return { ok: false, error: 'price out of range' };
   }
@@ -358,7 +374,8 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
     }
     content = { kind: 'url', value: input.content.trim() };
   } else {
-    const text = sanitizeHostedText(input.content);
+    // license の空欄だけ定型案内へ。通常デジタル text の空欄拒否には波及させない。
+    const text = sanitizeHostedText(isLicense && (input.content === undefined || (typeof input.content === 'string' && input.content.trim() === '')) ? LICENSE_DEFAULT_INSTRUCTIONS : input.content);
     if (!text) return { ok: false, error: 'invalid content text' };
     content = { kind: 'text', value: text };
   }
@@ -382,10 +399,12 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       ...(input.featured === true ? { featured: true } : {}),
       ...(input.usdcEnabled === true ? { usdcEnabled: true } : {}),
       contentRevision: 1,
-      saleActive: true,
+      ...(isLicense ? { productKind: 'license' as const, registration: { status: 'pending' as const, attempts: 0 } } : {}),
+      saleActive: !isLicense,
       contentAvailable: true,
     },
     content,
+    ...(licenseInput ? { licenseInput } : {}),
   };
 }
 
@@ -401,6 +420,11 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const r = value as Record<string, unknown>;
   if (!isHostedId(r.id)) return null;
+  if (r.productKind !== undefined && r.productKind !== 'license') return null;
+  const license = r.productKind === 'license' ? parseLicenseDefinition(r.license) : null;
+  const registration = r.productKind === 'license' ? parseLicenseRegistration(r.registration) : null;
+  if (r.productKind === 'license' && (!license || !registration || license.contentRef !== hostedContentKey(r.id, 1) || r.contentRevision !== 1 || r.contentKind !== 'text' || r.usdcEnabled === true || typeof r.priceJpyc !== 'string' || !DECIMAL_RE.test(r.priceJpyc) || BigInt(r.priceJpyc) < 1000n || BigInt(r.priceJpyc) > MAX_HOSTED_PRICE_JPYC || (r.saleActive === true && registration.status !== 'registered'))) return null;
+  if (r.productKind === undefined && (r.license !== undefined || r.registration !== undefined)) return null;
   if (typeof r.owner !== 'string' || !isAddress(r.owner)) return null;
   if (typeof r.payTo !== 'string' || !isAddress(r.payTo)) return null;
   const title = sanitizeLine(r.title, MAX_HOSTED_TITLE_LEN);
@@ -457,7 +481,7 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
       : undefined;
   return {
     id: r.id,
-    owner: getAddress(r.owner),
+    ...(license && registration ? { productKind: 'license' as const, license, registration } : {}),    owner: getAddress(r.owner),
     payTo: getAddress(r.payTo),
     title,
     ...(desc ? { desc } : {}),
@@ -506,6 +530,7 @@ export async function createHostedProduct(
 ): Promise<CreateHostedResult> {
   const id = newHostedId();
   const product: HostedProduct = { id, createdAt: now, ...parsed.product };
+  if (product.productKind === 'license') return createLicenseProduct(product, parsed.content, parsed.licenseInput, MAX_HOSTED_PER_OWNER);
   const res = await kvEval<number>(
     CREATE_HOSTED,
     [
@@ -598,7 +623,7 @@ export async function listHostedForOwner(
     if (!isHostedId(id)) continue;
     const product = await getHostedProduct(id);
     if (product === 'storage') return null;
-    if (product && product.owner.toLowerCase() === wallet.toLowerCase()) {
+    if (product && licenseVisible(product) && product.owner.toLowerCase() === wallet.toLowerCase()) {
       out.push(product);
     }
   }
@@ -634,6 +659,7 @@ export async function listAvailableHostedForOwner(
     const product = parseStoredHostedProduct(values.value[index]);
     if (
       product &&
+      licenseVisible(product) &&
       product.id === validIds[index] &&
       product.owner.toLowerCase() === wallet.toLowerCase() &&
       product.saleActive &&
@@ -685,6 +711,7 @@ export async function getHostedProductsByIds(
     const product = parseStoredHostedProduct(values.value[index]);
     if (
       product &&
+      licenseVisible(product) &&
       product.id === validIds[index] &&
       product.saleActive &&
       product.contentAvailable
@@ -727,6 +754,7 @@ export async function updateHostedProduct(input: {
   ) {
     return { ok: false, reason: 'forbidden' };
   }
+  if (current.productKind === 'license' && (!licenseVisible(current) || (input.patch.priceJpyc !== undefined && input.patch.priceJpyc !== current.priceJpyc) || (input.patch.saleActive === true && (current.registration?.status !== 'registered' || !licenseSellerAllowed(current.owner))))) return { ok: false, reason: 'forbidden' };
   const next: HostedProduct = {
     ...current,
     ...(input.patch.title !== undefined
@@ -814,6 +842,8 @@ export async function replaceHostedSellerProduct(input: {
   ) {
     return { ok: false, reason: 'forbidden' };
   }
+  // 同じ tokenId に異なる経済条件/本文を混ぜず、登録前の販売開始も拒否する。
+  if (current.productKind === 'license' && (!licenseVisible(current) || input.content || input.metadata.priceJpyc !== current.priceJpyc || input.metadata.usdcEnabled || (input.metadata.saleActive && (current.registration?.status !== 'registered' || !licenseSellerAllowed(current.owner))))) return { ok: false, reason: 'forbidden' };
   const revision = current.contentRevision + (input.content ? 1 : 0);
   const updatedAt = Math.max(
     input.now ?? Date.now(),
@@ -821,6 +851,7 @@ export async function replaceHostedSellerProduct(input: {
   );
   const next: HostedProduct = {
     id: current.id,
+    ...(current.productKind === 'license' ? { productKind: current.productKind, license: current.license, registration: current.registration } : {}),
     owner: current.owner,
     payTo: current.payTo,
     title: input.metadata.title,
@@ -879,6 +910,7 @@ export async function putHostedContentRevision(input: {
   const current = await getHostedProduct(input.id);
   if (current === 'storage') return { ok: false, reason: 'storage' };
   if (!current) return { ok: false, reason: 'not_found' };
+  if (current.productKind === 'license') return { ok: false, reason: 'forbidden' };
   if (
     !isAddress(input.owner) ||
     current.owner.toLowerCase() !== input.owner.toLowerCase()
@@ -1054,6 +1086,8 @@ export async function sellerDisclosureComplete(
  */
 export type HostedPurchaseMetadata = Pick<
   HostedProduct,
+  | 'productKind'
+  | 'license'
   | 'owner'
   | 'payTo'
   | 'title'
@@ -1068,6 +1102,7 @@ export function hostedPurchaseMetadata(
   product: HostedProduct,
 ): HostedPurchaseMetadata {
   return {
+    ...(product.productKind === 'license' ? { productKind: product.productKind, license: product.license } : {}),
     owner: product.owner,
     payTo: product.payTo,
     title: product.title,

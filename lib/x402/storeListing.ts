@@ -18,6 +18,7 @@ import { listStoreIndexIds } from '@/lib/x402/storeIndex';
 
 /** Store カードの描画に必要な公開情報のみ (owner ウォレットは client へ渡さない)。 */
 export type StoreListing = {
+  productKind?: 'license';
   id: string;
   title: string;
   desc?: string;
@@ -77,6 +78,7 @@ export async function listStoreListings(): Promise<StoreListing[] | null> {
         : ownedHandles[0];
     out.push({
       id: product.id,
+      ...(product.productKind === 'license' ? { productKind: product.productKind } : {}),
       title: product.title,
       ...(product.desc ? { desc: product.desc } : {}),
       ...(product.emoji ? { emoji: product.emoji } : {}),

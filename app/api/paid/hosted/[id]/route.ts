@@ -9,6 +9,7 @@ import { getAddress, isAddress, isAddressEqual, type Address, type Hex } from 'v
 import { POST as settlePayment } from '@/app/api/facilitator/settle/route';
 import { POST as verifyPayment } from '@/app/api/facilitator/verify/route';
 import { env } from '@/lib/env';
+import { licenseVisible, licenseSellerAllowed } from '@/lib/license/config';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
 import { FORWARDER_COMMIT_VERSION } from '@/lib/relay/forwarderIntent';
 import {
@@ -211,6 +212,7 @@ async function settledContentResponse(input: {
   intent: SettledPurchaseIntent;
   settlement?: SettleBody;
 }): Promise<NextResponse> {
+  if (!licenseVisible(input.intent.metadata)) return errorResponse('not_found', 404);
   // settled shortcut より先に intent / ownership / purchase の三者整合を読む。
   // 復旧 cache や壊れた own key が別商品の content 解錠へ波及するのを断つ。
   let access = await readSettledPurchaseAccess(
@@ -251,6 +253,12 @@ async function settledContentResponse(input: {
       503,
     );
   }
+  if (access.intent.metadata.license) {
+    const { resolveLicenseRights } = await import('@/lib/license/rights');
+    const rights = await resolveLicenseRights({ address: access.intent.claim.payer, productId: access.intent.resourceId, definition: access.intent.metadata.license, ownership: access.ownership });
+    if (rights.entitled === null) return errorResponse('license_rights_unknown', 503);
+    if (!rights.entitled) return errorResponse('not_found', 404);
+  }
   const content = await contentForIntent(access.intent);
   if (content === 'storage') {
     return errorResponse('storage_unavailable', 503);
@@ -271,6 +279,7 @@ async function settledContentResponse(input: {
     contentRevision: access.intent.contentRevision,
     title: access.intent.metadata.title,
     kind: content.kind,
+    ...(access.intent.metadata.productKind === 'license' ? { productKind: 'license', license: access.intent.metadata.license } : {}),
     value: content.value,
     txHash: access.intent.txHash,
   });
@@ -293,6 +302,9 @@ async function quoteResponse(input: {
   const { req, resourceId, payer } = input;
   const product = await getHostedProduct(resourceId);
   if (product === 'storage') return errorResponse('storage_unavailable', 503);
+  if (product?.productKind === 'license' && (!licenseVisible(product) || !licenseSellerAllowed(product.owner))) return errorResponse('not_found', 404);
+  // 登録待ちは 409。署名要求 (402) を出さず、登録 job 完了後の再試行を示す。
+  if (product?.productKind === 'license' && product.registration?.status !== 'registered') return errorResponse('license_registration_pending', 409);
   if (!product || !product.saleActive || !product.contentAvailable) {
     return errorResponse('not_found', 404);
   }
@@ -480,6 +492,13 @@ async function submittedPaymentResponse(input: {
     return errorResponse('storage_unavailable', 503);
   }
   if (!found) return errorResponse('purchase_intent_not_found', 404);
+  if (!licenseVisible(found.metadata)) return errorResponse('not_found', 404);
+  if (found.metadata.productKind === 'license' && (found.state === 'quoted' || found.state === 'signed')) {
+    const product = await getHostedProduct(found.resourceId);
+    if (product === 'storage') return errorResponse('storage_unavailable', 503);
+    if (!product || !licenseSellerAllowed(product.owner) || !product.saleActive) return errorResponse('not_found', 404);
+    if (product.registration?.status !== 'registered' || product.license?.definitionHash !== found.metadata.license?.definitionHash) return errorResponse('license_registration_pending', 409);
+  }
   if (
     found.resourceId !== input.resourceId ||
     !isAddressEqual(found.payerHint, input.payerQuery)
@@ -519,7 +538,8 @@ async function submittedPaymentResponse(input: {
   }
   if (
     found.state === 'settling' ||
-    found.state === 'indeterminate'
+    found.state === 'indeterminate' ||
+    (found.metadata.productKind === 'license' && found.state === 'failed_prebroadcast')
   ) {
     const reconciled = await reconcilePurchaseIntent(intentSalt);
     if (!reconciled.ok) {
@@ -598,6 +618,7 @@ async function submittedPaymentResponse(input: {
           : claimed.reason === 'not_found'
             ? 404
             : 409;
+      if (claimed.reason === 'sold_out' || claimed.reason === 'reservation_quota') return errorResponse(claimed.reason, 409);
       return errorResponse(
         claimed.reason === 'storage' || claimed.reason === 'corrupt'
           ? 'storage_unavailable'
@@ -719,6 +740,7 @@ async function submittedPaymentResponse(input: {
   ) {
     const marked = await markPurchaseFailedPrebroadcast({
       intentSalt,
+      ...(settling.metadata.productKind === 'license' ? { licenseIntent: settling } : {}),
       attemptId: settling.attemptId,
       reason:
         settleBody.errorReason ??

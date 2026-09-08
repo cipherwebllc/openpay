@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { licenseVisible } from '@/lib/license/config';
 import {
   getHostedContent,
   getHostedProduct,
@@ -85,14 +86,20 @@ export async function GET(
 
   const grant = selectStorePurchaseGrant(owned.ownership, selector);
   // 未所有 resource と、所有 record 内に指定 grant がない場合は同じ oracle-safe 404。
-  if (!grant) return notFound();
+  if (!grant || !licenseVisible(grant.metadata)) return notFound();
   const product = await getHostedProduct(resourceId);
   if (product === 'storage') return storageUnavailable();
   // 未所有と商品レコード不在は、body/status とも同一の 404 にする。
-  if (!product) return notFound();
+  if (!product || !licenseVisible(product)) return notFound();
   if (product.id !== resourceId) {
     // key と embedded id の破損から、別商品の availability を権利判定へ波及させない。
     return storageUnavailable();
+  }
+  if (grant.metadata.license) {
+    const { resolveLicenseRights } = await import('@/lib/license/rights');
+    const rights = await resolveLicenseRights({ address: auth.address, productId: resourceId, definition: grant.metadata.license, ownership: owned.ownership });
+    if (rights.entitled === null) return storePrivateJson({ ok: false, error: 'license_rights_unknown' }, 503);
+    if (!rights.entitled) return notFound();
   }
   if (!product.contentAvailable) {
     return storePrivateJson({
