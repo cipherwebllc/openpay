@@ -122,6 +122,7 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
       ['/api/paid/usdc/jpyc/supply', '0.002'],
       ['/api/paid/usdc/jpyc/balance', '0.002'],
       ['/api/paid/usdc/jpyc/transfers', '0.005'],
+      ['/api/paid/usdc/jpyc/activity', '0.01'],
       ['/api/paid/hello', '0.01'], // X402_PRICE stub に一致
     ];
     // JPYC ライブ API は operationId (動詞始まり・不変) と x-agent-usage (購入ルール) を持ち、
@@ -130,6 +131,7 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
       ['/api/paid/usdc/jpyc/supply', 'getJpycSupply'],
       ['/api/paid/usdc/jpyc/balance', 'getJpycBalance'],
       ['/api/paid/usdc/jpyc/transfers', 'listRecentJpycTransfers'],
+      ['/api/paid/usdc/jpyc/activity', 'getJpycNetworkActivity'],
     ];
     for (const [path, opId] of agentReady) {
       const op = body.paths[path]?.get as Record<string, unknown> | undefined;
@@ -169,6 +171,31 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
       const chainParam = params?.find((p) => p.name === 'chain');
       expect(chainParam?.schema?.enum, path).toEqual([...JPYC_CHAINS]);
     }
+  });
+
+  it('activity はPolygonだけ、previewと有料schemaが常時公開され、operationIdは一意', async () => {
+    const body = await doc();
+    const { JPYC_CHAINS } = await import('@/lib/chains');
+    const { JPYC_ACTIVITY_RESPONSE_SCHEMA, JPYC_ACTIVITY_PREVIEW_SCHEMA } = await import('@/lib/jpyc/liveSchema');
+    for (const [path, schema] of [
+      ['/api/paid/usdc/jpyc/activity', JPYC_ACTIVITY_RESPONSE_SCHEMA],
+      ['/api/jpyc/activity/preview', JPYC_ACTIVITY_PREVIEW_SCHEMA],
+    ] as const) {
+      const op = body.paths[path]?.get;
+      const params = op?.parameters as Array<{ name: string; schema: { enum: string[] } }>;
+      const chains = params.find((p) => p.name === 'chain')!.schema.enum;
+      expect(chains).toEqual(['polygon']);
+      expect(chains.every((chain) => (JPYC_CHAINS as readonly string[]).includes(chain))).toBe(true);
+      const responses = op?.responses as Record<string, { content: { 'application/json': { schema: unknown } }; description: string }>;
+      expect(responses['200'].content['application/json'].schema).toEqual(schema);
+      if (path.includes('/paid/')) {
+        expect(responses['400'].description).toContain('duplicate');
+        expect(responses['503'].description).toContain('data_stale');
+        expect(responses['503'].description).toContain('No settlement');
+      } else expect(op?.['x-payment-info']).toBeUndefined();
+    }
+    const ids = Object.values(body.paths).flatMap((path) => Object.values(path).map((op) => op.operationId)).filter(Boolean);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   // E6: 掲載条件は route の 404 条件と一致させる。

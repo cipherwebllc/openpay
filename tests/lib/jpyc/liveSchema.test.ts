@@ -18,11 +18,12 @@ vi.mock('@/lib/jpyc/live', async () => {
 });
 
 import {
+  JPYC_ACTIVITY_RESPONSE_SCHEMA,
   JPYC_BALANCE_RESPONSE_SCHEMA,
   JPYC_SUPPLY_RESPONSE_SCHEMA,
   JPYC_TRANSFERS_RESPONSE_SCHEMA,
 } from '@/lib/jpyc/liveSchema';
-import { USDC_JPYC_BALANCE, USDC_JPYC_SUPPLY, USDC_JPYC_TRANSFERS } from '@/lib/jpyc/liveResources';
+import { USDC_JPYC_ACTIVITY, USDC_JPYC_BALANCE, USDC_JPYC_SUPPLY, USDC_JPYC_TRANSFERS } from '@/lib/jpyc/liveResources';
 
 // format (date-time / uri) は ajv-formats 無しでは検証できないため外す (依存は ajv のみ・掟 16)。
 // 実質的な制約は pattern (数字列・アドレス・tx hash) が担う。
@@ -32,6 +33,7 @@ function ajv() {
 const validateSupply = ajv().compile(JPYC_SUPPLY_RESPONSE_SCHEMA);
 const validateBalance = ajv().compile(JPYC_BALANCE_RESPONSE_SCHEMA);
 const validateTransfers = ajv().compile(JPYC_TRANSFERS_RESPONSE_SCHEMA);
+const validateActivity = ajv().compile(JPYC_ACTIVITY_RESPONSE_SCHEMA);
 
 const CONTRACT = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
 const ADDR = '0x9A76ea8Fc0b9f34D34b91d453F2940932C9a7FE0';
@@ -42,12 +44,25 @@ describe('example は自分の Schema に適合する', () => {
     expect(validateSupply(USDC_JPYC_SUPPLY.bazaar.output.example), JSON.stringify(validateSupply.errors)).toBe(true);
     expect(validateBalance(USDC_JPYC_BALANCE.bazaar.output.example), JSON.stringify(validateBalance.errors)).toBe(true);
     expect(validateTransfers(USDC_JPYC_TRANSFERS.bazaar.output.example), JSON.stringify(validateTransfers.errors)).toBe(true);
+    expect(validateActivity(USDC_JPYC_ACTIVITY.bazaar.output.example), JSON.stringify(validateActivity.errors)).toBe(true);
   });
 
   it('Bazaar 宣言の output.schema は応答 Schema そのもの', () => {
     expect(USDC_JPYC_SUPPLY.bazaar.output.schema).toBe(JPYC_SUPPLY_RESPONSE_SCHEMA);
     expect(USDC_JPYC_BALANCE.bazaar.output.schema).toBe(JPYC_BALANCE_RESPONSE_SCHEMA);
     expect(USDC_JPYC_TRANSFERS.bazaar.output.schema).toBe(JPYC_TRANSFERS_RESPONSE_SCHEMA);
+    expect(USDC_JPYC_ACTIVITY.bazaar.output.schema).toBe(JPYC_ACTIVITY_RESPONSE_SCHEMA);
+  });
+
+  it('activity は未知キー・生KV・誤chainId・非数字amount・6受信者を拒否', () => {
+    const example = USDC_JPYC_ACTIVITY.bazaar.output.example;
+    for (const fields of [{ extra: 1 }, { items: [] }, { coverage: {} }, { chainId: 80002 },
+      { window: '1h' }, { volume: '1e18' }, { toBlock: 123 },
+      { definitions: { ...example.definitions, internal: true } },
+      { topReceivers: Array(6).fill(example.topReceivers[0]) },
+      { topReceivers: [{ ...example.topReceivers[0], address: '0x' + 'A'.repeat(40) }] },
+      { topReceivers: [{ ...example.topReceivers[0], extra: true }] },
+    ]) expect(validateActivity({ ...example, ...fields }), JSON.stringify(fields)).toBe(false);
   });
 });
 

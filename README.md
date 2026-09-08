@@ -357,6 +357,7 @@ Do not add data through unauthorized scraping, access-control or paywall bypasse
 | x402 (USDC) | `GET /api/paid/usdc/jpyc/supply` | JPYC Supply by Chain — current contract-reported totalSupply per chain (Polygon / Kaia / Avalanche / Ethereum) with the observed block number | 0.002 USDC |
 | x402 (USDC) | `GET /api/paid/usdc/jpyc/balance?address=` | JPYC Wallet Balance — current balanceOf of any address across chains with the observed block number | 0.002 USDC |
 | x402 (USDC) | `GET /api/paid/usdc/jpyc/transfers?chain=` | Recent JPYC Transfers — Transfer events on one chain within ≈ the last hour of blocks, newest first, optional address filter | 0.005 USDC |
+| x402 (USDC) | `GET /api/paid/usdc/jpyc/activity?chain=polygon&window=24h` | JPYC Network Activity — approximately 24 hours of metrics computed hourly from finalized Polygon buckets; exact range in response. Free `/api/jpyc/activity/preview?chain=polygon`; buy again when observedAt advances and before expiresAt | 0.01 USDC |
 | x402 | `GET /api/paid/japan-web3-directory/search` | Filtered search | 2 JPYC |
 | x402 | `GET /api/paid/japan-web3-directory/:slug` | One published record | 1 JPYC |
 

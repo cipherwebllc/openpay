@@ -171,3 +171,85 @@ export const JPYC_TRANSFERS_RESPONSE_SCHEMA = {
   required: [...ENVELOPE_REQUIRED, 'chain', 'chainId', 'contract', 'fromBlock', 'toBlock', 'mode', 'nextCursor', 'hasMore', 'truncated', 'items'],
   additionalProperties: false,
 } as const;
+
+// hourly 集計は request-time RPC の notice を継承しない。封筒と本体を同じ object で閉じる。
+const ACTIVITY_NOTICE = {
+  type: 'string', const: 'onchain-facts-only',
+  description: 'On-chain facts computed hourly from finalized Polygon blocks. Informational only; not financial advice. Full terms at termsUrl.',
+} as const;
+const COUNT = { type: 'integer', minimum: 0 } as const;
+const LOWER_ADDRESS = { type: 'string', pattern: '^0x[a-f0-9]{40}$' } as const;
+export const JPYC_ACTIVITY_RESPONSE_SCHEMA = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  type: 'object',
+  properties: {
+    ...ENVELOPE_COMMON,
+    notice: ACTIVITY_NOTICE,
+    chain: { type: 'string', const: 'polygon' }, chainId: { type: 'integer', const: 137 }, contract: ADDRESS,
+    window: { type: 'string', const: '24h' },
+    fromBlock: UINT_STRING, toBlock: UINT_STRING,
+    fromTimestamp: ISO_DATETIME, toTimestamp: ISO_DATETIME,
+    transferCount: COUNT, uniqueSenders: COUNT, uniqueReceivers: COUNT,
+    volume: UINT_STRING, volumeFormatted: DECIMAL_STRING,
+    medianTransfer: UINT_STRING, medianTransferFormatted: DECIMAL_STRING,
+    topReceivers: {
+      type: 'array', maxItems: 5,
+      items: {
+        type: 'object',
+        properties: { address: LOWER_ADDRESS, count: { ...COUNT, minimum: 1 }, volume: UINT_STRING, volumeFormatted: DECIMAL_STRING },
+        required: ['address', 'count', 'volume', 'volumeFormatted'], additionalProperties: false,
+      },
+    },
+    definitions: {
+      type: 'object',
+      properties: {
+        eligible: { type: 'string', const: 'positive-value transfers with distinct sender and receiver, excluding the zero address' },
+        countUnit: { type: 'string', const: 'events' },
+        median: { type: 'string', const: 'floored atomic average for even counts' },
+      },
+      required: ['eligible', 'countUnit', 'median'], additionalProperties: false,
+    },
+    observedAt: ISO_DATETIME, expiresAt: ISO_DATETIME,
+  },
+  required: [...ENVELOPE_REQUIRED, 'chain', 'chainId', 'contract', 'window', 'fromBlock', 'toBlock',
+    'fromTimestamp', 'toTimestamp', 'transferCount', 'uniqueSenders', 'uniqueReceivers', 'volume',
+    'volumeFormatted', 'medianTransfer', 'medianTransferFormatted', 'topReceivers', 'definitions', 'observedAt', 'expiresAt'],
+  additionalProperties: false,
+} as const;
+
+export const JPYC_ACTIVITY_PREVIEW_SCHEMA = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  type: 'object',
+  properties: {
+    teaser: { type: 'boolean', const: true }, product: { type: 'string', const: 'jpyc-network-activity' },
+    chain: { type: 'string', const: 'polygon' }, window: { type: 'string', const: '24h' },
+    available: { type: 'boolean' },
+    sample: {
+      type: 'object', properties: { transferCount: COUNT }, required: ['transferCount'], additionalProperties: false,
+    },
+    fromBlock: UINT_STRING, toBlock: UINT_STRING, toTimestamp: ISO_DATETIME,
+    observedAt: ISO_DATETIME, expiresAt: ISO_DATETIME,
+    reason: { type: 'string', enum: ['data_unavailable', 'data_incomplete', 'data_stale'] },
+    paidFields: { type: 'array', items: { type: 'string' } },
+    fullFeed: {
+      type: 'object',
+      properties: { usdc: { type: 'string', format: 'uri' }, priceUsd: DECIMAL_STRING, hint: { type: 'string' } },
+      required: ['usdc', 'priceUsd', 'hint'], additionalProperties: false,
+    },
+    notice: ACTIVITY_NOTICE, termsUrl: { type: 'string', format: 'uri' },
+  },
+  required: ['teaser', 'product', 'chain', 'window', 'available', 'paidFields', 'fullFeed', 'notice', 'termsUrl'],
+  // unavailable に sample を捏造する変更も契約違反として検出する。
+  oneOf: [
+    {
+      properties: { available: { const: true }, reason: false },
+      required: ['sample', 'fromBlock', 'toBlock', 'toTimestamp', 'observedAt', 'expiresAt'],
+    },
+    {
+      properties: { available: { const: false }, sample: false, fromBlock: false, toBlock: false,
+        toTimestamp: false, observedAt: false, expiresAt: false },
+      required: ['reason'],
+    },
+  ],
+  additionalProperties: false,
+} as const;
