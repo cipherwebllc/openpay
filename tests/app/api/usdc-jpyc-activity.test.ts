@@ -111,19 +111,19 @@ describe('activity paid: gate 実体で課金境界を検証', () => {
       expect(mocks.release).toHaveBeenCalledOnce();
     });
 
-    it.each(['missing', 'malformed', 'schema', 'overflow', 'stale', 'future', 'unconfigured', 'storage', 'exception'])('v' + version + ': %s は503・settle不呼出', async (kind) => {
-      const rows = activityWindow(kind === 'stale' ? ACTIVITY_NOW - 14_400_001 : kind === 'future' ? ACTIVITY_NOW + 60_001 : ACTIVITY_NOW);
-      if (kind === 'overflow') Object.assign(rows[1], { items: [], overflow: true, eventCount: 5_001 });
-      if (kind === 'schema') Object.assign(rows[1], { schema: 2 });
+    it.each(['missing', 'no_boundary', 'malformed', 'schema', 'overflow', 'stale', 'future', 'unconfigured', 'storage', 'exception'])('v' + version + ': %s は503・settle不呼出', async (kind) => {
+      const rows = activityWindow(kind === 'stale' ? ACTIVITY_NOW - 14_400_001 : kind === 'future' ? ACTIVITY_NOW + 60_001 : ACTIVITY_NOW, kind === 'no_boundary' ? 0.5 : 2);
+      if (kind === 'overflow') Object.assign(rows[36], { items: [], overflow: true, eventCount: 5_001 });
+      if (kind === 'schema') Object.assign(rows[36], { schema: 2 });
       const values: (string | null)[] = rows.map((b) => JSON.stringify(b));
-      if (kind === 'missing') values[12] = null;
-      if (kind === 'malformed') values[1] = '{';
+      if (kind === 'missing') values[48] = null;
+      if (kind === 'malformed') values[36] = '{';
       mocks.mget.mockResolvedValue({ ok: true, value: values });
       if (kind === 'unconfigured' || kind === 'storage') mocks.get.mockResolvedValue({ ok: false, reason: kind === 'storage' ? 'timeout' : 'unconfigured' });
       if (kind === 'exception') mocks.get.mockRejectedValue(new Error('storage threw'));
       const res = await paid.GET(request(PAID + '?chain=polygon', version));
       expect(res.status).toBe(503);
-      expect(await res.json()).toEqual({ ok: false, error: kind === 'missing' ? 'data_incomplete' : kind === 'stale' ? 'data_stale' : 'data_unavailable' });
+      expect(await res.json()).toEqual({ ok: false, error: kind === 'missing' || kind === 'no_boundary' ? 'data_incomplete' : kind === 'stale' ? 'data_stale' : 'data_unavailable' });
       expect(mocks.fetch.mock.calls.map(([url]) => String(url))).toEqual(['https://facilitator.payai.network/verify']);
       expect(mocks.release).toHaveBeenCalledOnce();
     });
@@ -135,7 +135,7 @@ describe('activity paid: gate 実体で課金境界を検証', () => {
       expect(validatePaid(body), JSON.stringify(validatePaid.errors)).toBe(true);
       expect(body.observedAt).toBe(body.toTimestamp);
       expect(Date.parse(body.expiresAt) - Date.parse(body.observedAt)).toBe(14_400_000);
-      expect(body.transferCount).toBe(24);
+      expect(body.transferCount).toBe(25);
       expect(body).not.toHaveProperty('coverage');
       expect(body).not.toHaveProperty('items');
       expect(res.headers.get('cache-control')).toBe('no-store');
@@ -161,7 +161,7 @@ describe('activity preview: flagなし・同じ封筒・有効期限内のキャ
     const body = await res.json();
     expect(validatePreview(body), JSON.stringify(validatePreview.errors)).toBe(true);
     expect(body.available).toBe(true);
-    expect(body.sample).toEqual({ transferCount: 24 });
+    expect(body.sample).toEqual({ transferCount: 25 });
     expect(body.fullFeed.priceUsd).toBe(USDC_JPYC_ACTIVITY.priceUsd);
     expect(body.fullFeed.usdc).toBe(ORIGIN + PAID + '?chain=polygon&window=24h');
     expect(body.fullFeed.hint).toBe('Check before you buy: if observedAt equals the observedAt of your last paid response, the paid aggregate is unchanged -- skip the purchase. Buy only when observedAt has advanced and expiresAt has not passed.');
@@ -170,7 +170,7 @@ describe('activity preview: flagなし・同じ封筒・有効期限内のキャ
   });
 
   it.each(['data_incomplete', 'data_unavailable', 'data_stale'])('unavailable %s は同じ商品封筒・sampleなし', async (reason) => {
-    if (reason === 'data_incomplete') mocks.mget.mockResolvedValue({ ok: true, value: Array(25).fill(null) });
+    if (reason === 'data_incomplete') mocks.mget.mockResolvedValue({ ok: true, value: Array(60).fill(null) });
     if (reason === 'data_unavailable') mocks.get.mockResolvedValue({ ok: false, reason: 'unconfigured' });
     if (reason === 'data_stale') store(activityWindow(ACTIVITY_NOW - 14_400_001));
     const res = await preview.GET(request(PREVIEW + '?chain=polygon'));
