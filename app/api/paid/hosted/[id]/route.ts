@@ -332,6 +332,12 @@ async function quoteResponse(input: {
     );
   }
 
+  if (product.productKind === 'license' && product.license) {
+    const { checkLicenseRecipient } = await import('@/lib/license/recipient');
+    const recipient = await checkLicenseRecipient(product.license, payer);
+    if (recipient !== 'supported') return errorResponse(recipient === 'unsupported' ? 'recipient_unsupported' : 'license_simulation_unavailable', recipient === 'unsupported' ? 409 : 503);
+  }
+
   let currentRequirements: ReturnType<typeof createJpycPaymentRequirements>;
   try {
     currentRequirements = createJpycPaymentRequirements({
@@ -846,6 +852,24 @@ async function submittedPaymentResponse(input: {
         formatJpycYenLabel(BigInt(soldIntent.merchantValue)),
       );
     });
+  }
+  if (finalized.intent.metadata.productKind === 'license') {
+    // mint の RPC/KV/after 登録の失敗を、確定済み決済の応答へ波及させない。
+    // Promise は after の中で完了させ、serverless の応答後凍結による中断を避ける。
+    try {
+      after(async () => {
+        try {
+          const { runLicenseWorker } = await import('@/lib/license/minter');
+          const { computeLicensePaymentKey } = await import('@/lib/license/paymentKey');
+          const c = finalized.intent.claim;
+          await runLicenseWorker({ member: computeLicensePaymentKey({ paymentChainId: BigInt(c.chainId), paymentToken: c.token, payer: c.payer, authorizationNonce: c.nonce }), deadline: Date.now() + 8_000 });
+        } catch {
+          // 即時試行の障害は恒久義務と cron に委ね、購入成功を取り消さない。
+        }
+      });
+    } catch {
+      // request scope が無い場合も義務は保存済み。応答外の未追跡送信を開始しない。
+    }
   }
   return settledContentResponse({
     intent: finalized.intent,

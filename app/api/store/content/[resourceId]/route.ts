@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
-import { licenseVisible } from '@/lib/license/config';
+import { licenseNftEnabled, licenseVisible } from '@/lib/license/config';
 import {
   getHostedContent,
   getHostedProduct,
+  isHostedId,
 } from '@/lib/x402/hostedStore';
 import {
   readStoreOwnership,
@@ -82,7 +83,24 @@ export async function GET(
   // 商品/content の存在を先に見ると、未所有者へ resource の存在を漏らすため own が先。
   const owned = await readStoreOwnership(auth.address, resourceId);
   if (!owned.ok) return storageUnavailable();
-  if (!owned.ownership) return notFound();
+  if (!owned.ownership) {
+    if (!licenseNftEnabled() || !isHostedId(resourceId) || selector.intentSalt !== null || (selector.revision !== null && selector.revision !== 1)) return notFound();
+    const product = await getHostedProduct(resourceId);
+    if (product === 'storage') return storageUnavailable();
+    if (!product || product.id !== resourceId || product.productKind !== 'license' || !product.license?.transferable) return notFound();
+    const { resolveLicenseRights } = await import('@/lib/license/rights');
+    const rights = await resolveLicenseRights({ address: auth.address, productId: resourceId, definition: product.license, ownership: null });
+    if (rights.entitled === null) return storePrivateJson({ ok: false, error: 'license_rights_unknown' }, 503);
+    if (!rights.entitled) return notFound();
+    const held = { ok: true, productKind: 'license', resourceId, title: product.title, contentRevision: 1, license: product.license, ...rights };
+    if (!product.contentAvailable) return storePrivateJson({ ...held, state: 'provided-ended' });
+    const content = await getHostedContent(resourceId, 1);
+    if (content === 'storage') return storageUnavailable();
+    if (!content) return storePrivateJson({ ...held, state: 'provided-ended' });
+    // 固定 revision の破損が、購入していない別形式の本文配信へ波及するのを断つ。
+    if (content.kind !== 'text') return storageUnavailable();
+    return storePrivateJson({ ...held, state: 'ready', kind: content.kind, value: content.value });
+  }
 
   const grant = selectStorePurchaseGrant(owned.ownership, selector);
   // 未所有 resource と、所有 record 内に指定 grant がない場合は同じ oracle-safe 404。

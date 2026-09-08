@@ -29,7 +29,7 @@ export async function createLicenseProduct(product: HostedProduct, content: Host
   }
   const license = createLicenseDefinition(product.id, terms, deployment.chainId, deployment.contract);
   const next: HostedProduct = { ...product, productKind: 'license', license, saleActive: false, registration: { status: 'pending', attempts: 0 } };
-  const job = { version: 1, kind: 'registration', productId: product.id, license, status: 'pending', attempts: 0, nextAttemptAt: product.createdAt };
+  const job = { version: 1, kind: 'register', productId: product.id, license, status: 'pending', attempts: 0, nextAttemptAt: product.createdAt };
   const r = await kvEval<number>(CREATE_LICENSE, [
     'x402:hosted:' + product.id, license.contentRef, 'x402:hosted:owner:' + product.owner.toLowerCase(),
     licenseStockKey(product.id), licenseRegistrationJobKey(product.id), LICENSE_REGISTRATION_INDEX, LICENSE_DUE_INDEX,

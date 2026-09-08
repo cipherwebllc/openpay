@@ -15,6 +15,7 @@ import {
   DISCLOSED_RECOVER_FEE,
   DISCLOSED_STORE_USDC_PAYMENT,
   DISCLOSED_X402_FEE,
+  DISCLOSED_LICENSE_NFT,
 } from '@/lib/legal';
 import {
   JPYC_PAYMENTS_RESOURCE,
@@ -78,6 +79,12 @@ afterEach(() => {
 });
 
 describe('public/llms.txt 開示同期 (掟 14③)', () => {
+  it('license の行はチェーン・商品政策・権利・不明を同じ文脈で開示する', () => {
+    const line = lineMentioning('/api/license/verify');
+    const d = DISCLOSED_LICENSE_NFT;
+    for (const fact of [d.chainName, d.testChainName, d.asset, d.standard, '販売数 ' + d.minSupply + '〜' + d.maxSupply.toLocaleString('en-US'), '整数価格 ' + d.minPriceJpyc.toLocaleString('en-US') + ' JPYC 以上']) expect(line).toContain(fact);
+    for (const text of ['flag 既定 OFF', '譲渡不可が既定', '回数・残高はない', '権利は購入時', '発行遅延・失敗でも無効にならない', '売り手負担の別送金', 'gating は保証しない', '公開台帳', 'entitled:null', '法的適合性の認定ではない']) expect(line).toContain(text);
+  });
   it('決済 QR (recover) 利用料 = DISCLOSED_RECOVER_FEE', () => {
     expectEveryMatch(
       /決済額の (\d+)%・最低 (\d+) JPYC/g,

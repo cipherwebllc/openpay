@@ -26,6 +26,9 @@ type LibraryCursor = {
 export type StoreLibraryItem = {
   productKind?: 'license';
   entitled?: boolean | null;
+  basis?: import('@/lib/license/rights').LicenseRights['basis'];
+  nft?: import('@/lib/license/jobs').LicenseProof;
+  observedBlock?: string;
   resourceId: string;
   title: string;
   desc?: string;
@@ -348,7 +351,7 @@ export async function listStoreLibraryPage(input: {
     if (!definition) { items.push(libraryItem(ownership)); continue; }
     const { resolveLicenseRights } = await import('@/lib/license/rights');
     const rights = await resolveLicenseRights({ address: ownership.payer, productId: ownership.resourceId, definition, ownership });
-    items.push({ ...libraryItem(ownership), productKind: 'license', entitled: rights.entitled });
+    items.push({ ...libraryItem(ownership), productKind: 'license', ...rights });
   }
   const last = visible.at(-1)!;
   return {

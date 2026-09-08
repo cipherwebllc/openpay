@@ -19,6 +19,12 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (!auth.ok) return auth.response;
 
   const cursor = new URL(req.url).searchParams.get('cursor');
+  if (new URL(req.url).searchParams.get('source') === 'holders') {
+    const { listHeldLicenses } = await import('@/lib/license/holders');
+    const held = await listHeldLicenses(auth.address, cursor);
+    if (!held.ok) return storePrivateJson({ ok: false, error: held.reason }, held.reason === 'invalid_cursor' ? 400 : held.reason === 'not_found' ? 404 : 503);
+    return storePrivateJson({ ok: true, source: 'holders', ...held.page });
+  }
   const result = await listStoreLibraryPage({
     payer: auth.address,
     cursor,
