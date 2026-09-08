@@ -35,7 +35,14 @@ const routeMocks = vi.hoisted(() => ({
   claimRail: vi.fn(),
   releaseRail: vi.fn(),
   claimedFacilitatorBody: null as Record<string, unknown> | null,
+  after: vi.fn(),
+  recipient: vi.fn(),
+  worker: vi.fn(),
 }));
+
+vi.mock('next/server', async (original) => ({ ...await original<typeof import('next/server')>(), after: routeMocks.after }));
+vi.mock('@/lib/license/recipient', () => ({ checkLicenseRecipient: routeMocks.recipient }));
+vi.mock('@/lib/license/minter', () => ({ runLicenseWorker: routeMocks.worker }));
 
 vi.mock('@/lib/env', () => ({
   env: routeMocks.env,
@@ -375,6 +382,8 @@ beforeEach(() => {
   }
 
   routeMocks.getHostedProduct.mockResolvedValue(productFixture());
+  routeMocks.after.mockReset(); routeMocks.recipient.mockReset(); routeMocks.worker.mockReset();
+  routeMocks.recipient.mockResolvedValue('supported'); routeMocks.worker.mockResolvedValue({ ok: true });
   routeMocks.getHostedContent.mockResolvedValue({
     kind: 'text',
     value: 'paid content',
@@ -864,6 +873,24 @@ describe('license hosted admission', () => {
     const { GET } = await import('@/app/api/paid/hosted/[id]/route');
     const response = await GET(new Request(`https://open-pay.jp/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`), { params: Promise.resolve({ id: RESOURCE_ID }) });
     expect(response.status).toBe(409); expect(await response.json()).toEqual({ ok: false, error: 'license_registration_pending' }); expect(routeMocks.createQuoted).not.toHaveBeenCalled();
+  });
+  it.each(['unsupported', 'unknown'])('simulates receiver before requesting a purchase signature: %s', async (result) => {
+    routeMocks.env.enableLicenseNft = true; vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', SELLER);
+    routeMocks.getHostedProduct.mockResolvedValue({ ...productFixture(), productKind: 'license', license: { tokenId: NONCE }, registration: { status: 'registered' } });
+    routeMocks.recipient.mockResolvedValue(result);
+    const response = await callHosted(await loadRoute(), `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`);
+    expect(response.status).toBe(result === 'unsupported' ? 409 : 503); expect(routeMocks.createQuoted).not.toHaveBeenCalled();
+    expect(routeMocks.recipient).toHaveBeenCalledWith({ tokenId: NONCE }, PAYER);
+  });
+  it('defers the isolated mint attempt to after() and returns without awaiting the worker', async () => {
+    routeMocks.env.enableLicenseNft = true;
+    const settled = intentFixture('settled');
+    routeMocks.finalize.mockResolvedValue({ ok: true, kind: 'finalized', intent: { ...settled, metadata: { ...settled.metadata, productKind: 'license' } } });
+    const response = await callHosted(await loadRoute(), `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`, { 'x-payment': paymentHeader() });
+    expect(response.status).toBe(200); expect(routeMocks.worker).not.toHaveBeenCalled();
+    routeMocks.worker.mockRejectedValue(new Error('isolated worker outage'));
+    const tasks = routeMocks.after.mock.calls.map(([task]) => task as () => Promise<void>);
+    expect(tasks).toHaveLength(2); await expect(tasks[1]!()).resolves.toBeUndefined(); expect(routeMocks.worker).toHaveBeenCalledTimes(1);
   });
 });
 

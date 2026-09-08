@@ -18,9 +18,10 @@ const REBUILD =
   'local key=ARGV[3]..member; local value=nil; ' +
   'if kt(key)=="string" then local ok,v=pcall(cjson.decode,redis.call("GET",key)); if ok and type(v)=="table" then value=v end end; ' +
   'if not value then bad[#bad+1]=member; ' +
+  'elseif ARGV[4]~="hold" and redis.call("ZSCORE",KEYS[4],ARGV[4]..":"..member) then ' +
   'elseif ARGV[4]=="hold" then ' +
   'if value.state~="settled" and value.state~="quoted" and type(value.metadata)=="table" and value.metadata.productKind=="license" then due[#due+1]={member,now}; end; ' +
-  'elseif (value.status~="minted" and value.status~="needs_repair" and value.status~="registered") then ' +
+  'elseif value.alertPending or (value.status~="minted" and value.status~="needs_repair" and value.status~="registered") then ' +
   'local score=tonumber(value.nextAttemptAt); if score and score>=0 then due[#due+1]={ARGV[5]..member,score}; else bad[#bad+1]=member end; ' +
   'end; end; ' +
   'for _,d in ipairs(due) do if not redis.call("ZSCORE",KEYS[2],d[1]) then redis.call("ZADD",KEYS[2],d[2],d[1]) end end; ' +

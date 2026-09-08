@@ -5,6 +5,7 @@ import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { kvEval } from '@/lib/kv';
 import { getHostedProductUpdateSnapshot } from '@/lib/x402/hostedStore';
 import { licenseNftEnabled } from './config';
+import type { licenseRpc } from './rpc';
 
 const ABI = parseAbi([
   'function licenseOf(uint256 id) view returns ((uint64 maxSupply,uint64 minted,bool transferable,bool exists,bytes32 definitionHash))',
@@ -17,7 +18,7 @@ const CONFIRM =
   'redis.call("SET",KEYS[1],ARGV[2]); return 1; ';
 
 /** worker 用の登録確認。receipt と finalized の定義が一致したときだけ registered を保存する。 */
-export async function confirmLicenseRegistration(productId: string, txHash: Hex): Promise<'registered' | 'pending' | 'conflict' | 'storage'> {
+export async function confirmLicenseRegistration(productId: string, txHash: Hex, client?: ReturnType<typeof licenseRpc>): Promise<'registered' | 'pending' | 'conflict' | 'storage'> {
   if (!licenseNftEnabled()) return 'pending';
   const snapshot = await getHostedProductUpdateSnapshot(productId);
   if (snapshot === 'storage') return 'storage';
@@ -26,7 +27,7 @@ export async function confirmLicenseRegistration(productId: string, txHash: Hex)
   try {
     const chain = chainObjectForId(d.tokenChainId);
     if (!chain) return 'conflict';
-    const rpc = createPublicClient({ chain, transport: transportForChain(d.tokenChainId) });
+    const rpc = client ?? createPublicClient({ chain, transport: transportForChain(d.tokenChainId) });
     const block = await rpc.getBlock({ blockTag: 'finalized' });
     const receipt = await rpc.getTransactionReceipt({ hash: txHash });
     if (receipt.blockNumber > block.number) return 'pending';

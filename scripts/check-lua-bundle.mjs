@@ -31,6 +31,9 @@ if (!hide || !authHide) {
 // バンドルで `"..."+String(3)+"..."` のまま残る (畳み込まれない) ことがあるので、閾値を含めずに前後の
 // 定数片だけを検査し、閾値が `>=3 then` に畳み込まれた場合も `>="+String(3)+" then` の場合も通す。
 const EXPECTED = [
+  'if ARGV[5]==',
+  'v.lease.token~=ARGV[1] then return -1 end;',
+  'active~=ARGV[4] then return 0 end;',
   'stock.reserved+stock.sold>=stock.supply then return -4 end;',
   'stock.sold=stock.sold+1; quota=quota-1;',
   'reservation.state=',

@@ -110,6 +110,13 @@ async function handleStatus(req: Request): Promise<NextResponse> {
   }
 
   if (intent.state === 'settled') {
+    if (intent.metadata.productKind === 'license') {
+      const { readLicenseProof } = await import('@/lib/license/jobs');
+      const { computeLicensePaymentKey } = await import('@/lib/license/paymentKey');
+      const c = intent.claim;
+      const nft = await readLicenseProof(computeLicensePaymentKey({ paymentChainId: BigInt(c.chainId), paymentToken: c.token, payer: c.payer, authorizationNonce: c.nonce }));
+      return NextResponse.json({ ok: true, state: 'settled', txHash: intent.txHash, productKind: 'license', nft });
+    }
     return NextResponse.json({
       ok: true,
       state: 'settled',

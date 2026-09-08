@@ -11,12 +11,36 @@ import {
   DISCLOSED_RECOVER_FEE,
   DISCLOSED_STORE_USDC_PAYMENT,
   DISCLOSED_DUAL_RAIL_USDC,
+  DISCLOSED_LICENSE_NFT,
 } from '@/lib/legal';
 import { TOKEN_DEPLOYMENTS } from '@/lib/tokens';
 import { USDC_CHAINS, chainForSlug } from '@/lib/chains';
 
 describe('Legal pages', () => {
   describe('Terms (利用規約)', () => {
+    it('第13条: license の政策値・売り手・権利・返金・公開情報を同じ namespace 内で固定する', async () => {
+      const ja = (await import('@/messages/ja.json')).default.Terms.article13.body;
+      const en = (await import('@/messages/en.json')).default.Terms.article13.body;
+      const d = DISCLOSED_LICENSE_NFT;
+      const clause = (body: string, n: number) => body.split('(' + n + ')')[1]?.split('(' + (n + 1) + ')')[0] ?? '';
+      for (const body of [ja, en]) {
+        for (const fact of [d.chainName, d.testChainName, d.asset, d.standard, d.minPriceJpyc.toLocaleString('en-US'), d.maxSupply.toLocaleString('en-US')]) expect(clause(body, 16)).toContain(fact);
+      }
+      expect(d).toMatchObject({ chainId: 137, testChainId: 80002, minSupply: 1, transferableByDefault: false, usageCountsOrBalances: false });
+      expect(clause(ja, 11)).toContain('当社は売り手'); expect(clause(en, 11)).toContain('acts as the seller');
+      expect(clause(ja, 12)).toContain('当事者ではなく'); expect(clause(en, 12)).toContain('not a party');
+      expect(clause(ja, 12)).toContain('保証しません'); expect(clause(en, 12)).toContain('does not guarantee');
+      expect(clause(ja, 13)).toContain('発行遅延・失敗により無効にはなりません'); expect(clause(en, 13)).toContain('Rights arise at purchase');
+      expect(clause(ja, 14)).toContain('購入ウォレット'); expect(clause(en, 14)).toContain('bound to the purchasing wallet');
+      expect(clause(ja, 14)).toContain('ライセンスの移転'); expect(clause(en, 14)).toContain('transfers that license');
+      expect(clause(ja, 14)).toContain('投資'); expect(clause(en, 14)).toContain('not offered for investment');
+      expect(clause(ja, 15)).toContain('出品者の負担による別送金'); expect(clause(en, 15)).toContain('separate transfers funded by the seller');
+      expect(clause(ja, 15)).toContain('利用回数・残高を持たせません'); expect(clause(en, 15)).toContain('usage counts or balances');
+      expect(clause(ja, 17)).toContain('公開台帳'); expect(clause(en, 17)).toContain('public ledger');
+      expect(clause(ja, 17)).toContain('公開 Verify API'); expect(clause(en, 17)).toContain('public Verify API');
+      expect(clause(ja, 16)).toContain('法的適合性の認定を意味しません'); expect(clause(en, 16)).toContain('not legal clearance');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-09-08');
+    });
     it('ja: h1 と 11 条すべての title が render される', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
       expect(
@@ -674,7 +698,8 @@ describe('Legal pages', () => {
       //   改定 (実質的改定のため施行日/最終更新日を更新)。Privacy は料金モデルに直接言及しないため据置。
       // 2026-08-17: デジタル商品ストアの Base USDC 決済を 13 条に追加。
       // 2026-08-24: dual-rail 出品 (第三者出品の USDC/Base 併売・利用料 0%) を 5 条 (10) に追加。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-08-24');
+      // 2026-09-08 改定案: 自社出品・利用ライセンス NFT の第13条追記 (公開前承認対象)。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-09-08');
       expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-07-30');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-13');
       // 2026-07-29: 非公開チップメッセージ追記 (取得/目的/保管) の実質的改定で更新

@@ -124,7 +124,9 @@ export const LEGAL_ENTITY = {
   //   に追加。当社利用料 0%・購入者 → 出品者直接送金 (ノンカストディ)・将来改定は第 10 条の
   //   変更手続で事前告知・(9) の x402 ファシリテーター利用料 (JPYC) は不適用。機能は flag 既定 OFF
   //   だが、条項の掲出自体が実質的改定のため施行日を更新。SOT は DISCLOSED_DUAL_RAIL_USDC。
-  termsEffectiveDate: '2026-08-24',
+  // 2026-09-08 改定案: 第13条に自社出品・利用ライセンス NFT の条件と公開情報を追加。
+  // 文言と施行日は公開前の user 承認対象 (flag の点灯とは別)。
+  termsEffectiveDate: '2026-09-08',
   // 2026-07-29 改定: 非公開チップメッセージ (質問箱 Phase 1) の取得項目 (2-1(7))・
   //   利用目的 (2-2(9))・保管期間 (最長 180 日+本人削除) を追加。実質的改定のため施行日を更新。
   privacyEffectiveDate: '2026-07-30',
@@ -284,6 +286,22 @@ export const DISCLOSED_STORE_USDC_PAYMENT = {
   asset: 'USDC',
   priceAsset: 'JPYC',
   openPayFeeBps: 0,
+} as const;
+
+// 利用ライセンス NFT の開示案 SOT。数値は商品ポリシーで、法的適合性の認定ではない。
+// 第13条・llms.txt の contextual fence と同期し、公開前に文言の承認を受ける。
+export const DISCLOSED_LICENSE_NFT = {
+  chainId: 137,
+  chainName: 'Polygon',
+  testChainId: 80002,
+  testChainName: 'Amoy',
+  asset: 'JPYC',
+  standard: 'ERC-1155',
+  minSupply: 1,
+  maxSupply: 10_000,
+  minPriceJpyc: 1_000,
+  transferableByDefault: false,
+  usageCountsOrBalances: false,
 } as const;
 
 // dual-rail 出品 (AI ストア第三者出品の USDC/Base 併売) の開示 SOT。当社は CDP facilitator への

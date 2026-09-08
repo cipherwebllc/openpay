@@ -1665,3 +1665,90 @@ opt-in (既定 OFF)。詳細は plans/a2hs-retention-roadmap.md Phase 2・memory
 pending は cron/status が止まるだけで、再点灯後に reconciler が同じ entitlement へ収束させる)。
 署名済み authorization は validBefore (quote 期限 ≤10 分) で自然失効し、settle gate が
 汎用入口からの持ち込みを拒否する。
+
+### 16.4 利用ライセンス NFT bootstrap（承認前の運用案・既定 OFF）
+
+PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下の復旧手順を人間が確認するまで点灯しない。
+`ENABLE_LICENSE_NFT` は `ENABLE_CREATOR_STORE`、`NEXT_PUBLIC_ENABLE_LICENSE_NFT` は
+`NEXT_PUBLIC_ENABLE_CREATOR_STORE` を親とする。既存の六つの license env だけを使用する。
+
+1. **二つの役割・鍵**: owner はデプロイ・修復用のコールド鍵、minter は専用 hot EOA。
+   owner と minter を分離し、既存 `RELAYER_PRIVATE_KEY` の EOA とも分ける。
+   owner 鍵を Vercel に置かず、`LICENSE_MINTER_PRIVATE_KEY` だけを server secret に設定する。
+   `NEXT_PUBLIC_LICENSE_NFT_AMOY` / `NEXT_PUBLIC_LICENSE_NFT_POLYGON` は検証したデプロイ先。
+   保存済み商品の contract/deploymentId は変更しない。rotation は新商品だけに適用する。
+2. **POL 入金**: 各チェーンの minter に native POL を入金し、登録と mint を別々に見積もる。
+   worker は tx あたり gas 600,000 以下・最大署名費用 0.1 POL 以下、送信後にも 0.1 POL の残額を要求する。
+   超過を切り詰めて送信せず再試行し、10 回失敗時に修復へ回す。relay の資金は共用しない。
+3. **出品許可**: `LICENSE_NFT_SELLER_ALLOWLIST` に公式出品者の checksum アドレスのみを CSV 設定。
+   空・不正 checksum は誰も出品できない。USDC 併売は不可。一般出品の開放は別の判断とする。
+4. **登録と公開を分離**: 作成時は paused + pending。worker が `registerLicense` を送信し、
+   finalized receipt・LicenseRegistered・licenseOf を照合して registered にする。
+   自動公開はしない。販売者が登録確認後に明示的に販売開始する。
+5. **cron**: Vercel Pro の `/api/cron/license-mint` を `*/5 * * * *` で有効化し、
+   `CRON_SECRET` と既存 `ALERT_WEBHOOK_URL` の到達を確認。store-reconcile 日次は維持する。
+   after の即時試行も同じ 55 秒 lock と恒久送信枠を使う。cron は 40 秒で dispatch を止める。
+   未採掘 receipt を待ち続けず次 run で読む。バックログと実測容量を確認するまで発行時間を保証しない。
+6. **残余リスク**: hot minter が侵害されると、各定義の cap 内で偽の登録・mint が可能。
+   paymentKey の決済証拠確認はサーバーの責務で、コントラクトは実決済を検証しない。
+   owner が `setMinter(0)` で停止し、鍵交換・影響調査・関係者通知を行う。
+   mint の停止だけでは偽造済み証明は回収されない。flag OFF は売買・mint を止めても NFT 移転は止めない。
+
+### 16.5 Amoy E2E と配信の確認
+
+- allowlist 内外・flag OFF・空 allowlist を試し、登録前は 402 を出さず、登録後も明示 publish が必要と確認。
+- 非譲渡/譲渡可の各商品を作成し、JPYC 購入 → finalized 決済 tuple → 発行義務保存 →
+  simulate → pre-signed nonce/hash 保存 → broadcast → 次回 cron の LicenseMinted/paymentKeyOf 照合を確認。
+  購入直後は権利があり、NFT の発行待ちが購入の取り消しにならないことを確認。
+- `GET /api/license/verify?address=<wallet>&product=<id>` の version/chain/contract/tokenId、
+  60 秒以内の正負キャッシュ、RPC 失敗時の `entitled:null`、trusted IP 制限と集計枠を確認。
+  この API を本人認証・可搬な署名証明として使用しない。
+- SIWE で購入者ライブラリ/status の nft.status・mintTxHash を確認。譲渡先で
+  `/api/store/library?source=holders` を `nextCursor` で最後まで巡り、購入履歴を作らず content revision 1 を取得。
+  譲渡元の権利喪失、非譲渡 burn 後の購入権利維持、譲渡可 burn 後の保有者権利喪失、配信停止も確認。
+- receiver 拒否、POL 不足、gas 超過、RPC timeout、finality 変化、送信応答喪失、receipt 保存前 crash、
+  同 nonce replacement、due index 消失を試す。cron の重複呼出は片方 locked、KV 障害は 503。
+  unknown submission は attempt 10 でも submitted + alert とし、保存済み hash を追い、新 nonce で再 mint しない。
+- Redis/Upstash 実機で lock/CAS・同時最終在庫・恒久 index 復旧を確認する。
+  WASM Lua harness の green は Redis 5.1/Upstash の実機同等性を保証しない。
+
+### 16.6 KV バックアップと認証済み修復（運用期限案）
+
+点灯前に、KV と独立した保存先への暗号化バックアップを実装・試験すること。
+本 PR はバックアップサービスを作成しない。取得主体は運営の認証済み管理アカウントとし、
+復号・復元権限を限定し監査ログを残す。運用目標案は増分 5 分以内・日次全量、RPO 5 分・RTO 24 時間。
+商品/固定 content/terms snapshot、purchase intent/ownership/grants、stock/reservation、
+obligation/registration job、各恒久 index、worker active、署名済み tx と修復監査を一緒に保存する。
+同じ KV 内の別 index はバックアップではない。署名済み tx は再送可能なため公開ログへ出さない。
+
+- `needs_repair` または 10 回の不明送信通知を受けた運営は **24 時間以内に確認**し、
+  **72 時間以内に修復方針と見込みを売り手へ通知**する運用案。発行失敗・終了時の購入者への通知期限と
+  売り手負担の返金等は販売前に売り手の利用条件で定める。silent abandonment をしない。
+- 修復は MFA/RBAC を備えた KV 管理画面または同等の認証済み管理端末から実施する。
+  公開 repair endpoint はない。flag を停止し、55 秒以上待ち、旧レコード・操作者・理由・時刻・
+  決済/発行の block/hash を独立監査ログへ退避してから、旧 raw 値一致の CAS で変更する。
+  変更前後をバックアップし、二人目の確認を経て再開する。
+- **due だけ消失**: 恒久 obligation/registration index と原本を維持し cron の paged rebuild を使う。
+  **原本消失**: バックアップから同じ tuple を復元し、canonical 決済・LicenseMinted・paymentKeyOf と突合。
+  termsHash だけでは失った条件本文を復元できない。バックアップの隙間は不明として隔離し、在庫を戻さない。
+- 不明送信は status=submitted、元の serializedTransaction/hash/nonce/signer と active を維持して再開。
+  結果未確定の active を消したり、別 recipient/contract/paymentKey へ付替えたりしない。
+  finalized nonce が進んだ replacement は消費済み key とイベントを検索する。一致しない場合は手動調査。
+- finalized revert または置換済みで未消費と確定した tx を再試行する場合のみ、旧 submission を監査へ保存し、
+  同じ paymentKey/payer/定義の job を retryable に戻す。nonce が未解決なら署名を捨てない。
+  paymentKey が消費済みなら再 mint しない。バックアップ復元後も receipt から minted/registered を再確認する。
+
+### 16.7 permissionless forwarder の例外
+
+`Eip3009Forwarder.settle` は permissionless で、サーバーの stock admission を知らない。
+買い手は sold_out で拒否された署名済み authorization も直接送信できる。off-chain stock CAS が
+すべてのオンチェーン支払いを防ぐとは説明しない。期限前の hold はローカル失敗だけでは解放しない。
+
+在庫予約のない直接支払いを発見したら、canonical の支払 tuple・nonce・block/hash、売り手受領を確認し、
+通常の在庫や義務へ強制挿入せず例外として監査する。cap 超過の mint・別定義での代替発行は行わない。
+運営は上記期限で売り手へ連絡し、売り手の条件に従う別送金の返金その他の救済と通知を調整する。
+OpenPay が第三者の売上を預かったり、原決済を取り消したりする処理ではない。
+
+worker が検出した破損ジョブは `store:license:repair:quarantine` の `mint:<paymentKey>` /
+`registration:<productId>` に残し、due の先頭を占有させない。原本の修復・監査後にこの marker を除去し、
+恒久 index から due を再構築する。active が指すジョブの破損は nonce 不明なので、送信枠を勝手に解放しない。
