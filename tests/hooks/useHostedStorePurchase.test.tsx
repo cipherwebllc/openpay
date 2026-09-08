@@ -46,6 +46,7 @@ const account = vi.hoisted(() => ({
     | undefined,
   chainId: 80002 as number | undefined,
 }));
+const licenseFlags = vi.hoisted(() => ({ enabled: false }));
 const signTypedData = vi.hoisted(() => vi.fn());
 
 vi.mock('wagmi', () => ({
@@ -63,6 +64,7 @@ vi.mock('wagmi', () => ({
 vi.mock('@/lib/env', () => ({
   env: {
     networkEnv: 'testnet',
+    get enableLicenseNftUi() { return licenseFlags.enabled; },
     feeReceiver:
       '0x3333333333333333333333333333333333333333',
     feeReceiverConfigured: true,
@@ -230,6 +232,7 @@ async function prepare(
 }
 
 beforeEach(() => {
+  licenseFlags.enabled = false;
   vi.restoreAllMocks();
   account.address = PAYER;
   account.chainId = 80002;
@@ -845,5 +848,61 @@ describe('useHostedStorePurchase settlement and read-back', () => {
     expect(paidCalls[1][1]?.method).toBe('GET');
     expect(signTypedData).toHaveBeenCalledTimes(1);
     expect(result.current.phase).toBe('indeterminate');
+  });
+});
+
+
+describe('license errors preserve server code', () => {
+  it.each([
+    ['sold_out', 409], ['reservation_quota', 409], ['recipient_unsupported', 409], ['license_registration_pending', 409], ['license_simulation_unavailable', 503],
+  ])('%s は署名前に保持し、署名しない', async (code, status) => {
+    licenseFlags.enabled = true;
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ ok: false, error: code }, status));
+    const { result } = renderPurchase();
+    await act(async () => { await expect(result.current.prepare()).rejects.toMatchObject({ code }); });
+    expect(result.current.error).toMatchObject({ code });
+    expect(result.current.phase).toBe('error');
+    expect(signTypedData).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['sold_out', 409], ['reservation_quota', 409], ['recipient_unsupported', 409],
+    ['license_registration_pending', 409], ['license_simulation_unavailable', 503],
+  ])('%s は署名送信後も未実行で停止する', async (code, status) => {
+    licenseFlags.enabled = true;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) =>
+      new Headers(init?.headers).has('X-PAYMENT') ? jsonResponse({ ok: false, error: code }, Number(status)) : jsonResponse(paymentRequired(), 402));
+    const { result } = renderPurchase();
+    await prepare(result);
+    await act(async () => { await result.current.purchase(); });
+    expect(result.current.phase).toBe('failed-prebroadcast');
+    expect(result.current.error?.message).toBe(code);
+    expect(result.current.paymentStatus).toBe('not-executed');
+    expect(fetchMock.mock.calls.every(([url]) => !String(url).includes('/purchase/status'))).toBe(true);
+  });
+
+  it.each(['operator', 'third_party'] as const)('server sellerRole=%s は表示専用で、quote・署名・X-PAYMENT に入れない', async (sellerRole) => {
+    licenseFlags.enabled = true;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) =>
+      new Headers(init?.headers).has('X-PAYMENT')
+        ? jsonResponse({ ok: false, error: 'sold_out' }, 409)
+        : jsonResponse({ ...paymentRequired(), sellerRole }, 402));
+    const { result } = renderPurchase();
+    await prepare(result);
+    expect(result.current.sellerRole).toBe(sellerRole);
+    expect(result.current.quote).not.toHaveProperty('sellerRole');
+    await act(async () => { await result.current.purchase(); });
+    expect(JSON.stringify(signTypedData.mock.calls, (_key, value) => typeof value === 'bigint' ? value.toString() : value)).not.toContain('sellerRole');
+    const header = fetchMock.mock.calls.map(([, init]) => new Headers(init?.headers).get('X-PAYMENT')).find(Boolean)!;
+    expect(atob(header)).not.toContain('sellerRole');
+    act(() => result.current.reset());
+    expect(result.current.sellerRole).toBeUndefined();
+  });
+
+  it.each([[false, 409], [true, 500]])('flag=%s・HTTP=%s はライセンスエラーへ誤分類しない', async (enabled, status) => {
+    licenseFlags.enabled = Boolean(enabled);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ error: 'sold_out' }, Number(status)));
+    const { result } = renderPurchase();
+    await act(async () => { await expect(result.current.prepare()).rejects.toMatchObject({ code: 'quote_expected_402' }); });
+    expect(signTypedData).not.toHaveBeenCalled();
   });
 });

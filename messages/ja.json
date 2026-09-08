@@ -1075,7 +1075,33 @@
     "listingHandleLabel": "掲載するプロフィール",
     "listingHandleAll": "すべての自分のプロフィールに掲載",
     "featuredLabel": "プロフィールで優先表示",
-    "featuredHint": "1 つ以上選ぶと、選んだ商品だけがプロフィールに表示されます (Store にはすべての商品が並びます)。"
+    "featuredHint": "1 つ以上選ぶと、選んだ商品だけがプロフィールに表示されます (Store にはすべての商品が並びます)。",
+    "productTypeLabel": "商品タイプ",
+    "digitalProduct": "デジタル商品",
+    "licenseProduct": "利用ライセンス NFT",
+    "licenseTitleLabel": "ライセンス名",
+    "licenseSupplyLabel": "販売数（1〜10,000）",
+    "licensePriceLabel": "価格（JPYC・1,000 以上）",
+    "licenseTransferLabel": "譲渡",
+    "licenseTransferYes": "可",
+    "licenseTransferNo": "不可",
+    "licenseTermsUrlLabel": "利用条件 URL（https）",
+    "licenseTermsVersionLabel": "利用条件の版",
+    "licenseInstructionsLabel": "利用開始の案内（テキスト・任意）",
+    "licenseInstructionsHint": "空欄の場合は、利用条件 URL を参照する案内が保存されます。",
+    "licenseUsdcNotice": "利用ライセンスは JPYC のみです。USDC は利用できません。",
+    "licenseImmutableNotice": "作成後は売上の受取先・価格・販売数・譲渡・利用条件・利用開始の案内を変更できません。登録済みになった後、商品一覧の「公開する」で販売を開始します。",
+    "licenseValidationError": "販売数は 1〜10,000、価格は 1,000〜1,000,000 の整数 JPYC、利用条件は https URL と空でない版を入力し、有効な売上受取ウォレットを指定してください。",
+    "licenseRegistrationLabel": "登録状態: {state}",
+    "licenseRegistrationPending": "登録待ち",
+    "licenseRegistrationRegistered": "登録済み",
+    "licenseRegistrationFailed": "失敗",
+    "licenseRefresh": "登録状態を更新",
+    "licensePublish": "公開する",
+    "licensePause": "販売を停止する",
+    "licenseRegistrationHint": "登録が完了するまで公開できません。失敗が続く場合は運営へお問い合わせください。",
+    "licensePayToLabel": "売上の受取ウォレット",
+    "licensePayToHint": "売上はこのウォレットへ直接届きます。OpenPay の手数料受取先と同じウォレットは指定できません。販売者の区分は出品アカウントで決まり、受取先を変えても変わりません。"
   },
   "CreatorStorefront": {
     "heading": "販売中",
@@ -1202,7 +1228,14 @@
     "shareCopy": "リンクをコピー",
     "shareCopied": "コピーしました",
     "shareOnX": "X でシェア",
-    "shareMore": "その他の共有"
+    "shareMore": "その他の共有",
+    "licenseErrors": {
+      "sold_out": "完売しました",
+      "reservation_quota": "同時に確保できる数の上限です。しばらくしてからお試しください",
+      "recipient_unsupported": "このウォレットは NFT を受け取れません。対応するウォレットをご利用ください。",
+      "license_registration_pending": "準備中です",
+      "license_simulation_unavailable": "確認できませんでした。時間をおいて再試行"
+    }
   },
   "CreatorStoreLibrary": {
     "eyebrow": "購入済み",
@@ -1251,7 +1284,14 @@
       "external": "外部リンク"
     },
     "provenanceTitle": "この商品はウォレット {wallet} 宛に提供されています",
-    "provenanceMeta": "購入日時 {date} ・ 購入ID {id} ・ tx {tx}"
+    "provenanceMeta": "購入日時 {date} ・ 購入ID {id} ・ tx {tx}",
+    "receivedHeading": "受け取ったライセンス",
+    "receivedEmpty": "受け取ったライセンスはありません。続きがある場合は読み込んでください。",
+    "receivedIntro": "現在のウォレットが保有する譲渡可のライセンスです。購入履歴とは別に表示します。",
+    "receivedLoadError": "受け取ったライセンスを確認できませんでした。時間をおいて再試行してください。",
+    "openLicense": "利用開始の案内を開く",
+    "holderProvenance": "現在の NFT 保有に基づく提供です。このウォレットの購入記録ではありません。",
+    "receivedLink": "受け取ったライセンスを見る"
   },
   "CreatorStoreSellerDisclosure": {
     "back": "戻る",
@@ -2843,5 +2883,47 @@
       "loadError": "読み込みに失敗しました。開き直してください",
       "openAll": "受信箱で全件を見る"
     }
+  },
+  "CreatorStoreLicense": {
+    "badge": "利用ライセンス NFT",
+    "transferable": "譲渡可",
+    "nonTransferable": "譲渡不可",
+    "termsLink": "利用条件（版 {version}）",
+    "deliveryNotice": "NFT は購入後、通常数分で支払いに使ったウォレットへ届きます。権利は購入時点で有効です",
+    "nftState": "NFT 状態: {state}",
+    "mintTransaction": "発行トランザクションを見る",
+    "purchaseRights": "権利は購入記録で有効です。譲渡可のライセンスは、発行後は現在の保有者が権利を行使します。",
+    "holderRights": "受け取ったライセンスの権利は現在の NFT 保有に基づきます。",
+    "transferredRights": "譲渡済み、または焼却済みのため、このウォレットではその保有ライセンスを利用できません。購入記録は残ります。",
+    "providerLabel": "提供者",
+    "providerUnverified": "販売者情報で提供者を確認してください",
+    "scopeLabel": "提供範囲・期間",
+    "scopeBody": "提供範囲・期間、発行失敗への対応期限、返金・終了時の通知と救済は、購入する版の利用条件で確認してください。",
+    "meteredLabel": "従量利用は別料金",
+    "meteredBody": "この価格はライセンスの対価です。利用回数・残高は含みません。従量利用がある場合は、提示された料金を別の x402 決済で支払います。",
+    "issueLabel": "NFT の発行時期・発行失敗",
+    "issueBody": "発行が遅延・失敗しても購入に基づく権利は無効になりません。修復を行い、対応期限と救済は売り手の利用条件に従います。支払元以外のウォレットへの付替えはできません。",
+    "refundLabel": "返金・提供終了",
+    "refundBody": "返金は売り手の負担による別送金で、元の決済取消や NFT の自動回収ではありません。提供終了時の通知・契約終了・救済は利用条件に従います。未提供や説明との重大な相違に対する解除・返金等の権利は妨げられません。",
+    "transferLabel": "譲渡・burn（焼却）",
+    "transferBody": "発行後は NFT の保有者が権利を行使します。譲渡すると元の保有者はそのライセンスを利用できなくなり、burn した分の権利も失われます。返金や burn で販売数は補充されません。",
+    "nonTransferBody": "購入ウォレットに結び付くライセンスで、譲渡できません。burn は証明の放棄であり、購入記録に基づく権利自体は消滅しません。返金や burn で販売数は補充されません。",
+    "publicLabel": "公開台帳・Verify API",
+    "publicBody": "ウォレットアドレスと NFT の識別情報、発行・譲渡・burn の履歴は公開台帳に記録されます。公開 Verify API で権利の状態・根拠・NFT 状態を照会でき、第三者が情報を関連付ける場合があります。この API は本人認証や可搬な署名証明ではありません。",
+    "quantity": "「{title}」のライセンス 1 点",
+    "providerThirdPartyNote": "OpenPay は第三者のライセンス契約の当事者ではなく、サービス提供や外部サービスの対応を保証しません。",
+    "providerOperatorNote": "OpenPay が売り手としてサービス提供と出品者の義務を負います。",
+    "states": {
+      "pending": "発行待ち",
+      "minted": "発行済み",
+      "repair": "修復中",
+      "transferred": "譲渡済み",
+      "unknown": "確認できませんでした"
+    },
+    "remaining": "残り {remaining} / {supply}",
+    "remainingUnknown": "残数を確認できません",
+    "sellerOperator": "販売者: OpenPay (運営)",
+    "sellerThirdParty": "販売者: 第三者出品者 ({name})",
+    "providerThirdParty": "販売者: 第三者出品者"
   }
 }

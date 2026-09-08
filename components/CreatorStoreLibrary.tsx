@@ -4,6 +4,7 @@
 // sessionAddress を含め、別 wallet の購入情報を React Query cache から再利用しない。
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import {
@@ -16,6 +17,8 @@ import {
 } from 'lucide-react';
 import { formatUnits } from 'viem';
 import { env } from '@/lib/env';
+import type { StoreLicenseProof, StoreLicenseSummary } from '@/lib/licenseUi';
+import { CreatorStoreLicenseNftState } from '@/components/CreatorStoreLicenseNftState';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
 import { normalizeHostedUsdcPaymentSnapshot } from '@/lib/x402/hostedUsdcPurchaseWire';
@@ -33,6 +36,11 @@ type LibraryRevision = {
 };
 
 type LibraryItem = LibraryRevision & {
+  productKind?: 'license';
+  tokenChainId?: number;
+  nft?: StoreLicenseProof;
+  entitled?: boolean | null;
+  basis?: 'purchase' | 'holder' | null;
   resourceId: string;
   revisions: LibraryRevision[];
 };
@@ -65,7 +73,12 @@ type EndedContent = {
   intentSalt: string;
 };
 
-type StoreContent = ReadyContent | EndedContent;
+// 受取の API は購入日時・購入 intent を持たない。購入の来歴を捏造しない別型にする。
+type HeldContent = (Omit<ReadyContent, 'intentSalt' | 'purchasedAt' | 'txHash'> | Omit<EndedContent, 'intentSalt'>) & {
+  productKind: 'license';
+  basis: 'holder';
+};
+type StoreContent = ReadyContent | EndedContent | HeldContent;
 
 class StoreLibraryRequestError extends Error {
   constructor(
@@ -106,12 +119,12 @@ async function fetchOwnedContent(
   );
 }
 
-export function CreatorStoreLibrary() {
+export function CreatorStoreLibrary({ source = 'purchases' }: { source?: 'purchases' | 'holders' }) {
   if (!env.enableCreatorStoreUi) return null;
-  return <EnabledCreatorStoreLibrary />;
+  return <EnabledCreatorStoreLibrary source={source} />;
 }
 
-function EnabledCreatorStoreLibrary() {
+function EnabledCreatorStoreLibrary({ source }: { source: 'purchases' | 'holders' }) {
   const t = useTranslations('CreatorStoreLibrary');
   const locale = useLocale();
   const {
@@ -219,7 +232,13 @@ function EnabledCreatorStoreLibrary() {
     );
   }
 
-  const items = library.data?.pages.flatMap((page) => page.items) ?? [];
+  const items = (library.data?.pages.flatMap((page) => page.items) ?? []).filter((item) => env.enableLicenseNftUi || item.productKind !== 'license');
+  const receivedLicenses = env.enableLicenseNftUi ? (
+    <ReceivedLicenses key={sessionAddress} sessionAddress={sessionAddress} onOpen={(resourceId) => {
+      if (selectedResourceId === resourceId && selectedRevision === 1) void content.refetch();
+      else setSelectedContent({ resourceId, contentRevision: 1 });
+    }} />
+  ) : null;
 
   return (
     <section aria-labelledby="creator-store-library-heading">
@@ -237,8 +256,10 @@ function EnabledCreatorStoreLibrary() {
         <p className="mt-2 text-sm leading-relaxed text-slate-600">
           {t('intro')}
         </p>
+        {env.enableLicenseNftUi ? <Link href={`/${locale}/store/library?source=holders#creator-store-received-heading`} className="mt-2 inline-flex min-h-11 items-center font-semibold text-indigo-800 underline underline-offset-2">{t('receivedLink')}</Link> : null}
       </div>
 
+      {source === 'holders' ? receivedLicenses : null}
       {library.isPending ? (
         <div
           role="status"
@@ -290,6 +311,7 @@ function EnabledCreatorStoreLibrary() {
                         payment={item.payment}
                       />
                     </div>
+                    {env.enableLicenseNftUi && item.productKind === 'license' ? <CreatorStoreLicenseNftState nft={item.nft} entitled={item.entitled} basis={item.basis} chainId={item.tokenChainId} /> : null}
                     {item.desc ? (
                       // P4: プロフカード (P2) と同じ 2 行クランプ — 長い説明や生 URL が
                       // 購入済み一覧の見通しを塞がないようにする (全文は商品側で読める)。
@@ -343,6 +365,7 @@ function EnabledCreatorStoreLibrary() {
                             </div>
                             <button
                               type="button"
+                              disabled={env.enableLicenseNftUi && item.productKind === 'license' && item.entitled !== true}
                               onClick={() => {
                                 if (
                                   selectedResourceId === item.resourceId &&
@@ -358,7 +381,7 @@ function EnabledCreatorStoreLibrary() {
                                   });
                                 }
                               }}
-                              className="min-h-10 rounded-lg bg-brand px-3 py-2 text-sm font-bold text-white hover:bg-brand-dark"
+                              className={`${env.enableLicenseNftUi && item.productKind === 'license' ? 'min-h-11 disabled:cursor-not-allowed disabled:opacity-50' : 'min-h-10'} rounded-lg bg-brand px-3 py-2 text-sm font-bold text-white hover:bg-brand-dark`}
                             >
                               {t('showRevision', {
                                 revision: revision.contentRevision,
@@ -387,6 +410,8 @@ function EnabledCreatorStoreLibrary() {
           ) : null}
         </>
       )}
+
+      {source !== 'holders' ? receivedLicenses : null}
 
       {selectedResourceId ? (
         <section
@@ -458,7 +483,7 @@ function EnabledCreatorStoreLibrary() {
                   })}
                 </p>
                 <p className="mt-1">
-                  {t('provenanceMeta', {
+                  {'intentSalt' in content.data ? t('provenanceMeta', {
                     date: content.data.purchasedAt
                       ? new Date(content.data.purchasedAt).toLocaleString(
                           locale === 'en' ? 'en-US' : 'ja-JP',
@@ -468,7 +493,7 @@ function EnabledCreatorStoreLibrary() {
                     tx: content.data.txHash
                       ? `${content.data.txHash.slice(0, 10)}…`
                       : '—',
-                  })}
+                  }) : env.enableLicenseNftUi ? t('holderProvenance') : null}
                 </p>
               </div>
             </>
@@ -545,5 +570,51 @@ function LibraryPaymentSnapshot({
         <dd className="text-right font-semibold">{t('quoteRoundingCeil')}</dd>
       </dl>
     </div>
+  );
+}
+
+
+type HeldLicense = {
+  resourceId: string;
+  title: string;
+  license: StoreLicenseSummary;
+  nft: StoreLicenseProof;
+  entitled: boolean | null;
+  basis: 'purchase' | 'holder' | null;
+  state: 'ready' | 'provided-ended';
+};
+
+// サインイン済みの親からのみ mount する。取得とページングの障害を購入履歴へ波及させない。
+function ReceivedLicenses({ sessionAddress, onOpen }: { sessionAddress: string; onOpen: (resourceId: string) => void }) {
+  const t = useTranslations('CreatorStoreLibrary');
+  const held = useInfiniteQuery({
+    queryKey: ['store', 'library-holders', sessionAddress],
+    queryFn: ({ pageParam }) => requestStoreJson<{ ok: true; items: HeldLicense[]; nextCursor: string | null }>(
+      `/api/store/library?source=holders${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`,
+    ),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    retry: false,
+  });
+  const items = held.data?.pages.flatMap((page) => page.items) ?? [];
+  return (
+    <section aria-labelledby="creator-store-received-heading" className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 sm:p-7">
+      <h2 id="creator-store-received-heading" className="text-lg font-bold text-slate-900">{t('receivedHeading')}</h2>
+      <p className="mt-2 text-sm text-slate-700">{t('receivedIntro')}</p>
+      {held.isPending ? <p role="status" className="mt-3 text-sm text-slate-600">{t('loading')}</p> : null}
+      {held.isError ? <div role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-900">
+        <p>{t('receivedLoadError')}</p>
+        <button type="button" onClick={() => void (held.isFetchNextPageError ? held.fetchNextPage() : held.refetch())} className="mt-2 min-h-11 rounded-lg border border-red-300 px-3 py-2 font-semibold">{t('retry')}</button>
+      </div> : null}
+      {!held.isPending && !held.isError && items.length === 0 ? <p className="mt-3 text-sm text-slate-600">{t('receivedEmpty')}</p> : null}
+      <ul className="mt-3 space-y-3">
+        {items.map((item) => <li key={item.resourceId} className="rounded-xl border border-slate-200 p-4">
+          <h3 className="font-bold text-slate-900">{item.title}</h3>
+          <CreatorStoreLicenseNftState nft={item.nft} entitled={item.entitled} basis={item.basis} chainId={item.license.tokenChainId} received />
+          {item.state === 'provided-ended' ? <p className="mt-2 text-sm text-amber-900">{t('providedEnded')}</p> : <button type="button" disabled={item.entitled !== true} onClick={() => onOpen(item.resourceId)} className="mt-3 min-h-11 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">{t('openLicense')}</button>}
+        </li>)}
+      </ul>
+      {held.hasNextPage ? <button type="button" disabled={held.isFetchingNextPage} onClick={() => void held.fetchNextPage()} className="mt-4 min-h-11 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 disabled:opacity-50">{t(held.isFetchingNextPage ? 'loadingMore' : 'loadMore')}</button> : null}
+    </section>
   );
 }

@@ -6,6 +6,7 @@ import { renderWithIntl } from '../_helpers/i18n';
 const ADDRESS = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const state = vi.hoisted(() => ({
   enabled: true,
+  licenseEnabled: false,
   isSignedIn: true,
   sessionAddress: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
 }));
@@ -17,6 +18,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
     ...actual,
     env: {
       ...actual.env,
+      get enableLicenseNftUi() { return state.enabled && state.licenseEnabled; },
       get enableCreatorStoreUi() {
         return state.enabled;
       },
@@ -81,6 +83,7 @@ function renderPanel(handle?: string | null) {
 
 beforeEach(() => {
   state.enabled = true;
+  state.licenseEnabled = false;
   state.isSignedIn = true;
   state.sessionAddress = ADDRESS;
   signIn.mockClear();
@@ -734,5 +737,106 @@ describe('CreatorStoreSellerPanel', () => {
     expect(
       screen.queryByRole('button', { name: 'シェア用リンクをコピー' }),
     ).not.toBeInTheDocument();
+  });
+});
+
+
+describe('利用ライセンスの出品', () => {
+  function setup(registration?: 'pending' | 'registered' | 'failed') {
+    state.licenseEnabled = true;
+    let products: Record<string, unknown>[] = registration ? [licenseProduct(registration)] : [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/store/seller') return response({ ok: true, seller: { name: 'Seller', contact: 'seller@example.com', updatedAt: 1 } });
+      if (url === '/api/store/products' && init?.method === 'POST') {
+        products = [licenseProduct('pending')];
+        return response({ ok: true, product: products[0] });
+      }
+      if (init?.method === 'PATCH') {
+        const body = JSON.parse(String(init.body));
+        products = products.map((p) => ({ ...p, ...body }));
+        return response({ ok: true, product: products[0] });
+      }
+      if (url.startsWith('/api/store/products/')) return response({ ok: true, product: products[0], content: { kind: 'text', value: '案内' } });
+      return response({ ok: true, products, max: 24 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+  function licenseProduct(registration: string) {
+    return { id: 'h_license', payTo: ADDRESS, title: 'API ライセンス', priceJpyc: '1000', contentKind: 'text', label: 'api', contentAvailable: true, saleActive: false,
+      productKind: 'license', license: { supply: 10, transferable: false, termsUrl: 'https://example.com/terms', termsVersion: '1' }, registration: { status: registration } };
+  }
+  async function fill() {
+    fireEvent.click(await screen.findByRole('radio', { name: '利用ライセンス NFT' }));
+    fireEvent.change(screen.getByLabelText('ライセンス名'), { target: { value: 'API ライセンス' } });
+    fireEvent.change(screen.getByLabelText('販売数（1〜10,000）'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('価格（JPYC・1,000 以上）'), { target: { value: '1000' } });
+    fireEvent.change(screen.getByLabelText('利用条件 URL（https）'), { target: { value: 'https://example.com/terms' } });
+  }
+  it('出品アカウントとは別の売上受取先を、既存 payTo 入力として指定できる', async () => {
+    const fetchMock = setup(); renderPanel(); await fill();
+    const payout = `0x${'ab'.repeat(20)}`;
+    fireEvent.change(screen.getByLabelText('売上の受取ウォレット'), { target: { value: payout } });
+    fireEvent.submit(screen.getByLabelText('ライセンス名').closest('form')!);
+    await screen.findByText('登録状態: 登録待ち');
+    const request = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+    const body = JSON.parse(String(request?.[1]?.body));
+    expect(body.payTo).toBe(payout);
+    expect(body).not.toHaveProperty('owner');
+    expect(body).not.toHaveProperty('sellerRole');
+  });
+  it('作成は未公開・JPYC 限定で既定の版/譲渡不可と任意の案内を送る', async () => {
+    const fetchMock = setup(); renderPanel(); await fill();
+    expect(screen.getByRole('radio', { name: '不可' })).toBeChecked();
+    expect(screen.getByLabelText('利用条件の版')).toHaveValue('1');
+    expect(screen.getByLabelText('利用開始の案内（テキスト・任意）')).not.toBeRequired();
+    expect(screen.getByText('利用ライセンスは JPYC のみです。USDC は利用できません。')).toBeInTheDocument();
+    fireEvent.submit(screen.getByLabelText('ライセンス名').closest('form')!);
+    await screen.findByText('登録状態: 登録待ち');
+    const request = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ productKind: 'license', license: { supply: 10, transferable: false, termsUrl: 'https://example.com/terms', termsVersion: '1' }, priceJpyc: '1000', contentKind: 'text', content: '', saleActive: false, usdcEnabled: false });
+    expect(screen.getByRole('button', { name: '公開する' })).toBeDisabled();
+  });
+  it.each([
+    ['販売数（1〜10,000）', '0'], ['販売数（1〜10,000）', '10001'], ['販売数（1〜10,000）', '1.5'],
+    ['価格（JPYC・1,000 以上）', '999'], ['価格（JPYC・1,000 以上）', '1000.5'],
+    ['利用条件 URL（https）', 'http://example.com'], ['利用条件 URL（https）', 'https://user:pass@example.com'], ['利用条件の版', '   '],
+    ['売上の受取ウォレット', 'invalid'],
+  ])('%s = %s は送信しない', async (label, value) => {
+    const fetchMock = setup(); renderPanel(); await fill();
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.submit(screen.getByLabelText('ライセンス名').closest('form')!);
+    expect(screen.getByRole('alert')).toHaveTextContent('販売数は 1〜10,000');
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  });
+  it.each(['pending', 'failed'] as const)('%s の登録中は公開できない', async (status) => {
+    setup(status); renderPanel();
+    expect(await screen.findByRole('button', { name: '公開する' })).toBeDisabled();
+    expect(screen.getByText(`登録状態: ${status === 'pending' ? '登録待ち' : '失敗'}`)).toBeInTheDocument();
+  });
+  it('登録済みだけ明示的に公開し、経済条件を PATCH へ含めない', async () => {
+    const fetchMock = setup('registered'); renderPanel();
+    const publish = await screen.findByRole('button', { name: '公開する' });
+    expect(publish).toBeEnabled();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
+    fireEvent.click(publish);
+    await screen.findByRole('button', { name: '販売を停止する' });
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]?.body))).toEqual({ saleActive: true });
+    fireEvent.click(screen.getByRole('button', { name: /編集/ }));
+    await waitFor(() => expect(screen.getByLabelText('ライセンス名')).toHaveValue('API ライセンス'));
+    for (const label of ['売上の受取ウォレット', '販売数（1〜10,000）', '価格（JPYC・1,000 以上）', '利用条件 URL（https）', '利用条件の版', '利用開始の案内（テキスト・任意）']) expect(screen.getByLabelText(label)).toHaveAttribute('readonly');
+    expect(screen.getByRole('radio', { name: '不可' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('ライセンス名'), { target: { value: '更新した名前' } });
+    fireEvent.submit(screen.getByLabelText('ライセンス名').closest('form')!);
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(2));
+    const body = JSON.parse(String(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')[1][1]?.body));
+    expect(body.title).toBe('更新した名前');
+    for (const key of ['license', 'priceJpyc', 'contentKind', 'content', 'productKind', 'payTo']) expect(body).not.toHaveProperty(key);
+  });
+  it('ライセンス flag OFF はタイプ選択とライセンス商品を表示しない', async () => {
+    setup('registered'); state.licenseEnabled = false; renderPanel();
+    await screen.findByLabelText('商品名');
+    expect(screen.queryByRole('radio', { name: '利用ライセンス NFT' })).not.toBeInTheDocument();
+    expect(screen.queryByText('API ライセンス')).not.toBeInTheDocument();
   });
 });

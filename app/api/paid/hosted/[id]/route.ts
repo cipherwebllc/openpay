@@ -10,6 +10,8 @@ import { POST as settlePayment } from '@/app/api/facilitator/settle/route';
 import { POST as verifyPayment } from '@/app/api/facilitator/verify/route';
 import { env } from '@/lib/env';
 import { licenseVisible, licenseSellerAllowed } from '@/lib/license/config';
+import { sellerRoleFor } from '@/lib/license/sellerRole';
+import type { SellerRole } from '@/lib/licenseUi';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
 import { FORWARDER_COMMIT_VERSION } from '@/lib/relay/forwarderIntent';
 import {
@@ -182,6 +184,7 @@ function requirementsForIntent(
 function challenge(
   intent: PurchaseIntent,
   error = 'payment_required',
+  sellerRole?: SellerRole,
 ): NextResponse {
   const accepts = requirementsForIntent(intent);
   const paymentRequired = buildPaymentRequiredV2({
@@ -192,7 +195,8 @@ function challenge(
     error,
   });
   const response = NextResponse.json(
-    { x402Version: 1, accepts, error },
+    // 販売者区分は画面用の応答だけへ追加し、requirements・snapshot には含めない。
+    { x402Version: 1, accepts, error, ...(sellerRole ? { sellerRole } : {}) },
     { status: 402 },
   );
   response.headers.set(
@@ -279,7 +283,10 @@ async function settledContentResponse(input: {
     contentRevision: access.intent.contentRevision,
     title: access.intent.metadata.title,
     kind: content.kind,
-    ...(access.intent.metadata.productKind === 'license' ? { productKind: 'license', license: access.intent.metadata.license } : {}),
+    ...(access.intent.metadata.productKind === 'license' ? {
+      productKind: 'license', license: access.intent.metadata.license,
+      sellerRole: sellerRoleFor(access.intent.metadata.owner),
+    } : {}),
     value: content.value,
     txHash: access.intent.txHash,
   });
@@ -393,7 +400,8 @@ async function quoteResponse(input: {
     contentRevision: quoted.intent.contentRevision,
   });
   if (!parent.ok) return errorResponse('storage_unavailable', 503);
-  return challenge(quoted.intent);
+  return challenge(quoted.intent, 'payment_required',
+    product.productKind === 'license' ? sellerRoleFor(product.owner) : undefined);
 }
 
 async function decodeSubmittedPayment(req: Request): Promise<

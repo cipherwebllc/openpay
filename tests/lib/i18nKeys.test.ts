@@ -1635,3 +1635,96 @@ describe('i18n: @handle 名前空間 (ja/en parity)', () => {
     expect(typeof (en.Create as { tabs: Record<string, string> }).tabs.mobileOrder).toBe('string');
   });
 });
+
+
+describe('i18n: license UI の正確な namespace と key path', () => {
+  // 両言語で同じ誤配置をしても通らないよう、利用箇所が要求する完全パスを固定する。
+  const requiredPaths = [
+    'CreatorStoreSeller.productTypeLabel',
+    'CreatorStoreSeller.digitalProduct',
+    'CreatorStoreSeller.licenseProduct',
+    'CreatorStoreSeller.licenseTitleLabel',
+    'CreatorStoreSeller.licenseSupplyLabel',
+    'CreatorStoreSeller.licensePriceLabel',
+    'CreatorStoreSeller.licenseTransferLabel',
+    'CreatorStoreSeller.licenseTransferYes',
+    'CreatorStoreSeller.licenseTransferNo',
+    'CreatorStoreSeller.licenseTermsUrlLabel',
+    'CreatorStoreSeller.licenseTermsVersionLabel',
+    'CreatorStoreSeller.licenseInstructionsLabel',
+    'CreatorStoreSeller.licenseInstructionsHint',
+    'CreatorStoreSeller.licenseUsdcNotice',
+    'CreatorStoreSeller.licenseImmutableNotice',
+    'CreatorStoreSeller.licenseValidationError',
+    'CreatorStoreSeller.licenseRegistrationLabel',
+    'CreatorStoreSeller.licenseRegistrationPending',
+    'CreatorStoreSeller.licenseRegistrationRegistered',
+    'CreatorStoreSeller.licenseRegistrationFailed',
+    'CreatorStoreSeller.licenseRefresh',
+    'CreatorStoreSeller.licensePublish',
+    'CreatorStoreSeller.licensePause',
+    'CreatorStoreSeller.licenseRegistrationHint',
+    'CreatorStoreSeller.licensePayToLabel',
+    'CreatorStoreSeller.licensePayToHint',
+    'CreatorStorePurchase.licenseErrors.sold_out',
+    'CreatorStorePurchase.licenseErrors.reservation_quota',
+    'CreatorStorePurchase.licenseErrors.recipient_unsupported',
+    'CreatorStorePurchase.licenseErrors.license_registration_pending',
+    'CreatorStorePurchase.licenseErrors.license_simulation_unavailable',
+    'CreatorStoreLibrary.receivedHeading',
+    'CreatorStoreLibrary.receivedEmpty',
+    'CreatorStoreLibrary.receivedIntro',
+    'CreatorStoreLibrary.receivedLoadError',
+    'CreatorStoreLibrary.openLicense',
+    'CreatorStoreLibrary.holderProvenance',
+    'CreatorStoreLibrary.receivedLink',
+    'CreatorStoreLicense.badge',
+    'CreatorStoreLicense.transferable',
+    'CreatorStoreLicense.nonTransferable',
+    'CreatorStoreLicense.termsLink',
+    'CreatorStoreLicense.deliveryNotice',
+    'CreatorStoreLicense.nftState',
+    'CreatorStoreLicense.mintTransaction',
+    'CreatorStoreLicense.purchaseRights',
+    'CreatorStoreLicense.holderRights',
+    'CreatorStoreLicense.transferredRights',
+    'CreatorStoreLicense.providerLabel',
+    'CreatorStoreLicense.providerUnverified',
+    'CreatorStoreLicense.scopeLabel',
+    'CreatorStoreLicense.scopeBody',
+    'CreatorStoreLicense.meteredLabel',
+    'CreatorStoreLicense.meteredBody',
+    'CreatorStoreLicense.issueLabel',
+    'CreatorStoreLicense.issueBody',
+    'CreatorStoreLicense.refundLabel',
+    'CreatorStoreLicense.refundBody',
+    'CreatorStoreLicense.transferLabel',
+    'CreatorStoreLicense.transferBody',
+    'CreatorStoreLicense.nonTransferBody',
+    'CreatorStoreLicense.publicLabel',
+    'CreatorStoreLicense.publicBody',
+    'CreatorStoreLicense.quantity',
+    'CreatorStoreLicense.providerThirdPartyNote',
+    'CreatorStoreLicense.providerOperatorNote',
+    'CreatorStoreLicense.states.pending',
+    'CreatorStoreLicense.states.minted',
+    'CreatorStoreLicense.states.repair',
+    'CreatorStoreLicense.states.transferred',
+    'CreatorStoreLicense.states.unknown',
+    'CreatorStoreLicense.remaining',
+    'CreatorStoreLicense.remainingUnknown',
+    'CreatorStoreLicense.sellerOperator',
+    'CreatorStoreLicense.sellerThirdParty',
+    'CreatorStoreLicense.providerThirdParty',
+  ] as const;
+
+  it.each([ja, en])('全ライセンス UI key が指定の namespace に存在する', (messages) => {
+    for (const key of requiredPaths) {
+      expect(messages, key).toHaveProperty(key, expect.any(String));
+    }
+    expect(messages.CreatorStoreLicense.remaining).toContain('{remaining}');
+    expect(messages.CreatorStoreLicense.remaining).toContain('{supply}');
+    expect(messages.CreatorStoreLicense.sellerThirdParty).toContain('{name}');
+    expect(messages.CreatorStoreSeller.licenseRegistrationLabel).toContain('{state}');
+  });
+});

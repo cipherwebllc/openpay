@@ -1,9 +1,13 @@
 // /store のブラウズ UI (P3)。フィルタリングと deep link (購入面を持たない) のフェンス。
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import { StoreBrowser } from '@/components/StoreBrowser';
 import type { StoreListing } from '@/lib/x402/storeListing';
+
+const state = vi.hoisted(() => ({ licenseEnabled: false }));
+vi.mock('@/lib/env', () => ({ env: { get enableLicenseNftUi() { return state.licenseEnabled; } } }));
+beforeEach(() => { state.licenseEnabled = false; });
 
 const LISTINGS: StoreListing[] = [
   {
@@ -89,4 +93,21 @@ describe('StoreBrowser', () => {
       screen.getByText('まだ商品がありません。最初の出品者になりませんか？'),
     ).toBeInTheDocument();
   });
+});
+
+
+it('ライセンスカードの外部条件リンクを商品リンク内に入れず、OFF では隠す', () => {
+  const listing = { ...LISTINGS[0], productKind: 'license' as const, sellerRole: 'third_party' as const, license: { supply: 12, remaining: 9, transferable: true, termsUrl: 'https://example.com/terms', termsVersion: '3' } };
+  state.licenseEnabled = true;
+  const { container, rerender } = renderWithIntl(<StoreBrowser listings={[listing]} locale="ja" />);
+  expect(screen.getByText('利用ライセンス NFT')).toBeInTheDocument();
+  expect(screen.getByText('残り 9 / 12 · 譲渡可')).toBeInTheDocument();
+  expect(screen.getByText('販売者: 第三者出品者 (@alice)')).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: '利用条件（版 3）' })).toHaveAttribute('href', 'https://example.com/terms');
+  expect(container.querySelector('a a')).toBeNull();
+  expect(container.querySelector('ul')).toHaveClass('grid-cols-1');
+  state.licenseEnabled = false;
+  rerender(<StoreBrowser listings={[{ ...listing }]} locale="ja" />);
+  expect(screen.queryByText('利用ライセンス NFT')).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: /AI プロンプト集/ })).not.toBeInTheDocument();
 });

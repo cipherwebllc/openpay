@@ -7,6 +7,7 @@ const routeMocks = vi.hoisted(() => ({
     enableCreatorStore: true,
     enableLicenseNft: false,
     enableX402Facilitator: true,
+    feeReceiver: `0x${'3'.repeat(40)}`,
   },
   verify: vi.fn(),
   settle: vi.fn(),
@@ -861,6 +862,36 @@ describe('hosted creator-store paid route', () => {
 // license の追加分岐でも、デジタルの既存 payload/error は上の固定テストで維持する。
 describe('license hosted admission', () => {
   afterEach(() => { routeMocks.env.enableLicenseNft = false; vi.unstubAllEnvs(); });
+  it('hosted 商品の成功応答にも表示専用の sellerRole を返す', async () => {
+    routeMocks.env.enableLicenseNft = true;
+    const settled = intentFixture('settled');
+    routeMocks.readSettledAccess.mockResolvedValue({
+      ok: true,
+      intent: { ...settled, metadata: { ...settled.metadata, productKind: 'license', owner: getAddress(routeMocks.env.feeReceiver) } },
+      ownership: {}, purchase: {}, grant: {},
+    });
+    const response = await callHosted(await loadRoute(), `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`, { 'x-payment': paymentHeader() });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ productKind: 'license', sellerRole: 'operator' });
+    expect(JSON.stringify(routeMocks.claimedFacilitatorBody)).not.toContain('sellerRole');
+    expect(Buffer.from(response.headers.get('X-PAYMENT-RESPONSE')!, 'base64').toString()).not.toContain('sellerRole');
+  });
+  it.each(['operator', 'third_party'] as const)('quote に表示専用の sellerRole=%s を追加し、snapshot と wire は変えない', async (role) => {
+    routeMocks.env.enableLicenseNft = true;
+    const owner = role === 'operator' ? getAddress(routeMocks.env.feeReceiver) : SELLER;
+    vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', owner);
+    routeMocks.getHostedProduct.mockResolvedValue({ ...productFixture(), owner, productKind: 'license', license: { tokenId: NONCE }, registration: { status: 'registered' } });
+    routeMocks.recipient.mockResolvedValue('supported');
+    const response = await callHosted(await loadRoute(), `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`);
+    expect(response.status).toBe(402);
+    const body = await response.json();
+    expect(body.sellerRole).toBe(role);
+    expect(JSON.stringify(body.accepts)).not.toContain('sellerRole');
+    expect(JSON.stringify(routeMocks.createQuoted.mock.calls, (_key, value) => typeof value === 'bigint' ? value.toString() : value)).not.toContain('sellerRole');
+    expect(Buffer.from(response.headers.get('PAYMENT-REQUIRED')!, 'base64').toString()).not.toContain('sellerRole');
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
   it('returns 404 while disabled before any quote or verify work', async () => {
     routeMocks.getHostedProduct.mockResolvedValue({ ...productFixture(), productKind: 'license' });
     const { GET } = await import('@/app/api/paid/hosted/[id]/route');

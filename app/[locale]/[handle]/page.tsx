@@ -8,6 +8,8 @@
 
 import { cache } from 'react';
 import type { Metadata } from 'next';
+import { sellerRoleFor } from '@/lib/license/sellerRole';
+import { licenseSummariesFor } from '@/lib/license/display';
 import Link from 'next/link';
 import NextImage from 'next/image';
 import { setRequestLocale, getTranslations } from 'next-intl/server';
@@ -52,12 +54,6 @@ import {
   type TipOgLocale,
 } from '@/lib/ogTipCard';
 import { stripControlChars } from '@/lib/sanitize';
-
-// catch-all かつ KV を実行時に読むため、静的最適化させず必ず Node ランタイムでリクエスト時に
-// 解決する (API route と揃える)。これがないと環境によって KV env が解決時に見えない/
-// 静的 404 にされる可能性がある。
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 // generateMetadata と本体が同一リクエストで同じ handle / 商品一覧を解決するため、React の
 // cache() でリクエスト単位にメモ化し KV への重複 REST I/O を1回に潰す
@@ -125,7 +121,8 @@ export async function generateMetadata({
     productId
   ) {
     const products = await listAvailableHostedForOwnerCached(record.owner);
-    const product = products?.find((candidate) => candidate.id === productId);
+    const product = products?.find((candidate) => candidate.id === productId &&
+      (env.enableLicenseNftUi || candidate.productKind !== 'license'));
     if (product) {
       const sellerName = c.name?.trim() || `@${normalized}`;
       const title = `${product.title} — ${sellerName}`;
@@ -260,7 +257,7 @@ export default async function HandlePage({
     // 掲載先 handle が設定された商品はそのプロフにだけ出す (未設定 = 旧仕様どおり
     // owner の全プロフに表示・後方互換)。同一ウォレット複数 handle の誤帰属修正
     // (2026-08-04 user 裁定・plans/product-handle-attribution.md)。
-    .filter((product) => !product.handle || product.handle === normalized);
+    .filter((product) => (env.enableLicenseNftUi || product.productKind !== 'license') && (!product.handle || product.handle === normalized));
   // 厳選ショーケース: featured があればそれだけ表示し、残りは Store への
   // 「すべての商品を見る」リンクが受ける (selectProfileProducts)。
   const profileSelection = selectProfileProducts(scopedHosted);
@@ -279,9 +276,16 @@ export default async function HandlePage({
   // viewAll の件数 (hidden + shown = 全商品数) が追加表示分で二重計上されないよう調整。
   const hiddenCountForView =
     profileSelection.hiddenCount - (deepLinkedHidden ? 1 : 0);
+  const licenseSummaries = await licenseSummariesFor(shownProducts);
   const creatorProducts: CreatorStorefrontProduct[] = shownProducts.map(
     (product) => ({
       id: product.id,
+      ...(env.enableLicenseNftUi && product.productKind === 'license' && product.license ? {
+        productKind: 'license' as const,
+        license: licenseSummaries.get(product.id),
+        sellerRole: sellerRoleFor(product.owner),
+        sellerName: record.config.name?.trim() || `@${normalized}`,
+      } : {}),
       title: product.title,
       ...(product.desc ? { desc: product.desc } : {}),
       ...(product.emoji ? { emoji: product.emoji } : {}),

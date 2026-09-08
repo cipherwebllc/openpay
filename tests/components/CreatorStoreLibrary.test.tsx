@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
 import { CreatorStoreLibrary } from '@/components/CreatorStoreLibrary';
@@ -10,10 +10,11 @@ const state = vi.hoisted(() => ({
     | string
     | null,
   isSignedIn: true,
+  licenseEnabled: false,
 }));
 
 vi.mock('@/lib/env', () => ({
-  env: { enableCreatorStoreUi: true },
+  env: { enableCreatorStoreUi: true, networkEnv: 'mainnet', get enableLicenseNftUi() { return state.licenseEnabled; } },
 }));
 
 vi.mock('@/hooks/useStoreCacheScope', () => ({
@@ -42,12 +43,12 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function renderLibrary(queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
-})) {
+}), source: 'purchases' | 'holders' = 'purchases') {
   return {
     queryClient,
     ...renderWithIntl(
       <QueryClientProvider client={queryClient}>
-        <CreatorStoreLibrary />
+        <CreatorStoreLibrary source={source} />
       </QueryClientProvider>,
     ),
   };
@@ -56,6 +57,7 @@ function renderLibrary(queryClient = new QueryClient({
 describe('CreatorStoreLibrary', () => {
   beforeEach(() => {
     state.sessionAddress = ADDRESS;
+    state.licenseEnabled = false;
     state.isSignedIn = true;
     vi.restoreAllMocks();
   });
@@ -281,5 +283,78 @@ describe('CreatorStoreLibrary', () => {
     expect(
       screen.getByText(/購入記録は残っていますが/),
     ).toBeInTheDocument();
+  });
+});
+
+
+describe('license library', () => {
+  beforeEach(() => { vi.restoreAllMocks(); state.licenseEnabled = true; state.sessionAddress = ADDRESS; state.isSignedIn = true; });
+  const revision = { title: 'Purchased license', priceJpyc: '1000', contentKind: 'text', label: 'api', purchasedAt: 1_750_000_000_000, contentRevision: 1 };
+  const tx = `0x${'ab'.repeat(32)}`;
+  const heldItem = { resourceId: 'h_held', title: 'Incoming license', license: { supply: 10, transferable: true, termsUrl: 'https://example.com/terms', termsVersion: '1', tokenChainId: 80002 }, nft: { status: 'minted', mintTxHash: tx }, entitled: true, basis: 'holder', state: 'ready', contentRevision: 1 };
+  it('source=holders で受取セクションを先頭へ表示し、同じ URL への導線を持つ', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => String(url).includes('source=holders')
+      ? jsonResponse({ ok: true, items: [heldItem], nextCursor: null })
+      : jsonResponse({ ok: true, items: [{ ...revision, resourceId: 'h_purchase', revisions: [revision] }], nextCursor: null }));
+    renderLibrary(undefined, 'holders');
+    await screen.findByText('Purchased license');
+    const received = await screen.findByText('Incoming license');
+    expect(received.compareDocumentPosition(screen.getByText('Purchased license')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('link', { name: '受け取ったライセンスを見る' })).toHaveAttribute('href', '/ja/store/library?source=holders#creator-store-received-heading');
+  });
+  it.each([
+    ['pending', true, 'purchase', '発行待ち'], ['minted', true, 'purchase', '発行済み'], ['needs_repair', true, 'purchase', '修復中'], ['minted', false, 'holder', '譲渡済み'], ['unknown', null, null, '確認できませんでした'],
+  ])('購入履歴の %s/%s は %s 根拠で表示する', async (status, entitled, basis, label) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => String(url).includes('source=holders')
+      ? jsonResponse({ ok: true, items: [], nextCursor: null })
+      : jsonResponse({ ok: true, items: [{ ...revision, resourceId: 'h_purchase', revisions: [revision], productKind: 'license', tokenChainId: 137, nft: { status, mintTxHash: tx }, entitled, basis }], nextCursor: null }));
+    renderLibrary();
+    expect(await screen.findByText(`NFT 状態: ${label}`)).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'リビジョン 1 を表示' });
+    if (entitled === true) expect(button).toBeEnabled(); else expect(button).toBeDisabled();
+    if (status === 'minted' && entitled === true) expect(screen.getByRole('link', { name: '発行トランザクションを見る' })).toHaveAttribute('href', `https://polygonscan.com/tx/${tx}`);
+  });
+  it('受取は独立の cursor で読み込み、購入履歴を作らず案内を取得する', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const path = String(url);
+      if (path === '/api/store/library?source=holders') return jsonResponse({ ok: true, items: [], nextCursor: 'h_cursor' });
+      if (path === '/api/store/library?source=holders&cursor=h_cursor') return jsonResponse({ ok: true, items: [heldItem], nextCursor: null });
+      if (path === '/api/store/content/h_held?revision=1') return jsonResponse({ ok: true, state: 'ready', productKind: 'license', basis: 'holder', title: heldItem.title, resourceId: 'h_held', contentRevision: 1, kind: 'text', value: 'Received instructions' });
+      return jsonResponse({ ok: true, items: [], nextCursor: null });
+    });
+    const { queryClient } = renderLibrary();
+    const section = (await screen.findByRole('heading', { name: '受け取ったライセンス' })).closest('section')!;
+    fireEvent.click(await within(section).findByRole('button', { name: 'さらに読み込む' }));
+    await screen.findByText('Incoming license');
+    expect(within(section).queryByText(/購入日時/)).not.toBeInTheDocument();
+    expect(within(section).getByRole('link', { name: '発行トランザクションを見る' })).toHaveAttribute('href', `https://amoy.polygonscan.com/tx/${tx}`);
+    expect(queryClient.getQueryData(['store', 'library-holders', ADDRESS])).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: '利用開始の案内を開く' }));
+    await screen.findByText('Received instructions');
+    expect(screen.getByText('現在の NFT 保有に基づく提供です。このウォレットの購入記録ではありません。')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/store/content/h_held?revision=1', { cache: 'no-store' });
+  });
+  it('受取 API の不明/障害を空や購入履歴のエラーに変えない', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => String(url).includes('source=holders')
+      ? jsonResponse({ ok: false, error: 'license_rights_unknown' }, 503)
+      : jsonResponse({ ok: true, items: [{ ...revision, resourceId: 'h_purchase', revisions: [revision] }], nextCursor: null }));
+    renderLibrary();
+    await screen.findByText('Purchased license');
+    expect(await screen.findByRole('alert')).toHaveTextContent('受け取ったライセンスを確認できませんでした');
+    expect(screen.queryByText('受け取ったライセンスはありません。続きがある場合は読み込んでください。')).not.toBeInTheDocument();
+  });
+  it('flag OFF は受取 API を呼ばず、license 表示も追加しない', async () => {
+    state.licenseEnabled = false;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ ok: true, items: [], nextCursor: null }));
+    renderLibrary();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('source=holders'))).toBe(false);
+    expect(screen.queryByText('受け取ったライセンス')).not.toBeInTheDocument();
+  });
+  it('未サインインでは受取 API を呼ばない', () => {
+    state.isSignedIn = false; state.sessionAddress = null;
+    const fetchMock = vi.spyOn(globalThis, 'fetch'); renderLibrary();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('受け取ったライセンス')).not.toBeInTheDocument();
   });
 });

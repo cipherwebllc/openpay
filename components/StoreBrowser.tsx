@@ -12,6 +12,8 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Search } from 'lucide-react';
+import { env } from '@/lib/env';
+import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { CreatorStorefrontProductArtwork } from '@/components/CreatorStorefrontProductArtwork';
 import {
   HOSTED_PRODUCT_CATEGORIES,
@@ -37,6 +39,7 @@ export function StoreBrowser({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return listings.filter((listing) => {
+      if (listing.productKind === 'license' && !env.enableLicenseNftUi) return false;
       if (category && listing.category !== category) return false;
       if (!q) return true;
       const haystack = [
@@ -67,7 +70,7 @@ export function StoreBrowser({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={t('searchPlaceholder')}
-          className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
+          className={`${env.enableLicenseNftUi ? 'min-h-11 ' : ''}w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15`}
         />
       </label>
       <div
@@ -83,7 +86,7 @@ export function StoreBrowser({
               type="button"
               onClick={() => setCategory(value)}
               aria-pressed={active}
-              className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
+              className={`${env.enableLicenseNftUi ? 'min-h-11 ' : ''}shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
                 active
                   ? 'bg-brand text-white'
                   : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
@@ -121,13 +124,13 @@ export function StoreBrowser({
         // image-top カード。引き算 = 手数料内訳・カテゴリチップ・#タグはカードから
         // 除去 (内訳は購入モーダルで開示・カテゴリはフィルタ行が担う・タグは検索に
         // 効いたまま)。合計額の表示は維持 (2026-07-31 user 裁定)。
-        <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+        <ul className={`mt-4 grid ${env.enableLicenseNftUi ? 'grid-cols-1' : 'grid-cols-2'} gap-3 sm:grid-cols-3 sm:gap-4`}>
           {filtered.map((listing) => (
             <li key={listing.id}>
               <Link
                 href={`/${locale}/@${listing.handle}?product=${listing.id}&from=store`}
                 prefetch={false}
-                className="group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-[0_8px_20px_-10px_rgba(15,23,42,0.25)]"
+                className={`group flex ${env.enableLicenseNftUi && listing.productKind === 'license' ? '' : 'h-full'} flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-[0_8px_20px_-10px_rgba(15,23,42,0.25)]`}
               >
                 <CreatorStorefrontProductArtwork
                   imageUrl={listing.imageUrl}
@@ -155,6 +158,7 @@ export function StoreBrowser({
                   </span>
                 </span>
               </Link>
+              <CreatorStoreLicenseDetails product={{ ...listing, sellerName: `@${listing.handle}` }} />
             </li>
           ))}
         </ul>

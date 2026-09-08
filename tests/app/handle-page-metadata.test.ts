@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   enableMobileOrder: false,
   enableCreatorStore: false,
   enableCreatorStoreUi: false,
+  enableLicenseNftUi: false,
   hostedProducts: [] as unknown[] | null,
   record: null as unknown,
   ok: true,
@@ -33,6 +34,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableCreatorStoreUi() {
         return h.enableCreatorStoreUi;
+      },
+      get enableLicenseNftUi() {
+        return h.enableCreatorStoreUi && h.enableLicenseNftUi;
       },
     },
   };
@@ -127,6 +131,7 @@ beforeEach(() => {
   h.enableMobileOrder = false;
   h.enableCreatorStore = false;
   h.enableCreatorStoreUi = false;
+  h.enableLicenseNftUi = false;
   h.hostedProducts = [];
   h.ok = true;
   h.record = PROFILE_RECORD;
@@ -137,6 +142,14 @@ beforeEach(() => {
 });
 
 describe('@handle generateMetadata', () => {
+  it('license flag OFF は商品 meta を公開せず、ON のときだけ表示する', async () => {
+    h.enableCreatorStore = true;
+    h.enableCreatorStoreUi = true;
+    h.hostedProducts = [{ ...PRODUCT, productKind: 'license' }];
+    expect((await call('%40masia', 'ja', PRODUCT_ID)).title).toBe('山田太郎 (@masia) — OpenPay');
+    h.enableLicenseNftUi = true;
+    expect((await call('%40masia', 'ja', PRODUCT_ID)).title).toBe('AI プロンプト集 — 山田太郎');
+  });
   it('storefront 公開 (enableMobileOrder ON) はモバイルオーダー meta', async () => {
     h.enableMobileOrder = true;
     h.record = STORE_RECORD;

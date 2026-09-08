@@ -1,5 +1,8 @@
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
+import { env } from '@/lib/env';
+import type { StoreLicenseProduct } from '@/lib/licenseUi';
+import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { formatUnits } from 'viem';
 import { hostedPurchaseFeeValue } from '@/lib/x402/hostedPurchaseWire';
 import type { Address } from 'viem';
@@ -10,7 +13,7 @@ import {
 import { CreatorStorePurchaseLauncher } from '@/components/CreatorStorePurchaseLauncher';
 import { CreatorStorefrontProductArtwork } from '@/components/CreatorStorefrontProductArtwork';
 
-export type CreatorStorefrontProduct = {
+export type CreatorStorefrontProduct = StoreLicenseProduct & {
   id: string;
   title: string;
   desc?: string;
@@ -58,7 +61,8 @@ export function CreatorStorefrontSection({
 }) {
   const t = useTranslations('CreatorStorefront');
   const locale = useLocale();
-  if (products.length === 0) return null;
+  const visibleProducts = products.filter((product) => env.enableLicenseNftUi || product.productKind !== 'license');
+  if (visibleProducts.length === 0) return null;
 
   const tokens = handleViewTheme(accent, theme);
   const inverted = tokens.dark || theme === 'bold';
@@ -91,7 +95,7 @@ export function CreatorStorefrontSection({
           一本化・合計額表示は維持 = 2026-07-31 user 裁定)。説明は 2 行でクランプ
           (生 URL などの長文ノイズを抑える。全文は購入モーダルが表示する)。 */}
       <ul className="space-y-3">
-        {products.map((product) => (
+        {visibleProducts.map((product) => (
           <li
             key={product.id}
             className={`group overflow-hidden rounded-2xl text-left ${
@@ -142,6 +146,7 @@ export function CreatorStorefrontSection({
                       {product.desc}
                     </p>
                   ) : null}
+                  <CreatorStoreLicenseDetails product={product} />
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <span
                       className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ${
@@ -174,6 +179,7 @@ export function CreatorStorefrontSection({
                     <CreatorStorePurchaseLauncher
                       product={{
                         id: product.id,
+                        ...(product.productKind === 'license' ? { productKind: product.productKind, license: product.license, sellerRole: product.sellerRole, sellerName: product.sellerName } : {}),
                         title: product.title,
                         ...(product.desc
                           ? { description: product.desc }

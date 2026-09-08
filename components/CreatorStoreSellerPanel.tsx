@@ -14,6 +14,8 @@ import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
 import { useOrigin } from '@/hooks/useOrigin';
+import type { StoreLicenseProduct } from '@/lib/licenseUi';
+import { CreatorStoreLicenseFields, validLicenseForm, type LicenseFormFields } from '@/components/CreatorStoreLicenseFields';
 
 type HostedLabel =
   | 'download'
@@ -23,7 +25,8 @@ type HostedLabel =
   | 'api'
   | 'external';
 
-type ProductSummary = {
+type ProductSummary = StoreLicenseProduct & {
+  registration?: { status: 'pending' | 'registered' | 'failed' };
   id: string;
   payTo: string;
   title: string;
@@ -56,7 +59,8 @@ type SellerDisclosure = {
   updatedAt: number;
 };
 
-type ProductForm = {
+type ProductForm = LicenseFormFields & {
+  productKind: 'digital' | 'license';
   payTo: string;
   title: string;
   desc: string;
@@ -113,6 +117,11 @@ const HOSTED_LABELS: readonly HostedLabel[] = [
 ];
 
 const EMPTY_PRODUCT_FORM: ProductForm = {
+  productKind: 'digital',
+  supply: '1',
+  transferable: false,
+  termsUrl: '',
+  termsVersion: '1',
   payTo: '',
   title: '',
   desc: '',
@@ -178,6 +187,8 @@ const DETAIL_MESSAGE_KEYS: Record<string, string> = {
 
 const ERROR_MESSAGE_KEYS: Record<string, string> = {
   usdc_pay_to_contract_wallet: 'usdcContractWalletError',
+  license_registration_pending: 'licenseRegistrationHint',
+  license_definition_immutable: 'licenseImmutableNotice',
 };
 
 function errorDetailKey(error: unknown): string | null {
@@ -256,10 +267,12 @@ function ProductShareButton({
   url,
   copyLabel,
   copiedLabel,
+  license = false,
 }: {
   url: string;
   copyLabel: string;
   copiedLabel: string;
+  license?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -277,7 +290,7 @@ function ProductShareButton({
     <button
       type="button"
       onClick={() => void copy()}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
+      className={`${license ? 'min-h-11 ' : ''}inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand`}
     >
       <Copy className="h-3.5 w-3.5" aria-hidden />
       {copied ? copiedLabel : copyLabel}
@@ -399,6 +412,9 @@ function SignedInSellerPanel({
   const [editingProductState, setEditingProductState] =
     useState<EditingProductState | null>(null);
   const [productSaved, setProductSaved] = useState(false);
+  const [licenseValidationError, setLicenseValidationError] = useState(false);
+  const isLicense = env.enableLicenseNftUi && productForm.productKind === 'license';
+  const licenseReadOnly = isLicense && editingId !== null;
 
   const productsQuery = useQuery({
     queryKey: ['creator-store', 'products', sessionAddress],
@@ -429,7 +445,7 @@ function SignedInSellerPanel({
   const seller = sellerQuery.data?.seller ?? null;
   const sellerComplete = seller !== null;
   const sellerForm = sellerDraft ?? sellerFormOf(seller);
-  const products = productsQuery.data?.products ?? [];
+  const products = (productsQuery.data?.products ?? []).filter((product) => env.enableLicenseNftUi || product.productKind !== 'license');
   const maxProducts = productsQuery.data?.max ?? 12;
   const atLimit = products.length >= maxProducts;
   const productShareBaseUrl =
@@ -445,6 +461,7 @@ function SignedInSellerPanel({
 
   const updateProduct = (patch: Partial<ProductForm>) => {
     setProductSaved(false);
+    setLicenseValidationError(false);
     setProductForm((current) => ({ ...current, ...patch }));
   };
 
@@ -491,6 +508,11 @@ function SignedInSellerPanel({
       });
       setProductSaved(false);
       setProductForm({
+        productKind: product.productKind ?? 'digital',
+        supply: String(product.license?.supply ?? 1),
+        transferable: product.license?.transferable ?? false,
+        termsUrl: product.license?.termsUrl ?? '',
+        termsVersion: product.license?.termsVersion ?? '1',
         payTo: product.payTo,
         title: product.title,
         desc: product.desc ?? '',
@@ -534,8 +556,16 @@ function SignedInSellerPanel({
               .split(/\r?\n/)
               .map((url) => url.trim())
               .filter(Boolean),
-            priceJpyc: form.priceJpyc,
-            contentKind: form.contentKind,
+            ...(form.productKind === 'license' && id ? {} : {
+              priceJpyc: form.priceJpyc,
+              contentKind: form.contentKind,
+              content: form.content,
+            }),
+            ...(form.productKind === 'license' && !id ? {
+              productKind: 'license',
+              payTo: form.payTo,
+              license: { supply: Number(form.supply), transferable: form.transferable, termsUrl: form.termsUrl.trim(), termsVersion: form.termsVersion.trim() },
+            } : {}),
             label: form.label,
             category: form.category || null,
             // カンマ区切り入力 → 配列 (検証は server 権威・storeMeta.parseHostedTags)
@@ -545,10 +575,9 @@ function SignedInSellerPanel({
               .filter(Boolean),
             handle: form.listingHandle || null,
             featured: form.featured,
-            content: form.content,
-            saleActive: form.saleActive,
+            ...(form.productKind === 'license' && id ? {} : { saleActive: form.productKind === 'license' ? false : form.saleActive }),
             // 新規 UI の既定 ON も含め、server の暗黙 default に依存せず常に明示する。
-            usdcEnabled: form.usdcEnabled,
+            usdcEnabled: form.productKind === 'license' ? false : form.usdcEnabled,
           }),
         },
       ),
@@ -587,6 +616,7 @@ function SignedInSellerPanel({
   const cancelEdit = () => {
     setEditingId(null);
     setEditingProductState(null);
+    setLicenseValidationError(false);
     setProductForm(emptyForm);
     loadProduct.reset();
     saveProduct.reset();
@@ -648,7 +678,7 @@ function SignedInSellerPanel({
         </div>
 
         <form
-          className="mt-4 grid gap-4 sm:grid-cols-2"
+          className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2"
           onSubmit={(event) => {
             event.preventDefault();
             saveSeller.mutate(sellerForm);
@@ -715,7 +745,7 @@ function SignedInSellerPanel({
             <button
               type="submit"
               disabled={saveSeller.isPending}
-              className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+              className={`${isLicense ? 'min-h-11 ' : ''}rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50`}
             >
               {saveSeller.isPending ? t('saving') : t('saveSeller')}
             </button>
@@ -798,6 +828,13 @@ function SignedInSellerPanel({
                       <h4 className="break-words text-sm font-semibold text-slate-800">
                         {product.title}
                       </h4>
+                      {env.enableLicenseNftUi && product.productKind === 'license' ? (
+                        <div className="mt-2 text-sm text-indigo-900">
+                          <p className="font-semibold">{t('licenseProduct')}</p>
+                          <p>{t('licenseRegistrationLabel', { state: t(product.registration?.status === 'registered' ? 'licenseRegistrationRegistered' : product.registration?.status === 'failed' ? 'licenseRegistrationFailed' : 'licenseRegistrationPending') })}</p>
+                          {product.registration?.status !== 'registered' ? <p className="mt-1 text-xs">{t('licenseRegistrationHint')}</p> : null}
+                        </div>
+                      ) : null}
                       {product.desc ? (
                         <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">
                           {product.desc}
@@ -823,7 +860,14 @@ function SignedInSellerPanel({
                   </div>
 
                   <div className="mt-4 flex flex-wrap items-center gap-3">
-                    <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                    {env.enableLicenseNftUi && product.productKind === 'license' ? (
+                      <>
+                        <button type="button" disabled={toggling || cannotStart || (!product.saleActive && product.registration?.status !== 'registered')} onClick={() => toggleSale.mutate({ id: product.id, saleActive: !product.saleActive })} className="min-h-11 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+                          {t(product.saleActive ? 'licensePause' : 'licensePublish')}
+                        </button>
+                        <button type="button" disabled={productsQuery.isFetching} onClick={() => void productsQuery.refetch()} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700">{t('licenseRefresh')}</button>
+                      </>
+                    ) : <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                       <input
                         type="checkbox"
                         checked={product.saleActive}
@@ -840,14 +884,14 @@ function SignedInSellerPanel({
                           ? t('saleActive')
                           : t('saleInactive')}
                       </span>
-                    </label>
+                    </label>}
                     <button
                       type="button"
                       disabled={
                         loadProduct.isPending || !product.contentAvailable
                       }
                       onClick={() => loadProduct.mutate(product.id)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand disabled:cursor-not-allowed disabled:opacity-40"
+                      className={`${env.enableLicenseNftUi && product.productKind === 'license' ? 'min-h-11 ' : ''}inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand disabled:cursor-not-allowed disabled:opacity-40`}
                     >
                       <Pencil className="h-3.5 w-3.5" aria-hidden />
                       {t('editProduct')}
@@ -856,6 +900,7 @@ function SignedInSellerPanel({
                     product.contentAvailable &&
                     productShareBaseUrl ? (
                       <ProductShareButton
+                        license={env.enableLicenseNftUi && product.productKind === 'license'}
                         url={`${productShareBaseUrl}?product=${encodeURIComponent(product.id)}`}
                         copyLabel={t('copyShareLink')}
                         copiedLabel={t('shareLinkCopied')}
@@ -907,17 +952,35 @@ function SignedInSellerPanel({
         </p>
 
         <form
-          className="mt-4 grid gap-4 sm:grid-cols-2"
+          className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2"
           onSubmit={(event) => {
             event.preventDefault();
+            if (isLicense && !validLicenseForm(productForm, productForm.priceJpyc)) {
+              setLicenseValidationError(true);
+              return;
+            }
             saveProduct.mutate({ id: editingId, form: productForm });
           }}
         >
+          {env.enableLicenseNftUi ? (
+            <fieldset className="sm:col-span-2">
+              <legend className="text-sm font-semibold text-slate-800">{t('productTypeLabel')}</legend>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {(['digital', 'license'] as const).map((kind) => (
+                  <label key={kind} className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800">
+                    <input type="radio" name="creator-store-product-type" checked={productForm.productKind === kind} disabled={editingId !== null} onChange={() => updateProduct({ productKind: kind, saleActive: false, contentKind: kind === 'license' ? 'text' : 'url', label: kind === 'license' ? 'api' : 'download', content: '', usdcEnabled: kind !== 'license' })} />
+                    {t(kind === 'license' ? 'licenseProduct' : 'digitalProduct')}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ) : null}
+          {isLicense ? <CreatorStoreLicenseFields fields={productForm} readOnly={licenseReadOnly} onChange={updateProduct} /> : null}
           <label
             htmlFor="creator-store-product-title"
             className="block text-sm font-medium text-slate-700 sm:col-span-2"
           >
-            {t('titleLabel')}
+            {t(isLicense ? 'licenseTitleLabel' : 'titleLabel')}
             <input
               id="creator-store-product-title"
               type="text"
@@ -927,7 +990,7 @@ function SignedInSellerPanel({
               onChange={(event) =>
                 updateProduct({ title: event.target.value })
               }
-              className={inputClass}
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             />
           </label>
           <label
@@ -943,7 +1006,7 @@ function SignedInSellerPanel({
               onChange={(event) =>
                 updateProduct({ desc: event.target.value })
               }
-              className={inputClass}
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             />
           </label>
           <label
@@ -959,7 +1022,7 @@ function SignedInSellerPanel({
               onChange={(event) =>
                 updateProduct({ emoji: event.target.value })
               }
-              className={inputClass}
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             />
           </label>
           <label
@@ -976,7 +1039,7 @@ function SignedInSellerPanel({
               onChange={(event) =>
                 updateProduct({ imageUrl: event.target.value })
               }
-              className={inputClass}
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             />
           </label>
           {/* アップロード先の案内 (レジ商品プリセットの imageHint と同文言・2026-08-05 user 指示)。
@@ -1003,17 +1066,21 @@ function SignedInSellerPanel({
               onChange={(event) =>
                 updateProduct({ galleryUrls: event.target.value })
               }
-              className={inputClass}
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             />
           </label>
           <label
             htmlFor="creator-store-product-price"
             className="block text-sm font-medium text-slate-700"
           >
-            {t('priceLabel')}
+            {t(isLicense ? 'licensePriceLabel' : 'priceLabel')}
             <input
               id="creator-store-product-price"
-              type="text"
+              type={isLicense ? 'number' : 'text'}
+              min={isLicense ? 1_000 : undefined}
+              max={isLicense ? 1_000_000 : undefined}
+              step={isLicense ? 1 : undefined}
+              readOnly={licenseReadOnly}
               inputMode="numeric"
               pattern="[0-9]+"
               required
@@ -1022,13 +1089,14 @@ function SignedInSellerPanel({
               onChange={(event) =>
                 updateProduct({ priceJpyc: event.target.value })
               }
-              className={inputClass}
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             />
           </label>
           {/* 税込総額での登録案内 (Terms 13 条 (4) 2026-08-05 改定と同期・label 外 = a11y 名不変)。 */}
           <p className="-mt-3 text-xs text-slate-500">
             {t('priceHint')}
           </p>
+          {!isLicense ? <>
           <label
             htmlFor="creator-store-product-kind"
             className="block text-sm font-medium text-slate-700"
@@ -1044,7 +1112,7 @@ function SignedInSellerPanel({
                   label: contentKind === 'url' ? 'download' : 'prompt',
                 });
               }}
-              className={inputClass}
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             >
               <option value="url">{t('contentKinds.url')}</option>
               <option value="text">{t('contentKinds.text')}</option>
@@ -1063,7 +1131,7 @@ function SignedInSellerPanel({
                   label: event.target.value as HostedLabel,
                 })
               }
-              className={inputClass}
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             >
               {HOSTED_LABELS.map((label) => (
                 <option key={label} value={label}>
@@ -1072,6 +1140,7 @@ function SignedInSellerPanel({
               ))}
             </select>
           </label>
+          </> : null}
           <label
             htmlFor="creator-store-product-category"
             className="block text-sm font-medium text-slate-700"
@@ -1083,7 +1152,7 @@ function SignedInSellerPanel({
               onChange={(event) =>
                 updateProduct({ category: event.target.value })
               }
-              className={inputClass}
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             >
               <option value="">{t('categoryNone')}</option>
               {HOSTED_PRODUCT_CATEGORIES.map((category) => (
@@ -1104,7 +1173,7 @@ function SignedInSellerPanel({
               onChange={(event) =>
                 updateProduct({ listingHandle: event.target.value })
               }
-              className={inputClass}
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             >
               <option value="">{t('listingHandleAll')}</option>
               {handle ? <option value={handle}>@{handle}</option> : null}
@@ -1144,7 +1213,7 @@ function SignedInSellerPanel({
               value={productForm.tags}
               onChange={(event) => updateProduct({ tags: event.target.value })}
               placeholder={t('tagsPlaceholder')}
-              className={inputClass}
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             />
           </label>
           <div className="sm:col-span-2">
@@ -1152,7 +1221,7 @@ function SignedInSellerPanel({
               htmlFor="creator-store-product-content"
               className="block text-sm font-medium text-slate-700"
             >
-              {productForm.contentKind === 'url'
+              {isLicense ? t('licenseInstructionsLabel') : productForm.contentKind === 'url'
                 ? t('contentUrlLabel')
                 : t('contentTextLabel')}
             </label>
@@ -1167,32 +1236,34 @@ function SignedInSellerPanel({
                 onChange={(event) =>
                   updateProduct({ content: event.target.value })
                 }
-                className={inputClass}
+                className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
               />
             ) : (
               <textarea
                 id="creator-store-product-content"
                 aria-describedby="creator-store-product-content-hint"
                 rows={8}
-                required
+                required={!isLicense}
+                readOnly={licenseReadOnly}
                 maxLength={20_000}
                 value={productForm.content}
                 onChange={(event) =>
                   updateProduct({ content: event.target.value })
                 }
-                className={inputClass}
+                className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
               />
             )}
             <p
               id="creator-store-product-content-hint"
               className="mt-1 text-xs leading-relaxed text-slate-500"
             >
-              {productForm.contentKind === 'url'
+              {isLicense ? t('licenseInstructionsHint') : productForm.contentKind === 'url'
                 ? t('contentUrlHint')
                 : t('contentTextHint')}
             </p>
           </div>
 
+          {!isLicense ? <>
           <div className="sm:col-span-2">
             <label
               htmlFor="creator-store-product-usdc-enabled"
@@ -1257,13 +1328,15 @@ function SignedInSellerPanel({
             ) : null}
           </div>
 
+          </> : null}
+          {licenseValidationError ? <p role="alert" className="text-sm text-red-700 sm:col-span-2">{t('licenseValidationError')}</p> : null}
           <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
             <button
               type="submit"
               disabled={
                 saveProduct.isPending || (atLimit && editingId === null)
               }
-              className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+              className={`${isLicense ? 'min-h-11 ' : ''}rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50`}
             >
               {saveProduct.isPending
                 ? t('saving')
@@ -1276,7 +1349,7 @@ function SignedInSellerPanel({
                 type="button"
                 onClick={cancelEdit}
                 disabled={saveProduct.isPending}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-slate-400 disabled:opacity-50"
+                className={`${isLicense ? 'min-h-11 ' : ''}rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:border-slate-400 disabled:opacity-50`}
               >
                 {t('cancelEdit')}
               </button>

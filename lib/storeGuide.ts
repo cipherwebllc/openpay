@@ -6,6 +6,7 @@
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
 import {
+  DISCLOSED_LICENSE_NFT,
   DISCLOSED_STORE_USDC_PAYMENT,
   DISCLOSED_X402_FEE,
 } from '@/lib/legal';
@@ -642,4 +643,51 @@ export function storeGuideMetadata(locale: string): Metadata {
       alt: c.heroTitle,
     },
   });
+}
+
+
+// ライセンス節の両言語とポリシー値も、このモジュールを単一情報源とする。
+const LICENSE_STORE_GUIDE_JA = {
+  heading: '利用ライセンスを売る',
+  intro: 'サービスの入口や利用範囲を、買い手のウォレットに結び付けて販売する商品です。NFT はライセンスの証明で、権利は購入時点で有効になります。投資や利益分配、値上がり益を目的とする商品ではありません。',
+  fieldsHeading: '登録する項目',
+  fields: '商品タイプで「利用ライセンス NFT」を選び、ライセンス名・販売数・整数 JPYC の価格・譲渡（既定は不可）・https の利用条件 URL・利用条件の版（既定は 1）を入力します。利用開始の案内は任意のテキストです。利用条件には提供範囲と期間、従量料金の有無、発行失敗時の対応期限、返金と終了時の通知・救済を記載してください。',
+  publish: '作成した商品は登録待ちになります。登録状態を更新し、登録済みになってから「公開する」で販売を開始します。作成後は価格・販売数・譲渡・利用条件・案内を変更できません。販売停止では既存の購入記録は消えません。',
+  integrationHeading: 'サービスへの組み込み方',
+  integration: 'SDK 0.7 で提供予定の組み合わせです。入口の本人確認と、使った分の支払いを分けて考えます。',
+  entry: 'createLicenseGate：ウォレット署名で本人を確認し、入口のライセンスを確認する。',
+  metered: 'createJpycGate：実際の API 利用などを、別の x402 都度課金にする。',
+  verifyHeading: 'Verify API で状態を確認する',
+  verifyBody: 'ADDRESS を確認するウォレット、PRODUCT_ID を商品 ID に置き換えます。HTTPS の状態 API であり、本人認証や持ち運べる署名証明ではありません。entitled が null の場合は確認できていないため、非保有と断定せず再確認します。',
+  policyHeading: '商品ポリシー',
+  policy: 'Polygon の JPYC のみ（検証は Amoy）。販売数は {minSupply}〜{maxSupply}、価格は整数の {minPrice} JPYC 以上です。USDC は利用できません。ライセンスにも関連するサーバー上の権利にも利用回数・残高は持たせません。現在は許可された出品者のみが利用できます。これらは商品ポリシーであり、法的適合性の認定ではありません。',
+  rights: '譲渡不可なら burn（焼却）しても購入記録に基づく権利は残ります。譲渡可なら発行後の権利は保有者に移り、譲渡・burn した分を元の保有者は利用できません。返金は売り手からの別送金です。NFT の発行・譲渡・burn とウォレット情報は公開台帳や Verify API で公開されます。',
+};
+
+const LICENSE_STORE_GUIDE_EN = {
+  heading: 'Sell usage licenses',
+  intro: 'Sell access to a service or a defined scope of use tied to the buyer’s wallet. The NFT is proof of the license; rights take effect at purchase. It is not a product for investment, profit sharing or capital gains.',
+  fieldsHeading: 'Fields to complete',
+  fields: 'Choose “Usage license NFT” and enter a license name, supply, whole-JPYC price, transfer policy (not allowed by default), https terms URL and terms version (default 1). Getting-started text is optional. The terms must explain scope, duration, any metered charges, the deadline for addressing mint failures, refunds and termination notices and remedies.',
+  publish: 'A new product awaits registration. Refresh its status and select “Publish” once registered. Price, supply, transfer policy, terms and instructions cannot be edited after creation. Stopping sales does not erase purchase records.',
+  integrationHeading: 'Connect it to your service',
+  integration: 'This combination is planned for SDK 0.7. Check identity and access at the entrance, and charge separately for usage.',
+  entry: 'createLicenseGate: verify the wallet signature and check the license at the entrance.',
+  metered: 'createJpycGate: charge for API calls or other actual usage in separate x402 payments.',
+  verifyHeading: 'Check status with the Verify API',
+  verifyBody: 'Replace ADDRESS with the wallet to check and PRODUCT_ID with the product ID. This is an HTTPS status API, not identity authentication or portable signed proof. An entitled value of null is unknown; recheck instead of treating it as non-ownership.',
+  policyHeading: 'Product policy',
+  policy: 'JPYC on Polygon only (Amoy for testing). Supply is {minSupply}–{maxSupply}; price is a whole number of at least {minPrice} JPYC. USDC is unavailable. Neither licenses nor related server-side rights carry usage counts or balances. Only approved sellers can currently list. These limits are product policy, not certification of legal compliance.',
+  rights: 'Burning a non-transferable NFT preserves purchase rights. For transferable licenses, rights follow the holder after minting; transferred or burned units no longer grant access to the former holder. Refunds are separate seller transfers. NFT minting, transfers, burns and wallet information are public through the ledger and Verify API.',
+};
+export function licenseStoreGuideContentFor(locale: string) {
+  const c = locale === 'en' ? LICENSE_STORE_GUIDE_EN : LICENSE_STORE_GUIDE_JA;
+  const number = (value: number) => new Intl.NumberFormat(locale === 'en' ? 'en-US' : 'ja-JP').format(value);
+  return {
+    ...c,
+    policy: c.policy.replace('{minSupply}', number(DISCLOSED_LICENSE_NFT.minSupply))
+      .replace('{maxSupply}', number(DISCLOSED_LICENSE_NFT.maxSupply))
+      .replace('{minPrice}', number(DISCLOSED_LICENSE_NFT.minPriceJpyc)),
+    verifyCommand: 'curl --get "https://open-pay.jp/api/license/verify" --data-urlencode "address=ADDRESS" --data-urlencode "product=PRODUCT_ID"',
+  };
 }

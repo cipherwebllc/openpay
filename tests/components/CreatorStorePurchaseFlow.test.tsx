@@ -16,6 +16,8 @@ const state = vi.hoisted(() => ({
   purchase: vi.fn(),
   retry: vi.fn(),
   reset: vi.fn(),
+  licenseEnabled: false,
+  sellerRole: undefined as 'operator' | 'third_party' | undefined,
   phase: 'review',
   paymentStatus: 'not-started',
   accessStatus: 'none',
@@ -31,6 +33,11 @@ const state = vi.hoisted(() => ({
   canRetrySignedPayment: false,
   hookInput: null as Record<string, unknown> | null,
 }));
+
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return { ...actual, env: { ...actual.env, get enableLicenseNftUi() { return state.licenseEnabled; } } };
+});
 
 vi.mock('wagmi', () => ({
   useAccount: () => ({ address: state.address }),
@@ -69,6 +76,7 @@ vi.mock('@/hooks/useHostedStorePurchase', () => ({
     paymentStatus: state.paymentStatus,
     accessStatus: state.accessStatus,
     quote: state.quote,
+    sellerRole: state.sellerRole,
     content: state.content,
     txHash: null,
     needsSupportReason: null,
@@ -97,6 +105,7 @@ vi.mock('@/lib/x402/hostedPurchaseWire', () => ({
 
 vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
   CreatorStorePurchaseConfirmation: ({
+    product,
     priceJpyc,
     feeJpyc,
     totalJpyc,
@@ -106,6 +115,7 @@ vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
     onBack,
     onConfirm,
   }: {
+    product?: { sellerRole?: string };
     priceJpyc: string;
     feeJpyc: string;
     totalJpyc: string;
@@ -115,7 +125,7 @@ vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
     onBack: () => void;
     onConfirm: () => void;
   }) => (
-    <div data-testid="confirmation">
+    <div data-testid="confirmation" data-seller-role={product?.sellerRole}>
       <span>
         {rail === 'usdc'
           ? `usdc:${priceJpyc}/${paidUsdc}`
@@ -170,6 +180,8 @@ function renderFlow(
 }
 
 beforeEach(() => {
+  state.licenseEnabled = false;
+  state.sellerRole = undefined;
   vi.clearAllMocks();
   state.address = '0x1111111111111111111111111111111111111111';
   state.phase = 'review';
@@ -383,5 +395,38 @@ describe('CreatorStorePurchaseFlow', () => {
     );
     expect(state.retry).toHaveBeenCalledOnce();
     expect(state.purchase).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('license purchase flow', () => {
+  const licenseProduct = { ...PRODUCT, productKind: 'license' as const, priceJpyc: '1000', license: { supply: 10, transferable: false, termsUrl: 'https://example.com/terms', termsVersion: '1' } };
+  it('最終確認は server quote の sellerRole を受け取る', () => {
+    state.licenseEnabled = true;
+    state.sellerRole = 'third_party';
+    renderFlow('ja', { ...licenseProduct, sellerRole: 'operator', sellerName: 'Seller' });
+    expect(screen.getByTestId('confirmation')).toHaveAttribute('data-seller-role', 'third_party');
+    expect(state.hookInput).not.toHaveProperty('sellerRole');
+  });
+  it.each([
+    ['sold_out', '完売しました'],
+    ['reservation_quota', '同時に確保できる数の上限です。しばらくしてからお試しください'],
+    ['recipient_unsupported', 'このウォレットは NFT を受け取れません。対応するウォレットをご利用ください。'],
+    ['license_registration_pending', '準備中です'],
+    ['license_simulation_unavailable', '確認できませんでした。時間をおいて再試行'],
+  ])('%s は可視の購入エラーになる', (code, message) => {
+    state.licenseEnabled = true; state.phase = 'error'; state.quote = null; state.error = new Error(code);
+    renderFlow('ja', licenseProduct);
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+    expect(screen.getByText('利用ライセンス NFT')).toBeInTheDocument();
+  });
+  it('署名送信後の確定エラーも表示する', () => {
+    state.licenseEnabled = true; state.phase = 'failed-prebroadcast'; state.error = new Error('sold_out');
+    renderFlow('ja', licenseProduct);
+    expect(screen.getByRole('alert')).toHaveTextContent('完売しました');
+  });
+  it('flag OFF ではライセンス modal を表示しない', () => {
+    const { container } = renderFlow('ja', licenseProduct);
+    expect(container).toBeEmptyDOMElement();
   });
 });

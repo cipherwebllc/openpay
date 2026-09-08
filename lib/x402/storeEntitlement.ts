@@ -25,6 +25,7 @@ type LibraryCursor = {
 
 export type StoreLibraryItem = {
   productKind?: 'license';
+  tokenChainId?: number;
   entitled?: boolean | null;
   basis?: import('@/lib/license/rights').LicenseRights['basis'];
   nft?: import('@/lib/license/jobs').LicenseProof;
@@ -351,7 +352,8 @@ export async function listStoreLibraryPage(input: {
     if (!definition) { items.push(libraryItem(ownership)); continue; }
     const { resolveLicenseRights } = await import('@/lib/license/rights');
     const rights = await resolveLicenseRights({ address: ownership.payer, productId: ownership.resourceId, definition, ownership });
-    items.push({ ...libraryItem(ownership), productKind: 'license', ...rights });
+    // 発行 tx のリンク先は購入時の定義から返し、現在の環境設定で推測させない。
+    items.push({ ...libraryItem(ownership), productKind: 'license', tokenChainId: definition.tokenChainId, ...rights });
   }
   const last = visible.at(-1)!;
   return {

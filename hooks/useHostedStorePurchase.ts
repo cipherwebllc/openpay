@@ -16,6 +16,8 @@ import {
   useState,
 } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { env } from '@/lib/env';
+import { isLicensePurchaseError, LICENSE_PURCHASE_ERRORS, type LicensePurchaseErrorCode, type SellerRole } from '@/lib/licenseUi';
 import { getAddress, type Address, type Hex } from 'viem';
 import { useAccount, useWalletClient } from 'wagmi';
 import {
@@ -100,6 +102,7 @@ export type HostedStoreNeedsSupportReason =
   | 'payment-status-timeout';
 
 export type HostedStorePurchaseErrorCode =
+  | LicensePurchaseErrorCode
   | 'disabled'
   | 'wallet_not_connected'
   | 'siwe_required'
@@ -316,6 +319,8 @@ export function useHostedStorePurchase({
     useState<HostedStorePurchasePhase>('idle');
   const [quote, setQuote] =
     useState<HostedStorePurchaseQuote | null>(null);
+  // 表示専用の server 応答。署名・決済検証用 quote へは混ぜない。
+  const [sellerRole, setSellerRole] = useState<SellerRole | undefined>();
   const [error, setError] = useState<Error | null>(null);
   const [txHash, setTxHash] = useState<Hex | null>(null);
   const [content, setContent] =
@@ -339,6 +344,7 @@ export function useHostedStorePurchase({
     indeterminateAtRef.current = null;
     setPhase('idle');
     setQuote(null);
+    setSellerRole(undefined);
     setError(null);
     setTxHash(null);
     setContent(null);
@@ -397,6 +403,7 @@ export function useHostedStorePurchase({
     indeterminateAtRef.current = null;
     setPhase('loading-quote');
     setQuote(null);
+    setSellerRole(undefined);
     setError(null);
     setTxHash(null);
     setContent(null);
@@ -426,9 +433,12 @@ export function useHostedStorePurchase({
       throw next;
     }
     if (response.status !== 402) {
+      // ライセンスの確定した購入前エラーだけを可視化し、既存 quote の検証は維持する。
+      const body = env.enableLicenseNftUi ? await responseJson(response) : null;
+      const licenseError = isRecord(body) && isLicensePurchaseError(body.error) && LICENSE_PURCHASE_ERRORS[body.error] === response.status ? body.error : null;
       const next = new HostedStorePurchaseError(
-        'quote_expected_402',
-        `Expected HTTP 402, received ${response.status}`,
+        licenseError ?? 'quote_expected_402',
+        licenseError ?? `Expected HTTP 402, received ${response.status}`,
       );
       setError(next);
       setPhase('error');
@@ -488,6 +498,8 @@ export function useHostedStorePurchase({
       throw next;
     }
 
+    setSellerRole(env.enableLicenseNftUi && isRecord(raw) &&
+      (raw.sellerRole === 'operator' || raw.sellerRole === 'third_party') ? raw.sellerRole : undefined);
     setQuote(validated);
     setPhase('review');
     return validated;
@@ -608,6 +620,8 @@ export function useHostedStorePurchase({
         return;
       }
       if (
+        // これらは license の simulate / reservation CAS が settle 前に返す応答。
+        (env.enableLicenseNftUi && isRecord(body) && isLicensePurchaseError(body.error) && LICENSE_PURCHASE_ERRORS[body.error] === response.status) ||
         response.status === 402 ||
         (response.status === 404 &&
           isRecord(body) &&
@@ -986,6 +1000,7 @@ export function useHostedStorePurchase({
     paymentStatus,
     accessStatus,
     quote,
+    sellerRole,
     content,
     txHash,
     needsSupportReason,
