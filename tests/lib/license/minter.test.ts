@@ -42,7 +42,7 @@ import { LICENSE_DUE_INDEX, LICENSE_OBLIGATION_INDEX, licenseObligationKey } fro
 import { licenseRegistrationJobKey } from '@/lib/license/product';
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
 import { JPYC_V3_ASSET } from '@/lib/x402/types';
-import type { LicenseMintJob } from '@/lib/license/jobs';
+import { parseLicenseJob, type LicenseMintJob } from '@/lib/license/jobs';
 
 const NOW = 1_800_000_000_000;
 const ID = 'h_' + 'a'.repeat(32);
@@ -97,14 +97,22 @@ afterAll(closeRedisLuaEngine);
 describe('license worker: viem + real Lua CAS', () => {
   it('persists finality evidence, nonce and signed hash before broadcast, then polls in the next run', async () => {
     expect(await run()).toMatchObject({ ok: true, processed: 1, failed: 0 });
-    const submitted = current(); expect(submitted).toMatchObject({ status: 'submitted', paymentBlock: { blockNumber: '50', blockHash: BLOCK }, submission: { nonce: 7 } });
+    const submitted = current(); expect(submitted).toMatchObject({ status: 'submitted', attempts: 0, nextAttemptAt: NOW + 60_000, paymentBlock: { blockNumber: '50', blockHash: BLOCK }, submission: { nonce: 7 } });
+    expect(h.store!.zsets.get(LICENSE_DUE_INDEX)?.get(job.paymentKey)).toBe(NOW + 60_000);
     expect(submitted.lease?.token).toBe(h.store!.strings.get(LICENSE_WORKER_LOCK));
     const original = h.rpc.getTransactionReceipt.getMockImplementation()!;
     h.rpc.getTransactionReceipt.mockImplementation(async (args) => args.hash === TX ? original(args) : mintReceipt(args.hash));
     h.rpc.readContract.mockImplementation(async ({ functionName }) => functionName === 'authorizationState' ? true : functionName === 'licenseOf' ? { exists: true, definitionHash: definition.definitionHash, maxSupply: 10n, transferable: true } : { id: BigInt(definition.tokenId), to: PAYER });
-    advance(); await run();
+    advance(60_000); await run();
     expect(current()).toMatchObject({ status: 'minted', mintTxHash: submitted.submission!.hash, mintBlock: { blockNumber: '90', blockHash: BLOCK } });
     expect(h.wallet.signTransaction).toHaveBeenCalledTimes(1); expect(h.store!.strings.has(LICENSE_ACTIVE_SUBMISSION)).toBe(false);
+  });
+  it('does not poll before the 60s due time and retains the 55s worker lock', async () => {
+    await run(); const submitted = current();
+    advance(59_999); await run();
+    expect(current()).toEqual(submitted); expect(h.rpc.getTransactionReceipt).toHaveBeenCalledTimes(1);
+    advance(1); expect(await run()).toMatchObject({ skipped: 'locked' });
+    expect(h.wallet.signTransaction).toHaveBeenCalledTimes(1);
   });
   it('awaits finalized payment and rejects mismatched payment evidence', async () => {
     h.rpc.getBlock.mockResolvedValue({ number: 40n, hash: BLOCK }); await run();
@@ -125,6 +133,59 @@ describe('license worker: viem + real Lua CAS', () => {
     expect(current()).toMatchObject({ status: 'needs_repair', attempts: 10, alertedAt: NOW, alertPending: false }); expect(h.alert).toHaveBeenCalledTimes(1);
     expect(h.store!.zsets.get(LICENSE_OBLIGATION_INDEX)?.has(job.paymentKey)).toBe(true);
     expect([1, 2, 3, 10].map(licenseBackoff)).toEqual([300_000, 600_000, 1_200_000, 3_600_000]);
+  });
+  it.each(['submission_unconfirmed', 'receipt_not_finalized', 'alternating'] as const)('uses five persisted 60s waits then backoff for %s without counting failures', async (reason) => {
+    await run(); const submitted = current();
+    const original = h.rpc.getTransactionReceipt.getMockImplementation()!;
+    let receiptAvailable = false;
+    h.rpc.getTransactionReceipt.mockImplementation(async (args) => args.hash !== TX && receiptAvailable
+      ? { ...mintReceipt(args.hash), blockNumber: 101n }
+      : original(args));
+    const delays = [60_000, 60_000, 60_000, 60_000, 60_000, 300_000, 600_000, 1_200_000, 2_400_000, 3_600_000, 3_600_000];
+    for (const [index, delay] of delays.entries()) {
+      receiptAvailable = reason === 'receipt_not_finalized' || (reason === 'alternating' && index % 2 === 1);
+      advance(current().nextAttemptAt - h.store!.now()); await run();
+      expect(current()).toMatchObject({ status: 'submitted', submission: submitted.submission, attempts: 0, finalityWaitAttempts: index + 1,
+        lastError: receiptAvailable ? 'receipt_not_finalized' : 'submission_unconfirmed', nextAttemptAt: h.store!.now() + delay });
+      expect(h.store!.zsets.get(LICENSE_DUE_INDEX)?.get(job.paymentKey)).toBe(h.store!.now() + delay);
+      expect(current().alertPending).not.toBe(true); expect(h.alert).not.toHaveBeenCalled();
+      expect(h.store!.strings.get(LICENSE_ACTIVE_SUBMISSION)).toBe(job.paymentKey);
+    }
+    expect(h.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    for (const [args] of h.rpc.sendRawTransaction.mock.calls) expect(args.serializedTransaction).toBe(submitted.submission!.serializedTransaction);
+  });
+  it.each([true, false])('keeps the real attempt-10 repair/alert boundary across finality waits (submission: %s)', async (submitted) => {
+    seed({ ...job, attempts: 8 });
+    if (submitted) await run();
+    else {
+      h.rpc.readContract.mockImplementation(async ({ functionName }) => functionName === 'authorizationState' ? true : functionName === 'licenseOf'
+        ? { exists: true, definitionHash: definition.definitionHash, maxSupply: 10n, transferable: true }
+        : { id: BigInt(definition.tokenId), to: PAYER });
+      h.rpc.getLogs.mockResolvedValue([{ transactionHash: KEY }]);
+    }
+    const original = h.rpc.getTransactionReceipt.getMockImplementation()!;
+    h.rpc.getTransactionReceipt.mockImplementation(async (args) => args.hash === TX ? original(args) : { ...mintReceipt(args.hash), blockNumber: 101n });
+    for (let count = 1; count <= 6; count++) {
+      advance(current().nextAttemptAt - h.store!.now()); await run();
+      expect(current()).toMatchObject({ attempts: count <= 2 ? 8 : 9, finalityWaitAttempts: count,
+        status: submitted ? 'submitted' : 'retryable', nextAttemptAt: h.store!.now() + (count <= 5 ? 60_000 : 300_000) });
+      expect(h.alert).not.toHaveBeenCalled(); expect(current().alertPending).not.toBe(true);
+      if (count === 2) {
+        advance(current().nextAttemptAt - h.store!.now()); h.rpc.getBlock.mockRejectedValueOnce(new Error('RPC unavailable')); await run();
+        expect(current()).toMatchObject({ attempts: 9, finalityWaitAttempts: 2, nextAttemptAt: h.store!.now() + licenseBackoff(9) });
+        expect(h.alert).not.toHaveBeenCalled();
+      }
+    }
+    advance(current().nextAttemptAt - h.store!.now()); h.rpc.getBlock.mockRejectedValueOnce(new Error('RPC unavailable')); await run();
+    expect(current()).toMatchObject({ status: submitted ? 'submitted' : 'needs_repair', attempts: 10, finalityWaitAttempts: 6,
+      nextAttemptAt: h.store!.now() + licenseBackoff(10), alertedAt: h.store!.now(), alertPending: false });
+    expect(h.alert).toHaveBeenCalledTimes(1); expect(h.wallet.signTransaction).toHaveBeenCalledTimes(submitted ? 1 : 0);
+  });
+  it('accepts legacy jobs without a wait counter and isolates corrupt wait counters', () => {
+    expect(parseLicenseJob(JSON.stringify(job))).toEqual(job);
+    for (const finalityWaitAttempts of [-1, 1.5, '5', null]) {
+      expect(parseLicenseJob(JSON.stringify({ ...job, finalityWaitAttempts }))).toBeNull();
+    }
   });
   it('alert failure stays due and is retried independently', async () => {
     seed({ ...job, attempts: 9 }); h.alert.mockResolvedValue(false); h.rpc.simulateContract.mockRejectedValue(new Error('bad receiver')); await run();
@@ -188,8 +249,9 @@ describe('license worker: viem + real Lua CAS', () => {
     const member = 'registration:' + ID; const key = licenseRegistrationJobKey(ID);
     h.store!.strings.set(key, JSON.stringify({ version: 1, kind: 'registration', productId: ID, license: definition, status: 'pending', attempts: 0, nextAttemptAt: NOW }));
     h.rpc.readContract.mockResolvedValue({ exists: false }); h.rpc.sendRawTransaction.mockResolvedValue(TX);
-    await runLicenseWorker({ member }); const submitted = JSON.parse(h.store!.strings.get(key)!); expect(submitted).toMatchObject({ kind: 'register', status: 'submitted' });
-    advance(); h.rpc.readContract.mockResolvedValue({ exists: true, definitionHash: definition.definitionHash, maxSupply: 10n, transferable: true }); h.rpc.getTransactionReceipt.mockResolvedValue(mintReceipt(submitted.submission.hash));
+    await runLicenseWorker({ member }); const submitted = JSON.parse(h.store!.strings.get(key)!); expect(submitted).toMatchObject({ kind: 'register', status: 'submitted', attempts: 0, nextAttemptAt: NOW + 60_000 });
+    expect(h.store!.zsets.get(LICENSE_DUE_INDEX)?.get(member)).toBe(NOW + 60_000);
+    advance(60_000); h.rpc.readContract.mockResolvedValue({ exists: true, definitionHash: definition.definitionHash, maxSupply: 10n, transferable: true }); h.rpc.getTransactionReceipt.mockResolvedValue(mintReceipt(submitted.submission.hash));
     await runLicenseWorker({ member }); expect(h.confirm).toHaveBeenCalledWith(ID, submitted.submission.hash, h.rpc); expect(JSON.parse(h.store!.strings.get(key)!).status).toBe('registered');
   });
   it('flag OFF never acquires a lock or dispatches RPC; relay key reuse never signs', async () => {

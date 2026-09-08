@@ -37,6 +37,8 @@ const PAYMENT_ABI = parseAbi([
 const MAX_GAS = 600_000n;
 const MAX_TX_COST = 10n ** 17n; // 0.1 POL。見積り超過を切り詰めて送信せず、運営修復へ回す。
 const MIN_RESERVE = 10n ** 17n;
+const FINALITY_WAIT_DELAY = 60_000;
+const SHORT_FINALITY_WAITS = 5;
 export const licenseBackoff = (attempts: number) => Math.min(3_600_000, 300_000 * 2 ** Math.min(10, Math.max(0, attempts - 1)));
 class Deadline extends Error {}
 class Repair extends Error {}
@@ -75,10 +77,17 @@ async function processJob(member: string, token: string, deadline: number): Prom
   };
   await save({ ...job, lease: { token, until: Date.now() + 55_000 } });
   const reschedule = async (reason: string, repair = false) => {
-    const attempts = job.attempts + 1;
+    // 確定待ちが実障害の attempt 10 修復・通知境界へ波及しないよう、両待機理由を永続 finalityWaitAttempts で別計数する。
+    // 待機中は attempts を増減せず、実障害を挟んでも待機回数を保持し、最初の 5 回だけ 60 秒、その後は既存 backoff を使う。
+    const finalityWait = !repair && (reason === 'receipt_not_finalized' || reason === 'submission_unconfirmed');
+    const finalityWaitAttempts = (job.finalityWaitAttempts ?? 0) + (finalityWait ? 1 : 0);
+    const attempts = job.attempts + (finalityWait ? 0 : 1);
+    const delay = finalityWait
+      ? finalityWaitAttempts <= SHORT_FINALITY_WAITS ? FINALITY_WAIT_DELAY : licenseBackoff(finalityWaitAttempts - SHORT_FINALITY_WAITS)
+      : licenseBackoff(attempts);
     // 不明な送信は attempt 10 でも submitted のまま hash を追う。新しい nonce で再 mint しない。
     const status = job.submission && !repair ? 'submitted' : repair || attempts >= 10 ? 'needs_repair' : 'retryable';
-    await save({ ...job, status, attempts, lastError: reason, nextAttemptAt: Date.now() + licenseBackoff(attempts),
+    await save({ ...job, status, attempts, ...(finalityWait ? { finalityWaitAttempts } : {}), lastError: reason, nextAttemptAt: Date.now() + delay,
       ...(attempts >= 10 || repair ? { alertPending: job.alertedAt === undefined } : {}) });
   };
   const alert = async () => {
@@ -214,7 +223,7 @@ async function processJob(member: string, token: string, deadline: number): Prom
     const serializedTransaction = await step(() => wallet.signTransaction(prepared));
     const hash = keccak256(serializedTransaction);
     // broadcast より先に nonce/署名/hash と恒久送信枠を同一 CAS で記録。応答消失でも再利用しない。
-    await save({ ...job, status: 'submitted', submission: { serializedTransaction, hash, nonce, signer: account.address, fromBlock: head.number.toString() }, nextAttemptAt: Date.now() + 300_000 }, 'take');
+    await save({ ...job, status: 'submitted', submission: { serializedTransaction, hash, nonce, signer: account.address, fromBlock: head.number.toString() }, nextAttemptAt: Date.now() + FINALITY_WAIT_DELAY }, 'take');
     await step(() => rpc.sendRawTransaction({ serializedTransaction }));
   } catch (error) {
     // 期限切れ/lease 喪失で stale worker が追記や送信を続ける波及を断つ。

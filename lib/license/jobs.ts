@@ -15,6 +15,7 @@ export type LicenseSubmission = {
 type JobBase = {
   version: 1; productId: string; license: LicenseDefinition; status: LicenseJobStatus;
   attempts: number; nextAttemptAt: number; lastError?: string;
+  finalityWaitAttempts?: number;
   lease?: { token: string; until: number };
   submission?: LicenseSubmission;
   mintTxHash?: Hex; mintBlock?: LicenseBlockEvidence;
@@ -48,6 +49,8 @@ export function parseLicenseJob(raw: string | null): LicenseJob | null {
       typeof r.productId !== 'string' || license.contentRef !== 'x402:hosted:' + r.productId + ':content:1' ||
       !['awaiting_finality', 'pending', 'submitted', 'minted', 'registered', 'retryable', 'needs_repair'].includes(r.status) ||
       !integer(r.attempts) || !integer(r.nextAttemptAt)) return null;
+    // 待機カウンタの破損が不正な再試行時刻や短期待機の再開へ波及しないよう、原本を修復対象に残す。
+    if (r.finalityWaitAttempts !== undefined && !integer(r.finalityWaitAttempts)) return null;
     if (r.lease !== undefined && (typeof r.lease?.token !== 'string' || !integer(r.lease.until))) return null;
     if (r.mintTxHash !== undefined && !hex32(r.mintTxHash)) return null;
     if (r.paymentBlock !== undefined && !block(r.paymentBlock)) return null;
