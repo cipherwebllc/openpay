@@ -318,6 +318,32 @@ describe('runRedisLua: redis.call / pcall', () => {
 });
 
 describe('runRedisLua: cjson', () => {
+  it.each([
+    'local shared={n=1}; local value={left={child=shared},right={child=shared}}',
+    'local value={}; value.self=value',
+  ])('Upstash は同一 table の再参照で例外を投げず nil + exact error を返す: %s', async (setup) => {
+    expect(await runRedisLua(`${setup}
+      local ok, encoded, err = pcall(cjson.encode, value)
+      return {ok, encoded == nil, err}
+    `, [], [], store)).toEqual([
+      1, 1,
+      'json: error calling MarshalJSON for type json.jsonValue: cannot encode recursively nested tables to JSON',
+    ]);
+  });
+
+  it('同じ構造の別 table は成功し、visited は encode ごとにリセットされる', async () => {
+    const result = await runRedisLua(`
+      local value={left={child={n=1}},right={child={n=1}}}
+      local first, firstError=cjson.encode(value)
+      local second, secondError=cjson.encode(value)
+      return {first, firstError == nil, second, secondError == nil}
+    `, [], [], store);
+    expect(result).toEqual([expect.any(String), 1, expect.any(String), 1]);
+    const [first, , second] = result as [string, number, string, number];
+    expect(JSON.parse(first)).toEqual({ left: { child: { n: 1 } }, right: { child: { n: 1 } } });
+    expect(JSON.parse(second)).toEqual(JSON.parse(first));
+  });
+
   it('decode は Lua の table を作る (userdata ではない)', async () => {
     expect(
       await runRedisLua(

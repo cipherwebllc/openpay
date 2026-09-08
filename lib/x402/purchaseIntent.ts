@@ -1966,7 +1966,11 @@ if ownRaw then
       tonumber(grant.contentRevision) > tonumber(own.latestGrant.contentRevision) or
       (tonumber(grant.contentRevision) == tonumber(own.latestGrant.contentRevision) and
        tonumber(grant.purchasedAt) > tonumber(own.latestGrant.purchasedAt)) then
-    own.latestGrant = grant
+    -- grants[] に入れた grant と同じ Lua テーブルを latestGrant にも参照させると、Upstash の
+    -- cjson.encode は「同一テーブルの二重参照」を循環と誤検知して nil+error を返し (例外にならない)、
+    -- 直後の SET が壊れて finalize が永久に失敗する (2026-09-08 Amoy 実測・同一商品の 2 回目購入)。
+    -- 本家 Redis / WASM ハーネスでは再現しない。JSON から decode し直した別テーブルを持たせる。
+    own.latestGrant = cjson.decode(ARGV[13])
   end
   if tonumber(ARGV[19]) > tonumber(own.updatedAt) then
     own.updatedAt = tonumber(ARGV[19])

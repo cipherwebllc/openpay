@@ -510,6 +510,28 @@ export function runRedisLua(
       decode: (raw: string) => stripNulls(JSON.parse(raw)),
     });
     try {
+      // Upstash 実測 (2026-09-08): 真の循環だけでなく、値全体で同一 table を二度参照すると
+      // nil + このエラー文字列を返す (例外ではない)。ancestor stack に緩めないこと。
+      // JS 変換前の Lua table identity を検査し、visited は encode 呼び出しごとに作り直す。
+      await lua.doString(`
+        local stringify = cjson.encode
+        cjson.encode = function(value)
+          local visited = {}
+          local function repeated(node)
+            if type(node) ~= 'table' then return false end
+            if visited[node] then return true end
+            visited[node] = true
+            for key, child in pairs(node) do
+              if repeated(key) or repeated(child) then return true end
+            end
+            return false
+          end
+          if repeated(value) then
+            return nil, 'json: error calling MarshalJSON for type json.jsonValue: cannot encode recursively nested tables to JSON'
+          end
+          return stringify(value)
+        end
+      `);
       // script 中の top-level `return` を許すため無名関数で包む。local は関数内に閉じるので
       // 次の実行へグローバル汚染が漏れない。
       const result = await lua.doString(`return (function() ${script} end)()`);
