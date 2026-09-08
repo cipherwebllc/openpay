@@ -6,7 +6,8 @@ test.describe('license UI default OFF', () => {
 
   test('ガイドはライセンス節を表示しない', async ({ page }) => {
     await page.goto('/ja/guide/store');
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    // ガイドは h1 が複数ある (タイトル + ヒーロー) ので strict 違反を避けて先頭だけ待つ。
+    await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
     await expect(page.getByRole('heading', { name: '利用ライセンスを売る' })).toHaveCount(0);
     await expect(page.getByText('createLicenseGate', { exact: false })).toHaveCount(0);
   });
