@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.1
+
+- Add `resolveLicense({ product, origin?, fetch? })` for validated v1 product
+  descriptors, HTTPS-only discovery, redirect rejection and token derivation checks.
+- Let `hasLicense` and `createLicenseGate` accept a product ID in place of the
+  explicit chain/contract/token tuple. Polygon/Amoy RPC remains optional.
+- Discover gate identity at first challenge/verify or `await gate.ready()`, sharing
+  concurrent discovery and caching the descriptor for the gate lifetime. Failed
+  discovery can retry. Synchronous `check()` throws `not_ready` until initialized.
+- Preserve explicit identity and synchronous session checks. Add `session.origin`
+  to bind signatures to your service independently of descriptor discovery.
+- Document integration with `LICENSE_PRODUCT_ID` and `LICENSE_SESSION_SECRET`.
+  No new dependencies. This workspace release has not been published.
+
 ## 0.7.0
 
 - Add `hasLicense` for standard ERC-1155 ownership with a required chain/contract/

@@ -38,16 +38,33 @@ export function licenseIdentity({ chainId, contract, tokenId }) {
   return { chainId, contract: licenseAddress(contract, 'contract'), tokenId: id };
 }
 
-export function licenseOrigin(value) {
+export function licenseProduct(value) {
+  if (typeof value !== 'string' || !/^h_[0-9a-f]{32}$/.test(value)) {
+    throw new TypeError('product must be an OpenPay product ID (h_ plus 32 lowercase hex digits)');
+  }
+  return value;
+}
+
+export function licenseSelector({ product, chainId, contract, tokenId }) {
+  if (product === undefined) return licenseIdentity({ chainId, contract, tokenId });
+  licenseProduct(product);
+  if (chainId !== undefined || contract !== undefined || tokenId !== undefined) {
+    throw new TypeError('Provide product or chainId/contract/tokenId, not both');
+  }
+  return null;
+}
+
+export function licenseOrigin(value, { httpsOnly = false } = {}) {
   let url;
   try { url = new URL(value); } catch {
     throw new TypeError('origin must be an HTTPS origin');
   }
   // The status authority and signing domain must not be substituted over plaintext.
   const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) ||
+  if ((url.protocol !== 'https:' && !(url.protocol === 'http:' && local && !httpsOnly)) ||
     url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
-    throw new TypeError('origin must use HTTPS (HTTP only for localhost/127.0.0.1), without credentials or a path');
+    throw new TypeError(httpsOnly ? 'origin must use HTTPS, without credentials or a path' :
+      'origin must use HTTPS (HTTP only for localhost/127.0.0.1), without credentials or a path');
   }
   return url.origin;
 }

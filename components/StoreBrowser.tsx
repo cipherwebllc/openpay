@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Search } from 'lucide-react';
 import { env } from '@/lib/env';
+import { storeProductPath } from '@/lib/storeProductLink';
 import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { CreatorStorefrontProductArtwork } from '@/components/CreatorStorefrontProductArtwork';
 import {
@@ -128,7 +129,7 @@ export function StoreBrowser({
           {filtered.map((listing) => (
             <li key={listing.id}>
               <Link
-                href={`/${locale}/@${listing.handle}?product=${listing.id}&from=store`}
+                href={`${storeProductPath(listing.handle, listing.id, locale)}&from=store`}
                 prefetch={false}
                 className={`group flex ${env.enableLicenseNftUi && listing.productKind === 'license' ? '' : 'h-full'} flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-[0_8px_20px_-10px_rgba(15,23,42,0.25)]`}
               >

@@ -11,6 +11,7 @@ import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Copy, PackageOpen, Pencil, Store } from 'lucide-react';
 import { env } from '@/lib/env';
+import { storeProductPath } from '@/lib/storeProductLink';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
 import { useOrigin } from '@/hooks/useOrigin';
@@ -448,8 +449,6 @@ function SignedInSellerPanel({
   const products = (productsQuery.data?.products ?? []).filter((product) => env.enableLicenseNftUi || product.productKind !== 'license');
   const maxProducts = productsQuery.data?.max ?? 12;
   const atLimit = products.length >= maxProducts;
-  const productShareBaseUrl =
-    handle && origin ? `${origin}/${locale}/@${handle}` : null;
 
   const updateSeller = (patch: Partial<SellerForm>) => {
     setSellerSaved(false);
@@ -898,10 +897,10 @@ function SignedInSellerPanel({
                     </button>
                     {product.saleActive &&
                     product.contentAvailable &&
-                    productShareBaseUrl ? (
+                    handle && origin ? (
                       <ProductShareButton
                         license={env.enableLicenseNftUi && product.productKind === 'license'}
-                        url={`${productShareBaseUrl}?product=${encodeURIComponent(product.id)}`}
+                        url={`${origin}${storeProductPath(handle, product.id, locale)}`}
                         copyLabel={t('copyShareLink')}
                         copiedLabel={t('shareLinkCopied')}
                       />

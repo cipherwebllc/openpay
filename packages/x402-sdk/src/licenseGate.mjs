@@ -1,9 +1,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { verifyMessage } from 'viem';
 import { createSiweMessage, parseSiweMessage } from 'viem/siwe';
-import { hasLicense } from './license.mjs';
+import { hasLicense, resolveLicense } from './license.mjs';
 import {
-  DEFAULT_LICENSE_ORIGIN, LicenseError, licenseAddress, licenseIdentity, licenseOrigin,
+  DEFAULT_LICENSE_ORIGIN, LicenseError, licenseAddress, licenseIdentity, licenseOrigin, licenseSelector,
 } from './licenseCommon.mjs';
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -28,15 +28,38 @@ function memoryNonceStore(now) {
 }
 
 export function createLicenseGate({
-  chainId, contract, tokenId, rpcUrl, publicClient,
+  product, fetch, chainId, contract, tokenId, rpcUrl, publicClient,
   session, origin = DEFAULT_LICENSE_ORIGIN,
   statement = 'Sign in to use this license.', nonceStore, now = Date.now,
 }) {
-  const identity = licenseIdentity({ chainId, contract, tokenId });
-  const audience = licenseOrigin(origin);
+  let identity = licenseSelector({ product, chainId, contract, tokenId });
+  if (product !== undefined) licenseOrigin(origin, { httpsOnly: true });
+  const audience = licenseOrigin(session?.origin ?? origin);
   const url = new URL(audience);
-  const idHex = `0x${identity.tokenId.toString(16)}`;
-  const resource = `urn:openpay:license:${chainId}:${identity.contract.toLowerCase()}:${idHex}`;
+  let idHex;
+  let resource;
+  function setIdentity(value) {
+    identity = value;
+    chainId = identity.chainId;
+    idHex = `0x${identity.tokenId.toString(16)}`;
+    resource = `urn:openpay:license:${chainId}:${identity.contract.toLowerCase()}:${idHex}`;
+  }
+  if (identity) setIdentity(identity);
+  let descriptor;
+  let pending;
+  async function ready() {
+    if (identity) return descriptor;
+    pending ??= resolveLicense({ product, origin, fetch }).then((value) => {
+      descriptor = Object.freeze(value);
+      setIdentity(licenseIdentity(descriptor));
+    }).catch((error) => {
+      // A failed discovery must not install a partial identity. A later call can retry.
+      pending = undefined;
+      throw error;
+    });
+    await pending;
+    return descriptor;
+  }
   if (typeof session?.secret !== 'string' || Buffer.byteLength(session.secret, 'utf8') < 32) {
     throw new TypeError('session.secret must contain at least 32 bytes of secret key material');
   }
@@ -73,14 +96,17 @@ export function createLicenseGate({
   }
 
   async function challenge(address) {
+    const holderAddress = licenseAddress(address);
+    await ready();
     const nonce = randomBytes(32).toString('hex');
     const issuedAt = now();
-    const message = messageFor(licenseAddress(address), nonce, issuedAt);
+    const message = messageFor(holderAddress, nonce, issuedAt);
     await storeCall('set', nonce, { message, expiresAt: issuedAt + CHALLENGE_TTL_MS });
     return message;
   }
 
   async function verify({ message, signature }) {
+    await ready();
     if (typeof message !== 'string' || message.length > 8192) {
       throw new LicenseError('invalid_challenge', 'Invalid license challenge');
     }
@@ -125,6 +151,7 @@ export function createLicenseGate({
   }
 
   function check(token) {
+    if (!identity) throw new LicenseError('not_ready', 'Call await gate.ready() before checking sessions');
     const invalid = () => new LicenseError('invalid_session', 'Invalid license session');
     if (typeof token !== 'string' || token.length > 4096) throw invalid();
     const match = /^(opl1\.[A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/.exec(token);
@@ -146,5 +173,5 @@ export function createLicenseGate({
     return { address, tokenId: identity.tokenId, exp: payload.exp };
   }
 
-  return { challenge, verify, check };
+  return { ready, challenge, verify, check };
 }

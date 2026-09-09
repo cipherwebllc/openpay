@@ -8,6 +8,14 @@ describe('license parent/child flags', () => {
     vi.resetModules(); const { env } = await import('@/lib/env'); const { licenseNftEnabled } = await import('@/lib/license/config');
     expect(licenseNftEnabled()).toBe(parent && child); expect(env.enableLicenseNftUi).toBe(parent && child);
   });
+  it.each(['', '0', 'true', '1'])('public flag %s only admits any seller for literal 1', async (value) => {
+    vi.stubEnv('ENABLE_CREATOR_STORE', '1'); vi.stubEnv('ENABLE_LICENSE_NFT', '1');
+    vi.stubEnv('ENABLE_LICENSE_NFT_PUBLIC', value); vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', '');
+    vi.resetModules();
+    const { env } = await import('@/lib/env'); const { licenseSellerAllowed } = await import('@/lib/license/config');
+    expect(env.enableLicenseNftPublic).toBe(value === '1');
+    expect(licenseSellerAllowed('0x1111111111111111111111111111111111111111')).toBe(value === '1');
+  });
   it('keeps the minter key server-only and separate from the relayer', async () => {
     expect(readFileSync('lib/env.ts', 'utf8')).not.toContain('LICENSE_MINTER_PRIVATE_KEY');
     const source = readFileSync('lib/license/minterKey.ts', 'utf8'); expect(source).toContain("import 'server-only'"); expect(source).not.toContain('RELAYER_PRIVATE_KEY');

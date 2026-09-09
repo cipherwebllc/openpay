@@ -45,6 +45,29 @@ afterEach(() => {
 });
 
 describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
+  it.each([[false, true], [true, false], [true, true]])('license schemas and both public operations follow parent=%s child=%s', async (parent, child) => {
+    vi.stubEnv('ENABLE_CREATOR_STORE', parent ? '1' : '0');
+    vi.stubEnv('ENABLE_LICENSE_NFT', child ? '1' : '0');
+    const body = await doc();
+    for (const path of ['/api/license/products/{id}', '/api/license/verify']) {
+      if (parent && child) {
+        expect(body.paths[path].get.security).toEqual([]);
+        expect(body.paths[path].get).not.toHaveProperty('x-payment-info');
+      } else expect(body.paths).not.toHaveProperty(path);
+    }
+    if (parent && child) {
+      expect(body).toHaveProperty('components.schemas.LicenseDescriptor');
+      expect(body).toHaveProperty('components.schemas.LicenseVerification');
+    }
+  });
+
+  it('license-only configuration still serves OpenAPI', async () => {
+    for (const key of ['NEXT_PUBLIC_ENABLE_X402_FACILITATOR', 'NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY', 'NEXT_PUBLIC_ENABLE_SHOPS_API']) vi.stubEnv(key, '0');
+    vi.stubEnv('ENABLE_CREATOR_STORE', '1'); vi.stubEnv('ENABLE_LICENSE_NFT', '1'); vi.resetModules();
+    const { buildOpenApiDocument } = await import('@/lib/openapi/document');
+    expect(buildOpenApiDocument()).toHaveProperty('paths./api/license/products/{id}');
+  });
+
   it('origin 直下で配信され servers が canonical origin を指す', async () => {
     const body = await doc();
     expect(body.openapi).toBe('3.1.0');

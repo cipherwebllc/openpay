@@ -7,9 +7,11 @@ export function licenseNftEnabled(): boolean {
   return env.enableCreatorStore === true && env.enableLicenseNft === true;
 }
 
-/** 空・checksum 不正を許可に変えない。rollout の誤設定が一般出品へ波及するのを防ぐ。 */
+/** 公開時も親 flag と address 検証は必須。SIWE・プロフィール等は既存の出品 API で検証する。 */
 export function licenseSellerAllowed(address: string): boolean {
   if (!licenseNftEnabled() || !isAddress(address)) return false;
+  if (process.env.ENABLE_LICENSE_NFT_PUBLIC === '1') return true;
+  // 限定公開では空・checksum 不正を許可に変えない。
   const entries = (process.env.LICENSE_NFT_SELLER_ALLOWLIST ?? '').split(',').map((v) => v.trim());
   if (entries.some((v) => !isAddress(v) || getAddress(v) !== v)) return false;
   return entries.includes(getAddress(address));

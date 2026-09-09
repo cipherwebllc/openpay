@@ -862,6 +862,17 @@ describe('hosted creator-store paid route', () => {
 // license の追加分岐でも、デジタルの既存 payload/error は上の固定テストで維持する。
 describe('license hosted admission', () => {
   afterEach(() => { routeMocks.env.enableLicenseNft = false; vi.unstubAllEnvs(); });
+  it('public listing admits unlisted sellers and rollback blocks their next quote', async () => {
+    routeMocks.env.enableLicenseNft = true;
+    vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', ''); vi.stubEnv('ENABLE_LICENSE_NFT_PUBLIC', '1');
+    routeMocks.getHostedProduct.mockResolvedValue({ ...productFixture(), productKind: 'license', license: { tokenId: NONCE }, registration: { status: 'registered' } });
+    routeMocks.recipient.mockResolvedValue('supported');
+    const route = await loadRoute();
+    expect((await callHosted(route, `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`)).status).toBe(402);
+    vi.stubEnv('ENABLE_LICENSE_NFT_PUBLIC', '0'); routeMocks.createQuoted.mockClear();
+    expect((await callHosted(route, `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`)).status).toBe(404);
+    expect(routeMocks.createQuoted).not.toHaveBeenCalled();
+  });
   it('hosted 商品の成功応答にも表示専用の sellerRole を返す', async () => {
     routeMocks.env.enableLicenseNft = true;
     const settled = intentFixture('settled');

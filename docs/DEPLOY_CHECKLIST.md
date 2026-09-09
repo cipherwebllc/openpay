@@ -1666,11 +1666,11 @@ pending は cron/status が止まるだけで、再点灯後に reconciler が�
 署名済み authorization は validBefore (quote 期限 ≤10 分) で自然失効し、settle gate が
 汎用入口からの持ち込みを拒否する。
 
-### 16.4 利用ライセンス NFT bootstrap（承認前の運用案・既定 OFF）
+### 16.4 利用ライセンス NFT bootstrap と一般開放（flag 既定 OFF）
 
 PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下の復旧手順を人間が確認するまで点灯しない。
 `ENABLE_LICENSE_NFT` は `ENABLE_CREATOR_STORE`、`NEXT_PUBLIC_ENABLE_LICENSE_NFT` は
-`NEXT_PUBLIC_ENABLE_CREATOR_STORE` を親とする。既存の六つの license env だけを使用する。
+`NEXT_PUBLIC_ENABLE_CREATOR_STORE` を親とする。一般出品は server-only の `ENABLE_LICENSE_NFT_PUBLIC` で切り替える（既定 OFF・`1` のみ ON）。
 
 1. **二つの役割・鍵**: owner はデプロイ・修復用のコールド鍵、minter は専用 hot EOA。
    owner と minter を分離し、既存 `RELAYER_PRIVATE_KEY` の EOA とも分ける。
@@ -1680,8 +1680,16 @@ PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下�
 2. **POL 入金**: 各チェーンの minter に native POL を入金し、登録と mint を別々に見積もる。
    worker は tx あたり gas 600,000 以下・最大署名費用 0.1 POL 以下、送信後にも 0.1 POL の残額を要求する。
    超過を切り詰めて送信せず再試行し、10 回失敗時に修復へ回す。relay の資金は共用しない。
-3. **出品許可**: `LICENSE_NFT_SELLER_ALLOWLIST` に公式出品者の checksum アドレスのみを CSV 設定。
-   空・不正 checksum は誰も出品できない。USDC 併売は不可。一般出品の開放は別の判断とする。
+3. **一般開放（2026-09-09 判断）**: `ENABLE_LICENSE_NFT_PUBLIC=1` を設定して redeploy すると、
+   allowlist を無視して全クリエイターの出品を受け付ける。両 server 親 flag、プロフィール所有・SIWE・
+   販売者情報・登録確認の既存要件は維持する。USDC 併売は不可。
+   開放前に本変更の検証結果を確認し、開放後に allowlist 外のアドレスで作成 → 登録 → 公開 →
+   一覧/quote/descriptor の smoke を行う。運営表示は allowlist でなく商品 owner の sellerRole で決まる。
+   **戻し方**: `ENABLE_LICENSE_NFT_PUBLIC` を削除または `0` にして redeploy。
+   `LICENSE_NFT_SELLER_ALLOWLIST` の checksum アドレス CSV が再び有効になり、空・不正なら誰も新規販売できない。
+   allowlist 外は新規作成/販売開始/quote と公開一覧から除外する。既存商品の管理・販売停止、descriptor、
+   購入記録・発行義務・Verify/content/library は維持する（親 flag は ON のまま）。
+   CDN の descriptor は最大 60 秒＋stale 300 秒の表示キャッシュであり、販売可否の権威には使わない。
 4. **登録と公開を分離**: 作成時は paused + pending。worker が `registerLicense` を送信し、
    finalized receipt・LicenseRegistered・licenseOf を照合して registered にする。
    自動公開はしない。販売者が登録確認後に明示的に販売開始する。
@@ -1696,13 +1704,15 @@ PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下�
 
 ### 16.5 Amoy E2E と配信の確認
 
-- allowlist 内外・flag OFF・空 allowlist を試し、登録前は 402 を出さず、登録後も明示 publish が必要と確認。
+- PUBLIC=1 の allowlist 外/空/不正 CSV、PUBLIC OFF の allowlist 内外/空、親 flag OFF を試し、登録前は 402 を出さず、登録後も明示 publish が必要と確認。
 - 非譲渡/譲渡可の各商品を作成し、JPYC 購入 → finalized 決済 tuple → 発行義務保存 →
   simulate → pre-signed nonce/hash 保存 → broadcast → 次回 cron の LicenseMinted/paymentKeyOf 照合を確認。
   購入直後は権利があり、NFT の発行待ちが購入の取り消しにならないことを確認。
 - `GET /api/license/verify?address=<wallet>&product=<id>` の version/chain/contract/tokenId、
   60 秒以内の正負キャッシュ、RPC 失敗時の `entitled:null`、trusted IP 制限と集計枠を確認。
   この API を本人認証・可搬な署名証明として使用しない。
+- `GET /api/license/products/<id>` の v1 schema、HTTPS 商品リンク、残数（読込不明は null）、
+  キャッシュヘッダー、OFF/digital/unknown の 404、trusted IP 制限を確認。
 - SIWE で購入者ライブラリ/status の nft.status・mintTxHash を確認。譲渡先で
   `/api/store/library?source=holders` を `nextCursor` で最後まで巡り、購入履歴を作らず content revision 1 を取得。
   譲渡元の権利喪失、非譲渡 burn 後の購入権利維持、譲渡可 burn 後の保有者権利喪失、配信停止も確認。
@@ -1752,3 +1762,33 @@ OpenPay が第三者の売上を預かったり、原決済を取り消したり
 worker が検出した破損ジョブは `store:license:repair:quarantine` の `mint:<paymentKey>` /
 `registration:<productId>` に残し、due の先頭を占有させない。原本の修復・監査後にこの marker を除去し、
 恒久 index から due を再構築する。active が指すジョブの破損は nonce 不明なので、送信枠を勝手に解放しない。
+
+
+### 16.8 外部サービスの利用ライセンス gate（SDK 0.7.1・未 publish）
+
+必要な環境変数は `LICENSE_PRODUCT_ID` と `LICENSE_SESSION_SECRET` の二つ。
+後者はサーバー限定のランダムな 32 bytes 以上の鍵素材（例: 32 bytes を hex 化）とし、全 worker で共通にする。
+`session.origin` と従量 API の URL は組み込むサービスの URL に置き換える。Polygon/Amoy の RPC は省略可。
+0.7.1 はこの変更では publish しない。導入時は公開状況を確認する。
+
+```js
+import { createLicenseGate, createJpycGate } from 'openpay-x402-sdk';
+
+const entry = createLicenseGate({
+  product: process.env.LICENSE_PRODUCT_ID,
+  session: {
+    secret: process.env.LICENSE_SESSION_SECRET,
+    origin: 'https://service.example',
+  },
+});
+await entry.ready();
+const usage = createJpycGate({ resourceUrl: 'https://service.example/api/paid' });
+```
+
+商品 descriptor の取得元 `origin` は既定 `https://open-pay.jp`（変更時も HTTPS のみ・redirect 不可）。
+最初の challenge/verify または ready で取得し、gate の生存期間中は chainId/contract/tokenId を固定する。
+`check()` は同期のままなので、別 worker が発行した token を受ける worker も起動時に ready を待つ。
+初期化前の check は `not_ready`、取得失敗はエラーで、アクセス許可には変えない。
+NFT 保有は署名検証後に RPC で確認する。Verify は本人認証ではなく、発行待ちでも購入権利は存在し得る。
+短命セッションの有効期間中に譲渡/burn されても check 単独では再照会しない。
+全 worker で利用する nonceStore は atomic consume と TTL を実装し、詳細は SDK README の説明に従う。
