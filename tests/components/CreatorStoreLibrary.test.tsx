@@ -11,10 +11,11 @@ const state = vi.hoisted(() => ({
     | null,
   isSignedIn: true,
   licenseEnabled: false,
+  deliveryEnabled: false,
 }));
 
 vi.mock('@/lib/env', () => ({
-  env: { enableCreatorStoreUi: true, networkEnv: 'mainnet', get enableLicenseNftUi() { return state.licenseEnabled; } },
+  env: { enableCreatorStoreUi: true, networkEnv: 'mainnet', get enableStoreDeliveryTicketUi() { return state.deliveryEnabled; }, get enableLicenseNftUi() { return state.licenseEnabled; } },
 }));
 
 vi.mock('@/hooks/useStoreCacheScope', () => ({
@@ -356,5 +357,41 @@ describe('license library', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch'); renderLibrary();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(screen.queryByText('受け取ったライセンス')).not.toBeInTheDocument();
+  });
+});
+
+
+describe('protected delivery library navigation', () => {
+  beforeEach(() => { state.isSignedIn = true; state.sessionAddress = ADDRESS; state.licenseEnabled = true; state.deliveryEnabled = true; vi.restoreAllMocks(); });
+  const cases = (['digital', 'license', 'holder'] as const).flatMap((source) => [false, true].flatMap((enabled) => (['ready', 'provided-ended'] as const).map((contentState) => ({ source, enabled, contentState }))));
+  it.each(cases)('$source $contentState flag=$enabled: only ready content exposes an ordinary issuance anchor', async ({ source, enabled, contentState }) => {
+    state.deliveryEnabled = enabled;
+    const href = '/api/store/delivery/h_delivery?revision=1';
+    const revision = { title: 'Delivery item', priceJpyc: '1000', contentKind: 'text', label: 'download', purchasedAt: 1, contentRevision: 1 };
+    const license = { productKind: 'license', nft: { status: 'minted' }, entitled: true, basis: source === 'holder' ? 'holder' : 'purchase', license: { supply: 1, transferable: true, termsUrl: 'https://example.com/terms', termsVersion: '1' } };
+    const item = { ...revision, resourceId: 'h_delivery', revisions: [revision], ...(source !== 'digital' ? license : {}) };
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const path = String(url);
+      if (path.startsWith('/api/store/content/')) return jsonResponse({ ok: true, state: contentState, ...item, ...(source === 'holder' ? {} : { intentSalt: '0x1234' }), kind: 'url', value: 'https://example.com/instructions', delivery: { mode: 'ticket', href } });
+      if (path.includes('source=holders')) return jsonResponse({ ok: true, items: source === 'holder' ? [{ ...item, state: 'ready' }] : [], nextCursor: null });
+      return jsonResponse({ ok: true, items: source !== 'holder' ? [item] : [], nextCursor: null });
+    });
+    const { queryClient } = renderLibrary(undefined, source === 'holder' ? 'holders' : 'purchases');
+    fireEvent.click(await screen.findByRole('button', { name: source === 'holder' ? '利用開始の案内を開く' : 'リビジョン 1 を表示' }));
+    if (contentState === 'ready') await screen.findByRole('link', { name: '商品を開く' });
+    else await screen.findByText('提供終了', { exact: true });
+    const link = screen.queryByRole('link', { name: '保護ダウンロードを開く' });
+    if (enabled && contentState === 'ready') {
+      expect(link?.tagName).toBe('A'); expect(link).toHaveAttribute('href', href);
+      expect(link).toHaveAttribute('target', '_blank'); expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+      expect(link).not.toHaveAttribute('data-prefetch');
+      expect(screen.getByText('リンクは60秒で失効します。失効したらもう一度押してください。')).toBeInTheDocument();
+      fireEvent.mouseOver(link!); fireEvent.focus(link!);
+    } else {
+      expect(link).not.toBeInTheDocument();
+      expect(screen.queryByText('リンクは60秒で失効します。失効したらもう一度押してください。')).not.toBeInTheDocument();
+    }
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/store/delivery/'))).toBe(false);
+    expect(JSON.stringify(queryClient.getQueryCache().getAll().map((q) => q.state.data))).not.toContain('ticket=');
   });
 });

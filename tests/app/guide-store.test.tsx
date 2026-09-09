@@ -51,3 +51,16 @@ describe('store guide license section', () => {
     expect(ja.CreatorStorePurchase.licenseErrors.sold_out).toBe('完売しました');
   });
 });
+
+it.each(['ja', 'en'])('%s protected delivery guide includes the complete setup and limits', async (locale) => {
+  const { deliveryStoreGuideContentFor, DELIVERY_SDK_README_URL } = await import('@/lib/storeGuide');
+  render(await GuideStorePage({ params: Promise.resolve({ locale }) }));
+  const c = deliveryStoreGuideContentFor(locale);
+  expect(screen.getByRole('heading', { name: c.heading })).toBeVisible();
+  expect(screen.getByText(c.intro)).toBeVisible();
+  expect(c.steps).toHaveLength(4); expect(c.caveats).toHaveLength(3);
+  for (const text of [...c.steps, ...c.caveats]) expect(screen.getByText(text)).toBeVisible();
+  for (const setting of ['SDK 0.8.0', 'examples/cloudflare-r2-delivery-gate', 'OPENPAY_PRODUCT_ID', 'AUDIENCE', 'OBJECT_KEYS', 'FILES', 'wrangler deploy']) expect(c.steps[1]).toContain(setting);
+  expect(screen.getByRole('link', { name: c.sdkLink })).toHaveAttribute('href', DELIVERY_SDK_README_URL);
+  expect(Object.keys(deliveryStoreGuideContentFor('ja'))).toEqual(Object.keys(deliveryStoreGuideContentFor('en')));
+});

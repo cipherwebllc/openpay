@@ -14,6 +14,7 @@ import { useTranslations } from 'next-intl';
 import { Search } from 'lucide-react';
 import { env } from '@/lib/env';
 import { storeProductPath } from '@/lib/storeProductLink';
+import { CreatorStoreDeliveryBadge } from '@/components/CreatorStoreDeliveryBadge';
 import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { CreatorStorefrontProductArtwork } from '@/components/CreatorStorefrontProductArtwork';
 import {
@@ -143,6 +144,7 @@ export function StoreBrowser({
                   <span className="truncate text-sm font-bold text-slate-800">
                     {listing.title}
                   </span>
+                  <CreatorStoreDeliveryBadge protectedDelivery={listing.protectedDelivery} />
                   <span className="mt-0.5 truncate text-[11px] text-slate-500">
                     @{listing.handle}
                     <span className="mx-1 text-slate-300">·</span>

@@ -430,3 +430,9 @@ describe('license purchase flow', () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+it.each(['ja', 'en'] as const)('%s: product modal renders a configured delivery badge', (locale) => {
+  state.phase = 'idle'; state.quote = null;
+  renderFlow(locale, { ...PRODUCT, protectedDelivery: true });
+  expect(screen.getByText(locale === 'ja' ? '保護配布' : 'Protected delivery', { exact: true })).toBeVisible();
+});

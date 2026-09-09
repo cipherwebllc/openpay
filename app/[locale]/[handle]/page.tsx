@@ -17,6 +17,7 @@ import { hasLocale } from 'next-intl';
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/i18n';
 import { env } from '@/lib/env';
+import { parseDeliveryUrl } from '@/lib/store/deliveryUrl';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { HandleProfileView } from '@/components/HandleProfile';
 import { ReceiveMethodPicker } from '@/components/ReceiveMethodPicker';
@@ -297,6 +298,7 @@ export default async function HandlePage({
       ...(product.usdcEnabled === true ? { usdcEnabled: true as const } : {}),
       payTo: product.payTo,
       contentKind: product.contentKind,
+      protectedDelivery: parseDeliveryUrl(product.deliveryUrl).ok,
       label: product.label,
       ...(product.category ? { category: product.category } : {}),
       ...(product.tags ? { tags: product.tags } : {}),

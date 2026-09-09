@@ -212,3 +212,12 @@ it('ライセンス公開情報と sellerRole を購入 launcher から modal �
   rerender(<CreatorStorefrontSection {...props} />);
   expect(container).toBeEmptyDOMElement();
 });
+
+it('profile product badge and modal props retain only the public boolean', async () => {
+  renderWithIntl(<CreatorStorefrontSection products={[{ ...PRODUCT, protectedDelivery: true }]} accent="#2563eb" theme="clean" sellerDisclosureHref="/ja/store/seller/0x1234" />);
+  expect(screen.getByText('保護配布', { exact: true })).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: '購入する' }));
+  await waitFor(() => expect(purchaseFlowSpy).toHaveBeenCalled());
+  expect(purchaseFlowSpy.mock.lastCall?.[0].product.protectedDelivery).toBe(true);
+  expect(purchaseFlowSpy.mock.lastCall?.[0].product).not.toHaveProperty('deliveryUrl');
+});

@@ -111,3 +111,10 @@ it('ライセンスカードの外部条件リンクを商品リンク内に入�
   expect(screen.queryByText('利用ライセンス NFT')).not.toBeInTheDocument();
   expect(screen.queryByRole('link', { name: /AI プロンプト集/ })).not.toBeInTheDocument();
 });
+
+it.each([true, false, undefined])('protectedDelivery=%s controls the store card badge', (protectedDelivery) => {
+  renderWithIntl(<StoreBrowser listings={[{ ...LISTINGS[0], protectedDelivery }]} locale="ja" />);
+  const badge = screen.queryByText('保護配布', { exact: true });
+  if (protectedDelivery) { expect(badge).toBeVisible(); expect(badge).not.toHaveAttribute('title'); }
+  else expect(badge).not.toBeInTheDocument();
+});

@@ -11,6 +11,7 @@ import { STORE_REPORT_EMAIL } from '@/lib/x402/storeMeta';
 import type { Address } from 'viem';
 import { licensePurchaseErrorCode, type StoreLicenseProduct } from '@/lib/licenseUi';
 import { env } from '@/lib/env';
+import { CreatorStoreDeliveryBadge } from '@/components/CreatorStoreDeliveryBadge';
 import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { CreatorStorePurchaseConfirmation } from '@/components/CreatorStorePurchaseConfirmation';
 import { CreatorStorePurchaseState } from '@/components/CreatorStorePurchaseState';
@@ -22,6 +23,7 @@ import { buildHostedPurchaseSignPreview } from '@/lib/x402/hostedPurchaseWire';
 export type CreatorStorePurchaseFlowProps = {
   open: boolean;
   product: StoreLicenseProduct & {
+    protectedDelivery?: boolean;
     id: string;
     title: string;
     description?: string;
@@ -359,6 +361,7 @@ export function CreatorStorePurchaseFlow({
                 {product.description}
               </p>
             ) : null}
+            <CreatorStoreDeliveryBadge protectedDelivery={product.protectedDelivery} />
             <CreatorStoreLicenseDetails product={product} />
             {!isLicense && product.usdcEnabled === true ? (
               <fieldset className="mx-auto mt-5 max-w-md text-left">

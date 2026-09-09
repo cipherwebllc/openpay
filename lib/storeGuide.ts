@@ -703,3 +703,42 @@ const usage = createJpycGate({ resourceUrl: 'https://service.example/api/paid' }
     verifyCommand: 'curl --get "https://open-pay.jp/api/license/verify" --data-urlencode "address=ADDRESS" --data-urlencode "product=PRODUCT_ID"',
   };
 }
+
+// Public-copy draft: reviewed SDK branch artifact; publication/activation are separate steps.
+export const DELIVERY_SDK_README_URL = 'https://github.com/cipherwebllc/openpay/blob/feat/protected-delivery-sdk/packages/x402-sdk/README.md#保護配布-delivery-ticket';
+
+const DELIVERY_STORE_GUIDE_JA = {
+  heading: 'ファイルを預けずに保護配布する',
+  intro: '保護配布は既定で無効です。SDK 0.8.0 は未公開のため、レビュー済みのパッケージで設定を確認してください。',
+  steps: [
+    'ファイルを Cloudflare R2 などの非公開ストレージに置きます。公開 URL から直接取得できないようにします。',
+    'SDK 0.8.0 の examples/cloudflare-r2-delivery-gate を用意し、OPENPAY_PRODUCT_ID（商品 ID）、AUDIENCE（Worker の HTTPS オリジン）、OBJECT_KEYS（版とファイルの対応）、FILES（非公開 R2 の binding）を設定して、wrangler deploy でデプロイします。',
+    '出品フォームの「保護配布先URL」に Worker の固定 URL を入れて保存します。期限付きのファイル URL は使いません。',
+    '権利のあるウォレットでログインし、ライブラリの「保護ダウンロードを開く」で確認します。',
+  ],
+  caveats: [
+    'チケットは発行から60秒で失効します。失効や再試行の際は、ライブラリでもう一度リンクを押してください。',
+    'チケット付き URL を転載されても、期限後はそのチケットで新たに開けません。期限内の共有や、取得済みファイルの複製は防げません。',
+    '配布先の可用性は売り手の責任です。「保護配布」バッジは売り手が設定したことを示し、保護の監査や稼働・取得の保証ではありません。',
+  ],
+  sdkLink: 'SDK README の保護配布の設定を見る',
+};
+const DELIVERY_STORE_GUIDE_EN = {
+  heading: 'Protected delivery without uploading files',
+  intro: 'Protected delivery is disabled by default. SDK 0.8.0 is not yet published; use the reviewed package artifact to check your setup.',
+  steps: [
+    'Put files in private storage such as Cloudflare R2. Disable direct access through public URLs.',
+    'Use examples/cloudflare-r2-delivery-gate from SDK 0.8.0. Configure OPENPAY_PRODUCT_ID (product ID), AUDIENCE (the Worker’s HTTPS origin), OBJECT_KEYS (revision-to-file mapping) and FILES (the private R2 binding), then deploy with wrangler deploy.',
+    'Enter the Worker’s stable URL in “Protected delivery URL” on the listing form and save. Do not use an expiring file URL.',
+    'Sign in with an entitled wallet and select “Open protected download” in the library to check delivery.',
+  ],
+  caveats: [
+    'Tickets expire 60 seconds after issuance. If a ticket expires or you need to retry, press the library link again.',
+    'A shared ticket URL cannot start a new download after expiry. Sharing within its lifetime and copying downloaded files cannot be prevented.',
+    'The seller is responsible for the destination’s availability. The “Protected delivery” badge means the seller configured it; it is not an audit of protection or a guarantee of uptime or downloads.',
+  ],
+  sdkLink: 'See protected delivery setup in the SDK README',
+};
+export function deliveryStoreGuideContentFor(locale: string) {
+  return locale === 'en' ? DELIVERY_STORE_GUIDE_EN : DELIVERY_STORE_GUIDE_JA;
+}

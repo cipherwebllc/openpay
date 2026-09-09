@@ -309,6 +309,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
   'store': [
     'ConnectButton',
     'CreatorStoreLicense',
+    'CreatorStorefront',
     'LocaleSwitcher',
     'Nav',
     'News',

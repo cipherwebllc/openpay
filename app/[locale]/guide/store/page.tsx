@@ -11,7 +11,7 @@ import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { BulletList, Section } from '@/components/guide/PosGuidePieces';
-import { storeGuideContentFor, storeGuideMetadata, licenseStoreGuideContentFor } from '@/lib/storeGuide';
+import { storeGuideContentFor, storeGuideMetadata, licenseStoreGuideContentFor, deliveryStoreGuideContentFor, DELIVERY_SDK_README_URL } from '@/lib/storeGuide';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { env } from '@/lib/env';
 
@@ -33,6 +33,7 @@ export default async function GuideStorePage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = storeGuideContentFor(locale);
+  const deliveryGuide = deliveryStoreGuideContentFor(locale);
   const licenseGuide = env.enableLicenseNftUi ? licenseStoreGuideContentFor(locale) : null;
   const tCatalog = await getTranslations({ locale, namespace: 'StoreCatalog' });
 
@@ -269,6 +270,26 @@ export default async function GuideStorePage({
             <p>{licenseGuide.rights}</p>
           </div>
         </Section> : null}
+
+        <div id="protected-delivery" className="scroll-mt-24">
+          <Section title={deliveryGuide.heading}>
+            <p className="mt-3 text-sm leading-relaxed text-slate-700">{deliveryGuide.intro}</p>
+            <ol className="mt-4 space-y-3">
+              {deliveryGuide.steps.map((step, i) => (
+                <li key={step} className="flex items-start gap-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-sm font-bold text-emerald-800">{i + 1}</span>
+                  <span className="min-w-0 break-words text-sm leading-relaxed text-slate-700">{step}</span>
+                </li>
+              ))}
+            </ol>
+            <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-relaxed text-slate-700">
+              {deliveryGuide.caveats.map((caveat) => <li key={caveat}>{caveat}</li>)}
+            </ul>
+            <p className="mt-4 text-sm">
+              <a href={DELIVERY_SDK_README_URL} target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-700 underline underline-offset-2 hover:text-emerald-900">{deliveryGuide.sdkLink}</a>
+            </p>
+          </Section>
+        </div>
 
         <Section title={c.commonTitle}>
           <div className="mt-2 space-y-6">
