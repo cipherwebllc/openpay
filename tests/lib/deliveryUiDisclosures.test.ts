@@ -11,8 +11,11 @@ describe('protected delivery disclosure drafts', () => {
       for (const text of ['OFF', '60', 'EdDSA', '/.well-known/openpay-delivery-keys.json', 'SDK 0.8.0', 'openpay-x402-sdk/delivery']) expect(line).toContain(text);
       expect(line).not.toMatch(/JPYC|USDC|%|手数料|価格/);
     }
-    for (const text of ['does not host', 'not yet published', 'responsible for its availability', 'not copying or sharing']) expect(readme).toContain(text);
-    for (const text of ['保管・配信しない', '未 publish', '可用性は売り手の責任', '期限内の共有']) expect(llms).toContain(text);
+    for (const text of ['does not host', 'SDK 0.8.0 provides `openpay-x402-sdk/delivery`', 'responsible for its availability', 'not copying or sharing']) expect(readme).toContain(text);
+    for (const text of ['保管・配信しない', 'SDK 0.8.0 の `openpay-x402-sdk/delivery`', '可用性は売り手の責任', '期限内の共有']) expect(llms).toContain(text);
+    // 2026-09-10 publish 済み: 「未 publish」表記が残ると AI 検索が古い状態を引用し続ける。
+    expect(readme).not.toContain('not yet published');
+    expect(llms).not.toContain('未 publish');
   });
   it('UI keys live in their intended namespaces in both languages', () => {
     for (const messages of [ja, en]) {

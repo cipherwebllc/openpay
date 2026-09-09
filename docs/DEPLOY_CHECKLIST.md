@@ -1764,7 +1764,7 @@ worker が検出した破損ジョブは `store:license:repair:quarantine` の `
 恒久 index から due を再構築する。active が指すジョブの破損は nonce 不明なので、送信枠を勝手に解放しない。
 
 
-### 16.8 外部サービスの利用ライセンス gate（SDK 0.7.1・未 publish）
+### 16.8 外部サービスの利用ライセンス gate（SDK 0.7.1）
 
 必要な環境変数は `LICENSE_PRODUCT_ID` と `LICENSE_SESSION_SECRET` の二つ。
 後者はサーバー限定のランダムな 32 bytes 以上の鍵素材（例: 32 bytes を hex 化）とし、全 worker で共通にする。
