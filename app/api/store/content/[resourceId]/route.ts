@@ -1,15 +1,9 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
-import { licenseNftEnabled, licenseVisible } from '@/lib/license/config';
 import {
-  getHostedContent,
-  getHostedProduct,
-  isHostedId,
-} from '@/lib/x402/hostedStore';
-import {
-  readStoreOwnership,
-  selectStorePurchaseGrant,
-} from '@/lib/x402/storeEntitlement';
+  resolveStoreContentAccess,
+  type StoreContentSelector,
+} from '@/lib/x402/storeContentAccess';
 import {
   requireStoreSeller,
   storePrivateJson,
@@ -33,15 +27,10 @@ function storageUnavailable(): NextResponse {
   );
 }
 
-type ContentSelector = {
-  revision: number | null;
-  intentSalt: string | null;
-};
-
 const POSITIVE_INTEGER_RE = /^[1-9][0-9]*$/;
 const CANONICAL_INTENT_SALT_RE = /^0x[0-9a-f]{64}$/;
 
-function contentSelector(req: Request): ContentSelector | null {
+function contentSelector(req: Request): StoreContentSelector | null {
   const params = new URL(req.url).searchParams;
   const revisions = params.getAll('revision');
   const intentSalts = params.getAll('intentSalt');
@@ -80,91 +69,38 @@ export async function GET(
       400,
     );
   }
-  // 商品/content の存在を先に見ると、未所有者へ resource の存在を漏らすため own が先。
-  const owned = await readStoreOwnership(auth.address, resourceId);
-  if (!owned.ok) return storageUnavailable();
-  if (!owned.ownership) {
-    if (!licenseNftEnabled() || !isHostedId(resourceId) || selector.intentSalt !== null || (selector.revision !== null && selector.revision !== 1)) return notFound();
-    const product = await getHostedProduct(resourceId);
-    if (product === 'storage') return storageUnavailable();
-    if (!product || product.id !== resourceId || product.productKind !== 'license' || !product.license?.transferable) return notFound();
-    const { resolveLicenseRights } = await import('@/lib/license/rights');
-    const rights = await resolveLicenseRights({ address: auth.address, productId: resourceId, definition: product.license, ownership: null });
-    if (rights.entitled === null) return storePrivateJson({ ok: false, error: 'license_rights_unknown' }, 503);
-    if (!rights.entitled) return notFound();
-    const held = { ok: true, productKind: 'license', resourceId, title: product.title, contentRevision: 1, license: product.license, ...rights };
-    if (!product.contentAvailable) return storePrivateJson({ ...held, state: 'provided-ended' });
-    const content = await getHostedContent(resourceId, 1);
-    if (content === 'storage') return storageUnavailable();
-    if (!content) return storePrivateJson({ ...held, state: 'provided-ended' });
-    // 固定 revision の破損が、購入していない別形式の本文配信へ波及するのを断つ。
-    if (content.kind !== 'text') return storageUnavailable();
-    return storePrivateJson({ ...held, state: 'ready', kind: content.kind, value: content.value });
+  const access = await resolveStoreContentAccess({ address: auth.address, resourceId, selector });
+  if (access.kind === 'denied') return notFound();
+  if (access.kind === 'storage') return storageUnavailable();
+  if (access.kind === 'rights_unknown') {
+    return storePrivateJson({ ok: false, error: 'license_rights_unknown' }, 503);
   }
-
-  const grant = selectStorePurchaseGrant(owned.ownership, selector);
-  // 未所有 resource と、所有 record 内に指定 grant がない場合は同じ oracle-safe 404。
-  if (!grant || !licenseVisible(grant.metadata)) return notFound();
-  const product = await getHostedProduct(resourceId);
-  if (product === 'storage') return storageUnavailable();
-  // 未所有と商品レコード不在は、body/status とも同一の 404 にする。
-  if (!product || !licenseVisible(product)) return notFound();
-  if (product.id !== resourceId) {
-    // key と embedded id の破損から、別商品の availability を権利判定へ波及させない。
-    return storageUnavailable();
-  }
-  if (grant.metadata.license) {
-    const { resolveLicenseRights } = await import('@/lib/license/rights');
-    const rights = await resolveLicenseRights({ address: auth.address, productId: resourceId, definition: grant.metadata.license, ownership: owned.ownership });
-    if (rights.entitled === null) return storePrivateJson({ ok: false, error: 'license_rights_unknown' }, 503);
-    if (!rights.entitled) return notFound();
-  }
-  if (!product.contentAvailable) {
+  const state = access.kind === 'ready' ? 'ready' : 'provided-ended';
+  if (access.source === 'holder') {
     return storePrivateJson({
       ok: true,
-      state: 'provided-ended',
+      productKind: 'license',
       resourceId,
-      title: grant.metadata.title,
-      contentRevision: grant.contentRevision,
-      intentSalt: grant.intentSalt,
-      purchasedAt: grant.purchasedAt,
-      txHash: grant.txHash,
+      title: access.product.title,
+      contentRevision: access.contentRevision,
+      license: access.license,
+      ...access.rights,
+      state,
+      ...(access.kind === 'ready' ? { kind: access.content.kind, value: access.content.value } : {}),
     });
   }
-
-  const content = await getHostedContent(
-    resourceId,
-    grant.contentRevision,
-  );
-  if (content === 'storage') return storageUnavailable();
-  if (!content) {
-    return storePrivateJson({
-      ok: true,
-      state: 'provided-ended',
-      resourceId,
-      title: grant.metadata.title,
-      contentRevision: grant.contentRevision,
-      intentSalt: grant.intentSalt,
-      purchasedAt: grant.purchasedAt,
-      txHash: grant.txHash,
-    });
-  }
-  if (content.kind !== grant.metadata.contentKind) {
-    // 購入時 metadata と本文種別の不整合時に、別形式の本文を配信する偽成功を防ぐ。
-    return storageUnavailable();
-  }
+  const { grant } = access;
   // 来歴 (誰宛の提供か) の明示用 (2026-08-01 user 裁定: 二次流通対策は
   // 「表示による抑止 + 購入記録との突き合わせ根拠」に限定し、ファイル埋め込みはしない)。
   return storePrivateJson({
     ok: true,
-    state: 'ready',
+    state,
     resourceId,
     title: grant.metadata.title,
     contentRevision: grant.contentRevision,
     intentSalt: grant.intentSalt,
     purchasedAt: grant.purchasedAt,
     txHash: grant.txHash,
-    kind: content.kind,
-    value: content.value,
+    ...(access.kind === 'ready' ? { kind: access.content.kind, value: access.content.value } : {}),
   });
 }
