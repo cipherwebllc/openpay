@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { parseDeliveryUrl } from '@/lib/store/deliveryUrl';
 import { listHandlesForOwner } from '@/lib/handleStore';
 import { licenseNftEnabled } from '@/lib/license/config';
 import { licenseSummariesFor } from '@/lib/license/display';
@@ -43,6 +44,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   return NextResponse.json({
     version: 1, productId: id, chainId: d.tokenChainId, contract: d.contract, tokenId: d.tokenId,
     transferable: d.transferable, termsUrl: d.termsUrl, termsVersion: d.termsVersion,
+    protectedDelivery: parseDeliveryUrl(product.deliveryUrl).ok,
     supply: d.supply, remaining, saleActive: product.saleActive,
     registered: product.registration?.status === 'registered',
     productUrl: 'https://open-pay.jp' + storeProductPath(handle, id),

@@ -167,3 +167,11 @@ it('販売者区分は表示名・受取先ではなく owner から返し、OFF
   expect(out?.[0].sellerRole).toBe('third_party');
   expect(mocks.stocks).not.toHaveBeenCalled();
 });
+
+it.each([undefined, 'https://files.example/private-gate', 'https://127.1/gate'])('public listing omits URL and exposes only valid configuration boolean: %s', async (deliveryUrl) => {
+  mocks.ids = ['h_1']; mocks.products = [product('h_1', OWNER_A, { deliveryUrl })];
+  mocks.handles.set(OWNER_A, ['alice']);
+  const out = await (await mod()).listStoreListings();
+  expect(out?.[0].protectedDelivery).toBe(deliveryUrl === 'https://files.example/private-gate');
+  expect(out?.[0]).not.toHaveProperty('deliveryUrl'); expect(JSON.stringify(out)).not.toContain('private-gate');
+});

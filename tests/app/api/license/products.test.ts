@@ -40,7 +40,7 @@ it('returns only the public v1 schema, canonical share link and trusted-IP cache
   expect(response.headers.get('Cache-Control')).toBe('public, s-maxage=60, stale-while-revalidate=300');
   expect(body).toEqual({ version: 1, productId: ID, chainId: 137, contract: d.contract, tokenId: d.tokenId,
     transferable: false, termsUrl: d.termsUrl, termsVersion: '1', supply: 10, remaining: 5, saleActive: true, registered: true,
-    productUrl: 'https://open-pay.jp/@seller?product=' + ID, verifyUrl: 'https://open-pay.jp/api/license/verify?product=' + ID, sellerRole: 'third_party' });
+    productUrl: 'https://open-pay.jp/@seller?product=' + ID, verifyUrl: 'https://open-pay.jp/api/license/verify?product=' + ID, sellerRole: 'third_party', protectedDelivery: false });
   expect(validate(body), JSON.stringify(validate.errors)).toBe(true);
   for (const patch of [{ tokenId: 1 }, { remaining: -1 }, { registered: 'yes' }, { sellerRole: 'official' }, { internal: true }]) expect(validate({ ...body, ...patch })).toBe(false);
   expect(h.ip).toHaveBeenCalledWith(expect.any(Request)); expect(h.hash).toHaveBeenCalledWith('trusted');
@@ -65,4 +65,12 @@ it('rate limits before product or stock reads', async () => {
   h.limit.mockResolvedValue(false); const response = await get(); expect(response.status).toBe(429);
   expect(response.headers.get('Retry-After')).toBe('60'); expect(response.headers.get('Cache-Control')).toBe('no-store');
   expect(h.product).not.toHaveBeenCalled(); expect(h.stock).not.toHaveBeenCalled();
+});
+
+it.each([undefined, 'https://files.example/private-gate', 'http://invalid.example'])('descriptor exposes only configuration boolean for %s', async (deliveryUrl) => {
+  h.product.mockResolvedValue({ ...product, deliveryUrl });
+  const response = await get(); const body = await response.json();
+  expect(body.protectedDelivery).toBe(deliveryUrl === 'https://files.example/private-gate');
+  expect(body).not.toHaveProperty('deliveryUrl'); expect(validate(body)).toBe(true);
+  expect(validate({ ...body, deliveryUrl: 'https://files.example/private-gate' })).toBe(false);
 });

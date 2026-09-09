@@ -12,6 +12,11 @@ import { JPYC_SHOPS_SEARCH_RESOURCE } from '@/lib/shops/paidResources';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 
 export const OPENPAY_CANONICAL_ORIGIN = new URL(LEGAL_ENTITY.siteUrl).origin;
+// 配布先の自己ループ防止用。www alias も port にかかわらず同じ first-party とする。
+export const OPENPAY_FIRST_PARTY_HOSTNAMES: readonly string[] = [
+  new URL(OPENPAY_CANONICAL_ORIGIN).hostname,
+  `www.${new URL(OPENPAY_CANONICAL_ORIGIN).hostname}`,
+];
 
 // x402scan (Merit-Systems) の v1 payable-index 用スキーマ。402 チャレンジの accepts に
 // 添付する表示/発見メタで、facilitator の verify/settle には渡さない (money-path 不変)。

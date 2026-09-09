@@ -183,3 +183,21 @@ describe('telemetry URL redaction', () => {
     expect(JSON.stringify(event)).not.toContain(SECRET);
   });
 });
+
+it('delivery redirect and JSON fields are scrubbed by the installed browser/server hooks', () => {
+  const ticket = 'header.payload.signature-delivery-secret';
+  const url = `https://files.example/private-gate?ticket=${ticket}`;
+  const breadcrumb = scrubSentryBreadcrumb({ category: 'fetch', data: { url, ticket, deliveryUrl: url, Location: url }, message: url });
+  expect(breadcrumb.data).toEqual({ url: 'https://files.example', Location: 'https://files.example' });
+  const browser = scrubSentryTransaction({
+    type: 'transaction', request: { url },
+    contexts: { trace: { trace_id: '1'.repeat(32), span_id: '2'.repeat(16), data: { 'http.response.header.location': url, ticket } } },
+  });
+  const server = scrubSentryServerEvent({
+    request: { url, headers: { Location: url } }, breadcrumbs: [breadcrumb],
+    contexts: { trace: { trace_id: '1'.repeat(32), span_id: '2'.repeat(16), data: { 'http.response.header.location': url, ticket } } },
+  });
+  for (const scrubbed of [breadcrumb, browser, server]) {
+    expect(JSON.stringify(scrubbed)).not.toContain(ticket); expect(JSON.stringify(scrubbed)).not.toContain('/private-gate');
+  }
+});

@@ -418,3 +418,14 @@ describe('@handle ProfilePage JSON-LD', () => {
     expect(state.renderedAutoOpenProductId).toBeUndefined();
   });
 });
+
+it('keeps owner deliveryUrl out of public HTML/JSON-LD and the RSC-to-client product props', async () => {
+  state.enableCreatorStore = true; state.enableCreatorStoreUi = true;
+  const deliveryUrl = 'https://files.example/private-delivery-sentinel';
+  state.hostedProducts = [{ id: `h_${'a'.repeat(32)}`, owner: ADDR, payTo: ADDR, title: 'Delivery', priceJpyc: '300', contentKind: 'text', label: 'prompt', contentRevision: 1, saleActive: true, contentAvailable: true, createdAt: 1, deliveryUrl }];
+  const { container } = await renderHandlePage(record());
+  expect(state.renderedStorefrontProducts).toHaveLength(1);
+  expect(state.renderedStorefrontProducts[0]).not.toHaveProperty('deliveryUrl');
+  expect(JSON.stringify(state.renderedStorefrontProducts)).not.toContain(deliveryUrl);
+  expect(container.innerHTML).not.toContain(deliveryUrl);
+});

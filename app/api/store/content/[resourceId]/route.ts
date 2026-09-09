@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import {
   resolveStoreContentAccess,
-  type StoreContentSelector,
+  parseStoreContentSelector,
 } from '@/lib/x402/storeContentAccess';
 import {
   requireStoreSeller,
@@ -27,32 +27,6 @@ function storageUnavailable(): NextResponse {
   );
 }
 
-const POSITIVE_INTEGER_RE = /^[1-9][0-9]*$/;
-const CANONICAL_INTENT_SALT_RE = /^0x[0-9a-f]{64}$/;
-
-function contentSelector(req: Request): StoreContentSelector | null {
-  const params = new URL(req.url).searchParams;
-  const revisions = params.getAll('revision');
-  const intentSalts = params.getAll('intentSalt');
-  if (revisions.length > 1 || intentSalts.length > 1) return null;
-
-  let revision: number | null = null;
-  if (revisions.length === 1) {
-    const raw = revisions[0]!;
-    if (!POSITIVE_INTEGER_RE.test(raw)) return null;
-    revision = Number(raw);
-    if (!Number.isSafeInteger(revision)) return null;
-  }
-
-  let intentSalt: string | null = null;
-  if (intentSalts.length === 1) {
-    const raw = intentSalts[0]!;
-    if (!CANONICAL_INTENT_SALT_RE.test(raw)) return null;
-    intentSalt = raw;
-  }
-  return { revision, intentSalt };
-}
-
 export async function GET(
   req: Request,
   { params }: RouteContext,
@@ -62,7 +36,7 @@ export async function GET(
   if (!auth.ok) return auth.response;
 
   const { resourceId } = await params;
-  const selector = contentSelector(req);
+  const selector = parseStoreContentSelector(req);
   if (!selector) {
     return storePrivateJson(
       { ok: false, error: 'invalid_selector' },
@@ -75,6 +49,18 @@ export async function GET(
   if (access.kind === 'rights_unknown') {
     return storePrivateJson({ ok: false, error: 'license_rights_unknown' }, 503);
   }
+  // OFF 時は鍵モジュールに到達せず、既存の HTTP serializer を維持する。
+  let delivery: { mode: 'ticket'; href: string } | undefined;
+  if (access.kind === 'ready' && env.enableStoreDeliveryTicket && access.product.deliveryUrl) {
+    const { deliveryTicketConfig } = await import('@/lib/store/deliveryTicket');
+    const { parseDeliveryUrl } = await import('@/lib/store/deliveryUrl');
+    if (parseDeliveryUrl(access.product.deliveryUrl).ok && deliveryTicketConfig()) {
+      const revision = access.source === 'holder' ? 1 : access.grant.contentRevision;
+      const salt = access.source === 'purchase' && selector.intentSalt !== null
+        ? `&intentSalt=${access.grant.intentSalt}` : '';
+      delivery = { mode: 'ticket', href: `/api/store/delivery/${resourceId}?revision=${revision}${salt}` };
+    }
+  }
   const state = access.kind === 'ready' ? 'ready' : 'provided-ended';
   if (access.source === 'holder') {
     return storePrivateJson({
@@ -86,6 +72,7 @@ export async function GET(
       license: access.license,
       ...access.rights,
       state,
+      ...(delivery ? { delivery } : {}),
       ...(access.kind === 'ready' ? { kind: access.content.kind, value: access.content.value } : {}),
     });
   }
@@ -101,6 +88,7 @@ export async function GET(
     intentSalt: grant.intentSalt,
     purchasedAt: grant.purchasedAt,
     txHash: grant.txHash,
+    ...(delivery ? { delivery } : {}),
     ...(access.kind === 'ready' ? { kind: access.content.kind, value: access.content.value } : {}),
   });
 }

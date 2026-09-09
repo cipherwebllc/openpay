@@ -271,3 +271,12 @@ describe('@handle generateMetadata', () => {
     expect(m.title).toBe('OpenPay');
   });
 });
+
+it('does not expose owner deliveryUrl in product metadata/OG links', async () => {
+  h.enableCreatorStore = true; h.enableCreatorStoreUi = true;
+  const deliveryUrl = 'https://files.example/private-delivery-sentinel';
+  h.hostedProducts = [{ ...PRODUCT, deliveryUrl }];
+  const meta = await call('%40delivery-private-metadata', 'ja', PRODUCT_ID);
+  expect(JSON.stringify(meta)).not.toContain(deliveryUrl);
+  expect(JSON.stringify(meta)).toContain(PRODUCT.title);
+});

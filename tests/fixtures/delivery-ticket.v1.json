@@ -1,0 +1,60 @@
+{
+  "label": "TEST-ONLY RFC 8032 section 7.1 test 1 seed. Public test material. NEVER use in production.",
+  "profile": {
+    "maxKeys": 8,
+    "maxEncodedHeader": 1024,
+    "maxEncodedPayload": 4096,
+    "signatureBytes": 64,
+    "ttlSeconds": 60
+  },
+  "seed": "0x9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+  "publicJwk": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+    "kid": "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k",
+    "use": "sig",
+    "alg": "EdDSA"
+  },
+  "header": {
+    "alg": "EdDSA",
+    "typ": "openpay-delivery+jwt",
+    "kid": "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k"
+  },
+  "claims": {
+    "v": 1,
+    "iss": "https://open-pay.jp",
+    "aud": "https://files.example",
+    "sub": "0x52908400098527886E0F7030069857D2E4169EE7",
+    "product": "h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "rev": 3,
+    "basis": "purchase",
+    "iat": 1700000000,
+    "exp": 1700000060,
+    "jti": "0123456789abcdef0123456789abcdef"
+  },
+  "ticket": "eyJhbGciOiJFZERTQSIsInR5cCI6Im9wZW5wYXktZGVsaXZlcnkrand0Iiwia2lkIjoia1ByS19xbXhWV2FZVkE5d3dCRjZJdW8zdlZ6ejdUeEhDVHdYQnlnclM0ayJ9.eyJ2IjoxLCJpc3MiOiJodHRwczovL29wZW4tcGF5LmpwIiwiYXVkIjoiaHR0cHM6Ly9maWxlcy5leGFtcGxlIiwic3ViIjoiMHg1MjkwODQwMDA5ODUyNzg4NkUwRjcwMzAwNjk4NTdEMkU0MTY5RUU3IiwicHJvZHVjdCI6ImhfYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJyZXYiOjMsImJhc2lzIjoicHVyY2hhc2UiLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAwMDA2MCwianRpIjoiMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYifQ.ogBsJ1hlz2aeS13bUeQ8MmKIAUiumQoGKjxNJgjQNi5Hb97E7ihiRinTEb86CQ1jB6vQ0KBPDZqnGv3IWCSfAg",
+  "negative": [
+    {
+      "name": "wrong_alg",
+      "ticket": "eyJhbGciOiJIUzI1NiIsInR5cCI6Im9wZW5wYXktZGVsaXZlcnkrand0Iiwia2lkIjoia1ByS19xbXhWV2FZVkE5d3dCRjZJdW8zdlZ6ejdUeEhDVHdYQnlnclM0ayJ9.eyJ2IjoxLCJpc3MiOiJodHRwczovL29wZW4tcGF5LmpwIiwiYXVkIjoiaHR0cHM6Ly9maWxlcy5leGFtcGxlIiwic3ViIjoiMHg1MjkwODQwMDA5ODUyNzg4NkUwRjcwMzAwNjk4NTdEMkU0MTY5RUU3IiwicHJvZHVjdCI6ImhfYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJyZXYiOjMsImJhc2lzIjoicHVyY2hhc2UiLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAwMDA2MCwianRpIjoiMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYifQ.auLx2JI6WeJJBMfckEaLpZyO711WQvuwWm2Xy6ZAVr1uo49u6ov0LmJX9Y0QMbwGmIF4GKkofamA7NK8Zq_YCg",
+      "now": 1700000000
+    },
+    {
+      "name": "tampered_payload",
+      "ticket": "eyJhbGciOiJFZERTQSIsInR5cCI6Im9wZW5wYXktZGVsaXZlcnkrand0Iiwia2lkIjoia1ByS19xbXhWV2FZVkE5d3dCRjZJdW8zdlZ6ejdUeEhDVHdYQnlnclM0ayJ9.eyJ2IjoxLCJpc3MiOiJodHRwczovL29wZW4tcGF5LmpwIiwiYXVkIjoiaHR0cHM6Ly9maWxlcy5leGFtcGxlIiwic3ViIjoiMHg1MjkwODQwMDA5ODUyNzg4NkUwRjcwMzAwNjk4NTdEMkU0MTY5RUU3IiwicHJvZHVjdCI6ImhfYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJyZXYiOjQsImJhc2lzIjoicHVyY2hhc2UiLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAwMDA2MCwianRpIjoiMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYifQ.ogBsJ1hlz2aeS13bUeQ8MmKIAUiumQoGKjxNJgjQNi5Hb97E7ihiRinTEb86CQ1jB6vQ0KBPDZqnGv3IWCSfAg",
+      "now": 1700000000
+    },
+    {
+      "name": "expired",
+      "ticket": "eyJhbGciOiJFZERTQSIsInR5cCI6Im9wZW5wYXktZGVsaXZlcnkrand0Iiwia2lkIjoia1ByS19xbXhWV2FZVkE5d3dCRjZJdW8zdlZ6ejdUeEhDVHdYQnlnclM0ayJ9.eyJ2IjoxLCJpc3MiOiJodHRwczovL29wZW4tcGF5LmpwIiwiYXVkIjoiaHR0cHM6Ly9maWxlcy5leGFtcGxlIiwic3ViIjoiMHg1MjkwODQwMDA5ODUyNzg4NkUwRjcwMzAwNjk4NTdEMkU0MTY5RUU3IiwicHJvZHVjdCI6ImhfYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiLCJyZXYiOjMsImJhc2lzIjoicHVyY2hhc2UiLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAwMDA2MCwianRpIjoiMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYifQ.ogBsJ1hlz2aeS13bUeQ8MmKIAUiumQoGKjxNJgjQNi5Hb97E7ihiRinTEb86CQ1jB6vQ0KBPDZqnGv3IWCSfAg",
+      "now": 1700000060
+    }
+  ],
+  "measurements": {
+    "ticketBytes": 570,
+    "maxDeliveryUrlChars": 512,
+    "redirectBytes": 1090,
+    "percentEncodedQueryRedirectBytes": 2064
+  }
+}

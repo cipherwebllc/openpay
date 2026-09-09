@@ -8,8 +8,8 @@ const URL_BREADCRUMB_CATEGORIES = new Set([
   'xhr',
   'navigation',
 ]);
-const BREADCRUMB_URL_KEYS = ['url', 'from', 'to'] as const;
-const TRACE_URL_KEYS = ['http.url', 'url.full'] as const;
+const BREADCRUMB_URL_KEYS = ['url', 'from', 'to', 'location', 'Location'] as const;
+const TRACE_URL_KEYS = ['http.url', 'url.full', 'http.response.header.location'] as const;
 const REFERER_HEADER_NAMES = new Set(['referer', 'referrer']);
 const REFERER_TRACE_KEYS = new Set([
   'http.request.header.referer',
@@ -61,6 +61,9 @@ function scrubUrlFields(
   keys: readonly string[],
 ): void {
   if (!data) return;
+  // 配布 ticket/owner 限定 URL が network data に付いた場合も telemetry へ波及させない。
+  delete data.ticket;
+  delete data.deliveryUrl;
   for (const key of keys) {
     if (typeof data[key] === 'string') {
       data[key] = urlOriginForTelemetry(data[key]);
@@ -88,7 +91,7 @@ function scrubTraceUrlFields(event: Event): void {
 function scrubRefererHeaders(headers: Record<string, string> | undefined): void {
   if (!headers) return;
   for (const [key, value] of Object.entries(headers)) {
-    if (REFERER_HEADER_NAMES.has(key.toLowerCase())) {
+    if (REFERER_HEADER_NAMES.has(key.toLowerCase()) || key.toLowerCase() === 'location') {
       headers[key] = urlOriginForTelemetry(value);
     }
   }
