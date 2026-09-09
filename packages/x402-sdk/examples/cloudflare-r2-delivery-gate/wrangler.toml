@@ -1,0 +1,23 @@
+name = "openpay-delivery-gate"
+main = "worker.mjs"
+compatibility_date = "2026-09-09"
+# No nodejs_compat flag: delivery uses standard Web APIs and Ed25519.
+
+[vars]
+OPENPAY_PRODUCT_ID = "h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+AUDIENCE = "https://files.example"
+# Optional; default is revision 1 -> file-v1.zip. Reject every unmapped revision.
+OBJECT_KEYS = '{ "1": "file-v1.zip", "2": "file-v2.zip" }'
+
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "replace-with-your-private-bucket"
+
+# Optional single-use tickets: uncomment BOTH sections together.
+# [[durable_objects.bindings]]
+# name = "REPLAY"
+# class_name = "Replay"
+#
+# [[migrations]]
+# tag = "v1"
+# new_sqlite_classes = ["Replay"]
