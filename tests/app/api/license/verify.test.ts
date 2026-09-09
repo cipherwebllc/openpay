@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import Ajv2020 from 'ajv/dist/2020';
+import { LICENSE_VERIFY_SCHEMA } from '@/lib/license/schema';
 const h = vi.hoisted(() => ({ enabled: true, product: vi.fn(), own: vi.fn(), rights: vi.fn(), get: vi.fn(), set: vi.fn(), limit: vi.fn(), acquire: vi.fn(), release: vi.fn(), ip: vi.fn(), hash: vi.fn() }));
 vi.mock('@/lib/license/config', () => ({ licenseNftEnabled: () => h.enabled }));
 vi.mock('@/lib/kv', () => ({ kvGet: h.get, kvSet: h.set }));
@@ -26,7 +28,10 @@ describe('read-only license verify API', () => {
   });
   it('returns the versioned canonical license identity and uses trusted-IP helpers', async () => {
     const response = await GET(request()); expect(response.headers.get('Cache-Control')).toBe('no-store');
-    expect(await response.json()).toMatchObject({ version: 1, address: ADDRESS, license: { chainId: 80002, contract: d.contract, tokenId: d.tokenId, productId: ID }, entitled: true, basis: 'holder', observedBlock: '100', checkedAt: expect.any(String) });
+    const body = await response.json();
+    const validate = new Ajv2020({ strict: false, validateFormats: false }).compile(LICENSE_VERIFY_SCHEMA);
+    expect(validate(body), JSON.stringify(validate.errors)).toBe(true);
+    expect(body).toMatchObject({ version: 1, address: ADDRESS, license: { chainId: 80002, contract: d.contract, tokenId: d.tokenId, productId: ID }, entitled: true, basis: 'holder', observedBlock: '100', checkedAt: expect.any(String) });
     expect(h.ip).toHaveBeenCalledWith(expect.any(Request)); expect(h.hash).toHaveBeenCalledWith('trusted'); expect(h.limit).toHaveBeenCalledWith('license-verify', 'hash', 30, 60); expect(h.release).toHaveBeenCalledWith('lease');
   });
   it.each([true, false])('caches %s for 60 seconds without resolving again', async (entitled) => {

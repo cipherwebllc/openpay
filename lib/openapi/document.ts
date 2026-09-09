@@ -8,6 +8,8 @@
 // x402FeeBreakdown から導出する (literal を書くと掟 14 のドリフト源になるため)。
 
 import { env } from '@/lib/env';
+import { licenseNftEnabled } from '@/lib/license/config';
+import { LICENSE_DESCRIPTOR_SCHEMA, LICENSE_VERIFY_SCHEMA } from '@/lib/license/schema';
 import { JPYC_CHAINS } from '@/lib/chains';
 import { shopsApiEnabled } from '@/lib/shops/flags';
 import {
@@ -44,6 +46,45 @@ import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 import { caip2ForChainId } from '@/lib/x402/network';
 
 const JPYC_WEI = 10n ** 18n;
+
+const LICENSE_OPENAPI_PATHS = {
+  '/api/license/products/{id}': {
+    get: {
+      operationId: 'resolveLicense', tags: ['Licenses'], security: [],
+      summary: 'Resolve a license product to its immutable ERC-1155 identity',
+      description: 'Public HTTPS descriptor; feature OFF, unknown/digital products or no public seller handle return 404. Paused licenses remain resolvable. Stock is display-only and can be null.',
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', pattern: '^h_[0-9a-f]{32}$' } }],
+      responses: {
+        '200': { description: 'Version 1 license product descriptor',
+          headers: { 'Cache-Control': { schema: { type: 'string', const: 'public, s-maxage=60, stale-while-revalidate=300' } } },
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/LicenseDescriptor' } } } },
+        '400': { description: 'Invalid product ID; rejected before IO' },
+        '404': { description: 'License unavailable' },
+        '429': { description: 'Trusted-IP rate limit exceeded', headers: { 'Retry-After': { schema: { type: 'string', const: '60' } } } },
+        '503': { description: 'Product or handle storage unavailable' },
+      },
+    },
+  },
+  '/api/license/verify': {
+    get: {
+      operationId: 'verifyLicense', tags: ['Licenses'], security: [],
+      summary: 'Read purchase or holder rights for a wallet and license product',
+      description: 'Public HTTPS status, not authentication or signed proof. entitled:null means unknown. Feature OFF returns 404. 30 requests per trusted IP per minute; bounded RPC budget.',
+      parameters: [
+        { name: 'address', in: 'query', required: true, schema: { type: 'string', pattern: '^0x[0-9a-fA-F]{40}$' } },
+        { name: 'product', in: 'query', required: true, schema: { type: 'string', pattern: '^h_[0-9a-f]{32}$' } },
+      ],
+      responses: {
+        '200': { description: 'Version 1 status; unknown is entitled:null', headers: { 'Cache-Control': { schema: { type: 'string', const: 'no-store' } } },
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/LicenseVerification' } } } },
+        '400': { description: 'Invalid or duplicated selectors; rejected before IO' },
+        '404': { description: 'License unavailable' },
+        '429': { description: 'Trusted-IP rate limit exceeded', headers: { 'Retry-After': { schema: { type: 'string', const: '60' } } } },
+        '503': { description: 'Product storage unavailable' },
+      },
+    },
+  },
+} as const;
 
 /** atomic JPYC → 小数文字列 (末尾 0 を落とす)。表示ではなく機械可読面の金額に使う。 */
 function formatJpyc(wei: bigint): string {
@@ -1504,9 +1545,10 @@ const OPENAPI_DOCUMENT = {
  * ルート (/openapi.json) と /api/openapi.json が同一文書を配信する単一情報源。
  */
 export function buildOpenApiDocument(): Record<string, unknown> | null {
+  const licensesEnabled = licenseNftEnabled();
   const shopsEnabled = shopsApiEnabled();
   const facilitatorEnabled = env.enableX402Facilitator;
-  if (!env.enableWeb3Directory && !shopsEnabled && !facilitatorEnabled) {
+  if (!env.enableWeb3Directory && !shopsEnabled && !facilitatorEnabled && !licensesEnabled) {
     return null;
   }
   const document = {
@@ -1523,12 +1565,14 @@ export function buildOpenApiDocument(): Record<string, unknown> | null {
         ? [{ name: 'Shops Free' }, { name: 'Shops Paid' }]
         : []),
       ...(facilitatorEnabled ? [{ name: 'x402 Catalog' }] : []),
+      ...(licensesEnabled ? [{ name: 'Licenses' }] : []),
       { name: 'x402 Vanilla (USDC)' },
     ],
     paths: {
       ...(env.enableWeb3Directory ? OPENAPI_DOCUMENT.paths : {}),
       ...(shopsEnabled ? SHOPS_OPENAPI_PATHS : {}),
       ...(facilitatorEnabled ? DISCOVERY_OPENAPI_PATHS : {}),
+      ...(licensesEnabled ? LICENSE_OPENAPI_PATHS : {}),
       ...VANILLA_OPENAPI_PATHS,
       ...ACTIVITY_OPENAPI_PATHS,
       ...(env.enableWeb3Directory ? VANILLA_DIRECTORY_OPENAPI_PATHS : {}),
@@ -1545,6 +1589,7 @@ export function buildOpenApiDocument(): Record<string, unknown> | null {
         ...OPENAPI_DOCUMENT.components.schemas,
         ...SHOPS_OPENAPI_SCHEMAS,
         ...(facilitatorEnabled ? DISCOVERY_OPENAPI_SCHEMAS : {}),
+        ...(licensesEnabled ? { LicenseDescriptor: LICENSE_DESCRIPTOR_SCHEMA, LicenseVerification: LICENSE_VERIFY_SCHEMA } : {}),
       },
       responses: {
         ...OPENAPI_DOCUMENT.components.responses,

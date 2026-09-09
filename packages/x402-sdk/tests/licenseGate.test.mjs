@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { privateKeyToAccount } from 'viem/accounts';
 import { parseSiweMessage } from 'viem/siwe';
 import { createLicenseGate, LicenseRpcError } from '../src/index.mjs';
+import { descriptor, product } from './licenseDescriptor.fixture.mjs';
 
 const account = privateKeyToAccount(`0x${'1'.repeat(64)}`);
 const other = privateKeyToAccount(`0x${'2'.repeat(64)}`);
@@ -201,4 +202,50 @@ test('the minimal gate options use five-minute sessions and the default origin',
   const proof = await signed(f.gate);
   assert.equal(parseSiweMessage(proof.message).uri, 'https://open-pay.jp');
   assert.equal(f.gate.check(await f.gate.verify(proof)).exp, start / 1000 + 300);
+});
+
+test('product gates discover lazily, coalesce ready/challenge and keep the descriptor for their lifetime', async () => {
+  for (const eager of [false, true]) {
+    let fetches = 0; let reads = 0;
+    const d = descriptor({ chainId: 80002 });
+    const gate = createLicenseGate({ product, session: { ...defaults.session, origin: defaults.origin },
+      fetch: async () => { fetches++; return Response.json(d); }, now: () => start,
+      publicClient: { async getChainId() { return 80002; }, async getBlockNumber() { return 99n; }, async readContract(input) {
+        reads++; assert.equal(input.address, d.contract); assert.deepEqual(input.args, [account.address, BigInt(d.tokenId)]); return 1n;
+      } },
+    });
+    assert.equal(fetches, 0);
+    assert.throws(() => gate.check('token'), { code: 'not_ready' });
+    assert.equal(fetches, 0, 'synchronous check never performs IO');
+    if (eager) await Promise.all([gate.ready(), gate.ready()]);
+    const [proof, cached] = await Promise.all([signed(gate), gate.ready()]);
+    assert.deepEqual(cached, d); assert.ok(Object.isFrozen(cached));
+    assert.equal(await gate.ready(), cached);
+    const parsed = parseSiweMessage(proof.message);
+    assert.equal(parsed.chainId, 80002); assert.equal(parsed.uri, defaults.origin);
+    assert.deepEqual(parsed.resources, [`urn:openpay:license:80002:${d.contract}:${d.tokenId}`]);
+    const token = await gate.verify(proof);
+    assert.deepEqual(gate.check(token), { address: account.address, tokenId: BigInt(d.tokenId), exp: start / 1000 + 60 });
+    await gate.challenge(account.address); gate.check(token);
+    assert.equal(fetches, 1); assert.equal(reads, 1);
+    // Explicit identity workers remain compatible with product-discovered sessions.
+    const explicit = createLicenseGate({ chainId: d.chainId, contract: d.contract, tokenId: d.tokenId,
+      origin: defaults.origin, session: defaults.session, now: () => start });
+    assert.equal(await explicit.ready(), undefined); assert.deepEqual(explicit.check(token), gate.check(token));
+  }
+});
+
+test('failed product discovery cannot issue challenges or sessions and can retry without a partial identity', async () => {
+  let fetches = 0; let writes = 0;
+  const gate = createLicenseGate({ product, session: defaults.session,
+    fetch: async () => { fetches++; return Response.json(descriptor(fetches === 1 ? { tokenId: '0x1' } : {})); },
+    nonceStore: { set() { writes++; }, consume() {} },
+  });
+  const attempts = await Promise.allSettled([gate.ready(), gate.challenge(account.address)]);
+  assert.ok(attempts.every((value) => value.status === 'rejected' && value.reason.code === 'invalid_response'));
+  assert.equal(fetches, 1); assert.equal(writes, 0);
+  assert.throws(() => gate.check('token'), { code: 'not_ready' });
+  await gate.ready(); await gate.challenge(account.address); assert.equal(fetches, 2); assert.equal(writes, 1);
+  assert.throws(() => createLicenseGate({ ...defaults, product }), TypeError);
+  assert.throws(() => createLicenseGate({ product, origin: 'http://localhost', session: defaults.session }), TypeError);
 });

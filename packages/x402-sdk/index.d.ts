@@ -349,7 +349,43 @@ export type LicenseTransport =
   | { rpcUrl?: string; publicClient?: never }
   | { rpcUrl?: never; publicClient: LicensePublicClient };
 
-export type HasLicenseOptions = LicenseIdentity & LicenseTransport & { address: Address };
+export interface ResolveLicenseOptions {
+  /** OpenPay product ID: h_ followed by 32 lowercase hex digits. */
+  product: string;
+  /** Trusted descriptor authority; HTTPS only, even on localhost. Default https://open-pay.jp. */
+  origin?: string;
+  /** Must honor redirect: 'manual' and the AbortSignal. */
+  fetch?: typeof globalThis.fetch;
+}
+
+export interface LicenseDescriptor {
+  version: 1;
+  productId: string;
+  chainId: 137 | 80002;
+  contract: Address;
+  tokenId: Hex;
+  transferable: boolean;
+  termsUrl: string;
+  termsVersion: string;
+  supply: number;
+  /** Display only; null means stock could not be read. */
+  remaining: number | null;
+  saleActive: boolean;
+  registered: boolean;
+  productUrl: string;
+  /** Append the wallet address query parameter to check rights. */
+  verifyUrl: string;
+  sellerRole: 'operator' | 'third_party';
+}
+
+/** Validates the v1 descriptor, product echo and token derivation; rejects all redirects. */
+export function resolveLicense(options: ResolveLicenseOptions): Promise<LicenseDescriptor>;
+
+export type LicenseSelector =
+  | (LicenseIdentity & { product?: never })
+  | (ResolveLicenseOptions & { chainId?: never; contract?: never; tokenId?: never });
+
+export type HasLicenseOptions = LicenseSelector & LicenseTransport & { address: Address };
 
 export interface LicenseBalance {
   holder: boolean;
@@ -362,7 +398,7 @@ export type LicenseErrorCode =
   | 'rpc_error' | 'network_error' | 'http_error' | 'redirect' | 'invalid_response'
   | 'nonce_store_error' | 'invalid_challenge' | 'challenge_expired'
   | 'invalid_signature' | 'invalid_nonce' | 'no_license'
-  | 'invalid_session' | 'session_expired';
+  | 'invalid_session' | 'session_expired' | 'not_ready';
 
 export class LicenseError extends Error {
   readonly code: LicenseErrorCode;
@@ -419,14 +455,17 @@ export interface LicenseNonceStore {
   consume(nonce: string): LicenseNonceRecord | null | undefined | Promise<LicenseNonceRecord | null | undefined>;
 }
 
-export type LicenseGateOptions = LicenseIdentity & LicenseTransport & {
+export type LicenseGateOptions = LicenseSelector & LicenseTransport & {
   session: {
     /** Server-only random secret, at least 32 UTF-8 bytes. */
     secret: string;
     /** Seconds, 1–86400. Default 300. Ownership is cached for this lifetime. */
     ttlSeconds?: number;
+    /** Your service's signing origin/session audience. Defaults to the top-level origin. */
+    origin?: string;
   };
-  /** Your service's signing origin and session audience. Default https://open-pay.jp. */
+  /** Product form: descriptor authority (HTTPS only). Explicit identity: signing origin.
+   * Defaults to https://open-pay.jp. Set session.origin to use a separate signing origin. */
   origin?: string;
   /** Single-line ASCII SIWE statement. */
   statement?: string;
@@ -444,11 +483,13 @@ export interface LicenseSession {
 }
 
 export interface LicenseGate {
+  /** Resolve and cache the product identity for this gate's lifetime; no IO for explicit identity. */
+  ready(): Promise<Readonly<LicenseDescriptor> | undefined>;
   /** An EIP-4361-style message, valid for five minutes. */
   challenge(address: Address): Promise<string>;
   /** EOA signature recovery, atomic nonce consumption, balanceOf, then HMAC session issuance. */
   verify(input: { message: string; signature: Hex }): Promise<string>;
-  /** Synchronous signature/scope/expiry validation; no RPC and no ownership refresh. */
+  /** Synchronous signature/scope/expiry validation; no IO. Throws not_ready before discovery. */
   check(token: string): LicenseSession;
 }
 

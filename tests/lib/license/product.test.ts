@@ -25,7 +25,7 @@ import { licenseRegistrationJobKey, LICENSE_REGISTRATION_INDEX } from '@/lib/lic
 import { repairLicenseIndexes } from '@/lib/license/repair';
 const OWNER = getAddress('0x1111111111111111111111111111111111111111');
 const base = { owner: OWNER, title: 'License', priceJpyc: '1000', contentKind: 'text', content: '', productKind: 'license', license: { supply: 2, transferable: false, termsUrl: 'https://seller.example/terms', termsVersion: 'v1' } };
-beforeEach(() => { h.store = createFakeRedisStore(1000); h.enabled = true; h.creator = true; h.network = 'testnet'; h.calls = 0; vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', OWNER); });
+beforeEach(() => { h.store = createFakeRedisStore(1000); h.enabled = true; h.creator = true; h.network = 'testnet'; h.calls = 0; vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', OWNER); vi.stubEnv('ENABLE_LICENSE_NFT_PUBLIC', ''); });
 afterAll(() => { vi.unstubAllEnvs(); return closeRedisLuaEngine(); });
 async function create() {
   const input = parseHostedInput(base); if (!input.ok) throw new Error(input.error);
@@ -60,6 +60,28 @@ describe('license product foundation', () => {
     vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', OWNER); h.creator = false; expect(parseHostedInput(base).ok).toBe(false);
     h.creator = true; h.enabled = false; expect(parseHostedInput(base).ok).toBe(false);
     h.enabled = true; expect(licenseDeployment()?.chainId).toBe(80002); h.network = 'mainnet'; expect(licenseDeployment()?.chainId).toBe(137);
+  });
+  it('public admission ignores empty/malformed allowlists, retains parent flags and rolls back public listings', async () => {
+    vi.stubEnv('ENABLE_LICENSE_NFT_PUBLIC', '1');
+    vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', 'invalid checksum');
+    expect(licenseSellerAllowed(OWNER)).toBe(true);
+    expect(licenseSellerAllowed('invalid')).toBe(false);
+    h.enabled = false; expect(licenseSellerAllowed(OWNER)).toBe(false);
+    h.enabled = true; h.creator = false; expect(licenseSellerAllowed(OWNER)).toBe(false); h.creator = true;
+    const p = await create();
+    h.store!.strings.set('x402:hosted:' + p.id, JSON.stringify({ ...p, registration: { status: 'registered', attempts: 1, txHash: '0x' + 'a'.repeat(64) } }));
+    expect(await updateHostedProduct({ id: p.id, owner: OWNER, patch: { saleActive: true } })).toMatchObject({ ok: true });
+    expect(await listAvailableHostedForOwner(OWNER)).toHaveLength(1);
+    expect(await getHostedProductsByIds([p.id])).toHaveLength(1);
+    vi.stubEnv('ENABLE_LICENSE_NFT_PUBLIC', '');
+    expect(await listAvailableHostedForOwner(OWNER)).toEqual([]);
+    expect(await getHostedProductsByIds([p.id])).toEqual([]);
+    expect(await listHostedForOwner(OWNER)).toHaveLength(1); // Seller can still manage/pause it.
+    expect(await updateHostedProduct({ id: p.id, owner: OWNER, patch: { saleActive: true } })).toMatchObject({ ok: false });
+    expect(await updateHostedProduct({ id: p.id, owner: OWNER, patch: { saleActive: false } })).toMatchObject({ ok: true });
+    vi.stubEnv('ENABLE_LICENSE_NFT_PUBLIC', '1'); vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', '');
+    expect(licenseSellerAllowed(OWNER)).toBe(true);
+    expect(parseHostedInput(base).ok).toBe(true);
   });
   it('does not weaken digital empty text validation or inject license defaults in old snapshots', () => {
     const digital = { ...base, productKind: undefined, license: undefined };

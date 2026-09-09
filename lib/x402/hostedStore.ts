@@ -660,6 +660,7 @@ export async function listAvailableHostedForOwner(
     if (
       product &&
       licenseVisible(product) &&
+      (product.productKind !== 'license' || licenseSellerAllowed(product.owner)) &&
       product.id === validIds[index] &&
       product.owner.toLowerCase() === wallet.toLowerCase() &&
       product.saleActive &&
@@ -712,6 +713,7 @@ export async function getHostedProductsByIds(
     if (
       product &&
       licenseVisible(product) &&
+      (product.productKind !== 'license' || licenseSellerAllowed(product.owner)) &&
       product.id === validIds[index] &&
       product.saleActive &&
       product.contentAvailable

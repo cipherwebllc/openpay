@@ -259,6 +259,7 @@ export default async function GuideStorePage({
             <p>{licenseGuide.publish}</p>
             <h3 className="font-semibold text-slate-900">{licenseGuide.integrationHeading}</h3>
             <p>{licenseGuide.integration}</p>
+            <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-xl bg-slate-950 p-4 text-xs text-slate-100"><code>{licenseGuide.integrationSnippet}</code></pre>
             <ul className="list-disc space-y-2 pl-5"><li>{licenseGuide.entry}</li><li>{licenseGuide.metered}</li></ul>
             <h3 className="font-semibold text-slate-900">{licenseGuide.verifyHeading}</h3>
             <p>{licenseGuide.verifyBody}</p>

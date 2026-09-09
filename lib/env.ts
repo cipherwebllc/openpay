@@ -681,6 +681,8 @@ export const env = {
   ),
   // ライセンス NFT は Creator Store の子。秘密鍵は lib/license の server-only module に隔離する。
   enableLicenseNft: parseBoolFlag('ENABLE_LICENSE_NFT', process.env.ENABLE_LICENSE_NFT),
+  // 一般出品のみを開放する server flag。明示的な '1' だけで ON、親 flag は config.ts で確認。
+  enableLicenseNftPublic: process.env.ENABLE_LICENSE_NFT_PUBLIC === '1',
   enableLicenseNftUi:
     parseBoolFlag('NEXT_PUBLIC_ENABLE_CREATOR_STORE', process.env.NEXT_PUBLIC_ENABLE_CREATOR_STORE) &&
     parseBoolFlag('NEXT_PUBLIC_ENABLE_LICENSE_NFT', process.env.NEXT_PUBLIC_ENABLE_LICENSE_NFT),

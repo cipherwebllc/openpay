@@ -171,20 +171,60 @@ and is never transmitted.
 
 ## 利用ライセンス (License NFT)
 
-SDK 0.7.0 adds license reads and a server-side entry gate. The two-line pattern is:
+SDK 0.7.1 (workspace update; not yet published) resolves the NFT definition from
+one product ID. Set only `LICENSE_PRODUCT_ID` and `LICENSE_SESSION_SECRET` on
+your server. The secret must contain at least 32 random bytes of key material
+(for example 32 random bytes encoded as hex). Replace the service URLs below
+with your own:
 
 ```js
-const entry = createLicenseGate({ ...licenseIdentity, origin: 'https://service.example', session: { secret: sessionSecret } });
+import { createLicenseGate, createJpycGate } from 'openpay-x402-sdk';
+
+const entry = createLicenseGate({
+  product: process.env.LICENSE_PRODUCT_ID,
+  session: {
+    secret: process.env.LICENSE_SESSION_SECRET,
+    origin: 'https://service.example',
+  },
+});
+await entry.ready();
 const usage = createJpycGate({ resourceUrl: 'https://service.example/api/paid' });
 ```
 
-Import these helpers from `openpay-x402-sdk`. `licenseIdentity` is the full
-`{ chainId, contract, tokenId }` tuple for your product; obtain it from the product
-definition or the trusted Verify API. `tokenId` must be a `bigint` or `0x` hex
-string representing a uint256, never a JS number or decimal string. OpenPay
-derives it as `keccak256(UTF8('openpay:license:' + productId))`, including the
-entire `h_…` product ID. A token ID alone does not identify a license across
-chains and contracts.
+Polygon (137) and Amoy (80002) use public RPC defaults; `rpcUrl` is optional.
+`origin` defaults to `https://open-pay.jp` for product discovery. `session.origin`
+binds the wallet signature and session to **your service**, independently of the
+OpenPay descriptor origin; this is application configuration, not another secret.
+If omitted, the signing origin remains the top-level `origin` for compatibility.
+
+`createLicenseGate({ chainId, contract, tokenId, origin, session, ... })` remains
+supported without discovery. An explicit `tokenId` must be a `bigint` or `0x` hex
+uint256, never a JS number or decimal string. Do not mix `product` and an explicit
+identity. OpenPay derives token IDs as
+`keccak256(UTF8('openpay:license:' + productId))`, including the entire `h_…` ID.
+
+### Resolve product metadata
+
+```js
+import { resolveLicense } from 'openpay-x402-sdk';
+const descriptor = await resolveLicense({ product: process.env.LICENSE_PRODUCT_ID });
+```
+
+`resolveLicense({ product, origin?, fetch? })` calls
+`GET /api/license/products/<id>`. It validates the v1 schema, product echo,
+chain/contract/hex token identity and token derivation, terms, supply and remaining
+stock, sale/registration booleans, canonical product/Verify links and seller role.
+It returns only these public fields. `remaining: null` means unknown stock;
+`remaining` and `saleActive` are cached display information, not reservations or
+proof of ownership. Paused or unregistered products still have descriptors.
+`verifyUrl` includes `product`; append `address` to query wallet rights.
+
+Descriptor origins must be bare **HTTPS** origins, including on localhost.
+Redirects are rejected and the injected `fetch` must honor `redirect: 'manual'`
+and the 15-second AbortSignal. Failures throw `LicenseError` (`invalid_response`,
+`redirect`, `http_error`, `network_error`); invalid options throw `TypeError`.
+The selected origin is a trusted source, not a signed attestation. Descriptor
+responses use `public, s-maxage=60, stale-while-revalidate=300`.
 
 ### Read ownership or purchase rights
 
@@ -201,9 +241,7 @@ if (status.entitled === null) {
 try {
   const { holder, balance, blockNumber } = await hasLicense({
     address: walletAddress,
-    chainId: status.license.chainId,
-    contract: status.license.contract,
-    tokenId: status.license.tokenId,
+    product: productId,
   });
   console.log({ holder, balance, blockNumber });
 } catch (error) {
@@ -213,7 +251,9 @@ try {
 }
 ```
 
-`hasLicense` calls standard ERC-1155 `balanceOf(address, tokenId)` at the returned
+`hasLicense({ address, product, origin?, fetch?, rpcUrl? })` resolves once per call;
+the explicit identity form also supports the same RPC transports. `hasLicense`
+calls standard ERC-1155 `balanceOf(address, tokenId)` at the returned
 `blockNumber`, using the latest block (not a finality guarantee). It checks the
 RPC chain ID and returns `{ holder: boolean, balance: bigint, blockNumber: bigint }`.
 Zero balance is a successful negative result; network errors, a wrong chain,
@@ -243,12 +283,21 @@ use `redirect`. Invalid caller options throw `TypeError`.
 
 ### Authenticate at entry, charge separately for use
 
-Create one `entry` instance on your server using the two-line pattern above.
-Set `origin` to **your service's origin** (default `https://open-pay.jp`) so the
-signing domain and session audience are correct. `sessionSecret` must be a
+Create one `entry` instance on your server using the pattern above. Set
+`session.origin` to **your service's origin** so the signing domain and session
+audience are correct. The explicit identity form can still use top-level `origin`
+for this. `LICENSE_SESSION_SECRET` must be a
 server-only, cryptographically random secret of at least 32 UTF-8 bytes, for
 example a random 32-byte value encoded as hex. All workers must use the same
 configuration and secret.
+
+Product gates discover at the first `challenge()` or `verify()`, or explicitly
+with `await entry.ready()` at startup. Concurrent initialization shares one
+request. A successful descriptor is frozen and cached for the gate lifetime;
+`ready()` returns it (or `undefined` for explicit identity). A failed request
+installs no identity and a later call can retry. `check()` remains synchronous:
+it throws `not_ready` before initialization and never performs discovery or RPC.
+Call `ready()` at worker startup when accepting sessions issued by another worker.
 
 ```js
 // Server challenge endpoint: send this message to the wallet.
@@ -311,7 +360,7 @@ spend balance; `createJpycGate` handles separate x402 pay-per-use. SDK spend
 defaults remain unchanged.
 
 ERC-8217 note: the license remains a standard ERC-1155. The agent-binding format
-will be published later; SDK 0.7.0 does not emit or validate binding metadata.
+will be published later; SDK 0.7.1 does not emit or validate binding metadata.
 
 ### SDK verification in this repository
 
