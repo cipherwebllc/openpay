@@ -10,7 +10,7 @@ import 'server-only';
 // **registry.ts には 1 行も触れない**。
 //
 // key 空間 (external の `x402:resource:*` / `x402:resources:index` と衝突しない):
-//   x402:hosted:<id>                        → HostedProduct (公開メタ・秘密を含まない)
+//   x402:hosted:<id>                        → HostedProduct (owner 限定 deliveryUrl を含む・公開時は明示 projection 必須)
 //   x402:hosted:owner:<wallet>              → id の list (owner あたり cap)
 //   x402:hosted:<id>:content:<revision>     → HostedContent (秘密本文・**不変**)
 //
@@ -23,6 +23,7 @@ import 'server-only';
 //     署名させた後に必ず失敗する構成を作らない。
 
 import { getAddress, isAddress, type Address } from 'viem';
+import { parseDeliveryUrl } from '@/lib/store/deliveryUrl';
 import { LICENSE_DEFAULT_INSTRUCTIONS, parseLicenseDefinition, parseLicenseRegistration, parseLicenseCreationTerms, type LicenseDefinition, type LicenseRegistration, type LicenseTermsInput } from '@/lib/license/definition';
 import { licenseDeployment, licenseSellerAllowed, licenseVisible } from '@/lib/license/config';
 import { createLicenseProduct } from '@/lib/license/product';
@@ -78,6 +79,8 @@ export type HostedProduct = {
   desc?: string;
   emoji?: string;
   imageUrl?: string;
+  /** owner 限定の配布先。購入 snapshot 非対象・公開時は protectedDelivery boolean のみ。 */
+  deliveryUrl?: string;
   galleryUrls?: readonly string[];
   /** human JPYC 整数の文字列 (売り手受領額。買い手は別途 x402 手数料を上乗せ)。 */
   priceJpyc: string;
@@ -205,6 +208,7 @@ export type HostedProductInput = {
   desc?: unknown;
   emoji?: unknown;
   imageUrl?: unknown;
+  deliveryUrl?: unknown;
   galleryUrls?: unknown;
   priceJpyc: unknown;
   contentKind: unknown;
@@ -278,6 +282,12 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       return { ok: false, error: 'invalid imageUrl' };
     }
     imageUrl = candidate || undefined;
+  }
+  let deliveryUrl: string | undefined;
+  if (input.deliveryUrl !== undefined && input.deliveryUrl !== null && input.deliveryUrl !== '') {
+    const parsed = parseDeliveryUrl(input.deliveryUrl);
+    if (!parsed.ok) return { ok: false, error: 'invalid deliveryUrl' };
+    deliveryUrl = parsed.url;
   }
   let galleryUrls: string[] | undefined;
   if (input.galleryUrls !== undefined) {
@@ -389,6 +399,7 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       ...(desc ? { desc } : {}),
       ...(sanitizeEmoji(input.emoji) ? { emoji: sanitizeEmoji(input.emoji) } : {}),
       ...(imageUrl ? { imageUrl } : {}),
+      ...(deliveryUrl ? { deliveryUrl } : {}),
       ...(galleryUrls ? { galleryUrls } : {}),
       priceJpyc: price.toString(),
       contentKind,
@@ -455,6 +466,8 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
     isHttpsUrl(imageUrlCandidate)
       ? imageUrlCandidate
       : undefined;
+  // 掟 13: 補助機能の破損を決済/content 経路へ波及させない。無効な保存 URL だけ落とす。
+  const deliveryUrl = parseDeliveryUrl(r.deliveryUrl);
   const galleryUrls: string[] = [];
   if (Array.isArray(r.galleryUrls)) {
     for (const value of r.galleryUrls) {
@@ -487,6 +500,7 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
     ...(desc ? { desc } : {}),
     ...(emoji ? { emoji } : {}),
     ...(imageUrl ? { imageUrl } : {}),
+    ...(deliveryUrl.ok ? { deliveryUrl: deliveryUrl.url } : {}),
     ...(galleryUrls.length > 0 ? { galleryUrls } : {}),
     priceJpyc: r.priceJpyc,
     contentKind: r.contentKind,
@@ -811,7 +825,7 @@ export type ReplaceHostedSellerProductResult =
     };
 
 /**
- * 出品フォームが管理する公開メタを全置換し、必要なら新 content revision も原子的に
+ * 出品フォームが管理するメタ (owner 限定の配布先を含む) を全置換し、必要なら新 content revision も原子的に
  * 追加する。旧 revision は残し、payTo / contentAvailable は seller から変更できない。
  */
 export async function replaceHostedSellerProduct(input: {
@@ -820,6 +834,7 @@ export async function replaceHostedSellerProduct(input: {
   metadata: Pick<
     HostedProduct,
     | 'title'
+    | 'deliveryUrl'
     | 'imageUrl'
     | 'galleryUrls'
     | 'priceJpyc'
@@ -859,6 +874,7 @@ export async function replaceHostedSellerProduct(input: {
     title: input.metadata.title,
     ...(input.metadata.desc ? { desc: input.metadata.desc } : {}),
     ...(input.metadata.emoji ? { emoji: input.metadata.emoji } : {}),
+    ...(input.metadata.deliveryUrl ? { deliveryUrl: input.metadata.deliveryUrl } : {}),
     ...(input.metadata.imageUrl ? { imageUrl: input.metadata.imageUrl } : {}),
     ...(input.metadata.galleryUrls?.length
       ? { galleryUrls: input.metadata.galleryUrls }

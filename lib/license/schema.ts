@@ -14,6 +14,7 @@ export const LICENSE_DESCRIPTOR_SCHEMA = {
     termsVersion: { type: 'string', minLength: 1, maxLength: 128, pattern: '\\S' },
     supply: { type: 'integer', minimum: 1, maximum: 10000 },
     remaining: { type: ['integer', 'null'], minimum: 0, maximum: 10000, description: 'supply minus sold and reserved; null when stock is unknown. Display only, not a reservation.' },
+    protectedDelivery: { type: 'boolean', description: 'Seller configured ticket delivery; not a protection or availability guarantee.' },
     saleActive: { type: 'boolean' }, registered: { type: 'boolean' },
     productUrl: { type: 'string', pattern: '^https://open-pay\\.jp/@[^/?#]+\\?product=h_[0-9a-f]{32}$' },
     verifyUrl: { type: 'string', pattern: '^https://open-pay\\.jp/api/license/verify\\?product=h_[0-9a-f]{32}$', description: 'Append address to check wallet rights.' },

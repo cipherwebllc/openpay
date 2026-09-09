@@ -12,6 +12,7 @@ import { licenseSummariesFor } from '@/lib/license/display';
 // 遷移先も @handle の商品 deep link (購入面を新設しない = money-path 不変)。
 
 import { formatUnits } from 'viem';
+import { parseDeliveryUrl } from '@/lib/store/deliveryUrl';
 import { listHandlesForOwner } from '@/lib/handleStore';
 import { hostedPurchaseFeeValue } from '@/lib/x402/hostedPurchaseWire';
 import {
@@ -22,6 +23,7 @@ import { listStoreIndexIds } from '@/lib/x402/storeIndex';
 
 /** Store カードの描画に必要な公開情報のみ (owner ウォレットは client へ渡さない)。 */
 export type StoreListing = {
+  protectedDelivery?: boolean;
   productKind?: 'license';
   license?: StoreLicenseSummary;
   sellerRole?: SellerRole;
@@ -85,6 +87,7 @@ export async function listStoreListings(): Promise<StoreListing[] | null> {
         : ownedHandles[0];
     out.push({
       id: product.id,
+      protectedDelivery: parseDeliveryUrl(product.deliveryUrl).ok,
       ...(product.productKind === 'license' && product.license ? {
         productKind: product.productKind,
         sellerRole: sellerRoleFor(product.owner),

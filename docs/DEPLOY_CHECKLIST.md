@@ -1792,3 +1792,61 @@ const usage = createJpycGate({ resourceUrl: 'https://service.example/api/paid' }
 NFT 保有は署名検証後に RPC で確認する。Verify は本人認証ではなく、発行待ちでも購入権利は存在し得る。
 短命セッションの有効期間中に譲渡/burn されても check 単独では再照会しない。
 全 worker で利用する nonceStore は atomic consume と TTL を実装し、詳細は SDK README の説明に従う。
+
+
+### 16.9 保護配布 signed delivery ticket（PR B 草案・既定 OFF）
+
+§16.8 の `LICENSE_SESSION_SECRET` を共有する gate とは**別プロトコル**。
+OpenPay だけが Ed25519 seed を持ち、売り手は JWKS の公開鍵で 60 秒の bearer ticket を検証する。
+本文 text/URL は既存の OpenPay ストアに残り、外部ファイルのバイト列は売り手のホストで配布する。
+署名鍵・認可・公開文言は merge 前に user がレビューし、SDK/テンプレート/UI の後続 PR と
+private R2 の E2E が完了するまで点灯しない。本節は env/deploy 実施の承認を意味しない。
+
+1. 鍵を手元で生成する。32 bytes の seed (64 bytes の展開秘密鍵ではない) を用い、チャットへ貼らない。
+
+   ```sh
+   node -e "console.log('0x'+require('crypto').randomBytes(32).toString('hex'))"
+   ```
+
+2. env は `ENABLE_STORE_DELIVERY_TICKET`、`NEXT_PUBLIC_ENABLE_STORE_DELIVERY_TICKET`、
+   `STORE_DELIVERY_SIGNING_KEYS` の 3 つ。server/UI は各 Creator Store 親 flag との AND・既定 OFF。
+   seed CSV は trim 後の各要素が小文字 `0x` + 64 hex・最大 8 鍵。空要素、末尾カンマ、重複、
+   不正な要素があれば全体無効。server flag OFF/未設定時は JWKS と発行 route が 404。
+   flag ON・署名鍵不正は JWKS 404、認可済みで配布可能な商品の発行だけ 503。通常 content は維持。
+
+3. `https://open-pay.jp/.well-known/openpay-delivery-keys.json` の到達性を確認する。
+   公開 `{kty,crv,x,kid,use,alg}` のみで `d`/seed が無いこと、
+   `Cache-Control: public, max-age=60, s-maxage=300` (stale-while-revalidate なし) と
+   `Content-Type: application/json` を確認する。`kid` は RFC 7638 の完全 thumbprint。
+
+4. 通常 rotation は **`old,new` → 15 分以上待つ → `new,old` → 15 分以上 + ticket TTL 60 秒待つ → `new`**。
+   先頭で署名し、全鍵を公開する。先に新鍵を公開してから署名を切り替える。
+   JWKS CDN 300 秒 + 後続 SDK cache 300 秒と伝播時間を見込み、温まった CDN/検証側 cache でも
+   新旧 ticket を検証する。後続 SDK は upstream Age を反映し、stale を無期限に使わない。
+
+5. 緊急失効は **CDN purge と検証側 refresh/拒否設定**が必要。
+   漏洩 seed は公開鍵が cache で信頼される間、新しい ticket を繰り返し署名できるため、
+   60 秒 TTL だけで侵害期間は制限できない。OpenPay の発行 OFF は攻撃者の署名を止めない。
+   verifier に `keys` を直接渡す設定は自動更新されない。各売り手が差し替え/失効処置を実施する。
+   既発行 ticket と取得済みファイルを即時回収できるとは説明しない。
+
+配布先は安定した HTTPS gate を設定する。query の再シリアライズで署名が壊れる presigned URL は
+設定しない。audience は URL.origin、ファイルは信頼済み `(product, rev)` マップから選ぶ。
+`protectedDelivery` は売り手が設定したという真偽であり、防御の監査・可用性保証を意味しない。
+`sub` は発行時セッションの wallet の主張で、提示者がその wallet 本人である証明ではない。
+購入歴のない holder の wallet も配布先へ渡る。ticket は暗号化されず、内容は読める。
+
+発行 GET は SIWE が必要。`Sec-Fetch-Site: cross-site` は 403、ヘッダ欠落の agent は許可する。
+発行結果を描画時に取得/prefetch/cache しない。302/JSON は private, no-store / no-referrer / Vary: Cookie。
+Location、JSON の url/ticket、例外、breadcrumb、売り手/CDN のアクセスログを秘匿対象として確認する。
+no-referrer は既存ログやブラウザ履歴を消さない。相対発行 href のみを content cache に保持する。
+license flag ON の hosted id は、明示 revision>1 (license grant/holder は revision 1 固定) を除き
+delivery 専用 RPC lease (上限 8) に保守的に admission する。補助 20/address/分 counter の障害のみ fail-open、
+lease の取得不能は RPC 開始前に 503。content route の既存 admission は変更しない。
+
+共有 vector は `tests/fixtures/delivery-ticket.v1.json` (TEST-ONLY seed・本番利用禁止)。
+header/payload の encoded segment 上限は 1,024/4,096 文字、署名は 64 bytes (86 文字)。
+実測 ticket は 570 bytes。512 文字の配布先への追加後サイズは、path の例で 1,090 bytes、
+query の percent encoding を含む例は fixture の measurements を参照する (配布先 512 文字制限は
+最終 Location の上限ではない)。
+後続 SDK の refresh/cache・独立 runtime/Worker の実機検証は PR C の受入条件とする。

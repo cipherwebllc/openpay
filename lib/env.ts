@@ -679,6 +679,13 @@ export const env = {
     'ENABLE_CREATOR_STORE',
     process.env.ENABLE_CREATOR_STORE,
   ),
+  // 保護配布は server/UI とも Creator Store の子・既定 OFF。秘密鍵は server-only module。
+  enableStoreDeliveryTicket:
+    parseBoolFlag('ENABLE_CREATOR_STORE', process.env.ENABLE_CREATOR_STORE) &&
+    parseBoolFlag('ENABLE_STORE_DELIVERY_TICKET', process.env.ENABLE_STORE_DELIVERY_TICKET),
+  enableStoreDeliveryTicketUi:
+    parseBoolFlag('NEXT_PUBLIC_ENABLE_CREATOR_STORE', process.env.NEXT_PUBLIC_ENABLE_CREATOR_STORE) &&
+    parseBoolFlag('NEXT_PUBLIC_ENABLE_STORE_DELIVERY_TICKET', process.env.NEXT_PUBLIC_ENABLE_STORE_DELIVERY_TICKET),
   // ライセンス NFT は Creator Store の子。秘密鍵は lib/license の server-only module に隔離する。
   enableLicenseNft: parseBoolFlag('ENABLE_LICENSE_NFT', process.env.ENABLE_LICENSE_NFT),
   // 一般出品のみを開放する server flag。明示的な '1' だけで ON、親 flag は config.ts で確認。

@@ -555,3 +555,13 @@ describe('GET /api/og/handle', () => {
     expect(collectImgSrcs(element)).toHaveLength(1);
   });
 });
+
+it('omits private deliveryUrl from the public OG model and never fetches the gate', async () => {
+  h.enableCreatorStore = true; h.enableCreatorStoreUi = true;
+  const id = 'h_' + 'a'.repeat(32); const deliveryUrl = 'https://files.example/private-delivery-sentinel';
+  hosted.listAvailableForOwner.mockResolvedValue([{ id, owner: RECORD.owner, payTo: RECORD.owner, title: 'Delivery', priceJpyc: '300', saleActive: true, contentAvailable: true, deliveryUrl }]);
+  const out = await callGet(`h=masia&locale=ja&product=${id}`);
+  expect(collectText(out.element).join(' ')).toContain('Delivery');
+  expect(JSON.stringify(out)).not.toContain(deliveryUrl);
+  expect(JSON.stringify(ssrf.fetchSafe.mock.calls)).not.toContain(deliveryUrl);
+});

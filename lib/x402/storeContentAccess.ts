@@ -22,6 +22,32 @@ export type StoreContentSelector = {
   intentSalt: string | null;
 };
 
+const POSITIVE_INTEGER_RE = /^[1-9][0-9]*$/;
+const CANONICAL_INTENT_SALT_RE = /^0x[0-9a-f]{64}$/;
+
+export function parseStoreContentSelector(req: Request): StoreContentSelector | null {
+  const params = new URL(req.url).searchParams;
+  const revisions = params.getAll('revision');
+  const intentSalts = params.getAll('intentSalt');
+  if (revisions.length > 1 || intentSalts.length > 1) return null;
+
+  let revision: number | null = null;
+  if (revisions.length === 1) {
+    const raw = revisions[0]!;
+    if (!POSITIVE_INTEGER_RE.test(raw)) return null;
+    revision = Number(raw);
+    if (!Number.isSafeInteger(revision)) return null;
+  }
+
+  let intentSalt: string | null = null;
+  if (intentSalts.length === 1) {
+    const raw = intentSalts[0]!;
+    if (!CANONICAL_INTENT_SALT_RE.test(raw)) return null;
+    intentSalt = raw;
+  }
+  return { revision, intentSalt };
+}
+
 // source は HTTP 来歴の由来。購入経路でも rights.basis は holder になり得る。
 type StoreContentProvenance = {
   resourceId: string;
