@@ -171,7 +171,7 @@ and is never transmitted.
 
 ## 利用ライセンス (License NFT)
 
-SDK 0.7.1 (workspace update; not yet published) resolves the NFT definition from
+SDK 0.7.1 resolves the NFT definition from
 one product ID. Set only `LICENSE_PRODUCT_ID` and `LICENSE_SESSION_SECRET` on
 your server. The secret must contain at least 32 random bytes of key material
 (for example 32 random bytes encoded as hex). Replace the service URLs below
@@ -376,8 +376,7 @@ consumer types.
 
 ## 保護配布 (Delivery ticket)
 
-SDK 0.8.0 is an **initial generation** workspace release, not yet published or
-production-adopted. OpenPay signs a 60-second bearer ticket after checking
+SDK 0.8.0 adds delivery-ticket verification. OpenPay signs a 60-second bearer ticket after checking
 entitlement. Sellers verify it with the public JWKS; no secret is shared with
 OpenPay. The token is signed, not encrypted, and its claims are readable.
 Possession authorizes admission during its lifetime; it is access control, not
