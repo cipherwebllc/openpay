@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.0
+
+- Add the typed `openpay-x402-sdk/delivery` Web-API-only subpath: strict Ed25519
+  delivery-ticket verification, request extraction, startup readiness and RFC 7638
+  thumbprints. Preserve all root exports and dependencies.
+- Bound JWKS fetches, enforce complete key-set validation, honor Age in a 300-second
+  cache, share concurrent fetches, throttle unknown-kid refresh and reject stale
+  trust. Supplied keys never fetch or automatically refresh.
+- Add optional atomic replay consumption with fail-closed errors and final expiry
+  rechecks; ship private R2/Durable Object and Node presigned-redirect templates.
+- Cross-check shared fixtures and fresh server signatures, packed subpath imports,
+  types, runtime capability failures, and template authorization boundaries.
+- Document bearer/session-wallet semantics and the Node/Workers acceptance matrix.
+  No dependencies added. Initial generation only: human review and real private R2
+  deployment acceptance remain required before adoption; publication is separate.
+
 ## 0.7.1
 
 - Add `resolveLicense({ product, origin?, fetch? })` for validated v1 product

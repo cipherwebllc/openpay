@@ -374,6 +374,131 @@ and real EOA signatures. Existing buyer/seller regression and tarball tests
 remain in the root Vitest suite; `npm run typecheck` also checks license API
 consumer types.
 
+## 保護配布 (Delivery ticket)
+
+SDK 0.8.0 is an **initial generation** workspace release, not yet published or
+production-adopted. OpenPay signs a 60-second bearer ticket after checking
+entitlement. Sellers verify it with the public JWKS; no secret is shared with
+OpenPay. The token is signed, not encrypted, and its claims are readable.
+Possession authorizes admission during its lifetime; it is access control, not
+copy protection or an allowance/payment balance.
+
+Import the dedicated typed subpath. The existing package root remains Node-only
+and does **not** re-export delivery helpers or types.
+
+```js
+import { createDeliveryGate, DeliveryError } from 'openpay-x402-sdk/delivery';
+
+const delivery = createDeliveryGate({
+  product: 'h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  audience: 'https://files.example', // Trusted seller configuration, not Host/header input.
+});
+await delivery.ready(); // Probe standard Ed25519 and prefetch validated JWKS.
+
+async function authorize(request) {
+  try {
+    const { product, revision, exp, address } = await delivery.verifyRequest(request);
+    // Resolve (product, revision) using YOUR trusted map, then serve private bytes.
+    return { product, revision, exp, address };
+  } catch (error) {
+    if (error instanceof DeliveryError) return null; // Deny; never log the request/ticket.
+    throw error;
+  }
+}
+```
+
+`verifyDeliveryTicket({ ticket, product, audience, issuer?, origin?, fetch?, now?,
+keys?, maxSkewSeconds?, replayStore? })` returns
+`{ address, product, revision, basis, exp, iat, jti, kid }`.
+`createDeliveryGate` takes the same options except `ticket`, and exposes async
+`ready()`, `verify(ticket)`, and `verifyRequest(request)`.
+`ticketFromRequest(request)` reads exactly one `?ticket=` or
+`Authorization: Bearer <ticket>` and returns `null` if absent. Duplicate/query-plus-
+authorization credentials, empty tickets and malformed authorization are rejected.
+`deliveryKeyThumbprint(x)` computes the RFC 7638 public-key ID.
+
+The expected `issuer` defaults to `https://open-pay.jp`; `origin` defaults to
+`issuer` and controls only trusted HTTPS JWKS transport. Configure these yourself,
+never from token headers/claims. Issuer/audience configuration is normalized with
+`new URL(value).origin`; the signed claims must exactly match that normalized
+origin. `now` returns Unix **milliseconds** (default `Date.now`); returned `iat`
+and `exp` are Unix **seconds**. Future `iat` allows `maxSkewSeconds` (default 30);
+expiry is strict, never extended by skew, and rechecked after async verification
+and immediately before returning. `sub`/`address` means the session wallet at
+issuance, **not proof that the presenter controls that wallet**. The SDK checks
+`0x` plus 40 hex characters and preserves spelling; EIP-55 checksum is enforced
+server-side at issuance, without adding a crypto dependency to the subpath.
+
+Optional single-use storage must implement:
+
+```ts
+consume(jti: string, expSeconds: number): Promise<boolean>;
+```
+
+Reserve the jti **atomically across instances** until its absolute Unix-second
+expiry: true for the first consume, false for a replay, throw on storage failure.
+Namespace storage per issuer/product/audience. The SDK calls it only after full
+verification, and denies on false (`replay`) or exceptions (`replay_store_error`).
+Other return values also deny. Concurrent calls must yield exactly one true.
+Without a store, reuse within TTL is allowed. After consumption, a downstream
+failure, HEAD request or retry needs a fresh ticket; no consume is rolled back.
+Workers KV get/put is not equivalent to atomic consume; the bundled example uses
+a Durable Object. An admitted stream may finish after expiry; subsequent requests
+(including resume/Range) must authenticate again.
+
+Public keys are validated as a whole (at most 8, public Ed25519 only, matching
+thumbprints, no duplicate kids). Fetches use an 8-second deadline, manual redirect
+rejection and a 16 KiB response cap. Cache is scoped by issuer and configured key
+origin for at most 300 seconds, subtracting upstream `Age` and fetch elapsed time.
+Age >= 300 is rejected; expired cache entries are refetched and **never** used on
+failure. Concurrent fetches share a request. Unknown kids trigger at most one
+extra refresh per 60 seconds per scope, including failed attempts. Invalid refreshes
+never replace good keys: still-fresh known cached keys remain usable, while the
+failed refresh request denies. `keys` supplied directly are validated and used
+exclusively, never fetched or automatically refreshed (even if empty/invalid).
+
+Rotation must publish `old,new` before signing with new, wait at least 15 minutes,
+switch to `new,old`, and retain old through propagation plus ticket lifetime.
+Emergency removal requires CDN purge and verifier refresh/reconfiguration; leaked
+keys can sign new tickets while cached public keys remain trusted. Turning off
+issuance does not revoke an attacker's signing ability or recall downloaded bytes.
+
+| Runtime | Delivery subpath requirement / acceptance |
+| --- | --- |
+| Node 20.19+ | Global WebCrypto with standard Ed25519; package engine remains Node >=20. |
+| Node 22.13+ | Same Web API entry point. |
+| Node 24 | Same Web API entry point. |
+| Cloudflare Workers | Standard `Ed25519`, no `nodejs_compat`; run a real deployment smoke on the template's pinned compatibility date. |
+
+`ready()` detects missing Ed25519 support as `unsupported_crypto`; there is no
+algorithm downgrade. The matrix is a release target, not proof that every runtime
+was executed by package tests. A real Worker deployment/private R2 smoke is an
+acceptance step. See [Node WebCrypto](https://nodejs.org/api/webcrypto.html) and
+[Workers WebCrypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/).
+
+Errors are `DeliveryError` with codes: `invalid_ticket`, `unsupported_algorithm`,
+`unknown_key`, `keys_unavailable`, `ticket_expired`, `ticket_not_yet_valid`,
+`wrong_issuer`, `wrong_audience`, `wrong_product`, `unsupported_crypto`, `replay`,
+`replay_store_error`. SDK errors omit raw tickets, URLs and upstream bodies.
+
+Start from the packaged [private R2 Worker template](examples/cloudflare-r2-delivery-gate/README.md)
+or [Node presigned-redirect example](examples/node-delivery-gate.mjs). The Node
+example uses `OPENPAY_PRODUCT_ID`, `AUDIENCE`, and optional `OBJECT_KEYS` (default
+`{ "1": "file-v1.zip" }`), listens on 127.0.0.1:8787 behind HTTPS, and requires you
+to implement the seller storage-SDK presigning stub. Its signature's absolute
+expiry must be <= the ticket's `exp`, even if presigning is slow; a duration alone
+must not extend that deadline. Presigned URLs are separate bearer capabilities.
+
+“Product ID only” is an onboarding simplification: audience, a trusted revision
+map, a private bucket binding and deployment compatibility still need configuration.
+Reject unmapped revisions instead of serving the latest file. Authenticate before
+all file/HEAD/Range/conditional paths and before any Cache API access. Close old
+unsigned/public-bucket URLs. Success, error and redirect responses need
+`Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`, and attachment
+disposition. Redact tickets/URLs in seller/CDN logs, Location, JSON and exceptions;
+no-referrer does not erase history or existing logs. Use a stable gate destination,
+not a presigned URL that may be broken by query reserialization.
+
 ## Money guards
 
 | Option | Default | Guard |
