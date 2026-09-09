@@ -34,6 +34,7 @@ type ProductSummary = StoreLicenseProduct & {
   desc?: string;
   emoji?: string;
   imageUrl?: string;
+  deliveryUrl?: string;
   galleryUrls?: readonly string[];
   priceJpyc: string;
   contentKind: 'url' | 'text';
@@ -67,6 +68,7 @@ type ProductForm = LicenseFormFields & {
   desc: string;
   emoji: string;
   imageUrl: string;
+  deliveryUrl: string;
   galleryUrls: string;
   priceJpyc: string;
   contentKind: 'url' | 'text';
@@ -128,6 +130,7 @@ const EMPTY_PRODUCT_FORM: ProductForm = {
   desc: '',
   emoji: '',
   imageUrl: '',
+  deliveryUrl: '',
   galleryUrls: '',
   priceJpyc: '',
   contentKind: 'url',
@@ -174,6 +177,7 @@ const DETAIL_MESSAGE_KEYS: Record<string, string> = {
   'invalid title': 'detailInvalidTitle',
   'invalid desc': 'detailInvalidDesc',
   'invalid imageUrl': 'detailInvalidImageUrl',
+  'invalid deliveryUrl': 'detailInvalidDeliveryUrl',
   'too many gallery images': 'detailTooManyGalleryImages',
   'invalid gallery image': 'detailInvalidGalleryImage',
   'invalid price': 'detailInvalidPrice',
@@ -517,6 +521,7 @@ function SignedInSellerPanel({
         desc: product.desc ?? '',
         emoji: product.emoji ?? '',
         imageUrl: product.imageUrl ?? '',
+        deliveryUrl: product.deliveryUrl ?? '',
         galleryUrls: product.galleryUrls?.join('\n') ?? '',
         priceJpyc: product.priceJpyc,
         contentKind: content.kind,
@@ -551,6 +556,9 @@ function SignedInSellerPanel({
             desc: form.desc.trim() || null,
             emoji: form.emoji.trim() || null,
             imageUrl: form.imageUrl.trim() || null,
+            // Mutable delivery metadata stays outside the immutable license/content fields.
+            // OFF omits it; ON preserves an empty string so editing can clear the destination.
+            ...(env.enableStoreDeliveryTicketUi ? { deliveryUrl: form.deliveryUrl } : {}),
             galleryUrls: form.galleryUrls
               .split(/\r?\n/)
               .map((url) => url.trim())
@@ -1053,6 +1061,29 @@ function SignedInSellerPanel({
               {t('imageGuideLink')}
             </Link>
           </p>
+          {env.enableStoreDeliveryTicketUi ? (
+            <div className="sm:col-span-2">
+              <label htmlFor="creator-store-product-delivery-url" className="block text-sm font-medium text-slate-700">
+                {t('deliveryUrlLabel')}
+              </label>
+              <input
+                id="creator-store-product-delivery-url"
+                type="url"
+                maxLength={512}
+                placeholder="https://"
+                value={productForm.deliveryUrl}
+                onChange={(event) => updateProduct({ deliveryUrl: event.target.value })}
+                aria-describedby="creator-store-product-delivery-help"
+                className={`${inputClass} min-h-11`}
+              />
+              <p id="creator-store-product-delivery-help" className="mt-1 text-xs leading-relaxed text-slate-500">
+                {t('deliveryUrlHelp')}{' '}
+                <Link href={`/${locale}/guide/store#protected-delivery`} prefetch={false} className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900">
+                  {t('deliveryGuideLink')}
+                </Link>
+              </p>
+            </div>
+          ) : null}
           <label
             htmlFor="creator-store-product-gallery-urls"
             className="block text-sm font-medium text-slate-700 sm:col-span-2"

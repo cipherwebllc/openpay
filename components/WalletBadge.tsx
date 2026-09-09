@@ -40,6 +40,7 @@ export function WalletBadge() {
     env.enableCsvPass ||
     env.enablePushNotify ||
     env.enableTipMessage ||
+    // Delivery UI is a strict child of Creator Store, so its SIWE entry is covered here.
     env.enableCreatorStoreUi ||
     env.enableHandles; // P2-M/掟7: /api/handle は SIWE 必須ゆえヘッダのサインイン導線に含める
 

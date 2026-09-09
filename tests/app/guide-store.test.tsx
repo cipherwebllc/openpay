@@ -6,15 +6,15 @@ import { DISCLOSED_LICENSE_NFT } from '@/lib/legal';
 import ja from '@/messages/ja.json';
 import en from '@/messages/en.json';
 
-const state = vi.hoisted(() => ({ enabled: false }));
+const state = vi.hoisted(() => ({ enabled: false, delivery: false }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
-  return { ...actual, env: { ...actual.env, get enableLicenseNftUi() { return state.enabled; } } };
+  return { ...actual, env: { ...actual.env, get enableLicenseNftUi() { return state.enabled; }, get enableStoreDeliveryTicketUi() { return state.delivery; } } };
 });
 vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn(), getTranslations: async () => (key: string) => key }));
 vi.mock('@/components/AppShell', () => ({ AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
 
-beforeEach(() => { state.enabled = false; });
+beforeEach(() => { state.enabled = false; state.delivery = false; });
 describe('store guide license section', () => {
   it('OFF では既存ガイドだけを表示する', async () => {
     render(await GuideStorePage({ params: Promise.resolve({ locale: 'ja' }) }));
@@ -50,4 +50,27 @@ describe('store guide license section', () => {
     expect(en.CreatorStoreSeller.licenseTitleLabel).toBe('License name');
     expect(ja.CreatorStorePurchase.licenseErrors.sold_out).toBe('完売しました');
   });
+});
+
+it('protected delivery guide is hidden while the UI flag is OFF', async () => {
+  const { deliveryStoreGuideContentFor, DELIVERY_SDK_README_URL } = await import('@/lib/storeGuide');
+  render(await GuideStorePage({ params: Promise.resolve({ locale: 'ja' }) }));
+  expect(screen.queryByRole('heading', { name: deliveryStoreGuideContentFor('ja').heading })).toBeNull();
+  expect(screen.queryByRole('link', { name: deliveryStoreGuideContentFor('ja').sdkLink })).toBeNull();
+  // ブランチ URL は merge 後に消えるので main を指す。
+  expect(DELIVERY_SDK_README_URL).toMatch(/^https:\/\/github\.com\/cipherwebllc\/openpay\/blob\/main\//);
+});
+
+it.each(['ja', 'en'])('%s protected delivery guide includes the complete setup and limits', async (locale) => {
+  state.delivery = true;
+  const { deliveryStoreGuideContentFor, DELIVERY_SDK_README_URL } = await import('@/lib/storeGuide');
+  render(await GuideStorePage({ params: Promise.resolve({ locale }) }));
+  const c = deliveryStoreGuideContentFor(locale);
+  expect(screen.getByRole('heading', { name: c.heading })).toBeVisible();
+  expect(screen.getByText(c.intro)).toBeVisible();
+  expect(c.steps).toHaveLength(4); expect(c.caveats).toHaveLength(3);
+  for (const text of [...c.steps, ...c.caveats]) expect(screen.getByText(text)).toBeVisible();
+  for (const setting of ['SDK 0.8.0', 'examples/cloudflare-r2-delivery-gate', 'OPENPAY_PRODUCT_ID', 'AUDIENCE', 'OBJECT_KEYS', 'FILES', 'wrangler deploy']) expect(c.steps[1]).toContain(setting);
+  expect(screen.getByRole('link', { name: c.sdkLink })).toHaveAttribute('href', DELIVERY_SDK_README_URL);
+  expect(Object.keys(deliveryStoreGuideContentFor('ja'))).toEqual(Object.keys(deliveryStoreGuideContentFor('en')));
 });

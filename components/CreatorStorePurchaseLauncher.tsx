@@ -20,6 +20,7 @@ const CreatorStorePurchaseFlow = dynamic(
 
 export type CreatorStorePurchaseLauncherProps = {
   product: StoreLicenseProduct & {
+    protectedDelivery?: boolean;
     id: string;
     title: string;
     description?: string;

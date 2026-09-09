@@ -7,6 +7,7 @@ const ADDRESS = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const state = vi.hoisted(() => ({
   enabled: true,
   licenseEnabled: false,
+  deliveryEnabled: false,
   isSignedIn: true,
   sessionAddress: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
 }));
@@ -18,6 +19,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
     ...actual,
     env: {
       ...actual.env,
+      get enableStoreDeliveryTicketUi() { return state.enabled && state.deliveryEnabled; },
       get enableLicenseNftUi() { return state.enabled && state.licenseEnabled; },
       get enableCreatorStoreUi() {
         return state.enabled;
@@ -84,6 +86,7 @@ function renderPanel(handle?: string | null) {
 beforeEach(() => {
   state.enabled = true;
   state.licenseEnabled = false;
+  state.deliveryEnabled = false;
   state.isSignedIn = true;
   state.sessionAddress = ADDRESS;
   signIn.mockClear();
@@ -256,11 +259,13 @@ describe('CreatorStoreSellerPanel', () => {
       /受け取り先にこのウォレットは使えません/,
     ],
     ['invalid imageUrl', /画像 URL は https:\/\//],
+    ['invalid deliveryUrl', /保護配布先は https:\/\//],
     ['too many gallery images', /追加画像は最大 4 枚/],
     ['invalid gallery image', /追加画像 URL は 1 行ごとに https:\/\//],
   ])(
     'invalid_product の detail「%s」を具体的な理由メッセージで表示する',
     async (invalidDetail, expectedMessage) => {
+      state.deliveryEnabled = invalidDetail === 'invalid deliveryUrl';
       const fetchMock = vi.fn(
         async (url: string, init?: RequestInit): Promise<Response> => {
           if (url === '/api/store/seller') {
@@ -838,5 +843,65 @@ describe('利用ライセンスの出品', () => {
     await screen.findByLabelText('商品名');
     expect(screen.queryByRole('radio', { name: '利用ライセンス NFT' })).not.toBeInTheDocument();
     expect(screen.queryByText('API ライセンス')).not.toBeInTheDocument();
+  });
+});
+
+
+describe('protected delivery seller field', () => {
+  function setup(kind: 'digital' | 'license', editing: boolean) {
+    state.licenseEnabled = true;
+    const product = { id: 'h_delivery', payTo: ADDRESS, title: 'Delivery product', priceJpyc: '1000', contentKind: 'text', label: 'download', saleActive: false, contentAvailable: true,
+      deliveryUrl: 'https://files.example/gate', ...(kind === 'license' ? { productKind: 'license', license: { supply: 1, transferable: false, termsUrl: 'https://example.com/terms', termsVersion: '1' }, registration: { status: 'registered' } } : {}) };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/store/seller') return response({ ok: true, seller: { name: 'Seller', contact: 'seller@example.com', updatedAt: 1 } });
+      if (init?.method === 'POST' || init?.method === 'PATCH') return response({ ok: true, product });
+      if (url === '/api/store/products/h_delivery') return response({ ok: true, product, content: { kind: 'text', value: 'Instructions' } });
+      return response({ ok: true, products: editing ? [product] : [], max: 12 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+  async function openForm(kind: 'digital' | 'license', editing: boolean) {
+    if (editing) {
+      fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+      await screen.findByRole('heading', { name: '商品を編集' });
+    } else if (kind === 'license') {
+      fireEvent.click(await screen.findByRole('radio', { name: '利用ライセンス NFT' }));
+      fireEvent.change(screen.getByLabelText('ライセンス名'), { target: { value: 'License' } });
+      fireEvent.change(screen.getByLabelText('価格（JPYC・1,000 以上）'), { target: { value: '1000' } });
+      fireEvent.change(screen.getByLabelText('利用条件 URL（https）'), { target: { value: 'https://example.com/terms' } });
+    } else {
+      fireEvent.change(await screen.findByLabelText('商品名'), { target: { value: 'Digital' } });
+      fireEvent.change(screen.getByLabelText('価格 (JPYC)'), { target: { value: '1000' } });
+      fireEvent.change(screen.getByLabelText('提供する URL'), { target: { value: 'https://example.com/instructions' } });
+    }
+  }
+  const cases = (['digital', 'license'] as const).flatMap((kind) => [false, true].flatMap((editing) => [false, true].map((enabled) => ({ kind, editing, enabled }))));
+  it.each(cases)('$kind editing=$editing flag=$enabled: field and JSON follow the flag', async ({ kind, editing, enabled }) => {
+    state.deliveryEnabled = enabled;
+    const fetchMock = setup(kind, editing);
+    renderPanel(); await openForm(kind, editing);
+    const field = screen.queryByRole('textbox', { name: '保護配布先URL' });
+    if (enabled) {
+      expect(field).toBeVisible(); expect(field).not.toBeRequired(); expect(field).not.toHaveAttribute('readonly');
+      expect(field).toHaveValue(editing ? 'https://files.example/gate' : '');
+      expect(screen.getByRole('link', { name: '設定手順はガイドを参照' })).toHaveAttribute('href', '/ja/guide/store#protected-delivery');
+      fireEvent.change(field!, { target: { value: 'https://new.example/gate' } });
+    } else expect(field).not.toBeInTheDocument();
+    fireEvent.submit(screen.getByLabelText(kind === 'license' ? 'ライセンス名' : '商品名').closest('form')!);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === (editing ? 'PATCH' : 'POST'))).toBe(true));
+    const body = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === (editing ? 'PATCH' : 'POST'))?.[1]?.body));
+    if (enabled) expect(body.deliveryUrl).toBe('https://new.example/gate');
+    else expect(body).not.toHaveProperty('deliveryUrl');
+    if (kind === 'license' && editing) for (const key of ['license', 'content', 'contentKind', 'priceJpyc', 'payTo']) expect(body).not.toHaveProperty(key);
+  });
+  it.each(['digital', 'license'] as const)('%s: clearing a saved destination sends an explicit empty string', async (kind) => {
+    state.deliveryEnabled = true;
+    const fetchMock = setup(kind, true); renderPanel(); await openForm(kind, true);
+    const field = screen.getByRole('textbox', { name: '保護配布先URL' });
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.submit(field.closest('form')!);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true));
+    expect(JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]?.body))).toHaveProperty('deliveryUrl', '');
   });
 });

@@ -326,7 +326,7 @@ describe('@handle ProfilePage JSON-LD', () => {
     expect(jsonLd.mainEntity).not.toHaveProperty('sameAs');
   });
 
-  it('両 creator-store flag ON の link-in-bio だけ owner 商品を表示する', async () => {
+  it.each([undefined, 'https://files.example/gate'])('両 creator-store flag ON の商品表示は配布先 %s を boolean に限定する', async (deliveryUrl) => {
     state.enableCreatorStore = true;
     state.enableCreatorStoreUi = true;
     state.hostedProducts = [
@@ -335,6 +335,7 @@ describe('@handle ProfilePage JSON-LD', () => {
         owner: ADDR,
         payTo: ADDR,
         title: 'Prompt',
+        deliveryUrl,
         imageUrl: 'https://cdn.example.com/product.png',
         galleryUrls: [
           'https://cdn.example.com/product-side.png',
@@ -362,6 +363,7 @@ describe('@handle ProfilePage JSON-LD', () => {
       {
         id: `h_${'a'.repeat(32)}`,
         title: 'Prompt',
+        protectedDelivery: !!deliveryUrl,
         imageUrl: 'https://cdn.example.com/product.png',
         galleryUrls: [
           'https://cdn.example.com/product-side.png',
@@ -374,6 +376,8 @@ describe('@handle ProfilePage JSON-LD', () => {
         label: 'prompt',
       },
     ]);
+    expect(JSON.stringify(state.renderedStorefrontProducts)).not.toContain('deliveryUrl');
+    expect(container.innerHTML).not.toContain('https://files.example/gate');
   });
 
   it('商品 storage 障害は既存ページへ波及させず節だけ省略する', async () => {

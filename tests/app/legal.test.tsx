@@ -18,6 +18,21 @@ import { USDC_CHAINS, chainForSlug } from '@/lib/chains';
 
 describe('Legal pages', () => {
   describe('Terms (利用規約)', () => {
+    it.each(['ja', 'en'] as const)('%s: Article 13 (18) and privacy explain external delivery and holder disclosure', async (locale) => {
+      const messages = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
+      const body = messages.Terms.article13.body;
+      expect(body.match(/\(18\)/g)).toHaveLength(1);
+      const clause = body.split('(18)')[1];
+      for (const text of locale === 'ja'
+        ? ['出品者が運営', '可用性', '60秒', 'ウォレットアドレス・商品・版・時刻', '保管・配信しません', '引渡し義務', '(6)', '第三者', '即時に回収', '購入歴のない保有者', '(14)', '(7)', '(11)']
+        : ['seller operates', 'availability', '60 seconds', 'wallet address, product, revision and timestamps', 'does not store or serve', 'responsible for delivery', '(6)', 'third parties', 'not immediately recalled', 'holder without a purchase history', '(14)', '(7)', '(11)']) expect(clause).toContain(text);
+      renderWithIntl(<TermsPage />, { locale });
+      expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-09-10');
+      expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-09-10');
+    });
+
     it('第13条: license の政策値・売り手・権利・返金・公開情報を同じ namespace 内で固定する', async () => {
       const ja = (await import('@/messages/ja.json')).default.Terms.article13.body;
       const en = (await import('@/messages/en.json')).default.Terms.article13.body;
@@ -39,7 +54,7 @@ describe('Legal pages', () => {
       expect(clause(ja, 17)).toContain('公開台帳'); expect(clause(en, 17)).toContain('public ledger');
       expect(clause(ja, 17)).toContain('公開 Verify API'); expect(clause(en, 17)).toContain('public Verify API');
       expect(clause(ja, 16)).toContain('法的適合性の認定を意味しません'); expect(clause(en, 16)).toContain('not legal clearance');
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-09-08');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-09-10');
     });
     it('ja: h1 と 11 条すべての title が render される', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
@@ -698,12 +713,12 @@ describe('Legal pages', () => {
       //   改定 (実質的改定のため施行日/最終更新日を更新)。Privacy は料金モデルに直接言及しないため据置。
       // 2026-08-17: デジタル商品ストアの Base USDC 決済を 13 条に追加。
       // 2026-08-24: dual-rail 出品 (第三者出品の USDC/Base 併売・利用料 0%) を 5 条 (10) に追加。
-      // 2026-09-08 改定案: 自社出品・利用ライセンス NFT の第13条追記 (公開前承認対象)。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-09-08');
+      // 2026-09-10 改定案: 保護配布の第13条 (18) 追記 (公開前承認対象)。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-09-10');
       expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-07-30');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-13');
-      // 2026-07-29: 非公開チップメッセージ追記 (取得/目的/保管) の実質的改定で更新
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-07-30');
+      // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-09-10');
     });
   });
 

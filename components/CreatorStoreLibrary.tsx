@@ -54,6 +54,7 @@ type LibraryPage = {
 type ReadyContent = {
   ok: true;
   state: 'ready';
+  delivery?: { mode: 'ticket'; href: string };
   resourceId: string;
   title: string;
   contentRevision: number;
@@ -457,6 +458,16 @@ function EnabledCreatorStoreLibrary({ source }: { source: 'purchases' | 'holders
               <p className="mt-3 font-bold text-slate-900">
                 {content.data.title}
               </p>
+              {env.enableStoreDeliveryTicketUi && content.data.delivery?.href ? (
+                <div className="mt-4">
+                  {/* Ordinary same-origin navigation sends the SIWE cookie; issue only on click. */}
+                  <a href={content.data.delivery.href} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-bold text-white hover:bg-brand-dark">
+                    {t('openProtectedDownload')}
+                    <ExternalLink className="h-4 w-4" aria-hidden />
+                  </a>
+                  <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('protectedDownloadCaption')}</p>
+                </div>
+              ) : null}
               {content.data.kind === 'url' ? (
                 <a
                   href={content.data.value}

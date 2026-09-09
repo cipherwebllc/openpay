@@ -2,6 +2,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { env } from '@/lib/env';
 import type { StoreLicenseProduct } from '@/lib/licenseUi';
+import { CreatorStoreDeliveryBadge } from '@/components/CreatorStoreDeliveryBadge';
 import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { formatUnits } from 'viem';
 import { hostedPurchaseFeeValue } from '@/lib/x402/hostedPurchaseWire';
@@ -14,6 +15,7 @@ import { CreatorStorePurchaseLauncher } from '@/components/CreatorStorePurchaseL
 import { CreatorStorefrontProductArtwork } from '@/components/CreatorStorefrontProductArtwork';
 
 export type CreatorStorefrontProduct = StoreLicenseProduct & {
+  protectedDelivery?: boolean;
   id: string;
   title: string;
   desc?: string;
@@ -146,6 +148,7 @@ export function CreatorStorefrontSection({
                       {product.desc}
                     </p>
                   ) : null}
+                  <CreatorStoreDeliveryBadge protectedDelivery={product.protectedDelivery} />
                   <CreatorStoreLicenseDetails product={product} />
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <span
@@ -179,6 +182,7 @@ export function CreatorStorefrontSection({
                     <CreatorStorePurchaseLauncher
                       product={{
                         id: product.id,
+                        protectedDelivery: product.protectedDelivery,
                         ...(product.productKind === 'license' ? { productKind: product.productKind, license: product.license, sellerRole: product.sellerRole, sellerName: product.sellerName } : {}),
                         title: product.title,
                         ...(product.desc
