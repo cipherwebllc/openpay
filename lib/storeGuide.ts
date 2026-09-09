@@ -704,8 +704,8 @@ const usage = createJpycGate({ resourceUrl: 'https://service.example/api/paid' }
   };
 }
 
-// Public-copy draft: reviewed SDK branch artifact; publication/activation are separate steps.
-export const DELIVERY_SDK_README_URL = 'https://github.com/cipherwebllc/openpay/blob/feat/protected-delivery-sdk/packages/x402-sdk/README.md#保護配布-delivery-ticket';
+// main の SDK README (PR #466 merge 後に節が存在)。ブランチ URL は merge 後に消えるので使わない。
+export const DELIVERY_SDK_README_URL = 'https://github.com/cipherwebllc/openpay/blob/main/packages/x402-sdk/README.md#保護配布-delivery-ticket';
 
 const DELIVERY_STORE_GUIDE_JA = {
   heading: 'ファイルを預けずに保護配布する',

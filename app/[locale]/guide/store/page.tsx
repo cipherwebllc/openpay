@@ -33,7 +33,8 @@ export default async function GuideStorePage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = storeGuideContentFor(locale);
-  const deliveryGuide = deliveryStoreGuideContentFor(locale);
+  // license 節と同じく UI flag の子。OFF の本番/CI に未点灯機能のガイドを出さない。
+  const deliveryGuide = env.enableStoreDeliveryTicketUi ? deliveryStoreGuideContentFor(locale) : null;
   const licenseGuide = env.enableLicenseNftUi ? licenseStoreGuideContentFor(locale) : null;
   const tCatalog = await getTranslations({ locale, namespace: 'StoreCatalog' });
 
@@ -271,7 +272,7 @@ export default async function GuideStorePage({
           </div>
         </Section> : null}
 
-        <div id="protected-delivery" className="scroll-mt-24">
+        {deliveryGuide ? <div id="protected-delivery" className="scroll-mt-24">
           <Section title={deliveryGuide.heading}>
             <p className="mt-3 text-sm leading-relaxed text-slate-700">{deliveryGuide.intro}</p>
             <ol className="mt-4 space-y-3">
@@ -289,7 +290,7 @@ export default async function GuideStorePage({
               <a href={DELIVERY_SDK_README_URL} target="_blank" rel="noopener noreferrer" className="font-semibold text-emerald-700 underline underline-offset-2 hover:text-emerald-900">{deliveryGuide.sdkLink}</a>
             </p>
           </Section>
-        </div>
+        </div> : null}
 
         <Section title={c.commonTitle}>
           <div className="mt-2 space-y-6">
