@@ -35,22 +35,29 @@ const BUDGETS_KB = {
   // 切り分け実測: 同 PR の i18n pick (F12) のみを適用したビルドでは /pay 438kB のまま増分ゼロ、
   // /create の code-split を戻すと 438kB に戻る。code-split を「やった上で」出た再分割分なので
   // 予算側を +2kB する。自作コードの直接 import 増には引き続き code-split 優先方針を適用する。
-  '/[locale]/pay': 442,
+  // 2026-09-09 npm audit fix (next 15.5.25 の RCE 修正と同時・ws/postcss HIGH の transitive 更新):
+  //   viem 配下の ox 0.14.22→0.14.44・@solana/web3.js 1.98→1.99・@metamask/utils 等のベンダー更新で
+  //   /pay 445・/tip 443・/[handle] 482・/checkout 448 kB (+2〜5kB)。自作コードの import graph は不変
+  //   (lockfile 差分にアプリ側の変更なし)。Sentry 更新 (2026-07-22) と同じ「削れないベンダー増分」として
+  //   各 +5〜7kB 再調整。自作コード起因の増分には引き続き code-split 優先方針を適用する。
+  '/[locale]/pay': 447,
   // 2026-08-18 store USDC P2: /pay と同型の chunk 再分割 +1kB (tip から新規 USDC モジュール
   // への import 経路なしを grep で確認)。
   // 2026-08-17 store USDC P3: Terms 13 条追記 (messages 増) による再分割 +1kB (tip から
   // lib/legal への直接 import なしを grep 確認)。自作コード起因なら code-split 優先の方針は不変。
   // 2026-09-03 review Phase6 F2: /pay と同型の再分割 +2kB (/create の code-split 起因・
   // tip の import graph は不変。切り分け実測は上の /pay コメント参照)。
-  '/[locale]/tip/[address]': 438,
+  // 2026-09-09 npm audit fix のベンダー増分 (/pay のコメント参照) で 443kB → +7kB。
+  '/[locale]/tip/[address]': 445,
   // 2026-09-02 全コードベースレビュー Phase 5 (F1): 予算対象が 5 route しかなく、実際に最も重い
   //   3 route (/create・/[handle]・/checkout) が無監視だった。/pay と同じ「余裕ゼロ」慣行で
   //   実測 +4kB を上限に据える (実測: [handle] 475 / checkout 442 kB)。
   //   超えたら安易に上げず、まず code-split (next/dynamic) を検討すること。
   // 2026-09-03 Phase 6 (F2) で /create のタブを next/dynamic 化 → 546 → 387 kB。予算も追従。
   '/[locale]/create': 392,
-  '/[locale]/[handle]': 479,
-  '/[locale]/checkout': 446,
+  // 2026-09-09 npm audit fix のベンダー増分 (/pay のコメント参照): [handle] 482 / checkout 448 kB。
+  '/[locale]/[handle]': 485,
+  '/[locale]/checkout': 451,
   '/manifest.webmanifest': 250,
   // shared chunks の総和。表の行 "First Load JS shared by all"
   '__shared__': 250,
