@@ -149,7 +149,7 @@ export function CreatorStorefrontSection({
                     </p>
                   ) : null}
                   <CreatorStoreDeliveryBadge protectedDelivery={product.protectedDelivery} />
-                  <CreatorStoreLicenseDetails product={product} />
+                  <CreatorStoreLicenseDetails product={product} variant="card" />
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                     <span
                       className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ${

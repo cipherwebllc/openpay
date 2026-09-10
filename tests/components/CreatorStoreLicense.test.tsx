@@ -30,6 +30,19 @@ function confirmation(provider: 'operator' | 'third_party' = 'operator', transfe
 beforeEach(() => { flags.enabled = true; });
 
 describe('license public details and confirmation', () => {
+  it('card variant はバッジと残数だけを出し、full の開示項目を出さない', () => {
+    renderWithIntl(<CreatorStoreLicenseDetails product={{ ...product, sellerRole: 'third_party' }} variant="card" />);
+    expect(screen.getByText(ja.CreatorStoreLicense.badge)).toBeInTheDocument();
+    expect(screen.getByText(ja.CreatorStoreLicense.remaining.replace('{remaining}', '7').replace('{supply}', '10'))).toBeInTheDocument();
+    expect(screen.queryByText(ja.CreatorStoreLicense.nonTransferable)).not.toBeInTheDocument();
+    expect(screen.queryByText(ja.CreatorStoreLicense.sellerThirdParty.replace('{name}', 'Example Seller'))).not.toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.queryByText(ja.CreatorStoreLicense.deliveryNotice)).not.toBeInTheDocument();
+  });
+  it('card variant も在庫不明を在庫ありに見せない', () => {
+    renderWithIntl(<CreatorStoreLicenseDetails product={{ ...product, license: { ...license, remaining: null } }} variant="card" />);
+    expect(screen.getByText(ja.CreatorStoreLicense.remainingUnknown)).toBeInTheDocument();
+  });
   it('在庫ゼロと取得失敗を区別する', () => {
     const { rerender } = renderWithIntl(<CreatorStoreLicenseDetails product={{ ...product, license: { ...license, remaining: 0 } }} />);
     expect(screen.getByText('残り 0 / 10 · 譲渡不可')).toBeInTheDocument();
