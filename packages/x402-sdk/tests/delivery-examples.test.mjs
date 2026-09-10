@@ -8,7 +8,9 @@ import { fixture, base, ticket, response } from './delivery.fixture.mjs';
 function privateHeaders(headers) {
   assert.equal(headers.get('cache-control'), 'private, no-store');
   assert.equal(headers.get('referrer-policy'), 'no-referrer');
-  assert.equal(headers.get('content-disposition'), 'attachment');
+  // Only a 200 file response is a download; "attachment" on an error makes Chrome
+  // report ERR_INVALID_RESPONSE (real Worker, 2026-09-10).
+  assert.equal(headers.get('content-disposition'), null);
 }
 function replayState({ failPut = false, failAlarm = false } = {}) {
   const records = new Map(); let chain = Promise.resolve(); let alarm;
@@ -80,7 +82,10 @@ test('Worker serves authenticated full GET/Range/conditional and HEAD using only
   const { env, request, reads } = setupWorker(t);
   for (const init of [{}, { headers: { Range: 'bytes=0-1' } }, { headers: { 'If-None-Match': '*' } }, { method: 'HEAD' }]) {
     const result = await worker.fetch(request(fixture.ticket, init), env);
-    assert.equal(result.status, 200); privateHeaders(result.headers);
+    assert.equal(result.status, 200);
+    assert.equal(result.headers.get('cache-control'), 'private, no-store');
+    assert.equal(result.headers.get('referrer-policy'), 'no-referrer');
+    assert.match(result.headers.get('content-disposition'), /^attachment; filename="[A-Za-z0-9._-]+"$/);
     assert.equal(result.headers.get('content-length'), '3');
     assert.equal((await result.arrayBuffer()).byteLength, init.method === 'HEAD' ? 0 : 3);
   }

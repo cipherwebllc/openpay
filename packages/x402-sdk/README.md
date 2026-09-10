@@ -467,7 +467,7 @@ issuance does not revoke an attacker's signing ability or recall downloaded byte
 | Node 20.19+ | Global WebCrypto with standard Ed25519; package engine remains Node >=20. |
 | Node 22.13+ | Same Web API entry point. |
 | Node 24 | Same Web API entry point. |
-| Cloudflare Workers | Standard `Ed25519`, no `nodejs_compat`; run a real deployment smoke on the template's pinned compatibility date. |
+| Cloudflare Workers | Standard `Ed25519`, no `nodejs_compat`. Verified end-to-end on a real Worker + private R2 deployment with SDK 0.8.1 (2026-09-10); re-run the smoke when you change the compatibility date. |
 
 `ready()` detects missing Ed25519 support as `unsupported_crypto`; there is no
 algorithm downgrade. The matrix is a release target, not proof that every runtime

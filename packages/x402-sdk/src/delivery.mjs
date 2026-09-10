@@ -192,7 +192,9 @@ async function refresh(cache, config) {
     });
     try {
       const { keys, age } = await Promise.race([
-        (async () => readKeysResponse(await config.fetchImpl(`${config.origin}/.well-known/openpay-delivery-keys.json`, {
+        // Call with `this` = globalThis: Cloudflare Workers reject a detached `fetch`
+        // ("Illegal invocation") — observed on a real Worker on 2026-09-10; Node does not.
+        (async () => readKeysResponse(await config.fetchImpl.call(globalThis, `${config.origin}/.well-known/openpay-delivery-keys.json`, {
           method: 'GET', redirect: 'manual', signal: controller.signal, headers: { accept: 'application/json' },
         }), config))(), timeout,
       ]);

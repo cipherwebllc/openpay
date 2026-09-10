@@ -2,8 +2,11 @@ import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { createDeliveryGate } from 'openpay-x402-sdk/delivery';
 
+// No Content-Disposition here: the redirect target (your presigned URL) decides the
+// download name, and an error response carrying "attachment" makes Chrome show
+// ERR_INVALID_RESPONSE instead of the JSON body.
 const PRIVATE_HEADERS = {
-  'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer', 'Content-Disposition': 'attachment',
+  'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer',
 };
 
 async function presignObject({ key, method, expiresAt, expiresInSeconds }) {
