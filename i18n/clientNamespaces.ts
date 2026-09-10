@@ -224,6 +224,12 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'Nav',
     'News',
   ],
+  'license-terms/standard-v1': [
+    'ConnectButton',
+    'LocaleSwitcher',
+    'Nav',
+    'News',
+  ],
   'me': [
     'ConnectButton',
     'LocaleSwitcher',

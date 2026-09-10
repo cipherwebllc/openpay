@@ -37,7 +37,8 @@ describe('store guide license section', () => {
     expect(c.policy).toContain(DISCLOSED_LICENSE_NFT.maxSupply.toLocaleString('en-US'));
     expect(c.policy).toContain(DISCLOSED_LICENSE_NFT.minPriceJpyc.toLocaleString('en-US'));
     expect(c.policy).toContain('Amoy');
-    expect(c.fields).toMatch(/利用条件の版|terms version/);
+    expect(screen.getByText(c.fields)).toHaveTextContent('standard-v1');
+    expect(c.fields).toMatch(/利用条件のバージョン|terms version/);
     expect(c.verifyBody).toContain('null');
   });
   it('翻訳は指定 namespace に完全 parity で存在する', () => {

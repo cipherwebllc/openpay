@@ -1,5 +1,17 @@
 import { expect, test } from '@playwright/test';
 
+// Standard terms remain public independently of listing flags, including CI flag OFF.
+for (const [locale, heading] of [
+  ['ja', '利用ライセンス標準条件 standard-v1'],
+  ['en', 'Standard Usage License Terms standard-v1'],
+]) {
+  test(`standard license terms are public (${locale})`, async ({ page }) => {
+    await page.goto(`/${locale}/license-terms/standard-v1`);
+    await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+    await expect(page.locator('article ol > li')).toHaveCount(11);
+  });
+}
+
 // CI の既定 OFF で、既存の作成画面とガイドへライセンス UI が漏れないことを確認する。
 test.describe('license UI default OFF', () => {
   test.skip(process.env.NEXT_PUBLIC_ENABLE_LICENSE_NFT === '1' || process.env.NEXT_PUBLIC_ENABLE_LICENSE_NFT === 'true', '有効化環境の確認は flag ON 用の検証で行う');
