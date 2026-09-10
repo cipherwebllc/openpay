@@ -161,7 +161,7 @@ export function StoreBrowser({
                   </span>
                 </span>
               </Link>
-              <CreatorStoreLicenseDetails product={{ ...listing, sellerName: `@${listing.handle}` }} />
+              <CreatorStoreLicenseDetails product={{ ...listing, sellerName: `@${listing.handle}` }} variant="card" />
             </li>
           ))}
         </ul>

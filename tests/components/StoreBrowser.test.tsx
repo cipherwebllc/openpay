@@ -101,9 +101,11 @@ it('ライセンスカードの外部条件リンクを商品リンク内に入�
   state.licenseEnabled = true;
   const { container, rerender } = renderWithIntl(<StoreBrowser listings={[listing]} locale="ja" />);
   expect(screen.getByText('利用ライセンス NFT')).toBeInTheDocument();
-  expect(screen.getByText('残り 9 / 12 · 譲渡可')).toBeInTheDocument();
-  expect(screen.getByText('販売者: 第三者出品者 (@alice)')).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: '利用条件（版 3）' })).toHaveAttribute('href', 'https://example.com/terms');
+  expect(screen.getByText('残り 9 / 12')).toBeInTheDocument();
+  // 一覧カードはバッジ + 残数のみ (2026-09-10 user 裁定)。販売者区分・利用条件・発行時期は詳細と購入確認で開示する。
+  expect(screen.queryByText(/譲渡可/)).not.toBeInTheDocument();
+  expect(screen.queryByText('販売者: 第三者出品者 (@alice)')).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: '利用条件（版 3）' })).not.toBeInTheDocument();
   expect(container.querySelector('a a')).toBeNull();
   expect(container.querySelector('ul')).toHaveClass('grid-cols-1');
   state.licenseEnabled = false;
