@@ -36,6 +36,7 @@ describe('i18n: Creator Store namespace の完全 parity', () => {
   it.each(
     [
       'CreatorStoreSeller',
+      'CreatorStoreLicense',
       'CreatorStorefront',
       'CreatorStorePurchase',
       'CreatorStoreLibrary',
@@ -1649,6 +1650,11 @@ describe('i18n: license UI の正確な namespace と key path', () => {
     'CreatorStoreSeller.licenseTransferLabel',
     'CreatorStoreSeller.licenseTransferYes',
     'CreatorStoreSeller.licenseTransferNo',
+    'CreatorStoreSeller.licenseTermsLabel',
+    'CreatorStoreSeller.licenseTermsStandard',
+    'CreatorStoreSeller.licenseTermsStandardLink',
+    'CreatorStoreSeller.licenseTermsCustom',
+    'CreatorStoreSeller.licenseTermsVersionHint',
     'CreatorStoreSeller.licenseTermsUrlLabel',
     'CreatorStoreSeller.licenseTermsVersionLabel',
     'CreatorStoreSeller.licenseInstructionsLabel',

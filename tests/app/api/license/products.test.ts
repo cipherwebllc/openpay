@@ -11,6 +11,7 @@ vi.mock('@/lib/net/ipHash', () => ({ clientIp: h.ip, hashIp: h.hash }));
 import { GET } from '@/app/api/license/products/[id]/route';
 import { createLicenseDefinition } from '@/lib/license/definition';
 import { LICENSE_DESCRIPTOR_SCHEMA } from '@/lib/license/schema';
+import { LICENSE_STANDARD_TERMS } from '@/lib/license/standardTerms';
 const ID = 'h_' + 'a'.repeat(32);
 const OWNER = '0x1111111111111111111111111111111111111111';
 const d = createLicenseDefinition(ID, { transferable: false, supply: 10, termsUrl: 'https://seller.example/terms', termsVersion: '1' }, 137, '0x3333333333333333333333333333333333333333');
@@ -22,6 +23,16 @@ beforeEach(() => {
   vi.resetAllMocks(); h.enabled = true; h.product.mockResolvedValue(product); h.handles.mockResolvedValue(['other', 'seller']);
   h.stock.mockResolvedValue({ ok: true, value: [JSON.stringify(stock)] }); h.limit.mockResolvedValue(true);
   h.ip.mockReturnValue('trusted'); h.hash.mockReturnValue('hash');
+});
+it('exposes the resolved standard URL/version through the ordinary descriptor', async () => {
+  const license = createLicenseDefinition(ID, { transferable: false, supply: 10, termsUrl: LICENSE_STANDARD_TERMS.url, termsVersion: LICENSE_STANDARD_TERMS.version }, 137, d.contract);
+  h.product.mockResolvedValue({ ...product, license });
+  h.stock.mockResolvedValue({ ok: true, value: [JSON.stringify({ ...stock, gen: license.definitionHash })] });
+  const response = await get();
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body).toMatchObject({ termsUrl: LICENSE_STANDARD_TERMS.url, termsVersion: LICENSE_STANDARD_TERMS.version });
+  expect(validate(body), JSON.stringify(validate.errors)).toBe(true);
 });
 it('feature OFF returns inert 404 before any IO', async () => {
   h.enabled = false; expect((await get()).status).toBe(404);

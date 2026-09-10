@@ -1,5 +1,6 @@
 import { encodeAbiParameters, getAddress, isAddress, keccak256, stringToHex, toHex, type Address, type Hex } from 'viem';
 import { computeLicenseTokenId } from './paymentKey';
+import { LICENSE_STANDARD_TERMS } from './standardTerms';
 
 export type LicenseDefinition = {
   schema: 1;
@@ -23,11 +24,15 @@ export type LicenseRegistration = {
   attempts: number;
 };
 export type LicenseTermsInput = Pick<LicenseDefinition, 'supply' | 'transferable' | 'termsUrl' | 'termsVersion'>;
+export type LicenseCreationTermsInput = Pick<LicenseTermsInput, 'supply'> & Partial<Pick<LicenseTermsInput, 'transferable'>> & (
+  | { termsPreset: typeof LICENSE_STANDARD_TERMS.version; termsUrl?: string; termsVersion?: string }
+  | (Pick<LicenseTermsInput, 'termsUrl' | 'termsVersion'> & { termsPreset?: never })
+);
 export const LICENSE_DEFAULT_INSTRUCTIONS = '利用開始の案内は売り手の利用条件 URL を参照';
 const HEX32 = /^0x[0-9a-f]{64}$/;
 const DOMAIN = keccak256(stringToHex('openpay.license.definition.v1'));
 
-/** URL と版の UTF-8 を abi.encode(string,string) して keccak256。連結の境界曖昧性を排除する。 */
+/** URL とバージョンの UTF-8 を abi.encode(string,string) して keccak256。連結の境界曖昧性を排除する。 */
 export function licenseTermsHash(termsUrl: string, termsVersion: string): Hex {
   return keccak256(encodeAbiParameters([{ type: 'string' }, { type: 'string' }], [termsUrl, termsVersion]));
 }
@@ -62,11 +67,20 @@ export function parseLicenseTerms(raw: unknown): LicenseTermsInput | null {
   return { supply: Number(r.supply), transferable: r.transferable, termsUrl: r.termsUrl, termsVersion: r.termsVersion };
 }
 
-/** 作成入力だけ不可譲渡を既定とする。保存済み tuple の parser には既定値を注入しない。 */
+/** 作成入力だけ標準条件を解決し、不可譲渡を既定とする。保存済み tuple には注入しない。 */
 export function parseLicenseCreationTerms(raw: unknown): LicenseTermsInput | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const record = raw as Record<string, unknown>;
-  return parseLicenseTerms({ ...record, transferable: record.transferable === undefined ? false : record.transferable });
+  if (record.termsPreset !== undefined && record.termsPreset !== LICENSE_STANDARD_TERMS.version) return null;
+  return parseLicenseTerms({
+    ...record,
+    transferable: record.transferable === undefined ? false : record.transferable,
+    // 標準条件の URL/version はサーバー権威。クライアントの同名値は採用しない。
+    ...(record.termsPreset === LICENSE_STANDARD_TERMS.version ? {
+      termsUrl: LICENSE_STANDARD_TERMS.url,
+      termsVersion: LICENSE_STANDARD_TERMS.version,
+    } : {}),
+  });
 }
 
 export function createLicenseDefinition(productId: string, terms: LicenseTermsInput, chainId: 137 | 80002, contract: Address): LicenseDefinition {

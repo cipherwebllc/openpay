@@ -1669,6 +1669,7 @@ pending は cron/status が止まるだけで、再点灯後に reconciler が�
 ### 16.4 利用ライセンス NFT bootstrap と一般開放（flag 既定 OFF）
 
 PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下の復旧手順を人間が確認するまで点灯しない。
+一般出品の公開前に、標準条件ページ `https://open-pay.jp/ja/license-terms/standard-v1` と英語の参考訳 `/en/license-terms/standard-v1` が到達可能であることを確認する。
 `ENABLE_LICENSE_NFT` は `ENABLE_CREATOR_STORE`、`NEXT_PUBLIC_ENABLE_LICENSE_NFT` は
 `NEXT_PUBLIC_ENABLE_CREATOR_STORE` を親とする。一般出品は server-only の `ENABLE_LICENSE_NFT_PUBLIC` で切り替える（既定 OFF・`1` のみ ON）。
 

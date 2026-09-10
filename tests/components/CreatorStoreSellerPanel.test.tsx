@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
+import { LICENSE_STANDARD_TERMS } from '@/lib/license/standardTerms';
 
 const ADDRESS = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const state = vi.hoisted(() => ({
@@ -72,7 +73,7 @@ function response(body: unknown, status = 200): Response {
   } as Response;
 }
 
-function renderPanel(handle?: string | null) {
+function renderPanel(handle?: string | null, locale: 'ja' | 'en' = 'ja') {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -80,6 +81,7 @@ function renderPanel(handle?: string | null) {
     <QueryClientProvider client={queryClient}>
       <CreatorStoreSellerPanel handle={handle} />
     </QueryClientProvider>,
+    { locale },
   );
 }
 
@@ -771,13 +773,43 @@ describe('利用ライセンスの出品', () => {
     return { id: 'h_license', payTo: ADDRESS, title: 'API ライセンス', priceJpyc: '1000', contentKind: 'text', label: 'api', contentAvailable: true, saleActive: false,
       productKind: 'license', license: { supply: 10, transferable: false, termsUrl: 'https://example.com/terms', termsVersion: '1' }, registration: { status: registration } };
   }
-  async function fill() {
+  async function fill(custom = true) {
     fireEvent.click(await screen.findByRole('radio', { name: '利用ライセンス NFT' }));
     fireEvent.change(screen.getByLabelText('ライセンス名'), { target: { value: 'API ライセンス' } });
     fireEvent.change(screen.getByLabelText('販売数（1〜10,000）'), { target: { value: '10' } });
     fireEvent.change(screen.getByLabelText('価格（JPYC・1,000 以上）'), { target: { value: '1000' } });
-    fireEvent.change(screen.getByLabelText('利用条件 URL（https）'), { target: { value: 'https://example.com/terms' } });
+    if (custom) {
+      fireEvent.click(screen.getByRole('radio', { name: '自分の利用条件 URL を指定する' }));
+      fireEvent.change(screen.getByLabelText('利用条件 URL（https）'), { target: { value: 'https://example.com/terms' } });
+    }
   }
+  it('既定の標準条件は URL/version を送らず、切替後の独自条件も送信しない', async () => {
+    const fetchMock = setup(); renderPanel(); await fill(false);
+    const group = screen.getByRole('group', { name: '利用条件' });
+    const standard = within(group).getByRole('radio', { name: 'OpenPay 標準条件 (standard-v1) を使う' });
+    expect(standard).toBeChecked();
+    expect(screen.getByRole('link', { name: '標準条件を読む' })).toHaveAttribute('href', LICENSE_STANDARD_TERMS.url);
+    expect(screen.queryByLabelText('利用条件 URL（https）')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('利用条件のバージョン (例: v1)')).not.toBeInTheDocument();
+    fireEvent.click(within(group).getByRole('radio', { name: '自分の利用条件 URL を指定する' }));
+    expect(screen.getByLabelText('利用条件 URL（https）')).toBeRequired();
+    expect(screen.getByLabelText('利用条件のバージョン (例: v1)')).toHaveAccessibleDescription('条件を変えるときは新しいバージョン名を付けます');
+    fireEvent.change(screen.getByLabelText('利用条件 URL（https）'), { target: { value: 'http://invalid.example' } });
+    fireEvent.change(screen.getByLabelText('利用条件のバージョン (例: v1)'), { target: { value: 'custom-v9' } });
+    fireEvent.click(standard);
+    fireEvent.submit(screen.getByLabelText('ライセンス名').closest('form')!);
+    await screen.findByText('登録状態: 登録待ち');
+    const request = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+    expect(JSON.parse(String(request?.[1]?.body)).license).toEqual({ supply: 10, transferable: false, termsPreset: 'standard-v1' });
+  });
+  it('English form shows the same choices, version label and help', async () => {
+    setup(); renderPanel(undefined, 'en');
+    fireEvent.click(await screen.findByRole('radio', { name: 'Usage license NFT' }));
+    expect(screen.getByRole('radio', { name: 'Use OpenPay standard terms (standard-v1)' })).toBeChecked();
+    expect(screen.getByRole('link', { name: 'Read the standard terms' })).toHaveAttribute('href', LICENSE_STANDARD_TERMS.url);
+    fireEvent.click(screen.getByRole('radio', { name: 'Specify my own terms URL' }));
+    expect(screen.getByLabelText('Terms version (e.g. v1)')).toHaveAccessibleDescription('Give a new version name when you change the terms');
+  });
   it('出品アカウントとは別の売上受取先を、既存 payTo 入力として指定できる', async () => {
     const fetchMock = setup(); renderPanel(); await fill();
     const payout = `0x${'ab'.repeat(20)}`;
@@ -790,22 +822,23 @@ describe('利用ライセンスの出品', () => {
     expect(body).not.toHaveProperty('owner');
     expect(body).not.toHaveProperty('sellerRole');
   });
-  it('作成は未公開・JPYC 限定で既定の版/譲渡不可と任意の案内を送る', async () => {
+  it('作成は未公開・JPYC 限定で独自条件のバージョン/譲渡不可と任意の案内を送る', async () => {
     const fetchMock = setup(); renderPanel(); await fill();
     expect(screen.getByRole('radio', { name: '不可' })).toBeChecked();
-    expect(screen.getByLabelText('利用条件の版')).toHaveValue('1');
+    expect(screen.getByLabelText('利用条件のバージョン (例: v1)')).toHaveValue('1');
     expect(screen.getByLabelText('利用開始の案内（テキスト・任意）')).not.toBeRequired();
     expect(screen.getByText('利用ライセンスは JPYC のみです。USDC は利用できません。')).toBeInTheDocument();
     fireEvent.submit(screen.getByLabelText('ライセンス名').closest('form')!);
     await screen.findByText('登録状態: 登録待ち');
     const request = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ productKind: 'license', license: { supply: 10, transferable: false, termsUrl: 'https://example.com/terms', termsVersion: '1' }, priceJpyc: '1000', contentKind: 'text', content: '', saleActive: false, usdcEnabled: false });
+    expect(JSON.parse(String(request?.[1]?.body)).license).not.toHaveProperty('termsPreset');
     expect(screen.getByRole('button', { name: '公開する' })).toBeDisabled();
   });
   it.each([
     ['販売数（1〜10,000）', '0'], ['販売数（1〜10,000）', '10001'], ['販売数（1〜10,000）', '1.5'],
     ['価格（JPYC・1,000 以上）', '999'], ['価格（JPYC・1,000 以上）', '1000.5'],
-    ['利用条件 URL（https）', 'http://example.com'], ['利用条件 URL（https）', 'https://user:pass@example.com'], ['利用条件の版', '   '],
+    ['利用条件 URL（https）', 'http://example.com'], ['利用条件 URL（https）', 'https://user:pass@example.com'], ['利用条件のバージョン (例: v1)', '   '],
     ['売上の受取ウォレット', 'invalid'],
   ])('%s = %s は送信しない', async (label, value) => {
     const fetchMock = setup(); renderPanel(); await fill();
@@ -829,8 +862,10 @@ describe('利用ライセンスの出品', () => {
     expect(JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]?.body))).toEqual({ saleActive: true });
     fireEvent.click(screen.getByRole('button', { name: /編集/ }));
     await waitFor(() => expect(screen.getByLabelText('ライセンス名')).toHaveValue('API ライセンス'));
-    for (const label of ['売上の受取ウォレット', '販売数（1〜10,000）', '価格（JPYC・1,000 以上）', '利用条件 URL（https）', '利用条件の版', '利用開始の案内（テキスト・任意）']) expect(screen.getByLabelText(label)).toHaveAttribute('readonly');
+    for (const label of ['売上の受取ウォレット', '販売数（1〜10,000）', '価格（JPYC・1,000 以上）', '利用条件 URL（https）', '利用条件のバージョン (例: v1)', '利用開始の案内（テキスト・任意）']) expect(screen.getByLabelText(label)).toHaveAttribute('readonly');
     expect(screen.getByRole('radio', { name: '不可' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: '自分の利用条件 URL を指定する' })).toBeChecked();
+    for (const radio of within(screen.getByRole('group', { name: '利用条件' })).getAllByRole('radio')) expect(radio).toBeDisabled();
     fireEvent.change(screen.getByLabelText('ライセンス名'), { target: { value: '更新した名前' } });
     fireEvent.submit(screen.getByLabelText('ライセンス名').closest('form')!);
     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(2));
@@ -869,6 +904,7 @@ describe('protected delivery seller field', () => {
       fireEvent.click(await screen.findByRole('radio', { name: '利用ライセンス NFT' }));
       fireEvent.change(screen.getByLabelText('ライセンス名'), { target: { value: 'License' } });
       fireEvent.change(screen.getByLabelText('価格（JPYC・1,000 以上）'), { target: { value: '1000' } });
+      fireEvent.click(screen.getByRole('radio', { name: '自分の利用条件 URL を指定する' }));
       fireEvent.change(screen.getByLabelText('利用条件 URL（https）'), { target: { value: 'https://example.com/terms' } });
     } else {
       fireEvent.change(await screen.findByLabelText('商品名'), { target: { value: 'Digital' } });

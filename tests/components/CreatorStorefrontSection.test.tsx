@@ -206,7 +206,7 @@ it('ライセンス公開情報と sellerRole を購入 launcher から modal �
   // プロフの商品カードもバッジ + 残数のみ (譲渡可否・販売者区分・利用条件は modal と購入確認で開示)。
   expect(screen.getByText('残り 11 / 15')).toBeInTheDocument();
   expect(screen.queryByText(/譲渡不可/)).not.toBeInTheDocument();
-  expect(screen.queryByRole('link', { name: '利用条件（版 1）' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: '利用条件（バージョン 1）' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: '購入する' })).toHaveClass('min-h-11');
   fireEvent.click(screen.getByRole('button', { name: '購入する' }));
   await screen.findByRole('dialog');

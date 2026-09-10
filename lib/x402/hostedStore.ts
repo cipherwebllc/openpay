@@ -237,7 +237,7 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
   const isLicense = input.productKind === 'license';
   const licenseInput = isLicense ? parseLicenseCreationTerms(input.license) : null;
   if (isLicense && (!licenseSellerAllowed(owner) || !licenseDeployment())) return { ok: false, error: 'license_unavailable' };
-  if (isLicense && (!licenseInput || Object.keys(input.license as object).some((key) => !['supply', 'transferable', 'termsUrl', 'termsVersion'].includes(key)))) return { ok: false, error: 'invalid license' };
+  if (isLicense && (!licenseInput || Object.keys(input.license as object).some((key) => !['supply', 'transferable', 'termsUrl', 'termsVersion', 'termsPreset'].includes(key)))) return { ok: false, error: 'invalid license' };
   if (!isLicense && input.license !== undefined) return { ok: false, error: 'invalid license' };
   if (isLicense && (input.contentKind !== 'text' || input.usdcEnabled === true)) return { ok: false, error: 'license_jpyc_text_only' };
 

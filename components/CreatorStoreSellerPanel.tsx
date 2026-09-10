@@ -16,6 +16,8 @@ import { useSiweSession } from '@/hooks/useSiweSession';
 import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
 import { useOrigin } from '@/hooks/useOrigin';
 import type { StoreLicenseProduct } from '@/lib/licenseUi';
+import { LICENSE_STANDARD_TERMS } from '@/lib/license/standardTerms';
+import type { LicenseCreationTermsInput } from '@/lib/license/definition';
 import { CreatorStoreLicenseFields, validLicenseForm, type LicenseFormFields } from '@/components/CreatorStoreLicenseFields';
 
 type HostedLabel =
@@ -123,6 +125,7 @@ const EMPTY_PRODUCT_FORM: ProductForm = {
   productKind: 'digital',
   supply: '1',
   transferable: false,
+  termsPreset: LICENSE_STANDARD_TERMS.version,
   termsUrl: '',
   termsVersion: '1',
   payTo: '',
@@ -514,6 +517,9 @@ function SignedInSellerPanel({
         productKind: product.productKind ?? 'digital',
         supply: String(product.license?.supply ?? 1),
         transferable: product.license?.transferable ?? false,
+        termsPreset: product.license
+          ? product.license.termsUrl === LICENSE_STANDARD_TERMS.url && product.license.termsVersion === LICENSE_STANDARD_TERMS.version ? LICENSE_STANDARD_TERMS.version : undefined
+          : LICENSE_STANDARD_TERMS.version,
         termsUrl: product.license?.termsUrl ?? '',
         termsVersion: product.license?.termsVersion ?? '1',
         payTo: product.payTo,
@@ -571,7 +577,12 @@ function SignedInSellerPanel({
             ...(form.productKind === 'license' && !id ? {
               productKind: 'license',
               payTo: form.payTo,
-              license: { supply: Number(form.supply), transferable: form.transferable, termsUrl: form.termsUrl.trim(), termsVersion: form.termsVersion.trim() },
+              license: {
+                supply: Number(form.supply), transferable: form.transferable,
+                ...(form.termsPreset === LICENSE_STANDARD_TERMS.version
+                  ? { termsPreset: LICENSE_STANDARD_TERMS.version }
+                  : { termsUrl: form.termsUrl.trim(), termsVersion: form.termsVersion.trim() }),
+              } satisfies LicenseCreationTermsInput,
             } : {}),
             label: form.label,
             category: form.category || null,

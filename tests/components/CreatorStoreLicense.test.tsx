@@ -54,7 +54,7 @@ describe('license public details and confirmation', () => {
     const { container } = renderWithIntl(<CreatorStoreLicenseDetails product={product} />);
     expect(screen.getByText('利用ライセンス NFT')).toBeInTheDocument();
     expect(screen.getByText('残り 7 / 10 · 譲渡不可')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '利用条件（版 2）' })).toHaveAttribute('href', license.termsUrl);
+    expect(screen.getByRole('link', { name: '利用条件（バージョン 2）' })).toHaveAttribute('href', license.termsUrl);
     expect(screen.getByRole('link')).toHaveAttribute('target', '_blank');
     expect(screen.getByText(ja.CreatorStoreLicense.deliveryNotice)).toBeInTheDocument();
     expect(container).not.toHaveTextContent(/tokenId|definitionHash|contract/);
@@ -70,7 +70,7 @@ describe('license public details and confirmation', () => {
     expect(within(screen.getByText('支払総額（価格 + 手数料）').parentElement!).getByText('1010 JPYC')).toBeInTheDocument();
     expect(screen.getByText('商品価格').parentElement).toHaveTextContent('1000 JPYC');
     expect(screen.getByText('買い手負担 x402 手数料').parentElement).toHaveTextContent('10 JPYC');
-    expect(screen.getByRole('link', { name: '利用条件（版 2）' })).toHaveAttribute('href', license.termsUrl);
+    expect(screen.getByRole('link', { name: '利用条件（バージョン 2）' })).toHaveAttribute('href', license.termsUrl);
     expect(screen.queryByText(/購入者本人の私的利用に限り/)).not.toBeInTheDocument();
   });
   it('第三者と譲渡可の条件を取り違えない', () => {
@@ -89,6 +89,12 @@ describe('license public details and confirmation', () => {
     renderWithIntl(confirmation('third_party'), { locale: 'en' });
     expect(screen.getByText(en.CreatorStoreLicense.publicBody)).toBeInTheDocument();
     expect(screen.getByText(en.CreatorStoreLicense.issueBody)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Terms (version 2)' })).toHaveAttribute('href', license.termsUrl);
+  });
+
+  it('English details use the version wording', () => {
+    renderWithIntl(<CreatorStoreLicenseDetails product={product} />, { locale: 'en' });
+    expect(screen.getByRole('link', { name: 'Terms (version 2)' })).toHaveAttribute('href', license.termsUrl);
   });
 
 });
