@@ -3,8 +3,16 @@ import { createDeliveryGate } from 'openpay-x402-sdk/delivery';
 const PRIVATE_HEADERS = {
   'Cache-Control': 'private, no-store',
   'Referrer-Policy': 'no-referrer',
-  'Content-Disposition': 'attachment',
 };
+// Only successful file responses are downloads. An error response carrying
+// Content-Disposition: attachment makes Chrome show ERR_INVALID_RESPONSE instead of
+// the JSON body (observed on 2026-09-10). The filename comes from the trusted object
+// key, reduced to a safe ASCII token so no header injection is possible.
+function attachment(key) {
+  const base = key.split('/').pop() ?? '';
+  const name = base.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '').slice(0, 100) || 'download';
+  return `attachment; filename="${name}"`;
+}
 const instances = new WeakMap();
 
 async function startup(env) {
@@ -56,7 +64,7 @@ const worker = {
       // This small template ignores Range/conditional headers and serves a full
       // 200 (HEAD returns metadata). Every such request still requires a ticket.
       return new Response(request.method === 'HEAD' ? null : file.body, {
-        headers: { ...PRIVATE_HEADERS, 'Content-Type': 'application/octet-stream', 'Content-Length': String(file.size) },
+        headers: { ...PRIVATE_HEADERS, 'Content-Disposition': attachment(key), 'Content-Type': 'application/octet-stream', 'Content-Length': String(file.size) },
       });
     } catch {
       // Do not expose request URLs, tickets, R2 keys or upstream exceptions.

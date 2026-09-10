@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.1
+
+- Fix `openpay-x402-sdk/delivery` on Cloudflare Workers: the JWKS fetch called a
+  detached `fetch`, which Workers reject with "Illegal invocation", so every ticket
+  failed with `keys_unavailable`. Verified on a real Worker deployment (2026-09-10).
+- Templates: send `Content-Disposition: attachment; filename="<object key>"` only on
+  successful file responses. An error response carrying `attachment` made Chrome
+  show ERR_INVALID_RESPONSE instead of the JSON body.
+
 ## 0.8.0
 
 - Add the typed `openpay-x402-sdk/delivery` Web-API-only subpath: strict Ed25519

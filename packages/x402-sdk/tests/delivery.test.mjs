@@ -320,3 +320,13 @@ test('unsupported_crypto explicitly denies missing subtle and missing standard E
     await assert.rejects(createDeliveryGate(base).ready(), { code: 'unsupported_crypto' });
   }
 });
+
+test('the default fetch is called with globalThis as `this` (Cloudflare Workers reject a detached fetch)', async () => {
+  const original = globalThis.fetch;
+  // Real Workers throw "Illegal invocation" here; Node does not, so simulate it.
+  globalThis.fetch = function fetchStub() { if (this !== globalThis) throw new TypeError('Illegal invocation'); return response(); };
+  try {
+    const result = await verify(remote({ fetch: undefined }));
+    assert.equal(result.product, fixture.claims.product);
+  } finally { globalThis.fetch = original; }
+});

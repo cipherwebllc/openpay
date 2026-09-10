@@ -26,7 +26,7 @@ test('actual npm tarball includes types/examples and verifies through installed 
   try {
     const npm = ['pack', '--json', '--ignore-scripts', '--cache', join(dir, 'npm-cache')];
     const dry = manifestOf(execFileSync('npm', [...npm, '--dry-run'], { cwd: packageDir, encoding: 'utf8' }));
-    assert.equal(dry.version, '0.8.0');
+    assert.equal(dry.version, '0.8.1');
     const paths = dry.files.map((file) => file.path);
     for (const path of ['src/delivery.mjs', 'delivery.d.ts', 'src/index.mjs', 'index.d.ts', 'README.md', 'CHANGELOG.md',
       'examples/node-delivery-gate.mjs', 'examples/cloudflare-r2-delivery-gate/worker.mjs',
