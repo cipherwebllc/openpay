@@ -17,6 +17,11 @@ import {
   transparencyContentFor,
   transparencyMetadata,
 } from '@/lib/transparency';
+import {
+  EXTERNAL_PURCHASES,
+  basescanTxUrl,
+  shortAddress,
+} from '@/lib/externalPurchases';
 
 export async function generateMetadata({
   params,
@@ -172,6 +177,42 @@ export default async function TransparencyPage({
             marker="•"
             markerClassName="text-emerald-600"
           />
+        </Section>
+
+        <Section title={content.externalTitle}>
+          <p className="text-sm leading-relaxed text-slate-700">{content.externalLead}</p>
+          <p className="mt-3 text-sm font-semibold text-slate-900">{content.externalSummary}</p>
+          <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full min-w-[36rem] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 sm:px-4">{content.externalHeaders.date}</th>
+                  <th className="px-3 py-2 sm:px-4">{content.externalHeaders.chain}</th>
+                  <th className="px-3 py-2 sm:px-4">{content.externalHeaders.amount}</th>
+                  <th className="px-3 py-2 sm:px-4">{content.externalHeaders.buyer}</th>
+                  <th className="px-3 py-2 sm:px-4">{content.externalHeaders.tx}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {EXTERNAL_PURCHASES.map((row) => (
+                  <tr key={row.tx}>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-700 sm:px-4">{row.date}</td>
+                    <td className="px-3 py-2 text-slate-700 sm:px-4">Base</td>
+                    <td className="whitespace-nowrap px-3 py-2 text-slate-700 sm:px-4">{row.amount} {row.asset}</td>
+                    <td className="px-3 py-2 font-mono text-xs text-slate-700 sm:px-4">{shortAddress(row.payer)}</td>
+                    <td className="px-3 py-2 sm:px-4">
+                      <a href={basescanTxUrl(row.tx)} target="_blank" rel="noopener noreferrer" className="font-mono text-xs text-emerald-700 underline decoration-emerald-300 underline-offset-2 hover:text-emerald-900">
+                        {row.tx.slice(0, 10)}… ({content.externalTxLabel})
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 rounded-xl bg-amber-50 p-4 text-sm leading-relaxed text-amber-900 ring-1 ring-amber-200">
+            {content.externalCaveat}
+          </p>
         </Section>
 
         <footer className="mt-12 border-t border-slate-200 pt-6 text-sm leading-relaxed text-slate-600">
