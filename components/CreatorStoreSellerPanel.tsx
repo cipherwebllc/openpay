@@ -6,6 +6,8 @@
 
 import { useMemo, useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
+import type { HostedLabel } from '@/lib/x402/hostedStore';
+import { DELIVERY_FORMATS, deliveryFormatOf, deliveryFormatFields, type DeliveryFormatId } from '@/lib/store/deliveryFormat';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -21,14 +23,6 @@ import type { StoreLicenseProduct } from '@/lib/licenseUi';
 import { LICENSE_STANDARD_TERMS } from '@/lib/license/standardTerms';
 import type { LicenseCreationTermsInput } from '@/lib/license/definition';
 import { CreatorStoreLicenseFields, validLicenseForm, type LicenseFormFields } from '@/components/CreatorStoreLicenseFields';
-
-type HostedLabel =
-  | 'download'
-  | 'pdf'
-  | 'zip'
-  | 'prompt'
-  | 'api'
-  | 'external';
 
 type ProductSummary = StoreLicenseProduct & {
   registration?: { status: 'pending' | 'registered' | 'failed' };
@@ -113,15 +107,6 @@ type ProductDetailResponse = {
   product: ProductSummary;
   content: HostedContent | null;
 };
-
-const HOSTED_LABELS: readonly HostedLabel[] = [
-  'download',
-  'pdf',
-  'zip',
-  'prompt',
-  'api',
-  'external',
-];
 
 const EMPTY_PRODUCT_FORM: ProductForm = {
   productKind: 'digital',
@@ -434,6 +419,7 @@ function SignedInSellerPanel({
   const [productSaved, setProductSaved] = useState(false);
   const [licenseValidationError, setLicenseValidationError] = useState(false);
   const isLicense = env.enableLicenseNftUi && productForm.productKind === 'license';
+  const deliveryFormat = deliveryFormatOf(productForm);
   const licenseReadOnly = isLicense && editingId !== null;
 
   const productsQuery = useQuery({
@@ -1060,24 +1046,30 @@ function SignedInSellerPanel({
           </label>
           {!isLicense ? <>
           <label
-            htmlFor="creator-store-product-kind"
+            htmlFor="creator-store-product-delivery-format"
             className="block text-sm font-medium text-slate-700"
           >
-            {t('contentKindLabel')}
+            {t('deliveryFormatLabel')}
             <select
-              id="creator-store-product-kind"
-              value={productForm.contentKind}
+              id="creator-store-product-delivery-format"
+              value={deliveryFormat ?? ''}
               onChange={(event) => {
-                const contentKind = event.target.value as 'url' | 'text';
-                updateProduct({
-                  contentKind,
-                  label: contentKind === 'url' ? 'download' : 'prompt',
-                });
+                if (event.target.value === '') return;
+                updateProduct(deliveryFormatFields(event.target.value as DeliveryFormatId));
               }}
               className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             >
-              <option value="url">{t('contentKinds.url')}</option>
-              <option value="text">{t('contentKinds.text')}</option>
+              {editingId !== null && deliveryFormat === null ? (
+                <option value="">
+                  {t('deliveryFormatOther', {
+                    kind: t(`contentKinds.${productForm.contentKind}`),
+                    label: t(`labels.${productForm.label}`),
+                  })}
+                </option>
+              ) : null}
+              {DELIVERY_FORMATS.map(({ id }) => (
+                <option key={id} value={id}>{t(`deliveryFormats.${id}`)}</option>
+              ))}
             </select>
           </label>
           </> : null}
@@ -1243,30 +1235,6 @@ function SignedInSellerPanel({
                   className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
                 />
               </label>
-              {!isLicense ? <>
-              <label
-                htmlFor="creator-store-product-label"
-                className="block text-sm font-medium text-slate-700"
-              >
-                {t('labelLabel')}
-                <select
-                  id="creator-store-product-label"
-                  value={productForm.label}
-                  onChange={(event) =>
-                    updateProduct({
-                      label: event.target.value as HostedLabel,
-                    })
-                  }
-                  className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
-                >
-                  {HOSTED_LABELS.map((label) => (
-                    <option key={label} value={label}>
-                      {t(`labels.${label}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              </> : null}
               <label
                 htmlFor="creator-store-product-category"
                 className="block text-sm font-medium text-slate-700"

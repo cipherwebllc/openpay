@@ -1034,8 +1034,16 @@
     "galleryUrlsLabel": "Additional image URLs (optional, up to 4)",
     "priceLabel": "Price (JPYC)",
     "priceHint": "Enter the total the buyer pays (tax-inclusive if you are a taxable business for Japanese consumption tax).",
-    "contentKindLabel": "Product type",
-    "labelLabel": "Display label",
+    "deliveryFormatLabel": "Delivery format",
+    "deliveryFormats": {
+      "download": "Download (URL)",
+      "pdf": "PDF (URL)",
+      "zip": "ZIP (URL)",
+      "external": "External link",
+      "prompt": "Prompt (text stored by OpenPay)",
+      "api": "API key / text (stored by OpenPay)"
+    },
+    "deliveryFormatOther": "Other (current: {kind} / {label})",
     "contentUrlLabel": "Delivery URL",
     "contentTextLabel": "Delivered text",
     "contentUrlHint": "Only URLs beginning with https:// are accepted.",

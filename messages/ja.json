@@ -1034,8 +1034,16 @@
     "galleryUrlsLabel": "追加画像 URL (任意・最大 4)",
     "priceLabel": "価格 (JPYC)",
     "priceHint": "お客様が支払う総額で登録してください（消費税の課税事業者の場合は税込価格）。",
-    "contentKindLabel": "商品の種別",
-    "labelLabel": "表示ラベル",
+    "deliveryFormatLabel": "配布形式",
+    "deliveryFormats": {
+      "download": "ダウンロード (URL)",
+      "pdf": "PDF (URL)",
+      "zip": "ZIP (URL)",
+      "external": "外部リンク",
+      "prompt": "プロンプト (本文を保管)",
+      "api": "API キー・テキスト (本文を保管)"
+    },
+    "deliveryFormatOther": "その他 (現在: {kind} / {label})",
     "contentUrlLabel": "提供する URL",
     "contentTextLabel": "提供する本文",
     "contentUrlHint": "https:// で始まる URL のみ登録できます。",
