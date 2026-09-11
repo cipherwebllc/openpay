@@ -70,6 +70,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     {
       resourceUrl: `${OPENPAY_CANONICAL_ORIGIN}${USDC_DIRECTORY_LIST.path}`,
       description: USDC_DIRECTORY_LIST.description,
+      serviceName: USDC_DIRECTORY_LIST.serviceName,
+      tags: USDC_DIRECTORY_LIST.tags,
       price: USDC_DIRECTORY_LIST.price,
       outputSchema: {
         input: { type: 'http', method: 'GET', discoverable: true },

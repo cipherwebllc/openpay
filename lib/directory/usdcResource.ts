@@ -11,6 +11,9 @@
 
 export const USDC_DIRECTORY_LIST = {
   path: '/api/paid/usdc/japan-web3-directory',
+  // Circle Agent Marketplace / CDP Bazaar のカード名と検索語 (2026-09-11: Circle 申請前に付与)。
+  serviceName: 'Japan Web3 Directory',
+  tags: ['japan', 'web3', 'directory', 'jpyc', 'usdc', 'sourced-data', 'ai-agent'],
   /** x402-next の Money 形式 (USD 表記・base network では USDC 6 桁 atomic へ変換される)。 */
   price: '$0.02',
   /** openapi の x-payment-info (機械可読) 用の数値文字列。price と一致させること。 */
@@ -24,6 +27,8 @@ export const USDC_DIRECTORY_LIST = {
 // 検索版。価格は一覧と同じ (JPYC 版も一覧/検索とも 2 JPYC で同額)。
 export const USDC_DIRECTORY_SEARCH = {
   path: '/api/paid/usdc/japan-web3-directory/search',
+  serviceName: 'Japan Web3 Directory Search',
+  tags: ['japan', 'web3', 'directory', 'search', 'filter', 'jpyc', 'usdc', 'sourced-data'],
   price: '$0.02',
   priceUsd: '0.02',
   description:

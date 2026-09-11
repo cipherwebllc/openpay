@@ -28,7 +28,7 @@ import {
   USDC_DIRECTORY_LIST,
   USDC_DIRECTORY_SEARCH,
 } from '@/lib/directory/usdcResource';
-import { USDC_STORES } from '@/lib/x402/usdcStores';
+import { USDC_STORES, USDC_STORES_BAZAAR } from '@/lib/x402/usdcStores';
 import {
   ACTIVITY_CHAINS,
   USDC_JPYC_ACTIVITY,
@@ -123,6 +123,27 @@ function paymentInfo(priceJpyc: string) {
 
 // vanilla x402 (USDC/Base) 直接販売用。JPYC 版と違い OpenPay 手数料が乗らないため、
 // amount は表示価格そのもの。network は本番 (servers = open-pay.jp) の Base mainnet 固定。
+/**
+ * 応答例から JSON Schema (型のみ) を導出する。Circle Agent Marketplace は「OpenAPI で入出力が
+ * 読めること」を掲載条件にするため (2026-09-11)、example だけだった 200 応答に schema を添える。
+ * 例と型が食い違わないよう手書きせず example から機械的に作る (nullable/enum は付けない)。
+ */
+function schemaFromExample(example: unknown): Record<string, unknown> {
+  if (Array.isArray(example)) {
+    return { type: 'array', ...(example.length ? { items: schemaFromExample(example[0]) } : {}) };
+  }
+  if (example !== null && typeof example === 'object') {
+    const properties: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(example as Record<string, unknown>)) {
+      properties[key] = schemaFromExample(value);
+    }
+    return { type: 'object', properties };
+  }
+  if (typeof example === 'number') return { type: Number.isInteger(example) ? 'integer' : 'number' };
+  if (typeof example === 'boolean') return { type: 'boolean' };
+  return { type: 'string' };
+}
+
 function usdcPaymentInfo(amountUsd: string) {
   return {
     price: { currency: 'USD', mode: 'fixed', amount: amountUsd },
@@ -342,11 +363,8 @@ const DISCOVERY_OPENAPI_PATHS = {
           description: 'Curated store list after settlement',
           content: {
             'application/json': {
-              example: {
-                items: [
-                  { name: 'JPYC EX', category: 'exchange', url: 'https://jpyc.jp/' },
-                ],
-              },
+              schema: schemaFromExample(USDC_STORES_BAZAAR.output.example),
+              example: USDC_STORES_BAZAAR.output.example,
             },
           },
         },
@@ -634,6 +652,7 @@ const VANILLA_DIRECTORY_OPENAPI_PATHS = {
           description: 'Monitor snapshot or change delta after settlement',
           content: {
             'application/json': {
+              schema: schemaFromExample(USDC_SERVICE_MONITOR_BAZAAR.output.example),
               example: USDC_SERVICE_MONITOR_BAZAAR.output.example,
             },
           },
@@ -686,6 +705,7 @@ const VANILLA_DIRECTORY_OPENAPI_PATHS = {
           description: 'Payment-scope change events after settlement',
           content: {
             'application/json': {
+              schema: schemaFromExample(USDC_PAYMENT_MONITOR_BAZAAR.output.example),
               example: USDC_PAYMENT_MONITOR_BAZAAR.output.example,
             },
           },
@@ -718,6 +738,7 @@ const JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS = {
           description: 'Monitor snapshot or change delta after settlement',
           content: {
             'application/json': {
+              schema: schemaFromExample(USDC_SERVICE_MONITOR_BAZAAR.output.example),
               example: USDC_SERVICE_MONITOR_BAZAAR.output.example,
             },
           },
@@ -744,6 +765,7 @@ const JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS = {
           description: 'Payment-scope change events after settlement',
           content: {
             'application/json': {
+              schema: schemaFromExample(USDC_PAYMENT_MONITOR_BAZAAR.output.example),
               example: USDC_PAYMENT_MONITOR_BAZAAR.output.example,
             },
           },
@@ -773,11 +795,8 @@ const VANILLA_STORES_OPENAPI_PATHS = {
           description: 'Curated store list after settlement',
           content: {
             'application/json': {
-              example: {
-                items: [
-                  { name: 'JPYC EX', category: 'exchange', url: 'https://jpyc.jp/' },
-                ],
-              },
+              schema: schemaFromExample(USDC_STORES_BAZAAR.output.example),
+              example: USDC_STORES_BAZAAR.output.example,
             },
           },
         },
