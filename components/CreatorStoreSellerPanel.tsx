@@ -388,7 +388,7 @@ function EnabledCreatorStoreSellerPanel({
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-xs text-slate-500">{t('connectFirst')}</p>
-              <ConnectButton />
+              <ConnectButton variant="secondary" />
             </div>
           )}
         </div>
@@ -977,9 +977,6 @@ function SignedInSellerPanel({
         >
           {editingId ? t('editProductHeading') : t('newProductHeading')}
         </h3>
-        <p className="mt-1 text-xs leading-relaxed text-slate-500">
-          {t('productFormIntro')}
-        </p>
 
         <form
           className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2"
@@ -1344,13 +1341,16 @@ function SignedInSellerPanel({
                 : t('usdcNewProductHint')}
             </p>
             {productForm.usdcEnabled ? (
-              <div className="mt-3 space-y-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs leading-relaxed text-slate-700">
+              <details className="mt-3 space-y-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs leading-relaxed text-slate-700">
+                <summary className="cursor-pointer font-medium">
+                  {t('usdcNoticeSummary')}
+                </summary>
                 <p>{t('usdcPayToNotice')}</p>
                 <code className="block break-all font-mono text-[11px] text-slate-800">
                   {productForm.payTo}
                 </code>
                 <p>{t('usdcRiskNotice')}</p>
-              </div>
+              </details>
             ) : null}
           </div>
 

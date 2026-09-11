@@ -762,6 +762,13 @@ export function HandleProfileBuilder({
                     )}
                   </div>
                 </FieldGroup>
+                {/* 埋め込み対応サービスの一覧は常時表示から畳む (引き算 P2)。hint「https:// のみ」の直下。 */}
+                <details className="text-xs leading-relaxed text-slate-500">
+                  <summary className="cursor-pointer font-medium">
+                    {t('embedServicesSummary')}
+                  </summary>
+                  <p className="mt-2">{t('embedServicesHint')}</p>
+                </details>
                 {hasInsecure && (
                   <p className="text-xs text-amber-700">{t('insecureDropped')}</p>
                 )}

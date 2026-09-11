@@ -13,7 +13,11 @@ function isUserRejection(err: Error): boolean {
   return msg.includes('user rejected') || msg.includes('connection request reset');
 }
 
-export function ConnectButton() {
+export function ConnectButton({
+  variant = 'primary',
+}: {
+  variant?: 'primary' | 'secondary';
+}) {
   const { address, isConnected, chain } = useAccount();
   const { connectors, connect, isPending, error } = useConnect();
   const { disconnect } = useDisconnect();
@@ -123,7 +127,11 @@ export function ConnectButton() {
             type="button"
             disabled={isPending}
             onClick={() => connect({ connector: c })}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+            className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50 ${
+              variant === 'secondary'
+                ? 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                : 'bg-brand text-white hover:bg-brand-dark'
+            }`}
           >
             {/* ウォレットアイコン (EIP-6963 data URI or 同梱 SVG)。brand 青地で青系ロゴが
                 沈まないよう白チップに載せる。装飾なので alt は空。 */}

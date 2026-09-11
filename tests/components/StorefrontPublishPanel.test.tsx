@@ -10,7 +10,13 @@ import type { Address } from 'viem';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const ADDR2 = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
-const h = vi.hoisted(() => ({ isSignedIn: true, enableShopsApi: false }));
+const h = vi.hoisted(() => ({ isSignedIn: true, enableShopsApi: false, isConnected: true }));
+vi.mock('wagmi', () => ({
+  useAccount: () => ({ isConnected: h.isConnected, address: h.isConnected ? ADDR : undefined }),
+}));
+vi.mock('@/components/ConnectButton', () => ({
+  ConnectButton: () => <button type="button">Connect wallet</button>,
+}));
 
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -81,6 +87,7 @@ function renderPanel(
 beforeEach(() => {
   h.isSignedIn = true;
   h.enableShopsApi = false;
+  h.isConnected = true;
   vi.unstubAllGlobals();
 });
 
@@ -92,6 +99,16 @@ describe('StorefrontPublishPanel', () => {
     renderPanel();
     expect(screen.getByText('サインインして公開')).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled(); // mine query は未サインインで無効
+  });
+
+  it('ウォレット未接続では接続導線を出し、サインインボタンは出さない (P2)', () => {
+    h.isSignedIn = false;
+    h.isConnected = false;
+    vi.stubGlobal('fetch', vi.fn());
+    renderPanel();
+    expect(screen.getByText('まずウォレットを接続してください。接続後にサインインして公開できます。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument();
+    expect(screen.queryByText('サインインして公開')).not.toBeInTheDocument();
   });
 
   it('handle 0件は @handle 取得導線を出す (onGetHandle 発火)', async () => {

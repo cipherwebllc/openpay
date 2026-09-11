@@ -696,9 +696,14 @@ describe('HandleProfileBuilder', () => {
 
   it('Audius URL に embed toggle と 9-provider hint を表示する', () => {
     renderWithIntl(<HandleProfileBuilder />);
+    const details = screen.getByText('埋め込み表示に対応するサービス').closest('details');
+    expect(details).not.toHaveAttribute('open');
+    expect(
+      screen.getByText('YouTube / Spotify / Audius / ニコニコ動画 / Vimeo / Apple Music / TikTok / Suno / SoundCloud は埋め込み表示に対応しています。'),
+    ).not.toBeVisible();
     expect(
       screen.getByText(
-        'リンクは https:// のみ。安全のため http や javascript は無効です。YouTube / Spotify / Audius / ニコニコ動画 / Vimeo / Apple Music / TikTok / Suno / SoundCloud は埋め込み表示に対応しています。',
+        'リンクは https:// のみ。',
       ),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByText('＋ リンクを追加'));
@@ -717,7 +722,7 @@ describe('HandleProfileBuilder', () => {
     renderWithIntl(<HandleProfileBuilder />, { locale: 'en' });
     expect(
       screen.getByText(
-        'Links must be https:// only. http and javascript are disabled for safety. YouTube / Spotify / Audius / Niconico Video / Vimeo / Apple Music / TikTok / Suno / SoundCloud links can be embedded.',
+        'Links must be https:// only.',
       ),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByText('＋ Add link'));
