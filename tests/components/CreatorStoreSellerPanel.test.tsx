@@ -6,6 +6,9 @@ import { LICENSE_STANDARD_TERMS } from '@/lib/license/standardTerms';
 
 const ADDRESS = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const state = vi.hoisted(() => ({
+  isConnected: true,
+  walletAddress: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' as string | undefined,
+  signInError: null as string | null,
   enabled: true,
   licenseEnabled: false,
   deliveryEnabled: false,
@@ -34,13 +37,20 @@ vi.mock('@/hooks/useStoreCacheScope', () => ({
   useStoreCacheScope: () => {},
 }));
 
+vi.mock('wagmi', () => ({
+  useAccount: () => ({ isConnected: state.isConnected, address: state.walletAddress }),
+}));
+vi.mock('@/components/ConnectButton', () => ({
+  ConnectButton: () => <button type="button">Connect wallet</button>,
+}));
+
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({
     isSignedIn: state.isSignedIn,
     sessionAddress: state.isSignedIn ? state.sessionAddress : null,
     signIn,
     isSigningIn: false,
-    signInError: null,
+    signInError: state.signInError,
     signOut: vi.fn(),
     mismatch: false,
     isLoading: false,
@@ -86,6 +96,9 @@ function renderPanel(handle?: string | null, locale: 'ja' | 'en' = 'ja') {
 }
 
 beforeEach(() => {
+  state.isConnected = true;
+  state.walletAddress = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+  state.signInError = null;
   state.enabled = true;
   state.licenseEnabled = false;
   state.deliveryEnabled = false;
@@ -96,6 +109,21 @@ beforeEach(() => {
 });
 
 describe('CreatorStoreSellerPanel', () => {
+  it.each([
+    [false, '0x52d4901142e2B5680027da5EB47C86CB02a3cA81'],
+    [true, undefined],
+  ])('未接続またはアドレス未確定では接続導線を表示し、サインインエラーを隠す (%s, %s)', (connected, address) => {
+    state.isSignedIn = false;
+    state.isConnected = connected;
+    state.walletAddress = address;
+    state.signInError = 'wallet_not_connected';
+    renderPanel();
+    expect(screen.getByText('まずウォレットを接続してください。接続後にログインして管理できます。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'ログインして管理' })).not.toBeInTheDocument();
+    expect(screen.queryByText('ログインに失敗しました。')).not.toBeInTheDocument();
+  });
+
   it('client flag OFF は何も描画せず API にも到達しない', () => {
     state.enabled = false;
     const fetchMock = vi.fn();

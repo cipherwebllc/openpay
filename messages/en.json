@@ -861,6 +861,9 @@
     "changeButton": "Change"
   },
   "HandleClaim": {
+    "connectFirst": "Connect your wallet first. After connecting, sign in to claim.",
+    "statusConnected": "Connected: {address}. Sign in to claim.",
+    "statusSignedIn": "Signed in: {address}",
     "title": "Permanent link (@handle)",
     "description": "A short, memorable link. It stays the same even if you change receiver or amounts.",
     "needReceiver": "Set a receiver first to claim a handle.",
@@ -978,6 +981,7 @@
     "embedToggle": "Embed media"
   },
   "CreatorStoreSeller": {
+    "connectFirst": "Connect your wallet first. After connecting, sign in to manage your products.",
     "heading": "Digital products",
     "intro": "List a URL or text as a product on your @handle page. OpenPay stores the product content so it can be delivered to buyers.",
     "signInPrompt": "Sign in with your wallet to list products and manage your seller information.",

@@ -4,7 +4,7 @@
 // 旧 / の中身 (QR / Tip タブ + offramp section) を AppShell の下に移行。
 // AppShell が logo + nav + wallet badge を担うため、ここでは個別 header を持たない。
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -64,6 +64,8 @@ const CreatorStoreSellerPanel = dynamic(() =>
 );
 
 export default function CreatePage() {
+  const tabBarRef = useRef<HTMLDivElement>(null);
+  const activeTabRef = useRef<HTMLButtonElement>(null);
   const [tab, setTab] = useState<Tab>('qr');
   const [publishedHandle, setPublishedHandle] = useState<string | null>(null);
   const t = useTranslations('Create');
@@ -89,6 +91,19 @@ export default function CreatePage() {
     );
   }, []);
 
+  useEffect(() => {
+    const bar = tabBarRef.current;
+    const active = activeTabRef.current;
+    if (!bar || !active) return;
+    const barRect = bar.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    // 横方向だけ動かし、本文の縦スクロール位置は維持する。
+    if (activeRect.left < barRect.left || activeRect.right > barRect.right) {
+      bar.scrollLeft += activeRect.left - barRect.left
+        + activeRect.width / 2 - bar.clientWidth / 2;
+    }
+  }, [tab]);
+
   return (
     <AppShell>
       <BillingDueBanner />
@@ -99,7 +114,7 @@ export default function CreatePage() {
       {/* タブバー: inline-flex のまま (flex にすると desktop で全幅に伸びる)。flex-nowrap +
           overflow-x-auto + 各ボタン whitespace-nowrap/shrink-0 で、ラベル短縮済みでもスマホ
           (360–390px) で 1 行を保ち、将来タブが増えても横スクロールで崩れない。 */}
-      <div className="mb-2 inline-flex max-w-full flex-nowrap overflow-x-auto rounded-xl bg-slate-100/80 p-1 ring-1 ring-slate-200/60 print:hidden">
+      <div ref={tabBarRef} className="mb-2 inline-flex max-w-full flex-nowrap overflow-x-auto rounded-xl bg-slate-100/80 p-1 ring-1 ring-slate-200/60 print:hidden">
         {(
           [
             ['qr', t('tabs.qr')],
@@ -122,6 +137,7 @@ export default function CreatePage() {
         ).map(([id, label]) => (
           <button
             key={id}
+            ref={tab === id ? activeTabRef : null}
             type="button"
             onClick={() => changeTab(id)}
             className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2 text-sm transition-all duration-200 ${

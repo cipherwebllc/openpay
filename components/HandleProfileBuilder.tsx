@@ -396,29 +396,12 @@ export function HandleProfileBuilder({
         <p className="mt-1 text-sm text-slate-500">{t('builderSubheading')}</p>
       </div>
 
-      {/* 2カラム: 左=① 恒久リンク / ② 受取先 / ③ プロフィール (page scroll)、
+      {/* 2カラム: 左=① 受取先 / ② 恒久リンク / ③ プロフィール (page scroll)、
           右=④ プレビュー (lg で sticky 追従)。 */}
       <div className="lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
         <div className="min-w-0 space-y-5">
-          {/* ① 恒久リンク (@handle) */}
-          <StepCard step={1} icon={AtSign} title={t('stepHandleTitle')}>
-            <HandleClaimPanel
-              payload={publishPayload}
-              onEdit={onEditExisting}
-              editingHandle={editingHandle}
-              expectedUpdatedAt={activeBaseline?.updatedAt}
-              isDirty={isDirty}
-              onStopEditing={onStopEditing}
-              onPublished={(snapshot: PublishedHandleSnapshot) => {
-                setEditingHandle(snapshot.handle);
-                onPublishedHandleChange?.(snapshot.handle);
-                dispatchPublishBaseline({ type: 'published', snapshot });
-              }}
-            />
-          </StepCard>
-
-          {/* ② 受取先 (AddressInput + 接続ウォレット + 受取方法) */}
-          <StepCard step={2} icon={Wallet} title={t('stepReceiverTitle')}>
+          {/* ① 受取先 (AddressInput + 接続ウォレット + 受取方法) */}
+          <StepCard step={1} icon={Wallet} title={t('stepReceiverTitle')}>
             <div className="space-y-4">
               <Field label={t('receiverLabel')} hint={t('receiverHint')}>
                 <AddressInput
@@ -459,6 +442,23 @@ export function HandleProfileBuilder({
                 )}
               </fieldset>
             </div>
+          </StepCard>
+
+          {/* ② 恒久リンク (@handle) */}
+          <StepCard step={2} icon={AtSign} title={t('stepHandleTitle')}>
+            <HandleClaimPanel
+              payload={publishPayload}
+              onEdit={onEditExisting}
+              editingHandle={editingHandle}
+              expectedUpdatedAt={activeBaseline?.updatedAt}
+              isDirty={isDirty}
+              onStopEditing={onStopEditing}
+              onPublished={(snapshot: PublishedHandleSnapshot) => {
+                setEditingHandle(snapshot.handle);
+                onPublishedHandleChange?.(snapshot.handle);
+                dispatchPublishBaseline({ type: 'published', snapshot });
+              }}
+            />
           </StepCard>
 
           {/* ③ プロフィール (表示名・テーマ色 + bio/avatar/SNS/links) */}
