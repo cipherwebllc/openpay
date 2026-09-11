@@ -114,7 +114,7 @@ describe('HandleClaimPanel', () => {
     expect(screen.getByText('まずウォレットを接続してください。接続後にサインインして取得できます。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'サインインして取得' })).not.toBeInTheDocument();
-    expect(screen.queryByText('サインインに失敗しました。')).not.toBeInTheDocument();
+    expect(screen.queryByText('サインインに失敗しました。ウォレットで署名を承認してから、もう一度お試しください。')).not.toBeInTheDocument();
   });
 
   it('flag OFF → 何も描画しない (inert)', () => {

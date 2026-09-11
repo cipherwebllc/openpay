@@ -185,7 +185,7 @@ describe('CreatorStoreSellerPanel', () => {
     expect(screen.getByText('まずウォレットを接続してください。接続後にログインして管理できます。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'ログインして管理' })).not.toBeInTheDocument();
-    expect(screen.queryByText('ログインに失敗しました。')).not.toBeInTheDocument();
+    expect(screen.queryByText('ログインに失敗しました。ウォレットで署名を承認してから、もう一度お試しください。')).not.toBeInTheDocument();
   });
 
   it('client flag OFF は何も描画せず API にも到達しない', () => {

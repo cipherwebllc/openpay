@@ -34,6 +34,7 @@ import {
   handlePreviewBackground,
 } from '@/lib/handleTheme';
 import { useOrigin } from '@/hooks/useOrigin';
+import { getPublicHandleUrl } from '@/lib/publicHandleUrl';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useDragReorderList } from '@/hooks/useDragReorderList';
 import { COLOR_PATTERN } from '@/lib/url';
@@ -360,9 +361,7 @@ export function HandleProfileBuilder({
     methods,
   };
   const publicHandleUrl = editingHandle
-    ? origin
-      ? `${origin}/@${editingHandle}`
-      : `/@${editingHandle}`
+    ? getPublicHandleUrl(origin, editingHandle)
     : '';
   const publishedName = activeBaseline?.payload.config.name;
   const xShareText = editingHandle
