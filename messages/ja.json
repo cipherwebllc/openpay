@@ -913,6 +913,7 @@
     "releaseModalCancel": "キャンセル"
   },
   "HandleProfile": {
+    "miniPreviewJump": "プレビューへ",
     "supportHeading": "応援する",
     "supportSubtext": "応援はそのまま全額、クリエイターに直接届きます。",
     "supportQuestionHint": "質問やメッセージも添えられます (読めるのは本人だけ)。",
