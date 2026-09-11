@@ -101,6 +101,22 @@ const inputClass =
 const linkFieldLabelClass =
   'mb-1 block text-xs font-medium text-slate-600';
 
+function MiniPreviewAvatar({ url, initial }: { url?: string; initial: string }) {
+  const [failed, setFailed] = useState(false);
+  return url && !failed ? (
+    // 外部画像の読込失敗がプレビューの壊れ画像表示に波及しないよう頭文字へ戻す。
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt=""
+      aria-hidden
+      referrerPolicy="no-referrer"
+      className="h-full w-full object-cover"
+      onError={() => setFailed(true)}
+    />
+  ) : <span aria-hidden>{initial}</span>;
+}
+
 function stripResolvedEmbedsForDraft(
   links: HandleProfile['links'],
 ): NonNullable<HandleProfile['links']> {
@@ -247,6 +263,9 @@ export function HandleProfileBuilder({
   // ライブプレビューカードの地色 (clean は undefined = 従来の白)。night は暗背景。
   const previewBg = handlePreviewBackground(pickerAccent, draft.theme);
   const previewDark = draft.theme === 'night';
+  const miniName = draft.name.trim() || `@${editingHandle ?? 'handle'}`;
+  const miniAvatar = profile.avatar;
+  const miniInitial = Array.from(draft.name.trim() || editingHandle || 'handle')[0].toUpperCase();
 
   // 並べ替えハンドル/▲▼ の i18n ラベル (socials/links 共通・既存キーを流用)。
   const reorderLabels = {
@@ -399,7 +418,44 @@ export function HandleProfileBuilder({
       {/* 2カラム: 左=① 受取先 / ② 恒久リンク / ③ プロフィール (page scroll)、
           右=④ プレビュー (lg で sticky 追従)。 */}
       <div className="lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
-        <div className="min-w-0 space-y-5">
+        <div className="min-w-0 space-y-5 lg:[&>section:first-of-type]:mt-0">
+          {hydrated && (
+            // AppShell → AppHeader: h-8 + py-3 × 2 + border-b = 57px。
+            // 外側は不透明の地 (白/濃紺) にして、半透明グラデーションのテーマ地色でも本文が透けないようにする。
+            <div
+              data-testid="handle-mini-preview"
+              className={`sticky top-[57px] z-20 overflow-hidden rounded-xl shadow-sm ring-1 ring-black/10 lg:hidden ${
+                previewDark ? 'bg-slate-900 text-slate-50' : 'bg-white text-slate-900'
+              }`}
+            >
+              <div
+                className="flex h-14 items-center gap-3 px-3"
+                style={previewBg ? { background: previewBg } : undefined}
+              >
+                <div
+                  className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white ring-2 ring-white/30"
+                  style={{ backgroundColor: pickerAccent }}
+                >
+                  <MiniPreviewAvatar key={miniAvatar ?? ''} url={miniAvatar} initial={miniInitial} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{miniName}</p>
+                  {/* 表示名が空のときは 1 行目が @handle になるので、同じ文字列を 2 行目に重ねない。 */}
+                  {draft.name.trim() !== '' && (
+                    <p className={`truncate text-xs ${previewDark ? 'text-slate-300' : 'text-slate-600'}`}>
+                      @{editingHandle ?? 'handle'}
+                    </p>
+                  )}
+                </div>
+                <a
+                  href="#step-4-heading"
+                  className="flex min-h-11 shrink-0 items-center rounded text-xs font-semibold underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                >
+                  {t('miniPreviewJump')}
+                </a>
+              </div>
+            </div>
+          )}
           {/* ① 受取先 (AddressInput + 接続ウォレット + 受取方法) */}
           <StepCard step={1} icon={Wallet} title={t('stepReceiverTitle')}>
             <div className="space-y-4">
@@ -777,7 +833,7 @@ export function HandleProfileBuilder({
         </div>
 
         {/* 右カラム: ④ ライブプレビュー (常時) + 編集中 handle の 開く/コピー/QR/X。desktop は sticky。 */}
-        <aside className="mt-6 min-w-0 self-start lg:mt-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
+        <aside className="mt-6 min-w-0 self-start [&_#step-4-heading]:scroll-mt-16 lg:mt-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto">
           <StepCard step={4} icon={Eye} title={t('stepPreviewTitle')}>
             {hydrated && (
               <div

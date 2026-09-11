@@ -913,6 +913,7 @@
     "releaseModalCancel": "Cancel"
   },
   "HandleProfile": {
+    "miniPreviewJump": "Preview",
     "supportHeading": "Support",
     "supportSubtext": "The full amount goes directly to the creator.",
     "supportQuestionHint": "Add a question or message — only they can read it.",

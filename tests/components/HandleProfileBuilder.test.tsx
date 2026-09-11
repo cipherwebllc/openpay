@@ -3,6 +3,7 @@ import { screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { getAddress } from 'viem';
 import { renderWithIntl } from '../_helpers/i18n';
 import { MAX_PROFILE_LINKS } from '@/lib/handle';
+import { handlePreviewBackground } from '@/lib/handleTheme';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const ADDR2 = '0x000000000000000000000000000000000000dead';
@@ -160,6 +161,66 @@ beforeEach(() => {
 });
 
 describe('HandleProfileBuilder', () => {
+  it('ミニプレビューが表示名・テーマ色・テーマ・アバターに追従する', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    const mini = screen.getByTestId('handle-mini-preview');
+    expect(mini).toHaveClass('sticky', 'top-[57px]', 'lg:hidden');
+    fireEvent.change(screen.getByLabelText('表示名'), { target: { value: 'Alice' } });
+    expect(within(mini).getByText('Alice')).toBeInTheDocument();
+    expect(within(mini).getByText('A')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('#2563eb'), { target: { value: '#ef4444' } });
+    expect(within(mini).getByText('A').parentElement).toHaveStyle({ backgroundColor: '#ef4444' });
+    fireEvent.click(screen.getByRole('button', { name: 'Gradient' }));
+    // テーマ地色は内側の帯に inline で載せ、外側は不透明の地 (白/濃紺) にする。
+    const band = mini.firstElementChild as HTMLElement;
+    expect(band).toHaveStyle({ background: handlePreviewBackground('#ef4444', 'gradient') });
+    expect(mini).toHaveClass('bg-white');
+    fireEvent.click(screen.getByRole('button', { name: 'Night' }));
+    expect(mini).toHaveClass('text-slate-50', 'bg-slate-900');
+    expect(band).toHaveStyle({ background: handlePreviewBackground('#ef4444', 'night') });
+    fireEvent.click(screen.getByRole('button', { name: 'Clean' }));
+    expect(mini).toHaveClass('text-slate-900', 'bg-white');
+    expect(band.style.background).toBe('');
+    const avatar = screen.getByLabelText(/アバター画像 URL/);
+    fireEvent.change(avatar, { target: { value: 'https://example.com/avatar.png' } });
+    expect(mini.querySelector('img')).toHaveAttribute('src', 'https://example.com/avatar.png');
+    expect(mini.querySelector('img')).toHaveAttribute('alt', '');
+    expect(mini.querySelector('img')).toHaveAttribute('aria-hidden', 'true');
+    fireEvent.change(avatar, { target: { value: 'http://example.com/avatar.png' } });
+    expect(mini.querySelector('img')).toBeNull();
+    expect(within(mini).getByText('A')).toBeInTheDocument();
+  });
+
+  it('ミニプレビューのリンクが実在する④見出しを指す (ja/en)', () => {
+    const { unmount } = renderWithIntl(<HandleProfileBuilder />);
+    const link = screen.getByRole('link', { name: 'プレビューへ' });
+    expect(link).toHaveAttribute('href', '#step-4-heading');
+    expect(document.getElementById('step-4-heading')).toHaveTextContent('プレビュー');
+    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    // 表示名が空なら 1 行目が @alice になり、2 行目の @alice は重ねない。
+    expect(within(screen.getByTestId('handle-mini-preview')).getAllByText('@alice')).toHaveLength(1);
+    unmount();
+    renderWithIntl(<HandleProfileBuilder />, { locale: 'en' });
+    expect(screen.getByRole('link', { name: 'Preview' })).toHaveAttribute('href', '#step-4-heading');
+  });
+
+  it('両プレビューの壊れたアバターは頭文字に戻り、URL 修正で再表示する', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.change(screen.getByLabelText('表示名'), { target: { value: 'Alice' } });
+    const avatar = screen.getByLabelText(/アバター画像 URL/);
+    fireEvent.change(avatar, { target: { value: 'https://example.com/broken.png' } });
+    const previews = [screen.getByTestId('handle-mini-preview'), screen.getByTestId('handle-preview-frame')];
+    for (const preview of previews) {
+      fireEvent.error(preview.querySelector('img')!);
+      expect(preview.querySelector('img')).toBeNull();
+      expect(within(preview).getByText('A')).toBeInTheDocument();
+    }
+    fireEvent.change(avatar, { target: { value: 'https://example.com/fixed.png' } });
+    for (const preview of previews) {
+      expect(preview.querySelector('img')).toHaveAttribute('src', 'https://example.com/fixed.png');
+    }
+  });
+
   it('flag OFF → 何も描画しない (inert)', () => {
     h.enableHandles = false;
     const { container } = renderWithIntl(<HandleProfileBuilder />);
