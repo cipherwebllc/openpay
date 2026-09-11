@@ -25,6 +25,14 @@ function parseSampleRate(raw: string | undefined, fallback: number): number {
 }
 
 if (dsn) {
+  const replaySessionRate = parseSampleRate(
+    process.env.NEXT_PUBLIC_SENTRY_REPLAY_SESSION_SAMPLE_RATE,
+    0,
+  );
+  const replayErrorRate = parseSampleRate(
+    process.env.NEXT_PUBLIC_SENTRY_REPLAY_ERROR_SAMPLE_RATE,
+    0.2,
+  );
   Sentry.init({
     dsn,
     environment: process.env.NEXT_PUBLIC_NETWORK_ENV ?? 'unknown',
@@ -80,24 +88,24 @@ if (dsn) {
     // に出る可能性があるので、本当に厳格にしたい場合は beforeSend で scrub。
     sendDefaultPii: false,
     // Replay: ユーザ操作の動画 (DOM mutation + console + network) を送信。
-    // 通常 10% サンプリング、エラー発生 session は 100% (バグ再現に直結)。
+    // Sentry 無料枠は月 50 replay。通常 session の録画は既定 0 (課金枠を使わない)・
+    // エラー発生 session のみ 20% (バグ再現用の最小限)。枠超過分は Sentry 側で drop され
+    // 課金は発生しないが、On-Demand 予算を設定している場合のみ超過課金になる (設定は $0 を維持)。
     // テキスト/メディア共に mask 既定 ON でアドレス・金額入力が露出しない。
-    // トラフィック増加でコスト spike するため env で再デプロイなしに調整可能。
-    replaysSessionSampleRate: parseSampleRate(
-      process.env.NEXT_PUBLIC_SENTRY_REPLAY_SESSION_SAMPLE_RATE,
-      0.1,
-    ),
-    replaysOnErrorSampleRate: parseSampleRate(
-      process.env.NEXT_PUBLIC_SENTRY_REPLAY_ERROR_SAMPLE_RATE,
-      1.0,
-    ),
-    integrations: [
-      Sentry.replayIntegration({
-        maskAllText: true,
-        maskAllInputs: true,
-        blockAllMedia: true,
-      }),
-    ],
+    // NEXT_PUBLIC_* はビルド時に埋め込まれるため、env 変更の反映には再デプロイが要る。
+    replaysSessionSampleRate: replaySessionRate,
+    replaysOnErrorSampleRate: replayErrorRate,
+    // 両方 0 なら replay integration 自体を積まない (録画コードのバンドル ~50kB gz を省く)。
+    integrations:
+      replaySessionRate > 0 || replayErrorRate > 0
+        ? [
+            Sentry.replayIntegration({
+              maskAllText: true,
+              maskAllInputs: true,
+              blockAllMedia: true,
+            }),
+          ]
+        : [],
   });
 }
 
