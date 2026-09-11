@@ -64,7 +64,7 @@ export function WalletBadge() {
           )}
           <span className="font-mono">{shortAddress(address)}</span>
           {chain && (
-            <span className="hidden text-slate-500 sm:inline">/ {chain.name}</span>
+            <span className="hidden text-[11px] text-slate-400 sm:inline">/ {chain.name}</span>
           )}
           <ChevronDown
             className="h-3 w-3 text-slate-400 transition-transform group-open:rotate-180"
@@ -76,7 +76,7 @@ export function WalletBadge() {
           className="absolute right-0 top-full z-30 mt-1 w-52 rounded-lg border border-slate-200 bg-white p-1 text-sm shadow-lg"
         >
           {chain && (
-            <p className="px-3 py-1 text-[11px] text-slate-500">{chain.name}</p>
+            <p className="px-3 py-1 text-[11px] text-slate-400">{chain.name}</p>
           )}
           {siweEnabled &&
             (isSignedIn ? (

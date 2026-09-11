@@ -5,7 +5,7 @@
 // SIWE サインイン → 取得済み一覧 (編集/削除) → handle 入力 + 空き確認 →
 // 現在のプロフィール設定を publish。親 (HandleProfileBuilder) が純関数で canonical 化した
 // payload (config+profile) を受け取る (受取先/方法 未確定なら payload=null)。
-// 開く/コピー/QR/X は ④ プレビュー下 (builder 側) に集約したのでここには持たない。
+// 公開成功直下にも開く/コピーを表示。④ プレビュー下の共有アクションは残す。
 //
 // 編集モードは親が所有 (editingHandle)。「編集」でフォームに prefill + モード開始、
 // バナーで対象を明示し、編集中に**別名**で公開すると同内容の複製になることを事前警告する
@@ -20,6 +20,8 @@ import { ConnectButton } from '@/components/ConnectButton';
 import { shortAddress } from '@/lib/format';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrigin } from '@/hooks/useOrigin';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { getPublicHandleUrl } from '@/lib/publicHandleUrl';
 import {
   validateHandle,
   MAX_HANDLES_PER_WALLET,
@@ -203,6 +205,7 @@ export function HandleClaimPanel({
   const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } =
     useSiweSession();
   const origin = useOrigin();
+  const linkCopy = useCopyToClipboard();
   const qc = useQueryClient();
   const [input, setInput] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -211,6 +214,9 @@ export function HandleClaimPanel({
     handle: string;
     status: 'created' | 'updated';
   } | null>(null);
+  const publicHandleUrl = published
+    ? getPublicHandleUrl(origin, published.handle)
+    : '';
   // 削除確認モーダルの対象 handle (null = 閉)。window.confirm を置き換える danger 確認。
   const [releaseTarget, setReleaseTarget] = useState<string | null>(null);
   const config = payload?.config ?? null;
@@ -599,11 +605,30 @@ export function HandleClaimPanel({
             </button>
             {/* 公開結果のフィードバック (無言で入力が消えるのは「何が起きたか」不明だった) */}
             {published && !publish.isPending && (
-              <p className="mt-2 text-xs font-medium text-emerald-600">
-                {published.status === 'created'
-                  ? t('publishedCreated', { handle: published.handle })
-                  : t('publishedUpdated', { handle: published.handle })}
-              </p>
+              <div className="mt-2">
+                <p className="text-xs font-medium text-emerald-600">
+                  {published.status === 'created'
+                    ? t('publishedCreated', { handle: published.handle })
+                    : t('publishedUpdated', { handle: published.handle })}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <a
+                    href={publicHandleUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:border-brand hover:text-brand"
+                  >
+                    {t('open')}
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => void linkCopy.copy(publicHandleUrl)}
+                    className="rounded-md border border-slate-900 bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-700"
+                  >
+                    {linkCopy.copied ? t('copied') : t('copy')}
+                  </button>
+                </div>
+              </div>
             )}
             {atLimit && (
               <p className="mt-2 text-xs text-amber-700">{t('limitReached', { max })}</p>
