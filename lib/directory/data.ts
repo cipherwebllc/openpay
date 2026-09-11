@@ -319,7 +319,7 @@ export const DIRECTORY_ENTRIES = [
     name: 'Kaia',
     nameJa: 'Kaia',
     status: 'published',
-    ...provenance('https://www.kaia.io/ja/about', 'Kaia DLT Foundation'),
+    ...provenance('https://www.kaia.io/ja/about', 'Kaia DLT Foundation', 'official', { verifiedAt: '2026-09-11', updatedAt: '2026-09-11' }),
     facts: {
       description: 'アジア圏のステーブルコイン利用を対象に含むEVM互換レイヤー1ネットワーク。',
       category: 'network',

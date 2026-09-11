@@ -127,7 +127,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2027-01..2027-03',
     sourceUrl: OSAKA_SUBSIDY_URL,
-    verifiedAt: '2026-09-04',
+    verifiedAt: '2026-09-11',
   },
   {
     provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
@@ -143,7 +143,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2026-10..2027-02',
     sourceUrl: OSAKA_SUBSIDY_URL,
-    verifiedAt: '2026-09-04',
+    verifiedAt: '2026-09-11',
   },
   {
     provider: 'Mi&T (Osaka Pref. subsidy)',
@@ -160,7 +160,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2026-11..2027-03',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000003.000187870.html',
-    verifiedAt: '2026-09-04',
+    verifiedAt: '2026-09-11',
   },
   {
     // 2026-09-04 の第 2 回週次更新で追跡開始 (発表は 2026-07-13・backfill)。
@@ -177,6 +177,6 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: '2026-07-13',
     plannedPeriod: null,
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000185.000019526.html',
-    verifiedAt: '2026-09-04',
+    verifiedAt: '2026-09-11',
   },
 ];

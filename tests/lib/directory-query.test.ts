@@ -206,7 +206,7 @@ describe('directory query pure functions', () => {
     expect(directoryStats(DIRECTORY_ENTRIES)).toEqual({
       entryCount: publishedDirectoryEntries(DIRECTORY_ENTRIES).length,
       categoryCount: directoryCategoryCounts(DIRECTORY_ENTRIES).length,
-      lastUpdated: '2026-09-04', // 週次更新 (第 2 回)
+      lastUpdated: '2026-09-11', // 週次更新 (第 3 回・kaia の MOU 反映)
     });
   });
 
