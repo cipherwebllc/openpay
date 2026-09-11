@@ -3,6 +3,9 @@
 // 概ね等価の $0.04。データは lib/explore の EXPLORE_ENTRIES (JPYC 版と同一)。
 export const USDC_STORES = {
   path: '/api/paid/usdc/stores',
+  // Circle Agent Marketplace / CDP Bazaar のカード名と検索語 (2026-09-11: Circle 申請前に付与)。
+  serviceName: 'JPYC Acceptance Directory',
+  tags: ['jpyc', 'japan', 'stablecoin', 'acceptance', 'exchanges', 'dapps', 'directory'],
   price: '$0.04',
   priceUsd: '0.04',
   // 掲載面 (CDP Bazaar / agentic.market) のカード文言はこの description がそのまま出る

@@ -137,6 +137,20 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
     expect(`$${info.price.amount}`).toBe(USDC_DIRECTORY_LIST.price);
   });
 
+  it('USDC 9 endpoint は全て 200 応答に JSON Schema を持つ (Circle Agent Marketplace の掲載条件・2026-09-11)', async () => {
+    const body = await doc();
+    const usdcPaths = Object.keys(body.paths).filter((p) => p.startsWith('/api/paid/usdc/'));
+    expect(usdcPaths.length).toBeGreaterThanOrEqual(9);
+    for (const path of usdcPaths) {
+      const op = body.paths[path]?.get as { responses?: Record<string, { content?: Record<string, { schema?: unknown; example?: unknown }> }> } | undefined;
+      const json = op?.responses?.['200']?.content?.['application/json'];
+      const schema = json?.schema as { type?: string; $ref?: string } | undefined;
+      expect(schema, path).toBeTruthy();
+      // インライン object か components への $ref のどちらか (Directory 系は $ref)。
+      expect(schema?.type === 'object' || typeof schema?.$ref === 'string', path).toBe(true);
+    }
+  });
+
   it('vanilla USDC 追加分 (search / stores / hello) も USD 建て x-payment-info を持つ', async () => {
     const body = await doc();
     const expected: [string, string][] = [

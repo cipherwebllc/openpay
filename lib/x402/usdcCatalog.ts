@@ -40,14 +40,14 @@ export const USDC_CATALOG_ITEMS: readonly UsdcCatalogItem[] = [
   })),
   {
     resource: `${OPENPAY_CANONICAL_ORIGIN}${USDC_DIRECTORY_LIST.path}`,
-    title: 'Japan Web3 Directory',
+    title: USDC_DIRECTORY_LIST.serviceName,
     description: USDC_DIRECTORY_LIST.description,
     priceUsd: USDC_DIRECTORY_LIST.priceUsd,
     category: 'data',
   },
   {
     resource: `${OPENPAY_CANONICAL_ORIGIN}${USDC_DIRECTORY_SEARCH.path}`,
-    title: 'Japan Web3 Directory Search',
+    title: USDC_DIRECTORY_SEARCH.serviceName,
     description: USDC_DIRECTORY_SEARCH.description,
     priceUsd: USDC_DIRECTORY_SEARCH.priceUsd,
     category: 'data',
@@ -68,7 +68,7 @@ export const USDC_CATALOG_ITEMS: readonly UsdcCatalogItem[] = [
   },
   {
     resource: `${OPENPAY_CANONICAL_ORIGIN}${USDC_STORES.path}`,
-    title: 'JPYC Acceptance Directory',
+    title: USDC_STORES.serviceName,
     description: USDC_STORES.description,
     priceUsd: USDC_STORES.priceUsd,
     category: 'data',

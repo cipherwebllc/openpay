@@ -18,6 +18,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     {
       resourceUrl: `${OPENPAY_CANONICAL_ORIGIN}${USDC_STORES.path}`,
       description: USDC_STORES.description,
+      serviceName: USDC_STORES.serviceName,
+      tags: USDC_STORES.tags,
       price: USDC_STORES.price,
       outputSchema: {
         input: { type: 'http', method: 'GET', discoverable: true },
