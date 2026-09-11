@@ -397,7 +397,7 @@ export function HandleClaimPanel({
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-xs text-slate-500">{t('connectFirst')}</p>
-              <ConnectButton />
+              <ConnectButton variant="secondary" />
             </div>
           )}
         </div>

@@ -198,10 +198,10 @@ export default function CreatePage() {
       )}
       {tab === 'orders' && (env.enableOrderRelay || env.enableShopLive) && <OrderFeedPanel />}
 
-      {/* 受注タブでは下部の参照系 (最近の取引 / 換金) を隠して受注に集中。他タブでは従来どおり表示。 */}
-      {tab !== 'orders' && <MiniHistoryRecent />}
+      {/* 受注・プロフタブでは下部の参照系 (最近の取引 / 換金) を隠す。 */}
+      {tab !== 'orders' && tab !== 'profile' && <MiniHistoryRecent />}
 
-      {tab !== 'orders' && (
+      {tab !== 'orders' && tab !== 'profile' && (
       <section
         aria-labelledby="offramp-heading"
         className="mt-6 rounded-3xl bg-white p-6 shadow-card ring-1 ring-slate-200/70 sm:p-8 print:hidden"
@@ -285,30 +285,32 @@ export default function CreatePage() {
       )}
 
       {/* 販売ハブとしての用途別ガイド入口 (P5・plans/site-ia-guides-ruling.md N10)。 */}
-      <section className="mt-10">
-        <h2 className="text-sm font-semibold text-slate-500">
-          {t('guideLinks.title')}
-        </h2>
-        <ul className="mt-2 space-y-1.5">
-          {(
-            [
-              ['qr', 'qr'],
-              ['shop', 'shop'],
-              ['store', 'store'],
-            ] as const
-          ).map(([key, slug]) => (
-            <li key={key}>
-              <Link
-                href={`/${locale}/guide/${slug}`}
-                prefetch={false}
-                className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
-              >
-                {t(`guideLinks.${key}`)} →
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </section>
+      {tab !== 'profile' && (
+        <section className="mt-10">
+          <h2 className="text-sm font-semibold text-slate-500">
+            {t('guideLinks.title')}
+          </h2>
+          <ul className="mt-2 space-y-1.5">
+            {(
+              [
+                ['qr', 'qr'],
+                ['shop', 'shop'],
+                ['store', 'store'],
+              ] as const
+            ).map(([key, slug]) => (
+              <li key={key}>
+                <Link
+                  href={`/${locale}/guide/${slug}`}
+                  prefetch={false}
+                  className="text-sm font-medium text-emerald-700 underline-offset-2 hover:underline"
+                >
+                  {t(`guideLinks.${key}`)} →
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </AppShell>
   );
 }
