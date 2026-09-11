@@ -983,6 +983,9 @@
     "embedToggle": "埋め込み表示"
   },
   "CreatorStoreSeller": {
+    "formGroupWhat": "1. 何を売るか",
+    "formGroupPresentation": "2. 見せ方 (任意)",
+    "formGroupPublish": "3. 公開設定",
     "connectFirst": "まずウォレットを接続してください。接続後にログインして管理できます。",
     "heading": "デジタル商品",
     "intro": "URL やテキストを商品として登録し、あなたの @handle ページに並べます。商品本文は購入者への提供用に OpenPay が保管します。",

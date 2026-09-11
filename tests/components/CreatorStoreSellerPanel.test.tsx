@@ -109,6 +109,70 @@ beforeEach(() => {
 });
 
 describe('CreatorStoreSellerPanel', () => {
+  it('新規商品の見せ方は閉じ、既存商品の編集では開く', async () => {
+    const product: Product = {
+      id: 'h_' + 'a'.repeat(32),
+      payTo: ADDRESS,
+      title: '既存商品',
+      priceJpyc: '500',
+      contentKind: 'url',
+      label: 'download',
+      saleActive: false,
+      contentAvailable: true,
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/store/seller') return response({ ok: true, seller: null });
+      if (url === `/api/store/products/${product.id}`) {
+        return response({ ok: true, product, content: { kind: 'url', value: 'https://example.com/download' } });
+      }
+      return response({ ok: true, products: [product], max: 12 });
+    }));
+
+    renderPanel();
+    const summary = await screen.findByText('2. 見せ方 (任意)');
+    const details = summary.closest('details')!;
+    expect(summary.tagName).toBe('SUMMARY');
+    expect(details).not.toHaveAttribute('open');
+    expect(screen.getByLabelText('画像 URL (任意)')).not.toBeVisible();
+    for (const field of details.querySelectorAll('input, select, textarea')) {
+      expect(field).not.toBeRequired();
+      expect(field.closest('form')).toBe(screen.getByLabelText('商品名').closest('form'));
+    }
+    expect(details.querySelectorAll('input, select, textarea')).toHaveLength(6);
+    fireEvent.click(summary);
+    expect(screen.getByLabelText('画像 URL (任意)')).toBeVisible();
+    fireEvent.click(summary);
+    expect(details).not.toHaveAttribute('open');
+
+    fireEvent.click(screen.getByRole('button', { name: '編集' }));
+    await screen.findByRole('heading', { name: '商品を編集' });
+    expect(details).toHaveAttribute('open');
+    expect(screen.getByRole('textbox', { name: '画像 URL (任意)' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '編集をやめる' }));
+    expect(details).not.toHaveAttribute('open');
+  });
+
+  it('登録済みの販売者情報は名前と登録済みチップを持つ閉じた details になる', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      url === '/api/store/seller'
+        ? response({ ok: true, seller: { name: '山田', contact: 'seller@example.com', updatedAt: 1 } })
+        : response({ ok: true, products: [], max: 12 }),
+    ));
+    renderPanel();
+    const registered = await screen.findByText('登録済み');
+    const summary = registered.closest('summary')!;
+    const details = summary.closest('details')!;
+    expect(details).not.toHaveAttribute('open');
+    expect(summary).toHaveTextContent('販売者情報');
+    expect(summary).toHaveTextContent('山田');
+    expect(summary.querySelector('h3')).toBeNull();
+    expect(screen.getByRole('region', { name: '販売者情報' })).toContainElement(details);
+    expect(screen.getByLabelText('氏名・名称')).not.toBeVisible();
+    fireEvent.click(summary);
+    expect(screen.getByRole('textbox', { name: '氏名・名称' })).toHaveValue('山田');
+    expect(screen.getByRole('button', { name: '販売者情報を保存' })).toBeVisible();
+  });
+
   it.each([
     [false, '0x52d4901142e2B5680027da5EB47C86CB02a3cA81'],
     [true, undefined],
@@ -239,6 +303,7 @@ describe('CreatorStoreSellerPanel', () => {
     expect(
       screen.getByRole('textbox', { name: '提供する URL' }),
     ).toBeInTheDocument();
+    fireEvent.click(screen.getByText('2. 見せ方 (任意)'));
     // P1 (Store 統合): カテゴリー select (9 種 + 未選択) とタグ入力
     const categorySelect = screen.getByRole('combobox', {
       name: 'カテゴリー (任意)',
@@ -404,6 +469,7 @@ describe('CreatorStoreSellerPanel', () => {
     fireEvent.change(screen.getByRole('textbox', { name: '価格 (JPYC)' }), {
       target: { value: '200' },
     });
+    fireEvent.click(screen.getByText('2. 見せ方 (任意)'));
     fireEvent.change(
       screen.getByRole('textbox', { name: '画像 URL (任意)' }),
       {
