@@ -28,6 +28,9 @@ export type TransparencyContract = {
   readonly address: string;
 };
 
+import { EXTERNAL_PURCHASES_AS_OF, externalPurchaseSummary } from '@/lib/externalPurchases';
+const EXTERNAL = externalPurchaseSummary();
+
 export type TransparencyContent = {
   readonly metaTitle: string;
   readonly metaDescription: string;
@@ -68,6 +71,20 @@ export type TransparencyContent = {
 
   readonly metricsTitle: string;
   readonly metricsItems: readonly string[];
+
+  /** 9. 外部からの実購入 (SOT = lib/externalPurchases.ts)。数値は SOT から埋める。 */
+  readonly externalTitle: string;
+  readonly externalLead: string;
+  readonly externalSummary: string;
+  readonly externalCaveat: string;
+  readonly externalHeaders: {
+    readonly date: string;
+    readonly chain: string;
+    readonly amount: string;
+    readonly buyer: string;
+    readonly tx: string;
+  };
+  readonly externalTxLabel: string;
 
   readonly legalLead: string;
   readonly legalLinks: readonly TransparencyLink[];
@@ -172,6 +189,14 @@ const ja: TransparencyContent = {
     '自己購入と first-party の動作確認決済は、これらの実績から除外します。',
   ],
 
+  externalTitle: '9. 外部からの実購入 (オンチェーン記録)',
+  externalLead:
+    `第三者のウォレットから当社の x402 API へ支払われ、精算が確定した取引の一覧です。8 の方針どおり、当社および関係者のウォレットによる動作確認の決済は除外しています。各行は公開台帳 (Basescan) で検証できます。集計時点: ${EXTERNAL_PURCHASES_AS_OF} (週次で更新)。`,
+  externalSummary: `独立した買い手 ${EXTERNAL.buyers}・精算 ${EXTERNAL.settlements} 件・初回 ${EXTERNAL.first} (USDC / Base)。`,
+  externalCaveat: 'この一覧は支払いの事実を示すもので、稼働率や納品を保証するものではありません。',
+  externalHeaders: { date: '日付 (UTC)', chain: 'チェーン', amount: '金額', buyer: '買い手', tx: '取引' },
+  externalTxLabel: 'Basescan で見る',
+
   legalLead: '法務・免責の全文:',
   legalLinks: [
     { label: '利用規約', href: '/terms' },
@@ -256,6 +281,14 @@ const en: TransparencyContent = {
     'When results are published, the KPIs are independent buyers, payment volume between third parties, and repeat-purchase rate.',
     'Self-purchases and first-party test payments are excluded from those results.',
   ],
+
+  externalTitle: '9. Real purchases from third parties (on-chain record)',
+  externalLead:
+    `Settled payments from third-party wallets to our x402 APIs. As stated in section 8, verification payments from our own and related wallets are excluded. Every row can be verified on the public ledger (Basescan). As of ${EXTERNAL_PURCHASES_AS_OF}, updated weekly.`,
+  externalSummary: `${EXTERNAL.buyers} independent buyers, ${EXTERNAL.settlements} settlements, first on ${EXTERNAL.first} (USDC on Base).`,
+  externalCaveat: 'This list shows that payments happened; it is not a guarantee of uptime or delivery.',
+  externalHeaders: { date: 'Date (UTC)', chain: 'Chain', amount: 'Amount', buyer: 'Buyer', tx: 'Transaction' },
+  externalTxLabel: 'View on Basescan',
 
   legalLead: 'Full legal and disclaimer text:',
   legalLinks: [
