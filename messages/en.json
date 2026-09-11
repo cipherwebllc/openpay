@@ -983,6 +983,9 @@
     "embedToggle": "Embed media"
   },
   "CreatorStoreSeller": {
+    "formGroupWhat": "1. What you sell",
+    "formGroupPresentation": "2. Presentation (optional)",
+    "formGroupPublish": "3. Publishing",
     "connectFirst": "Connect your wallet first. After connecting, sign in to manage your products.",
     "heading": "Digital products",
     "intro": "List a URL or text as a product on your @handle page. OpenPay stores the product content so it can be delivered to buyers.",

@@ -678,126 +678,145 @@ function SignedInSellerPanel({
     );
   }
 
+  const SellerDisclosure = sellerComplete ? 'details' : 'div';
+
   return (
     <div className="mt-6 space-y-6">
       <section
         aria-labelledby="creator-store-seller-disclosure-heading"
         className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5"
       >
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <h3
-              id="creator-store-seller-disclosure-heading"
-              className="text-base font-semibold text-slate-800"
-            >
-              {t('sellerHeading')}
-            </h3>
-            <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              {t('sellerIntro')}
-            </p>
-          </div>
-          <span
-            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-              sellerComplete
-                ? 'bg-emerald-100 text-emerald-800'
-                : 'bg-amber-100 text-amber-800'
-            }`}
-          >
-            {sellerComplete ? t('sellerRegistered') : t('sellerUnregistered')}
-          </span>
-        </div>
+        <SellerDisclosure>
+          {sellerComplete ? (
+            <>
+              <summary className="cursor-pointer text-base font-semibold text-slate-800">
+                <span id="creator-store-seller-disclosure-heading">{t('sellerHeading')}</span>{' '}
+                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                  {t('sellerRegistered')}
+                </span>{' '}
+                <span className="text-sm font-normal text-slate-600">{seller.name}</span>
+              </summary>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                {t('sellerIntro')}
+              </p>
+            </>
+          ) : (
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <h3
+                  id="creator-store-seller-disclosure-heading"
+                  className="text-base font-semibold text-slate-800"
+                >
+                  {t('sellerHeading')}
+                </h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  {t('sellerIntro')}
+                </p>
+              </div>
+              <span
+                className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                  sellerComplete
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : 'bg-amber-100 text-amber-800'
+                }`}
+              >
+                {sellerComplete ? t('sellerRegistered') : t('sellerUnregistered')}
+              </span>
+            </div>
+          )}
 
-        <form
-          className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            saveSeller.mutate(sellerForm);
-          }}
-        >
-          <label
-            htmlFor="creator-store-seller-name"
-            className="block text-sm font-medium text-slate-700"
+          <form
+            className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveSeller.mutate(sellerForm);
+            }}
           >
-            {t('sellerNameLabel')}
-            <input
-              id="creator-store-seller-name"
-              type="text"
-              required
-              maxLength={60}
-              value={sellerForm.name}
-              onChange={(event) => updateSeller({ name: event.target.value })}
-              className={inputClass}
-            />
-          </label>
-          <label
-            htmlFor="creator-store-seller-contact"
-            className="block text-sm font-medium text-slate-700"
-          >
-            {t('sellerContactLabel')}
-            <input
-              id="creator-store-seller-contact"
-              type="text"
-              required
-              maxLength={200}
-              value={sellerForm.contact}
-              onChange={(event) =>
-                updateSeller({ contact: event.target.value })
-              }
-              className={inputClass}
-            />
-          </label>
-          <div className="sm:col-span-2">
             <label
-              htmlFor="creator-store-seller-disclosure"
+              htmlFor="creator-store-seller-name"
               className="block text-sm font-medium text-slate-700"
             >
-              {t('sellerDisclosureLabel')}
+              {t('sellerNameLabel')}
+              <input
+                id="creator-store-seller-name"
+                type="text"
+                required
+                maxLength={60}
+                value={sellerForm.name}
+                onChange={(event) => updateSeller({ name: event.target.value })}
+                className={inputClass}
+              />
             </label>
-            <textarea
-              id="creator-store-seller-disclosure"
-              aria-describedby="creator-store-seller-disclosure-hint"
-              rows={4}
-              maxLength={1000}
-              value={sellerForm.disclosure}
-              onChange={(event) =>
-                updateSeller({ disclosure: event.target.value })
-              }
-              className={inputClass}
-            />
-            <p
-              id="creator-store-seller-disclosure-hint"
-              className="mt-1 text-xs leading-relaxed text-slate-500"
+            <label
+              htmlFor="creator-store-seller-contact"
+              className="block text-sm font-medium text-slate-700"
             >
-              {t('sellerDisclosureHint')}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-            <button
-              type="submit"
-              disabled={saveSeller.isPending}
-              className={`${isLicense ? 'min-h-11 ' : ''}rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50`}
-            >
-              {saveSeller.isPending ? t('saving') : t('saveSeller')}
-            </button>
-            {sellerSaved ? (
-              <p className="text-sm font-medium text-emerald-700">
-                {t('sellerSaved')}
+              {t('sellerContactLabel')}
+              <input
+                id="creator-store-seller-contact"
+                type="text"
+                required
+                maxLength={200}
+                value={sellerForm.contact}
+                onChange={(event) =>
+                  updateSeller({ contact: event.target.value })
+                }
+                className={inputClass}
+              />
+            </label>
+            <div className="sm:col-span-2">
+              <label
+                htmlFor="creator-store-seller-disclosure"
+                className="block text-sm font-medium text-slate-700"
+              >
+                {t('sellerDisclosureLabel')}
+              </label>
+              <textarea
+                id="creator-store-seller-disclosure"
+                aria-describedby="creator-store-seller-disclosure-hint"
+                rows={4}
+                maxLength={1000}
+                value={sellerForm.disclosure}
+                onChange={(event) =>
+                  updateSeller({ disclosure: event.target.value })
+                }
+                className={inputClass}
+              />
+              <p
+                id="creator-store-seller-disclosure-hint"
+                className="mt-1 text-xs leading-relaxed text-slate-500"
+              >
+                {t('sellerDisclosureHint')}
               </p>
-            ) : null}
-            {saveSeller.isError ? (
-              <p className="text-sm text-red-600">
-                {(() => {
-                  const detailKey = errorDetailKey(saveSeller.error);
-                  return detailKey
-                    ? t(detailKey)
-                    : t('requestError', {
-                        error: errorCode(saveSeller.error),
-                      });
-                })()}
-              </p>
-            ) : null}
-          </div>
-        </form>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
+              <button
+                type="submit"
+                disabled={saveSeller.isPending}
+                className={`${isLicense ? 'min-h-11 ' : ''}rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50`}
+              >
+                {saveSeller.isPending ? t('saving') : t('saveSeller')}
+              </button>
+              {sellerSaved ? (
+                <p className="text-sm font-medium text-emerald-700">
+                  {t('sellerSaved')}
+                </p>
+              ) : null}
+              {saveSeller.isError ? (
+                <p className="text-sm text-red-600">
+                  {(() => {
+                    const detailKey = errorDetailKey(saveSeller.error);
+                    return detailKey
+                      ? t(detailKey)
+                      : t('requestError', {
+                          error: errorCode(saveSeller.error),
+                        });
+                  })()}
+                </p>
+              ) : null}
+            </div>
+          </form>
+        </SellerDisclosure>
       </section>
 
       <section aria-labelledby="creator-store-products-heading">
@@ -989,6 +1008,9 @@ function SignedInSellerPanel({
             saveProduct.mutate({ id: editingId, form: productForm });
           }}
         >
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 sm:col-span-2">
+            <h4>{t('formGroupWhat')}</h4>
+          </div>
           {env.enableLicenseNftUi ? (
             <fieldset className="sm:col-span-2">
               <legend className="text-sm font-semibold text-slate-800">{t('productTypeLabel')}</legend>
@@ -1036,116 +1058,6 @@ function SignedInSellerPanel({
               className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
             />
           </label>
-          <label
-            htmlFor="creator-store-product-emoji"
-            className="block text-sm font-medium text-slate-700"
-          >
-            {t('emojiLabel')}
-            <input
-              id="creator-store-product-emoji"
-              type="text"
-              maxLength={8}
-              value={productForm.emoji}
-              onChange={(event) =>
-                updateProduct({ emoji: event.target.value })
-              }
-              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
-            />
-          </label>
-          <label
-            htmlFor="creator-store-product-image-url"
-            className="block text-sm font-medium text-slate-700"
-          >
-            {t('imageUrlLabel')}
-            <input
-              id="creator-store-product-image-url"
-              type="url"
-              maxLength={512}
-              placeholder="https://"
-              value={productForm.imageUrl}
-              onChange={(event) =>
-                updateProduct({ imageUrl: event.target.value })
-              }
-              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
-            />
-          </label>
-          {/* アップロード先の案内 (レジ商品プリセットの imageHint と同文言・2026-08-05 user 指示)。
-              label の外に置き、input の a11y 名 (「画像 URL (任意)」) に混ざらないようにする。 */}
-          <p className="-mt-3 text-xs text-slate-500 sm:col-span-2">
-            {t('imageUrlHint')}{' '}
-            <Link
-              href={`/${locale}/guide/image-url`}
-              prefetch={false}
-              className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
-            >
-              {t('imageGuideLink')}
-            </Link>
-          </p>
-          {env.enableStoreDeliveryTicketUi ? (
-            <div className="sm:col-span-2">
-              <label htmlFor="creator-store-product-delivery-url" className="block text-sm font-medium text-slate-700">
-                {t('deliveryUrlLabel')}
-              </label>
-              <input
-                id="creator-store-product-delivery-url"
-                type="url"
-                maxLength={512}
-                placeholder="https://"
-                value={productForm.deliveryUrl}
-                onChange={(event) => updateProduct({ deliveryUrl: event.target.value })}
-                aria-describedby="creator-store-product-delivery-help"
-                className={`${inputClass} min-h-11`}
-              />
-              <p id="creator-store-product-delivery-help" className="mt-1 text-xs leading-relaxed text-slate-500">
-                {t('deliveryUrlHelp')}{' '}
-                <Link href={`/${locale}/guide/store#protected-delivery`} prefetch={false} className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900">
-                  {t('deliveryGuideLink')}
-                </Link>
-              </p>
-            </div>
-          ) : null}
-          <label
-            htmlFor="creator-store-product-gallery-urls"
-            className="block text-sm font-medium text-slate-700 sm:col-span-2"
-          >
-            {t('galleryUrlsLabel')}
-            <textarea
-              id="creator-store-product-gallery-urls"
-              rows={4}
-              value={productForm.galleryUrls}
-              onChange={(event) =>
-                updateProduct({ galleryUrls: event.target.value })
-              }
-              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
-            />
-          </label>
-          <label
-            htmlFor="creator-store-product-price"
-            className="block text-sm font-medium text-slate-700"
-          >
-            {t(isLicense ? 'licensePriceLabel' : 'priceLabel')}
-            <input
-              id="creator-store-product-price"
-              type={isLicense ? 'number' : 'text'}
-              min={isLicense ? 1_000 : undefined}
-              max={isLicense ? 1_000_000 : undefined}
-              step={isLicense ? 1 : undefined}
-              readOnly={licenseReadOnly}
-              inputMode="numeric"
-              pattern="[0-9]+"
-              required
-              maxLength={7}
-              value={productForm.priceJpyc}
-              onChange={(event) =>
-                updateProduct({ priceJpyc: event.target.value })
-              }
-              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
-            />
-          </label>
-          {/* 税込総額での登録案内 (Terms 13 条 (4) 2026-08-05 改定と同期・label 外 = a11y 名不変)。 */}
-          <p className="-mt-3 text-xs text-slate-500">
-            {t('priceHint')}
-          </p>
           {!isLicense ? <>
           <label
             htmlFor="creator-store-product-kind"
@@ -1168,104 +1080,7 @@ function SignedInSellerPanel({
               <option value="text">{t('contentKinds.text')}</option>
             </select>
           </label>
-          <label
-            htmlFor="creator-store-product-label"
-            className="block text-sm font-medium text-slate-700"
-          >
-            {t('labelLabel')}
-            <select
-              id="creator-store-product-label"
-              value={productForm.label}
-              onChange={(event) =>
-                updateProduct({
-                  label: event.target.value as HostedLabel,
-                })
-              }
-              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
-            >
-              {HOSTED_LABELS.map((label) => (
-                <option key={label} value={label}>
-                  {t(`labels.${label}`)}
-                </option>
-              ))}
-            </select>
-          </label>
           </> : null}
-          <label
-            htmlFor="creator-store-product-category"
-            className="block text-sm font-medium text-slate-700"
-          >
-            {t('categoryLabel')}
-            <select
-              id="creator-store-product-category"
-              value={productForm.category}
-              onChange={(event) =>
-                updateProduct({ category: event.target.value })
-              }
-              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
-            >
-              <option value="">{t('categoryNone')}</option>
-              {HOSTED_PRODUCT_CATEGORIES.map((category) => (
-                <option key={category} value={category}>
-                  {tCatalog(`categories.${category}`)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label
-            htmlFor="creator-store-product-listing-handle"
-            className="block text-sm font-medium text-slate-700"
-          >
-            {t('listingHandleLabel')}
-            <select
-              id="creator-store-product-listing-handle"
-              value={productForm.listingHandle}
-              onChange={(event) =>
-                updateProduct({ listingHandle: event.target.value })
-              }
-              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
-            >
-              <option value="">{t('listingHandleAll')}</option>
-              {handle ? <option value={handle}>@{handle}</option> : null}
-              {/* 編集中商品が別 handle 帰属のとき、その値を失わない選択肢を出す */}
-              {productForm.listingHandle &&
-              productForm.listingHandle !== handle ? (
-                <option value={productForm.listingHandle}>
-                  @{productForm.listingHandle}
-                </option>
-              ) : null}
-            </select>
-          </label>
-          <label className="flex items-start gap-2 text-sm text-slate-700 sm:col-span-2">
-            <input
-              type="checkbox"
-              checked={productForm.featured}
-              onChange={(event) =>
-                updateProduct({ featured: event.target.checked })
-              }
-              className="mt-0.5 h-4 w-4 rounded border-slate-300"
-            />
-            <span>
-              <span className="font-medium">{t('featuredLabel')}</span>
-              <span className="mt-0.5 block text-xs text-slate-500">
-                {t('featuredHint')}
-              </span>
-            </span>
-          </label>
-          <label
-            htmlFor="creator-store-product-tags"
-            className="block text-sm font-medium text-slate-700"
-          >
-            {t('tagsLabel')}
-            <input
-              id="creator-store-product-tags"
-              type="text"
-              value={productForm.tags}
-              onChange={(event) => updateProduct({ tags: event.target.value })}
-              placeholder={t('tagsPlaceholder')}
-              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
-            />
-          </label>
           <div className="sm:col-span-2">
             <label
               htmlFor="creator-store-product-content"
@@ -1313,6 +1128,225 @@ function SignedInSellerPanel({
             </p>
           </div>
 
+          {env.enableStoreDeliveryTicketUi ? (
+            <div className="sm:col-span-2">
+              <label htmlFor="creator-store-product-delivery-url" className="block text-sm font-medium text-slate-700">
+                {t('deliveryUrlLabel')}
+              </label>
+              <input
+                id="creator-store-product-delivery-url"
+                type="url"
+                maxLength={512}
+                placeholder="https://"
+                value={productForm.deliveryUrl}
+                onChange={(event) => updateProduct({ deliveryUrl: event.target.value })}
+                aria-describedby="creator-store-product-delivery-help"
+                className={`${inputClass} min-h-11`}
+              />
+              <p id="creator-store-product-delivery-help" className="mt-1 text-xs leading-relaxed text-slate-500">
+                {t('deliveryUrlHelp')}{' '}
+                <Link href={`/${locale}/guide/store#protected-delivery`} prefetch={false} className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900">
+                  {t('deliveryGuideLink')}
+                </Link>
+              </p>
+            </div>
+          ) : null}
+          <label
+            htmlFor="creator-store-product-price"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t(isLicense ? 'licensePriceLabel' : 'priceLabel')}
+            <input
+              id="creator-store-product-price"
+              type={isLicense ? 'number' : 'text'}
+              min={isLicense ? 1_000 : undefined}
+              max={isLicense ? 1_000_000 : undefined}
+              step={isLicense ? 1 : undefined}
+              readOnly={licenseReadOnly}
+              inputMode="numeric"
+              pattern="[0-9]+"
+              required
+              maxLength={7}
+              value={productForm.priceJpyc}
+              onChange={(event) =>
+                updateProduct({ priceJpyc: event.target.value })
+              }
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
+            />
+          </label>
+          {/* 税込総額での登録案内 (Terms 13 条 (4) 2026-08-05 改定と同期・label 外 = a11y 名不変)。 */}
+          <p className="-mt-3 text-xs text-slate-500">
+            {t('priceHint')}
+          </p>
+          <details open={editingId !== null} className="sm:col-span-2">
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-500">
+              {t('formGroupPresentation')}
+            </summary>
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <label
+                htmlFor="creator-store-product-image-url"
+                className="block text-sm font-medium text-slate-700"
+              >
+                {t('imageUrlLabel')}
+                <input
+                  id="creator-store-product-image-url"
+                  type="url"
+                  maxLength={512}
+                  placeholder="https://"
+                  value={productForm.imageUrl}
+                  onChange={(event) =>
+                    updateProduct({ imageUrl: event.target.value })
+                  }
+                  className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
+                />
+              </label>
+              {/* アップロード先の案内 (レジ商品プリセットの imageHint と同文言・2026-08-05 user 指示)。
+                  label の外に置き、input の a11y 名 (「画像 URL (任意)」) に混ざらないようにする。 */}
+              <p className="-mt-3 text-xs text-slate-500 sm:col-span-2">
+                {t('imageUrlHint')}{' '}
+                <Link
+                  href={`/${locale}/guide/image-url`}
+                  prefetch={false}
+                  className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+                >
+                  {t('imageGuideLink')}
+                </Link>
+              </p>
+              <label
+                htmlFor="creator-store-product-gallery-urls"
+                className="block text-sm font-medium text-slate-700 sm:col-span-2"
+              >
+                {t('galleryUrlsLabel')}
+                <textarea
+                  id="creator-store-product-gallery-urls"
+                  rows={4}
+                  value={productForm.galleryUrls}
+                  onChange={(event) =>
+                    updateProduct({ galleryUrls: event.target.value })
+                  }
+                  className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
+                />
+              </label>
+              <label
+                htmlFor="creator-store-product-emoji"
+                className="block text-sm font-medium text-slate-700"
+              >
+                {t('emojiLabel')}
+                <input
+                  id="creator-store-product-emoji"
+                  type="text"
+                  maxLength={8}
+                  value={productForm.emoji}
+                  onChange={(event) =>
+                    updateProduct({ emoji: event.target.value })
+                  }
+                  className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
+                />
+              </label>
+              {!isLicense ? <>
+              <label
+                htmlFor="creator-store-product-label"
+                className="block text-sm font-medium text-slate-700"
+              >
+                {t('labelLabel')}
+                <select
+                  id="creator-store-product-label"
+                  value={productForm.label}
+                  onChange={(event) =>
+                    updateProduct({
+                      label: event.target.value as HostedLabel,
+                    })
+                  }
+                  className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
+                >
+                  {HOSTED_LABELS.map((label) => (
+                    <option key={label} value={label}>
+                      {t(`labels.${label}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              </> : null}
+              <label
+                htmlFor="creator-store-product-category"
+                className="block text-sm font-medium text-slate-700"
+              >
+                {t('categoryLabel')}
+                <select
+                  id="creator-store-product-category"
+                  value={productForm.category}
+                  onChange={(event) =>
+                    updateProduct({ category: event.target.value })
+                  }
+                  className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
+                >
+                  <option value="">{t('categoryNone')}</option>
+                  {HOSTED_PRODUCT_CATEGORIES.map((category) => (
+                    <option key={category} value={category}>
+                      {tCatalog(`categories.${category}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label
+                htmlFor="creator-store-product-tags"
+                className="block text-sm font-medium text-slate-700"
+              >
+                {t('tagsLabel')}
+                <input
+                  id="creator-store-product-tags"
+                  type="text"
+                  value={productForm.tags}
+                  onChange={(event) => updateProduct({ tags: event.target.value })}
+                  placeholder={t('tagsPlaceholder')}
+                  className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
+                />
+              </label>
+            </div>
+          </details>
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 sm:col-span-2">
+            <h4>{t('formGroupPublish')}</h4>
+          </div>
+          <label
+            htmlFor="creator-store-product-listing-handle"
+            className="block text-sm font-medium text-slate-700"
+          >
+            {t('listingHandleLabel')}
+            <select
+              id="creator-store-product-listing-handle"
+              value={productForm.listingHandle}
+              onChange={(event) =>
+                updateProduct({ listingHandle: event.target.value })
+              }
+              className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
+            >
+              <option value="">{t('listingHandleAll')}</option>
+              {handle ? <option value={handle}>@{handle}</option> : null}
+              {/* 編集中商品が別 handle 帰属のとき、その値を失わない選択肢を出す */}
+              {productForm.listingHandle &&
+              productForm.listingHandle !== handle ? (
+                <option value={productForm.listingHandle}>
+                  @{productForm.listingHandle}
+                </option>
+              ) : null}
+            </select>
+          </label>
+          <label className="flex items-start gap-2 text-sm text-slate-700 sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={productForm.featured}
+              onChange={(event) =>
+                updateProduct({ featured: event.target.checked })
+              }
+              className="mt-0.5 h-4 w-4 rounded border-slate-300"
+            />
+            <span>
+              <span className="font-medium">{t('featuredLabel')}</span>
+              <span className="mt-0.5 block text-xs text-slate-500">
+                {t('featuredHint')}
+              </span>
+            </span>
+          </label>
           {!isLicense ? <>
           <div className="sm:col-span-2">
             <label
