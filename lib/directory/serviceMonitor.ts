@@ -399,6 +399,74 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
+  {
+    // 週次更新 第 3 回 (2026-09-11)。Kaia × ネットスターズ MOU = 両商品にまたがる 1 事実 (Kaia 側 / StarPay 側)。
+    date: '2026-09-11',
+    collectedAt: '2026-09-11',
+    scopes: ['jpyc-services'],
+    slug: 'kaia',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    assets: ['JPYC'],
+    summary:
+      'KAIA DLT Foundation signed an MOU with NetStars (operator of StarPay) to study integrating Kaia-based stablecoins — JPYC, IDRX and native USDT — into StarPay\'s roughly 700,000 payment locations in Japan, using Kaia\'s FX orchestration layer "Ratio" so merchants receive yen. Launch timing and fees are not disclosed.',
+    summaryJa:
+      'KAIA DLT Foundation がネットスターズ (StarPay 運営) と MOU を締結。Kaia 上の JPYC・IDRX・ネイティブ USDT を StarPay の国内約 70 万決済拠点へ統合する検討を開始し、FX 層「Ratio」で加盟店は円で受け取る構想。稼働時期・手数料は未公表。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000028.000154579.html',
+  },
+  {
+    date: '2026-09-11',
+    collectedAt: '2026-09-11',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    assets: ['JPYC', 'USDT'],
+    summary:
+      'NetStars signed an MOU with KAIA DLT Foundation to study accepting Kaia-based stablecoins (JPYC, IDRX, native USDT) across StarPay\'s roughly 700,000 payment locations, with yen settlement to merchants via Kaia\'s "Ratio" FX layer. This is a study-phase agreement; no launch date, fee or chain change has been announced for Stablecoin Pay.',
+    summaryJa:
+      'ネットスターズが KAIA DLT Foundation と MOU を締結。StarPay の国内約 70 万決済拠点で Kaia 系ステーブルコイン (JPYC・IDRX・ネイティブ USDT) の受け入れを検討し、Kaia の FX 層「Ratio」で加盟店へ円で精算する構想。検討段階の合意で、Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未発表。',
+    sourceUrl: 'https://www.netstars.co.jp/news/9737/',
+  },
+  {
+    date: '2026-09-11',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): 4 grants, JPY 28,890 thousand in total, implementation through 2027-03-31; HashPort pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: 交付決定 4 件・総額 28,890 千円・実施期間 2027-03-31 まで。HashPort の実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-09-11',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: マイナウォレット / 三井住友カードの実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-09-11',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mi&T pilot (merchant fee 1.0%, planned mid-November 2026 to mid-March 2027) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: Mi&T の実証 (手数料 1.0%・2026 年 11 月中旬〜2027 年 3 月中旬予定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
 ];
 
 // ディレクトリ初期公開日。baseline の 'added' はこの固定日に立てる — entry.updatedAt 由来に
