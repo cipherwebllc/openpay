@@ -35,12 +35,31 @@ jobs:
       # PaymentForm / CheckoutForm / TipForm 系で観測される post-teardown
       # "Worker exited unexpectedly" は全 assertion が pass している状態の
       # cleanup OOM なので fail とは扱わない (script 内で別途 warning を残す)。
+      # 本物の Lua (wasmoon) を使う test は非決定的に WASM heap が壊れる (memory:
+      # feedback_wasmoon_oob_flaky) ので、ここと Coverage から外し lua-real job に任せる
+      # (2026-09-12 案 1)。除外一覧は scripts/lib/luaRealTests.mjs が単一情報源。
       - run: node scripts/run-tests.mjs
+        env:
+          SKIP_LUA_REAL: '1'
       # カバレッジは gate (2026-09-02): 以前は continue-on-error で赤くならず、
       # 閾値 (vitest.config.ts の coverage.thresholds) が事実上無効だった。
       # 閾値は実測 -2pt で回帰のみを検出する設定なので、割れたら「テストの無い分岐が増えた」の合図。
       - name: Coverage
-        run: node --max-old-space-size=6144 ./node_modules/.bin/vitest run --coverage --pool=forks --poolOptions.forks.minForks=1 --poolOptions.forks.maxForks=2
+        # --exclude は scripts/lib/luaRealTests.mjs の一覧と同一 (tests/scripts/workflow-guards.test.ts が照合)。
+        run: >-
+          node --max-old-space-size=6144 ./node_modules/.bin/vitest run --coverage
+          --pool=forks --poolOptions.forks.minForks=1 --poolOptions.forks.maxForks=2
+          --exclude tests/_helpers/redisLua.test.ts
+          --exclude tests/app/api/store-delivery-metadata.test.ts
+          --exclude tests/app/api/store-products-license-terms.test.ts
+          --exclude tests/lib/license/minter.test.ts
+          --exclude tests/lib/license/product.test.ts
+          --exclude tests/lib/license/stock.test.ts
+          --exclude tests/lib/license/verifyBudget.test.ts
+          --exclude tests/lib/store/deliveryBudget.test.ts
+          --exclude tests/lib/x402/purchaseIntent-lua.test.ts
+          --exclude tests/lib/x402/registry-lua.test.ts
+          --exclude tests/lib/x402/reverify-cas.test.ts
       - name: Build (production) + bundle budget check
         env:
           NEXT_PUBLIC_NETWORK_ENV: testnet
@@ -53,6 +72,20 @@ jobs:
           node scripts/check-bundle-budget.mjs < build.log
           # サーバーバンドル内の Lua (EVAL 用 CAS) が minifier に壊されていないか (2026-09-06 実害)
           node scripts/check-lua-bundle.mjs
+
+  # 本物の Lua (wasmoon) を使う 4 file だけを、プロセスを作り直しながら最大 3 回まで実行する。
+  # test job から分離した理由・一覧は scripts/lib/luaRealTests.mjs。ここが 3 回とも落ちたら
+  # flaky ではなく本当の回帰 (or flaky の悪化) として扱う。
+  lua-real:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: node scripts/run-lua-tests.mjs
 
   audit:
     runs-on: ubuntu-latest

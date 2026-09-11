@@ -8,6 +8,7 @@ AI エージェント（Claude/Codex/その他）と人間の両方が守る、�
 ```bash
 npm run typecheck        # tsc --noEmit
 npx vitest run           # unit/integration 全 suite (~35s)。summary は末尾 5 行を読む
+node scripts/run-lua-tests.mjs # 本物の Lua (wasmoon) を使う 4 file だけをプロセス再起動つきで最大 3 回 (CI の lua-real job と同じ)
                          #   ⚠️ 出力を grep すると test 内の意図的エラーログ (SA init noise 等) に誤マッチする
 npm run e2e:local        # Playwright (ローカル環境依存 → 下記「e2e は CI が権威」参照)
 npm run build            # next build (page export 検査を含む・下記参照)

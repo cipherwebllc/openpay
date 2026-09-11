@@ -40,6 +40,9 @@ export default defineConfig({
       // のではなく計測範囲が広がった。
       // 実測 -2pt を下限にして回帰のみ検出 (新規コードに無理なテスト追加を強要しない)。
       // CI の Coverage ステップは continue-on-error を外したので、この下限割れは fail する。
+      // 2026-09-12: CI の Coverage は本物の Lua (wasmoon) を使う 11 file を除外して計測する
+      // (scripts/lib/luaRealTests.mjs・lua-real job で別途実行)。除外による実測差は
+      // statements 90.98→90.30 / branches 87.17→86.75 / functions 91.46→90.74 で、閾値は据え置き。
       thresholds: {
         statements: 87,
         branches: 84,

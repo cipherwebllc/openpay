@@ -32,6 +32,7 @@ import {
   listTestFiles,
   normalizeReportedFiles,
 } from './lib/testFileFence.mjs';
+import { LUA_REAL_TEST_FILES } from './lib/luaRealTests.mjs';
 
 // 既知の worker-OOM 等で未 run のファイル → 期待 missing test 数 (Map)。空 = 全ファイル run 前提
 // (missing が 1 件でも出れば fail)。ここに足す操作は PR レビューで明示同意が必要。
@@ -39,10 +40,16 @@ const KNOWN_BROKEN_FILES = new Map([
   // 例: ['tests/components/Foo.test.tsx', 42], // OOM 等で未 run のファイルと collect 済 test 数
 ]);
 
+// SKIP_LUA_REAL=1 (CI の test job) では本物の Lua (wasmoon) を使う test を除外し、専用 job
+// (lua-real・scripts/run-lua-tests.mjs) にプロセス再起動つき再試行で任せる (2026-09-12 案 1)。
+// ローカルの既定 (env 無し) は従来どおり全ファイルを走らせる。
+const skipLuaReal = process.env.SKIP_LUA_REAL === '1';
+
 // ファイル数フェンス (下記 3.) の allowlist。CI で意図的に走らせない test ファイルがあればここへ。
 // vitest.config.ts の exclude は node_modules / e2e / .next (いずれも tests/ 外) だけなので、
-// 現状は空 = tests/ 配下の全ファイルが reporter に現れることを要求する。
-const KNOWN_UNREPORTED_FILES = [];
+// 通常は空 = tests/ 配下の全ファイルが reporter に現れることを要求する。
+// Lua 実行系を除外したときだけ、その一覧を allowlist にする (別 job で必ず走るので欠けではない)。
+const KNOWN_UNREPORTED_FILES = skipLuaReal ? LUA_REAL_TEST_FILES : [];
 
 const tmp = mkdtempSync(join(tmpdir(), 'vitest-out-'));
 const jsonOut = join(tmp, 'result.json');
@@ -60,8 +67,14 @@ const args = [
   '--reporter=default',
   '--reporter=json',
   `--outputFile=${jsonOut}`,
+  ...(skipLuaReal && extraArgs.length === 0
+    ? LUA_REAL_TEST_FILES.flatMap((f) => ['--exclude', f])
+    : []),
   ...extraArgs,
 ];
+if (skipLuaReal && extraArgs.length === 0) {
+  console.log(`[run-tests] SKIP_LUA_REAL=1: ${LUA_REAL_TEST_FILES.length} 件の Lua 実行系 test は lua-real job に委ねる`);
+}
 
 const child = spawn('node', args, { stdio: 'inherit' });
 
