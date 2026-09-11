@@ -861,6 +861,9 @@
     "changeButton": "変更"
   },
   "HandleClaim": {
+    "connectFirst": "まずウォレットを接続してください。接続後にサインインして取得できます。",
+    "statusConnected": "接続済み: {address}。取得にはサインインが必要です。",
+    "statusSignedIn": "サインイン済み: {address}",
     "title": "恒久リンク (@handle)",
     "description": "覚えやすい固定リンク。受取先や金額を変えてもリンクは不変です。",
     "needReceiver": "先に受取先を設定すると取得できます。",
@@ -978,6 +981,7 @@
     "embedToggle": "埋め込み表示"
   },
   "CreatorStoreSeller": {
+    "connectFirst": "まずウォレットを接続してください。接続後にログインして管理できます。",
     "heading": "デジタル商品",
     "intro": "URL やテキストを商品として登録し、あなたの @handle ページに並べます。商品本文は購入者への提供用に OpenPay が保管します。",
     "signInPrompt": "商品の登録と販売者情報の管理には、ウォレットでのログインが必要です。",

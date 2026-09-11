@@ -1,7 +1,7 @@
 'use client';
 
 // @handle 恒久リンクの取得 UI。NEXT_PUBLIC_ENABLE_HANDLES OFF では何も描画しない。
-// StepCard ① の中身として描画される (枠と見出しは StepCard が提供)。
+// StepCard ② の中身として描画される (枠と見出しは StepCard が提供)。
 // SIWE サインイン → 取得済み一覧 (編集/削除) → handle 入力 + 空き確認 →
 // 現在のプロフィール設定を publish。親 (HandleProfileBuilder) が純関数で canonical 化した
 // payload (config+profile) を受け取る (受取先/方法 未確定なら payload=null)。
@@ -15,6 +15,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '@/lib/env';
+import { useAccount } from 'wagmi';
+import { ConnectButton } from '@/components/ConnectButton';
+import { shortAddress } from '@/lib/format';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrigin } from '@/hooks/useOrigin';
 import {
@@ -195,6 +198,7 @@ export function HandleClaimPanel({
   /** 公開成功後、mutation 変数の送信 snapshot を親の baseline にする。 */
   onPublished?: (snapshot: PublishedHandleSnapshot) => void;
 }) {
+  const { isConnected, address } = useAccount();
   const t = useTranslations('HandleClaim');
   const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } =
     useSiweSession();
@@ -373,20 +377,37 @@ export function HandleClaimPanel({
       {!isSignedIn ? (
         // サインインは config の有無に関わらず出す (既存 handle の編集/削除を受取先未設定でも到達可能に)。
         <div className="mt-3">
-          <button
-            type="button"
-            onClick={() => void signIn(t('signInStatement')).catch(() => {})}
-            disabled={isSigningIn}
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-40"
-          >
-            {isSigningIn ? t('signingIn') : t('signInButton')}
-          </button>
-          {signInError && (
-            <p className="mt-2 text-xs text-red-600">{t('signInError')}</p>
+          {isConnected && address ? (
+            <>
+              <p className="mb-2 text-xs text-slate-500">
+                {t('statusConnected', { address: shortAddress(address) })}
+              </p>
+              <button
+                type="button"
+                onClick={() => void signIn(t('signInStatement')).catch(() => {})}
+                disabled={isSigningIn}
+                className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-40"
+              >
+                {isSigningIn ? t('signingIn') : t('signInButton')}
+              </button>
+              {signInError && (
+                <p className="mt-2 text-xs text-red-600">{t('signInError')}</p>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-xs text-slate-500">{t('connectFirst')}</p>
+              <ConnectButton />
+            </div>
           )}
         </div>
       ) : (
         <div className="mt-3 space-y-3">
+          {sessionAddress && (
+            <p className="text-xs text-slate-500">
+              {t('statusSignedIn', { address: shortAddress(sessionAddress) })}
+            </p>
+          )}
           {/* 一覧の読み込み失敗は隠さない (KV 障害を「0件」と誤認させない)。 */}
           {mine.isError && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">

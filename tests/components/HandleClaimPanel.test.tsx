@@ -5,7 +5,7 @@ import { renderWithIntl } from '../_helpers/i18n';
 import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
 
 // env フラグ / SIWE 状態を制御する hoisted state。
-const h = vi.hoisted(() => ({ enableHandles: true, isSignedIn: false }));
+const h = vi.hoisted(() => ({ enableHandles: true, isSignedIn: false, isConnected: true, walletAddress: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' as string | undefined, signInError: null as string | null }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -19,6 +19,13 @@ vi.mock('@/lib/env', async (importOriginal) => {
   };
 });
 vi.mock('@/hooks/useOrigin', () => ({ useOrigin: () => 'https://test.local' }));
+vi.mock('wagmi', () => ({
+  useAccount: () => ({ isConnected: h.isConnected, address: h.walletAddress }),
+}));
+vi.mock('@/components/ConnectButton', () => ({
+  ConnectButton: () => <button type="button">Connect wallet</button>,
+}));
+
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({
     isSignedIn: h.isSignedIn,
@@ -27,7 +34,7 @@ vi.mock('@/hooks/useSiweSession', () => ({
       : null,
     signIn: vi.fn(),
     isSigningIn: false,
-    signInError: null,
+    signInError: h.signInError,
   }),
 }));
 
@@ -83,6 +90,9 @@ function stubMine(
 }
 
 beforeEach(() => {
+  h.isConnected = true;
+  h.walletAddress = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+  h.signInError = null;
   h.enableHandles = true;
   h.isSignedIn = false;
 });
@@ -92,6 +102,21 @@ afterEach(() => {
 });
 
 describe('HandleClaimPanel', () => {
+  it.each([
+    [false, '0x52d4901142e2B5680027da5EB47C86CB02a3cA81'],
+    [true, undefined],
+  ])('未接続またはアドレス未確定では接続導線を表示し、サインインエラーを隠す (%s, %s)', (connected, address) => {
+    h.isSignedIn = false;
+    h.isConnected = connected;
+    h.walletAddress = address;
+    h.signInError = 'wallet_not_connected';
+    renderPanel(null);
+    expect(screen.getByText('まずウォレットを接続してください。接続後にサインインして取得できます。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'サインインして取得' })).not.toBeInTheDocument();
+    expect(screen.queryByText('サインインに失敗しました。')).not.toBeInTheDocument();
+  });
+
   it('flag OFF → 何も描画しない (inert)', () => {
     h.enableHandles = false;
     const { container } = renderPanel(CONFIG);
@@ -104,6 +129,19 @@ describe('HandleClaimPanel', () => {
     expect(
       screen.getByRole('button', { name: 'サインインして取得' }),
     ).toBeInTheDocument();
+  });
+
+  it('接続済みの状態を短縮アドレスとともに表示する', () => {
+    renderPanel(null);
+    expect(screen.getByText('接続済み: 0x52d4…cA81。取得にはサインインが必要です。')).toBeInTheDocument();
+  });
+
+  it('サインイン済みの状態にはウォレットではなくセッションのアドレスを表示する', () => {
+    h.isSignedIn = true;
+    h.walletAddress = '0x000000000000000000000000000000000000dead';
+    stubMine([]);
+    renderPanel(CONFIG);
+    expect(screen.getByText('サインイン済み: 0x52d4…cA81')).toBeInTheDocument();
   });
 
   it('flag ON + config あり + 未サインイン → サインインボタン', () => {

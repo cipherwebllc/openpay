@@ -27,6 +27,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
     },
   };
 });
+vi.mock('@/components/ConnectButton', () => ({
+  ConnectButton: () => <button type="button">Connect wallet</button>,
+}));
 vi.mock('wagmi', () => ({
   useAccount: () => ({ address: h.connectedAddress }),
 }));
@@ -322,12 +325,16 @@ describe('HandleProfileBuilder', () => {
     expect(screen.getByText('プレビュー')).toBeInTheDocument();
   });
 
-  it('4 ステップの番号見出しを描画する (① 恒久リンク / ② 受取先 / ③ プロフィール / ④ プレビュー)', () => {
+  it('4 ステップの番号見出しを描画する (① 受取先 / ② 恒久リンク / ③ プロフィール / ④ プレビュー)', () => {
     renderWithIntl(<HandleProfileBuilder />);
+    const headings = Array.from(document.querySelectorAll('[id^="step-"][id$="-heading"]'));
+    expect(headings.map((heading) => heading.id)).toEqual([
+      'step-1-heading', 'step-2-heading', 'step-3-heading', 'step-4-heading',
+    ]);
     // StepCard は section[aria-labelledby=step-N-heading] + 見出し内に番号 badge + title。
     for (const [step, title] of [
-      [1, '恒久リンク (@handle)'],
-      [2, '受取先'],
+      [1, '受取先'],
+      [2, '恒久リンク (@handle)'],
       [3, 'プロフィール'],
       [4, 'プレビュー'],
     ] as const) {
@@ -338,16 +345,16 @@ describe('HandleProfileBuilder', () => {
     }
   });
 
-  it('表示名・テーマ色入力は ③ プロフィール step に置かれる (② 受取先 ではない)', () => {
+  it('表示名・テーマ色入力は ③ プロフィール step に置かれる (① 受取先 ではない)', () => {
     renderWithIntl(<HandleProfileBuilder />);
     const step3 = document.getElementById('step-3-body')!;
-    const step2 = document.getElementById('step-2-body')!;
+    const step1 = document.getElementById('step-1-body')!;
     // 表示名 (nameLabel)・テーマ色 (colorLabel) は ③ プロフィール側に存在。
     expect(within(step3).getByText('表示名')).toBeInTheDocument();
     expect(within(step3).getByText('テーマ色')).toBeInTheDocument();
     // 受取先 step には表示名/テーマ色を置かない。
-    expect(within(step2).queryByText('表示名')).not.toBeInTheDocument();
-    expect(within(step2).queryByText('テーマ色')).not.toBeInTheDocument();
+    expect(within(step1).queryByText('表示名')).not.toBeInTheDocument();
+    expect(within(step1).queryByText('テーマ色')).not.toBeInTheDocument();
   });
 
   it('金額プリセット editor は描画されない (UI 非表示・config 導出は温存)', () => {
