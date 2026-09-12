@@ -132,13 +132,6 @@ export function CreatorStorefrontSection({
                   >
                     {product.title}
                   </h3>
-                  <span
-                    className={`mt-0.5 block text-[11px] font-semibold uppercase tracking-wide ${
-                      inverted ? 'text-white/70' : 'text-slate-500'
-                    }`}
-                  >
-                    {t(`labels.${product.label}`)}
-                  </span>
                   {product.desc ? (
                     <p
                       className={`mt-1.5 line-clamp-2 text-sm leading-relaxed ${
@@ -151,6 +144,15 @@ export function CreatorStorefrontSection({
                   <CreatorStoreDeliveryBadge protectedDelivery={product.protectedDelivery} />
                   <CreatorStoreLicenseDetails product={product} variant="card" />
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <span
+                      className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                        inverted
+                          ? 'bg-white/15 text-white'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      {t(`labels.${product.label}`)}
+                    </span>
                     <span
                       className={`flex items-center gap-1 rounded-full px-2 py-1 text-xs font-bold ${
                         inverted
