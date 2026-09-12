@@ -32,6 +32,7 @@ import {
 } from '@/hooks/useHandleProfileDraft';
 import {
   handlePreviewBackground,
+  handleFontFamily,
 } from '@/lib/handleTheme';
 import { useOrigin } from '@/hooks/useOrigin';
 import { getPublicHandleUrl } from '@/lib/publicHandleUrl';
@@ -40,6 +41,8 @@ import { useDragReorderList } from '@/hooks/useDragReorderList';
 import { COLOR_PATTERN } from '@/lib/url';
 import {
   isHandleEmbedUrl,
+  HANDLE_FONTS,
+  HANDLE_LINK_LAYOUTS,
   MAX_LINK_IMAGE_URL_LEN,
   MAX_BIO_LEN,
   MAX_PROFILE_EMBEDS,
@@ -351,6 +354,8 @@ export function HandleProfileBuilder({
       bio: p?.bio ?? '',
       avatar: p?.avatar ?? '',
       cover: p?.cover ?? '',
+      font: p?.font ?? DEFAULT_PROFILE_DRAFT.font,
+      linkLayout: p?.linkLayout ?? DEFAULT_PROFILE_DRAFT.linkLayout,
       socials: p?.socials ?? [],
       links: stripResolvedEmbedsForDraft(p?.links),
       theme: p?.theme ?? DEFAULT_PROFILE_DRAFT.theme,
@@ -446,7 +451,7 @@ export function HandleProfileBuilder({
             >
               <div
                 className="relative flex h-14 items-center gap-3 px-3"
-                style={previewBg ? { background: previewBg } : undefined}
+                style={{ background: previewBg, fontFamily: handleFontFamily(draft.font) }}
               >
                 {profile.cover && <MiniPreviewCover key={profile.cover} url={profile.cover} />}
                 <div
@@ -571,6 +576,18 @@ export function HandleProfileBuilder({
                   />
                 </div>
               </Field>
+              <fieldset>
+                <legend className="text-sm font-medium text-slate-700">{t('fontLabel')}</legend>
+                <div className="mt-1 grid grid-cols-3 gap-2">
+                  {HANDLE_FONTS.map((font) => (
+                    <label key={font} className={`relative flex cursor-pointer flex-col items-center gap-1 rounded-lg border p-1.5 transition ${draft.font === font ? 'border-brand ring-2 ring-brand/40' : 'border-slate-200 hover:border-slate-300'}`}>
+                      <input type="radio" name="profile-font" value={font} checked={draft.font === font} onChange={() => update({ font })} className="peer sr-only" />
+                      <span aria-hidden className="flex h-9 w-full items-center justify-center rounded-md bg-slate-50 peer-focus-visible:ring-2 peer-focus-visible:ring-brand" style={{ fontFamily: handleFontFamily(font) }}>あア Aa</span>
+                      <span className={`text-xs font-medium ${draft.font === font ? 'text-brand' : 'text-slate-600'}`}>{t(`fonts.${font}`)}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
               <Field
                 label={t('bioLabel')}
                 hint={`${draft.bio.trim().length}/${MAX_BIO_LEN}`}
@@ -659,6 +676,17 @@ export function HandleProfileBuilder({
                 </div>
                 </Field>
                 <FieldGroup label={t('linksLabel')} hint={t('httpsOnlyHint')}>
+                  <fieldset className="mb-3">
+                    <legend className="text-sm font-medium text-slate-700">{t('linkLayoutLabel')}</legend>
+                    <div className="mt-1 flex gap-2">
+                      {HANDLE_LINK_LAYOUTS.map((linkLayout) => (
+                        <label key={linkLayout} className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-lg border px-3 text-xs ${draft.linkLayout === linkLayout ? 'border-brand text-brand' : 'border-slate-200 text-slate-600'}`}>
+                          <input type="radio" name="profile-link-layout" value={linkLayout} checked={draft.linkLayout === linkLayout} onChange={() => update({ linkLayout })} />
+                          {t(`linkLayouts.${linkLayout}`)}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
                   <div className="space-y-2">
                     {draft.links.map((l, i) => (
                       <ReorderableRow

@@ -8,6 +8,10 @@ import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX } from '@/lib/url';
 import { DEFAULT_TIP_PRESETS } from '@/lib/url';
 import {
   isHandleEmbedUrl,
+  isHandleFont,
+  isHandleLinkLayout,
+  type HandleFont,
+  type HandleLinkLayout,
   MAX_LINK_IMAGE_URL_LEN,
   MAX_PROFILE_EMBEDS,
   MAX_PROFILE_LINKS,
@@ -52,6 +56,8 @@ export interface HandleProfileDraft {
   bio: string;
   avatar: string;
   cover: string;
+  font: HandleFont;
+  linkLayout: HandleLinkLayout;
   socials: string[]; // SNS プロフィール URL (アイコンはドメイン自動判定)
   links: DraftLink[];
   // 着せ替えテーマ (clean 既定)。公開ページ/プレビューの見た目を切替える。
@@ -76,6 +82,8 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
   bio: '',
   avatar: '',
   cover: '',
+  font: 'sans',
+  linkLayout: 'list',
   socials: [],
   links: [],
   theme: 'clean',
@@ -183,6 +191,8 @@ function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
     bio: str(loaded.bio, ''),
     avatar: str(loaded.avatar, ''),
     cover: str(loaded.cover, ''),
+    font: isHandleFont(loaded.font) ? loaded.font : 'sans',
+    linkLayout: isHandleLinkLayout(loaded.linkLayout) ? loaded.linkLayout : 'list',
     socials: sanitizeSocials(loaded.socials),
     links: sanitizeLinks(loaded.links),
     theme: resolveHandleTheme(loaded.theme),

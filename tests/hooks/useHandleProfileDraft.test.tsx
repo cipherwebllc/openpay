@@ -14,6 +14,23 @@ describe('useHandleProfileDraft', () => {
     window.localStorage.clear();
   });
 
+
+  it.each(['serif', 'rounded'] as const)('persists and restores %s/grid', async (font) => {
+    const first = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(first.result.current.hydrated).toBe(true));
+    act(() => first.result.current.setSettings((current) => ({ ...current, font, linkLayout: 'grid' })));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')).toMatchObject({ font, linkLayout: 'grid' }));
+    first.unmount();
+    const restored = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(restored.result.current.hydrated).toBe(true));
+    expect(restored.result.current.settings).toMatchObject({ font, linkLayout: 'grid' });
+  });
+  it.each([{}, { font: 'invalid', linkLayout: 'invalid' }, { font: null, linkLayout: 42 }])('restores legacy/invalid enums as defaults %j', async (loaded) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
+    const { result } = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings).toMatchObject({ font: 'sans', linkLayout: 'list' });
+  });
   it('saves, reloads and resets cover exactly like avatar', async () => {
     const first = renderHook(() => useHandleProfileDraft());
     await waitFor(() => expect(first.result.current.hydrated).toBe(true));

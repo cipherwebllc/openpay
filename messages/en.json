@@ -913,6 +913,17 @@
     "releaseModalCancel": "Cancel"
   },
   "HandleProfile": {
+    "fontLabel": "Font",
+    "fonts": {
+      "sans": "Standard",
+      "serif": "Serif",
+      "rounded": "Rounded"
+    },
+    "linkLayoutLabel": "Link layout",
+    "linkLayouts": {
+      "list": "List",
+      "grid": "Two columns"
+    },
     "miniPreviewJump": "Preview",
     "supportHeading": "Support",
     "supportSubtext": "The full amount goes directly to the creator.",

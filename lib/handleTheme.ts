@@ -10,6 +10,7 @@
 //   - アクセント色 (config.color = `#rrggbb`) と 6 テーマは自由に組合せ可。alpha は 8 桁 hex 付与。
 
 import type { CSSProperties } from 'react';
+import type { HandleFont } from '@/lib/handle';
 import {
   HANDLE_THEMES,
   isHandleTheme,
@@ -239,3 +240,14 @@ export {
   tipFormTheme,
 } from '@/lib/tipFormTheme';
 export type { TipFormTheme } from '@/lib/tipFormTheme';
+
+export function handleFontFamily(font: HandleFont | undefined): string | undefined {
+  switch (font) {
+    case 'serif':
+      return '"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", Georgia, serif';
+    case 'rounded':
+      return '"Hiragino Maru Gothic ProN", "BIZ UDPGothic", "Yu Gothic", system-ui, sans-serif';
+    default:
+      return undefined;
+  }
+}

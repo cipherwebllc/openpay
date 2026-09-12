@@ -6,6 +6,7 @@ import {
   ReceiveMethodPicker,
   methodLabel,
 } from '@/components/ReceiveMethodPicker';
+import { handleFontFamily } from '@/lib/handleTheme';
 import type { HandleTipConfig } from '@/lib/handle';
 
 // TipForm は wagmi/relay 依存で重いのでスタブ化 (選択された method の token:chain を出すだけ)。
@@ -50,6 +51,29 @@ describe('methodLabel', () => {
 });
 
 describe('HandleProfileView', () => {
+  it.each([undefined, 'list', 'grid'] as const)('renders layout %s with full-width headings and embeds only in grid', (linkLayout) => {
+    renderWithIntl(<HandleProfileView config={multiConfig} profile={{ linkLayout, links: [
+      { kind: 'heading', label: 'Projects' },
+      { label: 'Site', url: 'https://example.com' },
+      { label: 'Video', url: 'https://youtu.be/dQw4w9WgXcQ', embed: true },
+    ] }} />);
+    expect(screen.getByRole('list').className).toBe(linkLayout === 'grid' ? 'mt-7 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2' : 'mt-7 flex w-full flex-col gap-2.5');
+    for (const row of [screen.getByRole('heading', { name: 'Projects' }).closest('li')!, screen.getByTitle('Video').closest('li')!]) {
+      if (linkLayout === 'grid') expect(row).toHaveClass('sm:col-span-2');
+      else expect(row).not.toHaveAttribute('class');
+    }
+    expect(screen.getByRole('link', { name: 'Site' }).closest('li')).not.toHaveAttribute('class');
+  });
+  it.each([undefined, 'sans', 'serif', 'rounded'] as const)('applies only non-default root font %s', (font) => {
+    const { container } = renderWithIntl(<HandleProfileView config={multiConfig} profile={{ font }} />);
+    const root = container.firstElementChild as HTMLElement;
+    if (font === 'serif' || font === 'rounded') expect(root).toHaveStyle({ fontFamily: handleFontFamily(font) });
+    else {
+      expect(root.style.fontFamily).toBe('');
+      expect(root).not.toHaveAttribute('style');
+    }
+  });
+
   it('keeps the original root and avatar DOM when cover is absent', () => {
     const { container } = renderWithIntl(<HandleProfileView config={multiConfig} profile={{}} />);
     const root = container.firstElementChild!;

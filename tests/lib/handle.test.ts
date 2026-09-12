@@ -564,6 +564,20 @@ describe('extractHandleEmbed', () => {
 });
 
 describe('validateProfile', () => {
+  it.each(['sans', 'serif', 'rounded'])('accepts font %s', (font) => {
+    expect(validateProfile({ font })).toEqual({ ok: true, profile: { font } });
+  });
+  it.each(['list', 'grid'])('accepts layout %s', (linkLayout) => {
+    expect(validateProfile({ linkLayout })).toEqual({ ok: true, profile: { linkLayout } });
+  });
+  it.each([undefined, null, '', '   '])('keeps empty enums %j unset', (value) => {
+    expect(validateProfile({ font: value, linkLayout: value })).toEqual({ ok: true, profile: {} });
+  });
+  it.each(['SANS', ' serif ', 'unknown', 42, false, {}, []])('rejects enum boundary %j', (value) => {
+    expect(validateProfile({ font: value })).toEqual({ ok: false, error: 'font must be one of sans, serif, rounded' });
+    expect(validateProfile({ linkLayout: value })).toEqual({ ok: false, error: 'linkLayout must be one of list, grid' });
+  });
+
   it.each([undefined, null, '', '   '])('treats empty cover %s as unset', (cover) => {
     expect(validateProfile({ cover })).toEqual({ ok: true, profile: {} });
   });
@@ -1008,6 +1022,16 @@ describe('parseHandleRecord', () => {
       expect(parseHandleRecord(JSON.stringify({ ...good, profile: { ...good.profile, cover } }))).toEqual(good);
     },
   );
+
+  it.each([undefined, null, '', ' ', 'invalid', 42, false, {}, []])('ignores invalid stored enums %j', (value) => {
+    expect(parseHandleRecord(JSON.stringify({ ...good, profile: { ...good.profile, font: value, linkLayout: value } }))).toEqual(good);
+  });
+  it.each(['sans', 'serif', 'rounded'] as const)('round-trips stored font %s and both layouts', (font) => {
+    for (const linkLayout of ['list', 'grid'] as const) {
+      const record = { ...good, profile: { ...good.profile, font, linkLayout } };
+      expect(parseHandleRecord(serializeHandleRecord(record))).toEqual(record);
+    }
+  });
   it('round-trips stored cover and trims whitespace', () => {
     const cover = 'https://example.com/' + 'a'.repeat(512 - 'https://example.com/'.length);
     const record = { ...good, profile: { ...good.profile, cover } };

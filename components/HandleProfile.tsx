@@ -22,7 +22,7 @@ import {
   type HandleProfile,
   type HandleTipConfig,
 } from '@/lib/handle';
-import { handleViewTheme, resolveHandleTheme } from '@/lib/handleTheme';
+import { handleFontFamily, handleViewTheme, resolveHandleTheme } from '@/lib/handleTheme';
 
 const DEFAULT_ACCENT = '#2563eb';
 
@@ -119,7 +119,7 @@ export function HandleProfileView({
   const links = profile.links ?? [];
 
   return (
-    <div className="flex flex-col items-center text-center">
+    <div className="flex flex-col items-center text-center" style={{ fontFamily: handleFontFamily(profile.font) }}>
       {showCover && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
@@ -192,11 +192,11 @@ export function HandleProfileView({
       )}
 
       {links.length > 0 && (
-        <ul className="mt-7 flex w-full flex-col gap-2.5">
+        <ul className={profile.linkLayout === 'grid' ? 'mt-7 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2' : 'mt-7 flex w-full flex-col gap-2.5'}>
           {links.map((l, i) => {
             if (l.kind === 'heading') {
               return (
-                <li key={`heading-${l.label}-${i}`}>
+                <li key={`heading-${l.label}-${i}`} className={profile.linkLayout === 'grid' ? 'sm:col-span-2' : undefined}>
                   <h2
                     className={isClean ? CLEAN_HEADING_CLASS : HEADING_BASE}
                     style={
@@ -221,7 +221,7 @@ export function HandleProfileView({
                 : null;
             if (embed) {
               return (
-                <li key={`${l.url}-${i}`}>
+                <li key={`${l.url}-${i}`} className={profile.linkLayout === 'grid' ? 'sm:col-span-2' : undefined}>
                   <div
                     className={
                       isClean ? CLEAN_EMBED_CARD_CLASS : EMBED_CARD_BASE
