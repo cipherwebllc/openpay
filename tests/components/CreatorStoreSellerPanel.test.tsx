@@ -109,6 +109,63 @@ beforeEach(() => {
 });
 
 describe('CreatorStoreSellerPanel', () => {
+  it.each([
+    ['pdf', 'url'],
+    ['prompt', 'text'],
+    ['api', 'text'],
+  ])('配布形式 %s を保存し、種別の切替でも本文を保持する', async (format, contentKind) => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/store/seller') return response({ ok: true, seller: null });
+      if (init?.method === 'POST') return response({ ok: true, product: {} });
+      return response({ ok: true, products: [], max: 12 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel();
+    const select = await screen.findByRole('combobox', { name: '配布形式' });
+    expect(select).toHaveValue('download');
+    expect(within(select).getAllByRole('option')).toHaveLength(6);
+    fireEvent.change(screen.getByLabelText('商品名'), { target: { value: '商品' } });
+    fireEvent.change(screen.getByLabelText('価格 (JPYC)'), { target: { value: '500' } });
+    const content = document.getElementById('creator-store-product-content')!;
+    fireEvent.change(content, { target: { value: 'https://example.com/content' } });
+    fireEvent.change(select, { target: { value: format } });
+    expect(document.getElementById('creator-store-product-content')).toHaveValue('https://example.com/content');
+    fireEvent.submit(screen.getByLabelText('商品名').closest('form')!);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
+    const request = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ contentKind, label: format, content: 'https://example.com/content' });
+  });
+
+  it('既存の不一致な組合せはその他として保持し、明示選択でのみ変更する', async () => {
+    const product = { id: 'h_other', payTo: ADDRESS, title: '既存商品', priceJpyc: '500', contentKind: 'text', label: 'download', saleActive: false, contentAvailable: true };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/store/seller') return response({ ok: true, seller: null });
+      if (init?.method === 'PATCH') return response({ ok: true, product });
+      if (url === '/api/store/products/h_other') return response({ ok: true, product, content: { kind: 'text', value: '既存本文' } });
+      return response({ ok: true, products: [product], max: 12 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    await screen.findByRole('heading', { name: '商品を編集' });
+    const select = screen.getByRole('combobox', { name: '配布形式' });
+    const other = within(select).getByRole('option', { name: 'その他 (現在: テキスト / ダウンロード)' });
+    expect(other).toBeEnabled();
+    expect(other).toHaveProperty('selected', true);
+    fireEvent.change(select, { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('商品名'), { target: { value: '名前だけ変更' } });
+    fireEvent.submit(screen.getByLabelText('商品名').closest('form')!);
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '配布形式' })).toHaveValue('download'));
+    const request = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH');
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ contentKind: 'text', label: 'download', content: '既存本文' });
+    fireEvent.click(screen.getByRole('button', { name: '編集' }));
+    await screen.findByRole('heading', { name: '商品を編集' });
+    fireEvent.change(screen.getByRole('combobox', { name: '配布形式' }), { target: { value: 'api' } });
+    expect(within(screen.getByRole('combobox', { name: '配布形式' })).queryByRole('option', { name: /その他/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: '配布形式' })).toHaveValue('api');
+    expect(document.getElementById('creator-store-product-content')).toHaveValue('既存本文');
+  });
+
   it('新規商品の見せ方は閉じ、既存商品の編集では開く', async () => {
     const product: Product = {
       id: 'h_' + 'a'.repeat(32),
@@ -138,7 +195,7 @@ describe('CreatorStoreSellerPanel', () => {
       expect(field).not.toBeRequired();
       expect(field.closest('form')).toBe(screen.getByLabelText('商品名').closest('form'));
     }
-    expect(details.querySelectorAll('input, select, textarea')).toHaveLength(6);
+    expect(details.querySelectorAll('input, select, textarea')).toHaveLength(5);
     fireEvent.click(summary);
     expect(screen.getByLabelText('画像 URL (任意)')).toBeVisible();
     fireEvent.click(summary);
@@ -869,6 +926,7 @@ describe('利用ライセンスの出品', () => {
   }
   async function fill(custom = true) {
     fireEvent.click(await screen.findByRole('radio', { name: '利用ライセンス NFT' }));
+    expect(screen.queryByLabelText('配布形式')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('ライセンス名'), { target: { value: 'API ライセンス' } });
     fireEvent.change(screen.getByLabelText('販売数（1〜10,000）'), { target: { value: '10' } });
     fireEvent.change(screen.getByLabelText('価格（JPYC・1,000 以上）'), { target: { value: '1000' } });
@@ -877,6 +935,18 @@ describe('利用ライセンスの出品', () => {
       fireEvent.change(screen.getByLabelText('利用条件 URL（https）'), { target: { value: 'https://example.com/terms' } });
     }
   }
+  it.each([false, true])('ライセンス商品の配布形式は表示しない (editing=%s)', async (editing) => {
+    setup(editing ? 'registered' : undefined);
+    renderPanel();
+    if (editing) {
+      fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+      await screen.findByRole('heading', { name: '商品を編集' });
+    } else {
+      fireEvent.click(await screen.findByRole('radio', { name: '利用ライセンス NFT' }));
+    }
+    expect(screen.queryByLabelText('配布形式')).not.toBeInTheDocument();
+  });
+
   it('既定の標準条件は URL/version を送らず、切替後の独自条件も送信しない', async () => {
     const fetchMock = setup(); renderPanel(); await fill(false);
     const group = screen.getByRole('group', { name: '利用条件' });
