@@ -7,6 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { cloneElement, type CSSProperties, type ReactElement } from 'react';
 import { hexToRgba, type OgCardModel } from '@/lib/ogTipCard';
 
 export const OG_WIDTH = 1200;
@@ -40,12 +41,13 @@ const ICON_DATA_URL = `data:image/png;base64,${iconBuf.toString('base64')}`;
 export function ogCardElement(
   m: OgCardModel,
   avatarDataUrl?: string | null,
+  coverDataUrl?: string | null,
 ): React.ReactElement {
   const glowTop = hexToRgba(m.accent, 0.45);
   const glowBottom = hexToRgba(m.accent, 0.25);
   const chipBg = hexToRgba(m.accent, 0.14);
   const theme = m.themeStyle;
-  return (
+  const element = (
     <div
       style={{
         height: '100%',
@@ -230,5 +232,42 @@ export function ogCardElement(
         </div>
       </div>
     </div>
+  );
+  // cover 無しは従来の JSX をそのまま返し、店舗/商品/汎用カードにも変更を波及させない。
+  if (!coverDataUrl) return element;
+
+  const foreground = element.props.children as ReactElement<{ style: CSSProperties }>[];
+  // satori は style の値に undefined があると CSS 変換で throw する (`.trim()`) ため、
+  // グロー (backgroundImage) はキーごと外す (undefined を代入しない)。
+  const { backgroundImage: _glow, ...baseStyle } = element.props.style as CSSProperties;
+  void _glow;
+  return cloneElement(
+    element,
+    {
+      style: {
+        ...baseStyle,
+        position: 'relative',
+      },
+    },
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={coverDataUrl}
+      alt=""
+      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+    />,
+    <div
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '100%',
+        backgroundImage: 'linear-gradient(180deg, rgba(11,18,32,0.55), rgba(11,18,32,0.75))',
+      }}
+    />,
+    // 白パネルとブランド行を背景レイヤより前面に置く。
+    ...foreground.map((child) => cloneElement(child, {
+      style: { ...child.props.style, position: 'relative' },
+    })),
   );
 }
