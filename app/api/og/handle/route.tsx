@@ -194,11 +194,12 @@ export async function GET(req: Request): Promise<ImageResponse> {
     tokenLabels: tokenLabelsOf(record),
     locale,
   });
-  const avatar = record.profile?.avatar
-    ? await fetchAvatarDataUrl(record.profile.avatar)
-    : null;
+  const [avatar, cover] = await Promise.all([
+    record.profile?.avatar ? fetchAvatarDataUrl(record.profile.avatar) : null,
+    record.profile?.cover ? fetchAvatarDataUrl(record.profile.cover) : null,
+  ]);
 
-  return new ImageResponse(ogCardElement(card, avatar), {
+  return new ImageResponse(ogCardElement(card, avatar, cover), {
     width: OG_WIDTH,
     height: OG_HEIGHT,
     fonts: OG_FONTS,

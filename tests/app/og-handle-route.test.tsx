@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { ReactElement } from 'react';
+import type { CSSProperties, ReactElement } from 'react';
 
 // next/og の ImageResponse は Satori + wasm を要するため、描画せず引数を捕捉する軽量
 // モックに差し替え、route の配線 (KV 解決 → モデル → 要素 / avatar fetch / fallback) を
@@ -72,6 +72,8 @@ vi.mock('@/lib/x402/hostedStore', () => ({
 }));
 
 import { GET } from '@/app/api/og/handle/route';
+import { ogCardElement } from '@/app/api/og/_card';
+import { buildHandleOgModel } from '@/lib/ogTipCard';
 
 function collectText(node: unknown): string[] {
   if (typeof node === 'string') return [node];
@@ -161,6 +163,65 @@ afterEach(() => {
 });
 
 describe('GET /api/og/handle', () => {
+  it('cover と avatar を並列取得し data URL で ImageResponse を生成する', async () => {
+    const coverUrl = 'https://cdn.example.com/cover.png';
+    h.record = { ...RECORD, profile: { ...RECORD.profile, cover: coverUrl } };
+    let finishAvatar!: (response: Response) => void;
+    ssrf.fetchSafe.mockImplementation((url: string) => {
+      if (url === RECORD.profile.avatar) {
+        return new Promise<Response>((resolve) => { finishAvatar = resolve; });
+      }
+      return Promise.resolve(new Response(new Uint8Array([1, 2, 3]), {
+        headers: { 'content-type': 'image/png' },
+      }));
+    });
+    const pending = callGet('h=masia&locale=ja');
+    try {
+      await vi.waitFor(() => expect(ssrf.fetchSafe).toHaveBeenCalledTimes(2));
+    } finally {
+      finishAvatar(new Response(new Uint8Array([137, 80, 78, 71]), {
+        headers: { 'content-type': 'image/png' },
+      }));
+    }
+    const { element, options } = await pending;
+    expect(ssrf.fetchSafe).toHaveBeenCalledWith(coverUrl, {
+      redirect: 'error', timeoutMs: 3000, userAgent: 'OpenPay-og-avatar/1.0',
+    });
+    expect(collectImgSrcs(element)).toEqual([
+      'data:image/png;base64,AQID',
+      'data:image/png;base64,iVBORw==',
+      expect.stringContaining('data:image/png;base64,'),
+    ]);
+    expect(ctorCalls).toHaveLength(1);
+    expect(options.status ?? 200).toBe(200);
+    expect(options).toMatchObject({ width: 1200, height: 630 });
+  });
+
+  it('cover fetch が null でも 200 で cover 無しの従来カードを返す', async () => {
+    ssrf.fetchSafe.mockResolvedValue(null);
+    const baseline = await callGet('h=masia');
+    const coverUrl = 'https://cdn.example.com/cover.png';
+    h.record = { ...RECORD, profile: { ...RECORD.profile, cover: coverUrl } };
+    const result = await callGet('h=masia');
+    expect(ssrf.fetchSafe).toHaveBeenCalledWith(coverUrl, expect.any(Object));
+    expect(result.options.status ?? 200).toBe(200);
+    expect(result).toEqual(baseline);
+  });
+
+  it('http の cover は fetch せず従来カードを返す', async () => {
+    ssrf.fetchSafe.mockResolvedValue(null);
+    const baseline = await callGet('h=masia');
+    ssrf.fetchSafe.mockClear();
+    h.record = {
+      ...RECORD,
+      profile: { ...RECORD.profile, cover: 'http://cdn.example.com/cover.png' },
+    };
+    const result = await callGet('h=masia');
+    expect(ssrf.fetchSafe).toHaveBeenCalledTimes(1);
+    expect(ssrf.fetchSafe).toHaveBeenCalledWith(RECORD.profile.avatar, expect.any(Object));
+    expect(result).toEqual(baseline);
+  });
+
   it('レコードあり: 名前・@handle・bio・ピル + アバター (data URL) を描く', async () => {
     // アバター fetch を画像レスポンスでスタブ
     vi.stubGlobal(
@@ -284,6 +345,7 @@ describe('GET /api/og/handle', () => {
   });
 
   it('有効な商品 deep link は KV 権威の商品カードを描く', async () => {
+    h.record = { ...RECORD, profile: { ...RECORD.profile, cover: 'https://cdn.example.com/cover.png' } };
     const productId = `h_${'a'.repeat(32)}`;
     h.enableCreatorStore = true;
     h.enableCreatorStoreUi = true;
@@ -464,7 +526,7 @@ describe('GET /api/og/handle', () => {
 
   it('storefront 公開 + enableMobileOrder ON: モバイルオーダー店舗カード (店名/ひとこと/JPYC + 店舗アバター)', async () => {
     h.enableMobileOrder = true;
-    h.record = STORE_RECORD;
+    h.record = { ...STORE_RECORD, profile: { ...STORE_RECORD.profile, cover: 'https://cdn.example.com/cover.png' } };
     vi.stubGlobal(
       'fetch',
       vi.fn(async () =>
@@ -486,6 +548,8 @@ describe('GET /api/og/handle', () => {
     // 店舗アバターが data URL の img として描かれる。
     const srcs = collectImgSrcs(element);
     expect(srcs.some((s) => s.startsWith('data:image/png;base64,'))).toBe(true);
+    expect(ssrf.fetchSafe).toHaveBeenCalledTimes(1);
+    expect(ssrf.fetchSafe).toHaveBeenCalledWith(STORE_RECORD.storefront.avatar, expect.any(Object));
   });
 
   it('storefront あっても enableMobileOrder OFF はプロフカード (inert)', async () => {
@@ -553,6 +617,60 @@ describe('GET /api/og/handle', () => {
     );
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(collectImgSrcs(element)).toHaveLength(1);
+  });
+});
+
+describe('ogCardElement cover 背景レイヤ', () => {
+  const model = buildHandleOgModel({
+    handle: 'masia', name: '山田太郎', color: '#2563eb',
+    bio: 'Web3 クリエイター', tokenLabels: ['JPYC'], locale: 'ja',
+  });
+  type CardElement = ReactElement<{ style: CSSProperties; children: CardElement[]; src?: string }>;
+
+  it('cover 無しは従来の背景・白パネル・ブランド行のツリーを保持する', () => {
+    const element = ogCardElement(model) as CardElement;
+    expect(ogCardElement(model, null, null)).toEqual(element);
+    expect(element.props.style).toEqual({
+      height: '100%', width: '100%', display: 'flex', flexDirection: 'column',
+      padding: 52, gap: 28, fontFamily: 'NotoSansJP', backgroundColor: '#0b1220',
+      backgroundImage: 'radial-gradient(circle at 88% -12%, rgba(37, 99, 235, 0.45) 0%, rgba(0,0,0,0) 52%), radial-gradient(circle at -8% 112%, rgba(37, 99, 235, 0.25) 0%, rgba(0,0,0,0) 46%)',
+    });
+    expect(element.props.children).toHaveLength(2);
+    const [panel, footer] = element.props.children;
+    expect(panel.type).toBe('div');
+    expect(panel.props.style).toEqual({
+      flex: 1, display: 'flex', alignItems: 'center', gap: 56,
+      backgroundColor: 'rgba(255,255,255,0.97)', borderRadius: 40,
+      padding: '48px 64px', boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
+    });
+    expect(footer.props.style).toEqual({
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+    });
+    expect(collectImgSrcs(element)).toHaveLength(1);
+  });
+
+  it('cover ありは背景 img・暗色 overlay を先頭に置きグローを消す', () => {
+    const cover = 'data:image/png;base64,AQID';
+    const baseline = ogCardElement(model) as CardElement;
+    const element = ogCardElement(model, null, cover) as CardElement;
+    expect(element.props.style).toEqual({
+      ...baseline.props.style, position: 'relative', backgroundImage: undefined,
+    });
+    expect(element.props.children).toHaveLength(4);
+    const [image, overlay, ...foreground] = element.props.children;
+    const layer = { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' };
+    expect(image.type).toBe('img');
+    expect(image.props.src).toBe(cover);
+    expect(image.props.style).toEqual({ ...layer, objectFit: 'cover' });
+    expect(overlay.type).toBe('div');
+    expect(overlay.props.style).toEqual({
+      ...layer,
+      backgroundImage: 'linear-gradient(180deg, rgba(11,18,32,0.55), rgba(11,18,32,0.75))',
+    });
+    foreground.forEach((child, index) => {
+      expect(child.props.style).toEqual({ ...baseline.props.children[index].props.style, position: 'relative' });
+      expect(child.props.children).toEqual(baseline.props.children[index].props.children);
+    });
   });
 });
 
