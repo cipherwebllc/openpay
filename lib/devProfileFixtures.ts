@@ -20,7 +20,9 @@ export const DEV_FIXTURE_HANDLE_RECORD: HandleRecord = {
   profile: {
     cover: '/landing/usecase-digital-goods.avif',
     bio: '3D 素材と BGM を作っています (dev フィクスチャ)',
-    links: [{ label: 'Portfolio', url: 'https://example.com' }],
+    font: 'rounded',
+    linkLayout: 'grid',
+    links: [{ label: 'Portfolio', url: 'https://example.com' }, { label: 'Blog', url: 'https://example.com/blog' }],
   },
   createdAt: 1754300000000,
   updatedAt: 1754300000000,

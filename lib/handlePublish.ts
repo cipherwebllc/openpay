@@ -6,6 +6,8 @@ import { getAddress, isAddress } from 'viem';
 import type { HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
 import {
   isHandleEmbedUrl,
+  isHandleFont,
+  isHandleLinkLayout,
   MAX_LINK_IMAGE_URL_LEN,
   MAX_PROFILE_EMBEDS,
   MAX_PROFILE_LINKS,
@@ -98,6 +100,8 @@ export function buildPublishProfile(draft: HandleProfileDraft): HandleProfile {
     socials: socials.length > 0 ? socials : undefined,
     links: links.length > 0 ? links : undefined,
     theme: draft.theme,
+    ...(isHandleFont(draft.font) && draft.font !== 'sans' ? { font: draft.font } : {}),
+    ...(isHandleLinkLayout(draft.linkLayout) && draft.linkLayout !== 'list' ? { linkLayout: draft.linkLayout } : {}),
   };
 }
 

@@ -39,6 +39,19 @@ export const MAX_LINK_LABEL_LEN = 40;
 export const MAX_LINK_URL_LEN = 512;
 export const MAX_AVATAR_URL_LEN = 512;
 export const MAX_COVER_URL_LEN = MAX_AVATAR_URL_LEN;
+export const HANDLE_FONTS = ['sans', 'serif', 'rounded'] as const;
+export type HandleFont = (typeof HANDLE_FONTS)[number];
+export const HANDLE_LINK_LAYOUTS = ['list', 'grid'] as const;
+export type HandleLinkLayout = (typeof HANDLE_LINK_LAYOUTS)[number];
+
+export function isHandleFont(value: unknown): value is HandleFont {
+  return HANDLE_FONTS.some((font) => font === value);
+}
+
+export function isHandleLinkLayout(value: unknown): value is HandleLinkLayout {
+  return HANDLE_LINK_LAYOUTS.some((layout) => layout === value);
+}
+
 export const MAX_LINK_IMAGE_URL_LEN = 512;
 // 外部 iframe の同時読込・ページ重量を抑える profile 単位の上限。server 保存時に enforce。
 export const MAX_PROFILE_EMBEDS = 3;
@@ -172,6 +185,8 @@ export interface HandleProfile {
   bio?: string;
   avatar?: string; // https URL (ホスティングはしない)
   cover?: string; // https URL (ホスティングはしない)
+  font?: HandleFont;
+  linkLayout?: HandleLinkLayout;
   // SNS プロフィール URL (https のみ)。アイコンは表示側がドメインから自動判定
   // (lib/socialLinks)。platform は保存しない (判定更新で既存データも追従)。
   socials?: string[];
@@ -811,6 +826,18 @@ export function validateProfile(raw: unknown): ValidatedProfile {
     }
   }
 
+  for (const key of ['font', 'linkLayout'] as const) {
+    const value = r[key];
+    if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) continue;
+    if (key === 'font') {
+      if (!isHandleFont(value)) return { ok: false, error: `font must be one of ${HANDLE_FONTS.join(', ')}` };
+      profile.font = value;
+    } else {
+      if (!isHandleLinkLayout(value)) return { ok: false, error: `linkLayout must be one of ${HANDLE_LINK_LAYOUTS.join(', ')}` };
+      profile.linkLayout = value;
+    }
+  }
+
   if (r.socials !== undefined && r.socials !== null) {
     if (!Array.isArray(r.socials)) {
       return { ok: false, error: 'socials must be an array' };
@@ -1083,6 +1110,8 @@ function parseStoredProfile(raw: unknown): HandleProfile | undefined {
       profile.cover = cover;
     }
   }
+  if (isHandleFont(r.font)) profile.font = r.font;
+  if (isHandleLinkLayout(r.linkLayout)) profile.linkLayout = r.linkLayout;
   if (Array.isArray(r.socials)) {
     const socials: string[] = [];
     for (const s of r.socials) {

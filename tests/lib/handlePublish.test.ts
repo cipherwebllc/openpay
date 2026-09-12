@@ -26,6 +26,17 @@ function draft(patch: Partial<HandleProfileDraft> = {}): HandleProfileDraft {
 }
 
 describe('buildPublishPayload', () => {
+  it.each([{ font: undefined, linkLayout: undefined }, { font: 'sans', linkLayout: 'list' }] as const)('omits default enums %j from the payload', (patch) => {
+    const payload = buildPublishPayload(draft(patch), OPTIONS)!;
+    expect(payload.profile).not.toHaveProperty('font');
+    expect(payload.profile).not.toHaveProperty('linkLayout');
+    expect(JSON.parse(JSON.stringify(payload)).profile).not.toHaveProperty('font');
+    expect(JSON.parse(JSON.stringify(payload)).profile).not.toHaveProperty('linkLayout');
+  });
+  it.each(['serif', 'rounded'] as const)('publishes non-default %s/grid', (font) => {
+    expect(buildPublishPayload(draft({ font, linkLayout: 'grid' }), OPTIONS)?.profile).toMatchObject({ font, linkLayout: 'grid' });
+  });
+
   it.each([
     [' https://example.com/cover.png ', 'https://example.com/cover.png', false],
     ['http://example.com/cover.png', undefined, true],

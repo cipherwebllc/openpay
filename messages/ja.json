@@ -913,6 +913,17 @@
     "releaseModalCancel": "キャンセル"
   },
   "HandleProfile": {
+    "fontLabel": "フォント",
+    "fonts": {
+      "sans": "標準",
+      "serif": "明朝",
+      "rounded": "丸ゴシック"
+    },
+    "linkLayoutLabel": "リンクの並び",
+    "linkLayouts": {
+      "list": "リスト",
+      "grid": "2 列"
+    },
     "miniPreviewJump": "プレビューへ",
     "supportHeading": "応援する",
     "supportSubtext": "応援はそのまま全額、クリエイターに直接届きます。",

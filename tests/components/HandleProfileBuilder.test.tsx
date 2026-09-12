@@ -3,7 +3,7 @@ import { screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { getAddress } from 'viem';
 import { renderWithIntl } from '../_helpers/i18n';
 import { MAX_PROFILE_LINKS } from '@/lib/handle';
-import { handlePreviewBackground } from '@/lib/handleTheme';
+import { handleFontFamily, handlePreviewBackground } from '@/lib/handleTheme';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const ADDR2 = '0x000000000000000000000000000000000000dead';
@@ -162,6 +162,35 @@ beforeEach(() => {
 });
 
 describe('HandleProfileBuilder', () => {
+  it('reflects font/layout selection in previews and canonical publish payload', () => {
+    localStorage.setItem('openpay:handle-profile-draft:v1', JSON.stringify({ links: [{ label: 'Site', url: 'https://example.com' }] }));
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR } });
+    const payload = () => JSON.parse(screen.getByTestId('claim').getAttribute('data-payload')!);
+    const preview = screen.getByTestId('handle-preview-frame');
+    const root = () => within(preview).getByRole('link', { name: 'Site' }).closest('ul')!.parentElement!;
+    const mini = screen.getByTestId('handle-mini-preview').firstElementChild!;
+    expect(payload().profile).not.toHaveProperty('font');
+    expect(payload().profile).not.toHaveProperty('linkLayout');
+    for (const [name, font] of [['明朝', 'serif'], ['丸ゴシック', 'rounded']] as const) {
+      fireEvent.click(screen.getByRole('radio', { name }));
+      expect(screen.getByRole('radio', { name })).toBeChecked();
+      expect(root()).toHaveStyle({ fontFamily: handleFontFamily(font) });
+      expect(mini).toHaveStyle({ fontFamily: handleFontFamily(font) });
+      expect(payload().profile.font).toBe(font);
+    }
+    fireEvent.click(screen.getByRole('radio', { name: '2 列' }));
+    expect(within(preview).getByRole('list')).toHaveClass('grid', 'grid-cols-1', 'sm:grid-cols-2');
+    expect(payload().profile.linkLayout).toBe('grid');
+    fireEvent.click(screen.getByRole('radio', { name: '標準' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'リスト' }));
+    expect(root().style.fontFamily).toBe('');
+    expect((mini as HTMLElement).style.fontFamily).toBe('');
+    expect(within(preview).getByRole('list').className).toBe('mt-7 flex w-full flex-col gap-2.5');
+    expect(payload().profile).not.toHaveProperty('font');
+    expect(payload().profile).not.toHaveProperty('linkLayout');
+  });
+
   it('renders cover in both previews, hides failures and retries changed URLs', () => {
     renderWithIntl(<HandleProfileBuilder />);
     const input = screen.getByRole('textbox', { name: /^カバー画像 URL/ });
