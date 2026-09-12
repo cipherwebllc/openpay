@@ -6,7 +6,6 @@ import {
   ReceiveMethodPicker,
   methodLabel,
 } from '@/components/ReceiveMethodPicker';
-import { handleFontFamily } from '@/lib/handleTheme';
 import type { HandleTipConfig } from '@/lib/handle';
 
 // TipForm は wagmi/relay 依存で重いのでスタブ化 (選択された method の token:chain を出すだけ)。
@@ -67,9 +66,10 @@ describe('HandleProfileView', () => {
   it.each([undefined, 'sans', 'serif', 'rounded'] as const)('applies only non-default root font %s', (font) => {
     const { container } = renderWithIntl(<HandleProfileView config={multiConfig} profile={{ font }} />);
     const root = container.firstElementChild as HTMLElement;
-    if (font === 'serif' || font === 'rounded') expect(root).toHaveStyle({ fontFamily: handleFontFamily(font) });
+    expect(root).not.toHaveAttribute('style');
+    if (font === 'serif' || font === 'rounded') expect(root).toHaveClass(`font-${font}-jp`);
     else {
-      expect(root.style.fontFamily).toBe('');
+      expect(root.className).toBe('flex flex-col items-center text-center');
       expect(root).not.toHaveAttribute('style');
     }
   });

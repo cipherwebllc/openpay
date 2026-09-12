@@ -22,7 +22,8 @@ import {
   type HandleProfile,
   type HandleTipConfig,
 } from '@/lib/handle';
-import { handleFontFamily, handleViewTheme, resolveHandleTheme } from '@/lib/handleTheme';
+import { handleFontClass } from '@/components/handleFonts';
+import { handleViewTheme, resolveHandleTheme } from '@/lib/handleTheme';
 
 const DEFAULT_ACCENT = '#2563eb';
 
@@ -119,7 +120,7 @@ export function HandleProfileView({
   const links = profile.links ?? [];
 
   return (
-    <div className="flex flex-col items-center text-center" style={{ fontFamily: handleFontFamily(profile.font) }}>
+    <div className={['flex flex-col items-center text-center', handleFontClass(profile.font)].filter(Boolean).join(' ')}>
       {showCover && (
         // eslint-disable-next-line @next/next/no-img-element
         <img

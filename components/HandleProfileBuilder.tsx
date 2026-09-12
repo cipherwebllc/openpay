@@ -19,6 +19,7 @@ import { getAddress, isAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
 import { AddressInput } from '@/components/AddressInput';
 import { HandleClaimPanel } from '@/components/HandleClaimPanel';
+import { handleFontClass } from '@/components/handleFonts';
 import { HandleProfileView } from '@/components/HandleProfile';
 import { HandleThemePicker } from '@/components/HandleThemePicker';
 import { LinkQrModal } from '@/components/LinkQrModal';
@@ -32,7 +33,6 @@ import {
 } from '@/hooks/useHandleProfileDraft';
 import {
   handlePreviewBackground,
-  handleFontFamily,
 } from '@/lib/handleTheme';
 import { useOrigin } from '@/hooks/useOrigin';
 import { getPublicHandleUrl } from '@/lib/publicHandleUrl';
@@ -450,8 +450,8 @@ export function HandleProfileBuilder({
               }`}
             >
               <div
-                className="relative flex h-14 items-center gap-3 px-3"
-                style={{ background: previewBg, fontFamily: handleFontFamily(draft.font) }}
+                className={['relative flex h-14 items-center gap-3 px-3', handleFontClass(draft.font)].filter(Boolean).join(' ')}
+                style={{ background: previewBg }}
               >
                 {profile.cover && <MiniPreviewCover key={profile.cover} url={profile.cover} />}
                 <div
@@ -582,7 +582,7 @@ export function HandleProfileBuilder({
                   {HANDLE_FONTS.map((font) => (
                     <label key={font} className={`relative flex cursor-pointer flex-col items-center gap-1 rounded-lg border p-1.5 transition ${draft.font === font ? 'border-brand ring-2 ring-brand/40' : 'border-slate-200 hover:border-slate-300'}`}>
                       <input type="radio" name="profile-font" value={font} checked={draft.font === font} onChange={() => update({ font })} className="peer sr-only" />
-                      <span aria-hidden className="flex h-9 w-full items-center justify-center rounded-md bg-slate-50 peer-focus-visible:ring-2 peer-focus-visible:ring-brand" style={{ fontFamily: handleFontFamily(font) }}>あア Aa</span>
+                      <span aria-hidden className={['flex h-9 w-full items-center justify-center rounded-md bg-slate-50 peer-focus-visible:ring-2 peer-focus-visible:ring-brand', handleFontClass(font)].filter(Boolean).join(' ')}>あア Aa</span>
                       <span className={`text-xs font-medium ${draft.font === font ? 'text-brand' : 'text-slate-600'}`}>{t(`fonts.${font}`)}</span>
                     </label>
                   ))}

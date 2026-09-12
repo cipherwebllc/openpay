@@ -111,9 +111,9 @@ describe('handleFontFamily', () => {
     expect(handleFontFamily('sans')).toBeUndefined();
   });
   it('uses the system serif stack', () => {
-    expect(handleFontFamily('serif')).toBe('"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", Georgia, serif');
+    expect(handleFontFamily('serif')).toBe('"Hiragino Mincho ProN", "Yu Mincho", Georgia, serif');
   });
   it('uses the system rounded stack', () => {
-    expect(handleFontFamily('rounded')).toBe('"Hiragino Maru Gothic ProN", "BIZ UDPGothic", "Yu Gothic", system-ui, sans-serif');
+    expect(handleFontFamily('rounded')).toBe('"Hiragino Maru Gothic ProN", "BIZ UDPGothic", system-ui, sans-serif');
   });
 });
