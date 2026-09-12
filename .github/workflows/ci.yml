@@ -78,6 +78,9 @@ jobs:
   # flaky ではなく本当の回帰 (or flaky の悪化) として扱う。
   lua-real:
     runs-on: ubuntu-latest
+    # 3 attempt × 10 分 (scripts/run-lua-tests.mjs の attempt timeout) + npm ci の余裕。
+    # 2026-09-12 に worker 無応答で 74 分ぶら下がった実害があるため job 側にも上限を置く。
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

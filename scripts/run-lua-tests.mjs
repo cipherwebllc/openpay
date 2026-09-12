@@ -8,6 +8,7 @@
 // 失敗したら exit 1 (= 本当に壊れているか、flaky が悪化している)。
 //
 // 使い方: node scripts/run-lua-tests.mjs (CI の lua-real job・ローカルでも可)
+// env: LUA_TESTS_MAX_ATTEMPTS (既定 3) / LUA_TESTS_ATTEMPT_TIMEOUT_MS (既定 600000)
 
 import { spawn } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -17,6 +18,10 @@ import { LUA_REAL_TEST_FILES } from './lib/luaRealTests.mjs';
 import { checkTestFileCoverage, normalizeReportedFiles } from './lib/testFileFence.mjs';
 
 const MAX_ATTEMPTS = Number(process.env.LUA_TESTS_MAX_ATTEMPTS ?? 3);
+// 1 attempt の上限。wasmoon の破損は「クラッシュ」だけでなく「worker が応答しなくなる」形でも出る
+// (2026-09-12 PR #482: 2 file pass 後に vitest worker が 74 分無応答・プロセスは生存)。
+// 正常なら 11 file で 1〜2 分なので、超えたらプロセスグループごと SIGKILL して失敗 attempt に数える。
+const ATTEMPT_TIMEOUT_MS = Number(process.env.LUA_TESTS_ATTEMPT_TIMEOUT_MS ?? 10 * 60_000);
 
 function runOnce(attempt) {
   return new Promise((resolve) => {
@@ -36,8 +41,26 @@ function runOnce(attempt) {
       ...LUA_REAL_TEST_FILES,
     ];
     console.log(`\n[run-lua-tests] attempt ${attempt}/${MAX_ATTEMPTS}`);
-    const child = spawn('node', args, { stdio: 'inherit' });
+    // detached: 子 (vitest) が起動する fork worker も同じプロセスグループに入るので、timeout 時に
+    // グループごと SIGKILL できる (worker だけ生き残る事故を防ぐ)。
+    const child = spawn('node', args, { stdio: 'inherit', detached: process.platform !== 'win32' });
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      console.error(`[run-lua-tests] attempt ${attempt}: timeout after ${ATTEMPT_TIMEOUT_MS}ms — killing vitest process group`);
+      try {
+        if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGKILL');
+        else child.kill('SIGKILL');
+      } catch {
+        // 既に終了していれば何もしない (exit ハンドラ側で resolve する)。
+      }
+    }, ATTEMPT_TIMEOUT_MS);
     child.on('exit', (code) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        rmSync(tmp, { recursive: true, force: true });
+        return resolve({ ok: false, reason: 'timeout (worker hung)' });
+      }
       let report = null;
       try {
         report = JSON.parse(readFileSync(jsonOut, 'utf8'));
