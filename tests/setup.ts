@@ -2,6 +2,11 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
 
+vi.mock('next/font/google', () => ({
+  Noto_Serif_JP: () => ({ className: 'font-serif-jp', style: { fontFamily: 'Noto Serif JP' } }),
+  Zen_Maru_Gothic: () => ({ className: 'font-rounded-jp', style: { fontFamily: 'Zen Maru Gothic' } }),
+}));
+
 // Node 26 は実験的な global localStorage を持ち (--localstorage-file 必須)、その影響で
 // vitest の jsdom 環境が window.localStorage を生やさなくなる (2026-08-02 実測: 全 suite が
 // setup の localStorage.clear() で全滅)。欠けている場合のみ per-file の in-memory 実装を

@@ -3,7 +3,7 @@ import { screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { getAddress } from 'viem';
 import { renderWithIntl } from '../_helpers/i18n';
 import { MAX_PROFILE_LINKS } from '@/lib/handle';
-import { handleFontFamily, handlePreviewBackground } from '@/lib/handleTheme';
+import { handlePreviewBackground } from '@/lib/handleTheme';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const ADDR2 = '0x000000000000000000000000000000000000dead';
@@ -175,8 +175,13 @@ describe('HandleProfileBuilder', () => {
     for (const [name, font] of [['明朝', 'serif'], ['丸ゴシック', 'rounded']] as const) {
       fireEvent.click(screen.getByRole('radio', { name }));
       expect(screen.getByRole('radio', { name })).toBeChecked();
-      expect(root()).toHaveStyle({ fontFamily: handleFontFamily(font) });
-      expect(mini).toHaveStyle({ fontFamily: handleFontFamily(font) });
+      expect(root()).toHaveClass(`font-${font}-jp`);
+      expect(root()).not.toHaveAttribute('style');
+      expect(mini).toHaveClass(`font-${font}-jp`);
+      expect((mini as HTMLElement).style.fontFamily).toBe('');
+      const sample = screen.getByRole('radio', { name }).nextElementSibling!;
+      expect(sample).toHaveClass(`font-${font}-jp`);
+      expect(sample).not.toHaveAttribute('style');
       expect(payload().profile.font).toBe(font);
     }
     fireEvent.click(screen.getByRole('radio', { name: '2 列' }));
@@ -184,7 +189,9 @@ describe('HandleProfileBuilder', () => {
     expect(payload().profile.linkLayout).toBe('grid');
     fireEvent.click(screen.getByRole('radio', { name: '標準' }));
     fireEvent.click(screen.getByRole('radio', { name: 'リスト' }));
-    expect(root().style.fontFamily).toBe('');
+    expect(root().className).toBe('flex flex-col items-center text-center');
+    expect(root()).not.toHaveAttribute('style');
+    expect(mini.className).toBe('relative flex h-14 items-center gap-3 px-3');
     expect((mini as HTMLElement).style.fontFamily).toBe('');
     expect(within(preview).getByRole('list').className).toBe('mt-7 flex w-full flex-col gap-2.5');
     expect(payload().profile).not.toHaveProperty('font');

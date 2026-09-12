@@ -244,9 +244,9 @@ export type { TipFormTheme } from '@/lib/tipFormTheme';
 export function handleFontFamily(font: HandleFont | undefined): string | undefined {
   switch (font) {
     case 'serif':
-      return '"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", Georgia, serif';
+      return '"Hiragino Mincho ProN", "Yu Mincho", Georgia, serif';
     case 'rounded':
-      return '"Hiragino Maru Gothic ProN", "BIZ UDPGothic", "Yu Gothic", system-ui, sans-serif';
+      return '"Hiragino Maru Gothic ProN", "BIZ UDPGothic", system-ui, sans-serif';
     default:
       return undefined;
   }
