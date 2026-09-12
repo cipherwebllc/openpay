@@ -28,6 +28,9 @@ describe('GitHub Actions operation guards', () => {
     expect(source.slice(testsStep, testsStep + 200)).toContain("SKIP_LUA_REAL: '1'");
     expect(source).toContain('lua-real:');
     expect(source).toContain('- run: node scripts/run-lua-tests.mjs');
+    // worker 無応答で job がぶら下がらないよう job 側の上限を必須にする (2026-09-12 実害)
+    const luaJob = source.slice(source.indexOf('lua-real:'), source.indexOf('- run: node scripts/run-lua-tests.mjs'));
+    expect(luaJob).toMatch(/timeout-minutes: \d+/);
     // Coverage step の --exclude は一覧と過不足なく一致する
     const excluded = [...source.matchAll(/--exclude (tests\/\S+)/g)].map((m) => m[1]).sort();
     expect(excluded).toEqual([...LUA_REAL_TEST_FILES].sort());
