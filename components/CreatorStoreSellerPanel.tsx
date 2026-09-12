@@ -837,6 +837,15 @@ function SignedInSellerPanel({
             <p className="mt-2 text-sm text-slate-500">
               {t('emptyProducts')}
             </p>
+            <p className="mt-2 text-sm">
+              <Link
+                href={`/${locale}/guide/store`}
+                prefetch={false}
+                className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+              >
+                {t('guideLink')}
+              </Link>
+            </p>
           </div>
         ) : (
           <ul className="mt-4 grid gap-3 md:grid-cols-2">
