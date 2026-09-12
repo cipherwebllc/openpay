@@ -80,6 +80,7 @@ vi.mock('@/components/HandleClaimPanel', () => ({
   }) => (
     <div
       data-testid="claim"
+      data-payload={JSON.stringify(payload)}
       data-expected-updated-at={expectedUpdatedAt ?? ''}
     >
       {payload ? `config-ready:${payload.config.to}` : 'no-config'}
@@ -161,6 +162,47 @@ beforeEach(() => {
 });
 
 describe('HandleProfileBuilder', () => {
+  it('renders cover in both previews, hides failures and retries changed URLs', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    const input = screen.getByRole('textbox', { name: /^カバー画像 URL/ });
+    expect(input).toHaveAttribute('type', 'url');
+    expect(input).toHaveAttribute('placeholder', 'https://');
+    const previews = [
+      screen.getByTestId('handle-preview-frame'),
+      screen.getByTestId('handle-mini-preview'),
+    ];
+    fireEvent.change(input, { target: { value: 'https://example.com/cover.png' } });
+    for (const preview of previews) {
+      const img = preview.querySelector('img');
+      expect(img).toHaveAttribute('src', 'https://example.com/cover.png');
+      expect(img).toHaveAttribute('referrerpolicy', 'no-referrer');
+      fireEvent.error(img!);
+      expect(preview.querySelector('img')).toBeNull();
+    }
+    fireEvent.change(input, { target: { value: 'https://example.com/fixed-cover.png' } });
+    for (const preview of previews) {
+      expect(preview.querySelector('img')).toHaveAttribute('src', 'https://example.com/fixed-cover.png');
+    }
+    expect(previews[1].querySelector('img')).toHaveClass('absolute', 'inset-0', 'opacity-25', 'object-cover');
+    fireEvent.change(input, { target: { value: '' } });
+    for (const preview of previews) expect(preview.querySelector('img')).toBeNull();
+  });
+
+  it('omits http cover from the published payload and both previews', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR } });
+    const input = screen.getByRole('textbox', { name: /^カバー画像 URL/ });
+    fireEvent.change(input, { target: { value: 'https://example.com/cover.png' } });
+    const payload = () => JSON.parse(screen.getByTestId('claim').getAttribute('data-payload')!);
+    expect(payload().profile.cover).toBe('https://example.com/cover.png');
+    fireEvent.change(input, { target: { value: 'http://example.com/cover.png' } });
+    expect(payload().profile).not.toHaveProperty('cover');
+    expect(screen.getByTestId('handle-mini-preview').querySelector('img')).toBeNull();
+    expect(screen.getByTestId('handle-preview-frame').querySelector('img')).toBeNull();
+    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    expect(input).toHaveValue('');
+  });
+
   it('ミニプレビューが表示名・テーマ色・テーマ・アバターに追従する', () => {
     renderWithIntl(<HandleProfileBuilder />);
     const mini = screen.getByTestId('handle-mini-preview');

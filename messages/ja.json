@@ -942,6 +942,8 @@
     "bioLabel": "ひとこと (bio)",
     "avatarLabel": "アバター画像 URL",
     "avatarHint": "画像はサーバー（例: imgur.com）にアップロードした https:// の URL を貼り付けてください。（任意）",
+    "coverLabel": "カバー画像 URL",
+    "coverHint": "横長の画像 (3:1 程度) の https:// URL を貼り付けてください。(任意)",
     "imageGuideLink": "画像の用意のしかたを見る",
     "socialsLabel": "SNS アイコン",
     "socialsHint": "SNS の https:// URL。X / Instagram / YouTube 等はアイコンを自動表示します。",

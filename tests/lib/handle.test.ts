@@ -564,6 +564,22 @@ describe('extractHandleEmbed', () => {
 });
 
 describe('validateProfile', () => {
+  it.each([undefined, null, '', '   '])('treats empty cover %s as unset', (cover) => {
+    expect(validateProfile({ cover })).toEqual({ ok: true, profile: {} });
+  });
+  it.each([
+    [42, 'cover must be string'],
+    ['http://example.com/c.jpg', 'cover must be an https url'],
+    ['https://example.com/' + 'a'.repeat(513 - 'https://example.com/'.length), 'cover url too long'],
+  ])('rejects invalid cover %s', (cover, error) => {
+    expect(validateProfile({ cover })).toEqual({ ok: false, error });
+  });
+  it('trims cover and accepts exactly 512 characters', () => {
+    const cover = 'https://example.com/' + 'a'.repeat(512 - 'https://example.com/'.length);
+    expect(cover).toHaveLength(512);
+    expect(validateProfile({ cover: `  ${cover}  ` })).toEqual({ ok: true, profile: { cover } });
+  });
+
   it('accepts bio + https avatar + https links', () => {
     const res = validateProfile({
       bio: '  Web3 creator ',
@@ -987,6 +1003,17 @@ describe('parseHandleRecord', () => {
     updatedAt: 2,
   };
 
+  it.each([undefined, null, 42, '', ' ', 'http://example.com/c.jpg', 'https://example.com/' + 'a'.repeat(513 - 'https://example.com/'.length)])(
+    'ignores invalid or missing stored cover %s without changing the old record', (cover) => {
+      expect(parseHandleRecord(JSON.stringify({ ...good, profile: { ...good.profile, cover } }))).toEqual(good);
+    },
+  );
+  it('round-trips stored cover and trims whitespace', () => {
+    const cover = 'https://example.com/' + 'a'.repeat(512 - 'https://example.com/'.length);
+    const record = { ...good, profile: { ...good.profile, cover } };
+    expect(parseHandleRecord(serializeHandleRecord(record))).toEqual(record);
+    expect(parseHandleRecord(JSON.stringify({ ...record, profile: { cover: ` ${cover} ` } }))?.profile).toEqual({ cover });
+  });
   it('parses a well-formed multi-method record (round-trip)', () => {
     expect(parseHandleRecord(serializeHandleRecord(good))).toEqual(good);
   });

@@ -118,6 +118,22 @@ function MiniPreviewAvatar({ url, initial }: { url?: string; initial: string }) 
   ) : <span aria-hidden>{initial}</span>;
 }
 
+function MiniPreviewCover({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false);
+  // 外部画像の読込失敗がプレビューの壊れ画像表示に波及しないよう非表示にする。
+  return failed ? null : (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt=""
+      aria-hidden
+      referrerPolicy="no-referrer"
+      className="absolute inset-0 h-full w-full opacity-25 object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function stripResolvedEmbedsForDraft(
   links: HandleProfile['links'],
 ): NonNullable<HandleProfile['links']> {
@@ -334,6 +350,7 @@ export function HandleProfileBuilder({
       presetsJpyc: c.presets?.jpyc ?? DEFAULT_PROFILE_DRAFT.presetsJpyc,
       bio: p?.bio ?? '',
       avatar: p?.avatar ?? '',
+      cover: p?.cover ?? '',
       socials: p?.socials ?? [],
       links: stripResolvedEmbedsForDraft(p?.links),
       theme: p?.theme ?? DEFAULT_PROFILE_DRAFT.theme,
@@ -428,16 +445,17 @@ export function HandleProfileBuilder({
               }`}
             >
               <div
-                className="flex h-14 items-center gap-3 px-3"
+                className="relative flex h-14 items-center gap-3 px-3"
                 style={previewBg ? { background: previewBg } : undefined}
               >
+                {profile.cover && <MiniPreviewCover key={profile.cover} url={profile.cover} />}
                 <div
-                  className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white ring-2 ring-white/30"
+                  className="relative z-10 flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white ring-2 ring-white/30"
                   style={{ backgroundColor: pickerAccent }}
                 >
                   <MiniPreviewAvatar key={miniAvatar ?? ''} url={miniAvatar} initial={miniInitial} />
                 </div>
-                <div className="min-w-0 flex-1">
+                <div className="relative z-10 min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">{miniName}</p>
                   {/* 表示名が空のときは 1 行目が @handle になるので、同じ文字列を 2 行目に重ねない。 */}
                   {draft.name.trim() !== '' && (
@@ -448,7 +466,7 @@ export function HandleProfileBuilder({
                 </div>
                 <a
                   href="#step-4-heading"
-                  className="flex min-h-11 shrink-0 items-center rounded text-xs font-semibold underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                  className="relative z-10 flex min-h-11 shrink-0 items-center rounded text-xs font-semibold underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                 >
                   {t('miniPreviewJump')}
                 </a>
@@ -571,6 +589,15 @@ export function HandleProfileBuilder({
                   value={draft.avatar}
                   placeholder="https://"
                   onChange={(e) => update({ avatar: e.target.value })}
+                  className={inputClass}
+                />
+              </Field>
+              <Field label={t('coverLabel')} hint={t('coverHint')}>
+                <input
+                  type="url"
+                  value={draft.cover}
+                  placeholder="https://"
+                  onChange={(e) => update({ cover: e.target.value })}
                   className={inputClass}
                 />
               </Field>

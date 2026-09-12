@@ -96,6 +96,12 @@ export function HandleProfileView({
   profile: HandleProfile;
   handle?: string;
 }) {
+  const [coverFailed, setCoverFailed] = useState(false);
+  // 画像の読込失敗をプロフィール全体へ波及させず、URL 修正時は再試行する。
+  useEffect(() => {
+    setCoverFailed(false);
+  }, [profile.cover]);
+  const showCover = !!profile.cover && !coverFailed;
   const [avatarFailed, setAvatarFailed] = useState(false);
   // avatar URL を変えたら失敗状態をリセット (ビルダーで誤 URL を直したのに fallback が残らない)。
   useEffect(() => {
@@ -114,10 +120,21 @@ export function HandleProfileView({
 
   return (
     <div className="flex flex-col items-center text-center">
+      {showCover && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={profile.cover}
+          alt=""
+          aria-hidden
+          referrerPolicy="no-referrer"
+          className="aspect-[3/1] max-h-[160px] w-full rounded-2xl object-cover"
+          onError={() => setCoverFailed(true)}
+        />
+      )}
       {/* アバター: 白リング + アクセントの細リング + 柔らかいアクセントグロー (浮遊感)。
           リングはテーマごとに切替 (night は外リングを #0f172a 基調に)。 */}
       <div
-        className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-full text-4xl font-bold text-white"
+        className={`flex h-28 w-28 items-center justify-center overflow-hidden rounded-full text-4xl font-bold text-white${showCover ? ' relative -mt-14' : ''}`}
         style={{
           backgroundColor: accent,
           boxShadow: tk.avatarRing,

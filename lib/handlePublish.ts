@@ -87,12 +87,14 @@ export function buildPublishProfile(draft: HandleProfileDraft): HandleProfile {
     .filter((entry) => isHttpsUrl(entry))
     .slice(0, MAX_SOCIAL_LINKS);
   const avatar = draft.avatar.trim();
+  const cover = draft.cover.trim();
 
   // キー順も従来の Builder インライン実装と一致させる。JSON.stringify 時に undefined は
   // 省略されるため、publish request のバイト列を変更しない。
   return {
     bio: draft.bio.trim() || undefined,
     avatar: avatar && isHttpsUrl(avatar) ? avatar : undefined,
+    cover: cover && isHttpsUrl(cover) ? cover : undefined,
     socials: socials.length > 0 ? socials : undefined,
     links: links.length > 0 ? links : undefined,
     theme: draft.theme,
@@ -152,8 +154,10 @@ export function buildPublishPayload(
 
 export function hasDroppedProfileUrl(draft: HandleProfileDraft): boolean {
   const avatar = draft.avatar.trim();
+  const cover = draft.cover.trim();
   return (
     (!!avatar && !isHttpsUrl(avatar)) ||
+    (!!cover && !isHttpsUrl(cover)) ||
     draft.socials.some((entry) => {
       const value = entry.trim();
       return !!value && !isHttpsUrl(value);
