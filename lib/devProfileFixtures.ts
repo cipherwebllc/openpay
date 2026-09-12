@@ -18,6 +18,7 @@ export const DEV_FIXTURE_HANDLE_RECORD: HandleRecord = {
     methods: [{ token: 'jpyc', chain: 'polygon' }],
   },
   profile: {
+    cover: '/landing/usecase-digital-goods.avif',
     bio: '3D 素材と BGM を作っています (dev フィクスチャ)',
     links: [{ label: 'Portfolio', url: 'https://example.com' }],
   },

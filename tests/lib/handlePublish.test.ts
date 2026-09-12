@@ -26,6 +26,23 @@ function draft(patch: Partial<HandleProfileDraft> = {}): HandleProfileDraft {
 }
 
 describe('buildPublishPayload', () => {
+  it.each([
+    [' https://example.com/cover.png ', 'https://example.com/cover.png', false],
+    ['http://example.com/cover.png', undefined, true],
+    ['javascript:alert(1)', undefined, true],
+    ['', undefined, false],
+    ['   ', undefined, false],
+  ])('canonicalizes cover %j and reports unsafe drops', (cover, expected, dropped) => {
+    const input = draft({ cover });
+    expect(buildPublishProfile(input).cover).toBe(expected);
+    const payload = buildPublishPayload(input, OPTIONS);
+    expect(payload?.profile.cover).toBe(expected);
+    if (expected === undefined) {
+      expect(JSON.parse(JSON.stringify(payload)).profile).not.toHaveProperty('cover');
+    }
+    expect(hasDroppedProfileUrl(input)).toBe(dropped);
+  });
+
   it('trim/filter/キー順 + config/profile theme を publish body で固定する', () => {
     const payload = buildPublishPayload(
       draft({

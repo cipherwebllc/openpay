@@ -942,6 +942,8 @@
     "bioLabel": "Bio",
     "avatarLabel": "Avatar image URL",
     "avatarHint": "Paste an https:// URL of an image uploaded to a host (e.g. imgur.com). Optional.",
+    "coverLabel": "Cover image URL",
+    "coverHint": "Paste an https:// URL of a wide image (about 3:1). Optional.",
     "imageGuideLink": "How to prepare an image URL",
     "socialsLabel": "Social icons",
     "socialsHint": "https:// URLs of your socials. Icons for X / Instagram / YouTube etc. appear automatically.",

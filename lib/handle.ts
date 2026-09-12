@@ -38,6 +38,7 @@ export const MAX_BIO_LEN = 160;
 export const MAX_LINK_LABEL_LEN = 40;
 export const MAX_LINK_URL_LEN = 512;
 export const MAX_AVATAR_URL_LEN = 512;
+export const MAX_COVER_URL_LEN = MAX_AVATAR_URL_LEN;
 export const MAX_LINK_IMAGE_URL_LEN = 512;
 // 外部 iframe の同時読込・ページ重量を抑える profile 単位の上限。server 保存時に enforce。
 export const MAX_PROFILE_EMBEDS = 3;
@@ -170,6 +171,7 @@ export type HandleLink = HandleRegularLink | HandleHeading;
 export interface HandleProfile {
   bio?: string;
   avatar?: string; // https URL (ホスティングはしない)
+  cover?: string; // https URL (ホスティングはしない)
   // SNS プロフィール URL (https のみ)。アイコンは表示側がドメインから自動判定
   // (lib/socialLinks)。platform は保存しない (判定更新で既存データも追従)。
   socials?: string[];
@@ -793,6 +795,22 @@ export function validateProfile(raw: unknown): ValidatedProfile {
     }
   }
 
+  if (r.cover !== undefined && r.cover !== null && r.cover !== '') {
+    if (typeof r.cover !== 'string') {
+      return { ok: false, error: 'cover must be string' };
+    }
+    const cover = r.cover.trim();
+    if (cover) {
+      if (cover.length > MAX_COVER_URL_LEN) {
+        return { ok: false, error: 'cover url too long' };
+      }
+      if (!isHttpsUrl(cover)) {
+        return { ok: false, error: 'cover must be an https url' };
+      }
+      profile.cover = cover;
+    }
+  }
+
   if (r.socials !== undefined && r.socials !== null) {
     if (!Array.isArray(r.socials)) {
       return { ok: false, error: 'socials must be an array' };
@@ -1057,6 +1075,12 @@ function parseStoredProfile(raw: unknown): HandleProfile | undefined {
     const avatar = r.avatar.trim();
     if (avatar && avatar.length <= MAX_AVATAR_URL_LEN && isHttpsUrl(avatar)) {
       profile.avatar = avatar;
+    }
+  }
+  if (typeof r.cover === 'string') {
+    const cover = r.cover.trim();
+    if (cover && cover.length <= MAX_COVER_URL_LEN && isHttpsUrl(cover)) {
+      profile.cover = cover;
     }
   }
   if (Array.isArray(r.socials)) {

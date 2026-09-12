@@ -51,6 +51,7 @@ export interface HandleProfileDraft {
   presetsJpyc: string[];
   bio: string;
   avatar: string;
+  cover: string;
   socials: string[]; // SNS プロフィール URL (アイコンはドメイン自動判定)
   links: DraftLink[];
   // 着せ替えテーマ (clean 既定)。公開ページ/プレビューの見た目を切替える。
@@ -74,6 +75,7 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
   presetsJpyc: defaultPresets().jpyc,
   bio: '',
   avatar: '',
+  cover: '',
   socials: [],
   links: [],
   theme: 'clean',
@@ -180,6 +182,7 @@ function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
     presetsJpyc: sanitizePresetList(loaded.presetsJpyc, d.jpyc),
     bio: str(loaded.bio, ''),
     avatar: str(loaded.avatar, ''),
+    cover: str(loaded.cover, ''),
     socials: sanitizeSocials(loaded.socials),
     links: sanitizeLinks(loaded.links),
     theme: resolveHandleTheme(loaded.theme),

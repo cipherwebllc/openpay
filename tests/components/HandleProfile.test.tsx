@@ -50,6 +50,39 @@ describe('methodLabel', () => {
 });
 
 describe('HandleProfileView', () => {
+  it('keeps the original root and avatar DOM when cover is absent', () => {
+    const { container } = renderWithIntl(<HandleProfileView config={multiConfig} profile={{}} />);
+    const root = container.firstElementChild!;
+    expect(root.className).toBe('flex flex-col items-center text-center');
+    expect(root.children).toHaveLength(2);
+    const avatar = root.firstElementChild!;
+    expect(avatar.tagName).toBe('DIV');
+    expect(avatar.className).toBe('flex h-28 w-28 items-center justify-center overflow-hidden rounded-full text-4xl font-bold text-white');
+    expect(avatar.innerHTML).toBe('<span aria-hidden="true">A</span>');
+    expect(root.lastElementChild?.tagName).toBe('H1');
+    expect(container.querySelector('img')).toBeNull();
+  });
+
+  it.each(['clean', 'night'] as const)('renders a decorative cover in %s, hides on error and resets on URL change', (theme) => {
+    const { container, rerender } = renderWithIntl(
+      <HandleProfileView config={multiConfig} profile={{ theme, cover: 'https://example.com/c.jpg' }} />,
+    );
+    const cover = container.querySelector('img')!;
+    expect(cover).toHaveAttribute('src', 'https://example.com/c.jpg');
+    expect(cover).toHaveAttribute('alt', '');
+    expect(cover).toHaveAttribute('aria-hidden', 'true');
+    expect(cover).toHaveAttribute('referrerpolicy', 'no-referrer');
+    expect(cover).toHaveClass('aspect-[3/1]', 'max-h-[160px]', 'w-full', 'rounded-2xl', 'object-cover');
+    const avatar = cover.nextElementSibling!;
+    expect(avatar).toHaveClass('relative', '-mt-14');
+    if (theme === 'night') expect(avatar.getAttribute('style')).toContain('#0f172a');
+    fireEvent.error(cover);
+    expect(container.querySelector('img')).toBeNull();
+    expect(avatar).not.toHaveClass('-mt-14');
+    rerender(<HandleProfileView config={multiConfig} profile={{ theme, cover: 'https://example.com/new.jpg' }} />);
+    expect(container.querySelector('img')).toHaveAttribute('src', 'https://example.com/new.jpg');
+  });
+
   it('renders name + bio + initial fallback (no avatar)', () => {
     renderWithIntl(
       <HandleProfileView config={multiConfig} profile={{ bio: 'Web3 creator' }} />,

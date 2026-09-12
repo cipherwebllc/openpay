@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useHandleProfileDraft } from '@/hooks/useHandleProfileDraft';
+import { DEFAULT_PROFILE_DRAFT, useHandleProfileDraft } from '@/hooks/useHandleProfileDraft';
 import {
   MAX_LINK_IMAGE_URL_LEN,
   MAX_PROFILE_EMBEDS,
@@ -12,6 +12,39 @@ const STORAGE_KEY = 'openpay:handle-profile-draft:v1';
 describe('useHandleProfileDraft', () => {
   beforeEach(() => {
     window.localStorage.clear();
+  });
+
+  it('saves, reloads and resets cover exactly like avatar', async () => {
+    const first = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(first.result.current.hydrated).toBe(true));
+    expect(first.result.current.settings.cover).toBe('');
+    const images = {
+      avatar: ' https://example.com/avatar.png ',
+      cover: ' http://example.com/cover.png ',
+    };
+    act(() => first.result.current.setSettings((current) => ({ ...current, ...images })));
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')).toMatchObject(images);
+    });
+    first.unmount();
+    const restored = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(restored.result.current.hydrated).toBe(true));
+    expect(restored.result.current.settings).toMatchObject(images);
+    act(() => restored.result.current.setSettings(DEFAULT_PROFILE_DRAFT));
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}')).toMatchObject({
+        avatar: '',
+        cover: '',
+      });
+    });
+    expect(restored.result.current.settings.cover).toBe('');
+  });
+
+  it('restores missing or non-string cover as empty', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ cover: 42 }));
+    const { result } = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.cover).toBe('');
   });
 
   it('keeps v1 kind-less regular links backward compatible', async () => {
