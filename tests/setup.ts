@@ -15,7 +15,10 @@ vi.mock('next/font/google', () => ({
 // 実装は Storage.prototype にメソッドを定義し、インスタンスは Object.create(prototype) で
 // 作る — `vi.spyOn(Storage.prototype, 'setItem')` で quota 障害等を注入する既存テスト
 // (circlePending / history / paymentIntentStorage) がそのまま効くようにするため。
-(() => {
+// 先頭の `;` は必須: vitest は vi.mock を hoist する際に上の import 文を
+// `await __vite_ssr_dynamic_import__(…)` に書き換え、末尾に `;` を付けない。無いと次行の `(` が
+// 呼び出しとして連結され "__vite_ssr_dynamic_import__(...) is not a function" で全 suite が落ちる。
+;(() => {
   if (typeof window === 'undefined' || window.localStorage) return;
   const StorageCtor = (
     window as unknown as { Storage?: { prototype: Storage } }
