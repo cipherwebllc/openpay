@@ -15,7 +15,8 @@ beforeEach(() => {
   vi.resetAllMocks(); vi.spyOn(console, 'log').mockImplementation(() => {});
   h.public.mockReturnValue({ readContract: h.read, simulateContract: h.simulate, waitForTransactionReceipt: h.receipt });
   h.wallet.mockReturnValue({ writeContract: h.write }); h.account.mockReturnValue({ address: CONTRACT });
-  h.read.mockResolvedValue('https://seller.example/terms'); h.simulate.mockResolvedValue({ request: { address: CONTRACT } });
+  h.read.mockImplementation(async ({ functionName }: { functionName: string }) => (functionName === 'owner' ? CONTRACT : 'https://seller.example/terms'));
+  h.simulate.mockResolvedValue({ request: { address: CONTRACT } });
   h.write.mockResolvedValue('0xtransaction'); h.receipt.mockResolvedValue({ status: 'success' });
 });
 afterEach(() => vi.restoreAllMocks());
@@ -34,6 +35,11 @@ it('only --send uses the env key and reports receipt without logging credentials
   expect(h.write).toHaveBeenCalledWith({ address: CONTRACT });
   expect(console.log).toHaveBeenCalledWith('receipt status:', 'success');
   expect(JSON.stringify(vi.mocked(console.log).mock.calls).includes(secret)).toBe(false);
+});
+it('refuses to send when the key is not the contract owner (prints both addresses only)', async () => {
+  h.account.mockReturnValue({ address: '0x1111111111111111111111111111111111111111' });
+  await expect(main(['--product', ID, '--send'], { ...config, LICENSE_OWNER_PRIVATE_KEY: 'k' })).rejects.toThrow(/is for 0x1111.*owner is 0x3333/);
+  expect(h.simulate).not.toHaveBeenCalled(); expect(h.write).not.toHaveBeenCalled();
 });
 it('reverted receipt fails after reporting status', async () => {
   h.receipt.mockResolvedValue({ status: 'reverted' });
