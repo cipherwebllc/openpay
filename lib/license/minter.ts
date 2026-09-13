@@ -48,7 +48,7 @@ function callData(job: LicenseJob): Hex {
   const d = job.license;
   return job.kind === 'mint'
     ? encodeFunctionData({ abi: LICENSE_ABI, functionName: 'mintFor', args: [job.payer, BigInt(d.tokenId), job.paymentKey] })
-    : encodeFunctionData({ abi: LICENSE_ABI, functionName: 'registerLicense', args: [BigInt(d.tokenId), BigInt(d.supply), d.transferable, d.termsUrl, d.definitionHash] });
+    : encodeFunctionData({ abi: LICENSE_ABI, functionName: 'registerLicense', args: [BigInt(d.tokenId), BigInt(d.supply), d.transferable, 'https://open-pay.jp/api/license/metadata/' + job.productId, d.definitionHash] });
 }
 
 /** EOA を relay と分離する。誤設定による同一 nonce 空間への送信を拒否する。 */
@@ -212,7 +212,7 @@ async function processJob(member: string, token: string, deadline: number): Prom
       const mint = job;
       await step(() => rpc.simulateContract({ account, address: d.contract, abi: LICENSE_ABI, functionName: 'mintFor', args: [mint.payer, BigInt(d.tokenId), mint.paymentKey] }));
     } else {
-      await step(() => rpc.simulateContract({ account, address: d.contract, abi: LICENSE_ABI, functionName: 'registerLicense', args: [BigInt(d.tokenId), BigInt(d.supply), d.transferable, d.termsUrl, d.definitionHash] }));
+      await step(() => rpc.simulateContract({ account, address: d.contract, abi: LICENSE_ABI, functionName: 'registerLicense', args: [BigInt(d.tokenId), BigInt(d.supply), d.transferable, 'https://open-pay.jp/api/license/metadata/' + job.productId, d.definitionHash] }));
     }
     const nonce = await step(() => rpc.getTransactionCount({ address: account.address, blockTag: 'pending' }));
     const prepared = await step(() => wallet.prepareTransactionRequest({ account, chain: rpc.chain, to: d.contract, data, value: 0n, nonce }));

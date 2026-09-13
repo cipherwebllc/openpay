@@ -48,6 +48,28 @@ import { caip2ForChainId } from '@/lib/x402/network';
 const JPYC_WEI = 10n ** 18n;
 
 const LICENSE_OPENAPI_PATHS = {
+  '/api/license/metadata/{id}': {
+    get: {
+      operationId: 'licenseMetadata', tags: ['Licenses'], security: [],
+      summary: 'ERC-1155 wallet metadata for a registered license product',
+      description: 'Public JSON with Japanese product name, image and terms. Feature OFF, invalid/unknown/unregistered products or no public seller handle return 404. Paused licenses remain resolvable.',
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', pattern: '^h_[0-9a-f]{32}$' } }],
+      responses: {
+        '200': { description: 'ERC-1155 metadata with OpenSea attributes',
+          headers: { 'Cache-Control': { schema: { type: 'string', const: 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400' } } },
+          content: { 'application/json': { schema: {
+            type: 'object',
+            properties: {
+              ...(schemaFromExample({ name: '利用ライセンス', description: '利用条件: https://seller.example/terms (v1)', image: 'https://open-pay.jp/og/handle?h=seller&locale=ja', external_url: 'https://open-pay.jp/@seller?product=h_4fa999236d92e95a76bb36dcd7446208' }).properties as Record<string, unknown>),
+              attributes: { type: 'array', items: { type: 'object',
+                properties: { trait_type: { type: 'string' }, value: { type: ['string', 'integer'] } } } },
+            },
+          } } } },
+        '404': { description: 'License metadata unavailable' },
+        '503': { description: 'Product or handle storage unavailable' },
+      },
+    },
+  },
   '/api/license/products/{id}': {
     get: {
       operationId: 'resolveLicense', tags: ['Licenses'], security: [],

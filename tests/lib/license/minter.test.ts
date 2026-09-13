@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { encodeAbiParameters, encodeEventTopics, keccak256, parseAbi, toHex, zeroAddress, type Hex } from 'viem';
+import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, keccak256, parseAbi, toHex, zeroAddress, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { polygonAmoy } from 'viem/chains';
 import { createFakeRedisStore, runRedisLua, closeRedisLuaEngine, type FakeRedisStore } from '../../_helpers/redisLua';
@@ -250,6 +250,9 @@ describe('license worker: viem + real Lua CAS', () => {
     h.store!.strings.set(key, JSON.stringify({ version: 1, kind: 'registration', productId: ID, license: definition, status: 'pending', attempts: 0, nextAttemptAt: NOW }));
     h.rpc.readContract.mockResolvedValue({ exists: false }); h.rpc.sendRawTransaction.mockResolvedValue(TX);
     await runLicenseWorker({ member }); const submitted = JSON.parse(h.store!.strings.get(key)!); expect(submitted).toMatchObject({ kind: 'register', status: 'submitted', attempts: 0, nextAttemptAt: NOW + 60_000 });
+    const args = [BigInt(definition.tokenId), BigInt(definition.supply), definition.transferable, 'https://open-pay.jp/api/license/metadata/' + ID, definition.definitionHash];
+    expect(h.rpc.simulateContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'registerLicense', args }));
+    expect(decodeFunctionData({ abi: LICENSE_ABI, data: h.wallet.prepareTransactionRequest.mock.calls[0][0].data })).toEqual({ functionName: 'registerLicense', args });
     expect(h.store!.zsets.get(LICENSE_DUE_INDEX)?.get(member)).toBe(NOW + 60_000);
     advance(60_000); h.rpc.readContract.mockResolvedValue({ exists: true, definitionHash: definition.definitionHash, maxSupply: 10n, transferable: true }); h.rpc.getTransactionReceipt.mockResolvedValue(mintReceipt(submitted.submission.hash));
     await runLicenseWorker({ member }); expect(h.confirm).toHaveBeenCalledWith(ID, submitted.submission.hash, h.rpc); expect(JSON.parse(h.store!.strings.get(key)!).status).toBe('registered');
