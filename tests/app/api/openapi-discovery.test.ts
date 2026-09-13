@@ -45,11 +45,11 @@ afterEach(() => {
 });
 
 describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
-  it.each([[false, true], [true, false], [true, true]])('license schemas and both public operations follow parent=%s child=%s', async (parent, child) => {
+  it.each([[false, true], [true, false], [true, true]])('license schemas and public operations follow parent=%s child=%s', async (parent, child) => {
     vi.stubEnv('ENABLE_CREATOR_STORE', parent ? '1' : '0');
     vi.stubEnv('ENABLE_LICENSE_NFT', child ? '1' : '0');
     const body = await doc();
-    for (const path of ['/api/license/products/{id}', '/api/license/verify']) {
+    for (const path of ['/api/license/products/{id}', '/api/license/metadata/{id}', '/api/license/verify']) {
       if (parent && child) {
         expect(body.paths[path].get.security).toEqual([]);
         expect(body.paths[path].get).not.toHaveProperty('x-payment-info');

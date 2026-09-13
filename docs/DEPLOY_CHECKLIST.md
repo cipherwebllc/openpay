@@ -1668,6 +1668,11 @@ pending は cron/status が止まるだけで、再点灯後に reconciler が�
 
 ### 16.4 利用ライセンス NFT bootstrap と一般開放（flag 既定 OFF）
 
+- 既存 NFT の URI 修復: 対象チェーンの `NEXT_PUBLIC_LICENSE_NFT_POLYGON` / `_AMOY` と任意の RPC env を端末に設定し、`node scripts/license-set-uri.mjs --product h_… [--chain polygon|amoy]` で現在 URI・metadata URI・calldata を dry-run 確認する（鍵不要）。
+- metadata エンドポイントの公開後、owner 鍵を端末の `LICENSE_OWNER_PRIVATE_KEY` env のみに設定し、同じコマンドに `--send` を付ける。鍵を履歴・ファイル・ログに残さず、server へ配置しない。
+- 表示された tx hash / receipt status と再 dry-run の URI を確認する。既存登録の retry は URI を更新しないため `setURI` が必要。ウォレット側の metadata キャッシュ更新は別途確認する。
+
+
 PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下の復旧手順を人間が確認するまで点灯しない。
 一般出品の公開前に、標準条件ページ `https://open-pay.jp/ja/license-terms/standard-v1` と英語の参考訳 `/en/license-terms/standard-v1` が到達可能であることを確認する。
 `ENABLE_LICENSE_NFT` は `ENABLE_CREATOR_STORE`、`NEXT_PUBLIC_ENABLE_LICENSE_NFT` は
