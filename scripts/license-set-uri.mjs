@@ -7,6 +7,7 @@ import { polygon, polygonAmoy } from 'viem/chains';
 const abi = parseAbi([
   'function uri(uint256 id) view returns (string)',
   'function setURI(uint256 id,string tokenURI)',
+  'function owner() view returns (address)',
 ]);
 
 export async function main(args = process.argv.slice(2), env = process.env) {
@@ -30,6 +31,12 @@ export async function main(args = process.argv.slice(2), env = process.env) {
     tokenId, currentUri, newUri, calldata: encodeFunctionData(call) }, null, 2));
   if (!values.send) return;
   const account = privateKeyToAccount(env.LICENSE_OWNER_PRIVATE_KEY);
+  // setURI は onlyOwner。鍵違い (minter 等) を simulate の無言 revert で終わらせず、アドレスだけを示して止める。
+  const owner = await rpc.readContract({ address, abi, functionName: 'owner' });
+  console.log('signer:', account.address, 'owner:', owner);
+  if (account.address.toLowerCase() !== String(owner).toLowerCase()) {
+    throw new Error(`LICENSE_OWNER_PRIVATE_KEY is for ${account.address} but the contract owner is ${owner}`);
+  }
   const { request } = await rpc.simulateContract({ ...call, account });
   const wallet = createWalletClient({ account, chain, transport });
   const hash = await wallet.writeContract(request);
