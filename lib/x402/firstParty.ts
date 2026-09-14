@@ -35,6 +35,7 @@ export type FirstPartyResource = {
     | '/api/paid/jpyc/services'
     | '/api/paid/stablecoin-payments'
     | `/api/paid/japan-web3-directory/${string}`;
+  title: string;
   priceJpyc: string;
   category: 'api' | 'data';
   description: string;
@@ -53,6 +54,7 @@ export type FirstPartyResource = {
 export const FIRST_PARTY_RESOURCES = [
   {
     path: '/api/paid/demo',
+    title: 'x402 Demo',
     priceJpyc: '1',
     category: 'api',
     description: 'OpenPay x402 demo — pay 1 JPYC and unlock a signed hello.',
@@ -75,6 +77,7 @@ export const FIRST_PARTY_RESOURCES = [
   },
   {
     path: '/api/paid/stores',
+    title: 'JPYC Acceptance Directory',
     priceJpyc: '5',
     category: 'data',
     description:

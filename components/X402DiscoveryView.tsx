@@ -34,6 +34,7 @@ import { useSiweSession } from '@/hooks/useSiweSession';
 import { ConnectButton } from '@/components/ConnectButton';
 import { Field } from '@/components/Field';
 import { env } from '@/lib/env';
+import { splitDisplayTitle } from '@/lib/x402/displayTitle';
 import { shortAddress } from '@/lib/format';
 import { AGENTIC_MARKET_URL, X402_LIST_URL, type UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
 import { REVERIFY_AUTH_HIDE_THRESHOLD } from '@/lib/x402/reverifyThresholds';
@@ -49,6 +50,7 @@ function categoryIcon(category: string) {
 }
 
 type DiscoveryItem = {
+  title?: string;
   resource: string;
   description: string;
   /** 「いつ・何のために買うか」(英語・任意)。未設定なら表示しない。 */
@@ -61,8 +63,8 @@ type DiscoveryItem = {
   verifiedAt?: string | null;
   official?: boolean;
   /** dual-rail の USDC/Base 面 (表示用・リレー点灯中のみ server が返す)。 */
-  usdc?: { priceUsd: string };
-  accepts: Array<{ extra?: { openpay?: { feeValue?: string } } }>;
+  usdc?: { priceUsd: string; serviceName?: string };
+  accepts: Array<{ payTo?: string; extra?: { openpay?: { feeValue?: string } } }>;
 };
 
 const EMPTY_DISCOVERY_ITEMS: DiscoveryItem[] = [];
@@ -271,6 +273,7 @@ export function X402DiscoveryView({
   const [attested, setAttested] = useState(false);
   // コピー済みフィードバック (key 単位・1.5s でリセット)。
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogCategory, setCatalogCategory] = useState<CatalogCategory | null>(null);
   const [catalogCurrency, setCatalogCurrency] = useState<CatalogCurrency>('all');
@@ -320,9 +323,9 @@ export function X402DiscoveryView({
   // JPYC (動的) と USDC (静的) を 1 つの一覧に。並びは JPYC (first-party 先頭の server 順) → USDC。
   const entries = useMemo<CatalogEntry[]>(
     () => [
-      ...items.map((item) => ({
+      ...items.map((item, index) => ({
         kind: 'jpyc' as const,
-        key: `jpyc:${item.resource}`,
+        key: `jpyc:${item.resource}:${item.accepts[0]?.payTo ?? index}`,
         category: item.category.trim().toLowerCase(),
         // dual (USDC 併売) 出品は "usdc" のテキスト検索でも見つかるようにする。
         searchText: `${item.description} ${item.resource}${item.usdc ? ' usdc' : ''}`.toLowerCase(),
@@ -630,8 +633,10 @@ export function X402DiscoveryView({
   const cardHead = (opts: {
     category: string;
     priceNode: ReactNode;
-    /** カードの見出し。未指定なら description を見出しにする (JPYC 掲載は名前を持たない)。 */
+    /** 未指定の見出しは serviceName / description / URL から導出する。 */
     title?: string;
+    usdc?: { serviceName?: string };
+    license?: string;
     description: string;
     /** 購入トリガー (任意)。見出しの下に控えめに出す (JA ページで英文が主役にならないように)。 */
     trigger?: string;
@@ -643,6 +648,15 @@ export function X402DiscoveryView({
     /** dual (JPYC 出品の USDC 併売): JPYC チップの隣に USDC チップも出す。 */
     dualUsdc?: boolean;
   }) => {
+    // 見出し = 名前 (無ければ description の先頭文)・本文 = 見出しと重複しない残り。
+    const { title, body } = splitDisplayTitle({ ...opts, resource: opts.url });
+    const expanded = expandedKeys.has(opts.copyKey);
+    // 「続きを読む」は clamp で隠れ得る長文か、折りたたみ時に出さない利用条件があるカードだけ。
+    const canExpand =
+      title.length > 60 ||
+      body.length > 120 ||
+      (opts.trigger?.length ?? 0) > 120 ||
+      Boolean(opts.license);
     const Icon = categoryIcon(opts.category);
     const urlIsHttps = isHttpsUrl(opts.url);
     // 更新型商品の「生きている」証拠 (最終イベント日・総件数)。該当商品にだけ出す。
@@ -681,19 +695,36 @@ export function X402DiscoveryView({
           </div>
           {opts.priceNode}
         </div>
-        <p className="mt-2 text-sm font-bold leading-snug text-slate-900">
-          {opts.title ?? opts.description}
+        <p
+          className={`mt-2 text-sm font-bold leading-snug text-slate-900 ${expanded ? '' : 'line-clamp-2'}`}
+        >
+          {title}
         </p>
-        {opts.title && (
-          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-slate-500">
-            {opts.description}
+        {body && body !== title && (
+          <p className={`mt-1 text-xs leading-relaxed text-slate-500 ${expanded ? '' : 'line-clamp-3'}`}>
+            {body}
           </p>
         )}
         {opts.trigger && (
           <p className="mt-1 flex items-start gap-1.5 text-xs leading-relaxed text-slate-500">
             <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand" aria-hidden />
-            <span className="line-clamp-2">{opts.trigger}</span>
+            <span className={expanded ? '' : 'line-clamp-2'}>{opts.trigger}</span>
           </p>
+        )}
+        {canExpand && (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            className="mt-1 text-xs font-medium text-brand hover:text-brand-dark hover:underline"
+            onClick={() => setExpandedKeys((keys) => {
+              const next = new Set(keys);
+              if (next.has(opts.copyKey)) next.delete(opts.copyKey);
+              else next.add(opts.copyKey);
+              return next;
+            })}
+          >
+            {expanded ? t('readLess') : t('readMore')}
+          </button>
         )}
         {freshness && (
           <p className="mt-1 flex items-center gap-1.5 text-xs leading-relaxed text-emerald-700">
@@ -1110,10 +1141,12 @@ export function X402DiscoveryView({
                     </span>
                   ),
                   description: r.description,
+                  usdc: r.usdc,
+                  license: r.license,
                   url: r.url,
                   copyKey: `owned-${r.id}`,
                 })}
-                {(Boolean(r.license) || Boolean(r.docsUrl && isHttpsUrl(r.docsUrl))) && (
+                {(Boolean(r.license && expandedKeys.has(`owned-${r.id}`)) || Boolean(r.docsUrl && isHttpsUrl(r.docsUrl))) && (
                   <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[11px] leading-relaxed text-slate-500">
                     {r.docsUrl && isHttpsUrl(r.docsUrl) && (
                       <a
@@ -1125,7 +1158,7 @@ export function X402DiscoveryView({
                         {t('docsLink')}
                       </a>
                     )}
-                    {r.license && (
+                    {r.license && expandedKeys.has(`owned-${r.id}`) && (
                       <span className="min-w-0">
                         {t('licenseMeta', { license: r.license })}
                       </span>
@@ -1452,7 +1485,7 @@ export function X402DiscoveryView({
               const updatedDate = isoDate(item.updatedAt);
               const docsUrl = item.docsUrl && isHttpsUrl(item.docsUrl) ? item.docsUrl : null;
               const hasComparisonMeta =
-                verifiedDays !== null || updatedDate !== null || Boolean(item.license) || docsUrl !== null;
+                verifiedDays !== null || updatedDate !== null || Boolean(item.license && expandedKeys.has(`cat-${entry.key}`)) || docsUrl !== null;
               // atomic JPYC → 表示 (小数あり)。1% 手数料は price/100 で端数が出るため、整数除算だと
               // 切り捨てて誤表示する → formatUnits で小数を保つ。合計も atomic で加算してから整形する。
               const fee = feeAtomic === null ? null : formatUnits(feeAtomic, 18);
@@ -1503,10 +1536,13 @@ export function X402DiscoveryView({
                         )}
                       </div>
                     ),
+                    title: item.title,
+                    usdc: item.usdc,
+                    license: item.license,
                     description: item.description,
                     trigger: item.trigger,
                     url: item.resource,
-                    copyKey: `cat-${item.resource}`,
+                    copyKey: `cat-${entry.key}`,
                     official: item.official === true,
                   })}
                   {hasComparisonMeta && (
@@ -1535,7 +1571,7 @@ export function X402DiscoveryView({
                           {t('docsLink')}
                         </a>
                       )}
-                      {item.license && (
+                      {item.license && expandedKeys.has(`cat-${entry.key}`) && (
                         <span className="min-w-0">
                           {t('licenseMeta', { license: item.license })}
                         </span>

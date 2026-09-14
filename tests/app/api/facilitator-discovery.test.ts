@@ -785,6 +785,7 @@ describe('x402 /discovery', () => {
     expect(item.license).toBe(validBody.license);
     expect(item.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(item).not.toHaveProperty('official');
+    expect(item).not.toHaveProperty('title');
     expect(item.accepts).toHaveLength(1);
     const pr = item.accepts[0];
     expect(pr.scheme).toBe('exact');
@@ -864,6 +865,8 @@ describe('x402 /discovery', () => {
       'https://open-pay.jp/api/paid/demo',
       'https://open-pay.jp/api/paid/stores',
     ]);
+    expect(body.items[0]).toHaveProperty('title', 'x402 Demo');
+    expect(body.items[1]).toHaveProperty('title', 'JPYC Acceptance Directory');
     expect(body.items[0].priceJpyc).toBe('1');
     expect(body.items.every((item) => item.official === true)).toBe(true);
     expect(body.items.every((item) => item.docsUrl === 'https://open-pay.jp/api/openapi.json')).toBe(true);
@@ -1087,12 +1090,16 @@ describe('x402 /discovery', () => {
     expect(body.paths).toHaveProperty('/api/discovery');
     const schema = body.components.schemas.DiscoveryItem;
     expect(schema.properties).toMatchObject({
+      title: { type: 'string', description: 'Short display name; absent for third-party listings' },
+      trigger: { type: 'string' },
       docsUrl: { type: 'string', format: 'uri', pattern: '^https://', maxLength: 512 },
       license: { type: 'string', maxLength: 60 },
       updatedAt: { type: 'string', format: 'date-time' },
       official: { type: 'boolean', const: true },
       verifiedAt: { type: ['string', 'null'], format: 'date-time' },
     });
+    expect(schema.required).not.toContain('title');
+    expect(schema.required).not.toContain('trigger');
     expect(schema.required).not.toEqual(
       expect.arrayContaining(['docsUrl', 'license', 'updatedAt', 'official']),
     );
@@ -1100,7 +1107,7 @@ describe('x402 /discovery', () => {
 });
 
 describe('discovery の dual-rail USDC 面公開', () => {
-  it('flag ON: usdc 面つき登録は catalog item に価格のみ載る (payTo/serviceName は出さない)', async () => {
+  it('flag ON: usdc 面つき登録は catalog item に価格と serviceName を載せる (payTo は出さない)', async () => {
     vi.stubEnv('ENABLE_X402_DUAL_RAIL', '1');
     const { resources, discovery } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
@@ -1112,7 +1119,7 @@ describe('discovery の dual-rail USDC 面公開', () => {
       items: Array<{ resource: string; usdc?: Record<string, unknown> }>;
     };
     const item = body.items.find((i) => i.resource === validBody.url);
-    expect(item?.usdc).toEqual({ priceUsd: '0.01' });
+    expect(item?.usdc).toEqual({ priceUsd: '0.01', serviceName: 'S' });
   });
 
   it('flag OFF: usdc 面は catalog に出ない (買えないのに USDC 対応と見せない)', async () => {

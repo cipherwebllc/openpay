@@ -1,5 +1,6 @@
 export const JPYC_SHOPS_SEARCH_RESOURCE = {
   path: '/api/paid/jpyc-shops/search',
+  title: 'JPYC Shops Search',
   priceJpyc: '2',
   category: 'data',
   description:

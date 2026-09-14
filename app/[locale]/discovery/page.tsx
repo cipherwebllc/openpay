@@ -1,6 +1,7 @@
 // x402 facilitator の公開カタログ + 加盟店登録ページ。
 // flag NEXT_PUBLIC_ENABLE_X402_FACILITATOR OFF (本番既定) では notFound = ページ自体が存在しない (inert)。
 
+import type { Metadata } from 'next';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { hasLocale } from 'next-intl';
 import { notFound } from 'next/navigation';
@@ -21,6 +22,22 @@ import { MAX_RESOURCES_PER_MERCHANT } from '@/lib/x402/registry';
 import { USDC_CATALOG_ITEMS } from '@/lib/x402/usdcCatalog';
 
 export const runtime = 'nodejs';
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  if (!hasLocale(LOCALES, locale)) return {};
+  setRequestLocale(locale);
+  const t = await getTranslations('Facilitator');
+  return {
+    title: `${t('title')} · OpenPay`,
+    description: t('subtitle'),
+    alternates: { types: { 'application/json': '/api/discovery' } },
+  };
+}
 
 export default async function DiscoveryPage({
   params,
