@@ -79,6 +79,8 @@ type CatalogEntry =
   | { kind: 'usdc'; key: string; category: string; searchText: string; item: UsdcCatalogItem };
 
 type RegisteredResource = {
+  title?: string;
+  trigger?: string;
   url: string;
   description: string;
   priceJpyc: string;
@@ -89,6 +91,8 @@ type RegisteredResource = {
 
 // owner 一覧 (GET /api/facilitator/resources) の要素。編集に id + payTo が要る。
 type OwnedResource = {
+  title?: string;
+  trigger?: string;
   id: string;
   url: string;
   description: string;
@@ -119,6 +123,8 @@ const EMPTY_FORM = {
   priceJpyc: '',
   category: '',
   payTo: '',
+  title: '',
+  trigger: '',
   docsUrl: '',
   license: '',
   // dual-rail USDC 面 (NEXT_PUBLIC_ENABLE_X402_DUAL_RAIL 点灯時のみ UI に出る)。
@@ -391,6 +397,8 @@ export function X402DiscoveryView({
       priceJpyc: r.priceJpyc,
       category: r.category,
       payTo: r.payTo,
+      title: r.title ?? '',
+      trigger: r.trigger ?? '',
       docsUrl: r.docsUrl ?? '',
       license: r.license ?? '',
       usdcEnabled: Boolean(r.usdc),
@@ -429,6 +437,8 @@ export function X402DiscoveryView({
         priceJpyc: form.priceJpyc,
         category: form.category,
         ...(form.payTo ? { payTo: form.payTo } : {}),
+        ...(form.title ? { title: form.title } : {}),
+        ...(form.trigger ? { trigger: form.trigger } : {}),
         ...(form.docsUrl ? { docsUrl: form.docsUrl } : {}),
         ...(form.license ? { license: form.license } : {}),
         // USDC 面は checkbox ON のときだけ送る (OFF = 編集で面を外す)。UI flag ではなく
@@ -976,7 +986,7 @@ export function X402DiscoveryView({
             {/* 任意項目は折りたたみ (既定で閉じる)。編集中か入力済みなら開いた状態で見せる。 */}
             <details
               className="group rounded-xl border border-slate-200/70"
-              open={Boolean(editId || form.docsUrl || form.license)}
+              open={Boolean(editId || form.title || form.trigger || form.docsUrl || form.license)}
             >
               <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2.5 text-sm font-semibold text-slate-700">
                 {t('formOptionalGroupTitle')}
@@ -986,6 +996,30 @@ export function X402DiscoveryView({
                 />
               </summary>
               <div className="space-y-3 border-t border-slate-100 px-3 py-3">
+                <Field label={t('formTitleLabel')}>
+                  <input
+                    className={inputCls}
+                    placeholder={t('formTitle')}
+                    maxLength={60}
+                    value={form.title}
+                    onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                  />
+                  <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+                    {t('formTitleHint')}
+                  </p>
+                </Field>
+                <Field label={t('formTriggerLabel')}>
+                  <input
+                    className={inputCls}
+                    placeholder={t('formTrigger')}
+                    maxLength={200}
+                    value={form.trigger}
+                    onChange={(e) => setForm((f) => ({ ...f, trigger: e.target.value }))}
+                  />
+                  <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
+                    {t('formTriggerHint')}
+                  </p>
+                </Field>
                 <Field label={t('formDocsUrlLabel')}>
                   <input
                     type="url"
@@ -1189,6 +1223,8 @@ export function X402DiscoveryView({
                       )}
                     </span>
                   ),
+                  title: r.title,
+                  trigger: r.trigger,
                   description: r.description,
                   usdc: r.usdc,
                   license: r.license,

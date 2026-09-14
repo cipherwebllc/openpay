@@ -65,6 +65,8 @@ export type X402Resource = {
   description: string;
   priceJpyc: string; // human JPYC 整数 (表示価格・seller 受領額)
   category: string;
+  title?: string;
+  trigger?: string;
   docsUrl?: string;
   license?: string;
   payTo: string; // seller 受取先 (既定 = merchant)
@@ -83,6 +85,8 @@ export type X402ResourceInput = {
   description: string;
   priceJpyc: string;
   category: string;
+  title?: string;
+  trigger?: string;
   docsUrl?: string;
   license?: string;
   payTo: string;
@@ -105,6 +109,8 @@ export type X402Settlement = {
 const MAX_URL = 2048;
 const MAX_DESC = 280;
 const MAX_CATEGORY = 40;
+export const MAX_RESOURCE_TITLE = 60;
+export const MAX_RESOURCE_TRIGGER = 200;
 export const MAX_RESOURCE_DOCS_URL = 512;
 export const MAX_RESOURCE_LICENSE = 60;
 export const MAX_USDC_SERVICE_NAME = 60;
@@ -176,6 +182,28 @@ export function parseResourceInput(
   const category = typeof r.category === 'string' ? r.category.trim() : '';
   if (category.length < 1 || category.length > MAX_CATEGORY) {
     return { ok: false, reason: 'invalid_category' };
+  }
+  let title: string | undefined;
+  if (r.title !== undefined) {
+    if (typeof r.title !== 'string') {
+      return { ok: false, reason: 'invalid_title' };
+    }
+    const cleaned = stripControlChars(r.title).trim();
+    if (cleaned.length > MAX_RESOURCE_TITLE) {
+      return { ok: false, reason: 'invalid_title' };
+    }
+    if (cleaned.length > 0) title = cleaned;
+  }
+  let trigger: string | undefined;
+  if (r.trigger !== undefined) {
+    if (typeof r.trigger !== 'string') {
+      return { ok: false, reason: 'invalid_trigger' };
+    }
+    const cleaned = stripControlChars(r.trigger).trim();
+    if (cleaned.length > MAX_RESOURCE_TRIGGER) {
+      return { ok: false, reason: 'invalid_trigger' };
+    }
+    if (cleaned.length > 0) trigger = cleaned;
   }
   let docsUrl: string | undefined;
   if (r.docsUrl !== undefined && r.docsUrl !== '') {
@@ -251,6 +279,8 @@ export function parseResourceInput(
       description,
       priceJpyc,
       category,
+      title,
+      trigger,
       docsUrl,
       license,
       payTo,
@@ -308,6 +338,8 @@ export async function createResource(
     description: input.description,
     priceJpyc: input.priceJpyc,
     category: input.category,
+    ...(input.title ? { title: input.title } : {}),
+    ...(input.trigger ? { trigger: input.trigger } : {}),
     ...(input.docsUrl ? { docsUrl: input.docsUrl } : {}),
     ...(input.license ? { license: input.license } : {}),
     ...(input.usdc ? { usdc: input.usdc } : {}),
@@ -407,7 +439,7 @@ export const CAS_OWNER_GUARD =
   "if type(o)~='table' or type(o.merchant)~='string' then return -2 end; " +
   'if string.lower(o.merchant)~=string.lower(ARGV[1]) then return 0 end; ';
 
-// owner 一致時のみ編集可能フィールド (url/description/priceJpyc/category/docsUrl/license/payTo/usdc) を更新する CAS。
+// owner 一致時のみ編集可能フィールド (url/description/priceJpyc/category/title/trigger/docsUrl/license/payTo/usdc) を更新する CAS。
 // read→write を atomic にし (handleStore と同流儀)、特に soft-delete (active:false) との競合で
 // 削除済 resource を復活させない — active/id/merchant/network/createdAt は Lua が現値を保持する。
 // soft-delete 済 (active:false) は編集不可 (-3) = 保持した監査データ (settlement が参照する当時の
@@ -426,6 +458,8 @@ export const CAS_UPDATE =
   "if ARGV[8]=='' then o.license=nil else o.license=ARGV[8] end; " +
   // usdc (dual-rail 面) は検証済み input を JSON で受け取り丸ごと置換 (空 = 面を外す)。
   "if ARGV[10]=='' then o.usdc=nil else o.usdc=cjson.decode(ARGV[10]) end; " +
+  "if ARGV[11]=='' then o.title=nil else o.title=ARGV[11] end; " +
+  "if ARGV[12]=='' then o.trigger=nil else o.trigger=ARGV[12] end; " +
   'o.updatedAt=tonumber(ARGV[9]); ' +
   "redis.call('SET',KEYS[1],cjson.encode(o)); return cjson.encode(o)";
 
@@ -451,7 +485,7 @@ export type UpdateResourceResult =
   | { ok: true; resource: X402Resource }
   | { ok: false; reason: 'not_found' | 'forbidden' | 'storage' };
 
-// owner 限定で編集可能フィールド (url/description/priceJpyc/category/docsUrl/license/payTo/usdc) を更新する。
+// owner 限定で編集可能フィールド (url/description/priceJpyc/category/title/trigger/docsUrl/license/payTo/usdc) を更新する。
 // id/merchant/network/createdAt/active は不変。**merchant !== owner は forbidden** = 他人の掲載や
 // payTo (送金先) を書き換えさせない (認可の要)。owner 確認と書込を CAS で原子化し、KV エラー/破損は
 // not_found ではなく storage に倒す (outage を「未存在」と誤魔化さない)。input は検証済を渡す。
@@ -472,6 +506,8 @@ export async function updateResource(
     input.license ?? '',
     String(nowMs),
     input.usdc ? JSON.stringify(input.usdc) : '',
+    input.title ?? '',
+    input.trigger ?? '',
   ]);
   if (!cas.ok) return { ok: false, reason: 'storage' };
   // -1=未存在 / -3=削除済 → どちらも「編集可能な resource は無い」= not_found。

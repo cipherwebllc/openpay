@@ -59,6 +59,8 @@ const OWNED = {
   payTo: '0x1111111111111111111111111111111111111111',
 };
 type OwnedFixture = typeof OWNED & {
+  title?: string;
+  trigger?: string;
   docsUrl?: string;
   license?: string;
   hidden?: boolean;
@@ -446,7 +448,7 @@ describe('X402DiscoveryView', () => {
       screen.getByText('価格'),
       screen.getByText('カテゴリー'),
       screen.getByText('受取アドレス'),
-      screen.getByText('任意項目（Docs・利用条件）'),
+      screen.getByText('任意項目（表示名・いつ使うか・Docs・利用条件）'),
       screen.getByText('Docs URL（任意）'),
       screen.getByText('利用条件（任意）'),
     ];
@@ -587,6 +589,8 @@ describe('X402DiscoveryView', () => {
   it('編集: 編集ボタンでフォームに値が入り PATCH /resources/:id を呼ぶ', async () => {
     const ownedWithComparison = {
       ...OWNED,
+      title: 'Tokyo Weather API',
+      trigger: 'When planning a Tokyo trip.',
       docsUrl: 'https://docs.example.jp/owned.json',
       license: 'Attribution required.',
     };
@@ -600,6 +604,13 @@ describe('X402DiscoveryView', () => {
     await waitFor(() => expect(screen.getByDisplayValue(OWNED.url)).toBeInTheDocument());
     expect(screen.getByDisplayValue(ownedWithComparison.docsUrl)).toBeInTheDocument();
     expect(screen.getByDisplayValue(ownedWithComparison.license)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(ownedWithComparison.title)).toBeInTheDocument();
+    expect(screen.getByDisplayValue(ownedWithComparison.trigger)).toBeInTheDocument();
+    expect(screen.getByText('任意項目（表示名・いつ使うか・Docs・利用条件）').closest('details')).toHaveAttribute('open');
+    expect(screen.getByText(ownedWithComparison.title)).toBeInTheDocument();
+    expect(screen.getByText(ownedWithComparison.trigger)).toBeInTheDocument();
+    fireEvent.change(screen.getByDisplayValue(ownedWithComparison.title), { target: { value: '' } });
+    fireEvent.change(screen.getByDisplayValue(ownedWithComparison.trigger), { target: { value: '' } });
     // 価格を書き換えて更新。
     const price = screen.getByPlaceholderText('3');
     fireEvent.change(price, { target: { value: '4000' } });
@@ -610,6 +621,10 @@ describe('X402DiscoveryView', () => {
         expect.objectContaining({ method: 'PATCH' }),
       ),
     );
+    const patch = fetchFn.mock.calls.find(([, init]) => init?.method === 'PATCH');
+    const sent = JSON.parse(String(patch![1]?.body));
+    expect(sent).not.toHaveProperty('title');
+    expect(sent).not.toHaveProperty('trigger');
     expect(await screen.findByText('更新しました。')).toBeVisible();
     expect(screen.getByText('新しい API を出品する').closest('details')).toHaveAttribute('open');
   });
@@ -669,6 +684,8 @@ describe('X402DiscoveryView', () => {
     fireEvent.change(screen.getByPlaceholderText('3'), {
       target: { value: '500' },
     });
+    fireEvent.change(screen.getByPlaceholderText('Tokyo Weather API'), { target: { value: 'Tokyo Weather API' } });
+    fireEvent.change(screen.getByPlaceholderText('When an agent needs hourly Tokyo weather for the next 48 hours.'), { target: { value: 'When planning a Tokyo trip.' } });
     fireEvent.change(
       screen.getByPlaceholderText('OpenAPI またはドキュメントの HTTPS URL'),
       { target: { value: 'https://docs.example.jp/openapi.json' } },
@@ -706,6 +723,8 @@ describe('X402DiscoveryView', () => {
     expect(sentBody).toMatchObject({
       url: 'https://api.example.jp/paid/new',
       description: '新しい有料 API',
+      title: 'Tokyo Weather API',
+      trigger: 'When planning a Tokyo trip.',
       priceJpyc: '500',
       category: 'data',
       docsUrl: 'https://docs.example.jp/openapi.json',
@@ -1227,4 +1246,15 @@ describe('X402DiscoveryView readable cards', () => {
     catalog([{ ...ITEM, trigger: 'Trigger '.repeat(18) }]);
     expect(await screen.findByRole('button', { name: '続きを読む' })).toBeInTheDocument();
   });
+});
+
+
+it.each([['Tokyo Weather API', 60], ['When an agent needs hourly Tokyo weather for the next 48 hours.', 200]])('optional group opens with %s alone', async (placeholder, maxLength) => {
+  renderAsOwner([]);
+  const input = await screen.findByPlaceholderText(placeholder);
+  const details = input.closest('details')!;
+  expect(details).not.toHaveAttribute('open');
+  expect(input).toHaveAttribute('maxLength', String(maxLength));
+  fireEvent.change(input, { target: { value: 'Weather' } });
+  expect(details).toHaveAttribute('open');
 });

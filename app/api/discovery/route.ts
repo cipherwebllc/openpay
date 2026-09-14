@@ -149,6 +149,8 @@ export async function GET(): Promise<NextResponse> {
     const updatedAt = updatedAtIso(r.updatedAt);
     return {
       resource: r.url,
+      ...(r.title ? { title: r.title } : {}),
+      ...(r.trigger ? { trigger: r.trigger } : {}),
       description: r.description,
       category: r.category,
       priceJpyc: r.priceJpyc,
