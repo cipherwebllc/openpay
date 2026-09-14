@@ -193,6 +193,10 @@ export interface OpenPaySession {
 }
 
 export interface DiscoveryItem {
+  /** Short display name (first-party, or seller-provided). */
+  title?: string;
+  /** One line describing when an agent should buy this resource (optional). */
+  trigger?: string;
   resource: string;
   description?: string;
   category?: string;

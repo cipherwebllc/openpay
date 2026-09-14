@@ -362,3 +362,17 @@ describe('script を直接実行したときの戻り値 (Lua → RESP)', () => 
     expect(await runRedisLua(CAS_CREATE, keys, argv, store)).toBe(-2);
   });
 });
+
+
+it('real Lua persists, replaces and deletes optional title / trigger', async () => {
+  const metadata = { title: 'Tokyo Weather API', trigger: 'When an agent needs Tokyo weather.' };
+  expect((await createResource(input(metadata), 'meta', 1)).ok).toBe(true);
+  expect(JSON.parse(store.strings.get(resourceKey('meta'))!)).toMatchObject(metadata);
+  const updated = { title: 'Updated weather', trigger: 'When planning a Tokyo trip.' };
+  expect(await updateResource('meta', OWNER, input(updated), 2)).toMatchObject({ ok: true, resource: updated });
+  expect(JSON.parse(store.strings.get(resourceKey('meta'))!)).toMatchObject(updated);
+  expect((await updateResource('meta', OWNER, input(), 3)).ok).toBe(true);
+  const saved = JSON.parse(store.strings.get(resourceKey('meta'))!);
+  expect(saved).not.toHaveProperty('title');
+  expect(saved).not.toHaveProperty('trigger');
+});

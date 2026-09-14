@@ -85,6 +85,10 @@ vi.mock('@/lib/kv', () => ({
       else delete o.license;
       if (args[9]) o.usdc = JSON.parse(args[9]);
       else delete o.usdc;
+      if (args[10]) o.title = args[10];
+      else delete o.title;
+      if (args[11]) o.trigger = args[11];
+      else delete o.trigger;
       o.updatedAt = Number(args[8]);
       const enc = JSON.stringify(o);
       store.kv.set(keys[0], enc);
@@ -791,5 +795,28 @@ describe('lib/x402/registry usdc (dual-rail 面)', () => {
     const off = await updateResource('u2', OWNER, input(), 3000);
     expect(off.ok).toBe(true);
     expect((await getResource('u2'))?.usdc).toBeUndefined();
+  });
+});
+
+
+describe('optional title / trigger parsing', () => {
+  it.each([['title', 60], ['trigger', 200]] as const)('%s: sanitizes before validating the boundary', (field, max) => {
+    const value = '天'.repeat(max);
+    expect(parseResourceInput({ ...input(), [field]: ` \u0000${value}\n ` }, OWNER)).toMatchObject({
+      ok: true, input: { [field]: value },
+    });
+    expect(parseResourceInput({ ...input(), [field]: value + '天' }, OWNER)).toEqual({
+      ok: false, reason: `invalid_${field}`,
+    });
+    for (const empty of [undefined, '', ' \u0000\n ']) {
+      const result = parseResourceInput({ ...input(), [field]: empty }, OWNER);
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.input[field]).toBeUndefined();
+    }
+    for (const invalid of [null, 1, true, [], {}]) {
+      expect(parseResourceInput({ ...input(), [field]: invalid }, OWNER)).toEqual({
+        ok: false, reason: `invalid_${field}`,
+      });
+    }
   });
 });

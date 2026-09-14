@@ -88,6 +88,10 @@ vi.mock('@/lib/kv', () => ({
       else delete o.docsUrl;
       if (args[7]) o.license = args[7];
       else delete o.license;
+      if (args[10]) o.title = args[10];
+      else delete o.title;
+      if (args[11]) o.trigger = args[11];
+      else delete o.trigger;
       o.updatedAt = Number(args[8]);
       const enc = JSON.stringify(o);
       store.kv.set(keys[0], enc);
@@ -1090,7 +1094,7 @@ describe('x402 /discovery', () => {
     expect(body.paths).toHaveProperty('/api/discovery');
     const schema = body.components.schemas.DiscoveryItem;
     expect(schema.properties).toMatchObject({
-      title: { type: 'string', description: 'Short display name; absent for third-party listings' },
+      title: { type: 'string', description: 'Short display name (first-party, or seller-provided)' },
       trigger: { type: 'string' },
       docsUrl: { type: 'string', format: 'uri', pattern: '^https://', maxLength: 512 },
       license: { type: 'string', maxLength: 60 },
@@ -1134,5 +1138,46 @@ describe('discovery の dual-rail USDC 面公開', () => {
     const item = body.items.find((i) => i.resource === validBody.url);
     expect(item).toBeDefined();
     expect(item?.usdc).toBeUndefined();
+  });
+});
+
+
+describe('seller title / trigger', () => {
+  it('POST → discovery + owned GET, PATCH → update / delete', async () => {
+    const { resources, discovery, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const metadata = { title: 'Tokyo Weather API', trigger: 'When an agent needs Tokyo weather.' };
+    const created = await resources.POST(postReq({ ...validBody, ...metadata }));
+    expect(created.status).toBe(201);
+    const { resource } = await created.json();
+    expect(resource).toMatchObject(metadata);
+    const publicItem = async () => {
+      const body = await (await discovery()).json();
+      return body.items.find((item: { resource: string }) => item.resource === validBody.url);
+    };
+    expect(await publicItem()).toMatchObject(metadata);
+    expect((await (await resources.GET()).json()).resources).toContainEqual(expect.objectContaining({ id: resource.id, ...metadata }));
+    const updated = { title: 'Updated weather', trigger: 'When planning a Tokyo trip.' };
+    const patched = await idRoute.PATCH(patchReq({ ...validBody, ...updated }), ctx(resource.id));
+    expect(patched.status).toBe(200);
+    expect((await patched.json()).resource).toMatchObject(updated);
+    expect(await publicItem()).toMatchObject(updated);
+    const cleared = await idRoute.PATCH(patchReq({ ...validBody, title: '', trigger: '' }), ctx(resource.id));
+    expect(cleared.status).toBe(200);
+    for (const item of [(await cleared.json()).resource, await publicItem(), (await (await resources.GET()).json()).resources[0]]) {
+      expect(item).not.toHaveProperty('title');
+      expect(item).not.toHaveProperty('trigger');
+    }
+  });
+
+  it.each([['title', 61], ['trigger', 201]] as const)('%s over limit returns 400 for POST and PATCH', async (field, length) => {
+    const { resources, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    const body = { ...validBody, [field]: 'x'.repeat(length) };
+    for (const res of [await resources.POST(postReq(body)), await idRoute.PATCH(patchReq(body), ctx(id))]) {
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: `invalid_${field}` });
+    }
   });
 });

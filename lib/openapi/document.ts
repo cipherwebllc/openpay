@@ -410,7 +410,7 @@ const DISCOVERY_OPENAPI_SCHEMAS = {
     ],
     properties: {
       resource: { type: 'string', format: 'uri' },
-      title: { type: 'string', description: 'Short display name; absent for third-party listings' },
+      title: { type: 'string', description: 'Short display name (first-party, or seller-provided)' },
       trigger: { type: 'string', description: 'When to use this resource' },
       description: { type: 'string' },
       category: { type: 'string' },
