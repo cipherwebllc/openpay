@@ -49,6 +49,7 @@ const ENVELOPE_OUTPUT = {
 
 export const DIRECTORY_LIST_RESOURCE = {
   path: '/api/paid/japan-web3-directory',
+  title: 'Japan Web3 Directory',
   priceJpyc: '2',
   category: 'data',
   description:
@@ -65,6 +66,7 @@ export const DIRECTORY_LIST_RESOURCE = {
 
 export const DIRECTORY_SEARCH_RESOURCE = {
   path: '/api/paid/japan-web3-directory/search',
+  title: 'Japan Web3 Directory Search',
   priceJpyc: '2',
   category: 'data',
   description:
@@ -85,6 +87,7 @@ export const DIRECTORY_DETAIL_PRICE_JPYC = '1';
 export function directoryDetailResource(slug: string): FirstPartyResource {
   return {
     path: `/api/paid/japan-web3-directory/${slug}`,
+    title: `Japan Web3 Directory: ${slug}`,
     priceJpyc: DIRECTORY_DETAIL_PRICE_JPYC,
     category: 'data',
     description: `Japan Web3 Directory detail for ${slug} — 1 JPYC.`,
@@ -222,6 +225,7 @@ const SERVICE_MONITOR_OUTPUT = {
 
 export const JPYC_SERVICES_RESOURCE = {
   path: '/api/paid/jpyc/services',
+  title: 'JPYC Service Monitor',
   priceJpyc: '2',
   category: 'data',
   description:
@@ -388,6 +392,7 @@ const PAYMENT_MONITOR_OUTPUT = {
 
 export const JPYC_PAYMENTS_RESOURCE = {
   path: '/api/paid/stablecoin-payments',
+  title: 'Japan Stablecoin Payment Monitor',
   priceJpyc: '2',
   category: 'data',
   description:

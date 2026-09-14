@@ -2697,6 +2697,8 @@
     "opError": "Operation failed. Please try again."
   },
   "Facilitator": {
+    "readMore": "Read more",
+    "readLess": "Show less",
     "title": "AI Store",
     "subtitle": "APIs and data that AI agents pay for per request with x402.",
     "pillJpyc": "JPYC · Polygon",

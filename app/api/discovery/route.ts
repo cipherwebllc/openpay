@@ -106,6 +106,7 @@ export async function GET(): Promise<NextResponse> {
       return [
         {
           resource: firstPartyResourceUrl(r),
+          title: r.title,
           description: r.description,
           // エージェントが「いつ・何のために買うか」を仕様より先に判断できるようにする
           // (未設定の商品では省く)。
@@ -154,10 +155,10 @@ export async function GET(): Promise<NextResponse> {
       ...(r.docsUrl ? { docsUrl: r.docsUrl } : {}),
       ...(r.license ? { license: r.license } : {}),
       ...(updatedAt ? { updatedAt } : {}),
-      // dual-rail の USDC/Base 面 (表示用・価格のみ)。リレー flag OFF 中は出さない —
+      // dual-rail の USDC/Base 面 (表示用・価格とサービス名)。リレー flag OFF 中は出さない —
       // 「USDC 対応」と見せて実際は買えない期待違いを作らないため。
       ...(env.enableX402DualRail && r.usdc
-        ? { usdc: { priceUsd: r.usdc.priceUsd } }
+        ? { usdc: { priceUsd: r.usdc.priceUsd, serviceName: r.usdc.serviceName } }
         : {}),
       network: r.network,
       accepts,

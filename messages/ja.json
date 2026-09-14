@@ -2697,6 +2697,8 @@
     "opError": "操作に失敗しました。もう一度お試しください。"
   },
   "Facilitator": {
+    "readMore": "続きを読む",
+    "readLess": "閉じる",
     "title": "AIストア",
     "subtitle": "AI エージェントが x402 で都度払いできる API とデータ。",
     "pillJpyc": "JPYC · Polygon",

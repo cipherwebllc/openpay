@@ -336,6 +336,8 @@ describe('X402DiscoveryView', () => {
       'datetime',
       compared.updatedAt,
     );
+    expect(screen.queryByText('利用条件: Commercial use with attribution.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '続きを読む' }));
     expect(
       screen.getByText('利用条件: Commercial use with attribution.'),
     ).toBeInTheDocument();
@@ -420,6 +422,8 @@ describe('X402DiscoveryView', () => {
     const description = await screen.findByText(ownedWithMeta.description);
     const card = description.closest('li')!;
     const docs = within(card).getByRole('link', { name: 'Docs' });
+    expect(within(card).queryByText('利用条件: Attribution required.')).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: '続きを読む' }));
     const license = within(card).getByText('利用条件: Attribution required.');
     const metaRow = docs.parentElement!;
     expect(metaRow.previousElementSibling).toBe(description.parentElement);
@@ -1078,5 +1082,69 @@ describe('X402DiscoveryView — Monitor の鮮度表示', () => {
     renderWithFreshness(undefined);
     await waitFor(() => expect(screen.getByText('JPYC Service Monitor')).toBeInTheDocument());
     expect(screen.queryByText(/最終イベント/)).toBeNull();
+  });
+});
+
+describe('X402DiscoveryView readable cards', () => {
+  function catalog(items: unknown[]) {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items }),
+    })) as unknown as typeof fetch;
+    renderView();
+  }
+
+  it('renders title as the heading and description as a separate body', async () => {
+    catalog([{ ...ITEM, title: 'Translation API' }]);
+    const heading = await screen.findByText('Translation API');
+    const body = screen.getByText(ITEM.description);
+    expect(heading).toHaveClass('text-sm', 'font-bold', 'line-clamp-2');
+    expect(body).toHaveClass('text-xs', 'text-slate-500', 'line-clamp-3');
+    expect(heading.nextElementSibling).toBe(body);
+    expect(screen.queryByRole('button', { name: '続きを読む' })).not.toBeInTheDocument();
+  });
+
+  it('expands and collapses description, trigger and license independently per card', async () => {
+    const description = 'Long description '.repeat(10);
+    const trigger = 'When you need translated data '.repeat(6);
+    catalog([
+      { ...ITEM, title: 'Translation API', description, trigger, license: 'Attribution required.', docsUrl: 'https://example.jp/docs' },
+      { ...ITEM, resource: `${ITEM.resource}/other`, description: 'Another API', license: 'Other license' },
+    ]);
+    const card = (await screen.findByText('Translation API')).closest('li')!;
+    const more = within(card).getByRole('button', { name: '続きを読む' });
+    expect(more).toHaveAttribute('aria-expanded', 'false');
+    expect(within(card).queryByText('利用条件: Attribution required.')).not.toBeInTheDocument();
+    expect(within(card).getByRole('link', { name: 'Docs' })).toBeInTheDocument();
+    expect(within(card).getByText(trigger.trim())).toHaveClass('line-clamp-2');
+    fireEvent.click(more);
+    expect(within(card).getByRole('button', { name: '閉じる' })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(card).getByText(description.trim())).not.toHaveClass('line-clamp-3');
+    expect(within(card).getByText(trigger.trim())).not.toHaveClass('line-clamp-2');
+    expect(within(card).getByText('利用条件: Attribution required.')).toBeInTheDocument();
+    expect(screen.queryByText('利用条件: Other license')).not.toBeInTheDocument();
+    fireEvent.click(within(card).getByRole('button', { name: '閉じる' }));
+    expect(within(card).getByText(description.trim())).toHaveClass('line-clamp-3');
+    expect(within(card).queryByText('利用条件: Attribution required.')).not.toBeInTheDocument();
+  });
+
+  it.each([true, false])('avoids duplicate resource key warnings (payTo present: %s)', async (withPayTo) => {
+    const errors = vi.spyOn(console, 'error');
+    catalog(['Seller one', 'Seller two'].map((title, index) => ({
+      ...ITEM,
+      title,
+      license: title,
+      accepts: withPayTo ? [{ ...ITEM.accepts[0], payTo: `0x${String(index + 1).repeat(40)}` }] : [],
+    })));
+    const first = (await screen.findByText('Seller one')).closest('li')!;
+    const second = screen.getByText('Seller two').closest('li')!;
+    fireEvent.click(within(first).getByRole('button', { name: '続きを読む' }));
+    expect(within(second).getByRole('button', { name: '続きを読む' })).toHaveAttribute('aria-expanded', 'false');
+    expect(errors.mock.calls.filter((args) => /same key|unique.*key/i.test(args.join(' ')))).toEqual([]);
+  });
+
+  it('shows a toggle for a long trigger even with a short description and no license', async () => {
+    catalog([{ ...ITEM, trigger: 'Trigger '.repeat(18) }]);
+    expect(await screen.findByRole('button', { name: '続きを読む' })).toBeInTheDocument();
   });
 });

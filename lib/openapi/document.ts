@@ -410,6 +410,8 @@ const DISCOVERY_OPENAPI_SCHEMAS = {
     ],
     properties: {
       resource: { type: 'string', format: 'uri' },
+      title: { type: 'string', description: 'Short display name; absent for third-party listings' },
+      trigger: { type: 'string', description: 'When to use this resource' },
       description: { type: 'string' },
       category: { type: 'string' },
       priceJpyc: { type: 'string', pattern: '^[1-9][0-9]*$' },
