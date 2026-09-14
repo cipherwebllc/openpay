@@ -448,7 +448,7 @@ describe('X402DiscoveryView', () => {
       screen.getByText('価格'),
       screen.getByText('カテゴリー'),
       screen.getByText('受取アドレス'),
-      screen.getByText('任意項目（表示名・いつ使うか・Docs・利用条件）'),
+      screen.getByText('任意項目（名前・用途・Docs・条件）'),
       screen.getByText('Docs URL（任意）'),
       screen.getByText('利用条件（任意）'),
     ];
@@ -606,7 +606,7 @@ describe('X402DiscoveryView', () => {
     expect(screen.getByDisplayValue(ownedWithComparison.license)).toBeInTheDocument();
     expect(screen.getByDisplayValue(ownedWithComparison.title)).toBeInTheDocument();
     expect(screen.getByDisplayValue(ownedWithComparison.trigger)).toBeInTheDocument();
-    expect(screen.getByText('任意項目（表示名・いつ使うか・Docs・利用条件）').closest('details')).toHaveAttribute('open');
+    expect(screen.getByText('任意項目（名前・用途・Docs・条件）').closest('details')).toHaveAttribute('open');
     expect(screen.getByText(ownedWithComparison.title)).toBeInTheDocument();
     expect(screen.getByText(ownedWithComparison.trigger)).toBeInTheDocument();
     fireEvent.change(screen.getByDisplayValue(ownedWithComparison.title), { target: { value: '' } });
@@ -1257,4 +1257,41 @@ it.each([['Tokyo Weather API', 60], ['When an agent needs hourly Tokyo weather f
   expect(input).toHaveAttribute('maxLength', String(maxLength));
   fireEvent.change(input, { target: { value: 'Weather' } });
   expect(details).toHaveAttribute('open');
+});
+
+describe('X402DiscoveryView catalog paging', () => {
+  function catalog(items: unknown[]) {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items }),
+    })) as unknown as typeof fetch;
+    renderView();
+  }
+  const many = Array.from({ length: 10 }, (_, i) => ({
+    ...ITEM,
+    resource: `${ITEM.resource}/${i}`,
+    title: `Item ${i}`,
+    category: i < 9 ? 'api' : 'data',
+  }));
+
+  it('shows 8 cards first and reveals the rest with the show-more button', async () => {
+    catalog(many);
+    await screen.findByText('Item 0');
+    expect(screen.getByText('Item 7')).toBeInTheDocument();
+    expect(screen.queryByText('Item 8')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'さらに 2 件を表示' }));
+    expect(screen.getByText('Item 9')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /さらに/ })).not.toBeInTheDocument();
+  });
+
+  it('resets the limit when the filter changes', async () => {
+    catalog(many);
+    await screen.findByText('Item 0');
+    fireEvent.click(screen.getByRole('button', { name: 'さらに 2 件を表示' }));
+    expect(screen.getByText('Item 9')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^api/ }));
+    expect(screen.getByText('Item 7')).toBeInTheDocument();
+    expect(screen.queryByText('Item 8')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'さらに 1 件を表示' })).toBeInTheDocument();
+  });
 });
