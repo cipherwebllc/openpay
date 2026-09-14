@@ -68,6 +68,8 @@ type DiscoveryItem = {
 };
 
 const EMPTY_DISCOVERY_ITEMS: DiscoveryItem[] = [];
+/** カタログの初期表示件数。超える分は「さらに N 件を表示」で開く (モバイルの全長を抑える)。 */
+const CATALOG_PAGE_SIZE = 8;
 const EMPTY_USDC_ITEMS: UsdcCatalogItem[] = [];
 
 /** カタログの通貨フィルタ。JPYC = /api/discovery (Polygon・facilitator) / USDC = Base・標準 x402。 */
@@ -388,6 +390,12 @@ export function X402DiscoveryView({
       return search === '' || entry.searchText.includes(search);
     });
   }, [catalogSearch, effectiveCatalogCategory, currencyEntries]);
+  // 表示上限は絞り込み条件ごとに持つ (条件が変わったら初期件数に戻る)。effect ではなく key 照合で導出。
+  const filterKey = `${catalogSearch.trim().toLowerCase()}|${effectiveCurrency}|${effectiveCatalogCategory ?? ''}`;
+  const [catalogShown, setCatalogShown] = useState<{ key: string; limit: number } | null>(null);
+  const catalogLimit = catalogShown?.key === filterKey ? catalogShown.limit : CATALOG_PAGE_SIZE;
+  const pagedEntries = visibleEntries.slice(0, catalogLimit);
+  const hiddenCount = visibleEntries.length - pagedEntries.length;
 
   const onEdit = useCallback((r: OwnedResource) => {
     setEditId(r.id);
@@ -1526,7 +1534,7 @@ export function X402DiscoveryView({
           </div>
         ) : (
           <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {visibleEntries.map((entry) => {
+            {pagedEntries.map((entry) => {
               if (entry.kind === 'usdc') {
                 const u = entry.item;
                 return (
@@ -1667,6 +1675,17 @@ export function X402DiscoveryView({
               );
             })}
           </ul>
+        )}
+        {hiddenCount > 0 && (
+          <div className="mt-4 flex justify-center">
+            <button
+              type="button"
+              onClick={() => setCatalogShown({ key: filterKey, limit: catalogLimit + CATALOG_PAGE_SIZE })}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-brand hover:text-brand"
+            >
+              {t('catalogShowMore', { count: hiddenCount })}
+            </button>
+          </div>
         )}
       </section>
     </>
