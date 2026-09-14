@@ -5,7 +5,7 @@
 // /api/facilitator/resources で管理する (GET=一覧 / POST=登録 / [id] PATCH=編集 / [id] DELETE=無効化)。
 // 本コンポーネントは env.enableX402Facilitator が ON のページからのみマウントされる。
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
@@ -255,6 +255,8 @@ export function X402DiscoveryView({
   const { isSignedIn, signIn, isSigningIn } = useSiweSession();
 
   const [form, setForm] = useState(EMPTY_FORM);
+  const [formOpen, setFormOpen] = useState<boolean | null>(null);
+  const registrationRef = useRef<HTMLElement>(null);
   const [editId, setEditId] = useState<string | null>(null); // 非 null = 編集中 (PATCH)
   const [created, setCreated] = useState<{
     resource: RegisteredResource;
@@ -325,7 +327,8 @@ export function X402DiscoveryView({
     () => [
       ...items.map((item, index) => ({
         kind: 'jpyc' as const,
-        key: `jpyc:${item.resource}:${item.accepts[0]?.payTo ?? index}`,
+        // 同一 URL の重複登録 (別販売者・同一販売者の二重登録) でも key が衝突しないよう index を含める。
+        key: `jpyc:${index}:${item.resource}`,
         category: item.category.trim().toLowerCase(),
         // dual (USDC 併売) 出品は "usdc" のテキスト検索でも見つかるようにする。
         searchText: `${item.description} ${item.resource}${item.usdc ? ' usdc' : ''}`.toLowerCase(),
@@ -400,10 +403,12 @@ export function X402DiscoveryView({
     setError(null);
     setErrorSnippet('');
     setConfirmDeleteId(null);
-    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+    setFormOpen(true);
+    registrationRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }, []);
 
   const onCancelEdit = useCallback(() => {
+    setFormOpen(null);
     setEditId(null);
     setForm(EMPTY_FORM);
     setError(null);
@@ -503,6 +508,7 @@ export function X402DiscoveryView({
       setForm(EMPTY_FORM);
       setEditId(null);
       setAttested(false);
+      setFormOpen(null);
       void queryClient.invalidateQueries({ queryKey: ['x402', 'discovery'] });
       void queryClient.invalidateQueries({ queryKey: ['x402', 'owned'] });
     },
@@ -759,23 +765,32 @@ export function X402DiscoveryView({
   };
 
   // セクションの中身を変えず、閲覧者と売り手で並びだけを切り替える。
-  const registrationSection = (
-    <>
-      {/* 出品: 加盟店登録 / 編集 */}
-      <section className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
+  const formCategories = ['api', 'data', 'mcp'];
+  const legacyCategory = owned.find((resource) => resource.id === editId)?.category;
+  if (legacyCategory && !formCategories.includes(legacyCategory)) {
+    formCategories.push(legacyCategory);
+  }
+  const autoOpen = owned.length === 0 || editId !== null || created !== null || notice !== null;
+  // owned>0 のときはフォーム全体を details に畳み、summary が見出しを兼ねる (内側の見出しは出さない)。
+  const collapsible = owned.length > 0;
+  const registrationContent = (
+      <div>
         <div className="flex items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
-            <Plus className="h-5 w-5" aria-hidden />
-          </span>
+          {!collapsible && (
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
+              <Plus className="h-5 w-5" aria-hidden />
+            </span>
+          )}
           <div className="min-w-0">
-            <h3 className="text-base font-bold text-slate-900">
-              {editId ? t('editTitle') : t('registerTitle')}
-            </h3>
-            <p className="mt-0.5 text-sm leading-relaxed text-slate-500">
+            {!collapsible && (
+              <h3 className="text-base font-bold text-slate-900">
+                {editId ? t('editTitle') : t('registerTitle')}
+              </h3>
+            )}
+            <p className={`${collapsible ? '' : 'mt-0.5 '}text-sm leading-relaxed text-slate-500`}>
               {t('registerSubtitle')}
             </p>
-            {/* 発見面の明示: 出品は /api/discovery + OpenPay MCP/SDK。Bazaar は USDC (Base) 商品
-                のみの別面で、本フォームの出品では載らない — 期待違いを先回りで解く。 */}
+            {/* 発見面の明示: USDC 併売の有無に合わせて掲載先を案内する。 */}
             <p className="mt-1.5 text-xs leading-relaxed text-slate-500">
               {env.enableX402DualRailUi
                 ? t('listingDiscoveryNoteDualRail')
@@ -820,23 +835,23 @@ export function X402DiscoveryView({
                 <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" aria-hidden />
                 {t('signedInAs', { address: shortAddress(address ?? '') })}
               </p>
-              <p
-                className={`text-xs font-semibold ${
-                  atResourceLimit ? 'text-amber-700' : 'text-slate-500'
-                }`}
-              >
-                {t('registrationCount', {
-                  count: owned.length,
-                  limit: maxResourcesPerMerchant,
-                })}
-              </p>
+              {owned.length > 0 && (
+                <p
+                  className={`text-xs font-semibold ${
+                    atResourceLimit ? 'text-amber-700' : 'text-slate-500'
+                  }`}
+                >
+                  {owned.length >= maxResourcesPerMerchant * 0.8
+                    ? t('registrationCount', { count: owned.length, limit: maxResourcesPerMerchant })
+                    : t('registrationCountShort', { count: owned.length })}
+                </p>
+              )}
             </div>
             {atResourceLimit && !editId && (
               <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
                 {t('registrationLimitReached')}
               </p>
             )}
-            <p className="text-xs leading-relaxed text-slate-500">{t('listingPolicySummary')}</p>
             <Field label={t('formUrlLabel')}>
               <input
                 className={inputCls}
@@ -864,12 +879,23 @@ export function X402DiscoveryView({
                 />
               </Field>
               <Field label={t('formCategoryLabel')}>
-                <input
-                  className={inputCls}
-                  placeholder={t('formCategory')}
-                  value={form.category}
-                  onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-                />
+                <div className="flex flex-wrap gap-1.5">
+                  {formCategories.map((category) => (
+                    <button
+                      key={category}
+                      type="button"
+                      aria-pressed={form.category === category}
+                      onClick={() => setForm((f) => ({ ...f, category }))}
+                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+                        form.category === category
+                          ? 'border-brand bg-brand text-white'
+                          : 'border-slate-300 bg-white text-slate-600 hover:border-brand'
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  ))}
+                </div>
               </Field>
             </div>
             <Field label={t('formPayToLabel')}>
@@ -1011,6 +1037,9 @@ export function X402DiscoveryView({
                     />
                   </summary>
                   <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+                    {t('listingPolicySummary')}
+                  </p>
+                  <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
                     {t('attestLabel')}
                   </p>
                 </details>
@@ -1111,8 +1140,28 @@ export function X402DiscoveryView({
             )}
           </div>
         )}
-      </section>
-    </>
+      </div>
+  );
+
+  const registrationSection = (
+    <section ref={registrationRef} className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
+      {collapsible ? (
+        <details
+          className="group/registration"
+          open={formOpen ?? autoOpen}
+          onToggle={(e) => setFormOpen(e.currentTarget.open)}
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-3 text-base font-bold text-slate-900">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
+              <Plus className="h-5 w-5" aria-hidden />
+            </span>
+            {editId ? t('editTitle') : t('registerNewTitle')}
+            <ChevronDown className="ml-auto h-4 w-4 shrink-0 transition group-open/registration:rotate-180" aria-hidden />
+          </summary>
+          <div className="mt-4">{registrationContent}</div>
+        </details>
+      ) : registrationContent}
+    </section>
   );
 
   const ownedResourcesSection =
@@ -1587,14 +1636,14 @@ export function X402DiscoveryView({
     </>
   );
 
-  const sellerMode = isConnected || isSignedIn;
+  const sellerMode = isSignedIn;
 
   return (
     <div className="space-y-6">
       {sellerMode ? (
         <>
-          {registrationSection}
           {ownedResourcesSection}
+          {registrationSection}
           {featured}
           {catalogSection}
         </>

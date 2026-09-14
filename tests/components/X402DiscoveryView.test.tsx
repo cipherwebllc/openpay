@@ -99,8 +99,8 @@ beforeEach(() => {
   state.address = undefined;
   state.signedIn = false;
   envState.enableX402DualRailUi = false;
-  // onEdit は window.scrollTo を呼ぶ (jsdom 未実装) → no-op で stub。
-  window.scrollTo = vi.fn() as unknown as typeof window.scrollTo;
+  // onEdit はフォームへ scrollIntoView する (jsdom 未実装)。
+  Element.prototype.scrollIntoView = vi.fn();
   global.fetch = vi.fn(async () => ({
     ok: true,
     json: async () => ({ x402Version: 1, items: [ITEM] }),
@@ -116,7 +116,7 @@ function renderView(): ReturnType<typeof renderWithIntl> {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithIntl(
     <QueryClientProvider client={qc}>
-      <X402DiscoveryView maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT} />
+      <X402DiscoveryView maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT} featured={<h2>Featured APIs</h2>} />
     </QueryClientProvider>,
   );
 }
@@ -157,7 +157,7 @@ describe('X402DiscoveryView', () => {
     ).toBeTruthy();
   });
 
-  it('接続済み: 登録フォームを公開カタログより前に表示', async () => {
+  it('接続済み・未サインイン: featured → カタログ → サインイン付き出品カード', async () => {
     state.connected = true;
     state.address = OWNED.payTo;
     renderView();
@@ -166,9 +166,78 @@ describe('X402DiscoveryView', () => {
       name: 'API を出品する',
     });
     expect(
-      registrationHeading.compareDocumentPosition(catalogHeading) &
+      catalogHeading.compareDocumentPosition(registrationHeading) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Featured APIs' }).compareDocumentPosition(catalogHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(registrationHeading.closest('section')!).getByRole('button', { name: 'ウォレットでサインイン' })).toBeInTheDocument();
+  });
+
+  it('owner: あなたの登録 → 閉じたフォーム → featured → カタログ、summary で手動開閉', async () => {
+    renderAsOwner();
+    const owned = await screen.findByText('あなたの登録');
+    const summary = screen.getByText('新しい API を出品する');
+    const details = summary.closest('details')!;
+    const featured = screen.getByRole('heading', { name: 'Featured APIs' });
+    const catalog = screen.getByRole('heading', { name: 'カタログ' });
+    for (const [before, after] of [[owned, summary], [summary, featured], [featured, catalog]]) {
+      expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(details).not.toHaveAttribute('open');
+    fireEvent.click(summary);
+    await waitFor(() => expect(details).toHaveAttribute('open'));
+    fireEvent.click(screen.getByRole('button', { name: 'data' }));
+    expect(details).toHaveAttribute('open');
+    fireEvent.click(summary);
+    await waitFor(() => expect(details).not.toHaveAttribute('open'));
+  });
+
+  it.each([0, 1, 79, 80])('登録件数 %i: 0 件は非表示、80% 未満は短縮、80% 以上は上限付き', async (count) => {
+    renderAsOwner(Array.from({ length: count }, (_, index) => ({
+      ...OWNED, id: `res-${index}`, url: `${OWNED.url}/${index}`,
+    })));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/facilitator/resources', { cache: 'no-store' }));
+    if (count === 0) {
+      expect(screen.queryByText(/^登録済み \d/)).not.toBeInTheDocument();
+      expect(screen.getByPlaceholderText('https://api.example.jp/paid/weather').closest('details')).toBeNull();
+      expect(screen.getByRole('button', { name: '登録する' })).toBeVisible();
+      expect(screen.queryByText('新しい API を出品する')).not.toBeInTheDocument();
+    } else {
+      const expected = count >= MAX_RESOURCES_PER_MERCHANT * 0.8
+        ? `登録済み ${count} / ${MAX_RESOURCES_PER_MERCHANT} 件` : `登録済み ${count} 件`;
+      expect(await screen.findByText(expected)).toBeInTheDocument();
+    }
+  });
+
+  it('登録済み owner: 手動で開いたフォームは送信成功後も結果を表示し、手動で閉じられる', async () => {
+    renderAsOwner();
+    const summary = await screen.findByText('新しい API を出品する');
+    const details = summary.closest('details')!;
+    fireEvent.click(summary);
+    await waitFor(() => expect(details).toHaveAttribute('open'));
+    fireEvent.change(screen.getByPlaceholderText('https://api.example.jp/paid/weather'), {
+      target: { value: 'https://api.example.jp/paid/new' },
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    expect(await screen.findByText('登録しました。')).toBeInTheDocument();
+    expect(details).toHaveAttribute('open');
+    fireEvent.click(summary);
+    await waitFor(() => expect(details).not.toHaveAttribute('open'));
+  });
+
+  it('編集: 旧カテゴリーを第 4 chip として選択表示し、他カテゴリーへ変更できる', async () => {
+    const fetchFn = renderAsOwner([{ ...OWNED, category: 'legacy' }]);
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    expect(screen.getByRole('button', { name: 'legacy' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'mcp' }));
+    expect(screen.getByRole('button', { name: 'mcp' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'legacy' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: '更新する' }));
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledWith(
+      `/api/facilitator/resources/${OWNED.id}`,
+      expect.objectContaining({ method: 'PATCH', body: expect.stringContaining('"category":"mcp"') }),
+    ));
   });
 
   it('カタログ検索: 名前・URL の部分一致を大小文字を無視して絞り込む', async () => {
@@ -354,17 +423,19 @@ describe('X402DiscoveryView', () => {
     renderView();
     await waitFor(() =>
       expect(
-        screen.getByPlaceholderText(/リソース URL/),
+        screen.getByPlaceholderText('https://api.example.jp/paid/weather'),
       ).toBeInTheDocument(),
     );
-    expect(screen.getByPlaceholderText('価格 (JPYC・整数)')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('3')).toBeInTheDocument();
     expect(
       screen.getByPlaceholderText('OpenAPI またはドキュメントの HTTPS URL'),
     ).toBeInTheDocument();
     expect(screen.getByPlaceholderText('例: 商用利用可・要帰属')).toBeInTheDocument();
-    expect(
-      screen.getByText(/掲載条件: 実在する 402 ゲート/),
-    ).toBeInTheDocument();
+    const policy = screen.getByText(/掲載条件: 実在する 402 ゲート/);
+    const attestationDetails = policy.closest('details')!;
+    expect(attestationDetails).not.toHaveAttribute('open');
+    expect(within(attestationDetails).getByText('詳しく')).toBeInTheDocument();
+    expect(screen.getAllByText(/掲載条件: 実在する 402 ゲート/)).toHaveLength(1);
     expect(screen.getByText('サインイン済: 0x1111…1111')).toHaveAttribute(
       'title',
       state.address,
@@ -389,14 +460,14 @@ describe('X402DiscoveryView', () => {
     expect(priceAndCategoryRow).toBe(orderedFields[3].parentElement?.parentElement);
     expect(priceAndCategoryRow).toHaveClass('grid-cols-2');
     expect(screen.getByRole('button', { name: '登録する' })).toBeInTheDocument();
-    expect(screen.getByText(`登録済み 0 / ${MAX_RESOURCES_PER_MERCHANT} 件`)).toBeInTheDocument();
+    expect(screen.queryByText(/^登録済み \d/)).not.toBeInTheDocument();
   });
 
   it('owner: 自分の登録一覧 (あなたの登録) を編集/削除ボタン付きで表示', async () => {
     renderAsOwner();
     expect(await screen.findByText('あなたの登録')).toBeInTheDocument();
     expect(
-      screen.getByText(`登録済み 1 / ${MAX_RESOURCES_PER_MERCHANT} 件`),
+      screen.getByText('登録済み 1 件'),
     ).toBeInTheDocument();
     expect(screen.getByText('自分の有料 API')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'スニペット' })).toBeInTheDocument();
@@ -503,6 +574,7 @@ describe('X402DiscoveryView', () => {
       `登録済み ${MAX_RESOURCES_PER_MERCHANT} / ${MAX_RESOURCES_PER_MERCHANT} 件`,
     );
     expect(counter).toHaveClass('text-amber-700');
+    fireEvent.click(screen.getByText('新しい API を出品する'));
     expect(
       screen.getByText(
         '登録上限に達しています。新しく登録するには、不要な登録を削除してください。',
@@ -520,14 +592,16 @@ describe('X402DiscoveryView', () => {
     };
     const fetchFn = renderAsOwner([ownedWithComparison]);
     fireEvent.click(await screen.findByRole('button', { name: '編集' }));
-    expect(window.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' });
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' });
+    // 編集中は summary が「掲載を編集」になり (内側に二重の見出しは出さない)、details は開く。
+    expect(screen.getByText('掲載を編集').closest('details')).toHaveAttribute('open');
+    expect(screen.queryByText('新しい API を出品する')).not.toBeInTheDocument();
     // フォームが編集モードになり、対象の値が入る。
     await waitFor(() => expect(screen.getByDisplayValue(OWNED.url)).toBeInTheDocument());
-    expect(screen.getByText('掲載を編集')).toBeInTheDocument();
     expect(screen.getByDisplayValue(ownedWithComparison.docsUrl)).toBeInTheDocument();
     expect(screen.getByDisplayValue(ownedWithComparison.license)).toBeInTheDocument();
     // 価格を書き換えて更新。
-    const price = screen.getByPlaceholderText('価格 (JPYC・整数)');
+    const price = screen.getByPlaceholderText('3');
     fireEvent.change(price, { target: { value: '4000' } });
     fireEvent.click(screen.getByRole('button', { name: '更新する' }));
     await waitFor(() =>
@@ -536,7 +610,8 @@ describe('X402DiscoveryView', () => {
         expect.objectContaining({ method: 'PATCH' }),
       ),
     );
-    expect(await screen.findByText('更新しました。')).toBeInTheDocument();
+    expect(await screen.findByText('更新しました。')).toBeVisible();
+    expect(screen.getByText('新しい API を出品する').closest('details')).toHaveAttribute('open');
   });
 
   it('編集キャンセル: キャンセルでフォームが登録モードに戻る', async () => {
@@ -545,7 +620,7 @@ describe('X402DiscoveryView', () => {
     await waitFor(() => expect(screen.getByText('掲載を編集')).toBeInTheDocument());
     fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '登録する' })).toBeInTheDocument(),
+      expect(screen.getByText('新しい API を出品する').closest('details')).not.toHaveAttribute('open'),
     );
     expect(screen.queryByRole('button', { name: '更新する' })).not.toBeInTheDocument();
   });
@@ -585,13 +660,13 @@ describe('X402DiscoveryView', () => {
     const fetchFn = installRoutingFetch([]); // owned 空 = 登録フォームのみ
     renderView();
 
-    fireEvent.change(await screen.findByPlaceholderText(/リソース URL/), {
+    fireEvent.change(await screen.findByPlaceholderText('https://api.example.jp/paid/weather'), {
       target: { value: 'https://api.example.jp/paid/new' },
     });
-    fireEvent.change(screen.getByPlaceholderText('説明 (何を提供するか)'), {
+    fireEvent.change(screen.getByPlaceholderText('東京の 48 時間天気予報 (JSON)'), {
       target: { value: '新しい有料 API' },
     });
-    fireEvent.change(screen.getByPlaceholderText('価格 (JPYC・整数)'), {
+    fireEvent.change(screen.getByPlaceholderText('3'), {
       target: { value: '500' },
     });
     fireEvent.change(
@@ -601,6 +676,10 @@ describe('X402DiscoveryView', () => {
     fireEvent.change(screen.getByPlaceholderText('例: 商用利用可・要帰属'), {
       target: { value: '商用利用可・要帰属' },
     });
+
+    fireEvent.click(screen.getByRole('button', { name: 'data' }));
+    expect(screen.getByRole('button', { name: 'data' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'api' })).toHaveAttribute('aria-pressed', 'false');
 
     // 境界: 表明前は登録ボタン disabled・案内文を表示。
     const submit = screen.getByRole('button', { name: '登録する' });
@@ -628,6 +707,7 @@ describe('X402DiscoveryView', () => {
       url: 'https://api.example.jp/paid/new',
       description: '新しい有料 API',
       priceJpyc: '500',
+      category: 'data',
       docsUrl: 'https://docs.example.jp/openapi.json',
       license: '商用利用可・要帰属',
       attested: true,
@@ -706,7 +786,7 @@ describe('X402DiscoveryView', () => {
     global.fetch = fetchFn as unknown as typeof fetch;
     renderView();
 
-    const urlInput = await screen.findByPlaceholderText(/リソース URL/);
+    const urlInput = await screen.findByPlaceholderText('https://api.example.jp/paid/weather');
     fireEvent.change(urlInput, { target: { value: 'https://api.example.jp/paid/foreign' } });
     fireEvent.click(screen.getByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: '登録する' }));
@@ -871,15 +951,15 @@ describe('X402DiscoveryView dual-rail USDC 面 (flag ゲート)', () => {
     const fetchFn = installRoutingFetch([]);
     renderView();
 
-    fireEvent.change(await screen.findByPlaceholderText(/リソース URL/), {
+    fireEvent.change(await screen.findByPlaceholderText('https://api.example.jp/paid/weather'), {
       target: { value: 'https://api.example.jp/paid/new' },
     });
-    // flag ON では発見面の注記も dual-rail 版 (「対象外」の否定文と矛盾させない)。
-    expect(screen.getByText(/「USDC \(Base\) でも販売する」を有効にすると/)).toBeInTheDocument();
-    fireEvent.change(screen.getByPlaceholderText('説明 (何を提供するか)'), {
+    // flag ON では発見面の注記も dual-rail 版。
+    expect(screen.getByText('掲載先: /api/discovery と MCP / SDK（JPYC・Polygon）。USDC 併売で x402 Bazaar にも。')).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('東京の 48 時間天気予報 (JSON)'), {
       target: { value: '新しい有料 API' },
     });
-    fireEvent.change(screen.getByPlaceholderText('価格 (JPYC・整数)'), {
+    fireEvent.change(screen.getByPlaceholderText('3'), {
       target: { value: '500' },
     });
     // opt-in を有効化 → USDC 入力欄が現れる。
@@ -989,13 +1069,13 @@ describe('X402DiscoveryView 公開カタログの dual (USDC 併売) 表示', ()
     state.signedIn = true;
     installRoutingFetch([]);
     renderView();
-    fireEvent.change(await screen.findByPlaceholderText(/リソース URL/), {
+    fireEvent.change(await screen.findByPlaceholderText('https://api.example.jp/paid/weather'), {
       target: { value: 'https://api.example.jp/paid/new' },
     });
-    fireEvent.change(screen.getByPlaceholderText('説明 (何を提供するか)'), {
+    fireEvent.change(screen.getByPlaceholderText('東京の 48 時間天気予報 (JSON)'), {
       target: { value: '新しい有料 API' },
     });
-    fireEvent.change(screen.getByPlaceholderText('価格 (JPYC・整数)'), {
+    fireEvent.change(screen.getByPlaceholderText('3'), {
       target: { value: '500' },
     });
     fireEvent.click(
@@ -1015,13 +1095,13 @@ describe('X402DiscoveryView 公開カタログの dual (USDC 併売) 表示', ()
     state.signedIn = true;
     installRoutingFetch([]);
     renderView();
-    fireEvent.change(await screen.findByPlaceholderText(/リソース URL/), {
+    fireEvent.change(await screen.findByPlaceholderText('https://api.example.jp/paid/weather'), {
       target: { value: 'https://api.example.jp/paid/new' },
     });
-    fireEvent.change(screen.getByPlaceholderText('説明 (何を提供するか)'), {
+    fireEvent.change(screen.getByPlaceholderText('東京の 48 時間天気予報 (JSON)'), {
       target: { value: '新しい有料 API' },
     });
-    fireEvent.change(screen.getByPlaceholderText('価格 (JPYC・整数)'), {
+    fireEvent.change(screen.getByPlaceholderText('3'), {
       target: { value: '500' },
     });
     fireEvent.click(screen.getByRole('checkbox', { name: /正当な権利/ }));
