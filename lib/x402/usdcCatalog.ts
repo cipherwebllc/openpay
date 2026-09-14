@@ -29,6 +29,9 @@ export type UsdcCatalogItem = {
 
 /** agentic.market の OpenPay サービスページ (2026-08-24 実ブラウザで描画確認)。 */
 export const AGENTIC_MARKET_URL = 'https://agentic.market/services/open-pay-jp';
+// x402-list.com の OpenPay 掲載ページ (Data カテゴリ・USDC/Base の 9 endpoint・2026-09-14 掲載承認)。
+// 第三者出品の自動掲載先ではなく、OpenPay 自身のデータ API の掲載先。
+export const X402_LIST_URL = 'https://x402-list.com/services/openpay';
 
 export const USDC_CATALOG_ITEMS: readonly UsdcCatalogItem[] = [
   ...USDC_JPYC_LIVE_RESOURCES.map((r) => ({
