@@ -34,6 +34,90 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'license-nft-protected-delivery-2026-09-14',
+    date: '2026-09-14',
+    category: 'feature',
+    title: {
+      ja: '利用ライセンス NFT と保護配布を追加しました（ウォレットに残る利用権・販売者サーバーからの限定配布）',
+      en: 'License NFTs and protected delivery — rights that live in the buyer wallet, files served from your own server',
+    },
+    body: {
+      ja: 'デジタル商品の新しいタイプとして「利用ライセンス NFT」を追加しました。購入すると Polygon 上の NFT (ERC-1155) が購入者のウォレットへ発行され、ソフトウェアやサービスの利用権の証明として持ち運べます。譲渡の可否は商品ごとに選べ、利用条件は OpenPay の標準ライセンス条件テンプレートを選ぶだけで設定できます。ウォレットや OpenSea では商品名と画像つきで表示されます (2026-09-14 対応)。販売数は 10,000 まで、価格は 1,000 JPYC 以上の整数で、JPYC 決済のみです。まず OpenPay 公式の商品から提供を始めています。\nあわせて「保護配布」を追加しました。ファイル本体は販売者ご自身のサーバー (Cloudflare R2 など) に置いたまま、OpenPay が購入者のウォレット署名と購入記録を確認して 60 秒だけ有効な配布チケットを発行します。当社はファイルを保管しません。連携用の SDK (openpay-x402-sdk 0.8) にテンプレートを同梱しています。\nNFT は投資対象ではなく利用権の証明です。詳しくは利用規約第 13 条をご確認ください。',
+      en: 'A new digital-goods type, the "License NFT", is here. Buying one mints an ERC-1155 token on Polygon to the buyer wallet — a portable proof of the right to use your software or service. Transferability is chosen per product, and you can adopt the OpenPay standard license terms template with one click. Wallets and OpenSea now show the product name and image (as of 2026-09-14). Up to 10,000 units per product, integer prices of 1,000 JPYC or more, JPYC only. We are starting with OpenPay\'s own products.\nWe also added "protected delivery": keep files on your own server (e.g. Cloudflare R2) while OpenPay verifies the buyer\'s wallet signature and purchase record and issues a delivery ticket valid for 60 seconds. We never store your files. Templates ship in openpay-x402-sdk 0.8.\nLicense NFTs are proofs of usage rights, not investments. See Article 13 of the Terms.',
+    },
+    link: { href: '/guide/store', labelJa: '販売ガイドを見る', labelEn: 'Read the selling guide' },
+  },
+  {
+    id: 'profile-branding-2026-09-12',
+    date: '2026-09-12',
+    category: 'feature',
+    title: {
+      ja: 'プロフィールと出品画面を刷新しました（カバー画像・フォント・2 列リンク・迷わない出品フォーム）',
+      en: 'Profile and listing overhaul — cover image, fonts, two-column links, and a simpler listing form',
+    },
+    body: {
+      ja: '@handle プロフィールにカバー画像 (横長の画像 URL)、フォント (標準・明朝・丸ゴシック)、リンクの並び (リスト・2 列) を追加しました。フォントは端末に依存せず表示され、SNS 共有時のカードにもカバー画像が反映されます。スマホでは編集中の見た目を画面上部のミニプレビューで確認できます。\n出品画面も整理しました。ウォレット未接続のときは接続ボタンをその場に表示し、手順を「受取先 → 恒久リンク → プロフィール」の順に。商品の種別と表示ラベルは 1 つの「配布形式」にまとめ、販売者情報は登録後に折りたたみ、任意項目は「見せ方」にまとめました。',
+      en: '@handle profiles gain a cover image (wide image URL), font choice (standard, serif, rounded), and link layout (list or two columns). Fonts render the same on every device, and the cover image now appears on social share cards. On mobile, a sticky mini preview shows your changes as you edit.\nThe listing flow is simpler too: a connect button appears in place when no wallet is connected, steps run receiver → permanent link → profile, product kind and label merged into a single "delivery format", seller info collapses once saved, and optional fields live under "Presentation".',
+    },
+    link: { href: '/create?tab=profile', labelJa: 'プロフィールを編集する', labelEn: 'Edit your profile' },
+  },
+  {
+    id: 'transparency-external-purchases-2026-09-11',
+    date: '2026-09-11',
+    category: 'notice',
+    title: {
+      ja: '運用透明性ページに「外部からの実購入 (オンチェーン記録)」を追加しました',
+      en: 'Transparency page now lists verified third-party purchases (on-chain)',
+    },
+    body: {
+      ja: '自社ウォレットを除いた第三者による x402 購入を、日付・チェーン・金額・買い手アドレス・トランザクションの一覧で公開しました。すべて Basescan で検証できます。週次で追記します。',
+      en: 'We now publish third-party x402 purchases (our own wallets excluded) with date, chain, amount, buyer address and transaction — all verifiable on Basescan. Updated weekly.',
+    },
+    link: { href: '/transparency', labelJa: '運用透明性を見る', labelEn: 'View the transparency page' },
+  },
+  {
+    id: 'ai-data-products-2026-09-01',
+    date: '2026-09-01',
+    category: 'feature',
+    title: {
+      ja: 'AI エージェント向けデータ商品を拡充しました（JPYC ライブデータ API・週次モニター・JPYC+USDC の併売）',
+      en: 'More data products for AI agents — live JPYC APIs, weekly monitors, and dual JPYC/USDC listings',
+    },
+    body: {
+      ja: 'JPYC の発行量・残高・送金履歴を返すライブデータ API、日本のステーブルコイン決済の対応状況を週次で追う「JPYC Service Monitor」「Japan Stablecoin Payment Monitor」、24 時間のネットワーク活動集計 (0.01 USDC) を AI ストアに追加しました。差分だけを安く取り直せるカーソル対応と、無料で試せるティーザーも用意しています。\n出品者向けには、1 つのリソースを JPYC と USDC (Base) の両方で販売できる「併売」を追加しました。USDC の商品は Coinbase の x402 Bazaar (agentic.market) にも掲載されます。',
+      en: 'The AI store now offers live JPYC data APIs (supply, balances, transfers), two weekly change-log products — the JPYC Service Monitor and the Japan Stablecoin Payment Monitor — and a 24-hour network activity summary (0.01 USDC). Cursor-based deltas keep repeat fetches cheap, and free teasers let agents try before buying.\nSellers can now list one resource for both JPYC and USDC (Base); USDC resources are also listed on Coinbase\'s x402 Bazaar (agentic.market).',
+    },
+    link: { href: '/discovery', labelJa: 'AI ストアを見る', labelEn: 'Browse the AI store' },
+  },
+  {
+    id: 'store-usdc-2026-08-17',
+    date: '2026-08-17',
+    category: 'pricing',
+    title: {
+      ja: 'デジタル商品を USDC (Base) でも購入できるようになりました（チップも USDC 対応）',
+      en: 'Digital goods can now be bought with USDC on Base — tips too',
+    },
+    body: {
+      ja: '出品者が許可した商品は、JPYC に加えて Base チェーンの USDC でも購入できます。価格は JPYC 建てのまま、当社サーバーが取得したレートで USDC 額を一定時間固定します。USDC 決済の x402 利用料は 0% (無料) で、代金は出品者のウォレットへ直接着金します。レート固定中の変動により買い手・出品者のどちらにも得または損が生じる場合があり、受取後の USDC の価格変動は出品者の負担です。\n@handle プロフィールのチップも USDC (Base) で受け取れるようになりました。詳しくは利用規約第 13 条 (9) をご確認ください。',
+      en: 'Products the seller opts in can be bought with USDC on Base as well as JPYC. Prices stay in JPYC; our server converts to USDC at a fetched rate and locks it for a short window. The x402 fee for USDC payments is 0%, and funds settle directly to the seller wallet. Rate movement during the lock can favor either side, and the seller bears USDC price risk after receipt.\nTips on @handle profiles can also be received in USDC (Base). See Article 13 (9) of the Terms.',
+    },
+    link: { href: '/store', labelJa: 'Store を見る', labelEn: 'Browse the Store' },
+  },
+  {
+    id: 'store-marketplace-guides-2026-08-09',
+    date: '2026-08-09',
+    category: 'feature',
+    title: {
+      ja: 'Store 一覧ページと用途別ガイドを公開しました（導入前チェックリスト・決済 QR・レジ/モバイルオーダー）',
+      en: 'Store marketplace and use-case guides — pre-launch checklist, payment QR, register & mobile ordering',
+    },
+    body: {
+      ja: 'すべてのクリエイターのデジタル商品を検索・カテゴリで探せる Store 一覧ページ (open-pay.jp/store) と、ナビゲーションの 4 区分 (決済・販売・Store・マイページ) を導入しました。商品はコピー・X・端末の共有メニューからシェアできます。\nガイドを拡充しました: 導入前チェックリスト (/guide/start)、決済 QR (/guide/qr)、レジ・モバイルオーダー (/guide/shop)、画像 URL の用意のしかた (/guide/image-url)。マイページに応援メッセージの受信箱と、商品が売れたときの通知を追加しました。デジタル商品の価格は税込総額で表示する運用に統一しています。',
+      en: 'A Store marketplace (open-pay.jp/store) lets anyone search and browse every creator\'s digital goods, and the navigation is now four sections: Pay, Sell, Store, My page. Products can be shared via copy, X, or the device share sheet.\nNew guides: the pre-launch checklist (/guide/start), payment QR (/guide/qr), register & mobile ordering (/guide/shop), and how to prepare an image URL (/guide/image-url). My page gained an inbox for support messages and a notification when a product sells. Digital goods prices are shown tax-inclusive.',
+    },
+    link: { href: '/guide/start', labelJa: '導入前チェックリストを見る', labelEn: 'Open the pre-launch checklist' },
+  },
+  {
     id: 'handle-embeds-2026-08-01',
     date: '2026-08-01',
     category: 'feature',
