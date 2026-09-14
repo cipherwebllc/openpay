@@ -2768,6 +2768,7 @@
     "catalogDiscoverPrefix": "発見: ",
     "catalogDiscoverJoin": " · ",
     "catalogDiscoverBazaar": "x402 Bazaar",
+    "catalogDiscoverX402List": "x402-list",
     "catalogFeeNoteJpyc": "JPYC の利用料 1%（最低 1 JPYC）は支払う側の上乗せです。",
     "catalogFeeNoteBoth": "JPYC の利用料 1%（最低 1 JPYC）は支払う側の上乗せ。USDC は上乗せなし（標準 x402・Base）。",
     "currencyJpyc": "JPYC",

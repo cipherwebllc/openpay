@@ -2768,6 +2768,7 @@
     "catalogDiscoverPrefix": "Discover via ",
     "catalogDiscoverJoin": " · ",
     "catalogDiscoverBazaar": "x402 Bazaar",
+    "catalogDiscoverX402List": "x402-list",
     "catalogFeeNoteJpyc": "JPYC items add a 1% fee (min 1 JPYC) paid by the buyer.",
     "catalogFeeNoteBoth": "JPYC items add a 1% fee (min 1 JPYC) paid by the buyer. USDC items have no markup (standard x402 on Base).",
     "currencyJpyc": "JPYC",

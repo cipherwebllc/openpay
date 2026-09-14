@@ -35,7 +35,7 @@ import { ConnectButton } from '@/components/ConnectButton';
 import { Field } from '@/components/Field';
 import { env } from '@/lib/env';
 import { shortAddress } from '@/lib/format';
-import { AGENTIC_MARKET_URL, type UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
+import { AGENTIC_MARKET_URL, X402_LIST_URL, type UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
 import { REVERIFY_AUTH_HIDE_THRESHOLD } from '@/lib/x402/reverifyThresholds';
 import type { MonitorFreshness } from '@/lib/directory/monitorFreshness';
 
@@ -1256,6 +1256,16 @@ export function X402DiscoveryView({
                   className="font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
                 >
                   {t('catalogDiscoverBazaar')}
+                </a>
+                {' / '}
+                {/* OpenPay 自身の USDC データ API の掲載先 (2026-09-15 承認)。第三者出品の自動掲載先ではない。 */}
+                <a
+                  href={X402_LIST_URL}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="font-medium text-brand underline-offset-2 hover:text-brand-dark hover:underline"
+                >
+                  {t('catalogDiscoverX402List')}
                 </a>
               </>
             )}
