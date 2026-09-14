@@ -9,7 +9,8 @@
 // hooks/useNewsRead.ts が再評価する (usePayerReceipts と同型の二経路同期)。
 
 import { safeGet, safeSet } from './storage';
-import type { NewsItem } from './news';
+// id さえあれば判定できる (NewsItem でも NewsIndexEntry でも可)。本文を持つ lib/news.ts に依存しない。
+type HasId = { id: string };
 
 export const NEWS_LAST_SEEN_STORAGE_KEY = 'openpay.news.lastSeenId';
 export const NEWS_CHANGED_EVENT = 'openpay.news.changed';
@@ -33,7 +34,7 @@ export function setLastSeenNewsId(id: string): void {
  * lastSeen が null (初回) なら全件が未読。lastSeen が配列に存在しなければ
  * (item が削除された等) 全件を未読扱いにして取りこぼしを防ぐ。
  */
-export function unreadCount(items: readonly NewsItem[], lastSeen: string | null): number {
+export function unreadCount(items: readonly HasId[], lastSeen: string | null): number {
   if (items.length === 0) return 0;
   if (lastSeen === null) return items.length;
   const idx = items.findIndex((it) => it.id === lastSeen);
@@ -42,6 +43,6 @@ export function unreadCount(items: readonly NewsItem[], lastSeen: string | null)
 }
 
 /** 未読が 1 件以上あるか。 */
-export function hasUnreadNews(items: readonly NewsItem[], lastSeen: string | null): boolean {
+export function hasUnreadNews(items: readonly HasId[], lastSeen: string | null): boolean {
   return unreadCount(items, lastSeen) > 0;
 }

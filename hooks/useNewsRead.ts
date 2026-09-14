@@ -10,7 +10,8 @@
 // hasUnread=false / unreadCount=0 を返す。
 
 import { useCallback, useEffect, useState } from 'react';
-import { sortedNews, latestNewsId } from '@/lib/news';
+// 本文を持つ lib/news.ts ではなく索引だけを読む (全ページに載るヘッダの bundle を膨らませない)。
+import { sortedNewsIndex, latestNewsId } from '@/lib/newsIndex';
 import {
   getLastSeenNewsId,
   setLastSeenNewsId,
@@ -50,7 +51,7 @@ export function useNewsRead(): {
     if (latest !== null) setLastSeenNewsId(latest); // CHANGED_EVENT で上の listener が再評価
   }, []);
 
-  const items = sortedNews();
+  const items = sortedNewsIndex();
   // SSR / hydrate 前は未読を出さない (mismatch / チラつき防止)。
   const count = hydrated ? computeUnreadCount(items, lastSeen) : 0;
 

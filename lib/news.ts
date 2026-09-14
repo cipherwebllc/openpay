@@ -275,7 +275,5 @@ export function sortedNews(): readonly NewsItem[] {
   return [...NEWS_ITEMS].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
-/** 最新 (sortedNews の先頭) の id。未読判定の基準。空なら null。 */
-export function latestNewsId(): string | null {
-  return sortedNews()[0]?.id ?? null;
-}
+// latestNewsId は lib/newsIndex.ts (本文を持たない索引) に移した。互換のため再 export。
+export { latestNewsId } from './newsIndex';
