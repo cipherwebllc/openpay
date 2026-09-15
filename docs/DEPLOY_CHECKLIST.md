@@ -1730,8 +1730,14 @@ PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下�
 
 ### 16.6 KV バックアップと認証済み修復（運用期限案）
 
-**状態 (2026-09-15)**: ライセンス NFT・保護配布は本節の「点灯前に実装」を満たさないまま点灯した (9/10)。
-独立バックアップ v1 は §16.6.1 として実装 (plans/kv-backup.md v1.2・Codex レビュー 2 巡)。
+**状態 (2026-09-16)**: ライセンス NFT・保護配布は本節の「点灯前に実装」を満たさないまま点灯した (9/10)。
+独立バックアップ v1 は §16.6.1 として実装 (plans/kv-backup.md v1.2・Codex レビュー 2 巡) し、**9/16 に本番で活性化済み**
+(Upstash `OpenPay-mainnet` → R2 `openpay-kv-backup`・初回 run 85 keys complete・watch green・`--verify` OK)。
+**復元の実機検証 (drill) も 9/16 に完了**: 本番 archive を空にした dev DB へ `kv-restore.mjs --apply` → applied 85 / mismatch 0 /
+`--check` 3 点とも違反 0 / 隔離候補 0 / Store index 22 = 本番一致。レポートは R2 `audits/` に保存。
+運用上の制約 (2026-09-16 確認): **Upstash 無料プランは DB 1 つまで**なので drill 専用 DB は作れない → drill は dev DB
+(`.env.local` の KV_REST_API_URL) を一時的に空にして行い、事前に取った全キーのコピーを終了後に戻す。**Upstash Daily Backup も無料プランでは不可**
+(二線目なし・有料化は user 裁定)。
 v1 が満たすのは「12h 周期の fuzzy snapshot を独立保存先に置き、空の隔離 DB へ復元・検証できる」ことまで。
 **未充足** (v1 で解決しない・別設計または user 裁定): RPO 5 分 (v1 は 12h)・terms 本文 (売り手 URL の本文と購入時点の証明)・
 GitHub 外の監視 (Actions 共通停止は検知不能)・独立監査の恒久化 (v1 は復元レポートを R2 `audits/` へ手動 PUT)・本番 in-place 修復 (旧値 CAS)。
@@ -1739,7 +1745,7 @@ GitHub 外の監視 (Actions 共通停止は検知不能)・独立監査の恒�
 点灯前に、KV と独立した保存先への暗号化バックアップを実装・試験すること。
 本 PR はバックアップサービスを作成しない。取得主体は運営の認証済み管理アカウントとし、
 復号・復元権限を限定し監査ログを残す。運用目標案は増分 5 分以内・日次全量、RPO 5 分・RTO 24 時間
-(**v1 到達値: 独立コピー 12h 周期・検知閾値 26h/監視 6h・二線目 = Upstash Daily Backup (Upstash 内・独立性なし)**)。
+(**v1 到達値: 独立コピー 12h 周期・検知閾値 26h/監視 6h。二線目の Upstash Daily Backup は無料プランでは使えず未設定**)。
 
 #### 16.6.1 独立バックアップ v1 (`scripts/kv-backup.mjs` / `kv-restore.mjs`)
 
@@ -1791,7 +1797,7 @@ R2 token は既存 archive を消せる → 月次棚卸しで最新 complete ar
   active↔job identity + submission・settled USDC intent → `payment:claimed` 値 `r:store:<salt>`・purchase record・grant・lib score・lib⇄own)。
   違反は `quarantine_candidates` (自動修正なし)。**graph 違反ゼロでもオンチェーン突合済みではない**。
 
-訓練: user が Upstash 無料 DB `openpay-restore-drill` を作り、dev DB の full → drill へ `--apply` → mismatch 0・`--check` の違反が dev の実状と一致。
+訓練: 無料プランでは drill 専用 DB を作れないため、dev DB (`.env.local`) を使う。手順 = 全キーのコピー取得 → `FLUSHDB` (運営者が実行) → `--apply` → mismatch 0・`--check` 違反 0 を確認 → `FLUSHDB` → コピーを戻す。初回 9/16 完了。
 月次棚卸しで最新 archive を 1Password の鍵で `--verify`。
 
 #### 16.6.3 release gate (replacement DB を本番へ向ける前)
