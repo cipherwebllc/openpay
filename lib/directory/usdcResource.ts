@@ -1,3 +1,5 @@
+import { DIRECTORY_LICENSE, DIRECTORY_LICENSE_PERMISSIONS } from '@/lib/directory/licenseTerms';
+
 // USDC (Base mainnet) で販売する Japan Web3 Directory リソースの単一情報源。
 // route (app/api/paid/usdc/japan-web3-directory) と /openapi.json が共用する。
 //
@@ -22,6 +24,15 @@ export const USDC_DIRECTORY_LIST = {
   // 差別化は「出典 URL + 最終検証日つき」= web 検索で代替できない点なので必ず残す。
   description:
     "Japan Web3 Directory, full export: sourced records on Japan's JPYC/USDC, exchange, wallet and AI-agent services — every row carries an official source URL and last-verified date.",
+} as const;
+
+export const USDC_DIRECTORY_LICENSED = {
+  path: '/api/paid/usdc/japan-web3-directory/licensed',
+  serviceName: 'Japan Web3 Directory (Licensed Export)',
+  tags: ['japan', 'web3', 'directory', 'license', 'commercial-use', 'jpyc', 'usdc', 'sourced-data'],
+  price: '$1',
+  priceUsd: '1',
+  description: `${USDC_DIRECTORY_LIST.description} Includes a commercial-use license (attribution required) and an EIP-712 attestation binding the buyer address, content hash and issue time.`,
 } as const;
 
 // 検索版。価格は一覧と同じ (JPYC 版も一覧/検索とも 2 JPYC で同額)。
@@ -108,6 +119,38 @@ export const USDC_DIRECTORY_SEARCH_BAZAAR = {
 
 export const USDC_DIRECTORY_LIST_BAZAAR = {
   output: { example: DIRECTORY_ENVELOPE_EXAMPLE },
+} as const;
+
+export const USDC_DIRECTORY_LICENSED_BAZAAR = {
+  ...USDC_DIRECTORY_LIST_BAZAAR,
+  output: {
+    example: {
+      ...DIRECTORY_ENVELOPE_EXAMPLE,
+      license: {
+        id: DIRECTORY_LICENSE.id,
+        name: DIRECTORY_LICENSE.name,
+        url: DIRECTORY_LICENSE.urlFor('en'),
+        licensee: null,
+        issuedAt: DIRECTORY_ENVELOPE_EXAMPLE.generatedAt,
+        ...DIRECTORY_LICENSE_PERMISSIONS,
+      },
+      attestation: null,
+      signer: null,
+      verify: {
+        method: 'EIP-712 recoverTypedDataAddress',
+        domain: { name: 'OpenPay Directory License', version: '1' },
+        types: {
+          DirectoryLicense: [
+            { name: 'licensee', type: 'address' },
+            { name: 'licenseId', type: 'string' },
+            { name: 'contentHash', type: 'bytes32' },
+            { name: 'rows', type: 'uint256' },
+            { name: 'issuedAt', type: 'uint256' },
+          ],
+        },
+      },
+    },
+  },
 } as const;
 
 // ── JPYC Service Monitor (更新型・USDC 面) ─────────────────────────────────
