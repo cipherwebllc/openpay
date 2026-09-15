@@ -26,4 +26,5 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/x402/purchaseIntent-lua.test.ts',
   'tests/lib/x402/registry-lua.test.ts',
   'tests/lib/x402/reverify-cas.test.ts',
+  'tests/scripts/kv-restore-lua.test.ts',
 ];

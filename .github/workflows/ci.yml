@@ -67,6 +67,7 @@ jobs:
           --exclude tests/lib/x402/purchaseIntent-lua.test.ts
           --exclude tests/lib/x402/registry-lua.test.ts
           --exclude tests/lib/x402/reverify-cas.test.ts
+          --exclude tests/scripts/kv-restore-lua.test.ts
       - name: Build (production) + bundle budget check
         env:
           NEXT_PUBLIC_NETWORK_ENV: testnet

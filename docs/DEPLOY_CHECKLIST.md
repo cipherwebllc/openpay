@@ -1778,13 +1778,13 @@ R2 token は既存 archive を消せる → 月次棚卸しで最新 complete ar
 #### 16.6.2 復元 (v1 = 空の隔離 DB のみ)
 
 `node scripts/kv-restore.mjs --file <enc> --target-url <REST URL> --target-name <drill|replacement-YYYYMMDD> [--prefix …] [--apply]`
-(token は env `KV_RESTORE_TARGET_TOKEN`・`--apply` 無しは dry-run)。
+(token は env `KV_RESTORE_TARGET_TOKEN`・`--apply` 無しは dry-run・`--check` は省略しても必ず実行)。
 
 - 前提: 復元先は **DBSIZE=0** (namespace 空ではなく DB 全体が空)・archive の source と同一 host は**拒否**・`KV_BACKUP_REST_URL` と同 host も拒否・
   app/worker が接続していない (復元中〜比較完了まで他の接続を作らない)。`--force`/resume は無い。
 - 順序: 復号 → GCM tag 検証 (private staging・検証前の平文は使わない) → gunzip → 構造検証 → `--check` (archive) → 復元集合 (prefix・期限切れ除外) → `--check` (復元集合) →
   **preflight 全件** (型・`{b:…}` binary 0 件・EVAL 符号化後 ≤ 3MB・member ≤ 10,000・期限) → key ごと Lua「不在なら install + PEXPIRE」→ readback 全比較 (bytes/順序/集合/score・TTL ±5s) →
-  `--check` (target) → `restore-report-<name>.json` (途中失敗でも書く) → R2 `audits/` へ手動 PUT。
+  `--check` (target) → `restore-report-<target-name>.json` (作業ディレクトリ・途中失敗でも書く・既存レポートは上書きしない) → R2 `audits/` へ手動 PUT。
 - 結果分類: applied / exists / lua_error / timeout_verified_match (内容一致を確認・自分の書込とは断定しない) / timeout_unverified / expired_skipped / expired_during_verify / mismatch。
 - 途中失敗 (プロセス終了・lua_error・timeout_unverified) は **resume せず、その DB を破棄して新しい空 DB でやり直す**。
 - `--check` は存在ではなく identity と値を見る (product↔全 grant の content revision・stock↔reservation 集計 (完全集合のみ・不完全は unverifiable)・job⇄恒久 index 双方向・
