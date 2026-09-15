@@ -226,7 +226,7 @@ const ja: SellGuideContent = {
     {
       n: 2,
       title: 'AI ストアで登録',
-      body: 'ウォレット接続（SIWE）後、URL、価格（JPYC の整数）、説明、カテゴリ、Docs URL、利用条件・正当性表明を入力します。説明はエージェントが読む前提で、何が返るかを淡々と書きます。',
+      body: 'ウォレット接続（SIWE）後、URL、価格（JPYC の整数）、説明、カテゴリ、正当性表明を入力します。任意項目の「表示名」はカタログの見出しに、「いつ使うか」はエージェントが購入を判断する 1 行になるので、できるだけ埋めてください（Docs URL・利用条件も任意）。説明はエージェントが読む前提で、何が返るかを淡々と書きます。',
     },
     {
       n: 3,
@@ -381,7 +381,7 @@ const en: SellGuideContent = {
     {
       n: 2,
       title: 'Register in the AI Store',
-      body: 'Connect your wallet (SIWE), then enter the URL, price (a whole number of JPYC), description, category, Docs URL, terms, and legitimacy declaration. Write the description for an agent: state plainly what the response contains.',
+      body: 'Connect your wallet (SIWE), then enter the URL, price (a whole number of JPYC), description, category, and the legitimacy declaration. Fill the optional “Display name” (the catalog heading) and “When to use” (the one line an agent uses to decide to buy) whenever you can; Docs URL and terms are optional too. Write the description for an agent: state plainly what the response contains.',
     },
     {
       n: 3,
