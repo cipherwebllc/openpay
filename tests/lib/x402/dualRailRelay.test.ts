@@ -43,6 +43,12 @@ vi.mock('@/lib/x402/cdpJwt', () => ({
   generateCdpJwt: () => 'test-jwt',
 }));
 
+const ledger = vi.hoisted(() => ({ record: vi.fn() }));
+vi.mock('@/lib/x402/settleLedger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/x402/settleLedger')>()),
+  recordSettleLedgerAfterResponse: ledger.record,
+}));
+
 vi.mock('@/lib/x402/registry', () => ({
   getResource: vi.fn(async () => state.resource),
 }));
@@ -111,6 +117,7 @@ beforeEach(() => {
   state.rateLimited = false;
   state.resource = record();
   fetchMock.mockReset();
+  ledger.record.mockReset();
   vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -299,6 +306,26 @@ describe('dualRailRelay verify/settle', () => {
     expect((fetchMock.mock.calls[0] as [string])[0]).toBe(
       'https://cdp.example/settle',
     );
+    // 運営台帳: 出品者の payTo・登録 URL・USDC 表示単位で 1 行。
+    expect(ledger.record).toHaveBeenCalledTimes(1);
+    expect(ledger.record.mock.calls[0][0]).toMatchObject({
+      source: 'usdc-dual-rail',
+      resource: 'https://seller.example/api/data',
+      payer: '0xabc',
+      payTo: SELLER_USDC,
+      amount: '0.005',
+      asset: 'USDC',
+      tx: '0xtx',
+    });
+  });
+
+  it('verify では台帳に書かない (settle 成功だけ)', async () => {
+    facilitatorReplies(200, { isValid: true, payer: '0xabc' });
+    await handleDualRailRelay(
+      post('verify', { resourceId: 'res-1', paymentHeader: v1Header() }),
+      'verify',
+    );
+    expect(ledger.record).not.toHaveBeenCalled();
   });
 
   it('facilitator 5xx → 503 (判定なしを成功にも失敗にも見せない)', async () => {
