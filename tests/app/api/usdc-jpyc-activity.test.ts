@@ -4,10 +4,12 @@ import { ACTIVITY_NOW, activityWindow } from '../../helpers/jpycActivity';
 import { JPYC_ACTIVITY_PREVIEW_SCHEMA, JPYC_ACTIVITY_RESPONSE_SCHEMA } from '@/lib/jpyc/liveSchema';
 import { USDC_JPYC_ACTIVITY } from '@/lib/jpyc/liveResources';
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), mget: vi.fn(), claim: vi.fn(), release: vi.fn(), fetch: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), mget: vi.fn(), claim: vi.fn(), release: vi.fn(), lpush: vi.fn(), fetch: vi.fn() }));
 vi.mock('@/lib/kv', async () => ({
   ...await vi.importActual<typeof import('@/lib/kv')>('@/lib/kv'),
   kvGet: mocks.get, kvMget: mocks.mget, kvSetNxGet: mocks.claim, kvEval: mocks.release,
+  // 運営台帳 (settleLedger) の LPUSH は KV REST を叩かせない (fetch の呼び出し列を課金境界の検証に使うため)。
+  kvLpush: mocks.lpush,
 }));
 
 const ORIGIN = 'https://open-pay.jp';
@@ -65,6 +67,7 @@ beforeEach(async () => {
   vi.setSystemTime(ACTIVITY_NOW);
   mocks.claim.mockResolvedValue({ ok: true, value: null });
   mocks.release.mockResolvedValue({ ok: true, value: 1 });
+  mocks.lpush.mockResolvedValue({ ok: true, value: 1 });
   store();
   mocks.fetch.mockImplementation(async (url: string) => {
     if (String(url).endsWith('/verify')) return Response.json({ isValid: true, payer: PAYER });

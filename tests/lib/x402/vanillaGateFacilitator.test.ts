@@ -8,6 +8,12 @@ import { NextResponse } from 'next/server';
 import { generateKeyPairSync } from 'node:crypto';
 
 vi.mock('server-only', () => ({}));
+// 運営台帳 (settleLedger) は settle 成功時に 1 回だけ呼ばれることを固定する (money-path 不変の付帯処理)。
+const ledger = vi.hoisted(() => ({ record: vi.fn() }));
+vi.mock('@/lib/x402/settleLedger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/x402/settleLedger')>()),
+  recordSettleLedgerAfterResponse: ledger.record,
+}));
 
 const configHold = vi.hoisted(() => ({
   vanillaFacilitator: { url: 'https://facilitator.payai.network' } as {
@@ -104,6 +110,7 @@ const fetchMock = vi.fn();
 
 beforeEach(() => {
   fetchMock.mockReset();
+  ledger.record.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockResolvedValue({
     ok: true,
@@ -126,6 +133,28 @@ async function run(): Promise<void> {
 }
 
 describe('vanillaGate facilitator 切替', () => {
+  it('settle 成功で運営台帳に 1 行 (resource / payer / 表示単位の金額 / tx)', async () => {
+    await run();
+    expect(ledger.record).toHaveBeenCalledTimes(1);
+    expect(ledger.record.mock.calls[0][0]).toMatchObject({
+      source: 'usdc-vanilla',
+      resource: RESOURCE.resourceUrl,
+      payer: '0xabc',
+      amount: '0.02',
+      asset: 'USDC',
+      tx: '0xtx',
+    });
+  });
+
+  it('verify 失敗 (402 challenge) では台帳に書かない', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ isValid: false, invalidReason: 'insufficient_funds' }),
+    });
+    await run();
+    expect(ledger.record).not.toHaveBeenCalled();
+  });
+
   it('既定: 従来 URL へ・authorization ヘッダ無し (挙動不変の回帰)', async () => {
     await run();
     expect(fetchMock).toHaveBeenCalledTimes(2);

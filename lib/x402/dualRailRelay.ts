@@ -22,6 +22,7 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { logger } from '@/lib/logger';
+import { atomicToHuman, recordSettleLedgerAfterResponse } from '@/lib/x402/settleLedger';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { x402Config } from './config';
@@ -205,10 +206,21 @@ export async function handleDualRailRelay(
       bazaar: buildBazaarQueryExtensionV2(),
     });
     if (action === 'settle' && judgment.success === true) {
-      logger.info('x402.dualrail.settled', {
-        resourceId: resource.id,
-        transaction:
-          typeof judgment.transaction === 'string' ? judgment.transaction : null,
+      const transaction =
+        typeof judgment.transaction === 'string' ? judgment.transaction : null;
+      logger.info('x402.dualrail.settled', { resourceId: resource.id, transaction });
+      // 運営台帳 (誰が・どの商品を・いくらで)。応答返却後・no-throw (掟 12/13)。
+      recordSettleLedgerAfterResponse({
+        at: new Date().toISOString(),
+        source: 'usdc-dual-rail',
+        network:
+          typeof judgment.network === 'string' ? judgment.network : accepts.v1.network,
+        resource: resource.url,
+        payer: typeof judgment.payer === 'string' ? judgment.payer : null,
+        payTo: accepts.v1.payTo,
+        amount: atomicToHuman(accepts.v1.maxAmountRequired, 6),
+        asset: 'USDC',
+        tx: transaction,
       });
     }
     return noStore(NextResponse.json(judgment));

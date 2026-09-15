@@ -31,6 +31,12 @@ const reservationState = vi.hoisted(() => ({
   consume: vi.fn(),
 }));
 
+const ledger = vi.hoisted(() => ({ record: vi.fn() }));
+vi.mock('@/lib/x402/settleLedger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/x402/settleLedger')>()),
+  recordSettleLedgerAfterResponse: ledger.record,
+}));
+
 vi.mock('@/lib/x402/facilitatorReservation', () => ({
   reserveFacilitatorPayment: reservationState.reserve,
   consumeFacilitatorPayment: reservationState.consume,
@@ -592,6 +598,18 @@ describe('x402 facilitator /settle', () => {
       }),
     );
     expect(await vr.json()).toEqual({ valid: true, signer: RECEIPT_SIGNER });
+    // 運営台帳: JPYC 表示単位 (1000 / 手数料 10)・payTo=merchant・要求の resource を写す。
+    expect(ledger.record).toHaveBeenCalledTimes(1);
+    expect(ledger.record.mock.calls[0][0]).toMatchObject({
+      source: 'jpyc-facilitator',
+      network: 'eip155:80002',
+      payer: CUSTOMER,
+      payTo: MERCHANT,
+      amount: '1000',
+      fee: '10',
+      asset: 'JPYC',
+      tx: TX_HASH,
+    });
   });
 
   it('同じ token の consumed tombstone を既存 settle 冪等処理へ replay する', async () => {
