@@ -36,8 +36,12 @@ import {
   type SignedX402Receipt,
 } from '@/lib/x402/receipt';
 import { recordSettlement } from '@/lib/x402/registry';
+import { atomicToHuman, recordSettleLedgerAfterResponse } from '@/lib/x402/settleLedger';
 import { consumeFacilitatorPayment } from '@/lib/x402/facilitatorReservation';
 import { checkHostedIntentSettleAdmission } from '@/lib/x402/purchaseSettleGate';
+
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null;
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -228,6 +232,21 @@ export async function POST(req: Request): Promise<NextResponse> {
       }
       // 月次メトリクス (運営ヒント・fail-quiet)。
       void recordMetric('x402_settle');
+      // 運営台帳 (誰が・どの商品を・いくらで)。resource は要求の paymentRequirements.resource を
+      // そのまま写す (検証対象ではない表示用・無ければ空)。応答返却後・no-throw (掟 12/13)。
+      const requirements = isObj(rawRecord.paymentRequirements) ? rawRecord.paymentRequirements : {};
+      recordSettleLedgerAfterResponse({
+        at: new Date().toISOString(),
+        source: 'jpyc-facilitator',
+        network,
+        resource: typeof requirements.resource === 'string' ? requirements.resource : '',
+        payer,
+        payTo: params.merchant,
+        amount: atomicToHuman(params.merchantValue.toString(), 18),
+        asset: 'JPYC',
+        fee: atomicToHuman(params.feeValue.toString(), 18),
+        tx: result.txHash,
+      });
       return NextResponse.json({
         success: true,
         transaction: result.txHash,

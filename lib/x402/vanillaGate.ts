@@ -32,6 +32,7 @@
 
 import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
+import { atomicToHuman, recordSettleLedgerAfterResponse } from '@/lib/x402/settleLedger';
 import { generateCdpJwt } from './cdpJwt';
 import { x402Config } from './config';
 import { isFacilitatorPreBroadcastRejection } from './paymentRedelivery';
@@ -561,5 +562,17 @@ async function handleVanillaPaidGetInner(
     Buffer.from(JSON.stringify(settlement), 'utf8').toString('base64'),
   );
   res.headers.set('PAYMENT-RESPONSE', encodePaymentResponseHeaderValue(settlement));
+  // 運営台帳 (誰が・どの商品を・いくらで)。応答返却後・no-throw (掟 12/13)。
+  recordSettleLedgerAfterResponse({
+    at: new Date().toISOString(),
+    source: 'usdc-vanilla',
+    network: settlement.network,
+    resource: resource.resourceUrl,
+    payer: settlement.payer ?? null,
+    payTo: accepts.v1.payTo,
+    amount: atomicToHuman(accepts.v1.maxAmountRequired, 6),
+    asset: 'USDC',
+    tx: settlement.transaction,
+  });
   return res;
 }
