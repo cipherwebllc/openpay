@@ -69,6 +69,11 @@ const RECEIPT_KEY = (() => {
   }
 })();
 
+/** Shared server-only account for off-chain attestations; uses the existing receipt key. */
+export function receiptSigningAccount() {
+  return RECEIPT_KEY;
+}
+
 /** 公開 facilitator receipt signer アドレス (/supported で公開・検証側の期待値)。鍵未設定なら null。 */
 export function receiptSignerAddress(): Address | null {
   return RECEIPT_KEY ? getAddress(RECEIPT_KEY.address) : null;

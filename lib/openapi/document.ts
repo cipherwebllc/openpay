@@ -25,6 +25,7 @@ import {
   USDC_PAYMENT_MONITOR_BAZAAR,
   USDC_SERVICE_MONITOR,
   USDC_SERVICE_MONITOR_BAZAAR,
+  USDC_DIRECTORY_LICENSED,
   USDC_DIRECTORY_LIST,
   USDC_DIRECTORY_SEARCH,
 } from '@/lib/directory/usdcResource';
@@ -1321,6 +1322,33 @@ const OPENAPI_DOCUMENT = {
         },
       },
     },
+    [USDC_DIRECTORY_LICENSED.path]: {
+      get: {
+        tags: ['Directory Paid'],
+        summary: USDC_DIRECTORY_LICENSED.serviceName,
+        description: USDC_DIRECTORY_LICENSED.description,
+        'x-payment-info': usdcPaymentInfo(USDC_DIRECTORY_LICENSED.priceUsd),
+        'x-payment-protocol': 'x402',
+        'x-payment-asset': 'USDC',
+        'x-payment-chains': ['Base'],
+        responses: {
+          '200': {
+            description: 'Full published directory after settlement',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DirectoryLicensedEnvelope' },
+              },
+            },
+          },
+          '402': {
+            description:
+              'Standard x402 payment challenge (USDC on Base, exact scheme, single transferWithAuthorization).',
+          },
+          '404': { $ref: '#/components/responses/NotFound' },
+          '503': { $ref: '#/components/responses/StorageUnavailable' },
+        },
+      },
+    },
     [USDC_DIRECTORY_SEARCH.path]: {
       get: {
         tags: ['Directory Paid'],
@@ -1457,6 +1485,89 @@ const OPENAPI_DOCUMENT = {
             },
           },
         },
+      },
+      DirectoryLicensedEnvelope: {
+        type: 'object',
+        allOf: [
+          { $ref: '#/components/schemas/DirectoryEnvelope' },
+          {
+            type: 'object',
+            required: ['license', 'attestation', 'signer', 'verify'],
+            properties: {
+              license: {
+                type: 'object',
+                required: ['id', 'name', 'url', 'licensee', 'issuedAt', 'grants', 'requires', 'prohibits'],
+                properties: {
+                  id: { type: 'string', const: 'openpay-directory-license-v1' },
+                  name: { type: 'string', const: 'OpenPay Directory Data License v1' },
+                  url: { type: 'string', format: 'uri' },
+                  licensee: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+                  issuedAt: { type: 'string', format: 'date-time' },
+                  grants: { type: 'array', items: { type: 'string' } },
+                  requires: { type: 'array', items: { type: 'string' } },
+                  prohibits: { type: 'array', items: { type: 'string' } },
+                },
+              },
+              attestation: {
+                type: ['object', 'null'],
+                required: ['message', 'signature'],
+                properties: {
+                  message: {
+                    type: 'object',
+                    required: ['licensee', 'licenseId', 'contentHash', 'rows', 'issuedAt'],
+                    properties: {
+                      licensee: { type: 'string', pattern: '^0x[0-9a-fA-F]{40}$', description: 'Zero address when the payer is unknown.' },
+                      licenseId: { type: 'string', const: 'openpay-directory-license-v1' },
+                      contentHash: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: 'keccak256 of UTF-8 JSON.stringify(items), preserving array order.' },
+                      rows: { type: 'integer', minimum: 0 },
+                      issuedAt: { type: 'integer', minimum: 0, description: 'Unix seconds.' },
+                    },
+                  },
+                  signature: { type: 'string', pattern: '^0x[0-9a-fA-F]{130}$' },
+                },
+              },
+              signer: { type: ['string', 'null'], pattern: '^0x[0-9a-fA-F]{40}$' },
+              verify: {
+                type: 'object',
+                required: ['method', 'domain', 'types'],
+                properties: {
+                  method: { type: 'string', const: 'EIP-712 recoverTypedDataAddress' },
+                  domain: {
+                    type: 'object',
+                    required: ['name', 'version'],
+                    additionalProperties: false,
+                    properties: {
+                      name: { type: 'string', const: 'OpenPay Directory License' },
+                      version: { type: 'string', const: '1' },
+                    },
+                  },
+                  types: {
+                    type: 'object',
+                    required: ['DirectoryLicense'],
+                    additionalProperties: false,
+                    properties: {
+                      DirectoryLicense: {
+                        type: 'array',
+                        const: [
+                          { name: 'licensee', type: 'address' },
+                          { name: 'licenseId', type: 'string' },
+                          { name: 'contentHash', type: 'bytes32' },
+                          { name: 'rows', type: 'uint256' },
+                          { name: 'issuedAt', type: 'uint256' },
+                        ],
+                        items: {
+                          type: 'object',
+                          required: ['name', 'type'],
+                          properties: { name: { type: 'string' }, type: { type: 'string' } },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
       },
       DirectoryEnvelope: {
         type: 'object',

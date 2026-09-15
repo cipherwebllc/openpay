@@ -7,6 +7,7 @@
 // 掲載済み (2026-08-21〜)。カタログ上は「Bazaar で見つかる」印を付ける。
 
 import {
+  USDC_DIRECTORY_LICENSED,
   USDC_DIRECTORY_LIST,
   USDC_DIRECTORY_SEARCH,
   USDC_PAYMENT_MONITOR,
@@ -53,6 +54,14 @@ export const USDC_CATALOG_ITEMS: readonly UsdcCatalogItem[] = [
     title: USDC_DIRECTORY_SEARCH.serviceName,
     description: USDC_DIRECTORY_SEARCH.description,
     priceUsd: USDC_DIRECTORY_SEARCH.priceUsd,
+    category: 'data',
+  },
+  // ライセンス版 ($1) は一覧・検索の後 (安い順に並べて価格の段差を読ませる)。
+  {
+    resource: `${OPENPAY_CANONICAL_ORIGIN}${USDC_DIRECTORY_LICENSED.path}`,
+    title: USDC_DIRECTORY_LICENSED.serviceName,
+    description: USDC_DIRECTORY_LICENSED.description,
+    priceUsd: USDC_DIRECTORY_LICENSED.priceUsd,
     category: 'data',
   },
   {

@@ -137,6 +137,21 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
     expect(`$${info.price.amount}`).toBe(USDC_DIRECTORY_LIST.price);
   });
 
+  it('licensed export describes the complete license and verification envelope', async () => {
+    const body = await doc();
+    expect(body).toHaveProperty('components.schemas.DirectoryLicensedEnvelope.allOf');
+    const prefix = 'components.schemas.DirectoryLicensedEnvelope.allOf.1';
+    expect(body).toHaveProperty(`${prefix}.required`, ['license', 'attestation', 'signer', 'verify']);
+    expect(body).toHaveProperty(`${prefix}.properties.license.required`, ['id', 'name', 'url', 'licensee', 'issuedAt', 'grants', 'requires', 'prohibits']);
+    expect(body).toHaveProperty(`${prefix}.properties.attestation.properties.message.required`, ['licensee', 'licenseId', 'contentHash', 'rows', 'issuedAt']);
+    const { DIRECTORY_LICENSE_EIP712_DOMAIN, DIRECTORY_LICENSE_TYPES } = await import('@/lib/directory/licenseAttestation');
+    expect(body).toHaveProperty(`${prefix}.properties.verify.properties.domain.properties.name.const`, DIRECTORY_LICENSE_EIP712_DOMAIN.name);
+    expect(body).toHaveProperty(`${prefix}.properties.verify.properties.types.properties.DirectoryLicense.const`, DIRECTORY_LICENSE_TYPES.DirectoryLicense);
+    const { USDC_DIRECTORY_LICENSED, USDC_DIRECTORY_LICENSED_BAZAAR } = await import('@/lib/directory/usdcResource');
+    expect(USDC_DIRECTORY_LICENSED.description.length).toBeLessThanOrEqual(480);
+    expect(USDC_DIRECTORY_LICENSED_BAZAAR.output.example.verify).toEqual({ method: 'EIP-712 recoverTypedDataAddress', domain: DIRECTORY_LICENSE_EIP712_DOMAIN, types: DIRECTORY_LICENSE_TYPES });
+  });
+
   it('USDC 9 endpoint は全て 200 応答に JSON Schema を持つ (Circle Agent Marketplace の掲載条件・2026-09-11)', async () => {
     const body = await doc();
     const usdcPaths = Object.keys(body.paths).filter((p) => p.startsWith('/api/paid/usdc/'));
@@ -155,6 +170,7 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
     const body = await doc();
     const expected: [string, string][] = [
       ['/api/paid/usdc/japan-web3-directory/search', '0.02'],
+      ['/api/paid/usdc/japan-web3-directory/licensed', '1'],
       ['/api/paid/usdc/stores', '0.04'],
       ['/api/paid/usdc/jpyc/supply', '0.002'],
       ['/api/paid/usdc/jpyc/balance', '0.002'],
@@ -241,6 +257,7 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
   // ずれると、実際には 404 する有料エンドポイントをインデクサに広告してしまう。
   const JPYC_RAIL_MONITOR_PATHS = ['/api/paid/jpyc/services', '/api/paid/stablecoin-payments'];
   const DIRECTORY_ONLY_MONITOR_PATHS = [
+    '/api/paid/usdc/japan-web3-directory/licensed',
     '/api/paid/usdc/jpyc/services',
     '/api/paid/usdc/stablecoin-payments',
     '/api/jpyc/services/teaser',

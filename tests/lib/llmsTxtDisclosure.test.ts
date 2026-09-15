@@ -22,6 +22,7 @@ import {
   JPYC_SERVICES_RESOURCE,
 } from '@/lib/directory/paidResources';
 import {
+  USDC_DIRECTORY_LICENSED,
   USDC_DIRECTORY_LIST,
   USDC_DIRECTORY_SEARCH,
   USDC_PAYMENT_MONITOR,
@@ -158,6 +159,7 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
 
   it('有料 API の価格 = 各リソース SoT (USDC 建て)', () => {
     for (const r of [
+      USDC_DIRECTORY_LICENSED,
       USDC_DIRECTORY_LIST,
       USDC_DIRECTORY_SEARCH,
       USDC_SERVICE_MONITOR,
@@ -170,6 +172,12 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
     ]) {
       expect(lineMentioning(r.path), r.path).toContain(`${r.priceUsd} USDC`);
     }
+  });
+
+  it('licensed export copy uses the price SoT', () => {
+    expect(lineMentioning(USDC_DIRECTORY_LICENSED.path)).toContain(
+      `ライセンス版 \`GET ${USDC_DIRECTORY_LICENSED.path}\`（全件 + 商用利用条件 + 署名 ${USDC_DIRECTORY_LICENSED.priceUsd} USDC）`,
+    );
   });
 
   it('Monitor の無料 teaser と nextChangedSince エコーが両商品の行に載っている', () => {

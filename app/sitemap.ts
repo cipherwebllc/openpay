@@ -34,7 +34,7 @@ const PUBLIC_ROUTES = [
 
 // 法務ページ。検索価値は低いが「サービス名 + 特商法/利用規約」で調べる
 // 慎重な利用者に公式整備済みであることを示す信頼シグナルとして低 priority で載せる。
-const LEGAL_ROUTES = ['/terms', '/privacy', '/disclaimer', '/tokutei', LICENSE_STANDARD_TERMS.path] as const;
+const LEGAL_ROUTES = ['/terms', '/privacy', '/disclaimer', '/tokutei', LICENSE_STANDARD_TERMS.path, '/license-terms/directory-v1'] as const;
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return LOCALES.flatMap((locale) => [
