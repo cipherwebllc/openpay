@@ -176,6 +176,7 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
       ['/api/paid/usdc/jpyc/balance', '0.002'],
       ['/api/paid/usdc/jpyc/transfers', '0.005'],
       ['/api/paid/usdc/jpyc/activity', '0.01'],
+      ['/api/paid/usdc/jpyc/attest', '0.1'],
       ['/api/paid/hello', '0.01'], // X402_PRICE stub に一致
     ];
     // JPYC ライブ API は operationId (動詞始まり・不変) と x-agent-usage (購入ルール) を持ち、
@@ -185,6 +186,7 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
       ['/api/paid/usdc/jpyc/balance', 'getJpycBalance'],
       ['/api/paid/usdc/jpyc/transfers', 'listRecentJpycTransfers'],
       ['/api/paid/usdc/jpyc/activity', 'getJpycNetworkActivity'],
+      ['/api/paid/usdc/jpyc/attest', 'getJpycPaymentAttestation'],
     ];
     for (const [path, opId] of agentReady) {
       const op = body.paths[path]?.get as Record<string, unknown> | undefined;
@@ -347,4 +349,17 @@ describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
     const mod = (await import('@/app/openapi.json/route')) as { GET: () => Promise<Response> };
     expect((await mod.GET()).status).toBe(404);
   });
+});
+
+it('attestation shares the Bazaar schema and declares non-settling errors', async () => {
+  const body = await doc();
+  const { USDC_JPYC_ATTEST } = await import('@/lib/jpyc/liveResources');
+  const op = body.paths[USDC_JPYC_ATTEST.path].get;
+  const responses = op.responses as Record<string, { content: { 'application/json': { schema: unknown } }; description: string }>;
+  expect(responses['200'].content['application/json'].schema).toEqual(USDC_JPYC_ATTEST.bazaar.output.schema);
+  for (const status of ['400', '404', '503']) expect(responses[status].description).toContain('No settlement');
+  expect(op.parameters).toEqual(['chain', 'tx'].map((name) => ({
+    name, in: 'query', required: true,
+    schema: USDC_JPYC_ATTEST.bazaar.queryParamsSchema.properties[name as 'chain' | 'tx'],
+  })));
 });

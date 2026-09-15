@@ -30,6 +30,7 @@ import {
 } from './live';
 import {
   JPYC_ACTIVITY_RESPONSE_SCHEMA,
+  JPYC_PAYMENT_ATTESTATION_RESPONSE_SCHEMA,
   JPYC_BALANCE_RESPONSE_SCHEMA,
   JPYC_SUPPLY_RESPONSE_SCHEMA,
   JPYC_TRANSFERS_RESPONSE_SCHEMA,
@@ -335,11 +336,58 @@ export const USDC_JPYC_ACTIVITY = {
   },
 } as const;
 
+export const USDC_JPYC_ATTEST = {
+  path: '/api/paid/usdc/jpyc/attest',
+  operationId: 'getJpycPaymentAttestation',
+  serviceName: 'JPYC Payment Attestation',
+  summary: 'Get a signed record of JPYC transfers in one transaction',
+  price: '$0.1', priceUsd: '0.1',
+  tags: ['jpyc', 'payment', 'attestation', 'receipt', 'onchain-data', 'eip-712'],
+  description:
+    'Signed record of the JPYC transfers in one transaction, read from public RPC at request time, with amounts, totals, block timestamp and finality observations. Use for payment reconciliation and retaining a machine-readable record. The signature shows only that OpenPay observed these on-chain facts at the stated time; it is not a legal certification.',
+  trigger: {
+    callWhen: ['A signed record of JPYC transfers in a specific transaction is needed'],
+    repeatWhen: ['New blocks have been produced and updated finality observations are needed'],
+    preferOver: ['Explorer pages when structured transfer data and an offline-verifiable signature matter'],
+    avoidWhen: ['Legal certification, wallet ownership, identity checks or financial advice are required'],
+    freshnessKey: ['observedAt', 'confirmations', 'finality'],
+  } satisfies AgentUsage,
+  bazaar: {
+    queryParams: { chain: 'polygon', tx: '0x' + 'ab'.repeat(32) },
+    queryParamsSchema: {
+      properties: {
+        chain: { type: 'string', enum: CHAIN_ENUM, description: `Chain to query. Supported values: ${CHAIN_LIST_TEXT}.` },
+        tx: { type: 'string', pattern: '^0x[0-9a-fA-F]{64}$', description: 'Transaction hash containing JPYC transfers.' },
+      }, required: ['chain', 'tx'], additionalProperties: false,
+    },
+    output: {
+      schema: JPYC_PAYMENT_ATTESTATION_RESPONSE_SCHEMA,
+      example: {
+        schemaVersion: '1.0', chain: 'polygon', chainId: 137,
+        txHash: '0x' + 'ab'.repeat(32), blockNumber: '92387745', blockHash: '0x' + 'cd'.repeat(32),
+        blockTimestamp: '2026-09-15T03:00:00.000Z', txStatus: 'success',
+        from: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81', to: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
+        confirmations: '10', finality: { finalized: true, method: 'finalized-tag', finalizedBlock: '92387750' },
+        token: { symbol: 'JPYC', decimals: 18, contract: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29' },
+        transfers: [{ logIndex: 0, from: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81', to: '0x0000000000000000000000000000000000000001', value: '1000000000000000000', valueJpyc: '1' }],
+        totals: { count: 1, valueJpyc: '1' }, observedAt: '2026-09-15T03:00:20.000Z',
+        generatedAt: '2026-09-15T03:00:20.000Z', notice: JPYC_LIVE_NOTICE_CODE, termsUrl: JPYC_LIVE_TERMS_URL,
+        licensee: null, attestation: null, signer: null,
+        verify: {
+          method: 'EIP-712 recoverTypedDataAddress', domain: { name: 'OpenPay JPYC Payment Attestation', version: '1' },
+          types: { JpycPayment: JPYC_PAYMENT_ATTESTATION_RESPONSE_SCHEMA.properties.verify.properties.types.properties.JpycPayment.const },
+        },
+      },
+    },
+  },
+} as const;
+
 export const USDC_JPYC_LIVE_RESOURCES = [
   USDC_JPYC_SUPPLY,
   USDC_JPYC_BALANCE,
   USDC_JPYC_TRANSFERS,
   USDC_JPYC_ACTIVITY,
+  USDC_JPYC_ATTEST,
 ] as const;
 
 /** trigger を 1 段落の英文に圧縮する (description 末尾・llms.txt 用)。 */
