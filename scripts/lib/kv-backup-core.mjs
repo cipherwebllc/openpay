@@ -94,9 +94,11 @@ const validName = (value) => typeof value === 'string' && /^\d{8}T\d{6}Z-r\d+-a(
 function validateManifest(manifest) {
   if (manifest?.v !== 2 || manifest.kind !== 'full' || !validName(manifest.name)
     || !/^[a-f0-9]{16}$/.test(manifest.source?.hostSha256Hex16 ?? '') || !validTime(manifest.startedAt)
-    || JSON.stringify(manifest.prefixes) !== JSON.stringify(PREFIXES)
-    || JSON.stringify(manifest.denylist) !== JSON.stringify(DENYLIST)
-    || ['fullCollectionMax', 'chunk', 'reqBytes', 'stringMax'].some((key) => manifest.limits?.[key] !== LIMITS[key])) {
+    // Older archives stay verifiable after the allowlist widens or limits are tuned: prefixes must be a
+    // subset of the current allowlist (a narrowed policy rejects them on purpose); limits need only be shaped.
+    || !Array.isArray(manifest.prefixes) || !manifest.prefixes.length || manifest.prefixes.some((prefix) => !PREFIXES.includes(prefix))
+    || !Array.isArray(manifest.denylist) || manifest.denylist.some((entry) => typeof entry !== 'string' || !entry)
+    || ['fullCollectionMax', 'chunk', 'reqBytes', 'stringMax'].some((key) => !Number.isSafeInteger(manifest.limits?.[key]) || manifest.limits[key] < 1)) {
     throw new BackupError('invalid_manifest');
   }
 }

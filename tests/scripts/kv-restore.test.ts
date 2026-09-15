@@ -266,9 +266,12 @@ describe('restore execution with fake fetch', () => {
   });
   it('reserves a private report before writing and refuses to overwrite previous evidence', async () => {
     const fake = target(); const file = await archive();
-    await writeFile(join(dir, 'restore-report-drill.json'), 'previous');
+    // The report name carries the run's UTC timestamp, so a dry-run and an apply for the same
+    // target name never collide; an identical clock reproduces the same name and must be refused.
+    const name = `restore-report-drill-${new Date(clock).toISOString().replace(/[-:]|\.\d{3}/g, '')}.json`;
+    await writeFile(join(dir, name), 'previous');
     await expect(runRestore({ ...options(), file, apply: true, fetch: fake.fetch })).rejects.toThrow();
-    expect(fake.fetch).not.toHaveBeenCalled(); expect(await readFile(join(dir, 'restore-report-drill.json'), 'utf8')).toBe('previous');
+    expect(fake.fetch).not.toHaveBeenCalled(); expect(await readFile(join(dir, name), 'utf8')).toBe('previous');
   });
   it('console output cannot leak values, target URLs, tokens or server errors', async () => {
     const file = await archive(); const log = vi.fn(), error = vi.fn();

@@ -198,8 +198,10 @@ const safeCode = (error) => error instanceof RestoreError || error instanceof Ba
 export async function runRestore({ env = process.env, fetch = globalThis.fetch, now = Date.now, reportDirectory = process.cwd(),
   timeoutMs = 30_000, ...options } = {}) {
   validateOptions(options);
-  const reportPath = join(resolve(reportDirectory), `restore-report-${options.targetName}.json`);
-  // Reserve the report before any network mutation; never overwrite an earlier drill's evidence.
+  const stamp = new Date(now()).toISOString().replace(/[-:]|\.\d{3}/g, '');
+  const reportPath = join(resolve(reportDirectory), `restore-report-${options.targetName}-${stamp}.json`);
+  // Reserve the report before any network mutation; never overwrite an earlier drill's evidence
+  // (dry-run and apply for the same target name naturally get distinct files).
   const handle = await open(reportPath, 'wx', 0o600);
   const report = { v: 1, archiveDigest: null, archiveName: null, targetFingerprint: sha256(endpointHost(options.targetUrl)).slice(0, 16),
     targetName: options.targetName, mode: options.apply ? 'apply' : 'dry-run', operator: env.USER ?? null,

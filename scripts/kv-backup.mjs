@@ -264,8 +264,10 @@ export async function main(args = process.argv.slice(2), { env = process.env, lo
     log(JSON.stringify({ archiveFile: result.archiveFile, status: result.meta.status, counts: result.meta.counts }));
     if (result.exitCode) error('::error::KV backup capture is partial; archive and meta have been saved.');
     return result.exitCode;
-  } catch {
-    error('::error::KV backup failed; check configuration, transport, and archive integrity.');
+  } catch (failure) {
+    // Error classes in this tree carry stable codes and never embed credentials or server text.
+    const code = typeof failure?.code === 'string' ? failure.code : 'unexpected';
+    error(`::error::KV backup failed (${failure?.name ?? 'Error'}: ${code}); check configuration, transport, and archive integrity.`);
     return 1;
   }
 }
