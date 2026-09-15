@@ -33,6 +33,7 @@ import { USDC_STORES, USDC_STORES_BAZAAR } from '@/lib/x402/usdcStores';
 import {
   ACTIVITY_CHAINS,
   USDC_JPYC_ACTIVITY,
+  USDC_JPYC_ATTEST,
   USDC_JPYC_BALANCE,
   USDC_JPYC_SUPPLY,
   USDC_JPYC_TRANSFERS,
@@ -631,6 +632,35 @@ const ACTIVITY_OPENAPI_PATHS = {
         '402': JPYC_LIVE_402,
         '503': {
           description: 'data_incomplete: a required bucket is missing. data_unavailable: KV is unavailable, malformed or overflowed, or the data timestamp is over 60 seconds in the future. data_stale: the newest bucket timestamp is more than four hours old. No settlement in every case.',
+        },
+      },
+    },
+  },
+  [USDC_JPYC_ATTEST.path]: {
+    get: {
+      tags: ['x402 Vanilla (USDC)', 'JPYC Live Data'],
+      operationId: USDC_JPYC_ATTEST.operationId,
+      summary: USDC_JPYC_ATTEST.summary,
+      description: USDC_JPYC_ATTEST.description + ' ' + agentUsageText(USDC_JPYC_ATTEST.trigger) + ' Payment: standard x402 in USDC on Base mainnet; no OpenPay fee is added.',
+      parameters: [
+        { name: 'chain', in: 'query', required: true, schema: USDC_JPYC_ATTEST.bazaar.queryParamsSchema.properties.chain },
+        { name: 'tx', in: 'query', required: true, schema: USDC_JPYC_ATTEST.bazaar.queryParamsSchema.properties.tx },
+      ],
+      'x-agent-usage': USDC_JPYC_ATTEST.trigger,
+      'x-payment-info': usdcPaymentInfo(USDC_JPYC_ATTEST.priceUsd),
+      'x-payment-protocol': 'x402', 'x-payment-asset': 'USDC', 'x-payment-chains': ['Base'],
+      responses: {
+        '200': {
+          description: 'JPYC transfers with an optional EIP-712 signature. The signature is not a legal certification.',
+          content: { 'application/json': {
+            schema: USDC_JPYC_ATTEST.bazaar.output.schema, example: USDC_JPYC_ATTEST.bazaar.output.example,
+          } },
+        },
+        '400': { description: 'Invalid or duplicate query parameters; missing required parameters with payment. No settlement.' },
+        '404': { description: 'tx_not_found: receipt not mined or absent. no_jpyc_transfer: reverted or no JPYC Transfer logs. No settlement.' },
+        '402': JPYC_LIVE_402,
+        '503': {
+          description: 'RPC unavailable. No settlement.',
         },
       },
     },

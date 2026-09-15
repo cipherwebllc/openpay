@@ -54,7 +54,7 @@ export function envelope(body: Record<string, unknown>): NextResponse {
 export function gated(
   request: NextRequest,
   resource: JpycLiveResource,
-  content: () => Promise<NextResponse>,
+  content: (ctx: { payer?: string }) => Promise<NextResponse>,
 ): Promise<NextResponse> {
   return handleVanillaPaidGet(
     request,

@@ -30,6 +30,7 @@ import {
 } from '@/lib/directory/usdcResource';
 import {
   USDC_JPYC_ACTIVITY,
+  USDC_JPYC_ATTEST,
   USDC_JPYC_BALANCE,
   USDC_JPYC_SUPPLY,
   USDC_JPYC_TRANSFERS,
@@ -168,6 +169,7 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
       USDC_JPYC_BALANCE,
       USDC_JPYC_TRANSFERS,
       USDC_JPYC_ACTIVITY,
+      USDC_JPYC_ATTEST,
       USDC_STORES,
     ]) {
       expect(lineMentioning(r.path), r.path).toContain(`${r.priceUsd} USDC`);
@@ -194,6 +196,7 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
   it('Activity は独立した価格・preview・observedAt/expiresAt の再購入ルールを持つ', () => {
     const line = lineMentioning(USDC_JPYC_ACTIVITY.path);
     expect(line).toContain(USDC_JPYC_ACTIVITY.priceUsd + ' USDC');
+    // Attestation は別行 (下の専用検査) なので、この行の価格は Activity だけ。
     expect(line.match(/\b[0-9.]+ USDC\b/g)).toEqual([USDC_JPYC_ACTIVITY.priceUsd + ' USDC']);
     expect(line).toContain('GET /api/jpyc/activity/preview?chain=polygon');
     expect(line).toContain('observedAt');
@@ -201,4 +204,13 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
     expect(line).toContain('同じなら買わない');
     expect(line).toContain('settle なし');
   });
+});
+
+it('Attestation の価格と法的証明でない旨を開示する', () => {
+  const line = lineMentioning(USDC_JPYC_ATTEST.path);
+  expect(line).toContain('GET ' + USDC_JPYC_ATTEST.path + '?chain=&tx=');
+  expect(line).toContain('署名付き JSON で返す ' + USDC_JPYC_ATTEST.priceUsd + ' USDC');
+  expect(line).toContain('法的証明ではない');
+  // 課金前に止まる分岐 (未採掘・JPYC 転送なし・RPC 障害) を AI に伝える。
+  expect(line).toContain('課金なし');
 });

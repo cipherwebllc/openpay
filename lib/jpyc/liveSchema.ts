@@ -253,3 +253,75 @@ export const JPYC_ACTIVITY_PREVIEW_SCHEMA = {
   ],
   additionalProperties: false,
 } as const;
+
+const PAYMENT_MESSAGE = {
+  type: 'object',
+  properties: {
+    chainId: { type: 'integer', minimum: 1 }, txHash: TX_HASH, blockNumber: UINT_STRING,
+    transfersHash: TX_HASH, issuedAt: COUNT, licensee: ADDRESS,
+  },
+  required: ['chainId', 'txHash', 'blockNumber', 'transfersHash', 'issuedAt', 'licensee'],
+  additionalProperties: false,
+} as const;
+
+export const JPYC_PAYMENT_ATTESTATION_RESPONSE_SCHEMA = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  type: 'object',
+  properties: {
+    ...ENVELOPE_COMMON,
+    schemaVersion: { type: 'string', const: '1.0' },
+    chain: CHAIN, chainId: { type: 'integer', minimum: 1 },
+    txHash: TX_HASH, blockNumber: UINT_STRING, blockHash: TX_HASH,
+    blockTimestamp: ISO_DATETIME, txStatus: { type: 'string', const: 'success' },
+    from: ADDRESS, to: { anyOf: [ADDRESS, { type: 'null' }] },
+    confirmations: UINT_STRING,
+    finality: {
+      type: 'object', properties: {
+        finalized: { type: ['boolean', 'null'] },
+        method: { type: 'string', enum: ['finalized-tag', 'confirmations'] }, finalizedBlock: UINT_STRING,
+      }, required: ['finalized', 'method'], additionalProperties: false,
+    },
+    token: {
+      type: 'object', properties: { symbol: { type: 'string', const: 'JPYC' }, decimals: { type: 'integer', const: 18 }, contract: ADDRESS },
+      required: ['symbol', 'decimals', 'contract'], additionalProperties: false,
+    },
+    transfers: {
+      type: 'array', minItems: 1, items: {
+        type: 'object', properties: { logIndex: COUNT, from: ADDRESS, to: ADDRESS, value: UINT_STRING, valueJpyc: DECIMAL_STRING },
+        required: ['logIndex', 'from', 'to', 'value', 'valueJpyc'], additionalProperties: false,
+      },
+    },
+    totals: {
+      type: 'object', properties: { count: { type: 'integer', minimum: 1 }, valueJpyc: DECIMAL_STRING },
+      required: ['count', 'valueJpyc'], additionalProperties: false,
+    },
+    observedAt: ISO_DATETIME, licensee: { anyOf: [ADDRESS, { type: 'null' }] },
+    attestation: { anyOf: [
+      { type: 'null' },
+      { type: 'object', properties: { message: PAYMENT_MESSAGE, signature: { type: 'string', pattern: '^0x[a-fA-F0-9]{130}$' } }, required: ['message', 'signature'], additionalProperties: false },
+    ] },
+    signer: { anyOf: [ADDRESS, { type: 'null' }] },
+    verify: {
+      type: 'object', properties: {
+        method: { type: 'string', const: 'EIP-712 recoverTypedDataAddress' },
+        domain: {
+          type: 'object', properties: { name: { type: 'string', const: 'OpenPay JPYC Payment Attestation' }, version: { type: 'string', const: '1' } },
+          required: ['name', 'version'], additionalProperties: false,
+        },
+        types: {
+          type: 'object', properties: { JpycPayment: {
+            type: 'array', minItems: 6, maxItems: 6,
+            items: { type: 'object', properties: { name: { type: 'string' }, type: { type: 'string' } }, required: ['name', 'type'], additionalProperties: false },
+            const: [
+              { name: 'chainId', type: 'uint256' }, { name: 'txHash', type: 'bytes32' },
+              { name: 'blockNumber', type: 'uint256' }, { name: 'transfersHash', type: 'bytes32' },
+              { name: 'issuedAt', type: 'uint256' }, { name: 'licensee', type: 'address' },
+            ],
+          } }, required: ['JpycPayment'], additionalProperties: false,
+        },
+      }, required: ['method', 'domain', 'types'], additionalProperties: false,
+    },
+  },
+  required: [...ENVELOPE_REQUIRED, 'chain', 'chainId', 'txHash', 'blockNumber', 'blockHash', 'blockTimestamp', 'txStatus', 'from', 'to', 'confirmations', 'finality', 'transfers', 'totals', 'observedAt', 'licensee', 'attestation', 'signer', 'verify'],
+  additionalProperties: false,
+} as const;

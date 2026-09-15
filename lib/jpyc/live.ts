@@ -529,3 +529,7 @@ export async function readTransfers(
 export function allFailed(rows: readonly { status: 'ok' | 'unavailable' }[]): boolean {
   return rows.length > 0 && rows.every((r) => r.status === 'unavailable');
 }
+
+// Shared RPC wiring for transaction attestations (lib/jpyc/paymentRecord)。withTimeout も共有し、
+// 1 tx の receipt/block 取得が RPC の無応答で request を抱え続けないようにする。
+export { deploymentFor, clientFor, withTimeout };
