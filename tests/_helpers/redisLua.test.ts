@@ -246,7 +246,7 @@ describe('fake store: 引数と未知コマンド', () => {
   });
 
   it('未知コマンドは例外 (綴り間違いを黙って通さない)', () => {
-    expect(() => call('HSET', 'k', 'f', 'v')).toThrow(/Unknown Redis command/);
+    expect(() => call('TYPO_COMMAND', 'k', 'f', 'v')).toThrow(/Unknown Redis command/);
   });
 });
 
@@ -306,13 +306,13 @@ describe('runRedisLua: redis.call / pcall', () => {
 
   it('未知コマンドは pcall で捕捉できる', async () => {
     expect(
-      await runRedisLua("local ok=pcall(redis.call,'HGETALL','k'); return ok and 1 or 0", [], [], store),
+      await runRedisLua("local ok=pcall(redis.call,'TYPO_COMMAND','k'); return ok and 1 or 0", [], [], store),
     ).toBe(0);
   });
 
   it('redis.pcall は投げずに {err=...} を返す', async () => {
     expect(
-      await runRedisLua("local r=redis.pcall('HGETALL','k'); return type(r)=='table' and r.err~=nil and 1 or 0", [], [], store),
+      await runRedisLua("local r=redis.pcall('TYPO_COMMAND','k'); return type(r)=='table' and r.err~=nil and 1 or 0", [], [], store),
     ).toBe(1);
   });
 });
@@ -395,5 +395,74 @@ describe('runRedisLua: cjson', () => {
       store,
     );
     expect(JSON.parse(encoded as string)).toEqual({ a: 1 });
+  });
+});
+
+describe('restore commands', () => {
+  it('RPUSH/LRANGE retain order, duplicates and Redis negative bounds', () => {
+    expect(call('RPUSH', 'l', 'a', 'b', 'a')).toBe(3);
+    expect(call('RPUSH', 'l', 'c')).toBe(4);
+    expect(call('LRANGE', 'l', 0, -1)).toEqual(['a', 'b', 'a', 'c']);
+    expect(call('LRANGE', 'l', -2, -1)).toEqual(['a', 'c']);
+    expect(call('LRANGE', 'l', 0, -10)).toEqual([]);
+    expect(call('LRANGE', 'l', 5, 10)).toEqual([]);
+    expect(call('LRANGE', 'missing', 0, -1)).toEqual([]);
+  });
+  it('SADD counts only new members and SMEMBERS returns the set', () => {
+    expect(call('SADD', 's', 'b', 'a', 'b')).toBe(2);
+    expect(call('SADD', 's', 'a')).toBe(0);
+    expect(call('SMEMBERS', 's')).toEqual(['b', 'a']);
+    expect(call('SMEMBERS', 'missing')).toEqual([]);
+  });
+  it('HSET counts fields, replaces values, and participates in type/exists/del', () => {
+    expect(call('HSET', 'h', 'b', '1', 'a', '2')).toBe(2);
+    expect(call('HSET', 'h', 'b', '3')).toBe(0);
+    expect(call('HGETALL', 'h')).toEqual(['b', '3', 'a', '2']);
+    expect(call('TYPE', 'h')).toEqual({ ok: 'hash' });
+    expect(call('EXISTS', 'h')).toBe(1);
+    expect(call('DBSIZE')).toBe(1);
+    expect(call('DEL', 'h')).toBe(1);
+    expect(call('HGETALL', 'h')).toEqual([]);
+    expect(call('DBSIZE')).toBe(0);
+  });
+  it('ZRANGE WITHSCORES sorts ascending and formats numeric/inf scores', () => {
+    call('ZADD', 'z', '2', 'b', '1.25', 'a', '-inf', 'first', '+inf', 'last');
+    expect(call('ZRANGE', 'z', 0, -1, 'WITHSCORES')).toEqual(['first', '-inf', 'a', '1.25', 'b', '2', 'last', 'inf']);
+    expect(call('ZRANGE', 'z', -2, -1)).toEqual(['b', 'last']);
+    expect(call('ZRANGE', 'z', 0, -10)).toEqual([]);
+  });
+  it('ZRANGE breaks score ties by UTF-8 bytes, including supplementary characters', () => {
+    call('ZADD', 'z', '1', '𐀀', '1', '\uE000');
+    expect(call('ZRANGE', 'z', 0, -1)).toEqual(['\uE000', '𐀀']);
+    expect(() => call('PTTL')).toThrow('wrong number of arguments');
+  });
+  it('PEXPIRE/PTTL use milliseconds, including zero and all types in DBSIZE', () => {
+    call('SET', 'v', 'v'); call('RPUSH', 'l', 'v'); call('SADD', 's', 'v');
+    call('ZADD', 'z', '1', 'v'); call('HSET', 'h', 'f', 'v');
+    expect(call('DBSIZE')).toBe(5);
+    expect(call('PTTL', 'h')).toBe(-1);
+    for (const k of store.keys()) expect(call('PEXPIRE', k, '1501')).toBe(1);
+    store.advance(1500);
+    expect(call('PTTL', 'h')).toBe(1);
+    expect(call('DBSIZE')).toBe(5);
+    store.advance(1);
+    expect(call('PTTL', 'h')).toBe(-2);
+    expect(call('DBSIZE')).toBe(0);
+    expect(call('PEXPIRE', 'missing', '2')).toBe(0);
+    call('SET', 'v', 'v'); call('PEXPIRE', 'v', '0');
+    expect(call('EXISTS', 'v')).toBe(0);
+    call('SET', 'v', 'v'); call('PEXPIRE', 'v', '500'); call('PERSIST', 'v');
+    expect(call('PTTL', 'v')).toBe(-1);
+  });
+  it('new commands reject WRONGTYPE and malformed arguments without mutations', () => {
+    call('SET', 'v', 'original');
+    for (const cmd of [['RPUSH', 'v', 'a'], ['SADD', 'v', 'a'], ['HSET', 'v', 'a', 'b'], ['SMEMBERS', 'v'], ['HGETALL', 'v'], ['LRANGE', 'v', '0', '-1'], ['ZRANGE', 'v', '0', '-1']]) {
+      expect(() => call(cmd[0], ...cmd.slice(1))).toThrow('WRONGTYPE');
+    }
+    for (const cmd of [['RPUSH', 'l'], ['SADD', 's'], ['HSET', 'h', 'f'], ['PEXPIRE', 'v', '0.5']]) {
+      expect(() => call(cmd[0], ...cmd.slice(1))).toThrow();
+    }
+    expect(call('DBSIZE')).toBe(1);
+    expect(call('GET', 'v')).toBe('original');
   });
 });

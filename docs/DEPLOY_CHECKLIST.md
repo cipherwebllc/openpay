@@ -1730,9 +1730,78 @@ PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下�
 
 ### 16.6 KV バックアップと認証済み修復（運用期限案）
 
+**状態 (2026-09-15)**: ライセンス NFT・保護配布は本節の「点灯前に実装」を満たさないまま点灯した (9/10)。
+独立バックアップ v1 は §16.6.1 として実装 (plans/kv-backup.md v1.2・Codex レビュー 2 巡)。
+v1 が満たすのは「12h 周期の fuzzy snapshot を独立保存先に置き、空の隔離 DB へ復元・検証できる」ことまで。
+**未充足** (v1 で解決しない・別設計または user 裁定): RPO 5 分 (v1 は 12h)・terms 本文 (売り手 URL の本文と購入時点の証明)・
+GitHub 外の監視 (Actions 共通停止は検知不能)・独立監査の恒久化 (v1 は復元レポートを R2 `audits/` へ手動 PUT)・本番 in-place 修復 (旧値 CAS)。
+
 点灯前に、KV と独立した保存先への暗号化バックアップを実装・試験すること。
 本 PR はバックアップサービスを作成しない。取得主体は運営の認証済み管理アカウントとし、
-復号・復元権限を限定し監査ログを残す。運用目標案は増分 5 分以内・日次全量、RPO 5 分・RTO 24 時間。
+復号・復元権限を限定し監査ログを残す。運用目標案は増分 5 分以内・日次全量、RPO 5 分・RTO 24 時間
+(**v1 到達値: 独立コピー 12h 周期・検知閾値 26h/監視 6h・二線目 = Upstash Daily Backup (Upstash 内・独立性なし)**)。
+
+#### 16.6.1 独立バックアップ v1 (`scripts/kv-backup.mjs` / `kv-restore.mjs`)
+
+**範囲** = Store (デジタル商品・ライセンス NFT・保護配布の権利判定) とそれが依存する決済 claim。allowlist prefix:
+`x402:hosted:`・`store:`・`payment:claimed:`・`billing:settled:`・`x402:settle:ledger:` (ledger は best-effort ヒント・決済の真実ではない)。
+denylist (完全一致または `<key>:` 家族): `store:quote:rl`・`store:license:verify:rpc`・`store:delivery:rpc`・`store:license:worker:lock`。
+**全 app の DR ではない** (handle・受注・チップ・push・SIWE・external registry は対象外。受注/チップ/push は保存期間を開示済みのため複製しない)。
+`x402fac:reservation:v1:` (入場 lease) は対象外で、復元時は捨てる。
+
+**取得**: GitHub Actions `kv-backup.yml` (12h ごと・`17 3,15 * * *` UTC・dispatch 可) が Upstash REST を **backup 専用 ACL user の token** で
+`SCAN` → key ごとに `/multi-exec [TYPE, PTTL, 値]` で原子取得 (base64 応答・bytes 保持・小コレクションは全量・大コレクションは chunk で `uncertain`) →
+JSONL → gzip → AES-256-GCM (鍵 1 本・header を AAD) → Cloudflare R2 private bucket へ S3 API (自前 SigV4) で PUT + HEAD 照合 → 平文 `meta.json` (機密なし) を隣に PUT。
+これは **fuzzy snapshot** (走査中の遷移は前後どちらかの状態で入る)。
+
+**成功状態**: Stored (保存と照合完了) → Capture complete (errors=0) → Needs reconciliation (復元後・gate 前は常にここ) → Released (16.6.3 の gate 通過を人が宣言)。
+run green = archive と meta が Stored かつ status complete。partial は保存するが run は赤。
+
+**監視**: `kv-backup-watch.yml` (6h ごと) が最新 complete meta の `capture.finishedAt` を見て 26h 超で赤 (通知 = workflow 失敗メール)。
+**backup job 単独の停止検知**であり、Actions 全体停止・リポの Actions 無効化・公開リポの 60 日無活動停止は検知できない (未充足)。
+
+**運用 secret** (app env ではない・`lib/env.ts` に入れない・`.env.local.example` 運用節と README に名前のみ):
+
+| 置き場 | 変数 | 内容 |
+|---|---|---|
+| GitHub secrets | `KV_BACKUP_REST_URL` / `KV_BACKUP_REST_TOKEN` | Upstash REST URL と **ACL user の token** (`ACL GENTOKEN` → `ACL SETUSER kvbackup on ><token> +scan +type +pttl +get +llen +lrange +scard +smembers +sscan +zcard +zrange +hlen +hgetall +hscan +multi +exec +ping +dbsize ~x402:hosted:* ~store:* ~payment:claimed:* ~billing:settled:* ~x402:settle:ledger:*` → `ACL RESTTOKEN kvbackup <token>`)。prefix 限定で SCAN が通らなければ `~*` に変更し「CI token は DB 全体の読取権を持つ」を受容 (書込は不可のまま)。full token への fallback は無い |
+| GitHub secrets | `KV_BACKUP_KEY` | `openssl rand -hex 32`。1Password にも保管。ローテは新鍵で次回 full・旧鍵は keyId 付きで archive が残る間保持 |
+| GitHub secrets | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | R2 API token (bucket 限定 Object Read & Write・削除防止は不可)。bucket lifecycle 180 日 (短縮は user 裁定) |
+| 運営端末 | `KV_RESTORE_TARGET_TOKEN` / `KV_BACKUP_KEY` | 復元先 DB の token (backup 用と別名・CLI 引数/URL/ログに出さない) と復号鍵 |
+
+受入 (使い捨て DB/bucket): ACL token で必要読取が全て成功し `SET`/`DEL`/`EVAL` の直接実行と `/multi-exec` 内混入が拒否される・`ACL GETUSER` で effective 権限確認・
+PUT/HEAD/List/GET→digest 一致・模擬欠落で watch が赤くなりメールが届く。
+
+トレードオフ (明示的に受容): CI は現行 KV の平文 (ACL token) と archive の復号鍵の両方を持つ。CI 侵害で過去 archive も復号され得る (公開鍵化 age は v2)。
+R2 token は既存 archive を消せる → 月次棚卸しで最新 complete archive + meta を運営 Mac ローカル (iCloud 外) へ `--verify` 後に二次コピー (R2 全損時の復旧点は最新二次コピー・最大 1 か月後退)。
+
+#### 16.6.2 復元 (v1 = 空の隔離 DB のみ)
+
+`node scripts/kv-restore.mjs --file <enc> --target-url <REST URL> --target-name <drill|replacement-YYYYMMDD> [--prefix …] [--apply]`
+(token は env `KV_RESTORE_TARGET_TOKEN`・`--apply` 無しは dry-run・`--check` は省略しても必ず実行)。
+
+- 前提: 復元先は **DBSIZE=0** (namespace 空ではなく DB 全体が空)・archive の source と同一 host は**拒否**・`KV_BACKUP_REST_URL` と同 host も拒否・
+  app/worker が接続していない (復元中〜比較完了まで他の接続を作らない)。`--force`/resume は無い。
+- 順序: 復号 → GCM tag 検証 (private staging・検証前の平文は使わない) → gunzip → 構造検証 → `--check` (archive) → 復元集合 (prefix・期限切れ除外) → `--check` (復元集合) →
+  **preflight 全件** (型・`{b:…}` binary 0 件・EVAL 符号化後 ≤ 3MB・member ≤ 10,000・期限) → key ごと Lua「不在なら install + PEXPIRE」→ readback 全比較 (bytes/順序/集合/score・TTL ±5s) →
+  `--check` (target) → `restore-report-<target-name>-<UTC ts>.json` (作業ディレクトリ・途中失敗でも書く・同名は上書きしない) → R2 `audits/` へ手動 PUT。
+- 結果分類: applied / exists / lua_error / timeout_verified_match (内容一致を確認・自分の書込とは断定しない) / timeout_unverified / expired_skipped / expired_during_verify / mismatch。
+- 途中失敗 (プロセス終了・lua_error・timeout_unverified) は **resume せず、その DB を破棄して新しい空 DB でやり直す**。
+- `--check` は存在ではなく identity と値を見る (product↔全 grant の content revision・stock↔reservation 集計 (完全集合のみ・不完全は unverifiable)・job⇄恒久 index 双方向・
+  active↔job identity + submission・settled USDC intent → `payment:claimed` 値 `r:store:<salt>`・purchase record・grant・lib score・lib⇄own)。
+  違反は `quarantine_candidates` (自動修正なし)。**graph 違反ゼロでもオンチェーン突合済みではない**。
+
+訓練: user が Upstash 無料 DB `openpay-restore-drill` を作り、dev DB の full → drill へ `--apply` → mismatch 0・`--check` の違反が dev の実状と一致。
+月次棚卸しで最新 archive を 1Password の鍵で `--verify`。
+
+#### 16.6.3 release gate (replacement DB を本番へ向ける前)
+
+writer/worker を flag OFF のまま 55 秒以上待つ → レポートの `uncertain`・`quarantine_candidates`・**最終 capture〜障害/再開の欠落区間**の未解決支払/送信を
+canonical 決済・LicenseMinted・paymentKeyOf・receipt・replacement nonce で突合 → 二人目 (user) が確認 → Released。reservation の held は年齢や lease 切れで解放しない。
+本番 DB の一部 key を旧値 CAS で差し替える in-place 修復は v1 の範囲外 (下記の既存手順が引き続き適用・ツールは v2)。
+
+#### 16.6.4 既存の修復手順 (in-place・v2 まで手動)
+
 商品/固定 content/terms snapshot、purchase intent/ownership/grants、stock/reservation、
 obligation/registration job、各恒久 index、worker active、署名済み tx と修復監査を一緒に保存する。
 同じ KV 内の別 index はバックアップではない。署名済み tx は再送可能なため公開ログへ出さない。

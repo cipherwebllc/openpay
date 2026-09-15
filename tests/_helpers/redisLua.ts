@@ -26,7 +26,9 @@
 //      本リポの record に null は現れない。
 // 3. redis.call のエラーは JS の例外として上がる。Lua の pcall では捕捉できるが、
 //    エラーメッセージの文言は実 Redis と一致しない。
-// 4. Lua 数値をコマンド引数に渡すと実 Redis は整数へ切り捨てて文字列化する。ここでも同じ
+// 4. wasmoon の JS bridge は NUL を含む文字列を NUL の手前で切る。REST/bytes の検証は
+//    この bridge を通さない fake fetch テストで行う。
+// 5. Lua 数値をコマンド引数に渡すと実 Redis は整数へ切り捨てて文字列化する。ここでも同じ
 //    挙動を実装しているが、丸めモードの端の差は保証しない。
 import { LuaFactory } from 'wasmoon';
 
@@ -53,8 +55,12 @@ export type FakeRedisStore = {
   readonly lists: Map<string, string[]>;
   /** sorted set (ZADD/ZSCORE/...)。member -> score。 */
   readonly zsets: Map<string, Map<string, number>>;
-  /** set (SISMEMBER)。script 側に SADD が無いのでテストから直接 seed する。 */
+  /** set (SADD/SISMEMBER/SMEMBERS)。 */
   readonly sets: Map<string, Set<string>>;
+  /** hash field -> value。 */
+  readonly hashes: Map<string, Map<string, string>>;
+  setPttl(key: string, ttlMs: number): void;
+  getPttl(key: string): number;
   /** 仮想時計 (ms)。TTL/EXPIRE の検証で advance して進める。 */
   now(): number;
   setNow(ms: number): void;
@@ -78,17 +84,19 @@ export function createFakeRedisStore(nowMs = 0): FakeRedisStore {
   const lists = new Map<string, string[]>();
   const zsets = new Map<string, Map<string, number>>();
   const sets = new Map<string, Set<string>>();
+  const hashes = new Map<string, Map<string, string>>();
   const expiry = new Map<string, number>();
   let clock = nowMs;
 
   const exists = (key: string): boolean =>
-    strings.has(key) || lists.has(key) || zsets.has(key) || sets.has(key);
+    strings.has(key) || lists.has(key) || zsets.has(key) || sets.has(key) || hashes.has(key);
 
   const drop = (key: string): void => {
     strings.delete(key);
     lists.delete(key);
     zsets.delete(key);
     sets.delete(key);
+    hashes.delete(key);
     expiry.delete(key);
   };
 
@@ -97,6 +105,18 @@ export function createFakeRedisStore(nowMs = 0): FakeRedisStore {
     lists,
     zsets,
     sets,
+    hashes,
+    setPttl: (key: string, ttlMs: number) => {
+      store.purgeExpired();
+      if (exists(key)) expiry.set(key, clock + ttlMs);
+      store.purgeExpired();
+    },
+    getPttl: (key: string) => {
+      store.purgeExpired();
+      if (!exists(key)) return -2;
+      const at = expiry.get(key);
+      return at === undefined ? -1 : at - clock;
+    },
     now: () => clock,
     setNow: (ms: number) => {
       clock = ms;
@@ -135,7 +155,7 @@ export function createFakeRedisStore(nowMs = 0): FakeRedisStore {
     keys: () => {
       store.purgeExpired();
       return [
-        ...new Set([...strings.keys(), ...lists.keys(), ...zsets.keys(), ...sets.keys()]),
+        ...new Set([...strings.keys(), ...lists.keys(), ...zsets.keys(), ...sets.keys(), ...hashes.keys()]),
       ];
     },
   };
@@ -199,6 +219,18 @@ export function dispatchRedisCommand(
   const args = rawArgs.map(argToString);
   const key = args[0];
 
+  // Type checks apply to newly supported commands; legacy dispatch behavior stays unchanged.
+  function requireType(type: string) {
+    const actual = store.strings.has(key) ? 'string' : store.lists.has(key) ? 'list' : store.sets.has(key) ? 'set'
+      : store.zsets.has(key) ? 'zset' : store.hashes.has(key) ? 'hash' : 'none';
+    if (actual !== 'none' && actual !== type) throw new Error('WRONGTYPE');
+  }
+  function range<T>(values: T[], first: string, last: string): T[] {
+    if (!/^-?\d+$/.test(first) || !/^-?\d+$/.test(last)) throw new Error('invalid index');
+    const start = normalizeIndex(Number(first), values.length);
+    const stop = Number(last) < 0 ? values.length + Number(last) : Number(last);
+    return start > stop ? [] : values.slice(start, stop + 1);
+  }
   switch (cmd) {
     case 'GET': {
       const value = store.strings.get(key);
@@ -247,11 +279,23 @@ export function dispatchRedisCommand(
     case 'EXISTS': {
       let count = 0;
       for (const k of args) {
-        if (store.strings.has(k) || store.lists.has(k) || store.zsets.has(k) || store.sets.has(k)) {
+        if (store.strings.has(k) || store.lists.has(k) || store.zsets.has(k) || store.sets.has(k) || store.hashes.has(k)) {
           count += 1;
         }
       }
       return count;
+    }
+    case 'DBSIZE':
+      if (args.length) throw new Error('wrong number of arguments');
+      return store.keys().length;
+    case 'PTTL':
+      if (args.length !== 1) throw new Error('wrong number of arguments');
+      return store.getPttl(key);
+    case 'PEXPIRE': {
+      if (args.length !== 2 || !/^-?\d+$/.test(args[1]) || !Number.isSafeInteger(Number(args[1]))) throw new Error('invalid expire time');
+      if (store.getPttl(key) === -2) return 0;
+      store.setPttl(key, Number(args[1]));
+      return 1;
     }
     case 'TTL':
       return store.getTtl(key);
@@ -276,7 +320,57 @@ export function dispatchRedisCommand(
       if (store.lists.has(key)) return { ok: 'list' };
       if (store.zsets.has(key)) return { ok: 'zset' };
       if (store.sets.has(key)) return { ok: 'set' };
+      if (store.hashes.has(key)) return { ok: 'hash' };
       return { ok: 'none' };
+    }
+    case 'RPUSH': {
+      if (args.length < 2) throw new Error('wrong number of arguments');
+      requireType('list');
+      const list = store.lists.get(key) ?? [];
+      list.push(...args.slice(1));
+      store.lists.set(key, list);
+      return list.length;
+    }
+    case 'LRANGE': {
+      if (args.length !== 3) throw new Error('wrong number of arguments');
+      requireType('list');
+      return range(store.lists.get(key) ?? [], args[1], args[2]);
+    }
+    case 'SADD': {
+      if (args.length < 2) throw new Error('wrong number of arguments');
+      requireType('set');
+      const set = store.sets.get(key) ?? new Set<string>();
+      const before = set.size;
+      for (const member of args.slice(1)) set.add(member);
+      store.sets.set(key, set);
+      return set.size - before;
+    }
+    case 'SMEMBERS':
+      if (args.length !== 1) throw new Error('wrong number of arguments');
+      requireType('set');
+      return [...store.sets.get(key) ?? []];
+    case 'HSET': {
+      if (args.length < 3 || args.length % 2 !== 1) throw new Error('wrong number of arguments');
+      requireType('hash');
+      const hash = store.hashes.get(key) ?? new Map<string, string>();
+      let added = 0;
+      for (let i = 1; i < args.length; i += 2) {
+        if (!hash.has(args[i])) added++;
+        hash.set(args[i], args[i + 1]);
+      }
+      store.hashes.set(key, hash);
+      return added;
+    }
+    case 'HGETALL':
+      if (args.length !== 1) throw new Error('wrong number of arguments');
+      requireType('hash');
+      return [...store.hashes.get(key) ?? []].flat();
+    case 'ZRANGE': {
+      if ((args.length !== 3 && args.length !== 4) || (args.length === 4 && args[3].toUpperCase() !== 'WITHSCORES')) throw new Error('invalid arguments');
+      requireType('zset');
+      const entries = [...store.zsets.get(key) ?? []].map(([member, score]) => ({ member, score }))
+        .sort((a, b) => a.score === b.score ? Buffer.compare(Buffer.from(a.member), Buffer.from(b.member)) : a.score - b.score);
+      return range(entries, args[1], args[2]).flatMap((entry) => args.length === 4 ? [entry.member, formatScore(entry.score)] : [entry.member]);
     }
     case 'LLEN':
       return store.lists.get(key)?.length ?? 0;
