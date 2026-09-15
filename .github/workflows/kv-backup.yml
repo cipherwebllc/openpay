@@ -1,0 +1,38 @@
+name: kv-backup
+on:
+  schedule:
+    - cron: '17 3,15 * * *'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: kv-backup
+  cancel-in-progress: false
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Capture and store KV backup
+        env:
+          KV_BACKUP_REST_URL: ${{ secrets.KV_BACKUP_REST_URL }}
+          KV_BACKUP_REST_TOKEN: ${{ secrets.KV_BACKUP_REST_TOKEN }}
+          KV_BACKUP_KEY: ${{ secrets.KV_BACKUP_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          for key in KV_BACKUP_REST_URL KV_BACKUP_REST_TOKEN KV_BACKUP_KEY R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET; do
+            if [ -z "${!key}" ]; then
+              echo "::error::$key secret is not set. KV backup cannot run."
+              exit 1
+            fi
+          done
+          node scripts/kv-backup.mjs
