@@ -45,7 +45,12 @@ describe('methodLabel', () => {
     );
     expect(
       methodLabel({ token: 'usdc', chain: 'base', crossChain: true }, 'cross-chain'),
-    ).toBe('USDC (cross-chain)');
+    ).toBe('USDC (Base · cross-chain)');
+    // Base と Arc を区別する (両方公開時に同名ボタンが並ばない)
+    expect(
+      methodLabel({ token: 'usdc', chain: 'arc', crossChain: true }, 'cross-chain'),
+    ).toBe('USDC (Arc · cross-chain)');
+    expect(methodLabel({ token: 'usdc', chain: 'arc' }, 'cross-chain')).toBe('USDC (Arc)');
   });
 });
 
@@ -675,7 +680,7 @@ describe('ReceiveMethodPicker', () => {
       screen.getByRole('button', { name: 'JPYC · Kaia' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'USDC · cross-chain' }),
+      screen.getByRole('button', { name: 'USDC · Base · cross-chain' }),
     ).toBeInTheDocument();
     expect(screen.getByText('通貨・チェーンを選ぶ')).toBeInTheDocument();
     // 初期状態では TipForm は描画しない
@@ -694,10 +699,10 @@ describe('ReceiveMethodPicker', () => {
     };
     renderWithIntl(<ReceiveMethodPicker config={single} />);
     expect(
-      screen.getByRole('button', { name: '♡ 応援する USDC · cross-chain' }),
+      screen.getByRole('button', { name: '♡ 応援する USDC · Base · cross-chain' }),
     ).toBeInTheDocument();
     expect(screen.getByText('♡ 応援する')).toBeInTheDocument();
-    expect(screen.getByText('USDC · cross-chain')).toBeInTheDocument();
+    expect(screen.getByText('USDC · Base · cross-chain')).toBeInTheDocument();
     expect(screen.queryByText('通貨・チェーンを選ぶ')).not.toBeInTheDocument();
     expect(screen.queryByTestId('tipform')).not.toBeInTheDocument();
   });
@@ -724,7 +729,7 @@ describe('ReceiveMethodPicker', () => {
       methods: [{ token: 'usdc', chain: 'base', crossChain: true }],
     };
     renderWithIntl(<ReceiveMethodPicker config={single} />);
-    fireEvent.click(screen.getByRole('button', { name: '♡ 応援する USDC · cross-chain' }));
+    fireEvent.click(screen.getByRole('button', { name: '♡ 応援する USDC · Base · cross-chain' }));
     expect(screen.getByTestId('tipform')).toHaveTextContent('usdc:base');
   });
 

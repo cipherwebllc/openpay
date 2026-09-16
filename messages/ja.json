@@ -1023,7 +1023,11 @@
     "imageUrlLabel": "画像 URL (任意)",
     "linkLabel": "ラベル",
     "linkUrlLabel": "URL",
-    "embedToggle": "埋め込み表示"
+    "embedToggle": "埋め込み表示",
+    "usdcChainLabel": "USDC の受取チェーン（どちらか 1 つ）",
+    "usdcNone": "USDC は受け取らない",
+    "usdcBothPublished": "現在は Base と Arc の両方を公開しています。どちらか 1 つを選ぶと、更新時に 1 つになります。",
+    "usdcArcTipHint": "USDC (Arc) のチップは Arc チェーンの同じ受取アドレスに届きます（送る側が USDC でガスを負担・他チェーンの USDC からは Circle が転送）。応援メッセージ機能は JPYC チップのみ対応です。"
   },
   "CreatorStoreSeller": {
     "formGroupWhat": "1. 何を売るか",

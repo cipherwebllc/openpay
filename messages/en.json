@@ -1023,7 +1023,11 @@
     "imageUrlLabel": "Image URL (optional)",
     "linkLabel": "Label",
     "linkUrlLabel": "URL",
-    "embedToggle": "Embed media"
+    "embedToggle": "Embed media",
+    "usdcChainLabel": "USDC receiving chain (pick one)",
+    "usdcNone": "Do not receive USDC",
+    "usdcBothPublished": "Both Base and Arc are currently published. Picking one will keep only that chain when you update.",
+    "usdcArcTipHint": "USDC (Arc) tips arrive at the same receiving address on Arc (the sender pays gas in USDC; USDC from other chains is forwarded by Circle). Support messages are available for JPYC tips only."
   },
   "CreatorStoreSeller": {
     "formGroupWhat": "1. What you sell",
