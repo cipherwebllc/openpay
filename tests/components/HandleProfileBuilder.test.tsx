@@ -8,6 +8,9 @@ import { handlePreviewBackground } from '@/lib/handleTheme';
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const ADDR2 = '0x000000000000000000000000000000000000dead';
 const h = vi.hoisted(() => ({
+  arc: false,
+  tip: false,
+  methods: [] as Array<{ token: string; chain: string; crossChain?: boolean }>,
   enableHandles: true,
   enableJpycAvalanche: false,
   connectedAddress: undefined as string | undefined,
@@ -17,6 +20,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
     ...actual,
+    isArcTipEnabled: () => h.arc && h.tip,
     env: {
       ...actual.env,
       get enableHandles() {
@@ -63,6 +67,7 @@ vi.mock('@/components/HandleClaimPanel', () => ({
     onEdit,
     onPublished,
     expectedUpdatedAt,
+    publishBlockedReason,
   }: {
     payload: { config: { to: string }; profile: unknown } | null;
     onEdit?: (
@@ -76,14 +81,17 @@ vi.mock('@/components/HandleClaimPanel', () => ({
       payload: { config: { to: string }; profile: unknown };
       updatedAt: number;
     }) => void;
+    publishBlockedReason?: string;
     expectedUpdatedAt?: number;
   }) => (
     <div
       data-testid="claim"
       data-payload={JSON.stringify(payload)}
+      data-blocked={publishBlockedReason}
       data-expected-updated-at={expectedUpdatedAt ?? ''}
     >
       {payload ? `config-ready:${payload.config.to}` : 'no-config'}
+      <button data-testid="edit-arc" onClick={() => onEdit?.('alice', { to: ADDR, methods: h.methods }, undefined, 123)} />
       <button
         type="button"
         data-testid="edit-legacy-usdc"
@@ -345,9 +353,8 @@ describe('HandleProfileBuilder', () => {
     expect(avax).toBeChecked();
     // checkbox 状態だけでなく、config.methods への反映 → 受取方法サマリ/プレビュー描画まで実際に
     // 伝播していることを実出力で検証 (LARP: トグルが効いて method が描画されることの実証)。
-    expect(
-      screen.getAllByText('JPYC · Avalanche').length,
-    ).toBeGreaterThan(0);
+    // Without a gasless deployment the saved method is retained, but not payment-capable in preview.
+    expect(screen.queryByText('JPYC · Avalanche')).not.toBeInTheDocument();
   });
 
   it('enableJpycAvalanche ON + avalanche method を持つ既存設定を編集ロード → トグル ON 復元 + 受取方法も描画 (load 経路)', () => {
@@ -358,9 +365,8 @@ describe('HandleProfileBuilder', () => {
     expect(
       screen.getByRole('checkbox', { name: 'JPYC (Avalanche)' }),
     ).toBeChecked();
-    expect(
-      screen.getAllByText('JPYC · Avalanche').length,
-    ).toBeGreaterThan(0);
+    // Without a gasless deployment the saved method is retained, but not payment-capable in preview.
+    expect(screen.queryByText('JPYC · Avalanche')).not.toBeInTheDocument();
   });
 
   it('enableJpycAvalanche OFF + avalanche method を持つ設定を編集ロード → method 非載・UI 非表示 (draft 値があっても flag OFF で inert)', () => {
@@ -1100,5 +1106,38 @@ describe('HandleProfileBuilder', () => {
     const after = screen.getAllByRole('button', { name: /注目/ });
     expect(after[0]).toHaveAttribute('aria-pressed', 'false');
     expect(after[1]).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('Arc profile exact payload round trips', () => {
+  it.each([
+    [true, false, true], [false, true, true], [true, true, true], [true, false, false],
+  ])('Arc=%s Base=%s enabled=%s', async (arc, base, enabled) => {
+    h.arc = enabled; h.tip = enabled;
+    h.methods = [
+      ...(base ? [{ token: 'usdc', chain: 'base', crossChain: true }] : []),
+      ...(arc ? [{ token: 'usdc', chain: 'arc', crossChain: false }] : []),
+    ];
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.click(screen.getByTestId('edit-arc'));
+    const claim = screen.getByTestId('claim');
+    const payload = JSON.parse(claim.getAttribute('data-payload')!);
+    expect(payload).toEqual({
+      config: { to: ADDR, color: '#2563eb', theme: 'clean', methods: h.methods, presets: { jpyc: ['300', '1000', '3000'] } },
+      profile: { theme: 'clean' },
+    });
+    expect(screen.getByRole('checkbox', { name: /^USDC \(Base\)/ })).toHaveProperty('checked', base);
+    if (arc) expect(screen.getByRole('checkbox', { name: /^USDC \(Arc\)/ })).toBeChecked();
+    if (!enabled && arc) {
+      expect(claim.getAttribute('data-blocked')).toContain('再公開できません');
+      expect(screen.getAllByText(/無効中/).length).toBeGreaterThan(0);
+      expect(screen.getByRole('checkbox', { name: /^USDC \(Arc\)/ })).toBeDisabled();
+    } else expect(claim.getAttribute('data-blocked')).toBeNull();
+    expect(claim.getAttribute('data-expected-updated-at')).toBe('123');
+    if (enabled) {
+      fireEvent.click(screen.getByTestId('publish-mock'));
+      expect(JSON.parse(claim.getAttribute('data-payload')!)).toEqual(payload);
+    }
+    h.arc = false; h.tip = false;
   });
 });

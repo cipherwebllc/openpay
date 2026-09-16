@@ -17,7 +17,7 @@ import {
   type HandleReceiveMethod,
   type HandleTipConfig,
 } from '@/lib/handle';
-import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX } from '@/lib/url';
+import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX, resolveTipCapability } from '@/lib/url';
 
 export interface HandlePublishPayload {
   config: HandleTipConfig;
@@ -28,6 +28,7 @@ export interface BuildPublishPayloadOptions {
   /** ENS 解決後または生 0x 入力の受取先。未解決なら null。 */
   receiver: string | null;
   enableJpycAvalanche: boolean;
+  arcTip?: boolean;
 }
 
 function isHttpsUrl(value: string): boolean {
@@ -107,8 +108,9 @@ export function buildPublishProfile(draft: HandleProfileDraft): HandleProfile {
 
 export function buildPublishMethods(
   draft: HandleProfileDraft,
-  enableJpycAvalanche: boolean,
+  options: { enableJpycAvalanche: boolean; arcTip?: boolean },
 ): HandleReceiveMethod[] {
+  const { enableJpycAvalanche } = options;
   const methods: HandleReceiveMethod[] = [];
   if (draft.jpycPolygon) methods.push({ token: 'jpyc', chain: 'polygon' });
   if (draft.jpycKaia) methods.push({ token: 'jpyc', chain: 'kaia' });
@@ -120,7 +122,14 @@ export function buildPublishMethods(
   if (draft.usdcBase) {
     methods.push({ token: 'usdc', chain: 'base', crossChain: true });
   }
-  return methods;
+  // 無効化された公開済み Arc を silently drop しない。資格検証は公開直前で全件行う。
+  if (draft.usdcArc) methods.push({ token: 'usdc', chain: 'arc', crossChain: false });
+  return methods.map((method) => {
+    const capability = resolveTipCapability(method.token, method.chain);
+    // 無効な保存済み方法を drop すると再公開で消失する。保持し、公開直前の全件検証で止める。
+    if (!capability.ok) return method;
+    return capability.mode === 'standard' ? { ...method, crossChain: false } : method;
+  });
 }
 
 /**
@@ -133,7 +142,7 @@ export function buildPublishPayload(
 ): HandlePublishPayload | null {
   if (!options.receiver || !isAddress(options.receiver)) return null;
 
-  const methods = buildPublishMethods(draft, options.enableJpycAvalanche);
+  const methods = buildPublishMethods(draft, options);
   if (methods.length === 0) return null;
 
   const presets = draft.presetsJpyc

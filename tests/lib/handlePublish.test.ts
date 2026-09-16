@@ -465,3 +465,14 @@ describe('formatPublishedRelativeTime', () => {
     expect(formatPublishedRelativeTime(Number.NaN, 'en', 0)).toBeNull();
   });
 });
+
+it.each([
+  [true, false, [{ token: 'usdc', chain: 'arc', crossChain: false }]],
+  [false, true, [{ token: 'usdc', chain: 'base', crossChain: true }]],
+  [true, true, [{ token: 'usdc', chain: 'base', crossChain: true }, { token: 'usdc', chain: 'arc', crossChain: false }]],
+] as const)('preserves exact chain-specific methods Arc=%s Base=%s', (usdcArc, usdcBase, methods) => {
+  for (const arcTip of [true, false]) {
+    const payload = buildPublishPayload(draft({ jpycPolygon: false, jpycKaia: false, usdcArc, usdcBase }), { ...OPTIONS, arcTip });
+    expect(payload?.config.methods).toEqual(methods);
+  }
+});

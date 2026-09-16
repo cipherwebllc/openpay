@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  DISCLOSED_TIP_FEE_MODELS,
   DISCLOSED_DUAL_RAIL_USDC,
   DISCLOSED_MOBILE_ORDER_FEE,
   DISCLOSED_RECOVER_FEE,
@@ -213,4 +214,14 @@ it('Attestation の価格と法的証明でない旨を開示する', () => {
   expect(line).toContain('法的証明ではない');
   // 課金前に止まる分岐 (未採掘・JPYC 転送なし・RPC 障害) を AI に伝える。
   expect(line).toContain('課金なし');
+});
+
+it('tip disclosure distinguishes all three fee models unconditionally', () => {
+  const tip = lines.find((line) => line.startsWith('- OpenPay 利用料:'))!.split('チップは')[1].split('クリエイターのデジタル商品')[0];
+  expect(tip).toContain(`約 ${DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc} JPYC`);
+  expect(tip).toContain('USDC (Base) は送る側が Paymaster');
+  expect(tip).toContain('USDC (Arc) は標準モード');
+  expect(tip).toContain('ネットワーク手数料を USDC でウォレットから直接負担');
+  expect(tip).toContain('いずれも OpenPay の徴収はありません');
+  expect(tip).not.toMatch(/(?:全て|すべて).*ガス不要/);
 });

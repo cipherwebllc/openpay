@@ -283,14 +283,16 @@ export function handleStorefrontConfig(
 
 // config → TipParams (TipForm / OGP に渡す)。to は保存時に検証済みなので Address とみなす。
 export function configToTipParams(config: PublishableTipConfig): TipParams {
-  return { ...config, to: config.to as Address };
+  const parsed = parseTipParams(config.to, configToSearchParams(config));
+  if (!parsed.ok) throw new Error(parsed.error);
+  return parsed.params;
 }
 
 // config → tip クエリ (parseTipParams で再検証するため。buildTipPath と対称)。
 export function configToSearchParams(
   config: PublishableTipConfig,
 ): URLSearchParams {
-  const path = buildTipPath(configToTipParams(config));
+  const path = buildTipPath({ ...config, to: config.to as Address });
   const qi = path.indexOf('?');
   return new URLSearchParams(qi >= 0 ? path.slice(qi + 1) : '');
 }
@@ -298,7 +300,8 @@ export function configToSearchParams(
 // 検証済み TipParams → 保存 config (to を string 化)。reserve 時に parseTipParams を
 // 通した結果を正規形として保存するために使う。
 export function tipParamsToConfig(params: TipParams): PublishableTipConfig {
-  return { ...params, to: params.to };
+  const { mode: _mode, ...config } = params;
+  return { ...config, to: params.to };
 }
 
 export type ValidatedConfig =

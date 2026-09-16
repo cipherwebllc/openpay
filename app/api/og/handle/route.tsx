@@ -1,3 +1,4 @@
+import { handleTipCapabilities } from '@/lib/ogTipCard';
 // @handle プロフィールページの動的 OG 画像 (1200x630)。SNS に open-pay.jp/@alice を
 // 貼ったとき、アバター・名前・@handle・bio・受取トークンのカードが表示される。
 //
@@ -192,6 +193,7 @@ export async function GET(req: Request): Promise<ImageResponse> {
     color: record.config.color,
     bio: record.profile?.bio,
     tokenLabels: tokenLabelsOf(record),
+    ...handleTipCapabilities(record.config.methods),
     locale,
   });
   const [avatar, cover] = await Promise.all([

@@ -8,6 +8,7 @@ import TokuteiPage from '@/app/[locale]/tokutei/page';
 import { polygon, avalanche } from 'viem/chains';
 import {
   LEGAL_ENTITY,
+  DISCLOSED_TIP_FEE_MODELS,
   DISCLOSED_RECOVER_FEE,
   DISCLOSED_STORE_USDC_PAYMENT,
   DISCLOSED_DUAL_RAIL_USDC,
@@ -1465,4 +1466,26 @@ it('Arc の USDC 決済 (通常決済のみ・顧客が USDC でネットワー�
   expect(ja.Tokutei.rows.additionalFees.value).toContain('Arc チェーンの USDC 決済は通常決済のみ');
   expect(en.Terms.article5.body).toContain('USDC payments on the Arc chain are standard payments only: customers pay network fees directly in USDC, and the Company collects nothing');
   expect(en.Tokutei.rows.additionalFees.value).toContain('USDC payments on the Arc chain are standard payments only');
+});
+
+// 開示リリースのフェンスは ambient feature flags と無関係に常時実行する。
+describe('three disclosed tip fee models', () => {
+  it.each(['ja', 'en'] as const)('%s: every surface distinguishes JPYC, Base and Arc', async (locale) => {
+    const m = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
+    const surfaces = [m.Landing.supportFeeTipBody, m.Landing.faqA1, m.Landing.faqA6,
+      m.Terms.article5.body.split('(2)')[0], m.Tokutei.rows.price.value, m.Disclaimer.section7.body];
+    expect(DISCLOSED_TIP_FEE_MODELS.usdcBase).toBe('paymaster-usdc');
+    expect(DISCLOSED_TIP_FEE_MODELS.usdcArc).toBe('standard-usdc-network-fee-no-openpay-fee');
+    for (const text of surfaces) {
+      expect(text).toContain(`${DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc} JPYC`);
+      expect(text).toMatch(/USDC \(Base\)[^.。]*Paymaster/);
+      expect(text).toContain('USDC (Arc)');
+      expect(text).toContain(locale === 'ja' ? 'ネットワーク手数料を USDC でウォレットから直接負担' : 'network fees directly in USDC from their wallet');
+      expect(text).toContain(locale === 'ja' ? 'いずれも OpenPay の徴収はありません' : 'OpenPay collects nothing for any of these tips');
+      expect(text).not.toMatch(/チップは(?:すべて|全て|全種類).*ガス不要|all tips (?:are )?(?:gasless|gas.free)/i);
+    }
+    const standardClause = m.Terms.article5.body.split('(3)')[1].split('(4)')[0];
+    expect(standardClause).toContain('Arc');
+    expect(standardClause).toContain('USDC');
+  });
 });

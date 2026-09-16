@@ -68,7 +68,7 @@ test.describe('chain chooser grid 列数 (viewport 連動)', () => {
       .getByRole('button', { name: 'チップ' })
       .click();
 
-    // USDC tab に切替 (Tip default は JPYC)
+    // USDC tab に切替 (Tip default は JPYC)。CI は Arc/Arc tip 両 flag OFF、既存 chain 数を維持。
     await page.getByRole('button', { name: 'USDC' }).click();
 
     await expect(

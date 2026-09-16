@@ -544,3 +544,15 @@ describe('useTipSettings', () => {
     expect(reader.current.settings.crossChain).toBe(false);
   });
 });
+
+it.each([[false, false], [false, true], [true, false], [true, true]])('saved Arc tip settings require both flags (%s, %s)', async (arc, tip) => {
+  const { env } = await import('@/lib/env');
+  const previous = { enableUsdcArc: env.enableUsdcArc, enableUsdcArcTip: env.enableUsdcArcTip };
+  Object.assign(env, { enableUsdcArc: arc, enableUsdcArcTip: tip });
+  try {
+    localStorage.setItem(KEY, JSON.stringify({ token: 'usdc', chain: 'arc', crossChain: true }));
+    const { result } = renderHook(() => useTipSettings());
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    expect(result.current.settings.chain).toBe(arc && tip ? 'arc' : 'base');
+  } finally { Object.assign(env, previous); }
+});

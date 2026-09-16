@@ -37,6 +37,9 @@ const ERROR_MESSAGE_MAX = 500;
 //                      → stats route 側で「fee tx として totalFeeWei にだけ計上、
 //                      GMV / count には含めない」特別扱いをする
 type Payload = {
+  tip?: true;
+  chainSlug?: import('@/lib/chains').ChainSlug;
+  mode?: 'standard';
   flow: 'batch' | 'direct' | 'standard-merchant' | 'standard-fee';
   result: 'success' | 'reverted' | 'error';
   chainId: number;
@@ -172,6 +175,11 @@ function validate(raw: unknown): Payload | null {
     merchant: r.merchant,
     merchantAmount: r.merchantAmount,
   };
+  if (r.tip === true && r.chainSlug === 'arc' && r.mode === 'standard') {
+    clean.tip = true;
+    clean.chainSlug = 'arc';
+    clean.mode = 'standard';
+  }
   if (r.customer !== undefined) clean.customer = r.customer;
   if (r.feeReceiver !== undefined) clean.feeReceiver = r.feeReceiver;
   if (r.feeAmount !== undefined) clean.feeAmount = r.feeAmount;

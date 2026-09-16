@@ -458,6 +458,10 @@ export const env = {
     process.env.NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE,
   ),
   // Arc は標準決済のみ、cross-chain 対象外。既定 OFF。
+  enableUsdcArcTip: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_USDC_ARC_TIP',
+    process.env.NEXT_PUBLIC_ENABLE_USDC_ARC_TIP,
+  ),
   enableUsdcArc: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_USDC_ARC',
     process.env.NEXT_PUBLIC_ENABLE_USDC_ARC,
@@ -794,3 +798,5 @@ if (isMainnet) {
     );
   }
 }
+
+export const isArcTipEnabled = () => env.enableUsdcArc && env.enableUsdcArcTip;

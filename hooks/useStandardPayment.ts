@@ -19,7 +19,12 @@ import type {
   StandardIntentStage,
 } from '@/lib/paymentIntentStorage';
 
-type StandardPaymentParams = StandardPaymentIntentParams;
+export type StandardPaymentParams = StandardPaymentIntentParams & {
+  customer?: Address;
+  tip?: true;
+  chainSlug?: import('@/lib/chains').ChainSlug;
+  mode?: 'standard';
+};
 
 type StandardPaymentResult = {
   merchantTxHash: Hex;
@@ -51,7 +56,7 @@ export type StandardPhase =
   | 'merchant-unknown'
   | 'fee-unknown';
 
-export function useStandardPayment() {
+export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {}) {
   const [chainId, setChainId] = useState<number | undefined>(undefined);
   const [externalError, setExternalError] = useState<Error | null>(null);
   const [phase, setPhase] = useState<StandardPhase>('idle');
@@ -88,10 +93,12 @@ export function useStandardPayment() {
     restoredMerchantBlockNumberRef.current;
 
   const merchantReceipt = useWaitForTransactionReceipt({
+    query: { enabled: enabled && !!merchantTxHash },
     hash: merchantTxHash,
     chainId,
   });
   const feeReceipt = useWaitForTransactionReceipt({
+    query: { enabled: enabled && !!feeTxHash },
     hash: feeTxHash,
     chainId,
   });
@@ -105,6 +112,7 @@ export function useStandardPayment() {
       merchantHash: Hex,
       values: { feeHash?: Hex; merchantBlockNumber?: bigint } = {},
     ) => {
+      if (!enabled) return;
       storageRef.current?.saveStandardPaymentIntent(
         stage,
         params,
@@ -120,13 +128,14 @@ export function useStandardPayment() {
       );
       setHasStoredIntent(true);
     },
-    [customer],
+    [customer, enabled],
   );
 
   const clearPersistedIntent = useCallback(() => {
+    if (!enabled) return;
     storageRef.current?.clearStandardIntent();
     setHasStoredIntent(false);
-  }, []);
+  }, [enabled]);
 
   const isOriginalPayerConnected = useCallback(() => {
     const originalPayer = lastSubmittedFromRef.current;
@@ -187,6 +196,7 @@ export function useStandardPayment() {
   );
 
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
     // /pay の First Load JS 予算へ storage parser を載せないため mount 後に遅延取得する。
     void import('@/lib/paymentIntentStorage')
@@ -227,9 +237,10 @@ export function useStandardPayment() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [enabled]);
 
   function mutate(params: StandardPaymentParams): void {
+    if (!enabled) return;
     if (!storageReady) {
       queuedParamsRef.current = params;
       return;
@@ -250,7 +261,7 @@ export function useStandardPayment() {
       return;
     }
     lastParamsRef.current = params;
-    lastSubmittedFromRef.current = customer;
+    lastSubmittedFromRef.current = params.customer ?? customer;
     merchantErrorLoggedKeyRef.current = null;
     merchantReceiptLoggedKeyRef.current = null;
     feeErrorLoggedKeyRef.current = null;
@@ -286,16 +297,17 @@ export function useStandardPayment() {
   }
 
   useEffect(() => {
-    if (!storageReady || hasStoredIntent) return;
+    if (!enabled || !storageReady || hasStoredIntent) return;
     const queued = queuedParamsRef.current;
     if (!queued) return;
     queuedParamsRef.current = null;
     mutate(queued);
     // mutate は render ごとに変わるが、storage 読込完了時に queue を 1 度だけ排出する effect。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasStoredIntent, storageReady]);
+  }, [enabled, hasStoredIntent, storageReady]);
 
   const retryFee = useCallback(() => {
+    if (!enabled) return;
     const params = lastParamsRef.current;
     const merchantBlockNumber =
       merchantReceipt.isSuccess &&
@@ -328,6 +340,7 @@ export function useStandardPayment() {
     });
     submitFee(params, merchantTxHash, merchantBlockNumber);
   }, [
+    enabled,
     phase,
     merchantTxHash,
     merchantReceipt.isSuccess,
@@ -340,15 +353,17 @@ export function useStandardPayment() {
   ]);
 
   const retryReceipt = useCallback(() => {
+    if (!enabled) return;
     // unknown で許可する操作は、broadcast 済み hash の receipt 再照会のみ。
     if (phase === 'merchant-unknown') {
       void refetchMerchantReceipt();
     } else if (phase === 'fee-unknown') {
       void refetchFeeReceipt();
     }
-  }, [phase, refetchMerchantReceipt, refetchFeeReceipt]);
+  }, [enabled, phase, refetchMerchantReceipt, refetchFeeReceipt]);
 
   useEffect(() => {
+    if (!enabled) return;
     const params = lastParamsRef.current;
     if (!params) return;
     if (merchantWrite.isPending) return;
@@ -399,6 +414,7 @@ export function useStandardPayment() {
       setPhase('merchant-error');
     }
   }, [
+    enabled,
     merchantWrite.isPending,
     merchantWrite.data,
     merchantWrite.error,
@@ -414,6 +430,7 @@ export function useStandardPayment() {
   ]);
 
   useEffect(() => {
+    if (!enabled) return;
     const params = lastParamsRef.current;
     if (!params || params.feeAmount === 0n) return;
     if (!feeStartedRef.current) return;
@@ -457,6 +474,7 @@ export function useStandardPayment() {
       setPhase('fee-error');
     }
   }, [
+    enabled,
     feeWrite.isPending,
     feeWrite.data,
     feeWrite.error,
@@ -486,13 +504,16 @@ export function useStandardPayment() {
   const frIsSuccess = feeReceipt.isSuccess;
 
   useEffect(() => {
+    if (!enabled) return;
     const params = lastParamsRef.current;
     if (!params) return;
+    // ログ chunk の待機中に次の送信へ移っても、payer を別の試行へ取り違えない。
+    const logCustomer = params.tip ? lastSubmittedFromRef.current : customer;
     void import('@/lib/standardPaymentLog')
       .then(({ emitStandardPaymentLogs }) => {
         emitStandardPaymentLogs(
           params,
-          customer,
+          logCustomer,
           feeStartedRef.current,
           { data: mwData, error: mwError },
           { data: mrData, error: mrError, isSuccess: mrIsSuccess },
@@ -510,6 +531,7 @@ export function useStandardPayment() {
         // paymentLog chunk の読込障害を進行中の送金状態へ波及させない。
       });
   }, [
+    enabled,
     mwData,
     mwError,
     mrData,
@@ -580,7 +602,7 @@ export function useStandardPayment() {
     //    variable-amount UI 編集で receipt 到達時に値が drift する。
     lastSubmittedParams: lastParamsRef.current,
     lastSubmittedFrom: lastSubmittedFromRef.current,
-    isRestoring: !storageReady,
+    isRestoring: enabled && !storageReady,
     hasActiveIntent: hasStoredIntent,
     hasAttempt: lastParamsRef.current !== null,
     restoredFromStorage: restoredFromStorageRef.current,

@@ -64,12 +64,14 @@ export async function generateMetadata({
       facts = {
         name: parsed.params.name,
         tokenLabel: tokenLabelFor(parsed.params.token),
-        gasless: true,
+        gasless: parsed.params.mode === 'gasless',
+        standardGas: parsed.params.mode === 'standard',
       };
       ogImage = buildTipOgImageUrl(
         address,
         {
           token: parsed.params.token,
+          chain: parsed.params.chain,
           name: parsed.params.name,
           color: parsed.params.color,
           theme: parsed.params.theme,

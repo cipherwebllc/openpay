@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const h = vi.hoisted(() => ({
+  arcTip: false,
   enableHandles: true,
   enableMobileOrder: false,
   enableCreatorStore: false,
@@ -21,6 +22,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
     ...actual,
+    isArcTipEnabled: () => h.arcTip,
     env: {
       ...actual.env,
       get enableHandles() {
@@ -279,4 +281,16 @@ it('does not expose owner deliveryUrl in product metadata/OG links', async () =>
   const meta = await call('%40delivery-private-metadata', 'ja', PRODUCT_ID);
   expect(JSON.stringify(meta)).not.toContain(deliveryUrl);
   expect(JSON.stringify(meta)).toContain(PRODUCT.title);
+});
+
+it.each(['arc', 'base', 'both', 'disabled'] as const)('handle metadata aggregates all methods: %s', async (kind) => {
+  h.arcTip = kind !== 'disabled';
+  h.record = { ...PROFILE_RECORD, profile: {}, config: { ...PROFILE_RECORD.config, methods: [
+    ...(kind === 'base' || kind === 'both' ? [{ token: 'usdc', chain: 'base' }] : []),
+    ...(kind !== 'base' ? [{ token: 'usdc', chain: 'arc', crossChain: false }] : []),
+  ] } };
+  const meta = await generateMetadata({ params: Promise.resolve({ locale: 'ja', handle: '@alice' }), searchParams: Promise.resolve({}) });
+  expect(meta.description?.includes('ガス不要')).toBe(kind === 'base' || kind === 'both');
+  expect(meta.description?.includes('ガスも USDC')).toBe(kind === 'arc' || kind === 'both');
+  h.arcTip = false;
 });
