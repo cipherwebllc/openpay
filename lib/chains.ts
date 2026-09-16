@@ -1,5 +1,5 @@
 // 対応チェーン (NETWORK_ENV で同一 slug が mainnet/testnet に切り替わる):
-//   USDC merchant 受信: Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche
+//   USDC merchant 受信: Base / Arbitrum / Optimism / Polygon / Ethereum / Avalanche / Arc (flag ON・standard のみ)
 //   JPYC merchant 受信: Polygon / Kaia
 //   buyer-only (cross-chain source のみ): Unichain / World Chain / Sonic / Sei / HyperEVM
 //
@@ -13,6 +13,8 @@
 // (mav2.ts で kaia 検出時 throw)。HyperEVM testnet は viem/chains 未収録のため
 // defineChain で inline 定義する。
 import {
+  arc as viemArc,
+  arcTestnet as viemArcTestnet,
   arbitrum,
   arbitrumSepolia,
   avalanche,
@@ -40,6 +42,27 @@ import {
 import { defineChain, fallback, http, type Chain, type Transport } from 'viem';
 import { env, isMainnet } from './env';
 
+// 公式値: https://docs.arc.io/arc/references/connect-to-arc
+// https://docs.arc.io/arc/references/contract-addresses
+// Native USDC は 18dp、ERC-20 USDC は 6dp (tokens.ts)。
+export const arc = defineChain({
+  ...viemArc,
+  id: 5042,
+  name: 'Arc',
+  nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
+  rpcUrls: { default: { http: ['https://rpc.mainnet.arc.io'] } },
+  blockExplorers: { default: { name: 'Arc Explorer', url: 'https://explorer.arc.io' } },
+});
+export const arcTestnet = defineChain({
+  ...viemArcTestnet,
+  id: 5042002,
+  name: 'Arc Testnet',
+  nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
+  rpcUrls: { default: { http: ['https://rpc.testnet.arc.io'] } },
+  blockExplorers: { default: { name: 'Arc Explorer', url: 'https://explorer.testnet.arc.io' } },
+  testnet: true,
+});
+
 // HyperEVM testnet (chainId 998) は viem/chains に未収録のため inline 定義。
 // 出典: https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/hyperevm
 // Circle Gateway testnet 用に最低限 (id / name / nativeCurrency / rpcUrls /
@@ -60,7 +83,7 @@ const hyperEvmTestnet = defineChain({
   testnet: true,
 });
 
-// merchant 受信 + buyer 支払の 両方 可能な chain slug。QrGenerator chain chooser や
+// merchant 受信 chain slug (Arc は merchant-only・cross-chain 対象外)。QrGenerator chain chooser や
 // /pay URL parser で受け取る "受取 chain" 用 union。
 // phase 4b-1 で追加した buyer-only chain (Avalanche/Unichain) は本 union に含めない
 // (UI 露出させない、URL parser が受取 chain として reject する設計のため)。
@@ -71,7 +94,8 @@ export type ChainSlug =
   | 'polygon'
   | 'kaia'
   | 'ethereum'
-  | 'avalanche';
+  | 'avalanche'
+  | 'arc';
 
 // buyer 側 source として balance を見るだけの chain slug。phase 4b-1 で導入、
 // merchant chooser には出さないが lib/crossChain/balance.ts の readMultiChainWalletBalances
@@ -95,6 +119,7 @@ const MAINNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
   kaia,
   ethereum: mainnet,
   avalanche,
+  arc,
 };
 
 const TESTNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
@@ -105,6 +130,7 @@ const TESTNET_SLUG_TO_CHAIN: Record<ChainSlug, Chain> = {
   kaia: kairos,
   ethereum: sepolia,
   avalanche: avalancheFuji,
+  arc: arcTestnet,
 };
 
 const MAINNET_BUYER_ONLY_TO_CHAIN: Record<BuyerOnlyChainSlug, Chain> = {
@@ -139,6 +165,7 @@ const ALL_SLUGS: readonly ChainSlug[] = [
   'kaia',
   'ethereum',
   'avalanche',
+  'arc',
 ];
 
 const ALL_BUYER_ONLY_SLUGS: readonly BuyerOnlyChainSlug[] = [
@@ -167,12 +194,14 @@ export const supportedChains = [
   SLUG_TO_CHAIN.kaia,
   SLUG_TO_CHAIN.ethereum,
   SLUG_TO_CHAIN.avalanche,
+  SLUG_TO_CHAIN.arc,
   BUYER_ONLY_SLUG_TO_CHAIN.unichain,
   BUYER_ONLY_SLUG_TO_CHAIN.worldchain,
   BUYER_ONLY_SLUG_TO_CHAIN.sonic,
   BUYER_ONLY_SLUG_TO_CHAIN.sei,
   BUYER_ONLY_SLUG_TO_CHAIN.hyperevm,
 ] as const satisfies readonly [
+  Chain,
   Chain,
   Chain,
   Chain,
@@ -192,8 +221,8 @@ export const supportedChains = [
  * Ethereum L1 は phase 4a で追加 (SBI VC トレード等の merchant 受信 demand)。
  *
  * **本配列は merchant 受信 chain (QR/Checkout chain chooser) 用**。buyer が支払元
- * として使える chain は phase 4b-1 で Avalanche/Unichain を加えた 7 chain (cross-chain
- * Gateway path) → `buyerUsdcChainNames()` を使用。 */
+ * として使える 11 chain (Arc を除く cross-chain Gateway path) は
+ * `buyerUsdcChainNames()` を使用。 */
 export const USDC_CHAINS: readonly ChainSlug[] = [
   'base',
   'arbitrum',
@@ -201,13 +230,11 @@ export const USDC_CHAINS: readonly ChainSlug[] = [
   'polygon',
   'ethereum',
   'avalanche',
+  ...(env.enableUsdcArc ? (['arc'] as const) : []),
 ];
 
-// merchant 受信 chain (USDC_CHAINS) は現在すべて buyer cross-chain source でもある
-// (config.ts CROSS_CHAIN_TARGETS で全 entry role='merchant-and-buyer')。
-// 重要: ここの集合と config.ts の role は必ず同期させる。片方だけ変えると
-// 「backend は払えると言うが poster には出ない」不整合になる。
-const BUYER_SOURCE_USDC_SLUGS: readonly ChainSlug[] = USDC_CHAINS;
+// CROSS_CHAIN_TARGETS の merchant-and-buyer と同期。Arc は受取専用で対象外。
+const BUYER_SOURCE_USDC_SLUGS = USDC_CHAINS.filter((slug) => slug !== 'arc');
 
 /** Customer (buyer) が cross-chain Gateway 経由で USDC を支払える chain の
  * 表示名一覧。merchant 受信 (Ethereum 含む) + buyer-only chain。ポスター等
@@ -250,7 +277,10 @@ export function isJpycChainSlug(value: string): value is JpycChainSlug {
 }
 
 export function isValidChainSlug(value: string): value is ChainSlug {
-  return (ALL_SLUGS as readonly string[]).includes(value);
+  return (
+    (value !== 'arc' || env.enableUsdcArc) &&
+    (ALL_SLUGS as readonly string[]).includes(value)
+  );
 }
 
 export function chainForSlug(slug: ChainSlug): Chain {
@@ -281,6 +311,7 @@ const SLUGS_WITH_LOGOS = new Set<string>([
   'sonic',
   'sei',
   'hyperevm',
+  'arc',
 ]);
 
 /** chainId → public/chains/{slug}.svg path (merchant + buyer-only 両方解決)。
@@ -339,6 +370,7 @@ const RPC_KEYS_BY_SLUG: Record<
   kaia: ['kaia', 'kairos'],
   ethereum: ['ethereum', 'sepolia'],
   avalanche: ['avalanche', 'avalancheFuji'],
+  arc: ['arc', 'arcTestnet'],
 };
 
 const RPC_KEYS_BY_BUYER_ONLY_SLUG: Record<

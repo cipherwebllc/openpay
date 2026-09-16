@@ -35,7 +35,7 @@ test.describe('chain chooser grid 列数 (viewport 連動)', () => {
     // USDC tab を選択 (default は JPYC)
     await page.getByRole('button', { name: 'USDC' }).click();
 
-    // chain chooser が出るまで待機 (USDC は 6 chain あるので Base/Arbitrum 等)
+    // chain chooser が出るまで待機 (CI は Arc flag OFF で USDC は 6 chain あるので Base/Arbitrum 等)
     await expect(
       page.getByRole('button', { name: /^Base/ }).first(),
     ).toBeVisible();

@@ -21,6 +21,7 @@
 // USDC でも sponsorship に倒す運用判断。動作確認時に testnet ネイティブ + USDC の両方を
 // 用意する手間を省くため (Ethereum Sepolia USDC も同じく sponsorship)。
 import { http } from 'viem';
+import { arc, arcTestnet } from './chains';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import {
   entryPoint07Address,
@@ -55,12 +56,16 @@ export function createPimlico(
 }
 
 /** deployment と現在のネットワーク (mainnet/testnet) から paymaster mode を決定。
- * `unavailable` は buyer-only chain (mainnet) のみ。testnet では sponsorship に
+ * Arc の `unavailable` は全環境で維持。他の unavailable は testnet で sponsorship に
  * 倒して動作確認を簡略化 (testnet ネイティブガス + USDC の両方準備不要)。 */
 export function resolvePaymasterMode(
   deployment: TokenDeployment,
 ): PaymasterMode {
   if (deployment.paymasterMode === 'unavailable') {
+    // Arc は testnet でも standard 固定。sponsorship への迂回を防ぐ。
+    if (deployment.chainId === arc.id || deployment.chainId === arcTestnet.id) {
+      return 'unavailable';
+    }
     if (!isMainnet) return 'sponsorship';
     return 'unavailable';
   }

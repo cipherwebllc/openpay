@@ -574,3 +574,21 @@ describe('mainnet 投入時の silent failure ガード', () => {
     expect(mod.env.pimlicoSponsorshipPolicyId).toBeUndefined();
   });
 });
+
+it.each([undefined, '0', 'false', '1', 'true'])('Arc flag %s defaults OFF; overrides remain optional', async (flag) => {
+  vi.resetModules();
+  if (flag === undefined) delete process.env.NEXT_PUBLIC_ENABLE_USDC_ARC;
+  else process.env.NEXT_PUBLIC_ENABLE_USDC_ARC = flag;
+  process.env.NEXT_PUBLIC_ARC_RPC_URL = 'https://arc.example/mainnet';
+  process.env.NEXT_PUBLIC_ARC_TESTNET_RPC_URL = 'https://arc.example/testnet';
+  const address = '0x3600000000000000000000000000000000000001';
+  process.env.NEXT_PUBLIC_USDC_ARC_MAINNET_ADDRESS = address;
+  process.env.NEXT_PUBLIC_USDC_ARC_TESTNET_ADDRESS = address;
+  const { env } = await import('@/lib/env');
+  const { customRpcUrlForChain } = await import('@/lib/chains');
+  expect(env.enableUsdcArc).toBe(flag === '1' || flag === 'true');
+  expect(customRpcUrlForChain(5042)).toBe('https://arc.example/mainnet');
+  expect(customRpcUrlForChain(5042002)).toBe('https://arc.example/testnet');
+  expect(env.mainnetTokenOverrides.usdc.arc).toBe(address);
+  expect(env.testnetTokenOverrides.usdc.arc).toBe(address);
+});

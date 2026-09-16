@@ -145,3 +145,15 @@ buyer が「自分の chain の USDC」で支払える source の範囲を広げ
 3. **Pimlico ERC20 Paymaster 対応 chain list 確認**: https://docs.pimlico.io/infra/paymaster/erc20-paymaster の対応 chain list に当該 chain が含まれるか
 4. **本 file に追加** + 該当 fact の 出典 URL + 確認日付を必ず記録
 5. `npm run test:run` で既存 test regression なし確認
+
+
+## Arc USDC merchant receive (2026-09-16)
+
+| Network | Chain ID | RPC | Explorer | ERC-20 USDC | Decimals |
+|---|---|---|---|---|---|
+| Arc mainnet | 5042 | https://rpc.mainnet.arc.io | https://explorer.arc.io | `0x3600000000000000000000000000000000000000` | 6 |
+| Arc testnet | 5042002 | https://rpc.testnet.arc.io | https://explorer.testnet.arc.io | `0x3600000000000000000000000000000000000000` | 6 |
+
+`NEXT_PUBLIC_ENABLE_USDC_ARC` defaults OFF. Standard payments only: customers pay network fees directly in USDC; OpenPay collects nothing. Native gas USDC uses **18 decimals**, while the ERC-20 interface uses **6 decimals**. Arc is excluded from both cross-chain source and target lists; no Circle domain is registered in OpenPay. No paymaster is used, including on testnet.
+
+Sources: [Arc connection parameters](https://docs.arc.io/arc/references/connect-to-arc), [Arc contracts](https://docs.arc.io/arc/references/contract-addresses), [Circle USDC contracts](https://developers.circle.com/stablecoins/usdc-contract-addresses). Plan §0 records RPC measurements (`eth_chainId`, `symbol()`, `decimals()`) on 2026-09-16; decimal mainnet ID 5042 is authoritative over the documented hex typo.

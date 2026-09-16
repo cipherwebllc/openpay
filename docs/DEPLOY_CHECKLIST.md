@@ -1081,8 +1081,8 @@ phase 4a-1 で USDC 受信 chain を 4 → 5 chain に拡張 (Ethereum L1 追加
 ### §10.9 Phase 4b-1: Avalanche + Unichain buyer-only chain 追加 (2026-05-24 投入)
 
 phase 4b-1 で **buyer 側 USDC source chain** を 5 → 7 chain に拡張 (Avalanche
-C-Chain + Unichain)。merchant 受信 chain は引き続き 5 chain のまま (USDC_CHAINS
-は変更なし)、QR/Checkout chain chooser には出ない。
+C-Chain + Unichain)。当時の merchant 受信 chain は 5 chain。現在は Avalanche を含む 6 chain、
+Arc flag ON 時は 7 chain (Arc は通常決済のみ・cross-chain 対象外)。Unichain は受取 chooser に出ない。
 
 **設計**:
 - `CrossChainTarget.role`: `'merchant-and-buyer'` (5 chain) / `'buyer-only'` (2 chain) で区別
@@ -1931,3 +1931,15 @@ header/payload の encoded segment 上限は 1,024/4,096 文字、署名は 64 b
 query の percent encoding を含む例は fixture の measurements を参照する (配布先 512 文字制限は
 最終 Location の上限ではない)。
 後続 SDK の refresh/cache・独立 runtime/Worker の実機検証は PR C の受入条件とする。
+
+
+### Arc testnet smoke (公開文言・flag 点灯は user 承認後)
+
+- [ ] テスト環境を `NEXT_PUBLIC_NETWORK_ENV=testnet` + `NEXT_PUBLIC_ENABLE_USDC_ARC=1` で用意する (本番 flag は既定 OFF のまま)。
+- [ ] https://faucet.circle.com で Arc testnet USDC を取得し、chain ID 5042002 に接続。
+- [ ] `/create` で USDC / Arc を選ぶ。通常決済固定、cross-chain 選択なし、ガスは USDC・別トークン不要の案内を確認。
+- [ ] `/pay` とレジ `/checkout` で少額の標準決済を実行。gasless URL は拒否されることを確認。
+- [ ] 履歴・払い手控え・レシートに宛先と USDC 金額が正しく記録され、receipt 検出が完了することを確認。
+- [ ] Explorer リンクが `https://explorer.testnet.arc.io/tx/<hash>` で、送金先・金額・成功状態が一致することを確認。
+- [ ] Arc の ERC-20 表示は 6 decimals、native gas は 18 decimals。別チェーンへの bridge / tip / @handle / Store は本 smoke 対象外。
+- [ ] **点灯 (`NEXT_PUBLIC_ENABLE_USDC_ARC=1`) は開示更新と同一リリース**: LP / FAQ / 取引所ガイド / Terms・免責・特商法 / llms.txt / お知らせの Arc 文言 (draft = `plans/arc-usdc-receive.md` §6) を user 承認のうえ同じ PR に含める。

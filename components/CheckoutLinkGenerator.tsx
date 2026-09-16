@@ -1,5 +1,6 @@
 'use client';
 
+import { chainForSlug } from '@/lib/chains';
 import { useCallback, useMemo, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { useTranslations } from 'next-intl';
@@ -197,7 +198,7 @@ export function CheckoutLinkGenerator() {
                   <div className="font-semibold">{info.displaySymbol}</div>
                   <div className="text-xs text-slate-500">
                     {tok === 'usdc'
-                      ? t('tokenChainHintMulti', { count: USDC_CHAINS.length })
+                      ? t('tokenChainHintMulti', { count: USDC_CHAINS.length, chains: USDC_CHAINS.map((slug) => chainForSlug(slug).name).join(' / ') })
                       : t('tokenChainHint', {
                           chainName: 'Polygon',
                           chainId: info.chainId,
@@ -331,7 +332,7 @@ export function CheckoutLinkGenerator() {
                   <div className="mt-0.5 text-xs text-slate-500">
                     {pm === 'gasless'
                       ? t('payModeGaslessDesc')
-                      : t('payModeStandardDesc')}
+                      : settings.chain === 'arc' ? t('payModeArcDesc') : t('payModeStandardDesc')}
                   </div>
                 </button>
               );

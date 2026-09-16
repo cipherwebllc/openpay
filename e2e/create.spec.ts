@@ -338,7 +338,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await expect(gaslessBtn).toBeVisible();
   });
 
-  test('ja: Step 1 に token/chain chooser が同居 (JPYC は Polygon/Kaia、USDC は 5 chain)', async ({
+  test('ja: Step 1 に token/chain chooser が同居 (JPYC は Polygon/Kaia、USDC は 6 chain (Arc flag OFF))', async ({
     page,
   }) => {
     // 2026-05-23 JPYC Kaia 対応で JPYC も multi-chain 化。

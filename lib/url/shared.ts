@@ -54,6 +54,11 @@ export function resolveChainSlugParam(
   };
 }
 
+// Arc 受取を cross-chain execute へ流さない。URL と保存設定で共用。
+export function crossChainAllowed(chain: ChainSlug, requested = true): boolean {
+  return chain !== 'arc' && requested;
+}
+
 // gas パラメタ解決: merchant のみ明示認識、それ以外 (customer / 不明値 / 未指定 / 旧 fee=)
 // は customer 扱い。pay/checkout 双方の parser で同一ロジックなので集約する。
 export function parseGasParam(gasRaw: string | null): GasMode {

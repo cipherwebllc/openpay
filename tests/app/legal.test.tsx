@@ -14,7 +14,10 @@ import {
   DISCLOSED_LICENSE_NFT,
 } from '@/lib/legal';
 import { TOKEN_DEPLOYMENTS } from '@/lib/tokens';
-import { USDC_CHAINS, chainForSlug } from '@/lib/chains';
+import { USDC_CHAINS, arc, arcTestnet, chainForSlug } from '@/lib/chains';
+
+// Arc は merchant USDC でも paymasterMode='unavailable' (standard 固定・顧客が USDC でガスを直接負担)。
+const ARC_CHAIN_IDS = new Set<number>([arc.id, arcTestnet.id]);
 
 describe('Legal pages', () => {
   describe('Terms (利用規約)', () => {
@@ -981,27 +984,27 @@ describe('Legal pages', () => {
 
   // -------------------------------------------------------------------------
   // C8: 法務 prose (Terms art2(6)/art3/art5(2)・特商法) は「JPYC=sponsorship
-  // (当社がガスを肩代わり・無徴収) / USDC=erc20 (顧客が Paymaster に支払い)」を
+  // (当社がガスを肩代わり・無徴収) / USDC=erc20 (Arc は通常決済で USDC ガスを直接負担)」を
   // ハードコードしている (paymasterMode は徴収有無ではなく paymaster 種別を表す)。
   // lib/tokens.ts の静的 paymasterMode マッピングが変わったら本テストが落ち、prose
   // の見直しを促す。
   //
   // ⚠️ スコープ: 法務文書は **mainnet 本番商用サービス**を記述対象とする (プロダクト
   // 判断)。本ガードは TOKEN_DEPLOYMENTS の静的 paymasterMode (mainnet/testnet で
-  // 不変: usdc=erc20 / jpyc=sponsorship) を固定する。testnet では実行時に
+  // 不変: usdc=erc20 (Arc=unavailable) / jpyc=sponsorship) を固定する。testnet では実行時に
   // resolvePaymasterMode が USDC erc20→sponsorship に倒すため挙動が異なるが、testnet
   // は非商用テスト環境 (AlphaNotice) であり法務文書の記述対象外。testnet の USDC
   // ガス代徴収挙動 (useGasQuote が sponsorship で発火) は本タスクとは別軸の
   // コード論点として別途扱う。
   // -------------------------------------------------------------------------
   describe('regression: token->paymasterMode 前提を tokens.ts に固定 (法務 prose ドリフトガード)', () => {
-    it('per-deployment: merchant USDC は全て erc20 / JPYC は全て sponsorship / sponsorship は JPYC のみ', () => {
+    it('per-deployment: merchant USDC は Arc のみ unavailable、他は erc20 / JPYC は全て sponsorship / sponsorship は JPYC のみ', () => {
       // merchant vs buyer-only の分類は paymasterMode ではなく **独立ソース**
       // (lib/chains.ts USDC_CHAINS) から行う。paymasterMode で分類すると、merchant
       // USDC が誤って 'unavailable' に変わった場合にフィルタで除外され検知できない
       // (循環依存)。USDC_CHAINS は merchant 受信 chain の SoT。
       //
-      // env-invariance note: paymasterMode は mainnet/testnet で同一 (usdc は常に
+      // env-invariance note: paymasterMode は mainnet/testnet で同一 (Arc 以外の merchant usdc は
       // 'erc20'、jpyc は常に 'sponsorship'、buyer-only は常に 'unavailable' を
       // lib/tokens.ts がハードコード)。env で変わるのは address/chainId のみ。よって
       // 本テストが testnet env (vitest.config) で走っても mainnet の paymasterMode
@@ -1022,14 +1025,20 @@ describe('Legal pages', () => {
         merchantUsdcChainIds.has(d.chainId),
       );
       const buyerOnlyUsdc = usdc.filter(
-        (d) => !merchantUsdcChainIds.has(d.chainId),
+        (d) => !merchantUsdcChainIds.has(d.chainId) && !ARC_CHAIN_IDS.has(d.chainId),
       );
       const jpyc = TOKEN_DEPLOYMENTS.filter((d) => d.symbol === 'jpyc');
 
-      // merchant 受信 USDC は全て erc20 (prose: 顧客が Paymaster に支払い・当社徴収なし)。
-      // unavailable へ漂流したら独立分類で拾われ every(erc20) が落ちる。
+      // Arc は USDC ガスを直接負担。他の merchant USDC は erc20 (当社徴収なし)。
+      // Arc 以外が unavailable に漂流した場合も独立分類で検知する。
       expect(merchantUsdc.length).toBe(USDC_CHAINS.length);
-      expect(merchantUsdc.every((d) => d.paymasterMode === 'erc20')).toBe(true);
+      expect(merchantUsdc.every((d) => d.paymasterMode ===
+        (ARC_CHAIN_IDS.has(d.chainId) ? 'unavailable' : 'erc20'))).toBe(true);
+      // Arc は flag OFF でも deployment を持つ (standard 固定・顧客が USDC でガスを直接負担)。
+      // Terms/免責/特商法の Arc 文言は flag 点灯と同一リリースで反映 (plans/arc-usdc-receive.md §6)。
+      const arcUsdc = usdc.filter((d) => ARC_CHAIN_IDS.has(d.chainId));
+      expect(arcUsdc).toHaveLength(1);
+      expect(arcUsdc[0].paymasterMode).toBe('unavailable');
       // buyer-only USDC は gasless 非対応 (unavailable)、法務 prose 対象外。
       expect(buyerOnlyUsdc.every((d) => d.paymasterMode === 'unavailable')).toBe(
         true,
@@ -1445,3 +1454,4 @@ describe('Legal pages', () => {
     });
   });
 });
+
