@@ -300,7 +300,7 @@ export function QrGenerator() {
       // crossChain は USDC のみ意味あり (JPYC は Gateway / CCTP V2 非対応)。
       // settings に false を持っていても token=jpyc なら URL に出ても無害だが、
       // 旧 QR との互換性を最大化するため token=usdc 時のみ出力する。
-      crossChain: settings.token === 'usdc' ? settings.crossChain : undefined,
+      crossChain: settings.chain === 'arc' ? false : settings.token === 'usdc' ? settings.crossChain : undefined,
       // convert 適用時のみ、期限と顧客への文脈表示 (元価格 + レート) を URL に乗せる。
       expiresAt: convert?.expiresAt,
       priceRefAmount: convert?.anchorAmount,
@@ -367,7 +367,7 @@ export function QrGenerator() {
       ? t('posterFixedAmount', { amount, symbol: deployment.displaySymbol })
       : t('posterOpenAmount', { symbol: deployment.displaySymbol });
   const tokenChainLabelText = `${deployment.displaySymbol} · ${
-    settings.token === 'usdc' && settings.crossChain
+    settings.token === 'usdc' && settings.chain !== 'arc' && settings.crossChain
       ? buyerUsdcChainNames().join(' / ')
       : chain.name
   }`;
@@ -534,6 +534,7 @@ export function QrGenerator() {
       ...s,
       chain: slug,
       payMode: isGaslessSupported(dep) ? s.payMode : 'standard',
+      crossChain: slug === 'arc' ? false : s.crossChain,
     }));
   }
 
@@ -949,7 +950,7 @@ export function QrGenerator() {
                         <div className="mt-0.5 text-xs text-slate-500">
                           {isGasless
                             ? t('payModeGaslessDesc')
-                            : t('payModeStandardDesc')}
+                            : settings.chain === 'arc' ? t('payModeArcDesc') : t('payModeStandardDesc')}
                         </div>
                       </button>
                     );
@@ -959,7 +960,7 @@ export function QrGenerator() {
 
               {isStandard ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">
-                  {t('standardHint')}
+                  {settings.chain === 'arc' ? t('standardArcHint') : t('standardHint')}
                 </div>
               ) : isJpycRecover ? (
                 // JPYC recover は店舗が手数料を吸収する固定モデル (per-QR トグル撤去)。
@@ -1017,7 +1018,7 @@ export function QrGenerator() {
               {/* Cross-chain 受信許可 toggle (USDC のみ意味あり、JPYC では disable)。
                   Default ON。Off にすると PaymentForm が代替経路 hint を出さない
                   (店主が「同一 chain で受け取りたい」と明示する用途)。 */}
-              {settings.token === 'usdc' && (
+              {settings.token === 'usdc' && settings.chain !== 'arc' && (
                 <AdvancedSection label={t('crossChainHeading')}>
                   <label className="flex cursor-pointer items-start gap-3">
                     <input
@@ -1151,7 +1152,7 @@ export function QrGenerator() {
             text:
               payMode === 'gasless'
                 ? t('posterPayModeGasless')
-                : t('posterPayModeStandard', {
+                : settings.chain === 'arc' ? t('posterPayModeArc') : t('posterPayModeStandard', {
                     nativeToken: chain.nativeCurrency.symbol,
                   }),
             tone: payMode === 'gasless' ? 'gasless' : 'standard',

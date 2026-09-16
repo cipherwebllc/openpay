@@ -25,7 +25,7 @@ vi.mock('@/lib/jpycGaslessProvider', async (importOriginal) => {
 
 import { CheckoutLinkGenerator } from '@/components/CheckoutLinkGenerator';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
-import { USDC_CHAINS } from '@/lib/chains';
+import { chainForSlug, USDC_CHAINS } from '@/lib/chains';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const STORAGE_KEY = 'openpay:checkout-settings:v1';
@@ -53,7 +53,8 @@ describe('CheckoutLinkGenerator', () => {
       .filter(Boolean);
     expect(count).toBe(USDC_CHAINS.length);
     expect(listed).toHaveLength(USDC_CHAINS.length); // count と列挙が乖離しない
-    expect(listed).toContain('Avalanche');
+    expect(listed).toContain(chainForSlug('avalanche').name);
+    expect(listed).not.toContain('Arc Testnet');
   });
 
   it('JPYC free 経路 (relay・forwarder 未設定): 負担者トグル非表示・gas=customer 固定', async () => {

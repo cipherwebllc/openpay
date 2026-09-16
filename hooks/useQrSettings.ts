@@ -2,6 +2,7 @@
 
 import { isJpycChainSlug, isValidChainSlug, type ChainSlug } from '@/lib/chains';
 import type { GasMode, PayMode } from '@/lib/fee';
+import { crossChainAllowed } from '@/lib/url/shared';
 import { stripControlChars } from '@/lib/sanitize';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
@@ -240,10 +241,12 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
     showPresetImages: loaded.showPresetImages !== false,
     quickAmounts: sanitizeQuickAmounts(loaded.quickAmounts, token),
     // boolean を厳密 check。旧 schema (crossChain 未定義) は true に倒す (default ON)。
-    crossChain:
+    crossChain: crossChainAllowed(
+      chain,
       typeof loaded.crossChain === 'boolean'
         ? loaded.crossChain
         : DEFAULT_SETTINGS.crossChain,
+    ),
     productName: sanitizeText(loaded.productName, PAY_PRODUCT_NAME_MAX),
     memo: sanitizeText(loaded.memo, PAY_MEMO_MAX),
     taxRate:

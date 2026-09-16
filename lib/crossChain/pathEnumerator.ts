@@ -96,6 +96,7 @@ export interface EnumerateArgs {
 export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
   const { targetChainId, requiredAtomic, balances } = args;
   const options: PathOption[] = [];
+  const hasTargetDomain = domainForChainId(targetChainId) !== undefined;
 
   for (const w of balances.wallet) {
     if (w.status !== 'ok') continue;
@@ -118,6 +119,9 @@ export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
       });
       continue;
     }
+
+    // 未対応 destination を execute に渡さない (Arc は同一チェーンのみ)。
+    if (!hasTargetDomain) continue;
 
     // cross-chain: Gateway pre-deposit が源残高に足りるなら gateway option も加算
     const gatewayPreDeposit =
@@ -156,7 +160,7 @@ export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
   // のケースを補完: target 以外で gateway.perDomain に balance あって wallet
   // entry に出ない / wallet status='error' の domain があれば gateway option
   // を加算。chainId は domain から逆引き、未解決なら skip。
-  if (balances.gateway.status === 'ok') {
+  if (hasTargetDomain && balances.gateway.status === 'ok') {
     for (const [domain, gwBalance] of balances.gateway.perDomain.entries()) {
       if (gwBalance < requiredAtomic) continue;
       const alreadyHasGateway = options.some(

@@ -313,6 +313,7 @@ describe('ChainChooser', () => {
       ethereum: 11155111,
       avalanche: 43113,
       kaia: 1001,
+      arc: 5042002,
     };
     render(
       <ChainChooser slugs={USDC_CHAINS} selected="base" onSelect={() => {}} />,
@@ -371,3 +372,11 @@ describe('ChainChooser', () => {
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+
+it('Arc を含む受取リストは 7 buttons、Arc Testnet id と logo を表示', () => {
+  render(<ChainChooser slugs={[...USDC_CHAINS, 'arc']} selected="arc" onSelect={() => {}} />);
+  expect(screen.getAllByRole('button')).toHaveLength(7);
+  expect(screen.getByRole('button', { name: /Arc Testnet/ })).toBeInTheDocument();
+  expect(screen.getByText('id: 5042002')).toBeInTheDocument();
+});

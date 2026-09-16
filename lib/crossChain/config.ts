@@ -334,7 +334,7 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
       },
     ];
 
-/** merchant 受信可能 chain のみ (USDC_CHAINS と 1:1)。
+/** cross-chain で merchant 受信可能な chain のみ (USDC_CHAINS から Arc を除く)。
  * role='buyer-only' は merchant 受信フローに含めない設計。
  * 'merchant-only' は merchant 受信は可能だが現状該当 chain なし (Ethereum 復帰済)。
  * 結果: 'merchant-and-buyer' (6: Polygon/Base/Arbitrum/Optimism/Avalanche/Ethereum) = 6 chain。

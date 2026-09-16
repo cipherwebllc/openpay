@@ -26,6 +26,7 @@ import {
 } from '../tokens';
 import {
   DECIMAL_PATTERN,
+  crossChainAllowed,
   resolveChainSlugParam,
   sanitizeText,
   sanitizeUrl,
@@ -178,7 +179,7 @@ export function buildTipPath(params: TipParams): string {
   }
   // PayParams と同型: default (undefined / true) は URL に出さず旧 embed と互換、
   // false (= creator が cross-chain 拒否) を明示するときだけ出力。
-  if (params.crossChain === false) {
+  if (params.chain === 'arc' || params.crossChain === false) {
     sp.set('crossChain', 'false');
   }
   return `/tip/${params.to}?${sp.toString()}`;
@@ -242,7 +243,7 @@ export function parseTipParams(
 
   // PayParams と同仕様: 明示的 "false" のみ false、それ以外 (未指定 / "true" /
   // 不明値) は default の true として扱う。既存 embed snippet は影響なし。
-  const crossChain: boolean = crossChainRaw !== 'false';
+  const crossChain = crossChainAllowed(chainSlug, crossChainRaw !== 'false');
 
   return {
     ok: true,

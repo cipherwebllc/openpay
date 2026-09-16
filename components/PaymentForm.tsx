@@ -1110,7 +1110,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <p className="font-semibold">{t('standardModeTitle')}</p>
           <p className="mt-1 text-xs">
-            {t('standardModeBody', { nativeToken })}
+            {params.chain === 'arc'
+              ? t('standardModeArcBody')
+              : t('standardModeBody', { nativeToken })}
           </p>
         </div>
       )}

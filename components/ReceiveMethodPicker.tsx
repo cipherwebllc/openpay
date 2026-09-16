@@ -30,6 +30,7 @@ const CHAIN_LABEL: Record<ChainSlug, string> = {
   kaia: 'Kaia',
   ethereum: 'Ethereum',
   avalanche: 'Avalanche',
+  arc: 'Arc',
 };
 
 function methodParts(

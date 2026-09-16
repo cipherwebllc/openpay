@@ -19,6 +19,8 @@ import {
 } from 'viem/chains';
 import { env, isMainnet } from './env';
 import {
+  arc,
+  arcTestnet,
   buyerOnlyChainForSlug,
   chainForSlug,
   JPYC_CHAINS,
@@ -38,7 +40,7 @@ export type TokenSymbol = (typeof TOKEN_SYMBOLS)[number];
 //   unavailable = 該当 chain で Pimlico paymaster 未対応 (standard mode 必須、
 //                 gasless mode は URL parser で reject される)。
 //                 例: buyer-only chain (Avalanche / Unichain) の USDC entry。
-//                 merchant 受信 chain には現れず、Gateway source のみで参照される。
+//                 Arc は merchant 受取でも unavailable (通常決済・USDC ガス直接負担)。
 export type PaymasterMode = 'sponsorship' | 'erc20' | 'unavailable';
 
 // 単一 (symbol, chainId) ペアの ERC20 デプロイメント情報。同じ symbol でも複数
@@ -67,6 +69,9 @@ export type TokenDeployment = {
 // 4 chain 全てで hard-code default + env override 可能、Vercel env 設定漏れ
 // でも UI が動作する safe-by-default 設計。
 const JPYC_V3_ADDRESS: Address = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
+
+// Arc native USDC は 18dp、ERC-20 USDC は 6dp。混同しないこと。
+const USDC_ARC_ADDRESS: Address = '0x3600000000000000000000000000000000000000';
 
 // USDC native (Circle 公式) — Phase 1 対応 4 chain (mainnet) + Ethereum (phase 4a)
 //                          + Avalanche (phase 4b-2 merchant 昇格)
@@ -135,6 +140,7 @@ const USDC_MAINNET_DEFAULTS: Record<UsdcChainSlug, Address> = {
   polygon:   USDC_POLYGON_MAINNET,
   ethereum:  USDC_ETHEREUM_MAINNET,
   avalanche: USDC_AVALANCHE_MAINNET,
+  arc: USDC_ARC_ADDRESS,
 };
 
 const USDC_TESTNET_DEFAULTS: Record<UsdcChainSlug, Address> = {
@@ -144,6 +150,7 @@ const USDC_TESTNET_DEFAULTS: Record<UsdcChainSlug, Address> = {
   polygon:   USDC_POLYGON_AMOY,
   ethereum:  USDC_SEPOLIA,
   avalanche: USDC_AVALANCHE_FUJI,
+  arc: USDC_ARC_ADDRESS,
 };
 
 function usdcAddress(slug: UsdcChainSlug): Address {
@@ -163,6 +170,7 @@ const CHAIN_ID_MAINNET: Record<ChainSlug, number> = {
   kaia:      kaia.id,
   ethereum:  mainnet.id,
   avalanche: avalanche.id,
+  arc: arc.id,
 };
 
 const CHAIN_ID_TESTNET: Record<ChainSlug, number> = {
@@ -173,6 +181,7 @@ const CHAIN_ID_TESTNET: Record<ChainSlug, number> = {
   kaia:      kairos.id,
   ethereum:  sepolia.id,
   avalanche: avalancheFuji.id,
+  arc: arcTestnet.id,
 };
 
 function chainIdFor(slug: ChainSlug): number {
@@ -194,14 +203,15 @@ const USDC_SLUGS: readonly UsdcChainSlug[] = [
   'polygon',
   'ethereum',
   'avalanche',
+  'arc',
 ];
 
-// USDC は全 chain で Pimlico ERC20 paymaster 対応 (顧客が USDC で gas 支払い)。
+// USDC は Arc 以外の merchant chain で Pimlico ERC20 paymaster 対応 (顧客が USDC で gas 支払い)。
 // Ethereum L1 も Pimlico v2 で ERC20 paymaster が利用可能になったため 'erc20' に統一。
 // Avalanche も Pimlico mainnet ERC-20 paymaster 対応 chain に含まれる。
 // 詳細は docs/research/circle-12chain-addresses.md。
-function usdcPaymasterModeFor(_slug: UsdcChainSlug): PaymasterMode {
-  return 'erc20';
+function usdcPaymasterModeFor(slug: UsdcChainSlug): PaymasterMode {
+  return slug === 'arc' ? 'unavailable' : 'erc20';
 }
 
 const usdcDeployments: TokenDeployment[] = USDC_SLUGS.map((slug) => ({

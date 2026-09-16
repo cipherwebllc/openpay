@@ -36,6 +36,7 @@ import {
   gaslessSupportError,
   parseGasParam,
   parseTaxReceiptParams,
+  crossChainAllowed,
   resolveChainSlugParam,
   resolveModeAlias,
   sanitizeText,
@@ -218,7 +219,7 @@ export function buildPayPath(params: PayParams): string {
   }
   // default (undefined または true) は URL に出さず旧 QR と完全互換。
   // false (= 店主が cross-chain 拒否) を明示するときだけ出力。
-  if (params.crossChain === false) {
+  if (params.chain === 'arc' || params.crossChain === false) {
     sp.set('crossChain', 'false');
   }
   // 動的 QR 付帯情報 (在るときだけ出力・既定 URL は不変)。
@@ -389,7 +390,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   // crossChain は明示的 "false" のみ false、それ以外 (未指定 / "true" / 不明値)
   // は default の true として扱う。本仕様により旧 QR は影響を受けず、phase 2
   // 投入後に店主が opt-out したいケースでのみ URL に出る。
-  const crossChain: boolean = crossChainRaw !== 'false';
+  const crossChain = crossChainAllowed(chainSlug, crossChainRaw !== 'false');
 
   // 動的 QR 付帯情報を validate して degrade (壊れていても支払いは止めない)。
   // exp: 安全な正整数のみ採用。不正/欠落/桁あふれ (Number.MAX_SAFE_INTEGER 超 → Infinity 等)

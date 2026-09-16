@@ -1514,7 +1514,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
           {isStandard
-            ? t('standardHint', { nativeToken })
+            ? params.chain === 'arc'
+              ? t('standardArcHint')
+              : t('standardHint', { nativeToken })
             : isMobileFee
               ? t('gaslessHintMobile')
               : useRecover

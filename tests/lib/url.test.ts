@@ -2155,3 +2155,9 @@ describe('offOriginCallbackHosts (F7・off-origin callback 開示ヘルパ)', ()
     ).toEqual(['localhost:4000']);
   });
 });
+
+it('Arc flag OFF: chain=arc は standard でも未対応 URL', () => {
+  expect(parsePayParams(new URLSearchParams({
+    to: VALID_TO, token: 'usdc', chain: 'arc', mode: 'standard', amount: '1',
+  })).ok).toBe(false);
+});

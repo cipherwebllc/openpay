@@ -169,6 +169,9 @@ export const env = {
     // rate limit に弱いので production では Alchemy/Infura 等の override 推奨。
     ethereum: nonEmpty(process.env.NEXT_PUBLIC_ETHEREUM_RPC_URL),
     sepolia: nonEmpty(process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL),
+    // Arc merchant-only: defineChain の公式 RPC を任意で上書き。
+    arc: nonEmpty(process.env.NEXT_PUBLIC_ARC_RPC_URL),
+    arcTestnet: nonEmpty(process.env.NEXT_PUBLIC_ARC_TESTNET_RPC_URL),
     // Avalanche / Unichain = buyer-only chain (phase 4b-1 追加、USDC global
     // volume + 国内 CEX 引出先カバー)。merchant 受信 chain では露出しないが
     // CrossChainHint balance fetch で 並列 query 対象。viem/chains の default
@@ -250,7 +253,11 @@ export const env = {
         'NEXT_PUBLIC_USDC_ETHEREUM_MAINNET_ADDRESS',
         process.env.NEXT_PUBLIC_USDC_ETHEREUM_MAINNET_ADDRESS,
       ),
-      // phase 4b-1: buyer-only chain (merchant UI に出ない、cross-chain source として balance 参照)
+      // Arc ERC-20 USDC (merchant-only)
+      arc: parseAddress(
+        'NEXT_PUBLIC_USDC_ARC_MAINNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_ARC_MAINNET_ADDRESS,
+      ),
       avalanche: parseAddress(
         'NEXT_PUBLIC_USDC_AVALANCHE_MAINNET_ADDRESS',
         process.env.NEXT_PUBLIC_USDC_AVALANCHE_MAINNET_ADDRESS,
@@ -321,7 +328,11 @@ export const env = {
         'NEXT_PUBLIC_USDC_SEPOLIA_ADDRESS',
         process.env.NEXT_PUBLIC_USDC_SEPOLIA_ADDRESS,
       ),
-      // phase 4b-1 testnet: Avalanche Fuji + Unichain Sepolia
+      // Arc testnet ERC-20 USDC
+      arc: parseAddress(
+        'NEXT_PUBLIC_USDC_ARC_TESTNET_ADDRESS',
+        process.env.NEXT_PUBLIC_USDC_ARC_TESTNET_ADDRESS,
+      ),
       avalanche: parseAddress(
         'NEXT_PUBLIC_USDC_AVALANCHE_FUJI_ADDRESS',
         process.env.NEXT_PUBLIC_USDC_AVALANCHE_FUJI_ADDRESS,
@@ -445,6 +456,11 @@ export const env = {
   enableJpycAvalanche: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE',
     process.env.NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE,
+  ),
+  // Arc は標準決済のみ、cross-chain 対象外。既定 OFF。
+  enableUsdcArc: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_USDC_ARC',
+    process.env.NEXT_PUBLIC_ENABLE_USDC_ARC,
   ),
   // JPYC を Ethereum L1 (mainnet) で受取可能にするフラグ (既定 OFF)。L1 ガスは高変動で gasless recover が
   // 不経済なため **standard モード固定** (顧客が ETH ガスを負担・OpenPay relayer 不使用・forwarder を

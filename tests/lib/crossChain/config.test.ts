@@ -265,7 +265,7 @@ describe('lib/crossChain/config', () => {
       expect(buyerOnly).toHaveLength(5);
       expect(merchantOnly).toHaveLength(0);
       // MERCHANT_RECEIVE_TARGETS = merchant-and-buyer (6) + merchant-only (0) = 6
-      // (USDC_CHAINS と 1:1)
+      // (USDC_CHAINS のうち Arc を除く cross-chain 対応分)
       expect(m.MERCHANT_RECEIVE_TARGETS).toHaveLength(6);
       // BUYER_SOURCE_TARGETS = merchant-and-buyer (6) + buyer-only (5) = 11
       // (Ethereum を含む全 chain が buyer source 可)
@@ -346,4 +346,13 @@ describe('CROSS_CHAIN_DISABLED (incident kill switch)', () => {
     const m = await import('@/lib/crossChain/config');
     expect(m.CROSS_CHAIN_DISABLED).toBe(false);
   });
+});
+
+
+it('Arc mainnet/testnet は Circle source/target domain に登録しない', async () => {
+  const m = await import('@/lib/crossChain/config');
+  for (const id of [5042, 5042002]) {
+    expect(m.domainForChainId(id)).toBeUndefined();
+    expect(m.CROSS_CHAIN_TARGETS.some((t) => t.chainId === id)).toBe(false);
+  }
 });

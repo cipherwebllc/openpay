@@ -35,7 +35,7 @@ import {
 
 // vitest.config.ts で NETWORK_ENV='testnet' なので testnet 側を期待
 describe('chains (testnet env)', () => {
-  it('chainForSlug が testnet env で sepolia/kairos/fuji 系チェーンを返す (7 slug 全て)', () => {
+  it('chainForSlug が testnet env で sepolia/kairos/fuji 系チェーンを返す (8 slug 全て)', () => {
     expect(chainForSlug('polygon').id).toBe(polygonAmoy.id);
     expect(chainForSlug('base').id).toBe(baseSepolia.id);
     expect(chainForSlug('arbitrum').id).toBe(arbitrumSepolia.id);
@@ -43,10 +43,11 @@ describe('chains (testnet env)', () => {
     expect(chainForSlug('kaia').id).toBe(kairos.id);
     expect(chainForSlug('ethereum').id).toBe(sepolia.id);
     expect(chainForSlug('avalanche').id).toBe(avalancheFuji.id);
+    expect(chainForSlug('arc').id).toBe(5042002);
   });
 
-  it('supportedChains は 12 本 (merchant 7: Base / Arbitrum / Optimism / Polygon / Kaia / Ethereum / Avalanche + buyer-only 5: Unichain / World Chain / Sonic / Sei / HyperEVM)', () => {
-    expect(supportedChains).toHaveLength(12);
+  it('supportedChains は 13 本 (merchant 8: Base / Arbitrum / Optimism / Polygon / Kaia / Ethereum / Avalanche + buyer-only 5: Unichain / World Chain / Sonic / Sei / HyperEVM)', () => {
+    expect(supportedChains).toHaveLength(13);
     const ids = supportedChains.map((c) => c.id);
     expect(ids).toContain(baseSepolia.id);
     expect(ids).toContain(arbitrumSepolia.id);
@@ -106,6 +107,7 @@ describe('chainForSlug', () => {
     expect(chainForSlug('kaia').id).toBe(kairos.id);
     expect(chainForSlug('ethereum').id).toBe(sepolia.id);
     expect(chainForSlug('avalanche').id).toBe(avalancheFuji.id);
+    expect(chainForSlug('arc').id).toBe(5042002);
   });
 });
 
@@ -307,9 +309,10 @@ describe('chainLogoPathForId', () => {
     ['worldchain', 4801], // worldchainSepolia
     ['sonic', 57054], // sonicBlazeTestnet
     ['sei', 1328], // seiTestnet
+    ['arc', 5042002],
     ['hyperevm', 998], // HyperEVM testnet (viem/chains 未収録、lib/chains.ts defineChain)
   ] as const)(
-    'supportedChains の 12 chain (%s) すべてに /chains/<slug>.svg を返す',
+    'supportedChains の 13 chain (%s) すべてに /chains/<slug>.svg を返す',
     (slug, chainId) => {
       expect(chainLogoPathForId(chainId)).toBe(`/chains/${slug}.svg`);
     },
