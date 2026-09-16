@@ -46,6 +46,8 @@ vi.mock('viem', async () => {
 });
 
 vi.mock('wagmi', () => ({
+  useWriteContract: vi.fn(() => ({ data: undefined, error: null, isPending: false, writeContract: vi.fn(), reset: vi.fn() })),
+  useWaitForTransactionReceipt: vi.fn(() => ({ data: undefined, error: null, isSuccess: false, isError: false, refetch: vi.fn() })),
   useAccount: vi.fn(),
   useReadContract: vi.fn(),
   useWalletClient: vi.fn(),
@@ -207,6 +209,7 @@ function setupConnected() {
 }
 
 const USDC_PARAMS: TipParams = {
+  mode: 'gasless',
   to: CREATOR,
   token: 'usdc',
   chain: 'base',
@@ -214,6 +217,7 @@ const USDC_PARAMS: TipParams = {
 };
 
 const JPYC_PARAMS: TipParams = {
+  mode: 'gasless',
   to: CREATOR,
   token: 'jpyc',
   chain: 'polygon',

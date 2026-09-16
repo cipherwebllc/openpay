@@ -1325,3 +1325,31 @@ describe('useStandardPayment', () => {
     expect(useWriteContractMockB.writeContract).toHaveBeenCalledOnce();
   });
 });
+
+describe('disabled standard payments', () => {
+  it('a populated session is neither restored nor rewritten, queried or logged', async () => {
+    seedStandardIntent();
+    const stored = window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY);
+    const { result, rerender } = renderHook(() => useStandardPayment({ enabled: false }));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.hasAttempt).toBe(false);
+    expect(result.current.isRestoring).toBe(false);
+    act(() => result.current.mutate({ chainId: 84532, tokenAddress: TOKEN, merchant: MERCHANT, merchantAmount: 1n, feeReceiver: FEE_RECEIVER, feeAmount: 0n }));
+    act(() => result.current.retryReceipt());
+    rerender();
+    expect(useWriteContractMockA.writeContract).not.toHaveBeenCalled();
+    expect(useWaitMockState.a.refetch).not.toHaveBeenCalled();
+    expect(logPaymentEventMock).not.toHaveBeenCalled();
+    expect(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)).toBe(stored);
+  });
+  it('tip log payer is snapshotted across wallet switches', async () => {
+    const { result, rerender } = await renderReadyStandardPayment();
+    act(() => result.current.mutate({ chainId: 5042002, tokenAddress: TOKEN, merchant: MERCHANT, merchantAmount: 500000n, feeReceiver: FEE_RECEIVER, feeAmount: 0n, customer: CUSTOMER, tip: true, chainSlug: 'arc', mode: 'standard' }));
+    useAccountMock.mockReturnValue({ address: OTHER_CUSTOMER });
+    useWriteContractMockState.a.data = MERCHANT_TX;
+    useWaitMockState.a.data = { status: 'success', blockNumber: 123n };
+    useWaitMockState.a.isSuccess = true;
+    rerender();
+    await waitFor(() => expect(logPaymentEventMock).toHaveBeenCalledWith(expect.objectContaining({ tip: true, chainSlug: 'arc', mode: 'standard', customer: CUSTOMER })));
+  });
+});

@@ -2,8 +2,9 @@
 
 import type { ChainSlug } from '@/lib/chains';
 import { isHandleTheme, type HandleTheme } from '@/lib/handleThemeKey';
-import { deploymentForSlug, isGaslessSupported, type TokenSymbol } from '@/lib/tokens';
+import { type TokenSymbol } from '@/lib/tokens';
 import {
+  resolveTipCapability,
   COLOR_PATTERN,
   DECIMAL_PATTERN,
   DEFAULT_TIP_PRESETS,
@@ -175,11 +176,9 @@ function sanitizeTipPresetLabels(
 
 function sanitize(loaded: Partial<TipSettings>): TipSettings {
   const token = sanitizeTokenSymbol(loaded.token, DEFAULT_SETTINGS.token);
-  // tip widget は gasless 必須。gasless 非対応 chain (例: buyer-only chain の Unichain)
-  // が saved value に入っていても sanitize 段階で token の default chain (usdc → base)
-  // にフォールバック。
+  // 無効な保存済み chain は既定へ戻す。Arc standard の資格も URL と同じ判定を使う。
   const normalized = normalizeChainForToken(token, loaded.chain);
-  const chain = isGaslessSupported(deploymentForSlug(token, normalized))
+  const chain = resolveTipCapability(token, normalized).ok
     ? normalized
     : normalizeChainForToken(token, undefined);
   const presets = sanitizeTipPresets(loaded.presets, token);

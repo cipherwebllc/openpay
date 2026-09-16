@@ -11,6 +11,7 @@
 // バナーで対象を明示し、編集中に**別名**で公開すると同内容の複製になることを事前警告する
 // (静かに複製が生まれるのが最大の混乱源だったため)。公開/更新は成功メッセージを出す。
 
+import { resolveTipCapability } from '@/lib/url/tip';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -177,6 +178,7 @@ async function fetchJson(url: string, init?: RequestInit) {
 export function HandleClaimPanel({
   payload,
   onEdit,
+  publishBlockedReason,
   editingHandle = null,
   expectedUpdatedAt,
   isDirty = false,
@@ -184,6 +186,7 @@ export function HandleClaimPanel({
   onPublished,
 }: {
   payload: HandlePublishPayload | null;
+  publishBlockedReason?: string;
   onEdit?: (
     handle: string,
     config: HandleTipConfig,
@@ -279,6 +282,11 @@ export function HandleClaimPanel({
 
   const publish = useMutation({
     mutationFn: async (snapshot: PublishMutationSnapshot) => {
+      // サーバの寛容な method drop を公開成功へ波及させず、全方法を保存前に検証する。
+      if (publishBlockedReason) throw new Error(publishBlockedReason);
+      if (snapshot.payload.config.methods.some((m) => !resolveTipCapability(m.token, m.chain).ok)) {
+        throw new Error(t('unsupportedMethod'));
+      }
       const { ok, status, json } = await fetchJson('/api/handle', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -585,6 +593,7 @@ export function HandleClaimPanel({
                 })
               }
               disabled={
+                !!publishBlockedReason ||
                 !config || // 受取先/方法 未確定では取得/更新できない
                 !validation.ok ||
                 publish.isPending ||
@@ -632,6 +641,9 @@ export function HandleClaimPanel({
             )}
             {atLimit && (
               <p className="mt-2 text-xs text-amber-700">{t('limitReached', { max })}</p>
+            )}
+            {publishBlockedReason && (
+              <p role="alert" className="mt-2 text-xs text-red-600">{publishBlockedReason}</p>
             )}
             {publish.isError && (
               isConflictError(publish.error) ? (

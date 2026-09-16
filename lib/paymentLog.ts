@@ -77,6 +77,9 @@ export type ClientReportedCircleVerification = Exclude<
 >;
 
 export type PaymentLogEvent = {
+  tip?: true;
+  chainSlug?: import('@/lib/chains').ChainSlug;
+  mode?: 'standard';
   flow: PaymentFlow;
   result: PaymentResult;
   chainId: number;
@@ -129,6 +132,9 @@ export type PaymentLogEvent = {
 // 全 hook が共通で持つ「flow / chain / merchant / customer」を 1 度に詰める。
 // hook 側は flow 固有 (userOpHash / errorMessage 等) のみ追加すればよい。
 export type PaymentLogContext = {
+  tip?: true;
+  chainSlug?: import('@/lib/chains').ChainSlug;
+  mode?: 'standard';
   flow: PaymentFlow;
   chainId: number;
   tokenAddress: Address;
@@ -169,6 +175,7 @@ export function buildPaymentLogEvent(
     | { result: 'error'; errorMessage: string; txHash?: Hex; userOpHash?: Hex },
 ): PaymentLogEvent {
   const base: PaymentLogEvent = {
+    ...(ctx.tip ? { tip: ctx.tip, chainSlug: ctx.chainSlug, mode: ctx.mode } : {}),
     flow: ctx.flow,
     result: outcome.result,
     chainId: ctx.chainId,

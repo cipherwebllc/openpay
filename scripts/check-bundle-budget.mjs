@@ -40,7 +40,10 @@ const BUDGETS_KB = {
   //   /pay 445・/tip 443・/[handle] 482・/checkout 448 kB (+2〜5kB)。自作コードの import graph は不変
   //   (lockfile 差分にアプリ側の変更なし)。Sentry 更新 (2026-07-22) と同じ「削れないベンダー増分」として
   //   各 +5〜7kB 再調整。自作コード起因の増分には引き続き code-split 優先方針を適用する。
-  '/[locale]/pay': 447,
+  // 2026-09-17 Arc USDC チップ (#B): 開示文言の追記 (messages 増) による再分割 +1kB。/pay からの新規
+  //   import 経路なし (tip.ts の変更は既存 env import のみ)。useStandardPayment は TipStandardEngine へ
+  //   code-split 済み (tip 448→446 / [handle] 487→484 kB に低減)。
+  '/[locale]/pay': 448,
   // 2026-08-18 store USDC P2: /pay と同型の chunk 再分割 +1kB (tip から新規 USDC モジュール
   // への import 経路なしを grep で確認)。
   // 2026-08-17 store USDC P3: Terms 13 条追記 (messages 増) による再分割 +1kB (tip から
@@ -48,7 +51,8 @@ const BUDGETS_KB = {
   // 2026-09-03 review Phase6 F2: /pay と同型の再分割 +2kB (/create の code-split 起因・
   // tip の import graph は不変。切り分け実測は上の /pay コメント参照)。
   // 2026-09-09 npm audit fix のベンダー増分 (/pay のコメント参照) で 443kB → +7kB。
-  '/[locale]/tip/[address]': 445,
+  // 2026-09-17 Arc USDC チップ: messages 増による再分割 +1kB (上の /pay コメント参照)。
+  '/[locale]/tip/[address]': 446,
   // 2026-09-02 全コードベースレビュー Phase 5 (F1): 予算対象が 5 route しかなく、実際に最も重い
   //   3 route (/create・/[handle]・/checkout) が無監視だった。/pay と同じ「余裕ゼロ」慣行で
   //   実測 +4kB を上限に据える (実測: [handle] 475 / checkout 442 kB)。

@@ -347,3 +347,9 @@ export function x402FeeDisclosureDivergence(
   }
   return issues.length > 0 ? issues.join('; ') : null;
 }
+
+export const DISCLOSED_TIP_FEE_MODELS = {
+  jpycRelay: { floorJpyc: 2 },
+  usdcBase: 'paymaster-usdc',
+  usdcArc: 'standard-usdc-network-fee-no-openpay-fee',
+} as const;

@@ -68,3 +68,20 @@ describe('GET /api/og/tip', () => {
     expect(text).toContain('open-pay.jp');
   });
 });
+
+it.each([[false, false], [false, true], [true, false], [true, true]])('metadata → image URL → actual route: arc=%s tip=%s', async (arc, tip) => {
+  const { env } = await import('@/lib/env');
+  const oldArc = env.enableUsdcArc; const oldTip = env.enableUsdcArcTip;
+  Object.assign(env, { enableUsdcArc: arc, enableUsdcArcTip: tip });
+  try {
+    const { generateMetadata } = await import('@/app/[locale]/tip/[address]/page');
+    const meta = await generateMetadata({ params: Promise.resolve({ locale: 'ja', address: ADDR }), searchParams: Promise.resolve({ token: 'usdc', chain: 'arc', preset: '0.5' }) });
+    const image = (meta.openGraph!.images as Array<{ url: string }>)[0].url;
+    expect(image.includes('chain=arc')).toBe(arc && tip);
+    GET(new Request(new URL(image.replace('/og/', '/api/og/'), 'https://open-pay.jp')));
+    const text = collectText(ctorCalls.at(-1)!.element).join(' ');
+    expect(text).not.toContain('ガス不要');
+    expect(text.includes('ガスも USDC')).toBe(arc && tip);
+    expect(meta.description).not.toContain('ガス不要');
+  } finally { Object.assign(env, { enableUsdcArc: oldArc, enableUsdcArcTip: oldTip }); }
+});

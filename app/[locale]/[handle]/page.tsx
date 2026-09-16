@@ -50,6 +50,7 @@ import {
   buildHandleOgImageUrl,
   buildProductOgImageUrl,
   tokenLabelFor,
+  handleTipCapabilities,
   truncateGraphemes,
   type TipCardFacts,
   type TipOgLocale,
@@ -158,11 +159,13 @@ export async function generateMetadata({
   const title = c.name
     ? `${c.name} (@${normalized}) — OpenPay`
     : `@${normalized} — OpenPay`;
-  const primary = c.methods[0];
+  // 全 method の資格を集約 (最初の method だけで gasless を決めない)。Arc standard は「ガスも USDC」。
+  const caps = handleTipCapabilities(c.methods);
   const facts: TipCardFacts = {
     name: c.name,
-    tokenLabel: tokenLabelFor(primary.token),
-    gasless: true,
+    tokenLabel: tokenLabelFor(c.methods[0].token),
+    gasless: caps.gaslessTokens.length > 0,
+    standardGas: caps.standardTokens.length > 0,
   };
   // bio は店主入力なので、制御文字を落としてからコードポイント単位で切る。
   // UTF-16 slice は絵文字・補助面漢字を割って孤立サロゲートを meta に載せる (OG カードと同型)。

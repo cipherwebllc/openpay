@@ -6,6 +6,8 @@ import { arbitrumSepolia, baseSepolia, polygonAmoy } from 'viem/chains';
 import type { Address } from 'viem';
 
 vi.mock('wagmi', () => ({
+  useWriteContract: vi.fn(() => ({ data: undefined, error: null, isPending: false, writeContract: vi.fn(), reset: vi.fn() })),
+  useWaitForTransactionReceipt: vi.fn(() => ({ data: undefined, error: null, isSuccess: false, isError: false, refetch: vi.fn() })),
   useAccount: vi.fn(),
   useReadContract: vi.fn(),
   useSwitchChain: vi.fn(),
@@ -296,6 +298,7 @@ beforeEach(() => {
 });
 
 const JPYC_PARAMS: TipParams = {
+  mode: 'gasless',
   to: CREATOR,
   token: 'jpyc',
   name: '山田太郎',
@@ -305,6 +308,7 @@ const JPYC_PARAMS: TipParams = {
 };
 
 const USDC_PARAMS: TipParams = {
+  mode: 'gasless',
   to: CREATOR,
   token: 'usdc',
   presets: ['1', '5', '10'],
@@ -322,12 +326,12 @@ describe('TipForm — レンダリング', () => {
   });
 
   it('name が無いときは汎用文言', () => {
-    render(<TipForm params={{ to: CREATOR, token: 'usdc' }} />);
+    render(<TipForm params={{ mode: 'gasless', to: CREATOR, token: 'usdc' }} />);
     expect(screen.getByText('クリエイターへチップを送る')).toBeInTheDocument();
   });
 
   it('preset 未指定 → DEFAULT_TIP_PRESETS が使われる (USDC)', () => {
-    render(<TipForm params={{ to: CREATOR, token: 'usdc' }} />);
+    render(<TipForm params={{ mode: 'gasless', to: CREATOR, token: 'usdc' }} />);
     expect(screen.getByRole('button', { name: '5 USDC' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '20 USDC' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '50 USDC' })).toBeInTheDocument();
@@ -2079,5 +2083,140 @@ describe('TipForm — F7 off-origin callback 開示', () => {
     setGasQuote('ready', 0n);
     render(<TipForm params={JPYC_PARAMS} />);
     expect(screen.queryByText(/に通知・遷移します/)).toBeNull();
+  });
+});
+
+// Real useStandardPayment + persisted intent; only wallet/RPC boundaries are mocked.
+describe('Arc standard tip attribution', () => {
+  const tx = `0x${'e'.repeat(64)}` as const;
+  const arcParams: TipParams = { ...USDC_PARAMS, mode: 'standard', chain: 'arc', presets: ['0.5', '1'], thanks: 'Arc thanks', webhook: 'https://creator.example/tip' };
+  let walletWrite: ReturnType<typeof vi.fn>;
+  let receiptRetry: ReturnType<typeof vi.fn>;
+  let writeState: { data: typeof tx | undefined; error: Error | null; isPending: boolean };
+  let receiptState: { data: { status: 'success' | 'reverted'; blockNumber: bigint } | undefined; error: Error | null; isSuccess: boolean; isError: boolean };
+
+  beforeEach(async () => {
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+    setAccount({ connected: true, chainId: 5042002 });
+    setBalance(10000000n);
+    setGasQuote('error'); // Standard must ignore quote and SA gates.
+    walletWrite = vi.fn((_request, callbacks) => callbacks?.onSuccess(tx));
+    receiptRetry = vi.fn();
+    writeState = { data: undefined, error: null, isPending: false };
+    receiptState = { data: undefined, error: null, isSuccess: false, isError: false };
+    const wagmi = await import('wagmi');
+    vi.mocked(wagmi.useWriteContract).mockImplementation(() => ({ ...writeState, writeContract: walletWrite, reset: vi.fn() }) as never);
+    vi.mocked(wagmi.useWaitForTransactionReceipt).mockImplementation(({ query, hash } = {}) => ({
+      ...(query?.enabled && hash ? receiptState : { data: undefined, error: null, isSuccess: false, isError: false }),
+      refetch: receiptRetry,
+    }) as never);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+  });
+
+  function seed(chainId = 84532) {
+    window.sessionStorage.setItem('openpay:standard-intent:v1', JSON.stringify({
+      version: 1, chainId, from: FAN, tokenAddress: '0x3600000000000000000000000000000000000000',
+      merchant: CREATOR, merchantValue: '500000', feeReceiver: env.feeReceiver, feeValue: '0',
+      stage: 'merchant', merchantTxHash: tx, issuedAt: Date.now(),
+    }));
+  }
+  async function submit() {
+    const button = await screen.findByRole('button', { name: /0.5 USDC.*送る/ });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+  }
+  const webhookCalls = () => vi.mocked(fetch).mock.calls.filter(([url]) => url === arcParams.webhook);
+
+  it('success sends the principal once, records standard receipt and notifies exactly once with snapshotted payer', async () => {
+    const view = render(<TipForm params={arcParams} />);
+    expect(screen.getByText('ウォレットで支払い')).toBeInTheDocument();
+    await submit();
+    expect(walletWrite).toHaveBeenCalledTimes(1);
+    expect(walletWrite.mock.calls[0][0]).toMatchObject({ chainId: 5042002, functionName: 'transfer', args: [CREATOR, 500000n] });
+    expect(useSmartAccount).toHaveBeenLastCalledWith(expect.anything(), false);
+    expect(useBatchPayment).toHaveBeenLastCalledWith(expect.anything(), false);
+    mockHook(useAccount, { address: '0x8888888888888888888888888888888888888888', isConnected: true, chainId: 5042002 });
+    receiptState = { data: { status: 'success', blockNumber: 123n }, error: null, isSuccess: true, isError: false };
+    view.rerender(<TipForm params={arcParams} />);
+    await screen.findByText('Arc thanks');
+    expect(webhookCalls()).toHaveLength(1);
+    expect(JSON.parse(webhookCalls()[0][1]!.body as string)).toMatchObject({ from: FAN, amount: '0.5', blockNumber: '123' });
+    const receipts = loadPayerReceipts();
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({ paymentMode: 'standard', payerAddress: FAN, amount: '0.5' });
+    expect(receipts[0]).not.toHaveProperty('networkFeeEquivalent');
+    view.rerender(<TipForm params={arcParams} />);
+    expect(webhookCalls()).toHaveLength(1);
+  });
+
+  it.each(['reject', 'revert'] as const)('%s produces no success side effects and permits retry', async (kind) => {
+    if (kind === 'reject') walletWrite.mockImplementation(() => {});
+    const view = render(<TipForm params={arcParams} />);
+    await submit();
+    if (kind === 'reject') writeState.error = new Error('User rejected request');
+    else receiptState = { data: { status: 'reverted', blockNumber: 123n }, error: null, isSuccess: true, isError: false };
+    view.rerender(<TipForm params={arcParams} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /0.5 USDC.*送る/ })).toBeEnabled());
+    expect(webhookCalls()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
+    expect(screen.queryByText('Arc thanks')).not.toBeInTheDocument();
+  });
+
+  it('unknown latches transfer, retries receipt only and recovers once; webhook failure stays isolated', async () => {
+    const view = render(<TipForm params={arcParams} />);
+    await submit();
+    receiptState.error = new Error('RPC timeout');
+    receiptState.isError = true;
+    view.rerender(<TipForm params={arcParams} />);
+    const retry = await screen.findByRole('button', { name: /再確認/ });
+    fireEvent.click(retry);
+    expect(receiptRetry).toHaveBeenCalledTimes(1);
+    expect(walletWrite).toHaveBeenCalledTimes(1);
+    vi.mocked(fetch).mockRejectedValue(new Error('notification unavailable'));
+    receiptState = { data: { status: 'success', blockNumber: 123n }, error: null, isSuccess: true, isError: false };
+    view.rerender(<TipForm params={arcParams} />);
+    await screen.findByText('Arc thanks');
+    await waitFor(() => expect(loggerWarn).toHaveBeenCalledWith('tip.webhook.failed', expect.anything()));
+    expect(loadPayerReceipts()).toHaveLength(1);
+    expect(walletWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([84532, 5042002])('restored chain %s is never a tip, including identical tuples; only a new mutate owns a changed amount', async (chainId) => {
+    seed(chainId);
+    const view = render(<TipForm params={arcParams} />);
+    const previous = await screen.findByText('以前の送信の確認');
+    expect(previous).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Explorer で確認/ }).getAttribute('href')).toContain(chainId === 84532 ? 'sepolia.basescan.org' : 'explorer.testnet.arc.io');
+    receiptState = { data: { status: 'success', blockNumber: 123n }, error: null, isSuccess: true, isError: false };
+    view.rerender(<TipForm params={arcParams} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /0.5 USDC.*送る/ })).toBeEnabled());
+    expect(webhookCalls()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
+    expect(screen.queryByText('Arc thanks')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '1 USDC' }));
+    receiptState = { data: undefined, error: null, isSuccess: false, isError: false };
+    fireEvent.click(screen.getByRole('button', { name: /1 USDC.*送る/ }));
+    expect(walletWrite).toHaveBeenCalledTimes(1);
+    expect(walletWrite.mock.calls[0][0].args).toEqual([CREATOR, 1000000n]);
+    receiptState = { data: { status: 'success', blockNumber: 124n }, error: null, isSuccess: true, isError: false };
+    view.rerender(<TipForm params={arcParams} />);
+    await screen.findByText('Arc thanks');
+    expect(webhookCalls()).toHaveLength(1);
+    expect(loadPayerReceipts()[0]).toMatchObject({ amount: '1', paymentMode: 'standard' });
+  });
+
+  it('preview with a populated intent has zero restore, RPC, write, receipt, webhook and log effects', async () => {
+    seed(5042002);
+    const stored = window.sessionStorage.getItem('openpay:standard-intent:v1');
+    render(<TipForm params={arcParams} preview />);
+    await act(async () => { await Promise.resolve(); });
+    const wagmi = await import('wagmi');
+    for (const [options] of vi.mocked(wagmi.useWaitForTransactionReceipt).mock.calls) expect(options?.query?.enabled).toBe(false);
+    expect(window.sessionStorage.getItem('openpay:standard-intent:v1')).toBe(stored);
+    expect(walletWrite).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(loadPayerReceipts()).toHaveLength(0);
+    expect(screen.queryByText('以前の送信の確認')).not.toBeInTheDocument();
   });
 });

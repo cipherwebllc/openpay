@@ -16,8 +16,8 @@
 
 import { isAddress } from 'viem';
 import { isValidTokenSymbol, type TokenSymbol } from '@/lib/tokens';
-import { isJpycChainSlug, type JpycChainSlug } from '@/lib/chains';
-import { COLOR_PATTERN } from '@/lib/url';
+import { isJpycChainSlug, type JpycChainSlug, type ChainSlug } from '@/lib/chains';
+import { COLOR_PATTERN, resolveChainSlugParam, resolveTipCapability } from '@/lib/url';
 import { stripControlChars } from '@/lib/sanitize';
 import { isHandleTheme, type HandleTheme } from '@/lib/handleTheme';
 
@@ -110,8 +110,11 @@ export function buildTipOgModel(sp: {
     if (nativeChain != null) tokenLabel = NATIVE_LABEL[nativeChain];
     else if (tokenSym != null) tokenLabel = TOKEN_LABEL[tokenSym];
   }
-  // native (POL/KAIA) は gasless ではない。無効リクエストは generic gasless カード。
-  const gasless = !(valid && nativeChain != null);
+  // native (POL/KAIA) は gasless ではない。無効リクエストはガスに言及しない中立カード。
+  const resolvedChain = tokenSym ? resolveChainSlugParam(sp.get('chain'), tokenSym) : null;
+  const capability = tokenSym && resolvedChain?.ok ? resolveTipCapability(tokenSym, resolvedChain.slug) : null;
+  const gasless = valid && !nativeChain && capability?.ok === true && capability.mode === 'gasless';
+  const standard = valid && !nativeChain && capability?.ok === true && capability.mode === 'standard';
   const colorRaw = sp.get('color');
   const color =
     colorRaw && COLOR_PATTERN.test(colorRaw) ? colorRaw : OG_DEFAULT_COLOR;
@@ -130,10 +133,10 @@ export function buildTipOgModel(sp: {
     sub: ja
       ? gasless
         ? `${tokenLabel}で応援 · ガス不要`
-        : `${tokenLabel}で応援`
+        : `${tokenLabel}で応援${standard ? ' · ガスも USDC' : ''}`
       : gasless
         ? `Support with ${tokenLabel} · no gas`
-        : `Support with ${tokenLabel}`,
+        : `Support with ${tokenLabel}${standard ? ' · Gas paid in USDC' : ''}`,
     footer: ja ? 'ウォレットで直接受け取り' : 'Straight to your wallet',
     url: 'open-pay.jp',
     ...(isHandleTheme(sp.get('theme'))
@@ -149,6 +152,7 @@ export function buildTipOgImageUrl(
   address: string,
   params: {
     token?: TokenSymbol;
+    chain?: ChainSlug;
     native?: JpycChainSlug;
     name?: string;
     color?: string;
@@ -160,6 +164,7 @@ export function buildTipOgImageUrl(
   q.set('to', address);
   if (params.native) q.set('native', params.native);
   else if (params.token) q.set('token', params.token);
+  if (params.chain) q.set('chain', params.chain);
   if (params.name) q.set('name', params.name);
   if (params.color) q.set('color', params.color);
   if (isHandleTheme(params.theme)) q.set('theme', params.theme);
@@ -174,6 +179,8 @@ export interface TipCardFacts {
   name?: string;
   tokenLabel: string; // 'JPYC' | 'USDC' | 'POL' | 'KAIA'
   gasless: boolean; // ERC20 gasless tip=true、native tip=false
+  /** Arc USDC (standard) を含む: 「ガスも USDC」を併記する。gasless と両立しうる (@handle 混在)。 */
+  standardGas?: boolean;
 }
 
 // generateMetadata 用: locale 別の title / description。facts=null は generic
@@ -186,9 +193,17 @@ export function buildTipMeta(
   const ja = locale === 'ja';
   const name = facts?.name ? displayName(facts.name) : undefined;
   const tokenLabel = facts ? facts.tokenLabel : BOTH_TOKENS_LABEL;
-  const gasless = facts ? facts.gasless : true;
-  const noGasJa = gasless ? 'アプリ不要・ガス不要、' : 'アプリ不要、';
-  const noGasEn = gasless ? 'No app, no gas — ' : 'No app — ';
+  const gasless = facts ? facts.gasless : false;
+  const standardGas = facts?.standardGas === true;
+  // 混在 (Base gasless + Arc standard) は両方を併記、Arc のみは「ガスも USDC」、無効/不明は中立。
+  const gasJa = gasless && standardGas
+    ? 'アプリ不要・ガス不要 (Base) / ガスも USDC (Arc)、'
+    : gasless ? 'アプリ不要・ガス不要、' : standardGas ? 'アプリ不要・ガスも USDC、' : 'アプリ不要、';
+  const gasEn = gasless && standardGas
+    ? 'No app, no gas (Base) / gas paid in USDC (Arc) — '
+    : gasless ? 'No app, no gas — ' : standardGas ? 'No app, gas paid in USDC — ' : 'No app — ';
+  const noGasJa = gasJa;
+  const noGasEn = gasEn;
   if (name) {
     return ja
       ? {
@@ -378,6 +393,8 @@ export interface HandleOgInput {
   bio?: string;
   tokenLabels: string[]; // methods 由来の表示トークン ['JPYC'] / ['JPYC','USDC']
   locale: TipOgLocale;
+  gaslessTokens?: string[];
+  standardTokens?: string[];
 }
 
 /** @handle プロフィールカードの描画モデル (純関数・単体テスト対象)。 */
@@ -390,9 +407,24 @@ export function buildHandleOgModel(input: HandleOgInput): OgCardModel {
     bioClean.length === 0 ? undefined : truncateGraphemes(bioClean, OG_BIO_DISPLAY_MAX);
   const tokens =
     input.tokenLabels.length > 0 ? input.tokenLabels.join(' / ') : 'JPYC';
-  const chips = ja
-    ? [`${tokens} で応援`, 'ガス不要']
-    : [`Support with ${tokens}`, 'No gas'];
+  const gasless = (input.gaslessTokens ?? input.tokenLabels).length > 0;
+  const standard = (input.standardTokens ?? []).length > 0;
+  const gaslessLabels = input.gaslessTokens ?? input.tokenLabels;
+  const gaslessChains = [
+    ...(gaslessLabels.includes('JPYC') ? ['JPYC'] : []),
+    ...(gaslessLabels.includes('USDC') ? ['Base'] : []),
+  ].join(' / ');
+  const wording = standard
+    ? gasless
+      ? ja
+        ? `ガス不要 (${gaslessChains}) / ガスも USDC (Arc)`
+        : `No gas (${gaslessChains}) / Gas paid in USDC (Arc)`
+      : ja ? 'ガスも USDC' : 'Gas paid in USDC'
+    : gasless ? ja ? 'ガス不要' : 'No gas' : null;
+  const chips = [
+    ja ? `${tokens} で応援` : `Support with ${tokens}`,
+    ...(wording ? [wording] : []),
+  ];
   const color =
     input.color && COLOR_PATTERN.test(input.color)
       ? input.color
@@ -556,4 +588,16 @@ export function buildStorefrontMeta(
   const title = `${name} — Mobile Order on OpenPay`;
   const base = `Browse ${name}'s menu and order from your phone, paying in JPYC.`;
   return { title, description: tag ? `${tag} — ${base}` : base };
+}
+
+/** All methods contribute; disabled/unsupported methods make no gas claim. */
+export function handleTipCapabilities(methods: readonly { token: TokenSymbol; chain: ChainSlug }[]) {
+  const gaslessTokens: string[] = [];
+  const standardTokens: string[] = [];
+  for (const method of methods) {
+    const capability = resolveTipCapability(method.token, method.chain);
+    if (!capability.ok) continue;
+    (capability.mode === 'gasless' ? gaslessTokens : standardTokens).push(tokenLabelFor(method.token));
+  }
+  return { gaslessTokens, standardTokens };
 }

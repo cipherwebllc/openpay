@@ -19,7 +19,7 @@ describe('buildTipOgModel', () => {
     expect(m.locale).toBe('ja');
     expect(m.brand).toBe('OpenPay');
     expect(m.heading).toBe('チップを送る');
-    expect(m.sub).toBe('JPYC / USDCで応援 · ガス不要');
+    expect(m.sub).toBe('JPYC / USDCで応援');
     expect(m.footer).toBe('ウォレットで直接受け取り');
     expect(m.url).toBe('open-pay.jp');
     expect(m.color).toBe(OG_DEFAULT_COLOR);
@@ -29,7 +29,7 @@ describe('buildTipOgModel', () => {
     const m = buildTipOgModel(sp('locale=en'));
     expect(m.locale).toBe('en');
     expect(m.heading).toBe('Send a tip');
-    expect(m.sub).toBe('Support with JPYC / USDC · no gas');
+    expect(m.sub).toBe('Support with JPYC / USDC');
     expect(m.footer).toBe('Straight to your wallet');
   });
 
@@ -112,7 +112,7 @@ describe('buildTipOgModel', () => {
 
   it('invalid token falls back to the JPYC / USDC label', () => {
     expect(buildTipOgModel(sp(`to=${ADDR}&token=eth`)).sub).toBe(
-      'JPYC / USDCで応援 · ガス不要',
+      'JPYC / USDCで応援',
     );
   });
 });

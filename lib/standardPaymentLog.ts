@@ -6,7 +6,7 @@ import {
   logPaymentEvent,
   type PaymentLogContext,
 } from '@/lib/paymentLog';
-import type { StandardPaymentIntentParams } from '@/lib/paymentIntentStorage';
+import type { StandardPaymentParams } from '@/hooks/useStandardPayment';
 
 const ERROR_SENTINEL = '0xerror' as const;
 
@@ -24,7 +24,7 @@ type ReceiptState = {
 type SeenRef = { current: string | null };
 
 export function emitStandardPaymentLogs(
-  params: StandardPaymentIntentParams,
+  params: StandardPaymentParams,
   customer: Address | undefined,
   feeStarted: boolean,
   merchantWrite: WriteState,
@@ -44,6 +44,7 @@ export function emitStandardPaymentLogs(
     refs.merchantError,
     refs.merchantReceipt,
     {
+      ...(params.tip ? { tip: params.tip, chainSlug: params.chainSlug, mode: params.mode } : {}),
       flow: 'standard-merchant',
       chainId: params.chainId,
       tokenAddress: params.tokenAddress,

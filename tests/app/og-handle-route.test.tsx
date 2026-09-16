@@ -17,6 +17,7 @@ vi.mock('next/og', () => ({
 }));
 
 const h = vi.hoisted(() => ({
+  arcTip: false,
   enableHandles: true,
   enableMobileOrder: false,
   enableCreatorStore: false,
@@ -34,6 +35,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
     ...actual,
+    isArcTipEnabled: () => h.arcTip,
     env: {
       ...actual.env,
       get enableHandles() {
@@ -682,4 +684,20 @@ it('omits private deliveryUrl from the public OG model and never fetches the gat
   expect(collectText(out.element).join(' ')).toContain('Delivery');
   expect(JSON.stringify(out)).not.toContain(deliveryUrl);
   expect(JSON.stringify(ssrf.fetchSafe.mock.calls)).not.toContain(deliveryUrl);
+});
+
+it.each(['arc', 'base', 'both', 'disabled'] as const)('actual handle OG route: %s', async (kind) => {
+  h.arcTip = kind !== 'disabled';
+  h.record = { ...RECORD, profile: {}, config: { ...RECORD.config, methods: [
+    ...(kind === 'base' || kind === 'both' ? [{ token: 'usdc', chain: 'base' }] : []),
+    ...(kind !== 'base' ? [{ token: 'usdc', chain: 'arc', crossChain: false }] : []),
+  ] } };
+  const { buildHandleOgImageUrl } = await import('@/lib/ogTipCard');
+  const url = buildHandleOgImageUrl('alice', 'ja');
+  await GET(new Request(new URL(url.replace('/og/', '/api/og/'), 'https://open-pay.jp')));
+  const text = collectText(ctorCalls.at(-1)!.element).join(' ');
+  expect(text.includes('ガス不要')).toBe(kind === 'base' || kind === 'both');
+  expect(text.includes('ガスも USDC')).toBe(kind === 'arc' || kind === 'both');
+  if (kind === 'both') expect(text).toContain('ガス不要 (Base) / ガスも USDC (Arc)');
+  h.arcTip = false;
 });

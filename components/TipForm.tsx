@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useLocale, useTranslations } from 'next-intl';
+import type { StandardPaymentParams } from '@/hooks/useStandardPayment';
+import type { TipStandardApi, TipStandardState } from './TipStandardEngine';
 import { formatUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
@@ -31,6 +33,11 @@ const TipSuccessPanel = dynamic(
 const PaymentStatusPanel = dynamic(
   () =>
     import('./PaymentStatusPanel').then((m) => m.PaymentStatusPanel),
+  { ssr: false },
+);
+// Arc standard 分岐のヘッドレス engine。Arc 選択時だけ読み込む (bundle 予算・副作用ゼロの preview)。
+const TipStandardEngine = dynamic(
+  () => import('./TipStandardEngine').then((m) => m.TipStandardEngine),
   { ssr: false },
 );
 const SignReassurance = dynamic(
@@ -162,8 +169,7 @@ export function TipForm({
   // 決済経路の単一情報源 (Phase 1.1)。散在していた useRelay / useRecover / isCircle を
   // この 1 値から導出する。引数は現行どおりに算出した解決済み値で、判定の優先順位・短絡は
   // resolvePaymentRoute が現行ロジックをそのまま再現する (挙動不変)。/pay・/checkout と同型だが、
-  // tip は常に gasless / gas=customer 固定で standard 経路を持たず、split も非対応なので
-  // isStandard は常に false・disableRelay は渡さない (CheckoutForm と同じく省略)。
+  // Arc のみ standard、gas=customer 固定。split 非対応のため disableRelay は省略。
   // ⚠️ chain 引数は TipForm の現行どおり deployment.chainId を渡す (PaymentForm/CheckoutForm は
   // useAccount() の chainId ?? deployment.chainId だが、TipForm は chainId を読まないため差異あり)。
   //   - JPYC ガスレスを EIP-3009 relay に倒すか (flag ON + JPYC + relay 対応 chain)。OFF / 非対応 /
@@ -172,8 +178,36 @@ export function TipForm({
   //   - recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (tip は customer 上乗せ固定)。
   //     未設定は free (OpenPay 負担)。
   //   - USDC ガスレスが Circle に解決される場合は Circle Paymaster (permit + surcharge 込み quote)。
+  const isStandard = params.mode === 'standard';
+  // useStandardPayment は TipStandardEngine (next/dynamic) 内でだけ mount する。engine が
+  // 読み込まれるまでは isRestoring=true で送信を塞ぐ (preview は engine を mount しない)。
+  const [standard, setStandard] = useState<TipStandardState>(() => ({
+    isRestoring: !preview,
+    isPending: false,
+    isUnknown: false,
+    isSuccess: false,
+    isMerchantError: false,
+    isFeeError: false,
+    hasActiveIntent: false,
+    restoredFromStorage: false,
+    error: null,
+    merchantTxHash: undefined,
+    blockNumber: undefined,
+    lastSubmittedParams: null,
+  }));
+  const standardApiRef = useRef<TipStandardApi | null>(null);
+  const [standardReady, setStandardReady] = useState(false);
+  const onStandardApi = useCallback((api: TipStandardApi) => {
+    standardApiRef.current = api;
+    setStandardReady(true);
+  }, []);
+  const submittedByThisFormRef = useRef<StandardPaymentParams | null>(null);
+  // 出所を持たない復元 intent を現在のチップへ誤帰属させない。mutate に渡した同一 snapshot のみ採用。
+  const ownsStandardAttempt = isStandard && !standard.restoredFromStorage &&
+    submittedByThisFormRef.current !== null && standard.lastSubmittedParams === submittedByThisFormRef.current;
+  const restoredStandardPayment = isStandard && standard.restoredFromStorage;
   const route = resolvePaymentRoute({
-    isStandard: false,
+    isStandard,
     jpycGaslessProvider: resolveJpycGaslessProvider(
       deployment,
       deployment.chainId,
@@ -194,7 +228,7 @@ export function TipForm({
   const useRecover = isRecoverRoute(route);
 
   // relay 時は smart account / batch / gas quote とも skip (enabled=!useRelay)。
-  const paymentEnabled = !preview && !useRelay;
+  const paymentEnabled = !preview && !useRelay && !isStandard;
   const { data: saData, error: saError } = useSmartAccount(
     deployment,
     paymentEnabled,
@@ -238,12 +272,8 @@ export function TipForm({
     ? recoverFeeValue(amountWei, 'customer', deployment.chainId)
     : 0n;
 
-  // Tip widget は gasless / gas=customer 固定 (preset セマンティクス維持):
-  // creator は preset - fee を受け取り、ファンは preset + gas を支払う。
-  // standard mode (顧客 wallet で gas 自前負担) は creator-fan UX を崩すため
-  // tip 文脈では非対応。URL で mode=standard が来ても無視して gasless で動かす。
-  // circle のときは surcharge 込み circleQuote を使う。
-  const gasAmount = activeQuote.data?.gasAmount;
+  // Arc はウォレットが USDC ガスを直接負担。その他のチップは既存の gasless 見積。
+  const gasAmount = isStandard ? undefined : activeQuote.data?.gasAmount;
   // breakdown/会計に使う gas 相当額: relay は固定の回収額 (recover=fee / free=0)、非 relay は
   // paymaster quote (circle / erc20)。relay は quote を持たないため effective で切り替える。
   // money 計算は route 駆動の純関数 (lib/paymentMoney) に一元化済 (Phase 1.2・式は不変)。
@@ -251,18 +281,17 @@ export function TipForm({
     route,
     { isJpyc, relayGasEquiv, gasAmount },
   );
-  // tip は payMode='gasless' / gasMode='customer' 固定 (creator-fan UX)。recover でも顧客上乗せの
-  // ままなので effectiveGasMode (recover→'merchant') は使わず literal を渡す (現行と byte 一致)。
+  // チップの gasMode は常に customer。Arc standard は額面全額を送り、ガスは wallet が別途扱う。
   const breakdown = useMemo(
     () =>
       paymentBreakdown({
         totalWei: amountWei,
         token: params.token,
-        payMode: 'gasless',
+        payMode: isStandard ? 'standard' : 'gasless',
         gasMode: 'customer',
         effectiveGasAmount,
       }),
-    [amountWei, params.token, effectiveGasAmount],
+    [amountWei, params.token, effectiveGasAmount, isStandard],
   );
 
   // gas 軸:
@@ -281,8 +310,7 @@ export function TipForm({
   });
   // 記録用ネットワーク手数料相当額 (会計分離・on-chain transfer とは別)。relay=回収額/0、
   // 非 relay sponsorship=立替回収 / USDC erc20=paymaster 徴収分。circle は receipt 由来の
-  // circlePaymasterNetUsdc を使うため null (mutate へは undefined)。tip は route が常に非 standard
-  // のため networkFeeEquivalentValue の !isStandard 句は常に真 → 現行の `!isCircle` 条件と byte 一致。
+  // circlePaymasterNetUsdc を使うため null。standard も未計測額を架空の 0 とせず null。
   const networkFeeEquivalent: bigint | null = networkFeeEquivalentValue(
     route,
     effectiveGasAmount,
@@ -301,47 +329,54 @@ export function TipForm({
   const relayAmbiguous = relay.recoveryState != null || relayResponseUnknown;
   // Pimlico は broadcast 後の receipt 取得失敗を relay と同じ unknown として保持する。
   // latch 中は新しい UserOperation ではなく、保持済み hash の receipt 再照会だけを許可する。
-  const gaslessAmbiguous = gasless.isUnknown;
+  const gaslessAmbiguous = !isStandard && !useRelay && gasless.isUnknown;
   // pending record store (localStorage) が読めず未解決 UserOp の有無を判定できない状態。
   // broadcast 済みとは言い切れないので ambiguous とは別扱いにし、gasless 経路だけを塞ぐ
   // (relay は localStorage に依存しないため、この fail-closed を波及させない)。
-  const gaslessStoreUnavailable = !useRelay && gasless.pendingStoreUnavailable;
+  const gaslessStoreUnavailable = !isStandard && !useRelay && gasless.pendingStoreUnavailable;
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
-  const directFlowPending = relay.isRestoring || relayAmbiguous
+  const directFlowPending = isStandard
+    ? standard.isRestoring || standard.isPending || standard.isUnknown
+    : relay.isRestoring || relayAmbiguous
     ? true
     : useRelay
       ? relay.isPending
       : gasless.isPending || gaslessAmbiguous;
-  const directFlowSuccess = useRelay
+  const directFlowSuccess = isStandard
+    ? ownsStandardAttempt && standard.isSuccess
+    : useRelay
     ? !!(relay.data?.success && relay.data.txHash)
     : !!gasless.data?.success;
-  const directFlowTxHash = useRelay ? relay.data?.txHash : gasless.data?.txHash;
+  const directFlowTxHash = isStandard ? standard.merchantTxHash : useRelay ? relay.data?.txHash : gasless.data?.txHash;
   const flowPending = directFlowPending || crossChainLocked;
   const flowSuccess = directFlowSuccess || !!crossChainResult;
   const flowTxHash = crossChainResult?.mintTxHash ?? directFlowTxHash;
   const flowUserOpHash = crossChainResult
     ? undefined
-    : useRelay
+    : isStandard || useRelay
       ? undefined
       : gasless.data?.userOpHash;
-  const flowBlockNumber: bigint | undefined = useRelay
+  const flowBlockNumber: bigint | undefined = isStandard
+    ? standard.blockNumber
+    : useRelay
     ? undefined
     : crossChainResult
       ? undefined
       : gasless.data?.blockNumber;
-  const restoredRelayPayment = relay.restoredIntent != null;
+  const restoredRelayPayment = useRelay && relay.restoredIntent != null;
 
   // relay は gas quote / smart account 不要なので readiness 即満たす。circle は permitAmount を含む
   // activeQuote(circleQuote) 確定まで待つ (未算定で送信すると useBatchPayment が throw)。
-  const gasQuoteReady = useRelay || activeQuote.data !== undefined;
+  const gasQuoteReady = isStandard || useRelay || activeQuote.data !== undefined;
   // 送金が確定 (または broadcast 済で確定しうる) 後の再送信を禁止。再送すると同一受取人へ
   // 2 件目の on-chain 送金 = 二重支払いになる。revert (送金未成立) は安全なので再試行を許す
-  // (CheckoutForm/PaymentForm と同一防御。TipForm は standard 経路を持たないため gasless/relay のみ)。
+  // 復元された standard 成功は今回のチップではないため、新規送信を妨げない。
   const directSettledNoRetry =
-    relay.hasActiveIntent ||
-    (!useRelay && (gaslessAmbiguous || !!gasless.data?.success)) ||
+    (isStandard && (standard.hasActiveIntent || standard.isUnknown || standard.isFeeError || (ownsStandardAttempt && standard.isSuccess))) ||
+    (!isStandard && relay.hasActiveIntent) ||
+    (!isStandard && !useRelay && (gaslessAmbiguous || !!gasless.data?.success)) ||
     (useRelay &&
       (relayAmbiguous ||
         !!relayIpRateLimited ||
@@ -358,7 +393,7 @@ export function TipForm({
     !preview &&
     isConnected &&
     !wrongChain &&
-    (useRelay || !!saData) &&
+    (isStandard ? standardReady : useRelay || !!saData) &&
     // creator 受取 > 0 を要求 (custom amount 未入力だと gas 分で customerPays が
     // 正になり得るが、tip 額 0 の空 batch は無意味)。hook 側でも calls.length===0
     // を弾くが、UI でも button を無効化して金額入力を促す。
@@ -374,14 +409,17 @@ export function TipForm({
   // gas congested はチェーン別の早期 abort なので、生のエラーメッセージ
   // (デバッグ向け詳細) ではなく i18n された案内文に差し替える。
   // gasQuote の失敗も同様に i18n 化 (詳細は logger 経由で Sentry へ)。
-  const saFallback = !useRelay && isIncompatibleSmartAccountError(saError);
+  const saFallback = !isStandard && !useRelay && isIncompatibleSmartAccountError(saError);
   // 送信は成立したがチェーン上で revert したケース (gasless/relay: data.success===false・relay は
   // pending を除外)。success overlay も error も出ず無反応に見える穴を明示メッセージで塞ぐ。
   const revertedNoFeedback =
-    (!useRelay && !!gasless.data && !gasless.data.success) ||
+    (isStandard && standard.isMerchantError && !standard.error) ||
+    (!isStandard && !useRelay && !!gasless.data && !gasless.data.success) ||
     (useRelay && !!relay.data && !relay.data.success && !relay.data.pending);
   // relay の error は code 文字列 (rate_limited 等) なので friendly i18n に差し替える。
-  const flowError = relayAmbiguous || gaslessAmbiguous
+  const flowError = isStandard
+    ? standard.isUnknown ? null : standard.error
+    : relayAmbiguous || gaslessAmbiguous
     ? null
     : useRelay
       ? relay.error
@@ -394,8 +432,8 @@ export function TipForm({
   const error = isGasCongestedError(flowError)
     ? t('errorGasCongested')
     : (flowErrorMessage ??
-      (useRelay || saFallback ? undefined : saError?.message) ??
-      (!useRelay && activeQuote.error ? t('errorGasQuote') : null) ??
+      (isStandard || useRelay || saFallback ? undefined : saError?.message) ??
+      (!isStandard && !useRelay && activeQuote.error ? t('errorGasQuote') : null) ??
       (amountPrecisionError
         ? t('errorAmountPrecision', { decimals: deployment.decimals })
         : null) ??
@@ -483,7 +521,7 @@ export function TipForm({
       customerPays: breakdown.customerPays.toString(),
     };
     logger.info('tip.success', {
-      mode: crossChainResult ? 'cross-chain' : useRelay ? 'relay' : 'gasless',
+      mode: crossChainResult ? 'cross-chain' : isStandard ? 'standard' : useRelay ? 'relay' : 'gasless',
       userOpHash: flowUserOpHash,
       txHash: flowTxHash,
       creator: params.to,
@@ -502,8 +540,8 @@ export function TipForm({
         amount: sent.amount,
         merchantAddress: params.to,
         merchantName: params.name ?? null,
-        payerAddress: address,
-        paymentMode: crossChainResult ? 'cross-chain' : 'gasless',
+        payerAddress: isStandard ? submittedByThisFormRef.current?.customer : address,
+        paymentMode: crossChainResult ? 'cross-chain' : isStandard ? 'standard' : 'gasless',
         gasMode: 'customer',
         memo: params.message ?? null,
         sourceRoute: '/tip',
@@ -518,7 +556,7 @@ export function TipForm({
       const payload = {
         type: 'openpay.tip.success',
         creator: params.to,
-        from: address,
+        from: isStandard ? submittedByThisFormRef.current?.customer : address,
         token: params.token,
         chain: chainSlug,
         amount: sent.amount,
@@ -563,6 +601,7 @@ export function TipForm({
         });
     }
   }, [
+    isStandard,
     flowSuccess,
     flowTxHash,
     flowUserOpHash,
@@ -600,6 +639,24 @@ export function TipForm({
       customerPays: breakdown.customerPays.toString(),
     };
     submittedAmountDisplayRef.current = fmt(totalCustomerOutflow);
+    if (isStandard) {
+      const snapshot: StandardPaymentParams = {
+        chainId: deployment.chainId,
+        tokenAddress: deployment.address,
+        merchant: params.to,
+        merchantAmount: breakdown.merchantReceives,
+        feeReceiver: env.feeReceiver,
+        feeAmount: 0n,
+        customer: address,
+        tip: true,
+        chainSlug,
+        mode: 'standard',
+      };
+      submittedByThisFormRef.current = snapshot;
+      // engine 未到達なら canSubmit が false なので到達しない (standardReady ゲート)。
+      standardApiRef.current?.mutate(snapshot);
+      return;
+    }
     if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が署名するだけ・自前 relayer がガス負担。tip は customer 固定
       // (recover 時 forwarder が gas 相当を回収・free 時 OpenPay 負担)。value=tip 額。
@@ -653,7 +710,7 @@ export function TipForm({
         }
       : null;
 
-  // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2+P4)。tip は standard 経路を持たないので
+  // 「署名安心 UX」(plans/sign-reassurance-ux.md・P2+P4)。standard ではこのパネルを表示せず、
   // (a) relay free / (a') relay recover / (c) Circle USDC の 3 kind のみ (計画 §3.3)。
   //   (a) relay free (forwarder 未設定): jpyc-relay-free フルパネル。preview は relay.mutate に
   //       渡す変数 (params.to / amountWei) と同一ソース。testnet 等 forwarder 無し chain 用。
@@ -907,7 +964,9 @@ export function TipForm({
           )}
           {/* relay は gas quote 非取得。recover=固定回収額 / free=OpenPay 立替 (無料)。
               非 relay は従来 paymaster quote (USDC erc20 / JPYC sponsorship)。 */}
-          {useRecover ? (
+          {isStandard ? (
+            <Row label={t('gasRow')} labelExtra={<InfoTooltip text={t('gasInfoUsdcArc')} />} value={t('gasRowUsdcArc')} />
+          ) : useRecover ? (
             <Row
               label={t('gasRow')}
               labelExtra={<InfoTooltip text={t('gasInfoJpycRecover')} />}
@@ -949,7 +1008,9 @@ export function TipForm({
           />
         </dl>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-          {useRecover
+          {isStandard
+            ? t('gasInfoUsdcArc')
+            : useRecover
             ? t('gaslessHintJpycRecover')
             : useRelay || isJpyc
               ? t('gaslessHintJpycRelay')
@@ -1034,7 +1095,7 @@ export function TipForm({
             だが他 chain / Gateway に balance がある時、Circle Gateway / CCTP V2
             経由の代替 path を提示する。JPYC は Gateway 非対応のため自動 skip
             (token guard で early return)。PaymentForm と同型実装。 */}
-        {!preview && params.token === 'usdc' && address && (
+        {!preview && !isStandard && params.token === 'usdc' && address && (
           <CrossChainHint
             token={params.token}
             enabled={params.crossChain !== false}
@@ -1044,7 +1105,7 @@ export function TipForm({
             feeReceiver={env.feeReceiver}
             displayDecimals={deployment.decimals}
             tokenAddress={deployment.address}
-            // tip は常にガスレスモードだが、直接送金がガスレスなのは smart account が
+            // この hint は非 standard 専用。直接送金がガスレスなのは smart account が
             // 実際に構築済 (saData あり) の時のみ。pristine/未対応 fallback・init 失敗・
             // 取得中は gasless 不可なので「ガス代要」表示にする。
             directIsGasless={!!saData}
@@ -1125,7 +1186,7 @@ export function TipForm({
             ? t('btnConnect')
             : wrongChain
               ? t('btnSwitchChain')
-              : !useRelay && !saData
+              : !isStandard && !useRelay && !saData
                 ? t('btnSaInit')
                 : !gasQuoteReady
                   ? t('btnGasQuoteLoading')
@@ -1166,7 +1227,7 @@ export function TipForm({
         />
       )}
 
-      {/* Tip には standard fallback が無い。ambiguity latch 中は Pay を封鎖し、同一 payload の
+      {/* relay ambiguity latch 中は Pay を封鎖し、同一 payload の
           再確認だけを許可する。 */}
       {relayAmbiguous && (
         <PaymentStatusPanel
@@ -1230,6 +1291,30 @@ export function TipForm({
         />
       )}
 
+      {!preview && restoredStandardPayment && standard.merchantTxHash && (
+        <PaymentStatusPanel
+          title={t('previousTransactionTitle')}
+          body={t('previousTransactionBody')}
+          identifier={standard.merchantTxHash}
+          explorerHref={`${blockExplorerUrl(standard.lastSubmittedParams!.chainId)}/tx/${standard.merchantTxHash}`}
+          explorerLabel={t('pendingExplorerLink')}
+          showSpinner={standard.isPending || standard.isUnknown}
+          actionLabel={standard.isUnknown ? t('responseUnknownRetryButton') : undefined}
+          onAction={standard.isUnknown ? () => standardApiRef.current?.retryReceipt() : undefined}
+        />
+      )}
+      {!preview && isStandard && standard.isUnknown && !restoredStandardPayment && (
+        <PaymentStatusPanel
+          title={t('responseUnknownTitle')}
+          body={t('responseUnknownBody')}
+          identifier={standard.merchantTxHash}
+          actionLabel={t('responseUnknownRetryButton')}
+          onAction={() => standardApiRef.current?.retryReceipt()}
+        />
+      )}
+      {!preview && isStandard && (
+        <TipStandardEngine onState={setStandard} onApi={onStandardApi} />
+      )}
       {flowSuccess && flowTxHash && (
         <TipSuccessPanel
           title={t('successTitle')}

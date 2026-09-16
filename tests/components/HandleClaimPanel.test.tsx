@@ -622,3 +622,37 @@ describe('HandleClaimPanel', () => {
     await waitFor(() => expect(onStopEditing).toHaveBeenCalled());
   });
 });
+
+it.each([[false, false], [false, true], [true, false], [true, true]])('prevalidates every publish method: arc=%s tip=%s', async (arc, tip) => {
+  h.isSignedIn = true;
+  const envModule = await import('@/lib/env');
+  const enabledSpy = vi.spyOn(envModule, 'isArcTipEnabled').mockReturnValue(arc && tip);
+  const config: HandleTipConfig = { ...CONFIG, methods: [{ token: 'usdc', chain: 'base', crossChain: true }, { token: 'usdc', chain: 'arc', crossChain: false }] };
+  const onPublished = vi.fn();
+  const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify(
+    init?.method === 'POST' ? { ok: true, status: 'created', updatedAt: 500 } : String(url) === '/api/handle' ? { ok: true, handles: [], max: 3 } : { ok: true, available: true },
+  ), { status: 200, headers: { 'content-type': 'application/json' } }));
+  vi.stubGlobal('fetch', fetchMock);
+  renderPanel(config, { onPublished });
+  fireEvent.change(screen.getByPlaceholderText('alice'), { target: { value: 'bob' } });
+  fireEvent.click(screen.getByRole('button', { name: 'この handle を取得' }));
+  if (arc && tip) {
+    await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1));
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
+    expect(JSON.parse(post![1]!.body as string).config.methods).toEqual(config.methods);
+  } else {
+    await screen.findByText(/無効または未対応の受取方法/);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+    expect(onPublished).not.toHaveBeenCalled();
+  }
+  enabledSpy.mockRestore();
+});
+
+it('blocks a disabled published Arc record even after unrelated edits', async () => {
+  h.isSignedIn = true;
+  stubMine([{ handle: 'alice', config: CONFIG, updatedAt: 10 }]);
+  renderPanel(CONFIG, { editingHandle: 'alice', expectedUpdatedAt: 10, publishBlockedReason: 'Arc disabled: cannot republish', isDirty: true });
+  fireEvent.change(screen.getByPlaceholderText('alice'), { target: { value: 'alice' } });
+  expect(await screen.findByRole('alert')).toHaveTextContent('Arc disabled: cannot republish');
+  expect(await screen.findByRole('button', { name: '設定を更新' })).toBeDisabled();
+});

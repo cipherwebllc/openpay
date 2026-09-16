@@ -16,7 +16,8 @@ import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { useAccount } from 'wagmi';
 import { getAddress, isAddress, type Address } from 'viem';
-import { env } from '@/lib/env';
+import { env, isArcTipEnabled } from '@/lib/env';
+import { resolveTipCapability } from '@/lib/url/tip';
 import { AddressInput } from '@/components/AddressInput';
 import { HandleClaimPanel } from '@/components/HandleClaimPanel';
 import { handleFontClass } from '@/components/handleFonts';
@@ -203,7 +204,10 @@ export function HandleProfileBuilder({
   );
 
   const methods = useMemo(
-    () => buildPublishMethods(draft, env.enableJpycAvalanche),
+    () => buildPublishMethods(draft, {
+      enableJpycAvalanche: env.enableJpycAvalanche,
+      arcTip: isArcTipEnabled(),
+    }),
     [draft],
   );
 
@@ -212,7 +216,7 @@ export function HandleProfileBuilder({
   // (forwarder 設定で gasless 成立) は公開ページ/publish 時の parseTipParams が判定する。
   const methodOptions: Array<
     [
-      'jpycPolygon' | 'jpycKaia' | 'jpycAvalanche' | 'usdcBase',
+      'jpycPolygon' | 'jpycKaia' | 'jpycAvalanche' | 'usdcBase' | 'usdcArc',
       HandleReceiveMethod,
     ]
   > = [
@@ -224,6 +228,9 @@ export function HandleProfileBuilder({
   }
   // USDC (Base 固定) — 2026-08-17 復活 (撤去理由「Base 固定」を user が明示的に許容)。
   methodOptions.push(['usdcBase', { token: 'usdc', chain: 'base' }]);
+  if (isArcTipEnabled() || draft.usdcArc) {
+    methodOptions.push(['usdcArc', { token: 'usdc', chain: 'arc' }]);
+  }
 
   // 受取先: 生 0x アドレスは**入力値を最優先**で採用する。AddressInput は ENS 名以外で
   // onResolved を再発火しないため、「接続ウォレットを使う」/編集 prefill で resolved に入った
@@ -242,6 +249,7 @@ export function HandleProfileBuilder({
       buildPublishPayload(draft, {
         receiver: effectiveReceiver,
         enableJpycAvalanche: env.enableJpycAvalanche,
+        arcTip: isArcTipEnabled(),
       }),
     [draft, effectiveReceiver],
   );
@@ -262,6 +270,10 @@ export function HandleProfileBuilder({
     activeBaseline?.updatedAt,
     locale,
   );
+
+  const inactivePublishedArc = !isArcTipEnabled() &&
+    !!activeBaseline?.payload.config.methods.some((m) => m.chain === 'arc');
+  const capableMethods = methods.filter((m) => resolveTipCapability(m.token, m.chain).ok);
 
   if (!env.enableHandles) return null;
 
@@ -333,7 +345,7 @@ export function HandleProfileBuilder({
     headingRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     const loadedReceiver = isAddress(c.to) ? getAddress(c.to) : null;
     setResolved(loadedReceiver);
-    // 旧レコードの USDC method はビルダーで編集できない → 更新で外れることを明示する。
+    // USDC は flag に依らず chain ごとに復元し、公開済み Arc を Base に置き換えない。
     // 編集対象レコードに無いフィールドは「前の下書き値」(s.*) ではなく **builder 既定**へ戻す。
     // でないと別プロフィールの色/プリセットが update 時にこの handle へ混入する。
     const loadedDraft: typeof draft = {
@@ -349,7 +361,8 @@ export function HandleProfileBuilder({
       jpycAvalanche: c.methods.some(
         (m) => m.token === 'jpyc' && m.chain === 'avalanche',
       ),
-      usdcBase: c.methods.some((m) => m.token === 'usdc'),
+      usdcBase: c.methods.some((m) => m.token === 'usdc' && m.chain === 'base'),
+      usdcArc: c.methods.some((m) => m.token === 'usdc' && m.chain === 'arc'),
       presetsJpyc: c.presets?.jpyc ?? DEFAULT_PROFILE_DRAFT.presetsJpyc,
       bio: p?.bio ?? '',
       avatar: p?.avatar ?? '',
@@ -364,6 +377,7 @@ export function HandleProfileBuilder({
     const loadedPayload = buildPublishPayload(loadedDraft, {
       receiver: loadedReceiver,
       enableJpycAvalanche: env.enableJpycAvalanche,
+      arcTip: isArcTipEnabled(),
     });
     if (loadedPayload && typeof updatedAt === 'number') {
       dispatchPublishBaseline({
@@ -376,12 +390,13 @@ export function HandleProfileBuilder({
   };
 
   // プレビューは受取先が未確定でも常時表示 (config が組めない間は draft から見た目だけ組む)。
-  const previewConfig: HandleTipConfig = config ?? {
+  const previewConfig: HandleTipConfig = config ? { ...config, methods: capableMethods } : {
     to: effectiveReceiver ?? '',
     name: draft.name.trim() || undefined,
     color: colorValid ? draft.color : undefined,
-    methods,
+    methods: capableMethods,
   };
+
   const publicHandleUrl = editingHandle
     ? getPublicHandleUrl(origin, editingHandle)
     : '';
@@ -506,9 +521,11 @@ export function HandleProfileBuilder({
                       <input
                         type="checkbox"
                         checked={draft[key]}
+                        disabled={key === 'usdcArc' && !isArcTipEnabled()}
                         onChange={(e) => update({ [key]: e.target.checked } as Partial<typeof draft>)}
                       />
                       {methodLabel(method, t('crossChain'))}
+                      {key === 'usdcArc' && !isArcTipEnabled() && ` (${tb('arcInactive')})`}
                     </label>
                   ))}
                 </div>
@@ -526,6 +543,7 @@ export function HandleProfileBuilder({
           <StepCard step={2} icon={AtSign} title={t('stepHandleTitle')}>
             <HandleClaimPanel
               payload={publishPayload}
+              publishBlockedReason={inactivePublishedArc ? tb('arcPublishDisabled') : undefined}
               onEdit={onEditExisting}
               editingHandle={editingHandle}
               expectedUpdatedAt={activeBaseline?.updatedAt}
@@ -910,9 +928,12 @@ export function HandleProfileBuilder({
                     style={previewBg ? { background: previewBg } : undefined}
                   >
                     <HandleProfileView config={previewConfig} profile={profile} />
-                    {methods.length > 0 && (
+                    {draft.usdcArc && !isArcTipEnabled() && (
+                      <p className="mt-2 text-center text-xs text-amber-700">{tb('arcInactive')}</p>
+                    )}
+                    {capableMethods.length > 0 && (
                       <div className="mt-4 flex flex-col gap-2">
-                        {methods.length > 1 && (
+                        {capableMethods.length > 1 && (
                           <p
                             className={`text-center text-xs font-semibold ${
                               previewDark ? 'text-slate-300' : 'text-slate-500'
@@ -921,7 +942,7 @@ export function HandleProfileBuilder({
                             {t('selectCurrencyChain')}
                           </p>
                         )}
-                        {methods.map((m, i) => (
+                        {capableMethods.map((m, i) => (
                           <span
                             key={i}
                             className={`flex flex-col items-center rounded-lg border px-3 py-2 text-center text-sm font-semibold ${
@@ -930,7 +951,7 @@ export function HandleProfileBuilder({
                                 : 'border-slate-200 text-slate-600'
                             }`}
                           >
-                            {methods.length > 1 ? (
+                            {capableMethods.length > 1 ? (
                               methodMetaLabel(m, t('crossChain'))
                             ) : (
                               <>
