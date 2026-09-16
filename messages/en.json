@@ -1,4 +1,22 @@
 {
+  "CrossChainForwardPendingPanel": {
+    "title": "Check your previous Arc payment",
+    "scanning": "Checking saved payments.",
+    "unreadable": "The previous payment record cannot be read. Contact support before starting another payment.",
+    "unresolved": "Source evidence is unavailable. Recheck without sending again.",
+    "preConfirmation": "We will probe the source first. If a burn is needed, you must accept a fresh quote.",
+    "verified": "Rechecking the mint and completing the payment record.",
+    "waitingCircle": "Waiting for Circle. Destination discovery requires a nonce, which is not available yet.",
+    "waitingMint": "Checking the Arc mint. Rechecking sends no transactions.",
+    "delay": "Circle delay reason: {reason}",
+    "sourceTx": "Source transaction",
+    "destinationTx": "Candidate destination transaction",
+    "checking": "Checking",
+    "recheck": "Recheck",
+    "quote": "Forwarding fee {fee} USDC; total {total} USDC",
+    "consent": "Accept this quote and continue",
+    "help": "Still pending? Recovery runbook"
+  },
   "Meta": {
     "title": "OpenPay — JPYC Stablecoin Payments & Mobile Ordering for Stores (0–1% fees)",
     "description": "OpenPay is an open-source, non-custodial payment layer for the Japanese yen stablecoin JPYC and USDC. QR payments, mobile ordering, order relay, receipts, accounting, and AI-agent checkout — 0–1% fees (3% only for scheduled pre-orders), sales settle directly to your wallet.",
@@ -1571,6 +1589,7 @@
     "resolving": "Resolving name…"
   },
   "CrossChainHint": {
+    "progressForwardPending": "Checking the Arc mint",
     "balancesLoading": "Checking other-chain balances…",
     "bridgeGateway": "Circle Gateway",
     "bridgeCctp": "CCTP V2 Fast",
@@ -1620,6 +1639,9 @@
     "burnAdoptErrorUnavailable": "We could not check it right now. Please try again in a moment."
   },
   "CrossChainSourceChooser": {
+    "quoteUnavailable": "Quote unavailable",
+    "insufficientBalance": "Insufficient balance including forwarding fees",
+    "forwardTotal": "Total {total} USDC (includes the {fee} USDC forwarding fee collected by Circle)",
     "title": "Choose payment source chain",
     "subtitle": "Required: {required} USDC. Compare all chains where you have a balance plus their fees.",
     "balance": "Balance: {balance} USDC",

@@ -1,5 +1,7 @@
 'use client';
 
+import { crossChainAllowed } from '@/lib/url/shared';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { env } from '@/lib/env';
@@ -300,7 +302,7 @@ export function QrGenerator() {
       // crossChain は USDC のみ意味あり (JPYC は Gateway / CCTP V2 非対応)。
       // settings に false を持っていても token=jpyc なら URL に出ても無害だが、
       // 旧 QR との互換性を最大化するため token=usdc 時のみ出力する。
-      crossChain: settings.chain === 'arc' ? false : settings.token === 'usdc' ? settings.crossChain : undefined,
+      crossChain: settings.token === 'usdc' ? crossChainAllowed(settings.chain, settings.crossChain) : undefined,
       // convert 適用時のみ、期限と顧客への文脈表示 (元価格 + レート) を URL に乗せる。
       expiresAt: convert?.expiresAt,
       priceRefAmount: convert?.anchorAmount,
@@ -367,7 +369,7 @@ export function QrGenerator() {
       ? t('posterFixedAmount', { amount, symbol: deployment.displaySymbol })
       : t('posterOpenAmount', { symbol: deployment.displaySymbol });
   const tokenChainLabelText = `${deployment.displaySymbol} · ${
-    settings.token === 'usdc' && settings.chain !== 'arc' && settings.crossChain
+    settings.token === 'usdc' && crossChainAllowed(settings.chain) && settings.crossChain
       ? buyerUsdcChainNames().join(' / ')
       : chain.name
   }`;
@@ -534,7 +536,7 @@ export function QrGenerator() {
       ...s,
       chain: slug,
       payMode: isGaslessSupported(dep) ? s.payMode : 'standard',
-      crossChain: slug === 'arc' ? false : s.crossChain,
+      crossChain: crossChainAllowed(slug, s.crossChain),
     }));
   }
 
@@ -1018,7 +1020,7 @@ export function QrGenerator() {
               {/* Cross-chain 受信許可 toggle (USDC のみ意味あり、JPYC では disable)。
                   Default ON。Off にすると PaymentForm が代替経路 hint を出さない
                   (店主が「同一 chain で受け取りたい」と明示する用途)。 */}
-              {settings.token === 'usdc' && settings.chain !== 'arc' && (
+              {settings.token === 'usdc' && crossChainAllowed(settings.chain) && (
                 <AdvancedSection label={t('crossChainHeading')}>
                   <label className="flex cursor-pointer items-start gap-3">
                     <input

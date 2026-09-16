@@ -255,6 +255,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // 成功時の大型 overlay (PayPay 風) を 1 度ユーザが閉じたら以降は inline panel のみ
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [crossChainLocked, setCrossChainLocked] = useState(false);
+  const arcRecoveryScope = `${address}:${params.chain}:${params.to}:${amountStr}`;
+  const [arcScannedScope, setArcScannedScope] = useState('');
   const [crossChainResult, setCrossChainResult] = useState<ExecuteResult>();
   const directAttemptSnapshotRef = useRef<PaymentAttemptSnapshot | null>(null);
   const crossChainAttemptSnapshotRef =
@@ -467,7 +469,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
       : useRelay
         ? relay.isPending
         : gasless.isPending;
-  const flowPending = directFlowPending || crossChainLocked;
+  // Arc の mount scan 完了前に直接送金が開始される波及を断つ (dynamic child の読込中も)。
+  const arcRecoveryScanning = params.token === 'usdc' && params.chain === 'arc' && !!address && arcScannedScope !== arcRecoveryScope;
+  const flowPending = directFlowPending || crossChainLocked || arcRecoveryScanning;
   // relay は gas quote も smart account も不要なので readiness は常に満たす。
   const gasQuoteReady = isStandard || useRelay || activeQuote.data !== undefined;
   // 送金が確定 (または broadcast 済で確定しうる) 後の再送信を禁止。再送すると同一
@@ -770,7 +774,8 @@ function PaymentDetails({ params }: { params: PayParams }) {
   );
   const onCrossChainExecutingChange = useCallback((executing: boolean) => {
     setCrossChainLocked(executing);
-  }, []);
+    setArcScannedScope(arcRecoveryScope);
+  }, [arcRecoveryScope]);
   const onCrossChainSuccess = useCallback(
     (result: ExecuteResult) => {
       setCrossChainResult(result);

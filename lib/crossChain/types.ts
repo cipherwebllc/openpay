@@ -21,7 +21,10 @@ export const CIRCLE_DOMAIN_WORLDCHAIN = 14 as const;
 export const CIRCLE_DOMAIN_SEI = 16 as const;
 export const CIRCLE_DOMAIN_HYPEREVM = 19 as const;
 
+export const CIRCLE_DOMAIN_ARC = 26 as const;
+
 export type CircleDomain =
+  | typeof CIRCLE_DOMAIN_ARC
   | typeof CIRCLE_DOMAIN_ETHEREUM
   | typeof CIRCLE_DOMAIN_AVALANCHE
   | typeof CIRCLE_DOMAIN_OPTIMISM
@@ -143,6 +146,7 @@ export interface CrossChainTarget {
   chainId: number;
   isTestnet: boolean;
   role: CrossChainRole;
+  destinationMint?: 'circle-forward';
 }
 
 // 循環 import 回避のため balance / gateway / cctp 共通の fetch DI 型を集約。

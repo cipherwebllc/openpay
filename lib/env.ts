@@ -462,6 +462,11 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_USDC_ARC_TIP',
     process.env.NEXT_PUBLIC_ENABLE_USDC_ARC_TIP,
   ),
+  // Arc の cross-chain (Circle forwarding の受取先) は受取 flag とは別に管理する。既定 OFF。
+  enableUsdcArcCrossChain: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN',
+    process.env.NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN,
+  ),
   enableUsdcArc: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_USDC_ARC',
     process.env.NEXT_PUBLIC_ENABLE_USDC_ARC,
@@ -800,3 +805,7 @@ if (isMainnet) {
 }
 
 export const isArcTipEnabled = () => env.enableUsdcArc && env.enableUsdcArcTip;
+/** 新規 Arc forwarding の認可。回復と domain lookup は gate しない。 */
+export function isArcCrossChainEnabled(): boolean {
+  return env.enableUsdcArc && env.enableUsdcArcCrossChain;
+}

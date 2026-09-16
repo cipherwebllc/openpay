@@ -28,6 +28,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'CreatorStoreLicense',
     'CreatorStorePurchase',
     'CreatorStorefront',
+    'CrossChainForwardPendingPanel',
     'CrossChainHint',
     'CrossChainSourceChooser',
     'HandleProfile',
@@ -78,6 +79,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'CopyableField',
     'Create',
     'CreatorStoreSeller',
+    'CrossChainForwardPendingPanel',
     'CrossChainHint',
     'CrossChainSourceChooser',
     'HandleClaim',
@@ -286,6 +288,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
   'pay': [
     'ConnectButton',
     'CopyableField',
+    'CrossChainForwardPendingPanel',
     'CrossChainHint',
     'CrossChainSourceChooser',
     'InfoTooltip',
@@ -341,6 +344,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
   'tip/[address]': [
     'ConnectButton',
     'CopyableField',
+    'CrossChainForwardPendingPanel',
     'CrossChainHint',
     'CrossChainSourceChooser',
     'InfoTooltip',

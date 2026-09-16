@@ -68,6 +68,7 @@ export function CrossChainSourceChooser(props: CrossChainSourceChooserProps) {
               <button
                 type="button"
                 onClick={() => props.onSelect(option)}
+                disabled={!!option.disabledReason}
                 aria-pressed={isSelected}
                 className={`w-full rounded-lg border px-3 py-2.5 text-left transition ${
                   isSelected
@@ -139,7 +140,9 @@ function OptionRow({
           (バッジ「直接送金」+ 残高で十分)。実際の総額 (OpenPay 利用料 + gas) は
           PaymentForm のメイン内訳に出る。cross-chain のみ「ブリッジ手数料 + gas +
           ETA」を比較用に表示する。 */}
-      {option.kind !== 'direct' && (
+      {option.disabledReason && <p>{t(option.disabledReason === 'quote-unavailable' ? 'quoteUnavailable' : 'insufficientBalance')}</p>}
+      {option.acceptedQuote && <p>{t('forwardTotal', { total: formatUnits(BigInt(option.acceptedQuote.grossAtomic), displayDecimals), fee: feeStr })}</p>}
+      {option.kind !== 'direct' && option.disabledReason !== 'quote-unavailable' && (
         <div className="mt-0.5 text-[11px] text-slate-500">
           {t('feeBreakdownCrossChain', {
             fee: feeStr,

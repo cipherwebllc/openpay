@@ -349,10 +349,10 @@ describe('CROSS_CHAIN_DISABLED (incident kill switch)', () => {
 });
 
 
-it('Arc mainnet/testnet は Circle source/target domain に登録しない', async () => {
+it('Arc domain lookup は flag 非依存、target は flag OFF で非表示', async () => {
   const m = await import('@/lib/crossChain/config');
   for (const id of [5042, 5042002]) {
-    expect(m.domainForChainId(id)).toBeUndefined();
+    expect(m.domainForChainId(id)).toBe(26);
     expect(m.CROSS_CHAIN_TARGETS.some((t) => t.chainId === id)).toBe(false);
   }
 });

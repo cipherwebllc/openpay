@@ -154,8 +154,32 @@ buyer が「自分の chain の USDC」で支払える source の範囲を広げ
 | Arc mainnet | 5042 | https://rpc.mainnet.arc.io | https://explorer.arc.io | `0x3600000000000000000000000000000000000000` | 6 |
 | Arc testnet | 5042002 | https://rpc.testnet.arc.io | https://explorer.testnet.arc.io | `0x3600000000000000000000000000000000000000` | 6 |
 
-`NEXT_PUBLIC_ENABLE_USDC_ARC` defaults OFF. Standard payments only: customers pay network fees directly in USDC; OpenPay collects nothing. Native gas USDC uses **18 decimals**, while the ERC-20 interface uses **6 decimals**. Arc is excluded from both cross-chain source and target lists; no Circle domain is registered in OpenPay. No paymaster is used, including on testnet.
+`NEXT_PUBLIC_ENABLE_USDC_ARC` defaults OFF. Standard payments only: customers pay network fees directly in USDC; OpenPay collects nothing. Native gas USDC uses **18 decimals**, while the ERC-20 interface uses **6 decimals**. Arc is permanently excluded from cross-chain sources. Circle domain 26 is always registered for lookup/recovery; merchant-only destination forwarding requires the separate `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN` flag as well. No paymaster is used, including on testnet.
 
 **Measured 2026-09-17 (testnet smoke, tx `0x0756edde…65aa2e`)**: the ERC-20 USDC balance at `0x3600…` and the native gas balance are the *same funds* (20 → 19.499025 after a 0.5 USDC transfer + 0.000975 USDC gas at 20 gwei / 48,734 gas). The 6-decimal ERC-20 view and the 18-decimal native view read one balance; a customer whose USDC balance equals the price exactly will fail on gas.
 
 Sources: [Arc connection parameters](https://docs.arc.io/arc/references/connect-to-arc), [Arc contracts](https://docs.arc.io/arc/references/contract-addresses), [Circle USDC contracts](https://developers.circle.com/stablecoins/usdc-contract-addresses). Plan §0 records RPC measurements (`eth_chainId`, `symbol()`, `decimals()`) on 2026-09-16; decimal mainnet ID 5042 is authoritative over the documented hex typo.
+
+## Arc destination forwarding (2026-09-17)
+
+Arc chain IDs 5042 / 5042002 map permanently to Circle domain 26. It remains
+excluded from buyer sources. New merchant-only destination routes require both
+Arc flags. CCTP V2 uses the existing deterministic TokenMessengerV2 and
+MessageTransmitterV2 addresses (no new contract address); Gateway is prohibited.
+Arc USDC is `0x3600000000000000000000000000000000000000`.
+
+Pinned supervisor captures live in `tests/fixtures/cctp/arc-forwarding/`.
+The forwarding receipts at blocks 62433535, 62430668 and 62427408 pin event
+signatures, indexed positions, mint-before-message ordering, and BurnMessageV2's
+228-byte fixed prefix. These real transfers use an extended forwarding hook;
+the app uses the reviewed fixed 32-byte hook. The non-forwarding receipts pin
+contrast cases. Iris `forwardTxHash ?? destinationMintTxHash` is only a candidate;
+`forwardState` / `delayReason` are informational, never settlement evidence.
+Fees are minimumFee in bps and forwardFee in six-decimal USDC atomic units.
+For 1,000,000 atomic, Circle's captured Fast requirement (forwardFee.high + protocol
+fee) is mainnet 98,272 and sandbox 20,632; the buyer-facing `maxFee` adds a 10%
+headroom on forwardFee.high (mainnet 108,096 / sandbox 22,683, `FORWARD_FEE_HEADROOM_BPS`).
+**Measured 2026-09-17 (OpenPay E2E, Base Sepolia → Arc testnet)**: Circle charged
+`feeExecuted = maxFee` in full (`MintAndWithdraw.feeCollected` equalled our maxFee), so
+maxFee behaves as the actual forwarding fee, not an upper bound. The UI therefore labels it
+as the forwarding fee, and the merchant still receives exactly the invoice (gross − feeExecuted).

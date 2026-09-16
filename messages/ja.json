@@ -1,4 +1,22 @@
 {
+  "CrossChainForwardPendingPanel": {
+    "title": "前回の Arc 支払いを確認",
+    "scanning": "保存済みの支払いを確認しています。",
+    "unreadable": "前回の支払い記録を読めません。別の支払いを開始せず、サポートへお問い合わせください。",
+    "unresolved": "送信元の証拠を確認できません。再送金せず、再確認してください。",
+    "preConfirmation": "送信元を先に確認します。送金が必要な場合は、新しい見積への同意を求めます。",
+    "verified": "着金を再確認し、支払い記録を完了します。",
+    "waitingCircle": "Circle の応答待ちです。nonce 未取得のため宛先探索はまだできません。",
+    "waitingMint": "Arc 上の着金を確認中です。再確認では送金しません。",
+    "delay": "Circle の遅延理由: {reason}",
+    "sourceTx": "送信元の取引",
+    "destinationTx": "宛先の候補取引",
+    "checking": "確認中",
+    "recheck": "再確認",
+    "quote": "転送手数料 {fee} USDC・支払総額 {total} USDC",
+    "consent": "この見積に同意して続ける",
+    "help": "解決しない場合（運用手順）"
+  },
   "Meta": {
     "title": "OpenPay｜JPYC店舗決済・モバイルオーダー（手数料0〜1%）",
     "description": "OpenPayは、日本円ステーブルコインJPYC・USDC対応の店舗向け決済インフラ。QR決済からモバイルオーダー・受注・電子レシート・会計、AIエージェント決済まで手数料0〜1%（時間指定の事前注文のみ3%）。売上はウォレットへ直接着金（ノンカストディ）。導入費0円・契約不要・オープンソース。",
@@ -1571,6 +1589,7 @@
     "resolving": "名前を解決しています…"
   },
   "CrossChainHint": {
+    "progressForwardPending": "Arc の着金を確認中",
     "balancesLoading": "他チェーン残高を確認中…",
     "bridgeGateway": "Circle Gateway",
     "bridgeCctp": "CCTP V2 Fast",
@@ -1620,6 +1639,9 @@
     "burnAdoptErrorUnavailable": "いま確認できませんでした。時間をおいて、もう一度お試しください。"
   },
   "CrossChainSourceChooser": {
+    "quoteUnavailable": "見積を取得できません",
+    "insufficientBalance": "手数料を含む残高が不足しています",
+    "forwardTotal": "支払総額 {total} USDC（転送手数料 {fee} USDC を含む・Circle が徴収）",
     "title": "支払元チェーンを選ぶ",
     "subtitle": "必要額 {required} USDC。残高がある全チェーンと、それぞれの手数料の概算を比較できます。",
     "balance": "残高: {balance} USDC",

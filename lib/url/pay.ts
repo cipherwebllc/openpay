@@ -219,7 +219,7 @@ export function buildPayPath(params: PayParams): string {
   }
   // default (undefined または true) は URL に出さず旧 QR と完全互換。
   // false (= 店主が cross-chain 拒否) を明示するときだけ出力。
-  if (params.chain === 'arc' || params.crossChain === false) {
+  if (!crossChainAllowed(params.chain ?? 'polygon', params.crossChain !== false)) {
     sp.set('crossChain', 'false');
   }
   // 動的 QR 付帯情報 (在るときだけ出力・既定 URL は不変)。

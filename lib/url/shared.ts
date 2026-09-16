@@ -1,3 +1,4 @@
+import { isArcCrossChainEnabled } from '../env';
 // /pay・/tip・/checkout の URL builder/parser で共有する基盤ヘルパ群。
 // ここに置くのは {pay, tip, checkout} の 2 つ以上から使われる symbol だけ
 // (単一セクション固有のものは各セクションモジュールに置く)。
@@ -57,9 +58,9 @@ export function resolveChainSlugParam(
   };
 }
 
-// Arc 受取を cross-chain execute へ流さない。URL と保存設定で共用。
+// Arc の新規 cross-chain は両 flag が有効な場合のみ。URL と保存設定で共用。
 export function crossChainAllowed(chain: ChainSlug, requested = true): boolean {
-  return chain !== 'arc' && requested;
+  return (chain !== 'arc' || isArcCrossChainEnabled()) && requested;
 }
 
 // gas パラメタ解決: merchant のみ明示認識、それ以外 (customer / 不明値 / 未指定 / 旧 fee=)
