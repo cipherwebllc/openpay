@@ -33,17 +33,34 @@ const CHAIN_LABEL: Record<ChainSlug, string> = {
   arc: 'Arc',
 };
 
+export interface MethodLabelOptions {
+  /** 着金チェーン名を併記する。同じトークンの受取方法が複数並んで区別が要るときだけ true。 */
+  withChain?: boolean;
+}
+
+/** チェーン名を隠す表記 (USDC cross-chain) の受取方法が 2 つ以上あり、併記しないと
+ *  同じラベルが並ぶか。(#511 以降ビルダーは USDC を 1 チェーンに限定するので通常は false。
+ *  旧レコードで Base と Arc を両方公開したままの場合だけ true になる。) */
+export function needsChainDisambiguation(methods: readonly HandleReceiveMethod[]): boolean {
+  return methods.filter((m) => m.token === 'usdc' && m.crossChain).length > 1;
+}
+
 function methodParts(
   method: HandleReceiveMethod,
   crossChainText: string,
+  opts?: MethodLabelOptions,
 ): { token: string; chain: string } {
   const token = displaySymbolFor(method.token);
-  // USDC の cross-chain は着金チェーン名を併記する (Base と Arc の両方を公開すると
-  // 「USDC (cross-chain)」が 2 つ並んで区別できないため・2026-09-17 user 指摘)。
   const chainName = CHAIN_LABEL[method.chain] ?? method.chain;
+  // USDC の cross-chain は送る側に着金チェーン名を見せない (どのチェーンの USDC からでも
+  // 払えるのに「Base の USDC が要る」と誤読されるため・2026-09-17 user 裁定)。着金先は
+  // 受け取る側がビルダーで選んでおり、送る側はフォーム内の案内で足りる。
+  // 同じトークンが複数並ぶとき (旧レコードの Base+Arc 両方公開) だけ withChain で併記する。
   const chain =
     method.token === 'usdc' && method.crossChain
-      ? `${chainName} · ${crossChainText}`
+      ? opts?.withChain
+        ? `${chainName} · ${crossChainText}`
+        : crossChainText
       : chainName;
   return { token, chain };
 }
@@ -51,16 +68,18 @@ function methodParts(
 export function methodLabel(
   method: HandleReceiveMethod,
   crossChainText: string,
+  opts?: MethodLabelOptions,
 ): string {
-  const { token, chain } = methodParts(method, crossChainText);
+  const { token, chain } = methodParts(method, crossChainText, opts);
   return `${token} (${chain})`;
 }
 
 export function methodMetaLabel(
   method: HandleReceiveMethod,
   crossChainText: string,
+  opts?: MethodLabelOptions,
 ): string {
-  const { token, chain } = methodParts(method, crossChainText);
+  const { token, chain } = methodParts(method, crossChainText, opts);
   return `${token} · ${chain}`;
 }
 
@@ -131,6 +150,7 @@ export function ReceiveMethodPicker({
       ? config.color
       : DEFAULT_ACCENT;
   const dark = resolveHandleTheme(theme) === 'night';
+  const labelWithChain = needsChainDisambiguation(methods);
   const multipleMethods = methods.length > 1;
 
   return (
@@ -174,7 +194,7 @@ export function ReceiveMethodPicker({
       )}
       <div className="mt-4 flex flex-col gap-2.5">
         {methods.map((m, i) => {
-          const label = methodMetaLabel(m, t('crossChain'));
+          const label = methodMetaLabel(m, t('crossChain'), { withChain: labelWithChain });
           const isActive = i === selected;
 
           return (

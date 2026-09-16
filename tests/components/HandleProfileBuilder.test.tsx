@@ -324,7 +324,7 @@ describe('HandleProfileBuilder', () => {
     // USDC はチェックボックスではなくラジオ (Base か Arc のどちらか 1 つ・2026-09-17)
     expect(screen.queryByRole('checkbox', { name: /USDC/ })).not.toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'USDC は受け取らない' })).toBeChecked();
-    expect(screen.getByRole('radio', { name: 'USDC (Base · cross-chain)' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: 'USDC (Base)' })).not.toBeChecked();
     // Arc tip flag OFF (既定) → Arc の選択肢は出ない (inert)
     expect(screen.queryByRole('radio', { name: /USDC \(Arc/ })).not.toBeInTheDocument();
     expect(screen.getByTestId('claim')).toBeInTheDocument();
@@ -335,8 +335,7 @@ describe('HandleProfileBuilder', () => {
     try {
       renderWithIntl(<HandleProfileBuilder />);
       const none = screen.getByRole('radio', { name: 'USDC は受け取らない' });
-      const base = screen.getByRole('radio', { name: 'USDC (Base · cross-chain)' });
-      // cross-chain flag は mock で OFF → Arc は cross-chain なしの表記
+      const base = screen.getByRole('radio', { name: 'USDC (Base)' });
       const arc = screen.getByRole('radio', { name: 'USDC (Arc)' });
       expect(none).toBeChecked();
       fireEvent.click(base);

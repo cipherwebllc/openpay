@@ -18,7 +18,6 @@ import { useAccount } from 'wagmi';
 import { getAddress, isAddress, type Address } from 'viem';
 import { env, isArcTipEnabled } from '@/lib/env';
 import { resolveTipCapability } from '@/lib/url/tip';
-import { crossChainAllowed } from '@/lib/url/shared';
 import { AddressInput } from '@/components/AddressInput';
 import { HandleClaimPanel } from '@/components/HandleClaimPanel';
 import { handleFontClass } from '@/components/handleFonts';
@@ -28,7 +27,7 @@ import { LinkQrModal } from '@/components/LinkQrModal';
 import { ReorderableRow } from '@/components/ReorderableRow';
 import { SocialIcon } from '@/components/SocialIconLinks';
 import { StepCard } from '@/components/StepCard';
-import { methodLabel, methodMetaLabel } from '@/components/ReceiveMethodPicker';
+import { methodLabel, methodMetaLabel, needsChainDisambiguation } from '@/components/ReceiveMethodPicker';
 import {
   useHandleProfileDraft,
   DEFAULT_PROFILE_DRAFT,
@@ -232,10 +231,10 @@ export function HandleProfileBuilder({
   const showArcChoice = isArcTipEnabled() || draft.usdcArc;
   const usdcChoices: Array<['none' | 'base' | 'arc', string]> = [
     ['none', tb('usdcNone')],
-    ['base', methodLabel({ token: 'usdc', chain: 'base', crossChain: true }, t('crossChain'))],
-    ...(showArcChoice
-      ? [['arc', methodLabel({ token: 'usdc', chain: 'arc', crossChain: crossChainAllowed('arc') }, t('crossChain'))] as ['arc', string]]
-      : []),
+    // ビルダーの選択肢はチェーン名で区別する (受け取る側が選ぶ場所)。cross-chain 可否は
+    // 公開時に buildPublishMethods が付け、送る側のボタンは「USDC · cross-chain」で統一。
+    ['base', methodLabel({ token: 'usdc', chain: 'base' }, t('crossChain'))],
+    ...(showArcChoice ? [['arc', methodLabel({ token: 'usdc', chain: 'arc' }, t('crossChain'))] as ['arc', string]] : []),
   ];
 
   // 受取先: 生 0x アドレスは**入力値を最優先**で採用する。AddressInput は ENS 名以外で
@@ -280,6 +279,7 @@ export function HandleProfileBuilder({
   const inactivePublishedArc = !isArcTipEnabled() &&
     !!activeBaseline?.payload.config.methods.some((m) => m.chain === 'arc');
   const capableMethods = methods.filter((m) => resolveTipCapability(m.token, m.chain).ok);
+  const previewWithChain = needsChainDisambiguation(capableMethods);
 
   if (!env.enableHandles) return null;
 
@@ -979,7 +979,7 @@ export function HandleProfileBuilder({
                             }`}
                           >
                             {capableMethods.length > 1 ? (
-                              methodMetaLabel(m, t('crossChain'))
+                              methodMetaLabel(m, t('crossChain'), { withChain: previewWithChain })
                             ) : (
                               <>
                                 <span>♡ {t('supportHeading')}</span>
@@ -988,7 +988,7 @@ export function HandleProfileBuilder({
                                     previewDark ? 'text-slate-300' : 'text-slate-500'
                                   }`}
                                 >
-                                  {methodMetaLabel(m, t('crossChain'))}
+                                  {methodMetaLabel(m, t('crossChain'), { withChain: previewWithChain })}
                                 </span>
                               </>
                             )}

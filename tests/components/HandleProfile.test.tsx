@@ -5,6 +5,7 @@ import { HandleProfileView } from '@/components/HandleProfile';
 import {
   ReceiveMethodPicker,
   methodLabel,
+  needsChainDisambiguation,
 } from '@/components/ReceiveMethodPicker';
 import type { HandleTipConfig } from '@/lib/handle';
 
@@ -45,12 +46,23 @@ describe('methodLabel', () => {
     );
     expect(
       methodLabel({ token: 'usdc', chain: 'base', crossChain: true }, 'cross-chain'),
-    ).toBe('USDC (Base · cross-chain)');
-    // Base と Arc を区別する (両方公開時に同名ボタンが並ばない)
+    ).toBe('USDC (cross-chain)');
+    // 送る側にはチェーン名を見せない (Arc 宛てでも同じ表記)
     expect(
       methodLabel({ token: 'usdc', chain: 'arc', crossChain: true }, 'cross-chain'),
-    ).toBe('USDC (Arc · cross-chain)');
+    ).toBe('USDC (cross-chain)');
     expect(methodLabel({ token: 'usdc', chain: 'arc' }, 'cross-chain')).toBe('USDC (Arc)');
+    // 同じトークンが複数並ぶときだけ withChain で併記して区別する
+    expect(
+      methodLabel({ token: 'usdc', chain: 'arc', crossChain: true }, 'cross-chain', { withChain: true }),
+    ).toBe('USDC (Arc · cross-chain)');
+    // JPYC の複数チェーンは元からチェーン名付きなので対象外・USDC cross-chain が 2 つのときだけ
+    expect(needsChainDisambiguation([
+      { token: 'jpyc', chain: 'polygon' }, { token: 'jpyc', chain: 'kaia' }, { token: 'usdc', chain: 'base', crossChain: true },
+    ])).toBe(false);
+    expect(needsChainDisambiguation([
+      { token: 'usdc', chain: 'base', crossChain: true }, { token: 'usdc', chain: 'arc', crossChain: true },
+    ])).toBe(true);
   });
 });
 
@@ -668,6 +680,22 @@ describe('HandleProfileView', () => {
 });
 
 describe('ReceiveMethodPicker', () => {
+  it('旧レコードで USDC を Base と Arc の両方公開 → ボタンにチェーン名を併記して区別する', () => {
+    renderWithIntl(
+      <ReceiveMethodPicker
+        config={{
+          ...multiConfig,
+          methods: [
+            { token: 'usdc', chain: 'base', crossChain: true },
+            { token: 'usdc', chain: 'arc', crossChain: true },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'USDC · Base · cross-chain' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'USDC · Arc · cross-chain' })).toBeInTheDocument();
+  });
+
   // --- 初期状態: 全て折りたたみ ---
 
   it('renders all method buttons but no TipForm initially (multiple methods)', () => {
@@ -680,7 +708,7 @@ describe('ReceiveMethodPicker', () => {
       screen.getByRole('button', { name: 'JPYC · Kaia' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'USDC · Base · cross-chain' }),
+      screen.getByRole('button', { name: 'USDC · cross-chain' }),
     ).toBeInTheDocument();
     expect(screen.getByText('通貨・チェーンを選ぶ')).toBeInTheDocument();
     // 初期状態では TipForm は描画しない
@@ -699,10 +727,10 @@ describe('ReceiveMethodPicker', () => {
     };
     renderWithIntl(<ReceiveMethodPicker config={single} />);
     expect(
-      screen.getByRole('button', { name: '♡ 応援する USDC · Base · cross-chain' }),
+      screen.getByRole('button', { name: '♡ 応援する USDC · cross-chain' }),
     ).toBeInTheDocument();
     expect(screen.getByText('♡ 応援する')).toBeInTheDocument();
-    expect(screen.getByText('USDC · Base · cross-chain')).toBeInTheDocument();
+    expect(screen.getByText('USDC · cross-chain')).toBeInTheDocument();
     expect(screen.queryByText('通貨・チェーンを選ぶ')).not.toBeInTheDocument();
     expect(screen.queryByTestId('tipform')).not.toBeInTheDocument();
   });
@@ -729,7 +757,7 @@ describe('ReceiveMethodPicker', () => {
       methods: [{ token: 'usdc', chain: 'base', crossChain: true }],
     };
     renderWithIntl(<ReceiveMethodPicker config={single} />);
-    fireEvent.click(screen.getByRole('button', { name: '♡ 応援する USDC · Base · cross-chain' }));
+    fireEvent.click(screen.getByRole('button', { name: '♡ 応援する USDC · cross-chain' }));
     expect(screen.getByTestId('tipform')).toHaveTextContent('usdc:base');
   });
 
