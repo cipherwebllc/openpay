@@ -2040,6 +2040,8 @@ block 62454204・店舗 1 USDC・feeCollected 0.023512) を検証 → 成功 →
    A Circle/rescue race may revert the rescue; re-run read-only discovery.
 6. Buyer selects Recheck to discover/adopt the verified mint and finish accounting.
 
+**点灯記録**: 2026-09-17 user が本番 Vercel に `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN=1` を設定して redeploy。開示同期は同日の点灯 PR (LP faqA2 / QR・pay の Arc 文言 / Terms 第 5 条 (3)・特商法 / llms.txt / お知らせ)。
+
 **Kill switch:** turn `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN` OFF and redeploy
 (the public env is compiled into the client). This disables new quotes/routes,
 not recovery. Do not delete resume records or instruct buyers to start another

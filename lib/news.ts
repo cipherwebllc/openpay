@@ -34,6 +34,17 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'usdc-arc-crosschain-2026-09-17',
+    date: '2026-09-17',
+    category: 'feature',
+    title: { ja: 'Arc 宛てに他チェーンの USDC から支払えるようになりました', en: 'Pay into Arc from USDC on other chains' },
+    body: {
+      ja: 'Arc を受取チェーンに選んだお店へ、Base など他チェーンの USDC からも支払えます。買い手が支払元チェーンを選ぶと Circle が Arc へ転送し、転送手数料 (Circle が徴収・ガス連動で変動) は買い手が上乗せ負担、OpenPay の徴収はありません。お店には表示額がそのまま届きます。Arc から他チェーンへの支払いは非対応です。',
+      en: 'Shops that receive on Arc can now be paid from USDC on other chains such as Base. The buyer picks the source chain, Circle forwards the funds to Arc, and the buyer pays Circle\'s forwarding fee (variable, gas-linked) on top; OpenPay collects nothing and the shop receives the displayed amount. Paying out of Arc to other chains is not supported.',
+    },
+    link: { href: '/create', labelJa: '受取 QR を作る', labelEn: 'Build a receiving QR' },
+  },
+  {
     id: 'usdc-arc-tip-2026-09-17',
     date: '2026-09-17',
     category: 'feature',
