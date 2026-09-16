@@ -34,6 +34,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'usdc-arc-2026-09-17',
+    date: '2026-09-17',
+    category: 'feature',
+    title: {
+      ja: 'USDC の受取チェーンに Arc を追加しました（通常決済のみ・ガスも USDC）',
+      en: 'Arc added as a USDC receiving chain (standard payments only, gas paid in USDC)',
+    },
+    body: {
+      ja: 'Circle のブロックチェーン「Arc」で USDC を受け取れるようになりました。Arc ではネットワーク手数料 (ガス) も USDC で支払われるため、お客様は POL や ETH などの別トークンを用意する必要がありません。対応は通常決済のみで、ガスレス決済と別チェーンからのクロスチェーン支払いは対象外です。受取チェーンは QR 作成時に選べます。',
+      en: 'You can now receive USDC on Arc, Circle\'s blockchain. On Arc, network fees (gas) are also paid in USDC, so customers do not need a separate token such as POL or ETH. Arc supports standard payments only; gasless and cross-chain payments from other chains are not available on Arc. Pick the receiving chain when you build a QR.',
+    },
+    link: { href: '/create', labelJa: '受取 QR を作る', labelEn: 'Build a receiving QR' },
+  },
+  {
     id: 'license-nft-protected-delivery-2026-09-14',
     date: '2026-09-14',
     category: 'feature',

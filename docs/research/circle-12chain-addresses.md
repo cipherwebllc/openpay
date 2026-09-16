@@ -156,4 +156,6 @@ buyer が「自分の chain の USDC」で支払える source の範囲を広げ
 
 `NEXT_PUBLIC_ENABLE_USDC_ARC` defaults OFF. Standard payments only: customers pay network fees directly in USDC; OpenPay collects nothing. Native gas USDC uses **18 decimals**, while the ERC-20 interface uses **6 decimals**. Arc is excluded from both cross-chain source and target lists; no Circle domain is registered in OpenPay. No paymaster is used, including on testnet.
 
+**Measured 2026-09-17 (testnet smoke, tx `0x0756edde…65aa2e`)**: the ERC-20 USDC balance at `0x3600…` and the native gas balance are the *same funds* (20 → 19.499025 after a 0.5 USDC transfer + 0.000975 USDC gas at 20 gwei / 48,734 gas). The 6-decimal ERC-20 view and the 18-decimal native view read one balance; a customer whose USDC balance equals the price exactly will fail on gas.
+
 Sources: [Arc connection parameters](https://docs.arc.io/arc/references/connect-to-arc), [Arc contracts](https://docs.arc.io/arc/references/contract-addresses), [Circle USDC contracts](https://developers.circle.com/stablecoins/usdc-contract-addresses). Plan §0 records RPC measurements (`eth_chainId`, `symbol()`, `decimals()`) on 2026-09-16; decimal mainnet ID 5042 is authoritative over the documented hex typo.

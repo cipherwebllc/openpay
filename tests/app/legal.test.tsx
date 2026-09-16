@@ -1455,3 +1455,14 @@ describe('Legal pages', () => {
   });
 });
 
+// Arc 点灯 (NEXT_PUBLIC_ENABLE_USDC_ARC=1) と同一リリースで入れた開示。Terms 第 5 条 (USDC 決済の
+// 利用料 0%) と特商法「追加費用」欄に「Arc は通常決済のみ・顧客が USDC でネットワーク手数料を直接負担・
+// 当社徴収なし」を明記する (paymasterMode='unavailable' の法務 prose 対応)。
+it('Arc の USDC 決済 (通常決済のみ・顧客が USDC でネットワーク手数料を直接負担) を Terms 第 5 条と特商法に開示', async () => {
+  const ja = (await import('@/messages/ja.json')).default;
+  const en = (await import('@/messages/en.json')).default;
+  expect(ja.Terms.article5.body).toContain('Arc チェーンの USDC 決済は通常決済のみで、顧客が USDC でネットワーク手数料を直接負担し、当社の徴収はありません');
+  expect(ja.Tokutei.rows.additionalFees.value).toContain('Arc チェーンの USDC 決済は通常決済のみ');
+  expect(en.Terms.article5.body).toContain('USDC payments on the Arc chain are standard payments only: customers pay network fees directly in USDC, and the Company collects nothing');
+  expect(en.Tokutei.rows.additionalFees.value).toContain('USDC payments on the Arc chain are standard payments only');
+});
