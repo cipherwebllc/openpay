@@ -49,10 +49,15 @@ const verifyArgs = (logs = destinationLogs()) => ({ destClient: { getTransaction
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); localStorage.clear(); });
 
 describe('Arc captured fixtures', () => {
-  it.each([[mainnetFees[0], 98272n], [sandboxFees[0], 20632n]] as const)('pins integer fee units/rounding', (fee, cap) => {
+  // required = forwardFee.high + protocolFee (Circle の現在要求)。maxFee (買い手が払う転送手数料) は high に
+  // 10% headroom (切り上げ) を乗せる: mainnet 98239 → 108063 (+33 = 108096)、sandbox 20502 → 22553 (+130 = 22683)。
+  it.each([[mainnetFees[0], 98272n, 108096n], [sandboxFees[0], 20632n, 22683n]] as const)('pins integer fee units/rounding', (fee, required, cap) => {
+    expect(cctp.computeForwardRequiredFee(1000000n, fee)).toBe(required);
     expect(cctp.computeForwardMaxFee(1000000n, fee)).toBe(cap);
-    expect(cctp.computeForwardMaxFee(1n, fee)).toBe(BigInt(fee.forwardFee.high) + 1n);
-    expect(cctp.computeForwardMaxFee(1000000n, { ...fee, minimumFee: 0.325, forwardFee: { low: 0, med: 0, high: 24862 } })).toBe(24895n);
+    expect(cctp.computeForwardRequiredFee(1n, fee)).toBe(BigInt(fee.forwardFee.high) + 1n);
+    expect(cctp.computeForwardMaxFee(1n, fee)).toBe(cctp.forwardFeeCapAtomic(fee) + 1n);
+    expect(cctp.computeForwardRequiredFee(1000000n, { ...fee, minimumFee: 0.325, forwardFee: { low: 0, med: 0, high: 24862 } })).toBe(24895n);
+    expect(cctp.computeForwardMaxFee(1000000n, { ...fee, minimumFee: 0.325, forwardFee: { low: 0, med: 0, high: 24862 } })).toBe(27382n);
   });
   it('quote is frozen and JSON-safe; encoder owns hook and gross', () => {
     const q = quote(); expect(Object.isFrozen(q)).toBe(true); expect(JSON.parse(JSON.stringify(q))).toEqual(q);
@@ -107,7 +112,7 @@ describe('Arc captured fixtures', () => {
 
 describe('destination binding', () => {
   it('verifies net and actual collected fee', async () => {
-    expect(await cctp.verifyForwardMint(verifyArgs())).toEqual({ ok: true, verifiedNetAtomic: 1000632n, feeCollectedAtomic: 20000n, blockNumber: 100n });
+    expect(await cctp.verifyForwardMint(verifyArgs())).toEqual({ ok: true, verifiedNetAtomic: 1002683n, feeCollectedAtomic: 20000n, blockNumber: 100n });
   });
   it.each(['mint-emitter', 'message-emitter', 'nonce', 'source-domain', 'recipient', 'burnToken', 'maxFee', 'gross', 'mintToken', 'minAmount', 'sender', 'reverted', 'missing-mint'])('rejects %s', async (kind) => {
     const logs = destinationLogs(); const a = verifyArgs(logs);
@@ -149,6 +154,8 @@ function harness(resume?: CctpResumeState) {
   const q = quote();
   const source = { getChainId: async () => 84532, getBlockNumber: vi.fn().mockResolvedValue(100n),
     getTransactionCount: vi.fn().mockResolvedValue(1), getCode: vi.fn().mockResolvedValue('0x1234'),
+    // approve 反映待ち (allowance ≥ gross) を即時に満たす。
+    readContract: vi.fn().mockResolvedValue(10n ** 30n),
     getTransactionReceipt: vi.fn().mockResolvedValue(receipt([sourceLog(q)])),
     waitForTransactionReceipt: vi.fn().mockResolvedValue(receipt([sourceLog(q)])), getLogs: vi.fn().mockResolvedValue([]) };
   const dest = { getBlockNumber: vi.fn().mockResolvedValue(100n), getLogs: vi.fn().mockResolvedValue([]),
@@ -185,12 +192,12 @@ describe('forward executor', () => {
   it('gross approve/burn, atomic quote+marker, no destination switch/mint, verified accounting', async () => {
     const h = harness(); const result = await executeCctpTransfer(h.args);
     expect(result.mintTxHash).toBe(mintHash);
-    expect(h.args.commitBurnIntent).toHaveBeenCalledWith(expect.objectContaining({ amount: '1020632' }), 'merchant', expect.objectContaining({ forward: expect.objectContaining({ acceptedQuote: quote(), state: 'intent' }) }));
-    expect(h.wallet.writeContract).toHaveBeenCalledWith(expect.objectContaining({ args: [cctp.CCTP_V2_TOKEN_MESSENGER_ADDRESS, 1020632n] }));
+    expect(h.args.commitBurnIntent).toHaveBeenCalledWith(expect.objectContaining({ amount: '1022683' }), 'merchant', expect.objectContaining({ forward: expect.objectContaining({ acceptedQuote: quote(), state: 'intent' }) }));
+    expect(h.wallet.writeContract).toHaveBeenCalledWith(expect.objectContaining({ args: [cctp.CCTP_V2_TOKEN_MESSENGER_ADDRESS, 1022683n] }));
     expect(h.wallet.sendTransaction).toHaveBeenCalledTimes(1); expect(h.args.switchChainAsync).not.toHaveBeenCalled();
     expect(h.states.map((s) => s.forward?.state)).toEqual(expect.arrayContaining(['intent', 'broadcast', 'source-confirmed', 'awaiting-forward', 'forward-observed', 'verified']));
     expect(h.states.at(-1)?.forward).toMatchObject({ nonce, acceptedQuote: quote(), sourceEvidence: { txHash: burnHash } });
-    expect(h.args.onMerchantMint).toHaveBeenCalledWith(expect.objectContaining({ forward: { grossAtomic: '1020632', maxFeeAtomic: '20632', verifiedNetAtomic: '1000632', feeCollectedAtomic: '20000' } }));
+    expect(h.args.onMerchantMint).toHaveBeenCalledWith(expect.objectContaining({ forward: { grossAtomic: '1022683', maxFeeAtomic: '22683', verifiedNetAtomic: '1002683', feeCollectedAtomic: '20000' } }));
   });
   it('flag OFF rejects a fresh transfer before any transaction', async () => {
     const h = harness(); vi.spyOn(env, 'enableUsdcArcCrossChain', 'get').mockReturnValue(false);

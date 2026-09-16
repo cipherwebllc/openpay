@@ -1966,7 +1966,8 @@ Arc (5042 / 5042002, Circle domain 26) is a destination only. CCTP V2
 `depositForBurnWithHook` uses the fixed `cctp-forward` hook, permissionless
 `destinationCaller=0`, and Circle submits the destination mint. No Gateway,
 no automatic routing, no OpenPay fee leg. The chooser presents a five-minute,
-immutable quote with a buyer-paid forwarding fee cap and gross payment amount.
+immutable quote with the buyer-paid Circle forwarding fee (measured 2026-09-17: Circle
+collects the full `maxFee`, so it is shown as the fee, not a cap) and the gross payment amount.
 Both `NEXT_PUBLIC_ENABLE_USDC_ARC` and `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN`
 are required for new routes; the latter defaults OFF. Domain lookup and recovery
 remain available with flags OFF. Arc tips remain excluded.
@@ -1982,7 +1983,7 @@ blocks new payments. `verified` records are replayed for accounting before clean
 - Human money-path review, including relayer key operations and disclosure draft.
 - Base Sepolia → Arc testnet E2E, using
   `/pay?to=<merchant>&token=usdc&chain=arc&amount=1&mode=standard&crossChain=true`.
-  Explicitly select Base Sepolia CCTP, review total and fee cap, approve + burn.
+  Explicitly select Base Sepolia CCTP, review the total and the forwarding fee, approve + burn.
   Confirm there is no destination wallet switch, and verify Arc receipt, success
   UI, history and `bridgeFeeMax` equal to the actual submitted cap.
 - Reload immediately after burn; recovery must appear without balances/options.
@@ -1994,6 +1995,25 @@ blocks new payments. `verified` records are replayed for accounting before clean
   pre-confirmation probe + explicit reconsent, and verified-before-cleanup reload.
 - Run the build separately with flags OFF and ON. No build or funded E2E was run
   during this offline implementation.
+
+**実施記録 (2026-09-17・Fable・Base Sepolia → Arc testnet)**: 3 flag ON の `next start -p 3140` で、
+#504 と同じ EIP-1193 注入 (ウォレットは Base Sepolia 0x14a34・テスト鍵で署名) により
+`/ja/pay?to=0x…dEaD&token=usdc&chain=arc&amount=1&mode=standard&crossChain=true` を開き、chooser で
+Base Sepolia (CCTP V2・支払総額 1.027023 USDC = 1 + 転送手数料 0.027023) を明示選択 → approve
+(0x9fa541f6…) + `depositForBurnWithHook` (0xb0fbe381…) → 宛先切替なし → `forward_pending` → Circle が
+Arc で mint ([0x76cff2a1…d1c2](https://explorer.testnet.arc.io/tx/0x76cff2a1ef9fd11be83f14932f69bf3ce553b5255148267cc8f63dfbf1f5d1c2)・
+block 62452924・`MintAndWithdraw` 店舗 1 USDC・feeCollected 0.027023) → `verifyForwardMint` OK → 成功画面
+「CCTP V2 Fast 経由で着金しました」→ resume 記録 clear。iris は `forwardState=COMPLETE`。
+実測の含意: (1) **Circle は feeExecuted = maxFee を全額徴収** → UI は「転送手数料」表示・headroom 10%。
+(2) **負荷分散 RPC の view 遅延**で approve 直後の burn が allowance revert / marker nonce が row 8 に
+倒れる事象 → forward 分岐は approve 後に allowance 反映を待ち、allowance revert は有界 retry (本ファイル
+§10.12 の設計どおり既存 6 チェーン経路は不変)。(3) iris `/v2/messages` は未 index の tx に対して CORS
+ヘッダ無しの 404 を返しブラウザ console にエラーが出るが、poll は catch して継続 (無害)。
+**reload 回復 (同日)**: 別の支払いで burn (0x4b3a253c…) broadcast の 1.5 秒後に reload → 回復パネル
+「Circle の応答待ちです。nonce 未取得のため宛先探索はまだできません」+ 送信元 tx リンク・直接支払いボタンは
+非表示 (ロック) → 「再確認」1 回で iris から nonce 取得 → Arc の mint
+([0x5274f28d…63ad](https://explorer.testnet.arc.io/tx/0x5274f28d00a92bc46b9e1ec8966b7a0af1464ddba7bdffb38166b8c2373963ad)・
+block 62454204・店舗 1 USDC・feeCollected 0.023512) を検証 → 成功 → resume 記録 clear。
 
 **Rescue runbook:**
 
@@ -2025,7 +2045,7 @@ payment while a burn is unresolved. Keep the Arc RPC accessible during recovery.
 
 Disclosure draft for activation: Arc accepts explicitly selected USDC payments
 from supported source chains via Circle forwarding; the buyer adds a variable
-forwarding fee cap, OpenPay collects none, and Arc is never a source. Synchronize
+forwarding fee (collected in full by Circle), OpenPay collects none, and Arc is never a source. Synchronize
 LP/FAQ, Terms/disclaimer, `public/llms.txt` and news with human approval before
 activation. Do not publish a fixed “approximately 0.03 USDC” fee: captured mainnet
 quotes on 2026-09-17 were approximately 0.098 USDC for a 1-USDC invoice.

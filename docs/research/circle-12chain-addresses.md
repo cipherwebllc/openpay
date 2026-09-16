@@ -176,4 +176,10 @@ the app uses the reviewed fixed 32-byte hook. The non-forwarding receipts pin
 contrast cases. Iris `forwardTxHash ?? destinationMintTxHash` is only a candidate;
 `forwardState` / `delayReason` are informational, never settlement evidence.
 Fees are minimumFee in bps and forwardFee in six-decimal USDC atomic units.
-For 1,000,000 atomic, captured Fast fee caps are mainnet 98,272 and sandbox 20,632.
+For 1,000,000 atomic, Circle's captured Fast requirement (forwardFee.high + protocol
+fee) is mainnet 98,272 and sandbox 20,632; the buyer-facing `maxFee` adds a 10%
+headroom on forwardFee.high (mainnet 108,096 / sandbox 22,683, `FORWARD_FEE_HEADROOM_BPS`).
+**Measured 2026-09-17 (OpenPay E2E, Base Sepolia → Arc testnet)**: Circle charged
+`feeExecuted = maxFee` in full (`MintAndWithdraw.feeCollected` equalled our maxFee), so
+maxFee behaves as the actual forwarding fee, not an upper bound. The UI therefore labels it
+as the forwarding fee, and the merchant still receives exactly the invoice (gross − feeExecuted).

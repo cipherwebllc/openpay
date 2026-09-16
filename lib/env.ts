@@ -461,7 +461,8 @@ export const env = {
   enableUsdcArcTip: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_USDC_ARC_TIP',
     process.env.NEXT_PUBLIC_ENABLE_USDC_ARC_TIP,
-  // Arc は標準決済のみ。受取と cross-chain の有効化は別々に管理する。
+  ),
+  // Arc の cross-chain (Circle forwarding の受取先) は受取 flag とは別に管理する。既定 OFF。
   enableUsdcArcCrossChain: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN',
     process.env.NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN,

@@ -13,7 +13,7 @@
     "destinationTx": "宛先の候補取引",
     "checking": "確認中",
     "recheck": "再確認",
-    "quote": "転送手数料上限 {fee} USDC・支払総額 {total} USDC",
+    "quote": "転送手数料 {fee} USDC・支払総額 {total} USDC",
     "consent": "この見積に同意して続ける",
     "help": "解決しない場合（運用手順）"
   },
@@ -1641,7 +1641,7 @@
   "CrossChainSourceChooser": {
     "quoteUnavailable": "見積を取得できません",
     "insufficientBalance": "手数料を含む残高が不足しています",
-    "forwardTotal": "支払総額 {total} USDC（転送手数料上限 {fee} USDC を含む）",
+    "forwardTotal": "支払総額 {total} USDC（転送手数料 {fee} USDC を含む・Circle が徴収）",
     "title": "支払元チェーンを選ぶ",
     "subtitle": "必要額 {required} USDC。残高がある全チェーンと、それぞれの手数料の概算を比較できます。",
     "balance": "残高: {balance} USDC",

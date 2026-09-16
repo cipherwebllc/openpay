@@ -170,7 +170,9 @@ export function CrossChainHint(props: CrossChainHintProps) {
   }
 
   // 回復は enabled/残高/option の gate より先。kill switch 後も資金の確認を閉じない。
-  if (hook.pendingRecovery && !result) return <div className="space-y-3">
+  // 実行中 (execute / recheck) は onStep の strict 保存で pendingRecovery が立つが、その間は
+  // 通常の進捗表示 (forward_pending 等) を出し、パネルで chooser を覆わない (E2E で観測した混乱)。
+  if (hook.pendingRecovery && !result && !isExecuting) return <div className="space-y-3">
     <CrossChainForwardPendingPanel
       recovery={hook.pendingRecovery} quote={hook.recoveryQuote} busy={isExecuting}
       disabled={props.executionDisabled}

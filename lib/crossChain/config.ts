@@ -357,7 +357,8 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = [
 
 /** cross-chain で merchant 受信可能な chain のみ (Arc は forwarding flag による merchant-only entry)。
  * role='buyer-only' は merchant 受信フローに含めない設計。
- * 'merchant-only' は merchant 受信は可能だが現状該当 chain なし (Ethereum 復帰済)。
+ * 'merchant-only' は merchant 受信は可能だが buyer source にはならない chain。現状は Arc
+ * (forwarding flag ON 時のみ entry が現れる・宛先専用) だけ。
  * 結果: 'merchant-and-buyer' (6: Polygon/Base/Arbitrum/Optimism/Avalanche/Ethereum) = 6 chain。
  * URL parser や merchant UI で「受信 chain として有効な集合」を取りたい時に使う。 */
 export const MERCHANT_RECEIVE_TARGETS: readonly CrossChainTarget[] =

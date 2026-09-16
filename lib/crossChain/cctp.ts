@@ -323,11 +323,28 @@ export async function fetchCctpBurnFees(
   }
   return fee;
 }
-export function computeForwardMaxFee(amount: bigint, quote: CctpBurnFee): bigint {
+/** Circle が「今」要求する下限 (forwardFee.high + protocolFee)。実行直前の再見積との比較に使う。 */
+export function computeForwardRequiredFee(amount: bigint, quote: CctpBurnFee): bigint {
   const bps = Math.round(quote.minimumFee * 1000);
   if (amount < 0n || !Number.isSafeInteger(bps) || bps < 0 ||
       !Number.isSafeInteger(quote.forwardFee.high) || quote.forwardFee.high < 0) throw new Error('Invalid fee inputs');
   return BigInt(quote.forwardFee.high) + (amount * BigInt(bps) + 9_999_999n) / 10_000_000n;
+}
+/** 買い手に提示する転送手数料 (maxFee) は forwardFee.high に headroom を乗せる。Circle の forwardFee は
+ *  gas 連動で分単位に動く (2026-09-17 sandbox 実測: 数分で 18,843〜26,664) ため、headroom 無しだと
+ *  見積→実行の数十秒でも「上限超過」で止まりやすい。
+ *  ⚠️ 2026-09-17 の Base Sepolia → Arc testnet 実測では feeExecuted = maxFee (上限まで全額徴収) だった。
+ *  つまり maxFee は「上限」ではなく実質「転送手数料そのもの」なので、UI では「転送手数料」として
+ *  表示し、headroom は買い手の実負担になる前提で小さく (10%) 取る。店舗は額面を受け取る (gross −
+ *  feeExecuted = value)。 */
+export const FORWARD_FEE_HEADROOM_BPS = 1000n;
+export function forwardFeeCapAtomic(quote: CctpBurnFee): bigint {
+  const high = BigInt(quote.forwardFee.high);
+  return high + (high * FORWARD_FEE_HEADROOM_BPS + 9_999n) / 10_000n;
+}
+export function computeForwardMaxFee(amount: bigint, quote: CctpBurnFee): bigint {
+  const required = computeForwardRequiredFee(amount, quote);
+  return required - BigInt(quote.forwardFee.high) + forwardFeeCapAtomic(quote);
 }
 export function acceptForwardQuote(
   binding: Pick<AcceptedQuote, 'sourceDomain' | 'destDomain' | 'sourceChainId' | 'destChainId' | 'recipient' | 'valueAtomic'>,
@@ -337,7 +354,7 @@ export function acceptForwardQuote(
   return Object.freeze({ sourceChainId: binding.sourceChainId, destChainId: binding.destChainId,
     sourceDomain: binding.sourceDomain, destDomain: binding.destDomain, recipient: binding.recipient,
     valueAtomic: binding.valueAtomic, minimumFeeBpsX1000: Math.round(fee.minimumFee * 1000),
-    forwardFeeAtomic: String(fee.forwardFee.high), maxFeeAtomic: String(maxFee),
+    forwardFeeAtomic: String(forwardFeeCapAtomic(fee)), maxFeeAtomic: String(maxFee),
     grossAtomic: String(BigInt(binding.valueAtomic) + maxFee), quotedAt: now, expiresAt: now + 300_000 });
 }
 

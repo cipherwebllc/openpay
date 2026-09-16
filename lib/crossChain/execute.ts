@@ -32,7 +32,7 @@ import {
   CCTP_FORWARD_HOOK_DATA,
   CCTP_V2_DEPOSIT_FOR_BURN_EVENT,
   acceptForwardQuote,
-  computeForwardMaxFee,
+  computeForwardRequiredFee,
   fetchCctpBurnFees,
   encodeForwardDepositForBurnCalldata,
   findForwardMintByNonce,
@@ -1335,7 +1335,7 @@ async function executeForwardTransfer(args: ExecuteCctpTransferArgs): Promise<Ex
       // 既存決定表が未 burn/revert を確定した場合だけ、新しい明示同意を適用する。
       quote = args.forward!.acceptedQuote;
       assertForwardQuoteBinding(quote, args);
-      if (now() >= quote.expiresAt || computeForwardMaxFee(args.valueAtomic, fee) > BigInt(quote.maxFeeAtomic)) throw new CrossChainQuoteExpiredError();
+      if (now() >= quote.expiresAt || computeForwardRequiredFee(args.valueAtomic, fee) > BigInt(quote.maxFeeAtomic)) throw new CrossChainQuoteExpiredError();
       const scanFromBlock = f?.scanFromBlock ?? String(await args.destPublicClient.getBlockNumber());
       const sourceChain = resolveChainOrThrow(args.sourceChainId, 'source');
       await ensureWalletChain(args.walletClient, args.switchChainAsync, args.sourceChainId);
@@ -1345,6 +1345,16 @@ async function executeForwardTransfer(args: ExecuteCctpTransferArgs): Promise<Ex
         functionName: 'approve', args: [CCTP_V2_TOKEN_MESSENGER_ADDRESS, BigInt(quote.grossAtomic)],
         account: args.account, chain: sourceChain });
       await waitForReceiptOrThrow(args.sourcePublicClient, approveTxHash, 'forward approve');
+      // 何の波及を断つか: 負荷分散 RPC で receipt が見えても nonce/allowance の view が遅れることがある
+      // (2026-09-17 Base Sepolia E2E で実測)。遅れた nonce で marker を作ると、burn 未送信なのに
+      // 決定表が「nonce 進行・log 無し」(row 8) の manual に倒れる。approve 反映を待ってから marker を作る。
+      // allowance が gross 以上に見える = approve 後の state がこのノードに反映済み (nonce も同じ state)。
+      for (let i = 0; i < 15; i += 1) {
+        const allowance = await args.sourcePublicClient.readContract({ address: args.sourceToken, abi: erc20Abi,
+          functionName: 'allowance', args: [args.account, CCTP_V2_TOKEN_MESSENGER_ADDRESS] });
+        if (allowance >= BigInt(quote.grossAtomic)) break;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
       const marker = await buildBurnMarker({ client: args.sourcePublicClient, chainId: args.sourceChainId,
         depositor: args.account, burnToken: args.sourceToken, mintRecipient: args.recipient,
         amount: BigInt(quote.grossAtomic), destinationDomain: args.destDomain, now });
@@ -1352,9 +1362,22 @@ async function executeForwardTransfer(args: ExecuteCctpTransferArgs): Promise<Ex
       // marker + quote は同じ strict write。hash が失われても gross/認可を復元できる。
       args.commitBurnIntent(marker, 'merchant', { forward: f });
       persist({ burnIntent: marker, approveTxHash });
-      const burnTxHash = await args.walletClient.sendTransaction({ account: args.account, chain: sourceChain,
-        to: CCTP_V2_TOKEN_MESSENGER_ADDRESS, data: encodeForwardDepositForBurnCalldata({ value: args.valueAtomic,
-          maxFee: BigInt(quote.maxFeeAtomic), destinationDomain: args.destDomain, recipient: args.recipient, burnToken: args.sourceToken }) });
+      const burnData = encodeForwardDepositForBurnCalldata({ value: args.valueAtomic,
+        maxFee: BigInt(quote.maxFeeAtomic), destinationDomain: args.destDomain, recipient: args.recipient, burnToken: args.sourceToken });
+      let burnTxHash: Hex | undefined;
+      for (let attempt = 0; burnTxHash === undefined; attempt += 1) {
+        try {
+          burnTxHash = await args.walletClient.sendTransaction({ account: args.account, chain: sourceChain,
+            to: CCTP_V2_TOKEN_MESSENGER_ADDRESS, data: burnData });
+        } catch (error) {
+          // 何の波及を断つか: ウォレット側ノードの allowance view 遅延で gas 見積が revert する
+          // (hash は返らない = 未 broadcast)。allowance 不足の revert だけ有界に再試行し、
+          // それ以外 (ユーザ拒否・残高不足等) はそのまま投げる。
+          const message = error instanceof Error ? error.message : String(error);
+          if (attempt >= 3 || !/allowance/i.test(message)) throw error;
+          await new Promise((r) => setTimeout(r, 3000));
+        }
+      }
       persist({ burnTxHash }, { state: 'broadcast' });
       progress({ kind: 'source_tx_pending', hash: burnTxHash });
       await args.sourcePublicClient.waitForTransactionReceipt({ hash: burnTxHash });
