@@ -35,7 +35,8 @@ for (const network of ['testnet', 'mainnet']) {
       expect(crossChainAllowed('arc', false)).toBe(false);
       const params = { chain: 'arc' as const, token: 'usdc' as const, to: '0x1111111111111111111111111111111111111111' as Address, mode: 'standard' as const, gas: 'customer' as const, crossChain: true };
       expect(buildPayPath(params).includes('crossChain=false')).toBe(!on);
-      expect(buildTipPath(params).includes('crossChain=false')).toBe(true);
+      // Arc チップの cross-chain も同じ flag に連動 (#507 の常時 OFF は #508 点灯後に解除)。
+      expect(buildTipPath(params).includes('crossChain=false')).toBe(!on);
     });
   }
 }

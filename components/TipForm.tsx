@@ -263,6 +263,9 @@ export function TipForm({
   // PayPay 風 大型成功 overlay (dismiss するまで全画面)
   const [overlayDismissed, setOverlayDismissed] = useState(false);
   const [crossChainLocked, setCrossChainLocked] = useState(false);
+  // PaymentForm と同型: Arc の回復 scan (CrossChainHint の mount 時) が終わるまで直接送信を待たせる。
+  const arcRecoveryScope = `${address}:${params.chain}:${params.to}:${amountWei}`;
+  const [arcScannedScope, setArcScannedScope] = useState('');
   const [crossChainResult, setCrossChainResult] = useState<ExecuteResult>();
 
   // recover 時に回収する利用料 (= 実 settle で feeReceiver へ分割される額)。CDX-3: 実スケジュール
@@ -350,7 +353,8 @@ export function TipForm({
     ? !!(relay.data?.success && relay.data.txHash)
     : !!gasless.data?.success;
   const directFlowTxHash = isStandard ? standard.merchantTxHash : useRelay ? relay.data?.txHash : gasless.data?.txHash;
-  const flowPending = directFlowPending || crossChainLocked;
+  const arcRecoveryScanning = params.token === 'usdc' && params.chain === 'arc' && !!address && !preview && arcScannedScope !== arcRecoveryScope;
+  const flowPending = directFlowPending || crossChainLocked || arcRecoveryScanning;
   const flowSuccess = directFlowSuccess || !!crossChainResult;
   const flowTxHash = crossChainResult?.mintTxHash ?? directFlowTxHash;
   const flowUserOpHash = crossChainResult
@@ -497,7 +501,8 @@ export function TipForm({
   );
   const onCrossChainExecutingChange = useCallback((executing: boolean) => {
     setCrossChainLocked(executing);
-  }, []);
+    setArcScannedScope(arcRecoveryScope);
+  }, [arcRecoveryScope]);
   const onCrossChainSuccess = useCallback((result: ExecuteResult) => {
     setCrossChainResult(result);
     setCrossChainLocked(false);
@@ -540,7 +545,7 @@ export function TipForm({
         amount: sent.amount,
         merchantAddress: params.to,
         merchantName: params.name ?? null,
-        payerAddress: isStandard ? submittedByThisFormRef.current?.customer : address,
+        payerAddress: isStandard && !crossChainResult ? submittedByThisFormRef.current?.customer : address,
         paymentMode: crossChainResult ? 'cross-chain' : isStandard ? 'standard' : 'gasless',
         gasMode: 'customer',
         memo: params.message ?? null,
@@ -556,7 +561,7 @@ export function TipForm({
       const payload = {
         type: 'openpay.tip.success',
         creator: params.to,
-        from: isStandard ? submittedByThisFormRef.current?.customer : address,
+        from: isStandard && !crossChainResult ? submittedByThisFormRef.current?.customer : address,
         token: params.token,
         chain: chainSlug,
         amount: sent.amount,
@@ -1095,7 +1100,9 @@ export function TipForm({
             だが他 chain / Gateway に balance がある時、Circle Gateway / CCTP V2
             経由の代替 path を提示する。JPYC は Gateway 非対応のため自動 skip
             (token guard で early return)。PaymentForm と同型実装。 */}
-        {!preview && !isStandard && params.token === 'usdc' && address && (
+        {/* Arc (standard) でも mount する: 他チェーン → Arc の forwarding (flag 連動・enabled で制御) と、
+            burn 後の回復パネル (flag 非依存) のため。 */}
+        {!preview && params.token === 'usdc' && address && (
           <CrossChainHint
             token={params.token}
             enabled={params.crossChain !== false}
@@ -1108,7 +1115,7 @@ export function TipForm({
             // この hint は非 standard 専用。直接送金がガスレスなのは smart account が
             // 実際に構築済 (saData あり) の時のみ。pristine/未対応 fallback・init 失敗・
             // 取得中は gasless 不可なので「ガス代要」表示にする。
-            directIsGasless={!!saData}
+            directIsGasless={!isStandard && !!saData}
             executionDisabled={directFlowPending || directSettledNoRetry}
             onAttemptStart={onCrossChainAttemptStart}
             onExecutingChange={onCrossChainExecutingChange}

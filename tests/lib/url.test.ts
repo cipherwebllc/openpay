@@ -2200,17 +2200,21 @@ it('unsupported pair is rejected before deployment lookup', async () => {
   } finally { lookup.mockRestore(); }
 });
 
-it('Arc tip parser cross-chain prohibition does not depend on crossChainAllowed', async () => {
+it('Arc tip parser cross-chain follows crossChainAllowed (Arc cross-chain flag): OFF → false / ON → true', async () => {
   const { parseTipParams } = await import('@/lib/url/tip');
   const { env } = await import('@/lib/env');
-  const shared = await import('@/lib/url/shared');
-  const previous = { enableUsdcArc: env.enableUsdcArc, enableUsdcArcTip: env.enableUsdcArcTip };
-  Object.assign(env, { enableUsdcArc: true, enableUsdcArcTip: true });
-  const policy = vi.spyOn(shared, 'crossChainAllowed').mockReturnValue(true);
+  const previous = { enableUsdcArc: env.enableUsdcArc, enableUsdcArcTip: env.enableUsdcArcTip, enableUsdcArcCrossChain: env.enableUsdcArcCrossChain };
   try {
-    const result = parseTipParams(VALID_TO, new URLSearchParams('token=usdc&chain=arc&crossChain=true'));
-    expect(result.ok).toBe(true);
-    expect(result.ok && result.params.crossChain).toBe(false);
-    expect(policy).not.toHaveBeenCalled();
-  } finally { policy.mockRestore(); Object.assign(env, previous); }
+    Object.assign(env, { enableUsdcArc: true, enableUsdcArcTip: true, enableUsdcArcCrossChain: false });
+    const off = parseTipParams(VALID_TO, new URLSearchParams('token=usdc&chain=arc&crossChain=true'));
+    expect(off.ok).toBe(true);
+    expect(off.ok && off.params.crossChain).toBe(false);
+    Object.assign(env, { enableUsdcArcCrossChain: true });
+    const on = parseTipParams(VALID_TO, new URLSearchParams('token=usdc&chain=arc&crossChain=true'));
+    expect(on.ok && on.params.mode).toBe('standard');
+    expect(on.ok && on.params.crossChain).toBe(true);
+    // 明示 false は ON でも尊重 (店主が同一チェーン受取を指定)
+    const explicit = parseTipParams(VALID_TO, new URLSearchParams('token=usdc&chain=arc&crossChain=false'));
+    expect(explicit.ok && explicit.params.crossChain).toBe(false);
+  } finally { Object.assign(env, previous); }
 });

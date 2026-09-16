@@ -1970,7 +1970,8 @@ immutable quote with the buyer-paid Circle forwarding fee (measured 2026-09-17: 
 collects the full `maxFee`, so it is shown as the fee, not a cap) and the gross payment amount.
 Both `NEXT_PUBLIC_ENABLE_USDC_ARC` and `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN`
 are required for new routes; the latter defaults OFF. Domain lookup and recovery
-remain available with flags OFF. Arc tips remain excluded.
+remain available with flags OFF. Arc tips follow the same flag (同日追記: #507 で常時 OFF にしていた
+Arc チップの cross-chain も、この flag ON で他チェーン → Arc の forwarding を受ける).
 
 Completion requires source `DepositForBurn` evidence and destination
 `MessageReceived` (source domain + nonce + decoded body) bound to its own
@@ -2014,6 +2015,11 @@ block 62452924・`MintAndWithdraw` 店舗 1 USDC・feeCollected 0.027023) → `v
 非表示 (ロック) → 「再確認」1 回で iris から nonce 取得 → Arc の mint
 ([0x5274f28d…63ad](https://explorer.testnet.arc.io/tx/0x5274f28d00a92bc46b9e1ec8966b7a0af1464ddba7bdffb38166b8c2373963ad)・
 block 62454204・店舗 1 USDC・feeCollected 0.023512) を検証 → 成功 → resume 記録 clear。
+
+**チップへの forwarding (同日・#507 の常時 OFF 解除後)**: `/ja/tip/0x…dEaD?token=usdc&chain=arc&preset=1` を
+Base Sepolia のウォレットで開き、chooser で Base Sepolia (支払総額 1.026375 USDC) → approve + burn (0xaa1a0bc8…)
+→ Circle が Arc で mint ([0x6dee63cb…5eb6](https://explorer.testnet.arc.io/tx/0x6dee63cba105992553103e63e78e7e9fcca6aea7203d1bd4454aefc2610f5eb6)・
+block 62466966・クリエイター 1 USDC・feeCollected 0.026375) → 検証 → 成功・resume clear。
 
 **Rescue runbook:**
 

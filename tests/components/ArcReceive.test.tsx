@@ -3,11 +3,11 @@ import { screen, waitFor, renderHook } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
 
-const flags = vi.hoisted(() => ({ arc: true, tip: false }));
+const flags = vi.hoisted(() => ({ arc: true, tip: false, xchain: false }));
 vi.mock('@/components/TipForm', () => ({ TipForm: ({ params }: { params: unknown }) => <div data-testid="tip-preview">{JSON.stringify(params)}</div> }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
-  return { ...actual, isArcTipEnabled: () => flags.arc && flags.tip, env: { ...actual.env, get enableUsdcArc() { return flags.arc; }, get enableUsdcArcTip() { return flags.tip; } } };
+  return { ...actual, isArcTipEnabled: () => flags.arc && flags.tip, isArcCrossChainEnabled: () => flags.arc && flags.xchain, env: { ...actual.env, get enableUsdcArc() { return flags.arc; }, get enableUsdcArcTip() { return flags.tip; }, get enableUsdcArcCrossChain() { return flags.xchain; } } };
 });
 vi.mock('@/hooks/useResolveAddress', () => ({
   useResolveAddress: () => ({ data: null, isFetching: false, error: null }),
@@ -26,7 +26,7 @@ import { QrGenerator } from '@/components/QrGenerator';
 import { USDC_CHAINS } from '@/lib/chains';
 
 const receiver = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-beforeEach(() => { window.localStorage.clear(); flags.arc = true; flags.tip = false; });
+beforeEach(() => { window.localStorage.clear(); flags.arc = true; flags.tip = false; flags.xchain = false; });
 
 describe('Arc receive UI with flag ON', () => {
   it('checkout lists seven chains and corrects gasless when Arc is selected', async () => {
@@ -96,4 +96,21 @@ describe('Arc tip four-combination matrix', () => {
     expect(og.sub).not.toContain('ガス不要');
     expect(og.sub.includes('ガスも USDC')).toBe(enabled);
   });
+});
+
+// #508 点灯後: Arc チップも cross-chain flag に連動して他チェーン → Arc の forwarding を受ける
+// (URL parser・URL builder・@handle 公開 payload が同じ述語 crossChainAllowed を見る)。
+it('Arc tip cross-chain follows NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN: ON → crossChain true everywhere', async () => {
+  flags.tip = true; flags.xchain = true;
+  const { parseTipParams, buildTipPath } = await import('@/lib/url/tip');
+  const { buildPublishPayload } = await import('@/lib/handlePublish');
+  const { DEFAULT_PROFILE_DRAFT } = await import('@/hooks/useHandleProfileDraft');
+  const parsed = parseTipParams(receiver, new URLSearchParams('token=usdc&chain=arc&preset=0.5'));
+  expect(parsed.ok && parsed.params).toMatchObject({ mode: 'standard', crossChain: true });
+  expect(buildTipPath({ to: receiver, token: 'usdc', chain: 'arc', presets: ['0.5'], crossChain: true })).not.toContain('crossChain=false');
+  const payload = buildPublishPayload({ ...DEFAULT_PROFILE_DRAFT, to: receiver, jpycPolygon: false, jpycKaia: false, usdcArc: true }, { receiver, enableJpycAvalanche: false, arcTip: true });
+  expect(payload?.config.methods).toEqual([{ token: 'usdc', chain: 'arc', crossChain: true }]);
+  flags.xchain = false;
+  const off = parseTipParams(receiver, new URLSearchParams('token=usdc&chain=arc&preset=0.5'));
+  expect(off.ok && off.params.crossChain).toBe(false);
 });

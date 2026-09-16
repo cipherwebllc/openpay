@@ -18,6 +18,7 @@ import {
   type HandleTipConfig,
 } from '@/lib/handle';
 import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX, resolveTipCapability } from '@/lib/url';
+import { crossChainAllowed } from '@/lib/url/shared';
 
 export interface HandlePublishPayload {
   config: HandleTipConfig;
@@ -123,12 +124,13 @@ export function buildPublishMethods(
     methods.push({ token: 'usdc', chain: 'base', crossChain: true });
   }
   // 無効化された公開済み Arc を silently drop しない。資格検証は公開直前で全件行う。
-  if (draft.usdcArc) methods.push({ token: 'usdc', chain: 'arc', crossChain: false });
+  // Arc の cross-chain (他チェーン → Arc の forwarding) は flag 連動。OFF なら false で公開する。
+  if (draft.usdcArc) methods.push({ token: 'usdc', chain: 'arc', crossChain: crossChainAllowed('arc') });
   return methods.map((method) => {
     const capability = resolveTipCapability(method.token, method.chain);
     // 無効な保存済み方法を drop すると再公開で消失する。保持し、公開直前の全件検証で止める。
     if (!capability.ok) return method;
-    return capability.mode === 'standard' ? { ...method, crossChain: false } : method;
+    return capability.mode === 'standard' ? { ...method, crossChain: crossChainAllowed(method.chain) } : method;
   });
 }
 
