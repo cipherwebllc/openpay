@@ -20,14 +20,19 @@
 // 実機運用後に観測値で再 calibrate 推奨。
 
 import type { MultiChainBalances } from './balance';
-import { domainForChainId } from './config';
+import { domainForChainId, isForwardOnlyDestination } from './config';
 import type { CircleDomain } from './types';
+
+import { isArcCrossChainEnabled } from '../env';
+import type { AcceptedQuote } from './cctp';
 
 export type PathKind = 'direct' | 'gateway' | 'cctp-v2';
 
 export interface PathOption {
   /** React key + 一意識別子 (kind + chainId / domain) */
   key: string;
+  acceptedQuote?: AcceptedQuote;
+  disabledReason?: 'quote-unavailable' | 'insufficient-balance';
   kind: PathKind;
   /** Source chain id (buyer が USDC を持つ chain) */
   sourceChainId: number;
@@ -86,6 +91,7 @@ export interface EnumerateArgs {
   requiredAtomic: bigint;
   /** balance.ts readAllCrossChainBalances の戻り値 */
   balances: MultiChainBalances;
+  forwardQuotes?: Readonly<Record<number, AcceptedQuote>>;
 }
 
 /** 全 viable source chain × path 組合せを返す。
@@ -96,6 +102,8 @@ export interface EnumerateArgs {
 export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
   const { targetChainId, requiredAtomic, balances } = args;
   const options: PathOption[] = [];
+  const forwardOnly = isForwardOnlyDestination(targetChainId);
+  if (forwardOnly && !isArcCrossChainEnabled()) return options;
   const hasTargetDomain = domainForChainId(targetChainId) !== undefined;
 
   for (const w of balances.wallet) {
@@ -120,7 +128,7 @@ export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
       continue;
     }
 
-    // 未対応 destination を execute に渡さない (Arc は同一チェーンのみ)。
+    // domain lookup のない destination を execute に渡さない。
     if (!hasTargetDomain) continue;
 
     // cross-chain: Gateway pre-deposit が源残高に足りるなら gateway option も加算
@@ -128,7 +136,7 @@ export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
       balances.gateway.status === 'ok'
         ? (balances.gateway.perDomain.get(sourceDomain) ?? 0n)
         : 0n;
-    if (gatewayPreDeposit >= requiredAtomic) {
+    if (!forwardOnly && gatewayPreDeposit >= requiredAtomic) {
       options.push({
         key: `gateway-${sourceDomain}`,
         kind: 'gateway',
@@ -142,6 +150,19 @@ export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
       });
     }
 
+    if (forwardOnly) {
+      const quote = args.forwardQuotes?.[w.target.chainId];
+      options.push({
+        key: `cctp-v2-${w.target.chainId}`, kind: 'cctp-v2',
+        sourceChainId: w.target.chainId, sourceDomain,
+        sourceBalanceAtomic: w.balance,
+        serviceFeeAtomic: quote ? BigInt(quote.maxFeeAtomic) : 0n,
+        estimatedGasUnits: 80_000n, gasOnChainId: w.target.chainId, etaSeconds: 180,
+        acceptedQuote: quote,
+        disabledReason: !quote ? 'quote-unavailable' : w.balance < BigInt(quote.grossAtomic) ? 'insufficient-balance' : undefined,
+      });
+      continue;
+    }
     // CCTP V2 option (wallet balance from source chain)
     options.push({
       key: `cctp-v2-${w.target.chainId}`,
@@ -160,7 +181,7 @@ export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
   // のケースを補完: target 以外で gateway.perDomain に balance あって wallet
   // entry に出ない / wallet status='error' の domain があれば gateway option
   // を加算。chainId は domain から逆引き、未解決なら skip。
-  if (hasTargetDomain && balances.gateway.status === 'ok') {
+  if (!forwardOnly && hasTargetDomain && balances.gateway.status === 'ok') {
     for (const [domain, gwBalance] of balances.gateway.perDomain.entries()) {
       if (gwBalance < requiredAtomic) continue;
       const alreadyHasGateway = options.some(

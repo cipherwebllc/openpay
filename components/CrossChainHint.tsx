@@ -19,7 +19,7 @@ import { useCrossChainPayment } from '@/hooks/useCrossChainPayment';
 import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
 import type { CrossChainProgress } from '@/lib/crossChain/execute';
 import type { PathOption } from '@/lib/crossChain/pathEnumerator';
-import { CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
+import { isForwardOnlyDestination, CROSS_CHAIN_DISABLED } from '@/lib/crossChain/config';
 import { ResumeStoreWriteError } from '@/lib/crossChain/resumeStore';
 import { blockExplorerUrl } from '@/lib/chains';
 import { CrossChainSourceChooser } from './CrossChainSourceChooser';
@@ -28,6 +28,8 @@ import { logger } from '@/lib/logger';
 
 // 中断再開でしか描画されない説明パネルなので、/pay・/tip の First Load JS には載せない
 // (予算は既に上限張り付き — 掟: 増えたら予算を上げる前にまず code-split)。
+const CrossChainForwardPendingPanel = dynamic(() => import('./CrossChainForwardPendingPanel').then((m) => m.CrossChainForwardPendingPanel), { ssr: false });
+
 const CrossChainBurnUnresolvedPanel = dynamic(
   () =>
     import('./CrossChainBurnUnresolvedPanel').then(
@@ -71,6 +73,7 @@ export interface CrossChainHintProps {
 
 export function CrossChainHint(props: CrossChainHintProps) {
   const t = useTranslations('CrossChainHint');
+  const { onSuccess, onExecutingChange } = props;
   // hook は常に呼ぶ (条件付きフック禁止)、enabled=false で react-query が skip。
   // CROSS_CHAIN_DISABLED env が ON のときは incident response として hook 全停止。
   const hook = useCrossChainPayment({
@@ -128,16 +131,16 @@ export function CrossChainHint(props: CrossChainHintProps) {
       });
       if (successNotifiedHashRef.current !== result.mintTxHash) {
         successNotifiedHashRef.current = result.mintTxHash;
-        props.onSuccess?.(result);
+        onSuccess?.(result);
       }
     }
-  }, [result, props.recipient, props.requiredAtomic, props.onSuccess]);
+  }, [result, props.recipient, props.requiredAtomic, onSuccess]);
 
   useEffect(() => {
     // 成功は onSuccess 側の settled lock に引き継ぐ。失敗時は不可逆境界前だけ false に
     // 戻し、burn / attestation 後は親の通常 Pay を同一 mount 中ずっと封鎖する。
-    props.onExecutingChange?.(result ? false : isExecuting || isCommitted);
-  }, [isCommitted, isExecuting, result, props.onExecutingChange]);
+    onExecutingChange?.(result ? false : isExecuting || isCommitted || !!hook.pendingRecovery);
+  }, [isCommitted, isExecuting, result, onExecutingChange, hook.pendingRecovery]);
 
   useEffect(() => {
     if (error) {
@@ -158,6 +161,35 @@ export function CrossChainHint(props: CrossChainHintProps) {
       });
     }
   }, [hook.balancesError, props.targetChainId]);
+
+  function recheckForward(consent = false) {
+    if (props.executionDisabled || isExecuting) return;
+    attemptedAtomicRef.current = props.requiredAtomic;
+    props.onAttemptStart?.(props.requiredAtomic);
+    void hook.recheckForward(consent);
+  }
+
+  // 回復は enabled/残高/option の gate より先。kill switch 後も資金の確認を閉じない。
+  if (hook.pendingRecovery && !result) return <div className="space-y-3">
+    <CrossChainForwardPendingPanel
+      recovery={hook.pendingRecovery} quote={hook.recoveryQuote} busy={isExecuting}
+      disabled={props.executionDisabled}
+      onRecheck={() => recheckForward()}
+      onConsent={() => recheckForward(true)}
+    />
+    {hook.burnUnresolved && <CrossChainBurnUnresolvedPanel
+      kind={hook.burnUnresolved.kind} sourceChainId={hook.burnUnresolved.sourceChainId}
+      depositor={hook.burnUnresolved.depositor} burnTxHash={hook.burnUnresolved.burnTxHash}
+      reburnable={hook.burnUnresolved.reburnable} armed={hook.isManualReburnArmed}
+      onArm={hook.armManualReburn}
+      onRetry={() => recheckForward()}
+      onAdoptHash={async (hash) => {
+        const adopted = await hook.adoptBurnTxHash(hash);
+        if (adopted.ok) recheckForward();
+        return adopted;
+      }}
+    />}
+  </div>;
 
   if (
     CROSS_CHAIN_DISABLED ||
@@ -201,7 +233,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
   // options なし or decision が onramp のみ (= どの chain にも balance なし)
   // は何も出さず OnrampCta (PaymentForm 側) に委譲。
   if (pathOptions.length === 0) return null;
-  if (decision?.path === 'onramp') return null;
+  if (decision?.path === 'onramp' && !isForwardOnlyDestination(props.targetChainId)) return null;
 
   // direct のみで cross-chain option なし → 既存 Pay button に完全委譲、本 panel 非表示。
   // (chooser 表示しても direct 1 件しか出ず情報価値ゼロ、UI スペース節約)
@@ -259,6 +291,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
     // 同一 mount で committed を観測したのに resume 保存が無い場合、再 execute は
     // 二重 burn/debit になり得る。D4b は行わず、この mount の子ボタンだけ fail-closed。
     (isCommitted && !resumable) ||
+    !!selectedOption?.disabledReason ||
     !selectedOption ||
     isDirectSelected;
 
@@ -328,6 +361,8 @@ function formatProgress(
   t: ReturnType<typeof useTranslations>,
 ): string {
   switch (p.kind) {
+    case 'forward_pending':
+      return t('progressForwardPending');
     case 'sign':
       return t('progressSign');
     case 'attest':

@@ -1945,3 +1945,73 @@ query の percent encoding を含む例は fixture の measurements を参照す
 **実施記録 (2026-09-17・Fable)**: 上記を Arc testnet で完走。実 wagmi injected 経路 (Playwright に EIP-1193 provider を注入し、テスト鍵で `eth_sendTransaction` を署名) で `/ja/pay?…chain=arc&mode=standard` から 0.5 USDC を標準決済 → 成功画面 (Tx/ブロック/Explorer リンク) → `/ja/history` に支払い+受取の 2 行 (chainSlug=arc) → `/ja/scan` の払い手控えに「USDC / Arc Testnet」と Explorer リンク。on-chain: [tx 0x0756edde…65aa2e](https://explorer.testnet.arc.io/tx/0x0756eddee9fb890364e23e32eca9f38bd8f7f8c1dace27d171f8015c0565aa2e) status=success・block 62422950・gasUsed 48,734・20 gwei (≈0.000975 USDC)。
   ⚠️ 実測の含意: **Arc では ERC-20 USDC (`0x3600…`・6dp) の残高と native gas 残高は同一の資金** (20 → 19.499025 = 0.5 送金 + 0.000975 ガス)。顧客の USDC 残高からガスも引かれるため、金額ちょうどしか持たない顧客は失敗する (通常決済の「別途 gas」注意はガス *トークン* ではなく *残高の余裕* として案内する)。
 - [ ] **点灯 (`NEXT_PUBLIC_ENABLE_USDC_ARC=1`) は開示更新と同一リリース**: LP / FAQ / 取引所ガイド / Terms・免責・特商法 / llms.txt / お知らせの Arc 文言 (draft = `plans/arc-usdc-receive.md` §6) を user 承認のうえ同じ PR に含める。
+
+### 10.12 Arc forwarding
+
+Arc (5042 / 5042002, Circle domain 26) is a destination only. CCTP V2
+`depositForBurnWithHook` uses the fixed `cctp-forward` hook, permissionless
+`destinationCaller=0`, and Circle submits the destination mint. No Gateway,
+no automatic routing, no OpenPay fee leg. The chooser presents a five-minute,
+immutable quote with a buyer-paid forwarding fee cap and gross payment amount.
+Both `NEXT_PUBLIC_ENABLE_USDC_ARC` and `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN`
+are required for new routes; the latter defaults OFF. Domain lookup and recovery
+remain available with flags OFF. Arc tips remain excluded.
+
+Completion requires source `DepositForBurn` evidence and destination
+`MessageReceived` (source domain + nonce + decoded body) bound to its own
+`MintAndWithdraw`, with trusted emitters. Iris hashes are candidates only.
+A confirmed burn never enters the reburn decision table. Unreadable storage
+blocks new payments. `verified` records are replayed for accounting before cleanup.
+
+**Before enabling / merging (not completed by offline fixture tests):**
+
+- Human money-path review, including relayer key operations and disclosure draft.
+- Base Sepolia → Arc testnet E2E, using
+  `/pay?to=<merchant>&token=usdc&chain=arc&amount=1&mode=standard&crossChain=true`.
+  Explicitly select Base Sepolia CCTP, review total and fee cap, approve + burn.
+  Confirm there is no destination wallet switch, and verify Arc receipt, success
+  UI, history and `bridgeFeeMax` equal to the actual submitted cap.
+- Reload immediately after burn; recovery must appear without balances/options.
+  Disable the flags and confirm recovery remains visible and direct payment stays
+  locked. Recheck must not submit transactions after source confirmation.
+- Simulate Iris outage after nonce persistence: discovery must complete. Before
+  nonce persistence: show Circle response pending, never retry burn.
+- Check standard-mode QR, chooser quote refresh/reconsent, timeout panel,
+  pre-confirmation probe + explicit reconsent, and verified-before-cleanup reload.
+- Run the build separately with flags OFF and ON. No build or funded E2E was run
+  during this offline implementation.
+
+**Rescue runbook:**
+
+1. Preserve the saved quote, gross marker, source receipt, nonce and scan cursor.
+   Investigate `amount_above_max`, `insufficient_fee` and
+   `insufficient_allowance_available`; these are delays, not payment completion.
+2. If nonce is missing, poll Iris with the source burn hash. Without a nonce,
+   destination discovery is unavailable; never infer non-payment or reburn.
+3. For pending/expired attestation, try Circle's
+   `POST /v2/reattest/{nonce}`, then poll `/v2/messages/{sourceDomain}?nonce=...`
+   again. If still unavailable, contact Circle with burn hash, source domain,
+   nonce and delay reason. Do not declare re-attestation impossible.
+4. Use `node scripts/arc-forward-rescue.mjs --help` (Node >=22.18). Supply the
+   original source token, merchant, invoice amount, gross, maxFee and Arc
+   `--from-block` cursor. The default is read-only and scans by nonce **first**.
+   A verified mint needs no transaction. A mismatched delivered nonce requires
+   investigation, not another submission.
+5. Only after operator review, rerun with `--send`. The existing
+   `MAINNET_RELAYER_PRIVATE_KEY` is loaded only then. The operator needs a small
+   Arc USDC gas balance; never put this key in NEXT_PUBLIC env or logs. The script
+   sends `receiveMessage` and uses the same on-chain verifier as the app.
+   A Circle/rescue race may revert the rescue; re-run read-only discovery.
+6. Buyer selects Recheck to discover/adopt the verified mint and finish accounting.
+
+**Kill switch:** turn `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN` OFF and redeploy
+(the public env is compiled into the client). This disables new quotes/routes,
+not recovery. Do not delete resume records or instruct buyers to start another
+payment while a burn is unresolved. Keep the Arc RPC accessible during recovery.
+
+Disclosure draft for activation: Arc accepts explicitly selected USDC payments
+from supported source chains via Circle forwarding; the buyer adds a variable
+forwarding fee cap, OpenPay collects none, and Arc is never a source. Synchronize
+LP/FAQ, Terms/disclaimer, `public/llms.txt` and news with human approval before
+activation. Do not publish a fixed “approximately 0.03 USDC” fee: captured mainnet
+quotes on 2026-09-17 were approximately 0.098 USDC for a 1-USDC invoice.

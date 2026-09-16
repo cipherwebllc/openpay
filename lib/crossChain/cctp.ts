@@ -8,6 +8,10 @@
 // 2000 (FINALIZED) で V1 互換の Standard (~13-19 分)。default は Fast。
 
 import {
+  decodeEventLog,
+  size,
+  slice,
+  type PublicClient,
   encodeFunctionData,
   getAddress,
   pad,
@@ -266,4 +270,199 @@ export async function pollIrisAttestation(
     }
     await sleep(interval);
   }
+}
+
+// Forwarding は opt-in。既存 depositForBurn の ABI / fee 計算は変更しない。
+export const CCTP_FORWARD_HOOK_DATA: Hex =
+  '0x636374702d666f72776172640000000000000000000000000000000000000000';
+export const CCTP_FORWARD_ABI = [parseAbiItem(
+  'function depositForBurnWithHook(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken, bytes32 destinationCaller, uint256 maxFee, uint32 minFinalityThreshold, bytes hookData)',
+)] as const;
+export function encodeForwardDepositForBurnCalldata(
+  args: Omit<BuildDepositForBurnArgs, 'overrides'> & { maxFee: bigint },
+): Hex {
+  return encodeFunctionData({ abi: CCTP_FORWARD_ABI, functionName: 'depositForBurnWithHook', args: [
+    args.value + args.maxFee, args.destinationDomain, addressToBytes32(args.recipient),
+    args.burnToken, PERMISSIONLESS_DESTINATION_CALLER, args.maxFee, CCTP_FINALITY_FAST,
+    CCTP_FORWARD_HOOK_DATA,
+  ] });
+}
+
+export interface CctpBurnFee {
+  finalityThreshold: number;
+  minimumFee: number;
+  forwardFee: { low: number; med: number; high: number };
+}
+/** JSON-safe、支払いと経路を含めて固定する。API 応答を実行認可に流用しない。 */
+export interface AcceptedQuote {
+  readonly sourceDomain: CircleDomain;
+  readonly destDomain: CircleDomain;
+  readonly sourceChainId: number;
+  readonly destChainId: number;
+  readonly recipient: Address;
+  readonly valueAtomic: string;
+  readonly minimumFeeBpsX1000: number;
+  readonly forwardFeeAtomic: string;
+  readonly maxFeeAtomic: string;
+  readonly grossAtomic: string;
+  readonly quotedAt: number;
+  readonly expiresAt: number;
+}
+export async function fetchCctpBurnFees(
+  src: CircleDomain, dst: CircleDomain,
+  opts: { forward: true; fetch?: FetchLike; baseUrl?: string },
+): Promise<CctpBurnFee> {
+  const res = await (opts.fetch ?? fetch)(`${opts.baseUrl ?? CCTP_IRIS_API_BASE_URL}/v2/burn/USDC/fees/${src}/${dst}?forward=true`, { method: 'GET', signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`Circle fees HTTP ${res.status}`);
+  const rows = await res.json() as CctpBurnFee[];
+  const fee = rows.find((r) => r.finalityThreshold === CCTP_FINALITY_FAST);
+  // 壊れた見積が過少承認・過大 burn に波及しないよう、fallback を作らず停止する。
+  if (!fee || !Number.isFinite(fee.minimumFee) || fee.minimumFee < 0 ||
+      !Number.isSafeInteger(fee.forwardFee?.high) || fee.forwardFee.high < 0) {
+    throw new Error('Invalid Circle forwarding quote');
+  }
+  return fee;
+}
+export function computeForwardMaxFee(amount: bigint, quote: CctpBurnFee): bigint {
+  const bps = Math.round(quote.minimumFee * 1000);
+  if (amount < 0n || !Number.isSafeInteger(bps) || bps < 0 ||
+      !Number.isSafeInteger(quote.forwardFee.high) || quote.forwardFee.high < 0) throw new Error('Invalid fee inputs');
+  return BigInt(quote.forwardFee.high) + (amount * BigInt(bps) + 9_999_999n) / 10_000_000n;
+}
+export function acceptForwardQuote(
+  binding: Pick<AcceptedQuote, 'sourceDomain' | 'destDomain' | 'sourceChainId' | 'destChainId' | 'recipient' | 'valueAtomic'>,
+  fee: CctpBurnFee, now = Date.now(),
+): AcceptedQuote {
+  const maxFee = computeForwardMaxFee(BigInt(binding.valueAtomic), fee);
+  return Object.freeze({ sourceChainId: binding.sourceChainId, destChainId: binding.destChainId,
+    sourceDomain: binding.sourceDomain, destDomain: binding.destDomain, recipient: binding.recipient,
+    valueAtomic: binding.valueAtomic, minimumFeeBpsX1000: Math.round(fee.minimumFee * 1000),
+    forwardFeeAtomic: String(fee.forwardFee.high), maxFeeAtomic: String(maxFee),
+    grossAtomic: String(BigInt(binding.valueAtomic) + maxFee), quotedAt: now, expiresAt: now + 300_000 });
+}
+
+export interface CctpForwardMessage extends CctpIrisMessage {
+  forwardTxHash?: Hex;
+  destinationMintTxHash?: Hex;
+  forwardState?: string;
+  delayReason?: string | null;
+  decodedMessage?: { nonce?: Hex; sourceDomain?: string; destinationDomain?: string };
+}
+/** 一回の Iris 観測。継続/timeout は executor が永続状態とともに管理する。 */
+export async function pollIrisForward(sourceDomain: CircleDomain, hash: Hex,
+  opts: { fetch?: FetchLike; baseUrl?: string } = {},
+): Promise<CctpForwardMessage | undefined> {
+  // Iris の接続停止を回復 poll 全体へ波及させない。既存 attestation 経路は変更しない。
+  const fetchImpl = opts.fetch ?? fetch;
+  const response = await fetchIrisAttestation(sourceDomain, hash, { ...opts,
+    fetch: (url, init) => fetchImpl(url, { ...init, signal: AbortSignal.timeout(15_000) }),
+  });
+  // 当経路は burn 1 本。複数 message の曖昧な nonce を決済へ持ち込まない。
+  if (response.messages.length !== 1) return undefined;
+  const message = response.messages[0] as CctpForwardMessage;
+  return { ...message, forwardTxHash: message.forwardTxHash ?? message.destinationMintTxHash };
+}
+
+export const CCTP_MESSAGE_RECEIVED_EVENT = parseAbiItem(
+  'event MessageReceived(address indexed caller, uint32 sourceDomain, bytes32 indexed nonce, bytes32 sender, uint32 indexed finalityThresholdExecuted, bytes messageBody)',
+);
+export const CCTP_MINT_AND_WITHDRAW_EVENT = parseAbiItem(
+  'event MintAndWithdraw(address indexed mintRecipient, uint256 amount, address indexed mintToken, uint256 feeCollected)',
+);
+export const CCTP_MESSAGE_RECEIVED_TOPIC0 = '0xff48c13eda96b1cceacc6b9edeedc9e9db9d6226afbc30146b720c19d3addb1c';
+export const CCTP_MINT_AND_WITHDRAW_TOPIC0 = '0x50c55e915134d457debfa58eb6f4342956f8b0616d51a89a3659360178e1ab63';
+export const ARC_USDC_ADDRESS: Address = '0x3600000000000000000000000000000000000000';
+
+export function decodeBurnMessageBody(body: Hex) {
+  if (size(body) < 228) throw new Error('Truncated BurnMessageV2');
+  return {
+    version: Number(BigInt(slice(body, 0, 4))),
+    burnToken: slice(body, 4, 36), mintRecipient: slice(body, 36, 68),
+    amount: BigInt(slice(body, 68, 100)), messageSender: slice(body, 100, 132),
+    maxFee: BigInt(slice(body, 132, 164)), feeExecuted: BigInt(slice(body, 164, 196)),
+    expirationBlock: BigInt(slice(body, 196, 228)), hookData: size(body) === 228 ? '0x' as Hex : slice(body, 228),
+  };
+}
+
+/** bounded scan、カーソルは成功した窓のみ進める。RPC 障害を「mint なし」にしない。 */
+export async function findForwardMintByNonce(destClient: PublicClient, args: {
+  nonce: Hex; sourceDomain: CircleDomain; fromBlock: bigint;
+}): Promise<{ hashes: Hex[]; nextBlock: bigint; scannedToBlock: bigint }> {
+  const head = await destClient.getBlockNumber();
+  if (args.fromBlock > head) return { hashes: [], nextBlock: args.fromBlock, scannedToBlock: head };
+  let span = 2000n;
+  while (true) {
+    const end = args.fromBlock + span - 1n < head ? args.fromBlock + span - 1n : head;
+    try {
+      const logs = await destClient.getLogs({ address: CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS,
+        event: CCTP_MESSAGE_RECEIVED_EVENT, args: { nonce: args.nonce },
+        fromBlock: args.fromBlock, toBlock: end, strict: true });
+      return { hashes: [...new Set(logs.filter((l) => !l.removed && l.args.sourceDomain === args.sourceDomain)
+        .map((l) => l.transactionHash).filter((h): h is Hex => !!h))],
+      // 12-block overlap prevents short reorgs from skipping a later canonical mint.
+      scannedToBlock: end,
+      nextBlock: end === head ? (head > 12n ? head - 12n : 0n) : end + 1n };
+    } catch (error) {
+      // provider の range/rate 制限を回復全体の失敗へ波及させない。有界に縮めて再試行。
+      if (span <= 100n) throw error;
+      span = span / 2n < 100n ? 100n : span / 2n;
+    }
+  }
+}
+
+export interface VerifyForwardMintArgs {
+  destClient: PublicClient; txHash: Hex; sourceDomain: CircleDomain; nonce: Hex;
+  mintRecipient: Address; mintToken: Address; minAmount: bigint;
+  burnToken: Address; grossAmount: bigint; maxFee: bigint;
+  messageSender?: Address;
+}
+export type ForwardMintVerification =
+  | { ok: true; verifiedNetAtomic: bigint; feeCollectedAtomic: bigint; blockNumber: bigint }
+  | { ok: false; reason: string };
+export async function verifyForwardMint(args: VerifyForwardMintArgs): Promise<ForwardMintVerification> {
+  let receipt;
+  try {
+    receipt = await args.destClient.getTransactionReceipt({ hash: args.txHash });
+  } catch (error) {
+    // 未 mine/replaced 候補が nonce 探索を永久に遮断する波及を断つ。RPC 障害は区別する。
+    if ((error as { name?: string }).name === 'TransactionReceiptNotFoundError') return { ok: false, reason: 'not-found' };
+    throw error;
+  }
+  if (receipt.status !== 'success') return { ok: false, reason: 'reverted' };
+  const logs = [...receipt.logs].sort((a, b) => a.logIndex - b.logIndex);
+  let previousMessageIndex = -1;
+  for (let i = 0; i < logs.length; i++) {
+    const log = logs[i];
+    if (log.address.toLowerCase() !== CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS.toLowerCase() ||
+        log.topics[0] !== CCTP_MESSAGE_RECEIVED_TOPIC0) continue;
+    const start = previousMessageIndex + 1;
+    previousMessageIndex = i;
+    try {
+      const { args: message } = decodeEventLog({ abi: [CCTP_MESSAGE_RECEIVED_EVENT], ...log });
+      if (message.nonce.toLowerCase() !== args.nonce.toLowerCase() || message.sourceDomain !== args.sourceDomain) continue;
+      const body = decodeBurnMessageBody(message.messageBody);
+      if (message.sender.toLowerCase() !== addressToBytes32(CCTP_V2_TOKEN_MESSENGER_ADDRESS).toLowerCase() ||
+          body.version !== 1 || body.burnToken.toLowerCase() !== addressToBytes32(args.burnToken).toLowerCase() ||
+          body.mintRecipient.toLowerCase() !== addressToBytes32(args.mintRecipient).toLowerCase() ||
+          body.amount !== args.grossAmount || body.maxFee !== args.maxFee ||
+          body.feeExecuted > args.maxFee || body.hookData !== CCTP_FORWARD_HOOK_DATA ||
+          (args.messageSender && body.messageSender.toLowerCase() !== addressToBytes32(args.messageSender).toLowerCase())) {
+        return { ok: false, reason: 'message-mismatch' };
+      }
+      const net = body.amount - body.feeExecuted;
+      if (net < args.minAmount || args.mintToken.toLowerCase() !== ARC_USDC_ADDRESS.toLowerCase()) return { ok: false, reason: 'amount-or-token' };
+      // CCTP は mint を emit してから MessageReceived を emit する。前の配送境界を越えて
+      // 別 message の mint を借用する偽成功を防ぐ (実 receipt の log 順序で pin)。
+      const mints = logs.slice(start, i).filter((l) => l.address.toLowerCase() === CCTP_V2_TOKEN_MESSENGER_ADDRESS.toLowerCase() && l.topics[0] === CCTP_MINT_AND_WITHDRAW_TOPIC0);
+      if (mints.length !== 1) return { ok: false, reason: 'mint-binding' };
+      const { args: mint } = decodeEventLog({ abi: [CCTP_MINT_AND_WITHDRAW_EVENT], ...mints[0] });
+      if (mint.mintRecipient.toLowerCase() !== args.mintRecipient.toLowerCase() ||
+          mint.mintToken.toLowerCase() !== args.mintToken.toLowerCase() || mint.amount !== net || mint.feeCollected !== body.feeExecuted) return { ok: false, reason: 'mint-mismatch' };
+      return { ok: true, verifiedNetAtomic: net, feeCollectedAtomic: mint.feeCollected, blockNumber: receipt.blockNumber };
+    } catch {
+      // malformed log を決済成功へ伝播しない。RPC 障害は上の receipt read から伝播する。
+      return { ok: false, reason: 'malformed-message' };
+    }
+  }
+  return { ok: false, reason: 'message-not-found' };
 }

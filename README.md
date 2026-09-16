@@ -71,7 +71,7 @@ There are **no fees** on receiving a payment itself, on **standard** (with-gas) 
 
 This pricing is **not a percentage skim of arbitrary size**: it is a small, capped, per-transaction service fee for the gas-sponsored JPYC relay. OpenPay remains a non-custodial software / infrastructure provider rather than a payment intermediary under the Japanese Payment Services Act framework.
 
-Arc is **standard-mode only** when enabled: customers pay network fees directly in USDC, with no separate gas token needed and no OpenPay collection. Arc is excluded from cross-chain sources and destinations. `NEXT_PUBLIC_ENABLE_USDC_ARC` defaults **off**.
+Arc is **standard-mode only** when enabled: customers pay network fees directly in USDC, with no separate gas token needed and no OpenPay collection. Arc is always excluded from cross-chain sources. Destination forwarding is separately gated by `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN` (default **off**); it uses CCTP V2 and Circle Forwarding Service, with the forwarding fee added to the buyer’s payment and no OpenPay collection. `NEXT_PUBLIC_ENABLE_USDC_ARC` defaults **off**.
 
 ## Supported tokens and chains
 
@@ -84,7 +84,7 @@ Arc is **standard-mode only** when enabled: customers pay network fees directly 
 
 > **USDC balances are chain-specific.** The same wallet address can receive USDC on all seven merchant chains (with Arc enabled), but each chain holds a separate balance. Optional chain-abstraction via Circle Gateway / CCTP V2 is available as an augmentation when the buyer's USDC is on a different chain than the merchant's selected chain (see [docs/DEPLOY_CHECKLIST.md §10](./docs/DEPLOY_CHECKLIST.md) for status and operator verification).
 
-> **Cross-chain reach:** When the merchant enables cross-chain in the QR (default ON for USDC except Arc), customers can pay from any of **11 chains** — the 6 cross-chain receiving chains (excluding Arc) plus Unichain, World Chain, Sonic, Sei, and HyperEVM. The print poster lists all 11 so customers know up-front which wallet works. Circle Gateway / CCTP V2 forwards the value to the merchant's selected receiving chain (~5–30 seconds end-to-end depending on path).
+> **Cross-chain reach:** When the merchant enables cross-chain in the QR (default ON for USDC; Arc requires both Arc flags), customers can pay from any of **11 chains** — the 6 cross-chain receiving chains (excluding Arc) plus Unichain, World Chain, Sonic, Sei, and HyperEVM. The print poster lists all 11 so customers know up-front which wallet works. Circle Gateway / CCTP V2 forwards the value to the merchant's selected receiving chain (~5–30 seconds end-to-end depending on path; Arc forwarding can take longer and has a separately quoted buyer-paid fee cap).
 
 > **Cross-chain is "gas-on" for the buyer.** Eligible same-chain payments are gasless (the buyer pays gas in USDC via the paymaster). A cross-chain payment bridges from the buyer's wallet via their own EOA, so the buyer needs the **source chain's native gas (ETH/POL etc.)** — it cannot be completed with USDC alone.
 
@@ -272,7 +272,8 @@ The table below is a **curated subset** (core setup + production feature flags).
 | `NEXT_PUBLIC_ENABLE_HANDLES` | `@handle` permanent creator links (`open-pay.jp/@alice`). Default **off** = the `@handle` page, `/api/handle/*`, and the claim UI are all inert. Requires KV. | optional |
 | `NEXT_PUBLIC_ENABLE_X402_FACILITATOR` | Runs OpenPay's **own** JPYC x402 facilitator (`/api/facilitator/*`, `/api/discovery`, the `/discovery` page and listing UI). Default **off** = every surface 404s. Light-up pairs with the disclosure update in the same release. | optional |
 | `NEXT_PUBLIC_ENABLE_JPYC_EIP3009` | Routes JPYC gasless payments through the EIP-3009 relay (no delegation, any injected wallet) instead of the older Pimlico 7702 path. **Live on mainnet**; code default **off**. | optional |
-| `NEXT_PUBLIC_ENABLE_USDC_ARC` | Adds Arc as a USDC receiving chain on mainnet/testnet. Standard only; gas paid directly in USDC, no separate token. No cross-chain. Default **off**. | optional |
+| `NEXT_PUBLIC_ENABLE_USDC_ARC` | Adds Arc as a USDC receiving chain on mainnet/testnet. Standard only; gas paid directly in USDC, no separate token. Cross-chain destination requires the separate forwarding flag. Default **off**. | optional |
+| `NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN` | Enables explicitly selected CCTP V2 forwarding to Arc when `NEXT_PUBLIC_ENABLE_USDC_ARC` is also on. Buyer pays the quoted forwarding fee cap; no Gateway, no fee leg. Recovery remains available when off. Default **off**. | optional |
 | `NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM` | Adds **Ethereum L1** as a JPYC receiving chain (mainnet only — JPYC is not deployed on Sepolia). Ethereum is **standard-mode only**: no forwarder, so the customer pays ETH gas and direct relay POSTs are refused with 503. Code default **off**. | optional |
 | `NEXT_PUBLIC_ENABLE_CIRCLE_PAYMASTER` | Circle Paymaster for USDC gasless (EIP-2612 permit; the customer pays gas in USDC, OpenPay takes nothing). Off ⇒ the previous Pimlico ERC-20 paymaster path. Base / Arbitrum / Optimism only. Default **off**. | optional |
 | `NEXT_PUBLIC_ENABLE_MAV2` | Alchemy Modular Account v2 route. Off ⇒ `pimlico-simple-7702`. Held off until the Pimlico bundler accepts MAv2 senders. Default **off**. | optional |

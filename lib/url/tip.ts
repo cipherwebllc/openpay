@@ -243,7 +243,7 @@ export function parseTipParams(
 
   // PayParams と同仕様: 明示的 "false" のみ false、それ以外 (未指定 / "true" /
   // 不明値) は default の true として扱う。既存 embed snippet は影響なし。
-  const crossChain = crossChainAllowed(chainSlug, crossChainRaw !== 'false');
+  const crossChain = chainSlug !== 'arc' && crossChainAllowed(chainSlug, crossChainRaw !== 'false');
 
   return {
     ok: true,

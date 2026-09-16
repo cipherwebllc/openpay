@@ -26,8 +26,9 @@ import {
   worldchainSepolia,
 } from 'viem/chains';
 import type { Address } from 'viem';
-import { isMainnet, parseBoolFlag } from '../env';
+import { isMainnet, parseBoolFlag, isArcCrossChainEnabled } from '../env';
 import {
+  CIRCLE_DOMAIN_ARC,
   CIRCLE_DOMAIN_ARBITRUM,
   CIRCLE_DOMAIN_AVALANCHE,
   CIRCLE_DOMAIN_BASE,
@@ -114,6 +115,8 @@ export const CROSS_CHAIN_BURN_AUTORESUME: boolean = parseBoolFlag(
 
 // chainId → Circle domain (CCTP/Gateway 共通、mainnet/testnet 同一 domain ID)。
 const CHAIN_ID_TO_DOMAIN: Record<number, CircleDomain> = {
+  5042: CIRCLE_DOMAIN_ARC,
+  5042002: CIRCLE_DOMAIN_ARC,
   [polygon.id]: CIRCLE_DOMAIN_POLYGON,
   [polygonAmoy.id]: CIRCLE_DOMAIN_POLYGON,
   [base.id]: CIRCLE_DOMAIN_BASE,
@@ -140,6 +143,7 @@ const CHAIN_ID_TO_DOMAIN: Record<number, CircleDomain> = {
 
 // domain は mainnet/testnet 共通だが chainId は env により異なるため 2 table。
 const DOMAIN_TO_CHAIN_ID_MAINNET: Record<CircleDomain, number> = {
+  [CIRCLE_DOMAIN_ARC]: 5042,
   [CIRCLE_DOMAIN_POLYGON]: polygon.id,
   [CIRCLE_DOMAIN_BASE]: base.id,
   [CIRCLE_DOMAIN_ARBITRUM]: arbitrum.id,
@@ -154,6 +158,7 @@ const DOMAIN_TO_CHAIN_ID_MAINNET: Record<CircleDomain, number> = {
 };
 
 const DOMAIN_TO_CHAIN_ID_TESTNET: Record<CircleDomain, number> = {
+  [CIRCLE_DOMAIN_ARC]: 5042002,
   [CIRCLE_DOMAIN_POLYGON]: polygonAmoy.id,
   [CIRCLE_DOMAIN_BASE]: baseSepolia.id,
   [CIRCLE_DOMAIN_ARBITRUM]: arbitrumSepolia.id,
@@ -183,7 +188,7 @@ export function chainIdForDomain(domain: CircleDomain): number {
 // Avalanche / Unichain は phase 4b-1 で buyer-only として追加 (USDC global
 // volume + 国内 CEX 引出先カバー)、merchant 受信 chain には露出しない
 // (USDC_CHAINS in lib/chains.ts は 5 のまま)。
-export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
+const LEGACY_TARGETS: readonly CrossChainTarget[] = isMainnet
   ? [
       {
         domain: CIRCLE_DOMAIN_POLYGON,
@@ -334,7 +339,23 @@ export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = isMainnet
       },
     ];
 
-/** cross-chain で merchant 受信可能な chain のみ (USDC_CHAINS から Arc を除く)。
+// 恒久ポリシー。lookup/回復を flag OFF で失わない。
+export const FORWARD_ONLY_DESTINATION_CHAIN_IDS: ReadonlySet<number> = new Set([5042, 5042002]);
+export function isForwardOnlyDestination(chainId: number): boolean {
+  return FORWARD_ONLY_DESTINATION_CHAIN_IDS.has(chainId);
+}
+export const CROSS_CHAIN_TARGETS: readonly CrossChainTarget[] = [
+  ...LEGACY_TARGETS,
+  ...(isArcCrossChainEnabled() ? [{
+    domain: CIRCLE_DOMAIN_ARC,
+    chainId: isMainnet ? 5042 : 5042002,
+    isTestnet: !isMainnet,
+    role: 'merchant-only' as const,
+    destinationMint: 'circle-forward' as const,
+  }] : []),
+];
+
+/** cross-chain で merchant 受信可能な chain のみ (Arc は forwarding flag による merchant-only entry)。
  * role='buyer-only' は merchant 受信フローに含めない設計。
  * 'merchant-only' は merchant 受信は可能だが現状該当 chain なし (Ethereum 復帰済)。
  * 結果: 'merchant-and-buyer' (6: Polygon/Base/Arbitrum/Optimism/Avalanche/Ethereum) = 6 chain。

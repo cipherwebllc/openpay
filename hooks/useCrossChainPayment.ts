@@ -6,12 +6,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { Address, Hex } from 'viem';
+import { createPublicClient, type Address, type Hex } from 'viem';
+import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { useAccount, usePublicClient, useSwitchChain, useWalletClient } from 'wagmi';
-import { env } from '@/lib/env';
+import { env, isArcCrossChainEnabled } from '@/lib/env';
 import { readAllCrossChainBalances } from '@/lib/crossChain/balance';
 import {
   CrossChainBurnUnresolvedError,
+  CrossChainQuoteExpiredError,
+  assertForwardQuoteBinding,
   executeCctpTransfer,
   executeGatewayTransfer,
   type CctpResumeState,
@@ -23,7 +26,7 @@ import {
   type GatewayResumeState,
   type OnMerchantMint,
 } from '@/lib/crossChain/execute';
-import { CROSS_CHAIN_BURN_AUTORESUME } from '@/lib/crossChain/config';
+import { BUYER_SOURCE_TARGETS, CROSS_CHAIN_DISABLED, isForwardOnlyDestination, CROSS_CHAIN_BURN_AUTORESUME } from '@/lib/crossChain/config';
 import {
   normalizeBurnTxHash,
   verifyBurnTxHash,
@@ -32,6 +35,9 @@ import {
 } from '@/lib/crossChain/burnMarker';
 import { buildPaymentLogEvent, logPaymentEvent } from '@/lib/paymentLog';
 import {
+  acceptForwardQuote,
+  fetchCctpBurnFees,
+  type AcceptedQuote,
   estimateCctpMaxFee,
   CCTP_V2_TOKEN_MESSENGER_ADDRESS,
 } from '@/lib/crossChain/cctp';
@@ -47,6 +53,7 @@ import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
 import {
   clearResumeState,
   hasResumeState,
+  loadResumeStateDiscriminated,
   loadResumeState,
   saveResumeState,
   saveResumeStateStrict,
@@ -70,7 +77,17 @@ export type ExecuteResult =
   | ExecuteGatewayTransferResult
   | ExecuteCctpTransferResult;
 
+export interface PendingForwardRecovery {
+  kind: 'scanning' | 'unreadable' | 'pending';
+  sourceChainId?: number;
+  state?: CctpResumeState;
+}
+
 export interface UseCrossChainPaymentReturn {
+  pendingRecovery?: PendingForwardRecovery;
+  recoveryQuote?: AcceptedQuote;
+  recheckForward: (consent?: boolean) => Promise<void>;
+
   /** undefined = balance 取得中 or 0 amount。自動 best path (selectPath) */
   decision: PathDecision | undefined;
   /** 全 viable source chain x path options (CrossChainSourceChooser 用)。
@@ -138,6 +155,16 @@ export function useCrossChainPayment(
   const { switchChainAsync } = useSwitchChain();
   const enabled = args.enabled !== false && Boolean(account);
 
+  const forwardOnly = isForwardOnlyDestination(args.targetChainId);
+  const executionRef = useRef(false);
+  const [forwardQuotes, setForwardQuotes] = useState<Readonly<Record<number, AcceptedQuote>>>({});
+  const [quoteRevision, setQuoteRevision] = useState(0);
+  const [recoveryQuote, setRecoveryQuote] = useState<AcceptedQuote>();
+  const [recovery, setRecovery] = useState<PendingForwardRecovery>();
+  const [scannedScope, setScannedScope] = useState('');
+  const recoveryScope = `${account}:${args.targetChainId}:${args.recipient}:${args.requiredAtomic}`;
+  const pendingRecovery = useMemo(() => forwardOnly && account && scannedScope !== recoveryScope
+    ? { kind: 'scanning' as const } : recovery, [forwardOnly, account, scannedScope, recoveryScope, recovery]);
   const [progress, setProgress] = useState<CrossChainProgress | undefined>();
   const [isExecuting, setIsExecuting] = useState(false);
   const [isCommitted, setIsCommitted] = useState(false);
@@ -172,6 +199,29 @@ export function useCrossChainPayment(
     staleTime: 30_000,
   });
 
+  useEffect(() => {
+    if (!forwardOnly || !enabled || pendingRecovery || !isArcCrossChainEnabled()) return;
+    let cancelled = false;
+    const refresh = async () => {
+      setForwardQuotes({});
+      const entries = await Promise.all(BUYER_SOURCE_TARGETS.map(async (target) => {
+        try {
+          const fee = await fetchCctpBurnFees(target.domain, 26, { forward: true });
+          return [target.chainId, acceptForwardQuote({ sourceDomain: target.domain, destDomain: 26,
+            sourceChainId: target.chainId, destChainId: args.targetChainId,
+            recipient: args.recipient, valueAtomic: String(args.requiredAtomic) }, fee)] as const;
+        } catch {
+          // 1 source の fee API 障害を他 source の選択肢へ波及させない。失敗経路は disabled。
+          return undefined;
+        }
+      }));
+      if (!cancelled) setForwardQuotes(Object.fromEntries(entries.filter((e) => e !== undefined)));
+    };
+    void refresh();
+    const timer = setInterval(() => void refresh(), 300_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [forwardOnly, enabled, pendingRecovery, args.targetChainId, args.recipient, args.requiredAtomic, quoteRevision]);
+
   const decision = useMemo<PathDecision | undefined>(() => {
     if (!balancesQuery.data) return undefined;
     if (args.requiredAtomic <= 0n) return undefined;
@@ -189,8 +239,9 @@ export function useCrossChainPayment(
       targetChainId: args.targetChainId,
       requiredAtomic: args.requiredAtomic,
       balances: balancesQuery.data,
+      forwardQuotes,
     });
-  }, [balancesQuery.data, args.requiredAtomic, args.targetChainId]);
+  }, [balancesQuery.data, args.requiredAtomic, args.targetChainId, forwardQuotes]);
 
   // 中断再開 state の session key。runCore の内部で組む key と同一定義 (account /
   // kind / chain / recipient / 金額)。mount 時の committed 復元 (D9)・hash 貼付け採用 (D4)・
@@ -219,12 +270,31 @@ export function useCrossChainPayment(
     [account, args.requiredAtomic, args.targetChainId, args.recipient],
   );
 
+  const scanRecovery = useCallback(() => {
+    if (!forwardOnly || !account) { setRecovery(undefined); setScannedScope(recoveryScope); return; }
+    let pending: PendingForwardRecovery | undefined;
+    for (const target of BUYER_SOURCE_TARGETS) {
+      const key = sessionKeyFor('cctp-v2', target.chainId);
+      if (!key) continue;
+      const entry = loadResumeStateDiscriminated(key);
+      if (entry.kind === 'unreadable') { pending = { kind: 'unreadable', sourceChainId: target.chainId }; break; }
+      // verified も cleanup/会計が終わるまで回復対象。残高・option・flag に依存しない。
+      if (entry.kind === 'present' && (entry.state.burnIntent || entry.state.burnTxHash)) {
+        pending ??= { kind: 'pending', sourceChainId: target.chainId, state: entry.state };
+      }
+    }
+    setRecovery(pending);
+    setScannedScope(recoveryScope);
+    return pending;
+  }, [forwardOnly, account, sessionKeyFor, recoveryScope]);
+  useEffect(() => { scanRecovery(); setRecoveryQuote(undefined); }, [scanRecovery]);
+
   // D9: mount 時 (reload 後) に marker / burn hash / attestation が残っていれば committed を
   // 復元する。復元しないと、再読込しただけで親フォームの直接決済ロックが外れ、burn 済 (または
   // 「送るつもり」が確定済) の決済をもう一度別経路で払えてしまう。marker は「不可逆境界の
   // 一歩手前」なので、reload を跨いでも塞ぎ続ける (設計 §7)。
   useEffect(() => {
-    if (isCommitted) return;
+    if (forwardOnly || isCommitted) return;
     for (const option of pathOptions) {
       if (option.kind === 'direct') continue;
       const key = sessionKeyFor(option.kind, option.sourceChainId);
@@ -240,7 +310,7 @@ export function useCrossChainPayment(
         return;
       }
     }
-  }, [pathOptions, sessionKeyFor, isCommitted]);
+  }, [pathOptions, sessionKeyFor, isCommitted, forwardOnly]);
 
   // 共通 execute core: 「source chain + path kind + (Gateway only) destDomain」
   // を引数に取り、Gateway / CCTP V2 dispatch を行う。auto-decision (execute)
@@ -254,6 +324,7 @@ export function useCrossChainPayment(
       }
     | {
         kind: 'cctp-v2';
+        forward?: ExecuteCctpTransferArgs['forward'];
         sourceChainId: number;
         sourceDomain: CircleDomain;
         destDomain: CircleDomain;
@@ -261,6 +332,7 @@ export function useCrossChainPayment(
 
   const runCore = useCallback(
     async (core: ExecuteCoreArgs): Promise<ExecuteResult> => {
+      if (forwardOnly && (core.kind !== 'cctp-v2' || !core.forward)) throw new Error('Arc requires explicit forwarding option');
       if (!account || !walletClient || !sourcePublicClient || !destPublicClient) {
         throw new Error('wallet not connected');
       }
@@ -303,9 +375,15 @@ export function useCrossChainPayment(
         feeAtomic: feeAmount,
       };
       // commitBurnIntent が marker を混ぜ込むために、直近の resume state を保持する。
-      let latestState: ResumeState = { ...(loadResumeState(sessionKey) ?? {}) };
+      // scan 後の storage 障害を「記録なし→新 burn」へ波及させない。forward は判別読取を維持。
+      const recovered = forwardOnly ? loadResumeStateDiscriminated(sessionKey) : undefined;
+      if (recovered?.kind === 'unreadable') throw recovered.error;
+      let latestState: ResumeState = forwardOnly
+        ? { ...(recovered?.kind === 'present' ? recovered.state : {}) }
+        : { ...(loadResumeState(sessionKey) ?? {}) };
       const onStep = (s: ResumeState) => {
-        latestState = s;
+        latestState = forwardOnly ? { ...latestState, ...s,
+          forward: { ...(latestState as CctpResumeState).forward!, ...(s as CctpResumeState).forward! } } : s;
         // D4a: 親子 UI の同一 mount 排他は storage 成否より先に確定する。CCTP は
         // merchant burn hash / burn-intent marker、Gateway は merchant attestation が
         // 送金の不可逆境界。approveTxHash だけでは資金移動前なので committed にせず、
@@ -322,7 +400,10 @@ export function useCrossChainPayment(
         }
         // D4b は見送り: resume 保存は best-effort のまま。保存失敗後に reload すると
         // committed state を復元できず、同一 mount 外の二重送金窓が残る。
-        saveResumeState(sessionKey, s);
+        if (forwardOnly) {
+          saveResumeStateStrict(sessionKey, latestState);
+          setRecovery({ kind: 'pending', sourceChainId: core.sourceChainId, state: latestState as CctpResumeState });
+        } else saveResumeState(sessionKey, s);
       };
 
       // A1: burn-intent marker の fail-closed 永続化。read-back まで確認できた場合だけ
@@ -331,9 +412,10 @@ export function useCrossChainPayment(
       //   D4a は best-effort 保存が前提で「保存できなくても送金は起きた」側に倒す。marker は
       //   fail-closed なので「書けた ⇒ 送る ⇒ 塞ぐ」で一貫する (書けなければ burn しないので
       //   塞ぐ必要もなく、親の通常決済を使わせる方が正しい)。
-      const commitBurnIntent = (marker: BurnIntentMarker, slot: BurnSlot) => {
+      const commitBurnIntent = (marker: BurnIntentMarker, slot: BurnSlot, metadata?: { forward: NonNullable<CctpResumeState['forward']> }) => {
         const next: CctpResumeState = {
           ...(latestState as CctpResumeState),
+          ...metadata,
           ...(slot === 'merchant'
             ? { burnIntent: marker }
             : { feeBurnIntent: marker }),
@@ -350,7 +432,7 @@ export function useCrossChainPayment(
       // resume で複数回発火し得るので、集計層が (bridge+chainId+mintTxHash) で dedup する。
       const onMerchantMint: OnMerchantMint = (info) => {
         const bridgeFeeMax =
-          core.kind === 'cctp-v2'
+          info.forward ? BigInt(info.forward.maxFeeAtomic) : core.kind === 'cctp-v2'
             ? estimateCctpMaxFee(bridgedAmount)
             : estimateGatewayMaxFee(bridgedAmount);
         void logPaymentEvent(
@@ -360,14 +442,14 @@ export function useCrossChainPayment(
               chainId: args.targetChainId,
               tokenAddress: destDeployment.address,
               merchant: args.recipient,
-              merchantAmount: bridgedAmount,
+              merchantAmount: info.forward ? BigInt(info.forward.verifiedNetAtomic) : bridgedAmount,
               customer: account,
               feeReceiver: args.feeReceiver,
               feeAmount, // OpenPay cross-chain 利用料 (Phase1 alpha = 0)
               saleAmount: args.requiredAtomic, // 請求総額 (gross)
               bridge: core.kind,
               sourceChainId: core.sourceChainId,
-              bridgedAmount,
+              bridgedAmount: info.forward ? BigInt(info.forward.grossAtomic) : bridgedAmount,
               bridgeFeeMax,
               burnTxHash: info.burnTxHash,
             },
@@ -405,17 +487,20 @@ export function useCrossChainPayment(
         return result;
       }
       // cctp-v2
-      const resume = loadResumeState<CctpResumeState>(sessionKey);
+      const resume = forwardOnly ? latestState as CctpResumeState : loadResumeState<CctpResumeState>(sessionKey);
       // marker (送るつもり) だけでも不可逆境界の一歩手前なので、親フォームの直接決済・
       // 別チェーン決済を塞ぐ (hash が残っていない中断からの復元も含めて排他する)。
       if (resume?.burnTxHash || resume?.burnIntent) setIsCommitted(true);
       // 二段確認は 1 回の execute で消費する (arm したまま放置しても次回以降に効かない)。
       const allowManualReburn = manualReburnArmedRef.current;
-      manualReburnArmedRef.current = false;
-      setIsManualReburnArmed(false);
+      if (!forwardOnly || core.forward?.allowBurn !== false) {
+        manualReburnArmedRef.current = false;
+        setIsManualReburnArmed(false);
+      }
       const cctpArgs: ExecuteCctpTransferArgs = {
+        forward: core.forward,
         walletClient,
-        sourcePublicClient,
+        sourcePublicClient: forwardOnly ? createPublicClient({ chain: chainObjectForId(core.sourceChainId), transport: transportForChain(core.sourceChainId) }) : sourcePublicClient,
         destPublicClient,
         switchChainAsync,
         account,
@@ -437,10 +522,13 @@ export function useCrossChainPayment(
         allowAutoReburn: CROSS_CHAIN_BURN_AUTORESUME,
       };
       const result = await executeCctpTransfer(cctpArgs);
-      clearResumeState(sessionKey);
+      if (!forwardOnly || (latestState as CctpResumeState).forward?.state === 'verified') clearResumeState(sessionKey);
+      if (forwardOnly) scanRecovery();
       return result;
     },
     [
+      forwardOnly,
+      scanRecovery,
       account,
       args.recipient,
       args.requiredAtomic,
@@ -454,6 +542,7 @@ export function useCrossChainPayment(
   );
 
   const execute = useCallback(async (): Promise<ExecuteResult | null> => {
+    if (forwardOnly) throw new Error('Arc forwarding requires chooser selection');
     setError(undefined);
     setResult(undefined);
     setProgress(undefined);
@@ -493,10 +582,20 @@ export function useCrossChainPayment(
     setResult(executeResult);
     setIsExecuting(false);
     return executeResult;
-  }, [decision, runCore, walletClient]);
+  }, [decision, runCore, walletClient, forwardOnly]);
 
   const executeOption = useCallback(
     async (option: PathOption): Promise<ExecuteResult | null> => {
+      if (forwardOnly) {
+        // state reset 前に認可/排他を確認し、競合クリックで committed が解除されるのを防ぐ。
+        if (executionRef.current || pendingRecovery || scanRecovery() || !enabled || CROSS_CHAIN_DISABLED || !isArcCrossChainEnabled() ||
+            !pathOptions.includes(option) || option.kind !== 'cctp-v2' || option.disabledReason || !option.acceptedQuote) throw new Error('Forward option unavailable');
+        assertForwardQuoteBinding(option.acceptedQuote, { sourceChainId: option.sourceChainId,
+          sourceDomain: option.sourceDomain, destChainId: args.targetChainId, destDomain: 26,
+          recipient: args.recipient, valueAtomic: args.requiredAtomic });
+        if (Date.now() >= option.acceptedQuote.expiresAt) throw new CrossChainQuoteExpiredError();
+
+      }
       setError(undefined);
       setResult(undefined);
       setProgress(undefined);
@@ -523,6 +622,7 @@ export function useCrossChainPayment(
       setIsExecuting(true);
       const executeResult = await runCore({
         kind: option.kind,
+        ...(forwardOnly ? { forward: { acceptedQuote: option.acceptedQuote! } } : {}),
         sourceChainId: option.sourceChainId,
         sourceDomain: option.sourceDomain,
         destDomain: destDomainResolved,
@@ -531,7 +631,7 @@ export function useCrossChainPayment(
       setIsExecuting(false);
       return executeResult;
     },
-    [args.targetChainId, runCore],
+    [args.targetChainId, args.recipient, args.requiredAtomic, runCore, forwardOnly, pendingRecovery, enabled, pathOptions, scanRecovery],
   );
 
   // burn 状態未確定の throw は UI 専用パネルに回す (Iris timeout 等の一般エラーとは別扱い)。
@@ -568,16 +668,22 @@ export function useCrossChainPayment(
 
   const safeExecuteOption = useCallback(
     async (option: PathOption) => {
+      if (forwardOnly && executionRef.current) throw new Error('Execution already running');
       try {
-        return await executeOption(option);
+        const execution = executeOption(option);
+        if (forwardOnly) executionRef.current = true;
+        return await execution;
       } catch (e) {
+        if (e instanceof CrossChainQuoteExpiredError) setQuoteRevision((v) => v + 1);
         captureBurnUnresolved(e);
         setError(e instanceof Error ? e : new Error(String(e)));
         setIsExecuting(false);
         throw e;
+      } finally {
+        if (forwardOnly) { executionRef.current = false; scanRecovery(); }
       }
     },
-    [executeOption, captureBurnUnresolved],
+    [executeOption, captureBurnUnresolved, forwardOnly, scanRecovery],
   );
 
   // D4: 買い手が explorer で見つけた burn の tx hash を貼って続きから再開する。
@@ -627,6 +733,32 @@ export function useCrossChainPayment(
     [burnUnresolved, sessionKeyFor, unresolvedSourceClient],
   );
 
+  const recheckForward = useCallback(async (consent = false) => {
+    if (executionRef.current || pendingRecovery?.kind !== 'pending' || !pendingRecovery.state?.forward || !pendingRecovery.sourceChainId) return;
+    const sourceDomain = domainForChainId(pendingRecovery.sourceChainId)!;
+    const savedQuote = pendingRecovery.state.forward.acceptedQuote;
+    // 再確認は probe-only。probe が burn を返した場合だけ新 quote を提示して二度目の同意を待つ。
+    const quote = consent ? recoveryQuote : savedQuote;
+    if (!quote) return;
+    executionRef.current = true;
+    setIsExecuting(true);
+    setError(undefined);
+    try {
+      const completed = await runCore({ kind: 'cctp-v2', sourceChainId: pendingRecovery.sourceChainId,
+        sourceDomain, destDomain: 26, forward: { acceptedQuote: quote, allowBurn: consent } });
+      setResult(completed);
+      setRecoveryQuote(undefined);
+    } catch (e) {
+      if (e instanceof CrossChainQuoteExpiredError) setRecoveryQuote(e.replacementQuote);
+      captureBurnUnresolved(e);
+      setError(e instanceof Error ? e : new Error(String(e)));
+    } finally {
+      executionRef.current = false;
+      setIsExecuting(false);
+      scanRecovery();
+    }
+  }, [pendingRecovery, recoveryQuote, runCore, captureBurnUnresolved, scanRecovery]);
+
   // manual パネルの二段確認完了。次の execute だけ、曖昧な状態からの再 burn を許可する。
   const armManualReburn = useCallback(() => {
     manualReburnArmedRef.current = true;
@@ -645,6 +777,9 @@ export function useCrossChainPayment(
   );
 
   return {
+    pendingRecovery,
+    recoveryQuote,
+    recheckForward,
     decision,
     pathOptions,
     progress,

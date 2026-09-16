@@ -147,3 +147,33 @@ export function hasResumeState(k: ResumeSessionKey): boolean {
     return false;
   }
 }
+
+export type DiscriminatedResumeState =
+  | { kind: 'absent' }
+  | { kind: 'present'; state: CctpResumeState }
+  | { kind: 'unreadable'; error: Error };
+/** Arc 専用の fail-closed 読取。既存 loader の malformed 挙動は変えない。 */
+export function loadResumeStateDiscriminated(k: ResumeSessionKey): DiscriminatedResumeState {
+  try {
+    if (typeof window === 'undefined') throw new Error('Storage unavailable');
+    const raw = window.localStorage.getItem(keyString(k));
+    if (raw === null) return { kind: 'absent' };
+    const state = JSON.parse(raw) as CctpResumeState;
+    if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('Invalid resume record');
+    if (!state.burnIntent && !state.burnTxHash) throw new Error('Forward record has no burn marker or hash');
+    const f = state.forward;
+    if (!f || !['intent', 'broadcast', 'source-confirmed', 'awaiting-forward', 'forward-observed', 'verified'].includes(f.state) ||
+        !f.acceptedQuote || !/^\d+$/.test(f.scanFromBlock)) throw new Error('Invalid forwarding record');
+    const q = f.acceptedQuote;
+    if (!Number.isSafeInteger(q.quotedAt) || !Number.isSafeInteger(q.expiresAt) || q.expiresAt !== q.quotedAt + 300_000 ||
+        !Number.isSafeInteger(q.minimumFeeBpsX1000) || !/^\d+$/.test(q.forwardFeeAtomic) ||
+        !/^\d+$/.test(q.grossAtomic) || !/^\d+$/.test(q.maxFeeAtomic) ||
+        !/^\d+$/.test(q.valueAtomic) || !/^0x[0-9a-fA-F]{40}$/.test(q.recipient) ||
+        q.sourceChainId !== k.sourceChainId || q.destChainId !== k.destChainId ||
+        q.recipient.toLowerCase() !== k.recipient.toLowerCase() || q.valueAtomic !== String(k.valueAtomic)) throw new Error('Invalid quote binding');
+    return { kind: 'present', state };
+  } catch (error) {
+    // 読めない記録を「支払いなし」にして二重支払いを開く波及を断つ。
+    return { kind: 'unreadable', error: error instanceof Error ? error : new Error(String(error)) };
+  }
+}

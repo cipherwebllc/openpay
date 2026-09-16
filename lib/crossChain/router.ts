@@ -10,7 +10,7 @@ import type {
   MultiChainBalances,
   WalletUsdcBalance,
 } from './balance';
-import { domainForChainId } from './config';
+import { domainForChainId, isForwardOnlyDestination } from './config';
 import type { CircleDomain, CrossChainTarget } from './types';
 
 export type PathDecision =
@@ -61,6 +61,9 @@ export interface SelectPathArgs {
 
 export function selectPath(args: SelectPathArgs): PathDecision {
   const { targetChainId, requiredAtomic, balances } = args;
+
+  // Arc は明示選択のみ。lookup の追加が auto/Gateway 送金に波及するのを断つ。
+  if (isForwardOnlyDestination(targetChainId)) return { path: 'onramp', reason: 'no_balance_anywhere' };
 
   // 1. direct path
   const directEntry = balances.wallet.find(
