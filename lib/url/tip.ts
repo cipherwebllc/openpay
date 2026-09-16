@@ -7,6 +7,8 @@
 //   preset  (任意, "100|☕ コーヒー1杯,500,1000|🍰 ケーキ" カンマ区切り、最大 6 件)
 //
 // Tip widget は gas=customer 固定 (preset セマンティクス: クリエイターが preset 額から運営手数料控除後を受け取る、ファンが gas を上乗せ支払い)。
+import { isArcTipEnabled } from '../env';
+import type { PayMode } from '../fee';
 import { getAddress, isAddress } from 'viem';
 import type { Address } from 'viem';
 import { removeControlChars } from '../sanitize';
@@ -37,7 +39,27 @@ import {
 // /tip/[address] helpers
 // ---------------------------------------------------------------------------
 
+export function resolveTipCapability(
+  token: TokenSymbol,
+  chainSlug: ChainSlug,
+):
+  | { ok: true; mode: PayMode }
+  | { ok: false; reason: 'unsupported-pair' | 'gasless-required' } {
+  // 不正な組合せを deployment lookup の例外へ波及させず、URL/settings 共通の拒否結果にする。
+  if (!symbolHasDeployment(token, chainSlug)) {
+    return { ok: false, reason: 'unsupported-pair' };
+  }
+  if (isGaslessSupported(deploymentForSlug(token, chainSlug))) {
+    return { ok: true, mode: 'gasless' };
+  }
+  if (token === 'usdc' && chainSlug === 'arc' && isArcTipEnabled()) {
+    return { ok: true, mode: 'standard' };
+  }
+  return { ok: false, reason: 'gasless-required' };
+}
+
 export type TipParams = {
+  mode: PayMode;
   to: Address;
   token: TokenSymbol;
   // chain slug (PayParams と同じ規則)。省略時は token の default。
@@ -139,7 +161,10 @@ function sanitizePresets(raw: string): string[] | undefined {
   return normalizePresets(raw.split(','));
 }
 
-export function buildTipPath(params: TipParams): string {
+// mode は能力解決で導出し、URL には保存しない。既存 builder caller は指定不要。
+type TipLinkParams = Omit<TipParams, 'mode'> & { mode?: PayMode };
+
+export function buildTipPath(params: TipLinkParams): string {
   const sp = new URLSearchParams();
   sp.set('token', params.token);
   if (params.chain && params.chain !== DEFAULT_CHAIN_FOR_SYMBOL[params.token]) {
@@ -185,7 +210,7 @@ export function buildTipPath(params: TipParams): string {
   return `/tip/${params.to}?${sp.toString()}`;
 }
 
-export function buildTipUrl(origin: string, params: TipParams): string {
+export function buildTipUrl(origin: string, params: TipLinkParams): string {
   return `${origin}${buildTipPath(params)}`;
 }
 
@@ -213,20 +238,13 @@ export function parseTipParams(
     return { ok: false, error: chainResult.error };
   }
   const chainSlug = chainResult.slug;
-  if (!symbolHasDeployment(token, chainSlug)) {
-    return {
-      ok: false,
-      error: `${token} は ${chainSlug} に対応していません`,
-    };
-  }
-  // Tip widget は gas=customer 固定 (常に gasless) なので、(token, chain) が
-  // gasless 非対応なら tip 自体が成立しない → reject。例: buyer-only chain の USDC。
-  if (!isGaslessSupported(deploymentForSlug(token, chainSlug))) {
-    return {
-      ok: false,
-      error: `${token} on ${chainSlug} は tip widget 非対応です (gasless mode 必須のため)`,
-    };
-  }
+  const capability = resolveTipCapability(token, chainSlug);
+  if (!capability.ok) return {
+    ok: false,
+    error: capability.reason === 'unsupported-pair'
+      ? `${token} は ${chainSlug} に対応していません`
+      : `${token} on ${chainSlug} は tip widget 非対応です (gasless mode 必須のため)`,
+  };
 
   const name = searchParams.get('name');
   const message = searchParams.get('message');
@@ -243,13 +261,16 @@ export function parseTipParams(
 
   // PayParams と同仕様: 明示的 "false" のみ false、それ以外 (未指定 / "true" /
   // 不明値) は default の true として扱う。既存 embed snippet は影響なし。
-  const crossChain = chainSlug !== 'arc' && crossChainAllowed(chainSlug, crossChainRaw !== 'false');
+  const crossChain = capability.mode === 'standard'
+    ? false
+    : crossChainAllowed(chainSlug, crossChainRaw !== 'false');
 
   return {
     ok: true,
     params: {
       to: getAddress(addressParam),
       token,
+      mode: capability.mode,
       chain: chainSlug,
       name: name ? sanitizeText(name, TIP_NAME_MAX) : undefined,
       message: message ? sanitizeText(message, TIP_MESSAGE_MAX) : undefined,

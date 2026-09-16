@@ -2172,3 +2172,45 @@ it('chain 不正時のエラー文言は現在有効な slug を列挙する (Av
     expect(r.error).not.toContain('arc');
   }
 });
+
+it.each([[false, false], [false, true], [true, false], [true, true]])('Arc tip URL requires both flags (%s, %s), ignores URL mode and forces cross-chain off', async (arc, tip) => {
+  const { parseTipParams } = await import('@/lib/url/tip');
+  const { env } = await import('@/lib/env');
+  const previous = { enableUsdcArc: env.enableUsdcArc, enableUsdcArcTip: env.enableUsdcArcTip };
+  Object.assign(env, { enableUsdcArc: arc, enableUsdcArcTip: tip });
+  try {
+    const result = parseTipParams(VALID_TO, new URLSearchParams('token=usdc&chain=arc&preset=0.5&crossChain=true&mode=gasless'));
+    expect(result.ok).toBe(arc && tip);
+    if (result.ok) {
+      expect(result.params).toMatchObject({ mode: 'standard', crossChain: false, presets: ['0.5'] });
+      expect(buildTipPath(result.params)).not.toContain('mode=');
+    }
+    const base = parseTipParams(VALID_TO, new URLSearchParams('token=usdc&mode=standard'));
+    expect(base.ok && base.params.mode).toBe('gasless');
+  } finally { Object.assign(env, previous); }
+});
+
+it('unsupported pair is rejected before deployment lookup', async () => {
+  const tokens = await import('@/lib/tokens');
+  const { resolveTipCapability } = await import('@/lib/url/tip');
+  const lookup = vi.spyOn(tokens, 'deploymentForSlug');
+  try {
+    expect(resolveTipCapability('jpyc', 'base')).toEqual({ ok: false, reason: 'unsupported-pair' });
+    expect(lookup).not.toHaveBeenCalled();
+  } finally { lookup.mockRestore(); }
+});
+
+it('Arc tip parser cross-chain prohibition does not depend on crossChainAllowed', async () => {
+  const { parseTipParams } = await import('@/lib/url/tip');
+  const { env } = await import('@/lib/env');
+  const shared = await import('@/lib/url/shared');
+  const previous = { enableUsdcArc: env.enableUsdcArc, enableUsdcArcTip: env.enableUsdcArcTip };
+  Object.assign(env, { enableUsdcArc: true, enableUsdcArcTip: true });
+  const policy = vi.spyOn(shared, 'crossChainAllowed').mockReturnValue(true);
+  try {
+    const result = parseTipParams(VALID_TO, new URLSearchParams('token=usdc&chain=arc&crossChain=true'));
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.params.crossChain).toBe(false);
+    expect(policy).not.toHaveBeenCalled();
+  } finally { policy.mockRestore(); Object.assign(env, previous); }
+});

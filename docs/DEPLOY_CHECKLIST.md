@@ -1946,6 +1946,20 @@ query の percent encoding を含む例は fixture の measurements を参照す
   ⚠️ 実測の含意: **Arc では ERC-20 USDC (`0x3600…`・6dp) の残高と native gas 残高は同一の資金** (20 → 19.499025 = 0.5 送金 + 0.000975 ガス)。顧客の USDC 残高からガスも引かれるため、金額ちょうどしか持たない顧客は失敗する (通常決済の「別途 gas」注意はガス *トークン* ではなく *残高の余裕* として案内する)。
 - [ ] **点灯 (`NEXT_PUBLIC_ENABLE_USDC_ARC=1`) は開示更新と同一リリース**: LP / FAQ / 取引所ガイド / Terms・免責・特商法 / llms.txt / お知らせの Arc 文言 (draft = `plans/arc-usdc-receive.md` §6) を user 承認のうえ同じ PR に含める。
 
+
+## Arc USDC チップ
+
+- 公開文言と money-path の差分は merge 前に user がレビューする。
+- 点灯は **env → merge → deploy**。本番 Vercel で既存 `NEXT_PUBLIC_ENABLE_USDC_ARC=1` を確認し、**merge 前に** `NEXT_PUBLIC_ENABLE_USDC_ARC_TIP=1` を設定する。コードと開示を同一リリースで公開する。
+- 両 flag ON の testnet で #504 の EIP-1193 注入 script を使い、`/ja/tip/<address>?token=usdc&chain=arc&preset=0.5` を開く。Arc testnet (5042002)、ERC-20 USDC (6 桁)、ガスも USDC を確認する。
+- 0.5 USDC を標準送信し、サンクス、払い手控え (`paymentMode:standard`、`networkFeeEquivalent` なし)、Explorer、server log 1 件 (`tip:true`、`chainSlug:arc`、`mode:standard`) を確認する。
+- `/pay` の同額送金 intent を session に残して `/tip` を開き、以前の送信パネルのみでサンクス・控え・webhook・overlay が発火しないことを確認する。
+- `/ja/create` のチップ preview はウォレット送信・intent 復元・ログが発火しない。Arc 選択時は cross-chain toggle がない。
+- @handle を Arc のみ／Base のみ／両方で公開して開き直し、方法が一致することを確認する。flag OFF では公開済み Arc を保持し「無効中」を表示、再公開は説明付きで停止する。
+- tip metadata が生成する `/og/tip?...&chain=arc` と handle OG を確認する。Arc のみでは「ガス不要」を表示しない。
+
+**実施記録 (2026-09-17・Fable)**: 両 flag ON の `next start -p 3140` で、#504 と同じ EIP-1193 注入 script により `/ja/tip/0x…dEaD?token=usdc&chain=arc&preset=0.5|コーヒー,1` を標準モードで送信。ガス行「ウォレットで支払い」・「ガスは USDC でウォレットが別途請求」・「ガス不要」非表示を確認 → 送信 → 成功 (Explorer リンク) → `/ja/scan` の払い手控えに USDC / Arc Testnet → `/api/og/tip?…&chain=arc` 200。on-chain: [tx 0x461afb0b…22a83](https://explorer.testnet.arc.io/tx/0x461afb0bd1cd9c60276916eba110d8d191c71fa617b1ef46e623fa13d7622a83) success・block 62439996・gasUsed 48,734・Transfer 0.5 USDC → 0x…dEaD。
+
 ### 10.12 Arc forwarding
 
 Arc (5042 / 5042002, Circle domain 26) is a destination only. CCTP V2

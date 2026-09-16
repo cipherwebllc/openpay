@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, renderHook } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
 
+const flags = vi.hoisted(() => ({ arc: true, tip: false }));
+vi.mock('@/components/TipForm', () => ({ TipForm: ({ params }: { params: unknown }) => <div data-testid="tip-preview">{JSON.stringify(params)}</div> }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
-  return { ...actual, env: { ...actual.env, enableUsdcArc: true } };
+  return { ...actual, isArcTipEnabled: () => flags.arc && flags.tip, env: { ...actual.env, get enableUsdcArc() { return flags.arc; }, get enableUsdcArcTip() { return flags.tip; } } };
 });
 vi.mock('@/hooks/useResolveAddress', () => ({
   useResolveAddress: () => ({ data: null, isFetching: false, error: null }),
@@ -24,7 +26,7 @@ import { QrGenerator } from '@/components/QrGenerator';
 import { USDC_CHAINS } from '@/lib/chains';
 
 const receiver = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-beforeEach(() => window.localStorage.clear());
+beforeEach(() => { window.localStorage.clear(); flags.arc = true; flags.tip = false; });
 
 describe('Arc receive UI with flag ON', () => {
   it('checkout lists seven chains and corrects gasless when Arc is selected', async () => {
@@ -56,5 +58,42 @@ describe('Arc receive UI with flag ON', () => {
     expect(screen.getByRole('button', { name: /^ガス代不要/ })).toBeDisabled();
     expect(screen.getAllByText(/ガスは USDC で支払われるため別トークン不要/).length).toBeGreaterThan(0);
     expect(screen.queryByRole('checkbox', { name: /別チェーン/ })).not.toBeInTheDocument();
+  });
+});
+
+
+describe('Arc tip four-combination matrix', () => {
+  it.each([[false, false], [false, true], [true, false], [true, true]])('arc=%s tip=%s: URL, saved settings, preview, publish validation and OG agree', async (arc, tip) => {
+    flags.arc = arc; flags.tip = tip;
+    const enabled = arc && tip;
+    const { parseTipParams, resolveTipCapability } = await import('@/lib/url/tip');
+    const { useTipSettings } = await import('@/hooks/useTipSettings');
+    const { TipEmbedGenerator } = await import('@/components/TipEmbedGenerator');
+    const { buildTipOgModel, buildTipOgImageUrl } = await import('@/lib/ogTipCard');
+    const { buildPublishPayload } = await import('@/lib/handlePublish');
+    const { DEFAULT_PROFILE_DRAFT } = await import('@/hooks/useHandleProfileDraft');
+    const { validateHandleTipConfig } = await import('@/lib/handle');
+    expect(resolveTipCapability('usdc', 'arc').ok).toBe(enabled);
+    expect(resolveTipCapability('jpyc', 'base')).toEqual({ ok: false, reason: 'unsupported-pair' });
+    const parsed = parseTipParams(receiver, new URLSearchParams('token=usdc&chain=arc&preset=0.5&crossChain=true'));
+    expect(parsed.ok).toBe(enabled);
+    if (parsed.ok) expect(parsed.params).toMatchObject({ mode: 'standard', crossChain: false, presets: ['0.5'] });
+    window.localStorage.setItem('openpay:tip-settings:v2', JSON.stringify({ receiver, token: 'usdc', chain: 'arc', crossChain: true }));
+    const hook = renderHook(() => useTipSettings());
+    await waitFor(() => expect(hook.result.current.hydrated).toBe(true));
+    expect(hook.result.current.settings.chain).toBe(enabled ? 'arc' : 'base');
+    hook.unmount();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => expect(JSON.parse(screen.getByTestId('tip-preview').textContent!).chain).toBe(enabled ? 'arc' : 'base'));
+    const preview = JSON.parse(screen.getByTestId('tip-preview').textContent!);
+    expect(preview.mode).toBe(enabled ? 'standard' : 'gasless');
+    if (enabled) expect(preview.crossChain).toBe(false);
+    const payload = buildPublishPayload({ ...DEFAULT_PROFILE_DRAFT, to: receiver, jpycPolygon: false, jpycKaia: false, usdcArc: true }, { receiver, enableJpycAvalanche: false, arcTip: enabled });
+    // Disabled published Arc is retained in draft payload, but rejected for payment/publication.
+    expect(payload?.config.methods).toEqual([{ token: 'usdc', chain: 'arc', crossChain: false }]);
+    expect(validateHandleTipConfig(payload?.config).ok).toBe(enabled);
+    const og = buildTipOgModel(new URL(buildTipOgImageUrl(receiver, { token: 'usdc', chain: 'arc' }, 'ja'), 'https://test.local').searchParams);
+    expect(og.sub).not.toContain('ガス不要');
+    expect(og.sub.includes('ガスも USDC')).toBe(enabled);
   });
 });

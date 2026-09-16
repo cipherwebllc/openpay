@@ -324,3 +324,11 @@ describe('useHandleProfileDraft', () => {
     expect(result.current.settings.links).toEqual(links.slice(0, MAX_PROFILE_LINKS));
   });
 });
+
+it.each([undefined, null, 1, 'true', true, false])('usdcArc draft is additive and strictly boolean: %s', async (value) => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ usdcBase: true, usdcArc: value }));
+  const { result } = renderHook(() => useHandleProfileDraft());
+  await waitFor(() => expect(result.current.hydrated).toBe(true));
+  expect(result.current.settings.usdcArc).toBe(value === true);
+  expect(result.current.settings.usdcBase).toBe(true);
+});

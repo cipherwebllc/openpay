@@ -32,7 +32,7 @@ import { env } from '@/lib/env';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   deploymentForSlug,
-  isGaslessSupported,
+
   type TokenSymbol,
 } from '@/lib/tokens';
 import {
@@ -53,6 +53,7 @@ import {
   QR_MAX_URL_LEN,
   sanitizeTipPresetLabel,
   TIP_PRESET_MAX,
+  resolveTipCapability,
   type TipParams,
 } from '@/lib/url';
 
@@ -71,15 +72,12 @@ const DEFAULT_PREVIEW_COLOR = '#2563eb';
 const PREVIEW_RECEIVER =
   '0x0000000000000000000000000000000000000001' as Address;
 
-// Tip widget は gasless 固定なので、受信可能な chain は gasless 対応のものだけ。
-// USDC は全 mainnet chain (Ethereum L1 含む) で ERC20 paymaster 対応、JPYC は
-// Polygon / Kaia (+ enableJpycAvalanche=ON で Avalanche)。chain 集合は build 時に確定するため
-// module-level で 1 度計算。
-const RECEIVABLE_USDC_CHAINS = USDC_CHAINS.filter((slug) =>
-  isGaslessSupported(deploymentForSlug('usdc', slug)),
+// URL と同じ資格判定。Arc は両 flag 有効時だけ standard チップとして選択可能。
+const receivableUsdcChains = () => USDC_CHAINS.filter((slug) =>
+  resolveTipCapability('usdc', slug).ok,
 );
 const RECEIVABLE_JPYC_CHAINS = JPYC_CHAINS.filter((slug) =>
-  isGaslessSupported(deploymentForSlug('jpyc', slug)),
+  resolveTipCapability('jpyc', slug).ok,
 );
 
 type PublishMode = 'share' | 'embed';
@@ -303,6 +301,8 @@ export function TipEmbedGenerator() {
 
   const colorValid = COLOR_PATTERN.test(settings.color);
   const deployment = deploymentForSlug(settings.token, settings.chain);
+  const capability = resolveTipCapability(settings.token, settings.chain);
+  const tipMode = capability.ok ? capability.mode : undefined;
 
   // 現在 token のプリセットリスト (token ごと独立)。エディタ・適用ともこのリストだけ操作。
   const tokenPresets = settings.presets[settings.token];
@@ -345,9 +345,10 @@ export function TipEmbedGenerator() {
   );
 
   const tipUrl = useMemo(() => {
-    if (!hydrated || !effectiveReceiver || !origin) return '';
+    if (!hydrated || !effectiveReceiver || !origin || !tipMode) return '';
     const params: TipParams = {
       to: effectiveReceiver,
+      mode: tipMode,
       token: settings.token,
       chain: settings.chain,
       name: settings.name || undefined,
@@ -361,10 +362,11 @@ export function TipEmbedGenerator() {
       // crossChain は USDC でのみ意味がある。JPYC では URL 出力時に無視 (false 時の
       // URL bloat 回避)。default true なので false 時のみ URL に乗る。
       crossChain:
-        settings.token === 'usdc' ? settings.crossChain : undefined,
+        settings.chain === 'arc' ? false : settings.token === 'usdc' ? settings.crossChain : undefined,
     };
     return buildTipUrl(origin, params);
   }, [
+    tipMode,
     hydrated,
     effectiveReceiver,
     origin,
@@ -425,9 +427,10 @@ export function TipEmbedGenerator() {
   // embed タブで実際に表示/コピーするスニペット (iframe / button の切替)。
   const activeSnippet = embedFormat === 'iframe' ? iframeSnippet : buttonSnippet;
 
-  const previewParams = useMemo<TipParams>(
-    () => ({
+  const previewParams = useMemo<TipParams | null>(
+    () => tipMode ? ({
       to: effectiveReceiver ?? PREVIEW_RECEIVER,
+      mode: tipMode,
       token: settings.token,
       chain: settings.chain,
       name: settings.name || undefined,
@@ -436,9 +439,10 @@ export function TipEmbedGenerator() {
       theme: settings.theme ?? 'clean',
       presets: activePresets,
       crossChain:
-        settings.token === 'usdc' ? settings.crossChain : undefined,
-    }),
+        tipMode === 'standard' ? false : settings.token === 'usdc' ? settings.crossChain : undefined,
+    }) : null,
     [
+      tipMode,
       effectiveReceiver,
       settings.token,
       settings.chain,
@@ -567,7 +571,7 @@ export function TipEmbedGenerator() {
               chain={settings.chain}
               availableChains={
                 settings.token === 'usdc'
-                  ? RECEIVABLE_USDC_CHAINS
+                  ? receivableUsdcChains()
                   : RECEIVABLE_JPYC_CHAINS
               }
               onTokenChange={selectToken}
@@ -709,7 +713,7 @@ export function TipEmbedGenerator() {
         </StepCard>
 
         {/* 高度な設定は変更可能な cross-chain 設定がある USDC でのみ表示する。 */}
-        {settings.token === 'usdc' && (
+        {settings.token === 'usdc' && settings.chain !== 'arc' && (
           <div className="order-4 rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
             <button
               type="button"
@@ -847,11 +851,11 @@ export function TipEmbedGenerator() {
               data-testid="tip-preview-scroll"
               className="max-h-[46vh] overflow-y-auto bg-slate-50 p-3"
             >
-              <TipFormPreview
+              {previewParams && <TipFormPreview
                 key={`${settings.token}:${settings.chain}:${activePresets.join(',')}`}
                 params={previewParams}
                 preview
-              />
+              />}
             </div>
           </div>
         </div>

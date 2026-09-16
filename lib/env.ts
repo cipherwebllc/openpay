@@ -457,6 +457,10 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE',
     process.env.NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE,
   ),
+  // Arc は標準決済のみ、cross-chain 対象外。既定 OFF。
+  enableUsdcArcTip: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_USDC_ARC_TIP',
+    process.env.NEXT_PUBLIC_ENABLE_USDC_ARC_TIP,
   // Arc は標準決済のみ。受取と cross-chain の有効化は別々に管理する。
   enableUsdcArcCrossChain: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN',
@@ -799,6 +803,7 @@ if (isMainnet) {
   }
 }
 
+export const isArcTipEnabled = () => env.enableUsdcArc && env.enableUsdcArcTip;
 /** 新規 Arc forwarding の認可。回復と domain lookup は gate しない。 */
 export function isArcCrossChainEnabled(): boolean {
   return env.enableUsdcArc && env.enableUsdcArcCrossChain;

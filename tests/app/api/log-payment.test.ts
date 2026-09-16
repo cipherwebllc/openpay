@@ -80,6 +80,27 @@ describe('POST /api/log/payment', () => {
     vi.unstubAllEnvs();
   });
 
+  it('standard tip emitter → event builder → API whitelist preserves final saved object', async () => {
+    const { emitStandardPaymentLogs } = await import('@/lib/standardPaymentLog');
+    const requests: Promise<Response>[] = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((_url, init) => {
+      const response = POST(req(JSON.parse(init!.body as string)));
+      requests.push(response);
+      return response;
+    });
+    const hash = `0x${'e'.repeat(64)}` as const;
+    const payer = '0x9999999999999999999999999999999999999999';
+    const refs = { merchantError: { current: null }, merchantReceipt: { current: null }, feeError: { current: null }, feeReceipt: { current: null } };
+    const params = { chainId: 5042002, tokenAddress: '0x3600000000000000000000000000000000000000' as const, merchant: '0x1111111111111111111111111111111111111111' as const, merchantAmount: 500000n, feeReceiver: '0x3333333333333333333333333333333333333333' as const, feeAmount: 0n, tip: true as const, chainSlug: 'arc' as const, mode: 'standard' as const };
+    for (let i = 0; i < 2; i++) emitStandardPaymentLogs(params, payer, false, { data: hash, error: null }, { data: { status: 'success', blockNumber: 123n }, error: null, isSuccess: true }, { data: undefined, error: null }, { data: undefined, error: null, isSuccess: false }, refs);
+    await Promise.all(requests);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const stored = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1] as string);
+    expect(stored).toMatchObject({ flow: 'standard-merchant', result: 'success', tip: true, chainSlug: 'arc', mode: 'standard', chainId: 5042002, customer: payer, merchantAmount: '500000', txHash: hash, blockNumber: '123' });
+    expect(stored).not.toHaveProperty('networkFeeEquivalent');
+    expect(stored).not.toHaveProperty('userOpHash');
+  });
+
   it('正常 payload を受理し KV に LPUSH する', async () => {
     const res = await POST(req(validBody));
     expect(res.status).toBe(200);

@@ -34,6 +34,17 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'usdc-arc-tip-2026-09-17',
+    date: '2026-09-17',
+    category: 'feature',
+    title: { ja: 'Arc で USDC チップを受け取れます', en: 'Receive USDC tips on Arc' },
+    body: {
+      ja: 'チップリンクと @handle に USDC (Arc) を追加しました。標準モードで送り手がガスも USDC で負担し、OpenPay の徴収はありません。Arc チップはクロスチェーンとメッセージに対応しません。',
+      en: 'USDC on Arc is now available for tip links and @handle. Senders pay gas in USDC in standard mode; OpenPay collects nothing. Arc tips do not support cross-chain payments or messages.',
+    },
+    link: { href: '/create', labelJa: 'チップリンクを作る', labelEn: 'Create a tip link' },
+  },
+  {
     id: 'usdc-arc-2026-09-17',
     date: '2026-09-17',
     category: 'feature',
