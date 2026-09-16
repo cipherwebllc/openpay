@@ -2032,8 +2032,10 @@ block 62454204・店舗 1 USDC・feeCollected 0.023512) を検証 → 成功 →
    A verified mint needs no transaction. A mismatched delivered nonce requires
    investigation, not another submission.
 5. Only after operator review, rerun with `--send`. The existing
-   `MAINNET_RELAYER_PRIVATE_KEY` is loaded only then. The operator needs a small
-   Arc USDC gas balance; never put this key in NEXT_PUBLIC env or logs. The script
+   `MAINNET_RELAYER_PRIVATE_KEY` is loaded only then. **運用方針 (2026-09-17 user 裁定)**: 手動の
+   保険であり自動化しない。Arc に USDC を事前に置かず、事故時に relayer アドレスへ 1 USDC 程度を
+   入金してから送る (負担は Arc のガス ≈0.001 USDC のみ。mint される USDC は買い手の burn 資金で、
+   OpenPay の肩代わりはない)。never put this key in NEXT_PUBLIC env or logs. The script
    sends `receiveMessage` and uses the same on-chain verifier as the app.
    A Circle/rescue race may revert the rescue; re-run read-only discovery.
 6. Buyer selects Recheck to discover/adopt the verified mint and finish accounting.
