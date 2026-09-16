@@ -283,6 +283,12 @@ export function isValidChainSlug(value: string): value is ChainSlug {
   );
 }
 
+/** 現在の flag 状態で URL `chain=` に指定できる slug 一覧 (エラー文言用)。
+ * ハードコードすると chain 追加時にドリフトする (Avalanche 昇格時に漏れた実績) ため導出する。 */
+export function validChainSlugs(): readonly ChainSlug[] {
+  return ALL_SLUGS.filter((slug) => isValidChainSlug(slug));
+}
+
 export function chainForSlug(slug: ChainSlug): Chain {
   return SLUG_TO_CHAIN[slug];
 }

@@ -3,7 +3,11 @@
 // (単一セクション固有のものは各セクションモジュールに置く)。
 // import 方向: shared は外部依存 (viem / chains / tokens / sanitize) のみに依存し、
 // pay/tip/checkout からは決して import しない (循環回避)。
-import { isValidChainSlug, type ChainSlug } from '../chains';
+import {
+  isValidChainSlug,
+  type ChainSlug,
+  validChainSlugs,
+} from '../chains';
 import type { GasMode, PayMode } from '../fee';
 import { stripControlChars, truncateSafe } from '../sanitize';
 import {
@@ -49,8 +53,7 @@ export function resolveChainSlugParam(
   }
   return {
     ok: false,
-    error:
-      'chain は base / arbitrum / optimism / polygon / kaia / ethereum のいずれかを指定してください',
+    error: `chain は ${validChainSlugs().join(' / ')} のいずれかを指定してください`,
   };
 }
 

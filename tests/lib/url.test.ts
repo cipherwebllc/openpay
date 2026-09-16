@@ -2161,3 +2161,14 @@ it('Arc flag OFF: chain=arc は standard でも未対応 URL', () => {
     to: VALID_TO, token: 'usdc', chain: 'arc', mode: 'standard', amount: '1',
   })).ok).toBe(false);
 });
+
+it('chain 不正時のエラー文言は現在有効な slug を列挙する (Avalanche 漏れ・Arc flag 連動のドリフト防止)', () => {
+  const r = parsePayParams(new URLSearchParams({ to: VALID_TO, token: 'usdc', chain: 'nochain', amount: '1' }));
+  expect(r.ok).toBe(false);
+  if (!r.ok) {
+    expect(r.error).toContain('avalanche');
+    expect(r.error).toContain('kaia');
+    // flag OFF (vitest 既定) では arc を案内しない
+    expect(r.error).not.toContain('arc');
+  }
+});
