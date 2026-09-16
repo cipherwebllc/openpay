@@ -313,7 +313,7 @@ describe('HandleProfileBuilder', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('flag ON → JPYC 2 受取方法トグル + claim panel を描画 (USDC は提供終了)', () => {
+  it('flag ON → JPYC 2 受取方法トグル + USDC は単一選択 (受け取らない/Base) + claim panel を描画', () => {
     renderWithIntl(<HandleProfileBuilder />);
     expect(
       screen.getByRole('checkbox', { name: 'JPYC (Polygon)' }),
@@ -321,10 +321,39 @@ describe('HandleProfileBuilder', () => {
     expect(
       screen.getByRole('checkbox', { name: 'JPYC (Kaia)' }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('checkbox', { name: 'USDC (cross-chain)' }),
-    ).not.toBeInTheDocument();
+    // USDC はチェックボックスではなくラジオ (Base か Arc のどちらか 1 つ・2026-09-17)
+    expect(screen.queryByRole('checkbox', { name: /USDC/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'USDC は受け取らない' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'USDC (Base · cross-chain)' })).not.toBeChecked();
+    // Arc tip flag OFF (既定) → Arc の選択肢は出ない (inert)
+    expect(screen.queryByRole('radio', { name: /USDC \(Arc/ })).not.toBeInTheDocument();
     expect(screen.getByTestId('claim')).toBeInTheDocument();
+  });
+
+  it('USDC は Base と Arc の排他選択 (両方公開すると受取ボタンが 2 つ並ぶため)', () => {
+    h.arc = true; h.tip = true;
+    try {
+      renderWithIntl(<HandleProfileBuilder />);
+      const none = screen.getByRole('radio', { name: 'USDC は受け取らない' });
+      const base = screen.getByRole('radio', { name: 'USDC (Base · cross-chain)' });
+      // cross-chain flag は mock で OFF → Arc は cross-chain なしの表記
+      const arc = screen.getByRole('radio', { name: 'USDC (Arc)' });
+      expect(none).toBeChecked();
+      fireEvent.click(base);
+      expect(base).toBeChecked();
+      expect(arc).not.toBeChecked();
+      expect(screen.getByText(/USDC \(Base\) のチップは/)).toBeInTheDocument();
+      fireEvent.click(arc);
+      expect(arc).toBeChecked();
+      expect(base).not.toBeChecked();
+      expect(screen.queryByText(/USDC \(Base\) のチップは/)).not.toBeInTheDocument();
+      expect(screen.getByText(/USDC \(Arc\) のチップは/)).toBeInTheDocument();
+      fireEvent.click(none);
+      expect(arc).not.toBeChecked();
+      expect(base).not.toBeChecked();
+    } finally {
+      h.arc = false; h.tip = false;
+    }
   });
 
   it('enableJpycAvalanche OFF (既定) → JPYC (Avalanche) トグルは出ない (inert)', () => {
@@ -1126,12 +1155,18 @@ describe('Arc profile exact payload round trips', () => {
       config: { to: ADDR, color: '#2563eb', theme: 'clean', methods: h.methods, presets: { jpyc: ['300', '1000', '3000'] } },
       profile: { theme: 'clean' },
     });
-    expect(screen.getByRole('checkbox', { name: /^USDC \(Base\)/ })).toHaveProperty('checked', base);
-    if (arc) expect(screen.getByRole('checkbox', { name: /^USDC \(Arc\)/ })).toBeChecked();
+    // USDC はラジオ (排他)。旧レコードで両方 true のときはどちらも未選択 + 明示通知 (黙って落とさない)。
+    const baseRadio = screen.getByRole('radio', { name: /^USDC \(Base/ });
+    const arcRadio = screen.queryByRole('radio', { name: /^USDC \(Arc/ });
+    expect(baseRadio).toHaveProperty('checked', base && !arc);
+    if (arc) expect(arcRadio).toHaveProperty('checked', !base);
+    else if (enabled) expect(arcRadio).not.toBeChecked();
+    else expect(arcRadio).toBeNull(); // flag OFF かつ Arc 無し → Arc の選択肢は出ない
+    expect(screen.queryByText(/Base と Arc の両方を公開しています/) !== null).toBe(arc && base);
     if (!enabled && arc) {
       expect(claim.getAttribute('data-blocked')).toContain('再公開できません');
       expect(screen.getAllByText(/無効中/).length).toBeGreaterThan(0);
-      expect(screen.getByRole('checkbox', { name: /^USDC \(Arc\)/ })).toBeDisabled();
+      expect(arcRadio).toBeDisabled();
     } else expect(claim.getAttribute('data-blocked')).toBeNull();
     expect(claim.getAttribute('data-expected-updated-at')).toBe('123');
     if (enabled) {

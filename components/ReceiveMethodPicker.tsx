@@ -38,10 +38,13 @@ function methodParts(
   crossChainText: string,
 ): { token: string; chain: string } {
   const token = displaySymbolFor(method.token);
+  // USDC の cross-chain は着金チェーン名を併記する (Base と Arc の両方を公開すると
+  // 「USDC (cross-chain)」が 2 つ並んで区別できないため・2026-09-17 user 指摘)。
+  const chainName = CHAIN_LABEL[method.chain] ?? method.chain;
   const chain =
     method.token === 'usdc' && method.crossChain
-      ? crossChainText
-      : (CHAIN_LABEL[method.chain] ?? method.chain);
+      ? `${chainName} · ${crossChainText}`
+      : chainName;
   return { token, chain };
 }
 

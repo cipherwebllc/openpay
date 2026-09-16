@@ -3,9 +3,9 @@
 // 「プロフ」タブ: @handle の link-in-bio ページを組み立てるビルダー。受取先 + 受取方法
 // (JPYC Polygon / JPYC Kaia) + 見た目 (名前/色/金額プリセット) + プロフィール
 // (bio/avatar/SNSアイコン/links) を編集し、SIWE で取得/更新 (HandleClaimPanel)。
-// USDC (cross-chain) は着金チェーンを選べず Base 固定になるためビルダーから提供終了 —
-// 必要ならチップタブで個別に作成しリンク集へ追加する。既存レコードの usdc method は
-// 公開ページでは引き続き描画されるが、ビルダーで更新すると外れる (編集時に明示)。
+// USDC は Base か Arc のどちらか 1 つを選ぶ (2026-08-17 Base 復活・2026-09-17 Arc 追加+排他化:
+// 両方公開すると公開ページに同種の受取ボタンが 2 つ並ぶため)。旧レコードで両方持つ場合は
+// 明示通知して選び直させる (黙って落とさない)。
 // レイアウトは他タブ (チップ/レジ) と同じ 2 カラム: 左=編集・右=ライブプレビュー+公開
 // (lg で sticky 追従)。下書きは useHandleProfileDraft (localStorage・チップタブとは分離)。
 // flag OFF で何も描画しない。
@@ -18,6 +18,7 @@ import { useAccount } from 'wagmi';
 import { getAddress, isAddress, type Address } from 'viem';
 import { env, isArcTipEnabled } from '@/lib/env';
 import { resolveTipCapability } from '@/lib/url/tip';
+import { crossChainAllowed } from '@/lib/url/shared';
 import { AddressInput } from '@/components/AddressInput';
 import { HandleClaimPanel } from '@/components/HandleClaimPanel';
 import { handleFontClass } from '@/components/handleFonts';
@@ -215,10 +216,7 @@ export function HandleProfileBuilder({
   // env.enableJpycAvalanche=ON のときだけ表示 (既定 OFF=非表示で完全 inert)。実際に受取可能か
   // (forwarder 設定で gasless 成立) は公開ページ/publish 時の parseTipParams が判定する。
   const methodOptions: Array<
-    [
-      'jpycPolygon' | 'jpycKaia' | 'jpycAvalanche' | 'usdcBase' | 'usdcArc',
-      HandleReceiveMethod,
-    ]
+    ['jpycPolygon' | 'jpycKaia' | 'jpycAvalanche', HandleReceiveMethod]
   > = [
     ['jpycPolygon', { token: 'jpyc', chain: 'polygon' }],
     ['jpycKaia', { token: 'jpyc', chain: 'kaia' }],
@@ -226,11 +224,19 @@ export function HandleProfileBuilder({
   if (env.enableJpycAvalanche) {
     methodOptions.push(['jpycAvalanche', { token: 'jpyc', chain: 'avalanche' }]);
   }
-  // USDC (Base 固定) — 2026-08-17 復活 (撤去理由「Base 固定」を user が明示的に許容)。
-  methodOptions.push(['usdcBase', { token: 'usdc', chain: 'base' }]);
-  if (isArcTipEnabled() || draft.usdcArc) {
-    methodOptions.push(['usdcArc', { token: 'usdc', chain: 'arc' }]);
-  }
+  // USDC は Base か Arc の**どちらか 1 つ** (2026-09-17 user 裁定: 両方公開すると受取ボタンが 2 つ並ぶ)。
+  // draft は従来の usdcBase / usdcArc の 2 boolean のまま (旧 draft 互換)・UI で排他にする。
+  // 旧レコードで両方 true のときは 'both' として明示表示し、どちらかを選ぶまで黙って落とさない。
+  const usdcChoice: 'none' | 'base' | 'arc' | 'both' =
+    draft.usdcBase && draft.usdcArc ? 'both' : draft.usdcArc ? 'arc' : draft.usdcBase ? 'base' : 'none';
+  const showArcChoice = isArcTipEnabled() || draft.usdcArc;
+  const usdcChoices: Array<['none' | 'base' | 'arc', string]> = [
+    ['none', tb('usdcNone')],
+    ['base', methodLabel({ token: 'usdc', chain: 'base', crossChain: true }, t('crossChain'))],
+    ...(showArcChoice
+      ? [['arc', methodLabel({ token: 'usdc', chain: 'arc', crossChain: crossChainAllowed('arc') }, t('crossChain'))] as ['arc', string]]
+      : []),
+  ];
 
   // 受取先: 生 0x アドレスは**入力値を最優先**で採用する。AddressInput は ENS 名以外で
   // onResolved を再発火しないため、「接続ウォレットを使う」/編集 prefill で resolved に入った
@@ -521,14 +527,35 @@ export function HandleProfileBuilder({
                       <input
                         type="checkbox"
                         checked={draft[key]}
-                        disabled={key === 'usdcArc' && !isArcTipEnabled()}
                         onChange={(e) => update({ [key]: e.target.checked } as Partial<typeof draft>)}
                       />
                       {methodLabel(method, t('crossChain'))}
-                      {key === 'usdcArc' && !isArcTipEnabled() && ` (${tb('arcInactive')})`}
                     </label>
                   ))}
                 </div>
+                <p className="mt-3 text-sm font-medium text-slate-700">{tb('usdcChainLabel')}</p>
+                {usdcChoice === 'both' && (
+                  <p className="mt-1 text-xs text-amber-700">{tb('usdcBothPublished')}</p>
+                )}
+                <div role="radiogroup" aria-label={tb('usdcChainLabel')} className="mt-1 space-y-1.5">
+                  {usdcChoices.map(([value, label]) => (
+                    <label key={value} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                      <input
+                        type="radio"
+                        name="usdcChain"
+                        value={value}
+                        checked={usdcChoice === value}
+                        disabled={value === 'arc' && !isArcTipEnabled()}
+                        onChange={() => update({ usdcBase: value === 'base', usdcArc: value === 'arc' })}
+                      />
+                      {label}
+                      {value === 'arc' && !isArcTipEnabled() && ` (${tb('arcInactive')})`}
+                    </label>
+                  ))}
+                </div>
+                {draft.usdcArc && (
+                  <p className="mt-1 text-xs text-slate-500">{tb('usdcArcTipHint')}</p>
+                )}
                 {methods.length === 0 && (
                   <p className="mt-1 text-xs text-red-600">{t('atLeastOneMethod')}</p>
                 )}
