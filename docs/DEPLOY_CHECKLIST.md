@@ -1942,4 +1942,6 @@ query の percent encoding を含む例は fixture の measurements を参照す
 - [ ] 履歴・払い手控え・レシートに宛先と USDC 金額が正しく記録され、receipt 検出が完了することを確認。
 - [ ] Explorer リンクが `https://explorer.testnet.arc.io/tx/<hash>` で、送金先・金額・成功状態が一致することを確認。
 - [ ] Arc の ERC-20 表示は 6 decimals、native gas は 18 decimals。別チェーンへの bridge / tip / @handle / Store は本 smoke 対象外。
+**実施記録 (2026-09-17・Fable)**: 上記を Arc testnet で完走。実 wagmi injected 経路 (Playwright に EIP-1193 provider を注入し、テスト鍵で `eth_sendTransaction` を署名) で `/ja/pay?…chain=arc&mode=standard` から 0.5 USDC を標準決済 → 成功画面 (Tx/ブロック/Explorer リンク) → `/ja/history` に支払い+受取の 2 行 (chainSlug=arc) → `/ja/scan` の払い手控えに「USDC / Arc Testnet」と Explorer リンク。on-chain: [tx 0x0756edde…65aa2e](https://explorer.testnet.arc.io/tx/0x0756eddee9fb890364e23e32eca9f38bd8f7f8c1dace27d171f8015c0565aa2e) status=success・block 62422950・gasUsed 48,734・20 gwei (≈0.000975 USDC)。
+  ⚠️ 実測の含意: **Arc では ERC-20 USDC (`0x3600…`・6dp) の残高と native gas 残高は同一の資金** (20 → 19.499025 = 0.5 送金 + 0.000975 ガス)。顧客の USDC 残高からガスも引かれるため、金額ちょうどしか持たない顧客は失敗する (通常決済の「別途 gas」注意はガス *トークン* ではなく *残高の余裕* として案内する)。
 - [ ] **点灯 (`NEXT_PUBLIC_ENABLE_USDC_ARC=1`) は開示更新と同一リリース**: LP / FAQ / 取引所ガイド / Terms・免責・特商法 / llms.txt / お知らせの Arc 文言 (draft = `plans/arc-usdc-receive.md` §6) を user 承認のうえ同じ PR に含める。
