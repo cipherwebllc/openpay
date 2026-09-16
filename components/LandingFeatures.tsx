@@ -33,6 +33,7 @@ const CARDS: readonly FeatureCard[] = [
     titleKey: 'featuresMultichainTitle',
     bodyKey: 'featuresMultichainBody',
     tone: 'emerald',
+    // 文言 (featuresMultichainBody) が言う「USDC は 7 チェーン」と同じ集合 (Arc 含む・2026-09-17)。
     chains: [
       'polygon',
       'kaia',
@@ -41,6 +42,7 @@ const CARDS: readonly FeatureCard[] = [
       'arbitrum',
       'optimism',
       'ethereum',
+      'arc',
     ],
   },
   {
