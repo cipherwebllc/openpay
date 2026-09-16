@@ -29,6 +29,7 @@ import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { env } from '@/lib/env';
+import { crossChainAllowed } from '@/lib/url/shared';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   deploymentForSlug,
@@ -362,7 +363,7 @@ export function TipEmbedGenerator() {
       // crossChain は USDC でのみ意味がある。JPYC では URL 出力時に無視 (false 時の
       // URL bloat 回避)。default true なので false 時のみ URL に乗る。
       crossChain:
-        settings.chain === 'arc' ? false : settings.token === 'usdc' ? settings.crossChain : undefined,
+        settings.token === 'usdc' ? crossChainAllowed(settings.chain, settings.crossChain) : undefined,
     };
     return buildTipUrl(origin, params);
   }, [
@@ -439,7 +440,7 @@ export function TipEmbedGenerator() {
       theme: settings.theme ?? 'clean',
       presets: activePresets,
       crossChain:
-        tipMode === 'standard' ? false : settings.token === 'usdc' ? settings.crossChain : undefined,
+        settings.token === 'usdc' ? crossChainAllowed(settings.chain, settings.crossChain) : undefined,
     }) : null,
     [
       tipMode,
@@ -713,7 +714,7 @@ export function TipEmbedGenerator() {
         </StepCard>
 
         {/* 高度な設定は変更可能な cross-chain 設定がある USDC でのみ表示する。 */}
-        {settings.token === 'usdc' && settings.chain !== 'arc' && (
+        {settings.token === 'usdc' && crossChainAllowed(settings.chain) && (
           <div className="order-4 rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
             <button
               type="button"

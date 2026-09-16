@@ -50,12 +50,22 @@ vi.mock('@/lib/circlePaymaster', async () => {
 // component で stub する (Hint 自体の動作は CrossChainHint.test.tsx で検証)。
 // TipForm から Hint へ渡される props は crossChainHintSpy で capture して検証。
 const crossChainHintSpy = vi.fn();
-vi.mock('@/components/CrossChainHint', () => ({
-  CrossChainHint: (props: Record<string, unknown>) => {
-    crossChainHintSpy(props);
-    return null;
-  },
-}));
+vi.mock('@/components/CrossChainHint', async () => {
+  const React = await import('react');
+  return {
+    CrossChainHint: (props: Record<string, unknown>) => {
+      crossChainHintSpy(props);
+      // 実物は mount 時に onExecutingChange を必ず呼ぶ (Arc の回復 scan 完了を親に伝え、直接送信の
+      // ロックを解く)。stub でも同じ契約を守らないと Arc standard の送信ボタンが永久に disabled になる。
+      // 実物の effect は onExecutingChange の identity (= 親の scan scope: 金額変更で変わる) に追随する。
+      const cb = props.onExecutingChange;
+      React.useEffect(() => {
+        if (typeof cb === 'function') (cb as (executing: boolean) => void)(false);
+      }, [cb]);
+      return null;
+    },
+  };
+});
 vi.mock('@/lib/pimlico', async () => {
   const actual =
     await vi.importActual<typeof import('@/lib/pimlico')>('@/lib/pimlico');
