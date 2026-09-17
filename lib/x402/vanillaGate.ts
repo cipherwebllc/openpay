@@ -35,6 +35,7 @@ import { logger } from '@/lib/logger';
 import { atomicToHuman, recordSettleLedgerAfterResponse } from '@/lib/x402/settleLedger';
 import { generateCdpJwt } from './cdpJwt';
 import { ARC_GATEWAY_MAX_TIMEOUT_SECONDS, x402Config } from './config';
+import { recordFunnelAfterResponse } from './funnel';
 import { isFacilitatorPreBroadcastRejection } from './paymentRedelivery';
 import {
   buildBazaarQueryExtensionV2,
@@ -551,7 +552,11 @@ async function handleVanillaPaidGetInner(
 
   const v2Header = req.headers.get('PAYMENT-SIGNATURE');
   const v1Header = req.headers.get('x-payment');
+  // 以下の recordFunnelAfterResponse はすべて応答返却後・no-throw の段階別カウンタ (lib/x402/funnel.ts)。
+  // 判定・順序・応答には一切関与しない (掟 12: 追加のみ)。
+  const url = resource.resourceUrl;
   if (!v2Header && !v1Header) {
+    recordFunnelAfterResponse('challenge', 'none', url);
     return paymentChallenge(resource, accepts, 'payment_required');
   }
 
@@ -562,6 +567,7 @@ async function handleVanillaPaidGetInner(
         return body ? { body, rail: 'base' as const } : null;
       })();
   if (!decoded) {
+    recordFunnelAfterResponse('invalid_payload', 'none', url);
     return paymentChallenge(resource, accepts, 'invalid_payment_payload');
   }
   const { body: facilitatorBody, rail } = decoded;
@@ -589,6 +595,7 @@ async function handleVanillaPaidGetInner(
       resource: resource.resourceUrl,
       rail,
     });
+    recordFunnelAfterResponse('facilitator_unavailable', rail, url);
     return facilitatorUnavailable('Payment verification failed. Please retry later.');
   }
   if (verify.isValid !== true) {
@@ -596,6 +603,7 @@ async function handleVanillaPaidGetInner(
       typeof verify.invalidReason === 'string'
         ? verify.invalidReason
         : 'payment_invalid';
+    recordFunnelAfterResponse('verify_failed', rail, url);
     return paymentChallenge(resource, accepts, reason);
   }
   const payer = typeof verify.payer === 'string' ? verify.payer : undefined;
@@ -622,7 +630,10 @@ async function handleVanillaPaidGetInner(
       // Arc は署名の有効期間 (7 日+) いっぱい束縛する (claimVanillaResource の ttlSec 注記)。
       ...(rail === 'arc-gateway' ? { ttlSec: ARC_GATEWAY_MAX_TIMEOUT_SECONDS } : {}),
     });
-    if (claim.kind === 'conflict') return authorizationConflict();
+    if (claim.kind === 'conflict') {
+      recordFunnelAfterResponse('conflict', rail, url);
+      return authorizationConflict();
+    }
     // 'match' (同一束縛の再送) は従来どおり content/settle へ進む。claim を張ったのが
     // 自分の request のときだけ、settle 前に落ちた場合の解放権を持つ。
     if (claim.kind === 'claimed') ownedClaim = claimIdentity;
@@ -644,6 +655,7 @@ async function handleVanillaPaidGetInner(
     // claim を外して別 resource へ回すことはできる。ただし 4xx body は有料コンテンツでは
     // なく (エラー封筒)、settle も走らない = 課金もされないため、二重「解錠」にはならない。
     await releaseClaim();
+    recordFunnelAfterResponse('content_error', rail, url);
     return res;
   }
 
@@ -668,6 +680,7 @@ async function handleVanillaPaidGetInner(
     });
     // settle 以降は broadcast 済みの可能性がある = 署名が使用済みかもしれない。claim は
     // **戻さない** (使用済みかもしれない authorization を別 resource へ流用させない)。
+    recordFunnelAfterResponse('facilitator_unavailable', rail, url);
     return facilitatorUnavailable('Payment settlement failed. Please retry later.');
   }
   if (settle.body.success !== true) {
@@ -684,6 +697,7 @@ async function handleVanillaPaidGetInner(
     if (rail === 'arc-gateway' || isFacilitatorPreBroadcastRejection(settle.status, settle.body)) {
       await releaseClaim();
     }
+    recordFunnelAfterResponse('settle_failed', rail, url);
     return paymentChallenge(resource, accepts, reason);
   }
 
@@ -706,6 +720,7 @@ async function handleVanillaPaidGetInner(
     Buffer.from(JSON.stringify(settlement), 'utf8').toString('base64'),
   );
   res.headers.set('PAYMENT-RESPONSE', encodePaymentResponseHeaderValue(settlement));
+  recordFunnelAfterResponse('settled', rail, url);
   // 運営台帳 (誰が・どの商品を・いくらで)。応答返却後・no-throw (掟 12/13)。
   recordSettleLedgerAfterResponse({
     at: new Date().toISOString(),
