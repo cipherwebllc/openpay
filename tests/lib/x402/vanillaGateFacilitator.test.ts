@@ -30,6 +30,8 @@ vi.mock('@/lib/x402/config', () => ({
     get vanillaFacilitator() {
       return configHold.vanillaFacilitator;
     },
+    // Arc rail は既定 OFF (このファイルは Base 経路の不変性を固定する)。
+    arcGateway: { enabled: false },
   },
 }));
 

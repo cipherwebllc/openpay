@@ -36,6 +36,7 @@ vi.mock('@/lib/x402/config', () => ({
     get vanillaFacilitator() {
       return { url: 'https://cdp.example', cdpAuth: state.cdpAuth };
     },
+    arcGateway: { enabled: false },
   },
 }));
 
