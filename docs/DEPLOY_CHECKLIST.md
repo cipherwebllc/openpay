@@ -1574,7 +1574,11 @@ Arc 非対応・自前の汎用 EIP-3009 facilitator は作らない)。設計 =
 2. Vercel Production に `ENABLE_X402_ARC_GATEWAY=1` → 開示 3 点セット同期 PR (掟 14・LP FAQ / Terms / llms.txt /
    README / お知らせ・**`/openapi.json` (`lib/openapi/document.ts` の `network`/`x-payment-chains`)**) を同一リリースで
    merge → deploy。
-3. 本番 smoke: mainnet で hello ($0.001) を 1 件実購入 → Circle Discovery API
+3. 本番 smoke: `node scripts/arc-gateway-buyer-smoke.mjs` → `http://localhost:4599` をウォレットのあるブラウザで開き、
+   接続 → (初回のみ) USDC を Gateway Wallet に deposit → `/api/paid/hello` を購入 (秘密鍵を扱わない・署名はウォレット内・
+   サーバ側で network/asset/verifyingContract/金額上限 $0.05 を検査)。買い手は `X402_PAY_TO_ADDRESS` と別のウォレット
+   (`self_transfer` 拒否)。testnet は `--testnet` (ローカル `next start -p 3141` 宛て・9/17 に注入ウォレットで完走)。
+   mainnet で hello ($0.001) を 1 件実購入 → Circle Discovery API
    (`api.circle.com/v2/x402/discovery/resources?network=eip155:5042`) に載るかを観測 (掲載トリガー未確定)。
 4. **既存掲載の回帰確認**: 402 の v2 accepts に `eip155:5042` が並ぶことで CDP Bazaar の validate API
    (severity=required) / x402scan / agentic.market の掲載が落ちていないかを点灯直後に確認する。落ちる場合は Arc accept を
