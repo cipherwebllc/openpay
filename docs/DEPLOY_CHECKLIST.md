@@ -1622,6 +1622,13 @@ PAYMENT-RESPONSE `{success:true, transaction:'904f72e8-f03d-4bd6-9df4-865e7b24d5
   `gatewayMint(bytes,bytes)`。**実測 (testnet 9/17・transferId `2be03aa5-…`・mint `0xf7e87469…`)**: 0.5 USDC の引き出しで Gateway 残高
   −0.5035 (burn 手数料 **0.0035 USDC**・同一チェーンは transfer fee なし)・ウォレット +0.4966 (mint のガス約 0.0034 USDC はウォレット払い)。
   → 残高が **引き出し額 + 0.02 (maxFee 上限)** 未満だとツールが拒否する。少額のうちは貯めてからまとめて引き出す。
+- **本番 1 往復の完走 (2026-09-17・Arc mainnet)**: 402 → Arc accept → 実 USDC 署名 → 200 + 商品 → Gateway 残高 → バッチ決済 → Arc USDC として引き出し。
+  購入 = 買い手 `0x9a76…7fe0` が hello (`904f72e8-…`・0.001) と `/api/paid/usdc/stores` (0.04) を購入 → 売り手 `0x52d4…cA81` の Gateway 残高 0.041。
+  **バッチ決済は mainnet で数分〜1 時間弱** (stores 分は購入から約 10 分で `pendingBatch` → `balance`)。
+  引き出し = transferId `fcdccbcd-1e15-4ac5-9f8f-43af1b9f2ef7`・fees 0.0035・mint tx `0x2f06fe34bad2b5f22f1b95c00b0846a02bc9275af756075743762644eb3c00e1`
+  (block 21326525・GatewayMinter `0x2222…C205`・USDC Transfer `0x0 → 0x52d4…cA81` 0.02 をレシートで確認)。残高 0.041 → 0.0175。
+- **ウォレットが別端末のとき**: この Mac で `HOST=0.0.0.0 node scripts/arc-gateway-buyer-smoke.mjs` → 別端末のブラウザで `http://<この Mac の IP>:4599`。
+  http の LAN IP は secure context でなく `crypto.randomUUID` が無いためウォレットの署名要求が落ちる → ページ側で補完済み (9/17 実機で踏んだ)。
   引き出しは Gateway の withdraw (同一チェーン無料・クロスチェーン 0.005% + gas)。
 - 決済の真実 = Gateway の settle 応答 (`success:true` + transaction UUID) + Gateway 残高。on-chain の
   Transfer では突合できない (バッチ・ネット決済)。
