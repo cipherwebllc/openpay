@@ -1616,6 +1616,12 @@ PAYMENT-RESPONSE `{success:true, transaction:'904f72e8-f03d-4bd6-9df4-865e7b24d5
 
 **運用**
 - 売上は Gateway 残高。確認 = `POST {gateway}/v1/balances {token:'USDC', sources:[{domain:26, depositor:<payTo>}]}`。
+- **引き出し (withdraw)**: `node scripts/arc-gateway-buyer-smoke.mjs` の「4. 引き出し」を **売り手ウォレット (`X402_PAY_TO_ADDRESS`) で接続**して実行。
+  BurnIntent (EIP-712・domain `GatewayWallet` v1・同一チェーン 26→26・受取人 = 署名者に固定・maxFee 0.02) に署名 → `POST {gateway}/v1/transfer`
+  で attestation 取得 → Arc の GatewayMinter (mainnet `0x2222222d7164433c4C09B0b0D809a9b52C04C205` / testnet `0x0022222A…475B`) で
+  `gatewayMint(bytes,bytes)`。**実測 (testnet 9/17・transferId `2be03aa5-…`・mint `0xf7e87469…`)**: 0.5 USDC の引き出しで Gateway 残高
+  −0.5035 (burn 手数料 **0.0035 USDC**・同一チェーンは transfer fee なし)・ウォレット +0.4966 (mint のガス約 0.0034 USDC はウォレット払い)。
+  → 残高が **引き出し額 + 0.02 (maxFee 上限)** 未満だとツールが拒否する。少額のうちは貯めてからまとめて引き出す。
   引き出しは Gateway の withdraw (同一チェーン無料・クロスチェーン 0.005% + gas)。
 - 決済の真実 = Gateway の settle 応答 (`success:true` + transaction UUID) + Gateway 残高。on-chain の
   Transfer では突合できない (バッチ・ネット決済)。

@@ -17,6 +17,7 @@
 
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
+import { encodeFunctionData, pad, parseAbi } from 'viem';
 
 const TESTNET = process.argv.includes('--testnet');
 const PORT = Number(process.env.PORT ?? 4599);
@@ -28,6 +29,7 @@ const NET = TESTNET
       explorer: 'https://explorer.testnet.arc.io',
       gatewayApi: 'https://gateway-api-testnet.circle.com',
       gatewayWallet: '0x0077777d7EBA4688BDeF3E311b846F25870A19B9',
+      gatewayMinter: '0x0022222ABE238Cc2C7Bb1f21003F0a260052475B',
       target: process.env.TARGET ?? 'http://localhost:3141',
     }
   : {
@@ -37,11 +39,71 @@ const NET = TESTNET
       explorer: 'https://explorer.arc.io',
       gatewayApi: 'https://gateway-api.circle.com',
       gatewayWallet: '0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE',
+      gatewayMinter: '0x2222222d7164433c4C09B0b0D809a9b52C04C205',
       target: process.env.TARGET ?? 'https://open-pay.jp',
     };
 const USDC = '0x3600000000000000000000000000000000000000';
 const GATEWAY_DOMAIN = 26; // Circle domain for Arc
 const MAX_ATOMIC = BigInt(Math.round(Number(process.env.MAX_USDC ?? '0.05') * 1e6));
+
+// withdraw (売り手の Gateway 残高 → 同じウォレットの Arc USDC)。同一チェーンは transfer fee なし・
+// burn の gas fee は Arc で $0.0035 (Gateway fees)。maxFee はその上限として 0.02 USDC に固定する。
+const WITHDRAW_MAX_FEE = 20_000n;
+const MAX_UINT256 = (2n ** 256n - 1n).toString();
+const GATEWAY_MINT_ABI = parseAbi(['function gatewayMint(bytes attestationPayload, bytes signature)']);
+const b32 = (address) => pad(address.toLowerCase(), { size: 32 });
+
+function buildWithdrawTypedData(from, atomic) {
+  const spec = {
+    version: 1,
+    sourceDomain: GATEWAY_DOMAIN,
+    destinationDomain: GATEWAY_DOMAIN,
+    sourceContract: b32(NET.gatewayWallet),
+    destinationContract: b32(NET.gatewayMinter),
+    sourceToken: b32(USDC),
+    destinationToken: b32(USDC),
+    sourceDepositor: b32(from),
+    // 受取人は署名者自身に固定 (このツールから第三者宛てに引き出せない)。
+    destinationRecipient: b32(from),
+    sourceSigner: b32(from),
+    destinationCaller: b32('0x0000000000000000000000000000000000000000'),
+    value: atomic.toString(),
+    salt: `0x${randomBytes(32).toString('hex')}`,
+    hookData: '0x',
+  };
+  return {
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+      ],
+      TransferSpec: [
+        { name: 'version', type: 'uint32' },
+        { name: 'sourceDomain', type: 'uint32' },
+        { name: 'destinationDomain', type: 'uint32' },
+        { name: 'sourceContract', type: 'bytes32' },
+        { name: 'destinationContract', type: 'bytes32' },
+        { name: 'sourceToken', type: 'bytes32' },
+        { name: 'destinationToken', type: 'bytes32' },
+        { name: 'sourceDepositor', type: 'bytes32' },
+        { name: 'destinationRecipient', type: 'bytes32' },
+        { name: 'sourceSigner', type: 'bytes32' },
+        { name: 'destinationCaller', type: 'bytes32' },
+        { name: 'value', type: 'uint256' },
+        { name: 'salt', type: 'bytes32' },
+        { name: 'hookData', type: 'bytes' },
+      ],
+      BurnIntent: [
+        { name: 'maxBlockHeight', type: 'uint256' },
+        { name: 'maxFee', type: 'uint256' },
+        { name: 'spec', type: 'TransferSpec' },
+      ],
+    },
+    domain: { name: 'GatewayWallet', version: '1' },
+    primaryType: 'BurnIntent',
+    message: { maxBlockHeight: MAX_UINT256, maxFee: WITHDRAW_MAX_FEE.toString(), spec },
+  };
+}
 
 const eq = (a, b) => typeof a === 'string' && typeof b === 'string' && a.toLowerCase() === b.toLowerCase();
 
@@ -166,6 +228,43 @@ const server = createServer(async (req, res) => {
       console.log('[pay]', path, JSON.stringify(result));
       return json(res, 200, result);
     }
+    if (req.method === 'GET' && url.pathname === '/api/withdraw-intent') {
+      const from = url.searchParams.get('from');
+      if (!/^0x[0-9a-fA-F]{40}$/.test(from ?? '')) throw new Error('from address required');
+      const atomic = BigInt(Math.round(Number(url.searchParams.get('amount')) * 1e6));
+      if (atomic <= 0n) throw new Error('amount must be > 0');
+      const { balance } = await gatewayBalance(from);
+      const available = BigInt(Math.round(Number(balance) * 1e6));
+      if (atomic + WITHDRAW_MAX_FEE > available) {
+        throw new Error(`Gateway balance ${balance} USDC is below amount + max fee (${Number(atomic + WITHDRAW_MAX_FEE) / 1e6})`);
+      }
+      return json(res, 200, { typedData: buildWithdrawTypedData(from, atomic), maxFee: WITHDRAW_MAX_FEE.toString() });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/withdraw') {
+      const { message, signature } = await readBody(req);
+      // 署名済み intent を検査: 同一チェーン・受取人 = 署名者・上限内の maxFee だけを Gateway へ渡す。
+      const spec = message?.spec ?? {};
+      if (
+        spec.sourceDomain !== GATEWAY_DOMAIN || spec.destinationDomain !== GATEWAY_DOMAIN ||
+        spec.destinationRecipient !== spec.sourceDepositor || spec.sourceSigner !== spec.sourceDepositor ||
+        !eq(spec.destinationContract, b32(NET.gatewayMinter)) || !eq(spec.sourceContract, b32(NET.gatewayWallet)) ||
+        BigInt(message.maxFee ?? '0') > WITHDRAW_MAX_FEE
+      ) {
+        throw new Error('burn intent does not match the expected same-chain self-withdraw shape');
+      }
+      const gw = await fetch(`${NET.gatewayApi}/v1/transfer`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify([{ burnIntent: message, signature }]),
+      });
+      const out = await gw.json().catch(() => null);
+      if (!gw.ok || !out?.attestation || !out?.signature) {
+        throw new Error(`gateway /v1/transfer HTTP ${gw.status}: ${JSON.stringify(out).slice(0, 300)}`);
+      }
+      const data = encodeFunctionData({ abi: GATEWAY_MINT_ABI, functionName: 'gatewayMint', args: [out.attestation, out.signature] });
+      console.log('[withdraw]', JSON.stringify({ transferId: out.transferId, fees: out.fees }));
+      return json(res, 200, { to: NET.gatewayMinter, data, transferId: out.transferId ?? null, fees: out.fees ?? null });
+    }
     json(res, 404, { error: 'not_found' });
   } catch (e) {
     json(res, 400, { error: e instanceof Error ? e.message : String(e) });
@@ -200,7 +299,12 @@ const PAGE = `<!doctype html>
 <h2>3. 購入</h2>
 <div class="row"><input id="path" value="/api/paid/hello" style="width:260px"> <button id="buy" disabled>402 を取得して署名 → 支払い</button></div>
 <pre id="buyLog">-</pre>
-<p class="warn">署名ダイアログの内容 (to・value・verifyingContract) が下の表示と一致することを確認してから承認してください。</p>
+<p class="warn">↑ 常設の注意書きです (エラーではありません)。署名ダイアログの to・value・verifyingContract が結果欄の表示と一致することを確認してから承認してください。</p>
+
+<h2>4. 引き出し (売り手用: Gateway 残高 → このウォレットの Arc USDC)</h2>
+<p>受取先は接続中のウォレット自身に固定です。Gateway の burn 手数料 (Arc は約 0.0035 USDC・上限 0.02) が残高から引かれ、mint のガスはウォレットの USDC で支払います。</p>
+<div class="row"><input id="wamt" value="0.01" inputmode="decimal"> USDC <button id="withdraw" disabled>BurnIntent に署名 → mint</button></div>
+<pre id="wLog">-</pre>
 
 <script>
 const $ = (id) => document.getElementById(id);
@@ -237,7 +341,7 @@ $('connect').onclick = async () => {
     }
     $('acct').textContent = account;
     await refresh();
-    $('deposit').disabled = false; $('buy').disabled = false;
+    $('deposit').disabled = false; $('buy').disabled = false; $('withdraw').disabled = false;
   } catch (e) { $('bal').textContent = 'ERROR: ' + (e.message || e); }
 };
 $('deposit').onclick = async () => {
@@ -256,6 +360,23 @@ $('deposit').onclick = async () => {
     log('depLog', 'Gateway 残高に反映');
   } catch (e) { log('depLog', 'ERROR: ' + (e.message || e)); }
   $('deposit').disabled = false;
+};
+$('withdraw').onclick = async () => {
+  $('withdraw').disabled = true; $('wLog').textContent = '-';
+  try {
+    const intent = await (await fetch('/api/withdraw-intent?from=' + account + '&amount=' + encodeURIComponent($('wamt').value))).json();
+    if (intent.error) throw new Error(intent.error);
+    log('wLog', 'value: ' + intent.typedData.message.spec.value + ' atomic / maxFee: ' + intent.maxFee + ' atomic / recipient: 自分 (' + account + ')');
+    const signature = await call('eth_signTypedData_v4', [account, JSON.stringify(intent.typedData)]);
+    log('wLog', 'signed. requesting attestation…');
+    const att = await (await fetch('/api/withdraw', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: intent.typedData.message, signature }) })).json();
+    if (att.error) throw new Error(att.error);
+    log('wLog', 'attestation ok (transferId ' + att.transferId + ' / fees ' + JSON.stringify(att.fees) + ')');
+    const tx = await call('eth_sendTransaction', [{ from: account, to: att.to, data: att.data }]);
+    log('wLog', 'mint tx ' + tx); const r = await waitReceipt(tx); log('wLog', 'mint status ' + r.status);
+    await refresh();
+  } catch (e) { log('wLog', 'ERROR: ' + (e.message || e)); }
+  $('withdraw').disabled = false;
 };
 $('buy').onclick = async () => {
   $('buy').disabled = true; $('buyLog').textContent = '-';
