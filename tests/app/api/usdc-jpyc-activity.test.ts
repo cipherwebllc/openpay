@@ -5,6 +5,9 @@ import { JPYC_ACTIVITY_PREVIEW_SCHEMA, JPYC_ACTIVITY_RESPONSE_SCHEMA } from '@/l
 import { USDC_JPYC_ACTIVITY } from '@/lib/jpyc/liveResources';
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), mget: vi.fn(), claim: vi.fn(), release: vi.fn(), lpush: vi.fn(), fetch: vi.fn() }));
+// 購入ファネルのカウンタ (lib/x402/funnel) は同じ kvEval を使う付帯処理。このファイルは kvEval の呼び出し回数で
+// claim の解放 (release) を数えるので、計測を切り離して従来の課金境界だけを検証する。
+vi.mock('@/lib/x402/funnel', () => ({ recordFunnelAfterResponse: vi.fn() }));
 vi.mock('@/lib/kv', async () => ({
   ...await vi.importActual<typeof import('@/lib/kv')>('@/lib/kv'),
   kvGet: mocks.get, kvMget: mocks.mget, kvSetNxGet: mocks.claim, kvEval: mocks.release,

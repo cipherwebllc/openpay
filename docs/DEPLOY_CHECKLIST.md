@@ -1547,6 +1547,17 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - **go-live 前 E2E**: 自店舗 (@handle・storefront 設定済み) に対し testnet で `order_menu` → `order_quote` → `x402_pay` を実行し、
   店主の受注画面に注文が届くことを確認する。MCP の `MAX_PER_CALL_JPYC` は既定 10 JPYC で注文合計を超えやすいので引き上げる。
 
+### §14.9 x402 購入ファネル (vanilla USDC・Base / Arc) の日次カウンタ
+
+外部レビュー裁定 (2026-09-17) P1。「Arc を増やすべきか・商品が悪いのか・支払いのどの段階で落ちるのか」を判断する最小計測。
+- 実装 = `lib/x402/funnel.ts`。`vanillaGate` の各出口で **応答返却後・no-throw** に `x402:funnel:<UTC 日>` (ハッシュ・TTL 180 日) の
+  `<stage>|<rail>|<pathname>` を +1。stage = challenge / invalid_payload / verify_failed / conflict / content_error /
+  settle_failed / facilitator_unavailable / settled。rail = none (支払い前) / base / arc-gateway。判定・順序・応答には関与しない。
+- リクエストごとの行は残さない (402 は巡回で大量に出る)。誰が・いくらで買ったかは settle 台帳 (`x402:settle:ledger:<月>`)。
+- 読み出し = `node scripts/x402-funnel-report.mjs [日数]` (本番 KV の URL/TOKEN を export・読み取りのみ)。
+  ⚠️ challenge は検索クローラを含む = 買い手の数ではない。成立率は「支払いを試みた件数」を分母にする。
+- 対象外 (今回): JPYC の first-party 経路・Store の閲覧〜購入。必要になったら同じ形で足す。
+
 ### §14.8 Arc x402 rail (Circle Gateway facilitator) — 設計・go-live・運用
 
 **裁定 (2026-09-17 user)**: Base = 実績ある x402 rail (CDP・Bazaar/agentic.market 掲載)、Arc = Circle 直系の

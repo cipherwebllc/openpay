@@ -14,6 +14,10 @@ vi.mock('@/lib/x402/settleLedger', async (importOriginal) => ({
   recordSettleLedgerAfterResponse: ledger.record,
 }));
 
+// 購入ファネルの段階別カウンタ (lib/x402/funnel)。どの出口で何が計上されるかを固定する。
+const funnel = vi.hoisted(() => ({ record: vi.fn() }));
+vi.mock('@/lib/x402/funnel', () => ({ recordFunnelAfterResponse: funnel.record }));
+
 const PAY_TO = '0x1111111111111111111111111111111111111111';
 const GATEWAY_WALLET = '0x0077777d7EBA4688BDeF3E311b846F25870A19B9';
 const ARC_USDC = '0x3600000000000000000000000000000000000000';
@@ -132,6 +136,7 @@ function gatewayOk(): void {
 beforeEach(() => {
   fetchMock.mockReset();
   ledger.record.mockReset();
+  funnel.record.mockReset();
   kvHold.store.clear();
   kvHold.claimed = 0;
   kvHold.lastTtlSec = null;
@@ -429,4 +434,59 @@ describe('vanillaGate Arc rail (Circle Gateway)', () => {
     expect(paid.status).toBe(200);
     expect(ledger.record.mock.calls[0][0]).toMatchObject({ amount: '0.000001' });
   });
+
+  // ---- 購入ファネル: 各出口で stage / rail / resource が 1 回だけ計上される ----
+  const stages = (): unknown[][] => funnel.record.mock.calls.map((c) => [c[0], c[1]]);
+
+  it('funnel: 402 発行 → challenge|none・改変 accepted → invalid_payload|none', async () => {
+    await challenge();
+    expect(funnel.record.mock.calls).toEqual([['challenge', 'none', RESOURCE.resourceUrl]]);
+    funnel.record.mockReset();
+    await pay({ ...ARC_ACCEPT, amount: '1' });
+    expect(stages()).toEqual([['invalid_payload', 'none']]);
+  });
+
+  it('funnel: Arc 成立 → settled|arc-gateway・Base 成立 → settled|base', async () => {
+    await pay(ARC_ACCEPT, '0x31');
+    expect(stages()).toEqual([['settled', 'arc-gateway']]);
+    funnel.record.mockReset();
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ isValid: true, payer: PAYER, success: true, transaction: '0xtx' }),
+    });
+    await pay(BASE_ACCEPT, '0x32');
+    expect(stages()).toEqual([['settled', 'base']]);
+  });
+
+  it('funnel: verify 失敗 / settle 失敗 / facilitator 障害 / content 4xx を段階別に計上', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ isValid: false, invalidReason: 'wallet_not_found' }) });
+    await pay(ARC_ACCEPT, '0x33');
+    expect(stages()).toEqual([['verify_failed', 'arc-gateway']]);
+
+    funnel.record.mockReset();
+    fetchMock.mockImplementation(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => (url.endsWith('/verify') ? { isValid: true, payer: PAYER } : { success: false, errorReason: 'insufficient_balance' }),
+    }));
+    await pay(ARC_ACCEPT, '0x34');
+    expect(stages()).toEqual([['settle_failed', 'arc-gateway']]);
+
+    funnel.record.mockReset();
+    fetchMock.mockResolvedValue({ ok: false, status: 502, json: async () => ({}) });
+    await pay(ARC_ACCEPT, '0x35');
+    expect(stages()).toEqual([['facilitator_unavailable', 'arc-gateway']]);
+
+    funnel.record.mockReset();
+    gatewayOk();
+    const res = await handleVanillaPaidGet(
+      new Request(RESOURCE.resourceUrl, { headers: { 'PAYMENT-SIGNATURE': v2Header(ARC_ACCEPT, '0x36') } }),
+      RESOURCE,
+      () => NextResponse.json({ error: 'bad_request' }, { status: 400 }),
+    );
+    expect(res.status).toBe(400);
+    expect(stages()).toEqual([['content_error', 'arc-gateway']]);
+  });
 });
+
