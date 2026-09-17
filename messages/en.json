@@ -1030,6 +1030,16 @@
     "usdcArcTipHint": "USDC (Arc) tips arrive at the same receiving address on Arc (the sender pays gas in USDC; USDC from other chains is forwarded by Circle). Support messages are available for JPYC tips only."
   },
   "CreatorStoreSeller": {
+    "detailsLabel": "Detailed description",
+    "detailsHint": "Describe what is included, compatibility, and how to use it. Up to 2,000 characters.",
+    "detailsRemaining": "{count} characters remaining",
+    "specsLabel": "Specifications",
+    "specsHint": "One item per line in “Label: Value” format. Up to 8 rows. Example: Format: GLB",
+    "demoUrlLabel": "Demo URL",
+    "demoUrlHint": "HTTPS only. Shown as a “Try it out” button on the product page.",
+    "detailInvalidDetails": "Keep the detailed description within 2,000 characters.",
+    "detailInvalidSpecs": "Enter up to 8 specification rows, each with a label (up to 24 characters) and a value (up to 80 characters).",
+    "detailInvalidDemoUrl": "Enter a demo URL starting with https://, up to 512 characters.",
     "formGroupWhat": "1. What you sell",
     "formGroupPresentation": "2. Presentation (optional)",
     "formGroupPublish": "3. Publishing",
@@ -1195,6 +1205,8 @@
     "protectedDeliveryBadge": "Protected delivery"
   },
   "CreatorStorePurchase": {
+    "tryDemo": "Try it out",
+    "specsHeading": "Specifications",
     "dialogLabel": "Purchase digital product",
     "close": "Close",
     "startHeading": "Prepare your purchase",

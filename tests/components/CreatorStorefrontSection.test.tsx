@@ -159,6 +159,9 @@ describe('CreatorStorefrontSection', () => {
       ...PRODUCT,
       id: `h_${'b'.repeat(32)}`,
       title: '第2の商品',
+      details: 'カードには出さない詳しい説明',
+      specs: [{ label: '形式', value: 'GLB' }],
+      demoUrl: 'https://example.com/demo',
       imageUrl: 'https://cdn.example.com/product.png',
       galleryUrls: [
         'https://cdn.example.com/product-side.png',
@@ -184,11 +187,15 @@ describe('CreatorStorefrontSection', () => {
             id: secondProduct.id,
             imageUrl: secondProduct.imageUrl,
             galleryUrls: secondProduct.galleryUrls,
+            details: secondProduct.details,
+            specs: secondProduct.specs,
+            demoUrl: secondProduct.demoUrl,
             usdcEnabled: true,
           }),
         }),
       );
     });
+    expect(screen.queryByText(secondProduct.details)).not.toBeInTheDocument();
     expect(purchaseFlowSpy).not.toHaveBeenCalledWith(
       expect.objectContaining({
         product: expect.objectContaining({ id: PRODUCT.id }),

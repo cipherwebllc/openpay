@@ -336,6 +336,9 @@ describe('@handle ProfilePage JSON-LD', () => {
         payTo: ADDR,
         title: 'Prompt',
         deliveryUrl,
+        details: '内容物\n使い方',
+        specs: [{ label: '形式', value: 'GLB' }],
+        demoUrl: 'https://example.com/demo',
         imageUrl: 'https://cdn.example.com/product.png',
         galleryUrls: [
           'https://cdn.example.com/product-side.png',
@@ -364,6 +367,9 @@ describe('@handle ProfilePage JSON-LD', () => {
         id: `h_${'a'.repeat(32)}`,
         title: 'Prompt',
         protectedDelivery: !!deliveryUrl,
+        details: '内容物\n使い方',
+        specs: [{ label: '形式', value: 'GLB' }],
+        demoUrl: 'https://example.com/demo',
         imageUrl: 'https://cdn.example.com/product.png',
         galleryUrls: [
           'https://cdn.example.com/product-side.png',

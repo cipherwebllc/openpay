@@ -34,6 +34,9 @@ type ProductSummary = StoreLicenseProduct & {
   imageUrl?: string;
   deliveryUrl?: string;
   galleryUrls?: readonly string[];
+  details?: string;
+  specs?: readonly { label: string; value: string }[];
+  demoUrl?: string;
   priceJpyc: string;
   contentKind: 'url' | 'text';
   label: HostedLabel;
@@ -68,6 +71,9 @@ type ProductForm = LicenseFormFields & {
   imageUrl: string;
   deliveryUrl: string;
   galleryUrls: string;
+  details: string;
+  specs: string;
+  demoUrl: string;
   priceJpyc: string;
   contentKind: 'url' | 'text';
   label: HostedLabel;
@@ -122,6 +128,9 @@ const EMPTY_PRODUCT_FORM: ProductForm = {
   imageUrl: '',
   deliveryUrl: '',
   galleryUrls: '',
+  details: '',
+  specs: '',
+  demoUrl: '',
   priceJpyc: '',
   contentKind: 'url',
   label: 'download',
@@ -166,6 +175,9 @@ const DETAIL_MESSAGE_KEYS: Record<string, string> = {
   'payTo must not be the forwarder': 'detailPayToForwarder',
   'invalid title': 'detailInvalidTitle',
   'invalid desc': 'detailInvalidDesc',
+  'invalid details': 'detailInvalidDetails',
+  'invalid specs': 'detailInvalidSpecs',
+  'invalid demoUrl': 'detailInvalidDemoUrl',
   'invalid imageUrl': 'detailInvalidImageUrl',
   'invalid deliveryUrl': 'detailInvalidDeliveryUrl',
   'too many gallery images': 'detailTooManyGalleryImages',
@@ -523,6 +535,9 @@ function SignedInSellerPanel({
         payTo: product.payTo,
         title: product.title,
         desc: product.desc ?? '',
+        details: product.details ?? '',
+        specs: product.specs?.map(({ label, value }) => `${label}: ${value}`).join('\n') ?? '',
+        demoUrl: product.demoUrl ?? '',
         emoji: product.emoji ?? '',
         imageUrl: product.imageUrl ?? '',
         deliveryUrl: product.deliveryUrl ?? '',
@@ -558,6 +573,16 @@ function SignedInSellerPanel({
           body: JSON.stringify({
             title: form.title,
             desc: form.desc.trim() || null,
+            details: form.details.trim() || null,
+            specs: form.specs.trim() ? form.specs.split(/\r?\n/).filter((line) => line.trim()).map((line) => {
+              // 区切りは「直後が / でない最初のコロン」。素の URL 行 (https://…) を {label:'https', value:'//…'} に
+              // 誤分割して公開しない — 区切れない行は value 空で送り、server の 400 で「ラベル: 値」を促す。
+              const match = /^([^:：]*)[:：](?!\/)(.*)$/.exec(line);
+              return match
+                ? { label: match[1].trim(), value: match[2].trim() }
+                : { label: line.trim(), value: '' };
+            }) : null,
+            demoUrl: form.demoUrl.trim() || null,
             emoji: form.emoji.trim() || null,
             imageUrl: form.imageUrl.trim() || null,
             // Mutable delivery metadata stays outside the immutable license/content fields.
@@ -1184,6 +1209,52 @@ function SignedInSellerPanel({
               {t('formGroupPresentation')}
             </summary>
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label htmlFor="creator-store-product-details" className="block text-sm font-medium text-slate-700">
+                  {t('detailsLabel')}
+                </label>
+                <textarea
+                  id="creator-store-product-details"
+                  rows={6}
+                  maxLength={2000}
+                  value={productForm.details}
+                  onChange={(event) => updateProduct({ details: event.target.value })}
+                  aria-describedby="creator-store-product-details-hint creator-store-product-details-remaining"
+                  className={inputClass}
+                />
+                <p id="creator-store-product-details-hint" className="mt-1 text-xs text-slate-500">{t('detailsHint')}</p>
+                <p id="creator-store-product-details-remaining" className="mt-1 text-xs text-slate-500">
+                  {t('detailsRemaining', { count: 2000 - [...productForm.details].length })}
+                </p>
+              </div>
+              <div className="sm:col-span-2">
+                <label htmlFor="creator-store-product-specs" className="block text-sm font-medium text-slate-700">
+                  {t('specsLabel')}
+                </label>
+                <textarea
+                  id="creator-store-product-specs"
+                  rows={4}
+                  value={productForm.specs}
+                  onChange={(event) => updateProduct({ specs: event.target.value })}
+                  aria-describedby="creator-store-product-specs-hint"
+                  className={inputClass}
+                />
+                <p id="creator-store-product-specs-hint" className="mt-1 text-xs text-slate-500">{t('specsHint')}</p>
+              </div>
+              <div className="sm:col-span-2">
+                <label htmlFor="creator-store-product-demo-url" className="block text-sm font-medium text-slate-700">
+                  {t('demoUrlLabel')}
+                </label>
+                <input
+                  id="creator-store-product-demo-url"
+                  type="url"
+                  value={productForm.demoUrl}
+                  onChange={(event) => updateProduct({ demoUrl: event.target.value })}
+                  aria-describedby="creator-store-product-demo-url-hint"
+                  className={inputClass}
+                />
+                <p id="creator-store-product-demo-url-hint" className="mt-1 text-xs text-slate-500">{t('demoUrlHint')}</p>
+              </div>
               <label
                 htmlFor="creator-store-product-image-url"
                 className="block text-sm font-medium text-slate-700"

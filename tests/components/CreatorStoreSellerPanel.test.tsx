@@ -195,7 +195,8 @@ describe('CreatorStoreSellerPanel', () => {
       expect(field).not.toBeRequired();
       expect(field.closest('form')).toBe(screen.getByLabelText('商品名').closest('form'));
     }
-    expect(details.querySelectorAll('input, select, textarea')).toHaveLength(5);
+    // 任意の表示メタ (詳しい説明・仕様・実際に試せる URL) もこの折りたたみに入る = 第 1 ブロックを伸ばさない
+    expect(details.querySelectorAll('input, select, textarea')).toHaveLength(8);
     fireEvent.click(summary);
     expect(screen.getByLabelText('画像 URL (任意)')).toBeVisible();
     fireEvent.click(summary);
@@ -410,6 +411,9 @@ describe('CreatorStoreSellerPanel', () => {
       'payTo must not be the fee receiver',
       /受け取り先にこのウォレットは使えません/,
     ],
+    ['invalid details', /詳しい説明は最大 2,000 字/],
+    ['invalid specs', /仕様は最大 8 行/],
+    ['invalid demoUrl', /実際に試せる URL は https/],
     ['invalid imageUrl', /画像 URL は https:\/\//],
     ['invalid deliveryUrl', /保護配布先は https:\/\//],
     ['too many gallery images', /追加画像は最大 4 枚/],
@@ -1103,5 +1107,95 @@ describe('protected delivery seller field', () => {
     fireEvent.submit(field.closest('form')!);
     await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true));
     expect(JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]?.body))).toHaveProperty('deliveryUrl', '');
+  });
+});
+
+
+describe('商品詳細フォーム', () => {
+  function setup(existing = false) {
+    const product = { id: 'h_' + 'b'.repeat(32), payTo: ADDRESS, title: '詳細付き商品', priceJpyc: '5000', contentKind: 'url', label: 'download', saleActive: false, contentAvailable: true,
+      details: '内容物\n使い方', specs: [{ label: '形式', value: 'GLB' }, { label: 'サイズ', value: '12 MB' }], demoUrl: 'https://example.com/demo',
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/store/seller') return response({ ok: true, seller: null });
+      if (init?.method === 'POST' || init?.method === 'PATCH') return response({ ok: true, product });
+      if (url === `/api/store/products/${product.id}`) return response({ ok: true, product, content: { kind: 'url', value: 'https://example.com/download' } });
+      return response({ ok: true, products: existing ? [product] : [], max: 12 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return { fetchMock, product };
+  }
+
+  it.each([false, true])('新規フォームの詳細 payload は空なら null、仕様は最初の半角/全角コロンで分割 (filled=%s)', async (filled) => {
+    const { fetchMock } = setup();
+    renderPanel();
+    await screen.findByText(/商品はまだありません/);
+    fireEvent.change(screen.getByLabelText('商品名'), { target: { value: '新商品' } });
+    fireEvent.change(screen.getByLabelText('価格 (JPYC)'), { target: { value: '5000' } });
+    fireEvent.change(screen.getByLabelText('提供する URL'), { target: { value: 'https://example.com/download' } });
+    // 3 項目は「2. 見せ方 (任意)」の折りたたみ内 (新規では閉じている)
+    expect(screen.getByLabelText('詳しい説明')).not.toBeVisible();
+    fireEvent.click(screen.getByText('2. 見せ方 (任意)'));
+    expect(screen.getByText('残り 2000 字')).toBeVisible();
+    expect(screen.getByLabelText('詳しい説明')).toHaveAttribute('maxLength', '2000');
+    if (filled) {
+      fireEvent.change(screen.getByLabelText('詳しい説明'), { target: { value: '😀'.repeat(2000) } });
+      expect(screen.getByText('残り 0 字')).toBeVisible();
+      fireEvent.change(screen.getByLabelText('詳しい説明'), { target: { value: ' 内容物\n使い方 ' } });
+      fireEvent.change(screen.getByLabelText('仕様'), { target: { value: ' 形式: GLB\n\n リンク：https://example.com/demo:a ' } });
+      fireEvent.change(screen.getByLabelText('実際に試せる URL'), { target: { value: 'https://example.com/demo' } });
+    }
+    fireEvent.submit(screen.getByLabelText('商品名').closest('form')!);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')?.[1]?.body));
+    expect(payload).toMatchObject(filled ? {
+      details: '内容物\n使い方', specs: [{ label: '形式', value: 'GLB' }, { label: 'リンク', value: 'https://example.com/demo:a' }], demoUrl: 'https://example.com/demo',
+    } : { details: null, specs: null, demoUrl: null });
+  });
+
+  it('仕様欄の素の URL 行は誤分割せず value 空で送る (server の 400 で「ラベル: 値」を促す)', async () => {
+    const { fetchMock } = setup();
+    renderPanel();
+    await screen.findByText(/商品はまだありません/);
+    fireEvent.change(screen.getByLabelText('商品名'), { target: { value: '新商品' } });
+    fireEvent.change(screen.getByLabelText('価格 (JPYC)'), { target: { value: '5000' } });
+    fireEvent.change(screen.getByLabelText('提供する URL'), { target: { value: 'https://example.com/download' } });
+    fireEvent.click(screen.getByText('2. 見せ方 (任意)'));
+    fireEvent.change(screen.getByLabelText('仕様'), { target: { value: 'https://example.com/demo\n比率: 16:9' } });
+    fireEvent.submit(screen.getByLabelText('商品名').closest('form')!);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')?.[1]?.body));
+    // 旧実装は {label:'https', value:'//example.com/demo'} として公開されていた。値側のコロンは保持。
+    expect(payload.specs).toEqual([
+      { label: 'https://example.com/demo', value: '' },
+      { label: '比率', value: '16:9' },
+    ]);
+  });
+
+  it('編集時に詳細を復元し、空にして保存すると null でクリアする', async () => {
+    const { fetchMock, product } = setup(true);
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    await screen.findByRole('heading', { name: '商品を編集' });
+    expect(screen.getByLabelText('詳しい説明')).toHaveValue(product.details);
+    expect(screen.getByLabelText('仕様')).toHaveValue('形式: GLB\nサイズ: 12 MB');
+    expect(screen.getByLabelText('実際に試せる URL')).toHaveValue(product.demoUrl);
+    for (const label of ['詳しい説明', '仕様', '実際に試せる URL']) fireEvent.change(screen.getByLabelText(label), { target: { value: '' } });
+    fireEvent.submit(screen.getByLabelText('商品名').closest('form')!);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]?.body));
+    expect(payload).toMatchObject({ details: null, specs: null, demoUrl: null });
+  });
+
+  it('コロンなし・空ラベル・空値の行を黙って捨てず、server 検証に渡す', async () => {
+    const { fetchMock } = setup(true);
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    await screen.findByRole('heading', { name: '商品を編集' });
+    fireEvent.change(screen.getByLabelText('仕様'), { target: { value: 'コロンなし\n: GLB\n形式：' } });
+    fireEvent.submit(screen.getByLabelText('商品名').closest('form')!);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true));
+    const payload = JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]?.body));
+    expect(payload.specs).toEqual([{ label: 'コロンなし', value: '' }, { label: '', value: 'GLB' }, { label: '形式', value: '' }]);
   });
 });

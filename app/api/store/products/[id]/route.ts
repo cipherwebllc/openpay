@@ -42,6 +42,9 @@ const PRODUCT_PATCH_KEYS = new Set([
   'imageUrl',
   'deliveryUrl',
   'galleryUrls',
+  'details',
+  'specs',
+  'demoUrl',
   'priceJpyc',
   'contentKind',
   'label',
@@ -289,6 +292,9 @@ export async function PATCH(
       owner: auth.address,
       metadata: {
         title: product.title,
+        ...(product.details ? { details: product.details } : {}),
+        ...(product.specs ? { specs: product.specs } : {}),
+        ...(product.demoUrl ? { demoUrl: product.demoUrl } : {}),
         ...(product.desc ? { desc: product.desc } : {}),
         ...(product.emoji ? { emoji: product.emoji } : {}),
         ...(product.deliveryUrl ? { deliveryUrl: product.deliveryUrl } : {}),
@@ -347,6 +353,9 @@ export async function PATCH(
     deliveryUrl: raw.deliveryUrl !== undefined ? raw.deliveryUrl : product.deliveryUrl,
     imageUrl:
       raw.imageUrl !== undefined ? raw.imageUrl : product.imageUrl,
+    details: raw.details !== undefined ? raw.details : product.details,
+    specs: raw.specs !== undefined ? raw.specs : product.specs,
+    demoUrl: raw.demoUrl !== undefined ? raw.demoUrl : product.demoUrl,
     galleryUrls:
       raw.galleryUrls !== undefined
         ? raw.galleryUrls
@@ -456,6 +465,9 @@ export async function PATCH(
     owner: auth.address,
     metadata: {
       title: parsed.product.title,
+      ...(parsed.product.details ? { details: parsed.product.details } : {}),
+      ...(parsed.product.specs ? { specs: parsed.product.specs } : {}),
+      ...(parsed.product.demoUrl ? { demoUrl: parsed.product.demoUrl } : {}),
       ...(parsed.product.desc ? { desc: parsed.product.desc } : {}),
       ...(parsed.product.emoji ? { emoji: parsed.product.emoji } : {}),
       ...(parsed.product.deliveryUrl ? { deliveryUrl: parsed.product.deliveryUrl } : {}),

@@ -125,6 +125,60 @@ afterEach(() => {
 });
 
 describe('hosted 入力検証', () => {
+  it('details は code points 上限・改行保持・CRLF 正規化・制御文字除去を適用する', async () => {
+    const { parseHostedInput, MAX_HOSTED_DETAILS_LEN } = await mod();
+    expect(MAX_HOSTED_DETAILS_LEN).toBe(2000);
+    const details = '😀'.repeat(MAX_HOSTED_DETAILS_LEN);
+    const atLimit = parseHostedInput(baseInput({ details }));
+    expect(atLimit.ok && atLimit.product.details).toBe(details);
+    for (const invalid of [details + 'a', 42, {}, []]) {
+      expect(parseHostedInput(baseInput({ details: invalid }))).toEqual({ ok: false, error: 'invalid details' });
+    }
+    const cleaned = parseHostedInput(baseInput({ details: ' \u0000A\r\nB\nC\t\r\u007f\u200b\ud800 ' }));
+    expect(cleaned.ok && cleaned.product.details).toBe('A\nB\nC');
+  });
+
+  it('specs は各 code point 上限と 8 行を許可し、不正行を拒否する', async () => {
+    const { parseHostedInput, MAX_HOSTED_SPECS, MAX_HOSTED_SPEC_LABEL_LEN, MAX_HOSTED_SPEC_VALUE_LEN } = await mod();
+    expect([MAX_HOSTED_SPECS, MAX_HOSTED_SPEC_LABEL_LEN, MAX_HOSTED_SPEC_VALUE_LEN]).toEqual([8, 24, 80]);
+    const row = { label: '😀'.repeat(24), value: '😀'.repeat(80) };
+    const specs = Array.from({ length: 8 }, () => row);
+    const atLimit = parseHostedInput(baseInput({ specs }));
+    expect(atLimit.ok && atLimit.product.specs).toEqual(specs);
+    for (const invalid of [
+      [...specs, row], [{ ...row, label: row.label + 'a' }], [{ ...row, value: row.value + 'a' }],
+      [{ label: ' \t ', value: 'GLB' }], [{ label: '形式', value: '\u0000' }],
+      [{ label: 1, value: 'GLB' }], [{ label: '形式' }], [null], [[]], '形式: GLB', {},
+    ]) {
+      expect(parseHostedInput(baseInput({ specs: invalid }))).toEqual({ ok: false, error: 'invalid specs' });
+    }
+    const cleaned = parseHostedInput(baseInput({ specs: [{ label: ' \u0000形\n式\u200b ', value: ' GL\tB\r\n\u007f ' }] }));
+    expect(cleaned.ok && cleaned.product.specs).toEqual([{ label: '形式', value: 'GLB' }]);
+  });
+
+  it('demoUrl は imageUrl と同じ https・長さ・trim 規則で検証する', async () => {
+    const { parseHostedInput, MAX_HOSTED_URL_LEN } = await mod();
+    const atLimit = 'https://example.com/' + 'x'.repeat(MAX_HOSTED_URL_LEN - 20);
+    expect(atLimit.length).toBe(MAX_HOSTED_URL_LEN);
+    for (const value of [atLimit, atLimit + 'x', ' https://example.com/demo ', 'http://example.com', 'javascript:alert(1)', 'data:text/plain,demo', '/demo', 42]) {
+      const demo = parseHostedInput(baseInput({ demoUrl: value }));
+      const image = parseHostedInput(baseInput({ imageUrl: value }));
+      expect(demo.ok).toBe(image.ok);
+      if (image.ok && demo.ok) expect(demo.product.demoUrl).toBe(image.product.imageUrl);
+      else expect(demo).toEqual({ ok: false, error: 'invalid demoUrl' });
+    }
+  });
+
+  it('表示詳細の省略・null・空欄は未設定にする', async () => {
+    const { parseHostedInput } = await mod();
+    for (const input of [{}, { details: null, specs: null, demoUrl: null }, { details: '', specs: [], demoUrl: '' }, { details: ' \r\n\t\u0000 ', demoUrl: '  ' }]) {
+      const parsed = parseHostedInput(baseInput(input));
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) throw new Error(parsed.error);
+      for (const key of ['details', 'specs', 'demoUrl']) expect(parsed.product).not.toHaveProperty(key);
+    }
+  });
+
   it('payTo が feeReceiver / forwarder なら拒否する (署名後に必ず失敗する商品を作らせない)', async () => {
     const { parseHostedInput } = await mod();
     expect(parseHostedInput(baseInput({ payTo: FEE_RECEIVER })).ok).toBe(false);
@@ -345,6 +399,9 @@ describe('hosted 作成と分離', () => {
     const m = await mod();
     const parsed = m.parseHostedInput(
       baseInput({
+        details: '内容物\n使い方',
+        specs: [{ label: '形式', value: 'GLB' }],
+        demoUrl: 'https://example.com/demo',
         imageUrl: 'https://cdn.example.com/product.png',
         galleryUrls: [
           'https://cdn.example.com/gallery-1.png',
@@ -957,5 +1014,109 @@ describe('出品者の販売者情報 (特商法対応)', () => {
     expect(await m.sellerDisclosureComplete(OWNER)).toBe(true);
     kvMocks.fail = true;
     expect(await m.sellerDisclosureComplete(OWNER)).toBe('storage');
+  });
+});
+
+
+describe('商品詳細メタ: レビュー指摘の固定', () => {
+  it('details: 単独 CR も改行・3 連続以上の改行は 2 つに畳む (改行だけで縦に伸びる表示破綻を断つ)', async () => {
+    const { parseHostedInput } = await mod();
+    const lone = parseHostedInput(baseInput({ details: 'A\rB' }));
+    expect(lone.ok && lone.product.details).toBe('A\nB');
+    const tall = parseHostedInput(baseInput({ details: `a${'\n'.repeat(1998)}b` }));
+    expect(tall.ok && tall.product.details).toBe('a\n\nb');
+  });
+
+  it('specs: ラベルのコロンは拒否 (「ラベル: 値」編集の往復で化けるため)・値のコロンは可', async () => {
+    const { parseHostedInput, parseStoredHostedProduct } = await mod();
+    for (const label of ['Ratio 16:9', '比率：横']) {
+      expect(parseHostedInput(baseInput({ specs: [{ label, value: 'yes' }] }))).toEqual({ ok: false, error: 'invalid specs' });
+    }
+    const ok = parseHostedInput(baseInput({ specs: [{ label: '比率', value: '16:9' }] }));
+    expect(ok.ok && ok.product.specs).toEqual([{ label: '比率', value: '16:9' }]);
+    // 保存済みに混ざっていても商品は読め、その行だけ落ちる
+    if (!ok.ok) throw new Error('setup');
+    const created = await (await mod()).createHostedProduct(ok, 1000);
+    if (!created.ok) throw new Error('setup');
+    const stored = { ...JSON.parse(JSON.stringify(created.product)), specs: [{ label: 'a:b', value: 'x' }, { label: '形式', value: 'GLB' }] };
+    expect(parseStoredHostedProduct(JSON.stringify(stored))?.specs).toEqual([{ label: '形式', value: 'GLB' }]);
+  });
+
+  it('保存済みの demoUrl が javascript: / data: / http: でも描画前に落とす (読出再検証 = 唯一の防波堤)', async () => {
+    const m = await mod();
+    const { parseHostedInput, parseStoredHostedProduct } = m;
+    const ok = parseHostedInput(baseInput({}));
+    if (!ok.ok) throw new Error('setup');
+    const created = await m.createHostedProduct(ok, 1000);
+    if (!created.ok) throw new Error('setup');
+    for (const demoUrl of ['javascript:alert(1)', 'data:text/html,<script>1</script>', 'http://example.com', '//example.com/x']) {
+      const reread = parseStoredHostedProduct(JSON.stringify({ ...JSON.parse(JSON.stringify(created.product)), demoUrl }));
+      expect(reread).not.toBeNull();
+      expect(reread).not.toHaveProperty('demoUrl');
+    }
+  });
+
+  it('購入 snapshot のキー集合は表示メタを足しても完全に不変 (4 つ目の表示項目を足す人への柵)', async () => {
+    const { parseHostedInput, hostedPurchaseMetadata } = await mod();
+    const plain = parseHostedInput(baseInput({}));
+    const rich = parseHostedInput(baseInput({
+      details: '内容物', specs: [{ label: '形式', value: 'GLB' }], demoUrl: 'https://example.com/demo',
+      imageUrl: 'https://example.com/a.png', galleryUrls: ['https://example.com/b.png'], tags: ['3d'], category: '3d-game',
+    }));
+    if (!plain.ok || !rich.ok) throw new Error('setup');
+    const a = hostedPurchaseMetadata({ ...plain.product, id: 'p1', createdAt: 1 });
+    const b = hostedPurchaseMetadata({ ...rich.product, id: 'p1', createdAt: 1 });
+    expect(b).toEqual(a);
+    expect(Object.keys(b).sort()).toEqual(Object.keys(a).sort());
+  });
+});
+
+describe('商品詳細メタの保存と寛容読込', () => {
+  it('作成・公開読込・編集・クリアを通じて保存し、購入 snapshot は不変', async () => {
+    const m = await mod();
+    const details = { details: '内容物\n使い方', specs: [{ label: '形式', value: 'GLB' }], demoUrl: 'https://example.com/demo' };
+    const parsed = m.parseHostedInput(baseInput(details));
+    if (!parsed.ok) throw new Error(parsed.error);
+    const created = await m.createHostedProduct(parsed);
+    if (!created.ok) throw new Error('setup');
+    expect(await m.getHostedProduct(created.product.id)).toMatchObject(details);
+    expect(await m.listAvailableHostedForOwner(OWNER)).toEqual([expect.objectContaining(details)]);
+    const purchase = m.hostedPurchaseMetadata(created.product);
+    for (const key of Object.keys(details)) expect(purchase).not.toHaveProperty(key);
+    for (const metadata of [{ ...details, details: '更新後', specs: [{ label: 'サイズ', value: '12 MB' }], demoUrl: 'https://example.com/v2' }, {}]) {
+      const snapshot = await m.getHostedProductUpdateSnapshot(created.product.id);
+      if (!snapshot || snapshot === 'storage') throw new Error('setup');
+      const updated = await m.replaceHostedSellerProduct({ snapshot, owner: OWNER, metadata: {
+        title: snapshot.product.title, priceJpyc: snapshot.product.priceJpyc, label: snapshot.product.label, saleActive: true, ...metadata,
+      } });
+      expect(updated.ok).toBe(true);
+      const stored = await m.getHostedProduct(created.product.id);
+      if (!stored || stored === 'storage') throw new Error('setup');
+      expect(stored.contentRevision).toBe(1);
+      expect(m.hostedPurchaseMetadata(stored)).toEqual(purchase);
+      if ('details' in metadata) expect(stored).toMatchObject(metadata);
+      else for (const key of Object.keys(details)) expect(stored).not.toHaveProperty(key);
+    }
+  });
+
+  it('不正な詳細・URL・仕様行だけを落とし、正常な仕様は最大 8 行残す', async () => {
+    const m = await mod();
+    const parsed = m.parseHostedInput(baseInput());
+    if (!parsed.ok) throw new Error(parsed.error);
+    const valid = { ...parsed.product, id: 'h_' + 'a'.repeat(32), createdAt: 1 };
+    for (const bad of [
+      { details: {}, specs: 'bad', demoUrl: false },
+      { details: 'a'.repeat(2001), specs: [{ label: '', value: 'GLB' }], demoUrl: 'http://example.com' },
+    ]) {
+      const product = m.parseStoredHostedProduct(JSON.stringify({ ...valid, ...bad }));
+      expect(product?.title).toBe(valid.title);
+      for (const key of Object.keys(bad)) expect(product).not.toHaveProperty(key);
+    }
+    const row = { label: ' 形\t式 ', value: ' GLB ' };
+    const product = m.parseStoredHostedProduct(JSON.stringify({ ...valid,
+      details: ' A\r\nB\u0000 ', demoUrl: ' https://example.com/demo ',
+      specs: [null, { label: '', value: 'bad' }, ...Array.from({ length: 9 }, () => row)],
+    }));
+    expect(product).toMatchObject({ details: 'A\nB', demoUrl: 'https://example.com/demo', specs: Array.from({ length: 8 }, () => ({ label: '形式', value: 'GLB' })) });
   });
 });

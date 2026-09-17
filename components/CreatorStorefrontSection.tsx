@@ -22,6 +22,9 @@ export type CreatorStorefrontProduct = StoreLicenseProduct & {
   emoji?: string;
   imageUrl?: string;
   galleryUrls?: readonly string[];
+  details?: string;
+  specs?: readonly { label: string; value: string }[];
+  demoUrl?: string;
   priceJpyc: string;
   /** 保存値 true の商品だけ、購入 modal 内で USDC rail を選べる。 */
   usdcEnabled?: true;
@@ -193,6 +196,9 @@ export function CreatorStorefrontSection({
                         ...(product.imageUrl
                           ? { imageUrl: product.imageUrl }
                           : {}),
+                        ...(product.details ? { details: product.details } : {}),
+                        ...(product.specs ? { specs: product.specs } : {}),
+                        ...(product.demoUrl ? { demoUrl: product.demoUrl } : {}),
                         ...(product.galleryUrls
                           ? { galleryUrls: product.galleryUrls }
                           : {}),

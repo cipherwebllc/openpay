@@ -29,6 +29,9 @@ export type CreatorStorePurchaseFlowProps = {
     description?: string;
     imageUrl?: string;
     galleryUrls?: readonly string[];
+    details?: string;
+    specs?: readonly { label: string; value: string }[];
+    demoUrl?: string;
     priceJpyc: string;
     merchant: Address;
     usdcEnabled?: true;
@@ -37,6 +40,15 @@ export type CreatorStorePurchaseFlowProps = {
   onClose: () => void;
 };
 
+
+/** demoUrl のホスト名 (表示用)。保存時に https 検証済みだが、壊れた値で描画を落とさない。 */
+function demoHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
 export function CreatorStorePurchaseFlow({
   open,
   product,
@@ -360,6 +372,31 @@ export function CreatorStorePurchaseFlow({
               <p className="mx-auto mt-3 max-w-prose whitespace-pre-wrap break-words text-left text-sm leading-relaxed text-slate-600">
                 {product.description}
               </p>
+            ) : null}
+            {product.details ? (
+              <p className="mx-auto mt-5 max-w-prose whitespace-pre-line break-words text-left text-sm leading-relaxed text-slate-700">
+                {product.details}
+              </p>
+            ) : null}
+            {product.specs?.length ? (
+              <section className="mx-auto mt-5 max-w-prose text-left">
+                <h3 className="text-sm font-bold text-slate-900">{t('specsHeading')}</h3>
+                <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] text-sm">
+                  {product.specs.map(({ label, value }, index) => (
+                    <div key={index} className="contents">
+                      <dt className="break-words border-b border-slate-200 py-2 pr-3 font-medium text-slate-700">{label}</dt>
+                      <dd className="break-words border-b border-slate-200 py-2 text-slate-600">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ) : null}
+            {product.demoUrl ? (
+              <a href={product.demoUrl} target="_blank" rel="noopener noreferrer nofollow" className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl border border-brand px-4 py-2 text-sm font-bold text-brand hover:bg-blue-50">
+                {t('tryDemo')} <span aria-hidden="true">↗</span>
+                {/* 遷移先を読めるようにホスト名を併記 (出品者が指定した外部 URL・OpenPay の管理外)。 */}
+                <span className="font-normal text-slate-500">{demoHost(product.demoUrl)}</span>
+              </a>
             ) : null}
             <CreatorStoreDeliveryBadge protectedDelivery={product.protectedDelivery} />
             <CreatorStoreLicenseDetails product={product} />
