@@ -127,6 +127,71 @@ export function parseVanillaFacilitator(env: {
   return { url: CDP_FACILITATOR_URL, cdpAuth: { keyId, keySecret } };
 }
 
+// Arc = 第 2 の USDC x402 rail (user 裁定 2026-09-17・plans/arc-x402-gateway.md)。
+// CDP / payai は Arc を settle できないため、Circle Gateway の x402 facilitator を使う:
+//   - 認証不要 (`security: []`)・x402 v2 のみ・署名 domain は USDC でなく GatewayWalletBatched
+//   - 買い手は Gateway Wallet に deposit 済み USDC から払う (ガス不要)・売り手は Gateway 残高で受け取る
+// 既定 OFF で完全 inert (402 に Arc accept が出ない・Base 経路は 1 バイトも変わらない)。
+// X402_NETWORK の mainnet/testnet に追従: base → Arc mainnet / base-sepolia → Arc testnet。
+// polygon 系 (JPYC facilitator の領分) で ON は配線ミスなので起動時 throw (fail-loud)。
+const ARC_GATEWAY_BY_NETWORK = {
+  base: {
+    chainId: 5042,
+    caip2: 'eip155:5042',
+    url: 'https://gateway-api.circle.com',
+    gatewayWallet: '0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE',
+  },
+  'base-sepolia': {
+    chainId: 5042002,
+    caip2: 'eip155:5042002',
+    url: 'https://gateway-api-testnet.circle.com',
+    gatewayWallet: '0x0077777d7EBA4688BDeF3E311b846F25870A19B9',
+  },
+} as const;
+/** Arc の USDC (ERC-20 面・6 桁)。native gas と同一残高だが x402 は ERC-20 面だけを使う。 */
+const ARC_USDC_ADDRESS: Address = '0x3600000000000000000000000000000000000000';
+/** Gateway は 3 日未満の有効期間を `authorization_validity_too_short` で拒否する。Circle SDK と同じ 7 日+。 */
+export const ARC_GATEWAY_MAX_TIMEOUT_SECONDS = 604_900;
+
+export type ArcGatewayConfig =
+  | { enabled: false }
+  | {
+      enabled: true;
+      chainId: 5042 | 5042002;
+      caip2: 'eip155:5042' | 'eip155:5042002';
+      usdc: Address;
+      /** EIP-712 verifyingContract (Gateway Wallet)。USDC のアドレスではない。 */
+      gatewayWallet: Address;
+      /** `${url}/v1/x402/{supported,verify,settle}` */
+      url: string;
+      payTo: Address;
+    };
+
+export function parseArcGateway(env: {
+  flag: string | undefined;
+  network: X402Network;
+  payTo: Address;
+}): ArcGatewayConfig {
+  const flag = nonEmpty(env.flag);
+  if (flag !== '1' && flag !== 'true') return { enabled: false };
+  if (env.network !== 'base' && env.network !== 'base-sepolia') {
+    throw new Error(
+      `ENABLE_X402_ARC_GATEWAY requires X402_NETWORK=base or base-sepolia (got: ${env.network}). ` +
+        'Arc x402 rides on the vanilla USDC gate, not the JPYC facilitator.',
+    );
+  }
+  const net = ARC_GATEWAY_BY_NETWORK[env.network];
+  return {
+    enabled: true,
+    chainId: net.chainId,
+    caip2: net.caip2,
+    usdc: ARC_USDC_ADDRESS,
+    gatewayWallet: net.gatewayWallet,
+    url: net.url,
+    payTo: env.payTo,
+  };
+}
+
 const isProd = process.env.NODE_ENV === 'production';
 const testMode = process.env.X402_TEST_MODE === 'true';
 
@@ -150,6 +215,11 @@ const vanillaFacilitator = parseVanillaFacilitator({
   cdpKeyId: process.env.CDP_API_KEY_ID,
   cdpKeySecret: process.env.CDP_API_KEY_SECRET,
 });
+const arcGateway = parseArcGateway({
+  flag: process.env.ENABLE_X402_ARC_GATEWAY,
+  network,
+  payTo,
+});
 
 export const x402Config = {
   network,
@@ -157,6 +227,8 @@ export const x402Config = {
   facilitatorUrl,
   /** vanilla USDC gate 専用の facilitator (既定 = facilitatorUrl と同一・cdp 切替可)。 */
   vanillaFacilitator,
+  /** Arc rail (Circle Gateway x402 facilitator)。既定 `{ enabled: false }`。 */
+  arcGateway,
   defaultPrice,
   // X402_ASSET 未設定なら network 既定 (Base→USDC / Polygon→JPYC) を使う。
   asset: nonEmpty(process.env.X402_ASSET),

@@ -133,6 +133,11 @@ x402 の per-call micropayment 用途 ($0.001-0.01 単価) で fee は実用範�
 
 ## 7. x402 Protocol との統合状況
 
+> **2026-09-17 追記**: 本節は古い。Circle は 2026-09-16 (Arc mainnet 稼働日) に **Gateway x402 facilitator
+> (Nanopayments)** を公開した — `gateway-api.circle.com/v1/x402/{supported,verify,settle}`・認証不要・
+> x402 v2・`GatewayWalletBatched` domain・Arc (`eip155:5042`) を含む 12 chain。OpenPay は Arc rail に採用
+> (`plans/arc-x402-gateway.md`・DEPLOY_CHECKLIST §14.8)。以下は評価当時の記録。
+
 ### 7.1 確認済 facts
 
 - **x402 公式統合は live ではない (proposal 段階)** — Circle blog (2026) に「proposal を x402 GitHub に提出」と記載 (source: https://www.circle.com/blog/enabling-machine-to-machine-micropayments-with-gateway-and-usdc)

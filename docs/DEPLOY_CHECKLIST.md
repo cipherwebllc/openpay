@@ -1547,6 +1547,55 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - **go-live 前 E2E**: 自店舗 (@handle・storefront 設定済み) に対し testnet で `order_menu` → `order_quote` → `x402_pay` を実行し、
   店主の受注画面に注文が届くことを確認する。MCP の `MAX_PER_CALL_JPYC` は既定 10 JPYC で注文合計を超えやすいので引き上げる。
 
+### §14.8 Arc x402 rail (Circle Gateway facilitator) — 設計・go-live・運用
+
+**裁定 (2026-09-17 user)**: Base = 実績ある x402 rail (CDP・Bazaar/agentic.market 掲載)、Arc = Circle 直系の
+次世代 USDC/x402 rail の 2 本立て。Arc は **Circle Gateway の x402 facilitator** を使う (CDP / payai / x402.org は
+Arc 非対応・自前の汎用 EIP-3009 facilitator は作らない)。設計 = `plans/arc-x402-gateway.md`。
+
+**仕組み (第 1 段 = first-party の vanilla USDC 有料エンドポイントのみ)**
+- `ENABLE_X402_ARC_GATEWAY=1` で 402 の **v2 面 (PAYMENT-REQUIRED) だけ** accepts が `[Base, Arc]` になる。
+  v1 JSON body は Base 1 件のまま (Gateway は x402 v2 のみ)。Base 経路 (CDP wire・順序・応答) は不変。
+- Arc accept: `network=eip155:5042`・`asset=0x3600…0000` (USDC 6 桁)・`extra={name:'GatewayWalletBatched',
+  version:'1', verifyingContract:<Gateway Wallet>}`・`maxTimeoutSeconds=604900` (Gateway は 3 日未満を拒否)。
+  署名 domain は **USDC ではなく Gateway Wallet** (mainnet `0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE` /
+  testnet `0x0077777d7EBA4688BDeF3E311b846F25870A19B9`)。
+- verify/settle: `https://gateway-api.circle.com/v1/x402/{verify,settle}` (testnet は `gateway-api-testnet`)・
+  認証なし・v2 wire・Bazaar 拡張なし。順序は従来どおり verify → content → settle。
+- 買い手 = Gateway Wallet に deposit 済み USDC から払う (ガス不要・EOA 署名のみ)。売り手 = **Gateway 残高**
+  (`X402_PAY_TO_ADDRESS`) に credit・on-chain はバッチ決済。`PAYMENT-RESPONSE.transaction` は Gateway の
+  **transaction UUID** (tx hash ではない)。settle 台帳 (`usdc-vanilla`) は `network=eip155:5042` で Base と区別。
+- kill switch: flag を外して redeploy (402 から Arc accept が消えるだけ)。
+
+**go-live (点灯は user)**
+1. testnet E2E (§4 of plan): smoke wallet で Arc testnet USDC を Gateway Wallet に deposit →
+   ローカル `next start` (`X402_NETWORK=base-sepolia`・`ENABLE_X402_ARC_GATEWAY=1`) の `/api/paid/hello` を
+   Arc accept で購入 → 200 + PAYMENT-RESPONSE success → 売り手の Gateway 残高 (domain 26) 増加を確認。
+2. Vercel Production に `ENABLE_X402_ARC_GATEWAY=1` → 開示 3 点セット同期 PR (掟 14・LP FAQ / Terms / llms.txt /
+   README / お知らせ) を同一リリースで merge → deploy。
+3. 本番 smoke: mainnet で hello ($0.001) を 1 件実購入 → Circle Discovery API
+   (`api.circle.com/v2/x402/discovery/resources?network=eip155:5042`) に載るかを観測 (掲載トリガー未確定)。
+
+**testnet E2E 記録 (2026-09-17・Arc testnet 5042002)**
+- 買い手 = smoke wallet `0x3E32…AeEa`。deposit: approve `0xe0775f4c…` → `GatewayWallet.deposit(USDC, 2 USDC)` `0x888deb48…`
+  (block 62493861)。Gateway 残高は **deposit 直後に 2.000000 (pendingBatch 0)** = Arc の ~1 ブロック finality。
+- 売り手 = 使い捨て EOA `0x008081BE…fee5A` (`X402_PAY_TO_ADDRESS`)。ローカル `next start -p 3141`
+  (`X402_NETWORK=base-sepolia`・`ENABLE_X402_ARC_GATEWAY=1`・`X402_PRICE='\$0.001'`)。
+- `GET /api/paid/hello` → 402: v1 body = `base-sepolia` 1 件、v2 accepts = `[eip155:84532 USDC, eip155:5042002
+  GatewayWalletBatched (timeout 604900)]`。Arc accept で署名 → **200 (1.3s)** + PAYMENT-RESPONSE
+  `{success:true, transaction:'0feb78a9-9fdf-4e8b-901c-8ceba5d4614c', network:'eip155:5042002'}`。
+  2 件目 `3b203fd0-fed2-…`。買い手残高 2.000 → 1.998・売り手 `pendingBatch 0.002000`。
+- 同じ nonce で署名し直して再送 → **409 authorization_conflict** (resource 束縛 claim・Gateway 未到達)。
+- ⚠️ ローカル `.env.local` の `X402_PRICE=$0.001` は Next の env 展開で `$0` が消え `.001` になる (503
+  `unsupported USD price format`)。ローカル検証では `\$0.001` とエスケープする (Vercel の UI 設定は展開されない)。
+
+**運用**
+- 売上は Gateway 残高。確認 = `POST {gateway}/v1/balances {token:'USDC', sources:[{domain:26, depositor:<payTo>}]}`。
+  引き出しは Gateway の withdraw (同一チェーン無料・クロスチェーン 0.005% + gas)。
+- 決済の真実 = Gateway の settle 応答 (`success:true` + transaction UUID) + Gateway 残高。on-chain の
+  Transfer では突合できない (バッチ・ネット決済)。
+- Gateway 障害: 5xx → 503 (課金なし)。Base 経路は独立に生きる。
+
 ## §15 Web Push 着金通知 go-live SOP
 
 決済/受注の成功を店主端末に Web Push で届ける (`/history` の PushNotifyPanel + 素の `public/sw.js`)。

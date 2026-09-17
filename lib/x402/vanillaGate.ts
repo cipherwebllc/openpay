@@ -34,7 +34,7 @@ import { NextResponse } from 'next/server';
 import { logger } from '@/lib/logger';
 import { atomicToHuman, recordSettleLedgerAfterResponse } from '@/lib/x402/settleLedger';
 import { generateCdpJwt } from './cdpJwt';
-import { x402Config } from './config';
+import { ARC_GATEWAY_MAX_TIMEOUT_SECONDS, x402Config } from './config';
 import { isFacilitatorPreBroadcastRejection } from './paymentRedelivery';
 import {
   buildBazaarQueryExtensionV2,
@@ -122,7 +122,17 @@ export type PreparedAccepts = {
   v1: PaymentRequirementsV1;
   /** CAIP-2 命名 — v2 ヘッダと accepted 照合に使う。 */
   v1Caip2: PaymentRequirementsV1;
+  /**
+   * Arc rail (Circle Gateway x402 facilitator)。first-party の 402 だけが付ける (flag ON 時)。
+   * **v2 面 (PAYMENT-REQUIRED / accepted 照合) にのみ**現れ、v1 body と facilitator の v1 wire には出ない —
+   * Gateway は x402 v2 のみで、v1 クライアントには支払えない accept を見せないため。
+   * network は最初から CAIP-2 (`eip155:5042`)。plans/arc-x402-gateway.md。
+   */
+  arc?: PaymentRequirementsV1;
 };
+
+/** どの facilitator へ verify/settle を送るか。既定 (Base) は従来どおり CDP/payai。 */
+type FacilitatorRail = 'base' | 'arc-gateway';
 
 function buildAcceptsCore(args: {
   resourceUrl: string;
@@ -147,12 +157,32 @@ function buildAcceptsCore(args: {
 }
 
 function buildAccepts(resource: VanillaPaidResource): PreparedAccepts {
-  return buildAcceptsCore({
+  const core = buildAcceptsCore({
     resourceUrl: resource.resourceUrl,
     description: resource.description,
     price: resource.price,
     payTo: x402Config.payTo,
   });
+  const arc = x402Config.arcGateway;
+  if (!arc.enabled) return core;
+  // Arc accept: 同じ resource・同じ USD 価格を Arc USDC (6 桁) で。署名 domain は Gateway Wallet
+  // (USDC の domain ではない) なので extra に name/version/verifyingContract を載せる — Circle の
+  // client はこの extra から EIP-712 domain を組み立てる。有効期間は Gateway の下限 (3 日) を満たす 7 日+。
+  return {
+    ...core,
+    arc: {
+      ...core.v1,
+      network: arc.caip2,
+      payTo: arc.payTo,
+      asset: arc.usdc,
+      maxTimeoutSeconds: ARC_GATEWAY_MAX_TIMEOUT_SECONDS,
+      extra: {
+        name: 'GatewayWalletBatched',
+        version: '1',
+        verifyingContract: arc.gatewayWallet,
+      },
+    },
+  };
 }
 
 /**
@@ -196,7 +226,11 @@ function paymentChallenge(
     ...(resource.serviceName ? { serviceName: resource.serviceName } : {}),
     ...(resource.tags ? { tags: resource.tags } : {}),
     ...(resource.iconUrl ? { iconUrl: resource.iconUrl } : {}),
-    accepts: [toV2Accept(accepts.v1Caip2)],
+    // Arc は v2 面にだけ並べる (Base が先・従来の client は先頭を選ぶ)。
+    accepts: [
+      toV2Accept(accepts.v1Caip2),
+      ...(accepts.arc ? [toV2Accept(accepts.arc)] : []),
+    ],
     // v1 body の outputSchema (x402scan 互換) はそのまま・v2 面だけ公式形 {info, schema}。
     // CDP Bazaar は schema 無しを severity=required で掲載拒否する (validate API 実測)。
     ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2(resource.bazaar) } : {}),
@@ -269,22 +303,41 @@ function v2HeaderToBody(
   raw: string,
   accepts: PreparedAccepts,
 ): FacilitatorV1Body | null {
+  return v2HeaderToRailBody(raw, accepts)?.body ?? null;
+}
+
+/**
+ * v2 ヘッダを rail 付きで復号する。accepted が Arc accept と一致すれば `arc-gateway`
+ * (body の network/requirements は CAIP-2 のまま = Gateway の wire に直接使える)。
+ * Base 一致は従来と同一の body (network を v1 命名へ戻す)。
+ */
+function v2HeaderToRailBody(
+  raw: string,
+  accepts: PreparedAccepts,
+): { body: FacilitatorV1Body; rail: FacilitatorRail } | null {
   let payload: unknown;
   try {
     payload = decodePaymentSignatureHeaderValue(raw);
   } catch {
     return null;
   }
+  if (accepts.arc) {
+    const arcMatched = v2PayloadToV1Body(payload, [accepts.arc]);
+    if (arcMatched) return { body: arcMatched, rail: 'arc-gateway' };
+  }
   // accepted の照合は CAIP-2 形で行い (v2 表面と一致)、facilitator へは v1 命名で渡す。
   const matched = v2PayloadToV1Body(payload, [accepts.v1Caip2]);
   if (!matched) return null;
   return {
-    x402Version: 1,
-    paymentPayload: {
-      ...matched.paymentPayload,
-      network: accepts.v1.network,
+    body: {
+      x402Version: 1,
+      paymentPayload: {
+        ...matched.paymentPayload,
+        network: accepts.v1.network,
+      },
+      paymentRequirements: accepts.v1,
     },
-    paymentRequirements: accepts.v1,
+    rail: 'base',
   };
 }
 
@@ -336,7 +389,9 @@ export async function postFacilitatorWithStatus(
   path: '/verify' | '/settle',
   body: FacilitatorV1Body,
   cdpWire: FacilitatorCdpWire,
+  rail: FacilitatorRail = 'base',
 ): Promise<{ status: number; body: Record<string, unknown> }> {
+  if (rail === 'arc-gateway') return postGatewayFacilitator(path, body, cdpWire);
   const { url: baseUrl, cdpAuth } = x402Config.vanillaFacilitator;
   const url = `${baseUrl}${path}`;
   const headers: Record<string, string> = { 'content-type': 'application/json' };
@@ -409,6 +464,57 @@ export async function postFacilitatorWithStatus(
 }
 
 /**
+ * Arc rail: Circle Gateway の x402 facilitator へ verify/settle を送る。
+ *   - 認証なし (`security: []`)・x402 v2 wire (CDP と同じ封筒形・Bazaar 拡張は載せない = CDP 専用)
+ *   - accepted/paymentRequirements は Arc accept そのもの (CAIP-2・Gateway domain の extra)
+ *   - 2xx の判定 body をそのまま返す。4xx でも `isValid`/`success` を持つ判定 body は結果として返す
+ *     (CDP と同じ扱い・真偽判定は呼び出し側の fail-closed)。5xx / 形不明は throw → 503 (課金なし)。
+ * Base の facilitator (CDP/payai) には一切触れない (掟 12)。
+ */
+async function postGatewayFacilitator(
+  path: '/verify' | '/settle',
+  body: FacilitatorV1Body,
+  wire: FacilitatorCdpWire,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const arc = x402Config.arcGateway;
+  if (!arc.enabled) {
+    // 402 に Arc accept を配っていない限り到達しない。配線ミスは 503 (課金なし) に倒す。
+    throw new Error('arc gateway rail is not enabled');
+  }
+  const url = `${arc.url}/v1/x402${path}`;
+  const wireBody = {
+    x402Version: 2,
+    paymentPayload: {
+      x402Version: 2,
+      accepted: wire.accept,
+      payload: body.paymentPayload.payload,
+      resource: {
+        url: wire.resource.resourceUrl,
+        description: wire.resource.description,
+        mimeType: 'application/json',
+      },
+    },
+    paymentRequirements: wire.accept,
+  };
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(wireBody),
+    signal: AbortSignal.timeout(FACILITATOR_TIMEOUT_MS),
+  });
+  const parsed: unknown = await res.json().catch(() => null);
+  if (res.ok && isRecord(parsed)) return { status: res.status, body: parsed };
+  if (
+    res.status < 500 &&
+    isRecord(parsed) &&
+    ('isValid' in parsed || 'success' in parsed)
+  ) {
+    return { status: res.status, body: parsed };
+  }
+  throw new Error(`gateway facilitator ${path} HTTP ${res.status}`);
+}
+
+/**
  * vanilla x402 の有料 GET を処理する。応答は一律 no-store (#277 と同じ判断)。
  * content は「支払い済みのときだけ呼ばれる」のではなく settle 前に呼ばれる点に注意 —
  * 4xx/5xx を返せば settle されない (買い手保護)。
@@ -444,25 +550,39 @@ async function handleVanillaPaidGetInner(
     return paymentChallenge(resource, accepts, 'payment_required');
   }
 
-  const facilitatorBody = v2Header
-    ? v2HeaderToBody(v2Header, accepts)
-    : v1HeaderToBody(v1Header!, accepts);
-  if (!facilitatorBody) {
+  const decoded = v2Header
+    ? v2HeaderToRailBody(v2Header, accepts)
+    : (() => {
+        const body = v1HeaderToBody(v1Header!, accepts);
+        return body ? { body, rail: 'base' as const } : null;
+      })();
+  if (!decoded) {
     return paymentChallenge(resource, accepts, 'invalid_payment_payload');
   }
+  const { body: facilitatorBody, rail } = decoded;
+  // facilitator に渡す accept: Base は従来どおり CAIP-2 化した v1 要件、Arc は Arc accept そのもの。
+  const railAccept = toV2Accept(rail === 'arc-gateway' ? accepts.arc! : accepts.v1Caip2);
 
   let verify: Record<string, unknown>;
   try {
-    verify = await postFacilitator('/verify', facilitatorBody, {
-      accept: toV2Accept(accepts.v1Caip2),
-      resource,
-      // 402 で配ったのと同じ宣言を facilitator にも渡す (Bazaar カタログ登録の入力)。
-      ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2(resource.bazaar) } : {}),
-    });
+    verify = (
+      await postFacilitatorWithStatus(
+        '/verify',
+        facilitatorBody,
+        {
+          accept: railAccept,
+          resource,
+          // 402 で配ったのと同じ宣言を facilitator にも渡す (Bazaar カタログ登録の入力)。
+          ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2(resource.bazaar) } : {}),
+        },
+        rail,
+      )
+    ).body;
   } catch (e) {
     logger.warn('x402.vanilla.verify_unavailable', {
       error: e instanceof Error ? e.message : String(e),
       resource: resource.resourceUrl,
+      rail,
     });
     return facilitatorUnavailable('Payment verification failed. Please retry later.');
   }
@@ -517,16 +637,22 @@ async function handleVanillaPaidGetInner(
 
   let settle: { status: number; body: Record<string, unknown> };
   try {
-    settle = await postFacilitatorWithStatus('/settle', facilitatorBody, {
-      accept: toV2Accept(accepts.v1Caip2),
-      resource,
-      // カタログ登録は settle 時に確定する — verify と同じ payload 形で送る。
-      ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2(resource.bazaar) } : {}),
-    });
+    settle = await postFacilitatorWithStatus(
+      '/settle',
+      facilitatorBody,
+      {
+        accept: railAccept,
+        resource,
+        // カタログ登録は settle 時に確定する — verify と同じ payload 形で送る。
+        ...(resource.outputSchema ? { bazaar: buildBazaarQueryExtensionV2(resource.bazaar) } : {}),
+      },
+      rail,
+    );
   } catch (e) {
     logger.warn('x402.vanilla.settle_unavailable', {
       error: e instanceof Error ? e.message : String(e),
       resource: resource.resourceUrl,
+      rail,
     });
     // settle 以降は broadcast 済みの可能性がある = 署名が使用済みかもしれない。claim は
     // **戻さない** (使用済みかもしれない authorization を別 resource へ流用させない)。
@@ -541,7 +667,9 @@ async function handleVanillaPaidGetInner(
     // claim を戻す。pending/reverted/未知 reason は broadcast 済みかもしれないので保持し、
     // 使用済みかもしれない authorization が別 resource へ回るのを防ぐ。判定式は
     // first-party 経路と同一 (lib/x402/paymentRedelivery.ts)。
-    if (isFacilitatorPreBroadcastRejection(settle.status, settle.body)) {
+    // Arc (Gateway) の settle は「検証・残高ロック・バッチ待ち行列」で broadcast を伴わないため、
+    // success:false は常に broadcast 前 = claim を戻してよい (使用済み nonce は次の verify が落とす)。
+    if (rail === 'arc-gateway' || isFacilitatorPreBroadcastRejection(settle.status, settle.body)) {
       await releaseClaim();
     }
     return paymentChallenge(resource, accepts, reason);
@@ -554,7 +682,7 @@ async function handleVanillaPaidGetInner(
     network:
       typeof settle.body.network === 'string'
         ? settle.body.network
-        : accepts.v1.network,
+        : facilitatorBody.paymentRequirements.network,
     payer: typeof settle.body.payer === 'string' ? settle.body.payer : payer,
   };
   res.headers.set(
@@ -569,8 +697,8 @@ async function handleVanillaPaidGetInner(
     network: settlement.network,
     resource: resource.resourceUrl,
     payer: settlement.payer ?? null,
-    payTo: accepts.v1.payTo,
-    amount: atomicToHuman(accepts.v1.maxAmountRequired, 6),
+    payTo: facilitatorBody.paymentRequirements.payTo,
+    amount: atomicToHuman(facilitatorBody.paymentRequirements.maxAmountRequired, 6),
     asset: 'USDC',
     tx: settlement.transaction,
   });

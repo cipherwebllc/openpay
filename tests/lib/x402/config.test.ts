@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 // 各 test では vi.resetModules() で再 import + env を都度 set し直す。
 
 const X402_KEYS = [
+  'ENABLE_X402_ARC_GATEWAY',
   'X402_NETWORK',
   'X402_PAY_TO_ADDRESS',
   'X402_FACILITATOR_URL',
@@ -195,6 +196,7 @@ describe('lib/x402/config', () => {
     expect(typeof x402Config).toBe('object');
     expect(Object.keys(x402Config).sort()).toEqual(
       [
+        'arcGateway',
         'asset',
         'defaultPrice',
         'facilitatorUrl',
@@ -289,5 +291,56 @@ describe('lib/x402/config', () => {
       const { x402Config } = await import('@/lib/x402/config');
       expect(x402Config.defaultPrice).toBe('$0.001');
     });
+  });
+});
+
+// Arc rail (Circle Gateway x402 facilitator・plans/arc-x402-gateway.md)。既定 OFF で inert。
+describe('lib/x402/config arcGateway', () => {
+  const PAY_TO = '0x1111111111111111111111111111111111111111';
+
+  it('flag 未設定 → { enabled: false } (Base 経路に影響なし)', async () => {
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.arcGateway).toEqual({ enabled: false });
+  });
+
+  it('base-sepolia + flag → Arc testnet (5042002・gateway-api-testnet・testnet Gateway Wallet)', async () => {
+    process.env.ENABLE_X402_ARC_GATEWAY = '1';
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.arcGateway).toEqual({
+      enabled: true,
+      chainId: 5042002,
+      caip2: 'eip155:5042002',
+      usdc: '0x3600000000000000000000000000000000000000',
+      gatewayWallet: '0x0077777d7EBA4688BDeF3E311b846F25870A19B9',
+      url: 'https://gateway-api-testnet.circle.com',
+      payTo: x402Config.payTo,
+    });
+  });
+
+  it('base (mainnet) + flag → Arc mainnet (5042・gateway-api・mainnet Gateway Wallet)・payTo 共用', async () => {
+    process.env.ENABLE_X402_ARC_GATEWAY = 'true';
+    process.env.X402_NETWORK = 'base';
+    process.env.X402_PAY_TO_ADDRESS = PAY_TO;
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.arcGateway).toMatchObject({
+      enabled: true,
+      chainId: 5042,
+      caip2: 'eip155:5042',
+      gatewayWallet: '0x77777777Dcc4d5A8B6E418Fd04D8997ef11000eE',
+      url: 'https://gateway-api.circle.com',
+      payTo: PAY_TO,
+    });
+  });
+
+  it('polygon 系 + flag → 起動時 throw (JPYC facilitator の領分・fail-loud)', async () => {
+    process.env.ENABLE_X402_ARC_GATEWAY = '1';
+    process.env.X402_NETWORK = 'polygon-amoy';
+    await expect(import('@/lib/x402/config')).rejects.toThrow(/ENABLE_X402_ARC_GATEWAY requires X402_NETWORK/);
+  });
+
+  it("flag が '0' / 空 → OFF", async () => {
+    const { parseArcGateway } = await import('@/lib/x402/config');
+    expect(parseArcGateway({ flag: '0', network: 'base', payTo: PAY_TO })).toEqual({ enabled: false });
+    expect(parseArcGateway({ flag: '', network: 'base', payTo: PAY_TO })).toEqual({ enabled: false });
   });
 });
