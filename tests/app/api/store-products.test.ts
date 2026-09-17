@@ -34,13 +34,15 @@ vi.mock('@/lib/handleStore', () => ({
   listHandlesForOwner: async () => handleMocks.owned,
 }));
 
-vi.mock('@/lib/env', () => ({
-  env: {
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return { ...actual, env: {
+    ...actual.env,
     get enableCreatorStore() {
       return state.enabled;
     },
-  },
-}));
+  } };
+});
 vi.mock('@/app/api/auth/siwe/_session', () => ({
   requireSession,
 }));
@@ -777,5 +779,76 @@ describe('creator store seller routes', () => {
       ok: true,
       seller: { name: 'Alice' },
     });
+  });
+});
+
+
+describe('store product details P1 routes', () => {
+  const detailFields = { details: '内容物\n使い方', specs: [{ label: '形式', value: 'GLB' }], demoUrl: 'https://example.com/demo' };
+  beforeEach(async () => {
+    // 表示メタの検証は実 parser を通し、KV 書込みだけ既存 boundary mock に閉じる。
+    const actual = await vi.importActual<typeof import('@/lib/x402/hostedStore')>('@/lib/x402/hostedStore');
+    parseHostedInput.mockImplementation(actual.parseHostedInput);
+    createHostedProduct.mockImplementation(async ({ product }) => ({ ok: true, product: { ...baseProduct, ...product } }));
+  });
+
+  it('作成で保存され、作成・一覧・owner 詳細の応答に含まれる', async () => {
+    const result = await createProduct(request('/api/store/products', 'POST', validBody(detailFields)));
+    expect(result.status).toBe(201);
+    expect(await result.json()).toMatchObject({ product: detailFields });
+    expect(createHostedProduct).toHaveBeenCalledWith(expect.objectContaining({ product: expect.objectContaining(detailFields) }));
+    const product = { ...baseProduct, ...detailFields };
+    listHostedForOwner.mockResolvedValue([product]);
+    getHostedProduct.mockResolvedValue(product);
+    const list = await listProducts(request('/api/store/products'));
+    expect(await list.json()).toMatchObject({ products: [detailFields] });
+    const detail = await getProduct(request(`/api/store/products/${ID}`), { params: Promise.resolve({ id: ID }) });
+    expect(await detail.json()).toMatchObject({ product: detailFields });
+  });
+
+  it('通常 PATCH と販売切替で省略値を保持し、更新・null クリアできる', async () => {
+    getHostedProductUpdateSnapshot.mockResolvedValue({ product: { ...baseProduct, ...detailFields }, token: 'snapshot' });
+    const changes = { details: '更新後', specs: [{ label: 'サイズ', value: '12 MB' }], demoUrl: 'https://example.com/v2' };
+    for (const [patch, expected] of [
+      [{ title: '更新' }, detailFields], [{ saleActive: true }, detailFields], [changes, changes],
+      [{ details: null, specs: null, demoUrl: null }, null],
+    ] as const) {
+      const result = await patchProduct(request(`/api/store/products/${ID}`, 'PATCH', patch), { params: Promise.resolve({ id: ID }) });
+      expect(result.status).toBe(200);
+      const body = await result.json();
+      const call = replaceHostedSellerProduct.mock.calls.at(-1)![0];
+      expect(call).not.toHaveProperty('content');
+      if (expected) {
+        expect(body.product).toMatchObject(expected);
+        expect(call.metadata).toMatchObject(expected);
+      } else {
+        expect(parseHostedInput).toHaveBeenLastCalledWith(expect.objectContaining(patch));
+        for (const key of Object.keys(detailFields)) {
+          expect(body.product).not.toHaveProperty(key);
+          expect(call.metadata).not.toHaveProperty(key);
+        }
+      }
+    }
+  });
+
+  it.each([
+    ['details', 'x'.repeat(2001), 'invalid details'],
+    ['details', 12, 'invalid details'],
+    ['specs', [{ label: '', value: 'GLB' }], 'invalid specs'],
+    ['specs', [{ label: '形式', value: '' }], 'invalid specs'],
+    ['specs', Array.from({ length: 9 }, () => ({ label: '形式', value: 'GLB' })), 'invalid specs'],
+    ['demoUrl', 'http://example.com/demo', 'invalid demoUrl'],
+    ['demoUrl', 12, 'invalid demoUrl'],
+  ])('不正な %s を POST/PATCH とも 400 と詳細エラーで拒否する (%j)', async (field, value, error) => {
+    const responses = [
+      await createProduct(request('/api/store/products', 'POST', validBody({ [field]: value }))),
+      await patchProduct(request(`/api/store/products/${ID}`, 'PATCH', { [field]: value }), { params: Promise.resolve({ id: ID }) }),
+    ];
+    for (const response of responses) {
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ ok: false, error: 'invalid_product', detail: error });
+    }
+    expect(createHostedProduct).not.toHaveBeenCalled();
+    expect(replaceHostedSellerProduct).not.toHaveBeenCalled();
   });
 });

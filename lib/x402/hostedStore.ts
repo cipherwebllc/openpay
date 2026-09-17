@@ -43,6 +43,10 @@ export const MAX_HOSTED_TITLE_LEN = 60;
 export const MAX_HOSTED_DESC_LEN = 200;
 export const MAX_HOSTED_URL_LEN = 512;
 export const MAX_HOSTED_GALLERY_IMAGES = 4;
+export const MAX_HOSTED_DETAILS_LEN = 2000;
+export const MAX_HOSTED_SPECS = 8;
+export const MAX_HOSTED_SPEC_LABEL_LEN = 24;
+export const MAX_HOSTED_SPEC_VALUE_LEN = 80;
 /** text 商品 (プロンプト / API キー / 手順) の上限 (Unicode code points)。 */
 export const MAX_HOSTED_TEXT_CODE_POINTS = 20_000;
 /** 価格の範囲 (human JPYC 整数)。 */
@@ -82,6 +86,10 @@ export type HostedProduct = {
   /** owner 限定の配布先。購入 snapshot 非対象・公開時は protectedDelivery boolean のみ。 */
   deliveryUrl?: string;
   galleryUrls?: readonly string[];
+  /** 表示専用の詳細情報 (購入 snapshot 非対象)。 */
+  details?: string;
+  specs?: readonly { label: string; value: string }[];
+  demoUrl?: string;
   /** human JPYC 整数の文字列 (売り手受領額。買い手は別途 x402 手数料を上乗せ)。 */
   priceJpyc: string;
   contentKind: HostedContentKind;
@@ -147,6 +155,42 @@ function isHttpsUrl(value: string): boolean {
   return u.protocol === 'https:';
 }
 
+/** imageUrl / demoUrl 共通。空欄は ''、不正値は undefined。 */
+function parseOptionalDisplayUrl(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) return '';
+  if (typeof raw !== 'string') return undefined;
+  const candidate = raw.trim();
+  if (candidate && (candidate.length > MAX_HOSTED_URL_LEN || !isHttpsUrl(candidate))) return undefined;
+  return candidate;
+}
+
+function parseDetails(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) return '';
+  if (typeof raw !== 'string') return undefined;
+  // 改行は同ファイルの他の複数行入力と同じ規則で正規化 (単独 CR も改行)。3 連続以上の改行は 2 つに畳む —
+  // 上限内の「改行だけ 2,000 行」で購入モーダルが縦に伸びる表示破綻を断つ。
+  const cleaned = [...raw.replace(/\r\n?/g, '\n')]
+    .filter((ch) => ch === '\n' || !UNSAFE_UNICODE_RE.test(ch))
+    .join('')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  return [...cleaned].length <= MAX_HOSTED_DETAILS_LEN ? cleaned : undefined;
+}
+
+function parseSpec(raw: unknown): { label: string; value: string } | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const row = raw as Record<string, unknown>;
+  if (typeof row.label !== 'string' || typeof row.value !== 'string') return undefined;
+  const clean = (text: string) => [...text].filter((ch) => !UNSAFE_UNICODE_RE.test(ch)).join('').trim();
+  const label = clean(row.label);
+  const value = clean(row.value);
+  // ラベルにコロンを許さない: 出品フォームは「ラベル: 値」の 1 行テキストで編集するため、コロン入りラベルは
+  // 編集 → 保存の往復で「Ratio 16:9」が「Ratio 16 / 9: …」に化ける (黙った改変)。値側のコロンは可。
+  if (/[:：]/.test(label)) return undefined;
+  if (!label || !value || [...label].length > MAX_HOSTED_SPEC_LABEL_LEN || [...value].length > MAX_HOSTED_SPEC_VALUE_LEN) return undefined;
+  return { label, value };
+}
+
 /**
  * text content の正規化。LF のみ保持し、制御 / 書式 / サロゲート (zero-width・bidi 含む) を除去。
  * lib/tipMessages.sanitizeTipMessage と同じ流儀 (上限だけ hosted 用)。
@@ -210,6 +254,9 @@ export type HostedProductInput = {
   imageUrl?: unknown;
   deliveryUrl?: unknown;
   galleryUrls?: unknown;
+  details?: unknown;
+  specs?: unknown;
+  demoUrl?: unknown;
   priceJpyc: unknown;
   contentKind: unknown;
   label?: unknown;
@@ -265,24 +312,8 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
   if (input.desc !== undefined && input.desc !== null && !desc) {
     return { ok: false, error: 'invalid desc' };
   }
-  let imageUrl: string | undefined;
-  if (
-    input.imageUrl !== undefined &&
-    input.imageUrl !== null &&
-    input.imageUrl !== ''
-  ) {
-    if (typeof input.imageUrl !== 'string') {
-      return { ok: false, error: 'invalid imageUrl' };
-    }
-    const candidate = input.imageUrl.trim();
-    if (
-      candidate &&
-      (candidate.length > MAX_HOSTED_URL_LEN || !isHttpsUrl(candidate))
-    ) {
-      return { ok: false, error: 'invalid imageUrl' };
-    }
-    imageUrl = candidate || undefined;
-  }
+  const imageUrl = parseOptionalDisplayUrl(input.imageUrl);
+  if (imageUrl === undefined) return { ok: false, error: 'invalid imageUrl' };
   let deliveryUrl: string | undefined;
   if (input.deliveryUrl !== undefined && input.deliveryUrl !== null && input.deliveryUrl !== '') {
     const parsed = parseDeliveryUrl(input.deliveryUrl);
@@ -314,6 +345,22 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
     }
     galleryUrls = candidates.length > 0 ? candidates : undefined;
   }
+
+  const details = parseDetails(input.details);
+  if (details === undefined) return { ok: false, error: 'invalid details' };
+  const specs: { label: string; value: string }[] = [];
+  if (input.specs !== undefined && input.specs !== null) {
+    if (!Array.isArray(input.specs) || input.specs.length > MAX_HOSTED_SPECS) {
+      return { ok: false, error: 'invalid specs' };
+    }
+    for (const raw of input.specs) {
+      const row = parseSpec(raw);
+      if (!row) return { ok: false, error: 'invalid specs' };
+      specs.push(row);
+    }
+  }
+  const demoUrl = parseOptionalDisplayUrl(input.demoUrl);
+  if (demoUrl === undefined) return { ok: false, error: 'invalid demoUrl' };
 
   if (typeof input.priceJpyc !== 'string' || !DECIMAL_RE.test(input.priceJpyc)) {
     return { ok: false, error: 'invalid price' };
@@ -401,6 +448,9 @@ export function parseHostedInput(input: HostedProductInput): ParsedHostedInput {
       ...(imageUrl ? { imageUrl } : {}),
       ...(deliveryUrl ? { deliveryUrl } : {}),
       ...(galleryUrls ? { galleryUrls } : {}),
+      ...(details ? { details } : {}),
+      ...(specs.length ? { specs } : {}),
+      ...(demoUrl ? { demoUrl } : {}),
       priceJpyc: price.toString(),
       contentKind,
       label,
@@ -458,14 +508,7 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
       : 'download';
   const desc = sanitizeLine(r.desc, MAX_HOSTED_DESC_LEN);
   const emoji = sanitizeEmoji(r.emoji);
-  const imageUrlCandidate =
-    typeof r.imageUrl === 'string' ? r.imageUrl.trim() : undefined;
-  const imageUrl =
-    imageUrlCandidate &&
-    imageUrlCandidate.length <= MAX_HOSTED_URL_LEN &&
-    isHttpsUrl(imageUrlCandidate)
-      ? imageUrlCandidate
-      : undefined;
+  const imageUrl = parseOptionalDisplayUrl(r.imageUrl);
   // 掟 13: 補助機能の破損を決済/content 経路へ波及させない。無効な保存 URL だけ落とす。
   const deliveryUrl = parseDeliveryUrl(r.deliveryUrl);
   const galleryUrls: string[] = [];
@@ -482,6 +525,17 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
         continue;
       }
       galleryUrls.push(candidate);
+    }
+  }
+  // 表示メタの破損を商品・購入経路に波及させない。仕様も gallery と同様に不正な行だけ落とす。
+  const details = parseDetails(r.details);
+  const demoUrl = parseOptionalDisplayUrl(r.demoUrl);
+  const specs: { label: string; value: string }[] = [];
+  if (Array.isArray(r.specs)) {
+    for (const raw of r.specs) {
+      if (specs.length >= MAX_HOSTED_SPECS) break;
+      const row = parseSpec(raw);
+      if (row) specs.push(row);
     }
   }
   // category/tags: 不正値は落として商品自体は残す (emoji と同じ寛容読込)。
@@ -502,6 +556,9 @@ export function parseStoredHostedProduct(raw: unknown): HostedProduct | null {
     ...(imageUrl ? { imageUrl } : {}),
     ...(deliveryUrl.ok ? { deliveryUrl: deliveryUrl.url } : {}),
     ...(galleryUrls.length > 0 ? { galleryUrls } : {}),
+    ...(details ? { details } : {}),
+    ...(specs.length ? { specs } : {}),
+    ...(demoUrl ? { demoUrl } : {}),
     priceJpyc: r.priceJpyc,
     contentKind: r.contentKind,
     label,
@@ -837,6 +894,9 @@ export async function replaceHostedSellerProduct(input: {
     | 'deliveryUrl'
     | 'imageUrl'
     | 'galleryUrls'
+    | 'details'
+    | 'specs'
+    | 'demoUrl'
     | 'priceJpyc'
     | 'label'
     | 'category'
@@ -879,6 +939,9 @@ export async function replaceHostedSellerProduct(input: {
     ...(input.metadata.galleryUrls?.length
       ? { galleryUrls: input.metadata.galleryUrls }
       : {}),
+    ...(input.metadata.details ? { details: input.metadata.details } : {}),
+    ...(input.metadata.specs?.length ? { specs: input.metadata.specs } : {}),
+    ...(input.metadata.demoUrl ? { demoUrl: input.metadata.demoUrl } : {}),
     priceJpyc: input.metadata.priceJpyc,
     contentKind: input.content?.kind ?? current.contentKind,
     label: input.metadata.label,

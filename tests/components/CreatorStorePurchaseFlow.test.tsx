@@ -205,6 +205,44 @@ beforeEach(() => {
 });
 
 describe('CreatorStorePurchaseFlow', () => {
+  it.each(['ja', 'en'] as const)('表示詳細はプレーンテキスト・仕様表・外部リンクとして表示する (%s)', (locale) => {
+    state.phase = 'idle';
+    state.quote = null;
+    const details = '<b>内容物</b>\n' + '詳しい説明。'.repeat(250);
+    const { container } = renderFlow(locale, { ...PRODUCT, details,
+      specs: [{ label: '形式', value: 'GLB' }, { label: 'サイズ', value: '12 MB' }],
+      demoUrl: 'https://example.com/demo',
+    });
+    const description = screen.getByText(/<b>内容物<\/b>/);
+    expect(description.textContent).toBe(details);
+    expect(description).toHaveClass('whitespace-pre-line', 'break-words');
+    expect(description.querySelector('b')).toBeNull();
+    expect(screen.getByRole('heading', { name: locale === 'ja' ? '仕様' : 'Specifications' })).toBeVisible();
+    const specs = container.querySelector('dl')!;
+    expect([...specs.querySelectorAll('dt')].map((node) => node.textContent)).toEqual(['形式', 'サイズ']);
+    expect([...specs.querySelectorAll('dd')].map((node) => node.textContent)).toEqual(['GLB', '12 MB']);
+    // 遷移先を読めるよう、ボタンにホスト名を併記する
+    const link = screen.getByRole('link', { name: locale === 'ja' ? /^実際に試す/ : /^Try it out/ });
+    expect(link).toHaveTextContent('example.com');
+    expect(link).toHaveAttribute('href', 'https://example.com/demo');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer nofollow');
+    expect(link).toHaveTextContent('↗');
+    expect(state.hookInput).not.toHaveProperty('details');
+    expect(state.hookInput).not.toHaveProperty('specs');
+    expect(state.hookInput).not.toHaveProperty('demoUrl');
+  });
+
+  it('詳細未設定の商品には空の詳細欄・仕様表・デモリンクを出さない', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const { container } = renderFlow();
+    expect(container.querySelector('.whitespace-pre-line')).toBeNull();
+    expect(container.querySelector('dl')).toBeNull();
+    expect(screen.queryByRole('heading', { name: '仕様' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '実際に試す' })).not.toBeInTheDocument();
+  });
+
   it('開始画面でメイン画像を表示し、サムネイルで切替・読込失敗時に fallback する', () => {
     state.phase = 'idle';
     state.quote = null;

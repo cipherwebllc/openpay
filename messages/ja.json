@@ -1030,6 +1030,16 @@
     "usdcArcTipHint": "USDC (Arc) のチップは Arc チェーンの同じ受取アドレスに届きます（送る側が USDC でガスを負担・他チェーンの USDC からは Circle が転送）。応援メッセージ機能は JPYC チップのみ対応です。"
   },
   "CreatorStoreSeller": {
+    "detailsLabel": "詳しい説明",
+    "detailsHint": "内容物・対応環境・使い方など。最大 2,000 字。",
+    "detailsRemaining": "残り {count} 字",
+    "specsLabel": "仕様",
+    "specsHint": "1 行に 1 項目、「ラベル: 値」の形式で。最大 8 行。例) 形式: GLB",
+    "demoUrlLabel": "実際に試せる URL",
+    "demoUrlHint": "https のみ。商品ページに「実際に試す」ボタンとして表示されます。",
+    "detailInvalidDetails": "詳しい説明は最大 2,000 字で入力してください。",
+    "detailInvalidSpecs": "仕様は最大 8 行、ラベルは 24 字以内、値は 80 字以内で両方入力してください。",
+    "detailInvalidDemoUrl": "実際に試せる URL は https:// で始まる 512 字以内の URL を入力してください。",
     "formGroupWhat": "1. 何を売るか",
     "formGroupPresentation": "2. 見せ方 (任意)",
     "formGroupPublish": "3. 公開設定",
@@ -1195,6 +1205,8 @@
     "protectedDeliveryBadge": "保護配布"
   },
   "CreatorStorePurchase": {
+    "tryDemo": "実際に試す",
+    "specsHeading": "仕様",
     "dialogLabel": "デジタル商品を購入",
     "close": "閉じる",
     "startHeading": "購入の準備",

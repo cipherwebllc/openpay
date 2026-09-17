@@ -294,6 +294,9 @@ export default async function HandlePage({
       ...(product.desc ? { desc: product.desc } : {}),
       ...(product.emoji ? { emoji: product.emoji } : {}),
       ...(product.imageUrl ? { imageUrl: product.imageUrl } : {}),
+      ...(product.details ? { details: product.details } : {}),
+      ...(product.specs ? { specs: product.specs } : {}),
+      ...(product.demoUrl ? { demoUrl: product.demoUrl } : {}),
       ...(product.galleryUrls
         ? { galleryUrls: product.galleryUrls }
         : {}),

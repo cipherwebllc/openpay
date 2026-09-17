@@ -19,6 +19,9 @@ const PRODUCT = {
   id: `h_${'a'.repeat(32)}`,
   title: 'AI プロンプト集',
   description: '仕事で使えるテンプレート',
+  details: '内容物\n使い方',
+  specs: [{ label: '形式', value: 'GLB' }],
+  demoUrl: 'https://example.com/demo',
   imageUrl: 'https://cdn.example.com/product.png',
   galleryUrls: [
     'https://cdn.example.com/product-side.png',
