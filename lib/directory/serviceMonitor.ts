@@ -467,6 +467,91 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
+  {
+    // 週次更新 第 4 回 (2026-09-18)。Circle の原文は "active or onboarding" — JPYC が Arc 上で稼働中とは
+    // 書いていないので、稼働を断定せず chains (発行チェーン) も変えない (sourced-facts-only)。
+    date: '2026-09-16',
+    collectedAt: '2026-09-18',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    assets: ['JPYC'],
+    summary:
+      'Circle\'s Arc mainnet launch announcement (2026-09-16) names JPYC among the local stablecoins that are "active or onboarding" to Circle StableFX, its 24/7 FX engine on Arc. The announcement does not say which of the two applies to JPYC, and gives no date for JPYC availability on Arc.',
+    summaryJa:
+      'Circle の Arc メインネット公開発表 (2026-09-16) が、Arc 上の 24 時間 FX エンジン「Circle StableFX」で「稼働中または導入手続き中 (active or onboarding)」の現地通貨ステーブルコインの 1 つとして JPYC を挙げた。JPYC がどちらの段階かと、Arc での提供時期は発表に記載なし。',
+    sourceUrl:
+      'https://www.circle.com/pressroom/circle-launches-arc-mainnet-an-economic-operating-system-for-the-internet',
+  },
+  {
+    // 週次更新 第 4 回 (2026-09-18)。Upbit の告知は取引所自身の一次ソース。価格・出来高・「初の上場」等の
+    // 評価は一次ソースに無いので書かない (sourced-facts-only)。JPYC 側の facts (発行チェーン) は不変。
+    date: '2026-09-17',
+    collectedAt: '2026-09-18',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    chains: ['ethereum'],
+    summary:
+      'Upbit (South Korea) announced new trading support for JPYC in its KRW, BTC and USDT markets on 2026-09-17. Upbit supports JPYC deposits and withdrawals on Ethereum only (contract 0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29); transfers over other networks are not supported. Upbit rescheduled the trading start twice on the day, to 18:00 KST.',
+    summaryJa:
+      '韓国の取引所 Upbit が 2026-09-17、JPYC の新規取引支援 (KRW・BTC・USDT マーケット) を告知。Upbit での JPYC 入出金は Ethereum のみ (コントラクト 0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29) で、他ネットワーク経由は非対応。取引開始時刻は当日 2 回変更され 18:00 KST となった。',
+    sourceUrl: 'https://upbit.com/service_center/notice?id=1580532257',
+  },
+  {
+    date: '2026-09-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): 4 grants, JPY 28,890 thousand in total; HashPort pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: 交付決定 4 件・総額 28,890 千円。HashPort の実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-09-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: マイナウォレット / 三井住友カードの実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-09-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mi&T pilot (merchant fee 1.0%, planned mid-November 2026 to mid-March 2027) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: Mi&T の実証 (手数料 1.0%・2026 年 11 月中旬〜2027 年 3 月中旬予定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-09-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDT'],
+    summary:
+      'Re-verified on the NetStars news list: no announcement after the 2026-09-11 Kaia MOU; no launch date, fee or chain change published for Stablecoin Pay.',
+    summaryJa:
+      'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降の発表なし。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
+    sourceUrl: 'https://www.netstars.co.jp/news/',
+  },
 ];
 
 // ディレクトリ初期公開日。baseline の 'added' はこの固定日に立てる — entry.updatedAt 由来に
