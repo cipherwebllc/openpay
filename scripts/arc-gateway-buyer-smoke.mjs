@@ -311,6 +311,16 @@ const PAGE = `<!doctype html>
 <pre id="wLog">-</pre>
 
 <script>
+// LAN の IP (http) で開くと secure context でなくなり crypto.randomUUID が無い。ウォレットの inpage provider が
+// それを使って署名要求で落ちる (2026-09-17 実機) ため、getRandomValues (非 secure でも使える) で補う。
+if (typeof crypto.randomUUID !== 'function') {
+  crypto.randomUUID = () => {
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+    const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
+  };
+}
 const $ = (id) => document.getElementById(id);
 const log = (id, msg) => { const el = $(id); el.textContent = (el.textContent === '-' ? '' : el.textContent + '\\n') + msg; };
 let cfg, account;
