@@ -146,8 +146,9 @@ const ja: TransparencyContent = {
 
   verificationTitle: '3. 決済の検証と確定',
   verificationItems: [
-    'x402 は facilitator が支払い署名を verify してから settle します。settle は売り手の受取分と利用料をオンチェーンの 1 トランザクションで原子的に分割します。',
-    'facilitator で確定するすべての x402 決済には OpenPay 署名レシートが付き、オフラインでも検証できます。',
+    'JPYC の x402（OpenPay の facilitator）: 支払い署名を verify してから settle します。settle は売り手の受取分と利用料をオンチェーンの 1 トランザクションで原子的に分割します。確定した決済には OpenPay 署名レシートが付き、オフラインでも検証できます。',
+    'USDC の x402（Base）: 外部の facilitator が支払い署名を verify し、USDC の送金をオンチェーンの 1 トランザクションで settle します。settle が成立しなければ商品は返しません。OpenPay の利用料はなく、表示価格の全額が売り手に届きます。',
+    'USDC の x402（Arc）: Circle Gateway が支払い署名と買い手の Gateway 残高を確認して決済を確定し、オンチェーンの精算は後続のバッチでまとめて行われます。決済ごとのオンチェーン取引はなく、確定の根拠は Gateway の settle 応答（transaction ID）です。売上は売り手の Gateway 残高に入ります。',
     'QR 決済は完了画面と電子レシートのブロックエクスプローラリンクから、オンチェーンのトランザクションを確認できます。画面表示だけは送金の証明ではありません。',
   ],
   receiptEndpointLabel: '署名レシート検証 API',
@@ -239,8 +240,9 @@ const en: TransparencyContent = {
 
   verificationTitle: '3. Payment verification and finality',
   verificationItems: [
-    'For x402, the facilitator verifies the payment signature before settlement. Settlement atomically splits the seller amount and fee in one on-chain transaction.',
-    'Every x402 payment finalized by the facilitator includes an OpenPay-signed receipt that can be verified offline.',
+    'JPYC over x402 (OpenPay facilitator): the payment signature is verified before settlement. Settlement atomically splits the seller amount and fee in one on-chain transaction, and every finalized payment includes an OpenPay-signed receipt that can be verified offline.',
+    'USDC over x402 (Base): an external facilitator verifies the payment signature and settles the USDC transfer in one on-chain transaction. The product is not returned unless settlement succeeds. OpenPay charges no fee, so the seller receives the full listed price.',
+    'USDC over x402 (Arc): Circle Gateway checks the payment signature and the buyer’s Gateway balance to finalize the payment, and on-chain settlement happens later in batches. There is no per-payment on-chain transaction; finality rests on the Gateway settle response (transaction ID). Proceeds are credited to the seller’s Gateway balance.',
     'For QR payments, the completion screen and electronic receipt link to a block explorer where the on-chain transaction can be checked. The screen alone is not proof of payment.',
   ],
   receiptEndpointLabel: 'Signed-receipt verification API',

@@ -53,7 +53,7 @@
     "featuresGaslessTitle": "No gas fees",
     "featuresGaslessBody": "Pay with JPYC / USDC alone. See the FAQ for conditions.",
     "featuresMultichainTitle": "Multi-chain",
-    "featuresMultichainBody": "JPYC on 4 chains, USDC on 7; cross-chain is automatic (Arc: standard only).",
+    "featuresMultichainBody": "JPYC on 4 chains, USDC on 7. Pay from USDC on other chains too (Arc has no gasless mode).",
     "featuresNoncustodyTitle": "Non-custodial by design",
     "featuresNoncustodyBody": "Sales bypass OpenPay and go to your wallet. No withdrawal approval.",
     "howItWorksTitle": "How it works",
