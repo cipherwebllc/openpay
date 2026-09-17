@@ -53,7 +53,7 @@
     "featuresGaslessTitle": "ガス代不要",
     "featuresGaslessBody": "JPYC / USDC の残高だけで支払い。条件は FAQ へ。",
     "featuresMultichainTitle": "マルチチェーン対応",
-    "featuresMultichainBody": "JPYC は 4、USDC は 7 チェーン。クロスチェーンも自動（Arc は通常決済のみ）。",
+    "featuresMultichainBody": "JPYC は 4、USDC は 7 チェーン。別チェーンの USDC からも支払えます（Arc はガスレス非対応）。",
     "featuresNoncustodyTitle": "ノンカストディ設計",
     "featuresNoncustodyBody": "売上は OpenPay を経由せず直接ウォレットへ。引き出し承認も不要。",
     "howItWorksTitle": "使い方",
