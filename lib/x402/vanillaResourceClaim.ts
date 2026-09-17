@@ -200,6 +200,14 @@ function storedMatches(
 export async function claimVanillaResource(input: {
   identity: VanillaResourceClaimIdentity;
   binding: string;
+  /**
+   * claim の TTL (秒)。既定は VANILLA_CLAIM_TTL_SEC (30 分・Base の 300 秒署名に十分)。
+   * Arc (Gateway) は 7 日署名が標準で、Gateway の verify は使用済み nonce を落とさない (settle で
+   * nonce_already_used・2026-09-17 実測) ため、署名の有効期間いっぱい束縛を残す — 断つ波及:
+   * 30 分後に同じ署名を別 resource へ再利用され、verify 通過 → content 生成 (計算) → settle 失敗 402
+   * という無駄打ちを許すこと (content は settle 失敗時に返さないので解錠はされない)。
+   */
+  ttlSec?: number;
 }): Promise<VanillaResourceClaimResult> {
   const digest = bindingHash(input.binding);
   const raw = serialize(digest, input.identity.credential);
@@ -207,7 +215,7 @@ export async function claimVanillaResource(input: {
     const result = await kvSetNxGet(
       input.identity.key,
       raw,
-      VANILLA_CLAIM_TTL_SEC,
+      input.ttlSec ?? VANILLA_CLAIM_TTL_SEC,
     );
     if (!result.ok) {
       if (result.reason === 'unconfigured') {

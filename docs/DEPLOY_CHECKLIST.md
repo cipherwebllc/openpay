@@ -1572,9 +1572,13 @@ Arc 非対応・自前の汎用 EIP-3009 facilitator は作らない)。設計 =
    ローカル `next start` (`X402_NETWORK=base-sepolia`・`ENABLE_X402_ARC_GATEWAY=1`) の `/api/paid/hello` を
    Arc accept で購入 → 200 + PAYMENT-RESPONSE success → 売り手の Gateway 残高 (domain 26) 増加を確認。
 2. Vercel Production に `ENABLE_X402_ARC_GATEWAY=1` → 開示 3 点セット同期 PR (掟 14・LP FAQ / Terms / llms.txt /
-   README / お知らせ) を同一リリースで merge → deploy。
+   README / お知らせ・**`/openapi.json` (`lib/openapi/document.ts` の `network`/`x-payment-chains`)**) を同一リリースで
+   merge → deploy。
 3. 本番 smoke: mainnet で hello ($0.001) を 1 件実購入 → Circle Discovery API
    (`api.circle.com/v2/x402/discovery/resources?network=eip155:5042`) に載るかを観測 (掲載トリガー未確定)。
+4. **既存掲載の回帰確認**: 402 の v2 accepts に `eip155:5042` が並ぶことで CDP Bazaar の validate API
+   (severity=required) / x402scan / agentic.market の掲載が落ちていないかを点灯直後に確認する。落ちる場合は Arc accept を
+   掲載していない resource (hello 等) に限定する逃げ道 (resource 単位の opt-in) を用意する。
 
 **testnet E2E 記録 (2026-09-17・Arc testnet 5042002)**
 - 買い手 = smoke wallet `0x3E32…AeEa`。deposit: approve `0xe0775f4c…` → `GatewayWallet.deposit(USDC, 2 USDC)` `0x888deb48…`
@@ -1586,6 +1590,12 @@ Arc 非対応・自前の汎用 EIP-3009 facilitator は作らない)。設計 =
   `{success:true, transaction:'0feb78a9-9fdf-4e8b-901c-8ceba5d4614c', network:'eip155:5042002'}`。
   2 件目 `3b203fd0-fed2-…`。買い手残高 2.000 → 1.998・売り手 `pendingBatch 0.002000`。
 - 同じ nonce で署名し直して再送 → **409 authorization_conflict** (resource 束縛 claim・Gateway 未到達)。
+- **Gateway の replay 挙動 (使用済み authorization を直接再投入・transaction `9de37c58-…` の後)**: `/v1/x402/verify` は
+  **`isValid:true` を返す** (verify は署名/期限/宛先/金額のみ・nonce と残高は settle でしか見ない = API ref どおり)、
+  `/v1/x402/settle` は `success:false, errorReason:'nonce_already_used'`。同一ヘッダをゲートへ再送 → 402
+  (content は settle 失敗時に返さない = 解錠されない)。このため **Arc の claim TTL は署名の有効期間 (604900s)** に
+  合わせ、別 resource への再利用を verify 前に 409 で止める (30 分では verify 通過 → content 生成 → settle 失敗の無駄打ちが残る)。
+- バッチ決済: settle の数分後に売り手 `balance 0.002000 / pendingBatch 0` に遷移 (Arc testnet)。
 - ⚠️ ローカル `.env.local` の `X402_PRICE=$0.001` は Next の env 展開で `$0` が消え `.001` になる (503
   `unsupported USD price format`)。ローカル検証では `\$0.001` とエスケープする (Vercel の UI 設定は展開されない)。
 
@@ -1594,7 +1604,10 @@ Arc 非対応・自前の汎用 EIP-3009 facilitator は作らない)。設計 =
   引き出しは Gateway の withdraw (同一チェーン無料・クロスチェーン 0.005% + gas)。
 - 決済の真実 = Gateway の settle 応答 (`success:true` + transaction UUID) + Gateway 残高。on-chain の
   Transfer では突合できない (バッチ・ネット決済)。
-- Gateway 障害: 5xx → 503 (課金なし)。Base 経路は独立に生きる。
+- Gateway 障害: 5xx・判定 body を持たない 4xx・JSON 不正・timeout はすべて 503 (課金なし)。4xx を判定として
+  通すのは **否定判定 (`isValid:false` / `success:false`) だけ** (4xx の `{success:true}` は信じない)。Base 経路は独立に生きる。
+- KV 未設定/障害時の claim は fail-open (§14.6 と同じ)。Arc は Base と違い **on-chain nonce のバックストップが無い**
+  (verify が使用済み nonce を通す) が、settle 失敗時は content を返さないため解錠はされない (無駄な content 生成のみ)。
 
 ## §15 Web Push 着金通知 go-live SOP
 

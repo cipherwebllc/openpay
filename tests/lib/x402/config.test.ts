@@ -338,9 +338,16 @@ describe('lib/x402/config arcGateway', () => {
     await expect(import('@/lib/x402/config')).rejects.toThrow(/ENABLE_X402_ARC_GATEWAY requires X402_NETWORK/);
   });
 
-  it("flag が '0' / 空 → OFF", async () => {
+  it("flag が '0' / 空 / 'TRUE' / ' 1' / 'yes' → OFF (厳密に '1' か 'true' だけ)", async () => {
     const { parseArcGateway } = await import('@/lib/x402/config');
-    expect(parseArcGateway({ flag: '0', network: 'base', payTo: PAY_TO })).toEqual({ enabled: false });
-    expect(parseArcGateway({ flag: '', network: 'base', payTo: PAY_TO })).toEqual({ enabled: false });
+    for (const flag of ['0', '', 'TRUE', ' 1', 'yes', 'on']) {
+      expect(parseArcGateway({ flag, network: 'base', payTo: PAY_TO })).toEqual({ enabled: false });
+    }
+  });
+
+  it('X402_NETWORK 未設定 + flag → 既定 base-sepolia に従い Arc testnet (mainnet ではない)', async () => {
+    process.env.ENABLE_X402_ARC_GATEWAY = '1';
+    const { x402Config } = await import('@/lib/x402/config');
+    expect(x402Config.arcGateway).toMatchObject({ enabled: true, chainId: 5042002 });
   });
 });

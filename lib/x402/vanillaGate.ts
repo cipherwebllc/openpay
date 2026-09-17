@@ -163,8 +163,10 @@ function buildAccepts(resource: VanillaPaidResource): PreparedAccepts {
     price: resource.price,
     payTo: x402Config.payTo,
   });
+  // optional chaining は「arcGateway を持たない config スタブ (兄弟テストの vi.mock)」が全有料 API を
+  // 503 に落とす波及を断つため (掟 6)。本物の config は常に {enabled:boolean} を持つ。
   const arc = x402Config.arcGateway;
-  if (!arc.enabled) return core;
+  if (arc?.enabled !== true) return core;
   // Arc accept: 同じ resource・同じ USD 価格を Arc USDC (6 桁) で。署名 domain は Gateway Wallet
   // (USDC の domain ではない) なので extra に name/version/verifyingContract を載せる — Circle の
   // client はこの extra から EIP-712 domain を組み立てる。有効期間は Gateway の下限 (3 日) を満たす 7 日+。
@@ -504,10 +506,13 @@ async function postGatewayFacilitator(
   });
   const parsed: unknown = await res.json().catch(() => null);
   if (res.ok && isRecord(parsed)) return { status: res.status, body: parsed };
+  // Gateway の契約は「判定は 200 + body・400 は body 不正」(API ref)。4xx を判定として通すのは
+  // **否定判定 (isValid:false / success:false) のときだけ** — 4xx の `{success:true}` (異形応答・
+  // プロキシ) で解錠+台帳記録される fail-open を断つ。それ以外の 4xx/5xx は障害 → 503 (課金なし)。
   if (
     res.status < 500 &&
     isRecord(parsed) &&
-    ('isValid' in parsed || 'success' in parsed)
+    (parsed.isValid === false || parsed.success === false)
   ) {
     return { status: res.status, body: parsed };
   }
@@ -605,10 +610,17 @@ async function handleVanillaPaidGetInner(
   const claimIdentity = vanillaPaymentIdentity(facilitatorBody.paymentPayload);
   const claimBinding = vanillaResourceBinding(resource.resourceUrl, req.url);
   let ownedClaim: VanillaResourceClaimIdentity | null = null;
+  if (!claimIdentity && rail === 'arc-gateway') {
+    // Arc の payload 形は Circle の scheme 由来。形が変わって identity を導けなくなると束縛が
+    // 無言で消えるので観測可能にする (挙動は従来どおり facilitator の判定に委ねる)。
+    logger.warn('x402.vanilla.claim_skipped', { rail, resource: resource.resourceUrl });
+  }
   if (claimIdentity) {
     const claim = await claimVanillaResource({
       identity: claimIdentity,
       binding: claimBinding,
+      // Arc は署名の有効期間 (7 日+) いっぱい束縛する (claimVanillaResource の ttlSec 注記)。
+      ...(rail === 'arc-gateway' ? { ttlSec: ARC_GATEWAY_MAX_TIMEOUT_SECONDS } : {}),
     });
     if (claim.kind === 'conflict') return authorizationConflict();
     // 'match' (同一束縛の再送) は従来どおり content/settle へ進む。claim を張ったのが
@@ -679,10 +691,14 @@ async function handleVanillaPaidGetInner(
     success: true,
     transaction:
       typeof settle.body.transaction === 'string' ? settle.body.transaction : null,
+    // Arc は network をローカルで確定済み (Gateway のエコーを信じない = 台帳/透明性集計が Base に
+    // 化ける波及を断つ)。Base は従来どおり facilitator の値を優先 (挙動不変)。
     network:
-      typeof settle.body.network === 'string'
-        ? settle.body.network
-        : facilitatorBody.paymentRequirements.network,
+      rail === 'arc-gateway'
+        ? facilitatorBody.paymentRequirements.network
+        : typeof settle.body.network === 'string'
+          ? settle.body.network
+          : facilitatorBody.paymentRequirements.network,
     payer: typeof settle.body.payer === 'string' ? settle.body.payer : payer,
   };
   res.headers.set(
