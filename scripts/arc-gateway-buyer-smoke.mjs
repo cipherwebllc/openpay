@@ -5,6 +5,7 @@
 //   node scripts/arc-gateway-buyer-smoke.mjs            # mainnet (https://open-pay.jp・Arc 5042)
 //   node scripts/arc-gateway-buyer-smoke.mjs --testnet  # testnet (http://localhost:3141・Arc 5042002)
 //   → http://localhost:4599 をウォレットのあるブラウザで開く
+//   ウォレットが別の端末にある場合: HOST=0.0.0.0 で起動し、その端末から http://<この Mac の IP>:4599
 //
 // 役割分担: このサーバが 402 の取得・検査・支払いリクエストの送信を行い (CORS を避ける)、ページは
 // window.ethereum でチェーン切替・USDC の Gateway deposit・EIP-712 署名だけを行う。
@@ -21,6 +22,9 @@ import { encodeFunctionData, pad, parseAbi } from 'viem';
 
 const TESTNET = process.argv.includes('--testnet');
 const PORT = Number(process.env.PORT ?? 4599);
+// 既定は localhost のみ。ウォレットが別の端末にあるときだけ HOST=0.0.0.0 で LAN に開く
+// (このサーバは鍵を持たず、署名は常に接続したウォレット内。用が済んだら止める)。
+const HOST = process.env.HOST ?? '127.0.0.1';
 const NET = TESTNET
   ? {
       label: 'Arc Testnet',
@@ -395,7 +399,8 @@ $('buy').onclick = async () => {
 };
 </script></body></html>`;
 
-server.listen(PORT, '127.0.0.1', () => {
+server.listen(PORT, HOST, () => {
   console.log(`Arc x402 buyer smoke (${NET.label} ${NET.chainId}) → ${NET.target}`);
   console.log(`open http://localhost:${PORT}  (max ${Number(MAX_ATOMIC) / 1e6} USDC per purchase)`);
+  if (HOST !== '127.0.0.1') console.log(`LAN: http://<this-machine-ip>:${PORT}  (HOST=${HOST})`);
 });
