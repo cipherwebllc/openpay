@@ -1608,6 +1608,12 @@ Arc 非対応・自前の汎用 EIP-3009 facilitator は作らない)。設計 =
 Terms/特商法は対象外 (first-party API に OpenPay 手数料は無く、Store の USDC 購入は Base のまま)。/discovery の
 カード表記 (`Base · 標準 x402`) は据え置き (Base は引き続き真・client は server-only flag を読めない)。
 
+**本番 smoke 記録 (2026-09-17・Arc mainnet 5042)**: `scripts/arc-gateway-buyer-smoke.mjs` で user のウォレット
+`0x9a76…7fe0` (自社・外部購入の集計対象外) から `/api/paid/hello` を Arc accept で購入 → **200 (481ms)**・
+PAYMENT-RESPONSE `{success:true, transaction:'904f72e8-f03d-4bd6-9df4-865e7b24d5ec', network:'eip155:5042'}`。
+売り手 `0x52d4…cA81` の Gateway 残高に `pendingBatch 0.001000` を確認 (08:02 UTC)。Circle Discovery は settle 直後 0 件
+(掲載トリガーは引き続き観測)。点灯直後の既存掲載: CDP Bazaar 10 resource・agentic.market `open-pay-jp` 10 endpoints とも健在。
+
 **運用**
 - 売上は Gateway 残高。確認 = `POST {gateway}/v1/balances {token:'USDC', sources:[{domain:26, depositor:<payTo>}]}`。
   引き出しは Gateway の withdraw (同一チェーン無料・クロスチェーン 0.005% + gas)。
