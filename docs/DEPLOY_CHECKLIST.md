@@ -1599,6 +1599,11 @@ Arc 非対応・自前の汎用 EIP-3009 facilitator は作らない)。設計 =
 - ⚠️ ローカル `.env.local` の `X402_PRICE=$0.001` は Next の env 展開で `$0` が消え `.001` になる (503
   `unsupported USD price format`)。ローカル検証では `\$0.001` とエスケープする (Vercel の UI 設定は展開されない)。
 
+**点灯 (2026-09-17・user 裁定「点灯する」)**: 開示同期 = `public/llms.txt` (Arc 対応の 1 行)・README・お知らせ
+(`x402-arc-gateway-2026-09-17`)・`/openapi.json` (flag 連動で `x-payment-chains: ['Base','Arc']` + 2 つ目の protocol)。
+Terms/特商法は対象外 (first-party API に OpenPay 手数料は無く、Store の USDC 購入は Base のまま)。/discovery の
+カード表記 (`Base · 標準 x402`) は据え置き (Base は引き続き真・client は server-only flag を読めない)。
+
 **運用**
 - 売上は Gateway 残高。確認 = `POST {gateway}/v1/balances {token:'USDC', sources:[{domain:26, depositor:<payTo>}]}`。
   引き出しは Gateway の withdraw (同一チェーン無料・クロスチェーン 0.005% + gas)。

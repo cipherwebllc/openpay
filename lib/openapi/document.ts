@@ -168,13 +168,38 @@ function schemaFromExample(example: unknown): Record<string, unknown> {
   return { type: 'string' };
 }
 
+// Arc rail (ENABLE_X402_ARC_GATEWAY・DEPLOY_CHECKLIST §14.8) が ON のとき、first-party の USDC 有料 API は
+// Arc の USDC (Circle Gateway x402 facilitator) でも払える。402 の v2 accepts と機械可読面を一致させるため、
+// flag に連動して 2 つ目の protocol と chain を載せる (OFF なら従来と 1 バイトも変わらない)。
+// network は Base と同じく本番 (servers = open-pay.jp) の mainnet 固定。
+function arcRailEnabled(): boolean {
+  return x402Config.arcGateway.enabled;
+}
+
+function usdcPaymentChains(): string[] {
+  return arcRailEnabled() ? ['Base', 'Arc'] : ['Base'];
+}
+
 function usdcPaymentInfo(amountUsd: string) {
   return {
     price: { currency: 'USD', mode: 'fixed', amount: amountUsd },
     protocols: [
       { x402: { scheme: 'exact', network: 'eip155:8453', asset: 'USDC' } },
+      ...(arcRailEnabled()
+        ? [
+            {
+              x402: {
+                scheme: 'exact',
+                network: 'eip155:5042',
+                asset: 'USDC',
+                facilitator: 'circle-gateway',
+                extra: { name: 'GatewayWalletBatched', version: '1' },
+              },
+            },
+          ]
+        : []),
     ],
-  } as const;
+  };
 }
 
 // hello (vanilla demo) の価格は X402_PRICE env が権威。Money 文字列でない (polygon 配線) か
@@ -488,7 +513,7 @@ const VANILLA_OPENAPI_PATHS = {
       'x-payment-info': usdcPaymentInfo(USDC_JPYC_SUPPLY.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',
-      'x-payment-chains': ['Base'],
+      'x-payment-chains': usdcPaymentChains(),
       responses: {
         '200': {
           description: 'Per-chain totalSupply after settlement (rows with status "error" are RPC failures on that chain only)',
@@ -526,7 +551,7 @@ const VANILLA_OPENAPI_PATHS = {
       'x-payment-info': usdcPaymentInfo(USDC_JPYC_BALANCE.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',
-      'x-payment-chains': ['Base'],
+      'x-payment-chains': usdcPaymentChains(),
       responses: {
         '200': {
           description: 'Per-chain balance after settlement',
@@ -585,7 +610,7 @@ const VANILLA_OPENAPI_PATHS = {
       'x-payment-info': usdcPaymentInfo(USDC_JPYC_TRANSFERS.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',
-      'x-payment-chains': ['Base'],
+      'x-payment-chains': usdcPaymentChains(),
       responses: {
         '200': {
           description: 'Newest-first Transfer events within the block window after settlement',
@@ -620,7 +645,7 @@ const ACTIVITY_OPENAPI_PATHS = {
       ],
       'x-agent-usage': USDC_JPYC_ACTIVITY.trigger,
       'x-payment-info': usdcPaymentInfo(USDC_JPYC_ACTIVITY.priceUsd),
-      'x-payment-protocol': 'x402', 'x-payment-asset': 'USDC', 'x-payment-chains': ['Base'],
+      'x-payment-protocol': 'x402', 'x-payment-asset': 'USDC', 'x-payment-chains': usdcPaymentChains(),
       responses: {
         '200': {
           description: 'Complete aggregate from immutable finalized buckets after settlement; observedAt is the newest bucket timestamp and expiresAt is four hours later.',
@@ -648,7 +673,7 @@ const ACTIVITY_OPENAPI_PATHS = {
       ],
       'x-agent-usage': USDC_JPYC_ATTEST.trigger,
       'x-payment-info': usdcPaymentInfo(USDC_JPYC_ATTEST.priceUsd),
-      'x-payment-protocol': 'x402', 'x-payment-asset': 'USDC', 'x-payment-chains': ['Base'],
+      'x-payment-protocol': 'x402', 'x-payment-asset': 'USDC', 'x-payment-chains': usdcPaymentChains(),
       responses: {
         '200': {
           description: 'JPYC transfers with an optional EIP-712 signature. The signature is not a legal certification.',
@@ -701,7 +726,7 @@ const VANILLA_DIRECTORY_OPENAPI_PATHS = {
       'x-payment-info': usdcPaymentInfo(USDC_SERVICE_MONITOR.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',
-      'x-payment-chains': ['Base'],
+      'x-payment-chains': usdcPaymentChains(),
       responses: {
         '200': {
           description: 'Monitor snapshot or change delta after settlement',
@@ -754,7 +779,7 @@ const VANILLA_DIRECTORY_OPENAPI_PATHS = {
       'x-payment-info': usdcPaymentInfo(USDC_PAYMENT_MONITOR.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',
-      'x-payment-chains': ['Base'],
+      'x-payment-chains': usdcPaymentChains(),
       responses: {
         '200': {
           description: 'Payment-scope change events after settlement',
@@ -844,7 +869,7 @@ const VANILLA_STORES_OPENAPI_PATHS = {
       'x-payment-info': usdcPaymentInfo(USDC_STORES.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',
-      'x-payment-chains': ['Base'],
+      'x-payment-chains': usdcPaymentChains(),
       responses: {
         '200': {
           description: 'Curated store list after settlement',
@@ -879,7 +904,7 @@ function vanillaHelloPath(): Record<string, unknown> {
         'x-payment-info': usdcPaymentInfo(amount),
         'x-payment-protocol': 'x402',
         'x-payment-asset': 'USDC',
-        'x-payment-chains': ['Base'],
+        'x-payment-chains': usdcPaymentChains(),
         responses: {
           '200': {
             description: 'Hello + timestamp after settlement',
@@ -1333,7 +1358,7 @@ const OPENAPI_DOCUMENT = {
         'x-payment-info': usdcPaymentInfo(USDC_DIRECTORY_LIST.priceUsd),
         'x-payment-protocol': 'x402',
         'x-payment-asset': 'USDC',
-        'x-payment-chains': ['Base'],
+        'x-payment-chains': usdcPaymentChains(),
         responses: {
           '200': {
             description: 'Full published directory after settlement',
@@ -1360,7 +1385,7 @@ const OPENAPI_DOCUMENT = {
         'x-payment-info': usdcPaymentInfo(USDC_DIRECTORY_LICENSED.priceUsd),
         'x-payment-protocol': 'x402',
         'x-payment-asset': 'USDC',
-        'x-payment-chains': ['Base'],
+        'x-payment-chains': usdcPaymentChains(),
         responses: {
           '200': {
             description: 'Full published directory after settlement',
@@ -1389,7 +1414,7 @@ const OPENAPI_DOCUMENT = {
         'x-payment-info': usdcPaymentInfo(USDC_DIRECTORY_SEARCH.priceUsd),
         'x-payment-protocol': 'x402',
         'x-payment-asset': 'USDC',
-        'x-payment-chains': ['Base'],
+        'x-payment-chains': usdcPaymentChains(),
         responses: {
           '200': {
             description: 'Filtered directory envelope after settlement',

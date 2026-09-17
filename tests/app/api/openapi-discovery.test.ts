@@ -363,3 +363,48 @@ it('attestation shares the Bazaar schema and declares non-settling errors', asyn
     schema: USDC_JPYC_ATTEST.bazaar.queryParamsSchema.properties[name as 'chain' | 'tx'],
   })));
 });
+
+// Arc rail (ENABLE_X402_ARC_GATEWAY) と機械可読面の一致。402 の v2 accepts に Arc が並ぶのに
+// /openapi.json が Base だけを名乗ると、AI エージェントが古い支払い方法を引用し続ける (掟 14 の趣旨)。
+describe('/openapi.json × Arc rail', () => {
+  type UsdcOp = {
+    'x-payment-chains'?: string[];
+    'x-payment-info'?: { protocols: { x402?: { network?: string; facilitator?: string } }[] };
+  };
+  const usdcOps = (d: Doc): UsdcOp[] =>
+    Object.entries(d.paths)
+      .filter(([path]) => path === '/api/paid/hello' || path.startsWith('/api/paid/usdc/'))
+      .map(([, ops]) => ops.get as UsdcOp);
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('flag OFF (既定): USDC の有料 API は Base だけを名乗る (従来どおり)', async () => {
+    const ops = usdcOps(await doc());
+    expect(ops.length).toBeGreaterThan(0);
+    for (const op of ops) {
+      expect(op['x-payment-chains']).toEqual(['Base']);
+      expect(op['x-payment-info']?.protocols.map((p) => p.x402?.network)).toEqual(['eip155:8453']);
+    }
+  });
+
+  it('flag ON: 全 USDC 有料 API が [Base, Arc] と Circle Gateway の protocol を名乗る・JPYC 側は不変', async () => {
+    vi.stubEnv('ENABLE_X402_ARC_GATEWAY', '1');
+    const d = await doc();
+    const ops = usdcOps(d);
+    expect(ops.length).toBeGreaterThan(0);
+    for (const op of ops) {
+      expect(op['x-payment-chains']).toEqual(['Base', 'Arc']);
+      expect(op['x-payment-info']?.protocols.map((p) => p.x402?.network)).toEqual([
+        'eip155:8453',
+        'eip155:5042',
+      ]);
+      expect(op['x-payment-info']?.protocols[1]?.x402?.facilitator).toBe('circle-gateway');
+    }
+    const jpyc = Object.entries(d.paths)
+      .filter(([path]) => path.startsWith('/api/paid/') && path !== '/api/paid/hello' && !path.startsWith('/api/paid/usdc/'))
+      .map(([, o]) => o.get as UsdcOp);
+    for (const op of jpyc) expect(op['x-payment-chains'] ?? []).not.toContain('Arc');
+  });
+});
