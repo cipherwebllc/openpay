@@ -468,6 +468,23 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
   {
+    // 週次更新 第 4 回 (2026-09-18)。Circle の原文は "active or onboarding" — JPYC が Arc 上で稼働中とは
+    // 書いていないので、稼働を断定せず chains (発行チェーン) も変えない (sourced-facts-only)。
+    date: '2026-09-16',
+    collectedAt: '2026-09-18',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    assets: ['JPYC'],
+    summary:
+      'Circle\'s Arc mainnet launch announcement (2026-09-16) names JPYC among the local stablecoins that are "active or onboarding" to Circle StableFX, its 24/7 FX engine on Arc. The announcement does not say which of the two applies to JPYC, and gives no date for JPYC availability on Arc.',
+    summaryJa:
+      'Circle の Arc メインネット公開発表 (2026-09-16) が、Arc 上の 24 時間 FX エンジン「Circle StableFX」で「稼働中または導入手続き中 (active or onboarding)」の現地通貨ステーブルコインの 1 つとして JPYC を挙げた。JPYC がどちらの段階かと、Arc での提供時期は発表に記載なし。',
+    sourceUrl:
+      'https://www.circle.com/pressroom/circle-launches-arc-mainnet-an-economic-operating-system-for-the-internet',
+  },
+  {
     // 週次更新 第 4 回 (2026-09-18)。Upbit の告知は取引所自身の一次ソース。価格・出来高・「初の上場」等の
     // 評価は一次ソースに無いので書かない (sourced-facts-only)。JPYC 側の facts (発行チェーン) は不変。
     date: '2026-09-17',
