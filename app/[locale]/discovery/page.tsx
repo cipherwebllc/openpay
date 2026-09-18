@@ -19,6 +19,7 @@ import { monitorFreshnessByPath } from '@/lib/directory/monitorFreshness';
 import { directoryStats } from '@/lib/directory/query';
 import { env } from '@/lib/env';
 import { MAX_RESOURCES_PER_MERCHANT } from '@/lib/x402/registry';
+import { isArcGatewayFlagOn } from '@/lib/x402/arcGatewayFlag';
 import { USDC_CATALOG_ITEMS } from '@/lib/x402/usdcCatalog';
 
 export const runtime = 'nodejs';
@@ -58,6 +59,8 @@ export default async function DiscoveryPage({
   const usdcItems = USDC_CATALOG_ITEMS.filter(
     (item) => env.enableWeb3Directory || !item.resource.includes('/japan-web3-directory'),
   );
+  // first-party の USDC 有料 API が Arc (Circle Gateway) でも払えるか。表示専用 — 402 の中身は vanilla gate が決める。
+  const usdcArc = isArcGatewayFlagOn();
   const featuredCopy: DirectoryFeaturedCopy | null = directoryT
     ? {
         eyebrow: directoryT('featuredEyebrow'),
@@ -87,7 +90,7 @@ export default async function DiscoveryPage({
             {usdcItems.length > 0 && (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 px-2.5 py-1 text-sky-800 ring-1 ring-sky-200">
                 <Globe className="h-3.5 w-3.5" aria-hidden />
-                {t('pillUsdc')}
+                {usdcArc ? t('pillUsdcArc') : t('pillUsdc')}
               </span>
             )}
             <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-800 ring-1 ring-emerald-200">
@@ -101,6 +104,7 @@ export default async function DiscoveryPage({
         <X402DiscoveryView
           maxResourcesPerMerchant={MAX_RESOURCES_PER_MERCHANT}
           usdcItems={usdcItems}
+          usdcArc={usdcArc}
           freshnessByPath={env.enableWeb3Directory ? monitorFreshnessByPath() : undefined}
           featured={
             featuredCopy ? (

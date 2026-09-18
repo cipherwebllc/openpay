@@ -239,12 +239,16 @@ export function X402DiscoveryView({
   maxResourcesPerMerchant,
   featured,
   usdcItems = EMPTY_USDC_ITEMS,
+  usdcArc = false,
   freshnessByPath,
 }: {
   maxResourcesPerMerchant: number;
   featured?: ReactNode;
   /** USDC (Base・標準 x402) 商品。server が静的に渡す (lib/x402/usdcCatalog)。 */
   usdcItems?: readonly UsdcCatalogItem[];
+  /** first-party の USDC 商品が Arc (Circle Gateway) でも払えるとき true (表示専用・server が flag から渡す)。
+   *  第三者出品の USDC 面 (dual-rail) は Base のみなので対象外。 */
+  usdcArc?: boolean;
   /** 更新型商品の鮮度 (path キー)。server が静的に渡す (lib/directory/monitorFreshness)。 */
   freshnessByPath?: Readonly<Record<string, MonitorFreshness>>;
 }) {
@@ -1509,7 +1513,11 @@ export function X402DiscoveryView({
             )}
             {/* 利用料の脚注 (JPYC は買い手上乗せ 1%・最低 1 JPYC / USDC は上乗せなし)。開示 SoT は LP・法務。 */}
             <p className="text-[11px] leading-relaxed text-slate-500">
-              {showCurrencyChips ? t('catalogFeeNoteBoth') : t('catalogFeeNoteJpyc')}
+              {showCurrencyChips
+                ? usdcArc
+                  ? t('catalogFeeNoteBothArc')
+                  : t('catalogFeeNoteBoth')
+                : t('catalogFeeNoteJpyc')}
             </p>
           </div>
         )}
@@ -1567,7 +1575,7 @@ export function X402DiscoveryView({
                       >
                         {t('bazaarListed')}
                       </a>
-                      <span>{t('usdcNetworkMeta')}</span>
+                      <span>{usdcArc ? t('usdcNetworkMetaArc') : t('usdcNetworkMeta')}</span>
                     </div>
                   </li>
                 );
