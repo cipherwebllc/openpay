@@ -502,6 +502,25 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl: 'https://upbit.com/service_center/notice?id=1580532257',
   },
   {
+    // 週次更新 第 4 回 follow-up (2026-09-18)。発行予約は JPYC EX の機能なので slug は jpyc-ex
+    // (同日の jpyc/updated = Upbit 告知と dedupe キーが衝突しない)。時刻は JPYC EX 公式お知らせの
+    // 追記時刻を採用 (報道の時刻とは食い違うため使わない)。原因・Upbit 上場との関係は公式に記載が
+    // 無いので書かない (sourced-facts-only)。
+    date: '2026-09-17',
+    collectedAt: '2026-09-18',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    chains: ['ethereum', 'polygon'],
+    summary:
+      'JPYC EX temporarily suspended JPYC issuance reservations: Ethereum from around 19:15 JST on 2026-09-17 (cause under investigation), Polygon added at 21:30 JST. Ethereum reservations were restored at 23:20 JST the same day and Polygon at 00:15 JST on 2026-09-18, after which the service returned to normal. JPYC has not published a cause. Redemption was not mentioned as affected.',
+    summaryJa:
+      'JPYC EX が JPYC の発行予約を一時停止: Ethereum は 2026-09-17 19:15 頃から (原因調査中)、Polygon は同日 21:30 追記で対象に追加。Ethereum は同日 23:20、Polygon は 2026-09-18 0:15 に復旧し、通常どおり利用可能に。原因は公表なし。償還への影響は記載なし。',
+    sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0036',
+  },
+  {
     date: '2026-09-18',
     scopes: ['stablecoin-payments'],
     provider: 'HashPort (Osaka Pref. subsidy)',

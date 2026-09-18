@@ -69,10 +69,10 @@ describe('createPaymentMonitorEnvelope', () => {
     );
     // E11 (2026-09-03 の日付訂正) 後、jpyc-services スコープで 8/01 以降に残るのは
     // dg-sps 追加 (発表日 8/10)・aegis (8/27)・coincheck 登録 (8/27・第 2 回週次)・
-    // 9/04 の verified 4 件 (sbi-vc-trade/jpyc/jpyc-ex/aegis)・9/11 kaia MOU・9/16 jpyc (Circle StableFX)・9/17 jpyc (Upbit 取引支援)
-    // の 10 件。決済スコープ専用の 8/10 DG SPS launch・8/26 大阪府採択 3 件・8/31 Mi&T・9/04 verified 2 件・
-    // 9/11 の 4 件 (NetStars 更新 + verified 3)・9/18 verified 4 件が混ざれば 25 件になる = スコープ分離の証明。
-    expect(jpyc.changes).toHaveLength(10);
+    // 9/04 の verified 4 件 (sbi-vc-trade/jpyc/jpyc-ex/aegis)・9/11 kaia MOU・9/16 jpyc (Circle StableFX)・9/17 jpyc (Upbit 取引支援)・
+    // 9/17 jpyc-ex (発行予約の一時停止と復旧) の 11 件。決済スコープ専用の 8/10 DG SPS launch・8/26 大阪府採択 3 件・8/31 Mi&T・9/04 verified 2 件・
+    // 9/11 の 4 件 (NetStars 更新 + verified 3)・9/18 verified 4 件が混ざれば 26 件になる = スコープ分離の証明。
+    expect(jpyc.changes).toHaveLength(11);
     expect(jpyc.changes.every((c) => c.slug !== undefined)).toBe(true);
     // 応答に内部ルーティング用 scopes を漏らさない。
     expect(jpyc.changes[0]).not.toHaveProperty('scopes');
