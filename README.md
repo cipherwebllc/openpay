@@ -12,6 +12,19 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 
 ![OpenPay demo: receive (payment QR), register (POS), pay (customer)](./public/demo/sns-row.gif)
 
+### Pay-per-request APIs on Arc (x402) · Arc の USDC で買える有料 API
+
+Every USDC-priced API on open-pay.jp answers `402` with **two ways to pay the same price: USDC on Base, or USDC on [Arc](https://www.arc.io/)** (`eip155:5042`).
+The Arc option settles through the **Circle Gateway x402 facilitator** (`GatewayWalletBatched`): the buyer pays from a Gateway balance with no gas, and content is released only after the facilitator's verify + settle succeed.
+Live on Arc mainnet since 2026-09-17 — see it without a wallet:
+
+```bash
+curl -si https://open-pay.jp/api/paid/hello | grep -i '^payment-required:' | cut -d' ' -f2 | base64 -d
+# → accepts: [ eip155:8453 (USD Coin), eip155:5042 (GatewayWalletBatched) ] — same amount, same payee
+```
+
+Buy with Arc USDC from a browser wallet (no private key in the script): `node scripts/arc-gateway-buyer-smoke.mjs` · Catalogue: [`/openapi.json`](https://open-pay.jp/openapi.json) · [`/llms.txt`](https://open-pay.jp/llms.txt) · Runbook: [`docs/DEPLOY_CHECKLIST.md`](./docs/DEPLOY_CHECKLIST.md) §14.8
+
 ---
 
 ## Key features
@@ -34,7 +47,7 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 - **Creator digital goods store** *(live in production)* — creators sell digital items on their `@handle` profile for JPYC: **URL products** (share links to PDFs / ZIPs / videos on free hosting) and **text products** (prompts, templates, up to 20k chars, stored by OpenPay for delivery). No seller fee — the buyer pays price + the x402 facilitator fee (1%, min 1 JPYC); sales settle **directly to the seller wallet** (non-custodial). Ships with a Specified-Commercial-Transactions-compliant purchase confirmation, seller-info registration, a **permanent purchase library** (re-download anytime, per-revision), purchase-provenance display (wallet / purchase ID / tx shown with the content as a resale deterrent), product images + gallery (up to 4), and **per-product share links** whose OG cards open the purchase dialog directly (`/@handle?product=…`). See `/guide/store` for a hands-on selling guide.
 - **License NFTs** *(flags default OFF)* — seller-defined access licenses with ERC-1155 proof on Polygon (Amoy for testing), paid directly to the seller in JPYC. Policy: 1–10,000 units, integer price at least 1,000 JPYC, non-transferable by default; transferable NFTs transfer the license. No usage counts or balances; purchase rights survive mint delay or failure. Seller-funded refunds are separate transfers. Sellers may pick the OpenPay standard terms template (standard-v1) or their own terms URL. `GET /api/license/verify?address=&product=` is a read-only HTTPS status API: unknown is `entitled: null`, not authentication or a signed attestation. SIWE holders can use `/api/store/content/<product>` and discover incoming licenses via `/api/store/library?source=holders` (follow `nextCursor` as `cursor`; the ordinary library remains purchase history). Ledger and Verify data are public. Third-party gating is not guaranteed. Public listing is available when `ENABLE_LICENSE_NFT_PUBLIC=1`; existing creator profile and SIWE prerequisites still apply. `GET /api/license/products/<id>` returns a public v1 product descriptor; SDK 0.7.1 accepts the product ID directly for license gates. See Terms Article 13 and deployment checklist §16.4–16.8.
 - **Protected delivery (flags default OFF)** — OpenPay checks entitlement and redirects to the seller’s host with a 60-second EdDSA ticket; it does not host the external file bytes. Public verification keys are served at `/.well-known/openpay-delivery-keys.json`, and SDK 0.8.0 provides `openpay-x402-sdk/delivery` and a private R2 Worker example. Sellers operate the destination and are responsible for its availability; tickets control access, not copying or sharing during their lifetime.
-- **x402 / AI-agent payments** *(live in production)* — a managed **JPYC x402 facilitator** with a public **AI store** (`/discovery`: searchable catalog + self-service seller registration), first-party demo resources, and the `openpay-x402-mcp` MCP package (two profiles: keyless human-pays ordering, and guarded autonomous x402 payments). Most x402 servers are USDC-only; OpenPay adds **JPYC**.
+- **x402 / AI-agent payments** *(live in production)* — a managed **JPYC x402 facilitator** with a public **AI store** (`/discovery`: searchable catalog + self-service seller registration), first-party demo resources, and the `openpay-x402-mcp` MCP package (two profiles: keyless human-pays ordering, and guarded autonomous x402 payments). Most x402 servers are USDC-only; OpenPay adds **JPYC**, and its USDC APIs accept **Base and Arc** (Arc via the Circle Gateway x402 facilitator).
 - **OSS, self-hostable** under MIT.
 
 ## Why OpenPay?
