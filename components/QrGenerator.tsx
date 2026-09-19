@@ -33,6 +33,7 @@ import {
   POSTER_NOTE_MAX,
   QUICK_AMOUNT_MAX,
   STORE_NAME_MAX,
+  rememberTokenPrefs,
   useQrSettings,
 } from '@/hooks/useQrSettings';
 import {
@@ -514,10 +515,13 @@ export function QrGenerator() {
     // token を切り替えると chain も既定 (USDC→base, JPYC→polygon) にリセット。
     // jpyc は polygon 固定なので、互換性のため reset 必須。usdc は default に
     // 戻すことで、ユーザの直前の chain 選択 (例: arbitrum) を意図せず引き継がない。
+    // 離れる token の (chain, payMode) は tokenPrefs に記憶する (レジの暗黙切替が復元に使う)。
+    // このタブの切替自体は従来どおり既定チェーンへ戻す。
     setSettings((s) => ({
       ...s,
       token: tok,
       chain: DEFAULT_CHAIN_FOR_SYMBOL[tok],
+      tokenPrefs: rememberTokenPrefs(s),
     }));
     // 旧 token (例 JPYC decimals=18) で打った長い小数を新 token (USDC decimals=6) の
     // 範囲へ truncate。amount を超過状態のまま残すと EIP-681 section が disable 表示
