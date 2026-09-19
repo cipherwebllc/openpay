@@ -628,7 +628,8 @@ describe('RegisterMode', () => {
     // JPYC 商品を打つ → JPYC へ暗黙に切替。会計を終えた想定でカートを空にする。
     await user.click(screen.getByRole('button', { name: /コーヒー/ }));
     const jpyc = await parsedCheckout();
-    expect(jpyc.ok && jpyc.params).toMatchObject({ token: 'jpyc', chain: 'polygon' });
+    // 初めての JPYC は既定のガスレス (直前の USDC の通常決済を引き継がない)。
+    expect(jpyc.ok && jpyc.params).toMatchObject({ token: 'jpyc', chain: 'polygon', mode: 'gasless' });
     await user.click(screen.getAllByRole('button', { name: 'この商品を削除' })[0]);
     // 次の客は USDC 商品 → 店主が選んだ Arbitrum・通常決済に戻る (従来は Base に巻き戻っていた)。
     await user.click(screen.getByRole('button', { name: /USDCグッズ/ }));

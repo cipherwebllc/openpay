@@ -45,8 +45,9 @@ describe('tokenPrefs (token 別の chain / payMode の記憶)', () => {
   it('USDC の非既定チェーンは JPYC を経由しても戻ってくる', async () => {
     const usdc = await loaded({ token: 'usdc', chain: 'arbitrum', payMode: 'standard' });
     const jpyc = switchTokenKeepingPrefs(usdc, 'jpyc');
-    // 記憶が無い JPYC は従来どおり既定チェーン + 現在の payMode。
-    expect(jpyc).toMatchObject({ token: 'jpyc', chain: 'polygon', payMode: 'standard' });
+    // 記憶が無い JPYC は既定チェーン + **既定のガスレス** (USDC の通常決済を引き継がない — 引き継ぐと
+    // JPYC しか持たない客が POL ガスを払えない)。
+    expect(jpyc).toMatchObject({ token: 'jpyc', chain: 'polygon', payMode: 'gasless' });
     expect(jpyc.tokenPrefs.usdc).toEqual({ chain: 'arbitrum', payMode: 'standard' });
     const back = switchTokenKeepingPrefs(jpyc, 'usdc');
     expect(back).toMatchObject({ token: 'usdc', chain: 'arbitrum', payMode: 'standard' });
@@ -59,6 +60,14 @@ describe('tokenPrefs (token 別の chain / payMode の記憶)', () => {
     expect(back).toMatchObject({ token: 'jpyc', chain: 'kaia', payMode: 'gasless' });
     // 離れた USDC 側の選択も記憶されている。
     expect(back.tokenPrefs.usdc).toEqual({ chain: 'arbitrum', payMode: 'standard' });
+  });
+
+  it('店主が JPYC の通常決済を選んでいた場合は、その選択が記憶から戻る (既定のガスレスで上書きしない)', async () => {
+    const jpyc = await loaded({ token: 'jpyc', chain: 'polygon', payMode: 'standard' });
+    const usdc = switchTokenKeepingPrefs(jpyc, 'usdc');
+    // 記憶の無い USDC は従来どおり現在の payMode を引き継ぐ。
+    expect(usdc).toMatchObject({ token: 'usdc', chain: 'base', payMode: 'standard' });
+    expect(switchTokenKeepingPrefs(usdc, 'jpyc')).toMatchObject({ chain: 'polygon', payMode: 'standard' });
   });
 
   it('同じ token への切替は何も変えない (同一参照)', async () => {

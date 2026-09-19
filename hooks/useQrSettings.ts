@@ -235,7 +235,11 @@ export function rememberTokenPrefs(s: QrSettings): TokenPrefs {
 
 /**
  * レジの暗黙の token 切替 (商品プリセット) 用。離れる token の選択を記憶し、移る先は店主が最後に
- * 使っていた (chain, payMode) を復元する。記憶が無ければ従来どおり既定チェーン + 現在の payMode。
+ * 使っていた (chain, payMode) を復元する。記憶が無ければ既定チェーンへ。
+ * 記憶が無いときの payMode: JPYC は既定 (ガスレス)、USDC は現在の payMode を引き継ぐ (従来どおり)。
+ *   JPYC だけ既定に戻す理由 (2026-09-20 user 裁定): 直前の USDC が通常決済なのは「Arc 等がガスレス
+ *   非対応」の副作用であり、店主が JPYC の通常決済を選んだわけではない。引き継ぐと JPYC しか持たない
+ *   客が POL ガスを払えず会計できない。利用料は開示済みのガスレス体系 (1%・最低 2 JPYC) になる。
  * いずれの場合も gasless 非対応の組合せは standard に倒す (URL parser に拒否される QR を出さない)。
  */
 export function switchTokenKeepingPrefs(s: QrSettings, token: TokenSymbol): QrSettings {
@@ -243,7 +247,8 @@ export function switchTokenKeepingPrefs(s: QrSettings, token: TokenSymbol): QrSe
   const tokenPrefs = rememberTokenPrefs(s);
   const saved = tokenPrefs[token];
   const chain = saved ? normalizeChainForToken(token, saved.chain) : DEFAULT_CHAIN_FOR_SYMBOL[token];
-  const payMode = coercePayMode(token, chain, saved?.payMode ?? s.payMode);
+  const unremembered: PayMode = token === 'jpyc' ? DEFAULT_SETTINGS.payMode : s.payMode;
+  const payMode = coercePayMode(token, chain, saved?.payMode ?? unremembered);
   return { ...s, token, chain, payMode, tokenPrefs };
 }
 
