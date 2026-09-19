@@ -607,6 +607,35 @@ describe('RegisterMode', () => {
     expect(r.ok && r.params.items).toHaveLength(1); // コーヒーのみ
   });
 
+  it('USDC を非既定チェーンで受ける店: JPYC 商品を経由しても USDC は同じチェーン・決済モードに戻る', async () => {
+    const user = userEvent.setup();
+    // 店主は決済QRタブで USDC を Arbitrum・通常決済にしている (Arc でも同じ経路。テスト環境は Arc flag OFF)。
+    window.localStorage.setItem(
+      QR_KEY,
+      JSON.stringify({ receiver: VALID, token: 'usdc', chain: 'arbitrum', payMode: 'standard' }),
+    );
+    window.localStorage.setItem(
+      'openpay:product-presets:v1',
+      JSON.stringify({
+        presets: [
+          { id: 'p-j', name: 'コーヒー', unitPrice: '500', token: 'jpyc', taxRate: 10, taxCategory: 'taxable_10', memo: null, sortOrder: 0, enabled: true },
+          { id: 'p-u', name: 'USDCグッズ', unitPrice: '5', token: 'usdc', taxRate: 10, taxCategory: 'taxable_10', memo: null, sortOrder: 1, enabled: true },
+        ],
+      }),
+    );
+    render(<RegisterMode />);
+    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    // JPYC 商品を打つ → JPYC へ暗黙に切替。会計を終えた想定でカートを空にする。
+    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    const jpyc = await parsedCheckout();
+    expect(jpyc.ok && jpyc.params).toMatchObject({ token: 'jpyc', chain: 'polygon' });
+    await user.click(screen.getAllByRole('button', { name: 'この商品を削除' })[0]);
+    // 次の客は USDC 商品 → 店主が選んだ Arbitrum・通常決済に戻る (従来は Base に巻き戻っていた)。
+    await user.click(screen.getByRole('button', { name: /USDCグッズ/ }));
+    const usdc = await parsedCheckout();
+    expect(usdc.ok && usdc.params).toMatchObject({ token: 'usdc', chain: 'arbitrum', mode: 'standard' });
+  });
+
   it('受取先/通貨/決済設定を読み取り表示 +「決済QRの受取先で変更」リンク', async () => {
     seedReceiver();
     render(<RegisterMode onEditCurrency={vi.fn()} />);

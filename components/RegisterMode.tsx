@@ -22,7 +22,7 @@ import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
 import { Field } from './Field';
 import { ProductPresetManager } from './ProductPresetManager';
-import { useQrSettings } from '@/hooks/useQrSettings';
+import { switchTokenKeepingPrefs, useQrSettings } from '@/hooks/useQrSettings';
 import { useReceiverAutofill, type ReceiverSource } from '@/hooks/useReceiverAutofill';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { useProductPresets, type ProductPreset } from '@/hooks/useProductPresets';
@@ -256,11 +256,7 @@ function RegisterModeContent({
     }
     setCurrencyWarning(false);
     if (cart.length === 0 && p.token !== settings.token) {
-      setSettings((s) => ({
-        ...s,
-        token: p.token,
-        chain: DEFAULT_CHAIN_FOR_SYMBOL[p.token],
-      }));
+      setSettings((s) => switchTokenKeepingPrefs(s, p.token));
     }
     setCart((c) => {
       const existing = c.find((l) => l.presetId === p.id);
@@ -300,7 +296,7 @@ function RegisterModeContent({
     }
     setCurrencyWarning(false);
     if (cart.length === 0 && p.token !== settings.token) {
-      setSettings((s) => ({ ...s, token: p.token, chain: DEFAULT_CHAIN_FOR_SYMBOL[p.token] }));
+      setSettings((s) => switchTokenKeepingPrefs(s, p.token));
     }
     const name = composeLineName(p.name, choices);
     const unitPrice = effectiveUnitPrice(p.unitPrice, choices);

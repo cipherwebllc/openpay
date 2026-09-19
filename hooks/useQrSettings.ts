@@ -15,6 +15,12 @@ import { PAY_MEMO_MAX, PAY_PRODUCT_NAME_MAX } from '@/lib/url';
 import { isTaxCategory, type TaxCategory } from '@/lib/tax';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
+// token ごとに店主が最後に使っていた (受取チェーン, 決済モード)。レジは商品プリセットを押すだけで
+// token が暗黙に切り替わる (チェーン選択 UI が無い) ため、これが無いと USDC を Arc で受けたい店でも
+// JPYC 商品を 1 度打つだけで Base に戻り、逆に JPYC はガスレスを失う。決済 QR タブの明示的な
+// token 切替は従来どおり既定チェーンへ戻す (意図した仕様) が、離れる側の選択はここへ記録する。
+export type TokenPrefs = Partial<Record<TokenSymbol, { chain: ChainSlug; payMode: PayMode }>>;
+
 export type QrSettings = {
   receiver: string;
   // 受取先アドレスの由来。'auto' = 接続ウォレットからの自動補完 (ウォレット切替に追従)、
@@ -54,6 +60,8 @@ export type QrSettings = {
   memo: string;
   taxRate: number | null;
   taxCategory: TaxCategory | null;
+  // token 別の (chain, payMode) の記憶。旧 schema (未定義) は空 = 従来動作。
+  tokenPrefs: TokenPrefs;
 };
 
 const STORAGE_KEY = 'openpay:qr-settings:v2';
@@ -97,6 +105,7 @@ const DEFAULT_SETTINGS: QrSettings = {
   memo: '',
   taxRate: null,
   taxCategory: null,
+  tokenPrefs: {},
 };
 
 export const STORE_NAME_MAX = 48;
@@ -191,6 +200,53 @@ export function normalizeChainForToken(
   return DEFAULT_CHAIN_FOR_SYMBOL[token];
 }
 
+// (token, chain) が gasless 非対応なら standard に倒す。/pay・/checkout の URL parser が同組合せを
+// reject するので、設定と実際に生成される URL を一致させる。
+function coercePayMode(token: TokenSymbol, chain: ChainSlug, payMode: PayMode): PayMode {
+  return payMode === 'gasless' && !isGaslessSupported(deploymentForSlug(token, chain))
+    ? 'standard'
+    : payMode;
+}
+
+const TOKEN_SYMBOLS: readonly TokenSymbol[] = ['jpyc', 'usdc'];
+
+// localStorage 由来 (untrusted) の tokenPrefs を検証して復元する。token に対して無効なチェーン
+// (flag OFF で消えたチェーン・jpyc の非 JPYC チェーン等) の記憶は既定へ丸めず**捨てる** —
+// 丸めると「店主が選んでいないチェーン」を選択として扱ってしまう。
+function sanitizeTokenPrefs(loaded: unknown): TokenPrefs {
+  if (!loaded || typeof loaded !== 'object') return {};
+  const raw = loaded as Record<string, unknown>;
+  const out: TokenPrefs = {};
+  for (const token of TOKEN_SYMBOLS) {
+    const entry = raw[token];
+    if (!entry || typeof entry !== 'object') continue;
+    const { chain, payMode } = entry as { chain?: unknown; payMode?: unknown };
+    if (typeof chain !== 'string' || normalizeChainForToken(token, chain) !== chain) continue;
+    if (payMode !== 'gasless' && payMode !== 'standard') continue;
+    out[token] = { chain: chain as ChainSlug, payMode: coercePayMode(token, chain as ChainSlug, payMode) };
+  }
+  return out;
+}
+
+/** 現在の token の (chain, payMode) を記憶に書き足した tokenPrefs を返す (token を離れる直前に呼ぶ)。 */
+export function rememberTokenPrefs(s: QrSettings): TokenPrefs {
+  return { ...s.tokenPrefs, [s.token]: { chain: s.chain, payMode: s.payMode } };
+}
+
+/**
+ * レジの暗黙の token 切替 (商品プリセット) 用。離れる token の選択を記憶し、移る先は店主が最後に
+ * 使っていた (chain, payMode) を復元する。記憶が無ければ従来どおり既定チェーン + 現在の payMode。
+ * いずれの場合も gasless 非対応の組合せは standard に倒す (URL parser に拒否される QR を出さない)。
+ */
+export function switchTokenKeepingPrefs(s: QrSettings, token: TokenSymbol): QrSettings {
+  if (token === s.token) return s;
+  const tokenPrefs = rememberTokenPrefs(s);
+  const saved = tokenPrefs[token];
+  const chain = saved ? normalizeChainForToken(token, saved.chain) : DEFAULT_CHAIN_FOR_SYMBOL[token];
+  const payMode = coercePayMode(token, chain, saved?.payMode ?? s.payMode);
+  return { ...s, token, chain, payMode, tokenPrefs };
+}
+
 export function sanitizeTokenSymbol(
   value: unknown,
   fallback: TokenSymbol,
@@ -256,6 +312,7 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
         ? loaded.taxRate
         : null,
     taxCategory: isTaxCategory(loaded.taxCategory) ? loaded.taxCategory : null,
+    tokenPrefs: sanitizeTokenPrefs(loaded.tokenPrefs),
   };
 }
 

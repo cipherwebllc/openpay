@@ -32,6 +32,7 @@ describe('useQrSettings', () => {
       memo: '',
       taxRate: null,
       taxCategory: null,
+      tokenPrefs: {},
     });
   });
 
@@ -229,6 +230,7 @@ describe('useQrSettings', () => {
         memo: '',
         taxRate: null,
         taxCategory: null,
+        tokenPrefs: {},
       });
     });
 
