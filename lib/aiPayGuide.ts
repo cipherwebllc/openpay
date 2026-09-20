@@ -103,6 +103,7 @@ export type AiPayGuideContent = JpycSectionContent & {
   readonly mechanismSteps: readonly GuideStep[];
   readonly receiptNote: string;
 
+  readonly agentLink: AiPayGuideLink;
   readonly quickSetupTitle: string;
   readonly quickSetupBody: string;
   readonly quickSetupConfigLabel: string;
@@ -200,6 +201,7 @@ const ja: AiPayGuideContent = {
   ],
   receiptNote: 'すべての決済に、検証可能な署名レシートが付きます。',
 
+  agentLink: { label: 'Agent を接続・設定を生成', href: '/agent' },
   quickSetupTitle: 'セットアップ A: 手軽に始める (専用ウォレット)',
   quickSetupBody:
     '使う分だけ JPYC を入れた専用の少額ウォレットを作り、その秘密鍵で Claude Desktop に openpay-x402-mcp を設定します。',
@@ -316,6 +318,7 @@ const en: AiPayGuideContent = {
   ],
   receiptNote: 'Every payment comes with a verifiable signed receipt.',
 
+  agentLink: { label: 'Connect your agent · generate a config', href: '/agent' },
   quickSetupTitle: 'Setup A: the easy path (dedicated wallet)',
   quickSetupBody:
     'Create a dedicated low-balance wallet funded only with the JPYC you intend to use, then configure openpay-x402-mcp in Claude Desktop with its private key.',

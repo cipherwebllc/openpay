@@ -10,6 +10,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import {
+  Bot,
   ChevronRight,
   History,
   Library,
@@ -45,6 +46,11 @@ export default async function MePage({
       key: 'history',
       href: `/${locale}/history`,
       icon: History,
+    },
+    {
+      key: 'agent',
+      href: `/${locale}/agent`,
+      icon: Bot,
     },
     // ライブラリは client flag OFF (self-host 等) だと 404 のため項目ごと隠す
     ...(env.enableCreatorStoreUi

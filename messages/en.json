@@ -2969,6 +2969,10 @@
     "title": "My Page",
     "subtitle": "History, purchases, and selling — all here.",
     "cards": {
+      "agent": {
+        "title": "Agent",
+        "desc": "Set up your AI to pay in JPYC. One prompt to connect."
+      },
       "history": {
         "title": "History",
         "desc": "Payments and receipts recorded on this device, with accounting CSV."
