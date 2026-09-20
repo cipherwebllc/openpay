@@ -17,7 +17,7 @@ describe('AgentConnect', () => {
     const { container } = render(<AgentConnect locale="en" c={C} />);
     expect(container.querySelector('pre')?.textContent).toBe(buildSetupPrompt('en'));
     expect(screen.getByText('Claude Code').closest('a')).toBeNull();
-    expect(screen.getByRole('link')).toHaveAttribute('href', '/agent/setup.md');
+    expect(screen.getByRole('link', { name: /setup\.md/ })).toHaveAttribute('href', '/agent/setup.md');
     await user.click(screen.getByRole('button', { name: 'Copy setup prompt' }));
     expect(write).toHaveBeenCalledWith(buildSetupPrompt('en'));
     expect(track).toHaveBeenCalledWith('agent_prompt_copy', { locale: 'en' });
@@ -50,5 +50,18 @@ describe('AgentConnect', () => {
     render(<AgentConnect locale="en" c={C} />);
     await user.click(screen.getByRole('button'));
     expect(screen.getByRole('button')).toHaveTextContent('Copied');
+  });
+  it('offers desktop-app deep links that carry the whole prompt and track only the app name', async () => {
+    render(<AgentConnect locale="en" c={C} />);
+    const prompt = buildSetupPrompt('en');
+    const claude = screen.getByRole('link', { name: 'Claude' });
+    const codex = screen.getByRole('link', { name: 'Codex' });
+    expect(claude).toHaveAttribute('href', `claude://code/new?q=${encodeURIComponent(prompt)}`);
+    expect(codex).toHaveAttribute('href', `codex://threads/new?prompt=${encodeURIComponent(prompt)}`);
+    // Web チャットへの deep link は作らない (シェルが無く setup を実行できない)。
+    expect(document.querySelector('a[href*="claude.ai"], a[href*="chatgpt.com"]')).toBeNull();
+    claude.addEventListener('click', (event) => event.preventDefault());
+    await userEvent.click(claude);
+    expect(track).toHaveBeenCalledWith('agent_open_in', { locale: 'en', app: 'claude' });
   });
 });

@@ -6,7 +6,7 @@ import { parseUnits } from 'viem';
 import { DEFAULT_MAX_PER_CALL_JPYC, DEFAULT_MAX_SESSION_JPYC, DEFAULT_ALLOWED_HOSTS, DEFAULT_CATALOG_TRUST, readMoneyConfig } from '../../packages/x402-sdk/src/guards.mjs';
 // @ts-expect-error The MCP source of truth is JavaScript without declarations.
 import { createToolRuntime } from '../../packages/x402-mcp/src/tools.mjs';
-import { AGENT_MCP_PACKAGE, AGENT_CLIENTS, AGENT_MODES, AGENT_LIMIT_DEFAULTS, AGENT_SETUP_URL, DEFAULT_AGENT_CONFIG_INPUT, buildAgentEnv, buildSetupPrompt, invalidAgentConfigFields, renderAgentConfig } from '@/lib/agentSetup';
+import { buildOpenInLink, AGENT_MCP_PACKAGE, AGENT_CLIENTS, AGENT_MODES, AGENT_LIMIT_DEFAULTS, AGENT_SETUP_URL, DEFAULT_AGENT_CONFIG_INPUT, buildAgentEnv, buildSetupPrompt, invalidAgentConfigFields, renderAgentConfig } from '@/lib/agentSetup';
 
 describe('agent setup — package fences', () => {
   it('generated invocations name bins that the MCP package really ships', () => {
@@ -21,6 +21,21 @@ describe('agent setup — package fences', () => {
     expect(() => createToolRuntime({ env })).not.toThrow();
     expect(() => createToolRuntime({ env: { ...env, BUYER_PRIVATE_KEY: '0x...' } })).toThrow(/BUYER_PRIVATE_KEY/);
     expect(() => createToolRuntime({ env: { ...env, SIGNER_MODE: 'steward' } })).toThrow(/steward/);
+  });
+});
+
+describe('agent setup — open-in deep links', () => {
+  it.each(['ja', 'en'])('round-trips the %s prompt and stays inside the Claude handler limits', (locale) => {
+    const prompt = buildSetupPrompt(locale);
+    const claude = new URL(buildOpenInLink('claude', prompt));
+    expect(`${claude.protocol}//${claude.host}${claude.pathname}`).toBe('claude://code/new');
+    expect(claude.searchParams.get('q')).toBe(prompt);
+    const codex = new URL(buildOpenInLink('codex', prompt));
+    expect(`${codex.protocol}//${codex.host}${codex.pathname}`).toBe('codex://threads/new');
+    expect(codex.searchParams.get('prompt')).toBe(prompt);
+    // Claude の URL handler は q を 14,336 字で切り、`/` 始まり (slash command) を拒否する。
+    expect(prompt.length).toBeLessThan(14336);
+    expect(prompt.startsWith('/')).toBe(false);
   });
 });
 

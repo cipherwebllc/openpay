@@ -175,6 +175,23 @@ export function renderAgentConfig(
   return `claude mcp add ${server}${envPart} -- npx ${args.join(' ')}`;
 }
 
+export const AGENT_OPEN_IN_APPS = ['claude', 'codex'] as const;
+export type AgentOpenInApp = (typeof AGENT_OPEN_IN_APPS)[number];
+
+/**
+ * prompt を入力済みにしてデスクトップアプリの新規セッションを開く deep link。どちらもシェルを持つ
+ * ローカルの Agent (Claude Code / Codex) が開くので、Web チャットと違い setup を実行できる。
+ * 受け口は各アプリの URL handler で確認済み (2026-09-21): Claude = `claude://code/new?q=`
+ * (14,336 字まで・`/` 始まりは拒否) / Codex = `codex://threads/new?prompt=`。
+ * アプリ未導入だとリンクは何も起こさないため、UI はコピーを第一導線のまま残す。
+ */
+export function buildOpenInLink(app: AgentOpenInApp, prompt: string): string {
+  const encoded = encodeURIComponent(prompt);
+  return app === 'claude'
+    ? `claude://code/new?q=${encoded}`
+    : `codex://threads/new?prompt=${encoded}`;
+}
+
 /** Agent に渡す setup prompt。手順の本体は setup.md 側に置き、ここは方針だけを固定する。 */
 export function buildSetupPrompt(locale: string): string {
   if (locale === 'en') {
