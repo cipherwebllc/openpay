@@ -17,6 +17,7 @@ const PUBLIC_ROUTES = [
   '/store',
   '/kit',
   '/discovery',
+  '/agent',
   '/directory',
   '/news',
   '/transparency',

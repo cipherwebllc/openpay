@@ -76,6 +76,9 @@ export default async function GuideAiPayPage({
         </Section>
 
         <Section title={c.quickSetupTitle}>
+          <Link href={`/${locale}${c.agentLink.href}`} prefetch={false} className="mt-3 inline-block text-sm font-medium text-emerald-700 underline">
+            {c.agentLink.label}
+          </Link>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">
             {c.quickSetupBody}
           </p>

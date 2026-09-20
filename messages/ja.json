@@ -2969,6 +2969,10 @@
     "title": "マイページ",
     "subtitle": "履歴・購入・出品をここから。",
     "cards": {
+      "agent": {
+        "title": "Agent",
+        "desc": "AI に JPYC を使わせる設定。プロンプト 1 つで接続。"
+      },
       "history": {
         "title": "履歴",
         "desc": "この端末で行った支払い・受け取りの記録と会計 CSV。"

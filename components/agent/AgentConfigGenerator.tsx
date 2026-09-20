@@ -1,0 +1,70 @@
+'use client';
+
+import { useRef, useState } from 'react';
+import { CodeBlock } from '@/components/guide/AgentGuidePieces';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import type { AgentPageContent } from '@/lib/agentPage';
+import { AGENT_CLIENTS, AGENT_MODES, DEFAULT_AGENT_CONFIG_INPUT, invalidAgentConfigFields, renderAgentConfig, type AgentClient, type AgentMode, type AgentConfigField } from '@/lib/agentSetup';
+import { trackAgentEvent } from '@/lib/agentTrack';
+
+export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPageContent['generator'] }) {
+  const [client, setClient] = useState<AgentClient>('claude-code');
+  const [mode, setMode] = useState<AgentMode>('agent-pays');
+  const [input, setInput] = useState({ ...DEFAULT_AGENT_CONFIG_INPUT });
+  const generated = useRef(false);
+  const [copiedOutput, setCopiedOutput] = useState<string | null>(null);
+  const { copy, copied, available } = useCopyToClipboard();
+  // human-pays に適用されない入力は検証・出力の対象から外す。
+  const invalid = mode === 'human-pays' ? [] : invalidAgentConfigFields(input);
+  const output = invalid.length === 0 ? renderAgentConfig(client, mode, input) : null;
+  function recordInteraction(nextClient = client, nextMode = mode) {
+    if (generated.current) return;
+    generated.current = true;
+    trackAgentEvent('agent_config_generate', { locale, client: nextClient, mode: nextMode });
+  }
+  const fieldClass = 'mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900';
+  return (
+    <section className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-8">
+      <h2 className="text-xl font-bold text-slate-900">{c.title}</h2>
+      <p className="mt-3 text-sm text-slate-700">{c.lead}</p>
+      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <label className="min-w-0 text-sm font-medium">{c.modeLabel}
+          <select className={fieldClass} value={mode} onChange={(e) => { const value = e.target.value as AgentMode; setMode(value); recordInteraction(client, value); }}>
+            {AGENT_MODES.map((value) => <option key={value} value={value}>{c.modeOptions[value]}</option>)}
+          </select>
+        </label>
+        <label className="min-w-0 text-sm font-medium">{c.clientLabel}
+          <select className={fieldClass} value={client} onChange={(e) => { const value = e.target.value as AgentClient; setClient(value); recordInteraction(value); }}>
+            {AGENT_CLIENTS.map((value) => <option key={value} value={value}>{c.clientOptions[value]}</option>)}
+          </select>
+        </label>
+        {mode === 'agent-pays' ? (Object.keys(c.fields) as AgentConfigField[]).map((field) => (
+          <div key={field} className="min-w-0">
+            <label htmlFor={`agent-${field}`} className="text-sm font-medium">{c.fields[field].label}</label>
+            <input id={`agent-${field}`} className={fieldClass} type="text" inputMode={field === 'allowedHosts' ? 'text' : 'decimal'} value={input[field]} aria-invalid={invalid.includes(field)} aria-describedby={`agent-${field}-hint${invalid.includes(field) ? ` agent-${field}-error` : ''}`} onChange={(e) => { setInput({ ...input, [field]: e.target.value }); recordInteraction(); }} />
+            <p id={`agent-${field}-hint`} className="mt-1 text-xs text-slate-500">{c.fields[field].hint}</p>
+            {invalid.includes(field) ? <p id={`agent-${field}-error`} className="mt-1 text-xs text-red-700">{c.invalid}</p> : null}
+          </div>
+        )) : null}
+      </div>
+      {mode === 'agent-pays' ? (
+        <div className="mt-4">
+          <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={input.catalogTrust} aria-describedby="agent-catalog-hint" onChange={(e) => { setInput({ ...input, catalogTrust: e.target.checked }); recordInteraction(); }} />{c.catalogTrustLabel}</label>
+          <p id="agent-catalog-hint" className="mt-2 text-xs leading-relaxed text-slate-500">{c.catalogTrustHint}</p>
+        </div>
+      ) : <p className="mt-4 text-sm text-slate-600">{c.humanPaysNote}</p>}
+      {output !== null ? (
+        <div>
+          <CodeBlock label={c.outputLabel[client]} code={output} />
+          {available ? <button type="button" className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium" onClick={async () => {
+            if (await copy(output)) {
+              setCopiedOutput(output);
+              trackAgentEvent('agent_config_copy', { locale, client, mode });
+            }
+          }}>{copied && copiedOutput === output ? c.copied : c.copy}</button> : null}
+          {mode === 'agent-pays' ? <div className="mt-4 space-y-2 text-xs leading-relaxed text-slate-600"><p>{c.keyNote}</p><p>{c.feeNote}</p></div> : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
