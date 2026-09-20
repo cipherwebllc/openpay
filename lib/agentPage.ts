@@ -9,7 +9,12 @@
 import type { Metadata } from 'next';
 import { DISCLOSED_X402_FEE } from '@/lib/legal';
 import { guidePageMetadata } from '@/lib/guideMetadata';
-import type { AgentClient, AgentConfigField, AgentMode } from '@/lib/agentSetup';
+import type {
+  AgentClient,
+  AgentConfigField,
+  AgentMode,
+  AgentOpenInApp,
+} from '@/lib/agentSetup';
 
 export type AgentPageContent = {
   readonly metaTitle: string;
@@ -22,6 +27,9 @@ export type AgentPageContent = {
     readonly lead: string;
     readonly copy: string;
     readonly copied: string;
+    readonly openIn: string;
+    readonly openInApps: Record<AgentOpenInApp, string>;
+    readonly openInNote: string;
     readonly pasteInto: string;
     readonly hosts: readonly string[];
     readonly shellNote: string;
@@ -79,6 +87,8 @@ export type AgentPageContent = {
     readonly fundBody: string;
     readonly copyAddress: string;
     readonly copied: string;
+    readonly connectCta: string;
+    readonly fundCta: string;
   };
   readonly next: {
     readonly title: string;
@@ -107,7 +117,11 @@ const ja: AgentPageContent = {
     lead: 'このプロンプトを Agent に渡すと、Agent 自身がセットアップを進めます。',
     copy: 'セットアッププロンプトをコピー',
     copied: 'コピーしました',
-    pasteInto: '貼り付け先',
+    openIn: 'またはアプリで開く',
+    openInApps: { claude: 'Claude', codex: 'Codex' },
+    openInNote:
+      'デスクトップアプリ (Claude / Codex) が入っていれば、プロンプトを入力した状態で新しいセッションが開きます。送信するのはあなたです。',
+    pasteInto: 'コピーして貼り付ける場合',
     hosts: ['Claude Code', 'Codex CLI', 'Hermes'],
     shellNote:
       'シェルを使える Agent 向けです。Claude Desktop など自分で設定を書けない環境では、下の「設定を生成」を使ってください。',
@@ -198,6 +212,8 @@ const ja: AgentPageContent = {
       'このアドレスへ JPYC を送ってください。OpenPay での x402 支払いは署名 (EIP-3009) で行われるため、支払いに POL は要りません (残った JPYC を後で別のウォレットへ送るときは POL が必要です)。',
     copyAddress: 'アドレスをコピー',
     copied: 'コピーしました',
+    connectCta: 'Agent を接続',
+    fundCta: '入金する',
   },
   next: {
     title: '買えるものを見る',
@@ -219,7 +235,11 @@ const en: AgentPageContent = {
     lead: 'Give this prompt to your agent and it runs the setup itself.',
     copy: 'Copy setup prompt',
     copied: 'Copied',
-    pasteInto: 'Paste into',
+    openIn: 'Or open in',
+    openInApps: { claude: 'Claude', codex: 'Codex' },
+    openInNote:
+      'If the desktop app (Claude / Codex) is installed, a new session opens with the prompt filled in. You press send.',
+    pasteInto: 'Or copy and paste into',
     hosts: ['Claude Code', 'Codex CLI', 'Hermes'],
     shellNote:
       'For agents with shell access. If your host cannot write its own config (Claude Desktop, for example), use “Generate a config” below.',
@@ -310,6 +330,8 @@ const en: AgentPageContent = {
       'Send JPYC to this address. OpenPay x402 payments are signed authorizations (EIP-3009), so paying needs no POL (moving leftover JPYC out later does).',
     copyAddress: 'Copy address',
     copied: 'Copied',
+    connectCta: 'Connect agent',
+    fundCta: 'Add funds',
   },
   next: {
     title: 'See what it can buy',

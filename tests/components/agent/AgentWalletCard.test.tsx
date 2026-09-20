@@ -15,7 +15,7 @@ vi.mock('wagmi', () => ({
   useReadContract: (options: unknown) => { state.read(options); return { data: state.data, isError: state.isError }; },
 }));
 vi.mock('next/dynamic', () => ({ default: () => function QR({ value }: { value: string }) { return <svg data-value={value} />; } }));
-beforeEach(() => { state.query = ''; state.data = undefined; state.isError = false; state.connected = false; state.read.mockClear(); });
+beforeEach(() => { window.localStorage.clear(); state.query = ''; state.data = undefined; state.isError = false; state.connected = false; state.read.mockClear(); });
 
 describe('AgentWalletCard', () => {
   it('does not enable balance reads for empty or invalid addresses', () => {
@@ -59,5 +59,15 @@ describe('AgentWalletCard', () => {
     expect(state.read).toHaveBeenLastCalledWith(expect.objectContaining({ args: [address], query: { enabled: true } }));
     fireEvent.change(screen.getByLabelText('Agent wallet address'), { target: { value: '0x' } });
     expect(state.read).toHaveBeenLastCalledWith(expect.objectContaining({ args: undefined, query: { enabled: false } }));
+  });
+  it('remembers a valid public address on this device and restores it on the next visit', () => {
+    const first = render(<AgentWalletCard c={C} />);
+    fireEvent.change(screen.getByLabelText('Agent wallet address'), { target: { value: address } });
+    expect(window.localStorage.getItem('openpay.agent.address')).toBe(address);
+    expect(screen.getByRole('link', { name: 'Add funds' })).toHaveAttribute('href', '#agent-fund');
+    expect(screen.getByRole('link', { name: 'Connect agent' })).toHaveAttribute('href', '#agent-connect');
+    first.unmount();
+    render(<AgentWalletCard c={C} />);
+    expect(screen.getByLabelText('Agent wallet address')).toHaveValue(address);
   });
 });
