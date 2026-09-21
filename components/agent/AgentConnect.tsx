@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
 import { AGENT_OPEN_IN_APPS, buildOpenInLink, buildSetupPrompt } from '@/lib/agentSetup';
 import { trackAgentEvent } from '@/lib/agentTrack';
@@ -9,7 +9,9 @@ import { trackAgentEvent } from '@/lib/agentTrack';
 // 文言は server page から props で受ける (lib/agentPage → lib/legal を client bundle に入れない)。
 export function AgentConnect({ locale, c }: { locale: string; c: AgentPageContent['connect'] }) {
   const prompt = buildSetupPrompt(locale);
-  const { copy, copied, available } = useCopyToClipboard();
+  const { copy, copied, available: clipboardAvailable } = useCopyToClipboard();
+  // server (clipboard なし) と client (あり) で折りたたみ・ボタンの有無が食い違う hydration エラーを避ける。
+  const available = useHydrationSafeAvailable(clipboardAvailable);
   const [expanded, setExpanded] = useState(false);
   const promptExpanded = expanded || !available;
   return (

@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { CodeBlock } from '@/components/guide/AgentGuidePieces';
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
 import { AGENT_CLIENTS, AGENT_MODES, DEFAULT_AGENT_CONFIG_INPUT, invalidAgentConfigFields, renderAgentConfig, type AgentClient, type AgentMode, type AgentConfigField } from '@/lib/agentSetup';
 import { trackAgentEvent } from '@/lib/agentTrack';
@@ -13,7 +13,9 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
   const [input, setInput] = useState({ ...DEFAULT_AGENT_CONFIG_INPUT });
   const generated = useRef(false);
   const [copiedOutput, setCopiedOutput] = useState<string | null>(null);
-  const { copy, copied, available } = useCopyToClipboard();
+  const { copy, copied, available: clipboardAvailable } = useCopyToClipboard();
+  // details の中身は閉じていても SSR される。server と client でコピーボタンの有無が食い違う hydration エラーを避ける。
+  const available = useHydrationSafeAvailable(clipboardAvailable);
   // human-pays に適用されない入力は検証・出力の対象から外す。
   const invalid = mode === 'human-pays' ? [] : invalidAgentConfigFields(input);
   const output = invalid.length === 0 ? renderAgentConfig(client, mode, input) : null;

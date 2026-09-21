@@ -50,3 +50,17 @@ export function useCopyToClipboard(feedbackMs: number = COPIED_FEEDBACK_MS): {
 
   return { copied, available, copy };
 }
+
+/**
+ * SSR される client component 用: `available` は server では常に false・ブラウザでは通常 true なので、
+ * そのまま出し分けに使うと server の HTML と初回の client 描画が食い違い、hydration エラーになる
+ * (React がツリーを client で作り直す)。mount までは「使える」前提 (圧倒的多数の環境) で server と同じ
+ * 描画にし、mount 後に実際の値へ切り替える。mount 前のボタンはまだ操作できないので偽の操作面にはならない。
+ */
+export function useHydrationSafeAvailable(available: boolean): boolean {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+  return mounted ? available : true;
+}

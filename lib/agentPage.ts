@@ -123,6 +123,33 @@ export type AgentPageContent = {
       readonly viewTx: string;
     };
   };
+  readonly activity: {
+    readonly title: string;
+    readonly filterAll: string;
+    readonly filterIn: string;
+    readonly filterOut: string;
+    readonly colDate: string;
+    readonly colType: string;
+    readonly colCounterparty: string;
+    readonly colAmount: string;
+    readonly viaOpenPay: string;
+    readonly viewTx: string;
+    readonly more: string;
+    readonly empty: string;
+    readonly filterEmpty: string;
+    readonly hiddenOnly: string;
+    readonly loading: string;
+    readonly error: string;
+    readonly busy: string;
+    readonly unsupported: string;
+    readonly explorerLink: string;
+    readonly truncatedNote: string;
+    readonly refreshing: string;
+    readonly stat24h: string;
+    readonly stat7d: string;
+    readonly statsPartial: string;
+    readonly publicNote: string;
+  };
   readonly next: {
     readonly title: string;
     readonly body: string;
@@ -286,6 +313,33 @@ const ja: AgentPageContent = {
       viewTx: '取引を見る',
     },
   },
+  activity: {
+    title: 'アクティビティ',
+    filterAll: 'すべて',
+    filterIn: '入金',
+    filterOut: '送金',
+    colDate: '日時',
+    colType: '種別',
+    colCounterparty: '相手',
+    colAmount: '金額',
+    viaOpenPay: 'OpenPay 経由',
+    viewTx: '取引を見る',
+    more: 'もっと見る',
+    empty: 'まだ JPYC の送受信がありません。',
+    filterEmpty: 'この条件に合う取引はありません。',
+    hiddenOnly: '直近 50 件の中に、表示できる取引がありません (0 JPYC の送信は除いています)。',
+    loading: '読み込み中…',
+    error: '履歴を読み取れませんでした。',
+    busy: '混み合っています。少し待ってから開き直してください。',
+    unsupported: 'テストネットでは履歴を表示しません。',
+    explorerLink: 'Polygonscan で見る',
+    truncatedNote: '直近 50 件までを取得しています。それより前の取引は、',
+    refreshing: '反映まで 1 分ほどかかります。',
+    stat24h: '直近 24 時間の送金',
+    stat7d: '直近 7 日間の送金',
+    statsPartial: '50 件より前は集計できません',
+    publicNote: 'Polygon 上の JPYC の送受信 (公開情報) です。何を購入したかは表示しません。0 JPYC の送信は除いています。',
+  },
   next: {
     title: '買えるものを見る',
     body: 'セットアップが済んだら、Agent が JPYC で購入できるリソースを AI ストアで確認できます。',
@@ -441,6 +495,33 @@ const en: AgentPageContent = {
       failed: 'The transfer failed, or its confirmation could not be checked. Use “View transaction” to see the result. Sending again before checking can send twice.',
       viewTx: 'View transaction',
     },
+  },
+  activity: {
+    title: 'Activity',
+    filterAll: 'All',
+    filterIn: 'Received',
+    filterOut: 'Sent',
+    colDate: 'Date',
+    colType: 'Type',
+    colCounterparty: 'Counterparty',
+    colAmount: 'Amount',
+    viaOpenPay: 'via OpenPay',
+    viewTx: 'View transaction',
+    more: 'Show more',
+    empty: 'No JPYC transfers yet.',
+    filterEmpty: 'No transfers match this filter.',
+    hiddenOnly: 'Nothing to show among the latest 50 transfers (0 JPYC transfers are left out).',
+    loading: 'Loading…',
+    error: 'Couldn’t load the history.',
+    busy: 'It’s busy right now. Please try again shortly.',
+    unsupported: 'History isn’t shown on testnets.',
+    explorerLink: 'View on Polygonscan',
+    truncatedNote: 'Only the latest 50 transfers are fetched. For earlier ones,',
+    refreshing: 'It can take about a minute to appear.',
+    stat24h: 'Sent, last 24 hours',
+    stat7d: 'Sent, last 7 days',
+    statsPartial: 'Can’t total beyond the latest 50',
+    publicNote: 'JPYC transfers on Polygon (public data). What was purchased is not shown. 0 JPYC transfers are left out.',
   },
   next: {
     title: 'See what it can buy',

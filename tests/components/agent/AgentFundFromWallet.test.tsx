@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { track } from '@vercel/analytics';
 import { erc20Abi, maxUint256, parseUnits, type Address, type Hash } from 'viem';
+import type { AgentActivity } from '@/components/agent/AgentActivity';
 import { AgentWalletCard } from '@/components/agent/AgentWalletCard';
 import { AgentFundFromWallet } from '@/components/agent/AgentFundFromWallet';
 import { agentPageContentFor } from '@/lib/agentPage';
@@ -46,7 +47,8 @@ vi.mock('wagmi', () => ({
 }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('address=0xabcdefabcdefabcdefabcdefabcdefabcdefabcd') }));
 vi.mock('next-intl', () => ({ useLocale: () => 'en' }));
-vi.mock('next/dynamic', () => ({ default: () => function Dynamic(props: ComponentProps<typeof AgentFundFromWallet> | { value: string }) {
+vi.mock('next/dynamic', () => ({ default: () => function Dynamic(props: ComponentProps<typeof AgentFundFromWallet> | ComponentProps<typeof AgentActivity> | { value: string }) {
+  if ('refreshKey' in props) return <h3>{props.c.title}</h3>;
   return 'value' in props ? <svg data-value={props.value} /> : <AgentFundFromWallet {...props} />;
 } }));
 vi.mock('@vercel/analytics', () => ({ track: vi.fn() }));
@@ -122,7 +124,7 @@ describe('AgentFundFromWallet', () => {
 
   it('keeps the real funding form locked across parent edits, unknown receipts and reopening after confirmation', () => {
     const wallet = agentPageContentFor('en').wallet;
-    const { container, rerender } = render(<AgentWalletCard c={wallet} />);
+    const { container, rerender } = render(<AgentWalletCard c={wallet} activity={agentPageContentFor('en').activity} />);
     // `?address=` 付きの着地 (MCP の入金リンク) は入金パネルが開いた状態で始まる。
     expect(container.querySelector('#agent-fund')).toBeVisible();
     sendAmount();
@@ -130,7 +132,7 @@ describe('AgentFundFromWallet', () => {
     state.hash = hash;
     settleWrite();
     state.receiptError = true;
-    rerender(<AgentWalletCard c={wallet} />);
+    rerender(<AgentWalletCard c={wallet} activity={agentPageContentFor('en').activity} />);
     fireEvent.click(screen.getByRole('button', { name: wallet.changeAddress }));
     for (const value of ['', 'invalid', sender, agentAddress]) {
       fireEvent.change(screen.getByLabelText(wallet.inputLabel), { target: { value } });
@@ -143,7 +145,7 @@ describe('AgentFundFromWallet', () => {
     state.receiptError = false;
     state.receiptSuccess = true;
     state.receiptStatus = 'success';
-    rerender(<AgentWalletCard c={wallet} />);
+    rerender(<AgentWalletCard c={wallet} activity={agentPageContentFor('en').activity} />);
     expect(screen.getByRole('button', { name: wallet.closeFund })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: wallet.closeFund }));
     expect(container.querySelector('#agent-fund')).not.toBeVisible();
