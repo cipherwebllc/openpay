@@ -7,7 +7,7 @@ import { useLocale } from 'next-intl';
 import { Copy } from 'lucide-react';
 import { useAccount, useReadContract } from 'wagmi';
 import { erc20Abi, formatUnits, isAddress, zeroAddress, type Address } from 'viem';
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
 import { chainNameForId } from '@/lib/chains';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
@@ -53,7 +53,9 @@ export function AgentWalletCard({ c, activity }: { c: AgentPageContent['wallet']
     return () => window.removeEventListener('hashchange', openFundFromHash);
   }, []);
   const { address: connectedAddress, isConnected } = useAccount();
-  const { copy, copied, available } = useCopyToClipboard();
+  const { copy, copied, available: clipboardAvailable } = useCopyToClipboard();
+  // 入金パネルは常に mount される。server と client でコピーボタンの有無が食い違う hydration エラーを避ける。
+  const available = useHydrationSafeAvailable(clipboardAvailable);
   const value = input.trim();
   const address = isAddress(value) ? value : undefined;
   const inputExpanded = editing || !address;
