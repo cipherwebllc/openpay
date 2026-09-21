@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.0 — 2026-09-22
+
+- Add x402-only `wallet_history` (12 tools; order remains 4). Join local start/end records, disclose coverage and incomplete history, and show only verified receipt amounts with integer unit conversion. No totals or on-chain proof claims.
+- Record purchase attempts in every signer mode without creating a wallet. Add `history: recorded | failed` to payment results; recording failures never change payment behavior or exceptions, and history I/O gives up after 2 seconds so a hung filesystem cannot hold back a paid result. Existing tool definitions and SDK dependency are unchanged.
+- Limit logs to allowed metadata, remove queries/fragments and third-party paths, and exclude bodies, signatures, nonces, authorizations, and keys. Use checked 0600 single-write appends in a checked 0700 directory, reject unsafe files, and rotate above 512 KiB without truncation.
+
 ## 0.15.0 — 2026-09-21
 
 - Add x402-only `wallet_init` and `wallet_status` (11 tools; order remains 4), with pinned tool wire hashes. Explicit keystore mode publishes a fully written, fsynced 0600 temporary file via an atomic hard link, removes the temporary file on success/failure, fsyncs the directory, and rereads the stored record. Existing wallets are never overwritten or regenerated; unsupported links fail closed with a filesystem reason code.

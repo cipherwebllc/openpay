@@ -41,6 +41,7 @@ const X402_TOOL_NAMES = [
   'search_shops',
   'wallet_init',
   'wallet_status',
+  'wallet_history',
 ];
 const ORDER_TOOL_NAMES = [
   'order_menu',
@@ -56,6 +57,7 @@ const X402_ONLY_TOOL_NAMES = [
   'search_shops',
   'wallet_init',
   'wallet_status',
+  'wallet_history',
 ];
 // 0.8.0 の既存 7 ツールは個別 JSON byte を固定し、0.9.0 はその末尾へ 2 ツールだけを追加する。
 const V080_TOOL_WIRE_SHA256_BY_NAME: Record<string, string> = {
@@ -87,13 +89,13 @@ function parsedText(result: ToolResult): unknown {
 describe('x402-mcp tool profiles', () => {
   it('pins wallet tool names, descriptions, and input schemas byte-for-byte', async () => {
     const { TOOLS } = await loadTools();
-    const wallets = TOOLS.filter((tool) => tool.name.startsWith('wallet_'));
+    const wallets = TOOLS.filter((tool) => tool.name in V0150_WALLET_WIRE_SHA256_BY_NAME);
     expect(wallets.map((tool) => tool.name)).toEqual(Object.keys(V0150_WALLET_WIRE_SHA256_BY_NAME));
     for (const tool of wallets) {
       expect(createHash('sha256').update(JSON.stringify(tool)).digest('hex')).toBe(V0150_WALLET_WIRE_SHA256_BY_NAME[tool.name]);
     }
   });
-  it('profile 未指定 / x402 は既存9 byte不変の末尾に2ツールを追加する', async () => {
+  it('profile 未指定 / x402 は既存11 byte不変の末尾にwallet_historyだけを追加する', async () => {
     const { TOOLS, createToolRuntime } = await loadTools();
     const implicit = createToolRuntime({ env: {} });
     const explicit = createToolRuntime({ profile: 'x402', env: {} });
@@ -101,6 +103,14 @@ describe('x402-mcp tool profiles', () => {
     expect(implicit.tools.map((tool) => tool.name)).toEqual(X402_TOOL_NAMES);
     expect(explicit.tools).toEqual(implicit.tools);
     expect(implicit.tools).toEqual(TOOLS);
+    // 0.16.0 changes the full wire hash only by appending wallet_history. Preserve every
+    // 0.15.0 tool byte, in addition to the older 0.8/0.9 and wallet compatibility fences.
+    expect(createHash('sha256').update(JSON.stringify(TOOLS.slice(0, 11))).digest('hex'))
+      .toBe('9eb2b4db0d177a3b24c9c85af5e565955e0060d367b3fa2934ce77df0de83608');
+    expect(createHash('sha256').update(JSON.stringify(TOOLS)).digest('hex'))
+      .toBe('b3df31d49b160ac5d4246363da2b590854c899ec517d5e21e325e4ebf30e5d07');
+    expect(createHash('sha256').update(JSON.stringify(TOOLS.at(-1))).digest('hex'))
+      .toBe('0281e2104895945e15138517ed8ac86bcdbc89bf87ffc62d0cb0c88bf7fe8ab8');
     expect(
       createHash('sha256').update(JSON.stringify(implicit.tools.slice(0, 9))).digest('hex'),
     ).toBe(X402_V090_TOOLS_WIRE_SHA256);

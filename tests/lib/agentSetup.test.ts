@@ -14,8 +14,16 @@ describe('agent setup — package fences', () => {
   it('generated invocations name bins that the MCP package really ships', () => {
     const pkg = JSON.parse(readFileSync('packages/x402-mcp/package.json', 'utf8'));
     expect(pkg.name).toBe(AGENT_MCP_PACKAGE);
-    // 生成コマンドの版固定は、リポの MCP の minor と一致させる (keystore は 0.15 から)。
-    expect(pkg.version.split('.').slice(0, 2).join('.')).toBe(AGENT_MCP_VERSION);
+    // MCP の版更新 → npm publish → Web 切替の間は Web の固定が 1 minor 遅れる。
+    // 未公開版を npx に固定すると利用者環境で起動できないため、同 major の同版または
+    // ちょうど 1 minor 前のみ許容する。Web 先行・2 minor 以上の遅れは引き続き拒否。
+    const [packageMajor, packageMinor] = pkg.version.split('.').map(Number);
+    const [webMajor, webMinor] = AGENT_MCP_VERSION.split('.').map(Number);
+    expect(Number.isInteger(webMajor) && Number.isInteger(webMinor)).toBe(true);
+    // major を跨ぐ版更新 (例 0.16 → 1.0) でも同じ窓が開く: そのときだけ「次の major の .0」を許す。
+    const sameMajorWindow = webMajor === packageMajor && [0, 1].includes(packageMinor - webMinor);
+    const nextMajorWindow = packageMajor === webMajor + 1 && packageMinor === 0;
+    expect(sameMajorWindow || nextMajorWindow).toBe(true);
     expect(AGENT_MCP_SPEC).toBe(`${AGENT_MCP_PACKAGE}@${AGENT_MCP_VERSION}`);
     expect(Object.keys(pkg.bin)).toEqual(expect.arrayContaining([AGENT_MCP_PACKAGE, 'openpay-order-mcp']));
     expect(renderAgentConfig('claude-code', 'human-pays', DEFAULT_AGENT_CONFIG_INPUT)).toContain('openpay-order-mcp');
