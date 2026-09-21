@@ -13,6 +13,17 @@ describe('agent page content', () => {
   it('has matching ja/en key structures', () => {
     expect(shape(agentPageContentFor('ja'))).toEqual(shape(agentPageContentFor('en')));
   });
+  it('provides matching, nonempty activity copy outside the wallet namespace', () => {
+    const ja = agentPageContentFor('ja');
+    const en = agentPageContentFor('en');
+    expect(shape(ja.activity)).toEqual(shape(en.activity));
+    expect(Object.keys(ja.activity)).toHaveLength(24);
+    for (const c of [ja, en]) {
+      expect(c.wallet).not.toHaveProperty('activity');
+      for (const value of Object.values(c.activity)) expect(value.length).toBeGreaterThan(0);
+      expect(`${c.activity.stat24h} ${c.activity.stat7d}`).not.toMatch(/上限|limit/i);
+    }
+  });
   it.each(['ja', 'en'])('provides all disclosure and toggle copy in %s', (locale) => {
     const c = agentPageContentFor(locale);
     expect(c.safety.summary).toHaveLength(3);

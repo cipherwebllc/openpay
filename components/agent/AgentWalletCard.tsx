@@ -18,7 +18,9 @@ const STORAGE_KEY = 'openpay.agent.address';
 const QRCodeSVG = dynamic(() => import('qrcode.react').then((m) => m.QRCodeSVG), { ssr: false });
 const AgentFundFromWallet = dynamic(() => import('./AgentFundFromWallet').then((m) => m.AgentFundFromWallet), { ssr: false });
 
-export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
+const AgentActivity = dynamic(() => import('./AgentActivity').then((m) => m.AgentActivity), { ssr: false });
+
+export function AgentWalletCard({ c, activity }: { c: AgentPageContent['wallet']; activity: AgentPageContent['activity'] }) {
   const locale = useLocale();
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const params = useSearchParams();
@@ -32,6 +34,7 @@ export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
   const [fundOpen, setFundOpen] = useState(() => { const initial = params.get('address'); return Boolean(initial && isAddress(initial)); });
   const changeRef = useRef<HTMLButtonElement>(null);
   const [fundBusy, setFundBusy] = useState(false);
+  const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   // localStorage は SSR と初回描画に無いので mount 後に 1 回だけ読む。
   // ブラウザ API の失敗 (private mode 等) をページ描画へ波及させないための try-catch。
   useEffect(() => {
@@ -145,10 +148,11 @@ export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
             <div className="min-w-0 sm:col-span-2">
               {fundBusy ? <p className="mb-3 text-xs leading-relaxed text-slate-600">{c.fundLockedNote}</p> : null}
               {pendingToOther ? <p className="mb-3 break-all rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-200">{c.pendingToOther} <span className="font-mono">{fundAddress}</span></p> : null}
-              <AgentFundFromWallet locale={locale} c={c.fundFromWallet} agentAddress={fundAddress} onSent={() => { void balance.refetch(); }} onBusyChange={setFundBusy} />
+              <AgentFundFromWallet locale={locale} c={c.fundFromWallet} agentAddress={fundAddress} onSent={() => { void balance.refetch(); setActivityRefreshKey((key) => key + 1); }} onBusyChange={setFundBusy} />
             </div>
           </div>
         </div>
+        {address ? <AgentActivity address={address} locale={locale} c={activity} refreshKey={activityRefreshKey} /> : null}
       </div>
     </section>
   );
