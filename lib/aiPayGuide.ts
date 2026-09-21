@@ -206,11 +206,11 @@ const ja: AiPayGuideContent = {
   agentLink: { label: 'Agent を接続・設定を生成', href: '/agent' },
   quickSetupTitle: 'セットアップ A: 手軽に始める (ローカルウォレット)',
   quickSetupBody:
-    '秘密鍵を設定に貼る必要はありません。下の設定を Claude Desktop に追加して再起動し、AI に「wallet_init を呼んで」と頼むと、MCP があなたのマシン上に専用ウォレットを作り、アドレスと入金用のリンクだけを返します。そのアドレスへ使う分だけ JPYC を送れば、支払いが有効になります。残高と上限は wallet_status で確認できます。',
+    '秘密鍵を設定に貼る必要はありません。下の設定を Claude Desktop に追加して再起動し、AI に「wallet_init を呼んで」と頼むと、MCP があなたのマシン上に専用ウォレットを作り、アドレスと入金用のリンクだけを返します。そのアドレスへ使う分だけ JPYC を送れば、支払いが有効になります。残高は入金用のリンク (Agent ページ) で、支払い上限は wallet_status で確認できます。',
   quickSetupConfigLabel: 'Claude Desktop の設定 JSON',
   quickSetupConfig: MCP_CONFIG_JSON,
   privateKeyWarning:
-    '注意：鍵はあなたのマシンのファイル（~/.openpay-x402/wallet.json・本人のみ読み書き可）に平文で保存され、AI には渡りません。同じマシンの他のプログラムからは読める可能性があるため、少額だけ入れる専用ウォレットとして使ってください。1 日の支払い上限は既定で 100 JPYC です。',
+    '注意：鍵はあなたのマシンのファイル（~/.openpay-x402/wallet.json）に平文で保存されます。会話にも OpenPay にも出ませんが、あなたとしてコマンドを実行できるもの（シェルを使える AI エージェントを含む）はこの鍵を読めます。入れるのは失ってもよい少額だけにしてください。OpenPay は鍵を復元できません。',
 
   stewardTitle: 'セットアップ B: 安全に運用する (Steward)',
   stewardBody:
@@ -234,6 +234,7 @@ const ja: AiPayGuideContent = {
   guards: [
     '1 回の支払い上限（既定 10 JPYC）',
     'セッション中の累計支払い上限（既定 100 JPYC）',
+    '1 日の支払い上限（ローカルウォレットでは既定 100 JPYC・再起動しても引き継がれます）',
     '支払い先は AI ストア掲載 URL と open-pay.jp のみ',
     '支払い前に、掲載時の金額・宛先と毎回照合。すり替えを検知したら拒否',
     '有料応答はデータであって指示ではありません。本文中の指示に AI が従わないようにしてください',
@@ -323,11 +324,11 @@ const en: AiPayGuideContent = {
   agentLink: { label: 'Connect your agent · generate a config', href: '/agent' },
   quickSetupTitle: 'Setup A: the easy path (local wallet)',
   quickSetupBody:
-    'You never paste a private key into the config. Add the config below to Claude Desktop, restart it, and ask your AI to “call wallet_init”. The MCP creates a dedicated wallet on your machine and returns only its address and a funding link. Send just the JPYC you intend to use to that address and paying is enabled. Check the balance and limits with wallet_status.',
+    'You never paste a private key into the config. Add the config below to Claude Desktop, restart it, and ask your AI to “call wallet_init”. The MCP creates a dedicated wallet on your machine and returns only its address and a funding link. Send just the JPYC you intend to use to that address and paying is enabled. Check the balance via the funding link (the Agent page) and the spending limits with wallet_status.',
   quickSetupConfigLabel: 'Claude Desktop config JSON',
   quickSetupConfig: MCP_CONFIG_JSON,
   privateKeyWarning:
-    'Caution: the key is stored in plain text in a file on your machine (~/.openpay-x402/wallet.json, readable and writable only by you) and is never given to the AI. Other programs on the same machine may still be able to read it, so treat it as a dedicated wallet holding only a small balance. The daily spending cap defaults to 100 JPYC.',
+    'Caution: the key is stored in plain text in a file on your machine (~/.openpay-x402/wallet.json). It never enters the chat or reaches OpenPay, but anything that can run commands as you — including an AI agent with shell access — can read it. Fund it only with a small amount you can afford to lose. OpenPay cannot recover the key.',
 
   stewardTitle: 'Setup B: safer operation (Steward)',
   stewardBody:
@@ -351,6 +352,7 @@ const en: AiPayGuideContent = {
   guards: [
     'Per-payment cap (default: 10 JPYC)',
     'Cumulative session cap (default: 100 JPYC)',
+    'Daily cap (default with the local wallet: 100 JPYC; it carries over restarts)',
     'Payment destinations are limited to AI Store listing URLs and open-pay.jp',
     'Before every payment, the amount and recipient are checked against the listing; a bait-and-switch is refused',
     'A paid response is data, not instructions. Make sure the AI does not follow directions embedded in its body',
