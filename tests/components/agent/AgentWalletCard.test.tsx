@@ -181,6 +181,41 @@ describe('AgentWalletCard', () => {
     expect(screen.getByLabelText(C.inputLabel)).not.toBeVisible();
     expect(screen.getByRole('button', { name: C.changeAddress })).toHaveFocus();
   });
+  it('collapses the manual input on blur once the address is valid, and Change right after does not reopen it', () => {
+    render(<AgentWalletCard c={C} activity={activity} />);
+    fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
+    const input = screen.getByLabelText(C.inputLabel);
+    fireEvent.change(input, { target: { value: 'invalid' } });
+    fireEvent.blur(input);
+    // 不正な入力は直せるよう開いたまま。
+    expect(input).toBeVisible();
+    fireEvent.change(input, { target: { value: address } });
+    expect(input).toBeVisible();
+    vi.useFakeTimers();
+    try {
+      fireEvent.blur(input);
+      // すぐには畳まない: 畳むとカードがずれ、入力欄から直接押した「入金する」等のクリックが空振りする。
+      expect(input).toBeVisible();
+      fireEvent.click(screen.getByRole('button', { name: C.fundCta }));
+      expect(screen.getByRole('button', { name: C.closeFund })).toHaveAttribute('aria-expanded', 'true');
+      act(() => { vi.advanceTimersByTime(250); });
+      expect(input).not.toBeVisible();
+      // 畳んだ直後の「変更」クリックで開き直さない。
+      fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+      expect(input).not.toBeVisible();
+      // 時間を置いた「変更」は通常どおり開く。
+      act(() => { vi.advanceTimersByTime(500); });
+      fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+      expect(input).toBeVisible();
+      // 入力を再開したら、保留中の畳みは取り消す。
+      fireEvent.blur(input);
+      fireEvent.focus(input);
+      act(() => { vi.advanceTimersByTime(300); });
+      expect(input).toBeVisible();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('does not enable balance reads for empty or invalid addresses', () => {
     state.query = 'address=invalid';
     render(<AgentWalletCard c={C} activity={activity} />);
