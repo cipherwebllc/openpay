@@ -59,14 +59,21 @@ A weekly change feed for Japan-related JPYC/Web3 services, designed to be wired 
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["-y", "openpay-x402-mcp"],
-      "env": { "BUYER_PRIVATE_KEY": "0x..." }
+      "args": ["--yes", "openpay-x402-mcp@0.15"],
+      "env": {
+        "SIGNER_MODE": "keystore",
+        "MAX_PER_CALL_JPYC": "3",
+        "MAX_SESSION_JPYC": "10",
+        "ALLOWED_HOSTS": "open-pay.jp"
+      }
     }
   }
 }
 ```
 
-MCP の `x402_pay` ツールに上記 URL を渡すだけで、402 チャレンジの検証・JPYC 署名・支払い上限ガードまで自動で行われます。鍵には少額(数十 JPYC)だけ入れた専用ウォレットを使ってください。
+設定に秘密鍵は書きません(`"0x..."` のような仮の値を入れると MCP は起動時に停止します)。ホストを再起動したあと、エージェントに `wallet_init` を呼ばせると、あなたのマシン上に専用ウォレットが作られ、公開アドレスと入金用リンク(`https://open-pay.jp/agent?address=…`)が返ります。そこへ少額(数十 JPYC)だけ入金してください。手順の全体は [OpenPay Agent](https://open-pay.jp/ja/agent) にあります。
+
+MCP の `x402_pay` ツールに上記 URL を渡すだけで、402 チャレンジの検証・JPYC 署名・支払い上限ガードまで自動で行われます。上限は Agent 側の設定値で、OpenPay のサーバーが強制するものではありません。
 
 ## スクリプト例(鍵は env で渡す・ファイルに書かない)
 
