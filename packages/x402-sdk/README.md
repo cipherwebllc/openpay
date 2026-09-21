@@ -577,6 +577,20 @@ returned or the facilitator signer could not be resolved. Treat `unverified` and
 
 ## Signers
 
+The environment adapter accepts `SIGNER_MODE=env-key` (default), `steward`, or
+`keystore`. Keystore is an explicit caller-managed mode: `createSigner(env)`
+throws instead of loading a file or falling back to `BUYER_PRIVATE_KEY`. A caller
+such as `openpay-x402-mcp` loads its wallet and uses
+`createSignerFromOptions({ privateKey })`, passing the signer to the executor.
+The keystore guard returns `wallet_not_initialized` when `signerAvailable` is
+false; env-key and Steward retain their existing guard behavior. File storage
+and the default daily limit for keystore are MCP responsibilities.
+
+`safeErrorMessage` / `redactSensitiveText` redact 32-byte key hex and 65-byte
+signature hex in error text. Do not apply these functions to payment payloads:
+authorization nonces are also 32-byte hex. OpenPay does not receive, store, or
+recover local wallet keys (OpenPay は鍵を受け取らない・保管しない・復元できない).
+
 Choose exactly one of `privateKey`, `steward`, or `signer`. Supplying more than
 one is a startup error. A custom signer has an EVM `address` and an async
 `signTypedData(typedData)` method.

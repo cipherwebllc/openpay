@@ -47,6 +47,7 @@ export const REASONS = {
   dailyAuthorizationCrossesUtcDay: 'daily_authorization_crosses_utc_day',
   buyerPrivateKeyMissing: 'buyer_private_key_missing',
   stewardSignerUnconfigured: 'steward_signer_unconfigured',
+  walletNotInitialized: 'wallet_not_initialized',
   // catalog trust 経由 (第三者ドメイン) の URL で、支払い時にライブ fetch した accept が
   // discovery 掲載 accept (OpenPay サーバー生成の権威値) と食い違う = bait-and-switch。
   catalogAcceptMismatch: 'catalog_accept_mismatch',
@@ -554,6 +555,8 @@ export function evaluatePaymentGuards({
   if (requirePrivateKey || requireSigner) {
     if (config.signerMode === SIGNER_MODES.steward) {
       if (!signerAvailable) reasons.push(REASONS.stewardSignerUnconfigured);
+    } else if (config.signerMode === SIGNER_MODES.keystore) {
+      if (!signerAvailable) reasons.push(REASONS.walletNotInitialized);
     } else if (config.buyerPrivateKey === null) {
       reasons.push(REASONS.buyerPrivateKeyMissing);
     }
@@ -574,7 +577,11 @@ export function redactSensitiveText(text, secrets = []) {
       out = out.split(secret).join('[redacted_private_key]');
     }
   }
-  return out.replace(/\b0x[0-9a-fA-F]{130}\b/g, '[redacted_signature]');
+  return out
+    .replace(/\b0x[0-9a-fA-F]{130}\b/g, '[redacted_signature]')
+    // 32 バイトの hex は秘密鍵と同じ形だが、取引ハッシュや nonce でもあり得る。「鍵が漏れた」と
+    // 誤解させないラベルにする (既知の秘密の置換は上の [redacted_private_key] のまま)。
+    .replace(/\b0x[0-9a-fA-F]{64}\b/g, '[redacted_32byte_hex]');
 }
 
 export function safeErrorMessage(error, config = {}) {
