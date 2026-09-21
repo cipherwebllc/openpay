@@ -1,23 +1,29 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseUnits } from 'viem';
 // @ts-expect-error The SDK source of truth is JavaScript without declarations.
 import { DEFAULT_MAX_PER_CALL_JPYC, DEFAULT_MAX_SESSION_JPYC, DEFAULT_ALLOWED_HOSTS, DEFAULT_CATALOG_TRUST, readMoneyConfig } from '../../packages/x402-sdk/src/guards.mjs';
 // @ts-expect-error The MCP source of truth is JavaScript without declarations.
 import { createToolRuntime } from '../../packages/x402-mcp/src/tools.mjs';
-import { buildOpenInLink, AGENT_MCP_PACKAGE, AGENT_CLIENTS, AGENT_MODES, AGENT_LIMIT_DEFAULTS, AGENT_SETUP_URL, DEFAULT_AGENT_CONFIG_INPUT, buildAgentEnv, buildSetupPrompt, invalidAgentConfigFields, renderAgentConfig } from '@/lib/agentSetup';
+import { buildOpenInLink, AGENT_MCP_PACKAGE, AGENT_MCP_SPEC, AGENT_MCP_VERSION, AGENT_CLIENTS, AGENT_MODES, AGENT_LIMIT_DEFAULTS, AGENT_SETUP_URL, DEFAULT_AGENT_CONFIG_INPUT, buildAgentEnv, buildSetupPrompt, invalidAgentConfigFields, renderAgentConfig } from '@/lib/agentSetup';
 
 describe('agent setup — package fences', () => {
   it('generated invocations name bins that the MCP package really ships', () => {
     const pkg = JSON.parse(readFileSync('packages/x402-mcp/package.json', 'utf8'));
     expect(pkg.name).toBe(AGENT_MCP_PACKAGE);
+    // 生成コマンドの版固定は、リポの MCP の minor と一致させる (keystore は 0.15 から)。
+    expect(pkg.version.split('.').slice(0, 2).join('.')).toBe(AGENT_MCP_VERSION);
+    expect(AGENT_MCP_SPEC).toBe(`${AGENT_MCP_PACKAGE}@${AGENT_MCP_VERSION}`);
     expect(Object.keys(pkg.bin)).toEqual(expect.arrayContaining([AGENT_MCP_PACKAGE, 'openpay-order-mcp']));
     expect(renderAgentConfig('claude-code', 'human-pays', DEFAULT_AGENT_CONFIG_INPUT)).toContain('openpay-order-mcp');
   });
   // setup.md と keyNote の前提: 鍵なしの生成 env で MCP は起動でき、プレースホルダ鍵では起動時に落ちる。
   it('the MCP runtime starts with the generated env and rejects a placeholder key', () => {
-    const env = Object.fromEntries(buildAgentEnv(DEFAULT_AGENT_CONFIG_INPUT));
+    // keystore は起動時にウォレットを読む。開発機の本物の ~/.openpay-x402 を読まないよう隔離する。
+    const env = { ...Object.fromEntries(buildAgentEnv(DEFAULT_AGENT_CONFIG_INPUT)), OPENPAY_X402_HOME: mkdtempSync(join(tmpdir(), 'openpay-agent-setup-')) };
     expect(() => createToolRuntime({ env })).not.toThrow();
     expect(() => createToolRuntime({ env: { ...env, BUYER_PRIVATE_KEY: '0x...' } })).toThrow(/BUYER_PRIVATE_KEY/);
     expect(() => createToolRuntime({ env: { ...env, SIGNER_MODE: 'steward' } })).toThrow(/steward/);
@@ -58,11 +64,13 @@ describe('agent setup', () => {
       expect(output).not.toMatch(/PRIVATE_KEY|STEWARD|0x/);
       const server = mode === 'agent-pays' ? 'openpay-x402' : 'openpay-order';
       expect(output).toContain(server);
-      if (mode === 'human-pays') expect(output).not.toMatch(/MAX_|ALLOWED_HOSTS|CATALOG_TRUST|\benv\b/);
+      if (mode === 'human-pays') expect(output).not.toMatch(/SIGNER_MODE|MAX_|ALLOWED_HOSTS|CATALOG_TRUST|\benv\b/);
+      // Agent が払う設定は keystore を明示する (鍵は MCP が手元で作る・人が env に貼る手順を作らない)。
+      if (mode === 'agent-pays') expect(output).toMatch(/SIGNER_MODE\W+keystore/);
       if (client === 'claude-desktop') {
         const entry = JSON.parse(output).mcpServers[server];
         expect(entry.command).toBe('npx');
-        expect(entry.args).toEqual(mode === 'agent-pays' ? ['--yes', 'openpay-x402-mcp'] : ['--yes', '--package=openpay-x402-mcp', '--', 'openpay-order-mcp']);
+        expect(entry.args).toEqual(mode === 'agent-pays' ? ['--yes', AGENT_MCP_SPEC] : ['--yes', `--package=${AGENT_MCP_SPEC}`, '--', 'openpay-order-mcp']);
         expect(entry.env).toEqual(mode === 'agent-pays' ? Object.fromEntries(buildAgentEnv(DEFAULT_AGENT_CONFIG_INPUT)) : undefined);
       } else if (client === 'codex') {
         expect(output).toContain(`[mcp_servers.${server}]`);
@@ -70,7 +78,7 @@ describe('agent setup', () => {
         expect(output.includes(`[mcp_servers.${server}.env]`)).toBe(mode === 'agent-pays');
       } else if (client === 'hermes') {
         expect(output.split(' --args ')).toHaveLength(2);
-        expect(output.split(' --args ')[1]).toBe(mode === 'agent-pays' ? '--yes openpay-x402-mcp' : '--yes --package=openpay-x402-mcp -- openpay-order-mcp');
+        expect(output.split(' --args ')[1]).toBe(mode === 'agent-pays' ? `--yes ${AGENT_MCP_SPEC}` : `--yes --package=${AGENT_MCP_SPEC} -- openpay-order-mcp`);
       } else {
         expect(output).toMatch(/^claude mcp add /);
         expect(output).toContain(' -- npx --yes');
