@@ -5,6 +5,7 @@
 // 未接続時: 「接続」ボタン + ▾ で開く dropdown (利用可能 connector 一覧)。
 // dropdown は native <details> で実装し、JS state を最小化する。
 
+import { useEffect, useRef } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAccount, useConnect, useDisconnect } from 'wagmi';
 import { Check, ChevronDown } from 'lucide-react';
@@ -48,8 +49,24 @@ export function WalletBadge() {
   const handleSignIn = () => {
     void signIn(t('siweStatement')).catch(() => undefined);
   };
+  // メニュー内の操作 (接続 / 切断) で branch が入れ替わると、押したボタンごと <details> が作り直され
+  // フォーカスが body へ落ちる。メニューから操作したときだけ新しい summary へ戻す
+  // (ページ読み込み時の自動再接続ではフォーカスを奪わない)。
+  const summaryRef = useRef<HTMLElement | null>(null);
+  const restoreFocusRef = useRef(false);
+  useEffect(() => {
+    if (!restoreFocusRef.current) return;
+    restoreFocusRef.current = false;
+    summaryRef.current?.focus();
+  }, [isConnected]);
+  // 接続が失敗・拒否で終わったら予約を捨てる (後で別の場所から接続したときにフォーカスを奪わない)。
+  useEffect(() => {
+    if (error) restoreFocusRef.current = false;
+  }, [error]);
+
   // 切断時はセッション cookie も破棄して「ログイン済だが未接続」の宙ぶらりんを残さない。
   const handleDisconnect = () => {
+    restoreFocusRef.current = true;
     void signOut().catch(() => undefined);
     disconnect();
   };
@@ -59,7 +76,7 @@ export function WalletBadge() {
       // key: 未接続 branch と同じ位置の <details> なので、無いと React が DOM を使い回し open が
       // 引き継がれる (接続直後にメニューが開いたまま本文へ被さる)。
       <details key="connected" className="group relative">
-        <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
+        <summary ref={summaryRef} className="flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
           <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
           {siweEnabled && isSignedIn && (
             <Check className="h-3 w-3 text-emerald-600" aria-label={t('signedIn')} />
@@ -127,7 +144,7 @@ export function WalletBadge() {
 
   return (
     <details key="disconnected" className="group relative">
-      <summary className="flex cursor-pointer list-none items-center gap-1 rounded-full bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark">
+      <summary ref={summaryRef} className="flex cursor-pointer list-none items-center gap-1 rounded-full bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark">
         {t('connect')}
         <ChevronDown
           className="h-3 w-3 transition-transform group-open:rotate-180"
@@ -147,7 +164,10 @@ export function WalletBadge() {
               type="button"
               role="menuitem"
               disabled={isPending}
-              onClick={() => connect({ connector: c })}
+              onClick={() => {
+                restoreFocusRef.current = true;
+                connect({ connector: c });
+              }}
               className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 disabled:opacity-50"
             >
               {/* ウォレットアイコン (EIP-6963 data URI or 同梱 SVG)。装飾なので alt は空。 */}

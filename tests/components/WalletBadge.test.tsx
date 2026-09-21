@@ -527,6 +527,53 @@ describe('WalletBadge: 接続状態の切り替わり', () => {
   });
 });
 
+describe('WalletBadge: 接続・切断後のフォーカス', () => {
+  it('メニューから接続 → 作り直された summary へフォーカスを戻す (body に落とさない)', () => {
+    setDisconnected();
+    visibleConnectorsMock.mockReturnValue([{ uid: '1', name: 'MetaMask' }]);
+    const { rerender } = renderWithIntl(<WalletBadge />);
+    const details = openDropdown('接続');
+    fireEvent.click(within(details).getByRole('menuitem', { name: 'MetaMask' }));
+
+    setConnected();
+    rerender(<WalletBadge />);
+    expect(document.activeElement).toBe(screen.getByText(/0x52d4/i).closest('summary'));
+  });
+
+  it('メニューから切断 → 「接続」の summary へフォーカスを戻す', () => {
+    setConnected();
+    const { rerender } = renderWithIntl(<WalletBadge />);
+    const details = openDropdown(/0x52d4/i);
+    fireEvent.click(within(details).getByRole('menuitem', { name: '切断' }));
+
+    setDisconnected();
+    rerender(<WalletBadge />);
+    expect(document.activeElement).toBe(screen.getByText('接続').closest('summary'));
+  });
+
+  it('メニューを使わない接続 (自動再接続・ページ側のボタン) ではフォーカスを奪わない', () => {
+    setDisconnected();
+    const { rerender } = renderWithIntl(<WalletBadge />);
+    setConnected();
+    rerender(<WalletBadge />);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('接続が拒否で終わったあと、別経路で接続してもフォーカスを奪わない', () => {
+    setDisconnected();
+    visibleConnectorsMock.mockReturnValue([{ uid: '1', name: 'MetaMask' }]);
+    const { rerender } = renderWithIntl(<WalletBadge />);
+    const details = openDropdown('接続');
+    fireEvent.click(within(details).getByRole('menuitem', { name: 'MetaMask' }));
+    setDisconnected({ error: new Error('User rejected the request') });
+    rerender(<WalletBadge />);
+
+    setConnected();
+    rerender(<WalletBadge />);
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
 describe('WalletBadge: siweEnabled の flag 網羅 (掟 7)', () => {
   const FLAG_NAMES = Object.keys(flags) as (keyof typeof flags)[];
 
