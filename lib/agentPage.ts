@@ -19,6 +19,7 @@ import type {
 export type AgentPageContent = {
   readonly metaTitle: string;
   readonly metaDescription: string;
+  readonly ogImageAlt: string;
   readonly eyebrow: string;
   readonly title: string;
   readonly subtitle: string;
@@ -108,7 +109,9 @@ function feeText(locale: 'ja' | 'en'): string {
 const ja: AgentPageContent = {
   metaTitle: 'OpenPay Agent — AI に JPYC を使わせる',
   metaDescription:
-    'プロンプトを Claude Code / Codex / Hermes に渡すと、Agent 自身が OpenPay の JPYC 支払いをセットアップします。OpenPay はウォレットも秘密鍵も預かりません。',
+    'プロンプトを 1 つ渡すだけで、Claude・Codex・Hermes が JPYC 支払いを自分でセットアップ。支払い上限は Agent 側で強制、ウォレットも秘密鍵も OpenPay は預かりません。',
+  ogImageAlt:
+    'OpenPay Agent — AI に JPYC を使わせる。プロンプトを渡すだけで Agent を接続。ウォレットも秘密鍵も OpenPay は預かりません。',
   eyebrow: 'OpenPay Agent',
   title: 'AI に JPYC を使わせる。',
   subtitle: 'ウォレットも秘密鍵も、OpenPay は預かりません。',
@@ -226,7 +229,9 @@ const ja: AgentPageContent = {
 const en: AgentPageContent = {
   metaTitle: 'OpenPay Agent — let your AI pay in JPYC',
   metaDescription:
-    'Hand one prompt to Claude Code, Codex, or Hermes and the agent sets up OpenPay JPYC payments itself. OpenPay never holds your wallet or your private key.',
+    'Hand one prompt to Claude, Codex, or Hermes and the agent sets up JPYC payments itself. Spending limits are enforced on the agent side; OpenPay never holds your wallet or your private key.',
+  ogImageAlt:
+    'OpenPay Agent — let your AI pay in JPYC. Connect your agent with one prompt. OpenPay never holds your wallet or your private key.',
   eyebrow: 'OpenPay Agent',
   title: 'Let your AI pay in JPYC.',
   subtitle: 'OpenPay never holds your wallet or your private key.',
@@ -350,7 +355,16 @@ export function agentPageMetadata(locale: string): Metadata {
   return guidePageMetadata({
     locale,
     path: '/agent',
-    title: `${c.metaTitle} · OpenPay`,
+    // metaTitle が既に「OpenPay Agent — …」で始まるので、guide 共通の「 · OpenPay」接尾辞は付けない。
+    title: c.metaTitle,
     description: c.metaDescription,
+    // 専用 OG (docs/og-agent/og.html を 1200x630 で描画 → webp)。既定の og-image.png は店頭決済の
+    // 絵なので、SNS で共有したときに Agent の面だと伝わらない。
+    ogImage: {
+      url: '/og-agent.webp',
+      width: 1200,
+      height: 630,
+      alt: c.ogImageAlt,
+    },
   });
 }
