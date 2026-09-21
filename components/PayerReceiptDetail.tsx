@@ -11,7 +11,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { addressExplorerUrl } from '@/lib/chains';
 import { downloadBlob } from '@/lib/download';
 import { shortAddress } from '@/lib/format';
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import {
   formatReceiptDateTime,
   payerReceiptCopyText,
@@ -55,7 +55,9 @@ export function PayerReceiptDetail({
   const tp = useTranslations('PaymentForm');
   const locale = useLocale();
   const rootRef = useRef<HTMLDivElement>(null);
-  const { copy, copied, available: copyAvailable } = useCopyToClipboard();
+  const { copy, copied, available: clipboardAvailable } = useCopyToClipboard();
+  // server と初回の client 描画を揃える (SSR されるページで hydration エラーになるため)。
+  const copyAvailable = useHydrationSafeAvailable(clipboardAvailable);
 
   const items = receipt.lineItems ?? [];
   const currency = receipt.currency;
