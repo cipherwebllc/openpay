@@ -46,8 +46,18 @@ describe('AgentWalletCard', () => {
     const c = agentPageContentFor(locale).wallet;
     const empty = render(<AgentWalletCard c={c} activity={agentPageContentFor(locale).activity} />);
     expect(screen.getByRole('heading', { name: c.title })).toBeVisible();
+    // 初期状態は入力欄を出さない: ウォレットは「Agent を接続」のセットアップで作られ、Agent が返すリンクで反映される。
+    expect(screen.getByText(c.emptyLead)).toBeVisible();
+    expect(screen.getByRole('link', { name: c.emptyConnectCta })).toHaveAttribute('href', '#agent-connect');
+    expect(screen.getByLabelText(c.inputLabel)).not.toBeVisible();
+    // まだ何も読み取っていないので、読み取りの注記も出さない。
+    expect(screen.queryByText(c.ownershipNote)).toBeNull();
+    const manual = screen.getByRole('button', { name: c.manualEntry });
+    expect(manual).toHaveAttribute('aria-controls', 'agent-wallet-input');
+    fireEvent.click(manual);
     expect(screen.getByText(c.lead)).toBeVisible();
     expect(screen.getByRole('textbox', { name: c.inputLabel })).toBeVisible();
+    expect(screen.queryByText(c.emptyLead)).toBeNull();
     expect(screen.queryByRole('button', { name: c.useConnected })).toBeNull();
     expect(screen.getByText(c.ownershipNote)).toBeVisible();
     empty.unmount();
@@ -163,12 +173,42 @@ describe('AgentWalletCard', () => {
   it('moves focus to Change after using the connected wallet, not to the body', async () => {
     state.connected = true;
     render(<AgentWalletCard c={C} activity={activity} />);
+    fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
     const use = screen.getByRole('button', { name: C.useConnected });
     use.focus();
     fireEvent.click(use);
     await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
     expect(screen.getByLabelText(C.inputLabel)).not.toBeVisible();
     expect(screen.getByRole('button', { name: C.changeAddress })).toHaveFocus();
+  });
+  it('focuses the input on manual entry, collapses the moment the address becomes valid, and never on blur', async () => {
+    render(<AgentWalletCard c={C} activity={activity} />);
+    fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
+    const input = screen.getByLabelText(C.inputLabel);
+    // 押したボタン自身が消える → フォーカスは body ではなく、開いた入力欄へ。
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: 'invalid' } });
+    fireEvent.blur(input);
+    // 不正な入力は直せるよう開いたまま。blur では畳まない (畳むとカードがずれ、進行中のクリックが空振りする)。
+    expect(input).toBeVisible();
+    fireEvent.change(input, { target: { value: address } });
+    // 有効になった瞬間に畳む。フォーカスは「変更」へ (消えた入力欄に残さない)。
+    expect(input).not.toBeVisible();
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
+    const change = screen.getByRole('button', { name: C.changeAddress });
+    expect(change).toHaveFocus();
+    // 「変更」は直後でも必ず効く (タイマーや無視する時間帯を持たない)。
+    fireEvent.click(change);
+    expect(input).toBeVisible();
+    fireEvent.blur(input);
+    expect(input).toBeVisible();
+    fireEvent.click(change);
+    expect(input).not.toBeVisible();
+    // 開いたまま別の有効なアドレスに書き換えても同じ。
+    fireEvent.click(change);
+    fireEvent.change(input, { target: { value: '0x2222222222222222222222222222222222222222' } });
+    expect(input).not.toBeVisible();
   });
   it('does not enable balance reads for empty or invalid addresses', () => {
     state.query = 'address=invalid';
@@ -208,6 +248,7 @@ describe('AgentWalletCard', () => {
   it('uses the connected wallet only on request and disables reads after invalid edits', () => {
     state.connected = true;
     render(<AgentWalletCard c={C} activity={activity} />);
+    fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
     fireEvent.click(screen.getByRole('button', { name: 'Use the connected wallet' }));
     expect(screen.getByLabelText('Agent wallet address')).toHaveValue(address);
     expect(state.read).toHaveBeenLastCalledWith(expect.objectContaining({ args: [address], query: { enabled: true } }));

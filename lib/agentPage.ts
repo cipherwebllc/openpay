@@ -95,6 +95,9 @@ export type AgentPageContent = {
     readonly connectCta: string;
     readonly fundCta: string;
     readonly changeAddress: string;
+    readonly emptyLead: string;
+    readonly emptyConnectCta: string;
+    readonly manualEntry: string;
     readonly closeFund: string;
     readonly fundLockedNote: string;
     readonly pendingToOther: string;
@@ -285,6 +288,9 @@ const ja: AgentPageContent = {
     connectCta: 'Agent を接続',
     fundCta: '入金する',
     changeAddress: '変更',
+    emptyLead: '下の「Agent を接続」で「Agent が支払う」をセットアップすると、あなたのマシン上にウォレットが作られます。Agent が返すリンクを開くと、ここに残高が表示されます。',
+    emptyConnectCta: 'Agent を接続する',
+    manualEntry: 'アドレスを手入力する',
     closeFund: '閉じる',
     fundLockedNote: '送金の結果を確認できるまで、このパネルは閉じられません。',
     pendingToOther: '送信中の送金は、変更前のアドレス宛てです:',
@@ -468,6 +474,9 @@ const en: AgentPageContent = {
     connectCta: 'Connect agent',
     fundCta: 'Add funds',
     changeAddress: 'Change',
+    emptyLead: 'Set up “Agent pays” with “Connect your agent” below and a wallet is created on your own machine. Open the link your agent returns and its balance appears here.',
+    emptyConnectCta: 'Connect your agent',
+    manualEntry: 'Enter an address manually',
     closeFund: 'Close',
     fundLockedNote: 'This panel stays open until the transfer’s result is confirmed.',
     pendingToOther: 'The transfer in progress goes to the previous address:',
