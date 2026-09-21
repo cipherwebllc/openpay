@@ -34,6 +34,34 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'agent-page-local-wallet-2026-09-21',
+    date: '2026-09-21',
+    category: 'feature',
+    title: {
+      ja: 'Agent ページを公開しました（秘密鍵を貼らずに AI の支払いを始められます）',
+      en: 'The Agent page is live (let your AI pay without pasting a private key)',
+    },
+    body: {
+      ja: 'Claude や Codex などの AI エージェントを OpenPay につなぐ「Agent」ページを追加しました。接続用のプロンプトをコピーするか、Claude / Codex のデスクトップアプリをそのまま開いて設定できます。支払い用のウォレットは MCP (openpay-x402-mcp 0.15) があなたのマシン上に作って保管し、鍵は会話にも OpenPay にも出ません。ただし、あなたとしてコマンドを実行できるものはこの鍵を読めるので、入れるのは少額だけにしてください。OpenPay は鍵を預からず、復元もできません。ページでは Agent のアドレスの JPYC 残高を確認でき、接続中のウォレットから入金できます（通常の送金・ガス代はあなたのウォレットから・OpenPay の徴収なし）。1 回・累計・1 日の支払い上限は Agent 側の MCP が強制する値で、OpenPay のサーバーが強制するものではありません。AI が支払うときの利用料は従来どおりです。',
+      en: 'A new Agent page connects AI agents such as Claude and Codex to OpenPay. Copy a setup prompt, or open the Claude / Codex desktop app directly. The paying wallet is created and kept on your own machine by the MCP (openpay-x402-mcp 0.15); the key never enters the chat or reaches OpenPay. Anything that can run commands as you can still read it, so fund it only with a small amount. OpenPay never holds the key and cannot recover it. The page shows the agent address\'s JPYC balance and lets you fund it from your connected wallet (a plain transfer; gas is paid from your wallet and OpenPay collects nothing). Per-call, cumulative and daily spending caps are enforced by the MCP on the agent\'s side, not by OpenPay\'s servers. Usage fees for AI payments are unchanged.',
+    },
+    link: { href: '/agent', labelJa: 'Agent ページを開く', labelEn: 'Open the Agent page' },
+  },
+  {
+    id: 'store-product-details-2026-09-18',
+    date: '2026-09-18',
+    category: 'feature',
+    title: {
+      ja: 'Store の商品に「詳しい説明・仕様表・実際に試す」を載せられます',
+      en: 'Store products can now show a full description, a spec table and a “try it” link',
+    },
+    body: {
+      ja: '出品フォームの「見せ方 (任意)」に 3 欄を追加しました。詳しい説明（2,000 字まで）、仕様表（8 行まで・「ラベル: 値」）、実際に試せるページへのリンク（https のみ）です。商品を開いたときに表示され、購入内容や価格・利用料には影響しません。既存の商品はそのままで、あとから追記できます。',
+      en: 'The listing form\'s “Presentation (optional)” block has three new fields: a full description (up to 2,000 characters), a spec table (up to 8 rows of “label: value”) and a link to a page where buyers can try the item (https only). They appear when a product is opened and do not affect what is purchased, the price or fees. Existing products are unchanged and can be updated later.',
+    },
+    link: { href: '/store', labelJa: 'Store を見る', labelEn: 'Open the Store' },
+  },
+  {
     id: 'x402-arc-gateway-2026-09-17',
     date: '2026-09-17',
     category: 'feature',

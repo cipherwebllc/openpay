@@ -9,6 +9,8 @@
 export type NewsIndexEntry = { id: string; date: string };
 
 export const NEWS_INDEX: readonly NewsIndexEntry[] = [
+  { id: 'agent-page-local-wallet-2026-09-21', date: '2026-09-21' },
+  { id: 'store-product-details-2026-09-18', date: '2026-09-18' },
   { id: 'x402-arc-gateway-2026-09-17', date: '2026-09-17' },
   { id: 'usdc-arc-crosschain-2026-09-17', date: '2026-09-17' },
   { id: 'usdc-arc-tip-2026-09-17', date: '2026-09-17' },
