@@ -39,6 +39,8 @@ const X402_TOOL_NAMES = [
   'createOrderLink',
   'find_shops',
   'search_shops',
+  'wallet_init',
+  'wallet_status',
 ];
 const ORDER_TOOL_NAMES = [
   'order_menu',
@@ -52,6 +54,8 @@ const X402_ONLY_TOOL_NAMES = [
   'discovery_search',
   'x402_quote',
   'search_shops',
+  'wallet_init',
+  'wallet_status',
 ];
 // 0.8.0 の既存 7 ツールは個別 JSON byte を固定し、0.9.0 はその末尾へ 2 ツールだけを追加する。
 const V080_TOOL_WIRE_SHA256_BY_NAME: Record<string, string> = {
@@ -65,6 +69,10 @@ const V080_TOOL_WIRE_SHA256_BY_NAME: Record<string, string> = {
 };
 const X402_V090_TOOLS_WIRE_SHA256 =
   'f4f7c69c2a150e55d5dc4f2e31cf83b0e17c4c34989317f3f03a1a3b2fc34de4';
+const V0150_WALLET_WIRE_SHA256_BY_NAME: Record<string, string> = {
+  wallet_init: '2da9fbf1180d4659b6aec499c97fa62d26c96f8a3ee348a4b751b1891c5ff616',
+  wallet_status: '8471c1a7a5ae8a7c810c58312df9ce41d8ca07d1ac7f9a95fab7155c99cf8907',
+};
 
 async function loadTools(): Promise<ToolsModule> {
   return (await import(
@@ -77,7 +85,15 @@ function parsedText(result: ToolResult): unknown {
 }
 
 describe('x402-mcp tool profiles', () => {
-  it('profile 未指定 / x402 は既存7 byte不変の末尾に2ツールを追加する', async () => {
+  it('pins wallet tool names, descriptions, and input schemas byte-for-byte', async () => {
+    const { TOOLS } = await loadTools();
+    const wallets = TOOLS.filter((tool) => tool.name.startsWith('wallet_'));
+    expect(wallets.map((tool) => tool.name)).toEqual(Object.keys(V0150_WALLET_WIRE_SHA256_BY_NAME));
+    for (const tool of wallets) {
+      expect(createHash('sha256').update(JSON.stringify(tool)).digest('hex')).toBe(V0150_WALLET_WIRE_SHA256_BY_NAME[tool.name]);
+    }
+  });
+  it('profile 未指定 / x402 は既存9 byte不変の末尾に2ツールを追加する', async () => {
     const { TOOLS, createToolRuntime } = await loadTools();
     const implicit = createToolRuntime({ env: {} });
     const explicit = createToolRuntime({ profile: 'x402', env: {} });
@@ -86,7 +102,7 @@ describe('x402-mcp tool profiles', () => {
     expect(explicit.tools).toEqual(implicit.tools);
     expect(implicit.tools).toEqual(TOOLS);
     expect(
-      createHash('sha256').update(JSON.stringify(implicit.tools)).digest('hex'),
+      createHash('sha256').update(JSON.stringify(implicit.tools.slice(0, 9))).digest('hex'),
     ).toBe(X402_V090_TOOLS_WIRE_SHA256);
     for (const tool of implicit.tools.slice(0, 7)) {
       expect(

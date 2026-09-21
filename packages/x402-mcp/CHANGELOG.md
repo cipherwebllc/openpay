@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.0 — 2026-09-21
+
+- Add x402-only `wallet_init` and `wallet_status` (11 tools; order remains 4), with pinned tool wire hashes. Explicit keystore mode publishes a fully written, fsynced 0600 temporary file via an atomic hard link, removes the temporary file on success/failure, fsyncs the directory, and rereads the stored record. Existing wallets are never overwritten or regenerated; unsupported links fail closed with a filesystem reason code.
+- Both wallet tools report the path and do-not-delete recovery guidance for corrupt, mismatched, or unsafe wallet files, including empty/partial records. Require an absolute `OPENPAY_X402_HOME`; invalid homes disable wallet operations without preventing startup or discovery.
+- Activate initialization without restarting the host, retaining one payment executor and serializing payments with reinitialization. Uninitialized payments send no requests. Default keystore daily cap to the session cap. Separate public wallet metadata from non-enumerable secrets; retain every activated key and stray env key in redaction, never signing with an env key in keystore mode or writing keys to env.
+- Report optional read-only Polygon JPYC balances using SDK outbound validation, private/link-local/internal-host rejection and DNS pinning, with an explicit localhost HTTP exception. Bound DNS/transport/body reads to five seconds (tested with fake timers); unavailable balances remain null.
+- Require SDK `^0.9.0`; pin setup examples and document the plaintext-file threat model. OpenPay does not receive, store, or recover local keys.
+
 ## 0.14.0
 
 - Attach a `settlementNote` to every `x402_pay` result that carries the SDK's new

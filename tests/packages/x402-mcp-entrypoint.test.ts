@@ -35,6 +35,8 @@ const PROFILES = [
       'createOrderLink',
       'find_shops',
       'search_shops',
+      'wallet_init',
+      'wallet_status',
     ],
   },
   {
@@ -202,6 +204,8 @@ describe('x402-mcp entrypoints', () => {
     ];
     const packedPaths = manifest[0].files.map((file) => file.path);
     expect(packedPaths).toContain('src/order.mjs');
+    expect(packedPaths).toContain('src/keystore.mjs');
+    expect(packedPaths.some((path) => /(?:wallet\.json|spend\.json|\.env(?:\.|$)|\.openpay-x402)/.test(path))).toBe(false);
     expect(packedPaths).toContain('scripts/steward-bootstrap.mjs');
     expect(packedPaths).toContain('CHANGELOG.md');
 
@@ -223,8 +227,8 @@ describe('x402-mcp entrypoints', () => {
         integrity?: string;
       }>;
     };
-    // SDK の作業ツリーは未公開の次版を持てる。MCP の取得契約は、公開済み依存の
-    // manifest・lock・registry tarball に束縛し、未公開版への依存更新を要求しない。
+    // SDK → MCP の協調リリース。manifest と lock は必要な SDK 版へ同時に進める。
+    // 未公開 SDK の integrity はローカル npm pack で算出し、公開時に同一 tarball を確認する。
     const lockedSdk = lock.packages['node_modules/openpay-x402-sdk'];
     expect(lockedSdk?.version).toMatch(/^\d+\.\d+\.\d+$/);
     expect(pkg.dependencies['openpay-x402-sdk']).toBe(`^${lockedSdk.version}`);
