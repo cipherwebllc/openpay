@@ -1,11 +1,12 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 
 // クリック 1 タップで navigator.clipboard にコピー、1.5 秒間「コピー済み」フィードバック。
-// navigator.clipboard は HTTPS 必須 (localhost 例外) のため、unavailable な環境では
-// disabled な div として graceful degrade させる (button にはしない、誤クリック防止)。
+// navigator.clipboard は HTTPS 必須 (localhost 例外) のため、unavailable な環境では mount 後に
+// 押せない span へ落とす (graceful degrade・誤クリック防止)。mount 前は server と同形の button を
+// 描く (hydration を揃えるため。まだ操作できないので偽の操作面にはならない)。
 
 export function CopyableField({
   value,
@@ -19,7 +20,9 @@ export function CopyableField({
   className?: string;
 }) {
   const t = useTranslations('CopyableField');
-  const { copied, available, copy } = useCopyToClipboard();
+  const { copied, available: clipboardAvailable, copy } = useCopyToClipboard();
+  // server と初回の client 描画を揃える (SSR されるページで hydration エラーになるため)。
+  const available = useHydrationSafeAvailable(clipboardAvailable);
 
   const shown = displayValue ?? value;
 

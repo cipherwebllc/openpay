@@ -1,8 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
+import { NextIntlClientProvider } from 'next-intl';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import { CopyableField } from '@/components/CopyableField';
+import messages from '../../messages/ja.json';
 
 const TX_HASH = `0x${'a'.repeat(64)}`;
 
@@ -135,6 +138,28 @@ describe('CopyableField', () => {
         // @ts-expect-error: navigator.clipboard は通常 readonly だがテスト用
         delete navigator.clipboard;
       }
+    }
+  });
+
+  it('server の描画は clipboard が無くても client の初回描画と同じ形 (hydration 不一致を起こさない)', () => {
+    // server には navigator.clipboard が無い。以前は server = span・ブラウザの初回描画 = button で
+    // 食い違い、SSR されるページ (Web3 Directory 等) で hydration に失敗していた。
+    const desc = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      get: () => undefined,
+    });
+    try {
+      const html = renderToString(
+        <NextIntlClientProvider locale="ja" messages={messages}>
+          <CopyableField value={TX_HASH} label="Tx Hash" />
+        </NextIntlClientProvider>,
+      );
+      expect(html).toContain('<button');
+      expect(html).toContain('Tx Hash をコピー');
+    } finally {
+      if (desc) Object.defineProperty(navigator, 'clipboard', desc);
+      else Reflect.deleteProperty(navigator, 'clipboard');
     }
   });
 });
