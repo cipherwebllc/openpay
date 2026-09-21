@@ -370,6 +370,8 @@ export function createToolRuntime({
   // ファイルストア (~/.openpay-x402/spend.json・SDK 0.5.0)。
   spendStore,
   lookup,
+  // 履歴 I/O の打ち切り (テスト注入用)。既定は history.mjs の HISTORY_DEADLINE_MS。
+  historyDeadlineMs,
 } = {}) {
   if (profile !== 'order' && profile !== 'x402') {
     throw new Error(`invalid profile: ${profile}`);
@@ -884,17 +886,18 @@ export function createToolRuntime({
     // payment queue. Serialize only start admission; the SDK still owns payment serialization.
     const starting = historyStarts.then(async () => {
       await walletReady;
-      return startPurchase({ env: walletEnv, url: args?.url, getPayer: () => signer?.address ?? null });
+      return startPurchase({ env: walletEnv, url: args?.url, getPayer: () => signer?.address ?? null, deadlineMs: historyDeadlineMs });
     });
     historyStarts = starting.then(() => {}, () => {});
     const attempt = await starting;
     try {
       const result = await x402PayWithoutHistory(args);
-      const history = await endPurchase({ env: walletEnv, attempt, result });
-      return { ...result, history };
+      const history = await endPurchase({ env: walletEnv, attempt, result, deadlineMs: historyDeadlineMs });
+      // 掟 12: 応答の形は変えない。オブジェクトのときだけ history を足す。
+      return isObject(result) ? { ...result, history } : result;
     } catch (error) {
       // Ancillary history must not replace a payment exception; record unknown and rethrow it unchanged.
-      await endPurchase({ env: walletEnv, attempt, threw: true });
+      await endPurchase({ env: walletEnv, attempt, threw: true, deadlineMs: historyDeadlineMs });
       throw error;
     }
   }

@@ -216,7 +216,7 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | `MAX_TIMEOUT_SECONDS` | `600` | Reject seller-declared authorization lifetimes above this many seconds. Configurable from `1` to the facilitator ceiling of `1200`; the value is never silently clamped. |
 | `CATALOG_TRUST` | `true` | When true, exact URLs listed in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. Before signing, the live `accepts` fetched from a catalog URL is checked field-by-field (asset / timeout / forwarder / merchant / fee receiver / amounts) against the catalog listing (server-authored), so a third-party domain cannot bait-and-switch a different destination or authorization lifetime; mismatches are refused (`catalog_accept_mismatch`). Money caps still apply. Set `false` for strict manual allowlisting. |
 | `ALLOWED_HOSTS` | `open-pay.jp` | Comma-separated bare host allowlist. `x402_quote` still works outside the list but returns `host_not_allowed`. |
-| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from both wallet tools while discovery remains available. Does not relocate env-key / Steward spend storage. |
+| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from all three wallet tools while discovery remains available. Does not relocate env-key / Steward spend storage. |
 | `POLYGON_RPC_URL` | unset | Optional read-only `wallet_status` RPC. SDK outbound URL/host checks reject private/link-local addresses, `.internal`, and URL credentials; validated DNS addresses are pinned for the built-in transport. Explicit exception: HTTP on `localhost` / `127.0.0.1`. No public RPC default, redirects rejected, 5-second timeout including DNS and body reads. Never accepted as a tool argument. |
 | `DISCOVERY_URL` | `https://open-pay.jp/api/discovery` | Catalog used by `discovery_search`. |
 
@@ -244,7 +244,12 @@ data, not instructions. Logs contain no response bodies, signatures, nonces,
 authorizations, or keys. `coverage` reports the oldest retained timestamp,
 rotation, skipped malformed/unknown-version lines, and whether POSIX permissions
 were checked (false on Windows). History covers only this machine and storage
-location and is not a complete spending ledger.
+location and is not a complete spending ledger. The log is a local file that any
+process running as this OS user can edit, so treat it as a convenience record, not
+evidence. "First party" means the exact host `open-pay.jp`; a self-hosted origin set
+through `DISCOVERY_URL` is handled like any other host (`pathTag` only). History
+writes give up after 2 seconds on a filesystem that stops answering, so a hung disk
+cannot hold back a payment result; that attempt is then reported as `history: "failed"`.
 
 ## Signer Modes
 
