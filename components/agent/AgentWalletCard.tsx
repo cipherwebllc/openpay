@@ -58,7 +58,10 @@ export function AgentWalletCard({ c, activity }: { c: AgentPageContent['wallet']
   const available = useHydrationSafeAvailable(clipboardAvailable);
   const value = input.trim();
   const address = isAddress(value) ? value : undefined;
-  const inputExpanded = editing || !address;
+  // アドレスが無い初期状態では入力欄を出さない: ウォレットは下の「Agent を接続」のセットアップで利用者のマシン上に
+  // 作られ、Agent が返すリンク (`?address=`) を開けばここに反映される。入力欄は手入力を選んだとき (editing) と、
+  // 入力が不正なとき (直せるように) だけ出す。
+  const inputExpanded = editing || Boolean(value && !address);
   // 未入力でもフォームを mount しておく。zeroAddress は非表示時だけの初期値。
   // 送信中のアドレス編集が、確認済みの送り先・receipt 表示へ波及しないよう保持する。
   const [fundAddress, setFundAddress] = useState<Address>(address ?? zeroAddress);
@@ -95,6 +98,15 @@ export function AgentWalletCard({ c, activity }: { c: AgentPageContent['wallet']
     <section className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
       <h2 className="text-xl font-bold text-slate-900">{c.title}</h2>
       <div hidden={!restored}>
+        {!address && !inputExpanded ? (
+          <div className="mt-2">
+            <p className="text-sm leading-relaxed text-slate-700">{c.emptyLead}</p>
+            <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+              <a href="#agent-connect" className={`font-bold text-brand underline underline-offset-2 ${focus}`}>{c.emptyConnectCta}</a>
+              <button type="button" aria-expanded={false} aria-controls="agent-wallet-input" className={`text-slate-600 underline underline-offset-2 ${focus}`} onClick={() => setEditing(true)}>{c.manualEntry}</button>
+            </p>
+          </div>
+        ) : null}
         <div id="agent-wallet-input" hidden={!inputExpanded}>
           <p className="mt-2 text-sm text-slate-700">{c.lead}</p>
           <label htmlFor="agent-wallet-address" className="mt-3 block text-sm font-medium">{c.inputLabel}</label>
@@ -135,7 +147,8 @@ export function AgentWalletCard({ c, activity }: { c: AgentPageContent['wallet']
             </div>
           </div>
         ) : null}
-        <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.ownershipNote}</p>
+        {/* まだ何も読み取っていない初期状態では出さない (読み取りが起きる = アドレスあり / 手入力中 のときの注記)。 */}
+        {address || inputExpanded ? <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.ownershipNote}</p> : null}
         {/* hidden は grid と別の要素に付け、display:grid による上書きも防ぐ。開閉・編集で子を再生成しない。 */}
         <div id="agent-fund" hidden={!fundVisible} className="mt-5 scroll-mt-24">
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-[1fr_auto]">

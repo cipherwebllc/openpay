@@ -46,8 +46,18 @@ describe('AgentWalletCard', () => {
     const c = agentPageContentFor(locale).wallet;
     const empty = render(<AgentWalletCard c={c} activity={agentPageContentFor(locale).activity} />);
     expect(screen.getByRole('heading', { name: c.title })).toBeVisible();
+    // 初期状態は入力欄を出さない: ウォレットは「Agent を接続」のセットアップで作られ、Agent が返すリンクで反映される。
+    expect(screen.getByText(c.emptyLead)).toBeVisible();
+    expect(screen.getByRole('link', { name: c.emptyConnectCta })).toHaveAttribute('href', '#agent-connect');
+    expect(screen.getByLabelText(c.inputLabel)).not.toBeVisible();
+    // まだ何も読み取っていないので、読み取りの注記も出さない。
+    expect(screen.queryByText(c.ownershipNote)).toBeNull();
+    const manual = screen.getByRole('button', { name: c.manualEntry });
+    expect(manual).toHaveAttribute('aria-controls', 'agent-wallet-input');
+    fireEvent.click(manual);
     expect(screen.getByText(c.lead)).toBeVisible();
     expect(screen.getByRole('textbox', { name: c.inputLabel })).toBeVisible();
+    expect(screen.queryByText(c.emptyLead)).toBeNull();
     expect(screen.queryByRole('button', { name: c.useConnected })).toBeNull();
     expect(screen.getByText(c.ownershipNote)).toBeVisible();
     empty.unmount();
@@ -163,6 +173,7 @@ describe('AgentWalletCard', () => {
   it('moves focus to Change after using the connected wallet, not to the body', async () => {
     state.connected = true;
     render(<AgentWalletCard c={C} activity={activity} />);
+    fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
     const use = screen.getByRole('button', { name: C.useConnected });
     use.focus();
     fireEvent.click(use);
@@ -208,6 +219,7 @@ describe('AgentWalletCard', () => {
   it('uses the connected wallet only on request and disables reads after invalid edits', () => {
     state.connected = true;
     render(<AgentWalletCard c={C} activity={activity} />);
+    fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
     fireEvent.click(screen.getByRole('button', { name: 'Use the connected wallet' }));
     expect(screen.getByLabelText('Agent wallet address')).toHaveValue(address);
     expect(state.read).toHaveBeenLastCalledWith(expect.objectContaining({ args: [address], query: { enabled: true } }));
