@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { renderToString } from 'react-dom/server';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { track } from '@vercel/analytics';
@@ -11,6 +12,21 @@ vi.mock('@vercel/analytics', () => ({ track: vi.fn() }));
 
 beforeEach(() => vi.clearAllMocks());
 describe('AgentConnect', () => {
+  it('server の描画は clipboard が無くても client の初回描画と同じ形 (hydration 不一致を起こさない)', () => {
+    // server には navigator.clipboard が無い。以前は「clipboard なし = 展開・ボタンなし」で描画し、
+    // ブラウザの初回描画 (畳む・ボタンあり) と食い違って hydration に失敗していた。
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    try {
+      const html = renderToString(<AgentConnect locale="en" c={C} />);
+      expect(html).toContain('max-h-40');
+      expect(html).toContain(C.promptExpand);
+      expect(html).toContain(C.copy);
+    } finally {
+      if (original) Object.defineProperty(navigator, 'clipboard', original);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
   it.each(['ja', 'en'])('expands and collapses the prompt with an accessible toggle in %s', async (locale) => {
     const user = userEvent.setup();
     const c = agentPageContentFor(locale).connect;
