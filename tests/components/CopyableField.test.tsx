@@ -158,12 +158,8 @@ describe('CopyableField', () => {
       expect(html).toContain('<button');
       expect(html).toContain('Tx Hash をコピー');
     } finally {
-      if (desc) {
-        Object.defineProperty(navigator, 'clipboard', desc);
-      } else {
-        // @ts-expect-error: navigator.clipboard は通常 readonly だがテスト用
-        delete navigator.clipboard;
-      }
+      if (desc) Object.defineProperty(navigator, 'clipboard', desc);
+      else Reflect.deleteProperty(navigator, 'clipboard');
     }
   });
 });

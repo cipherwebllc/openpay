@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { fireEvent, screen, within } from '@testing-library/react';
+import { renderToString } from 'react-dom/server';
+import { NextIntlClientProvider } from 'next-intl';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import { PayerReceiptDetail } from '@/components/PayerReceiptDetail';
+import messages from '../../messages/ja.json';
 
 // downloadBlob は DOM (<a download> + ObjectURL) に副作用するため境界 mock し、
 // 渡された Blob の実内容 / ファイル名を検査する (実出力検証・コードパスは実物)。
@@ -257,6 +260,22 @@ describe('PayerReceiptDetail — アクションボタン (実コードパス)',
     expect(screen.queryByRole('button', { name: 'レシートをコピー' })).toBeNull();
     // 他のアクションは出る
     expect(screen.getByRole('button', { name: '印刷' })).toBeTruthy();
+  });
+
+  it('server の描画は clipboard が無くてもコピーボタンを含む (client の初回描画と同じ形・hydration 不一致を起こさない)', () => {
+    const desc = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    try {
+      const html = renderToString(
+        <NextIntlClientProvider locale="ja" messages={messages}>
+          <PayerReceiptDetail receipt={r()} />
+        </NextIntlClientProvider>,
+      );
+      expect(html).toContain('レシートをコピー');
+    } finally {
+      if (desc) Object.defineProperty(navigator, 'clipboard', desc);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
   });
 
   // 注: 検証範囲は handlePrint の JS 契約 (window.print 呼出 / body class /
