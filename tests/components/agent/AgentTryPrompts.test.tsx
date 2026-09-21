@@ -21,7 +21,7 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
   const c = agentPageContentFor(locale).tryPrompts;
 
   it('shows the heading, lead and five selectable prompts with payment notes only on paid items', () => {
-    render(<AgentTryPrompts c={c} />);
+    render(<AgentTryPrompts locale={locale} c={c} />);
     expect(screen.getByRole('heading', { level: 2, name: c.title })).toBeVisible();
     expect(screen.getByText(c.lead)).toBeVisible();
     const items = within(screen.getByRole('list')).getAllByRole('listitem');
@@ -41,14 +41,14 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
   it('copies each exact prompt, changes only its button and tracks only its ID after success', async () => {
     const user = userEvent.setup();
     const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
-    render(<AgentTryPrompts c={c} />);
+    render(<AgentTryPrompts locale={locale} c={c} />);
     const buttons = screen.getAllByRole('button', { name: c.copy });
     expect(buttons).toHaveLength(5);
 
     for (const [index, item] of c.items.entries()) {
       await user.click(buttons[index]);
       expect(write).toHaveBeenNthCalledWith(index + 1, item.prompt);
-      expect(track).toHaveBeenNthCalledWith(index + 1, 'agent_try_prompt_copy', { id: item.id });
+      expect(track).toHaveBeenNthCalledWith(index + 1, 'agent_try_prompt_copy', { locale, id: item.id });
       expect(screen.getAllByRole('button', { name: c.copied })).toEqual([buttons[index]]);
       expect(screen.getAllByRole('button', { name: c.copy })).toHaveLength(4);
     }
@@ -58,7 +58,7 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
 
   it('uses visible button names and distinct prompt descriptions without aria-label overrides', () => {
     userEvent.setup();
-    const { container } = render(<AgentTryPrompts c={c} />);
+    const { container } = render(<AgentTryPrompts locale={locale} c={c} />);
     expect(container.querySelector('[aria-label]')).toBeNull();
     const buttons = screen.getAllByRole('button', { name: c.copy });
     expect(buttons).toHaveLength(5);
@@ -77,7 +77,7 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
     let root: Root | undefined;
     try {
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
-      const html = renderToString(<AgentTryPrompts c={c} />);
+      const html = renderToString(<AgentTryPrompts locale={locale} c={c} />);
       container.innerHTML = html;
       expect(within(container).getAllByRole('button', { name: c.copy })).toHaveLength(5);
       if (hasClipboard) Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
@@ -86,7 +86,7 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
       function HydrationProbe() {
         // passive effect が clipboard の有無を反映する前の、client 初回 commit を観測する。
         useLayoutEffect(() => { initialClientHtml = container.innerHTML; }, []);
-        return <AgentTryPrompts c={c} />;
+        return <AgentTryPrompts locale={locale} c={c} />;
       }
       const onRecoverableError = vi.fn();
       await act(async () => {
@@ -108,7 +108,7 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
     const user = userEvent.setup();
     let rejectCopy!: (reason: Error) => void;
     vi.spyOn(navigator.clipboard, 'writeText').mockReturnValue(new Promise<void>((_, reject) => { rejectCopy = reject; }));
-    render(<AgentTryPrompts c={c} />);
+    render(<AgentTryPrompts locale={locale} c={c} />);
     await user.click(screen.getAllByRole('button', { name: c.copy })[0]);
     expect(track).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: c.copied })).toBeNull();
@@ -122,7 +122,7 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
     const user = userEvent.setup();
     const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
     vi.mocked(track).mockImplementationOnce(() => { throw new Error('analytics unavailable'); });
-    render(<AgentTryPrompts c={c} />);
+    render(<AgentTryPrompts locale={locale} c={c} />);
     const button = screen.getAllByRole('button', { name: c.copy })[1];
     await user.click(button);
     expect(write).toHaveBeenCalledWith(c.items[1].prompt);
@@ -134,7 +134,7 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
     userEvent.setup();
     vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
     vi.useFakeTimers();
-    render(<AgentTryPrompts c={c} />);
+    render(<AgentTryPrompts locale={locale} c={c} />);
     await act(async () => { fireEvent.click(screen.getAllByRole('button', { name: c.copy })[0]); });
     expect(screen.getAllByRole('button', { name: c.copied })).toHaveLength(1);
     act(() => { vi.advanceTimersByTime(COPIED_FEEDBACK_MS); });

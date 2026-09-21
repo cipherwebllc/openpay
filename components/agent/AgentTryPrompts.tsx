@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { track } from '@vercel/analytics';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
+import { trackAgentEvent } from '@/lib/agentTrack';
 
 const tagColors = {
   free: 'bg-slate-100 text-slate-700',
@@ -12,7 +12,7 @@ const tagColors = {
 };
 
 // 文言は server page から受け取り、lib/agentPage → lib/legal を client bundle に入れない。
-export function AgentTryPrompts({ c }: { c: AgentPageContent['tryPrompts'] }) {
+export function AgentTryPrompts({ locale, c }: { locale: string; c: AgentPageContent['tryPrompts'] }) {
   const { copy, copied, available: clipboardAvailable } = useCopyToClipboard();
   const available = useHydrationSafeAvailable(clipboardAvailable);
   const [copiedId, setCopiedId] = useState<AgentPageContent['tryPrompts']['items'][number]['id'] | null>(null);
@@ -32,13 +32,9 @@ export function AgentTryPrompts({ c }: { c: AgentPageContent['tryPrompts'] }) {
                 <button type="button" aria-describedby={`agent-try-prompt-${item.id}`} className="min-h-[44px] shrink-0 rounded-lg px-2 text-sm font-semibold text-emerald-700 underline underline-offset-2 transition hover:text-emerald-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600" onClick={async () => {
                   if (!await copy(item.prompt)) return;
                   setCopiedId(item.id);
-                  try {
-                    // 掟 13: 計測障害をコピー成功の表示へ波及させない。依頼文は送らず id だけを送信する。
-                    track('agent_try_prompt_copy', { id: item.id });
-                  } catch {
-                    // 付帯処理の失敗で本来のコピー操作を止めない。
-                  }
-                }}><span aria-live="polite">{copied && copiedId === item.id ? c.copied : c.copy}</span></button>
+                  // 依頼文の本文は送らず id だけ。計測の失敗は trackAgentEvent が隔離する (掟 13)。
+                  trackAgentEvent('agent_try_prompt_copy', { locale, id: item.id });
+                }}>{copied && copiedId === item.id ? c.copied : c.copy}</button>
               ) : null}
             </div>
             <p id={`agent-try-prompt-${item.id}`} className="break-words text-sm leading-relaxed text-slate-800">{item.prompt}</p>
@@ -46,6 +42,8 @@ export function AgentTryPrompts({ c }: { c: AgentPageContent['tryPrompts'] }) {
           </li>
         ))}
       </ul>
+      {/* 結果の読み上げは 1 か所だけ。ボタンの名前そのものを live region にすると、名前の変更と二重に読まれる。 */}
+      <p role="status" className="sr-only">{copied && copiedId !== null ? c.copied : ''}</p>
     </section>
   );
 }
