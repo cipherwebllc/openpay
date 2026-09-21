@@ -236,7 +236,7 @@ describe('AgentActivity', () => {
     expect(screen.getByText(c.unsupported, { exact: false })).toBeVisible();
     expectExplorer('https://amoy.polygonscan.com');
     update({ refreshKey: 1 });
-    await act(async () => { await vi.advanceTimersByTimeAsync(80_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(200_000); });
     expect(mockFetch).not.toHaveBeenCalled();
     expect(screen.queryByText(c.loading)).toBeNull();
     expect(screen.queryByText(c.refreshing)).toBeNull();
@@ -291,7 +291,7 @@ describe('AgentActivity', () => {
     expect(screen.getAllByText('0 JPYC')).toHaveLength(2);
   });
 
-  it('refetches at 20-second intervals exactly three times after confirmation', async () => {
+  it('refetches at 20-second intervals exactly six times (120 s) after confirmation', async () => {
     const { update } = mount();
     await screen.findByRole('table');
     vi.useFakeTimers();
@@ -306,9 +306,16 @@ describe('AgentActivity', () => {
     expect(mockFetch).toHaveBeenCalledTimes(3);
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
     expect(mockFetch).toHaveBeenCalledTimes(4);
+    // 60 秒では打ち切らない (本番実測: 確定の 54 秒後にまだ出ず 89 秒後に出た)。
+    expect(screen.getByText(c.refreshing)).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(59_999); });
+    expect(mockFetch).toHaveBeenCalledTimes(6);
+    expect(screen.getByText(c.refreshing)).toBeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(mockFetch).toHaveBeenCalledTimes(7);
     expect(screen.queryByText(c.refreshing)).toBeNull();
-    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
-    expect(mockFetch).toHaveBeenCalledTimes(4);
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(mockFetch).toHaveBeenCalledTimes(7);
     expect(mockFetch.mock.calls.every(([url]) => url === `/api/agent/activity?address=${address.toLowerCase()}`)).toBe(true);
   });
 
@@ -323,8 +330,8 @@ describe('AgentActivity', () => {
     else update({ refreshKey: 2 });
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
     expect(mockFetch).toHaveBeenCalledTimes(change === 'address' ? 2 : 1);
-    await act(async () => { await vi.advanceTimersByTimeAsync(100_000); });
-    expect(mockFetch).toHaveBeenCalledTimes(change === 'address' ? 2 : change === 'confirmation' ? 4 : 1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(200_000); });
+    expect(mockFetch).toHaveBeenCalledTimes(change === 'address' ? 2 : change === 'confirmation' ? 7 : 1);
     expect(screen.queryByText(c.refreshing)).toBeNull();
   });
 

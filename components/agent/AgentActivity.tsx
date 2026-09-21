@@ -23,6 +23,12 @@ export function AgentActivity(props: Props) {
   return <ActivityForAddress key={`${deployment.chainId}:${address}`} {...props} address={address} chainId={deployment.chainId} tokenAddress={deployment.address} />;
 }
 
+// 確定後の再取得。実測 (2026-09-22・本番): 支払い tx は確定の 54 秒後にはまだ API に出ず、89 秒後に出た
+// (索引側の遅れ + CDN の stale-while-revalidate で 1 回ぶん古い応答が返る)。60 秒で打ち切ると、
+// 開き直すまで新しい行が出ない。120 秒まで追う。上流の呼び出しは CDN (s-maxage=30) が吸収する。
+const REFRESH_INTERVAL_MS = 20_000;
+const REFRESH_ATTEMPTS = 6;
+
 function ActivityForAddress({ address, locale, c, refreshKey, chainId, tokenAddress }: Props & { chainId: number; tokenAddress: string }) {
   const [filter, setFilter] = useState<'all' | 'in' | 'out'>('all');
   const [visibleCount, setVisibleCount] = useState(10);
@@ -55,11 +61,11 @@ function ActivityForAddress({ address, locale, c, refreshKey, chainId, tokenAddr
     const timer = window.setInterval(() => {
       void refetch();
       attempts += 1;
-      if (attempts === 3) {
+      if (attempts === REFRESH_ATTEMPTS) {
         window.clearInterval(timer);
         setRefreshing(false);
       }
-    }, 20_000);
+    }, REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [refreshKey, refetch, supported]);
 
