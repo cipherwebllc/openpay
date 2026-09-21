@@ -14,6 +14,9 @@ import { spawnSync } from 'node:child_process';
 const BUDGETS_KB = {
   '/_not-found': 250,
   '/[locale]': 320,
+  // 2026-09-21 /agent 磨き上げ P1: 実測 353kB (P0 時点 352kB) + 3kB。Agent activity (P2) を足す**前**の値で
+  // 固定する — 機能追加後の実測に予算を追随させないため。P2 で超えるなら Activity を next/dynamic へ。
+  '/[locale]/agent': 356,
   // /pay は慢性的に予算上限張り付き。Option B (会計データ分離・v3) で 420→423kB、
   // JPYC EIP-3009 recover モード (#131c) の forwarderConfig + recover 開示 i18n で 423→424kB。
   // 2026-06-13: 上の comment が要求した code-split pass を実施 — CrossChainHint (USDC 接続時) /

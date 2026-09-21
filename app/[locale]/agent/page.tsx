@@ -6,6 +6,7 @@ import { AppShell } from '@/components/AppShell';
 import { AgentConnect } from '@/components/agent/AgentConnect';
 import { AgentConfigGenerator } from '@/components/agent/AgentConfigGenerator';
 import { AgentWalletCard } from '@/components/agent/AgentWalletCard';
+import { AgentSafety } from '@/components/agent/AgentSafety';
 import { AgentStoreLink } from '@/components/agent/AgentStoreLink';
 import { agentPageContentFor, agentPageMetadata } from '@/lib/agentPage';
 
@@ -27,6 +28,7 @@ export default async function AgentPage({ params }: { params: Promise<{ locale: 
           <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">{c.title}</h1>
           <p className="mt-4 text-sm text-slate-600">{c.subtitle}</p>
         </header>
+        <Suspense fallback={<p className="min-h-[22rem] text-sm text-slate-500 sm:min-h-[20rem]">{c.wallet.balanceLoading}</p>}><AgentWalletCard c={c.wallet} /></Suspense>
         <AgentConnect locale={locale} c={c.connect} />
         <section>
           <h2 className="text-xl font-bold text-slate-900">{c.modes.title}</h2>
@@ -39,14 +41,8 @@ export default async function AgentPage({ params }: { params: Promise<{ locale: 
             </div>)}
           </div>
         </section>
-        <section className="rounded-2xl bg-slate-50 p-5 ring-1 ring-slate-200/70 sm:p-8">
-          <h2 className="text-xl font-bold text-slate-900">{c.safety.title}</h2>
-          <span className="mt-3 inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-900">{c.safety.enforcedBadge}</span>
-          <p className="mt-4 text-sm leading-relaxed text-slate-700">{c.safety.body}</p>
-          <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-relaxed text-slate-600">{c.safety.points.map((point) => <li key={point}>{point}</li>)}</ul>
-        </section>
+        <AgentSafety c={c.safety} />
         <AgentConfigGenerator locale={locale} c={c.generator} />
-        <Suspense fallback={<p className="text-sm text-slate-500">{c.wallet.balanceLoading}</p>}><AgentWalletCard c={c.wallet} /></Suspense>
         <section className="pb-4">
           <h2 className="text-xl font-bold text-slate-900">{c.next.title}</h2>
           <p className="mt-3 text-sm text-slate-600">{c.next.body}</p>

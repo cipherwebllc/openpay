@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useLocale } from 'next-intl';
+import { Copy } from 'lucide-react';
 import { useAccount, useReadContract } from 'wagmi';
-import { erc20Abi, formatUnits, isAddress } from 'viem';
+import { erc20Abi, formatUnits, isAddress, zeroAddress, type Address } from 'viem';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
 import { chainNameForId } from '@/lib/chains';
@@ -25,7 +26,11 @@ export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
     const initial = params.get('address');
     return initial && isAddress(initial) ? initial : '';
   });
-  // localStorage は SSR と初回描画に無いので mount 後に読む (hydration 不一致を避ける)。
+  const [restored, setRestored] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [fundOpen, setFundOpen] = useState(false);
+  const [fundBusy, setFundBusy] = useState(false);
+  // localStorage は SSR と初回描画に無いので mount 後に 1 回だけ読む。
   // ブラウザ API の失敗 (private mode 等) をページ描画へ波及させないための try-catch。
   useEffect(() => {
     try {
@@ -34,19 +39,35 @@ export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
     } catch {
       // 控えが読めなくても手入力で使える。
     }
+    setRestored(true);
+    function openFundFromHash() {
+      if (window.location.hash === '#agent-fund') setFundOpen(true);
+    }
+    openFundFromHash();
+    window.addEventListener('hashchange', openFundFromHash);
+    return () => window.removeEventListener('hashchange', openFundFromHash);
   }, []);
   const { address: connectedAddress, isConnected } = useAccount();
   const { copy, copied, available } = useCopyToClipboard();
   const value = input.trim();
   const address = isAddress(value) ? value : undefined;
+  const inputExpanded = editing || !address;
+  // 未入力でもフォームを mount しておく。zeroAddress は非表示時だけの初期値。
+  // 送信中のアドレス編集が、確認済みの送り先・receipt 表示へ波及しないよう保持する。
+  const [fundAddress, setFundAddress] = useState<Address>(address ?? zeroAddress);
   useEffect(() => {
+    if (address && !fundBusy) setFundAddress(address);
+  }, [address, fundBusy]);
+  const fundVisible = fundBusy || (Boolean(address) && fundOpen);
+  useEffect(() => {
+    if (!restored) return;
     try {
       if (address) window.localStorage.setItem(STORAGE_KEY, address);
       else if (value === '') window.localStorage.removeItem(STORAGE_KEY);
     } catch {
       // 控えの保存失敗は次回の手入力で足りる。
     }
-  }, [address, value]);
+  }, [address, value, restored]);
   const deployment = defaultDeploymentForSymbol('jpyc');
   const balance = useReadContract({
     abi: erc20Abi,
@@ -56,55 +77,66 @@ export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
     args: address ? [address] : undefined,
     query: { enabled: Boolean(address) },
   });
+  const focus = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600';
   return (
-    <section className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-8">
+    // 控えの復元 (mount 後) までは中身を出さない: 空状態 → 残高カードへの差し替わりを見せないため。
+    // 高さの予約はしない (空状態と残高カードの高さは近く、予約すると空状態に大きな空白ができる)。
+    <section className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
       <h2 className="text-xl font-bold text-slate-900">{c.title}</h2>
-      <p className="mt-3 text-sm text-slate-700">{c.lead}</p>
-      <label htmlFor="agent-wallet-address" className="mt-5 block text-sm font-medium">{c.inputLabel}</label>
-      <input id="agent-wallet-address" className="mt-2 block w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm" placeholder={c.inputPlaceholder} value={input} spellCheck={false} autoCapitalize="none" aria-invalid={Boolean(value && !address)} aria-describedby={value && !address ? 'agent-wallet-error' : undefined} onChange={(e) => setInput(e.target.value)} />
-      {value && !address ? <p id="agent-wallet-error" className="mt-2 text-xs text-red-700">{c.invalidAddress}</p> : null}
-      {isConnected && connectedAddress ? <button type="button" className="mt-3 rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium" onClick={() => setInput(connectedAddress)}>{c.useConnected}</button> : null}
-      <p className="mt-4 text-xs leading-relaxed text-slate-500">{c.ownershipNote}</p>
-      {address ? (
-        <div className="mt-5 space-y-5">
-          <div className="grid grid-cols-1 gap-6 rounded-2xl bg-slate-900 p-5 text-white sm:grid-cols-[1fr_auto] sm:items-start sm:p-7">
-            <div className="min-w-0">
-              <p className="inline-flex max-w-full items-center rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-slate-200">
-                <span className="truncate">{address.slice(0, 6)}…{address.slice(-4)}</span>
-              </p>
-              <div role="status" className="mt-4 text-sm text-slate-300">
-                {balance.isError ? c.balanceError : balance.data === undefined ? c.balanceLoading : (
-                  <>
+      <div hidden={!restored}>
+        <div id="agent-wallet-input" hidden={!inputExpanded}>
+          <p className="mt-2 text-sm text-slate-700">{c.lead}</p>
+          <label htmlFor="agent-wallet-address" className="mt-3 block text-sm font-medium">{c.inputLabel}</label>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input id="agent-wallet-address" className={`block w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm ${focus}`} placeholder={c.inputPlaceholder} value={input} spellCheck={false} autoCapitalize="none" aria-invalid={Boolean(value && !address)} aria-describedby={value && !address ? 'agent-wallet-error' : undefined} onChange={(e) => { setInput(e.target.value); setEditing(true); }} />
+            {isConnected && connectedAddress ? <button type="button" className={`shrink-0 rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium ${focus}`} onClick={() => setInput(connectedAddress)}>{c.useConnected}</button> : null}
+          </div>
+          {value && !address ? <p id="agent-wallet-error" className="mt-2 text-xs text-red-700">{c.invalidAddress}</p> : null}
+        </div>
+        {address ? (
+          <div className="mt-4 grid grid-cols-1 gap-4 rounded-2xl bg-slate-900 p-5 text-white sm:p-6">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
+              <span className="rounded-full bg-white/10 px-3 py-1 font-mono text-slate-200">{address.slice(0, 6)}…{address.slice(-4)}</span>
+              {available ? <button type="button" className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-white ${focus}`} onClick={async () => { if (await copy(address)) setCopiedAddress(address); }}><Copy aria-hidden size={14} />{copied && copiedAddress === address ? c.copied : c.copyShort}</button> : null}
+              <button type="button" aria-expanded={inputExpanded} aria-controls="agent-wallet-input" className={`rounded-lg px-2 py-1 text-xs text-white underline ${focus}`} onClick={() => setEditing((current) => !current)}>{c.changeAddress}</button>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
+              <div className="min-w-0">
+                <div role="status" className="text-sm text-slate-300">
+                  {balance.isError ? c.balanceError : balance.data === undefined ? c.balanceLoading : (
                     <p className="break-all text-5xl font-light tracking-tight text-white sm:text-6xl">
                       {formatUnits(balance.data, deployment.decimals)}
                       <span className="ml-2 text-base font-normal text-slate-400">JPYC</span>
                     </p>
-                    <p className="mt-2 text-xs text-slate-400">{balance.data > 0n ? c.hasBalance : c.noBalance}</p>
-                  </>
-                )}
+                  )}
+                </div>
+                <p className="mt-2 text-xs text-slate-400">{c.balanceLabel} · {chainNameForId(deployment.chainId)}</p>
               </div>
-              <p className="mt-2 text-xs text-slate-400">{c.balanceLabel} · {chainNameForId(deployment.chainId)}</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <a href="#agent-connect" className="rounded-xl border border-white/30 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/10">{c.connectCta}</a>
-              <a href="#agent-fund" className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-900 transition hover:bg-slate-100">{c.fundCta}</a>
+              <div className="flex flex-wrap gap-2">
+                <a href="#agent-connect" className={`rounded-xl border border-white/30 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/10 ${focus}`}>{c.connectCta}</a>
+                <button type="button" aria-expanded={fundVisible} aria-controls="agent-fund" disabled={fundBusy} className={`rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-900 transition hover:bg-slate-100 disabled:opacity-50 ${focus}`} onClick={() => setFundOpen((current) => !current)}>{fundVisible ? c.closeFund : c.fundCta}</button>
+              </div>
             </div>
           </div>
-          <div id="agent-fund" className="grid scroll-mt-24 grid-cols-1 gap-6 sm:grid-cols-[1fr_auto]">
+        ) : null}
+        <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.ownershipNote}</p>
+        {/* hidden は grid と別の要素に付け、display:grid による上書きも防ぐ。開閉・編集で子を再生成しない。 */}
+        <div id="agent-fund" hidden={!fundVisible} className="mt-5 scroll-mt-24">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-[1fr_auto]">
             <div className="min-w-0">
               <h3 className="font-bold text-slate-900">{c.fundTitle}</h3>
               <p className="mt-2 text-sm leading-relaxed text-slate-600">{c.fundBody}</p>
-              <p className="mt-3 select-all break-all font-mono text-sm">{address}</p>
-              {available ? <button type="button" className="mt-3 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white" onClick={async () => { if (await copy(address)) setCopiedAddress(address); }}>{copied && copiedAddress === address ? c.copied : c.copyAddress}</button> : null}
+              <p className="mt-3 select-all break-all font-mono text-sm">{fundAddress}</p>
+              {available ? <button type="button" className={`mt-3 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white ${focus}`} onClick={async () => { if (await copy(fundAddress)) setCopiedAddress(fundAddress); }}>{copied && copiedAddress === fundAddress ? c.copied : c.copyAddress}</button> : null}
             </div>
-            {/* QR は直前のアドレス行と同じ情報なので a11y ツリーからは外す (掟 8: 可視テキストなしの名前を付けない)。 */}
-            <div aria-hidden className="h-fit w-fit rounded-xl bg-white p-3 ring-1 ring-slate-200/70"><QRCodeSVG value={address} size={160} /></div>
+            {/* QR は直前のアドレス行と同じ情報なので a11y ツリーからは外す (掟 8)。 */}
+            <div aria-hidden className="h-fit w-fit rounded-xl bg-white p-3 ring-1 ring-slate-200/70"><QRCodeSVG value={fundAddress} size={160} /></div>
             <div className="min-w-0 sm:col-span-2">
-              <AgentFundFromWallet locale={locale} c={c.fundFromWallet} agentAddress={address} onSent={() => { void balance.refetch(); }} />
+              <AgentFundFromWallet locale={locale} c={c.fundFromWallet} agentAddress={fundAddress} onSent={() => { void balance.refetch(); }} onBusyChange={setFundBusy} />
             </div>
           </div>
         </div>
-      ) : null}
+      </div>
     </section>
   );
 }
