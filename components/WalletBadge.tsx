@@ -57,6 +57,9 @@ export function WalletBadge() {
   useEffect(() => {
     if (!restoreFocusRef.current) return;
     restoreFocusRef.current = false;
+    // 落ちたフォーカスを拾うだけ: ウォレットの承認待ちの間に利用者が別の場所へ移していたら奪わない。
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
     summaryRef.current?.focus();
   }, [isConnected]);
   // 接続が失敗・拒否で終わったら予約を捨てる (後で別の場所から接続したときにフォーカスを奪わない)。

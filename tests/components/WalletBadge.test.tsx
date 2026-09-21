@@ -290,7 +290,7 @@ describe('WalletBadge: SIWE サインイン', () => {
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('SIWE 機能 (freee/利用権/Pro/CSVパス/push通知/tip質問) が全 OFF → ログイン UI を出さない (切断のみ)', () => {
+  it('SIWE 機能の flag が全 OFF → ログイン UI を出さない (切断のみ)', () => {
     flags.enableFreeeSync = false;
     flags.enableUsageFee = false;
     flags.enablePro = false;
@@ -551,6 +551,25 @@ describe('WalletBadge: 接続・切断後のフォーカス', () => {
     expect(document.activeElement).toBe(screen.getByText('接続').closest('summary'));
   });
 
+  it('承認待ちの間に利用者が別の場所へフォーカスを移していたら奪わない', () => {
+    setDisconnected();
+    visibleConnectorsMock.mockReturnValue([{ uid: '1', name: 'MetaMask' }]);
+    const other = document.createElement('input');
+    document.body.appendChild(other);
+    try {
+      const { rerender } = renderWithIntl(<WalletBadge />);
+      const details = openDropdown('接続');
+      fireEvent.click(within(details).getByRole('menuitem', { name: 'MetaMask' }));
+      other.focus();
+
+      setConnected();
+      rerender(<WalletBadge />);
+      expect(document.activeElement).toBe(other);
+    } finally {
+      other.remove();
+    }
+  });
+
   it('メニューを使わない接続 (自動再接続・ページ側のボタン) ではフォーカスを奪わない', () => {
     setDisconnected();
     const { rerender } = renderWithIntl(<WalletBadge />);
@@ -585,6 +604,11 @@ describe('WalletBadge: siweEnabled の flag 網羅 (掟 7)', () => {
     const block = src.slice(src.indexOf('const siweEnabled ='), src.indexOf('const handleSignIn'));
     const used = [...block.matchAll(/env\.(enable\w+)/g)].map((m) => m[1]).sort();
     expect(used.length).toBeGreaterThan(0);
+    // 書き方も固定する: 分割代入や helper 経由で flag を足すと上の正規表現に掛からず、holder にも
+    // 無いまま「一致」して通ってしまう。ブロック内の enable* はすべて `env.` 直読みであること。
+    const bare = [...block.matchAll(/(?<!env\.)\benable\w+/g)].map((m) => m[0]);
+    expect(bare).toEqual([]);
+    // 下の it.each の網羅は holder 由来なので、このフェンスが通っていることが前提。
     expect([...FLAG_NAMES].sort()).toEqual(used);
   });
 
