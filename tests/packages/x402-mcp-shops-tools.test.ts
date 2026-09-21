@@ -1,8 +1,18 @@
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress } from 'viem';
 import { FORWARDER_COMMIT_VERSION } from '@/lib/relay/forwarderIntent';
+
+let historyHome: string;
+beforeEach(async () => {
+  historyHome = await mkdtemp(join(tmpdir(), 'x402-history-fixture-'));
+});
+afterEach(async () => {
+  await rm(historyHome, { recursive: true, force: true });
+});
 
 const JPYC = 10n ** 18n;
 const TOKEN = getAddress('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
@@ -128,7 +138,7 @@ describe('MCP Shops convenience tools', () => {
     );
     const { createToolRuntime } = await loadTools();
     const runtime = createToolRuntime({
-      env: { ...ENV, BUYER_PRIVATE_KEY },
+      env: { OPENPAY_X402_HOME: historyHome, ...ENV, BUYER_PRIVATE_KEY },
       fetchImpl,
       nowSec: () => 1_000_000_000,
     });
@@ -157,7 +167,7 @@ describe('MCP Shops convenience tools', () => {
     );
     const { createToolRuntime } = await loadTools();
     const runtime = createToolRuntime({
-      env: { ...ENV, BUYER_PRIVATE_KEY },
+      env: { OPENPAY_X402_HOME: historyHome, ...ENV, BUYER_PRIVATE_KEY },
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
 

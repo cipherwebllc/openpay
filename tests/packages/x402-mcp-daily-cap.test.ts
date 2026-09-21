@@ -1,8 +1,18 @@
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress, type Address, type Hex } from 'viem';
 import { FORWARDER_COMMIT_VERSION } from '@/lib/relay/forwarderIntent';
+
+let historyHome: string;
+beforeEach(async () => {
+  historyHome = await mkdtemp(join(tmpdir(), 'x402-history-fixture-'));
+});
+afterEach(async () => {
+  await rm(historyHome, { recursive: true, force: true });
+});
 
 // MCP 0.12.0 の MAX_DAILY_JPYC 配線テスト: env 設定時のみ spendStore が consult され、
 // 上限到達で支払い前 (X-PAYMENT 再訪前) に拒否されること。日次計算の本体 (境界/保存/
@@ -89,7 +99,7 @@ describe('openpay-x402-mcp MAX_DAILY_JPYC wiring', () => {
       save: vi.fn(async () => {}),
     };
     const runtime = mcp.createToolRuntime({
-      env: { ...BASE_ENV, MAX_DAILY_JPYC: '2' },
+      env: { OPENPAY_X402_HOME: historyHome, ...BASE_ENV, MAX_DAILY_JPYC: '2' },
       fetchImpl: fetchImpl as unknown as typeof fetch,
       spendStore,
     });
@@ -110,7 +120,7 @@ describe('openpay-x402-mcp MAX_DAILY_JPYC wiring', () => {
       save: vi.fn(async () => {}),
     };
     const runtime = mcp.createToolRuntime({
-      env: { ...BASE_ENV },
+      env: { OPENPAY_X402_HOME: historyHome, ...BASE_ENV },
       fetchImpl: fetchImpl as unknown as typeof fetch,
       spendStore,
     });

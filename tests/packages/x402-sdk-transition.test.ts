@@ -1,9 +1,19 @@
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { FORWARDER_COMMIT_VERSION } from '@/lib/relay/forwarderIntent';
+
+let historyHome: string;
+beforeEach(async () => {
+  historyHome = await mkdtemp(join(tmpdir(), 'x402-history-fixture-'));
+});
+afterEach(async () => {
+  await rm(historyHome, { recursive: true, force: true });
+});
 
 type Runtime = {
   quote: (url: string) => Promise<Record<string, unknown>>;
@@ -93,6 +103,7 @@ async function runtimeFor(
   if (implementation === 'MCP') {
     const mcp = await loadMcp();
     const env = {
+      OPENPAY_X402_HOME: historyHome,
       ALLOWED_HOSTS: 'open-pay.jp',
       MAX_PER_CALL_JPYC: '10',
       MAX_SESSION_JPYC: '100',

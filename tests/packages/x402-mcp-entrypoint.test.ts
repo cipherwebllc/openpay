@@ -2,10 +2,10 @@
 // npm pack の files も確認し、追加した order entry の publish 漏れを防ぐ。
 
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { mkdtempSync, readFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 type RpcResponse = {
   id?: number;
@@ -20,6 +20,15 @@ type Pending = {
 };
 
 const PACKAGE_DIR = resolve(process.cwd(), 'packages/x402-mcp');
+const temporaryDirectories: string[] = [];
+function temporaryDirectory() {
+  const directory = mkdtempSync(join(tmpdir(), 'x402-mcp-entrypoint-'));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
 const PROFILES = [
   {
     profile: 'x402',
@@ -37,6 +46,7 @@ const PROFILES = [
       'search_shops',
       'wallet_init',
       'wallet_status',
+      'wallet_history',
     ],
   },
   {
@@ -53,9 +63,11 @@ const PROFILES = [
 ] as const;
 
 function startRpc(entry: string) {
+  const home = temporaryDirectory();
   const proc = spawn(process.execPath, [entry], {
     cwd: PACKAGE_DIR,
     stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, HOME: home, OPENPAY_X402_HOME: join(home, 'wallet') },
   });
   const pending = new Map<number, Pending>();
   let buffer = '';
@@ -165,7 +177,7 @@ describe('x402-mcp entrypoints', () => {
   it.each(PROFILES)(
     '$bin は npm/npx 同様の symlink 経由でも起動する',
     async ({ bin, entry }) => {
-      const dir = mkdtempSync(join(tmpdir(), 'x402-mcp-bin-'));
+      const dir = temporaryDirectory();
       const link = join(dir, bin);
       symlinkSync(entry, link);
       const rpc = startRpc(link);
@@ -190,6 +202,7 @@ describe('x402-mcp entrypoints', () => {
     const packed = spawnSync('npm', ['pack', '--dry-run', '--json'], {
       cwd: PACKAGE_DIR,
       encoding: 'utf8',
+      env: { ...process.env, npm_config_cache: join(temporaryDirectory(), 'npm-cache') },
     });
     expect(packed.status, packed.stderr).toBe(0);
     // npm pack --json は npm 11 まで配列・npm 12 (node 26 同梱) からパッケージ名 key の
@@ -205,6 +218,8 @@ describe('x402-mcp entrypoints', () => {
     const packedPaths = manifest[0].files.map((file) => file.path);
     expect(packedPaths).toContain('src/order.mjs');
     expect(packedPaths).toContain('src/keystore.mjs');
+    expect(packedPaths).toContain('src/history.mjs');
+    expect(packedPaths.some((path) => /(?:^|\/)purchases[^/]*\.jsonl$/.test(path))).toBe(false);
     expect(packedPaths.some((path) => /(?:wallet\.json|spend\.json|\.env(?:\.|$)|\.openpay-x402)/.test(path))).toBe(false);
     expect(packedPaths).toContain('scripts/steward-bootstrap.mjs');
     expect(packedPaths).toContain('CHANGELOG.md');

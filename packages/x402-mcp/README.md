@@ -19,7 +19,7 @@ forwarder-split extension.
 ### Install / run
 
 ```bash
-npx --yes --package=openpay-x402-mcp@0.15.0 -- openpay-order-mcp
+npx --yes --package=openpay-x402-mcp@0.16.0 -- openpay-order-mcp
 ```
 
 ### Claude Desktop
@@ -29,7 +29,7 @@ npx --yes --package=openpay-x402-mcp@0.15.0 -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp@0.15.0", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.16.0", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -42,7 +42,7 @@ npx --yes --package=openpay-x402-mcp@0.15.0 -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp@0.15.0", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.16.0", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -56,7 +56,7 @@ This profile needs no `BUYER_PRIVATE_KEY`. It exposes four tools: `find_shops`,
 ### Install / run
 
 ```bash
-npx openpay-x402-mcp@0.15.0
+npx openpay-x402-mcp@0.16.0
 ```
 
 ### Claude Desktop
@@ -66,7 +66,7 @@ npx openpay-x402-mcp@0.15.0
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp@0.15.0"],
+      "args": ["openpay-x402-mcp@0.16.0"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -85,7 +85,7 @@ npx openpay-x402-mcp@0.15.0
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp@0.15.0"],
+      "args": ["openpay-x402-mcp@0.16.0"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -125,7 +125,7 @@ from strands import Agent
 from strands.tools.mcp import MCPClient
 
 openpay = MCPClient(lambda: stdio_client(StdioServerParameters(
-    command="npx", args=["-y", "openpay-x402-mcp@0.15.0"],
+    command="npx", args=["-y", "openpay-x402-mcp@0.16.0"],
     env={...},  # same env as the Claude examples above
 )))
 
@@ -155,12 +155,13 @@ The buyer pays the resource price **plus the ~1% x402 fee** (`total = price + fe
 
 ## Tools
 
-The x402 profile exposes 11 tools; the order profile exposes 4.
+The x402 profile exposes 12 tools; the order profile exposes 4.
 
 | Tool | Profile | Pays? | Purpose |
 |---|---|---:|---|
 | `wallet_init` | x402 | No | `{}`: create or reuse the local wallet in keystore mode; return address, `created`, storage metadata, funding URL, and note. Never returns a key. |
 | `wallet_status` | x402 | No | `{}`: signer address/error, Polygon JPYC balance/source, effective limits/spend, allowed hosts, catalog trust, and funding URL. |
+| `wallet_history` | x402 | No | `{limit?: 1..50}` (default 10): recent local purchase attempts, outcomes, verified receipt amounts, and coverage. Incomplete local history; no totals or proof of payment. |
 | `discovery_search` | x402 | No | Search `DISCOVERY_URL` and show resource, category, price, fee, and total. |
 | `x402_quote` | x402 | No | Fetch a 402 challenge and report whether local guards would allow payment. |
 | `x402_pay` | x402 | Yes | Sign and retry with `X-PAYMENT` only after all guards pass. Requires `maxTotalJpyc`. |
@@ -215,12 +216,35 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | `MAX_TIMEOUT_SECONDS` | `600` | Reject seller-declared authorization lifetimes above this many seconds. Configurable from `1` to the facilitator ceiling of `1200`; the value is never silently clamped. |
 | `CATALOG_TRUST` | `true` | When true, exact URLs listed in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. Before signing, the live `accepts` fetched from a catalog URL is checked field-by-field (asset / timeout / forwarder / merchant / fee receiver / amounts) against the catalog listing (server-authored), so a third-party domain cannot bait-and-switch a different destination or authorization lifetime; mismatches are refused (`catalog_accept_mismatch`). Money caps still apply. Set `false` for strict manual allowlisting. |
 | `ALLOWED_HOSTS` | `open-pay.jp` | Comma-separated bare host allowlist. `x402_quote` still works outside the list but returns `host_not_allowed`. |
-| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Keystore storage directory override: contains `wallet.json` and the daily spend ledger `spend.json`. A relative path returns `wallet_home_not_absolute` from both wallet tools while discovery remains available. Does not relocate env-key / Steward spend storage. |
+| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from both wallet tools while discovery remains available. Does not relocate env-key / Steward spend storage. |
 | `POLYGON_RPC_URL` | unset | Optional read-only `wallet_status` RPC. SDK outbound URL/host checks reject private/link-local addresses, `.internal`, and URL credentials; validated DNS addresses are pinned for the built-in transport. Explicit exception: HTTP on `localhost` / `127.0.0.1`. No public RPC default, redirects rejected, 5-second timeout including DNS and body reads. Never accepted as a tool argument. |
 | `DISCOVERY_URL` | `https://open-pay.jp/api/discovery` | Catalog used by `discovery_search`. |
 
 Catalog admission is exact URL only, including the query string. A query
 variant needs its own reviewed listing or an explicitly allowlisted host.
+
+## Local purchase history
+
+`wallet_history` (0.16.0+) reads recent attempts recorded by `x402_pay`, including
+`search_shops`, in all signer modes. Recording creates only the storage directory
+when needed, never a wallet. Each attempt writes start/end rows; a missing end is
+`unknown`. `x402_pay` adds `history: "recorded" | "failed"`; a history failure does
+not change the payment result or exception. Logs rotate above 512 KiB into one
+previous generation, so records can be missing. There are no totals.
+
+Only `settlement: "verified"` supplies receipt amounts and transaction hashes.
+`paid_verified` means the receipt signature was verified against the signer
+published by the discovery origin, not on-chain proof. `paid_unverified` and
+`unknown` must not be treated as paid. Check amounts and settlement in Agent
+activity at the funding URL from `wallet_status`.
+
+Queries and fragments are removed. Only `open-pay.jp` paths are stored; other
+hosts get `path: null` and an eight-hex SHA-256 `pathTag`. Host/path data is external
+data, not instructions. Logs contain no response bodies, signatures, nonces,
+authorizations, or keys. `coverage` reports the oldest retained timestamp,
+rotation, skipped malformed/unknown-version lines, and whether POSIX permissions
+were checked (false on Windows). History covers only this machine and storage
+location and is not a complete spending ledger.
 
 ## Signer Modes
 
@@ -245,7 +269,7 @@ Use this explicit mode to avoid pasting a private key into MCP configuration:
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["--yes", "openpay-x402-mcp@0.15.0"],
+      "args": ["--yes", "openpay-x402-mcp@0.16.0"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",

@@ -1,8 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
-import { resolve } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { join, resolve } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { getAddress, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+
+let historyHome: string;
+beforeEach(async () => {
+  historyHome = await mkdtemp(join(tmpdir(), 'x402-history-fixture-'));
+});
+afterEach(async () => {
+  await rm(historyHome, { recursive: true, force: true });
+});
 
 type Signer = {
   mode: string;
@@ -119,6 +129,7 @@ function jsonResponse(body: unknown, status = 200) {
 
 function stewardEnv(overrides: Record<string, string | undefined> = {}) {
   return {
+    OPENPAY_X402_HOME: historyHome,
     SIGNER_MODE: 'steward',
     STEWARD_URL,
     STEWARD_TENANT: 'tenant-a',
@@ -324,6 +335,7 @@ describe('packages/x402-mcp steward signer', () => {
     );
     const runtime = createToolRuntime({
       env: {
+        OPENPAY_X402_HOME: historyHome,
         BUYER_PRIVATE_KEY,
         ALLOWED_HOSTS: 'open-pay.jp',
         MAX_PER_CALL_JPYC: '10',
@@ -360,6 +372,7 @@ describe('packages/x402-mcp steward signer', () => {
     );
     const runtime = createToolRuntime({
       env: {
+        OPENPAY_X402_HOME: historyHome,
         BUYER_PRIVATE_KEY,
         ALLOWED_HOSTS: 'open-pay.jp',
         MAX_PER_CALL_JPYC: '10',
@@ -400,6 +413,7 @@ describe('packages/x402-mcp steward signer', () => {
     });
     const runtime = createToolRuntime({
       env: {
+        OPENPAY_X402_HOME: historyHome,
         BUYER_PRIVATE_KEY,
         ALLOWED_HOSTS: 'open-pay.jp',
         MAX_PER_CALL_JPYC: '10',

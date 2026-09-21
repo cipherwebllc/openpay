@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { encodeFunctionData, erc20Abi } from 'viem';
 import { createWallet, loadWallet, walletDirectory } from './keystore.mjs';
 import { fetchPolygonRpc } from './wallet-rpc.mjs';
+import { startPurchase, endPurchase, readHistory } from './history.mjs';
 
 const TOOL_DEFINITIONS = [
   {
@@ -239,6 +240,16 @@ const TOOL_DEFINITIONS = [
     profiles: ['x402'],
     description: 'Read the signer address, Polygon JPYC balance when an RPC is configured, and local payment limits. Does not sign or pay.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'wallet_history',
+    profiles: ['x402'],
+    description: 'Read recent local purchase attempts from this machine and storage location. History may be incomplete and is not proof of payment. Does not sign, pay, or create a wallet.',
+    inputSchema: {
+      type: 'object',
+      properties: { limit: { type: 'integer', minimum: 1, maximum: 50, default: 10 } },
+      additionalProperties: false,
+    },
   },
 ];
 
@@ -848,7 +859,7 @@ export function createToolRuntime({
     return `settlement: ${settlement} — verified only means the receipt signature is valid for the signer published by the discovery origin, not on-chain proof; treat unverified/receipt_unavailable as not proven paid`;
   }
 
-  async function x402PayImpl(args) {
+  async function x402PayWithoutHistory(args) {
     const input = requireArgsObject(args);
     if (typeof input.url !== 'string') throw new Error('url is required');
     if (keystoreMode) {
@@ -867,8 +878,37 @@ export function createToolRuntime({
     return { ...result, settlementNote: settlementNote(result.settlement) };
   }
 
+  let historyStarts = Promise.resolve();
+  async function x402PayImpl(args) {
+    // Awaited filesystem work must not reorder concurrent calls entering the SDK's existing
+    // payment queue. Serialize only start admission; the SDK still owns payment serialization.
+    const starting = historyStarts.then(async () => {
+      await walletReady;
+      return startPurchase({ env: walletEnv, url: args?.url, getPayer: () => signer?.address ?? null });
+    });
+    historyStarts = starting.then(() => {}, () => {});
+    const attempt = await starting;
+    try {
+      const result = await x402PayWithoutHistory(args);
+      const history = await endPurchase({ env: walletEnv, attempt, result });
+      return { ...result, history };
+    } catch (error) {
+      // Ancillary history must not replace a payment exception; record unknown and rethrow it unchanged.
+      await endPurchase({ env: walletEnv, attempt, threw: true });
+      throw error;
+    }
+  }
+
   function x402Pay(args) {
     return serializeWallet(() => x402PayImpl(args));
+  }
+
+  async function walletHistory(args) {
+    const input = requireArgsObject(args);
+    if (Array.isArray(input) || Object.keys(input).some((key) => key !== 'limit')) {
+      throw new Error('wallet_history only accepts limit');
+    }
+    return readHistory({ env: walletEnv, limit: input.limit });
   }
 
   async function callTool(name, args) {
@@ -879,6 +919,7 @@ export function createToolRuntime({
       await walletReady;
       if (name === 'wallet_init') return textResult(await walletInit(args));
       if (name === 'wallet_status') return textResult(await walletStatus(args));
+      if (name === 'wallet_history') return textResult(await walletHistory(args));
       if (name === 'discovery_search') return textResult(await discoverySearch(args));
       if (name === 'x402_quote') return textResult(await x402Quote(args));
       if (name === 'x402_pay') return textResult(await x402Pay(args));
@@ -914,5 +955,6 @@ export function createToolRuntime({
     searchShops,
     walletInit,
     walletStatus,
+    walletHistory,
   };
 }
