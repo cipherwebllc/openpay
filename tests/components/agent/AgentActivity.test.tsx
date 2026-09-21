@@ -77,7 +77,9 @@ describe('AgentActivity', () => {
     expect(table().getByText('−2.5 JPYC')).toHaveClass('text-slate-900');
     expect(table().getAllByText('0x1234…abcd')).toHaveLength(2);
     expect(table().getAllByText(new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(outgoing.timestamp * 1000))).toHaveLength(2);
-    for (const label of [copy.colDate, copy.colType, copy.colCounterparty, copy.colAmount, copy.viewTx]) {
+    // 「取引を見る」の列は引き算した: 日時そのものが取引へのリンク。
+    expect(table().getAllByRole('columnheader')).toHaveLength(4);
+    for (const label of [copy.colDate, copy.colType, copy.colCounterparty, copy.colAmount]) {
       expect(table().getByRole('columnheader', { name: label })).toHaveAttribute('scope', 'col');
     }
     expect(screen.getByRole('table')).toHaveClass('hidden', 'sm:table');
@@ -89,14 +91,20 @@ describe('AgentActivity', () => {
         expect(within(row).getByText(`${label}:`)).toHaveClass('sr-only');
       }
     }
-    for (const link of screen.getAllByRole('link', { name: copy.viewTx })) {
+    // リンク名は可視テキストの日時 (掟 8: 可視テキストなしの名前を付けない)。表と積みの両方で 2 行ずつ = 4 本。
+    const dateText = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(outgoing.timestamp * 1000);
+    const txLinks = screen.getAllByRole('link').filter((link) => (link.getAttribute('href') ?? '').includes('/tx/'));
+    expect(txLinks).toHaveLength(4);
+    for (const link of txLinks) {
       expect(link.getAttribute('href')).toMatch(/^https:\/\/polygonscan\.com\/tx\/0x[ab]{64}$/);
       expect(link).toHaveAttribute('target', '_blank');
       expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-      expect(link).toHaveAccessibleName(copy.viewTx);
+      expect(link).toHaveAccessibleName(dateText);
     }
+    expect(screen.queryByRole('link', { name: copy.viewTx })).toBeNull();
     expect(container.querySelector('[aria-label]')).toBeNull();
-    expect(container.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(4);
+    // 種別アイコン 4 + 外部リンクアイコン 4。すべて装飾 (aria-hidden)。
+    expect(container.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(8);
   });
 
   it('fetches a canonical lowercase URL, without cache-busting parameters', async () => {
