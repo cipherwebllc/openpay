@@ -27,16 +27,14 @@ function respond(result: AgentActivityResponse): NextResponse {
 }
 
 export async function GET(req: Request): Promise<NextResponse> {
-  const params = new URL(req.url).searchParams;
-  const address = params.get('address');
   // 重複・余分な query で CDN キャッシュを外し、上流 API 枠を枯らす波及を断つ。
-  // length も検査し、$ が末尾改行の直前に一致するケースを受理しない。
-  if (
-    params.size !== 1 ||
-    address === null ||
-    address.length !== 42 ||
-    !/^0x[0-9a-f]{40}$/.test(address)
-  ) return respond({ ok: false, reason: 'invalid_address' });
+  // URLSearchParams は空ペアを数えない (`?address=…&` も `?&address=…` も size 1) ので、パース後の値ではなく
+  // **生の query 文字列**を正規形 1 つと完全一致で比べる。長さも検査し、$ が末尾改行の直前に一致するケースを受理しない。
+  const { search } = new URL(req.url);
+  if (search.length !== 51 || !/^\?address=0x[0-9a-f]{40}$/.test(search)) {
+    return respond({ ok: false, reason: 'invalid_address' });
+  }
+  const address = search.slice('?address='.length);
 
   if (!(await checkAgentActivityRateLimit(req))) {
     return respond({ ok: false, reason: 'rate_limited' });

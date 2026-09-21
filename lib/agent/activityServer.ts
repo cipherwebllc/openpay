@@ -5,7 +5,7 @@ import {
   type AgentActivityItem,
   type AgentActivityResponse,
 } from '@/lib/agent/activityTypes';
-import { isKvConfigured, kvExpire, kvIncr } from '@/lib/kv';
+import { isKvConfigured, kvIncr } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
@@ -34,13 +34,13 @@ async function consumeBudgetWindow(
   max: number,
   ttlSec: number,
 ): Promise<boolean> {
-  // 守るのは無料 API 枠で決済ではない。KV 障害を閲覧へ波及させないため fail-open。
+  // 守るのは無料 API 枠で決済ではない。KV 障害 (カウントそのものが取れない) を閲覧へ波及させないため fail-open。
   // 枠が尽きても上流の NOTOK が upstream になるだけで、履歴なしの偽成功にはしない。
+  // INCR と初回 TTL は 1 回の EVAL に閉じる (lib/kv.ts INCR_EXPIRE_ON_FIRST): TTL の設定失敗を理由に、
+  // 既に取得できた「超過」の判定まで捨てて通すことをしない。KV コマンドも 1 窓 1 回で済む。
   try {
-    const count = await kvIncr(key);
+    const count = await kvIncr(key, { initialTtlSec: ttlSec });
     if (!count.ok) return true;
-    const expiry = await kvExpire(key, ttlSec);
-    if (!expiry.ok) return true;
     return count.value <= max;
   } catch {
     return true;
@@ -138,6 +138,9 @@ async function fetchActivity(
     const occurrence = occurrences.get(hash) ?? 0;
     occurrences.set(hash, occurrence + 1);
     if (from === address && to === address) continue;
+    // 0 円の transfer は誰でも安価に送れる。似せたアドレスを相手欄に出させる address poisoning と、
+    // 直近 50 件の枠を埋めて本物の履歴を押し出す嫌がらせが、表示へ波及するのを断つ。
+    if (/^0+$/.test(row.value)) continue;
 
     const direction = from === address ? 'out' : 'in';
     items.push({

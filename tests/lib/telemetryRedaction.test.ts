@@ -182,6 +182,36 @@ describe('telemetry URL redaction', () => {
     expect(event.breadcrumbs?.[0].data?.url).toBe('https://hooks.example.com');
     expect(JSON.stringify(event)).not.toContain(SECRET);
   });
+
+  it('外向き fetch breadcrumb の http.query / http.fragment (Sentry が url と別キーで入れる query 全文) を落とす', () => {
+    // @sentry/node-core の getBreadcrumbData と同じ形: url は sanitize 済みでも、query は http.query に丸ごと残る。
+    // 上流 API のキーを query で渡す fetch (Etherscan の apikey 等) が、エラー event 経由で Sentry へ出る経路のフェンス。
+    const fetchBreadcrumb = () => ({
+      category: 'http',
+      type: 'http',
+      data: {
+        url: 'https://api.etherscan.io/v2/api',
+        'http.method': 'GET',
+        'http.query': `?chainid=137&action=tokentx&apikey=${SECRET}`,
+        'http.fragment': `#${SECRET}`,
+        status_code: 502,
+      },
+    });
+    const direct = scrubSentryBreadcrumb(fetchBreadcrumb());
+    expect(direct.data).not.toHaveProperty('http.query');
+    expect(direct.data).not.toHaveProperty('http.fragment');
+    expect(direct.data?.status_code).toBe(502);
+
+    // server の beforeSend (captureMessage / captureException の event に載った breadcrumb) でも同じ。
+    const event = scrubSentryServerEvent({
+      message: 'agent.activity.upstream',
+      breadcrumbs: [fetchBreadcrumb()],
+      contexts: { trace: { data: { 'http.query': `?apikey=${SECRET}`, 'http.fragment': `#${SECRET}` } } },
+      spans: [{ data: { 'http.query': `?apikey=${SECRET}` } }],
+    } as never);
+    expect(JSON.stringify(event)).not.toContain(SECRET);
+    expect(JSON.stringify(direct)).not.toContain(SECRET);
+  });
 });
 
 it('delivery redirect and JSON fields are scrubbed by the installed browser/server hooks', () => {

@@ -78,6 +78,8 @@ describe('GET /api/agent/activity', () => {
     `address=${ADDRESS}&extra=1`,
     `extra=1&address=${ADDRESS}`,
     `address=${ADDRESS}&unused`,
+    // URLSearchParams は空ペアを数えない (size 1 のまま) → 生の query 文字列で弾く。CDN のキャッシュキーを増やせない。
+    `address=${ADDRESS}&`, `&address=${ADDRESS}`, `address=${ADDRESS}&&&`, `address=${ADDRESS}&=`,
     '', 'extra=1', 'address=', `Address=${ADDRESS}`,
     `address=${ADDRESS}0`, `address=${ADDRESS.slice(0, -1)}`,
     `address=${ADDRESS}%0A`, `address=%20${ADDRESS}`, `address=${ADDRESS}%20`,
@@ -93,6 +95,7 @@ describe('GET /api/agent/activity', () => {
   });
 
   it('IP 制限超過は 429 + no-store、上流を呼ばずログは ipPrefix だけ', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(10_000_000_000);
     vi.mocked(checkIpRateLimit).mockResolvedValue(false);
     const response = await GET(req());
     expect(response.status).toBe(429);
@@ -102,8 +105,37 @@ describe('GET /api/agent/activity', () => {
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith('agent.activity.rate_limited', {
       ipPrefix: '203.0.113.0/24',
+      window: 'minute',
     });
     expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain('203.0.113.10');
+    // 分の上限で落ちたら日次のカウンタは消費しない。
+    expect(checkIpRateLimit).toHaveBeenCalledTimes(1);
+  });
+
+  it('IP の日次上限 (300/日) 超過も 429 + no-store で上流を呼ばない', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(20_000_000_000);
+    vi.mocked(checkIpRateLimit).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const response = await GET(req());
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({ ok: false, reason: 'rate_limited' });
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(fetchAgentActivity).not.toHaveBeenCalled();
+    expect(checkIpRateLimit).toHaveBeenNthCalledWith(2, 'agent-activity-day', hashIp('203.0.113.10'), 300, 86400);
+    expect(logger.warn).toHaveBeenCalledWith('agent.activity.rate_limited', { ipPrefix: '203.0.113.0/24', window: 'day' });
+  });
+
+  it('拒否の warn はプロセス内で 1 分に 1 回だけ (攻撃者に Sentry のイベント量を決めさせない)', async () => {
+    const now = vi.spyOn(Date, 'now');
+    vi.mocked(checkIpRateLimit).mockResolvedValue(false);
+    now.mockReturnValue(30_000_000_000);
+    await GET(req());
+    now.mockReturnValue(30_000_000_000 + 1_000);
+    await GET(req());
+    await GET(req());
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    now.mockReturnValue(30_000_000_000 + 61_000);
+    await GET(req());
+    expect(logger.warn).toHaveBeenCalledTimes(2);
   });
 
   it.each([

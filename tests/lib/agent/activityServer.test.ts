@@ -181,6 +181,19 @@ describe('fetchAgentActivity', () => {
     expect(result.items.map((item) => item.key.split(':').at(-1))).toEqual(['0', '1', '3']);
   });
 
+  it('0 円の transfer は表示に出さない (address poisoning と 50 件枠の埋め立てを断つ)・rawCount には数える', async () => {
+    reply([
+      transfer({ from: OTHER, to: ADDRESS, value: '0', timeStamp: '1790000003' }),
+      transfer({ to: OTHER, value: '000', timeStamp: '1790000002' }),
+      transfer({ from: OTHER, to: ADDRESS, value: '1', timeStamp: '1790000001' }),
+    ]);
+    const result = await fetchAgentActivity(ADDRESS);
+    expect(result).toMatchObject({ ok: true, rawCount: 3 });
+    if (!result.ok) throw new Error('expected success');
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ direction: 'in', valueAtomic: '1' });
+  });
+
   it('同一 hash の同値行でも key が衝突せず、別 hash は 0 から始まる', async () => {
     reply([transfer(), transfer({ hash: `0x${'b'.repeat(64)}` }), transfer()]);
     const result = await fetchAgentActivity(ADDRESS);
@@ -250,13 +263,14 @@ describe('fetchAgentActivity', () => {
     expect(await fetchAgentActivity(ADDRESS)).toEqual({ ok: false, reason: 'upstream' });
   });
 
-  it('78 桁の巨大額・最小単位・0・先頭 0 を文字列のまま保つ', async () => {
+  it('78 桁の巨大額・最小単位・先頭 0 を文字列のまま保つ (0 円の行だけは除外)', async () => {
     const values = ['9'.repeat(78), '1', '0', '0001'];
     reply(values.map((value) => transfer({ value })));
     const result = await fetchAgentActivity(ADDRESS);
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('expected success');
-    expect(result.items.map((item) => item.valueAtomic)).toEqual(values);
+    expect(result.items.map((item) => item.valueAtomic)).toEqual(['9'.repeat(78), '1', '0001']);
+    expect(result.rawCount).toBe(4);
   });
 
   it.each([49, 50, 51])('除外前の rawCount=%i で truncated を判定', async (count) => {
@@ -272,10 +286,10 @@ describe('共有 API 予算・同時取得', () => {
     vi.mocked(kvIncr).mockResolvedValueOnce({ ok: true, value: 120 })
       .mockResolvedValueOnce({ ok: true, value: 30_000 });
     expect(await fetchAgentActivity(ADDRESS)).toMatchObject({ ok: true });
-    expect(kvIncr).toHaveBeenNthCalledWith(1, `agent:activity:budget:m:${Math.floor(NOW / 60_000)}`);
-    expect(kvIncr).toHaveBeenNthCalledWith(2, 'agent:activity:budget:d:2026-09-21');
-    expect(kvExpire).toHaveBeenNthCalledWith(1, `agent:activity:budget:m:${Math.floor(NOW / 60_000)}`, 120);
-    expect(kvExpire).toHaveBeenNthCalledWith(2, 'agent:activity:budget:d:2026-09-21', 172800);
+    // INCR と初回 TTL は 1 回の EVAL (kvIncr の initialTtlSec)。別コマンドの EXPIRE は使わない。
+    expect(kvIncr).toHaveBeenNthCalledWith(1, `agent:activity:budget:m:${Math.floor(NOW / 60_000)}`, { initialTtlSec: 120 });
+    expect(kvIncr).toHaveBeenNthCalledWith(2, 'agent:activity:budget:d:2026-09-21', { initialTtlSec: 172800 });
+    expect(kvExpire).not.toHaveBeenCalled();
   });
 
   it('分上限超過なら busy で上流を呼ばない', async () => {
@@ -307,12 +321,18 @@ describe('共有 API 予算・同時取得', () => {
     },
   );
 
-  it.each(['incr', 'expire-result', 'expire-throw'])('KV 例外・TTL 障害 (%s) は fail-open', async (kind) => {
-    if (kind === 'incr') vi.mocked(kvIncr).mockRejectedValue(new Error('KV down'));
-    if (kind === 'expire-result') vi.mocked(kvExpire).mockResolvedValue({ ok: false, reason: 'timeout' });
-    if (kind === 'expire-throw') vi.mocked(kvExpire).mockRejectedValue(new Error('KV down'));
+  it('KV の例外 (カウントが取れない) は fail-open', async () => {
+    vi.mocked(kvIncr).mockRejectedValue(new Error('KV down'));
     expect(await fetchAgentActivity(ADDRESS)).toMatchObject({ ok: true });
     expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('超過の判定は TTL 側の事情で捨てない (EXPIRE を別コマンドにしない)', async () => {
+    // 旧実装は INCR で超過が分かっていても、続く EXPIRE が失敗すると通していた。
+    vi.mocked(kvExpire).mockResolvedValue({ ok: false, reason: 'timeout' });
+    vi.mocked(kvIncr).mockResolvedValueOnce({ ok: true, value: 121 });
+    expect(await fetchAgentActivity(ADDRESS)).toEqual({ ok: false, reason: 'busy' });
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('分 KV が失敗しても、取得できた日上限は適用する', async () => {
