@@ -181,40 +181,34 @@ describe('AgentWalletCard', () => {
     expect(screen.getByLabelText(C.inputLabel)).not.toBeVisible();
     expect(screen.getByRole('button', { name: C.changeAddress })).toHaveFocus();
   });
-  it('collapses the manual input on blur once the address is valid, and Change right after does not reopen it', () => {
+  it('focuses the input on manual entry, collapses the moment the address becomes valid, and never on blur', async () => {
     render(<AgentWalletCard c={C} activity={activity} />);
     fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
     const input = screen.getByLabelText(C.inputLabel);
+    // 押したボタン自身が消える → フォーカスは body ではなく、開いた入力欄へ。
+    expect(input).toHaveFocus();
     fireEvent.change(input, { target: { value: 'invalid' } });
     fireEvent.blur(input);
-    // 不正な入力は直せるよう開いたまま。
+    // 不正な入力は直せるよう開いたまま。blur では畳まない (畳むとカードがずれ、進行中のクリックが空振りする)。
     expect(input).toBeVisible();
     fireEvent.change(input, { target: { value: address } });
+    // 有効になった瞬間に畳む。フォーカスは「変更」へ (消えた入力欄に残さない)。
+    expect(input).not.toBeVisible();
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
+    const change = screen.getByRole('button', { name: C.changeAddress });
+    expect(change).toHaveFocus();
+    // 「変更」は直後でも必ず効く (タイマーや無視する時間帯を持たない)。
+    fireEvent.click(change);
     expect(input).toBeVisible();
-    vi.useFakeTimers();
-    try {
-      fireEvent.blur(input);
-      // すぐには畳まない: 畳むとカードがずれ、入力欄から直接押した「入金する」等のクリックが空振りする。
-      expect(input).toBeVisible();
-      fireEvent.click(screen.getByRole('button', { name: C.fundCta }));
-      expect(screen.getByRole('button', { name: C.closeFund })).toHaveAttribute('aria-expanded', 'true');
-      act(() => { vi.advanceTimersByTime(250); });
-      expect(input).not.toBeVisible();
-      // 畳んだ直後の「変更」クリックで開き直さない。
-      fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
-      expect(input).not.toBeVisible();
-      // 時間を置いた「変更」は通常どおり開く。
-      act(() => { vi.advanceTimersByTime(500); });
-      fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
-      expect(input).toBeVisible();
-      // 入力を再開したら、保留中の畳みは取り消す。
-      fireEvent.blur(input);
-      fireEvent.focus(input);
-      act(() => { vi.advanceTimersByTime(300); });
-      expect(input).toBeVisible();
-    } finally {
-      vi.useRealTimers();
-    }
+    fireEvent.blur(input);
+    expect(input).toBeVisible();
+    fireEvent.click(change);
+    expect(input).not.toBeVisible();
+    // 開いたまま別の有効なアドレスに書き換えても同じ。
+    fireEvent.click(change);
+    fireEvent.change(input, { target: { value: '0x2222222222222222222222222222222222222222' } });
+    expect(input).not.toBeVisible();
   });
   it('does not enable balance reads for empty or invalid addresses', () => {
     state.query = 'address=invalid';

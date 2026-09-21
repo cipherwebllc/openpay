@@ -13,6 +13,14 @@ describe('agent page content', () => {
   it('has matching ja/en key structures', () => {
     expect(shape(agentPageContentFor('ja'))).toEqual(shape(agentPageContentFor('en')));
   });
+  it.each(['ja', 'en'])('explains where the agent wallet comes from in the empty state in %s', (locale) => {
+    const c = agentPageContentFor(locale);
+    for (const value of [c.wallet.emptyLead, c.wallet.emptyConnectCta, c.wallet.manualEntry]) expect(value.trim().length).toBeGreaterThan(0);
+    // ウォレットが作られるのは「Agent が支払う」のセットアップだけ (「人が支払う」では作られない)。モード名と接続カードの見出しを引用する。
+    const agentPays = c.modes.items.find((item) => item.mode === 'agent-pays');
+    expect(c.wallet.emptyLead).toContain(agentPays?.name);
+    expect(c.wallet.emptyLead).toContain(c.connect.title);
+  });
   it('provides matching, nonempty activity copy outside the wallet namespace', () => {
     const ja = agentPageContentFor('ja');
     const en = agentPageContentFor('en');
