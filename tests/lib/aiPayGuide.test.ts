@@ -10,6 +10,9 @@ import {
   guideAiPayMetadata,
 } from '@/lib/aiPayGuide';
 import { AGENT_GUIDE } from '@/lib/agentGuide';
+import { AGENT_MCP_SPEC } from '@/lib/agentSetup';
+import jaMessages from '@/messages/ja.json';
+import enMessages from '@/messages/en.json';
 
 const LOCALES = ['ja', 'en'] as const;
 
@@ -153,19 +156,48 @@ describe('AI_PAY_GUIDE: MCP 設定と金銭ガード', () => {
     expect(AI_PAY_GUIDE.en.stewardEnv).toBe(AI_PAY_GUIDE.ja.stewardEnv);
   });
 
-  it('Claude Desktop 設定は README と同じ env を持つ妥当な JSON', () => {
+  it('Claude Desktop 設定は README の keystore 節と同じ env を持つ妥当な JSON (版固定は /agent と同一)', () => {
     const parsed = JSON.parse(AI_PAY_GUIDE.ja.quickSetupConfig);
     expect(parsed.mcpServers['openpay-x402']).toEqual({
       command: 'npx',
-      args: ['openpay-x402-mcp'],
+      args: ['--yes', AGENT_MCP_SPEC],
       env: {
-        SIGNER_MODE: 'env-key',
-        BUYER_PRIVATE_KEY: '0x...',
+        SIGNER_MODE: 'keystore',
         MAX_PER_CALL_JPYC: '10',
         MAX_SESSION_JPYC: '100',
         ALLOWED_HOSTS: 'open-pay.jp',
       },
     });
+  });
+
+  it.each(LOCALES)('%s: セットアップ A は鍵を設定に入れず wallet_init の流れを案内する', (loc) => {
+    const c = AI_PAY_GUIDE[loc];
+    // プレースホルダ鍵 (`0x...`) 入りの設定は MCP が起動時に拒否する → 設定に鍵の変数を戻さない
+    expect(c.quickSetupConfig).not.toContain('PRIVATE_KEY');
+    expect(c.quickSetupConfig).not.toContain('env-key');
+    expect(c.quickSetupBody).toContain('wallet_init');
+    expect(c.quickSetupBody).toContain('wallet_status');
+    expect(c.privateKeyWarning).toContain('wallet.json');
+    // /agent・MCP README の threat model と同じ強さ: 利用者としてコマンドを実行できるものは鍵を読める。
+    // 「AI には渡らない」とだけ書くと、シェルを持つ Agent (Claude Code / Codex) に対して過剰な断定になる。
+    expect(c.privateKeyWarning).toMatch(/コマンドを実行できるもの|run commands as you/);
+    // 提示する設定に POLYGON_RPC_URL は無い → wallet_status の jpycBalance は null。残高は入金用リンクで見る。
+    expect(c.quickSetupConfig).not.toContain('POLYGON_RPC_URL');
+    expect(c.quickSetupBody).toMatch(/残高は入金用のリンク|balance via the funding link/);
+  });
+
+  it('AI ストアの MCP 案内 (Facilitator.mcpWalletInit) も ja/en とも wallet_init の流れ', () => {
+    // component テストは ja の描画しか見ない → en の本文はここで固定する。
+    for (const messages of [jaMessages, enMessages]) {
+      const text = (messages as { Facilitator: Record<string, string> }).Facilitator
+        .mcpWalletInit;
+      expect(text).toContain('wallet_init');
+      expect(text).not.toContain('PRIVATE_KEY');
+    }
+  });
+
+  it('Strands のサンプルも同じ版に固定する', () => {
+    expect(AI_PAY_GUIDE.ja.strandsCode).toContain(`"${AGENT_MCP_SPEC}"`);
   });
 
   it('Steward 設定は signer mode と 7 変数を含む', () => {
@@ -187,8 +219,9 @@ describe('AI_PAY_GUIDE: MCP 設定と金銭ガード', () => {
     expect(quote).toContain("payer's side");
   });
 
-  it.each(LOCALES)('%s: 5 項目の money guard と paid-response 注意を含む', (loc) => {
-    expect(AI_PAY_GUIDE[loc].guards).toHaveLength(5);
+  it.each(LOCALES)('%s: 6 項目の money guard (日次上限を含む) と paid-response 注意を含む', (loc) => {
+    expect(AI_PAY_GUIDE[loc].guards).toHaveLength(6);
+    expect(AI_PAY_GUIDE[loc].guards[2]).toMatch(/1 日の支払い上限|Daily cap/);
     expect(AI_PAY_GUIDE[loc].guards.join('\n').toLowerCase()).toMatch(
       /data|データ/,
     );

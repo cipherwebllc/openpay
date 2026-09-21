@@ -2895,6 +2895,7 @@
     "mcpGuardPerCall": "Per-call limit: 10 JPYC",
     "mcpGuardCumulative": "Cumulative limit: 100 JPYC",
     "mcpGuardDestinations": "Payment destinations are limited to catalog-listed URLs and open-pay.jp",
+    "mcpWalletInit": "No private key goes in the config. After adding it, ask your AI to “call wallet_init”: a dedicated wallet is created on your machine and only its address is returned. Send a small amount of JPYC there to enable paying",
     "mcpMore": "Learn more on npm: openpay-x402-mcp",
     "mcpSdkNote": "Building in Node.js? openpay-x402-sdk (npm) provides discovery, quotes, and guarded JPYC payments without MCP."
   },

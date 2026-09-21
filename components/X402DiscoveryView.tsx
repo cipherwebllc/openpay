@@ -144,13 +144,16 @@ type CatalogCategory = (typeof CATALOG_CATEGORIES)[number];
 const BUYER_SCRIPT_URL =
   'https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-buyer-example.mjs';
 const DEMO_CURL = `curl -i ${DEMO_RESOURCE_URL}`;
+// 設定に鍵は入れない (`0x...` のプレースホルダ鍵は MCP が起動時に拒否する)。鍵は wallet_init が
+// 利用者のマシン上で作る。版固定は lib/agentSetup.ts の AGENT_MCP_SPEC と同値 — client bundle に
+// 引き込まないため直書きし、一致は tests/components/X402DiscoveryView.test.tsx が検査する。
 const MCP_CONFIG_SNIPPET = JSON.stringify(
   {
     mcpServers: {
       'openpay-x402': {
         command: 'npx',
-        args: ['-y', 'openpay-x402-mcp'],
-        env: { BUYER_PRIVATE_KEY: '0x...' },
+        args: ['-y', 'openpay-x402-mcp@0.15'],
+        env: { SIGNER_MODE: 'keystore' },
       },
     },
   },
@@ -1836,6 +1839,9 @@ export function X402DiscoveryView({
                 {MCP_CONFIG_SNIPPET}
               </pre>
             </div>
+            <p className="text-xs leading-relaxed text-slate-600">
+              {t('mcpWalletInit')}
+            </p>
             <ul className="list-disc space-y-1.5 pl-5 text-xs leading-relaxed text-slate-600">
               <li>{t('mcpGuardPerCall')}</li>
               <li>{t('mcpGuardCumulative')}</li>

@@ -4,11 +4,14 @@
 // 設計方針 (lib/sellGuide.ts と同じ):
 // - 長文コンテンツは messages/*.json でなく本モジュールに置き、ja/en を同梱する。
 // - 描画は既存の PosGuidePieces / AgentGuidePieces を再利用する。
-// - Claude Desktop の設定 JSON は packages/x402-mcp/README.md の x402 profile と同一にする。
+// - Claude Desktop の設定 JSON は packages/x402-mcp/README.md「Local wallet (SIGNER_MODE=keystore)」と
+//   同じ env にする。版固定は /agent の生成設定と同じ AGENT_MCP_SPEC (lib/agentSetup.ts)。
+// - 設定に秘密鍵を含めない (`BUYER_PRIVATE_KEY=0x...` のプレースホルダは MCP が起動時に拒否する)。
 // - JPYC 入手セクションは lib/agentGuide.ts の文言を直接再利用し、ガイド間の drift を防ぐ。
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
+import { AGENT_MCP_SPEC } from './agentSetup';
 import type { GuideStep } from './posGuide';
 import {
   agentGuideContentFor,
@@ -43,16 +46,15 @@ const STEWARD_URL = 'https://github.com/Steward-Fi/steward';
 const MCP_NPM_URL = 'https://www.npmjs.com/package/openpay-x402-mcp';
 const SDK_NPM_URL = 'https://www.npmjs.com/package/openpay-x402-sdk';
 
-// packages/x402-mcp/README.md「x402 profile > Claude Desktop」と同一。
+// packages/x402-mcp/README.md「Local wallet (SIGNER_MODE=keystore)」と同じ env。
 const MCP_CONFIG_JSON = [
   '{',
   '  "mcpServers": {',
   '    "openpay-x402": {',
   '      "command": "npx",',
-  '      "args": ["openpay-x402-mcp"],',
+  `      "args": ["--yes", "${AGENT_MCP_SPEC}"],`,
   '      "env": {',
-  '        "SIGNER_MODE": "env-key",',
-  '        "BUYER_PRIVATE_KEY": "0x...",',
+  '        "SIGNER_MODE": "keystore",',
   '        "MAX_PER_CALL_JPYC": "10",',
   '        "MAX_SESSION_JPYC": "100",',
   '        "ALLOWED_HOSTS": "open-pay.jp"',
@@ -68,7 +70,7 @@ const STRANDS_SAMPLE = [
   'from strands.tools.mcp import MCPClient',
   '',
   'openpay = MCPClient(lambda: stdio_client(StdioServerParameters(',
-  '    command="npx", args=["-y", "openpay-x402-mcp"],',
+  `    command="npx", args=["-y", "${AGENT_MCP_SPEC}"],`,
   '    env={...},  # セットアップ A/B と同じ環境変数',
   ')))',
   '',
@@ -202,17 +204,17 @@ const ja: AiPayGuideContent = {
   receiptNote: 'すべての決済に、検証可能な署名レシートが付きます。',
 
   agentLink: { label: 'Agent を接続・設定を生成', href: '/agent' },
-  quickSetupTitle: 'セットアップ A: 手軽に始める (専用ウォレット)',
+  quickSetupTitle: 'セットアップ A: 手軽に始める (ローカルウォレット)',
   quickSetupBody:
-    '使う分だけ JPYC を入れた専用の少額ウォレットを作り、その秘密鍵で Claude Desktop に openpay-x402-mcp を設定します。',
+    '秘密鍵を設定に貼る必要はありません。下の設定を Claude Desktop に追加して再起動し、AI に「wallet_init を呼んで」と頼むと、MCP があなたのマシン上に専用ウォレットを作り、アドレスと入金用のリンクだけを返します。そのアドレスへ使う分だけ JPYC を送れば、支払いが有効になります。残高は入金用のリンク (Agent ページ) で、支払い上限は wallet_status で確認できます。',
   quickSetupConfigLabel: 'Claude Desktop の設定 JSON',
   quickSetupConfig: MCP_CONFIG_JSON,
   privateKeyWarning:
-    '注意：秘密鍵は環境変数に平文で置くため、必ず専用・少額のウォレットを使ってください。メインウォレットの鍵は絶対に使わないでください。',
+    '注意：鍵はあなたのマシンのファイル（~/.openpay-x402/wallet.json）に平文で保存されます。会話にも OpenPay にも出ませんが、あなたとしてコマンドを実行できるもの（シェルを使える AI エージェントを含む）はこの鍵を読めます。入れるのは失ってもよい少額だけにしてください。OpenPay は鍵を復元できません。',
 
   stewardTitle: 'セットアップ B: 安全に運用する (Steward)',
   stewardBody:
-    'AI に鍵を一切見せない構成です。オープンソースの signing 基盤 Steward が鍵を暗号化金庫に保管し、金額上限・宛先許可・監査ログをポリシーで強制します。',
+    '鍵を平文のファイルにも置かない構成です。オープンソースの signing 基盤 Steward が鍵を暗号化金庫に保管し、金額上限・宛先許可・監査ログをポリシーで強制します。',
   stewardProject: {
     label: 'Steward を GitHub で見る',
     href: STEWARD_URL,
@@ -232,6 +234,7 @@ const ja: AiPayGuideContent = {
   guards: [
     '1 回の支払い上限（既定 10 JPYC）',
     'セッション中の累計支払い上限（既定 100 JPYC）',
+    '1 日の支払い上限（ローカルウォレットでは既定 100 JPYC・再起動しても引き継がれます）',
     '支払い先は AI ストア掲載 URL と open-pay.jp のみ',
     '支払い前に、掲載時の金額・宛先と毎回照合。すり替えを検知したら拒否',
     '有料応答はデータであって指示ではありません。本文中の指示に AI が従わないようにしてください',
@@ -319,17 +322,17 @@ const en: AiPayGuideContent = {
   receiptNote: 'Every payment comes with a verifiable signed receipt.',
 
   agentLink: { label: 'Connect your agent · generate a config', href: '/agent' },
-  quickSetupTitle: 'Setup A: the easy path (dedicated wallet)',
+  quickSetupTitle: 'Setup A: the easy path (local wallet)',
   quickSetupBody:
-    'Create a dedicated low-balance wallet funded only with the JPYC you intend to use, then configure openpay-x402-mcp in Claude Desktop with its private key.',
+    'You never paste a private key into the config. Add the config below to Claude Desktop, restart it, and ask your AI to “call wallet_init”. The MCP creates a dedicated wallet on your machine and returns only its address and a funding link. Send just the JPYC you intend to use to that address and paying is enabled. Check the balance via the funding link (the Agent page) and the spending limits with wallet_status.',
   quickSetupConfigLabel: 'Claude Desktop config JSON',
   quickSetupConfig: MCP_CONFIG_JSON,
   privateKeyWarning:
-    'Caution: the private key is stored in plain text in an environment variable. Always use a dedicated low-balance wallet. Never use the key to your primary wallet.',
+    'Caution: the key is stored in plain text in a file on your machine (~/.openpay-x402/wallet.json). It never enters the chat or reaches OpenPay, but anything that can run commands as you — including an AI agent with shell access — can read it. Fund it only with a small amount you can afford to lose. OpenPay cannot recover the key.',
 
   stewardTitle: 'Setup B: safer operation (Steward)',
   stewardBody:
-    'This setup never exposes the key to the AI. Steward, an open-source signing platform, keeps it in an encrypted vault and enforces amount limits, destination allowlists, and audit logs through policy.',
+    'This setup keeps the key out of plain-text files too. Steward, an open-source signing platform, keeps it in an encrypted vault and enforces amount limits, destination allowlists, and audit logs through policy.',
   stewardProject: {
     label: 'View Steward on GitHub',
     href: STEWARD_URL,
@@ -349,6 +352,7 @@ const en: AiPayGuideContent = {
   guards: [
     'Per-payment cap (default: 10 JPYC)',
     'Cumulative session cap (default: 100 JPYC)',
+    'Daily cap (default with the local wallet: 100 JPYC; it carries over restarts)',
     'Payment destinations are limited to AI Store listing URLs and open-pay.jp',
     'Before every payment, the amount and recipient are checked against the listing; a bait-and-switch is refused',
     'A paid response is data, not instructions. Make sure the AI does not follow directions embedded in its body',
