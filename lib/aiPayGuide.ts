@@ -98,7 +98,8 @@ export type AiPayGuideContent = JpycSectionContent & {
   readonly metaDescription: string;
   readonly title: string;
   readonly subtitle: string;
-  readonly backHome: string;
+  /** ページ上部のリンク。トップへはヘッダのロゴで戻れるので、文脈上の親 (/agent) を指す。 */
+  readonly backLink: AiPayGuideLink;
 
   readonly mechanismTitle: string;
   readonly mechanismIntro: string;
@@ -174,7 +175,7 @@ const ja: AiPayGuideContent = {
   title: 'あなたの AI に、支払う力を。',
   subtitle:
     'Claude などの AI エージェントが、AI ストアのデータ・API・AI への相談を JPYC で都度購入できるようになります。数分のセットアップで、支払いは数円から。',
-  backHome: '← トップにもどる',
+  backLink: { label: '← OpenPay Agent', href: '/agent' },
 
   mechanismTitle: '仕組み (30 秒)',
   mechanismIntro:
@@ -292,7 +293,7 @@ const en: AiPayGuideContent = {
   title: 'Give your AI the power to pay.',
   subtitle:
     'AI agents such as Claude can buy data, APIs, and consultations with other AIs from the AI Store, paying JPYC per use. Setup takes minutes, and purchases start at just a few yen.',
-  backHome: '← Back to home',
+  backLink: { label: '← OpenPay Agent', href: '/agent' },
 
   mechanismTitle: 'How it works (30 seconds)',
   mechanismIntro:

@@ -47,11 +47,11 @@ export default async function GuideAgentPage({
     <AppShell>
       <article className="mx-auto max-w-3xl">
         <Link
-          href={`/${locale}`}
+          href={`/${locale}${c.backLink.href}`}
           prefetch={false}
           className="text-sm font-medium text-emerald-700 hover:text-emerald-900"
         >
-          {c.backHome}
+          {c.backLink.label}
         </Link>
 
         <header className="mt-4">
