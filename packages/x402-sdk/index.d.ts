@@ -166,7 +166,7 @@ export type OpenPayClientOptions = ClientCommonOptions &
   );
 
 export interface RuntimeConfig {
-  signerMode: 'env-key' | 'steward';
+  signerMode: 'env-key' | 'steward' | 'keystore';
   buyerPrivateKey: string | null;
   stewardApiKey: string | null;
   stewardSignerSecret: string | null;
@@ -702,6 +702,7 @@ export const REASONS: {
   dailyAuthorizationCrossesUtcDay: 'daily_authorization_crosses_utc_day';
   buyerPrivateKeyMissing: 'buyer_private_key_missing';
   stewardSignerUnconfigured: 'steward_signer_unconfigured';
+  walletNotInitialized: 'wallet_not_initialized';
   catalogAcceptMismatch: 'catalog_accept_mismatch';
 };
 export const SUPPORTED_JPYC_ASSETS: Readonly<
@@ -826,10 +827,11 @@ export function safeErrorMessage(
 export const SIGNER_MODES: {
   envKey: 'env-key';
   steward: 'steward';
+  keystore: 'keystore';
 };
 export function readSignerMode(
   env?: Record<string, string | undefined>,
-): 'env-key' | 'steward';
+): 'env-key' | 'steward' | 'keystore';
 export function createSigner(
   env?: Record<string, string | undefined>,
   options?: { fetchImpl?: typeof globalThis.fetch },

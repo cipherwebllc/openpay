@@ -155,7 +155,7 @@ describe('openpay-x402-sdk source ownership and vectors', () => {
         env: { SIGNER_MODE: 'invalid' },
         expected: {
           type: 'throw',
-          message: 'SIGNER_MODE must be "env-key" or "steward"',
+          message: 'SIGNER_MODE must be "env-key", "steward", or "keystore"',
         },
       },
     ])('readSignerMode vector %#', async ({ env, expected }) => {

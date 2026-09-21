@@ -4,6 +4,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 export const SIGNER_MODES = {
   envKey: 'env-key',
   steward: 'steward',
+  keystore: 'keystore',
 };
 
 function nonEmpty(raw) {
@@ -12,8 +13,8 @@ function nonEmpty(raw) {
 
 export function readSignerMode(env = process.env) {
   const mode = nonEmpty(env.SIGNER_MODE) ?? SIGNER_MODES.envKey;
-  if (mode !== SIGNER_MODES.envKey && mode !== SIGNER_MODES.steward) {
-    throw new Error('SIGNER_MODE must be "env-key" or "steward"');
+  if (mode !== SIGNER_MODES.envKey && mode !== SIGNER_MODES.steward && mode !== SIGNER_MODES.keystore) {
+    throw new Error('SIGNER_MODE must be "env-key", "steward", or "keystore"');
   }
   return mode;
 }
@@ -182,6 +183,9 @@ function createStewardSigner(env, fetchImpl) {
 
 export function createSigner(env = process.env, { fetchImpl = fetch } = {}) {
   const mode = readSignerMode(env);
+  if (mode === SIGNER_MODES.keystore) {
+    throw new Error('keystore keys must be supplied by the caller via createSignerFromOptions');
+  }
   if (mode === SIGNER_MODES.envKey) return createEnvKeySigner(env);
   return createStewardSigner(env, fetchImpl);
 }
