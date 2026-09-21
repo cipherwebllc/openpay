@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
+import { useLocale } from 'next-intl';
 import { useAccount, useReadContract } from 'wagmi';
 import { erc20Abi, formatUnits, isAddress } from 'viem';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
@@ -14,8 +15,10 @@ import { defaultDeploymentForSymbol } from '@/lib/tokens';
 const STORAGE_KEY = 'openpay.agent.address';
 
 const QRCodeSVG = dynamic(() => import('qrcode.react').then((m) => m.QRCodeSVG), { ssr: false });
+const AgentFundFromWallet = dynamic(() => import('./AgentFundFromWallet').then((m) => m.AgentFundFromWallet), { ssr: false });
 
 export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
+  const locale = useLocale();
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const params = useSearchParams();
   const [input, setInput] = useState(() => {
@@ -96,6 +99,9 @@ export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
             </div>
             {/* QR は直前のアドレス行と同じ情報なので a11y ツリーからは外す (掟 8: 可視テキストなしの名前を付けない)。 */}
             <div aria-hidden className="h-fit w-fit rounded-xl bg-white p-3 ring-1 ring-slate-200/70"><QRCodeSVG value={address} size={160} /></div>
+            <div className="min-w-0 sm:col-span-2">
+              <AgentFundFromWallet locale={locale} c={c.fundFromWallet} agentAddress={address} onSent={() => { void balance.refetch(); }} />
+            </div>
           </div>
         </div>
       ) : null}

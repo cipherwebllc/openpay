@@ -3,11 +3,11 @@
 import { track } from '@vercel/analytics';
 import type { AgentClient, AgentMode, AgentOpenInApp } from '@/lib/agentSetup';
 
-type AgentEventName = 'agent_prompt_copy' | 'agent_open_in' | 'agent_config_generate' | 'agent_config_copy' | 'agent_store_click';
+type AgentEventName = 'agent_prompt_copy' | 'agent_open_in' | 'agent_config_generate' | 'agent_config_copy' | 'agent_store_click' | 'agent_fund_send';
 type ConfigProperties = { locale: string; client: AgentClient; mode: AgentMode };
 
 export function trackAgentEvent(name: 'agent_config_generate' | 'agent_config_copy', properties: ConfigProperties): void;
-export function trackAgentEvent(name: 'agent_prompt_copy' | 'agent_store_click', properties: { locale: string }): void;
+export function trackAgentEvent(name: 'agent_prompt_copy' | 'agent_store_click' | 'agent_fund_send', properties: { locale: string }): void;
 export function trackAgentEvent(name: 'agent_open_in', properties: { locale: string; app: AgentOpenInApp }): void;
 export function trackAgentEvent(name: AgentEventName, properties: { locale: string; client?: AgentClient; mode?: AgentMode; app?: AgentOpenInApp }): void {
   try {

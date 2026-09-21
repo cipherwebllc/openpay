@@ -90,6 +90,30 @@ export type AgentPageContent = {
     readonly copied: string;
     readonly connectCta: string;
     readonly fundCta: string;
+    readonly fundFromWallet: {
+      readonly title: string;
+      readonly amountLabel: string;
+      readonly amountPlaceholder: string;
+      readonly send: string;
+      readonly confirmTitle: string;
+      readonly confirmSend: string;
+      readonly back: string;
+      readonly toLabel: string;
+      readonly amountConfirmLabel: string;
+      readonly chainLabel: string;
+      readonly irreversible: string;
+      readonly ownershipWarning: string;
+      readonly gasNote: string;
+      readonly insufficient: string;
+      readonly invalidAmount: string;
+      readonly sameWalletNote: string;
+      readonly waitingWallet: string;
+      readonly sent: string;
+      readonly confirmed: string;
+      readonly rejected: string;
+      readonly failed: string;
+      readonly viewTx: string;
+    };
   };
   readonly next: {
     readonly title: string;
@@ -217,6 +241,30 @@ const ja: AgentPageContent = {
     copied: 'コピーしました',
     connectCta: 'Agent を接続',
     fundCta: '入金する',
+    fundFromWallet: {
+      title: '接続中のウォレットから送る',
+      amountLabel: '金額 (JPYC)',
+      amountPlaceholder: '例: 100',
+      send: '送る',
+      confirmTitle: '送金内容の確認',
+      confirmSend: 'この内容で送る',
+      back: '戻る',
+      toLabel: '送り先',
+      amountConfirmLabel: '送金額',
+      chainLabel: 'チェーン',
+      irreversible: '送金は取り消せません。送り先のアドレスを確かめてください。',
+      ownershipWarning: 'このアドレスが Agent Wallet であることを OpenPay は確認していません。',
+      gasNote: '通常の送金です。ガス代 (POL) はあなたのウォレットから支払われ、OpenPay の利用料はかかりません。',
+      insufficient: 'ウォレットの JPYC 残高が不足しています。',
+      invalidAmount: '0 より大きい金額を、小数点以下 18 桁までで入力してください。',
+      sameWalletNote: '接続中のウォレットと同じアドレスです。',
+      waitingWallet: 'ウォレットで承認してください。',
+      sent: '送信済み。確定を待っています。',
+      confirmed: '送金が確定しました。',
+      rejected: 'ウォレットで操作が拒否されました。',
+      failed: '送金に失敗したか、確定を確認できませんでした。「取引を見る」で結果を確かめてください。確かめる前に送り直すと、二重に送ってしまうことがあります。',
+      viewTx: '取引を見る',
+    },
   },
   next: {
     title: '買えるものを見る',
@@ -337,6 +385,30 @@ const en: AgentPageContent = {
     copied: 'Copied',
     connectCta: 'Connect agent',
     fundCta: 'Add funds',
+    fundFromWallet: {
+      title: 'Send from the connected wallet',
+      amountLabel: 'Amount (JPYC)',
+      amountPlaceholder: 'e.g. 100',
+      send: 'Send',
+      confirmTitle: 'Review transfer',
+      confirmSend: 'Confirm and send',
+      back: 'Back',
+      toLabel: 'To',
+      amountConfirmLabel: 'Amount',
+      chainLabel: 'Chain',
+      irreversible: 'Transfers cannot be reversed. Check the destination address.',
+      ownershipWarning: 'OpenPay has not verified that this address is an Agent Wallet.',
+      gasNote: 'This is a regular transfer. Gas (POL) is paid from your wallet, and OpenPay charges no usage fee.',
+      insufficient: 'Your wallet has insufficient JPYC.',
+      invalidAmount: 'Enter an amount greater than 0 with up to 18 decimal places.',
+      sameWalletNote: 'This is the same address as the connected wallet.',
+      waitingWallet: 'Approve the request in your wallet.',
+      sent: 'Sent. Waiting for confirmation.',
+      confirmed: 'Transfer confirmed.',
+      rejected: 'The request was rejected in your wallet.',
+      failed: 'The transfer failed, or its confirmation could not be checked. Use “View transaction” to see the result. Sending again before checking can send twice.',
+      viewTx: 'View transaction',
+    },
   },
   next: {
     title: 'See what it can buy',
