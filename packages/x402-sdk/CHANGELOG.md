@@ -3,7 +3,7 @@
 ## 0.9.0 — 2026-09-21
 
 - Add explicit `keystore` signer mode and `wallet_not_initialized` guard reason. `createSigner` requires the caller to supply keystore keys via `createSignerFromOptions`; no env-key fallback.
-- Redact 32-byte private-key hex in error text while preserving signature redaction. Update public types; existing env-key / Steward behavior is unchanged.
+- Redact any `0x` + 64-hex value in error text as `[redacted_32byte_hex]` (a key configured through the SDK is still replaced as `[redacted_private_key]`). The generic label is deliberate: the same shape is also a transaction hash or a nonce, and it must not read as "your key leaked". Signature redaction is unchanged. Update public types; existing env-key / Steward behavior is unchanged.
 
 ## 0.8.1
 

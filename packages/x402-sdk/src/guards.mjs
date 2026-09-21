@@ -579,7 +579,9 @@ export function redactSensitiveText(text, secrets = []) {
   }
   return out
     .replace(/\b0x[0-9a-fA-F]{130}\b/g, '[redacted_signature]')
-    .replace(/\b0x[0-9a-fA-F]{64}\b/g, '[redacted_private_key]');
+    // 32 バイトの hex は秘密鍵と同じ形だが、取引ハッシュや nonce でもあり得る。「鍵が漏れた」と
+    // 誤解させないラベルにする (既知の秘密の置換は上の [redacted_private_key] のまま)。
+    .replace(/\b0x[0-9a-fA-F]{64}\b/g, '[redacted_32byte_hex]');
 }
 
 export function safeErrorMessage(error, config = {}) {

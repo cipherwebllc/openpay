@@ -33,7 +33,7 @@ describe('SDK keystore additions', () => {
   it('redacts 32-byte keys and preserves the existing signature rule and word boundaries', () => {
     const key = `0x${'aB'.repeat(32)}`;
     const signature = `0x${'ab'.repeat(65)}`;
-    expect(redactSensitiveText(`${signature} ${key}`)).toBe('[redacted_signature] [redacted_private_key]');
+    expect(redactSensitiveText(`${signature} ${key}`)).toBe('[redacted_signature] [redacted_32byte_hex]');
     expect(redactSensitiveText(`${key}a`) === `${key}a`).toBe(true);
   });
 });
