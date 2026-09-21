@@ -7,15 +7,20 @@ import { agentPageContentFor } from '@/lib/agentPage';
 
 const C = agentPageContentFor('en').wallet;
 
-const state = vi.hoisted(() => ({ query: '', data: undefined as bigint | undefined, isError: false, connected: false, read: vi.fn() }));
+const state = vi.hoisted(() => ({ query: '', data: undefined as bigint | undefined, isError: false, connected: false, read: vi.fn(), fund: vi.fn(), refetch: vi.fn() }));
 const address = '0x1111111111111111111111111111111111111111';
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(state.query) }));
+vi.mock('next-intl', () => ({ useLocale: () => 'en' }));
 vi.mock('wagmi', () => ({
   useAccount: () => ({ address, isConnected: state.connected }),
-  useReadContract: (options: unknown) => { state.read(options); return { data: state.data, isError: state.isError }; },
+  useReadContract: (options: unknown) => { state.read(options); return { data: state.data, isError: state.isError, refetch: state.refetch }; },
 }));
-vi.mock('next/dynamic', () => ({ default: () => function QR({ value }: { value: string }) { return <svg data-value={value} />; } }));
-beforeEach(() => { window.localStorage.clear(); state.query = ''; state.data = undefined; state.isError = false; state.connected = false; state.read.mockClear(); });
+vi.mock('next/dynamic', () => ({ default: () => function Dynamic(props: { value?: string; onSent?: () => void }) {
+  if (props.value) return <svg data-value={props.value} />;
+  state.fund(props);
+  return <button type="button" onClick={props.onSent}>Mock funding confirmed</button>;
+} }));
+beforeEach(() => { window.localStorage.clear(); state.query = ''; state.data = undefined; state.isError = false; state.connected = false; vi.clearAllMocks(); });
 
 describe('AgentWalletCard', () => {
   it('does not enable balance reads for empty or invalid addresses', () => {
@@ -69,5 +74,15 @@ describe('AgentWalletCard', () => {
     first.unmount();
     render(<AgentWalletCard c={C} />);
     expect(screen.getByLabelText('Agent wallet address')).toHaveValue(address);
+  });
+  it('passes the funding copy, locale and address inside the funding block and refreshes on confirmation', () => {
+    state.query = `address=${address}`;
+    render(<AgentWalletCard c={C} />);
+    expect(state.fund).toHaveBeenLastCalledWith(expect.objectContaining({ locale: 'en', c: C.fundFromWallet, agentAddress: address }));
+    const button = screen.getByRole('button', { name: 'Mock funding confirmed' });
+    expect(button.closest('#agent-fund')).not.toBeNull();
+    expect(state.refetch).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    expect(state.refetch).toHaveBeenCalledTimes(1);
   });
 });
