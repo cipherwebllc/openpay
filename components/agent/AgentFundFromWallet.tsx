@@ -11,11 +11,12 @@ import { isUserRejection } from '@/lib/walletErrors';
 
 type Review = { sender: Address; recipient: Address; amount: bigint };
 
-export function AgentFundFromWallet({ locale, c, agentAddress, onSent }: {
+export function AgentFundFromWallet({ locale, c, agentAddress, onSent, onBusyChange }: {
   locale: string;
   c: AgentPageContent['wallet']['fundFromWallet'];
   agentAddress: Address;
   onSent: () => void;
+  onBusyChange?: (busy: boolean) => void;
 }) {
   const { address, isConnected, chainId } = useAccount();
   const deployment = defaultDeploymentForSymbol('jpyc');
@@ -75,6 +76,10 @@ export function AgentFundFromWallet({ locale, c, agentAddress, onSent }: {
     trackAgentEvent('agent_fund_send', { locale });
     onSent();
   }, [confirmed, write.data, locale, onSent]);
+
+  useEffect(() => {
+    onBusyChange?.(inFlight);
+  }, [inFlight, onBusyChange]);
 
   function openReview() {
     if (!canReview || !address) return;

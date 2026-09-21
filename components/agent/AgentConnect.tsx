@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
 import { AGENT_OPEN_IN_APPS, buildOpenInLink, buildSetupPrompt } from '@/lib/agentSetup';
@@ -9,16 +10,22 @@ import { trackAgentEvent } from '@/lib/agentTrack';
 export function AgentConnect({ locale, c }: { locale: string; c: AgentPageContent['connect'] }) {
   const prompt = buildSetupPrompt(locale);
   const { copy, copied, available } = useCopyToClipboard();
+  const [expanded, setExpanded] = useState(false);
+  const promptExpanded = expanded || !available;
   return (
     <section id="agent-connect" className="scroll-mt-24 min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-brand/30 sm:p-8">
       <h2 className="text-xl font-bold text-slate-900">{c.title}</h2>
       <p className="mt-3 text-sm text-slate-700">{c.lead}</p>
       {/* prompt は人が読んで確かめる文章なので折り返す (CodeBlock は横スクロールで後半が隠れる)。 */}
-      <pre className="mt-4 whitespace-pre-wrap break-words rounded-xl bg-slate-900 p-4 text-xs leading-relaxed text-slate-100 ring-1 ring-slate-700">
-        <code>{prompt}</code>
-      </pre>
+      <div className="relative mt-4 overflow-hidden rounded-xl bg-slate-900 ring-1 ring-slate-700">
+        <pre id="agent-setup-prompt" className={`whitespace-pre-wrap break-words p-4 text-xs leading-relaxed text-slate-100 ${promptExpanded ? '' : 'max-h-40 overflow-hidden'}`}>
+          <code>{prompt}</code>
+        </pre>
+        {!promptExpanded ? <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-slate-900 to-transparent" /> : null}
+      </div>
+      {available ? <button type="button" aria-expanded={promptExpanded} aria-controls="agent-setup-prompt" className="mt-2 rounded-sm text-sm font-medium text-emerald-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600" onClick={() => setExpanded((current) => !current)}>{promptExpanded ? c.promptCollapse : c.promptExpand}</button> : null}
       {available ? (
-        <button type="button" className="mt-4 rounded-xl bg-brand px-5 py-3 text-sm font-bold text-white" onClick={async () => {
+        <button type="button" className="mt-3 block rounded-xl bg-brand px-5 py-3 text-sm font-bold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600" onClick={async () => {
           if (await copy(prompt)) trackAgentEvent('agent_prompt_copy', { locale });
         }}>{copied ? c.copied : c.copy}</button>
       ) : null}
@@ -35,12 +42,12 @@ export function AgentConnect({ locale, c }: { locale: string; c: AgentPageConten
         ))}
       </div>
       <p className="mt-2 text-xs leading-relaxed text-slate-500">{c.openInNote}</p>
-      <div className="mt-5 flex flex-wrap items-center gap-2 text-xs">
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
         <span className="text-slate-500">{c.pasteInto}</span>
         {c.hosts.map((host) => <span key={host} className="rounded-full bg-slate-100 px-3 py-1.5 text-slate-700">{host}</span>)}
+        <p className="w-full leading-relaxed text-slate-500">{c.shellNote}</p>
       </div>
-      <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.shellNote}</p>
-      <a href="/agent/setup.md" className="mt-3 inline-block text-sm text-emerald-700 underline">{c.setupLinkLabel}</a>
+      <a href="/agent/setup.md" className="mt-2 inline-block text-sm text-emerald-700 underline">{c.setupLinkLabel}</a>
     </section>
   );
 }

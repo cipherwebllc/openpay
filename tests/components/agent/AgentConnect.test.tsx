@@ -11,6 +11,21 @@ vi.mock('@vercel/analytics', () => ({ track: vi.fn() }));
 
 beforeEach(() => vi.clearAllMocks());
 describe('AgentConnect', () => {
+  it.each(['ja', 'en'])('expands and collapses the prompt with an accessible toggle in %s', async (locale) => {
+    const user = userEvent.setup();
+    const c = agentPageContentFor(locale).connect;
+    const { container } = render(<AgentConnect locale={locale} c={c} />);
+    const toggle = screen.getByRole('button', { name: c.promptExpand });
+    expect(toggle).toHaveAttribute('aria-controls', 'agent-setup-prompt');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('#agent-connect')).toBeVisible();
+    await user.click(toggle);
+    expect(screen.getByRole('button', { name: c.promptCollapse })).toHaveAttribute('aria-expanded', 'true');
+    expect(container.querySelector('pre')).not.toHaveClass('max-h-40');
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('pre')?.textContent).toBe(buildSetupPrompt(locale));
+  });
   it('shows the prompt and non-link host chips; tracks successful copy only', async () => {
     const user = userEvent.setup();
     const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
@@ -18,6 +33,8 @@ describe('AgentConnect', () => {
     expect(container.querySelector('pre')?.textContent).toBe(buildSetupPrompt('en'));
     expect(screen.getByText('Claude Code').closest('a')).toBeNull();
     expect(screen.getByRole('link', { name: /setup\.md/ })).toHaveAttribute('href', '/agent/setup.md');
+    expect(screen.getByRole('button', { name: C.promptExpand })).toHaveAttribute('aria-expanded', 'false');
+    expect(container.querySelector('pre')).toHaveClass('max-h-40');
     await user.click(screen.getByRole('button', { name: 'Copy setup prompt' }));
     expect(write).toHaveBeenCalledWith(buildSetupPrompt('en'));
     expect(track).toHaveBeenCalledWith('agent_prompt_copy', { locale: 'en' });
@@ -27,9 +44,9 @@ describe('AgentConnect', () => {
     const user = userEvent.setup();
     const write = vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'));
     render(<AgentConnect locale="en" c={C} />);
-    await user.click(screen.getByRole('button'));
+    await user.click(screen.getByRole('button', { name: C.copy }));
     expect(track).not.toHaveBeenCalled();
-    expect(screen.getByRole('button')).toHaveTextContent('Copy setup prompt');
+    expect(screen.getByRole('button', { name: C.copy })).toBeInTheDocument();
     write.mockRestore();
   });
   it('keeps a selectable prompt without a clipboard button', () => {
@@ -39,6 +56,7 @@ describe('AgentConnect', () => {
       const { container } = render(<AgentConnect locale="en" c={C} />);
       expect(screen.queryByRole('button')).toBeNull();
       expect(container.querySelector('pre')?.textContent).toBe(buildSetupPrompt('en'));
+      expect(container.querySelector('pre')).not.toHaveClass('max-h-40', 'overflow-hidden');
     } finally {
       if (descriptor) Object.defineProperty(navigator, 'clipboard', descriptor);
       else Reflect.deleteProperty(navigator, 'clipboard');
@@ -48,8 +66,8 @@ describe('AgentConnect', () => {
     const user = userEvent.setup();
     vi.mocked(track).mockImplementationOnce(() => { throw new Error('analytics unavailable'); });
     render(<AgentConnect locale="en" c={C} />);
-    await user.click(screen.getByRole('button'));
-    expect(screen.getByRole('button')).toHaveTextContent('Copied');
+    await user.click(screen.getByRole('button', { name: C.copy }));
+    expect(screen.getByRole('button', { name: C.copied })).toBeInTheDocument();
   });
   it('offers desktop-app deep links that carry the whole prompt and track only the app name', async () => {
     render(<AgentConnect locale="en" c={C} />);

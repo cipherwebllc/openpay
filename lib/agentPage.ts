@@ -35,6 +35,8 @@ export type AgentPageContent = {
     readonly hosts: readonly string[];
     readonly shellNote: string;
     readonly setupLinkLabel: string;
+    readonly promptExpand: string;
+    readonly promptCollapse: string;
   };
   readonly modes: {
     readonly title: string;
@@ -50,11 +52,14 @@ export type AgentPageContent = {
   readonly safety: {
     readonly title: string;
     readonly enforcedBadge: string;
+    readonly summary: readonly string[];
+    readonly detailsLabel: string;
     readonly body: string;
     readonly points: readonly string[];
   };
   readonly generator: {
     readonly title: string;
+    readonly summaryHint: string;
     readonly lead: string;
     readonly modeLabel: string;
     readonly modeOptions: Record<AgentMode, string>;
@@ -81,8 +86,7 @@ export type AgentPageContent = {
     readonly balanceLabel: string;
     readonly balanceLoading: string;
     readonly balanceError: string;
-    readonly hasBalance: string;
-    readonly noBalance: string;
+    readonly copyShort: string;
     readonly ownershipNote: string;
     readonly fundTitle: string;
     readonly fundBody: string;
@@ -90,6 +94,10 @@ export type AgentPageContent = {
     readonly copied: string;
     readonly connectCta: string;
     readonly fundCta: string;
+    readonly changeAddress: string;
+    readonly closeFund: string;
+    readonly fundLockedNote: string;
+    readonly pendingToOther: string;
     readonly fundFromWallet: {
       readonly title: string;
       readonly amountLabel: string;
@@ -141,18 +149,20 @@ const ja: AgentPageContent = {
   subtitle: 'ウォレットも秘密鍵も、OpenPay は預かりません。',
   connect: {
     title: 'Agent を接続',
-    lead: 'このプロンプトを Agent に渡すと、Agent 自身がセットアップを進めます。',
+    lead: 'このプロンプトを Agent に渡すだけ。セットアップは Agent が進めます。',
     copy: 'セットアッププロンプトをコピー',
     copied: 'コピーしました',
     openIn: 'またはアプリで開く',
     openInApps: { claude: 'Claude', codex: 'Codex' },
     openInNote:
-      'デスクトップアプリ (Claude / Codex) が入っていれば、プロンプトを入力した状態で新しいセッションが開きます。送信するのはあなたです。',
+      'アプリが入っていれば、プロンプト入りで開きます。送信するのはあなたです。',
     pasteInto: 'コピーして貼り付ける場合',
     hosts: ['Claude Code', 'Codex CLI', 'Hermes'],
     shellNote:
-      'シェルを使える Agent 向けです。Claude Desktop など自分で設定を書けない環境では、下の「設定を生成」を使ってください。',
+      'シェルを使える Agent 向け。Claude Desktop などは下の「自分で設定を書く」へ。',
     setupLinkLabel: 'Agent が読む手順 (setup.md) を見る',
+    promptExpand: '全文を表示',
+    promptCollapse: 'たたむ',
   },
   modes: {
     title: '2 つの使い方',
@@ -161,7 +171,7 @@ const ja: AgentPageContent = {
         mode: 'human-pays',
         tagline: 'AI に財布を渡さない',
         name: '人が支払う',
-        body: 'AI がお店を探し、注文をまとめ、支払いリンクを作ります。最後の支払いは、あなたが自分のウォレットで承認します。鍵は不要です。',
+        body: 'AI が注文をまとめ、支払いはあなたが自分のウォレットで承認します。鍵は不要です。',
         guideLabel: 'AI で注文するガイド',
         guideHref: '/guide/agent',
       },
@@ -169,7 +179,7 @@ const ja: AgentPageContent = {
         mode: 'agent-pays',
         tagline: 'AI に予算を渡す',
         name: 'Agent が支払う',
-        body: '少額の専用 Agent Wallet から、決めた上限の範囲で AI が自動で支払います。AI ストアの有料データや API の購入に使います。',
+        body: '少額の専用ウォレットから、決めた上限の範囲で AI が支払います。',
         guideLabel: 'AI が支払うガイド',
         guideHref: '/guide/ai-pay',
       },
@@ -178,6 +188,12 @@ const ja: AgentPageContent = {
   safety: {
     title: '支払い上限について',
     enforcedBadge: 'Agent 側の MCP/SDK で強制',
+    summary: [
+      '上限を強制するのは Agent 側の MCP です。OpenPay のサーバーは関与しません。',
+      '入れるのは失ってもよい少額だけ。残高が実質的な上限です。',
+      'このページは秘密鍵を尋ねません。鍵を求める OpenPay の画面は偽物です。',
+    ],
+    detailsLabel: 'くわしく',
     body: '支払い上限と接続先の制限は、Agent を動かすマシン上の MCP/SDK が適用するローカルの安全設定です。OpenPay のサーバーは上限を知らず、保証もしません。このページが設定を書き換えることもありません。',
     points: [
       '専用の Agent Wallet には、使ってよい金額だけを入れてください。残高が実質的な上限になります。',
@@ -186,7 +202,8 @@ const ja: AgentPageContent = {
     ],
   },
   generator: {
-    title: '設定を生成',
+    title: '自分で設定を書く (手動)',
+    summaryHint: 'Claude Desktop など、Agent が自分で設定を書けない環境向け',
     lead: 'Agent の実行環境へ貼り付ける設定を作ります。貼り付けるのはあなたです。',
     modeLabel: '使い方',
     modeOptions: { 'agent-pays': 'Agent が支払う', 'human-pays': '人が支払う' },
@@ -222,7 +239,7 @@ const ja: AgentPageContent = {
   },
   wallet: {
     title: 'Agent Wallet',
-    lead: 'OpenPay はウォレットを作りません。Agent に使わせるウォレットのアドレスを入れると、JPYC 残高を確認できます。',
+    lead: 'Agent のウォレットアドレスを入れると、JPYC 残高を確認できます。OpenPay はウォレットを作りません。',
     inputLabel: 'Agent Wallet のアドレス',
     inputPlaceholder: '0x…',
     useConnected: '接続中のウォレットを使う',
@@ -230,8 +247,7 @@ const ja: AgentPageContent = {
     balanceLabel: 'JPYC 残高',
     balanceLoading: '読み込み中…',
     balanceError: '残高を読み取れませんでした',
-    hasBalance: 'JPYC 残高あり',
-    noBalance: 'JPYC 残高なし',
+    copyShort: 'コピー',
     ownershipNote:
       'オンチェーンの公開情報を読み取っているだけです。このアドレスの所有や、Agent が動いているかどうかは確認していません。',
     fundTitle: 'JPYC を入金',
@@ -241,6 +257,10 @@ const ja: AgentPageContent = {
     copied: 'コピーしました',
     connectCta: 'Agent を接続',
     fundCta: '入金する',
+    changeAddress: '変更',
+    closeFund: '閉じる',
+    fundLockedNote: '送金の結果を確認できるまで、このパネルは閉じられません。',
+    pendingToOther: '送信中の送金は、変更前のアドレス宛てです:',
     fundFromWallet: {
       title: '接続中のウォレットから送る',
       amountLabel: '金額 (JPYC)',
@@ -285,18 +305,20 @@ const en: AgentPageContent = {
   subtitle: 'OpenPay never holds your wallet or your private key.',
   connect: {
     title: 'Connect your agent',
-    lead: 'Give this prompt to your agent and it runs the setup itself.',
+    lead: 'Hand this prompt to your agent. It does the setup itself.',
     copy: 'Copy setup prompt',
     copied: 'Copied',
     openIn: 'Or open in',
     openInApps: { claude: 'Claude', codex: 'Codex' },
     openInNote:
-      'If the desktop app (Claude / Codex) is installed, a new session opens with the prompt filled in. You press send.',
+      'If the app is installed, it opens with the prompt filled in. You press send.',
     pasteInto: 'Or copy and paste into',
     hosts: ['Claude Code', 'Codex CLI', 'Hermes'],
     shellNote:
-      'For agents with shell access. If your host cannot write its own config (Claude Desktop, for example), use “Generate a config” below.',
+      'For agents with shell access. For Claude Desktop and similar, use “Write the config yourself” below.',
     setupLinkLabel: 'Read the instructions your agent follows (setup.md)',
+    promptExpand: 'Show full prompt',
+    promptCollapse: 'Collapse',
   },
   modes: {
     title: 'Two ways to use it',
@@ -305,7 +327,7 @@ const en: AgentPageContent = {
         mode: 'human-pays',
         tagline: "Don't hand the AI a wallet",
         name: 'Human pays',
-        body: 'The AI finds a shop, builds the order, and creates a checkout link. You approve the final payment from your own wallet. No key needed.',
+        body: 'The AI prepares the order; you approve the payment in your own wallet. No key needed.',
         guideLabel: 'Guide: order with your AI',
         guideHref: '/guide/agent',
       },
@@ -313,7 +335,7 @@ const en: AgentPageContent = {
         mode: 'agent-pays',
         tagline: 'Give the AI a budget',
         name: 'Agent pays',
-        body: 'The AI pays on its own from a dedicated low-balance agent wallet, inside the limits you set. Use it to buy paid data and APIs on the AI Store.',
+        body: 'The AI pays from a small dedicated wallet, within limits you set.',
         guideLabel: 'Guide: how AI pays',
         guideHref: '/guide/ai-pay',
       },
@@ -322,6 +344,12 @@ const en: AgentPageContent = {
   safety: {
     title: 'About spending limits',
     enforcedBadge: 'Enforced by the MCP/SDK on the agent side',
+    summary: [
+      'Limits are enforced by the MCP on the agent’s side. OpenPay’s servers are not involved.',
+      'Fund only a small amount you can afford to lose. The balance is the real cap.',
+      'This page never asks for a private key. Any OpenPay screen that does is fake.',
+    ],
+    detailsLabel: 'Details',
     body: "Spending limits and allowed hosts are local safety settings applied by the MCP/SDK on the machine that runs your agent. OpenPay's servers do not know them and do not guarantee them. This page never changes your agent's settings.",
     points: [
       'Fund the dedicated agent wallet only with what you are willing to spend. Its balance is the effective ceiling.',
@@ -330,7 +358,8 @@ const en: AgentPageContent = {
     ],
   },
   generator: {
-    title: 'Generate a config',
+    title: 'Write the config yourself (manual)',
+    summaryHint: 'For Claude Desktop and other hosts where the agent can’t write its own config',
     lead: 'Builds the config to paste into your agent’s environment. You do the pasting.',
     modeLabel: 'Mode',
     modeOptions: { 'agent-pays': 'Agent pays', 'human-pays': 'Human pays' },
@@ -366,7 +395,7 @@ const en: AgentPageContent = {
   },
   wallet: {
     title: 'Agent wallet',
-    lead: 'OpenPay does not create wallets. Enter the address of the wallet your agent uses to check its JPYC balance.',
+    lead: 'Enter your agent’s wallet address to see its JPYC balance. OpenPay does not create wallets.',
     inputLabel: 'Agent wallet address',
     inputPlaceholder: '0x…',
     useConnected: 'Use the connected wallet',
@@ -374,8 +403,7 @@ const en: AgentPageContent = {
     balanceLabel: 'JPYC balance',
     balanceLoading: 'Loading…',
     balanceError: 'Could not read the balance',
-    hasBalance: 'Holds JPYC',
-    noBalance: 'No JPYC',
+    copyShort: 'Copy',
     ownershipNote:
       'This only reads public on-chain data. It does not verify who owns the address or whether an agent is running.',
     fundTitle: 'Fund it with JPYC',
@@ -385,6 +413,10 @@ const en: AgentPageContent = {
     copied: 'Copied',
     connectCta: 'Connect agent',
     fundCta: 'Add funds',
+    changeAddress: 'Change',
+    closeFund: 'Close',
+    fundLockedNote: 'This panel stays open until the transfer’s result is confirmed.',
+    pendingToOther: 'The transfer in progress goes to the previous address:',
     fundFromWallet: {
       title: 'Send from the connected wallet',
       amountLabel: 'Amount (JPYC)',

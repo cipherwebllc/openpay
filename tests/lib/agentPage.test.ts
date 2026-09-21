@@ -13,6 +13,33 @@ describe('agent page content', () => {
   it('has matching ja/en key structures', () => {
     expect(shape(agentPageContentFor('ja'))).toEqual(shape(agentPageContentFor('en')));
   });
+  it.each(['ja', 'en'])('provides all disclosure and toggle copy in %s', (locale) => {
+    const c = agentPageContentFor(locale);
+    expect(c.safety.summary).toHaveLength(3);
+    for (const value of [...c.safety.summary, c.safety.detailsLabel, c.connect.promptExpand, c.connect.promptCollapse, c.wallet.changeAddress, c.wallet.closeFund]) {
+      expect(value.length).toBeGreaterThan(0);
+    }
+  });
+  it('retains the complete Japanese spending and key disclosure', () => {
+    expect(agentPageContentFor('ja').safety).toMatchObject({
+      body: '支払い上限と接続先の制限は、Agent を動かすマシン上の MCP/SDK が適用するローカルの安全設定です。OpenPay のサーバーは上限を知らず、保証もしません。このページが設定を書き換えることもありません。',
+      points: [
+        '専用の Agent Wallet には、使ってよい金額だけを入れてください。残高が実質的な上限になります。',
+        'このページに秘密鍵の入力欄はありません。鍵を求める OpenPay の画面があれば偽物です。',
+        'ウォレットの鍵は、Agent を動かすあなたのマシン上で MCP が作って保管します。会話にも OpenPay にも出ません。ただし、あなたとしてコマンドを実行できるものはこの鍵を読めます。入れるのは失ってもよい少額だけにしてください。OpenPay は鍵を復元できません。',
+      ],
+    });
+  });
+  it('retains the complete English spending and key disclosure', () => {
+    expect(agentPageContentFor('en').safety).toMatchObject({
+      body: "Spending limits and allowed hosts are local safety settings applied by the MCP/SDK on the machine that runs your agent. OpenPay's servers do not know them and do not guarantee them. This page never changes your agent's settings.",
+      points: [
+        'Fund the dedicated agent wallet only with what you are willing to spend. Its balance is the effective ceiling.',
+        'This page has no private-key field. Any OpenPay screen asking for a key is fake.',
+        'The wallet key is created and kept by the MCP on your own machine, where your agent runs. It never enters the chat or reaches OpenPay. Anything that can run commands as you can still read it, so fund it only with a small amount you can afford to lose. OpenPay cannot recover the key.',
+      ],
+    });
+  });
   it.each(['ja', 'en'])('states local enforcement and factual wallet status in %s', (locale) => {
     const c = agentPageContentFor(locale);
     expect(JSON.stringify(c)).not.toMatch(/稼働中|Active|接続済み/);

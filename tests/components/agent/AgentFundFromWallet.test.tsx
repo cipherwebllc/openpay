@@ -1,8 +1,9 @@
-import { StrictMode } from 'react';
+import { StrictMode, type ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { track } from '@vercel/analytics';
 import { erc20Abi, maxUint256, parseUnits, type Address, type Hash } from 'viem';
+import { AgentWalletCard } from '@/components/agent/AgentWalletCard';
 import { AgentFundFromWallet } from '@/components/agent/AgentFundFromWallet';
 import { agentPageContentFor } from '@/lib/agentPage';
 import { chainNameForId, txExplorerUrl } from '@/lib/chains';
@@ -34,7 +35,7 @@ vi.mock('wagmi', () => ({
   useAccount: () => ({ address: state.address, isConnected: state.connected, chainId: state.chainId }),
   useReadContract: (options: unknown) => {
     state.read(options);
-    return { data: state.balance, isError: state.balanceError };
+    return { data: state.balance, isError: state.balanceError, refetch: vi.fn() };
   },
   useWriteContract: () => ({ writeContract: state.write, data: state.hash, isPending: state.writePending, error: state.writeError, reset: state.resetWrite }),
   useSwitchChain: () => ({ switchChain: state.switchChain, isPending: state.switchPending, error: state.switchError, reset: state.resetSwitch }),
@@ -43,6 +44,11 @@ vi.mock('wagmi', () => ({
     return { isSuccess: state.receiptSuccess, isError: state.receiptError, data: state.receiptStatus ? { status: state.receiptStatus } : undefined };
   },
 }));
+vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('address=0xabcdefabcdefabcdefabcdefabcdefabcdefabcd') }));
+vi.mock('next-intl', () => ({ useLocale: () => 'en' }));
+vi.mock('next/dynamic', () => ({ default: () => function Dynamic(props: ComponentProps<typeof AgentFundFromWallet> | { value: string }) {
+  return 'value' in props ? <svg data-value={props.value} /> : <AgentFundFromWallet {...props} />;
+} }));
 vi.mock('@vercel/analytics', () => ({ track: vi.fn() }));
 
 const C = agentPageContentFor('en').wallet.fundFromWallet;
@@ -88,6 +94,65 @@ beforeEach(() => {
 });
 
 describe('AgentFundFromWallet', () => {
+  it.each(['success', 'reverted', 'rpc-error'] as const)('reports busy from submission through the %s receipt outcome', (outcome) => {
+    const busy = vi.fn();
+    const element = <AgentFundFromWallet locale="en" c={C} agentAddress={agentAddress} onSent={onSent} onBusyChange={busy} />;
+    const { rerender } = render(element);
+    expect(busy).toHaveBeenLastCalledWith(false);
+    sendAmount();
+    expect(busy).toHaveBeenLastCalledWith(true);
+    busy.mockClear();
+    state.hash = hash;
+    settleWrite();
+    rerender(<AgentFundFromWallet locale="en" c={C} agentAddress={agentAddress} onSent={onSent} onBusyChange={busy} />);
+    expect(busy).not.toHaveBeenCalled();
+    state.receiptSuccess = outcome !== 'rpc-error';
+    state.receiptStatus = outcome === 'rpc-error' ? undefined : outcome;
+    state.receiptError = outcome === 'rpc-error';
+    rerender(<AgentFundFromWallet locale="en" c={C} agentAddress={agentAddress} onSent={onSent} onBusyChange={busy} />);
+    if (outcome === 'rpc-error') {
+      expect(busy).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: C.back })).toBeDisabled();
+    } else {
+      expect(busy).toHaveBeenLastCalledWith(false);
+      expect(screen.getByRole('button', { name: C.back })).toBeEnabled();
+    }
+    expect(screen.getByRole('button', { name: C.confirmSend })).toBeDisabled();
+  });
+
+  it('keeps the real funding form locked across parent edits, unknown receipts and reopening after confirmation', () => {
+    const wallet = agentPageContentFor('en').wallet;
+    const { container, rerender } = render(<AgentWalletCard c={wallet} />);
+    // `?address=` 付きの着地 (MCP の入金リンク) は入金パネルが開いた状態で始まる。
+    expect(container.querySelector('#agent-fund')).toBeVisible();
+    sendAmount();
+    expect(screen.getByRole('button', { name: wallet.closeFund })).toBeDisabled();
+    state.hash = hash;
+    settleWrite();
+    state.receiptError = true;
+    rerender(<AgentWalletCard c={wallet} />);
+    fireEvent.click(screen.getByRole('button', { name: wallet.changeAddress }));
+    for (const value of ['', 'invalid', sender, agentAddress]) {
+      fireEvent.change(screen.getByLabelText(wallet.inputLabel), { target: { value } });
+      expect(container.querySelector('#agent-fund')).toBeVisible();
+      expect(screen.getByRole('button', { name: C.confirmSend })).toBeDisabled();
+      expect(screen.getByRole('button', { name: C.back })).toBeDisabled();
+      expect(screen.getByRole('link', { name: `${C.viewTx}: ${hash}` })).toBeVisible();
+    }
+    expect(screen.getByRole('button', { name: wallet.closeFund })).toBeDisabled();
+    state.receiptError = false;
+    state.receiptSuccess = true;
+    state.receiptStatus = 'success';
+    rerender(<AgentWalletCard c={wallet} />);
+    expect(screen.getByRole('button', { name: wallet.closeFund })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: wallet.closeFund }));
+    expect(container.querySelector('#agent-fund')).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: wallet.fundCta }));
+    expect(screen.getByRole('button', { name: C.confirmSend })).toBeDisabled();
+    expect(screen.getByRole('link', { name: `${C.viewTx}: ${hash}` })).toBeVisible();
+    expect(state.write).toHaveBeenCalledTimes(1);
+  });
+
   it('renders nothing and disables balance reads while disconnected', () => {
     state.connected = false;
     state.address = undefined;

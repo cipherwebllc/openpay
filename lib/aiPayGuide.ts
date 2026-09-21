@@ -203,7 +203,7 @@ const ja: AiPayGuideContent = {
   ],
   receiptNote: 'すべての決済に、検証可能な署名レシートが付きます。',
 
-  agentLink: { label: 'Agent を接続・設定を生成', href: '/agent' },
+  agentLink: { label: 'Agent ページで接続する', href: '/agent' },
   quickSetupTitle: 'セットアップ A: 手軽に始める (ローカルウォレット)',
   quickSetupBody:
     '秘密鍵を設定に貼る必要はありません。下の設定を Claude Desktop に追加して再起動し、AI に「wallet_init を呼んで」と頼むと、MCP があなたのマシン上に専用ウォレットを作り、アドレスと入金用のリンクだけを返します。そのアドレスへ使う分だけ JPYC を送れば、支払いが有効になります。残高は入金用のリンク (Agent ページ) で、支払い上限は wallet_status で確認できます。',
@@ -321,7 +321,7 @@ const en: AiPayGuideContent = {
   ],
   receiptNote: 'Every payment comes with a verifiable signed receipt.',
 
-  agentLink: { label: 'Connect your agent · generate a config', href: '/agent' },
+  agentLink: { label: 'Connect on the Agent page', href: '/agent' },
   quickSetupTitle: 'Setup A: the easy path (local wallet)',
   quickSetupBody:
     'You never paste a private key into the config. Add the config below to Claude Desktop, restart it, and ask your AI to “call wallet_init”. The MCP creates a dedicated wallet on your machine and returns only its address and a funding link. Send just the JPYC you intend to use to that address and paying is enabled. Check the balance via the funding link (the Agent page) and the spending limits with wallet_status.',

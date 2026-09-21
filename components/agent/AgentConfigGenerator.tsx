@@ -24,8 +24,14 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
   }
   const fieldClass = 'mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900';
   return (
-    <section className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-8">
-      <h2 className="text-xl font-bold text-slate-900">{c.title}</h2>
+    <details className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-8">
+      <summary className="cursor-pointer rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600">
+        {/* summary の中身は「phrasing content か見出し 1 つ」。見出しを保ってアウトライン (h2 の並び) から消さない。 */}
+        <h2 className="inline text-lg font-bold text-slate-900">
+          {c.title}
+          <span className="mt-1 block pl-5 text-sm font-normal text-slate-500">{c.summaryHint}</span>
+        </h2>
+      </summary>
       <p className="mt-3 text-sm text-slate-700">{c.lead}</p>
       <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="min-w-0 text-sm font-medium">{c.modeLabel}
@@ -65,6 +71,6 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
           {mode === 'agent-pays' ? <div className="mt-4 space-y-2 text-xs leading-relaxed text-slate-600"><p>{c.keyNote}</p><p>{c.feeNote}</p></div> : null}
         </div>
       ) : null}
-    </section>
+    </details>
   );
 }
