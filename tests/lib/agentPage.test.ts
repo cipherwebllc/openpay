@@ -1,6 +1,8 @@
+import { formatUnits, parseUnits } from 'viem';
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { agentPageContentFor, agentPageMetadata } from '@/lib/agentPage';
+import { JPYC_SERVICES_RESOURCE } from '@/lib/directory/paidResources';
 import { DISCLOSED_X402_FEE } from '@/lib/legal';
 
 function shape(value: unknown): unknown {
@@ -12,6 +14,34 @@ function shape(value: unknown): unknown {
 describe('agent page content', () => {
   it('has matching ja/en key structures', () => {
     expect(shape(agentPageContentFor('ja'))).toEqual(shape(agentPageContentFor('en')));
+  });
+  it('keeps try-prompt IDs and payment kinds in the same order in ja/en', () => {
+    const ja = agentPageContentFor('ja').tryPrompts.items;
+    const en = agentPageContentFor('en').tryPrompts.items;
+    expect(ja).toHaveLength(5);
+    expect(new Set(ja.map((item) => item.id)).size).toBe(5);
+    expect(ja.map(({ id, kind }) => ({ id, kind }))).toEqual(en.map(({ id, kind }) => ({ id, kind })));
+  });
+  it.each(['ja', 'en'])('includes a spending cap in every paid prompt in %s', (locale) => {
+    const paid = agentPageContentFor(locale).tryPrompts.items.filter((item) => item.kind === 'paid');
+    expect(paid.length).toBeGreaterThan(0);
+    for (const item of paid) {
+      expect(item.prompt).toMatch(locale === 'ja' ? /上限 \d+(?:\.\d+)? JPYC/ : /\d+(?:\.\d+)? JPYC cap/);
+    }
+  });
+  it.each(['ja', 'en'])('keeps the monitor prompt and tag total aligned with the price and disclosed fee in %s', (locale) => {
+    // /api/paid/jpyc/services が handleFirstPartyPaidGet に渡す価格 SoT を直接参照する。
+    // 実装 (lib/x402/fee.ts) と同じ atomic の整数演算。Number だと小数価格で 0.3 + 1 = 1.2999… の偽 fail になる。
+    const priceWei = parseUnits(JPYC_SERVICES_RESOURCE.priceJpyc, 18);
+    const floorWei = parseUnits(String(DISCLOSED_X402_FEE.floorJpyc), 18);
+    const percentWei = priceWei * BigInt(DISCLOSED_X402_FEE.bps) / 10000n;
+    const total = formatUnits(priceWei + (percentWei > floorWei ? percentWei : floorWei), 18);
+    const item = agentPageContentFor(locale).tryPrompts.items.find((item) => item.id === 'buy-monitor');
+    expect(item?.kind).toBe('paid');
+    for (const text of [item?.prompt, item?.tag]) {
+      const amounts = [...(text ?? '').matchAll(/(\d+(?:\.\d+)?) JPYC/g)].map((match) => match[1]);
+      expect(amounts).toEqual([total]);
+    }
   });
   it.each(['ja', 'en'])('explains where the agent wallet comes from in the empty state in %s', (locale) => {
     const c = agentPageContentFor(locale);

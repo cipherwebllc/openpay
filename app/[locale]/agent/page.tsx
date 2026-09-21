@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { AgentConnect } from '@/components/agent/AgentConnect';
+import { AgentTryPrompts } from '@/components/agent/AgentTryPrompts';
 import { AgentConfigGenerator } from '@/components/agent/AgentConfigGenerator';
 import { AgentWalletCard } from '@/components/agent/AgentWalletCard';
 import { AgentSafety } from '@/components/agent/AgentSafety';
@@ -31,6 +32,7 @@ export default async function AgentPage({ params }: { params: Promise<{ locale: 
         {/* fallback は実カードの復元前 (外枠 + 見出し) と同じ形にする — 大きな予約 → 縮む → 伸びる、の 2 回シフトを避ける。 */}
         <Suspense fallback={<section className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6"><h2 className="text-xl font-bold text-slate-900">{c.wallet.title}</h2></section>}><AgentWalletCard c={c.wallet} activity={c.activity} /></Suspense>
         <AgentConnect locale={locale} c={c.connect} />
+        <AgentTryPrompts locale={locale} c={c.tryPrompts} />
         <section>
           <h2 className="text-xl font-bold text-slate-900">{c.modes.title}</h2>
           <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">

@@ -153,6 +153,22 @@ export type AgentPageContent = {
     readonly statsPartial: string;
     readonly publicNote: string;
   };
+  /** セットアップ後に Agent へそのまま貼れる依頼文 (user 承認 2026-09-22)。 */
+  readonly tryPrompts: {
+    readonly title: string;
+    readonly lead: string;
+    readonly copy: string;
+    readonly copied: string;
+    /** 支払いが起きる依頼文にだけ出す注記。 */
+    readonly paidNote: string;
+    readonly items: readonly {
+      readonly id: 'catalog' | 'buy-monitor' | 'order' | 'history' | 'limits';
+      /** free = 支払いなし / paid = Agent が支払う / human = 人が支払う。 */
+      readonly kind: 'free' | 'paid' | 'human';
+      readonly tag: string;
+      readonly prompt: string;
+    }[];
+  };
   readonly next: {
     readonly title: string;
     readonly body: string;
@@ -346,6 +362,20 @@ const ja: AgentPageContent = {
     statsPartial: '50 件より前は集計できません',
     publicNote: 'Polygon 上の JPYC の送受信 (公開情報) です。何を購入したかは表示しません。0 JPYC の送信は除いています。',
   },
+  tryPrompts: {
+    title: 'Agent に頼めること',
+    lead: 'セットアップが済んだら、そのまま話しかけてください。コピーして Agent に貼るだけです。「Agent が支払う」で接続したときの例で、店の注文は「人が支払う」でも使えます。',
+    copy: 'プロンプトをコピー',
+    copied: 'コピーしました',
+    paidNote: '依頼文の上限を超える支払いは行われません。Agent 側の上限のほうが小さいときは、支払いは拒否されます。',
+    items: [
+      { id: 'catalog', kind: 'free', tag: '無料', prompt: 'OpenPay で今買える JPYC のデータと API を一覧にして、それぞれの価格と利用料を教えてください。支払いはしないでください。' },
+      { id: 'buy-monitor', kind: 'paid', tag: '支払いあり・3 JPYC', prompt: 'JPYC Service Monitor を上限 3 JPYC で購入して、この 1 か月に変わった点を 5 行にまとめてください。' },
+      { id: 'order', kind: 'human', tag: '支払いは自分で', prompt: 'JPYC で注文できる店を探して、メニューと合計額を見せてください。支払いは私がします。' },
+      { id: 'history', kind: 'free', tag: '無料', prompt: '最近なにを買ったか、金額と取引ハッシュつきで見せてください。' },
+      { id: 'limits', kind: 'free', tag: '無料', prompt: 'いまの支払い上限と、今日使った額を教えてください。' },
+    ],
+  },
   next: {
     title: '買えるものを見る',
     body: 'セットアップが済んだら、Agent が JPYC で購入できるリソースを AI ストアで確認できます。',
@@ -531,6 +561,20 @@ const en: AgentPageContent = {
     stat7d: 'Sent, last 7 days',
     statsPartial: 'Can’t total beyond the latest 50',
     publicNote: 'JPYC transfers on Polygon (public data). What was purchased is not shown. 0 JPYC transfers are left out.',
+  },
+  tryPrompts: {
+    title: 'What you can ask your agent',
+    lead: 'Once setup is done, just talk to it. Copy a prompt and paste it to your agent. These examples are for the “Agent pays” setup; ordering from a shop also works with “You pay”.',
+    copy: 'Copy prompt',
+    copied: 'Copied',
+    paidNote: 'Nothing above the cap in the prompt is paid. If the limit on the agent side is lower, the payment is refused.',
+    items: [
+      { id: 'catalog', kind: 'free', tag: 'Free', prompt: 'List the JPYC data and APIs I can buy on OpenPay right now, with the price and fee for each. Do not pay.' },
+      { id: 'buy-monitor', kind: 'paid', tag: 'Pays · 3 JPYC', prompt: 'Buy the JPYC Service Monitor with a 3 JPYC cap and summarize what changed in the last month in five lines.' },
+      { id: 'order', kind: 'human', tag: 'You pay yourself', prompt: 'Find shops where I can order with JPYC and show me the menu and the total. I will pay myself.' },
+      { id: 'history', kind: 'free', tag: 'Free', prompt: 'Show me what you bought recently, with amounts and transaction hashes.' },
+      { id: 'limits', kind: 'free', tag: 'Free', prompt: 'Tell me my current spending limits and how much I have spent today.' },
+    ],
   },
   next: {
     title: 'See what it can buy',
