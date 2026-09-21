@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
@@ -30,12 +32,13 @@ vi.mock('@/hooks/useSiweSession', () => ({
 // (既定 = freee ON で SIWE UI を出す。両 OFF で隠れることは専用 test で検証)。
 const flags = vi.hoisted(() => ({
   enableFreeeSync: true,
-  enableBilling: false,
+  enableUsageFee: false,
   enablePro: false,
   enableCsvPass: false,
   enablePushNotify: false,
   enableTipMessage: false,
   enableCreatorStoreUi: false,
+  enableHandles: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -46,8 +49,8 @@ vi.mock('@/lib/env', async (importOriginal) => {
       get enableFreeeSync() {
         return flags.enableFreeeSync;
       },
-      get enableBilling() {
-        return flags.enableBilling;
+      get enableUsageFee() {
+        return flags.enableUsageFee;
       },
       get enablePro() {
         return flags.enablePro;
@@ -63,6 +66,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableCreatorStoreUi() {
         return flags.enableCreatorStoreUi;
+      },
+      get enableHandles() {
+        return flags.enableHandles;
       },
     },
   };
@@ -148,12 +154,13 @@ beforeEach(() => {
   visibleConnectorsMock.mockReturnValue([]);
   setSiwe();
   flags.enableFreeeSync = true; // 既定: SIWE 機能 ON → ログイン UI を出す
-  flags.enableBilling = false;
+  flags.enableUsageFee = false;
   flags.enablePro = false;
   flags.enableCsvPass = false;
   flags.enablePushNotify = false;
   flags.enableTipMessage = false;
   flags.enableCreatorStoreUi = false;
+  flags.enableHandles = false;
 });
 
 describe('WalletBadge: 接続済 branch', () => {
@@ -285,12 +292,13 @@ describe('WalletBadge: SIWE サインイン', () => {
 
   it('SIWE 機能 (freee/利用権/Pro/CSVパス/push通知/tip質問) が全 OFF → ログイン UI を出さない (切断のみ)', () => {
     flags.enableFreeeSync = false;
-    flags.enableBilling = false;
+    flags.enableUsageFee = false;
     flags.enablePro = false;
     flags.enableCsvPass = false;
     flags.enablePushNotify = false;
     flags.enableTipMessage = false;
     flags.enableCreatorStoreUi = false;
+    flags.enableHandles = false;
     setConnected();
     setSiwe({ isSignedIn: false }); // 仮にサインインしていなくてもログイン導線を出さない
     renderWithIntl(<WalletBadge />);
@@ -310,7 +318,7 @@ describe('WalletBadge: SIWE サインイン', () => {
     // 回帰防止: siweEnabled に enablePushNotify を含めないと、push 単独構成でヘッダーから
     // サインインできず PushNotifyPanel が不到達になる (CsvPassPaywall と同型の教訓)。
     flags.enableFreeeSync = false;
-    flags.enableBilling = false;
+    flags.enableUsageFee = false;
     flags.enablePro = false;
     flags.enableCsvPass = false;
     flags.enablePushNotify = true;
@@ -325,7 +333,7 @@ describe('WalletBadge: SIWE サインイン', () => {
 
   it('チップ質問 inbox のみ ON → ログイン UI を出す (閲覧にサインインが要る)', () => {
     flags.enableFreeeSync = false;
-    flags.enableBilling = false;
+    flags.enableUsageFee = false;
     flags.enablePro = false;
     flags.enableCsvPass = false;
     flags.enablePushNotify = false;
@@ -341,7 +349,7 @@ describe('WalletBadge: SIWE サインイン', () => {
 
   it('Creator Store UI のみ ON → 出品管理用のログイン UI を出す', () => {
     flags.enableFreeeSync = false;
-    flags.enableBilling = false;
+    flags.enableUsageFee = false;
     flags.enablePro = false;
     flags.enableCsvPass = false;
     flags.enablePushNotify = false;
@@ -360,7 +368,7 @@ describe('WalletBadge: SIWE サインイン', () => {
     // 回帰防止: siweEnabled に enablePro を含めないと、Pro 単独構成でヘッダーからサインイン
     // できず、Pro ゲート (ProPaywall) が不到達になる。Pro だけでもログイン導線を出す。
     flags.enableFreeeSync = false;
-    flags.enableBilling = false;
+    flags.enableUsageFee = false;
     flags.enablePro = true;
     setConnected();
     setSiwe({ isSignedIn: false });
@@ -375,7 +383,7 @@ describe('WalletBadge: SIWE サインイン', () => {
     // 回帰防止: siweEnabled に enableCsvPass を含めないと、CSV パス単独構成 (= 現行の CSV ゲート)
     // でヘッダーからサインインできず、CSV パスゲート (CsvPassPaywall) が不到達になる。
     flags.enableFreeeSync = false;
-    flags.enableBilling = false;
+    flags.enableUsageFee = false;
     flags.enablePro = false;
     flags.enableCsvPass = true;
     setConnected();
@@ -516,5 +524,32 @@ describe('WalletBadge: 接続状態の切り替わり', () => {
     rerender(<WalletBadge />);
     expect(screen.getByText('接続')).toBeInTheDocument();
     expect(container.querySelector('details')?.open).toBe(false);
+  });
+});
+
+describe('WalletBadge: siweEnabled の flag 網羅 (掟 7)', () => {
+  const FLAG_NAMES = Object.keys(flags) as (keyof typeof flags)[];
+
+  it('このテストの flag holder は WalletBadge の siweEnabled が読む env キーと一致する', () => {
+    // holder が実装とずれると、mock されない flag は実 env の false 固定になり、
+    // 「足し忘れるとヘッダからサインインできない」を守るテストが黙って効かなくなる
+    // (旧 holder は実在しない enableBilling を持ち、enableUsageFee / enableHandles を欠いていた)。
+    const src = readFileSync(join(process.cwd(), 'components/WalletBadge.tsx'), 'utf8');
+    const block = src.slice(src.indexOf('const siweEnabled ='), src.indexOf('const handleSignIn'));
+    const used = [...block.matchAll(/env\.(enable\w+)/g)].map((m) => m[1]).sort();
+    expect(used.length).toBeGreaterThan(0);
+    expect([...FLAG_NAMES].sort()).toEqual(used);
+  });
+
+  it.each(FLAG_NAMES)('%s のみ ON → ヘッダにログイン UI を出す', (name) => {
+    for (const k of FLAG_NAMES) flags[k] = false;
+    flags[name] = true;
+    setConnected();
+    setSiwe({ isSignedIn: false });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    expect(
+      within(details).getByRole('menuitem', { name: 'ログイン (署名)' }),
+    ).toBeInTheDocument();
   });
 });
