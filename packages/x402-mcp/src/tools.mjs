@@ -5,11 +5,17 @@ import {
   createPaymentSession,
   createReceiptSignerResolver,
   createSigner,
+  createSignerFromOptions,
   formatAtomicJpyc,
   readRuntimeConfig,
   safeErrorMessage,
   SIGNER_MODES,
+  SUPPORTED_JPYC_ASSETS,
 } from 'openpay-x402-sdk';
+import { join } from 'node:path';
+import { encodeFunctionData, erc20Abi } from 'viem';
+import { createWallet, loadWallet, walletDirectory } from './keystore.mjs';
+import { fetchPolygonRpc } from './wallet-rpc.mjs';
 
 const TOOL_DEFINITIONS = [
   {
@@ -222,6 +228,18 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
     },
   },
+  {
+    name: 'wallet_init',
+    profiles: ['x402'],
+    description: 'Create a local wallet in keystore mode, or reuse the existing wallet. Returns only its public address and storage metadata; never a key. Does not pay.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'wallet_status',
+    profiles: ['x402'],
+    description: 'Read the signer address, Polygon JPYC balance when an RPC is configured, and local payment limits. Does not sign or pay.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
 ];
 
 function publicTool({ profiles: _profiles, ...tool }) {
@@ -234,7 +252,7 @@ function isObject(value) {
   return typeof value === 'object' && value !== null;
 }
 
-function textResult(value, isError = false) {
+function rawTextResult(value, isError = false) {
   return {
     content: [
       {
@@ -340,6 +358,7 @@ export function createToolRuntime({
   // MAX_DAILY_JPYC 設定時の日次支出ストア (テスト注入用)。既定はホームディレクトリの
   // ファイルストア (~/.openpay-x402/spend.json・SDK 0.5.0)。
   spendStore,
+  lookup,
 } = {}) {
   if (profile !== 'order' && profile !== 'x402') {
     throw new Error(`invalid profile: ${profile}`);
@@ -351,6 +370,55 @@ export function createToolRuntime({
   const allowedToolNames = new Set(profileDefinitions.map((tool) => tool.name));
   const knownToolNames = new Set(TOOL_DEFINITIONS.map((tool) => tool.name));
   const config = readRuntimeConfig(env);
+  const keystoreMode = config.signerMode === SIGNER_MODES.keystore;
+  const dailyLimitSource = config.maxDailyAtomic !== null
+    ? 'configured'
+    : keystoreMode ? 'default_keystore' : 'disabled';
+  if (dailyLimitSource === 'default_keystore') {
+    config.maxDailyAtomic = config.maxSessionAtomic;
+  }
+  const walletEnv = { HOME: env.HOME, OPENPAY_X402_HOME: env.OPENPAY_X402_HOME };
+  const rpcUrl = env.POLYGON_RPC_URL;
+  let walletPrivateKey = null;
+  let walletFailure = null;
+  let walletSigner = null;
+  const redactedKeys = new Set();
+  if (keystoreMode && config.buyerPrivateKey !== null) {
+    redactedKeys.add(config.buyerPrivateKey);
+    config.buyerPrivateKey = null;
+  }
+  function redactWalletKeys(text) {
+    for (const key of redactedKeys) text = text.split(key).join('[redacted_private_key]');
+    return text;
+  }
+  function errorMessage(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return safeErrorMessage(redactWalletKeys(message), config);
+  }
+  function textResult(value, isError = false) {
+    const result = rawTextResult(value, isError);
+    // Only known keys are removed from payloads. Generic 32-byte hex redaction would destroy nonces.
+    result.content[0].text = redactWalletKeys(result.content[0].text);
+    return result;
+  }
+  function rememberWalletFailure(error) {
+    walletFailure = { code: error.code ?? 'wallet_unavailable', message: errorMessage(error) };
+    walletSigner = null;
+    // Keep a previously loaded key in the redaction context even after disabling its signer.
+    // Otherwise a failed re-init could let a later response echo that secret into tool output.
+  }
+  function activateWallet(wallet) {
+    walletPrivateKey = wallet.secret.privateKey;
+    redactedKeys.add(walletPrivateKey);
+    walletSigner = createSignerFromOptions({ privateKey: walletPrivateKey });
+    walletFailure = null;
+  }
+  // A corrupt local wallet must not take discovery/quotes down, but must prevent every signature.
+  const walletReady = keystoreMode
+    ? loadWallet({ env: walletEnv }).then((wallet) => {
+        if (wallet !== null) activateWallet(wallet);
+      }).catch(rememberWalletFailure)
+    : Promise.resolve();
   const session = createPaymentSession();
   const sessionSigner =
     config.signerMode === SIGNER_MODES.steward
@@ -363,7 +431,14 @@ export function createToolRuntime({
   }
   const signer =
     sessionSigner ??
-    (config.buyerPrivateKey !== null
+    (keystoreMode ? {
+      get address() { return walletSigner?.address ?? null; },
+      get signerAvailable() { return walletSigner !== null; },
+      signTypedData(typedData) {
+        if (walletSigner === null) throw new Error(walletFailure?.code ?? 'wallet_not_initialized');
+        return walletSigner.signTypedData(typedData);
+      },
+    } : config.buyerPrivateKey !== null
       ? {
           get address() {
             return getEnvKeySigner().address;
@@ -378,22 +453,176 @@ export function createToolRuntime({
     discoveryUrl: config.discoveryUrl,
     fetchImpl,
   });
-  // 日次上限 (MAX_DAILY_JPYC) が設定されたときだけ永続ストアを用意する。未設定なら
-  // spendStore ごと null = 従来経路 (SDK 側で load すら走らない)。
-  const dailySpendStore =
-    config.maxDailyAtomic !== null && config.maxDailyAtomic !== undefined
-      ? (spendStore ?? createFileSpendStore())
-      : null;
+  // 有効な日次上限 (keystore の既定値を含む) があるときだけ永続ストアを用意する。
+  // env-key / steward の未設定時は null = 従来経路 (SDK 側で load すら走らない)。
+  let dailySpendStore = spendStore ?? null;
+  if (config.maxDailyAtomic !== null && dailySpendStore === null) {
+    try {
+      dailySpendStore = createFileSpendStore(keystoreMode
+        ? { path: join(walletDirectory(walletEnv), 'spend.json') }
+        : undefined);
+    } catch (error) {
+      if (!keystoreMode) throw error;
+      // Invalid wallet storage must disable signing without taking discovery/status down.
+      rememberWalletFailure(error);
+    }
+  }
+  if (config.maxDailyAtomic === null) dailySpendStore = null;
+  function walletSpendKey(key) {
+    if (walletSigner === null || dailySpendStore === null) {
+      throw new Error(walletFailure?.code ?? 'wallet_not_initialized');
+    }
+    return `${walletSigner.address.toLowerCase()}:${key.slice(-10)}`;
+  }
+  // SDK 0.9.0 captures signerAddress at construction. Translate its private placeholder
+  // to the active public address at the store boundary; the placeholder is never persisted.
+  const executorSpendStore = keystoreMode ? {
+    load(key) { return dailySpendStore.load(walletSpendKey(key)); },
+    save(key, value) { return dailySpendStore.save(walletSpendKey(key), value); },
+    ...(typeof dailySpendStore?.reserve === 'function' ? {
+      reserve(key, ...args) { return dailySpendStore.reserve(walletSpendKey(key), ...args); },
+    } : {}),
+    ...(typeof dailySpendStore?.confirm === 'function' ? {
+      confirm(id) { return dailySpendStore.confirm(id); },
+    } : {}),
+  } : dailySpendStore;
   const paymentExecutor = createPaymentExecutor({
-    config,
+    config: keystoreMode ? {
+      ...config,
+      get buyerPrivateKey() { return walletPrivateKey; },
+    } : config,
     session,
     signer,
+    ...(keystoreMode ? { signerAddress: 'keystore' } : {}),
     fetchImpl,
+    lookup,
     nowSec,
     resolveCatalogListings,
     resolveReceiptSigner,
-    spendStore: dailySpendStore,
+    spendStore: executorSpendStore,
   });
+  let walletOperations = Promise.resolve();
+  function serializeWallet(operation) {
+    if (!keystoreMode) return operation();
+    // Reinitialization cannot change the payer halfway through an outstanding authorization.
+    const run = walletOperations.then(operation, operation);
+    walletOperations = run.then(() => {}, () => {});
+    return run;
+  }
+
+  function fundingUrl(address) {
+    return address === null ? null : `https://open-pay.jp/agent?address=${address}`;
+  }
+
+  function requireEmptyArgs(args) {
+    const input = requireArgsObject(args);
+    if (Array.isArray(input) || Object.keys(input).length !== 0) {
+      throw new Error('wallet tools take no arguments');
+    }
+  }
+
+  async function walletInitImpl(args) {
+    requireEmptyArgs(args);
+    if (!keystoreMode) return { ok: false, error: 'wallet_init_requires_keystore_mode' };
+    await walletReady;
+    try {
+      const wallet = await createWallet({ env: walletEnv });
+      // Idempotent init preserves the executor's queue and outstanding session reservations.
+      if (walletSigner === null || wallet.secret.privateKey !== walletPrivateKey) activateWallet(wallet);
+      return {
+        address: wallet.public.address,
+        created: wallet.public.created,
+        storage: wallet.public.storage,
+        fundingUrl: fundingUrl(wallet.public.address),
+        note: 'OpenPay never receives, stores, or can recover this key. Anything that can run commands as you can read it. Keep only a small balance in this wallet.',
+      };
+    } catch (error) {
+      rememberWalletFailure(error);
+      return { ok: false, error: walletFailure.code, message: walletFailure.message };
+    }
+  }
+
+  function walletInit(args) {
+    return serializeWallet(() => walletInitImpl(args));
+  }
+
+  async function readBalance(address) {
+    if (!rpcUrl) return { jpycBalance: null, balanceSource: 'no_rpc_configured' };
+    let timeout;
+    const controller = new AbortController();
+    try {
+      if (address === null) return { jpycBalance: null, balanceSource: 'rpc_error' };
+      const token = SUPPORTED_JPYC_ASSETS['eip155:137'];
+      const request = async () => {
+        const response = await fetchPolygonRpc(rpcUrl, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          redirect: 'error',
+          signal: controller.signal,
+          body: JSON.stringify({
+            jsonrpc: '2.0', id: 1, method: 'eth_call',
+            params: [{ to: token.address, data: encodeFunctionData({
+              abi: erc20Abi, functionName: 'balanceOf', args: [address],
+            }) }, 'latest'],
+          }),
+        }, { fetchImpl, lookup });
+        const body = await response.json();
+        if (!response.ok || body?.error || !/^0x[0-9a-fA-F]{64}$/.test(body?.result)) {
+          throw new Error('invalid balance response');
+        }
+        return { jpycBalance: formatAtomicJpyc(BigInt(body.result)), balanceSource: 'rpc' };
+      };
+      // Bound both transport and body reads, even when an injected transport ignores abort.
+      return await Promise.race([request(), new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          reject(new Error('balance RPC timed out'));
+        }, 5000);
+      })]);
+    } catch {
+      // An optional balance lookup must not break status or turn an unknown balance into zero.
+      return { jpycBalance: null, balanceSource: 'rpc_error' };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async function walletStatus(args) {
+    requireEmptyArgs(args);
+    await walletReady;
+    const address = (keystoreMode ? walletSigner : signer)?.address ?? null;
+    let dailySpentJpyc = null;
+    if (dailySpendStore !== null && address !== null) {
+      try {
+        const key = `${address.toLowerCase()}:${new Date().toISOString().slice(0, 10)}`;
+        const spent = await dailySpendStore.load(key);
+        if (typeof spent === 'string' && /^[0-9]+$/.test(spent)) {
+          dailySpentJpyc = formatAtomicJpyc(BigInt(spent));
+        }
+      } catch {
+        // Status remains readable when spend storage fails; payment still fails closed in the SDK.
+      }
+    }
+    return {
+      signerMode: config.signerMode,
+      address,
+      walletError: walletFailure?.code ?? null,
+      walletErrorMessage: walletFailure?.message ?? null,
+      chain: 'polygon',
+      ...await readBalance(address),
+      limits: {
+        perCallJpyc: formatAtomicJpyc(config.maxPerCallAtomic),
+        sessionJpyc: formatAtomicJpyc(config.maxSessionAtomic),
+        sessionSpentJpyc: formatAtomicJpyc(session.spentAtomic),
+        dailyJpyc: config.maxDailyAtomic === null ? null : formatAtomicJpyc(config.maxDailyAtomic),
+        dailySpentJpyc,
+        dailyLimitSource,
+      },
+      allowedHosts: config.allowedHosts,
+      catalogTrust: config.catalogTrust,
+      fundingUrl: fundingUrl(address),
+    };
+  }
 
   // agent-order は discovery と同一 origin (config.discoveryUrl の origin) に対して menu/pay を叩く。
   function baseOrigin() {
@@ -607,6 +836,7 @@ export function createToolRuntime({
   async function x402Quote(args) {
     const input = requireArgsObject(args);
     if (typeof input.url !== 'string') throw new Error('url is required');
+    await walletReady;
     return paymentExecutor.quote(input.url);
   }
 
@@ -618,9 +848,17 @@ export function createToolRuntime({
     return `settlement: ${settlement} — verified only means the receipt signature is valid for the signer published by the discovery origin, not on-chain proof; treat unverified/receipt_unavailable as not proven paid`;
   }
 
-  async function x402Pay(args) {
+  async function x402PayImpl(args) {
     const input = requireArgsObject(args);
     if (typeof input.url !== 'string') throw new Error('url is required');
+    if (keystoreMode) {
+      await walletReady;
+      // SDK 0.9.0 only tests signer !== null; availability of this stable proxy is checked here.
+      if (!signer.signerAvailable) {
+        const reason = walletFailure?.code ?? 'wallet_not_initialized';
+        return { ok: false, error: reason, reasons: [reason] };
+      }
+    }
     const result = await paymentExecutor.pay(input.url, {
       maxTotalJpyc: input.maxTotalJpyc,
     });
@@ -629,11 +867,18 @@ export function createToolRuntime({
     return { ...result, settlementNote: settlementNote(result.settlement) };
   }
 
+  function x402Pay(args) {
+    return serializeWallet(() => x402PayImpl(args));
+  }
+
   async function callTool(name, args) {
     if (knownToolNames.has(name) && !allowedToolNames.has(name)) {
       return textResult({ ok: false, error: 'tool_not_in_profile' }, true);
     }
     try {
+      await walletReady;
+      if (name === 'wallet_init') return textResult(await walletInit(args));
+      if (name === 'wallet_status') return textResult(await walletStatus(args));
       if (name === 'discovery_search') return textResult(await discoverySearch(args));
       if (name === 'x402_quote') return textResult(await x402Quote(args));
       if (name === 'x402_pay') return textResult(await x402Pay(args));
@@ -643,10 +888,11 @@ export function createToolRuntime({
       if (name === 'createOrderLink') return textResult(await createOrderLink(args));
       if (name === 'find_shops') return textResult(await findShops(args));
       if (name === 'search_shops') return textResult(await searchShops(args));
-      return textResult({ ok: false, error: `unknown tool: ${name}` }, true);
+      const unknownTool = `unknown tool: ${name}`;
+      return textResult({ ok: false, error: keystoreMode ? errorMessage(unknownTool) : unknownTool }, true);
     } catch (error) {
       return textResult(
-        { ok: false, error: safeErrorMessage(error, config) },
+        { ok: false, error: errorMessage(error) },
         true,
       );
     }
@@ -666,5 +912,7 @@ export function createToolRuntime({
     createOrderLink,
     findShops,
     searchShops,
+    walletInit,
+    walletStatus,
   };
 }

@@ -19,7 +19,7 @@ forwarder-split extension.
 ### Install / run
 
 ```bash
-npx --yes --package=openpay-x402-mcp -- openpay-order-mcp
+npx --yes --package=openpay-x402-mcp@0.15.0 -- openpay-order-mcp
 ```
 
 ### Claude Desktop
@@ -29,7 +29,7 @@ npx --yes --package=openpay-x402-mcp -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.15.0", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -42,7 +42,7 @@ npx --yes --package=openpay-x402-mcp -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.15.0", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -56,7 +56,7 @@ This profile needs no `BUYER_PRIVATE_KEY`. It exposes four tools: `find_shops`,
 ### Install / run
 
 ```bash
-npx openpay-x402-mcp
+npx openpay-x402-mcp@0.15.0
 ```
 
 ### Claude Desktop
@@ -66,7 +66,7 @@ npx openpay-x402-mcp
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp"],
+      "args": ["openpay-x402-mcp@0.15.0"],
       "env": {
         "SIGNER_MODE": "env-key",
         "BUYER_PRIVATE_KEY": "0x...",
@@ -86,7 +86,7 @@ npx openpay-x402-mcp
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp"],
+      "args": ["openpay-x402-mcp@0.15.0"],
       "env": {
         "SIGNER_MODE": "env-key",
         "BUYER_PRIVATE_KEY": "0x...",
@@ -120,7 +120,7 @@ from strands import Agent
 from strands.tools.mcp import MCPClient
 
 openpay = MCPClient(lambda: stdio_client(StdioServerParameters(
-    command="npx", args=["-y", "openpay-x402-mcp"],
+    command="npx", args=["-y", "openpay-x402-mcp@0.15.0"],
     env={...},  # same env as the Claude examples above
 )))
 
@@ -150,8 +150,12 @@ The buyer pays the resource price **plus the ~1% x402 fee** (`total = price + fe
 
 ## Tools
 
+The x402 profile exposes 11 tools; the order profile exposes 4.
+
 | Tool | Profile | Pays? | Purpose |
 |---|---|---:|---|
+| `wallet_init` | x402 | No | `{}`: create or reuse the local wallet in keystore mode; return address, `created`, storage metadata, funding URL, and note. Never returns a key. |
+| `wallet_status` | x402 | No | `{}`: signer address/error, Polygon JPYC balance/source, effective limits/spend, allowed hosts, catalog trust, and funding URL. |
 | `discovery_search` | x402 | No | Search `DISCOVERY_URL` and show resource, category, price, fee, and total. |
 | `x402_quote` | x402 | No | Fetch a 402 challenge and report whether local guards would allow payment. |
 | `x402_pay` | x402 | Yes | Sign and retry with `X-PAYMENT` only after all guards pass. Requires `maxTotalJpyc`. |
@@ -191,7 +195,7 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 
 | Variable | Default | Notes |
 |---|---|---|
-| `SIGNER_MODE` | `env-key` | `env-key` signs in-process with `BUYER_PRIVATE_KEY`. `steward` delegates typed-data signing to Steward. |
+| `SIGNER_MODE` | `env-key` | `env-key` signs in-process with `BUYER_PRIVATE_KEY`. `steward` delegates typed-data signing to Steward. Explicit `keystore` uses the local wallet file, with no fallback to another signer. |
 | `BUYER_PRIVATE_KEY` | unset | Required only for `x402_pay` when `SIGNER_MODE=env-key`. Use a dedicated low-balance wallet, never a primary wallet. |
 | `STEWARD_URL` | unset | Required when `SIGNER_MODE=steward`, for example `http://localhost:3900`. |
 | `STEWARD_TENANT` | unset | Required when `SIGNER_MODE=steward`; tenant context sent as `X-Steward-Tenant`. |
@@ -202,10 +206,12 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | `STEWARD_SIGNER_SECRET` | unset | Required when `SIGNER_MODE=steward`; scoped signer secret. Treated as a secret. |
 | `MAX_PER_CALL_JPYC` | `10` | Upper bound for the tool call's required `maxTotalJpyc`. |
 | `MAX_SESSION_JPYC` | `100` | Process-lifetime cap for successful payments plus signed authorizations exposed to a seller. A non-2xx response or timeout keeps its reservation. Restarting the process resets this cap. |
-| `MAX_DAILY_JPYC` | unset | Optional per-UTC-day cap that **survives restarts**. Immediately before `X-PAYMENT` is sent, the amount is reserved under an exclusive file lock in `~/.openpay-x402/spend.json`. Non-2xx/timeout reservations are retained because settlement may already have occurred; unreadable or unwritable state fails closed. |
+| `MAX_DAILY_JPYC` | `MAX_SESSION_JPYC` in keystore; unset otherwise | Per-UTC-day cap that **survives restarts**. Immediately before `X-PAYMENT` is sent, the amount is reserved under an exclusive file lock in `~/.openpay-x402/spend.json` (keystore uses `OPENPAY_X402_HOME/spend.json` when set). Non-2xx/timeout reservations are retained because settlement may already have occurred; unreadable or unwritable state fails closed. |
 | `MAX_TIMEOUT_SECONDS` | `600` | Reject seller-declared authorization lifetimes above this many seconds. Configurable from `1` to the facilitator ceiling of `1200`; the value is never silently clamped. |
 | `CATALOG_TRUST` | `true` | When true, exact URLs listed in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. Before signing, the live `accepts` fetched from a catalog URL is checked field-by-field (asset / timeout / forwarder / merchant / fee receiver / amounts) against the catalog listing (server-authored), so a third-party domain cannot bait-and-switch a different destination or authorization lifetime; mismatches are refused (`catalog_accept_mismatch`). Money caps still apply. Set `false` for strict manual allowlisting. |
 | `ALLOWED_HOSTS` | `open-pay.jp` | Comma-separated bare host allowlist. `x402_quote` still works outside the list but returns `host_not_allowed`. |
+| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Keystore storage directory override: contains `wallet.json` and the daily spend ledger `spend.json`. A relative path returns `wallet_home_not_absolute` from both wallet tools while discovery remains available. Does not relocate env-key / Steward spend storage. |
+| `POLYGON_RPC_URL` | unset | Optional read-only `wallet_status` RPC. SDK outbound URL/host checks reject private/link-local addresses, `.internal`, and URL credentials; validated DNS addresses are pinned for the built-in transport. Explicit exception: HTTP on `localhost` / `127.0.0.1`. No public RPC default, redirects rejected, 5-second timeout including DNS and body reads. Never accepted as a tool argument. |
 | `DISCOVERY_URL` | `https://open-pay.jp/api/discovery` | Catalog used by `discovery_search`. |
 
 Catalog admission is exact URL only, including the query string. A query
@@ -224,6 +230,121 @@ POST {STEWARD_URL}/vault/{STEWARD_AGENT_ID}/sign-typed-data
 with `X-Steward-Key`, `X-Steward-Tenant`, `x-steward-signer-id`, and `x-steward-signer-secret` headers. The request body is `{ domain, types, primaryType, value }`, where `value` is the EIP-712 message.
 
 After the first Steward signature in a process session, the MCP verifies it locally against `STEWARD_AGENT_ADDRESS`. A mismatch fails closed before any paid resource retry is sent.
+
+### Local wallet (`SIGNER_MODE=keystore`)
+
+Use this explicit mode to avoid pasting a private key into MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "openpay-x402": {
+      "command": "npx",
+      "args": ["--yes", "openpay-x402-mcp@0.15.0"],
+      "env": {
+        "SIGNER_MODE": "keystore",
+        "MAX_PER_CALL_JPYC": "10",
+        "MAX_SESSION_JPYC": "100",
+        "ALLOWED_HOSTS": "open-pay.jp"
+      }
+    }
+  }
+}
+```
+
+These examples target the coordinated SDK 0.9.0 / MCP 0.15.0 release. Publish
+SDK first, then MCP, then update Web setup after a real-host smoke. Publication
+requires explicit human review and a real-host `wallet_init → funding →
+wallet_status → x402_pay` check. Keep the package version pinned.
+
+1. Register the MCP server, restart the host, and call `wallet_status {}` to
+   confirm it starts. If startup fails, report the error verbatim.
+2. Call `wallet_init {}`. Give the person the public `address` and `fundingUrl`
+   (`https://open-pay.jp/agent?address=<address>`). Initialization activates the
+   signer immediately; a second host restart is unnecessary.
+3. The person funds that address with a small amount of JPYC.
+4. Call `wallet_status {}`, `discovery_search`, and `x402_quote`. Setup itself
+   does not pay.
+
+All operating systems use a plaintext `wallet.json` with mode 0600 in a 0700
+directory. Its internal format is `{ version: 1, address, privateKey, createdAt }`;
+file contents are never tool output. The key stays in process memory and is never
+written into `process.env`. Startup loads once; `wallet_init` rereads the stored
+record and reuses it without overwriting or regenerating it. Creation writes a
+random `wallet.json.<random>.tmp` with exclusive `wx` and mode 0600, fsyncs it,
+then publishes with a hard link that atomically refuses an existing destination.
+It removes the temporary file, fsyncs the directory, and rereads the stored
+key/address before returning. Failed attempts clean up their temporary file;
+unsupported hard links fail closed with `wallet_unavailable` and a filesystem
+reason code (for example `EPERM` or `ENOTSUP`), without a rename fallback.
+Reinitialization and payments share a queue, retaining the same payment executor
+and session accounting. Previously loaded keys and any stray `BUYER_PRIVATE_KEY`
+remain redacted; keystore mode never signs with that environment key.
+There is no Keychain backend or wallet export/import/delete tool.
+
+Missing wallets leave discovery and quote available; `x402_pay` and
+`search_shops` return `wallet_not_initialized` before sending any request.
+Corruption (`wallet_corrupt`), address mismatch (`wallet_address_mismatch`),
+symlink directories (`wallet_dir_symlink`), nonregular/symlink files
+(`wallet_file_unsafe`), and unsafe permissions (`wallet_permissions_unsafe`) fail
+closed without replacement. `wallet_status.walletError` reports the error code
+and `walletErrorMessage` carries the same guidance as `wallet_init.message`.
+Corrupt, mismatched, or unsafe wallet files include their path and this recovery
+guidance: **Do not delete this file. Move it aside under another name** (for
+example `mv '<path>' '<path>.broken'`). **If you have ever funded this address,
+this file may be the only copy of the key.** Preserve it for recovery; moving it
+does not recover its funds. Permissions are never fixed
+automatically: on POSIX, use `chmod 700 ~/.openpay-x402` and
+`chmod 600 ~/.openpay-x402/wallet.json` after inspecting the problem. Windows
+skips POSIX permission-bit validation and reports `storage.permissionsChecked:
+false`; this does not establish an ACL guarantee.
+
+`wallet_status` returns `signerMode`, `address` (or null), `walletError` and
+`walletErrorMessage` (or null), `chain: "polygon"`, `jpycBalance`, `balanceSource`, `limits`,
+`allowedHosts`, `catalogTrust`, and `fundingUrl` (or null). Limits contain
+`perCallJpyc`, `sessionJpyc`, `sessionSpentJpyc`, `dailyJpyc`, `dailySpentJpyc`,
+and `dailyLimitSource` (`default_keystore`, `configured`, or `disabled`). Spend
+includes persisted reservations; unavailable daily spend is null. In keystore
+mode an unset/empty `MAX_DAILY_JPYC` uses `MAX_SESSION_JPYC` (100 JPYC by default).
+An empty wallet cannot have daily spend checked, so its quote can include
+`daily_spend_unavailable` while still reporting the price.
+
+Balance is a read-only `balanceOf` call on the SDK's Polygon JPYC v3 asset,
+only when `POLYGON_RPC_URL` is configured and an address is available. Without
+an RPC, `jpycBalance: null` and `balanceSource: "no_rpc_configured"`; a failed,
+invalid, timed-out lookup or unavailable address returns null and `"rpc_error"`.
+A successful lookup returns a JPYC decimal string and `"rpc"`. Unknown is never
+reported as zero. The EOA key is chain-independent, but this tool reports only
+Polygon. In env-key / Steward modes it reports the existing signer address
+(`STEWARD_AGENT_ADDRESS` for Steward) and unchanged limits, without returning
+private credentials.
+
+## Local wallet threat model
+
+**Protects against:** routine key copying into chat, MCP configuration, and shell
+history, and copy/paste mistakes. By design the key does not enter tool output or
+the conversation. POSIX 0600/0700 permissions restrict access from other OS users.
+OpenPay は鍵を受け取らない・保管しない・復元できない — OpenPay does not receive,
+store, or recover the key. Loss of the file without a user-managed copy means
+loss of the wallet; any copy or backup is also a plaintext secret.
+
+**Does not protect against:** malicious code running as the same OS user, an
+administrator, or a compromised agent with shell access. あなたとしてコマンドを実行できるものは、この鍵を読める
+— anything that can run commands as you can read this key. Filesystem backups,
+dotfile synchronization, and disk access can copy the plaintext wallet. Core dumps
+and swap are outside this threat model. Windows permission bits are not checked.
+
+An agent can also call `x402_pay` without reading the key. If the agent is taken
+over, reading the key exposes **the entire wallet balance**; for example, a
+500-JPYC wallet exposes all **500 JPYC**, regardless of MCP limits. If the agent
+can only use MCP payment tools and cannot alter configuration/state, its exposure
+is **min(balance, daily limit) per UTC day**: with a 500-JPYC balance and the
+100-JPYC default daily limit, up to **100 JPYC/day** (per-call default 10 JPYC,
+session default 100 JPYC). Across midnight that permits up to 200 JPYC in a short
+interval spanning two UTC days. A shell-capable attacker can also edit the local
+limits/ledger. These are local controls, not an on-chain spending restriction.
+Per-call/session/daily guards, host allowlists, and catalog checks still apply to
+ordinary MCP payments. Keep a dedicated wallet with only a small balance.
 
 ## Steward Setup
 
