@@ -182,7 +182,7 @@ const ja: AgentPageContent = {
     points: [
       '専用の Agent Wallet には、使ってよい金額だけを入れてください。残高が実質的な上限になります。',
       'このページに秘密鍵の入力欄はありません。鍵を求める OpenPay の画面があれば偽物です。',
-      '秘密鍵は Agent との会話に貼らず、設定ファイルに自分で追加します。自分で Steward サーバーを運用すれば、鍵を MCP の外に置くこともできます。',
+      'ウォレットの鍵は、Agent を動かすあなたのマシン上で MCP が作って保管します。会話にも OpenPay にも出ません。ただし、あなたとしてコマンドを実行できるものはこの鍵を読めます。入れるのは失ってもよい少額だけにしてください。OpenPay は鍵を復元できません。',
     ],
   },
   generator: {
@@ -200,7 +200,7 @@ const ja: AgentPageContent = {
     fields: {
       maxPerCallJpyc: { label: '1 回の上限 (JPYC)', hint: '価格と利用料の合計に対する上限' },
       maxSessionJpyc: { label: 'セッションの上限 (JPYC)', hint: 'MCP を再起動するとリセットされます' },
-      maxDailyJpyc: { label: '1 日の上限 (JPYC)', hint: '任意・再起動しても保たれます (UTC 日)' },
+      maxDailyJpyc: { label: '1 日の上限 (JPYC)', hint: '空欄ならセッションの上限と同額が適用されます・再起動しても保たれます (UTC 日)' },
       allowedHosts: { label: '接続先 (Allowed Hosts)', hint: 'カンマ区切りのホスト名' },
     },
     catalogTrustLabel: 'AI ストア掲載の URL を許可 (CATALOG_TRUST)',
@@ -217,7 +217,7 @@ const ja: AgentPageContent = {
     copy: '設定をコピー',
     copied: 'コピーしました',
     keyNote:
-      'この設定に秘密鍵は含まれません。鍵なしでも検索と見積もりは動きます。支払いを有効にするには、設定ファイルの env に BUYER_PRIVATE_KEY (専用ウォレットの鍵) か SIGNER_MODE=steward と STEWARD_* を自分で追加してください。',
+      'この設定に秘密鍵は含まれません。貼り付けて Agent のホストを再起動したら、Agent に「wallet_init を呼んで」と頼んでください。MCP があなたのマシン上でウォレットを作り、アドレスと入金用のリンクだけを返します。そのアドレスへ JPYC を送れば支払いが有効になります。',
     feeNote: `買い手は価格に加えて x402 利用料 ${feeText('ja')} を支払います。1 回の上限は合計額で決めてください。`,
   },
   wallet: {
@@ -326,7 +326,7 @@ const en: AgentPageContent = {
     points: [
       'Fund the dedicated agent wallet only with what you are willing to spend. Its balance is the effective ceiling.',
       'This page has no private-key field. Any OpenPay screen asking for a key is fake.',
-      'Never paste a private key into a chat with your agent; add it to the config file yourself. If you run your own Steward server, the key can stay outside the MCP process.',
+      'The wallet key is created and kept by the MCP on your own machine, where your agent runs. It never enters the chat or reaches OpenPay. Anything that can run commands as you can still read it, so fund it only with a small amount you can afford to lose. OpenPay cannot recover the key.',
     ],
   },
   generator: {
@@ -344,7 +344,7 @@ const en: AgentPageContent = {
     fields: {
       maxPerCallJpyc: { label: 'Per-call limit (JPYC)', hint: 'Ceiling for price plus fee' },
       maxSessionJpyc: { label: 'Session limit (JPYC)', hint: 'Resets when the MCP restarts' },
-      maxDailyJpyc: { label: 'Daily limit (JPYC)', hint: 'Optional · survives restarts (UTC day)' },
+      maxDailyJpyc: { label: 'Daily limit (JPYC)', hint: 'Blank applies the session limit as the daily limit · survives restarts (UTC day)' },
       allowedHosts: { label: 'Allowed hosts', hint: 'Comma-separated host names' },
     },
     catalogTrustLabel: 'Allow URLs listed on the AI Store (CATALOG_TRUST)',
@@ -361,7 +361,7 @@ const en: AgentPageContent = {
     copy: 'Copy config',
     copied: 'Copied',
     keyNote:
-      'This config contains no private key. Search and quotes work without one. To enable paying, add BUYER_PRIVATE_KEY (a dedicated wallet’s key) or SIGNER_MODE=steward with the STEWARD_* values to the env in the config file yourself.',
+      'This config contains no private key. After pasting it and restarting your agent’s host, ask the agent to “call wallet_init”. The MCP creates a wallet on your machine and returns only its address and a funding link. Send JPYC to that address and paying is enabled.',
     feeNote: `The buyer pays the price plus the x402 fee of ${feeText('en')}. Size the per-call limit for the total.`,
   },
   wallet: {

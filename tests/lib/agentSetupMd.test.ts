@@ -18,7 +18,7 @@ describe('agent setup document drift fences', () => {
   });
   it('references real MCP tools and contains no key-bearing execution example', () => {
     const source = readFileSync('packages/x402-mcp/src/tools.mjs', 'utf8');
-    for (const tool of ['discovery_search', 'x402_quote', 'x402_pay', 'find_shops']) {
+    for (const tool of ['discovery_search', 'x402_quote', 'x402_pay', 'find_shops', 'wallet_init', 'wallet_status']) {
       expect(md).toContain(`\`${tool}\``);
       expect(source).toContain(`name: '${tool}'`);
     }
@@ -37,5 +37,20 @@ describe('agent setup document drift fences', () => {
       vi.unstubAllEnvs();
       vi.resetModules();
     }
+  });
+  it('registers the keystore signer with the pinned package version, and never a key', async () => {
+    const { AGENT_MCP_SPEC } = await import('@/lib/agentSetup');
+    // 全ての登録例が版固定の spec を使う (無固定の npx を残さない)。
+    const specs = md.match(/openpay-x402-mcp@[0-9.]+/g) ?? [];
+    expect(specs.length).toBeGreaterThanOrEqual(5);
+    expect(new Set(specs)).toEqual(new Set([AGENT_MCP_SPEC]));
+    expect(md).not.toMatch(/npx (?:--yes |-y )?openpay-x402-mcp(?!@)/);
+    expect(md.match(/SIGNER_MODE\W+keystore/g)?.length ?? 0).toBeGreaterThanOrEqual(4);
+    // 壊れたウォレットを消させない・復元できないことを必ず伝える。
+    expect(md).toContain('do not delete or rewrite the file');
+    expect(md).toContain('never receives, stores, or can recover this key');
+    const guards = readFileSync('packages/x402-mcp/src/tools.mjs', 'utf8');
+    expect(guards).toContain('wallet_not_initialized');
+    expect(md).toContain('`wallet_not_initialized`');
   });
 });

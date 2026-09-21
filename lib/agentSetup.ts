@@ -5,13 +5,21 @@
 // env 名・既定値の SoT は packages/x402-sdk/src/guards.mjs — 食い違いは
 // tests/lib/agentSetup.test.ts のドリフトフェンスが CI で検出する。
 //
-// 秘密情報は生成物に一切含めない: `BUYER_PRIVATE_KEY` にプレースホルダ (`0x...`) を入れると
-// MCP は起動時の検証で落ちる (guards.mjs parseOptionalPrivateKey)。鍵なしでも
-// discovery_search / x402_quote は動くので、鍵は確認が済んだ後に人が自分で足す。
+// 秘密情報は生成物に一切含めない。署名方式は `SIGNER_MODE=keystore` (openpay-x402-mcp 0.15 以降):
+// 鍵は MCP が利用者のマシン上で生成・保管し (`wallet_init`)、AI には公開アドレスしか返さない。
+// 人が鍵を用意して env に貼る手順は無い (`BUYER_PRIVATE_KEY=0x...` のプレースホルダは MCP が起動時に拒否する)。
+// ウォレット未作成でも discovery_search / x402_quote は動き、x402_pay だけが wallet_not_initialized で止まる。
 
 export const AGENT_SETUP_URL = 'https://open-pay.jp/agent/setup.md';
 
 export const AGENT_MCP_PACKAGE = 'openpay-x402-mcp';
+/**
+ * 生成するコマンドは minor を固定する。無固定の `npx` だと、将来の publish が既に配った設定の挙動を
+ * 遡って変えてしまい、Web を戻しても取り消せない。packages/x402-mcp/package.json の minor と一致
+ * (tests/lib/agentSetup.test.ts のフェンス)。keystore は 0.15 から。
+ */
+export const AGENT_MCP_VERSION = '0.15';
+export const AGENT_MCP_SPEC = `${AGENT_MCP_PACKAGE}@${AGENT_MCP_VERSION}`;
 export const AGENT_PAYS_SERVER = 'openpay-x402';
 export const HUMAN_PAYS_SERVER = 'openpay-order';
 
@@ -111,6 +119,7 @@ export function buildAgentEnv(input: AgentConfigInput): [string, string][] {
     throw new Error('agent config input is invalid');
   }
   const entries: [string, string][] = [
+    ['SIGNER_MODE', 'keystore'],
     ['MAX_PER_CALL_JPYC', input.maxPerCallJpyc],
     ['MAX_SESSION_JPYC', input.maxSessionJpyc],
   ];
@@ -132,9 +141,9 @@ function launchFor(mode: AgentMode): { server: string; args: string[] } {
   return mode === 'human-pays'
     ? {
         server: HUMAN_PAYS_SERVER,
-        args: ['--yes', `--package=${AGENT_MCP_PACKAGE}`, '--', 'openpay-order-mcp'],
+        args: ['--yes', `--package=${AGENT_MCP_SPEC}`, '--', 'openpay-order-mcp'],
       }
-    : { server: AGENT_PAYS_SERVER, args: ['--yes', AGENT_MCP_PACKAGE] };
+    : { server: AGENT_PAYS_SERVER, args: ['--yes', AGENT_MCP_SPEC] };
 }
 
 /**
@@ -201,12 +210,12 @@ export function buildSetupPrompt(locale: string): string {
       `Run \`curl -sL ${AGENT_SETUP_URL}\` and follow the returned instructions.`,
       '',
       'Rules:',
-      '- Never ask me for a private key, and never print, log, or send one anywhere (not to this chat, not to OpenPay, not to any third party). I will add the key to the config file myself, after setup.',
+      '- Never ask me for a private key, and never read, print, log, or send one anywhere (not to this chat, not to OpenPay, not to any third party). The MCP server creates the wallet key on this machine and shows you only its public address.',
       '- Assume a dedicated low-balance agent wallet, not my main wallet.',
       '- Set the per-call, per-session, and daily spending limits and the allowed hosts. Ask me for the amounts if I have not given them.',
       '- Do not make any real payment during setup.',
       '',
-      'When you are done, report: the config you wrote, the limits you applied, how I can check the agent wallet JPYC balance, and which JPYC resources on the OpenPay AI Store this agent can buy right now (with a quote for one of them).',
+      'When you are done, report: the config you wrote, the limits you applied, the agent wallet address and the link where I can fund it and check its JPYC balance, and which JPYC resources on the OpenPay AI Store this agent can buy right now (with a quote for one of them).',
     ].join('\n');
   }
   return [
@@ -215,11 +224,11 @@ export function buildSetupPrompt(locale: string): string {
     `\`curl -sL ${AGENT_SETUP_URL}\` を実行し、返ってきた手順に従ってください。`,
     '',
     'ルール:',
-    '- 秘密鍵を私に尋ねないでください。秘密鍵をこのチャット・OpenPay・その他の第三者へ表示・記録・送信しないでください。鍵は設定の完了後に、私が自分で設定ファイルへ追加します。',
+    '- 秘密鍵を私に尋ねないでください。秘密鍵を読み出したり、このチャット・OpenPay・その他の第三者へ表示・記録・送信したりしないでください。ウォレットの鍵は MCP サーバーがこのマシン上で作り、あなたには公開アドレスだけが返ります。',
     '- 支払いには、メインのウォレットではなく少額の専用 Agent Wallet を使う前提で進めてください。',
     '- 1 回・セッション・1 日の支払い上限と、接続先の制限を設定してください。金額を私が指定していなければ尋ねてください。',
     '- 設定中に実際の支払いはしないでください。',
     '',
-    '完了したら、書き込んだ設定・適用した支払い上限・Agent Wallet の JPYC 残高の確認方法・いまこの Agent が OpenPay AI ストアで購入できる JPYC リソース (うち 1 件の見積もり) を報告してください。',
+    '完了したら、書き込んだ設定・適用した支払い上限・Agent Wallet のアドレスと入金/残高確認用のリンク・いまこの Agent が OpenPay AI ストアで購入できる JPYC リソース (うち 1 件の見積もり) を報告してください。',
   ].join('\n');
 }
