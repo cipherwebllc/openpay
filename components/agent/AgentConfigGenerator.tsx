@@ -26,8 +26,11 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
   return (
     <details className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-8">
       <summary className="cursor-pointer rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600">
-        <span className="text-lg font-bold text-slate-900">{c.title}</span>
-        <span className="mt-1 block pl-5 text-sm font-normal text-slate-500">{c.summaryHint}</span>
+        {/* summary の中身は「phrasing content か見出し 1 つ」。見出しを保ってアウトライン (h2 の並び) から消さない。 */}
+        <h2 className="inline text-lg font-bold text-slate-900">
+          {c.title}
+          <span className="mt-1 block pl-5 text-sm font-normal text-slate-500">{c.summaryHint}</span>
+        </h2>
       </summary>
       <p className="mt-3 text-sm text-slate-700">{c.lead}</p>
       <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">

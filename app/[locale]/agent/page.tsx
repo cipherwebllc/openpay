@@ -28,7 +28,8 @@ export default async function AgentPage({ params }: { params: Promise<{ locale: 
           <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">{c.title}</h1>
           <p className="mt-4 text-sm text-slate-600">{c.subtitle}</p>
         </header>
-        <Suspense fallback={<p className="min-h-[22rem] text-sm text-slate-500 sm:min-h-[20rem]">{c.wallet.balanceLoading}</p>}><AgentWalletCard c={c.wallet} /></Suspense>
+        {/* fallback は実カードの復元前 (外枠 + 見出し) と同じ形にする — 大きな予約 → 縮む → 伸びる、の 2 回シフトを避ける。 */}
+        <Suspense fallback={<section className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6"><h2 className="text-xl font-bold text-slate-900">{c.wallet.title}</h2></section>}><AgentWalletCard c={c.wallet} /></Suspense>
         <AgentConnect locale={locale} c={c.connect} />
         <section>
           <h2 className="text-xl font-bold text-slate-900">{c.modes.title}</h2>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useLocale } from 'next-intl';
@@ -28,7 +28,9 @@ export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
   });
   const [restored, setRestored] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [fundOpen, setFundOpen] = useState(false);
+  // `?address=` 付きの着地は MCP の入金リンク (wallet_init の fundingUrl) 経由 = 入金が目的なので、パネルを開いて迎える。
+  const [fundOpen, setFundOpen] = useState(() => { const initial = params.get('address'); return Boolean(initial && isAddress(initial)); });
+  const changeRef = useRef<HTMLButtonElement>(null);
   const [fundBusy, setFundBusy] = useState(false);
   // localStorage は SSR と初回描画に無いので mount 後に 1 回だけ読む。
   // ブラウザ API の失敗 (private mode 等) をページ描画へ波及させないための try-catch。
@@ -59,6 +61,10 @@ export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
     if (address && !fundBusy) setFundAddress(address);
   }, [address, fundBusy]);
   const fundVisible = fundBusy || (Boolean(address) && fundOpen);
+  // 入金用の表示 (アドレス行・コピー・QR) は常に「いま上のカードに出ているアドレス」。fundAddress は送金フォームの宛先専用。
+  // 送信中にアドレスを変えても QR が旧アドレスのまま残り、外部からの入金が意図しない宛先へ着く波及を断つ。
+  const shownAddress = address ?? fundAddress;
+  const pendingToOther = fundBusy && Boolean(address) && fundAddress.toLowerCase() !== (address ?? '').toLowerCase();
   useEffect(() => {
     if (!restored) return;
     try {
@@ -89,7 +95,12 @@ export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
           <label htmlFor="agent-wallet-address" className="mt-3 block text-sm font-medium">{c.inputLabel}</label>
           <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
             <input id="agent-wallet-address" className={`block w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm ${focus}`} placeholder={c.inputPlaceholder} value={input} spellCheck={false} autoCapitalize="none" aria-invalid={Boolean(value && !address)} aria-describedby={value && !address ? 'agent-wallet-error' : undefined} onChange={(e) => { setInput(e.target.value); setEditing(true); }} />
-            {isConnected && connectedAddress ? <button type="button" className={`shrink-0 rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium ${focus}`} onClick={() => setInput(connectedAddress)}>{c.useConnected}</button> : null}
+            {isConnected && connectedAddress ? <button type="button" className={`shrink-0 rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium ${focus}`} onClick={() => {
+              setInput(connectedAddress);
+              setEditing(false);
+              // 押したボタンごと入力欄が畳まれる。フォーカスが body に落ちないよう「変更」へ移す。
+              requestAnimationFrame(() => changeRef.current?.focus());
+            }}>{c.useConnected}</button> : null}
           </div>
           {value && !address ? <p id="agent-wallet-error" className="mt-2 text-xs text-red-700">{c.invalidAddress}</p> : null}
         </div>
@@ -98,7 +109,7 @@ export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
               <span className="rounded-full bg-white/10 px-3 py-1 font-mono text-slate-200">{address.slice(0, 6)}…{address.slice(-4)}</span>
               {available ? <button type="button" className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-white ${focus}`} onClick={async () => { if (await copy(address)) setCopiedAddress(address); }}><Copy aria-hidden size={14} />{copied && copiedAddress === address ? c.copied : c.copyShort}</button> : null}
-              <button type="button" aria-expanded={inputExpanded} aria-controls="agent-wallet-input" className={`rounded-lg px-2 py-1 text-xs text-white underline ${focus}`} onClick={() => setEditing((current) => !current)}>{c.changeAddress}</button>
+              <button ref={changeRef} type="button" aria-expanded={inputExpanded} aria-controls="agent-wallet-input" className={`rounded-lg px-2 py-1 text-xs text-white underline ${focus}`} onClick={() => setEditing((current) => !current)}>{c.changeAddress}</button>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
               <div className="min-w-0">
@@ -126,12 +137,14 @@ export function AgentWalletCard({ c }: { c: AgentPageContent['wallet'] }) {
             <div className="min-w-0">
               <h3 className="font-bold text-slate-900">{c.fundTitle}</h3>
               <p className="mt-2 text-sm leading-relaxed text-slate-600">{c.fundBody}</p>
-              <p className="mt-3 select-all break-all font-mono text-sm">{fundAddress}</p>
-              {available ? <button type="button" className={`mt-3 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white ${focus}`} onClick={async () => { if (await copy(fundAddress)) setCopiedAddress(fundAddress); }}>{copied && copiedAddress === fundAddress ? c.copied : c.copyAddress}</button> : null}
+              <p className="mt-3 select-all break-all font-mono text-sm">{shownAddress}</p>
+              {available ? <button type="button" className={`mt-3 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white ${focus}`} onClick={async () => { if (await copy(shownAddress)) setCopiedAddress(shownAddress); }}>{copied && copiedAddress === shownAddress ? c.copied : c.copyAddress}</button> : null}
             </div>
             {/* QR は直前のアドレス行と同じ情報なので a11y ツリーからは外す (掟 8)。 */}
-            <div aria-hidden className="h-fit w-fit rounded-xl bg-white p-3 ring-1 ring-slate-200/70"><QRCodeSVG value={fundAddress} size={160} /></div>
+            <div aria-hidden className="h-fit w-fit rounded-xl bg-white p-3 ring-1 ring-slate-200/70"><QRCodeSVG value={shownAddress} size={160} /></div>
             <div className="min-w-0 sm:col-span-2">
+              {fundBusy ? <p className="mb-3 text-xs leading-relaxed text-slate-600">{c.fundLockedNote}</p> : null}
+              {pendingToOther ? <p className="mb-3 break-all rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-200">{c.pendingToOther} <span className="font-mono">{fundAddress}</span></p> : null}
               <AgentFundFromWallet locale={locale} c={c.fundFromWallet} agentAddress={fundAddress} onSent={() => { void balance.refetch(); }} onBusyChange={setFundBusy} />
             </div>
           </div>

@@ -18,6 +18,8 @@ describe('AgentConfigGenerator', () => {
     const summary = screen.getByText(c.title);
     const limit = screen.getByLabelText(c.fields.maxPerCallJpyc.label);
     expect(details).not.toHaveAttribute('open');
+    // 畳んでも見出し (h2) はアウトラインに残す (summary の中の見出し 1 つは HTML 仕様で許される)。
+    expect(details?.querySelector('summary h2')).toHaveTextContent(agentPageContentFor(locale).generator.title);
     expect(limit).not.toBeVisible();
     await user.click(summary);
     fireEvent.change(limit, { target: { value: '25' } });

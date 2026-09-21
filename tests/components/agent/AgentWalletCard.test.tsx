@@ -103,10 +103,14 @@ describe('AgentWalletCard', () => {
   it('disables closing while busy and preserves the mounted recipient through edits', () => {
     state.query = `address=${address}`;
     const { container } = render(<AgentWalletCard c={C} />);
-    fireEvent.click(screen.getByRole('button', { name: C.fundCta }));
+    // `?address=` 付きの着地 (MCP の入金リンク) は最初から開いている。
+    expect(container.querySelector('#agent-fund')).toBeVisible();
+    expect(screen.queryByText(C.fundLockedNote)).toBeNull();
     act(() => state.fund.mock.calls.at(-1)?.[0].onBusyChange(true));
     const close = screen.getByRole('button', { name: C.closeFund });
     expect(close).toBeDisabled();
+    // 閉じられない理由を見せる。
+    expect(screen.getByText(C.fundLockedNote)).toBeVisible();
     fireEvent.click(close);
     fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
     fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: '' } });
@@ -115,11 +119,40 @@ describe('AgentWalletCard', () => {
     fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: next } });
     expect(screen.getByRole('button', { name: C.closeFund })).toBeDisabled();
     expect(state.fund).toHaveBeenLastCalledWith(expect.objectContaining({ agentAddress: address }));
+    // 入金用の表示 (アドレス行・QR) は上のカードと同じ新しいアドレス。送金フォームの宛先だけが旧アドレスに固定される。
+    // 旧アドレスの QR が残ると、外部からの入金が意図しない宛先へ着く (送金は取り消せない)。
+    expect(container.querySelector(`svg[data-value="${next}"]`)).not.toBeNull();
+    expect(container.querySelector(`svg[data-value="${address}"]`)).toBeNull();
+    expect(container.querySelector('#agent-fund p.select-all')).toHaveTextContent(next);
+    const pending = screen.getByText(C.pendingToOther, { exact: false });
+    expect(pending).toBeVisible();
+    expect(pending).toHaveTextContent(address);
     act(() => state.fund.mock.calls.at(-1)?.[0].onBusyChange(false));
+    expect(screen.queryByText(C.pendingToOther, { exact: false })).toBeNull();
+    expect(screen.queryByText(C.fundLockedNote)).toBeNull();
     expect(screen.getByRole('button', { name: C.closeFund })).toBeEnabled();
     expect(state.fund).toHaveBeenLastCalledWith(expect.objectContaining({ agentAddress: next }));
     expect(state.mount).toHaveBeenCalledTimes(1);
     expect(state.unmount).not.toHaveBeenCalled();
+  });
+  it('keeps the funding panel closed for a saved address but opens it for a funding link', () => {
+    window.localStorage.setItem('openpay.agent.address', address);
+    const saved = render(<AgentWalletCard c={C} />);
+    expect(saved.container.querySelector('#agent-fund')).not.toBeVisible();
+    saved.unmount();
+    state.query = `address=${address}`;
+    const linked = render(<AgentWalletCard c={C} />);
+    expect(linked.container.querySelector('#agent-fund')).toBeVisible();
+  });
+  it('moves focus to Change after using the connected wallet, not to the body', async () => {
+    state.connected = true;
+    render(<AgentWalletCard c={C} />);
+    const use = screen.getByRole('button', { name: C.useConnected });
+    use.focus();
+    fireEvent.click(use);
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
+    expect(screen.getByLabelText(C.inputLabel)).not.toBeVisible();
+    expect(screen.getByRole('button', { name: C.changeAddress })).toHaveFocus();
   });
   it('does not enable balance reads for empty or invalid addresses', () => {
     state.query = 'address=invalid';
@@ -180,7 +213,8 @@ describe('AgentWalletCard', () => {
     state.query = `address=${address}`;
     render(<AgentWalletCard c={C} />);
     expect(state.fund).toHaveBeenLastCalledWith(expect.objectContaining({ locale: 'en', c: C.fundFromWallet, agentAddress: address }));
-    fireEvent.click(screen.getByRole('button', { name: C.fundCta }));
+    // `?address=` 付きの着地は開いた状態 (押さなくても入金ブロックが見える)。
+    expect(screen.getByRole('button', { name: C.closeFund })).toHaveAttribute('aria-expanded', 'true');
     const button = screen.getByRole('button', { name: 'Mock funding confirmed' });
     expect(button.closest('#agent-fund')).not.toBeNull();
     expect(state.refetch).not.toHaveBeenCalled();

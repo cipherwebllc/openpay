@@ -123,7 +123,8 @@ describe('AgentFundFromWallet', () => {
   it('keeps the real funding form locked across parent edits, unknown receipts and reopening after confirmation', () => {
     const wallet = agentPageContentFor('en').wallet;
     const { container, rerender } = render(<AgentWalletCard c={wallet} />);
-    fireEvent.click(screen.getByRole('button', { name: wallet.fundCta }));
+    // `?address=` 付きの着地 (MCP の入金リンク) は入金パネルが開いた状態で始まる。
+    expect(container.querySelector('#agent-fund')).toBeVisible();
     sendAmount();
     expect(screen.getByRole('button', { name: wallet.closeFund })).toBeDisabled();
     state.hash = hash;

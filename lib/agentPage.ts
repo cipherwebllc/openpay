@@ -96,6 +96,8 @@ export type AgentPageContent = {
     readonly fundCta: string;
     readonly changeAddress: string;
     readonly closeFund: string;
+    readonly fundLockedNote: string;
+    readonly pendingToOther: string;
     readonly fundFromWallet: {
       readonly title: string;
       readonly amountLabel: string;
@@ -153,7 +155,7 @@ const ja: AgentPageContent = {
     openIn: 'またはアプリで開く',
     openInApps: { claude: 'Claude', codex: 'Codex' },
     openInNote:
-      'アプリがプロンプト入りで開きます。送信するのはあなたです。',
+      'アプリが入っていれば、プロンプト入りで開きます。送信するのはあなたです。',
     pasteInto: 'コピーして貼り付ける場合',
     hosts: ['Claude Code', 'Codex CLI', 'Hermes'],
     shellNote:
@@ -189,7 +191,7 @@ const ja: AgentPageContent = {
     summary: [
       '上限を強制するのは Agent 側の MCP です。OpenPay のサーバーは関与しません。',
       '入れるのは失ってもよい少額だけ。残高が実質的な上限です。',
-      'このページは秘密鍵を尋ねません。尋ねる画面は偽物です。',
+      'このページは秘密鍵を尋ねません。鍵を求める OpenPay の画面は偽物です。',
     ],
     detailsLabel: 'くわしく',
     body: '支払い上限と接続先の制限は、Agent を動かすマシン上の MCP/SDK が適用するローカルの安全設定です。OpenPay のサーバーは上限を知らず、保証もしません。このページが設定を書き換えることもありません。',
@@ -257,6 +259,8 @@ const ja: AgentPageContent = {
     fundCta: '入金する',
     changeAddress: '変更',
     closeFund: '閉じる',
+    fundLockedNote: '送金の結果を確認できるまで、このパネルは閉じられません。',
+    pendingToOther: '送信中の送金は、変更前のアドレス宛てです:',
     fundFromWallet: {
       title: '接続中のウォレットから送る',
       amountLabel: '金額 (JPYC)',
@@ -307,7 +311,7 @@ const en: AgentPageContent = {
     openIn: 'Or open in',
     openInApps: { claude: 'Claude', codex: 'Codex' },
     openInNote:
-      'The app opens with the prompt filled in. You press send.',
+      'If the app is installed, it opens with the prompt filled in. You press send.',
     pasteInto: 'Or copy and paste into',
     hosts: ['Claude Code', 'Codex CLI', 'Hermes'],
     shellNote:
@@ -343,7 +347,7 @@ const en: AgentPageContent = {
     summary: [
       'Limits are enforced by the MCP on the agent’s side. OpenPay’s servers are not involved.',
       'Fund only a small amount you can afford to lose. The balance is the real cap.',
-      'This page never asks for a private key. Any screen that does is fake.',
+      'This page never asks for a private key. Any OpenPay screen that does is fake.',
     ],
     detailsLabel: 'Details',
     body: "Spending limits and allowed hosts are local safety settings applied by the MCP/SDK on the machine that runs your agent. OpenPay's servers do not know them and do not guarantee them. This page never changes your agent's settings.",
@@ -411,6 +415,8 @@ const en: AgentPageContent = {
     fundCta: 'Add funds',
     changeAddress: 'Change',
     closeFund: 'Close',
+    fundLockedNote: 'This panel stays open until the transfer’s result is confirmed.',
+    pendingToOther: 'The transfer in progress goes to the previous address:',
     fundFromWallet: {
       title: 'Send from the connected wallet',
       amountLabel: 'Amount (JPYC)',
