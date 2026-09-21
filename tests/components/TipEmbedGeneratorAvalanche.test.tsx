@@ -21,6 +21,12 @@ vi.mock('@/hooks/useResolveAddress', () => ({
 vi.mock('wagmi', () => ({
   useAccount: vi.fn(() => ({ address: undefined, isConnected: false })),
 }));
+// プレビューの TipForm は遅延 import で、実物は上の wagmi mock に無い hook (useSwitchChain 等) を呼ぶ。
+// 読み込みがテスト終了と重なると未処理例外になり、全 test pass のまま exit 1 になっていた。
+// このファイルの対象は chain chip なので、既存 TipEmbedGenerator.test と同じく境界で切る。
+vi.mock('@/components/TipForm', () => ({
+  TipForm: () => null,
+}));
 
 let cleanupFn: (() => void) | null = null;
 
