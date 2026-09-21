@@ -1,0 +1,43 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box;margin:0}
+body{width:1200px;height:630px;font-family:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;background:linear-gradient(135deg,#f8fafc 0%,#eef2ff 60%,#e0e7ff 100%);color:#0f172a;overflow:hidden;position:relative}
+.wrap{display:flex;height:100%;padding:64px 64px 56px;gap:48px;align-items:center}
+.left{flex:1;min-width:0}
+.logo{height:44px}
+.eyebrow{margin-top:40px;font-size:24px;font-weight:700;color:#1d4ed8;letter-spacing:.02em}
+h1{margin-top:14px;font-size:68px;line-height:1.15;font-weight:800;letter-spacing:-.01em}
+.sub{margin-top:24px;font-size:27px;line-height:1.5;color:#334155;font-weight:500}
+.chips{margin-top:34px;display:flex;gap:12px}
+.chip{font-size:20px;font-weight:600;color:#1e293b;background:#fff;border:1.5px solid #cbd5e1;border-radius:999px;padding:9px 20px}
+.right{width:470px;flex:none}
+.card{background:#0f172a;border-radius:24px;padding:28px 30px 30px;box-shadow:0 30px 60px -20px rgba(15,23,42,.45)}
+.dots{display:flex;gap:8px}.dots i{width:12px;height:12px;border-radius:50%;background:#334155;display:block}
+.label{margin-top:22px;font-size:17px;color:#94a3b8;font-weight:600}
+pre{margin-top:10px;font-family:"SF Mono",Menlo,monospace;font-size:18.5px;line-height:1.65;color:#e2e8f0;white-space:pre-wrap;word-break:break-all}
+pre b{color:#93c5fd;font-weight:500;font-size:15.8px;white-space:nowrap;display:block}
+.btn{margin-top:22px;background:#1d4ed8;color:#fff;font-size:21px;font-weight:700;border-radius:14px;padding:15px 0;text-align:center}
+.bal{margin-top:18px;background:#fff;border-radius:20px;padding:20px 26px;display:flex;align-items:baseline;justify-content:space-between;box-shadow:0 12px 30px -16px rgba(15,23,42,.35)}
+.bal .k{font-size:17px;color:#64748b;font-weight:600}
+.bal .v{font-size:40px;font-weight:300;letter-spacing:-.02em}.bal .v span{font-size:18px;color:#64748b;font-weight:500;margin-left:6px}
+</style></head><body><div class="wrap">
+<div class="left">
+  <img class="logo" src="logo.svg" alt="">
+  <div class="eyebrow">OpenPay Agent</div>
+  <h1>AI に JPYC を<br>使わせる。</h1>
+  <p class="sub">ウォレットも秘密鍵も、<br>OpenPay は預かりません。</p>
+  <div class="chips"><span class="chip">Claude</span><span class="chip">Codex</span><span class="chip">Hermes</span></div>
+</div>
+<div class="right">
+  <div class="card">
+    <div class="dots"><i></i><i></i><i></i></div>
+    <div class="label">Agent を接続 — プロンプトを渡すだけ</div>
+    <pre>OpenPay を使って JPYC で支払い
+できるように設定してください。
+
+<b>curl -sL https://open-pay.jp/agent/setup.md</b></pre>
+    <div class="btn">セットアッププロンプトをコピー</div>
+  </div>
+  <div class="bal"><span class="k">Agent Wallet の残高</span><span class="v">1,000<span>JPYC</span></span></div>
+</div>
+</div></body></html>
