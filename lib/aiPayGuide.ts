@@ -4,11 +4,14 @@
 // 設計方針 (lib/sellGuide.ts と同じ):
 // - 長文コンテンツは messages/*.json でなく本モジュールに置き、ja/en を同梱する。
 // - 描画は既存の PosGuidePieces / AgentGuidePieces を再利用する。
-// - Claude Desktop の設定 JSON は packages/x402-mcp/README.md の x402 profile と同一にする。
+// - Claude Desktop の設定 JSON は packages/x402-mcp/README.md「Local wallet (SIGNER_MODE=keystore)」と
+//   同じ env にする。版固定は /agent の生成設定と同じ AGENT_MCP_SPEC (lib/agentSetup.ts)。
+// - 設定に秘密鍵を含めない (`BUYER_PRIVATE_KEY=0x...` のプレースホルダは MCP が起動時に拒否する)。
 // - JPYC 入手セクションは lib/agentGuide.ts の文言を直接再利用し、ガイド間の drift を防ぐ。
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
+import { AGENT_MCP_SPEC } from './agentSetup';
 import type { GuideStep } from './posGuide';
 import {
   agentGuideContentFor,
@@ -43,16 +46,15 @@ const STEWARD_URL = 'https://github.com/Steward-Fi/steward';
 const MCP_NPM_URL = 'https://www.npmjs.com/package/openpay-x402-mcp';
 const SDK_NPM_URL = 'https://www.npmjs.com/package/openpay-x402-sdk';
 
-// packages/x402-mcp/README.md「x402 profile > Claude Desktop」と同一。
+// packages/x402-mcp/README.md「Local wallet (SIGNER_MODE=keystore)」と同じ env。
 const MCP_CONFIG_JSON = [
   '{',
   '  "mcpServers": {',
   '    "openpay-x402": {',
   '      "command": "npx",',
-  '      "args": ["openpay-x402-mcp"],',
+  `      "args": ["--yes", "${AGENT_MCP_SPEC}"],`,
   '      "env": {',
-  '        "SIGNER_MODE": "env-key",',
-  '        "BUYER_PRIVATE_KEY": "0x...",',
+  '        "SIGNER_MODE": "keystore",',
   '        "MAX_PER_CALL_JPYC": "10",',
   '        "MAX_SESSION_JPYC": "100",',
   '        "ALLOWED_HOSTS": "open-pay.jp"',
@@ -68,7 +70,7 @@ const STRANDS_SAMPLE = [
   'from strands.tools.mcp import MCPClient',
   '',
   'openpay = MCPClient(lambda: stdio_client(StdioServerParameters(',
-  '    command="npx", args=["-y", "openpay-x402-mcp"],',
+  `    command="npx", args=["-y", "${AGENT_MCP_SPEC}"],`,
   '    env={...},  # セットアップ A/B と同じ環境変数',
   ')))',
   '',
@@ -202,17 +204,17 @@ const ja: AiPayGuideContent = {
   receiptNote: 'すべての決済に、検証可能な署名レシートが付きます。',
 
   agentLink: { label: 'Agent を接続・設定を生成', href: '/agent' },
-  quickSetupTitle: 'セットアップ A: 手軽に始める (専用ウォレット)',
+  quickSetupTitle: 'セットアップ A: 手軽に始める (ローカルウォレット)',
   quickSetupBody:
-    '使う分だけ JPYC を入れた専用の少額ウォレットを作り、その秘密鍵で Claude Desktop に openpay-x402-mcp を設定します。',
+    '秘密鍵を設定に貼る必要はありません。下の設定を Claude Desktop に追加して再起動し、AI に「wallet_init を呼んで」と頼むと、MCP があなたのマシン上に専用ウォレットを作り、アドレスと入金用のリンクだけを返します。そのアドレスへ使う分だけ JPYC を送れば、支払いが有効になります。残高と上限は wallet_status で確認できます。',
   quickSetupConfigLabel: 'Claude Desktop の設定 JSON',
   quickSetupConfig: MCP_CONFIG_JSON,
   privateKeyWarning:
-    '注意：秘密鍵は環境変数に平文で置くため、必ず専用・少額のウォレットを使ってください。メインウォレットの鍵は絶対に使わないでください。',
+    '注意：鍵はあなたのマシンのファイル（~/.openpay-x402/wallet.json・本人のみ読み書き可）に平文で保存され、AI には渡りません。同じマシンの他のプログラムからは読める可能性があるため、少額だけ入れる専用ウォレットとして使ってください。1 日の支払い上限は既定で 100 JPYC です。',
 
   stewardTitle: 'セットアップ B: 安全に運用する (Steward)',
   stewardBody:
-    'AI に鍵を一切見せない構成です。オープンソースの signing 基盤 Steward が鍵を暗号化金庫に保管し、金額上限・宛先許可・監査ログをポリシーで強制します。',
+    '鍵を平文のファイルにも置かない構成です。オープンソースの signing 基盤 Steward が鍵を暗号化金庫に保管し、金額上限・宛先許可・監査ログをポリシーで強制します。',
   stewardProject: {
     label: 'Steward を GitHub で見る',
     href: STEWARD_URL,
@@ -319,17 +321,17 @@ const en: AiPayGuideContent = {
   receiptNote: 'Every payment comes with a verifiable signed receipt.',
 
   agentLink: { label: 'Connect your agent · generate a config', href: '/agent' },
-  quickSetupTitle: 'Setup A: the easy path (dedicated wallet)',
+  quickSetupTitle: 'Setup A: the easy path (local wallet)',
   quickSetupBody:
-    'Create a dedicated low-balance wallet funded only with the JPYC you intend to use, then configure openpay-x402-mcp in Claude Desktop with its private key.',
+    'You never paste a private key into the config. Add the config below to Claude Desktop, restart it, and ask your AI to “call wallet_init”. The MCP creates a dedicated wallet on your machine and returns only its address and a funding link. Send just the JPYC you intend to use to that address and paying is enabled. Check the balance and limits with wallet_status.',
   quickSetupConfigLabel: 'Claude Desktop config JSON',
   quickSetupConfig: MCP_CONFIG_JSON,
   privateKeyWarning:
-    'Caution: the private key is stored in plain text in an environment variable. Always use a dedicated low-balance wallet. Never use the key to your primary wallet.',
+    'Caution: the key is stored in plain text in a file on your machine (~/.openpay-x402/wallet.json, readable and writable only by you) and is never given to the AI. Other programs on the same machine may still be able to read it, so treat it as a dedicated wallet holding only a small balance. The daily spending cap defaults to 100 JPYC.',
 
   stewardTitle: 'Setup B: safer operation (Steward)',
   stewardBody:
-    'This setup never exposes the key to the AI. Steward, an open-source signing platform, keeps it in an encrypted vault and enforces amount limits, destination allowlists, and audit logs through policy.',
+    'This setup keeps the key out of plain-text files too. Steward, an open-source signing platform, keeps it in an encrypted vault and enforces amount limits, destination allowlists, and audit logs through policy.',
   stewardProject: {
     label: 'View Steward on GitHub',
     href: STEWARD_URL,

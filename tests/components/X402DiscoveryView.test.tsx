@@ -38,6 +38,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
 });
 
 import { X402DiscoveryView } from '@/components/X402DiscoveryView';
+import { AGENT_MCP_SPEC } from '@/lib/agentSetup';
 import { MAX_RESOURCES_PER_MERCHANT } from '@/lib/x402/registry';
 
 const ITEM = {
@@ -884,7 +885,16 @@ describe('X402DiscoveryView', () => {
     const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
     for (const button of copyButtons) fireEvent.click(button);
     const copied = writeText.mock.calls.map((call) => String(call[0]));
-    expect(copied.some((text) => text.includes('openpay-x402-mcp'))).toBe(true);
+    const mcpConfig = copied.find((text) => text.includes('mcpServers'))!;
+    // 版固定は /agent の生成設定と同値・鍵の変数は設定に戻さない (プレースホルダ鍵で MCP が起動時に落ちる)。
+    expect(JSON.parse(mcpConfig).mcpServers['openpay-x402']).toEqual({
+      command: 'npx',
+      args: ['-y', AGENT_MCP_SPEC],
+      env: { SIGNER_MODE: 'keystore' },
+    });
+    expect(
+      within(title.closest('details')!).getByText(/wallet_init を呼んで/),
+    ).toBeInTheDocument();
     // 既定ガードは 3 点の箇条書き。金額・支払先の安全フェンスを固定する。
     const details = title.closest('details')!;
     const guardBullets = within(details)
