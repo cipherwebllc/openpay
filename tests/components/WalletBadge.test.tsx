@@ -491,3 +491,30 @@ describe('WalletBadge: 未接続 branch', () => {
     expect(screen.getByText('Connect')).toBeInTheDocument();
   });
 });
+
+describe('WalletBadge: 接続状態の切り替わり', () => {
+  it('開いた「接続」メニューから接続が完了 → 接続後のメニューは閉じた状態で始まる', () => {
+    // 両 branch とも同じ位置に <details> を描くため、key が無いと React が DOM を使い回し、
+    // open 属性が引き継がれて接続直後にメニューが本文へ被さったままになっていた。
+    setDisconnected();
+    visibleConnectorsMock.mockReturnValue([{ uid: '1', name: 'MetaMask' }]);
+    const { container, rerender } = renderWithIntl(<WalletBadge />);
+    openDropdown('接続');
+
+    setConnected();
+    rerender(<WalletBadge />);
+    expect(screen.getByText(/0x52d4/i)).toBeInTheDocument();
+    expect(container.querySelector('details')?.open).toBe(false);
+  });
+
+  it('開いたメニューから切断 → 「接続」メニューは閉じた状態で始まる', () => {
+    setConnected();
+    const { container, rerender } = renderWithIntl(<WalletBadge />);
+    openDropdown(/0x52d4/i);
+
+    setDisconnected();
+    rerender(<WalletBadge />);
+    expect(screen.getByText('接続')).toBeInTheDocument();
+    expect(container.querySelector('details')?.open).toBe(false);
+  });
+});

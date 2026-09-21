@@ -56,7 +56,9 @@ export function WalletBadge() {
 
   if (isConnected && address) {
     return (
-      <details className="group relative">
+      // key: 未接続 branch と同じ位置の <details> なので、無いと React が DOM を使い回し open が
+      // 引き継がれる (接続直後にメニューが開いたまま本文へ被さる)。
+      <details key="connected" className="group relative">
         <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
           <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
           {siweEnabled && isSignedIn && (
@@ -124,7 +126,7 @@ export function WalletBadge() {
   }
 
   return (
-    <details className="group relative">
+    <details key="disconnected" className="group relative">
       <summary className="flex cursor-pointer list-none items-center gap-1 rounded-full bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark">
         {t('connect')}
         <ChevronDown
