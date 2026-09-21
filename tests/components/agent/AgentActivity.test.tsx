@@ -189,6 +189,29 @@ describe('AgentActivity', () => {
     });
   });
 
+  it.each(['ja', 'en'])('never says "no transfers" when the fetched window only held hidden rows in %s', async (locale) => {
+    // 0 円の送信 (server が除外) が直近 50 件を埋めたアドレス: items は空でも rawCount は 50。
+    // 押し出された本物の入出金を「ありません」と断言しない。
+    const copy = agentPageContentFor(locale).activity;
+    mockFetch.mockResolvedValue(response(success([], true)));
+    mount({ locale, c: copy });
+    expect(await screen.findByText(copy.hiddenOnly, { exact: false })).toBeVisible();
+    expect(screen.queryByText(copy.empty)).toBeNull();
+    expect(screen.getAllByRole('link', { name: copy.explorerLink }).length).toBeGreaterThan(0);
+    // 集計も 0 と言わない (期間を覆えていない)。
+    expect(screen.getAllByText('—')).toHaveLength(2);
+    expect(screen.queryByText('0 JPYC')).toBeNull();
+  });
+
+  it('treats an unexpected JSON shape as a read failure instead of rendering nothing', async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ error: 'gateway' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    mount();
+    expect(await screen.findByText(c.error, { exact: false })).toBeVisible();
+    expectExplorer();
+    expect(screen.queryByText(c.empty)).toBeNull();
+    expect(screen.queryByRole('table')).toBeNull();
+  });
+
   it('maps a non-JSON response to the history error', async () => {
     mockFetch.mockResolvedValue(new Response('<html>upstream unavailable</html>', { status: 502 }));
     mount();

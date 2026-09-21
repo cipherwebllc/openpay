@@ -194,6 +194,16 @@ describe('fetchAgentActivity', () => {
     expect(result.items[0]).toMatchObject({ direction: 'in', valueAtomic: '1' });
   });
 
+  it('新しい順でない応答・1 日より先の時刻は upstream (期間集計の完全性判定と client の Date 変換を守る)', async () => {
+    reply([transfer({ timeStamp: '1790000000' }), transfer({ timeStamp: '1790000001' })]);
+    expect(await fetchAgentActivity(ADDRESS)).toEqual({ ok: false, reason: 'upstream' });
+    reply([transfer({ timeStamp: String(Math.floor(NOW / 1000) + 86_401) })]);
+    expect(await fetchAgentActivity(ADDRESS)).toEqual({ ok: false, reason: 'upstream' });
+    // 同時刻の複数行 (同一ブロックの transfer) は順序違反ではない。
+    reply([transfer({ timeStamp: '1790000000' }), transfer({ timeStamp: '1790000000', to: OTHER })]);
+    expect(await fetchAgentActivity(ADDRESS)).toMatchObject({ ok: true });
+  });
+
   it('同一 hash の同値行でも key が衝突せず、別 hash は 0 から始まる', async () => {
     reply([transfer(), transfer({ hash: `0x${'b'.repeat(64)}` }), transfer()]);
     const result = await fetchAgentActivity(ADDRESS);

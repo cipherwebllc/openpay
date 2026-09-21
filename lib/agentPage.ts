@@ -137,6 +137,7 @@ export type AgentPageContent = {
     readonly more: string;
     readonly empty: string;
     readonly filterEmpty: string;
+    readonly hiddenOnly: string;
     readonly loading: string;
     readonly error: string;
     readonly busy: string;
@@ -326,17 +327,18 @@ const ja: AgentPageContent = {
     more: 'もっと見る',
     empty: 'まだ JPYC の送受信がありません。',
     filterEmpty: 'この条件に合う取引はありません。',
+    hiddenOnly: '直近 50 件の中に、表示できる取引がありません (0 JPYC の送信は除いています)。',
     loading: '読み込み中…',
     error: '履歴を読み取れませんでした。',
     busy: '混み合っています。少し待ってから開き直してください。',
     unsupported: 'テストネットでは履歴を表示しません。',
     explorerLink: 'Polygonscan で見る',
-    truncatedNote: '直近 50 件を表示しています。',
+    truncatedNote: '直近 50 件までを取得しています。それより前の取引は、',
     refreshing: '反映まで 1 分ほどかかります。',
-    stat24h: '24 時間の送金',
-    stat7d: '7 日間の送金',
-    statsPartial: '直近 50 件の範囲外',
-    publicNote: 'Polygon 上の JPYC の送受信 (公開情報) です。何を購入したかは表示しません。',
+    stat24h: '直近 24 時間の送金',
+    stat7d: '直近 7 日間の送金',
+    statsPartial: '50 件より前は集計できません',
+    publicNote: 'Polygon 上の JPYC の送受信 (公開情報) です。何を購入したかは表示しません。0 JPYC の送信は除いています。',
   },
   next: {
     title: '買えるものを見る',
@@ -508,17 +510,18 @@ const en: AgentPageContent = {
     more: 'Show more',
     empty: 'No JPYC transfers yet.',
     filterEmpty: 'No transfers match this filter.',
+    hiddenOnly: 'Nothing to show among the latest 50 transfers (0 JPYC transfers are left out).',
     loading: 'Loading…',
     error: 'Couldn’t load the history.',
     busy: 'It’s busy right now. Please try again shortly.',
     unsupported: 'History isn’t shown on testnets.',
     explorerLink: 'View on Polygonscan',
-    truncatedNote: 'Showing the latest 50 transfers.',
+    truncatedNote: 'Only the latest 50 transfers are fetched. For earlier ones,',
     refreshing: 'It can take about a minute to appear.',
     stat24h: 'Sent, last 24 hours',
     stat7d: 'Sent, last 7 days',
-    statsPartial: 'Beyond the latest 50',
-    publicNote: 'JPYC transfers on Polygon (public data). What was purchased is not shown.',
+    statsPartial: 'Can’t total beyond the latest 50',
+    publicNote: 'JPYC transfers on Polygon (public data). What was purchased is not shown. 0 JPYC transfers are left out.',
   },
   next: {
     title: 'See what it can buy',

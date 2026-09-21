@@ -65,9 +65,11 @@ function ActivityForAddress({ address, locale, c, refreshKey, chainId, tokenAddr
 
   const focus = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600';
   const explorerBase = blockExplorerUrl(chainId);
-  const explorerLink = <a href={`${explorerBase}/token/${tokenAddress}?a=${address}`} target="_blank" rel="noopener noreferrer" className={`underline ${focus}`}>{c.explorerLink}</a>;
-  const result = supported && !isError && data?.ok ? data : undefined;
-  const failure = !supported ? 'unsupported_chain' : isError ? 'upstream' : data?.ok === false ? data.reason : undefined;
+  // explorer が未定義のチェーンで "undefined/tx/…" という壊れたリンクを開かせない (lib/chains.ts の txExplorerUrl と同じ方針)。
+  const explorerLink = explorerBase ? <a href={`${explorerBase}/token/${tokenAddress}?a=${address}`} target="_blank" rel="noopener noreferrer" className={`underline ${focus}`}>{c.explorerLink}</a> : null;
+  const result = supported && !isError && data?.ok === true && Array.isArray(data.items) ? data : undefined;
+  // 想定外の形 (中継が返す {"error":…} 等) を「何も出さない」にしない: 読めなかったことを明示する。
+  const failure = !supported ? 'unsupported_chain' : isError ? 'upstream' : data?.ok === false ? data.reason : !isPending && !result ? 'upstream' : undefined;
   const filtered = result?.items.filter((item) => filter === 'all' || item.direction === filter) ?? [];
   const rows = filtered.slice(0, visibleCount);
   const formatter = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
@@ -75,7 +77,9 @@ function ActivityForAddress({ address, locale, c, refreshKey, chainId, tokenAddr
   function date(item: AgentActivityItem) {
     // 行ごとに「取引を見る」を並べると視覚的にうるさい。日時そのものを取引へのリンクにする
     // (リンク名 = 可視テキストの日時。掟 8: 可視テキストなしの名前を付けない)。
-    return <a href={`${explorerBase}/tx/${item.hash}`} target="_blank" rel="noopener noreferrer" title={c.viewTx} className={`inline-flex items-center gap-1 py-1 text-slate-700 underline decoration-slate-300 underline-offset-2 hover:text-emerald-700 ${focus}`}><time dateTime={new Date(item.timestamp * 1000).toISOString()}>{formatter.format(item.timestamp * 1000)}</time><ExternalLink size={12} aria-hidden /></a>;
+    const time = <time dateTime={new Date(item.timestamp * 1000).toISOString()}>{formatter.format(item.timestamp * 1000)}</time>;
+    if (!explorerBase) return time;
+    return <a href={`${explorerBase}/tx/${item.hash}`} target="_blank" rel="noopener noreferrer" title={c.viewTx} className={`inline-flex items-center gap-1 py-1.5 text-slate-700 underline decoration-slate-400 underline-offset-2 hover:text-emerald-700 ${focus}`}>{time}<ExternalLink size={12} aria-hidden /></a>;
   }
   function direction(item: AgentActivityItem) {
     const Icon = item.direction === 'in' ? ArrowDownLeft : ArrowUpRight;
@@ -108,7 +112,11 @@ function ActivityForAddress({ address, locale, c, refreshKey, chainId, tokenAddr
         <div aria-busy="true" className="mt-4 space-y-3"><p className="text-sm text-slate-500">{c.loading}</p>{[0, 1, 2].map((key) => <div key={key} aria-hidden className="h-12 animate-pulse rounded-lg bg-slate-100" />)}</div>
       ) : result ? (
         <>
-          {rows.length === 0 ? <p className="mt-4 text-sm text-slate-600">{result.items.length === 0 ? c.empty : c.filterEmpty}</p> : (
+          {rows.length === 0 ? (
+            // 「取引ゼロ」と言うのは上流が本当に 0 件のときだけ。0 円の送信 (除外対象) が直近 50 件を埋めたアドレスで、
+            // 押し出された本物の入出金を「ありません」と断言しない。
+            <p className="mt-4 text-sm text-slate-600">{result.items.length > 0 ? c.filterEmpty : result.rawCount === 0 ? c.empty : <>{c.hiddenOnly} {explorerLink}</>}</p>
+          ) : (
             <>
               <table className="mt-4 hidden w-full table-fixed text-left text-xs sm:table">
                 <thead className="text-slate-500"><tr>{[c.colDate, c.colType, c.colCounterparty, c.colAmount].map((label) => <th key={label} scope="col" className={`px-2 py-2 font-medium ${label === c.colAmount ? 'text-right' : ''}`}>{label}</th>)}</tr></thead>

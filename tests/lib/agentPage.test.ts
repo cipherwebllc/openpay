@@ -17,7 +17,10 @@ describe('agent page content', () => {
     const ja = agentPageContentFor('ja');
     const en = agentPageContentFor('en');
     expect(shape(ja.activity)).toEqual(shape(en.activity));
-    expect(Object.keys(ja.activity)).toHaveLength(24);
+    expect(Object.keys(ja.activity)).toHaveLength(25);
+    // 「取引ゼロ」と「表示できる取引がない」は別の文言 (0 円の送信が直近 50 件を埋めたとき、ゼロと断言しない)。
+    expect(ja.activity.hiddenOnly).not.toBe(ja.activity.empty);
+    expect(en.activity.hiddenOnly).not.toBe(en.activity.empty);
     for (const c of [ja, en]) {
       expect(c.wallet).not.toHaveProperty('activity');
       for (const value of Object.values(c.activity)) expect(value.length).toBeGreaterThan(0);

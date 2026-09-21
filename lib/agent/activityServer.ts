@@ -113,6 +113,8 @@ async function fetchActivity(
 
   const forwarder = jpycForwarderFor(137)?.toLowerCase();
   const occurrences = new Map<string, number>();
+  const nowSec = Math.floor(Date.now() / 1000);
+  let previousTimestamp = Number.MAX_SAFE_INTEGER;
   const items: AgentActivityItem[] = [];
   for (const row of body.result) {
     // 行を捨てて続行すると欠けた履歴を完全と見せるため、不正行は全体を失敗にする。
@@ -130,6 +132,12 @@ async function fetchActivity(
     // 時刻だけを数値化する。丸められた時刻が期間判定へ波及しないよう安全な整数に限定。
     const timestamp = Number(row.timeStamp);
     if (!Number.isSafeInteger(timestamp) || timestamp <= 0) return upstream('row');
+    // 極端な未来時刻は client の Date 変換を RangeError にし、残高カードごと描画を落とす。表示へ波及する前に断つ。
+    if (timestamp > nowSec + 86_400) return upstream('row');
+    // 期間集計の「完全」判定は、上流が新しい順 (sort=desc) で返すことに依存する。順序が崩れた応答を
+    // 完全な履歴として集計へ渡さない。
+    if (timestamp > previousTimestamp) return upstream('row');
+    previousTimestamp = timestamp;
 
     const hash = row.hash.toLowerCase() as `0x${string}`;
     const from = row.from.toLowerCase() as `0x${string}`;
@@ -160,7 +168,7 @@ async function fetchActivity(
     items,
     rawCount: body.result.length,
     truncated: body.result.length >= AGENT_ACTIVITY_PAGE_SIZE,
-    asOf: Math.floor(Date.now() / 1000),
+    asOf: nowSec,
   };
 }
 
