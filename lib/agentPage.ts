@@ -364,10 +364,10 @@ const ja: AgentPageContent = {
   },
   tryPrompts: {
     title: 'Agent に頼めること',
-    lead: 'セットアップが済んだら、そのまま話しかけてください。コピーして Agent に貼るだけです。',
+    lead: 'セットアップが済んだら、そのまま話しかけてください。コピーして Agent に貼るだけです。「Agent が支払う」で接続したときの例で、店の注文は「人が支払う」でも使えます。',
     copy: 'プロンプトをコピー',
     copied: 'コピーしました',
-    paidNote: '上限は、依頼文に書いた額と Agent 側の設定の小さいほうが効きます。',
+    paidNote: '依頼文の上限を超える支払いは行われません。Agent 側の上限のほうが小さいときは、支払いは拒否されます。',
     items: [
       { id: 'catalog', kind: 'free', tag: '無料', prompt: 'OpenPay で今買える JPYC のデータと API を一覧にして、それぞれの価格と利用料を教えてください。支払いはしないでください。' },
       { id: 'buy-monitor', kind: 'paid', tag: '支払いあり・3 JPYC', prompt: 'JPYC Service Monitor を上限 3 JPYC で購入して、この 1 か月に変わった点を 5 行にまとめてください。' },
@@ -564,10 +564,10 @@ const en: AgentPageContent = {
   },
   tryPrompts: {
     title: 'What you can ask your agent',
-    lead: 'Once setup is done, just talk to it. Copy a prompt and paste it to your agent.',
+    lead: 'Once setup is done, just talk to it. Copy a prompt and paste it to your agent. These examples are for the “Agent pays” setup; ordering from a shop also works with “You pay”.',
     copy: 'Copy prompt',
     copied: 'Copied',
-    paidNote: 'The smaller of the cap in the prompt and the limit set on the agent side applies.',
+    paidNote: 'Nothing above the cap in the prompt is paid. If the limit on the agent side is lower, the payment is refused.',
     items: [
       { id: 'catalog', kind: 'free', tag: 'Free', prompt: 'List the JPYC data and APIs I can buy on OpenPay right now, with the price and fee for each. Do not pay.' },
       { id: 'buy-monitor', kind: 'paid', tag: 'Pays · 3 JPYC', prompt: 'Buy the JPYC Service Monitor with a 3 JPYC cap and summarize what changed in the last month in five lines.' },
