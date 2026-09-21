@@ -68,8 +68,7 @@ npx openpay-x402-mcp@0.15.0
       "command": "npx",
       "args": ["openpay-x402-mcp@0.15.0"],
       "env": {
-        "SIGNER_MODE": "env-key",
-        "BUYER_PRIVATE_KEY": "0x...",
+        "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
         "MAX_SESSION_JPYC": "100",
         "ALLOWED_HOSTS": "open-pay.jp"
@@ -88,8 +87,7 @@ npx openpay-x402-mcp@0.15.0
       "command": "npx",
       "args": ["openpay-x402-mcp@0.15.0"],
       "env": {
-        "SIGNER_MODE": "env-key",
-        "BUYER_PRIVATE_KEY": "0x...",
+        "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
         "MAX_SESSION_JPYC": "100",
         "ALLOWED_HOSTS": "open-pay.jp"
@@ -98,6 +96,13 @@ npx openpay-x402-mcp@0.15.0
   }
 }
 ```
+
+These examples use the local wallet (`SIGNER_MODE=keystore`): no private key goes
+into the configuration. After the host restarts, call `wallet_init` to create the
+wallet on this machine, then fund the returned address — see
+[Local wallet](#local-wallet-signer_modekeystore). Do not put a placeholder such as
+`"BUYER_PRIVATE_KEY": "0x..."` in the configuration: the server rejects it at startup.
+`env-key` and `steward` are described under [Signer Modes](#signer-modes).
 
 During local development from this repository:
 
@@ -252,10 +257,7 @@ Use this explicit mode to avoid pasting a private key into MCP configuration:
 }
 ```
 
-These examples target the coordinated SDK 0.9.0 / MCP 0.15.0 release. Publish
-SDK first, then MCP, then update Web setup after a real-host smoke. Publication
-requires explicit human review and a real-host `wallet_init → funding →
-wallet_status → x402_pay` check. Keep the package version pinned.
+Requires openpay-x402-mcp 0.15.0 or later (SDK 0.9.0). Keep the package version pinned.
 
 1. Register the MCP server, restart the host, and call `wallet_status {}` to
    confirm it starts. If startup fails, report the error verbatim.

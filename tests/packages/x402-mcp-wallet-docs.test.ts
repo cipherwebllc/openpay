@@ -16,4 +16,15 @@ describe('wallet release documentation', () => {
       expect(changelog).toContain(text);
     }
   });
+
+  it('x402 profile の設定例は keystore で、コピーすると起動時に停止する仮の秘密鍵を含まない', async () => {
+    const readme = await readFile('packages/x402-mcp/README.md', 'utf8');
+    const profile = readme.slice(readme.indexOf('## x402 profile'), readme.indexOf('\n## Quickstart'));
+    const jsonBlocks = [...profile.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1]);
+    expect(jsonBlocks.length).toBeGreaterThanOrEqual(2);
+    for (const block of jsonBlocks) {
+      expect(block).toContain('"SIGNER_MODE": "keystore"');
+      expect(block).not.toContain('BUYER_PRIVATE_KEY');
+    }
+  });
 });
