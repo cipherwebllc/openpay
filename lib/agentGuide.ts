@@ -113,7 +113,8 @@ export type AgentGuideContent = {
   readonly ctaButton: string;
   readonly ctaButtonHref: string;
 
-  readonly backHome: string;
+  /** ページ上部のリンク。トップへはヘッダのロゴで戻れるので、文脈上の親 (/agent) を指す。 */
+  readonly backLink: { readonly label: string; readonly href: string };
 };
 
 const ja: AgentGuideContent = {
@@ -280,7 +281,7 @@ const ja: AgentGuideContent = {
   ctaButton: 'AIストアを見る',
   ctaButtonHref: '/discovery',
 
-  backHome: '← トップにもどる',
+  backLink: { label: '← OpenPay Agent', href: '/agent' },
 };
 
 const en: AgentGuideContent = {
@@ -446,7 +447,7 @@ const en: AgentGuideContent = {
   ctaButton: 'Open the AI store',
   ctaButtonHref: '/discovery',
 
-  backHome: '← Back to home',
+  backLink: { label: '← OpenPay Agent', href: '/agent' },
 };
 
 export const AGENT_GUIDE: Record<AgentGuideLocale, AgentGuideContent> = { ja, en };

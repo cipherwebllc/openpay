@@ -90,6 +90,14 @@ describe('guideAgentMetadata: メタデータ組立', () => {
 
 // ── (2) ja/en parity + 全 leaf 非空 ───────────────────────────────
 describe('AGENT_GUIDE: ja/en 構造 parity と非空', () => {
+  it.each(LOCALES)('%s: 上部のリンクは文脈上の親 (/agent) を指し、ラベルは「もどる」と言わない', (loc) => {
+    // トップへはヘッダのロゴで戻れる。流入元は複数 (/agent・LP のモバイルオーダー節・店舗ガイド…) なので親ページの名前を出す。
+    const c = AGENT_GUIDE[loc];
+    expect(c.backLink.href).toBe('/agent');
+    expect(c.backLink.label).toBe('← OpenPay Agent');
+    expect(c.backLink.label).not.toMatch(/もどる|戻る|Back/i);
+  });
+
   it('ja と en のトップレベルキーが完全一致', () => {
     expect(Object.keys(AGENT_GUIDE.ja).sort()).toEqual(
       Object.keys(AGENT_GUIDE.en).sort(),

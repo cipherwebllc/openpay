@@ -128,6 +128,14 @@ describe('AI_PAY_GUIDE: 主要リンク', () => {
     expect(c.sdkLink.href).toBe(expected.sdk);
   });
 
+  it.each(LOCALES)('%s: 上部のリンクは文脈上の親 (/agent) を指し、ラベルは「もどる」と言わない', (loc) => {
+    // トップへはヘッダのロゴで戻れる。流入元は複数 (/agent・AI ストア・LP…) なので「もどる」ではなく親ページの名前を出す。
+    const c = AI_PAY_GUIDE[loc];
+    expect(c.backLink.href).toBe('/agent');
+    expect(c.backLink.label).toBe('← OpenPay Agent');
+    expect(c.backLink.label).not.toMatch(/もどる|戻る|Back/i);
+  });
+
   it.each(LOCALES)('%s: discovery と売り手ガイドの内部リンクが正しい', (loc) => {
     const c = AI_PAY_GUIDE[loc];
     expect(c.ctaButtonHref).toBe('/discovery');
