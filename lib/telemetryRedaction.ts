@@ -64,6 +64,11 @@ function scrubUrlFields(
   // 配布 ticket/owner 限定 URL が network data に付いた場合も telemetry へ波及させない。
   delete data.ticket;
   delete data.deliveryUrl;
+  // Sentry の外向き fetch breadcrumb は `url` から query を剥がす一方で、query 文字列を `http.query` に
+  // **別のキーで丸ごと**入れる (@sentry/node-core outgoingFetchRequest の getBreadcrumbData)。
+  // 上流 API のキーを query で渡す fetch (例: Etherscan の apikey) が、エラー event に載って Sentry へ波及するのを断つ。
+  delete data['http.query'];
+  delete data['http.fragment'];
   for (const key of keys) {
     if (typeof data[key] === 'string') {
       data[key] = urlOriginForTelemetry(data[key]);
@@ -100,6 +105,9 @@ function scrubRefererHeaders(headers: Record<string, string> | undefined): void 
 function scrubServerTraceData(data: Record<string, unknown> | undefined): void {
   if (!data) return;
   delete data['url.query'];
+  // span 側にも同じ別表現が付き得る (上の scrubUrlFields と同じ理由)。
+  delete data['http.query'];
+  delete data['http.fragment'];
   if (typeof data['http.target'] === 'string') {
     data['http.target'] = withoutQueryOrFragment(data['http.target']);
   }
