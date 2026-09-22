@@ -13,6 +13,14 @@ const ONRAMP_KEYS = [
 
 const FORM_NAMESPACES = ['PaymentForm', 'TipForm', 'CheckoutForm'] as const;
 
+describe('Privacy: x402 retention disclosure', () => {
+  it('Privacy.section4 declares 400 days in both locales (not Terms.section4)', () => {
+    expect(ja.Privacy.section4.body).toContain('x402 決済の記録 (買い手ウォレットアドレス・商品 URL・金額・取引ハッシュ・日時) は最後の記録から 400 日間保管');
+    expect(en.Privacy.section4.body).toContain('Records of x402 payments (buyer wallet address, product URL, amount, transaction hash, and date/time) are retained for 400 days from the last record.');
+    expect(deepKeys(ja.Privacy).sort()).toEqual(deepKeys(en.Privacy).sort());
+  });
+});
+
 const OFFRAMP_KEYS = [
   'heading',
   'subheading',

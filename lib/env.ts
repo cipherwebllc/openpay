@@ -518,6 +518,11 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_HANDLES',
     process.env.NEXT_PUBLIC_ENABLE_HANDLES,
   ),
+  // Agent 購入履歴の client 露出・SIWE 導線。API は別の server-only flag で制御。既定 OFF。
+  enableAgentPurchases: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_AGENT_PURCHASES',
+    process.env.NEXT_PUBLIC_ENABLE_AGENT_PURCHASES,
+  ),
   // OpenPay Pro (月額固定 ¥500=500 JPYC の前払いサブスク・ゲート対象 = CSV ダウンロードのみ) の
   // 有効化フラグ (client 露出)。**既定 OFF**。OFF の間は /api/pro/* は 404・ProPaywall 非表示・
   // CSV は無料のまま挙動完全不変。点灯 = '1'/'true' + ALPHA_ENTITLEMENT_BYPASS=0 + FEE_RECEIVER 設定済。
