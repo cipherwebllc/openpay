@@ -34,6 +34,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'agent-wallet-history-try-prompts-2026-09-22',
+    date: '2026-09-22',
+    category: 'feature',
+    title: {
+      ja: 'Agent が何を買ったかを手元で確認できます（MCP 0.16）・Agent に頼める依頼文を用意しました',
+      en: 'See what your agent bought, kept on your machine (MCP 0.16) — plus ready-to-paste prompts',
+    },
+    body: {
+      ja: 'openpay-x402-mcp 0.16 に wallet_history を追加しました。Agent が x402 で買ったもの（何を・いつ・検証済みの領収書があれば金額と取引ハッシュ）を、あなたのマシン上の記録から返します。OpenPay のサーバーは買い手ごとの購入履歴を保持しません。記録は欠損することがあり、金額と着金の確認はオンチェーン（Agent ページのアクティビティ）が基準です。\nあわせて Agent ページに「Agent に頼めること」を追加しました。セットアップ後にそのまま貼れる依頼文 5 本（買えるものの一覧、3 JPYC のお試し購入、店の注文、購入履歴、上限の確認）を、コピーボタンつきで並べています。アクティビティは入金・送金の確定後、最長 2 分まで自動で更新されます。',
+      en: 'openpay-x402-mcp 0.16 adds wallet_history: what your agent bought over x402 — which resource, when, and the amount and transaction hash when a verified receipt exists — read from a log kept on your own machine. OpenPay\'s servers keep no per-buyer purchase history. The log can be incomplete; amounts and settlement are confirmed on-chain in the Agent page\'s activity.\nThe Agent page also gained “What you can ask your agent”: five ready-to-paste prompts (list what it can buy, a 3 JPYC trial purchase, order from a shop, purchase history, current limits), each with a copy button. Activity now refreshes for up to two minutes after a deposit or transfer confirms.',
+    },
+    link: { href: '/agent', labelJa: 'Agent ページを開く', labelEn: 'Open the Agent page' },
+  },
+  {
     id: 'agent-page-local-wallet-2026-09-21',
     date: '2026-09-21',
     category: 'feature',
