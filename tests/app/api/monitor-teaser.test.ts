@@ -89,3 +89,20 @@ describe('monitor teasers', () => {
     expect(body.fullFeed.hint).toContain('skip the purchase');
   });
 });
+
+describe('teaser の latestRecordedAt (記録日での「買う前に確かめる」)', () => {
+  it('latestRecordedAt は changes の実効日 (max(date, collectedAt)) の最大で、latestChanges もその順', async () => {
+    const [{ GET }, { GET: GETP }] = await Promise.all([
+      import('@/app/api/jpyc/services/teaser/route'),
+      import('@/app/api/stablecoin-payments/teaser/route'),
+    ]);
+    for (const handler of [GET, GETP]) {
+      const body = await (await handler()).json();
+      const eff = (e: { date: string; collectedAt?: string }) => (e.collectedAt && e.collectedAt > e.date ? e.collectedAt : e.date);
+      const dates = body.latestChanges.map(eff);
+      expect([...dates].sort()).toEqual(dates);
+      expect(body.latestRecordedAt).toBe(dates.at(-1));
+      expect(body.fullFeed.hint).toContain('latestRecordedAt');
+    }
+  });
+});

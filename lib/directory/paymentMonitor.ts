@@ -16,6 +16,8 @@ import {
   type ServiceChangeCategory,
   type ServiceChangeType,
   type ServiceMonitorQuery,
+  deltaEffectiveDate,
+  sortByDeltaEffectiveDate,
 } from './serviceMonitor';
 import type { DirectoryEntry } from './types';
 import { PAYMENT_PROVIDERS, type PaymentProviderRecord } from './paymentProviders';
@@ -62,7 +64,7 @@ export type PaymentMonitorEnvelope = {
   providers: PaymentProviderRow[];
   /** 監視対象の事業者数 (delta で絞っても母数が分かる)。 */
   totalProviders: number;
-  /** snapshot: 全履歴 (limit 件・新しい順ではなく日付昇順) / delta: changedSince 以降のみ。
+  /** snapshot: 全履歴 (limit 件・新しい順ではなく日付昇順) / delta: 実効日 (max(date, collectedAt)) が changedSince 以降のみ。
    * delta の limit は**日付境界に切り上げ**られる (1 日が分割されることはない)。 */
   changes: PaymentChangeRow[];
   /** 決済スコープの全イベント数 (limit で切っても母数が分かる)。 */
@@ -139,7 +141,8 @@ export function createPaymentMonitorEnvelope(
     hasMore = changelog.length > query.limit;
     filtered = changelog.slice(-query.limit);
   } else {
-    const matched = changelog.filter((event) => event.date >= (query.changedSince as string));
+    // 実効日 (max(date, collectedAt)) で照合 — 後から記録した古い date のイベントを取りこぼさない (serviceMonitor と同じ)。
+    const matched = sortByDeltaEffectiveDate(changelog.filter((event) => deltaEffectiveDate(event) >= (query.changedSince as string)));
     // 同一 date のグループは分割しない (serviceMonitor.ts の takeDeltaByDateGroups が単一情報源)。
     const page = takeDeltaByDateGroups(matched, query.limit);
     filtered = page.taken;

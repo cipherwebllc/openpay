@@ -9,7 +9,8 @@
 //   - mode: 'snapshot' (changedSince なし・全 published の監視ビュー) | 'delta' (以降の変更のみ)
 //   - 変更なしの delta は changes: [] を明示的に返す (エージェントは「重要な変更なし」と報告できる)
 //   - dedupe は slug + date + changeType で決定的
-//   - changedSince は YYYY-MM-DD (その日を**含む**)。イベント date も YYYY-MM-DD で単調。
+//   - changedSince は YYYY-MM-DD (その日を**含む**)。delta の照合・並び・cursor は実効日 max(date, collectedAt)
+//     (2026-09-23: 後から記録した古い date のイベントを取りこぼさない)。snapshot は date 昇順。
 //   - date = 一次ソースの発表日 / collectedAt = こちらが記録した日 (2026-09-03 統一)。
 
 import { DIRECTORY_ENTRIES } from './data';
@@ -98,6 +99,9 @@ export type ServiceChangeEvent = {
 // 掟: 事実のみ・一次ソース URL 必須級・エントリ本体 (data.ts) の変更と同一 PR で追記する。
 // removed の場合は data.ts の status を 'archived' にし、ここに removed イベントを足す。
 // 新規エントリは必ず 'added' イベントをここに書く (baseline の自動 added から除外される)。
+// 記入ルール (2026-09-23): 2026-09-24 以降の行は collectedAt 必須 (テストがフェンス)。collectedAt は「本番に
+// merge した日 (JST)」以上。merge が遅れたら merge 直前に更新する — delta の cursor (generatedAt の UTC 日付) が
+// 実効日を追い越すと、その買い手には永久に届かなくなる。
 const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   // ── stablecoin-payments backfill (2026-08-27 収集・一次ソース確認済み。初回購入者が
   //     空フィードを掴まないよう、決済スコープの過去イベントを遡って積む) ──
@@ -750,28 +754,50 @@ export function parseServiceMonitorQuery(
 }
 
 /**
- * delta の切り出し (2026-09-03 裁定・E3 の残欠陥の修正)。**同一 date のグループを分割しない**。
+ * delta の照合に使う実効日 = max(date, collectedAt)。date は一次ソースの発表日で、週次収集では
+ * 発表から数日〜数か月遅れて記録する (backfill)。買い手の cursor は「前回の購入日」なので、date だけで
+ * 照合すると **後から記録した古い date のイベントはその買い手に永久に届かない** (2026-09-23 実機で発覚:
+ * cursor 9/21 に対し 9/23 収集の 9/17・9/18 イベントが漏れた)。collectedAt が無い行 (初期分) は date。
+ * delta の並びと打ち切り cursor もこの実効日で揃える (実効日昇順・安定ソート・cursor = 最初の未返却
+ * イベントの実効日)。並びと cursor の鍵を揃えないと、cursor を回したとき再配信か取りこぼしのどちらかが
+ * 起きる。snapshot の並び (date 昇順) は不変。
+ */
+export function deltaEffectiveDate(event: { date: string; collectedAt?: string }): string {
+  return event.collectedAt !== undefined && event.collectedAt > event.date ? event.collectedAt : event.date;
+}
+
+/** delta 用: 実効日の安定ソート (同じ実効日の中は changelog の宣言順 = date 昇順のまま)。 */
+export function sortByDeltaEffectiveDate<T extends { date: string; collectedAt?: string }>(events: readonly T[]): T[] {
+  return events
+    .map((event, index) => ({ event, index, key: deltaEffectiveDate(event) }))
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : a.index - b.index))
+    .map(({ event }) => event);
+}
+
+/**
+ * delta の切り出し (2026-09-03 裁定・E3 の残欠陥の修正)。**同一の実効日のグループを分割しない**。
  *
- * 何を防ぐ防御か: 「打ち切り時の nextChangedSince = 最後に返したイベントの date」だけでは、
- * **1 つの date に limit より多いイベントがある**と次回も同じ日の同じ先頭 limit 件が返り、
+ * 何を防ぐ防御か: 「打ち切り時の nextChangedSince = 最後に返したイベントの日」だけでは、
+ * **1 つの日に limit より多いイベントがある**と次回も同じ日の同じ先頭 limit 件が返り、
  * hasMore:true のまま永久に前進しない (毎回課金される)。実データで現実に起こる —
  * baseline 19 件は全て 2026-07-13、決済スコープの 2026-08-26 は 3 件。
  *
- * 規則: date 昇順のイベントを日付グループ単位で取り、累計が limit 以下の間だけ含める。
- * **先頭グループだけで limit を超える場合はそのグループ全体を含める** (limit を超過する)
+ * 規則: 実効日 (keyOf・既定 = max(date, collectedAt)) 昇順のイベントを日付グループ単位で取り、累計が
+ * limit 以下の間だけ含める。**先頭グループだけで limit を超える場合はそのグループ全体を含める**
  * = 「limit は日付境界に切り上げられる。1 日が分割されることはない」。
- * こうすると未返却の先頭イベントの date は**必ず**返した最後の date より後になるので、
+ * こうすると未返却の先頭イベントの実効日は**必ず**返した最後の実効日より後になるので、
  * 次回の changedSince は前進し (無限ループなし)、inclusive でも再配信が発生しない。
  */
-export function takeDeltaByDateGroups<T extends { date: string }>(
+export function takeDeltaByDateGroups<T extends { date: string; collectedAt?: string }>(
   events: readonly T[],
   limit: number,
+  keyOf: (event: T) => string = deltaEffectiveDate,
 ): { taken: T[]; hasMore: boolean; nextChangedSince: string | null } {
   let count = 0;
   while (count < events.length) {
-    const date = events[count].date;
+    const date = keyOf(events[count]);
     let end = count;
-    while (end < events.length && events[end].date === date) end += 1;
+    while (end < events.length && keyOf(events[end]) === date) end += 1;
     // 2 つ目以降のグループは limit を超えるなら足さない (先頭グループだけは必ず含める)。
     if (end > limit && count > 0) break;
     count = end;
@@ -779,7 +805,7 @@ export function takeDeltaByDateGroups<T extends { date: string }>(
   return {
     taken: events.slice(0, count),
     hasMore: count < events.length,
-    nextChangedSince: count < events.length ? events[count].date : null,
+    nextChangedSince: count < events.length ? keyOf(events[count]) : null,
   };
 }
 
@@ -874,9 +900,10 @@ export function createServiceMonitorEnvelope(
   let changes: ServiceChangeEventOutput[];
   let services: ServiceMonitorRow[];
   let hasMore: boolean;
-  // 既定は UTC 日付。イベント date (一次ソースの発表日) 以下になるため inclusive 比較で取りこぼしなし
-  // (同日イベントの重複は slug+date+changeType の dedupe が吸収する)。打ち切られた delta だけは
-  // 下で「最初の未返却イベントの date」に差し替える (打ち切り分の永久ロス防止・前進の保証)。
+  // 既定は UTC 日付。取りこぼしゼロが成り立つのは「後から本番に載るイベントの実効日 ≥ その本番反映日の
+  // UTC 日付」のとき = **collectedAt は本番 merge 日の JST 日付以上で書く** (merge が遅れたら merge 直前に
+  // 更新する・runbook)。同日イベントの重複は slug+date+changeType の dedupe が吸収する。打ち切られた delta
+  // だけは下で「最初の未返却イベントの実効日」に差し替える (打ち切り分の永久ロス防止・前進の保証)。
   let nextChangedSince = generatedAtIso.slice(0, 10);
   if (mode === 'snapshot') {
     hasMore = changelog.length > query.limit;
@@ -884,7 +911,7 @@ export function createServiceMonitorEnvelope(
     services = published.map((entry) => toRow(entry, snapshot));
   } else {
     const since = query.changedSince as string;
-    const matched = changelog.filter((event) => event.date >= since);
+    const matched = sortByDeltaEffectiveDate(changelog.filter((event) => deltaEffectiveDate(event) >= since));
     const page = takeDeltaByDateGroups(matched, query.limit);
     changes = page.taken;
     hasMore = page.hasMore;

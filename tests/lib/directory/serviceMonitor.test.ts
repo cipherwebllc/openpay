@@ -13,6 +13,7 @@ import {
   takeDeltaByDateGroups,
   SERVICE_DIFF_FIELDS,
   SERVICE_MONITOR_MAX_LIMIT,
+  deltaEffectiveDate,
 } from '@/lib/directory/serviceMonitor';
 import { JPYC_SERVICES_RESOURCE } from '@/lib/directory/paidResources';
 
@@ -176,16 +177,18 @@ describe('createServiceMonitorEnvelope', () => {
 
   // E11 (2026-09-03 の日付訂正) 後: jpyc / jpyc-ex は発表日 2026-05-15 の 2 件に移った。
   // limit=1 でもこの日は分割されず 2 件返る (残りは次ページ = hasMore)。
-  it('limit が changes を cap する (ただし日付境界で切り上げ)', () => {
+  it('limit が changes を cap する (ただし実効日の境界で切り上げ)', () => {
+    // delta の並びと打ち切りは実効日 (max(date, collectedAt))。5/15 の 2 件は 8/27 に記録した backfill
+    // (実効日 8/27) なので、5/15 から見た最初のグループは baseline (7/13・19 件) になる。
     const env = createServiceMonitorEnvelope(
       { changedSince: '2026-05-15', limit: 1 },
       {},
       NOW,
     );
-    expect(env.changes.length).toBe(2);
-    expect(new Set(env.changes.map((e) => e.date))).toEqual(new Set(['2026-05-15']));
+    expect(env.changes.length).toBe(19);
+    expect(new Set(env.changes.map((e) => e.date))).toEqual(new Set(['2026-07-13']));
     expect(env.hasMore).toBe(true);
-    expect(env.nextChangedSince > '2026-05-15').toBe(true);
+    expect(env.nextChangedSince).toBe('2026-08-27');
   });
 
   // E3: limit で打ち切られた delta は「取りこぼしを永久ロス」しない。かつ **同一 date を
@@ -206,7 +209,7 @@ describe('createServiceMonitorEnvelope', () => {
     // 次のカーソルは「最後に返した date」ではなく「最初の未返却イベントの date」= 厳密に後。
     expect(capped.nextChangedSince > baselineDate).toBe(true);
     // その日のイベントは 1 件も返していない = 次回に再配信は起きない。
-    expect(capped.changes.some((e) => e.date === capped.nextChangedSince)).toBe(false);
+    expect(capped.changes.some((e) => deltaEffectiveDate(e) === capped.nextChangedSince)).toBe(false);
 
     const uncapped = createServiceMonitorEnvelope(
       { changedSince: baselineDate, limit: SERVICE_MONITOR_MAX_LIMIT },
@@ -428,5 +431,31 @@ describe('SERVICE_MONITOR_OUTPUT スキーマ (E26): required ⊆ 常に存在�
         ).toHaveProperty(key);
       }
     }
+  });
+});
+
+describe('delta は実効日 (max(date, collectedAt)) で照合する — 後から記録した古い date のイベントを取りこぼさない', () => {
+  it('cursor より古い date でも、cursor 以降に記録した (collectedAt) イベントは delta に入る', () => {
+    // 2026-09-23 実機で発覚: cursor 9/21 に対し、9/23 に記録した 9/17 (Upbit) と 9/18 (100 億円) が漏れた。
+    const env = createServiceMonitorEnvelope({ changedSince: '2026-09-21', limit: SERVICE_MONITOR_MAX_LIMIT }, {}, NOW);
+    const keys = env.changes.map((e) => `${e.slug}|${e.date}|${e.changeType}`);
+    expect(keys).toContain('jpyc|2026-09-17|updated');
+    expect(keys).toContain('jpyc|2026-09-18|updated');
+    expect(keys).toContain('coincheck|2026-09-23|verified');
+    // 9/21 より前に記録したものは入らない (9/18 記録の 9/16 Circle・9/17 jpyc-ex)。
+    expect(keys).not.toContain('jpyc|2026-09-16|updated');
+    expect(keys).not.toContain('jpyc-ex|2026-09-17|updated');
+    expect(env.changes.every((e) => (e.collectedAt ?? e.date) >= '2026-09-21')).toBe(true);
+  });
+});
+
+describe('週次運用の記入ルール (delta の cursor が実効日を追い越さないため)', () => {
+  it('2026-09-24 以降の date を持つ行は collectedAt を必ず持つ', () => {
+    // collectedAt (記録日) が無い行は date で照合される。date が本番 merge 日より前だと、その間に買った
+    // 買い手の cursor (generatedAt の UTC 日付) を追い越されて永久に届かない。verified 行は date = merge 日
+    // なので従来は問題にならなかったが、規則として固定する (9/23 以前の行は既存のまま)。
+    const missing = [...scopedChangelog('jpyc-services'), ...scopedChangelog('stablecoin-payments')]
+      .filter((e) => e.date >= '2026-09-24' && e.collectedAt === undefined);
+    expect(missing.map((e) => `${e.slug ?? e.provider}|${e.date}|${e.changeType}`)).toEqual([]);
   });
 });
