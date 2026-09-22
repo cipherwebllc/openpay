@@ -16,6 +16,7 @@ const AGENT_PROOF_PURPOSE = 'bind-purchase-history';
 const AGENT_PROOF_AUDIENCE = 'https://open-pay.jp';
 const AGENT_PROOF_TTL_SEC = 300;
 const MAX_CHALLENGE_BYTES = 8 * 1024;
+const MAX_UNIX_SECONDS = 99_999_999_999; // year 5138; anything larger is not a seconds timestamp
 const NOTE = 'This link is valid for 5 minutes and can be used only once. Open it in a browser signed in to OpenPay with SIWE to bind this Agent to that account and view its purchase history. Do not forward it to anyone: if someone else opens it first while signed in, it binds to their account; run wallet_prove again to reclaim it by overwriting the binding. It does not access funds or keys. Records of what was purchased are stored on OpenPay servers for 400 days after the last record, separately from local wallet_history.';
 const failure = (error) => ({ ok: false, error });
 
@@ -44,7 +45,8 @@ async function readChallenge(response) {
     if (!challenge || Object.keys(challenge).sort().join(',') !== 'expiresAt,issuedAt,nonce' ||
         typeof challenge.nonce !== 'string' || challenge.nonce.length !== 66 || !/^0x[0-9a-fA-F]{64}$/.test(challenge.nonce) ||
         !Number.isSafeInteger(challenge.issuedAt) || !Number.isSafeInteger(challenge.expiresAt) ||
-        challenge.issuedAt < 0 || challenge.expiresAt - challenge.issuedAt !== AGENT_PROOF_TTL_SEC) {
+        // Times are Unix seconds; a millisecond-scale value means a malformed responder, not a clock difference.
+        challenge.issuedAt < 0 || challenge.issuedAt > MAX_UNIX_SECONDS || challenge.expiresAt - challenge.issuedAt !== AGENT_PROOF_TTL_SEC) {
       return failure('challenge_invalid');
     }
     return { ok: true, challenge };
@@ -54,8 +56,11 @@ async function readChallenge(response) {
   }
 }
 
-export async function proveWallet({ signer, origin, fetchImpl, lookup, nowSec }) {
+export async function proveWallet({ signer, origin, fetchImpl, lookup }) {
   const address = signer.address;
+  // Signing surface: a plaintext origin would let a network attacker hand us a challenge and steer the
+  // bind link to itself (binding hijack; funds and keys are never exposed). Refuse before any request.
+  if (!origin.startsWith('https://')) return failure('insecure_origin');
   let result;
   let response;
   try {
@@ -72,7 +77,6 @@ export async function proveWallet({ signer, origin, fetchImpl, lookup, nowSec })
   }
   if (!result.ok) return result;
   const { nonce, issuedAt, expiresAt } = result.challenge;
-  if (Math.abs(issuedAt - nowSec()) > 120) return failure('challenge_invalid');
 
   let signature;
   try {

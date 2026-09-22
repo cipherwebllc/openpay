@@ -275,8 +275,10 @@ it. Client or conversation logging can retain the link.
 The challenge and link use the origin of `DISCOVERY_URL`. The proof's audience
 is always `https://open-pay.jp`; the response cannot choose its domain, types,
 purpose, or audience. Challenges must be HTTP 200 JSON with exactly `nonce`,
-`issuedAt`, and `expiresAt`, at most 8 KiB, a 300-second lifetime, and an issue
-time within 120 seconds of the local clock. Invalid challenges return
+`issuedAt`, and `expiresAt`, at most 8 KiB, and a 300-second lifetime (the server
+rebuilds the signed times from its own record, so the local clock is not checked).
+The origin must be `https://`; otherwise `insecure_origin` is returned without any
+request. Invalid challenges return
 `challenge_invalid` without signing; 429, 5xx, and network failures return
 `challenge_unavailable`. If the server flag `ENABLE_AGENT_PURCHASES` is OFF,
 HTTP 404 returns `feature_disabled`. Steward returns `signer_mode_unsupported`;

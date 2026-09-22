@@ -577,7 +577,7 @@ export function createToolRuntime({
         return { ok: false, error: walletFailure?.code ?? 'wallet_not_initialized' };
       }
       if (signer === null) return { ok: false, error: 'buyer_private_key_missing' };
-      return proveWallet({ signer, origin: baseOrigin(), fetchImpl, lookup, nowSec });
+      return proveWallet({ signer, origin: baseOrigin(), fetchImpl, lookup });
     });
   }
 

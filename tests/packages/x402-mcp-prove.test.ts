@@ -23,7 +23,7 @@ const { createToolRuntime } = await import(pathToFileURL(resolve('packages/x402-
 const { proveWallet } = await import(pathToFileURL(resolve('packages/x402-mcp/src/prove.mjs')).href) as {
   proveWallet: (options: {
     signer: Signer; origin: string; fetchImpl: typeof fetch;
-    lookup: typeof lookup; nowSec: () => number;
+    lookup: typeof lookup;
   }) => Promise<Result>;
 };
 const key = `0x${'11'.repeat(32)}` as Hex;
@@ -53,8 +53,8 @@ function runtime(fetchImpl = vi.fn(async () => json(challenge)), env = {}, extra
     fetchImpl, lookup, nowSec: () => now, ...extra,
   });
 }
-function prove(fetchImpl: typeof fetch, signer: Signer, nowSec = () => now) {
-  return proveWallet({ signer, origin, fetchImpl, lookup, nowSec });
+function prove(fetchImpl: typeof fetch, signer: Signer) {
+  return proveWallet({ signer, origin, fetchImpl, lookup });
 }
 async function verify(result: Result, expected: Address, expectedChallenge = challenge, expectedOrigin = origin) {
   expect(result.ok).toBe(true);
@@ -142,7 +142,7 @@ describe('wallet_prove', () => {
     expect(initialized).toBe(true);
   });
 
-  it.each([-120, 0, 120])('accepts the inclusive clock boundary %i with a real signature', async (offset) => {
+  it.each([-3600, 0, 3600])('signs server-issued times as given (offset %i); the server owns the clock', async (offset) => {
     const shifted = { ...challenge, issuedAt: now + offset, expiresAt: now + offset + 300 };
     const signer = { address: account.address, signTypedData: vi.fn((data: TypedData) => account.signTypedData(data)) };
     const result = await prove(vi.fn(async () => json(shifted)), signer);
@@ -151,14 +151,20 @@ describe('wallet_prove', () => {
     expect(signer.signTypedData).toHaveBeenCalledWith(agentProofTypedData(account.address, shifted));
   });
 
+  it('refuses a plaintext origin before sending any request', async () => {
+    const fetchImpl = vi.fn();
+    const signer = { address: account.address, signTypedData: vi.fn() };
+    expect(await proveWallet({ signer, origin: 'http://open-pay.jp', fetchImpl, lookup })).toEqual({ ok: false, error: 'insecure_origin' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(signer.signTypedData).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['types injection', { ...challenge, types: { Proof: [{ name: 'value', type: 'uint256' }] } }],
     ['domain injection', { ...challenge, domain: { chainId: 1 } }],
     ['audience injection', { ...challenge, audience: 'https://attacker.example' }],
     ['purpose injection', { ...challenge, purpose: 'transfer' }],
     ['address injection', { ...challenge, address: account.address }],
-    ['old timestamp', { ...challenge, issuedAt: now - 121, expiresAt: now + 179 }],
-    ['future timestamp', { ...challenge, issuedAt: now + 121, expiresAt: now + 421 }],
     ['wrong TTL', { ...challenge, expiresAt: now + 301 }],
     ['fractional seconds', { ...challenge, issuedAt: now + 0.5, expiresAt: now + 300.5 }],
     ['string timestamp', { ...challenge, issuedAt: String(now) }],
@@ -238,7 +244,7 @@ describe('wallet_prove', () => {
   it('rejects a DNS-private challenge target before fetching or signing', async () => {
     const fetchImpl = vi.fn();
     const signer = { address: account.address, signTypedData: vi.fn() };
-    expect(await proveWallet({ signer, origin, fetchImpl, nowSec: () => now,
+    expect(await proveWallet({ signer, origin, fetchImpl,
       lookup: async () => [{ address: '169.254.169.254', family: 4 }],
     })).toEqual({ ok: false, error: 'challenge_unavailable' });
     expect(fetchImpl).not.toHaveBeenCalled();
