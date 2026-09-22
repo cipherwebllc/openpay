@@ -18,9 +18,12 @@ describe('agent page content', () => {
   it('keeps try-prompt IDs and payment kinds in the same order in ja/en', () => {
     const ja = agentPageContentFor('ja').tryPrompts.items;
     const en = agentPageContentFor('en').tryPrompts.items;
-    expect(ja).toHaveLength(5);
-    expect(new Set(ja.map((item) => item.id)).size).toBe(5);
+    expect(ja).toHaveLength(6);
+    expect(new Set(ja.map((item) => item.id)).size).toBe(6);
     expect(ja.map(({ id, kind }) => ({ id, kind }))).toEqual(en.map(({ id, kind }) => ({ id, kind })));
+  });
+  it.each(['ja', 'en'])('keeps history-web free in %s', (locale) => {
+    expect(agentPageContentFor(locale).tryPrompts.items.find((item) => item.id === 'history-web')?.kind).toBe('free');
   });
   it.each(['ja', 'en'])('includes a spending cap in every paid prompt in %s', (locale) => {
     const paid = agentPageContentFor(locale).tryPrompts.items.filter((item) => item.kind === 'paid');

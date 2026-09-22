@@ -20,7 +20,7 @@ Ask the person which one they want if they have not said.
 | **Human pays** — "don't hand the AI a wallet" | `openpay-order-mcp` | The person, from their own wallet, approving the final payment themselves. You find a shop, read the menu, state the total, and create a checkout link. | No |
 | **Agent pays** — "give the AI a budget" | `openpay-x402-mcp` | You, from a dedicated low-balance agent wallet, inside the local limits. | Yes — created locally by the MCP server in Step 5; nobody types or pastes it |
 
-Both ship in one npm package, `openpay-x402-mcp` (Node.js 20 or newer). The commands below pin `@0.16`. The local wallet arrived in 0.15; 0.16 adds `wallet_history`, a local log of what this agent bought.
+Both ship in one npm package, `openpay-x402-mcp` (Node.js 20 or newer). The commands below pin `@0.17`. The local wallet arrived in 0.15; 0.16 adds `wallet_history`, a local log of what this agent bought.
 
 For **Human pays**, do Step 3 with the `openpay-order` server and no env, then skip to Step 4a. There is nothing to fund and no limit to set, because you never touch a wallet.
 
@@ -48,7 +48,7 @@ Use the form for your host, substituting the agreed amounts.
 Claude Code:
 
 ```bash
-claude mcp add openpay-x402 -e SIGNER_MODE=keystore -e MAX_PER_CALL_JPYC=10 -e MAX_SESSION_JPYC=100 -e MAX_DAILY_JPYC=300 -e ALLOWED_HOSTS=open-pay.jp -e CATALOG_TRUST=true -- npx --yes openpay-x402-mcp@0.16
+claude mcp add openpay-x402 -e SIGNER_MODE=keystore -e MAX_PER_CALL_JPYC=10 -e MAX_SESSION_JPYC=100 -e MAX_DAILY_JPYC=300 -e ALLOWED_HOSTS=open-pay.jp -e CATALOG_TRUST=true -- npx --yes openpay-x402-mcp@0.17
 ```
 
 Codex CLI (`~/.codex/config.toml`):
@@ -56,7 +56,7 @@ Codex CLI (`~/.codex/config.toml`):
 ```toml
 [mcp_servers.openpay-x402]
 command = "npx"
-args = ["--yes", "openpay-x402-mcp@0.16"]
+args = ["--yes", "openpay-x402-mcp@0.17"]
 
 [mcp_servers.openpay-x402.env]
 SIGNER_MODE = "keystore"
@@ -70,7 +70,7 @@ CATALOG_TRUST = "true"
 Hermes:
 
 ```bash
-hermes mcp add openpay-x402 --command npx --env SIGNER_MODE=keystore MAX_PER_CALL_JPYC=10 MAX_SESSION_JPYC=100 MAX_DAILY_JPYC=300 ALLOWED_HOSTS=open-pay.jp CATALOG_TRUST=true --args --yes openpay-x402-mcp@0.16
+hermes mcp add openpay-x402 --command npx --env SIGNER_MODE=keystore MAX_PER_CALL_JPYC=10 MAX_SESSION_JPYC=100 MAX_DAILY_JPYC=300 ALLOWED_HOSTS=open-pay.jp CATALOG_TRUST=true --args --yes openpay-x402-mcp@0.17
 ```
 
 Any other MCP host (JSON `mcpServers` form, e.g. Claude Desktop):
@@ -80,7 +80,7 @@ Any other MCP host (JSON `mcpServers` form, e.g. Claude Desktop):
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["--yes", "openpay-x402-mcp@0.16"],
+      "args": ["--yes", "openpay-x402-mcp@0.17"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -94,7 +94,7 @@ Any other MCP host (JSON `mcpServers` form, e.g. Claude Desktop):
 }
 ```
 
-Human pays uses the server name `openpay-order`, the args `["--yes", "--package=openpay-x402-mcp@0.16", "--", "openpay-order-mcp"]`, and no `env`.
+Human pays uses the server name `openpay-order`, the args `["--yes", "--package=openpay-x402-mcp@0.17", "--", "openpay-order-mcp"]`, and no `env`.
 
 If a server with the same name already exists, tell the person and ask before replacing it. An existing entry may already hold a key: do not print its `env` values — name the variables only.
 
@@ -137,6 +137,8 @@ Tell the person plainly, once: OpenPay never receives, stores, or can recover th
 Other signer modes exist for people who want them and are not part of this setup: `SIGNER_MODE=env-key` with `BUYER_PRIVATE_KEY` (the person edits the config file by hand), and `SIGNER_MODE=steward` (the person runs their own Steward server; its bootstrap takes an owner private key, so never run it for them). Details: https://www.npmjs.com/package/openpay-x402-mcp
 
 After payments are enabled, the person can ask what this agent bought: call `wallet_history`. It reads a local log on this machine (`~/.openpay-x402/purchases.jsonl`) — OpenPay keeps its own x402 payment records (buyer address, resource URL, amount, transaction hash, time) for 400 days from the last record; this log is the agent-side view. The log can be incomplete, and only `paid_verified` entries carry an amount and a transaction hash; never present `paid_unverified` or `unknown` as paid. Amounts and settlement are confirmed on-chain, in Agent activity on the `fundingUrl` page.
+
+The person can also see purchases on the web: they sign in to OpenPay (SIWE) on /agent, then ask you to `wallet_prove`, and open the returned link in that signed-in browser once. The link is valid 5 minutes, single-use; do not paste it anywhere else. Requires the OpenPay feature to be enabled; `feature_disabled` means it is not.
 
 ## Step 6: Report
 

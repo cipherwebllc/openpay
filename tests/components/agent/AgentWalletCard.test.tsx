@@ -1,4 +1,6 @@
 import { useEffect, type ComponentProps } from 'react';
+import dynamic from 'next/dynamic';
+import type { AgentPurchases } from '@/components/agent/AgentPurchases';
 import type { AgentActivity } from '@/components/agent/AgentActivity';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
@@ -9,8 +11,14 @@ import { agentPageContentFor } from '@/lib/agentPage';
 
 const C = agentPageContentFor('en').wallet;
 const activity = agentPageContentFor('en').activity;
+const purchases = agentPageContentFor('en').purchases;
+const flags = vi.hoisted(() => ({ enabled: true }));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return { ...actual, env: { ...actual.env, get enableAgentPurchases() { return flags.enabled; } } };
+});
 
-const state = vi.hoisted(() => ({ query: '', data: undefined as bigint | undefined, isError: false, connected: false, read: vi.fn(), fund: vi.fn(), activity: vi.fn(), mount: vi.fn(), unmount: vi.fn(), refetch: vi.fn() }));
+const state = vi.hoisted(() => ({ query: '', data: undefined as bigint | undefined, isError: false, connected: false, read: vi.fn(), fund: vi.fn(), activity: vi.fn(), purchases: vi.fn(), mount: vi.fn(), unmount: vi.fn(), refetch: vi.fn() }));
 const address = '0x1111111111111111111111111111111111111111';
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(state.query) }));
 vi.mock('next-intl', () => ({ useLocale: () => 'en' }));
@@ -18,19 +26,38 @@ vi.mock('wagmi', () => ({
   useAccount: () => ({ address, isConnected: state.connected }),
   useReadContract: (options: unknown) => { state.read(options); return { data: state.data, isError: state.isError, refetch: state.refetch }; },
 }));
-vi.mock('next/dynamic', () => ({ default: () => function Dynamic(props: ComponentProps<typeof AgentActivity> | { value?: string; onSent?: () => void; onBusyChange?: (busy: boolean) => void }) {
-  const isFund = !('refreshKey' in props) && !props.value;
+vi.mock('next/dynamic', () => ({ default: vi.fn(() => function Dynamic(props: ComponentProps<typeof AgentPurchases> | ComponentProps<typeof AgentActivity> | { value?: string; onSent?: () => void; onBusyChange?: (busy: boolean) => void }) {
+  const isFund = !('address' in props) && !props.value;
   useEffect(() => { if (isFund) { state.mount(); return () => { state.unmount(); }; } }, [isFund]);
   if ('refreshKey' in props) { state.activity(props); return <h3>{props.c.title}</h3>; }
+  if ('address' in props) { state.purchases(props); return <h3>{props.c.title}</h3>; }
   if (props.value) return <svg data-value={props.value} />;
   state.fund(props);
   return <button type="button" onClick={props.onSent}>Mock funding confirmed</button>;
-} }));
-beforeEach(() => { window.localStorage.clear(); window.history.replaceState(null, '', '/'); state.query = ''; state.data = undefined; state.isError = false; state.connected = false; vi.clearAllMocks(); });
+}), }));
+beforeEach(() => { flags.enabled = true; window.localStorage.clear(); window.history.replaceState(null, '', '/'); state.query = ''; state.data = undefined; state.isError = false; state.connected = false; vi.clearAllMocks(); });
 
 describe('AgentWalletCard', () => {
+  it('renders purchases below activity with the Agent address and server-supplied copy', () => {
+    state.query = `address=${address}`;
+    const { container } = render(<AgentWalletCard c={C} activity={activity} purchases={purchases} />);
+    const heading = screen.getByRole('heading', { name: purchases.title });
+    expect(screen.getByRole('heading', { name: activity.title }).compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(state.purchases).toHaveBeenCalledWith({ address, locale: 'en', c: purchases });
+    expect(container.querySelector('#agent-fund')!.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+  it('does not even register the purchases dynamic import when the flag is off', async () => {
+    flags.enabled = false;
+    vi.resetModules();
+    const { AgentWalletCard: Disabled } = await import('@/components/agent/AgentWalletCard');
+    expect(dynamic).toHaveBeenCalledTimes(3);
+    state.query = `address=${address}`;
+    render(<Disabled c={C} activity={activity} purchases={purchases} />);
+    expect(screen.queryByRole('heading', { name: purchases.title })).toBeNull();
+    expect(state.purchases).not.toHaveBeenCalled();
+  });
   it('shows activity after the ownership note and funding panel only for a valid address', () => {
-    const { container } = render(<AgentWalletCard c={C} activity={activity} />);
+    const { container } = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(screen.queryByRole('heading', { name: activity.title })).toBeNull();
     expect(state.activity).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: address } });
@@ -44,7 +71,7 @@ describe('AgentWalletCard', () => {
   });
   it.each(['ja', 'en'])('shows a slim empty form and hides a valid address until Change in %s', (locale) => {
     const c = agentPageContentFor(locale).wallet;
-    const empty = render(<AgentWalletCard c={c} activity={agentPageContentFor(locale).activity} />);
+    const empty = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={c} activity={agentPageContentFor(locale).activity} />);
     expect(screen.getByRole('heading', { name: c.title })).toBeVisible();
     // 初期状態は入力欄を出さない: ウォレットは「Agent を接続」のセットアップで作られ、Agent が返すリンクで反映される。
     expect(screen.getByText(c.emptyLead)).toBeVisible();
@@ -62,7 +89,7 @@ describe('AgentWalletCard', () => {
     expect(screen.getByText(c.ownershipNote)).toBeVisible();
     empty.unmount();
     state.query = `address=${address}`;
-    render(<AgentWalletCard c={c} activity={agentPageContentFor(locale).activity} />);
+    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={c} activity={agentPageContentFor(locale).activity} />);
     expect(screen.getByLabelText(c.inputLabel)).not.toBeVisible();
     const change = screen.getByRole('button', { name: c.changeAddress });
     expect(change).toHaveAttribute('aria-expanded', 'false');
@@ -78,7 +105,7 @@ describe('AgentWalletCard', () => {
     expect(screen.getByText(c.invalidAddress)).toBeVisible();
   });
   it('keeps funding mounted across toggles and empty, invalid and valid address edits', () => {
-    const { container } = render(<AgentWalletCard c={C} activity={activity} />);
+    const { container } = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     const panel = container.querySelector('#agent-fund');
     expect(panel).not.toBeVisible();
     expect(state.mount).toHaveBeenCalledTimes(1);
@@ -105,12 +132,12 @@ describe('AgentWalletCard', () => {
     window.history.replaceState(null, '', '/#agent-fund');
     if (source === 'query') state.query = `address=${address}`;
     else window.localStorage.setItem('openpay.agent.address', address);
-    const { container } = render(<AgentWalletCard c={C} activity={activity} />);
+    const { container } = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(container.querySelector('#agent-fund')).toBeVisible();
     expect(screen.getByRole('button', { name: C.closeFund })).toHaveAttribute('aria-expanded', 'true');
   });
   it('opens on hashchange and retains a pending anchor until an address is entered', () => {
-    const { container } = render(<AgentWalletCard c={C} activity={activity} />);
+    const { container } = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     act(() => {
       window.history.replaceState(null, '', '/#agent-fund');
       window.dispatchEvent(new HashChangeEvent('hashchange'));
@@ -122,13 +149,13 @@ describe('AgentWalletCard', () => {
   it('prefers the URL address to the saved address', () => {
     state.query = `address=${address}`;
     window.localStorage.setItem('openpay.agent.address', '0x2222222222222222222222222222222222222222');
-    render(<AgentWalletCard c={C} activity={activity} />);
+    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(screen.getByLabelText(C.inputLabel)).toHaveValue(address);
     expect(window.localStorage.getItem('openpay.agent.address')).toBe(address);
   });
   it('disables closing while busy and preserves the mounted recipient through edits', () => {
     state.query = `address=${address}`;
-    const { container } = render(<AgentWalletCard c={C} activity={activity} />);
+    const { container } = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     // `?address=` 付きの着地 (MCP の入金リンク) は最初から開いている。
     expect(container.querySelector('#agent-fund')).toBeVisible();
     expect(screen.queryByText(C.fundLockedNote)).toBeNull();
@@ -163,16 +190,16 @@ describe('AgentWalletCard', () => {
   });
   it('keeps the funding panel closed for a saved address but opens it for a funding link', () => {
     window.localStorage.setItem('openpay.agent.address', address);
-    const saved = render(<AgentWalletCard c={C} activity={activity} />);
+    const saved = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(saved.container.querySelector('#agent-fund')).not.toBeVisible();
     saved.unmount();
     state.query = `address=${address}`;
-    const linked = render(<AgentWalletCard c={C} activity={activity} />);
+    const linked = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(linked.container.querySelector('#agent-fund')).toBeVisible();
   });
   it('moves focus to Change after using the connected wallet, not to the body', async () => {
     state.connected = true;
-    render(<AgentWalletCard c={C} activity={activity} />);
+    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
     const use = screen.getByRole('button', { name: C.useConnected });
     use.focus();
@@ -182,7 +209,7 @@ describe('AgentWalletCard', () => {
     expect(screen.getByRole('button', { name: C.changeAddress })).toHaveFocus();
   });
   it('focuses the input on manual entry, collapses the moment the address becomes valid, and never on blur', async () => {
-    render(<AgentWalletCard c={C} activity={activity} />);
+    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
     await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
     const input = screen.getByLabelText(C.inputLabel);
@@ -212,7 +239,7 @@ describe('AgentWalletCard', () => {
   });
   it('does not enable balance reads for empty or invalid addresses', () => {
     state.query = 'address=invalid';
-    render(<AgentWalletCard c={C} activity={activity} />);
+    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(state.read).toHaveBeenLastCalledWith(expect.objectContaining({ query: { enabled: false }, args: undefined }));
     fireEvent.change(screen.getByLabelText('Agent wallet address'), { target: { value: 'invalid' } });
     expect(state.read).toHaveBeenLastCalledWith(expect.objectContaining({ query: { enabled: false }, args: undefined }));
@@ -224,7 +251,7 @@ describe('AgentWalletCard', () => {
   it.each([[0n, '0'], [10n ** 18n, '1']] as const)('shows factual balance %s', (data, label) => {
     state.query = `address=${address}`;
     state.data = data;
-    const { container } = render(<AgentWalletCard c={C} activity={activity} />);
+    const { container } = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     const deployment = defaultDeploymentForSymbol('jpyc');
     expect(state.read).toHaveBeenLastCalledWith(expect.objectContaining({ address: deployment.address, chainId: deployment.chainId, args: [address], query: { enabled: true } }));
     expect(screen.getByRole('status')).toHaveTextContent(new RegExp(`^${label}\\s*JPYC$`));
@@ -238,16 +265,16 @@ describe('AgentWalletCard', () => {
   });
   it('shows loading and errors without a false zero balance', () => {
     state.query = `address=${address}`;
-    const { rerender } = render(<AgentWalletCard c={C} activity={activity} />);
+    const { rerender } = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(screen.getByRole('status')).toHaveTextContent('Loading…');
     state.isError = true;
-    rerender(<AgentWalletCard c={C} activity={activity} />);
+    rerender(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(screen.getByRole('status')).toHaveTextContent('Could not read the balance');
     expect(screen.queryByText('No JPYC')).toBeNull();
   });
   it('uses the connected wallet only on request and disables reads after invalid edits', () => {
     state.connected = true;
-    render(<AgentWalletCard c={C} activity={activity} />);
+    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
     fireEvent.click(screen.getByRole('button', { name: 'Use the connected wallet' }));
     expect(screen.getByLabelText('Agent wallet address')).toHaveValue(address);
@@ -257,18 +284,18 @@ describe('AgentWalletCard', () => {
     expect(state.read).toHaveBeenLastCalledWith(expect.objectContaining({ args: undefined, query: { enabled: false } }));
   });
   it('remembers a valid public address on this device and restores it on the next visit', () => {
-    const first = render(<AgentWalletCard c={C} activity={activity} />);
+    const first = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     fireEvent.change(screen.getByLabelText('Agent wallet address'), { target: { value: address } });
     expect(window.localStorage.getItem('openpay.agent.address')).toBe(address);
     expect(screen.getByRole('button', { name: 'Add funds' })).toHaveAttribute('aria-controls', 'agent-fund');
     expect(screen.getByRole('link', { name: 'Connect agent' })).toHaveAttribute('href', '#agent-connect');
     first.unmount();
-    render(<AgentWalletCard c={C} activity={activity} />);
+    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(screen.getByLabelText('Agent wallet address')).toHaveValue(address);
   });
   it('passes the funding copy, locale and address inside the funding block and refreshes on confirmation', () => {
     state.query = `address=${address}`;
-    render(<AgentWalletCard c={C} activity={activity} />);
+    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(state.fund).toHaveBeenLastCalledWith(expect.objectContaining({ locale: 'en', c: C.fundFromWallet, agentAddress: address }));
     // `?address=` 付きの着地は開いた状態 (押さなくても入金ブロックが見える)。
     expect(screen.getByRole('button', { name: C.closeFund })).toHaveAttribute('aria-expanded', 'true');

@@ -82,6 +82,12 @@ afterEach(() => {
 });
 
 describe('public/llms.txt 開示同期 (掟 14③)', () => {
+  it('discloses the 13-tool profile and owner-only web purchase history', () => {
+    const line = lines.find((line) => line.startsWith('- MCP パッケージ:'))!;
+    expect(line).toContain('全 13 ツール');
+    expect(line).toContain('`wallet_prove` は持ち主が /agent で SIWE ログインしたうえで一度だけ開く紐づけリンクを返し');
+    expect(line).toContain('自分の Agent の購入履歴 (何を・いくら・tx) を閲覧できる');
+  });
   it('x402 server records disclose retention from the last record', () => {
     expect(llms).toContain('x402 の決済記録 (買い手アドレス・商品 URL・金額・tx・日時) を最後の記録から 400 日保持する');
     expect(llms).not.toContain('OpenPay のサーバーは買い手別の購入履歴を保持しない');
