@@ -6,7 +6,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const profile = process.argv[2] ?? 'x402';
 const profiles = {
   order: { entry: 'src/order.mjs', expectedToolCount: 4 },
-  x402: { entry: 'src/index.mjs', expectedToolCount: 12 },
+  x402: { entry: 'src/index.mjs', expectedToolCount: 13 },
 };
 const selected = profiles[profile];
 if (!selected) {
@@ -43,7 +43,7 @@ try {
       2,
     ),
   );
-  // x402 は既存 9 + Wallet 3 の 12 ツール、order は鍵なし人払い + find の 4 ツールを公開する。
+  // x402 は既存 9 + Wallet 4 の 13 ツール、order は鍵なし人払い + find の 4 ツールを公開する。
   if (result.tools.length !== selected.expectedToolCount) {
     process.exitCode = 1;
   }

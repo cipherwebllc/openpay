@@ -17,6 +17,7 @@ import { encodeFunctionData, erc20Abi } from 'viem';
 import { createWallet, loadWallet, walletDirectory } from './keystore.mjs';
 import { fetchPolygonRpc } from './wallet-rpc.mjs';
 import { startPurchase, endPurchase, readHistory } from './history.mjs';
+import { proveWallet } from './prove.mjs';
 
 const TOOL_DEFINITIONS = [
   {
@@ -250,6 +251,12 @@ const TOOL_DEFINITIONS = [
       properties: { limit: { type: 'integer', minimum: 1, maximum: 50, default: 10 } },
       additionalProperties: false,
     },
+  },
+  {
+    name: 'wallet_prove',
+    profiles: ['x402'],
+    description: 'Sign a one-time, five-minute link to bind this Agent to a signed-in OpenPay account for server-side purchase history. Do not share the link. Keystore or env-key only; does not pay or expose keys.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
 ];
 
@@ -557,6 +564,21 @@ export function createToolRuntime({
 
   function walletInit(args) {
     return serializeWallet(() => walletInitImpl(args));
+  }
+
+  function walletProve(args) {
+    return serializeWallet(async () => {
+      requireEmptyArgs(args);
+      if (config.signerMode !== SIGNER_MODES.keystore && config.signerMode !== SIGNER_MODES.envKey) {
+        return { ok: false, error: 'signer_mode_unsupported' };
+      }
+      await walletReady;
+      if (keystoreMode && !signer.signerAvailable) {
+        return { ok: false, error: walletFailure?.code ?? 'wallet_not_initialized' };
+      }
+      if (signer === null) return { ok: false, error: 'buyer_private_key_missing' };
+      return proveWallet({ signer, origin: baseOrigin(), fetchImpl, lookup });
+    });
   }
 
   async function readBalance(address) {
@@ -923,6 +945,7 @@ export function createToolRuntime({
       if (name === 'wallet_init') return textResult(await walletInit(args));
       if (name === 'wallet_status') return textResult(await walletStatus(args));
       if (name === 'wallet_history') return textResult(await walletHistory(args));
+      if (name === 'wallet_prove') return textResult(await walletProve(args));
       if (name === 'discovery_search') return textResult(await discoverySearch(args));
       if (name === 'x402_quote') return textResult(await x402Quote(args));
       if (name === 'x402_pay') return textResult(await x402Pay(args));
@@ -959,5 +982,6 @@ export function createToolRuntime({
     walletInit,
     walletStatus,
     walletHistory,
+    walletProve,
   };
 }

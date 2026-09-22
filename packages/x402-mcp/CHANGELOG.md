@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.0 — 2026-09-23
+
+- Add x402-only `wallet_prove {}` (13 tools; order remains 4) for keystore and env-key signers. Return a five-minute, single-use link that binds the Agent to a browser's SIWE account for server-side purchase history; no payment or local purchase record.
+- Fetch challenges through the SDK's DNS-pinned GET transport, limit bodies to 8 KiB, reject unexpected fields and invalid nonce/timestamps/TTL, and reconstruct all EIP-712 fields from local constants. Return the unpadded base64url proof only inside the link fragment.
+- Disclose link-sharing and first-opener risks, rebinding recovery, and server-side retention of 400 days after the last record. A disabled server flag returns `feature_disabled`; Steward is unsupported. Preserve existing tool definitions, dependencies, and the local wallet threat model.
+
 ## 0.16.0 — 2026-09-22
 
 - Add x402-only `wallet_history` (12 tools; order remains 4). Join local start/end records, disclose coverage and incomplete history, and show only verified receipt amounts with integer unit conversion. No totals or on-chain proof claims.

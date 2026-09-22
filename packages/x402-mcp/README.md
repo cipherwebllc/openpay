@@ -19,7 +19,7 @@ forwarder-split extension.
 ### Install / run
 
 ```bash
-npx --yes --package=openpay-x402-mcp@0.16.0 -- openpay-order-mcp
+npx --yes --package=openpay-x402-mcp@0.17.0 -- openpay-order-mcp
 ```
 
 ### Claude Desktop
@@ -29,7 +29,7 @@ npx --yes --package=openpay-x402-mcp@0.16.0 -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp@0.16.0", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.17.0", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -42,7 +42,7 @@ npx --yes --package=openpay-x402-mcp@0.16.0 -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp@0.16.0", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.17.0", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -56,7 +56,7 @@ This profile needs no `BUYER_PRIVATE_KEY`. It exposes four tools: `find_shops`,
 ### Install / run
 
 ```bash
-npx openpay-x402-mcp@0.16.0
+npx openpay-x402-mcp@0.17.0
 ```
 
 ### Claude Desktop
@@ -66,7 +66,7 @@ npx openpay-x402-mcp@0.16.0
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp@0.16.0"],
+      "args": ["openpay-x402-mcp@0.17.0"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -85,7 +85,7 @@ npx openpay-x402-mcp@0.16.0
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp@0.16.0"],
+      "args": ["openpay-x402-mcp@0.17.0"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -125,7 +125,7 @@ from strands import Agent
 from strands.tools.mcp import MCPClient
 
 openpay = MCPClient(lambda: stdio_client(StdioServerParameters(
-    command="npx", args=["-y", "openpay-x402-mcp@0.16.0"],
+    command="npx", args=["-y", "openpay-x402-mcp@0.17.0"],
     env={...},  # same env as the Claude examples above
 )))
 
@@ -155,13 +155,14 @@ The buyer pays the resource price **plus the ~1% x402 fee** (`total = price + fe
 
 ## Tools
 
-The x402 profile exposes 12 tools; the order profile exposes 4.
+The x402 profile exposes 13 tools; the order profile exposes 4.
 
 | Tool | Profile | Pays? | Purpose |
 |---|---|---:|---|
 | `wallet_init` | x402 | No | `{}`: create or reuse the local wallet in keystore mode; return address, `created`, storage metadata, funding URL, and note. Never returns a key. |
 | `wallet_status` | x402 | No | `{}`: signer address/error, Polygon JPYC balance/source, effective limits/spend, allowed hosts, catalog trust, and funding URL. |
 | `wallet_history` | x402 | No | `{limit?: 1..50}` (default 10): recent local purchase attempts, outcomes, verified receipt amounts, and coverage. Incomplete local history; no totals or proof of payment. |
+| `wallet_prove` | x402 | No | `{}`: sign a five-minute, single-use link to bind the Agent to a signed-in OpenPay account for server-side purchase history. Keystore/env-key only; do not share the link. |
 | `discovery_search` | x402 | No | Search `DISCOVERY_URL` and show resource, category, price, fee, and total. |
 | `x402_quote` | x402 | No | Fetch a 402 challenge and report whether local guards would allow payment. |
 | `x402_pay` | x402 | Yes | Sign and retry with `X-PAYMENT` only after all guards pass. Requires `maxTotalJpyc`. |
@@ -202,7 +203,7 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | Variable | Default | Notes |
 |---|---|---|
 | `SIGNER_MODE` | `env-key` | `env-key` signs in-process with `BUYER_PRIVATE_KEY`. `steward` delegates typed-data signing to Steward. Explicit `keystore` uses the local wallet file, with no fallback to another signer. |
-| `BUYER_PRIVATE_KEY` | unset | Required only for `x402_pay` when `SIGNER_MODE=env-key`. Use a dedicated low-balance wallet, never a primary wallet. |
+| `BUYER_PRIVATE_KEY` | unset | Required for `x402_pay` and `wallet_prove` when `SIGNER_MODE=env-key`. Use a dedicated low-balance wallet, never a primary wallet. |
 | `STEWARD_URL` | unset | Required when `SIGNER_MODE=steward`, for example `http://localhost:3900`. |
 | `STEWARD_TENANT` | unset | Required when `SIGNER_MODE=steward`; tenant context sent as `X-Steward-Tenant`. |
 | `STEWARD_API_KEY` | unset | Required when `SIGNER_MODE=steward`; tenant API key sent as `X-Steward-Key`. Treated as a secret. |
@@ -216,7 +217,7 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | `MAX_TIMEOUT_SECONDS` | `600` | Reject seller-declared authorization lifetimes above this many seconds. Configurable from `1` to the facilitator ceiling of `1200`; the value is never silently clamped. |
 | `CATALOG_TRUST` | `true` | When true, exact URLs listed in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. Before signing, the live `accepts` fetched from a catalog URL is checked field-by-field (asset / timeout / forwarder / merchant / fee receiver / amounts) against the catalog listing (server-authored), so a third-party domain cannot bait-and-switch a different destination or authorization lifetime; mismatches are refused (`catalog_accept_mismatch`). Money caps still apply. Set `false` for strict manual allowlisting. |
 | `ALLOWED_HOSTS` | `open-pay.jp` | Comma-separated bare host allowlist. `x402_quote` still works outside the list but returns `host_not_allowed`. |
-| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from all three wallet tools while discovery remains available. Does not relocate env-key / Steward spend storage. |
+| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from `wallet_init`, `wallet_status`, `wallet_history`, and keystore `wallet_prove` while discovery remains available. Does not relocate env-key / Steward spend storage. |
 | `POLYGON_RPC_URL` | unset | Optional read-only `wallet_status` RPC. SDK outbound URL/host checks reject private/link-local addresses, `.internal`, and URL credentials; validated DNS addresses are pinned for the built-in transport. Explicit exception: HTTP on `localhost` / `127.0.0.1`. No public RPC default, redirects rejected, 5-second timeout including DNS and body reads. Never accepted as a tool argument. |
 | `DISCOVERY_URL` | `https://open-pay.jp/api/discovery` | Catalog used by `discovery_search`. |
 
@@ -251,6 +252,40 @@ through `DISCOVERY_URL` is handled like any other host (`pathTag` only). History
 writes give up after 2 seconds on a filesystem that stops answering, so a hung disk
 cannot hold back a payment result; that attempt is then reported as `history: "failed"`.
 
+## Web purchase history (`wallet_prove`)
+
+Call `wallet_prove {}` in the x402 profile with a keystore or env-key signer.
+It signs a fixed-purpose proof and returns `{ok, address, bindUrl, expiresAt,
+note}`. Open `bindUrl` in a browser signed in to OpenPay with SIWE to bind this
+Agent to that account and view its server-side purchase history. The link is
+valid for five minutes and can be used only once. This does not move funds,
+expose keys, or create a local purchase-history record. Server records of what
+was purchased are retained for 400 days after the last record and are separate
+from this machine's `wallet_history`.
+
+**Do not forward the link.** It appears in the agent conversation. Anyone who
+opens it first while signed in can bind the Agent to their account and view its
+purchase history (resources, amounts, and transactions). Run `wallet_prove`
+again and open the new link in your own signed-in browser to reclaim the binding
+by overwriting it. This proof grants no access to funds or keys. Its nonce and
+signature appear only in the URL fragment; ordinary HTTP requests and Referer
+headers do not send that fragment, but a JavaScript-capable link preview can read
+it. Client or conversation logging can retain the link.
+
+The challenge and link use the origin of `DISCOVERY_URL`. The proof's audience
+is always `https://open-pay.jp`; the response cannot choose its domain, types,
+purpose, or audience. Challenges must be HTTP 200 JSON with exactly `nonce`,
+`issuedAt`, and `expiresAt`, at most 8 KiB, and a 300-second lifetime (the server
+rebuilds the signed times from its own record, so the local clock is not checked).
+The origin must be `https://`; otherwise `insecure_origin` is returned without any
+request. Invalid challenges return
+`challenge_invalid` without signing; 429, 5xx, and network failures return
+`challenge_unavailable`. If the server flag `ENABLE_AGENT_PURCHASES` is OFF,
+HTTP 404 returns `feature_disabled`. Steward returns `signer_mode_unsupported`;
+an uninitialized keystore returns `wallet_not_initialized`. A missing env key
+returns `buyer_private_key_missing`; a signing failure returns the fixed code
+`proof_signing_failed` without exposing signer details.
+
 ## Signer Modes
 
 `env-key` is the default zero-config mode. It is convenient for local testing and should use a dedicated low-balance wallet.
@@ -274,7 +309,7 @@ Use this explicit mode to avoid pasting a private key into MCP configuration:
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["--yes", "openpay-x402-mcp@0.16.0"],
+      "args": ["--yes", "openpay-x402-mcp@0.17.0"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",

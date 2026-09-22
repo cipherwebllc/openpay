@@ -47,6 +47,7 @@ const PROFILES = [
       'wallet_init',
       'wallet_status',
       'wallet_history',
+      'wallet_prove',
     ],
   },
   {
@@ -219,6 +220,7 @@ describe('x402-mcp entrypoints', () => {
     expect(packedPaths).toContain('src/order.mjs');
     expect(packedPaths).toContain('src/keystore.mjs');
     expect(packedPaths).toContain('src/history.mjs');
+    expect(packedPaths).toContain('src/prove.mjs');
     expect(packedPaths.some((path) => /(?:^|\/)purchases[^/]*\.jsonl$/.test(path))).toBe(false);
     expect(packedPaths.some((path) => /(?:wallet\.json|spend\.json|\.env(?:\.|$)|\.openpay-x402)/.test(path))).toBe(false);
     expect(packedPaths).toContain('scripts/steward-bootstrap.mjs');
