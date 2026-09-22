@@ -177,7 +177,7 @@ describe('Agent purchases routes', () => {
     expect(response.status).toBe(200);
     noStore(response);
     const history = await response.json();
-    expect(history).toMatchObject({ ok: true, since: '2026-09-23', truncated: false, boundAt: bound.boundAt, items: [{ amount: '100', fee: '1', resource: { host: 'third.test', path: null, pathTag: expect.stringMatching(/^[0-9a-f]{8}$/) }, resourceOrigin: 'claimed' }] });
+    expect(history).toMatchObject({ ok: true, since: '2026-09-22', truncated: false, boundAt: bound.boundAt, items: [{ amount: '100', fee: '1', resource: { host: 'third.test', path: null, pathTag: expect.stringMatching(/^[0-9a-f]{8}$/) }, resourceOrigin: 'claimed' }] });
     expect(JSON.stringify(history)).not.toMatch(/payTo|payer|private|customer|secret/);
 
     signIn(OTHER);

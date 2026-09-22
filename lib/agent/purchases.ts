@@ -5,7 +5,9 @@ import { kvLrange } from '@/lib/kv';
 import type { SettleLedgerEntry, SettleLedgerSource } from '@/lib/x402/settleLedger';
 import { normalizeAgentAddress } from './purchaseAddress';
 
-export const AGENT_PURCHASES_SINCE = '2026-09-23';
+// 索引の導入日 = B-1 (#554) の本番デプロイ日を **UTC** で (行の `at` は UTC の ISO)。JST の日付で書くと、
+// JST 0〜9 時の購入が「導入日より前」と判定されて一覧から消える (2026-09-23 05:00 JST に実機で発覚)。
+export const AGENT_PURCHASES_SINCE = '2026-09-22';
 export const AGENT_PURCHASES_MAX = 200;
 const ORIGINS = {
   'usdc-vanilla': 'first-party',

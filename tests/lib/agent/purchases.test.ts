@@ -19,7 +19,7 @@ describe('payer purchases', () => {
     kv.kvLrange.mockResolvedValue({ ok: true, value: Array.from({ length: count }, (_, i) => row({ at: new Date(Date.parse(ENTRY.at) + i * 1000).toISOString() })) });
     const result = await readPayerPurchases(`0x${'A'.repeat(40)}`);
     expect(kv.kvLrange).toHaveBeenCalledWith(`x402:settle:payer:${A}`, 0, 200);
-    expect(result).toMatchObject({ ok: true, since: '2026-09-23', truncated: count > 200 });
+    expect(result).toMatchObject({ ok: true, since: '2026-09-22', truncated: count > 200 });
     if (!result.ok) throw new Error('read');
     expect(result.items).toHaveLength(Math.min(count, 200));
     if (count) expect(result.items[0].at).toBe(new Date(Date.parse(ENTRY.at) + (count - 1) * 1000).toISOString());
@@ -66,5 +66,13 @@ describe('payer purchases', () => {
     expect(await readPayerPurchases(A)).toEqual({ ok: false, reason: 'storage_error' });
     kv.kvLrange.mockRejectedValueOnce(new Error('details'));
     expect(await readPayerPurchases(A)).toEqual({ ok: false, reason: 'storage_error' });
+  });
+
+  it('lists a row recorded late on the UTC start date (JST early morning of the next day)', async () => {
+    // 2026-09-23 05:00 JST の購入 = 2026-09-22T20:00Z。since を JST の日付 (09-23) で書くと消えていた。
+    kv.kvLrange.mockResolvedValue({ ok: true, value: [row({ at: '2026-09-22T20:00:00.000Z' })] });
+    const result = await readPayerPurchases(A);
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.items).toHaveLength(1);
   });
 });
