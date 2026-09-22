@@ -167,6 +167,10 @@ export type AgentPageContent = {
       readonly kind: 'free' | 'paid' | 'human';
       readonly tag: string;
       readonly prompt: string;
+      /** 依頼文の下に出す補足 (継続用途など)。 */
+      readonly hint?: string;
+      /** 実際に買った実績 1 件 (時点と当時の価格を明記・tx リンクで検証できる)。 */
+      readonly example?: { readonly text: string; readonly linkLabel: string; readonly href: string };
     }[];
   };
   readonly next: {
@@ -195,7 +199,7 @@ const ja: AgentPageContent = {
   subtitle: 'ウォレットも秘密鍵も、OpenPay は預かりません。',
   connect: {
     title: 'Agent を接続',
-    lead: 'このプロンプトを Agent に渡すだけ。セットアップは Agent が進めます。',
+    lead: 'このプロンプトを Agent に渡すだけ。セットアップは Agent が進めます。支払いは、専用ウォレットに入金してからです。',
     copy: 'セットアッププロンプトをコピー',
     copied: 'コピーしました',
     openIn: 'またはアプリで開く',
@@ -370,7 +374,16 @@ const ja: AgentPageContent = {
     paidNote: '依頼文の上限を超える支払いは行われません。Agent 側の上限のほうが小さいときは、支払いは拒否されます。',
     items: [
       { id: 'catalog', kind: 'free', tag: '無料', prompt: 'OpenPay で今買える JPYC のデータと API を一覧にして、それぞれの価格と利用料を教えてください。支払いはしないでください。' },
-      { id: 'buy-monitor', kind: 'paid', tag: '支払いあり・3 JPYC', prompt: 'JPYC Service Monitor を上限 3 JPYC で購入して、この 1 か月に変わった点を 5 行にまとめてください。' },
+      {
+        id: 'buy-monitor', kind: 'paid', tag: '支払いあり・3 JPYC',
+        prompt: 'JPYC Service Monitor を上限 3 JPYC で購入して、この 1 か月に変わった点を 5 行にまとめてください。',
+        hint: '前回以降の差分だけを取れるので、毎週の確認にも使えます。買う前に、無料の更新日チェックで変更があったかを確かめられます。',
+        example: {
+          text: '実績: 2026-09-22 に Agent が 3 JPYC (当時の価格) で購入。返ってきたのは、日付と一次ソース URL つきの変更一覧。',
+          linkLabel: '取引を見る',
+          href: 'https://polygonscan.com/tx/0x50d58a1b10572c96ca2bed71983b1235a7957e0b61ac71bed2303323afd579c4',
+        },
+      },
       { id: 'order', kind: 'human', tag: '支払いは自分で', prompt: 'JPYC で注文できる店を探して、メニューと合計額を見せてください。支払いは私がします。' },
       { id: 'history', kind: 'free', tag: '無料', prompt: '最近なにを買ったか、金額と取引ハッシュつきで見せてください。' },
       { id: 'limits', kind: 'free', tag: '無料', prompt: 'いまの支払い上限と、今日使った額を教えてください。' },
@@ -395,7 +408,7 @@ const en: AgentPageContent = {
   subtitle: 'OpenPay never holds your wallet or your private key.',
   connect: {
     title: 'Connect your agent',
-    lead: 'Hand this prompt to your agent. It does the setup itself.',
+    lead: 'Hand this prompt to your agent. It does the setup itself. Payments start once you fund the agent’s wallet.',
     copy: 'Copy setup prompt',
     copied: 'Copied',
     openIn: 'Or open in',
@@ -570,7 +583,16 @@ const en: AgentPageContent = {
     paidNote: 'Nothing above the cap in the prompt is paid. If the limit on the agent side is lower, the payment is refused.',
     items: [
       { id: 'catalog', kind: 'free', tag: 'Free', prompt: 'List the JPYC data and APIs I can buy on OpenPay right now, with the price and fee for each. Do not pay.' },
-      { id: 'buy-monitor', kind: 'paid', tag: 'Pays · 3 JPYC', prompt: 'Buy the JPYC Service Monitor with a 3 JPYC cap and summarize what changed in the last month in five lines.' },
+      {
+        id: 'buy-monitor', kind: 'paid', tag: 'Pays · 3 JPYC',
+        prompt: 'Buy the JPYC Service Monitor with a 3 JPYC cap and summarize what changed in the last month in five lines.',
+        hint: 'It can return only what changed since your last check, so it also works as a weekly routine. A free freshness check tells you whether anything changed before you buy.',
+        example: {
+          text: 'Real run: on 2026-09-22 an agent bought it for 3 JPYC (price at the time) and got back the dated change list with source URLs.',
+          linkLabel: 'View the transaction',
+          href: 'https://polygonscan.com/tx/0x50d58a1b10572c96ca2bed71983b1235a7957e0b61ac71bed2303323afd579c4',
+        },
+      },
       { id: 'order', kind: 'human', tag: 'You pay yourself', prompt: 'Find shops where I can order with JPYC and show me the menu and the total. I will pay myself.' },
       { id: 'history', kind: 'free', tag: 'Free', prompt: 'Show me what you bought recently, with amounts and transaction hashes.' },
       { id: 'limits', kind: 'free', tag: 'Free', prompt: 'Tell me my current spending limits and how much I have spent today.' },

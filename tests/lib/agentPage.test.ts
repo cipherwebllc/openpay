@@ -29,6 +29,16 @@ describe('agent page content', () => {
       expect(item.prompt).toMatch(locale === 'ja' ? /上限 \d+(?:\.\d+)? JPYC/ : /\d+(?:\.\d+)? JPYC cap/);
     }
   });
+  it.each(['ja', 'en'])('shows one verifiable purchase example on the paid prompt in %s', (locale) => {
+    const item = agentPageContentFor(locale).tryPrompts.items.find((item) => item.id === 'buy-monitor');
+    // 実績は日付と当時の価格を明記し、Polygonscan の tx で誰でも検証できる形に固定する。
+    expect(item?.example?.href).toMatch(/^https:\/\/polygonscan\.com\/tx\/0x[0-9a-f]{64}$/);
+    expect(item?.example?.text).toMatch(/2026-09-22/);
+    expect(item?.hint?.trim().length).toBeGreaterThan(0);
+    for (const other of agentPageContentFor(locale).tryPrompts.items.filter((other) => other.id !== 'buy-monitor')) {
+      expect(other.example).toBeUndefined();
+    }
+  });
   it.each(['ja', 'en'])('keeps the monitor prompt and tag total aligned with the price and disclosed fee in %s', (locale) => {
     // /api/paid/jpyc/services が handleFirstPartyPaidGet に渡す価格 SoT を直接参照する。
     // 実装 (lib/x402/fee.ts) と同じ atomic の整数演算。Number だと小数価格で 0.3 + 1 = 1.2999… の偽 fail になる。

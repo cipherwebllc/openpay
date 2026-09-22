@@ -39,6 +39,13 @@ export function AgentTryPrompts({ locale, c }: { locale: string; c: AgentPageCon
             </div>
             <p id={`agent-try-prompt-${item.id}`} className="break-words text-sm leading-relaxed text-slate-800">{item.prompt}</p>
             {item.kind === 'paid' ? <p className="mt-1 text-xs leading-relaxed text-slate-600">{c.paidNote}</p> : null}
+            {item.hint ? <p className="mt-1 text-xs leading-relaxed text-slate-600">{item.hint}</p> : null}
+            {item.example ? (
+              <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                {item.example.text}{' '}
+                <a href={item.example.href} target="_blank" rel="noopener noreferrer" className="text-emerald-700 underline underline-offset-2 hover:text-emerald-900">{item.example.linkLabel}</a>
+              </p>
+            ) : null}
           </li>
         ))}
       </ul>
