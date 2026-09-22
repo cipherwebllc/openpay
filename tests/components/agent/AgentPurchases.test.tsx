@@ -45,7 +45,7 @@ function success(items: PurchaseItem[] = [item()], truncated = false) {
 }
 function mount(overrides: Partial<ComponentProps<typeof AgentPurchases>> = {}, strict = false) {
   const qc = client();
-  let props = { address, locale: 'en', c, ...overrides };
+  let props = { address, locale: 'en', c, isConnected: true, ...overrides };
   const ui = () => <NextIntlClientProvider locale={props.locale} messages={props.locale === 'ja' ? ja : en}><QueryClientProvider client={qc}><AgentPurchases {...props} /></QueryClientProvider></NextIntlClientProvider>;
   const tree = () => strict ? <StrictMode>{ui()}</StrictMode> : ui();
   const view = render(tree());
@@ -144,7 +144,8 @@ describe('AgentPurchases', () => {
     mockFetch.mockResolvedValue(response({ reason }, reason === 'feature_disabled' ? 404 : reason === 'storage_error' ? 503 : 401));
     mount();
     expect(await screen.findByText(c.failures[reason])).toBeVisible();
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    // verify の失敗後も一覧の取得は行う (紐づけ済みの持ち主が一覧を失わない)。ここでは一覧も失敗する mock なので table は出ない。
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole('table')).toBeNull();
     expect(track).not.toHaveBeenCalled();
   });
@@ -161,7 +162,9 @@ describe('AgentPurchases', () => {
     mockFetch.mockResolvedValue(new Response('Not found', { status: 404 }));
     mount();
     await screen.findByText(c.failures.feature_disabled);
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    // verify は 1 回だけ (再試行しない)。その後の一覧取得 1 回は別。
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/verify'))).toHaveLength(1);
   });
 
   it.each(['read', 'verify'])('isolates a %s network failure in the panel', async (operation) => {
@@ -171,7 +174,8 @@ describe('AgentPurchases', () => {
     mount();
     await screen.findByText(c.error);
     expect(screen.queryByRole('table')).toBeNull();
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    // verify の失敗後も一覧の取得は 1 回行う (再試行はしない)。
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(operation === 'verify' ? 2 : 1));
   });
 
   it.each([503, 429])('shows the general read error for HTTP %s', async (status) => {
@@ -347,7 +351,7 @@ describe('AgentPurchases', () => {
     mockFetch.mockImplementation(async (url) => String(url).endsWith('/verify') ? response({ address }) : response(success()));
     const qc = client();
     const wrap = (child: React.ReactNode) => <NextIntlClientProvider locale="en" messages={en}><QueryClientProvider client={qc}>{child}</QueryClientProvider></NextIntlClientProvider>;
-    const ui = <AgentPurchases address={address} locale="en" c={c} />;
+    const ui = <AgentPurchases address={address} locale="en" c={c} isConnected />;
     const container = document.createElement('div');
     document.body.appendChild(container);
     let root: Root | undefined;
@@ -368,5 +372,22 @@ describe('AgentPurchases', () => {
       if (root) await act(async () => { root?.unmount(); });
       container.remove();
     }
+  });
+
+  it('shows the connect hint instead of a sign-in button while no wallet is connected', () => {
+    mount({ isConnected: false });
+    expect(screen.queryByRole('button', { name: c.signIn })).toBeNull();
+    expect(screen.getByText(c.connectFirst)).toBeInTheDocument();
+    expect(h.signIn).not.toHaveBeenCalled();
+  });
+
+  it('keeps showing an already-bound list when a stale link fails verification', async () => {
+    h.sessionAddress = owner; landing();
+    mockFetch.mockImplementation(async (url) => String(url).endsWith('/verify')
+      ? response({ reason: 'expired_or_unknown' }, 401)
+      : response(success([item()])));
+    mount();
+    await screen.findByText(c.failures.expired_or_unknown);
+    await screen.findByRole('table');
   });
 });

@@ -11,7 +11,7 @@ import { txExplorerUrl } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { chainIdFromCaip2 } from '@/lib/x402/network';
 
-type Props = { address: string; locale: string; c: AgentPageContent['purchases'] };
+type Props = { address: string; locale: string; c: AgentPageContent['purchases']; isConnected: boolean };
 type Purchases = { ok: true; since: string; items: PurchaseItem[]; truncated: boolean; boundAt: string };
 type Result = Purchases | { ok: false; reason: 'not_bound' | 'not_signed_in' | 'feature_disabled' };
 class PurchaseError extends Error {
@@ -74,7 +74,7 @@ function PurchasesForAddress(props: Props) {
   );
 }
 
-function PurchasesForOwner({ address, locale, c, session, proof, consumeProof }: Props & {
+function PurchasesForOwner({ address, locale, c, isConnected, session, proof, consumeProof }: Props & {
   session: ReturnType<typeof useSiweSession>; proof: string | null; consumeProof: () => void;
 }) {
   const t = useTranslations('Nav');
@@ -123,7 +123,8 @@ function PurchasesForOwner({ address, locale, c, session, proof, consumeProof }:
       if (body.ok !== true || !Array.isArray(body.items)) throw new PurchaseError('storage_error');
       return body;
     },
-    enabled: !!owner && !authRequired && proof === null && !verify.isPending && !verify.isError,
+    // 検証に失敗しても、既に紐づいている一覧は隠さない (期限切れリンクを開いた持ち主が一覧を失わない)。
+    enabled: !!owner && !authRequired && proof === null && !verify.isPending,
     staleTime: 30_000, refetchOnWindowFocus: false, retry: false,
     // mount ごとの key と gcTime で、再ログイン直後にも古い認可の履歴を再表示しない。
     gcTime: 0, refetchOnMount: 'always',
@@ -149,7 +150,7 @@ function PurchasesForOwner({ address, locale, c, session, proof, consumeProof }:
     },
   });
   const signedOut = !owner || authRequired || (query.data?.ok === false && query.data.reason === 'not_signed_in');
-  const result = !signedOut && !query.isError && proof === null && !verify.isPending && !verify.isError && query.data?.ok === true ? query.data : undefined;
+  const result = !signedOut && !query.isError && proof === null && !verify.isPending && query.data?.ok === true ? query.data : undefined;
   useEffect(() => {
     if (!result || viewed.current) return;
     viewed.current = true;
@@ -192,7 +193,10 @@ function PurchasesForOwner({ address, locale, c, session, proof, consumeProof }:
     <>
       {signedOut ? <p className="mt-3 text-sm text-slate-600">{c.lead}</p> : <p className="mt-3 text-xs text-slate-500">{c.signedInAs} <span className="font-mono">{owner!.slice(0, 6)}…{owner!.slice(-4)}</span></p>}
       <p id={`${instance}-status`} role="status" className="mt-3 text-sm text-slate-600">{status}</p>
-      {signedOut ? <button type="button" className={`mt-3 ${button}`} disabled={session.isSigningIn} onClick={() => void signIn()}>{session.isSigningIn ? c.signingIn : c.signIn}</button> : null}
+      {/* 未接続ではサインインの署名ができない (useSiweSession が wallet_not_connected を投げる) → ボタンではなく接続への案内。 */}
+      {signedOut ? (isConnected
+        ? <button type="button" className={`mt-3 ${button}`} disabled={session.isSigningIn} onClick={() => void signIn()}>{session.isSigningIn ? c.signingIn : c.signIn}</button>
+        : <p className="mt-3 text-sm text-slate-600">{c.connectFirst}</p>) : null}
       {notBound && !verify.isPending && !verify.isError ? <div className="mt-3 text-sm text-slate-600"><p>{c.notBoundLead}</p><ol className="mt-2 list-decimal space-y-2 pl-5">{c.notBoundSteps.map((step) => <li key={step}>{step}</li>)}</ol></div> : null}
       {result ? (
         <>

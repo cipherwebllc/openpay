@@ -3,6 +3,7 @@
 import * as Sentry from '@sentry/nextjs';
 import {
   scrubSentryBreadcrumb,
+  scrubSentryServerEvent,
   scrubSentryTransaction,
 } from '@/lib/telemetryRedaction';
 
@@ -84,6 +85,9 @@ if (dsn) {
     // webhook token 等が path/query/userinfo に含まれても Sentry へ送らない。
     beforeBreadcrumb: scrubSentryBreadcrumb,
     beforeSendTransaction: scrubSentryTransaction,
+    // error event の request.url は location.href そのもの。/agent の紐づけリンク (#proof=・一回限りの
+    // 署名) が遅延 chunk の mount 前にエラーへ乗る窓を、origin だけに切り詰めて塞ぐ。
+    beforeSend: scrubSentryServerEvent,
     // PII (IP / ユーザ ID) は送らない。但しウォレットアドレスは breadcrumb
     // に出る可能性があるので、本当に厳格にしたい場合は beforeSend で scrub。
     sendDefaultPii: false,

@@ -158,6 +158,7 @@ export type AgentPageContent = {
     readonly title: string;
     readonly lead: string;
     readonly signIn: string;
+    readonly connectFirst: string;
     readonly signingIn: string;
     readonly signInError: string;
     readonly signedInAs: string;
@@ -401,6 +402,7 @@ const ja: AgentPageContent = {
     title: '購入 (何を買ったか)',
     lead: 'この Agent が x402 で買ったものを、OpenPay の決済記録から表示します。持ち主だけが見られます。',
     signIn: 'ログインして購入履歴を見る',
+    connectFirst: 'ログインするには、まずヘッダの「接続」でウォレットを接続してください。',
     signingIn: 'ウォレットで署名しています…',
     signInError: 'ログインできませんでした。もう一度お試しください。',
     signedInAs: 'ログイン中:',
@@ -652,6 +654,7 @@ const en: AgentPageContent = {
     title: 'Purchases (what it bought)',
     lead: 'What this agent bought over x402, from OpenPay’s payment records. Only the owner can see it.',
     signIn: 'Sign in to see purchases',
+    connectFirst: 'To sign in, first connect a wallet from “Connect” in the header.',
     signingIn: 'Signing with your wallet…',
     signInError: 'Sign-in failed. Please try again.',
     signedInAs: 'Signed in as',

@@ -43,7 +43,7 @@ describe('AgentWalletCard', () => {
     const { container } = render(<AgentWalletCard c={C} activity={activity} purchases={purchases} />);
     const heading = screen.getByRole('heading', { name: purchases.title });
     expect(screen.getByRole('heading', { name: activity.title }).compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(state.purchases).toHaveBeenCalledWith({ address, locale: 'en', c: purchases });
+    expect(state.purchases).toHaveBeenCalledWith({ address, locale: 'en', c: purchases, isConnected: false });
     expect(container.querySelector('#agent-fund')!.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
   it('does not even register the purchases dynamic import when the flag is off', async () => {

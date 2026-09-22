@@ -1,3 +1,4 @@
+import { AGENT_PURCHASES_MAX, AGENT_PURCHASES_SINCE } from '@/lib/agent/purchases';
 import { formatUnits, parseUnits } from 'viem';
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -31,6 +32,12 @@ describe('agent page content', () => {
     for (const item of paid) {
       expect(item.prompt).toMatch(locale === 'ja' ? /上限 \d+(?:\.\d+)? JPYC/ : /\d+(?:\.\d+)? JPYC cap/);
     }
+  });
+  it.each(['ja', 'en'])('keeps the purchases notes aligned with the index constants in %s', (locale) => {
+    // 「2026-09-23 以降」「直近 200 件」は文言側の直書き。索引の定数を変えたら文言も変わるようフェンス。
+    const p = agentPageContentFor(locale).purchases;
+    expect(p.sinceNote).toContain(AGENT_PURCHASES_SINCE);
+    expect(p.truncated).toContain(String(AGENT_PURCHASES_MAX));
   });
   it.each(['ja', 'en'])('shows one verifiable purchase example on the paid prompt in %s', (locale) => {
     const item = agentPageContentFor(locale).tryPrompts.items.find((item) => item.id === 'buy-monitor');

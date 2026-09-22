@@ -54,6 +54,8 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
     function openFundFromHash() {
       if (window.location.hash === '#agent-fund') setFundOpen(true);
     }
+    // 紐づけリンク (#proof=) も ?address= を持つが、目的は購入履歴なので入金パネルは開かない。
+    if (window.location.hash.startsWith('#proof=')) setFundOpen(false);
     openFundFromHash();
     window.addEventListener('hashchange', openFundFromHash);
     return () => window.removeEventListener('hashchange', openFundFromHash);
@@ -188,7 +190,7 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
           </div>
         </div>
         {address ? <AgentActivity address={address} locale={locale} c={activity} refreshKey={activityRefreshKey} /> : null}
-        {address && AgentPurchases ? <AgentPurchases address={address} locale={locale} c={purchases} /> : null}
+        {address && AgentPurchases ? <AgentPurchases address={address} locale={locale} c={purchases} isConnected={isConnected} /> : null}
       </div>
     </section>
   );
