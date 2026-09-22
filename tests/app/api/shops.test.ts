@@ -379,7 +379,8 @@ describe('GET /api/paid/jpyc-shops/search', () => {
       }>;
     };
     expect(body.accepts[0]).toMatchObject({
-      resource: 'https://open-pay.jp/api/paid/jpyc-shops/search',
+      // 実リクエストの query を echo する (SDK / MCP の resource 照合は query まで一致を要求)。
+      resource: 'https://open-pay.jp/api/paid/jpyc-shops/search?q=alpha',
       extra: {
         openpay: { merchantValue: (2n * 10n ** 18n).toString() },
       },

@@ -347,12 +347,26 @@ export async function handleFirstPartyPaidGet(
  */
 async function handlePaidGetWithDescriptor(
   req: Request,
-  source: PaidDescriptorSource,
+  canonical: PaidDescriptorSource,
   content: PaidContent,
 ): Promise<NextResponse> {
   if (!env.enableX402Facilitator) {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
+
+  // 402 の resource は「実際に支払う URL」= canonical path + 実リクエストの query。
+  // 買い手 (SDK / MCP) は accept.resource と要求 URL の query まで一致を要求する
+  // (packages/x402-sdk guards.mjs addResourceReason・第三者ゲートウェイは要求 URL を echo する) ため、
+  // query 付きの first-party 商品 (?changedSince= / ?q=) が resource_mismatch で買えなかった
+  // (2026-09-23・JPYC Service Monitor の delta 購入で発覚)。query が無いときは従来と byte 同一。
+  // redelivery binding (下) は以前から path + query で束縛しており、この値と一致する。
+  const requestSearch = new URL(req.url).search;
+  const source: PaidDescriptorSource = requestSearch === ''
+    ? canonical
+    : {
+        url: `${canonical.url}${requestSearch}`,
+        resolve: () => ({ ...canonical.resolve(), url: `${canonical.url}${requestSearch}` }),
+      };
 
   const paymentSignatureHeader = req.headers.get('PAYMENT-SIGNATURE');
   const paymentHeader = req.headers.get('x-payment');
@@ -382,10 +396,9 @@ async function handlePaidGetWithDescriptor(
 
   // 検索 API の query が違う別コンテンツまで同じ支払いで解錠される波及を断つため、
   // payment identity の原子的 claim を resource path + 実リクエスト query へ束縛する。
-  const requestUrl = new URL(req.url);
   const redeliveryBinding: PaymentRedeliveryBinding = {
     scope: 'first-party',
-    resource: `${source.url}${requestUrl.search}`,
+    resource: source.url, // = canonical path + 実リクエスト query (上で束縛済み・従来と同値)
   };
   const deliveryLookup = await lookupPaymentRedelivery(
     redeliveryIdentity,
