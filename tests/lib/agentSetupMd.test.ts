@@ -6,6 +6,10 @@ import { DEFAULT_MAX_PER_CALL_JPYC, DEFAULT_MAX_SESSION_JPYC, DEFAULT_ALLOWED_HO
 
 const md = readFileSync('public/agent/setup.md', 'utf8');
 describe('agent setup document drift fences', () => {
+  it('discloses the signed-in owner flow and the single-use proof link restrictions', () => {
+    for (const text of ['`wallet_prove`', 'OpenPay (SIWE) on /agent', 'signed-in browser once', 'valid 5 minutes, single-use', 'do not paste it anywhere else', '`feature_disabled`']) expect(md).toContain(text);
+  });
+
   it('matches the SDK defaults table', () => {
     for (const [key, value] of Object.entries({ MAX_PER_CALL_JPYC: DEFAULT_MAX_PER_CALL_JPYC, MAX_SESSION_JPYC: DEFAULT_MAX_SESSION_JPYC, ALLOWED_HOSTS: DEFAULT_ALLOWED_HOSTS, CATALOG_TRUST: DEFAULT_CATALOG_TRUST, MAX_TIMEOUT_SECONDS: DEFAULT_MAX_TIMEOUT_SECONDS })) {
       expect(md).toContain(`| \`${key}\` | \`${value}\` |`);

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
 import { trackAgentEvent } from '@/lib/agentTrack';
+import { env } from '@/lib/env';
 
 const tagColors = {
   free: 'bg-slate-100 text-slate-700',
@@ -23,7 +24,7 @@ export function AgentTryPrompts({ locale, c }: { locale: string; c: AgentPageCon
       <h2 className="text-xl font-bold text-slate-900">{c.title}</h2>
       <p className="mt-3 text-sm text-slate-600">{c.lead}</p>
       <ul className="mt-2 divide-y divide-slate-200/80">
-        {c.items.map((item) => (
+        {c.items.filter((item) => env.enableAgentPurchases || item.id !== 'history-web').map((item) => (
           <li key={item.id} className="min-w-0 py-3 last:pb-0">
             {/* タグとコピーを 1 行に並べ、依頼文はその下 (ボタンを依頼文の下に積むと mobile で 1 行ぶんずつ伸びる)。 */}
             <div className="flex min-w-0 items-center justify-between gap-3">

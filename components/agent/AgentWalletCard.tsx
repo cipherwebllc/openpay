@@ -10,6 +10,7 @@ import { erc20Abi, formatUnits, isAddress, zeroAddress, type Address } from 'vie
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
 import { chainNameForId } from '@/lib/chains';
+import { env } from '@/lib/env';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
 
 // 再訪時に残高カードをすぐ出すための端末ローカルの控え (公開アドレスのみ・秘密ではない)。
@@ -20,7 +21,11 @@ const AgentFundFromWallet = dynamic(() => import('./AgentFundFromWallet').then((
 
 const AgentActivity = dynamic(() => import('./AgentActivity').then((m) => m.AgentActivity), { ssr: false });
 
-export function AgentWalletCard({ c, activity }: { c: AgentPageContent['wallet']; activity: AgentPageContent['activity'] }) {
+const AgentPurchases = env.enableAgentPurchases
+  ? dynamic(() => import('./AgentPurchases').then((m) => m.AgentPurchases), { ssr: false })
+  : null;
+
+export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageContent['wallet']; activity: AgentPageContent['activity']; purchases: AgentPageContent['purchases'] }) {
   const locale = useLocale();
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const params = useSearchParams();
@@ -49,6 +54,8 @@ export function AgentWalletCard({ c, activity }: { c: AgentPageContent['wallet']
     function openFundFromHash() {
       if (window.location.hash === '#agent-fund') setFundOpen(true);
     }
+    // 紐づけリンク (#proof=) も ?address= を持つが、目的は購入履歴なので入金パネルは開かない。
+    if (window.location.hash.startsWith('#proof=')) setFundOpen(false);
     openFundFromHash();
     window.addEventListener('hashchange', openFundFromHash);
     return () => window.removeEventListener('hashchange', openFundFromHash);
@@ -183,6 +190,7 @@ export function AgentWalletCard({ c, activity }: { c: AgentPageContent['wallet']
           </div>
         </div>
         {address ? <AgentActivity address={address} locale={locale} c={activity} refreshKey={activityRefreshKey} /> : null}
+        {address && AgentPurchases ? <AgentPurchases address={address} locale={locale} c={purchases} isConnected={isConnected} /> : null}
       </div>
     </section>
   );

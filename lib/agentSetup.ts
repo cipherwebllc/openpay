@@ -18,7 +18,7 @@ export const AGENT_MCP_PACKAGE = 'openpay-x402-mcp';
  * 遡って変えてしまい、Web を戻しても取り消せない。packages/x402-mcp/package.json の minor と一致
  * (tests/lib/agentSetup.test.ts のフェンス)。keystore は 0.15 から・購入ログ (wallet_history) は 0.16 から。
  */
-export const AGENT_MCP_VERSION = '0.16';
+export const AGENT_MCP_VERSION = '0.17';
 export const AGENT_MCP_SPEC = `${AGENT_MCP_PACKAGE}@${AGENT_MCP_VERSION}`;
 export const AGENT_PAYS_SERVER = 'openpay-x402';
 export const HUMAN_PAYS_SERVER = 'openpay-order';

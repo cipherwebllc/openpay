@@ -124,7 +124,7 @@ describe('AgentFundFromWallet', () => {
 
   it('keeps the real funding form locked across parent edits, unknown receipts and reopening after confirmation', () => {
     const wallet = agentPageContentFor('en').wallet;
-    const { container, rerender } = render(<AgentWalletCard c={wallet} activity={agentPageContentFor('en').activity} />);
+    const { container, rerender } = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={wallet} activity={agentPageContentFor('en').activity} />);
     // `?address=` 付きの着地 (MCP の入金リンク) は入金パネルが開いた状態で始まる。
     expect(container.querySelector('#agent-fund')).toBeVisible();
     sendAmount();
@@ -132,7 +132,7 @@ describe('AgentFundFromWallet', () => {
     state.hash = hash;
     settleWrite();
     state.receiptError = true;
-    rerender(<AgentWalletCard c={wallet} activity={agentPageContentFor('en').activity} />);
+    rerender(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={wallet} activity={agentPageContentFor('en').activity} />);
     fireEvent.click(screen.getByRole('button', { name: wallet.changeAddress }));
     for (const value of ['', 'invalid', sender, agentAddress]) {
       fireEvent.change(screen.getByLabelText(wallet.inputLabel), { target: { value } });
@@ -145,7 +145,7 @@ describe('AgentFundFromWallet', () => {
     state.receiptError = false;
     state.receiptSuccess = true;
     state.receiptStatus = 'success';
-    rerender(<AgentWalletCard c={wallet} activity={agentPageContentFor('en').activity} />);
+    rerender(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={wallet} activity={agentPageContentFor('en').activity} />);
     expect(screen.getByRole('button', { name: wallet.closeFund })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: wallet.closeFund }));
     expect(container.querySelector('#agent-fund')).not.toBeVisible();

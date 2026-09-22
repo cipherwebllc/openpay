@@ -153,6 +153,38 @@ export type AgentPageContent = {
     readonly statsPartial: string;
     readonly publicNote: string;
   };
+  /** 購入 (何を買ったか)。SIWE ログイン + 初回 1 回の Agent 署名で紐づけ (plans/agent-purchase-web.md v3)。 */
+  readonly purchases: {
+    readonly title: string;
+    readonly lead: string;
+    readonly signIn: string;
+    readonly connectFirst: string;
+    readonly signingIn: string;
+    readonly signInError: string;
+    readonly signedInAs: string;
+    readonly notBoundLead: string;
+    readonly notBoundSteps: readonly string[];
+    readonly continueAfterSignIn: string;
+    readonly verifying: string;
+    readonly bound: string;
+    readonly failures: { readonly [K in 'expired_or_unknown' | 'signature_mismatch' | 'already_used' | 'malformed' | 'binding_limit' | 'storage_error' | 'feature_disabled']: string };
+    readonly colDate: string;
+    readonly colItem: string;
+    readonly colAmount: string;
+    readonly viewTx: string;
+    readonly originFirstParty: string;
+    readonly originListed: string;
+    readonly originClaimed: string;
+    readonly feeSuffix: string;
+    readonly empty: string;
+    readonly truncated: string;
+    readonly sinceNote: string;
+    readonly caveat: string;
+    readonly unbind: string;
+    readonly unbindConfirm: string;
+    readonly loading: string;
+    readonly error: string;
+  };
   /** セットアップ後に Agent へそのまま貼れる依頼文 (user 承認 2026-09-22)。 */
   readonly tryPrompts: {
     readonly title: string;
@@ -162,7 +194,7 @@ export type AgentPageContent = {
     /** 支払いが起きる依頼文にだけ出す注記。 */
     readonly paidNote: string;
     readonly items: readonly {
-      readonly id: 'catalog' | 'buy-monitor' | 'order' | 'history' | 'limits';
+      readonly id: 'catalog' | 'buy-monitor' | 'order' | 'history' | 'limits' | 'history-web';
       /** free = 支払いなし / paid = Agent が支払う / human = 人が支払う。 */
       readonly kind: 'free' | 'paid' | 'human';
       readonly tag: string;
@@ -366,6 +398,48 @@ const ja: AgentPageContent = {
     statsPartial: '50 件より前は集計できません',
     publicNote: 'Polygon 上の JPYC の送受信 (公開情報) です。何を購入したかは表示しません。0 JPYC の送信は除いています。',
   },
+  purchases: {
+    title: '購入 (何を買ったか)',
+    lead: 'この Agent が x402 で買ったものを、OpenPay の決済記録から表示します。持ち主だけが見られます。',
+    signIn: 'ログインして購入履歴を見る',
+    connectFirst: 'ログインするには、まずヘッダの「接続」でウォレットを接続してください。',
+    signingIn: 'ウォレットで署名しています…',
+    signInError: 'ログインできませんでした。もう一度お試しください。',
+    signedInAs: 'ログイン中:',
+    notBoundLead: 'この Agent はまだあなたのアカウントに紐づいていません。紐づけは 1 回だけです。',
+    notBoundSteps: [
+      'Agent に「購入履歴を Web で開いて」と頼みます。',
+      '返ってきたリンク (5 分有効・1 回だけ) を、このログイン中のブラウザで開きます。',
+    ],
+    continueAfterSignIn: 'Agent のリンクを受け取りました。ログインすると紐づけを続けます。',
+    verifying: '紐づけを確認しています…',
+    bound: 'この Agent をあなたのアカウントに紐づけました。',
+    failures: {
+      expired_or_unknown: 'このリンクは期限切れです。Agent にもう一度「購入履歴を Web で開いて」と頼んでください。',
+      signature_mismatch: 'このリンクの署名が Agent のアドレスと一致しません。Agent にもう一度頼んでください。',
+      already_used: 'このリンクはすでに使われています。別のアカウントに紐づいた場合は、Agent にもう一度頼むと取り戻せます。',
+      malformed: 'リンクの形式が正しくありません。Agent が返したリンクをそのまま開いてください。',
+      binding_limit: '紐づけられる Agent は 20 件までです。使っていない Agent の紐づけを解除してください。',
+      storage_error: '一時的に処理できません。少し待ってからやり直してください。',
+      feature_disabled: 'この機能は現在ご利用いただけません。',
+    },
+    colDate: '日時',
+    colItem: '内容',
+    colAmount: '金額',
+    viewTx: '取引を見る',
+    originFirstParty: 'OpenPay',
+    originListed: '出品',
+    originClaimed: '申告',
+    feeSuffix: '利用料',
+    empty: 'まだ購入の記録がありません。',
+    truncated: '直近 200 件までを表示しています。',
+    sinceNote: '2026-09-23 以降の記録です。',
+    caveat: '記録は欠損することがあります。金額と着金はオンチェーン (上のアクティビティ) が基準です。「申告」は売り手と買い手が申告した内容で、商品が提供されたことの証明ではありません。',
+    unbind: 'この Agent の紐づけを解除',
+    unbindConfirm: '紐づけを解除しますか? もう一度見るには、Agent に新しいリンクを頼む必要があります。',
+    loading: '読み込み中…',
+    error: '購入履歴を読み取れませんでした。',
+  },
   tryPrompts: {
     title: 'Agent に頼めること',
     lead: 'セットアップが済んだら、そのまま話しかけてください。コピーして Agent に貼るだけです。「Agent が支払う」で接続したときの例で、店の注文は「人が支払う」でも使えます。',
@@ -387,6 +461,7 @@ const ja: AgentPageContent = {
       { id: 'order', kind: 'human', tag: '支払いは自分で', prompt: 'JPYC で注文できる店を探して、メニューと合計額を見せてください。支払いは私がします。' },
       { id: 'history', kind: 'free', tag: '無料', prompt: '最近なにを買ったか、金額と取引ハッシュつきで見せてください。' },
       { id: 'limits', kind: 'free', tag: '無料', prompt: 'いまの支払い上限と、今日使った額を教えてください。' },
+      { id: 'history-web', kind: 'free', tag: '無料', prompt: '購入履歴を Web で開いてください。' },
     ],
   },
   next: {
@@ -575,6 +650,48 @@ const en: AgentPageContent = {
     statsPartial: 'Can’t total beyond the latest 50',
     publicNote: 'JPYC transfers on Polygon (public data). What was purchased is not shown. 0 JPYC transfers are left out.',
   },
+  purchases: {
+    title: 'Purchases (what it bought)',
+    lead: 'What this agent bought over x402, from OpenPay’s payment records. Only the owner can see it.',
+    signIn: 'Sign in to see purchases',
+    connectFirst: 'To sign in, first connect a wallet from “Connect” in the header.',
+    signingIn: 'Signing with your wallet…',
+    signInError: 'Sign-in failed. Please try again.',
+    signedInAs: 'Signed in as',
+    notBoundLead: 'This agent is not linked to your account yet. Linking is a one-time step.',
+    notBoundSteps: [
+      'Ask your agent: “Open my purchase history on the web.”',
+      'Open the link it returns (valid 5 minutes, single use) in this signed-in browser.',
+    ],
+    continueAfterSignIn: 'Link received from your agent. Sign in to continue linking.',
+    verifying: 'Confirming the link…',
+    bound: 'This agent is now linked to your account.',
+    failures: {
+      expired_or_unknown: 'This link has expired. Ask your agent again to open your purchase history on the web.',
+      signature_mismatch: 'The signature in this link does not match the agent’s address. Ask your agent again.',
+      already_used: 'This link was already used. If it linked to another account, asking your agent again reclaims it.',
+      malformed: 'The link is not in the expected form. Open the link exactly as your agent returned it.',
+      binding_limit: 'You can link up to 20 agents. Unlink one you no longer use.',
+      storage_error: 'Temporarily unavailable. Please wait a moment and try again.',
+      feature_disabled: 'This feature is not available right now.',
+    },
+    colDate: 'Date',
+    colItem: 'Item',
+    colAmount: 'Amount',
+    viewTx: 'View transaction',
+    originFirstParty: 'OpenPay',
+    originListed: 'Listed',
+    originClaimed: 'Claimed',
+    feeSuffix: 'fee',
+    empty: 'No purchases recorded yet.',
+    truncated: 'Showing the latest 200 records.',
+    sinceNote: 'Records from 2026-09-23 onward.',
+    caveat: 'Records can be incomplete. Amounts and settlement are confirmed on-chain (Activity above). “Claimed” is what the seller and buyer declared, not proof that the item was delivered.',
+    unbind: 'Unlink this agent',
+    unbindConfirm: 'Unlink this agent? To see it again, ask your agent for a new link.',
+    loading: 'Loading…',
+    error: 'Could not read purchases.',
+  },
   tryPrompts: {
     title: 'What you can ask your agent',
     lead: 'Once setup is done, just talk to it. Copy a prompt and paste it to your agent. These examples are for the “Agent pays” setup; ordering from a shop also works with “You pay”.',
@@ -596,6 +713,7 @@ const en: AgentPageContent = {
       { id: 'order', kind: 'human', tag: 'You pay yourself', prompt: 'Find shops where I can order with JPYC and show me the menu and the total. I will pay myself.' },
       { id: 'history', kind: 'free', tag: 'Free', prompt: 'Show me what you bought recently, with amounts and transaction hashes.' },
       { id: 'limits', kind: 'free', tag: 'Free', prompt: 'Tell me my current spending limits and how much I have spent today.' },
+      { id: 'history-web', kind: 'free', tag: 'Free', prompt: 'Open my purchase history on the web.' },
     ],
   },
   next: {
