@@ -205,7 +205,7 @@ const ja: AgentPageContent = {
     pasteInto: 'コピーして貼り付ける場合',
     hosts: ['Claude Code', 'Codex CLI', 'Hermes'],
     shellNote:
-      'シェルを使える Agent 向け。Claude Desktop などは下の「自分で設定を書く」へ。',
+      'シェルを使える Agent 向け。上の「Claude」ボタンは Claude アプリ内の Claude Code で開くので、そのまま使えます。チャットだけの環境 (Agent が設定を書けない) は下の「自分で設定を書く」へ。',
     setupLinkLabel: 'Agent が読む手順 (setup.md) を見る',
     promptExpand: '全文を表示',
     promptCollapse: 'たたむ',
@@ -249,7 +249,7 @@ const ja: AgentPageContent = {
   },
   generator: {
     title: '自分で設定を書く (手動)',
-    summaryHint: 'Claude Desktop など、Agent が自分で設定を書けない環境向け',
+    summaryHint: 'Claude のチャットなど、Agent が自分で設定を書けない環境向け',
     lead: 'Agent の実行環境へ貼り付ける設定を作ります。貼り付けるのはあなたです。',
     modeLabel: '使い方',
     modeOptions: { 'agent-pays': 'Agent が支払う', 'human-pays': '人が支払う' },
@@ -405,7 +405,7 @@ const en: AgentPageContent = {
     pasteInto: 'Or copy and paste into',
     hosts: ['Claude Code', 'Codex CLI', 'Hermes'],
     shellNote:
-      'For agents with shell access. For Claude Desktop and similar, use “Write the config yourself” below.',
+      'For agents with shell access. The “Claude” button above opens Claude Code inside the Claude app, so it works as is. Chat-only hosts, where the agent can’t write its own config, should use “Write the config yourself” below.',
     setupLinkLabel: 'Read the instructions your agent follows (setup.md)',
     promptExpand: 'Show full prompt',
     promptCollapse: 'Collapse',
@@ -449,7 +449,7 @@ const en: AgentPageContent = {
   },
   generator: {
     title: 'Write the config yourself (manual)',
-    summaryHint: 'For Claude Desktop and other hosts where the agent can’t write its own config',
+    summaryHint: 'For Claude chat and other hosts where the agent can’t write its own config',
     lead: 'Builds the config to paste into your agent’s environment. You do the pasting.',
     modeLabel: 'Mode',
     modeOptions: { 'agent-pays': 'Agent pays', 'human-pays': 'Human pays' },
