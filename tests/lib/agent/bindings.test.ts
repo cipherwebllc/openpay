@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-const kv = vi.hoisted(() => ({ kvGet: vi.fn(), kvGetDel: vi.fn(), kvSetNxGet: vi.fn(), kvEval: vi.fn(), kvLrange: vi.fn() }));
+const kv = vi.hoisted(() => ({ kvGet: vi.fn(), kvMget: vi.fn(), kvGetDel: vi.fn(), kvSetNxGet: vi.fn(), kvEval: vi.fn(), kvLrange: vi.fn() }));
 vi.mock('@/lib/kv', () => kv);
 import { bindAgent, unbindAgent, listAgentBindings, isOwner } from '@/lib/agent/bindings';
 import { agentPurchasesKv } from '../../_helpers/agentPurchasesKv';

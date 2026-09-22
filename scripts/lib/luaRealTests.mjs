@@ -16,11 +16,13 @@
 // 全て対象 (実際に verifyBudget.test.ts も 2026-09-12 に巻き込まれた)。
 export const LUA_REAL_TEST_FILES = [
   'tests/_helpers/redisLua.test.ts',
+  'tests/app/api/agentPurchases.test.ts',
   'tests/app/api/store-delivery-metadata.test.ts',
   'tests/app/api/store-products-license-terms.test.ts',
   'tests/lib/license/minter.test.ts',
   'tests/lib/license/product.test.ts',
   'tests/lib/license/stock.test.ts',
+  'tests/lib/agent/bindings.test.ts',
   'tests/lib/license/verifyBudget.test.ts',
   'tests/lib/store/deliveryBudget.test.ts',
   'tests/lib/x402/purchaseIntent-lua.test.ts',

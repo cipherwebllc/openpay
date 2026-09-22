@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { privateKeyToAccount } from 'viem/accounts';
 import type { Address } from 'viem';
 
-const kv = vi.hoisted(() => ({ kvGet: vi.fn(), kvGetDel: vi.fn(), kvSetNxGet: vi.fn(), kvEval: vi.fn(), kvLrange: vi.fn() }));
+const kv = vi.hoisted(() => ({ kvGet: vi.fn(), kvMget: vi.fn(), kvGetDel: vi.fn(), kvSetNxGet: vi.fn(), kvEval: vi.fn(), kvLrange: vi.fn() }));
 vi.mock('@/lib/kv', () => kv);
 import {
   AGENT_PROOF_AUDIENCE, AGENT_PROOF_DOMAIN, AGENT_PROOF_PURPOSE, AGENT_PROOF_TYPES,

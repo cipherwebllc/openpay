@@ -68,6 +68,8 @@ export async function readPayerPurchases(address: string): Promise<
     if (!result.ok) return { ok: false, reason: 'storage_error' };
     const items = result.value.map((line) => parsePurchase(line, normalized))
       .filter((row): row is PurchaseItem => row !== null)
+      // 索引の導入日より前の行は出さない (導入直前の月バケットからの遡及は無いので、通常は該当なし)。
+      .filter((row) => row.at >= AGENT_PURCHASES_SINCE)
       .sort((left, right) => Date.parse(right.at) - Date.parse(left.at))
       .slice(0, AGENT_PURCHASES_MAX);
     return { ok: true, since: AGENT_PURCHASES_SINCE, items, truncated: result.value.length > AGENT_PURCHASES_MAX };

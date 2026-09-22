@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { kvEval, kvGet } from '@/lib/kv';
+import { kvEval, kvGet, kvMget } from '@/lib/kv';
 import { normalizeAgentAddress } from './purchaseAddress';
 
 export const AGENT_BINDINGS_MAX = 20;
@@ -131,9 +131,9 @@ export async function listAgentBindings(owner: string): Promise<
   if (!o) return storageError();
   try {
     const addresses = parseAddresses(await read(ownerKey(o)));
-    const bindings = await Promise.all(addresses.map(async (address) => ({
-      address, binding: parseBinding(await read(boundKey(address))),
-    })));
+    const rows = await kvMget(addresses.map(boundKey));
+    if (!rows.ok) return storageError();
+    const bindings = addresses.map((address, index) => ({ address, binding: parseBinding(rows.value[index] ?? null) }));
     // The bound record is authoritative even if an index is stale or a rebind races this read.
     return { ok: true, addresses: bindings.flatMap(({ address, binding }) =>
       binding?.owner === o ? [{ address, boundAt: binding.at }] : []) };

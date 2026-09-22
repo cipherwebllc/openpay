@@ -4,6 +4,7 @@ import { createFakeRedisStore, runRedisLua } from './redisLua';
 /** Real Lua at the KV boundary; GETDEL and SET NX use the same in-memory store. */
 export function agentPurchasesKv(kv: {
   kvGet: ReturnType<typeof vi.fn>;
+  kvMget: ReturnType<typeof vi.fn>;
   kvEval: ReturnType<typeof vi.fn>;
   kvSetNxGet: ReturnType<typeof vi.fn>;
   kvGetDel: ReturnType<typeof vi.fn>;
@@ -11,6 +12,7 @@ export function agentPurchasesKv(kv: {
 }) {
   const store = createFakeRedisStore();
   kv.kvGet.mockImplementation(async (key: string) => ({ ok: true, value: store.strings.get(key) ?? null }));
+  kv.kvMget.mockImplementation(async (keys: readonly string[]) => ({ ok: true, value: keys.map((key) => store.strings.get(key) ?? null) }));
   kv.kvGetDel.mockImplementation(async (key: string) => {
     const value = store.strings.get(key) ?? null;
     store.strings.delete(key);

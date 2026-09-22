@@ -2,7 +2,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { privateKeyToAccount } from 'viem/accounts';
 
-const kv = vi.hoisted(() => ({ kvGet: vi.fn(), kvGetDel: vi.fn(), kvSetNxGet: vi.fn(), kvEval: vi.fn(), kvLrange: vi.fn() }));
+const kv = vi.hoisted(() => ({ kvGet: vi.fn(), kvMget: vi.fn(), kvGetDel: vi.fn(), kvSetNxGet: vi.fn(), kvEval: vi.fn(), kvLrange: vi.fn() }));
 const session = vi.hoisted(() => ({ token: 'owner-token' as string | undefined }));
 vi.mock('@/lib/kv', () => kv);
 vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => session.token ? { value: session.token } : undefined }) }));
