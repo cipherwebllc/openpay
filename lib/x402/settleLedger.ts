@@ -15,6 +15,9 @@ import { kvLpush } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 
 export const SETTLE_LEDGER_MAX = 5000;
+// resource は 402 の echo (2026-09-23 から実リクエストの query を含む) = 買い手が長さを制御できる。
+// 1 行の肥大が月バケット (5000 行) と payer 索引の容量を圧迫する波及を断つため、記録時に切り詰める。
+export const SETTLE_LEDGER_RESOURCE_MAX_CHARS = 512;
 const SETTLE_LEDGER_TTL_SEC = 400 * 24 * 60 * 60;
 
 export type SettleLedgerSource =
@@ -62,7 +65,10 @@ export function atomicToHuman(atomic: string, decimals: number): string {
 }
 
 /** 1 行を追記する。失敗しても throw しない (付帯処理の隔離)。 */
-export async function recordSettleLedger(entry: SettleLedgerEntry): Promise<void> {
+export async function recordSettleLedger(input: SettleLedgerEntry): Promise<void> {
+  const entry: SettleLedgerEntry = input.resource.length > SETTLE_LEDGER_RESOURCE_MAX_CHARS
+    ? { ...input, resource: input.resource.slice(0, SETTLE_LEDGER_RESOURCE_MAX_CHARS) }
+    : input;
   try {
     const result = await kvLpush(settleLedgerKey(settleLedgerMonth()), JSON.stringify(entry), {
       trimStart: 0,

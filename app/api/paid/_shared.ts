@@ -356,7 +356,7 @@ async function handlePaidGetWithDescriptor(
 
   // 402 の resource は「実際に支払う URL」= canonical path + 実リクエストの query。
   // 買い手 (SDK / MCP) は accept.resource と要求 URL の query まで一致を要求する
-  // (packages/x402-sdk guards.mjs addResourceReason・第三者ゲートウェイは要求 URL を echo する) ため、
+  // (packages/x402-sdk guards.mjs addResourceReason・第三者売り手のゲートウェイ実装は要求 URL を echo する) ため、
   // query 付きの first-party 商品 (?changedSince= / ?q=) が resource_mismatch で買えなかった
   // (2026-09-23・JPYC Service Monitor の delta 購入で発覚)。query が無いときは従来と byte 同一。
   // redelivery binding (下) は以前から path + query で束縛しており、この値と一致する。
