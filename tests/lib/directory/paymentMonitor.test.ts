@@ -61,7 +61,7 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(env.changes.some((c) => c.provider === 'Aegis')).toBe(false);
   });
 
-  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 7 件', () => {
+  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 13 件', () => {
     const jpyc = createServiceMonitorEnvelope(
       { changedSince: '2026-08-01', limit: SERVICE_MONITOR_MAX_LIMIT },
       {},
@@ -70,9 +70,10 @@ describe('createPaymentMonitorEnvelope', () => {
     // E11 (2026-09-03 の日付訂正) 後、jpyc-services スコープで 8/01 以降に残るのは
     // dg-sps 追加 (発表日 8/10)・aegis (8/27)・coincheck 登録 (8/27・第 2 回週次)・
     // 9/04 の verified 4 件 (sbi-vc-trade/jpyc/jpyc-ex/aegis)・9/11 kaia MOU・9/16 jpyc (Circle StableFX)・9/17 jpyc (Upbit 取引支援)・
-    // 9/17 jpyc-ex (発行予約の一時停止と復旧) の 11 件。決済スコープ専用の 8/10 DG SPS launch・8/26 大阪府採択 3 件・8/31 Mi&T・9/04 verified 2 件・
-    // 9/11 の 4 件 (NetStars 更新 + verified 3)・9/18 verified 4 件が混ざれば 26 件になる = スコープ分離の証明。
-    expect(jpyc.changes).toHaveLength(11);
+    // 9/17 jpyc-ex (発行予約の一時停止と復旧)・9/18 jpyc (累計発行 100 億円・第 5 回)・9/23 coincheck verified (第 5 回) の 13 件。
+    // 決済スコープ専用の 8/10 DG SPS launch・8/26 大阪府採択 3 件・8/31 Mi&T・9/04 verified 2 件・
+    // 9/11 の 4 件 (NetStars 更新 + verified 3)・9/18 verified 4 件・9/23 verified 4 件が混ざれば 32 件になる = スコープ分離の証明。
+    expect(jpyc.changes).toHaveLength(13);
     expect(jpyc.changes.every((c) => c.slug !== undefined)).toBe(true);
     // 応答に内部ルーティング用 scopes を漏らさない。
     expect(jpyc.changes[0]).not.toHaveProperty('scopes');
@@ -85,9 +86,9 @@ describe('createPaymentMonitorEnvelope', () => {
     );
     expect(delta.mode).toBe('delta');
     // 8/10 DG SPS launch + 8/26 大阪府採択 3 件 + 8/31 Mi&T 手数料開示 + 9/04 verified 2 件
-    // + 9/11 NetStars × Kaia MOU + 9/11 verified 3 件 + 9/18 verified 4 件 = 15 件
+    // + 9/11 NetStars × Kaia MOU + 9/11 verified 3 件 + 9/18 verified 4 件 + 9/23 verified 4 件 = 19 件
     // (当日含む・以前の backfill 4 件 = TIS/DG 実証/NetStars/JCB は含まない)
-    expect(delta.changes).toHaveLength(15);
+    expect(delta.changes).toHaveLength(19);
     expect(delta.changes[0].date).toBe('2026-08-10');
     expect(delta.changes.every((c) => c.date >= '2026-08-10')).toBe(true);
 
@@ -239,8 +240,8 @@ describe('createPaymentMonitorEnvelope.providers (事業者の現況行)', () =>
       NOW,
     );
     // 大阪府 3 件 + 8/31 Mi&T 手数料開示 + 9/04 verified 2 件 + 9/11 NetStars 更新 + 9/11 verified 3 件
-    // + 9/18 verified 4 件 = 14 イベント・現況行は大阪 3 社 + NetStars の 4 社分
-    expect(delta.changes).toHaveLength(14);
+    // + 9/18 verified 4 件 + 9/23 verified 4 件 = 18 イベント・現況行は大阪 3 社 + NetStars の 4 社分
+    expect(delta.changes).toHaveLength(18);
     expect(delta.providers.map((p) => p.region).sort()).toEqual(['Japan', 'Osaka', 'Osaka', 'Osaka']);
     // 第 2 回週次更新: 現況が変わった社は changelog の diffs と行の値が一致する (同一 PR の掟)。
     const mit = delta.providers.find((p) => p.provider.startsWith('Mi&T'))!;
