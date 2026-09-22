@@ -267,6 +267,23 @@ describe('first-party paid x402 routes', () => {
     expect(paymentResponse).toMatchObject({ success: true, transaction: TX_HASH, payer: PAYER });
   });
 
+  it('query 付きの要求は verify と settle に同じ「path + query」の resource を渡して 200 になる', async () => {
+    // 2026-09-23: 402 の resource が query を落としていたため、SDK/MCP の resource 照合 (query まで一致) で
+    // ?changedSince= 付きの first-party 商品が買えなかった。402 だけでなく決済まで同じ文字列で通ることを固定する。
+    routeMocks.verify.mockResolvedValue(NextResponse.json({ isValid: true, payer: PAYER }));
+    routeMocks.settle.mockImplementation(
+      async () => NextResponse.json({ success: true, transaction: TX_HASH, network: 'eip155:80002', payer: PAYER }),
+    );
+    const { demo } = await load();
+    const res = await demo.GET(req('/api/paid/demo?x=1&y=two', paymentHeader()));
+    expect(res.status).toBe(200);
+    const sentVerify = (await routeMocks.verify.mock.calls[0][0].json()) as { paymentRequirements: { resource: string } };
+    const sentSettle = (await routeMocks.settle.mock.calls[0][0].json()) as { paymentRequirements: { resource: string } };
+    expect(sentVerify.paymentRequirements.resource).toBe('https://open-pay.jp/api/paid/demo?x=1&y=two');
+    // verify と settle は同一の requirements 文字列 = facilitator の予約 (record.resource) と必ず一致する。
+    expect(sentSettle.paymentRequirements.resource).toBe(sentVerify.paymentRequirements.resource);
+  });
+
   it('settle の broadcast 前 rate limit は所有 claim を解放し、同じ正規 payment を再試行できる', async () => {
     routeMocks.verify.mockImplementation(
       async () => NextResponse.json({ isValid: true, payer: PAYER }),

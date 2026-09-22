@@ -16,7 +16,7 @@ import {
   settleLedgerKey,
   settleLedgerMonth,
   type SettleLedgerEntry,
-} from '@/lib/x402/settleLedger';
+ SETTLE_LEDGER_RESOURCE_MAX_CHARS } from '@/lib/x402/settleLedger';
 
 const ENTRY: SettleLedgerEntry = {
   at: '2026-09-15T00:00:00.000Z',
@@ -106,5 +106,17 @@ describe('settleLedger', () => {
     await expect(recordSettleLedger(ENTRY)).resolves.toBeUndefined();
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith('x402.settle_ledger.payer_index_failed', { source: ENTRY.source });
+  });
+
+  it('買い手が制御する resource (query 付き) は記録時に上限で切り詰める (月バケットと payer 索引の両方)', async () => {
+    kv.kvLpush.mockResolvedValue({ ok: true, value: 1 });
+    const long = `https://open-pay.jp/api/paid/demo?q=${'x'.repeat(2000)}`;
+    await recordSettleLedger({ ...ENTRY, resource: long });
+    for (const call of kv.kvLpush.mock.calls) {
+      const row = JSON.parse(call[1] as string) as { resource: string };
+      expect(row.resource).toHaveLength(SETTLE_LEDGER_RESOURCE_MAX_CHARS);
+      expect(row.resource.startsWith('https://open-pay.jp/api/paid/demo?q=')).toBe(true);
+    }
+    expect(kv.kvLpush).toHaveBeenCalledTimes(2);
   });
 });

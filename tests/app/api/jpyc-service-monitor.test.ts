@@ -4,6 +4,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress } from 'viem';
+// @ts-expect-error SDK source of truth is JavaScript without declarations.
+import { validateAcceptForPayment } from '../../../packages/x402-sdk/src/guards.mjs';
 
 const verificationMocks = vi.hoisted(() => ({
   snapshot: {} as Record<
@@ -146,14 +148,21 @@ describe('GET /api/paid/jpyc/services (facilitator gate)', () => {
     }
   });
 
-  it('支払いなし → 402。accepts の resource は本 route・価格 2 JPYC + 手数料', async () => {
+  it('支払いなし → 402。accepts の resource は本 route + 実リクエストの query・価格 2 JPYC + 手数料', async () => {
     const route = await loadJpyc();
     const res = await route.GET(req(PATH, '?changedSince=2026-08-20'));
     expect(res.status).toBe(402);
     const body = await res.json();
     expect(body.accepts).toHaveLength(1);
     const accept = body.accepts[0];
-    expect(accept.resource).toBe(`https://open-pay.jp${PATH}`);
+    // 買い手 (SDK / MCP) は accept.resource と要求 URL の query まで一致を要求する。query を落とすと
+    // delta 購入 (?changedSince=) が resource_mismatch で買えない (2026-09-23 実機で発覚)。
+    expect(accept.resource).toBe(`https://open-pay.jp${PATH}?changedSince=2026-08-20`);
+    expect(validateAcceptForPayment(accept, `https://open-pay.jp${PATH}?changedSince=2026-08-20`).reasons).not.toContain('resource_mismatch');
+    // v2 ヘッダの resource.url も同じ値。
+    const v2 = res.headers.get('PAYMENT-REQUIRED');
+    expect(v2).not.toBeNull();
+    expect(JSON.parse(Buffer.from(v2!, 'base64').toString('utf8')).resource.url).toBe(`https://open-pay.jp${PATH}?changedSince=2026-08-20`);
     // 2 JPYC + facilitator fee (floor 1 JPYC・1% < floor) = 3 JPYC
     expect(accept.maxAmountRequired).toBe((3n * 10n ** 18n).toString());
     expect(accept.extra.openpay.merchantValue).toBe((2n * 10n ** 18n).toString());
@@ -223,13 +232,13 @@ describe('GET /api/paid/stablecoin-payments (JPYC facilitator gate・2 商品目
     )) as unknown as Route;
   }
 
-  it('支払いなし → 402。価格 2 JPYC + 手数料 = 3 JPYC・resource は本 route', async () => {
+  it('支払いなし → 402。価格 2 JPYC + 手数料 = 3 JPYC・resource は本 route + query', async () => {
     const route = await loadPaymentJpyc();
     const res = await route.GET(req(PATH, '?changedSince=2026-08-01'));
     expect(res.status).toBe(402);
     const body = await res.json();
     const accept = body.accepts[0];
-    expect(accept.resource).toBe(`https://open-pay.jp${PATH}`);
+    expect(accept.resource).toBe(`https://open-pay.jp${PATH}?changedSince=2026-08-01`);
     expect(accept.maxAmountRequired).toBe((3n * 10n ** 18n).toString());
   });
 });
