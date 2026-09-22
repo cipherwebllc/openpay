@@ -64,7 +64,7 @@ export type PaymentMonitorEnvelope = {
   providers: PaymentProviderRow[];
   /** 監視対象の事業者数 (delta で絞っても母数が分かる)。 */
   totalProviders: number;
-  /** snapshot: 全履歴 (limit 件・新しい順ではなく日付昇順) / delta: changedSince 以降のみ。
+  /** snapshot: 全履歴 (limit 件・新しい順ではなく日付昇順) / delta: 実効日 (max(date, collectedAt)) が changedSince 以降のみ。
    * delta の limit は**日付境界に切り上げ**られる (1 日が分割されることはない)。 */
   changes: PaymentChangeRow[];
   /** 決済スコープの全イベント数 (limit で切っても母数が分かる)。 */

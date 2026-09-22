@@ -31,6 +31,9 @@ export async function GET(): Promise<NextResponse> {
     {},
     new Date().toISOString(),
   );
+  // snapshot の changes は limit で切られた view (末尾 200 件・date 順)。件数が上限を超えると、date は古いが
+  // 記録は最新の backfill が先に落ちて latestRecordedAt を過小に出す → changelog 全体から計算する。
+  const recorded = sortByDeltaEffectiveDate(scopedChangelog('jpyc-services'));
   return NextResponse.json(
     {
       schemaVersion: full.schemaVersion,
@@ -38,8 +41,8 @@ export async function GET(): Promise<NextResponse> {
       teaser: true,
       // 「買う前に確かめる」は記録日で判定する (有料 delta と同じ実効日)。date だけだと、後から記録した
       // 古い date のイベントが「新しい変更なし」に見えて買い控えが起きる (2026-09-23)。
-      latestChanges: sortByDeltaEffectiveDate(full.changes).slice(-TEASER_EVENTS),
-      latestRecordedAt: full.changes.length > 0 ? sortByDeltaEffectiveDate(full.changes).map(deltaEffectiveDate).at(-1) : null,
+      latestChanges: recorded.slice(-TEASER_EVENTS).map(({ scopes: _scopes, ...event }) => event),
+      latestRecordedAt: recorded.length > 0 ? deltaEffectiveDate(recorded[recorded.length - 1]) : null,
       // full.changes は limit で切られた view なので総数の権威にならない (件数が
       // SERVICE_MONITOR_MAX_LIMIT を超えると開示が過少になる)。changelog の実数を使う
       // (payments teaser が full.totalEvents を使うのと同じ意味)。

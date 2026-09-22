@@ -26,11 +26,12 @@ A weekly change feed for Japan-related JPYC/Web3 services, designed to be wired 
 
 - `changedSince` は **YYYY-MM-DD・その日を含む**。省略すると全件スナップショット(`mode: "snapshot"`)。**応答の `nextChangedSince` をそのまま次回に渡すのが正**(取りこぼしなし)
 - **無料 teaser(購入前に実データを確認・支払い不要)**: `GET /api/jpyc/services/teaser` / `GET /api/stablecoin-payments/teaser`(直近 3 イベント)
-- **買う前に確かめる(空振り課金ゼロ)**: teaser の最終イベント日が手元の `nextChangedSince` より**前(古い)なら**その週は買わない(有料 delta は空になる)。同日以降のイベントがあるときだけ有料 delta を購入する — 「変更なし」に支払う週が無くなります
+- **買う前に確かめる(空振り課金ゼロ)**: teaser の `latestRecordedAt`(最終記録日・古い発表日のイベントも後から記録されるので `date` ではなく記録日で比べる)が手元の `nextChangedSince` より**前(古い)なら**その週は買わない(有料 delta は空になる)。同日以降に記録されたイベントがあるときだけ有料 delta を購入する — 「変更なし」に支払う週が無くなります
 - **変更は値でも返ります**: 一次ソースが前後の値を明示する場合、`diffs: [{ field, previousValue, currentValue, effectiveAt? }]`(field は assets / chains / fee / limit / status / feature の固定語彙)が付きます。推測では埋めません(無い場合は summary のみ)
 - 重複排除キーは `slug + date + changeType`
 - **日付の定義**: `date` は**一次ソースの発表日**、`collectedAt` は**こちらが記録した日**(収集日・発表日と異なるときだけ付きます)。2026-09-03 に過去イベントの `date` を発表日基準へ訂正しました
-- `limit` は**日付境界で丸められます**(1 日が途中で分割されることはないため、1 日の件数が `limit` を超える場合は `changes` が `limit` を超えます)。`hasMore` が `true` なら応答の `nextChangedSince`(= まだ返していない最初のイベントの日付・返した最後の日付より必ず後)で続きを購入してください — 同じ範囲が再送されることも、取りこぼされることもありません
+- 重複排除の鍵は `slug + date + changeType`。**同じ鍵のイベントが再び届いたら、後から届いた本文で置き換えてください**(記録を統合・訂正したときに再配信します)
+- `limit` は**日付境界で丸められます**(1 日が途中で分割されることはないため、1 日の件数が `limit` を超える場合は `changes` が `limit` を超えます)。`hasMore` が `true` なら応答の `nextChangedSince`(= まだ返していない最初のイベントの記録日・返した最後の記録日より必ず後)で続きを購入してください — 同じ範囲が再送されることも、取りこぼされることもありません
 - OpenAPI(機械可読・`x-agent-usage` つき): `https://open-pay.jp/api/openapi.json`(operationId: `getJpycServiceMonitor` / `getJpycServiceMonitorUsdc`)
 - 外部カタログ: [x402 Bazaar / agentic.market](https://agentic.market/services/open-pay-jp) に掲載(USDC 面)
 

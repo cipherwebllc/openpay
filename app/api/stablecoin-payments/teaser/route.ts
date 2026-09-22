@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { JPYC_PAYMENTS_RESOURCE } from '@/lib/directory/paidResources';
 import { createPaymentMonitorEnvelope } from '@/lib/directory/paymentMonitor';
-import { deltaEffectiveDate, SERVICE_MONITOR_MAX_LIMIT, sortByDeltaEffectiveDate } from '@/lib/directory/serviceMonitor';
+import { deltaEffectiveDate, scopedChangelog, SERVICE_MONITOR_MAX_LIMIT, sortByDeltaEffectiveDate } from '@/lib/directory/serviceMonitor';
 import { USDC_PAYMENT_MONITOR } from '@/lib/directory/usdcResource';
 
 export const runtime = 'nodejs';
@@ -21,13 +21,15 @@ export async function GET(): Promise<NextResponse> {
     { limit: SERVICE_MONITOR_MAX_LIMIT },
     new Date().toISOString(),
   );
+  const recorded = sortByDeltaEffectiveDate(scopedChangelog('stablecoin-payments'));
   return NextResponse.json(
     {
       schemaVersion: full.schemaVersion,
       product: 'japan-stablecoin-payment-monitor',
       teaser: true,
-      latestChanges: sortByDeltaEffectiveDate(full.changes).slice(-TEASER_EVENTS),
-      latestRecordedAt: full.changes.length > 0 ? sortByDeltaEffectiveDate(full.changes).map(deltaEffectiveDate).at(-1) : null,
+      // limit で切られた snapshot view ではなく changelog 全体から (backfill が最新でも取りこぼさない)。
+      latestChanges: recorded.slice(-TEASER_EVENTS).map(({ scopes: _scopes, ...event }) => event),
+      latestRecordedAt: recorded.length > 0 ? deltaEffectiveDate(recorded[recorded.length - 1]) : null,
       totalEvents: full.totalEvents,
       generatedAt: full.generatedAt,
       fullFeed: {

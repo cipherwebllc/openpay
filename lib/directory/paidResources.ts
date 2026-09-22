@@ -112,7 +112,7 @@ const SERVICE_MONITOR_OUTPUT = {
       type: 'string',
       enum: ['snapshot', 'delta'],
       description:
-        'snapshot = full monitor view (no changedSince). delta = only what changed on/after changedSince; changes:[] explicitly means no change.',
+        'snapshot = full monitor view (no changedSince). delta = events recorded on/after changedSince (matched on collectedAt, or date when absent, so an event with an older date can still be new); changes:[] explicitly means no change.',
     },
     query: {
       type: 'object',
@@ -201,7 +201,7 @@ const SERVICE_MONITOR_OUTPUT = {
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the date of the first event NOT returned here, which is strictly later than the last returned date because a single day is never split — so continuing always makes progress and never re-delivers. When hasMore is false it is the response generation date (UTC).',
+        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the recorded date (collectedAt, or date when absent) of the first event NOT returned here, which is strictly later than the last returned recorded date because a single recorded day is never split across pages.',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },
@@ -250,7 +250,7 @@ const PAYMENT_MONITOR_OUTPUT = {
       type: 'string',
       enum: ['snapshot', 'delta'],
       description:
-        'snapshot = full dated history (no changedSince). delta = only events on/after changedSince; changes:[] explicitly means no change.',
+        'snapshot = full dated history (no changedSince). delta = events recorded on/after changedSince (matched on collectedAt, or date when absent, so an event with an older date can still be new); changes:[] explicitly means no change.',
     },
     query: {
       type: 'object',
@@ -371,7 +371,7 @@ const PAYMENT_MONITOR_OUTPUT = {
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the date of the first event NOT returned here, which is strictly later than the last returned date because a single day is never split — so continuing always makes progress and never re-delivers. When hasMore is false it is the response generation date (UTC).',
+        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the recorded date (collectedAt, or date when absent) of the first event NOT returned here, which is strictly later than the last returned recorded date because a single recorded day is never split across pages.',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },
