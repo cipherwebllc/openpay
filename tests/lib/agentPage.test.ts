@@ -34,7 +34,7 @@ describe('agent page content', () => {
     }
   });
   it.each(['ja', 'en'])('keeps the purchases notes aligned with the index constants in %s', (locale) => {
-    // 「2026-09-23 以降」「直近 200 件」は文言側の直書き。索引の定数を変えたら文言も変わるようフェンス。
+    // 「2026-09-22 (UTC) 以降」「直近 200 件」は文言側の直書き。索引の定数を変えたら文言も変わるようフェンス。
     const p = agentPageContentFor(locale).purchases;
     expect(p.sinceNote).toContain(AGENT_PURCHASES_SINCE);
     expect(p.truncated).toContain(String(AGENT_PURCHASES_MAX));
