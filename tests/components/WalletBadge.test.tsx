@@ -39,6 +39,7 @@ const flags = vi.hoisted(() => ({
   enableTipMessage: false,
   enableCreatorStoreUi: false,
   enableHandles: false,
+  enableAgentPurchases: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -69,6 +70,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableHandles() {
         return flags.enableHandles;
+      },
+      get enableAgentPurchases() {
+        return flags.enableAgentPurchases;
       },
     },
   };
@@ -161,6 +165,7 @@ beforeEach(() => {
   flags.enableTipMessage = false;
   flags.enableCreatorStoreUi = false;
   flags.enableHandles = false;
+  flags.enableAgentPurchases = false;
 });
 
 describe('WalletBadge: 接続済 branch', () => {

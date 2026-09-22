@@ -136,7 +136,7 @@ Tell the person plainly, once: OpenPay never receives, stores, or can recover th
 
 Other signer modes exist for people who want them and are not part of this setup: `SIGNER_MODE=env-key` with `BUYER_PRIVATE_KEY` (the person edits the config file by hand), and `SIGNER_MODE=steward` (the person runs their own Steward server; its bootstrap takes an owner private key, so never run it for them). Details: https://www.npmjs.com/package/openpay-x402-mcp
 
-After payments are enabled, the person can ask what this agent bought: call `wallet_history`. It reads a local log on this machine (`~/.openpay-x402/purchases.jsonl`) — OpenPay's servers keep no per-buyer purchase history. The log can be incomplete, and only `paid_verified` entries carry an amount and a transaction hash; never present `paid_unverified` or `unknown` as paid. Amounts and settlement are confirmed on-chain, in Agent activity on the `fundingUrl` page.
+After payments are enabled, the person can ask what this agent bought: call `wallet_history`. It reads a local log on this machine (`~/.openpay-x402/purchases.jsonl`) — OpenPay keeps its own x402 payment records (buyer address, resource URL, amount, transaction hash, time) for 400 days from the last record; this log is the agent-side view. The log can be incomplete, and only `paid_verified` entries carry an amount and a transaction hash; never present `paid_unverified` or `unknown` as paid. Amounts and settlement are confirmed on-chain, in Agent activity on the `fundingUrl` page.
 
 ## Step 6: Report
 

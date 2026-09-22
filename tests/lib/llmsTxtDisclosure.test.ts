@@ -82,6 +82,10 @@ afterEach(() => {
 });
 
 describe('public/llms.txt 開示同期 (掟 14③)', () => {
+  it('x402 server records disclose retention from the last record', () => {
+    expect(llms).toContain('x402 の決済記録 (買い手アドレス・商品 URL・金額・tx・日時) を最後の記録から 400 日保持する');
+    expect(llms).not.toContain('OpenPay のサーバーは買い手別の購入履歴を保持しない');
+  });
   it('license の行はチェーン・商品政策・権利・不明を同じ文脈で開示する', () => {
     const line = lineMentioning('/api/license/verify');
     expect(lineMentioning('/api/license/products/<id>')).toBe(line);

@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const kv = vi.hoisted(() => ({ kvLpush: vi.fn() }));
 vi.mock('@/lib/kv', () => kv);
+vi.mock('@/lib/logger', () => ({ logger: { warn: vi.fn() } }));
+import { logger } from '@/lib/logger';
 
 import {
   atomicToHuman,
@@ -30,6 +32,7 @@ const ENTRY: SettleLedgerEntry = {
 
 beforeEach(() => {
   kv.kvLpush.mockReset();
+  vi.mocked(logger.warn).mockClear();
 });
 
 describe('settleLedger', () => {
@@ -53,7 +56,7 @@ describe('settleLedger', () => {
   it('recordSettleLedger は現在月キーへ LPUSH (trim 上限と TTL を同じ呼び出しで指定)', async () => {
     kv.kvLpush.mockResolvedValue({ ok: true, value: 1 });
     await recordSettleLedger(ENTRY);
-    expect(kv.kvLpush).toHaveBeenCalledTimes(1);
+    expect(kv.kvLpush).toHaveBeenCalledTimes(2);
     const [key, value, opts] = kv.kvLpush.mock.calls[0] as [string, string, Record<string, number>];
     expect(key).toMatch(/^x402:settle:ledger:\d{4}-\d{2}$/);
     expect(JSON.parse(value)).toEqual(ENTRY);
@@ -63,7 +66,7 @@ describe('settleLedger', () => {
   it('recordSettleLedgerAfterResponse はリクエストスコープ外 (after 不可) でも throw せず記録する', async () => {
     kv.kvLpush.mockResolvedValue({ ok: true, value: 1 });
     expect(() => recordSettleLedgerAfterResponse(ENTRY)).not.toThrow();
-    await vi.waitFor(() => expect(kv.kvLpush).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(kv.kvLpush).toHaveBeenCalledTimes(2));
   });
 
   it('KV 障害 (ok:false / throw) でも throw しない', async () => {
@@ -71,5 +74,37 @@ describe('settleLedger', () => {
     await expect(recordSettleLedger(ENTRY)).resolves.toBeUndefined();
     kv.kvLpush.mockRejectedValue(new Error('kv down'));
     await expect(recordSettleLedger(ENTRY)).resolves.toBeUndefined();
+  });
+
+  it('payer index uses lowercase, the same row, 201 retained rows and 400-day TTL', async () => {
+    kv.kvLpush.mockResolvedValue({ ok: true, value: 1 });
+    const entry = { ...ENTRY, payer: `0x${ENTRY.payer!.slice(2).toUpperCase()}` };
+    await recordSettleLedger(entry);
+    expect(kv.kvLpush).toHaveBeenNthCalledWith(2, `x402:settle:payer:${ENTRY.payer}`, JSON.stringify(entry), {
+      trimStart: 0, trimStop: 200, ttlSec: 400 * 86400,
+    });
+  });
+
+  it.each([null, '', '0x123', `0x${'g'.repeat(40)}`, `${ENTRY.payer}\n`])('invalid payer %s only records the monthly row', async (payer) => {
+    kv.kvLpush.mockResolvedValue({ ok: true, value: 1 });
+    await recordSettleLedger({ ...ENTRY, payer });
+    expect(kv.kvLpush).toHaveBeenCalledTimes(1);
+  });
+
+  it('monthly throw does not prevent the independent payer index (§3.1)', async () => {
+    kv.kvLpush.mockRejectedValueOnce(new Error('monthly failed')).mockResolvedValueOnce({ ok: true, value: 1 });
+    await expect(recordSettleLedger(ENTRY)).resolves.toBeUndefined();
+    expect(kv.kvLpush).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('x402.settle_ledger.record_failed', { source: ENTRY.source });
+  });
+
+  it.each(['throw', 'error'])('payer index %s uses its own log, never the monthly log', async (failure) => {
+    kv.kvLpush.mockResolvedValueOnce({ ok: true, value: 1 });
+    if (failure === 'throw') kv.kvLpush.mockRejectedValueOnce(new Error('payer failed'));
+    else kv.kvLpush.mockResolvedValueOnce({ ok: false, reason: 'timeout' });
+    await expect(recordSettleLedger(ENTRY)).resolves.toBeUndefined();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('x402.settle_ledger.payer_index_failed', { source: ENTRY.source });
   });
 });

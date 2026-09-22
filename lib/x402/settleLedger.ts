@@ -75,6 +75,22 @@ export async function recordSettleLedger(entry: SettleLedgerEntry): Promise<void
   } catch {
     logger.warn('x402.settle_ledger.record_failed', { source: entry.source });
   }
+
+  // payer 索引の障害を月バケット・決済応答へ波及させない (独立した付帯処理)。
+  try {
+    if (entry.payer?.length === 42 && /^0x[0-9a-fA-F]{40}$/.test(entry.payer)) {
+      const result = await kvLpush(`x402:settle:payer:${entry.payer.toLowerCase()}`, JSON.stringify(entry), {
+        trimStart: 0,
+        trimStop: 200,
+        ttlSec: SETTLE_LEDGER_TTL_SEC,
+      });
+      if (!result.ok) {
+        logger.warn('x402.settle_ledger.payer_index_failed', { source: entry.source });
+      }
+    }
+  } catch {
+    logger.warn('x402.settle_ledger.payer_index_failed', { source: entry.source });
+  }
 }
 
 /**
