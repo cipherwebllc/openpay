@@ -111,7 +111,7 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: 電子決済手段等取引業者に登録 (金融庁登録一覧・第00002号・取扱 USDC)。
     // 取扱開始時期は未発表のため tokens は空のまま (sourced-facts-only)。
     ...provenance('https://coincheck.com/', 'コインチェック株式会社', 'official', {
-      verifiedAt: '2026-09-04',
+      verifiedAt: '2026-09-23',
       updatedAt: '2026-09-04',
     }),
     facts: {
@@ -226,7 +226,7 @@ export const DIRECTORY_ENTRIES = [
       'https://corporate.jpyc.co.jp/news/posts/jpyc-ex-launch',
       'JPYC株式会社',
       'official',
-      { verifiedAt: '2026-09-04', updatedAt: '2026-08-27' },
+      { verifiedAt: '2026-09-23', updatedAt: '2026-08-27' },
     ),
     facts: {
       description: '日本円と連動するよう設計された電子決済手段のステーブルコイン。',

@@ -487,19 +487,21 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   {
     // 週次更新 第 4 回 (2026-09-18)。Upbit の告知は取引所自身の一次ソース。価格・出来高・「初の上場」等の
     // 評価は一次ソースに無いので書かない (sourced-facts-only)。JPYC 側の facts (発行チェーン) は不変。
+    // 第 5 回 (2026-09-23) で同日 19:23 KST の別告知 (ID 6585・Kaia/Polygon 入金開始) を本イベントに統合。
+    // 同日同 slug の updated は dedupe キーが衝突するため別イベントにできない。「置き換え済み」を summary に明記。
     date: '2026-09-17',
-    collectedAt: '2026-09-18',
+    collectedAt: '2026-09-23',
     scopes: ['jpyc-services'],
     slug: 'jpyc',
     changeType: 'updated',
     changeCategory: 'update',
     assets: ['JPYC'],
-    chains: ['ethereum'],
+    chains: ['ethereum', 'kaia', 'polygon'],
     summary:
-      'Upbit (South Korea) announced new trading support for JPYC in its KRW, BTC and USDT markets on 2026-09-17. Upbit supports JPYC deposits and withdrawals on Ethereum only (contract 0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29); transfers over other networks are not supported. Upbit rescheduled the trading start twice on the day, to 18:00 KST.',
+      'Upbit (South Korea) announced new trading support for JPYC in its KRW, BTC and USDT markets on 2026-09-17, with deposits and withdrawals on Ethereum only at launch (contract 0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29); the trading start was rescheduled twice on the day, to 18:00 KST. Updated 2026-09-23: a second Upbit notice (ID 6585, 2026-09-17 19:23 KST) opened JPYC deposits over Kaia and Polygon (minimum deposit 500 JPYC; 36 / 200 confirmations; withdrawal fee 1 JPYC / 0.2 JPYC), with withdrawals on those networks to follow in a later notice.',
     summaryJa:
-      '韓国の取引所 Upbit が 2026-09-17、JPYC の新規取引支援 (KRW・BTC・USDT マーケット) を告知。Upbit での JPYC 入出金は Ethereum のみ (コントラクト 0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29) で、他ネットワーク経由は非対応。取引開始時刻は当日 2 回変更され 18:00 KST となった。',
-    sourceUrl: 'https://upbit.com/service_center/notice?id=1580532257',
+      '韓国の取引所 Upbit が 2026-09-17、JPYC の新規取引支援 (KRW・BTC・USDT マーケット) を告知。開始時点の入出金は Ethereum のみ (コントラクト 0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29) で、取引開始時刻は当日 2 回変更され 18:00 KST となった。2026-09-23 更新: 同日 19:23 KST の別告知 (ID 6585) で Kaia・Polygon ネットワーク経由の JPYC 入金を開始 (最小入金 500 JPYC・確認数 36 / 200・出金手数料 1 JPYC / 0.2 JPYC)。両ネットワークの出金は後日の告知で対応予定。',
+    sourceUrl: 'https://upbit.com/service_center/notice?id=6585',
   },
   {
     // 週次更新 第 4 回 follow-up (2026-09-18)。発行予約は JPYC EX の機能なので slug は jpyc-ex
@@ -561,6 +563,87 @@ const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   },
   {
     date: '2026-09-18',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDT'],
+    summary:
+      'Re-verified on the NetStars news list: no announcement after the 2026-09-11 Kaia MOU; no launch date, fee or chain change published for Stablecoin Pay.',
+    summaryJa:
+      'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降の発表なし。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
+    sourceUrl: 'https://www.netstars.co.jp/news/',
+  },
+  {
+    // 週次更新 第 5 回 (2026-09-23)。累計発行額は JPYC 社の自社発表 (PR TIMES 一次配信)。
+    // 発行チェーン (4) と facts は不変なので diffs は付けない。
+    date: '2026-09-18',
+    collectedAt: '2026-09-23',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      'JPYC Inc. announced on 2026-09-18 that cumulative issuance of the JPYC yen stablecoin has passed JPY 10 billion. Issuance chains are unchanged: Avalanche, Ethereum, Polygon and Kaia (4 chains).',
+    summaryJa:
+      'JPYC 株式会社が 2026-09-18、日本円ステーブルコイン JPYC の累計発行額が 100 億円を突破したと発表。発行チェーンは Avalanche・Ethereum・Polygon・Kaia の 4 チェーンで変更なし。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000331.000054018.html',
+  },
+  {
+    // 週次更新 第 5 回 (2026-09-23)。金融庁の登録一覧 PDF で再確認。
+    date: '2026-09-23',
+    collectedAt: '2026-09-23',
+    scopes: ['jpyc-services'],
+    slug: 'coincheck',
+    changeType: 'verified',
+    assets: ['USDC'],
+    summary:
+      'Re-verified against the FSA registry of Electronic Payment Instruments Exchange Service Providers (still as of 2026-08-27): two registrants, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC); no new registration.',
+    summaryJa:
+      '金融庁の電子決済手段等取引業者登録一覧 (令和 8 年 8 月 27 日現在のまま) で再確認: 登録は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社で、新規登録なし。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+  },
+  {
+    date: '2026-09-23',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): HashPort pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: HashPort の実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-09-23',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mina Wallet / Sumitomo Mitsui Card pilot schedule unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: マイナウォレット / 三井住友カードの実証予定に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-09-23',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mi&T (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-08-26): Mi&T pilot (merchant fee 1.0%, planned mid-November 2026 to mid-March 2027) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-08-26 のまま) で再確認: Mi&T の実証 (手数料 1.0%・2026 年 11 月中旬〜2027 年 3 月中旬予定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-09-23',
     scopes: ['stablecoin-payments'],
     provider: 'NetStars Stablecoin Pay',
     changeType: 'verified',
