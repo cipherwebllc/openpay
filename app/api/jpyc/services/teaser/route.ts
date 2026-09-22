@@ -8,8 +8,10 @@ import { env } from '@/lib/env';
 import { JPYC_SERVICES_RESOURCE } from '@/lib/directory/paidResources';
 import {
   createServiceMonitorEnvelope,
+  deltaEffectiveDate,
   scopedChangelog,
   SERVICE_MONITOR_MAX_LIMIT,
+  sortByDeltaEffectiveDate,
 } from '@/lib/directory/serviceMonitor';
 import { USDC_SERVICE_MONITOR } from '@/lib/directory/usdcResource';
 
@@ -34,7 +36,10 @@ export async function GET(): Promise<NextResponse> {
       schemaVersion: full.schemaVersion,
       product: 'jpyc-service-monitor',
       teaser: true,
-      latestChanges: full.changes.slice(-TEASER_EVENTS),
+      // 「買う前に確かめる」は記録日で判定する (有料 delta と同じ実効日)。date だけだと、後から記録した
+      // 古い date のイベントが「新しい変更なし」に見えて買い控えが起きる (2026-09-23)。
+      latestChanges: sortByDeltaEffectiveDate(full.changes).slice(-TEASER_EVENTS),
+      latestRecordedAt: full.changes.length > 0 ? sortByDeltaEffectiveDate(full.changes).map(deltaEffectiveDate).at(-1) : null,
       // full.changes は limit で切られた view なので総数の権威にならない (件数が
       // SERVICE_MONITOR_MAX_LIMIT を超えると開示が過少になる)。changelog の実数を使う
       // (payments teaser が full.totalEvents を使うのと同じ意味)。
@@ -46,7 +51,7 @@ export async function GET(): Promise<NextResponse> {
         usdc: 'https://open-pay.jp/api/paid/usdc/jpyc/services',
         priceJpyc: JPYC_SERVICES_RESOURCE.priceJpyc,
         priceUsd: USDC_SERVICE_MONITOR.priceUsd,
-        hint: 'Check before you buy: if the latest date in latestChanges is before the nextChangedSince you stored from your last paid response, the paid delta would be empty — skip the purchase. Otherwise pass changedSince=<that nextChangedSince> to buy only deltas. The paid feed returns every event plus the current monitor row for each service.',
+        hint: 'Check before you buy: if latestRecordedAt is before the nextChangedSince you stored from your last paid response, the paid delta would be empty — skip the purchase. Otherwise pass changedSince=<that nextChangedSince> to buy only deltas. Events are matched on the day they were recorded (collectedAt, or date when absent), so an event with an older date can still be new. The paid feed returns every event plus the current monitor row for each service.',
       },
       notice: full.notice,
       licenseNotice: full.licenseNotice,

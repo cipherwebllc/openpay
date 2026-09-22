@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { JPYC_PAYMENTS_RESOURCE } from '@/lib/directory/paidResources';
 import { createPaymentMonitorEnvelope } from '@/lib/directory/paymentMonitor';
-import { SERVICE_MONITOR_MAX_LIMIT } from '@/lib/directory/serviceMonitor';
+import { deltaEffectiveDate, SERVICE_MONITOR_MAX_LIMIT, sortByDeltaEffectiveDate } from '@/lib/directory/serviceMonitor';
 import { USDC_PAYMENT_MONITOR } from '@/lib/directory/usdcResource';
 
 export const runtime = 'nodejs';
@@ -26,7 +26,8 @@ export async function GET(): Promise<NextResponse> {
       schemaVersion: full.schemaVersion,
       product: 'japan-stablecoin-payment-monitor',
       teaser: true,
-      latestChanges: full.changes.slice(-TEASER_EVENTS),
+      latestChanges: sortByDeltaEffectiveDate(full.changes).slice(-TEASER_EVENTS),
+      latestRecordedAt: full.changes.length > 0 ? sortByDeltaEffectiveDate(full.changes).map(deltaEffectiveDate).at(-1) : null,
       totalEvents: full.totalEvents,
       generatedAt: full.generatedAt,
       fullFeed: {
@@ -34,7 +35,7 @@ export async function GET(): Promise<NextResponse> {
         usdc: 'https://open-pay.jp/api/paid/usdc/stablecoin-payments',
         priceJpyc: JPYC_PAYMENTS_RESOURCE.priceJpyc,
         priceUsd: USDC_PAYMENT_MONITOR.priceUsd,
-        hint: 'Check before you buy: if the latest date in latestChanges is before the nextChangedSince you stored from your last paid response, the paid delta would be empty — skip the purchase. Otherwise pass changedSince=<that nextChangedSince> to buy only deltas. The paid feed returns the full dated history.',
+        hint: 'Check before you buy: if latestRecordedAt is before the nextChangedSince you stored from your last paid response, the paid delta would be empty — skip the purchase. Otherwise pass changedSince=<that nextChangedSince> to buy only deltas. Events are matched on the day they were recorded (collectedAt, or date when absent), so an event with an older date can still be new. The paid feed returns the full dated history.',
       },
       notice: full.notice,
       licenseNotice: full.licenseNotice,

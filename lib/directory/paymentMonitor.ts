@@ -16,6 +16,8 @@ import {
   type ServiceChangeCategory,
   type ServiceChangeType,
   type ServiceMonitorQuery,
+  deltaEffectiveDate,
+  sortByDeltaEffectiveDate,
 } from './serviceMonitor';
 import type { DirectoryEntry } from './types';
 import { PAYMENT_PROVIDERS, type PaymentProviderRecord } from './paymentProviders';
@@ -139,7 +141,8 @@ export function createPaymentMonitorEnvelope(
     hasMore = changelog.length > query.limit;
     filtered = changelog.slice(-query.limit);
   } else {
-    const matched = changelog.filter((event) => event.date >= (query.changedSince as string));
+    // 実効日 (max(date, collectedAt)) で照合 — 後から記録した古い date のイベントを取りこぼさない (serviceMonitor と同じ)。
+    const matched = sortByDeltaEffectiveDate(changelog.filter((event) => deltaEffectiveDate(event) >= (query.changedSince as string)));
     // 同一 date のグループは分割しない (serviceMonitor.ts の takeDeltaByDateGroups が単一情報源)。
     const page = takeDeltaByDateGroups(matched, query.limit);
     filtered = page.taken;
