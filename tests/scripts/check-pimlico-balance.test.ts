@@ -6,11 +6,17 @@ import { base, kaia, polygon } from 'viem/chains';
 
 // viem の境界モック (HTTP / RPC layer)
 const readContractMock = vi.fn();
+const readV08ContractMock = vi.fn();
 vi.mock('viem', async () => {
   const actual = await vi.importActual<typeof import('viem')>('viem');
   return {
     ...actual,
-    createPublicClient: () => ({ readContract: readContractMock }),
+    createPublicClient: () => ({
+      readContract: (args: { address: string }) =>
+        args.address === '0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108'
+          ? readV08ContractMock(args)
+          : readContractMock(args),
+    }),
   };
 });
 
@@ -30,6 +36,14 @@ const fetchMock = vi.fn<MockFetch>(
 
 beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
+  vi.stubEnv('PIMLICO_BALANCE_MODE', undefined);
+  vi.stubEnv('ALERT_THRESHOLD_POL_V08', '');
+  vi.stubEnv('ALERT_THRESHOLD_ETH_V08', '');
+  vi.stubEnv('ALERT_THRESHOLD_KAIA_V08', '');
+  readV08ContractMock.mockResolvedValue(0n);
+  vi.stubEnv('PIMLICO_PAYMASTER_POLYGON_V08', '');
+  vi.stubEnv('PIMLICO_PAYMASTER_BASE_V08', '');
+  vi.stubEnv('PIMLICO_PAYMASTER_KAIA_V08', '');
   // chain ごと env を空に
   delete process.env.PIMLICO_PAYMASTER_POLYGON;
   delete process.env.PIMLICO_PAYMASTER_BASE;
@@ -44,7 +58,9 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   readContractMock.mockReset();
+  readV08ContractMock.mockReset();
   fetchMock.mockClear();
 });
 
@@ -52,6 +68,116 @@ async function loadScript() {
   // CLI ガード越しの import (main() が走らない context)
   return import('@/scripts/check-pimlico-balance.mjs');
 }
+
+describe('check-pimlico-balance: X8 default compatibility and opt-in 0.8 alerts', () => {
+  const v08 = '0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108';
+  const paymaster = '0x1111111111111111111111111111111111111111';
+  const override = '0x8888888888888888888888888888888888888888';
+  const logger = { log: vi.fn(), error: vi.fn() };
+  const options = { webhookUrl: 'https://hook.example.com', logger };
+
+  beforeEach(() => {
+    process.env.PIMLICO_PAYMASTER_POLYGON = paymaster;
+    process.env.PIMLICO_PAYMASTER_BASE = paymaster;
+    readContractMock.mockResolvedValue(100n * 10n ** 18n);
+    logger.log.mockClear();
+    logger.error.mockClear();
+  });
+
+  it('unset mode preserves healthy 0.7 checks and reads zero 0.8 deposits without alerting', async () => {
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck(options);
+    expect(readContractMock).toHaveBeenCalledTimes(2);
+    expect(readV08ContractMock.mock.calls.map(([call]) => [call.address, call.args[0]]))
+      .toEqual([[v08, paymaster], [v08, paymaster]]);
+    expect(result).toMatchObject({ breached: false, alerts: [], failures: [], message: null });
+    expect(result.lines.join('\n')).toContain('Polygon (EntryPoint 0.8): 0 POL');
+    expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('::warning::'));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps existing 0.7 low-balance alerts with all optional settings absent', async () => {
+    readContractMock.mockResolvedValueOnce(1n * 10n ** 18n);
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck(options);
+    expect(result.breached).toBe(true);
+    expect(result.alerts).toHaveLength(1);
+    expect(result.alerts[0]).toContain('Polygon (EntryPoint 0.7)');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('an unconfigured 0.8 read failure only warns and cannot fail the existing check', async () => {
+    readV08ContractMock.mockRejectedValue(new Error('0.8 RPC timeout'));
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck(options);
+    expect(result).toMatchObject({ breached: false, alerts: [], failures: [], message: null });
+    expect(logger.log).toHaveBeenCalledWith(expect.stringMatching(/::warning::.*0\.8 RPC timeout/));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('an explicit 0.8 address alone does not opt in to low-balance alerts', async () => {
+    vi.stubEnv('PIMLICO_PAYMASTER_POLYGON_V08', override);
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck(options);
+    expect(readV08ContractMock.mock.calls[0][0].args).toEqual([override]);
+    expect(result).toMatchObject({ breached: false, alerts: [], failures: [] });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('an explicit 0.8 threshold alerts only on that version and chain', async () => {
+    vi.stubEnv('ALERT_THRESHOLD_POL_V08', '2');
+    vi.stubEnv('PIMLICO_PAYMASTER_POLYGON_V08', override);
+    readV08ContractMock.mockResolvedValueOnce(1n * 10n ** 18n);
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck(options);
+    expect(result.breached).toBe(true);
+    expect(result.alerts).toHaveLength(1);
+    expect(result.alerts[0]).toContain('Polygon (EntryPoint 0.8)');
+    expect(result.alerts[0]).toContain('しきい値 2 POL');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('0.8 balance equal to its threshold is healthy independently of the 0.7 threshold', async () => {
+    vi.stubEnv('ALERT_THRESHOLD_POL_V08', '2');
+    readV08ContractMock.mockResolvedValueOnce(2n * 10n ** 18n);
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck(options);
+    expect(result.alerts).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('zero is an explicit 0.8 threshold, so an RPC failure is still an alert', async () => {
+    vi.stubEnv('ALERT_THRESHOLD_POL_V08', '0');
+    readV08ContractMock.mockRejectedValueOnce(new Error('RPC timeout'));
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck(options);
+    expect(result.failures).toEqual(['Polygon (EntryPoint 0.8): RPC timeout']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('isolates a 0.7 RPC failure from an opted-in low 0.8 deposit on the same chain', async () => {
+    vi.stubEnv('ALERT_THRESHOLD_POL_V08', '2');
+    readContractMock.mockRejectedValueOnce(new Error('RPC timeout'));
+    const { runBalanceCheck } = await loadScript();
+    const result = await runBalanceCheck(options);
+    expect(result.failures).toEqual(['Polygon (EntryPoint 0.7): RPC timeout']);
+    expect(result.alerts).toHaveLength(1);
+    expect(result.alerts[0]).toContain('Polygon (EntryPoint 0.8)');
+  });
+
+  it('keeps optional Kaia absent until its existing address is configured', async () => {
+    vi.stubEnv('PIMLICO_PAYMASTER_KAIA_V08', override);
+    vi.stubEnv('ALERT_THRESHOLD_KAIA_V08', '5');
+    const { runBalanceCheck } = await loadScript();
+    const absent = await runBalanceCheck(options);
+    expect(absent.lines.join('\n')).not.toContain('Kaia');
+    process.env.PIMLICO_PAYMASTER_KAIA = paymaster;
+    const configured = await runBalanceCheck(options);
+    expect(configured.alerts).toHaveLength(1);
+    expect(configured.alerts[0]).toContain('Kaia (EntryPoint 0.8)');
+    expect(readV08ContractMock.mock.calls.at(-1)?.[0].args).toEqual([override]);
+  });
+});
 
 // テスト用の chain config — production CHAIN_CONFIGS と同 shape、production
 // と decoupling して数値変更にも追従しやすい。
@@ -127,7 +253,7 @@ describe('check-pimlico-balance: chain 設定の解決', () => {
 
     expect(result.breached).toBe(false);
     expect(readContractMock).toHaveBeenCalledTimes(2); // kaia は skip
-    expect(result.lines).toHaveLength(3); // 'Pimlico ...' header + 2 chains
+    expect(result.lines).toHaveLength(5); // header + 2 chains × 2 EntryPoints
     expect(result.lines.join('\n')).toContain('Polygon');
     expect(result.lines.join('\n')).toContain('Base');
     expect(result.lines.join('\n')).not.toContain('Kaia');
@@ -154,7 +280,7 @@ describe('check-pimlico-balance: chain 設定の解決', () => {
 
     expect(result.breached).toBe(false);
     expect(readContractMock).toHaveBeenCalledTimes(3);
-    expect(result.lines.join('\n')).toContain('Kaia: 10 KAIA');
+    expect(result.lines.join('\n')).toContain('Kaia (EntryPoint 0.7): 10 KAIA');
   });
 
   it('readContract が getAddress で正規化された paymaster address に呼ばれる', async () => {
@@ -432,8 +558,8 @@ describe('check-pimlico-balance: 並列 fetch + chain ごとの独立性', () =>
     expect(result.breached).toBe(true);
     expect(result.alerts).toHaveLength(1);
     expect(result.alerts[0]).toContain('Polygon');
-    expect(result.failures).toEqual(['Base: base RPC timeout']);
-    expect(result.lines.join('\n')).toContain('Base: 取得不能 (base RPC timeout)');
+    expect(result.failures).toEqual(['Base (EntryPoint 0.7): base RPC timeout']);
+    expect(result.lines.join('\n')).toContain('Base (EntryPoint 0.7): 取得不能 (base RPC timeout)');
 
     // 通知は 1 回だけ・本文に残高割れと取得不能の両方が載る
     expect(fetchMock).toHaveBeenCalledTimes(1);

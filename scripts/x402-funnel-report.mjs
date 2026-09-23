@@ -6,7 +6,8 @@
 //   node scripts/x402-funnel-report.mjs 30       # 直近 30 日
 //
 // 読み方: challenge は検索クローラの巡回を含む (買い手の数ではない)。「支払いを試みた件数」=
-// invalid_payload + verify_failed + conflict + content_error + settle_failed + facilitator_unavailable + settled。
+// verify_failed + conflict + content_error + settle_failed + facilitator_unavailable + settled。
+// invalid_payload は rail=none のため試行数から除外する。
 // 成立率 = settled / 支払いを試みた件数。誰が・いくらで買ったかは settle 台帳 (x402:settle:ledger:<月>) を見る。
 
 const url = process.env.KV_REST_API_URL;

@@ -109,7 +109,8 @@ export const RULES = [
       'Circle Gateway / CCTP V2 execute 失敗が 1 時間に 20 件超で通知。' +
       'Circle attestation API 障害 / HashPort sign 非互換 / 各 chain RPC 障害の ' +
       'いずれかのサイン。incident 時は NEXT_PUBLIC_CROSS_CHAIN_DISABLED=true で ' +
-      'CrossChainHint を全 buyer に対し即時 disable (Vercel env flip、redeploy 不要)。',
+      '再ビルド・再デプロイ後に CrossChainHint を全 buyer に対し disable。' +
+      '緊急時は DEPLOY_CHECKLIST §10.6b の Instant Rollback (無効化済み build) を参照。',
     eventTag: 'cross-chain.execute.failed',
     threshold: 20,
     interval: '1h',

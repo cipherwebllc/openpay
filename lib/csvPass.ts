@@ -3,8 +3,14 @@
 // 送金 → txHash を /api/csv-pass/subscribe に自己申告 → on-chain 検証 (from=SIWE wallet 束縛) →
 // **支払い tx の block timestamp + 24時間** をパス期限として決定論的に付与する。設計: plans/csv-pass.md。
 //
+// D5: NEXT_PUBLIC_ENABLE_CSV_PASS は既定 OFF のまま維持する (inert)。
+// CSV は店主自身の localStorage 履歴からブラウザ内で生成される。利用権は UI の
+// ダウンロード操作を制御するだけで、データや CSV の security boundary (保護境界) ではない。
+// クライアント側で回避可能な任意協力の仕組みであり、server に保護対象の CSV はない。
+// 点灯前にはこの制約を前提に公開文言・法務と課金方針の明示承認が必要。README の env 表を参照。
+//
 // bypass: アルファ全開放 (ALPHA_ENTITLEMENT_BYPASS・既定 ON) 中は常に active=true = 課金しない。
-// 本番点灯 = NEXT_PUBLIC_ENABLE_CSV_PASS=1 + ALPHA_ENTITLEMENT_BYPASS=0 + FEE_RECEIVER 設定済。
+// 技術上の点灯条件 (点灯承認ではない) = NEXT_PUBLIC_ENABLE_CSV_PASS=1 + ALPHA_ENTITLEMENT_BYPASS=0 + FEE_RECEIVER 設定済。
 // 値 = expiresAt(ms) の素の数値文字列・KV TTL = ceil((expiresAt-now)/1000) で自然失効 (timedGrant 共有)。
 //
 // Pro ⊃ CSV: status は csvpass:exp と pro:exp の **両方** を見て max を取る。有効な Pro (将来再点灯時)

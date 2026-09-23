@@ -509,12 +509,13 @@ async function handleRecover(
     forwarderFor,
     idemPrefix: 'relay:idem:',
   });
-  const isFeePayment = params.merchant.toLowerCase() === feeReceiver.toLowerCase();
-  if (result.kind === 'success' && !isFeePayment) {
-    // 月次メトリクス (運営ヒント・掟 13 no-throw)。fee 支払い tx は除外。
+  // verifyForwarderSettle が merchant === feeReceiver を merchant_is_fee_receiver で
+  // 拒否するため、recover 成功に fee 支払いは含まれない (free 経路の除外とは別)。
+  if (result.kind === 'success') {
+    // 月次メトリクス (運営ヒント・掟 13 no-throw)。
     recordMetricAfterResponse('relay_jpyc');
   }
-  if (result.kind === 'success' && !isFeePayment && env.enablePushNotify) {
+  if (result.kind === 'success' && env.enablePushNotify) {
     // recover 経路の店主実受取額 = 検証済み params.merchantValue (forwarder.settle が店舗へ
     // 送る額・署名対象で settleViaForwarder が照合済み)。gas 回収分 (feeValue) は含めない。
     const amountLabel = formatJpycYenLabel(params.merchantValue);

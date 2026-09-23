@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LUA_REAL_TEST_FILES } from '../../scripts/lib/luaRealTests.mjs';
@@ -46,6 +47,41 @@ describe('GitHub Actions operation guards', () => {
     expect(typecheck).toBeGreaterThan(-1);
     expect(lint).toBeGreaterThan(typecheck);
     expect(tests).toBeGreaterThan(lint);
+  });
+
+  it.each([
+    { event: 'schedule', configured: true, status: 0, output: 'skip=false' },
+    { event: 'workflow_dispatch', configured: true, status: 0, output: 'skip=false' },
+    { event: 'schedule', configured: false, status: 0, output: '::warning::' },
+    { event: 'workflow_dispatch', configured: false, status: 1, output: '::error::' },
+  ])('Pimlico cron keeps main behavior: $event, required secrets=$configured, optional variables absent', ({ event, configured, status, output }) => {
+    const source = workflow('pimlico-balance.yml');
+    const step = source.slice(source.indexOf('- name: Verify secrets configured'), source.indexOf('- name: Check dependency sources'));
+    const script = step.slice(step.indexOf('run: |') + 'run: |'.length)
+      .replaceAll('${{ github.event_name }}', event)
+      .replaceAll('>> "$GITHUB_OUTPUT"', '');
+    const result = spawnSync('bash', ['-c', script], {
+      encoding: 'utf8',
+      env: {
+        NODE_ENV: 'test',
+        PIMLICO_PAYMASTER_POLYGON: configured ? '0x1111111111111111111111111111111111111111' : '',
+        PIMLICO_PAYMASTER_BASE: configured ? '0x1111111111111111111111111111111111111111' : '',
+        ALERT_WEBHOOK_URL: configured ? 'https://hook.example.com' : '',
+      },
+    });
+    expect(result.status).toBe(status);
+    expect(result.stdout).toContain(output);
+    if (event === 'schedule' && !configured) expect(result.stdout).toContain('skip=true');
+  });
+
+  it('Pimlico cron forwards optional 0.8 addresses and thresholds to the checker', () => {
+    const source = workflow('pimlico-balance.yml').split('- name: Check Pimlico balance')[1];
+    for (const name of ['PIMLICO_PAYMASTER_POLYGON_V08', 'PIMLICO_PAYMASTER_BASE_V08', 'PIMLICO_PAYMASTER_KAIA_V08']) {
+      expect(source).toContain(`${name}: \${{ secrets.${name} }}`);
+    }
+    for (const name of ['ALERT_THRESHOLD_POL_V08', 'ALERT_THRESHOLD_ETH_V08', 'ALERT_THRESHOLD_KAIA_V08']) {
+      expect(source).toContain(`${name}: \${{ vars.${name} }}`);
+    }
   });
 
   // wasmoon (本物の Lua) を使う test は非決定的に落ちるので専用 job で再試行する (2026-09-12 案 1)。

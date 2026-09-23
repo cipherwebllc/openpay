@@ -74,7 +74,7 @@ export type PaymentMonitorEnvelope = {
    * delta: 日付境界で切り上げても入り切らないイベントがある)。 */
   hasMore: boolean;
   /** 次回の delta 購入でそのまま changedSince に渡す値。hasMore=true の delta では
-   * **最初の未返却イベントの date** (返した最後の date より必ず後 = 前進が保証され再配信なし)。 */
+   * **最初の未返却イベントの deltaEffectiveDate = max(date, collectedAt ?? date)** (返した最後の deltaEffectiveDate より必ず後 = 前進が保証され再配信なし)。 */
   nextChangedSince: string;
   notice: { code: string; detail: string; termsUrl: string };
   licenseNotice: string;
@@ -135,7 +135,7 @@ export function createPaymentMonitorEnvelope(
   let filtered: ReturnType<typeof scopedChangelog>;
   let hasMore: boolean;
   // 既定は UTC 日付 (serviceMonitor.ts と同じ inclusive 比較の理屈)。打ち切られた delta だけ
-  // 「最初の未返却イベントの date」に差し替える (打ち切り分の永久ロス防止・前進の保証)。
+  // 「最初の未返却イベントの deltaEffectiveDate = max(date, collectedAt ?? date)」に差し替える (打ち切り分の永久ロス防止・前進の保証)。
   let nextChangedSince = generatedAtIso.slice(0, 10);
   if (mode === 'snapshot') {
     hasMore = changelog.length > query.limit;
