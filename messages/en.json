@@ -1603,7 +1603,20 @@
     "burnAdoptErrorNotFound": "We could not find that transaction on the source chain. Please check the chain and the transaction ID.",
     "burnAdoptErrorReverted": "That transaction failed on chain. Please check for another transaction ID.",
     "burnAdoptErrorMismatch": "That transaction does not match this payment's transfer (amount, destination or sender differs).",
-    "burnAdoptErrorUnavailable": "We could not check it right now. Please try again in a moment."
+    "burnAdoptErrorUnavailable": "We could not check it right now. Please try again in a moment.",
+    "gatewayReady": "This transfer is ready to complete. Recheck to submit the saved authorization.",
+    "gatewayConfirmationLost": "A transfer previously shown as successful is now confirmed expired and unused. Contact support before making another payment.",
+    "gatewayFeeAuthorizationRequired": "Completing the merchant transfer requires a new fee authorization and signature. Recheck alone will not request a signature.",
+    "gatewayAuthorizeFee": "Authorize and sign fee transfer",
+    "gatewayUnknown": "This transfer is unresolved. Recheck its status without signing again.",
+    "gatewayFinality": "Waiting for this transfer to finalize. A replacement is not available yet.",
+    "gatewayBalance": "This transfer expired unused. The remaining transfer status still needs verification.",
+    "gatewayInsufficientBalance": "This transfer expired unused. Sufficient available funds, including fees, have not yet been confirmed. Recheck later.",
+    "gatewayReplacementDisabled": "This transfer is confirmed expired and unused. A new Gateway transfer cannot currently be authorized for this invoice.",
+    "gatewayReplaceable": "This transfer is confirmed expired and unused, and funds are available. A replacement requires your consent below and a new signature.",
+    "gatewayPaid": "Payment is finalized. You can retrieve its transaction details. No additional payment is needed.",
+    "gatewayRecheck": "Recheck transfer",
+    "gatewayReplaceMerchant": "Authorize and sign replacement"
   },
   "CrossChainSourceChooser": {
     "quoteUnavailable": "Quote unavailable",

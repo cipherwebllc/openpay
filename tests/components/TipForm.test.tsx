@@ -2359,3 +2359,26 @@ describe('Arc standard tip attribution', () => {
     expect(screen.queryByText('以前の送信の確認')).not.toBeInTheDocument();
   });
 });
+
+it('Gateway hashless success keeps Tip paid and records a receipt without a transaction link or webhook', async () => {
+  window.localStorage.clear();
+  const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }));
+  setAccount({ connected: true, chainId: baseSepolia.id });
+  setBalance(20_000_000n); setSmartAccount(true); setGasQuote('ready', 100_000n);
+  render(<TipForm params={{ ...USDC_PARAMS, webhook: 'https://example.com/tip-hook' }} />);
+  await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+  const props = crossChainHintSpy.mock.lastCall![0] as { onAttemptStart: (amount: bigint) => void; onSuccess: (result: import('@/hooks/useCrossChainPayment').ExecuteResult) => void };
+  const { gatewayAttestation, encodedSpec } = await import('../fixtures/gateway');
+  const { keccak256 } = await import('viem');
+  const att = gatewayAttestation(); const transferSpecHash = keccak256(encodedSpec());
+  act(() => {
+    props.onAttemptStart(1_000_000n);
+    props.onSuccess({ path: 'gateway', settlement: 'hashless', transferSpecHash, attestation: att.attestation, attestationSignature: att.signature, destChainId: baseSepolia.id });
+  });
+  await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+  expect(loadPayerReceipts()[0]).toMatchObject({ receiptId: `gateway:${baseSepolia.id}:${transferSpecHash}`, status: 'confirmed' });
+  expect(loadPayerReceipts()[0].txHash).toBeUndefined();
+  expect(loadPayerReceipts()[0].explorerUrl).toBeUndefined();
+  expect(screen.getAllByText(/チップを送信しました/).length).toBeGreaterThan(0);
+  expect(fetchSpy).not.toHaveBeenCalled();
+});

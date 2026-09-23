@@ -1,3 +1,7 @@
+import { gatewayAttestation, gatewaySpec } from '../../fixtures/gateway';
+import { keccak256 } from 'viem';
+import { GATEWAY_MINTER_ABI } from '@/lib/crossChain/gateway';
+import type { TransferSpec } from '@/lib/crossChain/types';
 import { env } from '@/lib/env';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
@@ -51,6 +55,7 @@ let mockChainId = 0;
 beforeEach(() => {
   vi.spyOn(env, 'enableGatewayCrossChain', 'get').mockReturnValue(true);
   mockChainId = 0;
+  gatewayMints.clear();
   __resetContractDeployedCacheForTest();
 });
 
@@ -67,6 +72,12 @@ function trackSwitch() {
 // args type を明示することで mock.calls[idx][0] が unknown ではなく実型として
 // 推論される (TS2493 回避)。test fixture なので overkill 気味だが、安全な assertion
 // を書くために必要。
+const gatewayMints = new Map<Hex, { hash: Hex; finalized: boolean }>();
+const gatewayBlockHash = pad('0x01');
+function gatewayResponse(init?: RequestInit) {
+  const spec = JSON.parse(String(init?.body))[0].burnIntent.spec;
+  return gatewayAttestation({ ...spec, value: BigInt(spec.value) }, 1_000_000n);
+}
 function makeWalletClient(opts: {
   signature: Hex;
   txHashes: Hex[]; // sendTransaction / writeContract で順番に返す
@@ -79,6 +90,10 @@ function makeWalletClient(opts: {
     sendTransaction: vi.fn(async (_args: Record<string, unknown>) => {
       const h = opts.txHashes[i++];
       if (!h) throw new Error('test: ran out of txHashes');
+      if (_args.to === GATEWAY_MINTER_ADDRESS) {
+        const decoded = decodeFunctionData({ abi: GATEWAY_MINTER_ABI, data: _args.data as Hex });
+        gatewayMints.set(keccak256(`0x${decoded.args[0].slice(82)}`), { hash: h, finalized: false });
+      }
       return h;
     }),
     writeContract: vi.fn(async (_args: Record<string, unknown>) => {
@@ -93,9 +108,16 @@ function makePublicClient(opts: { blockNumber?: bigint } = {}) {
   return {
     getBlockNumber: vi.fn(async () => opts.blockNumber ?? 1000n),
     readContract: vi.fn().mockResolvedValue(302_400n),
-    waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => { for (const m of gatewayMints.values()) if (m.hash === hash) m.finalized = true; return { status: 'success' }; }),
+    request: vi.fn(async (a: { method: string; params: unknown[] }) => a.method === 'eth_call'
+      ? pad(gatewayMints.get(`0x${(a.params[0] as { data: string }).data.slice(-64)}`)?.finalized ? '0x01' : '0x00')
+      : { hash: gatewayBlockHash, number: '0x3e8' }),
+    getLogs: vi.fn(async ({ args }: { args: { transferSpecHash: Hex } }) => {
+      const mint = gatewayMints.get(args.transferSpecHash);
+      return mint?.finalized ? [{ transactionHash: mint.hash, blockNumber: 1000n, blockHash: gatewayBlockHash, removed: false }] : [];
+    }),
     // resume の landed 検証 (txAlreadySucceeded) 用。default は成功扱い。
-    getTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    getTransactionReceipt: vi.fn(async () => ({ status: 'success', blockNumber: 1000n, blockHash: gatewayBlockHash })),
     // assertContractDeployed (CCTP/Gateway 存在確認) 用。default は deploy 済扱い。
     getCode: vi.fn(async () => '0x60016000' as Hex),
   };
@@ -111,16 +133,17 @@ describe('lib/crossChain/execute.executeGatewayTransfer', () => {
     const destPublic = makePublicClient();
     const switchChainAsync = trackSwitch();
     const mockFetch = vi.fn(
-      async () =>
+      async (_url: string, init?: RequestInit) =>
         new Response(
-          JSON.stringify({ attestation: '0xatt', signature: '0xattsig' }),
+          JSON.stringify(gatewayResponse(init)),
           { status: 200 },
         ),
     );
     const progress: CrossChainProgress[] = [];
-    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
+    const merchantMints: Array<{ mintTxHash?: string; burnTxHash?: string }> = [];
 
     const result = await executeGatewayTransfer({
+      onStep: vi.fn(),
       walletClient: walletClient as unknown as Parameters<
         typeof executeGatewayTransfer
       >[0]['walletClient'],
@@ -168,14 +191,14 @@ describe('lib/crossChain/execute.executeGatewayTransfer', () => {
     });
 
     // merchant mint 確定で onMerchantMint が発火 (会計ログ用・Gateway は burnTxHash 無し)
-    expect(merchantMints).toEqual([{ mintTxHash: '0xminthash01' }]);
+    expect(merchantMints).toEqual([expect.objectContaining({ mintTxHash: '0xminthash01', transferSpecHash: expect.any(String) })]);
 
     // result
     expect(result.path).toBe('gateway');
     expect(result.mintTxHash).toBe('0xminthash01');
     expect(result.signature).toBe('0xsignature1');
-    expect(result.attestation).toBe('0xatt');
-    expect(result.attestationSignature).toBe('0xattsig');
+    expect(result.attestation).toBe(gatewayAttestation((walletClient.signTypedData.mock.calls[0][0] as { message: { spec: TransferSpec } }).message.spec, 1_000_000n).attestation);
+    expect(result.attestationSignature).toBe(gatewayAttestation().signature);
     expect(result.destChainId).toBe(80002);
 
     // progress
@@ -197,9 +220,9 @@ describe('lib/crossChain/execute.executeGatewayTransfer', () => {
     const sourcePublic = makePublicClient({ blockNumber: 0n });
     const destPublic = makePublicClient();
     const mockFetch = vi.fn(
-      async () =>
+      async (_url: string, init?: RequestInit) =>
         new Response(
-          JSON.stringify({ attestation: '0x', signature: '0x' }),
+          JSON.stringify(gatewayResponse(init)),
           { status: 200 },
         ),
     );
@@ -210,6 +233,7 @@ describe('lib/crossChain/execute.executeGatewayTransfer', () => {
     const fixedSalt: Hex =
       '0xaabbccddeeff00112233445566778899aabbccddeeff00112233445566778899';
     await executeGatewayTransfer({
+      onStep: vi.fn(),
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -251,6 +275,7 @@ describe('lib/crossChain/execute.executeGatewayTransfer', () => {
 
     await expect(
       executeGatewayTransfer({
+      onStep: vi.fn(),
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -353,7 +378,7 @@ describe('lib/crossChain/execute.executeCctpTransfer', () => {
         ),
     );
     const progress: CrossChainProgress[] = [];
-    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
+    const merchantMints: Array<{ mintTxHash?: string; burnTxHash?: string }> = [];
 
     const result = await executeCctpTransfer({
       commitBurnIntent: () => {},
@@ -535,6 +560,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
 
     await expect(
       executeGatewayTransfer({
+      onStep: vi.fn(),
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -575,6 +601,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
 
     await expect(
       executeGatewayTransfer({
+      onStep: vi.fn(),
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -610,6 +637,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
 
     await expect(
       executeGatewayTransfer({
+      onStep: vi.fn(),
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -643,15 +671,16 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
     const sourcePublic = makePublicClient();
     const destPublic = makePublicClient();
     const mockFetch = vi.fn(
-      async () =>
+      async (_url: string, init?: RequestInit) =>
         new Response(
-          JSON.stringify({ attestation: '0x', signature: '0x' }),
+          JSON.stringify(gatewayResponse(init)),
           { status: 200 },
         ),
     );
 
     await expect(
       executeGatewayTransfer({
+      onStep: vi.fn(),
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -667,7 +696,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
         valueAtomic: 1n,
         fetch: mockFetch as unknown as typeof fetch,
       }),
-    ).rejects.toThrow(/Transaction rejected by user/);
+    ).rejects.toThrow(/Gateway recovery/);
     // attestation は取得済み (sign + fetch は呼ばれた)
     expect(walletClient.signTypedData).toHaveBeenCalledTimes(1);
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -682,6 +711,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
     });
     const sourcePublic = makePublicClient();
     const destPublic = {
+      ...makePublicClient(),
       getBlockNumber: vi.fn(),
       waitForTransactionReceipt: vi.fn(async () => {
         throw new Error('Transaction reverted: insufficient gas');
@@ -689,15 +719,16 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
       getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const mockFetch = vi.fn(
-      async () =>
+      async (_url: string, init?: RequestInit) =>
         new Response(
-          JSON.stringify({ attestation: '0x', signature: '0x' }),
+          JSON.stringify(gatewayResponse(init)),
           { status: 200 },
         ),
     );
 
     await expect(
       executeGatewayTransfer({
+      onStep: vi.fn(),
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -713,7 +744,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
         valueAtomic: 1n,
         fetch: mockFetch as unknown as typeof fetch,
       }),
-    ).rejects.toThrow(/insufficient gas/);
+    ).rejects.toThrow(/Gateway recovery/);
     expect(walletClient.sendTransaction).toHaveBeenCalledTimes(1);
   });
 
@@ -930,26 +961,19 @@ describe('lib/crossChain/execute: chain resolution from chainId (stale walletCli
 
   it('Gateway: walletClient.chain が source を指していても dest mint は dest Chain object で発火', async () => {
     // walletClient.chain は source (baseSepolia) を指す = source switchChain 完了後の stale state。
-    const walletClient = {
-      chain: baseSepolia, // ← source を指す
-      getChainId: vi.fn(async () => mockChainId),
-      signTypedData: vi.fn(async (_args: Record<string, unknown>) => '0xsig'),
-      sendTransaction: vi.fn(
-        async (_args: Record<string, unknown>) => '0xmint' as Hex,
-      ),
-      writeContract: vi.fn(),
-    };
+    const walletClient = { ...makeWalletClient({ signature: '0xsig', txHashes: ['0xmint'] }), chain: baseSepolia };
     const sourcePublic = makePublicClient({ blockNumber: 100n });
     const destPublic = makePublicClient();
     const mockFetch = vi.fn(
-      async () =>
+      async (_url: string, init?: RequestInit) =>
         new Response(
-          JSON.stringify({ attestation: '0xatt', signature: '0xattsig' }),
+          JSON.stringify(gatewayResponse(init)),
           { status: 200 },
         ),
     );
 
     await executeGatewayTransfer({
+      onStep: vi.fn(),
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -1022,17 +1046,16 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     });
     const sourcePublic = makePublicClient({ blockNumber: 100n });
     const destPublic = makePublicClient();
-    let n = 0;
-    const mockFetch = vi.fn(async () => {
-      n++;
+    const mockFetch = vi.fn(async (_url: string, init?: RequestInit) => {
       return new Response(
-        JSON.stringify({ attestation: `0xatt${n}`, signature: `0xattsig${n}` }),
+        JSON.stringify(gatewayResponse(init)),
         { status: 200 },
       );
     });
     const progress: CrossChainProgress[] = [];
 
     const result = await executeGatewayTransfer({
+      onStep: vi.fn(),
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -1244,7 +1267,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
         ),
     );
 
-    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
+    const merchantMints: Array<{ mintTxHash?: string; burnTxHash?: string }> = [];
 
     const result = await executeCctpTransfer({
       commitBurnIntent: () => {},
@@ -1306,7 +1329,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
           { status: 200 },
         ),
     );
-    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
+    const merchantMints: Array<{ mintTxHash?: string; burnTxHash?: string }> = [];
 
     await expect(
       executeCctpTransfer({
@@ -1345,14 +1368,15 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     const sourcePublic = makePublicClient({ blockNumber: 500n });
     const destPublic = makePublicClient();
     const mockFetch = vi.fn(
-      async () =>
+      async (_url: string, init?: RequestInit) =>
         new Response(
-          JSON.stringify({ attestation: '0xatt', signature: '0xattsig' }),
+          JSON.stringify(gatewayResponse(init)),
           { status: 200 },
         ),
     );
 
     const result = await executeGatewayTransfer({
+      onStep: vi.fn(),
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -1397,7 +1421,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
           { status: 200 },
         ),
     );
-    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
+    const merchantMints: Array<{ mintTxHash?: string; burnTxHash?: string }> = [];
 
     await expect(
       executeCctpTransfer({
@@ -1433,7 +1457,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     ]);
   });
 
-  it('Gateway resume: attestation 済なら再 sign せず mint だけ実行', async () => {
+  it('Gateway resume: finalized unused・未失効なら再 sign せず既存 attestation を mint', async () => {
     const walletClient = makeWalletClient({
       signature: '0xshould_not_be_used',
       txHashes: ['0xmint_m', '0xmint_f'],
@@ -1443,6 +1467,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     const mockFetch = vi.fn();
 
     const result = await executeGatewayTransfer({
+      onStep: vi.fn(),
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -1459,8 +1484,8 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
       feeReceiver: FEE_RECEIVER,
       feeAmount: 100_000n,
       resume: {
-        merchantAttestation: { attestation: '0xattM', signature: '0xsigM' },
-        feeAttestation: { attestation: '0xattF', signature: '0xsigF' },
+        merchantAttestation: gatewayAttestation({ ...gatewaySpec, value: 9_900_000n }, 1_000_000n),
+        feeAttestation: gatewayAttestation({ ...gatewaySpec, value: 100_000n, destinationRecipient: pad(FEE_RECEIVER) }, 1_000_000n),
       },
       fetch: mockFetch as unknown as typeof fetch,
     });
@@ -1470,7 +1495,7 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     expect(mockFetch).not.toHaveBeenCalled();
     // mint 2 本だけ
     expect(walletClient.sendTransaction).toHaveBeenCalledTimes(2);
-    expect(result.attestation).toBe('0xattM');
+    expect(result.attestation).toBe(gatewayAttestation({ ...gatewaySpec, value: 9_900_000n }, 1_000_000n).attestation);
     expect(result.mintTxHash).toBe('0xmint_m');
     expect(result.feeMintTxHash).toBe('0xmint_f');
   });
@@ -1483,13 +1508,14 @@ describe('lib/crossChain/execute: OpenPay 利用料ブリッジ (案A′)', () =
     const sourcePublic = makePublicClient({ blockNumber: 100n });
     const destPublic = makePublicClient();
     const mockFetch = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ attestation: '0x', signature: '0x' }), {
+      async (_url: string, init?: RequestInit) =>
+        new Response(JSON.stringify(gatewayResponse(init)), {
           status: 200,
         }),
     );
 
     const result = await executeGatewayTransfer({
+      onStep: vi.fn(),
       walletClient: walletClient as never,
       sourcePublicClient: sourcePublic as never,
       destPublicClient: destPublic as never,
@@ -1594,20 +1620,22 @@ describe('lib/crossChain/execute: receipt status 検証 (revert を成功扱い�
     });
     const sourcePublic = makePublicClient({ blockNumber: 100n });
     const destPublic = {
+      ...makePublicClient(),
       getBlockNumber: vi.fn(),
       waitForTransactionReceipt: vi.fn(async () => ({ status: 'reverted' })),
       getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const mockFetch = vi.fn(
-      async () =>
+      async (_url: string, init?: RequestInit) =>
         new Response(
-          JSON.stringify({ attestation: '0x', signature: '0x' }),
+          JSON.stringify(gatewayResponse(init)),
           { status: 200 },
         ),
     );
 
     await expect(
       executeGatewayTransfer({
+      onStep: vi.fn(),
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -1623,7 +1651,7 @@ describe('lib/crossChain/execute: receipt status 検証 (revert を成功扱い�
         valueAtomic: 1_000_000n,
         fetch: mockFetch as unknown as typeof fetch,
       }),
-    ).rejects.toThrow(/revert/);
+    ).rejects.toThrow(/Gateway recovery/);
   });
 
   it('CCTP: burn が reverted → throw (mint へ進まない)', async () => {
@@ -1730,6 +1758,7 @@ describe('lib/crossChain/execute: mint hash を broadcast 時に永続化 + resu
     });
     const sourcePublic = makePublicClient();
     const destPublic = {
+      ...makePublicClient(),
       getBlockNumber: vi.fn(),
       getTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
       waitForTransactionReceipt: vi.fn(async () => {
@@ -1779,6 +1808,7 @@ describe('lib/crossChain/execute: mint hash を broadcast 時に永続化 + resu
     });
     const sourcePublic = makePublicClient();
     const destPublic = {
+      ...makePublicClient(),
       getBlockNumber: vi.fn(),
       // 前回 broadcast した mint は revert 済 → landed=false → 再 mint されるべき。
       getTransactionReceipt: vi.fn(async () => ({ status: 'reverted' })),
@@ -1908,6 +1938,7 @@ describe('lib/crossChain/execute: resume の receipt 障害区別 (transport vs 
     });
     const sourcePublic = makePublicClient();
     const destPublic = {
+      ...makePublicClient(),
       getBlockNumber: vi.fn(),
       getTransactionReceipt: vi.fn(async () => {
         throw notFoundError();
@@ -1964,6 +1995,7 @@ describe('lib/crossChain/execute: resume の receipt 障害区別 (transport vs 
     });
     const sourcePublic = makePublicClient();
     const destPublic = {
+      ...makePublicClient(),
       getBlockNumber: vi.fn(),
       getTransactionReceipt: vi.fn(async () => {
         throw new Error('fetch failed: ECONNREFUSED'); // name は既定の "Error"
@@ -2025,14 +2057,15 @@ describe('lib/crossChain/execute: feeReceiver burn-address ガード', () => {
       const sourcePublic = makePublicClient({ blockNumber: 100n });
       const destPublic = makePublicClient();
       const mockFetch = vi.fn(
-        async () =>
+        async (_url: string, init?: RequestInit) =>
           new Response(
-            JSON.stringify({ attestation: '0xatt', signature: '0xattsig' }),
+            JSON.stringify(gatewayResponse(init)),
             { status: 200 },
           ),
       );
 
       const result = await executeGatewayTransfer({
+      onStep: vi.fn(),
         walletClient: walletClient as never,
         sourcePublicClient: sourcePublic as never,
         destPublicClient: destPublic as never,
@@ -2214,7 +2247,7 @@ describe('lib/crossChain/execute: CCTP resume の attestation poll 非直列化 
     const destPublic = makePublicClient();
     // fee burn (0xburn_f_prev) の poll は fail、merchant burn は成功。
     const mockFetch = makeIrisFetch({ failHashes: ['0xburn_f_prev'] });
-    const merchantMints: Array<{ mintTxHash: string; burnTxHash?: string }> = [];
+    const merchantMints: Array<{ mintTxHash?: string; burnTxHash?: string }> = [];
     const steps: Array<Record<string, unknown>> = [];
 
     const timeout = expect(

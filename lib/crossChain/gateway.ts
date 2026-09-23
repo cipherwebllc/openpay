@@ -249,8 +249,8 @@ function computeMaxFee(value: bigint, ov: BuildBurnIntentOverrides): bigint {
 // 会計ログ用の bridge fee **上限** 見積 (実 charge ではない・実 fee ≤ これ)。burn intent と
 // 同じ既定 (overrides 無し) で算出し、ログ値が calldata と drift しないようにする。記録は
 // reported/unreconciled 扱い、実 charge は mint receipt 照合 (B-3) で確定する。
-export function estimateGatewayMaxFee(value: bigint): bigint {
-  return computeMaxFee(value, {});
+export function estimateGatewayMaxFee(value: bigint, overrides: BuildBurnIntentOverrides = {}): bigint {
+  return computeMaxFee(value, overrides);
 }
 
 // EIP712Domain は viem が domain object から自動推論するため types には含めない。
@@ -266,6 +266,18 @@ export function getBurnIntentTypedData(
     primaryType: 'BurnIntent',
     message: intent as unknown as Record<string, unknown>,
   } satisfies TypedDataDefinition;
+}
+
+export class GatewayTransferRejectedError extends Error {
+  constructor(public readonly status: number, detail: string) {
+    super(`Circle attestation API /v1/transfer HTTP ${status}: ${detail}`);
+    this.name = 'GatewayTransferRejectedError';
+  }
+  get definitive(): boolean {
+    // Timeouts, conflicts, throttling and server failures may hide an accepted request.
+    // Only explicit validation/authentication/not-found rejections release this authorization.
+    return [400, 401, 403, 404, 405, 413, 415, 422].includes(this.status);
+  }
 }
 
 // POST /v1/transfer: BurnIntent array (batch 可) → AttestationResponse。
@@ -289,9 +301,7 @@ export async function requestAttestation(
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(
-      `Circle attestation API /v1/transfer HTTP ${res.status}: ${text.slice(0, 500)}`,
-    );
+    throw new GatewayTransferRejectedError(res.status, text.slice(0, 500));
   }
 
   return (await res.json()) as AttestationResponse;

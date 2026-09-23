@@ -787,6 +787,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       // appendPayerReceipt 内の既存 no-throw storage 境界に委ねる。
       appendPayerReceipt(
         buildPayerReceipt({
+          gatewayTransferSpecHash: result.path === 'gateway' ? result.transferSpecHash : undefined,
           txHash: result.mintTxHash,
           chainId: result.destChainId,
           asset: params.token,
@@ -992,7 +993,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const crossChainAttemptAmountDisplay =
     crossChainAttemptSnapshotRef.current?.amountDisplay;
   const successOverlayPayload: PaymentSuccessOverlayPayload | null =
-    crossChainResult && crossChainAttemptAmountDisplay
+    crossChainResult?.mintTxHash && crossChainAttemptAmountDisplay
       ? {
           amountDisplay: crossChainAttemptAmountDisplay,
           txHash: crossChainResult.mintTxHash,
@@ -1512,16 +1513,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <>
           <PaymentResultPanel
             title={t('successTitle')}
-            rows={[
-              {
-                label: t('successTx'),
-                value: crossChainResult.mintTxHash,
-                copyable: true,
-              },
-            ]}
+            rows={crossChainResult.mintTxHash ? [{ label: t('successTx'), value: crossChainResult.mintTxHash, copyable: true }] : []}
           />
           <PayerReceiptCompletion
-            candidateIds={[crossChainResult.mintTxHash]}
+            candidateIds={crossChainResult.path === 'gateway' ? [`gateway:${crossChainResult.destChainId}:${crossChainResult.transferSpecHash.toLowerCase()}`] : [crossChainResult.mintTxHash]}
           />
         </>
       )}

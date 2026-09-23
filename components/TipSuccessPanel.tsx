@@ -10,6 +10,7 @@ export function TipSuccessPanel({
   openLinkLabel,
   userOpHash,
   txHash,
+  receiptId,
   blockNumber,
   userOpLabel,
   txLabel,
@@ -20,7 +21,8 @@ export function TipSuccessPanel({
   thanksUrl?: string;
   openLinkLabel: string;
   userOpHash?: string;
-  txHash: string;
+  txHash?: string;
+  receiptId?: string;
   blockNumber?: bigint;
   userOpLabel: string;
   txLabel: string;
@@ -47,7 +49,7 @@ export function TipSuccessPanel({
         {userOpHash && (
           <ResultRow label={userOpLabel} value={userOpHash} copyable />
         )}
-        <ResultRow label={txLabel} value={txHash} copyable />
+        {txHash && <ResultRow label={txLabel} value={txHash} copyable />}
         {blockNumber !== undefined && (
           <ResultRow label={blockLabel} value={blockNumber.toString()} />
         )}
@@ -57,7 +59,7 @@ export function TipSuccessPanel({
       <div className="mt-3">
         <PayerReceiptCompletion
           candidateIds={
-            userOpHash ? [txHash, userOpHash] : [txHash]
+            receiptId ? [receiptId] : userOpHash ? [txHash, userOpHash] : [txHash]
           }
         />
       </div>

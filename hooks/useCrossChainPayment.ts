@@ -53,6 +53,13 @@ import type { CircleDomain } from '@/lib/crossChain/types';
 import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
 import {
   clearResumeState,
+  loadGatewayResumeState,
+  archiveGatewayResumeState,
+  saveGatewayResumeStateStrict,
+  loadGatewayReceipts,
+  loadGatewayConfirmingStates,
+  saveGatewayReceipt,
+  scanGatewayResumeStates,
   hasResumeState,
   loadResumeStateDiscriminated,
   loadResumeState,
@@ -61,6 +68,8 @@ import {
   type ResumeSessionKey,
   type ResumeState,
 } from '@/lib/crossChain/resumeStore';
+import { activeGatewayAttempt, gatewayCanRelease, gatewayHasOutstanding, reconcileGatewayReceipt, type GatewayReplacement, type GatewayRequestGuard } from '@/lib/crossChain/gatewayRecovery';
+import { backfillGatewayPayerReceipt } from '@/lib/payerReceipt';
 import { resolveDeployment } from '@/lib/tokens';
 
 export interface UseCrossChainPaymentArgs {
@@ -84,7 +93,17 @@ export interface PendingForwardRecovery {
   state?: CctpResumeState;
 }
 
+export interface PendingGatewayRecovery {
+  kind: 'scanning' | 'unreadable' | 'pending';
+  key?: ResumeSessionKey;
+  state?: GatewayResumeState;
+  replacementAllowed?: boolean;
+  entries?: PendingGatewayRecovery[];
+}
+
 export interface UseCrossChainPaymentReturn {
+  gatewayRecovery?: PendingGatewayRecovery;
+  recheckGateway: (replacement?: GatewayReplacement, sourceChainId?: number, invoicePayable?: boolean) => Promise<void>;
   pendingRecovery?: PendingForwardRecovery;
   recoveryQuote?: AcceptedQuote;
   recheckForward: (consent?: boolean) => Promise<void>;
@@ -165,6 +184,13 @@ export function useCrossChainPayment(
   const recoveryScope = `${account}:${args.targetChainId}:${args.recipient}:${args.requiredAtomic}`;
   const pendingRecovery = useMemo(() => forwardOnly && account && scannedScope !== recoveryScope
     ? { kind: 'scanning' as const } : recovery, [forwardOnly, account, scannedScope, recoveryScope, recovery]);
+  const [gatewayRecovery, setGatewayRecovery] = useState<PendingGatewayRecovery>();
+  const [gatewayReceiptRevision, setGatewayReceiptRevision] = useState(0);
+  const [gatewayScannedScope, setGatewayScannedScope] = useState('');
+  const gatewayChecked = useRef(new Map<number, GatewayResumeState>());
+  const gatewayOwnsCommit = useRef(false);
+  const gatewayCheckedScope = useRef(recoveryScope);
+  const [gatewayEntries, setGatewayEntries] = useState<{ key: ResumeSessionKey; state: GatewayResumeState }[]>([]);
   const [progress, setProgress] = useState<CrossChainProgress | undefined>();
   const [isExecuting, setIsExecuting] = useState(false);
   const [isCommitted, setIsCommitted] = useState(false);
@@ -269,23 +295,74 @@ export function useCrossChainPayment(
     }) : [];
     if (forwardOnly || !account || result) return options;
 
-    // 新規 Gateway の flag / 残高 gate が保存済み attestation の回復を隠す波及を断つ。
-    // invoice に束縛された key で全 source を走査し、残高 fetch 完了にも依存しない。
-    const recoveryOptions: PathOption[] = [];
-    for (const target of BUYER_SOURCE_TARGETS) {
-      const key = sessionKeyFor('gateway', target.chainId);
-      if (!key || !loadResumeState<GatewayResumeState>(key)?.merchantAttestation) continue;
-      recoveryOptions.push({
-        key: `gateway-${target.domain}`, kind: 'gateway', recoveryOnly: true,
-        sourceChainId: target.chainId, sourceDomain: target.domain,
-        // 回復に新たな源残高は要求しない。この placeholder は chooser に表示しない。
-        sourceBalanceAtomic: 0n, serviceFeeAtomic: estimateGatewayMaxFee(args.requiredAtomic),
-        estimatedGasUnits: 150_000n, gasOnChainId: args.targetChainId, etaSeconds: 5,
-      });
-    }
+    const recoveryOptions: PathOption[] = gatewayEntries.map<PathOption>(({ key }) => ({
+      key: `gateway-${domainForChainId(key.sourceChainId)}`, kind: 'gateway', recoveryOnly: true,
+      sourceChainId: key.sourceChainId, sourceDomain: domainForChainId(key.sourceChainId)!,
+      sourceBalanceAtomic: 0n, serviceFeeAtomic: estimateGatewayMaxFee(args.requiredAtomic),
+      estimatedGasUnits: 150_000n, gasOnChainId: args.targetChainId, etaSeconds: 5,
+    })).filter((o) => o.sourceDomain !== undefined);
     return [...recoveryOptions, ...options.filter((o) => !recoveryOptions.some((r) => r.key === o.key))];
   }, [balancesQuery.data, args.requiredAtomic, args.targetChainId, forwardQuotes,
-    forwardOnly, account, result, sessionKeyFor]);
+    forwardOnly, account, result, gatewayEntries]);
+
+  const scanGateway = useCallback(() => {
+    if (gatewayCheckedScope.current !== recoveryScope) {
+      gatewayChecked.current.clear(); gatewayCheckedScope.current = recoveryScope;
+      // Gateway invoice changes must not reset the existing CCTP completion/commitment behavior.
+      setResult((current) => current?.path === 'gateway' ? undefined : current);
+      if (gatewayOwnsCommit.current) { setError(undefined); setProgress(undefined); }
+    }
+    const scope = sessionKeyFor('gateway', 0);
+    if (forwardOnly || !scope) {
+      setGatewayRecovery(undefined); setGatewayEntries([]); setGatewayScannedScope(recoveryScope);
+      if (gatewayOwnsCommit.current) setIsCommitted(false);
+      gatewayOwnsCommit.current = false;
+      return;
+    }
+    const scan = scanGatewayResumeStates(scope);
+    const pending: PendingGatewayRecovery | undefined = scan.kind === 'unreadable'
+      ? { kind: 'unreadable' } : scan.entries.length ? { kind: 'pending', ...scan.entries[0] } : undefined;
+    setGatewayEntries(scan.kind === 'ok' ? scan.entries : []);
+    setGatewayRecovery(pending);
+    setGatewayScannedScope(recoveryScope);
+    // Persisted classification is evidence to recheck, never permission to unlock on reload.
+    if (pending || gatewayOwnsCommit.current) setIsCommitted(!!pending);
+    gatewayOwnsCommit.current = !!pending;
+    return pending;
+  }, [forwardOnly, sessionKeyFor, recoveryScope]);
+  useEffect(() => { scanGateway(); }, [scanGateway]);
+
+  useEffect(() => {
+    if (!account || !destPublicClient || forwardOnly) return;
+    let cancelled = false; let running = false;
+    const poll = async () => {
+      if (running) return;
+      running = true;
+      try {
+        for (const record of loadGatewayConfirmingStates(account, args.targetChainId)) {
+          const state = await reconcileGatewayReceipt(destPublicClient, args.targetChainId, record.state);
+          if (cancelled) return;
+          saveGatewayResumeStateStrict(record.key, state, record.state);
+          if (state.completion === 'settled') {
+            archiveGatewayResumeState(record.key, state);
+            scanGateway();
+          } else if (activeGatewayAttempt(state.merchant)?.status !== activeGatewayAttempt(record.state.merchant)?.status) scanGateway();
+        }
+        for (const record of loadGatewayReceipts(account, args.targetChainId)) {
+          const state = await reconcileGatewayReceipt(destPublicClient, args.targetChainId, record.state);
+          if (cancelled) return;
+          saveGatewayReceipt({ ...record, state });
+          const merchant = activeGatewayAttempt(state.merchant);
+          if (merchant?.settledTxHash) backfillGatewayPayerReceipt(args.targetChainId, merchant.transferSpecHash, merchant.settledTxHash);
+        }
+      } catch {
+        // Background receipt/storage failures must not affect a new invoice, its lock, or onSuccess.
+      } finally { running = false; }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 10_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [account, args.targetChainId, destPublicClient, forwardOnly, gatewayReceiptRevision, scanGateway]);
 
   const scanRecovery = useCallback(() => {
     if (!forwardOnly || !account) { setRecovery(undefined); setScannedScope(recoveryScope); return; }
@@ -295,7 +372,6 @@ export function useCrossChainPayment(
       if (!key) continue;
       const entry = loadResumeStateDiscriminated(key);
       if (entry.kind === 'unreadable') { pending = { kind: 'unreadable', sourceChainId: target.chainId }; break; }
-      // verified も cleanup/会計が終わるまで回復対象。残高・option・flag に依存しない。
       if (entry.kind === 'present' && (entry.state.burnIntent || entry.state.burnTxHash)) {
         pending ??= { kind: 'pending', sourceChainId: target.chainId, state: entry.state };
       }
@@ -312,19 +388,8 @@ export function useCrossChainPayment(
   // 一歩手前」なので、reload を跨いでも塞ぎ続ける (設計 §7)。
   useEffect(() => {
     if (forwardOnly || isCommitted) return;
-    // Gateway discovery can fail or hide a spent balance after attestation issuance.
-    // Scan every source so that missing options cannot unlock a second payment route.
-    for (const target of BUYER_SOURCE_TARGETS) {
-      const key = sessionKeyFor('gateway', target.chainId);
-      if (!key) continue;
-      const state = loadResumeState<GatewayResumeState>(key);
-      if (state?.merchantAttestation) {
-        setIsCommitted(true);
-        return;
-      }
-    }
     for (const option of pathOptions) {
-      if (option.kind === 'direct') continue;
+      if (option.kind !== 'cctp-v2') continue;
       const key = sessionKeyFor(option.kind, option.sourceChainId);
       if (!key) continue;
       const s = loadResumeState<ResumeState>(key);
@@ -345,6 +410,8 @@ export function useCrossChainPayment(
   type ExecuteCoreArgs =
     | {
         kind: 'gateway';
+        replacement?: GatewayReplacement;
+        newPayment?: boolean;
         sourceChainId: number;
         sourceDomain: CircleDomain;
         destDomain: CircleDomain;
@@ -359,6 +426,7 @@ export function useCrossChainPayment(
 
   const runCore = useCallback(
     async (core: ExecuteCoreArgs): Promise<ExecuteResult> => {
+      if (core.kind === 'cctp-v2') gatewayOwnsCommit.current = false;
       if (forwardOnly && (core.kind !== 'cctp-v2' || !core.forward)) throw new Error('Arc requires explicit forwarding option');
       if (!account || !walletClient || !destPublicClient) {
         throw new Error('wallet not connected');
@@ -403,8 +471,8 @@ export function useCrossChainPayment(
       );
 
       // 中断再開: payment params で session key を作り、完了済みステップを
-      // localStorage から復元 (resume)、各ステップ完了で保存 (onStep)、全完了で
-      // 削除する。失敗時は保存済 state が残り、再 Pay で続きから再開できる。
+      // localStorage から復元 (resume)、各ステップ完了で保存 (onStep)。
+      // CCTP は全完了で削除、Gateway は完了後も identity / receipt 回収履歴を保持する。
       const sessionKey: ResumeSessionKey = {
         account,
         kind: core.kind,
@@ -416,33 +484,56 @@ export function useCrossChainPayment(
       };
       // commitBurnIntent が marker を混ぜ込むために、直近の resume state を保持する。
       // scan 後の storage 障害を「記録なし→新 burn」へ波及させない。forward は判別読取を維持。
-      const recovered = forwardOnly ? loadResumeStateDiscriminated(sessionKey) : undefined;
+      const gatewayScan = core.kind === 'gateway' ? scanGatewayResumeStates(sessionKey) : undefined;
+      if (gatewayScan?.kind === 'unreadable') throw gatewayScan.error;
+      const recovered = core.kind === 'gateway' ? loadGatewayResumeState(sessionKey) : forwardOnly ? loadResumeStateDiscriminated(sessionKey) : undefined;
       if (recovered?.kind === 'unreadable') throw recovered.error;
-      let latestState: ResumeState = forwardOnly
+      let latestState: ResumeState = (forwardOnly || core.kind === 'gateway')
         ? { ...(recovered?.kind === 'present' ? recovered.state : {}) }
         : { ...(loadResumeState(sessionKey) ?? {}) };
-      const onStep = (s: ResumeState) => {
+      const onStep = (s: ResumeState, beforeSigning?: GatewayResumeState, beforeRequest?: GatewayRequestGuard) => {
         latestState = forwardOnly ? { ...latestState, ...s,
           forward: { ...(latestState as CctpResumeState).forward!, ...(s as CctpResumeState).forward! } } : s;
         // D4a: 親子 UI の同一 mount 排他は storage 成否より先に確定する。CCTP は
-        // merchant burn hash / burn-intent marker、Gateway は merchant attestation が
+        // merchant burn hash / burn-intent marker、Gateway は署名前の intent 保存が
         // 送金の不可逆境界。approveTxHash だけでは資金移動前なので committed にせず、
         // 失敗時の通常 Pay を許す。
         if (
           (core.kind === 'cctp-v2' &&
             (('burnTxHash' in s && !!s.burnTxHash) ||
               ('burnIntent' in s && !!s.burnIntent))) ||
-          (core.kind === 'gateway' &&
-            'merchantAttestation' in s &&
-            !!s.merchantAttestation)
+          (core.kind === 'gateway' && ('merchant' in s || 'merchantAttestation' in s))
         ) {
           setIsCommitted(true);
         }
-        // D4b は見送り: resume 保存は best-effort のまま。保存失敗後に reload すると
-        // committed state を復元できず、同一 mount 外の二重送金窓が残る。
+        // Gateway と forwarding は全 step を strict 保存し、記録喪失からの再署名を防ぐ。
+        // 既存の legacy CCTP step 記録の best-effort 方針は維持する。
         if (forwardOnly) {
           saveResumeStateStrict(sessionKey, latestState);
           setRecovery({ kind: 'pending', sourceChainId: core.sourceChainId, state: latestState as CctpResumeState });
+        } else if (core.kind === 'gateway') {
+          gatewayOwnsCommit.current = true;
+          const gatewayState = s as GatewayResumeState;
+          saveGatewayResumeStateStrict(sessionKey, gatewayState, beforeSigning, beforeRequest);
+          if (gatewayState.completion === 'settled') {
+            archiveGatewayResumeState(sessionKey, gatewayState);
+            gatewayChecked.current.delete(core.sourceChainId);
+            setGatewayReceiptRevision((v) => v + 1);
+            scanGateway();
+          } else {
+            if (gatewayState.completion === 'confirming') setGatewayReceiptRevision((v) => v + 1);
+            gatewayChecked.current.set(core.sourceChainId, gatewayState);
+            const outstanding = gatewayHasOutstanding(gatewayState);
+            const others = gatewayEntries.filter((e) => e.key.sourceChainId !== core.sourceChainId);
+            setGatewayRecovery(outstanding ? { kind: 'pending', key: sessionKey, state: gatewayState }
+              : others.length ? { kind: 'pending', ...others[0] } : undefined);
+            setGatewayEntries([...others, ...(outstanding ? [{ key: sessionKey, state: gatewayState }] : [])]);
+            // Every source must be freshly releasable before another path can pay this invoice.
+            setIsCommitted(!gatewayCanRelease(gatewayState) || others.some((e) => {
+              const checked = gatewayChecked.current.get(e.key.sourceChainId);
+              return !checked || !gatewayCanRelease(checked);
+            }));
+          }
         } else saveResumeState(sessionKey, s);
       };
 
@@ -492,6 +583,7 @@ export function useCrossChainPayment(
               bridgedAmount: info.forward ? BigInt(info.forward.grossAtomic) : bridgedAmount,
               bridgeFeeMax,
               burnTxHash: info.burnTxHash,
+              gatewayTransferSpecHash: info.transferSpecHash,
             },
             { result: 'success', txHash: info.mintTxHash },
           ),
@@ -499,9 +591,13 @@ export function useCrossChainPayment(
       };
 
       if (core.kind === 'gateway') {
-        const resume = loadResumeState<GatewayResumeState>(sessionKey);
+        const resume = recovered?.kind === 'present' ? recovered.state as GatewayResumeState : undefined;
         if (resume?.merchantAttestation) setIsCommitted(true);
         const gatewayArgs: ExecuteGatewayTransferArgs = {
+          replacement: core.replacement,
+          newPayment: core.newPayment,
+          recheckOnly: gatewayScan?.kind === 'ok' && gatewayScan.entries.some((e) => e.key.sourceChainId !== core.sourceChainId &&
+            (!gatewayChecked.current.has(e.key.sourceChainId) || !gatewayCanRelease(gatewayChecked.current.get(e.key.sourceChainId)!))),
           walletClient,
           sourcePublicClient,
           destPublicClient,
@@ -523,7 +619,7 @@ export function useCrossChainPayment(
           onMerchantMint,
         };
         const result = await executeGatewayTransfer(gatewayArgs);
-        clearResumeState(sessionKey);
+        // Completed identities live only in the receipt store; never resume them for a new invoice.
         return result;
       }
       // cctp-v2
@@ -568,6 +664,8 @@ export function useCrossChainPayment(
     },
     [
       forwardOnly,
+      gatewayEntries,
+      scanGateway,
       scanRecovery,
       account,
       args.recipient,
@@ -594,12 +692,14 @@ export function useCrossChainPayment(
       }
       if (option.kind === 'gateway') {
         const key = sessionKeyFor('gateway', option.sourceChainId);
-        assertGatewayTransferEnabled(key ? loadResumeState<GatewayResumeState>(key) : undefined);
+        const saved = key ? loadGatewayResumeState(key) : undefined;
+        if (saved?.kind === 'unreadable') throw saved.error;
+        assertGatewayTransferEnabled(saved?.kind === 'present' ? saved.state : undefined);
       }
       setError(undefined);
       setResult(undefined);
       setProgress(undefined);
-      setIsCommitted(false);
+      if (option.kind !== 'gateway') setIsCommitted(false);
       // D2: 前回の未確定 state を捨てる。残したままだと (a) 再試行の結果が
       // 反映されず wait パネルが出っぱなしで「続きから支払う」が押せない、(b) 新しいエラーが
       // `error && !burnUnresolved` の条件で隠れる。Chooser 経路 (executeOption) は本 UI の
@@ -622,6 +722,7 @@ export function useCrossChainPayment(
       setIsExecuting(true);
       const executeResult = await runCore({
         kind: option.kind,
+        ...(option.kind === 'gateway' ? { newPayment: true } : {}),
         ...(forwardOnly ? { forward: { acceptedQuote: option.acceptedQuote! } } : {}),
         sourceChainId: option.sourceChainId,
         sourceDomain: option.sourceDomain,
@@ -656,10 +757,22 @@ export function useCrossChainPayment(
   // 内部 throw を error state に取り込み rethrow (UI 側の catch と実行中表示の解除用)。
   const safeExecuteOption = useCallback(
     async (option: PathOption) => {
-      if (forwardOnly && executionRef.current) throw new Error('Execution already running');
+      if (executionRef.current) throw new Error('Execution already running');
       try {
+        const scope = sessionKeyFor('gateway', 0);
+        const scan = scope && !forwardOnly ? scanGatewayResumeStates(scope) : undefined;
+        if (scan?.kind === 'unreadable') throw new Error('Gateway recovery pending');
+        const entries = scan?.kind === 'ok' ? scan.entries : [];
+        const allReleasable = entries.every((e) => {
+          const checked = gatewayChecked.current.get(e.key.sourceChainId);
+          return checked && gatewayCanRelease(checked) && gatewayCanRelease(e.state) &&
+            activeGatewayAttempt(checked.merchant)?.transferSpecHash === activeGatewayAttempt(e.state.merchant)?.transferSpecHash &&
+            activeGatewayAttempt(checked.fee)?.transferSpecHash === activeGatewayAttempt(e.state.fee)?.transferSpecHash;
+        });
+        const existingGateway = option.kind === 'gateway' && entries.some((e) => e.key.sourceChainId === option.sourceChainId);
+        if (!allReleasable && !existingGateway) throw new Error('Gateway recovery pending');
         const execution = executeOption(option);
-        if (forwardOnly) executionRef.current = true;
+        executionRef.current = true;
         return await execution;
       } catch (e) {
         if (e instanceof CrossChainQuoteExpiredError) setQuoteRevision((v) => v + 1);
@@ -668,10 +781,11 @@ export function useCrossChainPayment(
         setIsExecuting(false);
         throw e;
       } finally {
-        if (forwardOnly) { executionRef.current = false; scanRecovery(); }
+        executionRef.current = false;
+        if (forwardOnly) scanRecovery();
       }
     },
-    [executeOption, captureBurnUnresolved, forwardOnly, scanRecovery],
+    [executeOption, captureBurnUnresolved, forwardOnly, scanRecovery, sessionKeyFor],
   );
 
   // D4: 買い手が explorer で見つけた burn の tx hash を貼って続きから再開する。
@@ -747,6 +861,41 @@ export function useCrossChainPayment(
     }
   }, [pendingRecovery, recoveryQuote, runCore, captureBurnUnresolved, scanRecovery]);
 
+  const recheckGateway = useCallback(async (replacement?: GatewayReplacement, sourceChainId?: number, invoicePayable = false) => {
+    // An expired/disabled invoice may recover its authorization, but cannot issue a new one at the stale amount.
+    if (replacement && !invoicePayable) return;
+    if (executionRef.current) return;
+    const scope = sessionKeyFor('gateway', 0);
+    const scan = scope ? scanGatewayResumeStates(scope) : undefined;
+    if (scan?.kind !== 'ok' || !scan.entries.length) { scanGateway(); return; }
+    const selected = scan.entries.find((e) => e.key.sourceChainId === sourceChainId) ?? scan.entries[0];
+    const current = selected ? { kind: 'pending' as const, ...selected } : gatewayRecovery?.kind === 'pending' ? gatewayRecovery : scanGateway();
+    if (current?.kind !== 'pending' || !current.key) return;
+    const sourceDomain = domainForChainId(current.key.sourceChainId);
+    const destDomain = domainForChainId(current.key.destChainId);
+    if (sourceDomain === undefined || destDomain === undefined) return;
+    executionRef.current = true;
+    setIsExecuting(true);
+    setError(undefined);
+    try {
+      if (current.state?.completion === 'confirming') {
+        if (!destPublicClient) return;
+        const state = await reconcileGatewayReceipt(destPublicClient, current.key.destChainId, current.state);
+        saveGatewayResumeStateStrict(current.key, state, current.state);
+        if (state.completion === 'settled') archiveGatewayResumeState(current.key, state);
+        scanGateway();
+        return; // This invoice already reported its own receipt; recheck is never another onSuccess.
+      }
+      const completed = await runCore({ kind: 'gateway', sourceChainId: current.key.sourceChainId, sourceDomain, destDomain, replacement });
+      setResult(completed);
+    } catch (e) {
+      setError(e instanceof Error ? e : new Error(String(e)));
+    } finally {
+      executionRef.current = false;
+      setIsExecuting(false);
+    }
+  }, [gatewayRecovery, scanGateway, runCore, sessionKeyFor, destPublicClient]);
+
   // manual パネルの二段確認完了。次の実行だけ、曖昧な状態からの再 burn を許可する。
   const armManualReburn = useCallback(() => {
     manualReburnArmedRef.current = true;
@@ -765,6 +914,15 @@ export function useCrossChainPayment(
   );
 
   return {
+    gatewayRecovery: !forwardOnly && account && args.requiredAtomic > 0n && gatewayScannedScope !== recoveryScope
+      ? { kind: 'scanning' } : gatewayRecovery ? { ...gatewayRecovery,
+        replacementAllowed: gatewayEntries.every((e) => e.key.sourceChainId === gatewayRecovery.key?.sourceChainId ||
+          (gatewayChecked.current.has(e.key.sourceChainId) && gatewayCanRelease(gatewayChecked.current.get(e.key.sourceChainId)!))),
+        entries: gatewayEntries.length > 1 ? gatewayEntries.map(({ key, state }) => ({ kind: 'pending', key, state,
+          replacementAllowed: gatewayEntries.every((other) => other.key.sourceChainId === key.sourceChainId ||
+            (gatewayChecked.current.has(other.key.sourceChainId) && gatewayCanRelease(gatewayChecked.current.get(other.key.sourceChainId)!))) })) : undefined,
+      } : undefined,
+    recheckGateway,
     pendingRecovery,
     recoveryQuote,
     recheckForward,

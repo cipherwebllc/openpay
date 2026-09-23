@@ -28,6 +28,8 @@ import { logger } from '@/lib/logger';
 
 // 中断再開でしか描画されない説明パネルなので、/pay・/tip の First Load JS には載せない
 // (予算は既に上限張り付き — 掟: 増えたら予算を上げる前にまず code-split)。
+const CrossChainGatewayRecoveryPanel = dynamic(() => import('./CrossChainGatewayRecoveryPanel').then((m) => m.CrossChainGatewayRecoveryPanel), { ssr: false });
+
 const CrossChainForwardPendingPanel = dynamic(() => import('./CrossChainForwardPendingPanel').then((m) => m.CrossChainForwardPendingPanel), { ssr: false });
 
 const CrossChainBurnUnresolvedPanel = dynamic(
@@ -130,8 +132,9 @@ export function CrossChainHint(props: CrossChainHintProps) {
           attemptedAtomicRef.current ?? props.requiredAtomic
         ).toString(),
       });
-      if (successNotifiedHashRef.current !== result.mintTxHash) {
-        successNotifiedHashRef.current = result.mintTxHash;
+      const identity = result.path === 'gateway' ? `${result.transferSpecHash}:${result.mintTxHash ?? ''}` : result.mintTxHash;
+      if (successNotifiedHashRef.current !== identity) {
+        successNotifiedHashRef.current = identity;
         onSuccess?.(result);
       }
     }
@@ -140,8 +143,8 @@ export function CrossChainHint(props: CrossChainHintProps) {
   useEffect(() => {
     // 成功は onSuccess 側の settled lock に引き継ぐ。失敗時は不可逆境界前だけ false に
     // 戻し、burn / attestation 後は親の通常 Pay を同一 mount 中ずっと封鎖する。
-    onExecutingChange?.(result ? false : isExecuting || isCommitted || !!hook.pendingRecovery);
-  }, [isCommitted, isExecuting, result, onExecutingChange, hook.pendingRecovery]);
+    onExecutingChange?.(result ? false : isExecuting || isCommitted || !!hook.pendingRecovery || hook.gatewayRecovery?.kind === 'scanning');
+  }, [isCommitted, isExecuting, result, onExecutingChange, hook.pendingRecovery, hook.gatewayRecovery]);
 
   useEffect(() => {
     if (error) {
@@ -170,6 +173,18 @@ export function CrossChainHint(props: CrossChainHintProps) {
     void hook.recheckForward(consent);
   }
 
+  const gatewayPanel = hook.gatewayRecovery && hook.gatewayRecovery.kind !== 'scanning' && <CrossChainGatewayRecoveryPanel
+    recovery={hook.gatewayRecovery} enabled={props.enabled} busy={isExecuting || !!props.executionDisabled}
+    onRecheck={(replacement, sourceChainId) => {
+      if (props.executionDisabled || isExecuting) return;
+      attemptedAtomicRef.current = props.requiredAtomic;
+      props.onAttemptStart?.(props.requiredAtomic);
+      void hook.recheckGateway(replacement, sourceChainId, props.enabled);
+    }}
+  />;
+  // Persisted Gateway recovery remains reachable after flags, balances or routing change.
+  if (gatewayPanel && !result && !isExecuting) return gatewayPanel;
+
   // 回復は enabled/残高/option の gate より先。kill switch 後も資金の確認を閉じない。
   // 実行中 (execute / recheck) は onStep の strict 保存で pendingRecovery が立つが、その間は
   // 通常の進捗表示 (forward_pending 等) を出し、パネルで chooser を覆わない (E2E で観測した混乱)。
@@ -194,20 +209,11 @@ export function CrossChainHint(props: CrossChainHintProps) {
     />}
   </div>;
 
-  if (
-    CROSS_CHAIN_DISABLED ||
-    props.token !== 'usdc' ||
-    !props.enabled ||
-    props.requiredAtomic <= 0n
-  ) {
-    return null;
-  }
-
   // 成功 panel は path 完了時のみ。
   if (result) {
     const explorer = blockExplorerUrl(result.destChainId);
     return (
-      <SuccessPanel
+      <div className="space-y-3"><SuccessPanel
         bridge={result.path}
         recipient={props.recipient}
         valueAtomic={attemptedAtomicRef.current ?? props.requiredAtomic}
@@ -218,10 +224,19 @@ export function CrossChainHint(props: CrossChainHintProps) {
         // D3: 利用料 (付帯) だけが未確定でも決済は成立している。買い手には「追加の支払いは
         // 不要」を二次通知として伝える (本送金の成功表示を濁さない)。
         feeUnresolved={
-          result.path === 'cctp-v2' && result.feeBurnUnresolved !== undefined
+          result.path === 'cctp-v2' ? result.feeBurnUnresolved !== undefined : result.feeUnresolved
         }
-      />
+      />{result.path === 'gateway' && (result.feeUnresolved || !result.mintTxHash) && gatewayPanel}</div>
     );
+  }
+
+  if (
+    CROSS_CHAIN_DISABLED ||
+    props.token !== 'usdc' ||
+    !props.enabled ||
+    props.requiredAtomic <= 0n
+  ) {
+    return null;
   }
 
   // balance fetch 中 (decision 未確定 = options も未) は loading hint。
@@ -412,7 +427,7 @@ function SuccessPanel({
   valueAtomic: bigint;
   displayDecimals: number;
   destChainId: number;
-  mintTxHash: `0x${string}`;
+  mintTxHash?: `0x${string}`;
   explorerBase: string | undefined;
   feeUnresolved?: boolean;
 }) {
@@ -434,7 +449,7 @@ function SuccessPanel({
       {feeUnresolved && (
         <p className="text-xs text-emerald-800">{t('feeUnresolvedNotice')}</p>
       )}
-      {explorerBase && (
+      {explorerBase && mintTxHash && (
         <a
           href={`${explorerBase}/tx/${mintTxHash}`}
           target="_blank"

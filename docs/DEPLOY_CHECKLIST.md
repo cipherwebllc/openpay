@@ -2279,3 +2279,31 @@ forwarding fee (collected in full by Circle), OpenPay collects none, and Arc is 
 LP/FAQ, Terms/disclaimer, `public/llms.txt` and news with human approval before
 activation. Do not publish a fixed “approximately 0.03 USDC” fee: captured mainnet
 quotes on 2026-09-17 were approximately 0.098 USDC for a 1-USDC invoice.
+
+### 10.13 Gateway recovery (X12)
+
+Keep `NEXT_PUBLIC_ENABLE_GATEWAY_CROSS_CHAIN` OFF until every destination RPC
+passes this read-only smoke: fetch `finalized`, call
+`isTransferSpecHashUsed(bytes32)` with EIP-1898
+`{blockHash, requireCanonical: true}`, and re-read that numbered block to confirm
+its hash. Test a noncanonical hash is rejected. On Arbitrum, require
+`l1BlockNumber` on finalized, latest and historical blocks; contract expiry uses
+that L1 height, while receipts/logs use L2 numbers. Missing support must stay
+locked; never substitute latest, safe or a confirmation count. Record results
+for each production endpoint before enabling. Offline fixtures are insufficient.
+
+For response loss (`requestSentAt` without an attestation), AttestationSet or
+unsupported bytes, recovery intentionally stays locked. Preserve all raw
+attestations, attempt specs/salts, request markers, observations and transaction
+hashes locally. Do not clear storage, change the amount to evade the lock, or
+request another signature. Escalate to support/Circle with chain/domain,
+transferSpecHash, transferId if present and request time; never send wallet keys
+or keystores. Obtain the original single attestation or a reviewed recovery fix;
+balance alone is not evidence of non-payment.
+
+An own successful receipt reports success immediately, but the same
+payer/recipient/amount stays locked until finality. If it becomes finalized
+expired-unused, investigate the reorg and reconcile accounting before another
+payment. Hashless receipts remain valid; automatic backfill uses known validity
+bounds and backs off on RPC failures. Legacy records without a lower bound need
+manual transaction lookup. Settled receipts must never re-enter the invoice scan.
