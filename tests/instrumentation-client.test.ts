@@ -1,18 +1,103 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 const sentry = vi.hoisted(() => ({
   init: vi.fn(),
-  replayIntegration: vi.fn(() => ({ name: 'Replay' })),
   captureRouterTransitionStart: vi.fn(),
+  // 遅延化前の実装でも読める stub。初期化時の呼び出しは下で禁止する。
+  replayIntegration: vi.fn(() => ({ name: 'Replay' })),
+  addEventProcessor: vi.fn(),
 }));
+const lazy = vi.hoisted(() => ({ loaded: vi.fn(), installSentryReplay: vi.fn() }));
 
 vi.mock('@sentry/nextjs', () => sentry);
+vi.mock('@/lib/sentryReplayLazy', () => {
+  lazy.loaded();
+  return { installSentryReplay: lazy.installSentryReplay };
+});
 
 describe('instrumentation-client telemetry hooks', () => {
   beforeEach(() => {
     vi.resetModules();
-    sentry.init.mockClear();
-    sentry.replayIntegration.mockClear();
+    vi.clearAllMocks();
+    lazy.installSentryReplay.mockReset();
+    vi.useFakeTimers();
+    vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://test@o0.ingest.sentry.io/0');
+    vi.stubEnv('NEXT_PUBLIC_SENTRY_REPLAY_SESSION_SAMPLE_RATE', '0');
+    vi.stubEnv('NEXT_PUBLIC_SENTRY_REPLAY_ERROR_SAMPLE_RATE', '0.2');
+    vi.spyOn(document, 'readyState', 'get').mockReturnValue('complete');
+    vi.stubGlobal('requestIdleCallback', undefined);
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it('初期 bundle に Replay の static import / transport wrapper を含めない', async () => {
+    const source = readFileSync('instrumentation-client.ts', 'utf8');
+    expect(source).not.toMatch(/(?:from\s+|^import\s*)['"][^'"]*sentryReplay/m);
+    expect(source).not.toMatch(/Sentry\.(replayIntegration|makeFetchTransport)/);
+    expect(source).toMatch(/import\(['"]@\/lib\/sentryReplayLazy['"]\)/);
+    await import('@/instrumentation-client');
+    expect(sentry.init.mock.calls[0][0]).not.toHaveProperty('transport');
+    expect(sentry.init.mock.calls[0][0].integrations).toEqual([]);
+    expect(lazy.loaded).not.toHaveBeenCalled();
+  });
+
+  it('load 後の idle callback まで Replay を import せず、sampling は init に保持する', async () => {
+    vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading');
+    const idle = vi.fn();
+    vi.stubGlobal('requestIdleCallback', idle);
+    await import('@/instrumentation-client');
+    expect(sentry.init.mock.calls[0][0]).toMatchObject({
+      replaysSessionSampleRate: 0, replaysOnErrorSampleRate: 0.2,
+    });
+    expect(idle).not.toHaveBeenCalled();
+    expect(lazy.loaded).not.toHaveBeenCalled();
+    window.dispatchEvent(new Event('load'));
+    expect(idle).toHaveBeenCalledOnce();
+    expect(lazy.loaded).not.toHaveBeenCalled();
+    idle.mock.calls[0][0]();
+    await vi.dynamicImportSettled();
+    expect(lazy.loaded).toHaveBeenCalledOnce();
+    expect(lazy.installSentryReplay).toHaveBeenCalledOnce();
+    window.dispatchEvent(new Event('load'));
+    expect(idle).toHaveBeenCalledOnce();
+  });
+
+  it('load 済みかつ idle API がないブラウザでは timer で遅延登録する', async () => {
+    await import('@/instrumentation-client');
+    expect(lazy.loaded).not.toHaveBeenCalled();
+    await vi.runAllTimersAsync();
+    await vi.dynamicImportSettled();
+    expect(lazy.installSentryReplay).toHaveBeenCalledOnce();
+  });
+
+  it('Replay の読込/初期化失敗をアプリへ波及させない', async () => {
+    lazy.installSentryReplay.mockImplementation(() => { throw new Error('Replay unavailable'); });
+    await import('@/instrumentation-client');
+    await vi.runAllTimersAsync();
+    await vi.dynamicImportSettled();
+    expect(lazy.installSentryReplay).toHaveBeenCalledOnce();
+    expect(sentry.init).toHaveBeenCalledOnce();
+  });
+
+  it('DSN 未設定・両 sampling rate 0 では Replay を読み込まない', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', '');
+    await import('@/instrumentation-client');
+    expect(sentry.init).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    vi.resetModules();
+    vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://test@o0.ingest.sentry.io/0');
+    vi.stubEnv('NEXT_PUBLIC_SENTRY_REPLAY_ERROR_SAMPLE_RATE', '0');
+    await import('@/instrumentation-client');
+    expect(sentry.init.mock.calls[0][0].integrations).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(lazy.loaded).not.toHaveBeenCalled();
   });
 
   it('ignoreErrors が non-Error 拒否の両文言 (value 形式 / DOM Event 形式) を落とす', async () => {
