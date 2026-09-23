@@ -56,11 +56,22 @@ async function readChallenge(response) {
   }
 }
 
-export async function proveWallet({ signer, origin, fetchImpl, lookup }) {
+export async function proveWallet({ signer, origin = AGENT_PROOF_AUDIENCE, fetchImpl, lookup }) {
+  let parsedOrigin;
+  try {
+    parsedOrigin = new URL(origin);
+  } catch {
+    // Invalid local configuration must not reach the signer or echo URL credentials in errors.
+    return failure('invalid_origin');
+  }
+  // Plaintext or credential/path-bearing configuration must not steer a bearer proof to an
+  // unintended page. Accept only an explicit HTTPS origin, independently of discovery.
+  if (parsedOrigin.protocol !== 'https:') return failure('insecure_origin');
+  if (parsedOrigin.username || parsedOrigin.password || parsedOrigin.pathname !== '/' || parsedOrigin.search || parsedOrigin.hash) {
+    return failure('invalid_origin');
+  }
+  origin = parsedOrigin.origin;
   const address = signer.address;
-  // Signing surface: a plaintext origin would let a network attacker hand us a challenge and steer the
-  // bind link to itself (binding hijack; funds and keys are never exposed). Refuse before any request.
-  if (!origin.startsWith('https://')) return failure('insecure_origin');
   let result;
   let response;
   try {
@@ -85,7 +96,8 @@ export async function proveWallet({ signer, origin, fetchImpl, lookup }) {
       types: AGENT_PROOF_TYPES,
       primaryType: 'Proof',
       message: {
-        address, purpose: AGENT_PROOF_PURPOSE, audience: AGENT_PROOF_AUDIENCE,
+        // Bind overrides to their own audience so another deployment cannot harvest production proofs.
+        address, purpose: AGENT_PROOF_PURPOSE, audience: origin,
         nonce, issuedAt: BigInt(issuedAt), expiresAt: BigInt(expiresAt),
       },
     });

@@ -1,5 +1,6 @@
 import {
   access,
+  chmod,
   mkdtemp,
   mkdir,
   open,
@@ -71,6 +72,54 @@ afterEach(async () => {
 });
 
 describe('openpay-x402-sdk file spend store', () => {
+  it.skipIf(process.platform === 'win32').each(['reserve', 'compatibility save'])(
+    'creates a private shared directory for %s that can switch to keystore without permission repair',
+    async (operation) => {
+      const sdk = await loadSdk();
+      const path = await temporaryPath('.openpay-x402', 'spend.json');
+      const directory = dirname(path);
+      const store = sdk.createFileSpendStore({
+        path,
+        ...(operation === 'compatibility save' ? { fsImpl: { mkdir, readFile, writeFile } as unknown as NonNullable<Parameters<SdkModule['createFileSpendStore']>[0]>['fsImpl'] } : {}),
+      });
+      const key = '0xabc:2026-07-17';
+      if (operation === 'reserve') {
+        await expect(store.reserve(key, '7', '10', {
+          id: '0xnonce', payer: '0xabc', network: 'eip155:137', asset: '0xdef', validBefore: '2000000000',
+        })).resolves.toMatchObject({ ok: true, totalAtomic: '7' });
+      } else {
+        await store.save(key, '7');
+      }
+      expect((await stat(directory)).mode & 0o777).toBe(0o700);
+      const { createWallet } = await import(pathToFileURL(resolve('packages/x402-mcp/src/keystore.mjs')).href);
+      const wallet = await createWallet({ env: { HOME: dirname(directory) } });
+      expect(wallet.public.created).toBe(true);
+      expect((await stat(join(directory, 'wallet.json'))).mode & 0o777).toBe(0o600);
+      await expect(store.load(key)).resolves.toBe('7');
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')('preserves the legacy spend ledger and requires explicit permission repair before keystore migration', async () => {
+    const sdk = await loadSdk();
+    const path = await temporaryPath('.openpay-x402', 'spend.json');
+    const directory = dirname(path);
+    await mkdir(directory);
+    await chmod(directory, 0o755);
+    const store = sdk.createFileSpendStore({ path });
+    await store.save('0xabc:2026-07-17', '7');
+    const ledger = await readFile(path, 'utf8');
+    const { createWallet } = await import(pathToFileURL(resolve('packages/x402-mcp/src/keystore.mjs')).href);
+    const env = { HOME: dirname(directory) };
+    await expect(createWallet({ env })).rejects.toMatchObject({ code: 'wallet_permissions_unsafe' });
+    expect((await stat(directory)).mode & 0o777).toBe(0o755);
+    await expect(access(join(directory, 'wallet.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await chmod(directory, 0o700);
+    const wallet = await createWallet({ env });
+    expect(wallet.public.created).toBe(true);
+    expect((await stat(join(directory, 'wallet.json'))).mode & 0o777).toBe(0o600);
+    expect(await readFile(path, 'utf8')).toBe(ledger);
+  });
+
   it('atomically admits only one cross-instance reservation at the limit', async () => {
     const sdk = await loadSdk();
     const path = await temporaryPath('spend.json');
