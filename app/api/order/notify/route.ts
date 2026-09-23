@@ -10,7 +10,6 @@ import { createPublicClient, getAddress, isAddress, type Address, type Hex } fro
 import { env, isMainnet } from '@/lib/env';
 import {
   chainObjectForId,
-  slugForChain,
   transportForChain,
 } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
@@ -57,12 +56,8 @@ import {
   ORDER_ID_MAX,
   type StoredOrder,
 } from '@/lib/orderRelay';
-import {
-  mobileOrderFeeValue,
-  standardMobileOrderFeeMinimum,
-  type FeePayer,
-  type MobileOrderFeeKind,
-} from '@/lib/mobileOrderFee';
+import { resolveStandardFeeConfig, standardFeeObligationFromReceipt } from '@/lib/order/orderFeeObligation';
+import { agentTransactionKey, receiptHasAgentReservation } from '@/lib/order/agentOrderReservation';
 import {
   legacyBillingPaymentKey,
   paymentClaimKey,
@@ -115,65 +110,6 @@ function fail(error: string, status: number) {
   return NextResponse.json({ ok: false, error }, { status });
 }
 
-type StandardFeeConfig = {
-  kind: MobileOrderFeeKind;
-  feePayer: FeePayer;
-};
-
-function resolveStandardFeeConfig(
-  storefront: {
-    chain: string;
-    chains?: string[];
-    mode: MobileOrderFeeKind;
-    feePayer: FeePayer;
-  } | undefined,
-  chainId: number,
-): StandardFeeConfig | null {
-  if (!env.enableMobileOrderFee || !storefront) return null;
-  const chainSlug = slugForChain(chainId);
-  const configuredChains = storefront.chains ?? [storefront.chain];
-  // 別 chain の storefront 設定を流用して fee obligation を作る波及を断つ。公開済み受取 chain のみ対象。
-  if (!chainSlug || !configuredChains.includes(chainSlug)) return null;
-  return { kind: storefront.mode, feePayer: storefront.feePayer };
-}
-
-type StandardFeeObligation = {
-  expected: bigint;
-  alternate?: bigint;
-  collectedInline: boolean;
-};
-
-function standardFeeObligationFromReceipt(args: {
-  receiptValue: bigint;
-  sameSourceFeeValue?: bigint;
-  config: StandardFeeConfig | null;
-}): StandardFeeObligation | null {
-  if (!args.config) return null;
-  const fee = standardMobileOrderFeeMinimum(
-    args.receiptValue,
-    args.config.kind,
-    args.config.feePayer,
-  );
-  if (fee <= 0n) return null;
-  const merchantBorne =
-    args.config.kind !== 'preorder' ||
-    args.config.feePayer !== 'customer';
-  const alternate = fee + 1n;
-  const alternateGross = args.receiptValue + alternate;
-  const hasAlternate =
-    merchantBorne &&
-    mobileOrderFeeValue(alternateGross, args.config.kind) === alternate &&
-    alternateGross - alternate === args.receiptValue;
-  // merchant 着金全額と同じ Transfer source が同一 receipt 内で feeReceiver に期待額以上を
-  // 払った atomic relay/batch だけを徴収済みとする。receipt.from 不一致の helper/4337 支払いで
-  // standard 判定を避け、fee 未払いを通常受注へ落とす迂回の波及を断つ。
-  return {
-    expected: fee,
-    ...(hasAlternate ? { alternate } : {}),
-    collectedInline: (args.sameSourceFeeValue ?? 0n) >= fee,
-  };
-}
-
 async function reconcileCollectedStandardFee(args: {
   merchant: Address;
   merchantTxHash: Hex;
@@ -182,6 +118,7 @@ async function reconcileCollectedStandardFee(args: {
   token: Address;
   feeReceiver: Address;
   waitForOrder: boolean;
+  checkReservation: boolean;
   publicClient: Parameters<
     typeof verifyJpycStandardFeePairOnChain
   >[0]['publicClient'];
@@ -249,6 +186,7 @@ async function reconcileCollectedStandardFee(args: {
     ) {
       const result = await verifyJpycStandardFeePairOnChain({
         publicClient: args.publicClient,
+        includeReceiptLogs: args.checkReservation,
         merchantTxHash: args.merchantTxHash,
         feeTxHash: args.feeTxHash,
         expected: {
@@ -277,6 +215,7 @@ async function reconcileCollectedStandardFee(args: {
         }
         return;
       }
+      if (args.checkReservation && await receiptHasAgentReservation(args.chainId, args.token, result.receiptLogs) !== 'clear') return;
       verifiedObligation = {
         merchantAmount: storedOrder.amount,
         feeAmount: storedOrder.feeExpectedAmount,
@@ -400,7 +339,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     ? (o.feeTxHash as Hex)
     : null;
 
-  const queueFeeReconciliation = (waitForOrder = false) => {
+  const queueFeeReconciliation = (waitForOrder = false, checkReservation = false) => {
     if (!feeTxHash || !env.feeReceiverConfigured) return;
     after(async () => {
       try {
@@ -408,6 +347,12 @@ export async function POST(req: Request): Promise<NextResponse> {
           chain,
           transport: transportForChain(chainId),
         });
+        if (checkReservation) {
+          // Completed agent batches are fenced without another receipt RPC. Unknown public
+          // claims are checked against the SAME merchant receipt used by fee verification below.
+          const agent = await kvGet(agentTransactionKey(chainId, txHash));
+          if (!agent.ok || agent.value !== null) return;
+        }
         await reconcileCollectedStandardFee({
           merchant,
           merchantTxHash: txHash,
@@ -416,6 +361,7 @@ export async function POST(req: Request): Promise<NextResponse> {
           token: deployment.address,
           feeReceiver: getAddress(env.feeReceiver),
           waitForOrder,
+          checkReservation,
           publicClient,
         });
       } catch (e) {
@@ -449,12 +395,12 @@ export async function POST(req: Request): Promise<NextResponse> {
       if (!existing.ok) return fail('kv_error', 503);
       // done = 検証 + 保存済の恒久ブロック → 同一 txHash の無期限リプレイを永久拒否 (P1-E)。1 決済 1 注文。
       if (existing.value === ORDER_MARK_DONE) {
-        queueFeeReconciliation();
+        queueFeeReconciliation(false, true);
         return NextResponse.json({ ok: true, duplicate: true });
       }
       // pending 中 (または直前に失効/解放) = **まだ done でない** → 検証成功前の**偽 duplicate を返さない** (P2)。
       // 別 POST が検証中/リトライ可能な「処理中」を表す (client は pending 失効後に同一 txHash を再送可能)。
-      queueFeeReconciliation(true);
+      queueFeeReconciliation(true, true);
       return fail('processing', 409);
     }
   }
@@ -469,6 +415,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     const result = await verifyJpycTransferToOnChain({
       publicClient,
       txHash,
+      includeReceiptLogs: true,
       expected: {
         token: deployment.address,
         to: merchant,
@@ -520,6 +467,13 @@ export async function POST(req: Request): Promise<NextResponse> {
         reason: 'tx_too_old', chainId, merchant, ageSec: Number(paymentAgeMs) / 1000,
       });
       return fail('tx_too_old', 422);
+    }
+
+    // Reuse the successful transfer verification's receipt, after A2a freshness checks.
+    const reservation = await receiptHasAgentReservation(chainId, deployment.address, result.receiptLogs);
+    if (reservation !== 'clear') {
+      await kvDel(usedKey);
+      return fail(reservation === 'reserved' ? 'reserved_order' : 'storage_unavailable', reservation === 'reserved' ? 409 : 503);
     }
 
     const orderId =

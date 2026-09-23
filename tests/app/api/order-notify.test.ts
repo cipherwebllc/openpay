@@ -131,13 +131,13 @@ vi.mock('@/lib/feeVerify', () => ({
   verifyJpycTransferToOnChain: (...a: unknown[]) => {
     verifySpy(...a);
     return Promise.resolve(hold.verify.ok
-      ? { blockNumber: 123n, ...hold.verify }
+      ? { blockNumber: 123n, receiptLogs: [], ...hold.verify }
       : hold.verify);
   },
   verifyJpycStandardFeePairOnChain: (...a: unknown[]) => {
     feePairVerifySpy(...a);
     return Promise.resolve(
-      hold.feePairVerifyQueue.shift() ?? hold.feePairVerify,
+      { receiptLogs: [], ...(hold.feePairVerifyQueue.shift() ?? hold.feePairVerify) },
     );
   },
 }));

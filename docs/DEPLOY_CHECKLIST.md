@@ -1583,15 +1583,27 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 
 ### §14.7 エージェント注文 (agent-order) の運用注記
 - **範囲**: `@handle` 店舗のモバイルオーダーを openpay-x402-mcp から x402 で支払う。新レールは作らず、
-  支払いは §14 の facilitator (forwarder-split・買い手上乗せ 1%)、受注登録は §15.x の受注リレー
-  (`/api/order/notify`・on-chain 検証込み) を **そのまま再利用** する (`/api/agent-order/{menu,pay}`)。計画: `plans/agent-order-x402.md`。
+  支払いは §14 の facilitator (forwarder-split・買い手上乗せ 1%) を使う (`/api/agent-order/{menu,pay}`)。
+  settle 前に authorization と不変の注文 snapshot を 24 時間予約し、内部 finalizer が forwarder の
+  `Settled` イベントの全フィールド一致を検証して注文と authorization ごとの完了記録を原子的に保存する。
+  `/api/order/notify` を使うのは予約導入前の記録だけ。計画: `plans/a2b-agent-order-reservation.md`。
 - **フラグ (server-only・AND ゲート)**: `ENABLE_AGENT_ORDER` (NEXT_PUBLIC を付けない) + `NEXT_PUBLIC_ENABLE_X402_FACILITATOR`
   + `NEXT_PUBLIC_ENABLE_ORDER_RELAY` の 3 つが全 ON でなければ全 route 404。**既定 OFF = 完全 inert がロールバック先**。
   点灯順序は先に facilitator (§14) + 受注リレー (§15.x) を go-live 済みにしてから最後に `ENABLE_AGENT_ORDER=1`。
 - **権威**: 金額は **サーバーが menu から再計算** (顧客申告額は使わない)・受取先は `record.config.to` (@handle 権威)・
   対象 chain は storefront.chain の deployment (forwarder 未設定チェーンは 422 `unsupported_chain`)。options 付き商品は v1 非対応 (`item_has_options`)。
-- **隔離 (掟13)**: settle 成功後の受注登録 (notify) 失敗は決済成功を巻き込まない → 200 + `orderRegistered:false` + `txHash` を返す
-  (店主は履歴/txHash で追える)。notify は txHash 冪等ゆえ二重登録は既存機構で防がれる。
+- **予約と再利用拒否**: 予約の storage 障害は `503 storage_unavailable` (settle なし)。自分の既存 agent 記録がない
+  使用済み authorization・人間 recover の冪等 claim は `402 payment_invalid`。public notify は receipt 内の全
+  `AuthorizationUsed` を確認し、予約があれば `409 reserved_order`、予約読み取り障害なら `503 storage_unavailable`。
+  KV 未設定時の人間 notify は従来どおり (agent は予約不能なので settle しない)。
+- **隔離と修復 (掟13)**: 新経路の受注登録失敗は決済成功を巻き込まない → `200` + `paymentSettled:true` +
+  `orderRegistered:false` + `txHash` + `repair:{action:"do_not_pay_again",retryWithSameHeader,txHash}`。
+  **`x402_pay` を再実行しない** (新しい署名で別の支払いになる)。`retryWithSameHeader:true` の場合だけ、保存した
+  同じ署名ヘッダの再送で登録を修復できる。`false` は同じヘッダでは解消できない競合等なので txHash で調査する。
+  予約導入前の promotion 競合も決済済みとしてこの修復案内を返す (`retryWithSameHeader:false`)。
+- **回復の限界**: 回復は同じ支払いの再送で動作し、バックグラウンド worker はない。snapshot の 24 時間保持は
+  hash 不明時の status 探索範囲 (直近 10,000 block) を延ばさない。確実に未使用かつ署名期限切れなら、保存済み
+  requirements の `402 expired` を返して再署名を促す。不明な決済状態は `202 pending` のまま維持する。
 - **go-live 前 E2E**: 自店舗 (@handle・storefront 設定済み) に対し testnet で `order_menu` → `order_quote` → `x402_pay` を実行し、
   店主の受注画面に注文が届くことを確認する。MCP の `MAX_PER_CALL_JPYC` は既定 10 JPYC で注文合計を超えやすいので引き上げる。
 
