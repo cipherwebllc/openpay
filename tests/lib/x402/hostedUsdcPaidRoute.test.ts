@@ -84,6 +84,17 @@ vi.mock('@/lib/x402/storeUsdcRateProvider', () => ({
 vi.mock('@/lib/x402/vanillaGate', () => ({
   postFacilitator: mocks.postFacilitator,
 }));
+vi.mock('@/lib/x402/config', () => ({
+  x402Config: {
+    vanillaFacilitator: {
+      url: 'https://cdp.example',
+      cdpAuth: { keyId: 'k', keySecret: 's' },
+    },
+  },
+}));
+vi.mock('@/lib/x402/cdpJwt', () => ({
+  generateCdpJwt: () => 'test-jwt',
+}));
 
 import { handleHostedUsdcPaidGet } from '@/lib/x402/hostedUsdcPaidRoute';
 
@@ -284,6 +295,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('hosted USDC paid route', () => {
@@ -365,6 +377,39 @@ describe('hosted USDC paid route', () => {
     expect(mocks.finalize.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.readAccess.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('B14: CDP verify 400 + isValid:true returns 503 before claiming, settling, or unlocking content', async () => {
+    // Exercise the shared HTTP verdict validation instead of stubbing a thrown error.
+    const { postFacilitator } = await vi.importActual<typeof import('@/lib/x402/vanillaGate')>(
+      '@/lib/x402/vanillaGate',
+    );
+    mocks.postFacilitator.mockImplementation(postFacilitator);
+    const fetchMock = vi.fn().mockResolvedValue(Response.json(
+      { isValid: true, payer: PAYER },
+      { status: 400 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await handleHostedUsdcPaidGet(
+      request({ 'X-PAYMENT': paymentHeader() }),
+      RESOURCE_ID,
+      PAYER,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://cdp.example/verify');
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'payment_verification_unavailable' });
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.has('PAYMENT-RESPONSE')).toBe(false);
+    expect(response.headers.has('X-PAYMENT-RESPONSE')).toBe(false);
+    expect(mocks.claimSigned).not.toHaveBeenCalled();
+    expect(mocks.claimSettlement).not.toHaveBeenCalled();
+    expect(mocks.recordTransaction).not.toHaveBeenCalled();
+    expect(mocks.finalize).not.toHaveBeenCalled();
+    expect(mocks.readAccess).not.toHaveBeenCalled();
+    expect(mocks.getContent).not.toHaveBeenCalled();
   });
 
   it('v2 PAYMENT-SIGNATURE は CAIP-2 accept の完全一致だけを facilitator へ渡す', async () => {
