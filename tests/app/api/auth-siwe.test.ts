@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createSiweMessage } from 'viem/siwe';
+import { privateKeyToAccount } from 'viem/accounts';
+import { supportedChains } from '@/lib/chains';
 
 const h = vi.hoisted(() => {
   const ipRate = { allowed: true };
@@ -24,6 +27,16 @@ vi.mock('@/lib/kv', () => ({
   kvSet: h.kvSet,
   kvDel: h.kvDel,
 }));
+
+vi.mock('@/lib/chains', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/chains')>();
+  const { custom } = await import('viem');
+  return {
+    ...actual,
+    // Exercise viem's local EOA verification without any network requests.
+    transportForChain: () => custom({ request: async () => { throw new Error('offline test provider'); } }, { retryCount: 0 }),
+  };
+});
 
 vi.mock('@/lib/relay/relayGuards', () => ({
   checkIpRateLimit: h.checkIpRateLimit,
@@ -63,7 +76,8 @@ const MALFORMED_TOKENS = [
 function nonceReq(ip?: string): Request {
   return new Request('http://localhost/api/auth/siwe/nonce', {
     method: 'POST',
-    headers: ip ? { 'x-vercel-forwarded-for': ip } : undefined,
+    headers: { 'content-type': 'application/json', ...(ip ? { 'x-vercel-forwarded-for': ip } : {}) },
+    body: '{}',
   });
 }
 
@@ -83,6 +97,76 @@ describe('SIWE routes', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  describe.each([['nonce', noncePOST], ['verify', verifyPOST], ['logout', logoutPOST]] as const)('%s CSRF', (path, post) => {
+    function request(site: string | null, contentType: string | null) {
+      const headers = new Headers();
+      if (site !== null) headers.set('sec-fetch-site', site);
+      if (contentType !== null) headers.set('content-type', contentType);
+      return new Request(`http://localhost/api/auth/siwe/${path}`, {
+        method: 'POST', headers,
+        ...(contentType === null ? {} : { body: new TextEncoder().encode('{"message":"x","signature":"0x1","p":"="}') }),
+      });
+    }
+    it.each(['application/json', 'text/plain', null])('rejects cross-site %s before storage or cookies', async (type) => {
+      h.kvConfigured = true;
+      h.cookieToken = 'live-session';
+      const res = await post(request('cross-site', type));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ ok: false, error: 'cross_site_request' });
+      expect(res.headers.has('set-cookie')).toBe(false);
+      expect(h.kvSet).not.toHaveBeenCalled();
+      expect(h.kvDel).not.toHaveBeenCalled();
+      expect(h.checkIpRateLimit).not.toHaveBeenCalled();
+    });
+    it.each(['text/plain', 'text/plain; application/json', 'application/x-www-form-urlencoded', 'multipart/form-data', 'application/jsonp', ''])('rejects non-JSON %s without Fetch Metadata', async (type) => {
+      h.kvConfigured = true;
+      h.cookieToken = 'live-session';
+      const res = await post(request(null, type));
+      expect(res.status).toBe(415);
+      expect(await res.json()).toEqual({ ok: false, error: 'unsupported_media_type' });
+      expect(res.headers.has('set-cookie')).toBe(false);
+      expect(h.kvSet).not.toHaveBeenCalled();
+      expect(h.kvDel).not.toHaveBeenCalled();
+    });
+    it.each(['same-origin', 'same-site', 'none', null])('handles legacy bodyless POST without Content-Type for %s', async (site) => {
+      h.kvConfigured = true;
+      h.kvSet.mockResolvedValue({ ok: true, value: 'OK' });
+      h.cookieToken = SESSION_TOKEN;
+      const req = request(site, null);
+      expect(req.headers.has('content-type')).toBe(false);
+      expect(req.body).toBeNull();
+      const res = await post(req);
+      expect(res.status).toBe(path === 'verify' ? 415 : 200);
+      if (path === 'nonce') expect(h.kvSet).toHaveBeenCalledOnce();
+      if (path === 'logout') {
+        expect(h.kvDel).toHaveBeenCalledWith(sessionKey(SESSION_TOKEN));
+        expect(res.headers.get('set-cookie')).toContain('Max-Age=0');
+      }
+      if (path === 'verify') {
+        expect(res.headers.has('set-cookie')).toBe(false);
+        expect(h.kvDel).not.toHaveBeenCalled();
+        expect(h.kvSet).not.toHaveBeenCalled();
+      }
+    });
+    it.each(['same-origin', 'same-site'])('rejects text/plain even for %s', async (site) => {
+      h.kvConfigured = true;
+      const res = await post(request(site, 'text/plain'));
+      expect(res.status).toBe(415);
+      expect(res.headers.has('set-cookie')).toBe(false);
+      expect(h.kvSet).not.toHaveBeenCalled();
+      expect(h.kvDel).not.toHaveBeenCalled();
+    });
+    it.each(['same-origin', 'same-site', 'none', null])('preserves the JSON flow for %s', async (site) => {
+      h.kvConfigured = true;
+      h.kvSet.mockResolvedValue({ ok: true, value: 'OK' });
+      const res = await post(request(site, 'Application/JSON; charset=utf-8'));
+      // Invalid SIWE messages still reach the existing validator; nonce/logout succeed.
+      expect(res.status).toBe(path === 'verify' ? 400 : 200);
+      if (path === 'nonce') expect(h.kvSet).toHaveBeenCalledOnce();
+      if (path === 'logout') expect(res.headers.get('set-cookie')).toContain('Max-Age=0');
+    });
   });
 
   it('nonce: KV 未設定 → 503 kv_not_configured', async () => {
@@ -121,6 +205,42 @@ describe('SIWE routes', () => {
     expect(res.status).toBe(200);
     expect(h.checkIpRateLimit).toHaveBeenCalledWith('siwe-nonce', null, 60, 60);
     expect(h.kvSet).toHaveBeenCalledOnce();
+  });
+
+  it.each(['same-origin', 'same-site', null])('verify: valid JSON login issues a session for %s', async (site) => {
+    h.kvConfigured = true;
+    h.kvDel.mockResolvedValue({ ok: true, value: 1 });
+    h.kvSet.mockResolvedValue({ ok: true, value: 'OK' });
+    // Fixed, test-only account; no real wallet, keystore, or RPC is used for this EOA signature.
+    const account = privateKeyToAccount(`0x${'11'.repeat(32)}`);
+    const issuedAt = new Date();
+    const message = createSiweMessage({
+      domain: 'localhost', uri: 'http://localhost', address: account.address,
+      version: '1', chainId: supportedChains[0].id, nonce: 'csrf1234', issuedAt,
+      expirationTime: new Date(issuedAt.getTime() + 600_000),
+    });
+    const signature = await account.signMessage({ message });
+    const headers = new Headers({ 'content-type': 'application/json; charset=utf-8' });
+    if (site) headers.set('sec-fetch-site', site);
+    const res = await verifyPOST(new Request('http://localhost/api/auth/siwe/verify', {
+      method: 'POST', headers, body: JSON.stringify({ message, signature }),
+    }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, address: account.address });
+    expect(res.headers.get('set-cookie')).toContain('op_sess=');
+    expect(h.kvDel).toHaveBeenCalledWith('siwe:nonce:csrf1234');
+    expect(h.kvSet).toHaveBeenCalledOnce();
+  });
+
+  it('verify: JSON-shaped bytes without Content-Type still fail before session writes', async () => {
+    h.kvConfigured = true;
+    const res = await verifyPOST(new Request('http://localhost/api/auth/siwe/verify', {
+      method: 'POST', body: new TextEncoder().encode('{"message":"x","signature":"0x1"}'),
+    }));
+    expect(res.status).toBe(415);
+    expect(h.kvSet).not.toHaveBeenCalled();
+    expect(h.kvDel).not.toHaveBeenCalled();
+    expect(res.headers.has('set-cookie')).toBe(false);
   });
 
   it('verify: KV 未設定 → 503 (署名検証に到達しない)', async () => {
@@ -188,7 +308,7 @@ describe('SIWE routes', () => {
       vi.stubEnv('NODE_ENV', nodeEnv);
       h.cookieToken = token;
 
-      const res = await logoutPOST();
+      const res = await logoutPOST(new Request('http://localhost/api/auth/siwe/logout', { method: 'POST' }));
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true });
@@ -205,7 +325,7 @@ describe('SIWE routes', () => {
       h.cookieToken = SESSION_TOKEN;
       h.kvDel.mockResolvedValue({ ok: true, value: 1 });
 
-      const res = await logoutPOST();
+      const res = await logoutPOST(new Request('http://localhost/api/auth/siwe/logout', { method: 'POST' }));
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true });
@@ -302,7 +422,7 @@ describe('SIWE routes', () => {
   });
 
   it('logout: cookie 無しでも 200 (冪等) + op_sess を maxAge0 で失効', async () => {
-    const res = await logoutPOST();
+    const res = await logoutPOST(new Request('http://localhost/api/auth/siwe/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
     const setCookie = res.headers.get('set-cookie') ?? '';
@@ -314,7 +434,7 @@ describe('SIWE routes', () => {
   // Domain 属性なし) を 3 つとも満たしていなければ prefix cookie は黙って捨てられる。
   it('logout: 本番は __Host-op_sess を Secure + Path=/ + Domain 無しで失効させる', async () => {
     vi.stubEnv('NODE_ENV', 'production');
-    const res = await logoutPOST();
+    const res = await logoutPOST(new Request('http://localhost/api/auth/siwe/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
     const setCookie = res.headers.get('set-cookie') ?? '';
     expect(setCookie).toContain('__Host-op_sess=');
     const lower = setCookie.toLowerCase();
@@ -325,7 +445,7 @@ describe('SIWE routes', () => {
 
   it('logout: セッションが既に無い (DEL=0) → 200 (冪等) + cookie 失効', async () => {
     h.cookieToken = SESSION_TOKEN;
-    const res = await logoutPOST();
+    const res = await logoutPOST(new Request('http://localhost/api/auth/siwe/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
     expect(h.kvDel).toHaveBeenCalledWith(sessionKey(SESSION_TOKEN));
@@ -335,7 +455,7 @@ describe('SIWE routes', () => {
   it('logout: KV 削除失敗 → 503 だが cookie は失効', async () => {
     h.cookieToken = SESSION_TOKEN;
     h.kvDel.mockResolvedValue({ ok: false, reason: 'network_error' });
-    const res = await logoutPOST();
+    const res = await logoutPOST(new Request('http://localhost/api/auth/siwe/logout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ ok: false, error: 'session_revoke_failed' });
     expect(h.kvDel).toHaveBeenCalledWith(sessionKey(SESSION_TOKEN));

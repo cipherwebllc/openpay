@@ -27,6 +27,7 @@
     "disconnect": "Disconnect",
     "signIn": "Sign in (signature)",
     "signOut": "Sign out",
+    "signOutError": "Sign-out failed. Your session may still be active. Please try again.",
     "signedIn": "Signed in",
     "reSignIn": "Different address — sign in again",
     "siweStatement": "Sign in to OpenPay with this wallet.",

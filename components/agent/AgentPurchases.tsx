@@ -1,12 +1,15 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
+import { getAddress } from 'viem';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import type { AgentPageContent } from '@/lib/agentPage';
 import type { PurchaseItem } from '@/lib/agent/purchases';
 import { trackAgentEvent } from '@/lib/agentTrack';
+import { parseAgentProof } from '@/lib/agent/proofEnvelope';
+import { normalizeAgentAddress } from '@/lib/agent/purchaseAddress';
 import { txExplorerUrl } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { chainIdFromCaip2 } from '@/lib/x402/network';
@@ -40,13 +43,14 @@ async function post(path: string, body: object) {
 
 export function AgentPurchases(props: Props) {
   if (!env.enableAgentPurchases) return null;
-  return <PurchasesForAddress key={props.address.toLowerCase()} {...props} address={props.address.toLowerCase()} />;
+  return <PurchasesForAddress {...props} address={props.address.toLowerCase()} />;
 }
 
 function PurchasesForAddress(props: Props) {
   const session = useSiweSession();
   const [mounted, setMounted] = useState(false);
   const [proof, setProof] = useState<string | null>(null);
+  const [proofLinkAddress, setProofLinkAddress] = useState<string | null>(null);
   const [hashError, setHashError] = useState(false);
   useEffect(() => {
     const incoming = new URLSearchParams(window.location.hash.slice(1)).get('proof');
@@ -55,6 +59,7 @@ function PurchasesForAddress(props: Props) {
         // proof は URL・履歴に残さず、この mount のメモリだけに保持する。
         window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
         setProof(incoming);
+        setProofLinkAddress(normalizeAgentAddress(new URLSearchParams(window.location.search).get('address')));
       } catch {
         // history API が拒否された場合、秘密を URL に残したまま検証を進めない。
         setHashError(true);
@@ -67,15 +72,15 @@ function PurchasesForAddress(props: Props) {
     <section className="mt-6 min-w-0 max-w-full break-words border-t border-slate-200 pt-5">
       <h3 className="text-lg font-bold text-slate-900">{props.c.title}</h3>
       {!mounted || session.isLoading || hashError ? <p role="status" className="mt-3 text-sm text-slate-600">{hashError ? props.c.error : props.c.loading}</p> : (
-        // cookie の持ち主 O とカードの Agent A は別物。O の切替で操作・表示状態も破棄する。
-        <PurchasesForOwner key={session.sessionAddress?.toLowerCase() ?? 'anonymous'} {...props} session={session} proof={proof} consumeProof={() => setProof(null)} />
+        // Agent と持ち主の切替で操作・表示状態は破棄するが、未送信の proof はカードのアドレス確認後も保持する。
+        <PurchasesForOwner key={`${props.address}:${session.sessionAddress?.toLowerCase() ?? 'anonymous'}`} {...props} session={session} proof={proof} proofLinkAddress={proofLinkAddress} consumeProof={() => setProof(null)} />
       )}
     </section>
   );
 }
 
-function PurchasesForOwner({ address, locale, c, isConnected, session, proof, consumeProof }: Props & {
-  session: ReturnType<typeof useSiweSession>; proof: string | null; consumeProof: () => void;
+function PurchasesForOwner({ address, locale, c, isConnected, session, proof, proofLinkAddress, consumeProof }: Props & {
+  session: ReturnType<typeof useSiweSession>; proof: string | null; proofLinkAddress: string | null; consumeProof: () => void;
 }) {
   const t = useTranslations('Nav');
   const qc = useQueryClient();
@@ -85,29 +90,44 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, co
   const submitted = useRef(false);
   const viewed = useRef(false);
   const owner = session.sessionAddress?.toLowerCase();
+  const parsedProof = useMemo(() => parseAgentProof(proof), [proof]);
+  const proofMismatch = !!parsedProof && parsedProof.address !== address;
+  const proofLinkMismatch = !!parsedProof && !!proofLinkAddress && parsedProof.address !== proofLinkAddress;
+  const needsConfirmation = proof !== null && !!parsedProof && !!owner && (!session.isSignedIn || proofMismatch || proofLinkMismatch);
   const instance = useId();
   const queryKey = ['agent-purchases', address, owner, instance] as const;
-  const [verification, setVerification] = useState<{ status: 'idle' | 'pending' | 'success' | 'error'; error?: Error }>({ status: 'idle' });
+  const [verification, setVerification] = useState<{ status: 'idle' | 'pending' | 'success' | 'error'; error?: Error; address?: string }>({ status: 'idle' });
   const verify = {
     isPending: verification.status === 'pending', isError: verification.status === 'error',
     isSuccess: verification.status === 'success', error: verification.error,
     reset: () => setVerification({ status: 'idle' }),
   };
-  useEffect(() => {
-    if (proof === null || !owner || submitted.current) return;
+  const submitProof = useCallback(() => {
+    if (proof === null || !parsedProof || !owner || submitted.current) return;
     submitted.current = true;
     // 1 回限りの proof は再試行しない。StrictMode や持ち主の切替で二重送信しない。
     consumeProof();
     setVerification({ status: 'pending' });
     void post('verify', { proof }).then(() => {
-      setVerification({ status: 'success' });
+      setVerification({ status: 'success', address: parsedProof.address });
       trackAgentEvent('agent_proof_bound', { locale });
-      void qc.invalidateQueries({ queryKey: ['agent-purchases', address, owner] });
+      void qc.invalidateQueries({ queryKey: ['agent-purchases', parsedProof.address, owner] });
     }, (error: Error) => {
       setVerification({ status: 'error', error });
       if (error instanceof PurchaseError && error.reason === 'not_signed_in') setAuthRequired(true);
     });
-  }, [proof, owner, consumeProof, address, locale, qc]);
+  }, [proof, parsedProof, owner, consumeProof, locale, qc]);
+  useEffect(() => {
+    if (proof === null) return;
+    if (!parsedProof) {
+      // 不正な envelope を確認表示や自動紐づけに流さず、既存の履歴表示は継続する。
+      consumeProof();
+      setVerification({ status: 'error', error: new PurchaseError('malformed') });
+    } else if (session.isSignedIn && !proofMismatch && !proofLinkMismatch) {
+      // cookie だけの持ち主や別 Agent のリンクが、無確認の紐づけへ波及しないようにする。
+      submitProof();
+    }
+  }, [proof, parsedProof, consumeProof, session.isSignedIn, proofMismatch, proofLinkMismatch, submitProof]);
 
   const query = useQuery({
     queryKey,
@@ -179,24 +199,33 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, co
   const unbindError = unbind.error instanceof PurchaseError && ['not_bound', 'feature_disabled'].includes(unbind.error.reason) ? null : unbind.error;
   const status = session.isSigningIn ? c.signingIn
     : signedOut ? (signInFailed || session.signInError ? c.signInError : proof !== null ? c.continueAfterSignIn : '')
-      : verify.isPending || proof !== null ? c.verifying
-        : verify.error ? proofFailure(verify.error)
-          : unbindError || query.isError ? c.error
-            : query.data?.ok === false && query.data.reason === 'feature_disabled' ? c.failures.feature_disabled
-              : unbind.isPending || query.isPending ? c.loading
-                : confirmUnbind ? c.unbindConfirm
-                  : verify.isSuccess ? c.bound : result?.items.length === 0 ? c.empty : '';
+      : needsConfirmation ? c.bindConfirm.replace('{owner}', getAddress(owner!))
+        : verify.isPending || proof !== null ? c.verifying
+          : verify.error ? proofFailure(verify.error)
+            : unbindError || query.isError ? c.error
+              : query.data?.ok === false && query.data.reason === 'feature_disabled' ? c.failures.feature_disabled
+                : unbind.isPending || query.isPending ? c.loading
+                  : confirmUnbind ? c.unbindConfirm
+                    : verify.isSuccess ? (verification.address === address ? c.bound : c.boundOther.replace('{address}', verification.address!)) : result?.items.length === 0 ? c.empty : '';
   const focus = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600';
   const button = `min-h-11 max-w-full rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-800 disabled:opacity-50 ${focus}`;
   const formatter = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
   return (
     <>
       {signedOut ? <p className="mt-3 text-sm text-slate-600">{c.lead}</p> : <p className="mt-3 text-xs text-slate-500">{c.signedInAs} <span className="font-mono">{owner!.slice(0, 6)}…{owner!.slice(-4)}</span></p>}
-      <p id={`${instance}-status`} role="status" className="mt-3 text-sm text-slate-600">{status}</p>
+      <p id={`${instance}-status`} role="status" className="mt-3 break-all text-sm text-slate-600">{status}</p>
       {/* 未接続ではサインインの署名ができない (useSiweSession が wallet_not_connected を投げる) → ボタンではなく接続への案内。 */}
       {signedOut ? (isConnected
         ? <button type="button" className={`mt-3 ${button}`} disabled={session.isSigningIn} onClick={() => void signIn()}>{session.isSigningIn ? c.signingIn : c.signIn}</button>
         : <p className="mt-3 text-sm text-slate-600">{c.connectFirst}</p>) : null}
+      {needsConfirmation ? <div className="mt-3 rounded-xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
+        {proofMismatch ? <p className="mb-3 break-all">{c.proofAddressMismatch.replace('{proofAddress}', parsedProof!.address).replace('{cardAddress}', address)}</p> : null}
+        {proofLinkMismatch && proofLinkAddress !== address ? <p className="mb-3 break-all">{c.proofLinkAddressMismatch.replace('{proofAddress}', parsedProof!.address).replace('{linkAddress}', proofLinkAddress!)}</p> : null}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" className={button} aria-describedby={`${instance}-status`} onClick={submitProof}>{c.confirmBind}</button>
+          <button type="button" className={button} onClick={consumeProof}>{c.cancelBind}</button>
+        </div>
+      </div> : null}
       {notBound && !verify.isPending && !verify.isError ? <div className="mt-3 text-sm text-slate-600"><p>{c.notBoundLead}</p><ol className="mt-2 list-decimal space-y-2 pl-5">{c.notBoundSteps.map((step) => <li key={step}>{step}</li>)}</ol></div> : null}
       {result ? (
         <>

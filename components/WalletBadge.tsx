@@ -27,7 +27,7 @@ export function WalletBadge() {
   const t = useTranslations('Nav');
   const tConnect = useTranslations('ConnectButton');
   const visible = useVisibleConnectors(connectors);
-  const { isSignedIn, mismatch, signIn, isSigningIn, signInError, signOut } =
+  const { isSignedIn, mismatch, signIn, isSigningIn, signInError, signOut, isSigningOut, signOutError } =
     useSiweSession();
   // SIWE ログインを必要とする機能 (freee 連携 / a1 OpenPay 利用料 / Pro 加入 / CSV パス購入 /
   // 着金プッシュ通知 / チップ質問 inbox) が有効なときだけログイン UI を出す。すべて OFF では
@@ -50,6 +50,18 @@ export function WalletBadge() {
   const handleSignIn = () => {
     void signIn(t('siweStatement')).catch(() => undefined);
   };
+  // 失効失敗を unhandled rejection にせず、signOutError の警告と再試行操作で利用者へ伝える。
+  const handleSignOut = () => {
+    void signOut().catch(() => undefined);
+  };
+  const signOutFailure = signOutError ? (
+    <div role="alert" className="absolute right-0 top-full z-40 mt-1 w-56 rounded-lg border border-red-200 bg-white p-3 text-xs text-red-700 shadow-lg">
+      <p>{t('signOutError')}</p>
+      <button type="button" disabled={isSigningOut} onClick={handleSignOut} className="mt-2 rounded-md px-3 py-2 font-medium underline disabled:opacity-50">
+        {t('signOut')}
+      </button>
+    </div>
+  ) : null;
   // メニュー内の操作 (接続 / 切断) で branch が入れ替わると、押したボタンごと <details> が作り直され
   // フォーカスが body へ落ちる。メニューから操作したときだけ新しい summary へ戻す
   // (ページ読み込み時の自動再接続ではフォーカスを奪わない)。
@@ -71,7 +83,7 @@ export function WalletBadge() {
   // 切断時はセッション cookie も破棄して「ログイン済だが未接続」の宙ぶらりんを残さない。
   const handleDisconnect = () => {
     restoreFocusRef.current = true;
-    void signOut().catch(() => undefined);
+    handleSignOut();
     disconnect();
   };
 
@@ -79,119 +91,126 @@ export function WalletBadge() {
     return (
       // key: 未接続 branch と同じ位置の <details> なので、無いと React が DOM を使い回し open が
       // 引き継がれる (接続直後にメニューが開いたまま本文へ被さる)。
-      <details key="connected" className="group relative">
-        <summary ref={summaryRef} className="flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
-          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
-          {siweEnabled && isSignedIn && (
-            <Check className="h-3 w-3 text-emerald-600" aria-label={t('signedIn')} />
-          )}
-          <span className="font-mono">{shortAddress(address)}</span>
-          {chain && (
-            <span className="hidden text-[11px] text-slate-400 sm:inline">/ {chain.name}</span>
-          )}
+      <div className="relative">
+        <details key="connected" className="group relative">
+          <summary ref={summaryRef} className="flex cursor-pointer list-none items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200">
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" aria-hidden />
+            {siweEnabled && isSignedIn && (
+              <Check className="h-3 w-3 text-emerald-600" aria-label={t('signedIn')} />
+            )}
+            <span className="font-mono">{shortAddress(address)}</span>
+            {chain && (
+              <span className="hidden text-[11px] text-slate-400 sm:inline">/ {chain.name}</span>
+            )}
+            <ChevronDown
+              className="h-3 w-3 text-slate-400 transition-transform group-open:rotate-180"
+              aria-hidden
+            />
+          </summary>
+          <div
+            role="menu"
+            className="absolute right-0 top-full z-30 mt-1 w-52 rounded-lg border border-slate-200 bg-white p-1 text-sm shadow-lg"
+          >
+            {chain && (
+              <p className="px-3 py-1 text-[11px] text-slate-400">{chain.name}</p>
+            )}
+            {siweEnabled &&
+              (isSignedIn ? (
+                <>
+                  <span className="flex items-center gap-1 px-3 py-1 text-[11px] font-medium text-emerald-600">
+                    <Check className="h-3 w-3" aria-hidden />
+                    {t('signedIn')}
+                  </span>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handleSignOut}
+                    disabled={isSigningOut}
+                    className="block w-full rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100"
+                  >
+                    {t('signOut')}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={isSigningIn}
+                  onClick={handleSignIn}
+                  className="block w-full rounded-md px-3 py-1.5 text-left font-medium text-brand hover:bg-slate-100 disabled:opacity-50"
+                >
+                  {mismatch ? t('reSignIn') : t('signIn')}
+                </button>
+              ))}
+            {siweEnabled && signInError && (
+              <p className="px-3 pb-1 pt-0.5 text-[11px] text-red-600">
+                {t('signInError')}
+              </p>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={handleDisconnect}
+              className="block w-full rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100"
+            >
+              {t('disconnect')}
+            </button>
+          </div>
+        </details>
+        {signOutFailure}
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <details key="disconnected" className="group relative">
+        <summary ref={summaryRef} className="flex cursor-pointer list-none items-center gap-1 rounded-full bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark">
+          {t('connect')}
           <ChevronDown
-            className="h-3 w-3 text-slate-400 transition-transform group-open:rotate-180"
+            className="h-3 w-3 transition-transform group-open:rotate-180"
             aria-hidden
           />
         </summary>
         <div
           role="menu"
-          className="absolute right-0 top-full z-30 mt-1 w-52 rounded-lg border border-slate-200 bg-white p-1 text-sm shadow-lg"
+          className="absolute right-0 top-full z-30 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1 text-sm shadow-lg"
         >
-          {chain && (
-            <p className="px-3 py-1 text-[11px] text-slate-400">{chain.name}</p>
-          )}
-          {siweEnabled &&
-            (isSignedIn ? (
-              <>
-                <span className="flex items-center gap-1 px-3 py-1 text-[11px] font-medium text-emerald-600">
-                  <Check className="h-3 w-3" aria-hidden />
-                  {t('signedIn')}
-                </span>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => void signOut().catch(() => undefined)}
-                  className="block w-full rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100"
-                >
-                  {t('signOut')}
-                </button>
-              </>
-            ) : (
+          {visible.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-slate-500">…</p>
+          ) : (
+            visible.map((c) => (
               <button
+                key={c.uid}
                 type="button"
                 role="menuitem"
-                disabled={isSigningIn}
-                onClick={handleSignIn}
-                className="block w-full rounded-md px-3 py-1.5 text-left font-medium text-brand hover:bg-slate-100 disabled:opacity-50"
+                disabled={isPending}
+                onClick={() => {
+                  restoreFocusRef.current = true;
+                  connect({ connector: c });
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 disabled:opacity-50"
               >
-                {mismatch ? t('reSignIn') : t('signIn')}
+                {/* ウォレットアイコン (EIP-6963 data URI or 同梱 SVG)。装飾なので alt は空。 */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={walletIconSrc(c)}
+                  alt=""
+                  aria-hidden
+                  className="h-4 w-4 shrink-0 object-contain"
+                />
+                {c.name}
               </button>
-            ))}
-          {siweEnabled && signInError && (
-            <p className="px-3 pb-1 pt-0.5 text-[11px] text-red-600">
-              {t('signInError')}
+            ))
+          )}
+          {error && !isUserRejection(error) && (
+            <p className="px-3 pb-2 pt-1 text-xs text-red-600">
+              {tConnect('connectError', { message: error.message })}
             </p>
           )}
-          <button
-            type="button"
-            role="menuitem"
-            onClick={handleDisconnect}
-            className="block w-full rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100"
-          >
-            {t('disconnect')}
-          </button>
         </div>
       </details>
-    );
-  }
-
-  return (
-    <details key="disconnected" className="group relative">
-      <summary ref={summaryRef} className="flex cursor-pointer list-none items-center gap-1 rounded-full bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark">
-        {t('connect')}
-        <ChevronDown
-          className="h-3 w-3 transition-transform group-open:rotate-180"
-          aria-hidden
-        />
-      </summary>
-      <div
-        role="menu"
-        className="absolute right-0 top-full z-30 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-1 text-sm shadow-lg"
-      >
-        {visible.length === 0 ? (
-          <p className="px-3 py-2 text-xs text-slate-500">…</p>
-        ) : (
-          visible.map((c) => (
-            <button
-              key={c.uid}
-              type="button"
-              role="menuitem"
-              disabled={isPending}
-              onClick={() => {
-                restoreFocusRef.current = true;
-                connect({ connector: c });
-              }}
-              className="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-            >
-              {/* ウォレットアイコン (EIP-6963 data URI or 同梱 SVG)。装飾なので alt は空。 */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={walletIconSrc(c)}
-                alt=""
-                aria-hidden
-                className="h-4 w-4 shrink-0 object-contain"
-              />
-              {c.name}
-            </button>
-          ))
-        )}
-        {error && !isUserRejection(error) && (
-          <p className="px-3 pb-2 pt-1 text-xs text-red-600">
-            {tConnect('connectError', { message: error.message })}
-          </p>
-        )}
-      </div>
-    </details>
+      {signOutFailure}
+    </div>
   );
 }

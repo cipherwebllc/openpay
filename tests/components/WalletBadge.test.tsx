@@ -88,6 +88,7 @@ function defaultSiwe() {
     signIn: vi.fn().mockResolvedValue(undefined),
     isSigningIn: false,
     signInError: null as Error | null,
+    signOutError: null as Error | null,
     signOut: vi.fn().mockResolvedValue(undefined),
     isSigningOut: false,
   };
@@ -99,6 +100,8 @@ function setSiwe(overrides: Partial<SiweState> = {}) {
 }
 
 import { WalletBadge } from '@/components/WalletBadge';
+import ja from '@/messages/ja.json';
+import en from '@/messages/en.json';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 
@@ -283,6 +286,25 @@ describe('WalletBadge: SIWE サインイン', () => {
     renderWithIntl(<WalletBadge />);
     const details = openDropdown('0x52d4…cA81');
     expect(within(details).getByText('ログインに失敗しました')).toBeInTheDocument();
+  });
+
+  it.each([true, false])('announces sign-out failure outside the closed menu and allows retry (connected=%s)', async (connected) => {
+    if (connected) setConnected(); else setDisconnected();
+    const siwe = setSiwe({ isSignedIn: connected, signOutError: new Error('siwe_logout_http_503') });
+    const { container } = renderWithIntl(<WalletBadge />);
+    expect(container.querySelector('details')).not.toHaveAttribute('open');
+    const alert = screen.getByRole('alert');
+    expect(alert).toBeVisible();
+    expect(alert).toHaveTextContent(ja.Nav.signOutError);
+    fireEvent.click(within(alert).getByRole('button', { name: ja.Nav.signOut }));
+    expect(siwe.signOut).toHaveBeenCalledOnce();
+  });
+
+  it('provides the sign-out failure in the English Nav namespace', () => {
+    setConnected();
+    setSiwe({ signOutError: new Error('offline') });
+    renderWithIntl(<WalletBadge />, { locale: 'en' });
+    expect(screen.getByRole('alert')).toHaveTextContent(en.Nav.signOutError);
   });
 
   it('切断 menuitem → signOut + disconnect の両方を呼ぶ (宙ぶらりんセッション防止)', () => {

@@ -14,10 +14,10 @@ import en from '@/messages/en.json';
 
 const h = vi.hoisted(() => ({
   enabled: true, sessionAddress: null as string | null, isLoading: false,
-  isSigningIn: false, signInError: null as Error | null, signIn: vi.fn(),
+  isSignedIn: true, mismatch: false, isSigningIn: false, signInError: null as Error | null, signIn: vi.fn(),
 }));
 vi.mock('@/lib/env', () => ({ env: { get enableAgentPurchases() { return h.enabled; } } }));
-vi.mock('@/hooks/useSiweSession', () => ({ useSiweSession: () => ({ ...h, isSignedIn: false, mismatch: false }) }));
+vi.mock('@/hooks/useSiweSession', () => ({ useSiweSession: () => ({ ...h }) }));
 vi.mock('@vercel/analytics', () => ({ track: vi.fn() }));
 vi.mock('@/lib/chains', () => ({ txExplorerUrl: (chain: number, tx: string) => {
   const base = ({ 137: 'https://polygonscan.com', 8453: 'https://basescan.org' } as Record<number, string>)[chain];
@@ -51,7 +51,8 @@ function mount(overrides: Partial<ComponentProps<typeof AgentPurchases>> = {}, s
   const view = render(tree());
   return { ...view, qc, update: (next: Partial<ComponentProps<typeof AgentPurchases>> = {}) => { props = { ...props, ...next }; view.rerender(tree()); } };
 }
-function landing(proof = 'private-proof') {
+const encodeProof = (agentAddress = address, extra = {}) => Buffer.from(JSON.stringify({ v: 1, address: agentAddress, nonce: `0x${'aa'.repeat(32)}`, signature: `0x${'bb'.repeat(65)}`, ...extra })).toString('base64url');
+function landing(proof = encodeProof()) {
   window.history.replaceState({ keep: 'next-history' }, '', `/en/agent?address=${address}#proof=${proof}`);
 }
 function deferred<T>() {
@@ -61,7 +62,7 @@ function deferred<T>() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
-  h.enabled = true; h.sessionAddress = null; h.isLoading = false; h.isSigningIn = false; h.signInError = null;
+  h.enabled = true; h.isSignedIn = true; h.mismatch = false; h.sessionAddress = null; h.isLoading = false; h.isSigningIn = false; h.signInError = null;
   h.signIn.mockReset().mockResolvedValue(undefined);
   mockFetch.mockReset().mockImplementation(async () => response(success()));
   vi.stubGlobal('fetch', mockFetch);
@@ -126,8 +127,8 @@ describe('AgentPurchases', () => {
     h.sessionAddress = owner; view.update();
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
     expect(screen.getByRole('status')).toHaveTextContent(c.verifying);
-    expect(mockFetch).toHaveBeenCalledWith('/api/agent/proof/verify', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proof: 'private-proof' }) });
-    expect(view.container.textContent).not.toContain('private-proof');
+    expect(mockFetch).toHaveBeenCalledWith('/api/agent/proof/verify', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ proof: encodeProof() }) });
+    expect(view.container.textContent).not.toContain(encodeProof());
     await act(async () => { verification.resolve(response({ address, boundAt: '2026-09-23T09:00:00Z' })); });
     await screen.findByRole('table');
     expect(screen.getByRole('status')).toHaveTextContent(c.bound);
@@ -137,6 +138,108 @@ describe('AgentPurchases', () => {
     for (const call of vi.mocked(track).mock.calls) expect(call[1]).toEqual({ locale: 'en' });
     view.update();
     expect(track).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([['ja', true], ['en', true], ['en', false]] as const)('requires explicit owner confirmation in %s when wallet connected=%s but isSignedIn is false', async (locale, connected) => {
+    h.sessionAddress = owner; h.isSignedIn = false; h.mismatch = connected; landing();
+    const copy = agentPageContentFor(locale).purchases;
+    mount({ locale, c: copy, isConnected: connected }, true);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(window.location.hash).toBe('');
+    expect(screen.getByText(copy.bindConfirm.replace('{owner}', owner))).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: copy.confirmBind }));
+    await screen.findByRole('table');
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/verify'))).toHaveLength(1);
+  });
+
+  it.each(['ja', 'en'])('announces the full checksummed owner before binding in %s', (locale) => {
+    const checksummed = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+    h.sessionAddress = checksummed.toLowerCase(); h.isSignedIn = false; landing();
+    const copy = agentPageContentFor(locale).purchases;
+    mount({ locale, c: copy });
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent(copy.bindConfirm.replace('{owner}', checksummed));
+    expect(status).toHaveClass('break-all');
+    expect(screen.getByRole('button', { name: copy.confirmBind })).toHaveAccessibleDescription(copy.bindConfirm.replace('{owner}', checksummed));
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending proof without posting it', async () => {
+    h.sessionAddress = owner; h.isSignedIn = false; landing();
+    mount();
+    expect(mockFetch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: c.cancelBind }));
+    await screen.findByRole('table');
+    expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith('/verify'))).toBe(false);
+  });
+
+  it('shows a new owner in confirmation after session changes', async () => {
+    h.sessionAddress = owner; h.isSignedIn = false; landing();
+    const view = mount();
+    h.sessionAddress = other; view.update();
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(screen.getByText(c.bindConfirm.replace('{owner}', other))).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: c.confirmBind }));
+    await screen.findByRole('table');
+  });
+
+  it('requires confirmation for a different proof Agent and reports/invalidate that Agent only', async () => {
+    h.sessionAddress = owner; landing(encodeProof(other));
+    mockFetch.mockImplementation(async (url) => String(url).endsWith('/verify') ? response({ address: other }) : response({ reason: 'not_bound' }, 401));
+    const { qc } = mount({}, true);
+    const invalidate = vi.spyOn(qc, 'invalidateQueries');
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(screen.getByText(c.proofAddressMismatch.replace('{proofAddress}', other).replace('{cardAddress}', address))).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: c.confirmBind }));
+    await screen.findByText(c.boundOther.replace('{address}', other));
+    expect(screen.queryByText(c.bound, { exact: true })).toBeNull();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['agent-purchases', other, owner] });
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/verify'))).toHaveLength(1);
+  });
+
+  it('also requires confirmation when proof matches the saved card but differs from the URL Agent', async () => {
+    h.sessionAddress = owner;
+    window.history.replaceState(null, '', `/en/agent?address=${other}#proof=${encodeProof()}`);
+    mount();
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(screen.getByText(c.proofLinkAddressMismatch.replace('{proofAddress}', address).replace('{linkAddress}', other))).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: c.confirmBind }));
+    await screen.findByRole('table');
+  });
+
+  it('retains an unsubmitted proof when the user accepts a different card address', async () => {
+    h.sessionAddress = owner;
+    landing(encodeProof());
+    const view = mount({ address: other }, true);
+    expect(mockFetch).not.toHaveBeenCalled();
+    view.update({ address });
+    await screen.findByRole('table');
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/verify'))).toHaveLength(1);
+  });
+
+  it('automatically continues a pending proof when the connected wallet matches the session', async () => {
+    h.sessionAddress = owner; h.isSignedIn = false; landing();
+    const view = mount();
+    expect(mockFetch).not.toHaveBeenCalled();
+    h.isSignedIn = true; view.update();
+    await screen.findByRole('table');
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/verify'))).toHaveLength(1);
+  });
+
+  it('compares proof and card addresses without case sensitivity', async () => {
+    const agent = '0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa';
+    h.sessionAddress = owner;
+    window.history.replaceState(null, '', `/en/agent?address=${agent}#proof=${encodeProof(agent)}`);
+    mount({ address: agent.toLowerCase() });
+    await screen.findByRole('table');
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/verify'))).toHaveLength(1);
+  });
+
+  it.each(['not-a-proof', `${encodeProof()}=`, encodeProof(address, { v: 2 }), encodeProof(address, { audience: 'evil' })])('does not submit a malformed proof envelope %s', async (proof) => {
+    h.sessionAddress = owner; landing(proof);
+    mount();
+    await screen.findByText(c.failures.malformed);
+    expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith('/verify'))).toBe(false);
   });
 
   it.each(Object.keys(c.failures) as (keyof typeof c.failures)[])('shows the fixed proof failure for %s', async (reason) => {
@@ -358,7 +461,7 @@ describe('AgentPurchases', () => {
     try {
       const html = renderToString(wrap(ui));
       container.innerHTML = html;
-      expect(window.location.hash).toBe('#proof=private-proof');
+      expect(window.location.hash).toBe(`#proof=${encodeProof()}`);
       let initial = '';
       function Probe() { useLayoutEffect(() => { initial = container.innerHTML; }, []); return ui; }
       const onRecoverableError = vi.fn();

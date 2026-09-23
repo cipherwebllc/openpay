@@ -4,6 +4,8 @@ import { randomBytes } from 'node:crypto';
 import { recoverTypedDataAddress, type Address, type Hex } from 'viem';
 import { kvGet, kvGetDel, kvSetNxGet } from '@/lib/kv';
 import { normalizeAgentAddress } from './purchaseAddress';
+import { parseAgentProof } from './proofEnvelope';
+export { AGENT_PROOF_MAX_BYTES, parseAgentProof, type AgentProof } from './proofEnvelope';
 
 export const AGENT_PROOF_DOMAIN = { name: 'OpenPay Agent Proof', version: '1', chainId: 137 } as const;
 export const AGENT_PROOF_TYPES = {
@@ -19,34 +21,13 @@ export const AGENT_PROOF_TYPES = {
 export const AGENT_PROOF_PURPOSE = 'bind-purchase-history';
 export const AGENT_PROOF_AUDIENCE = 'https://open-pay.jp';
 export const AGENT_PROOF_TTL_SEC = 300;
-export const AGENT_PROOF_MAX_BYTES = 1024;
 
-export type AgentProof = { v: 1; address: Address; nonce: Hex; signature: Hex };
 export type AgentProofChallenge = { nonce: Hex; issuedAt: number; expiresAt: number };
 export type AgentProofFailure = 'malformed' | 'expired_or_unknown' | 'signature_mismatch' | 'already_used' | 'storage_error';
 type Failure = { ok: false; reason: AgentProofFailure };
 
 const nonceKey = (address: string, nonce: string) => `agent:proof:nonce:${address.toLowerCase()}:${nonce.toLowerCase()}`;
 const nowSec = () => Math.floor(Date.now() / 1000);
-const fixedHex = (value: unknown, bytes: number): value is Hex =>
-  typeof value === 'string' && value.length === 2 + bytes * 2 && /^0x[0-9a-fA-F]+$/.test(value);
-
-/** Strict, unpadded base64url envelope; supplied times/domain are never adopted. */
-export function parseAgentProof(encoded: unknown): AgentProof | null {
-  if (typeof encoded !== 'string' || encoded.length > AGENT_PROOF_MAX_BYTES || !/^[A-Za-z0-9_-]+$/.test(encoded)) return null;
-  try {
-    const bytes = Buffer.from(encoded, 'base64url');
-    if (bytes.toString('base64url') !== encoded) return null;
-    const proof = JSON.parse(bytes.toString('utf8'));
-    const address = normalizeAgentAddress(proof?.address);
-    if (!proof || proof.v !== 1 || !address || Object.keys(proof).sort().join(',') !== 'address,nonce,signature,v' ||
-        !fixedHex(proof.nonce, 32) || !fixedHex(proof.signature, 65)) return null;
-    return { v: 1, address, nonce: proof.nonce.toLowerCase() as Hex, signature: proof.signature };
-  } catch {
-    // Untrusted envelope parsing must not escape as a route exception.
-    return null;
-  }
-}
 
 export function agentProofTypedData(address: Address, challenge: AgentProofChallenge) {
   return {

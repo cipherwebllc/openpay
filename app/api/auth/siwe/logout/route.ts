@@ -2,6 +2,7 @@
 // cookie が無い/セッションが既に無ければ 200 (冪等)。KV 障害時も露出縮小のため cookie は失効させるが、
 // サーバ側セッションの削除を確認できないので成功とは返さない。
 import { NextResponse } from 'next/server';
+import { rejectSiweCsrf } from '../_csrf';
 import { cookies } from 'next/headers';
 import { kvDel } from '@/lib/kv';
 import { sessionCookieName, sessionKey, isSessionToken } from '@/lib/siwe';
@@ -9,7 +10,9 @@ import { sessionCookieName, sessionKey, isSessionToken } from '@/lib/siwe';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function POST(): Promise<NextResponse> {
+export async function POST(req: Request): Promise<NextResponse> {
+  const rejected = rejectSiweCsrf(req, { allowMissingContentType: true });
+  if (rejected) return rejected;
   const store = await cookies();
   const cookieName = sessionCookieName();
   const token = store.get(cookieName)?.value;

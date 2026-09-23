@@ -39,8 +39,8 @@ async function fetchMe(): Promise<Address | null> {
 async function postJson(url: string, body?: unknown): Promise<Response> {
   return fetch(url, {
     method: 'POST',
-    headers: body ? { 'content-type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
   });
 }
 
@@ -93,7 +93,9 @@ export function useSiweSession() {
 
   const signOut = useMutation({
     mutationFn: async () => {
-      await postJson('/api/auth/siwe/logout');
+      const res = await postJson('/api/auth/siwe/logout');
+      // 失効の失敗を成功扱いにして、セッションが残った端末を安全だと誤認させない。
+      if (!res.ok) throw new Error(`siwe_logout_http_${res.status}`);
     },
     onSuccess: invalidateAuthScoped,
   });
@@ -115,5 +117,7 @@ export function useSiweSession() {
     isSigningIn: signIn.isPending,
     signInError: signIn.error as Error | null,
     signOut: () => signOut.mutateAsync(),
+    isSigningOut: signOut.isPending,
+    signOutError: signOut.error as Error | null,
   };
 }
