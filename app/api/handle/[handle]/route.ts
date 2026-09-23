@@ -64,7 +64,7 @@ export async function DELETE(
   const session = await requireSession();
   if (!session.ok) return session.response;
   const { handle: raw } = await params;
-  const validated = validateHandle(raw);
+  const validated = validateHandle(raw, { allowReserved: true });
   if (!validated.ok) {
     return NextResponse.json({ ok: false, error: 'invalid_format' }, { status: 400 });
   }

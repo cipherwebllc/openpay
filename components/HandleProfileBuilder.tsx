@@ -39,7 +39,7 @@ import { useOrigin } from '@/hooks/useOrigin';
 import { getPublicHandleUrl } from '@/lib/publicHandleUrl';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useDragReorderList } from '@/hooks/useDragReorderList';
-import { COLOR_PATTERN } from '@/lib/url';
+import { COLOR_PATTERN, sanitizeUrl } from '@/lib/url';
 import {
   isHandleEmbedUrl,
   HANDLE_FONTS,
@@ -156,6 +156,7 @@ export function HandleProfileBuilder({
 }) {
   const t = useTranslations('HandleProfile');
   const tb = useTranslations('HandleProfileBuilder');
+  const tt = useTranslations('TipEmbedGenerator');
   const tc = useTranslations('HandleClaim');
   const locale = useLocale();
   const { settings: draft, setSettings, hydrated } = useHandleProfileDraft();
@@ -262,6 +263,10 @@ export function HandleProfileBuilder({
   // 受取先が未確定でも profile preview は描画するため、profile だけは同じ canonical helper で作る。
   const profile = useMemo(() => buildPublishProfile(draft), [draft]);
   const hasInsecure = useMemo(() => hasDroppedProfileUrl(draft), [draft]);
+  // 不正 URL が server で省略扱いになり旧値を保持するため、保存成功の誤表示へ波及させない。
+  const invalidThanksUrl = !!draft.thanksUrl?.trim() && !sanitizeUrl(draft.thanksUrl);
+  const invalidWebhook = !!draft.webhook?.trim() && !sanitizeUrl(draft.webhook);
+  const callbackUrlError = invalidThanksUrl || invalidWebhook ? tb('callbackUrlInvalid') : undefined;
   const isDirty = hasUnpublishedHandleChanges(
     publishBaseline,
     editingHandle,
@@ -358,6 +363,10 @@ export function HandleProfileBuilder({
       ...draft,
       to: c.to,
       name: c.name ?? '',
+      message: c.message,
+      thanks: c.thanks,
+      thanksUrl: c.thanksUrl,
+      webhook: c.webhook,
       color:
         c.color && COLOR_PATTERN.test(c.color)
           ? c.color
@@ -396,7 +405,14 @@ export function HandleProfileBuilder({
   };
 
   // プレビューは受取先が未確定でも常時表示 (config が組めない間は draft から見た目だけ組む)。
-  const previewConfig: HandleTipConfig = config ? { ...config, methods: capableMethods } : {
+  const previewConfig: HandleTipConfig = config ? {
+    ...config,
+    methods: capableMethods,
+    message: config.message ?? undefined,
+    thanks: config.thanks ?? undefined,
+    thanksUrl: config.thanksUrl ?? undefined,
+    webhook: config.webhook ?? undefined,
+  } : {
     to: effectiveReceiver ?? '',
     name: draft.name.trim() || undefined,
     color: colorValid ? draft.color : undefined,
@@ -570,7 +586,7 @@ export function HandleProfileBuilder({
           <StepCard step={2} icon={AtSign} title={t('stepHandleTitle')}>
             <HandleClaimPanel
               payload={publishPayload}
-              publishBlockedReason={inactivePublishedArc ? tb('arcPublishDisabled') : undefined}
+              publishBlockedReason={inactivePublishedArc ? tb('arcPublishDisabled') : callbackUrlError}
               onEdit={onEditExisting}
               editingHandle={editingHandle}
               expectedUpdatedAt={activeBaseline?.updatedAt}
@@ -596,6 +612,56 @@ export function HandleProfileBuilder({
                   className={inputClass}
                 />
               </Field>
+              <details className="rounded-lg border border-slate-200 p-3">
+                <summary className="cursor-pointer text-sm font-medium text-slate-700">
+                  {tt('advancedTitle')}
+                </summary>
+                <div className="mt-3 space-y-4">
+                  {(['message', 'thanks'] as const).map((field) => (
+                    <Field key={field} label={tt(`${field}Label`)}>
+                      <textarea
+                        value={draft[field] ?? ''}
+                        onChange={(e) => update({ [field]: e.target.value })}
+                        placeholder={tt(`${field}Placeholder`)}
+                        maxLength={200}
+                        rows={2}
+                        className={inputClass}
+                      />
+                    </Field>
+                  ))}
+                  <Field label={tt('thanksUrlLabel')} hint={tt('thanksUrlHint')}>
+                    <input
+                      type="url"
+                      value={draft.thanksUrl ?? ''}
+                      aria-invalid={invalidThanksUrl || undefined}
+                      aria-describedby={invalidThanksUrl ? 'handle-thanks-url-error' : undefined}
+                      onChange={(e) => update({ thanksUrl: e.target.value })}
+                      placeholder={tt('thanksUrlPlaceholder')}
+                      className={inputClass}
+                    />
+                    {invalidThanksUrl && (
+                      <p id="handle-thanks-url-error" className="mt-1 text-xs text-red-600">{callbackUrlError}</p>
+                    )}
+                  </Field>
+                  <Field
+                    label={tt('webhookLabel')}
+                    hint={tt('webhookHint', { payload: '{ txHash, amount, token, from, message }' })}
+                  >
+                    <input
+                      type="url"
+                      value={draft.webhook ?? ''}
+                      aria-invalid={invalidWebhook || undefined}
+                      aria-describedby={invalidWebhook ? 'handle-webhook-error' : undefined}
+                      onChange={(e) => update({ webhook: e.target.value })}
+                      placeholder={tt('webhookPlaceholder')}
+                      className={inputClass}
+                    />
+                    {invalidWebhook && (
+                      <p id="handle-webhook-error" className="mt-1 text-xs text-red-600">{callbackUrlError}</p>
+                    )}
+                  </Field>
+                </div>
+              </details>
               {/* interactive なタイル群なので Field (=<label>) では包まない。 */}
               <HandleThemePicker
                 accent={pickerAccent}

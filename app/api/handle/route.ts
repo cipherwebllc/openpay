@@ -11,6 +11,7 @@ import { logger } from '@/lib/logger';
 import { requireSession } from '../auth/siwe/_session';
 import {
   validateHandle,
+  CLEARABLE_HANDLE_TIP_FIELDS,
   validateHandleTipConfig,
   validateProfile,
   isAudiusHandleEmbedUrl,
@@ -210,7 +211,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: 'handle_required' }, { status: 400 });
   }
 
-  const validated = validateHandle(rawHandle);
+  const validated = validateHandle(rawHandle, { allowReserved: rawExpectedUpdatedAt !== undefined });
   if (!validated.ok) {
     return NextResponse.json(
       { ok: false, error: validated.reason === 'reserved' ? 'reserved' : 'invalid_format' },
@@ -225,6 +226,11 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+
+  // validator は null/省略をどちらも undefined にするため、明示クリアだけを別に渡す。
+  const clear = new Set(CLEARABLE_HANDLE_TIP_FIELDS.filter(
+    (field) => (rawConfig as Record<string, unknown>)[field] === null,
+  ));
 
   let expectedUpdatedAt: number | undefined;
   if (rawExpectedUpdatedAt !== undefined) {
@@ -287,6 +293,7 @@ export async function POST(req: Request) {
     handle: validated.handle,
     owner: session.address,
     config: config.config,
+    clear,
     profile: profileArg,
     storefront: storefrontArg,
     expectedUpdatedAt,
@@ -294,6 +301,8 @@ export async function POST(req: Request) {
   });
 
   switch (result.status) {
+    case 'reserved':
+      return NextResponse.json({ ok: false, error: 'reserved' }, { status: 400 });
     case 'created':
       return NextResponse.json(
         {

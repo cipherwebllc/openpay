@@ -1014,6 +1014,7 @@
     "featuredToggle": "Featured"
   },
   "HandleProfileBuilder": {
+    "callbackUrlInvalid": "Enter a valid http:// or https:// URL, or leave the field empty to clear it.",
     "arcInactive": "Inactive (awaiting activation)",
     "arcPublishDisabled": "Your published Arc method is preserved. This profile cannot be republished while Arc tips are disabled.",
     "addHeading": "Add heading",

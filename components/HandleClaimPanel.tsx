@@ -25,6 +25,7 @@ import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { getPublicHandleUrl } from '@/lib/publicHandleUrl';
 import {
   validateHandle,
+  normalizeHandle,
   MAX_HANDLES_PER_WALLET,
   type HandleTipConfig,
   type HandleProfile,
@@ -233,7 +234,10 @@ export function HandleClaimPanel({
   }, [editingHandle]);
 
   // env は build 時定数なので hook 後に early-return しても hook 数は不変。
-  const validation = useMemo(() => validateHandle(input), [input]);
+  const validation = useMemo(
+    () => validateHandle(input, { allowReserved: normalizeHandle(input) === editingHandle }),
+    [input, editingHandle],
+  );
   const normalized = validation.ok ? validation.handle : '';
 
   // 入力の debounce (空き確認の過剰リクエスト抑制)。

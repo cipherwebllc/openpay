@@ -148,6 +148,45 @@ describe('resolveHandle', () => {
 describe('reserveOrUpdateHandle', () => {
   const base = { handle: 'alice', owner: OWNER, config: CONFIG, nowMs: 100 };
 
+  describe.each(['message', 'thanks', 'thanksUrl', 'webhook'] as const)('%s updates', (field) => {
+    const metadata = {
+      message: 'Hello', thanks: 'Thank you',
+      thanksUrl: 'https://example.com/thanks', webhook: 'https://example.com/hook',
+    };
+    it.each(['clear', 'keep', 'set'] as const)('%s persists without changing other fields', async (action) => {
+      setExisting(JSON.stringify({
+        owner: OWNER, config: { ...CONFIG, ...metadata, name: 'Old name' },
+        profile: { bio: 'Keep profile' }, createdAt: 5, updatedAt: 5,
+      }));
+      const value = field.endsWith('Url') || field === 'webhook' ? 'https://example.com/new' : 'New text';
+      const res = await reserveOrUpdateHandle({
+        ...base, expectedUpdatedAt: 5,
+        config: { ...CONFIG, ...(action === 'set' ? { [field]: value } : {}) },
+        clear: new Set(action === 'clear' ? [field] : []),
+      });
+      expect(res.status).toBe('updated');
+      const saved = JSON.parse(store.values.get('handle:alice')!);
+      if (action === 'clear') expect(saved.config).not.toHaveProperty(field);
+      else expect(saved.config[field]).toBe(action === 'set' ? value : metadata[field]);
+      for (const other of Object.keys(metadata) as Array<keyof typeof metadata>) {
+        if (other !== field) expect(saved.config[other]).toBe(metadata[other]);
+      }
+      expect(saved.config).not.toHaveProperty('name'); // Other config fields still replace.
+      expect(saved.profile).toEqual({ bio: 'Keep profile' });
+      expect(saved.createdAt).toBe(5);
+    });
+  });
+
+  it.each(['agent', 'directory', 'store', 'transparency'])('reserves %s only for new claims; existing owners keep their record', async (handle) => {
+    expect((await reserveOrUpdateHandle({ ...base, handle })).status).toBe('reserved');
+    expect(kv.kvEval).not.toHaveBeenCalled();
+    setExisting(recJson(OWNER), handle);
+    expect((await resolveHandle(handle)).ok).toBe(true);
+    expect((await reserveOrUpdateHandle({ ...base, handle, owner: OTHER, expectedUpdatedAt: 1 })).status).toBe('taken');
+    expect((await reserveOrUpdateHandle({ ...base, handle, expectedUpdatedAt: 1 })).status).toBe('updated');
+    expect(store.values.has(`handle:${handle}`)).toBe(true);
+  });
+
   it('KV 未設定 → kv_unavailable', async () => {
     kv.isKvConfigured.mockReturnValue(false);
     expect((await reserveOrUpdateHandle(base)).status).toBe('kv_unavailable');
@@ -197,7 +236,7 @@ describe('reserveOrUpdateHandle', () => {
     ).toBe('conflict');
   });
 
-  it('update は builder 非管理の tip メタ (message/webhook) を既存から保持', async () => {
+  it('update は省略された tip メタ (message/webhook) を既存から保持', async () => {
     const existing = JSON.stringify({
       owner: OWNER,
       config: {
@@ -210,7 +249,7 @@ describe('reserveOrUpdateHandle', () => {
       updatedAt: 5,
     });
     setExisting(existing);
-    // base.config は message/webhook を持たない (builder が送らない) → 既存値を保持。
+    // base.config は message/webhook を持たない (旧 client/API の省略) → 既存値を保持。
     const res = await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 5 });
     expect(res.status).toBe('updated');
     expect(res.record?.config.message).toBe('thx');

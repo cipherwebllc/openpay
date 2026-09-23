@@ -67,12 +67,14 @@ export const HANDLE_PATTERN = /^[a-z0-9_]{3,30}$/;
 
 // 予約語: 既存ルート名 + locale + ブランド/紛らわしい語。handle namespace は `@` 接頭辞で
 // static route と分離されるため衝突防止というより成りすまし/混同の一次防御。
+// 新規 claim に適用する。追加前の既存 record は削除せず、解決・所有者による更新/解放も維持。
+// 既存の衝突有無はコードからは分からない (別途 KV inventory が必要)。
 export const RESERVED_HANDLES: ReadonlySet<string> = new Set<string>([
-  // 既存ルート / 特殊パス (全 top-level route 名を網羅 = handle が route を shadow しない)
-  'api', 'og', '_next', 'admin', 'billing', 'checkout', 'create',
-  'disclaimer', 'discovery', 'experimental', 'explore', 'guide', 'history',
-  'kit', 'news', 'order', 'orders', 'pay', 'privacy', 'scan', 'terms', 'tip',
-  'tokutei',
+  // 既存ルート / 特殊パス (handle 形式になり得る全 top-level route 名を網羅)
+  'api', 'og', '_next', 'admin', 'agent', 'billing', 'checkout', 'create',
+  'directory', 'disclaimer', 'discovery', 'experimental', 'explore', 'guide', 'history',
+  'kit', 'me', 'news', 'order', 'orders', 'pay', 'privacy', 'scan', 'store', 'terms', 'tip',
+  'tokutei', 'transparency',
   // locale
   'ja', 'en',
   // ブランド / 役割 (成りすまし防止)
@@ -113,10 +115,14 @@ export type HandleValidation =
   | { ok: false; reason: 'format' | 'reserved' };
 
 // 正規化 + 形式 + 予約語をまとめて判定。API / availability / dashboard が共有する。
-export function validateHandle(raw: string): HandleValidation {
+export function validateHandle(
+  raw: string,
+  { allowReserved = false }: { allowReserved?: boolean } = {},
+): HandleValidation {
   const handle = normalizeHandle(raw);
   if (!isValidHandleFormat(handle)) return { ok: false, reason: 'format' };
-  if (isReserved(handle)) return { ok: false, reason: 'reserved' };
+  // 既存 handle の操作だけ予約語を許可する。所有確認・新規 claim 拒否は store が行う。
+  if (!allowReserved && isReserved(handle)) return { ok: false, reason: 'reserved' };
   return { ok: true, handle };
 }
 
@@ -220,6 +226,13 @@ export interface HandleTipConfig {
   methods: HandleReceiveMethod[]; // 1..N
   presets?: Partial<Record<TokenSymbol, string[]>>;
 }
+
+export const CLEARABLE_HANDLE_TIP_FIELDS = ['message', 'thanks', 'thanksUrl', 'webhook'] as const;
+export type ClearableHandleTipField = (typeof CLEARABLE_HANDLE_TIP_FIELDS)[number];
+
+// wire 専用: 保存/描画用 HandleTipConfig には null を持ち込まない。
+export type HandleTipConfigUpdate = Omit<HandleTipConfig, ClearableHandleTipField> &
+  Partial<Record<ClearableHandleTipField, string | null>>;
 
 // 既定の受取方法 (ユーザ決定): JPYC Polygon / JPYC Kaia。
 // USDC は opt-in (ビルダーで Base か Arc のどちらか 1 つ・2026-09-17 排他化)。検証/公開ページは

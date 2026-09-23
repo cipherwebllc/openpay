@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { getAddress } from 'viem';
+import { readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   normalizeHandle,
   decodeHandleSegment,
@@ -80,6 +82,21 @@ describe('isValidHandleFormat', () => {
 });
 
 describe('isReserved', () => {
+  it.each(['app/[locale]', 'app'])('reserves all claimable top-level route directories in %s', (root) => {
+    const routes = readdirSync(resolve(root), { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && isValidHandleFormat(entry.name))
+      .map((entry) => entry.name);
+    expect(routes.length).toBeGreaterThan(0);
+    expect(routes.filter((name) => !isReserved(name))).toEqual([]);
+    // Reservations prevent new claims, not revoke stored records. Whether any of these
+    // names were already claimed requires a KV inventory and cannot be known from code.
+  });
+
+  it.each(['agent', 'directory', 'me', 'store', 'transparency'])('reserves official name %s', (name) => {
+    expect(isReserved(name)).toBe(true);
+    expect(validateHandle(name).ok).toBe(false); // `me` also fails the 3-character minimum.
+  });
+
   it('flags routes, locales, brand terms; allows normal names', () => {
     expect(isReserved('api')).toBe(true);
     expect(isReserved('pay')).toBe(true);

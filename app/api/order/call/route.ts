@@ -110,7 +110,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   ) {
     return fail('invalid_body', 400);
   }
-  const validated = validateHandle(o.h);
+  // 予約語は新規 claim 専用。既存店舗の呼出を止めず、下の KV 解決と決済済み注文で検証する。
+  const validated = validateHandle(o.h, { allowReserved: true });
   if (!validated.ok) return fail('invalid_handle', 400);
   const table = sanitizeTable(o.table);
   if (!table) return fail('invalid_table', 400);

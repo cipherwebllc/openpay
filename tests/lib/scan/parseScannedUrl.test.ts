@@ -729,7 +729,7 @@ describe('parseScannedUrl: 実 parser data の data 等価性', () => {
 });
 
 // ── @handle (固定店舗 / プロフ) ─────────────────────────────────────────
-// enableHandles ON のとき同 origin /@handle を handle として遷移可能にする。形式/予約語は
+// enableHandles ON のとき同 origin /@handle を handle として遷移可能にする。形式は
 // decomposePath で検証 (存在確認はしない=純関数)。flag OFF は unknown (404 遷移回避)。
 const HANDLES_ON = { enableHandles: true } as const;
 
@@ -773,12 +773,13 @@ describe('parseScannedUrl: @handle route', () => {
     expect(parseScannedUrl(`${ORIGIN}/@bad-handle`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
   });
 
-  it('予約語 = 全 route 名 (/@pay・/@admin・/@order・/@orders) → unknown (route shadow / 成りすまし防御)', () => {
-    expect(parseScannedUrl(`${ORIGIN}/@pay`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
-    expect(parseScannedUrl(`${ORIGIN}/@admin`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
-    // /order route と同名の handle は予約済 (route を shadow させない)。
-    expect(parseScannedUrl(`${ORIGIN}/@order`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
-    expect(parseScannedUrl(`${ORIGIN}/@orders`, ORIGIN, 'ja', HANDLES_ON).kind).toBe('unknown');
+  it.each(['pay', 'admin', 'order', 'orders', 'agent', 'directory', 'store', 'transparency'])('scans @%s without applying new-claim reservations', (handle) => {
+    // Existence belongs to the destination page; reservations must not strand existing QR codes.
+    for (const path of [`/@${handle}`, `/en/%40${handle.toUpperCase()}/`]) {
+      expect(parseScannedUrl(`${ORIGIN}${path}`, ORIGIN, 'ja', HANDLES_ON)).toEqual({
+        kind: 'handle', handle, href: `/ja/@${handle}`,
+      });
+    }
   });
 
   it('余分 segment /@shop/extra → unknown', () => {

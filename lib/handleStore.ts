@@ -20,6 +20,8 @@ import {
   parseHandleRecord,
   serializeHandleRecord,
   MAX_HANDLES_PER_WALLET,
+  isReserved,
+  type ClearableHandleTipField,
   type HandleRecord,
   type HandleTipConfig,
   type HandleProfile,
@@ -170,6 +172,7 @@ export async function listHandleRecordsForOwner(
 export type ReserveStatus =
   | 'created'
   | 'updated'
+  | 'reserved'
   | 'conflict'
   | 'taken'
   | 'limit'
@@ -197,6 +200,8 @@ export async function reserveOrUpdateHandle(input: {
   handle: string;
   owner: string;
   config: HandleTipConfig;
+  // explicit null のみを route が抽出する。省略は保持・検証済みの値は上書き。
+  clear?: ReadonlySet<ClearableHandleTipField>;
   profile?: HandleProfile;
   // storefront の三状態: undefined = 変更しない / null = 削除 / object = 置換。
   // (StorefrontParts は menu≥1 ゆえ「空オブジェクトでクリア」が表現できないため null を使う。)
@@ -210,6 +215,7 @@ export async function reserveOrUpdateHandle(input: {
     handle,
     owner,
     config,
+    clear,
     profile,
     storefront,
     expectedUpdatedAt,
@@ -233,15 +239,13 @@ export async function reserveOrUpdateHandle(input: {
     // 古い client の expectedUpdatedAt 欠落も安全側で拒否する。初回 GET と CAS の二段で
     // stale write を止め、config.to を含む全置換 payload の巻き戻りを防ぐ。
     if (expectedUpdatedAt !== existing.updatedAt) return { status: 'conflict' };
-    // 高度 tip メタ (message/thanks/thanksUrl/webhook) は現行 UI が管理しない。新 config が
-    // 省略していれば既存値を保持する (旧 Tip タブ / API 由来の設定を update で消さない)。
-    // builder が明示送信した値があればそれを優先 (= 将来 UI を足したときに上書き可能)。
+    // 高度 tip メタは省略時に保持し、明示 null だけを削除する。他の config は従来の置換。
     const mergedConfig: HandleTipConfig = {
       ...config,
-      message: config.message ?? existing.config.message,
-      thanks: config.thanks ?? existing.config.thanks,
-      thanksUrl: config.thanksUrl ?? existing.config.thanksUrl,
-      webhook: config.webhook ?? existing.config.webhook,
+      message: clear?.has('message') ? undefined : config.message ?? existing.config.message,
+      thanks: clear?.has('thanks') ? undefined : config.thanks ?? existing.config.thanks,
+      thanksUrl: clear?.has('thanksUrl') ? undefined : config.thanksUrl ?? existing.config.thanksUrl,
+      webhook: clear?.has('webhook') ? undefined : config.webhook ?? existing.config.webhook,
     };
     // omit (undefined) なら既存 profile を保持、provided なら置換 (空はクリア)。
     const nextProfile = profileProvided ? cleanedProfile : existing.profile;
@@ -268,6 +272,9 @@ export async function reserveOrUpdateHandle(input: {
     if (cas.value === -3) return { status: 'conflict' };
     return { status: 'taken' }; // 0/-1/-2: read 後に owner が変わった/消えた
   }
+
+  // 予約語の追加を既存 owner の更新/解放へ波及させず、新規 claim のみ拒否する。
+  if (isReserved(handle)) return { status: 'reserved' };
 
   const record: HandleRecord = {
     owner,

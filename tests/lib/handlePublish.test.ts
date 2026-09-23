@@ -26,6 +26,13 @@ function draft(patch: Partial<HandleProfileDraft> = {}): HandleProfileDraft {
 }
 
 describe('buildPublishPayload', () => {
+  it.each(['message', 'thanks', 'thanksUrl', 'webhook'] as const)('serializes %s omission, clear, and value distinctly', (field) => {
+    for (const [value, expected] of [[undefined, undefined], ['', null], ['   ', null], [' value ', 'value']] as const) {
+      const payload = JSON.parse(JSON.stringify(buildPublishPayload(draft({ [field]: value }), OPTIONS)));
+      if (expected === undefined) expect(payload.config).not.toHaveProperty(field);
+      else expect(payload.config[field]).toBe(expected);
+    }
+  });
   it.each([{ font: undefined, linkLayout: undefined }, { font: 'sans', linkLayout: 'list' }] as const)('omits default enums %j from the payload', (patch) => {
     const payload = buildPublishPayload(draft(patch), OPTIONS)!;
     expect(payload.profile).not.toHaveProperty('font');

@@ -1014,6 +1014,7 @@
     "featuredToggle": "注目"
   },
   "HandleProfileBuilder": {
+    "callbackUrlInvalid": "http:// または https:// で始まる有効な URL を入力してください。削除する場合は空欄にしてください。",
     "arcInactive": "無効中（点灯待ち）",
     "arcPublishDisabled": "公開済みの Arc 受取方法は保持されています。Arc チップが無効中のため、このプロフィールは再公開できません。",
     "addHeading": "見出しを追加",
