@@ -13,7 +13,7 @@ import { kvGet } from './kv';
 import { entitlementBypass } from './alphaBypass';
 import { grantTimedMax, parseExpiresAt } from './timedGrant';
 
-// ¥500 / 月 (= 500 JPYC・18 decimals)。overpayment は受理するが付与は常に 30日 1 期間のみ。
+// ¥500 / 月 (= 500 JPYC・18 decimals)。加入時は厳密額のみ受理し、付与は 30日 1 期間。
 export const PRO_PRICE_JPYC = 500;
 export const proPriceWei = BigInt(PRO_PRICE_JPYC) * 10n ** 18n;
 // 1 支払いで付与する日数。自動更新なし (手動再支払い)。

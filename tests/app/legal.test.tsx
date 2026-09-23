@@ -1350,11 +1350,25 @@ describe('Legal pages', () => {
   // -------------------------------------------------------------------------
   // CSV 24時間パス (都度 100 JPYC) の開示。CSV ダウンロードゲートを Pro (月額) から都度型へ置換
   // (2026-06-13・plans/csv-pass.md)。実課金前の必須開示として Terms 第5条・特商法 (役務の内容/
-  // 返品)・免責 §7 に「100 JPYC / 24時間 / 任意 (閲覧無料) / 前払い / 返金不可 / 合算なし / 超過も24時間 /
+  // 返品)・免責 §7 に「100 JPYC / 24時間 / 任意 (閲覧無料) / 前払い / 返金不可 / 合算なし / 厳密額のみ /
   // ガス代利用者負担 / 提供開始は本機能の有効化後に告知」を追記。既存の per-tx 利用料文言とは独立。
   // source-scan で本文 (message レベル) に必須語を pin し、片側の変更で fail させる。
   // -------------------------------------------------------------------------
   describe('regression: CSV 24時間パスの開示 (Terms/特商法/免責・ja/en)', () => {
+    it.each(['Terms', 'Disclaimer', 'Tokutei'] as const)('ja/en: %s も厳密額のみ付与可能と開示する', async (section) => {
+      const ja = (await import('@/messages/ja.json')).default;
+      const en = (await import('@/messages/en.json')).default;
+      for (const [m, text] of [
+        [ja, '100 JPYC ちょうどを送金してください。異なる金額では CSV パスを付与できません。'],
+        [en, 'Send exactly 100 JPYC. A CSV pass cannot be granted for any other amount.'],
+      ] as const) {
+        const body = section === 'Terms' ? m.Terms.article5.body
+          : section === 'Disclaimer' ? m.Disclaimer.section7.body : m.Tokutei.rows.returnPolicy.value;
+        expect(body).toContain(text);
+        expect(body).not.toMatch(/超えてお支払いいただいても|paying more than 100 JPYC/i);
+      }
+    });
+
     it('ja: Disclaimer §7 に CSV パス (100 JPYC / 24時間 / 返金不可 / 合算なし / ガスレス原則+ガスあり時は利用者負担 / 提供開始告知) がある', async () => {
       const ja = (await import('@/messages/ja.json')).default;
       const body = ja.Disclaimer.section7.body;
@@ -1393,7 +1407,7 @@ describe('Legal pages', () => {
       expect(body).toContain('CSV 24時間パス');
       expect(body).toContain('100 JPYC');
       expect(body).toContain('24時間');
-      expect(body).toContain('合算されず');
+      expect(body).toContain('合算されません');
       // 閲覧・受け取りは無料の据え置きを明示。
       expect(body).toContain('閲覧および決済の受け取りそのものは引き続き無料');
       // W2-5: ガスレス購入 (署名のみ・当社がガス負担) を原則とし、ガスあり購入を選んだ場合は利用者負担。

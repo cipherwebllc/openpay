@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import ja from '@/messages/ja.json';
+import en from '@/messages/en.json';
 
 const sub = vi.hoisted(() => ({
   start: vi.fn(),
@@ -18,9 +20,19 @@ const sub = vi.hoisted(() => ({
   error: null as Error | null,
 }));
 
-vi.mock('next-intl', () => ({
-  useTranslations: () => (key: string) => key,
-}));
+const wording = vi.hoisted(() => ({ locale: null as 'ja' | 'en' | null }));
+vi.mock('next-intl', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('next-intl')>();
+  return {
+    useTranslations: (namespace: 'Pro' | 'CsvPass') => wording.locale
+      ? actual.createTranslator({
+          locale: wording.locale,
+          messages: wording.locale === 'ja' ? ja : en,
+          namespace,
+        })
+      : (key: string) => key,
+  };
+});
 vi.mock('wagmi', () => ({
   useAccount: () => ({ isConnected: true, chainId: 137 }),
   useSwitchChain: () => ({ switchChain: vi.fn(), isPending: false }),
@@ -51,6 +63,7 @@ vi.mock('@/lib/tokens', () => {
 import { CsvPassPaywall } from '@/components/CsvPassPaywall';
 
 beforeEach(() => {
+  wording.locale = null;
   sub.start.mockClear();
   sub.startGasPaid.mockClear();
   sub.retrySubscribe.mockClear();
@@ -97,5 +110,18 @@ describe('CsvPassPaywall gas-paid fallback consent', () => {
     sub.error = new Error('insufficient_balance');
     view.rerender(<CsvPassPaywall />);
     expect(screen.getByText('payError')).toBeInTheDocument();
+  });
+});
+
+// 実際の ICU 翻訳で価格も検証し、key だけ返す mock が placeholder 未供給を隠すのを防ぐ。
+describe('CsvPassPaywall 厳密額の公開文言', () => {
+  it.each([
+    ['ja', '100 JPYC ちょうどを送金してください。異なる金額では CSV パスを付与できません。'],
+    ['en', 'Send exactly 100 JPYC. A CSV pass cannot be granted for any other amount.'],
+  ] as const)('%s で価格を埋めた確認文を支払い前に表示', (locale, text) => {
+    wording.locale = locale;
+    render(<CsvPassPaywall />);
+    expect(screen.getByText(text)).toBeInTheDocument();
+    expect(sub.start).not.toHaveBeenCalled();
   });
 });

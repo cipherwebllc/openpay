@@ -177,6 +177,49 @@ describe('verifyJpycFeeTransfer', () => {
 
 describe('verifyJpycFeeOnChain', () => {
   const txHash = `0x${'1'.repeat(64)}` as Hex;
+  it('厳密指定なしの billing 検証は merchant Transfer が混在しても従来どおり受理', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        status: 'success',
+        logs: [transferLog({ to: OTHER }), transferLog({})],
+      }),
+    };
+    expect(await verifyJpycFeeOnChain({ publicClient, txHash, expected })).toEqual({ ok: true, value: MIN });
+  });
+
+  it.each([
+    transferLog({ to: OTHER }),
+    transferLog({ from: OTHER }),
+    { ...transferLog({}), topics: [TRANSFER_TOPIC] },
+    { ...transferLog({}), data: '0xinvalid' },
+  ])('厳密指定時は不一致/不正な JPYC Transfer を他の一致ログで隠せない', async (otherLog) => {
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        status: 'success',
+        logs: [transferLog({}), otherLog],
+      }),
+    };
+    expect(await verifyJpycFeeOnChain({
+      publicClient, txHash, expected, onlyExpectedTransfers: true,
+    })).toEqual({ ok: false, reason: 'unexpected_transfer' });
+    expect(publicClient.getTransactionReceipt).toHaveBeenCalledOnce();
+  });
+
+  it('厳密指定時も同一経路の分割 Transfer の合計と大小文字違いを扱える', async () => {
+    const publicClient = {
+      getTransactionReceipt: vi.fn().mockResolvedValue({
+        status: 'success',
+        logs: [
+          transferLog({ token: TOKEN.toLowerCase(), value: MIN / 2n }),
+          transferLog({ value: MIN / 2n }),
+        ],
+      }),
+    };
+    expect(await verifyJpycFeeOnChain({
+      publicClient, txHash, expected, onlyExpectedTransfers: true,
+    })).toEqual({ ok: true, value: MIN });
+  });
+
   it('status=success → 純関数へ委譲し ok', async () => {
     const publicClient = {
       getTransactionReceipt: vi.fn().mockResolvedValue({

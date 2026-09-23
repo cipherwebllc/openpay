@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextResponse } from 'next/server';
 
 const JPYC = 10n ** 18n;
@@ -146,7 +146,10 @@ function req(body: unknown): Request {
   });
 }
 
+afterEach(() => vi.restoreAllMocks());
+
 beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(1_750_000_000_000);
   hold.enablePro = true;
   hold.feeReceiverConfigured = true;
   hold.session = { ok: true, address: SESSION_ADDR };

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import ja from '@/messages/ja.json';
+import en from '@/messages/en.json';
 
 // Pro hook (useProSubscribe) の返り値 mock。Pro は **ガスありのみ** なので gasless 系フィールドは
 // 持たない (EntitlementPaywall は supportsGasless=false でそれらを参照しない)。
@@ -25,9 +27,19 @@ const siwe = vi.hoisted(() => ({
 }));
 const envMock = vi.hoisted(() => ({ feeReceiverConfigured: true }));
 
-vi.mock('next-intl', () => ({
-  useTranslations: () => (key: string) => key,
-}));
+const wording = vi.hoisted(() => ({ locale: null as 'ja' | 'en' | null }));
+vi.mock('next-intl', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('next-intl')>();
+  return {
+    useTranslations: (namespace: 'Pro' | 'CsvPass') => wording.locale
+      ? actual.createTranslator({
+          locale: wording.locale,
+          messages: wording.locale === 'ja' ? ja : en,
+          namespace,
+        })
+      : (key: string) => key,
+  };
+});
 vi.mock('wagmi', () => ({
   useAccount: () => ({ isConnected: true, chainId: 137 }),
   useSwitchChain: () => ({ switchChain: vi.fn(), isPending: false }),
@@ -52,6 +64,7 @@ vi.mock('@/lib/tokens', () => {
 import { ProPaywall } from '@/components/ProPaywall';
 
 beforeEach(() => {
+  wording.locale = null;
   sub.start.mockClear();
   sub.retrySubscribe.mockClear();
   sub.isPaying = false;
@@ -175,5 +188,18 @@ describe('ProPaywall', () => {
     sub.error = new Error('insufficient_balance');
     rerender(<ProPaywall />);
     expect(screen.getByText('payError')).toBeInTheDocument();
+  });
+});
+
+// 実際の ICU 翻訳で価格も検証し、key だけ返す mock が placeholder 未供給を隠すのを防ぐ。
+describe('ProPaywall 厳密額の公開文言', () => {
+  it.each([
+    ['ja', '500 JPYC ちょうどを送金してください。異なる金額では Pro を付与できません。'],
+    ['en', 'Send exactly 500 JPYC. Pro access cannot be granted for any other amount.'],
+  ] as const)('%s で価格を埋めた確認文を支払い前に表示', (locale, text) => {
+    wording.locale = locale;
+    render(<ProPaywall />);
+    expect(screen.getByText(text)).toBeInTheDocument();
+    expect(sub.start).not.toHaveBeenCalled();
   });
 });

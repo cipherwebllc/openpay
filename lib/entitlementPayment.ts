@@ -1,5 +1,5 @@
 // 期限付き利用権 (Pro / CSV パス等) の **加入処理エンジン** (server 専用)。店主が JPYC を FEE_RECEIVER
-// へ送金 → txHash を自己申告 → on-chain で「セッション wallet → 受領アドレス・JPYC・tier 額以上」を
+// へ送金 → txHash を自己申告 → on-chain で「セッション wallet → 受領アドレス・JPYC・tier 額一致」を
 // 照合 → **支払い tx の block timestamp + 付与期間** を期限として決定論的に付与する。二重付与は txHash
 // idempotency (KV nx・短ロック→結果昇格) で防止し、別 wallet による同 txHash 再提出は拒否する。
 // 設計: plans/csv-pass.md (Pro: plans/pro-plan.md)。
@@ -32,6 +32,16 @@ const RESULT_TTL_SEC = 400 * 86_400;
 const LOCK_MARKER = 'pending';
 const RESULT_PREFIX = 'r:';
 
+// 直接送金/CSV relay ともサーバ発行の購入 intent は無く、EIP-3009 nonce も client が生成する。
+// 初回申請は 7 日まで: 古い支払いの再利用が利用権付与/手数料会計へ波及するのを制限しつつ、
+// reload や RPC/KV 障害復旧後の遅延申請を許容する。chain/server の時計差は未来 60 秒まで。
+// 残余: 全 JPYC Transfer が本人→FEE_RECEIVER で額も同じなら、単独 tip/fee との区別はできない。
+// 完全な目的束縛にはサーバ発行の購入プロトコルが必要。7 日超の未完了申請の回復手段は未実装で、
+// 再送金を促してはならない。確定済み結果の replay と支払い時点起点の期限は従来どおり。
+// 支払い→申請間に価格が変わると額不一致になるため、価格改定時は事前告知と未完了申請の扱いが必要。
+const FIRST_CLAIM_MAX_AGE_MS = 7 * 86_400_000;
+const PAYMENT_FUTURE_SKEW_MS = 60_000;
+
 type EntitlementResult = { wallet: string; expiresAt: number };
 export type EntitlementTier = 'pro' | 'csvpass';
 
@@ -47,7 +57,7 @@ export type EntitlementPaymentConfig = {
   usedKeyPrefix: string;
   /** cross-tier txHash claim に保存する tier 名。 */
   tier: EntitlementTier;
-  /** tier の最低額 (JPYC minor units・超過は受理するが付与は 1 期間のみ)。 */
+  /** tier の厳密な購入額 (JPYC minor units)。 */
   priceWei: bigint;
   /** 1 支払いで付与する時間 (ms)。target = blockTs*1000 + grantMs。 */
   grantMs: number;
@@ -101,10 +111,12 @@ function parseClaimedTier(value: string | null): EntitlementTier | null {
 export async function processEntitlementPayment(args: {
   txHash: string;
   chainId: number;
+  /** 認証/body/RPC 処理前の route 到着時刻 (サーバ時計)。body の値は使わない。 */
+  requestedAtMs: number;
   session: EntitlementSession;
   config: EntitlementPaymentConfig;
 }): Promise<NextResponse> {
-  const { txHash, chainId, session, config } = args;
+  const { txHash, chainId, requestedAtMs, session, config } = args;
 
   const chain = chainObjectForId(chainId);
   const deployment = resolveDeployment('jpyc', chainId);
@@ -198,11 +210,12 @@ export async function processEntitlementPayment(args: {
     const result = await verifyJpycFeeOnChain({
       publicClient,
       txHash: txHash as Hex,
+      onlyExpectedTransfers: true,
       expected: {
         token: deployment.address,
         from: session.address, // from 束縛 (recover forwarder を加入支払いと誤認しない)
         to: env.feeReceiver,
-        minValue: config.priceWei, // tier 額以上 (超過は受理するが付与は 1 期間のみ)
+        minValue: config.priceWei, // 既存の額不足判定を維持し、成功後に厳密額を照合する。
       },
     });
 
@@ -231,7 +244,7 @@ export async function processEntitlementPayment(args: {
           { status: 400 },
         );
       }
-      // no_matching_transfer / amount_too_low → 支払い不成立 (額不足・別 from/to/token)。
+      // no_matching_transfer / amount_too_low / unexpected_transfer → 額不足・別経路・他用途混在。
       logger.warn(`${config.logPrefix}.verify-failed`, {
         wallet: session.address,
         chainId,
@@ -239,6 +252,16 @@ export async function processEntitlementPayment(args: {
       });
       return NextResponse.json(
         { ok: false, error: 'insufficient_payment', reason: result.reason },
+        { status: 400 },
+      );
+    }
+
+    // 高額の別用途 tip/fee が安い利用権の付与/global claim に流用される波及を断つ。
+    // 共有 billing 検証の最低額判定は変えず、加入時だけ厳密額を要求する。
+    if (result.value !== config.priceWei) {
+      await releaseClaim(usedKey, 'amount-mismatch');
+      return NextResponse.json(
+        { ok: false, error: 'insufficient_payment', reason: 'amount_mismatch' },
         { status: 400 },
       );
     }
@@ -277,6 +300,12 @@ export async function processEntitlementPayment(args: {
         { ok: false, error: 'verify_unavailable' },
         { status: 503 },
       );
+    }
+    const paymentAgeMs = requestedAtMs - blockTimestampMs;
+    if (paymentAgeMs > FIRST_CLAIM_MAX_AGE_MS || paymentAgeMs < -PAYMENT_FUTURE_SKEW_MS) {
+      const error = paymentAgeMs > FIRST_CLAIM_MAX_AGE_MS ? 'payment_too_old' : 'payment_in_future';
+      await releaseClaim(usedKey, error);
+      return NextResponse.json({ ok: false, error }, { status: 400 });
     }
     const targetExpiresAtMs = blockTimestampMs + config.grantMs;
 
@@ -396,11 +425,11 @@ export async function processEntitlementPayment(args: {
     }
 
     // 収益記録 (FEE_RECEIVER 収入を recover 手数料/a1 利用料と会計分離・txHash 単位で冪等)。
-    // 額は **実際に on-chain で受領した value** (超過分も正しく台帳に乗る・Codex P2)、計上時点は
+    // 額は **価格と一致した on-chain の受領 value**、計上時点は
     // **支払い tx の block timestamp** (遅延 claim でも正しい期に記録・Date.now() を使わない)。
     await config.recordRevenue({
       wallet: session.address,
-      priceWei: result.value ?? config.priceWei,
+      priceWei: result.value,
       chainId,
       txHash,
       paidAtMs: blockTimestampMs,

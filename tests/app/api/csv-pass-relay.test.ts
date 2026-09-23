@@ -1,6 +1,6 @@
 // CSV パス購入 relay route (/api/csv-pass/relay) の gate / 検証 / auth 構成 / 応答整形 / guards 配線を
 // 検証する。relay コア (relayFreeAuthorization = 別途 jpycRelay.test / relayProvider が担保) はモックし、
-// route 固有のロジック (flag/feeReceiver/PROVIDER/auth/from束縛/value下限/to無視/応答) を実走させる。
+// route 固有のロジック (flag/feeReceiver/PROVIDER/auth/from束縛/value厳密一致/to無視/応答) を実走させる。
 // 決済ログ・billing メーターを **書かない** ことも確認する (購入は GMV ではない)。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -223,20 +223,16 @@ describe('POST /api/csv-pass/relay — route 固有検証', () => {
     expect(relayFreeAuthorization).not.toHaveBeenCalled();
   });
 
-  it('value < 100 JPYC → 400 insufficient_value', async () => {
-    const res = await POST(
-      req(validBody({ value: (csvPassPriceWei - 1n).toString() })),
-    );
+  it.each([
+    0n,
+    csvPassPriceWei - 1n,
+    csvPassPriceWei + 1n,
+    csvPassPriceWei * 10n,
+    csvPassPriceWei * 10n + 1n,
+  ])('value=%s は価格と不一致 → broadcast 前に 400 amount_mismatch', async (value) => {
+    const res = await POST(req(validBody({ value: value.toString() })));
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ ok: false, error: 'insufficient_value' });
-  });
-
-  it('value > パス価格の 10 倍 → 400 value_too_large', async () => {
-    const res = await POST(
-      req(validBody({ value: (csvPassPriceWei * 10n + 1n).toString() })),
-    );
-    expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ ok: false, error: 'value_too_large' });
+    expect(await res.json()).toEqual({ ok: false, error: 'amount_mismatch' });
     expect(relayFreeAuthorization).not.toHaveBeenCalled();
   });
 
