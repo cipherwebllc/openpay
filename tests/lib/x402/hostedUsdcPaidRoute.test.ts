@@ -41,7 +41,7 @@ vi.mock('next/server', async (importOriginal) => {
 });
 vi.mock('@/lib/net/ipHash', () => ({
   clientIp: () => '127.0.0.1',
-  hashIp: () => 'ip-hash',
+  hashIpBucket: () => 'ip-hash',
 }));
 vi.mock('@/lib/metrics', () => ({ recordMetric: mocks.metric }));
 vi.mock('@/lib/push/notify', () => ({ notifyPaymentReceived: mocks.notify }));

@@ -123,11 +123,11 @@ it.each([
   }
 });
 
-it('keeps the shared paid-shops guard on its existing /128 key for PR 10b', async () => {
+it('uses the shared /64 bucket in the paid-shops guard after PR 10b', async () => {
   const { guardPaidShopsApi } = await import('@/app/api/shops/_shared');
   for (const ip of ['2001:db8::1', '2001:db8::2']) {
     h.ipLimit.mockClear();
     expect((await guardPaidShopsApi(requestFor(ip)))?.status).toBe(429);
-    expect(h.ipLimit.mock.calls).toEqual([['shops-paid', digest(ip), 10, 60]]);
+    expect(h.ipLimit.mock.calls).toEqual([['shops-paid', digest('2001:db8::'), 10, 60]]);
   }
 });

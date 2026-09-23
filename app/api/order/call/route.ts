@@ -8,7 +8,7 @@ import { resolveHandle } from '@/lib/handleStore';
 import { kvEval, kvLrange, isKvConfigured } from '@/lib/kv';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { randomId } from '@/lib/id';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import {
   callListKey,
   isTxHashLike,
@@ -116,11 +116,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   const table = sanitizeTable(o.table);
   if (!table) return fail('invalid_table', 400);
 
-  // IP_HASH_SECRET 未設定/短すぎでは hashIp=null となり IP limiter は仕様どおり素通りする。
+  // IP_HASH_SECRET 未設定/短すぎでは hashIpBucket=null となり IP limiter は仕様どおり素通りする。
   // その場合も下の決済済み注文束縛・per-order・per-handle・table cooldown が主防御として残る。
   const ipAllowed = await checkIpRateLimit(
     'order-call',
-    hashIp(clientIp(req)),
+    hashIpBucket(clientIp(req)),
     5,
     60,
   );

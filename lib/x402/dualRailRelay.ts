@@ -23,7 +23,7 @@ import { env } from '@/lib/env';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { logger } from '@/lib/logger';
 import { atomicToHuman, recordSettleLedgerAfterResponse } from '@/lib/x402/settleLedger';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { x402Config } from './config';
 import { getResource, type X402Resource } from './registry';
@@ -70,7 +70,7 @@ function gate(): NextResponse | null {
 async function rateLimit(req: Request): Promise<NextResponse | null> {
   const allowed = await checkIpRateLimit(
     'x402-dual-rail',
-    hashIp(clientIp(req)),
+    hashIpBucket(clientIp(req)),
     RELAY_RATE_LIMIT_MAX,
     RELAY_RATE_LIMIT_WINDOW_SEC,
   );

@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { logger } from '@/lib/logger';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 
@@ -14,7 +14,7 @@ export async function checkFacilitatorStatusRateLimit(
   const ip = clientIp(req);
   const allowed = await checkIpRateLimit(
     'x402-status',
-    hashIp(ip),
+    hashIpBucket(ip),
     FACILITATOR_STATUS_RATE_LIMIT_MAX,
     FACILITATOR_STATUS_RATE_LIMIT_WINDOW_SEC,
   );

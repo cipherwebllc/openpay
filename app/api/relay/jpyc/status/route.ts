@@ -17,7 +17,7 @@ import {
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import {
   jpycAddressFor,
   PROVIDER,
@@ -68,7 +68,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   const ip = clientIp(req);
-  if (!(await checkIpRateLimit('relay-status', hashIp(ip), 30, 60))) {
+  if (!(await checkIpRateLimit('relay-status', hashIpBucket(ip), 30, 60))) {
     logger.warn('relay.jpyc.status.rate_limited', {
       ipPrefix: anonymizeIp(ip ?? ''),
     });

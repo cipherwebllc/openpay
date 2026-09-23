@@ -125,6 +125,38 @@ describe('admin billing revenue route', () => {
     expect(kvMod.kvIncr).toHaveBeenCalledOnce();
   });
 
+  it('rotating IPv6 hosts share the 30/60s quota and stop before session reads', async () => {
+    vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
+    process.env.ADMIN_WALLETS = MERCHANT;
+    const ips = ['2001:db8:1234:5678::1', '2001:db8:1234:5678:abcd::2'];
+    for (let i = 0; i < 30; i++) {
+      expect((await GET(req('', ips[i % 2]))).status).toBe(403);
+    }
+    const limited = await GET(req('', ips[1]));
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toEqual({ error: 'rate_limited' });
+    expect(limited.headers.get('retry-after')).toBe('60');
+    expect(requireSession).toHaveBeenCalledTimes(30);
+    expect(kvMod.kvIncr.mock.calls.map(([key]) => key)).toEqual(
+      Array(31).fill(`iprl:v1:admin-billing-revenue:${hashIp('2001:db8:1234:5678::')}`),
+    );
+    expect(kvMod.kvIncr).toHaveBeenLastCalledWith(
+      expect.any(String), { initialTtlSec: 60 },
+    );
+  });
+
+  it('keeps different IPv6 /64 quotas separate', async () => {
+    vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
+    process.env.ADMIN_WALLETS = MERCHANT;
+    for (let i = 0; i < 30; i++) {
+      expect((await GET(req('', '2001:db8:1234:5678::1'))).status).toBe(403);
+    }
+    expect((await GET(req('', '2001:db8:1234:5678::1'))).status).toBe(429);
+    expect((await GET(req('', '2001:db8:1234:5679::1'))).status).toBe(403);
+    expect(kvMod.kvIncr.mock.calls[31][0]).not.toBe(kvMod.kvIncr.mock.calls[30][0]);
+    expect(requireSession).toHaveBeenCalledTimes(31);
+  });
+
   it('admin → 200 JSON: 合計 + 照合 (請求 vs 入金)', async () => {
     const now = Date.now();
     const { prevPeriod, tsInPrev } = periods(now);

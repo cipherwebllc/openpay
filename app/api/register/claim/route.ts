@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { isAddress, isHex, type Address, type Hex } from 'viem';
 import { env } from '@/lib/env';
 import { claimRegisterFeePayment } from '@/lib/registerFeeClaim';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { MAX_BODY_BYTES } from '@/lib/relay/relayRoute';
 
@@ -20,7 +20,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (
     !(await checkIpRateLimit(
       'register-claim',
-      hashIp(clientIp(req)),
+      hashIpBucket(clientIp(req)),
       60,
       60,
     ))

@@ -50,7 +50,7 @@ import {
 import { feeDisclosureDivergence } from '@/lib/legal';
 import { env } from '@/lib/env';
 import { formatJpycYenLabel } from '@/lib/format';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { notifyPaymentReceived } from '@/lib/push/notify';
 import { recordMetricAfterResponse } from '@/lib/metrics';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
@@ -193,7 +193,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (
     !(await checkIpRateLimit(
       'relay-admission',
-      hashIp(clientIp(req)),
+      hashIpBucket(clientIp(req)),
       120,
       60,
     ))

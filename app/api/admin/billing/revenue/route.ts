@@ -13,7 +13,7 @@ import {
 import { toFeeRevenueCsv } from '@/lib/feeRevenueCsv';
 import { previousPeriod } from '@/lib/feeGate';
 import { logger } from '@/lib/logger';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 
 export const runtime = 'nodejs';
@@ -22,7 +22,7 @@ export const maxDuration = 20;
 
 export async function GET(req: Request): Promise<NextResponse> {
   // 連打を session/収益 KV 読取へ波及させない。limiter の KV 障害は既存 helper が fail-open。
-  if (!(await checkIpRateLimit('admin-billing-revenue', hashIp(clientIp(req)), 30, 60))) {
+  if (!(await checkIpRateLimit('admin-billing-revenue', hashIpBucket(clientIp(req)), 30, 60))) {
     return NextResponse.json(
       { error: 'rate_limited' },
       { status: 429, headers: { 'Retry-After': '60' } },
