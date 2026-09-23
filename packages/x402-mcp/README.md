@@ -19,7 +19,7 @@ forwarder-split extension.
 ### Install / run
 
 ```bash
-npx --yes --package=openpay-x402-mcp@0.17.0 -- openpay-order-mcp
+npx --yes --package=openpay-x402-mcp@0.17.1 -- openpay-order-mcp
 ```
 
 ### Claude Desktop
@@ -29,7 +29,7 @@ npx --yes --package=openpay-x402-mcp@0.17.0 -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp@0.17.0", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.17.1", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -42,7 +42,7 @@ npx --yes --package=openpay-x402-mcp@0.17.0 -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp@0.17.0", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.17.1", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -56,7 +56,7 @@ This profile needs no `BUYER_PRIVATE_KEY`. It exposes four tools: `find_shops`,
 ### Install / run
 
 ```bash
-npx openpay-x402-mcp@0.17.0
+npx openpay-x402-mcp@0.17.1
 ```
 
 ### Claude Desktop
@@ -66,7 +66,7 @@ npx openpay-x402-mcp@0.17.0
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp@0.17.0"],
+      "args": ["openpay-x402-mcp@0.17.1"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -85,7 +85,7 @@ npx openpay-x402-mcp@0.17.0
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp@0.17.0"],
+      "args": ["openpay-x402-mcp@0.17.1"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -125,7 +125,7 @@ from strands import Agent
 from strands.tools.mcp import MCPClient
 
 openpay = MCPClient(lambda: stdio_client(StdioServerParameters(
-    command="npx", args=["-y", "openpay-x402-mcp@0.17.0"],
+    command="npx", args=["-y", "openpay-x402-mcp@0.17.1"],
     env={...},  # same env as the Claude examples above
 )))
 
@@ -220,6 +220,7 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from `wallet_init`, `wallet_status`, `wallet_history`, and keystore `wallet_prove` while discovery remains available. Does not relocate env-key / Steward spend storage. |
 | `POLYGON_RPC_URL` | unset | Optional read-only `wallet_status` RPC. SDK outbound URL/host checks reject private/link-local addresses, `.internal`, and URL credentials; validated DNS addresses are pinned for the built-in transport. Explicit exception: HTTP on `localhost` / `127.0.0.1`. No public RPC default, redirects rejected, 5-second timeout including DNS and body reads. Never accepted as a tool argument. |
 | `DISCOVERY_URL` | `https://open-pay.jp/api/discovery` | Catalog used by `discovery_search`. |
+| `OPENPAY_ORIGIN` | `https://open-pay.jp` | `wallet_prove` challenge origin, bind-link origin and signed audience. Independent of `DISCOVERY_URL`. Unset or blank uses the default; surrounding whitespace is trimmed. Must be an HTTPS origin with no credentials, path, query or fragment (a trailing slash is accepted). Only override for a trusted deployment that verifies this same audience. |
 
 Catalog admission is exact URL only, including the query string. A query
 variant needs its own reviewed listing or an explicitly allowlisted host.
@@ -272,13 +273,21 @@ signature appear only in the URL fragment; ordinary HTTP requests and Referer
 headers do not send that fragment, but a JavaScript-capable link preview can read
 it. Client or conversation logging can retain the link.
 
-The challenge and link use the origin of `DISCOVERY_URL`. The proof's audience
-is always `https://open-pay.jp`; the response cannot choose its domain, types,
-purpose, or audience. Challenges must be HTTP 200 JSON with exactly `nonce`,
+The challenge, link and signed audience use `https://open-pay.jp`, independently
+of `DISCOVERY_URL`. An unset or blank `OPENPAY_ORIGIN` uses that default; surrounding
+whitespace is trimmed. An explicit origin selects a different trusted HTTPS origin
+for all three. Its proof verifier must accept that same audience. The server in
+this repository accepts only `https://open-pay.jp`, including preview and staging
+builds: changing this MCP setting alone does not enable proofs on those deployments.
+A noncanonical override requires a separate server change to its accepted audience.
+The response
+cannot choose the domain, types, purpose, audience or bind-link origin.
+Challenges must be HTTP 200 JSON with exactly `nonce`,
 `issuedAt`, and `expiresAt`, at most 8 KiB, and a 300-second lifetime (the server
 rebuilds the signed times from its own record, so the local clock is not checked).
-The origin must be `https://`; otherwise `insecure_origin` is returned without any
-request. Invalid challenges return
+Non-HTTPS origins (including localhost HTTP) return `insecure_origin`; malformed
+URLs or URLs containing credentials, a path, query or fragment return
+`invalid_origin`, without requesting a challenge or signing. Invalid challenges return
 `challenge_invalid` without signing; 429, 5xx, and network failures return
 `challenge_unavailable`. If the server flag `ENABLE_AGENT_PURCHASES` is OFF,
 HTTP 404 returns `feature_disabled`. Steward returns `signer_mode_unsupported`;
@@ -309,7 +318,7 @@ Use this explicit mode to avoid pasting a private key into MCP configuration:
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["--yes", "openpay-x402-mcp@0.17.0"],
+      "args": ["--yes", "openpay-x402-mcp@0.17.1"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -364,6 +373,15 @@ automatically: on POSIX, use `chmod 700 ~/.openpay-x402` and
 `chmod 600 ~/.openpay-x402/wallet.json` after inspecting the problem. Windows
 skips POSIX permission-bit validation and reports `storage.permissionsChecked:
 false`; this does not establish an ACL guarantee.
+
+**Migrating an existing env-key / Steward installation:** SDK versions before
+0.10.1 may have created `~/.openpay-x402` with mode 0755 when daily spend limits
+were enabled. Before switching to `SIGNER_MODE=keystore`, inspect the directory
+and run `chmod 700 ~/.openpay-x402` once if needed. Use the actual
+`OPENPAY_X402_HOME` path if configured. Preserve `spend.json` and any existing
+`wallet.json`; an existing wallet file must still have mode 0600. SDK 0.10.1
+creates new spend directories with mode 0700, but never changes existing
+permissions automatically.
 
 `wallet_status` returns `signerMode`, `address` (or null), `walletError` and
 `walletErrorMessage` (or null), `chain: "polygon"`, `jpycBalance`, `balanceSource`, `limits`,

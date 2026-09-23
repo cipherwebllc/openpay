@@ -22,7 +22,7 @@ const { createToolRuntime } = await import(pathToFileURL(resolve('packages/x402-
 };
 const { proveWallet } = await import(pathToFileURL(resolve('packages/x402-mcp/src/prove.mjs')).href) as {
   proveWallet: (options: {
-    signer: Signer; origin: string; fetchImpl: typeof fetch;
+    signer: Signer; origin?: string; fetchImpl: typeof fetch;
     lookup: typeof lookup;
   }) => Promise<Result>;
 };
@@ -72,8 +72,9 @@ async function verify(result: Result, expected: Address, expectedChallenge = cha
   expect(Object.keys(JSON.parse(Buffer.from(encoded, 'base64url').toString())).sort()).toEqual(['address', 'nonce', 'signature', 'v']);
   expect(proof.nonce).toBe(expectedChallenge.nonce.toLowerCase());
   expect(proof.address).toBe(expected.toLowerCase());
+  const typedData = agentProofTypedData(proof.address, expectedChallenge);
   const recovered = await recoverTypedDataAddress({
-    ...agentProofTypedData(proof.address, expectedChallenge), signature: proof.signature,
+    ...typedData, message: { ...typedData.message, audience: expectedOrigin }, signature: proof.signature,
   });
   expect(recovered.toLowerCase()).toBe(expected.toLowerCase());
   expect(result.address).toBe(expected);
@@ -106,12 +107,79 @@ describe('wallet_prove', () => {
     await expect(readdir(directory)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('uses the configured discovery origin but keeps the server audience fixed', async () => {
-    const customOrigin = 'https://purchase.example';
+  it('keeps the challenge, link and audience on OpenPay when discovery uses a third-party catalog', async () => {
     const fetchImpl = vi.fn(async () => json(challenge));
-    const result = decode(await runtime(fetchImpl, { DISCOVERY_URL: `${customOrigin}/discovery?ignored=1` }).callTool('wallet_prove', {}));
+    const result = decode(await runtime(fetchImpl, { DISCOVERY_URL: 'https://catalog.example/discovery?ignored=1' }).callTool('wallet_prove', {}));
+    await verify(result, account.address);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith(`${origin}/api/agent/proof/challenge?address=${account.address}`, expect.anything());
+  });
+
+  it('uses only the separate HTTPS OPENPAY_ORIGIN for the challenge, link and signed audience', async () => {
+    const customOrigin = 'https://purchase.example:8443';
+    const fetchImpl = vi.fn(async () => json(challenge));
+    const result = decode(await runtime(fetchImpl, {
+      DISCOVERY_URL: 'https://catalog.example/discovery', OPENPAY_ORIGIN: `${customOrigin}/`,
+    }).callTool('wallet_prove', {}));
     await verify(result, account.address, challenge, customOrigin);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledWith(`${customOrigin}/api/agent/proof/challenge?address=${account.address}`, expect.anything());
+    const proof = parseAgentProof(new URL(result.bindUrl).hash.slice('#proof='.length))!;
+    const recoveredForProduction = await recoverTypedDataAddress({
+      ...agentProofTypedData(proof.address, challenge), signature: proof.signature,
+    });
+    expect(recoveredForProduction.toLowerCase()).not.toBe(account.address.toLowerCase());
+  });
+
+  it('defaults to canonical OpenPay when proveWallet is called without an origin', async () => {
+    const fetchImpl = vi.fn(async () => json(challenge));
+    await verify(await proveWallet({ signer: account, fetchImpl, lookup }), account.address);
+    expect(fetchImpl).toHaveBeenCalledWith(`${origin}/api/agent/proof/challenge?address=${account.address}`, expect.anything());
+  });
+
+  it.each(['', ' \t\n ', ' https://OPEN-PAY.JP:443/ '])('normalizes optional OPENPAY_ORIGIN %j without using discovery', async (configuredOrigin) => {
+    const fetchImpl = vi.fn(async () => json(challenge));
+    const result = decode(await runtime(fetchImpl, {
+      DISCOVERY_URL: 'https://catalog.example/discovery', OPENPAY_ORIGIN: configuredOrigin,
+    }).callTool('wallet_prove', {}));
+    await verify(result, account.address);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith(`${origin}/api/agent/proof/challenge?address=${account.address}`, expect.anything());
+  });
+
+  it('rejects an explicitly empty origin at the proof helper boundary', async () => {
+    const fetchImpl = vi.fn();
+    const signer = { address: account.address, signTypedData: vi.fn() };
+    expect(await proveWallet({ signer, origin: '', fetchImpl, lookup })).toEqual({ ok: false, error: 'invalid_origin' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(signer.signTypedData).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['http://open-pay.jp', 'insecure_origin'],
+    ['http://localhost:3000', 'insecure_origin'],
+    ['ftp://purchase.example', 'insecure_origin'],
+    ['not a URL', 'invalid_origin'],
+    ['https://user:secret@purchase.example', 'invalid_origin'],
+    ['https://purchase.example/path', 'invalid_origin'],
+    ['https://purchase.example?secret=1', 'invalid_origin'],
+    ['https://purchase.example#proof=secret', 'invalid_origin'],
+  ])('rejects OPENPAY_ORIGIN %j before requesting or signing', async (configuredOrigin, error) => {
+    const fetchImpl = vi.fn(async () => json(challenge));
+    const signer = { address: account.address, signTypedData: vi.fn() };
+    expect(await proveWallet({ signer, origin: configuredOrigin, fetchImpl, lookup })).toEqual({ ok: false, error });
+    expect(decode(await runtime(fetchImpl, { OPENPAY_ORIGIN: configuredOrigin }).callTool('wallet_prove', {})))
+      .toEqual({ ok: false, error });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(signer.signTypedData).not.toHaveBeenCalled();
+  });
+
+  it('does not follow a challenge redirect to the discovery origin', async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 302, headers: { location: 'https://catalog.example/challenge' } }));
+    const result = decode(await runtime(fetchImpl, { DISCOVERY_URL: 'https://catalog.example/discovery' }).callTool('wallet_prove', {}));
+    expect(result).toEqual({ ok: false, error: 'challenge_invalid' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith(`${origin}/api/agent/proof/challenge?address=${account.address}`, expect.objectContaining({ redirect: 'manual' }));
   });
 
   it('uses a newly initialized keystore immediately and creates no purchase or spend records', async () => {

@@ -577,7 +577,8 @@ export function createToolRuntime({
         return { ok: false, error: walletFailure?.code ?? 'wallet_not_initialized' };
       }
       if (signer === null) return { ok: false, error: 'buyer_private_key_missing' };
-      return proveWallet({ signer, origin: baseOrigin(), fetchImpl, lookup });
+      // A third-party discovery catalog must never receive a purchase-history bearer proof.
+      return proveWallet({ signer, origin: env.OPENPAY_ORIGIN?.trim() || undefined, fetchImpl, lookup });
     });
   }
 

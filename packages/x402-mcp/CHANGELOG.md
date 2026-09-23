@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.17.1 — 2026-09-23
+
+- Keep `wallet_prove` challenges, bind links and signed audiences on
+  `https://open-pay.jp` regardless of `DISCOVERY_URL`. A separate `OPENPAY_ORIGIN`
+  can explicitly select another HTTPS origin; its server must verify that same
+  audience. Trim surrounding whitespace and treat blank env values as unset.
+  Reject invalid or insecure origins before fetching or signing.
+- Require SDK `^0.10.1`, which creates new spend directories with mode 0700.
+  Before migrating an existing env-key / Steward installation to keystore mode,
+  inspect the directory and run `chmod 700 ~/.openpay-x402` once if it has legacy
+  0755 permissions (use `OPENPAY_X402_HOME` instead when configured). Keep existing
+  spend and wallet files; existing wallet files still require mode 0600.
+- No dependencies added. Unpublished; rule-15 human review is required before adoption.
+- Release order: publish SDK 0.10.1 first, then MCP 0.17.1. The SDK tarball must
+  match the integrity pinned in this package's lockfile. If any SDK package bytes
+  change before release, repack it and update the lockfile before publishing.
+
 ## 0.17.0 — 2026-09-23
 
 - Add x402-only `wallet_prove {}` (13 tools; order remains 4) for keystore and env-key signers. Return a five-minute, single-use link that binds the Agent to a browser's SIWE account for server-side purchase history; no payment or local purchase record.

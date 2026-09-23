@@ -256,7 +256,9 @@ export function createFileSpendStore({ path, fsImpl } = {}) {
     if (!supportsAtomicFileUpdates(runtime.fileSystem)) {
       throw new Error('atomic spend store file operations are unavailable');
     }
-    await runtime.fileSystem.mkdir(runtime.directory, { recursive: true });
+    // Spend storage shares the default wallet directory: public directory bits would block
+    // a later keystore migration. Keep new directories private without chmod-ing existing ones.
+    await runtime.fileSystem.mkdir(runtime.directory, { recursive: true, mode: 0o700 });
     const handle = await acquireLock(runtime.fileSystem, runtime.lockPath);
     try {
       return await operation(runtime);
@@ -438,7 +440,8 @@ export function createFileSpendStore({ path, fsImpl } = {}) {
         }
         const current = documentForDate(document, key.slice(-10));
         current[key] = atomicString;
-        await runtime.fileSystem.mkdir(runtime.directory, { recursive: true });
+        // Compatibility saves must not create a shared directory the keystore would reject.
+        await runtime.fileSystem.mkdir(runtime.directory, { recursive: true, mode: 0o700 });
         await runtime.fileSystem.writeFile(
           runtime.targetPath,
           `${JSON.stringify(current, null, 2)}\n`,

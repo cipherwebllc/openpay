@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.1 — 2026-09-23
+
+- Create spend-store directories with mode 0700, including compatibility saves,
+  so an env-key user's spend directory can later hold an MCP keystore without
+  failing its permission checks. Existing directories are never chmod-ed; inspect
+  and manually repair legacy 0755 directories before switching to keystore mode.
+  Mode 0700 also applies to newly created intermediate directories at custom
+  spend-store paths; pre-existing shared/group directories keep their permissions.
+- Preserve spend reservations, locks, accounting and wallet 0600/0700 checks.
+  No dependencies added. Unpublished; rule-15 human review is required before adoption.
+
 ## 0.10.0 — 2026-09-23
 
 - Breaking: seller gates require a trusted `resourceId` and `expectedRecipient`;
