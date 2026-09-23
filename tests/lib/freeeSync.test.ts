@@ -19,7 +19,7 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
     schemaVersion: 4,
     id: 'e-' + Math.random().toString(36).slice(2),
-    ts: new Date(2026, 5, 15, 9, 0, 0).getTime(),
+    ts: Date.parse('2026-06-15T09:00:00+09:00'),
     flow: 'batch',
     status: 'success',
     chainId: 137,
@@ -73,8 +73,18 @@ function deps(overrides: Partial<FreeeSyncDeps> = {}): FreeeSyncDeps {
 }
 
 describe('freee 純粋ヘルパ', () => {
-  it('freeeIssueDate: ローカル YYYY-MM-DD', () => {
-    expect(freeeIssueDate(new Date(2026, 5, 3, 23, 0, 0).getTime())).toBe('2026-06-03');
+  it.each([
+    ['2026-09-30T14:59:59.999Z', '2026-09-30'],
+    ['2026-09-30T15:00:00.000Z', '2026-10-01'],
+    ['2026-09-30T15:30:00.000Z', '2026-10-01'],
+    ['2026-09-30T23:30:00.000Z', '2026-10-01'],
+    ['2026-10-01T00:00:00.000Z', '2026-10-01'],
+    ['2026-12-31T15:00:00.000Z', '2027-01-01'],
+    ['2026-02-28T15:00:00.000Z', '2026-03-01'],
+  ])('JST regression: freeeIssueDate(%s) = %s', (instant, expected) => {
+    const sale = entry({ ts: Date.parse(instant) });
+    expect(freeeIssueDate(sale.ts)).toBe(expected);
+    expect(buildFreeeDeal(sale, 1000, MAPPING).issue_date).toBe(expected);
   });
 
   it('freeeIdempotencyKey: txHash 優先・wallet は小文字', () => {
@@ -117,6 +127,19 @@ describe('freee 純粋ヘルパ', () => {
 });
 
 describe('runFreeeSync', () => {
+  it('JST regression: 同期 payload は JST 発生日、履歴 timestamp は保持', async () => {
+    const sale = entry({ ts: Date.parse('2026-09-30T23:30:00Z') });
+    const original = structuredClone(sale);
+    const d = deps();
+    const result = await runFreeeSync([sale], d);
+
+    expect(result.synced).toBe(1);
+    expect(d.createDeal).toHaveBeenCalledWith(expect.objectContaining({
+      issue_date: '2026-10-01',
+    }));
+    expect(sale).toEqual(original);
+  });
+
   it('店舗負担手数料は saleAmount (gross) で同期し standard-fee leg は除外', async () => {
     const createDeal = vi.fn(async (_body: FreeeDealBody) => 9001);
     const d = deps({ createDeal });

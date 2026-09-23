@@ -42,6 +42,18 @@ jobs:
       # Next build の lint 対象外 (hooks/tests/scripts/e2e/instrumentation 等) も含め、
       # bypass 可能な pre-commit hook に依存せずリポ全体を機械的に検査する。
       - run: npm run lint
+      # JST ホストではローカル日付への退行を検出できないため、起動前に非 JST の TZ を固定。
+      - name: JST date regressions (non-JST host)
+        env:
+          TZ: America/Los_Angeles
+        run: >-
+          npx vitest run --no-cache
+          tests/lib/shopTime.test.ts
+          tests/lib/freeeSync.test.ts
+          tests/lib/accountingCsv.test.ts
+          tests/lib/lineItemsCsv.test.ts
+          tests/app/store-seller-disclosure.test.tsx
+          tests/components/X402DiscoveryView.test.tsx
       # scripts/run-tests.mjs は vitest を forks pool / maxForks=2 で起動し、
       # JSON reporter の numFailedTests を真の合否ソースとして使う。
       # PaymentForm / CheckoutForm / TipForm 系で観測される post-teardown

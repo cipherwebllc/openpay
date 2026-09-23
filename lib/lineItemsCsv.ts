@@ -9,20 +9,19 @@
 // 取引合計のみの 1 行にフォールバックし、income tx を取りこぼさない。
 
 import { ACCOUNTING_MAX_ROWS, buildCsv } from './csv';
-import { pad } from './pad';
+import { tokyoDateKey, tokyoTimestamp } from './shopTime';
 import { isIncomeSaleEntry } from './historyFilters';
 import { taxCategoryShortLabel } from './tax';
 import {
   entryLineItems,
   entryTotals,
-  formatHistoryTimestamp,
   HISTORY_ASSET_DISPLAY,
   type HistoryEntry,
   type HistoryLineItem,
 } from './history';
 
 const HEADER: readonly string[] = [
-  '日時',
+  '日時(JST)',
   '管理番号',
   '取引Hash',
   'チェーン',
@@ -52,7 +51,7 @@ export function lineItemGrossAmount(li: HistoryLineItem): number | null {
 function rowsForEntry(e: HistoryEntry): string[][] {
   const totals = entryTotals(e);
   const items = entryLineItems(e);
-  const ts = formatHistoryTimestamp(e.ts);
+  const ts = tokyoTimestamp(e.ts);
   const txHash = e.txHash ?? '';
   const receiptNo = e.receiptNo ?? '';
   // 明細が無い (商品情報なし legacy) → 取引合計のみの 1 行で取りこぼさない。
@@ -118,5 +117,5 @@ export function toLineItemsCsv(
 }
 
 export function lineItemsCsvFilename(now: Date = new Date()): string {
-  return `openpay-line-items-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.csv`;
+  return `openpay-line-items-${tokyoDateKey(now.getTime())}.csv`;
 }

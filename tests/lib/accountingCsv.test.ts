@@ -3,6 +3,7 @@ import { convert, codeToString } from 'encoding-japanese';
 import {
   toAccountingCsv,
   accountingCsvFilename,
+  type AccountingFormat,
 } from '@/lib/accountingCsv';
 import { encodeShiftJis } from '@/lib/sjis';
 import { CSV_BOM, CSV_NEWLINE } from '@/lib/csv';
@@ -17,7 +18,7 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
     schemaVersion: 4,
     id: Math.random().toString(36),
-    ts: new Date(2026, 5, 15, 12, 0, 0).getTime(),
+    ts: Date.parse('2026-06-15T12:00:00+09:00'),
     flow: 'batch',
     status: 'success',
     chainId: 137,
@@ -82,6 +83,50 @@ const USDC_PLAIN = entry({
 const REVERTED = entry({ status: 'reverted' });
 const FEE_LEG = entry({ flow: 'standard-fee', status: 'success' });
 const ERRORED = entry({ status: 'error' });
+
+// このファイル自身は TZ を変更せず、起動プロセスから引き継ぐ。
+// CI の JST date regressions step は TZ=America/Los_Angeles を明示する。
+// ローカルでも TZ=UTC / TZ=America/Los_Angeles を起動前に指定すること:
+// JST ホストでは、ローカル日付への退行をこれらの期待値だけでは検出できない。
+describe.each<{ format: AccountingFormat; dateColumn: number; header: boolean; sep: string }>([
+  { format: 'freee', dateColumn: 1, header: true, sep: '-' },
+  { format: 'yayoi', dateColumn: 3, header: false, sep: '/' },
+  { format: 'mf', dateColumn: 1, header: true, sep: '/' },
+  { format: 'yayoi-native', dateColumn: 3, header: false, sep: '/' },
+])('JST regression: $format', ({ format, dateColumn, header, sep }) => {
+  it.each([
+    ['2026-09-30T14:59:59.999Z', '2026-09-30'],
+    ['2026-09-30T15:00:00.000Z', '2026-10-01'],
+    ['2026-09-30T15:30:00.000Z', '2026-10-01'],
+    ['2026-09-30T23:30:00.000Z', '2026-10-01'],
+    ['2026-10-01T00:00:00.000Z', '2026-10-01'],
+    ['2026-12-31T15:00:00.000Z', '2027-01-01'],
+    ['2026-02-28T15:00:00.000Z', '2026-03-01'],
+  ])('%s の仕訳日は %s (税区分別の全行)', (instant, expected) => {
+    const sale = entry({
+      ts: Date.parse(instant),
+      lineItems: [
+        { name: '食品', quantity: 1, unitPrice: '400', amount: '400', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+        { name: '雑貨', quantity: 1, unitPrice: '600', amount: '600', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+      ],
+    });
+    const original = structuredClone(sale);
+    const result = toAccountingCsv([sale], { format, usdcJpy: undefined });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const csv = result.csv.startsWith(CSV_BOM) ? result.csv.slice(CSV_BOM.length) : result.csv;
+    const rows = csv.split(CSV_NEWLINE).filter(Boolean).map((row) => row.split(','));
+    const dates = rows.slice(header ? 1 : 0).map((row) => row[dateColumn]);
+    expect(dates).toEqual(Array(2).fill(expected.replaceAll('-', sep)));
+    expect(sale).toEqual(original);
+  });
+
+  it('ファイル名も JST の暦日', () => {
+    expect(accountingCsvFilename(format, new Date('2026-12-31T15:00:00Z'))).toBe(
+      `openpay-${format}-2027-01-01.csv`,
+    );
+  });
+});
 
 describe('toAccountingCsv: freee 形式', () => {
   it('店舗負担手数料は saleAmount (gross) で出力し standard-fee leg は除外', () => {
@@ -277,7 +322,7 @@ describe('取引先 / 備考 のエッジケース', () => {
 
 describe('accountingCsvFilename', () => {
   it('openpay-{format}-YYYY-MM-DD.csv', () => {
-    const d = new Date(2026, 5, 3);
+    const d = new Date('2026-06-03T12:00:00+09:00');
     expect(accountingCsvFilename('freee', d)).toBe('openpay-freee-2026-06-03.csv');
     expect(accountingCsvFilename('yayoi', d)).toBe('openpay-yayoi-2026-06-03.csv');
     expect(accountingCsvFilename('mf', d)).toBe('openpay-mf-2026-06-03.csv');

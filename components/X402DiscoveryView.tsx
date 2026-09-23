@@ -36,6 +36,7 @@ import { Field } from '@/components/Field';
 import { env } from '@/lib/env';
 import { splitDisplayTitle } from '@/lib/x402/displayTitle';
 import { shortAddress } from '@/lib/format';
+import { tokyoDateKey } from '@/lib/shopTime';
 import { AGENTIC_MARKET_URL, X402_LIST_URL, type UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
 import { REVERIFY_AUTH_HIDE_THRESHOLD } from '@/lib/x402/reverifyThresholds';
 import type { MonitorFreshness } from '@/lib/directory/monitorFreshness';
@@ -177,7 +178,7 @@ function isHttpsUrl(value: string): boolean {
 function isoDate(value: string | undefined): string | null {
   if (!value) return null;
   const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString().slice(0, 10) : null;
+  return Number.isFinite(timestamp) ? tokyoDateKey(timestamp) : null;
 }
 
 function verifiedDaysAgo(value: string | null | undefined, now: number): number | null {

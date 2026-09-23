@@ -7,7 +7,7 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   return {
     schemaVersion: 5,
     id: 'e-' + Math.random().toString(36).slice(2),
-    ts: new Date(2026, 5, 15, 9, 0, 0).getTime(),
+    ts: Date.parse('2026-06-15T09:00:00+09:00'),
     flow: 'batch',
     status: 'success',
     chainId: 137,
@@ -59,6 +59,23 @@ function parse(csv: string): string[][] {
 }
 
 describe('toLineItemsCsv (1 商品 1 行)', () => {
+  it.each([
+    ['2026-09-30T14:59:59Z', '2026-09-30 23:59:59'],
+    ['2026-09-30T15:00:00Z', '2026-10-01 00:00:00'],
+    ['2026-12-31T23:30:45Z', '2027-01-01 08:30:45'],
+  ])('JST regression: %s の明細日時は %s', (instant, expected) => {
+    const sales = [
+      entry({ ts: Date.parse(instant) }),
+      entry({ ts: Date.parse(instant), lineItems: null }),
+    ];
+    const original = structuredClone(sales);
+    const result = toLineItemsCsv(sales);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(parse(result.csv).slice(1).map((row) => row[0])).toEqual(Array(3).fill(expected));
+    expect(sales).toEqual(original);
+  });
+
   it('複数明細を 1 商品 1 行で出力 (行別 税率/税区分/税額 + 取引合計)', () => {
     const r = toLineItemsCsv([entry()]);
     expect(r.ok).toBe(true);
@@ -67,7 +84,7 @@ describe('toLineItemsCsv (1 商品 1 行)', () => {
     const rows = parse(r.csv);
     // header
     expect(rows[0]).toEqual([
-      '日時', '管理番号', '取引Hash', 'チェーン', '通貨', '商品名', '数量',
+      '日時(JST)', '管理番号', '取引Hash', 'チェーン', '通貨', '商品名', '数量',
       '単価', '明細金額', '税率(%)', '税区分', '税額', '取引合計', 'メモ',
     ]);
     // row1 = コーヒー x2 @500 = 1000 / 10% / 課税10% / 内税 91 / 取引合計 4000
@@ -215,9 +232,15 @@ describe('toLineItemsCsv (1 商品 1 行)', () => {
 });
 
 describe('lineItemsCsvFilename', () => {
+  it('JST regression: ファイル名も JST の暦日', () => {
+    expect(lineItemsCsvFilename(new Date('2026-12-31T15:00:00Z'))).toBe(
+      'openpay-line-items-2027-01-01.csv',
+    );
+  });
+
   afterEach(() => vi.useRealTimers());
   it('openpay-line-items-yyyy-MM-dd.csv', () => {
-    expect(lineItemsCsvFilename(new Date(2026, 5, 4))).toBe(
+    expect(lineItemsCsvFilename(new Date('2026-06-04T12:00:00+09:00'))).toBe(
       'openpay-line-items-2026-06-04.csv',
     );
   });

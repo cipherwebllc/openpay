@@ -135,6 +135,19 @@ function renderAsOwner(owned: OwnedFixture[] = [OWNED]): ReturnType<typeof vi.fn
 }
 
 describe('X402DiscoveryView', () => {
+  it.each([
+    ['2026-09-22T23:30:00Z', '2026-09-23'],
+    ['2026-12-31T15:00:00Z', '2027-01-01'],
+  ])('JST regression: カタログ更新日 %s → %s、datetime は保持', async (updatedAt, expected) => {
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: [{ ...ITEM, updatedAt }] }),
+    })) as unknown as typeof fetch;
+    renderView();
+
+    expect(await screen.findByText(`更新: ${expected}`)).toHaveAttribute('datetime', updatedAt);
+  });
+
   it('未接続: connectPrompt を表示し、カタログを /api/discovery から列挙', async () => {
     renderView();
     // カタログ (公開・wallet 不要) が描画される。
