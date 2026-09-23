@@ -105,9 +105,28 @@ describe('useSiweSession', () => {
       await result.current.signIn('OpenPay test sign-in');
     });
 
+    expect(fetchSpy).toHaveBeenCalledWith('/api/auth/siwe/nonce', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['tip-messages'],
     });
+  });
+
+  it.each([403, 415, 503, 'network'] as const)('surfaces logout failure %s without successful invalidation or clearing the cached session', async (failure) => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(true, { ok: true, address: wallet.address }, 200));
+    if (failure === 'network') fetchSpy.mockRejectedValueOnce(new Error('offline'));
+    else fetchSpy.mockResolvedValueOnce(jsonResponse(false, { error: 'session_revoke_failed' }, failure));
+    const client = makeClient();
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useSiweSession(), { wrapper: wrapper(client) });
+    await waitFor(() => expect(result.current.isSignedIn).toBe(true));
+    const message = failure === 'network' ? 'offline' : `siwe_logout_http_${failure}`;
+    await act(async () => { await expect(result.current.signOut()).rejects.toThrow(message); });
+    await waitFor(() => expect(result.current.signOutError?.message).toBe(message));
+    expect(invalidateSpy).not.toHaveBeenCalled();
+    expect(result.current.isSignedIn).toBe(true);
+    expect(client.getQueryData(['siwe', 'me'])).toBe(wallet.address);
   });
 
   it('サインアウト成功時にも tip-messages cache を invalidate する', async () => {
@@ -130,6 +149,9 @@ describe('useSiweSession', () => {
       await result.current.signOut();
     });
 
+    expect(fetchSpy).toHaveBeenCalledWith('/api/auth/siwe/logout', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: ['tip-messages'],
     });

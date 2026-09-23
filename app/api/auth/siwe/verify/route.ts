@@ -5,6 +5,7 @@
 // 署名検証は viem verifySiweMessage に委譲 (EOA はローカル ECDSA recover、スマート
 // アカウントは ERC-6492/1271 を message の chainId 上の public client で検証)。
 import { NextResponse } from 'next/server';
+import { rejectSiweCsrf } from '../_csrf';
 import { createPublicClient } from 'viem';
 import { verifySiweMessage } from 'viem/siwe';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
@@ -29,6 +30,8 @@ export const dynamic = 'force-dynamic';
 const SIWE_VERIFY_BODY_MAX_BYTES = 8 * 1024;
 
 export async function POST(req: Request): Promise<NextResponse> {
+  const rejected = rejectSiweCsrf(req);
+  if (rejected) return rejected;
   if (!isKvConfigured()) {
     return NextResponse.json(
       { ok: false, error: 'kv_not_configured' },

@@ -29,10 +29,12 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
   const locale = useLocale();
   const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
   const params = useSearchParams();
-  const [input, setInput] = useState(() => {
+  const [linkedAddress] = useState(() => {
     const initial = params.get('address');
     return initial && isAddress(initial) ? initial : '';
   });
+  const [input, setInput] = useState('');
+  const [pendingLinkedAddress, setPendingLinkedAddress] = useState<string | null>(null);
   const [restored, setRestored] = useState(false);
   const [editing, setEditing] = useState(false);
   // `?address=` 付きの着地は MCP の入金リンク (wallet_init の fundingUrl) 経由 = 入金が目的なので、パネルを開いて迎える。
@@ -44,12 +46,18 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
   // localStorage は SSR と初回描画に無いので mount 後に 1 回だけ読む。
   // ブラウザ API の失敗 (private mode 等) をページ描画へ波及させないための try-catch。
   useEffect(() => {
+    let initial = linkedAddress;
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved && isAddress(saved)) setInput((current) => (current === '' ? saved : current));
+      if (saved && isAddress(saved)) {
+        initial = saved;
+        // 外部リンクが端末の控えと送金先を無断で置き換える波及を、確認まで止める。
+        if (linkedAddress && linkedAddress.toLowerCase() !== saved.toLowerCase()) setPendingLinkedAddress(linkedAddress);
+      }
     } catch {
       // 控えが読めなくても手入力で使える。
     }
+    setInput(initial);
     setRestored(true);
     function openFundFromHash() {
       if (window.location.hash === '#agent-fund') setFundOpen(true);
@@ -59,7 +67,7 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
     openFundFromHash();
     window.addEventListener('hashchange', openFundFromHash);
     return () => window.removeEventListener('hashchange', openFundFromHash);
-  }, []);
+  }, [linkedAddress]);
   const { address: connectedAddress, isConnected } = useAccount();
   const { copy, copied, available: clipboardAvailable } = useCopyToClipboard();
   // 入金パネルは常に mount される。server と client でコピーボタンの有無が食い違う hydration エラーを避ける。
@@ -76,7 +84,7 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
   useEffect(() => {
     if (address && !fundBusy) setFundAddress(address);
   }, [address, fundBusy]);
-  const fundVisible = fundBusy || (Boolean(address) && fundOpen);
+  const fundVisible = fundBusy || (!pendingLinkedAddress && Boolean(address) && fundOpen);
   // 入金用の表示 (アドレス行・コピー・QR) は常に「いま上のカードに出ているアドレス」。fundAddress は送金フォームの宛先専用。
   // 送信中にアドレスを変えても QR が旧アドレスのまま残り、外部からの入金が意図しない宛先へ着く波及を断つ。
   const shownAddress = address ?? fundAddress;
@@ -106,6 +114,21 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
     <section className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
       <h2 className="text-xl font-bold text-slate-900">{c.title}</h2>
       <div hidden={!restored}>
+        {pendingLinkedAddress ? <div className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
+          <p id="agent-wallet-link-confirm" className="break-all">{c.linkedAddressConfirm.replace('{address}', pendingLinkedAddress)}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" aria-describedby="agent-wallet-link-confirm" className={`min-h-11 rounded-xl bg-white px-4 py-2 font-medium ${focus}`} onClick={() => {
+              setInput(pendingLinkedAddress);
+              setPendingLinkedAddress(null);
+              requestAnimationFrame(() => changeRef.current?.focus());
+            }}>{c.useLinkedAddress}</button>
+            <button type="button" className={`min-h-11 rounded-xl bg-white px-4 py-2 font-medium ${focus}`} onClick={() => {
+              setPendingLinkedAddress(null);
+              setFundOpen(false);
+              requestAnimationFrame(() => changeRef.current?.focus());
+            }}>{c.keepSavedAddress}</button>
+          </div>
+        </div> : null}
         {!address && !inputExpanded ? (
           <div className="mt-2">
             <p className="text-sm leading-relaxed text-slate-700">{c.emptyLead}</p>

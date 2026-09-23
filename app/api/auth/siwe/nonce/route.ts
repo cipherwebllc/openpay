@@ -2,6 +2,7 @@
 // nonce は KV に SET NX EX で 1 回限り予約し、verify 時に DEL で atomic 消費 → replay 防止。
 // KV 未設定なら replay 防御が成立しないため 503 (auth 機能を degrade)。
 import { NextResponse } from 'next/server';
+import { rejectSiweCsrf } from '../_csrf';
 import { isKvConfigured, kvSet } from '@/lib/kv';
 import { nonceKey, NONCE_TTL_SEC, newSiweNonce } from '@/lib/siwe';
 import { logger } from '@/lib/logger';
@@ -12,6 +13,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request): Promise<NextResponse> {
+  const rejected = rejectSiweCsrf(req, { allowMissingContentType: true });
+  if (rejected) return rejected;
   if (!isKvConfigured()) {
     return NextResponse.json(
       { ok: false, error: 'kv_not_configured' },

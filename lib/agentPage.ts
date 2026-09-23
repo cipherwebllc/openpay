@@ -95,6 +95,9 @@ export type AgentPageContent = {
     readonly connectCta: string;
     readonly fundCta: string;
     readonly changeAddress: string;
+    readonly linkedAddressConfirm: string;
+    readonly useLinkedAddress: string;
+    readonly keepSavedAddress: string;
     readonly emptyLead: string;
     readonly emptyConnectCta: string;
     readonly manualEntry: string;
@@ -167,6 +170,12 @@ export type AgentPageContent = {
     readonly continueAfterSignIn: string;
     readonly verifying: string;
     readonly bound: string;
+    readonly bindConfirm: string;
+    readonly confirmBind: string;
+    readonly cancelBind: string;
+    readonly proofAddressMismatch: string;
+    readonly proofLinkAddressMismatch: string;
+    readonly boundOther: string;
     readonly failures: { readonly [K in 'expired_or_unknown' | 'signature_mismatch' | 'already_used' | 'malformed' | 'binding_limit' | 'storage_error' | 'feature_disabled']: string };
     readonly colDate: string;
     readonly colItem: string;
@@ -340,6 +349,9 @@ const ja: AgentPageContent = {
     connectCta: 'Agent を接続',
     fundCta: '入金する',
     changeAddress: '変更',
+    linkedAddressConfirm: 'リンクのアドレス {address} は、この端末に保存済みの Agent Wallet と異なります。置き換えますか?',
+    useLinkedAddress: 'リンクのアドレスに置き換える',
+    keepSavedAddress: '保存済みのアドレスを使う',
     emptyLead: '下の「Agent を接続」で「Agent が支払う」をセットアップすると、あなたのマシン上にウォレットが作られます。Agent が返すリンクを開くと、ここに残高が表示されます。',
     emptyConnectCta: 'Agent を接続する',
     manualEntry: 'アドレスを手入力する',
@@ -414,6 +426,12 @@ const ja: AgentPageContent = {
     continueAfterSignIn: 'Agent のリンクを受け取りました。ログインすると紐づけを続けます。',
     verifying: '紐づけを確認しています…',
     bound: 'この Agent をあなたのアカウントに紐づけました。',
+    bindConfirm: 'この Agent を {owner} に紐づけます。よろしいですか?',
+    confirmBind: '確認して紐づける',
+    cancelBind: '紐づけをやめる',
+    proofLinkAddressMismatch: '紐づけリンクの Agent {proofAddress} は、URL で指定された Agent {linkAddress} と異なります。',
+    proofAddressMismatch: '紐づけリンクの Agent {proofAddress} は、表示中の Agent {cardAddress} と異なります。',
+    boundOther: 'Agent {address} をあなたのアカウントに紐づけました。表示中の Agent は変更していません。',
     failures: {
       expired_or_unknown: 'このリンクは期限切れです。Agent にもう一度「購入履歴を Web で開いて」と頼んでください。',
       signature_mismatch: 'このリンクの署名が Agent のアドレスと一致しません。Agent にもう一度頼んでください。',
@@ -592,6 +610,9 @@ const en: AgentPageContent = {
     connectCta: 'Connect agent',
     fundCta: 'Add funds',
     changeAddress: 'Change',
+    linkedAddressConfirm: 'The link’s address {address} differs from the Agent Wallet saved on this device. Replace it?',
+    useLinkedAddress: 'Use the link’s address',
+    keepSavedAddress: 'Keep the saved address',
     emptyLead: 'Set up “Agent pays” with “Connect your agent” below and a wallet is created on your own machine. Open the link your agent returns and its balance appears here.',
     emptyConnectCta: 'Connect your agent',
     manualEntry: 'Enter an address manually',
@@ -666,6 +687,12 @@ const en: AgentPageContent = {
     continueAfterSignIn: 'Link received from your agent. Sign in to continue linking.',
     verifying: 'Confirming the link…',
     bound: 'This agent is now linked to your account.',
+    bindConfirm: 'Link this agent to {owner}?',
+    confirmBind: 'Confirm and link',
+    cancelBind: 'Cancel linking',
+    proofLinkAddressMismatch: 'The link is for Agent {proofAddress}, which differs from Agent {linkAddress} in the page URL.',
+    proofAddressMismatch: 'The link is for Agent {proofAddress}, which differs from the displayed Agent {cardAddress}.',
+    boundOther: 'Agent {address} is now linked to your account. The displayed Agent has not changed.',
     failures: {
       expired_or_unknown: 'This link has expired. Ask your agent again to open your purchase history on the web.',
       signature_mismatch: 'The signature in this link does not match the agent’s address. Ask your agent again.',

@@ -27,6 +27,7 @@
     "disconnect": "切断",
     "signIn": "ログイン (署名)",
     "signOut": "ログアウト",
+    "signOutError": "ログアウトに失敗しました。セッションが残っている可能性があります。もう一度お試しください。",
     "signedIn": "ログイン済",
     "reSignIn": "別アドレスでログイン中 — 再ログイン",
     "siweStatement": "OpenPay にこのウォレットでログインします。",

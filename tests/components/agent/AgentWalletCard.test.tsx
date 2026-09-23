@@ -146,12 +146,46 @@ describe('AgentWalletCard', () => {
     fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: address } });
     expect(container.querySelector('#agent-fund')).toBeVisible();
   });
-  it('prefers the URL address to the saved address', () => {
+  it.each(['ja', 'en'])('keeps the saved address until a conflicting link is confirmed in %s', (locale) => {
+    const c = agentPageContentFor(locale).wallet;
+    const saved = '0x2222222222222222222222222222222222222222';
     state.query = `address=${address}`;
-    window.localStorage.setItem('openpay.agent.address', '0x2222222222222222222222222222222222222222');
-    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
-    expect(screen.getByLabelText(C.inputLabel)).toHaveValue(address);
+    window.history.replaceState(null, '', '/#agent-fund');
+    window.localStorage.setItem('openpay.agent.address', saved);
+    const { container } = render(<AgentWalletCard purchases={purchases} c={c} activity={activity} />);
+    expect(screen.getByLabelText(c.inputLabel)).toHaveValue(saved);
+    expect(window.localStorage.getItem('openpay.agent.address')).toBe(saved);
+    expect(state.read).toHaveBeenLastCalledWith(expect.objectContaining({ args: [saved] }));
+    expect(state.fund).toHaveBeenLastCalledWith(expect.objectContaining({ agentAddress: saved }));
+    expect(container.querySelector('#agent-fund')).not.toBeVisible();
+    expect(screen.getByText(c.linkedAddressConfirm.replace('{address}', address))).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: c.useLinkedAddress }));
+    expect(screen.getByLabelText(c.inputLabel)).toHaveValue(address);
     expect(window.localStorage.getItem('openpay.agent.address')).toBe(address);
+    expect(state.fund).toHaveBeenLastCalledWith(expect.objectContaining({ agentAddress: address }));
+    expect(container.querySelector('#agent-fund')).toBeVisible();
+  });
+  it('keeps the saved address after declining a conflicting link and on the next direct visit', () => {
+    const saved = '0x2222222222222222222222222222222222222222';
+    state.query = `address=${address}`;
+    window.localStorage.setItem('openpay.agent.address', saved);
+    const view = render(<AgentWalletCard purchases={purchases} c={C} activity={activity} />);
+    expect(window.localStorage.getItem('openpay.agent.address')).toBe(saved);
+    fireEvent.click(screen.getByRole('button', { name: C.keepSavedAddress }));
+    expect(screen.queryByRole('button', { name: C.useLinkedAddress })).toBeNull();
+    expect(screen.getByLabelText(C.inputLabel)).toHaveValue(saved);
+    view.unmount(); state.query = '';
+    render(<AgentWalletCard purchases={purchases} c={C} activity={activity} />);
+    expect(screen.getByLabelText(C.inputLabel)).toHaveValue(saved);
+  });
+  it('accepts the same saved address with different casing without a replacement prompt', () => {
+    const saved = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    state.query = 'address=0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa';
+    window.localStorage.setItem('openpay.agent.address', saved);
+    render(<AgentWalletCard purchases={purchases} c={C} activity={activity} />);
+    expect(screen.queryByRole('button', { name: C.useLinkedAddress })).toBeNull();
+    expect(screen.getByLabelText(C.inputLabel)).toHaveValue(saved);
+    expect(window.localStorage.getItem('openpay.agent.address')).toBe(saved);
   });
   it('disables closing while busy and preserves the mounted recipient through edits', () => {
     state.query = `address=${address}`;

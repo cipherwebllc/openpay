@@ -111,6 +111,12 @@ describe('Agent proof', () => {
     expect(await verifyAgentProof(encode({ ...data, signature }))).toEqual({ ok: false, reason: 'signature_mismatch' });
   });
 
+  it('rejects a UTF-8 BOM just as the server parser did before sharing it with the browser', async () => {
+    const { proof } = await signed();
+    const withBom = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(proof, 'base64url')]).toString('base64url');
+    expect(parseAgentProof(withBom)).toBeNull();
+  });
+
   it.each([null, 1, '', 'a'.repeat(1025), '****', 'e30=', 'e30\n', 'e30', 'bm90LWpzb24'])('rejects malformed envelope %s', async (value) => {
     expect(parseAgentProof(value)).toBeNull();
     expect(await verifyAgentProof(value)).toEqual({ ok: false, reason: 'malformed' });
