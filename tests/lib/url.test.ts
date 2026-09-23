@@ -2013,8 +2013,8 @@ describe('exceedsTokenPrecision', () => {
 });
 
 // ---------------------------------------------------------------------------
-// surrogate-safe truncate: buildCheckoutPath / parseCheckoutParams /
-// parseCheckoutItemDrafts が絵文字境界で throw しない回帰テスト
+// surrogate-safe truncate: buildCheckoutPath / parseCheckoutParams が
+// 絵文字境界で throw しない回帰テスト
 // ---------------------------------------------------------------------------
 describe('checkout surrogate-safe (name/memo 境界絵文字)', () => {
   // CHECKOUT_NAME_MAX = 80
@@ -2074,17 +2074,19 @@ describe('checkout surrogate-safe (name/memo 境界絵文字)', () => {
     }).not.toThrow();
   });
 
-  it('parseCheckoutItemDrafts: draft name 境界絵文字 — throw せず孤立サロゲートなし', async () => {
-    const { parseCheckoutItemDrafts } = await import('@/lib/url');
+  it('外部 checkout URL の name 境界絵文字 — throw せず孤立サロゲートなし', async () => {
+    const { parseCheckoutParams } = await import('@/lib/url');
     const name = 'c'.repeat(79) + '🎉'; // 81 units
     expect(name.length).toBe(81);
-    const result = parseCheckoutItemDrafts(
-      [{ name, qty: '1', price: '300' }],
-      18,
-    );
-    expect(result.errors.length).toBe(0);
-    expect(result.items).not.toBeNull();
-    const parsedName = result.items?.[0]?.name ?? '';
+    const result = parseCheckoutParams(new URLSearchParams({
+      to: VALID_TO,
+      token: 'jpyc',
+      items: `${encodeURIComponent(name)}:1:300`,
+    }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error);
+    const parsedName = result.params.items[0].name;
+    expect(parsedName).toBe('c'.repeat(79));
     expect(/[\uD800-\uDFFF]/.test(parsedName)).toBe(false);
   });
 });

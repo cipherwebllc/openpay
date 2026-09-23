@@ -1,5 +1,7 @@
 # Weak Types Audit (Task 5/8)
 
+Historical snapshot: file references and counts below describe the code at the time of this audit. Review 6 (F3) removes the retired `CheckoutLinkGenerator`, `useCheckoutSettings`, and checkout draft parser; references to them below are historical. Live `CheckoutForm` and checkout URL parsing remain in use.
+
 ## Summary
 - Total `any` keyword usages in `app/lib/hooks/components`: **0** (zero — codebase has eliminated `any` entirely)
 - Total `unknown` annotations: **22** (all in `app/`, `lib/`, `hooks/`)

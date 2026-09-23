@@ -3,9 +3,6 @@
 // 通貨 (JPYC / USDC) 選択ボタン grid。QrGenerator (店舗 QR) と TipEmbedGenerator
 // (Tip widget) で共有する。公式ロゴ (public/tokens/{jpyc,usdc}.svg) + symbol の
 // 2 要素のみ表示し視覚密度を抑える。Field/label は ChainChooser と同様に呼出側責務。
-//
-// 注: CheckoutLinkGenerator は「symbol + 対応 chain 数 hint」の別レイアウト
-// (ロゴ無し) を使うため本コンポーネントは共有せず据え置き (variant 分岐を避ける)。
 
 import { defaultDeploymentForSymbol, type TokenSymbol } from '@/lib/tokens';
 import { TokenLogo } from './AssetLogo';

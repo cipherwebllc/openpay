@@ -145,8 +145,7 @@ export function encodeItems(items: ReadonlyArray<CheckoutItem>): string {
   return items.map(encodeItem).join(',');
 }
 
-// qty / price フィールドの共通検証 (URL parser と draft parser の両方で使う)。
-// reason は draft parser がエラー対象 row の UI 表示用に区別する単位。
+// URL parser が使う qty / price フィールドの検証。
 type ItemFieldsValidation =
   | { ok: true; qty: number }
   | { ok: false; reason: 'qty' | 'price' };
@@ -400,54 +399,6 @@ export function parseCheckoutParams(
           ? Number(pickupAtRaw)
           : undefined,
     },
-  };
-}
-
-// CheckoutLinkGenerator UI 用の draft 入力 (空欄を許容、qty/price は文字列)。
-// CheckoutItem は parse 済の確定型。
-export type CheckoutItemDraft = {
-  name: string;
-  qty: string;
-  price: string;
-};
-
-// all-or-nothing (parseSplitDrafts と同型): 1 件でも error なら items=null、
-// 個別 row のエラーは errors[] で返して UI に「商品 #N: 〜」と出す。
-export type CheckoutItemDraftsParseResult = {
-  items: CheckoutItem[] | null;
-  errors: Array<{ index: number; reason: 'empty' | 'qty' | 'price' }>;
-};
-
-export function parseCheckoutItemDrafts(
-  drafts: ReadonlyArray<CheckoutItemDraft>,
-  decimals: number,
-): CheckoutItemDraftsParseResult {
-  const items: CheckoutItem[] = [];
-  const errors: Array<{ index: number; reason: 'empty' | 'qty' | 'price' }> = [];
-
-  drafts.forEach((d, i) => {
-    const name = stripControlChars(d.name);
-    const qtyStr = d.qty.trim();
-    const priceStr = d.price.trim();
-    // 全フィールドが空欄の draft は「未入力 row」として無視 (UI 上「商品を追加」して
-    // 空のまま残す UX を許容)。1 つでも入力があれば validate 対象。
-    if (name.length === 0 && qtyStr.length === 0 && priceStr.length === 0) return;
-    if (name.length === 0 || qtyStr.length === 0 || priceStr.length === 0) {
-      errors.push({ index: i, reason: 'empty' });
-      return;
-    }
-    const v = validateItemFields(qtyStr, priceStr, decimals);
-    if (!v.ok) {
-      errors.push({ index: i, reason: v.reason });
-      return;
-    }
-    const trimmedName = truncateSafe(name, CHECKOUT_NAME_MAX);
-    items.push({ name: trimmedName, qty: v.qty, price: priceStr });
-  });
-
-  return {
-    items: errors.length === 0 && items.length > 0 ? items : null,
-    errors,
   };
 }
 

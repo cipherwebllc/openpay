@@ -82,6 +82,14 @@ beforeEach(() => {
 });
 afterEach(() => { qc.clear(); localStorage.clear(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
+it.each([80002, 5042002])('requires explicit option selection for target %s (no auto-execute API)', (targetChainId) => {
+  const { result } = renderHook(() => useCrossChainPayment({ ...args, targetChainId, enabled: false }), { wrapper });
+  expect(result.current.executeOption).toBeTypeOf('function');
+  expect(result.current).not.toHaveProperty('execute');
+  expect(executeGatewayTransfer).not.toHaveBeenCalled();
+  expect(executeCctpTransfer).not.toHaveBeenCalled();
+});
+
 describe.each([false, true])('D9 Gateway committed recovery independent of readiness (flag=%s)', (enabled) => {
   beforeEach(() => vi.spyOn(env, 'enableGatewayCrossChain', 'get').mockReturnValue(enabled));
   const legacyArgs = { ...args, targetChainId: 80002 };
@@ -361,7 +369,7 @@ describe('Arc hook recovery and authorization', () => {
     const { result } = renderHook(() => useCrossChainPayment({ ...args, enabled: false }), { wrapper });
     await waitFor(() => expect(result.current.pendingRecovery?.kind).toBe('pending'));
     expect(result.current.pathOptions).toEqual([]); expect(readAllCrossChainBalances).not.toHaveBeenCalled();
-    await expect(result.current.execute()).rejects.toThrow('chooser');
+    expect(result.current).not.toHaveProperty('execute');
   });
   it('scans all buyer sources, including sources missing from balances', async () => {
     const state = saved(); state.burnIntent!.chainId = 998;
