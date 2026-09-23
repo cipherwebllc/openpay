@@ -25,6 +25,11 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      # 依存の取得元 gate (2026-07-20 採用): 全 package-lock.json が公式 npm
+      # レジストリのみから解決されていることを検査。git URL / 独自レジストリ /
+      # http 取得の混入 (AI エージェント経由のサプライチェーン汚染含む) で fail。
+      # .npmrc の redirect は npm ci が読む前に止める (Node 標準 API + Git のみ)。
+      - run: node scripts/lockfile-gate.mjs
       - run: npm ci
       - name: Cache Next.js build
         uses: actions/cache@v4
@@ -102,6 +107,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - run: node scripts/lockfile-gate.mjs
       - run: npm ci
       - run: node scripts/run-lua-tests.mjs
 
@@ -113,6 +119,8 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      # lockfile と .npmrc の取得元を、npm のネットワークアクセスより前に検査する。
+      - run: node scripts/lockfile-gate.mjs
       # MODERATE / HIGH / CRITICAL の advisory gate。scripts/audit-gate.mjs は
       # 受容済 advisory を allowlist で許容し、それ以外の MODERATE+ で fail
       # させる。受容済の根拠は docs/DEPLOY_CHECKLIST.md §7、allowlist 本体は
@@ -121,7 +129,3 @@ jobs:
       # (旧: HIGH+ のみ gate、moderate は warning。2026-05-22 に moderate も
       # gating へ昇格させ、新規 moderate を必ず人が評価する policy に変更)
       - run: node scripts/audit-gate.mjs
-      # 依存の取得元 gate (2026-07-20 採用): 全 package-lock.json が公式 npm
-      # レジストリのみから解決されていることを検査。git URL / 独自レジストリ /
-      # http 取得の混入 (AI エージェント経由のサプライチェーン汚染含む) で fail。
-      - run: node scripts/lockfile-gate.mjs

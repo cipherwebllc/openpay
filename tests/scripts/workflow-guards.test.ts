@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { LUA_REAL_TEST_FILES } from '../../scripts/lib/luaRealTests.mjs';
@@ -9,6 +9,34 @@ function workflow(name: string): string {
 }
 
 describe('GitHub Actions operation guards', () => {
+  const workflowFiles = readdirSync(resolve('.github/workflows')).filter((name) => /\.ya?ml$/.test(name));
+
+  it('Lighthouse uses the explicitly approved patch version', () => {
+    expect(workflow('lighthouse.yml')).toMatch(/^\s*npx --yes @lhci\/cli@0\.14\.0 autorun\s*$/m);
+  });
+
+  it.each(workflowFiles)('%s explicitly limits GITHUB_TOKEN permissions', (name) => {
+    const source = workflow(name);
+    const permissions = source.match(/^permissions:\n((?:[ \t]+[^\n]*\n|\n)+)/m)?.[1];
+    expect(permissions).toBeDefined();
+    expect(permissions).toContain('contents: read');
+    expect(source).not.toMatch(/^\s+\S+: write\s*$/m);
+    if (name === 'post-deploy-verify.yml') expect(permissions).toContain('actions: read');
+  });
+
+  it.each(workflowFiles)('%s checks registry sources before every dependency install', (name) => {
+    const source = workflow(name);
+    const jobs = source.slice(source.indexOf('\njobs:\n')).split(/\n  [\w-]+:\n/).slice(1);
+    for (const job of jobs) {
+      const install = job.search(/\brun:\s*npm ci\b/);
+      if (install === -1) continue;
+      const gate = job.indexOf('run: node scripts/lockfile-gate.mjs');
+      expect(gate, `${name}: pre-install source gate`).toBeGreaterThan(-1);
+      expect(gate, `${name}: pre-install source gate`).toBeLessThan(install);
+      expect(job.slice(0, gate)).not.toMatch(/continue-on-error:\s*true/);
+    }
+  });
+
   it('CI は typecheck 直後に full ESLint を実行する', () => {
     const source = workflow('ci.yml');
     const typecheck = source.indexOf('- run: npm run typecheck');

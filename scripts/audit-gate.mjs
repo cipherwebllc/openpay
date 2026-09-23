@@ -169,14 +169,34 @@ const audit = spawnSync('npm', ['audit', '--omit=dev', '--json'], {
   encoding: 'utf8',
   maxBuffer: 50 * 1024 * 1024,
 });
-// npm audit は脆弱性が見つかると exit 1 を返すが、stdout は valid JSON のため
-// status を見ず JSON.parse する。stdout が空 = npm 自体の error 状態。
+// endpoint / npm 起動失敗が「脆弱性ゼロ」の成功判定へ波及するのを防ぐ。
+// exit 1 は脆弱性検出と endpoint 障害の両方に使われるため、JSON の形も検査する。
+if (audit.error || audit.signal || ![0, 1].includes(audit.status)) {
+  console.error(`audit-gate: npm audit failed (status: ${audit.status}, signal: ${audit.signal ?? 'none'})`);
+  process.exit(2);
+}
 if (!audit.stdout) {
   console.error('audit-gate: `npm audit` produced no stdout');
   console.error(audit.stderr);
   process.exit(2);
 }
-const data = JSON.parse(audit.stdout);
+let data;
+try {
+  data = JSON.parse(audit.stdout);
+} catch {
+  // 壊れた endpoint 応答を成功扱いせず、監査未完了として CI を止める。
+  console.error('audit-gate: npm audit returned invalid JSON; audit did not complete');
+  process.exit(2);
+}
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+if (isRecord(data) && Object.hasOwn(data, 'error')) {
+  console.error('audit-gate: npm audit returned an endpoint/command error; audit did not complete');
+  process.exit(2);
+}
+if (!isRecord(data) || !isRecord(data.vulnerabilities) || !isRecord(data.metadata?.vulnerabilities)) {
+  console.error('audit-gate: npm audit returned an invalid report; expected vulnerabilities and metadata.vulnerabilities objects');
+  process.exit(2);
+}
 
 // ────────────────────────────────────────────────────────────────────
 // 2. GATED_SEVERITIES (moderate / high / critical) を GHSA URL で集約
@@ -186,7 +206,7 @@ const data = JSON.parse(audit.stdout);
 // ────────────────────────────────────────────────────────────────────
 /** @type {Map<string, { ghsaId: string, name: string, title: string, severity: string, url: string, packages: Set<string> }>} */
 const advisories = new Map();
-for (const [pkgName, info] of Object.entries(data.vulnerabilities ?? {})) {
+for (const [pkgName, info] of Object.entries(data.vulnerabilities)) {
   if (!GATED_SEVERITIES.has(info.severity)) continue;
   for (const via of info.via ?? []) {
     if (typeof via !== 'object' || via === null) continue;

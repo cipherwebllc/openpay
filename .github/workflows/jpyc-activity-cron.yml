@@ -5,6 +5,8 @@ on:
   schedule:
     - cron: '20 * * * *' # 毎時 20 分
   workflow_dispatch: {}
+permissions:
+  contents: read
 jobs:
   trigger:
     runs-on: ubuntu-latest
