@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createSiweMessage } from 'viem/siwe';
 import { privateKeyToAccount } from 'viem/accounts';
 import { supportedChains } from '@/lib/chains';
+import * as Sentry from '@sentry/nextjs';
+
+vi.mock('@sentry/nextjs', () => ({ captureMessage: vi.fn(), captureException: vi.fn() }));
 
 const h = vi.hoisted(() => {
   const ipRate = { allowed: true };
@@ -93,6 +96,8 @@ describe('SIWE routes', () => {
     h.kvSet.mockResolvedValue({ ok: false, reason: 'unconfigured' });
     h.ipRate.allowed = true;
     h.checkIpRateLimit.mockClear();
+    vi.mocked(Sentry.captureMessage).mockClear();
+    vi.mocked(Sentry.captureException).mockClear();
   });
 
   afterEach(() => {
@@ -252,6 +257,27 @@ describe('SIWE routes', () => {
     const res = await verifyPOST(req);
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ ok: false, error: 'kv_not_configured' });
+  });
+
+  it('verify: unsigned foreign domain keeps 401 domain_mismatch without a Sentry event', async () => {
+    h.kvConfigured = true;
+    const message = createSiweMessage({
+      domain: 'attacker.invalid', uri: 'https://attacker.invalid', version: '1',
+      address: '0x0000000000000000000000000000000000000001',
+      chainId: 80002, nonce: 'abcdefgh12345678',
+      issuedAt: new Date(), expirationTime: new Date(Date.now() + 600_000),
+    });
+    const res = await verifyPOST(new Request('http://localhost/api/auth/siwe/verify', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message, signature: '0x1234' }),
+    }));
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ ok: false, error: 'domain_mismatch' });
+    expect(res.headers.has('set-cookie')).toBe(false);
+    expect(h.kvDel).not.toHaveBeenCalled();
+    expect(h.kvSet).not.toHaveBeenCalled();
+    expect(Sentry.captureMessage).not.toHaveBeenCalled();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
   });
 
   it('verify: KV 設定時の 8KiB 超 body → JSON/署名検証前に 413', async () => {

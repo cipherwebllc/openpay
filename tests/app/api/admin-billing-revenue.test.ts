@@ -7,6 +7,11 @@ const { kvMod, store } = vi.hoisted(() => {
   const lists = new Map<string, string[]>();
   const kvMod = {
     isKvConfigured: () => true,
+    kvIncr: vi.fn(async (k: string) => {
+      const value = Number(vals.get(k) ?? 0) + 1;
+      vals.set(k, String(value));
+      return { ok: true as const, value };
+    }),
     kvGet: async (k: string) => ({ ok: true as const, value: vals.has(k) ? vals.get(k)! : null }),
     kvSet: async (k: string, v: string, opts: { nx?: boolean } = {}) => {
       if (opts.nx && vals.has(k)) return { ok: true as const, value: null };
@@ -36,7 +41,7 @@ vi.mock('@/lib/kv', () => kvMod);
 
 const session = vi.hoisted(() => ({ address: '0x000000000000000000000000000000000000ad11' }));
 vi.mock('@/app/api/auth/siwe/_session', () => ({
-  requireSession: async () => ({ ok: true as const, address: session.address }),
+  requireSession: vi.fn(async () => ({ ok: true as const, address: session.address })),
 }));
 vi.mock('@/lib/logger', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -45,12 +50,17 @@ vi.mock('@/lib/logger', () => ({
 import { GET } from '@/app/api/admin/billing/revenue/route';
 import { recordRelayedVolume } from '@/lib/billingMeter';
 import { recordFeeRevenue } from '@/lib/feeRevenue';
+import { logger } from '@/lib/logger';
+import { requireSession } from '@/app/api/auth/siwe/_session';
+import { hashIp } from '@/lib/net/ipHash';
 
 const JPYC = 10n ** 18n;
 const AMOY = 80002;
 const ADMIN = '0x000000000000000000000000000000000000ad11';
 const MERCHANT = '0x000000000000000000000000000000000000000a' as `0x${string}`;
-const req = (qs = '') => new Request(`http://localhost/api/admin/billing/revenue${qs}`);
+const req = (qs = '', ip?: string) => new Request(`http://localhost/api/admin/billing/revenue${qs}`, {
+  headers: ip ? { 'x-vercel-forwarded-for': ip } : undefined,
+});
 
 // settle が課金する previousPeriod に合わせ、その期間で出来高+入金を仕込む。
 function periods(nowMs: number) {
@@ -62,6 +72,7 @@ function periods(nowMs: number) {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   store.vals.clear();
   store.lists.clear();
   session.address = ADMIN;
@@ -70,6 +81,7 @@ beforeEach(() => {
   delete process.env.OPENPAY_USAGE_FEE_BPS;
 });
 afterEach(() => {
+  vi.unstubAllEnvs();
   delete process.env.ADMIN_WALLETS;
   delete process.env.OPENPAY_USAGE_FEE_START_PERIOD;
 });
@@ -80,6 +92,37 @@ describe('admin billing revenue route', () => {
     const res = await GET(req());
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ error: 'forbidden' });
+    expect(logger.info).toHaveBeenCalledWith('admin.billing.forbidden', { wallet: ADMIN });
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('IP flood is limited before session reads without warnings (real limiter)', async () => {
+    vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
+    process.env.ADMIN_WALLETS = MERCHANT;
+    for (let i = 0; i < 30; i++) {
+      const res = await GET(req('', '203.0.113.10'));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ ok: false, error: 'forbidden' });
+    }
+    const res = await GET(req('', '203.0.113.10'));
+    expect(res.status).toBe(429);
+    expect(res.headers.get('retry-after')).toBe('60');
+    expect(await res.json()).toEqual({ error: 'rate_limited' });
+    expect(requireSession).toHaveBeenCalledTimes(30);
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(kvMod.kvIncr).toHaveBeenCalledWith(
+      `iprl:v1:admin-billing-revenue:${hashIp('203.0.113.10')}`, { initialTtlSec: 60 },
+    );
+    expect((await GET(req('', '203.0.113.11'))).status).toBe(403);
+  });
+
+  it('IP limiter KV outage fails open and keeps the admin JSON response', async () => {
+    vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
+    kvMod.kvIncr.mockRejectedValueOnce(new Error('KV unavailable'));
+    const res = await GET(req('', '203.0.113.10'));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, count: 0, totalWei: '0' });
+    expect(kvMod.kvIncr).toHaveBeenCalledOnce();
   });
 
   it('admin → 200 JSON: 合計 + 照合 (請求 vs 入金)', async () => {

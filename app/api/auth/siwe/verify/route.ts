@@ -110,10 +110,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   if (!result.ok) {
-    // domain_mismatch は phishing replay の兆候になり得るのでセキュリティイベントとして上げる
-    // (通常の署名ミス/nonce 失効はユーザ起因なので記録しない=ノイズ回避)。
+    // 署名前に誰でも生成できる拒否を Sentry quota 消費へ波及させない。
+    // info は captureMessage しない。domain/署名の検証順序と応答は維持する。
     if (result.error === 'domain_mismatch') {
-      logger.warn('siwe.verify.domain_mismatch');
+      logger.info('siwe.verify.domain_mismatch');
     }
     return NextResponse.json(
       { ok: false, error: result.error },

@@ -99,18 +99,27 @@ if (dsn) {
     // NEXT_PUBLIC_* はビルド時に埋め込まれるため、env 変更の反映には再デプロイが要る。
     replaysSessionSampleRate: replaySessionRate,
     replaysOnErrorSampleRate: replayErrorRate,
-    // 両方 0 なら replay integration 自体を積まない (録画コードのバンドル ~50kB gz を省く)。
-    integrations:
-      replaySessionRate > 0 || replayErrorRate > 0
-        ? [
-            Sentry.replayIntegration({
-              maskAllText: true,
-              maskAllInputs: true,
-              blockAllMedia: true,
-            }),
-          ]
-        : [],
+    // Replay 本体と scrubber は初期 bundle に含めず、load 後に追加する。
+    integrations: [],
   });
+
+  if (replaySessionRate > 0 || replayErrorRate > 0) {
+    const loadReplay = () => {
+      // 付帯録画の chunk 読込/初期化失敗を決済 UI の unhandled rejection へ波及させない。
+      void import('@/lib/sentryReplayLazy').then(({ installSentryReplay }) => {
+        installSentryReplay();
+      }).catch(() => undefined);
+    };
+    const scheduleReplay = () => {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(loadReplay, { timeout: 2000 });
+      } else {
+        window.setTimeout(loadReplay, 0);
+      }
+    };
+    if (document.readyState === 'complete') scheduleReplay();
+    else window.addEventListener('load', scheduleReplay, { once: true });
+  }
 }
 
 export const onRouterTransitionStart = dsn
