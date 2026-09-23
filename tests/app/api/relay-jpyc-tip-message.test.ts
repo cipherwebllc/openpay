@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getAddress, type Hex } from 'viem';
+import { encodeAbiParameters, encodeEventTopics, getAddress, parseAbi, type Hex } from 'viem';
 
 const JPYC = 10n ** 18n;
 const TX_HASH = `0x${'a'.repeat(64)}` as Hex;
@@ -19,10 +19,21 @@ const hold = vi.hoisted(() => ({
   sanitize: vi.fn(),
   after: vi.fn(),
   afterTasks: [] as Promise<unknown>[],
+  used: false,
+  getReceipt: vi.fn(),
   idem: { state: 'missing' } as
     | { state: 'missing' }
     | { state: 'hash'; txHash: Hex }
     | { state: 'indeterminate' },
+}));
+
+vi.mock('viem', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('viem')>()),
+  createPublicClient: () => ({ getTransactionReceipt: hold.getReceipt }),
+}));
+vi.mock('@/lib/chains', () => ({
+  chainObjectForId: () => ({ id: 80002 }),
+  transportForChain: () => ({}),
 }));
 
 vi.mock('next/server', () => ({
@@ -103,7 +114,7 @@ vi.mock('@/lib/relay/relayProvider', () => ({
   relayFreeAuthorization: (...args: unknown[]) => hold.relay(...args),
   jpycAddressFor: () =>
     '0x0000000000000000000000000000000000000002',
-  readAuthorizationUsed: vi.fn(async () => false),
+  readAuthorizationUsed: vi.fn(async () => hold.used),
   findAuthorizationUsedTransactionHash: vi.fn(async () => null),
 }));
 
@@ -216,6 +227,8 @@ beforeEach(() => {
   hold.forwarder = null;
   hold.afterTasks = [];
   hold.idem = { state: 'missing' };
+  hold.used = false;
+  hold.getReceipt.mockReset();
   hold.relay.mockResolvedValue({ kind: 'success', txHash: TX_HASH });
   hold.settle.mockResolvedValue({ kind: 'success', txHash: TX_HASH });
   hold.record.mockResolvedValue(undefined);
@@ -415,6 +428,31 @@ describe('POST /api/relay/jpyc — private tipMessage attachment', () => {
     expect(hold.store).not.toHaveBeenCalled();
 
     hold.idem = { state: 'hash', txHash: TX_HASH };
+    hold.used = true;
+    const abi = parseAbi([
+      'event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)',
+      'event Transfer(address indexed from, address indexed to, uint256 value)',
+    ]);
+    // status の settled は KV hash だけでなく、同じ authorization の成功 receipt が必要。
+    hold.getReceipt.mockResolvedValue({
+      status: 'success',
+      logs: [
+        {
+          address: '0x0000000000000000000000000000000000000002',
+          topics: encodeEventTopics({
+            abi,
+            eventName: 'AuthorizationUsed',
+            args: { authorizer: CUSTOMER, nonce: `0x${'3'.repeat(64)}` },
+          }),
+          data: '0x',
+        },
+        {
+          address: '0x0000000000000000000000000000000000000002',
+          topics: encodeEventTopics({ abi, eventName: 'Transfer', args: { from: CUSTOMER, to: MERCHANT } }),
+          data: encodeAbiParameters([{ type: 'uint256' }], [JPYC]),
+        },
+      ],
+    });
     const statusResponse = await statusPost(
       req('/api/relay/jpyc/status', {
         lookup: 'nonce',

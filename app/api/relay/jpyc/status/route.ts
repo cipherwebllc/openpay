@@ -3,7 +3,18 @@
 // response-unknown を settled / unused / indeterminate に分類する。
 
 import { NextResponse } from 'next/server';
-import { getAddress, isAddress, isHex, type Address, type Hex } from 'viem';
+import {
+  createPublicClient,
+  getAddress,
+  isAddress,
+  isAddressEqual,
+  isHex,
+  parseAbi,
+  parseEventLogs,
+  type Address,
+  type Hex,
+} from 'viem';
+import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
@@ -23,6 +34,7 @@ import {
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
 import { recoverReceiveWithAuthorizationSigner } from '@/lib/relay/forwarderSettle';
+import { hasMatchingForwarderSettlement } from '@/lib/relay/settlementReceipt';
 import {
   recoverTransferAuthorizationSigner,
   type Eip3009Authorization,
@@ -35,6 +47,9 @@ type ParsedIntent = {
   chainId: number;
   from: Address;
   nonce: Hex;
+  forwarder?: Address;
+  settlement?: ForwarderSettleParams;
+  transfer?: Pick<Eip3009Authorization, 'to' | 'value'>;
   verifySignature: () => Promise<Address>;
 };
 
@@ -90,10 +105,6 @@ export async function POST(req: Request): Promise<NextResponse> {
       parsed.nonce,
     );
     if (idem.state === 'indeterminate') return json({ ok: true, state: 'indeterminate' });
-    if (idem.state === 'hash') {
-      return json({ ok: true, state: 'settled', txHash: idem.txHash });
-    }
-
     const token = jpycAddressFor(parsed.chainId);
     if (!token) {
       return NextResponse.json(
@@ -107,14 +118,27 @@ export async function POST(req: Request): Promise<NextResponse> {
       parsed.from,
       parsed.nonce,
     );
-    if (!used) return json({ ok: true, state: 'unused' });
+    if (!used) {
+      // broadcast 済み hash がある場合、unused を新しい支払いの許可に使うと二重払いへ
+      // 波及しうる。未確定/置換を区別できない間は既存 indeterminate に閉じる。
+      return json({ ok: true, state: idem.state === 'hash' ? 'indeterminate' : 'unused' });
+    }
 
+    if (idem.state === 'hash' && await receiptMatchesIntent(parsed, token, idem.txHash)) {
+      return json({ ok: true, state: 'settled', txHash: idem.txHash });
+    }
+
+    // KV hash は別 authorization の置換 tx の可能性がある。対象 nonce の実行 tx を再解決し、
+    // こちらも receipt を照合してから返す。used/cancelled フラグだけでは決済成功としない。
     const txHash = await findAuthorizationUsedTransactionHash(
       parsed.chainId,
       token,
       parsed.from,
       parsed.nonce,
     );
+    if (!txHash || !(await receiptMatchesIntent(parsed, token, txHash))) {
+      return json({ ok: true, state: 'indeterminate' });
+    }
     return json({ ok: true, state: 'settled', txHash });
   } catch (error) {
     // KV/RPC の一過性障害を HTTP error にすると client の停止条件が分岐する。解決不能だけを
@@ -125,6 +149,66 @@ export async function POST(req: Request): Promise<NextResponse> {
       error,
     });
     return json({ ok: true, state: 'indeterminate' });
+  }
+}
+
+const AUTHORIZATION_TRANSFER_EVENTS = parseAbi([
+  'event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)',
+  'event Transfer(address indexed from, address indexed to, uint256 value)',
+]);
+
+async function receiptMatchesIntent(parsed: ParsedIntent, token: Address, txHash: Hex): Promise<boolean> {
+  try {
+    const chain = chainObjectForId(parsed.chainId);
+    if (!chain) return false;
+    const client = createPublicClient({ chain, transport: transportForChain(parsed.chainId) });
+    const receipt = await client.getTransactionReceipt({ hash: txHash });
+    if (receipt.status !== 'success') return false;
+
+    if (parsed.forwarder) {
+      return hasMatchingForwarderSettlement(
+        receipt.logs,
+        parsed.forwarder,
+        parsed.from,
+        parsed.nonce,
+        parsed.settlement,
+      );
+    }
+
+    const logs = receipt.logs.filter((log) => isAddressEqual(log.address, token));
+    const used = parseEventLogs({
+      abi: AUTHORIZATION_TRANSFER_EVENTS,
+      eventName: 'AuthorizationUsed',
+      logs,
+      strict: true,
+    }).some(({ args }) =>
+      isAddressEqual(args.authorizer, parsed.from) &&
+      args.nonce.toLowerCase() === parsed.nonce.toLowerCase(),
+    );
+    if (!used) return false;
+
+    // free 経路の nonce は分割 commitment ではないため、同じ JPYC receipt 内の Transfer も
+    // 必須。署名付き照会は宛先/額まで照合し、nonce-only は authorizer 自身の送金を確認する。
+    return parseEventLogs({
+      abi: AUTHORIZATION_TRANSFER_EVENTS,
+      eventName: 'Transfer',
+      logs,
+      strict: true,
+    }).some(({ args }) =>
+      isAddressEqual(args.from, parsed.from) &&
+      (!parsed.transfer || (
+        isAddressEqual(args.to, parsed.transfer.to) && args.value === parsed.transfer.value
+      )),
+    );
+  } catch (error) {
+    // 旧 KV hash の receipt 不在/RPC 障害が、正しい AuthorizationUsed tx の回復まで
+    // 巻き込むのを断つ。証拠を読めない hash は成功扱いせず、呼出元で再解決/indeterminate。
+    logger.warn('relay.jpyc.status.receipt_unreadable', {
+      chainId: parsed.chainId,
+      txHash,
+      error,
+    });
+    return false;
   }
 }
 
@@ -163,6 +247,7 @@ function parseIntent(raw: Record<string, unknown>): ParsedIntent | null {
       chainId: raw.chainId,
       from,
       nonce: raw.nonce as Hex,
+      forwarder: jpycForwarderFor(raw.chainId) ?? undefined,
       // nonce は 32-byte random/forwarder commitment で列挙不能、route は rate-limit 済みかつ
       // read-only。リロード後に署名を再保存せず結果照会できるよう signer は from に固定する。
       verifySignature: async () => from,
@@ -214,6 +299,8 @@ function parseIntent(raw: Record<string, unknown>): ParsedIntent | null {
       chainId,
       from,
       nonce: buildForwarderNonce(params, chainId, forwarder),
+      forwarder,
+      settlement: params,
       verifySignature: () =>
         recoverReceiveWithAuthorizationSigner(
           params,
@@ -245,6 +332,7 @@ function parseIntent(raw: Record<string, unknown>): ParsedIntent | null {
     chainId,
     from,
     nonce: auth.nonce,
+    transfer: auth,
     verifySignature: () =>
       recoverTransferAuthorizationSigner(auth, chainId, token, signature),
   };
