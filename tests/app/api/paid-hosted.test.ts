@@ -498,6 +498,24 @@ afterEach(() => {
 });
 
 describe('hosted creator-store paid route', () => {
+  it('takedown refuses fresh quotes and settled redelivery never verifies or charges again', async () => {
+    routeMocks.getHostedProduct.mockResolvedValue({ ...productFixture(), saleActive: false, contentAvailable: false });
+    routeMocks.getHostedContent.mockResolvedValue(null);
+    routeMocks.getIntent.mockResolvedValue(intentFixture('settled'));
+    const route = await loadRoute();
+    const path = `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`;
+    expect((await callHosted(route, path)).status).toBe(404);
+    const paid = await callHosted(route, path, { 'X-PAYMENT': paymentHeader() });
+    expect(paid.status).toBe(503);
+    expect(await paid.json()).toEqual({ ok: false, error: 'content_unavailable' });
+    expect(paid.headers.has('PAYMENT-REQUIRED')).toBe(false);
+    expect(routeMocks.createQuoted).not.toHaveBeenCalled();
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.claimSigned).not.toHaveBeenCalled();
+    expect(routeMocks.claimSettlement).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+
   it('creator-store または facilitator flag OFF は完全 inert の 404', async () => {
     const route = await loadRoute();
 

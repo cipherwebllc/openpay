@@ -505,6 +505,16 @@ async function submittedResponse(input: {
   if (found.state === 'failed_prebroadcast') {
     return errorResponse('purchase_intent_failed', 409);
   }
+  if (found.state === 'quoted' || found.state === 'signed') {
+    // moderation/欠損済み本文への署名が「支払いだけ成立」に波及するのを verify/settle 前に断つ。
+    // 通常の販売停止や改訂では既存 quote を維持し、購入 snapshot の revision を検査する。
+    const product = await getHostedProduct(found.resourceId);
+    if (product === 'storage') return errorResponse('storage_unavailable', 503);
+    if (!product || !product.contentAvailable) return errorResponse('content_unavailable', 409);
+    const content = await getHostedContent(found.resourceId, found.contentRevision);
+    if (content === 'storage') return errorResponse('storage_unavailable', 503);
+    if (content === null) return errorResponse('content_unavailable', 409);
+  }
   let signed = found;
   if (found.state === 'quoted') {
     let verify: RecordValue;

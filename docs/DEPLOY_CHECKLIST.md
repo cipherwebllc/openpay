@@ -2115,6 +2115,41 @@ query の percent encoding を含む例は fixture の measurements を参照す
 後続 SDK の refresh/cache・独立 runtime/Worker の実機検証は PR C の受入条件とする。
 
 
+### 16.10 Hosted 商品の運営 takedown
+
+`POST /api/admin/store/products/[id]/takedown` は、SIWE ログイン済みかつ既存の
+`ADMIN_WALLETS` に含まれる運営 wallet 専用。空の許可リストは全拒否する。
+ストアの公開 flag が OFF でも実行できる。対象の商品 ID・権利者申告を運営側で確認し、
+同じ OpenPay origin にログインしたブラウザの DevTools で実行する（cookie・秘密鍵はコピーしない）。
+
+```js
+const productId = 'h_対象商品の32桁hex'; // 対象 ID に置換
+const response = await fetch(`/api/admin/store/products/${encodeURIComponent(productId)}/takedown`, {
+  method: 'POST',
+  credentials: 'same-origin',
+  headers: { 'Content-Type': 'application/json' },
+});
+console.log(response.status, await response.json());
+```
+
+- `200 { ok: true, id, alreadyPurged, contentRevision }`: 販売停止・配信停止と全 revision の本文削除が完了。
+  再実行も成功し、完了済みなら `alreadyPurged: true`。商品・owner index・購入権・レシート・intent は保持する。
+- `409 conflict`: 並行編集を検出し削除していない。同じリクエストを再実行する。
+  `503 storage_unavailable`: 完了未確認。KV の状態を確認して再実行する。
+  `401` は再ログイン、`403` は運営 wallet と origin、`415` は JSON ヘッダ、`400/404` は対象 ID を確認。
+  `429` は `Retry-After: 60` に従う。
+- 実行後は運営ログの `admin.store.takedown`（wallet・productId・contentRevision・alreadyPurged・at）と
+  Store 非掲載を確認する。監査用 KV レコードの既存パターンはなく、この操作は `warn` の構造化ログと
+  既存 Sentry 連携の `event:admin.store.takedown` タグ付きイベントに記録する。
+- 既購入者の購入権は維持し、ライブラリからの本文取得は提供終了となる。再支払いを案内しない。
+  seller は販売再開できない。復元 API はないため、本文削除を取り消す操作として販売 flag を上げない。
+  この操作は送信済み on-chain 決済の取消・返金、NFT の burn、外部配布先や既取得コピーの削除は行わない。
+  進行中決済と救済は §16.2 の 4 ④（content purge × pending intent）の既存手順に従う。
+- タイトル・説明・画像などの商品メタデータは KV に残る。購入時のメタデータは購入者のライブラリに、
+  現在の商品情報は出品者管理画面に残る。登録済み license NFT のタイトル・説明・画像は
+  metadata API / marketplace で公開され得る。出品者単位の ban ではなく、別 ID での再出品も防がない。
+  画像などの公開情報の削除や再出品への対処が必要な場合は、別途対応する。
+
 ### Arc testnet smoke (公開文言・flag 点灯は user 承認後)
 
 - [ ] テスト環境を `NEXT_PUBLIC_NETWORK_ENV=testnet` + `NEXT_PUBLIC_ENABLE_USDC_ARC=1` で用意する (本番 flag は既定 OFF のまま)。

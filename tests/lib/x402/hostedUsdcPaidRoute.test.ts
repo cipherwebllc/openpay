@@ -409,7 +409,10 @@ describe('hosted USDC paid route', () => {
     expect(mocks.recordTransaction).not.toHaveBeenCalled();
     expect(mocks.finalize).not.toHaveBeenCalled();
     expect(mocks.readAccess).not.toHaveBeenCalled();
-    expect(mocks.getContent).not.toHaveBeenCalled();
+    // Admission checks existence before verify; the failed verdict still never serves it.
+    expect(mocks.getContent).toHaveBeenCalledTimes(1);
+    expect(mocks.getContent).toHaveBeenCalledWith(RESOURCE_ID, 2);
+    expect(mocks.getContent.mock.invocationCallOrder[0]).toBeLessThan(mocks.postFacilitator.mock.invocationCallOrder[0]);
   });
 
   it('v2 PAYMENT-SIGNATURE は CAIP-2 accept の完全一致だけを facilitator へ渡す', async () => {
@@ -521,6 +524,71 @@ describe('hosted USDC paid route', () => {
       state: 'pending',
     });
     expect(mocks.finalize).not.toHaveBeenCalled();
+  });
+
+  describe.each(['quoted', 'signed'] as const)('takedown admission for %s intents', (state) => {
+    it.each([
+      ['purged content', product(), null, 409, 'content_unavailable'],
+      ['content storage failure', product(), 'storage', 503, 'storage_unavailable'],
+      ['unavailable product with retained content', { ...product(), contentAvailable: false }, { kind: 'text', value: 'retained' }, 409, 'content_unavailable'],
+      ['product storage failure', 'storage', { kind: 'text', value: 'retained' }, 503, 'storage_unavailable'],
+      ['missing product', null, { kind: 'text', value: 'retained' }, 409, 'content_unavailable'],
+    ])('rejects %s before verification or settlement', async (_case, storedProduct, content, status, error) => {
+      mocks.findIntent.mockResolvedValue(intent(state));
+      mocks.getProduct.mockResolvedValue(storedProduct);
+      mocks.getContent.mockResolvedValue(content);
+      const response = await handleHostedUsdcPaidGet(request({ 'X-PAYMENT': paymentHeader() }), RESOURCE_ID, PAYER);
+      expect(response.status).toBe(status);
+      expect(await response.json()).toEqual({ ok: false, error });
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(response.headers.has('PAYMENT-REQUIRED')).toBe(false);
+      expect(mocks.postFacilitator).not.toHaveBeenCalled();
+      expect(mocks.claimSigned).not.toHaveBeenCalled();
+      expect(mocks.claimSettlement).not.toHaveBeenCalled();
+      expect(mocks.recordTransaction).not.toHaveBeenCalled();
+      expect(mocks.finalize).not.toHaveBeenCalled();
+      expect(mocks.markIndeterminate).not.toHaveBeenCalled();
+    });
+
+    it('uses the quoted revision and preserves valid outstanding purchases after a seller pause/edit', async () => {
+      mocks.findIntent.mockResolvedValue(intent(state));
+      mocks.getProduct.mockResolvedValue({ ...product(), saleActive: false, contentRevision: 3, priceJpyc: '500' });
+      const response = await handleHostedUsdcPaidGet(request({ 'X-PAYMENT': paymentHeader() }), RESOURCE_ID, PAYER);
+      expect(response.status).toBe(200);
+      expect(mocks.getProduct).toHaveBeenCalledWith(RESOURCE_ID);
+      expect(mocks.getContent).toHaveBeenNthCalledWith(1, RESOURCE_ID, 2);
+      expect(mocks.getContent.mock.invocationCallOrder[0]).toBeLessThan(mocks.postFacilitator.mock.invocationCallOrder[0]);
+      expect(mocks.getContent.mock.invocationCallOrder[0]).toBeLessThan(mocks.claimSettlement.mock.invocationCallOrder[0]);
+      expect(mocks.postFacilitator.mock.calls.map(([path]) => path)).toEqual(state === 'quoted' ? ['/verify', '/settle'] : ['/settle']);
+    });
+  });
+
+  it.each(['settling', 'indeterminate'] as const)('takedown does not block recovery of %s intents', async (state) => {
+    mocks.findIntent.mockResolvedValue(intent(state));
+    mocks.getProduct.mockResolvedValue('storage');
+    mocks.getContent.mockResolvedValue(null);
+    const response = await handleHostedUsdcPaidGet(request({ 'X-PAYMENT': paymentHeader() }), RESOURCE_ID, PAYER);
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ ok: true, state: 'pending' });
+    expect(mocks.getProduct).not.toHaveBeenCalled();
+    expect(mocks.getContent).not.toHaveBeenCalled();
+    expect(mocks.postFacilitator).not.toHaveBeenCalled();
+    expect(mocks.claimSettlement).not.toHaveBeenCalled();
+  });
+
+  it('takedown refuses fresh quotes and settled redelivery never calls the facilitator again', async () => {
+    mocks.getProduct.mockResolvedValue({ ...product(), saleActive: false, contentAvailable: false });
+    mocks.getContent.mockResolvedValue(null);
+    mocks.findIntent.mockResolvedValue(intent('settled'));
+    expect((await handleHostedUsdcPaidGet(request(), RESOURCE_ID, PAYER)).status).toBe(404);
+    const paid = await handleHostedUsdcPaidGet(request({ 'X-PAYMENT': paymentHeader() }), RESOURCE_ID, PAYER);
+    expect(paid.status).toBe(503);
+    expect(await paid.json()).toEqual({ ok: false, error: 'content_unavailable' });
+    expect(paid.headers.has('PAYMENT-REQUIRED')).toBe(false);
+    expect(mocks.createIntent).not.toHaveBeenCalled();
+    expect(mocks.postFacilitator).not.toHaveBeenCalled();
+    expect(mocks.claimSigned).not.toHaveBeenCalled();
+    expect(mocks.claimSettlement).not.toHaveBeenCalled();
   });
 
   // B4: 期限は「新規 broadcast の入場条件」であって、既に claim 済みの intent への

@@ -17,7 +17,7 @@ vi.mock('@/lib/kv', () => ({
   kvSet: async (key: string, value: string) => { h.store!.strings.set(key, value); return { ok: true, value: 'OK' }; },
   kvEval: async (script: string, keys: string[], args: string[]) => { h.calls++; return { ok: true, value: await runRedisLua(script, keys, args, h.store!) }; },
 }));
-import { parseHostedInput, createHostedProduct, parseStoredHostedProduct, hostedPurchaseMetadata, listHostedForOwner, listAvailableHostedForOwner, getHostedProductsByIds, getHostedProductUpdateSnapshot, replaceHostedSellerProduct, updateHostedProduct, putHostedContentRevision } from '@/lib/x402/hostedStore';
+import { parseHostedInput, createHostedProduct, parseStoredHostedProduct, hostedPurchaseMetadata, listHostedForOwner, listAvailableHostedForOwner, getHostedProductsByIds, getHostedProductUpdateSnapshot, replaceHostedSellerProduct, type HostedProduct, type HostedContent } from '@/lib/x402/hostedStore';
 import { LICENSE_DEFAULT_INSTRUCTIONS } from '@/lib/license/definition';
 import { licenseDeployment, licenseSellerAllowed } from '@/lib/license/config';
 import { licenseStockKey, LICENSE_DUE_INDEX } from '@/lib/license/stock';
@@ -30,6 +30,11 @@ afterAll(() => { vi.unstubAllEnvs(); return closeRedisLuaEngine(); });
 async function create() {
   const input = parseHostedInput(base); if (!input.ok) throw new Error(input.error);
   const r = await createHostedProduct(input, 1000); if (!r.ok) throw new Error(r.reason); return r.product;
+}
+async function edit(id: string, patch: Partial<HostedProduct>, content?: HostedContent) {
+  const snapshot = await getHostedProductUpdateSnapshot(id);
+  if (!snapshot || snapshot === 'storage') throw new Error('no snapshot');
+  return replaceHostedSellerProduct({ snapshot, owner: OWNER, metadata: { ...snapshot.product, ...patch }, content });
 }
 describe('license product foundation', () => {
   it('creates a pending definition, immutable text, stock and durable registration job atomically', async () => {
@@ -70,15 +75,15 @@ describe('license product foundation', () => {
     h.enabled = true; h.creator = false; expect(licenseSellerAllowed(OWNER)).toBe(false); h.creator = true;
     const p = await create();
     h.store!.strings.set('x402:hosted:' + p.id, JSON.stringify({ ...p, registration: { status: 'registered', attempts: 1, txHash: '0x' + 'a'.repeat(64) } }));
-    expect(await updateHostedProduct({ id: p.id, owner: OWNER, patch: { saleActive: true } })).toMatchObject({ ok: true });
+    expect(await edit(p.id, { saleActive: true })).toMatchObject({ ok: true });
     expect(await listAvailableHostedForOwner(OWNER)).toHaveLength(1);
     expect(await getHostedProductsByIds([p.id])).toHaveLength(1);
     vi.stubEnv('ENABLE_LICENSE_NFT_PUBLIC', '');
     expect(await listAvailableHostedForOwner(OWNER)).toEqual([]);
     expect(await getHostedProductsByIds([p.id])).toEqual([]);
     expect(await listHostedForOwner(OWNER)).toHaveLength(1); // Seller can still manage/pause it.
-    expect(await updateHostedProduct({ id: p.id, owner: OWNER, patch: { saleActive: true } })).toMatchObject({ ok: false });
-    expect(await updateHostedProduct({ id: p.id, owner: OWNER, patch: { saleActive: false } })).toMatchObject({ ok: true });
+    expect(await edit(p.id, { saleActive: true })).toMatchObject({ ok: false });
+    expect(await edit(p.id, { saleActive: false })).toMatchObject({ ok: true });
     vi.stubEnv('ENABLE_LICENSE_NFT_PUBLIC', '1'); vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', '');
     expect(licenseSellerAllowed(OWNER)).toBe(true);
     expect(parseHostedInput(base).ok).toBe(true);
@@ -94,9 +99,10 @@ describe('license product foundation', () => {
   });
   it('rejects publication before registration and economic/content edits in storage APIs', async () => {
     const p = await create();
-    expect(await updateHostedProduct({ id: p.id, owner: OWNER, patch: { saleActive: true } })).toMatchObject({ ok: false });
-    expect(await updateHostedProduct({ id: p.id, owner: OWNER, patch: { priceJpyc: '2000' } })).toMatchObject({ ok: false });
-    expect(await putHostedContentRevision({ id: p.id, owner: OWNER, content: { kind: 'text', value: 'new' } })).toMatchObject({ ok: false });
+    expect(await edit(p.id, { saleActive: true })).toMatchObject({ ok: false });
+    expect(await edit(p.id, { priceJpyc: '2000' })).toMatchObject({ ok: false });
+    expect(await edit(p.id, { usdcEnabled: true })).toMatchObject({ ok: false });
+    expect(await edit(p.id, {}, { kind: 'text', value: 'new' })).toMatchObject({ ok: false });
     const snapshot = await getHostedProductUpdateSnapshot(p.id); if (!snapshot || snapshot === 'storage') throw new Error('no snapshot');
     const update = await replaceHostedSellerProduct({ snapshot, owner: OWNER, metadata: { ...p, title: 'Cosmetic edit', imageUrl: 'https://seller.example/cover.png' } });
     expect(update).toMatchObject({ ok: true, product: { title: 'Cosmetic edit', license: p.license, registration: p.registration } });
