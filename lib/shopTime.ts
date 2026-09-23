@@ -4,6 +4,9 @@
 // enforcement は **advisory** (authority は on-chain・Phase1 の停止と同じ割り切り)。
 // 設計: plans/restaurant-pos-roadmap.md Phase 4 §3-D。
 
+import { pad } from './pad';
+
+export const TOKYO_TIME_ZONE = 'Asia/Tokyo';
 export const TOKYO_UTC_OFFSET_MIN = 9 * 60; // +09:00 固定
 const TOKYO_OFFSET_MS = TOKYO_UTC_OFFSET_MIN * 60_000;
 const DAY_MS = 86_400_000;
@@ -11,6 +14,18 @@ export const PICKUP_SLOT_MIN = 15; // 受取スロットの刻み (分)
 const SLOT_MS = PICKUP_SLOT_MIN * 60_000;
 export const PICKUP_MAX_SLOTS = 48; // スロット候補の上限 (15分×48=12h・暴走/巨大 UI 防止)
 export const MIN_LEAD_MAX = 24 * 60; // 最短受け渡し分数の上限 (24h)
+
+/** 会計・開示用の JST 暦日。ホスト TZ に依存せず、元の timestamp は変えない。 */
+export function tokyoDateKey(nowMs: number, sep = '-'): string {
+  const d = new Date(nowMs + TOKYO_OFFSET_MS);
+  return `${d.getUTCFullYear()}${sep}${pad(d.getUTCMonth() + 1)}${sep}${pad(d.getUTCDate())}`;
+}
+
+/** 会計明細CSV 用の JST 日時 (YYYY-MM-DD HH:mm:ss)。 */
+export function tokyoTimestamp(nowMs: number): string {
+  const d = new Date(nowMs + TOKYO_OFFSET_MS);
+  return `${tokyoDateKey(nowMs)} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+}
 
 /** "HH:mm" を 0..1439 の当日内分へ。形式/範囲不正は null (untrusted 入力の検証兼用)。 */
 export function parseHHMM(v: unknown): number | null {

@@ -7,6 +7,7 @@ import { getAddress, isAddress } from 'viem';
 import { AppShell } from '@/components/AppShell';
 import { LOCALES } from '@/i18n';
 import { env } from '@/lib/env';
+import { TOKYO_TIME_ZONE } from '@/lib/shopTime';
 import { getSellerDisclosure } from '@/lib/x402/hostedStore';
 
 export const runtime = 'nodejs';
@@ -43,6 +44,7 @@ export default async function CreatorStoreSellerDisclosurePage({
   const t = await getTranslations('CreatorStoreSellerDisclosure');
   const updatedAt = new Intl.DateTimeFormat(locale, {
     dateStyle: 'long',
+    timeZone: TOKYO_TIME_ZONE,
   }).format(new Date(disclosure.updatedAt));
 
   return (

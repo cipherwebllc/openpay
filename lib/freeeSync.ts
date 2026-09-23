@@ -18,7 +18,7 @@ import {
   type HistoryEntry,
 } from './history';
 import { shortAddress } from './format';
-import { pad } from './pad';
+import { tokyoDateKey } from './shopTime';
 
 /** freee deals に必要な会社・勘定科目・税区分 ID (名前でなく ID 指定が必須)。 */
 export type FreeeMapping = {
@@ -39,10 +39,9 @@ export type FreeeDealBody = {
   }>;
 };
 
-/** 発生日 (ローカル tz・YYYY-MM-DD)。会計 CSV の ymd と同じ規約。 */
+/** 発生日 (JST・YYYY-MM-DD)。会計 CSV と同じ暦日。 */
 export function freeeIssueDate(ts: number): string {
-  const d = new Date(ts);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return tokyoDateKey(ts);
 }
 
 /** 摘要: OpenPay 由来である事 + 記帳補助メタ (商品名/管理番号/メモ) + 追跡情報。

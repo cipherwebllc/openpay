@@ -15,7 +15,7 @@
 // (勘定科目/税区分は各社の取込ウィザードで再マッピング可)。
 
 import { ACCOUNTING_MAX_ROWS, buildCsv } from './csv';
-import { pad } from './pad';
+import { tokyoDateKey } from './shopTime';
 import { shortAddress } from './format';
 import { isIncomeSaleEntry } from './historyFilters';
 import { entryYenValue, type YenValue } from './historyYen';
@@ -59,11 +59,6 @@ export type AccountingCsvResult =
   | { ok: false; reason: 'rate-unavailable'; blockingRowCount: number };
 
 type Valued = { e: HistoryEntry; yv: Exclude<YenValue, { kind: 'unavailable' }> };
-
-function ymd(ts: number, sep: string): string {
-  const d = new Date(ts);
-  return `${d.getFullYear()}${sep}${pad(d.getMonth() + 1)}${sep}${pad(d.getDate())}`;
-}
 
 // 備考: 売上明細サマリ「商品名 x数量 / …」(記帳補助) + OpenPay の追跡情報 (token/chain・
 // 短縮 tx・元の価格建て anchor・概算フラグ) + 管理番号 + メモ。明細が無ければ従来どおり token/chain から。
@@ -214,7 +209,7 @@ function freeeRows(valued: ReadonlyArray<Valued>): string[][] {
     groups.forEach((g, gi) => {
       rows.push([
         '収入',
-        ymd(e.ts, '-'),
+        tokyoDateKey(e.ts),
         '売上高',
         freeeTaxLabel(g.taxCategory), // 税区分: グループ別 (単一グループは代表値)
         String(g.yen),
@@ -241,7 +236,7 @@ function yayoiRows(valued: ReadonlyArray<Valued>): string[][] {
         '2000', // 識別フラグ (仕訳)
         String(voucherNo), // 伝票No
         '', // 決算
-        ymd(e.ts, '/'), // 取引日付
+        tokyoDateKey(e.ts, '/'), // 取引日付 (JST)
         '売掛金', // 借方勘定科目
         '', // 借方補助科目
         '', // 借方部門
@@ -300,7 +295,7 @@ function mfRows(valued: ReadonlyArray<Valued>): string[][] {
       const yen = String(g.yen);
       rows.push([
         String(txNo), // 取引No
-        ymd(e.ts, '/'), // 取引日
+        tokyoDateKey(e.ts, '/'), // 取引日 (JST)
         '売掛金', // 借方勘定科目
         '', // 借方補助科目
         '', // 借方部門
@@ -367,5 +362,5 @@ export function accountingCsvFilename(
   format: AccountingFormat,
   now: Date = new Date(),
 ): string {
-  return `openpay-${format}-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.csv`;
+  return `openpay-${format}-${tokyoDateKey(now.getTime())}.csv`;
 }
