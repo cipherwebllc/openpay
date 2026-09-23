@@ -59,7 +59,7 @@ vi.mock('@/lib/kv', () => ({
       const merchantList = store.lists.get(keys[2]) ?? [];
       if (merchantList.length >= cap) return { ok: true as const, value: -2 };
       // N-5: hidden URL 台帳 (KEYS[4]) に印があれば hidden 済 JSON (ARGV[4]) で作る。
-      const inherited = store.kv.has(keys[3]);
+      const inherited = store.kv.has(keys[3]) || store.kv.has(keys[5]);
       store.kv.set(keys[0], inherited ? args[3] : args[0]);
       const idx = store.lists.get(keys[1]) ?? [];
       idx.unshift(args[1]);
@@ -84,6 +84,10 @@ vi.mock('@/lib/kv', () => ({
     }
     if (script.includes('o.url=ARGV[2]')) {
       if (o.active === false) return { ok: true as const, value: -3 }; // 削除済は編集不可
+      if (o.url !== args[1]) {
+        delete o.verification;
+        if (store.kv.has(keys[3]) || store.kv.has(keys[4])) o.hidden = true;
+      }
       o.url = args[1];
       o.description = args[2];
       o.priceJpyc = args[3];
@@ -348,13 +352,18 @@ describe('x402 facilitator /resources', () => {
     expect(body.paywallSnippet).toContain(validBody.url);
   });
 
-  it('canonical OpenPay origin は probe 前に 400 invalid_url で登録拒否', async () => {
+  it.each([
+    'https://open-pay.jp/api/paid/jpyc-shops/search',
+    'http://open-pay.jp/api/paid/stores',
+    'https://www.open-pay.jp/api/paid/stores',
+    'http://WWW.OPEN-PAY.JP.:8080/api/paid/stores',
+  ])('reserved OpenPay origin is rejected before POST probes: %s', async (url) => {
     const { resources } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
     const res = await resources.POST(
       postReq({
         ...validBody,
-        url: 'https://open-pay.jp/api/paid/jpyc-shops/search',
+        url,
         payTo: STRANGER,
       }),
     );
@@ -639,7 +648,12 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     expect((await res.json()).error).toBe('resource_not_gated');
   });
 
-  it('編集でも canonical OpenPay origin への差し替えを probe 前に拒否する', async () => {
+  it.each([
+    'https://open-pay.jp/api/paid/demo',
+    'http://open-pay.jp/api/paid/demo',
+    'https://www.open-pay.jp/api/paid/demo',
+    'http://WWW.OPEN-PAY.JP.:8080/api/paid/demo',
+  ])('reserved OpenPay origin is rejected before PATCH probes: %s', async (url) => {
     const { resources, idRoute } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
     const id = await seedOne(resources);
@@ -647,7 +661,7 @@ describe('x402 facilitator /resources/[id] PATCH (編集)', () => {
     mockProbeGate.mockClear();
 
     const res = await idRoute.PATCH(
-      patchReq({ ...validBody, url: 'https://open-pay.jp/api/paid/demo' }),
+      patchReq({ ...validBody, url }),
       ctx(id),
     );
 
@@ -907,7 +921,12 @@ describe('x402 /discovery', () => {
     expect(body.items.every((item) => (item.trigger ?? '').length > 0)).toBe(true);
   });
 
-  it('予約 origin 拒否前の registry record は first-party item と重複掲載しない', async () => {
+  it.each([
+    'https://open-pay.jp:443/api/paid/demo',
+    'http://open-pay.jp/api/paid/demo',
+    'https://www.open-pay.jp/api/paid/demo',
+    'http://WWW.OPEN-PAY.JP.:8080/api/paid/demo',
+  ])('discovery excludes legacy reserved-origin records: %s', async (url) => {
     const { discovery } = await load();
     const id = 'legacy-openpay-spoof';
     store.kv.set(
@@ -915,7 +934,7 @@ describe('x402 /discovery', () => {
       JSON.stringify({
         id,
         merchant: STRANGER,
-        url: 'https://open-pay.jp:443/api/paid/demo',
+        url,
         description: '偽の公式 API',
         priceJpyc: '1',
         category: 'api',
@@ -1035,6 +1054,52 @@ describe('x402 /discovery', () => {
       'https://api.example.jp/paid/second',
       'https://api.example.jp/paid/first',
     ]);
+  });
+
+  it('stably ranks official, verified third-party, then unverified third-party items', async () => {
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const lastOkAt = '2026-09-23T00:00:00.000Z';
+    const verification = (url: string) => ({
+      lastOkAt, lastCheckedAt: lastOkAt, failures: 0, lastRunId: 'run', probedUrl: url,
+    });
+    const officialUrl = 'https://open-pay.jp/api/paid/stores';
+    store.kv.set('x402:fpverify:/api/paid/stores', JSON.stringify({
+      hidden: false, verification: verification(officialUrl),
+    }));
+    for (const name of ['verified-old', 'unknown-old', 'verified-new', 'unknown-new']) {
+      const url = `https://api.example.jp/paid/${name}`;
+      const response = await resources.POST(postReq({ ...validBody, url }));
+      expect(response.status).toBe(201);
+      const { resource } = await response.json();
+      if (name.startsWith('verified')) {
+        store.kv.set(resourceKey(resource.id), JSON.stringify({
+          ...resource, verification: verification(url),
+        }));
+      }
+    }
+    // Capture the public projection: ranking must not change fields or payment requirements.
+    const { publicDiscoveryItem } = await import('@/lib/x402/discoveryItem');
+    const expectedExternal = [...store.kv.entries()]
+      .filter(([key]) => key.startsWith('x402:resource:'))
+      .map(([, raw]) => publicDiscoveryItem(JSON.parse(raw)));
+    const response = await discovery();
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(Object.keys(body).sort()).toEqual(['items', 'x402Version']);
+    expect(body.x402Version).toBe(1);
+    expect(body.items.map((item: { resource: string }) => item.resource)).toEqual([
+      'https://open-pay.jp/api/paid/demo',
+      officialUrl,
+      'https://api.example.jp/paid/verified-new',
+      'https://api.example.jp/paid/verified-old',
+      'https://api.example.jp/paid/unknown-new',
+      'https://api.example.jp/paid/unknown-old',
+    ]);
+    expect(body.items[0]).toMatchObject({ official: true, verifiedAt: null });
+    expect(body.items[1]).toMatchObject({ official: true, verifiedAt: lastOkAt });
+    expect(body.items.filter((item: { id?: string }) => item.id))
+      .toEqual(expect.arrayContaining(expectedExternal));
   });
 
   it('外部 hidden resource は discovery から除外するが owner 一覧には残す', async () => {
@@ -1238,6 +1303,9 @@ describe('public exact-ID discovery', () => {
 
   it.each([
     { hidden: true }, { active: false }, { url: 'https://open-pay.jp/api/paid/demo' },
+    { url: 'http://open-pay.jp/api/paid/demo' },
+    { url: 'https://www.open-pay.jp/api/paid/demo' },
+    { url: 'http://WWW.OPEN-PAY.JP.:8080/api/paid/demo' },
     { id: 'substituted-id' },
   ])('does not expose non-public or mismatched records: %j', async (overrides) => {
     const { resources } = await load();

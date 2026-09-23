@@ -52,6 +52,8 @@ vi.mock('@/lib/kv', () => ({
 import {
   createResource,
   deactivateResource,
+  listActiveResources,
+  listResourcesForMerchant,
   merchantResourcesKey,
   resourceKey,
   updateResource,
@@ -66,6 +68,7 @@ import {
 } from '@/lib/x402/registry';
 import {
   hiddenUrlLedgerKey,
+  legacyHiddenUrlLedgerKey,
   HIDDEN_URL_LEDGER_TTL_SEC,
 } from '@/lib/x402/hiddenUrlLedger';
 import { resourceUrlClaimKey } from '@/lib/x402/resourceUrlClaim.mjs';
@@ -150,6 +153,29 @@ describe('CAS_CREATE (本物の Lua)', () => {
     });
     expect(store.strings.has(resourceKey('r1'))).toBe(false);
     expect(store.lists.get(RESOURCES_INDEX)).toBeUndefined();
+  });
+
+  it('atomically admits only one create at cap-1 and deletion does not reset the budget', async () => {
+    store.lists.set(merchantResourcesKey(OWNER),
+      Array.from({ length: MAX_RESOURCES_PER_MERCHANT - 1 }, (_, i) => `old${i}`));
+    const results = await Promise.all([
+      createResource(input({ url: 'https://a.jp/last-a' }), 'last-a', 1),
+      createResource(input({ url: 'https://a.jp/last-b' }), 'last-b', 1),
+    ]);
+    const winner = results.find((r) => r.ok)!;
+    expect(winner.ok).toBe(true);
+    if (!winner.ok) throw new Error('expected one admitted listing');
+    expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, reason: 'too_many' }]);
+    expect(store.lists.get(merchantResourcesKey(OWNER))).toHaveLength(MAX_RESOURCES_PER_MERCHANT);
+    expect(store.lists.get(RESOURCES_INDEX)).toEqual([winner.resource.id]);
+    const deniedId = winner.resource.id === 'last-a' ? 'last-b' : 'last-a';
+    expect(store.strings.has(resourceKey(deniedId))).toBe(false);
+    expect(store.strings.has(resourceUrlClaimKey(`https://a.jp/${deniedId}`))).toBe(false);
+
+    expect(await deactivateResource(winner.resource.id, OWNER)).toEqual({ ok: true });
+    expect(await createResource(input(), 'after-delete', 2)).toEqual({ ok: false, reason: 'too_many' });
+    expect(await createResource(input({ merchant: STRANGER, payTo: STRANGER }), 'other-owner', 2))
+      .toMatchObject({ ok: true });
   });
 
   // N-5: 台帳 (KEYS[4]) に生きた印がある URL は hidden 済 JSON (ARGV[4]) で作成する。
@@ -340,6 +366,23 @@ describe('CAS_DEACTIVATE_WITH_LEDGER (本物の Lua)', () => {
     expect(store.getTtl(ledgerKey)).toBe(HIDDEN_URL_LEDGER_TTL_SEC);
   });
 
+  it.each([OWNER, STRANGER])('delete then re-register with ?v=2 inherits hidden for %s', async (merchant) => {
+    const url = 'https://a.jp/hidden?v=1';
+    expect(await createResource(input({ url }), 'old', 1)).toMatchObject({ ok: true });
+    store.strings.set(resourceKey('old'), JSON.stringify({ ...stored('old'), hidden: true }));
+    expect(await deactivateResource('old', OWNER)).toEqual({ ok: true });
+    expect(store.strings.has(resourceUrlClaimKey(url))).toBe(false);
+
+    const variant = 'https://A.JP:443/hidden?v=2#fragment';
+    expect(await createResource(input({ url: variant, merchant, payTo: merchant }), 'new', 2))
+      .toMatchObject({ ok: true, resource: { hidden: true } });
+    expect(stored('new')).toMatchObject({ hidden: true, url: variant });
+    expect(store.strings.get(resourceUrlClaimKey(variant))).toBe('new');
+    expect((await listActiveResources())!.map((r) => r.id)).not.toContain('new');
+    expect((await listResourcesForMerchant(merchant))!.map((r) => r.id)).toContain('new');
+    expect(store.getTtl(hiddenUrlLedgerKey(variant))).toBe(HIDDEN_URL_LEDGER_TTL_SEC);
+  });
+
   it('hidden でない削除は台帳に印を残さない', async () => {
     seedResource('r1', { url: 'https://a.jp/plain' });
     expect(await deactivateResource('r1', OWNER)).toEqual({ ok: true });
@@ -355,6 +398,7 @@ describe('script を直接実行したときの戻り値 (Lua → RESP)', () => 
       merchantResourcesKey(OWNER),
       hiddenUrlLedgerKey('https://a.jp/x'),
       resourceUrlClaimKey('https://a.jp/x'),
+      legacyHiddenUrlLedgerKey('https://a.jp/x'),
     ];
     const argv = ['{"id":"r9"}', 'r9', '2', '{"id":"r9","hidden":true}'];
     expect(await runRedisLua(CAS_CREATE, keys, argv, store)).toBe(1);

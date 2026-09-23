@@ -337,7 +337,8 @@ export function X402DiscoveryView({
   const loading = catalogQuery.isFetching;
   const owned = ownedQuery.data ?? [];
   const atResourceLimit = owned.length >= maxResourcesPerMerchant;
-  // JPYC (動的) と USDC (静的) を 1 つの一覧に。並びは JPYC (first-party 先頭の server 順) → USDC。
+  // JPYC (動的) と USDC (静的) を 1 つの一覧に。JPYC は server 順
+  // (公式 → 検証済の第三者 → 未検証の第三者・各 tier 内の順序は維持) を保ち、その後に USDC を並べる。
   const entries = useMemo<CatalogEntry[]>(
     () => [
       ...items.map((item, index) => ({
