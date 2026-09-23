@@ -4,6 +4,8 @@
 // カードと本体が食い違う (それを防ぐ回帰)。env / resolveHandle をモックする。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { parseScannedUrl } from '@/lib/scan/parseScannedUrl';
+import { resolveHandle } from '@/lib/handleStore';
 
 const h = vi.hoisted(() => ({
   arcTip: false,
@@ -144,6 +146,19 @@ beforeEach(() => {
 });
 
 describe('@handle generateMetadata', () => {
+  it.each(['agent', 'directory', 'store', 'transparency'])('a scanned existing @%s resolves its saved storefront', async (handle) => {
+    h.enableMobileOrder = true;
+    h.record = STORE_RECORD;
+    vi.mocked(resolveHandle).mockClear();
+    const scanned = parseScannedUrl(`https://open-pay.jp/@${handle}`, 'https://open-pay.jp', 'ja', { enableHandles: true });
+    expect(scanned.kind).toBe('handle');
+    if (scanned.kind !== 'handle') throw new Error('Expected a handle destination');
+    const destination = new URL(scanned.href, 'https://open-pay.jp').pathname.split('/').at(-1)!;
+    const metadata = await call(destination);
+    expect(resolveHandle).toHaveBeenCalledWith(handle);
+    expect(metadata.title).toBe('山田カフェ のモバイルオーダー — OpenPay');
+  });
+
   it('license flag OFF は商品 meta を公開せず、ON のときだけ表示する', async () => {
     h.enableCreatorStore = true;
     h.enableCreatorStoreUi = true;

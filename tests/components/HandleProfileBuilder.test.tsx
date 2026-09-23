@@ -93,6 +93,14 @@ vi.mock('@/components/HandleClaimPanel', () => ({
       {payload ? `config-ready:${payload.config.to}` : 'no-config'}
       <button data-testid="edit-arc" onClick={() => onEdit?.('alice', { to: ADDR, methods: h.methods }, undefined, 123)} />
       <button
+        data-testid="edit-tip-metadata"
+        onClick={() => onEdit?.('alice', {
+          to: ADDR, methods: [{ token: 'jpyc', chain: 'polygon' }],
+          message: 'Hello', thanks: 'Thank you',
+          thanksUrl: 'https://example.com/thanks', webhook: 'https://example.com/hook',
+        }, undefined, 123)}
+      />
+      <button
         type="button"
         data-testid="edit-legacy-usdc"
         onClick={() =>
@@ -170,6 +178,59 @@ beforeEach(() => {
 });
 
 describe('HandleProfileBuilder', () => {
+  describe.each([
+    ['thanksUrl', 'Link shown after a tip (optional)'],
+    ['webhook', 'Developer: webhook notification URL (optional)'],
+  ])('%s validation', (field, label) => {
+    it.each(['foo', 'javascript:alert(1)', 'ftp://example.com/file'])('blocks invalid URL %s until corrected or explicitly cleared', (invalid) => {
+      renderWithIntl(<HandleProfileBuilder />, { locale: 'en' });
+      fireEvent.click(screen.getByTestId('edit-tip-metadata'));
+      fireEvent.click(screen.getByText('Advanced (optional)'));
+      const input = screen.getByLabelText(label, { exact: false });
+      const claim = screen.getByTestId('claim');
+      const error = 'Enter a valid http:// or https:// URL, or leave the field empty to clear it.';
+      expect(claim).not.toHaveAttribute('data-blocked');
+      fireEvent.change(input, { target: { value: invalid } });
+      expect(input).toHaveAttribute('aria-invalid', 'true');
+      expect(input).toHaveAccessibleDescription(error);
+      expect(claim).toHaveAttribute('data-blocked', error);
+      expect(screen.getByTestId('published-status')).toHaveTextContent('You have unpublished changes');
+      for (const valid of ['https://example.com/new', 'http://example.com/new', '']) {
+        fireEvent.change(input, { target: { value: valid } });
+        expect(input).not.toHaveAttribute('aria-invalid', 'true');
+        expect(claim).not.toHaveAttribute('data-blocked');
+        expect(JSON.parse(claim.getAttribute('data-payload')!).config[field]).toBe(valid || null);
+      }
+    });
+  });
+
+  describe.each([
+    ['message', 'Message (optional)', 'Hello'],
+    ['thanks', 'Thank-you message after success (optional)', 'Thank you'],
+    ['thanksUrl', 'Link shown after a tip (optional)', 'https://example.com/thanks'],
+    ['webhook', 'Developer: webhook notification URL (optional)', 'https://example.com/hook'],
+  ])('%s form field', (field, label, original) => {
+    it.each(['clear', 'keep', 'set'])('%s is reflected in the publish payload and dirty state', (action) => {
+      renderWithIntl(<HandleProfileBuilder />, { locale: 'en' });
+      fireEvent.click(screen.getByTestId('edit-tip-metadata'));
+      const input = screen.getByLabelText(label, { exact: false });
+      expect(input).toHaveValue(original);
+      const payload = () => JSON.parse(screen.getByTestId('claim').getAttribute('data-payload')!);
+      const originalConfig = payload().config;
+      expect(originalConfig[field]).toBe(original);
+      expect(screen.getByTestId('published-status')).not.toHaveTextContent('You have unpublished changes');
+      const value = field.endsWith('Url') || field === 'webhook' ? 'https://example.com/new' : 'New text';
+      if (action !== 'keep') fireEvent.change(input, { target: { value: action === 'clear' ? '' : value } });
+      expect(payload().config).toEqual({ ...originalConfig, [field]: action === 'clear' ? null : action === 'set' ? value : original });
+      if (action !== 'keep') {
+        expect(screen.getByTestId('published-status')).toHaveTextContent('You have unpublished changes');
+        fireEvent.click(screen.getByTestId('publish-mock'));
+        expect(screen.getByTestId('published-status')).not.toHaveTextContent('You have unpublished changes');
+        expect(payload().config[field]).toBe(action === 'clear' ? null : value);
+      }
+    });
+  });
+
   it('reflects font/layout selection in previews and canonical publish payload', () => {
     localStorage.setItem('openpay:handle-profile-draft:v1', JSON.stringify({ links: [{ label: 'Site', url: 'https://example.com' }] }));
     renderWithIntl(<HandleProfileBuilder />);

@@ -14,6 +14,16 @@ describe('useHandleProfileDraft', () => {
     window.localStorage.clear();
   });
 
+  it.each(['message', 'thanks', 'thanksUrl', 'webhook'] as const)('restores %s values and intentional empty strings without treating a legacy omission as clear', async (field) => {
+    for (const value of [undefined, 'Saved value', '']) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ [field]: value }));
+      const restored = renderHook(() => useHandleProfileDraft());
+      await waitFor(() => expect(restored.result.current.hydrated).toBe(true));
+      expect(restored.result.current.settings[field]).toBe(value);
+      restored.unmount();
+    }
+  });
+
 
   it.each(['serif', 'rounded'] as const)('persists and restores %s/grid', async (font) => {
     const first = renderHook(() => useHandleProfileDraft());

@@ -105,6 +105,31 @@ afterEach(() => {
 });
 
 describe('POST /api/handle', () => {
+  describe.each(['message', 'thanks', 'thanksUrl', 'webhook'] as const)('%s tri-state input', (field) => {
+    it.each(['clear', 'keep', 'set'] as const)('%s is passed through validation to storage', async (action) => {
+      store.reserveOrUpdateHandle.mockResolvedValue({ status: 'updated', record: savedRecord(102) });
+      const value = field.endsWith('Url') || field === 'webhook' ? 'https://example.com/new' : 'New text';
+      const res = await POST(postReq({
+        handle: 'alice', expectedUpdatedAt: 101,
+        config: { ...CFG, ...(action === 'keep' ? {} : { [field]: action === 'clear' ? null : value }) },
+      }));
+      expect(res.status).toBe(200);
+      const call = store.reserveOrUpdateHandle.mock.calls[0][0];
+      expect(call.clear).toEqual(new Set(action === 'clear' ? [field] : []));
+      expect(call.config[field]).toBe(action === 'set' ? value : undefined);
+      expect(call.expectedUpdatedAt).toBe(101);
+    });
+  });
+
+  it('lets the store authorize an existing reserved handle update, but rejects a new claim with a forged version', async () => {
+    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'updated', record: savedRecord(102) });
+    expect((await POST(postReq({ handle: 'store', config: CFG, expectedUpdatedAt: 101 }))).status).toBe(200);
+    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'reserved' });
+    const res = await POST(postReq({ handle: 'store', config: CFG, expectedUpdatedAt: 101 }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'reserved' });
+  });
+
   it('flag OFF → 404 (inert) and never touches the store', async () => {
     h.enableHandles = false;
     const res = await POST(postReq({ handle: 'alice', config: CFG }));
@@ -813,6 +838,11 @@ describe('GET /api/handle/[handle] (availability)', () => {
 });
 
 describe('DELETE /api/handle/[handle]', () => {
+  it('allows an existing reserved handle owner to release it', async () => {
+    store.releaseHandle.mockResolvedValue('released');
+    expect((await DELETE(new Request('http://x'), params('store'))).status).toBe(200);
+    expect(store.releaseHandle).toHaveBeenCalledWith({ handle: 'store', owner: OWNER });
+  });
   it('forbidden (not owner) → 403', async () => {
     store.releaseHandle.mockResolvedValue('forbidden');
     expect((await DELETE(new Request('http://x'), params('alice'))).status).toBe(403);

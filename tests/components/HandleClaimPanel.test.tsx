@@ -252,7 +252,7 @@ describe('HandleClaimPanel', () => {
     expect(screen.getByPlaceholderText('alice')).toHaveValue('bob');
   });
 
-  it('publish (更新): updated ステータスで「更新しました」を表示', async () => {
+  it.each(['alice', 'store'])('publishes updates for an owned %s, including newly reserved names', async (handle) => {
     h.isSignedIn = true;
     const fetchMock = vi.fn(
       async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -261,7 +261,7 @@ describe('HandleClaimPanel', () => {
           return new Response(
             JSON.stringify({
               ok: true,
-              handle: 'alice',
+              handle,
               status: 'updated',
               updatedAt: 201,
             }),
@@ -272,7 +272,7 @@ describe('HandleClaimPanel', () => {
           return new Response(
             JSON.stringify({
               ok: true,
-              handles: [{ handle: 'alice', config: CONFIG, updatedAt: 200 }],
+              handles: [{ handle, config: CONFIG, updatedAt: 200 }],
               max: 3,
             }),
             { status: 200, headers: { 'content-type': 'application/json' } },
@@ -287,35 +287,35 @@ describe('HandleClaimPanel', () => {
     vi.stubGlobal('fetch', fetchMock);
     const onPublished = vi.fn();
     renderPanel(CONFIG, {
-      editingHandle: 'alice',
+      editingHandle: handle,
       expectedUpdatedAt: 200,
       isDirty: true,
       onPublished,
     });
     await waitFor(() =>
-      expect(screen.getByText('@alice')).toBeInTheDocument(),
+      expect(screen.getByText(`@${handle}`)).toBeInTheDocument(),
     );
     fireEvent.change(screen.getByPlaceholderText('alice'), {
-      target: { value: 'alice' },
+      target: { value: handle },
     });
     // 自分の所有 handle は「使用済み」でも更新ボタンが有効
     const update = screen.getByRole('button', { name: '設定を更新' });
     expect(update.className).toContain('ring-2');
     fireEvent.click(update);
     await waitFor(() =>
-      expect(screen.getByText('「@alice」を更新しました。')).toBeInTheDocument(),
+      expect(screen.getByText(`「@${handle}」を更新しました。`)).toBeInTheDocument(),
     );
     const post = fetchMock.mock.calls.find(
       (call) => (call[1] as RequestInit | undefined)?.method === 'POST',
     );
     expect(JSON.parse((post![1] as RequestInit).body as string)).toEqual({
-      handle: 'alice',
+      handle,
       config: CONFIG,
       profile: {},
       expectedUpdatedAt: 200,
     });
     expect(onPublished).toHaveBeenCalledWith({
-      handle: 'alice',
+      handle,
       payload: { config: CONFIG, profile: {} },
       updatedAt: 201,
     });

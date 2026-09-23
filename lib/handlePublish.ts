@@ -15,13 +15,13 @@ import {
   type HandleLink,
   type HandleProfile,
   type HandleReceiveMethod,
-  type HandleTipConfig,
+  type HandleTipConfigUpdate,
 } from '@/lib/handle';
 import { COLOR_PATTERN, DECIMAL_PATTERN, TIP_PRESET_MAX, resolveTipCapability } from '@/lib/url';
 import { crossChainAllowed } from '@/lib/url/shared';
 
 export interface HandlePublishPayload {
-  config: HandleTipConfig;
+  config: HandleTipConfigUpdate;
   profile: HandleProfile;
 }
 
@@ -162,6 +162,11 @@ export function buildPublishPayload(
       theme: draft.theme,
       methods,
       presets: { jpyc: presets },
+      // 未編集の旧 draft は省略のまま保持し、フォームで空にした値は null として送る。
+      ...(draft.message !== undefined ? { message: draft.message.trim() || null } : {}),
+      ...(draft.thanks !== undefined ? { thanks: draft.thanks.trim() || null } : {}),
+      ...(draft.thanksUrl !== undefined ? { thanksUrl: draft.thanksUrl.trim() || null } : {}),
+      ...(draft.webhook !== undefined ? { webhook: draft.webhook.trim() || null } : {}),
     },
     profile: buildPublishProfile(draft),
   };

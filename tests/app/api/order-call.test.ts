@@ -34,7 +34,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
     },
   };
 });
-vi.mock('@/lib/handleStore', () => ({ resolveHandle: async () => hold.resolved }));
+vi.mock('@/lib/handleStore', () => ({ resolveHandle: vi.fn(async () => hold.resolved) }));
 vi.mock('@/lib/shopLiveStore', () => ({
   readShopLive: async () => ({ soldOut: [], paused: hold.paused, updatedAt: 1 }),
 }));
@@ -72,6 +72,7 @@ vi.mock('@/lib/kv', () => ({
 }));
 
 import { POST } from '@/app/api/order/call/route';
+import { resolveHandle } from '@/lib/handleStore';
 
 function order(over: Partial<StoredOrder> = {}): StoredOrder {
   return {
@@ -97,6 +98,7 @@ function request(over: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+  vi.mocked(resolveHandle).mockClear();
   hold.enabled = true;
   hold.shopLive = false;
   hold.paused = false;
@@ -118,6 +120,37 @@ beforeEach(() => {
 });
 
 describe('POST /api/order/call', () => {
+  describe.each(['agent', 'directory', 'store', 'transparency'])('existing reserved shop @%s', (handle) => {
+    it('accepts a paid customer call and preserves the handle in storage', async () => {
+      const response = await POST(request({ h: `@${handle.toUpperCase()}` }));
+      expect(response.status).toBe(200);
+      expect(resolveHandle).toHaveBeenCalledWith(handle);
+      expect(hold.calls).toHaveLength(1);
+      expect(JSON.parse(hold.calls[0])).toMatchObject({ handle, table: '12' });
+      expect(hold.cooldowns.has(`order:call:cooldown:${handle}:12`)).toBe(true);
+    });
+
+    it('still requires a matching paid order and table', async () => {
+      hold.orders = [];
+      const missingOrder = await POST(request({ h: handle }));
+      expect(missingOrder.status).toBe(404);
+      expect(await missingOrder.json()).toEqual({ ok: false, error: 'order_not_found' });
+      hold.orders = [serializeOrder(order({ table: 'テーブル 99' }))];
+      const wrongTable = await POST(request({ h: handle }));
+      expect(wrongTable.status).toBe(403);
+      expect(await wrongTable.json()).toEqual({ ok: false, error: 'table_mismatch' });
+      expect(hold.calls).toHaveLength(0);
+    });
+
+    it('returns handle_not_found when the record does not exist', async () => {
+      hold.resolved = { ok: true, record: null };
+      const response = await POST(request({ h: handle }));
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ ok: false, error: 'handle_not_found' });
+      expect(hold.calls).toHaveLength(0);
+    });
+  });
+
   it('正常: 注文束縛後、単一 Lua で全ガードと保存を原子化', async () => {
     const response = await POST(request());
     expect(response.status).toBe(200);

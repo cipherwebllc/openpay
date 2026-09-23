@@ -45,6 +45,11 @@ export type DraftLink = DraftRegularLink | DraftHeading;
 export interface HandleProfileDraft {
   to: string; // 生入力 (アドレス or ENS)・submit 時に再解決
   name: string;
+  // undefined = 旧/未編集 draft の省略、空文字 = フォームでの明示クリア。
+  message?: string;
+  thanks?: string;
+  thanksUrl?: string;
+  webhook?: string;
   color: string;
   jpycPolygon: boolean;
   /** USDC (Base) チップの受け入れ (2026-08-17 復活・Base 固定は user 決定)。 */
@@ -181,6 +186,10 @@ function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
   return {
     to: str(loaded.to, ''),
     name: str(loaded.name, ''),
+    message: typeof loaded.message === 'string' ? loaded.message : undefined,
+    thanks: typeof loaded.thanks === 'string' ? loaded.thanks : undefined,
+    thanksUrl: typeof loaded.thanksUrl === 'string' ? loaded.thanksUrl : undefined,
+    webhook: typeof loaded.webhook === 'string' ? loaded.webhook : undefined,
     color:
       typeof loaded.color === 'string' && COLOR_PATTERN.test(loaded.color)
         ? loaded.color.toLowerCase()

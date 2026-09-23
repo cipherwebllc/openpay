@@ -4,7 +4,7 @@
 //   - 同 origin /pay /tip /checkout は既存 parser (lib/url.ts) に通し、params が
 //     valid なときだけ pay/tip/checkout を返す。「URL 形は正しいが to/amount が
 //     壊れている」状態は unknown に落として「後段で赤エラー」UX を排除。
-//   - 同 origin /@handle (固定店舗 / プロフ) は形式・予約語が valid かつ enableHandles の
+//   - 同 origin /@handle (固定店舗 / プロフ) は形式が valid かつ enableHandles の
 //     ときだけ handle。存在確認はしない (= 純関数を維持)。未登録 handle は遷移先 [handle]
 //     ページが notFound を出す。enableHandles OFF のときは unknown (404 への遷移を防ぐ)。
 //   - 同 origin /order?s=… (モバイル注文) は decodeOrderConfig が通り enableMobileOrder の
@@ -28,7 +28,6 @@ import {
   decodeHandleSegment,
   normalizeHandle,
   isValidHandleFormat,
-  isReserved,
 } from '@/lib/handle';
 import { decodeOrderConfig } from '@/lib/mobileOrder';
 
@@ -87,13 +86,13 @@ function decomposePath(pathname: string): DecomposedPath | null {
     return { route: 'tip', tipAddress: segments[start + 1]! };
   }
   // /@handle (固定店舗 / プロフ)。生 `@` も `%40` も受ける (Next は dynamic param を
-  // 自動デコードしない)。単一 segment のみ。decode→正規化→形式/予約語を満たすときだけ
-  // handle。`@` 始まりだが形式/予約語 NG は null (= unknown)。
+  // 自動デコードしない)。単一 segment のみ。decode→正規化→形式を満たすときだけ handle。
+  // 予約語の追加で既存店舗の QR を使えなくしないよう、claim 制限は適用しない。
   if (rest === 1 && head !== undefined) {
     const decoded = decodeHandleSegment(head);
     if (decoded.startsWith('@')) {
       const handle = normalizeHandle(decoded);
-      if (isValidHandleFormat(handle) && !isReserved(handle)) {
+      if (isValidHandleFormat(handle)) {
         return { route: 'handle', handle };
       }
       return null;
@@ -187,7 +186,7 @@ export function parseScannedUrl(
       };
     }
     case 'handle': {
-      // 形式/予約語は decomposePath で検証済。flag OFF (本番未点灯) は unknown=404 回避。
+      // 形式は decomposePath で検証済。flag OFF (本番未点灯) は unknown=404 回避。
       if (!opts.enableHandles) return { kind: 'unknown', raw: text };
       return {
         kind: 'handle',
