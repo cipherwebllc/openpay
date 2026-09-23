@@ -26,17 +26,24 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'invalid_query' }, { status: 400 });
   }
 
-  return handleFirstPartyPaidGet(req, JPYC_SERVICES_RESOURCE, async () => {
-    const snapshot = await readDirectoryVerificationSnapshot();
-    if (snapshot === null) {
-      // 5xx なら settle されない = 買い手は課金されない。
-      return NextResponse.json(
-        { ok: false, error: 'storage_unavailable' },
-        { status: 503 },
-      );
-    }
-    return NextResponse.json(
-      createServiceMonitorEnvelope(query, snapshot, new Date().toISOString()),
+  if (!req.headers.get('PAYMENT-SIGNATURE') && !req.headers.get('x-payment')) {
+    return handleFirstPartyPaidGet(req, JPYC_SERVICES_RESOURCE, () =>
+      NextResponse.json({ error: 'snapshot_required' }, { status: 503 }),
     );
-  });
+  }
+
+  // content は settle 後に実行される。KV 障害を「課金済み・データ無し」へ波及させないため、
+  // 兄弟 directory route と同じく先読みする。この 503 では今回の verify/settle を呼ばない。
+  // 過去の支払いが未課金という意味ではない。同じ署名の再送は helper の redelivery/recovery に従う。
+  const snapshot = await readDirectoryVerificationSnapshot();
+  if (snapshot === null) {
+    return NextResponse.json(
+      { ok: false, error: 'storage_unavailable' },
+      { status: 503 },
+    );
+  }
+  const envelope = createServiceMonitorEnvelope(query, snapshot, new Date().toISOString());
+  return handleFirstPartyPaidGet(req, JPYC_SERVICES_RESOURCE, () =>
+    NextResponse.json(envelope),
+  );
 }

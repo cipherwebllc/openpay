@@ -120,7 +120,7 @@ const TOOL_DEFINITIONS = [
     name: 'order_summary',
     profiles: ['order', 'x402'],
     description:
-      "DEFAULT for a mobile order a PERSON will pay — use this for any 'how much will I pay / quote / estimate / 見積もり' question. Returns the exact amount the customer pays from their own wallet: the subtotal (the shop absorbs the ~1% service fee, so the customer is charged NO extra — e.g. a 1700 order shows 1700, not 1717). Pair with createOrderLink to hand the person a checkout link. No key, no buyer fee upcharge, no payment-limit guards. (Do NOT use order_quote for a person's estimate — that is the agent-auto-pay path and adds the fee to the buyer.)",
+      "DEFAULT for a mobile order a PERSON will pay — use this for any 'how much will I pay / quote / estimate / 見積もり' question. Returns the exact amount the customer pays from their own wallet. Read customerPaysJpyc and feeBearer: usually the subtotal (storefront shops absorb the 1% service fee), but preorder shops may add a 3% fee paid by the customer. Pair with createOrderLink to hand the person a checkout link. No key or payment-limit guards. (Do NOT use order_quote for a person's estimate — that is the agent-auto-pay path and adds the fee to the buyer.)",
     inputSchema: {
       type: 'object',
       properties: {
@@ -803,8 +803,8 @@ export function createToolRuntime({
     return `${baseOrigin()}/api/agent-order/summary?${params.toString()}`;
   }
 
-  // 人払いの内訳を返す (鍵不要・**支払いは発生しない**)。/api/agent-order/summary は store-borne
-  // (customerPaysJpyc = 小計・feeBearer='merchant' = 店が ~1% を吸収) を返す。x402 の買い手上乗せ
+  // 人払いの内訳を返す (鍵不要・**支払いは発生しない**)。customerPaysJpyc/feeBearer を読む。
+  // 通常は小計 (storefront は店が 1% を吸収) だが、preorder は顧客負担の 3% が上乗せされ得る。x402 の買い手上乗せ
   // (order_quote) とは別物 — 人が自分のウォレットで払う額を order_quote と混同させないための経路。
   async function orderSummary(args) {
     const input = requireArgsObject(args);

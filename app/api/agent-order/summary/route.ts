@@ -4,12 +4,11 @@
 //
 // なぜ order_quote (x402) と別経路か: order_quote は AI 自動決済 (x402) 用で買い手上乗せ
 // (maxAmountRequired = merchant + fee・フロア 1 JPYC) を返すため、人払い checkout の実額
-// (store-borne = 客は小計ちょうど・店が 1% を吸収) と食い違う。ここは人払いの実額に一致させる。
+// と食い違う。ここは店舗設定に応じた人払いの実額に一致させる。
 //
-// 手数料は lib/mobileOrderFee (storefront = 1%・フロア無し・常に店舗負担) で計算する。
-// ⚠️ lib/x402 の x402FeeValue (フロア 1 JPYC) は **使わない** — @handle 店頭 (storefront) の
-// 人払い checkout と同じ料率にするため。Part A は storefront (店頭・店舗負担) に scope を限定する
-// (preorder 3%/顧客上乗せの写像は別 issue・plans/agent-order-fee-consistency.md H3)。
+// 手数料は人払い checkout と同じ lib/mobileOrderFee で計算する (フロア無し)。
+// storefront = 1%・常に店舗負担、preorder = 3%・feePayer に応じた負担者。
+// lib/x402 の x402FeeValue (フロア 1 JPYC) は使わない。
 //
 // flag: enableX402Facilitator && enableOrderRelay && enableAgentOrder が全 true でなければ 404
 // (menu route と同型)。**money-path 非該当** (読み取りのみ・facilitator/relay/settle には一切触れない
@@ -23,7 +22,7 @@ import { resolveHandle } from '@/lib/handleStore';
 import { chainForSlug } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
 import { decodeAgentCart, computeAgentOrder } from '@/lib/agentOrder';
-import { mobileOrderBreakdown } from '@/lib/mobileOrderFee';
+import { mobileOrderBreakdown, mobileOrderGasMode } from '@/lib/mobileOrderFee';
 import { declaredItemsTotalMinor } from '@/lib/orderRelay';
 
 export const runtime = 'nodejs';
@@ -47,7 +46,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
 
   // table / pickupAt は金額に影響しない (注文メタデータ)。createOrderLink とツール引数を揃えるため
-  // 受理はするが、内訳計算には使わない (支払い実額は小計 + storefront 手数料だけで決まる)。
+  // 受理はするが、内訳計算には使わない (支払い実額は小計と mode/feePayer・料金 flag で決まる)。
   const cartParam = url.searchParams.get('cart') ?? '';
   const cartItems = decodeAgentCart(cartParam);
   if (cartItems === null) {
@@ -78,9 +77,9 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: order.reason }, { status: 422 });
   }
 
-  // 人払い = store-borne: 客は小計ちょうど・店が手数料を吸収。分割は mobileOrderBreakdown が単一情報源
-  // (storefront は feePayer によらず常に merchant 負担)。フロア無し 1% は mobileOrderFeeValue 準拠。
-  const breakdown = mobileOrderBreakdown(order.totalMinor, 'storefront', 'merchant');
+  // checkout と同じ KV 権威の mode/feePayer で計算し、見積りだけ別の料金になる波及を断つ。
+  const { mode, feePayer } = record.storefront;
+  const breakdown = mobileOrderBreakdown(order.totalMinor, mode, feePayer);
 
   const shopName =
     record.storefront.shopName || record.config.name?.trim() || `@${handle}`;
@@ -100,8 +99,8 @@ export async function GET(req: Request): Promise<NextResponse> {
     currency: 'JPYC',
     items,
     subtotalJpyc: formatUnits(order.totalMinor, decimals),
-    feeJpyc: formatUnits(breakdown.feeAmount, decimals),
-    feeBearer: 'merchant', // storefront は常に店舗負担 (客は小計ちょうど)
-    customerPaysJpyc: formatUnits(breakdown.customerPays, decimals),
+    feeJpyc: formatUnits(env.enableMobileOrderFee ? breakdown.feeAmount : 0n, decimals),
+    feeBearer: mobileOrderGasMode(mode, feePayer),
+    customerPaysJpyc: formatUnits(env.enableMobileOrderFee ? breakdown.customerPays : order.totalMinor, decimals),
   });
 }

@@ -145,6 +145,7 @@ async function load(
     agent?: string;
     shopLive?: string;
     preorderTime?: string;
+    mobileOrderFee?: string;
     kairosForwarder?: string;
   } = {},
 ): Promise<{ menu: MenuRoute; pay: PayRoute; summary: SummaryRoute }> {
@@ -153,6 +154,7 @@ async function load(
   vi.stubEnv('ENABLE_AGENT_ORDER', flags.agent ?? '1');
   vi.stubEnv('NEXT_PUBLIC_ENABLE_SHOP_LIVE', flags.shopLive ?? '');
   vi.stubEnv('NEXT_PUBLIC_ENABLE_PREORDER_TIME', flags.preorderTime ?? '');
+  vi.stubEnv('NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE', flags.mobileOrderFee ?? '1');
   vi.stubEnv('NEXT_PUBLIC_JPYC_FORWARDER_AMOY', FORWARDER);
   vi.stubEnv(
     'NEXT_PUBLIC_JPYC_FORWARDER_KAIROS',
@@ -400,6 +402,31 @@ describe('agent-order menu route', () => {
 });
 
 describe('agent-order summary route (人払い store-borne)', () => {
+  it.each(['storefront', 'preorder'] as const)('A3 review: fee flag OFF quotes no fee for %s', async (mode) => {
+    const base = record();
+    store.record = record({ storefront: { ...base.storefront!, mode, feePayer: 'customer' } });
+    const { summary } = await load({ mobileOrderFee: '' });
+    const res = await summary.GET(summaryReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ subtotalJpyc: '1600', feeJpyc: '0', customerPaysJpyc: '1600' });
+  });
+
+  it.each([
+    ['preorder', 'customer', '48', 'customer', '1648'],
+    ['preorder', 'merchant', '48', 'merchant', '1600'],
+    ['preorder', undefined, '48', 'merchant', '1600'],
+    ['storefront', 'customer', '16', 'merchant', '1600'],
+  ] as const)('A3: %s / %s は人払い checkout と同じ内訳', async (mode, feePayer, feeJpyc, feeBearer, customerPaysJpyc) => {
+    const base = record();
+    // feePayer 欠落も入力し、共通 fee 関数の既定 (merchant) と見積りの一致を確認する。
+    store.record = record({ storefront: { ...base.storefront!, mode, feePayer } } as Partial<HandleRecord>);
+    const { summary } = await load();
+    const res = await summary.GET(summaryReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ subtotalJpyc: '1600', feeJpyc, feeBearer, customerPaysJpyc });
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+
   it('store-borne 内訳を返す (customerPays=小計・fee=1%・feeBearer=merchant)', async () => {
     const { summary } = await load();
     const res = await summary.GET(summaryReq(`h=shop&cart=${CART}`));

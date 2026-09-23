@@ -19,7 +19,7 @@ type ToolRuntime = {
   orderQuote: (args: unknown) => Promise<Record<string, unknown>>;
   orderSummary: (args: unknown) => Promise<Record<string, unknown>>;
   createOrderLink: (args: unknown) => Promise<Record<string, unknown>>;
-  tools: Array<{ name: string }>;
+  tools: Array<{ name: string; description: string }>;
 };
 
 async function loadTools(): Promise<{
@@ -228,6 +228,25 @@ describe('MCP agent-order tools', () => {
 // order_summary: 人払い (createOrderLink) の実額を読む読み取り専用ツール。summary エンドポイントを
 // 叩き store-borne 内訳を返す (x402 の買い手上乗せ order_quote とは別物 = 混同解消の核心)。
 describe('MCP order_summary', () => {
+  it('A3 review: the description tells agents to read the returned total and fee bearer for preorder shops', async () => {
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({ env: ENV });
+    const description = runtime.tools.find((tool) => tool.name === 'order_summary')?.description;
+    expect(description).toContain('customerPaysJpyc');
+    expect(description).toContain('feeBearer');
+    expect(description).toMatch(/preorder.*3%/);
+    expect(description).not.toContain('NO extra');
+  });
+
+  it('A3 review: preserves the preorder customer-paid 3% total from the summary API', async () => {
+    const { createToolRuntime } = await loadTools();
+    const runtime = createToolRuntime({ env: ENV, fetchImpl: async () => new Response(JSON.stringify({
+      ...SUMMARY_BODY, feeJpyc: '48', feeBearer: 'customer', customerPaysJpyc: '1648',
+    }), { status: 200 }) });
+    expect(await runtime.orderSummary({ handle: 'shop', items: [{ id: 'karaage', qty: 2 }, { id: 'beer', qty: 1 }] }))
+      .toMatchObject({ ok: true, subtotalJpyc: '1600', feeJpyc: '48', feeBearer: 'customer', customerPaysJpyc: '1648' });
+  });
+
   it('正規順 (h,cart,table,pickupAt) の summary URL を組み store-borne 内訳を返す', async () => {
     const calls: string[] = [];
     const fetchImpl = (async (url: string) => {

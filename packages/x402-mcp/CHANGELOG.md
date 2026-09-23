@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.2 — 2026-09-24
+
+- Correct `order_summary` guidance: read `customerPaysJpyc` and `feeBearer` for the exact human checkout total and fee payer. Usually the customer pays the subtotal; preorder shops may add a customer-paid 3% fee. Align the tool description and README with the server's shop-specific fee schedule.
+- Payment/signing behavior, input schemas, and dependencies are unchanged. Unpublished; public wording approval and rule-15 human review are required before release.
+
 ## 0.17.1 — 2026-09-23
 
 - Keep `wallet_prove` challenges, bind links and signed audiences on

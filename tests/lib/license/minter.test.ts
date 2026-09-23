@@ -7,14 +7,15 @@ import { createFakeRedisStore, runRedisLua, closeRedisLuaEngine, type FakeRedisS
 
 const h = vi.hoisted(() => ({
   store: null as FakeRedisStore | null, enabled: true, lockError: false, failSave: '' as '' | 'before' | 'after',
-  rpc: { getBlock: vi.fn(), getTransactionReceipt: vi.fn(), readContract: vi.fn(), getLogs: vi.fn(), simulateContract: vi.fn(), getTransactionCount: vi.fn(), getBalance: vi.fn(), sendRawTransaction: vi.fn(), chain: undefined as unknown },
+  rpc: { getBlock: vi.fn(), getBytecode: vi.fn(), getTransactionReceipt: vi.fn(), readContract: vi.fn(), getLogs: vi.fn(), simulateContract: vi.fn(), getTransactionCount: vi.fn(), getBalance: vi.fn(), sendRawTransaction: vi.fn(), chain: undefined as unknown },
   wallet: { prepareTransactionRequest: vi.fn(), signTransaction: vi.fn() },
-  intent: vi.fn(), confirm: vi.fn(), alert: vi.fn(), eval: vi.fn(),
+  intent: vi.fn(), product: vi.fn(), confirm: vi.fn(), alert: vi.fn(), eval: vi.fn(),
 }));
 vi.mock('@/lib/license/config', () => ({ licenseNftEnabled: () => h.enabled }));
 vi.mock('@/lib/chains', () => ({ chainObjectForId: () => h.rpc.chain, customRpcUrlForChain: () => undefined }));
 vi.mock('viem', async (original) => ({ ...await original<typeof import('viem')>(), createPublicClient: () => h.rpc, createWalletClient: () => h.wallet }));
 vi.mock('@/lib/x402/purchaseIntent', () => ({ getPurchaseIntent: h.intent }));
+vi.mock('@/lib/x402/hostedStore', () => ({ getHostedProduct: h.product }));
 vi.mock('@/lib/license/registration', () => ({ confirmLicenseRegistration: h.confirm }));
 vi.mock('@/lib/x402/reverify', () => ({ sendReverifyAlert: h.alert }));
 vi.mock('@/lib/kv', () => ({
@@ -73,6 +74,8 @@ beforeEach(() => {
   vi.stubEnv('LICENSE_MINTER_PRIVATE_KEY', KEY); vi.stubEnv('RELAYER_PRIVATE_KEY', ''); vi.stubEnv('ALERT_WEBHOOK_URL', 'https://alerts.example');
   h.enabled = true; h.lockError = false; h.failSave = ''; h.rpc.chain = polygonAmoy; job = fixture(); seed();
   h.rpc.getBlock.mockImplementation(async ({ blockNumber }) => ({ number: blockNumber ?? 100n, hash: BLOCK, timestamp: 1800000601n }));
+  h.rpc.getBytecode.mockResolvedValue('0x6000');
+  h.product.mockResolvedValue({ createdAt: NOW, license: definition });
   h.rpc.getTransactionReceipt.mockImplementation(async ({ hash }) => {
     if (hash !== TX) throw new Error('not found');
     return { transactionHash: TX, blockNumber: 50n, blockHash: BLOCK, status: 'success', logs: [
@@ -95,6 +98,178 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 afterAll(closeRedisLuaEngine);
 
 describe('license worker: viem + real Lua CAS', () => {
+  function consumedAt(paymentBlock: bigint, head = 80_000_000n) {
+    const original = h.rpc.getTransactionReceipt.getMockImplementation()!;
+    h.rpc.getTransactionReceipt.mockImplementation(async (args) => ({ ...await original(args), blockNumber: paymentBlock }));
+    h.rpc.getBlock.mockImplementation(async ({ blockNumber }) => ({ number: blockNumber ?? head, hash: BLOCK }));
+    h.rpc.readContract.mockImplementation(async ({ functionName }) => functionName === 'authorizationState' ? true : functionName === 'licenseOf'
+      ? { exists: true, definitionHash: definition.definitionHash, maxSupply: 10n, transferable: true }
+      : { id: BigInt(definition.tokenId), to: PAYER });
+  }
+
+  it.each([undefined, '0', '79999000'])('G1: restored consumed mint bounds cursor %s by finalized payment block', async (scanFromBlock) => {
+    seed({ ...job, scanFromBlock });
+    consumedAt(79_998_000n);
+    await run();
+    const fromBlock = scanFromBlock === '79999000' ? 79_999_000n : 79_998_000n;
+    expect(h.rpc.getLogs).toHaveBeenCalledWith(expect.objectContaining({ fromBlock, toBlock: fromBlock + 1999n > 80_000_000n ? 80_000_000n : fromBlock + 1999n }));
+    expect(current().scanFromBlock).toBe((fromBlock + 1999n > 80_000_000n ? 80_000_001n : fromBlock + 2000n).toString());
+    expect(h.wallet.signTransaction).not.toHaveBeenCalled();
+    expect(h.rpc.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it('G1: restored consumed mint recovers the event in the payment block without signing', async () => {
+    consumedAt(79_999_000n);
+    const replacement = toHex(55n, { size: 32 });
+    h.rpc.getLogs.mockImplementation(async ({ fromBlock, toBlock }) => fromBlock <= 79_999_000n && toBlock >= 79_999_000n ? [{ transactionHash: replacement }] : []);
+    const original = h.rpc.getTransactionReceipt.getMockImplementation()!;
+    h.rpc.getTransactionReceipt.mockImplementation(async (args) => args.hash === replacement
+      ? { ...mintReceipt(replacement), blockNumber: 79_999_000n } : original(args));
+    await run();
+    expect(current()).toMatchObject({ status: 'minted', mintTxHash: replacement });
+    expect(h.wallet.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it('G1: repeated scan misses advance the cursor and reach repair with an alert', async () => {
+    consumedAt(79_000_000n);
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      await run();
+      advance();
+    }
+    expect(current()).toMatchObject({ status: 'needs_repair', attempts: 0, scanAttempts: 10, lastError: 'event_not_found', scanFromBlock: '79020000', alertPending: false });
+    expect(h.rpc.getLogs).toHaveBeenCalledTimes(10);
+    expect(h.alert).toHaveBeenCalledTimes(1);
+    expect(h.wallet.signTransaction).not.toHaveBeenCalled();
+    await run();
+    expect(h.rpc.getLogs).toHaveBeenCalledTimes(10);
+  });
+
+  function restoredRegistration(createdBlock = 79_990_000n, overrides = {}, milliseconds = 0) {
+    const member = 'registration:' + ID;
+    const key = licenseRegistrationJobKey(ID);
+    h.store!.strings.set(key, JSON.stringify({ version: 1, kind: 'register', productId: ID, license: definition, status: 'pending', attempts: 0, nextAttemptAt: NOW, ...overrides }));
+    h.product.mockResolvedValue({ createdAt: Number(1_600_000_000n + createdBlock * 2n) * 1000 + milliseconds, license: definition });
+    h.rpc.getBlock.mockImplementation(async ({ blockNumber }) => {
+      const number = blockNumber ?? 80_000_000n;
+      return { number, hash: BLOCK, timestamp: 1_600_000_000n + number * 2n };
+    });
+    h.rpc.getBytecode.mockRejectedValue(new Error('archive state unavailable'));
+    return { member, key, read: () => JSON.parse(h.store!.strings.get(key)!) };
+  }
+
+  it.each([[0n, 0], [79_999_000n, 0], [79_999_000n, 999]] as const)('G1 review: registration maps product creation block %s + %sms using headers only', async (createdBlock, milliseconds) => {
+    const registration = restoredRegistration(createdBlock, {}, milliseconds);
+    const lowerBound = createdBlock === 0n ? 0n : createdBlock - 1n;
+    h.rpc.getLogs.mockImplementation(async ({ fromBlock, toBlock }) => fromBlock <= createdBlock && toBlock >= createdBlock ? [{ transactionHash: TX }] : []);
+    h.rpc.getTransactionReceipt.mockResolvedValue({ ...mintReceipt(TX), blockNumber: createdBlock });
+    await runLicenseWorker({ member: registration.member });
+    expect(h.rpc.getLogs).toHaveBeenCalledWith(expect.objectContaining({ fromBlock: lowerBound }));
+    expect(registration.read()).toMatchObject({ status: 'registered', mintTxHash: TX });
+    expect(h.confirm).toHaveBeenCalledWith(ID, TX, h.rpc);
+    expect(h.product).toHaveBeenCalledWith(ID);
+    expect(h.rpc.getBytecode).not.toHaveBeenCalled();
+    expect(h.wallet.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it('G1 review: registration clamps a legacy genesis cursor and keeps scan retries independent of funding retries', async () => {
+    const registration = restoredRegistration(79_990_000n, { attempts: 9, scanFromBlock: '0' });
+    for (let scanAttempts = 1; scanAttempts <= 3; scanAttempts++) {
+      await runLicenseWorker({ member: registration.member });
+      expect(registration.read()).toMatchObject({ status: 'pending', attempts: 9, scanAttempts, scanFromBlock: String(79_989_999 + scanAttempts * 2000) });
+      expect(h.alert).not.toHaveBeenCalled();
+      advance();
+    }
+    expect(h.product).toHaveBeenCalledTimes(1);
+    expect(h.rpc.getBytecode).not.toHaveBeenCalled();
+    expect(h.rpc.getLogs).toHaveBeenLastCalledWith(expect.objectContaining({ fromBlock: 79_993_999n, toBlock: 79_995_998n }));
+  });
+
+  it('G1 review: restored mint keeps pending while its separate scan budget is available', async () => {
+    seed({ ...job, attempts: 9 });
+    consumedAt(79_000_000n);
+    await run();
+    expect(current()).toMatchObject({ status: 'pending', attempts: 9, scanAttempts: 1 });
+    expect(h.alert).not.toHaveBeenCalled();
+    advance(); await run();
+    expect(current()).toMatchObject({ status: 'pending', attempts: 9, scanAttempts: 2 });
+  });
+
+  it('G1 review: submitted mint keeps its submission and independent scan budget', async () => {
+    await run();
+    const signed = current(); seed({ ...signed, attempts: 9 }); advance();
+    consumedAt(50n);
+    h.rpc.getBlock.mockImplementation(async ({ blockNumber }) => ({ number: blockNumber ?? 80_000_000n, hash: BLOCK }));
+    await run();
+    expect(current()).toMatchObject({ status: 'submitted', attempts: 9, scanAttempts: 1, submission: signed.submission });
+    expect(h.wallet.signTransaction).toHaveBeenCalledTimes(1);
+    expect(h.rpc.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('G1 review: slow header lookup persists partial bounds and finishes after multiple deadlines', async () => {
+    const registration = restoredRegistration(79_990_000n);
+    const original = h.rpc.getBlock.getMockImplementation()!;
+    h.rpc.getBlock.mockImplementation(async (args) => { advance(1500); return original(args); });
+    await runLicenseWorker({ member: registration.member, deadline: NOW + 12_000 });
+    const partial = registration.read().scanSearch;
+    expect(partial).toBeDefined();
+    expect(BigInt(partial.low)).toBeGreaterThan(0n);
+    expect(BigInt(partial.high)).toBeLessThanOrEqual(80_000_000n);
+    expect(h.rpc.getLogs).not.toHaveBeenCalled();
+    advance();
+    await runLicenseWorker({ member: registration.member });
+    expect(registration.read()).toMatchObject({ status: 'pending', scanAttempts: 1, scanFromBlock: '79991999' });
+    expect(h.product).toHaveBeenCalledTimes(1);
+    expect(h.rpc.getLogs).toHaveBeenCalledWith(expect.objectContaining({ fromBlock: 79_989_999n }));
+    expect(h.rpc.getBlock.mock.calls.filter(([args]) => args.blockNumber === 40_000_000n)).toHaveLength(1);
+  });
+
+  it('G1 review: persisted timestamp bounds are rejected if their finalized anchor changes', async () => {
+    const registration = restoredRegistration(79_990_000n);
+    const original = h.rpc.getBlock.getMockImplementation()!;
+    h.rpc.getBlock.mockImplementation(async (args) => { advance(1500); return original(args); });
+    await runLicenseWorker({ member: registration.member, deadline: NOW + 12_000 });
+    advance();
+    h.rpc.getBlock.mockImplementation(async (args) => ({ ...await original(args), hash: TX }));
+    await runLicenseWorker({ member: registration.member });
+    expect(registration.read()).toMatchObject({ status: 'needs_repair', lastError: 'scan_anchor_changed' });
+    expect(h.rpc.getLogs).not.toHaveBeenCalled();
+    expect(h.alert).toHaveBeenCalledTimes(1);
+  });
+
+  it('G1 review: scan RPC failures use the scan budget, retain progress and alert at its limit', async () => {
+    const registration = restoredRegistration(79_990_000n, { attempts: 9, scanAttempts: 8 });
+    h.rpc.getLogs.mockRejectedValue(new Error('logs unavailable'));
+    await runLicenseWorker({ member: registration.member });
+    expect(registration.read()).toMatchObject({ status: 'pending', attempts: 9, scanAttempts: 9 });
+    expect(h.alert).not.toHaveBeenCalled();
+    advance(); await runLicenseWorker({ member: registration.member });
+    expect(registration.read()).toMatchObject({ status: 'needs_repair', attempts: 9, scanAttempts: 10, alertPending: false });
+    expect(h.alert).toHaveBeenCalledTimes(1);
+    expect(h.product).toHaveBeenCalledTimes(1);
+    expect(h.rpc.getBytecode).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 'storage'])('G1 review: unavailable product %s never falls back to a genesis scan', async (product) => {
+    const registration = restoredRegistration(); h.product.mockResolvedValue(product);
+    await runLicenseWorker({ member: registration.member });
+    expect(registration.read()).toMatchObject({ status: product === null ? 'needs_repair' : 'pending', scanAttempts: 1 });
+    expect(h.rpc.getLogs).not.toHaveBeenCalled();
+    expect(h.wallet.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it('G1 review: parser accepts legacy counters and rejects corrupt scan counters and bounds', () => {
+    const registration = restoredRegistration();
+    expect(parseLicenseJob(JSON.stringify(job))).toEqual(job);
+    for (const scanAttempts of [-1, 1.5, '5', null]) {
+      expect(parseLicenseJob(JSON.stringify({ ...job, scanAttempts }))).toBeNull();
+    }
+    const valid = { createdAt: NOW, low: '1', high: '10', anchor: { blockNumber: '10', blockHash: BLOCK } };
+    expect(parseLicenseJob(JSON.stringify({ ...registration.read(), scanSearch: valid }))).not.toBeNull();
+    for (const scanSearch of [null, { ...valid, createdAt: -1 }, { ...valid, low: '11' }, { ...valid, high: '11' }, { ...valid, low: 'bad' }, { ...valid, anchor: null }]) {
+      expect(parseLicenseJob(JSON.stringify({ ...registration.read(), scanSearch }))).toBeNull();
+    }
+  });
+
   it('persists finality evidence, nonce and signed hash before broadcast, then polls in the next run', async () => {
     expect(await run()).toMatchObject({ ok: true, processed: 1, failed: 0 });
     const submitted = current(); expect(submitted).toMatchObject({ status: 'submitted', attempts: 0, nextAttemptAt: NOW + 60_000, paymentBlock: { blockNumber: '50', blockHash: BLOCK }, submission: { nonce: 7 } });
