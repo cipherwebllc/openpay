@@ -68,6 +68,7 @@ jobs:
           --exclude tests/lib/store/deliveryBudget.test.ts
           --exclude tests/lib/x402/purchaseIntent-lua.test.ts
           --exclude tests/lib/x402/registry-lua.test.ts
+          --exclude tests/lib/x402/registry-moderation-lua.test.ts
           --exclude tests/lib/x402/registry-legacy-claims-lua.test.ts
           --exclude tests/lib/x402/registry-url-claims-lua.test.ts
           --exclude tests/lib/x402/registry-url-claims-lifecycle-lua.test.ts

@@ -122,6 +122,12 @@ export async function GET(): Promise<NextResponse> {
   // 予約 origin の登録拒否より前に作られた record も公開しない。first-party と同じ URL に
   // 攻撃者の payTo / Docs を重ね、公式 item と並べる波及を discovery 境界で断つ。
   const items = resources.filter((r) => !isOpenPayCanonicalOriginUrl(r.url)).map(publicDiscoveryItem);
+  // 運営管理の公式項目は検証前でも先頭に保つ。500 件窓内の第三者掲載は検証済 → 未検証とし、
+  // 到達不能な新規登録が検証済の掲載を押し下げる波及を断つ。各 tier 内の順序は stable に維持する。
+  const rankedItems = [
+    ...firstPartyItems,
+    ...items.sort((a, b) => Number(Boolean(b.verifiedAt)) - Number(Boolean(a.verifiedAt))),
+  ];
 
   // 公開カタログは AI エージェントがポーリングする read-only エンドポイント。edge (Vercel CDN) で
   // 短期キャッシュし、ポーリング毎の KV ファンアウトを抑える。s-maxage=10 = 最大 10 秒の鮮度
@@ -129,7 +135,7 @@ export async function GET(): Promise<NextResponse> {
   // 再検証による非表示/復帰が最大およそ 40 秒 stale になる点は、3 回の時間閾値に対して受容する。
   // 認証なしの公開データのみなので edge 共有キャッシュは安全 (owner 専用一覧は別 route で無キャッシュ)。
   return NextResponse.json(
-    { x402Version: 1, items: [...firstPartyItems, ...items] },
+    { x402Version: 1, items: rankedItems },
     { headers: { 'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=30' } },
   );
 }

@@ -47,7 +47,7 @@ vi.mock('@/lib/kv', () => ({
       const merchantList = store.lists.get(keys[2]) ?? [];
       if (merchantList.length >= cap) return { ok: true as const, value: -2 };
       // N-5: hidden URL 台帳 (KEYS[4]) に生きた印があれば hidden 済 JSON (ARGV[4]) で作る。
-      const inherited = store.alive(keys[3]);
+      const inherited = store.alive(keys[3]) || store.alive(keys[5]);
       store.kv.set(keys[0], inherited ? args[3] : args[0]);
       const idx = store.lists.get(keys[1]) ?? [];
       idx.unshift(args[1]);
@@ -73,7 +73,10 @@ vi.mock('@/lib/kv', () => ({
     if (script.includes('o.url=ARGV[2]')) {
       if (o.active === false) return { ok: true as const, value: -3 }; // 削除済は編集不可
       // B6: URL 変更でリセットするのは verification だけ (hidden は moderation 状態なので残す)。
-      if (o.url !== args[1]) delete o.verification;
+      if (o.url !== args[1]) {
+        delete o.verification;
+        if (store.alive(keys[3]) || store.alive(keys[4])) o.hidden = true;
+      }
       o.url = args[1];
       o.description = args[2];
       o.priceJpyc = args[3];
@@ -175,6 +178,24 @@ beforeEach(() => {
 });
 
 describe('lib/x402/registry parseResourceInput', () => {
+  it.each([
+    'https://evil.com\\@open-pay.jp/paid',
+    'http://evil.com\\@www.open-pay.jp/paid',
+    'https://evil.com\\paid',
+    'https://user\\@evil.com/paid',
+    'https://evil.com:443\\@open-pay.jp/paid',
+  ])('rejects backslashes before the path: %s', (url) => {
+    expect(parseResourceInput(input({ url }), OWNER)).toEqual({ ok: false, reason: 'invalid_url' });
+  });
+
+  it.each([
+    'https://api.example.com/path\\part',
+    'https://api.example.com?value=\\text',
+    'https://api.example.com#value=\\text',
+  ])('preserves accepted backslashes outside the authority: %s', (url) => {
+    expect(parseResourceInput(input({ url }), OWNER).ok).toBe(true);
+  });
+
   it('valid (payTo 省略 → owner)', () => {
     const r = parseResourceInput(
       { url: 'https://a.jp/x', description: 'd', priceJpyc: '100', category: 'api' },
@@ -221,6 +242,12 @@ describe('lib/x402/registry parseResourceInput', () => {
     'https://OPEN-PAY.JP:443/api/paid/stores',
     'https://open-pay.jp./api/paid/demo',
     'https://open-pay.jp/api/another-resource',
+    'http://open-pay.jp/api/paid/demo',
+    'http://OPEN-PAY.JP:80/api/paid/demo',
+    'https://www.open-pay.jp/api/paid/demo',
+    'http://www.open-pay.jp/api/paid/demo',
+    'https://WWW.OPEN-PAY.JP.:8443/api/paid/demo',
+    'https://open-pay.jp:8443/api/paid/demo',
   ])('canonical OpenPay origin は first-party 専用のため拒否する: %s', (url) => {
     expect(
       parseResourceInput(
@@ -242,6 +269,15 @@ describe('lib/x402/registry parseResourceInput', () => {
         OWNER,
       ).ok,
     ).toBe(true);
+  });
+
+  it.each([
+    'https://open-pay.jp.example.com/paid',
+    'https://www.open-pay.jp.example.com/paid',
+    'https://not-open-pay.jp/paid',
+    'https://open-pay.jp@api.example.com/paid',
+  ])('does not reserve lookalike third-party hosts: %s', (url) => {
+    expect(parseResourceInput(input({ url }), OWNER).ok).toBe(true);
   });
 
   it('docsUrl は HTTPS のみ受理し、license は制御文字除去後 60 文字に収める', () => {
@@ -325,9 +361,14 @@ describe('lib/x402/registry parseResourceInput', () => {
 });
 
 describe('lib/x402/registry store', () => {
-  it('createResource は parseResourceInput を迂回しても canonical OpenPay origin を保存しない', async () => {
+  it.each([
+    'https://open-pay.jp/api/paid/demo',
+    'http://open-pay.jp/api/paid/demo',
+    'https://www.open-pay.jp/api/paid/demo',
+    'http://WWW.OPEN-PAY.JP.:8080/api/paid/demo',
+  ])('createResource rejects reserved origins without parseResourceInput: %s', async (url) => {
     const res = await createResource(
-      input({ url: 'https://open-pay.jp/api/paid/demo' }),
+      input({ url }),
       'spoof',
       1000,
     );

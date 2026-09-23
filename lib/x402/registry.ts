@@ -17,9 +17,10 @@ import { stripControlChars, truncateSafe } from '@/lib/sanitize';
 import { normalizeHost } from '@/lib/net/privateHost';
 import { caip2ForChainId } from './network';
 import { x402FacilitatorConfig } from './facilitatorConfig';
-import { OPENPAY_CANONICAL_ORIGIN } from './firstParty';
+import { OPENPAY_FIRST_PARTY_HOSTNAMES } from './firstParty';
 import {
   hiddenUrlLedgerKey,
+  legacyHiddenUrlLedgerKey,
   HIDDEN_URL_LEDGER_TTL_SEC,
   HIDDEN_URL_LEDGER_VALUE,
 } from './hiddenUrlLedger';
@@ -125,16 +126,13 @@ export type ParseResourceResult =
   | { ok: true; input: X402ResourceInput }
   | { ok: false; reason: string };
 
-const OPENPAY_CANONICAL_URL = new URL(OPENPAY_CANONICAL_ORIGIN);
-
+// 既知の first-party host は scheme/port を問わず予約する (www・DNS 末尾 dot も含む)。
+// 既存の単一リストを使い、alias 経由の登録/公開読取で攻撃者の payTo を公式に重ねる経路を断つ。
 export function isOpenPayCanonicalOriginUrl(value: string): boolean {
   try {
-    const url = new URL(value);
-    return (
-      url.protocol === OPENPAY_CANONICAL_URL.protocol &&
-      normalizeHost(url.hostname.toLowerCase()) ===
-        normalizeHost(OPENPAY_CANONICAL_URL.hostname.toLowerCase()) &&
-      url.port === OPENPAY_CANONICAL_URL.port
+    const host = normalizeHost(new URL(value).hostname.toLowerCase());
+    return OPENPAY_FIRST_PARTY_HOSTNAMES.some(
+      (reserved) => host === normalizeHost(reserved.toLowerCase()),
     );
   } catch {
     return false;
@@ -159,6 +157,11 @@ export function parseResourceInput(
   }
   const url = typeof r.url === 'string' ? r.url.trim() : '';
   if (!/^https?:\/\//.test(url) || url.length > MAX_URL) {
+    return { ok: false, reason: 'invalid_url' };
+  }
+  // authority 内の backslash は parser によって host の解釈が異なるため拒否する。
+  // WHATWG では外部 host でも別の consumer には OpenPay 宛と見える偽装の波及を断つ。
+  if (/^https?:\/\/[^/?#]*\\/.test(url)) {
     return { ok: false, reason: 'invalid_url' };
   }
   // SSRF ガード: private/loopback/link-local 宛は登録不可 (モデレーション probe 先を public host に
@@ -309,14 +312,15 @@ function safeParse<T>(raw: string | null): T | null {
 // N-5: KEYS[4] = hidden URL 台帳。台帳に載っている URL は hidden 済 (ARGV[4]) の JSON で作成し、
 // 「DELETE → 同一 URL で再登録」でモデレーション状態を洗い流す経路を塞ぐ。判定と保存を同じ
 // script に閉じるので、削除と再登録を並走させても台帳を跨げない。戻り: 1=作成 / 3=hidden 継承で
-// 作成 / -2=cap 超過 / -5=URL 使用中 / -6=claim 先破損 (storage)。KEYS[5] は URL claim。
+// 作成 / -2=cap 超過 / -5=URL 使用中 / -6=claim 先破損 (storage)。KEYS[5] は URL claim、
+// KEYS[6] は移行中の旧 full-URL 台帳 (読取のみ・TTL を延長しない)。
 export const CAS_CREATE =
   URL_CLAIM_GUARD +
   'local cap=tonumber(ARGV[3]); ' +
   "if redis.call('LLEN',KEYS[3])>=cap then return -2 end; " +
   'local claim=claimAvailable(KEYS[5],ARGV[2]); if claim~=1 then return claim end; ' +
   "local doc=ARGV[1]; local code=1; " +
-  "if redis.call('EXISTS',KEYS[4])==1 then doc=ARGV[4]; code=3 end; " +
+  "if redis.call('EXISTS',KEYS[4])==1 or redis.call('EXISTS',KEYS[6])==1 then doc=ARGV[4]; code=3 end; " +
   "redis.call('SET',KEYS[1],doc); " +
   "redis.call('SET',KEYS[5],ARGV[2]); " +
   "redis.call('LPUSH',KEYS[2],ARGV[2]); " +
@@ -365,6 +369,7 @@ export async function createResource(
       merchantResourcesKey(input.merchant),
       hiddenUrlLedgerKey(input.url),
       resourceUrlClaimKey(input.url),
+      legacyHiddenUrlLedgerKey(input.url),
     ],
     [
       JSON.stringify(resource),
@@ -471,7 +476,7 @@ export const CAS_OWNER_GUARD =
 // hidden は cron 再検証 (lib/x402/reverify.ts) が付けたモデレーション状態であり、owner が別 URL へ
 // PATCH → 元 URL へ PATCH し直すだけで解除できると自動 hidden が無意味になる (B6)。復帰は
 // 「再検証が ok_402_openpay を観測する」正規経路のみ (reverify の CAS が hidden=false に倒す)。
-// KEYS[2/3]=新/旧 claim、ARGV[13/14]=読取時 URL/id。
+// KEYS[2/3]=新/旧 claim、KEYS[4/5]=変更先の新/旧 hidden 台帳、ARGV[13/14]=読取時 URL/id。
 // 戻り: JSON=成功 / -1=未存在 / -2=malformed / -3=削除済 / -4=URL 競合 / -5=URL 使用中
 // / -6=claim 先破損 / 0=owner 不一致。URL 競合時は無変更で storage (503・再試行可能)。
 export const CAS_UPDATE =
@@ -484,7 +489,10 @@ export const CAS_UPDATE =
   // 同じ正規化 URL の編集では claim に触れない。旧重複データの最初の編集者を
   // 勝者として固定し、他の所有者の価格・説明編集まで拒否する波及を防ぐ。
   'if KEYS[2]~=KEYS[3] then local claim=claimAvailable(KEYS[2],ARGV[14]); if claim~=1 then return claim end; end; ' +
-  'if o.url~=ARGV[2] then o.verification=nil end; ' +
+  // clean な掲載から台帳済 URL に PATCH するだけで hidden を洗い流し、公開に戻す経路を断つ。
+  // URL 変更時だけ継承し、同じ URL の価格/説明編集で再検証済の掲載を hidden に戻さない。
+  'if o.url~=ARGV[2] then o.verification=nil; ' +
+  "if redis.call('EXISTS',KEYS[4])==1 or redis.call('EXISTS',KEYS[5])==1 then o.hidden=true end; end; " +
   'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
   "if ARGV[7]=='' then o.docsUrl=nil else o.docsUrl=ARGV[7] end; " +
   "if ARGV[8]=='' then o.license=nil else o.license=ARGV[8] end; " +
@@ -555,6 +563,7 @@ export async function updateResource(
   if (!previous.ok) return previous;
   const cas = await kvEval<number | string>(CAS_UPDATE, [
     resourceKey(id), resourceUrlClaimKey(input.url), previous.key ?? '',
+    hiddenUrlLedgerKey(input.url), legacyHiddenUrlLedgerKey(input.url),
   ], [
     getAddress(owner),
     input.url,
