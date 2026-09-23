@@ -54,9 +54,24 @@ export type StoreListing = {
  * 「表示されない」方向へ倒す (誤掲載よりも欠落を選ぶ・fail-open は表示しない側)。
  */
 export async function listStoreListings(): Promise<StoreListing[] | null> {
-  const ids = await listStoreIndexIds();
+  // 同一 owner の商品が同じページや後続ページに並んでも handle は一度だけ取得する。
+  const handleLookups = new Map<string, Promise<string[] | null>>();
+  function handlesForOwner(owner: string): Promise<string[] | null> {
+    const key = owner.toLowerCase();
+    let lookup = handleLookups.get(key);
+    if (!lookup) {
+      lookup = listHandlesForOwner(key);
+      handleLookups.set(key, lookup);
+    }
+    return lookup;
+  }
+  const ids = await listStoreIndexIds(undefined, async (product) => {
+    const handles = await handlesForOwner(product.owner);
+    return handles !== null && handles.length > 0;
+  });
   if (ids === null) return null;
   if (ids.length === 0) return [];
+  // ページ走査中の非公開化が掲載へ波及しないよう、選択した商品だけを再検証する。
   const products = await getHostedProductsByIds(ids);
   if (products === 'storage') return null;
   if (products.length === 0) return [];
@@ -68,7 +83,7 @@ export async function listStoreListings(): Promise<StoreListing[] | null> {
   const [licenseSummaries] = await Promise.all([
     env.enableLicenseNftUi ? licenseSummariesFor(products) : Promise.resolve(new Map()),
     Promise.all(owners.map(async (owner) => {
-      const handles = await listHandlesForOwner(owner);
+      const handles = await handlesForOwner(owner);
       if (handles && handles.length > 0) {
         handlesByOwner.set(owner, handles);
       }
