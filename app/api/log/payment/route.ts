@@ -1,28 +1,37 @@
 // alpha 取引 log 受信 endpoint。
 // graceful degrade: KV 未設定 / KV 障害でも 200 を返す (UI 影響回避)。
 
-import { NextResponse } from 'next/server';
+import { after, NextResponse } from 'next/server';
 import { isAddress, isHex, type Address, type Hex } from 'viem';
-import { kvExpire, kvLpush, kvLtrim } from '@/lib/kv';
+import { kvIncr, kvLpush, kvSet } from '@/lib/kv';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { logger } from '@/lib/logger';
 import { clientIp, hashIp } from '@/lib/net/ipHash';
 import {
   PAYMENT_LOG_KV_KEY,
-  PAYMENT_LOG_DAILY_TTL_SEC,
-  paymentLogDailyKey,
   type ClientReportedCircleVerification,
 } from '@/lib/paymentLog';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 // P3: anonymizeIp を単一情報源化 (旧 local 実装は fallback が '' で relayRoute の 'unknown' と乖離し、
 // 不正形式 IP が同一空文字バケツを共有する rate-limit 相乗りの恐れがあった)。
-import { anonymizeIp } from '@/lib/relay/relayRoute';
+import { anonymizeIp, isDecWithin, MAX_UINT256_DEC_DIGITS } from '@/lib/relay/relayRoute';
 
 export const runtime = 'nodejs';
 
-const MAX_BODY_BYTES = 8 * 1024;
-// alpha 6 ヶ月 + 余裕。古い entry は LPUSH 後の LTRIM で自動破棄。
-const LIST_CAP = 100_000;
-// errorMessage は client 申告の自由文字列。body 上限 (8KB) 内でも 1 entry が肥大化して
+// buildPaymentLogEvent の全 optional field (7×78 桁の金額・5×42 字 address・4×66 字 hash
+// + chain ID / key / enum 等) は errorMessage が空なら最大 1,600 B。
+// 500 UTF-16 単位の message は CJK で 500×3 B、quote/newline で 500×2 B、
+// JSON の制御文字 / lone surrogate escape が最大 500×6 B。
+// 1,600 + 3,000 = 4,600 B < 5 KiB とし、正規のエラーログを body cap で失わない。
+const MAX_BODY_BYTES = 5 * 1024;
+// 未認証 telemetry による共有 KV 枯渇が SIWE / relay / settle の書込へ波及するのを断つ。
+// 既存 list も次回の保存時に最新 20k 件へ trim。TTL は保存のたびに延長する (entry 単位ではない)。
+const LIST_CAP = 20_000;
+const LIST_TTL_SEC = 35 * 24 * 60 * 60;
+const DAILY_WRITE_BUDGET = 5_000;
+// UTC 日付ごとに key が変わる。窓の途中で counter が消えて予算を再利用されないよう 2 日保持。
+const BUDGET_TTL_SEC = 2 * 24 * 60 * 60;
+// errorMessage は client 申告の自由文字列。body 上限 (5KB) 内でも 1 entry が肥大化して
 // 共有リストの容量を食い潰すため、保存前に切詰める (reject はしない — ログは best-effort)。
 const ERROR_MESSAGE_MAX = 500;
 
@@ -77,7 +86,7 @@ type Payload = {
 };
 
 function isDecimalString(v: unknown): v is string {
-  return typeof v === 'string' && /^[0-9]+$/.test(v);
+  return isDecWithin(v, MAX_UINT256_DEC_DIGITS);
 }
 
 function validAddress(v: unknown): v is Address {
@@ -217,24 +226,16 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (lenHeader && Number(lenHeader) > MAX_BODY_BYTES) {
     return NextResponse.json({ ok: false, error: 'payload_too_large' }, { status: 413 });
   }
-  // 実 body を読んで byte 長を再検証する。chunked 転送など content-length が無い/偽の
-  // 経路でも上限を効かせ、巨大 JSON の parse コストを避ける (header だけだと bypass 可能)。
-  let bodyText: string;
-  try {
-    bodyText = await req.text();
-  } catch {
-    return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
+  // header 欠落/詐称でも累積 byte cap で読み取りを止め、巨大 body のメモリ消費の波及を断つ。
+  const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+  if (!body.ok) {
+    const tooLarge = body.reason === 'too_large';
+    return NextResponse.json(
+      { ok: false, error: tooLarge ? 'payload_too_large' : 'invalid_json' },
+      { status: tooLarge ? 413 : 400 },
+    );
   }
-  if (Buffer.byteLength(bodyText, 'utf8') > MAX_BODY_BYTES) {
-    return NextResponse.json({ ok: false, error: 'payload_too_large' }, { status: 413 });
-  }
-  let raw: unknown;
-  try {
-    raw = JSON.parse(bodyText);
-  } catch {
-    return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
-  }
-  const payload = validate(raw);
+  const payload = validate(body.value);
   if (!payload) {
     return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
   }
@@ -256,54 +257,43 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const entry = {
     serverTs: new Date().toISOString(),
-    // ipPrefix は limiter 専用。reader が無く、TTL のない main list への利用者 subnet の
-    // 恒久保存を避けるため、日次 list / logger を含む決済記録には載せない。
+    // ipPrefix は limiter 専用。reader が無い利用者 subnet を list / logger に保存しない。
     userAgent: (req.headers.get('user-agent') ?? '').slice(0, 200),
     ...payload,
   };
   logger.info('payment.event', entry);
 
-  const serialized = JSON.stringify(entry);
-  const kv = await kvLpush(PAYMENT_LOG_KV_KEY, serialized);
-  if (!kv.ok && kv.reason !== 'unconfigured') {
-    logger.warn('payment-log.kv-write-failed', { reason: kv.reason, status: kv.status });
-  } else if (kv.ok) {
-    // 古い entry を捨てて list size を有界化。失敗しても client には返さない。
-    // LPUSH 成功時点で env は確定設定なので unconfigured 分岐は到達不能。
-    const trim = await kvLtrim(PAYMENT_LOG_KV_KEY, 0, LIST_CAP - 1);
-    if (!trim.ok) {
-      logger.warn('payment-log.kv-trim-failed', { reason: trim.reason, status: trim.status });
+  // IP を分散した telemetry flood の容量消費が SIWE / relay / settle 台帳へ波及するのを断つ。
+  // 予算超過は保存だけ省略し、成功応答を維持。KV 障害も決済へ波及させず fail-open。
+  // 予算・保存の I/O は after() に閉じ、決済側の応答を遅くしない (掟 12/13)。
+  after(async () => {
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const budget = await kvIncr(`logpay:budget:${day}`, { initialTtlSec: BUDGET_TTL_SEC });
+    if (budget.ok && budget.value > DAILY_WRITE_BUDGET) {
+      // log 欠落を観測可能にしつつ、flood が Sentry の警告枠枯渇へ波及するのを断つ。
+      // UTC 日付 + SET NX で instance 間でも 1 日 1 回。marker 障害時は警告を省略し、
+      // 次の超過 request で再試行する (決済応答や log 保存の skip 判定には波及させない)。
+      const warning = await kvSet(`logpay:budget-warn:${day}`, '1', {
+        nx: true,
+        ttlSec: BUDGET_TTL_SEC,
+      });
+      if (warning.ok && warning.value === 'OK') {
+        logger.warn('payment-log.daily-budget-exhausted', { day });
+      }
+      return;
     }
 
-    // 日次パーティションへの二重書き (追加のみ)。未認証 write が単一 cap 付きリストを
-    // 押し出す (古い正規 entry の eviction) のを、日ごとに独立したキー + TTL で断つ。
-    // 既存の読み出し口 (export / stats) は上のレガシーキーのままなので挙動不変。
-    // 付帯処理なので失敗しても 200 を返す (決済 UI へ波及させない)。
-    const dailyKey = paymentLogDailyKey();
-    const daily = await kvLpush(dailyKey, serialized);
-    if (!daily.ok) {
-      logger.warn('payment-log.kv-daily-write-failed', {
-        reason: daily.reason,
-        status: daily.status,
-      });
-    } else {
-      // 日次キーも同じ cap で有界化 (1 日分の flood がメモリを食い潰さないように)。
-      const dailyTrim = await kvLtrim(dailyKey, 0, LIST_CAP - 1);
-      if (!dailyTrim.ok) {
-        logger.warn('payment-log.kv-daily-trim-failed', {
-          reason: dailyTrim.reason,
-          status: dailyTrim.status,
-        });
-      }
-      const ttl = await kvExpire(dailyKey, PAYMENT_LOG_DAILY_TTL_SEC);
-      if (!ttl.ok) {
-        logger.warn('payment-log.kv-daily-ttl-failed', {
-          reason: ttl.reason,
-          status: ttl.status,
-        });
-      }
+    // push / trim / expiry refresh を原子的に行い、部分成功による容量・無期限保持の波及を断つ。
+    // unread の日次リストには複製しない。export / stats はこの legacy key を読む。
+    const kv = await kvLpush(PAYMENT_LOG_KV_KEY, JSON.stringify(entry), {
+      trimStart: 0,
+      trimStop: LIST_CAP - 1,
+      ttlSec: LIST_TTL_SEC,
+    });
+    if (!kv.ok && kv.reason !== 'unconfigured') {
+      logger.warn('payment-log.kv-write-failed', { reason: kv.reason, status: kv.status });
     }
-  }
+  });
 
   return NextResponse.json({ ok: true });
 }

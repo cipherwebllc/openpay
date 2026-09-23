@@ -1273,7 +1273,7 @@ npm run load-test -- --url http://localhost:3000 -c 20 -d 15
 
 | Risk | 現状の緩和 | 将来の選択肢 |
 |---|---|---|
-| `/api/log/payment` の rate limit は KV 障害時 fail-open (KV 停止中は DDoS で Vercel function 実行費用 spike 可能) | 匿名化 IP prefix ごとに 60 req / 60s (`checkReadRateLimit`、route.ts:228)、`MAX_BODY_BYTES=8KB` で body 制限 (route.ts:17)、Vercel platform DDoS protection (built-in、attack mode 設定可) | (a) Vercel Firewall WAF rule で per-IP rate limit (KV 非依存の層を足す)、(b) Upstash Ratelimit (Vercel Marketplace) で sliding window、(c) /api/log/payment は KV write 量 cap で kill switch 化済 (paymentLog.ts fire-and-forget) |
+| `/api/log/payment` の rate limit は KV 障害時 fail-open (KV 停止中は DDoS で Vercel function 実行費用 spike 可能) | IP hash / 匿名化 prefix ごとに 60 req / 60s (`checkReadRateLimit`)、5 KiB の streamed body cap、78 桁の decimal cap、legacy list 20k 件 cap + 35 日の inactivity TTL、UTC 日次 5,000 件の write budget。超過時は保存だけ省略して 200、`payment-log.daily-budget-exhausted` を日次 SET NX で 1 回警告 | C3/C6: IPv6 /64 bucket・per-IP 日次 sub-budget・KV 非依存の WAF 制限を検討。単一 IP でも約 84 分で日次枠を使い切れ、拒否後も KV コマンドは消費する |
 | `setup-sentry-alerts.mjs` 自動実行 CI なし (idempotent script を operator 手動実行に依存) | script は idempotent (既存 rule は skip)、人為的に rule が消えない限り再実行不要 | GH Actions workflow に sentry-setup を追加 (SENTRY_AUTH_TOKEN secret 必要) |
 | punycode deprecation build warning | §10.11 受容済 noise (修正不能、機能無影響) | upstream packages (whatwg-url / uri-js) が `require('punycode/')` 採用するまで wait |
 | **A3 デバイス共通ラッチ (2026-09-03 レビュー裁定・受容)**: 同一端末で wallet を切り替えた同一人物が、状態不明のガスレス送金の直後にもう一方の wallet で再送すると二重支払いになり得る | ラッチは wallet 単位 (端末単位にしていない)。端末単位にすると共用 POS タブレット (店頭の 1 台を客が順に使う) で**他人の支払いを誤って阻止/誤帰属**するため、被害の大きい側を避けている。pending 応答は client の standard fallback を禁止済 (relayRoute) | 再評価トリガ = メトリクスで**同一端末の複数 wallet 利用**が観測されたとき (その時点で端末ラッチ or 端末+wallet の複合キーを再検討) |
@@ -1284,6 +1284,27 @@ npm run load-test -- --url http://localhost:3000 -c 20 -d 15
 engineering を避ける。将来 incident で demand 確認後に対処する。A3/A6 は加えて
 「塞ぐ側の副作用 (他人の決済を止める・money-path の制御フロー変更) の方が現状の実害より
 大きい」ため、上記トリガまで現状維持とする。
+
+#### C1 payment log: deploy 時の既存データ整理
+
+この変更は既存キーを移行・削除しない。`openpay:payments:log` は次の許可された保存が
+成功した時点で最新 20,000 件に trim され、古い記録は失われる。残る oversized entry の
+内容は書き換えない。35 日 TTL は **最終書込からの key 単位**で、entry の年齢制限ではない。
+低流量では 90 日より古い entry が残りうるため、entry 単位の保持期限は別の retention 対応で扱う。
+旧日次キー `openpay:payments:log:YYYYMMDD` は書込が止まるだけで、既存の最大 400 日 TTL が残る
+(TTL 未設定のキーがあれば自然失効しない)。既に満杯だと次の LPUSH 自体が失敗し、trim にも進めない。
+
+一度だけ行う operator 手順 (本番での削除・trim は対象一覧と記録喪失の **user 承認後**):
+
+1. 認証済み KV 管理画面で `SCAN 0 MATCH openpay:payments:log:* COUNT 100` を実行し、返された
+   cursor で 0 に戻るまで続ける。名前が `^openpay:payments:log:[0-9]{8}$` に一致する旧日次キーだけを選ぶ。
+2. 各候補の `TYPE` / `LLEN` / `TTL` / `MEMORY USAGE` を確認し、削除予定一覧と容量を記録する。
+   保存が必要な記録は削除前に制限された保管先へ退避する。現行の `kv-backup` allowlist は payment log を含まない。
+3. 承認された日次キーを完全名指定の `DEL` で削除する。wildcard 一括削除は使わず、legacy key や
+   SIWE / relay / settle 台帳には触れない。これは telemetry の複製削除であり決済の取消ではない。
+4. legacy list 自体の緊急縮小も承認された場合だけ、`LTRIM openpay:payments:log 0 19999` と
+   `EXPIRE openpay:payments:log 3024000` を実施する。容量・LLEN・TTL を再確認し、次の正規ログの保存と
+   認証付き stats / export の読み出しを確認する。deploy だけで容量が回復したとは判定しない。
 
 ### §11.7 SIWE セッション cookie の `__Host-` 化 (2026-09-03 投入・一度だけ全員サインアウト)
 
