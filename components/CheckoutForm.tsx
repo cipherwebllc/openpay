@@ -151,6 +151,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 1 度だけ生成し、webhook payload (notify がポインタ保存) と完了画面の「注文状況を見る」リンクで
   // 使う。flag OFF では生成せず null = payload 無変化・リンク非表示 (byte-identical)。
   const [statusToken, setStatusToken] = useState<string | null>(null);
+  const [orderNotifyTooOld, setOrderNotifyTooOld] = useState(false);
   const statusTokenRef = useRef<string | null>(null);
   const router = useRouter();
   const [modeOverride, setModeOverride] = useState<'standard' | null>(null);
@@ -718,7 +719,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       chain: chainSlug,
     });
 
-    // webhook 失敗 (CORS 等) は logger.warn のみ。決済自体は成立しているため UI には出さない。
+    // webhook 失敗 (CORS 等) は logger.warn のみ。自社 notify の期限外だけはスタッフへの確認を案内する。
     if (params.webhook) {
       // hash は fetch と並行に開始し、失敗 telemetry が必要な場合だけ await する。
       const webhookTelemetry = redactUrlForTelemetry(params.webhook);
@@ -806,6 +807,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         )
           .then(async (res) => {
             if (!res.ok) {
+              // 中継層の非 JSON 応答が既存の HTTP status 記録を飛ばす波及を断つ。
+              if (
+                isOrderNotifyWebhook && res.status === 422 &&
+                (await res.json().catch(() => null))?.error === 'tx_too_old'
+              ) {
+                // 受注拒否を決済失敗や再支払いへ波及させず、支払い済みのまま手動確認へ案内する。
+                setOrderNotifyTooOld(true);
+                setRedirectIn(null);
+              }
               const redacted = await webhookTelemetry;
               logger.warn('checkout.webhook.non_ok', {
                 status: res.status,
@@ -984,6 +994,15 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     )
       .then(async (res) => {
         if (!res.ok) {
+          // 中継層の非 JSON 応答が既存の HTTP status 記録を飛ばす波及を断つ。
+          if (
+            res.status === 422 &&
+            (await res.json().catch(() => null))?.error === 'tx_too_old'
+          ) {
+            // merchant leg は確定済み。受注拒否を店舗への二重送金へ波及させない。
+            setOrderNotifyTooOld(true);
+            setRedirectIn(null);
+          }
           const redacted = await webhookTelemetry;
           logger.warn('checkout.webhook.non_ok', {
             status: res.status,
@@ -1149,7 +1168,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   }, [redirectIn]);
 
   function doRedirect() {
-    if (!params.successUrl || !completion || restoredCheckoutCompletion) return;
+    if (!params.successUrl || !completion || restoredCheckoutCompletion || orderNotifyTooOld) return;
     const u = new URL(params.successUrl);
     for (const [k, v] of Object.entries(completion.redirectQuery)) {
       u.searchParams.set(k, v);
@@ -1808,6 +1827,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         />
       )}
 
+      {orderNotifyTooOld && (
+        <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          {t('orderNotifyTooOld')}
+        </p>
+      )}
+
       {completed && (gasless.data || standard.data || relay.data) && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
           <p className="font-semibold">{t('successTitle')}</p>
@@ -1867,7 +1892,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           {/* お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): 顧客が注文状況を追えるリンク。
               click は user gesture ＝ ここで AudioContext を解錠 (iOS 自動再生対策)。flag OFF / 非
               mobile-order (webhook 無) では statusToken が null ゆえ非表示。 */}
-          {env.enableOrderPickup && statusToken && (
+          {env.enableOrderPickup && statusToken && !orderNotifyTooOld && (
             <Link
               href={`/${locale}/order/status?t=${statusToken}`}
               prefetch={false}
@@ -1890,7 +1915,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             />
           </div>
 
-          {!restoredCheckoutCompletion && params.successUrl && (
+          {!restoredCheckoutCompletion && params.successUrl && !orderNotifyTooOld && (
             <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs">
                 {redirectIn !== null && redirectIn > 0
@@ -1950,7 +1975,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           success_url 指定時は overlay 表示中も 3 秒 countdown が並走する仕様。gasless / relay /
           standard の 3 連は共通 PaymentSuccessOverlay へ集約 (payload で mode 差を吸収・挙動不変)。 */}
       <PaymentSuccessOverlay
-        dismissed={overlayDismissed}
+        dismissed={overlayDismissed || orderNotifyTooOld}
         payload={successOverlayPayload}
         onDismiss={() => setOverlayDismissed(true)}
       />

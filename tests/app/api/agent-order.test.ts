@@ -825,7 +825,11 @@ describe('agent-order pay route', () => {
     expect(routeMocks.notify).toHaveBeenCalledOnce();
   });
 
-  it('notify 失敗は決済成功を巻き込まない (200 + orderRegistered:false)', async () => {
+  it.each([
+    ['kv_error', 503],
+    ['rpc_error', 503],
+    ['tx_too_old', 422],
+  ])('notify %s は決済成功を巻き込まない (200 + orderRegistered:false)', async (error, status) => {
     routeMocks.verify.mockResolvedValue(
       NextResponse.json({ isValid: true, payer: PAYER }),
     );
@@ -833,7 +837,7 @@ describe('agent-order pay route', () => {
       NextResponse.json({ success: true, transaction: TX_HASH, payer: PAYER }),
     );
     routeMocks.notify.mockResolvedValue(
-      NextResponse.json({ ok: false, error: 'kv_error' }, { status: 503 }),
+      NextResponse.json({ ok: false, error }, { status }),
     );
     const { pay } = await load();
     const res = await pay.GET(

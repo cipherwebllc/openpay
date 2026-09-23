@@ -1496,6 +1496,7 @@
     "successTx": "Transaction",
     "successBlock": "Block number",
     "orderIdLabel": "Order no.",
+    "orderNotifyTooOld": "Your payment is confirmed, but your order could not be registered automatically. Do not pay again. Show your payment history or transaction to store staff.",
     "viewOrderStatus": "View order status",
     "redirectingIn": "Redirecting to confirmation in {sec}s",
     "redirectingNow": "Redirecting to confirmation…",
