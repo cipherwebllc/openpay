@@ -11,6 +11,7 @@ import type { Address } from 'viem';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { isPrivateHost } from '@/lib/net/privateHost';
+import { isAllowedPushEndpoint } from '@/lib/push/endpoints';
 import {
   listPushSubscriptions,
   refreshPushSubscriptionsTtl,
@@ -39,6 +40,9 @@ export type SendPushSummary = {
 };
 
 const SEND_TIMEOUT_MS = 3_500;
+// 旧購読が決済のたびに Sentry を埋める波及を断つため、警告はプロセスごとに 1 回だけ。
+// endpoint/token は記録せず、攻撃者が指定するホストの無制限な集合も保持しない。
+let loggedBlockedEndpoint = false;
 
 type LookupAll = (
   hostname: string,
@@ -157,20 +161,25 @@ async function sendOne(
   sub: StoredPushSubscription,
   payloadInput: PushPayloadInput,
 ): Promise<'sent' | 'pruned' | 'failed'> {
-  const payload = resolvePushPayload(payloadInput, sub);
   try {
     const endpoint = new URL(sub.endpoint);
-    if (endpoint.protocol !== 'https:' || isPrivateHost(endpoint.hostname)) {
-      logger.warn('push.send_blocked_private_endpoint', {
-        endpointHash: sub.endpointHash,
-      });
+    if (!isAllowedPushEndpoint(endpoint)) {
+      // 旧レコードによる任意ホストへの送信と、他の購読の通知/決済完了への波及を断つ。
+      // レコードは残し、購読解除できる状態を維持する。
+      if (!loggedBlockedEndpoint) {
+        loggedBlockedEndpoint = true;
+        logger.warn('push.send_blocked_endpoint');
+      }
       return 'failed';
     }
+    const payload = resolvePushPayload(payloadInput, sub);
     const agent = createPushHttpsAgent();
     await withTimeout(
       webPush.sendNotification(
         {
-          endpoint: sub.endpoint,
+          // web-push は旧 url.parse を使う。検証済 URL を直列化して渡し、ホスト名の
+          // エンコードによる解釈差から許可外ホストへ接続する波及を断つ。
+          endpoint: endpoint.href,
           keys: sub.keys,
         },
         JSON.stringify({

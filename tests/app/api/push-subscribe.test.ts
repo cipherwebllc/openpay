@@ -60,7 +60,7 @@ vi.mock('@/lib/push/store', () => ({
     storeSpy.upsert(...args);
     return Promise.resolve(
       hold.upsertOk
-        ? { ok: true, value: [{ endpoint: 'https://push.example/sub/1' }] }
+        ? { ok: true, value: [{ endpoint: 'https://fcm.googleapis.com/sub/1' }] }
         : { ok: false, reason: 'kv_error' },
     );
   },
@@ -75,7 +75,7 @@ vi.mock('@/lib/push/store', () => ({
 import { DELETE, POST } from '@/app/api/push/subscribe/route';
 
 const subscription = {
-  endpoint: 'https://push.example/sub/1',
+  endpoint: 'https://fcm.googleapis.com/sub/1',
   keys: {
     p256dh: 'A'.repeat(87),
     auth: 'B'.repeat(22),
@@ -152,6 +152,60 @@ describe('/api/push/subscribe', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: 'invalid_payload' });
     expect(storeSpy.upsert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'https://fcm.googleapis.com/fcm/send/token',
+    'https://updates.push.services.mozilla.com/wpush/v2/token',
+    'https://push.services.mozilla.com/push/token',
+    'https://web.push.apple.com/token',
+    'https://region.web.push.apple.com/token',
+    'https://wns2-par02p.notify.windows.com/token',
+    'https://region.wns.notify.windows.com/token',
+    'https://FCM.GOOGLEAPIS.COM:443/token',
+    'https://fcm.googleapis.com./token',
+  ])('POST accepts a known HTTPS push service: %s', async (endpoint) => {
+    const res = await POST(req('POST', {
+      subscription: { ...subscription, endpoint }, locale: 'ja',
+    }));
+    expect(res.status).toBe(200);
+    expect(storeSpy.upsert).toHaveBeenCalledWith(SESSION_ADDR,
+      expect.objectContaining({ endpoint }));
+  });
+
+  it.each([
+    'https://example.com/push',
+    'https://8.8.8.8/push',
+    'https://[2606:4700::1111]/push',
+    'http://fcm.googleapis.com/push',
+    'https://fcm.googleapis.com.evil.example/push',
+    'https://evilfcm.googleapis.com/push',
+    'https://evil.fcm.googleapis.com/push',
+    'https://evil.push.services.mozilla.com/push',
+    'https://updates.push.services.mozilla.com.evil.example/push',
+    'https://push.apple.com/push',
+    'https://evilpush.apple.com/push',
+    'https://web.push.apple.com.evil.example/push',
+    'https://notify.windows.com/push',
+    'https://evilnotify.windows.com/push',
+    'https://wns.notify.windows.com.evil.example/push',
+    'https://fcm.googleapis.com@evil.example/push',
+    'https://user:pass@fcm.googleapis.com/push',
+    'https://fcm.googleapis.com:8443/push',
+  ])('POST rejects an untrusted push endpoint before storage: %s', async (endpoint) => {
+    const res = await POST(req('POST', {
+      subscription: { ...subscription, endpoint }, locale: 'ja',
+    }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid_payload' });
+    expect(storeSpy.upsert).not.toHaveBeenCalled();
+  });
+
+  it('DELETE still removes a legacy subscription on an arbitrary public host', async () => {
+    const endpoint = 'https://push.example/legacy';
+    const res = await DELETE(req('DELETE', { endpoint }));
+    expect(res.status).toBe(200);
+    expect(storeSpy.remove).toHaveBeenCalledWith(SESSION_ADDR, { endpoint });
   });
 
   it('正常 POST は body の wallet を無視し SIWE address で upsert する', async () => {

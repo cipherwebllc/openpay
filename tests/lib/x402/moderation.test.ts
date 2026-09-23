@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
+  bridgeLookupResult,
   fetchSsrfSafe,
   isFreelyAccessible,
   isPrivateHost,
@@ -244,5 +245,28 @@ describe('lib/x402/moderation bridgeLookupResult (undici connect.lookup 契約)'
     const args: unknown[] = [];
     bridgeLookupResult(true, [], (...a: unknown[]) => args.push(...a));
     expect(args[0]).toBeInstanceOf(Error);
+  });
+});
+
+
+describe('x402 special-purpose DNS answers', () => {
+  it.each([
+    '192.0.0.1', '198.18.0.1', '203.0.113.1', '224.0.0.1', '240.0.0.1',
+    '::ffff:198.18.0.1', '64:ff9b::a9fe:a9fe', '2002:7f00:1::', 'fec0::1', 'ff02::1',
+  ])('blocks %s before fetch and at connection time', async (address) => {
+    const answers = [
+      { address: '8.8.8.8', family: 4 },
+      { address, family: address.includes(':') ? 6 : 4 },
+    ];
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 200 }));
+    const opts = { lookup: async () => answers, fetchImpl };
+    expect(await fetchSsrfSafe('https://seller.example/paid', opts)).toBeNull();
+    expect(await isFreelyAccessible('https://seller.example/paid', opts)).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    for (const wantAll of [false, true]) {
+      const callback = vi.fn();
+      bridgeLookupResult(wantAll, answers, callback);
+      expect(callback).toHaveBeenCalledWith(new Error('ssrf_blocked_private_address'));
+    }
   });
 });

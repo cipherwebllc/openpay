@@ -72,6 +72,7 @@ vi.mock('@/lib/push/store', () => ({
 }));
 
 import { createPushHttpsAgent, sendPushToWallet } from '@/lib/push/server';
+import { logger } from '@/lib/logger';
 
 const keys = { p256dh: 'A'.repeat(87), auth: 'B'.repeat(22) };
 
@@ -101,7 +102,7 @@ beforeEach(() => {
   hold.subscriptions = [
     {
       endpointHash: 'a'.repeat(64),
-      endpoint: 'https://push.example/sub/a',
+      endpoint: 'https://fcm.googleapis.com/sub/a',
       keys,
       locale: 'ja',
       vapidKeyId: '12345678',
@@ -109,7 +110,7 @@ beforeEach(() => {
     },
     {
       endpointHash: 'b'.repeat(64),
-      endpoint: 'https://push.example/sub/b',
+      endpoint: 'https://fcm.googleapis.com/sub/b',
       keys,
       locale: 'en',
       vapidKeyId: '12345678',
@@ -117,7 +118,7 @@ beforeEach(() => {
     },
     {
       endpointHash: 'c'.repeat(64),
-      endpoint: 'https://push.example/sub/c',
+      endpoint: 'https://fcm.googleapis.com/sub/c',
       keys,
       locale: 'ja',
       vapidKeyId: '12345678',
@@ -188,7 +189,7 @@ describe('sendPushToWallet', () => {
     hold.subscriptions = [
       {
         endpointHash: 'a'.repeat(64),
-        endpoint: 'https://push.example/opt-in',
+        endpoint: 'https://fcm.googleapis.com/opt-in',
         keys,
         locale: 'ja',
         vapidKeyId: '12345678',
@@ -197,7 +198,7 @@ describe('sendPushToWallet', () => {
       },
       {
         endpointHash: 'b'.repeat(64),
-        endpoint: 'https://push.example/opt-out',
+        endpoint: 'https://fcm.googleapis.com/opt-out',
         keys,
         locale: 'ja',
         vapidKeyId: '12345678',
@@ -229,6 +230,85 @@ describe('sendPushToWallet', () => {
 
     expect(summary).toEqual({ attempted: 0, sent: 0, pruned: 0, failed: 0 });
     expect(webPush.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it('skips legacy public hosts without pruning, sends valid siblings, and logs once per process', async () => {
+    vi.resetModules();
+    const { sendPushToWallet: send } = await import('@/lib/push/server');
+    vi.mocked(logger.warn).mockClear();
+    hold.subscriptions[0].endpoint = 'https://example.com/private-token';
+    hold.subscriptions[1].endpoint = 'https://another.example/private-token';
+    webPush.sendNotification.mockResolvedValue(undefined);
+    const payload = vi.fn(() => ({ title: 'payment received' }));
+
+    for (let i = 0; i < 2; i += 1) {
+      await expect(send(WALLET, payload)).resolves.toEqual({
+        attempted: 3, sent: 1, pruned: 0, failed: 2,
+      });
+    }
+    expect(webPush.sendNotification).toHaveBeenCalledTimes(2);
+    expect(webPush.sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: hold.subscriptions[2].endpoint }),
+      expect.any(String), expect.any(Object),
+    );
+    expect(payload).toHaveBeenCalledTimes(2);
+    expect(store.remove).not.toHaveBeenCalled();
+    expect(store.refresh).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith('push.send_blocked_endpoint');
+  });
+
+  it.each([
+    'https://evil.example%2eweb.push.apple.com/token',
+    'https://127.0.0.1%2eweb.push.apple.com/token',
+    'https://%66cm.googleapis.com/token',
+  ])('passes the validated URL serialization to web-push: %s', async (endpoint) => {
+    hold.subscriptions = [{ ...hold.subscriptions[0], endpoint }];
+    webPush.sendNotification.mockResolvedValue(undefined);
+    await expect(sendPushToWallet(WALLET, { title: 'received' })).resolves.toEqual({
+      attempted: 1, sent: 1, pruned: 0, failed: 0,
+    });
+    expect(webPush.sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: new URL(endpoint).href }),
+      expect.any(String), expect.any(Object),
+    );
+  });
+
+  it.each([
+    'https://example.com/push',
+    'https://web.push.apple.com.evil.example/push',
+    'https://evilnotify.windows.com/push',
+    'https://updates.push.services.mozilla.com.evil.example/push',
+    'http://fcm.googleapis.com/push',
+    'https://user:pass@fcm.googleapis.com/push',
+    'https://fcm.googleapis.com:8443/push',
+  ])('revalidates stored endpoints at the send sink: %s', async (endpoint) => {
+    hold.subscriptions = [{ ...hold.subscriptions[0], endpoint }];
+    await expect(sendPushToWallet(WALLET, { title: 'received' })).resolves.toEqual({
+      attempted: 1, sent: 0, pruned: 0, failed: 1,
+    });
+    expect(webPush.sendNotification).not.toHaveBeenCalled();
+    expect(store.refresh).not.toHaveBeenCalled();
+    expect(store.remove).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    '100.64.0.1', '192.0.0.1', '198.18.0.1', '203.0.113.1',
+    '224.0.0.1', '240.0.0.1', '::ffff:198.18.0.1',
+    '64:ff9b::a9fe:a9fe', '2002:7f00:1::', 'fec0::1', 'ff02::1',
+  ])('connect-time lookup blocks a special-purpose answer: %s', async (address) => {
+    const lookupAll: LookupAll = (_hostname, _options, callback) => callback(null, [
+      { address: '8.8.8.8', family: 4 },
+      { address, family: address.includes(':') ? 6 : 4 },
+    ]);
+    const agent = createPushHttpsAgent(lookupAll);
+    try {
+      await expect(agentLookup(agent, 'fcm.googleapis.com')).rejects.toThrow(
+        'push_blocked_private_address',
+      );
+    } finally {
+      agent.destroy();
+    }
   });
 
   it('保存済み literal private endpoint は sink で再拒否し、購読は削除しない', async () => {
