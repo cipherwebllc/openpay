@@ -1451,6 +1451,17 @@ describe('i18n: UsageFee owed 一覧 keys (古い未収の期間別清算・ja/e
   });
 });
 
+describe('i18n: 加入の厳密額確認 (過不足は付与不可)', () => {
+  it.each([
+    ['ja.Pro', ja.Pro.confirmOverpay, '{price} JPYC ちょうどを送金してください。異なる金額では Pro を付与できません。'],
+    ['ja.CsvPass', ja.CsvPass.confirmOverpay, '{price} JPYC ちょうどを送金してください。異なる金額では CSV パスを付与できません。'],
+    ['en.Pro', en.Pro.confirmOverpay, 'Send exactly {price} JPYC. Pro access cannot be granted for any other amount.'],
+    ['en.CsvPass', en.CsvPass.confirmOverpay, 'Send exactly {price} JPYC. A CSV pass cannot be granted for any other amount.'],
+  ])('%s は厳密額と異なる額の付与不可を開示する', (_key, actual, expected) => {
+    expect(actual).toBe(expected);
+  });
+});
+
 describe('i18n: Pro 名前空間 (OpenPay Pro paywall・ja/en parity)', () => {
   // Pro 加入パネル (ProPaywall) で使う key 集合。flag-gate された機能なので片 locale 抜けが
   // silent regression しやすい。非空 + 構造 parity + placeholder を fence する。
@@ -1582,7 +1593,7 @@ describe('i18n: CsvPass 名前空間 (CSV 24時間パス paywall・ja/en parity)
       expect(p.confirmPrice).toContain('{hours}');
       expect(p.confirmNoStacking).toContain('{hours}');
       expect(p.confirmOverpay).toContain('{price}');
-      expect(p.confirmOverpay).toContain('{hours}');
+      expect(p.confirmOverpay).not.toContain('{hours}');
       expect(p.payCta).toContain('{price}');
       expect(p.reviewCta).toContain('{price}');
       expect(p.switchChain).toContain('{chain}');

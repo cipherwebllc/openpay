@@ -1,7 +1,7 @@
 'use client';
 
 // OpenPay Pro (月額 ¥500) の加入パネル。SIWE ログイン → 支払い前確認 (¥500/30日/自動更新なし/返金不可/
-// 超過も 30日/別途ガス代) → 500 JPYC を FEE_RECEIVER へ送金 → /api/pro/subscribe で検証 + 付与。
+// 厳密額のみ/別途ガス代) → 500 JPYC を FEE_RECEIVER へ送金 → /api/pro/subscribe で検証 + 付与。
 // 検証失敗時は再支払いさせず再検証導線を出す。FEE_RECEIVER 未設定時は支払いボタンを無効化する
 // (未設定の宛先へ 500 JPYC を送らせない)。設計: plans/pro-plan.md。
 //
@@ -43,7 +43,7 @@ const PRO_CONFIG: EntitlementPaywallConfig = {
     { key: 'confirmPrice', values: { price: PRO_PRICE_JPYC, days: PRO_GRANT_DAYS } },
     { key: 'confirmNoAutoRenew' },
     { key: 'confirmNoRefund' },
-    { key: 'confirmOverpay' },
+    { key: 'confirmOverpay', values: { price: PRO_PRICE_JPYC } },
   ],
   gasLineKey: 'confirmGas',
   formatExpiry: formatDate,

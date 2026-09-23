@@ -8,8 +8,7 @@
 // サーバが auth = {from, to: env.feeReceiver, ...} を構成する (汎用無料 relay 化の悪用を構造的に遮断・
 // 別宛先署名は recover で弾かれる)。route 固有の検証:
 //   auth.from === session.address (SIWE 束縛・relayer ガスは認証済み wallet のみ) → 403 from_mismatch
-//   csvPassPriceWei <= value <= csvPassPriceWei * 10 (少額 overpay のみ許可) → 400 insufficient_value /
-//   value_too_large
+//   value === csvPassPriceWei (厳密額のみ許可) → 不一致は broadcast 前に 400 amount_mismatch
 // 共通検証 (relayJpycAuthorization): validateAuthorization → recover==from → balance ≥ value →
 //   authorizationState → idem claim → rate-limit → gas budget → submit → poll。
 //
@@ -41,8 +40,6 @@ import {
 } from '@/lib/relay/relayRoute';
 
 export const runtime = 'nodejs';
-
-const CSV_PASS_RELAY_MAX_MULTIPLE = 10n;
 
 // MAX_BODY_BYTES / isDec / respond は共有 relayRoute へ集約 (決済 relay と同形)。
 // respond は logger イベント prefix を 'csvpass.relay' で束ね、現行のイベント名を完全再現する
@@ -168,14 +165,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   const value = BigInt(raw.value);
-  // 100 JPYC 以上。少額 overpay は受理するが、汎用 relay 上限 (既定 50,000 JPYC) まで許すと
-  // パス購入 endpoint として広すぎるため 10 倍で cap する。額不足も subscribe の minValue を
-  // 満たさないため事前に弾く。
-  if (value < csvPassPriceWei) {
-    return NextResponse.json({ ok: false, error: 'insufficient_value' }, { status: 400 });
-  }
-  if (value > csvPassPriceWei * CSV_PASS_RELAY_MAX_MULTIPLE) {
-    return NextResponse.json({ ok: false, error: 'value_too_large' }, { status: 400 });
+  // subscribe が付与できない過不足額の送金とガススポンサー費用が発生する波及を broadcast 前に断つ。
+  if (value !== csvPassPriceWei) {
+    return NextResponse.json({ ok: false, error: 'amount_mismatch' }, { status: 400 });
   }
 
   // auth は **サーバ権威** で構成 (to=env.feeReceiver 固定・client の to は受けない)。署名は to を含む

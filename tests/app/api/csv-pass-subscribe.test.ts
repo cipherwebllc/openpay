@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextResponse } from 'next/server';
 
 const JPYC = 10n ** 18n;
@@ -151,7 +151,10 @@ function req(body: unknown): Request {
   });
 }
 
+afterEach(() => vi.restoreAllMocks());
+
 beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(1_750_000_000_000);
   hold.enableCsvPass = true;
   hold.feeReceiverConfigured = true;
   hold.session = { ok: true, address: SESSION_ADDR };
@@ -224,19 +227,15 @@ describe('POST /api/csv-pass/subscribe', () => {
     });
   });
 
-  it('overpay (150 JPYC): 台帳には実受領値が乗り、付与は 24時間 1 期間のみ', async () => {
+  it('overpay (150 JPYC) → 400・付与/収益記録なし・ロック解放', async () => {
     hold.verify = { ok: true, value: 150n * JPYC, blockNumber: 42n };
     const res = await POST(req({ txHash: TXHASH, chainId: AMOY }));
-    expect(res.status).toBe(200);
-    // 付与 target は額に依らず block ts + 24h (按分/積み増しなし)。
-    expect(grantSpy).toHaveBeenCalledWith(
-      SESSION_ADDR,
-      hold.blockTimestampSec * 1000 + GRANT_MS,
-    );
-    // 台帳は超過分も正しく実額で記録する。
-    expect(revenueSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ priceWei: 150n * JPYC }),
-    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'insufficient_payment', reason: 'amount_mismatch' });
+    expect(grantSpy).not.toHaveBeenCalled();
+    expect(revenueSpy).not.toHaveBeenCalled();
+    expect(kvDelSpy).toHaveBeenCalled();
+    expect(kvEvalSpy).not.toHaveBeenCalled();
   });
 
   it('from 束縛: verify に from=session・to=feeReceiver・token=JPYC・minValue=100e18 を渡す', async () => {

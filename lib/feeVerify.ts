@@ -25,6 +25,7 @@ export type FeeVerifyResult =
       reason:
         | 'no_matching_transfer'
         | 'amount_too_low'
+        | 'unexpected_transfer'
         | 'tx_reverted'
         | 'tx_not_found'
         // RPC/transport 障害 (ダウン/rate limit/network/timeout)。tx_not_found (= 顧客が
@@ -139,6 +140,8 @@ export async function verifyJpycFeeOnChain(args: {
   publicClient: ReceiptReader;
   txHash: Hex;
   expected: FeeTransferExpected;
+  /** 加入専用: receipt 内の全 JPYC Transfer が expected.from→to であることを要求する。 */
+  onlyExpectedTransfers?: boolean;
 }): Promise<FeeVerifyResult> {
   let receipt: Awaited<ReturnType<ReceiptReader['getTransactionReceipt']>>;
   try {
@@ -154,6 +157,21 @@ export async function verifyJpycFeeOnChain(args: {
     return { ok: false, reason: 'rpc_error' };
   }
   if (receipt.status !== 'success') return { ok: false, reason: 'tx_reverted' };
+  // 加入時だけ他用途の JPYC Transfer 混在を拒否し、店舗売上の手数料が利用権付与へ流用されて
+  // 元の売上/手数料 claim を妨げる波及を断つ。既存 billing 等の最低額検証には適用しない。
+  if (args.onlyExpectedTransfers) {
+    for (const log of receipt.logs) {
+      if (
+        log.address.toLowerCase() !== args.expected.token.toLowerCase() ||
+        log.topics[0]?.toLowerCase() !== ERC20_TRANSFER_TOPIC
+      ) continue;
+      const transfer = verifyJpycFeeTransfer({
+        logs: [log],
+        expected: { ...args.expected, minValue: 0n },
+      });
+      if (!transfer.ok) return { ok: false, reason: 'unexpected_transfer' };
+    }
+  }
   const result = verifyJpycFeeTransfer({ logs: receipt.logs, expected: args.expected });
   // 照合成功時のみ blockNumber を付加する (失敗時は reason だけ・形を変えない)。
   // settle はこのフィールドを無視するので既存挙動に影響しない (追加のみ・破壊なし)。

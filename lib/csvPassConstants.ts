@@ -1,7 +1,7 @@
 // CSV パスの client/server 共有定数。KV など server-only 依存を持たせず、購入 UI/hook から
 // lib/csvPass (利用権ストア) を経由せず直接 import できる境界に保つ。
 
-// 100 JPYC (= 18 decimals)。overpayment は受理するが付与は常に 24時間 1 期間のみ。
+// 100 JPYC (= 18 decimals)。購入時は厳密額のみ受理し、付与は 24時間 1 期間。
 export const CSV_PASS_PRICE_JPYC = 100;
 export const csvPassPriceWei = BigInt(CSV_PASS_PRICE_JPYC) * 10n ** 18n;
 // 1 支払いで付与する時間。自動更新なし (手動再支払い)。再購入は新しい支払い時刻から 24時間 (合算しない)。

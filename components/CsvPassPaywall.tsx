@@ -2,7 +2,7 @@
 
 // CSV 24時間パス (都度 100 JPYC) の購入パネル。会計CSVダウンロードが CSV パスゲート (passLocked)
 // のときに HistoryView が描画する。SIWE ログイン → 支払い前確認 (100 JPYC/24時間/自動更新なし/返金不可/
-// 合算なし/超過も24時間/別途ガス代) → 100 JPYC を FEE_RECEIVER へ送金 → /api/csv-pass/subscribe で
+// 合算なし/厳密額のみ/別途ガス代) → 100 JPYC を FEE_RECEIVER へ送金 → /api/csv-pass/subscribe で
 // 検証 + 付与。検証失敗時は再支払いさせず再検証導線を出す。FEE_RECEIVER 未設定時は支払いボタンを
 // 無効化する (未設定の宛先へ 100 JPYC を送らせない)。設計: plans/csv-pass.md。
 //
@@ -50,7 +50,7 @@ const CSV_PASS_CONFIG: EntitlementPaywallConfig = {
     { key: 'confirmNoAutoRenew' },
     { key: 'confirmNoRefund' },
     { key: 'confirmNoStacking', values: { hours: CSV_PASS_GRANT_HOURS } },
-    { key: 'confirmOverpay', values: { hours: CSV_PASS_GRANT_HOURS } },
+    { key: 'confirmOverpay', values: { price: CSV_PASS_PRICE_JPYC } },
   ],
   gasLineKey: 'confirmGas',
   gaslessGasLineKey: 'confirmGasGasless',

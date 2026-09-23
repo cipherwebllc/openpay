@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Address } from 'viem';
 import type {
   EntitlementPaymentConfig,
@@ -104,12 +104,16 @@ function pay(cfg: EntitlementPaymentConfig) {
   return processEntitlementPayment({
     txHash: TXHASH,
     chainId: AMOY,
+    requestedAtMs: Date.now(),
     session: { address: WALLET },
     config: cfg,
   });
 }
 
+afterEach(() => vi.restoreAllMocks());
+
 beforeEach(() => {
+  vi.spyOn(Date, 'now').mockReturnValue(1_750_000_000_000);
   h.store.clear();
   h.blockTimestampSec = 1_750_000_000;
   h.verify.mockReset();
@@ -120,7 +124,8 @@ beforeEach(() => {
 describe('processEntitlementPayment cross-tier claim', () => {
   it('same txHash submitted to two different tiers → second is rejected as used_by_other_tier', async () => {
     const pro = config('pro');
-    const csv = config('csvpass');
+    // Keep cross-tier coverage even if product prices coincide in the future.
+    const csv = config('csvpass', { priceWei: pro.cfg.priceWei });
 
     const first = await pay(pro.cfg);
     expect(first.status).toBe(200);
@@ -139,6 +144,8 @@ describe('processEntitlementPayment cross-tier claim', () => {
     const prior = await first.json();
     expect(first.status).toBe(200);
 
+    // Completed results remain replayable after the first-claim freshness window.
+    vi.spyOn(Date, 'now').mockReturnValue(1_750_000_000_000 + 8 * 86_400_000);
     pro.grant.mockClear();
     h.verify.mockClear();
     const retry = await pay(pro.cfg);
