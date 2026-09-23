@@ -188,6 +188,19 @@ export async function handleDualRailRelay(
   if (!resolved.ok) return resolved.response;
   const { resource, usdc, accepts } = resolved.target;
 
+  // Listing edits must not substitute money terms after the seller pins them. Display metadata
+  // is excluded so description/URL edits do not break payment; all forwarded fields, including
+  // the fixed USDC domain/timeout, still come from the registry/config, never this snapshot.
+  const pinned = b.paymentRequirements;
+  const moneyFields = ['payTo', 'maxAmountRequired', 'asset', 'network', 'scheme'] as const;
+  if ('paymentRequirements' in b && (
+    typeof pinned !== 'object' || pinned === null || Array.isArray(pinned) ||
+    moneyFields.some((field) => (pinned as Record<string, unknown>)[field] !== accepts.v1[field])
+  )) {
+    logger.warn('x402.dualrail.requirements_mismatch', { resourceId: resource.id, action });
+    return jsonError(409, 'requirements_mismatch');
+  }
+
   const v2Header =
     typeof b.paymentSignatureHeader === 'string' ? b.paymentSignatureHeader : null;
   const v1Header = typeof b.paymentHeader === 'string' ? b.paymentHeader : null;

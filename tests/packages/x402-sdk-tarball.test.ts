@@ -106,7 +106,7 @@ describe('openpay-x402-sdk tarball consumer', () => {
       join(consumerDir, 'smoke.mjs'),
       `import { createFileSpendStore, createJpycGate, createOpenPayClient, JPYC_DECIMALS } from 'openpay-x402-sdk';
 const client = createOpenPayClient({ catalogTrust: false });
-const gate = createJpycGate({ resourceUrl: 'https://seller.test/paid' });
+const gate = createJpycGate({ resourceUrl: 'https://seller.test/paid', resourceId: 'seller-id', expectedRecipient: '0x1111111111111111111111111111111111111111' });
 if (JPYC_DECIMALS !== 18 || client.session.spentJpyc !== '0') process.exit(1);
 if (JSON.stringify(client) !== '{}') process.exit(2);
 if (typeof gate.handle !== 'function' || typeof gate.verify !== 'function') process.exit(3);
@@ -145,6 +145,7 @@ if (typeof createFileSpendStore !== 'function') process.exit(4);
   createCatalogCache,
   createCatalogResolver,
   createFileSpendStore,
+  createDualGate,
   createJpycGate,
   createOpenPayClient,
   createPaymentExecutor,
@@ -229,8 +230,13 @@ createOpenPayClient({
   spendStore,
   catalogTrust: false,
 });
-const gateOptions: JpycGateOptions = { resourceUrl: 'https://seller.test/paid' };
+const gateOptions: JpycGateOptions = { resourceUrl: 'https://seller.test/paid', resourceId: 'seller-id', expectedRecipient: '0x1111111111111111111111111111111111111111' };
 const gate: JpycGate = createJpycGate(gateOptions);
+createDualGate({ ...gateOptions, expectedUsdcRecipient: '0x2222222222222222222222222222222222222222' });
+// @ts-expect-error seller gates require both identity and recipient pins
+createJpycGate({ resourceUrl: gateOptions.resourceUrl });
+// @ts-expect-error the USDC recipient must also be explicitly configured
+createDualGate(gateOptions);
 const quote: Promise<QuoteResult> = client.quote('https://open-pay.jp/api/paid/demo');
 const discovery: Promise<FreeApiResult<unknown>> = client.discover();
 const handled: Promise<Response | JpycGatePaymentResponse> = gate.handle(

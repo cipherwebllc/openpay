@@ -654,7 +654,7 @@ const LICENSE_STORE_GUIDE_JA = {
   fields: '商品タイプで「利用ライセンス NFT」を選び、ライセンス名・販売数・整数 JPYC の価格・譲渡（既定は不可）を入力します。利用条件は OpenPay 標準テンプレート (standard-v1) を選ぶか、自分の https URL と利用条件のバージョン（例: v1）を指定できます。利用開始の案内は任意のテキストです。利用条件には提供範囲と期間、従量料金の有無、発行失敗時の対応期限、返金と終了時の通知・救済を記載してください。',
   publish: '作成した商品は登録待ちになります。登録状態を更新し、登録済みになってから「公開する」で販売を開始します。作成後は価格・販売数・譲渡・利用条件・案内を変更できません。販売停止では既存の購入記録は消えません。',
   integrationHeading: 'サービスへの組み込み方',
-  integration: 'SDK 0.7.1 の組み合わせです。環境変数は LICENSE_PRODUCT_ID と LICENSE_SESSION_SECRET の二つ。商品 ID からチェーンと NFT の定義を取得します。Polygon の RPC URL は任意です。session.origin は組み込むサービスの URL に置き換えます。入口の本人確認と、使った分の支払いを分けて考えます。',
+  integration: 'SDK 0.10.0 の組み合わせです。LICENSE_PRODUCT_ID と LICENSE_SESSION_SECRET に加え、都度課金には自分の出品 ID（MY_RESOURCE_ID）と JPYC 受取先（EXPECTED_RECIPIENT）を設定します。ID と受取先は discovery 応答から設定しないでください。商品 ID からチェーンと NFT の定義を取得します。Polygon の RPC URL は任意です。session.origin は組み込むサービスの URL に置き換えます。入口の本人確認と、使った分の支払いを分けて考えます。',
   entry: 'createLicenseGate：ウォレット署名で本人を確認し、入口のライセンスを確認する。',
   metered: 'createJpycGate：実際の API 利用などを、別の x402 都度課金にする。',
   verifyHeading: 'Verify API で状態を確認する',
@@ -671,7 +671,7 @@ const LICENSE_STORE_GUIDE_EN = {
   fields: 'Choose “Usage license NFT” and enter a license name, supply, whole-JPYC price, transfer policy (not allowed by default). For license terms, choose the OpenPay standard template (standard-v1) or specify your own https URL and terms version (e.g. v1). Getting-started text is optional. The terms must explain scope, duration, any metered charges, the deadline for addressing mint failures, refunds and termination notices and remedies.',
   publish: 'A new product awaits registration. Refresh its status and select “Publish” once registered. Price, supply, transfer policy, terms and instructions cannot be edited after creation. Stopping sales does not erase purchase records.',
   integrationHeading: 'Connect it to your service',
-  integration: 'This combination uses SDK 0.7.1. Set two environment variables: LICENSE_PRODUCT_ID and LICENSE_SESSION_SECRET. The product ID resolves the chain and NFT definition; a Polygon RPC URL is optional. Replace session.origin with your service URL. Check identity and access at the entrance, and charge separately for usage.',
+  integration: 'This combination uses SDK 0.10.0. Set LICENSE_PRODUCT_ID and LICENSE_SESSION_SECRET; for usage payments, also configure your own listing ID (MY_RESOURCE_ID) and JPYC recipient (EXPECTED_RECIPIENT). Never take these pins from the discovery response. The product ID resolves the chain and NFT definition; a Polygon RPC URL is optional. Replace session.origin with your service URL. Check identity and access at the entrance, and charge separately for usage.',
   entry: 'createLicenseGate: verify the wallet signature and check the license at the entrance.',
   metered: 'createJpycGate: charge for API calls or other actual usage in separate x402 payments.',
   verifyHeading: 'Check status with the Verify API',
@@ -699,7 +699,11 @@ const entry = createLicenseGate({
   },
 });
 await entry.ready();
-const usage = createJpycGate({ resourceUrl: 'https://service.example/api/paid' });`,
+const usage = createJpycGate({
+  resourceUrl: 'https://service.example/api/paid',
+  resourceId: process.env.MY_RESOURCE_ID,
+  expectedRecipient: process.env.EXPECTED_RECIPIENT,
+});`,
     verifyCommand: 'curl --get "https://open-pay.jp/api/license/verify" --data-urlencode "address=ADDRESS" --data-urlencode "product=PRODUCT_ID"',
   };
 }

@@ -193,6 +193,8 @@ export interface OpenPaySession {
 }
 
 export interface DiscoveryItem {
+  /** Present for registered seller listings; obtain trusted gate pins from your own config. */
+  id?: string;
   /** Short display name (first-party, or seller-provided). */
   title?: string;
   /** One line describing when an agent should buy this resource (optional). */
@@ -313,6 +315,10 @@ export function createOpenPayClient(
 
 export interface JpycGateOptions {
   resourceUrl: string;
+  /** Trusted listing ID from your own seller dashboard/config; never a URL search result. */
+  resourceId: string;
+  /** Seller JPYC recipient (extra.openpay.merchant), NOT the forwarder payTo. */
+  expectedRecipient: Address;
   openpayOrigin?: string;
   fetchImpl?: typeof globalThis.fetch;
   now?: () => number;
@@ -500,14 +506,15 @@ export interface LicenseGate {
 export function createLicenseGate(options: LicenseGateOptions): LicenseGate;
 
 export interface DualGateOptions extends JpycGateOptions {
-  /** OpenPay listing id (MY_RESOURCE_ID in the generated snippet). Enables the USDC (Base) rail. */
-  resourceId: string;
+  /** Trusted USDC recipient (payTo); required even when equal to the JPYC recipient. */
+  expectedUsdcRecipient: Address;
 }
 
 /**
  * Dual-rail seller gate: JPYC (Polygon, OpenPay facilitator) plus USDC (Base, standard x402
  * relayed to the CDP facilitator via OpenPay). If the USDC face cannot be fetched (relay off
- * or unavailable), the gate degrades to JPYC-only — the USDC side never blocks JPYC payments.
+ * or unavailable), the gate degrades to JPYC-only. Identity/recipient mismatches throw and log
+ * before any 402 or payment call; they never trigger a rail fallback.
  */
 export function createDualGate(options: DualGateOptions): JpycGate;
 

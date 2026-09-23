@@ -418,6 +418,20 @@ async function resolveActiveByIds(
   return out;
 }
 
+// Exact-ID public reads bypass the bounded discovery index while preserving its visibility rules.
+export async function getPublicResource(id: string): Promise<
+  { ok: true; resource: X402Resource | null } | { ok: false }
+> {
+  const resources = await resolveActiveByIds([id], { includeHidden: false });
+  if (resources === null) return { ok: false };
+  const resource = resources[0];
+  return {
+    ok: true,
+    resource: resource && resource.id === id && !isOpenPayCanonicalOriginUrl(resource.url)
+      ? resource : null,
+  };
+}
+
 // owner の resource 一覧 (登録 UI 用)。active のみ — deactivate (soft-delete) 済は owner 画面からも
 // 隠す (データは KV に残す: settlement が resourceId を参照・監査)。index には id が残るが filter で除外。
 // **KV エラー (index 読取 or 各 record 取得) は null** を返し「空」と区別する (handleStore と同流儀)。

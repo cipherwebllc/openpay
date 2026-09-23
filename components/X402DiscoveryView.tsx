@@ -579,7 +579,7 @@ export function X402DiscoveryView({
   const errorMsg =
     error === 'resource_not_gated'
       ? t('errorNotGated')
-      : error === 'gate_not_openpay'
+      : error === 'gate_not_openpay' && errorSnippet
         ? t('errorGateNotOpenPay')
         : error === 'attestation_required'
           ? t('errorAttestationRequired')

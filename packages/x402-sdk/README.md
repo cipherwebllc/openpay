@@ -47,14 +47,19 @@ transaction id appearing in text. The gate unlocks only on the facilitator's `ve
 `settle` responses, which are backed by on-chain settlement; replayed or already-used
 authorizations are refused at that layer.
 
-Create a gate with the exact resource URL registered in OpenPay discovery. For
-inexpensive content, `handle()` verifies and settles the payment in one call:
+Create a gate with the resource URL, listing ID and expected recipient from your
+own seller dashboard/config. Never obtain these pins from the discovery response
+being checked. In 0.10.0, `resourceId` and `expectedRecipient` are required;
+missing/invalid pins throw at construction. For inexpensive content, `handle()`
+verifies and settles the payment in one call:
 
 ```js
 import { createJpycGate } from 'openpay-x402-sdk';
 
 const gate = createJpycGate({
   resourceUrl: process.env.MY_RESOURCE_URL,
+  resourceId: process.env.MY_RESOURCE_ID,
+  expectedRecipient: process.env.EXPECTED_RECIPIENT,
   maxUpstreamSeconds: 60,
 });
 
@@ -99,10 +104,20 @@ export async function GET(request) {
 }
 ```
 
-`createJpycGate` fetches `accepts` from `/api/discovery` and caches it for five
-minutes. Until `resourceUrl` is listed with a non-empty `accepts`, `handle()` and
-`verify()` throw; map that bootstrap condition to an HTTP 500 response. Pass
+`createJpycGate` fetches the single public listing at `/api/discovery/{resourceId}`,
+checks its ID/URL and every JPYC `extra.openpay.merchant` against your recipient,
+and caches only validated requirements for five minutes. JPYC's top-level `payTo`
+is the OpenPay forwarder, not your recipient. Hidden/inactive/missing listings
+cannot bootstrap a gate. Identity/recipient mismatches log an error and throw
+before a 402, verification or settlement; map these errors to an HTTP 500 response.
+Each payment retains its validated requirements through settlement. Pass
 `openpayOrigin` to use an origin other than `https://open-pay.jp`.
+
+Upgrade existing seller deployments to 0.10.0 and configure the required pins,
+or regenerate and redeploy your snippet from your own dashboard. Old installed
+SDKs and pasted snippets remain vulnerable until replaced; a package release does
+not update them. Register the listing, then retrieve its pinned snippet from the
+dashboard before serving payments.
 
 Before `verify()` contacts the facilitator, each gate instance claims a canonical
 authorization identity until its `validBefore` time. Set `maxUpstreamSeconds`
@@ -124,11 +139,22 @@ gate; `createJpycGate` is its importable SDK counterpart with split settlement.
 ### Dual-rail: also sell in USDC (Base) and appear on the x402 Bazaar
 
 If your listing has the USDC face enabled, use `createDualGate` with the listing
-id (shown as `MY_RESOURCE_ID` in the generated snippet). The 402 then carries
+id and both expected recipients from your own config (shown in the generated
+snippet). `expectedUsdcRecipient` is also required, even if both addresses match.
+USDC uses `payTo`; it is checked in the v1 body, v2 accept and every accept in the
+`PAYMENT-REQUIRED` header before caching or advertising. The 402 then carries
 both JPYC and USDC `accepts` plus a `PAYMENT-REQUIRED` header; USDC payments are
 relayed by OpenPay to the CDP facilitator and settle directly to your Base
 address with 0% OpenPay fee. If the USDC face cannot be fetched (relay off or
-unavailable), the gate degrades to JPYC-only — USDC never blocks JPYC payments.
+unavailable), the gate degrades to JPYC-only. JPYC catalog unavailability likewise
+allows USDC-only challenges and payments. Identity/recipient mismatches raise
+`SellerPinError` and stop both rails. The gate sends the same validated USDC
+requirements to relay verify/settle; the relay compares payTo, amount, asset,
+network and scheme against the registry. Display metadata edits do not interrupt
+payments. A relay 409 clears the USDC cache and returns a freshly fetched,
+pin-validated 402 without replaying the payment. A poisoned refresh still fails
+closed; an unavailable refresh never re-advertises the stale USDC terms. Deploy
+the matching OpenPay relay update before upgrading seller gates.
 
 ```js
 import { createDualGate } from 'openpay-x402-sdk';
@@ -136,6 +162,8 @@ import { createDualGate } from 'openpay-x402-sdk';
 const gate = createDualGate({
   resourceUrl: process.env.MY_RESOURCE_URL,
   resourceId: process.env.MY_RESOURCE_ID,
+  expectedRecipient: process.env.EXPECTED_RECIPIENT,
+  expectedUsdcRecipient: process.env.EXPECTED_USDC_RECIPIENT,
 });
 ```
 
@@ -159,7 +187,8 @@ const { resource, paywallSnippet } = await listings.register({
   usdc: { priceUsd: '0.01', serviceName: 'Example Report API' }, // optional USDC face
   attested: true, // your personal attestation — the SDK never sets this for you
 });
-// resource.id → pass to createDualGate; paywallSnippet → or paste the snippet instead
+// Pin resource.id, your JPYC payTo and your USDC payTo in createDualGate,
+// or paste paywallSnippet from this authenticated registration response.
 ```
 
 `register` refuses to run without an explicit `attested: true`: you must
@@ -171,9 +200,11 @@ and is never transmitted.
 
 ## 利用ライセンス (License NFT)
 
-SDK 0.7.1 resolves the NFT definition from
-one product ID. Set only `LICENSE_PRODUCT_ID` and `LICENSE_SESSION_SECRET` on
-your server. The secret must contain at least 32 random bytes of key material
+SDK 0.10.0 resolves the NFT definition from
+one product ID. For the license gate, set `LICENSE_PRODUCT_ID` and
+`LICENSE_SESSION_SECRET` on your server. The usage gate below also requires your
+own `MY_RESOURCE_ID` and `EXPECTED_RECIPIENT` pins. The license session secret must
+contain at least 32 random bytes of key material
 (for example 32 random bytes encoded as hex). Replace the service URLs below
 with your own:
 
@@ -188,7 +219,11 @@ const entry = createLicenseGate({
   },
 });
 await entry.ready();
-const usage = createJpycGate({ resourceUrl: 'https://service.example/api/paid' });
+const usage = createJpycGate({
+  resourceUrl: 'https://service.example/api/paid',
+  resourceId: process.env.MY_RESOURCE_ID,
+  expectedRecipient: process.env.EXPECTED_RECIPIENT,
+});
 ```
 
 Polygon (137) and Amoy (80002) use public RPC defaults; `rpcUrl` is optional.

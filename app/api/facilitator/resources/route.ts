@@ -40,12 +40,12 @@ export async function GET(): Promise<NextResponse> {
     logger.warn('x402.facilitator.resource_list_failed', { merchant: session.address });
     return NextResponse.json({ error: 'storage_unavailable' }, { status: 503 });
   }
-  // スニペットは URL から決定的に再生成できる。登録時 1 回きりだった表示を owner 一覧から
+  // スニペットは owner の出品 ID・受取先・URL から決定的に再生成できる。登録時 1 回きりだった表示を owner 一覧から
   // いつでも再取得できるようにする (加盟店の実組み込みで「もう一度見たい」が発生)。
   return NextResponse.json({
     resources: resources.map((r) => ({
       ...r,
-      paywallSnippet: buildPaywallSnippet(r.url, { usdcResourceId: r.usdc ? r.id : undefined }),
+      paywallSnippet: buildPaywallSnippet(r.url, { resourceId: r.id, expectedRecipient: r.payTo, dualRail: !!r.usdc, expectedUsdcRecipient: r.usdc?.payTo }),
     })),
   });
 }
@@ -120,13 +120,12 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // ゲート方式の検証: 402 は返すが accepts が OpenPay (forwarder-split/JPYC) でない URL は、
   // 「JPYC で払える」というカタログの約束を守れないため掲載しない (他 facilitator ゲートの
-  // ミスマッチ掲載を防ぐ・実加盟店の USDC ゲート登録で発覚)。スニペットを同梱して返すので、
-  // 設置 → 再登録で解決できる (判定不能 'unknown' は従来どおり fail-open)。
+  // ミスマッチ掲載を防ぐ・実加盟店の USDC ゲート登録で発覚)。判定不能 'unknown' は従来どおり
+  // fail-open。未登録では pin する ID がないため、起動不能なスニペットを加盟店へ渡さない。
   if ((await probeGate(parsed.input.url)) === 'foreign') {
     return NextResponse.json(
       {
         error: 'gate_not_openpay',
-        paywallSnippet: buildPaywallSnippet(parsed.input.url),
       },
       { status: 422 },
     );
@@ -154,7 +153,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   // paywall スニペット: 外部サーバーがコピペで動く自己完結ゲート (旧: リポ内 import 前提の
   // 骨子例 → 実加盟店で動かず差し替え)。
   const paywallSnippet = buildPaywallSnippet(resource.url, {
-    usdcResourceId: resource.usdc ? resource.id : undefined,
+    resourceId: resource.id,
+    expectedRecipient: resource.payTo,
+    dualRail: !!resource.usdc,
+    expectedUsdcRecipient: resource.usdc?.payTo,
   });
 
   return NextResponse.json({ resource, paywallSnippet }, { status: 201 });

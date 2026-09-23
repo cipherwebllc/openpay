@@ -21,6 +21,7 @@ const FIRST_PARTY_SELLER = getAddress('0x123456789012345678901234567890123456789
 const store = vi.hoisted(() => ({
   kv: new Map<string, string>(),
   lists: new Map<string, string[]>(),
+  failGet: false,
   failLrange: false, // true で kvLrange を fail させ登録数カウントの KV エラー枝を検証
   failSet: false, // true で kvSet を fail させ createResource の保存失敗 (503) を検証
   failEval: false, // true で kvEval を fail させ update/deactivate の storage エラー (503) を検証
@@ -28,7 +29,9 @@ const store = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => true,
-  kvGet: async (k: string) => ({ ok: true as const, value: store.kv.get(k) ?? null }),
+  kvGet: async (k: string) => store.failGet
+    ? { ok: false as const, reason: 'kv_error' }
+    : { ok: true as const, value: store.kv.get(k) ?? null },
   kvSet: async (k: string, v: string) => {
     if (store.failSet) return { ok: false as const, reason: 'kv_error' };
     store.kv.set(k, v);
@@ -244,6 +247,7 @@ const validBody = {
 beforeEach(() => {
   store.kv.clear();
   store.lists.clear();
+  store.failGet = false;
   store.failLrange = false;
   store.failSet = false;
   store.failEval = false;
@@ -854,7 +858,7 @@ describe('x402 /discovery', () => {
     expect(item?.accepts).toEqual([]); // 不正 price は accepts 生成不能 → 空
   });
 
-  it('foreign ゲート (USDC 等の 402) の URL は 422 gate_not_openpay + スニペット同梱で拒否', async () => {
+  it('foreign ゲートの新規登録は 422 を返し、ID のないスニペットを同梱しない', async () => {
     const { resources } = await load();
     mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
     mockProbeGate.mockResolvedValueOnce('foreign');
@@ -862,9 +866,7 @@ describe('x402 /discovery', () => {
     expect(res.status).toBe(422);
     const body = (await res.json()) as { error: string; paywallSnippet?: string };
     expect(body.error).toBe('gate_not_openpay');
-    // 鶏卵解決: 拒否応答にコピペで動くゲートを同梱する
-    expect(body.paywallSnippet).toContain(validBody.url);
-    expect(body.paywallSnippet).toContain("'verify'");
+    expect(body).not.toHaveProperty('paywallSnippet');
   });
 
   it('KV 空でも first-party resource 2 件を先頭に返す', async () => {
@@ -1109,8 +1111,10 @@ describe('x402 /discovery', () => {
       };
     };
     expect(body.paths).toHaveProperty('/api/discovery');
+    expect(body.paths).toHaveProperty('/api/discovery/{id}');
     const schema = body.components.schemas.DiscoveryItem;
     expect(schema.properties).toMatchObject({
+      id: { type: 'string' },
       title: { type: 'string', description: 'Short display name (first-party, or seller-provided)' },
       trigger: { type: 'string' },
       docsUrl: { type: 'string', format: 'uri', pattern: '^https://', maxLength: 512 },
@@ -1195,6 +1199,111 @@ describe('seller title / trigger', () => {
     for (const res of [await resources.POST(postReq(body)), await idRoute.PATCH(patchReq(body), ctx(id))]) {
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: `invalid_${field}` });
+    }
+  });
+});
+
+
+describe('public exact-ID discovery', () => {
+  async function read(id: string, ip?: string) {
+    const route = await import('@/app/api/discovery/[id]/route');
+    return route.GET(new Request(`https://open-pay.jp/api/discovery/${id}`, {
+      headers: ip ? { 'x-vercel-forwarded-for': ip } : {},
+    }), ctx(id));
+  }
+
+  it('returns the same public projection by ID beyond the 500-item window, never the newer duplicate URL', async () => {
+    const { resources, discovery } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    const published = (await (await discovery()).json()).items.find((item: { id?: string }) => item.id === id);
+    expect(published).toBeDefined();
+    const saved = JSON.parse(store.kv.get(resourceKey(id))!);
+    const attackers = Array.from({ length: 501 }, (_, i) => `attacker-${i}`);
+    for (const attackerId of attackers) {
+      store.kv.set(resourceKey(attackerId), JSON.stringify({ ...saved, id: attackerId, payTo: STRANGER }));
+    }
+    store.lists.set(RESOURCES_INDEX, [...attackers, id]);
+    const res = await read(id);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    const item = await res.json();
+    expect(item).toEqual(published);
+    expect(item.accepts[0].extra.openpay.merchant.toLowerCase()).toBe(saved.payTo.toLowerCase());
+    for (const key of ['merchant', 'active', 'hidden', 'verification', 'createdAt', 'paywallSnippet']) {
+      expect(item).not.toHaveProperty(key);
+    }
+    expect((await (await discovery()).json()).items.some((item: { id?: string }) => item.id === id)).toBe(false);
+  });
+
+  it.each([
+    { hidden: true }, { active: false }, { url: 'https://open-pay.jp/api/paid/demo' },
+    { id: 'substituted-id' },
+  ])('does not expose non-public or mismatched records: %j', async (overrides) => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    store.kv.set(resourceKey(id), JSON.stringify({ ...JSON.parse(store.kv.get(resourceKey(id))!), ...overrides }));
+    const res = await read(id);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+  });
+
+  it('distinguishes missing listings, flag off, malformed IDs and storage failures without caching', async () => {
+    await load();
+    expect((await read('missing')).status).toBe(404);
+    expect((await read('x'.repeat(101))).status).toBe(400);
+    store.failGet = true;
+    const failed = await read('seller-id');
+    expect(failed.status).toBe(503);
+    expect(failed.headers.get('cache-control')).toBe('no-store');
+    await load('');
+    expect((await read('seller-id')).status).toBe(404);
+  });
+
+  it('rate-limits public exact-ID reads before listing storage and keeps flag-off inert', async () => {
+    vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
+    await load();
+    ipRate.state.allowed = false;
+    store.failGet = true;
+    const res = await read('seller-id', '203.0.113.12');
+    expect(res.status).toBe(429);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.get('retry-after')).toBe('60');
+    expect(await res.json()).toEqual({ error: 'rate_limited' });
+    expect(ipRate.check).toHaveBeenCalledWith('x402-discovery-resource', expect.any(String), 60, 60);
+    expect(mockLoggerWarn).not.toHaveBeenCalledWith('x402.discovery.read_failed', expect.anything());
+    await load('');
+    ipRate.check.mockClear();
+    expect((await read('seller-id', '203.0.113.12')).status).toBe(404);
+    expect(ipRate.check).not.toHaveBeenCalled();
+  });
+
+  it('includes both configured recipient pins in a rejected dual-rail PATCH snippet', async () => {
+    const { resources, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    mockProbeGate.mockResolvedValueOnce('foreign');
+    const res = await idRoute.PATCH(patchReq({ ...validBody, payTo: STRANGER,
+      usdc: { priceUsd: '0.01', payTo: FIRST_PARTY_SELLER } }), ctx(id));
+    expect(res.status).toBe(422);
+    const { paywallSnippet } = await res.json();
+    expect(paywallSnippet).toContain('export async function x402Gate');
+    expect(paywallSnippet).toContain(`MY_RESOURCE_ID = "${id}"`);
+    expect(paywallSnippet).toContain(`EXPECTED_RECIPIENT = "${STRANGER}"`);
+    expect(paywallSnippet).toContain(`EXPECTED_USDC_RECIPIENT = "${FIRST_PARTY_SELLER}"`);
+  });
+
+  it('embeds owner-configured IDs and separate recipients in POST and owner GET snippets', async () => {
+    const { resources } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const res = await resources.POST(postReq({ ...validBody, payTo: STRANGER,
+      usdc: { priceUsd: '0.01', payTo: FIRST_PARTY_SELLER } }));
+    const { resource, paywallSnippet } = await res.json();
+    for (const snippet of [paywallSnippet, (await (await resources.GET()).json()).resources[0].paywallSnippet]) {
+      expect(snippet).toContain(`MY_RESOURCE_ID = "${resource.id}"`);
+      expect(snippet).toContain(`EXPECTED_RECIPIENT = "${STRANGER}"`);
+      expect(snippet).toContain(`EXPECTED_USDC_RECIPIENT = "${FIRST_PARTY_SELLER}"`);
     }
   });
 });

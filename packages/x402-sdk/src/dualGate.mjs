@@ -5,13 +5,14 @@
 //   - verify/settle: CDP facilitator への中継 (支払いは購入者 → 出品者 payTo へ直接)
 //
 // 隔離 (最重要): USDC 面の取得失敗 (リレー未点灯・障害) は null に落とし、JPYC ゲートだけで
-// 継続する — 付帯面 (USDC) の障害が決済本体 (JPYC) を止めない。
+// 継続する — 付帯面 (USDC) の障害が決済本体 (JPYC) を止めない。宛先不一致は両面を停止する。
 //
 // レール振り分け: PAYMENT-SIGNATURE ヘッダ (v2 = USDC クライアント)、または x-payment (v1) の
 // network が USDC 面と一致するときだけ USDC レール。その他は従来の JPYC ゲートへ委譲する。
 // JPYC レールの 402 には USDC accepts を追記 (decorate) して両面を常に見せる。
 
 import { createJpycGate } from './gate.mjs';
+import { assertSellerPins, SellerPinError, validateUsdcFace } from './sellerPins.mjs';
 
 const DEFAULT_OPENPAY_ORIGIN = 'https://open-pay.jp';
 const USDC_FACE_CACHE_MS = 5 * 60_000;
@@ -32,17 +33,20 @@ function encodeBase64Json(value) {
 export function createDualGate({
   resourceUrl,
   resourceId,
+  expectedRecipient,
+  expectedUsdcRecipient,
   openpayOrigin = DEFAULT_OPENPAY_ORIGIN,
   fetchImpl = globalThis.fetch,
   now = Date.now,
   maxUpstreamSeconds,
   settlementGraceSeconds,
-}) {
-  if (typeof resourceId !== 'string' || resourceId.length === 0) {
-    throw new Error('resourceId is required (shown as MY_RESOURCE_ID in your OpenPay listing)');
-  }
+} = {}) {
+  assertSellerPins(resourceId, expectedRecipient);
+  assertSellerPins(resourceId, expectedUsdcRecipient, 'expectedUsdcRecipient');
   const jpyc = createJpycGate({
     resourceUrl,
+    resourceId,
+    expectedRecipient,
     openpayOrigin,
     fetchImpl,
     now,
@@ -57,21 +61,23 @@ export function createDualGate({
     if (usdcCache !== null && now() - usdcCachedAt < USDC_FACE_CACHE_MS) {
       return usdcCache;
     }
+    let face;
     try {
       const response = await fetchImpl(
         `${origin}/api/x402/relay/requirements?resourceId=${encodeURIComponent(resourceId)}`,
       );
       if (!response.ok) return null;
-      const face = await response.json();
-      if (!face || typeof face !== 'object' || !face.v1Accepts) return null;
-      usdcCache = face;
-      usdcCachedAt = now();
-      return face;
+      face = await response.json();
     } catch {
       // リレー未点灯/障害 → USDC 面なしで継続 (JPYC 本体を止めない)。キャッシュしない
       // (復旧したら次のリクエストで拾う)。
       return null;
     }
+    // Keep trust failures outside the availability fallback: poisoning must stop both rails.
+    validateUsdcFace(face, resourceId, expectedUsdcRecipient, decodeBase64Json);
+    usdcCache = face;
+    usdcCachedAt = now();
+    return face;
   }
 
   // JPYC ゲートが返した 402 に USDC 面 (accepts + PAYMENT-REQUIRED ヘッダ) を追記する。
@@ -98,20 +104,8 @@ export function createDualGate({
     );
   }
 
-  // USDC レールの 402。JPYC accepts の取得失敗は握って USDC 面だけで返す
-  // (challenge の失敗で支払いエラーの伝達自体を落とさない)。
-  async function usdcChallenge(usdc, error) {
-    let jpycAccepts = [];
-    try {
-      const headerless = { url: resourceUrl, headers: { get: () => null } };
-      const challenge = await jpyc.verify(headerless);
-      if (challenge instanceof Response && challenge.status === 402) {
-        const body = await challenge.json();
-        if (Array.isArray(body.accepts)) jpycAccepts = body.accepts;
-      }
-    } catch {
-      /* JPYC カタログ未掲載などは USDC のみで継続 */
-    }
+  // Reuse this payment's validated JPYC/USDC snapshot even if another request refreshes the cache.
+  async function usdcChallenge(usdc, jpycAccepts, error) {
     const headers = { 'content-type': 'application/json' };
     if (typeof usdc.paymentRequiredHeader === 'string') {
       headers['PAYMENT-REQUIRED'] = usdc.paymentRequiredHeader;
@@ -124,6 +118,17 @@ export function createDualGate({
       }),
       { status: 402, headers },
     );
+  }
+
+  async function availableJpycAccepts(request) {
+    try {
+      const challenge = await jpyc.verify({ url: request.url, headers: { get: () => null } });
+      return (await challenge.json()).accepts;
+    } catch (error) {
+      // A JPYC outage must not block USDC; trust failures must still stop both rails.
+      if (error instanceof SellerPinError) throw error;
+      return [];
+    }
   }
 
   async function verify(request) {
@@ -146,32 +151,48 @@ export function createDualGate({
         (typeof v1Network === 'string' && v1Network === usdc.v1Accepts.network));
 
     if (usdcRail) {
+      const jpycAccepts = await availableJpycAccepts(request);
       const relay = async (path) => {
         const response = await fetchImpl(`${origin}/api/x402/relay/${path}`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             resourceId,
+            paymentRequirements: usdc.v1Accepts,
             ...(signatureHeader
               ? { paymentSignatureHeader: signatureHeader }
               : { paymentHeader: v1Header }),
           }),
         });
+        if (response.status === 409) {
+          // A stale price must not wedge payments for the cache TTL. Re-pin fresh terms,
+          // then ask the buyer again without replaying the old authorization.
+          usdcCache = null;
+          const fresh = await usdcFace();
+          if (!fresh) throw new Error('OpenPay USDC requirements unavailable');
+          return usdcChallenge(fresh, jpycAccepts, 'requirements_mismatch');
+        }
         return response.json();
       };
       const verification = await relay('verify');
+      if (verification instanceof Response) return verification;
       if (verification.isValid !== true) {
-        return usdcChallenge(usdc, verification.invalidReason || 'payment_invalid');
+        return usdcChallenge(usdc, jpycAccepts, verification.invalidReason || 'payment_invalid');
       }
       return {
         async settle() {
           const settlement = await relay('settle');
+          if (settlement instanceof Response) return settlement;
           if (settlement.success !== true) {
-            return usdcChallenge(usdc, settlement.errorReason || 'settlement_failed');
+            return usdcChallenge(usdc, jpycAccepts, settlement.errorReason || 'settlement_failed');
           }
           return { paymentResponseHeader: encodeBase64Json(settlement) };
         },
       };
+    }
+
+    if (usdc && !signatureHeader && !v1Header) {
+      return usdcChallenge(usdc, await availableJpycAccepts(request), 'payment_required');
     }
 
     const result = await jpyc.verify(request);
