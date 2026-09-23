@@ -7,8 +7,13 @@
 // component (描画テストの慣習対象外) なので、内容の正しさはこの drift フェンスで担保する。
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { createTranslator } from 'next-intl';
 import {
+  LANDING_PAYMENT_FEE_VALUES,
   DISCLOSED_RECOVER_FEE,
+  DISCLOSED_TIP_FEE_MODELS,
   DISCLOSED_MOBILE_ORDER_FEE,
   DISCLOSED_STORE_USDC_PAYMENT,
   DISCLOSED_X402_FEE,
@@ -24,32 +29,70 @@ const x402Pct = DISCLOSED_X402_FEE.bps / 100; // 1 (%)
 const x402FloorJpyc = DISCLOSED_X402_FEE.floorJpyc; // 1 (JPYC)
 const storeUsdcPct = DISCLOSED_STORE_USDC_PAYMENT.openPayFeeBps / 100; // 0 (%)
 
+describe('standard-payment fee scope (review 6 regression)', () => {
+  it('README scopes standard and USDC exemptions and includes register and mobile-order fees', () => {
+    const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
+    const paragraph = readme.split('\n\n').find((text) => text.startsWith('There are **no'))!;
+    expect(paragraph).toContain("**standard** (with-gas) mode outside the register's JPYC path and mobile orders");
+    expect(paragraph).toContain('**USDC** paths outside mobile orders');
+    expect(paragraph).toContain("plus the register's standard JPYC path and mobile orders described below");
+    expect(paragraph).not.toContain('The usage fee applies only');
+  });
+
+  for (const [locale, messages] of [['ja', ja], ['en', en]] as const) {
+    const t = createTranslator({ locale, messages, namespace: 'Landing' });
+    const values = {
+      recoverPercent: recoverPct,
+      recoverFloor: floorJpyc,
+      tipFloor: DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc,
+      registerPercent: recoverPct,
+      storefrontPercent: storefrontPct,
+      preorderPercent: preorderPct,
+    };
+    it.each(['cashCellFeeOpenPayNote', 'benefitsFeeBody', 'supportFeeRegisterBody', 'faqA6'] as const)(`${locale}: %s discloses merchant-paid register JPYC including standard mode`, (key) => {
+      const text = t(key, values);
+      expect(text).toMatch(locale === 'ja' ? /レジ/ : /register/i);
+      expect(text).toMatch(locale === 'ja' ? /通常決済/ : /standard/i);
+      expect(text).toMatch(locale === 'ja' ? /店舗.{0,4}負担/ : /merchant.{0,4}(?:paid|bears)/i);
+      expect(text).toContain(`${recoverPct}%`);
+      expect(text).toContain(`${floorJpyc} JPYC`);
+    });
+    it(`${locale}: QR and simulator exemptions exclude register and mobile order`, () => {
+      for (const key of ['supportFeePayBody', 'cashSimNote'] as const) {
+        const text = t(key, values);
+        expect(text).toMatch(locale === 'ja' ? /レジ.*モバイル注文.*除く/ : /excluding.*register.*mobile order/i);
+      }
+      expect(t('cashSimNote', values)).toContain(`${floorJpyc} JPYC`);
+    });
+  }
+});
+
 describe('LandingSupport 料率カード ↔ DISCLOSED 料率 (drift フェンス)', () => {
   for (const [loc, msgs] of [
     ['ja', ja],
     ['en', en],
   ] as const) {
     it(`${loc}: 決済QR/レジ ${recoverPct}%・最低 ${floorJpyc} JPYC、モバイル注文 ${storefrontPct}%/${preorderPct}%`, () => {
-      const L = msgs.Landing;
+      const t = createTranslator({ locale: loc, messages: msgs, namespace: 'Landing' });
       // 決済QR カード = 決済額の 1%・最低 2 JPYC
-      expect(L.supportFeePayBody).toContain(`${recoverPct}%`);
-      expect(L.supportFeePayBody).toContain(`${floorJpyc} JPYC`);
+      expect(t('supportFeePayBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${recoverPct}%`);
+      expect(t('supportFeePayBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${floorJpyc} JPYC`);
       // モバイル注文カード = 店頭・券売機 1% / 事前 3%
-      expect(L.supportFeeMobileBody).toContain(`${storefrontPct}%`);
-      expect(L.supportFeeMobileBody).toContain(`${preorderPct}%`);
+      expect(t('supportFeeMobileBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${storefrontPct}%`);
+      expect(t('supportFeeMobileBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${preorderPct}%`);
       // チップカード = ガス相当 約 2 JPYC (送るお客様が負担)
-      expect(L.supportFeeTipBody).toContain(`${floorJpyc} JPYC`);
+      expect(t('supportFeeTipBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${floorJpyc} JPYC`);
       // デジタル商品カード: JPYC を主表示にして買い手 x402 1%・最低 1 JPYC、
       // USDC (Base) は OpenPay x402 利用料 0%・売り手手数料なし。
-      expect(L.supportFeeStoreFocal).toBe(`JPYC ${x402Pct}%`);
-      expect(L.supportFeeStoreBody).toContain(`${x402Pct}%`);
-      expect(L.supportFeeStoreBody).toContain(`${x402FloorJpyc} JPYC`);
-      expect(L.supportFeeStoreBody).toContain(
+      expect(t('supportFeeStoreFocal', LANDING_PAYMENT_FEE_VALUES)).toBe(`JPYC ${x402Pct}%`);
+      expect(t('supportFeeStoreBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${x402Pct}%`);
+      expect(t('supportFeeStoreBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${x402FloorJpyc} JPYC`);
+      expect(t('supportFeeStoreBody', LANDING_PAYMENT_FEE_VALUES)).toContain(
         DISCLOSED_STORE_USDC_PAYMENT.chainName,
       );
-      expect(L.supportFeeStoreBody).toContain(`${storeUsdcPct}%`);
+      expect(t('supportFeeStoreBody', LANDING_PAYMENT_FEE_VALUES)).toContain(`${storeUsdcPct}%`);
       // チップカードの focal も顧客負担の実額 (ガス相当 約 2 JPYC)
-      expect(L.supportFeeTipFocal).toContain(`${floorJpyc}`);
+      expect(t('supportFeeTipFocal', LANDING_PAYMENT_FEE_VALUES)).toContain(`${floorJpyc}`);
     });
   }
 

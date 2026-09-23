@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { createTranslator } from 'next-intl';
 import { screen } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import TermsPage from '@/app/[locale]/terms/page';
@@ -8,6 +9,7 @@ import TokuteiPage from '@/app/[locale]/tokutei/page';
 import { polygon, avalanche } from 'viem/chains';
 import {
   LEGAL_ENTITY,
+  LANDING_PAYMENT_FEE_VALUES,
   DISCLOSED_TIP_FEE_MODELS,
   DISCLOSED_RECOVER_FEE,
   DISCLOSED_STORE_USDC_PAYMENT,
@@ -21,6 +23,18 @@ import { USDC_CHAINS, arc, arcTestnet, chainForSlug } from '@/lib/chains';
 const ARC_CHAIN_IDS = new Set<number>([arc.id, arcTestnet.id]);
 
 describe('Legal pages', () => {
+  it.each(['ja', 'en'] as const)('%s: standard fee exemptions explicitly exclude register and mobile order', async (locale) => {
+    const m = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
+    for (const body of [m.Terms.article3.body, m.Terms.article5.body, m.Disclaimer.intro, m.Disclaimer.section7.body, m.Tokutei.rows.price.value]) {
+      expect(body).toMatch(locale === 'ja'
+        ? /レジ・モバイル注文を除[くき]/
+        : /outside register JPYC and mobile orders/);
+      expect(body).not.toContain(locale === 'ja'
+        ? 'および通常決済（ガスあり）モードのご利用は無料です'
+        : 'and the use of Standard Payment (with Gas) mode are free');
+    }
+  });
+
   describe('Terms (利用規約)', () => {
     it.each(['ja', 'en'] as const)('%s: Article 13 (18) and privacy explain external delivery and holder disclosure', async (locale) => {
       const messages = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
@@ -1470,7 +1484,8 @@ it('Arc の USDC 決済 (通常決済のみ・顧客が USDC でネットワー�
 describe('three disclosed tip fee models', () => {
   it.each(['ja', 'en'] as const)('%s: every surface distinguishes JPYC, Base and Arc', async (locale) => {
     const m = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
-    const surfaces = [m.Landing.supportFeeTipBody, m.Landing.faqA1, m.Landing.faqA6,
+    const t = createTranslator({ locale, messages: m, namespace: 'Landing' });
+    const surfaces = [m.Landing.supportFeeTipBody, m.Landing.faqA1, t('faqA6', LANDING_PAYMENT_FEE_VALUES),
       m.Terms.article5.body.split('(2)')[0], m.Tokutei.rows.price.value, m.Disclaimer.section7.body];
     expect(DISCLOSED_TIP_FEE_MODELS.usdcBase).toBe('paymaster-usdc');
     expect(DISCLOSED_TIP_FEE_MODELS.usdcArc).toBe('standard-usdc-network-fee-no-openpay-fee');

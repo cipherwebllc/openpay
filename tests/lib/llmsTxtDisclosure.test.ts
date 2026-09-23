@@ -82,6 +82,19 @@ afterEach(() => {
 });
 
 describe('public/llms.txt 開示同期 (掟 14③)', () => {
+  it('limits same-transaction fee splitting to gasless payments in the non-custody summary', () => {
+    const line = lines.find((line) => line.startsWith('- ノンカストディ:'))!;
+    expect(line).toContain('ガスレス決済では利用料が決済と同一取引内で分割され');
+    expect(line).toContain('商品代金は店舗のウォレットへ直接・即時に着金');
+  });
+
+  it('register JPYC includes merchant-paid standard payments; the free scope excludes register and mobile order', () => {
+    const fees = lines.find((line) => line.startsWith('- OpenPay 利用料:'))!;
+    expect(fees).toContain(`レジ（POS）の JPYC 決済は通常決済（ガスあり）も決済額の ${pct(DISCLOSED_RECOVER_FEE.percentFromJulyBps)}%`);
+    expect(fees).toContain('いずれも店舗負担');
+    expect(fees).toContain(`ガスレス経路は最低 ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC`);
+    expect(fees).toContain('レジの JPYC 決済・モバイル注文を除く通常決済');
+  });
   it('discloses the 13-tool profile and owner-only web purchase history', () => {
     const line = lines.find((line) => line.startsWith('- MCP パッケージ:'))!;
     expect(line).toContain('全 13 ツール');
@@ -108,23 +121,15 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
     );
   });
 
-  it('モバイル注文 利用料 = DISCLOSED_MOBILE_ORDER_FEE (本文 + 冒頭要約)', () => {
+  it('モバイル注文 利用料 = DISCLOSED_MOBILE_ORDER_FEE (本文・冒頭は詳細へ案内)', () => {
     expectEveryMatch(
       /店内 (\d+)%・時間指定の事前注文 (\d+)%/g,
       [pct(DISCLOSED_MOBILE_ORDER_FEE.storefrontBps), pct(DISCLOSED_MOBILE_ORDER_FEE.preorderBps)],
       'mobile order',
     );
-    // 冒頭要約「手数料0〜N%（時間指定の事前モバイルオーダーのみM%）」
-    const maxCommonBps = Math.max(
-      DISCLOSED_RECOVER_FEE.percentFromJulyBps,
-      DISCLOSED_MOBILE_ORDER_FEE.storefrontBps,
-      DISCLOSED_X402_FEE.bps,
-    );
-    expectEveryMatch(
-      /手数料0〜(\d+)%（時間指定の事前モバイルオーダーのみ(\d+)%）/g,
-      [pct(maxCommonBps), pct(DISCLOSED_MOBILE_ORDER_FEE.preorderBps)],
-      'summary',
-    );
+    // 冒頭は上限料率を断定せず、最低額と負担者を含む下の料金説明へ案内する。
+    expect(lines.find((line) => line.startsWith('> OpenPay'))).toContain('料率・最低額・負担者は下記');
+    expect(llms).not.toMatch(/手数料0〜\d+%/);
   });
 
   it('x402 利用料 (JPYC 購入の買い手負担) = DISCLOSED_X402_FEE — 言及箇所すべて', () => {

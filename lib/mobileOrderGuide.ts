@@ -270,5 +270,11 @@ export function mobileOrderGuideMetadata(locale: string): Metadata {
     path: '/guide/mobile-order',
     title: `${c.metaTitle} · OpenPay`,
     description: c.metaDescription,
+    ogImage: {
+      url: '/og-image-mobileorder.webp',
+      width: 1280,
+      height: 670,
+      alt: `${c.metaTitle} · OpenPay`,
+    },
   });
 }

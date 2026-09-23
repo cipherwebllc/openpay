@@ -164,24 +164,23 @@ test.describe('landing / (LP)', () => {
     page,
   }) => {
     await page.goto('/ja');
-    // recover 課金ピボット: Fee カードは「利用料 0〜1%」訴求 (standard 0% / ガスレス 1%・旧「永久 0% / 決済手数料ゼロ」から変更)。
+    // Fee カードはレジ JPYC の店舗負担率とガスレスの最低額を併記する。
     // focal のビッグナンバーは 1% のまま。Cost / Settlement / NoSignup と合わせ 4 cards。
     const benefits = page
       .locator('section')
       .filter({ has: page.getByRole('heading', { name: '導入メリット' }) });
     await expect(benefits).toBeVisible();
-    // 4 focal text (ビッグナンバー) — Benefits section 内に scope (benefitsFeeFocal="0〜1%")
-    await expect(benefits.getByText('0〜1%', { exact: true })).toBeVisible();
+    // 4 focal text (ビッグナンバー) — Benefits section 内に scope
+    await expect(benefits.getByText('1%', { exact: true })).toBeVisible();
     await expect(benefits.getByText('¥0', { exact: true })).toBeVisible();
     await expect(benefits.getByText('数秒', { exact: true })).toBeVisible();
     expect(await benefits.getByText('登録不要').count()).toBeGreaterThanOrEqual(1);
     // 旧 % 訴求「0.5%」と旧「0%」永続コミット文脈は撤去済 (regression fence)
     expect(await benefits.getByText('0.5%', { exact: true }).count()).toBe(0);
     expect(await benefits.getByText('0%', { exact: true }).count()).toBe(0);
-    // 4 title (Fee カードは title=「利用料 0〜1%」= standard 0% / ガスレス 1% を反映。
-    // 旧「決済手数料ゼロ/手数料が安い」は消えている)
+    // 4 title (Fee カードの適用先はレジの JPYC 決済)
     await expect(
-      benefits.getByRole('heading', { name: '利用料 0〜1%' }),
+      benefits.getByRole('heading', { name: 'レジの JPYC 利用料' }),
     ).toBeVisible();
     await expect(
       benefits.getByRole('heading', { name: '導入コスト 0 円' }),

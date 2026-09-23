@@ -7,6 +7,7 @@
 // SEO 価値がある集客コンテンツなので noindex は設定しない (guide/* 共通方針)。
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
+import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -144,14 +145,14 @@ export default async function GuideQrPage({
           <div className="mt-4 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)]">
             <div className="flex items-baseline gap-2">
               <span className="text-xl font-bold text-slate-900">
-                {tLanding('supportFeePayFocal')}
+                {tLanding('supportFeePayFocal', LANDING_PAYMENT_FEE_VALUES)}
               </span>
               <h3 className="text-sm font-bold text-slate-900">
                 {tLanding('supportFeePayTitle')}
               </h3>
             </div>
             <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-              {tLanding('supportFeePayBody')}
+              {tLanding('supportFeePayBody', LANDING_PAYMENT_FEE_VALUES)}
             </p>
           </div>
           <p className="mt-3 text-sm leading-relaxed text-slate-600">

@@ -6,6 +6,7 @@
 // 「/create」path 直接表記は一般読み手に分かりにくいため、ラベル「受け取る」で
 // 内部 Link に置き換える。
 
+import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -55,7 +56,7 @@ export async function LandingFaq() {
         ),
       });
     }
-    return t(key);
+    return t(key, LANDING_PAYMENT_FEE_VALUES);
   }
 
   return (

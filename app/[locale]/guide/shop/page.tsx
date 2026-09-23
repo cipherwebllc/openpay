@@ -6,6 +6,7 @@
 // SEO 価値がある集客コンテンツなので noindex は設定しない (guide/* 共通方針)。
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
+import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -37,13 +38,13 @@ export default async function GuideShopPage({
   const fees = [
     {
       title: tLanding('supportFeeRegisterTitle'),
-      focal: tLanding('supportFeeRegisterFocal'),
-      body: tLanding('supportFeeRegisterBody'),
+      focal: tLanding('supportFeeRegisterFocal', LANDING_PAYMENT_FEE_VALUES),
+      body: tLanding('supportFeeRegisterBody', LANDING_PAYMENT_FEE_VALUES),
     },
     {
       title: tLanding('supportFeeMobileTitle'),
-      focal: tLanding('supportFeeMobileFocal'),
-      body: tLanding('supportFeeMobileBody'),
+      focal: tLanding('supportFeeMobileFocal', LANDING_PAYMENT_FEE_VALUES),
+      body: tLanding('supportFeeMobileBody', LANDING_PAYMENT_FEE_VALUES),
     },
   ];
 

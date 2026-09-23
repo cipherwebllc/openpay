@@ -5,8 +5,9 @@
 //
 // 見出しスケールは他の Landing セクション (LandingBenefits) と揃える
 // (text-2xl sm:text-3xl・中央)。手数料の数字は hero / 開示と整合させ、
-// OpenPay は「0%〜1%」framing。カード 3.24% / コード 1.98% は「一般的な料率の例」と脚注。
+// OpenPay はレジ JPYC の料率・ガスレス最低額・無料の範囲を併記する。比較先の料率は脚注で例示。
 
+import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowRight } from 'lucide-react';
@@ -72,10 +73,10 @@ export async function LandingCashComparison() {
                   {t(`cashCell${id}Card`)}
                 </td>
                 <td className="bg-brand/5 px-2 py-3 sm:px-4 text-center font-semibold text-slate-900">
-                  {t(`cashCell${id}OpenPay`)}
+                  {t(`cashCell${id}OpenPay`, LANDING_PAYMENT_FEE_VALUES)}
                   {id === 'Fee' && (
                     <span className="mt-1 block text-[11px] font-normal leading-snug text-slate-500">
-                      {t('cashCellFeeOpenPayNote')}
+                      {t('cashCellFeeOpenPayNote', LANDING_PAYMENT_FEE_VALUES)}
                     </span>
                   )}
                 </td>
