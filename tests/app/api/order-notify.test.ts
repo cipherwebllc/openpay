@@ -46,6 +46,7 @@ const hold = vi.hoisted(() => ({
     | {
         ok: true;
         value: bigint;
+        blockNumber?: bigint;
         receiptFrom?: string;
         directValue?: bigint;
         merchantSource?: string;
@@ -121,10 +122,17 @@ vi.mock('@/lib/env', async (importOriginal) => {
 });
 const verifySpy = vi.hoisted(() => vi.fn());
 const feePairVerifySpy = vi.hoisted(() => vi.fn());
+const getBlockSpy = vi.hoisted(() => vi.fn());
+vi.mock('viem', async (importOriginal) => ({
+  ...await importOriginal<typeof import('viem')>(),
+  createPublicClient: () => ({ getBlock: getBlockSpy }),
+}));
 vi.mock('@/lib/feeVerify', () => ({
   verifyJpycTransferToOnChain: (...a: unknown[]) => {
     verifySpy(...a);
-    return Promise.resolve(hold.verify);
+    return Promise.resolve(hold.verify.ok
+      ? { blockNumber: 123n, ...hold.verify }
+      : hold.verify);
   },
   verifyJpycStandardFeePairOnChain: (...a: unknown[]) => {
     feePairVerifySpy(...a);
@@ -315,6 +323,8 @@ function latestStoredOrder(): Record<string, unknown> {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-09-06T12:00:00Z'));
+  getBlockSpy.mockReset();
+  getBlockSpy.mockResolvedValue({ timestamp: BigInt(Date.now() / 1000) });
   hold.enableOrderRelay = true;
   hold.enableOrderPickup = true;
   hold.enablePushNotify = true;
@@ -372,6 +382,110 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('POST /api/order/notify', () => {
+  function expectNoOrderSideEffects() {
+    expect(lpushSpy).not.toHaveBeenCalled();
+    expect(evalSpy).not.toHaveBeenCalled();
+    expect(setSpy.mock.calls).toEqual([
+      [`order:used:80002:${TXHASH}`, 'pending', { nx: true, ttlSec: 120 }],
+    ]);
+    expect(pushNotify.after).not.toHaveBeenCalled();
+    expect(pushNotify.notify).not.toHaveBeenCalled();
+    expect(feePairVerifySpy).not.toHaveBeenCalled();
+    expect(hold.ltrimCalls).toEqual([]);
+    expect(hold.expireCalls).toEqual([]);
+  }
+
+  it.each([
+    ['fresh', 60],
+    ['exactly 30 minutes old', 30 * 60],
+    ['future skew within tolerance', -60],
+    ['exactly 2 minutes ahead', -2 * 60],
+  ])('A2 freshness: %s is accepted using the verified block', async (_name, ageSec) => {
+    hold.verify = { ok: true, value: JPYC, blockNumber: 456n };
+    getBlockSpy.mockResolvedValue({ timestamp: BigInt(Date.now() / 1000 - ageSec) });
+    const res = await POST(req(goodBody({ blockNumber: '999', ts: 0 })));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, orderId: 'oid-1' });
+    expect(getBlockSpy).toHaveBeenCalledTimes(1);
+    expect(getBlockSpy).toHaveBeenCalledWith({ blockNumber: 456n });
+    expect(hold.listValues).toHaveLength(1);
+    expect(delSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['31 minutes old', 31 * 60],
+    ['one second past the 30-minute boundary', 30 * 60 + 1],
+  ])('A2 freshness: %s returns tx_too_old and releases the claim without side effects', async (_name, ageSec) => {
+    getBlockSpy.mockResolvedValue({ timestamp: BigInt(Date.now() / 1000 - ageSec) });
+    const res = await POST(req(goodBody({
+      statusToken: STATUS_TOKEN, feeTxHash: FEE_TXHASH, ts: Date.now(),
+    })));
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ ok: false, error: 'tx_too_old' });
+    expect(delSpy).toHaveBeenCalledTimes(1);
+    expect(delSpy).toHaveBeenCalledWith(`order:used:80002:${TXHASH}`);
+    expect(warnSpy).toHaveBeenCalledWith('order.notify.verify_failed', {
+      reason: 'tx_too_old', chainId: 80002, merchant: MERCHANT, ageSec,
+    });
+    expectNoOrderSideEffects();
+  });
+
+  it('A2 freshness: a block beyond the future tolerance is a retryable rpc_error (server clock skew), not tx_too_old', async () => {
+    const ageSec = -2 * 60 - 1;
+    getBlockSpy.mockResolvedValue({ timestamp: BigInt(Date.now() / 1000 - ageSec) });
+    const res = await POST(req(goodBody({
+      statusToken: STATUS_TOKEN, feeTxHash: FEE_TXHASH, ts: Date.now(),
+    })));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'rpc_error' });
+    expect(delSpy).toHaveBeenCalledTimes(1);
+    expect(delSpy).toHaveBeenCalledWith(`order:used:80002:${TXHASH}`);
+    expect(warnSpy).toHaveBeenCalledWith('order.notify.verify_failed', {
+      reason: 'clock_skew', chainId: 80002, merchant: MERCHANT, ageSec,
+    });
+    expectNoOrderSideEffects();
+  });
+
+  it('A2 freshness: missing verified blockNumber returns rpc_error without looking up the latest block', async () => {
+    hold.verify = { ok: true, value: JPYC, blockNumber: undefined };
+    const res = await POST(req(goodBody({
+      blockNumber: '999', statusToken: STATUS_TOKEN, feeTxHash: FEE_TXHASH,
+    })));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'rpc_error' });
+    expect(getBlockSpy).not.toHaveBeenCalled();
+    expect(delSpy).toHaveBeenCalledTimes(1);
+    expect(delSpy).toHaveBeenCalledWith(`order:used:80002:${TXHASH}`);
+    expect(warnSpy).toHaveBeenCalledWith('order.notify.verify_failed', {
+      reason: 'rpc_error', chainId: 80002, merchant: MERCHANT,
+    });
+    expectNoOrderSideEffects();
+  });
+
+  it('A2 freshness: block lookup failure is retryable rpc_error and never accepts the order', async () => {
+    getBlockSpy.mockRejectedValue(new Error('RPC unavailable'));
+    const res = await POST(req(goodBody({ statusToken: STATUS_TOKEN, feeTxHash: FEE_TXHASH })));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'rpc_error' });
+    expect(delSpy).toHaveBeenCalledTimes(1);
+    expect(delSpy).toHaveBeenCalledWith(`order:used:80002:${TXHASH}`);
+    expectNoOrderSideEffects();
+  });
+
+  it('A2 freshness: completed duplicate remains idempotent after the window without another block lookup', async () => {
+    expect((await POST(req(goodBody()))).status).toBe(200);
+    hold.claimValue = null;
+    hold.usedMarker = 'done';
+    vi.setSystemTime(Date.now() + 31 * 60 * 1000);
+    const res = await POST(req(goodBody()));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, duplicate: true });
+    expect(getBlockSpy).toHaveBeenCalledTimes(1);
+    expect(verifySpy).toHaveBeenCalledTimes(1);
+    expect(hold.listValues).toHaveLength(1);
+    expect(delSpy).not.toHaveBeenCalled();
+  });
+
   // /guide/start が「直近 200 件を保持・一覧全体は最後の注文から 72 時間で消える」と
   // 開示している。その 2 点は実装のこの 2 呼び出しに依存するため固定する
   // (TTL を張り直さなくなると「最後の注文から」が嘘になる)。

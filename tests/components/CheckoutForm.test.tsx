@@ -2401,6 +2401,66 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     vi.unstubAllGlobals();
   });
 
+  it.each([true, false])('A2 freshness: relay notify tx_too_old shows staff recovery only for own notify (same origin=%s)', async (sameOrigin) => {
+    const user = userEvent.setup();
+    feeFlags.enableOrderPickup = true;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      Response.json({ ok: false, error: 'tx_too_old' }, { status: 422 }),
+    );
+    setupRelayReady();
+    const makeUi = () => (
+      <CheckoutForm params={{
+        ...JPYC_PARAMS,
+        webhook: `${sameOrigin ? window.location.origin : 'https://shop.example.com'}/api/order/notify?h=alice`,
+        ...(sameOrigin ? { successUrl: 'https://shop.example.com/thanks' } : {}),
+      }} />
+    );
+    const { rerender } = render(makeUi());
+    await submitRelayThenSucceed(user, rerender, makeUi, {
+      txHash: `0x${'e'.repeat(64)}`,
+      variables: { merchant: MERCHANT, value: JPYC_TOTAL, gasMode: 'customer' },
+    });
+    if (sameOrigin) {
+      expect(await screen.findByText(/再度支払わず、支払い履歴またはトランザクションをお店のスタッフに提示してください/)).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: '注文状況を見る' })).toBeNull();
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(screen.queryByRole('button', { name: '今すぐ確認ページへ' })).toBeNull();
+    } else {
+      await waitFor(() => expect(loggerWarn).toHaveBeenCalledWith('checkout.webhook.non_ok', expect.anything()));
+      expect(screen.queryByText(/支払い履歴またはトランザクションをお店のスタッフに提示/)).toBeNull();
+    }
+    expect(screen.getByText('お支払いが完了しました')).toBeInTheDocument();
+    expect(relayMutate).not.toHaveBeenCalled(); // success 後の新しい mutate は呼ばない
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  it('A2 freshness: relay notify with a non-JSON 422 preserves HTTP telemetry and payment success', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('<html>upstream error</html>', { status: 422 }),
+    );
+    setupRelayReady();
+    const makeUi = () => <CheckoutForm params={{
+      ...JPYC_PARAMS,
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    }} />;
+    const { rerender } = render(makeUi());
+    await submitRelayThenSucceed(user, rerender, makeUi, {
+      txHash: `0x${'e'.repeat(64)}`,
+      variables: { merchant: MERCHANT, value: JPYC_TOTAL, gasMode: 'customer' },
+    });
+    await waitFor(() => expect(loggerWarn).toHaveBeenCalledWith(
+      'checkout.webhook.non_ok', expect.objectContaining({ status: 422 }),
+    ));
+    expect(loggerWarn).not.toHaveBeenCalledWith('checkout.webhook.failed', expect.anything());
+    expect(screen.getByText('お支払いが完了しました')).toBeInTheDocument();
+    expect(screen.queryByText(/支払い履歴またはトランザクションをお店のスタッフに提示/)).toBeNull();
+    expect(relayMutate).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
   it('relay 成功 + success_url: redirect query は tx_hash のみ (block / user_op_hash なし)', async () => {
     const user = userEvent.setup();
     const assignSpy = vi.fn();
@@ -2675,6 +2735,79 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     expect(screen.getByText('ウォレットで支払い')).toBeInTheDocument();
     // モバイル用「ガス不要・署名のみ」ヒントは出さない (standard はガスが必要)。
     expect(screen.queryByText(/ネイティブトークン \(ガス\) は不要/)).toBeNull();
+  });
+
+  it.each([false, true])('A2 freshness: standard partial notify tx_too_old shows staff recovery without paying the merchant again (restored=%s)', async (restored) => {
+    const user = userEvent.setup();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      Response.json({ ok: false, error: 'tx_too_old' }, { status: 422 }),
+    );
+    const params: CheckoutParams = {
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      feeKind: 'storefront',
+      orderId: 'order-too-old',
+      ...(restored ? { storeHandle: 'alice' } : {}),
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    };
+    if (restored) {
+      setStandardPayment('fee-error', {
+        lastSubmittedFrom: CUSTOMER,
+        lastSubmittedParams: {
+          tokenAddress: deploymentForSlug('jpyc', 'polygon').address,
+          merchant: MERCHANT,
+          merchantAmount: 2_970n * 10n ** 18n,
+          feeReceiver: env.feeReceiver,
+          feeAmount: 30n * 10n ** 18n,
+          chainId: polygonAmoy.id,
+          saleAmount: JPYC_TOTAL,
+          contextKey: contextKeyFor(params),
+        },
+        restoredFromStorage: true,
+      });
+    }
+    const makeUi = () => <CheckoutForm params={params} />;
+    const { rerender } = render(makeUi());
+    if (!restored) {
+      await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+      expect(standardMutate).toHaveBeenCalledTimes(1);
+      setStandardPayment('fee-error');
+      rerender(makeUi());
+    }
+    expect(await screen.findByText(/再度支払わず、支払い履歴またはトランザクションをお店のスタッフに提示してください/)).toBeInTheDocument();
+    expect(standardMutate).not.toHaveBeenCalled(); // fee-error 後に店舗送金を再実行しない
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
+  });
+
+  it('A2 freshness: standard partial notify with a non-JSON 422 preserves HTTP telemetry without paying again', async () => {
+    const user = userEvent.setup();
+    feeFlags.enableMobileOrderFee = true;
+    setupJpycStandard();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('<html>upstream error</html>', { status: 422 }),
+    );
+    const makeUi = () => <CheckoutForm params={{
+      ...JPYC_PARAMS,
+      mode: 'standard',
+      feeKind: 'storefront',
+      webhook: `${window.location.origin}/api/order/notify?h=alice`,
+    }} />;
+    const { rerender } = render(makeUi());
+    await user.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    expect(standardMutate).toHaveBeenCalledTimes(1);
+    setStandardPayment('fee-error');
+    rerender(makeUi());
+    await waitFor(() => expect(loggerWarn).toHaveBeenCalledWith(
+      'checkout.webhook.non_ok', expect.objectContaining({ status: 422 }),
+    ));
+    expect(loggerWarn).not.toHaveBeenCalledWith('checkout.webhook.failed', expect.anything());
+    expect(screen.queryByText(/支払い履歴またはトランザクションをお店のスタッフに提示/)).toBeNull();
+    expect(standardMutate).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockRestore();
   });
 
   it('モバイル注文 standard: merchant 確定時点で fee の結果を待たず受注 notify へ未収付きで届ける', async () => {

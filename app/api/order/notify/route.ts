@@ -80,6 +80,11 @@ export const maxDuration = 20;
 // 上限で、64KB あれば正当な注文は通る。money-path は不変 (追加の 413 分岐のみ)。
 const ORDER_NOTIFY_BODY_MAX_BYTES = 64 * 1024;
 
+// 過去の着金が新規注文へ流用される波及を減らす暫定 replay 緩和。支払い目的の証明ではない。
+// canonical block 時刻で 30 分以内 (境界含む) とし、server 時計に対する未来ずれは 2 分まで許容する。
+const ORDER_PAYMENT_MAX_AGE_MS = 30n * 60n * 1000n;
+const ORDER_PAYMENT_FUTURE_TOLERANCE_MS = 2n * 60n * 1000n;
+
 const AMOUNT_ADVISORY_BPS_CAP = 300;
 const FEE_RECONCILE_RETRY_MS = [0, 1_000, 4_000, 10_000] as const;
 
@@ -479,6 +484,42 @@ export async function POST(req: Request): Promise<NextResponse> {
       await kvDel(usedKey);
       logger.warn('order.notify.verify_failed', { reason: result.reason, chainId, merchant });
       return fail(result.reason, result.reason === 'rpc_error' ? 503 : 422);
+    }
+
+    // optional な blockNumber の欠落で getBlock が latest を返し、過去の着金が鮮度検査を
+    // 素通りする波及を断つ。receipt の block が特定できるまで再試行可能な検証失敗にする。
+    if (result.blockNumber === undefined) {
+      await kvDel(usedKey);
+      logger.warn('order.notify.verify_failed', { reason: 'rpc_error', chainId, merchant });
+      return fail('rpc_error', 503);
+    }
+
+    let blockTimestamp: bigint;
+    try {
+      const block = await publicClient.getBlock({ blockNumber: result.blockNumber });
+      blockTimestamp = block.timestamp;
+    } catch {
+      // block RPC 障害が未検証の受理や pending claim の居座りへ波及しないよう、既存の再試行契約へ戻す。
+      await kvDel(usedKey);
+      logger.warn('order.notify.verify_failed', { reason: 'rpc_error', chainId, merchant });
+      return fail('rpc_error', 503);
+    }
+    const paymentAgeMs = BigInt(Date.now()) - blockTimestamp * 1000n;
+    // block が server 時計より大きく未来 = server 側の時計ずれ。本物の着金を恒久拒否 (422) へ
+    // 波及させないよう、再試行可能な検証失敗に倒す。
+    if (paymentAgeMs < -ORDER_PAYMENT_FUTURE_TOLERANCE_MS) {
+      await kvDel(usedKey);
+      logger.warn('order.notify.verify_failed', {
+        reason: 'clock_skew', chainId, merchant, ageSec: Number(paymentAgeMs) / 1000,
+      });
+      return fail('rpc_error', 503);
+    }
+    if (paymentAgeMs > ORDER_PAYMENT_MAX_AGE_MS) {
+      await kvDel(usedKey);
+      logger.warn('order.notify.verify_failed', {
+        reason: 'tx_too_old', chainId, merchant, ageSec: Number(paymentAgeMs) / 1000,
+      });
+      return fail('tx_too_old', 422);
     }
 
     const orderId =

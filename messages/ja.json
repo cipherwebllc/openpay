@@ -1496,6 +1496,7 @@
     "successTx": "トランザクション",
     "successBlock": "ブロック番号",
     "orderIdLabel": "受付番号",
+    "orderNotifyTooOld": "支払いは確認できましたが、注文を自動登録できませんでした。再度支払わず、支払い履歴またはトランザクションをお店のスタッフに提示してください。",
     "viewOrderStatus": "注文状況を見る",
     "redirectingIn": "{sec} 秒後に確認ページへ移動します",
     "redirectingNow": "確認ページへ移動しています…",
