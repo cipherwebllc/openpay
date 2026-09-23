@@ -52,7 +52,7 @@ function makeBalances(opts: {
           (opts.gatewayPerDomain ?? new Map<CircleDomain, bigint>()).values(),
         ).reduce((s, v) => s + v, 0n),
       };
-  return { wallet: opts.walletEntries, gateway };
+  return { wallet: opts.walletEntries, gateway, gatewayReadyDomains: new Set(opts.gatewayPerDomain?.keys()) };
 }
 
 describe('lib/crossChain/router.selectPath', () => {

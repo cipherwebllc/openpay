@@ -25,7 +25,12 @@ for (const network of ['testnet', 'mainnet']) {
       expect(config.MERCHANT_RECEIVE_TARGETS).toHaveLength(on ? 7 : 6);
       for (const id of [5042, 5042002]) { expect(config.domainForChainId(id)).toBe(26); expect(config.isForwardOnlyDestination(id)).toBe(true); }
       const base = config.BUYER_SOURCE_TARGETS.find((t) => t.domain === 6)!;
-      const balances = { wallet: [{ target: base, status: 'ok', balance: 10000000n }], gateway: { status: 'ok', total: 10000000n, perDomain: new Map([[6, 10000000n]]) } } as MultiChainBalances;
+      const tokenAddress = '0x1111111111111111111111111111111111111111' as Address;
+      const balances: MultiChainBalances = {
+        gatewayReadyDomains: new Set([6]),
+        wallet: [{ target: base, tokenAddress, status: 'ok', balance: 10000000n }],
+        gateway: { status: 'ok', depositor: tokenAddress, total: 10000000n, perDomain: new Map([[6, 10000000n]]) },
+      };
       const args = { targetChainId: network === 'mainnet' ? 5042 : 5042002, requiredAtomic: 1000000n, balances };
       const options = enumeratePathOptions(args);
       expect(options.map((o) => o.kind)).toEqual(on ? ['cctp-v2'] : []);

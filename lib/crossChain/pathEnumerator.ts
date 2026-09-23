@@ -136,7 +136,8 @@ export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
       balances.gateway.status === 'ok'
         ? (balances.gateway.perDomain.get(sourceDomain) ?? 0n)
         : 0n;
-    if (!forwardOnly && gatewayPreDeposit >= requiredAtomic) {
+    // A failed source delay/height probe must not advertise an unsignable Gateway path.
+    if (!forwardOnly && balances.gatewayReadyDomains.has(sourceDomain) && gatewayPreDeposit >= requiredAtomic) {
       options.push({
         key: `gateway-${sourceDomain}`,
         kind: 'gateway',
@@ -183,6 +184,7 @@ export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
   // を加算。chainId は domain から逆引き、未解決なら skip。
   if (!forwardOnly && hasTargetDomain && balances.gateway.status === 'ok') {
     for (const [domain, gwBalance] of balances.gateway.perDomain.entries()) {
+      if (!balances.gatewayReadyDomains.has(domain)) continue;
       if (gwBalance < requiredAtomic) continue;
       const alreadyHasGateway = options.some(
         (o) => o.kind === 'gateway' && o.sourceDomain === domain,

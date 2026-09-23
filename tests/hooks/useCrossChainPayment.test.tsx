@@ -11,7 +11,8 @@ import * as chains from '@/lib/chains';
 import { readAllCrossChainBalances } from '@/lib/crossChain/balance';
 import { executeCctpTransfer, executeGatewayTransfer, CrossChainBurnUnresolvedError, CrossChainQuoteExpiredError, type CctpResumeState } from '@/lib/crossChain/execute';
 import { acceptForwardQuote, fetchCctpBurnFees, pollIrisAttestation } from '@/lib/crossChain/cctp';
-import { defaultBlockHeightOffset, requestAttestation } from '@/lib/crossChain/gateway';
+import { requestAttestation } from '@/lib/crossChain/gateway';
+import { BUYER_SOURCE_TARGETS } from '@/lib/crossChain/config';
 import { __resetContractDeployedCacheForTest } from '@/lib/crossChain/deploycheck';
 import { saveResumeStateStrict, loadResumeState, type ResumeSessionKey } from '@/lib/crossChain/resumeStore';
 import { logPaymentEvent } from '@/lib/paymentLog';
@@ -24,6 +25,7 @@ const { publicClientFor, publicClients, connection, wallet, switchChainAsync } =
   const makeClient = (chainId: number) => ({
     chain: { id: chainId },
     getCode: vi.fn().mockResolvedValue('0x6000'),
+    readContract: vi.fn().mockResolvedValue(302_400n),
     getBlockNumber: vi.fn().mockResolvedValue(chainId === 84532 ? 1234n : 900000n),
     getTransactionCount: vi.fn().mockResolvedValue(1),
     getLogs: vi.fn().mockResolvedValue([]),
@@ -76,9 +78,52 @@ beforeEach(() => {
   vi.spyOn(env, 'enableUsdcArcCrossChain', 'get').mockReturnValue(true);
   vi.mocked(fetchCctpBurnFees).mockResolvedValue(fees[0]);
   vi.mocked(readAllCrossChainBalances).mockResolvedValue({ wallet: [{ target: { chainId: 84532, domain: 6, isTestnet: true, role: 'merchant-and-buyer' },
-    balance: 3000000n, status: 'ok' }], gateway: { status: 'ok', perDomain: new Map(), total: 0n } } as never);
+    balance: 3000000n, status: 'ok' }], gateway: { status: 'ok', perDomain: new Map(), total: 0n }, gatewayReadyDomains: new Set() } as never);
 });
 afterEach(() => { qc.clear(); localStorage.clear(); vi.restoreAllMocks(); vi.clearAllMocks(); });
+
+describe('D9 Gateway committed recovery independent of readiness', () => {
+  const legacyArgs = { ...args, targetChainId: 80002 };
+  const merchantAttestation = { attestation: '0x1234' as Hex, signature: '0x5678' as Hex };
+
+  it.each(BUYER_SOURCE_TARGETS)('restores the committed lock for source $chainId when its readiness probe fails', async (target) => {
+    const gatewayKey: ResumeSessionKey = { ...key, kind: 'gateway', sourceChainId: target.chainId, destChainId: legacyArgs.targetChainId };
+    saveResumeStateStrict(gatewayKey, { merchantAttestation });
+    const source = publicClientFor(target.chainId);
+    source.readContract.mockImplementation(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'withdrawalDelay') throw new Error('Gateway readiness RPC unavailable');
+      return 3_000_000n;
+    });
+    const actual = await vi.importActual<typeof import('@/lib/crossChain/balance')>('@/lib/crossChain/balance');
+    vi.mocked(readAllCrossChainBalances).mockImplementation((account) => actual.readAllCrossChainBalances(account, {
+      fetch: vi.fn(async () => new Response(JSON.stringify({ balances: [{ domain: target.domain, balance: '3000000' }] }))),
+    }));
+
+    const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+    await waitFor(() => expect(result.current.isFetchingBalances).toBe(false));
+
+    expect(source.readContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'withdrawalDelay' }));
+    expect(result.current.pathOptions.some((option) => option.kind === 'gateway')).toBe(false);
+    expect(result.current.isCommitted).toBe(true);
+    expect(loadResumeState(gatewayKey)).toEqual({ merchantAttestation });
+    expect(wallet.signTypedData).not.toHaveBeenCalled();
+    expect(wallet.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('restores the lock before balances are available, with the query disabled', () => {
+    saveResumeStateStrict({ ...key, kind: 'gateway', destChainId: legacyArgs.targetChainId }, { merchantAttestation });
+    const { result } = renderHook(() => useCrossChainPayment({ ...legacyArgs, enabled: false }), { wrapper });
+    expect(result.current.pathOptions).toEqual([]);
+    expect(result.current.isCommitted).toBe(true);
+    expect(readAllCrossChainBalances).not.toHaveBeenCalled();
+  });
+
+  it('does not restore another recipient’s payment lock', () => {
+    saveResumeStateStrict({ ...key, kind: 'gateway', destChainId: legacyArgs.targetChainId, recipient: account }, { merchantAttestation });
+    const { result } = renderHook(() => useCrossChainPayment({ ...legacyArgs, enabled: false }), { wrapper });
+    expect(result.current.isCommitted).toBe(false);
+  });
+});
 
 describe('source-chain client routing with the wallet connected to the destination', () => {
   const legacyArgs = { ...args, targetChainId: 80002 };
@@ -101,6 +146,7 @@ describe('source-chain client routing with the wallet connected to the destinati
       wallet: [{ target: { chainId: 84532, domain: 6, isTestnet: true, role: 'merchant-and-buyer' },
         balance: 3000000n, status: 'ok' }],
       gateway: { status: 'ok', perDomain: new Map([[6, 3000000n]]), total: 3000000n },
+      gatewayReadyDomains: new Set([6]),
     } as never);
   });
 
@@ -196,9 +242,11 @@ describe('source-chain client routing with the wallet connected to the destinati
     await act(async () => { await result.current.executeOption(result.current.pathOptions.find((o) => o.kind === 'gateway')!); });
 
     expect(source.getBlockNumber).toHaveBeenCalledOnce();
+    expect(source.readContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'withdrawalDelay' }));
+    expect(dest.readContract).not.toHaveBeenCalled();
     expect(dest.getBlockNumber).not.toHaveBeenCalled();
     expect(wallet.signTypedData).toHaveBeenCalledWith(expect.objectContaining({
-      message: expect.objectContaining({ maxBlockHeight: 1234n + defaultBlockHeightOffset(legacyKey.sourceChainId) }),
+      message: expect.objectContaining({ maxBlockHeight: 1234n + 302_400n + 30_240n }),
     }));
     expect(dest.waitForTransactionReceipt.mock.calls).toEqual([[{ hash: mintHash }]]);
     expect(result.current.result).toMatchObject({ path: 'gateway', mintTxHash: mintHash });

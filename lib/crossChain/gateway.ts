@@ -11,29 +11,14 @@ import {
   pad,
   type Address,
   type Hex,
+  type PublicClient,
   type TypedDataDefinition,
 } from 'viem';
-import {
-  arbitrum,
-  arbitrumSepolia,
-  avalanche,
-  avalancheFuji,
-  base,
-  baseSepolia,
-  mainnet,
-  optimism,
-  optimismSepolia,
-  polygon,
-  polygonAmoy,
-  sepolia,
-  unichain,
-  unichainSepolia,
-} from 'viem/chains';
+import { arbitrum, arbitrumSepolia } from 'viem/chains';
 import {
   CIRCLE_GATEWAY_API_BASE_URL,
   GATEWAY_MINTER_ADDRESS,
   GATEWAY_WALLET_ADDRESS,
-  chainIdForDomain,
 } from './config';
 import {
   BURN_INTENT_TYPED_DATA,
@@ -68,48 +53,24 @@ const DEFAULT_MAX_FEE_BPS: bigint = (() => {
 // 落ちて fee reject されないための下限。
 const MIN_MAX_FEE_ATOMIC = 1000n;
 
-// chain-aware maxBlockHeight buffer。Arbitrum (~0.25s/block) で固定 500 blocks
-// では ~125 秒しか有効でなく user flow (sign + attest + switch + mint ≈ 1.5-2 min)
-// で expire するリスクがあったため (2026-05-24 LARP audit)、chain ごとに ~20 分
-// になる block 数を table で持つ:
-//   Polygon/Base/Optimism (~2s/block):  600 blocks = 1200s
-//   Arbitrum One         (~0.25s/block): 5000 blocks = 1250s
-//   Ethereum L1          (~12s/block):  100 blocks = 1200s (phase 4a)
-//   Avalanche C          (~2s/block):   600 blocks = 1200s (phase 4b-1 buyer-only)
-//   Unichain             (~1s/block):   1200 blocks = 1200s (phase 4b-1 buyer-only)
-const PER_CHAIN_BLOCK_OFFSET = new Map<number, bigint>([
-  [polygon.id, 600n],
-  [polygonAmoy.id, 600n],
-  [base.id, 600n],
-  [baseSepolia.id, 600n],
-  [optimism.id, 600n],
-  [optimismSepolia.id, 600n],
-  [arbitrum.id, 5000n],
-  [arbitrumSepolia.id, 5000n],
-  [mainnet.id, 100n],
-  [sepolia.id, 100n],
-  [avalanche.id, 600n],
-  [avalancheFuji.id, 600n],
-  [unichain.id, 1200n],
-  [unichainSepolia.id, 1200n],
-]);
+// Circle requires at least withdrawalDelay beyond the source head at API submission.
+// Add 10% (rounded up) to absorb blocks mined during wallet approval + API latency;
+// measured ~7-day delays leave ~17 hours of headroom, in L1 units on Arbitrum too.
+const WITHDRAWAL_DELAY_MARGIN_DIVISOR = 10n;
+const ENV_BLOCK_OFFSET_LIMIT = 1n << 255n;
 
-const FALLBACK_BLOCK_OFFSET = 600n;
-
-// env global override (緊急 hot-fix 用、per-chain map より優先)。
+// Optional total offset override; buildBurnIntent clamps it to the live delay + margin.
 const ENV_BLOCK_OFFSET_OVERRIDE: bigint | undefined = (() => {
   const raw = process.env.NEXT_PUBLIC_CROSS_CHAIN_BLOCK_OFFSET_DEFAULT;
   if (!raw) return undefined;
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) return undefined;
-  return BigInt(n);
+  const offset = BigInt(n);
+  // Ignore oversized operator overrides so they cannot cause uint256 encoding
+  // failures in an otherwise valid payment; reserve room for the source head.
+  if (offset >= ENV_BLOCK_OFFSET_LIMIT) return undefined;
+  return offset;
 })();
-
-// 優先順位: env override > per-chain map > fallback。
-export function defaultBlockHeightOffset(sourceChainId: number): bigint {
-  if (ENV_BLOCK_OFFSET_OVERRIDE !== undefined) return ENV_BLOCK_OFFSET_OVERRIDE;
-  return PER_CHAIN_BLOCK_OFFSET.get(sourceChainId) ?? FALLBACK_BLOCK_OFFSET;
-}
 
 // destinationCaller=0x0 = permissionless mint。buyer 自身が呼ぶ前提なら問題
 // なし、relayer pattern では specific address を入れる。
@@ -132,6 +93,13 @@ export const GATEWAY_MINTER_ABI = [
 // 事前に erc20.approve(GATEWAY_WALLET_ADDRESS, value) が必要。
 export const GATEWAY_WALLET_ABI = [
   {
+    inputs: [],
+    name: 'withdrawalDelay',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
     inputs: [
       { name: 'token', type: 'address' },
       { name: 'value', type: 'uint256' },
@@ -152,6 +120,35 @@ export const GATEWAY_WALLET_ABI = [
     type: 'function',
   },
 ] as const;
+
+// Source-scoped reads only. Read errors propagate so an unavailable Gateway cannot
+// produce an invalid signed authorization; callers may still offer CCTP/direct paths.
+export async function readGatewayBurnIntentContext(
+  client: PublicClient,
+  sourceChainId: number,
+): Promise<{ currentBlockHeight: bigint; withdrawalDelay: bigint }> {
+  const withdrawalDelay = await client.readContract({
+    address: GATEWAY_WALLET_ADDRESS,
+    abi: GATEWAY_WALLET_ABI,
+    functionName: 'withdrawalDelay',
+  });
+  let currentBlockHeight: bigint;
+  if (sourceChainId === arbitrum.id || sourceChainId === arbitrumSepolia.id) {
+    // Circle uses Ethereum L1 heights here. viem's getBlockNumber returns L2;
+    // its generic block type omits Arbitrum's documented l1BlockNumber extension.
+    // Read the raw RPC field instead: https://docs.arbitrum.io/arbitrum-essentials/arbitrum-vs-ethereum/rpc-methods
+    const block = await client.request({ method: 'eth_getBlockByNumber', params: ['latest', false] });
+    const l1BlockNumber = (block as (typeof block & { l1BlockNumber?: unknown }))?.l1BlockNumber;
+    // Missing/malformed L1 data must not spill into an L2-based burn authorization.
+    if (typeof l1BlockNumber !== 'string' || !/^0x[0-9a-fA-F]+$/.test(l1BlockNumber)) {
+      throw new Error('Gateway source RPC did not return a valid Arbitrum L1 block number');
+    }
+    currentBlockHeight = BigInt(l1BlockNumber);
+  } else {
+    currentBlockHeight = await client.getBlockNumber({ cacheTime: 0 });
+  }
+  return { currentBlockHeight, withdrawalDelay };
+}
 
 // TransferSpec は address を bytes32 で持つ (Circle の non-EVM chain 対応の余地)。
 export function addressToBytes32(addr: Address): Hex {
@@ -184,8 +181,10 @@ export interface BuildBurnIntentArgs {
   recipient: Address;
   /** Transfer する atomic USDC value (6 decimals) */
   value: bigint;
-  /** 現在の source chain block number (publicClient.getBlockNumber で取得) */
+  /** Source contract-visible height (Ethereum L1 height for Arbitrum). */
   currentBlockHeight: bigint;
+  /** Live source GatewayWallet.withdrawalDelay(), in the same block units. */
+  withdrawalDelay: bigint;
   /** Optional overrides — caller の policy をこの level で上書きする */
   overrides?: BuildBurnIntentOverrides;
 }
@@ -195,7 +194,7 @@ export interface BuildBurnIntentOverrides {
   maxFee?: bigint;
   /** maxFee を value から bps で計算する比率 (default 10 bps) */
   maxFeeBps?: bigint;
-  /** maxBlockHeight = currentBlockHeight + offset (default 500) */
+  /** Total offset from source head; clamped to live withdrawalDelay + 10% margin. */
   maxBlockHeightOffset?: bigint;
   /** randomSalt の override (test 用、本番では undefined で random) */
   salt?: Hex;
@@ -208,9 +207,12 @@ export interface BuildBurnIntentOverrides {
 export function buildBurnIntent(args: BuildBurnIntentArgs): BurnIntent {
   const ov = args.overrides ?? {};
   const maxFee = computeMaxFee(args.value, ov);
-  const sourceChainId = chainIdForDomain(args.sourceDomain);
-  const offset =
-    ov.maxBlockHeightOffset ?? defaultBlockHeightOffset(sourceChainId);
+  const margin = (args.withdrawalDelay + WITHDRAWAL_DELAY_MARGIN_DIVISOR - 1n) /
+    WITHDRAWAL_DELAY_MARGIN_DIVISOR;
+  const minimumOffset = args.withdrawalDelay + margin;
+  const requestedOffset = ov.maxBlockHeightOffset ?? ENV_BLOCK_OFFSET_OVERRIDE ?? minimumOffset;
+  // A stale env/per-call override must not turn a valid delay read into a rejected intent.
+  const offset = requestedOffset < minimumOffset ? minimumOffset : requestedOffset;
   const maxBlockHeight = args.currentBlockHeight + offset;
   const salt = ov.salt ?? randomSalt();
   const sourceSigner = ov.sourceSigner ?? args.depositor;

@@ -50,6 +50,7 @@ import {
   getBurnIntentTypedData,
   GATEWAY_WALLET_ABI,
   requestAttestation,
+  readGatewayBurnIntentContext,
 } from '@/lib/crossChain/gateway';
 import type {
   AttestationResponse,
@@ -365,7 +366,10 @@ function TransferPanel({ account }: { account: Address }) {
     const valueAtomic = parseUnits(amount, sourceDep.decimals);
 
     setStatus({ kind: 'pending', step: 'fetch current block height (source)' });
-    const currentBlockHeight = await sourcePublicClient.getBlockNumber();
+    const { currentBlockHeight, withdrawalDelay } = await readGatewayBurnIntentContext(
+      sourcePublicClient,
+      sourceChainId,
+    );
 
     const intent = buildBurnIntent({
       sourceDomain,
@@ -376,6 +380,7 @@ function TransferPanel({ account }: { account: Address }) {
       recipient: recipient as Address,
       value: valueAtomic,
       currentBlockHeight,
+      withdrawalDelay,
     });
 
     setStatus({ kind: 'pending', step: 'sign burn intent (EIP-712)' });

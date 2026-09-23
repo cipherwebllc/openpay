@@ -934,18 +934,24 @@ phase 2 本線 UX は事実上意味を成さない。
 - [ ] **NG なら**: Vercel server-side proxy 経由 (server fetch) で回避するか
       検討 (Vercel リージョンは us-east、Circle API 動作実績 region)
 
-### §10.3 Soft gate: 各 chain の block height offset 適切性 (LARP A1 fix の動作確認)
+### §10.3 Soft gate: Gateway burn intent の source 有効期間 (X13)
 
-`defaultBlockHeightOffset` で Polygon/Base/OP = 600 blocks (~20 分)、
-Arbitrum = 5000 blocks (~21 分) を chain-aware で設定済。実機検証:
+署名直前に source GatewayWallet の `withdrawalDelay()` を読み、
+`maxBlockHeight = source head + withdrawalDelay + 10% (切上げ)` とする。
+これは burn intent の期限であり、destination attestation の期限とは別。
 
-- [ ] Polygon Amoy source で attestation expire 起きない (典型 user flow ~2 分
-      で完了するため余裕は問題ない、念のため)
-- [ ] **Arbitrum Sepolia source** で attestation expire 起きないか確認 (
-      ~0.25s/block で 5000 blocks = ~21 分、user flow > expire になる典型は
-      ないはずだが LARP audit 起因の修正なので明示確認)
-- [ ] 緊急時の env override: `NEXT_PUBLIC_CROSS_CHAIN_BLOCK_OFFSET_DEFAULT=8000`
-      で全 chain に上書き設定可能であることを 1 度試して動作確認
+Gateway API 応答後に、残高がある source の readiness probe を並列で実行する。
+RPC が応答しない場合、balance query に最大約 3 秒の待ち時間が加わる。
+operator demo の Gateway total は API の預入残高であり、経路の利用可否ではない。
+購入者向け chooser は readiness 検証済みの Gateway option だけを表示する。
+
+- [ ] Polygon Amoy source で live delay + margin が署名内容へ反映され、Circle が受理する
+- [ ] **Arbitrum Sepolia source** では source RPC の `l1BlockNumber` を使い、L2 height を使わない
+- [ ] delay / Arbitrum L1 height の読取失敗時は該当 Gateway 経路を提示せず、署名もしない
+- [ ] `NEXT_PUBLIC_CROSS_CHAIN_BLOCK_OFFSET_DEFAULT` の小さい値は delay + margin に
+      切り上げられ、大きい値だけが有効期間を延長する (2^255 以上は無視)
+- [ ] 保存済み merchant attestation があれば、readiness probe が失敗して option が
+      消えても、reload 後に committed lock が復元される
 
 ### §10.4 mainnet smoke (testnet 全 OK 後)
 

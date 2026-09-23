@@ -88,6 +88,7 @@ describe('lib/crossChain/gateway', () => {
       recipient: RECIPIENT,
       value: 5_000_000n, // 5 USDC
       currentBlockHeight: 1000n,
+      withdrawalDelay: 302_400n,
     };
 
     it('TransferSpec に正しい domain / token / address を 入れる', () => {
@@ -119,44 +120,17 @@ describe('lib/crossChain/gateway', () => {
       expect(intent.spec.hookData).toBe('0x');
     });
 
-    it('maxBlockHeight = currentBlockHeight + chain-aware default offset (Base: 600 blocks ≈ 20 min)', () => {
-      // baseArgs.sourceDomain = CIRCLE_DOMAIN_BASE = 6
-      // testnet env: chainIdForDomain(6) → baseSepolia.id → 600n (block ~2s)
+    it('maxBlockHeight = currentBlockHeight + live delay + 10% margin', () => {
       const intent = buildBurnIntent(baseArgs);
-      expect(intent.maxBlockHeight).toBe(1000n + 600n);
+      expect(intent.maxBlockHeight).toBe(1000n + 302_400n + 30_240n);
     });
 
-    it('Arbitrum source: 5000 blocks (~21 分、~0.25s/block 対応)', () => {
+    it('overrides.maxBlockHeightOffset can extend the expiry', () => {
       const intent = buildBurnIntent({
         ...baseArgs,
-        sourceDomain: 3 as never, // CIRCLE_DOMAIN_ARBITRUM
+        overrides: { maxBlockHeightOffset: 400_000n },
       });
-      // 短い block time に対応するため per-chain map で 5000 blocks 確保
-      expect(intent.maxBlockHeight).toBe(1000n + 5000n);
-    });
-
-    it('Polygon source: 600 blocks (~20 分、~2s/block)', () => {
-      const intent = buildBurnIntent({
-        ...baseArgs,
-        sourceDomain: 7 as never, // CIRCLE_DOMAIN_POLYGON
-      });
-      expect(intent.maxBlockHeight).toBe(1000n + 600n);
-    });
-
-    it('Optimism source: 600 blocks (~20 分、~2s/block)', () => {
-      const intent = buildBurnIntent({
-        ...baseArgs,
-        sourceDomain: 2 as never, // CIRCLE_DOMAIN_OPTIMISM
-      });
-      expect(intent.maxBlockHeight).toBe(1000n + 600n);
-    });
-
-    it('overrides.maxBlockHeightOffset で offset 上書き', () => {
-      const intent = buildBurnIntent({
-        ...baseArgs,
-        overrides: { maxBlockHeightOffset: 100n },
-      });
-      expect(intent.maxBlockHeight).toBe(1100n);
+      expect(intent.maxBlockHeight).toBe(401_000n);
     });
 
     it('maxFee default: value * 10 bps (= value * 0.001)', () => {
@@ -225,6 +199,7 @@ describe('lib/crossChain/gateway', () => {
         recipient: RECIPIENT,
         value: 1_000_000n,
         currentBlockHeight: 0n,
+        withdrawalDelay: 302_400n,
         overrides: { salt: FIXED_SALT },
       });
       const td = getBurnIntentTypedData(intent);
@@ -243,6 +218,7 @@ describe('lib/crossChain/gateway', () => {
         recipient: RECIPIENT,
         value: 1n,
         currentBlockHeight: 0n,
+        withdrawalDelay: 302_400n,
       });
       const td = getBurnIntentTypedData(intent);
       expect(td.primaryType).toBe('BurnIntent');
@@ -260,12 +236,13 @@ describe('lib/crossChain/gateway', () => {
         recipient: RECIPIENT,
         value: 1_000_000n,
         currentBlockHeight: 100n,
+        withdrawalDelay: 302_400n,
         overrides: { salt: FIXED_SALT },
       });
       const td = getBurnIntentTypedData(intent);
       expect(td.message).toMatchObject({
-        // currentBlock=100 + chain-aware offset (Base=600) = 700
-        maxBlockHeight: 700n,
+        // currentBlock + live withdrawalDelay + 10% margin
+        maxBlockHeight: 332_740n,
         maxFee: 1000n,
         spec: intent.spec,
       });
@@ -317,6 +294,7 @@ describe('lib/crossChain/gateway', () => {
         recipient: RECIPIENT,
         value: 1_000_000n,
         currentBlockHeight: 100n,
+        withdrawalDelay: 302_400n,
         overrides: { salt: FIXED_SALT },
       });
       const response: AttestationResponse = {
@@ -341,8 +319,8 @@ describe('lib/crossChain/gateway', () => {
       expect(body[0].signature).toBe('0xdeadbeef');
       // BigInt はすべて string に落ちている
       expect(typeof body[0].burnIntent.maxBlockHeight).toBe('string');
-      // currentBlockHeight=100 + chain-aware offset (Base=600) = 700
-      expect(body[0].burnIntent.maxBlockHeight).toBe('700');
+      // currentBlockHeight=100 + withdrawalDelay=302400 + margin=30240
+      expect(body[0].burnIntent.maxBlockHeight).toBe('332740');
       expect(body[0].burnIntent.spec.value).toBe('1000000');
 
       expect(out).toEqual(response);
@@ -366,6 +344,7 @@ describe('lib/crossChain/gateway', () => {
             recipient: RECIPIENT,
             value: 1n,
             currentBlockHeight: 0n,
+            withdrawalDelay: 302_400n,
           }),
           signature: '0x',
         },
@@ -394,6 +373,7 @@ describe('lib/crossChain/gateway', () => {
               recipient: RECIPIENT,
               value: 1n,
               currentBlockHeight: 0n,
+              withdrawalDelay: 302_400n,
             }),
             signature: '0x',
           },
@@ -423,6 +403,7 @@ describe('DEFAULT_MAX_FEE_BPS env パース (REM-19)', () => {
     recipient: RECIPIENT,
     value: 100_000_000n, // 100 USDC — bps 計算が整数になる額
     currentBlockHeight: 0n,
+    withdrawalDelay: 302_400n,
   };
 
   it('hex 表記 ("0x32") は fallback 10n — 5_000_000 * 10 / 10000 = 5000', async () => {

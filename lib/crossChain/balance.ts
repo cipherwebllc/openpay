@@ -41,6 +41,7 @@ import {
   BUYER_SOURCE_TARGETS,
   CIRCLE_GATEWAY_API_BASE_URL,
 } from './config';
+import { readGatewayBurnIntentContext } from './gateway';
 import type {
   BalanceQueryRequest,
   BalanceQueryResponse,
@@ -68,6 +69,8 @@ export type WalletUsdcBalance =
 export interface MultiChainBalances {
   wallet: WalletUsdcBalance[];
   gateway: GatewayUnifiedBalance;
+  /** Sources whose live delay and contract-visible height can be read. Rechecked before signing. */
+  gatewayReadyDomains: ReadonlySet<CircleDomain>;
 }
 
 export type GatewayUnifiedBalance =
@@ -295,7 +298,8 @@ export async function readGatewayUnifiedBalance(
 }
 
 // wallet ERC20 + Gateway unified を 1 callsite で並列取得 (CrossChainHint /
-// demo の primary entry point)。
+// demo の primary entry point)。Gateway readiness probes run in parallel after
+// its API response, adding up to 3 seconds to the balance query when a source hangs.
 export async function readAllCrossChainBalances(
   account: Address,
   opts: {
@@ -304,12 +308,36 @@ export async function readAllCrossChainBalances(
     chainResolver?: (chainId: number) => Chain;
   } = {},
 ): Promise<MultiChainBalances> {
-  const [wallet, gateway] = await Promise.all([
+  const [wallet, { gateway, gatewayReadyDomains }] = await Promise.all([
     readMultiChainWalletBalances(account, opts.chainResolver),
     readGatewayUnifiedBalance(account, undefined, {
       fetch: opts.fetch,
       baseUrl: opts.baseUrl,
+    }).then(async (gateway) => {
+      const gatewayReadyDomains = new Set<CircleDomain>();
+      if (gateway.status === 'ok') {
+        await Promise.all(BUYER_SOURCE_TARGETS.map(async (target) => {
+          if ((gateway.perDomain.get(target.domain) ?? 0n) <= 0n) return;
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const chain = (opts.chainResolver ?? chainResolveFromTargets)(target.chainId);
+            await Promise.race([
+              readGatewayBurnIntentContext(publicClientFor(chain), target.chainId),
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error('Gateway source RPC timeout')), WALLET_BALANCE_TIMEOUT_MS);
+              }),
+            ]);
+            gatewayReadyDomains.add(target.domain);
+          } catch {
+            // Gateway read failure/hang only hides this source's Gateway option;
+            // keep wallet balances, CCTP/direct, and other Gateway sources usable.
+          } finally {
+            clearTimeout(timer);
+          }
+        }));
+      }
+      return { gateway, gatewayReadyDomains };
     }),
   ]);
-  return { wallet, gateway };
+  return { wallet, gateway, gatewayReadyDomains };
 }

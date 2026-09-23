@@ -26,12 +26,10 @@
 
 ### Block time / maxBlockHeight buffer
 
-| chain | block time | OpenPay の `defaultBlockHeightOffset` |
-|---|---|---|
-| Ethereum L1 (post-Merge) | ~12s | **100 blocks** = 1200s ≈ 20 min |
-| Sepolia | ~12s | 100 blocks |
-
-`lib/crossChain/gateway.ts` の `PER_CHAIN_BLOCK_OFFSET` Map に上記 entry 追加。
+2026-09-23 X13 訂正: 固定の約 20 分 offset は Circle の最低有効期間を満たさない。
+`lib/crossChain/gateway.ts` は source GatewayWallet の `withdrawalDelay()` を読み、
+source head + delay + 10% (切上げ) を使う。Ethereum mainnet の delay 実測は
+50,400 blocks (約 7 日)。testnet も固定値を流用せず live 値を読む。
 
 ## 既存対応 chain (リファレンス、変更なし)
 
@@ -62,12 +60,9 @@
 
 ### Block time / maxBlockHeight buffer (phase 4b-1)
 
-| chain | block time | OpenPay の `defaultBlockHeightOffset` |
-|---|---|---|
-| Avalanche C-Chain | ~2s | **600 blocks** = 1200s ≈ 20 min |
-| Unichain | ~1s | **1200 blocks** = 1200s ≈ 20 min |
-| Avalanche Fuji | ~2s | 600 blocks |
-| Unichain Sepolia | ~1s | 1200 blocks |
+2026-09-23 X13 訂正: Avalanche / Unichain と各 testnet も上記の live delay + 10%
+を使う。Avalanche mainnet の delay 実測は 545,000 blocks。固定の短い offset table
+は廃止し、delay が読めない source の Gateway 経路は提示・署名しない。
 
 ### CCTP V2 contract addresses
 
