@@ -113,6 +113,9 @@ export async function PATCH(
 
   const result = await updateResource(id, session.address, parsed.input);
   if (!result.ok) {
+    if (result.reason === 'url_taken') {
+      return NextResponse.json({ error: 'url_taken' }, { status: 409 });
+    }
     if (result.reason === 'not_found') return notFound();
     if (result.reason === 'forbidden') return forbidden();
     logger.warn('x402.facilitator.resource_update_failed', { id, merchant: session.address });

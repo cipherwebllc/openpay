@@ -1493,6 +1493,27 @@ Polygon (mainnet) / Amoy (testnet)。
 8. フラグ点灯 (NEXT_PUBLIC_* は build-time inline → **再デプロイ必須**):
    `NEXT_PUBLIC_ENABLE_X402_FACILITATOR=1`。必要なら運営自身の resource を SIWE で seed 登録 (空カタログ回避)。
 
+### §14.2a Registry URL claim の移行 (B12b)
+
+1. **deploy 前に read-only 棚卸し**: 運用用の `KV_REST_API_URL` / `KV_REST_API_TOKEN` を設定し、
+   `node scripts/x402-registry-url-claims.mjs` を実行する。hidden・inactive・index 外を含む全件が対象。
+   `invalid` と重複一覧 (merchant / recipient / active / hidden / createdAt) を人間が確認する。
+2. **すべての registry writer を新 CAS に更新してから** `--apply` を実行する。旧 PATCH が残る間に
+   claim を作ると、URL だけが移動し古い claim が残る。ローリング deploy 中・旧版への rollback 中は
+   backfill を実行しない。claim は URL の一意性の補助であり、origin 所有証明ではない。
+3. **競合は自動解消しない**: 最古・最新・最初の PATCH/probe を正当な所有者の根拠にしない。
+   運用者が提供者と受取先を別途確認し、各所有者の認証済 PATCH (別 URL へ移動) / DELETE
+   (soft-delete) で不要な active 掲載を解消する。旧 URL の `invalid` は削除する前に所有者が修正する。
+   inactive の `invalid` は通常の PATCH 対象外なので、監査データを保った個別修復を人間レビューに回す
+   (`--apply` は inactive を含む `invalid` が残る間は全書込を止める)。
+   非協力・所有者不明の場合は競合を残して個別の人間レビューに回す。admin claim 解放ツールは無い。
+4. 棚卸しを再実行し、`invalid` が無いことを確認して
+   `node scripts/x402-registry-url-claims.mjs --apply` を実行する。active がちょうど1件の URL だけを
+   書き込み、競合には勝者を選ばない。`changed` は並走変更なので再棚卸しする。レコードは削除しない。
+5. 再検証の `urlTaken` と `x402.reverify.url_taken` warn を確認する。競合中の hidden 解除は保留されるが、
+   成功 probe のカウンタリセットは継続する。移行完了までは未 claim の旧データに一意性を仮定しない。
+   `url_taken` は signed-in 登録者へ hidden を含む掲載済み URL の存在を示す (受容済みの挙動)。
+
 ### §14.3 ロールバック (安全状態へ即復帰)
 - **最速 (全停止)**: `NEXT_PUBLIC_ENABLE_X402_FACILITATOR=0` + 再デプロイ → 全 route 404 = 完全 inert。
 - **settle だけ止める (登録/閲覧は残す)**: `RELAYER_PRIVATE_KEY` を外す → settle 503 `relay_not_configured`

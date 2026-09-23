@@ -135,6 +135,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   const id = crypto.randomUUID();
   const created = await createResource(parsed.input, id, Date.now());
   if (!created.ok) {
+    if (created.reason === 'url_taken') {
+      return NextResponse.json({ error: 'url_taken' }, { status: 409 });
+    }
     // 上の soft cap pre-check 通過後に並列 POST が cap に達したレースは createResource (原子的 cap) が
     // too_many で弾く。invalid_url は保存層でも予約 origin を守る invariant、それ以外は KV エラー。
     if (created.reason === 'invalid_url') {

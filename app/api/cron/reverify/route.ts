@@ -75,6 +75,7 @@ type ReverifySummary = {
   hidden: number;
   restored: number;
   skippedDuplicate: number;
+  urlTaken: number;
   directory: {
     checked: number;
     ok: number;
@@ -116,14 +117,19 @@ async function processTarget(
       runId,
       authClass,
     );
-    const storageError = !apply.applied && apply.reason === 'storage';
+    const storageError = apply.applied
+      ? apply.restoreBlocked === 'storage'
+      : apply.reason === 'storage';
+    if (apply.applied && apply.restoreBlocked === 'url_taken') {
+      logger.warn('x402.reverify.url_taken', { runId, target: targetLabel(target) });
+    }
     return {
       target,
       checked: true,
       verdict,
       apply,
       storageError,
-      ...(storageError && !apply.applied ? { storageDetail: apply.detail } : {}),
+      ...(storageError ? { storageDetail: apply.applied ? 'url claim unavailable' : apply.detail } : {}),
     };
   }
 
@@ -175,6 +181,7 @@ function summarize(
     hidden: 0,
     restored: 0,
     skippedDuplicate: 0,
+    urlTaken: 0,
     directory,
   };
   for (const outcome of outcomes) {
@@ -191,6 +198,7 @@ function summarize(
     } else summary.transient += 1;
 
     if (outcome.apply?.applied) {
+      if (outcome.apply.restoreBlocked === 'url_taken') summary.urlTaken += 1;
       if (!outcome.apply.hiddenBefore && outcome.apply.hiddenAfter) {
         summary.hidden += 1;
       }

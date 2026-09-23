@@ -68,6 +68,7 @@ import {
   hiddenUrlLedgerKey,
   HIDDEN_URL_LEDGER_TTL_SEC,
 } from '@/lib/x402/hiddenUrlLedger';
+import { resourceUrlClaimKey } from '@/lib/x402/resourceUrlClaim.mjs';
 
 const OWNER = getAddress('0x1111111111111111111111111111111111111111');
 const STRANGER = getAddress('0x9999999999999999999999999999999999999999');
@@ -353,6 +354,7 @@ describe('script を直接実行したときの戻り値 (Lua → RESP)', () => 
       RESOURCES_INDEX,
       merchantResourcesKey(OWNER),
       hiddenUrlLedgerKey('https://a.jp/x'),
+      resourceUrlClaimKey('https://a.jp/x'),
     ];
     const argv = ['{"id":"r9"}', 'r9', '2', '{"id":"r9","hidden":true}'];
     expect(await runRedisLua(CAS_CREATE, keys, argv, store)).toBe(1);

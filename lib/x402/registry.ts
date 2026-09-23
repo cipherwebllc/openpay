@@ -3,6 +3,7 @@
 //
 // キー:
 //   x402:resource:<id>            → JSON (1 resource)
+//   x402:resource:urlclaim:<sha256> → active resource id (hidden も保持)
 //   x402:resources:index          → list of resource id (discovery 列挙)
 //   x402:merchant:<wallet>:resources → list of resource id (owner の一覧)
 //   x402:settlement:<id>          → JSON (1 settlement・会計用)
@@ -23,6 +24,7 @@ import {
   HIDDEN_URL_LEDGER_VALUE,
 } from './hiddenUrlLedger';
 import { isPrivateHost } from './moderation';
+import { normalizeResourceUrl, resourceUrlClaimKey, URL_CLAIM_GUARD } from './resourceUrlClaim.mjs';
 
 export const RESOURCES_INDEX = 'x402:resources:index';
 export const SETTLEMENTS_INDEX = 'x402:settlements:index';
@@ -165,6 +167,8 @@ export function parseResourceInput(
   // URL パース不能も弾く。
   try {
     const parsedUrl = new URL(url);
+    // claim key を導出できない曖昧な authority 表記を保存層の例外 (500) に波及させない。
+    normalizeResourceUrl(url);
     if (isPrivateHost(parsedUrl.hostname) || isOpenPayCanonicalOriginUrl(url)) {
       return { ok: false, reason: 'invalid_url' };
     }
@@ -305,19 +309,22 @@ function safeParse<T>(raw: string | null): T | null {
 // N-5: KEYS[4] = hidden URL 台帳。台帳に載っている URL は hidden 済 (ARGV[4]) の JSON で作成し、
 // 「DELETE → 同一 URL で再登録」でモデレーション状態を洗い流す経路を塞ぐ。判定と保存を同じ
 // script に閉じるので、削除と再登録を並走させても台帳を跨げない。戻り: 1=作成 / 3=hidden 継承で
-// 作成 / -2=cap 超過。
+// 作成 / -2=cap 超過 / -5=URL 使用中 / -6=claim 先破損 (storage)。KEYS[5] は URL claim。
 export const CAS_CREATE =
+  URL_CLAIM_GUARD +
   'local cap=tonumber(ARGV[3]); ' +
   "if redis.call('LLEN',KEYS[3])>=cap then return -2 end; " +
+  'local claim=claimAvailable(KEYS[5],ARGV[2]); if claim~=1 then return claim end; ' +
   "local doc=ARGV[1]; local code=1; " +
   "if redis.call('EXISTS',KEYS[4])==1 then doc=ARGV[4]; code=3 end; " +
   "redis.call('SET',KEYS[1],doc); " +
+  "redis.call('SET',KEYS[5],ARGV[2]); " +
   "redis.call('LPUSH',KEYS[2],ARGV[2]); " +
   "redis.call('LPUSH',KEYS[3],ARGV[2]); return code";
 
 export type CreateResourceResult =
   | { ok: true; resource: X402Resource }
-  | { ok: false; reason: 'invalid_url' | 'too_many' | 'storage' };
+  | { ok: false; reason: 'invalid_url' | 'too_many' | 'url_taken' | 'storage' };
 
 // resource を作成して KV に保存する。id は採番 (uuid)。network は facilitator の対象 chain。
 // cap 判定・保存・両 index 登録を CAS_CREATE で原子化する (cap race / orphan を防ぐ)。nowMs を引数化
@@ -357,6 +364,7 @@ export async function createResource(
       RESOURCES_INDEX,
       merchantResourcesKey(input.merchant),
       hiddenUrlLedgerKey(input.url),
+      resourceUrlClaimKey(input.url),
     ],
     [
       JSON.stringify(resource),
@@ -366,6 +374,7 @@ export async function createResource(
     ],
   );
   if (!cas.ok) return { ok: false, reason: 'storage' };
+  if (cas.value === -5) return { ok: false, reason: 'url_taken' };
   if (cas.value === -2) return { ok: false, reason: 'too_many' };
   // 3 = 台帳に載っていた URL なので hidden を継承して作成した (公開カタログには出ない)。
   if (cas.value === 3) return { ok: true, resource: hiddenResource };
@@ -448,10 +457,19 @@ export const CAS_OWNER_GUARD =
 // hidden は cron 再検証 (lib/x402/reverify.ts) が付けたモデレーション状態であり、owner が別 URL へ
 // PATCH → 元 URL へ PATCH し直すだけで解除できると自動 hidden が無意味になる (B6)。復帰は
 // 「再検証が ok_402_openpay を観測する」正規経路のみ (reverify の CAS が hidden=false に倒す)。
-// 戻り: 更新後 JSON 文字列=成功 / -1=未存在 / -2=malformed / -3=削除済 / 0=owner 不一致。
+// KEYS[2/3]=新/旧 claim、ARGV[13/14]=読取時 URL/id。
+// 戻り: JSON=成功 / -1=未存在 / -2=malformed / -3=削除済 / -4=URL 競合 / -5=URL 使用中
+// / -6=claim 先破損 / 0=owner 不一致。URL 競合時は無変更で storage (503・再試行可能)。
 export const CAS_UPDATE =
   CAS_OWNER_GUARD +
   'if o.active==false then return -3 end; ' +
+  // JS で求めた旧 claim key が現在の URL に対応することを CAS 内で確認する。
+  // 並走 PATCH/DELETE の古い読取が別 URL の claim を解放する波及を断つ。
+  'if o.url~=ARGV[13] then return -4 end; ' +
+  URL_CLAIM_GUARD +
+  // 同じ正規化 URL の編集では claim に触れない。旧重複データの最初の編集者を
+  // 勝者として固定し、他の所有者の価格・説明編集まで拒否する波及を防ぐ。
+  'if KEYS[2]~=KEYS[3] then local claim=claimAvailable(KEYS[2],ARGV[14]); if claim~=1 then return claim end; end; ' +
   'if o.url~=ARGV[2] then o.verification=nil end; ' +
   'o.url=ARGV[2]; o.description=ARGV[3]; o.priceJpyc=ARGV[4]; o.category=ARGV[5]; o.payTo=ARGV[6]; ' +
   "if ARGV[7]=='' then o.docsUrl=nil else o.docsUrl=ARGV[7] end; " +
@@ -461,29 +479,53 @@ export const CAS_UPDATE =
   "if ARGV[11]=='' then o.title=nil else o.title=ARGV[11] end; " +
   "if ARGV[12]=='' then o.trigger=nil else o.trigger=ARGV[12] end; " +
   'o.updatedAt=tonumber(ARGV[9]); ' +
-  "redis.call('SET',KEYS[1],cjson.encode(o)); return cjson.encode(o)";
+  'local updated=cjson.encode(o); ' +
+  "redis.call('SET',KEYS[1],updated); " +
+  "if KEYS[2]~=KEYS[3] then redis.call('SET',KEYS[2],ARGV[14]); " +
+  "if KEYS[3]~='' and redis.call('GET',KEYS[3])==ARGV[14] then redis.call('DEL',KEYS[3]) end; end; " +
+  'return updated';
 
 // owner 一致時のみ soft-delete (active:false) する CAS。既に無効なら 2 (冪等)。
 // discovery index は active 一覧用なので LREM で掃除する。merchant index は登録総数 cap 用に残す。
-// 戻り: 1=無効化 / 2=既に無効 / -1=未存在 / -2=malformed / 0=owner 不一致。
+// KEYS[4]=claim、ARGV[5]=読取時 URL。戻り: 1=無効化 / 2=既に無効 / -1=未存在
+// / -2=malformed / -4=URL 競合 / 0=owner 不一致。
 export const CAS_DEACTIVATE_BODY =
+  "if KEYS[4]~='' and redis.call('GET',KEYS[4])==ARGV[2] then redis.call('DEL',KEYS[4]) end; " +
   "if o.active==false then redis.call('LREM',KEYS[2],0,ARGV[2]); return 2 end; " +
   "o.active=false; redis.call('SET',KEYS[1],cjson.encode(o)); " +
   "redis.call('LREM',KEYS[2],0,ARGV[2]); return 1";
-
-export const CAS_DEACTIVATE = CAS_OWNER_GUARD + CAS_DEACTIVATE_BODY;
 
 // N-5: hidden 済の掲載を削除するときだけ URL 台帳 (KEYS[3]) に印を残す。owner が
 // 「DELETE → 同一 URL で再登録」で hidden を消せないようにする (createResource が継承する)。
 // hidden の判定は権威レコード (o.hidden) 側で行うので、呼び元の読取と競合しても誤って印を残さない。
 export const CAS_DEACTIVATE_WITH_LEDGER =
   CAS_OWNER_GUARD +
+  'if o.url~=ARGV[5] then return -4 end; ' +
   "if o.hidden==true then redis.call('SET',KEYS[3],ARGV[3],'EX',ARGV[4]) end; " +
   CAS_DEACTIVATE_BODY;
 
 export type UpdateResourceResult =
   | { ok: true; resource: X402Resource }
-  | { ok: false; reason: 'not_found' | 'forbidden' | 'storage' };
+  | { ok: false; reason: 'not_found' | 'forbidden' | 'url_taken' | 'storage' };
+
+async function readResourceClaim(id: string): Promise<
+  | { ok: true; url: string; key: string | null }
+  | { ok: false; reason: 'not_found' | 'storage' }
+> {
+  const got = await kvGet(resourceKey(id));
+  if (!got.ok) return { ok: false, reason: 'storage' };
+  if (got.value === null) return { ok: false, reason: 'not_found' };
+  const resource = safeParse<X402Resource>(got.value);
+  if (!resource || typeof resource.url !== 'string') return { ok: false, reason: 'storage' };
+  try {
+    return { ok: true, url: resource.url, key: resourceUrlClaimKey(resource.url) };
+  } catch {
+    // 旧 parser が受理した URL に新 claim を導出できない場合、所有者の修正・削除まで
+    // 永久に 503 にしない。存在し得ない旧 claim は操作せず、raw URL の CAS と認可は保つ。
+    // WHATWG 等による代替 key は作らない (別 URL の claim を解放する波及を防ぐ)。
+    return { ok: true, url: resource.url, key: null };
+  }
+}
 
 // owner 限定で編集可能フィールド (url/description/priceJpyc/category/title/trigger/docsUrl/license/payTo/usdc) を更新する。
 // id/merchant/network/createdAt/active は不変。**merchant !== owner は forbidden** = 他人の掲載や
@@ -495,7 +537,11 @@ export async function updateResource(
   input: X402ResourceInput,
   nowMs = Date.now(),
 ): Promise<UpdateResourceResult> {
-  const cas = await kvEval<number | string>(CAS_UPDATE, [resourceKey(id)], [
+  const previous = await readResourceClaim(id);
+  if (!previous.ok) return previous;
+  const cas = await kvEval<number | string>(CAS_UPDATE, [
+    resourceKey(id), resourceUrlClaimKey(input.url), previous.key ?? '',
+  ], [
     getAddress(owner),
     input.url,
     input.description,
@@ -508,8 +554,11 @@ export async function updateResource(
     input.usdc ? JSON.stringify(input.usdc) : '',
     input.title ?? '',
     input.trigger ?? '',
+    previous.url,
+    id,
   ]);
   if (!cas.ok) return { ok: false, reason: 'storage' };
+  if (cas.value === -5) return { ok: false, reason: 'url_taken' };
   // -1=未存在 / -3=削除済 → どちらも「編集可能な resource は無い」= not_found。
   if (cas.value === -1 || cas.value === -3) return { ok: false, reason: 'not_found' };
   if (cas.value === 0) return { ok: false, reason: 'forbidden' };
@@ -529,30 +578,23 @@ export async function deactivateResource(
   id: string,
   owner: string,
 ): Promise<DeactivateResourceResult> {
-  // 台帳キーは URL の sha256 なので Lua 側では作れない (Redis Lua は sha1 のみ)。先に URL を
-  // 読んで鍵を渡し、**印を残すか否かの判定 (o.hidden) は Lua が権威レコードで**行う。URL を
-  // 読めなかった (未存在 / KV エラー) ときは従来どおりの 2 keys 版に倒す。
-  const existing = await getResource(id);
-  const ledgerKey = existing?.url ? hiddenUrlLedgerKey(existing.url) : null;
-  const cas = ledgerKey
-    ? await kvEval<number>(
-        CAS_DEACTIVATE_WITH_LEDGER,
-        [resourceKey(id), RESOURCES_INDEX, ledgerKey],
-        [
-          getAddress(owner),
-          id,
-          HIDDEN_URL_LEDGER_VALUE,
-          String(HIDDEN_URL_LEDGER_TTL_SEC),
-        ],
-      )
-    : await kvEval<number>(
-        CAS_DEACTIVATE,
-        [resourceKey(id), RESOURCES_INDEX],
-        [getAddress(owner), id],
-      );
+  // SHA-256 は JS で計算し、Lua 内で URL が読取時から変わっていないことを確認する。
+  const previous = await readResourceClaim(id);
+  if (!previous.ok) return previous;
+  const cas = await kvEval<number>(
+    CAS_DEACTIVATE_WITH_LEDGER,
+    [resourceKey(id), RESOURCES_INDEX, hiddenUrlLedgerKey(previous.url), previous.key ?? ''],
+    [
+      getAddress(owner),
+      id,
+      HIDDEN_URL_LEDGER_VALUE,
+      String(HIDDEN_URL_LEDGER_TTL_SEC),
+      previous.url,
+    ],
+  );
   if (!cas.ok) return { ok: false, reason: 'storage' };
   if (cas.value === -1) return { ok: false, reason: 'not_found' };
-  if (cas.value === -2) return { ok: false, reason: 'storage' }; // 破損 JSON
+  if (cas.value === -2 || cas.value === -4) return { ok: false, reason: 'storage' }; // 破損 / URL 競合
   if (cas.value === 0) return { ok: false, reason: 'forbidden' };
   return { ok: true }; // 1 (無効化) / 2 (既に無効・冪等)
 }
