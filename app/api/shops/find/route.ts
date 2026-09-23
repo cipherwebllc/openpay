@@ -4,6 +4,7 @@ import { env } from '@/lib/env';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { EMPTY_SHOP_LIVE, type ShopLiveState } from '@/lib/shopLive';
 import { acceptingNow } from '@/lib/shops/accepting';
+import { shopsApiEnabled } from '@/lib/shops/flags';
 import {
   createShopsEnvelope,
   findShopSummaries,
@@ -28,11 +29,14 @@ function forwarderConfigured(summary: ShopSummary): boolean | null {
 }
 
 export async function GET(req: Request): Promise<NextResponse> {
-  const guarded = await guardFreeShopsApi(req);
-  if (guarded) return guarded;
-
+  // Keep this gate aligned with guardFreeShopsApi so disabled routes return 404
+  // before validation; the shared guard still gates its other callers.
+  if (!shopsApiEnabled()) return shopsError('not_found', 404);
+  // Reject malformed queries before the KV limiter so junk cannot exhaust shared storage.
   const parsed = validateShopFindQuery(new URL(req.url).searchParams);
   if (!parsed.ok) return shopsError(parsed.error, 400);
+  const guarded = await guardFreeShopsApi(req);
+  if (guarded) return guarded;
 
   const snapshot = await readShopSummarySnapshot();
   if (snapshot === null) return shopsError('storage_unavailable', 503);

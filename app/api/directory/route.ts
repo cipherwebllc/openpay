@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { env } from '@/lib/env';
 import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
 import {
   capDirectoryLimit,
@@ -16,11 +17,14 @@ import {
 export const runtime = 'nodejs';
 
 export async function GET(req: Request): Promise<NextResponse> {
-  const guarded = await guardFreeDirectoryApi(req);
-  if (guarded) return guarded;
-
+  // Keep this gate aligned with guardFreeDirectoryApi so disabled routes return
+  // 404 before validation; the shared guard still gates its other callers.
+  if (!env.enableWeb3Directory) return directoryError('not_found', 404);
+  // Reject malformed queries before the KV limiter so junk cannot exhaust shared storage.
   const parsed = validateDirectoryQuery(new URL(req.url).searchParams);
   if (!parsed.ok) return directoryError(parsed.error, 400);
+  const guarded = await guardFreeDirectoryApi(req);
+  if (guarded) return guarded;
 
   // 無料 teaser は limit だけでなく offset も 0 に固定する。limit のみを絞ると、offset を
   // 進めながら数回叩けば無料枠のまま全件 (最大 1000 件分) を持ち出せてしまう (E5)。

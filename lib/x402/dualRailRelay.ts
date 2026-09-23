@@ -130,9 +130,14 @@ async function resolveTarget(
 export async function handleDualRailRequirements(req: Request): Promise<NextResponse> {
   const gated = gate();
   if (gated) return gated;
+  // Match resolveTarget's existing ID bounds before the KV limiter, preventing
+  // malformed public lookups from draining storage shared with verify/settle.
+  const resourceId = new URL(req.url).searchParams.get('resourceId');
+  if (!resourceId || resourceId.length > MAX_RESOURCE_ID) {
+    return jsonError(400, 'invalid_resource_id');
+  }
   const limited = await rateLimit(req);
   if (limited) return limited;
-  const resourceId = new URL(req.url).searchParams.get('resourceId');
   const resolved = await resolveTarget(resourceId);
   if (!resolved.ok) return resolved.response;
   const { resource, usdc, accepts } = resolved.target;

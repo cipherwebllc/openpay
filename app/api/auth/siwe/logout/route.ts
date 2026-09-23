@@ -4,7 +4,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { kvDel } from '@/lib/kv';
-import { sessionCookieName, sessionKey } from '@/lib/siwe';
+import { sessionCookieName, sessionKey, isSessionToken } from '@/lib/siwe';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,7 +14,9 @@ export async function POST(): Promise<NextResponse> {
   const cookieName = sessionCookieName();
   const token = store.get(cookieName)?.value;
   let revoked = true;
-  if (token) {
+  // Malformed cookies cannot name an issued session. Skip DEL so anonymous
+  // logout requests cannot drain the KV budget shared with payments.
+  if (token && isSessionToken(token)) {
     const del = await kvDel(sessionKey(token));
     // value=0 は既に削除済み/未設定の正常系。KV コマンドの成否は ok で判定する。
     revoked = del.ok;

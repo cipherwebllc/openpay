@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import type { Address } from 'viem';
 import { kvGet } from '@/lib/kv';
-import { sessionCookieName, sessionKey, parseSessionRecord } from '@/lib/siwe';
+import { sessionCookieName, sessionKey, parseSessionRecord, isSessionToken } from '@/lib/siwe';
 
 export type SessionReadResult =
   | { status: 'authenticated'; address: Address }
@@ -16,7 +16,11 @@ export type SessionReadResult =
 export async function readSession(): Promise<SessionReadResult> {
   const store = await cookies();
   const token = store.get(sessionCookieName())?.value;
-  if (!token) return { status: 'missing' };
+  // newSessionToken() issues exactly 64 lowercase hex characters. Reject malformed
+  // cookies before KV so anonymous junk cannot drain the budget shared with payments.
+  if (!token || !isSessionToken(token)) {
+    return { status: 'missing' };
+  }
   const res = await kvGet(sessionKey(token));
   if (!res.ok) return { status: 'storage-error' };
   const record = parseSessionRecord(res.value);

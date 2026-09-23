@@ -25,6 +25,12 @@ export async function GET(
   { params }: { params: Promise<{ handle: string }> },
 ) {
   if (!env.enableHandles) return notFound();
+  // Invalid/reserved handles must not spend the shared KV budget, even on the limiter.
+  const { handle: raw } = await params;
+  const validated = validateHandle(raw);
+  if (!validated.ok) {
+    return NextResponse.json({ ok: true, available: false, reason: validated.reason });
+  }
   // IP 固定窓 (公開・無認証の予約可否 read)。@handle 空間の総当り列挙と、それによる KV read
   // 圧力が予約/公開の本体機能へ波及するのを入口で止める。dashboard の入力中チェック
   // (1 handle あたり数回) の遥か上の上限。
@@ -34,11 +40,6 @@ export async function GET(
       { ok: false, error: 'rate_limited' },
       { status: 429 },
     );
-  }
-  const { handle: raw } = await params;
-  const validated = validateHandle(raw);
-  if (!validated.ok) {
-    return NextResponse.json({ ok: true, available: false, reason: validated.reason });
   }
   if (!isKvConfigured()) {
     return NextResponse.json({ ok: true, available: false, reason: 'unavailable' });

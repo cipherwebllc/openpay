@@ -16,10 +16,10 @@ vi.mock('@/lib/relay/relayGuards', async (importOriginal) => {
     await importOriginal<typeof import('@/lib/relay/relayGuards')>();
   return {
     ...actual,
-    checkReadRateLimit: async (key: string) => {
+    checkReadRateLimit: vi.fn(async (key: string) => {
       h.lastRateLimitKey = key;
       return h.rateLimitAllowed;
-    },
+    }),
   };
 });
 
@@ -60,6 +60,7 @@ vi.mock('@/lib/handleStore', () => store);
 
 import { GET as mineGET, POST } from '@/app/api/handle/route';
 import { GET as availGET, DELETE } from '@/app/api/handle/[handle]/route';
+import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 
 const ADDR = OWNER;
 const YOUTUBE_ID = 'dQw4w9WgXcQ';
@@ -750,11 +751,21 @@ describe('GET /api/handle (mine)', () => {
 });
 
 describe('GET /api/handle/[handle] (availability)', () => {
+  it.each(['ab', 'a'.repeat(33), 'bad/handle', 'bad!handle'])('malformed handle %j skips the KV limiter and lookup', async (handle) => {
+    const res = await availGET(new Request('http://x'), params(handle));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, available: false, reason: 'format' });
+    expect(checkReadRateLimit).not.toHaveBeenCalled();
+    expect(store.resolveHandle).not.toHaveBeenCalled();
+  });
+
   it('public: available when unclaimed', async () => {
     store.resolveHandle.mockResolvedValue({ ok: true, record: null });
     const res = await availGET(new Request('http://x'), params('alice'));
     const json = await res.json();
     expect(json.available).toBe(true);
+    expect(checkReadRateLimit).toHaveBeenCalledOnce();
+    expect(store.resolveHandle).toHaveBeenCalledWith('alice');
   });
   it('KV エラーは available:false reason:unavailable (空きと誤答しない)', async () => {
     store.resolveHandle.mockResolvedValue({ ok: false });
@@ -768,6 +779,7 @@ describe('GET /api/handle/[handle] (availability)', () => {
     const json = await res.json();
     expect(json.available).toBe(false);
     expect(json.reason).toBe('reserved');
+    expect(checkReadRateLimit).not.toHaveBeenCalled();
     expect(store.resolveHandle).not.toHaveBeenCalled();
   });
   it('flag OFF → 404', async () => {

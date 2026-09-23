@@ -239,6 +239,24 @@ describe('GET /api/shops', () => {
 });
 
 describe('GET /api/shops/find', () => {
+  it.each(['limit=nope', 'mode=unknown', 'q=' + 'a'.repeat(201)])('malformed query %s skips the KV limiter and snapshot', async (query) => {
+    const { find } = await load();
+    const res = await find.GET(req(`/api/shops/find?${query}`));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_query' });
+    expect(rate.check).not.toHaveBeenCalled();
+    expect(kvMocks.lrange).not.toHaveBeenCalled();
+    expect(kvMocks.mget).not.toHaveBeenCalled();
+  });
+
+  it('malformed query remains 404 when shops are disabled', async () => {
+    const { find } = await load({ shops: '' });
+    const res = await find.GET(req('/api/shops/find?limit=nope'));
+    expect(res.status).toBe(404);
+    expect(rate.check).not.toHaveBeenCalled();
+    expect(kvMocks.lrange).not.toHaveBeenCalled();
+  });
+
   it('店名 q の部分一致・limit を適用し、4 field と acceptingNow 三値だけを返す', async () => {
     state.handles = ['alpha', 'bravo', 'charlie'];
     state.summaries.set('alpha', summary('alpha', { name: 'Blue Cafe' }));
@@ -368,6 +386,26 @@ describe('GET /api/shops/find', () => {
 });
 
 describe('GET /api/paid/jpyc-shops/search', () => {
+  it.each(['limit=nope', 'mode=unknown', 'q=' + 'a'.repeat(201)])('malformed unpaid query %s skips KV and payment work', async (query) => {
+    const { paid } = await load();
+    const res = await paid.GET(req(`/api/paid/jpyc-shops/search?${query}`));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_query' });
+    expect(rate.check).not.toHaveBeenCalled();
+    expect(kvMocks.lrange).not.toHaveBeenCalled();
+    expect(kvMocks.mget).not.toHaveBeenCalled();
+    expect(payment.verify).not.toHaveBeenCalled();
+    expect(payment.settle).not.toHaveBeenCalled();
+  });
+
+  it('malformed unpaid query remains 404 when shops are disabled', async () => {
+    const { paid } = await load({ shops: '' });
+    const res = await paid.GET(req('/api/paid/jpyc-shops/search?limit=nope'));
+    expect(res.status).toBe(404);
+    expect(rate.check).not.toHaveBeenCalled();
+    expect(kvMocks.lrange).not.toHaveBeenCalled();
+  });
+
   it('未課金は KV を読まず 2 JPYC の402 challenge', async () => {
     const { paid } = await load();
     const res = await paid.GET(req('/api/paid/jpyc-shops/search?q=alpha'));

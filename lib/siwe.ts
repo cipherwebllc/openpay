@@ -86,6 +86,11 @@ export function newSessionToken(): string {
   return randomHex32();
 }
 
+/** Match newSessionToken exactly, including case and length (no trailing newline). */
+export function isSessionToken(token: string): boolean {
+  return /^[0-9a-f]{64}$/.test(token);
+}
+
 /** SIWE nonce 用の CSPRNG 64hex。EIP-4361 の英数字 8 文字以上を満たす。 */
 export function newSiweNonce(): string {
   return randomHex32();

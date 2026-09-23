@@ -6,6 +6,7 @@ import { env } from '@/lib/env';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { EMPTY_SHOP_LIVE, type ShopLiveState } from '@/lib/shopLive';
 import { acceptingNow } from '@/lib/shops/accepting';
+import { shopsApiEnabled } from '@/lib/shops/flags';
 import { JPYC_SHOPS_SEARCH_RESOURCE } from '@/lib/shops/paidResources';
 import {
   createShopsEnvelope,
@@ -82,11 +83,14 @@ function searchItem(
 }
 
 export async function GET(req: Request): Promise<NextResponse> {
-  const guarded = await guardPaidShopsApi(req);
-  if (guarded) return guarded;
-
+  // Keep this gate aligned with guardPaidShopsApi so disabled routes return 404
+  // before validation; the shared guard remains responsible for rate limiting.
+  if (!shopsApiEnabled()) return shopsError('not_found', 404);
+  // Reject malformed queries before the KV limiter so junk cannot exhaust shared storage.
   const parsed = validateShopQuery(new URL(req.url).searchParams);
   if (!parsed.ok) return shopsError(parsed.error, 400);
+  const guarded = await guardPaidShopsApi(req);
+  if (guarded) return guarded;
 
   // 未払いは KV を読まず既存 helper の 402 challenge を返す。支払い header がある場合だけ、
   // verify/settle より先に summary + live の content snapshot を完成させる。

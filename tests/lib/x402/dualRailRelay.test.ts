@@ -62,6 +62,8 @@ import {
   handleDualRailRelay,
   handleDualRailRequirements,
 } from '@/lib/x402/dualRailRelay';
+import { checkIpRateLimit } from '@/lib/relay/relayGuards';
+import { getResource } from '@/lib/x402/registry';
 
 const SELLER = getAddress('0x1111111111111111111111111111111111111111');
 const SELLER_USDC = getAddress('0x2222222222222222222222222222222222222222');
@@ -112,6 +114,7 @@ function reqGet(resourceId?: string): Request {
 const fetchMock = vi.fn();
 
 beforeEach(() => {
+  vi.clearAllMocks();
   state.flags.enableX402DualRail = true;
   state.flags.enableX402Facilitator = true;
   state.cdpAuth = { keyId: 'k', keySecret: 's' };
@@ -195,6 +198,32 @@ describe('dualRailRelay resolveTarget (登録リソース限定)', () => {
 });
 
 describe('dualRailRequirements', () => {
+  it.each([undefined, '', 'a'.repeat(101)])('invalid resource ID %j skips the KV limiter and lookup', async (id) => {
+    const res = await handleDualRailRequirements(reqGet(id));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_resource_id' });
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(checkIpRateLimit).not.toHaveBeenCalled();
+    expect(getResource).not.toHaveBeenCalled();
+  });
+
+  it('valid unknown resource ID still reaches the limiter and lookup', async () => {
+    state.resource = null;
+    const res = await handleDualRailRequirements(reqGet('a'.repeat(100)));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'resource_not_found' });
+    expect(checkIpRateLimit).toHaveBeenCalledOnce();
+    expect(getResource).toHaveBeenCalledWith('a'.repeat(100));
+  });
+
+  it('valid resource ID remains rate limited before lookup', async () => {
+    state.rateLimited = true;
+    const res = await handleDualRailRequirements(reqGet('res-1'));
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: 'rate_limited' });
+    expect(getResource).not.toHaveBeenCalled();
+  });
+
   it('登録値から USDC 要件一式を返す (payTo=出品者・Base USDC・atomic 変換)', async () => {
     const res = await handleDualRailRequirements(reqGet('res-1'));
     expect(res.status).toBe(200);

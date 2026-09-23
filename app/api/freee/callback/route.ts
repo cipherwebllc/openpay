@@ -5,6 +5,7 @@ import { freeeEnv, exchangeCode, getCompanies } from '@/lib/freee';
 import { logger } from '@/lib/logger';
 import { env as appEnv } from '@/lib/env';
 import { safeInternalPath } from '@/lib/url/shared';
+import { isSessionToken } from '@/lib/siwe';
 import { requireSession } from '../../auth/siwe/_session';
 import { consumeState, setToken, setMeta, getMeta, delMapping } from '../_store';
 
@@ -28,6 +29,9 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   if (denied) return errorRedirect(req, 'denied');
   if (!code || !state) return errorRedirect(req, 'missing_params');
+  // authorize uses newSessionToken for state. Reject junk before GETDEL so
+  // anonymous callbacks cannot drain the KV budget shared with payments.
+  if (!isSessionToken(state)) return errorRedirect(req, 'invalid_state');
 
   const stateValue = await consumeState(state);
   if (!stateValue) return errorRedirect(req, 'invalid_state');

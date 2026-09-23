@@ -45,11 +45,11 @@ vi.mock('@/lib/kv', () => ({
     h.store.delete(k);
     return { ok: true, value: had ? 1 : 0 };
   },
-  kvGetDel: async (k: string) => {
+  kvGetDel: vi.fn(async (k: string) => {
     const value = h.store.has(k) ? h.store.get(k) : null;
     h.store.delete(k);
     return { ok: true, value };
-  },
+  }),
 }));
 
 vi.mock('next/headers', () => ({
@@ -65,9 +65,11 @@ import { GET as authorizeGET } from '@/app/api/freee/authorize/route';
 import { GET as statusGET } from '@/app/api/freee/status/route';
 import { GET as callbackGET } from '@/app/api/freee/callback/route';
 import { encryptStoredToken, type StoredToken } from '@/lib/freee';
+import { kvGetDel } from '@/lib/kv';
 
 const MERCHANT = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
-const TOKEN = 'sess-token-abc';
+const TOKEN = 'ab'.repeat(32);
+const STATE = 'cd'.repeat(32);
 const FAR_FUTURE = 9_999_999_999_999;
 const ENC_KEY = '00'.repeat(32);
 
@@ -380,15 +382,61 @@ describe('GET/POST /api/freee/mapping (実グルー)', () => {
 });
 
 describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交換→保存)', () => {
+  it('authorize-issued state reaches callback KV consumption and completes the connection', async () => {
+    seedSession();
+    const authorize = await authorizeGET(
+      new Request('http://localhost/api/freee/authorize?returnTo=/ja/history'),
+    );
+    expect(authorize.status).toBe(302);
+    const state = new URL(authorize.headers.get('location')!).searchParams.get('state');
+    expect(state).not.toBeNull();
+    if (state === null) throw new Error('expected an authorize-issued state');
+    expect(h.store.has(`freee:state:${state}`)).toBe(true);
+
+    vi.mocked(kvGetDel).mockClear();
+    mockFreeeFetch();
+    const callback = await callbackGET(new Request(
+      `http://localhost/api/freee/callback?code=CODE&state=${encodeURIComponent(state)}`,
+    ));
+
+    expect(kvGetDel).toHaveBeenCalledOnce();
+    expect(kvGetDel).toHaveBeenCalledWith(`freee:state:${state}`);
+    expect(h.store.has(`freee:state:${state}`)).toBe(false);
+    expect(callback.status).toBe(307);
+    expect(callback.headers.get('location')).toBe('http://localhost/ja/history?freee=connected');
+    expect(h.store.has(`freee:tok:${MERCHANT.toLowerCase()}`)).toBe(true);
+  });
+
+  it.each(['bad-state', 'a'.repeat(63), 'a'.repeat(65), 'A'.repeat(64), 'g'.repeat(64), 'a'.repeat(64) + '\n'])('malformed state %j keeps the invalid-state redirect without KV', async (state) => {
+    vi.mocked(kvGetDel).mockClear();
+    const fetchMock = mockFreeeFetch();
+    const res = await callbackGET(new Request(
+      `http://localhost/api/freee/callback?code=CODE&state=${encodeURIComponent(state)}`,
+    ));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('http://localhost/?freee=error&reason=invalid_state');
+    expect(kvGetDel).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('valid-shape unknown state still reads KV and returns invalid_state', async () => {
+    vi.mocked(kvGetDel).mockClear();
+    const res = await callbackGET(new Request(`http://localhost/api/freee/callback?code=CODE&state=${STATE}`));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('http://localhost/?freee=error&reason=invalid_state');
+    expect(kvGetDel).toHaveBeenCalledOnce();
+    expect(kvGetDel).toHaveBeenCalledWith(`freee:state:${STATE}`);
+  });
+
   it('成功: token 交換 → 保存 → returnTo へ freee=connected で 302', async () => {
     seedSession();
     h.store.set(
-      'freee:state:STATE1',
+      `freee:state:${STATE}`,
       JSON.stringify({ wallet: MERCHANT, returnTo: '/ja/history' }),
     );
     mockFreeeFetch();
     const res = await callbackGET(
-      new Request('http://localhost/api/freee/callback?code=CODE&state=STATE1'),
+      new Request(`http://localhost/api/freee/callback?code=CODE&state=${STATE}`),
     );
     expect(res.status).toBe(307);
     const loc = res.headers.get('location') ?? '';
@@ -397,16 +445,16 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
     // token が保存されている
     expect(h.store.has(`freee:tok:${MERCHANT.toLowerCase()}`)).toBe(true);
     // state は消費済 (再利用不可)
-    expect(h.store.has('freee:state:STATE1')).toBe(false);
+    expect(h.store.has(`freee:state:${STATE}`)).toBe(false);
   });
 
   it('freee token 交換が失敗 → 生500でなく errorRedirect(token_exchange_failed)', async () => {
     seedSession();
-    h.store.set('freee:state:STATE3', JSON.stringify({ wallet: MERCHANT, returnTo: '/' }));
+    h.store.set(`freee:state:${STATE}`, JSON.stringify({ wallet: MERCHANT, returnTo: '/' }));
     // token endpoint が 500 → exchangeCode が throw → catch で graceful redirect
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(json({ error: 'server_error' }, 500));
     const res = await callbackGET(
-      new Request('http://localhost/api/freee/callback?code=CODE&state=STATE3'),
+      new Request(`http://localhost/api/freee/callback?code=CODE&state=${STATE}`),
     );
     expect(res.status).toBe(307);
     expect(res.headers.get('location') ?? '').toContain('reason=token_exchange_failed');
@@ -416,12 +464,12 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
     seedSession();
     // KV 破損/改竄を想定し、authorize を介さず外部 URL を直接 state に仕込む
     h.store.set(
-      'freee:state:STATE4',
+      `freee:state:${STATE}`,
       JSON.stringify({ wallet: MERCHANT, returnTo: 'https://evil.com/phish' }),
     );
     mockFreeeFetch();
     const res = await callbackGET(
-      new Request('http://localhost/api/freee/callback?code=CODE&state=STATE4'),
+      new Request(`http://localhost/api/freee/callback?code=CODE&state=${STATE}`),
     );
     expect(res.status).toBe(307);
     const loc = new URL(res.headers.get('location') ?? '');
@@ -433,12 +481,12 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
   it('open-redirect 防御: プロトコル相対 //evil も / に倒す', async () => {
     seedSession();
     h.store.set(
-      'freee:state:STATE5',
+      `freee:state:${STATE}`,
       JSON.stringify({ wallet: MERCHANT, returnTo: '//evil.com' }),
     );
     mockFreeeFetch();
     const res = await callbackGET(
-      new Request('http://localhost/api/freee/callback?code=CODE&state=STATE5'),
+      new Request(`http://localhost/api/freee/callback?code=CODE&state=${STATE}`),
     );
     expect(new URL(res.headers.get('location') ?? '').origin).toBe('http://localhost');
   });
@@ -451,12 +499,12 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
   ])('open-redirect 防御: %s も同一オリジン / に倒す', async (_case, returnTo) => {
     seedSession();
     h.store.set(
-      'freee:state:STATE_BS',
+      `freee:state:${STATE}`,
       JSON.stringify({ wallet: MERCHANT, returnTo }),
     );
     mockFreeeFetch();
     const res = await callbackGET(
-      new Request('http://localhost/api/freee/callback?code=CODE&state=STATE_BS'),
+      new Request(`http://localhost/api/freee/callback?code=CODE&state=${STATE}`),
     );
     expect(res.status).toBe(307);
     const loc = new URL(res.headers.get('location') ?? '');
@@ -495,7 +543,7 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
 
   it('別会社で再連携 → 旧会社の mapping を破棄 (再マッピング要求)', async () => {
     seedSession();
-    h.store.set('freee:state:STATE6', JSON.stringify({ wallet: MERCHANT, returnTo: '/' }));
+    h.store.set(`freee:state:${STATE}`, JSON.stringify({ wallet: MERCHANT, returnTo: '/' }));
     h.store.set(
       `freee:meta:${MERCHANT.toLowerCase()}`,
       JSON.stringify({ companyId: 7, companyName: '旧商店' }),
@@ -509,14 +557,14 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
       token: { access_token: 'AT', refresh_token: 'RT', expires_in: 21_600, company_id: 99 },
       companies: { companies: [{ id: 99, display_name: '新商店' }] },
     });
-    await callbackGET(new Request('http://localhost/api/freee/callback?code=C&state=STATE6'));
+    await callbackGET(new Request(`http://localhost/api/freee/callback?code=C&state=${STATE}`));
     expect(h.store.has(`freee:map:${MERCHANT.toLowerCase()}`)).toBe(false); // 旧 mapping 破棄
     expect(JSON.parse(h.store.get(`freee:meta:${MERCHANT.toLowerCase()}`)!).companyId).toBe(99);
   });
 
   it('別会社で再連携時の mapping 削除失敗 → connected と偽らない', async () => {
     seedSession();
-    h.store.set('freee:state:STATE8', JSON.stringify({ wallet: MERCHANT, returnTo: '/' }));
+    h.store.set(`freee:state:${STATE}`, JSON.stringify({ wallet: MERCHANT, returnTo: '/' }));
     h.store.set(
       `freee:meta:${MERCHANT.toLowerCase()}`,
       JSON.stringify({ companyId: 7, companyName: '旧商店' }),
@@ -532,7 +580,7 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
       companies: { companies: [{ id: 99, display_name: '新商店' }] },
     });
     const res = await callbackGET(
-      new Request('http://localhost/api/freee/callback?code=C&state=STATE8'),
+      new Request(`http://localhost/api/freee/callback?code=C&state=${STATE}`),
     );
     expect(res.headers.get('location') ?? '').toContain('reason=mapping_delete_failed');
     expect(h.store.has(mappingKey)).toBe(true);
@@ -541,7 +589,7 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
 
   it('同一会社で再連携 → mapping は保持', async () => {
     seedSession();
-    h.store.set('freee:state:STATE7', JSON.stringify({ wallet: MERCHANT, returnTo: '/' }));
+    h.store.set(`freee:state:${STATE}`, JSON.stringify({ wallet: MERCHANT, returnTo: '/' }));
     h.store.set(
       `freee:meta:${MERCHANT.toLowerCase()}`,
       JSON.stringify({ companyId: 7, companyName: 'X' }),
@@ -551,18 +599,18 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
       JSON.stringify({ companyId: 7, accountItemId: 101, taxCode: 21 }),
     );
     mockFreeeFetch(); // company_id = 7 (既定・同一会社)
-    await callbackGET(new Request('http://localhost/api/freee/callback?code=C&state=STATE7'));
+    await callbackGET(new Request(`http://localhost/api/freee/callback?code=C&state=${STATE}`));
     expect(h.store.has(`freee:map:${MERCHANT.toLowerCase()}`)).toBe(true); // 保持
   });
 
   it('CSRF: state の wallet とセッション address 不一致 → session_mismatch', async () => {
     seedSession(); // session = MERCHANT
     h.store.set(
-      'freee:state:STATE2',
+      `freee:state:${STATE}`,
       JSON.stringify({ wallet: '0x0000000000000000000000000000000000000001', returnTo: '/' }),
     );
     const res = await callbackGET(
-      new Request('http://localhost/api/freee/callback?code=CODE&state=STATE2'),
+      new Request(`http://localhost/api/freee/callback?code=CODE&state=${STATE}`),
     );
     expect(res.status).toBe(307);
     expect(res.headers.get('location') ?? '').toContain('reason=session_mismatch');
@@ -571,7 +619,7 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
   it('companies 空 → reason=no_company で errorRedirect し、KV に token を保存しない', async () => {
     seedSession();
     h.store.set(
-      'freee:state:STATE_NC',
+      `freee:state:${STATE}`,
       JSON.stringify({ wallet: MERCHANT, returnTo: '/' }),
     );
     // token endpoint は company_id なし、companies API は空配列を返す。
@@ -580,7 +628,7 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
       companies: { companies: [] },
     });
     const res = await callbackGET(
-      new Request('http://localhost/api/freee/callback?code=CODE&state=STATE_NC'),
+      new Request(`http://localhost/api/freee/callback?code=CODE&state=${STATE}`),
     );
     expect(res.status).toBe(307);
     const loc = res.headers.get('location') ?? '';
