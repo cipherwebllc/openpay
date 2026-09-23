@@ -10,6 +10,7 @@ function balances(walletOk: boolean): MultiChainBalances {
     wallet: [walletOk
       ? { status: 'ok', target: source, tokenAddress: address, balance: 10000000n }
       : { status: 'error', target: source, tokenAddress: address, error: 'offline' }],
+    gatewayReadyDomains: new Set([source.domain]),
     gateway: { status: 'ok', depositor: address, perDomain: new Map([[source.domain, 10000000n]]), total: 10000000n },
   };
 }

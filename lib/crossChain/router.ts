@@ -95,10 +95,14 @@ export function selectPath(args: SelectPathArgs): PathDecision {
   // 2. Gateway path
   const destDomain = domainForChainId(targetChainId);
   if (destDomain !== undefined && balances.gateway.status === 'ok') {
-    const total = balances.gateway.total;
-    if (total >= requiredAtomic) {
+    // Unreadable Gateway sources cannot fund an offered path; their wallet/CCTP
+    // balances remain eligible below, and the original balance report is retained.
+    const perDomain = new Map(Array.from(balances.gateway.perDomain)
+      .filter(([domain]) => balances.gatewayReadyDomains.has(domain)));
+    const total = Array.from(perDomain.values()).reduce((sum, value) => sum + value, 0n);
+    if (perDomain.size > 0 && total >= requiredAtomic) {
       const sourceDomain = pickBestGatewaySource(
-        balances.gateway,
+        { ...balances.gateway, perDomain, total },
         requiredAtomic,
         destDomain,
       );

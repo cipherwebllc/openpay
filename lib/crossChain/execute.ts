@@ -72,6 +72,7 @@ import {
   encodeGatewayMintCalldata,
   getBurnIntentTypedData,
   requestAttestation,
+  readGatewayBurnIntentContext,
   type BuildBurnIntentOverrides,
 } from './gateway';
 import type {
@@ -365,7 +366,6 @@ export async function executeGatewayTransfer(
       GATEWAY_WALLET_ADDRESS,
       args.sourceChainId,
     );
-    const currentBlockHeight = await args.sourcePublicClient.getBlockNumber();
 
     // 1 件分の burn intent を sign + attest する closure。phase で progress の
     // kind を出し分け、UI が「本送金」と「利用料」を区別できるようにする。
@@ -374,6 +374,10 @@ export async function executeGatewayTransfer(
       value: bigint,
       phase: 'merchant' | 'fee',
     ): Promise<{ signature: Hex; attestation: Hex; attestationSignature: Hex }> => {
+      const { currentBlockHeight, withdrawalDelay } = await readGatewayBurnIntentContext(
+        args.sourcePublicClient,
+        args.sourceChainId,
+      );
       onProgress({ kind: phase === 'fee' ? 'fee_sign' : 'sign' });
       const intent = buildBurnIntent({
         sourceDomain: args.sourceDomain,
@@ -384,6 +388,7 @@ export async function executeGatewayTransfer(
         recipient,
         value,
         currentBlockHeight,
+        withdrawalDelay,
         overrides: args.overrides,
       });
       const typedData = getBurnIntentTypedData(intent);

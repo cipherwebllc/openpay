@@ -15,6 +15,7 @@ import {
 // viem boundary mock: createPublicClient を stub し、各 chain ごとに
 // readContract が canned value を返すようにする。balance.ts の SUT は実コード。
 const readContractMocks = new Map<number, ReturnType<typeof vi.fn>>();
+const rpcRequestMocks = new Map<number, ReturnType<typeof vi.fn>>();
 
 vi.mock('viem', async () => {
   const actual = await vi.importActual<typeof import('viem')>('viem');
@@ -27,7 +28,11 @@ vi.mock('viem', async () => {
           `test setup: no readContract mock for chainId ${opts.chain.id}`,
         );
       }
-      return { readContract: mock };
+      return {
+        readContract: mock,
+        getBlockNumber: vi.fn().mockResolvedValue(1000n),
+        request: rpcRequestMocks.get(opts.chain.id) ?? vi.fn().mockResolvedValue({ l1BlockNumber: '0x1312d00' }),
+      };
     }),
   };
 });
@@ -41,11 +46,14 @@ import {
   CIRCLE_DOMAIN_BASE,
   CIRCLE_DOMAIN_POLYGON,
 } from '@/lib/crossChain/types';
+import { enumeratePathOptions } from '@/lib/crossChain/pathEnumerator';
+import { selectPath } from '@/lib/crossChain/router';
 
 const ACCOUNT = '0x1234567890123456789012345678901234567890' as const;
 
 beforeEach(() => {
   readContractMocks.clear();
+  rpcRequestMocks.clear();
 });
 
 // 2026-05-26: Ethereum (sepolia) を CROSS_CHAIN_TARGETS で role='merchant-and-buyer'
@@ -279,6 +287,66 @@ describe('lib/crossChain/balance.readGatewayUnifiedBalance', () => {
 });
 
 describe('lib/crossChain/balance.readAllCrossChainBalances', () => {
+  it.each(['delay rejection', 'delay timeout', 'missing Arbitrum L1'])(
+    'X13: %s leaves CCTP available when no Gateway source can be probed', async (failure) => {
+      vi.useFakeTimers();
+      try {
+        for (const chain of ALL_TESTNET_CHAINS) {
+          readContractMocks.set(chain.id, vi.fn(async ({ functionName }: { functionName: string }) => {
+            if (functionName === 'withdrawalDelay') {
+              if (failure === 'delay rejection') throw new Error('withdrawalDelay unavailable');
+              if (failure === 'delay timeout') return new Promise<bigint>(() => {});
+              return 50_400n;
+            }
+            return 10_000_000n;
+          }));
+        }
+        rpcRequestMocks.set(arbitrumSepolia.id, vi.fn().mockResolvedValue({ number: '0x17d78400' }));
+        const pending = readAllCrossChainBalances(ACCOUNT, {
+          fetch: vi.fn(async () => new Response(JSON.stringify({ balances: [{ domain: 3, balance: '10000000' }] }))),
+        });
+        await vi.advanceTimersByTimeAsync(3000);
+        const out = await pending;
+        expect(out.gatewayReadyDomains.size).toBe(0);
+        out.wallet = out.wallet.filter((entry) => entry.target.chainId === arbitrumSepolia.id);
+        expect(enumeratePathOptions({ balances: out, targetChainId: polygonAmoy.id, requiredAtomic: 1_000_000n })
+          .map((o) => o.kind)).toEqual(['cctp-v2']);
+        expect(selectPath({ balances: out, targetChainId: polygonAmoy.id, requiredAtomic: 1_000_000n }).path).toBe('cctp-v2');
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('X13: withdrawalDelay failure hides only the affected Gateway source and leaves CCTP/direct available', async () => {
+    for (const chain of ALL_TESTNET_CHAINS) {
+      readContractMocks.set(chain.id, vi.fn(async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'withdrawalDelay') {
+          if (chain.id === baseSepolia.id) throw new Error('Gateway read unavailable');
+          return 50_400n;
+        }
+        return 10_000_000n;
+      }));
+    }
+    const out = await readAllCrossChainBalances(ACCOUNT, {
+      fetch: vi.fn(async () => new Response(JSON.stringify({ balances: [
+        { domain: 6, balance: '10000000' },
+        { domain: 3, balance: '5000000' },
+      ] }))),
+    });
+    const options = enumeratePathOptions({ balances: out, targetChainId: polygonAmoy.id, requiredAtomic: 1_000_000n });
+    expect(options.filter((o) => o.kind === 'gateway').map((o) => o.sourceChainId)).toEqual([arbitrumSepolia.id]);
+    expect(options.some((o) => o.kind === 'cctp-v2' && o.sourceChainId === baseSepolia.id)).toBe(true);
+    expect(options.some((o) => o.kind === 'direct')).toBe(true);
+    // The failed source is also excluded from automatic routing and gateway-only balances.
+    out.wallet = out.wallet.map((entry) => ({ ...entry, status: 'error' as const, error: 'wallet RPC down' }));
+    expect(selectPath({ balances: out, targetChainId: polygonAmoy.id, requiredAtomic: 1_000_000n }))
+      .toMatchObject({ path: 'gateway', sourceDomain: 3 });
+    expect(enumeratePathOptions({ balances: out, targetChainId: polygonAmoy.id, requiredAtomic: 1_000_000n })
+      .map((o) => o.sourceChainId)).toEqual([arbitrumSepolia.id]);
+    expect(selectPath({ balances: out, targetChainId: polygonAmoy.id, requiredAtomic: 6_000_000n }).path).toBe('onramp');
+  });
+
   it('wallet + gateway を並列で取得', async () => {
     for (const chain of ALL_TESTNET_CHAINS) {
       readContractMocks.set(chain.id, vi.fn().mockResolvedValue(100n));

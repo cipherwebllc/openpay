@@ -297,6 +297,17 @@ export function useCrossChainPayment(
   // 一歩手前」なので、reload を跨いでも塞ぎ続ける (設計 §7)。
   useEffect(() => {
     if (forwardOnly || isCommitted) return;
+    // Gateway discovery can fail or hide a spent balance after attestation issuance.
+    // Scan every source so that missing options cannot unlock a second payment route.
+    for (const target of BUYER_SOURCE_TARGETS) {
+      const key = sessionKeyFor('gateway', target.chainId);
+      if (!key) continue;
+      const state = loadResumeState<GatewayResumeState>(key);
+      if (state?.merchantAttestation) {
+        setIsCommitted(true);
+        return;
+      }
+    }
     for (const option of pathOptions) {
       if (option.kind === 'direct') continue;
       const key = sessionKeyFor(option.kind, option.sourceChainId);

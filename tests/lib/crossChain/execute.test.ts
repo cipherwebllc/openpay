@@ -87,6 +87,7 @@ function makeWalletClient(opts: {
 function makePublicClient(opts: { blockNumber?: bigint } = {}) {
   return {
     getBlockNumber: vi.fn(async () => opts.blockNumber ?? 1000n),
+    readContract: vi.fn().mockResolvedValue(302_400n),
     waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
     // resume の landed 検証 (txAlreadySucceeded) 用。default は成功扱い。
     getTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
@@ -502,6 +503,7 @@ describe('lib/crossChain/execute: 各 step 失敗時の挙動', () => {
       txHashes: ['0xmint'],
     });
     const sourcePublic = {
+      readContract: vi.fn().mockResolvedValue(302_400n),
       getBlockNumber: vi.fn(async () => {
         throw new Error('rpc connection refused');
       }),
