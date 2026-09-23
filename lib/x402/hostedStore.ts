@@ -33,7 +33,7 @@ import {
   parseHostedTags,
   type HostedProductCategory,
 } from '@/lib/x402/storeMeta';
-import { kvDel, kvEval, kvGet, kvLrange, kvMget, kvSet } from '@/lib/kv';
+import { kvEval, kvGet, kvLrange, kvMget, kvSet } from '@/lib/kv';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 
@@ -743,22 +743,6 @@ export async function listAvailableHostedForOwner(
   return out;
 }
 
-// owner 確認 + 公開メタ更新を原子化 (CAS)。owner 不一致は -1 で拒否。
-// content は差し替えない (編集は新 revision を書く別操作)。
-const UPDATE_HOSTED =
-  "local cur=redis.call('GET',KEYS[1]); if not cur then return 0 end; " +
-  'local ok,rec=pcall(cjson.decode,cur); if not ok then return -2 end; ' +
-  'if string.lower(rec.owner)~=ARGV[1] then return -1 end; ' +
-  "redis.call('SET',KEYS[1],ARGV[2]); return 1";
-
-export type UpdateHostedResult =
-  | { ok: true; product: HostedProduct }
-  | { ok: false; reason: 'not_found' | 'forbidden' | 'corrupt' | 'storage' };
-
-/**
- * 公開メタの更新 (owner 限定)。saleActive の切替と title/desc/emoji/price の変更に使う。
- * **contentAvailable は運営のみが下げる**ため、ここでは受け付けない。
- */
 /**
  * Store 一覧 (P3) 用: index が返した id 列から公開可能な商品を引く。
  * **index はヒント・ここが権威**: parse 成功 + id 一致 + saleActive + contentAvailable
@@ -808,51 +792,6 @@ export function selectProfileProducts<T extends { featured?: boolean }>(
     return { shown: [...products], hiddenCount: 0 };
   }
   return { shown: featured, hiddenCount: products.length - featured.length };
-}
-
-export async function updateHostedProduct(input: {
-  id: string;
-  owner: string;
-  patch: Partial<
-    Pick<HostedProduct, 'title' | 'desc' | 'emoji' | 'priceJpyc' | 'saleActive'>
-  >;
-  now?: number;
-}): Promise<UpdateHostedResult> {
-  const current = await getHostedProduct(input.id);
-  if (current === 'storage') return { ok: false, reason: 'storage' };
-  if (!current) return { ok: false, reason: 'not_found' };
-  if (
-    !isAddress(input.owner) ||
-    current.owner.toLowerCase() !== input.owner.toLowerCase()
-  ) {
-    return { ok: false, reason: 'forbidden' };
-  }
-  if (current.productKind === 'license' && (!licenseVisible(current) || (input.patch.priceJpyc !== undefined && input.patch.priceJpyc !== current.priceJpyc) || (input.patch.saleActive === true && (current.registration?.status !== 'registered' || !licenseSellerAllowed(current.owner))))) return { ok: false, reason: 'forbidden' };
-  const next: HostedProduct = {
-    ...current,
-    ...(input.patch.title !== undefined
-      ? { title: input.patch.title }
-      : {}),
-    ...(input.patch.desc !== undefined ? { desc: input.patch.desc } : {}),
-    ...(input.patch.emoji !== undefined ? { emoji: input.patch.emoji } : {}),
-    ...(input.patch.priceJpyc !== undefined
-      ? { priceJpyc: input.patch.priceJpyc }
-      : {}),
-    ...(input.patch.saleActive !== undefined
-      ? { saleActive: input.patch.saleActive }
-      : {}),
-    updatedAt: input.now ?? Date.now(),
-  };
-  const res = await kvEval<number>(
-    UPDATE_HOSTED,
-    [hostedProductKey(current.id)],
-    [current.owner.toLowerCase(), JSON.stringify(next)],
-  );
-  if (!res.ok) return { ok: false, reason: 'storage' };
-  if (res.value === 0) return { ok: false, reason: 'not_found' };
-  if (res.value === -1) return { ok: false, reason: 'forbidden' };
-  if (res.value === -2) return { ok: false, reason: 'corrupt' };
-  return { ok: true, product: next };
 }
 
 // seller 管理画面の full edit を 1 EVAL で CAS 更新する。
@@ -978,70 +917,50 @@ export async function replaceHostedSellerProduct(input: {
   return { ok: true, product: next };
 }
 
-/**
- * content を新 revision で差し替える。**旧 revision は削除しない** —
- * 既購入者が指す revision が消えると恒久 entitlement が無意味になる (レビュー H-5/G)。
+// Compare the raw snapshot before any deletion: a concurrent seller revision must not
+// be orphaned by an operator writing stale metadata. Only content keys are deleted;
+// ownership, purchase receipts, intents and indexes remain untouched.
+const PURGE_HOSTED_CONTENT =
+  "local cur=redis.call('GET',KEYS[1]); if not cur then return 0 end; " +
+  'if cur~=ARGV[1] then return -4 end; ' +
+  "for rev=1,tonumber(ARGV[3]) do redis.call('DEL',KEYS[1]..':content:'..rev); end; " +
+  "redis.call('SET',KEYS[1],ARGV[2]); return 1";
+
+export type PurgeHostedContentResult =
+  | { ok: true; alreadyPurged: boolean; contentRevision: number }
+  | { ok: false; reason: 'not_found' | 'corrupt' | 'conflict' | 'storage' };
+
+/** Operator-only moderation. Atomically stop sales and purge all content revisions.
+ * Keep the product record so existing buyers can receive the ended response.
+ * Repeating a completed purge leaves the product (including updatedAt) unchanged.
  */
-export async function putHostedContentRevision(input: {
-  id: string;
-  owner: string;
-  content: HostedContent;
-  now?: number;
-}): Promise<UpdateHostedResult> {
-  const current = await getHostedProduct(input.id);
-  if (current === 'storage') return { ok: false, reason: 'storage' };
-  if (!current) return { ok: false, reason: 'not_found' };
-  if (current.productKind === 'license') return { ok: false, reason: 'forbidden' };
-  if (
-    !isAddress(input.owner) ||
-    current.owner.toLowerCase() !== input.owner.toLowerCase()
-  ) {
-    return { ok: false, reason: 'forbidden' };
-  }
-  const revision = current.contentRevision + 1;
-  const written = await kvSet(
-    hostedContentKey(current.id, revision),
-    JSON.stringify(input.content),
-  );
-  if (!written.ok) return { ok: false, reason: 'storage' };
-  // content を先に書いてから公開メタを進める = 「メタは新 revision を指すが本文が無い」
-  // 孤児を作らない (順序が防御・レビュー H-1)。
-  const next: HostedProduct = {
-    ...current,
-    contentKind: input.content.kind,
-    contentRevision: revision,
-    updatedAt: input.now ?? Date.now(),
-  };
+export async function purgeHostedContent(id: string): Promise<PurgeHostedContentResult> {
+  if (!isHostedId(id)) return { ok: false, reason: 'not_found' };
+  const stored = await kvGet(hostedProductKey(id));
+  if (!stored.ok) return { ok: false, reason: 'storage' };
+  if (stored.value === null) return { ok: false, reason: 'not_found' };
+  const current = parseStoredHostedProduct(stored.value);
+  // A corrupt embedded id must not redirect moderation to another seller's content.
+  if (!current || current.id !== id) return { ok: false, reason: 'corrupt' };
+  const alreadyPurged = !current.saleActive && !current.contentAvailable;
+  const next = alreadyPurged ? stored.value : JSON.stringify({
+    // Preserve fields outside the current parser's projection during moderation.
+    ...JSON.parse(stored.value),
+    saleActive: false,
+    contentAvailable: false,
+    updatedAt: Math.max(Date.now(), (current.updatedAt ?? current.createdAt) + 1),
+  });
   const res = await kvEval<number>(
-    UPDATE_HOSTED,
-    [hostedProductKey(current.id)],
-    [current.owner.toLowerCase(), JSON.stringify(next)],
+    PURGE_HOSTED_CONTENT,
+    [hostedProductKey(id)],
+    [stored.value, next, String(current.contentRevision)],
   );
   if (!res.ok) return { ok: false, reason: 'storage' };
   if (res.value === 0) return { ok: false, reason: 'not_found' };
-  if (res.value === -1) return { ok: false, reason: 'forbidden' };
-  if (res.value === -2) return { ok: false, reason: 'corrupt' };
-  return { ok: true, product: next };
-}
-
-/**
- * 運営専用の強制抹消 (moderation)。`contentAvailable=false` にし、全 revision の本文を消す。
- * **商品レコードと owner index は残す** (購入者に「提供終了」を返すため・黙って 404 にしない)。
- */
-export async function purgeHostedContent(id: string): Promise<boolean> {
-  const current = await getHostedProduct(id);
-  if (current === 'storage' || !current) return false;
-  for (let rev = 1; rev <= current.contentRevision; rev += 1) {
-    await kvDel(hostedContentKey(current.id, rev));
-  }
-  const next: HostedProduct = {
-    ...current,
-    saleActive: false,
-    contentAvailable: false,
-    updatedAt: Date.now(),
-  };
-  const res = await kvSet(hostedProductKey(current.id), JSON.stringify(next));
-  return res.ok;
+  if (res.value === -4) return { ok: false, reason: 'conflict' };
+  // An unexpected Redis result must not turn a failed purge into an operator success.
+  if (res.value !== 1) return { ok: false, reason: 'storage' };
+  return { ok: true, alreadyPurged, contentRevision: current.contentRevision };
 }
 
 // ---------------------------------------------------------------------------

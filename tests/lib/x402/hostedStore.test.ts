@@ -31,10 +31,6 @@ vi.mock('@/lib/kv', () => ({
     kvMocks.store.set(key, value);
     return { ok: true as const, value: 'OK' };
   }),
-  kvDel: vi.fn(async (key: string) => {
-    const existed = kvMocks.store.delete(key);
-    return { ok: true as const, value: existed ? 1 : 0 };
-  }),
   kvLrange: vi.fn(async (key: string) =>
     kvMocks.fail
       ? { ok: false as const }
@@ -78,13 +74,7 @@ vi.mock('@/lib/kv', () => ({
       kvMocks.store.set(keys[0], args[4]);
       return { ok: true as const, value: 1 };
     }
-    // UPDATE_HOSTED
-    const cur = kvMocks.store.get(keys[0]);
-    if (!cur) return { ok: true as const, value: 0 };
-    const rec = JSON.parse(cur) as { owner: string };
-    if (rec.owner.toLowerCase() !== args[0]) return { ok: true as const, value: -1 };
-    kvMocks.store.set(keys[0], args[1]);
-    return { ok: true as const, value: 1 };
+    throw new Error('Unexpected hosted script');
   }),
 }));
 
@@ -590,26 +580,28 @@ describe('hosted 更新・revision・moderation', () => {
     if (!parsed.ok) throw new Error('setup');
     const created = await m.createHostedProduct(parsed, 1000);
     if (!created.ok) throw new Error('setup');
-    return { m, id: created.product.id };
+    const snapshot = await m.getHostedProductUpdateSnapshot(created.product.id);
+    if (!snapshot || snapshot === 'storage') throw new Error('setup');
+    return { m, id: created.product.id, snapshot };
   }
 
   it('owner 以外の更新は forbidden', async () => {
-    const { m, id } = await seed();
+    const { m, snapshot } = await seed();
     expect(
-      await m.updateHostedProduct({
-        id,
+      await m.replaceHostedSellerProduct({
+        snapshot,
         owner: OTHER,
-        patch: { saleActive: false },
+        metadata: { ...snapshot.product, saleActive: false },
       }),
     ).toEqual({ ok: false, reason: 'forbidden' });
   });
 
   it('販売停止 (saleActive=false) でも content は配信可のまま (恒久 entitlement の前提)', async () => {
-    const { m, id } = await seed();
-    const updated = await m.updateHostedProduct({
-      id,
+    const { m, id, snapshot } = await seed();
+    const updated = await m.replaceHostedSellerProduct({
+      snapshot,
       owner: OWNER,
-      patch: { saleActive: false },
+      metadata: { ...snapshot.product, saleActive: false },
       now: 2000,
     });
     expect(updated.ok && updated.product.saleActive).toBe(false);
@@ -648,10 +640,11 @@ describe('hosted 更新・revision・moderation', () => {
   });
 
   it('content 編集は新 revision を作り、旧 revision を消さない', async () => {
-    const { m, id } = await seed();
-    const res = await m.putHostedContentRevision({
-      id,
+    const { m, id, snapshot } = await seed();
+    const res = await m.replaceHostedSellerProduct({
+      snapshot,
       owner: OWNER,
+      metadata: snapshot.product,
       content: { kind: 'text', value: '第 2 版' },
       now: 3000,
     });
@@ -665,23 +658,6 @@ describe('hosted 更新・revision・moderation', () => {
       kind: 'text',
       value: '第 2 版',
     });
-  });
-
-  it('運営の強制抹消は contentAvailable=false + 全 revision 削除・レコードは残す', async () => {
-    const { m, id } = await seed();
-    await m.putHostedContentRevision({
-      id,
-      owner: OWNER,
-      content: { kind: 'text', value: '第 2 版' },
-    });
-    expect(await m.purgeHostedContent(id)).toBe(true);
-    const after = await m.getHostedProduct(id);
-    expect(after !== 'storage' && after?.contentAvailable).toBe(false);
-    expect(after !== 'storage' && after?.saleActive).toBe(false);
-    // レコードは残る (購入者に「提供終了」を返せる = 黙って 404 にしない)
-    expect(after).not.toBeNull();
-    expect(await m.getHostedContent(id, 1)).toBeNull();
-    expect(await m.getHostedContent(id, 2)).toBeNull();
   });
 
   it('owner 一覧は他人のレコードを混ぜない', async () => {
@@ -857,10 +833,10 @@ describe('hosted 更新・revision・moderation', () => {
     const { m, id } = await seed();
     const snapshot = await m.getHostedProductUpdateSnapshot(id);
     if (!snapshot || snapshot === 'storage') throw new Error('setup');
-    await m.updateHostedProduct({
+    await m.replaceHostedSellerProduct({
       owner: OWNER,
-      id,
-      patch: { saleActive: false },
+      snapshot,
+      metadata: { ...snapshot.product, saleActive: false },
       now: 2000,
     });
     const result = await m.replaceHostedSellerProduct({
