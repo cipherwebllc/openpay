@@ -12,9 +12,6 @@ import 'server-only';
 import {
   createPublicClient,
   getAddress,
-  isAddressEqual,
-  parseAbi,
-  parseEventLogs,
   type Address,
   type Hex,
 } from 'viem';
@@ -31,6 +28,7 @@ import { recoverReceiveWithAuthorizationSigner } from '@/lib/relay/forwarderSett
 import { feeReceiverFor } from '@/lib/relay/forwarderSettleService';
 import { readIdempotency } from '@/lib/relay/relayGuards';
 import { parseFacilitatorRequest } from '@/lib/x402/facilitatorSettle';
+import { hasMatchingForwarderSettlement } from '@/lib/relay/settlementReceipt';
 
 export type FacilitatorPaymentStatus =
   | {
@@ -57,10 +55,6 @@ export type FacilitatorPaymentStatus =
         | 'unsupported_chain';
     };
 
-const FORWARDER_SETTLED_EVENT_ABI = parseAbi([
-  'event Settled(address indexed from, bytes32 indexed nonce, address indexed merchant, uint256 merchantValue, address feeReceiver, uint256 feeValue)',
-]);
-
 async function receiptMatchesSettlement(
   chainId: number,
   txHash: Hex,
@@ -81,25 +75,12 @@ async function receiptMatchesSettlement(
   const receipt = await client.getTransactionReceipt({ hash: txHash });
   if (receipt.status !== 'success') return false;
 
-  // Eip3009Forwarder は merchant / feeReceiver 双方への safeTransfer が成功した後にだけ
-  // Settled を emit し、失敗時は tx 全体が revert する。そのため expected forwarder 発火かつ
-  // 6 field 完全一致の event が対象 settle の成立証明になる。同一 batch の別 settle を
-  // nonce だけで誤帰属させず、receipt 全体の Transfer 合算で正規 batch を拒否もしない。
-  return parseEventLogs({
-    abi: FORWARDER_SETTLED_EVENT_ABI,
-    eventName: 'Settled',
-    logs: receipt.logs.filter((log) =>
-      isAddressEqual(log.address, forwarder),
-    ),
-    strict: true,
-  }).some(
-    ({ args }) =>
-      isAddressEqual(args.from, payer) &&
-      args.nonce === nonce &&
-      isAddressEqual(args.merchant, merchant) &&
-      args.merchantValue === merchantValue &&
-      isAddressEqual(args.feeReceiver, feeReceiver) &&
-      args.feeValue === feeValue,
+  return hasMatchingForwarderSettlement(
+    receipt.logs,
+    forwarder,
+    payer,
+    nonce,
+    { merchant, merchantValue, feeReceiver, feeValue },
   );
 }
 
