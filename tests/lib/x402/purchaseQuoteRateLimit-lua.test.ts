@@ -126,8 +126,9 @@ describe('hosted quote limiter: production Lua and KEYS/ARGV', () => {
     const call = h.calls[0];
     h.store = createFakeRedisStore();
     const walletIndex = call.keys.indexOf(walletKey(payer(1))) + 1;
-    // Execute the actual script 130 times in one engine entry. This avoids
-    // recreating wasmoon's JS callbacks for every request in this stress case.
+    // Execute the actual script 130 times in one engine entry. This batching originally
+    // avoided accumulating doString return values on the old harness's shared Lua stack.
+    // Per-EVAL factory/engine isolation now fixes that overflow; retain the stress-case batching.
     const results = await runRedisLua(
       'local limit = function() ' + call.script + ' end\n' +
       'local results = {}\n' +

@@ -550,25 +550,12 @@ function stripNulls(value: unknown): unknown {
   return value;
 }
 
-type LuaEngine = Awaited<ReturnType<LuaFactory['createEngine']>>;
-
-let enginePromise: Promise<LuaEngine> | null = null;
-// 同一エンジンのグローバル (KEYS/ARGV/redis) を共有するため、実行は直列化する。
+// 呼び出し元が並行実行しても、Redis EVAL の順序と原子性を保つ。
 let queue: Promise<unknown> = Promise.resolve();
 
-async function getEngine(): Promise<LuaEngine> {
-  // enableProxy:false が要 — 既定 (proxy) だと JS object が Lua に **userdata** として入り、
-  // script の `type(o)~='table'` ガードが全部 falsy 側に落ちる。
-  enginePromise ??= new LuaFactory().createEngine({ enableProxy: false });
-  return enginePromise;
-}
-
-/** vitest の afterAll から呼んで WASM エンジンを解放する。 */
+/** 既存の teardown hook では待機中の EVAL の完了を待つ。engine は各 EVAL が閉じる。 */
 export async function closeRedisLuaEngine(): Promise<void> {
-  if (!enginePromise) return;
-  const engine = await enginePromise;
-  enginePromise = null;
-  engine.global.close();
+  await queue;
 }
 
 /**
@@ -582,28 +569,34 @@ export function runRedisLua(
   store: FakeRedisStore,
 ): Promise<RedisLuaValue> {
   const run = queue.then(async () => {
-    const lua = await getEngine();
-    lua.global.set('KEYS', keys);
-    lua.global.set('ARGV', argv);
-    lua.global.set('redis', {
-      call: (command: string, ...args: unknown[]) =>
-        dispatchRedisCommand(store, command, args),
-      // pcall は例外を投げずに {err=...} を返す (Redis と同じ)。
-      pcall: (command: string, ...args: unknown[]) => {
-        try {
-          return dispatchRedisCommand(store, command, args);
-        } catch (e) {
-          return { err: e instanceof Error ? e.message : String(e) };
-        }
-      },
-      status_reply: (message: string) => ({ ok: message }),
-      error_reply: (message: string) => ({ err: message }),
-    });
-    lua.global.set('cjson', {
-      encode: (value: unknown) => JSON.stringify(value),
-      decode: (raw: string) => stripNulls(JSON.parse(raw)),
-    });
+    // Wasmoon 1.16 の doString は返り値を global の Lua stack に残す。同じ engine を使い続けると
+    // 蓄積した返り値が stack の範囲外書き込みを起こし、WASM heap を壊す。
+    // heap は factory が所有するため、factory と engine を EVAL ごとに隔離し、stack の蓄積や
+    // bridge/teardown の障害が後続の評価・test に波及しないようにする。
+    // enableProxy:false が要 — 既定 (proxy) だと JS object が Lua に **userdata** として入り、
+    // script の `type(o)~='table'` ガードが全部 falsy 側に落ちる。
+    const lua = await new LuaFactory().createEngine({ enableProxy: false });
     try {
+      lua.global.set('KEYS', keys);
+      lua.global.set('ARGV', argv);
+      lua.global.set('redis', {
+        call: (command: string, ...args: unknown[]) =>
+          dispatchRedisCommand(store, command, args),
+        // pcall は例外を投げずに {err=...} を返す (Redis と同じ)。
+        pcall: (command: string, ...args: unknown[]) => {
+          try {
+            return dispatchRedisCommand(store, command, args);
+          } catch (e) {
+            return { err: e instanceof Error ? e.message : String(e) };
+          }
+        },
+        status_reply: (message: string) => ({ ok: message }),
+        error_reply: (message: string) => ({ err: message }),
+      });
+      lua.global.set('cjson', {
+        encode: (value: unknown) => JSON.stringify(value),
+        decode: (raw: string) => stripNulls(JSON.parse(raw)),
+      });
       // Upstash 実測 (2026-09-08): 真の循環だけでなく、値全体で同一 table を二度参照すると
       // nil + このエラー文字列を返す (例外ではない)。ancestor stack に緩めないこと。
       // JS 変換前の Lua table identity を検査し、visited は encode 呼び出しごとに作り直す。
@@ -626,14 +619,12 @@ export function runRedisLua(
           return stringify(value)
         end
       `);
-      // script 中の top-level `return` を許すため無名関数で包む。local は関数内に閉じるので
-      // 次の実行へグローバル汚染が漏れない。
+      // script 中の top-level `return` を許すため無名関数で包む。
       const result = await lua.doString(`return (function() ${script} end)()`);
       return luaToResp(result);
     } finally {
-      // 次の呼び出しへ KEYS/ARGV を持ち越さない (undefined は push できないので空配列)。
-      lua.global.set('KEYS', []);
-      lua.global.set('ARGV', []);
+      // 成功時も setup/script の失敗時も、Lua state と JS bridge の参照を解放する。
+      lua.global.close();
     }
   });
   // 失敗しても後続の実行を止めない (queue 自体は常に解決させる)。
