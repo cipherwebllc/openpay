@@ -113,13 +113,13 @@ before a 402, verification or settlement; map these errors to an HTTP 500 respon
 Each payment retains its validated requirements through settlement. Pass
 `openpayOrigin` to use an origin other than `https://open-pay.jp`.
 
-Upgrade existing seller deployments to 0.10.0 and configure the required pins,
+Upgrade existing seller deployments to 0.10.2 and configure the required pins,
 or regenerate and redeploy your snippet from your own dashboard. Old installed
 SDKs and pasted snippets remain vulnerable until replaced; a package release does
 not update them. Register the listing, then retrieve its pinned snippet from the
 dashboard before serving payments.
 
-Before `verify()` contacts the facilitator, each gate instance claims a canonical
+Before `verify()` contacts the facilitator, each JPYC gate instance claims a canonical
 authorization identity until its `validBefore` time. Set `maxUpstreamSeconds`
 (default `60`) to the seller's worst-case upstream duration; the gate also
 retains `settlementGraceSeconds` (default `30`) and rejects a duplicate before
@@ -127,9 +127,9 @@ upstream work begins. A failed facilitator verification releases the tentative
 claim, while a successful verification keeps it through settlement so an
 unknown settlement result cannot expose the same authorization twice.
 
-The facilitator reservation is an optional additional defense. The gate forwards
+The JPYC facilitator reservation is an optional additional defense. The gate forwards
 its token when one is returned and continues on the established token-less wire
-when it is not. The local claim covers concurrent requests sharing one gate
+when it is not. The JPYC local claim covers concurrent requests sharing one gate
 instance; separate processes or serverless isolates do not share its in-memory
 ledger.
 
@@ -167,7 +167,33 @@ const gate = createDualGate({
 });
 ```
 
-`handle()` / `verify()` work exactly like `createJpycGate`, on both rails.
+`handle()` / `verify()` support the same verify → upstream → settle pattern on
+both rails. Starting in 0.10.2, USDC v1 and v2 requests share a claim keyed by the
+pinned chain and asset plus the authorization's payer and nonce. Header formatting,
+address/nonce casing, request URL and other envelope metadata do not create new
+claims. USDC authorizations are not bound to a resource, so the USDC ledger is
+shared across gate instances and endpoints in the same process. It is lost on
+restart; separate processes and serverless isolates do not coordinate. JPYC
+claims remain per gate instance.
+
+USDC rejects duplicate authorizations with `authorization_reserved` and requires
+at least `maxUpstreamSeconds + settlementGraceSeconds` remaining before relay
+verification and again before returning the upstream capability (defaults: 60 + 30
+seconds). Each call uses its gate's configured margin even though USDC claims
+are shared. Insufficient time returns `insufficient_validity_window`; an unreadable
+authorization identity or expiry returns `invalid_payment_payload`.
+
+Verify rejection or failure releases the tentative USDC claim because upstream
+work has not been authorized and verify cannot settle. After verification grants
+upstream work, the claim remains until `validBefore`, including when upstream is
+abandoned, settlement succeeds, settlement rejects (including a relay 409), or its
+outcome is unknown due to transport/JSON/503 errors. Holding after a definitive
+settle rejection is deliberate: it does not undo upstream work. Even after a
+balance top-up, that signature cannot start new work before `validBefore`; a retry
+requires a newly signed authorization with a fresh nonce. Claims do not reserve
+buyer funds: different nonces may all verify against the same balance and later
+fail to settle. This local claim does not guarantee settlement or replace
+facilitator/on-chain verification, and USDC does not use JPYC's reservation token.
 
 ### Register listings without the web form
 

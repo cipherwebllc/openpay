@@ -322,7 +322,7 @@ export interface JpycGateOptions {
   openpayOrigin?: string;
   fetchImpl?: typeof globalThis.fetch;
   now?: () => number;
-  /** Worst-case seller upstream duration protected by the local claim. Default: 60. */
+  /** Worst-case seller upstream duration; applies to both rails in createDualGate. Default: 60. */
   maxUpstreamSeconds?: number;
   /** Extra validity retained for settlement after upstream work. Default: 30. */
   settlementGraceSeconds?: number;
@@ -515,6 +515,14 @@ export interface DualGateOptions extends JpycGateOptions {
  * relayed to the CDP facilitator via OpenPay). If the USDC face cannot be fetched (relay off
  * or unavailable), the gate degrades to JPYC-only. Identity/recipient mismatches throw and log
  * before any 402 or payment call; they never trigger a rail fallback.
+ * USDC authorizations are not resource-bound: all gate instances in one process share a pinned
+ * chain/asset + payer/nonce ledger, lost on restart and not shared across processes/isolates.
+ * JPYC claims remain per instance. USDC v1/v2 require the calling gate's upstream + settlement
+ * validity margin before relay verify and before granting upstream work. Tentative verify failures
+ * release the claim; after upstream is granted, it remains until validBefore even if upstream is
+ * abandoned or settlement fails/has an unknown outcome. Holding after definitive rejection is
+ * deliberate: retrying upstream requires a fresh nonce/signature. Claims do not reserve buyer
+ * funds or guarantee settlement. USDC has no JPYC reservation token.
  */
 export function createDualGate(options: DualGateOptions): JpycGate;
 
