@@ -19,6 +19,22 @@ function receiverInput(page: Page): Locator {
   return page.getByPlaceholder(/0x\.\.\./);
 }
 
+async function hydratedStep2Toggle(page: Page): Promise<Locator> {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('openpay:qr-settings:v2', JSON.stringify({
+      receiver: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
+    }));
+  });
+  await page.goto('/ja/create');
+  const toggle = page.getByRole('button', { name: /^受取先/ });
+  // SSR は open。保存済み receiver による closed への遷移は useQrSettings の hydrate と
+  // Step 2 の初期化が完了した印。fill → inputValue の一致だけでは React の handler が
+  // 動いた証拠にならず、後から初期化や金額欄の autoFocus が toggle/focus を上書きし得る。
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false', { timeout: 15000 });
+  await expect(toggle.getByText('0x52d4…cA81')).toBeVisible();
+  return toggle;
+}
+
 test.describe('create /create (QR generator + Tip widget tab)', () => {
   test('default タブは決済 QR、QrGenerator が表示される', async ({ page }) => {
     await page.goto('/ja/create');
@@ -473,41 +489,40 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
   test('ja: Step 2 toggle は Enter / Space キーで開閉できる (a11y)', async ({
     page,
   }) => {
-    await page.goto('/ja/create');
-    const toggle = page.getByRole('button', { name: /^受取先/ });
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    // 受取先を入力 (これで初期 state は確定し、以降は手動 toggle のみ)
-    await fillStable(
-      receiverInput(page),
-      '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
-    );
-    // focus → Enter で close
+    const toggle = await hydratedStep2Toggle(page);
+    // WebKit の click は button に focus を与えるとは限らない。keyboard の開始位置だけ
+    // 明示し、以降は再 focus せず native Enter/Space と focus 維持を検証する。
     await toggle.focus();
-    await page.keyboard.press('Enter');
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    // Space で open
-    await page.keyboard.press('Space');
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    // focus は toggle 上に保持 (キーボード操作のみで完結)
-    const isFocused = await toggle.evaluate((el) => el === document.activeElement);
-    expect(isFocused).toBe(true);
+    await expect(toggle).toBeFocused();
+    // 両キーで open/close を検証。locator.press は毎回 focus し直すので使わない。
+    for (const key of ['Enter', 'Space']) {
+      await page.keyboard.press(key);
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(receiverInput(page)).toBeVisible();
+      await expect(toggle).toBeFocused();
+      await page.keyboard.press(key);
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(receiverInput(page)).toHaveCount(0);
+      await expect(toggle).toBeFocused();
+    }
   });
 
-  // ChevronDown の rotation は computed CSS で実測 (transition の race を吸収
-  // する toHaveCSS auto-retry 経由)。jsdom では style 計算が乏しいので e2e 必須。
+  // ChevronDown の rotation は computed CSS で実測。jsdom では style 計算が乏しいので e2e 必須。
   test('ja: Step 2 toggle の ChevronDown は open/close で実 CSS transform が変わる', async ({
     page,
   }) => {
-    await page.goto('/ja/create');
-    const toggle = page.getByRole('button', { name: /^受取先/ });
+    const toggle = await hydratedStep2Toggle(page);
+    // このテストは回転の終点を検証する。実行速度/WebKit の animation frame に依存する
+    // 中間 matrix を読まないよう、対象 chevron の transition だけ test-only で無効化。
+    // transform 自体と rotate-180 の本番 CSS は変更しない。
+    await page.addStyleTag({ content: `
+      button[aria-controls="step-2-body"] svg.transition-transform {
+        transition: none !important;
+      }
+    ` });
     // closed → chevron は未 rotate (matrix identity or none)
-    await fillStable(
-      receiverInput(page),
-      '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
-    );
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     const chevron = toggle.locator('svg.transition-transform');
+    await expect(chevron).toHaveCSS('transition-duration', '0s');
     // closed 状態: rotate-180 class が剥がれた状態の matrix
     await expect(chevron).toHaveCSS(
       'transform',
@@ -519,6 +534,12 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await expect(chevron).toHaveCSS(
       'transform',
       /matrix\(\s*-1,\s*[\d.eE+-]+,\s*[\d.eE+-]+,\s*-1,\s*0,\s*0\s*\)/,
+    );
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(chevron).toHaveCSS(
+      'transform',
+      /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/,
     );
   });
 
