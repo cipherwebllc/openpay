@@ -1730,6 +1730,10 @@ opt-in (既定 OFF)。詳細は plans/a2hs-retention-roadmap.md Phase 2・memory
 - 送信/購読/設定の障害は logger 経由で Sentry へ:
   - `push.send_failed` (endpoint 個別の送信失敗・endpoint は hash のみ)・`push.notify_failed`
     (トリガ処理の例外)・`push.vapid_misconfigured` (鍵/subject 未設定で送信 skip)。
+  - `push.send_blocked_endpoint` (許可外の保存済 endpoint を送信せず skip)。旧イベント名
+    `push.send_blocked_private_endpoint` を条件にする外部ダッシュボード/アラートは、新名へ更新する。
+    Sentry への大量送信を避けるためプロセスごとに 1 回だけ記録し、endpoint/hash は含めない。
+    このイベントの件数から、拒否した購読数や個別レコードは特定できない。
   - 補助: `push.subscriptions_read_failed` / `push.notify_*` (pending/coalesce の KV 障害)。
 - 点灯直後は実 payment を 1 件流し、店主端末で通知が届くこと + 上記イベントが無出力なことを目視。
 - **push 失敗は決済/受注を rollback しない** (契約)。通知が届かなくても着金・受注は成立する。

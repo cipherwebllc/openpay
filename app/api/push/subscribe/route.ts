@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { env } from '@/lib/env';
-import { isPrivateHost } from '@/lib/net/privateHost';
+import { isAllowedPushEndpoint } from '@/lib/push/endpoints';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { clientIp } from '@/lib/net/ipHash';
 import { MAX_BODY_BYTES, anonymizeIp } from '@/lib/relay/relayRoute';
@@ -179,7 +179,7 @@ function parseEndpointLoose(raw: unknown): string | null {
 function parseEndpointStrict(raw: unknown): string | null {
   const endpoint = parseEndpointLoose(raw);
   if (!endpoint) return null;
-  return isPrivateHost(new URL(endpoint).hostname) ? null : endpoint;
+  return isAllowedPushEndpoint(new URL(endpoint)) ? endpoint : null;
 }
 
 function parseBase64UrlKey(raw: unknown): string | null {

@@ -187,6 +187,25 @@ describe('lib/x402/registry parseResourceInput', () => {
     }
   });
 
+  it.each([
+    'https://192.0.0.1/paid', 'https://198.18.0.1/paid', 'https://192.0.2.1/paid',
+    'https://224.0.0.1/paid', 'https://240.0.0.1/paid',
+    'https://[::ffff:198.18.0.1]/paid', 'https://[64:ff9b::a9fe:a9fe]/paid',
+    'https://[2002:7f00:1::]/paid', 'https://[fec0::1]/paid', 'https://[2001:db8::1]/paid',
+  ])('rejects special-purpose resource URLs: %s', (url) => {
+    expect(parseResourceInput(
+      { url, description: 'd', priceJpyc: '100', category: 'api' }, OWNER,
+    )).toEqual({ ok: false, reason: 'invalid_url' });
+  });
+
+  it.each(['https://8.8.8.8/paid', 'https://[2606:4700::1111]/paid', 'https://[::ffff:8.8.8.8]/paid'])(
+    'keeps public resource URLs valid: %s', (url) => {
+      expect(parseResourceInput(
+        { url, description: 'd', priceJpyc: '100', category: 'api' }, OWNER,
+      ).ok).toBe(true);
+    },
+  );
+
   it('valid (payTo 指定 → checksum)', () => {
     const pt = '0x2222222222222222222222222222222222222222';
     const r = parseResourceInput(
