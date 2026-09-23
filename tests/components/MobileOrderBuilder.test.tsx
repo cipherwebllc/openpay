@@ -68,6 +68,12 @@ beforeEach(() => {
 });
 
 describe('MobileOrderBuilder', () => {
+  it('D3: menu toggle accessible name contains the visible item count', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    const toggle = screen.getByRole('button', { name: /登録中のメニュー/ });
+    expect(toggle).toHaveAccessibleName(new RegExp(toggle.querySelector('span:not(.sr-only)')!.textContent!));
+  });
+
   it('flag OFF では何も描画しない', () => {
     h.enableMobileOrder = false;
     const { container } = renderWithIntl(<MobileOrderBuilder />);
@@ -82,7 +88,7 @@ describe('MobileOrderBuilder', () => {
       screen.getByText('メニューは「レジ」タブの有効な JPYC 商品です（画像・税率も共有）。'),
     ).toBeInTheDocument();
     // メニュー一覧は折りたたみ → トグルを開いて商品名 (seed: コーヒー) を確認。
-    fireEvent.click(screen.getByRole('button', { name: '登録中のメニュー' }));
+    fireEvent.click(screen.getByRole('button', { name: /登録中のメニュー/ }));
     expect(screen.getAllByText('コーヒー').length).toBeGreaterThanOrEqual(1);
     // 共有は @handle 公開のみ。長い ?s= 注文 URL は出さず、プレビューは実際の店舗ページ (WYSIWYG)。
     expect(screen.queryByText(/\/order\?s=/)).toBeNull();
@@ -187,7 +193,7 @@ describe('MobileOrderBuilder', () => {
 
   it('③メニュー一覧は既定で折りたたみ、トグルで開閉できる (レジ管理・長くなる対策)', () => {
     renderWithIntl(<MobileOrderBuilder />);
-    const toggle = screen.getByRole('button', { name: '登録中のメニュー' });
+    const toggle = screen.getByRole('button', { name: /登録中のメニュー/ });
     expect(toggle).toHaveAttribute('aria-expanded', 'false'); // 既定は閉
     // 一覧の「価格 JPYC」行は閉じている間は出ない (プレビューは価格のみで "JPYC" を付けない)。
     expect(screen.queryByText(/ JPYC$/)).toBeNull();

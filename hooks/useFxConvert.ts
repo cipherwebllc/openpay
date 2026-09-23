@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import {
   counterpartSymbol,
@@ -69,6 +69,8 @@ function writeFxLkg(rate: number, ts: number): void {
 // レート急変警告の表示状態 (LKG と新レートの両方を保持し ConvertPanel に両方を見せる)。
 export type FxRateWarning = { lkgRate: number; newRate: number };
 
+type Selection = Pick<QrSettings, 'token' | 'chain' | 'payMode'>;
+
 export function useFxConvert(params: {
   settings: QrSettings; // reads settings.token / settings.chain / settings.payMode
   amount: string;
@@ -76,6 +78,9 @@ export function useFxConvert(params: {
   setSettings: Dispatch<SetStateAction<QrSettings>>;
   setAmount: Dispatch<SetStateAction<string>>;
 }): {
+  settings: QrSettings;
+  setSettings: Dispatch<SetStateAction<QrSettings>>;
+  clearSelection: () => void;
   convert: ConvertState | null;
   convertRemaining: number;
   convertExpired: boolean;
@@ -86,7 +91,34 @@ export function useFxConvert(params: {
   fxWarning: FxRateWarning | null;
   acknowledgeFxWarning: () => void;
 } {
-  const { settings, amount, marketRates, setSettings, setAmount } = params;
+  const { settings: savedSettings, amount, marketRates, setSettings: saveSettings, setAmount } = params;
+  // Converted selections remain local even if an amount edit removes the FX metadata.
+  // Other merchant preferences still save normally; register/reload see the saved selection.
+  const [selection, setSelection] = useState<Selection | null>(null);
+  const settings = useMemo(
+    () => selection ? { ...savedSettings, ...selection } : savedSettings,
+    [savedSettings, selection],
+  );
+  // Keep the public setter stable and advance its snapshot synchronously: multiple
+  // functional updates in one event must compose before React renders the next state.
+  const pendingRef = useRef({ savedSettings, settings, selection });
+  pendingRef.current = { savedSettings, settings, selection };
+  const setSettings = useCallback<Dispatch<SetStateAction<QrSettings>>>((update) => {
+    const current = pendingRef.current;
+    const next = typeof update === 'function' ? update(current.settings) : update;
+    const nextSelection = current.selection
+      ? { token: next.token, chain: next.chain, payMode: next.payMode }
+      : null;
+    const nextSaved = nextSelection ? {
+      ...next,
+      token: current.savedSettings.token,
+      chain: current.savedSettings.chain,
+      payMode: current.savedSettings.payMode,
+    } : next;
+    pendingRef.current = { savedSettings: nextSaved, settings: next, selection: nextSelection };
+    if (current.selection) setSelection(nextSelection);
+    saveSettings(nextSaved);
+  }, [saveSettings]);
 
   // convert 適用状態 (null = 通常 QR)。
   const [convert, setConvert] = useState<ConvertState | null>(null);
@@ -161,15 +193,14 @@ export function useFxConvert(params: {
       fxRate: String(marketRates.usdcJpy),
       expiresAt: Math.floor(Date.now() / 1000) + QR_EXPIRY_SECONDS,
     });
-    setSettings((s) => ({
-      ...s,
+    setSelection({
       token: target,
       chain: targetChain,
       // 換算先が gasless 非対応 chain なら standard に倒す (URL parser reject 回避)。
-      payMode: isGaslessSupported(dep) ? s.payMode : 'standard',
-    }));
+      payMode: isGaslessSupported(dep) ? settings.payMode : 'standard',
+    });
     setAmount(res.amount);
-  }, [marketRates, settings, amount, setSettings, setAmount]);
+  }, [marketRates, settings, amount, setAmount]);
 
   // 同じ anchor 価格を最新レートで再換算し、画面上の目安を 3 分リセット (token は据え置き)。
   const recalcConvert = useCallback(() => {
@@ -195,18 +226,24 @@ export function useFxConvert(params: {
     if (!convert) return;
     const { anchorAmount, anchorSymbol, anchorChain, anchorPayMode } = convert;
     setConvert(null);
-    setSettings((s) => ({
-      ...s,
-      token: anchorSymbol,
-      chain: anchorChain,
-      payMode: anchorPayMode,
-    }));
+    setSelection(
+      savedSettings.token === anchorSymbol && savedSettings.chain === anchorChain && savedSettings.payMode === anchorPayMode
+        ? null
+        : { token: anchorSymbol, chain: anchorChain, payMode: anchorPayMode },
+    );
     setAmount(anchorAmount);
-  }, [convert, setSettings, setAmount]);
+  }, [convert, savedSettings, setAmount]);
 
   const resetConvert = useCallback(() => setConvert(null), []);
+  const clearSelection = useCallback(() => {
+    setConvert(null);
+    setSelection(null);
+  }, []);
 
   return {
+    settings,
+    setSettings,
+    clearSelection,
     convert,
     convertRemaining,
     convertExpired,

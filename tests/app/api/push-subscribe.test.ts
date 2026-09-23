@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextResponse } from 'next/server';
+import { createHash } from 'node:crypto';
 
 const SESSION_ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 
@@ -12,6 +13,7 @@ const hold = vi.hoisted(() => ({
   rateAllowed: true,
   upsertOk: true,
   removeOk: true,
+  listOk: true,
 }));
 
 vi.mock('@/lib/env', () => ({
@@ -54,8 +56,17 @@ vi.mock('@/lib/relay/relayGuards', () => ({
 const storeSpy = vi.hoisted(() => ({
   upsert: vi.fn(),
   remove: vi.fn(),
+  list: vi.fn(),
 }));
 vi.mock('@/lib/push/store', () => ({
+  listPushSubscriptions: (...args: unknown[]) => {
+    storeSpy.list(...args);
+    return Promise.resolve(hold.listOk ? { ok: true, value: [{
+      endpoint: 'https://fcm.googleapis.com/sub/1', includeAmount: true,
+      endpointHash: createHash('sha256').update('https://fcm.googleapis.com/sub/1').digest('hex'),
+      keys: { p256dh: 'secret', auth: 'secret' },
+    }] } : { ok: false, reason: 'kv_error' });
+  },
   upsertPushSubscription: (...args: unknown[]) => {
     storeSpy.upsert(...args);
     return Promise.resolve(
@@ -72,6 +83,7 @@ vi.mock('@/lib/push/store', () => ({
   },
 }));
 
+import * as subscribeRoute from '@/app/api/push/subscribe/route';
 import { DELETE, POST } from '@/app/api/push/subscribe/route';
 
 const subscription = {
@@ -100,6 +112,8 @@ beforeEach(() => {
   hold.rateAllowed = true;
   hold.upsertOk = true;
   hold.removeOk = true;
+  hold.listOk = true;
+  storeSpy.list.mockClear();
   requireSessionSpy.mockClear();
   rateSpy.mockClear();
   storeSpy.upsert.mockClear();
@@ -271,5 +285,44 @@ describe('/api/push/subscribe', () => {
 
     expect(res.status).toBe(200);
     expect(storeSpy.remove).toHaveBeenCalledWith(SESSION_ADDR, { endpoint });
+  });
+});
+
+describe('D6: GET /api/push/subscribe', () => {
+  // Optional lookup lets the pre-fix suite fail at an assertion rather than module import.
+  async function get(hash = createHash('sha256').update(subscription.endpoint).digest('hex')) {
+    const handler = (subscribeRoute as unknown as { GET?: (req: Request) => Promise<Response> }).GET;
+    expect(handler).toBeTypeOf('function');
+    return handler!(new Request(`http://localhost/api/push/subscribe?endpointHash=${hash}`));
+  }
+
+  it('returns only this device status/preferences without endpoints or push keys', async () => {
+    const res = await get();
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toContain('no-store');
+    expect(await res.json()).toEqual({ subscribed: true, includeAmount: true });
+    expect(storeSpy.list).toHaveBeenCalledWith(SESSION_ADDR);
+  });
+
+  it('another device is not reported as this device subscription', async () => {
+    const res = await get('a'.repeat(64));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ subscribed: false, includeAmount: false });
+  });
+
+  it.each(['', 'not-a-hash', 'a'.repeat(63), 'a'.repeat(65)])('invalid endpoint hash %s is rejected before reading subscriptions', async (hash) => {
+    const res = await get(hash);
+    expect(res.status).toBe(400);
+    expect(storeSpy.list).not.toHaveBeenCalled();
+  });
+
+  it.each(['signed-out', 'disabled', 'limited', 'storage-down'])('%s cannot report a successful subscription lookup', async (mode) => {
+    if (mode === 'signed-out') hold.session = { ok: false, response: null };
+    if (mode === 'disabled') hold.enablePushNotify = false;
+    if (mode === 'limited') hold.rateAllowed = false;
+    if (mode === 'storage-down') hold.listOk = false;
+    const res = await get();
+    expect(res.status).toBe({ 'signed-out': 401, disabled: 404, limited: 429, 'storage-down': 503 }[mode]);
+    if (mode !== 'storage-down') expect(storeSpy.list).not.toHaveBeenCalled();
   });
 });

@@ -557,7 +557,6 @@ function RegisterModeContent({
                     key={p.id}
                     type="button"
                     onClick={() => (hasPresetOptions(p) ? setOptionModalPreset(p) : addFromPreset(p))}
-                    aria-label={inCart ? t('presetInCart', { name: p.name, count: qty }) : p.name}
                     className={`relative flex min-h-[76px] flex-col justify-center rounded-xl border bg-white px-3 py-3 text-left shadow-card transition hover:-translate-y-0.5 hover:border-brand hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] active:bg-brand/5 ${categoryColors ? `border-l-4 ${categoryColors.border}` : ''} ${
                       inCart
                         ? 'border-brand ring-2 ring-brand/15'
@@ -608,6 +607,7 @@ function RegisterModeContent({
                       {deploymentForSlug(p.token, DEFAULT_CHAIN_FOR_SYMBOL[p.token])
                         .displaySymbol}
                     </div>
+                    {inCart && <span className="sr-only">{t('presetInCart', { count: qty })}</span>}
                   </button>
                 );
               })}

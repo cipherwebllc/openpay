@@ -2349,6 +2349,37 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
     });
   });
 
+  it('D7: FX conversion does not persist token, chain or payMode across remount', async () => {
+    const user = userEvent.setup();
+    const view = render(<QrGenerator />);
+    await user.type(await screen.findByPlaceholderText('1000'), '1000');
+    const anchor = JSON.parse(localStorage.getItem('openpay:qr-settings:v2')!);
+    await user.click(screen.getByRole('button', { name: /USDC 建てで受取る/ }));
+    expect(await screen.findByPlaceholderText('10.00')).toHaveValue('6.666667');
+    expect(JSON.parse(localStorage.getItem('openpay:qr-settings:v2')!)).toMatchObject({
+      token: anchor.token, chain: anchor.chain, payMode: anchor.payMode,
+    });
+    view.unmount();
+    render(<QrGenerator />);
+    expect(await screen.findByPlaceholderText('1000')).toHaveValue('');
+    expect(screen.queryByRole('button', { name: /元の JPYC 建てに戻す/ })).toBeNull();
+  });
+
+  it('D7: editing a converted amount keeps the temporary token without saving it', async () => {
+    const user = userEvent.setup();
+    const view = render(<QrGenerator />);
+    await user.type(await screen.findByPlaceholderText('1000'), '1000');
+    await user.click(screen.getByRole('button', { name: /USDC 建てで受取る/ }));
+    const input = await screen.findByPlaceholderText('10.00');
+    await user.clear(input);
+    await user.type(input, '5');
+    expect(screen.getByPlaceholderText('10.00')).toHaveValue('5');
+    expect(JSON.parse(localStorage.getItem('openpay:qr-settings:v2')!).token).toBe('jpyc');
+    view.unmount();
+    render(<QrGenerator />);
+    expect(await screen.findByPlaceholderText('1000')).toHaveValue('');
+  });
+
   it('JPYC + 金額入力で convert ボタンが出る (金額未入力では出ない)', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);

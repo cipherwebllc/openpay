@@ -287,15 +287,15 @@ export function QrPreviewModal({
               </p>
             )}
             {/* 着金検知ヒント (任意・advisory)。watching=監視中 (淡い slate + 脈打つドット)、
-                received=検知 (emerald + ✓)。印刷ポスターには出さない。prop 省略時は非描画。 */}
+                received=残高増加の観測 (slate + Eye)。決済成功の意匠を避け、印刷時と prop 省略時は非描画。 */}
             {paymentStatus &&
               (paymentStatus.state === 'received' ? (
                 <p
                   role="status"
                   aria-live="polite"
-                  className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-600 print:hidden"
+                  className="mt-3 inline-flex items-center gap-1.5 text-sm text-slate-600 print:hidden"
                 >
-                  <CircleCheck className="h-4 w-4 flex-none" aria-hidden />
+                  <Eye className="h-4 w-4 flex-none" aria-hidden />
                   {paymentStatus.text}
                 </p>
               ) : (

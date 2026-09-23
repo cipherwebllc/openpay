@@ -213,6 +213,11 @@ beforeEach(() => {
 });
 
 describe('@handle ProfilePage JSON-LD', () => {
+  it('D3: footer link is named by its visible poweredBy text', async () => {
+    const view = await renderHandlePage(record());
+    expect(view.getByText('poweredBy').closest('a')).toHaveAccessibleName('poweredBy');
+  });
+
   it('ProfilePage.mainEntity=Person と公開プロフィール項目を一致させ、sameAs に一般リンクを混ぜない', async () => {
     const pageRecord = record();
     const { container } = await renderHandlePage(pageRecord, {

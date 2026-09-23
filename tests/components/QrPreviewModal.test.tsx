@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createRef } from 'react';
 import { QrPreviewModal } from '@/components/QrPreviewModal';
+import ja from '@/messages/ja.json';
 
 const LABELS = {
   title: '決済用 QR コード',
@@ -151,8 +152,8 @@ describe('QrPreviewModal', () => {
 
   it('paymentStatus 省略時は着金ヒントを描画しない (既存呼び出し元は無影響)', () => {
     renderModal();
-    expect(screen.queryByText(/着金を監視中/)).toBeNull();
-    expect(screen.queryByText(/着金を確認しました/)).toBeNull();
+    expect(screen.queryByText(/残高を監視中/)).toBeNull();
+    expect(screen.queryByText(/残高の増加を検知/)).toBeNull();
     // status role の line も無い
     expect(screen.queryByRole('status')).toBeNull();
   });
@@ -161,22 +162,25 @@ describe('QrPreviewModal', () => {
     renderModal({
       paymentStatus: {
         state: 'watching',
-        text: '着金を監視中…（この画面で確認できます）',
+        text: ja.QrGenerator.paymentWatching,
       },
     });
     const status = screen.getByRole('status');
-    expect(status).toHaveTextContent('着金を監視中…（この画面で確認できます）');
+    expect(status).toHaveTextContent(ja.QrGenerator.paymentWatching);
   });
 
-  it('paymentStatus=received で着金確認テキストを status として描画', () => {
+  it('paymentStatus=received は決済成功でなく中立な残高ヒントとして描画', () => {
     renderModal({
       paymentStatus: {
         state: 'received',
-        text: '着金を確認しました ✓（+1000 JPYC 受信）',
+        text: ja.QrGenerator.paymentReceived.replace('{amount}', '1000 JPYC'),
       },
     });
     const status = screen.getByRole('status');
-    expect(status).toHaveTextContent('着金を確認しました ✓（+1000 JPYC 受信）');
+    expect(status).toHaveTextContent(ja.QrGenerator.paymentReceived.replace('{amount}', '1000 JPYC'));
+    expect(status).toHaveClass('text-slate-600');
+    expect(status).not.toHaveClass('text-emerald-600', 'font-semibold');
+    expect(status.querySelector('.lucide-circle-check')).toBeNull();
   });
 
   const ASSET_LABELS = {

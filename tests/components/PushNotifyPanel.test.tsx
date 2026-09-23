@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, screen, fireEvent, waitFor } from '@testing-library/react';
+import { createHash } from 'node:crypto';
 import { renderWithIntl } from '../_helpers/i18n';
 
 // env / SIWE / PWA display mode / platform を hoisted な可変ホルダで mock し、各 test で
@@ -8,6 +9,7 @@ import { renderWithIntl } from '../_helpers/i18n';
 const h = vi.hoisted(() => ({
   enablePushNotify: true,
   pushVapidPublicKey: 'BPublicKeyBase64Url',
+  sessionAddress: '0x1111111111111111111111111111111111111111',
   isSignedIn: true,
   isConnected: true,
   signIn: undefined as ReturnType<typeof vi.fn> | undefined,
@@ -29,6 +31,7 @@ vi.mock('@/lib/env', () => ({
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({
     isSignedIn: h.isSignedIn,
+    sessionAddress: h.sessionAddress,
     signIn: h.signIn,
     isSigningIn: false,
   }),
@@ -94,7 +97,10 @@ function installBrowserPush({
     permission,
     requestPermission: requestPermissionFn,
   };
-  fetchFn = vi.fn().mockResolvedValue({ ok: true });
+  fetchFn = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ subscribed: existingSub, includeAmount: false }),
+  });
   global.fetch = fetchFn as unknown as typeof fetch;
 }
 
@@ -102,6 +108,7 @@ beforeEach(() => {
   h.enablePushNotify = true;
   h.pushVapidPublicKey = 'BPublicKeyBase64Url';
   h.isSignedIn = true;
+  h.sessionAddress = '0x1111111111111111111111111111111111111111';
   h.isConnected = true;
   h.signIn = vi.fn().mockResolvedValue(undefined);
   h.isStandalone = false;
@@ -202,9 +209,10 @@ describe('PushNotifyPanel', () => {
   it('金額 opt-in チェックで includeAmount:true を送る (購読済みは再 POST)', async () => {
     installBrowserPush({ existingSub: true });
     renderWithIntl(<PushNotifyPanel />);
-    // 既存購読ありなので「有効」状態から始まる。
+    // ブラウザとサーバの両方に購読がある。
     expect(await screen.findByText('通知は有効です')).toBeInTheDocument();
 
+    fetchFn.mockClear();
     const checkbox = screen.getByRole('checkbox');
     fireEvent.click(checkbox);
 
@@ -218,11 +226,12 @@ describe('PushNotifyPanel', () => {
     installBrowserPush({ existingSub: true });
     fetchFn.mockResolvedValue({
       ok: true,
-      json: async () => ({ ok: true, attempted: 1, sent: 1 }),
+      json: async () => ({ subscribed: true, includeAmount: false, ok: true, attempted: 1, sent: 1 }),
     });
     renderWithIntl(<PushNotifyPanel />);
     expect(await screen.findByText('通知は有効です')).toBeInTheDocument();
 
+    fetchFn.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'テスト通知を送る' }));
     await waitFor(() =>
       expect(screen.getByText(/テスト通知を送りました/)).toBeInTheDocument(),
@@ -234,16 +243,90 @@ describe('PushNotifyPanel', () => {
 
   it('テスト通知が rate limit (429) → 失敗文言 (再試行誘導)', async () => {
     installBrowserPush({ existingSub: true });
-    fetchFn.mockResolvedValue({
-      ok: false,
-      json: async () => ({ ok: false, error: 'rate_limited' }),
-    });
+
     renderWithIntl(<PushNotifyPanel />);
     expect(await screen.findByText('通知は有効です')).toBeInTheDocument();
 
+    fetchFn.mockResolvedValue({ ok: false, json: async () => ({ error: 'rate_limited' }) });
     fireEvent.click(screen.getByRole('button', { name: 'テスト通知を送る' }));
     await waitFor(() =>
       expect(screen.getByText(/テスト通知を送れませんでした/)).toBeInTheDocument(),
     );
   });
+});
+
+describe('D6: wallet-scoped push truth', () => {
+  it('a browser subscription for A does not enable notifications for B', async () => {
+    installBrowserPush({ existingSub: true });
+    const view = renderWithIntl(<PushNotifyPanel />);
+    expect(await screen.findByText('通知は有効です')).toBeInTheDocument();
+    fetchFn.mockResolvedValue({ ok: true, json: async () => ({ subscribed: false, includeAmount: false }) });
+    h.sessionAddress = '0x2222222222222222222222222222222222222222';
+    await act(async () => view.rerender(<PushNotifyPanel />));
+    expect(screen.queryByText('通知は有効です')).toBeNull();
+    expect(screen.getByRole('button', { name: '通知を有効にする' })).toBeInTheDocument();
+  });
+
+  it.each([401, 503])('DELETE %i reports failure and keeps the subscription retryable', async (status) => {
+    installBrowserPush({ existingSub: true });
+    renderWithIntl(<PushNotifyPanel />);
+    await screen.findByText('通知は有効です');
+    fetchFn.mockResolvedValue({ ok: false, status });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '通知を無効にする' })));
+    expect(screen.getByText('通知の設定に失敗しました。しばらくしてからもう一度お試しください。')).toBeInTheDocument();
+    expect(screen.getByText('通知は有効です')).toBeInTheDocument();
+    expect(unsubscribeFn).not.toHaveBeenCalled();
+  });
+
+  it('failed server status lookup does not claim the browser subscription is enabled', async () => {
+    installBrowserPush({ existingSub: true });
+    fetchFn.mockResolvedValue({ ok: false, status: 503 });
+    await act(async () => renderWithIntl(<PushNotifyPanel />));
+    expect(screen.queryByText('通知は有効です')).toBeNull();
+    expect(screen.getByText('通知の設定に失敗しました。しばらくしてからもう一度お試しください。')).toBeInTheDocument();
+  });
+
+  it('late status response for A cannot enable B', async () => {
+    installBrowserPush({ existingSub: true });
+    let resolve!: (value: unknown) => void;
+    fetchFn.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
+    const view = renderWithIntl(<PushNotifyPanel />);
+    await waitFor(() => expect(fetchFn).toHaveBeenCalled());
+    fetchFn.mockResolvedValue({ ok: true, json: async () => ({ subscribed: false, includeAmount: false }) });
+    h.sessionAddress = '0x2222222222222222222222222222222222222222';
+    await act(async () => view.rerender(<PushNotifyPanel />));
+    await act(async () => resolve({ ok: true, json: async () => ({ subscribed: true, includeAmount: false }) }));
+    expect(screen.queryByText('通知は有効です')).toBeNull();
+  });
+});
+
+it('D6: disables the server endpoint even if the browser subscription has disappeared', async () => {
+  installBrowserPush({ existingSub: true });
+  renderWithIntl(<PushNotifyPanel />);
+  await screen.findByText('通知は有効です');
+  getSubscriptionFn.mockResolvedValue(null);
+  fetchFn.mockClear();
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '通知を無効にする' })));
+  expect(fetchFn).toHaveBeenCalledWith('/api/push/subscribe', expect.objectContaining({
+    method: 'DELETE', body: JSON.stringify({ endpoint: 'https://push.example/sub/xyz' }),
+  }));
+  expect(screen.queryByText('通知は有効です')).toBeNull();
+});
+
+it('D6: server deletion remains reflected when browser unsubscribe rejects', async () => {
+  installBrowserPush({ existingSub: true });
+  renderWithIntl(<PushNotifyPanel />);
+  await screen.findByText('通知は有効です');
+  unsubscribeFn.mockRejectedValue(new Error('browser failure'));
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: '通知を無効にする' })));
+  expect(screen.queryByText('通知は有効です')).toBeNull();
+  expect(screen.getByText('通知の設定に失敗しました。しばらくしてからもう一度お試しください。')).toBeInTheDocument();
+});
+
+it('D6 review: reads only this endpoint status without putting the endpoint URL in the request URL', async () => {
+  installBrowserPush({ existingSub: true });
+  renderWithIntl(<PushNotifyPanel />);
+  await waitFor(() => expect(fetchFn).toHaveBeenCalled());
+  const hash = createHash('sha256').update('https://push.example/sub/xyz').digest('hex');
+  expect(fetchFn).toHaveBeenCalledWith(`/api/push/subscribe?endpointHash=${hash}`, { cache: 'no-store' });
 });

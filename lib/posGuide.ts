@@ -177,13 +177,13 @@ const ja: GuideContent = {
     {
       n: 4,
       title: '着金を確認してからレジを締める',
-      body: 'QR画面に「着金を確認しました ✓」が出たら、商品をお渡し・レジを締めます。これは目安表示のため、確実を期すときは取引履歴やブロックチェーン Explorer でもご確認を。',
+      body: 'QR画面の「残高の増加を検知」は、この支払いを特定するものではありません。取引履歴やブロックチェーン Explorer で該当する支払いを確認してから、商品をお渡し・レジを締めます。',
     },
   ],
   flowImage: { file: 'four-steps.svg', alt: '会計→QR表示→スキャン→完了確認 の4ステップ' },
   successImage: { file: 'payment-success.svg', alt: 'お客様のスマホに表示される支払い完了画面' },
   successCaption:
-    '※お客様側の完了画面の例です。店舗側はQR画面に「着金を確認しました ✓」が出ます。',
+    '※お客様側の完了画面の例です。店舗側の「残高の増加を検知」は目安です。該当する支払いは取引履歴で確認してください。',
   safetyNote:
     '重要：着金を確認する前に商品を渡さないでください。逆に、一度完了した決済は取り消せません（直接あなたのウォレットに着金済みです）。',
 
@@ -334,13 +334,13 @@ const en: GuideContent = {
     {
       n: 4,
       title: 'Confirm the payment, then close',
-      body: 'When “Payment received ✓” appears, hand over the goods and close the sale. It is an approximate hint — for certainty, also check your history or a blockchain explorer.',
+      body: 'The QR screen’s “Balance increase detected” hint does not identify this payment. Verify the relevant payment in transaction history or a blockchain explorer before handing over goods and closing the sale.',
     },
   ],
   flowImage: { file: 'four-steps.svg', alt: 'Four steps: ring up → show QR → scan → confirm' },
   successImage: { file: 'payment-success.svg', alt: 'The payment-complete screen shown on the customer’s phone' },
   successCaption:
-    '* Example of the customer’s completion screen. Your side shows “Payment received ✓” on the QR screen.',
+    '* Example of the customer’s completion screen. The merchant’s “Balance increase detected” hint is advisory. Verify the relevant payment in transaction history.',
   safetyNote:
     'Important: do not hand over goods before confirming receipt. Conversely, a completed payment cannot be reversed (it has settled directly to your wallet).',
 

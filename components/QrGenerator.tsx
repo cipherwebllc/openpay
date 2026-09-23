@@ -134,7 +134,7 @@ function downloadPng(filename: string, ref: React.RefObject<HTMLDivElement | nul
 }
 
 export function QrGenerator() {
-  const { settings, setSettings, hydrated } = useQrSettings();
+  const { settings: savedSettings, setSettings: saveSettings, hydrated } = useQrSettings();
   const [mode, setMode] = useState<Mode>('amount');
   const [amount, setAmount] = useState('');
   const origin = useOrigin();
@@ -170,8 +170,11 @@ export function QrGenerator() {
   // 「他トークン建てで受け取る」用の為替レート (USDC→JPY)。convert 押下時に参照。
   const { data: marketRates } = useMarketRates();
   // FX 換算 (他トークン建て受取・画面上の期限目安付き) の状態とハンドラ。convert / カウントダウン /
-  // applyConvert・recalcConvert・revertConvert を hook 内に保持する (挙動は従来と同一)。
+  // applyConvert・recalcConvert・revertConvert と一時的な通貨選択を hook 内に保持し、保存設定と分離する。
   const {
+    settings,
+    setSettings,
+    clearSelection,
     convert,
     convertRemaining,
     convertExpired,
@@ -182,10 +185,10 @@ export function QrGenerator() {
     fxWarning,
     acknowledgeFxWarning,
   } = useFxConvert({
-    settings,
+    settings: savedSettings,
     amount,
     marketRates: marketRates ?? null,
-    setSettings,
+    setSettings: saveSettings,
     setAmount,
   });
 
@@ -511,13 +514,13 @@ export function QrGenerator() {
 
   function selectToken(tok: TokenSymbol) {
     // token を手動切替したら convert (FX 換算ロック) は解除して通常 QR に戻す。
-    resetConvert();
+    clearSelection();
     // token を切り替えると chain も既定 (USDC→base, JPYC→polygon) にリセット。
     // jpyc は polygon 固定なので、互換性のため reset 必須。usdc は default に
     // 戻すことで、ユーザの直前の chain 選択 (例: arbitrum) を意図せず引き継がない。
     // 離れる token の (chain, payMode) は tokenPrefs に記憶する (レジの暗黙切替が復元に使う)。
     // このタブの切替自体は従来どおり既定チェーンへ戻す。
-    setSettings((s) => ({
+    saveSettings((s) => ({
       ...s,
       token: tok,
       chain: DEFAULT_CHAIN_FOR_SYMBOL[tok],
