@@ -50,7 +50,9 @@ const JPYC_ACCEPT = {
   description: 'paid report',
   payTo: '0x2222222222222222222222222222222222222222',
   asset: '0x1111111111111111111111111111111111111111',
-  extra: { name: 'JPY Coin', version: '1' },
+  extra: { name: 'JPY Coin', version: '1', openpay: { mode: 'forwarder-split',
+    forwarder: '0x2222222222222222222222222222222222222222',
+    merchant: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' } },
 };
 
 const USDC_FACE = {
@@ -64,9 +66,13 @@ const USDC_FACE = {
     asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
     extra: { name: 'USD Coin', version: '2' },
   },
-  v2Accept: { scheme: 'exact', network: 'eip155:8453', amount: '1000' },
-  paymentRequiredHeader: b64({ x402Version: 2 }),
+  v2Accept: { scheme: 'exact', network: 'eip155:8453', amount: '1000',
+    payTo: '0x3333333333333333333333333333333333333333',
+    asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' },
+  paymentRequiredHeader: '',
 };
+
+USDC_FACE.paymentRequiredHeader = b64({ x402Version: 2, accepts: [USDC_FACE.v2Accept] });
 
 type Routes = {
   requirements?: () => Response;
@@ -84,7 +90,7 @@ function routingFetch(routes: Routes) {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ url: u, body });
     if (u.startsWith(`${OPENPAY_ORIGIN}/api/discovery`)) {
-      return jsonResponse({ items: [{ resource: RESOURCE, accepts: [JPYC_ACCEPT] }] });
+      return jsonResponse({ id: RESOURCE_ID, resource: RESOURCE, accepts: [JPYC_ACCEPT] });
     }
     if (u.startsWith(`${OPENPAY_ORIGIN}/api/x402/relay/requirements`)) {
       return routes.requirements?.() ?? jsonResponse(USDC_FACE);
@@ -112,6 +118,8 @@ async function makeGate(routes: Routes = {}) {
   const gate = sdk.createDualGate({
     resourceUrl: RESOURCE,
     resourceId: RESOURCE_ID,
+    expectedRecipient: JPYC_ACCEPT.extra.openpay.merchant,
+    expectedUsdcRecipient: USDC_FACE.v1Accepts.payTo,
     openpayOrigin: OPENPAY_ORIGIN,
     fetchImpl,
   });
@@ -169,7 +177,7 @@ describe('createDualGate', () => {
     );
     expect(settlement).toMatchObject({ success: true, transaction: '0xtx' });
     const verifyCall = calls.find((c) => c.url.endsWith('/relay/verify'));
-    expect(verifyCall?.body).toEqual({ resourceId: RESOURCE_ID, paymentSignatureHeader: sig });
+    expect(verifyCall?.body).toEqual({ resourceId: RESOURCE_ID, paymentRequirements: USDC_FACE.v1Accepts, paymentSignatureHeader: sig });
     expect(calls.some((c) => c.url.endsWith('/relay/settle'))).toBe(true);
     expect(calls.some((c) => c.url.includes('/api/facilitator/'))).toBe(false);
   });
@@ -187,7 +195,7 @@ describe('createDualGate', () => {
     expect(body.error).toBe('insufficient_funds');
     expect(body.accepts).toHaveLength(2);
     const verifyCall = calls.find((c) => c.url.endsWith('/relay/verify'));
-    expect(verifyCall?.body).toEqual({ resourceId: RESOURCE_ID, paymentHeader: header });
+    expect(verifyCall?.body).toEqual({ resourceId: RESOURCE_ID, paymentRequirements: USDC_FACE.v1Accepts, paymentHeader: header });
   });
 
   it('USDC レール settle 失敗 → 402 settlement_failed (解錠しない)', async () => {

@@ -39,6 +39,8 @@ const SDK_ONE_SHOT = [
   '',
   'const gate = createJpycGate({',
   '  resourceUrl: process.env.MY_RESOURCE_URL,',
+  '  resourceId: process.env.MY_RESOURCE_ID,',
+  '  expectedRecipient: process.env.EXPECTED_RECIPIENT,',
   '});',
   '',
   'export async function GET(request) {',
@@ -190,7 +192,7 @@ const ja: SellGuideContent = {
   noCodeEnv: NO_CODE_ENV,
   sdkTitle: 'SDK（数行）',
   sdkBody:
-    'openpay-x402-sdk をインストールし、登録する正確な resourceUrl で createJpycGate({ resourceUrl }) を作ります。',
+    'openpay-x402-sdk 0.10.0 以降で、自分の出品の resourceUrl・resourceId・expectedRecipient（JPYC 受取先）を createJpycGate に設定します。ID と受取先は自分の管理画面・設定から取得し、discovery 応答から設定しないでください。',
   sdkPackage: {
     label: 'openpay-x402-sdk を npm で開く',
     href: SDK_NPM_URL,
@@ -345,7 +347,7 @@ const en: SellGuideContent = {
   noCodeEnv: NO_CODE_ENV,
   sdkTitle: 'SDK (a few lines)',
   sdkBody:
-    'Install openpay-x402-sdk and create createJpycGate({ resourceUrl }) with the exact resource URL you register.',
+    'With openpay-x402-sdk 0.10.0 or later, configure createJpycGate with your listing’s resourceUrl, resourceId and expectedRecipient (JPYC recipient). Take the ID and recipient from your own dashboard/config, never from the discovery response.',
   sdkPackage: {
     label: 'Open openpay-x402-sdk on npm',
     href: SDK_NPM_URL,

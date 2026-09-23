@@ -1,3 +1,5 @@
+import { assertSellerPins, validateJpycListing } from './sellerPins.mjs';
+
 const DEFAULT_OPENPAY_ORIGIN = 'https://open-pay.jp';
 const ACCEPTS_CACHE_MS = 5 * 60_000;
 const DEFAULT_MAX_UPSTREAM_SECONDS = 60;
@@ -93,12 +95,15 @@ function authorizationClaim(paymentPayload, paymentRequirements) {
 
 export function createJpycGate({
   resourceUrl,
+  resourceId,
+  expectedRecipient,
   openpayOrigin = DEFAULT_OPENPAY_ORIGIN,
   fetchImpl = globalThis.fetch,
   now = Date.now,
   maxUpstreamSeconds = DEFAULT_MAX_UPSTREAM_SECONDS,
   settlementGraceSeconds = DEFAULT_SETTLEMENT_GRACE_SECONDS,
-}) {
+} = {}) {
+  assertSellerPins(resourceId, expectedRecipient);
   if (!Number.isSafeInteger(maxUpstreamSeconds) || maxUpstreamSeconds < 0) {
     throw new Error('maxUpstreamSeconds must be a non-negative integer');
   }
@@ -160,12 +165,12 @@ export function createJpycGate({
       return acceptsCache;
     }
 
-    const response = await fetchImpl(`${origin}/api/discovery`);
-    const { items } = await response.json();
-    const mine = (items || []).find((item) => item.resource === resourceUrl);
-    if (!mine || !mine.accepts || mine.accepts.length === 0) {
-      throw new Error(`resource not found in OpenPay catalog: ${resourceUrl}`);
-    }
+    const response = await fetchImpl(`${origin}/api/discovery/${encodeURIComponent(resourceId)}`);
+    if (response.status === 404) throw new Error(`resource not found in OpenPay catalog: ${resourceId}`);
+    if (!response.ok) throw new Error(`OpenPay catalog request failed (HTTP ${response.status}): ${resourceId}`);
+    const mine = await response.json();
+    // A poisoned listing must not reach a challenge, cache, or facilitator payment.
+    validateJpycListing(mine, resourceId, resourceUrl, expectedRecipient);
     acceptsCache = mine.accepts;
     acceptsCachedAt = now();
     return acceptsCache;

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.10.0 — 2026-09-23
+
+- Breaking: seller gates require a trusted `resourceId` and `expectedRecipient`;
+  dual gates also require `expectedUsdcRecipient`. Missing/invalid pins fail at
+  construction. JPYC pins `extra.openpay.merchant`; USDC pins `payTo` in every
+  advertised representation. Mismatches log and throw before payment advertising
+  or processing, without a fallback to registry-supplied recipients.
+- Fetch seller listings by exact ID using `/api/discovery/{resourceId}`, independent
+  of duplicate URLs, catalog order or pagination. Cache only validated requirements
+  and retain each payment's snapshot through verify/settle. USDC relay requests
+  carry the snapshot for comparison of money fields against the current registry.
+  On relay 409, discard the USDC cache and return freshly pinned terms without
+  replaying payment. JPYC unavailability does not block USDC; trust failures use
+  `SellerPinError` and still stop both rails.
+- Update seller types, examples and generated snippets. Existing sellers must
+  configure pins and redeploy the SDK/snippet; deploy the matching relay update
+  first. No dependencies added. Unpublished; rule-15 human review is required
+  before adoption.
+
 ## 0.9.0 — 2026-09-21
 
 - Add explicit `keystore` signer mode and `wallet_not_initialized` guard reason. `createSigner` requires the caller to supply keystore keys via `createSignerFromOptions`; no env-key fallback.

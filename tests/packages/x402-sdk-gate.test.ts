@@ -13,6 +13,8 @@ type Gate = {
 type SdkModule = {
   createJpycGate: (options: {
     resourceUrl: string;
+    resourceId: string;
+    expectedRecipient: string;
     openpayOrigin?: string;
     fetchImpl?: typeof globalThis.fetch;
     now?: () => number;
@@ -24,6 +26,8 @@ type SdkModule = {
 const SDK_ENTRY = resolve(process.cwd(), 'packages/x402-sdk/src/index.mjs');
 const OPENPAY_ORIGIN = 'https://openpay.test';
 const RESOURCE = 'https://seller.test/api/paid/report';
+const RESOURCE_ID = 'seller-id';
+const EXPECTED_RECIPIENT = '0x2222222222222222222222222222222222222222';
 const REQUEST_URL = `${RESOURCE}?locale=ja&topic=%E6%B1%BA%E6%B8%88`;
 
 async function loadSdk(): Promise<SdkModule> {
@@ -113,9 +117,9 @@ function createFetchMock({
   const fetchImpl = vi.fn(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === `${OPENPAY_ORIGIN}/api/discovery`) {
+      if (url === `${OPENPAY_ORIGIN}/api/discovery/${RESOURCE_ID}`) {
         order.push('discovery');
-        return jsonResponse({ items: [{ resource: RESOURCE, accepts }] });
+        return jsonResponse({ id: RESOURCE_ID, resource: RESOURCE, accepts });
       }
       if (url === `${OPENPAY_ORIGIN}/api/facilitator/verify`) {
         order.push('verify');
@@ -155,6 +159,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: `${OPENPAY_ORIGIN}/`,
       fetchImpl,
     });
@@ -182,6 +188,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
     });
@@ -205,6 +213,8 @@ describe('openpay-x402-sdk seller gate', () => {
       const sdk = await loadSdk();
       const gate = sdk.createJpycGate({
         resourceUrl: RESOURCE,
+        resourceId: RESOURCE_ID,
+        expectedRecipient: EXPECTED_RECIPIENT,
         openpayOrigin: OPENPAY_ORIGIN,
         fetchImpl,
       });
@@ -226,6 +236,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
     });
@@ -252,6 +264,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
     });
@@ -286,6 +300,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
     });
@@ -314,6 +330,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
     });
@@ -336,6 +354,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
     });
@@ -363,6 +383,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
       maxUpstreamSeconds: 240,
@@ -407,6 +429,8 @@ describe('openpay-x402-sdk seller gate', () => {
     expect(() =>
       sdk.createJpycGate({
         resourceUrl: RESOURCE,
+        resourceId: RESOURCE_ID,
+        expectedRecipient: EXPECTED_RECIPIENT,
         ...options,
       }),
     ).toThrow(expected);
@@ -417,6 +441,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
     });
@@ -467,6 +493,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
     });
@@ -489,6 +517,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
       now: () => 1_700_000_000_500,
@@ -514,6 +544,8 @@ describe('openpay-x402-sdk seller gate', () => {
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
     });
@@ -531,29 +563,33 @@ describe('openpay-x402-sdk seller gate', () => {
   it('throws while the exact resource is absent from the catalog', async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
-        items: [{ resource: `${RESOURCE}/other`, accepts: [catalogAccept()] }],
-      }),
+        error: 'not_found',
+      }, 404),
     );
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
     });
 
     await expect(gate.handle(new Request(REQUEST_URL))).rejects.toThrow(
-      `resource not found in OpenPay catalog: ${RESOURCE}`,
+      `resource not found in OpenPay catalog: ${RESOURCE_ID}`,
     );
   });
 
   it('caches catalog accepts until the five-minute boundary', async () => {
     let currentTime = 10_000;
     const fetchImpl = vi.fn(async () =>
-      jsonResponse({ items: [{ resource: RESOURCE, accepts: [catalogAccept()] }] }),
+      jsonResponse({ id: RESOURCE_ID, resource: RESOURCE, accepts: [catalogAccept()] }),
     );
     const sdk = await loadSdk();
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl,
       now: () => currentTime,
@@ -579,6 +615,8 @@ describe('openpay-x402-sdk seller gate', () => {
     });
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
@@ -599,6 +637,8 @@ describe('openpay-x402-sdk seller gate', () => {
     });
     const gate = sdk.createJpycGate({
       resourceUrl: RESOURCE,
+      resourceId: RESOURCE_ID,
+      expectedRecipient: EXPECTED_RECIPIENT,
       openpayOrigin: OPENPAY_ORIGIN,
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });

@@ -21,12 +21,12 @@ describe('store guide license section', () => {
     expect(screen.queryByRole('heading', { name: '利用ライセンスを売る' })).not.toBeInTheDocument();
     expect(screen.queryByText(/createLicenseGate/)).not.toBeInTheDocument();
   });
-  it.each(['ja', 'en'])('%s で SDK 0.7.1・商品 ID の組み込み例・verify とポリシーを表示する', async (locale) => {
+  it.each(['ja', 'en'])('%s で SDK 0.10.0・商品 ID の組み込み例・verify とポリシーを表示する', async (locale) => {
     state.enabled = true;
     render(await GuideStorePage({ params: Promise.resolve({ locale }) }));
     const c = licenseStoreGuideContentFor(locale);
     expect(screen.getByRole('heading', { name: c.heading })).toBeInTheDocument();
-    expect(screen.getByText(c.integration)).toHaveTextContent('SDK 0.7.1');
+    expect(screen.getByText(c.integration)).toHaveTextContent('SDK 0.10.0');
     const snippet = screen.getByText(/product: LICENSE_PRODUCT_ID/);
     expect(snippet).toHaveTextContent('secret: LICENSE_SESSION_SECRET');
     expect(snippet).toHaveTextContent('await entry.ready()');

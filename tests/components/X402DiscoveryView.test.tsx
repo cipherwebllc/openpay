@@ -753,6 +753,7 @@ describe('X402DiscoveryView', () => {
 
   it.each([
     ['resource_not_gated', /HTTP 402 応答が返らないため登録できません/],
+    ['gate_not_openpay', '操作に失敗しました (gate_not_openpay)。'],
     ['attestation_required', /正当な権利があり、支払いゲートを実装している/],
     [
       'too_many_resources',
@@ -775,6 +776,9 @@ describe('X402DiscoveryView', () => {
     fireEvent.click(await screen.findByRole('checkbox'));
     fireEvent.click(screen.getByRole('button', { name: '登録する' }));
     expect(await screen.findByText(expected)).toBeInTheDocument();
+    if (errCode === 'gate_not_openpay') {
+      expect(screen.queryByText(/下のスニペットをサイトに設置/)).not.toBeInTheDocument();
+    }
   });
 
   it('gate_not_openpay 422 → 専用カードとスニペットを表示し、入力保持のまま再登録できる', async () => {

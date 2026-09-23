@@ -105,7 +105,12 @@ export async function PATCH(
     return NextResponse.json(
       {
         error: 'gate_not_openpay',
-        paywallSnippet: buildPaywallSnippet(parsed.input.url),
+        paywallSnippet: buildPaywallSnippet(parsed.input.url, {
+          resourceId: id,
+          expectedRecipient: parsed.input.payTo,
+          dualRail: !!parsed.input.usdc,
+          expectedUsdcRecipient: parsed.input.usdc?.payTo,
+        }),
       },
       { status: 422 },
     );

@@ -1992,12 +1992,14 @@ worker が検出した破損ジョブは `store:license:repair:quarantine` の `
 恒久 index から due を再構築する。active が指すジョブの破損は nonce 不明なので、送信枠を勝手に解放しない。
 
 
-### 16.8 外部サービスの利用ライセンス gate（SDK 0.7.1）
+### 16.8 外部サービスの利用ライセンス gate（SDK 0.10.0）
 
-必要な環境変数は `LICENSE_PRODUCT_ID` と `LICENSE_SESSION_SECRET` の二つ。
-後者はサーバー限定のランダムな 32 bytes 以上の鍵素材（例: 32 bytes を hex 化）とし、全 worker で共通にする。
+ライセンス gate に必要な環境変数は `LICENSE_PRODUCT_ID` と `LICENSE_SESSION_SECRET` の二つ。
+都度課金 gate には `MY_RESOURCE_ID` と `EXPECTED_RECIPIENT` も必要。
+`LICENSE_SESSION_SECRET` はサーバー限定のランダムな 32 bytes 以上の鍵素材（例: 32 bytes を hex 化）とし、全 worker で共通にする。
 `session.origin` と従量 API の URL は組み込むサービスの URL に置き換える。Polygon/Amoy の RPC は省略可。
-0.7.1 はこの変更では publish しない。導入時は公開状況を確認する。
+0.10.0 はこの変更では publish しない。導入時は公開状況を確認する。
+都度課金の MY_RESOURCE_ID と EXPECTED_RECIPIENT は自分の管理画面・設定から取得し、discovery 応答から設定しない。
 
 ```js
 import { createLicenseGate, createJpycGate } from 'openpay-x402-sdk';
@@ -2010,7 +2012,11 @@ const entry = createLicenseGate({
   },
 });
 await entry.ready();
-const usage = createJpycGate({ resourceUrl: 'https://service.example/api/paid' });
+const usage = createJpycGate({
+  resourceUrl: 'https://service.example/api/paid',
+  resourceId: process.env.MY_RESOURCE_ID,
+  expectedRecipient: process.env.EXPECTED_RECIPIENT,
+});
 ```
 
 商品 descriptor の取得元 `origin` は既定 `https://open-pay.jp`（変更時も HTTPS のみ・redirect 不可）。

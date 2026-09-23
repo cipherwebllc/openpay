@@ -390,3 +390,58 @@ describe('dualRailRelay verify/settle', () => {
     expect(await res.json()).toEqual({ isValid: true, payer: '0xabc' });
   });
 });
+
+
+describe('seller-pinned relay snapshot', () => {
+  it.each(['verify', 'settle'] as const)('%s refuses a recipient edit after requirements were pinned', async (action) => {
+    const face = await (await handleDualRailRequirements(reqGet('res-1'))).json();
+    state.resource = record({ usdc: { ...record().usdc, payTo: SELLER } });
+    const res = await handleDualRailRelay(post(action, {
+      resourceId: 'res-1', paymentHeader: v1Header(), paymentRequirements: face.v1Accepts,
+    }), action);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'requirements_mismatch' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(ledger.record).not.toHaveBeenCalled();
+  });
+
+  it('uses the registry snapshot for verify and settle and refuses a later price change', async () => {
+    const face = await (await handleDualRailRequirements(reqGet('res-1'))).json();
+    const body = { resourceId: 'res-1', paymentHeader: v1Header(), paymentRequirements: face.v1Accepts };
+    facilitatorReplies(200, { isValid: true });
+    expect((await handleDualRailRelay(post('verify', body), 'verify')).status).toBe(200);
+    facilitatorReplies(200, { success: true });
+    expect((await handleDualRailRelay(post('settle', body), 'settle')).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    state.resource = record({ usdc: { ...record().usdc, priceUsd: '1' } });
+    expect((await handleDualRailRelay(post('settle', body), 'settle')).status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+
+describe('relay money-field comparison', () => {
+  it.each(['verify', 'settle'] as const)('%s ignores display metadata changes but uses registry metadata', async (action) => {
+    const face = await (await handleDualRailRequirements(reqGet('res-1'))).json();
+    state.resource = record({ description: 'Updated description', url: 'https://seller.example/new' });
+    facilitatorReplies(200, action === 'verify' ? { isValid: true } : { success: true });
+    const res = await handleDualRailRelay(post(action, {
+      resourceId: 'res-1', paymentHeader: v1Header(), paymentRequirements: face.v1Accepts,
+    }), action);
+    expect(res.status).toBe(200);
+    const wire = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(wire.paymentPayload.resource.description).toBe('Updated description');
+    expect(wire.paymentPayload.resource.url).toBe('https://seller.example/new');
+    expect(wire.paymentRequirements.payTo).toBe(SELLER_USDC);
+  });
+
+  it.each(['payTo', 'maxAmountRequired', 'asset', 'network', 'scheme'])('still rejects changed %s before facilitator I/O', async (field) => {
+    const face = await (await handleDualRailRequirements(reqGet('res-1'))).json();
+    const res = await handleDualRailRelay(post('verify', {
+      resourceId: 'res-1', paymentHeader: v1Header(),
+      paymentRequirements: { ...face.v1Accepts, [field]: 'substituted' },
+    }), 'verify');
+    expect(res.status).toBe(409);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

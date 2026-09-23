@@ -355,6 +355,25 @@ const PAID_RESPONSES = {
 } as const;
 
 const DISCOVERY_OPENAPI_PATHS = {
+  '/api/discovery/{id}': {
+    get: {
+      tags: ['x402 Catalog'],
+      summary: 'Get one public seller listing by exact ID',
+      description: 'Independent of catalog pagination. Hidden, inactive and reserved-origin listings are excluded. Seller gates must pin the ID and recipient from their own configuration.',
+      security: [],
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', minLength: 1, maxLength: 100 } }],
+      responses: {
+        '200': {
+          description: 'Single public listing in the discovery item shape',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/DiscoveryItem' } } },
+        },
+        '400': { description: 'Invalid resource ID.' },
+        '404': { description: 'The facilitator is disabled or the listing is not public.' },
+        '429': { description: 'Too many requests from this IP address.' },
+        '503': { description: 'The resource storage is temporarily unavailable.' },
+      },
+    },
+  },
   '/api/discovery': {
     get: {
       tags: ['x402 Catalog'],
@@ -436,6 +455,7 @@ const DISCOVERY_OPENAPI_SCHEMAS = {
       'verifiedAt',
     ],
     properties: {
+      id: { type: 'string', description: 'Registry listing ID; present for registered seller resources.' },
       resource: { type: 'string', format: 'uri' },
       title: { type: 'string', description: 'Short display name (first-party, or seller-provided)' },
       trigger: { type: 'string', description: 'When to use this resource' },
