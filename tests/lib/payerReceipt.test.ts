@@ -56,6 +56,62 @@ function saleEntry(over: Partial<BuildHistoryBase> = {}) {
   });
 }
 
+describe('payer receipts: unreadable entries survive writes (E5/F12)', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  function receipt(id: string): PayerReceipt {
+    return buildPayerReceipt({ asset: 'jpyc', amount: '1', merchantAddress: '0xM', txHash: id }, NOW);
+  }
+
+  const writers = ['append', 'append-promotion', 'promote', 'remove'] as const;
+  it.each(writers)('%s preserves future schema and invalid raw items in place', (kind) => {
+    const target = { ...receipt('target'), status: 'pending' as const };
+    const future = { ...target, schemaVersion: 999, future: { nested: ['keep', null] } };
+    const invalid = { ...target, status: 'future-status' };
+    const opaque = [future, invalid, null, 'opaque', 42, ['nested']];
+    window.localStorage.setItem(PAYER_RECEIPTS_STORAGE_KEY, JSON.stringify([...opaque, target]));
+    expect(loadPayerReceipts()).toEqual([target]);
+
+    if (kind === 'append') appendPayerReceipt(receipt('new'));
+    if (kind === 'append-promotion') appendPayerReceipt({ ...target, status: 'confirmed' });
+    if (kind === 'promote') expect(promotePayerReceiptStatus(target.receiptId, 'confirmed')).toBe(true);
+    if (kind === 'remove') removePayerReceipt(target.receiptId);
+
+    const known = kind === 'remove' ? [] : [{ ...target, status: kind === 'append' ? 'pending' : 'confirmed' }];
+    const expected = [...(kind === 'append' ? [receipt('new')] : []), ...opaque, ...known];
+    expect(JSON.parse(window.localStorage.getItem(PAYER_RECEIPTS_STORAGE_KEY)!)).toEqual(JSON.parse(JSON.stringify(expected)));
+    expect(loadPayerReceipts()).toEqual([...(kind === 'append' ? [receipt('new')] : []), ...known]);
+  });
+
+  it.each(['known', 'unknown'] as const)('FIFO cap counts unreadable entries and evicts the oldest %s item', (oldest) => {
+    const future = { schemaVersion: 999, payload: { keep: true } };
+    const filler = Array.from({ length: PAYER_RECEIPTS_MAX - 3 }, (_, i) => receipt(`kept-${i}`));
+    const tail = oldest === 'known' ? receipt('oldest') : { schemaVersion: 999, receiptId: 'oldest' };
+    const raw = [future, null, ...filler, tail];
+    window.localStorage.setItem(PAYER_RECEIPTS_STORAGE_KEY, JSON.stringify(raw));
+
+    const added = receipt('new');
+    appendPayerReceipt(added);
+
+    const stored = JSON.parse(window.localStorage.getItem(PAYER_RECEIPTS_STORAGE_KEY)!);
+    expect(stored).toHaveLength(PAYER_RECEIPTS_MAX);
+    expect(stored).toEqual(JSON.parse(JSON.stringify([added, ...raw.slice(0, -1)])));
+    expect(loadPayerReceipts()).toHaveLength(PAYER_RECEIPTS_MAX - 2);
+  });
+
+  it.each(['not-json{{{', '{"not":"array"}', 'null'])('malformed/non-array root %s keeps the existing recovery behavior', (raw) => {
+    window.localStorage.setItem(PAYER_RECEIPTS_STORAGE_KEY, raw);
+    expect(loadPayerReceipts()).toEqual([]);
+    expect(promotePayerReceiptStatus('missing', 'confirmed')).toBe(false);
+    removePayerReceipt('missing');
+    expect(window.localStorage.getItem(PAYER_RECEIPTS_STORAGE_KEY)).toBe(raw);
+
+    const added = receipt('new');
+    appendPayerReceipt(added);
+    expect(loadPayerReceipts()).toEqual([added]);
+  });
+});
+
 describe('buildPayerReceipt', () => {
   it('lineItems あり → そのまま保持・direction/kind/status・chain/explorer/通貨 を導出', () => {
     const r = buildPayerReceipt(

@@ -265,7 +265,7 @@ function isValidReceipt(value: unknown): value is PayerReceipt {
 }
 
 // 現状 v1 単独。schemaVersion 欠落は v1 とみなして救済し、LATEST 以外 (未来/未知) は
-// 移行手段が無いので drop する。v2 を出す際はここに v1→v2 の変換ステップを追加する。
+// 移行手段が無いので読込結果から除外 (保存時は保持)。v2 時は v1→v2 の変換ステップを追加する。
 function migrateToLatest(value: unknown): PayerReceipt | null {
   if (value === null || typeof value !== 'object') return null;
   const r = value as Record<string, unknown>;
@@ -276,23 +276,38 @@ function migrateToLatest(value: unknown): PayerReceipt | null {
   return isValidReceipt(normalized) ? normalized : null;
 }
 
-export function loadPayerReceipts(): PayerReceipt[] {
+type StoredReceiptItem = { raw: unknown; receipt: PayerReceipt | null };
+
+// 保持した未知項目の再読込が Sentry の警告・quota 消費へ繰り返し波及しないよう、ページ内で一度だけ通知。
+let hasWarnedUnreadableEntries = false;
+
+function loadPayerReceiptItems(): StoredReceiptItem[] {
   const raw = safeGet<unknown>(PAYER_RECEIPTS_STORAGE_KEY, []);
   if (!Array.isArray(raw)) {
     logger.warn('payerReceipts.load.not-array', { actual: typeof raw });
     return [];
   }
-  const valid: PayerReceipt[] = [];
+  const items: StoredReceiptItem[] = [];
   let invalid = 0;
   for (const item of raw) {
     const migrated = migrateToLatest(item);
     if (migrated === null) invalid += 1;
-    else valid.push(migrated);
+    // 読込除外が無関係な控えの書込で永久削除へ波及しないよう、不明項目も元の位置で保持。
+    items.push({ raw: item, receipt: migrated });
   }
-  if (invalid > 0) {
-    logger.warn('payerReceipts.load.invalid-dropped', { invalid, kept: valid.length });
+  if (invalid > 0 && !hasWarnedUnreadableEntries) {
+    hasWarnedUnreadableEntries = true;
+    logger.warn('payerReceipts.load.unreadable-entries-preserved', { invalid, kept: items.length - invalid });
   }
-  return valid;
+  return items;
+}
+
+export function loadPayerReceipts(): PayerReceipt[] {
+  return loadPayerReceiptItems().flatMap(({ receipt }) => receipt === null ? [] : [receipt]);
+}
+
+function savePayerReceiptItems(items: StoredReceiptItem[]): void {
+  safeSet(PAYER_RECEIPTS_STORAGE_KEY, items.map(({ raw, receipt }) => receipt ?? raw));
 }
 
 function broadcastChange(): void {
@@ -301,33 +316,38 @@ function broadcastChange(): void {
 
 export function appendPayerReceipt(receipt: PayerReceipt): void {
   if (typeof window === 'undefined') return;
-  const current = loadPayerReceipts();
+  const current = loadPayerReceiptItems();
   // 同一 receiptId (= 同一 tx) は基本 no-op で dedupe する。ただし relay/gasless が
   // pending (txHash あり) で先に保存した控えに対し、後続で同一 tx の confirmed/failed
   // が来た場合のみ **既存 entry を昇格** (pending → confirmed/failed) して保存・broadcast
   // する。StrictMode 二重発火・再描画は同一 status なので引き続き no-op (昇格しない)。
   // downgrade 方向 (例: confirmed → pending) や既存が non-pending の再 append も no-op。
-  const idx = current.findIndex((r) => r.receiptId === receipt.receiptId);
-  if (idx >= 0) {
-    const existing = current[idx];
+  // 未知 schema の receiptId は解釈せず保持する。rollback 中に同じ支払いを再記帳すると、
+  // roll-forward 後に重複表示されうる既知の制約がある (未知データを推測で削除しない)。
+  const idx = current.findIndex((item) => item.receipt?.receiptId === receipt.receiptId);
+  const existing = current[idx]?.receipt;
+  if (existing) {
     const isPromotion =
       existing.status === 'pending' &&
       (receipt.status === 'confirmed' || receipt.status === 'failed');
     if (!isPromotion) return;
     const next = [...current];
     next[idx] = {
-      ...existing,
-      status: receipt.status,
-      paidAt: receipt.paidAt ?? existing.paidAt,
+      ...current[idx],
+      receipt: {
+        ...existing,
+        status: receipt.status,
+        paidAt: receipt.paidAt ?? existing.paidAt,
+      },
     };
-    safeSet(PAYER_RECEIPTS_STORAGE_KEY, next);
+    savePayerReceiptItems(next);
     broadcastChange();
     return;
   }
-  const next = [receipt, ...current];
+  const next = [{ raw: receipt, receipt }, ...current];
   const trimmed =
     next.length > PAYER_RECEIPTS_MAX ? next.slice(0, PAYER_RECEIPTS_MAX) : next;
-  safeSet(PAYER_RECEIPTS_STORAGE_KEY, trimmed);
+  savePayerReceiptItems(trimmed);
   broadcastChange();
 }
 
@@ -342,22 +362,23 @@ export function promotePayerReceiptStatus(
   status: 'confirmed' | 'failed',
 ): boolean {
   if (typeof window === 'undefined') return false;
-  const current = loadPayerReceipts();
-  const idx = current.findIndex((r) => r.receiptId === receiptId);
-  if (idx < 0 || current[idx].status !== 'pending') return false;
+  const current = loadPayerReceiptItems();
+  const idx = current.findIndex((item) => item.receipt?.receiptId === receiptId);
+  const existing = current[idx]?.receipt;
+  if (existing?.status !== 'pending') return false;
   const next = [...current];
-  next[idx] = { ...current[idx], status };
-  safeSet(PAYER_RECEIPTS_STORAGE_KEY, next);
+  next[idx] = { ...current[idx], receipt: { ...existing, status } };
+  savePayerReceiptItems(next);
   broadcastChange();
   return true;
 }
 
 export function removePayerReceipt(receiptId: string): void {
   if (typeof window === 'undefined') return;
-  const current = loadPayerReceipts();
-  const next = current.filter((r) => r.receiptId !== receiptId);
+  const current = loadPayerReceiptItems();
+  const next = current.filter((item) => item.receipt?.receiptId !== receiptId);
   if (next.length === current.length) return;
-  safeSet(PAYER_RECEIPTS_STORAGE_KEY, next);
+  savePayerReceiptItems(next);
   broadcastChange();
 }
 
