@@ -222,6 +222,10 @@ it('Attestation の価格と法的証明でない旨を開示する', () => {
   expect(line).toContain('GET ' + USDC_JPYC_ATTEST.path + '?chain=&tx=');
   expect(line).toContain('署名付き JSON で返す ' + USDC_JPYC_ATTEST.priceUsd + ' USDC');
   expect(line).toContain('法的証明ではない');
+  expect(line).toContain('観測時点');
+  expect(line).toContain('確定を保証しない');
+  expect(line).toContain('confirmations・finality は署名対象外');
+  expect(line).toContain('未確定・確定状況不明でも署名');
   // 課金前に止まる分岐 (未採掘・JPYC 転送なし・RPC 障害) を AI に伝える。
   expect(line).toContain('課金なし');
 });

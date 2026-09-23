@@ -355,6 +355,9 @@ it('attestation shares the Bazaar schema and declares non-settling errors', asyn
   const body = await doc();
   const { USDC_JPYC_ATTEST } = await import('@/lib/jpyc/liveResources');
   const op = body.paths[USDC_JPYC_ATTEST.path].get;
+  expect(op.description).toContain('observation time');
+  expect(op.description).toContain('does not guarantee finality');
+  expect(op.description).toContain('confirmations and finality are unsigned');
   const responses = op.responses as Record<string, { content: { 'application/json': { schema: unknown } }; description: string }>;
   expect(responses['200'].content['application/json'].schema).toEqual(USDC_JPYC_ATTEST.bazaar.output.schema);
   for (const status of ['400', '404', '503']) expect(responses[status].description).toContain('No settlement');

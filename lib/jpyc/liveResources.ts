@@ -340,16 +340,16 @@ export const USDC_JPYC_ATTEST = {
   path: '/api/paid/usdc/jpyc/attest',
   operationId: 'getJpycPaymentAttestation',
   serviceName: 'JPYC Payment Attestation',
-  summary: 'Get a signed record of JPYC transfers in one transaction',
+  summary: 'Get a signed observation-time record of JPYC transfers in one transaction',
   price: '$0.1', priceUsd: '0.1',
   tags: ['jpyc', 'payment', 'attestation', 'receipt', 'onchain-data', 'eip-712'],
   description:
-    'Signed record of the JPYC transfers in one transaction, read from public RPC at request time, with amounts, totals, block timestamp and finality observations. Use for payment reconciliation and retaining a machine-readable record. The signature shows only that OpenPay observed these on-chain facts at the stated time; it is not a legal certification.',
+    'Signed record of JPYC transfers in one transaction, read from public RPC at observation time for reconciliation and record keeping. The signature does not guarantee finality or provide legal certification; unfinalized or finality-unknown transactions can be signed. Only attestation.message is signed; confirmations and finality are unsigned informational observations.',
   trigger: {
     callWhen: ['A signed record of JPYC transfers in a specific transaction is needed'],
     repeatWhen: ['New blocks have been produced and updated finality observations are needed'],
     preferOver: ['Explorer pages when structured transfer data and an offline-verifiable signature matter'],
-    avoidWhen: ['Legal certification, wallet ownership, identity checks or financial advice are required'],
+    avoidWhen: ['Finality guarantees, legal certification, wallet ownership, identity checks or financial advice are required'],
     freshnessKey: ['observedAt', 'confirmations', 'finality'],
   } satisfies AgentUsage,
   bazaar: {

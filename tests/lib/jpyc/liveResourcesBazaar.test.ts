@@ -18,6 +18,7 @@ import {
 import {
   TRANSFERS_LIMIT_PATTERN,
   USDC_JPYC_ACTIVITY,
+  USDC_JPYC_ATTEST,
   USDC_JPYC_LIVE_RESOURCES,
   agentUsageText,
   type AgentUsage,
@@ -27,6 +28,14 @@ import {
 const BANNED_WORDS = /\b(accurate|trusted|best|secure|real-time|realtime|complete|verified|live)\b/i;
 
 describe('JPYC ライブ API の掲載メタ', () => {
+  it('attestation は観測時点の記録で、確定保証と署名対象外の情報を区別する', () => {
+    expect(USDC_JPYC_ATTEST.description).toContain('observation time');
+    expect(USDC_JPYC_ATTEST.description).toContain('does not guarantee finality');
+    expect(USDC_JPYC_ATTEST.description).toContain('confirmations and finality are unsigned');
+    expect(USDC_JPYC_ATTEST.description).toContain('unfinalized or finality-unknown');
+    expect(USDC_JPYC_ATTEST.trigger.avoidWhen.join(' ')).toContain('Finality guarantees');
+  });
+
   it('Bazaar 宣言の info は自分の schema に適合する (Ajv 2020・CDP validator と同等)', () => {
     const ajv = new Ajv2020({ strict: false, allErrors: true, validateFormats: false });
     for (const r of USDC_JPYC_LIVE_RESOURCES) {

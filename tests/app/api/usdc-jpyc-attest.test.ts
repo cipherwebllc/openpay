@@ -69,6 +69,32 @@ beforeEach(async () => {
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('JPYC attestation gate and RPC record', () => {
+  it.each([false, null])('finality=%s stays unsigned and does not change the signed observation or settlement', async (finalized) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-24T00:00:00.000Z'));
+    try {
+      const baseline = await (await route.GET(request())).json();
+      mocks.latest.mockResolvedValue(100n);
+      mocks.block.mockImplementation(async ({ blockTag }) => {
+        if (blockTag && finalized === null) throw new Error('unsupported finalized');
+        return { number: blockTag ? 99n : 100n, timestamp: 1_750_000_000n };
+      });
+      const response = await route.GET(request());
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(validate(body), JSON.stringify(validate.errors)).toBe(true);
+      expect(body.finality.finalized).toBe(finalized);
+      expect(body.blockNumber).toBe('100');
+      expect(body.confirmations).toBe('1');
+      expect(body.attestation).toEqual(baseline.attestation);
+      expect(Object.keys(body.attestation.message)).toEqual(['chainId', 'txHash', 'blockNumber', 'transfersHash', 'issuedAt', 'licensee']);
+      expect(body.verify.domain).toEqual({ name: 'OpenPay JPYC Payment Attestation', version: '1' });
+      expect(mocks.fetch.mock.calls.map(([url]) => String(url))).toEqual([FAC + '/verify', FAC + '/settle', FAC + '/verify', FAC + '/settle']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(['?chain=bad', '?chain=', '?tx=', '?tx=0x12', '?foo=1', '?chain=polygon&chain=polygon', `?tx=${TX}&tx=${TX}`])('400 before payment: %s', async (query) => {
     expect((await route.GET(request(query, 0))).status).toBe(400);
     expect(mocks.fetch).not.toHaveBeenCalled(); expect(mocks.receipt).not.toHaveBeenCalled();

@@ -1,8 +1,8 @@
 'use client';
 
 // 「現金に戻したお店へ」セクションの節約シミュレータ (client)。
-// 月商スライダー × 今の決済手段 (カード 3.24% / コード決済 1.98%) から、
-// OpenPay のガスレス決済 (1%) に置き換えたときに「年間いくら手元に残るか」を
+// 月商・平均決済額スライダー × 今の決済手段 (カード 3.24% / コード決済 1.98%) から、
+// OpenPay のガスレス決済 (開示料率・1 回あたりの最低額) に置き換えた年間差額を
 // ビッグナンバーで示す。crypto 語彙は出さず、店主が直感的に得を掴めるようにする。
 //
 // 金額計算は整数円で行い (Math.round)、float の見た目誤差 (26.8799…) を出さない。
@@ -10,6 +10,7 @@
 
 import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
+import { DISCLOSED_RECOVER_FEE } from '@/lib/disclosedRecoverFee';
 
 // 月商スライダー: 10 万円〜500 万円・10 万円刻み・既定 100 万円 (すべて「円」単位)。
 const MONTHLY_MIN = 100_000;
@@ -17,8 +18,11 @@ const MONTHLY_MAX = 5_000_000;
 const MONTHLY_STEP = 100_000;
 const MONTHLY_DEFAULT = 1_000_000;
 
-// OpenPay ガスレス決済の利用料率 (差額計算の基準)。
-const OPENPAY_RATE = 0.01;
+// 全決済がこの金額と同額という概算。最低利用料は月商でなく 1 決済ごとに適用する。
+const TICKET_MIN = 50;
+const TICKET_MAX = 10_000;
+const TICKET_STEP = 50;
+const TICKET_DEFAULT = 1_000;
 
 // 比較先チップ (今の決済手段の一般的な料率の例)。
 const COMPARE = {
@@ -37,14 +41,19 @@ export function SavingsSimulator() {
   // ja は「万円」でヒーロー表示、en は full 円でヒーロー表示 (万 は英語で読みにくい)。
   const isJa = useLocale() === 'ja';
   const [monthlyYen, setMonthlyYen] = useState(MONTHLY_DEFAULT);
+  const [ticketYen, setTicketYen] = useState(TICKET_DEFAULT);
   const [compare, setCompare] = useState<CompareId>('card');
 
-  // 年間差額 (整数円): 月商 × 12 か月 × (今の料率 − OpenPay 1%)。
-  const annualDiffYen = Math.round(
-    monthlyYen * 12 * (COMPARE[compare] - OPENPAY_RATE),
+  const feePerPayment = Math.max(
+    DISCLOSED_RECOVER_FEE.floorJpyc,
+    ticketYen * DISCLOSED_RECOVER_FEE.percentFromJulyBps / 10_000,
   );
-  // ビッグナンバーは万円単位 (整数に丸めて小数の見た目誤差を避ける)。
-  const annualDiffMan = Math.round(annualDiffYen / 10000);
+  // 年間差額 (整数円): 比較先の年額 − 月間決済件数 × 1 決済の利用料 × 12。
+  const annualDiffYen = Math.round(
+    monthlyYen * 12 * COMPARE[compare] - (monthlyYen / ticketYen) * feePerPayment * 12,
+  );
+  // ビッグナンバーは万円単位。+ 0 で丸め後の -0 を正規化し、「-0 万円」と表示しない。
+  const annualDiffMan = Math.round(annualDiffYen / 10000) + 0;
   // スライダー現在値の表示 (万円・10 万刻みなので常に整数)。
   const monthlyMan = monthlyYen / 10000;
   // ヒーローの数字: ja=万円 (annualDiffMan) / en=full 円 (annualDiffYen)。
@@ -86,6 +95,27 @@ export function SavingsSimulator() {
         />
       </div>
 
+      <div className="mt-5">
+        <div className="flex items-baseline justify-between">
+          <label htmlFor="savings-ticket" className="text-xs font-semibold text-slate-600">
+            {t('cashSimTicketLabel')}
+          </label>
+          <span className="tabular-nums text-sm font-bold text-slate-900">
+            {t('cashSimTicketValue', { value: formatYen(ticketYen) })}
+          </span>
+        </div>
+        <input
+          id="savings-ticket"
+          type="range"
+          min={TICKET_MIN}
+          max={TICKET_MAX}
+          step={TICKET_STEP}
+          value={ticketYen}
+          onChange={(e) => setTicketYen(Number(e.target.value))}
+          className="mt-2 w-full accent-blue-600"
+        />
+      </div>
+
       {/* 今の決済手段チップ */}
       <div className="mt-5">
         <p className="text-xs font-semibold text-slate-600">
@@ -113,7 +143,7 @@ export function SavingsSimulator() {
         </div>
       </div>
 
-      {/* 結果: 年間 ◯◯万円 手元に残る (ビッグナンバー) */}
+      {/* 結果: 割高な場合も負の差額をそのまま示す。 */}
       <div className="mt-6 text-center">
         <p className="text-sm text-slate-600">{t('cashSimResultPrefix')}</p>
         <p className="mt-1 flex items-baseline justify-center gap-1">
@@ -131,13 +161,18 @@ export function SavingsSimulator() {
             ヒーローが full 円ゆえ重複しないよう出さない。 */}
         {isJa && (
           <p className="mt-1 tabular-nums text-xs text-slate-500">
-            {t('cashSimYenExact', { yen: formatYen(annualDiffYen) })}
+            {t('cashSimYenExact', {
+              yen: `${annualDiffYen < 0 ? '-' : ''}¥${formatYen(Math.abs(annualDiffYen))}`,
+            })}
           </p>
         )}
       </div>
 
       <p className="mt-4 text-[11px] leading-relaxed text-slate-500">
-        {t('cashSimNote')}
+        {t('cashSimNote', {
+          percent: DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100,
+          floor: DISCLOSED_RECOVER_FEE.floorJpyc,
+        })}
       </p>
     </div>
   );
