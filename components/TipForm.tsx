@@ -340,13 +340,16 @@ export function TipForm({
   const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
     ? relay.error
     : null;
-  const directFlowPending = isStandard
-    ? standard.isRestoring || standard.isPending || standard.isUnknown
-    : relay.isRestoring || relayAmbiguous
+  // relay intent は sessionStorage に保存され、同一タブの TipForm で復元される。
+  // 別タブ・NativeTipForm は対象外。方法切替で未解決の送金が二重払いへ波及しないよう、
+  // 復元中・曖昧応答の封鎖を current route から独立させる。
+  const directFlowPending = relay.isRestoring || relayAmbiguous
     ? true
-    : useRelay
-      ? relay.isPending
-      : gasless.isPending || gaslessAmbiguous;
+    : isStandard
+      ? standard.isRestoring || standard.isPending || standard.isUnknown
+      : useRelay
+        ? relay.isPending
+        : gasless.isPending || gaslessAmbiguous;
   const directFlowSuccess = isStandard
     ? ownsStandardAttempt && standard.isSuccess
     : useRelay
@@ -378,12 +381,11 @@ export function TipForm({
   // 2 件目の on-chain 送金 = 二重支払いになる。revert (送金未成立) は安全なので再試行を許す
   // 復元された standard 成功は今回のチップではないため、新規送信を妨げない。
   const directSettledNoRetry =
+    relayAmbiguous || relay.hasActiveIntent ||
     (isStandard && (standard.hasActiveIntent || standard.isUnknown || standard.isFeeError || (ownsStandardAttempt && standard.isSuccess))) ||
-    (!isStandard && relay.hasActiveIntent) ||
     (!isStandard && !useRelay && (gaslessAmbiguous || !!gasless.data?.success)) ||
     (useRelay &&
-      (relayAmbiguous ||
-        !!relayIpRateLimited ||
+      (!!relayIpRateLimited ||
         (!!relay.data && (relay.data.success || !!relay.data.pending))));
   const settledNoRetry = directSettledNoRetry || !!crossChainResult;
   // relay 202: broadcast 済だが未確定 (success でも error でもない)。送信ボタンに「送信中」を
@@ -1187,6 +1189,8 @@ export function TipForm({
       >
         {preview
           ? t('btnSend', { amount: fmt(totalCustomerOutflow) })
+          : isStandard && relayAmbiguous
+          ? t('responseUnknownTitle')
           : flowPending || relayPending
           ? t('btnSending')
           : !isConnected
