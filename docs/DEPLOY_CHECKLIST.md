@@ -1902,11 +1902,21 @@ GitHub 外の監視 (Actions 共通停止は検知不能)・独立監査の恒�
 
 #### 16.6.1 独立バックアップ v1 (`scripts/kv-backup.mjs` / `kv-restore.mjs`)
 
-**範囲** = Store (デジタル商品・ライセンス NFT・保護配布の権利判定) とそれが依存する決済 claim。allowlist prefix:
-`x402:hosted:`・`store:`・`payment:claimed:`・`billing:settled:`・`x402:settle:ledger:` (ledger は best-effort ヒント・決済の真実ではない)。
+**範囲** = Store (デジタル商品・ライセンス NFT・保護配布の権利判定) とそれが依存する決済 claim、Agent の購入索引・所有者紐づけ。allowlist prefix:
+`x402:hosted:`・`store:`・`payment:claimed:`・`billing:settled:`・`x402:settle:ledger:`・`x402:settle:payer:`・`agent:bound:`・`agent:owner:`。
+ledger/payer は best-effort ヒント・決済の真実ではない。payer 索引は最終書込から 400 日の TTL、bound/owner は TTL なし。
+復元は取得時の絶対期限から残り TTL を計算し、期限切れを飛ばす（400 日を復元時に延長しない）。紐づけは恒久キーとして復元する。
+既存 v2 archive（旧 5 prefix）も検証・復元可。ただし未収録の Agent キーは復元されない。
+**復元後は Agent の紐づけを再確認する**。RPO（約 12h）内の unbind/rebind が巻き戻り、解除済みの紐づけが復活しうる。
+R2 archive は 180 日 lifecycle のため、payer/ledger の行は稼働 KV の 400 日 TTL を過ぎてもバックアップ内に残りうる（復元時の期限切れスキップは archive 内の削除ではない）。
 denylist (完全一致または `<key>:` 家族): `store:quote:rl`・`store:license:verify:rpc`・`store:delivery:rpc`・`store:license:worker:lock`。
 **全 app の DR ではない** (handle・受注・チップ・push・SIWE・external registry は対象外。受注/チップ/push は保存期間を開示済みのため複製しない)。
 `x402fac:reservation:v1:` (入場 lease) は対象外で、復元時は捨てる。
+
+**merge 前に user が必須実施する ACL 更新**: 本番 `kvbackup` ACL user は現在、旧 5 prefix に限定されている。
+本変更を **merge する前に**、user が `~x402:settle:payer:* ~agent:bound:* ~agent:owner:*` を既存 ACL に追加し、完了を確認する。
+merge 後は `main` の定期 backup job が新 prefix を走査するため、未更新のままでは NOPERM により archive が partial となり、Store を含む complete backup が更新されない。
+コード更新だけでは本番 ACL は変更されない。
 
 **取得**: GitHub Actions `kv-backup.yml` (12h ごと・`17 3,15 * * *` UTC・dispatch 可) が Upstash REST を **backup 専用 ACL user の token** で
 `SCAN` → key ごとに `/multi-exec [TYPE, PTTL, 値]` で原子取得 (base64 応答・bytes 保持・小コレクションは全量・大コレクションは chunk で `uncertain`) →
@@ -1923,7 +1933,7 @@ run green = archive と meta が Stored かつ status complete。partial は保�
 
 | 置き場 | 変数 | 内容 |
 |---|---|---|
-| GitHub secrets | `KV_BACKUP_REST_URL` / `KV_BACKUP_REST_TOKEN` | Upstash REST URL と **ACL user の token** (`ACL GENTOKEN` → `ACL SETUSER kvbackup on ><token> +scan +type +pttl +get +llen +lrange +scard +smembers +sscan +zcard +zrange +hlen +hgetall +hscan +multi +exec +ping +dbsize ~x402:hosted:* ~store:* ~payment:claimed:* ~billing:settled:* ~x402:settle:ledger:*` → `ACL RESTTOKEN kvbackup <token>`)。prefix 限定で SCAN が通らなければ `~*` に変更し「CI token は DB 全体の読取権を持つ」を受容 (書込は不可のまま)。full token への fallback は無い |
+| GitHub secrets | `KV_BACKUP_REST_URL` / `KV_BACKUP_REST_TOKEN` | Upstash REST URL と **ACL user の token** (`ACL GENTOKEN` → `ACL SETUSER kvbackup on ><token> +scan +type +pttl +get +llen +lrange +scard +smembers +sscan +zcard +zrange +hlen +hgetall +hscan +multi +exec +ping +dbsize ~x402:hosted:* ~store:* ~payment:claimed:* ~billing:settled:* ~x402:settle:ledger:* ~x402:settle:payer:* ~agent:bound:* ~agent:owner:*` → `ACL RESTTOKEN kvbackup <token>`)。prefix 限定で SCAN が通らなければ `~*` に変更し「CI token は DB 全体の読取権を持つ」を受容 (書込は不可のまま)。full token への fallback は無い |
 | GitHub secrets | `KV_BACKUP_KEY` | `openssl rand -hex 32`。1Password にも保管。ローテは新鍵で次回 full・旧鍵は keyId 付きで archive が残る間保持 |
 | GitHub secrets | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` | R2 API token (bucket 限定 Object Read & Write・削除防止は不可)。bucket lifecycle 180 日 (短縮は user 裁定) |
 | 運営端末 | `KV_RESTORE_TARGET_TOKEN` / `KV_BACKUP_KEY` | 復元先 DB の token (backup 用と別名・CLI 引数/URL/ログに出さない) と復号鍵 |
@@ -1943,7 +1953,8 @@ R2 token は既存 archive を消せる → 月次棚卸しで最新 complete ar
   app/worker が接続していない (復元中〜比較完了まで他の接続を作らない)。`--force`/resume は無い。
 - 順序: 復号 → GCM tag 検証 (private staging・検証前の平文は使わない) → gunzip → 構造検証 → `--check` (archive) → 復元集合 (prefix・期限切れ除外) → `--check` (復元集合) →
   **preflight 全件** (型・`{b:…}` binary 0 件・EVAL 符号化後 ≤ 3MB・member ≤ 10,000・期限) → key ごと Lua「不在なら install + PEXPIRE」→ readback 全比較 (bytes/順序/集合/score・TTL ±5s) →
-  `--check` (target) → `restore-report-<target-name>-<UTC ts>.json` (作業ディレクトリ・途中失敗でも書く・同名は上書きしない) → R2 `audits/` へ手動 PUT。
+  `--check` (target) → `restore-report-<target-name>-<UTC ts>.json` (`os.tmpdir()` 内の専用 0700 ディレクトリ・ファイル 0600・途中失敗でも書く・同名は上書きしない) → R2 `audits/` へ手動 PUT。
+  出力先は `--report /private/path/report.json` で指定可（親ディレクトリは事前作成・git checkout 内は拒否）。stdout に保存パスを表示する。
 - 結果分類: applied / exists / lua_error / timeout_verified_match (内容一致を確認・自分の書込とは断定しない) / timeout_unverified / expired_skipped / expired_during_verify / mismatch。
 - 途中失敗 (プロセス終了・lua_error・timeout_unverified) は **resume せず、その DB を破棄して新しい空 DB でやり直す**。
 - `--check` は存在ではなく identity と値を見る (product↔全 grant の content revision・stock↔reservation 集計 (完全集合のみ・不完全は unverifiable)・job⇄恒久 index 双方向・

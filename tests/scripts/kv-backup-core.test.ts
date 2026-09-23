@@ -38,7 +38,7 @@ async function fixture(bytes: Buffer, filename = 'fixture.enc') {
 }
 
 describe('scope and lossless byte records', () => {
-  it('allows precisely the five prefixes and denies exact keys / colon families', () => {
+  it('allows precisely the allowed prefixes and denies exact keys / colon families', () => {
     for (const prefix of PREFIXES) expect(isAllowedKey(`${prefix}one`)).toBe(true);
     for (const denied of DENYLIST) {
       expect(isAllowedKey(denied)).toBe(false);
@@ -46,6 +46,20 @@ describe('scope and lossless byte records', () => {
       expect(isAllowedKey(`${denied}x`)).toBe(true);
     }
     for (const other of ['store', 'x402fac:reservation:v1:a', 'session:a', 'payment:claim:a']) expect(isAllowedKey(other)).toBe(false);
+  });
+  it('includes durable agent families without including ephemeral agent credentials', async () => {
+    const docs = await readFile('docs/DEPLOY_CHECKLIST.md', 'utf8');
+    for (const prefix of ['x402:settle:payer:', 'agent:bound:', 'agent:owner:']) {
+      expect(isAllowedKey(prefix + '0x123')).toBe(true);
+      expect(docs).toContain('~' + prefix + '*');
+    }
+    for (const key of ['agent:challenge:nonce', 'agent:proof:nonce', 'agent:bound', 'agent:owner']) expect(isAllowedKey(key)).toBe(false);
+  });
+  it('still verifies archives with the original five-prefix manifest', async () => {
+    const legacy = { ...manifest, prefixes: ['x402:hosted:', 'store:', 'payment:claimed:', 'billing:settled:', 'x402:settle:ledger:'] };
+    const chunks = [];
+    for await (const part of createJsonl(legacy, [record], { now })) chunks.push(part);
+    expect((await verifyJsonl(chunks)).footer.keys).toBe(1);
   });
   it.each([
     [Buffer.from('\uFEFFhello'), '\uFEFFhello'],

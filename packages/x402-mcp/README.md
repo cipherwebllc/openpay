@@ -438,14 +438,22 @@ ordinary MCP payments. Keep a dedicated wallet with only a small balance.
 it creates the tenant, opens self-join, logs the owner in via SIWE, promotes them to
 owner, creates the buyer agent, applies the JPYC typed-data policy, enrolls the
 owner's TOTP (MFA), establishes an MFA session, issues the signer credential, and
-prints the completed MCP env block. Takes about a minute (it must wait out Steward's
-session-revocation boundaries and one TOTP window).
+saves the MCP env and owner TOTP seed to a new private JSON file (mode `0600`).
+Takes about a minute (it must wait out Steward's session-revocation boundaries and
+one TOTP window).
 
 ```bash
 OWNER_PRIVATE_KEY=0x... \
 STEWARD_PLATFORM_KEY=<one of the server STEWARD_PLATFORM_KEYS> \
-node scripts/steward-bootstrap.mjs
+node scripts/steward-bootstrap.mjs --out "$HOME/.config/openpay/steward.json"
 ```
+
+Without `--out`, a uniquely named file is created under `~/.config/openpay/`.
+Repository destinations (including symlinked parents) and existing files are refused.
+Only the path and non-secret identifiers are printed. CI requires `--allow-ci`.
+The file contains `env` (copy this object into your MCP configuration) and
+`ownerTotpSecret` (register this in your authenticator). It is updated after each
+credential is issued, so retain it even if a later provisioning step fails.
 
 The owner key is used only to sign the SIWE login in-process — it is never sent or
 stored. Start Steward with `SIWE_ALLOWED_DOMAINS` including your `STEWARD_URL` host so
@@ -455,7 +463,7 @@ Steward gates signer issuance behind an MFA-verified session. The script does no
 bypass this: it enrolls a TOTP factor on the owner's behalf and **hands the TOTP
 secret to you** at the end — add it to your authenticator app and keep it with the
 other secrets; you will need it for any future admin operation. The signer secret and
-tenant API key are printed exactly once.
+tenant API key are saved only in the private file, never in terminal output.
 
 ### Manual setup
 

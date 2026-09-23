@@ -3,7 +3,7 @@ import type { CheckResult, Finding } from './lib/kv-restore-check.mjs';
 import type { Command, Fetch } from './lib/upstash-rest.mjs';
 export const RESTORE_LIMITS: Readonly<{ requestBytes: number; members: number; ttlToleranceMs: number }>;
 export const INSTALL_LUA: string;
-export interface RestoreOptions { file: string; targetUrl: string; targetName: string; prefix?: string; apply?: boolean; check?: boolean }
+export interface RestoreOptions { file: string; targetUrl: string; targetName: string; prefix?: string; report?: string; apply?: boolean; check?: boolean }
 export type Category = 'applied' | 'exists' | 'lua_error' | 'timeout_verified_match' | 'timeout_unverified' | 'expired_skipped' | 'expired_during_verify' | 'mismatch';
 export interface RestoreReport {
   v: 1; archiveDigest: string | null; archiveName: string | null; targetFingerprint: string; targetName: string;

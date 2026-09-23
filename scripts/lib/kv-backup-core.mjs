@@ -7,7 +7,8 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { createGzip, createGunzip } from 'node:zlib';
 
-export const PREFIXES = Object.freeze(['x402:hosted:', 'store:', 'payment:claimed:', 'billing:settled:', 'x402:settle:ledger:']);
+export const PREFIXES = Object.freeze(['x402:hosted:', 'store:', 'payment:claimed:', 'billing:settled:', 'x402:settle:ledger:',
+  'x402:settle:payer:', 'agent:bound:', 'agent:owner:']);
 export const DENYLIST = Object.freeze(['store:quote:rl', 'store:license:verify:rpc', 'store:delivery:rpc', 'store:license:worker:lock']);
 export const LIMITS = Object.freeze({
   fullCollectionMax: 1000, fullCollectionBytes: 1024 * 1024, chunk: 1000, minChunk: 50,

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { archiveIdentity, captureKey, captureRecords, main, parseArgs, probeTypes, runBackup, scanKeys } from '@/scripts/kv-backup.mjs';
-import { LIMITS, verifyArchive } from '@/scripts/lib/kv-backup-core.mjs';
+import { LIMITS, PREFIXES, verifyArchive } from '@/scripts/lib/kv-backup-core.mjs';
 import { createUpstashClient } from '@/scripts/lib/upstash-rest.mjs';
 import { createR2Client, fileDigest } from '@/scripts/lib/r2.mjs';
 
@@ -44,6 +44,25 @@ afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 async function all(records: AsyncIterable<unknown>) { const result = []; for await (const record of records) result.push(record); return result; }
 
 describe('SCAN and TYPE phases', () => {
+  it('scans and captures payer indexes and bindings with their original expiries', async () => {
+    const keys = ['x402:settle:payer:buyer', 'agent:bound:buyer', 'agent:owner:owner'];
+    const ttl = 400 * 24 * 60 * 60 * 1000;
+    const fixture = redis((cmd) => {
+      const payer = cmd[1] === keys[0];
+      if (cmd[0] === 'TYPE') return payer ? 'list' : 'string';
+      if (cmd[0] === 'PTTL') return payer ? ttl : -1;
+      if (cmd[0] === 'LLEN') return 2;
+      if (cmd[0] === 'LRANGE') return ['new purchase', 'old purchase'];
+      if (cmd[0] === 'GET') return cmd[1] === keys[1] ? '{"owner":"owner"}' : '["buyer"]';
+      throw new Error('unexpected command');
+    }, keys);
+    const records = await all(captureRecords(fixture.client, { now: () => 100 }));
+    expect(records).toEqual([
+      { k: keys[0], t: 'list', capturedAt: 100, expiresAt: 100 + ttl, l: ['new purchase', 'old purchase'] },
+      { k: keys[1], t: 'string', capturedAt: 100, expiresAt: null, s: '{"owner":"owner"}' },
+      { k: keys[2], t: 'string', capturedAt: 100, expiresAt: null, s: '["buyer"]' },
+    ]);
+  });
   it('handles duplicates, empty nonfinal pages, allowlist and denylist families', async () => {
     let scans = 0;
     const fetch = vi.fn(async (_url: string, init: { body: string }) => {
@@ -59,7 +78,7 @@ describe('SCAN and TYPE phases', () => {
     });
     const client = createUpstashClient({ url: 'https://kv.test', token: 'token', fetch });
     expect((await scanKeys(client)).map((key: Uint8Array) => Buffer.from(key).toString())).toEqual(['store:a', 'store:quote:rlx', 'store:b']);
-    expect(scans).toBe(3); expect(fetch).toHaveBeenCalledTimes(7);
+    expect(scans).toBe(3); expect(fetch).toHaveBeenCalledTimes(PREFIXES.length + 2);
   });
   it('halves SCAN count after a limit even on initial cursor 0', async () => {
     const counts: number[] = [];
@@ -68,7 +87,7 @@ describe('SCAN and TYPE phases', () => {
       return cmd[5] > 250 ? new Response('', { status: 413 }) : new Response(JSON.stringify({ result: wire(['0', []]) }));
     } });
     expect(await scanKeys(client)).toEqual([]);
-    expect(counts).toEqual([500, 250, 500, 250, 500, 250, 500, 250, 500, 250]);
+    expect(counts).toEqual(PREFIXES.flatMap(() => [500, 250]));
   });
   it('uses TYPE batches of 500 and preserves per-command errors', async () => {
     const fixture = redis((cmd) => cmd[1] === 'store:2' ? new Error('NOPERM denied') : 'string');

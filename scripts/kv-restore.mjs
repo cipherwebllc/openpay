@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 import { createReadStream } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { pipeline } from 'node:stream/promises';
 import { createGunzip } from 'node:zlib';
+// Keep one private-file implementation in the published package so bootstrap is self-contained.
+// Moving it must update this DR import too; kv-restore.test.ts pins both consumers and packaging.
+import { openPrivateOutput, PrivateOutputError } from '../packages/x402-mcp/src/privateOutput.mjs';
 import { BackupError, LIMITS, PREFIXES, byteText, cleanupStaging, decryptToStaging,
   isAllowedKey, restoreBytes, sha256, verifyJsonl } from './lib/kv-backup-core.mjs';
 import { createUpstashClient, UpstashCommandError, UpstashTimeoutError } from './lib/upstash-rest.mjs';
@@ -61,7 +65,7 @@ function validateOptions(options) {
 }
 export function parseArgs(args) {
   const options = {}, seen = new Set();
-  const names = { '--file': 'file', '--target-url': 'targetUrl', '--target-name': 'targetName', '--prefix': 'prefix' };
+  const names = { '--file': 'file', '--target-url': 'targetUrl', '--target-name': 'targetName', '--prefix': 'prefix', '--report': 'report' };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (seen.has(arg)) throw new RestoreError('invalid_arguments');
@@ -195,14 +199,16 @@ async function readback(client, record, now) {
 }
 const safeCode = (error) => error instanceof RestoreError || error instanceof BackupError ? error.code : 'operation_failed';
 
-export async function runRestore({ env = process.env, fetch = globalThis.fetch, now = Date.now, reportDirectory = process.cwd(),
+export async function runRestore({ env = process.env, fetch = globalThis.fetch, now = Date.now, reportDirectory,
   timeoutMs = 30_000, ...options } = {}) {
   validateOptions(options);
   const stamp = new Date(now()).toISOString().replace(/[-:]|\.\d{3}/g, '');
-  const reportPath = join(resolve(reportDirectory), `restore-report-${options.targetName}-${stamp}.json`);
+  // Buyer-to-product key names belong in private scratch storage, never a checkout.
+  const reportPath = options.report ? resolve(options.report) : join(resolve(reportDirectory ??
+    await mkdtemp(join(tmpdir(), 'openpay-kv-restore-'))), `restore-report-${options.targetName}-${stamp}.json`);
   // Reserve the report before any network mutation; never overwrite an earlier drill's evidence
   // (dry-run and apply for the same target name naturally get distinct files).
-  const handle = await open(reportPath, 'wx', 0o600);
+  const { handle } = await openPrivateOutput(reportPath);
   const report = { v: 1, archiveDigest: null, archiveName: null, targetFingerprint: sha256(endpointHost(options.targetUrl)).slice(0, 16),
     targetName: options.targetName, mode: options.apply ? 'apply' : 'dry-run', operator: env.USER ?? null,
     startedAt: new Date(now()).toISOString(), finishedAt: null, status: 'running', failure: null, inFlight: null,
@@ -349,7 +355,13 @@ export async function main(args = process.argv.slice(2), { env = process.env, lo
     const result = await runRestore({ ...dependencies, ...parseArgs(args), env });
     // Closed output: no values, keys, URLs, credentials, or server-provided error strings.
     log(JSON.stringify({ status: result.report.status, counts: result.report.counts, failure: result.report.failure }));
+    log(`Report: ${result.reportPath}`);
     return result.exitCode;
-  } catch { error('KV restore failed'); return 1; }
+  } catch (err) {
+    // Only fixed local path-refusal messages may cross this boundary; raw I/O/transport
+    // errors can contain private paths, keys or credentials and must not reach logs.
+    error(err instanceof PrivateOutputError ? `KV restore failed: ${err.message}` : 'KV restore failed');
+    return 1;
+  }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) process.exitCode = await main();

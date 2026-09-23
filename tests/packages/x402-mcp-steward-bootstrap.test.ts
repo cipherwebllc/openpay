@@ -37,8 +37,11 @@ async function setAndVerifyJpycPolicy(args: SetPolicyArgs) {
 }
 
 function run(env: Record<string, string>) {
+  // GitHub Actions sets CI=true, which makes the script stop at its --allow-ci guard before the
+  // input validation these tests target. Drop the runner's CI flag; a test can still pass CI explicitly.
+  const { CI: _runnerCi, ...baseEnv } = process.env;
   return spawnSync('node', [SCRIPT], {
-    env: { ...process.env, ...env },
+    env: { ...baseEnv, ...env },
     encoding: 'utf8',
     timeout: 15_000,
   });
@@ -110,6 +113,12 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 describe('steward-bootstrap input validation', () => {
+  it('refuses to run under CI without an explicit --allow-ci', () => {
+    const r = run({ CI: 'true', STEWARD_PLATFORM_KEY: 'k', OWNER_PRIVATE_KEY: '0x' + '11'.repeat(32) });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/CI bootstrap requires explicit --allow-ci/);
+  });
+
   it('exits non-zero without STEWARD_PLATFORM_KEY', () => {
     const r = run({ STEWARD_PLATFORM_KEY: '', OWNER_PRIVATE_KEY: '0x' + '11'.repeat(32) });
     expect(r.status).not.toBe(0);
@@ -135,6 +144,12 @@ describe('steward-bootstrap jsonOrThrow', () => {
     await expect(
       jsonOrThrow(jsonResponse(body, status), 'promote owner'),
     ).rejects.toThrow(new RegExp(`promote owner failed \\(${status}\\)`));
+  });
+
+  it('withholds authenticated response bodies from error messages', async () => {
+    const { jsonOrThrow } = await bootstrapModule();
+    await expect(jsonOrThrow(jsonResponse({ ok: false, error: 'API_KEY SIGNER_SECRET TOTP_SEED' }, 500), 'signer issuance'))
+      .rejects.toThrow('signer issuance failed (500); response body withheld');
   });
 
   it('200 + ok:true だけ body を返す', async () => {

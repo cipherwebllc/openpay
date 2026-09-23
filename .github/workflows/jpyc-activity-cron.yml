@@ -20,11 +20,16 @@ jobs:
             echo "::error::CRON_SECRET secret is not set. Hourly jpyc-activity cannot run."
             exit 1
           fi
-          code=$(curl -s -o /tmp/out.json -w "%{http_code}" \
+          # Authenticated bodies contain private diagnostics; never send them to public logs.
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer $CRON_SECRET" \
             --max-time 90 \
             https://open-pay.jp/api/cron/jpyc-activity)
           echo "HTTP $code"
-          cat /tmp/out.json || true
           # 401 = secret 不一致 (設定ミスを赤で知らせる)。5xx も失敗扱い。
-          [ "$code" = "200" ]
+          if [ "$code" = "200" ]; then
+            echo "Cron trigger: accepted"
+          else
+            echo "Cron trigger: failed"
+            exit 1
+          fi
