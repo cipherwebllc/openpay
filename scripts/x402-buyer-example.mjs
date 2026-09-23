@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // OpenPay の JPYC forwarder-split 402 を 1 回購入するリファレンス買い手。
 //
-// 使い方 (鍵はファイルに書かない・env で渡す):
+// 使い方 (Node.js 20+・鍵はファイルに書かない・env で渡す):
+//   npm install openpay-x402-sdk viem
 //   BUYER_PRIVATE_KEY=0x... [RESOURCE_URL=https://open-pay.jp/api/paid/x] [MAX_JPYC=5] \
 //     node scripts/x402-buyer-example.mjs
 //
@@ -27,9 +28,9 @@ import { privateKeyToAccount } from 'viem/accounts';
 import {
   SUPPORTED_JPYC_ASSETS,
   SUPPORTED_JPYC_FORWARDERS,
-} from '../packages/x402-sdk/src/guards.mjs';
-import { MAX_AUTHORIZATION_TIMEOUT_SECONDS } from '../packages/x402-sdk/src/payment.mjs';
-import { parseSafePaymentUrl } from '../packages/x402-sdk/src/network.mjs';
+  MAX_AUTHORIZATION_TIMEOUT_SECONDS,
+  parseSafePaymentUrl,
+} from 'openpay-x402-sdk';
 
 const DEFAULT_RESOURCE_URL = 'https://open-pay.jp/api/paid/demo';
 export const DEFAULT_MAX_JPYC = '5';

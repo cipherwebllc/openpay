@@ -105,6 +105,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.doUnmock('@/lib/directory/data');
   vi.unstubAllEnvs();
   vi.resetModules();
 });
@@ -296,4 +297,26 @@ describe('paid Japan Web3 Directory APIs', () => {
     expect(routeMocks.verify).not.toHaveBeenCalled();
     expect(routeMocks.settle).not.toHaveBeenCalled();
   });
+});
+
+
+it('E2: the JPYC full export also returns all 51 published rows, excluding drafts', async () => {
+  const { DIRECTORY_ENTRIES } = await vi.importActual<typeof import('@/lib/directory/data')>('@/lib/directory/data');
+  const source = DIRECTORY_ENTRIES.find((entry) => entry.status === 'published')!;
+  vi.doMock('@/lib/directory/data', () => ({
+    DIRECTORY_ENTRIES: [
+      ...Array.from({ length: 51 }, (_, i) => ({ ...source, slug: `published-${i}` })),
+      { ...source, slug: 'hidden-draft', status: 'draft' },
+    ],
+  }));
+  routeMocks.verify.mockResolvedValue(NextResponse.json({ isValid: true, payer: PAYER }));
+  routeMocks.settle.mockResolvedValue(NextResponse.json({ success: true, transaction: TX_HASH, network: 'eip155:80002', payer: PAYER }));
+  const { list } = await load();
+  const response = await list.GET(req('/api/paid/japan-web3-directory', true));
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.total).toBe(51);
+  expect(body.items.map((item: { slug: string }) => item.slug)).toEqual(
+    Array.from({ length: 51 }, (_, i) => `published-${i}`),
+  );
 });

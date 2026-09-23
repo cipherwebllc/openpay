@@ -606,7 +606,7 @@ const VANILLA_OPENAPI_PATHS = {
           required: false,
           schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
           description:
-            'Maximum number of transfer events to return, newest first (1-100, default 20). This is not a page number.',
+            'Maximum number of transfer events to return: snapshot newest first, cursor delta oldest first (1-100, default 20). This is not a page number.',
           example: 20,
         },
         {
@@ -622,7 +622,7 @@ const VANILLA_OPENAPI_PATHS = {
           required: false,
           schema: { type: 'string', pattern: '^[0-9]+:(?:-1|[0-9]+)$' },
           description:
-            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), so repeated calls pay only for new events and return each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true. If the cursor is older than the scanned window, the response sets truncated=true. A cursor slightly beyond the current chain head (up to 64 blocks, which normal polling against a lagging node can produce) returns no items and echoes your cursor back unchanged; further ahead than that is rejected with 400 and error cursor_ahead_of_head before settlement. Without a cursor (mode=snapshot) hasMore only means older events in the window were omitted; start monitoring from nextCursor.',
+            'Both snapshot and delta scan through max(0, raw head - depth), where depth is 64 blocks on Polygon/Ethereum; 2 blocks on Kaia/Avalanche. Deeper reorgs can invalidate cursors. The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), returning each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true. If the cursor is older than the scanned window, the response sets truncated=true. A cursor more than 64 blocks beyond the raw head is rejected with 400 cursor_ahead_of_head before settlement (tolerance is measured from the raw head, independently of confirmation depth). Otherwise, a cursor newer than the scan boundary returns no items and is echoed unchanged until the boundary catches up. Without a cursor (mode=snapshot) hasMore only means older events in the window were omitted; start monitoring from nextCursor.',
           example: '92387695:286',
         },
       ],
@@ -742,7 +742,7 @@ const VANILLA_DIRECTORY_OPENAPI_PATHS = {
       description: `${USDC_SERVICE_MONITOR.description} Payment: standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
       parameters: SERVICE_MONITOR_PARAMS,
       'x-agent-usage':
-        'Run on a weekly schedule. Before paying, GET the free /api/jpyc/services/teaser and compare latestRecordedAt (the maximum effective date across all events) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince to pay only for deltas; dedupe by slug+date+changeType. When changes is empty, report "no significant change" — do not re-fetch the snapshot. Verify with each event sourceUrl before acting on a change.',
+        'Run on a weekly schedule. Before paying, GET the free /api/jpyc/services/teaser and compare latestRecordedAt (max(date, collectedAt), with date used when collectedAt is absent) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince to pay only for deltas; dedupe by slug+date+changeType. When changes is empty, report "no significant change" — do not re-fetch the snapshot. Verify with each event sourceUrl before acting on a change.',
       'x-payment-info': usdcPaymentInfo(USDC_SERVICE_MONITOR.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',
@@ -768,7 +768,7 @@ const VANILLA_DIRECTORY_OPENAPI_PATHS = {
       tags: ['Japan Web3 Directory'],
       summary: 'Free teaser of the JPYC Service Monitor (latest 3 change events)',
       description:
-        'Free, no payment: the 3 most recent change events from the JPYC Service Monitor, so an agent can inspect real output before buying — and skip the paid call when latestRecordedAt (the maximum effective date across all events) is before its stored nextChangedSince. The paid feed adds every event, the current monitor row per service, and changedSince deltas.',
+        'Free, no payment: the 3 most recent change events from the JPYC Service Monitor, so an agent can inspect real output before buying — and skip the paid call when latestRecordedAt (max(date, collectedAt), with date used when collectedAt is absent) is before its stored nextChangedSince. The paid feed adds every event, the current monitor row per service, and changedSince deltas.',
       responses: {
         '200': { description: 'Latest 3 events plus pointers to the paid feed' },
         '404': { description: 'Feature disabled' },
@@ -780,7 +780,7 @@ const VANILLA_DIRECTORY_OPENAPI_PATHS = {
       tags: ['Japan Web3 Directory'],
       summary: 'Free teaser of the Japan Stablecoin Payment Monitor (latest 3 events)',
       description:
-        'Free, no payment: the 3 most recent payment-scope events, so an agent can inspect real output before buying — and skip the paid call when latestRecordedAt (the maximum effective date across all events) is before its stored nextChangedSince. The paid feed adds the full dated history and changedSince deltas.',
+        'Free, no payment: the 3 most recent payment-scope events, so an agent can inspect real output before buying — and skip the paid call when latestRecordedAt (max(date, collectedAt), with date used when collectedAt is absent) is before its stored nextChangedSince. The paid feed adds the full dated history and changedSince deltas.',
       responses: {
         '200': { description: 'Latest 3 events plus pointers to the paid feed' },
         '404': { description: 'Feature disabled' },
@@ -795,7 +795,7 @@ const VANILLA_DIRECTORY_OPENAPI_PATHS = {
       description: `${USDC_PAYMENT_MONITOR.description} Payment: standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
       parameters: SERVICE_MONITOR_PARAMS,
       'x-agent-usage':
-        'Run on a weekly schedule when monitoring Japanese stablecoin payment providers. Before paying, GET the free /api/stablecoin-payments/teaser and compare latestRecordedAt (the maximum effective date across all events) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; dedupe by provider+date+changeCategory. When changes is empty, report "no significant change". Verify with each event sourceUrl before acting on a change.',
+        'Run on a weekly schedule when monitoring Japanese stablecoin payment providers. Before paying, GET the free /api/stablecoin-payments/teaser and compare latestRecordedAt (max(date, collectedAt), with date used when collectedAt is absent) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; dedupe by provider+date+changeCategory. When changes is empty, report "no significant change". Verify with each event sourceUrl before acting on a change.',
       'x-payment-info': usdcPaymentInfo(USDC_PAYMENT_MONITOR.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',
@@ -831,7 +831,7 @@ const JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS = {
         'Same data and contract as the USDC variant: dated change events (added / updated / removed / verified) for Japan-related JPYC/Web3 services, each tied to an official source URL. Pass changedSince=YYYY-MM-DD to fetch only what changed; an empty changes list explicitly means no change. Paid in JPYC via the OpenPay facilitator (buyer pays price + x402 facilitator fee).',
       parameters: SERVICE_MONITOR_PARAMS,
       'x-agent-usage':
-        'Run on a weekly schedule. Before paying, GET the free /api/jpyc/services/teaser and compare latestRecordedAt (the maximum effective date across all events) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; dedupe by slug+date+changeType. When changes is empty, report "no significant change".',
+        'Run on a weekly schedule. Before paying, GET the free /api/jpyc/services/teaser and compare latestRecordedAt (max(date, collectedAt), with date used when collectedAt is absent) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; dedupe by slug+date+changeType. When changes is empty, report "no significant change".',
       'x-payment-info': paymentInfo(JPYC_SERVICES_RESOURCE.priceJpyc),
       responses: {
         '200': {
@@ -858,7 +858,7 @@ const JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS = {
         'Same data and contract as the USDC variant: dated, categorized events (launches, pilots, partnerships, fee changes, closures) for stablecoin payment services in Japan, each tied to an official source URL. Pass changedSince=YYYY-MM-DD to fetch only new events; an empty changes list explicitly means no change. Paid in JPYC via the OpenPay facilitator (buyer pays price + x402 facilitator fee).',
       parameters: SERVICE_MONITOR_PARAMS,
       'x-agent-usage':
-        'Run on a weekly schedule when monitoring Japanese stablecoin payment providers. Before paying, GET the free /api/stablecoin-payments/teaser and compare latestRecordedAt (the maximum effective date across all events) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; report "no significant change" when changes is empty.',
+        'Run on a weekly schedule when monitoring Japanese stablecoin payment providers. Before paying, GET the free /api/stablecoin-payments/teaser and compare latestRecordedAt (max(date, collectedAt), with date used when collectedAt is absent) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; report "no significant change" when changes is empty.',
       'x-payment-info': paymentInfo(JPYC_PAYMENTS_RESOURCE.priceJpyc),
       responses: {
         '200': {

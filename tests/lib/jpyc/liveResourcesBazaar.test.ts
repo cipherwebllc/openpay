@@ -13,12 +13,14 @@ import { JPYC_CHAINS } from '@/lib/chains';
 import { buildBazaarQueryExtensionV2 } from '@/lib/x402/v2';
 import {
   TRANSFERS_MAX_LIMIT,
+  TRANSFER_CONFIRMATION_DEPTH_BLOCKS,
   parseLimitParam,
 } from '@/lib/jpyc/live';
 import {
   TRANSFERS_LIMIT_PATTERN,
   USDC_JPYC_ACTIVITY,
   USDC_JPYC_ATTEST,
+  USDC_JPYC_TRANSFERS,
   USDC_JPYC_LIVE_RESOURCES,
   agentUsageText,
   type AgentUsage,
@@ -34,6 +36,35 @@ describe('JPYC ライブ API の掲載メタ', () => {
     expect(USDC_JPYC_ATTEST.description).toContain('confirmations and finality are unsigned');
     expect(USDC_JPYC_ATTEST.description).toContain('unfinalized or finality-unknown');
     expect(USDC_JPYC_ATTEST.trigger.avoidWhen.join(' ')).toContain('Finality guarantees');
+  });
+
+  it('E14: public transfer wording discloses per-chain delays before purchase and raw-head tolerance', () => {
+    const transfers = USDC_JPYC_TRANSFERS;
+    expect(TRANSFER_CONFIRMATION_DEPTH_BLOCKS).toEqual({ polygon: 64n, ethereum: 64n, kaia: 2n, avalanche: 2n });
+    const policy = '64 blocks on Polygon/Ethereum; 2 blocks on Kaia/Avalanche';
+    for (const text of [
+      transfers.description,
+      ...transfers.trigger.callWhen.slice(0, 1),
+      transfers.trigger.repeatWhen[2],
+      transfers.trigger.avoidWhen[0],
+      transfers.bazaar.output.schema.properties.toBlock.description,
+      transfers.bazaar.queryParamsSchema.properties.cursor.description,
+    ]) expect(text).toContain(policy);
+    expect(transfers.description).toContain('deeper reorgs');
+    expect(transfers.description).toContain('sanctions screening');
+    expect(transfers.trigger.avoidWhen[0]).toContain('Immediate');
+    expect(transfers.bazaar.queryParamsSchema.properties.cursor.description).toContain('tolerance is measured from the raw head');
+    const llms = readFileSync(join(process.cwd(), 'public/llms.txt'), 'utf8');
+    const line = llms.split('\n').find((value) => value.includes('/api/paid/usdc/jpyc/transfers?'))!;
+    expect(line).toContain('Polygon/Ethereum=64、Kaia/Avalanche=2 ブロック');
+    expect(line).toContain('送信直後には買わず');
+    expect(line).toContain('未取得の続き（hasMore=true）');
+    expect(line).toContain('truncated=true');
+    expect(line).toContain('深い reorg による取りこぼしは保証外');
+    const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
+    const row = readme.split('\n').find((value) => value.includes('`GET /api/paid/usdc/jpyc/transfers?chain=`'))!;
+    expect(row).toContain(policy);
+    expect(row).toContain('snapshot newest first, cursor delta oldest first');
   });
 
   it('Bazaar 宣言の info は自分の schema に適合する (Ajv 2020・CDP validator と同等)', () => {

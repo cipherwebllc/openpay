@@ -45,6 +45,38 @@ afterEach(() => {
 });
 
 describe('GET /openapi.json (x402 インデクサ向け discovery)', () => {
+  it('E14: OpenAPI discloses per-chain purchase delays and separates raw-head tolerance', async () => {
+    const body = await doc();
+    const operation = body.paths['/api/paid/usdc/jpyc/transfers'].get;
+    const usage = operation['x-agent-usage'] as { callWhen: string[]; avoidWhen: string[] };
+    const policy = '64 blocks on Polygon/Ethereum; 2 blocks on Kaia/Avalanche';
+    expect(usage.callWhen[0]).toContain(policy);
+    expect(usage.avoidWhen[0]).toContain(policy);
+    expect(usage.avoidWhen[0]).toContain('Immediate');
+    const params = operation.parameters as { name: string; description: string }[];
+    const cursor = params.find((param) => param.name === 'cursor')!;
+    expect(cursor.description).toContain(policy);
+    expect(cursor.description).toContain('tolerance is measured from the raw head');
+  });
+
+  it('E1: every teaser purchase check uses latestRecordedAt, including backfilled events', async () => {
+    const body = await doc();
+    const usages = Object.values(body.paths).flatMap((path) => Object.values(path))
+      .map((operation) => operation['x-agent-usage'])
+      .filter((usage): usage is string => typeof usage === 'string' && usage.includes('/teaser'));
+    expect(usages).toHaveLength(4);
+    for (const usage of usages) expect(usage).toContain('latestRecordedAt');
+    for (const path of ['/api/jpyc/services/teaser', '/api/stablecoin-payments/teaser']) {
+      expect(body.paths[path].get.description).toContain('latestRecordedAt');
+    }
+    const { JPYC_SERVICES_RESOURCE, JPYC_PAYMENTS_RESOURCE } = await import('@/lib/directory/paidResources');
+    for (const resource of [JPYC_SERVICES_RESOURCE, JPYC_PAYMENTS_RESOURCE]) {
+      const schema = resource.outputSchema.output.properties;
+      expect(schema.mode.description).toContain('max(date, collectedAt)');
+      expect(schema.nextChangedSince.description).toContain('max(date, collectedAt)');
+    }
+  });
+
   it.each([[false, true], [true, false], [true, true]])('license schemas and public operations follow parent=%s child=%s', async (parent, child) => {
     vi.stubEnv('ENABLE_CREATOR_STORE', parent ? '1' : '0');
     vi.stubEnv('ENABLE_LICENSE_NFT', child ? '1' : '0');

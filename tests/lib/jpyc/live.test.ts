@@ -28,6 +28,7 @@ import { logger } from '@/lib/logger';
 import { JPYC_CHAINS, chainForSlug } from '@/lib/chains';
 import {
   CURSOR_HEAD_TOLERANCE_BLOCKS,
+  TRANSFER_CONFIRMATION_DEPTH_BLOCKS,
   TRANSFERS_DEFAULT_LIMIT,
   TRANSFERS_MAX_LIMIT,
   TRANSFER_CHUNK_BLOCKS,
@@ -170,6 +171,98 @@ describe('readTransfers', () => {
     args: { from, to, value },
   });
 
+  const expectedDepth = { polygon: 64n, kaia: 2n, avalanche: 2n, ethereum: 64n } as const;
+
+  it.each(JPYC_CHAINS)('E14: %s snapshot and delta stop at the per-chain confirmation boundary', async (chain) => {
+    const boundary = 1_000n - expectedDepth[chain];
+    const logs = [log(boundary, 2, ADDR, OTHER, 1n), log(boundary + 1n, 3, ADDR, OTHER, 2n)];
+    const getLogs = vi.fn(async (q: { fromBlock: bigint; toBlock: bigint }) =>
+      logs.filter((item) => item.blockNumber >= q.fromBlock && item.blockNumber <= q.toBlock),
+    );
+    setAll(() => okClient({ getBlockNumber: vi.fn().mockResolvedValue(1_000n), getLogs }));
+    for (const cursor of [undefined, { block: boundary - 1n, logIndex: -1 }]) {
+      const result = await readTransfers(chain, { limit: 20, cursor });
+      expect(result).toMatchObject({ status: 'ok', toBlock: String(boundary), nextCursor: `${boundary}:2` });
+      if (result.status === 'ok') expect(result.items.map((item) => item.blockNumber)).toEqual([String(boundary)]);
+    }
+    for (const [q] of getLogs.mock.calls) expect(q.toBlock).toBeLessThanOrEqual(boundary);
+  });
+
+  it('E14: all four mainnet chains use their own depth and retain raw-head cursor tolerance', async () => {
+    vi.stubEnv('NEXT_PUBLIC_NETWORK_ENV', 'mainnet');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE', '1');
+    vi.stubEnv('NEXT_PUBLIC_ENABLE_JPYC_ETHEREUM', '1');
+    vi.resetModules();
+    try {
+      const chains = await import('@/lib/chains');
+      const live = await import('@/lib/jpyc/live');
+      expect(chains.JPYC_CHAINS).toEqual(['polygon', 'kaia', 'avalanche', 'ethereum']);
+      for (const chain of chains.JPYC_CHAINS) {
+        const boundary = 1_000n - expectedDepth[chain];
+        const getLogs = vi.fn().mockResolvedValue([]);
+        clients.set(chains.chainForSlug(chain).id, okClient({
+          getBlockNumber: vi.fn().mockResolvedValue(1_000n), getLogs,
+        }));
+        for (const cursor of [undefined, { block: boundary - 1n, logIndex: -1 }]) {
+          expect(await live.readTransfers(chain, { limit: 20, cursor }))
+            .toMatchObject({ status: 'ok', toBlock: String(boundary), nextCursor: `${boundary}:-1` });
+        }
+        getLogs.mockClear();
+        for (const block of [1_000n, 1_000n + CURSOR_HEAD_TOLERANCE_BLOCKS]) {
+          expect(await live.readTransfers(chain, { limit: 20, cursor: { block, logIndex: 5 } }))
+            .toMatchObject({ status: 'ok', items: [], nextCursor: `${block}:5` });
+        }
+        expect(await live.readTransfers(chain, {
+          limit: 20, cursor: { block: 1_001n + CURSOR_HEAD_TOLERANCE_BLOCKS, logIndex: 5 },
+        })).toMatchObject({ status: 'cursor_ahead_of_head' });
+        expect(getLogs).not.toHaveBeenCalled();
+      }
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+
+  it('E14: a replaced head event is withheld, then its lower-logIndex replacement is delivered once', async () => {
+    let head = 1_000n;
+    let logs = [log(1_000n, 5, ADDR, OTHER, 1n)];
+    const getLogs = vi.fn(async (q: { fromBlock: bigint; toBlock: bigint }) =>
+      logs.filter((item) => item.blockNumber >= q.fromBlock && item.blockNumber <= q.toBlock),
+    );
+    setAll(() => okClient({ getBlockNumber: vi.fn(async () => head), getLogs }));
+    const first = await readTransfers(JPYC_CHAINS[0], { limit: 20 });
+    expect(first).toMatchObject({ items: [], nextCursor: '936:-1' });
+    if (first.status !== 'ok') return;
+    logs = [log(1_000n, 2, ADDR, OTHER, 2n)];
+    head = 1_064n;
+    const second = await readTransfers(JPYC_CHAINS[0], { limit: 20, cursor: parseCursorParam(first.nextCursor)! });
+    expect(second).toMatchObject({ nextCursor: '1000:2', items: [{ blockNumber: '1000', logIndex: 2 }] });
+    if (second.status !== 'ok') return;
+    const third = await readTransfers(JPYC_CHAINS[0], { limit: 20, cursor: parseCursorParam(second.nextCursor)! });
+    expect(third).toMatchObject({ items: [], nextCursor: '1000:2' });
+  });
+
+  it('E14: a legacy head cursor waits for confirmation without scanning or moving backwards', async () => {
+    const getLogs = vi.fn().mockResolvedValue([]);
+    setAll(() => okClient({ getBlockNumber: vi.fn().mockResolvedValue(1_000n), getLogs }));
+    expect(await readTransfers(JPYC_CHAINS[0], { limit: 20, cursor: { block: 1_000n, logIndex: 5 } }))
+      .toMatchObject({ status: 'ok', toBlock: '936', items: [], nextCursor: '1000:5' });
+    expect(getLogs).not.toHaveBeenCalled();
+  });
+
+  it('E14: short chains clamp the confirmed scan boundary at genesis', async () => {
+    const getLogs = vi.fn().mockResolvedValue([]);
+    setAll(() => okClient({ getBlockNumber: vi.fn().mockResolvedValue(10n), getLogs }));
+    expect(await readTransfers(JPYC_CHAINS[0], { limit: 20 }))
+      .toMatchObject({ status: 'ok', fromBlock: '0', toBlock: '0', nextCursor: '0:-1' });
+    expect(getLogs).toHaveBeenCalledWith(expect.objectContaining({ fromBlock: 0n, toBlock: 0n }));
+  });
+
+  const confirmedClient = (over: Partial<ClientMock> = {}) => okClient({
+    getBlockNumber: vi.fn().mockResolvedValue(1_000_000n + TRANSFER_CONFIRMATION_DEPTH_BLOCKS[JPYC_CHAINS[0]]),
+    ...over,
+  });
+
   // 公開 RPC の範囲制限 (drpc ≈100 ブロック) に合わせ、窓を 100 ブロックのチャンクで新しい順に読む。
   // mock は「要求範囲に含まれる log だけ返す」= 実 RPC と同じ振る舞い。
   const ALL_LOGS = [
@@ -184,7 +277,7 @@ describe('readTransfers', () => {
     );
 
   it('窓を ≤100 ブロックのチャンクで新しい順に読み、limit に達したら残りを読まない', async () => {
-    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    setAll(() => confirmedClient({ getLogs: rangedGetLogs() }));
     const slug = JPYC_CHAINS[0];
     const r = await readTransfers(slug, { limit: 2 });
     expect(r.status).toBe('ok');
@@ -205,7 +298,7 @@ describe('readTransfers', () => {
   });
 
   it('limit に満たなければ窓全体を読み切り、窓外の log は含めない', async () => {
-    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    setAll(() => confirmedClient({ getLogs: rangedGetLogs() }));
     const slug = JPYC_CHAINS[0];
     const r = await readTransfers(slug, { limit: 100 });
     expect(r.status).toBe('ok');
@@ -220,7 +313,7 @@ describe('readTransfers', () => {
   it('address 指定はチャンクごとに from/to の 2 クエリを和集合し重複を除く', async () => {
     const dup = log(999_999n, 0, ADDR, ADDR, 1n);
     setAll(() =>
-      okClient({
+      confirmedClient({
         getLogs: vi.fn(async (q: { fromBlock: bigint; toBlock: bigint }) =>
           dup.blockNumber >= q.fromBlock && dup.blockNumber <= q.toBlock ? [dup] : [],
         ),
@@ -250,7 +343,7 @@ describe('readTransfers', () => {
   });
 
   it('delta (cursor あり): cursor より新しい分だけを**古い順**に返し、同一 block は logIndex で厳密比較・nextCursor は返した最新位置', async () => {
-    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    setAll(() => confirmedClient({ getLogs: rangedGetLogs() }));
     const slug = JPYC_CHAINS[0];
     // ALL_LOGS: (999999,3) (999999,0) (999990,1) (999500,0)。cursor=(999990,1) → (999999,0) (999999,3) を古い順
     const r = await readTransfers(slug, { limit: 100, cursor: { block: 999_990n, logIndex: 1 } });
@@ -269,7 +362,7 @@ describe('readTransfers', () => {
   });
 
   it('delta: 件数 > limit でも取りこぼさない (limit=1 で 2 回に分けて全件回収・hasMore で継続)', async () => {
-    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    setAll(() => confirmedClient({ getLogs: rangedGetLogs() }));
     const slug = JPYC_CHAINS[0];
     const first = await readTransfers(slug, { limit: 1, cursor: { block: 999_990n, logIndex: 1 } });
     expect(first.status).toBe('ok');
@@ -286,7 +379,7 @@ describe('readTransfers', () => {
   });
 
   it('delta: 何も無ければ items 空・nextCursor は "toBlock:-1" (次回も差分だけ)・hasMore=false', async () => {
-    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    setAll(() => confirmedClient({ getLogs: rangedGetLogs() }));
     const r = await readTransfers(JPYC_CHAINS[0], { limit: 20, cursor: { block: 999_999n, logIndex: 3 } });
     expect(r.status).toBe('ok');
     if (r.status !== 'ok') return;
@@ -297,7 +390,7 @@ describe('readTransfers', () => {
   });
 
   it('delta: nextCursor は入力 cursor より後退しない (同一 block で 0 件でも既読ログを再取得させない)', async () => {
-    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    setAll(() => confirmedClient({ getLogs: rangedGetLogs() }));
     // toBlock=1000000 と同じ block を cursor に渡し 0 件 → (1000000,-1) < (1000000,5) なので入力を維持
     const r = await readTransfers(JPYC_CHAINS[0], { limit: 20, cursor: { block: 1_000_000n, logIndex: 5 } });
     expect(r.status).toBe('ok');
@@ -307,7 +400,7 @@ describe('readTransfers', () => {
   });
 
   it('snapshot (cursor なし): hasMore は「窓内に limit より多い」を表し、nextCursor は最新位置', async () => {
-    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    setAll(() => confirmedClient({ getLogs: rangedGetLogs() }));
     const slug = JPYC_CHAINS[0];
     const r = await readTransfers(slug, { limit: 2 });
     expect(r.status).toBe('ok');
@@ -331,7 +424,7 @@ describe('readTransfers', () => {
   });
 
   it('cursor が走査窓より古いと truncated=true (窓の下端までしか読まない)', async () => {
-    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+    setAll(() => confirmedClient({ getLogs: rangedGetLogs() }));
     const slug = JPYC_CHAINS[0];
     const r = await readTransfers(slug, { limit: 100, cursor: { block: 1n, logIndex: -1 } });
     expect(r.status).toBe('ok');
@@ -352,10 +445,10 @@ describe('readTransfers', () => {
   // 買い手に非が無いのにフィードが止まる)。
   it('E10: cursor が head より先行しても許容量以内なら items:[] + 同じ cursor を echo・getLogs を呼ばない', async () => {
     const getLogs = vi.fn().mockResolvedValue([]);
-    setAll(() => okClient({ getLogs })); // getBlockNumber は既定の 1_000_000n
+    setAll(() => confirmedClient({ getLogs })); // raw head は confirmed boundary + confirmation depth
     const slug = JPYC_CHAINS[0];
     for (const ahead of [1n, CURSOR_HEAD_TOLERANCE_BLOCKS]) {
-      const cursor = { block: 1_000_000n + ahead, logIndex: 7 };
+      const cursor = { block: 1_000_000n + TRANSFER_CONFIRMATION_DEPTH_BLOCKS[JPYC_CHAINS[0]] + ahead, logIndex: 7 };
       const r = await readTransfers(slug, { limit: 20, cursor });
       expect(r.status, `ahead=${ahead}`).toBe('ok');
       if (r.status !== 'ok') return;
@@ -371,25 +464,25 @@ describe('readTransfers', () => {
 
   it('E10: 許容量を超えて先行する cursor は status=cursor_ahead_of_head・getLogs を呼ばない (空振り課金の防止)', async () => {
     const getLogs = vi.fn().mockResolvedValue([]);
-    setAll(() => okClient({ getLogs }));
+    setAll(() => confirmedClient({ getLogs }));
     const slug = JPYC_CHAINS[0];
     const r = await readTransfers(slug, {
       limit: 20,
-      cursor: { block: 1_000_000n + CURSOR_HEAD_TOLERANCE_BLOCKS + 1n, logIndex: 0 },
+      cursor: { block: 1_000_000n + TRANSFER_CONFIRMATION_DEPTH_BLOCKS[JPYC_CHAINS[0]] + CURSOR_HEAD_TOLERANCE_BLOCKS + 1n, logIndex: 0 },
     });
     expect(r.status).toBe('cursor_ahead_of_head');
     expect(getLogs).not.toHaveBeenCalled();
   });
 
-  it('E10: cursor.block === toBlock (現在の head と同一) は通常走査 (境界値)', async () => {
-    setAll(() => okClient({ getLogs: rangedGetLogs() }));
+  it('E10: cursor.block === toBlock (確認待ち境界と同一) は通常走査 (境界値)', async () => {
+    setAll(() => confirmedClient({ getLogs: rangedGetLogs() }));
     const slug = JPYC_CHAINS[0];
     const r = await readTransfers(slug, { limit: 20, cursor: { block: 1_000_000n, logIndex: -1 } });
     expect(r.status).toBe('ok');
   });
 
   it('RPC 失敗は throw せず status=error で返す', async () => {
-    setAll(() => okClient({ getLogs: vi.fn().mockRejectedValue(new Error('rate limited')) }));
+    setAll(() => confirmedClient({ getLogs: vi.fn().mockRejectedValue(new Error('rate limited')) }));
     const r = await readTransfers(JPYC_CHAINS[0], { limit: 5 });
     expect(r.status).toBe('unavailable');
     if (r.status === 'unavailable') {

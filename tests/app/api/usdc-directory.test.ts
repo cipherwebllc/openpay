@@ -95,6 +95,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.doUnmock('@/lib/directory/data');
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.resetModules();
@@ -384,4 +385,26 @@ describe('usdPriceToAtomic (金額境界)', () => {
     expect(() => usdPriceToAtomic('¥100')).toThrow();
     expect(() => usdPriceToAtomic('$1e3')).toThrow();
   });
+});
+
+// E2: the fixed export must remain complete when the catalog outgrows search's page cap.
+it('E2: exports all 51 published rows and excludes drafts', async () => {
+  const { DIRECTORY_ENTRIES } = await vi.importActual<typeof import('@/lib/directory/data')>('@/lib/directory/data');
+  const source = DIRECTORY_ENTRIES.find((entry) => entry.status === 'published')!;
+  vi.doMock('@/lib/directory/data', () => ({
+    DIRECTORY_ENTRIES: [
+      ...Array.from({ length: 51 }, (_, i) => ({ ...source, slug: `published-${i}` })),
+      { ...source, slug: 'hidden-draft', status: 'draft' },
+    ],
+  }));
+  facilitatorOk();
+  const route = await load();
+  const response = await route.GET(req({ 'x-payment': b64(V1_PAYLOAD) }));
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.total).toBe(51);
+  expect(body.items).toHaveLength(51);
+  expect(body.items.map((item: { slug: string }) => item.slug)).toEqual(
+    Array.from({ length: 51 }, (_, i) => `published-${i}`),
+  );
 });

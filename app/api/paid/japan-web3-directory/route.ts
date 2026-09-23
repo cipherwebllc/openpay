@@ -4,7 +4,6 @@ import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
 import { DIRECTORY_LIST_RESOURCE } from '@/lib/directory/paidResources';
 import {
   createDirectoryEnvelope,
-  DIRECTORY_MAX_LIMIT,
   queryDirectory,
 } from '@/lib/directory/query';
 import type { DirectoryQuery } from '@/lib/directory/types';
@@ -15,7 +14,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const LIST_QUERY: DirectoryQuery = {
-  limit: DIRECTORY_MAX_LIMIT,
+  // 全件 export を検索用の 50 件上限で切らない。非公開行は queryDirectory が除外する。
+  limit: DIRECTORY_ENTRIES.length,
   offset: 0,
 };
 

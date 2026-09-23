@@ -127,7 +127,10 @@ export const JPYC_TRANSFERS_RESPONSE_SCHEMA = {
     ...ENVELOPE_COMMON,
     ...CHAIN_ROW_BASE,
     fromBlock: UINT_STRING,
-    toBlock: UINT_STRING,
+    toBlock: {
+      ...UINT_STRING,
+      description: 'Scan boundary for both snapshot and delta: max(0, raw head - depth), where depth is 64 blocks on Polygon/Ethereum; 2 blocks on Kaia/Avalanche. The confirmation delay reduces exposure to short reorgs; it is not a finality guarantee.',
+    },
     mode: {
       type: 'string',
       enum: ['snapshot', 'delta'],

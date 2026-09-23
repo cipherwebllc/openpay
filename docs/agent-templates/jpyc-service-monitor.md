@@ -78,9 +78,10 @@ MCP の `x402_pay` ツールに上記 URL を渡すだけで、402 チャレン�
 
 ## スクリプト例(鍵は env で渡す・ファイルに書かない)
 
-JPYC 版(Polygon・ガス不要):
+JPYC 版(Polygon・ガス不要・Node.js 20+。作業ディレクトリに npm パッケージをインストール):
 
 ```bash
+npm install openpay-x402-sdk viem
 curl -fsSL https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-buyer-example.mjs -o buyer.mjs
 BUYER_PRIVATE_KEY=0x... \
   RESOURCE_URL="https://open-pay.jp/api/paid/jpyc/services?changedSince=2026-08-27" \
@@ -91,7 +92,7 @@ USDC 版(Base・ガス不要・要 `npm i x402-fetch viem`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/cipherwebllc/openpay/main/scripts/x402-vanilla-buyer-smoke.mjs -o buyer-usdc.mjs
-PRIVATE_KEY=0x... MAX_USDC=0.02 \
+SMOKE_MAINNET_OK=1 PRIVATE_KEY=0x... MAX_USDC=0.02 \
   TARGET_URL="https://open-pay.jp/api/paid/usdc/jpyc/services?changedSince=2026-08-27" \
   node buyer-usdc.mjs
 ```
