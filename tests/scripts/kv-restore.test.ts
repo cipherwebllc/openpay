@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { compareRecord, installCommand, main, parseArgs, preflight, RESTORE_LIMITS, runRestore } from '@/scripts/kv-restore.mjs';
 import { createManifest, sha256, writeArchive, type BackupRecord } from '@/scripts/lib/kv-backup-core.mjs';
@@ -77,6 +77,29 @@ function target(hook?: (cmd: Command, db: Map<string, BackupRecord>) => unknown)
 
 describe('CLI contract', () => {
   const required = ['--file', 'backup.enc', '--target-url', 'https://target.test', '--target-name', 'drill'];
+  it('keeps the packaged private-output helper shared with the DR script', async () => {
+    const helper = resolve('packages/x402-mcp/src/privateOutput.mjs');
+    for (const entry of ['scripts/kv-restore.mjs', 'packages/x402-mcp/scripts/steward-bootstrap.mjs']) {
+      const source = await readFile(entry, 'utf8');
+      const imported = source.match(/from '([^']*privateOutput\.mjs)'/);
+      expect(imported).not.toBeNull();
+      expect(resolve(dirname(entry), imported![1])).toBe(helper);
+    }
+    const manifest = JSON.parse(await readFile('packages/x402-mcp/package.json', 'utf8'));
+    expect(manifest.files).toContain('src'); // The shared helper must also ship with bootstrap.
+    expect(await readFile(helper, 'utf8')).toContain('export async function openPrivateOutput');
+  });
+  it('explains private report path refusals without exposing raw errors', async () => {
+    const fake = target(), log = vi.fn(), error = vi.fn();
+    expect(await main([...required, '--report', resolve('restore-report-forbidden.json')], { ...options(), fetch: fake.fetch, log, error })).toBe(1);
+    expect(error).toHaveBeenLastCalledWith('KV restore failed: Private output must be outside a git repository');
+    const existing = join(dir, 'existing.json');
+    await writeFile(existing, 'previous');
+    expect(await main([...required, '--report', existing], { ...options(), fetch: fake.fetch, log, error })).toBe(1);
+    expect(error).toHaveBeenLastCalledWith('KV restore failed: Private output already exists; choose a new path');
+    expect(await readFile(existing, 'utf8')).toBe('previous');
+    expect(fake.fetch).not.toHaveBeenCalled();
+  });
   it('requires explicit target/file/name and defaults to dry-run', () => {
     expect(parseArgs(required)).toEqual({ file: 'backup.enc', targetUrl: 'https://target.test', targetName: 'drill' });
     expect(parseArgs([...required, '--check', '--apply', '--prefix', 'store:own:']).apply).toBe(true);
@@ -129,6 +152,48 @@ describe('preflight all records before mutation', () => {
 });
 
 describe('restore execution with fake fetch', () => {
+  it('defaults to a private temporary report outside the checkout', async () => {
+    const fake = target();
+    const result = await runRestore({ ...options(), reportDirectory: undefined, file: await archive(), fetch: fake.fetch });
+    try {
+      expect(result.exitCode).toBe(0);
+      expect(resolve(result.reportPath).startsWith(resolve(process.cwd()) + sep)).toBe(false);
+      expect((await stat(result.reportPath)).mode & 0o777).toBe(0o600);
+      expect((await stat(dirname(result.reportPath))).mode & 0o777).toBe(0o700);
+    } finally {
+      await rm(result.reportPath, { force: true });
+      if (basename(dirname(result.reportPath)).startsWith('openpay-kv-restore-')) await rm(dirname(result.reportPath), { recursive: true, force: true });
+    }
+  });
+  it('accepts --report and rejects a repository destination before network requests', async () => {
+    const fake = target();
+    const file = await archive();
+    const args = ['--file', file, '--target-url', 'https://target.test', '--target-name', 'drill', '--report', join(dir, 'chosen.json')];
+    const parsed = parseArgs(args);
+    const result = await runRestore({ ...options(), ...parsed, fetch: fake.fetch });
+    expect(result.reportPath).toBe(join(dir, 'chosen.json'));
+    expect((await stat(result.reportPath)).mode & 0o777).toBe(0o600);
+    fake.fetch.mockClear();
+    await expect(runRestore({ ...options(), ...parseArgs([...args.slice(0, -1), resolve('restore-report-forbidden.json')]), fetch: fake.fetch })).rejects.toThrow();
+    expect(fake.fetch).not.toHaveBeenCalled();
+  });
+  it('restores payer lists with remaining TTL and persistent bindings, skipping expired indexes', async () => {
+    const payer = '0x' + '1'.repeat(40), owner = '0x' + '2'.repeat(40);
+    const expiresAt = 100 + 400 * 24 * 60 * 60 * 1000;
+    const records = [
+      rec(`x402:settle:payer:${payer}`, { t: 'list', l: ['{"payer":"' + payer + '","resource":"https://example.test"}'], expiresAt }),
+      rec(`agent:bound:${payer}`, { s: JSON.stringify({ owner, at: '2026-09-23T00:00:00Z' }) }),
+      rec(`agent:owner:${owner}`, { s: JSON.stringify([payer]) }),
+      rec('x402:settle:payer:expired', { t: 'list', l: ['expired'], expiresAt: clock }),
+    ];
+    const fake = target();
+    const result = await runRestore({ ...options(), file: await archive(records), fetch: fake.fetch, apply: true });
+    expect(result.exitCode).toBe(0);
+    expect(result.report.results.applied).toEqual(records.slice(0, 3).map((r) => r.k));
+    expect(result.report.results.expired_skipped).toEqual(['x402:settle:payer:expired']);
+    for (const r of records.slice(0, 3)) expect(fake.db.get(String(r.k))).toMatchObject({ ...r, capturedAt: clock });
+    expect(fake.commands.find((cmd) => cmd[0] === 'EVAL' && cmd[3] === records[0].k)?.[5]).toBe(String(expiresAt - clock));
+  });
   it('dry-run performs archive/selection checks and DBSIZE but never writes', async () => {
     const fake = target(); const result = await runRestore({ ...options(), file: await archive(), fetch: fake.fetch });
     expect(result.exitCode).toBe(0); expect(result.report.status).toBe('dry_run');

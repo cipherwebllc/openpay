@@ -12,6 +12,8 @@
   inspect the directory and run `chmod 700 ~/.openpay-x402` once if it has legacy
   0755 permissions (use `OPENPAY_X402_HOME` instead when configured). Keep existing
   spend and wallet files; existing wallet files still require mode 0600.
+- Save `steward-bootstrap` credentials (MCP env and owner TOTP seed) to an exclusive `0600` file instead of printing secrets. Default to a new file under `~/.config/openpay/`; accept `--out` for an explicit path outside a repository, and preserve credentials already issued if a later step fails.
+- Require `--allow-ci` when CI is enabled (`CI=false` and `CI=0` disable this check). Withhold raw errors while retaining safe error names and codes for operator diagnostics.
 - No dependencies added. Unpublished; rule-15 human review is required before adoption.
 - Release order: publish SDK 0.10.1 first, then MCP 0.17.1. The SDK tarball must
   match the integrity pinned in this package's lockfile. If any SDK package bytes

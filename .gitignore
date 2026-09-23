@@ -63,3 +63,8 @@ broadcast/
 
 # 実装計画・調査メモ (CLAUDE.md「参照」で ignore 対象と規定済み。ローカル限定・公開しない)。
 plans/
+
+# Private restore evidence and local encrypted KV backup artifacts.
+restore-report-*.json
+*-full.jsonl.gz.enc
+*-r*-a*.meta.json

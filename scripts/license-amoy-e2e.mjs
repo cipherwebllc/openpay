@@ -4,12 +4,14 @@
 // Export E2E_SELLER_KEY, AMOY_TEST_BUYER_KEY, CRON_SECRET, NEXT_PUBLIC_LICENSE_NFT_AMOY,
 // NEXT_PUBLIC_POLYGON_AMOY_RPC_URL. Optional: E2E_TRANSFER_TO_KEY, E2E_BASE_URL,
 // E2E_PRICE_JPYC=1000, E2E_SUPPLY=2, E2E_MAX_JPYC=1100 (PER SIGNATURE), E2E_REPORT.
+// Reports default to os.tmpdir(); --report <path> overrides E2E_REPORT.
 // E2E_MINT_TIMEOUT_SEC=720, E2E_REGISTER_TIMEOUT_SEC=720; cron polls every 60s.
 // E2E_RESUME_PRODUCT=h_<id> resumes a registered/published non-transferable license;
 // E2E_MAX_PURCHASES=2 bounds new resume purchases. Requires SIWE /api/license/grants
 // (address, product, cursor; { ok, grants: [{ intentSalt, txHash, nft }], nextCursor }).
-// This checkout has no grants route: resume fails before spending if unavailable.
-// E2E_ALLOW_SKIPS=1 (default): SKIP counts as passing for exit status; 0 makes
+// This checkout has no grants route: E2E_RESUME_PRODUCT is rejected before any network/signing.
+// Resume helpers remain covered by offline fixtures until the grants route exists.
+// E2E_ALLOW_SKIPS=1 (default): skips permit exit 0, labeled PASS WITH SKIPS; 0 makes
 // any SKIP fail the run, while preserving SKIP labels and dependent-step skips.
 // No automatic env loading. --self-check needs neither env, server, RPC nor funds.
 // Production SIWE requires SIWE_ALLOWED_DOMAINS to include the exact localhost:port.
@@ -18,7 +20,9 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
   createPublicClient, createWalletClient, formatEther, formatUnits, getAddress,
@@ -34,7 +38,7 @@ import {
   normalizePaymentRequirements, parseJpycCap,
 } from './x402-buyer-example.mjs';
 
-const DEFAULT_REPORT = '/private/tmp/claude-501/-Users-masia-Documents-GitHub-openpay/8c4d3cdc-1d35-44d2-a4ab-a74b5732bd34/scratchpad/license-amoy-e2e.json';
+const DEFAULT_REPORT = join(tmpdir(), `license-amoy-e2e-${process.pid}-${randomBytes(8).toString('hex')}.json`);
 const CHAIN_ID = polygonAmoy.id;
 const NETWORK = `eip155:${CHAIN_ID}`;
 const JPYC = SUPPORTED_JPYC_ASSETS[NETWORK];
@@ -714,6 +718,8 @@ async function checkHeld(product) {
 }
 
 async function main() {
+  // An absent grants route must not let resume perform setup mutations or reach spending.
+  requireThat(!process.env.E2E_RESUME_PRODUCT, 'Resume unavailable: this checkout has no /api/license/grants route');
   const configured = await step('1.1', 'Configuration and spend guard', async () => {
     config = readConfig();
     rpc = createPublicClient({ chain: polygonAmoy, transport: http(config.rpcUrl, { timeout: 10_000, retryCount: 0 }) });
@@ -883,12 +889,28 @@ function runPassed(steps, allowSkips) {
   return steps.every((s) => s.status === 'OK' || (allowSkips && s.status === 'SKIP'));
 }
 
-async function writeReport() {
-  const path = resolve(process.env.E2E_REPORT ?? DEFAULT_REPORT);
+export function resultLabel(steps, allowSkips) {
+  if (!runPassed(steps, allowSkips)) return 'FAIL';
+  return steps.some((s) => s.status === 'SKIP') ? 'PASS WITH SKIPS' : 'PASS';
+}
+
+export function reportPath(args = process.argv.slice(2), env = process.env) {
+  let path;
+  let selfCheck = false;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--self-check' && !selfCheck) selfCheck = true;
+    else if (args[i] === '--report' && !path && args[i + 1] && !args[i + 1].startsWith('--')) path = args[++i];
+    else throw new CheckError('Usage: node scripts/license-amoy-e2e.mjs [--self-check] [--report <path>]');
+  }
+  return resolve(path ?? env.E2E_REPORT ?? DEFAULT_REPORT);
+}
+
+async function writeReport(path) {
   await step('11', 'Summary and JSON report', async () => {
     report.finishedAt = new Date().toISOString();
     report.durationMs = Date.now() - Date.parse(report.startedAt);
     report.ok = runPassed(report.steps, config?.allowSkips ?? (process.env.E2E_ALLOW_SKIPS ?? '1') === '1');
+    report.result = resultLabel(report.steps, config?.allowSkips ?? (process.env.E2E_ALLOW_SKIPS ?? '1') === '1');
     report.summary = { ok: report.steps.filter((s) => s.status === 'OK').length,
       fail: report.steps.filter((s) => s.status === 'FAIL').length, skip: report.steps.filter((s) => s.status === 'SKIP').length };
     await mkdir(dirname(path), { recursive: true });
@@ -900,12 +922,15 @@ async function writeReport() {
   report.durationMs = Date.now() - Date.parse(report.startedAt);
   report.summary = { ok: report.steps.filter((s) => s.status === 'OK').length,
     fail: report.steps.filter((s) => s.status === 'FAIL').length, skip: report.steps.filter((s) => s.status === 'SKIP').length };
+  report.result = resultLabel(report.steps, config?.allowSkips ?? (process.env.E2E_ALLOW_SKIPS ?? '1') === '1');
   // Include the reporting step itself; I/O failures are visible and nonzero.
-  try { await writeFile(path, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 }); }
-  catch { report.ok = false; console.error('[11] Final report write ... FAIL (local I/O failure)'); }
+  let saved = false;
+  try { await writeFile(path, JSON.stringify(report, null, 2) + '\n', { mode: 0o600 }); saved = true; }
+  catch { report.ok = false; report.result = 'FAIL'; console.error('[11] Final report write ... FAIL (local I/O failure)'); }
   console.table(report.steps.map(({ n, name, status, durationMs }) => ({ step: n, name, status, seconds: (durationMs / 1000).toFixed(2) })));
+  console.log(`Result: ${report.result}`);
   console.log(`Summary: OK=${report.summary.ok} FAIL=${report.summary.fail} SKIP=${report.summary.skip}`);
-  console.log(`JSON report: ${path}`);
+  console.log(saved ? `JSON report: ${path}` : 'JSON report: not saved (local I/O failure)');
   if (!report.ok) process.exitCode = 1;
 }
 
@@ -1114,12 +1139,14 @@ async function selfCheck() {
   console.log(`[self-check] SIWE parse/signature, cookie names, quote spend/asset/forwarder/domain guards, committed nonce and streamed listing ... OK (${Date.now() - started}ms; no network)`);
 }
 
-if (process.argv.includes('--self-check')) {
-  try { await selfCheck(); } catch { console.error('[self-check] ... FAIL (offline assertion failed)'); process.exitCode = 1; }
-} else if (process.argv.length > 2) {
-  console.error('Usage: node scripts/license-amoy-e2e.mjs [--self-check]');
-  process.exitCode = 1;
-} else {
-  try { await main(); } catch (error) { await step('fatal', 'Unexpected orchestration failure', async () => { throw error; }); }
-  await writeReport();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  let path;
+  try { path = reportPath(); }
+  catch (error) { console.error(safeError(error)); process.exitCode = 1; }
+  if (path && process.argv.includes('--self-check')) {
+    try { await selfCheck(); } catch { console.error('[self-check] ... FAIL (offline assertion failed)'); process.exitCode = 1; }
+  } else if (path) {
+    try { await main(); } catch (error) { await step('fatal', 'Unexpected orchestration failure', async () => { throw error; }); }
+    await writeReport(path);
+  }
 }

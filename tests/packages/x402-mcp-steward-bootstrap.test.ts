@@ -137,6 +137,12 @@ describe('steward-bootstrap jsonOrThrow', () => {
     ).rejects.toThrow(new RegExp(`promote owner failed \\(${status}\\)`));
   });
 
+  it('withholds authenticated response bodies from error messages', async () => {
+    const { jsonOrThrow } = await bootstrapModule();
+    await expect(jsonOrThrow(jsonResponse({ ok: false, error: 'API_KEY SIGNER_SECRET TOTP_SEED' }, 500), 'signer issuance'))
+      .rejects.toThrow('signer issuance failed (500); response body withheld');
+  });
+
   it('200 + ok:true だけ body を返す', async () => {
     const { jsonOrThrow } = await bootstrapModule();
     await expect(
