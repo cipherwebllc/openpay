@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+const deferred = vi.hoisted(() => ({ tasks: [] as (() => Promise<void>)[] }));
+vi.mock('next/server', async (importOriginal) => ({
+  ...await importOriginal<typeof import('next/server')>(),
+  after: (task: () => Promise<void>) => { deferred.tasks.push(task); },
+}));
+
 // API route のテスト: POST /api/log/payment と GET /api/log/payment/export。
 // kv の I/O は mock し、validation / 認証 / response 形状を検証する。
 
@@ -9,6 +15,8 @@ vi.mock('@/lib/kv', () => ({
   kvLlen: vi.fn(),
   kvLtrim: vi.fn(),
   kvExpire: vi.fn(),
+  kvIncr: vi.fn(),
+  kvSet: vi.fn(),
   isKvConfigured: vi.fn(),
 }));
 // rate limiter は key 引数の検証のみ (許可挙動は常に true = 現行と同じ)。
@@ -30,7 +38,7 @@ vi.mock('@/lib/logger', () => ({
   },
 }));
 
-import { POST } from '@/app/api/log/payment/route';
+import { POST as postRoute } from '@/app/api/log/payment/route';
 import { GET } from '@/app/api/log/payment/export/route';
 import {
   kvLpush,
@@ -38,10 +46,31 @@ import {
   kvLlen,
   kvLtrim,
   kvExpire,
+  kvIncr,
+  kvSet,
   isKvConfigured,
 } from '@/lib/kv';
-import { paymentLogDailyKey, listPaymentLogKeys } from '@/lib/paymentLog';
 import { logger } from '@/lib/logger';
+import { buildPaymentLogEvent, type PaymentLogContext } from '@/lib/paymentLog';
+
+// 通常の保存テストでは response 後の仕事も実行。latency のテストだけ postRoute を直接呼ぶ。
+async function POST(request: Request) {
+  const response = await postRoute(request);
+  for (const task of deferred.tasks.splice(0)) await task();
+  return response;
+}
+
+beforeEach(() => {
+  deferred.tasks = [];
+  vi.mocked(kvIncr).mockReset().mockResolvedValue({ ok: true, value: 1 });
+  const warningDays = new Set<string>();
+  vi.mocked(kvSet).mockReset().mockImplementation(async (key) => {
+    if (warningDays.has(key)) return { ok: true, value: null };
+    warningDays.add(key);
+    return { ok: true, value: 'OK' };
+  });
+  vi.mocked(logger.warn).mockClear();
+});
 
 const validBody = {
   flow: 'batch' as const,
@@ -105,8 +134,8 @@ describe('POST /api/log/payment', () => {
     const res = await POST(req(validBody));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    // レガシー単一リスト + 日次パーティションの 2 本 (レガシーが先)。
-    expect(kvLpush).toHaveBeenCalledTimes(2);
+    // export / stats が読む単一リストだけに保存する。
+    expect(kvLpush).toHaveBeenCalledTimes(1);
     const [key, value] = vi.mocked(kvLpush).mock.calls[0];
     expect(key).toBe('openpay:payments:log');
     const entry = JSON.parse(value);
@@ -197,12 +226,12 @@ describe('POST /api/log/payment', () => {
     expect(await res.json()).toEqual({ ok: false, error: 'invalid_json' });
   });
 
-  it('content-length が 8KB を超えると 413', async () => {
+  it('content-length が 5KB を超えると 413', async () => {
     const r = new Request('http://localhost/api/log/payment', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'content-length': String(9 * 1024),
+        'content-length': String(5 * 1024 + 1),
       },
       body: JSON.stringify(validBody),
     });
@@ -210,23 +239,105 @@ describe('POST /api/log/payment', () => {
     expect(res.status).toBe(413);
   });
 
-  it('content-length header 無しでも実 body が 8KB 超なら 413 (header bypass 防止)', async () => {
-    // 巨大 errorMessage で body を 8KB 超に。Request 構築では content-length を付けず、
-    // route 側が実 byte 長を再検証することを確認する (chunked 転送の bypass を塞ぐ)。
-    const huge = { ...validBody, errorMessage: 'x'.repeat(9 * 1024) };
-    const r = new Request('http://localhost/api/log/payment', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(huge),
-    });
-    const res = await POST(r);
+  it.each([undefined, '1'])('5KB + 1 byte body is rejected with content-length=%s', async (length) => {
+    const body = JSON.stringify({ ...validBody, padding: '' });
+    const oversized = body.replace('"padding":""', `"padding":"${'x'.repeat(5121 - Buffer.byteLength(body))}"`);
+    expect(Buffer.byteLength(oversized)).toBe(5121);
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (length !== undefined) headers['content-length'] = length;
+    const res = await POST(new Request('http://localhost/api/log/payment', {
+      method: 'POST', headers, body: oversized,
+    }));
     expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ ok: false, error: 'payload_too_large' });
+    expect(kvLpush).not.toHaveBeenCalled();
+    expect(kvIncr).not.toHaveBeenCalled();
+  });
+
+  it('exactly 5KB is accepted', async () => {
+    const body = { ...validBody, padding: '' };
+    body.padding = 'x'.repeat(5120 - Buffer.byteLength(JSON.stringify(body)));
+    expect(Buffer.byteLength(JSON.stringify(body))).toBe(5120);
+    const res = await POST(req(body));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
+  it('counts UTF-8 bytes, not characters', async () => {
+    const body = { ...validBody, padding: 'あ'.repeat(1600) };
+    expect(JSON.stringify(body).length).toBeLessThan(5120);
+    expect(Buffer.byteLength(JSON.stringify(body))).toBeGreaterThan(5120);
+    expect((await POST(req(body))).status).toBe(413);
     expect(kvLpush).not.toHaveBeenCalled();
   });
 
-  it('8KB 直下の通常 body は 200 (cap が正常 payload を誤 reject しない)', async () => {
-    const res = await POST(req(validBody));
+  it.each([
+    ['CJK', 'あ'], ['quote', '"'], ['newline', '\n'],
+    ['control escape', '\u0000'], ['lone surrogate escape', '\ud800'],
+  ])('accepts the full buildPaymentLogEvent payload with 500 UTF-16 units of %s', async (_, char) => {
+    const amount = (1n << 256n) - 1n;
+    const address = `0x${'a'.repeat(40)}` as const;
+    const hash = `0x${'b'.repeat(64)}` as const;
+    const context: PaymentLogContext = {
+      tip: true, chainSlug: 'arc', mode: 'standard', flow: 'standard-merchant',
+      chainId: Number.MAX_VALUE, sourceChainId: Number.MAX_VALUE,
+      tokenAddress: address, merchant: address, customer: address,
+      feeReceiver: address, circlePaymasterAddress: address,
+      merchantAmount: amount, feeAmount: amount, saleAmount: amount,
+      networkFeeEquivalent: amount, bridgedAmount: amount, bridgeFeeMax: amount,
+      circlePaymasterNetUsdc: amount.toString(), feeTxHash: hash, burnTxHash: hash,
+      bridge: 'gateway', provider: 'pimlico', circleVerification: 'client-reported',
+    };
+    const body = buildPaymentLogEvent(context, {
+      result: 'error', errorMessage: char.repeat(501), txHash: hash, userOpHash: hash,
+    });
+    expect(body.errorMessage).toBe(char.repeat(500));
+    // All optional fields + canonical uint256/address/hash sizes. 23-byte chain IDs
+    // conservatively cover even IDs larger than the builder's real chain configurations.
+    expect(Buffer.byteLength(JSON.stringify({ ...body, errorMessage: '' }))).toBe(1599);
+    const bytes = Buffer.byteLength(JSON.stringify(body));
+    expect(bytes).toBeGreaterThan(2048);
+    expect(bytes).toBeLessThanOrEqual(1600 + 500 * 6);
+    const res = await POST(req(body));
     expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(JSON.parse(vi.mocked(kvLpush).mock.calls[0][1])).toMatchObject(body);
+  });
+
+  it('cancels the body stream as soon as accumulated chunks exceed 5KB', async () => {
+    const cancel = vi.fn();
+    const r = req(validBody);
+    const text = vi.spyOn(r, 'text');
+    let chunks = 0;
+    Object.defineProperty(r, 'body', { value: new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (chunks++ < 10) controller.enqueue(new Uint8Array(1024));
+        else controller.close();
+      },
+      cancel,
+    }) });
+    const res = await POST(r);
+    expect(res.status).toBe(413);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(chunks).toBeLessThan(10);
+    expect(text).not.toHaveBeenCalled();
+    expect(kvLpush).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'merchantAmount', 'feeAmount', 'saleAmount', 'networkFeeEquivalent',
+    'blockNumber', 'bridgedAmount', 'bridgeFeeMax', 'circlePaymasterNetUsdc',
+  ])('bounds decimal field %s at 78 digits', async (field) => {
+    const accepted = await POST(req({ ...validBody, [field]: '9'.repeat(78) }));
+    expect(accepted.status).toBe(200);
+    expect(JSON.parse(vi.mocked(kvLpush).mock.calls[0][1])[field]).toBe('9'.repeat(78));
+    vi.mocked(kvLpush).mockClear();
+    vi.mocked(kvIncr).mockClear();
+    const rejected = await POST(req({ ...validBody, [field]: '9'.repeat(79) }));
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toEqual({ ok: false, error: 'invalid_payload' });
+    expect(kvLpush).not.toHaveBeenCalled();
+    expect(kvIncr).not.toHaveBeenCalled();
   });
 
   it('KV 未設定 (unconfigured) でも 200 を返す (graceful degrade)', async () => {
@@ -247,53 +358,145 @@ describe('POST /api/log/payment', () => {
     expect(kvLtrim).not.toHaveBeenCalled();
   });
 
-  it('LPUSH 成功時は LTRIM で list を 100K に cap', async () => {
-    await POST(req(validBody));
-    expect(kvLtrim).toHaveBeenCalledWith('openpay:payments:log', 0, 99999);
-  });
-
-  // C2: 未認証 write が単一 cap 付きリストを押し出す (古い正規 entry の eviction) のを、
-  // 日次パーティション + TTL で断つ。レガシーキーは export/stats のため据え置き (追加のみ)。
-  describe('C2: 日次パーティション / errorMessage cap / limiter key', () => {
-    it('レガシーキーと日次キーの両方へ同じ entry を LPUSH する', async () => {
+  describe('C1: bounded retention / global daily budget', () => {
+    it('writes only the legacy list, atomically capped at 20k with a refreshed 35-day TTL', async () => {
       await POST(req(validBody));
-      const keys = vi.mocked(kvLpush).mock.calls.map((c) => c[0]);
-      expect(keys[0]).toBe('openpay:payments:log');
-      expect(keys[1]).toBe(paymentLogDailyKey());
-      expect(keys[1]).toMatch(/^openpay:payments:log:\d{8}$/);
-      // 中身は同一 (reader がどちらを読んでも同じ)。
-      expect(vi.mocked(kvLpush).mock.calls[1][1]).toBe(
-        vi.mocked(kvLpush).mock.calls[0][1],
+      expect(kvLpush).toHaveBeenCalledOnce();
+      expect(kvLpush).toHaveBeenCalledWith(
+        'openpay:payments:log', expect.any(String),
+        { trimStart: 0, trimStop: 19_999, ttlSec: 35 * 24 * 60 * 60 },
       );
+      expect(kvLtrim).not.toHaveBeenCalled();
+      expect(kvExpire).not.toHaveBeenCalled();
+      expect(kvSet).not.toHaveBeenCalled();
     });
 
-    it('日次キーには TTL (400 日) を張る', async () => {
-      await POST(req(validBody));
-      expect(kvExpire).toHaveBeenCalledWith(
-        paymentLogDailyKey(),
-        400 * 24 * 60 * 60,
-      );
-    });
-
-    it('日次 LPUSH が失敗しても 200 (付帯処理を本体へ波及させない)', async () => {
-      vi.mocked(kvLpush)
-        .mockReset()
-        .mockResolvedValueOnce({ ok: true, value: 1 })
-        .mockResolvedValueOnce({ ok: false, reason: 'http_error', status: 500 });
-      const res = await POST(req(validBody));
-      expect(res.status).toBe(200);
+    it('budget 5000 writes, budget 5001 skips storage with the identical success response', async () => {
+      vi.mocked(kvIncr)
+        .mockResolvedValueOnce({ ok: true, value: 5000 })
+        .mockResolvedValueOnce({ ok: true, value: 5001 });
+      const accepted = await POST(req(validBody));
+      expect(accepted.status).toBe(200);
+      expect(await accepted.json()).toEqual({ ok: true });
+      expect(kvLpush).toHaveBeenCalledTimes(1);
+      vi.mocked(kvLpush).mockClear();
+      const skipped = await POST(req(validBody));
+      expect(skipped.status).toBe(200);
+      expect(await skipped.json()).toEqual({ ok: true });
+      expect(kvLpush).not.toHaveBeenCalled();
+      expect(kvLtrim).not.toHaveBeenCalled();
       expect(kvExpire).not.toHaveBeenCalled();
     });
 
+    it('all IPs share one UTC daily counter, with an atomic initial TTL and a new day at midnight', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-09-23T23:59:59.000Z'));
+        for (const ip of ['203.0.113.1', '198.51.100.1', '2001:db8::1']) {
+          const r = req(validBody);
+          r.headers.set('x-forwarded-for', ip);
+          await POST(r);
+        }
+        expect(vi.mocked(kvIncr).mock.calls).toEqual(Array.from({ length: 3 }, () => [
+          'logpay:budget:20260923', { initialTtlSec: 2 * 24 * 60 * 60 },
+        ]));
+        vi.setSystemTime(new Date('2026-09-24T00:00:00.000Z'));
+        await POST(req(validBody));
+        expect(kvIncr).toHaveBeenLastCalledWith('logpay:budget:20260924', {
+          initialTtlSec: 2 * 24 * 60 * 60,
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('warns once per UTC day across concurrent over-budget requests, including counts past 5001', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-09-23T23:59:59.000Z'));
+        vi.mocked(kvIncr).mockResolvedValue({ ok: true, value: 5002 });
+        const responses = await Promise.all([postRoute(req(validBody)), postRoute(req(validBody))]);
+        for (const response of responses) {
+          expect(response.status).toBe(200);
+          expect(await response.json()).toEqual({ ok: true });
+        }
+        expect(kvSet).not.toHaveBeenCalled(); // Warning I/O is also post-response.
+        await Promise.all(deferred.tasks.splice(0).map((task) => task()));
+        await POST(req(validBody));
+        expect(kvSet).toHaveBeenCalledTimes(3);
+        expect(kvSet).toHaveBeenCalledWith('logpay:budget-warn:20260923', '1', {
+          nx: true, ttlSec: 2 * 24 * 60 * 60,
+        });
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+        expect(logger.warn).toHaveBeenCalledWith('payment-log.daily-budget-exhausted', { day: '20260923' });
+
+        vi.setSystemTime(new Date('2026-09-24T00:00:00.000Z'));
+        await POST(req(validBody));
+        expect(kvSet).toHaveBeenLastCalledWith('logpay:budget-warn:20260924', '1', {
+          nx: true, ttlSec: 2 * 24 * 60 * 60,
+        });
+        expect(logger.warn).toHaveBeenCalledTimes(2);
+        expect(logger.warn).toHaveBeenLastCalledWith('payment-log.daily-budget-exhausted', { day: '20260924' });
+        expect(kvLpush).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('warning dedupe storage failure keeps success and skips telemetry, retrying the warning later', async () => {
+      vi.mocked(kvIncr).mockResolvedValue({ ok: true, value: 5002 });
+      vi.mocked(kvSet).mockResolvedValueOnce({ ok: false, reason: 'timeout' });
+      const res = await POST(req(validBody));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      expect(logger.warn).not.toHaveBeenCalled();
+      expect(kvLpush).not.toHaveBeenCalled();
+      await POST(req(validBody));
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith('payment-log.daily-budget-exhausted', {
+        day: expect.stringMatching(/^\d{8}$/),
+      });
+      expect(kvLpush).not.toHaveBeenCalled();
+    });
+
+    it.each(['unconfigured', 'timeout', 'http_error'] as const)(
+      'budget storage %s fails open without changing the response', async (reason) => {
+        vi.mocked(kvIncr).mockResolvedValue({ ok: false, reason });
+        const res = await POST(req(validBody));
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({ ok: true });
+        expect(kvLpush).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it('returns success before the deferred budget and log write can delay the caller', async () => {
+      let resolveBudget!: (result: { ok: true; value: number }) => void;
+      vi.mocked(kvIncr).mockReturnValue(new Promise((resolve) => { resolveBudget = resolve; }));
+      const res = await postRoute(req(validBody));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      expect(kvIncr).not.toHaveBeenCalled();
+      expect(kvLpush).not.toHaveBeenCalled();
+      expect(deferred.tasks).toHaveLength(1);
+      const work = deferred.tasks.shift()!();
+      expect(kvIncr).toHaveBeenCalledOnce();
+      expect(kvLpush).not.toHaveBeenCalled();
+      resolveBudget({ ok: true, value: 1 });
+      await work;
+      expect(kvLpush).toHaveBeenCalledOnce();
+    });
+  });
+
+  describe('errorMessage cap / limiter key', () => {
     it('errorMessage は 500 字に切詰めて保存する (reject しない)', async () => {
       const res = await POST(
-        // 8KB の body 上限内 (2000 字 = 6000 bytes) で 500 字超を送る。
-        req({ ...validBody, result: 'error', errorMessage: 'あ'.repeat(2000) }),
+        // 5KB の body 上限内で 500 字超を送る。
+        req({ ...validBody, result: 'error', errorMessage: 'x'.repeat(600) }),
       );
       expect(res.status).toBe(200);
       const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1]);
       expect(entry.errorMessage).toHaveLength(500);
-      expect(entry.errorMessage).toBe('あ'.repeat(500));
+      expect(entry.errorMessage).toBe('x'.repeat(500));
     });
 
     it('500 字以内の errorMessage はそのまま保存する', async () => {
@@ -348,25 +551,6 @@ describe('POST /api/log/payment', () => {
       }
     });
 
-    it('listPaymentLogKeys は直近 n 日分の日次キーを新しい順に返す', () => {
-      const now = new Date('2026-01-02T03:04:05.000Z');
-      expect(listPaymentLogKeys(3, now)).toEqual([
-        'openpay:payments:log:20260102',
-        'openpay:payments:log:20260101',
-        'openpay:payments:log:20251231',
-      ]);
-    });
-  });
-
-  it('LTRIM 失敗でも 200 を返す (UI 影響回避)', async () => {
-    vi.mocked(kvLtrim).mockResolvedValue({
-      ok: false,
-      reason: 'http_error',
-      status: 500,
-    });
-    const res = await POST(req(validBody));
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
   });
 
   // C6 (2026-09-02): クライアント IP の導出を lib/net/ipHash の clientIp() に一本化した。
@@ -627,7 +811,7 @@ describe('POST /api/log/payment', () => {
   });
 
   it.each(['203.0.113.45', '2001:db8:1:2:3:4:5:6'])(
-    '利用者 IP %s の prefix は main / daily list と logger に保存しない',
+    '利用者 IP %s の prefix は main list と logger に保存しない',
     async (ip) => {
       const r = new Request('http://localhost/api/log/payment', {
         method: 'POST',
@@ -639,7 +823,7 @@ describe('POST /api/log/payment', () => {
         body: JSON.stringify(validBody),
       });
       await POST(r);
-      expect(kvLpush).toHaveBeenCalledTimes(2);
+      expect(kvLpush).toHaveBeenCalledTimes(1);
       for (const [, serialized] of vi.mocked(kvLpush).mock.calls) {
         expect(JSON.parse(serialized)).not.toHaveProperty('ipPrefix');
         expect(serialized).not.toContain(ip);

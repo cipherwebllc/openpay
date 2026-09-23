@@ -4,7 +4,20 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+const deferred = vi.hoisted(() => ({ tasks: [] as (() => Promise<void>)[] }));
+vi.mock('next/server', async (importOriginal) => ({
+  ...await importOriginal<typeof import('next/server')>(),
+  after: (task: () => Promise<void>) => { deferred.tasks.push(task); },
+}));
+vi.mock('@/lib/relay/relayGuards', () => ({
+  checkReadRateLimit: async () => true,
+}));
 vi.mock('@/lib/kv', () => ({
+  kvIncr: vi.fn(),
+  kvSet: vi.fn().mockResolvedValue({ ok: true, value: 'OK' }),
+  kvLpush: vi.fn(),
+  kvLtrim: vi.fn().mockResolvedValue({ ok: true, value: 'OK' }),
+  kvExpire: vi.fn().mockResolvedValue({ ok: true, value: 1 }),
   kvLrange: vi.fn(),
   kvLlen: vi.fn(),
   isKvConfigured: vi.fn(),
@@ -19,7 +32,8 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 import { GET } from '@/app/api/log/payment/stats/route';
-import { kvLrange, kvLlen, isKvConfigured } from '@/lib/kv';
+import { POST } from '@/app/api/log/payment/route';
+import { kvIncr, kvLpush, kvLrange, kvLlen, isKvConfigured } from '@/lib/kv';
 
 const TOKEN = 'test_admin_token_xyz';
 const JPYC = '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29';
@@ -63,6 +77,9 @@ function makeReq(opts: {
 }
 
 beforeEach(() => {
+  deferred.tasks = [];
+  vi.mocked(kvIncr).mockReset().mockResolvedValue({ ok: true, value: 1 });
+  vi.mocked(kvLpush).mockReset();
   process.env.PAYMENT_LOG_ADMIN_TOKEN = TOKEN;
   vi.mocked(isKvConfigured).mockReturnValue(true);
   vi.mocked(kvLrange).mockResolvedValue({ ok: true, value: [] });
@@ -173,6 +190,52 @@ describe('stats: query 検証', () => {
 });
 
 describe('stats: aggregate — chain / token / count / GMV', () => {
+  it('C1: stats read admitted telemetry from the single retained list after the daily budget is exhausted', async () => {
+    const entries: string[] = [];
+    vi.mocked(kvLpush).mockImplementation(async (key, value) => {
+      if (key === 'openpay:payments:log') entries.unshift(value);
+      return { ok: true, value: entries.length };
+    });
+    vi.mocked(kvLrange).mockImplementation(async (key) => {
+      expect(key).toBe('openpay:payments:log');
+      return { ok: true, value: entries };
+    });
+    vi.mocked(kvLlen).mockImplementation(async (key) => {
+      expect(key).toBe('openpay:payments:log');
+      return { ok: true, value: entries.length };
+    });
+    vi.mocked(kvIncr)
+      .mockResolvedValueOnce({ ok: true, value: 5000 })
+      .mockResolvedValueOnce({ ok: true, value: 5001 });
+    // 78-digit telemetry remains exact through JSON storage and BigInt aggregation.
+    const amount = '9'.repeat(78);
+    for (let i = 0; i < 2; i++) {
+      const res = await POST(new Request('http://localhost/api/log/payment', {
+        method: 'POST',
+        body: makeEntry({ merchantAmount: amount, saleAmount: amount, networkFeeEquivalent: '25' }),
+      }));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      for (const task of deferred.tasks.splice(0)) await task();
+    }
+    const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      total: 1,
+      aggregatedCount: 1,
+      byChain: [expect.objectContaining({
+        chainId: 137,
+        successCount: 1,
+        totalMerchantWei: amount,
+        totalSaleWei: amount,
+        totalFeeWei: '10000000000000000',
+        totalNetworkFeeWei: '25',
+      })],
+    });
+    expect(kvLpush).toHaveBeenCalledTimes(1);
+  });
+
   it('空 KV → byChain: [], total: 0, considered: 0', async () => {
     const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
     expect(res.status).toBe(200);
