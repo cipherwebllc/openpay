@@ -71,6 +71,63 @@ function entry(overrides: Partial<HistoryEntry> = {}): HistoryEntry {
   };
 }
 
+describe('history: unreadable entries survive writes (E5/F12)', () => {
+  beforeEach(() => window.localStorage.clear());
+
+  const writers = ['append', 'append-promotion', 'promote', 'remove'] as const;
+  function write(kind: typeof writers[number], target: HistoryEntry) {
+    if (kind === 'append') appendHistory(entry({ id: 'new' }));
+    if (kind === 'append-promotion') appendHistory({ ...target, status: 'success' });
+    if (kind === 'promote') expect(promotePendingHistoryByTxHash('0xtx', 'success')).toBe(true);
+    if (kind === 'remove') removeHistoryEntry(target.id);
+  }
+
+  it.each(writers)('%s preserves future schema and invalid raw items in place', (kind) => {
+    const target = entry({ id: 'target', status: 'pending', ts: Date.now() });
+    // Unknown entries deliberately share the target identity: they must neither match nor change.
+    const future = { ...target, schemaVersion: 999, future: { nested: ['keep', null] } };
+    const invalid = { ...target, asset: 'future-token' };
+    const opaque = [future, invalid, null, 'opaque', 42, ['nested']];
+    window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify([...opaque, target]));
+    expect(loadHistory()).toEqual([target]);
+
+    write(kind, target);
+
+    const known = kind === 'remove' ? [] : [{ ...target, status: kind === 'append' ? 'pending' : 'success' }];
+    const expected = [...(kind === 'append' ? [entry({ id: 'new' })] : []), ...opaque, ...known];
+    expect(JSON.parse(window.localStorage.getItem(HISTORY_STORAGE_KEY)!)).toEqual(expected);
+    expect(readTodaySummary()).toEqual(buildTodaySummary(loadHistory(), Date.now()));
+  });
+
+  it.each(['known', 'unknown'] as const)('FIFO cap counts unreadable entries and evicts the oldest %s item', (oldest) => {
+    const future = { schemaVersion: 999, payload: { keep: true } };
+    const filler = Array.from({ length: HISTORY_MAX_ENTRIES - 3 }, (_, i) => entry({ id: `kept-${i}` }));
+    const tail = oldest === 'known' ? entry({ id: 'oldest' }) : { schemaVersion: 999, id: 'oldest' };
+    const raw = [future, null, ...filler, tail];
+    window.localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(raw));
+
+    const added = entry({ id: 'new' });
+    appendHistory(added);
+
+    const stored = JSON.parse(window.localStorage.getItem(HISTORY_STORAGE_KEY)!);
+    expect(stored).toHaveLength(HISTORY_MAX_ENTRIES);
+    expect(stored).toEqual([added, ...raw.slice(0, -1)]);
+    expect(loadHistory()).toHaveLength(HISTORY_MAX_ENTRIES - 2);
+  });
+
+  it.each(['not-json{{{', '{"not":"array"}', 'null'])('malformed/non-array root %s keeps the existing recovery behavior', (raw) => {
+    window.localStorage.setItem(HISTORY_STORAGE_KEY, raw);
+    expect(loadHistory()).toEqual([]);
+    expect(promotePendingHistoryByTxHash('0xtx', 'success')).toBe(false);
+    removeHistoryEntry('missing');
+    expect(window.localStorage.getItem(HISTORY_STORAGE_KEY)).toBe(raw);
+
+    const added = entry({ id: 'new' });
+    appendHistory(added);
+    expect(JSON.parse(window.localStorage.getItem(HISTORY_STORAGE_KEY)!)).toEqual([added]);
+  });
+});
+
 describe('history (LocalStorage)', () => {
   beforeEach(() => {
     window.localStorage.clear();

@@ -82,12 +82,13 @@ export const RULES = [
     interval: '1h',
   },
   {
-    name: 'OpenPay: history.load.invalid-entries-dropped spike',
+    name: 'OpenPay: history.load.unreadable-entries-preserved spike',
     description:
-      'LocalStorage 履歴の schema 不一致 entry 脱落が 1 時間に 100 件超で通知。' +
+      'LocalStorage 履歴の読込不能項目の検出が 1 時間に 100 件超で通知。' +
+      '項目は保持し、各ページセッションで一度だけ通知する。' +
       '正常運用では 0 のはず。spike は schema 変更 / migration ミス / クライアント側' +
       '改竄試行 / 別ドメイン (preview deploy) からの混入のいずれかのサイン。',
-    eventTag: 'history.load.invalid-entries-dropped',
+    eventTag: 'history.load.unreadable-entries-preserved',
     threshold: 100,
     interval: '1h',
   },

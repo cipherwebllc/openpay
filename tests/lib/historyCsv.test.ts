@@ -692,6 +692,48 @@ describe('CSV v5: 記帳補助メタ列 (商品名/税/明細・末尾追加で�
     },
   ];
 
+  it.each([0, 1])('明細 %i の金額が非数値なら税額は空欄 (他の行に円額を再配分しない)', (invalidIndex) => {
+    const e = entry({
+      merchantAmount: '3880000000000000000000',
+      saleAmount: '4000000000000000000000',
+      lineItems: mixedLineItems.map((li, i) => i === invalidIndex ? { ...li, amount: 'not-a-number' } : li),
+    });
+    expect(cellsByHeader(toCsv([e]))('税額(円)')).toBe('');
+  });
+
+  it('E6: 手数料控除後も gross 10000 円の 10% 内税は 909 円', () => {
+    const e = entry({
+      merchantAmount: '9700000000000000000000',
+      saleAmount: '10000000000000000000000',
+      lineItems: [{ name: '商品', quantity: 1, unitPrice: '10000', amount: '10000', taxRate: 10, taxCategory: 'taxable_10', memo: null }],
+    });
+    expect(cellsByHeader(toCsv([e]))('税額(円)')).toBe('909');
+  });
+
+  it.each(['jpyc', 'usdc-rate', 'usdc-anchor'] as const)('E6: fee-deducted mixed-tax %s uses gross line proportions', (mode) => {
+    const e = entry({
+      asset: mode === 'jpyc' ? 'jpyc' : 'usdc',
+      merchantAmount: mode === 'jpyc' ? '3880000000000000000000' : '24250000',
+      saleAmount: mode === 'jpyc' ? '4000000000000000000000' : '25000000',
+      anchorAmount: mode === 'usdc-anchor' ? '4000' : null,
+      anchorSymbol: mode === 'usdc-anchor' ? 'jpyc' : null,
+      taxRate: null,
+      lineItems: mode === 'usdc-rate'
+        ? mixedLineItems.map((li, i) => ({ ...li, amount: i === 0 ? '6.25' : '18.75', unitPrice: i === 0 ? '3.125' : '18.75' }))
+        : mixedLineItems,
+    });
+    // Gross 4000 yen: 1000 × 10/110 → 91, 3000 × 8/108 → 222; sum = 313.
+    expect(cellsByHeader(toCsv([e], { usdcJpy: 160 }))('税額(円)')).toBe('313');
+    if (mode === 'jpyc') {
+      expect(entryTotals(e).totalTax).toBe('313');
+      const lines = toLineItemsCsv([e]);
+      expect(lines.ok).toBe(true);
+      if (!lines.ok) return;
+      const rows = parseCsv(lines.csv.slice(CSV_BOM.length)).slice(1).filter((r) => r.length > 1);
+      expect(rows.map((r) => r[11])).toEqual(['91', '222']);
+    }
+  });
+
   it('混在税率: 税額(円) は行別税額の合計 (10% 91 + 8% 222 = 313)', () => {
     const csv = toCsv([
       entry({

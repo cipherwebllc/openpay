@@ -17,7 +17,7 @@
 //     LocalStorage の `storage` event は他タブのみ発火する仕様。自タブの再描画は
 //     CustomEvent (`openpay:history-changed`) で別経路で通知する。
 // - corrupt JSON / schema mismatch:
-//     load 時に valid entries のみ復元、不正値は静かに脱落 (UI 全滅より部分復元)。
+//     load 時に valid entries のみ復元。不正/未知の項目は UI から除外するが保存時は保持する。
 
 import { safeGet, safeRemove, safeSet } from './storage';
 import { logger } from './logger';
@@ -83,8 +83,8 @@ export const HISTORY_ASSET_DISPLAY: Record<TokenSymbol, string> = {
 //   - 将来 v2 → v3 等の schema 変更時は MIGRATIONS[from] = (entry) => migrated_entry
 //     を 1 行追加するだけで chain migration が走る (migrateToLatest が低→高に repeatedly apply)。
 //   - LATEST_SCHEMA_VERSION より大きい version は user の browser が我々の build より
-//     新しい (= rollback 後の旧版が新版 entry を読む) ケース → 安全に drop。
-//   - 不明な intermediate version (e.g. v3 がいたら v2 migration が必要だが無い) も drop。
+//     新しい (= rollback 後の旧版が新版 entry を読む) ケース → 読込結果から除外し生データを保持。
+//   - 不明な intermediate version (e.g. v3 がいたら v2 migration が必要だが無い) も同様。
 //
 // 既存 user データ救済の証拠は tests/lib/history.test.ts:「unversioned legacy 読込」群を参照。
 
@@ -441,7 +441,7 @@ export const MIGRATIONS: Record<number, MigrationFn> = {
  *   - schemaVersion が number でない → unversioned 扱いで v1 stamp
  *     (Phase 2 初期 LocalStorage データへの後方互換)
  *   - LATEST より大きい → drop (rollback 後の旧 build が新 entry を読むケース、
- *     未知の field 構造で UI 表示が壊れる可能性があるため安全に drop)
+ *     未知の field 構造による UI 破損を防ぐため読込結果から除外。保存時は生データを保持)
  *   - LATEST より小さい → MIGRATIONS[v] → MIGRATIONS[v+1] → ... と repeatedly apply。
  *     途中で migration 未登録 (gap) なら drop。各 step で null を返したら drop。
  *   - 最後に isValidEntry で final shape を検証 → 通れば HistoryEntry。
@@ -468,29 +468,49 @@ export function migrateToLatest(value: unknown): HistoryEntry | null {
   return isValidEntry(current) ? current : null;
 }
 
-export function loadHistory(): HistoryEntry[] {
+type StoredHistoryItem = { raw: unknown; entry: HistoryEntry | null };
+
+// 保持した未知項目の再読込が Sentry の警告・quota 消費へ繰り返し波及しないよう、ページ内で一度だけ通知。
+let hasWarnedUnreadableEntries = false;
+
+function loadHistoryItems(): StoredHistoryItem[] {
   const raw = safeGet<unknown>(HISTORY_STORAGE_KEY, []);
   if (!Array.isArray(raw)) {
     logger.warn('history.load.not-array', { actual: typeof raw });
     return [];
   }
-  const valid: HistoryEntry[] = [];
+  const items: StoredHistoryItem[] = [];
   let invalid = 0;
   for (const item of raw) {
     const migrated = migrateToLatest(item);
     if (migrated === null) {
       invalid += 1;
-    } else {
-      valid.push(migrated);
     }
+    // 旧 build の読込除外が次の書込で永久削除へ波及しないよう、生の未知項目も位置ごと保持。
+    items.push({ raw: item, entry: migrated });
   }
-  if (invalid > 0) {
-    logger.warn('history.load.invalid-entries-dropped', {
+  if (invalid > 0 && !hasWarnedUnreadableEntries) {
+    hasWarnedUnreadableEntries = true;
+    logger.warn('history.load.unreadable-entries-preserved', {
       invalid,
-      kept: valid.length,
+      kept: items.length - invalid,
     });
   }
-  return valid;
+  return items;
+}
+
+function readableHistory(items: StoredHistoryItem[]): HistoryEntry[] {
+  return items.flatMap(({ entry }) => entry === null ? [] : [entry]);
+}
+
+export function loadHistory(): HistoryEntry[] {
+  return readableHistory(loadHistoryItems());
+}
+
+function saveHistoryItems(items: StoredHistoryItem[]): void {
+  safeSet(HISTORY_STORAGE_KEY, items.map(({ raw, entry }) => entry ?? raw));
+  // 未知項目の shape が summary 集計へ波及しないよう、表示と同じ読込可能な項目だけを使う。
+  updateTodaySummary(readableHistory(items), Date.now());
 }
 
 // 自タブ向け CustomEvent。useHistory hook が拾って state を再 load する。
@@ -501,14 +521,17 @@ function broadcastChange(): void {
 
 export function appendHistory(entry: HistoryEntry): void {
   if (typeof window === 'undefined') return;
-  const current = loadHistory();
-  const existingIndex = current.findIndex((e) => e.id === entry.id);
-  if (existingIndex >= 0) {
+  const current = loadHistoryItems();
+  // 未知 schema の id は解釈せず保持する。rollback 中に同じ支払いを再記帳すると、
+  // roll-forward 後に重複表示されうる既知の制約がある (未知データを推測で削除しない)。
+  const existingIndex = current.findIndex((item) => item.entry?.id === entry.id);
+  const existing = current[existingIndex]?.entry;
+  if (existing) {
     // broadcast 後の pending を reload 復元で終端確認できたとき、単純 dedupe のままでは
     // 履歴だけが永久に pending へ残る波及を断つ。pending→終端だけを同じ位置で昇格し、
     // 終端同士や終端→pending は従来どおり no-op にして StrictMode の重複を吸収する。
     if (
-      current[existingIndex].status !== 'pending' ||
+      existing.status !== 'pending' ||
       entry.status === 'pending'
     ) {
       return;
@@ -519,25 +542,25 @@ export function appendHistory(entry: HistoryEntry): void {
     // tx 単位で確定した終端 field だけを昇格し、元の支払い文脈はそのまま保持する。
     promoted[existingIndex] = {
       ...current[existingIndex],
-      status: entry.status,
-      blockNumber:
-        entry.blockNumber ?? current[existingIndex].blockNumber,
-      errorMessage: entry.errorMessage,
+      entry: {
+        ...existing,
+        status: entry.status,
+        blockNumber: entry.blockNumber ?? existing.blockNumber,
+        errorMessage: entry.errorMessage,
+      },
     };
-    safeSet(HISTORY_STORAGE_KEY, promoted);
-    updateTodaySummary(promoted, Date.now());
+    saveHistoryItems(promoted);
     broadcastChange();
     return;
   }
-  const next = [entry, ...current];
+  const next = [{ raw: entry, entry }, ...current];
   const trimmed =
     next.length > HISTORY_MAX_ENTRIES
       ? next.slice(0, HISTORY_MAX_ENTRIES)
       : next;
-  safeSet(HISTORY_STORAGE_KEY, trimmed);
   // 履歴本体を真実点として再構築する。1000 件 cap で当日 entry が落ちた場合も
   // 過去の加算値を summary に残さない。
-  updateTodaySummary(trimmed, Date.now());
+  saveHistoryItems(trimmed);
   broadcastChange();
 }
 
@@ -552,38 +575,40 @@ export function promotePendingHistoryByTxHash(
 ): boolean {
   if (typeof window === 'undefined') return false;
   const normalized = txHash.toLowerCase();
-  const current = loadHistory();
+  const current = loadHistoryItems();
   let changed = false;
-  const next = current.map((entry) => {
+  const next = current.map((item) => {
+    const entry = item.entry;
     if (
-      entry.status !== 'pending' ||
+      entry?.status !== 'pending' ||
       entry.txHash?.toLowerCase() !== normalized
     ) {
-      return entry;
+      return item;
     }
     changed = true;
     return {
-      ...entry,
-      status,
-      blockNumber:
-        blockNumber === null ? entry.blockNumber : blockNumber.toString(),
-      errorMessage: null,
+      ...item,
+      entry: {
+        ...entry,
+        status,
+        blockNumber:
+          blockNumber === null ? entry.blockNumber : blockNumber.toString(),
+        errorMessage: null,
+      },
     };
   });
   if (!changed) return false;
-  safeSet(HISTORY_STORAGE_KEY, next);
-  updateTodaySummary(next, Date.now());
+  saveHistoryItems(next);
   broadcastChange();
   return true;
 }
 
 export function removeHistoryEntry(id: string): void {
   if (typeof window === 'undefined') return;
-  const current = loadHistory();
-  const next = current.filter((e) => e.id !== id);
+  const current = loadHistoryItems();
+  const next = current.filter((item) => item.entry?.id !== id);
   if (next.length === current.length) return;
-  safeSet(HISTORY_STORAGE_KEY, next);
-  updateTodaySummary(next, Date.now());
+  saveHistoryItems(next);
   broadcastChange();
 }
 

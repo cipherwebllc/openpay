@@ -422,6 +422,26 @@ describe('toAccountingCsv: 混在税率の税区分グループ別分割 (REM-22
     ],
   });
 
+  it.each(['freee', 'yayoi'] as const)('E6: %s already apportions fee-deducted mixed-tax sales over gross lines', (format) => {
+    const e = entry({
+      merchantAmount: '3880000000000000000000',
+      saleAmount: '4000000000000000000000',
+      lineItems: [
+        { name: 'A', quantity: 2, unitPrice: '500', amount: '1000', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+        { name: 'B', quantity: 1, unitPrice: '3000', amount: '3000', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+      ],
+    });
+    const result = toAccountingCsv([e], { format, usdcJpy: undefined });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const rows = parseRows(result.csv).slice(format === 'freee' ? 1 : 0);
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r[format === 'freee' ? 4 : 14])).toEqual(['1000', '3000']);
+    expect(rows.map((r) => r[format === 'freee' ? 3 : 13])).toEqual(format === 'freee'
+      ? ['課税売上10%', '課税売上8%（軽）']
+      : ['課税売上込10%', '課税売上込8%(軽)']);
+  });
+
   it('freee: 2 行に分割・合計 === エントリ yen・各行の税区分ラベルが正しい', () => {
     const r = toAccountingCsv([MIXED_1500], { format: 'freee', usdcJpy: 150 });
     expect(r.ok).toBe(true);

@@ -19,7 +19,7 @@ describe('setup-sentry-alerts: RULES schema', () => {
     expect(tags).toContain('payment.failed');
     expect(tags).toContain('smart-account.init-failed');
     expect(tags).toContain('x402.middleware.error');
-    expect(tags).toContain('history.load.invalid-entries-dropped');
+    expect(tags).toContain('history.load.unreadable-entries-preserved');
     expect(tags).toContain('localStorage.set failed');
     expect(tags).toContain('cross-chain.execute.failed');
     expect(tags).toContain('cross-chain.balance-query.failed');
@@ -62,7 +62,7 @@ describe('setup-sentry-alerts: RULES schema', () => {
 
   it('history 系 rule は threshold 100/h (LocalStorage は per-user 由来で noise 多め)', () => {
     const historyRule = RULES.find(
-      (r) => r.eventTag === 'history.load.invalid-entries-dropped',
+      (r) => r.eventTag === 'history.load.unreadable-entries-preserved',
     );
     const quotaRule = RULES.find(
       (r) => r.eventTag === 'localStorage.set failed',

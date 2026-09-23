@@ -17,7 +17,6 @@ export { CSV_BOM, CSV_NEWLINE } from './csv';
 import type { HistoryEntry } from './history';
 import {
   entryLineItems,
-  entryTotals,
   formatHistoryTimestamp,
   hasSeparatedBreakdown,
   HISTORY_ASSET_DECIMALS,
@@ -26,6 +25,7 @@ import {
 } from './history';
 import { isIncomeSaleEntry } from './historyFilters';
 import { entryYenValue } from './historyYen';
+import { lineItemGrossAmount } from './lineItemsCsv';
 import {
   taxAmountDecimal,
   taxAmountYen,
@@ -161,7 +161,7 @@ function breakdownVersionLabel(e: HistoryEntry): string {
 // 明細 (entryLineItems) がある entry は **行ごとの税率** で按分して合算する。以前は entry 単位の
 // 単一税率を合計額に掛けていたため、10% と 8% が混在する取引で明細CSV (lineItemsCsv) /
 // 仕訳CSV (accountingCsv) / 履歴表示 (entryTotals) と税額が食い違っていた。按分の基準は
-// entryTotals().total (= 着金額の token 単位) で、円換算比率を掛けて行ごとの円額を作る。
+// 明細の税込額の合計。分子と分母を同じ通貨・gross 基準に揃え、円換算値も gross で配分する。
 function taxAmountCell(e: HistoryEntry, usdcJpy: number | undefined): string {
   if (!isIncomeSaleEntry(e)) return '';
   const yv = entryYenValue(e, usdcJpy);
@@ -176,15 +176,18 @@ function taxAmountCell(e: HistoryEntry, usdcJpy: number | undefined): string {
   }
   if (items.every((li) => li.taxRate == null)) return '';
 
-  const totalToken = Number(entryTotals(e).total);
-  if (!Number.isFinite(totalToken) || totalToken <= 0) return '';
+  const totalGross = items.reduce((sum, li) => sum + (lineItemGrossAmount(li) ?? 0), 0);
+  // 壊れた明細の按分不能な分母が NaN/Infinity の税額として CSV へ波及するのを防ぐ。
+  if (!Number.isFinite(totalGross) || totalGross <= 0) return '';
   let tax = 0;
   for (const li of items) {
-    const amountToken = Number(li.amount);
-    if (!Number.isFinite(amountToken)) continue;
-    // 円換算は entry 単位でしか出来ない (anchor / レートは取引単位) ので、行の token 額の
-    // 構成比で円額へ割り戻してから行税率を適用する。単一税率なら従来値と一致する。
-    const lineYen = (amountToken / totalToken) * yv.yen;
+    const gross = lineItemGrossAmount(li);
+    // 金額不明行の円額が他行へ再配分され税額を過大表示するのを防ぐため、取引の税額は出さない。
+    if (gross === null) return '';
+    // 行円額 = 行 gross / Σ行 gross × 取引 gross 円額。例: gross 4000・net 3880 でも
+    // 1000円(10%) + 3000円(8%) → round(1000×10/110) + round(3000×8/108) = 313円。
+    // net を分母にすると 4000/3880 倍に膨らむ。anchor 建てでも比率の通貨単位は約分される。
+    const lineYen = (gross / totalGross) * yv.yen;
     tax += taxAmountDecimal(lineYen, li.taxRate, 0) ?? 0;
   }
   return String(tax);
