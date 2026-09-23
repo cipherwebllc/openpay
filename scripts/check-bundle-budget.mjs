@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // next build 出力の Route 表をパースし、各ルートの First Load JS が予算内かを確認。
-// 超過を 1 件でも検出したら exit 1。
+// 超過・予算対象の計測漏れを 1 件でも検出したら exit 1。
 //
 // 使い方:
 //   npm run build 2>&1 | node scripts/check-bundle-budget.mjs   # 既存 build ログを paste
@@ -10,6 +10,7 @@
 
 import { stdin } from 'node:process';
 import { spawnSync } from 'node:child_process';
+import { stripVTControlCharacters } from 'node:util';
 
 const BUDGETS_KB = {
   '/_not-found': 250,
@@ -95,29 +96,35 @@ function runBuild() {
   return (r.stdout ?? '') + (r.stderr ?? '');
 }
 
-// "├ ● /[locale]                            14.8 kB         278 kB" のような行から
-// route name と First Load JS (右端の kB) を抽出。ANSI / Unicode box drawing
-// 文字を tolerant に扱う。
-function parseRoute(line) {
-  // 末尾の "数字 kB" を First Load JS とみなす
-  const sizeMatch = line.match(/(\d+(?:\.\d+)?)\s*kB\s*$/);
+// Next の pretty-bytes と同じ SI 単位 (1000 倍) で bytes に統一する。
+const SIZE_UNITS = ['B', 'kB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+
+function parseSizeBytes(line) {
+  const sizeMatch = line.match(/(\d+(?:\.\d+)?)\s*(B|kB|MB|GB|TB|PB|EB|ZB|YB)\s*$/);
   if (!sizeMatch) return null;
-  const sizeKb = Number(sizeMatch[1]);
-  // 行全体から / 始まりの token を route として抽出 (ANSI に強い形)
+  return Number(sizeMatch[1]) * 1000 ** SIZE_UNITS.indexOf(sizeMatch[2]);
+}
+
+// "├ ● /[locale]                            14.8 kB         278 kB" のような行から
+// route name と First Load JS (右端のサイズ) を抽出。
+function parseRoute(line) {
+  const sizeBytes = parseSizeBytes(line);
+  if (sizeBytes === null) return null;
+  // 行全体から / 始まりの token を route として抽出
   const routeMatch = line.match(/(\/[^\s│┌├└─]*)/);
   if (!routeMatch) return null;
-  return { route: routeMatch[1], sizeKb };
+  return { route: routeMatch[1], sizeBytes };
 }
 
 function parseSharedTotal(line) {
   // "+ First Load JS shared by all             222 kB"
   if (!line.includes('First Load JS shared by all')) return null;
-  const m = line.match(/(\d+(?:\.\d+)?)\s*kB/);
-  return m ? Number(m[1]) : null;
+  return parseSizeBytes(line);
 }
 
 const log = process.argv.includes('--build') ? runBuild() : await readStdin();
-const lines = log.split('\n');
+// Next の色付きサイズが計測漏れになり、CI 判定に波及するのを防ぐ。
+const lines = stripVTControlCharacters(log).split('\n');
 
 const observed = {};
 for (const line of lines) {
@@ -126,11 +133,11 @@ for (const line of lines) {
     observed.__shared__ = shared;
     continue;
   }
-  // Route 表の行は "Size" と "First Load JS" の 2 つの kB を含む。
+  // Route 表の行は "Size" と "First Load JS" の 2 つのサイズを含む。
   // Route 行の判定: 行頭が box drawing (┌├└) または "+ First Load" でない
   if (/^[┌├└]/.test(line.trim()) || /^[├│└]/.test(line)) {
     const r = parseRoute(line);
-    if (r) observed[r.route] = r.sizeKb;
+    if (r) observed[r.route] = r.sizeBytes;
   }
 }
 
@@ -148,18 +155,20 @@ console.log('Bundle budget check:');
 for (const [route, budget] of Object.entries(BUDGETS_KB)) {
   const actual = observed[route];
   if (actual === undefined) {
-    console.log(`  [skip] ${route}: 観測値なし (route 名変更?)`);
+    // 改名・削除やパース漏れによる未計測を CI の偽成功へ波及させない。
+    failed = true;
+    console.log(`  [MISSING] ${route}: build 出力に計測値がありません。改名・削除した場合は BUDGETS_KB を更新してください。`);
     continue;
   }
-  const status = actual <= budget ? 'OK' : 'OVER';
+  const status = actual <= budget * 1000 ? 'OK' : 'OVER';
   if (status === 'OVER') failed = true;
   console.log(
-    `  [${status}] ${route}: ${actual} kB / 予算 ${budget} kB`,
+    `  [${status}] ${route}: ${Math.round(actual) / 1000} kB / 予算 ${budget} kB`,
   );
 }
 
 if (failed) {
-  console.error('\nFAIL: 予算超過のルートあり。lib/url.ts 等の追加 import を疑え。');
+  console.error('\nFAIL: 予算超過または計測値のない予算対象あり。超過時は追加 import、計測漏れは build 出力と BUDGETS_KB を確認してください。');
   process.exit(1);
 }
 console.log('\nOK: 全ルートが予算内');
