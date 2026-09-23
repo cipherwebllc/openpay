@@ -44,5 +44,6 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/x402/reverify-cas.test.ts',
   'tests/lib/x402/reverify-url-claims-lua.test.ts',
   'tests/lib/x402/storeIndex-lua.test.ts',
+  'tests/lib/x402/storeUsdcReconcile-lua.test.ts',
   'tests/scripts/kv-restore-lua.test.ts',
 ];

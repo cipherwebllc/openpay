@@ -45,6 +45,7 @@ vi.mock('@/lib/x402/storeUsdcOnchain', () => ({
   STORE_USDC_CHAIN_ID: 8453,
   verifyStoreUsdcOnchain: vi.fn(async () => memory.verified),
   readStoreUsdcAuthorizationState: vi.fn(async () => memory.authorizationUsed),
+  readStoreUsdcAnchorBlock: vi.fn(async () => 114n),
   findStoreUsdcAuthorizationTransactions: vi.fn(async () => memory.foundTransactions),
 }));
 vi.mock('@/lib/kv', () => ({
@@ -63,6 +64,22 @@ vi.mock('@/lib/kv', () => ({
       }
       memory.strings.set(keys[0]!, args[0]!);
       memory.strings.set(keys[1]!, args[1]!);
+      return { ok: true as const, value: 1 };
+    }
+    if (script.includes('current.authorizationHash ~= ARGV[7]')) {
+      const raw = memory.strings.get(keys[0]!);
+      if (!raw) return { ok: true as const, value: 0 };
+      const current = JSON.parse(raw);
+      if (
+        !['settling', 'indeterminate'].includes(current.state) ||
+        current.attemptId !== args[5] || current.authorizationHash !== args[6]
+      ) return { ok: true as const, value: -1 };
+      current.txHash = args[8];
+      current.nextReconcileAt = Number(args[9]);
+      memory.strings.set(keys[0]!, JSON.stringify(current));
+      const zset = memory.zsets.get(keys[1]!) ?? new Map<string, number>();
+      zset.set(args[10]!, Number(args[9]));
+      memory.zsets.set(keys[1]!, zset);
       return { ok: true as const, value: 1 };
     }
     if (script.includes("local pendingType = redis.call('TYPE', KEYS[2])")) {
