@@ -38,7 +38,7 @@ vi.mock('@/lib/handleStore', () => ({ resolveHandle: vi.fn(async () => hold.reso
 vi.mock('@/lib/shopLiveStore', () => ({
   readShopLive: async () => ({ soldOut: [], paused: hold.paused, updatedAt: 1 }),
 }));
-vi.mock('@/lib/net/ipHash', () => ({ clientIp: () => '203.0.113.1', hashIp: () => 'hash' }));
+vi.mock('@/lib/net/ipHash', () => ({ clientIp: () => '203.0.113.1', hashIpBucket: () => 'hash' }));
 vi.mock('@/lib/relay/relayGuards', () => ({
   checkIpRateLimit: async () => hold.ipAllowed,
 }));

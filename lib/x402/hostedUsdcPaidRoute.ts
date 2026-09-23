@@ -8,7 +8,7 @@ import {
   type Address,
   type Hex,
 } from 'viem';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { recordMetric } from '@/lib/metrics';
 import { notifyPaymentReceived } from '@/lib/push/notify';
 import {
@@ -198,7 +198,7 @@ async function quoteResponse(input: {
   const allowed = await checkPurchaseQuoteRateLimit({
     payer: input.payer,
     resourceId: product.id,
-    ipHash: hashIp(clientIp(input.req)),
+    ipHash: hashIpBucket(clientIp(input.req)),
   });
   if (!allowed) {
     return NextResponse.json(

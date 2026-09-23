@@ -21,7 +21,7 @@ import {
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { settleViaForwarder } from '@/lib/relay/forwarderSettleService';
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { MAX_BODY_BYTES } from '@/lib/relay/relayRoute';
 import {
@@ -60,7 +60,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (
     !(await checkIpRateLimit(
       'relay-admission',
-      hashIp(clientIp(req)),
+      hashIpBucket(clientIp(req)),
       120,
       60,
     ))

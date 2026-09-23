@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { clientIp, hashIp, hashIpBucket } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { shopsApiEnabled } from '@/lib/shops/flags';
 
@@ -36,7 +36,7 @@ export async function guardPaidShopsApi(
   if (
     !(await checkIpRateLimit(
       'shops-paid',
-      hashIp(clientIp(req)),
+      hashIpBucket(clientIp(req)),
       10,
       60,
     ))

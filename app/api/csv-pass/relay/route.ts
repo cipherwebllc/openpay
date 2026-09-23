@@ -31,7 +31,7 @@ import {
 } from '@/lib/relay/relayProvider';
 import { isRecoverRequiredChain } from '@/lib/relay/forwarderConfig';
 import { isKvConfigured } from '@/lib/kv';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import {
   MAX_BODY_BYTES,
@@ -73,7 +73,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (
     !(await checkIpRateLimit(
       'relay-admission',
-      hashIp(clientIp(req)),
+      hashIpBucket(clientIp(req)),
       120,
       60,
     ))

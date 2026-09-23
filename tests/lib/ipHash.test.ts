@@ -53,7 +53,7 @@ describe('hashIpBucket', () => {
     expect(hashIpBucket('203.0.113.9')).toBeNull();
   });
 
-  it('keeps hashIp /128 behavior for the deferred money-route migration', () => {
+  it('keeps full-address hashIp /128 behavior separate from limiter buckets', () => {
     expect(hashIp('2001:db8::1')).not.toBe(hashIp('2001:db8::2'));
     expect(hashIpBucket('2001:db8::1')).toBe(hashIpBucket('2001:db8::2'));
   });

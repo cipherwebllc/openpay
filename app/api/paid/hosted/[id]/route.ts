@@ -12,7 +12,7 @@ import { env } from '@/lib/env';
 import { licenseVisible, licenseSellerAllowed } from '@/lib/license/config';
 import { sellerRoleFor } from '@/lib/license/sellerRole';
 import type { SellerRole } from '@/lib/licenseUi';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { FORWARDER_COMMIT_VERSION } from '@/lib/relay/forwarderIntent';
 import {
   getHostedContent,
@@ -330,7 +330,7 @@ async function quoteResponse(input: {
   const allowed = await checkPurchaseQuoteRateLimit({
     payer,
     resourceId,
-    ipHash: hashIp(clientIp(req)),
+    ipHash: hashIpBucket(clientIp(req)),
   });
   if (!allowed) {
     return NextResponse.json(

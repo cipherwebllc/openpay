@@ -20,7 +20,7 @@ vi.mock('@/lib/relay/relayGuards', () => ({
 }));
 vi.mock('@/lib/net/ipHash', () => ({
   clientIp: () => '192.0.2.1',
-  hashIp: () => 'hashed-ip',
+  hashIpBucket: () => 'hashed-ip',
 }));
 
 import { POST } from '@/app/api/register/claim/route';

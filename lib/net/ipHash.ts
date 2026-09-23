@@ -107,7 +107,7 @@ export function hashIpBucket(ip: string | null): string | null {
   const prefix = [112n, 96n, 80n, 64n]
     .map((shift) => ((parsed.value >> shift) & 0xffffn).toString(16))
     .join(':');
-  // Reuse the HMAC, domain separator and missing-secret policy; hashIp stays /128
-  // for money routes until their separate, reviewed migration (PR 10b).
+  // Reuse the HMAC, domain separator and missing-secret policy; hashIp remains
+  // the full-address primitive, while limiters use this /64 bucket identity.
   return hashIp(`${prefix}::`);
 }

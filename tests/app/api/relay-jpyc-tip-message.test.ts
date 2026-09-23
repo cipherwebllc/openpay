@@ -98,7 +98,7 @@ vi.mock('@/lib/feeGate', () => ({
 
 vi.mock('@/lib/net/ipHash', () => ({
   clientIp: () => '203.0.113.10',
-  hashIp: () => 'hashed-ip',
+  hashIpBucket: () => 'hashed-ip',
 }));
 
 vi.mock('@/lib/relay/relayGuards', () => ({
