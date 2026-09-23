@@ -115,6 +115,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
   }, [pathOptions]);
   const selectedOption =
     pathOptions.find((o) => o.key === selectedKey) ?? null;
+  const hasGatewayRecovery = pathOptions.some((o) => o.kind === 'gateway' && o.recoveryOnly);
 
   // Sentry observability。useEffect は早期 return 前に呼ぶ必要があるため
   // (React rules of hooks)、内部 if guard で空 trigger を抑止する。
@@ -224,7 +225,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
   }
 
   // balance fetch 中 (decision 未確定 = options も未) は loading hint。
-  if (!decision && hook.isFetchingBalances) {
+  if (!decision && hook.isFetchingBalances && !hasGatewayRecovery) {
     return (
       <p className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-500">
         {t('balancesLoading')}
@@ -235,7 +236,7 @@ export function CrossChainHint(props: CrossChainHintProps) {
   // options なし or decision が onramp のみ (= どの chain にも balance なし)
   // は何も出さず OnrampCta (PaymentForm 側) に委譲。
   if (pathOptions.length === 0) return null;
-  if (decision?.path === 'onramp' && !isForwardOnlyDestination(props.targetChainId)) return null;
+  if (decision?.path === 'onramp' && !isForwardOnlyDestination(props.targetChainId) && !hasGatewayRecovery) return null;
 
   // direct のみで cross-chain option なし → 既存 Pay button に完全委譲、本 panel 非表示。
   // (chooser 表示しても direct 1 件しか出ず情報価値ゼロ、UI スペース節約)

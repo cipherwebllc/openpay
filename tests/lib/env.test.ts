@@ -592,3 +592,14 @@ it.each([undefined, '0', 'false', '1', 'true'])('Arc flag %s defaults OFF; overr
   expect(env.mainnetTokenOverrides.usdc.arc).toBe(address);
   expect(env.testnetTokenOverrides.usdc.arc).toBe(address);
 });
+
+
+it.each([undefined, '', 'false', '0', 'true', '1'])(
+  'Gateway cross-chain flag %j is default OFF and only explicitly enabled', async (flag) => {
+    vi.resetModules();
+    if (flag === undefined) delete process.env.NEXT_PUBLIC_ENABLE_GATEWAY_CROSS_CHAIN;
+    else process.env.NEXT_PUBLIC_ENABLE_GATEWAY_CROSS_CHAIN = flag;
+    const { env } = await import('@/lib/env');
+    expect(env.enableGatewayCrossChain).toBe(flag === 'true' || flag === '1');
+  },
+);

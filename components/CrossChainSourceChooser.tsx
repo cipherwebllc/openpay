@@ -133,9 +133,9 @@ function OptionRow({
           <GasTag gasless={option.kind === 'direct' && directIsGasless} />
         </span>
       </div>
-      <div className="mt-0.5 text-xs text-slate-600">
+      {!option.recoveryOnly && <div className="mt-0.5 text-xs text-slate-600">
         {t('balance', { balance: balanceStr })}
-      </div>
+      </div>}
       {/* direct (同一チェーン) は bridge fee 0・追加情報不要なので fee 行を出さない
           (バッジ「直接送金」+ 残高で十分)。実際の総額 (OpenPay 利用料 + gas) は
           PaymentForm のメイン内訳に出る。cross-chain のみ「ブリッジ手数料 + gas +

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   decodeEventLog,
   decodeFunctionData,
@@ -18,12 +18,152 @@ import {
   encodeReceiveMessageCalldata,
   fetchIrisAttestation,
   pollIrisAttestation,
+  pollIrisForward,
 } from '@/lib/crossChain/cctp';
 import depositForBurnLog from './fixtures/depositForBurn-base-mainnet.json';
 import { CIRCLE_DOMAIN_BASE, CIRCLE_DOMAIN_POLYGON } from '@/lib/crossChain/types';
 
 const RECIPIENT = getAddress('0x000000000000000000000000000000000000aBcd');
 const TOKEN = getAddress('0x036CbD53842c5426634e7929541eC2318f3dCF7e'); // Base Sepolia USDC
+
+describe('X6: bounded legacy Iris polling', () => {
+  const ready = { status: 'complete', message: '0xa', attestation: '0xb' };
+  const complete = () => Response.json({ messages: [ready] });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it.each([404, 429, 500, 503, 599, 'network', 'body network'] as const)(
+    'retries %s then returns the indexed attestation', async (failure) => {
+      const fetch = vi.fn()
+        .mockImplementationOnce(async () => {
+          if (failure === 'network') throw new TypeError('Failed to fetch');
+          if (failure === 'body network') {
+            const response = complete();
+            vi.spyOn(response, 'json').mockRejectedValue(new TypeError('terminated'));
+            return response;
+          }
+          return new Response('not available yet', { status: failure });
+        })
+        .mockImplementationOnce(complete);
+      const outcome = pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1234', {
+        fetch, intervalMs: 1000, timeoutMs: 5000,
+      }).catch((err) => err);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await outcome).toEqual(ready);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(fetch.mock.calls.every(([url]) => url.endsWith('transactionHash=0x1234'))).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each([404, 429, 500, 'network', 'pending'] as const)(
+    'stops repeated %s exactly at the overall deadline', async (failure) => {
+      const fetch = vi.fn(async () => {
+        if (failure === 'network') throw new TypeError('Failed to fetch');
+        if (failure === 'pending') return Response.json({ messages: [] });
+        return new Response('not available yet', { status: failure });
+      });
+      let outcome: unknown;
+      void pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1234', {
+        fetch, intervalMs: 1000, timeoutMs: 2500,
+      }).then((value) => { outcome = value; }, (err) => { outcome = err; });
+      await vi.advanceTimersByTimeAsync(2499);
+      expect(outcome).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(outcome).toBeInstanceOf(Error);
+      expect((outcome as Error).message).toContain('polling timeout (2500ms)');
+      expect(fetch).toHaveBeenCalledTimes(3);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each([400, 401, 403, 422])('does not retry permanent HTTP %s', async (status) => {
+    const fetch = vi.fn(async () => new Response('invalid request', { status }));
+    await expect(pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1234', { fetch }))
+      .rejects.toThrow(`HTTP ${status}`);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['JSON', 'schema', 'null schema', 'programming error', 'invalid fetch result'])(
+    'does not hide %s errors in the retry policy', async (failure) => {
+      const fetch = vi.fn(async () => {
+        if (failure === 'programming error') throw new Error('unexpected implementation failure');
+        if (failure === 'null schema') return Response.json(null);
+        if (failure === 'invalid fetch result') return undefined as unknown as Response;
+        return failure === 'JSON' ? new Response('{') : Response.json({ messages: null });
+      });
+      let outcome: unknown;
+      void pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1234', { fetch })
+        .then((value) => { outcome = value; }, (err) => { outcome = err; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toBeInstanceOf(Error);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each(['fetch', 'body'])(
+    'bounds a stalled %s by 15s per request and the remaining overall budget', async (phase) => {
+      const signals: AbortSignal[] = [];
+      const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+        if (init?.signal) signals.push(init.signal);
+        if (phase === 'fetch') return new Promise<Response>(() => {});
+        const response = complete();
+        vi.spyOn(response, 'json').mockImplementation(() => new Promise(() => {}));
+        return response;
+      });
+      let outcome: unknown;
+      void pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1234', { fetch, timeoutMs: 20_000 })
+        .then((value) => { outcome = value; }, (err) => { outcome = err; });
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(outcome).toBeUndefined();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2001);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(signals[0].aborted).toBe(true);
+      expect(signals[1].aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(outcome).toBeInstanceOf(Error);
+      expect((outcome as Error).message).toContain('polling timeout (20000ms)');
+      expect(signals[1].aborted).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it('retries a timed-out request and accepts the next complete response', async () => {
+    const fetch = vi.fn()
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+      .mockImplementationOnce(complete);
+    let outcome: unknown;
+    void pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1234', { fetch })
+      .then((value) => { outcome = value; }, (err) => { outcome = err; });
+    await vi.advanceTimersByTimeAsync(17_000);
+    expect(outcome).toEqual(ready);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('returns an already received completion even if the clock has just crossed the deadline', async () => {
+    const fetch = vi.fn(async () => {
+      vi.setSystemTime(5001);
+      return complete();
+    });
+    await expect(pollIrisAttestation(CIRCLE_DOMAIN_BASE, '0x1234', { fetch, timeoutMs: 5000 }))
+      .resolves.toEqual(ready);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves Arc forwarding as a single observation with errors passed to its executor', async () => {
+    const fetch = vi.fn(async () => new Response('not indexed', { status: 404 }));
+    await expect(pollIrisForward(CIRCLE_DOMAIN_BASE, '0x1234', { fetch })).rejects.toThrow('HTTP 404');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe('lib/crossChain/cctp encode helpers', () => {
   describe('encodeDepositForBurnCalldata', () => {

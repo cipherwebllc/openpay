@@ -467,6 +467,11 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN',
     process.env.NEXT_PUBLIC_ENABLE_USDC_ARC_CROSSCHAIN,
   ),
+  // X12 の attestation 期限・再開修正までは新規 Gateway 経路を有効化しない。保存済み回復は別扱い。
+  enableGatewayCrossChain: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_GATEWAY_CROSS_CHAIN',
+    process.env.NEXT_PUBLIC_ENABLE_GATEWAY_CROSS_CHAIN,
+  ),
   enableUsdcArc: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_USDC_ARC',
     process.env.NEXT_PUBLIC_ENABLE_USDC_ARC,

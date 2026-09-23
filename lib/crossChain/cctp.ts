@@ -212,17 +212,26 @@ export async function fetchIrisAttestation(
   sourceTxHash: Hex,
   opts: { fetch?: FetchLike; baseUrl?: string } = {},
 ): Promise<CctpIrisResponse> {
+  return fetchIrisAttestationOnce(sourceDomain, sourceTxHash, opts);
+}
+
+async function fetchIrisAttestationOnce(
+  sourceDomain: CircleDomain,
+  sourceTxHash: Hex,
+  opts: { fetch?: FetchLike; baseUrl?: string },
+  readBody: <T>(read: () => Promise<T>) => Promise<T> = (read) => read(),
+): Promise<CctpIrisResponse> {
   const fetchImpl = opts.fetch ?? fetch;
   const baseUrl = opts.baseUrl ?? CCTP_IRIS_API_BASE_URL;
   const url = `${baseUrl}/v2/messages/${sourceDomain}?transactionHash=${sourceTxHash}`;
   const res = await fetchImpl(url, { method: 'GET' });
   if (!res.ok) {
-    const text = await res.text();
+    const text = await readBody(res.text.bind(res));
     throw new Error(
       `iris API GET /v2/messages HTTP ${res.status}: ${text.slice(0, 500)}`,
     );
   }
-  return (await res.json()) as CctpIrisResponse;
+  return (await readBody(res.json.bind(res))) as CctpIrisResponse;
 }
 
 export interface PollIrisAttestationOptions {
@@ -238,6 +247,59 @@ export interface PollIrisAttestationOptions {
   now?: () => number;
 }
 
+class RetryableIrisError extends Error {}
+
+async function retryableIrisNetworkRead<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (err) {
+    // network TypeError のみ再試行する。レスポンス参照の実装ミスが timeout まで隠れる波及を断つ。
+    if (err instanceof TypeError) throw new RetryableIrisError(err.message);
+    throw err;
+  }
+}
+
+// Legacy のみ: 未 index (404)、rate limit (429)、5xx、fetch/body 読取の network TypeError、
+// request timeout を既存 poll interval で再試行する。他の HTTP / JSON / 実装エラーは伝播。
+// Iris の一時障害を burn 済送金の即時失敗へ波及させず、request (body 読取も含む) を
+// 最大 15s / 残りの全体予算で打ち切る。Arc の単発観測と recovery loop は変更しない。
+async function fetchLegacyIrisWithinDeadline(
+  sourceDomain: CircleDomain,
+  sourceTxHash: Hex,
+  opts: PollIrisAttestationOptions,
+  remainingMs: number,
+): Promise<CctpIrisResponse> {
+  const controller = new AbortController();
+  const fetchImpl = opts.fetch ?? fetch;
+  const timeoutMs = Math.min(15_000, remainingMs);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new RetryableIrisError(`iris request timeout (${timeoutMs}ms)`));
+      controller.abort();
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      fetchIrisAttestationOnce(sourceDomain, sourceTxHash, {
+        baseUrl: opts.baseUrl,
+        fetch: async (url, init) => {
+          const res = await retryableIrisNetworkRead(() => fetchImpl(url, { ...init, signal: controller.signal }));
+          if (res.status === 404 || res.status === 429 || (res.status >= 500 && res.status <= 599)) {
+            // retry 対象の body は不要。読み捨て待ちで次の poll を遅らせない。
+            controller.abort();
+            throw new RetryableIrisError(`iris API GET /v2/messages HTTP ${res.status}`);
+          }
+          return res;
+        },
+      }, retryableIrisNetworkRead),
+      deadline,
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // "complete" status の最初の message を返す (single-recipient transfer 想定)。
 // timeout 超過時は throw (caller の UI で再試行 or standard fallback 提示)。
 export async function pollIrisAttestation(
@@ -251,25 +313,29 @@ export async function pollIrisAttestation(
     opts.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const now = opts.now ?? Date.now;
-  const startTime = now();
+  const deadline = now() + timeout;
 
   while (true) {
-    const response = await fetchIrisAttestation(sourceDomain, sourceTxHash, {
-      fetch: opts.fetch,
-      baseUrl: opts.baseUrl,
-    });
-    const ready = response.messages.find(
+    const remainingMs = deadline - now();
+    if (remainingMs <= 0) break;
+    let response: CctpIrisResponse | undefined;
+    try {
+      response = await fetchLegacyIrisWithinDeadline(sourceDomain, sourceTxHash, opts, remainingMs);
+    } catch (err) {
+      if (!(err instanceof RetryableIrisError)) throw err;
+    }
+    const ready = response === undefined ? undefined : response.messages.find(
       (m) => m.status === 'complete' && m.message && m.attestation,
     );
     if (ready) return ready;
 
-    if (now() - startTime > timeout) {
-      throw new Error(
-        `iris attestation polling timeout (${timeout}ms) for tx ${sourceTxHash} on domain ${sourceDomain}`,
-      );
-    }
-    await sleep(interval);
+    const remainingAfterRequest = deadline - now();
+    if (remainingAfterRequest <= 0) break;
+    await sleep(Math.min(interval, remainingAfterRequest));
   }
+  throw new Error(
+    `iris attestation polling timeout (${timeout}ms) for tx ${sourceTxHash} on domain ${sourceDomain}`,
+  );
 }
 
 // Forwarding は opt-in。既存 depositForBurn の ABI / fee 計算は変更しない。

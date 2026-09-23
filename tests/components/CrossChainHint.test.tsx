@@ -1,3 +1,4 @@
+import { env } from '@/lib/env';
 // CrossChainHint integration test — useCrossChainPayment hook の実コードを
 // 走らせ、wagmi (useAccount / useWalletClient / usePublicClient / useSwitchChain) と
 // グローバル fetch のみ boundary mock。balance.ts / router.ts / execute.ts /
@@ -198,6 +199,7 @@ const baseProps = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.spyOn(env, 'enableGatewayCrossChain', 'get').mockReturnValue(true);
   logPostMock.mockClear();
   mockWalletChainId = baseSepoliaId;
   localStorage.clear();
@@ -205,6 +207,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('CrossChainHint: 早期 return (enabled / token / amount guard)', () => {
@@ -414,7 +417,7 @@ describe('CrossChainHint: balance fetch + decision 表示', () => {
         async () =>
           new Response(
             JSON.stringify({
-              balances: [{ domain: 7, balance: '10000000' }], // 10 USDC on Polygon Gateway pre-deposit
+              balances: [{ domain: 7, balance: '10' }], // 10 USDC on Polygon Gateway pre-deposit
             }),
             { status: 200 },
           ),
@@ -480,7 +483,7 @@ describe('CrossChainHint: execute click → success / error flow', () => {
       if (url.includes('/v1/balances')) {
         return new Response(
           JSON.stringify({
-            balances: [{ domain: 7, balance: '10000000' }],
+            balances: [{ domain: 7, balance: '10' }],
           }),
           { status: 200 },
         );
@@ -676,7 +679,7 @@ describe('CrossChainHint: execute click → success / error flow', () => {
         if (url.includes('/v1/balances')) {
           return new Response(
             JSON.stringify({
-              balances: [{ domain: 7, balance: '10000000' }],
+              balances: [{ domain: 7, balance: '10' }],
             }),
             { status: 200 },
           );
@@ -714,7 +717,7 @@ describe('CrossChainHint: execute click → success / error flow', () => {
       if (url.includes('/v1/balances')) {
         return new Response(
           JSON.stringify({
-            balances: [{ domain: 7, balance: '10000000' }],
+            balances: [{ domain: 7, balance: '10' }],
           }),
           { status: 200 },
         );
@@ -889,7 +892,7 @@ describe('CrossChainHint: CROSS_CHAIN_DISABLED kill switch', () => {
         async () =>
           new Response(
             JSON.stringify({
-              balances: [{ domain: 7, balance: '10000000' }],
+              balances: [{ domain: 7, balance: '10' }],
             }),
             { status: 200 },
           ),

@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { env } from '@/lib/env';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { baseSepolia, polygonAmoy, arbitrumSepolia, optimismSepolia } from 'viem/chains';
 import { selectPath } from '@/lib/crossChain/router';
 import type {
@@ -12,6 +13,10 @@ import {
   CIRCLE_DOMAIN_POLYGON,
   type CircleDomain,
 } from '@/lib/crossChain/types';
+
+// Existing routing cases exercise the explicit Gateway opt-in. Default OFF is covered separately.
+beforeEach(() => vi.spyOn(env, 'enableGatewayCrossChain', 'get').mockReturnValue(true));
+afterEach(() => vi.restoreAllMocks());
 
 function walletEntry(
   chainId: number,
