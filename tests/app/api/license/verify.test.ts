@@ -9,7 +9,7 @@ vi.mock('@/lib/x402/storeEntitlement', () => ({ readStoreOwnership: h.own }));
 vi.mock('@/lib/license/rights', () => ({ resolveLicenseRights: h.rights }));
 vi.mock('@/lib/license/verifyBudget', () => ({ acquireLicenseVerifyBudget: h.acquire, releaseLicenseVerifyBudget: h.release }));
 vi.mock('@/lib/relay/relayGuards', () => ({ checkIpRateLimit: h.limit }));
-vi.mock('@/lib/net/ipHash', () => ({ clientIp: h.ip, hashIp: h.hash }));
+vi.mock('@/lib/net/ipHash', () => ({ clientIp: h.ip, hashIpBucket: h.hash }));
 import { GET } from '@/app/api/license/verify/route';
 import { createLicenseDefinition } from '@/lib/license/definition';
 const ID = 'h_' + 'a'.repeat(32);

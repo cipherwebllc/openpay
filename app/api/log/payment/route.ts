@@ -6,7 +6,7 @@ import { isAddress, isHex, type Address, type Hex } from 'viem';
 import { kvIncr, kvLpush, kvSet } from '@/lib/kv';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { logger } from '@/lib/logger';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import {
   PAYMENT_LOG_KV_KEY,
   type ClientReportedCircleVerification,
@@ -243,10 +243,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   const ipPrefix = anonymizeIp(
     clientIp(req) ?? '',
   );
-  // limiter は IP 単位 (HMAC 済み) で刻む。anonymizeIp は IPv6 を /64 に丸めるため、
-  // 単一の攻撃者が持つ /64 全体が 1 バケツに見え、逆に同一 /64 の正規ユーザ同士が
-  // 相乗りして詰まる。IP_HASH_SECRET 未設定 (hashIp=null) のときだけ従来の /64 に戻す。
-  const limiterKey = hashIp(clientIp(req)) ?? ipPrefix;
+  // IPv6 の host 部の変更による制限回避が log の共有 KV 枠へ波及するのを /64 bucket で断つ。
+  // IPv4 NAT と同様、同じ /64 の正規ユーザも 60 回/分の枠を共有するトレードオフを受け入れる。
+  // HMAC 無効時も telemetry を止めず、従来の匿名化 prefix による制限を保つ。
+  const limiterKey = hashIpBucket(clientIp(req)) ?? ipPrefix;
   try {
     if (!(await checkReadRateLimit(`logpay:${limiterKey}`, 60, 60))) {
       return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });

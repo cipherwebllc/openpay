@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { getPublicResource } from '@/lib/x402/registry';
 import { publicDiscoveryItem } from '@/lib/x402/discoveryItem';
@@ -18,7 +18,7 @@ export async function GET(
   if (!env.enableX402Facilitator) {
     return NextResponse.json({ error: 'not_found' }, { status: 404, headers });
   }
-  if (!(await checkIpRateLimit('x402-discovery-resource', hashIp(clientIp(req)), 60, 60))) {
+  if (!(await checkIpRateLimit('x402-discovery-resource', hashIpBucket(clientIp(req)), 60, 60))) {
     return NextResponse.json({ error: 'rate_limited' }, {
       status: 429,
       headers: { ...headers, 'Retry-After': '60' },

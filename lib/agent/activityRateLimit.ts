@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { logger } from '@/lib/logger';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 
@@ -29,7 +29,7 @@ function warnRateLimited(ip: string | null, window: 'minute' | 'day'): void {
 
 export async function checkAgentActivityRateLimit(req: Request): Promise<boolean> {
   const ip = clientIp(req);
-  const hashed = hashIp(ip);
+  const hashed = hashIpBucket(ip);
   // 同じ送信元の連打が共有 API 枠へ波及するのを断つ (どちらも KV 障害時は fail-open = checkIpRateLimit の仕様)。
   const minuteAllowed = await checkIpRateLimit(
     'agent-activity',

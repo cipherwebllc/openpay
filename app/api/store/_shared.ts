@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { Address } from 'viem';
 import { requireSession } from '@/app/api/auth/siwe/_session';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import {
   checkIpRateLimit,
   checkReadRateLimit,
@@ -34,7 +34,7 @@ function rateLimitedResponse(): NextResponse {
 async function ipAllowed(req: Request, scope: string): Promise<boolean> {
   return checkIpRateLimit(
     `creator-store:${scope}`,
-    hashIp(clientIp(req)),
+    hashIpBucket(clientIp(req)),
     RATE_LIMIT_MAX,
     RATE_LIMIT_WINDOW_SEC,
   );

@@ -8,7 +8,7 @@ import { env } from '@/lib/env';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { logger } from '@/lib/logger';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
 import { isFreelyAccessible, probeGate } from '@/lib/x402/moderation';
@@ -57,7 +57,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (
     !(await checkIpRateLimit(
       'x402-resource-write',
-      hashIp(clientIp(req)),
+      hashIpBucket(clientIp(req)),
       30,
       60,
     ))

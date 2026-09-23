@@ -89,3 +89,25 @@ export function hashIp(ip: string | null): string | null {
 
   return createHmac('sha256', secret).update(`ip:${normalized}`).digest('hex');
 }
+
+/** Limiter identity: IPv4 /32 (including mapped IPv6), native IPv6 /64. */
+export function hashIpBucket(ip: string | null): string | null {
+  if (ip === null) return null;
+  const trimmed = ip.trim();
+  // Zone-ID support is for direct callers; clientIp already rejects scoped addresses.
+  // Zone IDs identify local interfaces, not clients. Validate before stripping so
+  // malformed IPs cannot become valid buckets by discarding an arbitrary suffix.
+  const address = isIP(trimmed) === 6 ? trimmed.split('%', 1)[0] : trimmed;
+  const parsed = parseIp(address);
+  if (parsed === null) return null;
+  // Unmap before masking: mapped IPv4 hosts must keep distinct /32 buckets.
+  if (parsed.width === 32) return hashIp(address);
+
+  // One client's IPv6 host rotation must not spill into unlimited limiter buckets.
+  const prefix = [112n, 96n, 80n, 64n]
+    .map((shift) => ((parsed.value >> shift) & 0xffffn).toString(16))
+    .join(':');
+  // Reuse the HMAC, domain separator and missing-secret policy; hashIp stays /128
+  // for money routes until their separate, reviewed migration (PR 10b).
+  return hashIp(`${prefix}::`);
+}

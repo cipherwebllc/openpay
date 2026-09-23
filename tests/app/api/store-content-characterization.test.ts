@@ -32,7 +32,7 @@ vi.mock('@/lib/env', () => ({
 vi.mock('@/app/api/auth/siwe/_session', () => ({ requireSession: h.session }));
 vi.mock('@/lib/net/ipHash', () => ({
   clientIp: () => '192.0.2.1',
-  hashIp: () => 'hashed-ip',
+  hashIpBucket: () => 'hashed-ip',
 }));
 vi.mock('@/lib/relay/relayGuards', () => ({
   checkIpRateLimit: h.ipLimit,
