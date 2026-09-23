@@ -28,11 +28,14 @@ vi.mock('wagmi', () => ({
   usePublicClient: vi.fn(),
   useSwitchChain: vi.fn(),
 }));
-// viem.createPublicClient は balance.ts が ERC20.balanceOf を呼ぶ network layer。
+// viem.createPublicClient は balance.ts の ERC20.balanceOf と hook の source execution client。
 // integration test では実 RPC 呼ばないよう boundary mock し、readContract が
 // chain ごとに canned value を返すようにする。chainId → balance map を test
 // 毎に setReadContractByChain で設定する。
+// execution の spy は全 chain で共有する。source/destination の読み分けは
+// tests/hooks/useCrossChainPayment.test.tsx の chain ごとに異なる client で検証する。
 const readContractByChain = new Map<number, bigint>();
+let executionPublicClient: ReturnType<typeof makePublicClient>;
 function setReadContractByChain(map: Record<number, bigint>) {
   readContractByChain.clear();
   for (const [k, v] of Object.entries(map)) {
@@ -44,6 +47,8 @@ vi.mock('viem', async () => {
   return {
     ...actual,
     createPublicClient: vi.fn((opts: { chain: { id: number } }) => ({
+      ...executionPublicClient,
+      chain: { id: opts.chain.id },
       readContract: vi.fn(async () => {
         const v = readContractByChain.get(opts.chain.id);
         if (v === undefined) {
@@ -113,6 +118,7 @@ function setupConnected(opts: {
 } = {}) {
   const walletClient = opts.walletClient ?? makeWalletClient();
   const publicClient = opts.publicClient ?? makePublicClient();
+  executionPublicClient = publicClient;
   vi.mocked(useAccount).mockReturnValue({
     address: opts.account ?? ACCOUNT,
     isConnected: true,
