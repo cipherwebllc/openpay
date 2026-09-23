@@ -142,10 +142,12 @@ describe('next.config.mjs headers() — baseline and report-only CSP (C17)', () 
     expect(csp.has('report-to')).toBe(false);
   });
 
-  it('observes inline/eval scripts in production without nonces or dynamic rendering', async () => {
+  it('allows Next inline RSC scripts but no external script hosts or eval in production', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     const csp = await reportOnlyDirectives();
-    expect(csp.get('script-src')).toEqual(["'self'"]);
+    // Next App Router inlines RSC payload scripts on every page; without per-request nonces
+    // they must be allowed or every page reports (Lighthouse inspector-issues, PR #577).
+    expect(csp.get('script-src')).toEqual(["'self'", "'unsafe-inline'"]);
     expect(csp.get('script-src-attr')).toEqual(["'none'"]);
   });
 
@@ -153,7 +155,7 @@ describe('next.config.mjs headers() — baseline and report-only CSP (C17)', () 
     vi.stubEnv('NODE_ENV', 'development');
     const csp = await reportOnlyDirectives();
     expect(csp.get('script-src')).toEqual([
-      "'self'", "'unsafe-eval'", 'https://va.vercel-scripts.com',
+      "'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://va.vercel-scripts.com',
     ]);
   });
 

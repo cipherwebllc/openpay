@@ -83,7 +83,12 @@ function reportOnlyCsp() {
   return [
     "default-src 'self'",
     // app/[locale]/layout.tsx: Vercel scripts are same-origin in production.
-    `script-src 'self'${isDev ? " 'unsafe-eval' https://va.vercel-scripts.com" : ''}`,
+    // Next.js App Router inlines RSC payload scripts (self.__next_f.push) on every page.
+    // Without a per-request nonce (which would force dynamic rendering of every page),
+    // script-src must allow inline scripts or every page reports a violation (Lighthouse
+    // inspector-issues failed on all 7 URLs, PR #577). External script hosts stay
+    // disallowed. A nonce-based policy is evaluated in the enforcement PR.
+    `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval' https://va.vercel-scripts.com" : ''}`,
     "script-src-attr 'none'",
     // React style props and the wallet modal inject inline CSS.
     "style-src 'self' 'unsafe-inline'",
