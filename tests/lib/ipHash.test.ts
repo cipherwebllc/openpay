@@ -1,10 +1,63 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIp, hashIpBucket } from '@/lib/net/ipHash';
 
 const logger = vi.hoisted(() => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }));
 vi.mock('@/lib/logger', () => ({ logger }));
 
 const SECRET = '0123456789abcdef0123456789abcdef';
+
+describe('hashIpBucket', () => {
+  beforeEach(() => {
+    vi.stubEnv('IP_HASH_SECRET', SECRET);
+  });
+
+  it.each([
+    ['203.0.113.9', '203.0.113.9'],
+    [' 203.0.113.9 ', '203.0.113.9'],
+    ['::ffff:203.0.113.9', '203.0.113.9'],
+    ['::ffff:cb00:7109', '203.0.113.9'],
+    ['0:0:0:0:0:FFFF:CB00:7109', '203.0.113.9'],
+    ['::ffff:203.0.113.9%eth0', '203.0.113.9'],
+    ['2001:db8:1234:5678::1', '2001:db8:1234:5678::'],
+    ['2001:0DB8:1234:5678:ffff:ffff:ffff:ffff', '2001:db8:1234:5678::'],
+    ['2001:db8:1234:5678::192.0.2.1', '2001:db8:1234:5678::'],
+    ['fe80::1%eth0', 'fe80::'],
+    ['fe80:0:0:0::2%42', 'fe80::'],
+    ['::1', '::'],
+    ['::', '::'],
+    ['::192.0.2.1', '::'],
+    ['ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff', 'ffff:ffff:ffff:ffff::'],
+  ])('%s hashes the /32 or /64 network %s with the existing HMAC', (ip, network) => {
+    expect(hashIpBucket(ip)).toBe(hashIp(network));
+    expect(hashIpBucket(ip)).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it.each([
+    ['203.0.113.9', '203.0.113.10'],
+    ['::ffff:203.0.113.9', '::ffff:203.0.113.10'],
+    ['2001:db8:1234:5678::ffff', '2001:db8:1234:5679::1'],
+    ['2001:db8:1234:5678::1', '2001:db8:1235:5678::1'],
+  ])('keeps distinct networks %s and %s separate', (a, b) => {
+    expect(hashIpBucket(a)).not.toBe(hashIpBucket(b));
+  });
+
+  it.each([null, '', 'not-an-ip', '999.0.0.1', '2001::db8::1', '2001:db8::gg', '203.0.113.9%eth0', 'fe80::1%', 'fe80::1%eth0%1', '[::1]', '2001:db8::/64'])(
+    'rejects invalid input %s without throwing', (ip) => {
+      expect(hashIpBucket(ip)).toBeNull();
+    },
+  );
+
+  it.each(['', 'short-secret'])('preserves fail-open for secret %s', (secret) => {
+    vi.stubEnv('IP_HASH_SECRET', secret);
+    expect(hashIpBucket('2001:db8::1')).toBeNull();
+    expect(hashIpBucket('203.0.113.9')).toBeNull();
+  });
+
+  it('keeps hashIp /128 behavior for the deferred money-route migration', () => {
+    expect(hashIp('2001:db8::1')).not.toBe(hashIp('2001:db8::2'));
+    expect(hashIpBucket('2001:db8::1')).toBe(hashIpBucket('2001:db8::2'));
+  });
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();

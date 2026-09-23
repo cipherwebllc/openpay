@@ -11,7 +11,7 @@ const state = vi.hoisted(() => ({
 const requireSession = vi.hoisted(() => vi.fn());
 const checkIpRateLimit = vi.hoisted(() => vi.fn());
 const clientIp = vi.hoisted(() => vi.fn(() => '203.0.113.10'));
-const hashIp = vi.hoisted(() => vi.fn(() => 'hashed-ip'));
+const hashIpBucket = vi.hoisted(() => vi.fn(() => 'hashed-ip'));
 const listTipMessages = vi.hoisted(() => vi.fn());
 const deleteTipMessages = vi.hoisted(() => vi.fn());
 
@@ -27,7 +27,7 @@ vi.mock('@/app/api/auth/siwe/_session', () => ({
 }));
 vi.mock('@/lib/net/ipHash', () => ({
   clientIp,
-  hashIp,
+  hashIpBucket,
 }));
 vi.mock('@/lib/relay/relayGuards', () => ({
   checkIpRateLimit,
@@ -61,7 +61,7 @@ beforeEach(() => {
   checkIpRateLimit.mockReset();
   checkIpRateLimit.mockResolvedValue(true);
   clientIp.mockClear();
-  hashIp.mockClear();
+  hashIpBucket.mockClear();
   listTipMessages.mockReset();
   listTipMessages.mockResolvedValue([]);
   deleteTipMessages.mockReset();

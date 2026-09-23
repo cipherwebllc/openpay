@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { createHmac } from 'node:crypto';
 
 const deferred = vi.hoisted(() => ({ tasks: [] as (() => Promise<void>)[] }));
 vi.mock('next/server', async (importOriginal) => ({
@@ -505,17 +506,17 @@ describe('POST /api/log/payment', () => {
       expect(entry.errorMessage).toBe('boom');
     });
 
-    it('limiter key は IP_HASH_SECRET があれば hashIp (IPv6 /64 相乗りを避ける)', async () => {
+    it('limiter key は IPv6 /64 を共有し、別 /64 は別の HMAC bucket にする', async () => {
       const orig = process.env.IP_HASH_SECRET;
       process.env.IP_HASH_SECRET = 'x'.repeat(32);
       try {
         rl.calls.length = 0;
-        await POST(
+        for (const ip of ['2001:db8::1', '2001:0DB8:0:0:ffff:ffff:ffff:ffff', '2001:db8:0:1::1']) await POST(
           new Request('http://localhost/api/log/payment', {
             method: 'POST',
             headers: {
               'content-type': 'application/json',
-              'x-forwarded-for': '2001:db8::1',
+              'x-forwarded-for': ip,
             },
             body: JSON.stringify(validBody),
           }),
@@ -524,6 +525,12 @@ describe('POST /api/log/payment', () => {
         expect(key).toMatch(/^logpay:[0-9a-f]{64}$/); // HMAC-SHA256 hex
         expect(max).toBe(60);
         expect(win).toBe(60);
+        const digest = (network: string) => createHmac('sha256', 'x'.repeat(32)).update(`ip:${network}`).digest('hex');
+        expect(rl.calls).toEqual([
+          [`logpay:${digest('2001:db8::')}`, 60, 60],
+          [`logpay:${digest('2001:db8::')}`, 60, 60],
+          [`logpay:${digest('2001:db8:0:1::')}`, 60, 60],
+        ]);
       } finally {
         if (orig === undefined) delete process.env.IP_HASH_SECRET;
         else process.env.IP_HASH_SECRET = orig;

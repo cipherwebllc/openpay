@@ -4,7 +4,7 @@ import { listHandlesForOwner } from '@/lib/handleStore';
 import { licenseNftEnabled } from '@/lib/license/config';
 import { licenseSummariesFor } from '@/lib/license/display';
 import { sellerRoleFor } from '@/lib/license/sellerRole';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { storeProductPath } from '@/lib/storeProductLink';
 import { getHostedProduct, isHostedId } from '@/lib/x402/hostedStore';
@@ -20,7 +20,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const { id } = await context.params;
   // 不正 ID は rate limit の KV を含む全 IO より前に拒否する。
   if (!isHostedId(id)) return error('invalid_input', 400);
-  if (!await checkIpRateLimit('license-products', hashIp(clientIp(request)), 30, 60)) {
+  if (!await checkIpRateLimit('license-products', hashIpBucket(clientIp(request)), 30, 60)) {
     const response = error('rate_limited', 429);
     response.headers.set('Retry-After', '60');
     return response;

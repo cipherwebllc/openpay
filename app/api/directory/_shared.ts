@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 
 export const DIRECTORY_CACHE_CONTROL =
@@ -24,7 +24,7 @@ export async function guardFreeDirectoryApi(
   if (
     !(await checkIpRateLimit(
       'directory',
-      hashIp(clientIp(req)),
+      hashIpBucket(clientIp(req)),
       30,
       60,
     ))

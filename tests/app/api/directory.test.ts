@@ -19,7 +19,7 @@ vi.mock('@/lib/directory/verification', () => ({
 
 vi.mock('@/lib/net/ipHash', () => ({
   clientIp: vi.fn(() => '203.0.113.10'),
-  hashIp: vi.fn(() => null),
+  hashIpBucket: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/relay/relayGuards', () => ({

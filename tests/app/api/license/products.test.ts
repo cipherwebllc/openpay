@@ -7,7 +7,7 @@ vi.mock('@/lib/x402/hostedStore', () => ({ getHostedProduct: h.product, isHosted
 vi.mock('@/lib/handleStore', () => ({ listHandlesForOwner: h.handles }));
 vi.mock('@/lib/license/sellerRole', () => ({ sellerRoleFor: () => 'third_party' }));
 vi.mock('@/lib/relay/relayGuards', () => ({ checkIpRateLimit: h.limit }));
-vi.mock('@/lib/net/ipHash', () => ({ clientIp: h.ip, hashIp: h.hash }));
+vi.mock('@/lib/net/ipHash', () => ({ clientIp: h.ip, hashIpBucket: h.hash }));
 import { GET } from '@/app/api/license/products/[id]/route';
 import { createLicenseDefinition } from '@/lib/license/definition';
 import { LICENSE_DESCRIPTOR_SCHEMA } from '@/lib/license/schema';

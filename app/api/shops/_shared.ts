@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { shopsApiEnabled } from '@/lib/shops/flags';
 
@@ -22,7 +22,7 @@ export async function guardFreeShopsApi(
 ): Promise<NextResponse | null> {
   if (!shopsApiEnabled()) return shopsError('not_found', 404);
   if (
-    !(await checkIpRateLimit('shops', hashIp(clientIp(req)), 30, 60))
+    !(await checkIpRateLimit('shops', hashIpBucket(clientIp(req)), 30, 60))
   ) {
     return shopsError('rate_limited', 429, { 'Retry-After': '60' });
   }

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 
 const LIMITS = {
@@ -14,7 +14,7 @@ export type PurchasesRoute = keyof typeof LIMITS;
 
 /** Return the rejected window in seconds; null means allowed. */
 export async function agentPurchasesRateLimit(req: Request, route: PurchasesRoute): Promise<number | null> {
-  const hashed = hashIp(clientIp(req));
+  const hashed = hashIpBucket(clientIp(req));
   const limits: readonly number[] = LIMITS[route];
   const scope = `agent-purchases-${route}`;
   // Limiter storage is ancillary and fails open in checkIpRateLimit. Ownership and

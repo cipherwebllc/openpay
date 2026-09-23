@@ -12,7 +12,7 @@ import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { isKvConfigured, kvDel, kvSet } from '@/lib/kv';
 import { chainObjectForId, isSupportedChainId, transportForChain } from '@/lib/chains';
 import { logger } from '@/lib/logger';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import {
   sessionCookieName,
@@ -38,7 +38,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       { status: 503 },
     );
   }
-  if (!(await checkIpRateLimit('siwe-verify', hashIp(clientIp(req)), 30, 60))) {
+  if (!(await checkIpRateLimit('siwe-verify', hashIpBucket(clientIp(req)), 30, 60))) {
     return NextResponse.json(
       { error: 'rate_limited' },
       { status: 429, headers: { 'Retry-After': '60' } },

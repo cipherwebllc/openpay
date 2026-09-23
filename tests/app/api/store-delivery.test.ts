@@ -14,7 +14,7 @@ vi.mock('@/lib/env', async (original) => {
   return { ...actual, env: { ...actual.env, get enableCreatorStore() { return h.parent; }, get enableStoreDeliveryTicket() { return h.enabled; }, get enableLicenseNft() { return h.license; } } };
 });
 vi.mock('@/app/api/auth/siwe/_session', () => ({ requireSession: h.session }));
-vi.mock('@/lib/net/ipHash', () => ({ clientIp: () => '192.0.2.1', hashIp: () => 'ip-hash' }));
+vi.mock('@/lib/net/ipHash', () => ({ clientIp: () => '192.0.2.1', hashIpBucket: () => 'ip-hash' }));
 vi.mock('@/lib/relay/relayGuards', () => ({ checkIpRateLimit: h.ip, checkReadRateLimit: h.readLimit }));
 vi.mock('@/lib/kv', () => ({ kvIncr: h.incr, kvEval: h.eval }));
 vi.mock('@/lib/x402/hostedStore', () => ({ getHostedProduct: h.product, getHostedContent: h.content, isHostedId: (id: string) => /^h_[0-9a-f]{32}$/.test(id) }));

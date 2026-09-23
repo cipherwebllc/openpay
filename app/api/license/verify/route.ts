@@ -4,7 +4,7 @@ import { kvGet, kvSet } from '@/lib/kv';
 import { licenseNftEnabled } from '@/lib/license/config';
 import { resolveLicenseRights, type LicenseRights } from '@/lib/license/rights';
 import { acquireLicenseVerifyBudget, releaseLicenseVerifyBudget } from '@/lib/license/verifyBudget';
-import { clientIp, hashIp } from '@/lib/net/ipHash';
+import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { getHostedProduct, isHostedId } from '@/lib/x402/hostedStore';
 import { readStoreOwnership } from '@/lib/x402/storeEntitlement';
@@ -26,7 +26,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   const product = await getHostedProduct(productId);
   if (product === 'storage') return respond({ error: 'storage_unavailable' }, 503);
   if (!product || product.id !== productId || product.productKind !== 'license' || !product.license) return respond({ error: 'not_found' }, 404);
-  if (!await checkIpRateLimit('license-verify', hashIp(clientIp(request)), 30, 60)) {
+  if (!await checkIpRateLimit('license-verify', hashIpBucket(clientIp(request)), 30, 60)) {
     const response = respond({ error: 'rate_limited' }, 429);
     response.headers.set('Retry-After', '60'); return response;
   }

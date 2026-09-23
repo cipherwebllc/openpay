@@ -36,6 +36,7 @@ vi.mock('@/lib/kv', () => ({
 vi.mock('@/lib/net/ipHash', () => ({
   clientIp: vi.fn(() => '203.0.113.10'),
   hashIp: vi.fn(() => 'hashed-ip'),
+  hashIpBucket: vi.fn(() => 'hashed-ip'),
 }));
 vi.mock('@/lib/relay/relayGuards', () => ({
   checkIpRateLimit: rate.check,
