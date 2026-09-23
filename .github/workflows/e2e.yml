@@ -55,3 +55,42 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  e2e-prodflags:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Fail the job on regressions, including smoke failures (no advisory override).
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Check dependency sources
+        run: node scripts/lockfile-gate.mjs
+
+      - name: Install
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Load public production flags (testnet fixtures)
+        # One vector supplies BOTH the build and the server/test process.
+        run: sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' e2e/prodFlags.env >> "$GITHUB_ENV"
+
+      - name: Build
+        run: npm run build
+
+      - name: Run production-flag smoke and fee rows (timed)
+        run: time npx playwright test --config=playwright.prodflags.config.ts
+
+      - name: Upload production-flag report and durations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-prodflags-report
+          path: playwright-prodflags-report/
+          retention-days: 7
