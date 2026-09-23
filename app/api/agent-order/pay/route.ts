@@ -7,8 +7,8 @@
 //   - payTo    = record.config.to (@handle 権威・project_mobileorder_receiver_config_to)
 //   - resource = 正規順 (h, cart, table, pickupAt) で組んだ自 URL (MCP の accepts.resource 照合用)
 //   - chain    = storefront.chain の deployment (facilitator/forwarder 未対応は 422 unsupported_chain)
-// settle 成功後、既存の受注リレー (/api/order/notify) の POST handler を import して内部呼び出しし、
-// サーバー検証済みの注文を店主の受注画面へ届ける。notify 失敗は **決済成功を巻き込まない** (掟13)。
+// 新規 settle 前に不変 snapshot を予約し、nonce 束縛の finalizer で店主へ届ける。
+// 予約導入前の redelivery データだけ旧 notify を使う。登録失敗は決済成功を巻き込まない (掟13)。
 //
 // flag: enableX402Facilitator && enableOrderRelay && enableAgentOrder が全 true でなければ 404。
 
@@ -23,6 +23,7 @@ import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { readShopLive } from '@/lib/shopLiveStore';
 import { isBeforeOpen, isPastLastOrder, pickupSlots } from '@/lib/shopTime';
 import { createJpycPaymentRequirements } from '@/lib/x402/requirements';
+import { parseFacilitatorRequest } from '@/lib/x402/facilitatorSettle';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 import { resolveFacilitatorPaymentStatus } from '@/lib/x402/facilitatorStatus';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
@@ -60,6 +61,21 @@ import {
 import { POST as verifyPayment } from '@/app/api/facilitator/verify/route';
 import { POST as settlePayment } from '@/app/api/facilitator/settle/route';
 import { POST as notifyOrder } from '@/app/api/order/notify/route';
+
+import { logger } from '@/lib/logger';
+import { resolveStandardFeeConfig } from '@/lib/order/orderFeeObligation';
+import { finalizeAgentOrder } from '@/lib/order/agentOrderFinalize';
+import {
+  checkAgentOrderAuthorization,
+  lookupAgentOrderReservation,
+  reserveAgentOrder,
+  reservationForBinding,
+  reservationRecoveryRecord,
+  rememberAgentSettlement,
+  releaseAgentOrderAttempt,
+  claimAgentOrderRetry,
+  type AgentOrderReservation,
+} from '@/lib/order/agentOrderReservation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -137,46 +153,96 @@ function pendingRecoveryResponse(snapshot: AgentOrderSnapshot): NextResponse {
   );
 }
 
+async function authorizationOriginFailure(
+  facilitatorBody: Record<string, unknown>,
+  snapshot: AgentOrderSnapshot,
+  hasPriorAgentBinding: boolean,
+): Promise<NextResponse | null> {
+  const origin = await checkAgentOrderAuthorization(facilitatorBody, hasPriorAgentBinding);
+  if (origin === 'clear') return null;
+  if (origin === 'unavailable') {
+    return NextResponse.json({ error: 'storage_unavailable' }, { status: 503 });
+  }
+  if (origin === 'indeterminate') return pendingRecoveryResponse(snapshot);
+  const accepts = [facilitatorBody.paymentRequirements] as Accepts;
+  return challenge(snapshot.resource, accepts[0].description, accepts, 'payment_invalid');
+}
+
+function unusedExpiredChallenge(
+  facilitatorBody: Record<string, unknown>,
+  snapshot: AgentOrderSnapshot,
+): NextResponse | null {
+  const parsed = parseFacilitatorRequest(facilitatorBody);
+  if (!parsed.ok || parsed.parsed.params.validBefore >= BigInt(Math.floor(Date.now() / 1000))) {
+    return null;
+  }
+  // Call only on positive unused status: unknown settlement must never prompt another payment.
+  const accepts = [facilitatorBody.paymentRequirements] as Accepts;
+  return challenge(snapshot.resource, accepts[0].description, accepts, 'expired');
+}
+
 async function settledOrderResponse(input: {
   req: Request;
   snapshot: AgentOrderSnapshot;
   settlement: AgentOrderSettlement;
+  reservation: AgentOrderReservation | null;
+  allowLegacy?: boolean;
 }): Promise<NextResponse> {
-  const { req, snapshot, settlement } = input;
+  const { req, snapshot, settlement, reservation } = input;
   const txHash = settlement.transaction;
-  const orderId = `agent-${txHash.slice(0, 18)}`;
+  const orderId = `agent-${(reservation?.record.tuple.nonce ?? txHash).slice(0, 18)}`;
 
-  // 受注登録 (付帯処理) を既存の受注リレーへ委譲する。掟13 の隔離: **受注登録の失敗 (KV 障害 /
-  // on-chain 検証遅延 / notify の想定外 throw) が「決済成功」という本体を巻き込まない** ための防御。
-  // 支払いは既に settle 済 (不可逆) なので、notify がこけても 200 + orderRegistered:false + txHash を
-  // 返し、店主は履歴/txHash から追える。ここで throw を握るのはこの波及を断つためであり、他意はない。
+  // Registration failure must not turn an irreversible settled payment into another payment
+  // challenge. Preserve 200 + txHash and expose registration failure for same-payment repair.
   let orderRegistered = false;
+  let retryWithSameHeader = reservation !== null;
   try {
-    const notifyReq = new Request(
-      new URL(
-        `/api/order/notify?h=${encodeURIComponent(snapshot.handle)}`,
-        req.url,
-      ),
-      {
-        method: 'POST',
-        headers: cloneForwardHeaders(req),
-        body: JSON.stringify({
-          token: 'jpyc',
-          txHash,
-          chainId: snapshot.chainId,
-          merchant: snapshot.merchant,
-          orderId,
-          items: snapshot.items,
-          description: snapshot.table ?? undefined,
-          pickupAt: snapshot.pickupAt ?? undefined,
-          from: settlement.payer,
-        }),
-      },
-    );
-    const notifyRes = await notifyOrder(notifyReq);
-    const notifyBody = (await notifyRes.json()) as { ok?: boolean };
-    orderRegistered = notifyRes.status === 200 && notifyBody.ok === true;
-  } catch {
+    if (reservation) {
+      await rememberAgentSettlement(reservation, settlement);
+      const finalized = await finalizeAgentOrder({ reservation, settlement });
+      orderRegistered = finalized.ok;
+      retryWithSameHeader = !finalized.ok &&
+        (finalized.reason === 'processing' || finalized.reason === 'storage_unavailable');
+      if (!finalized.ok) {
+        logger.error('order.agent.registration_failed', {
+          reason: finalized.reason, txHash, orderId,
+        });
+      }
+    } else if (input.allowLegacy !== false) {
+      // No retroactive reservation: it cannot close a pre-upgrade race. Preserve legacy behavior
+      // and make the compatibility exception observable without logging payment credentials.
+      logger.warn('order.agent.legacy_unreserved', { txHash, orderId });
+      const notifyReq = new Request(
+        new URL(
+          `/api/order/notify?h=${encodeURIComponent(snapshot.handle)}`,
+          req.url,
+        ),
+        {
+          method: 'POST',
+          headers: cloneForwardHeaders(req),
+          body: JSON.stringify({
+            token: 'jpyc',
+            txHash,
+            chainId: snapshot.chainId,
+            merchant: snapshot.merchant,
+            orderId,
+            items: snapshot.items,
+            description: snapshot.table ?? undefined,
+            pickupAt: snapshot.pickupAt ?? undefined,
+            from: settlement.payer,
+          }),
+        },
+      );
+      const notifyRes = await notifyOrder(notifyReq);
+      const notifyBody = (await notifyRes.json()) as { ok?: boolean };
+      orderRegistered = notifyRes.status === 200 && notifyBody.ok === true;
+    } else {
+      logger.error('order.agent.registration_failed', {
+        reason: 'reservation_unavailable', txHash, orderId,
+      });
+    }
+  } catch (error) {
+    logger.error('order.agent.registration_failed', { error, txHash, orderId });
     orderRegistered = false;
   }
 
@@ -189,6 +255,10 @@ async function settledOrderResponse(input: {
       snapshot.decimals,
     ),
     orderRegistered,
+    ...(!orderRegistered && (reservation || input.allowLegacy === false) ? {
+      paymentSettled: true,
+      repair: { action: 'do_not_pay_again', retryWithSameHeader, txHash },
+    } : {}),
   });
   res.headers.set('X-PAYMENT-RESPONSE', encodeJsonBase64(settlement));
   res.headers.set(
@@ -203,6 +273,7 @@ async function recoverMatchedPayment(input: {
   identity: PaymentRedeliveryIdentity;
   binding: PaymentRedeliveryBinding;
   record: PaymentRedeliveryRecord;
+  reservation?: AgentOrderReservation;
 }): Promise<NextResponse> {
   const { req, identity, binding, record } = input;
   const snapshot = parseBoundAgentOrderSnapshot({
@@ -212,6 +283,52 @@ async function recoverMatchedPayment(input: {
     identity,
   });
   if (snapshot === null) return paymentInvalidResponse();
+  const originFailure = await authorizationOriginFailure(record.facilitatorBody, snapshot, true);
+  if (originFailure) return originFailure;
+
+  const owned = input.reservation
+    ? { kind: 'match' as const, reservation: input.reservation }
+    : await reservationForBinding(identity, snapshot, record.facilitatorBody);
+  const reservation = owned.kind === 'match' ? owned.reservation : null;
+  const allowLegacy = owned.kind === 'missing';
+  if (reservation && record.state !== 'settled') {
+    const owner = await claimAgentOrderRetry(reservation);
+    if (owner) {
+      // Only a proven pre-broadcast rejection resumes settlement. Use the saved binding,
+      // never today's menu/handle; an ambiguous prior attempt remains status-only.
+      const verifyRes = await verifyPayment(
+        new Request(new URL('/api/facilitator/verify', req.url), {
+          method: 'POST',
+          headers: cloneForwardHeaders(req),
+          body: JSON.stringify(record.facilitatorBody),
+        }),
+      );
+      const verified = await verifyRes.json() as VerifyBody;
+      if (verifyRes.status !== 200 || verified.isValid !== true) {
+        await releaseAgentOrderAttempt(reservation, owner);
+        if (verifyRes.status !== 200) {
+          return NextResponse.json(verified, { status: verifyRes.status });
+        }
+        const accepts = [record.facilitatorBody.paymentRequirements] as Accepts;
+        return challenge(
+          snapshot.resource, accepts[0].description, accepts,
+          verified.invalidReason ?? 'payment_invalid',
+        );
+      }
+      const accepts = [record.facilitatorBody.paymentRequirements] as Accepts;
+      return settleBoundOrder({
+        req, identity, binding, snapshot,
+        facilitatorBody: record.facilitatorBody,
+        recoveryClaimed: false,
+        recoveryOwnerToken: null,
+        reservation,
+        reservationOwner: owner,
+        accepts,
+        resourceUrl: snapshot.resource,
+        description: accepts[0].description,
+      });
+    }
+  }
 
   if (record.state === 'settled') {
     const settlement = parseAgentOrderSettlement(
@@ -220,7 +337,7 @@ async function recoverMatchedPayment(input: {
     );
     return settlement === null
       ? paymentInvalidResponse()
-      : settledOrderResponse({ req, snapshot, settlement });
+      : settledOrderResponse({ req, snapshot, settlement, reservation, allowLegacy });
   }
 
   if (!(await checkFacilitatorStatusRateLimit(req))) {
@@ -229,6 +346,10 @@ async function recoverMatchedPayment(input: {
   const status = await resolveFacilitatorPaymentStatus(
     record.facilitatorBody,
   );
+  if (status.ok && status.state === 'unused') {
+    const expired = unusedExpiredChallenge(record.facilitatorBody, snapshot);
+    if (expired) return expired;
+  }
   if (
     !status.ok ||
     status.state !== 'settled' ||
@@ -252,8 +373,10 @@ async function recoverMatchedPayment(input: {
     binding,
     settlement,
   });
-  if (promotion.kind === 'conflict') return paymentInvalidResponse();
-  return settledOrderResponse({ req, snapshot, settlement });
+  return settledOrderResponse({
+    req, snapshot, settlement, reservation,
+    allowLegacy: allowLegacy && promotion.kind !== 'conflict',
+  });
 }
 
 function paymentRequired(
@@ -348,19 +471,25 @@ export async function GET(req: Request): Promise<NextResponse> {
       paymentIdentity,
       binding,
     );
-    if (delivery.kind === 'match') {
-      // 支払い済み retry は current menu/live 状態を再評価せず、初回 verify 時の immutable
-      // server snapshot だけを使う。決済後の売切/閉店/価格変更が受注消失へ波及するのを断つ。
+    // The durable reservation is the original binding, including after redelivery promotion,
+    // expiry or conflict. Do not roundtrip its snapshot through the short-lived cache.
+    const reserved = await lookupAgentOrderReservation(paymentIdentity, binding);
+    if (reserved.kind === 'match') {
       return recoverMatchedPayment({
-        req,
-        identity: paymentIdentity,
-        binding,
-        record: delivery.record,
+        req, identity: paymentIdentity, binding,
+        record: await reservationRecoveryRecord(reserved.reservation),
+        reservation: reserved.reservation,
       });
     }
-    // missing/unavailable では cache を解錠せず、従来の current verify/settle へ進む。
-    // 復旧 KV の障害が新規の正当な注文決済を停止する波及を断つ。
-    paymentScopeConflict = delivery.kind === 'conflict';
+    if (reserved.kind === 'conflict') paymentScopeConflict = true;
+    if (!paymentScopeConflict && delivery.kind === 'match') {
+      // Pre-upgrade bindings remain recoverable without reevaluating today's menu/live state.
+      return recoverMatchedPayment({
+        req, identity: paymentIdentity, binding, record: delivery.record,
+      });
+    }
+    // Unavailable lookup cannot unlock anything: every new settlement still requires atomic reserve.
+    paymentScopeConflict ||= delivery.kind === 'conflict';
   }
 
   const cartItems = decodeAgentCart(cartParam);
@@ -590,6 +719,11 @@ export async function GET(req: Request): Promise<NextResponse> {
     return challenge(resourceUrl, description, accepts, 'payment_invalid');
   }
 
+  // Check before either pre-broadcast record is created: a rejected human authorization must
+  // not leave a redelivery record that would be mistaken for proof of our own submission.
+  const originFailure = await authorizationOriginFailure(facilitatorBody, snapshot, false);
+  if (originFailure) return originFailure;
+
   const claim = await claimPaymentRedelivery({
     identity: paymentIdentity,
     binding,
@@ -607,17 +741,67 @@ export async function GET(req: Request): Promise<NextResponse> {
       record: claim.record,
     });
   }
-  // unavailable は従来 settle を許す一方、record を確認できない request から status 回復は
-  // 行わない。補助 KV 障害を決済停止へ波及させず、未束縛 status の注文解錠も増やさない。
+  // Even when redelivery is unavailable, the independent immutable reservation is mandatory.
   const recoveryClaimed = claim.kind === 'claimed';
   const recoveryOwnerToken =
     claim.kind === 'claimed' ? claim.record.ownerToken : null;
 
+  const reserved = await reserveAgentOrder({
+    identity: paymentIdentity, snapshot, facilitatorBody,
+    feeConfig: resolveStandardFeeConfig(record.storefront, chainId),
+  });
+  if (reserved.kind !== 'created' && reserved.kind !== 'match') {
+    // Unbound payment must never broadcast. Release only our pre-broadcast cache claim so a
+    // failed write is retryable. The reservation helper CAS-releases only this request's attempt.
+    if (recoveryOwnerToken) {
+      await releasePaymentRedelivery({
+        identity: paymentIdentity, binding, ownerToken: recoveryOwnerToken,
+      });
+    }
+    if (reserved.kind === 'conflict') {
+      return challenge(resourceUrl, description, accepts, 'payment_invalid');
+    }
+    return NextResponse.json({ error: 'storage_unavailable' }, { status: 503 });
+  }
+  if (reserved.kind === 'match') {
+    return recoverMatchedPayment({
+      req, identity: paymentIdentity, binding,
+      record: await reservationRecoveryRecord(reserved.reservation),
+      reservation: reserved.reservation,
+    });
+  }
+  return settleBoundOrder({
+    req, identity: paymentIdentity, binding, snapshot, facilitatorBody, recoveryClaimed,
+    recoveryOwnerToken: recoveryOwnerToken ?? null,
+    reservation: reserved.reservation,
+    reservationOwner: reserved.owner,
+    accepts, resourceUrl, description,
+  });
+}
+
+async function settleBoundOrder(input: {
+  req: Request;
+  identity: PaymentRedeliveryIdentity;
+  binding: PaymentRedeliveryBinding;
+  snapshot: AgentOrderSnapshot;
+  facilitatorBody: Record<string, unknown>;
+  recoveryClaimed: boolean;
+  recoveryOwnerToken: string | null;
+  reservation: AgentOrderReservation;
+  reservationOwner: string;
+  accepts: Accepts;
+  resourceUrl: string;
+  description: string;
+}): Promise<NextResponse> {
+  const {
+    req, identity, binding, snapshot, facilitatorBody, recoveryClaimed, recoveryOwnerToken,
+    reservation, reservationOwner, accepts, resourceUrl, description,
+  } = input;
   const settleRes = await settlePayment(
     new Request(new URL('/api/facilitator/settle', req.url), {
       method: 'POST',
       headers: cloneForwardHeaders(req),
-      body: bodyText,
+      body: JSON.stringify(facilitatorBody),
     }),
   );
   const settleBody = (await settleRes.json()) as SettleBody;
@@ -626,20 +810,28 @@ export async function GET(req: Request): Promise<NextResponse> {
     isFacilitatorPreBroadcastRejection(settleRes.status, settleBody)
   ) {
     await releasePaymentRedelivery({
-      identity: paymentIdentity,
+      identity,
       binding,
       ownerToken: recoveryOwnerToken,
     });
   }
+  if (isFacilitatorPreBroadcastRejection(settleRes.status, settleBody)) {
+    await releaseAgentOrderAttempt(reservation, reservationOwner);
+  }
   if (settleRes.status !== 200 || settleBody.success !== true) {
     if (
-      recoveryClaimed &&
       settleBody.errorReason === 'pending' &&
       (await checkFacilitatorStatusRateLimit(req))
     ) {
+      const originFailure = await authorizationOriginFailure(facilitatorBody, snapshot, true);
+      if (originFailure) return originFailure;
       const status = await resolveFacilitatorPaymentStatus(
         facilitatorBody,
       );
+      if (status.ok && status.state === 'unused') {
+        const expired = unusedExpiredChallenge(facilitatorBody, snapshot);
+        if (expired) return expired;
+      }
       if (
         status.ok &&
         status.state === 'settled' &&
@@ -656,17 +848,18 @@ export async function GET(req: Request): Promise<NextResponse> {
         );
         if (recovered) {
           const promotion = await promotePaymentRedelivery({
-            identity: paymentIdentity,
+            identity,
             binding,
             settlement: recovered,
           });
           if (promotion.kind === 'conflict') {
-            return paymentInvalidResponse();
+            logger.warn('order.agent.redelivery_promotion_conflict');
           }
           return settledOrderResponse({
             req,
             snapshot,
             settlement: recovered,
+            reservation,
           });
         }
       }
@@ -701,11 +894,13 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
   if (recoveryClaimed) {
     const promotion = await promotePaymentRedelivery({
-      identity: paymentIdentity,
+      identity,
       binding,
       settlement,
     });
-    if (promotion.kind === 'conflict') return paymentInvalidResponse();
+    if (promotion.kind === 'conflict') {
+      logger.warn('order.agent.redelivery_promotion_conflict');
+    }
   }
-  return settledOrderResponse({ req, snapshot, settlement });
+  return settledOrderResponse({ req, snapshot, settlement, reservation });
 }

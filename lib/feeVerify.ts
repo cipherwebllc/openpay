@@ -122,7 +122,7 @@ type StandardFeePairReceiptReader = {
 };
 
 export type StandardFeePairVerifyResult =
-  | { ok: true; value: bigint; blockNumber: bigint }
+  | { ok: true; value: bigint; blockNumber: bigint; receiptLogs?: readonly FeeReceiptLog[] }
   | {
       ok: false;
       reason:
@@ -181,6 +181,7 @@ export type JpycTransferToOnChainResult =
   | {
       ok: true;
       value: bigint;
+      receiptLogs?: readonly FeeReceiptLog[];
       blockNumber?: bigint;
       // receipt.from と一致する payer から merchant への JPYC Transfer 合計。standard 判定専用。
       // receipt.from 欠落/不正または直接 Transfer 無しなら両方 undefined (relay の既存結果と同形)。
@@ -299,6 +300,7 @@ export async function verifyJpycTransferToOnChain(args: {
   publicClient: TransferReceiptReader;
   txHash: Hex;
   expected: JpycTransferToExpected;
+  includeReceiptLogs?: boolean;
 }): Promise<JpycTransferToOnChainResult> {
   let receipt: Awaited<
     ReturnType<TransferReceiptReader['getTransactionReceipt']>
@@ -344,6 +346,7 @@ export async function verifyJpycTransferToOnChain(args: {
   }
   return {
     ...result,
+    ...(args.includeReceiptLogs ? { receiptLogs: receipt.logs } : {}),
     ...(receipt.blockNumber !== undefined
       ? { blockNumber: receipt.blockNumber }
       : {}),
@@ -364,6 +367,7 @@ export async function verifyJpycTransferToOnChain(args: {
  */
 export async function verifyJpycStandardFeePairOnChain(args: {
   publicClient: StandardFeePairReceiptReader;
+  includeReceiptLogs?: boolean;
   merchantTxHash: Hex;
   feeTxHash: Hex;
   expected: {
@@ -451,5 +455,5 @@ export async function verifyJpycStandardFeePairOnChain(args: {
   ) {
     return { ok: false, reason: 'fee_amount_mismatch' };
   }
-  return { ...feeResult, blockNumber: feeReceipt.blockNumber };
+  return { ...feeResult, blockNumber: feeReceipt.blockNumber, ...(args.includeReceiptLogs ? { receiptLogs: merchantReceipt.logs } : {}) };
 }

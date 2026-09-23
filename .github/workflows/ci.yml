@@ -74,6 +74,14 @@ jobs:
           node --max-old-space-size=6144 ./node_modules/.bin/vitest run --coverage
           --pool=forks --poolOptions.forks.minForks=1 --poolOptions.forks.maxForks=2
           --exclude tests/_helpers/redisLua.test.ts
+          --exclude tests/lib/order/agentOrderReservation-lua.test.ts
+          --exclude tests/lib/order/agentOrderPending-lua.test.ts
+          --exclude tests/lib/order/agentOrderRecovery-lua.test.ts
+          --exclude tests/lib/order/agentOrderFinalize-lua.test.ts
+          --exclude tests/lib/order/agentOrderLifecycle-lua.test.ts
+          --exclude tests/lib/order/agentOrderPersistence-lua.test.ts
+          --exclude tests/lib/order/agentOrderReview-lua.test.ts
+          --exclude tests/lib/order/agentOrderOrigin-lua.test.ts
           --exclude tests/app/api/agentPurchases.test.ts
           --exclude tests/app/api/store-delivery-metadata.test.ts
           --exclude tests/app/api/store-products-license-terms.test.ts
