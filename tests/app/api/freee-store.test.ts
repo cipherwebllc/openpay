@@ -7,6 +7,7 @@ const kv = vi.hoisted(() => ({
   del: vi.fn(),
   getdel: vi.fn(),
   setNxGet: vi.fn(),
+  eval: vi.fn(),
 }));
 vi.mock('@/lib/kv', () => ({
   kvGet: (...a: unknown[]) => kv.get(...a),
@@ -14,6 +15,7 @@ vi.mock('@/lib/kv', () => ({
   kvDel: (...a: unknown[]) => kv.del(...a),
   kvGetDel: (...a: unknown[]) => kv.getdel(...a),
   kvSetNxGet: (...a: unknown[]) => kv.setNxGet(...a),
+  kvEval: (...a: unknown[]) => kv.eval(...a),
 }));
 
 import {
@@ -22,6 +24,7 @@ import {
   releaseSync,
   getToken,
   setToken,
+  setMeta,
   setMapping,
   delMapping,
   setState,
@@ -42,6 +45,7 @@ beforeEach(() => {
   kv.del.mockReset();
   kv.getdel.mockReset();
   kv.setNxGet.mockReset();
+  kv.eval.mockReset().mockResolvedValue({ ok: true, value: 1 });
 });
 
 afterEach(() => {
@@ -137,7 +141,8 @@ describe('token / state JSON 直列化 (wallet 名前空間)', () => {
     expect(await getToken('0xabc')).toBeNull();
     kv.get.mockResolvedValue({ ok: true, value: JSON.stringify(TOKEN) });
     expect(await getToken('0xabc')).toBeNull();
-    expect(kv.del).toHaveBeenCalledWith('freee:tok:0xabc');
+    expect(kv.eval).toHaveBeenCalledWith(expect.any(String), ['freee:tok:0xabc'], [expect.any(String), '']);
+    expect(kv.del).not.toHaveBeenCalled();
   });
 
   it('getToken: tampered ct/tag → decrypt fails → null and delete', async () => {
@@ -145,7 +150,8 @@ describe('token / state JSON 直列化 (wallet 名前空間)', () => {
     envelope.ct = Buffer.from('tampered').toString('base64');
     kv.get.mockResolvedValue({ ok: true, value: JSON.stringify(envelope) });
     expect(await getToken('0xabc')).toBeNull();
-    expect(kv.del).toHaveBeenCalledWith('freee:tok:0xabc');
+    expect(kv.eval).toHaveBeenCalledWith(expect.any(String), ['freee:tok:0xabc'], [expect.any(String), '']);
+    expect(kv.del).not.toHaveBeenCalled();
   });
 
   it('getToken: wrong encryption key → null and delete', async () => {
@@ -153,7 +159,8 @@ describe('token / state JSON 直列化 (wallet 名前空間)', () => {
     process.env.FREEE_TOKEN_ENC_KEY = OTHER_ENC_KEY;
     kv.get.mockResolvedValue({ ok: true, value: saved });
     expect(await getToken('0xabc')).toBeNull();
-    expect(kv.del).toHaveBeenCalledWith('freee:tok:0xabc');
+    expect(kv.eval).toHaveBeenCalledWith(expect.any(String), ['freee:tok:0xabc'], [expect.any(String), '']);
+    expect(kv.del).not.toHaveBeenCalled();
   });
 
   it('setState: NX 成功で true・衝突で false', async () => {
@@ -195,5 +202,12 @@ describe('mapping 永続化結果', () => {
 
     kv.del.mockResolvedValueOnce({ ok: false, reason: 'http_error' });
     await expect(delMapping('0xABC')).resolves.toBe(false);
+  });
+});
+
+describe('C14: metadata persistence', () => {
+  it('rejects a failed metadata write instead of reporting a connection', async () => {
+    kv.set.mockResolvedValue({ ok: false, reason: 'http_error' });
+    await expect(setMeta('0xABC', { companyId: 7, companyName: 'Shop' })).rejects.toThrow('freee_meta_persist_failed');
   });
 });

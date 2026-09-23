@@ -1759,8 +1759,11 @@ opt-in (既定 OFF)。詳細は plans/a2hs-retention-roadmap.md Phase 2・memory
 ### §15.6 既知の前提 / 制約 (accepted)
 - payload 既定は「着金がありました」(金額なし)。金額表示は購読ごとの opt-in (`includeAmount`) で、ON の
   購読にだけロック画面に売上額を出す。payer / wallet / txHash / 注文 items は payload に入れない。
-- wallet 単位 coalescing (1 分 1 通 + 「新着 n 件」集約)。金額ラベルは coalesce の NX 勝者 (単一 count===1)
-  イベントのみ表示 — n>=2 は件数のみで金額は合算しない。
+- wallet × kind (payment / order / store) 単位 coalescing (1 分 1 通 + 「前回通知以降の着金/注文/販売: n 件」集約)。
+  保留件数の TTL はイベントごとに更新される 24 時間。次の通知機会に集約し、24 時間イベントがなければ失効する。
+  末尾イベントの配信予約・配信保証はなく、決済応答や `after()` 内で通知窓の終了を待たない。
+  金額ラベルは coalesce の NX 勝者 (単一 count===1) イベントのみ表示 — n>=2 は件数のみで金額は合算しない。
+  `includeAmount` が ON でも、保留件数と合算された次のイベントは金額ではなく件数のみを表示する。
 - 購読は 1 wallet 最大 5 台 (oldest prune)・TTL 90 日 (送信成功で更新)・404/410 で即削除。
 - **ブラウザ内の FCM 購読→受信は自動 E2E 不可** (2026-07-03 testnet E2E で確定): Playwright 同梱
   Chromium は FCM API キー非搭載、自動化起動の実 Chrome (`channel:'chrome'`) も push service 登録を

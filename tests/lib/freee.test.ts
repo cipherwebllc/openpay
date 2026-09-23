@@ -276,3 +276,25 @@ describe('freee 会計 API (実パース + 認可ヘッダ + エラー)', () => 
     ).rejects.toThrow('freee_deal_no_id');
   });
 });
+
+// C14: abort must cover stalled headers and response bodies, without exposing tokens.
+describe('C14: freee request deadlines', () => {
+  it.each(['exchange', 'refresh', 'api', 'body'] as const)('aborts a stalled %s after 10 seconds', async (operation) => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(controller.signal);
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      const stalled = () => new Promise<never>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+      });
+      if (operation === 'body') return { ok: true, json: stalled } as unknown as Response;
+      return stalled();
+    });
+    const pending = operation === 'exchange' ? exchangeCode(ENV, 'CODE')
+      : operation === 'refresh' ? refreshAccessToken(ENV, 'REFRESH') : getCompanies('ACCESS');
+    await Promise.resolve();
+    expect(timeout).toHaveBeenCalledWith(10_000);
+    const rejected = expect(pending).rejects.toThrow('deadline');
+    controller.abort(new DOMException('deadline', 'TimeoutError'));
+    await rejected;
+  });
+});

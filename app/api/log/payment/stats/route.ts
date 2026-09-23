@@ -82,7 +82,6 @@ type LogEntry = {
   // Phase1 Circle Paymaster 監査フィールド (gasless circle 経路のみ)。
   provider?: string;
   circlePaymasterNetUsdc?: string;
-  circleVerification?: string;
 };
 
 // gasless paymaster 系統別の集計 key。undefined provider (standard/legacy) は 'unknown'。
@@ -93,10 +92,8 @@ type ProviderAgg = {
   successCount: number;
   revertedCount: number;
   errorCount: number;
-  // circle のみ: client 申告 net USDC と on-chain verified net USDC を別計上
-  // (verified と client-reported を区別する・C2/C3)。
+  // circle のみ: client 申告 net USDC (サーバ検証の writer は存在しない)。
   circleNetUsdcReported: bigint;
-  circleNetUsdcVerified: bigint;
 };
 
 type TokenAgg = {
@@ -206,7 +203,6 @@ function emptyProviderAgg(provider: PaymentProviderKey): ProviderAgg {
     revertedCount: 0,
     errorCount: 0,
     circleNetUsdcReported: 0n,
-    circleNetUsdcVerified: 0n,
   };
 }
 
@@ -359,14 +355,9 @@ function aggregate(entries: LogEntry[]): {
       chainBridge.successCount++;
       globalBridge.successCount++;
       provider.successCount++;
-      // Circle gas 徴収 net を verified / client-reported に分けて計上 (C2/C3)。
+      // サーバ検証の writer は存在しない。既存の client 申告分だけを集計する。
       if (providerKey === 'circle') {
-        const net = parseWei(e.circlePaymasterNetUsdc);
-        if (e.circleVerification === 'verified') {
-          provider.circleNetUsdcVerified += net;
-        } else {
-          provider.circleNetUsdcReported += net;
-        }
+        provider.circleNetUsdcReported += parseWei(e.circlePaymasterNetUsdc);
       }
       // GMV は success のみ計上 (reverted は資金移動なし、error は submit 失敗)。
       // totalFeeWei (OpenPay 利用手数料) は分離記録済 log のみ計上し、内訳不明の旧 log は
@@ -464,9 +455,7 @@ function serializeProviders(providers: ProviderAgg[]) {
     successCount: p.successCount,
     revertedCount: p.revertedCount,
     errorCount: p.errorCount,
-    // Circle gas 徴収 net (raw USDC)。verified = on-chain receipt 由来、
-    // reported = client 申告 (未検証)。両者を混ぜない。
-    circleNetUsdcVerified: p.circleNetUsdcVerified.toString(),
+    // Circle gas 徴収 net (raw USDC)。client 申告のみで、サーバ検証済みではない。
     circleNetUsdcReported: p.circleNetUsdcReported.toString(),
   }));
 }

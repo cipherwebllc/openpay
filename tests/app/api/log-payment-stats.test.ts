@@ -1022,7 +1022,7 @@ describe('stats: bridge 別集計 (phase 2 cross-chain receive)', () => {
 });
 
 describe('stats: byProvider 集計 (Phase1 Circle Paymaster)', () => {
-  it('provider 別 count + circle net を verified / reported に分けて集計', async () => {
+  it('C8: reports Circle client totals without advertising an unwritten verified bucket', async () => {
     const entries = [
       // circle: client-reported net 9000
       makeEntry({
@@ -1032,13 +1032,13 @@ describe('stats: byProvider 集計 (Phase1 Circle Paymaster)', () => {
         circlePaymasterNetUsdc: '9000',
         circleVerification: 'client-reported',
       }),
-      // circle: verified net 8000
+      // circle: client-reported net 8000
       makeEntry({
         chainId: 421614,
         tokenAddress: USDC_BASE,
         provider: 'circle',
         circlePaymasterNetUsdc: '8000',
-        circleVerification: 'verified',
+        circleVerification: 'client-reported',
       }),
       // pimlico success
       makeEntry({ provider: 'pimlico' }),
@@ -1054,13 +1054,12 @@ describe('stats: byProvider 集計 (Phase1 Circle Paymaster)', () => {
     const byProvider = body.byProvider as Array<{
       provider: string;
       successCount: number;
-      circleNetUsdcVerified: string;
       circleNetUsdcReported: string;
     }>;
     const circle = byProvider.find((p) => p.provider === 'circle')!;
     expect(circle.successCount).toBe(2);
-    expect(circle.circleNetUsdcReported).toBe('9000');
-    expect(circle.circleNetUsdcVerified).toBe('8000');
+    expect(circle.circleNetUsdcReported).toBe('17000');
+    for (const provider of byProvider) expect(provider).not.toHaveProperty('circleNetUsdcVerified');
     const pimlico = byProvider.find((p) => p.provider === 'pimlico')!;
     expect(pimlico.successCount).toBe(1);
     expect(pimlico.circleNetUsdcReported).toBe('0');

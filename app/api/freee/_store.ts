@@ -1,20 +1,40 @@
 // freee 連携の per-merchant KV ストア (`_` prefix で route 探索対象外)。
 // すべて wallet (SIWE 検証済 checksum アドレス) で名前空間を切る。
 //   freee:tok:{wallet}     → encrypted StoredToken envelope (access/refresh/expiresAt/companyId)
+//   freee:refresh:{wallet} → refresh lease owner (TTL 30秒)
 //   freee:meta:{wallet}    → { companyId, companyName }
 //   freee:map:{wallet}     → FreeeMapping (companyId/accountItemId/taxCode)
 //   freee:state:{state}    → OAuth state (JSON {wallet, returnTo}・TTL 10分)
 //   freee:synced:{wallet}:{txOrId} → 同期済 deal id (冪等・runFreeeSync が claim/finalize)
-import { kvGet, kvSet, kvDel, kvGetDel, kvSetNxGet } from '@/lib/kv';
+import { randomUUID } from 'node:crypto';
+import { kvGet, kvSet, kvDel, kvGetDel, kvSetNxGet, kvEval } from '@/lib/kv';
+import { logger } from '@/lib/logger';
 import {
   decryptStoredToken,
   encryptStoredToken,
+  getValidAccessToken,
+  tokenNeedsRefresh,
+  type FreeeEnv,
   type StoredToken,
 } from '@/lib/freee';
 import type { FreeeMapping, ClaimState } from '@/lib/freeeSync';
 
 const STATE_TTL_SEC = 600;
 const CLAIM_TTL_SEC = 300; // 'pending' claim が createDeal クラッシュで永久残留しない保険
+const REFRESH_LOCK_TTL_SEC = 30; // 10s の HTTP deadline より長く、停止した worker のロックは解放する。
+
+// 暗号文の snapshot と (refresh 時は) lock 所有者を同時に検証する。
+// 遅れた refresh / 失効処理 / 壊れたレコードの掃除で、新しい連携を上書き・削除しない。
+const TOKEN_CAS_SCRIPT = `
+if #KEYS > 1 and redis.call('GET', KEYS[2]) ~= ARGV[3] then return 0 end
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+if ARGV[2] == '' then
+  redis.call('DEL', KEYS[1])
+else
+  redis.call('SET', KEYS[1], ARGV[2])
+end
+return 1
+`;
 
 function key(ns: string, id: string): string {
   return `freee:${ns}:${id}`;
@@ -37,7 +57,7 @@ export async function getToken(wallet: string): Promise<StoredToken | null> {
   if (!res.ok || !res.value) return null;
   const token = decryptStoredToken(walletLower, res.value);
   if (!token) {
-    await kvDel(k);
+    await kvEval(TOKEN_CAS_SCRIPT, [k], [res.value, '']);
     return null;
   }
   return token;
@@ -51,9 +71,45 @@ export async function setToken(wallet: string, token: StoredToken): Promise<void
   if (!res.ok) throw new Error(`freee_token_persist_failed:${res.reason}`);
 }
 
-/** 連携解除/再連携用に token を破棄 (refresh 失効時に呼び status を not-connected に倒す)。 */
-export async function delToken(wallet: string): Promise<void> {
-  await kvDel(key('tok', wallet.toLowerCase()));
+/** Refresh は wallet 単位の lease 内で再読取し、更新・失効とも CAS で確定する。 */
+export async function getWalletAccessToken(
+  env: FreeeEnv,
+  wallet: string,
+  expected: StoredToken,
+): Promise<string> {
+  if (!tokenNeedsRefresh(expected, Date.now())) return expected.access;
+  const walletLower = wallet.toLowerCase();
+  const tokenKey = key('tok', walletLower);
+  const lockKey = key('refresh', walletLower);
+  const lockId = randomUUID();
+  const lock = await kvSet(lockKey, lockId, { nx: true, ttlSec: REFRESH_LOCK_TTL_SEC });
+  if (!lock.ok) throw new Error('freee_token_lock_failed');
+  // 並行リクエストで同じ refresh token を消費しない。busy は既存の 502 経路で再試行可能。
+  if (lock.value === null) throw new Error('freee_token_refresh_busy');
+  try {
+    const snapshot = await kvGet(tokenKey);
+    if (!snapshot.ok) throw new Error('freee_token_read_failed');
+    const current = snapshot.value && decryptStoredToken(walletLower, snapshot.value);
+    // 再連携で会社が変わった場合、旧 mapping を新しい access token で実行させない。
+    if (!current || current.companyId !== expected.companyId) throw new Error('freee_token_changed');
+    const replace = async (next: string) => {
+      const result = await kvEval<number>(TOKEN_CAS_SCRIPT, [tokenKey, lockKey], [snapshot.value!, next, lockId]);
+      if (!result.ok) throw new Error('freee_token_persist_failed');
+      if (result.value !== 1) throw new Error('freee_token_changed');
+    };
+    try {
+      return await getValidAccessToken(env, current, (next) => replace(encryptStoredToken(walletLower, next)));
+    } catch (error) {
+      // 既存の token endpoint 4xx による再連携導線を維持する。
+      // 通信障害・保存失敗は連携解除へ波及させない。
+      if (error instanceof Error && /^freee_token_http_4\d\d$/.test(error.message)) await replace('');
+      throw error;
+    }
+  } finally {
+    const released = await kvEval(TOKEN_CAS_SCRIPT, [lockKey], [lockId, '']);
+    // 後始末の KV 障害で、保存済みの rotation を失敗扱いにしない。lease は TTL で切れる。
+    if (!released.ok) logger.warn('freee.token_lock_release_failed', { reason: released.reason });
+  }
 }
 
 export type FreeeMeta = { companyId: number; companyName: string };
@@ -63,7 +119,8 @@ export function getMeta(wallet: string): Promise<FreeeMeta | null> {
 }
 
 export async function setMeta(wallet: string, meta: FreeeMeta): Promise<void> {
-  await kvSet(key('meta', wallet.toLowerCase()), JSON.stringify(meta));
+  const res = await kvSet(key('meta', wallet.toLowerCase()), JSON.stringify(meta));
+  if (!res.ok) throw new Error(`freee_meta_persist_failed:${res.reason}`);
 }
 
 export function getMapping(wallet: string): Promise<FreeeMapping | null> {

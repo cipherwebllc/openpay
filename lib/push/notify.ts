@@ -9,7 +9,7 @@ import type { PushLocale } from '@/lib/push/store';
 
 export type PaymentNotificationKind = 'payment' | 'order' | 'store';
 
-export const PUSH_NOTIFY_PENDING_TTL_SEC = 120;
+export const PUSH_NOTIFY_PENDING_TTL_SEC = 24 * 60 * 60;
 export const PUSH_NOTIFY_COALESCE_TTL_SEC = 60;
 
 const GETDEL_SCRIPT = `
@@ -46,6 +46,7 @@ export async function notifyPaymentReceived(
   try {
     await notifyPaymentReceivedInner(wallet, kind, amountLabel);
   } catch (e) {
+    // 通知の失敗を決済結果へ波及させない。呼び出し元の after() 内で完結させる。
     logger.warn('push.notify_failed', {
       wallet: wallet.toLowerCase(),
       kind,
@@ -95,8 +96,9 @@ async function notifyPaymentReceivedInner(
     return;
   }
   if (claim.value === null) {
-    // Coalesced events are counted in pending and sent by the next event that
-    // opens a new window. A trailing event may wait until another event arrives.
+    // Best-effort: the next event outside this window includes the pending count.
+    // After 24 hours without an event it expires; there is no scheduled trailing
+    // delivery. Never wait out this window in a payment response or after() budget.
     return;
   }
 
@@ -134,8 +136,8 @@ function copyFor(
       return {
         title:
           locale === 'ja'
-            ? `新着 ${count} 件の注文があります`
-            : `${count} new orders received`,
+            ? `前回通知以降の注文: ${count} 件`
+            : `${count} orders since last notice`,
       };
     }
 
@@ -149,8 +151,8 @@ function copyFor(
       return {
         title:
           locale === 'ja'
-            ? `商品が ${count} 件売れました`
-            : `${count} products sold`,
+            ? `前回通知以降の販売: ${count} 件`
+            : `${count} sales since last notice`,
       };
     }
     if (amountLabel) {
@@ -170,8 +172,8 @@ function copyFor(
     return {
       title:
         locale === 'ja'
-          ? `新着 ${count} 件の着金があります`
-          : `${count} new payments received`,
+          ? `前回通知以降の着金: ${count} 件`
+          : `${count} payments since last notice`,
     };
   }
 
