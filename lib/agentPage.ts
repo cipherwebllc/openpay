@@ -191,6 +191,11 @@ export type AgentPageContent = {
     readonly caveat: string;
     readonly unbind: string;
     readonly unbindConfirm: string;
+    readonly bindingsTitle: string;
+    readonly bindingsEmpty: string;
+    readonly bindingDate: string;
+    readonly unbindAddress: string;
+    readonly unbindAddressConfirm: string;
     readonly loading: string;
     readonly error: string;
   };
@@ -437,7 +442,7 @@ const ja: AgentPageContent = {
       signature_mismatch: 'このリンクの署名が Agent のアドレスと一致しません。Agent にもう一度頼んでください。',
       already_used: 'このリンクはすでに使われています。別のアカウントに紐づいた場合は、Agent にもう一度頼むと取り戻せます。',
       malformed: 'リンクの形式が正しくありません。Agent が返したリンクをそのまま開いてください。',
-      binding_limit: '紐づけられる Agent は 20 件までです。使っていない Agent の紐づけを解除してください。',
+      binding_limit: '紐づけられる Agent は 20 件までです。下の一覧で使っていない Agent の紐づけを解除し、Agent に新しいリンクを頼んでください。',
       storage_error: '一時的に処理できません。少し待ってからやり直してください。',
       feature_disabled: 'この機能は現在ご利用いただけません。',
     },
@@ -455,6 +460,11 @@ const ja: AgentPageContent = {
     caveat: '記録は欠損することがあります。金額と着金はオンチェーン (上のアクティビティ) が基準です。「申告」は売り手と買い手が申告した内容で、商品が提供されたことの証明ではありません。',
     unbind: 'この Agent の紐づけを解除',
     unbindConfirm: '紐づけを解除しますか? もう一度見るには、Agent に新しいリンクを頼む必要があります。',
+    bindingsTitle: '紐づけ済みの Agent',
+    bindingsEmpty: '紐づけ済みの Agent はありません。',
+    bindingDate: '紐づけ日時:',
+    unbindAddress: 'Agent {address} の紐づけを解除',
+    unbindAddressConfirm: 'Agent {address} の紐づけを解除しますか? もう一度見るには、Agent に新しいリンクを頼む必要があります。',
     loading: '読み込み中…',
     error: '購入履歴を読み取れませんでした。',
   },
@@ -698,7 +708,7 @@ const en: AgentPageContent = {
       signature_mismatch: 'The signature in this link does not match the agent’s address. Ask your agent again.',
       already_used: 'This link was already used. If it linked to another account, asking your agent again reclaims it.',
       malformed: 'The link is not in the expected form. Open the link exactly as your agent returned it.',
-      binding_limit: 'You can link up to 20 agents. Unlink one you no longer use.',
+      binding_limit: 'You can link up to 20 agents. Unlink one you no longer use in the list below, then ask your agent for a new link.',
       storage_error: 'Temporarily unavailable. Please wait a moment and try again.',
       feature_disabled: 'This feature is not available right now.',
     },
@@ -716,6 +726,11 @@ const en: AgentPageContent = {
     caveat: 'Records can be incomplete. Amounts and settlement are confirmed on-chain (Activity above). “Claimed” is what the seller and buyer declared, not proof that the item was delivered.',
     unbind: 'Unlink this agent',
     unbindConfirm: 'Unlink this agent? To see it again, ask your agent for a new link.',
+    bindingsTitle: 'Linked agents',
+    bindingsEmpty: 'No linked agents.',
+    bindingDate: 'Linked on:',
+    unbindAddress: 'Unlink agent {address}',
+    unbindAddressConfirm: 'Unlink agent {address}? To see it again, ask your agent for a new link.',
     loading: 'Loading…',
     error: 'Could not read purchases.',
   },

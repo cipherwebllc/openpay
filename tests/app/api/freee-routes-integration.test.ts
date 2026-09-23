@@ -1,5 +1,7 @@
+// @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import type { HistoryEntry } from '@/lib/history';
+import { createFakeRedisStore, runRedisLua, type FakeRedisStore } from '../../_helpers/redisLua';
 
 // freee ルートの「グルー」を実コードで通すための統合テスト。
 // モックするのは外部 I/O 境界だけ: KV(in-memory Map)・next/headers cookie・global fetch。
@@ -8,6 +10,7 @@ import type { HistoryEntry } from '@/lib/history';
 
 const h = vi.hoisted(() => ({
   store: new Map<string, string>(),
+  redis: undefined as unknown as FakeRedisStore,
   cookieToken: { value: undefined as string | undefined },
   failSetKeys: new Set<string>(),
   failDelKeys: new Set<string>(),
@@ -27,10 +30,15 @@ vi.mock('@/lib/env', async (importOriginal) => {
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => true,
   kvGet: async (k: string) => ({ ok: true, value: h.store.has(k) ? h.store.get(k) : null }),
-  kvSet: async (k: string, v: string, opts: { nx?: boolean } = {}) => {
+  kvEval: async (script: string, keys: string[], args: string[]) => {
+    if (h.failSetKeys.has(keys[0])) return { ok: false, reason: 'network_error' };
+    return { ok: true, value: await runRedisLua(script, keys, args, h.redis) };
+  },
+  kvSet: async (k: string, v: string, opts: { nx?: boolean; ttlSec?: number } = {}) => {
     if (h.failSetKeys.has(k)) return { ok: false, reason: 'network_error' };
     if (opts.nx && h.store.has(k)) return { ok: true, value: null };
     h.store.set(k, v);
+    if (opts.ttlSec) h.redis.setTtl(k, opts.ttlSec);
     return { ok: true, value: 'OK' };
   },
   // SET NX GET 原子 claim (REM-21): null=新設(fresh)、旧値=既存。
@@ -64,7 +72,7 @@ import { GET as mappingGET, POST as mappingPOST } from '@/app/api/freee/mapping/
 import { GET as authorizeGET } from '@/app/api/freee/authorize/route';
 import { GET as statusGET } from '@/app/api/freee/status/route';
 import { GET as callbackGET } from '@/app/api/freee/callback/route';
-import { encryptStoredToken, type StoredToken } from '@/lib/freee';
+import { decryptStoredToken, encryptStoredToken, type StoredToken } from '@/lib/freee';
 import { kvGetDel } from '@/lib/kv';
 
 const MERCHANT = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
@@ -171,7 +179,8 @@ function req(url: string, body?: unknown): Request {
 }
 
 beforeEach(() => {
-  h.store.clear();
+  h.redis = createFakeRedisStore();
+  h.store = h.redis.strings;
   h.cookieToken.value = undefined;
   h.failSetKeys.clear();
   h.failDelKeys.clear();
@@ -635,5 +644,100 @@ describe('GET /api/freee/callback (実グルー: state消費→CSRF→token交�
     expect(loc).toContain('reason=no_company');
     // KV に token が保存されていないこと (setToken が呼ばれていない)。
     expect(h.store.has(`freee:tok:${MERCHANT.toLowerCase()}`)).toBe(false);
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+describe('C14: refresh concurrency and callback persistence', () => {
+  const tokenKey = `freee:tok:${MERCHANT.toLowerCase()}`;
+  const routes = {
+    mapping: () => mappingGET(),
+    sync: () => syncPOST(req('http://localhost/api/freee/sync', { entries: [income()] })),
+  };
+  beforeEach(() => {
+    seedSession(); seedMapping();
+    seedFreeeToken({ access: 'old', refresh: 'oldR', expiresAt: 1, companyId: 7 });
+  });
+
+  it('serializes mapping and sync refreshes without disconnecting the winner', async () => {
+    const started = deferred<void>();
+    const winner = deferred<Response>();
+    const loser = deferred<Response>();
+    let refreshes = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (!String(input).includes('/public_api/token')) return json({});
+      refreshes++;
+      started.resolve();
+      return refreshes === 1 ? winner.promise : loser.promise;
+    });
+    const first = mappingGET();
+    await started.promise;
+    const second = routes.sync();
+    winner.resolve(json({ access_token: 'newA', refresh_token: 'newR', expires_in: 21_600 }));
+    expect((await first).status).toBe(200);
+    loser.resolve(json({ error: 'invalid_grant' }, 400));
+    await second;
+    expect(decryptStoredToken(MERCHANT, h.store.get(tokenKey)!)).toMatchObject({ access: 'newA', refresh: 'newR' });
+    expect(refreshes).toBe(1);
+  });
+
+  it.each(['mapping', 'sync'] as const)('%s: stale refresh failure cannot delete a reconnected token', async (route) => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      seedFreeeToken({ access: 'reconnected', refresh: 'newR', expiresAt: FAR_FUTURE, companyId: 99 });
+      return json({ error: 'invalid_grant' }, 400);
+    });
+    expect((await routes[route]()).status).toBe(502);
+    expect(decryptStoredToken(MERCHANT, h.store.get(tokenKey)!)).toMatchObject({ access: 'reconnected', companyId: 99 });
+  });
+
+  it.each(['mapping', 'sync'] as const)('%s: stale successful refresh cannot overwrite a reconnected token or use old mapping', async (route) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      seedFreeeToken({ access: 'reconnected', refresh: 'newR', expiresAt: FAR_FUTURE, companyId: 99 });
+      return json({ access_token: 'stale', refresh_token: 'staleR', expires_in: 21_600 });
+    });
+    expect((await routes[route]()).status).toBe(502);
+    expect(decryptStoredToken(MERCHANT, h.store.get(tokenKey)!)).toMatchObject({ access: 'reconnected', companyId: 99 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([200, 400])('an expired refresh lease cannot replace/delete the token or release a new lease (HTTP %s)', async (status) => {
+    const original = h.store.get(tokenKey);
+    const lockKey = `freee:refresh:${MERCHANT.toLowerCase()}`;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      expect(h.redis.getTtl(lockKey)).toBe(30);
+      h.redis.advance(31_000);
+      h.redis.purgeExpired();
+      h.store.set(lockKey, 'new-worker');
+      return status === 200
+        ? json({ access_token: 'stale', refresh_token: 'staleR', expires_in: 21_600 })
+        : json({ error: 'invalid_grant' }, status);
+    });
+    expect((await mappingGET()).status).toBe(502);
+    expect(h.store.get(tokenKey)).toBe(original);
+    expect(h.store.get(lockKey)).toBe('new-worker');
+  });
+
+  it.each(['lock', 'persist'])('a %s storage failure preserves the token and cannot report refresh success', async (failure) => {
+    const original = h.store.get(tokenKey);
+    const lockKey = `freee:refresh:${MERCHANT.toLowerCase()}`;
+    h.failSetKeys.add(failure === 'lock' ? lockKey : tokenKey);
+    const fetchMock = mockFreeeFetch();
+    expect((await mappingGET()).status).toBe(502);
+    expect(h.store.get(tokenKey)).toBe(original);
+    expect(fetchMock).toHaveBeenCalledTimes(failure === 'lock' ? 0 : 1);
+    expect(h.store.has(lockKey)).toBe(false);
+  });
+
+  it('callback does not redirect to connected when the metadata write fails', async () => {
+    h.store.set(`freee:state:${STATE}`, JSON.stringify({ wallet: MERCHANT, returnTo: '/ja/history' }));
+    h.failSetKeys.add(`freee:meta:${MERCHANT.toLowerCase()}`);
+    mockFreeeFetch();
+    const result = await callbackGET(new Request(`http://localhost/api/freee/callback?code=CODE&state=${STATE}`));
+    expect(result.headers.get('location')).toBe('http://localhost/?freee=error&reason=token_exchange_failed');
   });
 });

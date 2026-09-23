@@ -191,6 +191,8 @@ async function requestToken(
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
+    // freee の停止で OAuth / 同期のリクエストが無期限に滞留するのを防ぐ (body 読取も対象)。
+    signal: AbortSignal.timeout(10_000),
     cache: 'no-store',
   });
   if (!res.ok) {
@@ -271,6 +273,8 @@ async function freeeApi<T>(
       ...(init?.body ? { 'content-type': 'application/json' } : {}),
       ...init?.headers,
     },
+    // freee の停止で OAuth / 同期のリクエストが無期限に滞留するのを防ぐ (body 読取も対象)。
+    signal: AbortSignal.timeout(10_000),
     cache: 'no-store',
   });
   if (!res.ok) {

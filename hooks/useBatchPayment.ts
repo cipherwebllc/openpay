@@ -830,8 +830,8 @@ async function runCirclePayment(args: {
 
   // 監査: receipt から net USDC を再計算 (client-reported)。pending record の
   // userOpHash/sender/paymaster を expected binding に使う。verify は best-effort で、
-  // 失敗しても確定済の決済を巻き込まない (net は undefined のまま)。サーバ側 verifier が
-  // 後で on-chain 由来の verified 値で上書きする。
+  // 失敗しても確定済の決済を巻き込まない (net は undefined のまま)。サーバ側の
+  // 再検証 writer は無く、ログには client 申告としてのみ記録する。
   let circlePaymasterNetUsdc: string | undefined;
   let circleVerification: CircleVerificationStatus | undefined;
   try {

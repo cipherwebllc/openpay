@@ -83,6 +83,7 @@ jobs:
           --exclude tests/lib/order/agentOrderReview-lua.test.ts
           --exclude tests/lib/order/agentOrderOrigin-lua.test.ts
           --exclude tests/app/api/agentPurchases.test.ts
+          --exclude tests/app/api/freee-routes-integration.test.ts
           --exclude tests/app/api/store-delivery-metadata.test.ts
           --exclude tests/app/api/store-products-license-terms.test.ts
           --exclude tests/lib/license/minter.test.ts

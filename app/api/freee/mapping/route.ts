@@ -5,14 +5,13 @@
 import { NextResponse } from 'next/server';
 import {
   freeeEnv,
-  getValidAccessToken,
   getAccountItems,
   getTaxCodes,
 } from '@/lib/freee';
 import { logger } from '@/lib/logger';
 import { env as appEnv } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
-import { getToken, setToken, delToken, getMapping, setMapping } from '../_store';
+import { getToken, getWalletAccessToken, getMapping, setMapping } from '../_store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,9 +33,7 @@ export async function GET(): Promise<NextResponse> {
   }
 
   try {
-    const access = await getValidAccessToken(env, token, (next) =>
-      setToken(session.address, next),
-    );
+    const access = await getWalletAccessToken(env, session.address, token);
     const [accountItems, taxCodes, mapping] = await Promise.all([
       getAccountItems(access, token.companyId),
       getTaxCodes(access),
@@ -47,8 +44,6 @@ export async function GET(): Promise<NextResponse> {
     // freee API 不調 / token refresh 失敗は生 500 でなく 502 + Sentry。
     const reason = e instanceof Error ? e.message : String(e);
     logger.warn('freee.mapping.fetch_failed', { reason });
-    // 4xx = refresh 失効 → token 破棄で再連携導線 (sync と同じ復旧方針)。
-    if (/freee_token_http_4\d\d/.test(reason)) await delToken(session.address);
     return NextResponse.json({ ok: false, error: 'mapping_fetch_failed' }, { status: 502 });
   }
 }

@@ -3,7 +3,7 @@
 // 冪等性 (SET NX claim) により再クリックしても取引を重複作成しない。
 import { NextResponse } from 'next/server';
 import type { HistoryEntry } from '@/lib/history';
-import { freeeEnv, getValidAccessToken, createDeal } from '@/lib/freee';
+import { freeeEnv, createDeal } from '@/lib/freee';
 import { runFreeeSync } from '@/lib/freeeSync';
 import { rateIsSane } from '@/lib/fx';
 import { logger } from '@/lib/logger';
@@ -11,8 +11,7 @@ import { env as appEnv } from '@/lib/env';
 import { requireSession } from '../../auth/siwe/_session';
 import {
   getToken,
-  setToken,
-  delToken,
+  getWalletAccessToken,
   getMapping,
   claimSync,
   finalizeSync,
@@ -73,16 +72,11 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   let access: string;
   try {
-    access = await getValidAccessToken(env, token, (next) =>
-      setToken(session.address, next),
-    );
+    access = await getWalletAccessToken(env, session.address, token);
   } catch (e) {
     // refresh 失敗 (freee 障害 / refresh 失効) は生 500 でなく 502 + Sentry。
     const reason = e instanceof Error ? e.message : String(e);
     logger.error('freee.sync.token_refresh_failed', { reason });
-    // 4xx = refresh token 失効/取消 → token を破棄して再連携を促す (502 ループ stuck 回避)。
-    // 5xx/network は transient なので token は残す。
-    if (/freee_token_http_4\d\d/.test(reason)) await delToken(session.address);
     return NextResponse.json({ ok: false, error: 'token_refresh_failed' }, { status: 502 });
   }
 

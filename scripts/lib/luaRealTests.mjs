@@ -22,6 +22,7 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/order/agentOrderReview-lua.test.ts',
   'tests/lib/order/agentOrderOrigin-lua.test.ts',
   'tests/app/api/agentPurchases.test.ts',
+  'tests/app/api/freee-routes-integration.test.ts',
   'tests/app/api/store-delivery-metadata.test.ts',
   'tests/app/api/store-products-license-terms.test.ts',
   'tests/lib/license/minter.test.ts',

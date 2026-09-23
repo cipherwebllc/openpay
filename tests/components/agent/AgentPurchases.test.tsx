@@ -248,7 +248,7 @@ describe('AgentPurchases', () => {
     mount();
     expect(await screen.findByText(c.failures[reason])).toBeVisible();
     // verify の失敗後も一覧の取得は行う (紐づけ済みの持ち主が一覧を失わない)。ここでは一覧も失敗する mock なので table は出ない。
-    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(reason === 'binding_limit' ? 3 : 2));
     expect(screen.queryByRole('table')).toBeNull();
     expect(track).not.toHaveBeenCalled();
   });
@@ -492,5 +492,153 @@ describe('AgentPurchases', () => {
     mount();
     await screen.findByText(c.failures.expired_or_unknown);
     await screen.findByRole('table');
+  });
+});
+
+describe('G4: linked agents', () => {
+  async function openList() {
+    const summary = await screen.findByText(c.bindingsTitle);
+    const details = summary.closest('details')!;
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+  }
+  function stubBindings() {
+    mockFetch.mockImplementation(async (url) => String(url).endsWith('/bindings')
+      ? response({ addresses: [{ address: other, boundAt: '2026-09-23T09:00:00.000Z' }] })
+      : response(success()));
+  }
+
+  it.each(['ja', 'en'])('gives each row a visible unlink label naming its address in %s', async (locale) => {
+    h.sessionAddress = owner;
+    const copy = agentPageContentFor(locale).purchases;
+    mockFetch.mockImplementation(async (url) => String(url).endsWith('/bindings')
+      ? response({ addresses: [address, other].map((agent) => ({ address: agent, boundAt: '2026-09-23T09:00:00.000Z' })) })
+      : response(success()));
+    mount({ locale, c: copy });
+    const details = (await screen.findByText(copy.bindingsTitle)).closest('details')!;
+    details.open = true;
+    fireEvent(details, new Event('toggle'));
+    for (const agent of [address, other]) {
+      const row = (await screen.findByText(agent)).closest('li')!;
+      const button = within(row).getByRole('button');
+      const label = locale === 'ja' ? `Agent ${agent} の紐づけを解除` : `Unlink agent ${agent}`;
+      expect(button).toHaveAccessibleName(label);
+      expect(button).toHaveTextContent(label);
+      expect(button).not.toHaveAttribute('aria-label');
+    }
+    expect(screen.getByRole('button', { name: copy.unbind })).toBeVisible();
+  });
+
+  it('fetches only when expanded, and clears linked addresses on owner changes and logout', async () => {
+    h.sessionAddress = owner;
+    stubBindings();
+    const view = mount();
+    await screen.findByRole('table');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    await openList();
+    await screen.findByText(other);
+    h.sessionAddress = address; view.update();
+    expect(screen.queryByText(other)).toBeNull();
+    await openList();
+    await screen.findByText(other);
+    h.sessionAddress = null; view.update();
+    expect(screen.queryByText(other)).toBeNull();
+    expect(screen.queryByText(c.bindingsTitle)).toBeNull();
+  });
+
+  it('hides a late binding response from the previous owner', async () => {
+    h.sessionAddress = owner;
+    const pending = deferred<Response>();
+    mockFetch.mockImplementation(async (url) => String(url).endsWith('/bindings') ? pending.promise : response(success()));
+    const view = mount();
+    await openList();
+    await waitFor(() => expect(mockFetch.mock.calls.some(([url]) => String(url).endsWith('/bindings'))).toBe(true));
+    h.sessionAddress = address; view.update();
+    await act(async () => { pending.resolve(response({ addresses: [{ address: other, boundAt: '2026-09-23T09:00:00.000Z' }] })); });
+    expect(screen.queryByText(other)).toBeNull();
+  });
+
+  it.each(['read', 'unbind'])('requires sign-in if a bindings %s rejects the session', async (operation) => {
+    h.sessionAddress = owner;
+    mockFetch.mockImplementation(async (url) => {
+      if (String(url).endsWith('/bindings')) return operation === 'read'
+        ? response({ reason: 'not_signed_in' }, 401)
+        : response({ addresses: [{ address: other, boundAt: '2026-09-23T09:00:00.000Z' }] });
+      if (String(url).endsWith('/unbind')) return response({ reason: 'not_signed_in' }, 401);
+      return response(success());
+    });
+    mount();
+    await openList();
+    if (operation === 'unbind') {
+      const row = (await screen.findByText(other)).closest('li')!;
+      const button = within(row).getByRole('button', { name: c.unbindAddress.replace('{address}', other) });
+      fireEvent.click(button); fireEvent.click(button);
+    }
+    await screen.findByRole('button', { name: c.signIn });
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByText(other)).toBeNull();
+  });
+
+  it('keeps bindings and purchases visible when unlink fails', async () => {
+    h.sessionAddress = owner;
+    stubBindings();
+    const original = mockFetch.getMockImplementation()!;
+    mockFetch.mockImplementation(async (url, init) => String(url).endsWith('/unbind') ? response({ reason: 'storage_error' }, 503) : original(url, init));
+    mount();
+    await openList();
+    const row = (await screen.findByText(other)).closest('li')!;
+    const button = within(row).getByRole('button', { name: c.unbindAddress.replace('{address}', other) });
+    fireEvent.click(button);
+    expect(button).toHaveAccessibleDescription(c.unbindAddressConfirm.replace('{address}', other));
+    fireEvent.click(button);
+    await screen.findByText(c.failures.storage_error);
+    expect(screen.getByText(other)).toBeVisible();
+    expect(screen.getByRole('table')).toBeVisible();
+  });
+
+  it('clears current purchases when that address is unlinked from the list', async () => {
+    h.sessionAddress = owner;
+    mockFetch.mockImplementation(async (url) => String(url).endsWith('/bindings')
+      ? response({ addresses: [{ address, boundAt: '2026-09-23T09:00:00.000Z' }] })
+      : String(url).endsWith('/unbind') ? new Response(null, { status: 204 }) : response(success()));
+    mount();
+    await openList();
+    const row = (await screen.findByText(address)).closest('li')!;
+    const button = within(row).getByRole('button', { name: c.unbindAddress.replace('{address}', address) });
+    fireEvent.click(button); fireEvent.click(button);
+    await screen.findByText(c.bindingsEmpty);
+    await screen.findByText(c.notBoundLead);
+    expect(screen.queryByRole('table')).toBeNull();
+  });
+
+  it.each(['ja', 'en'])('lists and unlinks a remembered address after binding_limit in %s', async (locale) => {
+    h.sessionAddress = owner; landing();
+    const copy = agentPageContentFor(locale).purchases;
+    let bindings = [{ address: other, boundAt: '2026-09-23T09:00:00.000Z' }];
+    mockFetch.mockImplementation(async (url, init) => {
+      if (String(url).endsWith('/verify')) return response({ reason: 'binding_limit' }, 401);
+      if (String(url).endsWith('/bindings')) return response({ addresses: bindings });
+      if (String(url).endsWith('/unbind')) {
+        expect(JSON.parse(String(init?.body))).toEqual({ address: other });
+        bindings = [];
+        return new Response(null, { status: 204 });
+      }
+      return response({ reason: 'not_bound' }, 401);
+    });
+    mount({ locale, c: copy });
+    await screen.findByText(copy.failures.binding_limit);
+    const row = (await screen.findByText(other)).closest('li')!;
+    expect(within(row).getByText(/2026/).closest('time')).toHaveAttribute('dateTime', bindings[0].boundAt);
+    const unlink = within(row).getByRole('button', { name: copy.unbindAddress.replace('{address}', other) });
+    fireEvent.click(unlink);
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/unbind'))).toHaveLength(0);
+    fireEvent.keyDown(unlink, { key: 'Escape' });
+    fireEvent.click(unlink);
+    fireEvent.click(unlink);
+    await waitFor(() => expect(screen.queryByText(other)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(copy.failures.binding_limit)).toBeNull());
+    expect(mockFetch).toHaveBeenCalledWith('/api/agent/purchases/bindings', expect.objectContaining({ credentials: 'same-origin', cache: 'no-store' }));
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/unbind'))).toHaveLength(1);
+    expect(mockFetch.mock.calls.filter(([url]) => String(url).endsWith('/verify'))).toHaveLength(1);
   });
 });

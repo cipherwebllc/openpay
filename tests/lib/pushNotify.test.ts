@@ -6,6 +6,7 @@ const hold = vi.hoisted(() => ({
   enablePushNotify: true,
   data: new Map<string, string>(),
   ttl: new Map<string, number>(),
+  now: 0,
   incr: vi.fn(),
   expire: vi.fn(),
   set: vi.fn(),
@@ -40,7 +41,7 @@ vi.mock('@/lib/kv', () => ({
   },
   kvExpire: (key: string, ttlSec: number) => {
     hold.expire(key, ttlSec);
-    hold.ttl.set(key, ttlSec);
+    hold.ttl.set(key, hold.now + ttlSec);
     return Promise.resolve({ ok: true, value: 1 });
   },
   kvSet: (
@@ -53,7 +54,7 @@ vi.mock('@/lib/kv', () => ({
       return Promise.resolve({ ok: true, value: null });
     }
     hold.data.set(key, value);
-    if (opts.ttlSec !== undefined) hold.ttl.set(key, opts.ttlSec);
+    if (opts.ttlSec !== undefined) hold.ttl.set(key, hold.now + opts.ttlSec);
     return Promise.resolve({ ok: true, value: 'OK' });
   },
   kvEval: (script: string, keys: string[], args: string[]) => {
@@ -112,6 +113,7 @@ beforeEach(() => {
   hold.enablePushNotify = true;
   hold.data.clear();
   hold.ttl.clear();
+  hold.now = 0;
   hold.incr.mockClear();
   hold.expire.mockClear();
   hold.set.mockClear();
@@ -120,7 +122,52 @@ beforeEach(() => {
   hold.warn.mockClear();
 });
 
+function advance(seconds: number) {
+  hold.now += seconds;
+  for (const [key, expiresAt] of hold.ttl) {
+    if (expiresAt <= hold.now) { hold.data.delete(key); hold.ttl.delete(key); }
+  }
+}
+
 describe('notifyPaymentReceived', () => {
+  it.each(['payment', 'order', 'store'] as const)('C9: retains a trailing %s beyond 120s and counts it in the next notice', async (kind) => {
+    await notifyPaymentReceived(WALLET, kind);
+    advance(30);
+    await notifyPaymentReceived(WALLET, kind);
+    advance(180);
+    expect(hold.data.get(pushNotifyPendingKey(WALLET, kind))).toBe('1');
+    expect(hold.send).toHaveBeenCalledTimes(1);
+    await notifyPaymentReceived(WALLET, kind, '¥1,000');
+    const [, payload] = hold.send.mock.calls[1] as [string, Resolver];
+    const ja = { payment: '着金', order: '注文', store: '販売' }[kind];
+    const en = { payment: 'payments', order: 'orders', store: 'sales' }[kind];
+    expect(payload('ja', sub())).toEqual({ title: `前回通知以降の${ja}: 2 件` });
+    expect(payload('en', sub(false, 'en'))).toEqual({ title: `2 ${en} since last notice` });
+    // Pending events still suppress the winning event's amount for opt-in subscribers.
+    expect(payload('ja', sub(true))).toEqual({ title: `前回通知以降の${ja}: 2 件` });
+    expect(payload('en', sub(true, 'en'))).toEqual({ title: `2 ${en} since last notice` });
+  });
+
+  it('C9: expires pending events after 24 quiet hours without scheduling a trailing send', async () => {
+    await notifyPaymentReceived(WALLET, 'payment');
+    advance(30);
+    await notifyPaymentReceived(WALLET, 'payment');
+    advance(86_399);
+    expect(hold.data.get(paymentPendingKey)).toBe('1');
+    advance(1);
+    expect(hold.data.has(paymentPendingKey)).toBe(false);
+    expect(hold.send).toHaveBeenCalledTimes(1);
+    await notifyPaymentReceived(WALLET, 'payment');
+    const [, payload] = hold.send.mock.calls[1] as [string, Resolver];
+    expect(payload('en', sub(false, 'en'))).toEqual({ title: 'Payment received' });
+  });
+
+  it('preserves existing push failure isolation for the payment caller', async () => {
+    hold.send.mockImplementationOnce(() => { throw new Error('push unavailable'); });
+    await expect(notifyPaymentReceived(WALLET, 'payment')).resolves.toBeUndefined();
+    expect(hold.warn).toHaveBeenCalledWith('push.notify_failed', expect.objectContaining({ kind: 'payment' }));
+  });
+
   it('pending と coalesce のキーを wallet と kind ごとに分離する', () => {
     const normalizedWallet = WALLET.toLowerCase();
 
@@ -203,7 +250,7 @@ describe('notifyPaymentReceived', () => {
     expect(hold.send).toHaveBeenCalledTimes(2);
     const [, paymentPayload] = hold.send.mock.calls[1] as [string, Resolver];
     expect(paymentPayload('ja', sub())).toEqual({
-      title: '新着 2 件の着金があります',
+      title: '前回通知以降の着金: 2 件',
     });
   });
 
@@ -215,9 +262,9 @@ describe('notifyPaymentReceived', () => {
     expect(hold.data.has(paymentPendingKey)).toBe(false);
     expect(hold.send).toHaveBeenCalledTimes(1);
     const [, payload] = hold.send.mock.calls[0] as [string, Resolver];
-    expect(payload('ja', sub())).toEqual({ title: '新着 3 件の着金があります' });
+    expect(payload('ja', sub())).toEqual({ title: '前回通知以降の着金: 3 件' });
     expect(payload('en', sub(false, 'en'))).toEqual({
-      title: '3 new payments received',
+      title: '3 payments since last notice',
     });
   });
 
@@ -237,9 +284,9 @@ describe('notifyPaymentReceived', () => {
     await notifyPaymentReceived(WALLET, 'order');
 
     const [, payload] = hold.send.mock.calls[0] as [string, Resolver];
-    expect(payload('ja', sub())).toEqual({ title: '新着 5 件の注文があります' });
+    expect(payload('ja', sub())).toEqual({ title: '前回通知以降の注文: 5 件' });
     expect(payload('en', sub(false, 'en'))).toEqual({
-      title: '5 new orders received',
+      title: '5 orders since last notice',
     });
   });
 
@@ -265,10 +312,10 @@ describe('notifyPaymentReceived', () => {
 
     const [, payload] = hold.send.mock.calls[0] as [string, Resolver];
     expect(payload('ja', sub(true))).toEqual({
-      title: '新着 3 件の着金があります',
+      title: '前回通知以降の着金: 3 件',
     });
     expect(payload('en', sub(true, 'en'))).toEqual({
-      title: '3 new payments received',
+      title: '3 payments since last notice',
     });
   });
 });

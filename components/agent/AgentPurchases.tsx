@@ -87,6 +87,7 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, pr
   const [authRequired, setAuthRequired] = useState(false);
   const [signInFailed, setSignInFailed] = useState(false);
   const [confirmUnbind, setConfirmUnbind] = useState(false);
+  const [bindingsOpen, setBindingsOpen] = useState(false);
   const submitted = useRef(false);
   const viewed = useRef(false);
   const owner = session.sessionAddress?.toLowerCase();
@@ -102,6 +103,9 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, pr
     isSuccess: verification.status === 'success', error: verification.error,
     reset: () => setVerification({ status: 'idle' }),
   };
+  useEffect(() => {
+    if (verification.error instanceof PurchaseError && verification.error.reason === 'binding_limit') setBindingsOpen(true);
+  }, [verification.error]);
   const submitProof = useCallback(() => {
     if (proof === null || !parsedProof || !owner || submitted.current) return;
     submitted.current = true;
@@ -112,6 +116,7 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, pr
       setVerification({ status: 'success', address: parsedProof.address });
       trackAgentEvent('agent_proof_bound', { locale });
       void qc.invalidateQueries({ queryKey: ['agent-purchases', parsedProof.address, owner] });
+      void qc.invalidateQueries({ queryKey: ['agent-bindings', owner] });
     }, (error: Error) => {
       setVerification({ status: 'error', error });
       if (error instanceof PurchaseError && error.reason === 'not_signed_in') setAuthRequired(true);
@@ -157,6 +162,7 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, pr
       qc.setQueryData<Result>(queryKey, { ok: false, reason: 'not_bound' });
       setConfirmUnbind(false);
       verify.reset();
+      await qc.invalidateQueries({ queryKey: ['agent-bindings', owner] });
     },
     onError: async (error) => {
       if (!(error instanceof PurchaseError)) return;
@@ -166,6 +172,7 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, pr
         qc.setQueryData<Result>(queryKey, { ok: false, reason: error.reason });
         setConfirmUnbind(false);
         verify.reset();
+        await qc.invalidateQueries({ queryKey: ['agent-bindings', owner] });
       }
     },
   });
@@ -250,6 +257,79 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, pr
           <button type="button" className={`mt-4 ${button}`} disabled={unbind.isPending} aria-describedby={confirmUnbind ? `${instance}-status` : undefined} onKeyDown={(event) => { if (event.key === 'Escape') setConfirmUnbind(false); }} onClick={() => { if (confirmUnbind) unbind.mutate(); else setConfirmUnbind(true); }}>{c.unbind}</button>
         </>
       ) : null}
+      {!signedOut && proof === null && !verify.isPending && !(query.data?.ok === false && query.data.reason === 'feature_disabled') ? (
+        <details className="mt-4 min-w-0 rounded-xl border border-slate-200 p-4" open={bindingsOpen} onToggle={(event) => setBindingsOpen(event.currentTarget.open)}>
+          <summary className={`cursor-pointer text-sm font-medium text-slate-800 ${focus}`}>{c.bindingsTitle}</summary>
+          {bindingsOpen ? <BindingsList owner={owner!} locale={locale} c={c} button={button} onAuthRequired={() => setAuthRequired(true)} onUnbound={async (unboundAddress) => {
+            if (verify.error instanceof PurchaseError && verify.error.reason === 'binding_limit') verify.reset();
+            if (unboundAddress !== address) return;
+            await qc.cancelQueries({ queryKey });
+            qc.setQueryData<Result>(queryKey, { ok: false, reason: 'not_bound' });
+            setConfirmUnbind(false);
+            verify.reset();
+          }} /> : null}
+        </details>
+      ) : null}
     </>
   );
+}
+
+type Bindings = { addresses: { address: string; boundAt: string }[] };
+
+function BindingsList({ owner, locale, c, button, onAuthRequired, onUnbound }: {
+  owner: string; locale: string; c: Props['c']; button: string;
+  onAuthRequired: () => void; onUnbound: (address: string) => Promise<void>;
+}) {
+  const instance = useId();
+  const qc = useQueryClient();
+  const queryKey = ['agent-bindings', owner, instance] as const;
+  const [confirmAddress, setConfirmAddress] = useState<string | null>(null);
+  const query = useQuery({
+    queryKey,
+    queryFn: async ({ signal }): Promise<Bindings> => {
+      const response = await fetch('/api/agent/purchases/bindings', { credentials: 'same-origin', cache: 'no-store', signal });
+      if (!response.ok) throw await failure(response);
+      const body = await response.json() as Bindings;
+      if (!Array.isArray(body.addresses)) throw new PurchaseError('storage_error');
+      return body;
+    },
+    retry: false, staleTime: 0, gcTime: 0, refetchOnWindowFocus: false,
+  });
+  async function removeRow(address: string) {
+    await qc.cancelQueries({ queryKey });
+    qc.setQueryData<Bindings>(queryKey, (old) => old && ({ addresses: old.addresses.filter((row) => row.address !== address) }));
+    setConfirmAddress(null);
+    await onUnbound(address);
+  }
+  const unbind = useMutation({
+    mutationFn: (address: string) => post('unbind', { address }),
+    retry: false,
+    onSuccess: (_data, address) => removeRow(address),
+    onError: async (error, address) => {
+      if (error instanceof PurchaseError && error.reason === 'not_bound') await removeRow(address);
+    },
+  });
+  const error = unbind.error ?? query.error;
+  const reason = error instanceof PurchaseError ? error.reason : undefined;
+  useEffect(() => {
+    // 期限切れ session の一覧を保持せず、購入履歴と同じ再ログイン導線に戻す。
+    if (reason === 'not_signed_in') onAuthRequired();
+  }, [reason, onAuthRequired]);
+  const formatter = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
+  return <div className="mt-3 min-w-0 text-sm text-slate-600">
+    <p role="status">{reason === 'feature_disabled' ? c.failures.feature_disabled
+      : error && reason !== 'not_bound' ? c.failures.storage_error
+        : query.isPending || unbind.isPending ? c.loading
+          : query.data?.addresses.length === 0 ? c.bindingsEmpty : ''}</p>
+    {!query.isError && reason !== 'feature_disabled' && query.data ? <ul className="space-y-4">
+      {query.data.addresses.map((row) => <li key={row.address} className="min-w-0 border-t border-slate-100 pt-3">
+        <p className="break-all font-mono text-xs">{row.address}</p>
+        <p className="mt-1 text-xs">{c.bindingDate} <time dateTime={row.boundAt}>{formatter.format(new Date(row.boundAt))}</time></p>
+        {confirmAddress === row.address ? <p id={`${instance}-confirm`} className="mt-2 break-all">{c.unbindAddressConfirm.replace('{address}', row.address)}</p> : null}
+        <button type="button" className={`mt-2 break-all text-left ${button}`} disabled={unbind.isPending} aria-describedby={confirmAddress === row.address ? `${instance}-confirm` : undefined}
+          onKeyDown={(event) => { if (event.key === 'Escape') setConfirmAddress(null); }}
+          onClick={() => { if (confirmAddress === row.address) unbind.mutate(row.address); else { unbind.reset(); setConfirmAddress(row.address); } }}>{c.unbindAddress.replace('{address}', row.address)}</button>
+      </li>)}
+    </ul> : null}
+  </div>;
 }
