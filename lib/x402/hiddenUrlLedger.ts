@@ -18,6 +18,8 @@ export const HIDDEN_URL_LEDGER_VALUE = '1';
 // 正規化: scheme/host を小文字化し、既定ポートを落とし、fragment を捨てる。
 // クエリとパスは残す (別エンドポイントを同一視しない)。URL として読めない値は素の文字列を使う
 // (登録前検証を通っていない呼び元でも鍵が決まる)。
+// resourceUrlClaim の一意性とは別の moderation identity。claim 側は raw path/query/fragment
+// を保存する契約なので、この WHATWG 正規化を共有すると異なる掲載の claim を併合してしまう。
 export function normalizeHiddenUrl(url: string): string {
   try {
     const parsed = new URL(url);

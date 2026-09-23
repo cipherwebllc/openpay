@@ -24,6 +24,7 @@ const store = vi.hoisted(() => ({
   failLrange: false, // true で kvLrange を fail させ登録数カウントの KV エラー枝を検証
   failSet: false, // true で kvSet を fail させ createResource の保存失敗 (503) を検証
   failEval: false, // true で kvEval を fail させ update/deactivate の storage エラー (503) を検証
+  evalResult: null as number | null,
 }));
 vi.mock('@/lib/kv', () => ({
   isKvConfigured: () => true,
@@ -47,6 +48,7 @@ vi.mock('@/lib/kv', () => ({
   },
   // CAS_CREATE / CAS_UPDATE / CAS_DEACTIVATE (registry) の Lua セマンティクスを in-memory で再現。
   kvEval: async (script: string, keys: string[], args: string[]) => {
+    if (store.evalResult !== null) return { ok: true as const, value: store.evalResult };
     if (store.failEval) return { ok: false as const, reason: 'kv_error' };
     // CAS_CREATE: LLEN(merchant index) cap 判定 + SET(resource) + LPUSH(discovery/merchant index)。
     if (script.includes("redis.call('LLEN'")) {
@@ -245,6 +247,7 @@ beforeEach(() => {
   store.failLrange = false;
   store.failSet = false;
   store.failEval = false;
+  store.evalResult = null;
   mockRequireSession.mockReset();
   resourceRate.allowed = true;
   resourceRate.check.mockReset();
@@ -262,6 +265,20 @@ afterEach(() => {
 });
 
 describe('x402 facilitator /resources', () => {
+  it('atomic URL claim conflict returns 409 url_taken for POST and PATCH', async () => {
+    const { resources, idRoute } = await load();
+    mockRequireSession.mockResolvedValue({ ok: true, address: OWNER });
+    const id = await seedOne(resources);
+    // Actual Lua conflict behavior is covered by registry-url-claims-lua.test.ts.
+    store.evalResult = -5;
+    for (const result of [
+      await resources.POST(postReq(validBody)),
+      await idRoute.PATCH(patchReq(validBody), ctx(id)),
+    ]) {
+      expect(result.status).toBe(409);
+      expect(await result.json()).toEqual({ error: 'url_taken' });
+    }
+  });
   it('flag OFF → POST/GET 404', async () => {
     const { resources } = await load('');
     expect((await resources.POST(postReq(validBody))).status).toBe(404);

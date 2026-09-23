@@ -1,4 +1,5 @@
 import 'server-only';
+import { resourceUrlClaimKey, URL_CLAIM_GUARD } from './resourceUrlClaim.mjs';
 
 import { readBodyCapped, readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { kvEval, kvGet, kvLrange, kvSet } from '@/lib/kv';
@@ -71,6 +72,8 @@ export type ReverifyApplyResult =
       authFailures: number;
       hiddenBefore: boolean;
       hiddenAfter: boolean;
+      /** カウンタは更新済みだが、claim の競合・障害で hidden 解除だけを保留。 */
+      restoreBlocked?: 'url_taken' | 'storage';
     }
   | {
       applied: false;
@@ -494,8 +497,9 @@ export const REVERIFY_COUNTER_TRANSITION =
   ' then hidden=true end; ' +
   'local v={lastCheckedAt=ARGV[2],failures=failures,lastRunId=ARGV[3],probedUrl=ARGV[1]}; ' +
   'if authFailures>0 then v.authFailures=authFailures end; ' +
-  'if lastOk then v.lastOkAt=lastOk end; o.verification=v; o.hidden=hidden; ' +
-  "redis.call('SET',KEYS[1],cjson.encode(o)); ";
+  'if lastOk then v.lastOkAt=lastOk end; o.verification=v; o.hidden=hidden; ';
+
+const REVERIFY_SAVE = "redis.call('SET',KEYS[1],cjson.encode(o)); ";
 
 export const REVERIFY_TRANSITION_RESULT =
   'return cjson.encode({failures=failures,authFailures=authFailures,before=before,after=hidden})';
@@ -513,7 +517,18 @@ export const CAS_EXTERNAL_REVERIFY =
   'if o.active~=true then return 0 end; if o.url~=ARGV[1] then return -3 end; ' +
   'if type(o.verification)==\'table\' and o.verification.lastRunId==ARGV[3] then return -4 end; ' +
   REVERIFY_COUNTER_TRANSITION +
+  // claim は実際の hidden 解除だけに適用する。競合・壊れた claim・WRONGTYPE が
+  // ok の失敗カウンタリセットに波及し、孤立した失敗を連続失敗扱いすることを防ぐ。
+  // visible な旧重複データは成功 probe の順番で勝者を決めず、移行に委ねる。
+  URL_CLAIM_GUARD +
+  'local restoreBlocked=nil; if before and not hidden then ' +
+  'local checked,claim=pcall(claimAvailable,KEYS[3],ARGV[8]); ' +
+  "if not checked or claim~=1 then hidden=true; o.hidden=true; restoreBlocked='storage'; " +
+  "if checked and claim==-5 then restoreBlocked='url_taken' end; end; end; " +
+  REVERIFY_SAVE +
+  "if before and not hidden then redis.call('SET',KEYS[3],ARGV[8]) end; " +
   REVERIFY_HIDDEN_URL_LEDGER +
+  'if restoreBlocked then return cjson.encode({failures=failures,authFailures=authFailures,before=before,after=hidden,restoreBlocked=restoreBlocked}) end; ' +
   REVERIFY_TRANSITION_RESULT;
 
 export const CAS_FIRST_PARTY_REVERIFY =
@@ -521,6 +536,7 @@ export const CAS_FIRST_PARTY_REVERIFY =
   'local ok,decoded=pcall(cjson.decode,c); if not ok or type(decoded)~=\'table\' then return -2 end; o=decoded; end; ' +
   'if type(o.verification)==\'table\' and o.verification.lastRunId==ARGV[3] then return -4 end; ' +
   REVERIFY_COUNTER_TRANSITION +
+  REVERIFY_SAVE +
   REVERIFY_TRANSITION_RESULT;
 
 function verdictClass(verdict: ReverifyVerdict): 'ok' | 'violation' | 'transient' {
@@ -551,6 +567,7 @@ function parseApplyResult(value: number | string): ReverifyApplyResult {
     authFailures?: number;
     before: boolean;
     after: boolean;
+    restoreBlocked?: 'url_taken' | 'storage';
   }>(value);
   if (!parsed || !Number.isFinite(parsed.failures)) {
     return {
@@ -567,6 +584,7 @@ function parseApplyResult(value: number | string): ReverifyApplyResult {
       : 0,
     hiddenBefore: parsed.before === true,
     hiddenAfter: parsed.after === true,
+    ...(parsed.restoreBlocked ? { restoreBlocked: parsed.restoreBlocked } : {}),
   };
 }
 
@@ -578,9 +596,17 @@ export async function applyExternalReverify(
   runId: string,
   authClass: ReverifyAuthClass = 'neutral',
 ): Promise<ReverifyApplyResult> {
+  let claimKey: string;
+  try {
+    claimKey = resourceUrlClaimKey(probedUrl);
+  } catch {
+    // 旧 parser が受理した URL 1 件の導出失敗でバッチ全体・cursor 更新を止めない。
+    // 既存の per-target storage error/streak/quarantine 経路で隔離する。
+    return { applied: false, reason: 'storage', detail: 'unclaimable url' };
+  }
   const applied = await kvEval<number | string>(
     CAS_EXTERNAL_REVERIFY,
-    [resourceKey(id), hiddenUrlLedgerKey(probedUrl)],
+    [resourceKey(id), hiddenUrlLedgerKey(probedUrl), claimKey],
     [
       probedUrl,
       checkedAt,
@@ -589,6 +615,7 @@ export async function applyExternalReverify(
       authClass,
       HIDDEN_URL_LEDGER_VALUE,
       String(HIDDEN_URL_LEDGER_TTL_SEC),
+      id,
     ],
   );
   return applied.ok

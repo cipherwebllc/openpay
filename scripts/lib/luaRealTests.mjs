@@ -27,6 +27,10 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/store/deliveryBudget.test.ts',
   'tests/lib/x402/purchaseIntent-lua.test.ts',
   'tests/lib/x402/registry-lua.test.ts',
+  'tests/lib/x402/registry-legacy-claims-lua.test.ts',
+  'tests/lib/x402/registry-url-claims-lua.test.ts',
+  'tests/lib/x402/registry-url-claims-lifecycle-lua.test.ts',
   'tests/lib/x402/reverify-cas.test.ts',
+  'tests/lib/x402/reverify-url-claims-lua.test.ts',
   'tests/scripts/kv-restore-lua.test.ts',
 ];

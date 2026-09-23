@@ -68,7 +68,11 @@ jobs:
           --exclude tests/lib/store/deliveryBudget.test.ts
           --exclude tests/lib/x402/purchaseIntent-lua.test.ts
           --exclude tests/lib/x402/registry-lua.test.ts
+          --exclude tests/lib/x402/registry-legacy-claims-lua.test.ts
+          --exclude tests/lib/x402/registry-url-claims-lua.test.ts
+          --exclude tests/lib/x402/registry-url-claims-lifecycle-lua.test.ts
           --exclude tests/lib/x402/reverify-cas.test.ts
+          --exclude tests/lib/x402/reverify-url-claims-lua.test.ts
           --exclude tests/scripts/kv-restore-lua.test.ts
       - name: Build (production) + bundle budget check
         env:
