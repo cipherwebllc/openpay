@@ -221,6 +221,17 @@ beforeEach(() => {
 });
 
 describe('creator-store-usdc-vanilla-v1 intent', () => {
+  it.each(['wrong-failure-reason', 'malformed-expired-hash'] as const)('rejects a failed record with %s', async (scenario) => {
+    const intent = await settling();
+    expect(parseStoreUsdcIntent(JSON.stringify({
+      ...intent,
+      state: 'failed_prebroadcast',
+      failedAt: NOW + 1_000_000,
+      failureReason: scenario === 'wrong-failure-reason' ? 'prebroadcast_rejection' : 'authorization_expired_unused',
+      txHash: scenario === 'malformed-expired-hash' ? '0x1234' : TX,
+    }))).toBeNull();
+  });
+
   it('nonce は server intentSalt から決定論的に導出し、別 intent では変わる', () => {
     expect(storeUsdcNonce(SALT)).toBe(storeUsdcNonce(SALT));
     expect(storeUsdcNonce(SALT)).not.toBe(

@@ -12,6 +12,7 @@ import {
 import { base } from 'viem/chains';
 import { transportForChain } from '@/lib/chains';
 import { kvGet } from '@/lib/kv';
+import { authorizationExpiredUnused } from '@/lib/x402/authorizationExpiry';
 import {
   legacyBillingPaymentKey,
   paymentClaimKey,
@@ -52,8 +53,10 @@ export type StoreUsdcPublicClient = {
       transactionHash?: Hex | null;
     }[];
   }>;
-  getBlock: (args: { blockTag: 'safe' }) => Promise<{
+  getBlock: (args: { blockTag: 'safe' | 'finalized' } | { blockNumber: bigint }) => Promise<{
     number: bigint | null;
+    hash?: Hex | null;
+    timestamp?: bigint;
   }>;
   getBlockNumber: () => Promise<bigint>;
   readContract: (args: {
@@ -61,6 +64,7 @@ export type StoreUsdcPublicClient = {
     abi: typeof AUTHORIZATION_STATE_ABI;
     functionName: 'authorizationState';
     args: readonly [Address, Hex];
+    blockNumber?: bigint;
   }) => Promise<boolean>;
   getLogs: (args: {
     address: Address;
@@ -76,6 +80,20 @@ function baseClient(): StoreUsdcPublicClient {
     chain: base,
     transport: transportForChain(base.id),
   }) as unknown as StoreUsdcPublicClient;
+}
+
+export function storeUsdcAuthorizationExpiredUnused(input: {
+  payer: Address;
+  nonce: Hex;
+  validBefore: bigint;
+  txHash?: Hex;
+  client?: StoreUsdcPublicClient;
+}): Promise<boolean> {
+  return authorizationExpiredUnused({
+    ...input,
+    token: STORE_USDC_ADDRESS,
+    client: input.client ?? baseClient(),
+  });
 }
 
 export async function readStoreUsdcAnchorBlock(

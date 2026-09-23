@@ -43,6 +43,8 @@ import {
 } from '@/lib/x402/hostedStore';
 import { parseFacilitatorRequest } from '@/lib/x402/facilitatorSettle';
 import { paymentRedeliveryIdentity } from '@/lib/x402/paymentRedelivery';
+import { authorizationExpiredUnused } from '@/lib/x402/authorizationExpiry';
+import { railIntentParentKey, releaseActiveStoreRail } from '@/lib/x402/storeRailSelection';
 
 export const PURCHASE_INTENT_VERSION = 1;
 export const PURCHASE_QUOTE_TTL_SEC = 10 * 60;
@@ -268,6 +270,8 @@ export type FailedPrebroadcastPurchaseIntent = ClaimedPurchaseIntentBase & {
   leaseUntil: number;
   failedAt: number;
   failureReason: string;
+  /** Retained only when finalized expiry proves a broadcast authorization unused. */
+  txHash?: Hex;
 };
 
 export type PurchaseIntent =
@@ -681,7 +685,8 @@ export function parsePurchaseIntent(raw: unknown): PurchaseIntent | null {
   }
   if (
     value.state === 'failed_prebroadcast' &&
-    value.txHash === undefined &&
+    (value.txHash === undefined ||
+      value.failureReason === 'authorization_expired_unused' && parseHex32(value.txHash)) &&
     isSafeTimestamp(value.failedAt) &&
     typeof value.failureReason === 'string' &&
     value.failureReason.length > 0
@@ -691,6 +696,7 @@ export function parsePurchaseIntent(raw: unknown): PurchaseIntent | null {
       state: 'failed_prebroadcast',
       failedAt: value.failedAt,
       failureReason: value.failureReason,
+      ...(value.txHash === undefined ? {} : { txHash: parseHex32(value.txHash)! }),
     };
   }
   return null;
@@ -2628,6 +2634,8 @@ async function claimReconcileLease(
 }
 
 export type PurchaseReconcileChain = {
+  // An adapter without finalized evidence must never authorize a payment unlock.
+  authorizationExpiredUnused?: (intent: ClaimedPurchaseIntentBase & { txHash?: Hex }) => Promise<boolean>;
   authorizationUsed: (
     intent: ClaimedPurchaseIntentBase,
   ) => Promise<boolean>;
@@ -2653,6 +2661,14 @@ function clientForIntent(intent: ClaimedPurchaseIntentBase) {
 }
 
 export const defaultPurchaseReconcileChain: PurchaseReconcileChain = {
+  authorizationExpiredUnused: (intent) => authorizationExpiredUnused({
+    client: clientForIntent(intent),
+    token: intent.token,
+    payer: intent.claim.payer,
+    nonce: intent.claim.nonce,
+    validBefore: BigInt(intent.claim.validBefore),
+    ...('txHash' in intent ? { txHash: intent.txHash } : {}),
+  }),
   authorizationUsed: async (intent) =>
     clientForIntent(intent).readContract({
       address: intent.token,
@@ -2832,19 +2848,21 @@ export async function reconcilePurchaseIntent(
 
   try {
     const used = await chain.authorizationUsed(intent);
-    if (!used) {
+    if (used !== true) {
       const validBefore = BigInt(intent.claim.validBefore);
+      const expiryDue = BigInt(Math.floor(now / 1000)) >= validBefore;
       if (
-        intent.state === 'signed' &&
-        BigInt(Math.floor(now / 1000)) >= validBefore
+        used === false &&
+        expiryDue &&
+        await chain.authorizationExpiredUnused?.(intent) === true
       ) {
         const failed: FailedPrebroadcastPurchaseIntent = {
           ...intent,
           state: 'failed_prebroadcast',
-          attemptId: randomBytes(32).toString('hex'),
-          attempt: 1,
-          settlementStartedAt: now,
-          leaseUntil: now,
+          attemptId: intent.state === 'signed' ? randomBytes(32).toString('hex') : intent.attemptId,
+          attempt: intent.state === 'signed' ? 1 : intent.attempt,
+          settlementStartedAt: intent.state === 'signed' ? now : intent.settlementStartedAt,
+          leaseUntil: intent.state === 'signed' ? now : intent.leaseUntil,
           failedAt: now,
           failureReason: 'authorization_expired_unused',
         };
@@ -2857,6 +2875,24 @@ export async function reconcilePurchaseIntent(
           removePending: true,
           nextScore: now,
         });
+        if (updated === 'updated') {
+          // Release only after the atomic intent/pending CAS; an old reconciler cannot
+          // unlock a newer attempt. Rail release also compares the selected authorization.
+          const parent = await kvGet(railIntentParentKey(intentSalt));
+          if (parent.ok && parent.value) {
+            await releaseActiveStoreRail({
+              parentIntentId: parent.value,
+              intentSalt,
+              payer: intent.claim.payer,
+              resourceId: intent.resourceId,
+              contentRevision: intent.contentRevision,
+              rail: 'jpyc',
+              authorizationHash: intent.authorizationHash,
+            });
+          }
+          // A release/storage gap leaves the terminal intent authoritative: the next
+          // quote rotates its rail atomically, so lock cleanup cannot undo terminality.
+        }
         return updated === 'updated'
           ? { ok: true, state: 'failed_prebroadcast' }
           : { ok: false, reason: 'storage' };

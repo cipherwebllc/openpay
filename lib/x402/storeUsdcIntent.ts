@@ -43,6 +43,7 @@ import {
 import {
   findStoreUsdcAuthorizationTransactions,
   readStoreUsdcAuthorizationState,
+  storeUsdcAuthorizationExpiredUnused,
   STORE_USDC_ADDRESS,
   STORE_USDC_CHAIN_ID,
   type StoreUsdcPublicClient,
@@ -201,6 +202,8 @@ export type FailedStoreUsdcIntent = ClaimedStoreUsdcIntentBase & {
   state: 'failed_prebroadcast';
   failedAt: number;
   failureReason: string;
+  /** Retained only when finalized expiry proves a broadcast authorization unused. */
+  txHash?: Hex;
 };
 export type StoreUsdcIntent =
   | QuotedStoreUsdcIntent
@@ -414,12 +417,18 @@ export function parseStoreUsdcIntent(raw: unknown): StoreUsdcIntent | null {
       : null;
   }
   if (value.state === 'failed_prebroadcast') {
+    const txHash = value.txHash === undefined ? undefined : hex32(value.txHash);
+    // Do not normalize malformed/stray broadcast evidence into a hashless terminal
+    // record. Both rails retain hashes only for proven unused authorization expiry.
+    if (value.txHash !== undefined &&
+        (value.failureReason !== 'authorization_expired_unused' || !txHash)) return null;
     return safeTimestamp(value.failedAt) && typeof value.failureReason === 'string'
       ? {
           ...claimed,
           state: 'failed_prebroadcast',
           failedAt: value.failedAt,
           failureReason: value.failureReason,
+          ...(txHash ? { txHash } : {}),
         }
       : null;
   }
@@ -821,13 +830,14 @@ export async function recordStoreUsdcTransaction(input: {
   });
 }
 
-async function failPrebroadcast(
+// Reconciler-only transition: unlike a prebroadcast rejection, finalized unused
+// expiry proves that even a recorded/replacement transaction cannot settle.
+async function failExpiredAuthorization(
   intent: SignedStoreUsdcIntent | SettlingStoreUsdcIntent | IndeterminateStoreUsdcIntent,
   raw: string,
   reason: string,
   now: number,
 ): Promise<'updated' | 'conflict' | 'storage'> {
-  if ('txHash' in intent && intent.txHash) return 'conflict';
   const failed: FailedStoreUsdcIntent = {
     ...intent,
     state: 'failed_prebroadcast',
@@ -1269,9 +1279,19 @@ export async function reconcileStoreUsdcIntent(
     await reschedule(intent, read.raw, now);
     return { ok: true, state: 'pending' };
   }
-  if (!used) {
-    if (now >= Number(intent.claim.validBefore) * 1_000) {
-      const failed = await failPrebroadcast(
+  if (used !== true) {
+    if (
+      used === false &&
+      BigInt(Math.floor(now / 1000)) >= BigInt(intent.claim.validBefore) &&
+      await storeUsdcAuthorizationExpiredUnused({
+        payer: intent.claim.payer,
+        nonce: intent.claim.nonce,
+        validBefore: BigInt(intent.claim.validBefore),
+        ...('txHash' in intent ? { txHash: intent.txHash } : {}),
+        ...(input.client ? { client: input.client } : {}),
+      })
+    ) {
+      const failed = await failExpiredAuthorization(
         intent,
         read.raw,
         'authorization_expired_unused',
