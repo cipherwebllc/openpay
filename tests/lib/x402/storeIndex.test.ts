@@ -17,6 +17,9 @@ vi.mock('@/lib/kv', () => ({
     return kvMocks.evalImpl(script, keys, args);
   },
 }));
+vi.mock('@/lib/x402/hostedStore', () => ({
+  getHostedProductsByIds: async (ids: string[]) => ids.map((id) => ({ id })),
+}));
 
 const ID = `h_${'a'.repeat(32)}`;
 
@@ -57,7 +60,7 @@ describe('storeIndex', () => {
     const m = await mod();
     kvMocks.evalImpl = async () => ({
       ok: true,
-      value: [ID, 'garbage', `h_${'b'.repeat(32)}`],
+      value: [3, [ID, 'garbage', `h_${'b'.repeat(32)}`]],
     });
     const ids = await m.listStoreIndexIds(10);
     expect(ids).toEqual([ID, `h_${'b'.repeat(32)}`]);
@@ -65,7 +68,7 @@ describe('storeIndex', () => {
     expect(call.script).toContain('ZREVRANGE');
     expect(call.script).toContain('SISMEMBER');
     expect(call.keys).toEqual([m.STORE_INDEX_KEY, m.STORE_BLOCKLIST_KEY]);
-    expect(call.args).toEqual(['10']);
+    expect(call.args).toEqual(['200', '0']);
   });
 
   it('listStoreIndexIds: KV 障害は null (空配列と区別し呼び出し側が 503 に倒せる)', async () => {
@@ -74,12 +77,34 @@ describe('storeIndex', () => {
     expect(await m.listStoreIndexIds()).toBeNull();
   });
 
+  it('listStoreIndexIds: 壊れたページは空一覧や次ページとして扱わない', async () => {
+    const m = await mod();
+    for (const value of [null, [], [-1, []], [201, []], ['1', []], [1, null]]) {
+      kvMocks.evalImpl = async () => ({ ok: true, value });
+      expect(await m.listStoreIndexIds()).toBeNull();
+    }
+    expect(kvMocks.evalCalls).toHaveLength(6);
+  });
+
+  it('listStoreIndexIds: ページ間の更新で再登場した id は枠を二重に消費しない', async () => {
+    const m = await mod();
+    const second = `h_${'b'.repeat(32)}`;
+    kvMocks.evalImpl = async (_script, _keys, args) => ({
+      ok: true,
+      value: args[1] === '0' ? [200, [ID]] : [2, [ID, second]],
+    });
+    expect(await m.listStoreIndexIds(2)).toEqual([ID, second]);
+    expect(kvMocks.evalCalls.map((call) => call.args)).toEqual([['200', '0'], ['200', '200']]);
+  });
+
   it('listStoreIndexIds: limit は上限 (STORE_INDEX_MAX_IDS) と下限 1 に clamp される', async () => {
     const m = await mod();
-    kvMocks.evalImpl = async () => ({ ok: true, value: [] });
-    await m.listStoreIndexIds(99999);
-    expect(kvMocks.evalCalls[0].args).toEqual([String(m.STORE_INDEX_MAX_IDS)]);
-    await m.listStoreIndexIds(0);
-    expect(kvMocks.evalCalls[1].args).toEqual(['1']);
+    const ids = Array.from({ length: m.STORE_INDEX_MAX_IDS }, (_, n) => `h_${n.toString(16).padStart(32, '0')}`);
+    kvMocks.evalImpl = async () => ({ ok: true, value: [ids.length, ids] });
+    expect(await m.listStoreIndexIds(99999)).toEqual(ids);
+    expect(kvMocks.evalCalls[0].args).toEqual([String(m.STORE_INDEX_MAX_IDS), '0']);
+    expect(await m.listStoreIndexIds(0)).toEqual([ids[0]]);
+    expect(kvMocks.evalCalls[1].args).toEqual(['200', '0']);
+    expect(kvMocks.evalCalls).toHaveLength(2);
   });
 });

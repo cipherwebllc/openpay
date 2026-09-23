@@ -61,7 +61,10 @@ export const PURCHASE_RECONCILE_MAX_PAGES = 20;
 export const PURCHASE_QUOTE_RATE_WINDOW_SEC = 60;
 export const PURCHASE_QUOTE_WALLET_MAX = 12;
 export const PURCHASE_QUOTE_IP_MAX = 60;
-export const PURCHASE_QUOTE_RESOURCE_MAX = 120;
+// Abuse backstop only (10x the former 120/min ceiling). The per-IP limit and
+// Cloudflare edge rate limit are the primary controls. IPv6 /64 grouping is
+// handled separately in the PR for review finding C3.
+export const PURCHASE_QUOTE_RESOURCE_MAX = 1_200;
 /** token/forwarder のアドレスとは別の、保存 schema + rail generation。 */
 export const PURCHASE_DEPLOYMENT_VERSION = 'creator-store-jpyc-forwarder-v1';
 /** 同一商品を再購入した場合も、購入済みの全 revision を権利として残す。 */
@@ -889,13 +892,22 @@ for index, key in ipairs(KEYS) do
     return invalid
   end
 end
-for index, key in ipairs(KEYS) do
+local function increment(index)
+  local key = KEYS[index]
   local count = redis.call('INCR', key)
   local ttl = redis.call('TTL', key)
   if count == first or ttl < tonumber(ARGV[2]) then
     redis.call('EXPIRE', key, ARGV[4])
   end
-  if count > tonumber(ARGV[index + 4]) then
+  return count <= tonumber(ARGV[index + 4])
+end
+-- Denied IP traffic must not exhaust other buyers' resource or wallet buckets.
+-- KEYS[3] is optional; wallet/resource remain KEYS[1]/KEYS[2].
+if #KEYS == 3 and not increment(3) then
+  return denied
+end
+for index = 1, 2 do
+  if not increment(index) then
     allowed = denied
   end
 end
