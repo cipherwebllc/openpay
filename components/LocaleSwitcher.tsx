@@ -32,7 +32,6 @@ export function LocaleSwitcher() {
             key={l}
             type="button"
             onClick={() => switchTo(l)}
-            aria-label={`${t('label')}: ${t(l)}`}
             aria-pressed={active}
             className={`rounded-full px-2 py-1 font-medium transition sm:px-3 ${
               active
@@ -42,9 +41,10 @@ export function LocaleSwitcher() {
           >
             {/* モバイルは短縮アドレス併存で幅が足りないため ISO コード略称 (JA/EN)。
                 sm+ は chain 名・env pill と同じ境界で全文 (日本語/English) に戻す。
-                accessible name は上の aria-label が ARIA 優先で決めるため不変。 */}
-            <span className="sm:hidden">{l.toUpperCase()}</span>
-            <span className="hidden sm:inline">{t(l)}</span>
+                全文はモバイルでも sr-only で残し、可視の ISO コードと合わせて名前にする。 */}
+            <span className="sr-only">{t('label')}: </span>
+            <span className="sm:sr-only">{l.toUpperCase()}{' '}</span>
+            <span className="sr-only sm:not-sr-only">{t(l)}</span>
           </button>
         );
       })}

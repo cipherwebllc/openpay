@@ -5,6 +5,7 @@
 // /api/facilitator/resources で管理する (GET=一覧 / POST=登録 / [id] PATCH=編集 / [id] DELETE=無効化)。
 // 本コンポーネントは env.enableX402Facilitator が ON のページからのみマウントされる。
 
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
@@ -290,20 +291,16 @@ export function X402DiscoveryView({
   // 出品の正当性表明 (新規登録のみ必須・編集では不要)。送信成功でリセット。
   const [attested, setAttested] = useState(false);
   // コピー済みフィードバック (key 単位・1.5s でリセット)。
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const { copied, copy } = useCopyToClipboard();
+  const [lastCopiedKey, setCopiedKey] = useState<string | null>(null);
+  const copiedKey = copied ? lastCopiedKey : null;
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
   const [catalogSearch, setCatalogSearch] = useState('');
   const [catalogCategory, setCatalogCategory] = useState<CatalogCategory | null>(null);
   const [catalogCurrency, setCatalogCurrency] = useState<CatalogCurrency>('all');
-  const copyText = useCallback((key: string, text: string) => {
-    try {
-      void navigator.clipboard?.writeText(text);
-    } catch {
-      /* clipboard 不可環境は無視 */
-    }
-    setCopiedKey(key);
-    window.setTimeout(() => setCopiedKey((k) => (k === key ? null : k)), 1500);
-  }, []);
+  async function copyText(key: string, text: string) {
+    if (await copy(text)) setCopiedKey(key);
+  }
 
   const queryClient = useQueryClient();
 

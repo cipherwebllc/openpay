@@ -268,9 +268,9 @@ describe('POS_GUIDE: 文言フェンス (回帰防止)', () => {
 
   it('完了画像は顧客側の画面であることをキャプションで明示', () => {
     expect(POS_GUIDE.ja.successCaption).toContain('お客様');
-    expect(POS_GUIDE.ja.successCaption).toContain('着金を確認しました');
+    expect(POS_GUIDE.ja.successCaption).toContain('残高の増加を検知');
     expect(POS_GUIDE.en.successCaption).toMatch(/customer/i);
-    expect(POS_GUIDE.en.successCaption).toMatch(/Payment received/i);
+    expect(POS_GUIDE.en.successCaption).toMatch(/Balance increase detected/i);
   });
 
   it('安全注記は「着金を確認する前に渡さない」(完了表示頼みにしない)', () => {
@@ -290,4 +290,9 @@ describe('payment-success.svg: 顧客側の文言になっている', () => {
     expect(svg).not.toContain('受け取りました');
     expect(svg).not.toContain('着金済み');
   });
+});
+
+it('X10: POS flow does not authorize handing over goods from a balance hint', () => {
+  expect(POS_GUIDE.ja.flowSteps[3].body).toContain('この支払いを特定');
+  expect(POS_GUIDE.en.flowSteps[3].body).toContain('does not identify');
 });

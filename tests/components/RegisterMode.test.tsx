@@ -113,6 +113,15 @@ describe('RegisterMode', () => {
     global.fetch = vi.fn(async () => jsonRes({ ok: false }, 404)) as unknown as typeof fetch;
   });
 
+  it('D3: preset accessible name retains price and in-cart quantity', async () => {
+    render(<RegisterMode />);
+    const tile = await screen.findByRole('button', { name: /コーヒー/ });
+    expect(tile).toHaveAccessibleName(/コーヒー.*500.*JPYC/);
+    await userEvent.setup().click(tile);
+    expect(tile).toHaveAccessibleName(/500.*JPYC/);
+    expect(tile).toHaveAccessibleName('コーヒー 500 JPYC カートに 1 点');
+  });
+
   it('初期サンプルプリセットが表示される (コーヒー/Tシャツ/イベント参加費/Tip)', async () => {
     render(<RegisterMode />);
     await waitFor(() =>
@@ -296,7 +305,8 @@ describe('RegisterMode', () => {
     render(<RegisterMode />);
 
     expect(await screen.findAllByText('売り切れ')).toHaveLength(2);
-    const productButton = screen.getByRole('button', { name: '限定グッズ' });
+    const productButton = screen.getByRole('button', { name: /限定グッズ/ });
+    expect(productButton).toHaveAccessibleName(/売り切れ.*限定グッズ.*1200.*JPYC/);
     expect(productButton).not.toBeDisabled();
     expect(productButton.querySelector('img')).toHaveClass('grayscale');
     const toggle = screen.getByRole('checkbox', { name: '売り切れ' });

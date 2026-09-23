@@ -6,6 +6,7 @@ import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { clientIp } from '@/lib/net/ipHash';
 import { MAX_BODY_BYTES, anonymizeIp } from '@/lib/relay/relayRoute';
 import {
+  listPushSubscriptions,
   removePushSubscription,
   upsertPushSubscription,
   type PushLocale,
@@ -25,6 +26,29 @@ type ParsedSubscription = {
 const MAX_ENDPOINT_LENGTH = 2048;
 const MAX_KEY_LENGTH = 512;
 const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+
+export async function GET(req: Request): Promise<NextResponse> {
+  if (!env.enablePushNotify) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  }
+  const session = await requireSession();
+  if (!session.ok) return session.response;
+  const limited = await rateLimited(req, session.address);
+  if (limited) return limited;
+  const endpointHash = new URL(req.url).searchParams.get('endpointHash');
+  if (!endpointHash || !/^[0-9a-f]{64}$/.test(endpointHash)) {
+    return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
+  }
+  const stored = await listPushSubscriptions(session.address);
+  if (!stored.ok) {
+    return NextResponse.json({ error: 'kv_unavailable' }, { status: 503 });
+  }
+  const subscription = stored.value.find((entry) => entry.endpointHash === endpointHash);
+  return NextResponse.json({
+    subscribed: !!subscription,
+    includeAmount: subscription?.includeAmount === true,
+  }, { headers: { 'Cache-Control': 'private, no-store' } });
+}
 
 export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enablePushNotify) {

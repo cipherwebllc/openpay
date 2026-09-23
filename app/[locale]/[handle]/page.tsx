@@ -510,7 +510,6 @@ export default async function HandlePage({
           </Link>
           <Link
             href={`/${locale}`}
-            aria-label={t('backToTop')}
             className={`inline-flex items-center gap-1.5 text-xs font-semibold transition ${
               darkFooter
                 ? 'text-slate-300 hover:text-white'

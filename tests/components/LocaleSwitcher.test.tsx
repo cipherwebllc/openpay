@@ -103,11 +103,13 @@ describe('LocaleSwitcher', () => {
     );
   });
 
-  it('aria-label にラベル + locale 名が入る (a11y)', () => {
+  it('D3: accessible names include both mobile codes and desktop language names', () => {
     pathname.mockReturnValue('/ja');
     renderWithIntl(<LocaleSwitcher />, { locale: 'ja' });
     const ja = screen.getByRole('button', { name: /日本語/ });
-    expect(ja.getAttribute('aria-label')).toBe('言語: 日本語');
+    expect(ja).toHaveAccessibleName(/JA 日本語/);
+    expect(ja.textContent).toContain('JA 日本語');
+    expect(screen.getByRole('button', { name: /English/ })).toHaveAccessibleName(/EN.*English/);
   });
 
   // -- 境界条件 / pathname 形 --

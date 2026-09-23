@@ -1,7 +1,7 @@
 'use client';
 
 // 店員が決済 QR を提示している間 (QrPreviewModal が開いている間) に、受取先
-// アドレスのトークン残高をオンチェーンでポーリングし、モーダルを開いた瞬間の
+// アドレスのトークン残高をオンチェーンでポーリングし、モーダルを開いてから新たに取得した
 // 残高を baseline として記録、おおよそ請求額ぶん残高が増えたら「着金を確認した」
 // と判定する advisory なヒント。
 //
@@ -13,7 +13,7 @@
 // 残高取得は useErc20BalanceAndChain と同じく wagmi useReadContract +
 // erc20Abi('balanceOf') を再利用する。
 
-import { useRef } from 'react';
+import { useId, useRef } from 'react';
 import { useReadContract } from 'wagmi';
 import { erc20Abi } from 'viem';
 
@@ -38,43 +38,42 @@ export function useIncomingPaymentWatch(params: {
   // この watch を実際に有効化する条件。受取先と正の請求額が揃って初めて意味を持つ。
   const watchActive = enabled && !!receiver && expectedAmountWei > 0n;
 
+  // Every activation gets its own query generation, including reopenings with identical
+  // amounts. A timestamp alone would admit an old request finishing after activation.
+  const instanceId = useId();
+  const watchKey = watchActive
+    ? `${receiver}:${chainId}:${tokenAddress}:${expectedAmountWei.toString()}`
+    : null;
+  const baselineRef = useRef<bigint | null>(null);
+  const keyRef = useRef<string | null>(null);
+  const generationRef = useRef(0);
+  if (keyRef.current !== watchKey) {
+    keyRef.current = watchKey;
+    generationRef.current += 1;
+    baselineRef.current = null;
+  }
+
   const balanceQuery = useReadContract({
     address: tokenAddress,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: receiver ? [receiver] : undefined,
     chainId,
+    // Isolate both cached data and earlier in-flight requests from this QR's baseline.
+    scopeKey: `incoming:${instanceId}:${generationRef.current}`,
     query: {
       enabled: watchActive,
-      // 6 秒間隔で残高をポーリング。背面 (タブ非アクティブ) では止めて RPC 浪費を防ぐ。
+      gcTime: 0,
       refetchInterval: 6000,
       refetchIntervalInBackground: false,
     },
   });
+  // Placeholder data must not carry a prior query's balance into a new generation.
+  const currentBalance = balanceQuery.isPlaceholderData ? undefined : balanceQuery.data;
 
-  const currentBalance = balanceQuery.data;
-
-  // 「いま監視している QR」の identity。enabled の false→true 再立ち上がり /
-  // receiver / 請求額 のいずれかが変わると別 QR とみなし baseline を取り直す。
-  // disabled (watchActive=false) は null を key にして、再有効化を必ず立ち上がり
-  // エッジとして扱う。
-  const watchKey = watchActive
-    ? `${receiver}:${expectedAmountWei.toString()}`
-    : null;
-
-  // baseline (この QR を監視し始めた瞬間の残高) と、それが属する watchKey。
-  // effect ではなく render 中に同期リセットするのは、receiver/金額の差し替えと
-  // 同じ render で古い baseline を使って誤検知するのを防ぐため (ref reset を
-  // effect に置くと再 render が走らず古い値で 1 フレーム判定してしまう)。
-  const baselineRef = useRef<bigint | null>(null);
-  const keyRef = useRef<string | null>(null);
-
-  // watchKey が変わったら baseline を破棄 (新しい QR = 新規 watch)。
-  if (keyRef.current !== watchKey) {
-    keyRef.current = watchKey;
-    baselineRef.current = null;
-  }
-
+  // A payment arriving before this fresh read completes is part of the baseline, so may
+  // not trigger the hint. Balance deltas cannot identify an invoice; the UI directs the
+  // merchant to transaction history even while acquiring the baseline.
   // baseline 未確定かつ watch 有効で、残高を初めて取得できたら baseline に固定する。
   // 以降のポーリングでは上書きしない (delta 計測の基準点を保つ)。
   if (watchActive && baselineRef.current === null && currentBalance !== undefined) {

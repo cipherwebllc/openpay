@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { act, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
 
@@ -849,6 +849,21 @@ describe('X402DiscoveryView', () => {
       );
       expect(posts).toHaveLength(2);
     });
+  });
+
+  it.each(['missing', 'rejected', 'pending'] as const)('D2: clipboard %s never reports copied', async (mode) => {
+    const rejected = Promise.reject(new Error('clipboard denied'));
+    // Observe the test promise too, so the pre-fix run reports the UI assertion, not an unhandled rejection.
+    void rejected.catch(() => undefined);
+    const writeText = vi.fn(() => mode === 'pending' ? new Promise<void>(() => {}) : rejected);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: mode === 'missing' ? undefined : { writeText },
+    });
+    renderView();
+    await screen.findByText('JP→EN 翻訳 API です');
+    await act(async () => fireEvent.click(screen.getByLabelText('コピー')));
+    expect(screen.queryByLabelText('コピーしました')).not.toBeInTheDocument();
   });
 
   it('コピー: カタログ URL のコピーボタンで clipboard に書き込み「コピーしました」に変化', async () => {

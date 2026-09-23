@@ -15,6 +15,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { useAccount } from 'wagmi';
+import { sha256, stringToHex } from 'viem';
 import { env } from '@/lib/env';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { usePwaDisplayMode } from '@/hooks/usePwaDisplayMode';
@@ -45,13 +46,20 @@ function pushSupported(): boolean {
 }
 
 export function PushNotifyPanel() {
+  const session = useSiweSession();
+  // Wallet changes unmount all pending status/mutation feedback so A's response cannot
+  // become B's enabled indicator (including an A → B → A switch).
+  return <PushNotifySettings key={session.isSignedIn ? session.sessionAddress : 'signed-out'} session={session} />;
+}
+
+function PushNotifySettings({ session }: { session: ReturnType<typeof useSiweSession> }) {
   const t = useTranslations('PushNotify');
   const locale = useLocale();
   const pushLocale = locale === 'en' ? 'en' : 'ja';
   // signIn をパネル内蔵にする: ヘッダの SIWE ボタンは他 flag (freee/a1/Pro/CSV パス) 依存で
   // 出ない構成があり、「サインインしてください」だけ出して導線が無い不到達 (CsvPassPaywall の
   // 教訓と同型) になるため、ここで完結させる。文言は WalletBadge と同じ Nav.siweStatement。
-  const { isSignedIn, signIn, isSigningIn } = useSiweSession();
+  const { isSignedIn, signIn, isSigningIn } = session;
   const { isConnected } = useAccount();
   const tNav = useTranslations('Nav');
   const [signInFailed, setSignInFailed] = useState(false);
@@ -62,7 +70,8 @@ export function PushNotifyPanel() {
   const [supported, setSupported] = useState(false);
   const [permission, setPermission] =
     useState<NotificationPermission>('default');
-  const [subscribed, setSubscribed] = useState(false);
+  const [subscribedEndpoint, setSubscribedEndpoint] = useState<string | null>(null);
+  const subscribed = subscribedEndpoint !== null;
   const [includeAmount, setIncludeAmount] = useState(false);
   // テスト通知の送信状態 (idle/sending/sent/failed)。rate limit (429) も failed 表示に倒す。
   const [testState, setTestState] = useState<
@@ -97,13 +106,37 @@ export function PushNotifyPanel() {
     } catch {
       /* localStorage 不可環境では既定 false */
     }
-    // 既存購読があれば「有効」状態から始める (別端末では未購読=既定 false)。
-    void navigator.serviceWorker
-      .getRegistration()
-      .then((reg) => reg?.pushManager.getSubscription())
-      .then((sub) => setSubscribed(!!sub))
-      .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!env.enablePushNotify || !env.pushVapidPublicKey || !isSignedIn || !supported) return;
+    let cancelled = false;
+    setBusy(true);
+    // Browser ownership alone says nothing about this wallet's server subscription.
+    void (async () => {
+      try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        const sub = await reg?.pushManager.getSubscription();
+        if (!sub || cancelled) return;
+        // Query only this device by SHA-256, keeping raw endpoints out of URLs and
+        // other devices' endpoints out of the response.
+        const endpointHash = sha256(stringToHex(sub.endpoint)).slice(2);
+        const res = await fetch(`/api/push/subscribe?endpointHash=${endpointHash}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('subscription_status_failed');
+        const body = await res.json() as { subscribed: boolean; includeAmount: boolean };
+        if (!cancelled) {
+          setSubscribedEndpoint(body.subscribed ? sub.endpoint : null);
+          if (body.subscribed) setIncludeAmount(body.includeAmount === true);
+        }
+      } catch {
+        // Isolate notification lookup failures from history; never claim enabled on failure.
+        if (!cancelled) setError(true);
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isSignedIn, supported]);
 
   // flag OFF / 公開鍵なしは完全 inert (SSR/client 同一で null → hydration 安全)。
   if (!env.enablePushNotify || !env.pushVapidPublicKey) return null;
@@ -133,8 +166,9 @@ export function PushNotifyPanel() {
         }),
       });
       if (!res.ok) throw new Error('subscribe_failed');
-      setSubscribed(true);
+      setSubscribedEndpoint(sub.endpoint);
     } catch {
+      // Keep notification failures inside this panel and leave failed changes retryable.
       setError(true);
     } finally {
       setBusy(false);
@@ -147,16 +181,16 @@ export function PushNotifyPanel() {
     try {
       const reg = await navigator.serviceWorker.getRegistration();
       const sub = await reg?.pushManager.getSubscription();
-      if (sub) {
-        await fetch('/api/push/subscribe', {
-          method: 'DELETE',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ endpoint: sub.endpoint }),
-        });
-        await sub.unsubscribe();
-      }
-      setSubscribed(false);
+      const res = await fetch('/api/push/subscribe', {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ endpoint: subscribedEndpoint }),
+      });
+      if (!res.ok) throw new Error('unsubscribe_failed');
+      setSubscribedEndpoint(null);
+      await sub?.unsubscribe();
     } catch {
+      // Keep notification failures inside this panel and leave failed changes retryable.
       setError(true);
     } finally {
       setBusy(false);
@@ -190,6 +224,7 @@ export function PushNotifyPanel() {
         if (!res.ok) throw new Error('subscribe_failed');
       }
     } catch {
+      // Keep notification failures inside this panel and leave failed changes retryable.
       setError(true);
     } finally {
       setBusy(false);

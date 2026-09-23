@@ -646,9 +646,9 @@ export function MobileOrderBuilder({
                     type="button"
                     onClick={() => setMenuOpen((o) => !o)}
                     aria-expanded={menuOpen}
-                    aria-label={t('menuToggleLabel')}
                     className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:border-brand"
                   >
+                    <span className="sr-only">{t('menuToggleLabel')}</span>
                     <span>{t('menuItemsCount', { count: menuItems.length })}</span>
                     {menuOpen ? (
                       <ChevronUp className="h-4 w-4 text-slate-400" aria-hidden />
