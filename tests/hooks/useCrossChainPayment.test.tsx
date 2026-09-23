@@ -82,7 +82,8 @@ beforeEach(() => {
 });
 afterEach(() => { qc.clear(); localStorage.clear(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
-describe('D9 Gateway committed recovery independent of readiness', () => {
+describe.each([false, true])('D9 Gateway committed recovery independent of readiness (flag=%s)', (enabled) => {
+  beforeEach(() => vi.spyOn(env, 'enableGatewayCrossChain', 'get').mockReturnValue(enabled));
   const legacyArgs = { ...args, targetChainId: 80002 };
   const merchantAttestation = { attestation: '0x1234' as Hex, signature: '0x5678' as Hex };
 
@@ -96,14 +97,17 @@ describe('D9 Gateway committed recovery independent of readiness', () => {
     });
     const actual = await vi.importActual<typeof import('@/lib/crossChain/balance')>('@/lib/crossChain/balance');
     vi.mocked(readAllCrossChainBalances).mockImplementation((account) => actual.readAllCrossChainBalances(account, {
-      fetch: vi.fn(async () => new Response(JSON.stringify({ balances: [{ domain: target.domain, balance: '3000000' }] }))),
+      fetch: vi.fn(async () => new Response(JSON.stringify({ balances: [{ domain: target.domain, balance: '3' }] }))),
     }));
 
     const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
     await waitFor(() => expect(result.current.isFetchingBalances).toBe(false));
 
     expect(source.readContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'withdrawalDelay' }));
-    expect(result.current.pathOptions.some((option) => option.kind === 'gateway')).toBe(false);
+    expect(result.current.pathOptions.some((option) => option.kind === 'gateway' && !option.recoveryOnly)).toBe(false);
+    expect(result.current.pathOptions).toContainEqual(expect.objectContaining({
+      kind: 'gateway', sourceChainId: target.chainId, recoveryOnly: true,
+    }));
     expect(result.current.isCommitted).toBe(true);
     expect(loadResumeState(gatewayKey)).toEqual({ merchantAttestation });
     expect(wallet.signTypedData).not.toHaveBeenCalled();
@@ -113,7 +117,9 @@ describe('D9 Gateway committed recovery independent of readiness', () => {
   it('restores the lock before balances are available, with the query disabled', () => {
     saveResumeStateStrict({ ...key, kind: 'gateway', destChainId: legacyArgs.targetChainId }, { merchantAttestation });
     const { result } = renderHook(() => useCrossChainPayment({ ...legacyArgs, enabled: false }), { wrapper });
-    expect(result.current.pathOptions).toEqual([]);
+    expect(result.current.pathOptions).toEqual([expect.objectContaining({
+      kind: 'gateway', sourceChainId: key.sourceChainId, recoveryOnly: true,
+    })]);
     expect(result.current.isCommitted).toBe(true);
     expect(readAllCrossChainBalances).not.toHaveBeenCalled();
   });
@@ -125,6 +131,72 @@ describe('D9 Gateway committed recovery independent of readiness', () => {
   });
 });
 
+describe('Gateway rollout preserves saved recovery with the flag OFF', () => {
+  const legacyArgs = { ...args, targetChainId: 80002 };
+  const gatewayKey: ResumeSessionKey = { ...key, kind: 'gateway', destChainId: 80002 };
+  const state = { merchantAttestation: { attestation: '0x1234' as Hex, signature: '0x5678' as Hex } };
+
+  beforeEach(async () => {
+    connection.chainId = 80002;
+    const actual = await vi.importActual<typeof import('@/lib/crossChain/execute')>('@/lib/crossChain/execute');
+    vi.mocked(executeGatewayTransfer).mockImplementation(actual.executeGatewayTransfer);
+    wallet.sendTransaction.mockResolvedValue(hash);
+    saveResumeStateStrict(gatewayKey, state);
+  });
+
+  it.each(['empty', 'failed', 'loading'])(
+    'exposes and resumes a saved attestation when balances are %s', async (status) => {
+      if (status === 'loading') vi.mocked(readAllCrossChainBalances).mockImplementation(() => new Promise(() => {}));
+      else if (status === 'failed') vi.mocked(readAllCrossChainBalances).mockRejectedValue(new Error('offline'));
+      else vi.mocked(readAllCrossChainBalances).mockResolvedValue({
+        wallet: [], gateway: { status: 'ok', depositor: account, total: 0n, perDomain: new Map() }, gatewayReadyDomains: new Set(),
+      });
+      const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+      await waitFor(() => expect(result.current.pathOptions.some((o) => o.kind === 'gateway')).toBe(true));
+      await waitFor(() => expect(result.current.isCommitted).toBe(true));
+      const option = result.current.pathOptions.find((o) => o.kind === 'gateway')!;
+      expect(result.current.isOptionResumable(option)).toBe(true);
+      await act(async () => { await result.current.executeOption(option); });
+      expect(executeGatewayTransfer).toHaveBeenCalledWith(expect.objectContaining({ resume: state }));
+      expect(wallet.signTypedData).not.toHaveBeenCalled();
+      expect(requestAttestation).not.toHaveBeenCalled();
+      expect(wallet.sendTransaction).toHaveBeenCalledTimes(1);
+      expect(result.current.result).toMatchObject({ path: 'gateway', mintTxHash: hash });
+      expect(loadResumeState(gatewayKey)).toBeUndefined();
+    },
+  );
+
+  it.each(['loading', 'empty', 'failed'])('shows a usable resume button while balances are %s', async (status) => {
+    if (status === 'loading') vi.mocked(readAllCrossChainBalances).mockImplementation(() => new Promise(() => {}));
+    else if (status === 'failed') vi.mocked(readAllCrossChainBalances).mockRejectedValue(new Error('offline'));
+    else vi.mocked(readAllCrossChainBalances).mockResolvedValue({
+      wallet: [], gateway: { status: 'ok', depositor: account, total: 0n, perDomain: new Map() }, gatewayReadyDomains: new Set(),
+    });
+    renderWithIntl(wrapper({ children: <CrossChainHint {...legacyArgs} token="usdc" enabled
+      tokenAddress={account} displayDecimals={6} directIsGasless={false} /> }));
+    expect(await screen.findByRole('button', { name: '続きから支払う' })).toBeEnabled();
+    expect(screen.queryByText(/残高: 0/)).not.toBeInTheDocument();
+  });
+
+  it('does not reuse recovery for a different invoice amount', async () => {
+    const { result } = renderHook(() => useCrossChainPayment({ ...legacyArgs, requiredAtomic: 2_000_000n }), { wrapper });
+    await waitFor(() => expect(result.current.isFetchingBalances).toBe(false));
+    expect(result.current.pathOptions.some((o) => o.kind === 'gateway')).toBe(false);
+  });
+
+  it('rejects a stale Gateway option if its saved attestation has disappeared', async () => {
+    const { result } = renderHook(() => useCrossChainPayment(legacyArgs), { wrapper });
+    await waitFor(() => expect(result.current.pathOptions.some((o) => o.kind === 'gateway')).toBe(true));
+    const option = result.current.pathOptions.find((o) => o.kind === 'gateway')!;
+    localStorage.clear();
+    await act(async () => {
+      await expect(result.current.executeOption(option)).rejects.toThrow('Gateway cross-chain is disabled');
+    });
+    expect(executeGatewayTransfer).not.toHaveBeenCalled();
+    expect(wallet.signTypedData).not.toHaveBeenCalled();
+  });
+});
+
 describe('source-chain client routing with the wallet connected to the destination', () => {
   const legacyArgs = { ...args, targetChainId: 80002 };
   const legacyKey = { ...key, destChainId: legacyArgs.targetChainId };
@@ -132,6 +204,7 @@ describe('source-chain client routing with the wallet connected to the destinati
   const mintHash = `0x${'cd'.repeat(32)}` as Hex;
 
   beforeEach(async () => {
+    vi.spyOn(env, 'enableGatewayCrossChain', 'get').mockReturnValue(true);
     connection.chainId = legacyArgs.targetChainId;
     const actual = await vi.importActual<typeof import('@/lib/crossChain/execute')>('@/lib/crossChain/execute');
     vi.mocked(executeCctpTransfer).mockImplementation(actual.executeCctpTransfer);

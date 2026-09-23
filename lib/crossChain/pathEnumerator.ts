@@ -23,12 +23,14 @@ import type { MultiChainBalances } from './balance';
 import { domainForChainId, isForwardOnlyDestination } from './config';
 import type { CircleDomain } from './types';
 
-import { isArcCrossChainEnabled } from '../env';
+import { env, isArcCrossChainEnabled } from '../env';
 import type { AcceptedQuote } from './cctp';
 
 export type PathKind = 'direct' | 'gateway' | 'cctp-v2';
 
 export interface PathOption {
+  /** 保存済み attestation の回復専用。sourceBalanceAtomic は判定・表示に使わない。 */
+  recoveryOnly?: boolean;
   /** React key + 一意識別子 (kind + chainId / domain) */
   key: string;
   acceptedQuote?: AcceptedQuote;
@@ -137,7 +139,8 @@ export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
         ? (balances.gateway.perDomain.get(sourceDomain) ?? 0n)
         : 0n;
     // A failed source delay/height probe must not advertise an unsignable Gateway path.
-    if (!forwardOnly && balances.gatewayReadyDomains.has(sourceDomain) && gatewayPreDeposit >= requiredAtomic) {
+    // TODO(X12): 再開時の期限検証と併せ、新規 offer 前に source ごとの maxFee 余力も確保する。
+    if (env.enableGatewayCrossChain && !forwardOnly && balances.gatewayReadyDomains.has(sourceDomain) && gatewayPreDeposit >= requiredAtomic) {
       options.push({
         key: `gateway-${sourceDomain}`,
         kind: 'gateway',
@@ -182,7 +185,7 @@ export function enumeratePathOptions(args: EnumerateArgs): PathOption[] {
   // のケースを補完: target 以外で gateway.perDomain に balance あって wallet
   // entry に出ない / wallet status='error' の domain があれば gateway option
   // を加算。chainId は domain から逆引き、未解決なら skip。
-  if (!forwardOnly && hasTargetDomain && balances.gateway.status === 'ok') {
+  if (env.enableGatewayCrossChain && !forwardOnly && hasTargetDomain && balances.gateway.status === 'ok') {
     for (const [domain, gwBalance] of balances.gateway.perDomain.entries()) {
       if (!balances.gatewayReadyDomains.has(domain)) continue;
       if (gwBalance < requiredAtomic) continue;

@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { env } from '@/lib/env';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { enumeratePathOptions } from '@/lib/crossChain/pathEnumerator';
 import { CROSS_CHAIN_TARGETS } from '@/lib/crossChain/config';
 import type { MultiChainBalances } from '@/lib/crossChain/balance';
+
+// Existing routing cases exercise the explicit Gateway opt-in. Default OFF is covered separately.
+beforeEach(() => vi.spyOn(env, 'enableGatewayCrossChain', 'get').mockReturnValue(true));
+afterEach(() => vi.restoreAllMocks());
 
 const address = '0x3600000000000000000000000000000000000000';
 const source = CROSS_CHAIN_TARGETS[0];

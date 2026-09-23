@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   avalancheFuji,
   baseSepolia,
@@ -48,6 +48,7 @@ import {
 } from '@/lib/crossChain/types';
 import { enumeratePathOptions } from '@/lib/crossChain/pathEnumerator';
 import { selectPath } from '@/lib/crossChain/router';
+import { env } from '@/lib/env';
 
 const ACCOUNT = '0x1234567890123456789012345678901234567890' as const;
 
@@ -175,13 +176,44 @@ describe('lib/crossChain/balance.readMultiChainWalletBalances', () => {
 });
 
 describe('lib/crossChain/balance.readGatewayUnifiedBalance', () => {
+  it.each([
+    ['0.017500', 17_500n],
+    ['5', 5_000_000n],
+    ['0', 0n],
+    ['0.000000', 0n],
+    ['0.000001', 1n],
+    ['9007199254740993.123456', 9_007_199_254_740_993_123_456n],
+  ])('X5: parses human USDC %s exactly', async (balance, atomic) => {
+    const fetch = vi.fn().mockResolvedValue(Response.json({
+      balances: [{ domain: CIRCLE_DOMAIN_BASE, balance }],
+    }));
+    const out = await readGatewayUnifiedBalance(ACCOUNT, undefined, { fetch });
+    expect(out).toEqual({
+      status: 'ok', depositor: ACCOUNT,
+      total: atomic, perDomain: new Map([[CIRCLE_DOMAIN_BASE, atomic]]),
+    });
+  });
+
+  it.each([
+    '-1', '-0', '1e3', '+1', '', ' 1', '1 ', '1\n', '.5', '1.',
+    '1.2.3', '0x10', 'NaN', 'not-a-number', '0.0000001', '1.0000000',
+    5, null,
+  ])('X5: rejects invalid USDC %j without fabricating zero or a partial balance', async (balance) => {
+    const fetch = vi.fn().mockResolvedValue(Response.json({ balances: [
+      { domain: CIRCLE_DOMAIN_POLYGON, balance: '2' },
+      { domain: CIRCLE_DOMAIN_BASE, balance },
+    ] }));
+    const out = await readGatewayUnifiedBalance(ACCOUNT, undefined, { fetch });
+    expect(out).toEqual({ status: 'error', depositor: ACCOUNT, error: expect.any(String) });
+  });
+
   it('POST /v1/balances に sources を送る (default = 全 11 domain、Ethereum 含む)', async () => {
     const mockFetch = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
           balances: [
-            { domain: 6, balance: '1000000' },
-            { domain: 7, balance: '2000000' },
+            { domain: 6, balance: '1.000000' },
+            { domain: 7, balance: '2' },
           ],
         }),
         { status: 200 },
@@ -254,7 +286,7 @@ describe('lib/crossChain/balance.readGatewayUnifiedBalance', () => {
   });
 
   it('巨大 balance (uint256 max 級) を BigInt で扱う', async () => {
-    const huge = '115792089237316195423570985008687907853269984665640564039457584007913129639935';
+    const huge = '115792089237316195423570985008687907853269984665640564039457584007913129.639935';
     const mockFetch = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -268,7 +300,7 @@ describe('lib/crossChain/balance.readGatewayUnifiedBalance', () => {
     });
     expect(out.status).toBe('ok');
     if (out.status === 'ok') {
-      expect(out.total).toBe(BigInt(huge));
+      expect(out.total).toBe(BigInt(huge.replace('.', '')));
     }
   });
 
@@ -287,6 +319,9 @@ describe('lib/crossChain/balance.readGatewayUnifiedBalance', () => {
 });
 
 describe('lib/crossChain/balance.readAllCrossChainBalances', () => {
+  beforeEach(() => vi.spyOn(env, 'enableGatewayCrossChain', 'get').mockReturnValue(true));
+  afterEach(() => vi.restoreAllMocks());
+
   it.each(['delay rejection', 'delay timeout', 'missing Arbitrum L1'])(
     'X13: %s leaves CCTP available when no Gateway source can be probed', async (failure) => {
       vi.useFakeTimers();
@@ -303,7 +338,7 @@ describe('lib/crossChain/balance.readAllCrossChainBalances', () => {
         }
         rpcRequestMocks.set(arbitrumSepolia.id, vi.fn().mockResolvedValue({ number: '0x17d78400' }));
         const pending = readAllCrossChainBalances(ACCOUNT, {
-          fetch: vi.fn(async () => new Response(JSON.stringify({ balances: [{ domain: 3, balance: '10000000' }] }))),
+          fetch: vi.fn(async () => new Response(JSON.stringify({ balances: [{ domain: 3, balance: '10' }] }))),
         });
         await vi.advanceTimersByTimeAsync(3000);
         const out = await pending;
@@ -330,8 +365,8 @@ describe('lib/crossChain/balance.readAllCrossChainBalances', () => {
     }
     const out = await readAllCrossChainBalances(ACCOUNT, {
       fetch: vi.fn(async () => new Response(JSON.stringify({ balances: [
-        { domain: 6, balance: '10000000' },
-        { domain: 3, balance: '5000000' },
+        { domain: 6, balance: '10' },
+        { domain: 3, balance: '5' },
       ] }))),
     });
     const options = enumeratePathOptions({ balances: out, targetChainId: polygonAmoy.id, requiredAtomic: 1_000_000n });
@@ -347,13 +382,41 @@ describe('lib/crossChain/balance.readAllCrossChainBalances', () => {
     expect(selectPath({ balances: out, targetChainId: polygonAmoy.id, requiredAtomic: 6_000_000n }).path).toBe('onramp');
   });
 
+  it.each(['decimal', 'malformed balance', 'malformed JSON', 'network', 'HTTP'])(
+    'X5: keeps wallet-funded direct and CCTP routes when Gateway returns %s', async (scenario) => {
+      for (const chain of ALL_TESTNET_CHAINS) {
+        readContractMocks.set(chain.id, vi.fn().mockResolvedValue(5_000_000n));
+      }
+      const fetch = vi.fn(async () => {
+        if (scenario === 'network') throw new TypeError('Failed to fetch');
+        if (scenario === 'HTTP') return new Response('unavailable', { status: 503 });
+        if (scenario === 'malformed JSON') return new Response('{');
+        return Response.json({ balances: [{
+          domain: CIRCLE_DOMAIN_BASE,
+          balance: scenario === 'decimal' ? '0.017500' : 'invalid',
+        }] });
+      });
+      const out = await readAllCrossChainBalances(ACCOUNT, { fetch });
+      expect(out.wallet.every((w) => w.status === 'ok')).toBe(true);
+      expect(out.gateway.status).toBe(scenario === 'decimal' ? 'ok' : 'error');
+      const options = enumeratePathOptions({
+        targetChainId: polygonAmoy.id, requiredAtomic: 1_000_000n, balances: out,
+      });
+      expect(options).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: 'direct', sourceChainId: polygonAmoy.id }),
+        expect.objectContaining({ kind: 'cctp-v2', sourceChainId: baseSepolia.id }),
+      ]));
+      expect(options.some((o) => o.kind === 'gateway')).toBe(false);
+    },
+  );
+
   it('wallet + gateway を並列で取得', async () => {
     for (const chain of ALL_TESTNET_CHAINS) {
       readContractMocks.set(chain.id, vi.fn().mockResolvedValue(100n));
     }
     const mockFetch = vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({ balances: [{ domain: 6, balance: '777' }] }),
+        JSON.stringify({ balances: [{ domain: 6, balance: '0.000777' }] }),
         { status: 200 },
       ),
     );
@@ -374,7 +437,7 @@ describe('lib/crossChain/balance: edge cases + malformed responses', () => {
       new Response(
         JSON.stringify({
           balances: [
-            { domain: 6, balance: '100', extra: 'ignored' },
+            { domain: 6, balance: '0.000100', extra: 'ignored' },
           ],
           extraTopLevel: 'whatever',
         }),
@@ -388,25 +451,6 @@ describe('lib/crossChain/balance: edge cases + malformed responses', () => {
     if (out.status === 'ok') {
       expect(out.total).toBe(100n);
     }
-  });
-
-  it('Gateway response の balance が非数値 string → BigInt() で throw → status=error にならず例外', async () => {
-    const mockFetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          balances: [{ domain: 6, balance: 'not-a-number' }],
-        }),
-        { status: 200 },
-      ),
-    );
-    // BigInt('not-a-number') は SyntaxError throw する設計上の制約。
-    // Circle API が無効値を返すケースは contract 違反 (production では発生しないはず)
-    // のため、明示的 SyntaxError を上に投げる挙動を確認 (silent な 0 fallback ではない)。
-    await expect(
-      readGatewayUnifiedBalance(ACCOUNT, undefined, {
-        fetch: mockFetch as unknown as typeof fetch,
-      }),
-    ).rejects.toThrow(/Cannot convert/);
   });
 
   it('Gateway response が空 array → status=ok, total=0n, perDomain.size=0', async () => {
@@ -460,8 +504,8 @@ describe('lib/crossChain/balance: edge cases + malformed responses', () => {
       new Response(
         JSON.stringify({
           balances: [
-            { domain: 6, balance: uint256Max },
-            { domain: 7, balance: '1' },
+            { domain: 6, balance: `${uint256Max.slice(0, -6)}.${uint256Max.slice(-6)}` },
+            { domain: 7, balance: '0.000001' },
           ],
         }),
         { status: 200 },

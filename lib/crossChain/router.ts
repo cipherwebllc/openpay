@@ -11,6 +11,7 @@ import type {
   WalletUsdcBalance,
 } from './balance';
 import { domainForChainId, isForwardOnlyDestination } from './config';
+import { env } from '../env';
 import type { CircleDomain, CrossChainTarget } from './types';
 
 export type PathDecision =
@@ -94,7 +95,8 @@ export function selectPath(args: SelectPathArgs): PathDecision {
 
   // 2. Gateway path
   const destDomain = domainForChainId(targetChainId);
-  if (destDomain !== undefined && balances.gateway.status === 'ok') {
+  // TODO(X12): 新規 Gateway を点灯する前に単一 source の maxFee headroom も検証する。
+  if (env.enableGatewayCrossChain && destDomain !== undefined && balances.gateway.status === 'ok') {
     // Unreadable Gateway sources cannot fund an offered path; their wallet/CCTP
     // balances remain eligible below, and the original balance report is retained.
     const perDomain = new Map(Array.from(balances.gateway.perDomain)
@@ -184,4 +186,3 @@ function pickBestCrossChainWalletBalance(
   eligible.sort((a, b) => (b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : 0));
   return eligible[0];
 }
-

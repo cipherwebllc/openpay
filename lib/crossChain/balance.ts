@@ -10,7 +10,7 @@
 // transportForChain に集約 — mainnet/sepolia は公開 fallback 列で viem default
 // (eth.merkle.io) 依存を回避し、wagmi.ts と同一の RPC ロジックを共有する。
 
-import { createPublicClient, erc20Abi, type Address } from 'viem';
+import { createPublicClient, erc20Abi, parseUnits, type Address } from 'viem';
 import type { Chain } from 'viem';
 import {
   arbitrum,
@@ -270,31 +270,47 @@ export async function readGatewayUnifiedBalance(
     sources,
   };
 
-  const res = await fetchImpl(`${baseUrl}/v1/balances`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(requestBody),
-  });
+  // Gateway の通信・JSON・残高形式の障害を wallet-funded 経路へ波及させない。
+  // unavailable は status:'error' のまま返し、残高ゼロや部分的な合計を捏造しない。
+  try {
+    const res = await fetchImpl(`${baseUrl}/v1/balances`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
 
-  if (!res.ok) {
-    const text = await res.text();
+    if (!res.ok) {
+      const text = await res.text();
+      return {
+        status: 'error',
+        depositor,
+        error: `Circle attestation API /v1/balances HTTP ${res.status}: ${text.slice(0, 500)}`,
+      };
+    }
+
+    const json = (await res.json()) as BalanceQueryResponse;
+    const perDomain = new Map<CircleDomain, bigint>();
+    let total = 0n;
+    for (const entry of json.balances) {
+      // /v1/balances は human USDC (smoke script と同じ単位)。Number / 丸めは使わず、
+      // parseUnits の過剰精度の丸めが経路の残高判定に波及しないよう先に検証する。
+      const balance = entry.balance;
+      if (typeof balance !== 'string' ||
+          !/^\d+(?:\.\d{1,6})?$/.test(balance)) {
+        throw new Error('Invalid Gateway USDC balance: expected an unsigned decimal with at most 6 decimal places');
+      }
+      const v = parseUnits(balance, 6);
+      perDomain.set(entry.domain, v);
+      total += v;
+    }
+    return { status: 'ok', depositor, perDomain, total };
+  } catch (err) {
     return {
       status: 'error',
       depositor,
-      error: `Circle attestation API /v1/balances HTTP ${res.status}: ${text.slice(0, 500)}`,
+      error: err instanceof Error ? err.message : String(err),
     };
   }
-
-  const json = (await res.json()) as BalanceQueryResponse;
-  // balance は raw atomic string (uint256 max まで取り得る → BigInt)
-  const perDomain = new Map<CircleDomain, bigint>();
-  let total = 0n;
-  for (const entry of json.balances) {
-    const v = BigInt(entry.balance);
-    perDomain.set(entry.domain, v);
-    total += v;
-  }
-  return { status: 'ok', depositor, perDomain, total };
 }
 
 // wallet ERC20 + Gateway unified を 1 callsite で並列取得 (CrossChainHint /

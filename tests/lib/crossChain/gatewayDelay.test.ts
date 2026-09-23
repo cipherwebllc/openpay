@@ -6,6 +6,7 @@ import { executeGatewayTransfer } from '@/lib/crossChain/execute';
 import { GATEWAY_WALLET_ADDRESS } from '@/lib/crossChain/config';
 import { __resetContractDeployedCacheForTest } from '@/lib/crossChain/deploycheck';
 import { CIRCLE_DOMAIN_BASE, CIRCLE_DOMAIN_POLYGON } from '@/lib/crossChain/types';
+import { env } from '@/lib/env';
 
 const account = '0x1111111111111111111111111111111111111111' as const;
 const recipient = '0x2222222222222222222222222222222222222222' as const;
@@ -52,8 +53,11 @@ function fixture(sourceChainId = 84532) {
   } };
 }
 
-beforeEach(() => { __resetContractDeployedCacheForTest(); });
-afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); });
+beforeEach(() => {
+  vi.spyOn(env, 'enableGatewayCrossChain', 'get').mockReturnValue(true);
+  __resetContractDeployedCacheForTest();
+});
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.resetModules(); });
 
 describe('X13 Gateway burn-intent expiry', () => {
   it.each([302_400n, 403_200n, 50_400n, 545_000n, 7n])('uses live withdrawalDelay=%s plus a rounded-up 10%% margin', async (delay) => {

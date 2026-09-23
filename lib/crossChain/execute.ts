@@ -7,11 +7,11 @@
 // 「利用料は店チェーンに集約」会計に揃える。feeAmount=0 or feeReceiver 未指定時は
 // fee ブリッジを skip し従来と完全同一の挙動になる (後方互換)。
 //
-// 中断再開 (resume): CCTP/Gateway の attestation は永久に有効 (一度 burn すれば
-// 後でいつでも mint 可能) なので、完了済みステップを resume state で skip して
+// 中断再開 (resume): 完了済みステップを resume state で skip して
 // 「送り出しの二重実行 (= 二重支払い)」を防ぎつつ残りの step だけ再実行する。onStep で
 // 各 step 完了を逐次 report し、caller (hook) が localStorage 等へ永続化する。順序は
 // merchant 先 → fee 後 (放棄時も merchant への入金が先に確定し顧客が不利にならない)。
+// Gateway attestation には期限がある。期限切れ再利用 (X12) の修正までは新規経路は既定 OFF。
 
 import {
   decodeEventLog,
@@ -24,7 +24,7 @@ import {
   type PublicClient,
   type WalletClient,
 } from 'viem';
-import { isArcCrossChainEnabled } from '../env';
+import { env, isArcCrossChainEnabled } from '../env';
 import { chainObjectForId } from '../chains';
 import { logger } from '../logger';
 import {
@@ -327,9 +327,18 @@ export interface ExecuteGatewayTransferResult {
   destChainId: number;
 }
 
+export function assertGatewayTransferEnabled(resume?: GatewayResumeState): void {
+  // X5 の残高修正が X12 未修正の新規送金を開く波及を断つ。保存済み attestation の
+  // 回復は OFF 後も許可し、既に途中まで進んだ買い手を取り残さない。
+  if (!env.enableGatewayCrossChain && !resume?.merchantAttestation) {
+    throw new Error('Gateway cross-chain is disabled');
+  }
+}
+
 export async function executeGatewayTransfer(
   args: ExecuteGatewayTransferArgs,
 ): Promise<ExecuteGatewayTransferResult> {
+  assertGatewayTransferEnabled(args.resume);
   const onProgress = args.onProgress ?? (() => {});
   const onStep = args.onStep ?? (() => {});
   const feeReceiver = args.feeReceiver;

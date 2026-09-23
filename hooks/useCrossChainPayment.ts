@@ -15,6 +15,7 @@ import {
   CrossChainBurnUnresolvedError,
   CrossChainQuoteExpiredError,
   assertForwardQuoteBinding,
+  assertGatewayTransferEnabled,
   executeCctpTransfer,
   executeGatewayTransfer,
   type CctpResumeState,
@@ -234,17 +235,6 @@ export function useCrossChainPayment(
     });
   }, [balancesQuery.data, args.requiredAtomic, args.targetChainId]);
 
-  const pathOptions = useMemo<PathOption[]>(() => {
-    if (!balancesQuery.data) return [];
-    if (args.requiredAtomic <= 0n) return [];
-    return enumeratePathOptions({
-      targetChainId: args.targetChainId,
-      requiredAtomic: args.requiredAtomic,
-      balances: balancesQuery.data,
-      forwardQuotes,
-    });
-  }, [balancesQuery.data, args.requiredAtomic, args.targetChainId, forwardQuotes]);
-
   // 中断再開 state の session key。runCore の内部で組む key と同一定義 (account /
   // kind / chain / recipient / 金額)。mount 時の committed 復元 (D9)・hash 貼付け採用 (D4)・
   // isOptionResumable が同じ key を参照するために切り出してある。
@@ -271,6 +261,34 @@ export function useCrossChainPayment(
     },
     [account, args.requiredAtomic, args.targetChainId, args.recipient],
   );
+
+  const pathOptions = useMemo<PathOption[]>(() => {
+    if (args.requiredAtomic <= 0n) return [];
+    const options = balancesQuery.data ? enumeratePathOptions({
+      targetChainId: args.targetChainId,
+      requiredAtomic: args.requiredAtomic,
+      balances: balancesQuery.data,
+      forwardQuotes,
+    }) : [];
+    if (forwardOnly || !account || result) return options;
+
+    // 新規 Gateway の flag / 残高 gate が保存済み attestation の回復を隠す波及を断つ。
+    // invoice に束縛された key で全 source を走査し、残高 fetch 完了にも依存しない。
+    const recoveryOptions: PathOption[] = [];
+    for (const target of BUYER_SOURCE_TARGETS) {
+      const key = sessionKeyFor('gateway', target.chainId);
+      if (!key || !loadResumeState<GatewayResumeState>(key)?.merchantAttestation) continue;
+      recoveryOptions.push({
+        key: `gateway-${target.domain}`, kind: 'gateway', recoveryOnly: true,
+        sourceChainId: target.chainId, sourceDomain: target.domain,
+        // 回復に新たな源残高は要求しない。この placeholder は chooser に表示しない。
+        sourceBalanceAtomic: 0n, serviceFeeAtomic: estimateGatewayMaxFee(args.requiredAtomic),
+        estimatedGasUnits: 150_000n, gasOnChainId: args.targetChainId, etaSeconds: 5,
+      });
+    }
+    return [...recoveryOptions, ...options.filter((o) => !recoveryOptions.some((r) => r.key === o.key))];
+  }, [balancesQuery.data, args.requiredAtomic, args.targetChainId, forwardQuotes,
+    forwardOnly, account, result, sessionKeyFor]);
 
   const scanRecovery = useCallback(() => {
     if (!forwardOnly || !account) { setRecovery(undefined); setScannedScope(recoveryScope); return; }
@@ -621,6 +639,10 @@ export function useCrossChainPayment(
         if (Date.now() >= option.acceptedQuote.expiresAt) throw new CrossChainQuoteExpiredError();
 
       }
+      if (option.kind === 'gateway') {
+        const key = sessionKeyFor('gateway', option.sourceChainId);
+        assertGatewayTransferEnabled(key ? loadResumeState<GatewayResumeState>(key) : undefined);
+      }
       setError(undefined);
       setResult(undefined);
       setProgress(undefined);
@@ -656,7 +678,7 @@ export function useCrossChainPayment(
       setIsExecuting(false);
       return executeResult;
     },
-    [args.targetChainId, args.recipient, args.requiredAtomic, runCore, forwardOnly, pendingRecovery, enabled, pathOptions, scanRecovery],
+    [args.targetChainId, args.recipient, args.requiredAtomic, runCore, forwardOnly, pendingRecovery, enabled, pathOptions, scanRecovery, sessionKeyFor],
   );
 
   // burn 状態未確定の throw は UI 専用パネルに回す (Iris timeout 等の一般エラーとは別扱い)。
