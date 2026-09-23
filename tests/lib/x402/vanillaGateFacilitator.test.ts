@@ -350,6 +350,71 @@ describe('vanillaGate facilitator 切替', () => {
     expect(body.error).toBe('invalid_payload');
   });
 
+  it.each([
+    { path: 'verify', status: 400, body: { isValid: true } },
+    { path: 'settle', status: 409, body: { success: true, transaction: null } },
+    { path: 'verify', status: 409, body: { isValid: true, success: false } },
+    { path: 'settle', status: 409, body: { success: true, isValid: false } },
+    { path: 'verify', status: 302, body: { isValid: true } },
+    { path: 'settle', status: 302, body: { success: true } },
+    { path: 'verify', status: 500, body: { isValid: true } },
+    { path: 'settle', status: 500, body: { success: true } },
+    { path: 'verify', status: 400, body: { isValid: 'true' } },
+    { path: 'settle', status: 409, body: { success: 'true' } },
+  ])('B14: CDP $path HTTP $status + $body is unavailable without a successful payment', async ({ path, status, body }) => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    if (path === 'settle') {
+      fetchMock.mockResolvedValueOnce(Response.json({ isValid: true, payer: '0xabc' }));
+    }
+    fetchMock.mockResolvedValueOnce(Response.json(body, { status }));
+    const content = vi.fn(() => NextResponse.json({ secret: 'paid content' }));
+    const res = await handleVanillaPaidGet(new Request(RESOURCE.resourceUrl, {
+      headers: { 'x-payment': v1PaymentHeader() },
+    }), RESOURCE, content);
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: 'payment_facility_unavailable' });
+    expect(res.headers.get('Cache-Control')).toBe('no-store');
+    expect(res.headers.has('PAYMENT-RESPONSE')).toBe(false);
+    expect(res.headers.has('X-PAYMENT-RESPONSE')).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(path === 'verify' ? 1 : 2);
+    expect(content).toHaveBeenCalledTimes(path === 'verify' ? 0 : 1);
+    expect(ledger.record).not.toHaveBeenCalled();
+  });
+
+  it.each([200, 201])('CDP HTTP %s positive verdicts still unlock and record settlement', async (status) => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    fetchMock.mockResolvedValueOnce(Response.json({ isValid: true }, { status }));
+    fetchMock.mockResolvedValueOnce(Response.json({ success: true, transaction: '0xtx' }, { status }));
+    const res = await handleVanillaPaidGet(new Request(RESOURCE.resourceUrl, {
+      headers: { 'x-payment': v1PaymentHeader() },
+    }), RESOURCE, () => NextResponse.json({ ok: true }));
+    expect(res.status).toBe(200);
+    expect(res.headers.has('PAYMENT-RESPONSE')).toBe(true);
+    expect(ledger.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('CDP settle 409 + success:false retains the existing 402 rejection', async () => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+    fetchMock.mockResolvedValueOnce(Response.json({ isValid: true }));
+    fetchMock.mockResolvedValueOnce(Response.json({ success: false, errorReason: 'insufficient_balance' }, { status: 409 }));
+    const res = await handleVanillaPaidGet(new Request(RESOURCE.resourceUrl, {
+      headers: { 'x-payment': v1PaymentHeader() },
+    }), RESOURCE, () => NextResponse.json({ ok: true }));
+    expect(res.status).toBe(402);
+    expect(await res.json()).toMatchObject({ error: 'insufficient_balance' });
+    expect(ledger.record).not.toHaveBeenCalled();
+  });
+
   it('cdp: verify 400 でも判定 body でなければ従来どおり 503', async () => {
     configHold.vanillaFacilitator = {
       url: 'https://api.cdp.coinbase.com/platform/v2/x402',

@@ -158,6 +158,10 @@ function buildAcceptsCore(args: {
 }
 
 function buildAccepts(resource: VanillaPaidResource): PreparedAccepts {
+  // 無効設定の null 受取先を支払い要件へ載せる波及を断つ (呼出側で既存の 503 に変換)。
+  if (x402Config.payTo === null) {
+    throw new Error('Payment service is unavailable.');
+  }
   const core = buildAcceptsCore({
     resourceUrl: resource.resourceUrl,
     description: resource.description,
@@ -452,14 +456,18 @@ export async function postFacilitatorWithStatus(
   if (res.ok && isRecord(parsed)) return { status: res.status, body: parsed };
   // CDP は invalid な支払いを 200 でなく 4xx + 正規の判定 body で返す (2026-08-20 本番実測:
   // 400 {isValid:false, invalidReason:'invalid_payload', payer:...})。これは facilitator
-  // 障害ではなく「判定が出た」状態なので結果として呼び出し側へ返す — isValid/success の
-  // 真偽判定は呼び出し側の fail-closed (true 以外は解錠・settle しない) が担う。
+  // 障害ではなく「否定判定が出た」状態なので結果として呼び出し側へ返す。
+  // 非 2xx の肯定 body (相反する判定の混在を含む) が解錠・台帳記録へ波及するのを断つ。
+  // 肯定判定を運べるのは上の 2xx 経路だけ。
   // 5xx はこれまでどおり障害として throw → 503 (課金は発生しない)。
   if (
     cdpAuth &&
+    res.status >= 400 &&
     res.status < 500 &&
     isRecord(parsed) &&
-    ('isValid' in parsed || 'success' in parsed)
+    (path === '/verify' ? parsed.isValid === false : parsed.success === false) &&
+    parsed.isValid !== true &&
+    parsed.success !== true
   ) {
     return { status: res.status, body: parsed };
   }
@@ -538,6 +546,10 @@ async function handleVanillaPaidGetInner(
   resource: VanillaPaidResource,
   content: (ctx: { payer?: string }) => Promise<NextResponse> | NextResponse,
 ): Promise<NextResponse> {
+  // 無効な本番 network が testMode 経由でコンテンツ解錠へ波及するのを断つ。
+  if (x402Config.network === null) {
+    return facilitatorUnavailable('Payment service is unavailable.');
+  }
   if (x402Config.testMode) {
     return content({});
   }

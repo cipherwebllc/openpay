@@ -6,9 +6,11 @@
 //   - NODE_ENV=production + X402_TEST_MODE=true → throw (本番で課金 bypass は禁止)
 //   - mainnet (base / polygon) + X402_PAY_TO_ADDRESS 欠落 → throw (burn address 防止)
 //   - production + facilitator URL が https でない → throw
+//   - mainnet / Vercel production + 未知 X402_NETWORK → log + x402 のみ利用不可 (import は成功)
 
 import { getAddress, isAddress, parseUnits, type Address } from 'viem';
 import type { RouteConfig } from 'x402-next';
+import { logger } from '@/lib/logger';
 import { JPYC_V3_ASSET, type X402Network } from './types';
 
 const FALLBACK_TESTNET_PAY_TO: Address =
@@ -20,7 +22,7 @@ function nonEmpty(raw: string | undefined): string | undefined {
   return raw && raw.length > 0 ? raw : undefined;
 }
 
-function parseNetwork(raw: string | undefined): X402Network {
+function parseNetwork(raw: string | undefined): X402Network | null {
   if (
     raw === 'base' ||
     raw === 'base-sepolia' ||
@@ -28,6 +30,18 @@ function parseNetwork(raw: string | undefined): X402Network {
     raw === 'polygon-amoy'
   ) {
     return raw;
+  }
+  if (
+    raw !== undefined &&
+    (process.env.NEXT_PUBLIC_NETWORK_ENV === 'mainnet' || process.env.VERCEL_ENV === 'production')
+  ) {
+    // typo を testnet 課金へ流す波及を断つ。module-load throw は build / 無関係な route を
+    // 巻き込むため、利用不可を保持し、有料 gate だけを既存の 503 経路で閉じる。
+    logger.error('x402.config.invalid_network', {
+      network: raw,
+      message: 'Unknown X402_NETWORK; x402 is disabled. Expected base, base-sepolia, polygon, or polygon-amoy.',
+    });
+    return null;
   }
   return 'base-sepolia';
 }
@@ -203,23 +217,30 @@ if (isProd && testMode) {
 }
 
 const network = parseNetwork(nonEmpty(process.env.X402_NETWORK));
-const payTo = parsePayTo(nonEmpty(process.env.X402_PAY_TO_ADDRESS), network);
+const payTo = network === null
+  ? null
+  : parsePayTo(nonEmpty(process.env.X402_PAY_TO_ADDRESS), network);
 const facilitatorUrl = parseFacilitatorUrl(
   process.env.X402_FACILITATOR_URL,
   isProd,
 );
-const defaultPrice = buildDefaultPrice(network, process.env.X402_PRICE);
+const defaultPrice = network === null
+  ? null
+  : buildDefaultPrice(network, process.env.X402_PRICE);
 const vanillaFacilitator = parseVanillaFacilitator({
   mode: process.env.X402_VANILLA_FACILITATOR,
   fallbackUrl: facilitatorUrl,
   cdpKeyId: process.env.CDP_API_KEY_ID,
   cdpKeySecret: process.env.CDP_API_KEY_SECRET,
 });
-const arcGateway = parseArcGateway({
-  flag: process.env.ENABLE_X402_ARC_GATEWAY,
-  network,
-  payTo,
-});
+// 無効な Base 設定から Arc testnet の accept を配る波及も断つ。
+const arcGateway: ArcGatewayConfig = network === null || payTo === null
+  ? { enabled: false }
+  : parseArcGateway({
+      flag: process.env.ENABLE_X402_ARC_GATEWAY,
+      network,
+      payTo,
+    });
 
 export const x402Config = {
   network,

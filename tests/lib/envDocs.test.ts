@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
 const root = process.cwd();
 
 // プラットフォームが与える変数 (OpenPay の設定ではない) は文書化対象外。
-const PLATFORM_PROVIDED = new Set(['NODE_ENV', 'VERCEL']);
+const PLATFORM_PROVIDED = new Set(['NODE_ENV', 'VERCEL', 'VERCEL_ENV']);
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];

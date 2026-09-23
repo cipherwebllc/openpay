@@ -358,6 +358,22 @@ describe('dualRailRelay verify/settle', () => {
     expect(ledger.record).not.toHaveBeenCalled();
   });
 
+  it('B14: CDP settle 409 + success:true returns 503 without forwarding success or recording settlement', async () => {
+    facilitatorReplies(409, { success: true, transaction: '0xtx', payer: '0xabc' });
+    const res = await handleDualRailRelay(
+      post('settle', { resourceId: 'res-1', paymentHeader: v1Header() }),
+      'settle',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('https://cdp.example/settle');
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'facilitator_unavailable' });
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(res.headers.has('PAYMENT-RESPONSE')).toBe(false);
+    expect(res.headers.has('X-PAYMENT-RESPONSE')).toBe(false);
+    expect(ledger.record).not.toHaveBeenCalled();
+  });
+
   it('facilitator 5xx → 503 (判定なしを成功にも失敗にも見せない)', async () => {
     facilitatorReplies(500, { error: 'boom' });
     const res = await handleDualRailRelay(
