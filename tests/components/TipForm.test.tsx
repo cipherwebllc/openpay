@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { arbitrumSepolia, baseSepolia, polygonAmoy } from 'viem/chains';
 import type { Address } from 'viem';
 
@@ -11,6 +12,8 @@ vi.mock('wagmi', () => ({
   useAccount: vi.fn(),
   useReadContract: vi.fn(),
   useSwitchChain: vi.fn(),
+  useWalletClient: vi.fn(),
+  usePublicClient: vi.fn(),
   useConnect: vi.fn(() => ({
     connectors: [],
     connect: vi.fn(),
@@ -84,6 +87,9 @@ vi.mock('@/components/ConnectButton', async () => ({
 vi.mock('@/hooks/useJpycEip3009Payment', () => ({
   useJpycEip3009Payment: vi.fn(),
 }));
+vi.mock('@/lib/relay/relayStoredReceipt', () => ({
+  waitForStoredRelayReceipt: vi.fn(),
+}));
 vi.mock('@/lib/jpycGaslessProvider', async () => {
   const actual = await vi.importActual<
     typeof import('@/lib/jpycGaslessProvider')
@@ -101,7 +107,7 @@ vi.mock('@/lib/relay/forwarderConfig', async () => {
   };
 });
 
-import { useAccount, useReadContract, useSwitchChain } from 'wagmi';
+import { useAccount, useReadContract, useSwitchChain, useWalletClient, usePublicClient } from 'wagmi';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useGasQuoteUsdc } from '@/hooks/useGasQuoteUsdc';
@@ -123,6 +129,8 @@ import {
   RelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
 import { mockHook } from '../_helpers/wagmiMock';
+import { waitForStoredRelayReceipt } from '@/lib/relay/relayStoredReceipt';
+import { RELAY_INTENT_STORAGE_KEY } from '@/lib/paymentIntentStorage';
 
 const CREATOR: Address = '0x2222222222222222222222222222222222222222';
 const FAN: Address = '0x9999999999999999999999999999999999999999';
@@ -194,6 +202,7 @@ function setRelay(
     | 'pending'
     | 'auto'
     | 'success'
+    | 'reverted'
     | 'error'
     | 'pendingResult'
     | 'response-unknown'
@@ -219,8 +228,8 @@ function setRelay(
     mutate: relayMutate,
     isPending: state === 'pending' || state === 'auto',
     data:
-      state === 'success'
-        ? { txHash: `0x${'c'.repeat(64)}`, success: true }
+      state === 'success' || state === 'reverted'
+        ? { txHash: `0x${'c'.repeat(64)}`, success: state === 'success' }
         : state === 'pendingResult'
           ? { txHash: `0x${'d'.repeat(64)}`, success: false, pending: true }
           : undefined,
@@ -2137,6 +2146,126 @@ describe('Arc standard tip attribution', () => {
     fireEvent.click(button);
   }
   const webhookCalls = () => vi.mocked(fetch).mock.calls.filter(([url]) => url === arcParams.webhook);
+
+  describe.each([
+    { locale: 'ja' as const, send: '0.5 USDC を送る', checking: '送信結果を確認中', sending: '送信中…' },
+    { locale: 'en' as const, send: 'Send 0.5 USDC', checking: 'Checking submission status', sending: 'Sending…' },
+  ])('F8 review: $locale Arc button wording', ({ locale, send, checking, sending }) => {
+    it.each(['auto', 'response-unknown'] as const)('describes %s relay recovery without claiming an Arc submission', async (state) => {
+      const view = render(<TipForm params={arcParams} />, { locale });
+      await waitFor(() => expect(screen.getByRole('button', { name: send })).toBeEnabled());
+      setRelay(state, { hasActiveIntent: true });
+      view.rerender(<TipForm params={arcParams} />);
+
+      const button = screen.getByRole('button', { name: checking });
+      expect(button).toBeDisabled();
+      expect(screen.queryByRole('button', { name: sending })).not.toBeInTheDocument();
+      fireEvent.click(button);
+      expect(walletWrite).not.toHaveBeenCalled();
+      expect(relayMutate).not.toHaveBeenCalled();
+    });
+  });
+
+  it.each([
+    ['storage restoring', 'idle', { isRestoring: true }],
+    ['active intent', 'idle', { hasActiveIntent: true }],
+    ['auto recovery', 'auto', { hasActiveIntent: true }],
+    ['unknown response', 'response-unknown', {}],
+    ['broadcast pending', 'pendingResult', { hasActiveIntent: true }],
+  ] as const)('F8: %s blocks Arc direct and cross-chain payments', async (_name, state, options) => {
+    const view = render(<TipForm params={arcParams} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /0.5 USDC.*送る/ })).toBeEnabled());
+    setRelay(state, options);
+    view.rerender(<TipForm params={arcParams} />);
+
+    expect(crossChainHintSpy.mock.lastCall?.[0].executionDisabled).toBe(true);
+    const send = screen.getByRole('button', { name: /送る|送信中|送信結果を確認中/ });
+    expect(send).toBeDisabled();
+    fireEvent.click(send);
+    expect(walletWrite).not.toHaveBeenCalled();
+    expect(mutate).not.toHaveBeenCalled();
+    expect(relayMutate).not.toHaveBeenCalled();
+    if (state === 'auto' || state === 'response-unknown') {
+      expect(await screen.findByText('送信結果を確認中', { selector: 'p' })).toBeInTheDocument();
+    }
+  });
+
+  it.each(['settled', 'reverted', 'expired-unused'] as const)('F8: existing relay recovery releases Arc after %s without attributing the old tip', async (outcome) => {
+    const view = render(<TipForm params={arcParams} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /0.5 USDC.*送る/ })).toBeEnabled());
+    setRelay('response-unknown', { hasActiveIntent: true });
+    view.rerender(<TipForm params={arcParams} />);
+    expect(crossChainHintSpy.mock.lastCall?.[0].executionDisabled).toBe(true);
+    expect(screen.getByRole('button', { name: '送信結果を確認中' })).toBeDisabled();
+    fireEvent.click(await screen.findByRole('button', { name: /再確認/ }));
+    expect(relayRetrySamePayload).toHaveBeenCalledOnce();
+    expect(relayMutate).not.toHaveBeenCalled();
+
+    // These are the existing hook's terminal states: settled clears the active
+    // intent while retaining its result; expired + confirmed unused clears both.
+    setRelay(outcome === 'settled' ? 'success' : outcome === 'reverted' ? 'reverted' : 'idle');
+    view.rerender(<TipForm params={arcParams} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: /0.5 USDC.*送る/ })).toBeEnabled());
+    expect(crossChainHintSpy.mock.lastCall?.[0].executionDisabled).toBe(false);
+    expect(screen.queryByText('送信結果を確認中')).not.toBeInTheDocument();
+    expect(webhookCalls()).toHaveLength(0);
+    expect(loadPayerReceipts()).toHaveLength(0);
+    expect(walletWrite).not.toHaveBeenCalled();
+    await submit();
+    expect(walletWrite).toHaveBeenCalledOnce();
+  });
+
+  it.each(['settled', 'expired-unused'] as const)('F8: real same-tab relay recovery unlocks Arc after %s', async (outcome) => {
+    const realRelay = await vi.importActual<typeof import('@/hooks/useJpycEip3009Payment')>('@/hooks/useJpycEip3009Payment');
+    vi.mocked(useJpycEip3009Payment).mockImplementation(realRelay.useJpycEip3009Payment);
+    const signTypedData = vi.fn();
+    mockHook(useWalletClient, { data: { signTypedData } } as never);
+    mockHook(usePublicClient, { waitForTransactionReceipt: vi.fn() } as never);
+    vi.mocked(waitForStoredRelayReceipt).mockResolvedValue({ status: 'success' } as never);
+    window.sessionStorage.setItem(RELAY_INTENT_STORAGE_KEY, JSON.stringify({
+      version: 1, chainId: polygonAmoy.id, from: FAN, merchant: CREATOR,
+      merchantValue: '100000000000000000000', feeValue: '0',
+      nonce: `0x${'7'.repeat(64)}`, routeKind: 'free', issuedAt: Date.now(),
+      validBefore: String(Math.floor(Date.now() / 1000) + 10),
+    }));
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ ok: true, state: 'indeterminate' })));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    vi.useFakeTimers();
+    const view = render(<QueryClientProvider client={queryClient}><TipForm params={arcParams} /></QueryClientProvider>);
+    try {
+      // Start the recovery clock only after lazy storage/engine/recovery imports
+      // settle, so an isolated run has the same deadline as a warm full suite.
+      await act(async () => { await vi.dynamicImportSettled(); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(90_001); });
+      expect(screen.getByText('送信結果を確認中', { selector: 'p' })).toBeInTheDocument();
+      expect(crossChainHintSpy.mock.lastCall?.[0].executionDisabled).toBe(true);
+      expect(screen.getByRole('button', { name: '送信結果を確認中' })).toBeDisabled();
+      expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).not.toBeNull();
+
+      vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify(
+        outcome === 'settled' ? { ok: true, state: 'settled', txHash: tx } : { ok: true, state: 'unused' },
+      )));
+      fireEvent.click(screen.getByRole('button', { name: /同じ送信内容を再確認/ }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(9_001); });
+      expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+      expect(screen.queryByText('送信結果を確認中')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /0.5 USDC.*送る/ })).toBeEnabled();
+      expect(crossChainHintSpy.mock.lastCall?.[0].executionDisabled).toBe(false);
+      if (outcome === 'settled') {
+        expect(waitForStoredRelayReceipt).toHaveBeenCalledWith(polygonAmoy.id, tx, expect.any(Number));
+      }
+      expect(signTypedData).not.toHaveBeenCalled();
+      expect(walletWrite).not.toHaveBeenCalled();
+      expect(webhookCalls()).toHaveLength(0);
+      expect(loadPayerReceipts()).toHaveLength(0);
+      expect(vi.mocked(fetch).mock.calls.every(([url]) => url === '/api/relay/jpyc/status')).toBe(true);
+    } finally {
+      view.unmount();
+      queryClient.clear();
+      vi.useRealTimers();
+    }
+  });
 
   it('success sends the principal once, records standard receipt and notifies exactly once with snapshotted payer', async () => {
     const view = render(<TipForm params={arcParams} />);
