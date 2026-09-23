@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // 本物の Lua (wasmoon) を使う test だけを、プロセスを作り直しながら最大 MAX_ATTEMPTS 回まで実行する。
 //
-// 背景: scripts/lib/luaRealTests.mjs 参照。wasmoon の WASM heap が壊れた後は同一プロセス内の
-// vitest --retry では回復しないため、失敗したら vitest プロセスごと起動し直す。
+// 背景: scripts/lib/luaRealTests.mjs 参照。旧ハーネスの共有 Lua stack への返り値蓄積による
+// WASM heap 破損は EVAL 単位の隔離で修正済み。既存のプロセス再起動は維持し、
+// 2 回目以降を要したら warning annotation で表面化する。
 // 判定は run-tests.mjs と同じく JSON reporter (numFailedTests / 報告ファイル一覧) を信頼ソースにする:
 // 1 回でも「全ファイルが報告され・failed=0・total>0」になれば成功、MAX_ATTEMPTS 回すべて
 // 失敗したら exit 1 (= 本当に壊れているか、flaky が悪化している)。
@@ -18,9 +19,11 @@ import { LUA_REAL_TEST_FILES } from './lib/luaRealTests.mjs';
 import { checkTestFileCoverage, normalizeReportedFiles } from './lib/testFileFence.mjs';
 
 const MAX_ATTEMPTS = Number(process.env.LUA_TESTS_MAX_ATTEMPTS ?? 3);
-// 1 attempt の上限。wasmoon の破損は「クラッシュ」だけでなく「worker が応答しなくなる」形でも出る
+// 1 attempt の上限。旧ハーネスの doString 返り値蓄積による Lua stack の範囲外書き込みは、
+// WASM heap を壊し、クラッシュだけでなく worker の無応答も起こした
 // (2026-09-12 PR #482: 2 file pass 後に vitest worker が 74 分無応答・プロセスは生存)。
-// 正常なら 11 file で 1〜2 分なので、超えたらプロセスグループごと SIGKILL して失敗 attempt に数える。
+// EVAL 単位の隔離で修正済みだが、再発時の無応答が CI 全体に波及しないよう、
+// 上限を超えたらプロセスグループごと SIGKILL して失敗 attempt に数える。
 const ATTEMPT_TIMEOUT_MS = Number(process.env.LUA_TESTS_ATTEMPT_TIMEOUT_MS ?? 10 * 60_000);
 
 function runOnce(attempt) {
@@ -31,7 +34,7 @@ function runOnce(attempt) {
       '--max-old-space-size=4096',
       './node_modules/.bin/vitest',
       'run',
-      // 1 fork に絞る: wasmoon の失敗は heap 圧に敏感で、並列で走らせるほど再現しやすい。
+      // 実行並列度は既存の 1 fork を維持。Lua stack の蓄積はハーネスの EVAL 単位の隔離で解消。
       '--pool=forks',
       '--poolOptions.forks.minForks=1',
       '--poolOptions.forks.maxForks=1',
@@ -87,6 +90,9 @@ function runOnce(attempt) {
 }
 
 for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  if (attempt > 1) {
+    console.warn(`::warning::[run-lua-tests] attempt ${attempt}/${MAX_ATTEMPTS} required after earlier failure; investigate a possible regression.`);
+  }
   const result = await runOnce(attempt);
   if (result.ok) {
     console.log(`[run-lua-tests] OK (attempt ${attempt})`);

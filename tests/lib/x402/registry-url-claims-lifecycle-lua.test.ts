@@ -33,8 +33,9 @@ const stored = (id: string) => JSON.parse(holder.store!.strings.get(resourceKey(
 beforeEach(() => { holder.store = createFakeRedisStore(); holder.beforeEval = null; holder.failGet = false; });
 afterAll(closeRedisLuaEngine);
 
-// Keep lifecycle/migration cases in a separate file: wasmoon's JS bridge can
-// exhaust its heap when too many CAS calls share one engine (see luaRealTests.mjs).
+// This file was split when the old harness accumulated doString return values on
+// a shared Lua stack until it corrupted the WASM heap. Per-EVAL factory/engine
+// isolation now fixes that cause (see luaRealTests.mjs); retain the lifecycle/migration grouping.
 describe('registry URL claim lifecycle (real Lua)', () => {
   it('hidden records keep their claim through failures and successful restoration', async () => {
     await createResource(input(), 'a', 1);

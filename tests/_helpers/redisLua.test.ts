@@ -3,7 +3,8 @@
 // これが正しくないと本物の Lua を走らせても嘘の結果を検証してしまう。
 // ⚠️ node 環境が必須 — wasmoon の emscripten glue は jsdom 下では document.baseURI から
 // scriptDirectory を組み立てて createRequire に渡すため WASM の初期化に失敗する。
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { LuaFactory, type LuaEngine } from 'wasmoon';
 
 import {
   closeRedisLuaEngine,
@@ -247,6 +248,103 @@ describe('fake store: 引数と未知コマンド', () => {
 
   it('未知コマンドは例外 (綴り間違いを黙って通さない)', () => {
     expect(() => call('TYPO_COMMAND', 'k', 'f', 'v')).toThrow(/Unknown Redis command/);
+  });
+});
+
+describe('runRedisLua: evaluation lifetime', () => {
+  const createEngine = LuaFactory.prototype.createEngine;
+  let engines: LuaEngine[];
+  let factories: LuaFactory[];
+
+  beforeEach(async () => {
+    await closeRedisLuaEngine();
+    engines = [];
+    factories = [];
+    vi.spyOn(LuaFactory.prototype, 'createEngine').mockImplementation(async function (this: LuaFactory, options) {
+      factories.push(this);
+      const engine = await createEngine.call(this, options);
+      engines.push(engine);
+      return engine;
+    });
+  });
+
+  afterEach(async () => {
+    await closeRedisLuaEngine();
+    vi.restoreAllMocks();
+  });
+
+  it('closes every engine before resolving and gives the next evaluation its own WASM heap', async () => {
+    for (let i = 0; i < 3; i++) {
+      expect(await runRedisLua('return 1', [], [], store)).toBe(1);
+      expect(engines).toHaveLength(i + 1);
+      expect(engines[i].global.isClosed()).toBe(true);
+    }
+    expect(new Set(await Promise.all(factories.map((factory) => factory.getLuaModule()))).size).toBe(3);
+  });
+
+  it.each([
+    ['syntax', 'local =', /expected/],
+    ['Lua runtime', "error('lua failure')", /lua failure/],
+    ['JS callback', "return redis.call('TYPO_COMMAND')", /Unknown Redis command/],
+    ['RESP conversion', "return {err='response failure'}", /response failure/],
+  ])('closes on %s failure and the next evaluation still runs', async (_kind, script, message) => {
+    await expect(runRedisLua(script, [], [], store)).rejects.toThrow(message);
+    expect(engines[0].global.isClosed()).toBe(true);
+    expect(await runRedisLua('return 7', [], [], store)).toBe(7);
+    expect(engines[1].global.isClosed()).toBe(true);
+  });
+
+  it('closes even when global injection fails', async () => {
+    vi.mocked(LuaFactory.prototype.createEngine).mockImplementationOnce(async function (this: LuaFactory, options) {
+      const engine = await createEngine.call(this, options);
+      engines.push(engine);
+      vi.spyOn(engine.global, 'set').mockImplementationOnce(() => { throw new Error('injection failure'); });
+      return engine;
+    });
+    await expect(runRedisLua('return 1', [], [], store)).rejects.toThrow('injection failure');
+    expect(engines[0].global.isClosed()).toBe(true);
+    expect(await runRedisLua('return 7', [], [], store)).toBe(7);
+  });
+
+  it.each([false, true])('does not carry Lua globals into the next evaluation (error=%s)', async (fail) => {
+    const first = runRedisLua(`leaked = 42; ${fail ? "error('failure')" : 'return 1'}`, [], [], store);
+    if (fail) await expect(first).rejects.toThrow('failure');
+    else expect(await first).toBe(1);
+    expect(await runRedisLua('return leaked', [], [], store)).toBeNull();
+  });
+
+  it('keeps concurrent EVALs ordered and stores isolated across a rejected call', async () => {
+    const other = createFakeRedisStore();
+    const script = "return redis.call('INCR', KEYS[1])";
+    const results = await Promise.allSettled([
+      runRedisLua(script, ['counter'], [], store),
+      runRedisLua("error('failure')", [], [], store),
+      runRedisLua(script, ['counter'], [], other),
+      runRedisLua(script, ['counter'], [], store),
+    ]);
+    expect(results).toEqual([
+      { status: 'fulfilled', value: 1 },
+      { status: 'rejected', reason: expect.any(Error) },
+      { status: 'fulfilled', value: 1 },
+      { status: 'fulfilled', value: 2 },
+    ]);
+    expect(store.strings.get('counter')).toBe('2');
+    expect(other.strings.get('counter')).toBe('1');
+    expect(engines.every((engine) => engine.global.isClosed())).toBe(true);
+  });
+
+  it('runs 128 evaluations without accumulating return values on a shared Lua stack', async () => {
+    // Wasmoon 1.16 doString leaves its return values on global's stack. Reusing that
+    // state eventually writes past the stack; exercise more calls than the failing file's setup.
+    for (let i = 1; i <= 128; i++) {
+      const result = await runRedisLua(`
+        local value = cjson.decode(ARGV[1])
+        redis.call('SET', KEYS[1], cjson.encode(value))
+        return {redis.call('INCR', KEYS[2]), redis.call('GET', KEYS[1])}
+      `, ['record', 'counter'], [JSON.stringify({ n: i, nested: { ok: true } })], store) as [number, string];
+      expect(result[0]).toBe(i);
+      expect(JSON.parse(result[1])).toEqual({ n: i, nested: { ok: true } });
+    }
   });
 });
 

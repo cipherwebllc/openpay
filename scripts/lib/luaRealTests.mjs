@@ -1,13 +1,10 @@
 // 本物の Lua (wasmoon = Lua 5.4 WASM) を vitest 内で実行する test ファイルの一覧 (単一情報源)。
 //
-// wasmoon 1.16 は JS 関数 (redis.call / cjson) を Lua に橋渡しする部分の寿命管理に不具合があり、
-// CI では非決定的に "memory access out of bounds" / "Aborted(native code called abort())" で落ちる
-// (memory: feedback_wasmoon_oob_flaky・2026-09-09〜12 に 5 run)。ハーネス側の小手先対策
-// (engine 再作成・collectgarbage) は逆に決定的な OOB を起こしたため、恒久対策 案 1 (2026-09-12 user 採用):
-//   - 通常の test step / Coverage からこの一覧を除外し、
-//   - 専用 job (lua-real) で **プロセスごと** 作り直して最大 3 回まで再試行する (scripts/run-lua-tests.mjs)。
-// WASM の heap が壊れた後は同一プロセス内の retry では回復しないので、vitest の --retry ではなく
-// プロセス再起動で再試行する。
+// Wasmoon 1.16 の doString は返り値を global の Lua stack に残す。旧ハーネスは同じ engine を
+// 使い続け、stack の蓄積で WASM heap が壊れて後続 test も OOB / abort / hang になった。
+// 2026-09-24: redisLua は EVAL ごとに factory (WASM heap) と engine を作り、finally で close する。
+// 通常の test step / Coverage からの除外と専用 lua-real job は従来どおり。
+// 2026-09-24 の手動検証では、ローカル 3 回とも全 test が初回 attempt で pass することを確認した。
 //
 // この一覧は run-tests.mjs (除外 + ファイル数フェンスの allowlist)・run-lua-tests.mjs (実行対象)・
 // .github/workflows/ci.yml (Coverage の --exclude) で共有し、tests/scripts/workflow-guards.test.ts が
