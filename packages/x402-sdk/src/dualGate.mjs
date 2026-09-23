@@ -12,10 +12,14 @@
 // JPYC レールの 402 には USDC accepts を追記 (decorate) して両面を常に見せる。
 
 import { createJpycGate } from './gate.mjs';
+import { createAuthorizationClaims, usdcAuthorizationClaim } from './authorizationClaims.mjs';
 import { assertSellerPins, SellerPinError, validateUsdcFace } from './sellerPins.mjs';
 
 const DEFAULT_OPENPAY_ORIGIN = 'https://open-pay.jp';
 const USDC_FACE_CACHE_MS = 5 * 60_000;
+// USDC authorizations are not resource-bound: share claims so another endpoint's gate
+// cannot start duplicate upstream work with the same chain/asset/payer/nonce.
+const usdcAuthorizationClaims = new Map();
 
 function decodeBase64Json(value) {
   const binary = atob(value);
@@ -54,6 +58,9 @@ export function createDualGate({
     ...(settlementGraceSeconds === undefined ? {} : { settlementGraceSeconds }),
   });
   const origin = openpayOrigin.replace(/\/+$/, '');
+  const { claimAuthorization, releaseAuthorization, hasValidityWindow } = createAuthorizationClaims({
+    now, maxUpstreamSeconds, settlementGraceSeconds,
+  }, usdcAuthorizationClaims);
 
   let usdcCache = null;
   let usdcCachedAt = 0;
@@ -152,6 +159,19 @@ export function createDualGate({
 
     if (usdcRail) {
       const jpycAccepts = await availableJpycAccepts(request);
+      let paymentPayload;
+      try {
+        paymentPayload = decodeBase64Json(signatureHeader || v1Header);
+      } catch {
+        // A malformed preferred header must not bypass the claim via the other rail/header.
+        return usdcChallenge(usdc, jpycAccepts, 'invalid_payment_payload');
+      }
+      const authorization = usdcAuthorizationClaim(paymentPayload, usdc.v2Accept);
+      // Without a usable identity/expiry, verification cannot safely grant upstream work.
+      if (authorization === null) return usdcChallenge(usdc, jpycAccepts, 'invalid_payment_payload');
+      const claimed = claimAuthorization(authorization);
+      if (!claimed.ok) return usdcChallenge(usdc, jpycAccepts, claimed.reason);
+
       const relay = async (path) => {
         const response = await fetchImpl(`${origin}/api/x402/relay/${path}`, {
           method: 'POST',
@@ -174,11 +194,29 @@ export function createDualGate({
         }
         return response.json();
       };
-      const verification = await relay('verify');
-      if (verification instanceof Response) return verification;
+      let verification;
+      try {
+        verification = await relay('verify');
+      } catch (error) {
+        // Verify cannot settle or grant upstream work on failure; release only this tentative owner.
+        releaseAuthorization(claimed.claim);
+        throw error;
+      }
+      if (verification instanceof Response) {
+        releaseAuthorization(claimed.claim);
+        return verification;
+      }
       if (verification.isValid !== true) {
+        releaseAuthorization(claimed.claim);
         return usdcChallenge(usdc, jpycAccepts, verification.invalidReason || 'payment_invalid');
       }
+      // A slow verify must not consume the margin promised to the seller's upstream work.
+      if (!hasValidityWindow(authorization)) {
+        return usdcChallenge(usdc, jpycAccepts, 'insufficient_validity_window');
+      }
+      // As in JPYC, keep the claim until validBefore once upstream can run. Settlement
+      // errors (including ambiguous transport/JSON/503 and 409) must not repeat that work;
+      // even a definitive settle rejection cannot undo an already executed upstream call.
       return {
         async settle() {
           const settlement = await relay('settle');

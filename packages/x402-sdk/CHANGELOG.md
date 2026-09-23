@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.10.2 — unreleased
+
+- Fix `createDualGate` USDC authorization reuse before settlement. Reuse JPYC's
+  local claim manager for v1/v2 payments, keyed by pinned chain, asset, payer and
+  nonce; share the USDC ledger across gate instances and endpoints in one process
+  to reject duplicates before relay verification and upstream execution.
+- Enforce the configured upstream plus settlement validity margin before USDC
+  verify and again before granting upstream work. Reject unclaimable payloads.
+  Release tentative claims on verify rejection/failure; retain claims after
+  verification through upstream abandonment, settlement success, rejection and
+  ambiguous settlement until authorization expiry. Margins remain specific to each
+  calling gate. JPYC behavior/wire is unchanged.
+- Clarify README/types: USDC claims are process-local, are lost on restart, and
+  provide no coordination across processes/isolates. Holding after definitive
+  settlement rejection is deliberate; retrying upstream requires a fresh nonce
+  and signature. Claims do not reserve funds or guarantee settlement.
+  No dependencies added.
+
 ## 0.10.1 — 2026-09-23
 
 - Create spend-store directories with mode 0700, including compatibility saves,
@@ -9,7 +27,7 @@
   Mode 0700 also applies to newly created intermediate directories at custom
   spend-store paths; pre-existing shared/group directories keep their permissions.
 - Preserve spend reservations, locks, accounting and wallet 0600/0700 checks.
-  No dependencies added. Unpublished; rule-15 human review is required before adoption.
+  No dependencies added.
 
 ## 0.10.0 — 2026-09-23
 
@@ -27,8 +45,7 @@
   `SellerPinError` and still stop both rails.
 - Update seller types, examples and generated snippets. Existing sellers must
   configure pins and redeploy the SDK/snippet; deploy the matching relay update
-  first. No dependencies added. Unpublished; rule-15 human review is required
-  before adoption.
+  first. No dependencies added.
 
 ## 0.9.0 — 2026-09-21
 

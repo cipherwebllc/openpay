@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildPaywallSnippet } from '@/lib/x402/paywallSnippet';
 
 const RESOURCE = 'https://seller.test/paid';
@@ -11,6 +11,8 @@ const ATTACKER = '0x9999999999999999999999999999999999999999';
 const FORWARDER = '0x4444444444444444444444444444444444444444';
 const b64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64');
 const json = (value: unknown) => Response.json(value);
+let testSequence = 0;
+beforeEach(() => { testSequence += 1; });
 function listing(id = ID, merchant = SELLER) {
   return { id, resource: RESOURCE, accepts: [{
     scheme: 'exact', network: 'eip155:137', resource: RESOURCE,
@@ -27,6 +29,15 @@ function face(recipient = USDC_SELLER) {
   const v2Accept = { ...v1Accepts, network: 'eip155:8453', amount: '1000' };
   return { resourceId: ID, v1Accepts, v2Accept,
     paymentRequiredHeader: b64({ x402Version: 2, accepts: [v2Accept] }) };
+}
+function usdcPayment(version = 2, nonce = '1', amount = '1000') {
+  const payload = { signature: `0x${'c'.repeat(130)}`, authorization: {
+    from: SELLER, to: USDC_SELLER, value: amount,
+    nonce: `0x${nonce.repeat(60)}${testSequence.toString(16).padStart(4, '0')}`,
+    validAfter: '0', validBefore: String(Math.ceil(Date.now() / 1000) + 600),
+  } };
+  return version === 2 ? { x402Version: 2, accepted: { ...face().v2Accept, amount }, payload }
+    : { x402Version: 1, scheme: 'exact', network: 'base', payload };
 }
 const OPTIONS = { resourceUrl: RESOURCE, resourceId: ID, expectedRecipient: SELLER,
   expectedUsdcRecipient: USDC_SELLER };
@@ -136,7 +147,7 @@ describe.each(['SDK JPYC', 'SDK dual', 'snippet JPYC', 'snippet dual'])('%s sell
     it('retains the verified snapshot while another request refreshes the cache', async () => {
       const { gate, handle, calls, state, advance } = await setup();
       const dual = kind.endsWith('dual');
-      const headers: Record<string, string> = dual ? { 'payment-signature': b64({ x402Version: 2 }) }
+      const headers: Record<string, string> = dual ? { 'payment-signature': b64(usdcPayment()) }
         : { 'x-payment': b64({ network: 'eip155:137' }) };
       const verified = await gate!.verify(new Request(RESOURCE, { headers }));
       expect(verified).not.toBeInstanceOf(Response);
@@ -162,7 +173,7 @@ describe.each(['SDK JPYC', 'SDK dual', 'snippet JPYC', 'snippet dual'])('%s sell
       state.usdc.v1Accepts.maxAmountRequired = '2000';
       state.usdc.v2Accept.amount = '2000';
       state.usdc.paymentRequiredHeader = b64({ x402Version: 2, accepts: [state.usdc.v2Accept] });
-      const request = new Request(RESOURCE, { headers: { 'payment-signature': b64({ x402Version: 2 }) } });
+      const request = new Request(RESOURCE, { headers: { 'payment-signature': b64(usdcPayment()) } });
       const res = await handle(request) as Response;
       expect(res.status).toBe(402);
       expect((await res.json()).accepts.at(-1).maxAmountRequired).toBe('2000');
@@ -170,7 +181,13 @@ describe.each(['SDK JPYC', 'SDK dual', 'snippet JPYC', 'snippet dual'])('%s sell
       expect(calls.filter((c) => c.url.includes('/relay/requirements?'))).toHaveLength(2);
       expect(calls.filter((c) => /\/(verify|settle)$/.test(c.url))).toHaveLength(rejectRelay === 'verify' ? 1 : 2);
       expect(log).not.toHaveBeenCalled();
-      expect(await handle(request)).not.toBeInstanceOf(Response);
+      if (kind === 'SDK dual' && rejectRelay === 'settle') {
+        expect(await (await handle(request) as Response).json()).toMatchObject({ error: 'authorization_reserved' });
+      }
+      const freshPayment = new Request(RESOURCE, {
+        headers: { 'payment-signature': b64(usdcPayment(2, '2', '2000')) },
+      });
+      expect(await handle(freshPayment)).not.toBeInstanceOf(Response);
       expect(calls.at(-1)!.body!.paymentRequirements).toMatchObject({ maxAmountRequired: '2000' });
       expect(calls.filter((c) => c.url.includes('/relay/requirements?'))).toHaveLength(2);
     });
@@ -180,7 +197,7 @@ describe.each(['SDK JPYC', 'SDK dual', 'snippet JPYC', 'snippet dual'])('%s sell
       const { handle, calls, state } = await setup({ rejectRelay });
       await handle(new Request(RESOURCE));
       state.usdc = face(ATTACKER);
-      await expect(handle(new Request(RESOURCE, { headers: { 'payment-signature': b64({ x402Version: 2 }) } }))).rejects.toMatchObject({ name: 'SellerPinError' });
+      await expect(handle(new Request(RESOURCE, { headers: { 'payment-signature': b64(usdcPayment()) } }))).rejects.toMatchObject({ name: 'SellerPinError' });
       expect(calls.filter((c) => /\/(verify|settle)$/.test(c.url))).toHaveLength(rejectRelay === 'verify' ? 1 : 2);
       state.usdc = face();
       expect((await handle(new Request(RESOURCE)) as Response).status).toBe(402);
@@ -191,7 +208,7 @@ describe.each(['SDK JPYC', 'SDK dual', 'snippet JPYC', 'snippet dual'])('%s sell
       const { handle, calls, state } = await setup({ rejectRelay: 'verify',
         refreshedUsdc: () => Response.json({ error: 'storage_unavailable' }, { status: 503 }) });
       await handle(new Request(RESOURCE));
-      await expect(handle(new Request(RESOURCE, { headers: { 'payment-signature': b64({ x402Version: 2 }) } }))).rejects.toThrow(/unavailable/i);
+      await expect(handle(new Request(RESOURCE, { headers: { 'payment-signature': b64(usdcPayment()) } }))).rejects.toThrow(/unavailable/i);
       state.refreshedUsdc = undefined;
       expect((await handle(new Request(RESOURCE)) as Response).status).toBe(402);
       expect(calls.filter((c) => c.url.includes('/relay/requirements?'))).toHaveLength(3);
@@ -208,8 +225,8 @@ describe.each(['SDK JPYC', 'SDK dual', 'snippet JPYC', 'snippet dual'])('%s sell
       expect(challenge.status).toBe(402);
       expect((await challenge.json()).accepts).toEqual([face().v1Accepts]);
       for (const headers of [
-        { 'payment-signature': b64({ x402Version: 2 }) },
-        { 'x-payment': b64({ network: 'base' }) },
+        { 'payment-signature': b64(usdcPayment()) },
+        { 'x-payment': b64(usdcPayment(1, '2')) },
       ] as Array<Record<string, string>>) {
         expect(await handle(new Request(RESOURCE, { headers }))).not.toBeInstanceOf(Response);
       }
@@ -220,7 +237,7 @@ describe.each(['SDK JPYC', 'SDK dual', 'snippet JPYC', 'snippet dual'])('%s sell
     it('rejects JPYC poisoning before USDC verification', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       const { handle, calls } = await setup({ item: listing(ID, ATTACKER) });
-      await expect(handle(new Request(RESOURCE, { headers: { 'payment-signature': b64({ x402Version: 2 }) } }))).rejects.toMatchObject({ name: 'SellerPinError' });
+      await expect(handle(new Request(RESOURCE, { headers: { 'payment-signature': b64(usdcPayment()) } }))).rejects.toMatchObject({ name: 'SellerPinError' });
       expect(calls.some((c) => /\/(verify|settle)$/.test(c.url))).toBe(false);
     });
 

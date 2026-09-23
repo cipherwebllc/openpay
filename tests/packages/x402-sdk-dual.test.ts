@@ -74,6 +74,16 @@ const USDC_FACE = {
 
 USDC_FACE.paymentRequiredHeader = b64({ x402Version: 2, accepts: [USDC_FACE.v2Accept] });
 
+let paymentSequence = 0;
+function usdcPayload() {
+  paymentSequence += 1;
+  return { signature: `0x${'b'.repeat(130)}`, authorization: {
+    from: `0x${'a'.repeat(40)}`, to: USDC_FACE.v1Accepts.payTo, value: '1000',
+    nonce: `0x${'c'.repeat(60)}${paymentSequence.toString(16).padStart(4, '0')}`, validAfter: '0',
+    validBefore: String(Math.ceil(Date.now() / 1000) + 600),
+  } };
+}
+
 type Routes = {
   requirements?: () => Response;
   relayVerify?: () => Response;
@@ -164,7 +174,7 @@ describe('createDualGate', () => {
 
   it('v2 PAYMENT-SIGNATURE → リレー verify/settle に中継し receipt ヘッダを返す', async () => {
     const { gate, calls } = await makeGate();
-    const sig = b64({ x402Version: 2, accepted: USDC_FACE.v2Accept, payload: {} });
+    const sig = b64({ x402Version: 2, accepted: USDC_FACE.v2Accept, payload: usdcPayload() });
     const result = await gate.handle(
       new Request(RESOURCE, { headers: { 'payment-signature': sig } }),
     );
@@ -186,7 +196,7 @@ describe('createDualGate', () => {
     const { gate, calls } = await makeGate({
       relayVerify: () => jsonResponse({ isValid: false, invalidReason: 'insufficient_funds' }),
     });
-    const header = b64({ scheme: 'exact', network: 'base', payload: {} });
+    const header = b64({ scheme: 'exact', network: 'base', payload: usdcPayload() });
     const res = (await gate.handle(
       new Request(RESOURCE, { headers: { 'x-payment': header } }),
     )) as Response;
@@ -202,7 +212,7 @@ describe('createDualGate', () => {
     const { gate } = await makeGate({
       relaySettle: () => jsonResponse({ success: false, errorReason: 'settle_boom' }),
     });
-    const sig = b64({ x402Version: 2, accepted: USDC_FACE.v2Accept, payload: {} });
+    const sig = b64({ x402Version: 2, accepted: USDC_FACE.v2Accept, payload: usdcPayload() });
     const res = (await gate.handle(
       new Request(RESOURCE, { headers: { 'payment-signature': sig } }),
     )) as Response;
