@@ -211,11 +211,21 @@ describe('free Japan Web3 Directory APIs', () => {
     }
   });
 
-  it('不正 query は内部情報なしの400を返す', async () => {
+  it.each(['category=nope', 'limit=nope', 'offset=-1'])('malformed query %s returns the same 400 without the KV limiter or snapshot', async (query) => {
     const { directory } = await load();
-    const res = await directory.GET(req('/api/directory?category=nope'));
+    const res = await directory.GET(req(`/api/directory?${query}`));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ ok: false, error: 'invalid_query' });
+    expect(rateLimitMocks.check).not.toHaveBeenCalled();
+    expect(verificationMocks.read).not.toHaveBeenCalled();
+  });
+
+  it('malformed query remains 404 when the directory flag is off', async () => {
+    const { directory } = await load('');
+    const res = await directory.GET(req('/api/directory?category=nope'));
+    expect(res.status).toBe(404);
+    expect(rateLimitMocks.check).not.toHaveBeenCalled();
+    expect(verificationMocks.read).not.toHaveBeenCalled();
   });
 
   it('rate limit 超過は429を返す', async () => {

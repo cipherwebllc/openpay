@@ -33,7 +33,9 @@ vi.mock('@/lib/relay/relayGuards', () => ({
 vi.mock('next/headers', () => ({
   cookies: async () => ({
     get: (name: string) =>
-      name === 'op_sess' && h.cookieToken ? { value: h.cookieToken } : undefined,
+      name === (process.env.NODE_ENV === 'production' ? '__Host-op_sess' : 'op_sess') && h.cookieToken !== undefined
+        ? { value: h.cookieToken }
+        : undefined,
   }),
 }));
 
@@ -42,6 +44,21 @@ import { POST as verifyPOST } from '@/app/api/auth/siwe/verify/route';
 import { GET as meGET } from '@/app/api/auth/siwe/me/route';
 import { POST as logoutPOST } from '@/app/api/auth/siwe/logout/route';
 import { requireSession } from '@/app/api/auth/siwe/_session';
+import { newSessionToken, sessionKey } from '@/lib/siwe';
+
+const SESSION_TOKEN = '0123456789abcdef'.repeat(4);
+const MALFORMED_TOKENS = [
+  '',
+  'not-a-session',
+  'a'.repeat(63),
+  'a'.repeat(65),
+  'A'.repeat(64),
+  'a'.repeat(63) + 'B',
+  'g'.repeat(64),
+  '0x' + 'a'.repeat(64),
+  ' ' + 'a'.repeat(64),
+  'a'.repeat(64) + '\n',
+];
 
 function nonceReq(ip?: string): Request {
   return new Request('http://localhost/api/auth/siwe/nonce', {
@@ -163,6 +180,71 @@ describe('SIWE routes', () => {
     const res = await meGET();
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, address: null });
+    expect(h.kvGet).not.toHaveBeenCalled();
+  });
+
+  describe.each(['test', 'production'])('session cookie shape (%s)', (nodeEnv) => {
+    it.each(MALFORMED_TOKENS)('logout: malformed cookie %j is cleared without KV deletion', async (token) => {
+      vi.stubEnv('NODE_ENV', nodeEnv);
+      h.cookieToken = token;
+
+      const res = await logoutPOST();
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      expect(h.kvDel).not.toHaveBeenCalled();
+      const setCookie = res.headers.get('set-cookie') ?? '';
+      expect(setCookie).toContain(nodeEnv === 'production' ? '__Host-op_sess=' : 'op_sess=');
+      expect(setCookie.toLowerCase()).toContain('max-age=0');
+      expect(setCookie.toLowerCase()).toContain('path=/');
+      if (nodeEnv === 'production') expect(setCookie.toLowerCase()).toContain('secure');
+    });
+
+    it('logout: valid session is deleted from KV and the cookie is cleared', async () => {
+      vi.stubEnv('NODE_ENV', nodeEnv);
+      h.cookieToken = SESSION_TOKEN;
+      h.kvDel.mockResolvedValue({ ok: true, value: 1 });
+
+      const res = await logoutPOST();
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true });
+      expect(h.kvDel).toHaveBeenCalledOnce();
+      expect(h.kvDel).toHaveBeenCalledWith(sessionKey(SESSION_TOKEN));
+      expect(res.headers.get('set-cookie')?.toLowerCase()).toContain('max-age=0');
+    });
+
+    it.each(MALFORMED_TOKENS)('malformed cookie %j stays signed out without a KV read', async (token) => {
+      vi.stubEnv('NODE_ENV', nodeEnv);
+      h.cookieToken = token;
+      h.kvGet.mockResolvedValue({ ok: true, value: null });
+
+      const res = await meGET();
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, address: null });
+      expect(res.headers.get('cache-control')).toBe('private, no-store');
+
+      const session = await requireSession();
+      expect(session.ok).toBe(false);
+      if (session.ok) throw new Error('expected signed-out session');
+      expect(session.response.status).toBe(401);
+      expect(await session.response.json()).toEqual({ ok: false, error: 'unauthenticated' });
+      expect(h.kvGet).not.toHaveBeenCalled();
+    });
+
+    it('server-issued cookie still authenticates through KV', async () => {
+      vi.stubEnv('NODE_ENV', nodeEnv);
+      h.cookieToken = newSessionToken();
+      const address = '0x1111111111111111111111111111111111111111';
+      h.kvGet.mockResolvedValue({ ok: true, value: JSON.stringify({ address }) });
+
+      const res = await meGET();
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, address });
+      expect(await requireSession()).toEqual({ ok: true, address });
+      expect(h.kvGet).toHaveBeenCalledTimes(2);
+      expect(h.kvGet).toHaveBeenCalledWith(sessionKey(h.cookieToken));
+    });
   });
 
   it('me: Cache-Control: private, no-store を返す (CDN キャッシュ汚染防止)', async () => {
@@ -171,7 +253,7 @@ describe('SIWE routes', () => {
   });
 
   it('me: cookie 有りで KV 読取障害 → 503 (未ログイン成功に偽装しない)', async () => {
-    h.cookieToken = 'live-session';
+    h.cookieToken = SESSION_TOKEN;
     h.kvGet.mockResolvedValue({ ok: false, reason: 'network_error' });
 
     const res = await meGET();
@@ -182,11 +264,11 @@ describe('SIWE routes', () => {
       error: 'session_storage_unavailable',
     });
     expect(res.headers.get('cache-control')).toBe('private, no-store');
-    expect(h.kvGet).toHaveBeenCalledWith('siwe:sess:live-session');
+    expect(h.kvGet).toHaveBeenCalledWith(sessionKey(SESSION_TOKEN));
   });
 
   it('requireSession: cookie 有りで KV 読取障害 → 503 (401 と区別)', async () => {
-    h.cookieToken = 'live-session';
+    h.cookieToken = SESSION_TOKEN;
     h.kvGet.mockResolvedValue({ ok: false, reason: 'timeout' });
 
     const session = await requireSession();
@@ -201,13 +283,22 @@ describe('SIWE routes', () => {
   });
 
   it('me: cookie の KV record が miss → 従来どおり 200 address:null', async () => {
-    h.cookieToken = 'expired-session';
+    h.cookieToken = SESSION_TOKEN;
     h.kvGet.mockResolvedValue({ ok: true, value: null });
 
     const res = await meGET();
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, address: null });
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+    expect(h.kvGet).toHaveBeenCalledOnce();
+    expect(h.kvGet).toHaveBeenCalledWith(sessionKey(SESSION_TOKEN));
+    const session = await requireSession();
+    expect(session.ok).toBe(false);
+    if (session.ok) throw new Error('expected unknown session');
+    expect(session.response.status).toBe(401);
+    expect(await session.response.json()).toEqual({ ok: false, error: 'unauthenticated' });
+    expect(h.kvGet).toHaveBeenCalledTimes(2);
   });
 
   it('logout: cookie 無しでも 200 (冪等) + op_sess を maxAge0 で失効', async () => {
@@ -233,21 +324,21 @@ describe('SIWE routes', () => {
   });
 
   it('logout: セッションが既に無い (DEL=0) → 200 (冪等) + cookie 失効', async () => {
-    h.cookieToken = 'already-revoked';
+    h.cookieToken = SESSION_TOKEN;
     const res = await logoutPOST();
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
-    expect(h.kvDel).toHaveBeenCalledWith('siwe:sess:already-revoked');
+    expect(h.kvDel).toHaveBeenCalledWith(sessionKey(SESSION_TOKEN));
     expect(res.headers.get('set-cookie')?.toLowerCase()).toContain('max-age=0');
   });
 
   it('logout: KV 削除失敗 → 503 だが cookie は失効', async () => {
-    h.cookieToken = 'live-session';
+    h.cookieToken = SESSION_TOKEN;
     h.kvDel.mockResolvedValue({ ok: false, reason: 'network_error' });
     const res = await logoutPOST();
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ ok: false, error: 'session_revoke_failed' });
-    expect(h.kvDel).toHaveBeenCalledWith('siwe:sess:live-session');
+    expect(h.kvDel).toHaveBeenCalledWith(sessionKey(SESSION_TOKEN));
     expect(res.headers.get('set-cookie')?.toLowerCase()).toContain('max-age=0');
   });
 });

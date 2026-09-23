@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { privateKeyToAccount } from 'viem/accounts';
 
 const kv = vi.hoisted(() => ({ kvGet: vi.fn(), kvMget: vi.fn(), kvGetDel: vi.fn(), kvSetNxGet: vi.fn(), kvEval: vi.fn(), kvLrange: vi.fn() }));
-const session = vi.hoisted(() => ({ token: 'owner-token' as string | undefined }));
+const session = vi.hoisted(() => ({ token: 'ab'.repeat(32) as string | undefined }));
 vi.mock('@/lib/kv', () => kv);
 vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => session.token ? { value: session.token } : undefined }) }));
 vi.mock('@/lib/relay/relayGuards', () => ({ checkIpRateLimit: vi.fn() }));
@@ -43,7 +43,7 @@ const routes = [
 ];
 let store: ReturnType<typeof agentPurchasesKv>;
 function signIn(owner = O) {
-  session.token = 'owner-token';
+  session.token = 'ab'.repeat(32);
   store.strings.set(sessionKey(session.token), JSON.stringify({ address: owner }));
 }
 async function signedProof() {
@@ -127,6 +127,24 @@ describe('Agent purchases routes', () => {
     expect(result.expiresAt - result.issuedAt).toBe(300);
     expect(kv.kvGet).not.toHaveBeenCalled();
     expect(kv.kvSetNxGet.mock.calls[0][0]).toBe(`agent:proof:nonce:${A}:${result.nonce}`);
+    expect(checkIpRateLimit).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['', '?address=bad', `?address=${A}0`, `?address=${A}%0A`, `?address=${A}&address=${A}`, `?address=${A}&extra=1`])('malformed challenge query %s skips the KV limiter and nonce storage', async (query) => {
+    const response = await challengeGET(get('proof/challenge', query));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ reason: 'malformed' });
+    noStore(response);
+    expect(checkIpRateLimit).not.toHaveBeenCalled();
+    expect(kv.kvSetNxGet).not.toHaveBeenCalled();
+  });
+
+  it('malformed challenge query remains 404 when disabled', async () => {
+    vi.stubEnv('ENABLE_AGENT_PURCHASES', '');
+    const response = await challengeGET(get('proof/challenge', '?address=bad'));
+    expect(response.status).toBe(404);
+    expect(checkIpRateLimit).not.toHaveBeenCalled();
+    expect(kv.kvSetNxGet).not.toHaveBeenCalled();
   });
 
   it.each(['', '?address=bad', `?address=${A}0`, `?address=${A}%0A`, `?address=${A}&address=${A}`, `?address=${A}&extra=1`])('invalid address query %s is private 400', async (query) => {
