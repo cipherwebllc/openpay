@@ -10,6 +10,7 @@ import { kvGet, kvSetNxGet } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
 import { getPurchaseIntent } from '@/lib/x402/purchaseIntent';
+import { getHostedProduct } from '@/lib/x402/hostedStore';
 import { sendReverifyAlert } from '@/lib/x402/reverify';
 import { licenseNftEnabled } from './config';
 import { licenseMinterPrivateKey } from './minterKey';
@@ -39,6 +40,7 @@ const MAX_TX_COST = 10n ** 17n; // 0.1 POL。見積り超過を切り詰めて�
 const MIN_RESERVE = 10n ** 17n;
 const FINALITY_WAIT_DELAY = 60_000;
 const SHORT_FINALITY_WAITS = 5;
+const MAX_SCAN_ATTEMPTS = 10;
 export const licenseBackoff = (attempts: number) => Math.min(3_600_000, 300_000 * 2 ** Math.min(10, Math.max(0, attempts - 1)));
 class Deadline extends Error {}
 class Repair extends Error {}
@@ -97,6 +99,16 @@ async function processJob(member: string, token: string, deadline: number): Prom
     if (!url || !await step(() => sendReverifyAlert(url, 'OpenPay license needs repair: ' + member + ' (' + job.lastError + ')'))) return;
     await save({ ...job, alertPending: false, alertedAt: Date.now() });
   };
+  const rescheduleScan = async (reason: string, repair = false, nextBlock?: string) => {
+    // funding 等の過去の失敗で復旧走査の予算まで尽きる波及を断つ。未発見は pending のまま待つ。
+    const scanAttempts = (job.scanAttempts ?? 0) + 1;
+    const needsRepair = repair || scanAttempts >= MAX_SCAN_ATTEMPTS;
+    await save({ ...job, scanAttempts, status: needsRepair ? 'needs_repair' : job.submission ? 'submitted' : 'pending',
+      lastError: reason, nextAttemptAt: Date.now() + licenseBackoff(scanAttempts),
+      ...(nextBlock !== undefined ? { scanFromBlock: nextBlock } : {}),
+      ...(needsRepair ? { alertPending: job.alertedAt === undefined } : {}) });
+  };
+  let scanning = false;
   try {
     if (job.status === 'needs_repair') { await alert(); return; }
     const rpc = licenseRpc(job.license.tokenChainId, deadline);
@@ -183,15 +195,59 @@ async function processJob(member: string, token: string, deadline: number): Prom
       if (receipt) { await complete(s.hash); return; }
     }
     if (consumed || (job.kind === 'register' && registered.exists)) {
-      const fromBlock = BigInt(job.scanFromBlock ?? job.submission?.fromBlock ?? '0');
+      scanning = true;
+      let fromBlock: bigint;
+      const cursor = job.scanFromBlock ?? job.submission?.fromBlock;
+      if (job.kind === 'mint') {
+        // 復元で submission が消えても mint は確認済み payment より前には存在しない。
+        // 古い genesis 起点の cursor も支払いブロックで下限を付け、数か月の再走査へ波及させない。
+        const paymentBlock = BigInt(job.paymentBlock!.blockNumber); // 上で canonical receipt を検証・保存済み。
+        fromBlock = cursor !== undefined && BigInt(cursor) > paymentBlock ? BigInt(cursor) : paymentBlock;
+      } else if (job.submission) {
+        fromBlock = BigInt(job.scanFromBlock ?? job.submission.fromBlock);
+      } else {
+        let search = job.scanSearch;
+        if (!search) {
+          const product = await step(() => getHostedProduct(job.productId));
+          if (product === 'storage') throw new Error('product_storage_unavailable');
+          // 欠損/不一致の商品を block 0 と解釈し、無関係な全履歴の探索へ波及させない。
+          if (!product || product.createdAt < 0 || product.license?.definitionHash !== d.definitionHash) throw new Repair('registration_product_missing_or_mismatch');
+          search = { createdAt: product.createdAt, low: '0', high: head.number.toString(), anchor: { blockNumber: head.number.toString(), blockHash: head.hash } };
+          await save({ ...job, scanSearch: search });
+        } else {
+          // 複数 run にまたがる範囲を別の finalized 履歴へ持ち越し、イベントを飛ばす波及を断つ。
+          const savedAnchor = search.anchor;
+          const anchor = await step(() => rpc.getBlock({ blockNumber: BigInt(savedAnchor.blockNumber) }));
+          if (anchor.hash !== savedAnchor.blockHash) throw new Repair('scan_anchor_changed');
+        }
+        // archive state は不要。作成時刻を秒に切り下げ、その時刻以上の最初のブロックを探す。
+        // 同秒/ブロック境界の登録を飛ばさないよう、その一つ前 (最低 0) を安全な下限にする。
+        const createdAt = BigInt(Math.floor(search.createdAt / 1000));
+        let low = BigInt(search.low); let high = BigInt(search.high);
+        while (low < high) {
+          const mid = (low + high) / 2n;
+          const block = await step(() => rpc.getBlock({ blockNumber: mid }));
+          if (block.timestamp >= createdAt) high = mid;
+          else low = mid + 1n;
+          // deadline が探索のやり直しループへ波及しないよう、各 probe の進捗を同じ lease/CAS で保存する。
+          search = { ...search, low: low.toString(), high: high.toString() };
+          await save({ ...job, scanSearch: search });
+        }
+        const creationBlock = low > 0n ? low - 1n : 0n;
+        fromBlock = cursor !== undefined && BigInt(cursor) > creationBlock ? BigInt(cursor) : creationBlock;
+        await stableHead();
+        await save({ ...job, scanFromBlock: fromBlock.toString() });
+      }
       const toBlock = fromBlock + 1999n < head.number ? fromBlock + 1999n : head.number;
-      if (fromBlock > head.number) { await reschedule('event_not_found', true); return; }
+      if (fromBlock > head.number) { await rescheduleScan('event_not_found', true); await alert(); return; }
       const logs = job.kind === 'mint'
         ? await step(() => rpc.getLogs({ address: d.contract, event: LICENSE_ABI[5], args: { paymentKey: (job as LicenseMintJob).paymentKey }, fromBlock, toBlock }))
         : await step(() => rpc.getLogs({ address: d.contract, event: LICENSE_ABI[4], args: { id: BigInt(d.tokenId) }, fromBlock, toBlock }));
       const hash = logs.find((l) => l.transactionHash)?.transactionHash;
       if (hash) { await complete(hash); return; }
-      await save({ ...job, scanFromBlock: (toBlock + 1n).toString(), nextAttemptAt: Date.now() + 300_000 }); return;
+      // 空振りの cursor 更新だけで永久に due を占有する波及を断つ。消費済みでも 10 回で修復・通知する。
+      await rescheduleScan('event_not_found', false, (toBlock + 1n).toString());
+      await alert(); return;
     }
     if (job.submission) {
       const s = job.submission;
@@ -229,7 +285,8 @@ async function processJob(member: string, token: string, deadline: number): Prom
     // 期限切れ/lease 喪失で stale worker が追記や送信を続ける波及を断つ。
     if (error instanceof Deadline || error instanceof LostLease || Date.now() >= deadline) return;
     // RPC の本文/鍵/署名を永続エラーや通知へ漏らさず、失敗したジョブだけ再試行する。
-    await reschedule(error instanceof Repair ? error.message : 'rpc_or_funding_failure', error instanceof Repair);
+    const retry = scanning ? rescheduleScan : reschedule;
+    await retry(error instanceof Repair ? error.message : 'rpc_or_funding_failure', error instanceof Repair);
   }
   await alert();
 }

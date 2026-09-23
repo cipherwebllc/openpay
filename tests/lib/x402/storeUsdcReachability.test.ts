@@ -44,6 +44,25 @@ describe('Store USDC payTo reachability', () => {
     });
   });
 
+  it.each([
+    '0xef0100' + '12'.repeat(20),
+    '0xEF0100' + 'AB'.repeat(20),
+  ])('B9: 7702 delegation designator %s は EOA として許可する', async (code) => {
+    mocks.getBytecode.mockResolvedValue(code);
+    await expect(checkStoreUsdcPayToReachability(PAY_TO)).resolves.toEqual({ ok: true, payTo: PAY_TO });
+  });
+
+  it.each([
+    '0xef0100',
+    '0xef0100' + '12'.repeat(19),
+    '0xef0100' + '12'.repeat(21),
+    '0xef0101' + '12'.repeat(20),
+    '0xef0100' + 'zz'.repeat(20),
+  ])('B9: delegation に似た不正な code %s は許可しない', async (code) => {
+    mocks.getBytecode.mockResolvedValue(code);
+    await expect(checkStoreUsdcPayToReachability(PAY_TO)).resolves.toEqual({ ok: false, reason: 'contract_wallet' });
+  });
+
   it('RPC 障害は EOA に倒さず fail-closed', async () => {
     mocks.getBytecode.mockRejectedValue(new Error('rpc down'));
     await expect(checkStoreUsdcPayToReachability(PAY_TO)).resolves.toEqual({

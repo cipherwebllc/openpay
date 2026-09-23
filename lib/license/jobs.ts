@@ -20,6 +20,8 @@ type JobBase = {
   submission?: LicenseSubmission;
   mintTxHash?: Hex; mintBlock?: LicenseBlockEvidence;
   scanFromBlock?: string; alertPending?: boolean; alertedAt?: number;
+  scanAttempts?: number;
+  scanSearch?: { createdAt: number; low: string; high: string; anchor: LicenseBlockEvidence };
 };
 export type LicenseMintJob = JobBase & {
   kind: 'mint'; paymentKey: Hex; payer: Address; intentSalt: Hex;
@@ -51,6 +53,14 @@ export function parseLicenseJob(raw: string | null): LicenseJob | null {
       !integer(r.attempts) || !integer(r.nextAttemptAt)) return null;
     // 待機カウンタの破損が不正な再試行時刻や短期待機の再開へ波及しないよう、原本を修復対象に残す。
     if (r.finalityWaitAttempts !== undefined && !integer(r.finalityWaitAttempts)) return null;
+    // 復旧用カウンタ/探索範囲の破損を、無限再試行や登録イベントの取りこぼしへ波及させない。
+    if (r.scanAttempts !== undefined && !integer(r.scanAttempts)) return null;
+    if (r.scanSearch !== undefined) {
+      const s = r.scanSearch;
+      if (!['register', 'registration'].includes(r.kind) || !s || !integer(s.createdAt) ||
+        typeof s.low !== 'string' || !DECIMAL.test(s.low) || typeof s.high !== 'string' || !DECIMAL.test(s.high) ||
+        !block(s.anchor) || BigInt(s.low) > BigInt(s.high) || BigInt(s.high) > BigInt(s.anchor.blockNumber)) return null;
+    }
     if (r.lease !== undefined && (typeof r.lease?.token !== 'string' || !integer(r.lease.until))) return null;
     if (r.mintTxHash !== undefined && !hex32(r.mintTxHash)) return null;
     if (r.paymentBlock !== undefined && !block(r.paymentBlock)) return null;

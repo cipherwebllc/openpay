@@ -4,10 +4,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress } from 'viem';
+import { NextResponse } from 'next/server';
 // @ts-expect-error SDK source of truth is JavaScript without declarations.
 import { validateAcceptForPayment } from '../../../packages/x402-sdk/src/guards.mjs';
 
 const verificationMocks = vi.hoisted(() => ({
+  read: vi.fn(),
   snapshot: {} as Record<
     string,
     { checkedAt: string; ok: boolean; sourceUrl: string }
@@ -15,13 +17,27 @@ const verificationMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/directory/verification', () => ({
-  readDirectoryVerificationSnapshot: async () => verificationMocks.snapshot,
+  readDirectoryVerificationSnapshot: async () => {
+    verificationMocks.read();
+    return verificationMocks.snapshot;
+  },
+}));
+
+const paidMocks = vi.hoisted(() => ({ verify: vi.fn(), settle: vi.fn(), lookup: vi.fn(), promote: vi.fn() }));
+vi.mock('@/app/api/facilitator/verify/route', () => ({ POST: paidMocks.verify }));
+vi.mock('@/app/api/facilitator/settle/route', () => ({ POST: paidMocks.settle }));
+vi.mock('@/lib/x402/paymentRedelivery', async (original) => ({
+  ...await original<typeof import('@/lib/x402/paymentRedelivery')>(),
+  lookupPaymentRedelivery: paidMocks.lookup,
+  claimPaymentRedelivery: async () => ({ kind: 'unavailable' }),
+  promotePaymentRedelivery: paidMocks.promote,
 }));
 
 const SELLER = getAddress('0x1234567890123456789012345678901234567890');
 const FORWARDER = getAddress('0x752b7aad0089286eb7b553d84d05233d80c9fcb4');
 const FEE_RECEIVER = getAddress('0x428483d2bd5E9f0e9f8E9f8e9F8E9F8E9f8e9F8e');
 const JPYC_AMOY = getAddress('0x00000000000000000000000000000000000Ca11a');
+const SETTLEMENT = { success: true, transaction: `0x${'ab'.repeat(32)}`, network: 'eip155:80002', payer: SELLER };
 
 type Route = { GET: (req: Request) => Promise<Response> };
 
@@ -55,8 +71,27 @@ function req(base: string, qs = ''): Request {
   return new Request(`https://open-pay.jp${base}${qs}`);
 }
 
+async function paidReq(route: Route, header: 'X-PAYMENT' | 'PAYMENT-SIGNATURE'): Promise<Request> {
+  const url = 'https://open-pay.jp/api/paid/jpyc/services?changedSince=2026-08-20';
+  const challenge = await route.GET(new Request(url));
+  const required = JSON.parse(Buffer.from(challenge.headers.get('PAYMENT-REQUIRED')!, 'base64').toString());
+  const payload = {
+    signature: `0x${'0'.repeat(63)}1${'0'.repeat(63)}21b`,
+    authorization: { from: SELLER, validAfter: '0', validBefore: '9999999999', intentSalt: `0x${'22'.repeat(32)}` },
+  };
+  const payment = header === 'X-PAYMENT'
+    ? { x402Version: 1, scheme: 'exact', network: 'eip155:80002', payload }
+    : { x402Version: 2, resource: required.resource, accepted: required.accepts[0], payload };
+  return new Request(url, { headers: { [header]: Buffer.from(JSON.stringify(payment)).toString('base64') } });
+}
+
 beforeEach(() => {
+  vi.clearAllMocks();
   verificationMocks.snapshot = {};
+  paidMocks.verify.mockImplementation(async () => NextResponse.json({ isValid: true, payer: SELLER }));
+  paidMocks.settle.mockImplementation(async () => NextResponse.json(SETTLEMENT));
+  paidMocks.lookup.mockResolvedValue({ kind: 'missing' });
+  paidMocks.promote.mockResolvedValue({ kind: 'unavailable' });
 });
 
 afterEach(() => {
@@ -126,6 +161,47 @@ describe('GET /api/paid/usdc/jpyc/services (test mode)', () => {
 
 describe('GET /api/paid/jpyc/services (facilitator gate)', () => {
   const PATH = '/api/paid/jpyc/services';
+
+  it.each(['X-PAYMENT', 'PAYMENT-SIGNATURE'] as const)('B13: %s snapshot 障害は verify/settle 前の 503', async (header) => {
+    const route = await loadJpyc();
+    const request = await paidReq(route, header);
+    verificationMocks.snapshot = null;
+    const res = await route.GET(request);
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(paidMocks.verify).not.toHaveBeenCalled();
+    expect(paidMocks.settle).not.toHaveBeenCalled();
+    expect(res.headers.get('X-PAYMENT-RESPONSE')).toBeNull();
+    expect(res.headers.get('PAYMENT-RESPONSE')).toBeNull();
+  });
+
+  it('B13: unpaid challenge は snapshot 障害に依存しない', async () => {
+    verificationMocks.snapshot = null;
+    const route = await loadJpyc();
+    expect((await route.GET(req(PATH))).status).toBe(402);
+    expect(verificationMocks.read).not.toHaveBeenCalled();
+  });
+
+  it('B13: snapshot を先読みし、settle 中の KV 障害でも配信・同一支払いの再配信を維持する', async () => {
+    const route = await loadJpyc();
+    const request = await paidReq(route, 'X-PAYMENT');
+    paidMocks.settle.mockImplementation(async () => {
+      verificationMocks.snapshot = null;
+      return NextResponse.json(SETTLEMENT);
+    });
+    const res = await route.GET(request.clone());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ mode: 'delta' });
+    expect(verificationMocks.read).toHaveBeenCalledTimes(1);
+    expect(verificationMocks.read.mock.invocationCallOrder[0]).toBeLessThan(paidMocks.settle.mock.invocationCallOrder[0]);
+    paidMocks.lookup.mockResolvedValue({ kind: 'match', record: { state: 'settled', settlement: SETTLEMENT } });
+    verificationMocks.snapshot = {};
+    const redelivery = await route.GET(request.clone());
+    expect(redelivery.status).toBe(200);
+    expect(redelivery.headers.get('X-PAYMENT-RESPONSE')).toBe(res.headers.get('X-PAYMENT-RESPONSE'));
+    expect(paidMocks.verify).toHaveBeenCalledTimes(1);
+    expect(paidMocks.settle).toHaveBeenCalledTimes(1);
+  });
 
   it.each([
     ['directory OFF', '', '1'],
