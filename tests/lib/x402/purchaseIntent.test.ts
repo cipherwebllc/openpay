@@ -28,6 +28,7 @@ const h = vi.hoisted(() => ({
   loggerWarn: vi.fn(),
   publicClient: {
     readContract: vi.fn(),
+    getBlock: vi.fn(),
     getBlockNumber: vi.fn(),
     getLogs: vi.fn(),
     getTransactionReceipt: vi.fn(),
@@ -91,6 +92,7 @@ import {
   defaultPurchaseReconcileChain,
   finalizeHostedPurchase,
   getPurchaseIntent,
+  parsePurchaseIntent,
   hostedPurchaseRecordKey,
   listPendingPurchaseIntents,
   markPurchaseFailedPrebroadcast,
@@ -1392,6 +1394,17 @@ describe('PurchaseIntent settlement and finalizer', () => {
 });
 
 describe('PurchaseIntent reconciler', () => {
+  it.each(['wrong-failure-reason', 'malformed-expired-hash'] as const)('rejects a failed record with %s', async (scenario) => {
+    const intent = await makeSettling();
+    expect(parsePurchaseIntent(JSON.stringify({
+      ...intent,
+      state: 'failed_prebroadcast',
+      failedAt: BASE_NOW + 1_000_000,
+      failureReason: scenario === 'wrong-failure-reason' ? 'prebroadcast_rejection' : 'authorization_expired_unused',
+      txHash: scenario === 'malformed-expired-hash' ? '0x1234' : TX_HASH,
+    }))).toBeNull();
+  });
+
   it('保存 nonce を再計算し、authorizationState→anchor paging→厳密 Settled receipt で crash 後も finalize', async () => {
     const settling = await makeSettling({
       anchorBlock: ANCHOR_BLOCK,
@@ -1628,10 +1641,15 @@ describe('PurchaseIntent reconciler', () => {
     ).toBe(true);
   });
 
-  it('authorizationState 未使用かつ signed 有効期限切れだけ failed_prebroadcast を終端化する', async () => {
+  it('finalized block で期限切れと未使用を確認した signed intent を終端化する', async () => {
     const quote = await makeQuote();
     const { claim } = await signQuote(quote);
     h.publicClient.readContract.mockResolvedValue(false);
+    h.publicClient.getBlock.mockResolvedValue({
+      number: ANCHOR_BLOCK + 100n,
+      hash: OTHER_BYTES32,
+      timestamp: BigInt(claim.validBefore) + 1n,
+    });
 
     const result = await reconcilePurchaseIntent(quote.intentSalt, {
       now: Number(claim.validBefore) * 1_000,
@@ -1651,6 +1669,7 @@ describe('PurchaseIntent reconciler', () => {
     const key = purchaseIntentKey(quote.intentSalt);
     const impossibleTerminal = jsonObject(h.data.get(key)!);
     impossibleTerminal.txHash = TX_HASH;
+    impossibleTerminal.failureReason = 'prebroadcast_rejection';
     h.data.set(key, JSON.stringify(impossibleTerminal));
     expect(await getPurchaseIntent(quote.intentSalt)).toBe('corrupt');
   });

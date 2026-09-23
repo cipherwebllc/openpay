@@ -34,6 +34,7 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/license/verifyBudget.test.ts',
   'tests/lib/store/deliveryBudget.test.ts',
   'tests/lib/x402/purchaseIntent-lua.test.ts',
+  'tests/lib/x402/purchaseIntent-expiry-lua.test.ts',
   'tests/lib/x402/purchaseQuoteRateLimit-lua.test.ts',
   'tests/lib/x402/registry-lua.test.ts',
   'tests/lib/x402/registry-moderation-lua.test.ts',
