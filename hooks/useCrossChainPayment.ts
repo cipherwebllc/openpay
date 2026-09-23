@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { createPublicClient, type Address, type Hex } from 'viem';
+import { createPublicClient, type Address, type Hex, type PublicClient } from 'viem';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { useAccount, usePublicClient, useSwitchChain, useWalletClient } from 'wagmi';
 import { env, isArcCrossChainEnabled } from '@/lib/env';
@@ -150,7 +150,9 @@ export function useCrossChainPayment(
 ): UseCrossChainPaymentReturn {
   const { address: account } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const sourcePublicClient = usePublicClient();
+  // source client は選択経路の chain ごとに再利用し、wallet の宛先への切替に追従させない。
+  // 残高取得と D4 の hash 採用は、それぞれ別の chain 指定 client を使う。
+  const sourcePublicClients = useRef(new Map<number, PublicClient>());
   const destPublicClient = usePublicClient({ chainId: args.targetChainId });
   const { switchChainAsync } = useSwitchChain();
   const enabled = args.enabled !== false && Boolean(account);
@@ -333,7 +335,7 @@ export function useCrossChainPayment(
   const runCore = useCallback(
     async (core: ExecuteCoreArgs): Promise<ExecuteResult> => {
       if (forwardOnly && (core.kind !== 'cctp-v2' || !core.forward)) throw new Error('Arc requires explicit forwarding option');
-      if (!account || !walletClient || !sourcePublicClient || !destPublicClient) {
+      if (!account || !walletClient || !destPublicClient) {
         throw new Error('wallet not connected');
       }
       const destDeployment = resolveDeployment('usdc', args.targetChainId);
@@ -347,6 +349,19 @@ export function useCrossChainPayment(
         throw new Error(
           `USDC deployment missing for source chainId ${core.sourceChainId}`,
         );
+      }
+      let sourcePublicClient = sourcePublicClients.current.get(core.sourceChainId);
+      if (!sourcePublicClient) {
+        const sourceChain = chainObjectForId(core.sourceChainId);
+        // USDC deployment と chain 定義のずれが、不明瞭な RPC エラーとして決済へ波及するのを防ぐ。
+        if (!sourceChain) {
+          throw new Error(`Unsupported source chainId ${core.sourceChainId}`);
+        }
+        sourcePublicClient = createPublicClient({
+          chain: sourceChain,
+          transport: transportForChain(core.sourceChainId),
+        });
+        sourcePublicClients.current.set(core.sourceChainId, sourcePublicClient);
       }
 
       const reportProgress: (p: CrossChainProgress) => void = (p) => {
@@ -500,7 +515,7 @@ export function useCrossChainPayment(
       const cctpArgs: ExecuteCctpTransferArgs = {
         forward: core.forward,
         walletClient,
-        sourcePublicClient: forwardOnly ? createPublicClient({ chain: chainObjectForId(core.sourceChainId), transport: transportForChain(core.sourceChainId) }) : sourcePublicClient,
+        sourcePublicClient,
         destPublicClient,
         switchChainAsync,
         account,
@@ -535,7 +550,6 @@ export function useCrossChainPayment(
       args.feeReceiver,
       args.targetChainId,
       destPublicClient,
-      sourcePublicClient,
       switchChainAsync,
       walletClient,
     ],
