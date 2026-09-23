@@ -71,7 +71,7 @@ export type StoreUsdcPublicClient = {
     event: (typeof USDC_EVENTS_ABI)[1];
     args: { authorizer: Address; nonce: Hex };
     fromBlock: bigint;
-    toBlock: 'latest';
+    toBlock: bigint;
   }) => Promise<readonly { transactionHash: Hex | null }[]>;
 };
 
@@ -254,6 +254,7 @@ export async function findStoreUsdcAuthorizationTransactions(input: {
   payer: Address;
   nonce: Hex;
   fromBlock: bigint;
+  toBlock: bigint;
   client?: StoreUsdcPublicClient;
 }): Promise<Hex[] | 'unavailable'> {
   try {
@@ -262,7 +263,7 @@ export async function findStoreUsdcAuthorizationTransactions(input: {
       event: USDC_EVENTS_ABI[1],
       args: { authorizer: input.payer, nonce: input.nonce },
       fromBlock: input.fromBlock,
-      toBlock: 'latest',
+      toBlock: input.toBlock,
     });
     return [
       ...new Set(

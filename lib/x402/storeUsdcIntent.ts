@@ -11,6 +11,7 @@ import {
   type Hex,
 } from 'viem';
 import { kvEval, kvGet } from '@/lib/kv';
+import { logger } from '@/lib/logger';
 import {
   legacyBillingPaymentKey,
   paymentClaimKey,
@@ -42,6 +43,7 @@ import {
 } from '@/lib/x402/storePaymentSnapshot';
 import {
   findStoreUsdcAuthorizationTransactions,
+  readStoreUsdcAnchorBlock,
   readStoreUsdcAuthorizationState,
   storeUsdcAuthorizationExpiredUnused,
   STORE_USDC_ADDRESS,
@@ -59,12 +61,15 @@ export const STORE_USDC_EXPIRY_SAFETY_SEC = 5;
 export const STORE_USDC_SETTLEMENT_LEASE_SEC = 60;
 export const STORE_USDC_RECONCILE_RETRY_MS = 30_000;
 export const STORE_USDC_RECONCILE_BATCH_SIZE = 50;
+export const STORE_USDC_RECONCILE_PAGE_BLOCKS = 2_000n;
+export const STORE_USDC_RECONCILE_MAX_PAGES = 20;
 
 const INTENT_RE = /^0x[0-9a-f]{64}$/;
 const HASH_RE = /^[0-9a-f]{64}$/;
 const TX_RE = /^0x[0-9a-f]{64}$/;
 const DECIMAL_RE = /^(0|[1-9][0-9]*)$/;
 const PENDING_KEY = 'store:usdc:intent:pending';
+const PENDING_QUARANTINE_KEY = 'store:usdc:intent:quarantine';
 const MAX_FINALIZE_RETRIES = 4;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -167,6 +172,7 @@ type StoreUsdcIntentBase = {
   authorizationValidBeforeMax: string;
   bindingHash: string;
   nextReconcileAt?: number;
+  reconcileFromBlock?: string;
 };
 
 export type QuotedStoreUsdcIntent = StoreUsdcIntentBase & { state: 'quoted' };
@@ -235,7 +241,7 @@ export function storeUsdcNonce(intentSalt: Hex): Hex {
   );
 }
 
-function binding(value: Omit<StoreUsdcIntentBase, 'bindingHash' | 'nextReconcileAt'>): string {
+function binding(value: Omit<StoreUsdcIntentBase, 'bindingHash' | 'nextReconcileAt' | 'reconcileFromBlock'>): string {
   return canonicalHash(value);
 }
 
@@ -280,6 +286,9 @@ function parseBase(value: Record<string, unknown>): StoreUsdcIntentBase | null {
   const usdcQuoteAtomic = canonicalDecimal(value.usdcQuoteAtomic);
   const rateScaled = canonicalDecimal(value.rateScaled);
   const anchorBlock = canonicalDecimal(value.anchorBlock);
+  const reconcileFromBlock = value.reconcileFromBlock === undefined
+    ? undefined
+    : canonicalDecimal(value.reconcileFromBlock);
   const authorizationValidBeforeMax = canonicalDecimal(
     value.authorizationValidBeforeMax,
   );
@@ -307,6 +316,7 @@ function parseBase(value: Record<string, unknown>): StoreUsdcIntentBase | null {
     !safeTimestamp(value.rateFetchedAt) ||
     value.rounding !== 'ceil' ||
     anchorBlock === null ||
+    reconcileFromBlock === null ||
     !nonce ||
     !safeTimestamp(value.createdAt) ||
     !safeTimestamp(value.intentExpiresAt) ||
@@ -345,9 +355,11 @@ function parseBase(value: Record<string, unknown>): StoreUsdcIntentBase | null {
     ...(value.nextReconcileAt === undefined
       ? {}
       : { nextReconcileAt: value.nextReconcileAt }),
+    ...(reconcileFromBlock === undefined ? {} : { reconcileFromBlock }),
   };
   const immutable = { ...base };
   delete immutable.nextReconcileAt;
+  delete immutable.reconcileFromBlock;
   const { bindingHash, ...withoutHash } = immutable;
   if (
     base.contentRef !== hostedContentKey(base.resourceId, base.contentRevision) ||
@@ -1241,7 +1253,55 @@ export async function readSettledStoreUsdcAccess(
   return { ok: true, intent, ownership, purchase };
 }
 
-async function reschedule(intent: StoreUsdcIntent, raw: string, now: number): Promise<void> {
+// receipt 照合中の遅延 settle worker の書込みが replacement の採用を妨げないよう、
+// 同じ attempt/authorization の最新 record へ hash だけを merge する。
+// pending の型/score は SET 前に検査し、ZADD 失敗による部分更新への波及を断つ。
+const ADOPT_RECONCILED_TRANSACTION = [
+  "local pendingType = redis.call('TYPE', KEYS[2])",
+  'if type(pendingType) == ARGV[2] then pendingType = pendingType.ok end',
+  'if (pendingType ~= ARGV[13] and pendingType ~= ARGV[14]) or not tonumber(ARGV[10]) then',
+  '  return tonumber(ARGV[3])',
+  'end',
+  "local currentRaw = redis.call('GET', KEYS[1])",
+  'if not currentRaw then return tonumber(ARGV[1]) end',
+  'local currentOk, current = pcall(cjson.decode, currentRaw)',
+  'if not currentOk or type(current) ~= ARGV[2] then return tonumber(ARGV[3]) end',
+  'if (current.state ~= ARGV[4] and current.state ~= ARGV[5]) or',
+  '    current.attemptId ~= ARGV[6] or',
+  '    current.authorizationHash ~= ARGV[7] then',
+  '  return tonumber(ARGV[8])',
+  'end',
+  'current.txHash = ARGV[9]',
+  'current.nextReconcileAt = tonumber(ARGV[10])',
+  "redis.call('SET', KEYS[1], cjson.encode(current))",
+  "redis.call('ZADD', KEYS[2], ARGV[10], ARGV[11])",
+  'return tonumber(ARGV[12])',
+].join('\n');
+
+async function adoptReconciledTransaction(input: {
+  intent: SettlingStoreUsdcIntent | IndeterminateStoreUsdcIntent;
+  txHash: Hex;
+  now: number;
+}): Promise<'updated' | 'conflict' | 'storage'> {
+  const result = await kvEval<number>(
+    ADOPT_RECONCILED_TRANSACTION,
+    [storeUsdcIntentKey(input.intent.intentSalt), PENDING_KEY],
+    [
+      '0', 'table', '-3', 'settling', 'indeterminate',
+      input.intent.attemptId, input.intent.authorizationHash, '-1',
+      input.txHash, String(input.now), input.intent.intentSalt, '1', 'none', 'zset',
+    ],
+  );
+  if (!result.ok || result.value === 0 || result.value === -3) return 'storage';
+  return result.value === 1 ? 'updated' : 'conflict';
+}
+
+async function reschedule(
+  intent: StoreUsdcIntent,
+  raw: string,
+  now: number,
+  fromBlock?: bigint,
+): Promise<void> {
   if (
     intent.state === 'settled' ||
     intent.state === 'failed_prebroadcast' ||
@@ -1249,35 +1309,49 @@ async function reschedule(intent: StoreUsdcIntent, raw: string, now: number): Pr
   ) {
     return;
   }
-  await casIntent({
+  const updated = await casIntent({
     currentRaw: raw,
-    next: { ...intent, nextReconcileAt: now + STORE_USDC_RECONCILE_RETRY_MS },
+    next: {
+      ...intent,
+      nextReconcileAt: now + STORE_USDC_RECONCILE_RETRY_MS,
+      ...(fromBlock === undefined ? {} : { reconcileFromBlock: fromBlock.toString() }),
+    },
   });
+  if (updated === 'storage') {
+    // 再試行時刻の保存失敗を既存の pending 応答の 503 化へ波及させない。
+    // 支払いは未確定のままで、元の pending member を残し、失敗は監視へ記録する。
+    logger.warn('creator_store.usdc_purchase_reschedule_failed', { intentSalt: intent.intentSalt });
+  }
 }
+
+type ReconcileStoreUsdcResult =
+  | { ok: true; state: 'settled' | 'pending' | 'failed' }
+  | { ok: false; reason: 'not_found' | 'storage' | 'corrupt' };
 
 export async function reconcileStoreUsdcIntent(
   intentSalt: Hex,
   input: { now?: number; client?: StoreUsdcPublicClient } = {},
-): Promise<
-  | { ok: true; state: 'settled' | 'pending' | 'failed' }
-  | { ok: false; reason: 'not_found' | 'storage' | 'corrupt' }
-> {
+): Promise<ReconcileStoreUsdcResult> {
   const read = await readIntent(intentSalt);
   if (!read.ok) return { ok: false, reason: read.reason };
   if (!read.intent || !read.raw) return { ok: false, reason: 'not_found' };
-  const intent = read.intent;
+  let intent = read.intent;
+  let raw = read.raw;
   if (intent.state === 'settled') return { ok: true, state: 'settled' };
   if (intent.state === 'failed_prebroadcast') return { ok: true, state: 'failed' };
   if (intent.state === 'quoted') return { ok: true, state: 'pending' };
   const now = input.now ?? Date.now();
+  const retry = async (fromBlock?: bigint): Promise<ReconcileStoreUsdcResult> => {
+    await reschedule(intent, raw, now, fromBlock);
+    return { ok: true, state: 'pending' };
+  };
   const used = await readStoreUsdcAuthorizationState({
     payer: intent.claim.payer,
     nonce: intent.nonce,
     ...(input.client ? { client: input.client } : {}),
   });
   if (used === 'unavailable') {
-    await reschedule(intent, read.raw, now);
-    return { ok: true, state: 'pending' };
+    return retry();
   }
   if (used !== true) {
     if (
@@ -1297,26 +1371,62 @@ export async function reconcileStoreUsdcIntent(
         'authorization_expired_unused',
         now,
       );
+      // hash が残る未解決 intent が先頭を占有し、他の購入の回復を遅らせる波及を断つ。
+      if (failed === 'conflict') return retry();
       return failed === 'storage'
         ? { ok: false, reason: 'storage' }
         : { ok: true, state: failed === 'updated' ? 'failed' : 'pending' };
     }
-    await reschedule(intent, read.raw, now);
-    return { ok: true, state: 'pending' };
+    return retry();
   }
-  const candidates = 'txHash' in intent && intent.txHash
-    ? [intent.txHash]
-    : await findStoreUsdcAuthorizationTransactions({
-        payer: intent.claim.payer,
-        nonce: intent.nonce,
-        fromBlock: BigInt(intent.anchorBlock),
-        ...(input.client ? { client: input.client } : {}),
-      });
-  if (candidates === 'unavailable') {
-    await reschedule(intent, read.raw, now);
-    return { ok: true, state: 'pending' };
+
+  if (intent.state === 'signed') {
+    // 消費済み authorization を signed のまま残し、別 settle の開始へ波及させない。
+    const consumed: IndeterminateStoreUsdcIntent = {
+      ...intent,
+      state: 'indeterminate',
+      attemptId: randomBytes(32).toString('hex'),
+      settlementStartedAt: now,
+      leaseUntil: now,
+      indeterminateAt: now,
+    };
+    const updated = await casIntent({ currentRaw: raw, next: consumed });
+    if (updated === 'storage') return { ok: false, reason: 'storage' };
+    if (updated === 'conflict') return { ok: true, state: 'pending' };
+    intent = consumed;
+    raw = JSON.stringify(consumed);
   }
-  for (const txHash of candidates) {
+
+  const finalizeCandidate = async (
+    txHash: Hex,
+    candidatePageStart?: bigint,
+  ): Promise<ReconcileStoreUsdcResult | null> => {
+    // 旧 hash の欠落/revert が replacement の探索を止める波及を断つ。
+    // ログの hash だけでは採用せず、nonce・Transfer・finality・global claim を照合する。
+    const verification = await verifyStoreUsdcOnchain({
+      intent: { ...intent, payer: intent.claim.payer },
+      txHash,
+      ...(input.client ? { client: input.client } : {}),
+    });
+    // 候補の一時障害で証拠のページを飛ばすと、daily head が探索予算より速く進む間は
+    // 再発見できない。entitlement 未付与への波及を断つため、そのページから再試行する。
+    if (!verification.ok) {
+      return verification.reason === 'rpc_unavailable' && candidatePageStart !== undefined
+        ? retry(candidatePageStart)
+        : null;
+    }
+    if (verification.state === 'pending') {
+      // 保存 hash の完全一致 receipt が finality 待ちなら、同じ hash の再探索は不要。
+      // receipt 欠落の保存 hash は replacement 探索へ進める。
+      return candidatePageStart !== undefined || verification.reason === 'finality'
+        ? retry(candidatePageStart)
+        : null;
+    }
+    if (intent.txHash !== txHash) {
+      const adopted = await adoptReconciledTransaction({ intent, txHash, now });
+      if (adopted === 'storage') return { ok: false, reason: 'storage' };
+      if (adopted === 'conflict') return { ok: true, state: 'pending' };
+    }
     const finalized = await finalizeStoreUsdcPurchase({
       intentSalt,
       txHash,
@@ -1327,9 +1437,77 @@ export async function reconcileStoreUsdcIntent(
     if (finalized.reason === 'storage') {
       return { ok: false, reason: 'storage' };
     }
+    // 採用後の finality/RPC 変化でも古い raw で再スケジュールせず、採用 hash を保つ。
+    const latestRead = await readIntent(intentSalt);
+    if (!latestRead.ok) return { ok: false, reason: latestRead.reason };
+    if (!latestRead.intent || !latestRead.raw) return { ok: false, reason: 'not_found' };
+    if (latestRead.intent.state === 'settled') return { ok: true, state: 'settled' };
+    await reschedule(latestRead.intent, latestRead.raw, now);
+    return { ok: true, state: 'pending' };
+  };
+
+  if (intent.txHash) {
+    const resolved = await finalizeCandidate(intent.txHash);
+    if (resolved) return resolved;
   }
-  await reschedule(intent, read.raw, now);
-  return { ok: true, state: 'pending' };
+  const latest = await readStoreUsdcAnchorBlock(input.client);
+  if (latest === null) return retry();
+  const anchor = BigInt(intent.anchorBlock);
+  let fromBlock = intent.reconcileFromBlock ? BigInt(intent.reconcileFromBlock) : anchor;
+  if (fromBlock < anchor) fromBlock = anchor;
+  const candidates = new Map<Hex, bigint>();
+  let pages = 0;
+  while (fromBlock <= latest && pages < STORE_USDC_RECONCILE_MAX_PAGES) {
+    const pageEnd = fromBlock + STORE_USDC_RECONCILE_PAGE_BLOCKS - 1n;
+    const toBlock = pageEnd > latest ? latest : pageEnd;
+    const hashes = await findStoreUsdcAuthorizationTransactions({
+      payer: intent.claim.payer,
+      nonce: intent.nonce,
+      fromBlock,
+      toBlock,
+      ...(input.client ? { client: input.client } : {}),
+    });
+    // 途中ページの RPC 障害で未検証の候補を飛ばし、entitlement 未付与へ波及させない。
+    if (hashes === 'unavailable') return retry();
+    for (const hash of hashes) {
+      if (!candidates.has(hash)) candidates.set(hash, fromBlock);
+    }
+    fromBlock = toBlock + 1n;
+    pages += 1;
+  }
+  for (const [txHash, candidatePageStart] of candidates) {
+    const resolved = await finalizeCandidate(txHash, candidatePageStart);
+    if (resolved) return resolved;
+  }
+  return retry(fromBlock <= latest ? fromBlock : anchor);
+}
+
+// 両 ZSET の型/score を書込前に検査し、隔離先の障害が pending 証拠の消失へ波及しないようにする。
+const QUARANTINE_PENDING_MEMBER = [
+  'local function keyType(key)',
+  "  local result = redis.call('TYPE', key)",
+  '  if type(result) == ARGV[1] then return result.ok end',
+  '  return result',
+  'end',
+  'local pendingType = keyType(KEYS[1])',
+  'local quarantineType = keyType(KEYS[2])',
+  'if (pendingType ~= ARGV[2] and pendingType ~= ARGV[3]) or',
+  '    (quarantineType ~= ARGV[2] and quarantineType ~= ARGV[3]) or',
+  '    not tonumber(ARGV[4]) then',
+  '  return tonumber(ARGV[5])',
+  'end',
+  "redis.call('ZADD', KEYS[2], ARGV[4], ARGV[6])",
+  "redis.call('ZREM', KEYS[1], ARGV[6])",
+  'return tonumber(ARGV[7])',
+].join('\n');
+
+async function quarantinePendingMember(member: string, now: number): Promise<boolean> {
+  const result = await kvEval<number>(
+    QUARANTINE_PENDING_MEMBER,
+    [PENDING_KEY, PENDING_QUARANTINE_KEY],
+    ['table', 'none', 'zset', String(now), '-1', member, '1'],
+  );
+  return result.ok && result.value === 1;
 }
 
 export async function reconcilePendingStoreUsdcPurchases(input: {
@@ -1350,13 +1528,25 @@ export async function reconcilePendingStoreUsdcPurchases(input: {
   const summary = { checked: 0, settled: 0, failed: 0, pending: 0, storageErrors: 0 };
   for (const salt of due.value) {
     summary.checked += 1;
-    if (!INTENT_RE.test(salt)) {
-      summary.storageErrors += 1;
-      continue;
+    const intentNow = input.now ?? Date.now();
+    const result = INTENT_RE.test(salt)
+      ? await reconcileStoreUsdcIntent(salt as Hex, { ...input, now: intentNow })
+      : { ok: false as const, reason: 'invalid_salt' as const };
+    if (!result.ok) {
+      if (result.reason === 'storage') {
+        summary.storageErrors += 1;
+      } else {
+        // 壊れた先頭 member が毎 batch を占有し、正常 intent の回復を止める波及を断つ。
+        const quarantined = await quarantinePendingMember(salt, intentNow);
+        if (!quarantined) summary.storageErrors += 1;
+        else logger.warn('creator_store.usdc_purchase_pending_quarantined', {
+          member: salt,
+          reason: result.reason,
+        });
+      }
+    } else {
+      summary[result.state] += 1;
     }
-    const result = await reconcileStoreUsdcIntent(salt as Hex, input);
-    if (!result.ok) summary.storageErrors += 1;
-    else summary[result.state] += 1;
   }
   return summary;
 }
