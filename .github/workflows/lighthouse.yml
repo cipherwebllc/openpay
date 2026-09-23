@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 env:
   # GitHub Actions の Node.js 20 deprecation 対策 (詳細は ci.yml の同 env block 参照)
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
@@ -30,6 +33,9 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Check dependency sources
+        run: node scripts/lockfile-gate.mjs
+
       - name: Install
         run: npm ci
 
@@ -38,6 +44,6 @@ jobs:
 
       - name: Run Lighthouse CI
         run: |
-          npx --yes @lhci/cli@0.14 autorun
+          npx --yes @lhci/cli@0.14.0 autorun
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
