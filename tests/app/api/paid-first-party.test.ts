@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextResponse } from 'next/server';
 import { getAddress } from 'viem';
+import { forwardingCases, unforwardedHeaders } from '../../helpers/paidRouteWire';
 
 const routeMocks = vi.hoisted(() => ({
   verify: vi.fn(),
@@ -739,5 +740,25 @@ describe('first-party paid x402 routes', () => {
     };
     const schema = body.accepts[0]?.outputSchema;
     expect(schema?.input).toEqual({ type: 'http', method: 'GET', discoverable: true });
+  });
+});
+
+
+describe('R2 first-party forwarding pinning', () => {
+  it.each(forwardingCases)('forwards only the allowlist to verify and settle: $name', async ({ incoming, expected }) => {
+    const { demo } = await load();
+    routeMocks.verify.mockResolvedValue(NextResponse.json({ isValid: true, payer: PAYER }));
+    routeMocks.settle.mockResolvedValue(NextResponse.json({
+      success: true, transaction: TX_HASH, network: 'eip155:80002', payer: PAYER,
+    }));
+    const response = await demo.GET(new Request('http://test.local/api/paid/demo', {
+      headers: { ...incoming, ...unforwardedHeaders, 'X-PAYMENT': paymentHeader() },
+    }));
+    expect(response.status).toBe(200);
+    for (const handler of [routeMocks.verify, routeMocks.settle]) {
+      expect(handler).toHaveBeenCalledTimes(1);
+      const forwarded = handler.mock.calls[0]![0] as Request;
+      expect(Object.fromEntries(forwarded.headers)).toEqual(expected);
+    }
   });
 });

@@ -1,0 +1,171 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`R2 hosted JPYC response pinning > pins the fixed-salt v1 challenge body and encoded v2 header 1`] = `
+{
+  "body": "{"x402Version":1,"accepts":[{"scheme":"exact","network":"eip155:80002","maxAmountRequired":"6000000000000000000","resource":"https://open-pay.jp/api/paid/hosted/h_11111111111111111111111111111111?payer=0xabCabCabcabcaBCAbCABCaBCabCabcabcabCabcA","description":"Durable hosted note","mimeType":"application/json","payTo":"0x752B7AaD0089286EB7b553d84D05233d80c9FCB4","maxTimeoutSeconds":600,"asset":"0x00000000000000000000000000000000000cA11A","extra":{"name":"JPY Coin","version":"1","decimals":18,"assetTransferMethod":"eip3009","openpay":{"mode":"forwarder-split","forwarder":"0x752B7AaD0089286EB7b553d84D05233d80c9FCB4","merchant":"0x1234567890123456789012345678901234567890","merchantValue":"5000000000000000000","feeReceiver":"0x428483d2bd5E9f0e9f8E9f8e9F8E9F8E9f8e9F8e","feeValue":"1000000000000000000","commitVersion":"0xc1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1","intentSalt":"0x1111111111111111111111111111111111111111111111111111111111111111","authorizationValidBeforeMax":"2000000000","deploymentVersion":"creator-store.purchase.v1"}}}],"error":"payment_required"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+    "payment-required": "eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2UiOnsidXJsIjoiaHR0cHM6Ly9vcGVuLXBheS5qcC9hcGkvcGFpZC9ob3N0ZWQvaF8xMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMT9wYXllcj0weGFiQ2FiQ2FiY2FiY2FCQ0FiQ0FCQ2FCQ2FiQ2FiY2FiY2FiQ2FiY0EiLCJkZXNjcmlwdGlvbiI6IkR1cmFibGUgaG9zdGVkIG5vdGUiLCJtaW1lVHlwZSI6ImFwcGxpY2F0aW9uL2pzb24ifSwiYWNjZXB0cyI6W3sic2NoZW1lIjoiZXhhY3QiLCJuZXR3b3JrIjoiZWlwMTU1OjgwMDAyIiwiYW1vdW50IjoiNjAwMDAwMDAwMDAwMDAwMDAwMCIsImFzc2V0IjoiMHgwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMGNBMTFBIiwicGF5VG8iOiIweDc1MkI3QWFEMDA4OTI4NkVCN2I1NTNkODREMDUyMzNkODBjOUZDQjQiLCJtYXhUaW1lb3V0U2Vjb25kcyI6NjAwLCJleHRyYSI6eyJuYW1lIjoiSlBZIENvaW4iLCJ2ZXJzaW9uIjoiMSIsImRlY2ltYWxzIjoxOCwiYXNzZXRUcmFuc2Zlck1ldGhvZCI6ImVpcDMwMDkiLCJvcGVucGF5Ijp7Im1vZGUiOiJmb3J3YXJkZXItc3BsaXQiLCJmb3J3YXJkZXIiOiIweDc1MkI3QWFEMDA4OTI4NkVCN2I1NTNkODREMDUyMzNkODBjOUZDQjQiLCJtZXJjaGFudCI6IjB4MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5MCIsIm1lcmNoYW50VmFsdWUiOiI1MDAwMDAwMDAwMDAwMDAwMDAwIiwiZmVlUmVjZWl2ZXIiOiIweDQyODQ4M2QyYmQ1RTlmMGU5ZjhFOWY4ZTlGOEU5RjhFOWY4ZTlGOGUiLCJmZWVWYWx1ZSI6IjEwMDAwMDAwMDAwMDAwMDAwMDAiLCJjb21taXRWZXJzaW9uIjoiMHhjMWMxYzFjMWMxYzFjMWMxYzFjMWMxYzFjMWMxYzFjMWMxYzFjMWMxYzFjMWMxYzFjMWMxYzFjMWMxYzFjMWMxIiwiaW50ZW50U2FsdCI6IjB4MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMSIsImF1dGhvcml6YXRpb25WYWxpZEJlZm9yZU1heCI6IjIwMDAwMDAwMDAiLCJkZXBsb3ltZW50VmVyc2lvbiI6ImNyZWF0b3Itc3RvcmUucHVyY2hhc2UudjEifX19XSwiZXJyb3IiOiJwYXltZW50X3JlcXVpcmVkIn0=",
+  },
+  "status": 402,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v1 wire > pins conflict 1`] = `
+{
+  "body": "{"ok":false,"error":"purchase_intent_conflict"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 409,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v1 wire > pins malformed 1`] = `
+{
+  "body": "{"ok":false,"error":"invalid_payment_payload"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 400,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v1 wire > pins not found 1`] = `
+{
+  "body": "{"ok":false,"error":"purchase_intent_not_found"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 404,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v1 wire > pins pending 1`] = `
+{
+  "body": "{"ok":true,"state":"pending"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 202,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v1 wire > pins storage unavailable 1`] = `
+{
+  "body": "{"ok":false,"error":"storage_unavailable"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 503,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v1 wire > pins success 1`] = `
+{
+  "body": "{"ok":true,"state":"settled","resourceId":"h_11111111111111111111111111111111","contentRevision":7,"title":"Durable hosted note","kind":"text","value":"paid content","txHash":"0xabababababababababababababababababababababababababababababababab"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+    "payment-response": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsIm5ldHdvcmsiOiJlaXAxNTU6ODAwMDIiLCJwYXllciI6IjB4YWJDYWJDYWJjYWJjYUJDQWJDQUJDYUJDYWJDYWJjYWJjYWJDYWJjQSJ9",
+    "x-payment-response": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsIm5ldHdvcmsiOiJlaXAxNTU6ODAwMDIiLCJwYXllciI6IjB4YWJDYWJDYWJjYWJjYUJDQWJDQUJDYUJDYWJDYWJjYWJjYWJDYWJjQSJ9",
+  },
+  "status": 200,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v1 wire > pins verification rejected 1`] = `
+{
+  "body": "{"ok":false,"error":"signature_mismatch"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 402,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v2 wire > pins conflict 1`] = `
+{
+  "body": "{"ok":false,"error":"purchase_intent_conflict"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 409,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v2 wire > pins malformed 1`] = `
+{
+  "body": "{"ok":false,"error":"invalid_payment_payload"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 400,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v2 wire > pins not found 1`] = `
+{
+  "body": "{"ok":false,"error":"purchase_intent_not_found"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 404,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v2 wire > pins pending 1`] = `
+{
+  "body": "{"ok":true,"state":"pending"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 202,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v2 wire > pins storage unavailable 1`] = `
+{
+  "body": "{"ok":false,"error":"storage_unavailable"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 503,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v2 wire > pins success 1`] = `
+{
+  "body": "{"ok":true,"state":"settled","resourceId":"h_11111111111111111111111111111111","contentRevision":7,"title":"Durable hosted note","kind":"text","value":"paid content","txHash":"0xabababababababababababababababababababababababababababababababab"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+    "payment-response": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsIm5ldHdvcmsiOiJlaXAxNTU6ODAwMDIiLCJwYXllciI6IjB4YWJDYWJDYWJjYWJjYUJDQWJDQUJDYUJDYWJDYWJjYWJjYWJDYWJjQSJ9",
+    "x-payment-response": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4YWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYmFiYWJhYiIsIm5ldHdvcmsiOiJlaXAxNTU6ODAwMDIiLCJwYXllciI6IjB4YWJDYWJDYWJjYWJjYUJDQWJDQUJDYUJDYWJDYWJjYWJjYWJDYWJjQSJ9",
+  },
+  "status": 200,
+}
+`;
+
+exports[`R2 hosted JPYC response pinning > v2 wire > pins verification rejected 1`] = `
+{
+  "body": "{"ok":false,"error":"signature_mismatch"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 402,
+}
+`;

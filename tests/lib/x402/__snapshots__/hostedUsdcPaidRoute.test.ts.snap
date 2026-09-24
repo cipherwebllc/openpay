@@ -1,0 +1,173 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`R2 hosted USDC response pinning > pins the fixed-clock fixed-salt v1 challenge body and encoded v2 header 1`] = `
+{
+  "body": "{"x402Version":1,"accepts":[{"scheme":"exact","network":"base","maxAmountRequired":"2000000","resource":"https://open-pay.jp/api/paid/hosted/h_11111111111111111111111111111111?payer=0x1111111111111111111111111111111111111111&rail=usdc","description":"Base USDC product","mimeType":"application/json","payTo":"0x2222222222222222222222222222222222222222","maxTimeoutSeconds":180,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2","decimals":6,"assetTransferMethod":"eip3009","openpay":{"rail":"usdc","deploymentVersion":"creator-store-usdc-vanilla-v1","intentSalt":"0x2222222222222222222222222222222222222222222222222222222222222222","nonce":"0x3333333333333333333333333333333333333333333333333333333333333333","usdcQuoteAtomic":"2000000","priceJpyc":"300","rateScaled":"150000000","rateFetchedAt":1900000000000,"fxQuoteExpiresAt":1900000180000,"rounding":"ceil","authorizationValidBeforeMax":"1900000180"}}}],"error":"payment_required"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+    "payment-required": "eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2UiOnsidXJsIjoiaHR0cHM6Ly9vcGVuLXBheS5qcC9hcGkvcGFpZC9ob3N0ZWQvaF8xMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMT9wYXllcj0weDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEmcmFpbD11c2RjIiwiZGVzY3JpcHRpb24iOiJCYXNlIFVTREMgcHJvZHVjdCIsIm1pbWVUeXBlIjoiYXBwbGljYXRpb24vanNvbiJ9LCJhY2NlcHRzIjpbeyJzY2hlbWUiOiJleGFjdCIsIm5ldHdvcmsiOiJlaXAxNTU6ODQ1MyIsImFtb3VudCI6IjIwMDAwMDAiLCJhc3NldCI6IjB4ODMzNTg5ZkNENmVEYjZFMDhmNGM3QzMyRDRmNzFiNTRiZEEwMjkxMyIsInBheVRvIjoiMHgyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwibWF4VGltZW91dFNlY29uZHMiOjE4MCwiZXh0cmEiOnsibmFtZSI6IlVTRCBDb2luIiwidmVyc2lvbiI6IjIiLCJkZWNpbWFscyI6NiwiYXNzZXRUcmFuc2Zlck1ldGhvZCI6ImVpcDMwMDkiLCJvcGVucGF5Ijp7InJhaWwiOiJ1c2RjIiwiZGVwbG95bWVudFZlcnNpb24iOiJjcmVhdG9yLXN0b3JlLXVzZGMtdmFuaWxsYS12MSIsImludGVudFNhbHQiOiIweDIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJub25jZSI6IjB4MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMyIsInVzZGNRdW90ZUF0b21pYyI6IjIwMDAwMDAiLCJwcmljZUpweWMiOiIzMDAiLCJyYXRlU2NhbGVkIjoiMTUwMDAwMDAwIiwicmF0ZUZldGNoZWRBdCI6MTkwMDAwMDAwMDAwMCwiZnhRdW90ZUV4cGlyZXNBdCI6MTkwMDAwMDE4MDAwMCwicm91bmRpbmciOiJjZWlsIiwiYXV0aG9yaXphdGlvblZhbGlkQmVmb3JlTWF4IjoiMTkwMDAwMDE4MCJ9fX1dLCJlcnJvciI6InBheW1lbnRfcmVxdWlyZWQifQ==",
+  },
+  "status": 402,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v1 wire > pins conflict 1`] = `
+{
+  "body": "{"ok":false,"error":"purchase_intent_conflict"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 409,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v1 wire > pins malformed 1`] = `
+{
+  "body": "{"ok":false,"error":"invalid_payment_payload"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 400,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v1 wire > pins not found 1`] = `
+{
+  "body": "{"ok":false,"error":"purchase_intent_not_found"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 404,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v1 wire > pins pending 1`] = `
+{
+  "body": "{"ok":true,"state":"pending"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 202,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v1 wire > pins storage unavailable 1`] = `
+{
+  "body": "{"ok":false,"error":"storage_unavailable"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 503,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v1 wire > pins success 1`] = `
+{
+  "body": "{"ok":true,"state":"settled","resourceId":"h_11111111111111111111111111111111","contentRevision":2,"title":"Base USDC product","kind":"text","value":"paid content","txHash":"0x4444444444444444444444444444444444444444444444444444444444444444","payment":{"version":1,"rail":"usdc","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","assetSymbol":"USDC","chainId":8453,"paidAtomic":"2000000","priceJpyc":"300","quote":{"rateScaled":"150000000","rateFetchedAt":1900000000000,"fxQuoteExpiresAt":1900000180000,"rounding":"ceil"}}}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+    "payment-response": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NCIsIm5ldHdvcmsiOiJiYXNlIiwicGF5ZXIiOiIweDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEifQ==",
+    "x-payment-response": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NCIsIm5ldHdvcmsiOiJiYXNlIiwicGF5ZXIiOiIweDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEifQ==",
+  },
+  "status": 200,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v1 wire > pins verification rejected 1`] = `
+{
+  "body": "{"x402Version":1,"accepts":[{"scheme":"exact","network":"base","maxAmountRequired":"2000000","resource":"https://open-pay.jp/api/paid/hosted/h_11111111111111111111111111111111?payer=0x1111111111111111111111111111111111111111&rail=usdc","description":"Base USDC product","mimeType":"application/json","payTo":"0x2222222222222222222222222222222222222222","maxTimeoutSeconds":180,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2","decimals":6,"assetTransferMethod":"eip3009","openpay":{"rail":"usdc","deploymentVersion":"creator-store-usdc-vanilla-v1","intentSalt":"0x2222222222222222222222222222222222222222222222222222222222222222","nonce":"0x3333333333333333333333333333333333333333333333333333333333333333","usdcQuoteAtomic":"2000000","priceJpyc":"300","rateScaled":"150000000","rateFetchedAt":1900000000000,"fxQuoteExpiresAt":1900000180000,"rounding":"ceil","authorizationValidBeforeMax":"1900000180"}}}],"error":"signature_mismatch"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+    "payment-required": "eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2UiOnsidXJsIjoiaHR0cHM6Ly9vcGVuLXBheS5qcC9hcGkvcGFpZC9ob3N0ZWQvaF8xMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMT9wYXllcj0weDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEmcmFpbD11c2RjIiwiZGVzY3JpcHRpb24iOiJCYXNlIFVTREMgcHJvZHVjdCIsIm1pbWVUeXBlIjoiYXBwbGljYXRpb24vanNvbiJ9LCJhY2NlcHRzIjpbeyJzY2hlbWUiOiJleGFjdCIsIm5ldHdvcmsiOiJlaXAxNTU6ODQ1MyIsImFtb3VudCI6IjIwMDAwMDAiLCJhc3NldCI6IjB4ODMzNTg5ZkNENmVEYjZFMDhmNGM3QzMyRDRmNzFiNTRiZEEwMjkxMyIsInBheVRvIjoiMHgyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwibWF4VGltZW91dFNlY29uZHMiOjE4MCwiZXh0cmEiOnsibmFtZSI6IlVTRCBDb2luIiwidmVyc2lvbiI6IjIiLCJkZWNpbWFscyI6NiwiYXNzZXRUcmFuc2Zlck1ldGhvZCI6ImVpcDMwMDkiLCJvcGVucGF5Ijp7InJhaWwiOiJ1c2RjIiwiZGVwbG95bWVudFZlcnNpb24iOiJjcmVhdG9yLXN0b3JlLXVzZGMtdmFuaWxsYS12MSIsImludGVudFNhbHQiOiIweDIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJub25jZSI6IjB4MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMyIsInVzZGNRdW90ZUF0b21pYyI6IjIwMDAwMDAiLCJwcmljZUpweWMiOiIzMDAiLCJyYXRlU2NhbGVkIjoiMTUwMDAwMDAwIiwicmF0ZUZldGNoZWRBdCI6MTkwMDAwMDAwMDAwMCwiZnhRdW90ZUV4cGlyZXNBdCI6MTkwMDAwMDE4MDAwMCwicm91bmRpbmciOiJjZWlsIiwiYXV0aG9yaXphdGlvblZhbGlkQmVmb3JlTWF4IjoiMTkwMDAwMDE4MCJ9fX1dLCJlcnJvciI6InNpZ25hdHVyZV9taXNtYXRjaCJ9",
+  },
+  "status": 402,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v2 wire > pins conflict 1`] = `
+{
+  "body": "{"ok":false,"error":"purchase_intent_conflict"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 409,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v2 wire > pins malformed 1`] = `
+{
+  "body": "{"ok":false,"error":"invalid_payment_payload"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 400,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v2 wire > pins not found 1`] = `
+{
+  "body": "{"ok":false,"error":"purchase_intent_not_found"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 404,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v2 wire > pins pending 1`] = `
+{
+  "body": "{"ok":true,"state":"pending"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 202,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v2 wire > pins storage unavailable 1`] = `
+{
+  "body": "{"ok":false,"error":"storage_unavailable"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+  },
+  "status": 503,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v2 wire > pins success 1`] = `
+{
+  "body": "{"ok":true,"state":"settled","resourceId":"h_11111111111111111111111111111111","contentRevision":2,"title":"Base USDC product","kind":"text","value":"paid content","txHash":"0x4444444444444444444444444444444444444444444444444444444444444444","payment":{"version":1,"rail":"usdc","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","assetSymbol":"USDC","chainId":8453,"paidAtomic":"2000000","priceJpyc":"300","quote":{"rateScaled":"150000000","rateFetchedAt":1900000000000,"fxQuoteExpiresAt":1900000180000,"rounding":"ceil"}}}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+    "payment-response": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NCIsIm5ldHdvcmsiOiJiYXNlIiwicGF5ZXIiOiIweDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEifQ==",
+    "x-payment-response": "eyJzdWNjZXNzIjp0cnVlLCJ0cmFuc2FjdGlvbiI6IjB4NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NCIsIm5ldHdvcmsiOiJiYXNlIiwicGF5ZXIiOiIweDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEifQ==",
+  },
+  "status": 200,
+}
+`;
+
+exports[`R2 hosted USDC response pinning > v2 wire > pins verification rejected 1`] = `
+{
+  "body": "{"x402Version":1,"accepts":[{"scheme":"exact","network":"base","maxAmountRequired":"2000000","resource":"https://open-pay.jp/api/paid/hosted/h_11111111111111111111111111111111?payer=0x1111111111111111111111111111111111111111&rail=usdc","description":"Base USDC product","mimeType":"application/json","payTo":"0x2222222222222222222222222222222222222222","maxTimeoutSeconds":180,"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","extra":{"name":"USD Coin","version":"2","decimals":6,"assetTransferMethod":"eip3009","openpay":{"rail":"usdc","deploymentVersion":"creator-store-usdc-vanilla-v1","intentSalt":"0x2222222222222222222222222222222222222222222222222222222222222222","nonce":"0x3333333333333333333333333333333333333333333333333333333333333333","usdcQuoteAtomic":"2000000","priceJpyc":"300","rateScaled":"150000000","rateFetchedAt":1900000000000,"fxQuoteExpiresAt":1900000180000,"rounding":"ceil","authorizationValidBeforeMax":"1900000180"}}}],"error":"signature_mismatch"}",
+  "headers": {
+    "cache-control": "no-store",
+    "content-type": "application/json",
+    "payment-required": "eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2UiOnsidXJsIjoiaHR0cHM6Ly9vcGVuLXBheS5qcC9hcGkvcGFpZC9ob3N0ZWQvaF8xMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMT9wYXllcj0weDExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTEmcmFpbD11c2RjIiwiZGVzY3JpcHRpb24iOiJCYXNlIFVTREMgcHJvZHVjdCIsIm1pbWVUeXBlIjoiYXBwbGljYXRpb24vanNvbiJ9LCJhY2NlcHRzIjpbeyJzY2hlbWUiOiJleGFjdCIsIm5ldHdvcmsiOiJlaXAxNTU6ODQ1MyIsImFtb3VudCI6IjIwMDAwMDAiLCJhc3NldCI6IjB4ODMzNTg5ZkNENmVEYjZFMDhmNGM3QzMyRDRmNzFiNTRiZEEwMjkxMyIsInBheVRvIjoiMHgyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyIiwibWF4VGltZW91dFNlY29uZHMiOjE4MCwiZXh0cmEiOnsibmFtZSI6IlVTRCBDb2luIiwidmVyc2lvbiI6IjIiLCJkZWNpbWFscyI6NiwiYXNzZXRUcmFuc2Zlck1ldGhvZCI6ImVpcDMwMDkiLCJvcGVucGF5Ijp7InJhaWwiOiJ1c2RjIiwiZGVwbG95bWVudFZlcnNpb24iOiJjcmVhdG9yLXN0b3JlLXVzZGMtdmFuaWxsYS12MSIsImludGVudFNhbHQiOiIweDIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIiLCJub25jZSI6IjB4MzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMyIsInVzZGNRdW90ZUF0b21pYyI6IjIwMDAwMDAiLCJwcmljZUpweWMiOiIzMDAiLCJyYXRlU2NhbGVkIjoiMTUwMDAwMDAwIiwicmF0ZUZldGNoZWRBdCI6MTkwMDAwMDAwMDAwMCwiZnhRdW90ZUV4cGlyZXNBdCI6MTkwMDAwMDE4MDAwMCwicm91bmRpbmciOiJjZWlsIiwiYXV0aG9yaXphdGlvblZhbGlkQmVmb3JlTWF4IjoiMTkwMDAwMDE4MCJ9fX1dLCJlcnJvciI6InNpZ25hdHVyZV9taXNtYXRjaCJ9",
+  },
+  "status": 402,
+}
+`;
