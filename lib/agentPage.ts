@@ -1,5 +1,6 @@
 // /agent「OpenPay Agent」の content SOT (ja/en 同梱)。guide 系と同じ規約で、messages/ には
-// 置かない (全ページの i18n bundle を太らせない)。料率は lib/legal.ts の DISCLOSED_X402_FEE から
+// 置かない (全ページの i18n bundle を太らせない)。設定生成の追加文言は messages の
+// AgentConfigGenerator namespace を /agent だけへ配信する。料率は lib/legal.ts の DISCLOSED_X402_FEE から
 // 描画時に導出する (直書き禁止・掟 14)。
 //
 // 文言の不変条件 (tests/lib/agentPage.test.ts が検査):
@@ -62,10 +63,9 @@ export type AgentPageContent = {
     readonly summaryHint: string;
     readonly lead: string;
     readonly modeLabel: string;
-    readonly modeOptions: Record<AgentMode, string>;
     readonly clientLabel: string;
     readonly clientOptions: Record<AgentClient, string>;
-    readonly fields: Record<AgentConfigField, { label: string; hint: string }>;
+    readonly fields: Record<Exclude<AgentConfigField, 'kovaWallet' | 'kovaAgentAddress'>, { label: string; hint: string }>;
     readonly catalogTrustLabel: string;
     readonly catalogTrustHint: string;
     readonly humanPaysNote: string;
@@ -302,7 +302,6 @@ const ja: AgentPageContent = {
     summaryHint: 'Claude のチャットなど、Agent が自分で設定を書けない環境向け',
     lead: 'Agent の実行環境へ貼り付ける設定を作ります。貼り付けるのはあなたです。',
     modeLabel: '使い方',
-    modeOptions: { 'agent-pays': 'Agent が支払う', 'human-pays': '人が支払う' },
     clientLabel: '利用環境',
     clientOptions: {
       'claude-code': 'Claude Code',
@@ -319,7 +318,7 @@ const ja: AgentPageContent = {
     catalogTrustLabel: 'AI ストア掲載の URL を許可 (CATALOG_TRUST)',
     catalogTrustHint:
       'OpenPay のカタログに載っている URL は、接続先に追加しなくても支払えます。その場合、支払い条件が掲載内容と一致しなければ拒否されます (接続先に自分で追加したホストは照合されません)。',
-    humanPaysNote: '「人が支払う」は Agent がウォレットに触れないため、鍵も上限も不要です。',
+    humanPaysNote: '「自分で承認」は Agent がウォレットに触れないため、鍵も上限も不要です。',
     invalid: '入力を確認してください',
     outputLabel: {
       'claude-code': 'ターミナルで実行',
@@ -568,7 +567,6 @@ const en: AgentPageContent = {
     summaryHint: 'For Claude chat and other hosts where the agent can’t write its own config',
     lead: 'Builds the config to paste into your agent’s environment. You do the pasting.',
     modeLabel: 'Mode',
-    modeOptions: { 'agent-pays': 'Agent pays', 'human-pays': 'Human pays' },
     clientLabel: 'Environment',
     clientOptions: {
       'claude-code': 'Claude Code',
@@ -585,7 +583,7 @@ const en: AgentPageContent = {
     catalogTrustLabel: 'Allow URLs listed on the AI Store (CATALOG_TRUST)',
     catalogTrustHint:
       'URLs in the OpenPay catalog are payable without adding their host; for those, payment terms that differ from the listing are refused. Hosts you add yourself are not checked against the catalog.',
-    humanPaysNote: '“Human pays” needs no key and no limits: the agent never touches a wallet.',
+    humanPaysNote: '“Approve payments yourself” needs no key and no limits: the agent never touches a wallet.',
     invalid: 'Check this value',
     outputLabel: {
       'claude-code': 'Run in your terminal',

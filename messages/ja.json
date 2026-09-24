@@ -1,4 +1,22 @@
 {
+  "AgentConfigGenerator": {
+    "modeOptions": {
+      "human-pays": "自分で承認",
+      "agent-pays": "Agent Wallet (ローカル)",
+      "agent-pays-kova": "Agent Wallet (Kova・第三者)"
+    },
+    "kovaWallet": {
+      "label": "Kova の wallet 名",
+      "hint": "Kova で管理する wallet 名 (半角英数字・.・_・-、空欄不可)"
+    },
+    "kovaAgentAddress": {
+      "label": "Kova の公開 EVM アドレス",
+      "hint": "Kova の wallet アドレスは kova wallet info で確認してください。秘密鍵は貼らないでください。"
+    },
+    "providerNote": "Kova (Komlock lab) は第三者の Execution Provider です。OpenPay は Kova の鍵や資格情報を受け取りません。",
+    "policyNote": "Kova の policy はこの支払い経路の金額を制限しません (Kova 0.1.2 実測)。上限はこの MCP の設定だけです。",
+    "balanceNote": "失ってもよい少額だけを入れてください。"
+  },
   "CrossChainForwardPendingPanel": {
     "title": "前回の Arc 支払いを確認",
     "scanning": "保存済みの支払いを確認しています。",

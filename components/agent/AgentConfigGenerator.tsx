@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { CodeBlock } from '@/components/guide/AgentGuidePieces';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
@@ -8,6 +9,7 @@ import { AGENT_CLIENTS, AGENT_MODES, DEFAULT_AGENT_CONFIG_INPUT, invalidAgentCon
 import { trackAgentEvent } from '@/lib/agentTrack';
 
 export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPageContent['generator'] }) {
+  const t = useTranslations('AgentConfigGenerator');
   const [client, setClient] = useState<AgentClient>('claude-code');
   const [mode, setMode] = useState<AgentMode>('agent-pays');
   const [input, setInput] = useState({ ...DEFAULT_AGENT_CONFIG_INPUT });
@@ -17,8 +19,15 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
   // details の中身は閉じていても SSR される。server と client でコピーボタンの有無が食い違う hydration エラーを避ける。
   const available = useHydrationSafeAvailable(clipboardAvailable);
   // human-pays に適用されない入力は検証・出力の対象から外す。
-  const invalid = mode === 'human-pays' ? [] : invalidAgentConfigFields(input);
+  const invalid = mode === 'human-pays' ? [] : invalidAgentConfigFields(input, mode);
   const output = invalid.length === 0 ? renderAgentConfig(client, mode, input) : null;
+  const fields = {
+    ...c.fields,
+    ...(mode === 'agent-pays-kova' ? {
+      kovaWallet: { label: t('kovaWallet.label'), hint: t('kovaWallet.hint') },
+      kovaAgentAddress: { label: t('kovaAgentAddress.label'), hint: t('kovaAgentAddress.hint') },
+    } : {}),
+  };
   function recordInteraction(nextClient = client, nextMode = mode) {
     if (generated.current) return;
     generated.current = true;
@@ -38,7 +47,7 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
       <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="min-w-0 text-sm font-medium">{c.modeLabel}
           <select className={fieldClass} value={mode} onChange={(e) => { const value = e.target.value as AgentMode; setMode(value); recordInteraction(client, value); }}>
-            {AGENT_MODES.map((value) => <option key={value} value={value}>{c.modeOptions[value]}</option>)}
+            {AGENT_MODES.map((value) => <option key={value} value={value}>{t(`modeOptions.${value}`)}</option>)}
           </select>
         </label>
         <label className="min-w-0 text-sm font-medium">{c.clientLabel}
@@ -46,21 +55,22 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
             {AGENT_CLIENTS.map((value) => <option key={value} value={value}>{c.clientOptions[value]}</option>)}
           </select>
         </label>
-        {mode === 'agent-pays' ? (Object.keys(c.fields) as AgentConfigField[]).map((field) => (
+        {mode !== 'human-pays' ? (Object.keys(fields) as AgentConfigField[]).map((field) => (
           <div key={field} className="min-w-0">
-            <label htmlFor={`agent-${field}`} className="text-sm font-medium">{c.fields[field].label}</label>
-            <input id={`agent-${field}`} className={fieldClass} type="text" inputMode={field === 'allowedHosts' ? 'text' : 'decimal'} value={input[field]} aria-invalid={invalid.includes(field)} aria-describedby={`agent-${field}-hint${invalid.includes(field) ? ` agent-${field}-error` : ''}`} onChange={(e) => { setInput({ ...input, [field]: e.target.value }); recordInteraction(); }} />
-            <p id={`agent-${field}-hint`} className="mt-1 text-xs text-slate-500">{c.fields[field].hint}</p>
+            <label htmlFor={`agent-${field}`} className="text-sm font-medium">{fields[field]!.label}</label>
+            <input id={`agent-${field}`} className={fieldClass} type="text" inputMode={field.startsWith('max') ? 'decimal' : 'text'} value={input[field]} aria-invalid={invalid.includes(field)} aria-describedby={`agent-${field}-hint${invalid.includes(field) ? ` agent-${field}-error` : ''}`} onChange={(e) => { setInput({ ...input, [field]: e.target.value }); recordInteraction(); }} />
+            <p id={`agent-${field}-hint`} className="mt-1 text-xs text-slate-500">{fields[field]!.hint}</p>
             {invalid.includes(field) ? <p id={`agent-${field}-error`} className="mt-1 text-xs text-red-700">{c.invalid}</p> : null}
           </div>
         )) : null}
       </div>
-      {mode === 'agent-pays' ? (
+      {mode !== 'human-pays' ? (
         <div className="mt-4">
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={input.catalogTrust} aria-describedby="agent-catalog-hint" onChange={(e) => { setInput({ ...input, catalogTrust: e.target.checked }); recordInteraction(); }} />{c.catalogTrustLabel}</label>
           <p id="agent-catalog-hint" className="mt-2 text-xs leading-relaxed text-slate-500">{c.catalogTrustHint}</p>
         </div>
       ) : <p className="mt-4 text-sm text-slate-600">{c.humanPaysNote}</p>}
+      {mode === 'agent-pays-kova' ? <div className="mt-4 space-y-2 text-xs leading-relaxed text-slate-600"><p>{t('providerNote')}</p><p>{t('policyNote')}</p><p>{t('balanceNote')}</p></div> : null}
       {output !== null ? (
         <div>
           <CodeBlock label={c.outputLabel[client]} code={output} />

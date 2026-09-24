@@ -5,10 +5,13 @@
 // env 名・既定値の SoT は packages/x402-sdk/src/guards.mjs — 食い違いは
 // tests/lib/agentSetup.test.ts のドリフトフェンスが CI で検出する。
 //
-// 秘密情報は生成物に一切含めない。署名方式は `SIGNER_MODE=keystore` (openpay-x402-mcp 0.15 以降):
+// 秘密情報は生成物に一切含めない。ローカル署名は `SIGNER_MODE=keystore` (openpay-x402-mcp 0.15 以降):
 // 鍵は MCP が利用者のマシン上で生成・保管し (`wallet_init`)、AI には公開アドレスしか返さない。
 // 人が鍵を用意して env に貼る手順は無い (`BUYER_PRIVATE_KEY=0x...` のプレースホルダは MCP が起動時に拒否する)。
 // ウォレット未作成でも discovery_search / x402_quote は動き、x402_pay だけが wallet_not_initialized で止まる。
+// Kova (0.18 以降) は人が管理する wallet 名と公開アドレスだけを設定に含める。
+
+import { isAddress } from 'viem';
 
 export const AGENT_SETUP_URL = 'https://open-pay.jp/agent/setup.md';
 
@@ -18,7 +21,7 @@ export const AGENT_MCP_PACKAGE = 'openpay-x402-mcp';
  * 遡って変えてしまい、Web を戻しても取り消せない。packages/x402-mcp/package.json の minor と一致
  * (tests/lib/agentSetup.test.ts のフェンス)。keystore は 0.15 から・購入ログ (wallet_history) は 0.16 から。
  */
-export const AGENT_MCP_VERSION = '0.17';
+export const AGENT_MCP_VERSION = '0.18';
 export const AGENT_MCP_SPEC = `${AGENT_MCP_PACKAGE}@${AGENT_MCP_VERSION}`;
 export const AGENT_PAYS_SERVER = 'openpay-x402';
 export const HUMAN_PAYS_SERVER = 'openpay-order';
@@ -39,7 +42,7 @@ export const AGENT_CLIENTS = [
 ] as const;
 export type AgentClient = (typeof AGENT_CLIENTS)[number];
 
-export const AGENT_MODES = ['agent-pays', 'human-pays'] as const;
+export const AGENT_MODES = ['human-pays', 'agent-pays', 'agent-pays-kova'] as const;
 export type AgentMode = (typeof AGENT_MODES)[number];
 
 export type AgentConfigInput = {
@@ -50,13 +53,17 @@ export type AgentConfigInput = {
   /** カンマ区切りの bare host。 */
   allowedHosts: string;
   catalogTrust: boolean;
+  kovaWallet: string;
+  kovaAgentAddress: string;
 };
 
 export type AgentConfigField =
   | 'maxPerCallJpyc'
   | 'maxSessionJpyc'
   | 'maxDailyJpyc'
-  | 'allowedHosts';
+  | 'allowedHosts'
+  | 'kovaWallet'
+  | 'kovaAgentAddress';
 
 export const DEFAULT_AGENT_CONFIG_INPUT: AgentConfigInput = {
   maxPerCallJpyc: AGENT_LIMIT_DEFAULTS.maxPerCallJpyc,
@@ -64,6 +71,8 @@ export const DEFAULT_AGENT_CONFIG_INPUT: AgentConfigInput = {
   maxDailyJpyc: '',
   allowedHosts: AGENT_LIMIT_DEFAULTS.allowedHosts,
   catalogTrust: AGENT_LIMIT_DEFAULTS.catalogTrust,
+  kovaWallet: '',
+  kovaAgentAddress: '',
 };
 
 // guards.mjs parseJpycToAtomic と同じ受理形 (小数 18 桁まで・0 より大きい)。
@@ -99,6 +108,7 @@ export function normalizeAllowedHosts(raw: string): string[] | null {
 /** 不正なフィールドの一覧 (空 = 生成してよい)。 */
 export function invalidAgentConfigFields(
   input: AgentConfigInput,
+  mode: AgentMode = 'agent-pays',
 ): AgentConfigField[] {
   const invalid: AgentConfigField[] = [];
   if (!isPositiveJpyc(input.maxPerCallJpyc)) invalid.push('maxPerCallJpyc');
@@ -109,20 +119,27 @@ export function invalidAgentConfigFields(
   if (normalizeAllowedHosts(input.allowedHosts) === null) {
     invalid.push('allowedHosts');
   }
+  if (mode === 'agent-pays-kova') {
+    if (!input.kovaWallet || /[^A-Za-z0-9._-]/.test(input.kovaWallet)) invalid.push('kovaWallet');
+    if (!isAddress(input.kovaAgentAddress)) invalid.push('kovaAgentAddress');
+  }
   return invalid;
 }
 
 /** 生成設定に入れる env (秘密は含めない)。入力は検証済みであること。 */
-export function buildAgentEnv(input: AgentConfigInput): [string, string][] {
+export function buildAgentEnv(input: AgentConfigInput, mode: AgentMode = 'agent-pays'): [string, string][] {
   const hosts = normalizeAllowedHosts(input.allowedHosts);
-  if (hosts === null || invalidAgentConfigFields(input).length > 0) {
+  if (hosts === null || invalidAgentConfigFields(input, mode).length > 0) {
     throw new Error('agent config input is invalid');
   }
   const entries: [string, string][] = [
-    ['SIGNER_MODE', 'keystore'],
+    ['SIGNER_MODE', mode === 'agent-pays-kova' ? 'kova' : 'keystore'],
     ['MAX_PER_CALL_JPYC', input.maxPerCallJpyc],
     ['MAX_SESSION_JPYC', input.maxSessionJpyc],
   ];
+  if (mode === 'agent-pays-kova') {
+    entries.push(['KOVA_WALLET', input.kovaWallet], ['KOVA_AGENT_ADDRESS', input.kovaAgentAddress]);
+  }
   if (input.maxDailyJpyc !== '') {
     entries.push(['MAX_DAILY_JPYC', input.maxDailyJpyc]);
   }
@@ -156,7 +173,7 @@ export function renderAgentConfig(
   input: AgentConfigInput,
 ): string {
   const { server, args } = launchFor(mode);
-  const env = mode === 'agent-pays' ? buildAgentEnv(input) : [];
+  const env = mode === 'human-pays' ? [] : buildAgentEnv(input, mode);
 
   if (client === 'claude-desktop') {
     const entry: Record<string, unknown> = { command: 'npx', args };

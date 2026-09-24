@@ -6,6 +6,14 @@ import { DEFAULT_MAX_PER_CALL_JPYC, DEFAULT_MAX_SESSION_JPYC, DEFAULT_ALLOWED_HO
 
 const md = readFileSync('public/agent/setup.md', 'utf8');
 describe('agent setup document drift fences', () => {
+  it('keeps the Kova branch public-only and discloses the measured policy limitation', () => {
+    const branch = md.slice(md.indexOf('### Kova: alternative to Steps 3 and 5'), md.indexOf('## Step 4: Verify'));
+    for (const text of ['third-party Execution Provider', '`kova init`', '`kova wallet info`', 'person performs owner operations themselves', 'command -v kova', '`PATH`', 'SIGNER_MODE=kova', 'KOVA_WALLET=<name>', 'KOVA_AGENT_ADDRESS=<0x…>', 'signerMode: kova', "Skip Step 5's `wallet_init`", '`wallet_prove`', 'Polygon JPYC', 'No POL', 'Kova policy does not limit amounts', 'Kova 0.1.2', "Only this MCP's settings impose amount limits", 'record of intent', 'JPY Coin', 'ReceiveWithAuthorization', 'OpenPay Agent Proof', '"Proof"', 'kova_policy_denied', 'kova_not_found', 'kova_sign_failed']) expect(branch).toContain(text);
+    expect(branch).not.toMatch(/7702|KOVA_CREDENTIAL\s*[=:]/);
+    expect(md).toContain('never ask for or read `~/.kova/config.json`');
+    expect(md).toContain('`BUYER_PRIVATE_KEY`, `KOVA_CREDENTIAL`, or any `STEWARD_*`');
+    expect(md).toContain('For Kova, report only the wallet name and public address');
+  });
   it('discloses the signed-in owner flow and the single-use proof link restrictions', () => {
     for (const text of ['`wallet_prove`', 'OpenPay (SIWE) on /agent', 'signed-in browser once', 'valid 5 minutes, single-use', 'do not paste it anywhere else', '`feature_disabled`']) expect(md).toContain(text);
   });
