@@ -76,6 +76,28 @@ function edit(title: string) {
   fireEvent.click(within(screen.getByText(title).closest('li')!).getByRole('button', { name: /編集|Edit/ }));
 }
 
+// DOM の pin は container.innerHTML の SHA-256。ただしこの画面の <svg> はすべて lucide-react の icon で、版更新で
+// path data や既定の描画属性 (viewBox/stroke 等)、icon 名の改名で lucide が付ける class (lucide / lucide-*) が
+// 変わり、自前の code と無関係に hash が落ちる。そこで複製した tree の各 <svg> の子を空にし、属性は配置と a11y に
+// 効く class/width/height/role/aria-* だけ残し、class からも lucide / lucide-* を外す (<svg> 自体と位置・自前の
+// utility class は残す。R11b の QR の網と同じ規則)。<svg> の外の DOM は bytes のまま (実 DOM は触らない)。
+// 基準値を意図して採り直すときは、基準にする code (分割の網なら分割前) で一時的に expect の代わりに domHash の
+// 全桁を書き出して下の domHashes に写し (失敗表示の Received は途中で切れる)、同じ file が基準の code と比較先の
+// code の両方で書き換えなしで通ることを確かめる。
+const SVG_KEPT_ATTR = /^(class|width|height|role|aria-.+)$/;
+function domHash(container: HTMLElement) {
+  const copy = container.cloneNode(true) as HTMLElement;
+  for (const svg of copy.querySelectorAll('svg')) {
+    svg.replaceChildren();
+    for (const { name } of [...svg.attributes]) if (!SVG_KEPT_ATTR.test(name)) svg.removeAttribute(name);
+    const cls = svg.getAttribute('class');
+    if (cls !== null) {
+      svg.setAttribute('class', cls.split(/\s+/).filter((c) => c && c !== 'lucide' && !c.startsWith('lucide-')).join(' '));
+    }
+  }
+  return createHash('sha256').update(copy.innerHTML).digest('hex');
+}
+
 beforeEach(() => {
   state.wallet = A;
   state.session = A;
@@ -230,19 +252,19 @@ describe('seller private content and session boundaries (rule 15)', () => {
 });
 
 describe('seller extraction DOM and request pins', () => {
-  // SHA-256 of unnormalized container.innerHTML, captured from base 3b205825 before extraction.
-  // These fix element/attribute/class/text/order bytes; do not regenerate for a code move.
+  // domHash (<svg> の中身だけ除く) の基準値。分割前の merge-base 164f49c2 で採取した。要素・属性・class・
+  // 文字・順序の bytes を固定する。code の移動では採り直さない (落ちたら DOM か文言が変わっている)。
   const domHashes: Record<string, string> = {
-    'ja/empty': '518556dd6f76284d6cfb33dec05ee94ffa7903e7dbcddc0cc4c9aa173e537dfa',
-    'ja/list': 'fb383994cbca1c475e971eb33ff0de1f345b182b2bed5ed981dcbcaf151d7994',
-    'ja/digital-edit': 'c4f4f7fd00b134625ee3652f9af6e840bc59604890ef576921bd85071c58db87',
-    'ja/license-new': '1e35c55eaf402c6f490df754056fc7dfc076051870c3d2fd86ddfd30c324a834',
-    'ja/license-edit': '6091cd3ec6e1d526ffaaa785ee302b649d4e894855d06b3a22e71867fea1f92d',
-    'en/empty': '8c22ff04b49b246eac4869f4dfddfa12840c8fd0cc1e7f8c02942dd49e45d7ad',
-    'en/list': '93591a110c7074edb16d524b1ed04ed590c65ba5cffd03683e1e38e6d8c3af59',
-    'en/digital-edit': '1a2a6d5af6f94d15d35a5300ddf52b3ab63ac25a43ffa72aa8c06188c5bd38c6',
-    'en/license-new': '6d41c2c5c12b8f566a014d6eb22ec9ff41d611a9b24e90ed483e4121e6e0884c',
-    'en/license-edit': '56ac06c56a61621d6088f3340c1ae780347992b43b19f9f14612d5539f9ddcab',
+    'ja/empty': '1ed820fa049d52574b314da662cf7459896624c039e66e999389780401e6c025',
+    'ja/list': '1e7da8a56d7f2681b49de4dd50049c5c95b5d8f8712aaf57ab44f393c9788435',
+    'ja/digital-edit': '8892684dfff80fba75285c8cece1bb3655928adf23a1eec9c09bcca88a2fffd3',
+    'ja/license-new': 'c968fe9fce5200a5f53b81ef166a7100661619a914c8bc61234840fdc97dbb9d',
+    'ja/license-edit': '85d97c175408bb273c418becb6fa2a2a70b255189076f7bad4d22f968879ab53',
+    'en/empty': 'b43392969f8fed3f01a1f1fe5a5401e5a182316ceb68ec3f67b68ab24ec43f0a',
+    'en/list': 'f3bf688d996b50a3d2e2af1be573554dc974fe468b92bfa45faef9421f61ad4b',
+    'en/digital-edit': '0e6518dde2e8a539b0e6c9261c3578a577995f8876e809e4afe52ed90e0424a7',
+    'en/license-new': 'e64af7814aefb6cacd7d3363c146a6389359d989ac3a93d5ea8c068ca12c6760',
+    'en/license-edit': 'efd73d3f274bad9509bb6be76791e8d29563cc17856697e6784722ac096ae4d1',
   };
   it.each((['ja', 'en'] as const).flatMap((locale) => ['empty', 'list', 'digital-edit', 'license-new', 'license-edit'].map((mode) => ({ locale, mode }))))('$locale $mode DOM bytes', async ({ locale, mode }) => {
     state.license = mode !== 'empty';
@@ -262,7 +284,7 @@ describe('seller extraction DOM and request pins', () => {
       await waitFor(() => expect(content()).toHaveValue('Private instructions'));
     }
     if (mode === 'license-new') fireEvent.click(screen.getByRole('radio', { name: locale === 'ja' ? '利用ライセンス NFT' : 'Usage license NFT' }));
-    expect(createHash('sha256').update(container.innerHTML).digest('hex')).toBe(domHashes[`${locale}/${mode}`]);
+    expect(domHash(container)).toBe(domHashes[`${locale}/${mode}`]);
   });
 
   it.each([false, true])('digital POST preserves raw JSON order, nulls and delivery omission (delivery=%s)', async (delivery) => {
@@ -459,13 +481,13 @@ describe('seller request pins for update, license and sale toggles', () => {
 });
 
 describe('seller extraction DOM pins for error states', () => {
-  // SHA-256 of unnormalized container.innerHTML, captured on origin/main (pre-extraction) code.
-  // Do not regenerate for a code move; a mismatch means a DOM/wording change.
+  // domHash (<svg> の中身だけ除く) の基準値。分割前の merge-base 164f49c2 で採取した。
+  // code の移動では採り直さない (落ちたら DOM か文言が変わっている)。
   const domHashes: Record<string, string> = {
-    'ja/errors': '12b094e73a1132acf385e3ccb4a180020e33bdbe989e945601f0442bc1432c20',
-    'ja/license-invalid': 'c936032df233130446a9cf0a0f5ecd1792a539da09f627576507cc26d69e01bf',
-    'en/errors': '24d3bd6eb05fa4c28c74528c9d0a23fe3489f96000c2e620db3af982e966b414',
-    'en/license-invalid': '30cffd291d8e8f6e1267e226a14f77046811e7944dc1dcbb916ebfc54e1fcb29',
+    'ja/errors': 'c5243a7864614c0abcf736964b1217fa5aa8f0c24e7f7beaeb2e2cf487ecc16e',
+    'ja/license-invalid': '2d7ff5743bd15e8d1f5ace26e2ccd6b03c691d35e7a626221ba0e297dc8f6b67',
+    'en/errors': '5026692511d25a22b6b07fb933a91ad6d924f7a62995d81bf1c41c3cb7372d0f',
+    'en/license-invalid': '07d83475ce1c639833d2e930e419136d14612ad1311f5afa5ea91ef6a1d08057',
   };
   it.each((['ja', 'en'] as const).flatMap((locale) => ['errors', 'license-invalid'].map((mode) => ({ locale, mode }))))('$locale $mode DOM bytes', async ({ locale, mode }) => {
     state.license = true;
@@ -490,7 +512,7 @@ describe('seller extraction DOM pins for error states', () => {
       fireEvent.submit(content().closest('form')!);
       await screen.findByRole('alert');
     }
-    expect(createHash('sha256').update(container.innerHTML).digest('hex')).toBe(domHashes[`${locale}/${mode}`]);
+    expect(domHash(container)).toBe(domHashes[`${locale}/${mode}`]);
   });
 });
 
