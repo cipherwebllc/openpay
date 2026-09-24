@@ -54,6 +54,11 @@ export async function POST(req: Request): Promise<NextResponse> {
     }
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
+  // JSON の `null` / 数値 / 文字列も parse は成功する。object でなければ欄を読む前に 400 で返す
+  // (null のまま欄を読むと TypeError → 500 + Sentry event になっていた・第 6 回 B-R6f)。
+  if (cappedBody.value === null || typeof cappedBody.value !== 'object') {
+    return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
+  }
   const body = cappedBody.value as { message?: unknown; signature?: unknown };
 
   // domain 束縛はサーバ制御の許可リストで判定する (Host ヘッダは偽装可能なので使わない —

@@ -120,6 +120,11 @@ export async function POST(req: Request): Promise<NextResponse> {
       { status: 400 },
     );
   }
+  // JSON の `null` も parse は成功し、分解代入で TypeError → 500 になっていた (第 6 回 B-R6f)。money-path なので
+  // null だけを 400 にする (文字列/数値の本文は従来どおり invalid_chain・pro/subscribe と同じ線)。
+  if (capped.value === null) {
+    return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
+  }
   // 既存の分解代入・検証順序は不変に保つ (掟12: money-path は追加のみ)。
   const body = capped.value as {
     txHash?: unknown;

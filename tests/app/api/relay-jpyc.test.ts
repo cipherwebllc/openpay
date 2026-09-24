@@ -63,6 +63,15 @@ describe('POST /api/relay/jpyc (env-gate)', () => {
     const body = (await res.json()) as { error?: string };
     expect(body.error).toBe('invalid_payload');
   });
+
+  it('本文が JSON の null → 400 invalid_payload (raw.chainId の TypeError で 500 にしない・B-R6f)', async () => {
+    vi.stubEnv(EIP3009_ON, '1');
+    vi.stubEnv('RELAYER_PRIVATE_KEY', DUMMY_RELAYER_KEY);
+    const mod = await import('@/app/api/relay/jpyc/route');
+    const res = await mod.POST(req(null));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_payload' });
+  });
 });
 
 // recover (forwarder) × a1 (usage fee) の排他は resolver (jpycForwarderFor) で graceful に解決する:

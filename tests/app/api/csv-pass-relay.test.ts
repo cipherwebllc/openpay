@@ -253,6 +253,12 @@ describe('POST /api/csv-pass/relay — route 固有検証', () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ ok: false, error: 'invalid_payload' });
   });
+
+  it('本文が JSON の null → 400 invalid_payload (TypeError の 500 にしない・B-R6f)', async () => {
+    const res = await POST(req(null));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_payload' });
+  });
 });
 
 describe('POST /api/csv-pass/relay — relay 結果の応答整形 + guards 配線', () => {
