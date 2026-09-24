@@ -3533,21 +3533,36 @@ describe('A2c saved-order-only notification', () => {
     return { ...saved, state: 'signed' as const, bind: { ...saved.bind, validBefore }, intent: { ...saved.intent, validBefore, issuedAt: Date.now() } };
   }
   it.each(['relay', 'standard', 'different-shop'] as const)('unresolved old payment scopes the %s checkout hold and notice', async (kind) => {
+    // Fixture issuance, hook loading and recovery deadlines must share one clock.
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-24T00:00:00Z'));
     setupRelayReady(); const record = unresolvedRecord(); saveOrderDelivery(record);
-    const client = await realRelay(); vi.useFakeTimers();
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'indeterminate' }));
+    const holdUntil = Number(record.intent.validBefore) * 1000;
+    const client = await realRelay();
+    const statusReadTimes: number[] = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      statusReadTimes.push(Date.now());
+      return Response.json({ ok: true, state: 'indeterminate' });
+    });
     const params = { ...savedParams, orderId: 'new', ...(kind === 'standard' ? { mode: 'standard' as const } : {}), ...(kind === 'different-shop' ? { to: '0x9999999999999999999999999999999999999999' as Address } : {}) };
     const page = render(<QueryClientProvider client={client}><CheckoutForm params={params} /></QueryClientProvider>);
-    await vi.waitFor(async () => {
-      await act(async () => vi.advanceTimersByTimeAsync(0));
-      expect(screen.getByText(kind === 'different-shop' ? '以前のお支払いを確認中です。このお店へのお支払いは続けられます。' : '前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
-    }, { timeout: 2000, interval: 10 });
+    // The notice precedes the lazy recovery import. Await its timers being installed;
+    // vi.waitFor would advance time while that import is still racing real I/O.
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText(kind === 'different-shop' ? '以前のお支払いを確認中です。このお店へのお支払いは続けられます。' : '前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
     const button = screen.getByRole('button', { name: /JPYC を支払う/ });
     if (kind === 'different-shop') expect(button).toBeEnabled(); else expect(button).toBeDisabled();
     expect(screen.queryByText('お支払いが完了しました')).toBeNull();
-    await act(async () => vi.advanceTimersByTimeAsync(300_001));
+    await act(async () => vi.advanceTimersByTimeAsync(holdUntil - Date.now() - 1));
+    if (kind === 'different-shop') expect(button).toBeEnabled(); else expect(button).toBeDisabled();
+    expect(screen.getByText(kind === 'different-shop' ? '以前のお支払いを確認中です。このお店へのお支払いは続けられます。' : '前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(statusReadTimes.at(-1)).toBe(holdUntil);
     expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeEnabled();
     expect(screen.getByText(kind === 'different-shop' ? '以前のお支払いを確認中です。このお店へのお支払いは続けられます。' : '前回の支払いの状態を確認できませんでした。支払い直す前にお店のスタッフに確認してください。')).toBeInTheDocument();
+    expect(screen.queryByText('お支払いが完了しました')).toBeNull();
     expect(loadOrderDelivery().kind).toBe('ready');
     expect(fetchSpy.mock.calls.every(([url]) => url === '/api/relay/jpyc/status')).toBe(true);
     page.unmount(); client.clear(); fetchSpy.mockRestore(); vi.useRealTimers();
@@ -3574,11 +3589,17 @@ describe('A2c saved-order-only notification', () => {
       });
     });
     const page = render(<QueryClientProvider client={client}><CheckoutForm params={{ ...savedParams, orderId: 'new' }} /></QueryClientProvider>);
-    await vi.waitFor(async () => {
-      await act(async () => vi.advanceTimersByTimeAsync(0));
-      expect(screen.getByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
-    }, { timeout: 2000, interval: 10 });
-    await act(async () => vi.advanceTimersByTimeAsync(expiry - Date.now()));
+    // Await this mount's lazy recovery timers even when no earlier test loaded the chunk.
+    await act(async () => {
+      await vi.dynamicImportSettled();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTimeAsync(expiry - Date.now() - 1));
+    expect(expiryReads).toEqual([]);
+    expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeDisabled();
+    expect(screen.getByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(expiryReads).toEqual([expiry]);
     expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeDisabled();
     expect(screen.getByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
