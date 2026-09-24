@@ -12,6 +12,26 @@ npm run typecheck && npm run lint && npm run test:run   # local 全 pass
 ./scripts/predeploy-backup.sh               # .env.local を backup (Vercel CLI 上書き対策)
 ```
 
+### Production flag E2E (F13)
+
+公開 production ON フラグの CI スナップショットは [`e2e/prodFlags.env`](../e2e/prodFlags.env)。
+README の live 表記と user が承認した project memory の点灯記録を含み、名前は
+`.env.local.example`・`lib/env.ts` 等の実装に合わせる (Vercel の実設定は未照合)。
+production の公開フラグを変更するときはこのファイルも確認する。ネットワークは testnet、鍵/forwarder はダミー、
+server-only フラグ/秘密は含めない。`.github/workflows/e2e.yml` の `e2e-prodflags` が同じファイルを
+**build 前**に読み、Chromium のみで `/pay`・`/checkout` (mobile order)・`/tip` の smoke/料金行を検証する。
+既存の flags-OFF suite は別 job のまま維持する。ブラウザの API は `page.route` で固定し、未定義の
+API/外部通信はテスト失敗にする。例外は Coinbase SDK の同一 origin・非 API の HEAD probe
+(ローカルサーバへ通す) と `cca-lite.coinbase.com` の telemetry (記録せず中断し、外部へ送らない)。
+実決済・Web Push 配送・Service Worker 自体の検証は含まない。
+
+smoke を含め失敗は job failure にし、`continue-on-error` は使わない。retry は 0、実行時間は
+timed step と `playwright-prodflags-report/results.json` の `stats.duration` (ms) で確認する。
+独立レビューの scratch build では fixture 修正後に 8 tests が 3 回連続 pass (spec 約 3.4 秒)、
+拡張 vector でも 8 tests pass。CI 予算は install/build 込み約 6.5〜7 分 (推定)、job 上限 15 分。
+ローカル再現時は `.env.local` のない隔離コピーで同じ vector を build 前に読み込む (掟 2)。
+CI が権威であり、ローカルの描画は仕様の根拠にしない。
+
 ### 1.1 Lua-backed テスト (CAS スクリプト)
 
 `lib/x402/**` の CAS は Upstash の `EVAL` に渡す Lua 文字列なので、以前は kv モックが Lua の

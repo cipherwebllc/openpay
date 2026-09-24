@@ -26,6 +26,7 @@ next-env.d.ts
 
 # Playwright
 playwright-report/
+playwright-prodflags-report/
 test-results/
 playwright/.cache/
 

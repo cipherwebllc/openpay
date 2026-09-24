@@ -5,6 +5,8 @@ import { defineConfig, devices } from '@playwright/test';
 // のみ smoke する。
 export default defineConfig({
   testDir: './e2e',
+  // F13 has its own build/env and config; preserve the existing flags-OFF baseline.
+  testIgnore: ['**/prodflags/**'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   // CI: retries は flaky 再試行の時間爆発を抑えるため 1、workers は runner の 4 vCPU を活かし 4。
