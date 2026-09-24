@@ -120,7 +120,7 @@ describe('startGuide content', () => {
       expect(m.alternates?.canonical).toContain('/guide/start');
       expect(m.alternates?.languages).toBeDefined();
       const images = m.openGraph?.images;
-      // 既定の og-image.png (/guide/qr と共用) ではなく専用画像であること。
+      // 既定の og-home.webp (トップ・他の guide と共用) ではなく専用画像であること。
       expect(JSON.stringify(images)).toContain('/og-start.webp');
     }
     expect(existsSync(join(process.cwd(), 'public', 'og-start.webp'))).toBe(true);

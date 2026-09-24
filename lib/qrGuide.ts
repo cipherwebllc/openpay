@@ -211,7 +211,7 @@ export function qrGuideContentFor(locale: string): QrGuideContent {
   return locale === 'en' ? EN : JA;
 }
 
-/** /guide/qr の metadata。OG 画像は現行トップの og-image.png を流用 (裁定 N8)。 */
+/** /guide/qr の metadata。OG 画像は guide 共通の既定 (トップと同じ og-home.webp) を使う。 */
 export function qrGuideMetadata(locale: string): Metadata {
   const c = qrGuideContentFor(locale);
   // OG/Twitter/canonical/hreflang は guide 共通ビルダーで (P5・N9)。

@@ -69,7 +69,7 @@ describe('guideSellMetadata: metadata 組立', () => {
     expect(metadata.alternates?.canonical).toBe(`/${loc}/guide/sell`);
     expect(metadata.openGraph?.images).toEqual([
       {
-        url: '/og-image.png',
+        url: '/og-home.webp',
         width: 1200,
         height: 630,
         alt: `${c.metaTitle} · OpenPay`,

@@ -6,7 +6,7 @@ OpenPay は、JPYC / USDC のウォレット送金を、店舗・イベント向
 
 **Demo**: <https://open-pay.jp> · **Status**: Beta · **License**: MIT
 
-![OpenPay screenshot](./public/og-image.png)
+![OpenPay](./public/og-home.webp)
 
 **Live demo (mobile) — receive / register / pay · 実際の操作（受取・レジ・支払い）**
 

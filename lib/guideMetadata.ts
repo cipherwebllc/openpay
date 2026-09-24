@@ -3,7 +3,9 @@
 // (ja/en) を明示する。alternates は layout に置くと全下層が canonical=/ja になる
 // 事故を招くため (app/[locale]/layout.tsx 参照)、ページ単位でここから設定する。
 // ⚠️ openGraph を子で設定すると layout の og-image 継承が丸ごと消えるため、
-// images は必ず明示する (省略時は現行トップの og-image.png)。
+// images は必ず明示する (省略時はトップと同じ総合版 og-home.webp)。
+// 旧 og-image.png は「手数料最安クラス0%〜」を画像に焼き込んでおり、レジ (JPYC は通常決済も 1%)
+// 等の現行料金と食い違うため既定から外した (第 6 回レビュー E13 の follow-up・掟 14)。
 
 import type { Metadata } from 'next';
 
@@ -26,7 +28,7 @@ export function guidePageMetadata(opts: {
   // 正規化しないと canonical が /fr/... 等の存在しない URL になる。
   const locale = opts.locale === 'en' ? 'en' : 'ja';
   const image: GuideOgImage = opts.ogImage ?? {
-    url: '/og-image.png',
+    url: '/og-home.webp',
     width: 1200,
     height: 630,
     alt: opts.title,
