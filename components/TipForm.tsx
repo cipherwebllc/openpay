@@ -9,9 +9,8 @@ import { formatUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
-import { InfoTooltip } from './InfoTooltip';
+import { breakdownRow } from './PaymentBreakdownRows';
 import { OnrampCta } from './OnrampCta';
-import { Row } from './Row';
 import type { SignReassuranceProps } from './SignReassurance';
 import {
   PaymentSuccessOverlay,
@@ -75,11 +74,8 @@ import {
 } from '@/lib/paymentRoute';
 import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
-import {
-  isFallbackSafeRelayError,
-  isRelayIpRateLimitedError,
-  isRelayResponseUnknownError,
-} from '@/lib/relay/relayResponseError';
+import { isFallbackSafeRelayError } from '@/lib/relay/relayResponseError';
+import { deriveTipGuards } from '@/lib/paymentFlowGuards/tip';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   DEFAULT_TIP_PRESETS,
@@ -327,37 +323,49 @@ export function TipForm({
     totalCustomerOutflow,
   );
 
+  // 再送封鎖・flow pending・送信可否は /tip 専用の policy (route 限定ロック・完了後の次のチップ) に置く
+  // (R14・式は移動のみ)。
+  const {
+    relayAmbiguous,
+    gaslessAmbiguous,
+    gaslessStoreUnavailable,
+    relayIpRateLimited,
+    directFlowPending,
+    flowPending,
+    gasQuoteReady,
+    directSettledNoRetry,
+    settledNoRetry,
+    canSubmit,
+  } = deriveTipGuards({
+    isStandard,
+    useRelay,
+    standard,
+    relay,
+    gasless,
+    ownsStandardAttempt,
+    crossChainLocked,
+    crossChainResult,
+    params,
+    address,
+    preview,
+    arcScannedScope,
+    arcRecoveryScope,
+    activeQuote,
+    isConnected,
+    wrongChain,
+    saData,
+    standardReady,
+    breakdown,
+    insufficientBalance,
+  });
+
   // 決済結果を mode 中立に正規化 (relay は txHash のみ・blockNumber/userOpHash 無し)。
-  const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
-  const relayAmbiguous = relay.recoveryState != null || relayResponseUnknown;
-  // Pimlico は broadcast 後の receipt 取得失敗を relay と同じ unknown として保持する。
-  // latch 中は新しい UserOperation ではなく、保持済み hash の receipt 再照会だけを許可する。
-  const gaslessAmbiguous = !isStandard && !useRelay && gasless.isUnknown;
-  // pending record store (localStorage) が読めず未解決 UserOp の有無を判定できない状態。
-  // broadcast 済みとは言い切れないので ambiguous とは別扱いにし、gasless 経路だけを塞ぐ
-  // (relay は localStorage に依存しないため、この fail-closed を波及させない)。
-  const gaslessStoreUnavailable = !isStandard && !useRelay && gasless.pendingStoreUnavailable;
-  const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
-    ? relay.error
-    : null;
-  // relay intent は sessionStorage に保存され、同一タブの TipForm で復元される。
-  // 別タブ・NativeTipForm は対象外。方法切替で未解決の送金が二重払いへ波及しないよう、
-  // 復元中・曖昧応答の封鎖を current route から独立させる。
-  const directFlowPending = relay.isRestoring || relayAmbiguous
-    ? true
-    : isStandard
-      ? standard.isRestoring || standard.isPending || standard.isUnknown
-      : useRelay
-        ? relay.isPending
-        : gasless.isPending || gaslessAmbiguous;
   const directFlowSuccess = isStandard
     ? ownsStandardAttempt && standard.isSuccess
     : useRelay
     ? !!(relay.data?.success && relay.data.txHash)
     : !!gasless.data?.success;
   const directFlowTxHash = isStandard ? standard.merchantTxHash : useRelay ? relay.data?.txHash : gasless.data?.txHash;
-  const arcRecoveryScanning = params.token === 'usdc' && params.chain === 'arc' && !!address && !preview && arcScannedScope !== arcRecoveryScope;
-  const flowPending = directFlowPending || crossChainLocked || arcRecoveryScanning;
   const flowSuccess = directFlowSuccess || !!crossChainResult;
   const flowTxHash = crossChainResult ? crossChainResult.mintTxHash : directFlowTxHash;
   const flowUserOpHash = crossChainResult
@@ -373,44 +381,12 @@ export function TipForm({
       ? undefined
       : gasless.data?.blockNumber;
   const restoredRelayPayment = useRelay && relay.restoredIntent != null;
-
-  // relay は gas quote / smart account 不要なので readiness 即満たす。circle は permitAmount を含む
-  // activeQuote(circleQuote) 確定まで待つ (未算定で送信すると useBatchPayment が throw)。
-  const gasQuoteReady = isStandard || useRelay || activeQuote.data !== undefined;
-  // 送金が確定 (または broadcast 済で確定しうる) 後の再送信を禁止。再送すると同一受取人へ
-  // 2 件目の on-chain 送金 = 二重支払いになる。revert (送金未成立) は安全なので再試行を許す
-  // 復元された standard 成功は今回のチップではないため、新規送信を妨げない。
-  const directSettledNoRetry =
-    relayAmbiguous || relay.hasActiveIntent ||
-    (isStandard && (standard.hasActiveIntent || standard.isUnknown || standard.isFeeError || (ownsStandardAttempt && standard.isSuccess))) ||
-    (!isStandard && !useRelay && (gaslessAmbiguous || !!gasless.data?.success)) ||
-    (useRelay &&
-      (!!relayIpRateLimited ||
-        (!!relay.data && (relay.data.success || !!relay.data.pending))));
-  const settledNoRetry = directSettledNoRetry || !!crossChainResult;
   // relay 202: broadcast 済だが未確定 (success でも error でもない)。送信ボタンに「送信中」を
   // 出してフィードバックの空白を防ぐ (再送は settledNoRetry で既に禁止)。
   const relayPending =
     useRelay && !!relay.data && !relay.data.success && !!relay.data.pending;
   // 未接続時に最下部 CTA からウォレット選択セクションへ誘導するためのアンカー。
   const walletSectionRef = useRef<HTMLElement | null>(null);
-
-  const canSubmit =
-    !preview &&
-    isConnected &&
-    !wrongChain &&
-    (isStandard ? standardReady : useRelay || !!saData) &&
-    // creator 受取 > 0 を要求 (custom amount 未入力だと gas 分で customerPays が
-    // 正になり得るが、tip 額 0 の空 batch は無意味)。hook 側でも calls.length===0
-    // を弾くが、UI でも button を無効化して金額入力を促す。
-    breakdown.merchantReceives > 0n &&
-    breakdown.customerPays > 0n &&
-    !insufficientBalance &&
-    !flowPending &&
-    gasQuoteReady &&
-    !settledNoRetry &&
-    // gasless 経路のみ封鎖 (relay へ切り替えれば支払える)。
-    !gaslessStoreUnavailable;
 
   // gas congested はチェーン別の早期 abort なので、生のエラーメッセージ
   // (デバッグ向け詳細) ではなく i18n された案内文に差し替える。
@@ -972,55 +948,47 @@ export function TipForm({
           {t('breakdownTitle')}
         </p>
         <dl className="mt-2 space-y-1.5">
-          <Row label={t('creatorRow')} value={fmt(breakdown.merchantReceives)} />
+          {breakdownRow({ label: t('creatorRow'), value: fmt(breakdown.merchantReceives) })}
           {/* fee=0 のとき手数料行は非表示 (Phase 1 alpha)。 */}
-          {breakdown.feeAmount > 0n && (
-            <Row label={t('feeRow')} value={fmt(breakdown.feeAmount)} />
-          )}
+          {breakdown.feeAmount > 0n &&
+            breakdownRow({ label: t('feeRow'), value: fmt(breakdown.feeAmount) })}
           {/* relay は gas quote 非取得。recover=固定回収額 / free=OpenPay 立替 (無料)。
               非 relay は従来 paymaster quote (USDC erc20 / JPYC sponsorship)。 */}
-          {isStandard ? (
-            <Row label={t('gasRow')} labelExtra={<InfoTooltip text={t('gasInfoUsdcArc')} />} value={t('gasRowUsdcArc')} />
-          ) : useRecover ? (
-            <Row
-              label={t('gasRow')}
-              labelExtra={<InfoTooltip text={t('gasInfoJpycRecover')} />}
-              value={fmt(relayGasEquiv)}
-            />
-          ) : useRelay || isJpyc ? (
-            // JPYC ガスレス (relay free / 非 relay sponsorship free) は無徴収。中立ラベル。
-            <Row
-              label={t('gasRowFree')}
-              labelExtra={<InfoTooltip text={t('gasInfoJpycRelay')} />}
-              value={t('gasRowRelayFree')}
-            />
-          ) : (
-            <Row
-              label={t('gasRow')}
-              labelExtra={
-                <InfoTooltip
-                  text={
-                    isCircle
+          {breakdownRow(
+            isStandard
+              ? { label: t('gasRow'), tooltip: t('gasInfoUsdcArc'), value: t('gasRowUsdcArc') }
+              : useRecover
+                ? {
+                  label: t('gasRow'),
+                  tooltip: t('gasInfoJpycRecover'),
+                  value: fmt(relayGasEquiv),
+                }
+                : useRelay || isJpyc
+                  // JPYC ガスレス (relay free / 非 relay sponsorship free) は無徴収。中立ラベル。
+                  ? {
+                    label: t('gasRowFree'),
+                    tooltip: t('gasInfoJpycRelay'),
+                    value: t('gasRowRelayFree'),
+                  }
+                  : {
+                    label: t('gasRow'),
+                    tooltip: isCircle
                       ? t('gasInfoUsdcCircle', { nativeToken })
                       : isErc20Paymaster
                         ? t('gasInfoUsdc', { nativeToken })
-                        : t('gasInfoJpyc', { nativeToken })
-                  }
-                />
-              }
-              value={
-                gasAmount !== undefined
-                  ? t('gasRowValue', { amount: fmt(gasAmount) })
-                  : t('gasRowPending')
-              }
-            />
+                        : t('gasInfoJpyc', { nativeToken }),
+                    value:
+                      gasAmount !== undefined
+                        ? t('gasRowValue', { amount: fmt(gasAmount) })
+                        : t('gasRowPending'),
+                  },
           )}
           <div className="my-1 border-t border-slate-200" />
-          <Row
-            label={t('customerRow')}
-            value={fmt(totalCustomerOutflow)}
-            strong
-          />
+          {breakdownRow({
+            label: t('customerRow'),
+            value: fmt(totalCustomerOutflow),
+            strong: true,
+          })}
         </dl>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
           {isStandard

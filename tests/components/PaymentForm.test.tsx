@@ -2608,3 +2608,106 @@ it.each(['notify-pending', 'terminal', 'prepared'] as const)('A2c %s order from 
   expect(vi.mocked(useJpycEip3009Payment).mock.calls.every((args) => args[1]?.restoreOrderDelivery !== true)).toBe(true);
   view.unmount(); client.clear(); fetchSpy.mockRestore(); sessionStorage.clear();
 });
+
+// R14 (Phase 6): 内訳行の描画 fixture。行の抽出 (表示部品/row model の共有) の前に移動前の
+// コードで捕捉し、ja/en × 負担者 × gas 提供者 × split の section outerHTML を固定する。
+// InfoTooltip は閉じた状態では本文を DOM に出さないため、全て開いた状態も併せて固定する
+// (popover の id は乱数なので正規化)。
+describe('PaymentForm — R14 内訳行 fixture (ja/en)', () => {
+  const B = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const C = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  function usdc(query: string) {
+    setURL(`to=${MERCHANT}&token=usdc&${query}`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(500_000_000n);
+    setSmartAccount(true);
+  }
+  function jpyc(query: string) {
+    setURL(`to=${MERCHANT}&token=jpyc&${query}`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+  }
+  const cases: Array<[string, () => void]> = [
+    ['usdc sponsorship / customer gas', () => { usdc('amount=100'); setGasQuote('ready', 50_000n); }],
+    ['usdc erc20 / customer gas', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); usdc('amount=100'); setGasQuote('ready', 100_000n); }],
+    ['usdc erc20 / merchant gas', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); usdc('amount=100&gas=merchant'); setGasQuote('ready', 100_000n); }],
+    ['usdc circle / customer gas', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('circle'); usdc('amount=100'); setCircleQuote('ready', { gasAmount: 60_000n, permitAmount: 100_060_000n }); }],
+    ['usdc gas quote pending', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); usdc('amount=100'); setGasQuote('pending'); }],
+    ['usdc split / erc20', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); usdc(`amount=100&split=${B}:30,${C}:20`); setGasQuote('ready', 100_000n); }],
+    ['usdc split / merchant gas', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); usdc(`amount=100&gas=merchant&split=${B}:50`); setGasQuote('ready', 100_000n); }],
+    ['usdc standard', () => { usdc('amount=100&mode=standard'); }],
+    ['jpyc sponsorship (non relay)', () => { jpyc('amount=1000'); setGasQuote('ready', 0n); }],
+    ['jpyc relay free', () => { vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay'); jpyc('amount=300'); }],
+    ['jpyc relay recover', () => { vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay'); vi.mocked(jpycForwarderFor).mockReturnValue('0x1111111111111111111111111111111111111111'); jpyc('amount=300'); }],
+    ['jpyc standard', () => { jpyc('amount=300&mode=standard'); }],
+  ];
+  const titles = { ja: '明細', en: 'Breakdown' } as const;
+  describe.each(['ja', 'en'] as const)('%s', (locale) => {
+    it.each(cases)('%s', (_name, setup) => {
+      setup();
+      render(<PaymentForm />, { locale });
+      const section = screen.getByText(titles[locale]).closest('section')!;
+      expect(section.outerHTML).toMatchSnapshot('closed');
+      for (const button of Array.from(section.querySelectorAll('dl button'))) fireEvent.click(button);
+      expect(section.outerHTML.replace(/tip-[a-z0-9]+/g, 'tip-ID')).toMatchSnapshot('tooltips open');
+    });
+  });
+});
+
+// R14 (Phase 6): click 時の二重送信。policy の抽出前に移動前のコードで捕捉。1 回目の click を
+// hook が受け取った (in-flight に遷移した) 後の再描画で、同じボタンの 2 回目は mutate しない。
+describe('PaymentForm — R14 二重送信 (in-flight 後の再 click)', () => {
+  it('gasless: 2 回目の click は mutate しない', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    const view = render(<PaymentForm />);
+    const button = screen.getByRole('button', { name: /10 USDC を支払う/ });
+    fireEvent.click(button);
+    const first = mutate;
+    expect(first).toHaveBeenCalledOnce();
+    setPayment('pending');
+    view.rerender(<PaymentForm />);
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(first).toHaveBeenCalledOnce();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('relay: 署名待ちの 2 回目の click は mutate しない', () => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    const view = render(<PaymentForm />);
+    const button = screen.getByRole('button', { name: /300 JPYC を支払う/ });
+    fireEvent.click(button);
+    const first = relayMutate;
+    expect(first).toHaveBeenCalledOnce();
+    setRelay('pending-flow');
+    view.rerender(<PaymentForm />);
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(first).toHaveBeenCalledOnce();
+    expect(relayMutate).not.toHaveBeenCalled();
+  });
+
+  it('standard: merchant 送信中の 2 回目の click は mutate しない', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=10&mode=standard`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    const view = render(<PaymentForm />);
+    const button = screen.getByRole('button', { name: /10 USDC を支払う/ });
+    fireEvent.click(button);
+    const first = standardMutate;
+    expect(first).toHaveBeenCalledOnce();
+    setStandardPayment('merchant-sending');
+    view.rerender(<PaymentForm />);
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(first).toHaveBeenCalledOnce();
+    expect(standardMutate).not.toHaveBeenCalled();
+  });
+});

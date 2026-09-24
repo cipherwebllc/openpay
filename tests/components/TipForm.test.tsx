@@ -2407,3 +2407,88 @@ it.each(['notify-pending', 'terminal', 'prepared'] as const)('A2c %s order from 
   expect(vi.mocked(useJpycEip3009Payment).mock.calls.every((args) => args[1]?.restoreOrderDelivery !== true)).toBe(true);
   view.unmount(); client.clear(); fetchSpy.mockRestore(); sessionStorage.clear();
 });
+
+// R14 (Phase 6): 内訳行の描画 fixture。行の抽出前に移動前のコードで捕捉し、ja/en × gas 提供者 ×
+// Arc standard × テーマの section outerHTML を固定する (PaymentForm.test と同型・開いた
+// InfoTooltip の id は乱数なので正規化)。
+describe('TipForm — R14 内訳行 fixture (ja/en)', () => {
+  function usdcReady() {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(500_000_000n);
+    setSmartAccount(true);
+  }
+  function jpycReady() {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(1000n * 10n ** 18n);
+  }
+  async function arcReady() {
+    setAccount({ connected: true, chainId: 5042002 });
+    setBalance(10_000_000n);
+    const wagmi = await import('wagmi');
+    vi.mocked(wagmi.useWriteContract).mockImplementation(() => ({ data: undefined, error: null, isPending: false, writeContract: vi.fn(), reset: vi.fn() }) as never);
+    vi.mocked(wagmi.useWaitForTransactionReceipt).mockImplementation(() => ({ data: undefined, error: null, isSuccess: false, isError: false, refetch: vi.fn() }) as never);
+  }
+  const cases: Array<[string, () => Promise<TipParams> | TipParams]> = [
+    ['usdc sponsorship', () => { usdcReady(); setGasQuote('ready', 50_000n); return USDC_PARAMS; }],
+    ['usdc erc20', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); usdcReady(); setGasQuote('ready', 100_000n); return USDC_PARAMS; }],
+    ['usdc circle', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('circle'); usdcReady(); setCircleQuote('ready', { gasAmount: 60_000n, permitAmount: 1_060_000n }); return USDC_PARAMS; }],
+    ['usdc gas quote pending', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); usdcReady(); setGasQuote('pending'); return USDC_PARAMS; }],
+    ['jpyc sponsorship (non relay)', () => { jpycReady(); setGasQuote('ready', 0n); return JPYC_PARAMS; }],
+    ['jpyc relay free', () => { vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay'); jpycReady(); return JPYC_PARAMS; }],
+    ['jpyc relay recover', () => { vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay'); vi.mocked(jpycForwarderFor).mockReturnValue('0x1111111111111111111111111111111111111111'); jpycReady(); return JPYC_PARAMS; }],
+    ['jpyc relay free / night theme', () => { vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay'); jpycReady(); return { ...JPYC_PARAMS, theme: 'night' }; }],
+    ['usdc Arc standard', async () => { await arcReady(); return { ...USDC_PARAMS, mode: 'standard', chain: 'arc', presets: ['0.5', '1'] }; }],
+  ];
+  const titles = { ja: '明細', en: 'Breakdown' } as const;
+  describe.each(['ja', 'en'] as const)('%s', (locale) => {
+    it.each(cases)('%s', async (_name, setup) => {
+      const params = await setup();
+      render(<TipForm params={params} />, { locale });
+      const section = screen.getByText(titles[locale]).closest('section')!;
+      expect(section.outerHTML).toMatchSnapshot('closed');
+      for (const button of Array.from(section.querySelectorAll('dl button'))) fireEvent.click(button);
+      expect(section.outerHTML.replace(/tip-[a-z0-9]+/g, 'tip-ID')).toMatchSnapshot('tooltips open');
+      // dynamic な standard engine の読込が test 後に state を更新しないよう待つ。
+      await act(async () => {});
+    });
+  });
+});
+
+// R14 (Phase 6): click 時の二重送信。policy の抽出前に移動前のコードで捕捉。1 回目の click を
+// hook が受け取った (in-flight に遷移した) 後の再描画で、同じボタンの 2 回目は mutate しない。
+describe('TipForm — R14 二重送信 (in-flight 後の再 click)', () => {
+  it('gasless: 2 回目の click は mutate しない', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    const view = render(<TipForm params={USDC_PARAMS} />);
+    const button = screen.getByRole('button', { name: /1 USDC を送る/ });
+    fireEvent.click(button);
+    const first = mutate;
+    expect(first).toHaveBeenCalledOnce();
+    setBatchPayment('pending');
+    view.rerender(<TipForm params={USDC_PARAMS} />);
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(first).toHaveBeenCalledOnce();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('relay: 署名待ちの 2 回目の click は mutate しない', () => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(1000n * 10n ** 18n);
+    const view = render(<TipForm params={JPYC_PARAMS} />);
+    const button = screen.getByRole('button', { name: /100 JPYC を送る/ });
+    fireEvent.click(button);
+    const first = relayMutate;
+    expect(first).toHaveBeenCalledOnce();
+    setRelay('pending');
+    view.rerender(<TipForm params={JPYC_PARAMS} />);
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(first).toHaveBeenCalledOnce();
+    expect(relayMutate).not.toHaveBeenCalled();
+  });
+});

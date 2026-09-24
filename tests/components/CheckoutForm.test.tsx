@@ -3947,3 +3947,155 @@ describe('A2c saved-order-only notification', () => {
     expect(fetchSpy).not.toHaveBeenCalled(); expect(loadOrderDelivery().kind).toBe('ready'); fetchSpy.mockRestore();
   });
 });
+
+// R14 (Phase 6): 内訳行の描画 fixture。行の抽出前に移動前のコードで捕捉し、ja/en × 負担者 ×
+// gas 提供者 × モバイル注文/レジ × Arc の section outerHTML を固定する (PaymentForm.test と同型・
+// 開いた InfoTooltip の id は乱数なので正規化)。
+describe('CheckoutForm — R14 内訳行 fixture (ja/en)', () => {
+  const RECOVER_FORWARDER = '0x1111111111111111111111111111111111111111';
+  function usdcReady() {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(500_000_000n);
+    setSmartAccount(true);
+  }
+  function jpycReady() {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+  }
+  function relay(recover: boolean) {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    vi.mocked(jpycForwarderFor).mockReturnValue(recover ? RECOVER_FORWARDER : null);
+    jpycReady();
+  }
+  const cases: Array<[string, () => CheckoutParams]> = [
+    ['usdc sponsorship / customer gas', () => { usdcReady(); setGasQuote('ready', 50_000n); return USDC_PARAMS; }],
+    ['usdc erc20 / customer gas', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); usdcReady(); setGasQuote('ready', 100_000n); return USDC_PARAMS; }],
+    ['usdc erc20 / merchant gas', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); usdcReady(); setGasQuote('ready', 100_000n); return { ...USDC_PARAMS, gas: 'merchant' }; }],
+    ['usdc circle / customer gas', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); vi.mocked(resolveUsdcGaslessProvider).mockReturnValue('circle'); usdcReady(); setCircleQuote('ready', { gasAmount: 60_000n, permitAmount: 55_060_000n }); return USDC_PARAMS; }],
+    ['usdc gas quote pending', () => { vi.mocked(resolvePaymasterMode).mockReturnValue('erc20'); usdcReady(); setGasQuote('pending'); return USDC_PARAMS; }],
+    ['usdc standard', () => { usdcReady(); return { ...USDC_PARAMS, mode: 'standard' }; }],
+    ['usdc Arc standard', () => { usdcReady(); return { ...USDC_PARAMS, chain: 'arc', mode: 'standard' }; }],
+    ['jpyc sponsorship (non relay)', () => { jpycReady(); setGasQuote('ready', 0n); return JPYC_PARAMS; }],
+    ['jpyc relay free', () => { relay(false); return JPYC_PARAMS; }],
+    ['jpyc relay recover / merchant gas', () => { relay(true); return { ...JPYC_PARAMS, gas: 'merchant' }; }],
+    ['jpyc standard', () => { jpycReady(); return { ...JPYC_PARAMS, mode: 'standard' }; }],
+    ['mobile storefront (relay recover, merchant pays fee)', () => { feeFlags.enableMobileOrderFee = true; relay(true); return { ...JPYC_PARAMS, feeKind: 'storefront' }; }],
+    ['mobile preorder (relay recover, customer pays fee)', () => { feeFlags.enableMobileOrderFee = true; relay(true); return { ...JPYC_PARAMS, feeKind: 'preorder', feePayer: 'customer' }; }],
+    ['mobile storefront standard', () => { feeFlags.enableMobileOrderFee = true; jpycReady(); return { ...JPYC_PARAMS, feeKind: 'storefront', mode: 'standard' }; }],
+    ['register standard fee', () => { feeFlags.enableRegisterFee = true; feeRate.percentBps = 100; jpycReady(); return { ...JPYC_PARAMS, mode: 'standard', feeKind: 'register' }; }],
+  ];
+  describe.each(['ja', 'en'] as const)('%s', (locale) => {
+    it.each(cases)('%s', (_name, setup) => {
+      const params = setup();
+      const { container } = render(<CheckoutForm params={params} />, { locale });
+      const section = container.querySelector('dl')!.closest('section')!;
+      expect(section.outerHTML).toMatchSnapshot('closed');
+      for (const button of Array.from(section.querySelectorAll('dl button'))) fireEvent.click(button);
+      expect(section.outerHTML.replace(/tip-[a-z0-9]+/g, 'tip-ID')).toMatchSnapshot('tooltips open');
+    });
+  });
+});
+
+// R14 (Phase 6): click 時の競合。policy の抽出前に移動前のコードで捕捉。@handle 注文の admission は
+// await を挟むため、(1) 同一 gesture の二重 click は ref で 1 回に絞り、(2) await 後は最新の
+// paymentReady (接続・chain・同一店舗 hold 等) を読み直して stale な署名を止める。
+describe('CheckoutForm — R14 admission の二重送信と await 後の再確認', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  function deferredAdmission() {
+    const pending: Array<(response: Response) => void> = [];
+    const fetchSpy = vi.fn((input: RequestInfo | URL) => String(input) === '/api/order/admission'
+      ? new Promise<Response>((resolve) => { pending.push(resolve); })
+      : Promise.resolve(Response.json({})));
+    vi.stubGlobal('fetch', fetchSpy);
+    const admissionCalls = () => fetchSpy.mock.calls.filter(([input]) => String(input) === '/api/order/admission').length;
+    return { admissionCalls, admit: () => pending.shift()!(Response.json({ ok: true })) };
+  }
+  async function settle() {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  }
+  const USDC_HANDLE: CheckoutParams = { ...USDC_PARAMS, storeHandle: 'coffee_shop', feeKind: 'preorder' };
+  const JPYC_HANDLE: CheckoutParams = { ...JPYC_PARAMS, storeHandle: 'coffee_shop', feeKind: 'storefront' };
+  function usdcReady() {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+  }
+
+  it('同一 gesture の二重 click (再描画前) は admission 1 回・mutate 1 回', async () => {
+    usdcReady();
+    const { admissionCalls, admit } = deferredAdmission();
+    render(<CheckoutForm params={USDC_HANDLE} />);
+    const button = screen.getByRole('button', { name: /を支払う/ });
+    act(() => { button.click(); button.click(); });
+    expect(admissionCalls()).toBe(1);
+    // admission 待ちの再描画後は canSubmit (受付中) でボタン自体が閉じる。
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(admissionCalls()).toBe(1);
+    admit();
+    await settle();
+    expect(mutate).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])('admission の await 中に chain が切り替わったら署名へ進まない (切替=%s)', async (switched) => {
+    usdcReady();
+    const { admissionCalls, admit } = deferredAdmission();
+    const view = render(<CheckoutForm params={USDC_HANDLE} />);
+    fireEvent.click(screen.getByRole('button', { name: /を支払う/ }));
+    expect(admissionCalls()).toBe(1);
+    if (switched) setAccount({ connected: true, chainId: polygonAmoy.id });
+    view.rerender(<CheckoutForm params={USDC_HANDLE} />);
+    admit();
+    await settle();
+    expect(mutate).toHaveBeenCalledTimes(switched ? 0 : 1);
+    expect(screen.queryByText('ただいま注文を受け付けていません')).toBeNull();
+  });
+
+  it.each([false, true])('admission の await 中に wallet が切断されたら署名へ進まない (切断=%s)', async (disconnected) => {
+    usdcReady();
+    const { admit } = deferredAdmission();
+    const view = render(<CheckoutForm params={USDC_HANDLE} />);
+    fireEvent.click(screen.getByRole('button', { name: /を支払う/ }));
+    if (disconnected) setAccount({ connected: false });
+    view.rerender(<CheckoutForm params={USDC_HANDLE} />);
+    admit();
+    await settle();
+    expect(mutate).toHaveBeenCalledTimes(disconnected ? 0 : 1);
+  });
+
+  it.each([false, true])('admission の await 中に同一店舗の支払い hold が立ったら relay 署名へ進まない (hold=%s)', async (held) => {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+    const { admissionCalls, admit } = deferredAdmission();
+    const view = render(<CheckoutForm params={JPYC_HANDLE} />);
+    fireEvent.click(screen.getByRole('button', { name: /3000 JPYC を支払う/ }));
+    expect(admissionCalls()).toBe(1);
+    const first = relayMutate;
+    if (held) {
+      const current = vi.mocked(useJpycEip3009Payment).mock.results.at(-1)!.value as ReturnType<typeof useJpycEip3009Payment>;
+      mockHook(useJpycEip3009Payment, { ...current, orderPaymentHold: true });
+    }
+    view.rerender(<CheckoutForm params={JPYC_HANDLE} />);
+    admit();
+    await settle();
+    expect(first).toHaveBeenCalledTimes(held ? 0 : 1);
+  });
+
+  it('admission 拒否後は受付中が解け、再 click で admission をやり直す (署名はしない)', async () => {
+    usdcReady();
+    const fetchSpy = vi.fn(async () => Response.json({ ok: false }, { status: 409 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    render(<CheckoutForm params={USDC_HANDLE} />);
+    const button = screen.getByRole('button', { name: /を支払う/ });
+    fireEvent.click(button);
+    await settle();
+    expect(await screen.findByText('ただいま注文を受け付けていません')).toBeInTheDocument();
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await settle();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(mutate).not.toHaveBeenCalled();
+  });
+});
