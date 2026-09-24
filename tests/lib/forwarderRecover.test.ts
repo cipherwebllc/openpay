@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { getAddress, type Address, type Hex } from 'viem';
+import { logger } from '@/lib/logger';
 import { privateKeyToAccount } from 'viem/accounts';
 import {
   buildReceiveWithAuthorizationTypedData,
@@ -205,9 +206,11 @@ describe('recoverViaForwarder', () => {
   });
 
   it('残高 RPC 例外は submit 前の preflight_unavailable に正規化する', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const rpcError = new Error('rpc down');
     const deps = makeDeps({
       getBalance: vi.fn(async () => {
-        throw new Error('rpc down');
+        throw rpcError;
       }),
     });
     const res = await recoverViaForwarder(await makeInput(), deps);
@@ -217,6 +220,13 @@ describe('recoverViaForwarder', () => {
       httpStatus: 503,
     });
     expect(deps.submit).not.toHaveBeenCalled();
+    // 握った RPC 障害を運営が観測できる (例外は応答ではなく warn にだけ載せる)。
+    expect(warn).toHaveBeenCalledWith('relay.forwarder.preflight_unavailable', {
+      chainId: CHAIN,
+      step: 'balanceOf',
+      error: rpcError,
+    });
+    warn.mockRestore();
   });
 
   it('期限切れ (validBefore <= now) → rejected expired', async () => {
@@ -265,9 +275,11 @@ describe('recoverViaForwarder', () => {
   });
 
   it('authorizationState RPC 例外は submit 前の preflight_unavailable に正規化する', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const rpcError = new Error('rpc down');
     const deps = makeDeps({
       checkAuthorizationUsed: vi.fn(async () => {
-        throw new Error('rpc down');
+        throw rpcError;
       }),
     });
     const res = await recoverViaForwarder(await makeInput(), deps);
@@ -277,6 +289,13 @@ describe('recoverViaForwarder', () => {
       httpStatus: 503,
     });
     expect(deps.submit).not.toHaveBeenCalled();
+    // 握った RPC 障害を運営が観測できる (例外は応答ではなく warn にだけ載せる)。
+    expect(warn).toHaveBeenCalledWith('relay.forwarder.preflight_unavailable', {
+      chainId: CHAIN,
+      step: 'authorizationState',
+      error: rpcError,
+    });
+    warn.mockRestore();
   });
 
   it('B4: 日次予算超過 (checkGasBudget false) → rejected daily_budget_exceeded (submit せず)', async () => {

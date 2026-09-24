@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { getAddress, type Address, type Hex } from 'viem';
@@ -67,6 +67,7 @@ import {
   isRelayIpRateLimitedError,
   isRelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
+import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
 import {
   RELAY_INTENT_STORAGE_KEY,
   type RelayIntentMetadata,
@@ -636,6 +637,83 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
       expect(isRelayResponseUnknownError(result.current.error)).toBe(false);
     },
   );
+
+  // B-R5: server の free 経路も broadcast 前 read の RPC 障害を recover 経路と同じ
+  // JSON 503 preflight_unavailable で返す。client は経路を問わず同一の fallback-safe error に分類し、
+  // 曖昧 latch / 自動 status 照会 / intent 保存を残さない (= standard 決済へ切替可能)。
+  describe('503 preflight_unavailable は free / recover で同一の fallback-safe 扱い (B-R5)', () => {
+    const FORWARDER = getAddress('0x0F4560a777415580F0680F8B56a79B0022C6B848');
+
+    afterEach(() => {
+      // 後続 describe の既定 (free モード) を崩さない。
+      (jpycForwarderFor as ReturnType<typeof vi.fn>).mockReturnValue(null);
+      vi.useRealTimers();
+    });
+
+    it.each(['free', 'recover'] as const)(
+      '%s 経路の 503 preflight_unavailable → fallback-safe error・latch なし・intent 破棄',
+      async (mode) => {
+        (jpycForwarderFor as ReturnType<typeof vi.fn>).mockReturnValue(
+          mode === 'recover' ? FORWARDER : null,
+        );
+        fetchSpy.mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ ok: false, error: 'preflight_unavailable' }),
+            { status: 503, headers: { 'content-type': 'application/json' } },
+          ),
+        );
+        const result = await submit();
+
+        await waitFor(() => expect(result.current.isError).toBe(true));
+        const body = JSON.parse(
+          (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+        ) as Record<string, unknown>;
+        // 経路どおりの payload を POST したこと (free=to/nonce・recover=intentSalt)。
+        if (mode === 'free') {
+          expect(body).toHaveProperty('nonce');
+          expect(body).not.toHaveProperty('intentSalt');
+        } else {
+          expect(body).toHaveProperty('intentSalt');
+          expect(body).not.toHaveProperty('nonce');
+        }
+        const error = result.current.error!;
+        expect(error.message).toBe('preflight_unavailable');
+        expect(isFallbackSafeRelayError(error)).toBe(true);
+        expect(isRelayResponseUnknownError(error)).toBe(false);
+        expect(isRelayIpRateLimitedError(error)).toBe(false);
+        // フォームの fallback 文言キー (PaymentForm/CheckoutForm/TipForm 共通)。
+        expect(relayErrorKey(error)).toBe('errorRelayGeneric');
+        // 曖昧 latch に入らない: status 自動照会なし・intent は破棄・署名は 1 回のみ。
+        expect(result.current.recoveryState).toBeNull();
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(signTypedData).toHaveBeenCalledTimes(1);
+        expect(
+          window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY),
+        ).toBeNull();
+      },
+    );
+
+    it('対比: 旧 free 経路の非 JSON 500 (unhandled throw) は応答不明 → 曖昧 latch だった', async () => {
+      vi.useFakeTimers();
+      await import('@/lib/relay/relayIntentRecovery');
+      fetchSpy.mockResolvedValueOnce(
+        new Response('Internal Server Error', {
+          status: 500,
+          headers: { 'content-type': 'text/plain' },
+        }),
+      );
+      const result = await submit();
+
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      // fallback-safe error にならず、同一 payload の status 照会 (auto recovery) に閉じ込められる。
+      expect(result.current.recoveryState).toBe('auto');
+      expect(result.current.isPending).toBe(true);
+      expect(result.current.error).toBeNull();
+      expect(
+        window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY),
+      ).not.toBeNull();
+    });
+  });
 });
 
 describe('useJpycEip3009Payment — reload intent 復元', () => {

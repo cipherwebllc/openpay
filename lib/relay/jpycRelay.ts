@@ -6,6 +6,7 @@
 // 背景: memory:jpyc-eip3009 (Polygon は Gelato sponsoredCall、Kaia は自前 relayer)。
 
 import { getAddress, type Address, type Hex } from 'viem';
+import { logger } from '@/lib/logger';
 import { relayBroadcast } from './relayBroadcast';
 import type { RelayResult, RelayTaskOutcome } from './relayTypes';
 import {
@@ -141,7 +142,22 @@ export async function relayJpycAuthorization(
   }
 
   // 4. 残高事前確認 (revert する tx を relay して枠を浪費しない)。
-  const balance = await deps.getBalance(chainId, jpyc, auth.from);
+  // RPC 例外は recover 経路 (verifyForwarderSettle) と同じ構造化 503 に正規化する。握らずに
+  // 投げると route が非 JSON 500 になり、client が「応答不明」と判定して曖昧 latch (standard
+  // fallback も再署名も不可) に閉じ込められる波及を断つ。claim / rate-limit / 予算 / submit の
+  // いずれよりも前の read なので、tx は出ておらず fallback は安全。応答には理由コードだけを返し、
+  // 例外は運営の観測用に warn (Sentry) へ残す (握った RPC 障害が無音になるのを防ぐ)。
+  let balance: bigint;
+  try {
+    balance = await deps.getBalance(chainId, jpyc, auth.from);
+  } catch (error) {
+    logger.warn('relay.jpyc.preflight_unavailable', {
+      chainId,
+      step: 'balanceOf',
+      error,
+    });
+    return { kind: 'rejected', httpStatus: 503, reason: 'preflight_unavailable' };
+  }
   if (balance < auth.value) {
     return { kind: 'rejected', httpStatus: 400, reason: 'insufficient_balance' };
   }
@@ -150,12 +166,23 @@ export async function relayJpycAuthorization(
   // ここで pending を返すことで gas を浪費せず、かつ「既に処理済かもしれない決済」を
   // standard へ fallback させない (二重支払い防止)。
   if (deps.checkAuthorizationUsed) {
-    const used = await deps.checkAuthorizationUsed(
-      chainId,
-      jpyc,
-      auth.from,
-      auth.nonce,
-    );
+    let used: boolean;
+    try {
+      used = await deps.checkAuthorizationUsed(
+        chainId,
+        jpyc,
+        auth.from,
+        auth.nonce,
+      );
+    } catch (error) {
+      // 残高 read と同じく broadcast 前の read だけを正規化する (recoverViaForwarder と同形)。
+      logger.warn('relay.jpyc.preflight_unavailable', {
+        chainId,
+        step: 'authorizationState',
+        error,
+      });
+      return { kind: 'rejected', httpStatus: 503, reason: 'preflight_unavailable' };
+    }
     if (used) return { kind: 'pending' };
   }
 

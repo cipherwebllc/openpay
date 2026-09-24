@@ -14,6 +14,8 @@ const FEE_RECEIVER = getAddress('0xdead000000000000000000000000000000001234');
 const JPYC_AMOY = getAddress('0x0000000000000000000000000000000000000abc');
 
 const io = vi.hoisted(() => ({
+  // 例外を投げさせる read (null = 全 read 正常)。
+  failRead: null as null | 'balanceOf' | 'authorizationState',
   readFunctions: [] as string[],
   sentRaw: [] as Hex[],
 }));
@@ -34,6 +36,7 @@ vi.mock('viem', async (importOriginal) => {
     createPublicClient: () => ({
       readContract: async (args: { functionName: string }) => {
         io.readFunctions.push(args.functionName);
+        if (args.functionName === io.failRead) throw new Error('rpc timeout');
         if (args.functionName === 'balanceOf') return 10_000n * 10n ** 18n;
         if (args.functionName === 'authorizationState') return false;
         return 0n;
@@ -71,6 +74,8 @@ const kv = vi.hoisted(() => {
       opts: { nx?: boolean; ttlSec?: number };
     }>,
     incrKeys: [] as string[],
+    delKeys: [] as string[],
+    decrKeys: [] as string[],
     expireCalls: [] as Array<{ key: string; ttlSec: number }>,
   };
 });
@@ -91,10 +96,10 @@ vi.mock('@/lib/kv', () => ({
     kv.values.set(key, value);
     return { ok: true as const, value: 'OK' as const };
   },
-  kvDel: async (key: string) => ({
-    ok: true as const,
-    value: kv.values.delete(key) ? 1 : 0,
-  }),
+  kvDel: async (key: string) => {
+    kv.delKeys.push(key);
+    return { ok: true as const, value: kv.values.delete(key) ? 1 : 0 };
+  },
   kvLpush: async (key: string, value: string) => {
     const list = kv.lists.get(key) ?? [];
     list.unshift(value);
@@ -116,6 +121,7 @@ vi.mock('@/lib/kv', () => ({
     return { ok: true as const, value };
   },
   kvDecr: async (key: string) => {
+    kv.decrKeys.push(key);
     const value = (kv.counters.get(key) ?? 0) - 1;
     kv.counters.set(key, value);
     return { ok: true as const, value };
@@ -168,7 +174,10 @@ beforeEach(() => {
   kv.counters.clear();
   kv.setCalls.length = 0;
   kv.incrKeys.length = 0;
+  kv.delKeys.length = 0;
+  kv.decrKeys.length = 0;
   kv.expireCalls.length = 0;
+  io.failRead = null;
   io.readFunctions.length = 0;
   io.sentRaw.length = 0;
 });
@@ -231,6 +240,60 @@ describe('POST /api/csv-pass/relay 実 provider 配線', () => {
       expect.arrayContaining(['balanceOf', 'authorizationState']),
     );
     expect(io.sentRaw).toEqual(['0x1234']);
+  });
+
+  // B-R5: 共有 free コアの preflight read 障害は決済 relay と同じ JSON 503 preflight_unavailable。
+  // client (useJpycEntitlementPay) は 503 を submit 前の確定拒否としてガスあり fallback を提示する。
+  it.each([
+    ['balanceOf', ['balanceOf']],
+    ['authorizationState', ['balanceOf', 'authorizationState']],
+  ] as const)('%s の RPC 例外は JSON 503 preflight_unavailable で claim / rate-limit / 予算 / submit に進まない', async (failRead, expectedReads) => {
+    io.failRead = failRead;
+    // 入口 IP limiter の INCR だけが起き、日次予算に触れないことを IP_HASH_SECRET 依存なしに固定する。
+    vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
+    const ipKey = `iprl:v1:relay-admission:${hashIp('203.0.113.42')}`;
+    const validBefore = BigInt(Math.floor(Date.now() / 1000) + 200);
+    const auth = {
+      from: customer.address,
+      to: FEE_RECEIVER,
+      value: csvPassPriceWei,
+      validAfter: 0n,
+      validBefore,
+      nonce: NONCE,
+    };
+    const typed = buildTransferWithAuthorizationTypedData(auth, AMOY, JPYC_AMOY);
+    const signature = await customer.signTypedData(typed);
+
+    const res = await POST(
+      new Request('http://localhost/api/csv-pass/relay', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-for': '203.0.113.42',
+        },
+        body: JSON.stringify({
+          chainId: AMOY,
+          from: customer.address,
+          value: csvPassPriceWei.toString(),
+          validAfter: '0',
+          validBefore: validBefore.toString(),
+          nonce: NONCE,
+          signature,
+        }),
+      }),
+    );
+
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'preflight_unavailable' });
+    expect(io.readFunctions).toEqual(expectedReads);
+    // claim (SET NX) も release (DEL) もしない。
+    expect(kv.setCalls).toEqual([]);
+    expect(kv.delKeys).toEqual([]);
+    expect(kv.lists.size).toBe(0);
+    // 予算の INCR / refund DECR なし (INCR は入口 IP limiter の 1 件のみ)。
+    expect(kv.incrKeys).toEqual([ipKey]);
+    expect(kv.decrKeys).toEqual([]);
+    expect(io.sentRaw).toHaveLength(0);
   });
 
   it('IP_HASH_SECRET 設定時は 121 回目を session/署名/RPC/daily budget 前に 429 で止める', async () => {

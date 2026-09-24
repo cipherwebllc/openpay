@@ -22,6 +22,7 @@ import {
   encodeSettleCalldata,
   recoverReceiveWithAuthorizationSigner,
 } from '@/lib/relay/forwarderSettle';
+import { logger } from '@/lib/logger';
 import { relayBroadcast } from './relayBroadcast';
 import type { RelayResult, RelayTaskOutcome } from './relayTypes';
 import type {
@@ -216,10 +217,16 @@ export async function verifyForwarderSettle(
 
   // 残高照会は submit より前の read。RPC 例外を構造化して外側の redelivery owner が pending
   // claim を解放できるようにし、署名の有効期限より長い false tombstone へ波及するのを断つ。
+  // 応答には理由コードだけを返し、例外は運営の観測用に warn (Sentry) へ残す (無音化の防止)。
   let balance: bigint;
   try {
     balance = await deps.getBalance(chainId, jpyc, params.from);
-  } catch {
+  } catch (error) {
+    logger.warn('relay.forwarder.preflight_unavailable', {
+      chainId,
+      step: 'balanceOf',
+      error,
+    });
     return {
       ok: false,
       result: rejected(503, 'preflight_unavailable'),
@@ -252,9 +259,14 @@ export async function recoverViaForwarder(
       if (await deps.checkAuthorizationUsed(chainId, jpyc, params.from, nonce)) {
         return { kind: 'pending' };
       }
-    } catch {
+    } catch (error) {
       // idempotency claim / budget / submit のいずれよりも前の read だけを正規化する。ここで
       // structured reject にすることで redelivery marker を安全に解放し、RPC 復旧後の再試行を許す。
+      logger.warn('relay.forwarder.preflight_unavailable', {
+        chainId,
+        step: 'authorizationState',
+        error,
+      });
       return rejected(503, 'preflight_unavailable');
     }
   }
