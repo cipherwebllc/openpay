@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Add `SIGNER_MODE=kova` as a third-party CLI signer: fixed Polygon/Amoy mapping from the validated 402 network, lossless bigint JSON, strict 65-byte signatures and address verification on every signature. Use shell-free `execFile`, closed stdin, a 30-second deadline with `SIGKILL` and bounded output; expose only fixed denial/failure messages, never raw child output or errors. Report a missing executable as `kova_not_found`. No signer fallback.
+- Exclude `BUYER_PRIVATE_KEY` and all `STEWARD_*` variables from the Kova child environment while forwarding Kova credentials and other environment variables.
+- Default Kova's daily cap to the session cap with `default_kova`; use the existing address/UTC-date ledger at `OPENPAY_X402_HOME/spend.json` without creating a keystore. Report the public Kova mode and reject `wallet_init`/`wallet_prove`.
+- Document source-checkout setup in the package README, typed-data policy limitations, Polygon/Amoy separation and the undelegated-wallet requirement. Live Amoy compatibility remains unverified. Windows is unsupported.
+- No additional npm dependencies or peer dependencies. Kova must be installed separately.
+
 ## 0.17.2 — 2026-09-24
 
 - Correct `order_summary` guidance: read `customerPaysJpyc` and `feeBearer` for the exact human checkout total and fee payer. Usually the customer pays the subtotal; preorder shops may add a customer-paid 3% fee. Align the tool description and README with the server's shop-specific fee schedule.
