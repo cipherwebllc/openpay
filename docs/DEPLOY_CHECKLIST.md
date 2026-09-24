@@ -865,10 +865,9 @@ Sentry dashboard 側で alert rule を追加 (code change なし、dashboard 操
 
 - [ ] `event:"smart_account.mav2_kaia_rejected"` の発火頻度を週次 alert
 - [ ] `gas_congested` × `chainId:8217` filter (既存 polygon rule の複製)
-- [x] Pimlico Kaia API balance を別 alert で監視 — 2026-05-23 完了:
-      `scripts/check-pimlico-balance.mjs` に Kaia chain (optional) を追加、
-      operator が `PIMLICO_PAYMASTER_KAIA` secret を Vercel/GitHub に設定すると
-      6h cron で balance を Slack/Discord webhook に通知
+- [x] Pimlico Kaia EntryPoint 0.7 deposit を監視 — `PIMLICO_PAYMASTER_KAIA`
+      設定時に 6h cron で確認する。0.8 deposit も追加参照し、
+      `ALERT_THRESHOLD_KAIA_V08` 設定時だけ通知対象にする (§11.2)。
 - [x] /api/log/payment に kaia chain 集計を追加 — 2026-05-23 完了:
       `GET /api/log/payment/stats` を新設 (Bearer auth)、chain × token 別の
       GMV / success / reverted / error 集計と chainId / since filter を提供。
@@ -996,14 +995,16 @@ operator demo の Gateway total は API の預入残高であり、経路の利�
 ### §10.6b Cross-chain kill switch — 真の "instant" 経路
 
 **重要 (audit で誤記訂正)**: `NEXT_PUBLIC_CROSS_CHAIN_DISABLED=true` は
-Next.js 仕様で build-time env (client bundle へ inline)。Vercel env を flip
-すると auto rebuild がトリガーされ **~2-5 分後** に反映、**instant ではない**。
+Next.js 仕様で build-time env (client bundle へ inline)。Vercel env の変更だけでは
+配信済み bundle は変わらない。変更後に再ビルド・再デプロイが必要で、**instant ではない**。
 
 **緊急時の優先順位**:
-1. **Vercel Instant Rollback** (Dashboard → Deployments → 前 successful build →
-   "Promote to Production"、rebuild 不要、~10 秒で CDN 反映、**全機能巻き戻し**)
-2. **`NEXT_PUBLIC_CROSS_CHAIN_DISABLED=true`** (rebuild 2-5min、cross-chain
-   だけ targeted disable、他機能は最新版維持)
+1. **Vercel Instant Rollback** (Dashboard → Deployments → 対象 deployment のメニュー →
+   "Instant Rollback"、rebuild 不要、**全機能巻き戻し**)。cross-chain 無効化済みの
+   正常 deployment が存在する場合に使う。外部障害時にその build がなければ 2 を使う。
+2. **`NEXT_PUBLIC_CROSS_CHAIN_DISABLED=true`** を設定し再ビルド・再デプロイ。
+   必要なら完成した deployment を "Promote to Production" で本番へ反映する。
+   cross-chain だけを無効化し、他機能は最新版を維持する。
 
 **検証**:
 - [ ] staging で env=true 設定 → rebuild 完了後に `/pay?token=usdc&amount=10`
@@ -1215,12 +1216,21 @@ graceful skip) で気付けないため、`verify-production-config.mjs` で必�
 
 ### §11.2 GitHub Actions repository secrets (Pimlico balance cron 用)
 
+既存の EntryPoint 0.7 監視・しきい値・必須 secret の扱いは維持する。
+`PIMLICO_BALANCE_MODE` は不要で、未設定でも従来どおり実行する。
+追加の 0.8 deposit は同じ address を参照し、`PIMLICO_PAYMASTER_*_V08` で上書きできる。
+0.8 の通知は chain ごとの `ALERT_THRESHOLD_*_V08` を設定した場合だけ有効にする。
+未設定なら `::warning::` を出すが、残高ゼロや参照専用の読取失敗でも webhook/exit 1 にしない。
+この cron が読む値は EntryPoint の `balanceOf(paymaster)` のみ。
+
 | Secret | 必須? | 未設定時の影響 |
 |---|---|---|
 | `PIMLICO_PAYMASTER_POLYGON` | **必須** | cron が `Secrets 未設定` で graceful skip、balance 監視ゼロ |
 | `PIMLICO_PAYMASTER_BASE` | **必須** | 同上 |
 | `ALERT_WEBHOOK_URL` | **必須** | Slack/Discord 通知先 URL、未設定で skip |
 | `PIMLICO_PAYMASTER_KAIA` | 任意 (Kaia 投入後は推奨) | 未設定で Kaia chain は monitor 対象外 |
+| `PIMLICO_PAYMASTER_POLYGON_V08` / `PIMLICO_PAYMASTER_BASE_V08` / `PIMLICO_PAYMASTER_KAIA_V08` | 任意 | 0.8 読取先の上書き。未設定は既存 address。監視 chain は既存 secret で選択 |
+| `ALERT_THRESHOLD_POL_V08` / `ALERT_THRESHOLD_ETH_V08` / `ALERT_THRESHOLD_KAIA_V08` (Actions variables) | 任意 | chain-native 単位。未設定は参照のみ・warning。設定時のみ 0.8 の残高割れ/読取失敗を通知 |
 
 確認:
 ```bash

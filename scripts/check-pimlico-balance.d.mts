@@ -9,7 +9,9 @@ export interface ChainConfig {
   chain: Chain;
   rpcEnv: string;
   rpcDefault: string;
+  /** 既存の監視対象 address。同名 + _V08 で 0.8 の読取先だけを上書きできる。 */
   paymasterEnv: string;
+  /** 0.7 のしきい値 env。同名 + _V08 が空なら 0.8 は参照のみ。 */
   thresholdEnv: string;
   thresholdDefault: string;
   nativeSymbol: string;
@@ -29,7 +31,7 @@ export interface BalanceCheckResult {
   message: string | null;
   lines: string[];
   alerts: string[];
-  /** 残高を取得できなかった chain (`chain名: 理由`)。RPC 障害の隔離用。 */
+  /** 通知対象で残高を取得できなかった chain/EntryPoint (`chain名 (EntryPoint 版): 理由`)。参照専用の失敗は含めない。 */
   failures: string[];
 }
 

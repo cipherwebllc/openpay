@@ -868,7 +868,7 @@ export type ServiceMonitorEnvelope = {
    * delta: 日付境界で切り上げても入り切らないイベントがある)。 */
   hasMore: boolean;
   /** 次回の delta 購入でそのまま changedSince に渡す値 (当日含む契約なので取りこぼしなし)。
-   * hasMore=true の delta では**最初の未返却イベントの date** (返した最後の date より必ず後 =
+   * hasMore=true の delta では**最初の未返却イベントの deltaEffectiveDate = max(date, collectedAt ?? date)** (返した最後の deltaEffectiveDate より必ず後 =
    * 前進が保証され、再配信も起きない)。それ以外は generatedAt の UTC 日付。 */
   nextChangedSince: string;
   notice: { code: string; detail: string; termsUrl: string };

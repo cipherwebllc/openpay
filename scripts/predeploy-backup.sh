@@ -13,7 +13,7 @@
 # 使い方:
 #   ./scripts/predeploy-backup.sh                     # backup を取って md5 表示
 #   ./scripts/predeploy-backup.sh --verify-after      # vercel deploy 後の md5 整合性確認
-#                                                       (一致しなければ backup から復元)
+#                                                       (不一致なら復元手順を表示して exit 2。復元は手動)
 #
 # `.env.local.backup` は .gitignore の `.env.local.*` パターンで除外済。
 

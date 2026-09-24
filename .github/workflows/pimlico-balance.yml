@@ -39,7 +39,7 @@ jobs:
           # secret 未設定で kaia を skip、ある operator のみ check 対象に含める。
           if [ -z "$PIMLICO_PAYMASTER_POLYGON" ] || [ -z "$PIMLICO_PAYMASTER_BASE" ] || [ -z "$ALERT_WEBHOOK_URL" ]; then
             if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-              echo "::error::Secrets が未設定です (PIMLICO_PAYMASTER_POLYGON / PIMLICO_PAYMASTER_BASE / ALERT_WEBHOOK_URL)。README 'Pimlico 残高アラート設定手順' を参照"
+              echo "::error::Secrets が未設定です (PIMLICO_PAYMASTER_POLYGON / PIMLICO_PAYMASTER_BASE / ALERT_WEBHOOK_URL)。README 'Pimlico balance alerts' を参照"
               exit 1
             fi
             echo "::warning::Secrets 未設定のため scheduled run を skip (本番投入前の通常状態)"
@@ -74,4 +74,12 @@ jobs:
           ALERT_THRESHOLD_POL: ${{ vars.ALERT_THRESHOLD_POL }}
           ALERT_THRESHOLD_ETH: ${{ vars.ALERT_THRESHOLD_ETH }}
           ALERT_THRESHOLD_KAIA: ${{ vars.ALERT_THRESHOLD_KAIA }}
+          # 0.8 は追加参照のみ。しきい値が空なら ::warning::、通知/失敗にはしない。
+          # address が空なら同 chain の既存 paymaster address を参照する。
+          PIMLICO_PAYMASTER_POLYGON_V08: ${{ secrets.PIMLICO_PAYMASTER_POLYGON_V08 }}
+          PIMLICO_PAYMASTER_BASE_V08: ${{ secrets.PIMLICO_PAYMASTER_BASE_V08 }}
+          PIMLICO_PAYMASTER_KAIA_V08: ${{ secrets.PIMLICO_PAYMASTER_KAIA_V08 }}
+          ALERT_THRESHOLD_POL_V08: ${{ vars.ALERT_THRESHOLD_POL_V08 }}
+          ALERT_THRESHOLD_ETH_V08: ${{ vars.ALERT_THRESHOLD_ETH_V08 }}
+          ALERT_THRESHOLD_KAIA_V08: ${{ vars.ALERT_THRESHOLD_KAIA_V08 }}
         run: node scripts/check-pimlico-balance.mjs

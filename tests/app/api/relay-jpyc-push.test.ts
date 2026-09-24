@@ -230,13 +230,22 @@ describe('POST /api/relay/jpyc push trigger', () => {
     expect(hold.notify).toHaveBeenCalledWith(getAddress(MERCHANT), 'payment', '¥1');
   });
 
-  it('recover relay でも merchant が FEE_RECEIVER なら通知しない', async () => {
+  it('recover relay は merchant が FEE_RECEIVER なら verifier の拒否を返し通知しない', async () => {
     hold.forwarder = FORWARDER;
+    // verifyForwarderSettle の実契約 (forwarderRecover.test.ts で実行して検証)。
+    // ここを success で mock すると、実際には到達不能な fee 支払い成功を作ってしまう (A6)。
+    hold.settle.mockResolvedValue({
+      kind: 'rejected',
+      httpStatus: 400,
+      reason: 'merchant_is_fee_receiver',
+    });
 
     const res = await POST(req(recoverBody({ merchant: FEE_RECEIVER })));
     await flushAfterTasks();
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'merchant_is_fee_receiver' });
+    expect(hold.settle).toHaveBeenCalledTimes(1);
     expect(hold.after).not.toHaveBeenCalled();
     expect(hold.notify).not.toHaveBeenCalled();
   });

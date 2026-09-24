@@ -134,6 +134,8 @@ export function HistoryView() {
     (!isSignedIn || passStatus.data?.active !== true);
 
   // CSV ダウンロードのロックは a1 延滞 OR パス未保持 (独立評価)。閲覧ぼかしは a1Locked のみ。
+  // UI 操作の制御のみ。CSV は localStorage 履歴からクライアント生成され、保護境界ではない。
+  // D5: CSV パスは既定 OFF のまま維持し、server entitlement をデータへのアクセス制御と扱わない。
   const csvLocked = a1Locked || passLocked;
   const feeGated = a1Locked; // 履歴ぼかし + a1 paywall は延滞時のみ (従来挙動を不変に保つ)。
 

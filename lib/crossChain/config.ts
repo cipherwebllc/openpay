@@ -97,7 +97,9 @@ export const EXPERIMENTAL_CROSS_CHAIN_ENABLED: boolean = parseBoolFlag(
 
 // Incident kill switch: Circle attestation API mass failure / Sentry で
 // cross-chain.execute.failed の急増を観測した時、operator が Vercel env で
-// "true" / "1" を設定すると CrossChainHint が non-mount になる (redeploy 不要)。
+// "true" / "1" を設定して再ビルド・再デプロイすると CrossChainHint が non-mount になる。
+// NEXT_PUBLIC 値は build-time inline。緊急時は docs/DEPLOY_CHECKLIST.md §10.6b の
+// Vercel Instant Rollback を参照 (無効化済み build への全機能巻き戻し)。
 // merchant 個別 opt-out (URL crossChain=false) より優先される global guard。
 export const CROSS_CHAIN_DISABLED: boolean = parseBoolFlag(
   process.env.NEXT_PUBLIC_CROSS_CHAIN_DISABLED,
