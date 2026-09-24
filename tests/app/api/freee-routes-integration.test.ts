@@ -380,6 +380,23 @@ describe('GET/POST /api/freee/mapping (実グルー)', () => {
     expect(h.store.has(mappingKey)).toBe(false);
   });
 
+  it('POST: 本文が JSON の null → 400 invalid_json (TypeError の 500 にしない・B-R6f)', async () => {
+    seedSession();
+    seedFreeeConnected();
+    const res = await mappingPOST(req('http://localhost/api/freee/mapping', null));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_json' });
+  });
+
+  it('sync: 本文が JSON の null → 400 invalid_json (TypeError の 500 にしない・B-R6f)', async () => {
+    seedSession();
+    seedFreeeConnected();
+    seedMapping();
+    const res = await syncPOST(req('http://localhost/api/freee/sync', null));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_json' });
+  });
+
   it('POST: 不正 body → 400 invalid_mapping', async () => {
     seedSession();
     seedFreeeConnected();
