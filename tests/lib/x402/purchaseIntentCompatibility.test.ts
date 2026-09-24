@@ -46,11 +46,18 @@ vi.mock('@/lib/license/config', async (original) => ({
 vi.mock('@/lib/x402/facilitatorSettle', () => ({ parseFacilitatorRequest: vi.fn() }));
 vi.mock('@/lib/x402/paymentRedelivery', () => ({ paymentRedeliveryIdentity: vi.fn() }));
 vi.mock('viem', async (original) => ({ ...await original<typeof import('viem')>(), createPublicClient: () => h.client }));
+// R3d: facade の reconcile が license 商品で reconcileLicensePurchase に渡す引数 (finalize callback の同一性) を
+// 観測するための素通し spy。実装は本物のまま。
+vi.mock('@/lib/license/reconcile', async (original) => {
+  const actual = await original<typeof import('@/lib/license/reconcile')>();
+  return { ...actual, reconcileLicensePurchase: vi.fn(actual.reconcileLicensePurchase) };
+});
 
 import * as facade from '@/lib/x402/purchaseIntent';
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
 import { createLicenseDefinition } from '@/lib/license/definition';
 import { licenseLuaVariant } from '@/lib/license/stock';
+import { reconcileLicensePurchase, type LicenseReconcileChain } from '@/lib/license/reconcile';
 import { JPYC_V3_ASSET } from '@/lib/x402/types';
 import {
   checkPurchaseQuoteRateLimit, claimPurchaseSettlement, claimSignedPurchaseIntent,
@@ -80,6 +87,10 @@ const SCRIPT_NAMES: Record<string, string> = {
   '2ed9113e68b2a73df3561f865523449aa8de3fae45416f8e27616eff1173b291': 'REMOVE_TERMINAL_PENDING_MEMBER',
   'fff5b143e7f894679d9c6f47f3f4e9261265c9236fcb45550e52b15fc53cb11d': 'QUARANTINE_PENDING_MEMBER',
 };
+// R3d: license reconcile (lib/license/reconcile.ts) 自身の CAS。13 本とは別物で、license wrapper の内側にだけ現れる。
+const LICENSE_INNER_SCRIPT_NAMES: Record<string, string> = {
+  'dfaf600cf30b9578a0cdbb9eaaa2a3282af18f63282756cc6d99261b879023ce': 'LICENSE_RECONCILE_CAS',
+};
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 // license 商品は licenseLuaVariant(digital script) を EVAL する (R3b で追加した pin)。内側の digital script を
 // 取り出して SHA で名前を引き、production の wrapper で包み直すと元の script と byte 一致することまで確認する。
@@ -92,7 +103,7 @@ function scriptName(script: string): string {
   const close = script.lastIndexOf(LICENSE_CLOSE);
   if (open < 0 || close < open) return 'UNKNOWN';
   const inner = script.slice(open + LICENSE_OPEN.length, close);
-  const name = SCRIPT_NAMES[sha256(inner)];
+  const name = SCRIPT_NAMES[sha256(inner)] ?? LICENSE_INNER_SCRIPT_NAMES[sha256(inner)];
   return name && licenseLuaVariant(inner) === script ? `license(${name})` : 'UNKNOWN';
 }
 
@@ -412,6 +423,210 @@ describe('license Lua call sites: licenseLuaVariant script and trailing ARGV[#AR
     expect(context).toMatchObject({ hook: 'finalize', now: L_NOW + 4_000, obligation: { txHash: L_TX, purchasedAt: L_NOW + 4_000 } });
     expect(snapshot).toMatchSnapshot();
   });
+
+  // R3d で追加 (分割前のコード 99713f7f で採取): reconcile を lib/x402/purchase/* に移す前に、facade の reconcile が
+  // license 商品を reconcileLicensePurchase へ振り分ける経路の EVAL (license 自身の CAS と末尾 context) と、
+  // callback として渡す finalize が facade の finalizeHostedPurchase と同一の関数であることを固定する。
+  async function licenseSettling() {
+    const { quoted: q, claim } = await licenseStates();
+    reads(L_KEY, q);
+    await claimSignedPurchaseIntent({ intentSalt: L_SALT, claim, authorizationHash: hash(claim), now: L_NOW + 1_000 });
+    reads(L_KEY, JSON.parse(lastEval('license(CLAIM_SIGNED_INTENT)').args[8]!));
+    await claimPurchaseSettlement({ intentSalt: L_SALT, claim, now: L_NOW + 2_000 });
+    const settlingL = JSON.parse(lastEval('license(CLAIM_SETTLEMENT)').args[10]!) as SettlingPurchaseIntent;
+    reads(L_KEY, settlingL);
+    h.gets.length = 0;
+    h.sets.length = 0;
+    h.evals.length = 0;
+    vi.mocked(reconcileLicensePurchase).mockClear();
+    return settlingL;
+  }
+  // license CAS / FINALIZE が保存する JSON を、以降の kvGet で返す (Lua 成功後の KV を再現)。
+  function storeLicenseWrites(libraryScore: number) {
+    h.kvEval.mockImplementation(async (script: string, keys: string[], args: string[]) => {
+      const name = scriptName(script);
+      h.evals.push({ name, keys: [...keys], args: [...args] });
+      if (name === 'license(LICENSE_RECONCILE_CAS)') h.reads.set(L_KEY, [args[3]!]);
+      if (name === 'license(FINALIZE_PURCHASE)') {
+        h.reads.set(L_KEY, [args[22]!]);
+        h.reads.set(`store:own:${L_PAYER}:${L_ID}`, [args[13]!]);
+        h.reads.set(`store:purchase:80002:${L_TX}`, [args[21]!]);
+      }
+      return { ok: true, value: name === 'READ_LIBRARY_SCORE' ? String(libraryScore) : 1 };
+    });
+  }
+
+  it('reconcile dispatch: license lease CAS, adoption CAS and the finalize callback (settled JSON has no reconcile lease)', async () => {
+    const settlingL = await licenseSettling();
+    const now = settlingL.leaseUntil + 10_000;
+    storeLicenseWrites(now);
+    const licenseChain: LicenseReconcileChain = {
+      observe: vi.fn(async () => ({ number: 12_500n, hash: `0x${'f'.repeat(64)}` as Hex, timestamp: BigInt(now / 1000), used: true })),
+      receiptMatches: vi.fn(async (_intent, tx) => tx === L_TX),
+      transactions: vi.fn(async (_intent, from) => from === 12_000n ? [L_TX] : []),
+    };
+    const result = await reconcilePurchaseIntent(L_SALT, { now, licenseChain });
+    expect(result).toEqual({ ok: true, state: 'settled', txHash: L_TX });
+    const call = vi.mocked(reconcileLicensePurchase).mock.calls;
+    expect(call).toHaveLength(1);
+    expect(call[0]![0]).toEqual(settlingL);
+    expect(call[0]![1]).toBe(JSON.stringify(settlingL));
+    expect(call[0]![2]).toBe(now);
+    expect(call[0]![3]).toBe(facade.finalizeHostedPurchase);
+    expect(call[0]![4]).toBe(licenseChain);
+    expect(vi.mocked(licenseChain.transactions).mock.calls.map(([, from, to]) => [from, to]))
+      .toEqual([[10_000n, 11_999n], [12_000n, 12_500n]]);
+    const snapshot = trace();
+    expect(snapshot.evals.map((c) => c.name)).toEqual([
+      'license(LICENSE_RECONCILE_CAS)', 'license(LICENSE_RECONCILE_CAS)', 'license(FINALIZE_PURCHASE)', 'READ_LIBRARY_SCORE',
+    ]);
+    expect(snapshot.evals.slice(0, 3).map((c) => JSON.parse(c.args.at(-1)!).hook)).toEqual(['cas', 'cas', 'finalize']);
+    // 採用 CAS の intent は lease を持つが、finalize が保存する settled intent からは lease が消える (R3c レビュー nit 2)。
+    expect(JSON.parse(snapshot.evals[1]!.args[3]!)).toMatchObject({ state: 'indeterminate', txHash: L_TX, reconcileLeaseId: 'cd'.repeat(32) });
+    const settledJson = JSON.parse(snapshot.evals[2]!.args[22]!);
+    expect(settledJson).toMatchObject({ state: 'settled', txHash: L_TX, settledAt: now });
+    expect(settledJson).not.toHaveProperty('reconcileLeaseId');
+    expect(settledJson).not.toHaveProperty('reconcileLeaseUntil');
+    expect(snapshot).toMatchSnapshot();
+  });
+
+  it('reconcile dispatch: license finalized expiry releases through the license CAS with evidence (no default chain)', async () => {
+    const settlingL = await licenseSettling();
+    const now = settlingL.leaseUntil + 10_000;
+    storeLicenseWrites(now);
+    const licenseChain: LicenseReconcileChain = {
+      observe: vi.fn(async () => ({
+        number: 12_500n, hash: `0x${'f'.repeat(64)}` as Hex,
+        timestamp: BigInt(settlingL.claim.validBefore) + 1n, used: false,
+      })),
+      receiptMatches: vi.fn(async () => false),
+      transactions: vi.fn(async () => []),
+    };
+    expect(await reconcilePurchaseIntent(L_SALT, { now, licenseChain })).toEqual({ ok: true, state: 'failed_prebroadcast' });
+    expect(vi.mocked(reconcileLicensePurchase).mock.calls[0]![3]).toBe(facade.finalizeHostedPurchase);
+    expect(h.client.readContract).not.toHaveBeenCalled();
+    const snapshot = trace();
+    expect(snapshot.evals.map((c) => c.name)).toEqual(['license(LICENSE_RECONCILE_CAS)', 'license(LICENSE_RECONCILE_CAS)']);
+    expect(snapshot.evals.map((c) => [c.args[4], JSON.parse(c.args.at(-1)!).hook])).toEqual([['keep', 'cas'], ['remove', 'cas']]);
+    expect(snapshot).toMatchSnapshot();
+  });
+
+  it('reconcile dispatch: without licenseChain the dispatch passes undefined (the license default chain is chosen inside)', async () => {
+    await licenseSettling();
+    // lease 中の settlement は license 側で pending を返し、RPC にも KV 書き込みにも進まない。
+    const result = await reconcilePurchaseIntent(L_SALT, { now: L_NOW + 2_001 });
+    expect(result).toEqual({ ok: true, state: 'pending' });
+    const call = vi.mocked(reconcileLicensePurchase).mock.calls[0]!;
+    expect(call).toHaveLength(5);
+    expect(call[3]).toBe(facade.finalizeHostedPurchase);
+    expect(call[4]).toBeUndefined();
+    expect(trace()).toEqual({ gets: [L_KEY], sets: [], evals: [] });
+  });
+});
+
+// R3d で追加 (分割前のコード 99713f7f で採取): reconcile / pending を lib/x402/purchase/* に移す前に、digital の
+// reconcile 分岐ごとの KV 呼び出し (script・KEYS・ARGV・保存 JSON の property 順) を固定する。
+describe('R3d pins: digital reconcile call sites per branch', () => {
+  const RAIL_PARENT_KEY = `store:rail:intent:${SALT}`;
+  it('nonce reconstruction mismatch: corrupt, lease CAS then an indeterminate reschedule, no chain call', async () => {
+    const claim = { ...active.claim, nonce: OTHER_TX };
+    reads(KEY, { ...active, claim, authorizationHash: hash(claim) });
+    const adapter = chain();
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter })).toEqual({ ok: false, reason: 'corrupt' });
+    expect(adapter.authorizationUsed).not.toHaveBeenCalled();
+    expect(trace()).toMatchSnapshot();
+  });
+
+  it('signed with a consumed authorization: lease CAS, consumed→indeterminate CAS, bounded scan, reschedule CAS', async () => {
+    reads(KEY, signed);
+    const adapter = chain({ latestBlock: vi.fn(async () => BigInt(active.anchorBlock) + 10n) });
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter })).toEqual({ ok: true, state: 'pending' });
+    expect(vi.mocked(adapter.authorizationUsedTransactions).mock.calls.map(([, from, to]) => [from, to]))
+      .toEqual([[10_000n, 10_010n]]);
+    expect(trace()).toMatchSnapshot();
+  });
+
+  it('page bound: MAX_PAGES pages, then the next cursor is persisted in the reschedule CAS', async () => {
+    reads(KEY, active);
+    const pages = BigInt(facade.PURCHASE_RECONCILE_MAX_PAGES);
+    const span = facade.PURCHASE_RECONCILE_PAGE_BLOCKS;
+    const anchor = BigInt(active.anchorBlock);
+    const adapter = chain({ latestBlock: vi.fn(async () => anchor + span * pages + 5n) });
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter })).toEqual({ ok: true, state: 'pending' });
+    const calls = vi.mocked(adapter.authorizationUsedTransactions).mock.calls;
+    expect(calls).toHaveLength(Number(pages));
+    expect([calls[0]!.slice(1), calls.at(-1)!.slice(1)]).toEqual([
+      [anchor, anchor + span - 1n], [anchor + span * (pages - 1n), anchor + span * pages - 1n],
+    ]);
+    const resched = h.evals.at(-1)!;
+    expect(JSON.parse(resched.args[3]!).reconcileFromBlock).toBe((anchor + span * pages).toString());
+    expect(trace()).toMatchSnapshot();
+  });
+
+  it('finalized unused expiry: failed_prebroadcast CAS removes pending, then the JPYC rail release for the parent', async () => {
+    reads(KEY, active);
+    h.reads.set(RAIL_PARENT_KEY, ['parent-intent']);
+    const expiredAt = Number(active.claim.validBefore) * 1000;
+    const adapter = chain({
+      authorizationUsed: vi.fn(async () => false),
+      authorizationExpiredUnused: vi.fn(async () => true),
+    });
+    expect(await reconcilePurchaseIntent(SALT, { now: expiredAt, chain: adapter })).toEqual({ ok: true, state: 'failed_prebroadcast' });
+    const snapshot = trace();
+    // rail release は storeRailSelection の script (13 本の外) なので名前ではなく KEYS/ARGV で固定する。
+    expect(snapshot.evals.map((c) => c.name)).toEqual(['CAS_PENDING_INTENT', 'CAS_PENDING_INTENT', 'UNKNOWN']);
+    expect(snapshot.evals[2]).toEqual({
+      name: 'UNKNOWN',
+      keys: [`store:rail:active:${active.claim.payer.toLowerCase()}:${active.resourceId}:${active.contentRevision}`],
+      args: ['table', 'parent-intent', 'jpyc', SALT, active.authorizationHash],
+    });
+    expect(snapshot.gets).toEqual([KEY, RAIL_PARENT_KEY]);
+    expect({ ...snapshot, evals: snapshot.evals.slice(0, 2) }).toMatchSnapshot();
+  });
+
+  it('terminal settled intent: the settled record is re-finalized (repair) without a lease CAS', async () => {
+    reads(KEY, settled);
+    reads(OWN_KEY, fixture.ownership);
+    reads(RECORD_KEY, fixture.purchase);
+    h.replies.set('READ_LIBRARY_SCORE', String(fixture.ownership.firstPurchasedAt));
+    const adapter = chain();
+    const result = await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter });
+    expect(result).toEqual({ ok: true, state: 'settled', txHash: TX });
+    expect(adapter.authorizationUsed).not.toHaveBeenCalled();
+    expect(trace()).toMatchSnapshot();
+  });
+
+  it('RPC failure: lease CAS then an indeterminate reschedule CAS (never terminal)', async () => {
+    reads(KEY, active);
+    const adapter = chain({ authorizationUsed: vi.fn(async () => { throw new Error('rpc down'); }) });
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter })).toEqual({ ok: true, state: 'pending' });
+    expect(h.warn).toHaveBeenCalledWith('creator_store.purchase_reconcile_indeterminate', expect.objectContaining({ intentSalt: SALT }));
+    expect(trace()).toMatchSnapshot();
+  });
+
+  it('batch: not_found and corrupt members are quarantined, a storage failure is counted, and the summary shape is kept', async () => {
+    const missing = `0x${'9'.repeat(64)}`;
+    const broken = `0x${'8'.repeat(64)}`;
+    h.reads.set(`store:intent:${broken}`, ['{broken']);
+    h.replies.set('LIST_PENDING_INTENTS', [missing, broken, 'not-a-salt', SALT]);
+    reads(KEY, active);
+    // SALT の lease CAS だけ失敗させる (storage)。
+    h.kvEval.mockImplementation(async (script: string, keys: string[], args: string[]) => {
+      const name = scriptName(script);
+      h.evals.push({ name, keys: [...keys], args: [...args] });
+      if (name === 'LIST_PENDING_INTENTS') return { ok: true, value: h.replies.get(name) };
+      if (name === 'CAS_PENDING_INTENT') return { ok: false, reason: 'network_error' };
+      return { ok: true, value: 1 };
+    });
+    const summary = await reconcilePendingPurchases({ now: NOW, limit: 10, chain: chain() });
+    expect(summary).toEqual({ checked: 4, settled: 0, pending: 0, failedPrebroadcast: 0, storageErrors: 1 });
+    expect(h.warn.mock.calls.map(([event, data]) => [event, (data as { reason: string }).reason])).toEqual([
+      ['creator_store.purchase_pending_quarantined', 'not_found'],
+      ['creator_store.purchase_pending_quarantined', 'corrupt'],
+      ['creator_store.purchase_pending_quarantined', 'invalid_salt'],
+    ]);
+    expect(trace()).toMatchSnapshot();
+  });
 });
 
 describe('stored record parsers: exact outputs (property order) and rejections', () => {
@@ -504,7 +719,7 @@ describe('stored record parsers: exact outputs (property order) and rejections',
   });
 });
 
-describe('module structure (R3a/R3b/R3c split)', () => {
+describe('module structure (R3a/R3b/R3c/R3d split)', () => {
   const PURCHASE_DIR = 'lib/x402/purchase';
   const LEAVES = readdirSync(PURCHASE_DIR).sort();
   const specifiersOf = (source: string) => {
@@ -525,8 +740,8 @@ describe('module structure (R3a/R3b/R3c split)', () => {
 
   it('keeps the leaves below the facade: no leaf imports the facade, and the leaf graph is acyclic', () => {
     expect(LEAVES).toEqual([
-      'claim.ts', 'finalize.ts', 'keys.ts', 'library.ts', 'lua.ts', 'parse.ts', 'quote.ts', 'read.ts',
-      'records.ts', 'transitions.ts', 'types.ts',
+      'claim.ts', 'finalize.ts', 'keys.ts', 'library.ts', 'lua.ts', 'parse.ts', 'pending.ts', 'quote.ts', 'read.ts',
+      'reconcile.ts', 'reconcileChain.ts', 'records.ts', 'transitions.ts', 'types.ts',
     ]);
     const edges = Object.fromEntries(LEAVES.map((leaf) => [
       leaf, specifiers(`${PURCHASE_DIR}/${leaf}`).filter((spec) => spec.startsWith('.') || spec.includes('purchaseIntent')),
@@ -540,8 +755,11 @@ describe('module structure (R3a/R3b/R3c split)', () => {
       'library.ts': ['./types', './keys', './parse', './lua', './read', './records'],
       'lua.ts': [],
       'parse.ts': ['./types'],
+      'pending.ts': ['./types', './keys', './lua'],
       'quote.ts': ['./types', './keys', './parse', './lua'],
       'read.ts': ['./types', './keys', './parse'],
+      'reconcile.ts': ['./types', './keys', './read', './transitions', './finalize', './pending', './reconcileChain'],
+      'reconcileChain.ts': ['./types'],
       'records.ts': ['./types'],
       'transitions.ts': ['./types', './keys', './parse', './lua'],
       'types.ts': [],
@@ -550,6 +768,11 @@ describe('module structure (R3a/R3b/R3c split)', () => {
     // finalize を (builder は access 読み取りも) import しない。
     expect(edges['records.ts']!.filter((dep) => dep === './library' || dep === './finalize')).toEqual([]);
     expect(edges['library.ts']).not.toContain('./finalize');
+    // R3d: reconcile は最上位の leaf。どの leaf も reconcile を import しない (finalize は callback として下へ渡すだけ)。
+    // pending と chain adapter は reconcile の下で、reconcile / finalize を import しない。
+    expect(Object.entries(edges).filter(([, deps]) => deps.includes('./reconcile')).map(([leaf]) => leaf)).toEqual([]);
+    expect(edges['pending.ts']!.filter((dep) => ['./reconcile', './finalize', './reconcileChain'].includes(dep))).toEqual([]);
+    expect(edges['reconcileChain.ts']!.filter((dep) => ['./reconcile', './finalize', './pending'].includes(dep))).toEqual([]);
     // 閉路検査: 依存の無い leaf から順に取り除いて全件が消えること。
     const remaining = new Map(Object.entries(edges).map(([leaf, deps]) => [leaf, deps.map((dep) => `${dep.slice(2)}.ts`)]));
     while (remaining.size > 0) {
@@ -562,10 +785,15 @@ describe('module structure (R3a/R3b/R3c split)', () => {
   it('routes every consumer outside the split through the facade (vi.mock interception)', () => {
     // 検査器の自己検査: facade 自身の分割先 import は検出できる。
     expect(specifiers('lib/x402/purchaseIntent.ts')).toEqual(expect.arrayContaining([
-      './purchase/types', './purchase/keys', './purchase/parse', './purchase/lua',
+      // R3d: Lua を使う関数がすべて leaf に移り、facade は ./purchase/lua を import しなくなった。
+      './purchase/types', './purchase/keys', './purchase/parse',
       './purchase/read', './purchase/quote', './purchase/claim', './purchase/transitions',
       './purchase/finalize', './purchase/library',
+      './purchase/pending', './purchase/reconcileChain', './purchase/reconcile',
     ]));
+    // R3d 以降の facade は re-export だけ: 関数・定数の宣言を持たない (同 module 内呼び出しが残らない)。
+    expect(readFileSync('lib/x402/purchaseIntent.ts', 'utf8')
+      .split('\n').filter((line) => /^(?:export )?(?:async function|function|const|let|class) /.test(line))).toEqual([]);
     // vi.mock の specifier も拾える (この file は @/lib/logger を import せず vi.mock だけする)。
     expect(specifiers('tests/lib/x402/purchaseIntentCompatibility.test.ts')).toContain('@/lib/logger');
     // vi.doMock / 型引数付き vi.importActual / vi.importMock と二重引用符・template も拾える

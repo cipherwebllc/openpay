@@ -266,3 +266,49 @@ describe('R3c pins: license settled access and license-only finalize branches', 
     expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
   });
 });
+
+// R3d で追加 (分割前のコード 99713f7f で採取): reconcile を lib/x402/purchase/* に移す前に、facade reconcile から
+// license reconcile への振り分け (license 自身の CAS・finalize callback・失敗の写像・flag OFF) を本物の Lua で固定する。
+describe('R3d pins: license reconcile dispatch on real Lua', () => {
+  const hookOf = (args: string[]) => { try { return JSON.parse(args.at(-1)!).hook as string; } catch { return null; } };
+  it('adoption through reconcile settles; the stored settled intent has no reconcile lease and pending is cleared', async () => {
+    const input = await quote(); const i = await settling(input);
+    const now = i.leaseUntil + 10_000; h.calls = [];
+    expect(await reconcilePurchaseIntent(i.intentSalt, { now, licenseChain: chain(true) })).toEqual({ ok: true, state: 'settled', txHash: TX });
+    // license 自身の CAS 2 本 (lease・採用) → finalize → library 読み取り。
+    expect(h.calls.map((call) => hookOf(call.args))).toEqual(['cas', 'cas', 'finalize', null]);
+    const intentKeys = [purchaseIntentKey(i.intentSalt), purchasePendingIndexKey()];
+    expect(h.calls.slice(0, 2).map((call) => [call.keys, call.args[4]])).toEqual([[intentKeys, 'keep'], [intentKeys, 'keep']]);
+    expect(JSON.parse(h.calls[1]!.args[3]!)).toMatchObject({ state: 'indeterminate', txHash: TX, reconcileLeaseId: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    const stored = JSON.parse(h.store!.strings.get(purchaseIntentKey(i.intentSalt))!);
+    expect(stored).toMatchObject({ state: 'settled', txHash: TX, settledAt: now });
+    expect(stored).not.toHaveProperty('reconcileLeaseId');
+    expect(stored).not.toHaveProperty('reconcileLeaseUntil');
+    expect(h.store!.zsets.get(purchasePendingIndexKey())?.has(i.intentSalt) ?? false).toBe(false);
+    expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
+  });
+  it('a settled license intent is repaired through the finalize callback without RPC; a failed repair maps to storage', async () => {
+    const input = await quote(); await settling(input);
+    await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX, settledAt: NOW + 2000 });
+    const key = [...h.store!.zsets.get(LICENSE_OBLIGATION_INDEX)!.keys()][0]!;
+    h.store!.delete(LICENSE_DUE_INDEX);
+    const rpc = chain(true); h.calls = [];
+    expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 700_000, licenseChain: rpc })).toEqual({ ok: true, state: 'settled', txHash: TX });
+    expect(rpc.observe).not.toHaveBeenCalled();
+    expect(h.calls.map((call) => hookOf(call.args))).toEqual(['finalize', null]);
+    expect(h.store!.zsets.get(LICENSE_DUE_INDEX)?.has(key)).toBe(true);
+    expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
+    // license は finalize の失敗理由 (ここでは -3 = corrupt) を storage に写す (digital は理由を保つ)。
+    h.evalOverride = (_script, _keys, args) => hookOf(args) === 'finalize' ? -3 : undefined;
+    expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 700_000, licenseChain: rpc })).toEqual({ ok: false, reason: 'storage' });
+  });
+  it('with the flag OFF a license intent is pending without any EVAL, write or RPC', async () => {
+    const input = await quote(); await settling(input);
+    const before = { strings: [...h.store!.strings.entries()], pending: [...(h.store!.zsets.get(purchasePendingIndexKey()) ?? new Map()).entries()] };
+    h.enabled = false; h.calls = [];
+    const rpc = chain(true);
+    expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 700_000, licenseChain: rpc })).toEqual({ ok: true, state: 'pending' });
+    expect(h.calls).toEqual([]); expect(rpc.observe).not.toHaveBeenCalled();
+    expect({ strings: [...h.store!.strings.entries()], pending: [...(h.store!.zsets.get(purchasePendingIndexKey()) ?? new Map()).entries()] }).toEqual(before);
+  });
+});
