@@ -258,7 +258,10 @@ const PAYMENT_MESSAGE = {
   type: 'object',
   properties: {
     chainId: { type: 'integer', minimum: 1 }, txHash: TX_HASH, blockNumber: UINT_STRING,
-    transfersHash: TX_HASH, issuedAt: COUNT, licensee: ADDRESS,
+    transfersHash: {
+      ...TX_HASH,
+      description: 'keccak256 of the UTF-8 bytes of JSON.stringify(transfers), preserving array order and each object’s key order: logIndex, from, to, value, valueJpyc. Use the returned address casing and string values without normalization.',
+    }, issuedAt: COUNT, licensee: ADDRESS,
   },
   required: ['chainId', 'txHash', 'blockNumber', 'transfersHash', 'issuedAt', 'licensee'],
   additionalProperties: false,
@@ -267,6 +270,7 @@ const PAYMENT_MESSAGE = {
 export const JPYC_PAYMENT_ATTESTATION_RESPONSE_SCHEMA = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   type: 'object',
+  description: 'Record of chain state at observation time; it does not guarantee finality. Only attestation.message is signed. blockNumber is included in that message; confirmations, finality and blockHash are unsigned informational observations. Unfinalized or finality-unknown transactions can be signed.',
   properties: {
     ...ENVELOPE_COMMON,
     schemaVersion: { type: 'string', const: '1.0' },

@@ -20,6 +20,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('JPYC payment attestation', () => {
+  it('pins the v1 signed bytes before the observation-time disclosure correction', async () => {
+    const { signJpycPaymentAttestation } = await import('@/lib/jpyc/paymentAttestation');
+    expect(await signJpycPaymentAttestation(message)).toBe(
+      '0x3b06544f253df093dcb61fb8f750515fd0ab1011c4933544c17d6e4e8ade612e5c22f98567a7d30c407f1c3e375356fa545f5a0b8fc0af32fe9c0adc4e403e681c',
+    );
+  });
+
   it('hashes the exact JSON items deterministically, including order', async () => {
     const { transfersHash } = await import('@/lib/jpyc/paymentAttestation');
     const items = [{ slug: 'a' }, { slug: 'b' }];

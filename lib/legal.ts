@@ -16,6 +16,7 @@ import { polygon, kaia, avalanche, base } from 'viem/chains';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { STOREFRONT_FEE_BPS, PREORDER_FEE_BPS } from '@/lib/mobileOrderFee';
 import { env } from '@/lib/env';
+import { DISCLOSED_RECOVER_FEE } from './disclosedRecoverFee';
 
 export const LEGAL_ENTITY = {
   serviceName: 'OpenPay',
@@ -173,10 +174,8 @@ export const LEGAL_ENTITY = {
 //   (feeDisclosureDivergence) が live env とこの定数を突き合わせて Sentry に警告する。
 //   フェンステスト (tests/app/legal.test.tsx / tests/lib/news.test.ts) が、描画される法務/お知らせ
 //   本文がこの定数から導いた数値を含むことを assert する (定数だけ・本文だけの片側変更で fail)。
-export const DISCLOSED_RECOVER_FEE = {
-  floorJpyc: 2,
-  percentFromJulyBps: 100,
-} as const;
+// 値は lib/disclosedRecoverFee.ts が単一の定義 (クライアント部品が法務本文ごと bundle しないよう分離)。
+export { DISCLOSED_RECOVER_FEE };
 
 // 開示済みスケジュールの分岐点: 決済額連動率 (= percentFromJulyBps = 1%) を適用し始める時期。
 // 「2026 年 7 月のご利用分から」= 2026-07-01 00:00 UTC 以降。これより前は bps=0 (フロアのみ) が

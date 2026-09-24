@@ -113,6 +113,31 @@ describe('transparencyMetadata: indexable metadata', () => {
 });
 
 describe('手数料の SOT fence', () => {
+  it.each(LOCALES)('%s: レジの通常 JPYC 決済も店舗負担の利用料の対象', (locale) => {
+    const fees = transparency.TRANSPARENCY[locale].fees;
+    const register = fees.find((fee) => fee.startsWith(locale === 'ja' ? 'レジ（POS）:' : 'Register (POS):'));
+    expect(register).toBeDefined();
+    expect(register).toContain(percentFromBps(legal.DISCLOSED_RECOVER_FEE.percentFromJulyBps));
+    expect(register).toContain(`${legal.DISCLOSED_RECOVER_FEE.floorJpyc} JPYC`);
+    expect(register).toContain(locale === 'ja' ? '通常決済（ガスあり）を含む' : 'including standard payments');
+    expect(register).toContain(locale === 'ja' ? '店舗が負担' : 'merchant bears');
+    expect(register).toContain(locale === 'ja' ? 'ガスレス経路のみ' : 'only on gasless paths');
+    expect(fees[0]).toContain(locale === 'ja' ? 'レジ' : 'register');
+  });
+
+  it.each(LOCALES)('%s: チップの JPYC / USDC Base / USDC Arc の送る側負担を開示する', (locale) => {
+    const tip = transparency.TRANSPARENCY[locale].fees.find((fee) => fee.startsWith(locale === 'ja' ? 'チップ:' : 'Tips:'));
+    expect(tip).toBeDefined();
+    expect(tip).toContain(`${legal.DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc} JPYC`);
+    expect(tip).toContain(locale === 'ja' ? '送る側' : 'sender');
+    expect(tip).toContain(locale === 'ja' ? `${percentFromBps(legal.DISCLOSED_RECOVER_FEE.percentFromJulyBps)} は適用しません` : `${percentFromBps(legal.DISCLOSED_RECOVER_FEE.percentFromJulyBps)} fee does not apply`);
+    expect(tip).toContain('USDC (Base)');
+    expect(tip).toContain('Paymaster');
+    expect(tip).toContain('USDC (Arc)');
+    expect(tip).toContain(locale === 'ja' ? 'ウォレットから直接負担' : 'directly from their wallet');
+    expect(tip).toContain(locale === 'ja' ? 'OpenPay の徴収はありません' : 'OpenPay collects nothing');
+  });
+
   it.each(LOCALES)('%s: DISCLOSED_* の全数値が対応する描画文に含まれる', (locale) => {
     const fees = transparency.TRANSPARENCY[locale].fees;
     expect(fees[0]).toContain(

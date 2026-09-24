@@ -9,6 +9,7 @@
 import {
   DISCLOSED_MOBILE_ORDER_FEE,
   DISCLOSED_RECOVER_FEE,
+  DISCLOSED_TIP_FEE_MODELS,
   DISCLOSED_X402_FEE,
 } from './legal';
 import { sellGuideContentFor } from './sellGuide';
@@ -156,9 +157,11 @@ const ja: TransparencyContent = {
 
   feesTitle: '4. 手数料の決め方',
   fees: [
-    `JPYC ガスレス決済（recover）: 決済額の ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)}・最低 ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC。店舗が負担し、利用料は店舗の受取額から決済時に差し引かれます。通常決済（ガスあり）と USDC 経路は対象外です。`,
+    `JPYC ガスレス決済（recover）: 決済額の ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)}・最低 ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC。店舗が負担し、利用料は店舗の受取額から決済時に差し引かれます。通常決済（ガスあり）と USDC 経路はこのガスレス利用料の対象外ですが、レジの JPYC 通常決済には下記の利用料がかかります。`,
     `モバイル注文: 店頭・券売機は決済額の ${percentFromBps(DISCLOSED_MOBILE_ORDER_FEE.storefrontBps)}、事前モバイルオーダーは ${percentFromBps(DISCLOSED_MOBILE_ORDER_FEE.preorderBps)}。ガスレス決済の利用料とは重複せず、モバイル注文ではこの料率だけを決済経路を問わず適用します。事前モバイルオーダーは店舗の選択で店舗負担または顧客上乗せです。`,
     `x402 facilitator: 決済額の ${percentFromBps(DISCLOSED_X402_FEE.bps)}・最低 ${DISCLOSED_X402_FEE.floorJpyc} JPYC。買い手側への上乗せで、売り手は表示額をそのまま受け取ります。`,
+    `レジ（POS）: 通常決済（ガスあり）を含む JPYC 決済が対象。決済額の ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} を店舗が負担し、店舗の受取額から差し引かれます。最低 ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC はガスレス経路のみ。通常決済のガスはお客様負担です。`,
+    `チップ: 受け取り手数料はなし。JPYC は送る側がガス相当（約 ${DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc} JPYC）を上乗せ（決済額の ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} は適用しません）。USDC (Base) は送る側が Paymaster にガスを USDC で支払い、USDC (Arc) は送る側がネットワーク手数料を USDC でウォレットから直接負担。いずれも OpenPay の徴収はありません。`,
   ],
   feeDetailsLead: '正確な適用条件と支払時期は、',
   feeLinks: [
@@ -250,9 +253,11 @@ const en: TransparencyContent = {
 
   feesTitle: '4. How fees are determined',
   fees: [
-    `Gasless JPYC payments (recover): ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} of the payment, with a ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC minimum. The merchant bears the fee, which is deducted from the merchant’s receipt at payment time. Standard payments and USDC paths are excluded.`,
+    `Gasless JPYC payments (recover): ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} of the payment, with a ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC minimum. The merchant bears the fee, which is deducted from the merchant’s receipt at payment time. Standard payments and USDC paths are excluded from this gasless fee, but standard JPYC payments through the register incur the fee below.`,
     `Mobile ordering: ${percentFromBps(DISCLOSED_MOBILE_ORDER_FEE.storefrontBps)} for in-store or kiosk orders and ${percentFromBps(DISCLOSED_MOBILE_ORDER_FEE.preorderBps)} for pre-orders. It does not stack with the gasless-payment fee; only the mobile-order rate applies regardless of payment path. For pre-orders, the store selects merchant-borne or customer-added.`,
     `x402 facilitator: ${percentFromBps(DISCLOSED_X402_FEE.bps)} of the payment, with a ${DISCLOSED_X402_FEE.floorJpyc} JPYC minimum. It is added on the buyer’s side, and the seller receives the listed amount in full.`,
+    `Register (POS): JPYC payments, including standard payments, incur a ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} fee. The merchant bears the fee, which is deducted from the merchant’s receipt. The ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC minimum applies only on gasless paths. Customers pay their own gas for standard payments.`,
+    `Tips: Receiving tips is free. For JPYC, the sender adds the gas equivalent (about ${DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc} JPYC; the ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} fee does not apply). For USDC (Base), the sender pays gas in USDC to the Paymaster; for USDC (Arc), the sender pays network fees in USDC directly from their wallet. OpenPay collects nothing for any of these tips.`,
   ],
   feeDetailsLead: 'For exact applicability and payment timing, see the ',
   feeLinks: [
