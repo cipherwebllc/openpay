@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { after, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import {
   formatUnits,
   isAddress,
@@ -20,6 +20,7 @@ import {
 import { paymentSignatureFingerprint } from '@/lib/x402/paymentRedelivery';
 import { checkPurchaseQuoteRateLimit } from '@/lib/x402/purchaseIntent';
 import { recordHostedPurchase } from '@/lib/x402/purchaseStats';
+import { errorResponse, noStore, pendingResponse, scheduleAfterResponse } from '@/lib/x402/hostedRouteResponses';
 import {
   claimSignedStoreUsdcIntent,
   claimStoreUsdcSettlement,
@@ -65,27 +66,6 @@ type RecordValue = Record<string, unknown>;
 
 function isRecord(value: unknown): value is RecordValue {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function noStore(response: NextResponse): NextResponse {
-  response.headers.set('Cache-Control', 'no-store');
-  return response;
-}
-
-function errorResponse(error: string, status: number): NextResponse {
-  return NextResponse.json({ ok: false, error }, { status });
-}
-
-function pendingResponse(): NextResponse {
-  return NextResponse.json({ ok: true, state: 'pending' }, { status: 202 });
-}
-
-function scheduleAfterResponse(task: () => void): void {
-  try {
-    after(task);
-  } catch {
-    task();
-  }
 }
 
 // CDP facilitator は v2 ワイヤを要求する (vanillaGate.postFacilitator の実測コメント参照)。

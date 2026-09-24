@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
+import { after } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress, type Hex } from 'viem';
+import { paidRouteWire, v2PaymentHeader } from '../../helpers/paidRouteWire';
 
 // 署名 fingerprint と authorizationHash は **入力に依存する** 形で fake する (定数を返すと
 // 「別の署名で settled intent の内容を引き出せるか」を一切検証できない = B4 の穴が素通りする)。
@@ -776,5 +778,87 @@ describe('hosted USDC paid route', () => {
     );
     expect(tampered.status).toBe(409);
     expect(mocks.postFacilitator).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('R2 hosted USDC response pinning', () => {
+  beforeEach(() => {
+    // Record the task without running it (Vitest 3 changes what mockReset restores).
+    vi.mocked(after).mockReset();
+    vi.mocked(after).mockImplementation(() => undefined);
+    mocks.recordPurchase.mockReset();
+    mocks.metric.mockReset();
+    mocks.notify.mockReset();
+  });
+
+  afterEach(() => {
+    vi.mocked(after).mockImplementation((task) => { if (typeof task === 'function') void task(); });
+  });
+
+  it('pins the fixed-clock fixed-salt v1 challenge body and encoded v2 header', async () => {
+    expect(await paidRouteWire(await handleHostedUsdcPaidGet(request(), RESOURCE_ID, PAYER))).toMatchSnapshot();
+  });
+
+  describe.each(['v1', 'v2'] as const)('%s wire', (version) => {
+    it.each([
+      ['success', 200], ['pending', 202], ['verification rejected', 402],
+      ['storage unavailable', 503], ['conflict', 409], ['malformed', 400],
+      ['not found', 404],
+    ] as const)('pins %s', async (scenario, status) => {
+      const challenge = await handleHostedUsdcPaidGet(request(), RESOURCE_ID, PAYER);
+      const headerName = version === 'v1' ? 'X-PAYMENT' : 'PAYMENT-SIGNATURE';
+      const v1 = JSON.parse(Buffer.from(paymentHeader(), 'base64').toString('utf8')) as { payload: unknown };
+      let header = version === 'v1' ? paymentHeader() : v2PaymentHeader(challenge, v1.payload);
+      if (scenario === 'pending') mocks.findIntent.mockResolvedValue(intent('settling'));
+      if (scenario === 'verification rejected') {
+        mocks.postFacilitator.mockResolvedValue({ isValid: false, invalidReason: 'signature_mismatch' });
+      }
+      if (scenario === 'storage unavailable') mocks.findIntent.mockResolvedValue('storage');
+      if (scenario === 'conflict') mocks.findIntent.mockResolvedValue({ ...intent(), resourceId: 'another-product' });
+      if (scenario === 'malformed') header = 'not-json';
+      if (scenario === 'not found') mocks.findIntent.mockResolvedValue(null);
+      const response = await handleHostedUsdcPaidGet(request({ [headerName]: header }), RESOURCE_ID, PAYER);
+      expect(response.status).toBe(status);
+      expect(await paidRouteWire(response)).toMatchSnapshot();
+    });
+  });
+
+  it.each(['scheduled', 'fallback'] as const)('runs post-response work exactly once via %s', async (mode) => {
+    mocks.recordPurchase.mockReturnValue(new Promise(() => {}));
+    if (mode === 'fallback') vi.mocked(after).mockImplementation(() => { throw new Error('outside request scope'); });
+    const response = await handleHostedUsdcPaidGet(request({ 'X-PAYMENT': paymentHeader() }), RESOURCE_ID, PAYER);
+    expect(response.status).toBe(200);
+    expect(after).toHaveBeenCalledTimes(1);
+    if (mode === 'scheduled') {
+      expect(mocks.recordPurchase).not.toHaveBeenCalled();
+      expect(mocks.metric).not.toHaveBeenCalled();
+      expect(mocks.notify).not.toHaveBeenCalled();
+      const task = vi.mocked(after).mock.calls[0]![0] as () => void;
+      task();
+    }
+    expect(mocks.recordPurchase).toHaveBeenCalledTimes(1);
+    expect(mocks.recordPurchase).toHaveBeenCalledWith(RESOURCE_ID);
+    expect(mocks.metric).toHaveBeenCalledTimes(1);
+    expect(mocks.metric).toHaveBeenCalledWith('store_purchase');
+    expect(mocks.notify).toHaveBeenCalledTimes(1);
+    expect(mocks.notify).toHaveBeenCalledWith(SELLER, 'store', '2 USDC');
+  });
+
+  it.each(['scheduled', 'fallback'] as const)('does not catch or retry a task failure in %s execution', async (mode) => {
+    const failure = new Error('task is expected to be no-throw');
+    mocks.recordPurchase.mockImplementation(() => { throw failure; });
+    if (mode === 'fallback') {
+      vi.mocked(after).mockImplementation(() => { throw new Error('outside request scope'); });
+      await expect(handleHostedUsdcPaidGet(request({ 'X-PAYMENT': paymentHeader() }), RESOURCE_ID, PAYER)).rejects.toBe(failure);
+    } else {
+      expect((await handleHostedUsdcPaidGet(request({ 'X-PAYMENT': paymentHeader() }), RESOURCE_ID, PAYER)).status).toBe(200);
+      const task = vi.mocked(after).mock.calls[0]![0] as () => void;
+      expect(task).toThrow(failure);
+    }
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(mocks.recordPurchase).toHaveBeenCalledTimes(1);
+    expect(mocks.metric).not.toHaveBeenCalled();
+    expect(mocks.notify).not.toHaveBeenCalled();
   });
 });

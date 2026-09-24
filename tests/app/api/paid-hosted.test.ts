@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress } from 'viem';
+import { forwardingCases, paidRouteWire, unforwardedHeaders, v2PaymentHeader } from '../../helpers/paidRouteWire';
 
 const routeMocks = vi.hoisted(() => ({
   env: {
@@ -39,8 +40,14 @@ const routeMocks = vi.hoisted(() => ({
   after: vi.fn(),
   recipient: vi.fn(),
   worker: vi.fn(),
+  recordPurchase: vi.fn(),
+  metric: vi.fn(),
+  notify: vi.fn(),
 }));
 
+vi.mock('@/lib/x402/purchaseStats', () => ({ recordHostedPurchase: routeMocks.recordPurchase }));
+vi.mock('@/lib/metrics', () => ({ recordMetric: routeMocks.metric }));
+vi.mock('@/lib/push/notify', () => ({ notifyPaymentReceived: routeMocks.notify }));
 vi.mock('next/server', async (original) => ({ ...await original<typeof import('next/server')>(), after: routeMocks.after }));
 vi.mock('@/lib/license/recipient', () => ({ checkLicenseRecipient: routeMocks.recipient }));
 vi.mock('@/lib/license/minter', () => ({ runLicenseWorker: routeMocks.worker }));
@@ -968,5 +975,104 @@ describe('license sold-out response', () => {
     const route = await loadRoute();
     const response = await callHosted(route, `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`, { 'x-payment': paymentHeader() });
     expect(response.status).toBe(404); expect(routeMocks.getHostedProduct).not.toHaveBeenCalled(); expect(routeMocks.settle).not.toHaveBeenCalled(); expect(routeMocks.readSettledAccess).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('R2 hosted JPYC response pinning', () => {
+  const path = `/api/paid/hosted/${RESOURCE_ID}?payer=${PAYER}`;
+
+  let clock: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    clock = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_005_000);
+    routeMocks.recordPurchase.mockReset();
+    routeMocks.metric.mockReset();
+    routeMocks.notify.mockReset();
+  });
+
+  afterEach(() => { clock.mockRestore(); });
+
+  it('pins the fixed-salt v1 challenge body and encoded v2 header', async () => {
+    const route = await loadRoute();
+    expect(await paidRouteWire(await callHosted(route, path))).toMatchSnapshot();
+  });
+
+  describe.each(['v1', 'v2'] as const)('%s wire', (version) => {
+    it.each([
+      ['success', 200], ['pending', 202], ['verification rejected', 402],
+      ['storage unavailable', 503], ['conflict', 409], ['malformed', 400],
+      ['not found', 404],
+    ] as const)('pins %s', async (scenario, status) => {
+      const route = await loadRoute();
+      const challenge = await callHosted(route, path);
+      const headerName = version === 'v1' ? 'X-PAYMENT' : 'PAYMENT-SIGNATURE';
+      let header = version === 'v1'
+        ? paymentHeader()
+        : v2PaymentHeader(challenge, paymentPayload().payload);
+      if (scenario === 'pending') routeMocks.getIntent.mockResolvedValue(intentFixture('settling'));
+      if (scenario === 'verification rejected') {
+        routeMocks.verify.mockResolvedValue(NextResponse.json({ isValid: false, invalidReason: 'signature_mismatch' }));
+      }
+      if (scenario === 'storage unavailable') routeMocks.getIntent.mockResolvedValue('storage');
+      if (scenario === 'conflict') routeMocks.getIntent.mockResolvedValue({ ...intentFixture(), resourceId: 'another-product' });
+      if (scenario === 'malformed') header = 'not-json';
+      if (scenario === 'not found') routeMocks.getIntent.mockResolvedValue(null);
+      const response = await callHosted(route, path, { [headerName]: header });
+      expect(response.status).toBe(status);
+      expect(await paidRouteWire(response)).toMatchSnapshot();
+    });
+  });
+
+  it.each(forwardingCases)('forwards only the allowlist to verify and settle: $name', async ({ incoming, expected }) => {
+    const route = await loadRoute();
+    const response = await callHosted(route, path, {
+      ...incoming, ...unforwardedHeaders, 'X-PAYMENT': paymentHeader(),
+    });
+    expect(response.status).toBe(200);
+    for (const handler of [routeMocks.verify, routeMocks.settle]) {
+      expect(handler).toHaveBeenCalledTimes(1);
+      const forwarded = handler.mock.calls[0]![0] as Request;
+      expect(Object.fromEntries(forwarded.headers)).toEqual(expected);
+    }
+  });
+
+  it.each(['scheduled', 'fallback'] as const)('runs post-response work exactly once via %s', async (mode) => {
+    // An unresolved ancillary promise must not hold the paid response open.
+    routeMocks.recordPurchase.mockReturnValue(new Promise(() => {}));
+    if (mode === 'fallback') routeMocks.after.mockImplementation(() => { throw new Error('outside request scope'); });
+    const route = await loadRoute();
+    const response = await callHosted(route, path, { 'X-PAYMENT': paymentHeader() });
+    expect(response.status).toBe(200);
+    expect(routeMocks.after).toHaveBeenCalledTimes(1);
+    if (mode === 'scheduled') {
+      expect(routeMocks.recordPurchase).not.toHaveBeenCalled();
+      expect(routeMocks.metric).not.toHaveBeenCalled();
+      expect(routeMocks.notify).not.toHaveBeenCalled();
+      routeMocks.after.mock.calls[0]![0]();
+    }
+    expect(routeMocks.recordPurchase).toHaveBeenCalledTimes(1);
+    expect(routeMocks.recordPurchase).toHaveBeenCalledWith(RESOURCE_ID);
+    expect(routeMocks.metric).toHaveBeenCalledTimes(1);
+    expect(routeMocks.metric).toHaveBeenCalledWith('store_purchase');
+    expect(routeMocks.notify).toHaveBeenCalledTimes(1);
+    expect(routeMocks.notify).toHaveBeenCalledWith(SELLER, 'store', '¥5');
+  });
+
+  it.each(['scheduled', 'fallback'] as const)('does not catch or retry a task failure in %s execution', async (mode) => {
+    const failure = new Error('task is expected to be no-throw');
+    routeMocks.recordPurchase.mockImplementation(() => { throw failure; });
+    const route = await loadRoute();
+    if (mode === 'fallback') {
+      routeMocks.after.mockImplementation(() => { throw new Error('outside request scope'); });
+      await expect(callHosted(route, path, { 'X-PAYMENT': paymentHeader() })).rejects.toBe(failure);
+    } else {
+      expect((await callHosted(route, path, { 'X-PAYMENT': paymentHeader() })).status).toBe(200);
+      expect(() => routeMocks.after.mock.calls[0]![0]()).toThrow(failure);
+    }
+    expect(routeMocks.after).toHaveBeenCalledTimes(1);
+    expect(routeMocks.recordPurchase).toHaveBeenCalledTimes(1);
+    expect(routeMocks.metric).not.toHaveBeenCalled();
+    expect(routeMocks.notify).not.toHaveBeenCalled();
   });
 });

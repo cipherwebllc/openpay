@@ -13,6 +13,7 @@ import { licenseVisible, licenseSellerAllowed } from '@/lib/license/config';
 import { sellerRoleFor } from '@/lib/license/sellerRole';
 import type { SellerRole } from '@/lib/licenseUi';
 import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
+import { cloneForwardHeaders } from '@/lib/net/forwardHeaders';
 import { FORWARDER_COMMIT_VERSION } from '@/lib/relay/forwarderIntent';
 import {
   getHostedContent,
@@ -25,16 +26,7 @@ import { recordHostedPurchase } from '@/lib/x402/purchaseStats';
 import { notifyPaymentReceived } from '@/lib/push/notify';
 import { recordMetric } from '@/lib/metrics';
 import { formatJpycYenLabel } from '@/lib/format';
-
-// 応答後に付帯処理を予約する (掟 12)。after() はリクエストスコープ外 (テスト等) で
-// throw するため、その場合は直接 fire-and-forget に落とす (task は no-throw 前提)。
-function scheduleAfterResponse(task: () => void): void {
-  try {
-    after(task);
-  } catch {
-    task();
-  }
-}
+import { errorResponse, noStore, pendingResponse, scheduleAfterResponse } from '@/lib/x402/hostedRouteResponses';
 import {
   buildPurchaseAuthorizationClaim,
   checkPurchaseQuoteRateLimit,
@@ -103,40 +95,8 @@ function jpycPurchaseIntentKey(intentSalt: string): string {
   return `store:intent:${intentSalt.toLowerCase()}`;
 }
 
-function noStore(response: NextResponse): NextResponse {
-  response.headers.set('Cache-Control', 'no-store');
-  return response;
-}
-
-function errorResponse(error: string, status: number): NextResponse {
-  return NextResponse.json({ ok: false, error }, { status });
-}
-
-function pendingResponse(): NextResponse {
-  return NextResponse.json(
-    { ok: true, state: 'pending' },
-    { status: 202 },
-  );
-}
-
 function decodePaymentHeader(raw: string): unknown {
   return JSON.parse(Buffer.from(raw, 'base64').toString('utf8')) as unknown;
-}
-
-function cloneForwardHeaders(req: Request): Headers {
-  const headers = new Headers({ 'content-type': 'application/json' });
-  const forwardedFor = req.headers.get('x-forwarded-for');
-  const realIp = req.headers.get('x-real-ip');
-  const vercelForwardedFor = req.headers.get('x-vercel-forwarded-for');
-  // Cloudflare 配下では接続元 (x-vercel-forwarded-for) と cf-connecting-ip の両方が要る (lib/net/ipHash.ts)。
-  const cfConnectingIp = req.headers.get('cf-connecting-ip');
-  if (forwardedFor) headers.set('x-forwarded-for', forwardedFor);
-  if (realIp) headers.set('x-real-ip', realIp);
-  if (vercelForwardedFor) {
-    headers.set('x-vercel-forwarded-for', vercelForwardedFor);
-  }
-  if (cfConnectingIp) headers.set('cf-connecting-ip', cfConnectingIp);
-  return headers;
 }
 
 function hostedResourceUrl(resourceId: string, payer: Address): string {
