@@ -305,29 +305,61 @@ describe('MCP payment isolation and signer modes', () => {
     expect(fetched).toEqual([`${url}?first`, `${url}?second`]);
   });
 
-  it.each(['start', 'end'] as const)('gives up on a hung %s write after the deadline: the paid result still returns and later calls are not blocked', async (stage) => {
+  it.each([
+    { stage: 'start', deadlineMs: undefined, expectedDeadlineMs: 2000 },
+    { stage: 'end', deadlineMs: undefined, expectedDeadlineMs: 2000 },
+    { stage: 'start', deadlineMs: 25, expectedDeadlineMs: 25 },
+    { stage: 'end', deadlineMs: 25, expectedDeadlineMs: 25 },
+  ])('gives up on a hung $stage write after the deadline ($expectedDeadlineMs ms): the paid result still returns and later calls are not blocked', async ({ stage, deadlineMs, expectedDeadlineMs }) => {
     // 応答しないファイルシステム (NFS/FUSE の I/O ハング) を、永久に resolve しない open で再現する。
     // 期限が無いと、2xx で解錠済み (= 支払い済み) の結果が返らず再支払いを招き、以後の pay も止まる。
+    // 実 I/O は進め、deadline だけ手動で進める。実時間の短い期限では、CI 負荷で正常な
+    // start/end や後続 call まで timeout し、ハングからの隔離を検証できなくなる。
+    // beforeEach の Date-only clock を置き換える (再度 useFakeTimers だけでは対象が増えない)。
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    vi.setSystemTime(new Date(at));
     const open = fs.open.bind(fs);
+    let entered!: () => void;
+    const hungWrite = new Promise<void>((resolvePromise) => { entered = resolvePromise; });
     let appends = 0;
     vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
-      if (args[1] === APPEND_FLAGS && ++appends === (stage === 'start' ? 1 : 2)) return new Promise<never>(() => {});
+      if (args[1] === APPEND_FLAGS && ++appends === (stage === 'start' ? 1 : 2)) {
+        entered();
+        return new Promise<never>(() => {});
+      }
       return open(...args);
     });
     syncBuiltinESMExports();
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
       new Headers(init?.headers).has('X-PAYMENT') ? json({ unchanged: true }) : json({ accepts: [accept()] }, 402));
-    const active = runtime(fetchImpl, {}, { historyDeadlineMs: 25 });
-    const first = await active.x402Pay({ url, maxTotalJpyc: '4' });
-    expect(first).toMatchObject({ status: 200, body: { unchanged: true }, history: 'failed' });
-    const second = await active.x402Pay({ url, maxTotalJpyc: '4' });
-    expect(second).toMatchObject({ status: 200, history: 'recorded' });
+    const active = runtime(fetchImpl, {}, {
+      historyDeadlineMs: deadlineMs,
+    });
+    const returned = vi.fn();
+    const first = active.x402Pay({ url, maxTotalJpyc: '4' }).then((result) => {
+      returned(result);
+      return result;
+    });
+    // fs.open に到達するまで待つ。microtask だけの flush では実 I/O の完了を保証できない。
+    await hungWrite;
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(expectedDeadlineMs - 1);
+    expect(returned).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledTimes(stage === 'start' ? 0 : 2);
+    await vi.advanceTimersByTimeAsync(1);
+    if (stage === 'start') expect(fetchImpl).toHaveBeenCalledTimes(2);
+    else expect(returned).toHaveBeenCalledTimes(1);
+    expect(await first).toMatchObject({ status: 200, body: { unchanged: true }, history: 'failed' });
+    expect(await active.x402Pay({ url, maxTotalJpyc: '4' })).toMatchObject({ status: 200, history: 'recorded' });
     expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(vi.getTimerCount()).toBe(0);
+    // 後続 call は start/end とも durable。timeout した最初の write は依然ハング中。
+    expect((await rows()).slice(-2).map((row) => row.t)).toEqual(['start', 'end']);
   });
 
-  it('uses a short default deadline so a hung filesystem cannot hold a paid result for long', () => {
-    expect(HISTORY_DEADLINE_MS).toBeGreaterThan(0);
-    expect(HISTORY_DEADLINE_MS).toBeLessThanOrEqual(5000);
+  it('keeps the production history deadline at two seconds', () => {
+    expect(HISTORY_DEADLINE_MS).toBe(2000);
   });
 
   it('preserves exceptions when history also fails and returns only error codes on read failure', async () => {
