@@ -42,6 +42,28 @@ const EMPTY_DRAFT = {
   category: '',
 };
 
+// 商品画像 (任意の第三者 URL) の小さなプレビュー。Referer (OpenPay の origin) を画像ホストへ
+// 渡さない。読込失敗は壊れ画像 icon ではなく同寸の装飾枠で置き換える (枠ごと消すと入力中の途中 URL
+// が失敗するたびに横の入力欄が左右に跳ねるため)。失敗した URL だけを記録するので、URL を直せば
+// 新しい画像を再試行する。
+function PresetThumbnail({ url }: { url: string }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  if (failedUrl === url) {
+    return <span aria-hidden className="h-8 w-8 shrink-0 rounded bg-slate-100" />;
+  }
+  return (
+    <ExternalImage
+      src={url}
+      alt=""
+      referrerPolicy="no-referrer"
+      loading="lazy"
+      decoding="async"
+      className="h-8 w-8 shrink-0 rounded object-cover"
+      onError={() => setFailedUrl(url)}
+    />
+  );
+}
+
 export function ProductPresetManager({
   presets,
   addPreset,
@@ -164,18 +186,7 @@ export function ProductPresetManager({
                   チェックボックスを移動 (主行は商品名を広く取る)。カテゴリーは別グループに分離。 */}
               <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
-                  {p.image && (
-                    // 現行どおり Referer 抑制・lazy・失敗時 fallback の指定なし (方針の統一は B-R7 で行う)。
-                    <ExternalImage
-                      src={p.image}
-                      alt=""
-                      referrerPolicy={undefined}
-                      loading={undefined}
-                      decoding={undefined}
-                      className="h-8 w-8 shrink-0 rounded object-cover"
-                      onError={null}
-                    />
-                  )}
+                  {p.image && <PresetThumbnail url={p.image} />}
                   <input
                     type="url"
                     value={p.image ?? ''}

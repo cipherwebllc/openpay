@@ -174,7 +174,7 @@ describe('RegisterMode', () => {
     expect(noImg.querySelector('img')).toBeNull();
   });
 
-  it('レジの商品画像: no-referrer・lazy と、失敗時の inline display:none (R7a の網)', async () => {
+  it('レジの商品画像: no-referrer・lazy と、失敗時の inline display:none・URL を直すと新しい node で再表示 (R7a の網・B-R7)', async () => {
     window.localStorage.setItem('openpay:product-presets:v1', JSON.stringify({
       presets: [{ id: 'p1', name: '画像商品', unitPrice: '500', token: 'jpyc', taxRate: 10, taxCategory: 'taxable_10', memo: null, image: 'https://images.example/a.png', sortOrder: 0, enabled: true }],
       receipt: { day: '', n: 0 },
@@ -182,7 +182,8 @@ describe('RegisterMode', () => {
     render(<RegisterMode />);
     const button = await screen.findByRole('button', { name: /画像商品/ });
     const image = button.querySelector('img')!;
-    expect(image.outerHTML).toBe('<img alt="" referrerpolicy="no-referrer" loading="lazy" class="mb-2 h-16 w-full rounded-lg object-cover " src="https://images.example/a.png">');
+    // B-R7: decoding="async" を追加。
+    expect(image.outerHTML).toBe('<img alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="mb-2 h-16 w-full rounded-lg object-cover " src="https://images.example/a.png">');
     const following = image.nextElementSibling;
     fireEvent.error(image);
     expect(button.querySelector('img')).toBe(image);
@@ -191,6 +192,13 @@ describe('RegisterMode', () => {
     fireEvent.click(button);
     expect(button.querySelector('img')).toBe(image);
     expect(image).toHaveAttribute('style', 'display: none;');
+    // 同じ画面の商品管理で URL を直すと新しい node になり、旧 node の display:none は残らない
+    // (R7a までは node を使い回し、直した URL も隠れたままだった)。
+    fireEvent.change(screen.getByLabelText('画像URL(任意)'), { target: { value: 'https://images.example/b.png' } });
+    const corrected = button.querySelector('img')!;
+    expect(corrected).not.toBe(image);
+    expect(corrected).toHaveAttribute('src', 'https://images.example/b.png');
+    expect(corrected).not.toHaveAttribute('style');
   });
 
   it('商品画像表示 ON/OFF トグルで画像を出し分け (既定 ON)', async () => {

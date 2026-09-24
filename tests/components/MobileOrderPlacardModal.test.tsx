@@ -47,10 +47,11 @@ afterEach(() => {
 });
 
 describe('MobileOrderPlacardModal', () => {
-  it('印刷面のアバターは ExternalImage の対象外: loading/referrer/fallback の指定なしのまま (R7a の網)', () => {
+  it('印刷面のアバターは ExternalImage の対象外: no-referrer だけ付け、loading/fallback の指定なしのまま (R7a の網・B-R7)', () => {
     vi.stubGlobal('print', vi.fn());
     const { container } = setup({ avatar: 'https://images.example/print.png' });
-    const expected = '<img alt="" class="mt-4 h-16 w-16 rounded-full object-cover print:mt-6 print:h-28 print:w-28" src="https://images.example/print.png">';
+    // B-R7: referrerPolicy だけ追加 (印刷に影響しない)。印刷に必須なので lazy・fallback は付けない。
+    const expected = '<img alt="" referrerpolicy="no-referrer" class="mt-4 h-16 w-16 rounded-full object-cover print:mt-6 print:h-28 print:w-28" src="https://images.example/print.png">';
     expect(container.querySelector('img')?.outerHTML).toBe(expected);
     fireEvent.click(screen.getByRole('button', { name: '印刷' }));
     const images = document.querySelectorAll('img[src="https://images.example/print.png"]');

@@ -631,15 +631,16 @@ export function MobileOrderView({
     >
       <header className="text-center">
         {/* 店舗カバー (任意・https のみ)。横幅いっぱい (px-4 を打ち消し) のヒーロー背景に、
-            アバターを下端へ重ねる定番の店舗ヘッダー。読込失敗でカバーは消えアバターのみに。 */}
+            アバターを下端へ重ねる定番の店舗ヘッダー。読込失敗でカバーは消えアバターのみに。
+            ページ最上部のヒーロー (LCP 候補) なのでカバーもアバターも lazy にしない。 */}
         {showCover && (
           <div className="relative -mx-4 h-36 overflow-hidden rounded-b-3xl bg-slate-100">
             <ExternalImage
               src={coverUrl}
               alt=""
               referrerPolicy="no-referrer"
-              loading="lazy"
-              decoding={undefined}
+              loading={undefined}
+              decoding="async"
               className="h-full w-full object-cover"
               onError={() => setCoverFailed(true)}
             />
@@ -658,8 +659,8 @@ export function MobileOrderView({
               src={avatarUrl}
               alt={config.shopName}
               referrerPolicy="no-referrer"
-              loading="lazy"
-              decoding={undefined}
+              loading={undefined}
+              decoding="async"
               className="h-full w-full object-cover"
               onError={() => setAvatarFailed(true)}
             />

@@ -117,7 +117,7 @@ function MiniPreviewAvatar({ url, initial }: { url?: string; initial: string }) 
       aria-hidden
       referrerPolicy="no-referrer"
       loading={undefined}
-      decoding={undefined}
+      decoding="async"
       className="h-full w-full object-cover"
       onError={() => setFailed(true)}
     />
@@ -134,7 +134,7 @@ function MiniPreviewCover({ url }: { url: string }) {
       aria-hidden
       referrerPolicy="no-referrer"
       loading={undefined}
-      decoding={undefined}
+      decoding="async"
       className="absolute inset-0 h-full w-full opacity-25 object-cover"
       onError={() => setFailed(true)}
     />

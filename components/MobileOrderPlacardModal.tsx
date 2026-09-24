@@ -154,10 +154,13 @@ export function MobileOrderPlacardModal({
       </p>
 
       {avatar && (
+        // 第三者画像なので Referer (OpenPay の origin) を渡さない (B-R7)。印刷に必須なので lazy・
+        // fallback は付けない (印刷時に画像が揃っている必要がある)。referrerPolicy は印刷に影響しない。
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={avatar}
           alt=""
+          referrerPolicy="no-referrer"
           className="mt-4 h-16 w-16 rounded-full object-cover print:mt-6 print:h-28 print:w-28"
         />
       )}
