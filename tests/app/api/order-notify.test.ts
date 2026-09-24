@@ -2,6 +2,9 @@
 // flag OFF=404 / handle 束縛 / txHash 冪等 / on-chain 検証 (pass/fail/rpc) / KV 必須 (mainnet) /
 // レート制限。chains/tokens は実値 (chainId=137)・verifyJpycTransferToOnChain と KV は mock。
 
+import type { FeeReceiptLog } from '@/lib/feeVerify';
+import { bindingFixture, BIND_FORWARDER, BIND_PAYER, bindTransfer } from '../../_helpers/orderBinding';
+import { resolveDeployment } from '@/lib/tokens';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const JPYC = 10n ** 18n;
@@ -16,6 +19,7 @@ const STATUS_TOKEN = 'p'.repeat(43); // 顧客生成の status トークン (43 
 // 注意: vi.hoisted は top-level const より先に走るため、ここで MERCHANT/JPYC を参照すると TDZ。
 // 初期値は安全なリテラル/null にし、実値は beforeEach で設定する。
 const hold = vi.hoisted(() => ({
+  forwarder: null as `0x${string}` | null,
   enableOrderRelay: true,
   enableOrderPickup: true, // 顧客向け注文状況の逆引きポインタ保存のゲート
   enablePushNotify: true,
@@ -51,6 +55,7 @@ const hold = vi.hoisted(() => ({
         directValue?: bigint;
         merchantSource?: string;
         sameSourceFeeValue?: bigint;
+        receiptLogs?: FeeReceiptLog[];
       }
     | { ok: false; reason: string },
   feePairVerify: {
@@ -58,16 +63,18 @@ const hold = vi.hoisted(() => ({
     value: 10n ** 18n,
     blockNumber: 2n,
   } as
-    | { ok: true; value: bigint; blockNumber: bigint }
+    | { ok: true; value: bigint; blockNumber: bigint; receiptLogs?: FeeReceiptLog[] }
     | { ok: false; reason: string },
   feePairVerifyQueue: [] as (
-    | { ok: true; value: bigint; blockNumber: bigint }
+    | { ok: true; value: bigint; blockNumber: bigint; receiptLogs?: FeeReceiptLog[] }
     | { ok: false; reason: string }
   )[],
 }));
 
 const pushNotify = vi.hoisted(() => ({
   after: vi.fn(),
+  deferAfter: false,
+  deferred: [] as (() => unknown)[],
   afterTasks: [] as Promise<unknown>[],
   notify: vi.fn(),
 }));
@@ -82,6 +89,7 @@ vi.mock('next/server', () => ({
   },
   after: (cb: () => unknown) => {
     pushNotify.after(cb);
+    if (pushNotify.deferAfter) { pushNotify.deferred.push(cb); return; }
     try {
       pushNotify.afterTasks.push(Promise.resolve(cb()));
     } catch (e) {
@@ -141,6 +149,7 @@ vi.mock('@/lib/feeVerify', () => ({
     );
   },
 }));
+vi.mock('@/lib/relay/forwarderConfig', async (original) => ({ ...await original<typeof import('@/lib/relay/forwarderConfig')>(), configuredJpycForwarderFor: () => hold.forwarder }));
 vi.mock('@/lib/handleStore', () => ({
   resolveHandle: vi.fn(async () => hold.handle),
 }));
@@ -313,6 +322,7 @@ function partialOrderRaw(
 }
 
 async function flushAfterTasks() {
+  for (const cb of pushNotify.deferred.splice(0)) await cb();
   await Promise.all(pushNotify.afterTasks);
 }
 
@@ -325,6 +335,8 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-09-06T12:00:00Z'));
   getBlockSpy.mockReset();
   getBlockSpy.mockResolvedValue({ timestamp: BigInt(Date.now() / 1000) });
+  hold.forwarder = null;
+  vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', 'false');
   hold.enableOrderRelay = true;
   hold.enableOrderPickup = true;
   hold.enablePushNotify = true;
@@ -375,6 +387,8 @@ beforeEach(() => {
   warnSpy.mockClear();
   pushNotify.after.mockClear();
   pushNotify.afterTasks = [];
+  pushNotify.deferAfter = false;
+  pushNotify.deferred = [];
   pushNotify.notify.mockReset();
   pushNotify.notify.mockResolvedValue(undefined);
 });
@@ -1283,4 +1297,146 @@ describe('POST /api/order/notify', () => {
     await POST(req(goodBody()));
     expect(setSpy.mock.calls.some((c) => String(c[0]).startsWith('order:sv:'))).toBe(false);
   });
+});
+
+describe('A2c binding rejection precedes side effects', () => {
+  it.each([false, true])('malformed present binding is rejected even with enforcement=%s', async (enforce) => {
+    vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', enforce ? 'true' : 'false');
+    const response = await POST(req(goodBody({ bind: { v: 2 }, statusToken: STATUS_TOKEN, feeTxHash: FEE_TXHASH })));
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({ ok: false, error: 'order_binding_mismatch' });
+    expect(lpushSpy).not.toHaveBeenCalled();
+    expect(evalSpy).not.toHaveBeenCalled();
+    expect(setSpy.mock.calls.some(([key]) => String(key).startsWith('order:sv:'))).toBe(false);
+    expect(pushNotify.after).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+  it.each(['done', 'pending'] as const)('malformed %s replay never queues fee reconciliation', async (marker) => {
+    hold.claimValue = null;
+    hold.usedMarker = marker;
+    hold.listValues = [partialOrderRaw()];
+    const response = await POST(req(goodBody({ bind: null, feeTxHash: FEE_TXHASH })));
+    expect(response.status).toBe(422);
+    expect(pushNotify.after).not.toHaveBeenCalled();
+    expect(evalSpy).not.toHaveBeenCalled();
+    expect(delSpy).not.toHaveBeenCalled();
+  });
+});
+
+for (const mode of ['free', 'recover'] as const) {
+  describe(`A2c ${mode} on-chain binding`, () => {
+    function fixture() {
+      hold.forwarder = BIND_FORWARDER;
+      const f = bindingFixture(mode, { ...goodBody({ statusToken: STATUS_TOKEN, customerMemo: 'no ice', pickupAt: Date.now() + 60_000 }), handle: 'alice', tokenAddress: resolveDeployment('jpyc', 80002)!.address });
+      hold.verify = { ok: true, value: 5000n * JPYC, receiptLogs: f.logs };
+      return f;
+    }
+    it('accepts the opening and exact observed POST replay without using the receipt-wide amount', async () => {
+      const f = fixture();
+      expect((await POST(req(f.body))).status).toBe(200);
+      expect(latestStoredOrder()).toMatchObject({ orderId: f.order.orderId, amount: String(1000n * JPYC), customerMemo: 'no ice', table: f.order.description });
+      expect(latestStoredOrder().bindingDigest).toMatch(/^0x[0-9a-f]{64}$/);
+      hold.claimValue = null;
+      expect(await (await POST(req(f.body))).json()).toEqual({ ok: true, duplicate: true });
+    });
+    it.each(['items', 'statusToken', 'description', 'customerMemo', 'orderId', 'pickupAt', 'secret', 'salt'])('rejects substituted %s before all order/fee/push/pointer effects; original still succeeds', async (field) => {
+      const f = fixture();
+      const changed: Record<string, unknown> = { ...f.body, feeTxHash: FEE_TXHASH };
+      if (field === 'items') changed.items = [{ name: 'stolen', qty: 1, price: '1000' }];
+      else if (field === 'statusToken') changed.statusToken = 'q'.repeat(43);
+      else if (field === 'pickupAt') changed.pickupAt = f.order.pickupAt + 1;
+      else if (field === 'secret' || field === 'salt') changed.bind = { ...f.bind, secret: field === 'salt' ? f.salt : `0x${'00'.repeat(32)}` };
+      else changed[field] = 'stolen';
+      expect(await (await POST(req(changed))).json()).toEqual({ ok: false, error: 'order_binding_mismatch' });
+      expect(lpushSpy).not.toHaveBeenCalled(); expect(evalSpy).not.toHaveBeenCalled(); expect(pushNotify.after).not.toHaveBeenCalled();
+      expect(setSpy.mock.calls.some(([key]) => String(key).startsWith('order:sv:'))).toBe(false);
+      expect(delSpy).toHaveBeenCalled();
+      expect((await POST(req(f.body))).status).toBe(200);
+    });
+    it.each([false, true])('only completely absent binding receives migration treatment (enforce=%s)', async (enforce) => {
+      const f = fixture();
+      vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', enforce ? 'true' : 'false');
+      const { bind: _bind, ...body } = f.body;
+      const res = await POST(req(body));
+      expect(res.status).toBe(enforce ? 422 : 200);
+      if (!enforce) expect(latestStoredOrder().bindingMissing).toBe(true);
+      else expect(lpushSpy).not.toHaveBeenCalled();
+    });
+    it.each([false, true])('rejects incomplete binding under enforce=%s', async (enforce) => {
+      const f = fixture(); vi.stubEnv('ENABLE_ORDER_BIND_ENFORCE', enforce ? 'true' : 'false');
+      expect((await POST(req({ ...f.body, bind: { v: 1 } }))).status).toBe(422);
+    });
+    it.each(['done', 'pending'] as const)('substituted %s replay cannot reconcile fees or release someone else’s claim', async (marker) => {
+      const f = fixture(); hold.claimValue = null; hold.usedMarker = marker;
+      expect((await POST(req({ ...f.body, statusToken: 'q'.repeat(43), feeTxHash: FEE_TXHASH }))).status).toBe(422);
+      expect(pushNotify.after).not.toHaveBeenCalled(); expect(evalSpy).not.toHaveBeenCalled(); expect(delSpy).not.toHaveBeenCalled();
+    });
+    it('keeps first-notify freshness while acknowledging old completed identical notifications', async () => {
+      const f = fixture(); getBlockSpy.mockResolvedValue({ timestamp: BigInt(Date.now() / 1000 - 1801) });
+      expect(await (await POST(req(f.body))).json()).toEqual({ ok: false, error: 'tx_too_old' });
+      hold.claimValue = null; hold.usedMarker = 'done';
+      expect(await (await POST(req(f.body))).json()).toEqual({ ok: true, duplicate: true });
+    });
+    it('rejects forged authorization emitters and missing settlement evidence', async () => {
+      const f = fixture();
+      hold.verify = { ok: true, value: 1000n * JPYC, receiptLogs: f.logs.map((log, i) => i === 0 ? { ...log, address: OTHER } : log) };
+      expect((await POST(req(f.body))).status).toBe(422);
+      hold.verify = { ok: true, value: 1000n * JPYC, receiptLogs: mode === 'recover' ? f.logs.slice(0, -1) : f.logs.slice(1) };
+      expect((await POST(req(f.body))).status).toBe(422);
+    });
+    it('rejects ambiguous free batches, but attributes recover only to the selected settlement', async () => {
+      const f = fixture();
+      hold.verify = { ok: true, value: 9000n * JPYC, receiptLogs: [...f.logs, bindTransfer(f.order.tokenAddress, BIND_PAYER, f.order.merchant, 8000n * JPYC)] };
+      const res = await POST(req(f.body));
+      expect(res.status).toBe(mode === 'free' ? 422 : 200);
+      if (mode === 'recover') expect(latestStoredOrder().amount).toBe(String(1000n * JPYC));
+    });
+  });
+}
+
+it('A2c standard fee follow-up preserves original items, order and binding warning', async () => {
+  hold.claimValue = null;
+  hold.listValues = [partialOrderRaw(TXHASH, { bindingMissing: true, orderId: 'original', items: [{ name: 'original', qty: 1, price: '1000' }] })];
+  expect(await (await POST(req(goodBody({ feeTxHash: FEE_TXHASH, orderId: 'substituted', statusToken: 'q'.repeat(43) })))).json()).toEqual({ ok: true, duplicate: true });
+  await flushAfterTasks();
+  expect(latestStoredOrder()).toMatchObject({ orderId: 'original', items: [{ name: 'original', qty: 1, price: '1000' }], bindingMissing: true });
+  expect(latestStoredOrder().feeUncollected).toBeUndefined();
+  expect(setSpy.mock.calls.some(([key]) => String(key).startsWith('order:sv:'))).toBe(false);
+});
+
+ it.each(['done', 'pending'] as const)('A2c bind-less %s fee follow-up responds before RPC even with enforcement on', async (marker) => {
+  process.env.ENABLE_ORDER_BIND_ENFORCE = 'true';
+  hold.claimValue = null; hold.usedMarker = marker;
+  hold.verify = { ok: false, reason: 'rpc_error' };
+  const res = await POST(req(goodBody({ feeTxHash: FEE_TXHASH })));
+  expect(res.status).toBe(marker === 'done' ? 200 : 409);
+  expect(verifySpy).not.toHaveBeenCalled();
+});
+
+it.each(['free', 'recover'] as const)('A2c bind-less %s fee follow-up classifies relay evidence inside after and never claims a fee', async (mode) => {
+  const f = bindingFixture(mode, { chainId: 80002, tokenAddress: resolveDeployment('jpyc', 80002)!.address, merchant: MERCHANT, handle: 'alice', orderId: 'id', items: [{ name: 'Tea', qty: 1, price: '1000' }] });
+  hold.forwarder = mode === 'recover' ? BIND_FORWARDER : null;
+  pushNotify.deferAfter = true;
+  hold.claimValue = null;
+  hold.listValues = [partialOrderRaw(TXHASH)];
+  hold.feePairVerify = { ok: true, value: JPYC, blockNumber: 2n, receiptLogs: f.logs };
+  const before = [...hold.listValues];
+  const res = await POST(req(goodBody({ feeTxHash: FEE_TXHASH })));
+  expect(await res.json()).toEqual({ ok: true, duplicate: true });
+  expect(verifySpy).not.toHaveBeenCalled(); expect(feePairVerifySpy).not.toHaveBeenCalled();
+  await flushAfterTasks();
+  expect(feePairVerifySpy).toHaveBeenCalledOnce();
+  expect(hold.listValues).toEqual(before); expect(evalSpy).not.toHaveBeenCalled();
+});
+it('A2c verified duplicate reports an OFF migration winner without acknowledging the victim order', async () => {
+  const f = bindingFixture('free', { chainId: 80002, tokenAddress: resolveDeployment('jpyc', 80002)!.address, merchant: MERCHANT, handle: 'alice', orderId: 'victim', items: [{ name: 'Tea', qty: 1, price: '1000' }], statusToken: STATUS_TOKEN });
+  hold.verify = { ok: true, value: 1000n * JPYC, receiptLogs: f.logs };
+  hold.claimValue = null;
+  hold.listValues = [partialOrderRaw(f.body.txHash, { bindingMissing: true })];
+  const before = [...hold.listValues];
+  expect(await (await POST(req(f.body))).json()).toEqual({ ok: true, duplicate: true, bindingConflict: true });
+  expect(hold.listValues).toEqual(before);
+  expect(lpushSpy).not.toHaveBeenCalled(); expect(evalSpy).not.toHaveBeenCalled();
+  expect(delSpy).not.toHaveBeenCalled(); expect(pushNotify.after).not.toHaveBeenCalled();
+  expect(setSpy.mock.calls.some(([key]) => String(key).startsWith('order:sv:'))).toBe(false);
 });

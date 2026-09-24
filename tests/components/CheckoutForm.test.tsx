@@ -1,5 +1,10 @@
+import { logger } from '@/lib/logger';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { bindingFixture } from '../_helpers/orderBinding';
+import { resolveOrderDelivery, saveOrderDelivery, loadOrderDelivery } from '@/lib/orderDelivery';
+import type { OrderDelivery } from '@/lib/orderDelivery';
 import type { ReactElement } from 'react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
@@ -8,6 +13,8 @@ import type { Address } from 'viem';
 import { isOrderTokenLike } from '@/lib/orderToken';
 
 vi.mock('wagmi', () => ({
+  useWalletClient: vi.fn(() => ({ data: undefined })),
+  usePublicClient: vi.fn(),
   useAccount: vi.fn(),
   useReadContract: vi.fn(),
   useSwitchChain: vi.fn(),
@@ -243,6 +250,7 @@ function setRelayPayment(
     variables?: NonNullable<
       ReturnType<typeof useJpycEip3009Payment>['variables']
     >;
+    orderDelivery?: OrderDelivery;
     restoredIntent?: ReturnType<
       typeof useJpycEip3009Payment
     >['restoredIntent'];
@@ -279,6 +287,7 @@ function setRelayPayment(
       (state === 'response-unknown' ? 'exhausted' : null),
     variables: opts?.variables,
     restoredIntent: opts?.restoredIntent ?? null,
+    orderDelivery: opts?.orderDelivery ?? null,
   } as Partial<ReturnType<typeof useJpycEip3009Payment>>);
 }
 
@@ -507,7 +516,10 @@ async function submitRelayThenSucceed(
 ) {
   await user.click(screen.getByRole('button', { name: /を支払う/ }));
   expect(relayMutate).toHaveBeenCalledOnce();
-  setRelayPayment('success', opts);
+  const order = relayMutate.mock.calls[0][0].order;
+  const record = order ? resolveOrderDelivery(bindingFixture('free', order, opts.variables.value).record, opts.txHash) : undefined;
+  if (record) saveOrderDelivery(record);
+  setRelayPayment('success', { ...opts, orderDelivery: record });
   rerender(makeUi());
 }
 
@@ -2455,7 +2467,7 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     ));
     expect(loggerWarn).not.toHaveBeenCalledWith('checkout.webhook.failed', expect.anything());
     expect(screen.getByText('お支払いが完了しました')).toBeInTheDocument();
-    expect(screen.queryByText(/支払い履歴またはトランザクションをお店のスタッフに提示/)).toBeNull();
+    expect(screen.getByText(/支払い履歴またはトランザクションをお店のスタッフに提示/)).toBeInTheDocument();
     expect(relayMutate).not.toHaveBeenCalled();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     fetchSpy.mockRestore();
@@ -2941,7 +2953,7 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     setupJpycStandard();
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(null, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ ok: false, error: 'processing' }, { status: 409 }))
       .mockResolvedValueOnce(new Response(null, { status: 200 }));
     const params: CheckoutParams = {
       ...JPYC_PARAMS,
@@ -3121,6 +3133,7 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(loadHistory()).toHaveLength(0);
     expect(loadPayerReceipts()).toHaveLength(0);
+    expect(screen.queryByText(/再度支払わず/)).toBeNull();
     fetchSpy.mockRestore();
   });
 
@@ -3490,5 +3503,426 @@ describe('CheckoutForm — F7 off-origin callback 開示', () => {
       />,
     );
     expect(screen.queryByText(/に通知・遷移します/)).toBeNull();
+  });
+});
+
+describe('A2c saved-order-only notification', () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+  const savedParams = { ...JPYC_PARAMS, orderId: 'saved-id', webhook: `${location.origin}/api/order/notify?h=alice` };
+  function setupRelayReady() {
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(10_000n * 10n ** 18n);
+  }
+  function savedRecord() {
+    const dep = deploymentForSlug('jpyc', 'polygon');
+    return resolveOrderDelivery(bindingFixture('free', { chainId: dep.chainId, tokenAddress: dep.address, merchant: MERCHANT, handle: 'alice', orderId: 'saved-id', items: [{ name: 'Saved Tea', qty: 1, price: '3000' }], statusToken: 's'.repeat(43), description: 'Saved Table', customerMemo: 'Saved memo' }, 3000n * 10n ** 18n).record, `0x${'ab'.repeat(32)}`);
+  }
+  function restored(record: OrderDelivery) {
+    saveOrderDelivery(record);
+    setRelayPayment('success', { txHash: record.txHash, orderDelivery: record, restoredIntent: record.intent });
+  }
+  async function realRelay() {
+    const { useJpycEip3009Payment: actualHook } = await vi.importActual<typeof import('@/hooks/useJpycEip3009Payment')>('@/hooks/useJpycEip3009Payment');
+    vi.mocked(useJpycEip3009Payment).mockImplementation(actualHook);
+    return new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  }
+  function unresolvedRecord() {
+    const { txHash: _hash, notifyBody: _body, ...saved } = savedRecord();
+    const validBefore = String(Math.floor(Date.now() / 1000) + 300);
+    return { ...saved, state: 'signed' as const, bind: { ...saved.bind, validBefore }, intent: { ...saved.intent, validBefore, issuedAt: Date.now() } };
+  }
+  it.each(['relay', 'standard', 'different-shop'] as const)('unresolved old payment scopes the %s checkout hold and notice', async (kind) => {
+    setupRelayReady(); const record = unresolvedRecord(); saveOrderDelivery(record);
+    const client = await realRelay(); vi.useFakeTimers();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'indeterminate' }));
+    const params = { ...savedParams, orderId: 'new', ...(kind === 'standard' ? { mode: 'standard' as const } : {}), ...(kind === 'different-shop' ? { to: '0x9999999999999999999999999999999999999999' as Address } : {}) };
+    const page = render(<QueryClientProvider client={client}><CheckoutForm params={params} /></QueryClientProvider>);
+    await vi.waitFor(async () => {
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByText(kind === 'different-shop' ? '以前のお支払いを確認中です。このお店へのお支払いは続けられます。' : '前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
+    }, { timeout: 2000, interval: 10 });
+    const button = screen.getByRole('button', { name: /JPYC を支払う/ });
+    if (kind === 'different-shop') expect(button).toBeEnabled(); else expect(button).toBeDisabled();
+    expect(screen.queryByText('お支払いが完了しました')).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(300_001));
+    expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeEnabled();
+    expect(screen.getByText(kind === 'different-shop' ? '以前のお支払いを確認中です。このお店へのお支払いは続けられます。' : '前回の支払いの状態を確認できませんでした。支払い直す前にお店のスタッフに確認してください。')).toBeInTheDocument();
+    expect(loadOrderDelivery().kind).toBe('ready');
+    expect(fetchSpy.mock.calls.every(([url]) => url === '/api/relay/jpyc/status')).toBe(true);
+    page.unmount(); client.clear(); fetchSpy.mockRestore(); vi.useRealTimers();
+  });
+  // Round 4 regression list: wake exactly at expiry, keep the button/confirming notice
+  // until the read finishes (including timeout), then show staff advice; a settled read
+  // delivers only the old order. Other merchants remain payable throughout.
+  it.each(['unused', 'indeterminate', 'network', 'timeout', 'settled'] as const)('expiry read holds payment until %s completes and updates the notice', async (outcome) => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-24T00:00:00Z'));
+    setupRelayReady(); const record = unresolvedRecord(); saveOrderDelivery(record);
+    const expiry = Number(record.intent.validBefore) * 1000;
+    const { usePublicClient } = await import('wagmi');
+    mockHook(usePublicClient, { waitForTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success' }) });
+    const client = await realRelay();
+    let finishRead!: () => void;
+    const expiryReads: number[] = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (url !== '/api/relay/jpyc/status') return Response.json({ ok: true });
+      if (Date.now() < expiry) return Response.json({ ok: true, state: 'indeterminate' });
+      expiryReads.push(Date.now());
+      return new Promise<Response>((resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('timeout')), { once: true });
+        finishRead = () => outcome === 'network' ? reject(new Error('offline')) : resolve(Response.json({ ok: true, state: outcome, ...(outcome === 'settled' ? { txHash: `0x${'ab'.repeat(32)}` } : {}) }));
+      });
+    });
+    const page = render(<QueryClientProvider client={client}><CheckoutForm params={{ ...savedParams, orderId: 'new' }} /></QueryClientProvider>);
+    await vi.waitFor(async () => {
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
+    }, { timeout: 2000, interval: 10 });
+    await act(async () => vi.advanceTimersByTimeAsync(expiry - Date.now()));
+    expect(expiryReads).toEqual([expiry]);
+    expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeDisabled();
+    expect(screen.getByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
+    await act(async () => vi.advanceTimersByTimeAsync(9999));
+    expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeDisabled();
+    await act(async () => outcome === 'timeout' ? vi.advanceTimersByTimeAsync(1) : finishRead());
+    expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeEnabled();
+    expect(screen.queryByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeNull();
+    expect(screen.queryByText('お支払いが完了しました')).toBeNull();
+    if (outcome === 'settled') {
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      const notify = fetchSpy.mock.calls.find(([url]) => url !== '/api/relay/jpyc/status');
+      expect(notify?.[1]?.body).toBe(resolveOrderDelivery(record, `0x${'ab'.repeat(32)}`).notifyBody);
+      expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    } else {
+      expect(screen.getByText('前回の支払いの状態を確認できませんでした。支払い直す前にお店のスタッフに確認してください。')).toBeInTheDocument();
+      expect(loadOrderDelivery().kind).toBe('ready');
+    }
+    page.unmount(); client.clear(); vi.mocked(usePublicClient).mockReset();
+  });
+  it('background signed recovery registers the old order without adopting its completion', async () => {
+    setupRelayReady(); const record = unresolvedRecord(); saveOrderDelivery(record);
+    const { usePublicClient } = await import('wagmi');
+    mockHook(usePublicClient, { waitForTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success' }) });
+    const client = await realRelay(); vi.useFakeTimers();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => Response.json(url === '/api/relay/jpyc/status' ? { ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` } : { ok: true }));
+    const page = render(<QueryClientProvider client={client}><CheckoutForm params={{ ...savedParams, orderId: 'new' }} /></QueryClientProvider>);
+    await vi.waitFor(async () => {
+      await act(async () => vi.advanceTimersByTimeAsync(3000));
+      expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    }, { timeout: 2000, interval: 10 });
+    const notify = fetchSpy.mock.calls.find(([url]) => url === `${location.origin}/api/order/notify?h=alice`);
+    expect(notify?.[1]?.body).toBe(resolveOrderDelivery(record, `0x${'ab'.repeat(32)}`).notifyBody);
+    expect(screen.queryByText('お支払いが完了しました')).toBeNull();
+    expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeEnabled();
+    page.unmount(); client.clear(); fetchSpy.mockRestore(); vi.mocked(usePublicClient).mockReset(); vi.useRealTimers();
+  });
+  it('finishing a second background recovery cannot strand the first notification notice', async () => {
+    setupRelayReady(); const first = savedRecord(); saveOrderDelivery(first);
+    const f = bindingFixture('free', { ...first.order, orderId: 'second-old' }, 3000n * 10n ** 18n);
+    const validBefore = String(Math.floor(Date.now() / 1000) + 300);
+    saveOrderDelivery({ ...f.record, bind: { ...f.bind, validBefore }, intent: { ...f.record.intent, validBefore, issuedAt: Date.now() } });
+    const { usePublicClient } = await import('wagmi');
+    mockHook(usePublicClient, { waitForTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success' }) });
+    const client = await realRelay(); vi.useFakeTimers();
+    let acknowledgeFirst!: (response: Response) => void;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (url === '/api/relay/jpyc/status') return Response.json({ ok: true, state: 'settled', txHash: `0x${'cd'.repeat(32)}` });
+      if (JSON.parse(init!.body as string).orderId === first.order.orderId) return new Promise((resolve) => { acknowledgeFirst = resolve; });
+      return Response.json({ ok: true });
+    });
+    const page = render(<QueryClientProvider client={client}><CheckoutForm params={{ ...savedParams, orderId: 'new' }} /></QueryClientProvider>);
+    await vi.waitFor(async () => {
+      await act(async () => vi.advanceTimersByTimeAsync(0));
+      expect(screen.getByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
+    }, { timeout: 2000, interval: 10 });
+    expect(screen.queryByText('以前の注文の登録が保留中です。このお支払いは続けられます。')).toBeNull();
+    await vi.waitFor(async () => {
+      await act(async () => vi.advanceTimersByTimeAsync(3000));
+      expect(fetchSpy.mock.calls.filter(([url]) => url !== '/api/relay/jpyc/status')).toHaveLength(2);
+    }, { timeout: 2000, interval: 10 });
+    await act(async () => acknowledgeFirst(Response.json({ ok: true })));
+    expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    expect(screen.queryByText('以前の注文の登録が保留中です。このお支払いは続けられます。')).toBeNull();
+    expect(screen.queryByText('お支払いが完了しました')).toBeNull();
+    page.unmount(); client.clear(); fetchSpy.mockRestore(); vi.mocked(usePublicClient).mockReset(); vi.useRealTimers();
+  });
+  it.each(['', '?h=alice&h=bob'])('invalid notify handle %s shows the existing URL error instead of storage advice', async (query) => {
+    setupRelayReady(); const user = userEvent.setup();
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, webhook: `${location.origin}/api/order/notify${query}` }} />);
+    await user.click(screen.getByRole('button', { name: /JPYC を支払う/ }));
+    expect(screen.getByText('Checkout URL が不正です')).toBeInTheDocument();
+    expect(screen.queryByText(/注文の復元情報をこのブラウザに保存できない/)).toBeNull();
+    expect(relayMutate).not.toHaveBeenCalled();
+  });
+  it('a corrupt order slot does not show a cannot-start alert on a third-party checkout', async () => {
+    const { ORDER_DELIVERY_KEY } = await import('@/lib/orderDelivery');
+    setupRelayReady(); sessionStorage.setItem(ORDER_DELIVERY_KEY, 'corrupt');
+    const client = await realRelay();
+    const page = render(<QueryClientProvider client={client}><CheckoutForm params={{ ...JPYC_PARAMS, webhook: 'https://third.example/hook' }} /></QueryClientProvider>);
+    await waitFor(() => expect(vi.mocked(useJpycEip3009Payment).mock.results.at(-1)?.value.isRestoring).toBe(false));
+    expect(screen.queryByText(/注文の復元情報をこのブラウザに保存できない/)).toBeNull();
+    expect(screen.queryByText(/以前の注文の復元情報を読み込めませんでした/)).toBeNull();
+    expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeEnabled();
+    page.unmount(); client.clear();
+  });
+  it.each(['relay', 'standard', 'usdc'])('load warning is scoped for %s own-origin checkout', async (kind) => {
+    const { ORDER_DELIVERY_KEY } = await import('@/lib/orderDelivery');
+    setupRelayReady(); sessionStorage.setItem(ORDER_DELIVERY_KEY, 'corrupt');
+    if (kind === 'usdc') { vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702'); setAccount({ connected: true, chainId: baseSepolia.id }); setSmartAccount(true); setGasQuote('ready', 0n); }
+    const client = await realRelay();
+    const params = { ...(kind === 'usdc' ? USDC_PARAMS : savedParams), webhook: `${location.origin}/api/order/notify?h=alice`, ...(kind === 'standard' ? { mode: 'standard' as const } : {}) };
+    const page = render(<QueryClientProvider client={client}><CheckoutForm params={params} /></QueryClientProvider>);
+    await waitFor(() => expect(vi.mocked(useJpycEip3009Payment).mock.results.at(-1)?.value.isRestoring).toBe(false));
+    expect(!!screen.queryByText(/以前の注文の復元情報を読み込めませんでした/)).toBe(kind === 'relay');
+    expect(screen.queryByText(/注文の復元情報をこのブラウザに保存できない/)).toBeNull();
+    page.unmount(); client.clear();
+  });
+  it('a real pre-broadcast save failure retains the cannot-start wording', () => {
+    setupRelayReady(); setRelayPayment('error', { errMsg: 'order_binding_storage_unavailable' });
+    render(<CheckoutForm params={savedParams} />);
+    expect(screen.getByText(/注文の復元情報をこのブラウザに保存できない/)).toBeInTheDocument();
+    expect(screen.queryByText(/以前の注文の復元情報を読み込めませんでした/)).toBeNull();
+  });
+  it('a changed cart total with the same orderId cannot adopt the previous completion', async () => {
+    setupRelayReady(); saveOrderDelivery(savedRecord()); const client = await realRelay();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
+    const page = render(<QueryClientProvider client={client}><CheckoutForm params={{ ...savedParams, items: [{ name: 'New cart', qty: 1, price: '4000' }] }} /></QueryClientProvider>);
+    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    expect(screen.queryByText('お支払いが完了しました')).toBeNull();
+    expect(screen.getByRole('button', { name: /4000 JPYC を支払う/ })).toBeEnabled();
+    expect(fetchSpy.mock.calls.every(([url]) => url === `${location.origin}/api/order/notify?h=alice`)).toBe(true);
+    page.unmount(); client.clear(); fetchSpy.mockRestore();
+  });
+  it('restored matching includes customer-paid mobile fees in the total', async () => {
+    setupRelayReady(); feeFlags.enableMobileOrderFee = true;
+    const dep = deploymentForSlug('jpyc', 'polygon');
+    const f = bindingFixture('recover', { ...savedRecord().order, chainId: dep.chainId, tokenAddress: dep.address }, 3000n * 10n ** 18n, 90n * 10n ** 18n);
+    const record = resolveOrderDelivery(f.record, `0x${'ab'.repeat(32)}`); restored(record);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
+    render(<CheckoutForm params={{ ...savedParams, feeKind: 'preorder', feePayer: 'customer' }} />);
+    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    expect(screen.getByText('お支払いが完了しました')).toBeInTheDocument(); fetchSpy.mockRestore();
+  });
+  it('freezes orderId/status/memo before signing and never attaches them to third-party callbacks', async () => {
+    const user = userEvent.setup(); setupRelayReady();
+    feeFlags.enableOrderPickup = true;
+    sessionStorage.setItem('openpay:order-memo:fixed', 'before signing');
+    const { unmount } = render(<CheckoutForm params={{ ...JPYC_PARAMS, orderId: 'fixed', webhook: `${location.origin}/api/order/notify?h=alice` }} />);
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    const order = relayMutate.mock.calls[0][0].order;
+    expect(order).toMatchObject({ orderId: 'fixed', customerMemo: 'before signing', handle: 'alice' });
+    expect(isOrderTokenLike(order.statusToken)).toBe(true);
+    unmount(); setupRelayReady(); relayMutate.mockClear();
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, webhook: 'https://third.example/api/order/notify?h=alice' }} />);
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    expect(relayMutate.mock.calls[0][0].order).toBeUndefined();
+  });
+  it('lazy binding chunk loading cannot turn repeated submit clicks into two payments', async () => {
+    const actual = await vi.importActual<typeof import('@/lib/orderBind')>('@/lib/orderBind');
+    let release!: () => void;
+    const loaded = vi.fn();
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.doMock('@/lib/orderBind', async () => { loaded(); await gate; return actual; });
+    try {
+      setupRelayReady();
+      render(<CheckoutForm params={{ ...JPYC_PARAMS, webhook: `${location.origin}/api/order/notify?h=alice` }} />);
+      const button = screen.getByRole('button', { name: /を支払う/ });
+      fireEvent.click(button); fireEvent.click(button);
+      await waitFor(() => expect(loaded).toHaveBeenCalledOnce());
+      expect(relayMutate).not.toHaveBeenCalled();
+      await act(async () => release());
+      await waitFor(() => expect(relayMutate).toHaveBeenCalledOnce());
+    } finally { release(); vi.doUnmock('@/lib/orderBind'); }
+  });
+  it('generates a nonempty orderId before signing when absent', async () => {
+    const user = userEvent.setup(); setupRelayReady();
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, orderId: undefined, webhook: `${location.origin}/api/order/notify?h=alice` }} />);
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    expect(relayMutate.mock.calls[0][0].order.orderId.length).toBeGreaterThan(0);
+  });
+  it('a matching saved checkout can recover its original notification after route flags change', async () => {
+    const record = savedRecord(); setupRelayReady(); restored(record);
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
+    render(<CheckoutForm params={savedParams} />);
+    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${location.origin}/api/order/notify?h=alice`);
+    expect(fetchSpy.mock.calls[0][1]?.body).toBe(record.notifyBody);
+    expect(relayMutate).not.toHaveBeenCalled(); fetchSpy.mockRestore();
+  });
+  it.each(['different-shop', 'third-party'] as const)('a retryable old notify cannot take over a %s checkout', async (kind) => {
+    const record = savedRecord(); setupRelayReady(); restored(record);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ error: 'rpc_error' }, { status: 503 }));
+    const first = render(<CheckoutForm params={{ ...JPYC_PARAMS, orderId: record.order.orderId, webhook: `${location.origin}/api/order/notify?h=alice` }} />);
+    expect(await screen.findByRole('button', { name: '注文登録を再試行' })).toBeInTheDocument();
+    first.unmount();
+    const { useJpycEip3009Payment: actualHook } = await vi.importActual<typeof import('@/hooks/useJpycEip3009Payment')>('@/hooks/useJpycEip3009Payment');
+    vi.mocked(useJpycEip3009Payment).mockImplementation(actualHook);
+    vi.mocked(resolveJpycGaslessProvider).mockReturnValue('pimlico-7702');
+    setSmartAccount(true); setGasQuote('ready', 0n);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const params = { ...JPYC_PARAMS, orderId: 'new-order', ...(kind === 'different-shop' ? { to: '0x9999999999999999999999999999999999999999' as Address, webhook: `${location.origin}/api/order/notify?h=bob` } : { webhook: 'https://third.example/hook' }) };
+    const next = render(<QueryClientProvider client={client}><CheckoutForm params={params} /></QueryClientProvider>);
+    expect(await screen.findByText('以前の注文の登録が保留中です。このお支払いは続けられます。')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeEnabled());
+    expect(screen.queryByText('お支払いが完了しました')).toBeNull();
+    expect(screen.queryByText('saved-id')).toBeNull();
+    expect(screen.queryByText(/再度支払わず/)).toBeNull();
+    expect(fetchSpy.mock.calls.every(([url]) => url === `${location.origin}/api/order/notify?h=alice`)).toBe(true);
+    next.unmount(); client.clear(); fetchSpy.mockRestore();
+  });
+  it.each([200, 400])('a safe background notification with HTTP %s cannot complete or redirect the current checkout', async (status) => {
+    const record = savedRecord(); saveOrderDelivery(record); setupRelayReady();
+    const { useJpycEip3009Payment: actualHook } = await vi.importActual<typeof import('@/hooks/useJpycEip3009Payment')>('@/hooks/useJpycEip3009Payment');
+    vi.mocked(useJpycEip3009Payment).mockImplementation(actualHook);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(
+      status === 200 ? { ok: true } : { error: 'invalid_handle' }, { status },
+    ));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const next = render(<QueryClientProvider client={client}><CheckoutForm params={{ ...JPYC_PARAMS,
+      orderId: 'new-order', webhook: 'https://third.example/hook', successUrl: 'https://third.example/success',
+    }} /></QueryClientProvider>);
+    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${location.origin}/api/order/notify?h=alice`);
+    expect(fetchSpy.mock.calls[0][1]?.body).toBe(record.notifyBody);
+    expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeEnabled();
+    expect(screen.queryByText('お支払いが完了しました')).toBeNull();
+    expect(screen.queryByRole('button', { name: '今すぐ確認ページへ' })).toBeNull();
+    expect(screen.queryByText(/再度支払わず/)).toBeNull();
+    expect(!!screen.queryByText('以前の注文を登録できませんでした。そのお店のスタッフに支払い履歴またはトランザクションを提示してください。')).toBe(status === 400);
+    expect(screen.queryByText('以前の注文の登録が保留中です。このお支払いは続けられます。')).toBeNull();
+    next.unmount(); client.clear(); fetchSpy.mockRestore();
+  });
+  it.each([
+    [400, 'invalid_handle', false], [413, 'payload_too_large', false],
+    [429, 'rate_limited', true], [422, 'no_matching_transfer', false],
+    [422, 'amount_too_low', false], [422, 'tx_reverted', false], [422, 'tx_not_found', true],
+    [500, 'internal_error', true], [503, 'rpc_error', true], [409, 'reserved_order', false],
+  ] as const)('notify %s %s has retryable=%s', async (status, error, retryable) => {
+    const record = savedRecord(); setupRelayReady(); restored(record);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: false, error }, { status }));
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, orderId: record.order.orderId, webhook: `${location.origin}/api/order/notify?h=alice` }} />);
+    expect(await screen.findByText(/再度支払わず/)).toBeInTheDocument();
+    expect(loadOrderDelivery().kind).toBe(retryable ? 'ready' : 'empty');
+    expect(!!screen.queryByRole('button', { name: '注文登録を再試行' })).toBe(retryable);
+    expect(fetchSpy).toHaveBeenCalledOnce(); expect(relayMutate).not.toHaveBeenCalled(); fetchSpy.mockRestore();
+  });
+  it('pickup OFF fixes an explicit empty token before signing', async () => {
+    const user = userEvent.setup(); setupRelayReady(); feeFlags.enableOrderPickup = false;
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, webhook: `${location.origin}/api/order/notify?h=alice` }} />);
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    expect(relayMutate.mock.calls[0][0].order.statusToken).toBe('');
+  });
+  it('lost acknowledgement retains the opening; manual notification retry sends identical bytes and clears only on ok:true', async () => {
+    const user = userEvent.setup(); const record = savedRecord(); setupRelayReady(); restored(record);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('lost acknowledgement')).mockResolvedValueOnce(Response.json({ ok: true, duplicate: true }));
+    render(<CheckoutForm params={savedParams} />);
+    const retry = await screen.findByRole('button', { name: '注文登録を再試行' });
+    expect(loadOrderDelivery().kind).toBe('ready');
+    expect(screen.getByText(/再度支払わず/)).toBeInTheDocument();
+    await user.click(retry);
+    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    expect(fetchSpy.mock.calls.map(([, init]) => init?.body)).toEqual([record.notifyBody, record.notifyBody]);
+    expect(relayMutate).not.toHaveBeenCalled(); fetchSpy.mockRestore();
+  });
+  it.each(['order_binding_mismatch', 'tx_too_old', 'merchant_mismatch', 'handle_not_found', 'reserved_order'])('%s terminates delivery without automatic retry or a new authorization', async (error) => {
+    const record = savedRecord(); setupRelayReady(); restored(record);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: false, error }, { status: error === 'reserved_order' ? 409 : error === 'merchant_mismatch' ? 403 : error === 'handle_not_found' ? 404 : 422 }));
+    const previous = render(<CheckoutForm params={savedParams} />);
+    expect(await screen.findByText(/再度支払わず/)).toBeInTheDocument();
+    expect(loadOrderDelivery().kind).toBe('empty'); expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('button', { name: '注文登録を再試行' })).toBeNull();
+    expect(relayMutate).not.toHaveBeenCalled();
+    previous.unmount(); fetchSpy.mockClear();
+    const { useJpycEip3009Payment: actualHook } = await vi.importActual<typeof import('@/hooks/useJpycEip3009Payment')>('@/hooks/useJpycEip3009Payment');
+    vi.mocked(useJpycEip3009Payment).mockImplementation(actualHook);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const next = render(<QueryClientProvider client={client}><CheckoutForm params={{ ...JPYC_PARAMS, orderId: 'new-checkout', webhook: `${location.origin}/api/order/notify?h=alice` }} /></QueryClientProvider>);
+    await waitFor(() => expect(screen.getByRole('button', { name: /3000 JPYC を支払う/ })).toBeEnabled());
+    expect(screen.queryByText(/再度支払わず/)).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(useJpycEip3009Payment).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ restoreOrderDelivery: true, orderContext: expect.objectContaining({ orderId: 'new-checkout' }) }));
+    next.unmount(); client.clear(); fetchSpy.mockRestore();
+  });
+  it('bindingConflict ends delivery with staff assistance and no status link or redirect', async () => {
+    const record = savedRecord(); setupRelayReady(); restored(record);
+    feeFlags.enableOrderPickup = true;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true, duplicate: true, bindingConflict: true }));
+    render(<CheckoutForm params={{ ...savedParams, successUrl: 'https://third.example/success' }} />);
+    expect(await screen.findByText(/再度支払わず/)).toBeInTheDocument();
+    expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    expect(screen.queryByRole('button', { name: '今すぐ確認ページへ' })).toBeNull();
+    expect(document.querySelector('a[href*="/order/status"]')).toBeNull();
+    expect(relayMutate).not.toHaveBeenCalled(); fetchSpy.mockRestore();
+  });
+  it('bound relay keeps checkout.success telemetry and enables successUrl only after acknowledgement', async () => {
+    const user = userEvent.setup(); setupRelayReady();
+    let acknowledge!: (response: Response) => void;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise((resolve) => { acknowledge = resolve; }));
+    const makeUi = () => <CheckoutForm params={{ ...JPYC_PARAMS, webhook: `${location.origin}/api/order/notify?h=alice`, successUrl: 'https://third.example/success' }} />;
+    const { rerender } = render(makeUi());
+    await submitRelayThenSucceed(user, rerender, makeUi, { txHash: `0x${'e'.repeat(64)}`, variables: { merchant: MERCHANT, value: 3000n * 10n ** 18n } });
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    expect(logger.info).toHaveBeenCalledWith('checkout.success', expect.objectContaining({ merchant: MERCHANT, token: 'jpyc' }));
+    expect(vi.mocked(logger.info).mock.calls.filter(([event]) => event === 'checkout.success')).toHaveLength(1);
+    const saved = loadOrderDelivery();
+    if (saved.kind !== 'ready') throw new Error('missing opening');
+    expect(JSON.stringify(vi.mocked(logger.info).mock.calls)).not.toContain(saved.record.bind.secret);
+    expect(screen.queryByRole('button', { name: '今すぐ確認ページへ' })).toBeNull();
+    await act(async () => acknowledge(Response.json({ ok: true })));
+    expect(await screen.findByRole('button', { name: '今すぐ確認ページへ' })).toBeInTheDocument();
+    expect(loadOrderDelivery()).toEqual({ kind: 'empty' }); fetchSpy.mockRestore();
+  });
+  it('a lingering record does not suppress this attempt’s third-party callback or successUrl', async () => {
+    const user = userEvent.setup(); setupRelayReady();
+    const record = savedRecord();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
+    const makeUi = () => <CheckoutForm params={{ ...JPYC_PARAMS, webhook: 'https://third.example/hook', successUrl: 'https://third.example/success' }} />;
+    const { rerender } = render(makeUi());
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    setRelayPayment('success', { txHash: `0x${'e'.repeat(64)}`, orderDelivery: record });
+    rerender(makeUi());
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    expect(fetchSpy.mock.calls[0][0]).toBe('https://third.example/hook');
+    expect(fetchSpy.mock.calls[0][1]?.body).not.toContain(record.bind.secret);
+    expect(screen.getByRole('button', { name: '今すぐ確認ページへ' })).toBeInTheDocument();
+    fetchSpy.mockRestore();
+  });
+  it('409 processing retries only identical persisted bytes', async () => {
+    const record = savedRecord(); setupRelayReady(); restored(record);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json({ ok: false, error: 'processing' }, { status: 409 })).mockResolvedValueOnce(Response.json({ ok: true }));
+    render(<CheckoutForm params={savedParams} />);
+    await waitFor(() => expect(loadOrderDelivery()).toEqual({ kind: 'empty' }));
+    expect(fetchSpy.mock.calls.map(([, init]) => init?.body)).toEqual([record.notifyBody, record.notifyBody]);
+    fetchSpy.mockRestore();
+  });
+  it.each([503, 200])('HTTP %s without an acknowledgement follows the retryable classification', async (status) => {
+    const record = savedRecord(); setupRelayReady(); restored(record);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: false }, { status }));
+    render(<CheckoutForm params={savedParams} />);
+    expect(await screen.findByText(/再度支払わず/)).toBeInTheDocument();
+    expect(loadOrderDelivery().kind).toBe(status >= 500 ? 'ready' : 'empty');
+    expect(fetchSpy).toHaveBeenCalledOnce(); expect(relayMutate).not.toHaveBeenCalled(); fetchSpy.mockRestore();
+  });
+  it('exhausted processing retries retain the snapshot and never request payment again', async () => {
+    vi.useFakeTimers();
+    const record = savedRecord(); setupRelayReady(); restored(record);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: false, error: 'processing' }, { status: 409 }));
+    render(<CheckoutForm params={savedParams} />);
+    await act(async () => vi.advanceTimersByTimeAsync(141_000));
+    expect(fetchSpy).toHaveBeenCalledTimes(7);
+    expect(new Set(fetchSpy.mock.calls.map(([, init]) => init?.body))).toEqual(new Set([record.notifyBody]));
+    expect(loadOrderDelivery().kind).toBe('ready'); expect(relayMutate).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '注文登録を再試行' })).toBeInTheDocument();
+    fetchSpy.mockRestore(); vi.useRealTimers();
+  });
+  it('a mismatched recovered hash never notifies a saved order', async () => {
+    const record = savedRecord(); setupRelayReady(); restored(record);
+    setRelayPayment('success', { txHash: `0x${'cd'.repeat(32)}`, orderDelivery: record, restoredIntent: record.intent });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    render(<CheckoutForm params={savedParams} />);
+    await act(async () => {});
+    expect(fetchSpy).not.toHaveBeenCalled(); expect(loadOrderDelivery().kind).toBe('ready'); fetchSpy.mockRestore();
   });
 });

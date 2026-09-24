@@ -36,9 +36,13 @@ import {
   RelayIpRateLimitedError,
   RelayResponseUnknownError,
 } from '@/lib/relay/relayResponseError';
+import type { CanonicalOrder } from '@/lib/orderBind';
+import type { OrderDelivery } from '@/lib/orderDelivery';
+import type { OrderDeliveryContext } from '@/lib/orderDeliveryContext';
 import type { RelayIntentMetadata } from '@/lib/paymentIntentStorage';
 
 export type JpycEip3009Params = {
+  order?: CanonicalOrder; // Own-origin checkout snapshot only; never included in relay payload.
   merchant: Address;
   value: bigint; // 請求額 (bill amount)
   // relay POST にだけ載せる受取人向け非公開メッセージ。署名・復旧 intent・ログには含めない。
@@ -68,6 +72,8 @@ type RetainedRelayPayload = {
   intent: RelayIntentMetadata;
   // false→true のみ許す単調 latch。on-chain success/revert が証明されたときだけ ref ごと破棄する。
   ambiguous: boolean;
+  // A restored order belongs only to the checkout context that started its read-only recovery.
+  isCurrent?: () => boolean;
 };
 
 type PaymentIntentStorage = typeof import('@/lib/paymentIntentStorage');
@@ -160,7 +166,11 @@ async function postRelayPayload(
   throw new RelayResponseUnknownError();
 }
 
-export function useJpycEip3009Payment(deployment: TokenDeployment) {
+export function useJpycEip3009Payment(
+  deployment: TokenDeployment,
+  { restoreOrderDelivery = false, orderContext }: { restoreOrderDelivery?: boolean; orderContext?: OrderDeliveryContext } = {},
+) {
+  const { merchant: contextMerchant, chainId: contextChain, tokenAddress: contextToken, webhook: contextWebhook, orderId: contextOrderId, totalValue: contextTotalValue } = orderContext ?? {};
   const { data: walletClient } = useWalletClient();
   const { address, chainId } = useAccount();
   const publicClient = usePublicClient({ chainId: deployment.chainId });
@@ -170,6 +180,47 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
   // 破棄せず、通常 mutate の再呼出でも同じ payload だけを POST して新署名を構造的に封鎖する。
   const retainedPayloadRef = useRef<RetainedRelayPayload | null>(null);
   const storageRef = useRef<PaymentIntentStorage | null>(null);
+  const deliveryStorageRef = useRef<typeof import('@/lib/orderDelivery') | null>(null);
+  const orderDeliveryRef = useRef<OrderDelivery | null>(null);
+  const [orderDelivery, setOrderDelivery] = useState<OrderDelivery | null>(null);
+  const [backgroundOrderDeliveries, setBackgroundOrderDeliveries] = useState<OrderDelivery[]>([]);
+  const backgroundOrdersRef = useRef<OrderDelivery[]>([]);
+  const backgroundLoadedAtRef = useRef(Date.now());
+  const [orderDeliveryLoadError, setOrderDeliveryLoadError] = useState(false);
+  const heldOrdersRef = useRef(new Set<OrderDelivery>());
+  const [, updateOrderHold] = useState(0);
+  const sameMerchantSigned = backgroundOrderDeliveries.filter((r) => r.state === 'signed' &&
+    r.order.merchant.toLowerCase() === contextMerchant?.toLowerCase());
+  const orderPaymentHold = sameMerchantSigned.some((r) => heldOrdersRef.current.has(r));
+  const isOrderPaymentHeld = useCallback((merchant: Address) => backgroundOrdersRef.current.some((r) =>
+    r.state === 'signed' && r.order.merchant.toLowerCase() === merchant.toLowerCase() &&
+    heldOrdersRef.current.has(r)), []);
+  const clearSavedRelayIntent = useCallback((intent: RelayIntentMetadata) => {
+    const saved = storageRef.current?.loadRelayIntent();
+    // A bound order's completion must not clear an unrelated ordinary payment's public intent.
+    if (saved && saved.chainId === intent.chainId && saved.from.toLowerCase() === intent.from.toLowerCase() &&
+      saved.nonce.toLowerCase() === intent.nonce.toLowerCase()) storageRef.current?.clearRelayIntent();
+  }, []);
+  const parkUnbroadcastOrder = useCallback((intent: RelayIntentMetadata) => {
+    const record = orderDeliveryRef.current;
+    const storage = deliveryStorageRef.current;
+    if (record && storage?.sameOrderAuthorization(record, intent)) storage.abandonOrderDelivery(record);
+  }, []);
+  const finishOrderPayment = useCallback((intent: RelayIntentMetadata, result: JpycEip3009Result) => {
+    const storage = deliveryStorageRef.current;
+    const record = orderDeliveryRef.current;
+    if (!storage || !record || !storage.sameOrderAuthorization(record, intent) || result.pending) return;
+    if (result.success && result.txHash) {
+      const resolved = storage.resolveOrderDelivery(record, result.txHash);
+      orderDeliveryRef.current = resolved;
+      setOrderDelivery(resolved);
+      // A failed disk update must not hide the in-memory opening from notify; ack removes it.
+      storage.saveOrderDelivery(resolved);
+    } else if (storage.abandonOrderDelivery(record)) {
+      orderDeliveryRef.current = null;
+      setOrderDelivery(null);
+    }
+  }, []);
   const [storageReady, setStorageReady] = useState(false);
   const [restoredResult, setRestoredResult] =
     useState<JpycEip3009Result | null>(null);
@@ -182,7 +233,7 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
   const [recoveryState, setRecoveryState] =
     useState<JpycRelayRecoveryState>(null);
   const mountedRef = useRef(true);
-  const recoveryPromiseRef = useRef<Promise<JpycEip3009Result> | null>(null);
+  const recoveryPromiseRef = useRef<{ retained: RetainedRelayPayload; promise: Promise<JpycEip3009Result> } | null>(null);
   const recoverySleepRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recoveryWakeRef = useRef<(() => void) | null>(null);
   const recoveryFetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -216,7 +267,7 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
   const resolveAmbiguousPayload = useCallback(
     (retained: RetainedRelayPayload): Promise<JpycEip3009Result> => {
       const existing = recoveryPromiseRef.current;
-      if (existing) return existing;
+      if (existing?.retained === retained) return existing.promise;
 
       const run = (async (): Promise<JpycEip3009Result> => {
         setRecoveryStateIfMounted('auto');
@@ -225,7 +276,7 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
         );
         const outcome = await resolveRelayIntent({
           intent: retained.intent,
-          isMounted: () => mountedRef.current,
+          isMounted: () => mountedRef.current && (retained.isCurrent?.() ?? true),
           registerSleep: (timer, wake) => {
             recoverySleepRef.current = timer;
             recoveryWakeRef.current = wake;
@@ -271,9 +322,12 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
                 );
               },
         });
+        // A receipt can resolve after navigation; it must not clear or complete the new checkout.
+        if (retained.isCurrent && !retained.isCurrent()) throw new RelayResponseUnknownError();
         if (outcome.kind === 'expired') {
+          finishOrderPayment(retained.intent, { txHash: null, success: false });
           retainedPayloadRef.current = null;
-          storageRef.current?.clearRelayIntent();
+          clearSavedRelayIntent(retained.intent);
           // 未使用・失効済み intent の復元分類が画面に残り、新規決済の完了処理を
           // 抑止し続ける波及を断つ。呼出側 catch の有無に依存せず latch と同時に解除する。
           setRestoredIntent(null);
@@ -282,8 +336,9 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           throw new Error('relay_unused');
         }
         if (outcome.kind === 'settled') {
+          finishOrderPayment(retained.intent, { txHash: outcome.txHash, success: outcome.success });
           retainedPayloadRef.current = null;
-          storageRef.current?.clearRelayIntent();
+          clearSavedRelayIntent(retained.intent);
           setRecoveryStateIfMounted(null);
           void Promise.all([
             import('@/lib/history'),
@@ -314,28 +369,115 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
         throw new RelayResponseUnknownError();
       })();
 
-      recoveryPromiseRef.current = run;
+      recoveryPromiseRef.current = { retained, promise: run };
       void run
         .finally(() => {
-          if (recoveryPromiseRef.current === run) {
+          if (recoveryPromiseRef.current?.promise === run) {
             recoveryPromiseRef.current = null;
           }
         })
         .catch(() => undefined);
       return run;
     },
-    [deployment.chainId, publicClient, setRecoveryStateIfMounted],
+    [deployment.chainId, publicClient, setRecoveryStateIfMounted, finishOrderPayment, clearSavedRelayIntent],
   );
 
   useEffect(() => {
     let active = true;
+    let restoredOrder: RetainedRelayPayload | null = null;
+    const cancelBackground: (() => void)[] = [];
+    if (restoreOrderDelivery) {
+      // Reused CheckoutForm mounts must not carry a previous shop's restored completion forward.
+      setStorageReady(false);
+      setRestoredIntent(null);
+      setRestoredResult(null);
+      setRestoredError(null);
+      setRestoredVariables(null);
+      setRecoveryState(null);
+    }
     // /pay・/tip の First Load JS 予算へ storage parser を載せないため mount 後に遅延取得する。
     void import('@/lib/paymentIntentStorage')
-      .then((storage) => {
+      .then(async (storage) => {
+        let delivery: OrderDelivery | undefined;
+        let previous: OrderDelivery[] = [];
+        let saved = storage.loadRelayIntent();
+        if (restoreOrderDelivery) try {
+          const deliveryStorage = await import('@/lib/orderDelivery');
+          if (!active) return;
+          deliveryStorageRef.current = deliveryStorage;
+          const loaded = deliveryStorage.loadOrderDeliveries();
+          setOrderDeliveryLoadError(loaded.unavailable);
+          const context = contextMerchant && contextChain && contextToken && contextTotalValue !== undefined
+            ? { merchant: contextMerchant, chainId: contextChain, tokenAddress: contextToken, webhook: contextWebhook, orderId: contextOrderId, totalValue: contextTotalValue } : null;
+          delivery = loaded.records.find((r) => context && deliveryStorage.matchesOrderDeliveryContext(r.order, context, window.location.origin, r.intent));
+          // A legacy bound intent also lived in the global ordinary-payment slot. Its order slot
+          // owns recovery now, so that public metadata must not bypass checkout-context matching.
+          if (saved && loaded.records.some((r) => deliveryStorage.sameOrderAuthorization(r, saved!))) {
+            storage.clearRelayIntent();
+            saved = null;
+          }
+          previous = loaded.records.filter((r) => r !== delivery);
+        } catch {
+          // An unavailable order chunk must not fabricate a checkout association or opening.
+          setOrderDeliveryLoadError(true);
+        }
         if (!active) return;
+        orderDeliveryRef.current = delivery ?? null;
+        setOrderDelivery(delivery ?? null);
+        backgroundLoadedAtRef.current = Date.now();
+        backgroundOrdersRef.current = previous;
+        heldOrdersRef.current = new Set(previous.filter((r) => r.state === 'signed'));
+        setBackgroundOrderDeliveries(previous);
         storageRef.current = storage;
-        const intent = storage.loadRelayIntent();
+        const intent = delivery?.intent ?? saved;
         setStorageReady(true);
+        if (previous.some((r) => r.state === 'signed')) {
+          void import('@/lib/orderDeliveryRecovery').then(({ recoverOrderDelivery }) => {
+            if (!active) return;
+            for (const record of previous.filter((r) => r.state === 'signed')) {
+              cancelBackground.push(recoverOrderDelivery(record, async (hash, timeout) => {
+                if (publicClient && record.intent.chainId === deployment.chainId) {
+                  const receipt = await publicClient.waitForTransactionReceipt({ hash, confirmations: 1, timeout });
+                  return { status: receipt.status };
+                }
+                const { waitForStoredRelayReceipt } = await import('@/lib/relay/relayStoredReceipt');
+                return waitForStoredRelayReceipt(record.intent.chainId, hash, timeout);
+              }, (outcome) => {
+                if (!active) return;
+                const deliveryStorage = deliveryStorageRef.current!;
+                let resolved: OrderDelivery | null = null;
+                if (outcome.kind === 'settled' && outcome.success) {
+                  resolved = deliveryStorage.resolveOrderDelivery(record, outcome.txHash);
+                  // Retain the in-memory opening for notify even if its disk update fails.
+                  deliveryStorage.saveOrderDelivery(resolved);
+                } else deliveryStorage.abandonOrderDelivery(record);
+                heldOrdersRef.current.delete(record);
+                // A background result only advances delivery; it cannot complete the current checkout.
+                backgroundOrdersRef.current = backgroundOrdersRef.current.flatMap((r) => r === record ? resolved ? [resolved] : [] : [r]);
+                setBackgroundOrderDeliveries(backgroundOrdersRef.current);
+              }, { loadedAt: backgroundLoadedAtRef.current, onHoldReleased: () => {
+                if (!active) return;
+                heldOrdersRef.current.delete(record);
+                updateOrderHold((v) => v + 1);
+              } }));
+            }
+          }).catch(() => {
+            // A failed chunk cannot read status. Keep the opening and expiry hold, then show
+            // staff advice; the loading failure must not strand payments at another checkout.
+            if (!active) return;
+            setOrderDeliveryLoadError(true);
+            for (const record of previous.filter((r) => r.state === 'signed')) {
+              const until = Math.min(Number(record.intent.validBefore) * 1000,
+                record.intent.issuedAt + AUTHORIZATION_VALIDITY_WINDOW_SEC * 1000,
+                backgroundLoadedAtRef.current + AUTHORIZATION_VALIDITY_WINDOW_SEC * 1000);
+              const timer = setTimeout(() => {
+                heldOrdersRef.current.delete(record);
+                updateOrderHold((v) => v + 1);
+              }, Math.max(0, until - Date.now()));
+              cancelBackground.push(() => clearTimeout(timer));
+            }
+          });
+        }
         if (!intent) return;
         // 保存済み nonce の status 確認より前に届いた submit を、復元終了後の新規署名へ
         // 波及させない。未解決 intent を優先し、storage 読込中に積まれた操作は破棄する。
@@ -344,7 +486,9 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           payload: null,
           intent,
           ambiguous: true,
+          ...(delivery ? { isCurrent: () => active } : {}),
         };
+        if (delivery) restoredOrder = retained;
         retainedPayloadRef.current = retained;
         setRestoredIntent(intent);
         setRestoredVariables(variablesFromIntent(intent));
@@ -374,8 +518,18 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
       });
     return () => {
       active = false;
+      for (const cancel of cancelBackground) cancel();
+      if (restoredOrder && retainedPayloadRef.current === restoredOrder) {
+        // Cancel only this restored order's readers; its persisted opening stays for its own checkout.
+        retainedPayloadRef.current = null;
+        if (recoveryPromiseRef.current?.retained === restoredOrder) {
+          if (recoverySleepRef.current !== null) clearTimeout(recoverySleepRef.current);
+          recoveryWakeRef.current?.();
+          recoveryAbortRef.current?.abort();
+        }
+      }
     };
-  }, [deployment.chainId, resolveAmbiguousPayload]);
+  }, [deployment.chainId, publicClient, resolveAmbiguousPayload, restoreOrderDelivery, contextMerchant, contextChain, contextToken, contextWebhook, contextOrderId, contextTotalValue]);
 
   const mutation = useMutation<JpycEip3009Result, Error, JpycEip3009Params>({
     mutationFn: async ({
@@ -384,7 +538,10 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
       gasMode = 'customer',
       feeKind,
       tipMessage,
+      order,
     }) => {
+      // A new orderId must not bypass a still-live payment to the same merchant.
+      if (!retainedPayloadRef.current && isOrderPaymentHeld(merchant)) throw new Error('order_payment_pending');
       // 署名待ち中に UI 入力が変わっても wire 値を drift させないため、mutation 開始時の
       // primitive を固定する。復旧 intent には入れず、同一 mount の retained payload だけが保持する。
       const tipMessageSnapshot =
@@ -398,15 +555,22 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
         if (retained.ambiguous || !retained.payload) {
           return resolveAmbiguousPayload(retained);
         }
+        const record = orderDeliveryRef.current;
+        const deliveryStorage = deliveryStorageRef.current;
+        if (record && deliveryStorage?.sameOrderAuthorization(record, retained.intent) && !deliveryStorage.saveOrderDelivery(record)) {
+          // A retry whose signature never broadcast still needs its original opening persisted first.
+          throw new Error('order_binding_storage_unavailable');
+        }
         try {
           const result = await postRelayPayload(retained.payload);
+          finishOrderPayment(retained.intent, result);
           // txHash 付き success / reverted は on-chain の確定結果。非 ambiguous な D1 retry の
           // pending だけは broadcast 済みなので同一 mount でも intent latch を維持する。
           retainedPayloadRef.current = result.pending
             ? { ...retained, ambiguous: true }
             : null;
           if (!result.pending) {
-            storageRef.current?.clearRelayIntent();
+            clearSavedRelayIntent(retained.intent);
           }
           setRecoveryState(null);
           return result;
@@ -420,9 +584,13 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
               ambiguous: true,
             };
             setRecoveryState('exhausted');
-          } else if (!isRelayIpRateLimitedError(error)) {
+          } else if (isRelayIpRateLimitedError(error)) {
+            parkUnbroadcastOrder(retained.intent);
+            clearSavedRelayIntent(retained.intent);
+          } else {
             retainedPayloadRef.current = null;
-            storageRef.current?.clearRelayIntent();
+            clearSavedRelayIntent(retained.intent);
+            finishOrderPayment(retained.intent, { txHash: null, success: false });
           }
           throw error;
         }
@@ -439,6 +607,26 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
       const validBefore = BigInt(nowSec + AUTHORIZATION_VALIDITY_WINDOW_SEC);
       const forwarder = jpycForwarderFor(chainId);
 
+      const bindModule = order ? await import('@/lib/orderBind') : null;
+      // Canonical order and secret are frozen before wallet waits. Reject a mismatched caller
+      // context instead of signing an authorization that cannot open its saved order.
+      const canonical = order && bindModule ? bindModule.canonicalOrder(order) : null;
+      if (canonical && (canonical.chainId !== chainId ||
+        canonical.tokenAddress.toLowerCase() !== deployment.address.toLowerCase() ||
+        canonical.merchant.toLowerCase() !== merchant.toLowerCase())) throw new Error('order_binding_mismatch');
+      const bind = canonical ? { v: 1 as const, secret: randomAuthorizationNonce(), validAfter: '0', validBefore: validBefore.toString() } : null;
+      const boundSalt = bind && canonical && bindModule
+        ? bindModule.orderBindSalt(bindModule.orderDigest(canonical), bind.secret) : null;
+      const persistOrder = async (intent: RelayIntentMetadata) => {
+        if (!canonical || !bind) return;
+        const storage = deliveryStorageRef.current ?? await import('@/lib/orderDelivery');
+        deliveryStorageRef.current = storage;
+        const record: OrderDelivery = { version: 1, order: canonical, bind, intent, forwarder,
+          ...(forwarder ? { feeReceiver: env.feeReceiver as Address } : {}), state: 'signed' };
+        if (!storage.saveOrderDelivery(record)) throw new Error('order_binding_storage_unavailable');
+        orderDeliveryRef.current = record;
+        setOrderDelivery(record);
+      };
       // 「署名安心 UX」(plans/sign-reassurance-ux.md §5) の計測: 署名要求の前後と拒否/失敗
       // をログ化し、拒否率ファネル (Sentry) を取れるようにする。free/recover の 2 経路で
       // signTypedData を呼ぶため共通化する (署名内容は各 typed を渡すだけで不変)。catch は
@@ -500,7 +688,7 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           feeValue,
           validAfter: 0n,
           validBefore,
-          intentSalt: randomAuthorizationNonce(),
+          intentSalt: boundSalt ?? randomAuthorizationNonce(),
         };
         // recover 専用の intent 構築は lazy import (initial /pay バンドルに encodeAbiParameters
         // 等を載せない・予算節約)。recover 決済が実行された時のみ chunk を読み込む。
@@ -514,6 +702,17 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           deployment.address,
           forwarder,
         );
+        intent = {
+          chainId,
+          from,
+          merchant,
+          merchantValue: merchantValue.toString(),
+          feeValue: feeValue.toString(),
+          nonce: buildForwarderNonce(params, chainId, forwarder),
+          validBefore: validBefore.toString(),
+          routeKind: 'recover',
+          issuedAt: Date.now(),
+        };
         const signature = await signWithLogging({
           account: address,
           domain: typed.domain,
@@ -543,17 +742,6 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
             ? { tipMessage: tipMessageSnapshot }
             : {}),
         };
-        intent = {
-          chainId,
-          from,
-          merchant,
-          merchantValue: merchantValue.toString(),
-          feeValue: feeValue.toString(),
-          nonce: buildForwarderNonce(params, chainId, forwarder),
-          validBefore: validBefore.toString(),
-          routeKind: 'recover',
-          issuedAt: Date.now(),
-        };
       } else {
         // free: 直接 transferWithAuthorization。OpenPay がガス負担 (回収しない)。
         // ⚠️ モバイル注文システム利用料 (feeKind) は free 経路では分割できない (単一 transfer・fee 機構
@@ -568,13 +756,24 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           value,
           validAfter: 0n,
           validBefore,
-          nonce: randomAuthorizationNonce(),
+          nonce: boundSalt ?? randomAuthorizationNonce(),
         };
         const typed = buildTransferWithAuthorizationTypedData(
           auth,
           chainId,
           deployment.address,
         );
+        intent = {
+          chainId,
+          from,
+          merchant,
+          merchantValue: value.toString(),
+          feeValue: '0',
+          nonce: auth.nonce,
+          validBefore: validBefore.toString(),
+          routeKind: 'free',
+          issuedAt: Date.now(),
+        };
         const signature = await signWithLogging({
           account: address,
           domain: typed.domain,
@@ -595,27 +794,26 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
             ? { tipMessage: tipMessageSnapshot }
             : {}),
         };
-        intent = {
-          chainId,
-          from,
-          merchant,
-          merchantValue: value.toString(),
-          feeValue: '0',
-          nonce: auth.nonce,
-          validBefore: validBefore.toString(),
-          routeKind: 'free',
-          issuedAt: Date.now(),
-        };
       }
 
+      // Only a resolved signature can leave a restorable order. Storage failure discards it
+      // before POST, so navigation during a wallet prompt cannot block a subsequent checkout.
+      if (bind && !mountedRef.current) throw new Error('payment_cancelled');
+      if (bind) await persistOrder(intent);
+
+      // Keep the existing post-signing timestamp for ordinary /pay and /tip intents.
+      if (!bind) intent.issuedAt = Date.now();
+
       // 署名そのものは保存せず、POST 応答喪失後も read-only status を引ける公開メタデータだけを残す。
-      storageRef.current?.saveRelayIntent(intent);
+      // Bound payments recover from their own authorization slot, never the global /pay intent.
+      if (!bind) storageRef.current?.saveRelayIntent(intent);
       try {
         const result = await postRelayPayload(payload);
+        finishOrderPayment(intent, result);
         if (result.pending) {
           retainedPayloadRef.current = { payload, intent, ambiguous: true };
         } else {
-          storageRef.current?.clearRelayIntent();
+          clearSavedRelayIntent(intent);
         }
         return result;
       } catch (error) {
@@ -625,12 +823,14 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
           return resolveAmbiguousPayload(retained);
         } else if (isRelayIpRateLimitedError(error)) {
           retainedPayloadRef.current = { payload, intent, ambiguous: false };
+          parkUnbroadcastOrder(intent);
           // IP limiter は relay 処理前の確定的拒否。署名 payload は同一 mount の retry 用に
           // memory へ残すが、未 broadcast intent が reload 後の支払いを塞ぐ波及は断つ。
-          storageRef.current?.clearRelayIntent();
+          clearSavedRelayIntent(intent);
         } else {
           retainedPayloadRef.current = null;
-          storageRef.current?.clearRelayIntent();
+          clearSavedRelayIntent(intent);
+          finishOrderPayment(intent, { txHash: null, success: false });
         }
         throw error;
       }
@@ -648,6 +848,7 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
         queuedMutationRef.current = variables;
         return;
       }
+      if (isOrderPaymentHeld(variables.merchant)) return;
       if (
         mutationData?.success ||
         mutationData?.pending ||
@@ -661,7 +862,7 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
       setRestoredVariables(null);
       mutationMutate(variables);
     },
-    [mutationData, mutationMutate, restoredResult, storageReady],
+    [mutationData, mutationMutate, restoredResult, storageReady, isOrderPaymentHeld],
   );
 
   useEffect(() => {
@@ -676,8 +877,10 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
     const queued = queuedMutationRef.current;
     if (!queued) return;
     queuedMutationRef.current = null;
+    // Discard a queued click blocked by an earlier payment; resolving it must not auto-pay the new cart.
+    if (isOrderPaymentHeld(queued.merchant)) return;
     mutationMutate(queued);
-  }, [mutationIsPending, mutationMutate, restoredResult, storageReady]);
+  }, [mutationIsPending, mutationMutate, restoredResult, storageReady, isOrderPaymentHeld]);
 
   const retryRelay = useCallback(() => {
     if (
@@ -700,12 +903,12 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
     }
     void resolveAmbiguousPayload(retained)
       .then((result) => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || (retained.isCurrent && !retained.isCurrent())) return;
         setRestoredResult(result);
         setRestoredError(null);
       })
       .catch((error: unknown) => {
-        if (!mountedRef.current) return;
+        if (!mountedRef.current || (retained.isCurrent && !retained.isCurrent())) return;
         if (error instanceof Error && error.message === 'relay_unused') {
           // 未使用・失効済み intent の表示分類が残り、新規決済の完了処理を抑止する波及を断つ。
           setRestoredIntent(null);
@@ -747,5 +950,11 @@ export function useJpycEip3009Payment(deployment: TokenDeployment) {
     isRestoring: !storageReady,
     hasActiveIntent: retainedPayloadRef.current !== null,
     restoredIntent,
+    orderDelivery,
+    backgroundOrderDeliveries,
+    orderPaymentHold,
+    previousPaymentPending: backgroundOrderDeliveries.some((r) => r.state === 'signed'),
+    previousPaymentSameMerchant: sameMerchantSigned.length > 0,
+    orderDeliveryLoadError,
   };
 }

@@ -5,14 +5,14 @@ import { h, TOKEN, OTHER, UNIT, pay, notify, nonce, listKey, usedKey, orders, co
 afterAll(closeRedisLuaEngine);
 
 describe('A2b stateful agentOrderFinalize (real Lua)', () => {
-  it('checks every AuthorizationUsed event, ignores fake emitters, and fails closed on reservation reads', async () => {
+  it('checks every AuthorizationUsed event; fake emitters cannot hide incomplete forwarder evidence', async () => {
     await beginPending(); const saved = [...h.logs];
     h.logs = [transfer(), authorization(`0x${'ff'.repeat(32)}`), ...saved];
-    expect((await notify.POST(publicRequest())).status).toBe(409); expect(orders()).toEqual([]);
+    expect((await notify.POST(publicRequest({ bind: { v: 2 } }))).status).toBe(409); expect(orders()).toEqual([]);
     h.fail = (op, keys) => op === 'GET' && keys[0].startsWith('order:agentres:') ? 'before' : undefined;
     expect((await notify.POST(publicRequest())).status).toBe(503); expect(h.db!.strings.has(usedKey)).toBe(false);
     h.fail = null; h.logs = [transfer(), authorization(nonce, OTHER)];
-    expect((await notify.POST(publicRequest())).status).toBe(200); expect(orders()).toHaveLength(1);
+    expect((await notify.POST(publicRequest())).status).toBe(422); expect(orders()).toHaveLength(0);
   });
 
   it('a token log with another ABI event name cannot hide a later reserved authorization', async () => {

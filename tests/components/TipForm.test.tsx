@@ -2382,3 +2382,28 @@ it('Gateway hashless success keeps Tip paid and records a receipt without a tran
   expect(screen.getAllByText(/チップを送信しました/).length).toBeGreaterThan(0);
   expect(fetchSpy).not.toHaveBeenCalled();
 });
+
+it.each(['notify-pending', 'terminal', 'prepared'] as const)('A2c %s order from an earlier checkout cannot hijack a new TipForm mount', async (state) => {
+  const { bindingFixture } = await import('../_helpers/orderBinding');
+  const { defaultDeploymentForSymbol } = await import('@/lib/tokens');
+  const { ORDER_DELIVERY_KEY, resolveOrderDelivery, saveOrderDelivery, terminateOrderDelivery } = await import('@/lib/orderDelivery');
+  const { useJpycEip3009Payment: actualHook } = await vi.importActual<typeof import('@/hooks/useJpycEip3009Payment')>('@/hooks/useJpycEip3009Payment');
+  sessionStorage.clear();
+  const dep = defaultDeploymentForSymbol('jpyc');
+  const record = resolveOrderDelivery(bindingFixture('free', { chainId: dep.chainId, tokenAddress: dep.address, merchant: CREATOR, handle: 'alice', orderId: 'old', items: [{ name: 'Tea', qty: 1, price: '300' }] }).record, `0x${'ab'.repeat(32)}`);
+  saveOrderDelivery(record);
+  if (state === 'terminal') expect(terminateOrderDelivery(record)).toBe(true);
+  if (state === 'prepared') sessionStorage.setItem(ORDER_DELIVERY_KEY, JSON.stringify({ ...record, state: 'prepared', txHash: undefined, notifyBody: undefined }));
+  vi.mocked(useJpycEip3009Payment).mockImplementation(actualHook);
+  vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+  setAccount({ connected: true, chainId: dep.chainId });
+  setBalance(10_000n * 10n ** 18n);
+  mockHook(useWalletClient, { data: undefined });
+  const fetchSpy = vi.spyOn(globalThis, 'fetch');
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const view = render(<QueryClientProvider client={client}><TipForm params={JPYC_PARAMS} /></QueryClientProvider>);
+  await waitFor(() => expect(screen.getByRole('button', { name: /JPYC.*送る/ })).toBeEnabled());
+  expect(fetchSpy).not.toHaveBeenCalled();
+  expect(vi.mocked(useJpycEip3009Payment).mock.calls.every((args) => args[1]?.restoreOrderDelivery !== true)).toBe(true);
+  view.unmount(); client.clear(); fetchSpy.mockRestore(); sessionStorage.clear();
+});

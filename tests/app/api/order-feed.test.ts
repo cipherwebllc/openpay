@@ -517,3 +517,11 @@ describe('受注閲覧トークン認可 (x-order-token・資金鍵なしの店�
     expect(evalSpy).not.toHaveBeenCalled();
   });
 });
+
+it('A2c binding marker survives feed read and fulfillment serialization', async () => {
+  hold.lrange = { ok: true, value: [serializeOrder(order({ bindingMissing: true }))] };
+  expect((await (await GET(getReq())).json()).orders[0].bindingMissing).toBe(true);
+  expect((await POST(postReq({ txHash: TX, fulfilled: true }))).status).toBe(200);
+  const args = evalSpy.mock.calls[0][2] as string[];
+  expect(JSON.parse(args[1])).toMatchObject({ bindingMissing: true, fulfilled: true });
+});

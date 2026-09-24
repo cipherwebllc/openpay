@@ -6,6 +6,7 @@
 // ageMin (表示分) を渡す = tick で表示分が変わらない限り再レンダーしない。テーブル訂正の入力ドラフトは
 // 編集中の当該カードだけ描画に影響する (他カードは draft 変化で再レンダーしない)。
 
+import { OrderBindingNotice } from '@/components/OrderBindingNotice';
 import { memo } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
@@ -100,6 +101,7 @@ function OrderCardInner({
                 : 'border-slate-200 bg-white'
       }`}
     >
+      <OrderBindingNotice order={o} />
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-xs font-medium text-slate-500">

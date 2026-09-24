@@ -764,3 +764,11 @@ describe('OrderFulfillmentBoard', () => {
     expect(tokenHold.stored).toBe('e'.repeat(43)); // 保持 (失効ではない)
   });
 });
+
+it.each(['kitchen', 'hall'] as const)('A2c %s keeps the manual handover warning visible', (mode) => {
+  feedHold.data = [order({ bindingMissing: true }), order({ orderId: 'other', txHash: TX2 })];
+  renderWithIntl(<OrderFulfillmentBoard mode={mode} />);
+  expect(screen.getByRole('alert')).toHaveTextContent('支払いと注文の結びつき未確認 — 受け渡し前に手動確認が必要');
+  expect(screen.getAllByText(/暗号学的/)).toHaveLength(1);
+  expect(screen.getByText(/暗号学的/)).toHaveClass('text-slate-800', 'bg-slate-50');
+});

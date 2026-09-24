@@ -101,6 +101,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'News',
     'NonCustodialNotice',
     'OfflineLastQr',
+    'OrderBinding',
     'OrderCall',
     'OrderFulfillment',
     'OrderRelay',
@@ -269,11 +270,13 @@ export const ROUTE_CLIENT_NAMESPACES = {
   ],
   'orders/hall': [
     'LocaleSwitcher',
+    'OrderBinding',
     'OrderCall',
     'OrderFulfillment',
   ],
   'orders/kitchen': [
     'LocaleSwitcher',
+    'OrderBinding',
     'OrderCall',
     'OrderFulfillment',
   ],

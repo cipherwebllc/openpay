@@ -51,6 +51,8 @@ export type StoredOrderItem = {
 };
 
 export type StoredOrder = {
+  bindingMissing?: true; // Migration only: staff must manually verify before handover.
+  bindingDigest?: string; // Verified v1 commitment, preserved through fulfillment/fee updates.
   orderId: string;
   items: StoredOrderItem[]; // 顧客申告 (表示用・突合は店主)
   table: string | null; // 顧客申告: テーブル番号ラベル (description 由来)。テイクアウトは null。
@@ -380,6 +382,8 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
       order.readyAt = o.readyAt;
     }
   }
+  if (o.bindingMissing === true) order.bindingMissing = true;
+  if (typeof o.bindingDigest === 'string' && /^0x[0-9a-fA-F]{64}$/.test(o.bindingDigest)) order.bindingDigest = o.bindingDigest;
   if (o.amountMismatch === true) order.amountMismatch = true;
   if (o.amountUnchecked === true) order.amountUnchecked = true;
   if (o.feeUncollected === true) {
