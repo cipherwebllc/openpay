@@ -16,6 +16,7 @@ import {
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
 import { railIntentParentKey, releaseActiveStoreRail } from '@/lib/x402/storeRailSelection';
+import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
 import {
   PURCHASE_RECONCILE_LEASE_SEC,
   PURCHASE_RECONCILE_MAX_PAGES,
@@ -402,36 +403,20 @@ export async function reconcilePurchaseIntent(
       const resolved = await finalizeCandidate(intent.txHash);
       if (resolved) return resolved;
     }
-    const candidates: Hex[] = [];
     const latest = await chain.latestBlock(intent);
     const anchor = BigInt(intent.anchorBlock);
-    let fromBlock = intent.reconcileFromBlock
-      ? BigInt(intent.reconcileFromBlock)
-      : anchor;
-    if (fromBlock < anchor) fromBlock = anchor;
-    let pages = 0;
-    while (fromBlock <= latest && pages < PURCHASE_RECONCILE_MAX_PAGES) {
-      const toBlock =
-        fromBlock + PURCHASE_RECONCILE_PAGE_BLOCKS - 1n > latest
-          ? latest
-          : fromBlock + PURCHASE_RECONCILE_PAGE_BLOCKS - 1n;
-      const hashes = await chain.authorizationUsedTransactions(
-        intent,
-        fromBlock,
-        toBlock,
-      );
-      for (const hash of hashes) {
-        if (!candidates.includes(hash)) candidates.push(hash);
-      }
-      fromBlock = toBlock + 1n;
-      pages += 1;
-    }
-    for (const txHash of candidates) {
+    const { candidates, nextFromBlock } = await scanReconcileBlockPages({
+      anchor,
+      fromBlock: intent.reconcileFromBlock ? BigInt(intent.reconcileFromBlock) : anchor,
+      latest,
+      pageBlocks: PURCHASE_RECONCILE_PAGE_BLOCKS,
+      maxPages: PURCHASE_RECONCILE_MAX_PAGES,
+    }, (fromBlock, toBlock) => chain.authorizationUsedTransactions(intent, fromBlock, toBlock));
+    for (const txHash of candidates.keys()) {
       const resolved = await finalizeCandidate(txHash);
       if (resolved) return resolved;
     }
 
-    const nextFromBlock = fromBlock <= latest ? fromBlock : anchor;
     const updated = await rescheduleAfterReconcile({
       intentSalt,
       leasedRaw,
