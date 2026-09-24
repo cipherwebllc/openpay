@@ -504,18 +504,20 @@ describe('stored record parsers: exact outputs (property order) and rejections',
   });
 });
 
-describe('module structure (R3a/R3b split)', () => {
+describe('module structure (R3a/R3b/R3c split)', () => {
   const PURCHASE_DIR = 'lib/x402/purchase';
   const LEAVES = readdirSync(PURCHASE_DIR).sort();
-  const specifiers = (file: string) => {
-    const source = readFileSync(file, 'utf8');
+  const specifiersOf = (source: string) => {
     return [
       ...[...source.matchAll(/^(?:import|export)[^'"]*?from '([^']+)'|^import '([^']+)'/gm)]
         .map((match) => match[1] ?? match[2]!),
       // leaf を直接指す vi.mock も facade をすり抜ける (利用側の mock が効かない) ので同じ検査に含める。
-      ...[...source.matchAll(/\bvi\.mock\(\s*'([^']+)'/g)].map((match) => match[1]!),
+      // R3c: vi.doMock / vi.importActual / vi.importMock と二重引用符・template の specifier も拾う (R3b レビュー nit 2)。
+      ...[...source.matchAll(/\bvi\.(?:mock|doMock|importActual|importMock)(?:<[^>]*>)?\(\s*['"`]([^'"`]+)['"`]/g)]
+        .map((match) => match[1]!),
     ];
   };
+  const specifiers = (file: string) => specifiersOf(readFileSync(file, 'utf8'));
   const walk = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
     return statSync(path).isDirectory() ? walk(path) : /\.(?:ts|tsx|mjs|js)$/.test(name) ? [path] : [];
@@ -523,22 +525,31 @@ describe('module structure (R3a/R3b split)', () => {
 
   it('keeps the leaves below the facade: no leaf imports the facade, and the leaf graph is acyclic', () => {
     expect(LEAVES).toEqual([
-      'claim.ts', 'keys.ts', 'lua.ts', 'parse.ts', 'quote.ts', 'read.ts', 'transitions.ts', 'types.ts',
+      'claim.ts', 'finalize.ts', 'keys.ts', 'library.ts', 'lua.ts', 'parse.ts', 'quote.ts', 'read.ts',
+      'records.ts', 'transitions.ts', 'types.ts',
     ]);
     const edges = Object.fromEntries(LEAVES.map((leaf) => [
       leaf, specifiers(`${PURCHASE_DIR}/${leaf}`).filter((spec) => spec.startsWith('.') || spec.includes('purchaseIntent')),
     ]));
     // R3b: read は types/keys/parse の上・quote/claim/transitions の下。facade (purchaseIntent) への辺は無い。
+    // R3c: finalize → library (settled access) → records (grant/record builder) の一方向。builder は両者の下。
     expect(edges).toEqual({
       'claim.ts': ['./types', './keys', './parse', './lua', './read'],
+      'finalize.ts': ['./types', './keys', './parse', './lua', './read', './records', './library'],
       'keys.ts': ['./types'],
+      'library.ts': ['./types', './keys', './parse', './lua', './read', './records'],
       'lua.ts': [],
       'parse.ts': ['./types'],
       'quote.ts': ['./types', './keys', './parse', './lua'],
       'read.ts': ['./types', './keys', './parse'],
+      'records.ts': ['./types'],
       'transitions.ts': ['./types', './keys', './parse', './lua'],
       'types.ts': [],
     });
+    // R3c の循環の罠: finalize は access 読み取りを呼び、access 読み取りは builder を使う。builder と access 読み取りは
+    // finalize を (builder は access 読み取りも) import しない。
+    expect(edges['records.ts']!.filter((dep) => dep === './library' || dep === './finalize')).toEqual([]);
+    expect(edges['library.ts']).not.toContain('./finalize');
     // 閉路検査: 依存の無い leaf から順に取り除いて全件が消えること。
     const remaining = new Map(Object.entries(edges).map(([leaf, deps]) => [leaf, deps.map((dep) => `${dep.slice(2)}.ts`)]));
     while (remaining.size > 0) {
@@ -553,9 +564,19 @@ describe('module structure (R3a/R3b split)', () => {
     expect(specifiers('lib/x402/purchaseIntent.ts')).toEqual(expect.arrayContaining([
       './purchase/types', './purchase/keys', './purchase/parse', './purchase/lua',
       './purchase/read', './purchase/quote', './purchase/claim', './purchase/transitions',
+      './purchase/finalize', './purchase/library',
     ]));
     // vi.mock の specifier も拾える (この file は @/lib/logger を import せず vi.mock だけする)。
     expect(specifiers('tests/lib/x402/purchaseIntentCompatibility.test.ts')).toContain('@/lib/logger');
+    // vi.doMock / 型引数付き vi.importActual / vi.importMock と二重引用符・template も拾える
+    // (この file 自身が deep path を含まないよう P/ を後から置換する)。
+    expect(specifiersOf([
+      'vi.doMock("P/read", () => ({}));',
+      'await vi.importActual<typeof import(\'x\')>(`P/finalize`);',
+      "vi.importMock('P/library');",
+    ].join('\n').replaceAll('P/', '@/lib/x402/purchase/'))).toEqual([
+      '@/lib/x402/purchase/read', '@/lib/x402/purchase/finalize', '@/lib/x402/purchase/library',
+    ]);
     const deep = ['app', 'components', 'lib', 'scripts', 'tests'].flatMap(walk)
       .filter((file) => file !== 'lib/x402/purchaseIntent.ts' && !file.startsWith(`${PURCHASE_DIR}/`))
       .filter((file) => specifiers(file).some((spec) => /(?:^|\/)x402\/purchase\/|^\.\/purchase\//.test(spec)));

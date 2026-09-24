@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createFakeRedisStore, runRedisLua, closeRedisLuaEngine, type FakeRedisStore } from '../../_helpers/redisLua';
+import { createFakeRedisStore, dispatchRedisCommand, runRedisLua, closeRedisLuaEngine, type FakeRedisStore } from '../../_helpers/redisLua';
 import { captureLuaCall, copyRedisStore, redisState, type LuaCall } from '../../_helpers/redisLuaCapture';
 import {
   encodeAbiParameters,
@@ -97,6 +97,7 @@ import {
   listPendingPurchaseIntents,
   markPurchaseFailedPrebroadcast,
   markPurchaseIndeterminate,
+  parsePurchaseIntent,
   purchaseIntentKey,
   purchaseLibraryKey,
   purchaseOwnershipKey,
@@ -1893,5 +1894,290 @@ describe('R3b pins: transitions under contention, stale leases/CAS, wrong key ty
     await expect(claimPurchaseSettlement({ intentSalt: kept.intentSalt, claim: keptClaim, now: BASE_NOW + 2_000 }))
       .resolves.toMatchObject({ ok: true, kind: 'claimed' });
     expect(h.store!.getTtl(purchaseIntentKey(kept.intentSalt))).toBe(-1);
+  });
+});
+
+// R3c で追加 (分割前のコード 1126ea30 で採取): records / library (settled access の読み取り) / finalize を
+// lib/x402/purchase/* に移す前に、facade 経由で次を固定する。
+//   - access 読み取りの全分岐 (保存値そのものを返す・KV 読み取りの順序・書き込みなし・not_found/corrupt/conflict/storage)
+//   - library ZSET の score (同じ商品は最古購入時刻) と列挙順 (score 降順)・ownership の grant 順
+//   - finalize の入力検査・状態 gate・競合時の分岐 (-1 は再試行・-3 は再試行しない・digital は raced access を idempotent に)
+describe('R3c pins: settled access read, library score and listing order, finalize branches', () => {
+  const txHash = (n: number) => toHex(BigInt(n), { size: 32 });
+  const libraryKey = () => purchaseLibraryKey(PAYER);
+  const ownershipOf = (resourceId = RESOURCE_ID) =>
+    jsonObject(h.store!.strings.get(purchaseOwnershipKey(PAYER, resourceId))!);
+  async function finalizeNew(
+    settledAt: number,
+    hash: Hex,
+    overrides: Partial<CreateQuotedPurchaseIntentInput> = {},
+  ) {
+    const settling = await makeSettling(overrides);
+    const result = await finalizeHostedPurchase({ intentSalt: settling.intentSalt, txHash: hash, settledAt });
+    expect(result).toMatchObject({ ok: true, kind: 'finalized' });
+    return settling;
+  }
+  // FINALIZE_PURCHASE だけ Lua を実行せずに固定の返り値にする (他の script は本物の Lua)。
+  function forceFinalizeReply(value: number) {
+    h.kvEval.mockImplementation(async (script: string, keys: string[], args: string[]) => {
+      if (script !== purchaseScripts.FINALIZE_PURCHASE) return kvEvalMock(script, keys, args);
+      h.calls.push(captureLuaCall(script, keys, args, h.store!));
+      return { ok: true as const, value };
+    });
+  }
+  const scriptCount = (name: PurchaseScript) =>
+    h.calls.filter((call) => call.script === purchaseScripts[name]).length;
+
+  it('digital access read returns the stored intent / ownership / record and the grant, reading in a fixed order without writes', async () => {
+    const settling = await finalizeNew(BASE_NOW + 4_000, TX_HASH);
+    const salt = settling.intentSalt;
+    const before = redisState(h.store!);
+    h.calls = [];
+    h.kvGet.mockClear();
+    const access = await readSettledPurchaseAccess(salt);
+    expect(access.ok).toBe(true);
+    if (!access.ok) throw new Error(access.reason);
+    expect(h.kvGet.mock.calls.map(([key]) => key)).toEqual([
+      purchaseIntentKey(salt),
+      purchaseOwnershipKey(PAYER, RESOURCE_ID),
+      hostedPurchaseRecordKey(CHAIN_ID, TX_HASH),
+    ]);
+    expect(h.calls.map((call) => [call.script === purchaseScripts.READ_LIBRARY_SCORE, call.keys, call.args]))
+      .toEqual([[true, [libraryKey()], [RESOURCE_ID]]]);
+    expect(redisState(h.store!)).toEqual(before);
+    // settled の parser は attempt 系 field を落とす (保存 JSON と parser 出力の両方を固定)。
+    expect(access.intent).toEqual(parsePurchaseIntent(h.store!.strings.get(purchaseIntentKey(salt))!));
+    expect(Object.keys(jsonObject(h.store!.strings.get(purchaseIntentKey(salt))!))).toEqual(expect.arrayContaining(['attempt', 'attemptId', 'leaseUntil', 'settlementStartedAt']));
+    expect(access.intent).not.toHaveProperty('attemptId');
+    expect(access.intent).toMatchObject({ state: 'settled', txHash: TX_HASH, settledAt: BASE_NOW + 4_000 });
+    expect(access.ownership).toEqual(ownershipOf());
+    expect(access.purchase).toEqual(jsonObject(h.store!.strings.get(hostedPurchaseRecordKey(CHAIN_ID, TX_HASH))!));
+    const expectedGrant = {
+      intentSalt: salt,
+      contentRevision: 3,
+      contentRef: `store:hosted:content:${RESOURCE_ID}:3`,
+      metadata: settling.metadata,
+      chainId: CHAIN_ID,
+      txHash: TX_HASH,
+      nonce: settling.claim.nonce,
+      purchasedAt: BASE_NOW + 4_000,
+    };
+    expect(access.grant).toEqual(expectedGrant);
+    expect(access.ownership.grants).toEqual([expectedGrant]);
+    expect(access.purchase).toEqual({
+      version: 1,
+      payer: PAYER,
+      resourceId: RESOURCE_ID,
+      merchant: MERCHANT,
+      merchantValue: '100',
+      feeReceiver: FEE_RECEIVER,
+      feeValue: '2',
+      token: TOKEN,
+      forwarder: FORWARDER,
+      commitVersion: settling.commitVersion,
+      deploymentVersion: settling.deploymentVersion,
+      ...expectedGrant,
+    });
+  });
+
+  it.each([
+    ['missing intent', 'not_found'],
+    ['quoted intent', 'not_found'],
+    ['signed intent', 'not_found'],
+    ['settling intent', 'not_found'],
+    ['corrupt intent', 'corrupt'],
+    ['library member missing', 'corrupt'],
+    ['ownership missing', 'corrupt'],
+    ['record missing', 'corrupt'],
+    ['ownership unparseable', 'corrupt'],
+    ['record unparseable', 'corrupt'],
+    ['library score differs from firstPurchasedAt', 'conflict'],
+    ['grant missing from ownership', 'conflict'],
+    ['grant differs from the intent', 'conflict'],
+    ['record differs from the intent', 'conflict'],
+    ['get failure', 'storage'],
+    ['eval failure', 'storage'],
+  ] as const)('access read: %s → %s (without writing)', async (scenario, reason) => {
+    let salt: string;
+    if (scenario === 'missing intent') salt = nextSalt();
+    else if (scenario === 'quoted intent') salt = (await makeQuote()).intentSalt;
+    else if (scenario === 'signed intent') {
+      const quote = await makeQuote();
+      await signQuote(quote);
+      salt = quote.intentSalt;
+    } else if (scenario === 'settling intent') salt = (await makeSettling()).intentSalt;
+    else salt = (await finalizeNew(BASE_NOW + 4_000, TX_HASH)).intentSalt;
+    const ownKey = purchaseOwnershipKey(PAYER, RESOURCE_ID);
+    const recordKey = hostedPurchaseRecordKey(CHAIN_ID, TX_HASH);
+    const own = () => jsonObject(h.store!.strings.get(ownKey)!);
+    if (scenario === 'corrupt intent') h.store!.strings.set(purchaseIntentKey(salt), '{broken');
+    if (scenario === 'library member missing') h.store!.zsets.get(libraryKey())!.delete(RESOURCE_ID);
+    if (scenario === 'ownership missing') h.store!.delete(ownKey);
+    if (scenario === 'record missing') h.store!.delete(recordKey);
+    if (scenario === 'ownership unparseable') h.store!.strings.set(ownKey, '{broken');
+    if (scenario === 'record unparseable') h.store!.strings.set(recordKey, '{broken');
+    if (scenario === 'library score differs from firstPurchasedAt') zadd(libraryKey(), String(BASE_NOW + 3_999), RESOURCE_ID);
+    if (scenario === 'grant missing from ownership' || scenario === 'grant differs from the intent') {
+      const current = own();
+      const [grant] = current.grants as Record<string, unknown>[];
+      const patched = scenario === 'grant missing from ownership'
+        ? { ...grant, intentSalt: `0x${'f'.repeat(64)}` }
+        : { ...grant, nonce: OTHER_BYTES32 };
+      h.store!.strings.set(ownKey, JSON.stringify({ ...current, grants: [patched], latestGrant: patched }));
+    }
+    if (scenario === 'record differs from the intent') {
+      h.store!.strings.set(recordKey, JSON.stringify({
+        ...jsonObject(h.store!.strings.get(recordKey)!), nonce: OTHER_BYTES32,
+      }));
+    }
+    if (scenario === 'get failure') h.fail.get = true;
+    if (scenario === 'eval failure') h.fail.eval = true;
+    const before = redisState(h.store!);
+    await expect(readSettledPurchaseAccess(salt as Hex)).resolves.toEqual({ ok: false, reason });
+    expect(redisState(h.store!)).toEqual(before);
+  });
+
+  it('library keeps the earliest purchase per product and lists by score descending; ownership grants keep finalize order', async () => {
+    const a1 = await finalizeNew(BASE_NOW + 3_000, txHash(1), { resourceId: 'item-a' });
+    const b1 = await finalizeNew(BASE_NOW + 5_000, txHash(2), { resourceId: 'item-b' });
+    const c1 = await finalizeNew(BASE_NOW + 4_000, txHash(3), { resourceId: 'item-c' });
+    const b2 = await finalizeNew(BASE_NOW + 2_000, txHash(4), { resourceId: 'item-b' });
+    const a2 = await finalizeNew(BASE_NOW + 6_000, txHash(5), { resourceId: 'item-a' });
+    expect(Object.fromEntries(h.store!.zsets.get(libraryKey())!)).toEqual({
+      'item-a': BASE_NOW + 3_000,
+      'item-b': BASE_NOW + 2_000,
+      'item-c': BASE_NOW + 4_000,
+    });
+    expect(dispatchRedisCommand(h.store!, 'ZREVRANGE', [libraryKey(), 0, -1, 'WITHSCORES'])).toEqual([
+      'item-c', String(BASE_NOW + 4_000),
+      'item-a', String(BASE_NOW + 3_000),
+      'item-b', String(BASE_NOW + 2_000),
+    ]);
+    const shape = (resourceId: string) => {
+      const ownership = ownershipOf(resourceId);
+      return {
+        firstPurchasedAt: ownership.firstPurchasedAt,
+        updatedAt: ownership.updatedAt,
+        grants: (ownership.grants as Record<string, unknown>[]).map((grant) => [grant.intentSalt, grant.purchasedAt]),
+        latestGrant: (ownership.latestGrant as Record<string, unknown>).intentSalt,
+      };
+    };
+    expect(shape('item-a')).toEqual({
+      firstPurchasedAt: BASE_NOW + 3_000,
+      updatedAt: BASE_NOW + 6_000,
+      grants: [[a1.intentSalt, BASE_NOW + 3_000], [a2.intentSalt, BASE_NOW + 6_000]],
+      latestGrant: a2.intentSalt,
+    });
+    expect(shape('item-b')).toEqual({
+      firstPurchasedAt: BASE_NOW + 2_000,
+      updatedAt: BASE_NOW + 5_000,
+      grants: [[b1.intentSalt, BASE_NOW + 5_000], [b2.intentSalt, BASE_NOW + 2_000]],
+      latestGrant: b1.intentSalt,
+    });
+    for (const intent of [a1, b1, c1, b2, a2]) {
+      await expect(readSettledPurchaseAccess(intent.intentSalt)).resolves.toMatchObject({
+        ok: true, grant: { intentSalt: intent.intentSalt },
+      });
+    }
+  });
+
+  it('pending listing is ordered by due score with an exclusive future and the LIMIT clamp', async () => {
+    zadd(purchasePendingIndexKey(), String(BASE_NOW + 1), 'future');
+    zadd(purchasePendingIndexKey(), String(BASE_NOW), 'due-b');
+    zadd(purchasePendingIndexKey(), String(BASE_NOW - 5), 'due-c');
+    zadd(purchasePendingIndexKey(), String(BASE_NOW), 'due-a');
+    await expect(listPendingPurchaseIntents(BASE_NOW)).resolves.toEqual(['due-c', 'due-a', 'due-b']);
+    await expect(listPendingPurchaseIntents(BASE_NOW, 2)).resolves.toEqual(['due-c', 'due-a']);
+    await expect(listPendingPurchaseIntents(BASE_NOW, 0)).resolves.toEqual(['due-c']);
+  });
+
+  it.each([
+    ['bad intentSalt', 'conflict'],
+    ['bad txHash', 'conflict'],
+    ['unsafe settledAt', 'conflict'],
+    ['quoted', 'conflict'],
+    ['signed', 'conflict'],
+    ['failed_prebroadcast', 'conflict'],
+    ['recorded other txHash', 'conflict'],
+    ['settled with other txHash', 'conflict'],
+    ['missing', 'not_found'],
+  ] as const)('finalize gate: %s → %s without any Lua write', async (scenario, reason) => {
+    let salt: Hex = nextSalt();
+    let hash: Hex = TX_HASH;
+    let settledAt: number | undefined = BASE_NOW + 4_000;
+    if (scenario === 'bad intentSalt') salt = '0x1234' as Hex;
+    if (scenario === 'bad txHash') hash = '0x1234' as Hex;
+    if (scenario === 'unsafe settledAt') settledAt = Number.MAX_SAFE_INTEGER + 2;
+    if (scenario === 'quoted') salt = (await makeQuote()).intentSalt as Hex;
+    if (scenario === 'signed') {
+      const quote = await makeQuote();
+      await signQuote(quote);
+      salt = quote.intentSalt as Hex;
+    }
+    if (scenario === 'failed_prebroadcast' || scenario === 'recorded other txHash') {
+      const settling = await makeSettling();
+      salt = settling.intentSalt as Hex;
+      const input = { intentSalt: salt, attemptId: settling.attemptId, now: BASE_NOW + 3_000 };
+      if (scenario === 'failed_prebroadcast') await markPurchaseFailedPrebroadcast({ ...input, reason: 'prebroadcast_rejection' });
+      else await recordPurchaseTransaction({ ...input, txHash: OTHER_TX_HASH });
+    }
+    if (scenario === 'settled with other txHash') {
+      salt = (await finalizeNew(BASE_NOW + 4_000, OTHER_TX_HASH)).intentSalt as Hex;
+    }
+    const before = redisState(h.store!);
+    h.calls = [];
+    await expect(finalizeHostedPurchase({ intentSalt: salt, txHash: hash, settledAt })).resolves.toEqual({ ok: false, reason });
+    expect(h.calls).toEqual([]);
+    expect(redisState(h.store!)).toEqual(before);
+  });
+
+  it('finalize: -1 contention retries PURCHASE_FINALIZER_CONTENTION_RETRIES (4) times then conflicts; -3 is corrupt without retry', async () => {
+    const pendingSalt = (await makeSettling()).intentSalt;
+    forceFinalizeReply(-1);
+    h.calls = [];
+    await expect(finalizeHostedPurchase({ intentSalt: pendingSalt, txHash: TX_HASH, settledAt: BASE_NOW + 4_000 }))
+      .resolves.toEqual({ ok: false, reason: 'conflict' });
+    expect(scriptCount('FINALIZE_PURCHASE')).toBe(5);
+    // 未確定 intent の raced access は not_found なので毎回読むだけ (library score は読まない)。
+    expect(scriptCount('READ_LIBRARY_SCORE')).toBe(0);
+    forceFinalizeReply(-3);
+    h.calls = [];
+    await expect(finalizeHostedPurchase({ intentSalt: pendingSalt, txHash: TX_HASH, settledAt: BASE_NOW + 4_000 }))
+      .resolves.toEqual({ ok: false, reason: 'corrupt' });
+    expect(scriptCount('FINALIZE_PURCHASE')).toBe(1);
+  });
+
+  it('finalize: a digital -1/-3 whose raced access already shows this txHash returns idempotent after one EVAL', async () => {
+    const salt = (await finalizeNew(BASE_NOW + 4_000, TX_HASH)).intentSalt;
+    const access = await readSettledPurchaseAccess(salt);
+    for (const reply of [-1, -3]) {
+      forceFinalizeReply(reply);
+      h.calls = [];
+      const result = await finalizeHostedPurchase({ intentSalt: salt, txHash: TX_HASH });
+      expect(result).toEqual({
+        ok: true,
+        kind: 'idempotent',
+        ...(access.ok ? { intent: access.intent, ownership: access.ownership, purchase: access.purchase } : {}),
+      });
+      expect(scriptCount('FINALIZE_PURCHASE')).toBe(1);
+      expect(scriptCount('READ_LIBRARY_SCORE')).toBe(1);
+    }
+  });
+
+  it('finalize: success whose follow-up access read fails maps not_found to corrupt and passes other reasons through', async () => {
+    const settling = await makeSettling();
+    // Lua は成功 (1) を返すが何も書かない → 直後の access 読み取りは not_found (intent が settled でない)。
+    forceFinalizeReply(1);
+    await expect(finalizeHostedPurchase({ intentSalt: settling.intentSalt, txHash: TX_HASH, settledAt: BASE_NOW + 4_000 }))
+      .resolves.toEqual({ ok: false, reason: 'corrupt' });
+    forceFinalizeReply(0);
+    await expect(finalizeHostedPurchase({ intentSalt: settling.intentSalt, txHash: TX_HASH, settledAt: BASE_NOW + 4_000 }))
+      .resolves.toEqual({ ok: false, reason: 'not_found' });
+    // 2 は idempotent・1 は finalized (本物の Lua が 1 を返す初回と、確定済みの再実行 = 2)。
+    h.kvEval.mockImplementation(kvEvalMock);
+    await expect(finalizeHostedPurchase({ intentSalt: settling.intentSalt, txHash: TX_HASH, settledAt: BASE_NOW + 4_000 }))
+      .resolves.toMatchObject({ ok: true, kind: 'finalized' });
+    await expect(finalizeHostedPurchase({ intentSalt: settling.intentSalt, txHash: TX_HASH }))
+      .resolves.toMatchObject({ ok: true, kind: 'idempotent' });
   });
 });
