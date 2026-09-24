@@ -21,17 +21,35 @@ export function CsvPassModal({
 }) {
   const t = useTranslations('CsvPass');
   const dialogRef = useRef<HTMLDivElement>(null);
+  // inline onClose の更新で focus effect を再実行せず、ESC は最新のハンドラを読む。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
-  // ESC で閉じる + dialog に focus (a11y・QrPreviewModal と同様)。
+  // 開く時だけ focus を移し、close / unmount 時に dialog 側に残っていれば元の要素へ戻す。
+  // TODO(B-R11f): focus trap は別 PR で扱う。
   useEffect(() => {
     if (!open) return;
+    const previousFocus = document.activeElement;
+    // cleanup 時は ref が detach 済み (StrictMode の擬似 unmount も含む) なので node を捕捉する。
+    const dialog = dialogRef.current;
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     }
     window.addEventListener('keydown', onKey);
-    dialogRef.current?.focus();
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    dialog?.focus();
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      // trap が無いので、利用者が背後の入力欄などへ移した focus を opener へ奪わない。
+      // dialog 除去で body に落ちた場合と、StrictMode の擬似 cleanup で dialog 内に残る場合は戻す。
+      const active = document.activeElement;
+      if (
+        previousFocus instanceof HTMLElement &&
+        (!active || active === document.body || dialog?.contains(active))
+      ) {
+        previousFocus.focus();
+      }
+    };
+  }, [open]);
 
   if (!open) return null;
 

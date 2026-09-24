@@ -70,6 +70,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
 
 import { RegisterMode } from '@/components/RegisterMode';
 import { parseCheckoutParams } from '@/lib/url';
+import ja from '@/messages/ja.json';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const QR_KEY = 'openpay:qr-settings:v2';
@@ -724,6 +725,47 @@ describe('RegisterMode', () => {
     // × 閉じる で dialog が消える。
     await user.click(screen.getByRole('button', { name: /閉じる/ }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('B-R11e: 開いた QR の親が再描画されても外側の商品名入力から focus を奪わない', async () => {
+    const user = userEvent.setup();
+    seedReceiver();
+    render(<RegisterMode />);
+    await user.click(await screen.findByRole('button', { name: /コーヒー/ }));
+    const opener = screen.getAllByRole('button', { name: /QRコードを表示する/ })[0];
+    await user.click(opener);
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveFocus();
+
+    // 先頭はカート行 (後続はプリセット編集欄)。
+    const input = screen.getAllByRole('textbox', { name: ja.RegisterMode.productNameLabel })[0];
+    expect(dialog).not.toContainElement(input);
+    // 実際の親 state 更新で inline onClose が変わる。focus trap はこの PR の対象外。
+    await user.type(input, 'AB');
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue('コーヒーAB');
+    expect(screen.getByRole('dialog')).toBe(dialog);
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(input).toHaveFocus();
+  });
+
+  it('B-R11e: Copy URL の親 state 更新でボタンから focus を奪わず、閉じると起点へ戻す', async () => {
+    const user = userEvent.setup();
+    seedReceiver();
+    render(<RegisterMode />);
+    await user.click(await screen.findByRole('button', { name: /コーヒー/ }));
+    const opener = screen.getAllByRole('button', { name: /QRコードを表示する/ })[0];
+    await user.click(opener);
+    const copy = screen.getByRole('button', { name: ja.RegisterMode.copyUrl });
+    await user.click(copy);
+    expect(await screen.findByRole('button', { name: ja.RegisterMode.copied })).toBe(copy);
+    expect(copy).toHaveFocus();
+
+    await user.click(screen.getByRole('button', { name: ja.RegisterMode.qrModalClose }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(opener).toHaveFocus();
   });
 
   it('右サイドバーに注文サマリ (ご注文内容 + 小計/合計) を表示する', async () => {
