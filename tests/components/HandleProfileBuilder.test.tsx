@@ -267,7 +267,7 @@ describe('HandleProfileBuilder', () => {
     expect(payload().profile).not.toHaveProperty('linkLayout');
   });
 
-  it.each(['cover', 'avatar'] as const)('ミニプレビュー %s: loading 指定なし・URL 変更で reset・外れた node の遅れ error (R7a の網)', (kind) => {
+  it.each(['cover', 'avatar'] as const)('ミニプレビュー %s: loading 指定なし・URL 変更で reset・外れた node の遅れ error (R7a の網・B-R7)', (kind) => {
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.change(screen.getByLabelText('表示名'), { target: { value: 'Alice' } });
     const input = screen.getByRole('textbox', { name: kind === 'cover' ? /^カバー画像 URL/ : /^アバター画像 URL/ });
@@ -277,7 +277,8 @@ describe('HandleProfileBuilder', () => {
     fireEvent.change(input, { target: { value: a } });
     const first = mini.querySelector('img')!;
     const className = kind === 'cover' ? 'absolute inset-0 h-full w-full opacity-25 object-cover' : 'h-full w-full object-cover';
-    expect(first.outerHTML).toBe(`<img alt="" aria-hidden="true" referrerpolicy="no-referrer" class="${className}" src="${a}">`);
+    // B-R7: decoding="async" を追加。sticky で常に見えるミニプレビューなので lazy にはしない。
+    expect(first.outerHTML).toBe(`<img alt="" aria-hidden="true" referrerpolicy="no-referrer" decoding="async" class="${className}" src="${a}">`);
     const parent = first.parentElement!;
     fireEvent.error(first);
     expect(mini.querySelector('img')).toBeNull();

@@ -63,15 +63,26 @@ describe('ProductPresetManager', () => {
     expect(screen.getByDisplayValue('Tシャツ')).toBeInTheDocument();
   });
 
-  it('商品サムネは loading/referrer/失敗時 fallback の指定なし (R7a の網・統一は B-R7)', () => {
-    setup([preset({ image: 'https://images.example/preset.png' })]);
+  it('商品サムネ: no-referrer・lazy・失敗時は同寸の装飾枠・URL を直すと再試行 (R7a の網・B-R7)', () => {
+    const fns = { addPreset: vi.fn(), updatePreset: vi.fn(), removePreset: vi.fn(), movePreset: vi.fn() };
+    const { rerender } = render(
+      <ProductPresetManager presets={[preset({ image: 'https://images.example/preset.png' })]} {...fns} />,
+    );
     const image = document.querySelector('img')!;
-    expect(image.outerHTML).toBe('<img alt="" class="h-8 w-8 shrink-0 rounded object-cover" src="https://images.example/preset.png">');
+    // B-R7: レジ設定画面の URL を Referer として画像ホストへ送らない・一覧は遅延・decode は非同期。
+    expect(image.outerHTML).toBe('<img alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="h-8 w-8 shrink-0 rounded object-cover" src="https://images.example/preset.png">');
     const parent = image.parentElement!;
-    const before = parent.innerHTML;
+    const input = parent.querySelector('input')!;
     fireEvent.error(image);
-    expect(parent.innerHTML).toBe(before);
-    expect(image).toBeVisible();
+    // 壊れ画像 icon を出さず、同寸の装飾枠に置き換える (枠ごと消すと入力中に入力欄が左右に跳ねる)。
+    expect(document.querySelector('img')).toBeNull();
+    const placeholder = parent.firstElementChild!;
+    expect(placeholder.outerHTML).toBe('<span aria-hidden="true" class="h-8 w-8 shrink-0 rounded bg-slate-100"></span>');
+    // 画像と同じ箱 (幅・高さ・shrink・角丸) を持つ。
+    expect(placeholder).toHaveClass(...'h-8 w-8 shrink-0 rounded object-cover'.split(' ').filter((c) => c !== 'object-cover'));
+    expect(placeholder.nextElementSibling).toBe(input);
+    rerender(<ProductPresetManager presets={[preset({ image: 'https://images.example/preset2.png' })]} {...fns} />);
+    expect(document.querySelector('img')).toHaveAttribute('src', 'https://images.example/preset2.png');
   });
 
   it('名前編集で updatePreset を呼ぶ', () => {

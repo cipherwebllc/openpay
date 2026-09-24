@@ -69,7 +69,7 @@ function HandleLinkImage({
         height={20}
         referrerPolicy="no-referrer"
         loading="lazy"
-        decoding={undefined}
+        decoding="async"
         className="mr-1.5 h-5 w-5 shrink-0 rounded object-cover"
         onError={() => setFailedUrl(imageUrl)}
       />
@@ -129,7 +129,7 @@ export function HandleProfileView({
           aria-hidden
           referrerPolicy="no-referrer"
           loading={undefined}
-          decoding={undefined}
+          decoding="async"
           className="aspect-[3/1] max-h-[160px] w-full rounded-2xl object-cover"
           onError={() => setCoverFailed(true)}
         />
@@ -145,12 +145,13 @@ export function HandleProfileView({
       >
         {showAvatarImg ? (
           // 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制。
+          // ページ最上部 (初回表示の画面内) なので lazy にしない (カバーと同じく SSR で preload)。
           <ExternalImage
             src={profile.avatar}
             alt={config.name ? config.name : ''}
             referrerPolicy="no-referrer"
-            loading="lazy"
-            decoding={undefined}
+            loading={undefined}
+            decoding="async"
             className="h-full w-full object-cover"
             onError={() => setAvatarFailed(true)}
           />

@@ -611,7 +611,8 @@ function CreatorStorePurchaseGallery({
   return (
     <div>
       {/* 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制する。
-          パネル最上部のフルブリード (P3 ショーケース化・角丸は親の overflow-hidden)。 */}
+          パネル最上部のフルブリード (P3 ショーケース化・角丸は親の overflow-hidden)。
+          開いた直後に見える主画像なので lazy にしない。 */}
       <ExternalImage
         src={selectedImage.url}
         alt=""
@@ -620,7 +621,7 @@ function CreatorStorePurchaseGallery({
         height={360}
         referrerPolicy="no-referrer"
         loading={undefined}
-        decoding={undefined}
+        decoding="async"
         className="aspect-[16/9] max-h-80 w-full bg-slate-100 object-cover"
         onError={() => hideFailedImage(selectedImage.id)}
       />
@@ -652,7 +653,7 @@ function CreatorStorePurchaseGallery({
                   height={48}
                   referrerPolicy="no-referrer"
                   loading="lazy"
-                  decoding={undefined}
+                  decoding="async"
                   className="h-12 w-12 rounded-lg object-cover"
                   onError={() => hideFailedImage(image.id)}
                 />

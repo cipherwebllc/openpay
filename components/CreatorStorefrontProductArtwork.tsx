@@ -30,7 +30,7 @@ export function CreatorStorefrontProductArtwork({
         {...(variant === 'thumb' ? { width: 40, height: 40 } : {})}
         referrerPolicy="no-referrer"
         loading="lazy"
-        decoding={undefined}
+        decoding="async"
         className={
           variant === 'cover'
             ? 'aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]'

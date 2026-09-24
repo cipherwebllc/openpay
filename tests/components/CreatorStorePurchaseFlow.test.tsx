@@ -293,35 +293,46 @@ describe('CreatorStorePurchaseFlow', () => {
     );
   });
 
-  it('ギャラリー画像: DOM・サムネ失敗で親の選択が次へ移る・外れた node の遅れ error・大画像の失敗 (R7a の網)', () => {
+  it('ギャラリー画像: DOM・サムネ失敗で親の選択が次へ移る・外れた node の遅れ error・大画像の失敗 (R7a の網・B-R7)', () => {
     state.phase = 'idle';
     state.quote = null;
     const urls = ['https://images.example/a.png', 'https://images.example/b.png', 'https://images.example/c.png'];
     const { container } = renderFlow('ja', { ...PRODUCT, imageUrl: urls[0], galleryUrls: urls.slice(1) });
-    const large = container.querySelector('img.max-h-80')!;
-    expect(large.outerHTML).toBe(`<img alt="" aria-hidden="true" width="640" height="360" referrerpolicy="no-referrer" class="aspect-[16/9] max-h-80 w-full bg-slate-100 object-cover" src="${urls[0]}">`);
+    const largeImage = () => container.querySelector('img.max-h-80');
+    const large = largeImage()!;
+    // B-R7: decoding="async" を追加。パネル最上部の主画像なので lazy にはしない。
+    expect(large.outerHTML).toBe(`<img alt="" aria-hidden="true" width="640" height="360" referrerpolicy="no-referrer" decoding="async" class="aspect-[16/9] max-h-80 w-full bg-slate-100 object-cover" src="${urls[0]}">`);
     const firstButton = screen.getByRole('button', { name: '1' });
     const firstThumb = firstButton.querySelector('img')!;
-    expect(firstButton.innerHTML).toBe(`<img alt="" aria-hidden="true" width="48" height="48" referrerpolicy="no-referrer" loading="lazy" class="h-12 w-12 rounded-lg object-cover" src="${urls[0]}"><span class="mt-0.5 block text-center text-[10px] font-bold">1</span>`);
+    expect(firstButton.innerHTML).toBe(`<img alt="" aria-hidden="true" width="48" height="48" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="h-12 w-12 rounded-lg object-cover" src="${urls[0]}"><span class="mt-0.5 block text-center text-[10px] font-bold">1</span>`);
     expect(large.nextElementSibling).toHaveAttribute('role', 'group');
     expect(large.nextElementSibling).toHaveAttribute('aria-labelledby', 'creator-store-purchase-product-title');
     fireEvent.error(firstThumb);
-    expect(large).toHaveAttribute('src', urls[1]);
+    // B-R7: 大画像は URL ごとに node を作り直す (key={src})。
+    const largeB = largeImage()!;
+    expect(largeB).not.toBe(large);
+    expect(largeB).toHaveAttribute('src', urls[1]);
     expect(screen.queryByRole('button', { name: '1' })).toBeNull();
     expect(screen.getByRole('button', { name: '2' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.error(firstThumb); // 選択が B へ移った後に、外れた A のサムネへ遅れて error が届く。
-    expect(large).toHaveAttribute('src', urls[1]);
+    expect(largeImage()).toBe(largeB);
     const thirdButton = screen.getByRole('button', { name: '3' });
     expect(thirdButton.className).toBe('rounded-xl border bg-white p-1 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40 border-slate-200 text-slate-500 hover:border-slate-300');
     fireEvent.click(thirdButton);
-    expect(container.querySelector('img.max-h-80')).toBe(large);
-    expect(large).toHaveAttribute('src', urls[2]);
+    const largeC = largeImage()!;
+    expect(largeC).not.toBe(largeB);
+    expect(largeC).toHaveAttribute('src', urls[2]);
     expect(thirdButton.className).toBe('rounded-xl border bg-white p-1 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40 border-brand text-brand-dark ring-2 ring-brand/30');
-    fireEvent.error(large);
-    expect(large).toHaveAttribute('src', urls[1]);
+    // 選択を C へ移した後に B の (外れた) 大画像 node へ遅れて error が届いても、C の失敗にしない
+    // (R7a までは node を使い回していたため、この error が選択中の C を消していた)。
+    fireEvent.error(largeB);
+    expect(largeImage()).toBe(largeC);
+    expect(screen.getByRole('button', { name: '2' })).toBeInTheDocument();
+    fireEvent.error(largeC);
+    expect(largeImage()).toHaveAttribute('src', urls[1]);
     expect(screen.queryByRole('button', { name: '2' })).toBeNull(); // 残り 1 枚ならサムネ列を出さない。
-    fireEvent.error(large);
-    expect(container.querySelector('img.max-h-80')).toBeNull();
+    fireEvent.error(largeImage()!);
+    expect(largeImage()).toBeNull();
   });
 
   it('imageUrl がなければギャラリー先頭を大きく表示し、1 枚ではサムネイルを出さない', () => {

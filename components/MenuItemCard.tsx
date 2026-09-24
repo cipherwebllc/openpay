@@ -8,7 +8,7 @@
 // (qty / 売り切れ / オプション数) + 安定コールバックだけ** を渡すため、変化していない品のカードは
 // 再描画されない (アクセント色は親ルートの CSS 変数を継承するので prop 不要)。
 
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { UtensilsCrossed } from 'lucide-react';
 import { ExternalImage } from '@/components/ExternalImage';
@@ -40,6 +40,9 @@ function MenuItemCardImpl({
   const t = useTranslations('MobileOrder');
   const n = qty;
   const imgUrl = item.visual?.kind === 'image' ? safeHttpUrl(item.visual.url) : undefined;
+  // 第三者画像の読込失敗を壊れ画像 icon としてメニューに出さない (画像なしと同じアイコンへ戻す)。
+  // 失敗した URL だけを記録するので、店側が URL を直した live 更新では新しい画像を再試行する。
+  const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
   return (
     <li
       className={`flex flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_2px_10px_-4px_rgba(15,23,42,0.1)] transition-shadow duration-200 hover:shadow-[0_12px_28px_-12px_rgba(15,23,42,0.22)] ${
@@ -48,16 +51,17 @@ function MenuItemCardImpl({
     >
       {/* 写真 (大きく・正方形)。画像が無ければ絵文字、それも無ければアイコン。売り切れは重ね表示。 */}
       <div className="relative flex aspect-square w-full items-center justify-center bg-slate-50">
-        {imgUrl ? (
-          // 現行どおり Referer 抑制・lazy・失敗時 fallback の指定なし (方針の統一は B-R7 で行う)。
+        {imgUrl && failedImageUrl !== imgUrl ? (
+          // 任意の第三者 https 画像。referrerPolicy で OpenPay の origin も画像ホストへ渡さない。
+          // メニュー grid は画面外に続くので lazy (SSR で全商品画像を preload しない)。
           <ExternalImage
             src={imgUrl}
             alt=""
-            referrerPolicy={undefined}
-            loading={undefined}
-            decoding={undefined}
+            referrerPolicy="no-referrer"
+            loading="lazy"
+            decoding="async"
             className="h-full w-full object-cover"
-            onError={null}
+            onError={() => setFailedImageUrl(imgUrl)}
           />
         ) : item.visual?.kind === 'emoji' ? (
           <span className="text-5xl" aria-hidden>

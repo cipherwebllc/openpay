@@ -593,7 +593,9 @@ function RegisterModeContent({
                         alt=""
                         referrerPolicy="no-referrer"
                         loading="lazy"
-                        decoding={undefined}
+                        decoding="async"
+                        // 第三者画像の読込失敗を壊れ画像 icon として商品ボタンに出さない。URL を直すと
+                        // ExternalImage が node を作り直すので、この display:none は新 URL に残らない。
                         onError={(e) => {
                           e.currentTarget.style.display = 'none';
                         }}

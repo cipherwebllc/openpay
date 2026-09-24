@@ -98,6 +98,12 @@ export function MobileOrderBuilder({
   const [resolved, setResolved] = useState<Address | null>(null);
   // ③メニュー (レジ管理の読み取り専用一覧) の開閉。多いと長くなるので既定は閉じる。
   const [menuOpen, setMenuOpen] = useState(false);
+  // 編集画面の第三者画像 (アイコン/カバー/メニュー) の読込失敗を壊れ画像 icon として出さない。
+  // 失敗した URL だけを記録するので、URL を直せば新しい画像を再試行する。
+  const [failedImageUrls, setFailedImageUrls] = useState<readonly string[]>([]);
+  const markImageFailed = useCallback((url: string) => {
+    setFailedImageUrls((current) => (current.includes(url) ? current : [...current, url]));
+  }, []);
 
   // 受取先: 生 0x は入力値を最優先 (ENS 名のときだけ AddressInput の解決値を使う)。
   const effectiveReceiver = useMemo<Address | null>(() => {
@@ -351,16 +357,16 @@ export function MobileOrderBuilder({
               <Field label={t('avatarLabel')} hint={t('avatarHint')}>
                 <div className="flex items-center gap-3">
                   <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand text-lg font-bold text-white">
-                    {avatarPreview ? (
-                      // 現行どおり Referer 抑制・lazy・失敗時 fallback の指定なし (方針の統一は B-R7 で行う)。
+                    {avatarPreview && !failedImageUrls.includes(avatarPreview) ? (
+                      // 任意の第三者 https 画像。Referer (OpenPay の origin) を画像ホストへ渡さない。
                       <ExternalImage
                         src={avatarPreview}
                         alt=""
-                        referrerPolicy={undefined}
-                        loading={undefined}
-                        decoding={undefined}
+                        referrerPolicy="no-referrer"
+                        loading="lazy"
+                        decoding="async"
                         className="h-full w-full object-cover"
-                        onError={null}
+                        onError={() => markImageFailed(avatarPreview)}
                       />
                     ) : (
                       <span aria-hidden>{previewInitial}</span>
@@ -390,18 +396,23 @@ export function MobileOrderBuilder({
               {/* 店舗カバー (ヘッダー背景画像・https URL・任意)。横長プレビュー。 */}
               <Field label={t('coverLabel')} hint={t('coverHint')}>
                 <div className="space-y-2">
-                  {coverPreview && (
-                    // 現行どおり Referer 抑制・lazy・失敗時 fallback の指定なし (方針の統一は B-R7 で行う)。
-                    <ExternalImage
-                      src={coverPreview}
-                      alt=""
-                      referrerPolicy={undefined}
-                      loading={undefined}
-                      decoding={undefined}
-                      className="h-24 w-full rounded-lg object-cover"
-                      onError={null}
-                    />
-                  )}
+                  {coverPreview &&
+                    (failedImageUrls.includes(coverPreview) ? (
+                      // 読込失敗は同寸の装飾枠で置き換える。枠ごと消すと入力中の途中 URL が失敗する
+                      // たびに下の入力欄が上下に跳ねるため (打鍵ごとのレイアウト崩れへの波及を断つ)。
+                      <div aria-hidden className="h-24 w-full rounded-lg bg-slate-100" />
+                    ) : (
+                      // 任意の第三者 https 画像。
+                      <ExternalImage
+                        src={coverPreview}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        loading="lazy"
+                        decoding="async"
+                        className="h-24 w-full rounded-lg object-cover"
+                        onError={() => markImageFailed(coverPreview)}
+                      />
+                    ))}
                   <input
                     type="url"
                     value={draft.cover}
@@ -677,16 +688,16 @@ export function MobileOrderBuilder({
                         return (
                           <li key={item.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
                             <span className="flex min-w-0 items-center gap-2">
-                              {imgUrl && (
-                                // 現行どおり Referer 抑制・lazy・失敗時 fallback の指定なし (方針の統一は B-R7 で行う)。
+                              {imgUrl && !failedImageUrls.includes(imgUrl) && (
+                                // 任意の第三者 https 画像。失敗時は画像だけ隠し商品名を残す。
                                 <ExternalImage
                                   src={imgUrl}
                                   alt=""
-                                  referrerPolicy={undefined}
-                                  loading={undefined}
-                                  decoding={undefined}
+                                  referrerPolicy="no-referrer"
+                                  loading="lazy"
+                                  decoding="async"
                                   className="h-7 w-7 rounded object-cover"
-                                  onError={null}
+                                  onError={() => markImageFailed(imgUrl)}
                                 />
                               )}
                               <span className="truncate text-slate-800">{item.name}</span>

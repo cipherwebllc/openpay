@@ -68,29 +68,46 @@ beforeEach(() => {
 });
 
 describe('MobileOrderBuilder', () => {
-  it('編集画面のアバター・カバー・メニュー画像は loading/referrer/失敗時 fallback の指定なし (R7a の網・統一は B-R7)', () => {
+  it('編集画面のアバター・カバー・メニュー画像: no-referrer・lazy・失敗時は壊れ画像を出さず fallback・URL を直すと再試行 (R7a の網・B-R7)', () => {
     window.localStorage.setItem('openpay:product-presets:v1', JSON.stringify({
       presets: [{ id: 'p1', name: '画像商品', unitPrice: '500', token: 'jpyc', taxRate: 10, taxCategory: 'taxable_10', memo: null, image: 'https://images.example/menu.png', sortOrder: 0, enabled: true }],
       receipt: { day: '', n: 0 },
     }));
     const { container } = renderWithIntl(<MobileOrderBuilder />);
+    fireEvent.change(screen.getByLabelText('店名'), { target: { value: 'Cafe' } });
     const inputs = screen.getAllByPlaceholderText('https://');
     fireEvent.change(inputs[0], { target: { value: 'https://images.example/avatar.png' } });
     fireEvent.change(inputs[1], { target: { value: 'https://images.example/cover.png' } });
     fireEvent.click(screen.getByRole('button', { name: /登録中のメニュー/ }));
+    // [kind, class, 失敗後に img があった位置へ出るもの (avatar = 頭文字・cover = 同寸の装飾枠・menu = 何も出さず商品名を残す)]
     const cases = [
-      ['avatar', 'h-full w-full object-cover'],
-      ['cover', 'h-24 w-full rounded-lg object-cover'],
-      ['menu', 'h-7 w-7 rounded object-cover'],
-    ];
-    for (const [kind, className] of cases) {
-      const image = container.querySelector(`img[src="https://images.example/${kind}.png"]`)!;
-      expect(image.outerHTML).toBe(`<img alt="" class="${className}" src="https://images.example/${kind}.png">`);
-      const before = image.parentElement!.innerHTML;
+      ['avatar', 'h-full w-full object-cover', '<span aria-hidden="true">C</span>'],
+      // 入力欄の真上なので、枠ごと消すと打鍵のたびに入力欄が跳ねる → 画像と同じ箱 (h-24 w-full rounded-lg) を残す。
+      ['cover', 'h-24 w-full rounded-lg object-cover', '<div aria-hidden="true" class="h-24 w-full rounded-lg bg-slate-100"></div>'],
+      ['menu', 'h-7 w-7 rounded object-cover', ''],
+    ] as const;
+    // 右のライブプレビュー (MobileOrderView) にも同じ URL の画像があるので、編集欄の画像を alt+class で特定する。
+    const editorImage = (url: string, className: string) =>
+      container.querySelector(`img[alt=""][class="${className}"][src="${url}"]`);
+    for (const [kind, className, fallback] of cases) {
+      const image = editorImage(`https://images.example/${kind}.png`, className)!;
+      // B-R7: 編集画面の URL を Referer として画像ホストへ送らない・画面外なら遅延・decode は非同期。
+      expect(image.outerHTML).toBe(`<img alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="${className}" src="https://images.example/${kind}.png">`);
+      const parent = image.parentElement!;
+      const before = parent.innerHTML;
       fireEvent.error(image);
-      expect(image.parentElement!.innerHTML).toBe(before);
-      expect(image).toBeVisible();
+      expect(editorImage(`https://images.example/${kind}.png`, className)).toBeNull();
+      expect(parent.innerHTML).toBe(before.replace(image.outerHTML, fallback));
     }
+    // cover の装飾枠は画像と同じ箱 (高さ・幅・角丸) を持ち、失敗しても入力欄の位置が変わらない。
+    const coverPlaceholder = inputs[1].previousElementSibling!;
+    const imageBox = cases[1][1].split(' ').filter((c) => c !== 'object-cover');
+    expect(coverPlaceholder).toHaveClass(...imageBox);
+    // URL を直すと (失敗した URL だけを記録しているので) 新しい画像を再試行する。
+    fireEvent.change(inputs[0], { target: { value: 'https://images.example/avatar2.png' } });
+    fireEvent.change(inputs[1], { target: { value: 'https://images.example/cover2.png' } });
+    expect(editorImage('https://images.example/avatar2.png', cases[0][1])).not.toBeNull();
+    expect(editorImage('https://images.example/cover2.png', cases[1][1])).not.toBeNull();
   });
 
   it('D3: menu toggle accessible name contains the visible item count', () => {

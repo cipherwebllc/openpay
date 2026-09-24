@@ -10,10 +10,11 @@ import { HandleProfileView } from '@/components/HandleProfile';
 import { MenuItemCard } from '@/components/MenuItemCard';
 import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
 
-// 第三者画像 (ExternalImage) の呼び出しごとの現行挙動を DOM で固定する (R7a の抽出前に書いた網)。
+// 第三者画像 (ExternalImage) の呼び出しごとの挙動を DOM で固定する (R7a の抽出前に書いた網)。
 // 描画部品は mock しない。属性の有無・順序・class・失敗時の fallback・URL 切替と遅れて届く
-// 旧画像の error を、抽出前のコードで通ることを確認した期待値のまま保つ。
-// no-referrer・lazy・fallback の一律適用 (B-R7) をするときは、ここの期待値を差分として意図して更新する。
+// 旧画像の error を固定する。R7a からの意図した差分は B-R7 (D8) の方針だけ:
+//   全呼び出しに decoding="async"・メニュー grid に no-referrer/lazy/fallback・ページ最上部の
+//   プロフ avatar は lazy をやめる (SSR で preload)・URL が変わると <img> node を作り直す (key={src})。
 const A = 'https://images.example/a.png';
 const B = 'https://images.example/b.png';
 const config: HandleTipConfig = {
@@ -42,7 +43,7 @@ describe('external image consumer policies', () => {
     const imageClass = variant === 'thumb'
       ? 'h-10 w-10 shrink-0 rounded-xl object-cover'
       : 'aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]';
-    expect(container.innerHTML).toBe(`<img alt="" aria-hidden="true"${dimensions} referrerpolicy="no-referrer" loading="lazy" class="${imageClass}" src="${A}">`);
+    expect(container.innerHTML).toBe(`<img alt="" aria-hidden="true"${dimensions} referrerpolicy="no-referrer" loading="lazy" decoding="async" class="${imageClass}" src="${A}">`);
     fireEvent.error(first);
     const fallbackClass = variant === 'thumb'
       ? 'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl bg-slate-100'
@@ -69,13 +70,17 @@ describe('external image consumer policies', () => {
       : '<span aria-hidden="true" class="flex aspect-[4/3] w-full items-center justify-center text-4xl bg-white/10">🎁</span>');
   });
 
-  it('storefront: 失敗前の URL 変更は同じ img node を使い回し、その node の error は現在の URL を失敗扱いにする', () => {
+  it('storefront: 失敗前の URL 変更は img node を作り直し、旧 node に遅れて届く error を新 URL の失敗にしない (B-R7)', () => {
     const { container, rerender } = renderWithIntl(<CreatorStorefrontProductArtwork imageUrl={A} inverted={false} />);
     const image = container.querySelector('img')!;
     rerender(<CreatorStorefrontProductArtwork imageUrl={B} inverted={false} />);
-    expect(container.querySelector('img')).toBe(image);
-    // error event は URL を持たない: 使い回した node に届いた error は現行では B の失敗になる。
+    const second = container.querySelector('img')!;
+    expect(second).not.toBe(image);
+    expect(second).toHaveAttribute('src', B);
+    // error event は URL を持たない: R7a までは使い回した node の error が B の失敗になっていた。
     fireEvent.error(image);
+    expect(container.querySelector('img')).toBe(second);
+    fireEvent.error(second);
     expect(container.textContent).toBe('✦');
     rerender(<CreatorStorefrontProductArtwork imageUrl={A} inverted={false} />);
     expect(container.querySelector('img')).toHaveAttribute('src', A);
@@ -85,8 +90,9 @@ describe('external image consumer policies', () => {
     const { container, rerender } = renderWithIntl(<HandleProfileView config={config} profile={{ [kind]: A }} />);
     const first = container.querySelector('img')!;
     expect(first.outerHTML).toBe(kind === 'cover'
-      ? `<img alt="" aria-hidden="true" referrerpolicy="no-referrer" class="aspect-[3/1] max-h-[160px] w-full rounded-2xl object-cover" src="${A}">`
-      : `<img alt="Alice" referrerpolicy="no-referrer" loading="lazy" class="h-full w-full object-cover" src="${A}">`);
+      ? `<img alt="" aria-hidden="true" referrerpolicy="no-referrer" decoding="async" class="aspect-[3/1] max-h-[160px] w-full rounded-2xl object-cover" src="${A}">`
+      // avatar はページ最上部なので lazy をやめた (B-R7)。
+      : `<img alt="Alice" referrerpolicy="no-referrer" decoding="async" class="h-full w-full object-cover" src="${A}">`);
     const parent = first.parentElement!;
     fireEvent.error(first);
     expect(container.querySelector('img')).toBeNull();
@@ -99,11 +105,14 @@ describe('external image consumer policies', () => {
     // storefront の失敗 URL 記録と違い、プロフは URL が変わるたびに失敗状態を reset する (A に戻すと再試行)。
     rerender(<HandleProfileView config={config} profile={{ [kind]: A }} />);
     expect(container.querySelector('img')).toHaveAttribute('src', A);
-    // 失敗前の URL 変更は同じ node を使い回す (key で作り直さない)。
+    // 失敗前の URL 変更も node を作り直す (B-R7)。旧 node に遅れて届く error は B に波及しない。
     const live = container.querySelector('img')!;
     rerender(<HandleProfileView config={config} profile={{ [kind]: B }} />);
-    expect(container.querySelector('img')).toBe(live);
-    expect(live).toHaveAttribute('src', B);
+    const next = container.querySelector('img')!;
+    expect(next).not.toBe(live);
+    expect(next).toHaveAttribute('src', B);
+    fireEvent.error(live);
+    expect(container.querySelector('img')).toBe(next);
   });
 
   it.each(['🌐', undefined])('profile link 画像 (emoji=%s): fallback と A/B/遅れ A', (emoji) => {
@@ -111,7 +120,7 @@ describe('external image consumer policies', () => {
     const { rerender } = renderWithIntl(<HandleProfileView config={config} profile={profile(A)} />);
     const link = screen.getByRole('link', { name: 'Site' });
     const first = link.querySelector('img')!;
-    expect(link.innerHTML).toBe(`<img alt="" aria-hidden="true" width="20" height="20" referrerpolicy="no-referrer" loading="lazy" class="mr-1.5 h-5 w-5 shrink-0 rounded object-cover" src="${A}">Site`);
+    expect(link.innerHTML).toBe(`<img alt="" aria-hidden="true" width="20" height="20" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="mr-1.5 h-5 w-5 shrink-0 rounded object-cover" src="${A}">Site`);
     fireEvent.error(first);
     expect(link.innerHTML).toBe(emoji ? '<span class="mr-1.5" aria-hidden="true">🌐</span>Site' : 'Site');
     rerender(<HandleProfileView config={config} profile={profile(B)} />);
@@ -124,19 +133,31 @@ describe('external image consumer policies', () => {
     expect(link.querySelector('img')).toBeNull();
   });
 
-  it('menu grid: loading/referrer/fallback の指定なしを保つ (統一は B-R7)', () => {
+  it('menu grid: no-referrer・lazy・失敗時は画像なしと同じアイコンへ戻す・URL を直すと再試行 (B-R7)', () => {
     const item = { id: 'a', name: 'Coffee', price: '500', visual: { kind: 'image' as const, url: A } };
     const { container, rerender } = renderWithIntl(<MenuItemCard {...menuProps} item={item} />);
     const image = container.querySelector('img')!;
-    expect(image.outerHTML).toBe(`<img alt="" class="h-full w-full object-cover" src="${A}">`);
-    expect(image.parentElement?.children).toHaveLength(1);
+    expect(image.outerHTML).toBe(`<img alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="h-full w-full object-cover" src="${A}">`);
+    const frame = image.parentElement!;
+    expect(frame.children).toHaveLength(1);
     fireEvent.error(image);
-    expect(container.querySelector('img')).toBe(image);
+    // 壊れ画像 icon の代わりに、画像未設定の商品と同じ UtensilsCrossed (aria-hidden) を出す。
+    expect(container.querySelector('img')).toBeNull();
+    expect(frame.children).toHaveLength(1);
+    expect(frame.firstElementChild?.tagName.toLowerCase()).toBe('svg');
+    expect(frame.firstElementChild).toHaveAttribute('aria-hidden', 'true');
+    expect(frame.firstElementChild).toHaveClass('h-8', 'w-8', 'text-slate-300');
     rerender(<MenuItemCard {...menuProps} item={{ ...item, visual: { kind: 'image', url: B } }} />);
-    expect(container.querySelector('img')).toBe(image);
-    expect(image).toHaveAttribute('src', B);
-    fireEvent.error(image);
-    expect(image).toBeVisible();
+    const second = container.querySelector('img')!;
+    expect(second).toHaveAttribute('src', B);
+    fireEvent.error(image); // 外れた A の node に遅れて届く error は B に波及しない。
+    expect(container.querySelector('img')).toBe(second);
+    // 失敗前の URL 変更も node を作り直す。
+    const C = 'https://images.example/c.png';
+    rerender(<MenuItemCard {...menuProps} item={{ ...item, visual: { kind: 'image', url: C } }} />);
+    const third = container.querySelector('img')!;
+    expect(third).not.toBe(second);
+    expect(third).toHaveAttribute('src', C);
   });
 
   it('SSR の HTML (公開ページの初回描画) も同じ属性・順序で出す', () => {
@@ -146,23 +167,25 @@ describe('external image consumer policies', () => {
         profile={{ cover: A, avatar: B, links: [{ label: 'Site', url: 'https://example.com', imageUrl: A }] }}
       />,
     )).toEqual([
-      // lazy でないカバーだけ React が preload を出す (lazy の付与 = B-R7 でこの行が消える)。
+      // lazy でない画像だけ React が preload を出す: ページ最上部のカバーと (B-R7 で lazy をやめた)
+      // アバター。preload にも no-referrer が載る。リンク画像は lazy のまま preload なし。
       `<link rel="preload" as="image" href="${A}" referrerPolicy="no-referrer"/>`,
-      `<img src="${A}" alt="" aria-hidden="true" referrerPolicy="no-referrer" class="aspect-[3/1] max-h-[160px] w-full rounded-2xl object-cover"/>`,
-      `<img src="${B}" alt="Alice" referrerPolicy="no-referrer" loading="lazy" class="h-full w-full object-cover"/>`,
-      `<img src="${A}" alt="" aria-hidden="true" width="20" height="20" referrerPolicy="no-referrer" loading="lazy" class="mr-1.5 h-5 w-5 shrink-0 rounded object-cover"/>`,
+      `<link rel="preload" as="image" href="${B}" referrerPolicy="no-referrer"/>`,
+      `<img src="${A}" alt="" aria-hidden="true" referrerPolicy="no-referrer" decoding="async" class="aspect-[3/1] max-h-[160px] w-full rounded-2xl object-cover"/>`,
+      `<img src="${B}" alt="Alice" referrerPolicy="no-referrer" decoding="async" class="h-full w-full object-cover"/>`,
+      `<img src="${A}" alt="" aria-hidden="true" width="20" height="20" referrerPolicy="no-referrer" loading="lazy" decoding="async" class="mr-1.5 h-5 w-5 shrink-0 rounded object-cover"/>`,
     ]);
     expect(ssrTags(<CreatorStorefrontProductArtwork imageUrl={A} inverted={false} />)).toEqual([
-      `<img src="${A}" alt="" aria-hidden="true" width="40" height="40" referrerPolicy="no-referrer" loading="lazy" class="h-10 w-10 shrink-0 rounded-xl object-cover"/>`,
+      `<img src="${A}" alt="" aria-hidden="true" width="40" height="40" referrerPolicy="no-referrer" loading="lazy" decoding="async" class="h-10 w-10 shrink-0 rounded-xl object-cover"/>`,
     ]);
     expect(ssrTags(<CreatorStorefrontProductArtwork imageUrl={A} inverted={false} variant="cover" />)).toEqual([
-      `<img src="${A}" alt="" aria-hidden="true" referrerPolicy="no-referrer" loading="lazy" class="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"/>`,
+      `<img src="${A}" alt="" aria-hidden="true" referrerPolicy="no-referrer" loading="lazy" decoding="async" class="aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"/>`,
     ]);
     expect(ssrTags(
       <MenuItemCard {...menuProps} item={{ id: 'a', name: 'Coffee', price: '500', visual: { kind: 'image', url: A } }} />,
     )).toEqual([
-      `<link rel="preload" as="image" href="${A}"/>`,
-      `<img src="${A}" alt="" class="h-full w-full object-cover"/>`,
+      // B-R7: lazy になったので preload を出さず、Referer も送らない。
+      `<img src="${A}" alt="" referrerPolicy="no-referrer" loading="lazy" decoding="async" class="h-full w-full object-cover"/>`,
     ]);
   });
 });
