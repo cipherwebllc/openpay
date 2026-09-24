@@ -4,11 +4,11 @@
 import { NextResponse } from 'next/server';
 import { kvLrange, kvLlen } from '@/lib/kv';
 import { logger } from '@/lib/logger';
+import { PAYMENT_LOG_KV_KEY } from '@/lib/paymentLog';
 import { requireAdminAuth } from '../_auth';
 
 export const runtime = 'nodejs';
 
-const KV_KEY = 'openpay:payments:log';
 const EXPORT_MAX_WINDOW = 10_000;
 
 export async function GET(req: Request): Promise<NextResponse> {
@@ -35,8 +35,8 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
 
   const [range, len] = await Promise.all([
-    kvLrange(KV_KEY, from, to),
-    kvLlen(KV_KEY),
+    kvLrange(PAYMENT_LOG_KV_KEY, from, to),
+    kvLlen(PAYMENT_LOG_KV_KEY),
   ]);
 
   if (!range.ok) {

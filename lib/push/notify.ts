@@ -12,6 +12,8 @@ export type PaymentNotificationKind = 'payment' | 'order' | 'store';
 export const PUSH_NOTIFY_PENDING_TTL_SEC = 24 * 60 * 60;
 export const PUSH_NOTIFY_COALESCE_TTL_SEC = 60;
 
+// lib/kv の kvGetDel (native GETDEL) と結果は同じだが KV へ送る command が変わるため据え置く
+// (切り替えるなら通信の変更として B-R6c・tests/lib/pushNotify-storage-pinning)。
 const GETDEL_SCRIPT = `
 local raw = redis.call('GET', KEYS[1])
 redis.call('DEL', KEYS[1])
