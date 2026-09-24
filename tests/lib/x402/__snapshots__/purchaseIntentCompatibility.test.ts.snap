@@ -605,6 +605,468 @@ exports[`Lua call sites: script, KEYS and ARGV order > recordPurchaseTransaction
 }
 `;
 
+exports[`R3d pins: digital reconcile call sites per branch > RPC failure: lease CAS then an indeterminate reschedule CAS (never terminal) 1`] = `
+{
+  "evals": [
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000062000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"settling","attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000192000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000102000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"indeterminate","lastCheckedAt":1800000072000,"indeterminateAt":1800000072000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000102000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+  ],
+  "gets": [
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+  ],
+  "sets": [],
+}
+`;
+
+exports[`R3d pins: digital reconcile call sites per branch > batch: not_found and corrupt members are quarantined, a storage failure is counted, and the summary shape is kept 1`] = `
+{
+  "evals": [
+    {
+      "args": [
+        "-inf",
+        "1800000072000",
+        "LIMIT",
+        "0",
+        "10",
+      ],
+      "keys": [
+        "store:intent:pending",
+      ],
+      "name": "LIST_PENDING_INTENTS",
+    },
+    {
+      "args": [
+        "table",
+        "none",
+        "zset",
+        "1800000072000",
+        "-1",
+        "0x9999999999999999999999999999999999999999999999999999999999999999",
+        "1",
+      ],
+      "keys": [
+        "store:intent:pending",
+        "store:intent:quarantine",
+      ],
+      "name": "QUARANTINE_PENDING_MEMBER",
+    },
+    {
+      "args": [
+        "table",
+        "none",
+        "zset",
+        "1800000072000",
+        "-1",
+        "0x8888888888888888888888888888888888888888888888888888888888888888",
+        "1",
+      ],
+      "keys": [
+        "store:intent:pending",
+        "store:intent:quarantine",
+      ],
+      "name": "QUARANTINE_PENDING_MEMBER",
+    },
+    {
+      "args": [
+        "table",
+        "none",
+        "zset",
+        "1800000072000",
+        "-1",
+        "not-a-salt",
+        "1",
+      ],
+      "keys": [
+        "store:intent:pending",
+        "store:intent:quarantine",
+      ],
+      "name": "QUARANTINE_PENDING_MEMBER",
+    },
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000062000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"settling","attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000192000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+  ],
+  "gets": [
+    "store:intent:0x9999999999999999999999999999999999999999999999999999999999999999",
+    "store:intent:0x8888888888888888888888888888888888888888888888888888888888888888",
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+  ],
+  "sets": [],
+}
+`;
+
+exports[`R3d pins: digital reconcile call sites per branch > finalized unused expiry: failed_prebroadcast CAS removes pending, then the JPYC rail release for the parent 1`] = `
+{
+  "evals": [
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000062000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"settling","attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000720000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000720000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000720000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000720000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000720000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000720000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"failed_prebroadcast","failedAt":1800000600000,"failureReason":"authorization_expired_unused"}",
+        "remove",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000600000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+  ],
+  "gets": [
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+    "store:rail:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+  ],
+  "sets": [],
+}
+`;
+
+exports[`R3d pins: digital reconcile call sites per branch > nonce reconstruction mismatch: corrupt, lease CAS then an indeterminate reschedule, no chain call 1`] = `
+{
+  "evals": [
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000062000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"0c7f4e43b74172384fd8a4865264d2a9eb06ddf09f9291132ade465d6ce5862c","reservationToken":"reservation-token","signedAt":1800000001000,"state":"settling","attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"0c7f4e43b74172384fd8a4865264d2a9eb06ddf09f9291132ade465d6ce5862c","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000192000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"0c7f4e43b74172384fd8a4865264d2a9eb06ddf09f9291132ade465d6ce5862c","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000102000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"0c7f4e43b74172384fd8a4865264d2a9eb06ddf09f9291132ade465d6ce5862c","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"indeterminate","lastCheckedAt":1800000072000,"indeterminateAt":1800000072000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000102000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+  ],
+  "gets": [
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+  ],
+  "sets": [],
+}
+`;
+
+exports[`R3d pins: digital reconcile call sites per branch > page bound: MAX_PAGES pages, then the next cursor is persisted in the reschedule CAS 1`] = `
+{
+  "evals": [
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000062000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"settling","attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000192000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000102000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"indeterminate","lastCheckedAt":1800000072000,"reconcileFromBlock":"50000","indeterminateAt":1800000072000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000102000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+  ],
+  "gets": [
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+  ],
+  "sets": [],
+}
+`;
+
+exports[`R3d pins: digital reconcile call sites per branch > signed with a consumed authorization: lease CAS, consumed→indeterminate CAS, bounded scan, reschedule CAS 1`] = `
+{
+  "evals": [
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000062000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"signed","attemptId":"dc277178b4fb7855fd718b3b1eaae2cb76b238488157062238c1497ac4342dae","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"signed","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000192000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"signed","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"indeterminate","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000,"attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000072000,"leaseUntil":1800000072000,"indeterminateAt":1800000072000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000192000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"indeterminate","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000,"attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000072000,"leaseUntil":1800000072000,"indeterminateAt":1800000072000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000102000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"indeterminate","attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000072000,"leaseUntil":1800000072000,"indeterminateAt":1800000072000,"lastCheckedAt":1800000072000,"reconcileFromBlock":"10000"}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "1800000102000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:intent:pending",
+      ],
+      "name": "CAS_PENDING_INTENT",
+    },
+  ],
+  "gets": [
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+  ],
+  "sets": [],
+}
+`;
+
+exports[`R3d pins: digital reconcile call sites per branch > terminal settled intent: the settled record is re-finalized (repair) without a lease CAS 1`] = `
+{
+  "evals": [
+    {
+      "args": [
+        "0",
+        "table",
+        "-3",
+        "settled",
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435",
+        "-1",
+        "2",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000062000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"settled","txHash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","settledAt":1800000003000}",
+        "settling",
+        "indeterminate",
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"chainId":80002,"txHash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","purchasedAt":1800000003000}",
+        "{"version":1,"policy":"all-purchased-revisions","payer":"0x1111111111111111111111111111111111111111","resourceId":"creator-item","firstPurchasedAt":1800000003000,"updatedAt":1800000003000,"grants":[{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"chainId":80002,"txHash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","purchasedAt":1800000003000}],"latestGrant":{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"chainId":80002,"txHash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","purchasedAt":1800000003000}}",
+        "1",
+        "all-purchased-revisions",
+        "0x1111111111111111111111111111111111111111",
+        "creator-item",
+        "1800000003000",
+        "1800000003000",
+        "1800000003000",
+        "{"version":1,"payer":"0x1111111111111111111111111111111111111111","resourceId":"creator-item","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","token":"0x2222222222222222222222222222222222222222","forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"chainId":80002,"txHash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","purchasedAt":1800000003000}",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","resourceId":"creator-item","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"d78693d9389f8323a3faa47a1e3175796c4c6429e2cd1fb0394f71dbab7161df","nextReconcileAt":1800000062000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0x2222222222222222222222222222222222222222","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","validAfter":"0","validBefore":"1800000600","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","signatureFingerprint":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","resourceId":"creator-item","contentRevision":3,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"880357977b8a03297dba52302329feef861ee77d560683f4bdaa3c5b36583435","reservationToken":"reservation-token","signedAt":1800000001000,"state":"settled","txHash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","settledAt":1800000003000}",
+        "1",
+        "{"version":1,"policy":"all-purchased-revisions","payer":"0x1111111111111111111111111111111111111111","resourceId":"creator-item","firstPurchasedAt":1800000003000,"updatedAt":1800000003000,"grants":[{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"chainId":80002,"txHash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","purchasedAt":1800000003000}],"latestGrant":{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"chainId":80002,"txHash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","purchasedAt":1800000003000}}",
+        "{"version":1,"payer":"0x1111111111111111111111111111111111111111","resourceId":"creator-item","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"100","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"2","token":"0x2222222222222222222222222222222222222222","forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000001","contentRevision":3,"contentRef":"store:hosted:content:creator-item:3","metadata":{"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"Original title","desc":"Original description","emoji":"📦","priceJpyc":"100","contentKind":"url","label":"download"},"chainId":80002,"txHash":"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nonce":"0x92c630eb43f06cd53b742641667ae782220eb9e9110056830c9a39b763bd0fea","purchasedAt":1800000003000}",
+        "",
+        "none",
+        "zset",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+        "store:own:0x1111111111111111111111111111111111111111:creator-item",
+        "store:lib:0x1111111111111111111111111111111111111111",
+        "store:purchase:80002:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "store:intent:pending",
+      ],
+      "name": "FINALIZE_PURCHASE",
+    },
+    {
+      "args": [
+        "creator-item",
+      ],
+      "keys": [
+        "store:lib:0x1111111111111111111111111111111111111111",
+      ],
+      "name": "READ_LIBRARY_SCORE",
+    },
+  ],
+  "gets": [
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+    "store:own:0x1111111111111111111111111111111111111111:creator-item",
+    "store:purchase:80002:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000001",
+    "store:own:0x1111111111111111111111111111111111111111:creator-item",
+    "store:purchase:80002:0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  ],
+  "sets": [],
+}
+`;
+
 exports[`license Lua call sites: licenseLuaVariant script and trailing ARGV[#ARGV] context > claimSignedPurchaseIntent / claimPurchaseSettlement / markPurchaseFailedPrebroadcast (claim, settle, fail hooks) 1`] = `
 {
   "evals": [
@@ -793,6 +1255,177 @@ exports[`license Lua call sites: licenseLuaVariant script and trailing ARGV[#ARG
     },
   ],
   "gets": [
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000007",
+    "store:own:0x1111111111111111111111111111111111111111:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "store:purchase:80002:0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000007",
+    "store:own:0x1111111111111111111111111111111111111111:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "store:purchase:80002:0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  ],
+  "sets": [],
+}
+`;
+
+exports[`license Lua call sites: licenseLuaVariant script and trailing ARGV[#ARGV] context > reconcile dispatch: license finalized expiry releases through the license CAS with evidence (no default chain) 1`] = `
+{
+  "evals": [
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"22f3936ff9a74c5dac428aa239199e75d5615217dc7cf26efae91a24693a9336","nextReconcileAt":1800000062000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","validAfter":"0","validBefore":"1800000600","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","signatureFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"2c66c66e1a9040ea3e294e264e1698d60a747c1fee729944af3976c23a17f774","signedAt":1800000001000,"state":"settling","attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"22f3936ff9a74c5dac428aa239199e75d5615217dc7cf26efae91a24693a9336","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","validAfter":"0","validBefore":"1800000600","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","signatureFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"2c66c66e1a9040ea3e294e264e1698d60a747c1fee729944af3976c23a17f774","signedAt":1800000001000,"attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000007",
+        "1800000192000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+        "{"hook":"cas","now":1800000072000,"definition":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"identity":{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","productId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","payer":"0x1111111111111111111111111111111111111111","gen":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7","paymentKey":"0xd3bce2496ae85df00d06c6116a6d2598fac4eb3c9c07566e0c131c22277ac0d8"},"stockKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:stock","reservationKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:reservation:0x0000000000000000000000000000000000000000000000000000000000000007","quotaKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:payer:0x1111111111111111111111111111111111111111","holdIndex":"store:license:holds","obligationIndex":"store:license:ob:index","dueIndex":"store:license:due","obligationKey":"store:license:ob:0xd3bce2496ae85df00d06c6116a6d2598fac4eb3c9c07566e0c131c22277ac0d8"}",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000007",
+        "store:intent:pending",
+      ],
+      "name": "license(LICENSE_RECONCILE_CAS)",
+    },
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"22f3936ff9a74c5dac428aa239199e75d5615217dc7cf26efae91a24693a9336","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","validAfter":"0","validBefore":"1800000600","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","signatureFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"2c66c66e1a9040ea3e294e264e1698d60a747c1fee729944af3976c23a17f774","signedAt":1800000001000,"attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"22f3936ff9a74c5dac428aa239199e75d5615217dc7cf26efae91a24693a9336","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","validAfter":"0","validBefore":"1800000600","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","signatureFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"2c66c66e1a9040ea3e294e264e1698d60a747c1fee729944af3976c23a17f774","signedAt":1800000001000,"attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000072000,"leaseUntil":1800000072000,"state":"failed_prebroadcast","failedAt":1800000072000,"failureReason":"authorization_expired_unused"}",
+        "remove",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000007",
+        "1800000192000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+        "{"hook":"cas","now":1800000072000,"definition":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"identity":{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","productId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","payer":"0x1111111111111111111111111111111111111111","gen":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7","paymentKey":"0xd3bce2496ae85df00d06c6116a6d2598fac4eb3c9c07566e0c131c22277ac0d8"},"stockKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:stock","reservationKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:reservation:0x0000000000000000000000000000000000000000000000000000000000000007","quotaKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:payer:0x1111111111111111111111111111111111111111","holdIndex":"store:license:holds","obligationIndex":"store:license:ob:index","dueIndex":"store:license:due","obligationKey":"store:license:ob:0xd3bce2496ae85df00d06c6116a6d2598fac4eb3c9c07566e0c131c22277ac0d8","evidence":{"blockNumber":"12500","blockHash":"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","timestamp":"1800000601","authorizationUsed":false}}",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000007",
+        "store:intent:pending",
+      ],
+      "name": "license(LICENSE_RECONCILE_CAS)",
+    },
+  ],
+  "gets": [
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000007",
+  ],
+  "sets": [],
+}
+`;
+
+exports[`license Lua call sites: licenseLuaVariant script and trailing ARGV[#ARGV] context > reconcile dispatch: license lease CAS, adoption CAS and the finalize callback (settled JSON has no reconcile lease) 1`] = `
+{
+  "evals": [
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"22f3936ff9a74c5dac428aa239199e75d5615217dc7cf26efae91a24693a9336","nextReconcileAt":1800000062000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","validAfter":"0","validBefore":"1800000600","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","signatureFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"2c66c66e1a9040ea3e294e264e1698d60a747c1fee729944af3976c23a17f774","signedAt":1800000001000,"state":"settling","attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"22f3936ff9a74c5dac428aa239199e75d5615217dc7cf26efae91a24693a9336","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","validAfter":"0","validBefore":"1800000600","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","signatureFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"2c66c66e1a9040ea3e294e264e1698d60a747c1fee729944af3976c23a17f774","signedAt":1800000001000,"attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000007",
+        "1800000192000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+        "{"hook":"cas","now":1800000072000,"definition":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"identity":{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","productId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","payer":"0x1111111111111111111111111111111111111111","gen":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7","paymentKey":"0xd3bce2496ae85df00d06c6116a6d2598fac4eb3c9c07566e0c131c22277ac0d8"},"stockKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:stock","reservationKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:reservation:0x0000000000000000000000000000000000000000000000000000000000000007","quotaKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:payer:0x1111111111111111111111111111111111111111","holdIndex":"store:license:holds","obligationIndex":"store:license:ob:index","dueIndex":"store:license:due","obligationKey":"store:license:ob:0xd3bce2496ae85df00d06c6116a6d2598fac4eb3c9c07566e0c131c22277ac0d8"}",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000007",
+        "store:intent:pending",
+      ],
+      "name": "license(LICENSE_RECONCILE_CAS)",
+    },
+    {
+      "args": [
+        "0",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"22f3936ff9a74c5dac428aa239199e75d5615217dc7cf26efae91a24693a9336","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","validAfter":"0","validBefore":"1800000600","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","signatureFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"2c66c66e1a9040ea3e294e264e1698d60a747c1fee729944af3976c23a17f774","signedAt":1800000001000,"attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000002000,"leaseUntil":1800000062000,"state":"settling","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000}",
+        "-1",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"22f3936ff9a74c5dac428aa239199e75d5615217dc7cf26efae91a24693a9336","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","validAfter":"0","validBefore":"1800000600","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","signatureFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"2c66c66e1a9040ea3e294e264e1698d60a747c1fee729944af3976c23a17f774","signedAt":1800000001000,"attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000072000,"leaseUntil":1800000072000,"state":"indeterminate","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000,"txHash":"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","indeterminateAt":1800000072000}",
+        "keep",
+        "remove",
+        "0x0000000000000000000000000000000000000000000000000000000000000007",
+        "1800000192000",
+        "1",
+        "none",
+        "zset",
+        "table",
+        "-2",
+        "{"hook":"cas","now":1800000072000,"definition":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"identity":{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","productId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","payer":"0x1111111111111111111111111111111111111111","gen":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7","paymentKey":"0xd3bce2496ae85df00d06c6116a6d2598fac4eb3c9c07566e0c131c22277ac0d8"},"stockKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:stock","reservationKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:reservation:0x0000000000000000000000000000000000000000000000000000000000000007","quotaKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:payer:0x1111111111111111111111111111111111111111","holdIndex":"store:license:holds","obligationIndex":"store:license:ob:index","dueIndex":"store:license:due","obligationKey":"store:license:ob:0xd3bce2496ae85df00d06c6116a6d2598fac4eb3c9c07566e0c131c22277ac0d8"}",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000007",
+        "store:intent:pending",
+      ],
+      "name": "license(LICENSE_RECONCILE_CAS)",
+    },
+    {
+      "args": [
+        "0",
+        "table",
+        "-3",
+        "settled",
+        "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "2c66c66e1a9040ea3e294e264e1698d60a747c1fee729944af3976c23a17f774",
+        "-1",
+        "2",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"22f3936ff9a74c5dac428aa239199e75d5615217dc7cf26efae91a24693a9336","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","validAfter":"0","validBefore":"1800000600","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","signatureFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"2c66c66e1a9040ea3e294e264e1698d60a747c1fee729944af3976c23a17f774","signedAt":1800000001000,"attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000072000,"leaseUntil":1800000072000,"state":"indeterminate","reconcileLeaseId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","reconcileLeaseUntil":1800000192000,"txHash":"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","indeterminateAt":1800000072000}",
+        "settling",
+        "indeterminate",
+        "0x0000000000000000000000000000000000000000000000000000000000000007",
+        "{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"chainId":80002,"txHash":"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","purchasedAt":1800000072000}",
+        "{"version":1,"policy":"all-purchased-revisions","payer":"0x1111111111111111111111111111111111111111","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","firstPurchasedAt":1800000072000,"updatedAt":1800000072000,"grants":[{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"chainId":80002,"txHash":"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","purchasedAt":1800000072000}],"latestGrant":{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"chainId":80002,"txHash":"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","purchasedAt":1800000072000}}",
+        "1",
+        "all-purchased-revisions",
+        "0x1111111111111111111111111111111111111111",
+        "h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "1800000072000",
+        "1800000072000",
+        "1800000072000",
+        "{"version":1,"payer":"0x1111111111111111111111111111111111111111","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"chainId":80002,"txHash":"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","purchasedAt":1800000072000}",
+        "{"version":1,"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","metadata":{"productKind":"license","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"owner":"0x4444444444444444444444444444444444444444","payTo":"0x4444444444444444444444444444444444444444","title":"License","priceJpyc":"1000","contentKind":"text","label":"prompt"},"payerHint":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","deploymentVersion":"creator-store-jpyc-forwarder-v1","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","anchorBlock":"10000","createdAt":1800000000000,"quoteExpiresAt":1800000600000,"authorizationValidBeforeMax":"1800000600","bindingHash":"22f3936ff9a74c5dac428aa239199e75d5615217dc7cf26efae91a24693a9336","nextReconcileAt":1800000192000,"claim":{"payer":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","validAfter":"0","validBefore":"1800000600","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","signatureFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"authorizationHash":"2c66c66e1a9040ea3e294e264e1698d60a747c1fee729944af3976c23a17f774","signedAt":1800000001000,"attemptId":"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd","attempt":1,"settlementStartedAt":1800000072000,"leaseUntil":1800000072000,"state":"settled","indeterminateAt":1800000072000,"txHash":"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","settledAt":1800000072000}",
+        "1",
+        "",
+        "",
+        "",
+        "none",
+        "zset",
+        "{"hook":"finalize","now":1800000072000,"definition":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"identity":{"intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","productId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","payer":"0x1111111111111111111111111111111111111111","gen":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7","paymentKey":"0xd3bce2496ae85df00d06c6116a6d2598fac4eb3c9c07566e0c131c22277ac0d8"},"stockKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:stock","reservationKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:reservation:0x0000000000000000000000000000000000000000000000000000000000000007","quotaKey":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:license:payer:0x1111111111111111111111111111111111111111","holdIndex":"store:license:holds","obligationIndex":"store:license:ob:index","dueIndex":"store:license:due","obligationKey":"store:license:ob:0xd3bce2496ae85df00d06c6116a6d2598fac4eb3c9c07566e0c131c22277ac0d8","obligation":{"version":1,"kind":"mint","paymentKey":"0xd3bce2496ae85df00d06c6116a6d2598fac4eb3c9c07566e0c131c22277ac0d8","productId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","license":{"schema":1,"rail":"jpyc","tokenChainId":80002,"contract":"0x6666666666666666666666666666666666666666","deploymentId":"openpay-license1155-v1:80002:0x6666666666666666666666666666666666666666","tokenId":"0x3e90906cd295353bdf18ffb07f684b02806774dadd072162b04584b14e395067","transferable":false,"termsUrl":"https://seller.example/terms","termsVersion":"v1","termsHash":"0x739f5d8c81b17c6c664565ba62ec1a694192707a7174e19ac39926dfd90178c8","contentRef":"x402:hosted:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:content:1","supply":2,"definitionHash":"0x348d42c72a525482643b37fbbff03cc81dcbb7e5c1b80c105b19d86c824d19f7"},"payer":"0x1111111111111111111111111111111111111111","intentSalt":"0x0000000000000000000000000000000000000000000000000000000000000007","payment":{"payer":"0x1111111111111111111111111111111111111111","token":"0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29","chainId":80002,"forwarder":"0x3333333333333333333333333333333333333333","commitVersion":"0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89","merchant":"0x4444444444444444444444444444444444444444","merchantValue":"1000000000000000000000","feeReceiver":"0x5555555555555555555555555555555555555555","feeValue":"10000000000000000000","validAfter":"0","validBefore":"1800000600","nonce":"0x0ee5f067cdfa93f88aa2e2536b23ca971d4f13b9b4b45ca3cc2d763f32a0c0af","signatureFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","resourceId":"h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","contentRevision":1,"deploymentVersion":"creator-store-jpyc-forwarder-v1","anchorBlock":"10000"},"txHash":"0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","purchasedAt":1800000072000,"status":"awaiting_finality","attempts":0,"nextAttemptAt":1800000072000}}",
+      ],
+      "keys": [
+        "store:intent:0x0000000000000000000000000000000000000000000000000000000000000007",
+        "store:own:0x1111111111111111111111111111111111111111:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "store:lib:0x1111111111111111111111111111111111111111",
+        "store:purchase:80002:0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "store:intent:pending",
+      ],
+      "name": "license(FINALIZE_PURCHASE)",
+    },
+    {
+      "args": [
+        "h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      ],
+      "keys": [
+        "store:lib:0x1111111111111111111111111111111111111111",
+      ],
+      "name": "READ_LIBRARY_SCORE",
+    },
+  ],
+  "gets": [
+    "store:intent:0x0000000000000000000000000000000000000000000000000000000000000007",
     "store:intent:0x0000000000000000000000000000000000000000000000000000000000000007",
     "store:own:0x1111111111111111111111111111111111111111:h_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "store:purchase:80002:0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",

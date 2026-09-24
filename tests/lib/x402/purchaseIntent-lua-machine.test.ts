@@ -84,6 +84,8 @@ import {
   PURCHASE_QUOTE_GRACE_SEC,
   PURCHASE_QUOTE_TTL_SEC,
   PURCHASE_RECONCILE_LEASE_SEC,
+  PURCHASE_RECONCILE_MAX_PAGES,
+  PURCHASE_RECONCILE_PAGE_BLOCKS,
   PURCHASE_RECONCILE_RETRY_MS,
   PURCHASE_SETTLEMENT_LEASE_SEC,
   checkPurchaseQuoteRateLimit,
@@ -109,6 +111,7 @@ import {
   type CreateQuotedPurchaseIntentInput,
   type PurchaseAuthorizationClaim,
   type PurchaseIntent,
+  type PurchaseReconcileChain,
   type QuotedPurchaseIntent,
   type SettlingPurchaseIntent,
 } from '@/lib/x402/purchaseIntent';
@@ -2179,5 +2182,206 @@ describe('R3c pins: settled access read, library score and listing order, finali
       .resolves.toMatchObject({ ok: true, kind: 'finalized' });
     await expect(finalizeHostedPurchase({ intentSalt: settling.intentSalt, txHash: TX_HASH }))
       .resolves.toMatchObject({ ok: true, kind: 'idempotent' });
+  });
+});
+
+// R3d で追加 (分割前のコード 99713f7f で採取): reconcile / pending を lib/x402/purchase/* に移す前に、digital の
+// reconcile 分岐 (lease・busy・nonce 再構成・終端 member の掃除・settled record の修復・採用・走査 cursor・batch 集計)
+// を本物の Lua で、facade 経由の呼び出しとして固定する。
+describe('R3d pins: digital reconcile branches on real Lua', () => {
+  const pendingKey = () => purchasePendingIndexKey();
+  const QUARANTINE_KEY = 'store:intent:quarantine';
+  const pendingScore = (salt: string) => h.store!.zsets.get(pendingKey())?.get(salt);
+  const stored = (salt: string) => jsonObject(h.store!.strings.get(purchaseIntentKey(salt))!);
+  const adapter = (overrides: Partial<PurchaseReconcileChain> = {}) => ({
+    authorizationUsed: vi.fn(async () => true),
+    latestBlock: vi.fn(async () => ANCHOR_BLOCK),
+    authorizationUsedTransactions: vi.fn(async (): Promise<Hex[]> => []),
+    receiptMatches: vi.fn(async () => false),
+    ...overrides,
+  });
+  const scriptCalls = (name: string) => h.calls.filter((call) => call.script === purchaseScripts[name]);
+
+  it('adopting a receipt-matched replacement settles; the stored settled intent keeps no reconcile lease', async () => {
+    const settling = await makeSettling();
+    await recordPurchaseTransaction({ intentSalt: settling.intentSalt, attemptId: settling.attemptId, txHash: OTHER_TX_HASH, now: BASE_NOW + 3_000 });
+    h.calls = [];
+    const result = await reconcilePurchaseIntent(settling.intentSalt, {
+      now: RECONCILE_NOW,
+      chain: adapter({
+        authorizationUsedTransactions: vi.fn(async (): Promise<Hex[]> => [TX_HASH]),
+        receiptMatches: vi.fn(async (_intent: unknown, tx: Hex) => tx === TX_HASH),
+      }),
+    });
+    expect(result).toEqual({ ok: true, state: 'settled', txHash: TX_HASH });
+    // ADOPT は lease 付きの intent に hash を書く。finalize が保存する settled intent からは lease が消える。
+    expect(scriptCalls('ADOPT_RECONCILED_TRANSACTION')).toHaveLength(1);
+    const settled = stored(settling.intentSalt);
+    expect(settled).toMatchObject({ state: 'settled', txHash: TX_HASH, settledAt: RECONCILE_NOW });
+    expect(settled).not.toHaveProperty('reconcileLeaseId');
+    expect(settled).not.toHaveProperty('reconcileLeaseUntil');
+    expect(pendingScore(settling.intentSalt)).toBeUndefined();
+  });
+
+  it('busy: an active settlement lease is pending without EVAL, chain call or write; the boundary takes the lease', async () => {
+    const settling = await makeSettling();
+    const raw = h.store!.strings.get(purchaseIntentKey(settling.intentSalt));
+    h.calls = [];
+    const blocked = adapter();
+    await expect(reconcilePurchaseIntent(settling.intentSalt, { now: settling.leaseUntil - 1, chain: blocked }))
+      .resolves.toEqual({ ok: true, state: 'pending' });
+    expect(h.calls).toEqual([]);
+    expect(blocked.authorizationUsed).not.toHaveBeenCalled();
+    expect(h.store!.strings.get(purchaseIntentKey(settling.intentSalt))).toBe(raw);
+    const boundary = adapter({ authorizationUsed: vi.fn(async () => false) });
+    await expect(reconcilePurchaseIntent(settling.intentSalt, { now: settling.leaseUntil, chain: boundary }))
+      .resolves.toEqual({ ok: true, state: 'pending' });
+    expect(boundary.authorizationUsed).toHaveBeenCalledTimes(1);
+    expect(stored(settling.intentSalt)).toMatchObject({ state: 'indeterminate', indeterminateAt: settling.leaseUntil });
+  });
+
+  it('terminal members: quoted / failed_prebroadcast are removed from pending; settled is repaired; failures map by reason', async () => {
+    const quote = await makeQuote();
+    zadd(pendingKey(), String(BASE_NOW), quote.intentSalt);
+    const quoteRaw = h.store!.strings.get(purchaseIntentKey(quote.intentSalt));
+    const chainNotUsed = adapter();
+    h.fail.eval = true;
+    await expect(reconcilePurchaseIntent(quote.intentSalt, { now: RECONCILE_NOW, chain: chainNotUsed }))
+      .resolves.toEqual({ ok: false, reason: 'storage' });
+    h.fail.eval = false;
+    expect(pendingScore(quote.intentSalt)).toBe(BASE_NOW);
+    await expect(reconcilePurchaseIntent(quote.intentSalt, { now: RECONCILE_NOW, chain: chainNotUsed }))
+      .resolves.toEqual({ ok: true, state: 'pending' });
+    expect(pendingScore(quote.intentSalt)).toBeUndefined();
+    expect(h.store!.strings.get(purchaseIntentKey(quote.intentSalt))).toBe(quoteRaw);
+
+    const failing = await makeSettling();
+    expect(await markPurchaseFailedPrebroadcast({
+      intentSalt: failing.intentSalt, attemptId: failing.attemptId, reason: 'prebroadcast_rejection', now: BASE_NOW + 3_000,
+    })).toBe('updated');
+    zadd(pendingKey(), String(BASE_NOW + 3_000), failing.intentSalt);
+    await expect(reconcilePurchaseIntent(failing.intentSalt, { now: RECONCILE_NOW, chain: chainNotUsed }))
+      .resolves.toEqual({ ok: true, state: 'failed_prebroadcast' });
+    expect(pendingScore(failing.intentSalt)).toBeUndefined();
+
+    const done = await makeSettling();
+    expect(await finalizeHostedPurchase({ intentSalt: done.intentSalt, txHash: TX_HASH, settledAt: BASE_NOW + 4_000 }))
+      .toMatchObject({ ok: true, kind: 'finalized' });
+    h.store!.delete(purchaseLibraryKey(PAYER));
+    zadd(pendingKey(), String(BASE_NOW + 4_000), done.intentSalt);
+    h.fail.eval = true;
+    await expect(reconcilePurchaseIntent(done.intentSalt, { now: RECONCILE_NOW, chain: chainNotUsed }))
+      .resolves.toEqual({ ok: false, reason: 'storage' });
+    h.fail.eval = false;
+    h.calls = [];
+    await expect(reconcilePurchaseIntent(done.intentSalt, { now: RECONCILE_NOW, chain: chainNotUsed }))
+      .resolves.toEqual({ ok: true, state: 'settled', txHash: TX_HASH });
+    // 修復は lease CAS を取らず FINALIZE と access 読み取りだけ。library と pending が治る。
+    expect(h.calls.map((call) => Object.keys(purchaseScripts).find((name) => purchaseScripts[name] === call.script)))
+      .toEqual(['FINALIZE_PURCHASE', 'READ_LIBRARY_SCORE']);
+    expect(h.store!.zsets.get(purchaseLibraryKey(PAYER))?.get(RESOURCE_ID)).toBe(BASE_NOW + 4_000);
+    expect(pendingScore(done.intentSalt)).toBeUndefined();
+    expect(chainNotUsed.authorizationUsed).not.toHaveBeenCalled();
+    // settled で別 hash が記録済みなら修復は conflict → reconcile は corrupt に写す。
+    const conflicted = stored(done.intentSalt);
+    h.store!.strings.set(purchaseIntentKey(done.intentSalt), JSON.stringify({ ...conflicted, txHash: OTHER_TX_HASH }));
+    await expect(reconcilePurchaseIntent(done.intentSalt, { now: RECONCILE_NOW, chain: chainNotUsed }))
+      .resolves.toEqual({ ok: false, reason: 'corrupt' });
+  });
+
+  it('nonce reconstruction mismatch: corrupt, stored indeterminate without lease and rescheduled; the batch then quarantines it', async () => {
+    const settling = await makeSettling();
+    const key = purchaseIntentKey(settling.intentSalt);
+    const tampered = jsonObject(h.store!.strings.get(key)!);
+    const claim = { ...(tampered.claim as PurchaseAuthorizationClaim), nonce: OTHER_BYTES32 };
+    tampered.claim = claim;
+    tampered.authorizationHash = authorizationHash(claim);
+    h.store!.strings.set(key, JSON.stringify(tampered));
+    const chainNotUsed = adapter();
+    await expect(reconcilePurchaseIntent(settling.intentSalt, { now: RECONCILE_NOW, chain: chainNotUsed }))
+      .resolves.toEqual({ ok: false, reason: 'corrupt' });
+    expect(chainNotUsed.authorizationUsed).not.toHaveBeenCalled();
+    const after = stored(settling.intentSalt);
+    expect(after).toMatchObject({
+      state: 'indeterminate', indeterminateAt: RECONCILE_NOW, lastCheckedAt: RECONCILE_NOW,
+      nextReconcileAt: RECONCILE_NOW + PURCHASE_RECONCILE_RETRY_MS,
+    });
+    expect(after).not.toHaveProperty('reconcileLeaseId');
+    expect(after).not.toHaveProperty('reconcileLeaseUntil');
+    expect(after).not.toHaveProperty('reconcileFromBlock');
+    expect(pendingScore(settling.intentSalt)).toBe(RECONCILE_NOW + PURCHASE_RECONCILE_RETRY_MS);
+
+    const later = RECONCILE_NOW + PURCHASE_RECONCILE_RETRY_MS;
+    await expect(reconcilePendingPurchases({ now: later, chain: adapter() })).resolves.toEqual({
+      checked: 1, settled: 0, pending: 0, failedPrebroadcast: 0, storageErrors: 0,
+    });
+    expect(pendingScore(settling.intentSalt)).toBeUndefined();
+    expect(h.store!.zsets.get(QUARANTINE_KEY)?.get(settling.intentSalt)).toBe(later);
+    expect(h.loggerWarn).toHaveBeenCalledWith('creator_store.purchase_pending_quarantined', { member: settling.intentSalt, reason: 'corrupt' });
+  });
+
+  it('a signed intent whose authorization is consumed becomes indeterminate (attempt 1) and is rescheduled from the anchor', async () => {
+    const quote = await makeQuote();
+    await signQuote(quote);
+    await expect(reconcilePurchaseIntent(quote.intentSalt, { now: RECONCILE_NOW, chain: adapter() }))
+      .resolves.toEqual({ ok: true, state: 'pending' });
+    const after = stored(quote.intentSalt);
+    expect(after).toMatchObject({
+      state: 'indeterminate', attempt: 1, settlementStartedAt: RECONCILE_NOW, leaseUntil: RECONCILE_NOW,
+      indeterminateAt: RECONCILE_NOW, lastCheckedAt: RECONCILE_NOW, reconcileFromBlock: ANCHOR_BLOCK.toString(),
+      nextReconcileAt: RECONCILE_NOW + PURCHASE_RECONCILE_RETRY_MS,
+    });
+    expect(after.attemptId).toMatch(/^[0-9a-f]{64}$/);
+    expect(after).not.toHaveProperty('reconcileLeaseId');
+    expect(pendingScore(quote.intentSalt)).toBe(RECONCILE_NOW + PURCHASE_RECONCILE_RETRY_MS);
+    // lease CAS → consumed CAS → reschedule CAS の 3 本。
+    expect(scriptCalls('CAS_PENDING_INTENT')).toHaveLength(3);
+  });
+
+  it('scan cursor: MAX_PAGES pages per pass, the next pass resumes from the saved cursor, and a completed scan wraps to the anchor', async () => {
+    const settling = await makeSettling();
+    const span = PURCHASE_RECONCILE_PAGE_BLOCKS;
+    const pages = BigInt(PURCHASE_RECONCILE_MAX_PAGES);
+    const latest = ANCHOR_BLOCK + span * pages + 5n;
+    const first = adapter({ latestBlock: vi.fn(async () => latest) });
+    await expect(reconcilePurchaseIntent(settling.intentSalt, { now: RECONCILE_NOW, chain: first }))
+      .resolves.toEqual({ ok: true, state: 'pending' });
+    expect(first.authorizationUsedTransactions).toHaveBeenCalledTimes(PURCHASE_RECONCILE_MAX_PAGES);
+    expect(stored(settling.intentSalt).reconcileFromBlock).toBe((ANCHOR_BLOCK + span * pages).toString());
+    const second = adapter({ latestBlock: vi.fn(async () => latest) });
+    const later = RECONCILE_NOW + PURCHASE_RECONCILE_RETRY_MS;
+    await expect(reconcilePurchaseIntent(settling.intentSalt, { now: later, chain: second }))
+      .resolves.toEqual({ ok: true, state: 'pending' });
+    expect(vi.mocked(second.authorizationUsedTransactions).mock.calls.map(([, from, to]) => [from, to]))
+      .toEqual([[ANCHOR_BLOCK + span * pages, latest]]);
+    expect(stored(settling.intentSalt)).toMatchObject({ reconcileFromBlock: ANCHOR_BLOCK.toString(), lastCheckedAt: later });
+  });
+
+  it('batch summary on real Lua: settled / pending / failed_prebroadcast / quarantined (invalid and missing) per member', async () => {
+    const settles = await makeSettling();
+    const waits = await makeSettling();
+    const expiresQuote = await makeQuote();
+    await signQuote(expiresQuote);
+    const missing = `0x${'7'.repeat(64)}`;
+    zadd(pendingKey(), String(BASE_NOW), 'not-a-salt');
+    zadd(pendingKey(), String(BASE_NOW), missing);
+    const now = Number(settles.claim.validBefore) * 1_000;
+    const chain = adapter({
+      authorizationUsed: vi.fn(async (intent: { intentSalt: string }) => intent.intentSalt === settles.intentSalt),
+      authorizationExpiredUnused: vi.fn(async (intent: { intentSalt: string }) => intent.intentSalt === expiresQuote.intentSalt),
+      authorizationUsedTransactions: vi.fn(async (): Promise<Hex[]> => [TX_HASH]),
+      receiptMatches: vi.fn(async () => true),
+    });
+    await expect(reconcilePendingPurchases({ now, chain })).resolves.toEqual({
+      checked: 5, settled: 1, pending: 1, failedPrebroadcast: 1, storageErrors: 0,
+    });
+    expect(stored(settles.intentSalt)).toMatchObject({ state: 'settled', txHash: TX_HASH });
+    expect(stored(waits.intentSalt)).toMatchObject({ state: 'indeterminate', nextReconcileAt: now + PURCHASE_RECONCILE_RETRY_MS });
+    expect(stored(expiresQuote.intentSalt)).toMatchObject({ state: 'failed_prebroadcast', failureReason: 'authorization_expired_unused' });
+    expect([...h.store!.zsets.get(pendingKey())!.entries()]).toEqual([[waits.intentSalt, now + PURCHASE_RECONCILE_RETRY_MS]]);
+    expect([...h.store!.zsets.get(QUARANTINE_KEY)!.entries()].sort()).toEqual([[missing, now], ['not-a-salt', now]].sort());
+    expect(h.loggerWarn.mock.calls.filter(([event]) => event === 'creator_store.purchase_pending_quarantined').map(([, data]) => data))
+      // 同点 score は member の辞書順で列挙される ('0x7…' < 'not-a-salt')。
+      .toEqual([{ member: missing, reason: 'not_found' }, { member: 'not-a-salt', reason: 'invalid_salt' }]);
   });
 });
