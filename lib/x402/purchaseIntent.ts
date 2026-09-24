@@ -12,18 +12,20 @@ import 'server-only';
 //   store:own:<payer>:<resourceId>            全購入 revision の ownership
 //   store:lib:<payer>                         resourceId の無制限 ZSET (trim 禁止)
 //   store:purchase:<chainId>:<txHash>         authoritative purchase record
+//
+// R3a: 型・定数・KV key・parser・Lua 本文は lib/x402/purchase/{types,keys,parse,lua}.ts に分割した。
+// この file は公開 API の facade で、export 名は分割前と同じ。利用側の import と vi.mock は必ず
+// `@/lib/x402/purchaseIntent` を通す (lib/x402/purchase/* の deep import は eslint.config.mjs が禁止)。
+// 分割先は facade を import しない。facade 内の関数は分割先を直接 import して呼ぶ。
 
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import {
   hostedResourceUrl,
-  isHostedLabel,
   isRecord,
   isSafeTimestamp,
-  parseAddress,
   parseHex32,
 } from '@/lib/x402/storeWire';
 import { JPYC_V3_ASSET } from '@/lib/x402/types';
-import { parseLicenseDefinition } from '@/lib/license/definition';
 import { licenseNftEnabled } from '@/lib/license/config';
 import { licenseLuaVariant, licenseEvalContext } from '@/lib/license/stock';
 import { reconcileLicensePurchase, type LicenseReconcileChain } from '@/lib/license/reconcile';
@@ -53,41 +55,124 @@ import { parseFacilitatorRequest } from '@/lib/x402/facilitatorSettle';
 import { paymentRedeliveryIdentity } from '@/lib/x402/paymentRedelivery';
 import { authorizationExpiredUnused } from '@/lib/x402/authorizationExpiry';
 import { railIntentParentKey, releaseActiveStoreRail } from '@/lib/x402/storeRailSelection';
+import {
+  MAX_UINT256,
+  PURCHASE_DEPLOYMENT_VERSION,
+  PURCHASE_EXPIRY_SAFETY_SEC,
+  PURCHASE_FINALIZER_CONTENTION_RETRIES,
+  PURCHASE_INTENT_VERSION,
+  PURCHASE_QUOTE_GRACE_SEC,
+  PURCHASE_QUOTE_IP_MAX,
+  PURCHASE_QUOTE_RATE_WINDOW_SEC,
+  PURCHASE_QUOTE_RESOURCE_MAX,
+  PURCHASE_QUOTE_TTL_SEC,
+  PURCHASE_QUOTE_WALLET_MAX,
+  PURCHASE_RECONCILE_BATCH_SIZE,
+  PURCHASE_RECONCILE_LEASE_SEC,
+  PURCHASE_RECONCILE_MAX_PAGES,
+  PURCHASE_RECONCILE_PAGE_BLOCKS,
+  PURCHASE_RECONCILE_RETRY_MS,
+  PURCHASE_REVISION_POLICY,
+  PURCHASE_SETTLEMENT_LEASE_SEC,
+  FINGERPRINT_RE,
+  TX_HASH_RE,
+  type ClaimedPurchaseIntentBase,
+  type FailedPrebroadcastPurchaseIntent,
+  type HostedPurchaseRecord,
+  type IndeterminatePurchaseIntent,
+  type PurchaseAuthorizationClaim,
+  type PurchaseGrant,
+  type PurchaseIntent,
+  type PurchaseIntentBase,
+  type PurchaseOwnership,
+  type QuotedPurchaseIntent,
+  type SettledPurchaseIntent,
+  type SettlingPurchaseIntent,
+  type SignedPurchaseIntent,
+} from './purchase/types';
+import {
+  PENDING_INDEX_KEY,
+  PENDING_QUARANTINE_KEY,
+  hostedPurchaseRecordKey,
+  isPurchaseIntentSalt,
+  newPurchaseIntentSalt,
+  purchaseIntentKey,
+  purchaseLibraryKey,
+  purchaseOwnershipKey,
+} from './purchase/keys';
+import {
+  canonicalDecimal,
+  canonicalHash,
+  lowerHex,
+  parseClaim,
+  parseHostedPurchaseRecord,
+  parseMetadata,
+  parsePurchaseIntent,
+  parsePurchaseOwnership,
+  quoteBinding,
+} from './purchase/parse';
+import {
+  ADOPT_RECONCILED_TRANSACTION,
+  CAS_PENDING_INTENT,
+  CLAIM_SETTLEMENT,
+  CLAIM_SIGNED_INTENT,
+  FINALIZE_PURCHASE,
+  LIST_PENDING_INTENTS,
+  MARK_PURCHASE_FAILED_PREBROADCAST,
+  MARK_PURCHASE_INDETERMINATE,
+  QUARANTINE_PENDING_MEMBER,
+  QUOTE_RATE_LIMIT,
+  READ_LIBRARY_SCORE,
+  RECORD_PURCHASE_TRANSACTION,
+  REMOVE_TERMINAL_PENDING_MEMBER,
+} from './purchase/lua';
 
-export const PURCHASE_INTENT_VERSION = 1;
-export const PURCHASE_QUOTE_TTL_SEC = 10 * 60;
-export const PURCHASE_QUOTE_GRACE_SEC = 2 * 60;
-/**
- * validBefore の直前に新規 broadcast を始めない一方向の安全域。
- * client clock を未来側へ許容する値ではなく、server が期限を5秒短く扱う。
- */
-export const PURCHASE_EXPIRY_SAFETY_SEC = 5;
-export const PURCHASE_SETTLEMENT_LEASE_SEC = 60;
-export const PURCHASE_RECONCILE_LEASE_SEC = 120;
-export const PURCHASE_RECONCILE_RETRY_MS = 30_000;
-export const PURCHASE_RECONCILE_BATCH_SIZE = 50;
-export const PURCHASE_RECONCILE_PAGE_BLOCKS = 2_000n;
-export const PURCHASE_RECONCILE_MAX_PAGES = 20;
-export const PURCHASE_QUOTE_RATE_WINDOW_SEC = 60;
-export const PURCHASE_QUOTE_WALLET_MAX = 12;
-export const PURCHASE_QUOTE_IP_MAX = 60;
-// Abuse backstop only (10x the former 120/min ceiling). The per-IP limit and
-// Cloudflare edge rate limit are the primary controls. IPv6 /64 grouping is
-// handled separately in the PR for review finding C3.
-export const PURCHASE_QUOTE_RESOURCE_MAX = 1_200;
-/** token/forwarder のアドレスとは別の、保存 schema + rail generation。 */
-export const PURCHASE_DEPLOYMENT_VERSION = 'creator-store-jpyc-forwarder-v1';
-/** 同一商品を再購入した場合も、購入済みの全 revision を権利として残す。 */
-export const PURCHASE_REVISION_POLICY = 'all-purchased-revisions' as const;
-
-const INTENT_SALT_RE = /^0x[0-9a-f]{64}$/;
-const TX_HASH_RE = /^0x[0-9a-f]{64}$/i;
-const FINGERPRINT_RE = /^[0-9a-f]{64}$/;
-const DECIMAL_RE = /^(0|[1-9][0-9]*)$/;
-const MAX_UINT256 = (1n << 256n) - 1n;
-const PENDING_INDEX_KEY = 'store:intent:pending';
-const PENDING_QUARANTINE_KEY = 'store:intent:quarantine';
-const PURCHASE_FINALIZER_CONTENTION_RETRIES = 4;
+// 分割前と同じ公開 API (R3a)。利用側の import と vi.mock は必ずこの facade を通す。
+export {
+  PURCHASE_DEPLOYMENT_VERSION,
+  PURCHASE_EXPIRY_SAFETY_SEC,
+  PURCHASE_INTENT_VERSION,
+  PURCHASE_QUOTE_GRACE_SEC,
+  PURCHASE_QUOTE_IP_MAX,
+  PURCHASE_QUOTE_RATE_WINDOW_SEC,
+  PURCHASE_QUOTE_RESOURCE_MAX,
+  PURCHASE_QUOTE_TTL_SEC,
+  PURCHASE_QUOTE_WALLET_MAX,
+  PURCHASE_RECONCILE_BATCH_SIZE,
+  PURCHASE_RECONCILE_LEASE_SEC,
+  PURCHASE_RECONCILE_MAX_PAGES,
+  PURCHASE_RECONCILE_PAGE_BLOCKS,
+  PURCHASE_RECONCILE_RETRY_MS,
+  PURCHASE_REVISION_POLICY,
+  PURCHASE_SETTLEMENT_LEASE_SEC,
+};
+export type {
+  FailedPrebroadcastPurchaseIntent,
+  HostedPurchaseRecord,
+  IndeterminatePurchaseIntent,
+  PurchaseAuthorizationClaim,
+  PurchaseGrant,
+  PurchaseIntent,
+  PurchaseOwnership,
+  QuotedPurchaseIntent,
+  SettledPurchaseIntent,
+  SettlingPurchaseIntent,
+  SignedPurchaseIntent,
+};
+export {
+  hostedPurchaseRecordKey,
+  isPurchaseIntentSalt,
+  newPurchaseIntentSalt,
+  purchaseIntentKey,
+  purchaseLibraryKey,
+  purchaseOwnershipKey,
+};
+export { purchasePendingIndexKey } from './purchase/keys';
+export {
+  parseHostedPurchaseRecord,
+  parsePurchaseIntent,
+  parsePurchaseOwnership,
+};
 
 const AUTHORIZATION_STATE_ABI = parseAbi([
   'function authorizationState(address authorizer, bytes32 nonce) view returns (bool)',
@@ -98,592 +183,6 @@ const AUTHORIZATION_USED_EVENT = parseAbi([
 const FORWARDER_SETTLED_EVENT_ABI = parseAbi([
   'event Settled(address indexed from, bytes32 indexed nonce, address indexed merchant, uint256 merchantValue, address feeReceiver, uint256 feeValue)',
 ]);
-
-const lowerHex = <T extends string>(value: T): T =>
-  value.toLowerCase() as T;
-
-function canonicalDecimal(value: bigint | string): string {
-  return BigInt(value).toString();
-}
-
-function canonicalHash(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-
-function parseCanonicalDecimal(value: unknown): string | null {
-  if (typeof value !== 'string' || !DECIMAL_RE.test(value)) return null;
-  try {
-    const parsed = BigInt(value);
-    return parsed <= MAX_UINT256 && parsed.toString() === value
-      ? value
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function parseMetadata(value: unknown): HostedPurchaseMetadata | null {
-  if (!isRecord(value)) return null;
-  if (value.productKind !== undefined && value.productKind !== 'license') return null;
-  const license = value.productKind === 'license' ? parseLicenseDefinition(value.license) : null;
-  if (value.productKind === 'license' && (!license || value.contentKind !== 'text' || typeof value.priceJpyc !== 'string' || !DECIMAL_RE.test(value.priceJpyc) || BigInt(value.priceJpyc) < 1000n)) return null;
-  if (value.productKind === undefined && value.license !== undefined) return null;
-  const owner = parseAddress(value.owner);
-  const payTo = parseAddress(value.payTo);
-  if (!owner || !payTo) return null;
-  if (
-    typeof value.title !== 'string' ||
-    value.title.length === 0 ||
-    typeof value.priceJpyc !== 'string' ||
-    !DECIMAL_RE.test(value.priceJpyc) ||
-    (value.contentKind !== 'url' && value.contentKind !== 'text') ||
-    !isHostedLabel(value.label)
-  ) {
-    return null;
-  }
-  if (value.desc !== undefined && typeof value.desc !== 'string') return null;
-  if (value.emoji !== undefined && typeof value.emoji !== 'string') return null;
-  return {
-    ...(license ? { productKind: 'license' as const, license } : {}),
-    owner,
-    payTo,
-    title: value.title,
-    ...(value.desc === undefined ? {} : { desc: value.desc }),
-    ...(value.emoji === undefined ? {} : { emoji: value.emoji }),
-    priceJpyc: value.priceJpyc,
-    contentKind: value.contentKind,
-    label: value.label,
-  };
-}
-
-export type PurchaseAuthorizationClaim = {
-  payer: Address;
-  token: Address;
-  chainId: number;
-  forwarder: Address;
-  commitVersion: Hex;
-  merchant: Address;
-  merchantValue: string;
-  feeReceiver: Address;
-  feeValue: string;
-  validAfter: string;
-  validBefore: string;
-  nonce: Hex;
-  signatureFingerprint: string;
-  resourceId: string;
-  contentRevision: number;
-  deploymentVersion: string;
-  anchorBlock: string;
-};
-
-type PurchaseIntentBase = {
-  version: typeof PURCHASE_INTENT_VERSION;
-  intentSalt: Hex;
-  resourceId: string;
-  contentRevision: number;
-  contentRef: string;
-  metadata: HostedPurchaseMetadata;
-  payerHint: Address;
-  token: Address;
-  chainId: number;
-  forwarder: Address;
-  commitVersion: Hex;
-  deploymentVersion: string;
-  merchant: Address;
-  merchantValue: string;
-  feeReceiver: Address;
-  feeValue: string;
-  anchorBlock: string;
-  createdAt: number;
-  quoteExpiresAt: number;
-  authorizationValidBeforeMax: string;
-  bindingHash: string;
-  lastCheckedAt?: number;
-  nextReconcileAt?: number;
-  reconcileFromBlock?: string;
-  reconcileLeaseId?: string;
-  reconcileLeaseUntil?: number;
-};
-
-export type QuotedPurchaseIntent = PurchaseIntentBase & {
-  state: 'quoted';
-};
-
-type ClaimedPurchaseIntentBase = PurchaseIntentBase & {
-  claim: PurchaseAuthorizationClaim;
-  authorizationHash: string;
-  reservationToken?: string;
-  signedAt: number;
-};
-
-export type SignedPurchaseIntent = ClaimedPurchaseIntentBase & {
-  state: 'signed';
-};
-
-export type SettlingPurchaseIntent = ClaimedPurchaseIntentBase & {
-  state: 'settling';
-  attemptId: string;
-  attempt: number;
-  settlementStartedAt: number;
-  leaseUntil: number;
-  txHash?: Hex;
-};
-
-export type IndeterminatePurchaseIntent = ClaimedPurchaseIntentBase & {
-  state: 'indeterminate';
-  attemptId: string;
-  attempt: number;
-  settlementStartedAt: number;
-  leaseUntil: number;
-  indeterminateAt: number;
-  txHash?: Hex;
-};
-
-export type SettledPurchaseIntent = ClaimedPurchaseIntentBase & {
-  state: 'settled';
-  txHash: Hex;
-  settledAt: number;
-};
-
-export type FailedPrebroadcastPurchaseIntent = ClaimedPurchaseIntentBase & {
-  state: 'failed_prebroadcast';
-  attemptId: string;
-  attempt: number;
-  settlementStartedAt: number;
-  leaseUntil: number;
-  failedAt: number;
-  failureReason: string;
-  /** Retained only when finalized expiry proves a broadcast authorization unused. */
-  txHash?: Hex;
-};
-
-export type PurchaseIntent =
-  | QuotedPurchaseIntent
-  | SignedPurchaseIntent
-  | SettlingPurchaseIntent
-  | IndeterminatePurchaseIntent
-  | SettledPurchaseIntent
-  | FailedPrebroadcastPurchaseIntent;
-
-export type PurchaseGrant = {
-  intentSalt: Hex;
-  contentRevision: number;
-  contentRef: string;
-  metadata: HostedPurchaseMetadata;
-  chainId: number;
-  txHash: Hex;
-  nonce: Hex;
-  purchasedAt: number;
-};
-
-export type PurchaseOwnership = {
-  version: typeof PURCHASE_INTENT_VERSION;
-  policy: typeof PURCHASE_REVISION_POLICY;
-  payer: Address;
-  resourceId: string;
-  firstPurchasedAt: number;
-  updatedAt: number;
-  grants: PurchaseGrant[];
-  latestGrant: PurchaseGrant;
-};
-
-export type HostedPurchaseRecord = PurchaseGrant & {
-  version: typeof PURCHASE_INTENT_VERSION;
-  payer: Address;
-  resourceId: string;
-  merchant: Address;
-  merchantValue: string;
-  feeReceiver: Address;
-  feeValue: string;
-  token: Address;
-  forwarder: Address;
-  commitVersion: Hex;
-  deploymentVersion: string;
-};
-
-export function purchaseIntentKey(intentSalt: string): string {
-  return `store:intent:${intentSalt.toLowerCase()}`;
-}
-
-export function purchasePendingIndexKey(): string {
-  return PENDING_INDEX_KEY;
-}
-
-export function purchaseOwnershipKey(
-  payer: string,
-  resourceId: string,
-): string {
-  return `store:own:${payer.toLowerCase()}:${resourceId}`;
-}
-
-export function purchaseLibraryKey(payer: string): string {
-  return `store:lib:${payer.toLowerCase()}`;
-}
-
-export function hostedPurchaseRecordKey(
-  chainId: number,
-  txHash: string,
-): string {
-  return `store:purchase:${chainId}:${txHash.toLowerCase()}`;
-}
-
-export function isPurchaseIntentSalt(value: unknown): value is Hex {
-  return (
-    typeof value === 'string' &&
-    INTENT_SALT_RE.test(value.toLowerCase())
-  );
-}
-
-export function newPurchaseIntentSalt(): Hex {
-  return `0x${randomBytes(32).toString('hex')}` as Hex;
-}
-
-function parseClaim(value: unknown): PurchaseAuthorizationClaim | null {
-  if (!isRecord(value)) return null;
-  const payer = parseAddress(value.payer);
-  const token = parseAddress(value.token);
-  const forwarder = parseAddress(value.forwarder);
-  const merchant = parseAddress(value.merchant);
-  const feeReceiver = parseAddress(value.feeReceiver);
-  const commitVersion = parseHex32(value.commitVersion);
-  const nonce = parseHex32(value.nonce);
-  const merchantValue = parseCanonicalDecimal(value.merchantValue);
-  const feeValue = parseCanonicalDecimal(value.feeValue);
-  const validAfter = parseCanonicalDecimal(value.validAfter);
-  const validBefore = parseCanonicalDecimal(value.validBefore);
-  const anchorBlock = parseCanonicalDecimal(value.anchorBlock);
-  if (
-    !payer ||
-    !token ||
-    !forwarder ||
-    !merchant ||
-    !feeReceiver ||
-    !commitVersion ||
-    !nonce ||
-    merchantValue === null ||
-    feeValue === null ||
-    validAfter === null ||
-    validBefore === null ||
-    anchorBlock === null ||
-    typeof value.chainId !== 'number' ||
-    !Number.isSafeInteger(value.chainId) ||
-    value.chainId <= 0 ||
-    typeof value.signatureFingerprint !== 'string' ||
-    !FINGERPRINT_RE.test(value.signatureFingerprint) ||
-    typeof value.resourceId !== 'string' ||
-    value.resourceId.length === 0 ||
-    typeof value.contentRevision !== 'number' ||
-    !Number.isSafeInteger(value.contentRevision) ||
-    value.contentRevision < 1 ||
-    typeof value.deploymentVersion !== 'string' ||
-    value.deploymentVersion.length === 0
-  ) {
-    return null;
-  }
-  return {
-    payer,
-    token,
-    chainId: value.chainId,
-    forwarder,
-    commitVersion,
-    merchant,
-    merchantValue,
-    feeReceiver,
-    feeValue,
-    validAfter,
-    validBefore,
-    nonce,
-    signatureFingerprint: value.signatureFingerprint,
-    resourceId: value.resourceId,
-    contentRevision: value.contentRevision,
-    deploymentVersion: value.deploymentVersion,
-    anchorBlock,
-  };
-}
-
-function parseIntentBase(
-  value: Record<string, unknown>,
-): PurchaseIntentBase | null {
-  const intentSalt = parseHex32(value.intentSalt);
-  const metadata = parseMetadata(value.metadata);
-  const payerHint = parseAddress(value.payerHint);
-  const token = parseAddress(value.token);
-  const forwarder = parseAddress(value.forwarder);
-  const commitVersion = parseHex32(value.commitVersion);
-  const merchant = parseAddress(value.merchant);
-  const feeReceiver = parseAddress(value.feeReceiver);
-  const merchantValue = parseCanonicalDecimal(value.merchantValue);
-  const feeValue = parseCanonicalDecimal(value.feeValue);
-  const anchorBlock = parseCanonicalDecimal(value.anchorBlock);
-  const authorizationValidBeforeMax = parseCanonicalDecimal(
-    value.authorizationValidBeforeMax,
-  );
-  if (
-    value.version !== PURCHASE_INTENT_VERSION ||
-    !intentSalt ||
-    typeof value.resourceId !== 'string' ||
-    value.resourceId.length === 0 ||
-    typeof value.contentRevision !== 'number' ||
-    !Number.isSafeInteger(value.contentRevision) ||
-    value.contentRevision < 1 ||
-    typeof value.contentRef !== 'string' ||
-    value.contentRef.length === 0 ||
-    !metadata ||
-    !payerHint ||
-    !token ||
-    typeof value.chainId !== 'number' ||
-    !Number.isSafeInteger(value.chainId) ||
-    value.chainId <= 0 ||
-    !forwarder ||
-    !commitVersion ||
-    typeof value.deploymentVersion !== 'string' ||
-    value.deploymentVersion.length === 0 ||
-    !merchant ||
-    merchantValue === null ||
-    !feeReceiver ||
-    feeValue === null ||
-    anchorBlock === null ||
-    !isSafeTimestamp(value.createdAt) ||
-    !isSafeTimestamp(value.quoteExpiresAt) ||
-    authorizationValidBeforeMax === null ||
-    typeof value.bindingHash !== 'string' ||
-    !FINGERPRINT_RE.test(value.bindingHash)
-  ) {
-    return null;
-  }
-  if (metadata.license && (!isAddressEqual(token, JPYC_V3_ASSET.address) || metadata.license.contentRef !== value.contentRef || value.contentRevision !== 1 || metadata.license.tokenChainId !== value.chainId || metadata.priceJpyc + '000000000000000000' !== merchantValue)) return null;
-  const optionalNumber = (
-    key: 'lastCheckedAt' | 'nextReconcileAt' | 'reconcileLeaseUntil',
-  ): number | undefined => {
-    const current = value[key];
-    return isSafeTimestamp(current) ? current : undefined;
-  };
-  let reconcileFromBlock: string | undefined;
-  if (value.reconcileFromBlock !== undefined) {
-    const parsed = parseCanonicalDecimal(value.reconcileFromBlock);
-    if (parsed === null) return null;
-    reconcileFromBlock = parsed;
-  }
-  if (
-    value.reconcileLeaseId !== undefined &&
-    (typeof value.reconcileLeaseId !== 'string' ||
-      !FINGERPRINT_RE.test(value.reconcileLeaseId))
-  ) {
-    return null;
-  }
-  const base: PurchaseIntentBase = {
-    version: PURCHASE_INTENT_VERSION,
-    intentSalt,
-    resourceId: value.resourceId,
-    contentRevision: value.contentRevision,
-    contentRef: value.contentRef,
-    metadata,
-    payerHint,
-    token,
-    chainId: value.chainId,
-    forwarder,
-    commitVersion,
-    deploymentVersion: value.deploymentVersion,
-    merchant,
-    merchantValue,
-    feeReceiver,
-    feeValue,
-    anchorBlock,
-    createdAt: value.createdAt,
-    quoteExpiresAt: value.quoteExpiresAt,
-    authorizationValidBeforeMax,
-    bindingHash: value.bindingHash,
-    ...(optionalNumber('lastCheckedAt') === undefined
-      ? {}
-      : { lastCheckedAt: optionalNumber('lastCheckedAt') }),
-    ...(optionalNumber('nextReconcileAt') === undefined
-      ? {}
-      : { nextReconcileAt: optionalNumber('nextReconcileAt') }),
-    ...(reconcileFromBlock === undefined
-      ? {}
-      : { reconcileFromBlock }),
-    ...(value.reconcileLeaseId === undefined
-      ? {}
-      : { reconcileLeaseId: value.reconcileLeaseId }),
-    ...(optionalNumber('reconcileLeaseUntil') === undefined
-      ? {}
-      : { reconcileLeaseUntil: optionalNumber('reconcileLeaseUntil') }),
-  };
-  const immutableBinding = {
-    intentSalt: base.intentSalt,
-    resourceId: base.resourceId,
-    contentRevision: base.contentRevision,
-    contentRef: base.contentRef,
-    metadata: base.metadata,
-    payerHint: base.payerHint,
-    token: base.token,
-    chainId: base.chainId,
-    forwarder: base.forwarder,
-    commitVersion: base.commitVersion,
-    deploymentVersion: base.deploymentVersion,
-    merchant: base.merchant,
-    merchantValue: base.merchantValue,
-    feeReceiver: base.feeReceiver,
-    feeValue: base.feeValue,
-    anchorBlock: base.anchorBlock,
-    quoteExpiresAt: base.quoteExpiresAt,
-    authorizationValidBeforeMax: base.authorizationValidBeforeMax,
-  };
-  if (
-    base.contentRef !==
-      hostedContentKey(base.resourceId, base.contentRevision) ||
-    !isAddressEqual(base.metadata.payTo, base.merchant) ||
-    base.quoteExpiresAt <= base.createdAt ||
-    base.authorizationValidBeforeMax !==
-      String(Math.floor(base.quoteExpiresAt / 1000)) ||
-    quoteBinding(immutableBinding) !== base.bindingHash
-  ) {
-    return null;
-  }
-  return base;
-}
-
-function claimMatchesIntentBase(
-  claim: PurchaseAuthorizationClaim,
-  base: PurchaseIntentBase,
-): boolean {
-  return (
-    isAddressEqual(claim.payer, base.payerHint) &&
-    isAddressEqual(claim.token, base.token) &&
-    claim.chainId === base.chainId &&
-    isAddressEqual(claim.forwarder, base.forwarder) &&
-    claim.commitVersion === base.commitVersion &&
-    isAddressEqual(claim.merchant, base.merchant) &&
-    claim.merchantValue === base.merchantValue &&
-    isAddressEqual(claim.feeReceiver, base.feeReceiver) &&
-    claim.feeValue === base.feeValue &&
-    claim.resourceId === base.resourceId &&
-    claim.contentRevision === base.contentRevision &&
-    claim.deploymentVersion === base.deploymentVersion &&
-    claim.anchorBlock === base.anchorBlock
-  );
-}
-
-function parseClaimedBase(
-  value: Record<string, unknown>,
-  base: PurchaseIntentBase,
-): ClaimedPurchaseIntentBase | null {
-  const claim = parseClaim(value.claim);
-  if (
-    !claim ||
-    typeof value.authorizationHash !== 'string' ||
-    !FINGERPRINT_RE.test(value.authorizationHash) ||
-    (value.reservationToken !== undefined &&
-      (typeof value.reservationToken !== 'string' ||
-        value.reservationToken.length === 0)) ||
-    !isSafeTimestamp(value.signedAt) ||
-    canonicalHash(claim) !== value.authorizationHash ||
-    !claimMatchesIntentBase(claim, base)
-  ) {
-    return null;
-  }
-  return {
-    ...base,
-    claim,
-    authorizationHash: value.authorizationHash,
-    ...(value.reservationToken === undefined
-      ? {}
-      : { reservationToken: value.reservationToken }),
-    signedAt: value.signedAt,
-  };
-}
-
-export function parsePurchaseIntent(raw: unknown): PurchaseIntent | null {
-  if (typeof raw !== 'string') return null;
-  let value: unknown;
-  try {
-    value = JSON.parse(raw) as unknown;
-  } catch {
-    return null;
-  }
-  if (!isRecord(value)) return null;
-  const base = parseIntentBase(value);
-  if (!base) return null;
-  if (value.state === 'quoted') return { ...base, state: 'quoted' };
-  const claimed = parseClaimedBase(value, base);
-  if (!claimed) return null;
-  if (value.state === 'signed') return { ...claimed, state: 'signed' };
-  if (value.state === 'settled') {
-    const txHash = parseHex32(value.txHash);
-    if (!txHash || !isSafeTimestamp(value.settledAt)) return null;
-    return {
-      ...claimed,
-      state: 'settled',
-      txHash,
-      settledAt: value.settledAt,
-    };
-  }
-  const attemptId =
-    typeof value.attemptId === 'string' &&
-    FINGERPRINT_RE.test(value.attemptId)
-      ? value.attemptId
-      : null;
-  if (
-    !attemptId ||
-    typeof value.attempt !== 'number' ||
-    !Number.isSafeInteger(value.attempt) ||
-    value.attempt < 1 ||
-    !isSafeTimestamp(value.settlementStartedAt) ||
-    !isSafeTimestamp(value.leaseUntil)
-  ) {
-    return null;
-  }
-  const attemptBase = {
-    ...claimed,
-    attemptId,
-    attempt: value.attempt,
-    settlementStartedAt: value.settlementStartedAt,
-    leaseUntil: value.leaseUntil,
-  };
-  if (value.state === 'settling') {
-    const txHash =
-      value.txHash === undefined ? undefined : parseHex32(value.txHash);
-    if (value.txHash !== undefined && !txHash) return null;
-    return {
-      ...attemptBase,
-      state: 'settling',
-      ...(txHash ? { txHash } : {}),
-    };
-  }
-  if (value.state === 'indeterminate') {
-    const txHash =
-      value.txHash === undefined ? undefined : parseHex32(value.txHash);
-    if (
-      (value.txHash !== undefined && !txHash) ||
-      !isSafeTimestamp(value.indeterminateAt)
-    ) {
-      return null;
-    }
-    return {
-      ...attemptBase,
-      state: 'indeterminate',
-      indeterminateAt: value.indeterminateAt,
-      ...(txHash ? { txHash } : {}),
-    };
-  }
-  if (
-    value.state === 'failed_prebroadcast' &&
-    (value.txHash === undefined ||
-      value.failureReason === 'authorization_expired_unused' && parseHex32(value.txHash)) &&
-    isSafeTimestamp(value.failedAt) &&
-    typeof value.failureReason === 'string' &&
-    value.failureReason.length > 0
-  ) {
-    return {
-      ...attemptBase,
-      state: 'failed_prebroadcast',
-      failedAt: value.failedAt,
-      failureReason: value.failureReason,
-      ...(value.txHash === undefined ? {} : { txHash: parseHex32(value.txHash)! }),
-    };
-  }
-  return null;
-}
 
 export type PurchaseIntentReadResult =
   | { ok: true; intent: PurchaseIntent | null; raw: string | null }
@@ -710,29 +209,6 @@ export async function getPurchaseIntent(
   const result = await readPurchaseIntent(intentSalt);
   if (!result.ok) return result.reason;
   return result.intent;
-}
-
-function quoteBinding(input: {
-  intentSalt: Hex;
-  resourceId: string;
-  contentRevision: number;
-  contentRef: string;
-  metadata: HostedPurchaseMetadata;
-  payerHint: Address;
-  token: Address;
-  chainId: number;
-  forwarder: Address;
-  commitVersion: Hex;
-  deploymentVersion: string;
-  merchant: Address;
-  merchantValue: string;
-  feeReceiver: Address;
-  feeValue: string;
-  anchorBlock: string;
-  quoteExpiresAt: number;
-  authorizationValidBeforeMax: string;
-}): string {
-  return canonicalHash(input);
 }
 
 export type CreateQuotedPurchaseIntentInput = {
@@ -856,52 +332,6 @@ export async function createQuotedPurchaseIntent(
   if (saved.value === null) return { ok: false, reason: 'conflict' };
   return { ok: true, intent };
 }
-
-const QUOTE_RATE_LIMIT = `
-local allowed = tonumber(ARGV[1])
-local denied = tonumber(ARGV[2])
-local first = tonumber(ARGV[3])
-local window = tonumber(ARGV[4])
-local invalid = tonumber(ARGV[#KEYS + 8])
-local function keyType(key)
-  local result = redis.call('TYPE', key)
-  if type(result) == ARGV[#KEYS + 7] then
-    return result.ok
-  end
-  return result
-end
-if not allowed or not denied or not first or not window then
-  return invalid
-end
-for index, key in ipairs(KEYS) do
-  local currentType = keyType(key)
-  if (currentType ~= ARGV[#KEYS + 5] and
-      currentType ~= ARGV[#KEYS + 6]) or
-      not tonumber(ARGV[index + 4]) then
-    return invalid
-  end
-end
-local function increment(index)
-  local key = KEYS[index]
-  local count = redis.call('INCR', key)
-  local ttl = redis.call('TTL', key)
-  if count == first or ttl < tonumber(ARGV[2]) then
-    redis.call('EXPIRE', key, ARGV[4])
-  end
-  return count <= tonumber(ARGV[index + 4])
-end
--- Denied IP traffic must not exhaust other buyers' resource or wallet buckets.
--- KEYS[3] is optional; wallet/resource remain KEYS[1]/KEYS[2].
-if #KEYS == 3 and not increment(3) then
-  return denied
-end
-for index = 1, 2 do
-  if not increment(index) then
-    allowed = denied
-  end
-end
-return allowed
-`;
 
 export async function checkPurchaseQuoteRateLimit(input: {
   payer: Address;
@@ -1120,45 +550,6 @@ export function purchaseAuthorizationMatches(
   );
 }
 
-const CLAIM_SIGNED_INTENT = `
-local pendingType = redis.call('TYPE', KEYS[2])
-if type(pendingType) == ARGV[2] then
-  pendingType = pendingType.ok
-end
-if (pendingType ~= ARGV[20] and pendingType ~= ARGV[21]) or
-    not tonumber(ARGV[10]) then
-  return tonumber(ARGV[3])
-end
-local current = redis.call('GET', KEYS[1])
-if not current then
-  return tonumber(ARGV[1])
-end
-local decodedOk, decoded = pcall(cjson.decode, current)
-if not decodedOk or type(decoded) ~= ARGV[2] then
-  return tonumber(ARGV[3])
-end
-if decoded.state == ARGV[4] then
-  if decoded.bindingHash ~= ARGV[5] then
-    return tonumber(ARGV[6])
-  end
-  if tonumber(ARGV[7]) >= tonumber(decoded.quoteExpiresAt) then
-    return tonumber(ARGV[8])
-  end
-  redis.call('SET', KEYS[1], ARGV[9])
-  redis.call('PERSIST', KEYS[1])
-  redis.call('ZADD', KEYS[2], ARGV[10], ARGV[11])
-  return tonumber(ARGV[12])
-end
-if decoded.state == ARGV[13] or decoded.state == ARGV[14] or
-    decoded.state == ARGV[15] or decoded.state == ARGV[16] then
-  if decoded.authorizationHash == ARGV[17] and
-      decoded.claim.signatureFingerprint == ARGV[18] then
-    return tonumber(ARGV[19])
-  end
-end
-return tonumber(ARGV[6])
-`;
-
 export type ClaimSignedPurchaseResult =
   | { ok: true; kind: 'claimed' | 'idempotent'; intent: PurchaseIntent }
   | {
@@ -1301,45 +692,6 @@ export async function claimSignedPurchaseIntent(input: {
   return { ok: true, kind: 'claimed', intent: signed };
 }
 
-const CLAIM_SETTLEMENT = `
-local pendingType = redis.call('TYPE', KEYS[2])
-if type(pendingType) == ARGV[2] then
-  pendingType = pendingType.ok
-end
-if (pendingType ~= ARGV[20] and pendingType ~= ARGV[21]) or
-    not tonumber(ARGV[12]) then
-  return tonumber(ARGV[3])
-end
-local current = redis.call('GET', KEYS[1])
-if not current then
-  return tonumber(ARGV[1])
-end
-local decodedOk, decoded = pcall(cjson.decode, current)
-if not decodedOk or type(decoded) ~= ARGV[2] then
-  return tonumber(ARGV[3])
-end
-if decoded.authorizationHash ~= ARGV[4] or
-    decoded.claim.signatureFingerprint ~= ARGV[5] then
-  return tonumber(ARGV[6])
-end
-if decoded.state == ARGV[7] then
-  if tonumber(ARGV[8]) + tonumber(ARGV[9]) >=
-      tonumber(decoded.claim.validBefore) then
-    return tonumber(ARGV[10])
-  end
-  redis.call('SET', KEYS[1], ARGV[11])
-  redis.call('ZADD', KEYS[2], ARGV[12], ARGV[13])
-  return tonumber(ARGV[14])
-end
-if decoded.state == ARGV[15] or decoded.state == ARGV[16] then
-  return tonumber(ARGV[17])
-end
-if decoded.state == ARGV[18] then
-  return tonumber(ARGV[19])
-end
-return tonumber(ARGV[6])
-`;
-
 export type ClaimPurchaseSettlementResult =
   | { ok: true; kind: 'claimed'; intent: SettlingPurchaseIntent }
   | {
@@ -1453,31 +805,6 @@ export async function claimPurchaseSettlement(input: {
     : { ok: true, kind: 'pending', intent: latest };
 }
 
-const CAS_PENDING_INTENT = `
-local pendingType = redis.call('TYPE', KEYS[2])
-if type(pendingType) == ARGV[12] then
-  pendingType = pendingType.ok
-end
-if (pendingType ~= ARGV[10] and pendingType ~= ARGV[11]) or
-    (ARGV[5] ~= ARGV[6] and not tonumber(ARGV[8])) then
-  return tonumber(ARGV[13])
-end
-local current = redis.call('GET', KEYS[1])
-if not current then
-  return tonumber(ARGV[1])
-end
-if current ~= ARGV[2] then
-  return tonumber(ARGV[3])
-end
-redis.call('SET', KEYS[1], ARGV[4])
-if ARGV[5] == ARGV[6] then
-  redis.call('ZREM', KEYS[2], ARGV[7])
-else
-  redis.call('ZADD', KEYS[2], ARGV[8], ARGV[7])
-end
-return tonumber(ARGV[9])
-`;
-
 async function casPendingIntent(input: {
   intentSalt: Hex;
   expectedRaw: string;
@@ -1510,72 +837,6 @@ async function casPendingIntent(input: {
   if (result.value === -2) return 'storage';
   return result.value === 1 ? 'updated' : 'storage';
 }
-
-const RECORD_PURCHASE_TRANSACTION = `
-local pendingType = redis.call('TYPE', KEYS[2])
-if type(pendingType) == ARGV[2] then
-  pendingType = pendingType.ok
-end
-if (pendingType ~= ARGV[14] and pendingType ~= ARGV[15]) or
-    not tonumber(ARGV[10]) then
-  return tonumber(ARGV[3])
-end
-local currentRaw = redis.call('GET', KEYS[1])
-if not currentRaw then
-  return tonumber(ARGV[1])
-end
-local currentOk, current = pcall(cjson.decode, currentRaw)
-if not currentOk or type(current) ~= ARGV[2] then
-  return tonumber(ARGV[3])
-end
-if current.state == ARGV[8] then
-  if current.txHash == ARGV[5] then
-    return tonumber(ARGV[13])
-  end
-  return tonumber(ARGV[9])
-end
-if (current.state ~= ARGV[6] and current.state ~= ARGV[7]) or
-    current.attemptId ~= ARGV[4] or
-    (current.txHash and current.txHash ~= ARGV[5]) then
-  return tonumber(ARGV[9])
-end
-current.txHash = ARGV[5]
-current.nextReconcileAt = tonumber(ARGV[10])
-local nextRaw = cjson.encode(current)
-redis.call('SET', KEYS[1], nextRaw)
-redis.call('ZADD', KEYS[2], ARGV[10], ARGV[11])
-return tonumber(ARGV[12])
-`;
-
-const ADOPT_RECONCILED_TRANSACTION = `
-local pendingType = redis.call('TYPE', KEYS[2])
-if type(pendingType) == ARGV[2] then
-  pendingType = pendingType.ok
-end
-if (pendingType ~= ARGV[13] and pendingType ~= ARGV[14]) or
-    not tonumber(ARGV[10]) then
-  return tonumber(ARGV[3])
-end
-local currentRaw = redis.call('GET', KEYS[1])
-if not currentRaw then
-  return tonumber(ARGV[1])
-end
-local currentOk, current = pcall(cjson.decode, currentRaw)
-if not currentOk or type(current) ~= ARGV[2] then
-  return tonumber(ARGV[3])
-end
-if (current.state ~= ARGV[4] and current.state ~= ARGV[5]) or
-    current.reconcileLeaseId ~= ARGV[6] or
-    current.authorizationHash ~= ARGV[7] then
-  return tonumber(ARGV[8])
-end
-current.txHash = ARGV[9]
-current.nextReconcileAt = tonumber(ARGV[10])
-local nextRaw = cjson.encode(current)
-redis.call('SET', KEYS[1], nextRaw)
-redis.call('ZADD', KEYS[2], ARGV[10], ARGV[11])
-return tonumber(ARGV[12])
-`;
 
 async function adoptReconciledTransaction(input: {
   intentSalt: Hex;
@@ -1701,51 +962,6 @@ export async function markPurchaseIndeterminate(input: {
   return result.value === 1 ? 'updated' : 'storage';
 }
 
-// settle response と status/cron lease が競合しても、txHash を古い raw CAS で落とさず
-// 最新 intent に merge する。response-unknown が二重送金や回復不能へ波及するのを断つ。
-const MARK_PURCHASE_INDETERMINATE = `
-local pendingType = redis.call('TYPE', KEYS[2])
-if type(pendingType) == ARGV[2] then
-  pendingType = pendingType.ok
-end
-if (pendingType ~= ARGV[16] and pendingType ~= ARGV[17]) or
-    not tonumber(ARGV[12]) or not tonumber(ARGV[13]) then
-  return tonumber(ARGV[3])
-end
-local currentRaw = redis.call('GET', KEYS[1])
-if not currentRaw then
-  return tonumber(ARGV[1])
-end
-local currentOk, current = pcall(cjson.decode, currentRaw)
-if not currentOk or type(current) ~= ARGV[2] then
-  return tonumber(ARGV[3])
-end
-if current.state == ARGV[4] then
-  if ARGV[10] ~= ARGV[11] and current.txHash ~= ARGV[10] then
-    return tonumber(ARGV[9])
-  end
-  return tonumber(ARGV[5])
-end
-if (current.state ~= ARGV[6] and current.state ~= ARGV[7]) or
-    current.attemptId ~= ARGV[8] or
-    (current.txHash and ARGV[10] ~= ARGV[11] and
-     current.txHash ~= ARGV[10]) then
-  return tonumber(ARGV[9])
-end
-if ARGV[10] ~= ARGV[11] then
-  current.txHash = ARGV[10]
-end
-if current.state == ARGV[6] then
-  current.state = ARGV[7]
-  current.indeterminateAt = tonumber(ARGV[12])
-end
-current.nextReconcileAt = tonumber(ARGV[13])
-local nextRaw = cjson.encode(current)
-redis.call('SET', KEYS[1], nextRaw)
-redis.call('ZADD', KEYS[2], ARGV[13], ARGV[14])
-return tonumber(ARGV[15])
-`;
-
 export async function markPurchaseFailedPrebroadcast(input: {
   intentSalt: Hex;
   attemptId: string;
@@ -1795,39 +1011,6 @@ export async function markPurchaseFailedPrebroadcast(input: {
   return result.value === 1 ? 'updated' : 'storage';
 }
 
-const MARK_PURCHASE_FAILED_PREBROADCAST = `
-local pendingType = redis.call('TYPE', KEYS[2])
-if type(pendingType) == ARGV[2] then
-  pendingType = pendingType.ok
-end
-if (pendingType ~= ARGV[14] and pendingType ~= ARGV[15]) or
-    not tonumber(ARGV[10]) then
-  return tonumber(ARGV[3])
-end
-local currentRaw = redis.call('GET', KEYS[1])
-if not currentRaw then
-  return tonumber(ARGV[1])
-end
-local currentOk, current = pcall(cjson.decode, currentRaw)
-if not currentOk or type(current) ~= ARGV[2] then
-  return tonumber(ARGV[3])
-end
-if current.state == ARGV[4] then
-  return tonumber(ARGV[5])
-end
-if (current.state ~= ARGV[6] and current.state ~= ARGV[7]) or
-    current.attemptId ~= ARGV[8] or current.txHash then
-  return tonumber(ARGV[9])
-end
-current.state = ARGV[4]
-current.failedAt = tonumber(ARGV[10])
-current.failureReason = ARGV[11]
-local nextRaw = cjson.encode(current)
-redis.call('SET', KEYS[1], nextRaw)
-redis.call('ZREM', KEYS[2], ARGV[12])
-return tonumber(ARGV[13])
-`;
-
 function purchaseGrant(
   intent: ClaimedPurchaseIntentBase,
   txHash: Hex,
@@ -1865,129 +1048,6 @@ function purchaseRecord(
     ...purchaseGrant(intent, txHash, purchasedAt),
   };
 }
-
-const FINALIZE_PURCHASE = `
-local function keyType(key)
-  local result = redis.call('TYPE', key)
-  if type(result) == ARGV[2] then
-    return result.ok
-  end
-  return result
-end
-local libraryType = keyType(KEYS[3])
-local pendingType = keyType(KEYS[5])
-if (libraryType ~= ARGV[28] and libraryType ~= ARGV[29]) or
-    (pendingType ~= ARGV[28] and pendingType ~= ARGV[29]) or
-    not tonumber(ARGV[19]) or not tonumber(ARGV[20]) or
-    not tonumber(ARGV[21]) then
-  return tonumber(ARGV[3])
-end
-local currentRaw = redis.call('GET', KEYS[1])
-if not currentRaw then
-  return tonumber(ARGV[1])
-end
-local currentOk, current = pcall(cjson.decode, currentRaw)
-if not currentOk or type(current) ~= ARGV[2] then
-  return tonumber(ARGV[3])
-end
-if current.state == ARGV[4] then
-  if current.txHash ~= ARGV[5] or
-      current.authorizationHash ~= ARGV[6] then
-    return tonumber(ARGV[7])
-  end
-  local ownRaw = redis.call('GET', KEYS[2])
-  local purchaseRaw = redis.call('GET', KEYS[4])
-  if not ownRaw or not purchaseRaw or ownRaw ~= ARGV[25] or
-      purchaseRaw ~= ARGV[26] then
-    return tonumber(ARGV[3])
-  end
-  redis.call('ZADD', KEYS[3], ARGV[20], ARGV[18])
-  redis.call('ZREM', KEYS[5], ARGV[12])
-  return tonumber(ARGV[8])
-end
-if currentRaw ~= ARGV[9] then
-  return tonumber(ARGV[7])
-end
-if current.state ~= ARGV[10] and current.state ~= ARGV[11] then
-  return tonumber(ARGV[7])
-end
-if current.authorizationHash ~= ARGV[6] then
-  return tonumber(ARGV[7])
-end
-if current.txHash and current.txHash ~= ARGV[5] then
-  return tonumber(ARGV[7])
-end
-
-local purchaseRaw = redis.call('GET', KEYS[4])
-local ownRaw = redis.call('GET', KEYS[2])
-if (purchaseRaw or ARGV[27]) ~= ARGV[26] or
-    (ownRaw or ARGV[27]) ~= ARGV[25] then
-  return tonumber(ARGV[7])
-end
-if purchaseRaw then
-  local purchaseOk, purchase = pcall(cjson.decode, purchaseRaw)
-  if not purchaseOk or type(purchase) ~= ARGV[2] or
-      purchase.intentSalt ~= ARGV[12] or purchase.txHash ~= ARGV[5] or
-      purchase.nonce ~= current.claim.nonce then
-    return tonumber(ARGV[7])
-  end
-end
-
-local grantOk, grant = pcall(cjson.decode, ARGV[13])
-local initialOwnOk, initialOwn = pcall(cjson.decode, ARGV[14])
-if not grantOk or not initialOwnOk or type(grant) ~= ARGV[2] or
-    type(initialOwn) ~= ARGV[2] then
-  return tonumber(ARGV[3])
-end
-local nextOwn = initialOwn
-if ownRaw then
-  local ownOk, own = pcall(cjson.decode, ownRaw)
-  if not ownOk or type(own) ~= ARGV[2] or own.version ~= tonumber(ARGV[15]) or
-      own.policy ~= ARGV[16] or own.payer ~= ARGV[17] or
-      own.resourceId ~= ARGV[18] or type(own.grants) ~= ARGV[2] then
-    return tonumber(ARGV[3])
-  end
-  local found = false
-  for _, existing in ipairs(own.grants) do
-    if existing.intentSalt == ARGV[12] then
-      if existing.txHash ~= ARGV[5] or
-          existing.contentRevision ~= grant.contentRevision then
-        return tonumber(ARGV[7])
-      end
-      found = true
-    end
-  end
-  if not found then
-    table.insert(own.grants, grant)
-  end
-  if tonumber(ARGV[19]) < tonumber(own.firstPurchasedAt) then
-    own.firstPurchasedAt = tonumber(ARGV[19])
-  end
-  if not own.latestGrant or
-      tonumber(grant.contentRevision) > tonumber(own.latestGrant.contentRevision) or
-      (tonumber(grant.contentRevision) == tonumber(own.latestGrant.contentRevision) and
-       tonumber(grant.purchasedAt) > tonumber(own.latestGrant.purchasedAt)) then
-    -- grants[] に入れた grant と同じ Lua テーブルを latestGrant にも参照させると、Upstash の
-    -- cjson.encode は「同一テーブルの二重参照」を循環と誤検知して nil+error を返し (例外にならない)、
-    -- 直後の SET が壊れて finalize が永久に失敗する (2026-09-08 Amoy 実測・同一商品の 2 回目購入)。
-    -- 本家 Redis / WASM ハーネスでは再現しない。JSON から decode し直した別テーブルを持たせる。
-    own.latestGrant = cjson.decode(ARGV[13])
-  end
-  if tonumber(ARGV[19]) > tonumber(own.updatedAt) then
-    own.updatedAt = tonumber(ARGV[19])
-  end
-  nextOwn = own
-end
-
-redis.call('SET', KEYS[2], cjson.encode(nextOwn))
-redis.call('ZADD', KEYS[3], ARGV[20], ARGV[18])
-if not purchaseRaw then
-  redis.call('SET', KEYS[4], ARGV[22])
-end
-redis.call('SET', KEYS[1], ARGV[23])
-redis.call('ZREM', KEYS[5], ARGV[12])
-return tonumber(ARGV[24])
-`;
 
 export type FinalizeHostedPurchaseResult =
   | {
@@ -2220,173 +1280,6 @@ export async function finalizeHostedPurchase(input: {
   );
 }
 
-function parseGrant(value: unknown): PurchaseGrant | null {
-  if (!isRecord(value)) return null;
-  const intentSalt = parseHex32(value.intentSalt);
-  const metadata = parseMetadata(value.metadata);
-  const txHash = parseHex32(value.txHash);
-  const nonce = parseHex32(value.nonce);
-  if (
-    !intentSalt ||
-    typeof value.contentRevision !== 'number' ||
-    !Number.isSafeInteger(value.contentRevision) ||
-    value.contentRevision < 1 ||
-    typeof value.contentRef !== 'string' ||
-    value.contentRef.length === 0 ||
-    !metadata ||
-    typeof value.chainId !== 'number' ||
-    !Number.isSafeInteger(value.chainId) ||
-    value.chainId <= 0 ||
-    !txHash ||
-    !nonce ||
-    !isSafeTimestamp(value.purchasedAt)
-  ) {
-    return null;
-  }
-  if (metadata.license && (metadata.license.contentRef !== value.contentRef || value.contentRevision !== 1 || metadata.license.tokenChainId !== value.chainId)) return null;
-  return {
-    intentSalt,
-    contentRevision: value.contentRevision,
-    contentRef: value.contentRef,
-    metadata,
-    chainId: value.chainId,
-    txHash,
-    nonce,
-    purchasedAt: value.purchasedAt,
-  };
-}
-
-export function parsePurchaseOwnership(
-  raw: unknown,
-): PurchaseOwnership | null {
-  if (typeof raw !== 'string') return null;
-  let value: unknown;
-  try {
-    value = JSON.parse(raw) as unknown;
-  } catch {
-    return null;
-  }
-  if (!isRecord(value)) return null;
-  const payer = parseAddress(value.payer);
-  const latestGrant = parseGrant(value.latestGrant);
-  if (
-    value.version !== PURCHASE_INTENT_VERSION ||
-    value.policy !== PURCHASE_REVISION_POLICY ||
-    !payer ||
-    typeof value.resourceId !== 'string' ||
-    value.resourceId.length === 0 ||
-    !isSafeTimestamp(value.firstPurchasedAt) ||
-    !isSafeTimestamp(value.updatedAt) ||
-    !Array.isArray(value.grants) ||
-    !latestGrant
-  ) {
-    return null;
-  }
-  const parsedGrants = value.grants.map(parseGrant);
-  if (
-    parsedGrants.length === 0 ||
-    parsedGrants.some((grant) => grant === null)
-  ) {
-    return null;
-  }
-  const grants = parsedGrants as PurchaseGrant[];
-  const intentSalts = new Set<string>();
-  for (const grant of grants) {
-    if (
-      intentSalts.has(grant.intentSalt) ||
-      grant.contentRef !==
-        hostedContentKey(value.resourceId, grant.contentRevision)
-    ) {
-      return null;
-    }
-    intentSalts.add(grant.intentSalt);
-  }
-  const expectedLatest = grants.reduce((latest, grant) =>
-    grant.contentRevision > latest.contentRevision ||
-    (grant.contentRevision === latest.contentRevision &&
-      grant.purchasedAt > latest.purchasedAt)
-      ? grant
-      : latest,
-  );
-  const expectedFirstPurchasedAt = grants.reduce(
-    (earliest, grant) => Math.min(earliest, grant.purchasedAt),
-    grants[0]!.purchasedAt,
-  );
-  if (
-    canonicalHash(latestGrant) !== canonicalHash(expectedLatest) ||
-    value.firstPurchasedAt !== expectedFirstPurchasedAt
-  ) {
-    return null;
-  }
-  return {
-    version: PURCHASE_INTENT_VERSION,
-    policy: PURCHASE_REVISION_POLICY,
-    payer,
-    resourceId: value.resourceId,
-    firstPurchasedAt: value.firstPurchasedAt,
-    updatedAt: value.updatedAt,
-    grants,
-    latestGrant,
-  };
-}
-
-export function parseHostedPurchaseRecord(
-  raw: unknown,
-): HostedPurchaseRecord | null {
-  if (typeof raw !== 'string') return null;
-  let value: unknown;
-  try {
-    value = JSON.parse(raw) as unknown;
-  } catch {
-    return null;
-  }
-  if (!isRecord(value)) return null;
-  const grant = parseGrant(value);
-  const payer = parseAddress(value.payer);
-  const merchant = parseAddress(value.merchant);
-  const feeReceiver = parseAddress(value.feeReceiver);
-  const token = parseAddress(value.token);
-  const forwarder = parseAddress(value.forwarder);
-  const commitVersion = parseHex32(value.commitVersion);
-  const merchantValue = parseCanonicalDecimal(value.merchantValue);
-  const feeValue = parseCanonicalDecimal(value.feeValue);
-  if (
-    value.version !== PURCHASE_INTENT_VERSION ||
-    !grant ||
-    !payer ||
-    typeof value.resourceId !== 'string' ||
-    value.resourceId.length === 0 ||
-    !merchant ||
-    merchantValue === null ||
-    !feeReceiver ||
-    feeValue === null ||
-    !token ||
-    !forwarder ||
-    !commitVersion ||
-    grant.contentRef !==
-      hostedContentKey(value.resourceId, grant.contentRevision) ||
-    !isAddressEqual(grant.metadata.payTo, merchant) ||
-    typeof value.deploymentVersion !== 'string' ||
-    value.deploymentVersion.length === 0
-  ) {
-    return null;
-  }
-  return {
-    version: PURCHASE_INTENT_VERSION,
-    payer,
-    resourceId: value.resourceId,
-    merchant,
-    merchantValue,
-    feeReceiver,
-    feeValue,
-    token,
-    forwarder,
-    commitVersion,
-    deploymentVersion: value.deploymentVersion,
-    ...grant,
-  };
-}
-
 export type SettledPurchaseAccessResult =
   | {
       ok: true;
@@ -2396,10 +1289,6 @@ export type SettledPurchaseAccessResult =
       grant: PurchaseGrant;
     }
   | { ok: false; reason: 'not_found' | 'storage' | 'corrupt' | 'conflict' };
-
-const READ_LIBRARY_SCORE = `
-return redis.call('ZSCORE', KEYS[1], ARGV[1])
-`;
 
 export async function readSettledPurchaseAccess(
   intentSalt: Hex,
@@ -2460,11 +1349,6 @@ export async function readSettledPurchaseAccess(
   return { ok: true, intent, ownership, purchase, grant };
 }
 
-const LIST_PENDING_INTENTS = `
-return redis.call('ZRANGEBYSCORE', KEYS[1], ARGV[1], ARGV[2],
-  ARGV[3], ARGV[4], ARGV[5])
-`;
-
 export async function listPendingPurchaseIntents(
   now = Date.now(),
   limit = PURCHASE_RECONCILE_BATCH_SIZE,
@@ -2480,31 +1364,6 @@ export async function listPendingPurchaseIntents(
   );
   return result.ok ? result.value : 'storage';
 }
-
-const REMOVE_TERMINAL_PENDING_MEMBER = `
-local pendingType = redis.call('TYPE', KEYS[2])
-if type(pendingType) == ARGV[1] then
-  pendingType = pendingType.ok
-end
-if pendingType ~= ARGV[2] and pendingType ~= ARGV[3] then
-  return tonumber(ARGV[4])
-end
-local currentRaw = redis.call('GET', KEYS[1])
-if not currentRaw then
-  redis.call('ZREM', KEYS[2], ARGV[5])
-  return tonumber(ARGV[6])
-end
-local currentOk, current = pcall(cjson.decode, currentRaw)
-if not currentOk or type(current) ~= ARGV[1] then
-  return tonumber(ARGV[7])
-end
-if current.state == ARGV[8] or current.state == ARGV[9] or
-    current.state == ARGV[10] then
-  redis.call('ZREM', KEYS[2], ARGV[5])
-  return tonumber(ARGV[6])
-end
-return tonumber(ARGV[11])
-`;
 
 async function removeTerminalPendingMember(
   intentSalt: string,
@@ -2530,26 +1389,6 @@ async function removeTerminalPendingMember(
   if (result.value === -3) return 'corrupt';
   return result.value === 1 ? 'removed' : 'active';
 }
-
-const QUARANTINE_PENDING_MEMBER = `
-local function keyType(key)
-  local result = redis.call('TYPE', key)
-  if type(result) == ARGV[1] then
-    return result.ok
-  end
-  return result
-end
-local pendingType = keyType(KEYS[1])
-local quarantineType = keyType(KEYS[2])
-if (pendingType ~= ARGV[2] and pendingType ~= ARGV[3]) or
-    (quarantineType ~= ARGV[2] and quarantineType ~= ARGV[3]) or
-    not tonumber(ARGV[4]) then
-  return tonumber(ARGV[5])
-end
-redis.call('ZADD', KEYS[2], ARGV[4], ARGV[6])
-redis.call('ZREM', KEYS[1], ARGV[6])
-return tonumber(ARGV[7])
-`;
 
 async function quarantinePendingMember(
   member: string,

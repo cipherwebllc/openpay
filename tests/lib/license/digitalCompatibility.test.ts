@@ -21,7 +21,8 @@ const original = {
 };
 describe('digital purchase Lua byte compatibility', () => {
   it('preserves every pre-existing script byte for byte', () => {
-    const source = readFileSync('lib/x402/purchaseIntent.ts', 'utf8');
+    // R3a: Lua 本文は lib/x402/purchase/lua.ts へ移した (SHA は分割前と同じ)。
+    const source = readFileSync('lib/x402/purchase/lua.ts', 'utf8');
     const scripts = Object.fromEntries([...source.matchAll(/const ([A-Z_]+) = `([\s\S]*?)`;/g)].map((m) => [m[1], createHash('sha256').update(m[2]!).digest('hex')]));
     for (const [name, hash] of Object.entries(original)) expect(scripts[name], name).toBe(hash);
   });

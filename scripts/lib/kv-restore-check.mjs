@@ -44,7 +44,7 @@ function licenseDefinition(v) {
   } catch { return null; } // A corrupt tuple is quarantined, never treated as a different license.
 }
 
-// Match the projections in purchaseIntent.parseGrant/parseMetadata and storePaymentSnapshot.
+// Match the projections in lib/x402/purchase/parse.ts (parseGrant/parseMetadata) and storePaymentSnapshot.
 function metadata(v) {
   if (!object(v) || !isAddress(v.owner ?? '') || !isAddress(v.payTo ?? '') || typeof v.title !== 'string' || !v.title
     || !decimal(v.priceJpyc) || !['url', 'text'].includes(v.contentKind)
