@@ -3,7 +3,8 @@
 // - それ以外の全ページは default-deny (frame-ancestors 'self' + X-Frame-Options SAMEORIGIN)
 // - 2 ルールは排他 (tip に X-Frame-Options が付くと CSP を見ない古い実装で埋め込みが壊れる)
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match';
 import * as chains from 'viem/chains';
 import config from '../../next.config.mjs';
@@ -197,7 +198,11 @@ describe('next.config.mjs headers() — baseline and report-only CSP (C17)', () 
 
   it('allows every rebuilt handle iframe origin and WalletConnect verification frames', async () => {
     const csp = await reportOnlyDirectives();
-    const source = readFileSync('lib/handle.ts', 'utf8');
+    // facade + lib/handle/ 配下の全ファイル (iframe builder が別モジュールへ移っても取りこぼさない)。
+    const handleFiles = ['lib/handle.ts', ...readdirSync('lib/handle', { recursive: true, encoding: 'utf8' })
+      .filter((file) => /\.tsx?$/.test(file))
+      .map((file) => join('lib/handle', file))];
+    const source = handleFiles.map((file) => readFileSync(file, 'utf8')).join('\n');
     const origins = [...source.matchAll(/src: `((https:\/\/)[^/]+)/g)].map((match) => match[1]);
     expect(origins).toHaveLength(9);
     for (const origin of [...origins, 'https://verify.walletconnect.org', 'https://verify.walletconnect.com', 'https://secure.walletconnect.org']) {
