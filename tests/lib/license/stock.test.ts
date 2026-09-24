@@ -4,7 +4,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress, toHex } from 'viem';
 import { createFakeRedisStore, runRedisLua, closeRedisLuaEngine, type FakeRedisStore } from '../../_helpers/redisLua';
 
-const h = vi.hoisted(() => ({ store: null as FakeRedisStore | null, failBefore: false, failAfter: false, calls: [] as { script: string; keys: string[]; args: string[] }[], enabled: true }));
+const h = vi.hoisted(() => ({ store: null as FakeRedisStore | null, failBefore: false, failAfter: false, calls: [] as { script: string; keys: string[]; args: string[] }[], enabled: true,
+  // R3c pin 用: 値を返すと Lua を実行せずにその返り値にする (undefined なら本物の Lua)。
+  evalOverride: null as null | ((script: string, keys: string[], args: string[]) => unknown) }));
 vi.mock('@/lib/env', () => ({ env: { enableCreatorStore: true, get enableLicenseNft() { return h.enabled; }, networkEnv: 'testnet', licenseNftAmoy: '0x3333333333333333333333333333333333333333' } }));
 vi.mock('@/lib/kv', () => ({
   kvGet: async (key: string) => ({ ok: true, value: h.store!.strings.get(key) ?? null }),
@@ -16,6 +18,7 @@ vi.mock('@/lib/kv', () => ({
   kvEval: async (script: string, keys: string[], args: string[]) => {
     h.calls.push({ script, keys, args });
     if (h.failBefore) { h.failBefore = false; return { ok: false, reason: 'network_error' }; }
+    const forced = h.evalOverride?.(script, keys, args); if (forced !== undefined) return { ok: true, value: forced };
     const value = await runRedisLua(script, keys, args, h.store!);
     if (h.failAfter) { h.failAfter = false; return { ok: false, reason: 'network_error' }; }
     return { ok: true, value };
@@ -26,7 +29,7 @@ vi.mock('@/lib/x402/hostedStore', () => ({ hostedContentKey: (id: string, revisi
 vi.mock('@/lib/x402/facilitatorSettle', () => ({ parseFacilitatorRequest: vi.fn() }));
 vi.mock('@/lib/x402/paymentRedelivery', () => ({ paymentRedeliveryIdentity: vi.fn() }));
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
-import { createQuotedPurchaseIntent, claimSignedPurchaseIntent, claimPurchaseSettlement, finalizeHostedPurchase, getPurchaseIntent, markPurchaseFailedPrebroadcast, markPurchaseIndeterminate, reconcilePurchaseIntent, purchaseIntentKey, purchasePendingIndexKey, parsePurchaseIntent, type PurchaseAuthorizationClaim, type PurchaseIntent } from '@/lib/x402/purchaseIntent';
+import { createQuotedPurchaseIntent, claimSignedPurchaseIntent, claimPurchaseSettlement, finalizeHostedPurchase, readSettledPurchaseAccess, hostedPurchaseRecordKey, purchaseOwnershipKey, purchaseLibraryKey, getPurchaseIntent, markPurchaseFailedPrebroadcast, markPurchaseIndeterminate, reconcilePurchaseIntent, purchaseIntentKey, purchasePendingIndexKey, parsePurchaseIntent, type PurchaseAuthorizationClaim, type PurchaseIntent } from '@/lib/x402/purchaseIntent';
 import { createLicenseDefinition } from '@/lib/license/definition';
 import { LICENSE_DUE_INDEX, LICENSE_HOLD_INDEX, LICENSE_OBLIGATION_INDEX, licenseStockKey, licenseReservationKey, licenseQuotaKey, licenseObligationKey } from '@/lib/license/stock';
 import { repairLicenseIndexes } from '@/lib/license/repair';
@@ -69,7 +72,7 @@ async function settling(input: Awaited<ReturnType<typeof quote>>) {
 function chain(used = false, timestamp = BigInt(NOW / 1000 + 601)): LicenseReconcileChain {
   return { observe: vi.fn(async () => ({ number: 100n, hash: toHex(10n, { size: 32 }), timestamp, used })), transactions: vi.fn(async () => [TX]), receiptMatches: vi.fn(async () => true) };
 }
-beforeEach(() => { h.store = createFakeRedisStore(NOW); h.failBefore = false; h.failAfter = false; h.calls = []; h.enabled = true; counter = 0; });
+beforeEach(() => { h.store = createFakeRedisStore(NOW); h.failBefore = false; h.failAfter = false; h.calls = []; h.enabled = true; h.evalOverride = null; counter = 0; });
 afterAll(closeRedisLuaEngine);
 
 describe('license stock CAS: real Lua', () => {
@@ -197,5 +200,69 @@ describe('license recovery boundaries', () => {
     h.store!.delete(purchasePendingIndexKey()); expect(await repairLicenseIndexes(NOW + 3000)).toBe(true);
     expect(h.store!.zsets.get('store:license:repair:quarantine')?.has('hold:' + input.intentSalt)).toBe(true);
     expect(h.store!.zsets.get(LICENSE_HOLD_INDEX)?.has(input.intentSalt)).toBe(true); expect(stock().reserved).toBe(1);
+  });
+});
+
+// R3c で追加 (分割前のコード 1126ea30 で採取): records / library / finalize を lib/x402/purchase/* に移す前に、
+// license 商品の settled access 読み取りと、finalize の license 固有の分岐を facade 経由で固定する。
+//   - access 読み取りは license でも保存値そのもの (flag OFF でも読める)・finalize は flag OFF で EVAL せず not_found
+//   - FINALIZE の -1/-3 で raced access が同じ txHash を示しても license は idempotent にしない (digital との差)
+describe('R3c pins: license settled access and license-only finalize branches', () => {
+  const isFinalize = (args: string[]) => { try { return JSON.parse(args.at(-1)!).hook === 'finalize'; } catch { return false; } };
+  const finalizeCalls = () => h.calls.filter((call) => isFinalize(call.args)).length;
+  const libraryReads = () => h.calls.filter((call) => call.keys.length === 1 && call.keys[0]!.startsWith('store:lib:')).length;
+  async function finalized() {
+    const input = await quote(); const intent = await settling(input);
+    expect(await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX, settledAt: NOW + 2000 })).toMatchObject({ ok: true, kind: 'finalized' });
+    return { input, intent };
+  }
+  it('access read returns the stored license intent / ownership / record and grant; it is not gated by the flag', async () => {
+    const { input, intent } = await finalized();
+    const payer = input.claim.payer;
+    const ownRaw = h.store!.strings.get(purchaseOwnershipKey(payer, ID))!;
+    const recordRaw = h.store!.strings.get(hostedPurchaseRecordKey(80002, TX))!;
+    const grant = { intentSalt: input.intentSalt, contentRevision: 1, contentRef: 'x402:hosted:' + ID + ':content:1', metadata: intent.metadata, chainId: 80002, txHash: TX, nonce: input.claim.nonce, purchasedAt: NOW + 2000 };
+    for (const enabled of [true, false]) {
+      h.enabled = enabled; h.calls = [];
+      const access = await readSettledPurchaseAccess(input.intentSalt);
+      if (!access.ok) throw new Error(access.reason);
+      expect(access.intent).toEqual(parsePurchaseIntent(h.store!.strings.get(purchaseIntentKey(input.intentSalt))!));
+      expect(access.intent).toMatchObject({ state: 'settled', txHash: TX, settledAt: NOW + 2000, metadata: { productKind: 'license' } });
+      expect(access.ownership).toEqual(JSON.parse(ownRaw));
+      expect(access.purchase).toEqual(JSON.parse(recordRaw));
+      expect(access.grant).toEqual(grant);
+      expect(access.ownership.grants).toEqual([grant]);
+      expect(access.purchase).toMatchObject({ ...grant, payer, resourceId: ID, merchant: MERCHANT, feeReceiver: FEE, forwarder: FORWARDER });
+      // license の access 読み取りは library score だけを EVAL する (license wrapper を使わない)。
+      expect(h.calls.map((call) => [call.keys, call.args])).toEqual([[[purchaseLibraryKey(payer)], [ID]]]);
+    }
+  });
+  it('finalize with the flag OFF is not_found without any EVAL or write', async () => {
+    const input = await quote(); await settling(input);
+    const before = [...h.store!.strings.entries()]; h.enabled = false; h.calls = [];
+    expect(await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX, settledAt: NOW + 2000 })).toEqual({ ok: false, reason: 'not_found' });
+    expect(h.calls).toEqual([]); expect([...h.store!.strings.entries()]).toEqual(before);
+  });
+  it('a -1 FINALIZE retries 4 times and a -3 is corrupt even when the raced access already shows this txHash', async () => {
+    const { input } = await finalized();
+    h.evalOverride = (_script, _keys, args) => isFinalize(args) ? -1 : undefined; h.calls = [];
+    expect(await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX })).toEqual({ ok: false, reason: 'conflict' });
+    expect(finalizeCalls()).toBe(5); expect(libraryReads()).toBe(5);
+    h.evalOverride = (_script, _keys, args) => isFinalize(args) ? -3 : undefined; h.calls = [];
+    expect(await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX })).toEqual({ ok: false, reason: 'corrupt' });
+    expect(finalizeCalls()).toBe(1); expect(libraryReads()).toBe(1);
+    h.evalOverride = null;
+    expect(await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX })).toMatchObject({ ok: true, kind: 'idempotent' });
+    expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
+  });
+  // 現状の挙動の固定 (分割では変えない): 同時 finalize の敗者は license では raced access を使わないため
+  // corrupt を返す (digital は idempotent)。勝者の 1 件だけが売上になり、再実行は idempotent に収束する。
+  it('concurrent double finalize of one license intent: one finalized, the loser corrupt, one sale; a replay is idempotent', async () => {
+    const input = await quote(); await settling(input);
+    const results = await Promise.all([0, 1].map(() => finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX, settledAt: NOW + 2000 })));
+    expect(results.map((result) => result.ok ? result.kind : result.reason).sort()).toEqual(['corrupt', 'finalized']);
+    expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
+    expect(await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX })).toMatchObject({ ok: true, kind: 'idempotent' });
+    expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
   });
 });
