@@ -12,10 +12,9 @@ import { useLocale, useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { ConnectButton } from './ConnectButton';
-import { InfoTooltip } from './InfoTooltip';
+import { breakdownRow } from './PaymentBreakdownRows';
 import { OnrampCta } from './OnrampCta';
 import { ResultRow } from './ResultRow';
-import { Row } from './Row';
 import { SmartAccountFallbackBanner } from './SmartAccountFallbackBanner';
 import { RelayFallbackBanner } from './RelayFallbackBanner';
 import {
@@ -49,11 +48,8 @@ import {
   type MobileOrderFeeKind,
 } from '@/lib/mobileOrderFee';
 import { relayErrorKey } from '@/lib/relay/relayErrorMessage';
-import {
-  isFallbackSafeRelayError,
-  isRelayIpRateLimitedError,
-  isRelayResponseUnknownError,
-} from '@/lib/relay/relayResponseError';
+import { isFallbackSafeRelayError } from '@/lib/relay/relayResponseError';
+import { deriveCheckoutGuards } from '@/lib/paymentFlowGuards/checkout';
 import { generateStatusToken } from '@/lib/orderStatusToken';
 import { isOrderTokenLike } from '@/lib/orderToken';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
@@ -433,33 +429,6 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     totalCustomerOutflow,
   );
 
-  // relay 送信中に preflight の切替操作と競合して route が standard へ変わっていても、
-  // response-unknown / IP 制限の再送封鎖を外さないため current route とは独立に判定する。
-  const relayResponseUnknown = isRelayResponseUnknownError(relay.error);
-  const relayAmbiguous = relay.recoveryState != null || relayResponseUnknown;
-  // Pimlico は broadcast 後の receipt 取得失敗を relay と同じ unknown として保持する。
-  // current route が後から変わってもラッチを外さず、2 本目の UserOperation 送信を防ぐ。
-  const gaslessAmbiguous = gasless.isUnknown;
-  // pending record store (localStorage) が読めず未解決 UserOp の有無を判定できない状態。
-  // broadcast 済みとは言い切れないので ambiguous とは別扱いにし、gasless 経路だけを塞ぐ
-  // (standard は localStorage に依存しないため、この fail-closed を波及させない)。
-  const gaslessStoreUnavailable =
-    !isStandard && !useRelay && gasless.pendingStoreUnavailable;
-  const relayIpRateLimited = isRelayIpRateLimitedError(relay.error)
-    ? relay.error
-    : null;
-  const paymentFlowPending = standard.isRestoring || relay.isRestoring
-    ? true
-    : relayAmbiguous || gaslessAmbiguous
-    ? true
-    : isStandard
-      ? standard.isPending
-      : useRelay
-        ? relay.isPending
-        : gasless.isPending;
-  const flowPending = orderAdmissionPending || paymentFlowPending;
-  // relay は gas quote も smart account も不要なので readiness は常に満たす。
-  const gasQuoteReady = isStandard || useRelay || activeQuote.data !== undefined;
   // 運営の赤字防止: merchant が 0 になるケースは送信を block (fee>0 の Phase 2 で
   // 主に効く。fee=0 の現状で発火するのは gasless/merchant かつ total < gas のみ)。
   //   gasless / customer:  total < fee → merchant = 0
@@ -476,46 +445,39 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     effectiveGasAmount,
   });
 
-  // 送金が確定 (または broadcast 済で確定しうる) 後の再送信を禁止。再送すると同一
-  // 受取人へ 2 件目の on-chain 送金 = 二重支払いになる。revert (送金未成立) は安全
-  // なので再試行を許す。standard の fee-error は merchant transfer が確定済なので
-  // main ボタンは禁止し、fee の再送は専用 retryFee ボタンのみに限定する
-  // (PaymentForm と同一防御)。
-  const settledNoRetry =
-    relayAmbiguous ||
-    gaslessAmbiguous ||
-    !!relayIpRateLimited ||
-    (!isStandard && !useRelay && !!gasless.data?.success) ||
-    (useRelay &&
-      !!relay.data &&
-      (relay.data.success || !!relay.data.pending)) ||
-    relay.hasActiveIntent ||
-    standard.hasActiveIntent ||
-    (isStandard && (!!standard.data || standard.isFeeError || standard.isUnknown));
+  // 再送封鎖・flow pending・送信可否は /checkout 専用の policy (注文受付と同一店舗 hold を含む) に置く
+  // (R14・式は移動のみ)。admission の await 後は canSubmit でなく paymentReady を読み直す (onSubmit)。
+  const {
+    relayAmbiguous,
+    gaslessAmbiguous,
+    gaslessStoreUnavailable,
+    relayIpRateLimited,
+    flowPending,
+    gasQuoteReady,
+    settledNoRetry,
+    paymentReady,
+    canSubmit,
+  } = deriveCheckoutGuards({
+    isStandard,
+    useRelay,
+    standard,
+    relay,
+    gasless,
+    orderAdmissionPending,
+    activeQuote,
+    isConnected,
+    wrongChain,
+    saData,
+    breakdown,
+    insufficientBalance,
+    merchantUnderflow,
+  });
   const standardUnknownTxHash = standard.isFeeUnknown
     ? standard.feeTxHash
     : standard.merchantTxHash;
 
   // 未接続時に最下部 CTA からウォレット選択セクションへ誘導するためのアンカー。
   const walletSectionRef = useRef<HTMLElement | null>(null);
-
-  const paymentReady =
-    isConnected &&
-    !wrongChain &&
-    (isStandard || useRelay || !!saData) &&
-    // PaymentForm と揃える明示ガード。現状は totalWei>0 (有効 items) 不変で merchantUnderflow
-    // が拾うが、空 batch (merchant 受取 0) 送信を構造的にも塞ぐ defense-in-depth。
-    breakdown.merchantReceives > 0n &&
-    breakdown.customerPays > 0n &&
-    !insufficientBalance &&
-    !paymentFlowPending &&
-    !relay.orderPaymentHold &&
-    gasQuoteReady &&
-    !merchantUnderflow &&
-    !settledNoRetry &&
-    // gasless 経路のみ封鎖 (standard へ切り替えれば支払える)。
-    !gaslessStoreUnavailable;
-  const canSubmit = paymentReady && !orderAdmissionPending;
   const paymentReadyRef = useRef(paymentReady);
   paymentReadyRef.current = paymentReady;
 
@@ -1647,73 +1609,62 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </ul>
         <div className="mt-3 border-t border-slate-200 pt-3">
           <dl className="space-y-1.5">
-            <Row label={t('subtotalRow')} value={fmt(totalWei)} />
+            {breakdownRow({ label: t('subtotalRow'), value: fmt(totalWei) })}
             {/* fee=0 のとき手数料行は非表示 (Phase 1 alpha)。負担者でラベルを出し分ける:
                 店舗が受取から吸収した (merchantReceives < 請求額) なら「(店舗負担)」を補足、
                 顧客上乗せ (事前モバイルオーダーの顧客負担) なら補足なし。 */}
-            {breakdown.feeAmount > 0n && (
-              <Row
-                label={
+            {breakdown.feeAmount > 0n &&
+              breakdownRow({
+                label:
                   breakdown.merchantReceives < totalWei
                     ? t('feeRowMerchant')
-                    : t('feeRow')
-                }
-                value={fmt(breakdown.feeAmount)}
-              />
-            )}
-            {isStandard ? (
-              <Row label={t('gasRowStandard')} value={t('gasRowStandardValue')} />
-            ) : isMobileFee ? (
-              /* モバイル注文 (gasless): ネットワーク手数料は利用料 (feeRow) に含むため別行を出さない
-                 (relayGasEquiv=0 で「0 JPYC」表示になり紛らわしい)。standard 経路は上の分岐で
-                 顧客がウォレットで gas を払うので従来どおり gas 行を表示する (ここには来ない)。 */
-              null
-            ) : useRecover ? (
-              <Row
-                label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
-                labelExtra={<InfoTooltip text={t('gasInfoJpycRecover')} />}
-                value={fmt(relayGasEquiv)}
-              />
-            ) : useRelay || isJpyc ? (
-              // JPYC ガスレス (relay free / 非 relay sponsorship free) は無徴収。中立ラベル。
-              <Row
-                label={t('gasRowFree')}
-                labelExtra={<InfoTooltip text={t('gasInfoJpycRelay')} />}
-                value={t('gasRowRelayFree')}
-              />
-            ) : (
-              <Row
-                label={isMerchantGas ? t('gasRowMerchant') : t('gasRow')}
-                labelExtra={
-                  <InfoTooltip
-                    text={
-                      isCircle
-                        ? t('gasInfoUsdcCircle', { nativeToken })
-                        : isErc20Paymaster
-                          ? t('gasInfoUsdc', { nativeToken })
-                          : t('gasInfoJpyc', { nativeToken })
+                    : t('feeRow'),
+                value: fmt(breakdown.feeAmount),
+              })}
+            {isStandard
+              ? breakdownRow({ label: t('gasRowStandard'), value: t('gasRowStandardValue') })
+              : isMobileFee
+                /* モバイル注文 (gasless): ネットワーク手数料は利用料 (feeRow) に含むため別行を出さない
+                   (relayGasEquiv=0 で「0 JPYC」表示になり紛らわしい)。standard 経路は上の分岐で
+                   顧客がウォレットで gas を払うので従来どおり gas 行を表示する (ここには来ない)。 */
+                ? null
+                : breakdownRow(
+                  useRecover
+                    ? {
+                      label: isMerchantGas ? t('gasRowMerchant') : t('gasRow'),
+                      tooltip: t('gasInfoJpycRecover'),
+                      value: fmt(relayGasEquiv),
                     }
-                  />
-                }
-                value={
-                  gasAmount !== undefined
-                    ? t('gasRowValue', { amount: fmt(gasAmount) })
-                    : t('gasRowPending')
-                }
-              />
-            )}
+                    : useRelay || isJpyc
+                      // JPYC ガスレス (relay free / 非 relay sponsorship free) は無徴収。中立ラベル。
+                      ? {
+                        label: t('gasRowFree'),
+                        tooltip: t('gasInfoJpycRelay'),
+                        value: t('gasRowRelayFree'),
+                      }
+                      : {
+                        label: isMerchantGas ? t('gasRowMerchant') : t('gasRow'),
+                        tooltip: isCircle
+                          ? t('gasInfoUsdcCircle', { nativeToken })
+                          : isErc20Paymaster
+                            ? t('gasInfoUsdc', { nativeToken })
+                            : t('gasInfoJpyc', { nativeToken }),
+                        value:
+                          gasAmount !== undefined
+                            ? t('gasRowValue', { amount: fmt(gasAmount) })
+                            : t('gasRowPending'),
+                      },
+                )}
             <div className="my-1 border-t border-slate-200" />
-            <Row
-              label={
-                isStandard
-                  ? t('totalRowStandard', { nativeToken })
-                  : isMerchantGas
-                    ? t('totalRowMerchantGas')
-                    : t('totalRow')
-              }
-              value={fmt(totalCustomerOutflow)}
-              strong
-            />
+            {breakdownRow({
+              label: isStandard
+                ? t('totalRowStandard', { nativeToken })
+                : isMerchantGas
+                  ? t('totalRowMerchantGas')
+                  : t('totalRow'),
+              value: fmt(totalCustomerOutflow),
+              strong: true,
+            })}
           </dl>
         </div>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
