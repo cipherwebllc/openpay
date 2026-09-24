@@ -6,7 +6,6 @@ import {
   CHECKOUT_MAX_ITEMS,
   CHECKOUT_QTY_MAX,
   encodeItems,
-  parseCheckoutItemDrafts,
   parseCheckoutParams,
   type CheckoutItem,
 } from '@/lib/url';
@@ -94,6 +93,21 @@ describe('encodeItems / parseCheckoutParams roundtrip', () => {
 });
 
 describe('parseCheckoutParams バリデーション', () => {
+  // 商品入力 UI の廃止後も、外部 URL から来る明細を部分的に受理して請求額を変えない。
+  it.each(['B:0:5', 'B:1000:5', 'B:1.5:5', 'B:1:1.1234567', 'B::5'])('valid item + invalid %s rejects the whole checkout', (invalidItem) => {
+    const r = parseCheckoutParams(search(`to=${MERCHANT}&token=usdc&items=A:1:5,${invalidItem}`));
+    expect(r).toMatchObject({ ok: false });
+    expect(r).not.toHaveProperty('params');
+  });
+
+  it('JPYC の最小単位を URL から合計まで保持する', () => {
+    const r = parseCheckoutParams(search(`to=${MERCHANT}&token=jpyc&items=A:1:0.000000000000000001`));
+    expect(r.ok).toBe(true);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.params.items).toEqual([{ name: 'A', qty: 1, price: '0.000000000000000001' }]);
+    expect(calcCheckoutTotal(r.params.items, 18)).toBe(1n);
+  });
+
   it('to なし → エラー', () => {
     const r = parseCheckoutParams(search('token=usdc&items=A:1:5'));
     expect(r.ok).toBe(false);
@@ -650,123 +664,6 @@ describe('encodeItems / parseItemsParam — 境界 / 極端ケース', () => {
       // 999 * 999_999_999 wei = 998_999_999_001 (USDC base)
       expect(total).toBe(999n * 999_999_999n);
     }
-  });
-});
-
-describe('parseCheckoutItemDrafts (CheckoutLinkGenerator UI 用)', () => {
-  it('全空 draft → items=null, errors=[] (未入力扱い)', () => {
-    const r = parseCheckoutItemDrafts(
-      [{ name: '', qty: '', price: '' }],
-      6,
-    );
-    expect(r.items).toBeNull();
-    expect(r.errors).toEqual([]);
-  });
-
-  it('全 valid draft → items 確定', () => {
-    const r = parseCheckoutItemDrafts(
-      [
-        { name: 'A', qty: '1', price: '10' },
-        { name: 'B', qty: '2', price: '5.5' },
-      ],
-      6,
-    );
-    expect(r.items).toHaveLength(2);
-    expect(r.errors).toEqual([]);
-  });
-
-  it('部分入力 (name のみ) → empty error', () => {
-    const r = parseCheckoutItemDrafts(
-      [{ name: 'A', qty: '', price: '' }],
-      6,
-    );
-    expect(r.items).toBeNull();
-    expect(r.errors).toEqual([{ index: 0, reason: 'empty' }]);
-  });
-
-  it('qty 範囲外 → qty error', () => {
-    expect(
-      parseCheckoutItemDrafts(
-        [{ name: 'A', qty: '0', price: '5' }],
-        6,
-      ).errors,
-    ).toEqual([{ index: 0, reason: 'qty' }]);
-    expect(
-      parseCheckoutItemDrafts(
-        [{ name: 'A', qty: '1000', price: '5' }],
-        6,
-      ).errors,
-    ).toEqual([{ index: 0, reason: 'qty' }]);
-    expect(
-      parseCheckoutItemDrafts(
-        [{ name: 'A', qty: '1.5', price: '5' }],
-        6,
-      ).errors,
-    ).toEqual([{ index: 0, reason: 'qty' }]);
-  });
-
-  it('price 不正 / decimals 超過 / 0 → price error', () => {
-    expect(
-      parseCheckoutItemDrafts(
-        [{ name: 'A', qty: '1', price: 'abc' }],
-        6,
-      ).errors[0].reason,
-    ).toBe('price');
-    expect(
-      parseCheckoutItemDrafts(
-        [{ name: 'A', qty: '1', price: '1.1234567' }],
-        6,
-      ).errors[0].reason,
-    ).toBe('price');
-    expect(
-      parseCheckoutItemDrafts(
-        [{ name: 'A', qty: '1', price: '0' }],
-        6,
-      ).errors[0].reason,
-    ).toBe('price');
-  });
-
-  it('複数 draft で混在 (1 valid + 1 invalid) → all-or-nothing で items=null', () => {
-    const r = parseCheckoutItemDrafts(
-      [
-        { name: 'A', qty: '1', price: '5' },
-        { name: 'B', qty: '0', price: '5' },
-      ],
-      6,
-    );
-    expect(r.items).toBeNull();
-    expect(r.errors).toEqual([{ index: 1, reason: 'qty' }]);
-  });
-
-  it('空 draft 行が混在 → 無視される (valid なものだけ items に集約)', () => {
-    const r = parseCheckoutItemDrafts(
-      [
-        { name: 'A', qty: '1', price: '5' },
-        { name: '', qty: '', price: '' },
-        { name: 'B', qty: '2', price: '10' },
-      ],
-      6,
-    );
-    expect(r.items).toEqual([
-      { name: 'A', qty: 1, price: '5' },
-      { name: 'B', qty: 2, price: '10' },
-    ]);
-  });
-
-  it('JPYC (decimals=18): 18 桁精度の price OK', () => {
-    const r = parseCheckoutItemDrafts(
-      [{ name: 'A', qty: '1', price: '0.000000000000000001' }],
-      18,
-    );
-    expect(r.items).toEqual([{ name: 'A', qty: 1, price: '0.000000000000000001' }]);
-  });
-
-  it('name に C0 制御文字 → 除去されて name 確定', () => {
-    const r = parseCheckoutItemDrafts(
-      [{ name: 'A\x01B', qty: '1', price: '5' }],
-      6,
-    );
-    expect(r.items).toEqual([{ name: 'AB', qty: 1, price: '5' }]);
   });
 });
 

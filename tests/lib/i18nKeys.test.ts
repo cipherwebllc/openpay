@@ -13,6 +13,14 @@ const ONRAMP_KEYS = [
 
 const FORM_NAMESPACES = ['PaymentForm', 'TipForm', 'CheckoutForm'] as const;
 
+describe('retired checkout generator messages', () => {
+  it.each(['ja', 'en'] as const)('%s keeps the live checkout namespace without retired generator copy', (locale) => {
+    const messages = { ja, en }[locale];
+    expect(messages).toHaveProperty('CheckoutForm');
+    expect(messages).not.toHaveProperty('CheckoutLinkGenerator');
+  });
+});
+
 describe('Privacy: x402 retention disclosure', () => {
   it('Privacy.section4 declares 400 days in both locales (not Terms.section4)', () => {
     expect(ja.Privacy.section4.body).toContain('x402 決済の記録 (買い手・受取先のウォレットアドレス、商品 URL、金額と利用料、チェーン、取引ハッシュ、日時) は最後の記録から 400 日間保管');

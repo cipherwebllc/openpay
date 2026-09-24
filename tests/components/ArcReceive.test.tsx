@@ -21,7 +21,6 @@ vi.mock('@/hooks/useMarketRates', () => ({
   useMarketRates: () => ({ data: { usdcJpy: 150 }, isLoading: false, isError: false, refetch: vi.fn() }),
 }));
 
-import { CheckoutLinkGenerator } from '@/components/CheckoutLinkGenerator';
 import { QrGenerator } from '@/components/QrGenerator';
 import { USDC_CHAINS } from '@/lib/chains';
 
@@ -29,18 +28,19 @@ const receiver = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 beforeEach(() => { window.localStorage.clear(); flags.arc = true; flags.tip = false; flags.xchain = false; });
 
 describe('Arc receive UI with flag ON', () => {
-  it('checkout lists seven chains and corrects gasless when Arc is selected', async () => {
-    window.localStorage.setItem('openpay:checkout-settings:v1', JSON.stringify({
+  it('QR lists seven chains and corrects gasless when Arc is selected', async () => {
+    window.localStorage.setItem('openpay:qr-settings:v2', JSON.stringify({
       receiver, token: 'usdc', chain: 'base', payMode: 'gasless',
-      items: [{ name: 'A', qty: '1', price: '1' }],
     }));
-    render(<CheckoutLinkGenerator />);
+    render(<QrGenerator />);
     expect(USDC_CHAINS).toHaveLength(7);
-    await userEvent.click(await screen.findByRole('button', { name: /^Arc Testnet/ }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /^Arc Testnet/ }));
     await waitFor(() => {
-      const saved = JSON.parse(window.localStorage.getItem('openpay:checkout-settings:v1')!);
-      expect(saved).toMatchObject({ chain: 'arc', payMode: 'standard' });
+      const saved = JSON.parse(window.localStorage.getItem('openpay:qr-settings:v2')!);
+      expect(saved).toMatchObject({ chain: 'arc', payMode: 'standard', crossChain: false });
     });
+    await user.click(screen.getByRole('button', { name: /高度な設定/ }));
     expect(screen.getByRole('button', { name: /^ガス代不要/ })).toBeDisabled();
   });
 

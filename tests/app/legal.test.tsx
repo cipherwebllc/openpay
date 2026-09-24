@@ -807,7 +807,7 @@ describe('Legal pages', () => {
       }
     });
 
-    it('QrGenerator / CheckoutLinkGenerator に payMode radio 用 key が全て存在 (ja/en、非空文字列)', async () => {
+    it('QrGenerator に payMode radio 用 key が全て存在 (ja/en、非空文字列)', async () => {
       const ja = (await import('@/messages/ja.json')).default;
       const en = (await import('@/messages/en.json')).default;
       const radioKeys = [
@@ -827,20 +827,6 @@ describe('Legal pages', () => {
           en.QrGenerator[key as keyof typeof en.QrGenerator],
           key,
           'en.QrGenerator',
-        );
-        expectNonEmptyString(
-          ja.CheckoutLinkGenerator[
-            key as keyof typeof ja.CheckoutLinkGenerator
-          ],
-          key,
-          'ja.CheckoutLinkGenerator',
-        );
-        expectNonEmptyString(
-          en.CheckoutLinkGenerator[
-            key as keyof typeof en.CheckoutLinkGenerator
-          ],
-          key,
-          'en.CheckoutLinkGenerator',
         );
       }
       // QrGenerator 固有
@@ -865,8 +851,6 @@ describe('Legal pages', () => {
       const en = (await import('@/messages/en.json')).default;
       expect(ja.QrGenerator.payModeGaslessDesc).not.toMatch(/1\.0%/);
       expect(en.QrGenerator.payModeGaslessDesc).not.toMatch(/1\.0%/);
-      expect(ja.CheckoutLinkGenerator.payModeGaslessDesc).not.toMatch(/1\.0%/);
-      expect(en.CheckoutLinkGenerator.payModeGaslessDesc).not.toMatch(/1\.0%/);
     });
 
     it('旧 directHint / directOption / directOptionDesc が ja/en の QrGenerator から削除されている', async () => {

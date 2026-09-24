@@ -1,5 +1,7 @@
 # DRY / Duplication Audit (Task 1/8)
 
+Historical snapshot: file references and counts below describe the code at the time of this audit. Review 6 (F3) removes the retired `CheckoutLinkGenerator`, `useCheckoutSettings`, and checkout draft parser; references to them below are historical. Live `CheckoutForm` and checkout URL parsing remain in use.
+
 ## Summary
 Audited `lib/`, `hooks/`, `components/`, `app/` for code duplication. Found 4 high-confidence and 2 medium-confidence findings. Most duplication is concentrated in URL parsing (chain slug resolution), paymaster-mode guards across smart account adapters, balance/wrong-chain UI logic across the three "form" components (Payment/Tip/Checkout), and the chain chooser JSX pattern.
 

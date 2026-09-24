@@ -55,9 +55,6 @@ test.describe('chain chooser grid 列数 (viewport 連動)', () => {
     expect(rows).toBe(Math.ceil(6 / expectedCols));
   });
 
-  // CheckoutLinkGenerator は production route に未 mount のため e2e からは除外
-  // (ChainChooser.test.tsx で structural 検証済)。
-
   test('Tip widget generator: USDC chain chooser も同じ列数', async ({
     page,
     viewport,

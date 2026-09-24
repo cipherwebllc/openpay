@@ -1,7 +1,7 @@
 'use client';
 
 // useCrossChainPayment — wagmi を wire して balance fetch + decision +
-// execute を一括提供する hook。queryKey に networkEnv/account/target を含め
+// executeOption を一括提供する hook。queryKey に networkEnv/account/target を含め
 // 環境横断 cache 衝突を防ぐ。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -103,10 +103,7 @@ export interface UseCrossChainPaymentReturn {
   refetchBalances: () => Promise<unknown>;
   isFetchingBalances: boolean;
   balancesError: Error | null;
-  /** direct/onramp は何もせず null を返す (caller の既存 path に委譲)。
-   *  内部 auto-decision (selectPath) で実行。 */
-  execute: () => Promise<ExecuteResult | null>;
-  /** Chooser で user が選択した PathOption で実行 (auto-decision を override)。
+  /** Chooser で user が選択した PathOption で実行。
    *  direct option は何もせず null (caller の既存 path に委譲)、cross-chain
    *  option (gateway / cctp-v2) のみ実行する。 */
   executeOption: (option: PathOption) => Promise<ExecuteResult | null>;
@@ -115,7 +112,7 @@ export interface UseCrossChainPaymentReturn {
   /** A1: 前回 burn の状態を自動判定できず money-path を止めた状態。UI が専用パネルを出す。
    *  'wait' = 時間を置いて再試行 / 'manual' = 買い手が explorer で確認して二段確認。 */
   burnUnresolved: BurnUnresolvedInfo | undefined;
-  /** manual パネルの二段確認完了。次の execute だけ曖昧な状態からの再 burn を許可する。 */
+  /** manual パネルの二段確認完了。次の実行だけ曖昧な状態からの再 burn を許可する。 */
   armManualReburn: () => void;
   /** 二段確認が武装済みか (UI の表示切替用)。 */
   isManualReburnArmed: boolean;
@@ -176,8 +173,8 @@ export function useCrossChainPayment(
   const [burnUnresolved, setBurnUnresolved] = useState<
     BurnUnresolvedInfo | undefined
   >();
-  // 二段確認は「次の 1 回の execute」にだけ効かせる (押しっぱなしで常時 auto 再 burn に
-  // ならないよう、execute 開始時に消費する)。render を跨いで即時に読みたいので ref。
+  // 二段確認は「次の 1 回の実行」にだけ効かせる (押しっぱなしで常時 auto 再 burn に
+  // ならないよう、実行開始時に消費する)。render を跨いで即時に読みたいので ref。
   const manualReburnArmedRef = useRef(false);
   const [isManualReburnArmed, setIsManualReburnArmed] = useState(false);
 
@@ -343,9 +340,8 @@ export function useCrossChainPayment(
     }
   }, [pathOptions, sessionKeyFor, isCommitted, forwardOnly]);
 
-  // 共通 execute core: 「source chain + path kind + (Gateway only) destDomain」
-  // を引数に取り、Gateway / CCTP V2 dispatch を行う。auto-decision (execute)
-  // と user-selected option (executeOption) で共有。
+  // 選択経路と再開用の core: source chain + path kind + destDomain を受け取り、
+  // Gateway / CCTP V2 dispatch を行う。
   type ExecuteCoreArgs =
     | {
         kind: 'gateway';
@@ -535,7 +531,7 @@ export function useCrossChainPayment(
       // marker (送るつもり) だけでも不可逆境界の一歩手前なので、親フォームの直接決済・
       // 別チェーン決済を塞ぐ (hash が残っていない中断からの復元も含めて排他する)。
       if (resume?.burnTxHash || resume?.burnIntent) setIsCommitted(true);
-      // 二段確認は 1 回の execute で消費する (arm したまま放置しても次回以降に効かない)。
+      // 二段確認は 1 回の実行で消費する (arm したまま放置しても次回以降に効かない)。
       const allowManualReburn = manualReburnArmedRef.current;
       if (!forwardOnly || core.forward?.allowBurn !== false) {
         manualReburnArmedRef.current = false;
@@ -584,49 +580,6 @@ export function useCrossChainPayment(
     ],
   );
 
-  const execute = useCallback(async (): Promise<ExecuteResult | null> => {
-    if (forwardOnly) throw new Error('Arc forwarding requires chooser selection');
-    setError(undefined);
-    setResult(undefined);
-    setProgress(undefined);
-    setIsCommitted(false);
-    setBurnUnresolved(undefined);
-
-    if (!decision) return null;
-    if (decision.path === 'direct' || decision.path === 'onramp') {
-      // 既存 path (useBatchPayment / useStandardPayment) or OnrampCta に委譲
-      return null;
-    }
-
-    setIsExecuting(true);
-
-    let executeResult: ExecuteResult;
-    if (decision.path === 'gateway') {
-      // Gateway path の source chain は buyer の現 wallet chain (walletClient.chain)。
-      const sourceChainId = walletClient?.chain?.id;
-      if (sourceChainId === undefined) {
-        throw new Error('walletClient.chain undefined');
-      }
-      executeResult = await runCore({
-        kind: 'gateway',
-        sourceChainId,
-        sourceDomain: decision.sourceDomain,
-        destDomain: decision.destinationDomain,
-      });
-    } else {
-      executeResult = await runCore({
-        kind: 'cctp-v2',
-        sourceChainId: decision.sourceChainId,
-        sourceDomain: decision.sourceDomain,
-        destDomain: decision.destinationDomain,
-      });
-    }
-
-    setResult(executeResult);
-    setIsExecuting(false);
-    return executeResult;
-  }, [decision, runCore, walletClient, forwardOnly]);
-
   const executeOption = useCallback(
     async (option: PathOption): Promise<ExecuteResult | null> => {
       if (forwardOnly) {
@@ -647,7 +600,7 @@ export function useCrossChainPayment(
       setResult(undefined);
       setProgress(undefined);
       setIsCommitted(false);
-      // D2: execute と同様に前回の未確定 state を捨てる。残したままだと (a) 再試行の結果が
+      // D2: 前回の未確定 state を捨てる。残したままだと (a) 再試行の結果が
       // 反映されず wait パネルが出っぱなしで「続きから支払う」が押せない、(b) 新しいエラーが
       // `error && !burnUnresolved` の条件で隠れる。Chooser 経路 (executeOption) は本 UI の
       // 既定の実行経路なので、ここが抜けているとパネルが実質デッドロックになる。
@@ -700,19 +653,7 @@ export function useCrossChainPayment(
     });
   }, []);
 
-  // execute 系の共通 wrapper: 内部 throw を error state に取り込んで rethrow
-  // (UI 側でも catch できるように、かつ setIsExecuting=false を保証するため)。
-  const safeExecute = useCallback(async () => {
-    try {
-      return await execute();
-    } catch (e) {
-      captureBurnUnresolved(e);
-      setError(e instanceof Error ? e : new Error(String(e)));
-      setIsExecuting(false);
-      throw e;
-    }
-  }, [execute, captureBurnUnresolved]);
-
+  // 内部 throw を error state に取り込み rethrow (UI 側の catch と実行中表示の解除用)。
   const safeExecuteOption = useCallback(
     async (option: PathOption) => {
       if (forwardOnly && executionRef.current) throw new Error('Execution already running');
@@ -806,7 +747,7 @@ export function useCrossChainPayment(
     }
   }, [pendingRecovery, recoveryQuote, runCore, captureBurnUnresolved, scanRecovery]);
 
-  // manual パネルの二段確認完了。次の execute だけ、曖昧な状態からの再 burn を許可する。
+  // manual パネルの二段確認完了。次の実行だけ、曖昧な状態からの再 burn を許可する。
   const armManualReburn = useCallback(() => {
     manualReburnArmedRef.current = true;
     setIsManualReburnArmed(true);
@@ -837,7 +778,6 @@ export function useCrossChainPayment(
     refetchBalances: balancesQuery.refetch,
     isFetchingBalances: balancesQuery.isFetching,
     balancesError: balancesQuery.error as Error | null,
-    execute: safeExecute,
     executeOption: safeExecuteOption,
     isOptionResumable,
     burnUnresolved,
