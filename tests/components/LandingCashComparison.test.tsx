@@ -1,34 +1,13 @@
+import { createTranslator } from 'next-intl';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ja from '../../messages/ja.json';
 import { LandingCashComparison } from '@/components/LandingCashComparison';
 
-// 実 ja コピーで assertion したいので getTranslations を Landing 実辞書引きに mock。
-// t.rich は <tag>…</tag> を tag renderer に通す最小実装 (cashFlowNote の jpycEx リンク用)。
+// 実辞書と ICU 補間で、料金定数が描画へ渡ることも検証する。
 vi.mock('next-intl/server', () => ({
   getLocale: async () => 'ja',
-  getTranslations: async () => {
-    const dict = ja.Landing as Record<string, string>;
-    const t = (k: string) => dict[k] ?? k;
-    t.rich = (
-      k: string,
-      tags: Record<string, (chunks: React.ReactNode) => React.ReactNode>,
-    ) => {
-      const raw = dict[k] ?? k;
-      const m = raw.match(/^(.*)<(\w+)>(.*?)<\/\2>(.*)$/s);
-      if (!m) return raw;
-      const [, before, tag, inner, after] = m;
-      const renderer = tags[tag];
-      return (
-        <>
-          {before}
-          {renderer ? renderer(inner) : inner}
-          {after}
-        </>
-      );
-    };
-    return t;
-  },
+  getTranslations: async () => createTranslator({ locale: 'ja', messages: ja, namespace: 'Landing' }),
 }));
 
 // client 子 (useTranslations/useLocale) は intl provider が要るため mock (境界分離)。
@@ -53,11 +32,11 @@ describe('LandingCashComparison', () => {
     expect(screen.getByText('導入費と機器')).toBeInTheDocument();
     expect(screen.getByText('解約縛り')).toBeInTheDocument();
 
-    // 手数料セルの数値 framing (カード 1.98〜3.24% / OpenPay 0%〜1%)
+    // 手数料セルはレジの料金とガスレス最低額を区別する。
     expect(screen.getByText('1.98〜3.24%')).toBeInTheDocument();
-    expect(screen.getByText('0%〜1%')).toBeInTheDocument();
+    expect(screen.getByText('レジ 1%')).toBeInTheDocument();
     expect(
-      screen.getByText('お客様ガス代負担なら 0%・ガスレス決済で 1%'),
+      screen.getByText(/レジの JPYC は通常決済も店舗負担。ガスレス JPYC は 1%・最低 2 JPYC/),
     ).toBeInTheDocument();
 
     // 脚注 (一般的な料率の例)

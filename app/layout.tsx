@@ -4,9 +4,9 @@ import './globals.css';
 const SITE_URL = 'https://open-pay.jp';
 // フォールバック用 (locale 配下は app/[locale]/layout.tsx の generateMetadata が
 // messages Meta namespace から上書きする)。文言は messages/ja.json Meta と同期。
-const OG_TITLE = 'OpenPay｜JPYC店舗決済・モバイルオーダー（手数料0〜1%）';
+const OG_TITLE = 'OpenPay｜JPYC店舗決済・モバイルオーダー';
 const OG_DESCRIPTION =
-  'OpenPayは、日本円ステーブルコインJPYC・USDC対応の店舗向け決済インフラ。QR決済からモバイルオーダー・受注・電子レシート・会計、AIエージェント決済まで手数料0〜1%。売上はウォレットへ直接着金（ノンカストディ）。導入費0円・契約不要・オープンソース。';
+  'OpenPayは、日本円ステーブルコインJPYC・USDC対応の店舗向け決済インフラ。QR決済からモバイルオーダー・受注・電子レシート・会計、AIエージェント決済まで対応。利用料は決済方法により異なります。売上はウォレットへ直接着金（ノンカストディ）。導入費0円・契約不要・オープンソース。';
 
 // Root layout は <html lang> を [locale]/layout に委譲する。ここでは
 // メタデータと viewport だけ持ち、html/body は子で render させる。

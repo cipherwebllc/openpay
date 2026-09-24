@@ -3,14 +3,11 @@
 // LandingFeatures (技術特長) と差別化して「実利・実用メリット」をビッグナンバー
 // フォーカルで訴求する。レイアウトは mobile 2 col / desktop 4 col。
 //
-// Fee カード (focal="1%") は OpenPay 利用料 (ガスレス決済の月額利用料・受け取り額の
-// 1% 基準・2026 年 7 月のご利用分から・後払い) を素直に打ち出す。クレカ (約 3%) /
-// 一般的な QR 決済 (1.5–3.25%) との低率比較が訴求点。決済の媒介ではなくソフト /
-// インフラ提供者という規制論的ポジショニングは body の「ガスレス決済の利用に対する
-// 月額の利用料」という対価表現で保つ (決済額連動の都度徴収に読ませない)。
+// Fee カードはレジ JPYC の店舗負担率を表示し、ガスレスの最低額と無料の範囲を本文に示す。
 //
 // audience pill のカラーは LandingHowItWorks (merchant=emerald / customer=blue) と整合。
 
+import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import { getTranslations } from 'next-intl/server';
 import { Coins, Rocket, Zap, UserCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -89,14 +86,14 @@ export async function LandingBenefits() {
               <p
                 className={`mt-4 whitespace-nowrap break-keep text-4xl font-extrabold leading-none ${c.focal} sm:text-5xl`}
               >
-                {t(`benefits${id}Focal`)}
+                {t(`benefits${id}Focal`, LANDING_PAYMENT_FEE_VALUES)}
               </p>
 
               <h3 className="mt-3 text-sm font-semibold text-slate-900 sm:text-base">
                 {t(`benefits${id}Title`)}
               </h3>
               <p className="mt-2 text-xs leading-relaxed text-slate-600 sm:text-sm">
-                {t(`benefits${id}Body`)}
+                {t(`benefits${id}Body`, LANDING_PAYMENT_FEE_VALUES)}
               </p>
             </li>
           );

@@ -8,6 +8,7 @@
 // (dogfooding)。href は canonical な本番 URL (open-pay.jp) を指す (運営の固定プロフなので preview/local
 // でも本番ページへ遷移する)。トークン/チェーン選択はプロフ側 (JPYC Polygon/Kaia + USDC) が担う。
 
+import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import Image from 'next/image';
 import { getTranslations } from 'next-intl/server';
 import {
@@ -83,13 +84,13 @@ export async function LandingSupport() {
             <p
               className={`mt-4 whitespace-nowrap break-keep text-3xl font-extrabold leading-none sm:text-4xl ${FEE_TONE[audience].focal}`}
             >
-              {t(`supportFee${id}Focal`)}
+              {t(`supportFee${id}Focal`, LANDING_PAYMENT_FEE_VALUES)}
             </p>
             <h3 className="mt-3 text-sm font-semibold text-slate-900 sm:text-base">
               {t(`supportFee${id}Title`)}
             </h3>
             <p className="mt-2 text-xs leading-relaxed text-slate-600 sm:text-sm">
-              {t(`supportFee${id}Body`)}
+              {t(`supportFee${id}Body`, LANDING_PAYMENT_FEE_VALUES)}
             </p>
           </li>
         ))}

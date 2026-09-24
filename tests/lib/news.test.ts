@@ -89,6 +89,8 @@ describe('lib/news: sortedNews / latestNewsId', () => {
     expect(pricing!.body.ja).toMatch(/7\s*月/);
     // 断定的な「無料」誤誘導ではなく、無料の範囲 (通常決済等) を明記している。
     expect(pricing!.body.ja).toMatch(/無料/);
+    expect(pricing!.body.ja).toContain('レジの JPYC 決済とモバイル注文は通常決済でも OpenPay 利用料の対象');
+    expect(pricing!.body.en).toContain('Register JPYC payments and mobile orders now incur an OpenPay usage fee even in standard mode');
     // 確定モデル (2026-06-13): 決済は店舗が手数料を負担し、お客様は表示額のみ。
     expect(pricing!.body.ja).toMatch(/店舗が負担/);
     expect(pricing!.body.ja).toMatch(/表示額のみ/);

@@ -352,3 +352,15 @@ export const DISCLOSED_TIP_FEE_MODELS = {
   usdcBase: 'paymaster-usdc',
   usdcArc: 'standard-usdc-network-fee-no-openpay-fee',
 } as const;
+
+// LP / 導入ガイドの補間値。レジ JPYC は通常決済でも店舗負担で recover の % 部分を適用
+// (registerFeeClaim.ts の recoverPercentValue と同じ料率)。最低額はガスレス経路のみ。
+// 通常決済の無料表記からはレジ・モバイル注文を除く。下記は開示数値の参照のみで徴収額を変えない。
+export const LANDING_PAYMENT_FEE_VALUES = {
+  recoverPercent: DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100,
+  recoverFloor: DISCLOSED_RECOVER_FEE.floorJpyc,
+  tipFloor: DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc,
+  registerPercent: DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100,
+  storefrontPercent: DISCLOSED_MOBILE_ORDER_FEE.storefrontBps / 100,
+  preorderPercent: DISCLOSED_MOBILE_ORDER_FEE.preorderBps / 100,
+} as const;

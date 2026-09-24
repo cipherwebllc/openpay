@@ -7,6 +7,7 @@
 // SEO 価値がある集客コンテンツなので noindex は設定しない (guide/* 共通方針)。
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
+import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
@@ -98,9 +99,9 @@ export default async function GuideStartPage({
             {feeCards.map((k) => (
               <FeeCard
                 key={k}
-                focal={tLanding(`supportFee${k}Focal`)}
+                focal={tLanding(`supportFee${k}Focal`, LANDING_PAYMENT_FEE_VALUES)}
                 title={tLanding(`supportFee${k}Title`)}
-                body={tLanding(`supportFee${k}Body`)}
+                body={tLanding(`supportFee${k}Body`, LANDING_PAYMENT_FEE_VALUES)}
               />
             ))}
           </div>
