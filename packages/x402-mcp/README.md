@@ -293,7 +293,9 @@ URLs or URLs containing credentials, a path, query or fragment return
 `invalid_origin`, without requesting a challenge or signing. Invalid challenges return
 `challenge_invalid` without signing; 429, 5xx, and network failures return
 `challenge_unavailable`. If the server flag `ENABLE_AGENT_PURCHASES` is OFF,
-HTTP 404 returns `feature_disabled`. Steward and Kova return `signer_mode_unsupported`;
+HTTP 404 returns `feature_disabled`. Steward returns `signer_mode_unsupported`; Kova signs the
+proof through its CLI and returns `kova_policy_denied` when its `sign_allowlist` has no
+matching rule;
 an uninitialized keystore returns `wallet_not_initialized`. A missing env key
 returns `buyer_private_key_missing`; a signing failure returns the fixed code
 `proof_signing_failed` without exposing signer details.
@@ -371,7 +373,10 @@ for read-only checks before a separately agreed purchase.
 
 Only undelegated EOA wallets are supported: revoke any EIP-7702
 delegation or use another wallet. `wallet_init` returns
-`wallet_init_requires_keystore_mode`; `wallet_prove` returns `signer_mode_unsupported`.
+`wallet_init_requires_keystore_mode`. `wallet_prove` (purchase-history binding on
+`/agent`) is supported: it signs the `OpenPay Agent Proof` typed-data through the
+CLI with `--chain polygon`, so the person must also allow that domain in
+`sign_allowlist` (second rule below); otherwise it returns `kova_policy_denied`.
 Every signature is verified locally; only a 65-byte hex signature is accepted.
 CLI calls close stdin, enforce an independent 30-second deadline with `SIGKILL`,
 and limit each output stream to 64 KiB.
@@ -399,6 +404,17 @@ that matching behavior still needs Amoy verification:
   },
   "primaryType": "ReceiveWithAuthorization",
   "maxValue": "2000000000000000000"
+}
+```
+
+A second rule lets `wallet_prove` bind purchase history on `/agent`. It carries no
+value and has no `verifyingContract` (the proof is never submitted on-chain):
+
+```json
+{
+  "type": "sign_allowlist",
+  "domain": { "name": "OpenPay Agent Proof", "chainId": 137 },
+  "primaryType": "Proof"
 }
 ```
 

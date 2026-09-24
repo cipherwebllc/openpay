@@ -580,7 +580,8 @@ export function createToolRuntime({
   function walletProve(args) {
     return serializeWallet(async () => {
       requireEmptyArgs(args);
-      if (config.signerMode !== SIGNER_MODES.keystore && config.signerMode !== SIGNER_MODES.envKey) {
+      // Kova signs the Proof typed-data through the same CLI adapter (policy-gated by sign_allowlist).
+      if (!kovaMode && config.signerMode !== SIGNER_MODES.keystore && config.signerMode !== SIGNER_MODES.envKey) {
         return { ok: false, error: 'signer_mode_unsupported' };
       }
       await walletReady;

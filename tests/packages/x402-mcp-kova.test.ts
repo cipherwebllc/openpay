@@ -441,7 +441,6 @@ describe('Kova mode and daily ledger wiring', () => {
     const { active, fetchImpl } = runtime({ MAX_DAILY_JPYC: '3' }, execFileImpl);
     expect((await active.walletStatus({})).limits).toMatchObject({ dailyJpyc: '3', dailyLimitSource: 'configured' });
     expect(decode(await active.callTool('wallet_init', {}))).toEqual({ ok: false, error: 'wallet_init_requires_keystore_mode' });
-    expect(decode(await active.callTool('wallet_prove', {}))).toEqual({ ok: false, error: 'signer_mode_unsupported' });
     expect(execFileImpl).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(await readdir(home)).toEqual([]);
@@ -495,6 +494,52 @@ describe('Kova mode and daily ledger wiring', () => {
     expect(execFileImpl).not.toHaveBeenCalled();
     expect(paidFetch).not.toHaveBeenCalled();
     expect(await readFile(join(directory, 'wallet.json'), 'utf8')).toBe('do-not-read-or-replace');
+  });
+});
+
+describe('Kova wallet_prove (purchase-history binding)', () => {
+  const nonce = `0x${'ab'.repeat(32)}` as Hex;
+  function proveRuntime(kovaExecFile: ExecFile) {
+    const now = Math.floor(Date.now() / 1000);
+    const fetchImpl = vi.fn(async (url: unknown) => {
+      expect(String(url)).toBe(`https://open-pay.jp/api/agent/proof/challenge?address=${account.address}`);
+      return json({ nonce, issuedAt: now, expiresAt: now + 300 });
+    });
+    return { ...runtime({}, kovaExecFile, undefined, { fetchImpl }), fetchImpl };
+  }
+
+  it('signs the OpenPay Agent Proof through the CLI on polygon and returns the bind link', async () => {
+    const execFileImpl = signingChild();
+    const { active } = proveRuntime(execFileImpl);
+    const result = decode(await active.callTool('wallet_prove', {}));
+    expect(result).toMatchObject({ ok: true, address: account.address });
+    expect(String(result.bindUrl)).toMatch(new RegExp(`^https://open-pay\\.jp/agent\\?address=${account.address}#proof=`));
+    expect(execFileImpl).toHaveBeenCalledOnce();
+    const args = execFileImpl.mock.calls[0][1];
+    expect(args.slice(0, 6)).toEqual(['sign', 'typed-data', '--name', 'small-wallet', '--chain', 'polygon']);
+    const signed = JSON.parse(args[7]);
+    expect(signed).toMatchObject({
+      domain: { name: 'OpenPay Agent Proof', version: '1', chainId: 137 },
+      primaryType: 'Proof',
+      message: { address: account.address, purpose: 'bind-purchase-history', audience: 'https://open-pay.jp', nonce },
+    });
+    expect(signed.message.expiresAt).toBe(String(Number(signed.message.issuedAt) + 300));
+    const proof = JSON.parse(Buffer.from(String(result.bindUrl).split('#proof=')[1], 'base64url').toString());
+    expect(proof).toMatchObject({ v: 1, address: account.address, nonce });
+    expect(proof.signature).toMatch(/^0x[0-9a-f]{130}$/i);
+  });
+
+  it.each([
+    ['policy denial', child(JSON.stringify({ ok: false, error: { code: 'POLICY_DENIED', message: secret } })), 'kova_policy_denied'],
+    ['missing executable', child('', Object.assign(new Error(`spawn ${secret}`), { code: 'ENOENT' })), 'kova_not_found'],
+    ['signature by another wallet', signingChild(wrongAccount), 'proof_signing_failed'],
+    ['non-JSON output', child(secret), 'proof_signing_failed'],
+  ])('returns a fixed code on %s without leaking child output', async (_label, execFileImpl, code) => {
+    const { active } = proveRuntime(execFileImpl);
+    const result = await active.callTool('wallet_prove', {});
+    expect(decode(result)).toEqual({ ok: false, error: code });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(execFileImpl).toHaveBeenCalledOnce();
   });
 });
 

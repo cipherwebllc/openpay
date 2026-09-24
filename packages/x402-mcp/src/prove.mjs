@@ -101,8 +101,12 @@ export async function proveWallet({ signer, origin = AGENT_PROOF_AUDIENCE, fetch
         nonce, issuedAt: BigInt(issuedAt), expiresAt: BigInt(expiresAt),
       },
     });
-  } catch {
+  } catch (error) {
     // Signer errors can contain the typed data; return only a fixed code, never raw proof data.
+    // The Kova adapter throws only these fixed messages, so surfacing them cannot leak child output.
+    if (error instanceof Error && (error.message === 'kova_policy_denied' || error.message === 'kova_not_found')) {
+      return failure(error.message);
+    }
     return failure('proof_signing_failed');
   }
   const proof = Buffer.from(JSON.stringify({ v: 1, address, nonce, signature })).toString('base64url');
