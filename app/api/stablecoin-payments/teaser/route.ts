@@ -3,15 +3,14 @@
 
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { teaserChangesFor } from '@/lib/directory/monitorTeaser';
 import { JPYC_PAYMENTS_RESOURCE } from '@/lib/directory/paidResources';
 import { createPaymentMonitorEnvelope } from '@/lib/directory/paymentMonitor';
-import { deltaEffectiveDate, scopedChangelog, SERVICE_MONITOR_MAX_LIMIT, sortByDeltaEffectiveDate } from '@/lib/directory/serviceMonitor';
+import { SERVICE_MONITOR_MAX_LIMIT } from '@/lib/directory/serviceMonitor';
 import { USDC_PAYMENT_MONITOR } from '@/lib/directory/usdcResource';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const TEASER_EVENTS = 3;
 
 export async function GET(): Promise<NextResponse> {
   if (!env.enableWeb3Directory) {
@@ -21,16 +20,18 @@ export async function GET(): Promise<NextResponse> {
     { limit: SERVICE_MONITOR_MAX_LIMIT },
     new Date().toISOString(),
   );
-  const recorded = sortByDeltaEffectiveDate(scopedChangelog('stablecoin-payments'));
+  // latestChanges は有料版の provider 投影行ではなく raw の changelog イベント (scope だけ除く)。
+  const teaser = teaserChangesFor('stablecoin-payments');
   return NextResponse.json(
     {
       schemaVersion: full.schemaVersion,
       product: 'japan-stablecoin-payment-monitor',
       teaser: true,
       // limit で切られた snapshot view ではなく changelog 全体から (backfill が最新でも取りこぼさない)。
-      latestChanges: recorded.slice(-TEASER_EVENTS).map(({ scopes: _scopes, ...event }) => event),
-      latestRecordedAt: recorded.length > 0 ? deltaEffectiveDate(recorded[recorded.length - 1]) : null,
-      totalEvents: full.totalEvents,
+      latestChanges: teaser.latestChanges,
+      latestRecordedAt: teaser.latestRecordedAt,
+      // = full.totalEvents (どちらも決済スコープの changelog 全件数)。
+      totalEvents: teaser.totalEvents,
       generatedAt: full.generatedAt,
       fullFeed: {
         jpyc: 'https://open-pay.jp/api/paid/stablecoin-payments',

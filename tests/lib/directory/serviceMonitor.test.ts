@@ -403,7 +403,7 @@ describe('ServiceChangeEvent.date / collectedAt (発表日と収集日の分離)
 // E26: SERVICE_MONITOR_OUTPUT (paidResources.ts の Bazaar/openapi 向け宣言) の
 // changes.items.required は「実際のイベントに常に存在するキー」の部分集合でなければならない。
 // slug はディレクトリエントリに紐づかない業界イベント (provider のみ) では欠落し得るので
-// 必須にしてはいけない (serviceMonitor.ts:75-77 の slug?/provider?)。
+// 必須にしてはいけない (changelogTypes.ts の ServiceChangeEvent の slug?/provider?)。
 describe('SERVICE_MONITOR_OUTPUT スキーマ (E26): required ⊆ 常に存在するキー', () => {
   const itemSchema = JPYC_SERVICES_RESOURCE.outputSchema.output as unknown as {
     properties: {
