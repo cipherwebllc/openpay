@@ -2,9 +2,8 @@ import { NextResponse } from 'next/server';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { env } from '@/lib/env';
 import { isAllowedPushEndpoint } from '@/lib/push/endpoints';
-import { checkReadRateLimit } from '@/lib/relay/relayGuards';
-import { clientIp } from '@/lib/net/ipHash';
-import { MAX_BODY_BYTES, anonymizeIp } from '@/lib/relay/relayRoute';
+import { checkClientIpPrefixRateLimit } from '@/lib/net/clientRateLimit';
+import { MAX_BODY_BYTES } from '@/lib/relay/relayRoute';
 import {
   listPushSubscriptions,
   removePushSubscription,
@@ -126,11 +125,8 @@ async function rateLimited(
   wallet: string,
 ): Promise<NextResponse | null> {
   try {
-    const ipPrefix = anonymizeIp(
-      clientIp(req) ?? '',
-    );
-    const key = `pushsub:${wallet.toLowerCase()}:${ipPrefix}`;
-    if (!(await checkReadRateLimit(key, 20, 60))) {
+    const keyFor = (ipPrefix: string) => `pushsub:${wallet.toLowerCase()}:${ipPrefix}`;
+    if (!(await checkClientIpPrefixRateLimit(req, keyFor, 20, 60))) {
       return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
     }
   } catch {

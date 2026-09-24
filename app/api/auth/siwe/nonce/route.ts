@@ -6,8 +6,7 @@ import { rejectSiweCsrf } from '../_csrf';
 import { isKvConfigured, kvSet } from '@/lib/kv';
 import { nonceKey, NONCE_TTL_SEC, newSiweNonce } from '@/lib/siwe';
 import { logger } from '@/lib/logger';
-import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
-import { checkIpRateLimit } from '@/lib/relay/relayGuards';
+import { checkClientIpBucketRateLimit } from '@/lib/net/clientRateLimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,7 +20,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       { status: 503 },
     );
   }
-  if (!(await checkIpRateLimit('siwe-nonce', hashIpBucket(clientIp(req)), 60, 60))) {
+  if (!(await checkClientIpBucketRateLimit(req, 'siwe-nonce', 60, 60))) {
     return NextResponse.json(
       { error: 'rate_limited' },
       { status: 429, headers: { 'Retry-After': '60' } },

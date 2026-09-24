@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { env } from '@/lib/env';
-import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
-import { checkIpRateLimit } from '@/lib/relay/relayGuards';
+import { checkClientIpBucketRateLimit } from '@/lib/net/clientRateLimit';
 import {
   deleteTipMessages,
   listTipMessages,
@@ -33,9 +32,9 @@ function privateResponse(response: NextResponse): NextResponse {
 async function rateLimitResponse(req: Request): Promise<NextResponse | null> {
   let allowed = true;
   try {
-    allowed = await checkIpRateLimit(
+    allowed = await checkClientIpBucketRateLimit(
+      req,
       'tip-messages',
-      hashIpBucket(clientIp(req)),
       RATE_LIMIT_MAX,
       RATE_LIMIT_WINDOW_SEC,
     );
