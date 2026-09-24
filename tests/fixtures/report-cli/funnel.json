@@ -1,0 +1,284 @@
+[
+  {
+    "name": "flat HGETALL, numeric/null values, Unicode, pipes, all stages and sorting",
+    "script": "x402-funnel-report.mjs",
+    "args": [
+      "2"
+    ],
+    "replies": [
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-30"
+        ],
+        "body": {
+          "result": [
+            "challenge|none|/商品|preview",
+            "3",
+            "invalid_payload|none|/商品|preview",
+            2,
+            "challenge|none|/aaa",
+            null,
+            "settled|usdc|/商品|preview",
+            "2",
+            "invalid_payload|usdc|/商品|preview",
+            "99",
+            "challenge|usdc|/商品|preview",
+            "4",
+            "verify_failed|usdc|/商品|preview",
+            1,
+            "conflict|usdc|/商品|preview",
+            "1",
+            "content_error|usdc|/商品|preview",
+            "1",
+            "settle_failed|usdc|/商品|preview",
+            "1",
+            "facilitator_unavailable|usdc|/商品|preview",
+            "1",
+            "settled|jpyc|/aaa",
+            "1"
+          ]
+        }
+      },
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-29"
+        ],
+        "body": {
+          "result": [
+            "challenge|none|/商品|preview",
+            7,
+            "settled|usdc|/商品|preview",
+            1,
+            "settled|jpyc|/aaa",
+            1,
+            "invalid_payload|jpyc|/invalid-only",
+            "8"
+          ]
+        }
+      }
+    ],
+    "stdout": "x402 funnel — 直近 2 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n  /aaa: challenge 0 / invalid_payload 0\n  /商品|preview: challenge 10 / invalid_payload 2\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  /aaa|jpyc: 2 / 2 (100%)\n  /invalid-only|jpyc: 0 / 0 (-) — invalid_payload 8\n  /商品|preview|usdc: 3 / 8 (38%) — challenge 4, invalid_payload 99, verify_failed 1, conflict 1, content_error 1, settle_failed 1, facilitator_unavailable 1\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "default seven UTC days tolerate missing/null data",
+    "script": "x402-funnel-report.mjs",
+    "args": [],
+    "replies": [
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-30"
+        ],
+        "body": {
+          "result": []
+        }
+      },
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-29"
+        ],
+        "body": {
+          "result": null
+        }
+      },
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-28"
+        ],
+        "body": {
+          "result": []
+        }
+      },
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-27"
+        ],
+        "body": {
+          "result": null
+        }
+      },
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-26"
+        ],
+        "body": {
+          "result": []
+        }
+      },
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-25"
+        ],
+        "body": {
+          "result": null
+        }
+      },
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-24"
+        ],
+        "body": {
+          "result": []
+        }
+      }
+    ],
+    "stdout": "x402 funnel — 直近 7 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "malformed count and odd flat array are not validated",
+    "script": "x402-funnel-report.mjs",
+    "args": [
+      "1"
+    ],
+    "replies": [
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-30"
+        ],
+        "body": {
+          "result": [
+            "challenge|none|/bad",
+            "oops",
+            "settled|usdc|/odd"
+          ]
+        }
+      }
+    ],
+    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n  /bad: challenge NaN / invalid_payload 0\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  /odd|usdc: NaN / NaN (-)\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "non-array HGETALL is currently ignored",
+    "script": "x402-funnel-report.mjs",
+    "args": [
+      "1"
+    ],
+    "replies": [
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-30"
+        ],
+        "body": {
+          "result": {}
+        }
+      }
+    ],
+    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "nested field/value arrays retain existing String/Number coercion",
+    "script": "x402-funnel-report.mjs",
+    "args": [
+      "1"
+    ],
+    "replies": [
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-30"
+        ],
+        "body": {
+          "result": [
+            [
+              "challenge|none|/nested"
+            ],
+            [
+              "2"
+            ],
+            [
+              "settled|usdc|/nested"
+            ],
+            [
+              3
+            ]
+          ]
+        }
+      }
+    ],
+    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n  /nested: challenge 2 / invalid_payload 0\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  /nested|usdc: 3 / 3 (100%)\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "invalid day argument returns NaN with no requests",
+    "script": "x402-funnel-report.mjs",
+    "args": [
+      "garbage"
+    ],
+    "replies": [],
+    "stdout": "x402 funnel — 直近 NaN 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "unknown option also returns NaN with no requests",
+    "script": "x402-funnel-report.mjs",
+    "args": [
+      "--help"
+    ],
+    "replies": [],
+    "stdout": "x402 funnel — 直近 NaN 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "only first day argument is used",
+    "script": "x402-funnel-report.mjs",
+    "args": [
+      "1",
+      "30"
+    ],
+    "replies": [
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-30"
+        ],
+        "body": {
+          "result": []
+        }
+      }
+    ],
+    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "successful error envelope is not upgraded to a failure",
+    "script": "x402-funnel-report.mjs",
+    "args": [
+      "1"
+    ],
+    "replies": [
+      {
+        "command": [
+          "HGETALL",
+          "x402:funnel:2026-09-30"
+        ],
+        "body": {
+          "error": "NOPERM fixture"
+        }
+      }
+    ],
+    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stderr": "",
+    "status": 0
+  }
+]

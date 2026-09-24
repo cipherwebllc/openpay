@@ -10,6 +10,8 @@
 // invalid_payload は rail=none のため試行数から除外する。
 // 成立率 = settled / 支払いを試みた件数。誰が・いくらで買ったかは settle 台帳 (x402:settle:ledger:<月>) を見る。
 
+import { createReportKv } from './lib/report-kv.mjs';
+
 const url = process.env.KV_REST_API_URL;
 const token = process.env.KV_REST_API_TOKEN;
 if (!url || !token) {
@@ -19,15 +21,7 @@ if (!url || !token) {
 const days = Math.max(1, Math.min(180, Number(process.argv[2] ?? 7)));
 const STAGES = ['challenge', 'invalid_payload', 'verify_failed', 'conflict', 'content_error', 'settle_failed', 'facilitator_unavailable', 'settled'];
 
-async function kv(command) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(command),
-  });
-  if (!res.ok) throw new Error(`KV ${res.status}: ${await res.text()}`);
-  return (await res.json()).result;
-}
+const kv = createReportKv({ url, token });
 
 const totals = new Map(); // `${path}|${rail}` → { stage: n }
 const challenges = new Map(); // path → n (rail 未確定)

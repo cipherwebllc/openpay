@@ -5,6 +5,8 @@
 // 一部はインデクサー (x402scan / x402 List 等) の検証購入の可能性があるが、第三者が実 USDC を払い
 // 精算された事実に変わりはないので区別しない (推測を書かない)。
 
+import firstPartyWallets from './firstPartyWallets.json';
+
 export type ExternalPurchase = {
   readonly chain: 'base';
   /** UTC 日付 (ブロックタイムスタンプ)。 */
@@ -18,14 +20,8 @@ export type ExternalPurchase = {
   readonly tx: string;
 };
 
-/** 自社・関係者ウォレット (小文字)。ここに載る payer は EXTERNAL_PURCHASES に入れてはいけない (テストで固定)。 */
-export const FIRST_PARTY_WALLETS: readonly string[] = [
-  '0x9a76ea8fc0b9f34d34b91d453f2940932c9a7fe0', // テスト買い手 / license minter
-  '0x8f16ef365676c405c739175fe7a11343e864343b', // 運営者個人 (テスト兼用)
-  '0xda33e4cee3f06b19b174e299a36fcd075f0f9674', // テストネット使い捨て (mainnet でも動作確認に使用)
-  '0x52d4901142e2b5680027da5eb47c86cb02a3ca81', // 受取ウォレット
-  '0x428483fba62edcef1e3a100d3799f6d71759c560', // 手数料受取
-];
+/** 自社・関係者ウォレット (小文字)。本体は lib/firstPartyWallets.json (ops script と共有)。ここに載る payer は EXTERNAL_PURCHASES に入れてはいけない (テストで固定)。 */
+export const FIRST_PARTY_WALLETS: readonly string[] = firstPartyWallets.map(({ address }) => address);
 
 /** 集計時点 (週次更新で進める)。 */
 export const EXTERNAL_PURCHASES_AS_OF = '2026-09-18';
