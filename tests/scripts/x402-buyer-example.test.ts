@@ -263,7 +263,7 @@ describe('E12: standalone public onboarding', () => {
   });
 
   it('documents npm setup before downloading JPYC and explicitly opts in to the USDC smoke', () => {
-    for (const file of ['README.md', 'docs/agent-templates/jpyc-service-monitor.md', 'components/X402DiscoveryView.tsx']) {
+    for (const file of ['README.md', 'docs/agent-templates/jpyc-service-monitor.md', 'components/x402/DiscoveryExamples.tsx']) {
       const text = readFileSync(resolve(file), 'utf8');
       expect(text, file).toContain('npm install openpay-x402-sdk viem');
     }
