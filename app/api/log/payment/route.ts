@@ -250,12 +250,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   // IPv4 NAT と同様、同じ /64 の正規ユーザも 60 回/分の枠を共有するトレードオフを受け入れる。
   // HMAC 無効時も telemetry を止めず、従来の匿名化 prefix による制限を保つ。
   const limiterKey = hashIpBucket(clientIp(req)) ?? ipPrefix;
-  try {
-    if (!(await checkReadRateLimit(`logpay:${limiterKey}`, 60, 60))) {
-      return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
-    }
-  } catch {
-    // Telemetry is best-effort; KV/rate-limit errors must not break payment logging.
+  // KV/rate-limit 障害で payment logging を止めない fail-open は checkReadRateLimit 自身が持つ
+  // (no-throw・障害時 true)。ここで try/catch を重ねない (掟 13)。
+  if (!(await checkReadRateLimit(`logpay:${limiterKey}`, 60, 60))) {
+    return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
   }
 
   const entry = {

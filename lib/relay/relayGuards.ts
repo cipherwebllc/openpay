@@ -115,6 +115,7 @@ export async function checkRateLimit(keys: string[]): Promise<boolean> {
 // max*4 まで伸び、高頻度ポーリング (例: 注文状況 8s) を寛容な上限で守るには重い (毎回 max*4 件の
 // list 読み)。read poll 向けに INCR ベースの固定窓で近似する。allowed = 窓内カウント ≤ max。
 // fail-open: KV 未設定/障害は許可 (可用性優先・checkRateLimit と同方針)。
+// no-throw: 例外を投げない契約。呼び出し側は try で包まない (tests/lib/readRateLimit-nothrow-pinning)。
 export async function checkReadRateLimit(
   key: string,
   max: number,

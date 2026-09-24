@@ -29,15 +29,15 @@ import {
 } from 'viem/chains';
 import { kvLrange, kvLlen } from '@/lib/kv';
 import { logger } from '@/lib/logger';
+import { PAYMENT_LOG_KV_KEY } from '@/lib/paymentLog';
 import { requireAdminAuth } from '../_auth';
 
 export const runtime = 'nodejs';
 
-const KV_KEY = 'openpay:payments:log';
-
-// OpenPay が運用する全 chain (USDC 4 chain × mainnet/testnet + JPYC 2 chain
-// × mainnet/testnet)。chainId → 表示名の lookup table、未知 chain は
-// chainId をそのまま文字列化して返す。
+// chainId → 表示名の固定の lookup table (USDC 4 chain × mainnet/testnet + JPYC 2 chain ×
+// mainnet/testnet)。表に無い chain (Ethereum・Avalanche・Arc 等) は `chainId:N` と表示する。
+// lib/chains の chainNameForId は選択中 network の chain しか名前を返さず表示名が変わるため
+// ここでは使わない (寄せるなら表示変更として B-R6d・tests/app/api/payment-log-storage-pinning)。
 const KNOWN_CHAINS = [
   polygon,
   polygonAmoy,
@@ -554,8 +554,8 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
 
   const [range, len] = await Promise.all([
-    kvLrange(KV_KEY, from, to),
-    kvLlen(KV_KEY),
+    kvLrange(PAYMENT_LOG_KV_KEY, from, to),
+    kvLlen(PAYMENT_LOG_KV_KEY),
   ]);
 
   if (!range.ok) {
