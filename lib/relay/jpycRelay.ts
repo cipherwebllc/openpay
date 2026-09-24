@@ -6,6 +6,8 @@
 // 背景: memory:jpyc-eip3009 (Polygon は Gelato sponsoredCall、Kaia は自前 relayer)。
 
 import { getAddress, type Address, type Hex } from 'viem';
+import { relayBroadcast } from './relayBroadcast';
+import type { RelayResult, RelayTaskOutcome } from './relayTypes';
 import {
   encodeTransferWithAuthorizationCalldata,
   recoverTransferAuthorizationSigner,
@@ -17,6 +19,8 @@ import type {
   GasBudgetRefundToken,
 } from '@/lib/relay/relayGuards';
 
+export type { RelayResult, RelayTaskOutcome } from './relayTypes';
+
 export type RelayInput = {
   chainId: number;
   auth: Eip3009Authorization;
@@ -24,18 +28,6 @@ export type RelayInput = {
   // rate-limit 用の識別子 (from は auth.from、ip は呼出元 IP prefix 等)。
   rateLimitKeys: string[];
 };
-
-// submit 済 tx の最終状態。'pending' は「broadcast 済だが確定待ち」(timeout 等)。
-// 重要: broadcast 後の不確定は 'error' ではなく 'pending' を返す。'error' は client を
-// standard mode に fallback させるため、tx が後で確定すると二重支払いになる (Codex #4)。
-export type RelayTaskOutcome =
-  | { state: 'success'; txHash: Hex }
-  | { state: 'reverted'; txHash?: Hex }
-  // broadcast 済 or broadcast 不確定 (Gelato timeout 等)。txHash は分かれば同梱・無ければ省略。
-  | { state: 'pending'; txHash?: Hex }
-  // broadcast されなかったことが確実な失敗のみ (Gelato Cancelled/Blacklisted/NotFound)。
-  // client は standard へ fallback 可。timeout 等の不確定は 'pending' を使うこと。
-  | { state: 'error'; detail: string };
 
 export type RelayDeps = {
   nowSec: () => number;
@@ -108,18 +100,6 @@ export type RelayDeps = {
   pollTask: (taskId: string) => Promise<RelayTaskOutcome>;
 };
 
-export type RelayResult =
-  | { kind: 'success'; txHash: Hex }
-  | { kind: 'reverted'; txHash?: Hex }
-  // broadcast 済だが未確定 (確認待ち)。client は standard へ fallback してはならない
-  // (二重支払い防止)。txHash があれば追跡可能、authorizationState 既使用時は無し。
-  | { kind: 'pending'; txHash?: Hex }
-  // pre-submit に弾いた (検証/残高/rate-limit)。httpStatus + 理由コード。
-  | { kind: 'rejected'; httpStatus: number; reason: string }
-  // submit "前" のエラー (検証通過後〜broadcast 前: 残高 race / RPC / 資金不足)。tx は
-  // 出ていないので client は安全に fallback 可。broadcast 後は使わない (pending を使う)。
-  | { kind: 'relay_error'; detail: string };
-
 export async function relayJpycAuthorization(
   input: RelayInput,
   deps: RelayDeps,
@@ -179,95 +159,12 @@ export async function relayJpycAuthorization(
     if (used) return { kind: 'pending' };
   }
 
-  // 5.6 冪等性: 同一 authorization の重複 POST は再 broadcast せず pending (記録済 hash を同梱)。
-  let idemClaimed = false;
-  if (deps.claimIdempotency) {
-    const claim = await deps.claimIdempotency(chainId, auth.from, auth.nonce);
-    if (claim.status === 'duplicate') {
-      return { kind: 'pending', txHash: claim.txHash ?? undefined };
-    }
-    idemClaimed = true;
-  }
-  const releaseClaim = async () => {
-    if (idemClaimed) await deps.releaseIdempotency?.(chainId, auth.from, auth.nonce);
-  };
-  const recordHash = async (txHash: Hex) => {
-    if (idemClaimed) {
-      await deps.recordRelayHash?.(chainId, auth.from, auth.nonce, txHash);
-    }
-  };
-
-  // 5.65 rate-limit (relayer は gas を払うので濫用/DoS の標的)。重複ガード (5.5/5.6) の後に
-  // 置く: network retry / double-click の正当な重複 POST は pending で吸収され rate-limit 枠を
-  // 浪費しない (枠を浪費すると broadcast 済の決済に 429 が返り「失敗」に見える)。グローバル
-  // 日次予算 (5.7) より前に置き、rate-limit される actor が予算枠を消費しないようにする。
-  // reject 時は claim を解放 (false tombstone 防止・5.7 と同じ)。
-  const allowed = await deps.checkRateLimit(input.rateLimitKeys);
-  if (!allowed) {
-    await releaseClaim();
-    return { kind: 'rejected', httpStatus: 429, reason: 'rate_limited' };
-  }
-
-  // 5.7 日次グローバル予算 (Sybil circuit breaker)。重複/既使用ガードの後・submit 直前に置く
-  // (replay/duplicate が予算枠を消費して正当な決済を枯渇させる DoS を防ぐ・Codex P1)。超過は
-  // submit せず reject (tx 未送信 → standard へ安全に fallback)。claim 済なら解放 (false tombstone 防止)。
-  let gasBudgetRefundToken: GasBudgetRefundToken | null = null;
-  if (deps.checkGasBudget) {
-    const budget = await deps.checkGasBudget(chainId);
-    if (!budget.allowed) {
-      await releaseClaim();
-      return { kind: 'rejected', httpStatus: 503, reason: 'daily_budget_exceeded' };
-    }
-    // 実際に INCR した UTC 日付込み token だけを refund 対象にする。fail-open (token=null) や
-    // 日跨ぎ後の再計算で別日の counter を DECR し、余剰枠を与える波及を断つ。
-    gasBudgetRefundToken = budget.refundToken;
-  }
-  // tx が 1 件も broadcast されなかったことが確実な失敗でのみ予算枠を 1 戻す (RPC 不安定日に
-  // 正当決済が daily_budget_exceeded で 503 になるのを防ぐ)。checkGasBudget を通過した場合のみ。
-  const refundBudget = async () => {
-    if (gasBudgetRefundToken) {
-      await deps.refundGasBudget?.(gasBudgetRefundToken);
-    }
-  };
-
-  // 6. submit + poll。submit が throw = broadcast 前のエラー → relay_error (fallback 可)。
-  const data = encodeTransferWithAuthorizationCalldata(auth, signature);
-  let taskId: string;
-  try {
-    const submitted = await deps.submitSponsoredCall(chainId, jpyc, data);
-    taskId = submitted.taskId;
-  } catch (e) {
-    await releaseClaim(); // broadcast 前失敗 → claim 解放 (正当な再試行を待たせない)
-    await refundBudget(); // tx 未送信が確実 → 予算枠を戻す
-    return {
-      kind: 'relay_error',
-      detail: `submit_failed: ${e instanceof Error ? e.message : String(e)}`,
-    };
-  }
-
-  // broadcast 直後に hash を記録 (self-host は taskId=txHash)。poll 前に worker が落ちても重複
-  // POST が explorer 追跡できる。Gelato の taskId は UUID なので txHash 形のみ記録する。
-  if (/^0x[0-9a-fA-F]{64}$/.test(taskId)) await recordHash(taskId as Hex);
-
-  // ここから先は broadcast 済。error は返さず success/reverted/pending のいずれか。
-  const outcome = await deps.pollTask(taskId);
-  if (outcome.state === 'success') {
-    await recordHash(outcome.txHash);
-    return { kind: 'success', txHash: outcome.txHash };
-  }
-  if (outcome.state === 'reverted') {
-    if (outcome.txHash) await recordHash(outcome.txHash);
-    return { kind: 'reverted', txHash: outcome.txHash };
-  }
-  if (outcome.state === 'pending') {
-    if (outcome.txHash) await recordHash(outcome.txHash);
-    return { kind: 'pending', txHash: outcome.txHash };
-  }
-  // poll 'error' = broadcast されなかったことが確実な失敗のみ (Gelato Cancelled/Blacklisted/
-  // NotFound)。timeout 等の不確定は pollTask 側で 'pending' に倒す約束なのでここには来ない。
-  // よって未送信が確実 → relay_error で fallback 可 + claim 解放 (正当な再試行を待たせない)
-  // + 予算枠を戻す (tx 未送信が確実なので消費した枠を回収)。
-  await releaseClaim();
-  await refundBudget();
-  return { kind: 'relay_error', detail: outcome.detail };
+  return relayBroadcast({
+    chainId,
+    from: auth.from,
+    nonce: auth.nonce,
+    rateLimitKeys: input.rateLimitKeys,
+    encodeCalldata: () => encodeTransferWithAuthorizationCalldata(auth, signature),
+    submit: (data) => deps.submitSponsoredCall(chainId, jpyc, data),
+  }, deps);
 }
