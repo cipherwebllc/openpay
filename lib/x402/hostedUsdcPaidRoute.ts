@@ -18,6 +18,7 @@ import {
   sellerDisclosureComplete,
 } from '@/lib/x402/hostedStore';
 import { paymentSignatureFingerprint } from '@/lib/x402/paymentRedelivery';
+import { hostedResourceUrl } from '@/lib/x402/storeWire';
 import { checkPurchaseQuoteRateLimit } from '@/lib/x402/purchaseIntent';
 import { recordHostedPurchase } from '@/lib/x402/purchaseStats';
 import { errorResponse, noStore, pendingResponse, scheduleAfterResponse } from '@/lib/x402/hostedRouteResponses';
@@ -78,14 +79,10 @@ function cdpWireFor(intent: StoreUsdcIntent): {
   return {
     accept: toV2Accept(requirements.caip2),
     resource: {
-      resourceUrl: resourceUrl(intent),
+      resourceUrl: hostedResourceUrl(intent.resourceId, intent.payerHint, 'usdc'),
       description: 'OpenPay creator store digital product',
     },
   };
-}
-
-function resourceUrl(intent: Pick<StoreUsdcIntent, 'resourceId' | 'payerHint'>): string {
-  return `https://open-pay.jp/api/paid/hosted/${intent.resourceId}?payer=${intent.payerHint}&rail=usdc`;
 }
 
 function requirementsForIntent(intent: StoreUsdcIntent): {
@@ -115,7 +112,7 @@ function requirementsForIntent(intent: StoreUsdcIntent): {
     scheme: 'exact',
     network: 'base',
     maxAmountRequired: intent.usdcQuoteAtomic,
-    resource: resourceUrl(intent),
+    resource: hostedResourceUrl(intent.resourceId, intent.payerHint, 'usdc'),
     description: intent.metadata.title,
     mimeType: 'application/json',
     payTo: intent.merchant,
@@ -142,7 +139,7 @@ function challenge(
     'PAYMENT-REQUIRED',
     encodePaymentRequiredHeaderValue(
       buildPaymentRequiredV2({
-        url: resourceUrl(intent),
+        url: hostedResourceUrl(intent.resourceId, intent.payerHint, 'usdc'),
         description: intent.metadata.title,
         mimeType: 'application/json',
         accepts: [toV2Accept(requirements.caip2)],

@@ -2,6 +2,13 @@ import 'server-only';
 
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  isHostedLabel,
+  isRecord,
+  isSafeTimestamp as safeTimestamp,
+  parseAddress as address,
+  parseHex32 as hex32,
+} from '@/lib/x402/storeWire';
+import {
   getAddress,
   isAddress,
   isAddressEqual,
@@ -72,15 +79,8 @@ const PENDING_KEY = 'store:usdc:intent:pending';
 const PENDING_QUARANTINE_KEY = 'store:usdc:intent:quarantine';
 const MAX_FINALIZE_RETRIES = 4;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 function canonicalHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-
-function safeTimestamp(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
 function canonicalDecimal(value: unknown): string | null {
@@ -90,18 +90,6 @@ function canonicalDecimal(value: unknown): string | null {
   } catch {
     return null;
   }
-}
-
-function address(value: unknown): Address | null {
-  return typeof value === 'string' && isAddress(value)
-    ? getAddress(value)
-    : null;
-}
-
-function hex32(value: unknown): Hex | null {
-  return typeof value === 'string' && /^0x[0-9a-fA-F]{64}$/.test(value)
-    ? (value.toLowerCase() as Hex)
-    : null;
 }
 
 function metadata(value: unknown): HostedPurchaseMetadata | null {
@@ -117,9 +105,7 @@ function metadata(value: unknown): HostedPurchaseMetadata | null {
     typeof value.priceJpyc !== 'string' ||
     !DECIMAL_RE.test(value.priceJpyc) ||
     (value.contentKind !== 'url' && value.contentKind !== 'text') ||
-    !['download', 'pdf', 'zip', 'prompt', 'api', 'external'].includes(
-      String(value.label),
-    ) ||
+    !isHostedLabel(String(value.label)) ||
     (value.desc !== undefined && typeof value.desc !== 'string') ||
     (value.emoji !== undefined && typeof value.emoji !== 'string')
   ) {

@@ -14,6 +14,14 @@ import 'server-only';
 //   store:purchase:<chainId>:<txHash>         authoritative purchase record
 
 import { createHash, randomBytes } from 'node:crypto';
+import {
+  hostedResourceUrl,
+  isHostedLabel,
+  isRecord,
+  isSafeTimestamp,
+  parseAddress,
+  parseHex32,
+} from '@/lib/x402/storeWire';
 import { JPYC_V3_ASSET } from '@/lib/x402/types';
 import { parseLicenseDefinition } from '@/lib/license/definition';
 import { licenseNftEnabled } from '@/lib/license/config';
@@ -91,9 +99,6 @@ const FORWARDER_SETTLED_EVENT_ABI = parseAbi([
   'event Settled(address indexed from, bytes32 indexed nonce, address indexed merchant, uint256 merchantValue, address feeReceiver, uint256 feeValue)',
 ]);
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 const lowerHex = <T extends string>(value: T): T =>
   value.toLowerCase() as T;
 
@@ -103,10 +108,6 @@ function canonicalDecimal(value: bigint | string): string {
 
 function canonicalHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-
-function isSafeTimestamp(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
 function parseCanonicalDecimal(value: unknown): string | null {
@@ -119,19 +120,6 @@ function parseCanonicalDecimal(value: unknown): string | null {
   } catch {
     return null;
   }
-}
-
-function parseAddress(value: unknown): Address | null {
-  return typeof value === 'string' && isAddress(value)
-    ? getAddress(value)
-    : null;
-}
-
-function parseHex32(value: unknown): Hex | null {
-  return typeof value === 'string' &&
-    /^0x[0-9a-fA-F]{64}$/.test(value)
-    ? (lowerHex(value) as Hex)
-    : null;
 }
 
 function parseMetadata(value: unknown): HostedPurchaseMetadata | null {
@@ -149,12 +137,7 @@ function parseMetadata(value: unknown): HostedPurchaseMetadata | null {
     typeof value.priceJpyc !== 'string' ||
     !DECIMAL_RE.test(value.priceJpyc) ||
     (value.contentKind !== 'url' && value.contentKind !== 'text') ||
-    (value.label !== 'download' &&
-      value.label !== 'pdf' &&
-      value.label !== 'zip' &&
-      value.label !== 'prompt' &&
-      value.label !== 'api' &&
-      value.label !== 'external')
+    !isHostedLabel(value.label)
   ) {
     return null;
   }
@@ -1000,7 +983,7 @@ function requirementsMatchIntent(
     reqs.network === `eip155:${intent.chainId}` &&
     reqs.maxAmountRequired === expectedTotal.toString() &&
     reqs.resource ===
-      `https://open-pay.jp/api/paid/hosted/${intent.resourceId}?payer=${intent.payerHint}` &&
+      hostedResourceUrl(intent.resourceId, intent.payerHint, 'jpyc') &&
     typeof reqs.payTo === 'string' &&
     isAddress(reqs.payTo) &&
     isAddressEqual(reqs.payTo, intent.forwarder) &&
