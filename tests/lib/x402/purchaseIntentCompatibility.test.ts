@@ -31,12 +31,27 @@ vi.mock('node:crypto', async (original) => ({
 vi.mock('@/lib/kv', () => ({ kvGet: h.kvGet, kvSet: h.kvSet, kvEval: h.kvEval }));
 vi.mock('@/lib/logger', () => ({ logger: { warn: h.warn } }));
 vi.mock('@/lib/chains', () => ({ chainObjectForId: () => ({}), transportForChain: () => ({}) }));
-vi.mock('@/lib/x402/hostedStore', () => ({ hostedContentKey: (id: string, rev: number) => `store:hosted:content:${id}:${rev}` }));
+// license 商品 (h_ id) だけ実物と同じ contentRef 形式にする (license 定義の contentRef と一致させるため)。
+// 既存 fixture ('creator-item') の key は従来どおりで、既存 snapshot は変わらない。
+vi.mock('@/lib/x402/hostedStore', () => ({
+  hostedContentKey: (id: string, rev: number) =>
+    id.startsWith('h_') ? `x402:hosted:${id}:content:${rev}` : `store:hosted:content:${id}:${rev}`,
+}));
+// license 経路 (licenseLuaVariant + ARGV[#ARGV] の context) を通すため flag だけ ON にする。
+// 既存の digital fixture は productKind を持たないので、この flag を参照しない。
+vi.mock('@/lib/license/config', async (original) => ({
+  ...await original<typeof import('@/lib/license/config')>(),
+  licenseNftEnabled: () => true,
+}));
 vi.mock('@/lib/x402/facilitatorSettle', () => ({ parseFacilitatorRequest: vi.fn() }));
 vi.mock('@/lib/x402/paymentRedelivery', () => ({ paymentRedeliveryIdentity: vi.fn() }));
 vi.mock('viem', async (original) => ({ ...await original<typeof import('viem')>(), createPublicClient: () => h.client }));
 
 import * as facade from '@/lib/x402/purchaseIntent';
+import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
+import { createLicenseDefinition } from '@/lib/license/definition';
+import { licenseLuaVariant } from '@/lib/license/stock';
+import { JPYC_V3_ASSET } from '@/lib/x402/types';
 import {
   checkPurchaseQuoteRateLimit, claimPurchaseSettlement, claimSignedPurchaseIntent,
   createQuotedPurchaseIntent, finalizeHostedPurchase, hostedPurchaseRecordKey,
@@ -45,8 +60,8 @@ import {
   parsePurchaseIntent, parsePurchaseOwnership, purchaseIntentKey, purchaseLibraryKey,
   purchaseOwnershipKey, purchasePendingIndexKey, reconcilePendingPurchases,
   reconcilePurchaseIntent, recordPurchaseTransaction,
-  type PurchaseReconcileChain, type QuotedPurchaseIntent, type SettledPurchaseIntent,
-  type SettlingPurchaseIntent,
+  type PurchaseAuthorizationClaim, type PurchaseReconcileChain, type QuotedPurchaseIntent,
+  type SettledPurchaseIntent, type SettlingPurchaseIntent, type SignedPurchaseIntent,
 } from '@/lib/x402/purchaseIntent';
 
 // digitalCompatibility.test.ts と同じ SHA-256 (script 本文) → 定数名。未知の script は UNKNOWN で落ちる。
@@ -66,6 +81,20 @@ const SCRIPT_NAMES: Record<string, string> = {
   'fff5b143e7f894679d9c6f47f3f4e9261265c9236fcb45550e52b15fc53cb11d': 'QUARANTINE_PENDING_MEMBER',
 };
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
+// license 商品は licenseLuaVariant(digital script) を EVAL する (R3b で追加した pin)。内側の digital script を
+// 取り出して SHA で名前を引き、production の wrapper で包み直すと元の script と byte 一致することまで確認する。
+const LICENSE_OPEN = 'local function transition() ';
+const LICENSE_CLOSE = ' end; local result=transition(); ';
+function scriptName(script: string): string {
+  const digital = SCRIPT_NAMES[sha256(script)];
+  if (digital) return digital;
+  const open = script.indexOf(LICENSE_OPEN);
+  const close = script.lastIndexOf(LICENSE_CLOSE);
+  if (open < 0 || close < open) return 'UNKNOWN';
+  const inner = script.slice(open + LICENSE_OPEN.length, close);
+  const name = SCRIPT_NAMES[sha256(inner)];
+  return name && licenseLuaVariant(inner) === script ? `license(${name})` : 'UNKNOWN';
+}
 
 const quoted = fixture.quoted as QuotedPurchaseIntent;
 const active = fixture.active as SettlingPurchaseIntent;
@@ -113,7 +142,7 @@ beforeEach(() => {
     return { ok: true, value: 'OK' };
   });
   h.kvEval.mockReset().mockImplementation(async (script: string, keys: string[], args: string[]) => {
-    const name = SCRIPT_NAMES[sha256(script)] ?? 'UNKNOWN';
+    const name = scriptName(script);
     h.evals.push({ name, keys: [...keys], args: [...args] });
     return { ok: true, value: h.replies.has(name) ? h.replies.get(name) : 1 };
   });
@@ -272,6 +301,119 @@ describe('Lua call sites: script, KEYS and ARGV order', () => {
   });
 });
 
+// R3b で追加 (分割前のコード 86e98b1a で採取): license 商品の EVAL は licenseLuaVariant で包んだ script を使い、
+// 末尾 ARGV (Lua 側の ARGV[#ARGV]) に licenseEvalContext の JSON を足す。claim/settle/fail/finalize の
+// 4 hook について、包む script・KEYS・ARGV (末尾 context の JSON を含む) を固定する。
+describe('license Lua call sites: licenseLuaVariant script and trailing ARGV[#ARGV] context', () => {
+  const L_ID = `h_${'a'.repeat(32)}`;
+  const L_SALT = `0x${'0'.repeat(63)}7` as Hex;
+  const L_KEY = `store:intent:${L_SALT}`;
+  const L_MERCHANT = '0x4444444444444444444444444444444444444444' as const;
+  const L_FORWARDER = '0x3333333333333333333333333333333333333333' as const;
+  const L_FEE = '0x5555555555555555555555555555555555555555' as const;
+  const L_PAYER = '0x1111111111111111111111111111111111111111' as const;
+  const L_TX = `0x${'e'.repeat(64)}` as Hex;
+  const L_NOW = quoted.createdAt;
+  const definition = createLicenseDefinition(L_ID, {
+    supply: 2, transferable: false, termsUrl: 'https://seller.example/terms', termsVersion: 'v1',
+  }, 80002, '0x6666666666666666666666666666666666666666');
+
+  // 実際の関数を順に通し、各段で保存される JSON を次段の入力にする (KV は mock・EVAL は既定で 1 を返す)。
+  async function licenseStates() {
+    const q = await createQuotedPurchaseIntent({
+      resourceId: L_ID, contentRevision: 1,
+      metadata: {
+        productKind: 'license', license: definition, owner: L_MERCHANT, payTo: L_MERCHANT,
+        title: 'License', priceJpyc: '1000', contentKind: 'text', label: 'prompt',
+      },
+      payer: L_PAYER, token: JPYC_V3_ASSET.address, chainId: 80002, forwarder: L_FORWARDER,
+      merchant: L_MERCHANT, merchantValue: 1000n * 10n ** 18n, feeReceiver: L_FEE,
+      feeValue: 10n * 10n ** 18n, anchorBlock: 10000n, now: L_NOW, intentSalt: L_SALT,
+    });
+    if (!q.ok) throw new Error(`license quote: ${q.reason}`);
+    const i = q.intent;
+    const claim: PurchaseAuthorizationClaim = {
+      payer: L_PAYER, token: i.token, chainId: i.chainId, forwarder: i.forwarder,
+      commitVersion: i.commitVersion, merchant: i.merchant, merchantValue: i.merchantValue,
+      feeReceiver: i.feeReceiver, feeValue: i.feeValue, validAfter: '0',
+      validBefore: i.authorizationValidBeforeMax,
+      nonce: buildForwarderNonce({
+        from: i.payerHint, merchant: i.merchant, merchantValue: BigInt(i.merchantValue),
+        feeReceiver: i.feeReceiver, feeValue: BigInt(i.feeValue), validAfter: 0n,
+        validBefore: BigInt(i.authorizationValidBeforeMax), intentSalt: i.intentSalt,
+      }, i.chainId, i.forwarder),
+      signatureFingerprint: 'a'.repeat(64), resourceId: L_ID, contentRevision: 1,
+      deploymentVersion: i.deploymentVersion, anchorBlock: i.anchorBlock,
+    };
+    return { quoted: i, claim };
+  }
+  const lastEval = (name: string) => h.evals.filter((call) => call.name === name).at(-1)!;
+
+  it('claimSignedPurchaseIntent / claimPurchaseSettlement / markPurchaseFailedPrebroadcast (claim, settle, fail hooks)', async () => {
+    const { quoted: q, claim } = await licenseStates();
+    reads(L_KEY, q);
+    expect(await claimSignedPurchaseIntent({
+      intentSalt: L_SALT, claim, authorizationHash: hash(claim),
+      reservationToken: 'reservation-token', now: L_NOW + 1_000,
+    })).toMatchObject({ ok: true, kind: 'claimed' });
+    const signedL = JSON.parse(lastEval('license(CLAIM_SIGNED_INTENT)').args[8]!) as SignedPurchaseIntent;
+    reads(L_KEY, signedL);
+    const settlingResult = await claimPurchaseSettlement({ intentSalt: L_SALT, claim, now: L_NOW + 2_000 });
+    expect(settlingResult).toMatchObject({ ok: true, kind: 'claimed' });
+    const settlingL = JSON.parse(lastEval('license(CLAIM_SETTLEMENT)').args[10]!) as SettlingPurchaseIntent;
+    expect(await markPurchaseFailedPrebroadcast({
+      intentSalt: L_SALT, attemptId: settlingL.attemptId, reason: 'prebroadcast_rejection',
+      now: L_NOW + 3_000, licenseIntent: settlingL,
+    })).toBe('updated');
+    // licenseIntent を渡さない fail は digital script のまま (context なし)。
+    await markPurchaseFailedPrebroadcast({
+      intentSalt: L_SALT, attemptId: settlingL.attemptId, reason: 'prebroadcast_rejection', now: L_NOW + 3_000,
+    });
+    const snapshot = trace();
+    expect(snapshot.evals.map((call) => call.name)).toEqual([
+      'license(CLAIM_SIGNED_INTENT)', 'license(CLAIM_SETTLEMENT)',
+      'license(MARK_PURCHASE_FAILED_PREBROADCAST)', 'MARK_PURCHASE_FAILED_PREBROADCAST',
+    ]);
+    // 末尾 ARGV が context (hook 名と now) で、digital 版の ARGV の後ろにだけ足されている。
+    expect(snapshot.evals.slice(0, 3).map((call) => JSON.parse(call.args.at(-1)!).hook)).toEqual(['claim', 'settle', 'fail']);
+    expect(snapshot.evals[2]!.args.slice(0, -1)).toEqual(snapshot.evals[3]!.args);
+    expect(snapshot).toMatchSnapshot();
+  });
+
+  it('finalizeHostedPurchase (finalize hook: obligation context) and the verified access read', async () => {
+    const { quoted: q, claim } = await licenseStates();
+    reads(L_KEY, q);
+    await claimSignedPurchaseIntent({ intentSalt: L_SALT, claim, authorizationHash: hash(claim), now: L_NOW + 1_000 });
+    reads(L_KEY, JSON.parse(lastEval('license(CLAIM_SIGNED_INTENT)').args[8]!));
+    await claimPurchaseSettlement({ intentSalt: L_SALT, claim, now: L_NOW + 2_000 });
+    const settlingL = JSON.parse(lastEval('license(CLAIM_SETTLEMENT)').args[10]!) as SettlingPurchaseIntent;
+    const ownKey = `store:own:${L_PAYER}:${L_ID}`;
+    const recordKey = `store:purchase:80002:${L_TX}`;
+    reads(L_KEY, settlingL);
+    // finalize の EVAL が保存する値を、その後の access 読み取りで返す (Lua 成功後の KV を再現)。
+    h.kvEval.mockImplementation(async (script: string, keys: string[], args: string[]) => {
+      const name = scriptName(script);
+      h.evals.push({ name, keys: [...keys], args: [...args] });
+      if (name === 'license(FINALIZE_PURCHASE)') {
+        h.reads.set(L_KEY, [args[22]!]);
+        h.reads.set(ownKey, [args[13]!]);
+        h.reads.set(recordKey, [args[21]!]);
+      }
+      return { ok: true, value: name === 'READ_LIBRARY_SCORE' ? String(L_NOW + 4_000) : 1 };
+    });
+    h.gets.length = 0;
+    h.sets.length = 0;
+    h.evals.length = 0;
+    const result = await finalizeHostedPurchase({ intentSalt: L_SALT, txHash: L_TX, settledAt: L_NOW + 4_000 });
+    expect(result).toMatchObject({ ok: true, kind: 'finalized' });
+    const snapshot = trace();
+    expect(snapshot.evals.map((call) => call.name)).toEqual(['license(FINALIZE_PURCHASE)', 'READ_LIBRARY_SCORE']);
+    const context = JSON.parse(snapshot.evals[0]!.args.at(-1)!);
+    expect(context).toMatchObject({ hook: 'finalize', now: L_NOW + 4_000, obligation: { txHash: L_TX, purchasedAt: L_NOW + 4_000 } });
+    expect(snapshot).toMatchSnapshot();
+  });
+});
+
 describe('stored record parsers: exact outputs (property order) and rejections', () => {
   const out = (value: unknown) => value === null ? null : JSON.stringify(value);
   const claim = active.claim;
@@ -362,30 +504,58 @@ describe('stored record parsers: exact outputs (property order) and rejections',
   });
 });
 
-describe('module structure (R3a split)', () => {
+describe('module structure (R3a/R3b split)', () => {
   const PURCHASE_DIR = 'lib/x402/purchase';
   const LEAVES = readdirSync(PURCHASE_DIR).sort();
-  const specifiers = (file: string) =>
-    [...readFileSync(file, 'utf8').matchAll(/^(?:import|export)[^'"]*?from '([^']+)'|^import '([^']+)'/gm)]
-      .map((match) => match[1] ?? match[2]!);
+  const specifiers = (file: string) => {
+    const source = readFileSync(file, 'utf8');
+    return [
+      ...[...source.matchAll(/^(?:import|export)[^'"]*?from '([^']+)'|^import '([^']+)'/gm)]
+        .map((match) => match[1] ?? match[2]!),
+      // leaf を直接指す vi.mock も facade をすり抜ける (利用側の mock が効かない) ので同じ検査に含める。
+      ...[...source.matchAll(/\bvi\.mock\(\s*'([^']+)'/g)].map((match) => match[1]!),
+    ];
+  };
   const walk = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
     return statSync(path).isDirectory() ? walk(path) : /\.(?:ts|tsx|mjs|js)$/.test(name) ? [path] : [];
   });
 
-  it('keeps the leaves below the facade: no leaf imports the facade, and leaves only import types.ts among themselves', () => {
-    expect(LEAVES).toEqual(['keys.ts', 'lua.ts', 'parse.ts', 'types.ts']);
+  it('keeps the leaves below the facade: no leaf imports the facade, and the leaf graph is acyclic', () => {
+    expect(LEAVES).toEqual([
+      'claim.ts', 'keys.ts', 'lua.ts', 'parse.ts', 'quote.ts', 'read.ts', 'transitions.ts', 'types.ts',
+    ]);
     const edges = Object.fromEntries(LEAVES.map((leaf) => [
       leaf, specifiers(`${PURCHASE_DIR}/${leaf}`).filter((spec) => spec.startsWith('.') || spec.includes('purchaseIntent')),
     ]));
-    expect(edges).toEqual({ 'keys.ts': ['./types'], 'lua.ts': [], 'parse.ts': ['./types'], 'types.ts': [] });
+    // R3b: read は types/keys/parse の上・quote/claim/transitions の下。facade (purchaseIntent) への辺は無い。
+    expect(edges).toEqual({
+      'claim.ts': ['./types', './keys', './parse', './lua', './read'],
+      'keys.ts': ['./types'],
+      'lua.ts': [],
+      'parse.ts': ['./types'],
+      'quote.ts': ['./types', './keys', './parse', './lua'],
+      'read.ts': ['./types', './keys', './parse'],
+      'transitions.ts': ['./types', './keys', './parse', './lua'],
+      'types.ts': [],
+    });
+    // 閉路検査: 依存の無い leaf から順に取り除いて全件が消えること。
+    const remaining = new Map(Object.entries(edges).map(([leaf, deps]) => [leaf, deps.map((dep) => `${dep.slice(2)}.ts`)]));
+    while (remaining.size > 0) {
+      const ready = [...remaining].filter(([, deps]) => deps.every((dep) => !remaining.has(dep))).map(([leaf]) => leaf);
+      expect(ready.length, `cycle among ${[...remaining.keys()].join(', ')}`).toBeGreaterThan(0);
+      for (const leaf of ready) remaining.delete(leaf);
+    }
   });
 
   it('routes every consumer outside the split through the facade (vi.mock interception)', () => {
     // 検査器の自己検査: facade 自身の分割先 import は検出できる。
     expect(specifiers('lib/x402/purchaseIntent.ts')).toEqual(expect.arrayContaining([
       './purchase/types', './purchase/keys', './purchase/parse', './purchase/lua',
+      './purchase/read', './purchase/quote', './purchase/claim', './purchase/transitions',
     ]));
+    // vi.mock の specifier も拾える (この file は @/lib/logger を import せず vi.mock だけする)。
+    expect(specifiers('tests/lib/x402/purchaseIntentCompatibility.test.ts')).toContain('@/lib/logger');
     const deep = ['app', 'components', 'lib', 'scripts', 'tests'].flatMap(walk)
       .filter((file) => file !== 'lib/x402/purchaseIntent.ts' && !file.startsWith(`${PURCHASE_DIR}/`))
       .filter((file) => specifiers(file).some((spec) => /(?:^|\/)x402\/purchase\/|^\.\/purchase\//.test(spec)));
