@@ -16,6 +16,7 @@
 // (server) からもビルダー (client) のプレビューからも同一描画できる。
 
 import { useEffect, useState } from 'react';
+import { ExternalImage } from '@/components/ExternalImage';
 import { SocialIconLinks } from '@/components/SocialIconLinks';
 import {
   extractHandleEmbed,
@@ -60,8 +61,7 @@ function HandleLinkImage({
 
   if (failedUrl !== imageUrl) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
+      <ExternalImage
         src={imageUrl}
         alt=""
         aria-hidden
@@ -69,6 +69,7 @@ function HandleLinkImage({
         height={20}
         referrerPolicy="no-referrer"
         loading="lazy"
+        decoding={undefined}
         className="mr-1.5 h-5 w-5 shrink-0 rounded object-cover"
         onError={() => setFailedUrl(imageUrl)}
       />
@@ -122,12 +123,13 @@ export function HandleProfileView({
   return (
     <div className={['flex flex-col items-center text-center', handleFontClass(profile.font)].filter(Boolean).join(' ')}>
       {showCover && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
+        <ExternalImage
           src={profile.cover}
           alt=""
           aria-hidden
           referrerPolicy="no-referrer"
+          loading={undefined}
+          decoding={undefined}
           className="aspect-[3/1] max-h-[160px] w-full rounded-2xl object-cover"
           onError={() => setCoverFailed(true)}
         />
@@ -143,12 +145,12 @@ export function HandleProfileView({
       >
         {showAvatarImg ? (
           // 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制。
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <ExternalImage
             src={profile.avatar}
             alt={config.name ? config.name : ''}
             referrerPolicy="no-referrer"
             loading="lazy"
+            decoding={undefined}
             className="h-full w-full object-cover"
             onError={() => setAvatarFailed(true)}
           />

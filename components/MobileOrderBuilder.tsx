@@ -26,6 +26,7 @@ import {
 import { getAddress, isAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
 import { AddressInput } from '@/components/AddressInput';
+import { ExternalImage } from '@/components/ExternalImage';
 import { ReorderableRow } from '@/components/ReorderableRow';
 import { StepCard } from '@/components/StepCard';
 import { SocialIcon, SocialIconLinks } from '@/components/SocialIconLinks';
@@ -351,8 +352,16 @@ export function MobileOrderBuilder({
                 <div className="flex items-center gap-3">
                   <span className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand text-lg font-bold text-white">
                     {avatarPreview ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={avatarPreview} alt="" className="h-full w-full object-cover" />
+                      // 現行どおり Referer 抑制・lazy・失敗時 fallback の指定なし (方針の統一は B-R7 で行う)。
+                      <ExternalImage
+                        src={avatarPreview}
+                        alt=""
+                        referrerPolicy={undefined}
+                        loading={undefined}
+                        decoding={undefined}
+                        className="h-full w-full object-cover"
+                        onError={null}
+                      />
                     ) : (
                       <span aria-hidden>{previewInitial}</span>
                     )}
@@ -382,11 +391,15 @@ export function MobileOrderBuilder({
               <Field label={t('coverLabel')} hint={t('coverHint')}>
                 <div className="space-y-2">
                   {coverPreview && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    // 現行どおり Referer 抑制・lazy・失敗時 fallback の指定なし (方針の統一は B-R7 で行う)。
+                    <ExternalImage
                       src={coverPreview}
                       alt=""
+                      referrerPolicy={undefined}
+                      loading={undefined}
+                      decoding={undefined}
                       className="h-24 w-full rounded-lg object-cover"
+                      onError={null}
                     />
                   )}
                   <input
@@ -665,8 +678,16 @@ export function MobileOrderBuilder({
                           <li key={item.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
                             <span className="flex min-w-0 items-center gap-2">
                               {imgUrl && (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img src={imgUrl} alt="" className="h-7 w-7 rounded object-cover" />
+                                // 現行どおり Referer 抑制・lazy・失敗時 fallback の指定なし (方針の統一は B-R7 で行う)。
+                                <ExternalImage
+                                  src={imgUrl}
+                                  alt=""
+                                  referrerPolicy={undefined}
+                                  loading={undefined}
+                                  decoding={undefined}
+                                  className="h-7 w-7 rounded object-cover"
+                                  onError={null}
+                                />
                               )}
                               <span className="truncate text-slate-800">{item.name}</span>
                             </span>

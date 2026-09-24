@@ -11,6 +11,7 @@
 import { memo } from 'react';
 import { useTranslations } from 'next-intl';
 import { UtensilsCrossed } from 'lucide-react';
+import { ExternalImage } from '@/components/ExternalImage';
 import { safeHttpUrl, type MenuItem } from '@/lib/mobileOrder';
 
 function MenuItemCardImpl({
@@ -48,8 +49,16 @@ function MenuItemCardImpl({
       {/* 写真 (大きく・正方形)。画像が無ければ絵文字、それも無ければアイコン。売り切れは重ね表示。 */}
       <div className="relative flex aspect-square w-full items-center justify-center bg-slate-50">
         {imgUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={imgUrl} alt="" className="h-full w-full object-cover" />
+          // 現行どおり Referer 抑制・lazy・失敗時 fallback の指定なし (方針の統一は B-R7 で行う)。
+          <ExternalImage
+            src={imgUrl}
+            alt=""
+            referrerPolicy={undefined}
+            loading={undefined}
+            decoding={undefined}
+            className="h-full w-full object-cover"
+            onError={null}
+          />
         ) : item.visual?.kind === 'emoji' ? (
           <span className="text-5xl" aria-hidden>
             {item.visual.value}

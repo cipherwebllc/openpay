@@ -267,6 +267,30 @@ describe('HandleProfileBuilder', () => {
     expect(payload().profile).not.toHaveProperty('linkLayout');
   });
 
+  it.each(['cover', 'avatar'] as const)('ミニプレビュー %s: loading 指定なし・URL 変更で reset・外れた node の遅れ error (R7a の網)', (kind) => {
+    renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.change(screen.getByLabelText('表示名'), { target: { value: 'Alice' } });
+    const input = screen.getByRole('textbox', { name: kind === 'cover' ? /^カバー画像 URL/ : /^アバター画像 URL/ });
+    const mini = screen.getByTestId('handle-mini-preview');
+    const a = 'https://images.example/a.png';
+    const b = 'https://images.example/b.png';
+    fireEvent.change(input, { target: { value: a } });
+    const first = mini.querySelector('img')!;
+    const className = kind === 'cover' ? 'absolute inset-0 h-full w-full opacity-25 object-cover' : 'h-full w-full object-cover';
+    expect(first.outerHTML).toBe(`<img alt="" aria-hidden="true" referrerpolicy="no-referrer" class="${className}" src="${a}">`);
+    const parent = first.parentElement!;
+    fireEvent.error(first);
+    expect(mini.querySelector('img')).toBeNull();
+    if (kind === 'avatar') expect(parent.innerHTML).toBe('<span aria-hidden="true">A</span>');
+    fireEvent.change(input, { target: { value: b } });
+    const second = mini.querySelector('img')!;
+    fireEvent.error(first);
+    expect(mini.querySelector('img')).toBe(second);
+    expect(second).toHaveAttribute('src', b);
+    fireEvent.change(input, { target: { value: a } });
+    expect(mini.querySelector('img')).toHaveAttribute('src', a);
+  });
+
   it('renders cover in both previews, hides failures and retries changed URLs', () => {
     renderWithIntl(<HandleProfileBuilder />);
     const input = screen.getByRole('textbox', { name: /^カバー画像 URL/ });

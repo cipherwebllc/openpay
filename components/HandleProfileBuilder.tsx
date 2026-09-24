@@ -19,6 +19,7 @@ import { getAddress, isAddress, type Address } from 'viem';
 import { env, isArcTipEnabled } from '@/lib/env';
 import { resolveTipCapability } from '@/lib/url/tip';
 import { AddressInput } from '@/components/AddressInput';
+import { ExternalImage } from '@/components/ExternalImage';
 import { HandleClaimPanel } from '@/components/HandleClaimPanel';
 import { handleFontClass } from '@/components/handleFonts';
 import { HandleProfileView } from '@/components/HandleProfile';
@@ -110,12 +111,13 @@ function MiniPreviewAvatar({ url, initial }: { url?: string; initial: string }) 
   const [failed, setFailed] = useState(false);
   return url && !failed ? (
     // 外部画像の読込失敗がプレビューの壊れ画像表示に波及しないよう頭文字へ戻す。
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
+    <ExternalImage
       src={url}
       alt=""
       aria-hidden
       referrerPolicy="no-referrer"
+      loading={undefined}
+      decoding={undefined}
       className="h-full w-full object-cover"
       onError={() => setFailed(true)}
     />
@@ -126,12 +128,13 @@ function MiniPreviewCover({ url }: { url: string }) {
   const [failed, setFailed] = useState(false);
   // 外部画像の読込失敗がプレビューの壊れ画像表示に波及しないよう非表示にする。
   return failed ? null : (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
+    <ExternalImage
       src={url}
       alt=""
       aria-hidden
       referrerPolicy="no-referrer"
+      loading={undefined}
+      decoding={undefined}
       className="absolute inset-0 h-full w-full opacity-25 object-cover"
       onError={() => setFailed(true)}
     />

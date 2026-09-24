@@ -91,6 +91,43 @@ afterEach(() => {
 });
 
 describe('MobileOrderView', () => {
+  it.each(['cover', 'avatar'] as const)('%s 画像: 属性・失敗時 fallback・URL 変更で reset・外れた node の遅れ error (R7a の網)', (kind) => {
+    const a = 'https://images.example/a.png';
+    const b = 'https://images.example/b.png';
+    const { container, rerender } = renderWithIntl(<MobileOrderView config={{ ...config, [kind]: a }} />);
+    const first = container.querySelector(`img[src="${a}"]`)!;
+    expect(first.outerHTML).toBe(`<img alt="${kind === 'avatar' ? config.shopName : ''}" referrerpolicy="no-referrer" loading="lazy" class="h-full w-full object-cover" src="${a}">`);
+    const parent = first.parentElement!;
+    if (kind === 'cover') expect(parent.className).toBe('relative -mx-4 h-36 overflow-hidden rounded-b-3xl bg-slate-100');
+    fireEvent.error(first);
+    expect(container.querySelector(`img[src="${a}"]`)).toBeNull();
+    if (kind === 'avatar') expect(parent.innerHTML).toBe('<span aria-hidden="true">テ</span>');
+    else expect(parent).not.toBeInTheDocument();
+    rerender(<MobileOrderView config={{ ...config, [kind]: b }} />);
+    const second = container.querySelector(`img[src="${b}"]`)!;
+    fireEvent.error(first);
+    expect(second).toBeInTheDocument();
+    rerender(<MobileOrderView config={{ ...config, [kind]: a }} />);
+    expect(container.querySelector(`img[src="${a}"]`)).not.toBeNull();
+  });
+
+  it('SSR の初回 HTML: カバー・アバター・メニュー grid の画像属性と順序 (R7a の網・grid の Referer 抑制なしは B-R7)', () => {
+    const html = renderToString(
+      <NextIntlClientProvider locale="ja" messages={messages}>
+        <MobileOrderView
+          config={{ ...config, cover: 'https://images.example/cover.png', avatar: 'https://images.example/avatar.png' }}
+        />
+      </NextIntlClientProvider>,
+    );
+    expect(html.match(/<(?:img|link)\b[^>]*>/g)).toEqual([
+      // lazy でないメニュー画像だけ React が preload を出す (Referer 抑制も無い)。
+      '<link rel="preload" as="image" href="https://img/x.png"/>',
+      '<img src="https://images.example/cover.png" alt="" referrerPolicy="no-referrer" loading="lazy" class="h-full w-full object-cover"/>',
+      '<img src="https://images.example/avatar.png" alt="テスト珈琲店" referrerPolicy="no-referrer" loading="lazy" class="h-full w-full object-cover"/>',
+      '<img src="https://img/x.png" alt="" class="h-full w-full object-cover"/>',
+    ]);
+  });
+
   it('店舗名 + 受取チェーン + メニュー (名前/価格) を描画', () => {
     renderWithIntl(<MobileOrderView config={config} />);
     expect(screen.getByText('テスト珈琲店')).toBeInTheDocument();
