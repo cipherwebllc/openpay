@@ -1,0 +1,399 @@
+[
+  {
+    "name": "populated Unicode/string/numeric/null values and purchase counts",
+    "script": "metrics-report.mjs",
+    "args": [
+      "2026-09"
+    ],
+    "replies": [
+      {
+        "command": [
+          "MGET",
+          "metrics:2026-09:relay_jpyc",
+          "metrics:2026-09:x402_settle",
+          "metrics:2026-09:order",
+          "metrics:2026-09:store_purchase"
+        ],
+        "body": {
+          "result": [
+            "12",
+            "003",
+            null,
+            "broken"
+          ]
+        }
+      },
+      {
+        "command": [
+          "ZRANGE",
+          "x402:hosted:store:index",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": [
+            "商品|日本",
+            "MDEy",
+            "plain"
+          ]
+        }
+      },
+      {
+        "command": [
+          "MGET",
+          "store:purchases:商品|日本",
+          "store:purchases:MDEy",
+          "store:purchases:plain"
+        ],
+        "body": {
+          "result": [
+            "2x",
+            5,
+            null
+          ]
+        }
+      }
+    ],
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n      12  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       3  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n      15  合計 (観測イベント)\n\n== 現在値 ==\n       3  Store 掲載商品数 (index)\n       7  累計 商品購入数 (掲載中商品・2026-08-08 計測開始)\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "default months at UTC month end",
+    "script": "metrics-report.mjs",
+    "args": [],
+    "replies": [
+      {
+        "command": [
+          "MGET",
+          "metrics:2026-09:relay_jpyc",
+          "metrics:2026-09:x402_settle",
+          "metrics:2026-09:order",
+          "metrics:2026-09:store_purchase"
+        ],
+        "body": {
+          "result": null
+        }
+      },
+      {
+        "command": [
+          "MGET",
+          "metrics:2026-08:relay_jpyc",
+          "metrics:2026-08:x402_settle",
+          "metrics:2026-08:order",
+          "metrics:2026-08:store_purchase"
+        ],
+        "body": {
+          "result": []
+        }
+      },
+      {
+        "command": [
+          "ZRANGE",
+          "x402:hosted:store:index",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": []
+        }
+      }
+    ],
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 2026-08 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "nested arrays/numbers/null remain JSON values",
+    "script": "metrics-report.mjs",
+    "args": [
+      "2026-09"
+    ],
+    "replies": [
+      {
+        "command": [
+          "MGET",
+          "metrics:2026-09:relay_jpyc",
+          "metrics:2026-09:x402_settle",
+          "metrics:2026-09:order",
+          "metrics:2026-09:store_purchase"
+        ],
+        "body": {
+          "result": [
+            [
+              "12"
+            ],
+            [
+              2
+            ],
+            null,
+            3.5
+          ]
+        }
+      },
+      {
+        "command": [
+          "ZRANGE",
+          "x402:hosted:store:index",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": [
+            "one"
+          ]
+        }
+      },
+      {
+        "command": [
+          "MGET",
+          "store:purchases:one"
+        ],
+        "body": {
+          "result": [
+            [
+              "4"
+            ],
+            "bad",
+            null,
+            2
+          ]
+        }
+      }
+    ],
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n      12  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       2  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       3  デジタル商品 購入確定\n      17  合計 (観測イベント)\n\n== 現在値 ==\n       1  Store 掲載商品数 (index)\n       6  累計 商品購入数 (掲載中商品・2026-08-08 計測開始)\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "missing result and successful command error envelopes stay tolerated",
+    "script": "metrics-report.mjs",
+    "args": [
+      "2026-09"
+    ],
+    "replies": [
+      {
+        "command": [
+          "MGET",
+          "metrics:2026-09:relay_jpyc",
+          "metrics:2026-09:x402_settle",
+          "metrics:2026-09:order",
+          "metrics:2026-09:store_purchase"
+        ],
+        "body": {
+          "error": "NOPERM fixture"
+        }
+      },
+      {
+        "command": [
+          "ZRANGE",
+          "x402:hosted:store:index",
+          "0",
+          "-1"
+        ],
+        "body": {}
+      }
+    ],
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "malformed index string uses length but never fetches purchase counts",
+    "script": "metrics-report.mjs",
+    "args": [
+      "2026-09"
+    ],
+    "replies": [
+      {
+        "command": [
+          "MGET",
+          "metrics:2026-09:relay_jpyc",
+          "metrics:2026-09:x402_settle",
+          "metrics:2026-09:order",
+          "metrics:2026-09:store_purchase"
+        ],
+        "body": {
+          "result": "1234"
+        }
+      },
+      {
+        "command": [
+          "ZRANGE",
+          "x402:hosted:store:index",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": "abc"
+        }
+      }
+    ],
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       1  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       2  x402 settle (AI ストア/有料 API)\n       3  モバイル注文 (受注保存)\n       4  デジタル商品 購入確定\n      10  合計 (観測イベント)\n\n== 現在値 ==\n       3  Store 掲載商品数 (index)\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "invalid month is used literally and remaining arguments ignored",
+    "script": "metrics-report.mjs",
+    "args": [
+      "--json",
+      "2026-08"
+    ],
+    "replies": [
+      {
+        "command": [
+          "MGET",
+          "metrics:--json:relay_jpyc",
+          "metrics:--json:x402_settle",
+          "metrics:--json:order",
+          "metrics:--json:store_purchase"
+        ],
+        "body": {
+          "result": [
+            "1x",
+            "-2",
+            "0x10",
+            null
+          ]
+        }
+      },
+      {
+        "command": [
+          "ZRANGE",
+          "x402:hosted:store:index",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": null
+        }
+      }
+    ],
+    "stdout": "\n== --json (UTC 月・server 観測範囲) ==\n       1  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n      -2  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n      -1  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "endpoint is passed verbatim without backup validation or normalization",
+    "script": "metrics-report.mjs",
+    "args": [
+      "2026-99"
+    ],
+    "replies": [
+      {
+        "command": [
+          "MGET",
+          "metrics:2026-99:relay_jpyc",
+          "metrics:2026-99:x402_settle",
+          "metrics:2026-99:order",
+          "metrics:2026-99:store_purchase"
+        ],
+        "body": {
+          "result": []
+        }
+      },
+      {
+        "command": [
+          "ZRANGE",
+          "x402:hosted:store:index",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": []
+        }
+      }
+    ],
+    "env": {
+      "KV_REST_API_URL": "http://report.example.test/custom/path?fixture=1#tail"
+    },
+    "stdout": "\n== 2026-99 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "invalid URL syntax is delegated to fetch",
+    "script": "metrics-report.mjs",
+    "args": [
+      "garbage"
+    ],
+    "replies": [
+      {
+        "command": [
+          "MGET",
+          "metrics:garbage:relay_jpyc",
+          "metrics:garbage:x402_settle",
+          "metrics:garbage:order",
+          "metrics:garbage:store_purchase"
+        ],
+        "body": {
+          "result": []
+        }
+      },
+      {
+        "command": [
+          "ZRANGE",
+          "x402:hosted:store:index",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": []
+        }
+      }
+    ],
+    "env": {
+      "KV_REST_API_URL": "not a URL"
+    },
+    "stdout": "\n== garbage (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       0  Store 掲載商品数 (index)\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "malformed purchase count container still fails after partial stdout",
+    "script": "metrics-report.mjs",
+    "args": [
+      "2026-09"
+    ],
+    "replies": [
+      {
+        "command": [
+          "MGET",
+          "metrics:2026-09:relay_jpyc",
+          "metrics:2026-09:x402_settle",
+          "metrics:2026-09:order",
+          "metrics:2026-09:store_purchase"
+        ],
+        "body": {
+          "result": []
+        }
+      },
+      {
+        "command": [
+          "ZRANGE",
+          "x402:hosted:store:index",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": [
+            "one"
+          ]
+        }
+      },
+      {
+        "command": [
+          "MGET",
+          "store:purchases:one"
+        ],
+        "body": {
+          "result": {}
+        }
+      }
+    ],
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲) ==\n       0  JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)\n       0  x402 settle (AI ストア/有料 API)\n       0  モバイル注文 (受注保存)\n       0  デジタル商品 購入確定\n       0  合計 (観測イベント)\n\n== 現在値 ==\n       1  Store 掲載商品数 (index)\n",
+    "stderr": "TypeError: (counts ?? []).reduce is not a function\n",
+    "status": 1
+  }
+]

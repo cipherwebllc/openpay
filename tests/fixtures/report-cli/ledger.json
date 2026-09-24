@@ -1,0 +1,273 @@
+[
+  {
+    "name": "sort/group ties, malformed rows, all five mixed-case first-party wallets, missing payer/resource",
+    "script": "settle-ledger-report.mjs",
+    "args": [
+      "2026-09"
+    ],
+    "replies": [
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-09",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": [
+            "{\"at\":\"2026-09-03T01:00:00Z\",\"payer\":\"0xAbCd000000000000000000000000000000001234\",\"amount\":\"0.02\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/api/paid/商品?query=1#hash\",\"extra\":{\"kept\":true}}",
+            "{\"at\":\"2026-09-01T01:00:00Z\",\"payer\":\"0xabcd000000000000000000000000000000001234\",\"amount\":\"0.01\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/api/paid/商品?query=2\"}",
+            "{\"at\":\"2026-09-02T01:00:00Z\",\"payer\":\"0x56780000000000000000000000000000000000Ab\",\"amount\":\"2\",\"asset\":\"JPYC\",\"resource\":\"relative|resource\"}",
+            "{\"at\":\"2026-09-02T01:00:00Z\",\"payer\":\"0x56780000000000000000000000000000000000ab\",\"amount\":\"3\",\"asset\":\"JPYC\",\"resource\":\"relative|resource\"}",
+            "{\"at\":\"2026-09-04T01:00:00Z\",\"payer\":null,\"amount\":null,\"asset\":\"USDC\",\"resource\":null}",
+            "{\"at\":\"2026-09-05T01:00:00Z\",\"payer\":\"0X9A76EA8FC0B9F34D34B91D453F2940932C9A7FE0\",\"amount\":\"999\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/self\"}",
+            "{\"at\":\"2026-09-05T01:00:00Z\",\"payer\":\"0x8f16ef365676c405c739175fe7a11343e864343b\",\"amount\":\"999\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/self\"}",
+            "{\"at\":\"2026-09-05T01:00:00Z\",\"payer\":\"0XDA33E4CEE3F06B19B174E299A36FCD075F0F9674\",\"amount\":\"999\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/self\"}",
+            "{\"at\":\"2026-09-05T01:00:00Z\",\"payer\":\"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\",\"amount\":\"999\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/self\"}",
+            "{\"at\":\"2026-09-05T01:00:00Z\",\"payer\":\"0X428483FBA62EDCEF1E3A100D3799F6D71759C560\",\"amount\":\"999\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/self\"}",
+            "{broken",
+            "null",
+            "false",
+            "0",
+            ""
+          ]
+        }
+      }
+    ],
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲・10 settle) ==\n  外部 payer の settle: 5 / 10\n\n  -- 商品別 (外部のみ) --\n     2 件  1 payer  0.030000  USDC /api/paid/%E5%95%86%E5%93%81\n     2 件  1 payer  5.000000  JPYC relative|resource\n     1 件  1 payer  0.000000  USDC (unknown)\n\n  -- payer 別 (外部のみ) --\n     2 件  0xabcd…1234  2026-09-01〜2026-09-03  /api/paid/%E5%95%86%E5%93%81\n     2 件  0x5678…00ab  2026-09-02〜2026-09-02  relative|resource\n     1 件  -  2026-09-04〜2026-09-04  (unknown)\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "JSON preserves raw row property order and includes first-party rows",
+    "script": "settle-ledger-report.mjs",
+    "args": [
+      "2026-09",
+      "--json"
+    ],
+    "replies": [
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-09",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": [
+            "{\"at\":\"2026-09-03T01:00:00Z\",\"payer\":\"0xAbCd000000000000000000000000000000001234\",\"amount\":\"0.02\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/api/paid/商品?query=1#hash\",\"extra\":{\"kept\":true}}",
+            "{\"at\":\"2026-09-01T01:00:00Z\",\"payer\":\"0xabcd000000000000000000000000000000001234\",\"amount\":\"0.01\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/api/paid/商品?query=2\"}",
+            "{\"at\":\"2026-09-02T01:00:00Z\",\"payer\":\"0x56780000000000000000000000000000000000Ab\",\"amount\":\"2\",\"asset\":\"JPYC\",\"resource\":\"relative|resource\"}",
+            "{\"at\":\"2026-09-02T01:00:00Z\",\"payer\":\"0x56780000000000000000000000000000000000ab\",\"amount\":\"3\",\"asset\":\"JPYC\",\"resource\":\"relative|resource\"}",
+            "{\"at\":\"2026-09-04T01:00:00Z\",\"payer\":null,\"amount\":null,\"asset\":\"USDC\",\"resource\":null}",
+            "{\"at\":\"2026-09-05T01:00:00Z\",\"payer\":\"0X9A76EA8FC0B9F34D34B91D453F2940932C9A7FE0\",\"amount\":\"999\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/self\"}",
+            "{\"at\":\"2026-09-05T01:00:00Z\",\"payer\":\"0x8f16ef365676c405c739175fe7a11343e864343b\",\"amount\":\"999\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/self\"}",
+            "{\"at\":\"2026-09-05T01:00:00Z\",\"payer\":\"0XDA33E4CEE3F06B19B174E299A36FCD075F0F9674\",\"amount\":\"999\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/self\"}",
+            "{\"at\":\"2026-09-05T01:00:00Z\",\"payer\":\"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\",\"amount\":\"999\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/self\"}",
+            "{\"at\":\"2026-09-05T01:00:00Z\",\"payer\":\"0X428483FBA62EDCEF1E3A100D3799F6D71759C560\",\"amount\":\"999\",\"asset\":\"USDC\",\"resource\":\"https://open-pay.jp/self\"}",
+            "{broken",
+            "null",
+            "false",
+            "0",
+            ""
+          ]
+        }
+      }
+    ],
+    "stdout": "{\n \"month\": \"2026-09\",\n \"rows\": [\n  {\n   \"at\": \"2026-09-01T01:00:00Z\",\n   \"payer\": \"0xabcd000000000000000000000000000000001234\",\n   \"amount\": \"0.01\",\n   \"asset\": \"USDC\",\n   \"resource\": \"https://open-pay.jp/api/paid/商品?query=2\"\n  },\n  {\n   \"at\": \"2026-09-02T01:00:00Z\",\n   \"payer\": \"0x56780000000000000000000000000000000000Ab\",\n   \"amount\": \"2\",\n   \"asset\": \"JPYC\",\n   \"resource\": \"relative|resource\"\n  },\n  {\n   \"at\": \"2026-09-02T01:00:00Z\",\n   \"payer\": \"0x56780000000000000000000000000000000000ab\",\n   \"amount\": \"3\",\n   \"asset\": \"JPYC\",\n   \"resource\": \"relative|resource\"\n  },\n  {\n   \"at\": \"2026-09-03T01:00:00Z\",\n   \"payer\": \"0xAbCd000000000000000000000000000000001234\",\n   \"amount\": \"0.02\",\n   \"asset\": \"USDC\",\n   \"resource\": \"https://open-pay.jp/api/paid/商品?query=1#hash\",\n   \"extra\": {\n    \"kept\": true\n   }\n  },\n  {\n   \"at\": \"2026-09-04T01:00:00Z\",\n   \"payer\": null,\n   \"amount\": null,\n   \"asset\": \"USDC\",\n   \"resource\": null\n  },\n  {\n   \"at\": \"2026-09-05T01:00:00Z\",\n   \"payer\": \"0X9A76EA8FC0B9F34D34B91D453F2940932C9A7FE0\",\n   \"amount\": \"999\",\n   \"asset\": \"USDC\",\n   \"resource\": \"https://open-pay.jp/self\"\n  },\n  {\n   \"at\": \"2026-09-05T01:00:00Z\",\n   \"payer\": \"0x8f16ef365676c405c739175fe7a11343e864343b\",\n   \"amount\": \"999\",\n   \"asset\": \"USDC\",\n   \"resource\": \"https://open-pay.jp/self\"\n  },\n  {\n   \"at\": \"2026-09-05T01:00:00Z\",\n   \"payer\": \"0XDA33E4CEE3F06B19B174E299A36FCD075F0F9674\",\n   \"amount\": \"999\",\n   \"asset\": \"USDC\",\n   \"resource\": \"https://open-pay.jp/self\"\n  },\n  {\n   \"at\": \"2026-09-05T01:00:00Z\",\n   \"payer\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\",\n   \"amount\": \"999\",\n   \"asset\": \"USDC\",\n   \"resource\": \"https://open-pay.jp/self\"\n  },\n  {\n   \"at\": \"2026-09-05T01:00:00Z\",\n   \"payer\": \"0X428483FBA62EDCEF1E3A100D3799F6D71759C560\",\n   \"amount\": \"999\",\n   \"asset\": \"USDC\",\n   \"resource\": \"https://open-pay.jp/self\"\n  }\n ]\n}\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "default UTC months tolerate null and missing result",
+    "script": "settle-ledger-report.mjs",
+    "args": [],
+    "replies": [
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-09",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": null
+        }
+      },
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-08",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "error": "NOPERM fixture"
+        }
+      }
+    ],
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲・0 settle) ==\n\n== 2026-08 (UTC 月・server 観測範囲・0 settle) ==\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "unknown options and invalid month are ignored",
+    "script": "settle-ledger-report.mjs",
+    "args": [
+      "--unknown",
+      "garbage",
+      "2026-9",
+      "--json"
+    ],
+    "replies": [
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-09",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": null
+        }
+      },
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-08",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": []
+        }
+      }
+    ],
+    "stdout": "{\n \"month\": \"2026-09\",\n \"rows\": []\n}\n{\n \"month\": \"2026-08\",\n \"rows\": []\n}\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "regex-valid impossible month and duplicate months remain accepted",
+    "script": "settle-ledger-report.mjs",
+    "args": [
+      "2026-99",
+      "2026-99",
+      "2026-08"
+    ],
+    "replies": [
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-99",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": []
+        }
+      },
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-99",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": []
+        }
+      },
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-08",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": []
+        }
+      }
+    ],
+    "stdout": "\n== 2026-99 (UTC 月・server 観測範囲・0 settle) ==\n\n== 2026-99 (UTC 月・server 観測範囲・0 settle) ==\n\n== 2026-08 (UTC 月・server 観測範囲・0 settle) ==\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "truthy malformed JSON primitive is retained in JSON output",
+    "script": "settle-ledger-report.mjs",
+    "args": [
+      "2026-09",
+      "--json"
+    ],
+    "replies": [
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-09",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": [
+            "1",
+            "\"text\"",
+            "{\"at\":\"2026-09-02\",\"unknown\":7}"
+          ]
+        }
+      }
+    ],
+    "stdout": "{\n \"month\": \"2026-09\",\n \"rows\": [\n  {\n   \"at\": \"2026-09-02\",\n   \"unknown\": 7\n  },\n  \"text\",\n  1\n ]\n}\n\n",
+    "stderr": "",
+    "status": 0
+  },
+  {
+    "name": "non-array ledger still throws",
+    "script": "settle-ledger-report.mjs",
+    "args": [
+      "2026-09"
+    ],
+    "replies": [
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-09",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": {}
+        }
+      }
+    ],
+    "stdout": "",
+    "stderr": "TypeError: raw.map is not a function\n",
+    "status": 1
+  },
+  {
+    "name": "missing timestamp still fails after partial text output",
+    "script": "settle-ledger-report.mjs",
+    "args": [
+      "2026-09"
+    ],
+    "replies": [
+      {
+        "command": [
+          "LRANGE",
+          "x402:settle:ledger:2026-09",
+          "0",
+          "-1"
+        ],
+        "body": {
+          "result": [
+            "{}"
+          ]
+        }
+      }
+    ],
+    "stdout": "\n== 2026-09 (UTC 月・server 観測範囲・1 settle) ==\n  外部 payer の settle: 1 / 1\n\n  -- 商品別 (外部のみ) --\n     1 件  1 payer  0.000000  undefined (unknown)\n\n  -- payer 別 (外部のみ) --\n",
+    "stderr": "TypeError: Cannot read properties of undefined (reading 'slice')\n",
+    "status": 1
+  }
+]

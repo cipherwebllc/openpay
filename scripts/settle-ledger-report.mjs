@@ -10,15 +10,13 @@
 //   node scripts/settle-ledger-report.mjs 2026-09 --json   # 生データを JSON で出す
 //
 // ⚠️ 台帳は「server が観測できた settle 成功」のヒントで、KV 障害時は欠損しうる。
-// 決済の真実はオンチェーン (Basescan / Polygonscan)。自社・関係者ウォレット (lib/externalPurchases.ts
-// の FIRST_PARTY_WALLETS) は payer 側で印を付ける (外部購入の集計と同じ線引き)。
+// 決済の真実はオンチェーン (Basescan / Polygonscan)。自社・関係者ウォレット (lib/firstPartyWallets.json・
+// lib/externalPurchases.ts の FIRST_PARTY_WALLETS と同じ一覧) は payer 側で印を付ける (外部購入の集計と同じ線引き)。
 
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { monthOf } from './lib/month-of.mjs';
+import { createReportKv } from './lib/report-kv.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const url = process.env.KV_REST_API_URL;
 const token = process.env.KV_REST_API_TOKEN;
 if (!url || !token) {
@@ -26,21 +24,13 @@ if (!url || !token) {
   process.exit(1);
 }
 
-// 自社ウォレット一覧は TS の SoT から正規表現で読む (スクリプトは TS を import しない)。
-const firstPartySrc = readFileSync(join(root, 'lib/externalPurchases.ts'), 'utf8');
+// 自社ウォレット一覧は externalPurchases.ts と同じ JSON の SoT から読む (cwd 非依存)。
+const firstPartyWallets = JSON.parse(readFileSync(new URL('../lib/firstPartyWallets.json', import.meta.url), 'utf8'));
 const firstParty = new Set(
-  [...firstPartySrc.matchAll(/'(0x[0-9a-f]{40})',\s*\/\//g)].map((m) => m[1].toLowerCase()),
+  firstPartyWallets.map(({ address }) => address.toLowerCase()),
 );
 
-async function kv(command) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(command),
-  });
-  if (!res.ok) throw new Error(`KV ${res.status}: ${await res.text()}`);
-  return (await res.json()).result;
-}
+const kv = createReportKv({ url, token });
 
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');

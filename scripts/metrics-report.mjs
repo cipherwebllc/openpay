@@ -13,6 +13,7 @@
 // 受注保存・商品購入確定。standard 決済 (お客様 gas 負担の直接送金) は含まれない。
 
 import { monthOf } from './lib/month-of.mjs';
+import { createReportKv } from './lib/report-kv.mjs';
 
 const KINDS = [
   ['relay_jpyc', 'JPYC 決済 (relay/gasless: QR・レジ・注文・チップ)'],
@@ -29,16 +30,7 @@ if (!url || !token) {
   process.exit(1);
 }
 
-async function kv(command) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(command),
-  });
-  if (!res.ok) throw new Error(`KV ${res.status}: ${await res.text()}`);
-  const body = await res.json();
-  return body.result;
-}
+const kv = createReportKv({ url, token });
 
 const months = process.argv[2] ? [process.argv[2]] : [monthOf(0), monthOf(-1)];
 
