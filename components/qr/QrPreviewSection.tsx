@@ -102,8 +102,8 @@ export function QrPreviewSection({
   );
 }
 
-// モバイル下部固定 会計バー。payUrl が無い間も mount したまま null を返す — 再描画 effect を
-// バーの出現で発火させず、従来どおり金額 / モード / 通貨記号の変化時だけにするため。
+// モバイル下部固定 会計バー。payUrl が無い間は null。URL の内容だけの変更では
+// 再描画を促さず、バーの出現と表示金額 / モード / 通貨記号の変更に追従する。
 export function QrMobileBar({
   payUrl,
   amount,
@@ -123,9 +123,11 @@ export function QrMobileBar({
 }) {
   const t = useTranslations('QrGenerator');
   const bottomBarRef = useRef<HTMLDivElement>(null);
+  const visible = Boolean(payUrl);
   // WebKit (モバイル Safari・SNS アプリ内ブラウザ) では position:sticky な下部バーの子テキストを
   // JS で書き換えても合成レイヤーが再ラスタライズされず古い表示が残ることがある (RegisterMode
-  // と同根)。表示金額/通貨/モードが変わるたび transform を 1 フレーム入れて再描画を強制する。
+  // と同根)。バーの出現時と表示金額/通貨/モードが変わるたび transform を 1 フレーム
+  // 入れて再描画を強制する (金額を先に入力し、後から受取先が確定する場合も含む)。
   useEffect(() => {
     const el = bottomBarRef.current;
     if (!el) return;
@@ -134,8 +136,8 @@ export function QrMobileBar({
       if (el) el.style.transform = '';
     });
     return () => cancelAnimationFrame(id);
-  }, [amount, mode, deployment.displaySymbol]);
-  if (!payUrl) return null;
+  }, [visible, amount, mode, deployment.displaySymbol]);
+  if (!visible) return null;
   return (
     <div
       ref={bottomBarRef}
