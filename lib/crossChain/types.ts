@@ -105,6 +105,8 @@ export interface SignedBurnIntentRequest {
 // attestation = GatewayMinter.gatewayMint の第 1 引数、
 // signature = Circle attestation signer の sig (第 2 引数)。
 export interface AttestationResponse {
+  expirationBlock?: string;
+  transferId?: string;
   attestation: Hex;
   signature: Hex;
 }

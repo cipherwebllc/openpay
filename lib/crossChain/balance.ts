@@ -292,6 +292,8 @@ export async function readGatewayUnifiedBalance(
     const perDomain = new Map<CircleDomain, bigint>();
     let total = 0n;
     for (const entry of json.balances) {
+      // Duplicate/unrequested domains must not inflate a replacement funding gate.
+      if (!domains.includes(entry.domain) || perDomain.has(entry.domain)) throw new Error('Invalid Gateway balance domain');
       // /v1/balances は human USDC (smoke script と同じ単位)。Number / 丸めは使わず、
       // parseUnits の過剰精度の丸めが経路の残高判定に波及しないよう先に検証する。
       const balance = entry.balance;

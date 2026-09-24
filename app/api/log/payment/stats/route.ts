@@ -77,6 +77,7 @@ type LogEntry = {
   sourceChainId?: number;
   // cross-chain (Step 3) の dest mint tx (= idempotency key) と bridge fee 上限 (ceiling)。
   // cross-chain success は resume で複数回 log され得るため (bridge+chainId+txHash) で dedup する。
+  gatewayTransferSpecHash?: string;
   txHash?: string;
   bridgeFeeMax?: string;
   // Phase1 Circle Paymaster 監査フィールド (gasless circle 経路のみ)。
@@ -232,13 +233,15 @@ function aggregate(entries: LogEntry[]): {
     }
     // cross-chain success の冪等 dedup (mint tx hash 単位)。
     const bridgeKeyForDedup = normalizeBridge(e.bridge);
+    const settlementIdentity = bridgeKeyForDedup === 'gateway' && typeof e.gatewayTransferSpecHash === 'string'
+      ? e.gatewayTransferSpecHash : e.txHash;
     if (
       bridgeKeyForDedup !== 'direct' &&
       e.result === 'success' &&
-      typeof e.txHash === 'string' &&
-      e.txHash.length > 0
+      typeof settlementIdentity === 'string' &&
+      settlementIdentity.length > 0
     ) {
-      const key = `${bridgeKeyForDedup}:${e.chainId}:${e.txHash.toLowerCase()}`;
+      const key = `${bridgeKeyForDedup}:${e.chainId}:${settlementIdentity.toLowerCase()}`;
       if (seenCrossChain.has(key)) {
         crossChainDeduped++;
         continue;

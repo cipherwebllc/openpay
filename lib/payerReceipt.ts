@@ -44,6 +44,7 @@ export type PayerReceipt = {
   direction: 'paid';
   kind: 'payment_receipt';
   status: PayerReceiptStatus;
+  gatewayTransferSpecHash?: string;
   txHash?: string;
   chainId?: number;
   chainName?: string;
@@ -74,6 +75,7 @@ export type PayerReceipt = {
 };
 
 export type BuildPayerReceiptInput = {
+  gatewayTransferSpecHash?: string;
   txHash?: string | null;
   userOpHash?: string | null;
   chainId?: number;
@@ -133,7 +135,8 @@ export function buildPayerReceipt(
   const iso = now.toISOString();
   return {
     schemaVersion: PAYER_RECEIPT_SCHEMA_VERSION,
-    receiptId: txHash || input.userOpHash || randomId(),
+    receiptId: input.gatewayTransferSpecHash ? `gateway:${chainId}:${input.gatewayTransferSpecHash.toLowerCase()}` : txHash || input.userOpHash || randomId(),
+    gatewayTransferSpecHash: input.gatewayTransferSpecHash,
     receiptNo: input.receiptNo ?? undefined,
     orderId: input.orderId ?? undefined,
     createdAt: iso,
@@ -330,12 +333,15 @@ export function appendPayerReceipt(receipt: PayerReceipt): void {
     const isPromotion =
       existing.status === 'pending' &&
       (receipt.status === 'confirmed' || receipt.status === 'failed');
-    if (!isPromotion) return;
+    const gatewayDetails = existing.gatewayTransferSpecHash && !existing.txHash && receipt.txHash &&
+      receipt.gatewayTransferSpecHash === existing.gatewayTransferSpecHash;
+    if (!isPromotion && !gatewayDetails) return;
     const next = [...current];
     next[idx] = {
       ...current[idx],
       receipt: {
         ...existing,
+        ...(gatewayDetails ? { txHash: receipt.txHash, explorerUrl: receipt.explorerUrl } : {}),
         status: receipt.status,
         paidAt: receipt.paidAt ?? existing.paidAt,
       },
@@ -348,6 +354,18 @@ export function appendPayerReceipt(receipt: PayerReceipt): void {
   const trimmed =
     next.length > PAYER_RECEIPTS_MAX ? next.slice(0, PAYER_RECEIPTS_MAX) : next;
   savePayerReceiptItems(trimmed);
+  broadcastChange();
+}
+
+/** Enrich only an existing receipt; background recovery must not create a new payment success. */
+export function backfillGatewayPayerReceipt(chainId: number, transferSpecHash: string, txHash: string): void {
+  if (typeof window === 'undefined') return;
+  const items = loadPayerReceiptItems();
+  const item = items.find((r) => r.receipt?.receiptId === `gateway:${chainId}:${transferSpecHash.toLowerCase()}`);
+  if (!item?.receipt || item.receipt.txHash === txHash) return;
+  // Finalized backfill may replace a pre-finality receipt hash after a reorg; never append a second receipt.
+  item.receipt = { ...item.receipt, txHash, explorerUrl: txExplorerUrl(chainId, txHash) };
+  savePayerReceiptItems(items);
   broadcastChange();
 }
 

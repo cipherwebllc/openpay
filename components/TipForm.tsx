@@ -359,7 +359,7 @@ export function TipForm({
   const arcRecoveryScanning = params.token === 'usdc' && params.chain === 'arc' && !!address && !preview && arcScannedScope !== arcRecoveryScope;
   const flowPending = directFlowPending || crossChainLocked || arcRecoveryScanning;
   const flowSuccess = directFlowSuccess || !!crossChainResult;
-  const flowTxHash = crossChainResult?.mintTxHash ?? directFlowTxHash;
+  const flowTxHash = crossChainResult ? crossChainResult.mintTxHash : directFlowTxHash;
   const flowUserOpHash = crossChainResult
     ? undefined
     : isStandard || useRelay
@@ -508,7 +508,14 @@ export function TipForm({
   const onCrossChainSuccess = useCallback((result: ExecuteResult) => {
     setCrossChainResult(result);
     setCrossChainLocked(false);
-  }, []);
+    if (result.path === 'gateway' && result.settlement === 'hashless' && submittedRef.current) {
+      appendPayerReceipt(buildPayerReceipt({ gatewayTransferSpecHash: result.transferSpecHash,
+        chainId: result.destChainId, asset: params.token, tokenAddress: deployment.address,
+        amount: submittedRef.current.amount, merchantAddress: params.to, merchantName: params.name,
+        payerAddress: address, paymentMode: 'cross-chain', gasMode: 'customer', memo: params.message,
+        sourceRoute: '/tip', locale }));
+    }
+  }, [params.token, params.to, params.name, params.message, deployment.address, address, locale]);
 
   useEffect(() => {
     // mode 中立: relay (txHash のみ) / gasless (userOpHash + blockNumber) 双方を flow* で扱う。
@@ -539,6 +546,7 @@ export function TipForm({
     // 非経由のためここで直接 append (明細なし → 仮想 1 行)。dedupe は receiptId 任せ。
     appendPayerReceipt(
       buildPayerReceipt({
+        gatewayTransferSpecHash: crossChainResult?.path === 'gateway' ? crossChainResult.transferSpecHash : undefined,
         txHash: flowTxHash,
         userOpHash: flowUserOpHash ?? null,
         chainId: crossChainResult?.destChainId ?? deployment.chainId,
@@ -1326,14 +1334,15 @@ export function TipForm({
       {!preview && isStandard && (
         <TipStandardEngine onState={setStandard} onApi={onStandardApi} />
       )}
-      {flowSuccess && flowTxHash && (
+      {flowSuccess && (flowTxHash || crossChainResult?.path === 'gateway') && (
         <TipSuccessPanel
           title={t('successTitle')}
           thanks={restoredRelayPayment ? undefined : params.thanks}
           thanksUrl={restoredRelayPayment ? undefined : params.thanksUrl}
           openLinkLabel={t('openLink')}
           userOpHash={flowUserOpHash}
-          txHash={flowTxHash}
+          txHash={flowTxHash ?? undefined}
+          receiptId={crossChainResult?.path === 'gateway' ? `gateway:${crossChainResult.destChainId}:${crossChainResult.transferSpecHash.toLowerCase()}` : undefined}
           blockNumber={flowBlockNumber}
           userOpLabel={t('successUserOp')}
           txLabel={t('successTx')}

@@ -704,3 +704,33 @@ describe('payerReceiptCopyText: gating / locale / optional 省略', () => {
     expect(t).toContain('店舗ウォレット：0xM'); // 店舗ウォレットは必須
   });
 });
+
+it('Gateway hashless completion deduplicates by spec identity and fills transaction details later', () => {
+  const input = { chainId: 80002, asset: 'usdc' as const, amount: '1', merchantAddress: '0xmerchant', gatewayTransferSpecHash: `0x${'b'.repeat(64)}` };
+  const receipt = buildPayerReceipt(input, NOW);
+  expect(receipt.receiptId).toBe(`gateway:80002:${input.gatewayTransferSpecHash}`);
+  expect(receipt.txHash).toBeUndefined();
+  expect(receipt.explorerUrl).toBeUndefined();
+  appendPayerReceipt(receipt);
+  appendPayerReceipt(buildPayerReceipt(input, NOW));
+  expect(loadPayerReceipts()).toHaveLength(1);
+  appendPayerReceipt(buildPayerReceipt({ ...input, txHash: TX }, NOW));
+  const restored = loadPayerReceipts();
+  expect(restored).toHaveLength(1);
+  expect(restored[0]).toMatchObject({ txHash: TX, receiptId: receipt.receiptId, status: 'confirmed' });
+  expect(restored[0].explorerUrl).toContain(TX);
+});
+
+
+it('Gateway receipt backfill updates an existing identity after a reorg without creating another receipt', async () => {
+  const { backfillGatewayPayerReceipt } = await import('@/lib/payerReceipt');
+  const identity = `0x${'ab'.repeat(32)}`;
+  const old = `0x${'11'.repeat(32)}`; const canonical = `0x${'22'.repeat(32)}`;
+  appendPayerReceipt(buildPayerReceipt({ chainId: 80002, asset: 'usdc', amount: '1', merchantAddress: '0x1111111111111111111111111111111111111111',
+    gatewayTransferSpecHash: identity, txHash: old }));
+  backfillGatewayPayerReceipt(80002, identity, canonical);
+  expect(loadPayerReceipts()).toHaveLength(1);
+  expect(loadPayerReceipts()[0]).toMatchObject({ gatewayTransferSpecHash: identity, txHash: canonical });
+  backfillGatewayPayerReceipt(80002, `0x${'cd'.repeat(32)}`, canonical);
+  expect(loadPayerReceipts()).toHaveLength(1);
+});

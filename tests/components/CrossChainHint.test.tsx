@@ -1,3 +1,4 @@
+import { gatewayAttestation } from '../fixtures/gateway';
 import { env } from '@/lib/env';
 // CrossChainHint integration test — useCrossChainPayment hook の実コードを
 // 走らせ、wagmi (useAccount / useWalletClient / usePublicClient / useSwitchChain) と
@@ -90,6 +91,7 @@ import {
 } from 'wagmi';
 import { renderWithIntl } from '../_helpers/i18n';
 import { CrossChainHint } from '@/components/CrossChainHint';
+import * as crossChainHook from '@/hooks/useCrossChainPayment';
 import { logger } from '@/lib/logger';
 import { saveResumeState } from '@/lib/crossChain/resumeStore';
 import {
@@ -156,9 +158,13 @@ function makeWalletClient() {
 }
 
 function makePublicClient() {
+  let mintedHash: Hex | undefined;
+  const blockHash = pad('0x01');
   return {
+    request: vi.fn(async (a: { method: string }) => a.method === 'eth_call' ? pad(mintedHash ? '0x01' : '0x00') : { hash: blockHash, number: '0x3e8', l1BlockNumber: '0x3e8' }),
+    getLogs: vi.fn(async () => mintedHash ? [{ transactionHash: mintedHash, blockHash, blockNumber: 1000n, removed: false }] : []),
     getBlockNumber: vi.fn(async () => 1000n),
-    waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => { mintedHash = hash; return { status: 'success' }; }),
     // assertContractDeployed (CCTP/Gateway 存在確認) 用。deploy 済扱い。
     getCode: vi.fn(async () => '0x60016000'),
   };
@@ -478,7 +484,7 @@ describe('CrossChainHint: execute click → success / error flow', () => {
     // attestation API: balances (initial) + transfer (during execute)
     const fetchMock = vi.fn();
     let callIdx = 0;
-    fetchMock.mockImplementation(async (url: string) => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       callIdx++;
       if (url.includes('/v1/balances')) {
         return new Response(
@@ -490,7 +496,7 @@ describe('CrossChainHint: execute click → success / error flow', () => {
       }
       if (url.includes('/v1/transfer')) {
         return new Response(
-          JSON.stringify({ attestation: '0xattestation', signature: '0xsig' }),
+          JSON.stringify(gatewayAttestation({ ...JSON.parse(String(init?.body))[0].burnIntent.spec, value: BigInt(JSON.parse(String(init?.body))[0].burnIntent.spec.value) }, 1_000_000n)),
           { status: 200 },
         );
       }
@@ -675,7 +681,7 @@ describe('CrossChainHint: execute click → success / error flow', () => {
     setupConnected({ walletClient });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (url: string) => {
+      vi.fn(async (url: string, init?: RequestInit) => {
         if (url.includes('/v1/balances')) {
           return new Response(
             JSON.stringify({
@@ -685,7 +691,7 @@ describe('CrossChainHint: execute click → success / error flow', () => {
           );
         }
         return new Response(
-          JSON.stringify({ attestation: '0xattestation', signature: '0xsig' }),
+          JSON.stringify(gatewayAttestation({ ...JSON.parse(String(init?.body))[0].burnIntent.spec, value: BigInt(JSON.parse(String(init?.body))[0].burnIntent.spec.value) }, 1_000_000n)),
           { status: 200 },
         );
       }),
@@ -704,7 +710,7 @@ describe('CrossChainHint: execute click → success / error flow', () => {
         name: /選択したチェーンで支払う/,
       }),
     );
-    await screen.findByText(/mint broadcast unavailable/);
+    await screen.findByText(/送金を完了する準備ができています/);
     expect(onExecutingChange).toHaveBeenLastCalledWith(true);
   });
 
@@ -734,9 +740,9 @@ describe('CrossChainHint: execute click → success / error flow', () => {
     await user.click(payBtn);
 
     await waitFor(() => {
-      expect(screen.getByText(/エラー:/)).toBeInTheDocument();
+      expect(screen.getByText(/この送金を確認できていません/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/HTTP 503/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '送金状態を再確認' })).toBeEnabled();
     expect(logger.error).toHaveBeenCalledWith(
       'cross-chain.execute.failed',
       expect.objectContaining({ decisionPath: 'gateway' }),
@@ -1299,4 +1305,22 @@ describe('CrossChainHint: marker を保存できない環境 (fail-closed)', () 
       setItem.mockRestore();
     }
   });
+});
+
+
+it.each([false, true])('storage scans hold the parent lock without a warning on mount or amount change (enabled=%s)', (enabled) => {
+  vi.spyOn(crossChainHook, 'useCrossChainPayment').mockReturnValue({
+    gatewayRecovery: { kind: 'scanning' }, pathOptions: [], isExecuting: false, isCommitted: false,
+    isFetchingBalances: false,
+  } as never);
+  const onExecutingChange = vi.fn();
+  const props = { token: 'usdc' as const, enabled, targetChainId: 80002, requiredAtomic: 1_000_000n,
+    recipient: '0x1111111111111111111111111111111111111111' as const, feeReceiver: '0x2222222222222222222222222222222222222222' as const,
+    tokenAddress: '0x3333333333333333333333333333333333333333' as const, displayDecimals: 6, directIsGasless: false, onExecutingChange };
+  const h = renderWithIntl(<CrossChainHint {...props} />);
+  expect(h.container).toBeEmptyDOMElement();
+  expect(onExecutingChange).toHaveBeenLastCalledWith(true);
+  h.rerender(<CrossChainHint {...props} requiredAtomic={2_000_000n} />);
+  expect(h.container).toBeEmptyDOMElement();
+  expect(onExecutingChange).toHaveBeenLastCalledWith(true);
 });

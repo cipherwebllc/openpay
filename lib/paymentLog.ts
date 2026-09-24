@@ -93,6 +93,7 @@ export type PaymentLogEvent = {
   bridgeFeeMax?: string;
   // cross-chain (CCTP) の source burn tx hash (照合用)。Gateway は burn-intent モデルで undefined。
   burnTxHash?: Hex;
+  gatewayTransferSpecHash?: Hex;
   // --- Circle Paymaster 監査 (gasless circle 経路のみ・C2/C3) ---
   // paymaster 系統。gasless で 'pimlico' | 'circle'、standard/cross-chain は undefined。
   provider?: PaymentProvider;
@@ -131,6 +132,7 @@ export type PaymentLogContext = {
   bridgedAmount?: bigint;
   bridgeFeeMax?: bigint;
   burnTxHash?: Hex;
+  gatewayTransferSpecHash?: Hex;
   // Circle Paymaster 経路の監査フィールド (gasless circle のみ)。
   provider?: PaymentProvider;
   circlePaymasterAddress?: Address;
@@ -169,6 +171,7 @@ export function buildPaymentLogEvent(
     bridgedAmount: ctx.bridgedAmount?.toString(),
     bridgeFeeMax: ctx.bridgeFeeMax?.toString(),
     burnTxHash: ctx.burnTxHash,
+    ...(ctx.gatewayTransferSpecHash ? { gatewayTransferSpecHash: ctx.gatewayTransferSpecHash } : {}),
     provider: ctx.provider,
     circlePaymasterAddress: ctx.circlePaymasterAddress,
     circlePaymasterNetUsdc: ctx.circlePaymasterNetUsdc,

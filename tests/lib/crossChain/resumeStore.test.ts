@@ -1,3 +1,5 @@
+import type { GatewayResumeState } from '@/lib/crossChain/gatewayRecovery';
+import { gatewayAttestation } from '../../fixtures/gateway';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { getAddress } from 'viem';
 import {
@@ -199,4 +201,104 @@ describe('lib/crossChain/resumeStore.saveResumeStateStrict (fail-closed)', () =>
     expect(() => saveResumeState(baseKey, { burnIntent: marker })).not.toThrow();
     spy.mockRestore();
   });
+});
+
+describe('X12 Gateway fail-closed enumeration', () => {
+  const key = { ...baseKey, kind: 'gateway' as const };
+  it.each(['{broken', 'null', '[]', '{}', '{"merchant":{"attempts":[]}}'])('keeps unreadable %s distinct from absence', async (raw) => {
+    const { loadGatewayResumeState, scanGatewayResumeStates } = await import('@/lib/crossChain/resumeStore');
+    saveResumeStateStrict(key, { merchantAttestation: gatewayAttestation() });
+    const name = localStorage.key(0)!;
+    localStorage.setItem(name, raw);
+    expect(loadGatewayResumeState(key).kind).toBe('unreadable');
+    expect(scanGatewayResumeStates(key).kind).toBe('unreadable');
+    expect(localStorage.getItem(name)).toBe(raw);
+  });
+  it('scans persisted sources that no longer appear in supported path options', async () => {
+    const { scanGatewayResumeStates } = await import('@/lib/crossChain/resumeStore');
+    saveResumeStateStrict({ ...key, sourceChainId: 999999 }, { merchantAttestation: gatewayAttestation() });
+    saveResumeStateStrict(key, { merchantAttestation: gatewayAttestation() });
+    const result = scanGatewayResumeStates(key);
+    expect(result.kind).toBe('ok');
+    if (result.kind === 'ok') expect(result.entries.map((e) => e.key.sourceChainId)).toEqual([999999, key.sourceChainId]);
+  });
+  it('storage enumeration failure is unreadable, never an empty list', async () => {
+    const { scanGatewayResumeStates } = await import('@/lib/crossChain/resumeStore');
+    const spy = vi.spyOn(Storage.prototype, 'key').mockImplementation(() => { throw new Error('denied'); });
+    saveResumeStateStrict(key, { merchantAttestation: gatewayAttestation() });
+    expect(scanGatewayResumeStates(key).kind).toBe('unreadable');
+    spy.mockRestore();
+  });
+});
+
+
+it('ignores malformed keys outside this account/invoice before strict key validation', async () => {
+  const { scanGatewayResumeStates } = await import('@/lib/crossChain/resumeStore');
+  const key = { ...baseKey, kind: 'gateway' as const };
+  localStorage.setItem('openpay.xchain.resume.gateway:malformed:another-account', '{broken');
+  saveResumeStateStrict({ ...key, account: RECIPIENT }, { merchantAttestation: gatewayAttestation() });
+  const other = localStorage.key(1)!; localStorage.setItem(`${other}:extra`, '{broken');
+  expect(scanGatewayResumeStates(key)).toEqual({ kind: 'ok', entries: [] });
+  saveResumeStateStrict(key, { merchantAttestation: gatewayAttestation() });
+  const own = localStorage.key(3)!; localStorage.setItem(`${own}:extra`, '{broken');
+  expect(scanGatewayResumeStates(key).kind).toBe('unreadable');
+});
+
+it('compares the active identity before signing and merges concurrent history instead of deleting it', async () => {
+  const { saveGatewayResumeStateStrict } = await import('@/lib/crossChain/resumeStore');
+  const { decodeGatewayAttestation } = await import('@/lib/crossChain/gatewayAttestation');
+  const { gatewaySpec } = await import('../../fixtures/gateway');
+  const { pad } = await import('viem');
+  const make = (salt: `0x${string}`) => {
+    const attestation = gatewayAttestation({ ...gatewaySpec, salt });
+    const decoded = decodeGatewayAttestation(attestation.attestation);
+    return { transferSpecHash: decoded.transferSpecHash, spec: { ...decoded.spec, value: String(decoded.spec.value) },
+      attestation, maxBlockHeight: '100', txHashes: [], observations: [], status: 'replaceable' as const };
+  };
+  const key = { ...baseKey, kind: 'gateway' as const };
+  const prior = make(pad('0x01')); const ours = make(pad('0x02')); const theirs = make(pad('0x03'));
+  const before = { merchant: { attempts: [prior] } };
+  const concurrent = { merchant: { attempts: [prior, theirs] } };
+  saveResumeStateStrict(key, concurrent);
+  expect(() => saveGatewayResumeStateStrict(key, { merchant: { attempts: [prior, ours] } }, before)).toThrow('changed before signing');
+  expect(loadResumeState(key)).toEqual(concurrent);
+  saveGatewayResumeStateStrict(key, before);
+  expect(loadResumeState(key)).toEqual(concurrent);
+});
+
+
+it.each([false, true])('keeps interrupted paid records (unresolved fee=%s) locked until explicit completion', async (unresolvedFee) => {
+  const { loadGatewayResumeState, loadGatewayReceipts, scanGatewayResumeStates } = await import('@/lib/crossChain/resumeStore');
+  const { decodeGatewayAttestation } = await import('@/lib/crossChain/gatewayAttestation');
+  const { gatewaySpec } = await import('../../fixtures/gateway');
+  const { pad } = await import('viem');
+  const attestation = gatewayAttestation();
+  const decoded = decodeGatewayAttestation(attestation.attestation);
+  const merchant = { attempts: [{ transferSpecHash: decoded.transferSpecHash, spec: { ...decoded.spec, value: String(decoded.spec.value) },
+    attestation, maxBlockHeight: '100', txHashes: [], status: 'paid' as const,
+    observations: [{ status: 'paid' as const, used: true, blockHash: pad('0x01'), blockNumber: '101', height: '101' }] }] };
+  const feeAttestation = unresolvedFee ? gatewayAttestation({ ...gatewaySpec, value: 1000n, salt: pad('0x02') }) : undefined;
+  const key = { ...baseKey, kind: 'gateway' as const };
+  saveResumeStateStrict(key, { merchant, merchantAttestation: attestation, feeAttestation });
+  expect(loadGatewayResumeState(key)).toMatchObject({ kind: 'present', state: { merchant } });
+  expect(scanGatewayResumeStates(key)).toMatchObject({ kind: 'ok', entries: [{ key, state: { merchant } }] });
+  expect(loadGatewayReceipts(ACCOUNT, key.destChainId)).toHaveLength(0);
+  saveResumeStateStrict(key, { merchant, merchantAttestation: attestation, feeAttestation, completion: 'settled', feeUnresolved: unresolvedFee });
+  expect(loadGatewayResumeState(key)).toEqual({ kind: 'absent' });
+  expect(scanGatewayResumeStates(key)).toEqual({ kind: 'ok', entries: [] });
+  const receipt = loadGatewayReceipts(ACCOUNT, key.destChainId)[0];
+  expect(receipt.state).toMatchObject({ completion: 'settled', feeUnresolved: unresolvedFee, merchant, merchantAttestation: attestation });
+  expect(receipt.state.feeAttestation).toEqual(feeAttestation);
+});
+
+it.each(['abandoned-unsigned', 'abandoned-unsent', 'rejected-request'] as const)('never revives a concurrent %s attempt', async (status) => {
+  const { saveGatewayResumeStateStrict } = await import('@/lib/crossChain/resumeStore');
+  const { decodeGatewayAttestation } = await import('@/lib/crossChain/gatewayAttestation');
+  const decoded = decodeGatewayAttestation(gatewayAttestation().attestation);
+  const attempt = { transferSpecHash: decoded.transferSpecHash, spec: { ...decoded.spec, value: String(decoded.spec.value) },
+    txHashes: [], observations: [], intent: { maxBlockHeight: '1000', maxFee: '1000', requestTracked: true as const }, status };
+  const key = { ...baseKey, kind: 'gateway' as const };
+  saveResumeStateStrict(key, { merchant: { attempts: [attempt] } });
+  saveGatewayResumeStateStrict(key, { merchant: { attempts: [{ ...attempt, status: 'unknown', intent: { ...attempt.intent, signature: gatewayAttestation().signature } }] } });
+  expect(loadResumeState<GatewayResumeState>(key)?.merchant?.attempts[0].status).toBe(status);
 });

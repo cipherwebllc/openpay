@@ -1,3 +1,5 @@
+import { gatewayAttestation, encodedSpec } from '../fixtures/gateway';
+import { keccak256 } from 'viem';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   act,
@@ -1855,6 +1857,8 @@ describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
       onExecutingChange: (executing: boolean) => void;
       onSuccess: (result: {
         path: 'gateway';
+        transferSpecHash: `0x${string}`;
+        settlement: 'transaction';
         attestation: `0x${string}`;
         attestationSignature: `0x${string}`;
         mintTxHash: `0x${string}`;
@@ -1877,8 +1881,10 @@ describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
       props.onAttemptStart(10_000_000n);
       props.onSuccess({
         path: 'gateway',
-        attestation: '0xattestation',
-        attestationSignature: '0xsignature',
+        settlement: 'transaction',
+        transferSpecHash: keccak256(encodedSpec()),
+        attestation: gatewayAttestation().attestation,
+        attestationSignature: gatewayAttestation().signature,
         mintTxHash,
         destChainId: baseSepolia.id,
       });
@@ -1891,7 +1897,7 @@ describe('PaymentForm → CrossChainHint props 統合 (LARP audit C1)', () => {
     await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
     expect(loadPayerReceipts()[0]).toEqual(
       expect.objectContaining({
-        receiptId: mintTxHash,
+        receiptId: `gateway:${baseSepolia.id}:${keccak256(encodedSpec())}`,
         amount: '10',
         chainId: baseSepolia.id,
         merchantAddress: MERCHANT,

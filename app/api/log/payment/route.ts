@@ -76,6 +76,7 @@ type Payload = {
   bridgedAmount?: string;
   bridgeFeeMax?: string;
   burnTxHash?: Hex;
+  gatewayTransferSpecHash?: Hex;
   // Circle Paymaster 監査 (gasless circle 経路のみ・Phase1 C2/C3)。
   provider?: 'pimlico' | 'circle';
   circlePaymasterAddress?: Address;
@@ -152,6 +153,7 @@ function validate(raw: unknown): Payload | null {
     return null;
   if (r.bridgeFeeMax !== undefined && !isDecimalString(r.bridgeFeeMax))
     return null;
+  if (r.gatewayTransferSpecHash !== undefined && (r.bridge !== 'gateway' || !validHex(r.gatewayTransferSpecHash))) return null;
   if (r.burnTxHash !== undefined && !validHex(r.burnTxHash)) return null;
   if (r.provider !== undefined && r.provider !== 'pimlico' && r.provider !== 'circle')
     return null;
@@ -209,6 +211,7 @@ function validate(raw: unknown): Payload | null {
   if (r.bridgedAmount !== undefined) clean.bridgedAmount = r.bridgedAmount;
   if (r.bridgeFeeMax !== undefined) clean.bridgeFeeMax = r.bridgeFeeMax;
   if (r.burnTxHash !== undefined) clean.burnTxHash = r.burnTxHash;
+  if (r.gatewayTransferSpecHash !== undefined) clean.gatewayTransferSpecHash = r.gatewayTransferSpecHash;
   if (r.provider !== undefined) clean.provider = r.provider;
   if (r.circlePaymasterAddress !== undefined)
     clean.circlePaymasterAddress = r.circlePaymasterAddress;

@@ -110,6 +110,16 @@ describe('POST /api/log/payment', () => {
     vi.unstubAllEnvs();
   });
 
+
+  it('X12 preserves Gateway transfer identity for hashless accounting without inventing a tx hash', async () => {
+    const gatewayTransferSpecHash = `0x${'ab'.repeat(32)}`;
+    const res = await POST(req({ ...validBody, bridge: 'gateway', txHash: undefined, gatewayTransferSpecHash }));
+    expect(res.status).toBe(200);
+    const entry = JSON.parse(vi.mocked(kvLpush).mock.calls[0][1] as string);
+    expect(entry.gatewayTransferSpecHash).toBe(gatewayTransferSpecHash);
+    expect(entry.txHash).toBeUndefined();
+  });
+
   it('standard tip emitter → event builder → API whitelist preserves final saved object', async () => {
     const { emitStandardPaymentLogs } = await import('@/lib/standardPaymentLog');
     const requests: Promise<Response>[] = [];

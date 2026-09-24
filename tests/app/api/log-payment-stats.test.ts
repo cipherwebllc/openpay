@@ -1066,3 +1066,13 @@ describe('stats: byProvider 集計 (Phase1 Circle Paymaster)', () => {
     expect(byProvider.find((p) => p.provider === 'unknown')?.successCount).toBe(1);
   });
 })
+
+it('X12 deduplicates Gateway hashless and later receipt-enriched success by transfer spec identity', async () => {
+  const common = { bridge: 'gateway', gatewayTransferSpecHash: `0x${'ab'.repeat(32)}`, sourceChainId: 84532 };
+  vi.mocked(kvLrange).mockResolvedValue({ ok: true, value: [makeEntry(common), makeEntry({ ...common, txHash: `0x${'cd'.repeat(32)}` })] });
+  vi.mocked(kvLlen).mockResolvedValue({ ok: true, value: 2 });
+  const res = await GET(makeReq({ auth: `Bearer ${TOKEN}` }));
+  const body = await res.json();
+  expect(body.crossChainDeduped).toBe(1);
+  expect(body.byBridge.find((b: { bridge: string }) => b.bridge === 'gateway').successCount).toBe(1);
+});

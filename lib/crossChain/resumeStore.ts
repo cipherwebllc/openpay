@@ -5,17 +5,18 @@
 //
 // resume state は Hex (tx hash / attestation) と 10 進文字列 (burn-intent marker の
 // block / amount) だけで bigint を含まないため JSON でそのまま serialize できる。
-// session key に金額・chain・recipient を含めるので、別の決済に stale state が誤適用される
-// ことはない。
+// 同額・同宛先の別請求に invoice nonce はない。Gateway 完了記録は必ず別ストアへ移し、
+// 再開走査・次の請求の成功判定から除外する。
 //
 // 書込は 2 系統ある:
 //   - saveResumeState      : best-effort (失敗しても決済本体を止めない)。既存の step 記録用。
 //   - saveResumeStateStrict: fail-closed (read-back 検証、失敗は throw)。CCTP burn の
-//     burn-intent marker 専用 — 「marker を書けないなら burn しない」を成立させるため。
+//     burn-intent marker と Gateway identity 用 — 永続化できなければ送金認可しない。
 
 import type { Address } from 'viem';
 import type { CctpResumeState, GatewayResumeState } from './execute';
 import { logger } from '../logger';
+import { activeGatewayAttempt, gatewayAttemptAbandoned, gatewayHasOutstanding, type GatewayRequestGuard, type GatewayAttempt } from './gatewayRecovery';
 
 export type ResumeState = CctpResumeState | GatewayResumeState;
 
@@ -176,4 +177,193 @@ export function loadResumeStateDiscriminated(k: ResumeSessionKey): Discriminated
     // 読めない記録を「支払いなし」にして二重支払いを開く波及を断つ。
     return { kind: 'unreadable', error: error instanceof Error ? error : new Error(String(error)) };
   }
+}
+
+export type GatewayStoredEntry = { kind: 'absent' } | { kind: 'present'; state: GatewayResumeState } | { kind: 'unreadable'; error: Error };
+function readGatewayResumeState(k: ResumeSessionKey): GatewayStoredEntry {
+  try {
+    if (typeof window === 'undefined') throw new Error('Storage unavailable');
+    const raw = window.localStorage.getItem(keyString(k));
+    if (raw === null) return { kind: 'absent' };
+    const state = JSON.parse(raw) as GatewayResumeState;
+    if (!state || typeof state !== 'object' || Array.isArray(state) ||
+        (!state.merchant && !state.merchantAttestation) ||
+        (state.completion !== undefined && !['confirming', 'settled'].includes(state.completion))) throw new Error('Invalid Gateway resume record');
+    for (const leg of [state.merchant, state.fee]) {
+      if (!leg) continue;
+      if (!Array.isArray(leg.attempts) || !leg.attempts.length || leg.attempts.some((a) =>
+        !a || !/^0x[\da-f]{64}$/i.test(a.transferSpecHash) || !a.spec || !/^\d+$/.test(a.spec.value) ||
+        !Array.isArray(a.txHashes) || !Array.isArray(a.observations))) throw new Error('Invalid Gateway leg identity');
+    }
+    return { kind: 'present', state };
+  } catch (error) {
+    // Storage corruption/unavailability cannot become permission to issue another authorization.
+    return { kind: 'unreadable', error: error instanceof Error ? error : new Error(String(error)) };
+  }
+}
+
+export function loadGatewayResumeState(k: ResumeSessionKey): GatewayStoredEntry {
+  const entry = readGatewayResumeState(k);
+  if (entry.kind !== 'present') return entry;
+  const state = entry.state;
+  // A paid observation can precede completion notification; only explicit completion releases the invoice.
+  if (state.completion !== 'settled') return entry;
+  try {
+    archiveGatewayResumeState(k, state);
+    return { kind: 'absent' };
+  } catch (error) {
+    // An incomplete move must keep the active record so receipt evidence is never silently discarded.
+    return { kind: 'unreadable', error: error instanceof Error ? error : new Error(String(error)) };
+  }
+}
+
+export function scanGatewayResumeStates(scope: Omit<ResumeSessionKey, 'kind' | 'sourceChainId'>):
+  { kind: 'ok'; entries: { key: ResumeSessionKey; state: GatewayResumeState }[] } | { kind: 'unreadable'; error: Error } {
+  try {
+    if (typeof window === 'undefined') throw new Error('Storage unavailable');
+    const store = window.localStorage;
+    const entries: { key: ResumeSessionKey; state: GatewayResumeState }[] = [];
+    const names = Array.from({ length: store.length }, (_, i) => store.key(i));
+    for (const name of names) {
+      if (!name?.startsWith(`${PREFIX}gateway:`)) continue;
+      const parts = name.slice(PREFIX.length).split(':');
+      const [, source, dest, account, recipient, value, fee] = parts;
+      if (account !== scope.account.toLowerCase() || dest !== String(scope.destChainId) ||
+          recipient !== scope.recipient.toLowerCase() || value !== String(scope.valueAtomic) || fee !== String(scope.feeAtomic)) continue;
+      if (parts.length !== 7) throw new Error('Malformed Gateway storage key');
+      if (!/^\d+$/.test(source) || !Number.isSafeInteger(Number(source))) throw new Error('Malformed Gateway source');
+      const key: ResumeSessionKey = { ...scope, kind: 'gateway', sourceChainId: Number(source) };
+      const entry = loadGatewayResumeState(key);
+      if (entry.kind === 'unreadable') return entry;
+      if (entry.kind === 'present' && gatewayHasOutstanding(entry.state)) entries.push({ key, state: entry.state });
+    }
+    return { kind: 'ok', entries };
+  } catch (error) {
+    // Failed enumeration must keep the parent lock, even if balance routing yields no options.
+    return { kind: 'unreadable', error: error instanceof Error ? error : new Error(String(error)) };
+  }
+}
+
+
+/** Preserve every identity when another tab has written since our initial read. */
+export function saveGatewayResumeStateStrict(k: ResumeSessionKey, next: GatewayResumeState, beforeSigning?: GatewayResumeState, beforeRequest?: GatewayRequestGuard): void {
+  const entry = readGatewayResumeState(k);
+  if (entry.kind === 'unreadable') throw entry.error;
+  const current = entry.kind === 'present' ? entry.state : {};
+  if (beforeRequest) {
+    // Re-read immediately before the request marker: another tab's abandonment must prevent a second transfer.
+    const active = activeGatewayAttempt(current[beforeRequest.phase]);
+    if (!active || active.transferSpecHash !== beforeRequest.transferSpecHash || active.status !== 'unknown' ||
+        !active.intent?.signature || active.intent.requestSentAt !== undefined) {
+      throw new ResumeStoreWriteError('Gateway attempt changed before transfer request');
+    }
+  }
+  if (beforeSigning) {
+    // A concurrent authorization must stop signing, not be overwritten by our stale replacement.
+    for (const phase of ['merchant', 'fee'] as const) {
+      if (activeGatewayAttempt(current[phase])?.transferSpecHash !== activeGatewayAttempt(beforeSigning[phase])?.transferSpecHash) {
+        throw new ResumeStoreWriteError('Gateway attempt changed before signing');
+      }
+    }
+  }
+  const merged = { ...current, ...next };
+  for (const phase of ['merchant', 'fee'] as const) {
+    if (!current[phase]) continue;
+    const incoming = new Map(next[phase]?.attempts.map((a) => [a.transferSpecHash, a]));
+    const attempts: GatewayAttempt[] = current[phase].attempts.map((old) => {
+      const update = incoming.get(old.transferSpecHash);
+      incoming.delete(old.transferSpecHash);
+      if (!update) return old;
+      // A late wallet result must not revive an authorization another tab has already released.
+      return { ...old, ...update, status: gatewayAttemptAbandoned(old) ? old.status : update.status, attestation: update.attestation ?? old.attestation,
+        txHashes: [...new Set([...old.txHashes, ...update.txHashes])],
+        observations: [...new Map([...old.observations, ...update.observations].map((o) => [JSON.stringify(o), o])).values()] };
+    });
+    // Preserve concurrent attempts after our known identities so they remain outstanding.
+    const known = new Set(next[phase]?.attempts.map((a) => a.transferSpecHash));
+    merged[phase] = { attempts: [...attempts.filter((a) => known.has(a.transferSpecHash)), ...incoming.values(),
+      ...attempts.filter((a) => !known.has(a.transferSpecHash))] };
+  }
+  saveResumeStateStrict(k, merged);
+}
+
+const GATEWAY_RECEIPTS_PREFIX = 'openpay.xchain.gateway.receipts.';
+export interface GatewayReceiptRecord {
+  session: Omit<ResumeSessionKey, 'valueAtomic' | 'feeAtomic'> & { valueAtomic: string; feeAtomic: string };
+  state: GatewayResumeState;
+}
+function receiptKey(record: GatewayReceiptRecord): string {
+  return `${GATEWAY_RECEIPTS_PREFIX}${record.session.account}:${record.session.destChainId}:${activeGatewayAttempt(record.state.merchant)!.transferSpecHash}`.toLowerCase();
+}
+export function saveGatewayReceipt(record: GatewayReceiptRecord): void {
+  const store = storage();
+  if (!store) throw new ResumeStoreWriteError('Gateway receipt storage unavailable');
+  const key = receiptKey(record); const raw = JSON.stringify(record);
+  store.setItem(key, raw);
+  if (store.getItem(key) !== raw) throw new ResumeStoreWriteError('Gateway receipt read-back mismatch');
+}
+export function archiveGatewayResumeState(k: ResumeSessionKey, state: GatewayResumeState): void {
+  if (state.completion !== 'settled') throw new ResumeStoreWriteError('Gateway finality missing');
+  const store = storage();
+  if (!store) throw new ResumeStoreWriteError('Gateway receipt storage unavailable');
+  const key = keyString(k); const raw = store.getItem(key);
+  const current = raw ? JSON.parse(raw) as GatewayResumeState : state;
+  // Archiving a stale result must never remove a concurrently created payment or its fee attempt.
+  for (const phase of ['merchant', 'fee'] as const) {
+    if (activeGatewayAttempt(current[phase])?.transferSpecHash !== activeGatewayAttempt(state[phase])?.transferSpecHash) {
+      throw new ResumeStoreWriteError('Gateway attempt changed before archival');
+    }
+  }
+  saveGatewayReceipt({ session: { ...k, valueAtomic: String(k.valueAtomic), feeAtomic: String(k.feeAtomic) }, state: { ...state, ...current, completion: state.completion, feeUnresolved: state.feeUnresolved } });
+  if (store.getItem(key) !== raw) throw new ResumeStoreWriteError('Gateway attempt changed during archival');
+  store.removeItem(key);
+}
+
+/** Receipts are not resume candidates. Failure here cannot lock a new invoice or fire onSuccess. */
+export function loadGatewayReceipts(account: Address, destChainId: number): GatewayReceiptRecord[] {
+  const result: GatewayReceiptRecord[] = [];
+  try {
+    const store = storage();
+    if (!store) return result;
+    for (let i = 0; i < store.length; i++) {
+      const key = store.key(i);
+      if (!key?.startsWith(`${GATEWAY_RECEIPTS_PREFIX}${account}:${destChainId}:`.toLowerCase())) continue;
+      try {
+        const record = JSON.parse(store.getItem(key)!) as GatewayReceiptRecord;
+        if (record.session.account.toLowerCase() === account.toLowerCase() && record.session.destChainId === destChainId &&
+            ['confirming', 'settled'].includes(record.state.completion ?? '') && activeGatewayAttempt(record.state.merchant)) result.push(record);
+      } catch {
+        // One damaged receipt must not prevent backfilling the other completed payments.
+      }
+    }
+  } catch {
+    // Storage access failures in optional backfill must not affect the active payment.
+  }
+  return result;
+}
+
+
+/** Own successful receipts remain on their invoice key until finality; unrelated invoices are unblocked. */
+export function loadGatewayConfirmingStates(account: Address, destChainId: number): { key: ResumeSessionKey; state: GatewayResumeState }[] {
+  const entries: { key: ResumeSessionKey; state: GatewayResumeState }[] = [];
+  try {
+    const store = storage();
+    if (!store) return entries;
+    for (let i = 0; i < store.length; i++) {
+      const name = store.key(i);
+      if (!name?.startsWith(`${PREFIX}gateway:`)) continue;
+      const parts = name.slice(PREFIX.length).split(':');
+      const [, source, dest, payer, recipient, value, fee] = parts;
+      if (payer !== account.toLowerCase() || dest !== String(destChainId)) continue;
+      if (parts.length !== 7 || !/^\d+$/.test(source) || !Number.isSafeInteger(Number(source)) ||
+          !/^0x[\da-f]{40}$/i.test(recipient) || !/^\d+$/.test(value) || !/^\d+$/.test(fee)) continue;
+      const key: ResumeSessionKey = { kind: 'gateway', account, sourceChainId: Number(source), destChainId,
+        recipient: recipient as Address, valueAtomic: BigInt(value), feeAtomic: BigInt(fee) };
+      const entry = readGatewayResumeState(key);
+      if (entry.kind === 'present' && entry.state.completion === 'confirming') entries.push({ key, state: entry.state });
+    }
+  } catch {
+    // Optional polling cannot spread a storage failure to a different active invoice; its own scan stays strict.
+  }
+  return entries;
 }

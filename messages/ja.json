@@ -1603,7 +1603,20 @@
     "burnAdoptErrorNotFound": "この取引が送金元チェーン上で見つかりません。チェーンと取引 ID をご確認ください。",
     "burnAdoptErrorReverted": "この取引は失敗しています。別の取引 ID をご確認ください。",
     "burnAdoptErrorMismatch": "この取引は今回の決済の送金と一致しません (金額・送り先・送信者のいずれかが違います)。",
-    "burnAdoptErrorUnavailable": "いま確認できませんでした。時間をおいて、もう一度お試しください。"
+    "burnAdoptErrorUnavailable": "いま確認できませんでした。時間をおいて、もう一度お試しください。",
+    "gatewayReady": "送金を完了する準備ができています。再確認すると、保存済みの承認で送金を実行します。",
+    "gatewayConfirmationLost": "成功と表示した送金が、確定したブロックでは未実行のまま期限切れになっています。再支払いせず、サポートに連絡してください。",
+    "gatewayFeeAuthorizationRequired": "店舗への送金を完了するには、手数料の新たな承認と署名が必要です。再確認だけでは署名しません。",
+    "gatewayAuthorizeFee": "手数料の送金に同意して署名",
+    "gatewayUnknown": "この送金を確認できていません。再署名せずに状態を再確認してください。",
+    "gatewayFinality": "この送金の確定を待っています。新しい送金はまだ作成できません。",
+    "gatewayBalance": "この送金は未実行のまま期限切れになりました。残りの送金状態の確認が必要です。",
+    "gatewayInsufficientBalance": "この送金は未実行のまま期限切れになりました。手数料を含む利用可能残高をまだ確認できていません。時間をおいて再確認してください。",
+    "gatewayReplacementDisabled": "この送金の未実行・期限切れを確認しました。この請求では現在、新しい Gateway 送金を承認できません。",
+    "gatewayReplaceable": "この送金の未実行・期限切れと利用可能残高を確認しました。新しい送金には下のボタンでの同意と署名が必要です。",
+    "gatewayPaid": "送金は確定しています。取引の詳細を再取得できます。追加の支払いは不要です。",
+    "gatewayRecheck": "送金状態を再確認",
+    "gatewayReplaceMerchant": "新しい送金に同意して署名"
   },
   "CrossChainSourceChooser": {
     "quoteUnavailable": "見積を取得できません",

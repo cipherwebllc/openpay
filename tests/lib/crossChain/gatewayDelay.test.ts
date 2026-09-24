@@ -1,3 +1,5 @@
+import { gatewayAttestation } from '../../fixtures/gateway';
+import { pad } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PublicClient, WalletClient } from 'viem';
 import { arbitrum, arbitrumSepolia } from 'viem/chains';
@@ -30,19 +32,26 @@ function fixture(sourceChainId = 84532) {
     request: vi.fn().mockResolvedValue({ number: '0x17d78400', l1BlockNumber: '0x1312d00' }),
     getCode: vi.fn().mockResolvedValue('0x6000'),
   };
+  let minted = false;
   const dest = {
+    request: vi.fn(async (a: { method: string }) => a.method === 'eth_call' ? pad(minted ? '0x01' : '0x00') : { number: '0x01', hash: pad('0x01') }),
+    getLogs: vi.fn(async () => []),
     readContract: vi.fn().mockRejectedValue(new Error('must read source')),
     getBlockNumber: vi.fn().mockResolvedValue(9_000_000n),
     getCode: vi.fn().mockResolvedValue('0x6000'),
-    waitForTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success' }),
+    waitForTransactionReceipt: vi.fn(async () => { minted = true; return { status: 'success' }; }),
   };
   const wallet = {
     getChainId: vi.fn(async () => chainId),
     signTypedData: vi.fn().mockResolvedValue('0x1234'),
     sendTransaction: vi.fn().mockResolvedValue('0xabcd'),
   };
-  const fetch = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ attestation: '0x1234', signature: '0x5678' })));
+  const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+    const spec = JSON.parse(String(init?.body))[0].burnIntent.spec;
+    return new Response(JSON.stringify(gatewayAttestation({ ...spec, value: BigInt(spec.value) })));
+  });
   return { source, dest, wallet, fetch, args: {
+    onStep: vi.fn(),
     sourcePublicClient: source as unknown as PublicClient,
     destPublicClient: dest as unknown as PublicClient,
     walletClient: wallet as unknown as WalletClient,
