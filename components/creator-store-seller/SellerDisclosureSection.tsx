@@ -54,14 +54,8 @@ export function SellerDisclosureSection({ seller, sellerForm, sellerSaved, isLic
                 {t('sellerIntro')}
               </p>
             </div>
-            <span
-              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                sellerComplete
-                  ? 'bg-emerald-100 text-emerald-800'
-                  : 'bg-amber-100 text-amber-800'
-              }`}
-            >
-              {sellerComplete ? t('sellerRegistered') : t('sellerUnregistered')}
+            <span className="rounded-full px-2.5 py-1 text-xs font-semibold bg-amber-100 text-amber-800">
+              {t('sellerUnregistered')}
             </span>
           </div>
         )}

@@ -4,11 +4,11 @@
 // 販売開始に必須の販売者情報を同じ場所で管理する。商品本文は一覧 API へ載せず、編集時だけ
 // owner 限定 detail API から取得する。保存後は server の値を再取得し、楽観更新しない。
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { deliveryFormatOf } from '@/lib/store/deliveryFormat';
 import Link from 'next/link';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Store } from 'lucide-react';
 import { env } from '@/lib/env';
 import { useAccount } from 'wagmi';
@@ -176,6 +176,19 @@ function SignedInSellerPanel({
   const t = useTranslations('CreatorStoreSeller');
   const locale = useLocale();
   const origin = useOrigin();
+  const queryClient = useQueryClient();
+  const activeAddress = useRef<string | null>(sessionAddress.toLowerCase());
+  useEffect(() => {
+    activeAddress.current = sessionAddress.toLowerCase();
+    // タブ移動や account 切替で unmount しても mutation は完了する。旧 observer の
+    // refetch が別 account の cookie で取得しないよう失効させ、同 account の active query だけ更新する。
+    return () => { activeAddress.current = null; };
+  }, [sessionAddress]);
+  const refreshMountedOwner = (kind: 'products' | 'seller', owner: string) => queryClient.invalidateQueries({
+    queryKey: ['creator-store', kind],
+    predicate: ({ queryKey }) => String(queryKey[2]).toLowerCase() === owner,
+    refetchType: 'active',
+  });
   const [sellerDraft, setSellerDraft] = useState<SellerForm | null>(null);
   const [sellerSaved, setSellerSaved] = useState(false);
   // 新規商品の掲載先は「いま編集中のプロフ (prop handle)」を既定にする —
@@ -247,6 +260,7 @@ function SignedInSellerPanel({
 
   const saveSeller = useMutation({
     gcTime: 0,
+    onMutate: () => sessionAddress.toLowerCase(),
     mutationFn: async (form: SellerForm) =>
       requestJson<SellerResponse>('/api/store/seller', {
         method: 'PUT',
@@ -257,7 +271,8 @@ function SignedInSellerPanel({
           disclosure: form.disclosure.trim() || null,
         }),
       }),
-    onSuccess: async () => {
+    onSuccess: async (_data, _form, startedAddress) => {
+      if (activeAddress.current !== startedAddress) return refreshMountedOwner('seller', startedAddress);
       const refreshed = await sellerQuery.refetch();
       if (refreshed.isSuccess) {
         setSellerDraft(null);
@@ -322,6 +337,7 @@ function SignedInSellerPanel({
 
   const saveProduct = useMutation({
     gcTime: 0,
+    onMutate: () => sessionAddress.toLowerCase(),
     mutationFn: async ({
       id,
       form,
@@ -386,7 +402,8 @@ function SignedInSellerPanel({
           }),
         },
       ),
-    onSuccess: async () => {
+    onSuccess: async (_data, _variables, startedAddress) => {
+      if (activeAddress.current !== startedAddress) return refreshMountedOwner('products', startedAddress);
       const refreshed = await productsQuery.refetch();
       if (refreshed.isSuccess) {
         setEditingId(null);
@@ -398,6 +415,7 @@ function SignedInSellerPanel({
   });
 
   const toggleSale = useMutation({
+    onMutate: () => sessionAddress.toLowerCase(),
     mutationFn: async ({
       id,
       saleActive,
@@ -413,7 +431,8 @@ function SignedInSellerPanel({
           body: JSON.stringify({ saleActive }),
         },
       ),
-    onSuccess: async () => {
+    onSuccess: async (_data, _variables, startedAddress) => {
+      if (activeAddress.current !== startedAddress) return refreshMountedOwner('products', startedAddress);
       await productsQuery.refetch();
     },
   });
