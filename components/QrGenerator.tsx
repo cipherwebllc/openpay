@@ -78,6 +78,8 @@ export function QrGenerator() {
   const [step2Initialized, setStep2Initialized] = useState(false);
   // QR は即時表示せず「QRコードを表示する」ボタン → 全画面モーダルで提示。
   const [qrModalOpen, setQrModalOpen] = useState(false);
+  // onClose は modal の focus effect の依存。残高更新や入力で再 focus させない。
+  const closeQrModal = useCallback(() => setQrModalOpen(false), []);
   // 初回に QR モーダルを開いた「ピークモーメント」を latch。以降 A2HS hint を出す
   // (毎日この QR を使う店主に、ホーム画面への追加を提案する)。閉じても latch は保持。
   const [hasOpenedQr, setHasOpenedQr] = useState(false);
@@ -231,6 +233,7 @@ export function QrGenerator() {
       // 旧 QR との互換性を最大化するため token=usdc 時のみ出力する。
       crossChain: settings.token === 'usdc' ? crossChainAllowed(settings.chain, settings.crossChain) : undefined,
       // convert 適用時のみ、期限と顧客への文脈表示 (元価格 + レート) を URL に乗せる。
+      // 期限は画面上の目安。期限切れでも QR / exp は保持し、明示的な再計算で更新する。
       expiresAt: convert?.expiresAt,
       priceRefAmount: convert?.anchorAmount,
       fxRate: convert?.fxRate,
@@ -594,7 +597,7 @@ export function QrGenerator() {
       {payUrl && (
         <QrPreviewModal
           open={qrModalOpen}
-          onClose={() => setQrModalOpen(false)}
+          onClose={closeQrModal}
           labels={{
             title: t('qrModalTitle'),
             close: t('qrModalClose'),

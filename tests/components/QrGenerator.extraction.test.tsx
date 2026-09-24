@@ -15,7 +15,8 @@ import en from '@/messages/en.json';
 //   - モーダルの再表示とキャッシュ (コピー状態・前回 QR の保存・着金監視の再開)
 //   - FX の期限が子の mount/unmount をまたいで保たれること
 //   - SVG/PNG 保存が「今の」主 QR の ref を読むこと・印刷
-//   - 下部バーの WebKit 再描画 effect の発火条件 (金額/モード/通貨記号の変化時だけ)
+//   - 下部バーの WebKit 再描画 effect の発火条件 (B-R11d: 出現時も含める)
+// B-R11d の意図した差分: modal の focus 保持・バー出現時の再描画・モード切替時の入力保持。
 
 const mocks = vi.hoisted(() => ({
   balance: undefined as bigint | undefined,
@@ -325,6 +326,8 @@ describe('R11b: generated payment URL fixtures', () => {
 // 変更の意図と一致することを確かめてから、その文字列を下の該当キーへ写す。抽出・分割の
 // 差分に合わせて書き換えてはならない (Phase 6 原則 2 — その場合は抽出前の code で記録する)。
 // lucide-react / qrcode.react の更新だけで digest が変わるなら除外 (withoutSvgInternals) の漏れ。
+// B-R11d: fresh-ja/en の static/modal だけ amount/full を更新。金額欄・エディタが
+// hidden で残るため。amount モードの DOM と、それ以外の節の digest は不変。
 const DOM_BASELINE: Record<string, string> = {
   'fresh-ja/empty':
     'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=58f78ef36af2 receiver=e7e8e741048e accounting=1ae21b00fd1a settings=52f60fef0496 preview=df6fdaa1b2ab full=87e6a26fdc72',
@@ -335,9 +338,9 @@ const DOM_BASELINE: Record<string, string> = {
   'fresh-ja/advanced':
     'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=f11c9c908a3d receiver=53e63a799c4c accounting=1ae21b00fd1a settings=248c7149dc79 preview=a2659703e1e8 bar=59ab00522b30 full=da0a17195a81',
   'fresh-ja/static':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=05b177225a49 receiver=53e63a799c4c accounting=1ae21b00fd1a settings=248c7149dc79 preview=a2659703e1e8 bar=de07dcf3f38f full=af9234402c11',
+    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=6535b1cbe2da receiver=53e63a799c4c accounting=1ae21b00fd1a settings=248c7149dc79 preview=a2659703e1e8 bar=de07dcf3f38f full=49b178e99ae5',
   'fresh-ja/modal':
-    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=05b177225a49 receiver=53e63a799c4c accounting=1ae21b00fd1a settings=248c7149dc79 pwa=f0506b8ca563 preview=a2659703e1e8 modal=bddf69eea475 bar=de07dcf3f38f full=17c26552dcff',
+    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=6535b1cbe2da receiver=53e63a799c4c accounting=1ae21b00fd1a settings=248c7149dc79 pwa=f0506b8ca563 preview=a2659703e1e8 modal=bddf69eea475 bar=de07dcf3f38f full=e50b5a7ab4d1',
   'fresh-en/empty':
     'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=63f2f3856490 receiver=df2279b703b8 accounting=74ed35d7215a settings=16c64a10b7aa preview=fe779a049a06 full=94d3a55cfcb0',
   'fresh-en/receiver-typed':
@@ -347,9 +350,9 @@ const DOM_BASELINE: Record<string, string> = {
   'fresh-en/advanced':
     'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=225a60671bb5 receiver=fedfcd16f726 accounting=74ed35d7215a settings=8d52fa6c9d78 preview=af1a40c48a66 bar=8fd7054ec7dc full=2ae0731b41e4',
   'fresh-en/static':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=b8b03420b536 receiver=fedfcd16f726 accounting=74ed35d7215a settings=8d52fa6c9d78 preview=af1a40c48a66 bar=7af51957c9d0 full=a74f28eaea86',
+    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=0967e76f4762 receiver=fedfcd16f726 accounting=74ed35d7215a settings=8d52fa6c9d78 preview=af1a40c48a66 bar=7af51957c9d0 full=d6f784e55d7a',
   'fresh-en/modal':
-    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=b8b03420b536 receiver=fedfcd16f726 accounting=74ed35d7215a settings=8d52fa6c9d78 pwa=3e04971c2b53 preview=af1a40c48a66 modal=1f8b3ee8e853 bar=7af51957c9d0 full=c357d7c934b9',
+    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=0967e76f4762 receiver=fedfcd16f726 accounting=74ed35d7215a settings=8d52fa6c9d78 pwa=3e04971c2b53 preview=af1a40c48a66 modal=1f8b3ee8e853 bar=7af51957c9d0 full=3143a82eacfe',
   'seeded/collapsed':
     'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=58f78ef36af2 receiver=a40a7c4b7637 accounting=1ae21b00fd1a settings=52f60fef0496 preview=ef5f97440853 full=16d1e09dc74d',
   'seeded/step2-open':
@@ -581,7 +584,7 @@ const SCENARIOS: Record<string, { locale: Locale; run: (snap: Snap) => Promise<v
   },
 };
 
-describe('R11b: section DOM is unchanged', () => {
+describe('R11b: section DOM with B-R11d hidden static controls', () => {
   it.each(Object.keys(SCENARIOS))('%s', async (key) => {
     const scenario = SCENARIOS[key];
     locale = scenario.locale;
@@ -661,27 +664,48 @@ describe('R11b: no remount when sections become child components', () => {
     await settle();
     expect(requery()).toEqual(nodes);
     expect([quickDetails.open, accountingDetails.open]).toEqual([true, true]);
-    // 据え置き → 金額指定は従来どおり金額欄を作り直し (autoFocus で再 focus)、
-    // 金額指定時だけ出るクイック金額エディタも作り直す (開閉は閉じに戻る)。会計は保持。
+    // B-R11d S1: 据え置き中も金額欄とエディタを保持。ユーザーが金額指定へ
+    // 戻した時だけ同じ入力 node に focus し、クイック金額の開閉も保持する。
     // モード切替ボタン自体は ① の節ごと作り直されない (同じ node のまま)。
     fireEvent.click(screen.getByRole('button', { name: labels().modeStatic }));
     await settle();
-    expect(screen.queryByText(labels().quickAmountsLabel)).toBeNull();
+    expect(amountEl).toBeInTheDocument();
+    expect(amountEl).not.toBeVisible();
+    expect(quickDetails).toBeInTheDocument();
+    expect(quickDetails).not.toBeVisible();
+    expect(within(quickDetails).queryAllByRole('textbox')).toHaveLength(0);
     expect(screen.getByRole('button', { name: labels().modeStatic })).toBe(nodes.modeStatic);
     expect(screen.getByRole('button', { name: labels().modeAmount })).toBe(nodes.modeAmount);
-    fireEvent.click(screen.getByRole('button', { name: labels().modeAmount }));
+    const focusAmount = amountEl.focus.bind(amountEl);
+    const focusSpy = vi.spyOn(amountEl, 'focus').mockImplementation(() => {
+      // jsdom は hidden な入力にも focus できるので、実ブラウザで必要な表示順も検証する。
+      expect(amountEl).toBeVisible();
+      focusAmount();
+    });
+    nodes.modeAmount.focus();
+    fireEvent.click(nodes.modeAmount);
     await settle();
     expect(screen.getByRole('button', { name: labels().modeAmount })).toBe(nodes.modeAmount);
     expect(screen.getByRole('button', { name: labels().modeStatic })).toBe(nodes.modeStatic);
-    const remounted = amountInput();
-    expect(remounted).not.toBe(amountEl);
-    expect(document.activeElement).toBe(remounted);
-    expect(detailsOf(labels().quickAmountsLabel)).not.toBe(quickDetails);
-    expect(detailsOf(labels().quickAmountsLabel).open).toBe(false);
+    expect(amountInput()).toBe(amountEl);
+    expect(amountEl).toBeVisible();
+    expect(amountEl).toHaveValue('20');
+    expect(focusSpy).toHaveBeenCalledOnce();
+    expect(document.activeElement).toBe(amountEl);
+    expect(detailsOf(labels().quickAmountsLabel)).toBe(quickDetails);
+    expect(quickDetails).toBeVisible();
+    expect(quickDetails.open).toBe(true);
+    expect(within(quickDetails).getAllByRole('textbox')[0]).toBe(nodes.quickInput);
+    expect(nodes.quickInput).toHaveValue('7');
     expect(detailsOf(labels().accountingFieldsTitle)).toBe(accountingDetails);
     expect(accountingDetails.open).toBe(true);
     expect(advancedToggle()).toBe(nodes.advanced);
     expect(screen.getByRole('checkbox')).toBe(nodes.crossChain);
+    focusSpy.mockClear();
+    nodes.modeAmount.focus();
+    fireEvent.click(nodes.modeAmount);
+    expect(focusSpy).not.toHaveBeenCalled(); // 同じモードの再選択では focus を移さない。
+    expect(document.activeElement).toBe(nodes.modeAmount);
   });
 
   it('keeps the Step 2 and advanced-settings open state owned by the generator across modal and mode changes', async () => {
@@ -702,9 +726,41 @@ describe('R11b: no remount when sections become child components', () => {
   });
 });
 
-describe('R11b: mobile bar repaint effect', () => {
-  it('flashes translateZ(0) only when amount, mode or the display symbol changes', async () => {
+describe('B-R11d: retained amount in static mode', () => {
+  it('omits a previously typed amount and EIP-681 in static mode, restoring both when switched back', async () => {
+    seed({ token: 'usdc', chain: 'base', payMode: 'standard' });
     renderQr();
+    await settle();
+    amount('12.5');
+    const input = amountInput();
+    const amountDialog = openQr();
+    const amountUrl = BASE_URL + '&token=usdc&amount=12.5&mode=standard';
+    expect(displayedUrl()).toBe(amountUrl);
+    const eip681 = within(amountDialog).getByText(/^ethereum:/).textContent;
+    expect(within(amountDialog).getByText(labels().eip681Title)).toBeInTheDocument();
+    closeQr();
+
+    fireEvent.click(screen.getByRole('button', { name: labels().modeStatic }));
+    expect(input).toHaveValue('12.5');
+    expect(input).not.toBeVisible();
+    const staticDialog = openQr();
+    expect(displayedUrl()).toBe(BASE_URL + '&token=usdc&mode=standard');
+    expect(within(staticDialog).queryByText(labels().eip681Title)).toBeNull();
+    expect(within(staticDialog).queryByText(/^ethereum:/)).toBeNull();
+    closeQr();
+
+    fireEvent.click(screen.getByRole('button', { name: labels().modeAmount }));
+    expect(amountInput()).toBe(input);
+    const restoredDialog = openQr();
+    expect(displayedUrl()).toBe(amountUrl);
+    expect(within(restoredDialog).getByText(labels().eip681Title)).toBeInTheDocument();
+    expect(within(restoredDialog).getByText(/^ethereum:/).textContent).toBe(eip681);
+  });
+});
+
+describe('B-R11d: mobile bar repaint effect', () => {
+  it('repaints on appearance and amount/mode/symbol changes, cancelling stale frames on hide or unmount', async () => {
+    const view = renderQr();
     await settle();
     amount('1000');
     await settle();
@@ -712,13 +768,16 @@ describe('R11b: mobile bar repaint effect', () => {
     expect(mobileBar()).toBeNull();
     fireEvent.change(receiverInput(), { target: { value: RECEIVER } });
     await settle();
-    // バーの出現自体は effect の依存 (金額/モード/記号) を変えないので style に触れない。
+    // 金額が先・受取先が後でも、バーの初回表示で WebKit の再描画を促す。
     const bar = mobileBar()!;
-    expect(bar.getAttribute('style')).toBeNull();
-    expect(frames.size).toBe(0);
+    expect(bar.style.transform).toBe('translateZ(0)');
+    expect(frames.size).toBe(1);
+    flushFrames();
+    expect(bar.style.transform).toBe('');
     fireEvent.change(screen.getByPlaceholderText(labels().storeNamePlaceholder), { target: { value: '店' } });
     await settle();
-    expect(bar.getAttribute('style')).toBeNull();
+    expect(bar.style.transform).toBe('');
+    expect(frames.size).toBe(0); // URL の変更だけでは再描画しない。
     amount('1200');
     expect(bar.style.transform).toBe('translateZ(0)');
     amount('1300');
@@ -737,6 +796,62 @@ describe('R11b: mobile bar repaint effect', () => {
     expect(bar.style.transform).toBe('translateZ(0)');
     flushFrames();
     expect(bar.style.transform).toBe('');
+    amount('1400');
+    expect(frames.size).toBe(1);
+    fireEvent.change(receiverInput(), { target: { value: '' } });
+    expect(mobileBar()).toBeNull();
+    expect(frames.size).toBe(0);
+    fireEvent.change(receiverInput(), { target: { value: RECEIVER } });
+    const reappeared = mobileBar()!;
+    expect(reappeared).not.toBe(bar);
+    expect(reappeared.style.transform).toBe('translateZ(0)');
+    expect(frames.size).toBe(1);
+    view.unmount();
+    expect(frames.size).toBe(0);
+  });
+});
+
+describe('B-R11d: modal focus survives parent updates', () => {
+  it('keeps focus during balance polling and background input, and still focuses on reopen and closes with Escape', async () => {
+    seed();
+    const view = renderQr();
+    await settle();
+    amount('750');
+    const dialog = openQr();
+    expect(dialog).toHaveFocus();
+    const close = within(dialog).getByRole('button', { name: labels().qrModalClose });
+    close.focus();
+    mocks.balance = 10n ** 21n;
+    view.rerender(<QrGenerator />);
+    expect(close).toHaveFocus();
+    mocks.balance += 750n * 10n ** 18n;
+    view.rerender(<QrGenerator />);
+    expect(within(dialog).getByRole('status').textContent).toContain('残高の増加');
+    expect(close).toHaveFocus();
+    const input = amountInput();
+    input.focus();
+    amount('950');
+    expect(input).toHaveFocus();
+    expect(displayedUrl()).toBe(BASE_URL + '&token=jpyc&amount=950');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(openQr()).toHaveFocus();
+    closeQr();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('keeps the modal action focused while the FX countdown re-renders the generator', async () => {
+    seed();
+    renderQr();
+    await settle();
+    amount('1000');
+    fireEvent.click(screen.getByRole('button', { name: labels().convertButton.replace('{symbol}', 'USDC') }));
+    const dialog = openQr();
+    const close = within(dialog).getByRole('button', { name: labels().qrModalClose });
+    close.focus();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(screen.getByText(/残り 2:59/)).toBeInTheDocument();
+    expect(close).toHaveFocus();
   });
 });
 

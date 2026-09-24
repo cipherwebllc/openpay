@@ -9,16 +9,18 @@ export function QuickAmountEditor({
   onUpdate,
   onAdd,
   onRemove,
+  hidden,
 }: {
   items: string[];
   max: number;
   onUpdate: (idx: number, value: string) => void;
   onAdd: () => void;
   onRemove: (idx: number) => void;
+  hidden?: boolean;
 }) {
   const t = useTranslations('QrGenerator');
   return (
-    <details className="group rounded-2xl border border-slate-200 bg-white p-4">
+    <details hidden={hidden} className="group rounded-2xl border border-slate-200 bg-white p-4">
       <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-slate-700">
         <span>{t('quickAmountsLabel')}</span>
         <ChevronRight

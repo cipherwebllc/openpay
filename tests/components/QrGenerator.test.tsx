@@ -381,15 +381,19 @@ describe('QrGenerator', () => {
       );
     });
 
-    it('据え置きモードへ切替: 金額入力が消えてもメッセージが出る', async () => {
+    it('据え置きモードへ切替: JPYC の金額入力が非表示になりメッセージが出る', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
 
+      const input = screen.getByPlaceholderText('1000');
+      expect(input).toBeVisible();
       await user.click(screen.getByRole('button', { name: /据え置き/ }));
 
-      expect(screen.queryByPlaceholderText('10.00')).toBeNull();
+      expect(input).toBeInTheDocument();
+      expect(input).not.toBeVisible();
+      expect(screen.queryByRole('textbox', { name: /請求金額/ })).toBeNull();
       expect(
         screen.getByText(/据え置き QR では金額を顧客が入力/),
       ).toBeInTheDocument();
