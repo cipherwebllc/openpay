@@ -88,6 +88,8 @@ export type HostedStorePurchaseErrorCode =
   | 'review_required'
   | 'wallet_unavailable'
   | 'wallet_changed'
+  | 'product_changed'
+  | 'purchase_in_progress'
   | 'signature_rejected'
   | 'signed_payment_unavailable';
 
@@ -191,8 +193,12 @@ export function useHostedStorePurchase({
   const indeterminateAtRef = useRef<number | null>(null);
   const scopeRef = useRef<string | null>(null);
   const productScopeRef = useRef<string | null>(null);
+  // merchant は大文字小文字の差だけでは別商品にしない (checksum/lowercase の揺れで review を捨てない)。
+  const productScope = `${resourceId}:${title}:${merchant.toLowerCase()}:${priceJpyc}:${rail}`;
+  const currentProductScopeRef = useRef<string>(productScope);
   currentAddressRef.current = address;
   currentSessionRef.current = sessionAddress;
+  currentProductScopeRef.current = productScope;
 
   const clearPurchaseState = useCallback(() => {
     signedRequestRef.current = null;
@@ -224,7 +230,6 @@ export function useHostedStorePurchase({
   }, [address, sessionAddress, queryClient, clearPurchaseState]);
 
   useEffect(() => {
-    const productScope = `${resourceId}:${title}:${merchant.toLowerCase()}:${priceJpyc}:${rail}`;
     if (productScopeRef.current === null) {
       productScopeRef.current = productScope;
       return;
@@ -232,13 +237,28 @@ export function useHostedStorePurchase({
     if (productScopeRef.current === productScope) return;
     productScopeRef.current = productScope;
     clearPurchaseState();
-  }, [resourceId, title, merchant, priceJpyc, rail, clearPurchaseState]);
+  }, [productScope, clearPurchaseState]);
 
   const prepare = useCallback(async (): Promise<HostedStorePurchaseQuote> => {
     if (!enabled) {
       throw new HostedStorePurchaseError(
         'disabled',
         'Creator Store purchase is disabled',
+      );
+    }
+    // 1 件目の購入が未解決 (署名中・送信中・確認中) の間は新しい quote へ進ませない。prepare は
+    // 署名済み request を捨てるので、進めると 1 件目の retry/status 解決を失い、2 回目の署名が
+    // できてしまう (二重課金の防止)。条件は reset のガードと同じで、署名中も加える。state は触らない。
+    if (
+      phase === 'signing' ||
+      (signedRequestRef.current &&
+        (phase === 'submitting' ||
+          phase === 'indeterminate' ||
+          phase === 'indeterminate-exhausted'))
+    ) {
+      throw new HostedStorePurchaseError(
+        'purchase_in_progress',
+        'A hosted purchase is still in progress',
       );
     }
     if (!address) {
@@ -353,6 +373,17 @@ export function useHostedStorePurchase({
       setPhase('error');
       throw next;
     }
+    // 商品 (product scope) が quote fetch 中に切り替わった場合も、旧商品の quote を
+    // 切替後の review に出さない (wallet 切替と同じ扱い)。
+    if (currentProductScopeRef.current !== productScope) {
+      const next = new HostedStorePurchaseError(
+        'product_changed',
+        'Product changed while loading the purchase quote',
+      );
+      setError(next);
+      setPhase('error');
+      throw next;
+    }
 
     setSellerRole(env.enableLicenseNftUi && isRecord(raw) &&
       (raw.sellerRole === 'operator' || raw.sellerRole === 'third_party') ? raw.sellerRole : undefined);
@@ -360,6 +391,7 @@ export function useHostedStorePurchase({
     setPhase('review');
     return validated;
   }, [
+    phase,
     enabled,
     address,
     sessionAddress,
@@ -368,6 +400,7 @@ export function useHostedStorePurchase({
     merchant,
     priceJpyc,
     rail,
+    productScope,
   ]);
 
   const markConfirmed = useCallback((settledTxHash?: Hex) => {
@@ -388,6 +421,20 @@ export function useHostedStorePurchase({
     setPhase('indeterminate');
   }, []);
 
+  // wallet/session・商品の切替 (clearPurchaseState) で破棄した旧 flow の完了が、切替後の画面を
+  // 旧 flow の成功・確認中・失敗で上書きしないための判定 (quote=null の provisioning で止まる等を防ぐ)。
+  // 商品の切替と、wallet が A→B→A と戻った場合は、hook が保持する signed request が別 object
+  // (または null) になることで検出する。retry は保持中の同じ object を送るので捨てない。
+  // address/session の 2 条件は、切替を render した後・scope effect が clear する前の窓で先に止めるため
+  // に残す (最終状態は identity だけでも idle で同じ・既存の wallet 判定を変えない)。
+  const isStaleSignedCompletion = useCallback(
+    (signed: SignedHostedRequest): boolean =>
+      !sameAddress(currentAddressRef.current, signed.payer) ||
+      !sameAddress(currentSessionRef.current, signed.payer) ||
+      signedRequestRef.current !== signed,
+    [],
+  );
+
   const submitSignedRequest = useCallback(
     async (signed: SignedHostedRequest): Promise<void> => {
       setError(null);
@@ -404,10 +451,7 @@ export function useHostedStorePurchase({
           credentials: 'same-origin',
         });
       } catch (cause) {
-        if (
-          !sameAddress(currentAddressRef.current, signed.payer) ||
-          !sameAddress(currentSessionRef.current, signed.payer)
-        ) {
+        if (isStaleSignedCompletion(signed)) {
           return;
         }
         // header が server に届いた可能性を client だけでは否定できない。新しい署名へ倒さず、
@@ -417,10 +461,7 @@ export function useHostedStorePurchase({
       }
 
       const body = await responseJson(response);
-      if (
-        !sameAddress(currentAddressRef.current, signed.payer) ||
-        !sameAddress(currentSessionRef.current, signed.payer)
-      ) {
+      if (isStaleSignedCompletion(signed)) {
         return;
       }
       if (response.status === 200) {
@@ -513,7 +554,7 @@ export function useHostedStorePurchase({
       );
       markIndeterminate();
     },
-    [markConfirmed, markIndeterminate, resourceId],
+    [isStaleSignedCompletion, markConfirmed, markIndeterminate, resourceId],
   );
 
   const purchase = useCallback(async (): Promise<void> => {
@@ -627,6 +668,16 @@ export function useHostedStorePurchase({
       setPhase('error');
       throw next;
     }
+    // 署名 modal 中に商品が切り替わった場合も、旧商品の署名を送信しない (wallet 切替と同じ扱い)。
+    if (currentProductScopeRef.current !== productScope) {
+      const next = new HostedStorePurchaseError(
+        'product_changed',
+        'Product changed before the signed payment was submitted',
+      );
+      setError(next);
+      setPhase('error');
+      throw next;
+    }
 
     const header =
       prepared.rail === 'usdc'
@@ -663,6 +714,7 @@ export function useHostedStorePurchase({
     chainId,
     walletClient,
     resourceId,
+    productScope,
     submitSignedRequest,
   ]);
 

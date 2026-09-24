@@ -30,6 +30,8 @@ const state = vi.hoisted(() => ({
   content: null as Record<string, unknown> | null,
   error: null as Error | null,
   isWrongChain: false,
+  isBusy: false,
+  signPreview: { preview: true } as Record<string, unknown> | null,
   canRetrySignedPayment: false,
   hookInput: null as Record<string, unknown> | null,
 }));
@@ -83,7 +85,7 @@ vi.mock('@/hooks/useHostedStorePurchase', () => ({
     error: state.error,
     requiredChainId: state.quote ? Number(state.quote.chainId) : null,
     isWrongChain: state.isWrongChain,
-    isBusy: false,
+    isBusy: state.isBusy,
     canRetrySignedPayment: state.canRetrySignedPayment,
     prepare: state.prepare,
     purchase: state.purchase,
@@ -100,7 +102,7 @@ vi.mock('@/lib/x402/hostedPurchaseWire', () => ({
     const floor = 10n ** 18n;
     return pct > floor ? pct : floor;
   },
-  buildHostedPurchaseSignPreview: () => ({ preview: true }),
+  buildHostedPurchaseSignPreview: () => state.signPreview,
 }));
 
 vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
@@ -112,6 +114,7 @@ vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
     rail,
     paidUsdc,
     sellerDisclosureHref,
+    isSubmitting,
     onBack,
     onConfirm,
   }: {
@@ -122,6 +125,7 @@ vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
     rail?: 'jpyc' | 'usdc';
     paidUsdc?: string;
     sellerDisclosureHref: string;
+    isSubmitting?: boolean;
     onBack: () => void;
     onConfirm: () => void;
   }) => (
@@ -135,7 +139,7 @@ vi.mock('@/components/CreatorStorePurchaseConfirmation', () => ({
       <button type="button" onClick={onBack}>
         back
       </button>
-      <button type="button" onClick={onConfirm}>
+      <button type="button" disabled={isSubmitting} onClick={onConfirm}>
         confirm
       </button>
     </div>
@@ -197,6 +201,8 @@ beforeEach(() => {
   state.content = null;
   state.error = null;
   state.isWrongChain = false;
+  state.isBusy = false;
+  state.signPreview = { preview: true };
   state.canRetrySignedPayment = false;
   state.hookInput = null;
   state.switchChainAsync.mockResolvedValue(undefined);
@@ -434,6 +440,46 @@ describe('CreatorStorePurchaseFlow', () => {
       chainId: 80002,
     });
     expect(state.purchase).not.toHaveBeenCalled();
+  });
+
+  // B-R15d: 署名中・送信中に start view へ落ちると rail/prepare が押せ、進行中の購入を捨てて
+  // 2 回目の署名へ進めてしまう。wrong chain でも確認 UI を保ち、操作を止める。
+  it.each(['signing', 'submitting'] as const)(
+    '%s 中に wallet の chain が変わっても最終確認を出し続け、確定・支払い方法・購入内容の確認は押せない',
+    (phase) => {
+      state.phase = phase;
+      state.isWrongChain = true;
+      state.isBusy = true;
+      renderFlow('ja', { ...PRODUCT, usdcEnabled: true });
+
+      expect(screen.getByTestId('confirmation')).toHaveTextContent('100/1/101');
+      expect(screen.getByRole('button', { name: 'confirm' })).toBeDisabled();
+      expect(screen.queryByRole('radio')).toBeNull();
+      expect(
+        screen.queryByRole('button', { name: '購入内容を確認する' }),
+      ).toBeNull();
+      expect(
+        screen.queryByRole('button', { name: 'Polygon に切り替える' }),
+      ).toBeNull();
+      expect(state.prepare).not.toHaveBeenCalled();
+    },
+  );
+
+  it('署名中に最終確認を描けない場合 (sign preview なし) も、支払い方法と購入内容の確認は押せない', () => {
+    state.phase = 'signing';
+    state.isBusy = true;
+    state.signPreview = null;
+    renderFlow('ja', { ...PRODUCT, usdcEnabled: true });
+
+    expect(screen.queryByTestId('confirmation')).toBeNull();
+    expect(screen.getByRole('radio', { name: /JPYC で支払う/ })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: /USDC で支払う/ })).toBeDisabled();
+    const prepareButton = screen.getByRole('button', {
+      name: '購入内容を確認する',
+    });
+    expect(prepareButton).toBeDisabled();
+    fireEvent.click(prepareButton);
+    expect(state.prepare).not.toHaveBeenCalled();
   });
 
   it('own content read-back 済みの ready だけ ownershipReadBack=true を渡す', () => {
