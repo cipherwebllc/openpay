@@ -93,6 +93,8 @@ jobs:
           --exclude tests/lib/license/verifyBudget.test.ts
           --exclude tests/lib/store/deliveryBudget.test.ts
           --exclude tests/lib/x402/purchaseIntent-lua.test.ts
+          --exclude tests/lib/x402/purchaseIntent-lua-machine.test.ts
+          --exclude tests/lib/x402/storeUsdcIntent-lua-machine.test.ts
           --exclude tests/lib/x402/purchaseIntent-expiry-lua.test.ts
           --exclude tests/lib/x402/hostedTakedown-lua.test.ts
           --exclude tests/lib/x402/purchaseQuoteRateLimit-lua.test.ts
