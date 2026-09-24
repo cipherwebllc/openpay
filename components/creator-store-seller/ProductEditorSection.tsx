@@ -32,8 +32,8 @@ type Props = {
   updateProduct: (patch: Partial<ProductForm>) => void;
   cancelEdit: () => void;
   onSubmit: FormEventHandler<HTMLFormElement>;
-  saveProduct: Pick<MutationView<unknown>, 'isPending' | 'isError' | 'error'>;
-  loadProduct: Pick<MutationView<unknown>, 'isError' | 'error'>;
+  saveProduct: Pick<MutationView<unknown>, 'isPending' | 'isError' | 'error' | 'submittedAt'>;
+  loadProduct: Pick<MutationView<unknown>, 'isError' | 'error' | 'submittedAt'>;
 };
 
 export function ProductEditorSection({
@@ -530,7 +530,8 @@ export function ProductEditorSection({
         {loadProduct.isError || saveProduct.isError ? (
           <p className="text-sm text-red-600 sm:col-span-2">
             {(() => {
-              const cause = loadProduct.error ?? saveProduct.error;
+              const cause = saveProduct.isError && (!loadProduct.isError || saveProduct.submittedAt >= loadProduct.submittedAt)
+                ? saveProduct.error : loadProduct.error;
               const detailKey = errorDetailKey(cause);
               const messageKey = errorMessageKey(cause);
               return detailKey

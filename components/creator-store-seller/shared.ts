@@ -102,6 +102,7 @@ export type MutationView<Variables> = {
   isPending: boolean;
   isError: boolean;
   error: unknown;
+  submittedAt: number;
   variables?: Variables;
   mutate: (variables: Variables) => void;
 };
