@@ -6,7 +6,7 @@
 - Exclude `BUYER_PRIVATE_KEY` and all `STEWARD_*` variables from the Kova child environment while forwarding Kova credentials and other environment variables.
 - Default Kova's daily cap to the session cap with `default_kova`; use the existing address/UTC-date ledger at `OPENPAY_X402_HOME/spend.json` without creating a keystore. Report the public Kova mode and reject `wallet_init`.
 - Support `wallet_prove` in Kova mode: the `OpenPay Agent Proof` typed-data is signed through the CLI (`--chain polygon`) so the Agent can bind its purchase history on `/agent`; a missing `sign_allowlist` rule returns `kova_policy_denied`, a missing executable `kova_not_found`.
-- Document source-checkout setup in the package README, typed-data policy limitations, Polygon/Amoy separation and the undelegated-wallet requirement. Live Amoy compatibility remains unverified. Windows is unsupported.
+- Document source-checkout setup in the package README, Polygon/Amoy separation and the verified Amoy + Polygon mainnet purchases (2026-09-25). Kova 0.1.2 does not limit typed-data signing through `spending_limit` or `sign_allowlist` in our test, so the MCP caps are the only amount limits for this mode; EIP-7702 delegation set by `kova init` does not block JPYC v3 authorizations. Windows is unsupported.
 - No additional npm dependencies or peer dependencies. Kova must be installed separately.
 
 ## 0.17.2 — 2026-09-24
