@@ -1,5 +1,6 @@
 import { gatewayAttestation, encodedSpec } from '../fixtures/gateway';
 import { keccak256 } from 'viem';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   act,
@@ -19,6 +20,8 @@ vi.mock('next/navigation', () => ({
   useSearchParams: vi.fn(),
 }));
 vi.mock('wagmi', () => ({
+  useWalletClient: vi.fn(() => ({ data: undefined })),
+  usePublicClient: vi.fn(),
   useAccount: vi.fn(),
   useReadContract: vi.fn(),
   useSwitchChain: vi.fn(),
@@ -2579,4 +2582,29 @@ describe('PaymentForm — 署名安心 P2 (standard ヒント / Circle usdc-perm
     expect(screen.queryByText(/通常の送金確認が表示されます/)).toBeNull();
     expect(screen.queryByText(/求められるのは「署名」1回だけ/)).toBeNull();
   });
+});
+
+it.each(['notify-pending', 'terminal', 'prepared'] as const)('A2c %s order from an earlier checkout cannot hijack a new PaymentForm mount', async (state) => {
+  const { bindingFixture } = await import('../_helpers/orderBinding');
+  const { defaultDeploymentForSymbol } = await import('@/lib/tokens');
+  const { ORDER_DELIVERY_KEY, resolveOrderDelivery, saveOrderDelivery, terminateOrderDelivery } = await import('@/lib/orderDelivery');
+  const { useJpycEip3009Payment: actualHook } = await vi.importActual<typeof import('@/hooks/useJpycEip3009Payment')>('@/hooks/useJpycEip3009Payment');
+  sessionStorage.clear();
+  const dep = defaultDeploymentForSymbol('jpyc');
+  const record = resolveOrderDelivery(bindingFixture('free', { chainId: dep.chainId, tokenAddress: dep.address, merchant: MERCHANT, handle: 'alice', orderId: 'old', items: [{ name: 'Tea', qty: 1, price: '300' }] }).record, `0x${'ab'.repeat(32)}`);
+  saveOrderDelivery(record);
+  if (state === 'terminal') expect(terminateOrderDelivery(record)).toBe(true);
+  if (state === 'prepared') sessionStorage.setItem(ORDER_DELIVERY_KEY, JSON.stringify({ ...record, state: 'prepared', txHash: undefined, notifyBody: undefined }));
+  vi.mocked(useJpycEip3009Payment).mockImplementation(actualHook);
+  vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
+  setAccount({ connected: true, chainId: dep.chainId });
+  setBalance(10_000n * 10n ** 18n);
+  setURL(`to=${MERCHANT}&token=jpyc&amount=300`);
+  const fetchSpy = vi.spyOn(globalThis, 'fetch');
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const view = render(<QueryClientProvider client={client}><PaymentForm /></QueryClientProvider>);
+  await waitFor(() => expect(screen.getByRole('button', { name: /300 JPYC を支払う/ })).toBeEnabled());
+  expect(fetchSpy).not.toHaveBeenCalled();
+  expect(vi.mocked(useJpycEip3009Payment).mock.calls.every((args) => args[1]?.restoreOrderDelivery !== true)).toBe(true);
+  view.unmount(); client.clear(); fetchSpy.mockRestore(); sessionStorage.clear();
 });

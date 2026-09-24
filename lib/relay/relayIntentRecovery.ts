@@ -94,12 +94,15 @@ async function readStatus(
 
 export async function resolveRelayIntent(
   runtime: RecoveryRuntime,
+  { singleRead = false }: { singleRead?: boolean } = {},
 ): Promise<RelayRecoveryOutcome> {
-  const deadline = Date.now() + DEADLINE_MS;
+  // Background order holds need a fresh read at expiry without waiting through backoff.
+  // Its status + receipt work share the fetch timeout; ordinary recovery is unchanged.
+  const deadline = Date.now() + (singleRead ? FETCH_TIMEOUT_MS : DEADLINE_MS);
   let consecutiveUnused = 0;
 
-  for (const delayMs of BACKOFF_MS) {
-    if (!(await sleep(delayMs, runtime))) return { kind: 'unknown' };
+  for (const delayMs of singleRead ? [0] : BACKOFF_MS) {
+    if (delayMs ? !(await sleep(delayMs, runtime)) : !runtime.isMounted()) return { kind: 'unknown' };
     if (Date.now() > deadline) break;
 
     const status = await readStatus(runtime, deadline);

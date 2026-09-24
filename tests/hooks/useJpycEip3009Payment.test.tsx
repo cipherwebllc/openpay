@@ -1260,3 +1260,368 @@ describe('useJpycEip3009Payment — モバイル注文 feeKind (recover=実 mobi
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+const ORDER_CONTEXT = { merchant: MERCHANT, chainId: jpycDep.chainId, tokenAddress: jpycDep.address, webhook: `${location.origin}/api/order/notify?h=alice`, totalValue: 1000n * 10n ** 18n };
+
+describe('A2c browser binding', () => {
+  it.each(['free', 'recover'] as const)('persists %s opening only after signing and before broadcast; never sends secret to relay; success retains order', async (mode) => {
+    const { canonicalOrder, orderBindSalt, orderDigest } = await import('@/lib/orderBind');
+    const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const order = canonicalOrder({ chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'before-sign', items: [{ name: 'Tea', qty: 1, price: '300' }], statusToken: 's'.repeat(43), customerMemo: 'no ice' });
+    vi.mocked(jpycForwarderFor).mockReturnValue(mode === 'recover' ? '0x3333333333333333333333333333333333333333' : null);
+    mount();
+    signTypedData.mockImplementation(async () => {
+      expect(loadOrderDelivery().kind).toBe('empty');
+      return `0x${'a'.repeat(130)}`;
+    });
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+    result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order });
+    await waitFor(() => expect(result.current.data?.success).toBe(true));
+    const loaded = loadOrderDelivery();
+    expect(loaded.kind).toBe('ready');
+    if (loaded.kind !== 'ready') throw new Error('missing order');
+    expect(loaded.record.state).toBe('notify-pending');
+    const salt = orderBindSalt(orderDigest(order), loaded.record.bind.secret);
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(payload[mode === 'recover' ? 'intentSalt' : 'nonce']).toBe(salt);
+    expect(fetchSpy.mock.calls[0][1].body).not.toContain(loaded.record.bind.secret);
+    expect(sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+    expect(result.current.orderDelivery).toEqual(loaded.record);
+  });
+});
+
+describe('A2c recovery and storage failure transitions', () => {
+  async function fixture(mode: 'free' | 'recover' = 'free') {
+    const { bindingFixture } = await import('../_helpers/orderBinding');
+    return bindingFixture(mode, { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'saved-order', items: [{ name: 'Tea', qty: 1, price: '300' }], statusToken: 's'.repeat(43) });
+  }
+  it('unavailable order storage discards the signature and prevents broadcast', async () => {
+    const { ORDER_DELIVERY_KEY } = await import('@/lib/orderDelivery');
+    const f = await fixture();
+    mount();
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+    await waitFor(() => expect(result.current.isRestoring).toBe(false));
+    const original = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith(ORDER_DELIVERY_KEY)) throw new Error('quota');
+      original.call(this, key, value);
+    });
+    act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
+    await waitFor(() => expect(result.current.error?.message).toBe('order_binding_storage_unavailable'));
+    expect(signTypedData).toHaveBeenCalledOnce(); expect(fetchSpy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+  it.each(['signed', 'notify-pending'] as const)('reload from %s recovers the same authorization even after payment intent was cleared', async (state) => {
+    const { saveOrderDelivery, resolveOrderDelivery, loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const f = await fixture('recover');
+    const firstHash = `0x${'ab'.repeat(32)}` as Hex;
+    const finalHash = `0x${'cd'.repeat(32)}` as Hex;
+    saveOrderDelivery(state === 'signed' ? f.record : resolveOrderDelivery(f.record, firstHash));
+    vi.useFakeTimers();
+    mount();
+    fetchSpy.mockImplementation(async () => Response.json({ ok: true, state: 'settled', txHash: finalHash }));
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, totalValue: BigInt(f.record.intent.merchantValue) + BigInt(f.record.intent.feeValue) } }), { wrapper: makeWrapper() });
+    await flushStorageLoad();
+    await act(async () => vi.advanceTimersByTimeAsync(3000));
+    await flushStorageLoad();
+    expect(result.current.data).toEqual({ success: true, txHash: finalHash });
+    expect(result.current.orderDelivery?.order).toEqual(f.order);
+    expect(result.current.orderDelivery?.bind).toEqual(f.bind);
+    expect(result.current.orderDelivery?.txHash).toBe(finalHash);
+    expect(loadOrderDelivery().kind).toBe('ready');
+    expect(signTypedData).not.toHaveBeenCalled();
+    for (const [url, init] of fetchSpy.mock.calls) {
+      expect(url).toBe('/api/relay/jpyc/status'); expect(init.body).not.toContain(f.bind.secret);
+    }
+    vi.useRealTimers();
+  });
+  it.each(['unused', 'reverted'] as const)('proven %s authorization can discard an unpaid snapshot', async (outcome) => {
+    const { saveOrderDelivery, loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const f = await fixture(); saveOrderDelivery(f.record);
+    vi.useFakeTimers(); mount();
+    fetchSpy.mockImplementation(async () => Response.json(outcome === 'unused' ? { ok: true, state: 'unused' } : { ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
+    waitForTransactionReceipt.mockResolvedValue({ status: 'reverted' });
+    renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+    await flushStorageLoad();
+    await act(async () => vi.advanceTimersByTimeAsync(9000));
+    expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    expect(signTypedData).not.toHaveBeenCalled(); vi.useRealTimers();
+  });
+  it('IP retry retains the exact opening and signs once', async () => {
+    const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const f = await fixture(); vi.mocked(jpycForwarderFor).mockReturnValue(null); mount();
+    fetchSpy.mockResolvedValueOnce(Response.json({ error: 'ip_rate_limited' }, { status: 429 }));
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+    act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    const saved = result.current.orderDelivery;
+    expect(saved).not.toBeNull();
+    expect(loadOrderDelivery().kind).toBe('empty');
+    fetchSpy.mockImplementationOnce(async () => {
+      expect(loadOrderDelivery()).toEqual({ kind: 'ready', record: saved });
+      return Response.json({ ok: true, txHash: `0x${'ab'.repeat(32)}` });
+    });
+    act(() => result.current.retryRelay());
+    await waitFor(() => expect(result.current.data?.success).toBe(true));
+    expect(signTypedData).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls[0][1].body).toBe(fetchSpy.mock.calls[1][1].body);
+    expect(result.current.orderDelivery?.bind).toEqual(saved?.bind);
+  });
+  it('pending/unknown retain their saved opening without notification or new authorization', async () => {
+    const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const f = await fixture(); vi.mocked(jpycForwarderFor).mockReturnValue(null); mount();
+    fetchSpy.mockResolvedValue(Response.json({ pending: true, txHash: null }, { status: 202 }));
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+    act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
+    await waitFor(() => expect(result.current.data?.pending).toBe(true));
+    expect(loadOrderDelivery().kind).toBe('ready');
+    expect(result.current.orderDelivery?.state).toBe('signed');
+    act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
+    expect(signTypedData).toHaveBeenCalledOnce();
+  });
+});
+
+it('A2c lost relay response resolves the original opening; a failed resolution write keeps payment successful', async () => {
+  const { bindingFixture } = await import('../_helpers/orderBinding');
+  const { ORDER_DELIVERY_KEY, loadOrderDelivery } = await import('@/lib/orderDelivery');
+  const f = bindingFixture('free', { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'unknown', items: [{ name: 'Tea', qty: 1, price: '300' }] });
+  vi.mocked(jpycForwarderFor).mockReturnValue(null);
+  mount(); vi.useFakeTimers();
+  const original = Storage.prototype.setItem;
+  const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    if (key.startsWith(ORDER_DELIVERY_KEY) && JSON.parse(value).state === 'notify-pending') throw new Error('quota');
+    original.call(this, key, value);
+  });
+  fetchSpy.mockImplementation(async (url) => {
+    if (url === '/api/relay/jpyc') throw new Error('response lost');
+    return Response.json({ ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` });
+  });
+  const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+  await flushStorageLoad();
+  act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
+  await act(async () => vi.advanceTimersByTimeAsync(0));
+  const opening = result.current.orderDelivery?.bind;
+  await act(async () => vi.advanceTimersByTimeAsync(3000));
+  await flushStorageLoad();
+  expect(result.current.data?.success).toBe(true);
+  expect(result.current.orderDelivery?.bind).toEqual(opening);
+  expect(result.current.orderDelivery?.state).toBe('notify-pending');
+  expect(loadOrderDelivery()).toMatchObject({ kind: 'ready', record: { state: 'signed', bind: opening } });
+  expect(signTypedData).toHaveBeenCalledOnce();
+  write.mockRestore(); vi.useRealTimers();
+});
+
+it('A2c order chunk failure cannot hide an existing ordinary relay payment intent', async () => {
+  vi.doMock('@/lib/orderDelivery', () => { throw new Error('chunk unavailable'); });
+  try {
+    vi.useFakeTimers();
+    storeRelayIntent(restoredRelayIntent()); mount();
+    fetchSpy.mockImplementation(async () => Response.json({ ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+    // Module loading uses real microtasks; await the outcome rather than assuming two ticks
+    // scheduled the fake recovery timer (worker reuse changes module-cache timing).
+    await vi.waitFor(async () => {
+      await act(async () => vi.advanceTimersByTimeAsync(3000));
+      expect(result.current.data?.success).toBe(true);
+    }, { timeout: 2000, interval: 10 });
+    expect(result.current.orderDeliveryLoadError).toBe(true);
+    expect(signTypedData).not.toHaveBeenCalled();
+  } finally {
+    vi.doUnmock('@/lib/orderDelivery'); vi.useRealTimers();
+  }
+});
+
+ it('A2c ordinary payment hooks never restore an undelivered order', async () => {
+  const { bindingFixture } = await import('../_helpers/orderBinding');
+  const { saveOrderDelivery, resolveOrderDelivery } = await import('@/lib/orderDelivery');
+  const f = bindingFixture('free', { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'old', items: [{ name: 'Tea', qty: 1, price: '300' }] });
+  saveOrderDelivery(resolveOrderDelivery(f.record, `0x${'ab'.repeat(32)}`)); mount();
+  const { result } = renderHook(() => useJpycEip3009Payment(jpycDep), { wrapper: makeWrapper() });
+  await waitFor(() => expect(result.current.isRestoring).toBe(false));
+  expect(result.current.orderDelivery).toBeNull();
+  expect(result.current.restoredIntent).toBeNull();
+  expect(fetchSpy).not.toHaveBeenCalled();
+});
+
+it.each(['prepared', 'terminal'] as const)('A2c %s record cannot block persisting the next signed checkout', async (state) => {
+  const { bindingFixture } = await import('../_helpers/orderBinding');
+  const { ORDER_DELIVERY_KEY, loadOrderDelivery, resolveOrderDelivery, saveOrderDelivery, terminateOrderDelivery } = await import('@/lib/orderDelivery');
+  const f = bindingFixture('free', { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'old', items: [{ name: 'Tea', qty: 1, price: '300' }] });
+  if (state === 'terminal') {
+    const record = resolveOrderDelivery(f.record, `0x${'ab'.repeat(32)}`);
+    saveOrderDelivery(record); expect(terminateOrderDelivery(record)).toBe(true);
+  } else sessionStorage.setItem(ORDER_DELIVERY_KEY, JSON.stringify({ ...f.record, state: 'prepared' }));
+  mount(); vi.mocked(jpycForwarderFor).mockReturnValue(null);
+  fetchSpy.mockImplementation(async () => {
+    expect(loadOrderDelivery()).toMatchObject({ kind: 'ready', record: { state: 'signed', order: { orderId: 'new' } } });
+    return Response.json({ ok: true, txHash: `0x${'cd'.repeat(32)}` });
+  });
+  const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+  await waitFor(() => expect(result.current.isRestoring).toBe(false));
+  expect(result.current.restoredIntent).toBeNull(); expect(fetchSpy).not.toHaveBeenCalled();
+  act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: { ...f.order, orderId: 'new' } }));
+  await waitFor(() => expect(result.current.data?.success).toBe(true));
+  expect(signTypedData).toHaveBeenCalledOnce();
+  expect(loadOrderDelivery()).toMatchObject({ kind: 'ready', record: { state: 'notify-pending', order: { orderId: 'new' } } });
+});
+it('A2c navigation during a wallet prompt leaves no unsigned record or late broadcast', async () => {
+  const { bindingFixture } = await import('../_helpers/orderBinding');
+  const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+  const f = bindingFixture('free', { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'unsigned', items: [{ name: 'Tea', qty: 1, price: '300' }] });
+  let sign!: (signature: Hex) => void;
+  mount({ signImpl: () => new Promise((resolve) => { sign = resolve; }) });
+  vi.mocked(jpycForwarderFor).mockReturnValue(null);
+  const first = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+  act(() => first.result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
+  await waitFor(() => expect(signTypedData).toHaveBeenCalledOnce());
+  expect(loadOrderDelivery()).toEqual({ kind: 'empty' }); first.unmount();
+  await act(async () => sign(`0x${'ab'.repeat(65)}`));
+  const next = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+  await waitFor(() => expect(next.result.current.isRestoring).toBe(false));
+  expect(next.result.current.restoredIntent).toBeNull();
+  expect(loadOrderDelivery()).toEqual({ kind: 'empty' }); expect(fetchSpy).not.toHaveBeenCalled();
+});
+
+describe('A2c context and authorization slot isolation', () => {
+  async function saved() {
+    const { bindingFixture } = await import('../_helpers/orderBinding');
+    return bindingFixture('free', { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'old', items: [{ name: 'Tea', qty: 1, price: '300' }] });
+  }
+  it.each(['settled', 'receipt-pending'] as const)('changing the mounted checkout detaches a %s restored order', async (phase) => {
+    const { saveOrderDelivery, resolveOrderDelivery } = await import('@/lib/orderDelivery');
+    const f = await saved(); saveOrderDelivery(resolveOrderDelivery(f.record, `0x${'ab'.repeat(32)}`));
+    mount(); vi.useFakeTimers();
+    let receipt!: (result: { status: 'success' }) => void;
+    if (phase === 'receipt-pending') waitForTransactionReceipt.mockImplementationOnce(() => new Promise((resolve) => { receipt = resolve; }));
+    fetchSpy.mockResolvedValue(Response.json({ ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
+    const { result, rerender } = renderHook(({ orderId }) => useJpycEip3009Payment(jpycDep, {
+      restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, orderId },
+    }), { wrapper: makeWrapper(), initialProps: { orderId: 'old' } });
+    await vi.waitFor(async () => {
+      await act(async () => vi.advanceTimersByTimeAsync(3000));
+      expect(waitForTransactionReceipt).toHaveBeenCalledOnce();
+    }, { timeout: 2000, interval: 10 });
+    if (phase === 'settled') expect(result.current.data?.success).toBe(true);
+    rerender({ orderId: 'new' }); await flushStorageLoad();
+    if (phase === 'receipt-pending') await act(async () => receipt({ status: 'success' }));
+    expect(result.current.restoredIntent).toBeNull(); expect(result.current.data).toBeUndefined();
+    expect(result.current.orderDelivery).toBeNull(); expect(result.current.hasActiveIntent).toBe(false);
+    expect(result.current.isPending).toBe(false); expect(result.current.recoveryState).toBeNull();
+    expect(signTypedData).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+  it.each([
+    { merchant: '0x2222222222222222222222222222222222222222' }, { chainId: 1 },
+    { tokenAddress: '0x0000000000000000000000000000000000000def' }, { orderId: 'different' },
+    { webhook: 'https://third.example/hook' }, { webhook: `${location.origin}/api/order/notify?h=bob` },
+  ])('a mismatched %j context cannot recover completion through either storage slot', async (change) => {
+    const { saveOrderDelivery, resolveOrderDelivery } = await import('@/lib/orderDelivery');
+    const f = await saved(); const record = resolveOrderDelivery(f.record, `0x${'ab'.repeat(32)}`);
+    saveOrderDelivery(record); storeRelayIntent(record.intent); mount();
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, ...change } }), { wrapper: makeWrapper() });
+    await waitFor(() => expect(result.current.isRestoring).toBe(false));
+    expect(result.current.restoredIntent).toBeNull(); expect(result.current.data).toBeUndefined();
+    expect(result.current.orderDelivery).toBeNull(); expect(result.current.hasActiveIntent).toBe(false);
+    expect(result.current.backgroundOrderDeliveries).toEqual([record]);
+    expect(fetchSpy).not.toHaveBeenCalled(); expect(signTypedData).not.toHaveBeenCalled();
+  });
+  it('a new mobile order persists and pays without replacing another order’s pending delivery', async () => {
+    const { saveOrderDelivery, resolveOrderDelivery, loadOrderDeliveries } = await import('@/lib/orderDelivery');
+    const { canonicalOrder } = await import('@/lib/orderBind');
+    const f = await saved(); const old = resolveOrderDelivery(f.record, `0x${'ab'.repeat(32)}`);
+    saveOrderDelivery(old); mount(); vi.mocked(jpycForwarderFor).mockReturnValue(null);
+    const nextOrder = canonicalOrder({ ...f.order, orderId: 'new', handle: 'bob' });
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, orderId: 'new', webhook: `${location.origin}/api/order/notify?h=bob` } }), { wrapper: makeWrapper() });
+    await waitFor(() => expect(result.current.isRestoring).toBe(false));
+    act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: nextOrder }));
+    await waitFor(() => expect(result.current.data?.success).toBe(true));
+    expect(loadOrderDeliveries().records).toHaveLength(2);
+    expect(loadOrderDeliveries().records).toContainEqual(old);
+    expect(result.current.orderDelivery?.order.orderId).toBe('new');
+    expect(sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).toBeNull();
+    expect(signTypedData).toHaveBeenCalledOnce();
+  });
+  it('IP rejection removes the disk record across reload and a retry save failure never POSTS again', async () => {
+    const { ORDER_DELIVERY_KEY, loadOrderDelivery } = await import('@/lib/orderDelivery');
+    const f = await saved(); mount(); vi.mocked(jpycForwarderFor).mockReturnValue(null);
+    fetchSpy.mockResolvedValueOnce(Response.json({ error: 'ip_rate_limited' }, { status: 429 }));
+    const first = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+    act(() => first.result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n, order: f.order }));
+    await waitFor(() => expect(first.result.current.isError).toBe(true));
+    expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    const original = Storage.prototype.setItem;
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (key.startsWith(ORDER_DELIVERY_KEY)) throw new Error('quota');
+      original.call(this, key, value);
+    });
+    act(() => first.result.current.retryRelay());
+    await waitFor(() => expect(first.result.current.error?.message).toBe('order_binding_storage_unavailable'));
+    expect(fetchSpy).toHaveBeenCalledOnce(); expect(signTypedData).toHaveBeenCalledOnce();
+    write.mockRestore(); first.unmount();
+    const next = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
+    await waitFor(() => expect(next.result.current.isRestoring).toBe(false));
+    expect(next.result.current.restoredIntent).toBeNull(); expect(next.result.current.hasActiveIntent).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe('A2c background signed-order recovery', () => {
+  async function signed() {
+    const { bindingFixture } = await import('../_helpers/orderBinding');
+    const { saveOrderDelivery } = await import('@/lib/orderDelivery');
+    const f = bindingFixture('free', { chainId: jpycDep.chainId, tokenAddress: jpycDep.address, merchant: MERCHANT, handle: 'alice', orderId: 'old', items: [{ name: 'Tea', qty: 1, price: '300' }] });
+    const validBefore = String(Math.floor(Date.now() / 1000) + 300);
+    const record = { ...f.record, bind: { ...f.bind, validBefore }, intent: { ...f.record.intent, validBefore, issuedAt: Date.now() } };
+    expect(saveOrderDelivery(record)).toBe(true); mount(); vi.mocked(jpycForwarderFor).mockReturnValue(null); vi.useFakeTimers();
+    return record;
+  }
+  it('holds a new same-shop signature and resolves the old payment only into background delivery', async () => {
+    const record = await signed();
+    fetchSpy.mockImplementation(async () => Response.json({ ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, orderId: 'new' } }), { wrapper: makeWrapper() });
+    await flushStorageLoad();
+    act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n }));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(signTypedData).not.toHaveBeenCalled();
+    await vi.waitFor(async () => {
+      await act(async () => vi.advanceTimersByTimeAsync(3000));
+      expect(result.current.backgroundOrderDeliveries).toEqual([expect.objectContaining({ state: 'notify-pending', order: record.order })]);
+    }, { timeout: 2000, interval: 10 });
+    expect(result.current.data).toBeUndefined(); expect(result.current.restoredIntent).toBeNull();
+    expect(fetchSpy.mock.calls.every(([url]) => url === '/api/relay/jpyc/status')).toBe(true);
+    expect(signTypedData).not.toHaveBeenCalled(); vi.useRealTimers();
+  });
+  it.each(['expired', 'reverted'])('%s proof abandons a non-matching signed record', async (outcome) => {
+    await signed(); const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    if (outcome === 'expired') vi.advanceTimersByTime(300_000);
+    waitForTransactionReceipt.mockResolvedValue({ status: 'reverted' });
+    fetchSpy.mockImplementation(async () => Response.json(outcome === 'expired' ? { ok: true, state: 'unused' } : { ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, orderId: 'new' } }), { wrapper: makeWrapper() });
+    await vi.waitFor(async () => {
+      await act(async () => vi.advanceTimersByTimeAsync(9000));
+      expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    }, { timeout: 2000, interval: 10 });
+    expect(result.current.data).toBeUndefined(); expect(result.current.restoredIntent).toBeNull();
+    expect(result.current.orderPaymentHold).toBe(false);
+    expect(signTypedData).not.toHaveBeenCalled();
+    fetchSpy.mockResolvedValue(Response.json({ ok: true, txHash: `0x${'cd'.repeat(32)}` }));
+    act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n }));
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(signTypedData).toHaveBeenCalledOnce(); vi.useRealTimers();
+  });
+  it('unmounting a background receipt reader preserves the unresolved opening', async () => {
+    const record = await signed(); const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    let receipt!: (value: { status: 'success' }) => void;
+    waitForTransactionReceipt.mockImplementation(() => new Promise((resolve) => { receipt = resolve; }));
+    fetchSpy.mockResolvedValue(Response.json({ ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
+    const hook = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, orderId: 'new' } }), { wrapper: makeWrapper() });
+    await vi.waitFor(async () => {
+      await act(async () => vi.advanceTimersByTimeAsync(3000));
+      expect(waitForTransactionReceipt).toHaveBeenCalledOnce();
+    }, { timeout: 2000, interval: 10 });
+    hook.unmount(); await act(async () => receipt({ status: 'success' }));
+    expect(loadOrderDelivery()).toEqual({ kind: 'ready', record });
+    expect(signTypedData).not.toHaveBeenCalled(); vi.useRealTimers();
+  });
+});

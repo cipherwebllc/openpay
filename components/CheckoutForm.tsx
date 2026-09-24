@@ -92,6 +92,8 @@ import {
   buildJpycRelaySignPreview,
   buildJpycRecoverSignPreview,
 } from '@/lib/signPreview';
+import type { CanonicalOrder } from '@/lib/orderBind';
+import { matchesOrderDeliveryContext } from '@/lib/orderDeliveryContext';
 import { checkoutIntentContextFingerprint } from '@/lib/checkoutIntentContext';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
@@ -136,12 +138,31 @@ async function postCheckoutWebhook(
   if (!retryOrderProcessing) return response;
   for (const delayMs of ORDER_NOTIFY_PROCESSING_RETRY_MS) {
     if (response.status !== 409) return response;
+    // A non-JSON 409 must not trigger blind retries of reserved/rejected orders.
+    const error = (await response.clone().json().catch(() => null))?.error;
+    if (error !== 'processing') return response;
     // 直前 mount の order claim が処理中でも、fee 成功通知まで 409 で失われ受注/未収状態が
     // 固着する波及を断つ。既存 route の 409 契約は変えず、同じ byte の notify だけを再試行する。
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     response = await fetch(url, init);
   }
   return response;
+}
+
+function isOwnOrderNotifyUrl(webhook: string, origin: string): boolean {
+  try {
+    const url = new URL(webhook);
+    return url.origin === origin && url.pathname === '/api/order/notify';
+  } catch {
+    // An invalid callback must not make unrelated checkout pages display order-recovery warnings.
+    return false;
+  }
+}
+
+function isRetryableOrderNotify(status: number, body: { error?: string; bindingConflict?: boolean } | null): boolean {
+  if (body?.bindingConflict === true) return false;
+  return status >= 500 || status === 429 ||
+    (status === 409 && body?.error === 'processing') || (status === 422 && body?.error === 'tx_not_found');
 }
 
 export function CheckoutForm({ params }: { params: CheckoutParams }) {
@@ -152,6 +173,21 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // 使う。flag OFF では生成せず null = payload 無変化・リンク非表示 (byte-identical)。
   const [statusToken, setStatusToken] = useState<string | null>(null);
   const [orderNotifyTooOld, setOrderNotifyTooOld] = useState(false);
+  const boundOrderRef = useRef<CanonicalOrder | null>(null);
+  const boundOrderPreparingRef = useRef(false);
+  const [bindingStorageError, setBindingStorageError] = useState(false);
+  const [bindingInputError, setBindingInputError] = useState(false);
+  const [boundNotifyRetry, setBoundNotifyRetry] = useState(0);
+  const [boundNotifyRetryable, setBoundNotifyRetryable] = useState(false);
+  const [boundNotifyAcknowledged, setBoundNotifyAcknowledged] = useState(false);
+  const boundNotifiedRef = useRef<string | null>(null);
+  const previousNotificationsRef = useRef(new Map<string, 'pending' | 'staff' | 'done'>());
+  const previousNotificationMountedRef = useRef(true);
+  useEffect(() => {
+    previousNotificationMountedRef.current = true;
+    return () => { previousNotificationMountedRef.current = false; };
+  }, []);
+  const [previousOrderNotice, setPreviousOrderNotice] = useState<'pending' | 'staff' | null>(null);
   const statusTokenRef = useRef<string | null>(null);
   const router = useRouter();
   const [modeOverride, setModeOverride] = useState<'standard' | null>(null);
@@ -201,6 +237,24 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   //   - recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (gasMode で顧客上乗せ/店主吸収)。
   //     未設定は free (OpenPay 負担)。
   //   - USDC ガスレスが Circle に解決される場合は surcharge 込み quote + permit allowance。
+  const totalWei = useMemo(
+    () => calcCheckoutTotal(params.items, deployment.decimals),
+    [params.items, deployment.decimals],
+  );
+  const mobileFeeKind: MobileOrderFeeKind | null =
+    env.enableMobileOrderFee &&
+    (params.feeKind === 'storefront' || params.feeKind === 'preorder')
+      ? params.feeKind
+      : null;
+  const orderTotalValue = mobileFeeKind
+    ? mobileOrderBreakdown(totalWei, mobileFeeKind, params.feePayer).customerPays : totalWei;
+  const orderContext = useMemo(() => ({ merchant: params.to, chainId: deployment.chainId,
+    tokenAddress: deployment.address, webhook: params.webhook, orderId: params.orderId, totalValue: orderTotalValue }),
+  [params.to, deployment.chainId, deployment.address, params.webhook, params.orderId, orderTotalValue]);
+  const relay = useJpycEip3009Payment(deployment, { restoreOrderDelivery: true, orderContext });
+  const matchingDelivery = relay.orderDelivery && matchesOrderDeliveryContext(
+    relay.orderDelivery.order, orderContext, typeof window === 'undefined' ? '' : window.location.origin, relay.orderDelivery.intent,
+  ) ? relay.orderDelivery : null;
   const resolvedRoute = resolvePaymentRoute({
     isStandard:
       params.mode === 'standard' ||
@@ -218,11 +272,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   });
   // submit gesture で選ばれた経路を attempt 単位で固定し、relay POST 中に degraded banner の
   // standard 切替が競合しても進行中の money-path を差し替えない。
-  const route = attemptRouteRef.current ?? resolvedRoute;
+  const route: PaymentRoute = attemptRouteRef.current ??
+    (matchingDelivery && relay.restoredIntent
+      ? { kind: 'relay', recover: relay.restoredIntent.routeKind === 'recover' } : resolvedRoute);
   const isStandard = isStandardRoute(route);
   const useRelay = isRelayRoute(route);
   const isErc20Paymaster = !isStandard && paymasterMode === 'erc20';
-  const relay = useJpycEip3009Payment(deployment);
   // B1 Layer B: relay 経路でのみ relayer の事前 (preflight) 健全性を polling する。degraded なら
   // 署名 *前* に「通常決済へ切替」を先回り案内する (Layer A は submit 失敗 *後* の reactive な導線)。
   // fail-open (読込中/error は degraded:false) なので advisory に徹し決済実行には影響しない。
@@ -243,11 +298,6 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // customer) は mode/feePayer から確定し effectiveGasMode を上書きする (顧客上乗せ preorder では
   // recover でも customer が必要)。'register' (レジ) は下記 isRegisterStandardFee で別扱い (standard
   // のみ)。feeKind 無し・/pay・/tip・通常 checkout は従来動作のまま (一切不変)。
-  const mobileFeeKind: MobileOrderFeeKind | null =
-    env.enableMobileOrderFee &&
-    (params.feeKind === 'storefront' || params.feeKind === 'preorder')
-      ? params.feeKind
-      : null;
   const isMobileFee = mobileFeeKind !== null;
   // 課金 flag とは独立に、@handle 注文の元 storefront mode を署名前 admission へ渡す。
   // feeKind は MobileOrderView が常に付与し、課金自体は上の mobileFeeKind gate が決める。
@@ -279,10 +329,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   const activeQuote = isCircle ? circleQuote : gasQuote;
   const circlePermitAmount = isCircle ? circleQuote.data?.permitAmount : undefined;
 
-  const totalWei = useMemo(
-    () => calcCheckoutTotal(params.items, deployment.decimals),
-    [params.items, deployment.decimals],
-  );
+
 
   // レジ (店頭POS) システム利用料: standard 経路 (JPYC) で recover の OpenPay利用料 % を店舗負担で
   // 課金する (relay 経路は既存 recover が徴収するので register は standard のみ追加)。7月前
@@ -462,6 +509,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     breakdown.customerPays > 0n &&
     !insufficientBalance &&
     !paymentFlowPending &&
+    !relay.orderPaymentHold &&
     gasQuoteReady &&
     !merchantUnderflow &&
     !settledNoRetry &&
@@ -714,10 +762,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       mode: completion.mode,
       ...completion.hashFields,
       merchant: params.to,
-      orderId: params.orderId,
+      orderId: boundOrderRef.current?.orderId ?? params.orderId,
       token: params.token,
       chain: chainSlug,
     });
+
+    if (useRelay && boundOrderRef.current) return;
 
     // webhook 失敗 (CORS 等) は logger.warn のみ。自社 notify の期限外だけはスタッフへの確認を案内する。
     if (params.webhook) {
@@ -876,7 +926,103 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     deployment.chainId,
     deployment.decimals,
     restoredCheckoutCompletion,
+    useRelay,
+    relay.orderDelivery,
   ]);
+
+  // Bare public relay metadata cannot establish an order context. Only a matching delivery
+  // below may show order-registration assistance; an ordinary /pay recovery is not an order.
+  useEffect(() => {
+    const notices = previousNotificationsRef.current;
+    const updateNotice = () => {
+      // A second recovered order may change the list while the first POST is outstanding.
+      // Keep its notice current for this mount without updating an unmounted checkout.
+      if (!previousNotificationMountedRef.current) return;
+      const values = [...notices.values()];
+      setPreviousOrderNotice(values.includes('staff') ? 'staff' : values.includes('pending') ? 'pending' : null);
+    };
+    for (const record of relay.backgroundOrderDeliveries ?? []) {
+      // Only validated, already confirmed records may notify in the background. Signed/unknown
+      // records are resolved read-only by the hook; none of these records becomes page completion.
+      if (record.state !== 'notify-pending' || !record.notifyBody) continue;
+      const key = `${record.intent.nonce}:${record.txHash}`;
+      if (notices.has(key)) continue;
+      notices.set(key, 'pending');
+      const url = new URL('/api/order/notify', window.location.origin);
+      url.searchParams.set('h', record.order.handle);
+      void postCheckoutWebhook(url.toString(), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: record.notifyBody, keepalive: true,
+      }, true).then(async (res) => {
+        // Missing acknowledgement cannot be treated as registration of a previous order.
+        const body = await res.json().catch(() => null);
+        const storage = await import('@/lib/orderDelivery');
+        if (res.ok && body?.ok === true && body?.bindingConflict !== true) {
+          notices.set(key, storage.acknowledgeOrderDelivery(record) ? 'done' : 'pending');
+        } else if (!isRetryableOrderNotify(res.status, body)) {
+          storage.terminateOrderDelivery(record);
+          notices.set(key, 'staff');
+        }
+        updateNotice();
+      }).catch(() => {
+        // Background network/storage chunk failures retain the opening without blocking this payment.
+        updateNotice();
+      });
+    }
+    updateNotice();
+  }, [relay.backgroundOrderDeliveries]);
+
+  // Restored notification is allowed only for the validated saved authorization/order pair.
+  // The current URL contributes neither order fields nor destination; secrets stay on our origin.
+  useEffect(() => {
+    const record = relay.restoredIntent ? matchingDelivery : relay.orderDelivery;
+    if (!record || record.state !== 'notify-pending' || !record.notifyBody ||
+      !relay.data?.success || relay.data.txHash !== record.txHash) return;
+    const key = `${record.intent.nonce}:${record.txHash}:${boundNotifyRetry}`;
+    if (boundNotifiedRef.current === key) return;
+    boundNotifiedRef.current = key;
+    setBoundNotifyRetryable(false);
+    const url = new URL('/api/order/notify', window.location.origin);
+    url.searchParams.set('h', record.order.handle);
+    void postCheckoutWebhook(url.toString(), {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: record.notifyBody, keepalive: true,
+    }, true).then(async (res) => {
+      // A non-JSON response is not an acknowledgement; its HTTP status still determines retryability.
+      const body = await res.json().catch(() => null);
+      if (res.ok && body?.ok === true && body?.bindingConflict !== true) {
+        const { acknowledgeOrderDelivery } = await import('@/lib/orderDelivery');
+        if (!acknowledgeOrderDelivery(record)) setBindingStorageError(true);
+        setBoundNotifyAcknowledged(true);
+        setOrderNotifyTooOld(false);
+        statusTokenRef.current = record.order.statusToken || null;
+        setStatusToken(record.order.statusToken || null);
+        try {
+          window.sessionStorage.removeItem(`${ORDER_MEMO_STORAGE_PREFIX}${record.order.orderId}`);
+        } catch {
+          // Memo cleanup failure must not roll back an acknowledged order/payment.
+        }
+        if (!relay.restoredIntent && params.successUrl) setRedirectIn(SUCCESS_REDIRECT_DELAY_MS / 1000);
+        return;
+      }
+      const terminal = !isRetryableOrderNotify(res.status, body);
+      if (terminal) {
+        const { terminateOrderDelivery } = await import('@/lib/orderDelivery');
+        if (!terminateOrderDelivery(record)) setBindingStorageError(true);
+      }
+      // A terminal delivery shows assistance on this mount only; it must not hijack later payments.
+      // A notification rejection is never a failed payment or permission to sign again.
+      setOrderNotifyTooOld(true);
+      setRedirectIn(null);
+      setBoundNotifyRetryable(!terminal);
+      logger.warn('checkout.webhook.non_ok', { status: res.status, statusText: res.statusText });
+    }).catch(() => {
+      // Lost notification response retains the same opening for safe replay, independently of payment.
+      setOrderNotifyTooOld(true);
+      setRedirectIn(null);
+      setBoundNotifyRetryable(true);
+      logger.warn('checkout.webhook.failed', { reason: 'order_notify_network' });
+    });
+  }, [relay.orderDelivery, relay.data, relay.restoredIntent, matchingDelivery, boundNotifyRetry, params.successUrl]);
 
   // standard の merchant leg が確定した時点で、独立 fee leg の wallet 操作を待たず受注を届ける。
   // 第三者 webhook の成功契約は広げず、OpenPay 自身の same-origin `/api/order/notify` だけを
@@ -1168,7 +1314,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   }, [redirectIn]);
 
   function doRedirect() {
-    if (!params.successUrl || !completion || restoredCheckoutCompletion || orderNotifyTooOld) return;
+    if (!params.successUrl || !completion || restoredCheckoutCompletion || orderNotifyTooOld ||
+      (boundOrderRef.current && !boundNotifyAcknowledged)) return;
     const u = new URL(params.successUrl);
     for (const [k, v] of Object.entries(completion.redirectQuery)) {
       u.searchParams.set(k, v);
@@ -1236,6 +1383,43 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       // admission 待機中に接続・chain・残高等が変わっていれば、stale な submit を止める。
       if (!paymentReadyRef.current) return;
     }
+    let order: CanonicalOrder | undefined;
+    boundOrderRef.current = null;
+    setBindingInputError(false);
+    setBindingStorageError(false);
+    setBoundNotifyAcknowledged(false);
+    if (useRelay && params.webhook) {
+      // The lazy binding chunk introduces an await before mutate; block repeated clicks during
+      // that gap so a slow chunk cannot produce multiple authorizations for one submit gesture.
+      if (boundOrderPreparingRef.current) return;
+      boundOrderPreparingRef.current = true;
+      try {
+        const webhook = new URL(params.webhook);
+        if (webhook.origin === window.location.origin && webhook.pathname === '/api/order/notify') {
+          if (webhook.searchParams.getAll('h').length !== 1) throw new Error('invalid_handle');
+          const orderId = params.orderId || generateStatusToken().slice(0, 16);
+          // Unlike advisory standard metadata, a bound memo must be read before signing or stop.
+          const customerMemo = window.sessionStorage.getItem(`${ORDER_MEMO_STORAGE_PREFIX}${orderId}`) ?? '';
+          const { canonicalOrder } = await import('@/lib/orderBind');
+          // A slow chunk must not carry a disconnected/switched wallet into signing.
+          if (!paymentReadyRef.current) return;
+          order = canonicalOrder({ chainId: deployment.chainId, tokenAddress: deployment.address,
+            merchant: params.to, handle: webhook.searchParams.get('h'), orderId, items: params.items,
+            description: params.description, pickupAt: params.pickupAt, customerMemo,
+            statusToken: env.enableOrderPickup ? generateStatusToken() : '' });
+          boundOrderRef.current = order;
+        }
+      } catch (error) {
+        // Storage/invalid own-origin context must not broadcast an order with a missing opening.
+        if (error instanceof Error && (error.message === 'invalid_handle' || error.message === 'order_binding_mismatch')) {
+          setBindingInputError(true);
+        } else setBindingStorageError(true);
+        return;
+      } finally {
+        boundOrderPreparingRef.current = false;
+      }
+    }
+    setBindingStorageError(false);
     attemptRouteRef.current = route;
     // webhook/記録は「送金した瞬間の額」を報告する (成功描画時の live breakdown は
     // gas quote 再取得等で動きうるため、submit 時点の snapshot を真実とする)。
@@ -1272,6 +1456,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       relay.mutate({
         merchant: params.to,
         value: totalWei,
+        ...(order ? { order } : {}),
         gasMode: effectiveGas,
         // モバイル注文 (storefront/preorder) のときだけ feeKind を載せる (server が定数表から % を
         // 再計算・on-chain 強制)。register(レジ) は relay では既存 recover が徴収するので渡さない。
@@ -1827,6 +2012,38 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         />
       )}
 
+      {relay.previousPaymentPending && (
+        <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+          {t(relay.previousPaymentSameMerchant
+            ? relay.orderPaymentHold ? 'previousPaymentConfirming' : 'previousPaymentUnconfirmed'
+            : 'previousPaymentConfirmingOther')}
+        </p>
+      )}
+      {previousOrderNotice && !(previousOrderNotice === 'pending' && relay.previousPaymentSameMerchant) && (
+        <p role="status" className="rounded-lg bg-slate-50 p-3 text-xs text-slate-800">
+          {t(previousOrderNotice === 'staff' ? 'previousOrderNotifyStaff' : 'previousOrderNotifyPending')}
+        </p>
+      )}
+      {(bindingStorageError || relay.error?.message === 'order_binding_storage_unavailable') && !relay.data?.success && (
+        <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          {t('orderBindingStorageUnavailable')}
+        </p>
+      )}
+      {bindingInputError && (
+        <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          {t('urlInvalidTitle')}
+        </p>
+      )}
+      {relay.orderDeliveryLoadError && useRelay && params.webhook && origin && isOwnOrderNotifyUrl(params.webhook, origin) && (
+        <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          {t('orderBindingRestoreUnavailable')}
+        </p>
+      )}
+      {boundNotifyRetryable && (
+        <button type="button" className="rounded-xl border border-amber-400 p-3 text-sm font-semibold" onClick={() => setBoundNotifyRetry((v) => v + 1)}>
+          {t('retryOrderNotify')}
+        </button>
+      )}
       {orderNotifyTooOld && (
         <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           {t('orderNotifyTooOld')}
@@ -1884,8 +2101,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
                 />
               </>
             )}
-            {!restoredCheckoutCompletion && params.orderId && (
-              <ResultRow label={t('orderIdLabel')} value={params.orderId} />
+            {((boundOrderRef.current ?? matchingDelivery?.order)?.orderId || (!restoredCheckoutCompletion && params.orderId)) && (
+              <ResultRow label={t('orderIdLabel')} value={(boundOrderRef.current ?? matchingDelivery?.order)?.orderId ?? params.orderId!} />
             )}
           </dl>
 
@@ -1915,7 +2132,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             />
           </div>
 
-          {!restoredCheckoutCompletion && params.successUrl && !orderNotifyTooOld && (
+          {!restoredCheckoutCompletion && params.successUrl && !orderNotifyTooOld &&
+            (!boundOrderRef.current || boundNotifyAcknowledged) && (
             <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs">
                 {redirectIn !== null && redirectIn > 0

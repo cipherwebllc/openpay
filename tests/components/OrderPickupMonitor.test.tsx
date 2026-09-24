@@ -183,3 +183,12 @@ describe('OrderPickupMonitor', () => {
     ).toBeInTheDocument();
   });
 });
+
+it('A2c customer pickup display remains number-only for unverified orders', () => {
+  feedHold.data = [order('CHECK1', { ready: true, bindingMissing: true })];
+  renderWithIntl(<OrderPickupMonitor />);
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.queryByText(/暗号学的/)).toBeNull();
+  expect(screen.getByRole('listitem')).toHaveTextContent(/^CHECK1$/);
+  expect(screen.getByText('CHECK1')).toBeInTheDocument();
+});

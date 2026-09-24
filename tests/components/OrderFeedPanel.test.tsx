@@ -310,3 +310,12 @@ describe('OrderFeedPanel', () => {
     expect(screen.queryByText('まだ受注はありません。')).toBeNull();
   });
 });
+
+it('A2c missing binding warning is independent of amount and fee badges', async () => {
+  envHold.enableOrderRelay = true;
+  h.orders = [{ ...order, bindingMissing: true }, { ...order, orderId: 'other', txHash: `0x${'cd'.repeat(32)}` }];
+  render();
+  expect(await screen.findByRole('alert')).toHaveTextContent('支払いと注文の結びつき未確認 — 受け渡し前に手動確認が必要');
+  expect(screen.getAllByText(/暗号学的/)).toHaveLength(1);
+  expect(screen.getByText(/暗号学的/)).toHaveClass('text-slate-800', 'bg-slate-50');
+});

@@ -7,6 +7,7 @@
 // react-query を使うため、親 (create ページ) は env.enableOrderRelay でこのパネルの**マウント自体**を
 // ゲートする (OFF の単体テストで QueryClient を要求しない)。設計: plans/swift-puzzling-sky.md。
 
+import { OrderBindingNotice, OrderBindingScope } from '@/components/OrderBindingNotice';
 import { useMemo, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -137,6 +138,7 @@ export function OrderFeedPanel() {
                 : 'border-slate-200 bg-white'
         }`}
       >
+        <OrderBindingNotice order={o} />
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             {/* 受付番号 (受け渡し照合用・客の完了画面と同じコード)。 */}
@@ -260,6 +262,7 @@ export function OrderFeedPanel() {
         <div>
           <h2 className="text-lg font-semibold text-slate-800">{t('heading')}</h2>
           <p className="mt-1 text-sm text-slate-500">{t('subheading')}</p>
+          <OrderBindingScope />
           {/* 完了フローのヒント。飲食 (厨房/ホール) を使う場合は配膳済み=対応済みを案内。 */}
           <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
             {env.enableOrderFulfillment ? t('completionHintRestaurant') : t('completionHintRetail')}

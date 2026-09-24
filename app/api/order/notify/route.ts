@@ -4,6 +4,7 @@
 // (3) on-chain 検証 (from 非依存・to=merchant への実着金)、(4) txHash 冪等 (1 決済 1 注文) で守る。
 // 受注は **advisory**: 実着金額を権威保存・商品/テーブルは顧客申告。flag OFF は 404 (本番 inert)。
 // 設計: plans/swift-puzzling-sky.md。
+import { receiptHasRelayEvidence, verifyOrderBinding } from '@/lib/order/orderBindingVerify';
 import { recordMetric } from '@/lib/metrics';
 import { NextResponse, after } from 'next/server';
 import { createPublicClient, getAddress, isAddress, type Address, type Hex } from 'viem';
@@ -170,7 +171,8 @@ async function reconcileCollectedStandardFee(args: {
     // 保存時に server が storefront 設定 + on-chain merchant leg から確定した obligation を使う。
     // 後日の mode/feePayer/flag 変更で既存未収が減額・回収不能へ波及するのを断つ。旧/壊れレコードで
     // expected が無い場合は badge を消さず安全側 no-op（body や現在設定から推測して補完しない）。
-    if (!storedOrder.feeExpectedAmount) return;
+    // Bound relay orders cannot borrow a later standard fee pair; preserve their verified commitment.
+    if (!storedOrder.feeExpectedAmount || storedOrder.bindingDigest) return;
     const merchantValue = BigInt(storedOrder.amount);
     const expectedFee = BigInt(storedOrder.feeExpectedAmount);
     const alternateFee = storedOrder.feeExpectedAmountAlt
@@ -215,7 +217,12 @@ async function reconcileCollectedStandardFee(args: {
         }
         return;
       }
-      if (args.checkReservation && await receiptHasAgentReservation(args.chainId, args.token, result.receiptLogs) !== 'clear') return;
+      if (args.checkReservation) {
+        // Classify inside after(): relay evidence cannot borrow a standard fee pair, and RPC
+        // latency/failure must not change the historical duplicate/processing response.
+        if (receiptHasRelayEvidence(args.chainId, args.token, result.receiptLogs)) return;
+        if (await receiptHasAgentReservation(args.chainId, args.token, result.receiptLogs) !== 'clear') return;
+      }
       verifiedObligation = {
         merchantAmount: storedOrder.amount,
         feeAmount: storedOrder.feeExpectedAmount,
@@ -383,6 +390,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   // ステージ1 = pending クレーム (短 TTL)。検証中に maxDuration タイムアウトで done 昇格前に強制終了しても
   // pending は ORDER_PENDING_TTL_SEC で自然失効する → 正規注文が最大 72h ロックされ消失する事故 (P1-F) を断つ。
   const usedKey = orderUsedKey(chainId, txHash);
+  let existingMarker: 'done' | 'pending' | null = null;
   if (isKvConfigured()) {
     const claim = await kvSet(usedKey, ORDER_MARK_PENDING, {
       nx: true,
@@ -393,17 +401,19 @@ export async function POST(req: Request): Promise<NextResponse> {
       // nx 失敗 = 既存マーカーあり。done (恒久) と pending (検証中) を読み分ける。
       const existing = await kvGet(usedKey);
       if (!existing.ok) return fail('kv_error', 503);
-      // done = 検証 + 保存済の恒久ブロック → 同一 txHash の無期限リプレイを永久拒否 (P1-E)。1 決済 1 注文。
-      if (existing.value === ORDER_MARK_DONE) {
-        queueFeeReconciliation(false, true);
-        return NextResponse.json({ ok: true, duplicate: true });
+      existingMarker = existing.value === ORDER_MARK_DONE ? 'done' : 'pending';
+      // Bind-less duplicates retain their historical immediate response under either rollout flag.
+      // The after() task verifies reservation and relay evidence before any standard fee claim.
+      if (!Object.hasOwn(o, 'bind')) {
+        queueFeeReconciliation(existingMarker === 'pending', true);
+        return existingMarker === 'done'
+          ? NextResponse.json({ ok: true, duplicate: true }) : fail('processing', 409);
       }
-      // pending 中 (または直前に失効/解放) = **まだ done でない** → 検証成功前の**偽 duplicate を返さない** (P2)。
-      // 別 POST が検証中/リトライ可能な「処理中」を表す (client は pending 失効後に同一 txHash を再送可能)。
-      queueFeeReconciliation(true, true);
-      return fail('processing', 409);
     }
   }
+
+  // A rejected replay must not delete another request's pending/done marker.
+  const releaseClaim = async () => { if (!existingMarker) await kvDel(usedKey); };
 
   // 受注保存の確定フラグ (kvLpush 成功で true)。catch の解放判定に使う: 保存確定後は pending/done を
   // 消さない (done 昇格済を消すと同一 tx が二重注文になり得るため・下記 catch 参照)。
@@ -428,63 +438,94 @@ export async function POST(req: Request): Promise<NextResponse> {
 
     if (!result.ok) {
       // 検証不成立 → クレーム解放。rpc_error は retryable(503)・それ以外は顧客起因(422)。
-      await kvDel(usedKey);
+      await releaseClaim();
       logger.warn('order.notify.verify_failed', { reason: result.reason, chainId, merchant });
       return fail(result.reason, result.reason === 'rpc_error' ? 503 : 422);
     }
 
-    // optional な blockNumber の欠落で getBlock が latest を返し、過去の着金が鮮度検査を
-    // 素通りする波及を断つ。receipt の block が特定できるまで再試行可能な検証失敗にする。
-    if (result.blockNumber === undefined) {
-      await kvDel(usedKey);
-      logger.warn('order.notify.verify_failed', { reason: 'rpc_error', chainId, merchant });
-      return fail('rpc_error', 503);
-    }
+    if (!existingMarker) {
+      // optional な blockNumber の欠落で getBlock が latest を返し、過去の着金が鮮度検査を
+      // 素通りする波及を断つ。receipt の block が特定できるまで再試行可能な検証失敗にする。
+      if (result.blockNumber === undefined) {
+        await releaseClaim();
+        logger.warn('order.notify.verify_failed', { reason: 'rpc_error', chainId, merchant });
+        return fail('rpc_error', 503);
+      }
 
-    let blockTimestamp: bigint;
-    try {
-      const block = await publicClient.getBlock({ blockNumber: result.blockNumber });
-      blockTimestamp = block.timestamp;
-    } catch {
-      // block RPC 障害が未検証の受理や pending claim の居座りへ波及しないよう、既存の再試行契約へ戻す。
-      await kvDel(usedKey);
-      logger.warn('order.notify.verify_failed', { reason: 'rpc_error', chainId, merchant });
-      return fail('rpc_error', 503);
-    }
-    const paymentAgeMs = BigInt(Date.now()) - blockTimestamp * 1000n;
-    // block が server 時計より大きく未来 = server 側の時計ずれ。本物の着金を恒久拒否 (422) へ
-    // 波及させないよう、再試行可能な検証失敗に倒す。
-    if (paymentAgeMs < -ORDER_PAYMENT_FUTURE_TOLERANCE_MS) {
-      await kvDel(usedKey);
-      logger.warn('order.notify.verify_failed', {
-        reason: 'clock_skew', chainId, merchant, ageSec: Number(paymentAgeMs) / 1000,
-      });
-      return fail('rpc_error', 503);
-    }
-    if (paymentAgeMs > ORDER_PAYMENT_MAX_AGE_MS) {
-      await kvDel(usedKey);
-      logger.warn('order.notify.verify_failed', {
-        reason: 'tx_too_old', chainId, merchant, ageSec: Number(paymentAgeMs) / 1000,
-      });
-      return fail('tx_too_old', 422);
+      let blockTimestamp: bigint;
+      try {
+        const block = await publicClient.getBlock({ blockNumber: result.blockNumber });
+        blockTimestamp = block.timestamp;
+      } catch {
+        // block RPC 障害が未検証の受理や pending claim の居座りへ波及しないよう、既存の再試行契約へ戻す。
+        await releaseClaim();
+        logger.warn('order.notify.verify_failed', { reason: 'rpc_error', chainId, merchant });
+        return fail('rpc_error', 503);
+      }
+      const paymentAgeMs = BigInt(Date.now()) - blockTimestamp * 1000n;
+      // block が server 時計より大きく未来 = server 側の時計ずれ。本物の着金を恒久拒否 (422) へ
+      // 波及させないよう、再試行可能な検証失敗に倒す。
+      if (paymentAgeMs < -ORDER_PAYMENT_FUTURE_TOLERANCE_MS) {
+        await releaseClaim();
+        logger.warn('order.notify.verify_failed', {
+          reason: 'clock_skew', chainId, merchant, ageSec: Number(paymentAgeMs) / 1000,
+        });
+        return fail('rpc_error', 503);
+      }
+      if (paymentAgeMs > ORDER_PAYMENT_MAX_AGE_MS) {
+        await releaseClaim();
+        logger.warn('order.notify.verify_failed', {
+          reason: 'tx_too_old', chainId, merchant, ageSec: Number(paymentAgeMs) / 1000,
+        });
+        return fail('tx_too_old', 422);
+      }
     }
 
     // Reuse the successful transfer verification's receipt, after A2a freshness checks.
     const reservation = await receiptHasAgentReservation(chainId, deployment.address, result.receiptLogs);
     if (reservation !== 'clear') {
-      await kvDel(usedKey);
+      await releaseClaim();
       return fail(reservation === 'reserved' ? 'reserved_order' : 'storage_unavailable', reservation === 'reserved' ? 409 : 503);
     }
 
-    const orderId =
+    const binding = verifyOrderBinding({
+      body: o, handle, chainId, token: deployment.address, merchant, logs: result.receiptLogs,
+      ...(env.feeReceiverConfigured ? { feeReceiver: getAddress(env.feeReceiver) } : {}),
+    });
+    if (!binding.ok) {
+      await releaseClaim();
+      return fail('order_binding_mismatch', 422);
+    }
+    if (existingMarker) {
+      if (existingMarker === 'done' && binding.order) {
+        // OFF's conflict warning is limited to the capped list; a trimmed unbound winner is undetectable here.
+        const list = await kvLrange(orderListKey(merchant), 0, ORDER_LIST_MAX - 1);
+        if (!list.ok) return fail('kv_error', 503);
+        const conflict = (list.value ?? []).some((raw) => {
+          const stored = parseStoredOrder(raw);
+          return stored?.chainId === chainId && stored.txHash.toLowerCase() === txHash.toLowerCase() && stored.bindingMissing;
+        });
+        // OFF is observation only: never acknowledge the victim's opening as a registered order
+        // when an unbound notification already won the transaction claim.
+        if (conflict) return NextResponse.json({ ok: true, duplicate: true, bindingConflict: true });
+      }
+      // Only standard merchant/fee pairs are eligible; recover inline fees come from Settled.
+      if (binding.kind === 'standard') queueFeeReconciliation(existingMarker === 'pending', true);
+      return existingMarker === 'done'
+        ? NextResponse.json({ ok: true, duplicate: true }) : fail('processing', 409);
+    }
+    const receiptValue = binding.value ?? result.value;
+    const snapshot = binding.order;
+
+    const orderId = snapshot?.orderId ?? (
       typeof o.orderId === 'string' && o.orderId.length > 0
         ? o.orderId.slice(0, ORDER_ID_MAX)
-        : txHash; // orderId 無し時は txHash で代替 (一意)
-    const items = sanitizeOrderItems(o.items);
+        : txHash); // orderId 無し時は txHash で代替 (一意)
+    const items = snapshot?.items ?? sanitizeOrderItems(o.items);
     const declaredMinor = declaredItemsTotalMinor(items, deployment.decimals);
     const amountAdvisory = evaluateOrderAmount(
       declaredMinor,
-      result.value,
+      receiptValue,
       relayGasFeeValue(chainId),
       AMOUNT_ADVISORY_BPS_CAP,
     );
@@ -492,8 +533,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     const order: StoredOrder = {
       orderId,
       items,
-      table: sanitizeTable(o.description), // checkout description = テーブル番号ラベル (店内のみ)
-      amount: result.value.toString(), // **実着金 (権威)** — recover は total−fee, free は total
+      table: snapshot ? snapshot.description || null : sanitizeTable(o.description), // checkout description = テーブル番号ラベル (店内のみ)
+      amount: receiptValue.toString(), // **実着金 (権威)** — recover は total−fee, free は total
       txHash,
       chainId,
       // **オンチェーン検証していない顧客申告値** (feeVerify は from を返さない・表示専用)。形式のみ検証。P1-D
@@ -501,11 +542,13 @@ export async function POST(req: Request): Promise<NextResponse> {
       ts: Date.now(),
       fulfilled: false,
     };
+    if (binding.bindingMissing) order.bindingMissing = true;
+    if (binding.digest) order.bindingDigest = binding.digest;
     if (amountAdvisory.mismatch) order.amountMismatch = true;
     if (amountAdvisory.unchecked) order.amountUnchecked = true;
     const feeObligation = standardFeeObligationFromReceipt({
-      receiptValue: result.value,
-      sameSourceFeeValue: result.sameSourceFeeValue,
+      receiptValue,
+      sameSourceFeeValue: binding.sameSourceFeeValue ?? result.sameSourceFeeValue,
       config: feeConfig,
     });
     // 店舗送金確定後の fee leg 失敗が受注欠落へ波及しないよう未収状態を additive に記録する。
@@ -520,14 +563,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     // 受取予定時刻 (任意・preorder・顧客申告=advisory 表示用・items/table と同じ寛容さ)。正の有限数かつ
     // **near-future 窓内** (now-1h 〜 now+14d) のみ保存。スロット/lastOrder との厳密照合はしない (advisory)
     // が、年 9999 等の極端値で受注ボードの表示を汚さないよう sane 窓外は drop する (clock skew に -1h)。
-    if (typeof o.pickupAt === 'number' && Number.isFinite(o.pickupAt)) {
-      const at = Math.floor(o.pickupAt);
+    const pickupAt = snapshot?.pickupAt ?? o.pickupAt;
+    if (typeof pickupAt === 'number' && Number.isFinite(pickupAt)) {
+      const at = Math.floor(pickupAt);
       const nowMs = Date.now();
       if (at > nowMs - 60 * 60 * 1000 && at < nowMs + 14 * 24 * 60 * 60 * 1000) {
         order.pickupAt = at;
       }
     }
-    const customerMemo = sanitizeOrderMemo(o.customerMemo);
+    const customerMemo = snapshot?.customerMemo ?? sanitizeOrderMemo(o.customerMemo);
     if (customerMemo) order.customerMemo = customerMemo;
 
     if (isKvConfigured()) {
@@ -558,7 +602,7 @@ export async function POST(req: Request): Promise<NextResponse> {
           )
         : await kvLpush(key, serializeOrder(order));
       if (!save.ok) {
-        await kvDel(usedKey); // 保存できなければ pending クレームも戻す (リトライで再投入可能に)
+        await releaseClaim(); // 保存できなければ pending クレームも戻す (リトライで再投入可能に)
         return fail('kv_error', 503);
       }
       if (feeObligation?.collectedInline && save.value !== 1) {
@@ -589,7 +633,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       // /api/order/status?t=<token> で **自分の 1 注文の状態だけ** を読めるようにする (token は秘密=列挙不可)。
       // 受注本体は上で保存済 = ここは付帯処理。失敗しても受注/決済は成立するため握り (fail-quiet)、
       // nx で重複保存を避ける (1 token 1 注文)。flag OFF / token 無し / 不正形式では何もしない (inert)。
-      const statusToken = o.statusToken;
+      const statusToken = snapshot?.statusToken ?? o.statusToken;
       if (env.enableOrderPickup && isOrderTokenLike(statusToken)) {
         const ptr = await kvSet(
           orderStatusPointerKey(statusToken),
@@ -625,7 +669,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     // 検証/保存の途中で予期せぬ例外 → pending クレームを解放しリトライ可能に戻す。ただし **保存確定後
     // (orderStored) は解放しない**: done 昇格済の恒久ブロックを消すと同一 tx の二重注文を招くため
     // (掟13: 断つべき波及=検証失敗時のクレーム居座りのみ・保存済の冪等は保つ)。
-    if (!orderStored) await kvDel(usedKey);
+    if (!orderStored) await releaseClaim();
     logger.error('order.notify.unexpected', {
       reason: e instanceof Error ? e.message : String(e),
       chainId,

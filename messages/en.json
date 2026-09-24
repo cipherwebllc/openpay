@@ -1507,7 +1507,15 @@
     "returnHomeButton": "Return to OpenPay",
     "urlInvalidTitle": "Invalid Checkout URL",
     "urlExample": "Example URL: /checkout?to=0x...&token=usdc&items=T-shirt:1:25",
-    "poweredBy": "powered by"
+    "poweredBy": "powered by",
+    "orderBindingStorageUnavailable": "Payment cannot start because this browser could not save the order recovery information. Check your browser storage settings.",
+    "retryOrderNotify": "Retry order registration",
+    "previousPaymentConfirming": "Your previous payment is still being confirmed. Please do not pay again yet.",
+    "previousPaymentUnconfirmed": "We could not confirm your previous payment. Check with store staff before paying again.",
+    "previousPaymentConfirmingOther": "A previous payment is still being confirmed. You can still pay this store.",
+    "orderBindingRestoreUnavailable": "Previous order recovery information could not be read. If you already paid, check with store staff before paying again.",
+    "previousOrderNotifyPending": "A previous order is awaiting registration. You can still make this payment.",
+    "previousOrderNotifyStaff": "A previous order could not be registered. Show its payment history or transaction to that store’s staff."
   },
   "CopyableField": {
     "copy": "Copy",
@@ -3003,5 +3011,9 @@
     "sellerOperator": "Seller: OpenPay (operator)",
     "sellerThirdParty": "Seller: Third-party seller ({name})",
     "providerThirdParty": "Seller: Third-party seller"
+  },
+  "OrderBinding": {
+    "unverified": "Payment/order association unverified — manual verification required before handover",
+    "scope": "Standard ERC-20 transfers and non-relay ERC-4337/7702 gasless payments do not cryptographically verify the association between payment and order."
   }
 }

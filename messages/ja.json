@@ -1507,7 +1507,15 @@
     "returnHomeButton": "OpenPay ホームへ戻る",
     "urlInvalidTitle": "Checkout URL が不正です",
     "urlExample": "正しい URL の例: /checkout?to=0x...&token=usdc&items=Tシャツ:1:25",
-    "poweredBy": "powered by"
+    "poweredBy": "powered by",
+    "orderBindingStorageUnavailable": "注文の復元情報をこのブラウザに保存できないため、支払いを開始できません。ブラウザの保存設定を確認してください。",
+    "retryOrderNotify": "注文登録を再試行",
+    "previousPaymentConfirming": "前回の支払いを確認中です。まだ支払い直さないでください。",
+    "previousPaymentUnconfirmed": "前回の支払いの状態を確認できませんでした。支払い直す前にお店のスタッフに確認してください。",
+    "previousPaymentConfirmingOther": "以前のお支払いを確認中です。このお店へのお支払いは続けられます。",
+    "orderBindingRestoreUnavailable": "以前の注文の復元情報を読み込めませんでした。支払い済みの場合は、支払い直さずお店のスタッフに確認してください。",
+    "previousOrderNotifyPending": "以前の注文の登録が保留中です。このお支払いは続けられます。",
+    "previousOrderNotifyStaff": "以前の注文を登録できませんでした。そのお店のスタッフに支払い履歴またはトランザクションを提示してください。"
   },
   "CopyableField": {
     "copy": "コピー",
@@ -3003,5 +3011,9 @@
     "sellerOperator": "販売者: OpenPay (運営)",
     "sellerThirdParty": "販売者: 第三者出品者 ({name})",
     "providerThirdParty": "販売者: 第三者出品者"
+  },
+  "OrderBinding": {
+    "unverified": "支払いと注文の結びつき未確認 — 受け渡し前に手動確認が必要",
+    "scope": "標準 ERC-20 送金と relay を使わない ERC-4337/7702 ガスレス決済では、支払いと注文の結びつきは暗号学的に検証されません。"
   }
 }

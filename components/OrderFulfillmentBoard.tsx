@@ -1,5 +1,7 @@
 'use client';
 
+import { OrderBindingScope } from '@/components/OrderBindingNotice';
+
 // 受注フルフィルメントの全画面ボード (Phase 3)。mode で 厨房 (調理) / ホール (配膳) を切替。
 // - 厨房: 商品別「調理済み」トグル + 注文「調理済み」(中間 kitchenDone・厨房側だけ折りたたむ)。
 // - ホール: 調理済み品は **青** (配膳待ちが一目) + 商品別「配膳済み」トグル + 注文「配膳済み」
@@ -318,6 +320,7 @@ export function OrderFulfillmentBoard({
         </div>
       </div>
       <p className="text-xs text-slate-500">{t('autoRefresh')}</p>
+      <OrderBindingScope />
       {env.enableOrderCall && mode === 'hall' ? (
         <OrderCallSection
           calls={callFeed.calls.data ?? []}
