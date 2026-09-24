@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFakeRedisStore, runRedisLua, closeRedisLuaEngine, type FakeRedisStore } from '../../_helpers/redisLua';
 import { captureLuaCall, copyRedisStore, redisState, type LuaCall } from '../../_helpers/redisLuaCapture';
@@ -1322,7 +1322,8 @@ const PURCHASE_SCRIPTS = [
 ] as const;
 type PurchaseScript = typeof PURCHASE_SCRIPTS[number];
 const purchaseScripts = Object.fromEntries(
-  [...readFileSync('lib/x402/purchaseIntent.ts', 'utf8').matchAll(/const (\w+) = `([\s\S]*?)`;/g)]
+  // R3a: 本文は lib/x402/purchase/lua.ts に分割した (呼び出し側は facade と lib/x402/purchase/*)。
+  [...readFileSync('lib/x402/purchase/lua.ts', 'utf8').matchAll(/const (\w+) = `([\s\S]*?)`;/g)]
     .filter((match) => match[2].includes('redis.call'))
     .map((match) => [match[1], match[2]]),
 );
@@ -1426,7 +1427,11 @@ describe('purchase Lua contracts: production callers, positional arguments and a
 
   it('covers every production Lua script with an actual caller invocation', async () => {
     expect(Object.keys(purchaseScripts).sort()).toEqual([...PURCHASE_SCRIPTS].sort());
-    const source = readFileSync('lib/x402/purchaseIntent.ts', 'utf8');
+    // facade と分割先 (lib/x402/purchase/*) の全体で数える。段階分割で呼び出しが移っても数は同じ。
+    const source = [
+      'lib/x402/purchaseIntent.ts',
+      ...readdirSync('lib/x402/purchase').sort().map((file) => `lib/x402/purchase/${file}`),
+    ].map((file) => readFileSync(file, 'utf8')).join('\n');
     // Inline scripts must extend the inventory too, rather than bypassing the
     // named-template fence above.
     expect([...source.matchAll(/\bkvEval(?:<[^>]+>)?\(/g)]).toHaveLength(PURCHASE_SCRIPTS.length);

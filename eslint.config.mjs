@@ -25,32 +25,52 @@ const HANDLE_DEEP_IMPORT_FROM_LIB = '^(?:\\./|(?:\\.\\./)+)handle/';
 
 // lib/x402/hostedStore/* も同じ理由で `@/lib/x402/hostedStore` (facade) だけを入口にする (R15a)。
 // 30 超の test が facade を vi.mock しており、deep import はその mock を黙ってすり抜ける。
-const HOSTED_STORE_FACADE_MESSAGE =
-  "lib/x402/hostedStore/* は内部モジュール。'@/lib/x402/hostedStore' (facade) から import する (vi.mock の対象を 1 つに保つ)。";
-// `@/lib/x402/hostedStore/x` と、ルート直下のディレクトリからの相対 `../lib/x402/hostedStore/x`。
-const HOSTED_STORE_DEEP_IMPORT = '^(?:@/|(?:\\.\\.?/)+)lib/x402/hostedStore/';
-// lib/ 配下からの相対 `./x402/hostedStore/x`・`../x402/hostedStore/x`・`./hostedStore/x` (lib/x402/*)・`../hostedStore/x`。
-const HOSTED_STORE_DEEP_IMPORT_FROM_LIB = '^(?:\\./|(?:\\.\\./)+)(?:x402/)?hostedStore/';
-
-const HANDLE_RULES = [
-  { regex: HANDLE_DEEP_IMPORT, message: HANDLE_FACADE_MESSAGE },
-  { regex: HANDLE_DEEP_IMPORT_FROM_LIB, message: HANDLE_FACADE_MESSAGE },
+// lib/x402/purchase/* は `@/lib/x402/purchaseIntent` (facade) の内部実装 (R3a〜)。同じ理由で
+// vi.mock('@/lib/x402/purchaseIntent') を黙ってすり抜けさせない (storeUsdcIntent の ownership/key helper 等)。
+//
+// facade 1 つにつき: family = facade file + 内部 dir (この中の import は自由)、
+// outsideLib = `@/lib/<dir>/x` とルート直下のディレクトリからの相対 `../lib/<dir>/x`、
+// inLib = lib/ 配下からの相対 `./<dir>/x`・`../<dir>/x` (lib/x402/* からは `./purchase/x` 等)。
+const FACADES = [
+  {
+    family: ['lib/handle.ts', 'lib/handle/**'],
+    message: HANDLE_FACADE_MESSAGE,
+    outsideLib: HANDLE_DEEP_IMPORT,
+    inLib: HANDLE_DEEP_IMPORT_FROM_LIB,
+  },
+  {
+    family: ['lib/x402/hostedStore.ts', 'lib/x402/hostedStore/**'],
+    message:
+      "lib/x402/hostedStore/* は内部モジュール。'@/lib/x402/hostedStore' (facade) から import する (vi.mock の対象を 1 つに保つ)。",
+    outsideLib: '^(?:@/|(?:\\.\\.?/)+)lib/x402/hostedStore/',
+    inLib: '^(?:\\./|(?:\\.\\./)+)(?:x402/)?hostedStore/',
+  },
+  {
+    family: ['lib/x402/purchaseIntent.ts', 'lib/x402/purchase/**'],
+    message:
+      "lib/x402/purchase/* は内部モジュール。'@/lib/x402/purchaseIntent' (facade) から import する (vi.mock の対象を 1 つに保つ)。",
+    outsideLib: '^(?:@/|(?:\\.\\.?/)+)lib/x402/purchase/',
+    inLib: '^(?:\\./|(?:\\.\\./)+)(?:x402/)?purchase/',
+  },
 ];
-const HOSTED_STORE_RULES = [
-  { regex: HOSTED_STORE_DEEP_IMPORT, message: HOSTED_STORE_FACADE_MESSAGE },
-  { regex: HOSTED_STORE_DEEP_IMPORT_FROM_LIB, message: HOSTED_STORE_FACADE_MESSAGE },
-];
+const outsideLibRules = (facades) =>
+  facades.map(({ outsideLib, message }) => ({ regex: outsideLib, message }));
+const inLibRules = (facades) =>
+  facades.flatMap(({ outsideLib, inLib, message }) => [
+    { regex: outsideLib, message },
+    { regex: inLib, message },
+  ]);
 
 // flat config は同じ rule を後の block が丸ごと上書きするため、1 file に効く facade の規則は
 // 1 つの block にまとめて渡す。
-function restrictFacadeDeepImports(rules) {
+function restrictFacadeDeepImports(entries) {
   return {
     'no-restricted-imports': ['error', {
-      patterns: rules.map(({ regex, message }) => ({ regex, message })),
+      patterns: entries.map(({ regex, message }) => ({ regex, message })),
     }],
     // no-restricted-imports は動的 import() を検査しないため、文字列リテラルの import() も止める。
     // esquery の正規表現リテラルは `/` を含められないので \x2F で表す。
-    'no-restricted-syntax': ['error', ...rules.map(({ regex, message }) => ({
+    'no-restricted-syntax': ['error', ...entries.map(({ regex, message }) => ({
       selector: `ImportExpression[source.value=/${regex.replaceAll('/', '\\x2F')}/]`,
       message,
     }))],
@@ -78,23 +98,18 @@ const eslintConfig = [
   {
     files: LINTED_SOURCES,
     ignores: ['lib/**'],
-    rules: restrictFacadeDeepImports([HANDLE_RULES[0], HOSTED_STORE_RULES[0]]),
+    rules: restrictFacadeDeepImports(outsideLibRules(FACADES)),
   },
   {
     files: LINTED_SOURCES.map((glob) => `lib/${glob}`),
-    ignores: ['lib/handle.ts', 'lib/handle/**', 'lib/x402/hostedStore.ts', 'lib/x402/hostedStore/**'],
-    rules: restrictFacadeDeepImports([...HANDLE_RULES, ...HOSTED_STORE_RULES]),
+    ignores: FACADES.flatMap((facade) => facade.family),
+    rules: restrictFacadeDeepImports(inLibRules(FACADES)),
   },
-  {
-    // handle の内部同士は自由・hostedStore の内部へは facade 経由。
-    files: ['lib/handle.ts', ...LINTED_SOURCES.map((glob) => `lib/handle/${glob}`)],
-    rules: restrictFacadeDeepImports(HOSTED_STORE_RULES),
-  },
-  {
-    // hostedStore の内部同士は自由・handle の内部へは facade 経由。
-    files: ['lib/x402/hostedStore.ts', ...LINTED_SOURCES.map((glob) => `lib/x402/hostedStore/${glob}`)],
-    rules: restrictFacadeDeepImports(HANDLE_RULES),
-  },
+  // 各 facade の family (facade file + 内部 module) は自分同士は自由・他 facade の内部へは facade 経由。
+  ...FACADES.map((facade) => ({
+    files: facade.family,
+    rules: restrictFacadeDeepImports(inLibRules(FACADES.filter((other) => other !== facade))),
+  })),
 ];
 
 export default eslintConfig;
