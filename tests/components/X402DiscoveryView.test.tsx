@@ -893,16 +893,16 @@ describe('X402DiscoveryView', () => {
       configurable: true,
     });
     renderView();
-    fireEvent.click(await screen.findByText('2円で試す (5分)'));
+    fireEvent.click(await screen.findByText('2円で試す'));
     expect(
       screen.getByText(
-        'curl と Node.js があれば、5 分で 402→支払い→解錠の一往復を体験できます。',
+        'curl・Node.js 20+・npm を使い、下の手順で 402→支払い→解錠を体験できます。',
       ),
     ).toBeInTheDocument();
     const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
     for (const button of copyButtons) fireEvent.click(button);
     const copied = writeText.mock.calls.map((call) => String(call[0]));
-    expect(copied.some((text) => text.includes('BUYER_PRIVATE_KEY=0x...'))).toBe(true);
+    expect(copied.some((text) => text.includes('npm install openpay-x402-sdk viem') && text.includes('BUYER_PRIVATE_KEY=0x...'))).toBe(true);
   });
 
   it('MCP セクション: 設定 JSON (openpay-x402-mcp) をコピーできる', async () => {

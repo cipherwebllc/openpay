@@ -37,7 +37,7 @@ export async function GET(): Promise<NextResponse> {
         usdc: 'https://open-pay.jp/api/paid/usdc/stablecoin-payments',
         priceJpyc: JPYC_PAYMENTS_RESOURCE.priceJpyc,
         priceUsd: USDC_PAYMENT_MONITOR.priceUsd,
-        hint: 'Check before you buy: if latestRecordedAt is before the nextChangedSince you stored from your last paid response, the paid delta would be empty — skip the purchase. Otherwise pass changedSince=<that nextChangedSince> to buy only deltas. Events are matched on the day they were recorded (collectedAt, or date when absent), so an event with an older date can still be new. The paid feed returns the full dated history.',
+        hint: 'Check before you buy: if latestRecordedAt is before the nextChangedSince you stored from your last paid response, the paid delta would be empty — skip the purchase. Otherwise pass changedSince=<that nextChangedSince> to buy only deltas. Events are matched on the day they were recorded (max(date, collectedAt), or date when collectedAt is absent), so an event with an older date can still be new. The paid feed returns the full dated history.',
       },
       notice: full.notice,
       licenseNotice: full.licenseNotice,

@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { tmpdir } from 'node:os';
 import { getAddress, type Address, type Hex } from 'viem';
 import {
   FORWARDER_COMMIT_VERSION,
@@ -204,5 +207,67 @@ describe('scripts/x402-buyer-example.mjs: 署名前ガード', () => {
         buyer.normalizePaymentRequirements(guardedAccept({ forwarder: FORWARDER })),
       ),
     ).toThrow(/既知の OpenPay forwarder/);
+  });
+});
+
+describe('E12: standalone public onboarding', () => {
+  it('runs the downloaded JPYC example offline with only its documented npm packages', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'openpay-buyer-offline-'));
+    try {
+      mkdirSync(join(dir, 'node_modules'));
+      // Copy the package's publishable source, so package exports (not repo-relative imports) are exercised.
+      const sdk = join(dir, 'node_modules/openpay-x402-sdk');
+      mkdirSync(sdk);
+      for (const file of ['package.json', 'src']) cpSync(resolve('packages/x402-sdk', file), join(sdk, file), { recursive: true });
+      symlinkSync(resolve('node_modules/viem'), join(dir, 'node_modules/viem'), 'dir');
+      cpSync(resolve('scripts/x402-buyer-example.mjs'), join(dir, 'buyer.mjs'));
+      const challenge = accept();
+      const forwarder = '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4';
+      challenge.payTo = forwarder;
+      const extra = challenge.extra as { openpay: { forwarder: string } };
+      extra.openpay.forwarder = forwarder;
+      writeFileSync(join(dir, 'challenge.json'), JSON.stringify(challenge));
+      writeFileSync(join(dir, 'run.mjs'), `
+        import assert from 'node:assert/strict';
+        import { readFileSync } from 'node:fs';
+        import { verifyTypedData } from 'viem';
+        import { main, buildTypedDataFromPaymentRequirements } from './buyer.mjs';
+        // An undeclared package installed in the repo must be invisible to the downloaded script.
+        assert.throws(() => import.meta.resolve('next'), { code: 'ERR_MODULE_NOT_FOUND' });
+        const challenge = JSON.parse(readFileSync('challenge.json', 'utf8'));
+        let calls = 0;
+        globalThis.fetch = async (url, init) => {
+          assert.equal(url, 'https://open-pay.jp/api/paid/stores');
+          if (++calls === 1) return Response.json({ accepts: [challenge] }, { status: 402 });
+          assert.equal(calls, 2);
+          const payment = JSON.parse(Buffer.from(init.headers['X-PAYMENT'], 'base64').toString());
+          const { authorization, signature } = payment.payload;
+          const { typedData } = buildTypedDataFromPaymentRequirements(challenge, authorization);
+          assert.equal(await verifyTypedData({ ...typedData, signature, address: authorization.from }), true);
+          return Response.json({ offline: true });
+        };
+        await main();
+        assert.equal(calls, 2);
+      `);
+      const run = spawnSync(process.execPath, ['run.mjs'], {
+        cwd: dir, encoding: 'utf8', timeout: 20_000,
+        // Public fixture key only; do not inherit wallet/keystore or signer environment settings.
+        env: { NODE_ENV: 'test', BUYER_PRIVATE_KEY: `0x${'11'.repeat(32)}`, MAX_JPYC: '7', RESOURCE_URL: 'https://open-pay.jp/api/paid/stores' },
+      });
+      expect(run.error).toBeUndefined();
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).toContain('"offline": true');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('documents npm setup before downloading JPYC and explicitly opts in to the USDC smoke', () => {
+    for (const file of ['README.md', 'docs/agent-templates/jpyc-service-monitor.md', 'components/X402DiscoveryView.tsx']) {
+      const text = readFileSync(resolve(file), 'utf8');
+      expect(text, file).toContain('npm install openpay-x402-sdk viem');
+    }
+    const template = readFileSync(resolve('docs/agent-templates/jpyc-service-monitor.md'), 'utf8');
+    expect(template).toContain('SMOKE_MAINNET_OK=1 PRIVATE_KEY=0x... MAX_USDC=0.02');
   });
 });

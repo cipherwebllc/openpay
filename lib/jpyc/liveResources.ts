@@ -204,21 +204,21 @@ export const USDC_JPYC_TRANSFERS = {
   priceUsd: '0.005',
   tags: ['jpyc', 'token-transfers', 'wallet-activity', 'payment-reconciliation', 'transaction-monitoring', 'onchain-data'],
   description:
-    'List recent JPYC Transfer events on one supported chain from roughly the last hour of blocks, optionally filtered by address — tx hash, from, to, amount, block. Without a cursor: newest first. With a cursor: only events after that position, oldest first, so each observed event is returned once within the scanned window. Use to confirm a recent JPYC payment or monitor wallet activity. Not for history beyond the window, sanctions screening, identity, or finality proof.',
+    'Recent JPYC Transfer events in a roughly one-hour window ending at head - depth (64 blocks on Polygon/Ethereum; 2 blocks on Kaia/Avalanche), with optional address filtering. Use for delayed transfer or wallet monitoring: snapshot newest first, cursor deltas oldest first, assuming stable history before that boundary. Not for immediate payment checks, full history, sanctions screening, identity or finality proof; deeper reorgs can invalidate cursors.',
   trigger: {
     callWhen: [
-      'An agent must confirm a recent JPYC transfer',
+      'A JPYC transfer must be inspected after waiting for the scan delay (64 blocks on Polygon/Ethereum; 2 blocks on Kaia/Avalanche)',
       'Incoming or outgoing JPYC activity for an address must be monitored',
       'The latest JPYC flows on one chain must be inspected',
     ],
     repeatWhen: [
       'Pass the previous nextCursor as cursor to receive only transfers that appeared after the previous purchase (mode=delta, oldest first)',
       'mode is delta and hasMore is true — call again with nextCursor to continue; in mode=snapshot hasMore only means older events were omitted, so start monitoring from nextCursor',
-      'The chain has advanced beyond the previous toBlock value',
+      'The raw chain head minus the per-chain delay (64 blocks on Polygon/Ethereum; 2 blocks on Kaia/Avalanche) has advanced beyond the previous toBlock value',
       'Deduplicate results by txHash and logIndex',
     ],
     preferOver: ['Historical indexers for recent activity; use an indexer for complete transaction history'],
-    avoidWhen: ['Complete history', 'Identity checks', 'Finality certificates'],
+    avoidWhen: ['Immediate payment checks before the scan delay has elapsed (64 blocks on Polygon/Ethereum; 2 blocks on Kaia/Avalanche)', 'Complete history', 'Identity checks', 'Finality certificates'],
     freshnessKey: ['toBlock', 'items[].blockNumber'],
     dedupeKey: ['txHash', 'logIndex'],
   } satisfies AgentUsage,
@@ -235,7 +235,7 @@ export const USDC_JPYC_TRANSFERS = {
           type: 'string',
           pattern: TRANSFERS_LIMIT_PATTERN,
           default: String(TRANSFERS_DEFAULT_LIMIT),
-          description: `Maximum number of transfer events to return, newest first (1-${TRANSFERS_MAX_LIMIT}). This is not a page number.`,
+          description: `Maximum number of transfer events to return: snapshot newest first, cursor delta oldest first (1-${TRANSFERS_MAX_LIMIT}). This is not a page number.`,
         },
         address: {
           type: 'string',
@@ -246,7 +246,7 @@ export const USDC_JPYC_TRANSFERS = {
           type: 'string',
           pattern: TRANSFER_CURSOR_PATTERN,
           description:
-            'The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), so repeated calls pay only for new events and return each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true. A cursor up to 64 blocks beyond the current chain head (normal when a node lags) returns no items and echoes the cursor back; further ahead is rejected with 400 cursor_ahead_of_head.',
+            'Both snapshot and delta scan through max(0, raw head - depth), where depth is 64 blocks on Polygon/Ethereum; 2 blocks on Kaia/Avalanche. Deeper reorgs can invalidate cursors. The nextCursor value from a previous response ("<block>:<logIndex>"). Returns only transfers newer than that position, oldest first (mode=delta), returning each observed event once within the scanned window, assuming stable chain history; continue with nextCursor while hasMore is true. A cursor more than 64 blocks beyond the raw head is rejected with 400 cursor_ahead_of_head before settlement (tolerance is measured from the raw head, independently of confirmation depth). Otherwise, a cursor newer than the scan boundary returns no items and is echoed unchanged until the boundary catches up.',
         },
       },
       required: ['chain'],

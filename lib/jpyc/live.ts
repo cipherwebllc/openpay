@@ -56,6 +56,18 @@ export const TRANSFER_WINDOW_BLOCKS: Readonly<Record<JpycChainSlug, bigint>> = {
   ethereum: 300n,
 };
 
+/**
+ * 未確認 head の reorg が保存済み cursor より小さい logIndex のイベントを永久に飛ばす
+ * 波及を断つため、snapshot/delta ともチェーン別の深度まで待つ。Polygon/Ethereum は 64、
+ * 即時 finality の Kaia/Avalanche は RPC head 付近を避ける 2 ブロック。finality の保証ではない。
+ */
+export const TRANSFER_CONFIRMATION_DEPTH_BLOCKS: Readonly<Record<JpycChainSlug, bigint>> = {
+  polygon: 64n,
+  kaia: 2n,
+  avalanche: 2n,
+  ethereum: 64n,
+};
+
 export const TRANSFERS_DEFAULT_LIMIT = 20;
 export const TRANSFERS_MAX_LIMIT = 100;
 
@@ -144,7 +156,7 @@ export type TransfersResult = ChainRowBase &
         items: TransferItem[];
         /** snapshot (cursor なし・新しい順) / delta (cursor あり・古い順)。hasMore の意味が異なる。 */
         mode: 'snapshot' | 'delta';
-        /** 次回 `cursor` に渡すと、この応答より新しい Transfer だけが返る。入力 cursor より後退しない。 */
+        /** 次回 `cursor` に渡すと、この応答より新しい確認待ちを終えた Transfer だけが返る。深い reorg は保証外。入力 cursor より後退しない。 */
         nextCursor: string;
         /** limit で打ち切った (cursor 付きなら nextCursor で続きを取る)。 */
         hasMore: boolean;
@@ -162,7 +174,7 @@ export type TransfersResult = ChainRowBase &
 /**
  * cursor が chain head より先行していても「まだ新着なし」として扱うブロック数。
  *
- * なぜ必要か (E10 の残欠陥): 「新着なし」応答の nextCursor はその時点の head (live.ts の
+ * なぜ必要か (E10 の残欠陥): 「新着なし」応答の nextCursor はその時点の確認待ち境界 (live.ts の
  * items 0 件分岐) なので、正常な polling でも **次の呼び出しが head より前を見ている RPC
  * ノードに当たる**ことがある (負荷分散された複数ノードのラグ・リオーグ後の巻き戻し)。
  * これを一律 400 にすると、買い手側に非がないのにフィードが止まる。数ブロック程度の
@@ -390,19 +402,24 @@ export async function readTransfers(
     const result = await withTimeout<TransferContent>(
       (async (): Promise<TransferContent> => {
         const client = clientFor(dep.chainId);
-        const toBlock = await client.getBlockNumber();
+        const head = await client.getBlockNumber();
+        const depth = TRANSFER_CONFIRMATION_DEPTH_BLOCKS[chain];
+        const toBlock = head > depth
+          ? head - depth
+          : 0n;
         const window = TRANSFER_WINDOW_BLOCKS[chain];
         const fromBlock = toBlock > window ? toBlock - window : 0n;
         // cursor があれば走査の下端を cursor.block まで縮める (それより古い block は読まない)。
         // cursor が窓より古い場合は窓の下端までしか読めない = truncated。
         const cursor = opts.cursor;
-        // cursor が現在の chain head より新しい = 未来の位置 (E10)。
+        // cursor が確認待ち境界より新しい場合は走査しない。旧版の head cursor もここで待つ。
+        // 400 の閾値は従来どおり実 head 基準 (確認待ちの導入で正常 cursor を拒否しない)。
         //   - 許容量以内: RPC ノードのラグやリオーグで通常の polling でも起こるので
         //     「まだ新着なし」= items:[] + **入力 cursor をそのまま echo** で返す
         //     (getLogs は呼ばない。cursor を head へ後退させると既読分を再取得させてしまう)
         //   - 許容量超: 実運用では説明できないので settle 前に 400 (課金されない)
         if (cursor !== undefined && cursor.block > toBlock) {
-          if (cursor.block > toBlock + CURSOR_HEAD_TOLERANCE_BLOCKS) {
+          if (cursor.block > head + CURSOR_HEAD_TOLERANCE_BLOCKS) {
             return { kind: 'cursor_ahead_of_head' };
           }
           return {
