@@ -176,13 +176,14 @@ export function CreatorStorePurchaseFlow({
     setFlowError(null);
   };
 
+  // 署名中・送信中は wrong chain になっても確認 UI (isSubmitting で操作不可) を出し続ける。
+  // start view に落ちると rail/prepare が押せ、進行中の購入を捨てて 2 回目の署名へ進めてしまう。
   const showConfirmation =
     buyer.quote !== null &&
     (buyer.quote.rail === 'usdc' || signPreview !== null) &&
-    (buyer.phase === 'review' ||
+    ((buyer.phase === 'review' && !buyer.isWrongChain) ||
       buyer.phase === 'signing' ||
-      buyer.phase === 'submitting') &&
-    !buyer.isWrongChain;
+      buyer.phase === 'submitting');
   const showState =
     buyer.phase === 'indeterminate' ||
     buyer.phase === 'indeterminate-exhausted' ||
@@ -418,7 +419,7 @@ export function CreatorStorePurchaseFlow({
                         name={`store-payment-rail-${product.id}`}
                         value="jpyc"
                         checked={selectedPaymentRail === 'jpyc'}
-                        disabled={buyer.phase === 'loading-quote'}
+                        disabled={buyer.isBusy}
                         onChange={() => {
                           setPaymentRail('jpyc');
                           setFlowError(null);
@@ -441,7 +442,7 @@ export function CreatorStorePurchaseFlow({
                         name={`store-payment-rail-${product.id}`}
                         value="usdc"
                         checked={selectedPaymentRail === 'usdc'}
-                        disabled={buyer.phase === 'loading-quote'}
+                        disabled={buyer.isBusy}
                         onChange={() => {
                           setPaymentRail('usdc');
                           setFlowError(null);
@@ -520,7 +521,7 @@ export function CreatorStorePurchaseFlow({
             ) : (
               <button
                 type="button"
-                disabled={buyer.phase === 'loading-quote'}
+                disabled={buyer.isBusy}
                 onClick={prepareReview}
                 className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-brand px-5 py-3 text-sm font-bold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
               >

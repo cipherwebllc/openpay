@@ -746,52 +746,346 @@ describe('R15b pin: session / product scope と古い完了の扱い', () => {
       code: 'signed_payment_unavailable',
     });
   });
+});
 
-  // 以下 2 件は「現状挙動の固定」。product scope の切替は wallet 切替と違い、
-  // 進行中の request の完了を捨てない (UI 側は quote 取得中の rail 切替を disabled にしている)。
-  // 抽出 PR では変えない — 挙動変更は別 PR (掟 12/15) で扱う。
-  it('[現状固定] quote 取得中の product scope 切替では、遅れて届いた旧 quote が review に出る', async () => {
-    const quote = deferred<Response>();
-    routeFetch({ quote: () => quote.promise });
-    const props = baseProps();
-    const rendered = renderPurchase(props);
-    let pending!: Promise<unknown>;
-    act(() => {
-      pending = rendered.result.current.prepare();
-    });
-    rendered.rerender({ ...props, priceJpyc: '1300' });
-    expect(rendered.result.current.phase).toBe('idle');
+// B-R15d: 商品 (product scope) の切替は wallet 切替と同じく、進行中の旧 flow の完了を捨てる。
+// R15b では「[現状固定]」として旧挙動 (遅い旧 quote が review に出る / 遅い 200 で quote=null の
+// provisioning に止まる) を pin していた。ここではその 2 件を反転し、段階ごとの捨て方を固定する。
+describe('B-R15d: 商品の切替は進行中の結果を捨てる (wallet 切替と同じ扱い)', () => {
+  const PRODUCT_CHANGES = [
+    ['resourceId', { resourceId: 'h_other' }],
+    ['title', { title: 'Other title' }],
+    ['merchant', { merchant: OTHER }],
+    ['priceJpyc', { priceJpyc: '1300' }],
+    ['rail', { rail: 'usdc' as const }],
+  ] as const;
 
-    await act(async () => {
-      quote.resolve(jsonResponse(paymentRequired(), 402));
-      await pending;
-    });
-    expect(rendered.result.current.phase).toBe('review');
-    expect(rendered.result.current.quote).toMatchObject({
-      merchantValueJpyc: '1200',
-    });
-  });
-
-  it('[現状固定] 送信中の product scope 切替では、遅れて届いた旧商品の 200 settled で provisioning になる', async () => {
-    const paid = deferred<Response>();
-    routeFetch({ paid: () => paid.promise });
-    const props = baseProps();
-    const rendered = renderPurchase(props);
+  /** review → purchase() を呼び、署名済み request の送信 (X-PAYMENT GET) の応答待ちにする。 */
+  async function submitAndHold(rendered: Rendered) {
     await prepareToReview(rendered);
     let pending!: Promise<void>;
     await act(async () => {
       pending = rendered.result.current.purchase();
     });
-    rendered.rerender({ ...props, resourceId: 'h_other' });
+    expect(rendered.result.current.phase).toBe('submitting');
+    // Promise をそのまま返すと async 関数の戻り値として採用され、応答待ちで止まるため object で包む。
+    return { pending };
+  }
+
+  function paidCalls(fetchMock: ReturnType<typeof routeFetch>): number {
+    return fetchMock.mock.calls.filter(([, init]) =>
+      new Headers(init?.headers).has('X-PAYMENT'),
+    ).length;
+  }
+
+  it.each(PRODUCT_CHANGES)(
+    '(a) quote 取得中に product scope (%s) が変わると、遅れて届いた旧 quote を review に出さず product_changed',
+    async (_label, change) => {
+      const quote = deferred<Response>();
+      routeFetch({ quote: () => quote.promise });
+      const props = baseProps();
+      const rendered = renderPurchase(props);
+      let pending!: Promise<unknown>;
+      act(() => {
+        pending = rendered.result.current.prepare();
+      });
+      rendered.rerender({ ...props, ...change });
+      expect(rendered.result.current.phase).toBe('idle');
+
+      let thrown: unknown;
+      await act(async () => {
+        quote.resolve(jsonResponse(paymentRequired(), 402));
+        thrown = await pending.catch((error: unknown) => error);
+      });
+      expect(thrown).toBeInstanceOf(HostedStorePurchaseError);
+      expect((thrown as HostedStorePurchaseError).code).toBe('product_changed');
+      expect(rendered.result.current.phase).toBe('error');
+      expect(rendered.result.current.quote).toBeNull();
+      expect(signTypedData).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(PRODUCT_CHANGES)(
+    '(b) 送信中に product scope (%s) が変わると、遅れて届いた旧商品の 200 settled を無視する (quote=null の provisioning に入らない)',
+    async (_label, change) => {
+      const paid = deferred<Response>();
+      const fetchMock = routeFetch({ paid: () => paid.promise });
+      const props = baseProps();
+      const rendered = renderPurchase(props);
+      const { pending } = await submitAndHold(rendered);
+
+      rendered.rerender({ ...props, ...change });
+      expect(rendered.result.current.phase).toBe('idle');
+
+      await act(async () => {
+        paid.resolve(jsonResponse(settledPaidBody(RESOURCE_ID), 200));
+        await pending;
+      });
+      await settle();
+      expect(rendered.result.current.phase).toBe('idle');
+      expect(rendered.result.current.quote).toBeNull();
+      expect(rendered.result.current.txHash).toBeNull();
+      expect(rendered.result.current.error).toBeNull();
+      expect(rendered.result.current.paymentStatus).toBe('not-started');
+      expect(rendered.result.current.accessStatus).toBe('none');
+      expect(rendered.result.current.canRetrySignedPayment).toBe(false);
+      expect(calledWith(fetchMock, '/api/store/')).toBe(false);
+    },
+  );
+
+  it.each([
+    ['202 pending', () => jsonResponse({ ok: true, state: 'pending' }, 202)],
+    ['503 purchase_provisioning', () => jsonResponse({ error: 'purchase_provisioning' }, 503)],
+    ['409 purchase_intent_failed', () => jsonResponse({ error: 'purchase_intent_failed' }, 409)],
+    ['500 (予期しない error)', () => jsonResponse({ error: 'boom' }, 500)],
+    ['通信断', () => Promise.reject(new TypeError('network lost'))],
+  ] as const)(
+    '(a) 送信中に商品が変わると、遅れて届いた旧商品の %s も反映しない',
+    async (_label, respond) => {
+      const paid = deferred<Response>();
+      const fetchMock = routeFetch({ paid: () => paid.promise });
+      const props = baseProps();
+      const rendered = renderPurchase(props);
+      const { pending } = await submitAndHold(rendered);
+
+      rendered.rerender({ ...props, priceJpyc: '1300' });
+      await act(async () => {
+        await Promise.resolve().then(respond).then(
+          (response) => paid.resolve(response),
+          (error: unknown) => paid.reject(error),
+        );
+        await pending;
+      });
+      await settle();
+      expect(rendered.result.current.phase).toBe('idle');
+      expect(rendered.result.current.error).toBeNull();
+      expect(rendered.result.current.needsSupportReason).toBeNull();
+      expect(rendered.result.current.canRetrySignedPayment).toBe(false);
+      expect(calledWith(fetchMock, '/api/store/')).toBe(false);
+    },
+  );
+
+  it('(c) 署名中に商品が変わると、旧商品の署名を送信せず product_changed (再利用もできない)', async () => {
+    const signature = deferred<Hex>();
+    signTypedData.mockImplementation(() => signature.promise);
+    const fetchMock = routeFetch({
+      paid: () => jsonResponse(settledPaidBody(), 200),
+    });
+    const props = baseProps();
+    const rendered = renderPurchase(props);
+    await prepareToReview(rendered);
+    let pending!: Promise<void>;
+    act(() => {
+      pending = rendered.result.current.purchase();
+    });
+    expect(rendered.result.current.phase).toBe('signing');
+
+    rendered.rerender({ ...props, priceJpyc: '1300' });
+    expect(rendered.result.current.phase).toBe('idle');
+
+    let thrown: unknown;
+    await act(async () => {
+      signature.resolve(SIGNATURE);
+      thrown = await pending.catch((error: unknown) => error);
+    });
+    expect(thrown).toBeInstanceOf(HostedStorePurchaseError);
+    expect((thrown as HostedStorePurchaseError).code).toBe('product_changed');
+    expect(paidCalls(fetchMock)).toBe(0);
+    expect(rendered.result.current.phase).toBe('error');
+    expect(rendered.result.current.canRetrySignedPayment).toBe(false);
+    await expect(rendered.result.current.retry()).rejects.toMatchObject({
+      code: 'signed_payment_unavailable',
+    });
+    expect(paidCalls(fetchMock)).toBe(0);
+  });
+
+  it('(c) 確認中に商品が変わると、旧商品の署名済み request は retry で再送できず、遅い status も反映しない', async () => {
+    const status = deferred<Response>();
+    const fetchMock = routeFetch({
+      paid: () => jsonResponse({ ok: true, state: 'pending' }, 202),
+      status: () => status.promise,
+    });
+    const props = baseProps();
+    const rendered = renderPurchase(props);
+    await prepareToReview(rendered);
+    await act(async () => {
+      await rendered.result.current.purchase();
+    });
+    expect(rendered.result.current.phase).toBe('indeterminate');
+    await waitFor(() =>
+      expect(calledWith(fetchMock, '/api/store/purchase/status')).toBe(true),
+    );
+
+    rendered.rerender({ ...props, priceJpyc: '1300' });
+    expect(rendered.result.current.phase).toBe('idle');
+    expect(rendered.result.current.canRetrySignedPayment).toBe(false);
+    await expect(rendered.result.current.retry()).rejects.toMatchObject({
+      code: 'signed_payment_unavailable',
+    });
+    expect(paidCalls(fetchMock)).toBe(1);
+
+    await act(async () => {
+      status.resolve(
+        jsonResponse({ ok: true, state: 'settled', txHash: TX_HASH }, 200),
+      );
+    });
+    await settle();
+    expect(rendered.result.current.phase).toBe('idle');
+    expect(rendered.result.current.txHash).toBeNull();
+  });
+
+  it('(b) 送信中に商品が A→B→A と戻っても、破棄済みの旧 flow の 200 settled は反映しない', async () => {
+    const paid = deferred<Response>();
+    const fetchMock = routeFetch({ paid: () => paid.promise });
+    const props = baseProps();
+    const rendered = renderPurchase(props);
+    const { pending } = await submitAndHold(rendered);
+
+    rendered.rerender({ ...props, title: 'Other title' });
+    rendered.rerender(props);
     expect(rendered.result.current.phase).toBe('idle');
 
     await act(async () => {
-      paid.resolve(jsonResponse(settledPaidBody(RESOURCE_ID), 200));
+      paid.resolve(jsonResponse(settledPaidBody(), 200));
+      await pending;
+    });
+    await settle();
+    expect(rendered.result.current.phase).toBe('idle');
+    expect(rendered.result.current.quote).toBeNull();
+    expect(rendered.result.current.txHash).toBeNull();
+    expect(calledWith(fetchMock, '/api/store/')).toBe(false);
+  });
+
+  it('(b) 送信中に wallet が A→B→A と戻っても、破棄済みの旧 flow の 200 settled は反映しない', async () => {
+    const paid = deferred<Response>();
+    const fetchMock = routeFetch({ paid: () => paid.promise });
+    const props = baseProps();
+    const rendered = renderPurchase(props);
+    const { pending } = await submitAndHold(rendered);
+
+    switchWallet(rendered, props, OTHER);
+    switchWallet(rendered, props, PAYER);
+    expect(rendered.result.current.phase).toBe('idle');
+
+    await act(async () => {
+      paid.resolve(jsonResponse(settledPaidBody(), 200));
+      await pending;
+    });
+    await settle();
+    expect(rendered.result.current.phase).toBe('idle');
+    expect(rendered.result.current.quote).toBeNull();
+    expect(rendered.result.current.txHash).toBeNull();
+    expect(calledWith(fetchMock, '/api/store/')).toBe(false);
+  });
+
+  // prepare は署名済み request を捨てるので、1 件目が未解決の間は拒否する (reset と同じ条件 + 署名中)。
+  // 拒否しないと進行中の完了が identity 判定で捨てられ、2 回目の署名ができてしまう。
+  it('送信中の prepare は purchase_in_progress で拒否され、届いた 200 settled は捨てずに provisioning へ進む', async () => {
+    const paid = deferred<Response>();
+    const fetchMock = routeFetch({
+      paid: () => paid.promise,
+      status: HOLD,
+      content: HOLD,
+    });
+    const props = baseProps();
+    const rendered = renderPurchase(props);
+    const { pending } = await submitAndHold(rendered);
+    const quoteCalls = fetchMock.mock.calls.length;
+
+    await act(async () => {
+      await expect(rendered.result.current.prepare()).rejects.toMatchObject({
+        code: 'purchase_in_progress',
+      });
+    });
+    expect(fetchMock.mock.calls.length).toBe(quoteCalls);
+    expect(rendered.result.current.phase).toBe('submitting');
+
+    await act(async () => {
+      paid.resolve(jsonResponse(settledPaidBody(), 200));
       await pending;
     });
     expect(rendered.result.current.phase).toBe('provisioning');
-    expect(rendered.result.current.quote).toBeNull();
     expect(rendered.result.current.txHash).toBe(TX_HASH);
-    expect(rendered.result.current.canRetrySignedPayment).toBe(false);
+    expect(rendered.result.current.quote).not.toBeNull();
+    expect(rendered.result.current.error).toBeNull();
+  });
+
+  it('署名中の prepare は purchase_in_progress で拒否され、署名後の送信はそのまま 1 回だけ行われる', async () => {
+    const signature = deferred<Hex>();
+    signTypedData.mockImplementation(() => signature.promise);
+    const fetchMock = routeFetch({
+      paid: () => jsonResponse(settledPaidBody(), 200),
+      status: HOLD,
+      content: HOLD,
+    });
+    const props = baseProps();
+    const rendered = renderPurchase(props);
+    await prepareToReview(rendered);
+    let pending!: Promise<void>;
+    act(() => {
+      pending = rendered.result.current.purchase();
+    });
+    expect(rendered.result.current.phase).toBe('signing');
+    const quoteCalls = fetchMock.mock.calls.length;
+
+    await act(async () => {
+      await expect(rendered.result.current.prepare()).rejects.toMatchObject({
+        code: 'purchase_in_progress',
+      });
+    });
+    expect(fetchMock.mock.calls.length).toBe(quoteCalls);
+    expect(rendered.result.current.phase).toBe('signing');
+
+    await act(async () => {
+      signature.resolve(SIGNATURE);
+      await pending;
+    });
+    expect(paidCalls(fetchMock)).toBe(1);
+    expect(rendered.result.current.phase).toBe('provisioning');
+    expect(rendered.result.current.txHash).toBe(TX_HASH);
+  });
+
+  it('確認中 (indeterminate) の prepare も拒否し、同じ署名の retry を残す', async () => {
+    routeFetch({
+      paid: () => jsonResponse({ ok: true, state: 'pending' }, 202),
+    });
+    const props = baseProps();
+    const rendered = renderPurchase(props);
+    await prepareToReview(rendered);
+    await act(async () => {
+      await rendered.result.current.purchase();
+    });
+    expect(rendered.result.current.phase).toBe('indeterminate');
+
+    await act(async () => {
+      await expect(rendered.result.current.prepare()).rejects.toMatchObject({
+        code: 'purchase_in_progress',
+      });
+    });
+    expect(rendered.result.current.phase).toBe('indeterminate');
+    expect(rendered.result.current.canRetrySignedPayment).toBe(true);
+  });
+
+  it('商品が変わらない限り、送信中の 200 settled はこれまでどおり provisioning に進む (切替検出の偽陽性がない)', async () => {
+    const paid = deferred<Response>();
+    routeFetch({
+      paid: () => paid.promise,
+      status: HOLD,
+      content: HOLD,
+    });
+    const props = baseProps();
+    const rendered = renderPurchase(props);
+    const { pending } = await submitAndHold(rendered);
+
+    // 同じ product scope の再 render (merchant の大文字小文字だけの差を含む) は切替ではない。
+    rendered.rerender({ ...props });
+    rendered.rerender({ ...props, merchant: MERCHANT.toLowerCase() as Address });
+    await act(async () => {
+      paid.resolve(jsonResponse(settledPaidBody(), 200));
+      await pending;
+    });
+    expect(rendered.result.current.phase).toBe('provisioning');
+    expect(rendered.result.current.txHash).toBe(TX_HASH);
+    expect(rendered.result.current.quote).not.toBeNull();
   });
 });
