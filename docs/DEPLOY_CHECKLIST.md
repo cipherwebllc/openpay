@@ -1673,7 +1673,7 @@ Arc 非対応・自前の汎用 EIP-3009 facilitator は作らない)。設計 =
    ローカル `next start` (`X402_NETWORK=base-sepolia`・`ENABLE_X402_ARC_GATEWAY=1`) の `/api/paid/hello` を
    Arc accept で購入 → 200 + PAYMENT-RESPONSE success → 売り手の Gateway 残高 (domain 26) 増加を確認。
 2. Vercel Production に `ENABLE_X402_ARC_GATEWAY=1` → 開示 3 点セット同期 PR (掟 14・LP FAQ / Terms / llms.txt /
-   README / お知らせ・**`/openapi.json` (`lib/openapi/document.ts` の `network`/`x-payment-chains`)**) を同一リリースで
+   README / お知らせ・**`/openapi.json` (`lib/openapi/payment.ts` の `network`/`x-payment-chains`)**) を同一リリースで
    merge → deploy。
 3. 本番 smoke: `node scripts/arc-gateway-buyer-smoke.mjs` → `http://localhost:4599` をウォレットのあるブラウザで開き、
    接続 → (初回のみ) USDC を Gateway Wallet に deposit → `/api/paid/hello` を購入 (秘密鍵を扱わない・署名はウォレット内・
