@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
-import { checkIpRateLimit } from '@/lib/relay/relayGuards';
+import { checkClientIpBucketRateLimit } from '@/lib/net/clientRateLimit';
 import { shopsApiEnabled } from '@/lib/shops/flags';
 
 export const SHOPS_CACHE_CONTROL =
@@ -22,7 +21,7 @@ export async function guardFreeShopsApi(
 ): Promise<NextResponse | null> {
   if (!shopsApiEnabled()) return shopsError('not_found', 404);
   if (
-    !(await checkIpRateLimit('shops', hashIpBucket(clientIp(req)), 30, 60))
+    !(await checkClientIpBucketRateLimit(req, 'shops', 30, 60))
   ) {
     return shopsError('rate_limited', 429, { 'Retry-After': '60' });
   }
@@ -34,12 +33,7 @@ export async function guardPaidShopsApi(
 ): Promise<NextResponse | null> {
   if (!shopsApiEnabled()) return shopsError('not_found', 404);
   if (
-    !(await checkIpRateLimit(
-      'shops-paid',
-      hashIpBucket(clientIp(req)),
-      10,
-      60,
-    ))
+    !(await checkClientIpBucketRateLimit(req, 'shops-paid', 10, 60))
   ) {
     return shopsError('rate_limited', 429, { 'Retry-After': '60' });
   }

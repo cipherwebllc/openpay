@@ -5,9 +5,7 @@
 import { NextResponse } from 'next/server';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { env } from '@/lib/env';
-import { checkReadRateLimit } from '@/lib/relay/relayGuards';
-import { clientIp } from '@/lib/net/ipHash';
-import { anonymizeIp } from '@/lib/relay/relayRoute';
+import { checkClientIpPrefixRateLimit } from '@/lib/net/clientRateLimit';
 import { sendPushToWallet } from '@/lib/push/server';
 
 export const runtime = 'nodejs';
@@ -22,11 +20,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!session.ok) return session.response;
 
   try {
-    const ipPrefix = anonymizeIp(
-      clientIp(req) ?? '',
-    );
-    const key = `pushtest:${session.address.toLowerCase()}:${ipPrefix}`;
-    if (!(await checkReadRateLimit(key, 1, 60))) {
+    const keyFor = (ipPrefix: string) => `pushtest:${session.address.toLowerCase()}:${ipPrefix}`;
+    if (!(await checkClientIpPrefixRateLimit(req, keyFor, 1, 60))) {
       return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
     }
   } catch {
