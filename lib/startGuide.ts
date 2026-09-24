@@ -453,7 +453,7 @@ export function startGuideMetadata(locale: string): Metadata {
     path: '/guide/start',
     title: c.metaTitle,
     description: c.metaDescription,
-    // 専用 OG (チェックリスト意匠)。既定の og-image.png は /guide/qr と共用のため、
+    // 専用 OG (チェックリスト意匠)。既定の og-home.webp はトップや他の guide と共用のため、
     // 共有時にどちらの面か見分けがつかない — この面は「送って読んでもらう」用途が主。
     ogImage: {
       url: '/og-start.webp',

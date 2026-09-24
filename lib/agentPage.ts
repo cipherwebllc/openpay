@@ -778,7 +778,7 @@ export function agentPageMetadata(locale: string): Metadata {
     // metaTitle が既に「OpenPay Agent — …」で始まるので、guide 共通の「 · OpenPay」接尾辞は付けない。
     title: c.metaTitle,
     description: c.metaDescription,
-    // 専用 OG (docs/og-agent/og.html を 1200x630 で描画 → webp)。既定の og-image.png は店頭決済の
+    // 専用 OG (docs/og-agent/og.html を 1200x630 で描画 → webp)。既定の og-home.webp は総合版の
     // 絵なので、SNS で共有したときに Agent の面だと伝わらない。
     ogImage: {
       url: '/og-agent.webp',

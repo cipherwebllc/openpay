@@ -33,7 +33,7 @@ export const metadata: Metadata = {
     alternateLocale: ['en_US'],
     images: [
       {
-        // 総合版 OG (2026-08-05)。旧 og-image.png (店頭決済) は /guide/qr 等が使い続ける。
+        // 総合版 OG (2026-08-05)。guide 共通の既定 OG も同じ画像 (lib/guideMetadata.ts)。
         url: '/og-home.webp',
         width: 1200,
         height: 630,
