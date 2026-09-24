@@ -98,8 +98,8 @@ export function createKovaSigner(env = process.env, { execFileImpl = execFile } 
         if (body?.ok === false && body?.error?.code === 'POLICY_DENIED') {
           throw new KovaSigningError('kova_policy_denied');
         }
-        // Unknown envelopes/recoveryId encodings are not repaired. Actual CLI exit/JSON
-        // and sign_allowlist maxValue semantics still require the Amoy acceptance run.
+        // Unknown envelopes/recoveryId encodings are not repaired. Amoy/mainnet acceptance
+        // completed on 2026-09-25; Kova 0.1.2 policy does not limit this typed-data path.
         const signature = body?.data?.signature;
         // A strict end assertion also rejects a trailing newline (JavaScript's $ allows one).
         if (error || body?.ok !== true || typeof signature !== 'string' || !/^0x[0-9a-fA-F]{130}(?![\s\S])/.test(signature)) {

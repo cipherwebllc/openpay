@@ -19,7 +19,7 @@ forwarder-split extension.
 ### Install / run
 
 ```bash
-npx --yes --package=openpay-x402-mcp@0.17.2 -- openpay-order-mcp
+npx --yes --package=openpay-x402-mcp@0.18 -- openpay-order-mcp
 ```
 
 ### Claude Desktop
@@ -29,7 +29,7 @@ npx --yes --package=openpay-x402-mcp@0.17.2 -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp@0.17.2", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.18", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -42,7 +42,7 @@ npx --yes --package=openpay-x402-mcp@0.17.2 -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp@0.17.2", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.18", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -56,7 +56,7 @@ This profile needs no `BUYER_PRIVATE_KEY`. It exposes four tools: `find_shops`,
 ### Install / run
 
 ```bash
-npx openpay-x402-mcp@0.17.2
+npx openpay-x402-mcp@0.18
 ```
 
 ### Claude Desktop
@@ -66,7 +66,7 @@ npx openpay-x402-mcp@0.17.2
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp@0.17.2"],
+      "args": ["openpay-x402-mcp@0.18"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -85,7 +85,7 @@ npx openpay-x402-mcp@0.17.2
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp@0.17.2"],
+      "args": ["openpay-x402-mcp@0.18"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -102,7 +102,7 @@ into the configuration. After the host restarts, call `wallet_init` to create th
 wallet on this machine, then fund the returned address — see
 [Local wallet](#local-wallet-signer_modekeystore). Do not put a placeholder such as
 `"BUYER_PRIVATE_KEY": "0x..."` in the configuration: the server rejects it at startup.
-`env-key`, `steward`, and the unreleased `kova` mode are described under [Signer Modes](#signer-modes).
+`env-key`, `steward`, and `kova` (available since 0.18.0) are described under [Signer Modes](#signer-modes).
 
 During local development from this repository:
 
@@ -125,7 +125,7 @@ from strands import Agent
 from strands.tools.mcp import MCPClient
 
 openpay = MCPClient(lambda: stdio_client(StdioServerParameters(
-    command="npx", args=["-y", "openpay-x402-mcp@0.17.2"],
+    command="npx", args=["-y", "openpay-x402-mcp@0.18"],
     env={...},  # same env as the Claude examples above
 )))
 
@@ -202,7 +202,7 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 
 | Variable | Default | Notes |
 |---|---|---|
-| `SIGNER_MODE` | `env-key` | `env-key` signs in-process with `BUYER_PRIVATE_KEY`. `steward` delegates typed-data signing to Steward. Explicit `keystore` uses the local wallet file. `kova` (Unreleased) delegates to the separately installed Kova CLI. No fallback to another signer in keystore or kova mode. |
+| `SIGNER_MODE` | `env-key` | `env-key` signs in-process with `BUYER_PRIVATE_KEY`. `steward` delegates typed-data signing to Steward. Explicit `keystore` uses the local wallet file. `kova` (since 0.18.0) delegates to the separately installed Kova CLI. No fallback to another signer in keystore or kova mode. |
 | `BUYER_PRIVATE_KEY` | unset | Required for `x402_pay` and `wallet_prove` when `SIGNER_MODE=env-key`. Use a dedicated low-balance wallet, never a primary wallet. |
 | `STEWARD_URL` | unset | Required when `SIGNER_MODE=steward`, for example `http://localhost:3900`. |
 | `STEWARD_TENANT` | unset | Required when `SIGNER_MODE=steward`; tenant context sent as `X-Steward-Tenant`. |
@@ -294,8 +294,8 @@ URLs or URLs containing credentials, a path, query or fragment return
 `challenge_invalid` without signing; 429, 5xx, and network failures return
 `challenge_unavailable`. If the server flag `ENABLE_AGENT_PURCHASES` is OFF,
 HTTP 404 returns `feature_disabled`. Steward returns `signer_mode_unsupported`; Kova signs the
-proof through its CLI and returns `kova_policy_denied` when its `sign_allowlist` has no
-matching rule;
+proof through its CLI and returns `kova_policy_denied` when Kova denies the
+proof request;
 an uninitialized keystore returns `wallet_not_initialized`. A missing env key
 returns `buyer_private_key_missing`; a signing failure returns the fixed code
 `proof_signing_failed` without exposing signer details.
@@ -314,44 +314,37 @@ with `X-Steward-Key`, `X-Steward-Tenant`, `x-steward-signer-id`, and `x-steward-
 
 After the first Steward signature in a process session, the MCP verifies it locally against `STEWARD_AGENT_ADDRESS`. A mismatch fails closed before any paid resource retry is sent.
 
-### Kova (`SIGNER_MODE=kova`, Unreleased)
+### Kova (`SIGNER_MODE=kova`, since 0.18.0)
 
 Kova by Komlock lab is a third-party Execution Provider for wallet, policy and
-signing. This mode currently requires this repository's unreleased MCP source;
-the pinned npm examples above do not provide it. The CLI contract is based on
+signing. This mode is included in `openpay-x402-mcp` 0.18.0. The CLI contract is based on
 `@komlock_lab/kova` 0.1.2 and was verified on 2026-09-25 with one Polygon Amoy purchase
 and one Polygon mainnet purchase of `/api/paid/demo` (2 JPYC each).
 The person installs/configures Kova separately. No dependency or peer dependency
 is added. Target OS: macOS/Linux. Windows is **unsupported**: `.cmd` shims cannot
 be spawned by this shell-free adapter.
 
-Clone the repository and use a revision containing this unreleased Kova mode.
-Install the root dependencies, then the MCP package dependencies:
+Check that the separately installed CLI is available:
 
 ```bash
-git clone https://github.com/cipherwebllc/openpay
-cd openpay
-npm ci
-cd packages/x402-mcp
-npm ci
 command -v kova
 ```
 
-`command -v kova` must find the separately installed CLI. Confirm the wallet's
+Confirm the wallet's
 public EVM address in Kova, for example with `kova wallet info`, and use it as
 `KOVA_AGENT_ADDRESS`; never export or paste a private key. Address lookup in
 Kova's agent-mode JSON remains unverified; MCP does not attempt automatic lookup.
 
-Register `node <absolute path>/packages/x402-mcp/src/index.mjs` with an MCP-capable
-host. Example JSON configuration (replace the path, wallet name and public address,
+Register `npx --yes openpay-x402-mcp@0.18` with an MCP-capable
+host. Example JSON configuration (replace the wallet name and public address,
 and use the limits agreed with the person):
 
 ```json
 {
   "mcpServers": {
     "openpay-x402": {
-      "command": "node",
-      "args": ["/absolute/path/to/openpay/packages/x402-mcp/src/index.mjs"],
+      "command": "npx",
+      "args": ["--yes", "openpay-x402-mcp@0.18"],
       "env": {
         "SIGNER_MODE": "kova",
         "KOVA_WALLET": "<existing Kova wallet name>",
@@ -359,7 +352,8 @@ and use the limits agreed with the person):
         "MAX_PER_CALL_JPYC": "10",
         "MAX_SESSION_JPYC": "100",
         "MAX_DAILY_JPYC": "100",
-        "ALLOWED_HOSTS": "open-pay.jp"
+        "ALLOWED_HOSTS": "open-pay.jp",
+        "CATALOG_TRUST": "true"
       }
     }
   }
@@ -398,8 +392,8 @@ rules that did not match the request (a different domain name and a different
 `primaryType` were both signed; the audit log recorded `agent_policy_allowed`).
 Treat the MCP's `MAX_PER_CALL_JPYC` / `MAX_SESSION_JPYC` / `MAX_DAILY_JPYC` as the
 only amount limits for Kova, keep a small balance, and re-check newer Kova releases.
-Still configure `sign_allowlist` so the intent is recorded and enforced once Kova
-does. The interactive `kova policy update` typed-data prompt takes `domain.name`,
+Still configure `sign_allowlist` as a record of intent. The interactive
+`kova policy update` typed-data prompt takes `domain.name`,
 `domain.verifyingContract` and `primaryType` only; `maxValue` and `chainId` can be
 supplied through `kova policy create --file <policy.json>`:
 
@@ -416,7 +410,7 @@ supplied through `kova policy create --file <policy.json>`:
 }
 ```
 
-A second rule lets `wallet_prove` bind purchase history on `/agent`. It carries no
+A second rule records the intent to use `wallet_prove` for purchase history on `/agent`. It carries no
 value and has no `verifyingContract` (the proof is never submitted on-chain):
 
 ```json
@@ -455,7 +449,7 @@ Use this explicit mode to avoid pasting a private key into MCP configuration:
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["--yes", "openpay-x402-mcp@0.17.2"],
+      "args": ["--yes", "openpay-x402-mcp@0.18"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
