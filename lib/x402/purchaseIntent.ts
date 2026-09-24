@@ -14,49 +14,34 @@ import 'server-only';
 //   store:purchase:<chainId>:<txHash>         authoritative purchase record
 //
 // R3a: 型・定数・KV key・parser・Lua 本文は lib/x402/purchase/{types,keys,parse,lua}.ts に分割した。
+// R3b: 読み取り・quote・claim・状態遷移は lib/x402/purchase/{read,quote,claim,transitions}.ts に分割した。
 // この file は公開 API の facade で、export 名は分割前と同じ。利用側の import と vi.mock は必ず
 // `@/lib/x402/purchaseIntent` を通す (lib/x402/purchase/* の deep import は eslint.config.mjs が禁止)。
 // 分割先は facade を import しない。facade 内の関数は分割先を直接 import して呼ぶ。
 
 import { randomBytes } from 'node:crypto';
-import {
-  hostedResourceUrl,
-  isRecord,
-  isSafeTimestamp,
-  parseHex32,
-} from '@/lib/x402/storeWire';
-import { JPYC_V3_ASSET } from '@/lib/x402/types';
+import { isSafeTimestamp } from '@/lib/x402/storeWire';
 import { licenseNftEnabled } from '@/lib/license/config';
 import { licenseLuaVariant, licenseEvalContext } from '@/lib/license/stock';
 import { reconcileLicensePurchase, type LicenseReconcileChain } from '@/lib/license/reconcile';
 import {
   createPublicClient,
-  getAddress,
-  isAddress,
   isAddressEqual,
   parseAbi,
   parseEventLogs,
-  type Address,
   type Hex,
 } from 'viem';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
-import { kvEval, kvGet, kvSet } from '@/lib/kv';
+import { kvEval, kvGet } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import {
   buildForwarderNonce,
   FORWARDER_COMMIT_VERSION,
   type ForwarderSettleParams,
 } from '@/lib/relay/forwarderIntent';
-import {
-  hostedContentKey,
-  type HostedPurchaseMetadata,
-} from '@/lib/x402/hostedStore';
-import { parseFacilitatorRequest } from '@/lib/x402/facilitatorSettle';
-import { paymentRedeliveryIdentity } from '@/lib/x402/paymentRedelivery';
 import { authorizationExpiredUnused } from '@/lib/x402/authorizationExpiry';
 import { railIntentParentKey, releaseActiveStoreRail } from '@/lib/x402/storeRailSelection';
 import {
-  MAX_UINT256,
   PURCHASE_DEPLOYMENT_VERSION,
   PURCHASE_EXPIRY_SAFETY_SEC,
   PURCHASE_FINALIZER_CONTENTION_RETRIES,
@@ -74,7 +59,6 @@ import {
   PURCHASE_RECONCILE_RETRY_MS,
   PURCHASE_REVISION_POLICY,
   PURCHASE_SETTLEMENT_LEASE_SEC,
-  FINGERPRINT_RE,
   TX_HASH_RE,
   type ClaimedPurchaseIntentBase,
   type FailedPrebroadcastPurchaseIntent,
@@ -83,7 +67,6 @@ import {
   type PurchaseAuthorizationClaim,
   type PurchaseGrant,
   type PurchaseIntent,
-  type PurchaseIntentBase,
   type PurchaseOwnership,
   type QuotedPurchaseIntent,
   type SettledPurchaseIntent,
@@ -101,31 +84,24 @@ import {
   purchaseOwnershipKey,
 } from './purchase/keys';
 import {
-  canonicalDecimal,
   canonicalHash,
   lowerHex,
-  parseClaim,
   parseHostedPurchaseRecord,
-  parseMetadata,
   parsePurchaseIntent,
   parsePurchaseOwnership,
-  quoteBinding,
 } from './purchase/parse';
 import {
-  ADOPT_RECONCILED_TRANSACTION,
-  CAS_PENDING_INTENT,
-  CLAIM_SETTLEMENT,
-  CLAIM_SIGNED_INTENT,
   FINALIZE_PURCHASE,
   LIST_PENDING_INTENTS,
-  MARK_PURCHASE_FAILED_PREBROADCAST,
-  MARK_PURCHASE_INDETERMINATE,
   QUARANTINE_PENDING_MEMBER,
-  QUOTE_RATE_LIMIT,
   READ_LIBRARY_SCORE,
-  RECORD_PURCHASE_TRANSACTION,
   REMOVE_TERMINAL_PENDING_MEMBER,
 } from './purchase/lua';
+import { getPurchaseIntent, readPurchaseIntent } from './purchase/read';
+import {
+  adoptReconciledTransaction,
+  casPendingIntent,
+} from './purchase/transitions';
 
 // 分割前と同じ公開 API (R3a)。利用側の import と vi.mock は必ずこの facade を通す。
 export {
@@ -173,6 +149,34 @@ export {
   parsePurchaseIntent,
   parsePurchaseOwnership,
 };
+export { getPurchaseIntent };
+export type { PurchaseIntentReadResult } from './purchase/read';
+export {
+  checkPurchaseQuoteRateLimit,
+  createQuotedPurchaseIntent,
+  readPurchaseAnchorBlock,
+} from './purchase/quote';
+export type {
+  CreateQuotedPurchaseIntentInput,
+  CreateQuotedPurchaseIntentResult,
+} from './purchase/quote';
+export {
+  buildPurchaseAuthorizationClaim,
+  claimPurchaseSettlement,
+  claimSignedPurchaseIntent,
+  extractPurchaseIntentSalt,
+  purchaseAuthorizationMatches,
+} from './purchase/claim';
+export type {
+  BuildPurchaseAuthorizationResult,
+  ClaimPurchaseSettlementResult,
+  ClaimSignedPurchaseResult,
+} from './purchase/claim';
+export {
+  markPurchaseFailedPrebroadcast,
+  markPurchaseIndeterminate,
+  recordPurchaseTransaction,
+} from './purchase/transitions';
 
 const AUTHORIZATION_STATE_ABI = parseAbi([
   'function authorizationState(address authorizer, bytes32 nonce) view returns (bool)',
@@ -183,833 +187,6 @@ const AUTHORIZATION_USED_EVENT = parseAbi([
 const FORWARDER_SETTLED_EVENT_ABI = parseAbi([
   'event Settled(address indexed from, bytes32 indexed nonce, address indexed merchant, uint256 merchantValue, address feeReceiver, uint256 feeValue)',
 ]);
-
-export type PurchaseIntentReadResult =
-  | { ok: true; intent: PurchaseIntent | null; raw: string | null }
-  | { ok: false; reason: 'storage' | 'corrupt' };
-
-async function readPurchaseIntent(
-  intentSalt: string,
-): Promise<PurchaseIntentReadResult> {
-  if (!isPurchaseIntentSalt(intentSalt)) {
-    return { ok: true, intent: null, raw: null };
-  }
-  const result = await kvGet(purchaseIntentKey(intentSalt));
-  if (!result.ok) return { ok: false, reason: 'storage' };
-  if (result.value === null) return { ok: true, intent: null, raw: null };
-  const intent = parsePurchaseIntent(result.value);
-  return intent
-    ? { ok: true, intent, raw: result.value }
-    : { ok: false, reason: 'corrupt' };
-}
-
-export async function getPurchaseIntent(
-  intentSalt: string,
-): Promise<PurchaseIntent | null | 'storage' | 'corrupt'> {
-  const result = await readPurchaseIntent(intentSalt);
-  if (!result.ok) return result.reason;
-  return result.intent;
-}
-
-export type CreateQuotedPurchaseIntentInput = {
-  resourceId: string;
-  contentRevision: number;
-  metadata: HostedPurchaseMetadata;
-  payer: Address;
-  token: Address;
-  chainId: number;
-  forwarder: Address;
-  merchant: Address;
-  merchantValue: bigint;
-  feeReceiver: Address;
-  feeValue: bigint;
-  anchorBlock: bigint;
-  now?: number;
-  intentSalt?: Hex;
-  commitVersion?: Hex;
-  deploymentVersion?: string;
-};
-
-export type CreateQuotedPurchaseIntentResult =
-  | { ok: true; intent: QuotedPurchaseIntent }
-  | { ok: false; reason: 'storage' | 'conflict' | 'invalid' };
-
-export async function createQuotedPurchaseIntent(
-  input: CreateQuotedPurchaseIntentInput,
-): Promise<CreateQuotedPurchaseIntentResult> {
-  const normalizedMetadata = parseMetadata(input.metadata);
-  const commitVersion = parseHex32(
-    input.commitVersion ?? FORWARDER_COMMIT_VERSION,
-  );
-  const deploymentVersion =
-    input.deploymentVersion ?? PURCHASE_DEPLOYMENT_VERSION;
-  if (
-    !normalizedMetadata ||
-    !commitVersion ||
-    typeof deploymentVersion !== 'string' ||
-    deploymentVersion.length === 0 ||
-    commitVersion !== FORWARDER_COMMIT_VERSION ||
-    deploymentVersion !== PURCHASE_DEPLOYMENT_VERSION ||
-    input.resourceId.length === 0 ||
-    !Number.isSafeInteger(input.contentRevision) ||
-    input.contentRevision < 1 ||
-    !isAddress(input.payer) ||
-    !isAddress(input.token) ||
-    !isAddress(input.forwarder) ||
-    !isAddress(input.merchant) ||
-    !isAddress(input.feeReceiver) ||
-    input.chainId <= 0 ||
-    !Number.isSafeInteger(input.chainId) ||
-    input.merchantValue <= 0n ||
-    input.merchantValue > MAX_UINT256 ||
-    input.feeValue <= 0n ||
-    input.feeValue > MAX_UINT256 ||
-    input.anchorBlock < 0n ||
-    input.anchorBlock > MAX_UINT256 ||
-    !isAddressEqual(normalizedMetadata.payTo, input.merchant)
-  ) {
-    return { ok: false, reason: 'invalid' };
-  }
-  if (normalizedMetadata.license && (!isAddressEqual(input.token, JPYC_V3_ASSET.address) || !licenseNftEnabled() || normalizedMetadata.license.contentRef !== hostedContentKey(input.resourceId, input.contentRevision) || normalizedMetadata.license.tokenChainId !== input.chainId || input.merchantValue !== BigInt(normalizedMetadata.priceJpyc) * 10n ** 18n)) return { ok: false, reason: 'invalid' };
-  const now = input.now ?? Date.now();
-  if (
-    !isSafeTimestamp(now) ||
-    !Number.isSafeInteger(
-      now +
-        (PURCHASE_QUOTE_TTL_SEC + PURCHASE_QUOTE_GRACE_SEC) * 1000,
-    )
-  ) {
-    return { ok: false, reason: 'invalid' };
-  }
-  const intentSalt = lowerHex(input.intentSalt ?? newPurchaseIntentSalt());
-  if (!isPurchaseIntentSalt(intentSalt)) {
-    return { ok: false, reason: 'invalid' };
-  }
-  const quoteExpiresAt = now + PURCHASE_QUOTE_TTL_SEC * 1000;
-  const authorizationValidBeforeMax = String(
-    Math.floor(quoteExpiresAt / 1000),
-  );
-  const contentRef = hostedContentKey(
-    input.resourceId,
-    input.contentRevision,
-  );
-  const bindingInput = {
-    intentSalt,
-    resourceId: input.resourceId,
-    contentRevision: input.contentRevision,
-    contentRef,
-    metadata: normalizedMetadata,
-    payerHint: getAddress(input.payer),
-    token: getAddress(input.token),
-    chainId: input.chainId,
-    forwarder: getAddress(input.forwarder),
-    commitVersion,
-    deploymentVersion,
-    merchant: getAddress(input.merchant),
-    merchantValue: input.merchantValue.toString(),
-    feeReceiver: getAddress(input.feeReceiver),
-    feeValue: input.feeValue.toString(),
-    anchorBlock: input.anchorBlock.toString(),
-    quoteExpiresAt,
-    authorizationValidBeforeMax,
-  };
-  const intent: QuotedPurchaseIntent = {
-    version: PURCHASE_INTENT_VERSION,
-    state: 'quoted',
-    ...bindingInput,
-    createdAt: now,
-    bindingHash: quoteBinding(bindingInput),
-  };
-  const saved = await kvSet(
-    purchaseIntentKey(intentSalt),
-    JSON.stringify(intent),
-    {
-      nx: true,
-      ttlSec: PURCHASE_QUOTE_TTL_SEC + PURCHASE_QUOTE_GRACE_SEC,
-    },
-  );
-  if (!saved.ok) return { ok: false, reason: 'storage' };
-  if (saved.value === null) return { ok: false, reason: 'conflict' };
-  return { ok: true, intent };
-}
-
-export async function checkPurchaseQuoteRateLimit(input: {
-  payer: Address;
-  resourceId: string;
-  ipHash: string | null;
-}): Promise<boolean> {
-  const keys = [
-    `store:quote:rl:wallet:${input.payer.toLowerCase()}`,
-    `store:quote:rl:resource:${input.resourceId}`,
-  ];
-  const limits = [
-    String(PURCHASE_QUOTE_WALLET_MAX),
-    String(PURCHASE_QUOTE_RESOURCE_MAX),
-  ];
-  if (input.ipHash !== null) {
-    keys.push(`store:quote:rl:ip:${input.ipHash}`);
-    limits.push(String(PURCHASE_QUOTE_IP_MAX));
-  }
-  try {
-    const result = await kvEval<number>(QUOTE_RATE_LIMIT, keys, [
-      '1',
-      '0',
-      '1',
-      String(PURCHASE_QUOTE_RATE_WINDOW_SEC),
-      ...limits,
-      'string',
-      'none',
-      'table',
-      '-1',
-    ]);
-    // 付帯 limiter の KV 障害を quote 本体へ波及させない。intent 保存自体は別途 fail-closed。
-    return !result.ok || result.value !== 0;
-  } catch {
-    // 何の波及を断つか: rate-limit storage の例外だけで正規購入を停止しない。
-    return true;
-  }
-}
-
-export async function readPurchaseAnchorBlock(
-  chainId: number,
-): Promise<bigint | null> {
-  const chain = chainObjectForId(chainId);
-  if (!chain) return null;
-  try {
-    const client = createPublicClient({
-      chain,
-      transport: transportForChain(chainId),
-    });
-    return await client.getBlockNumber();
-  } catch {
-    return null;
-  }
-}
-
-export function extractPurchaseIntentSalt(
-  paymentPayload: unknown,
-): Hex | null {
-  if (!isRecord(paymentPayload) || !isRecord(paymentPayload.payload)) {
-    return null;
-  }
-  const authorization = paymentPayload.payload.authorization;
-  if (!isRecord(authorization)) return null;
-  return parseHex32(authorization.intentSalt);
-}
-
-function requirementsMatchIntent(
-  raw: unknown,
-  intent: PurchaseIntentBase,
-): boolean {
-  if (!isRecord(raw)) return false;
-  const reqs = raw.paymentRequirements;
-  if (!isRecord(reqs) || !isRecord(reqs.extra)) return false;
-  const openpay = reqs.extra.openpay;
-  if (!isRecord(openpay)) return false;
-  const expectedTotal =
-    BigInt(intent.merchantValue) + BigInt(intent.feeValue);
-  return (
-    reqs.scheme === 'exact' &&
-    reqs.network === `eip155:${intent.chainId}` &&
-    reqs.maxAmountRequired === expectedTotal.toString() &&
-    reqs.resource ===
-      hostedResourceUrl(intent.resourceId, intent.payerHint, 'jpyc') &&
-    typeof reqs.payTo === 'string' &&
-    isAddress(reqs.payTo) &&
-    isAddressEqual(reqs.payTo, intent.forwarder) &&
-    typeof reqs.asset === 'string' &&
-    isAddress(reqs.asset) &&
-    isAddressEqual(reqs.asset, intent.token) &&
-    openpay.mode === 'forwarder-split' &&
-    typeof openpay.forwarder === 'string' &&
-    isAddress(openpay.forwarder) &&
-    isAddressEqual(openpay.forwarder, intent.forwarder) &&
-    typeof openpay.merchant === 'string' &&
-    isAddress(openpay.merchant) &&
-    isAddressEqual(openpay.merchant, intent.merchant) &&
-    openpay.merchantValue === intent.merchantValue &&
-    typeof openpay.feeReceiver === 'string' &&
-    isAddress(openpay.feeReceiver) &&
-    isAddressEqual(openpay.feeReceiver, intent.feeReceiver) &&
-    openpay.feeValue === intent.feeValue &&
-    typeof openpay.commitVersion === 'string' &&
-    lowerHex(openpay.commitVersion) === intent.commitVersion &&
-    typeof openpay.intentSalt === 'string' &&
-    lowerHex(openpay.intentSalt) === intent.intentSalt &&
-    openpay.authorizationValidBeforeMax ===
-      intent.authorizationValidBeforeMax &&
-    openpay.deploymentVersion === intent.deploymentVersion
-  );
-}
-
-export type BuildPurchaseAuthorizationResult =
-  | {
-      ok: true;
-      claim: PurchaseAuthorizationClaim;
-      authorizationHash: string;
-      signatureFingerprint: string;
-    }
-  | {
-      ok: false;
-      reason:
-        | 'invalid_payload'
-        | 'intent_mismatch'
-        | 'authorization_expired'
-        | 'authorization_too_late';
-    };
-
-export function buildPurchaseAuthorizationClaim(input: {
-  intent: PurchaseIntent;
-  paymentPayload: unknown;
-  facilitatorBody: Record<string, unknown>;
-  now?: number;
-  use?: 'broadcast-admission' | 'existing-claim-recovery';
-}): BuildPurchaseAuthorizationResult {
-  const { intent, paymentPayload, facilitatorBody } = input;
-  if (!requirementsMatchIntent(facilitatorBody, intent)) {
-    return { ok: false, reason: 'intent_mismatch' };
-  }
-  const identity = paymentRedeliveryIdentity(paymentPayload);
-  if (!identity) return { ok: false, reason: 'invalid_payload' };
-  const parsed = parseFacilitatorRequest(facilitatorBody);
-  if (!parsed.ok) return { ok: false, reason: 'invalid_payload' };
-  const { chainId, params } = parsed.parsed;
-  const nowSec = BigInt(Math.floor((input.now ?? Date.now()) / 1000));
-  if (params.validBefore > BigInt(intent.authorizationValidBeforeMax)) {
-    return { ok: false, reason: 'authorization_too_late' };
-  }
-  if (
-    input.use !== 'existing-claim-recovery' &&
-    params.validBefore <=
-    nowSec + BigInt(PURCHASE_EXPIRY_SAFETY_SEC)
-  ) {
-    return { ok: false, reason: 'authorization_expired' };
-  }
-  const nonce = buildForwarderNonce(params, chainId, intent.forwarder);
-  if (
-    chainId !== intent.chainId ||
-    !isAddressEqual(params.from, intent.payerHint) ||
-    !isAddressEqual(params.merchant, intent.merchant) ||
-    params.merchantValue.toString() !== intent.merchantValue ||
-    !isAddressEqual(params.feeReceiver, intent.feeReceiver) ||
-    params.feeValue.toString() !== intent.feeValue
-  ) {
-    return { ok: false, reason: 'intent_mismatch' };
-  }
-  const claim: PurchaseAuthorizationClaim = {
-    payer: getAddress(params.from),
-    token: intent.token,
-    chainId,
-    forwarder: intent.forwarder,
-    commitVersion: intent.commitVersion,
-    merchant: getAddress(params.merchant),
-    merchantValue: canonicalDecimal(params.merchantValue),
-    feeReceiver: getAddress(params.feeReceiver),
-    feeValue: canonicalDecimal(params.feeValue),
-    validAfter: canonicalDecimal(params.validAfter),
-    validBefore: canonicalDecimal(params.validBefore),
-    nonce: lowerHex(nonce),
-    signatureFingerprint: identity.credential,
-    resourceId: intent.resourceId,
-    contentRevision: intent.contentRevision,
-    deploymentVersion: intent.deploymentVersion,
-    anchorBlock: intent.anchorBlock,
-  };
-  return {
-    ok: true,
-    claim,
-    authorizationHash: canonicalHash(claim),
-    signatureFingerprint: identity.credential,
-  };
-}
-
-export function purchaseAuthorizationMatches(
-  intent: PurchaseIntent,
-  claim: PurchaseAuthorizationClaim,
-): boolean {
-  if (intent.state === 'quoted') {
-    return (
-      isAddressEqual(claim.payer, intent.payerHint) &&
-      isAddressEqual(claim.token, intent.token) &&
-      claim.chainId === intent.chainId &&
-      isAddressEqual(claim.forwarder, intent.forwarder) &&
-      claim.commitVersion === intent.commitVersion &&
-      isAddressEqual(claim.merchant, intent.merchant) &&
-      claim.merchantValue === intent.merchantValue &&
-      isAddressEqual(claim.feeReceiver, intent.feeReceiver) &&
-      claim.feeValue === intent.feeValue &&
-      claim.resourceId === intent.resourceId &&
-      claim.contentRevision === intent.contentRevision &&
-      claim.deploymentVersion === intent.deploymentVersion &&
-      claim.anchorBlock === intent.anchorBlock
-    );
-  }
-  return (
-    canonicalHash(claim) === intent.authorizationHash &&
-    claim.signatureFingerprint === intent.claim.signatureFingerprint
-  );
-}
-
-export type ClaimSignedPurchaseResult =
-  | { ok: true; kind: 'claimed' | 'idempotent'; intent: PurchaseIntent }
-  | {
-      ok: false;
-      reason: 'not_found' | 'expired' | 'conflict' | 'storage' | 'corrupt' | 'sold_out' | 'reservation_quota';
-    };
-
-export async function claimSignedPurchaseIntent(input: {
-  intentSalt: Hex;
-  claim: PurchaseAuthorizationClaim;
-  authorizationHash: string;
-  reservationToken?: string;
-  now?: number;
-}): Promise<ClaimSignedPurchaseResult> {
-  const normalizedClaim = parseClaim(input.claim);
-  if (
-    !normalizedClaim ||
-    !FINGERPRINT_RE.test(input.authorizationHash) ||
-    (input.reservationToken !== undefined &&
-      (typeof input.reservationToken !== 'string' ||
-        input.reservationToken.length === 0))
-  ) {
-    return { ok: false, reason: 'conflict' };
-  }
-  const read = await readPurchaseIntent(input.intentSalt);
-  if (!read.ok) return { ok: false, reason: read.reason };
-  const current = read.intent;
-  if (!current) return { ok: false, reason: 'not_found' };
-  if (current.metadata.productKind === 'license' && !licenseNftEnabled()) return { ok: false, reason: 'not_found' };
-  if (
-    canonicalHash(normalizedClaim) !== input.authorizationHash ||
-    !purchaseAuthorizationMatches(current, normalizedClaim)
-  ) {
-    return { ok: false, reason: 'conflict' };
-  }
-  const now = input.now ?? Date.now();
-  if (!isSafeTimestamp(now)) {
-    return { ok: false, reason: 'conflict' };
-  }
-  const claimParams: ForwarderSettleParams = {
-    from: normalizedClaim.payer,
-    merchant: normalizedClaim.merchant,
-    merchantValue: BigInt(normalizedClaim.merchantValue),
-    feeReceiver: normalizedClaim.feeReceiver,
-    feeValue: BigInt(normalizedClaim.feeValue),
-    validAfter: BigInt(normalizedClaim.validAfter),
-    validBefore: BigInt(normalizedClaim.validBefore),
-    intentSalt: current.intentSalt,
-  };
-  if (
-    buildForwarderNonce(
-      claimParams,
-      normalizedClaim.chainId,
-      normalizedClaim.forwarder,
-    ) !== normalizedClaim.nonce ||
-    BigInt(normalizedClaim.validBefore) >
-      BigInt(current.authorizationValidBeforeMax)
-  ) {
-    return { ok: false, reason: 'conflict' };
-  }
-  if (
-    BigInt(normalizedClaim.validBefore) <=
-    BigInt(Math.floor(now / 1000) + PURCHASE_EXPIRY_SAFETY_SEC)
-  ) {
-    return { ok: false, reason: 'expired' };
-  }
-  const signed: SignedPurchaseIntent =
-    current.state === 'quoted'
-      ? {
-          ...current,
-          state: 'signed',
-          claim: normalizedClaim,
-          authorizationHash: input.authorizationHash,
-          ...(input.reservationToken === undefined
-            ? {}
-            : { reservationToken: input.reservationToken }),
-          signedAt: now,
-          nextReconcileAt: now,
-        }
-      : {
-          ...current,
-          state: 'signed',
-          claim: normalizedClaim,
-          authorizationHash: input.authorizationHash,
-          ...(current.reservationToken === undefined
-            ? {}
-            : { reservationToken: current.reservationToken }),
-          signedAt: current.signedAt,
-          nextReconcileAt: now,
-        };
-  const result = await kvEval<number>(
-    current.metadata.productKind === 'license' ? licenseLuaVariant(CLAIM_SIGNED_INTENT) : CLAIM_SIGNED_INTENT,
-    [purchaseIntentKey(input.intentSalt), PENDING_INDEX_KEY],
-    [
-      '0',
-      'table',
-      '-3',
-      'quoted',
-      current.bindingHash,
-      '-1',
-      String(now),
-      '-2',
-      JSON.stringify(signed),
-      String(now),
-      input.intentSalt,
-      '1',
-      'signed',
-      'settling',
-      'indeterminate',
-      'settled',
-      input.authorizationHash,
-      normalizedClaim.signatureFingerprint,
-      '2',
-      'none',
-      'zset',
-      ...(current.metadata.productKind === 'license' ? [licenseEvalContext(signed, 'claim', now)] : []),
-    ],
-  );
-  if (!result.ok) return { ok: false, reason: 'storage' };
-  if (result.value === -4) return { ok: false, reason: 'sold_out' };
-  if (result.value === -5) return { ok: false, reason: 'reservation_quota' };
-  if (result.value === 0) return { ok: false, reason: 'not_found' };
-  if (result.value === -3) return { ok: false, reason: 'corrupt' };
-  if (result.value === -2) return { ok: false, reason: 'expired' };
-  if (result.value === -1) return { ok: false, reason: 'conflict' };
-  if (result.value === 2) {
-    const latest = await getPurchaseIntent(input.intentSalt);
-    if (
-      latest === 'storage' ||
-      latest === 'corrupt' ||
-      latest === null
-    ) {
-      return {
-        ok: false,
-        reason: latest === 'corrupt' ? 'corrupt' : 'storage',
-      };
-    }
-    return { ok: true, kind: 'idempotent', intent: latest };
-  }
-  return { ok: true, kind: 'claimed', intent: signed };
-}
-
-export type ClaimPurchaseSettlementResult =
-  | { ok: true; kind: 'claimed'; intent: SettlingPurchaseIntent }
-  | {
-      ok: true;
-      kind: 'pending';
-      intent: SettlingPurchaseIntent | IndeterminatePurchaseIntent;
-    }
-  | { ok: true; kind: 'settled'; intent: SettledPurchaseIntent }
-  | {
-      ok: false;
-      reason:
-        | 'not_found'
-        | 'expired'
-        | 'conflict'
-        | 'failed'
-        | 'storage'
-        | 'corrupt';
-    };
-
-export async function claimPurchaseSettlement(input: {
-  intentSalt: Hex;
-  claim: PurchaseAuthorizationClaim;
-  now?: number;
-}): Promise<ClaimPurchaseSettlementResult> {
-  const normalizedClaim = parseClaim(input.claim);
-  if (!normalizedClaim) return { ok: false, reason: 'conflict' };
-  const read = await readPurchaseIntent(input.intentSalt);
-  if (!read.ok) return { ok: false, reason: read.reason };
-  const current = read.intent;
-  if (!current) return { ok: false, reason: 'not_found' };
-  if (current.metadata.productKind === 'license' && !licenseNftEnabled()) return { ok: false, reason: 'not_found' };
-  if (
-    current.state === 'quoted' ||
-    !purchaseAuthorizationMatches(current, normalizedClaim)
-  ) {
-    return { ok: false, reason: 'conflict' };
-  }
-  if (current.state === 'failed_prebroadcast') {
-    return { ok: false, reason: 'failed' };
-  }
-  if (current.state === 'settled') {
-    return { ok: true, kind: 'settled', intent: current };
-  }
-  if (current.state === 'settling' || current.state === 'indeterminate') {
-    return { ok: true, kind: 'pending', intent: current };
-  }
-  const now = input.now ?? Date.now();
-  if (!isSafeTimestamp(now)) {
-    return { ok: false, reason: 'conflict' };
-  }
-  const attemptId = randomBytes(32).toString('hex');
-  const settling: SettlingPurchaseIntent = {
-    ...current,
-    state: 'settling',
-    attemptId,
-    attempt: 1,
-    settlementStartedAt: now,
-    leaseUntil: now + PURCHASE_SETTLEMENT_LEASE_SEC * 1000,
-    nextReconcileAt:
-      now + PURCHASE_SETTLEMENT_LEASE_SEC * 1000,
-  };
-  const result = await kvEval<number>(
-    current.metadata.productKind === 'license' ? licenseLuaVariant(CLAIM_SETTLEMENT) : CLAIM_SETTLEMENT,
-    [purchaseIntentKey(input.intentSalt), PENDING_INDEX_KEY],
-    [
-      '0',
-      'table',
-      '-3',
-      current.authorizationHash,
-      current.claim.signatureFingerprint,
-      '-1',
-      'signed',
-      String(Math.floor(now / 1000)),
-      String(PURCHASE_EXPIRY_SAFETY_SEC),
-      '-2',
-      JSON.stringify(settling),
-      String(settling.nextReconcileAt),
-      input.intentSalt,
-      '1',
-      'settling',
-      'indeterminate',
-      '2',
-      'settled',
-      '3',
-      'none',
-      'zset',
-      ...(current.metadata.productKind === 'license' ? [licenseEvalContext(settling, 'settle', now)] : []),
-    ],
-  );
-  if (!result.ok) return { ok: false, reason: 'storage' };
-  if (result.value === 0) return { ok: false, reason: 'not_found' };
-  if (result.value === -3) return { ok: false, reason: 'corrupt' };
-  if (result.value === -2) return { ok: false, reason: 'expired' };
-  if (result.value === -1) return { ok: false, reason: 'conflict' };
-  if (result.value === 1) {
-    return { ok: true, kind: 'claimed', intent: settling };
-  }
-  const latest = await getPurchaseIntent(input.intentSalt);
-  if (
-    latest === 'storage' ||
-    latest === 'corrupt' ||
-    latest === null ||
-    latest.state === 'quoted' ||
-    latest.state === 'signed' ||
-    latest.state === 'failed_prebroadcast'
-  ) {
-    return { ok: false, reason: 'storage' };
-  }
-  return latest.state === 'settled'
-    ? { ok: true, kind: 'settled', intent: latest }
-    : { ok: true, kind: 'pending', intent: latest };
-}
-
-async function casPendingIntent(input: {
-  intentSalt: Hex;
-  expectedRaw: string;
-  next: PurchaseIntent;
-  removePending: boolean;
-  nextScore: number;
-}): Promise<'updated' | 'missing' | 'conflict' | 'storage'> {
-  const result = await kvEval<number>(
-    CAS_PENDING_INTENT,
-    [purchaseIntentKey(input.intentSalt), PENDING_INDEX_KEY],
-    [
-      '0',
-      input.expectedRaw,
-      '-1',
-      JSON.stringify(input.next),
-      input.removePending ? 'remove' : 'keep',
-      'remove',
-      input.intentSalt,
-      String(input.nextScore),
-      '1',
-      'none',
-      'zset',
-      'table',
-      '-2',
-    ],
-  );
-  if (!result.ok) return 'storage';
-  if (result.value === 0) return 'missing';
-  if (result.value === -1) return 'conflict';
-  if (result.value === -2) return 'storage';
-  return result.value === 1 ? 'updated' : 'storage';
-}
-
-async function adoptReconciledTransaction(input: {
-  intentSalt: Hex;
-  reconcileLeaseId: string;
-  authorizationHash: string;
-  txHash: Hex;
-  now: number;
-}): Promise<'updated' | 'conflict' | 'storage'> {
-  const result = await kvEval<number>(
-    ADOPT_RECONCILED_TRANSACTION,
-    [purchaseIntentKey(input.intentSalt), PENDING_INDEX_KEY],
-    [
-      '0',
-      'table',
-      '-3',
-      'settling',
-      'indeterminate',
-      input.reconcileLeaseId,
-      input.authorizationHash,
-      '-1',
-      lowerHex(input.txHash),
-      String(input.now),
-      input.intentSalt,
-      '1',
-      'none',
-      'zset',
-    ],
-  );
-  if (!result.ok || result.value === 0 || result.value === -3) {
-    return 'storage';
-  }
-  return result.value === 1 ? 'updated' : 'conflict';
-}
-
-export async function recordPurchaseTransaction(input: {
-  intentSalt: Hex;
-  attemptId: string;
-  txHash: Hex;
-  now?: number;
-}): Promise<'updated' | 'idempotent' | 'conflict' | 'storage'> {
-  if (
-    !isPurchaseIntentSalt(input.intentSalt) ||
-    !FINGERPRINT_RE.test(input.attemptId) ||
-    !TX_HASH_RE.test(input.txHash)
-  ) {
-    return 'conflict';
-  }
-  const now = input.now ?? Date.now();
-  if (!isSafeTimestamp(now)) return 'conflict';
-  const result = await kvEval<number>(
-    RECORD_PURCHASE_TRANSACTION,
-    [purchaseIntentKey(input.intentSalt), PENDING_INDEX_KEY],
-    [
-      '0',
-      'table',
-      '-3',
-      input.attemptId,
-      lowerHex(input.txHash),
-      'settling',
-      'indeterminate',
-      'settled',
-      '-1',
-      String(now),
-      input.intentSalt,
-      '1',
-      '2',
-      'none',
-      'zset',
-    ],
-  );
-  if (!result.ok || result.value === -3 || result.value === 0) {
-    return 'storage';
-  }
-  if (result.value === -1) return 'conflict';
-  if (result.value === 2) return 'idempotent';
-  return result.value === 1 ? 'updated' : 'storage';
-}
-
-export async function markPurchaseIndeterminate(input: {
-  intentSalt: Hex;
-  attemptId: string;
-  txHash?: Hex;
-  now?: number;
-}): Promise<'updated' | 'idempotent' | 'conflict' | 'storage'> {
-  if (
-    !isPurchaseIntentSalt(input.intentSalt) ||
-    !FINGERPRINT_RE.test(input.attemptId) ||
-    (input.txHash !== undefined && !TX_HASH_RE.test(input.txHash))
-  ) {
-    return 'conflict';
-  }
-  const now = input.now ?? Date.now();
-  if (!isSafeTimestamp(now)) return 'conflict';
-  const nextReconcileAt = now + PURCHASE_RECONCILE_RETRY_MS;
-  const result = await kvEval<number>(
-    MARK_PURCHASE_INDETERMINATE,
-    [purchaseIntentKey(input.intentSalt), PENDING_INDEX_KEY],
-    [
-      '0',
-      'table',
-      '-3',
-      'settled',
-      '2',
-      'settling',
-      'indeterminate',
-      input.attemptId,
-      '-1',
-      input.txHash ? lowerHex(input.txHash) : '',
-      '',
-      String(now),
-      String(nextReconcileAt),
-      input.intentSalt,
-      '1',
-      'none',
-      'zset',
-    ],
-  );
-  if (!result.ok || result.value === 0 || result.value === -3) {
-    return 'storage';
-  }
-  if (result.value === -1) return 'conflict';
-  if (result.value === 2) return 'idempotent';
-  return result.value === 1 ? 'updated' : 'storage';
-}
-
-export async function markPurchaseFailedPrebroadcast(input: {
-  intentSalt: Hex;
-  attemptId: string;
-  reason: string;
-  now?: number;
-  licenseIntent?: PurchaseIntent;
-}): Promise<'updated' | 'idempotent' | 'conflict' | 'storage'> {
-  if (
-    !isPurchaseIntentSalt(input.intentSalt) ||
-    !FINGERPRINT_RE.test(input.attemptId) ||
-    typeof input.reason !== 'string' ||
-    input.reason.length === 0
-  ) {
-    return 'conflict';
-  }
-  const now = input.now ?? Date.now();
-  if (!isSafeTimestamp(now)) return 'conflict';
-  const licenseIntent = input.licenseIntent ? parsePurchaseIntent(JSON.stringify(input.licenseIntent)) : null;
-  if (input.licenseIntent && (!licenseIntent || licenseIntent.intentSalt !== input.intentSalt || licenseIntent.metadata.productKind !== 'license')) return 'conflict';
-  const result = await kvEval<number>(
-    licenseIntent ? licenseLuaVariant(MARK_PURCHASE_FAILED_PREBROADCAST) : MARK_PURCHASE_FAILED_PREBROADCAST,
-    [purchaseIntentKey(input.intentSalt), PENDING_INDEX_KEY],
-    [
-      '0',
-      'table',
-      '-3',
-      'failed_prebroadcast',
-      '2',
-      'settling',
-      'indeterminate',
-      input.attemptId,
-      '-1',
-      String(now),
-      input.reason,
-      input.intentSalt,
-      '1',
-      'none',
-      'zset',
-      ...(licenseIntent ? [licenseEvalContext(licenseIntent, 'fail', now)] : []),
-    ],
-  );
-  if (!result.ok || result.value === 0 || result.value === -3) {
-    return 'storage';
-  }
-  if (result.value === -1) return 'conflict';
-  if (result.value === 2) return 'idempotent';
-  return result.value === 1 ? 'updated' : 'storage';
-}
 
 function purchaseGrant(
   intent: ClaimedPurchaseIntentBase,

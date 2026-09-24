@@ -83,6 +83,7 @@ import {
   PURCHASE_EXPIRY_SAFETY_SEC,
   PURCHASE_QUOTE_GRACE_SEC,
   PURCHASE_QUOTE_TTL_SEC,
+  PURCHASE_RECONCILE_LEASE_SEC,
   PURCHASE_RECONCILE_RETRY_MS,
   PURCHASE_SETTLEMENT_LEASE_SEC,
   checkPurchaseQuoteRateLimit,
@@ -1678,5 +1679,219 @@ describe('purchase Lua contracts: production callers, positional arguments and a
       expect(call.before.zsets.get(call.keys[1])?.get('invalid-salt')).toBe(BASE_NOW);
       expect(call.before.zsets.has(call.keys[0])).toBe(false);
     }
+  });
+});
+
+// R3b (quote/claim/transitions の分割) の前に、分割前のコード (86e98b1a) で固定した caller 経由の実 Lua ケース。
+// 上の contract 群は script 単体の replay。ここは移動する関数 (claim・transition・lease CAS) の
+// 戻り値の対応と、競合・古い lease/raw・key の型違い・欠落 index の修復・TTL を実際の呼び出し順で固定する。
+describe('R3b pins: transitions under contention, stale leases/CAS, wrong key types, repair and TTL', () => {
+  const pendingKey = () => purchasePendingIndexKey();
+  const pendingScore = (salt: string) => h.store!.zsets.get(pendingKey())?.get(salt);
+  const casCalls = () => h.calls.filter((call) => call.script === purchaseScripts.CAS_PENDING_INTENT);
+  const reconcileChain = (authorizationUsed: () => Promise<boolean>) => ({
+    authorizationUsed: vi.fn(authorizationUsed),
+    latestBlock: vi.fn(async () => ANCHOR_BLOCK),
+    authorizationUsedTransactions: vi.fn(async (): Promise<Hex[]> => []),
+    receiptMatches: vi.fn(async () => false),
+  });
+  function setStored(salt: string, patch: Record<string, unknown>) {
+    const key = purchaseIntentKey(salt);
+    h.store!.strings.set(key, JSON.stringify({ ...jsonObject(h.store!.strings.get(key)!), ...patch }));
+    return h.store!.strings.get(key)!;
+  }
+
+  it('concurrent signing: the same signature is claimed once and replayed idempotently; a different signature loses', async () => {
+    const quote = await makeQuote();
+    const claim = makeClaim(quote);
+    const sign = (value: PurchaseAuthorizationClaim) => claimSignedPurchaseIntent({
+      intentSalt: quote.intentSalt, claim: value, authorizationHash: authorizationHash(value), now: BASE_NOW + 1_000,
+    });
+    const same = await Promise.all([sign(claim), sign(claim)]);
+    expect(same.map((result) => (result.ok ? result.kind : result.reason)).sort()).toEqual(['claimed', 'idempotent']);
+
+    const race = await makeQuote();
+    const first = makeClaim(race);
+    const second = makeClaim(race, { signatureFingerprint: OTHER_FINGERPRINT });
+    const signRace = (value: PurchaseAuthorizationClaim) => claimSignedPurchaseIntent({
+      intentSalt: race.intentSalt, claim: value, authorizationHash: authorizationHash(value), now: BASE_NOW + 1_000,
+    });
+    const results = await Promise.all([signRace(first), signRace(second)]);
+    expect(results.map((result) => (result.ok ? result.kind : result.reason)).sort()).toEqual(['claimed', 'conflict']);
+    const winner = results.find((result) => result.ok)!;
+    expect(winner.ok && winner.intent.state === 'signed' && winner.intent.claim.signatureFingerprint)
+      .toBe((await getPurchaseIntent(race.intentSalt) as { claim: PurchaseAuthorizationClaim }).claim.signatureFingerprint);
+    expect(pendingScore(race.intentSalt)).toBe(BASE_NOW + 1_000);
+  });
+
+  it('concurrent settlement claims admit exactly one attempt and report it to the loser as pending', async () => {
+    const quote = await makeQuote();
+    const { claim } = await signQuote(quote);
+    const settle = () => claimPurchaseSettlement({ intentSalt: quote.intentSalt, claim, now: BASE_NOW + 2_000 });
+    const results = await Promise.all([settle(), settle()]);
+    expect(results.map((result) => (result.ok ? result.kind : result.reason)).sort()).toEqual(['claimed', 'pending']);
+    const stored = await getPurchaseIntent(quote.intentSalt) as SettlingPurchaseIntent;
+    for (const result of results) {
+      expect(result.ok && result.intent.state === 'settling' && result.intent.attemptId).toBe(stored.attemptId);
+    }
+    expect(h.calls.filter((call) => call.script === purchaseScripts.CLAIM_SETTLEMENT)).toHaveLength(2);
+    expect(pendingScore(quote.intentSalt)).toBe(BASE_NOW + 2_000 + PURCHASE_SETTLEMENT_LEASE_SEC * 1_000);
+  });
+
+  it('an expired settlement lease is never re-claimed by the settle path (reconcile owns recovery)', async () => {
+    const settling = await makeSettling();
+    const raw = h.store!.strings.get(purchaseIntentKey(settling.intentSalt));
+    await expect(claimPurchaseSettlement({
+      intentSalt: settling.intentSalt, claim: settling.claim, now: settling.leaseUntil + 1,
+    })).resolves.toMatchObject({ ok: true, kind: 'pending', intent: { attemptId: settling.attemptId } });
+    expect(h.store!.strings.get(purchaseIntentKey(settling.intentSalt))).toBe(raw);
+  });
+
+  it('reconcile respects an active reconcile lease without writing and takes over a stale one by CAS', async () => {
+    const settling = await makeSettling();
+    const active = setStored(settling.intentSalt, { reconcileLeaseId: 'f'.repeat(64), reconcileLeaseUntil: RECONCILE_NOW + 1 });
+    h.calls = [];
+    const blocked = reconcileChain(async () => false);
+    await expect(reconcilePurchaseIntent(settling.intentSalt, { now: RECONCILE_NOW, chain: blocked }))
+      .resolves.toEqual({ ok: true, state: 'pending' });
+    expect(blocked.authorizationUsed).not.toHaveBeenCalled();
+    expect(h.calls).toEqual([]);
+    expect(h.store!.strings.get(purchaseIntentKey(settling.intentSalt))).toBe(active);
+
+    const stale = setStored(settling.intentSalt, { reconcileLeaseUntil: RECONCILE_NOW });
+    const takeover = reconcileChain(async () => false);
+    await expect(reconcilePurchaseIntent(settling.intentSalt, { now: RECONCILE_NOW, chain: takeover }))
+      .resolves.toEqual({ ok: true, state: 'pending' });
+    expect(takeover.authorizationUsed).toHaveBeenCalledTimes(1);
+    // 1 本目が古い lease の raw を比較して取り直し、2 本目が取った lease の raw から再予約する。
+    expect(casCalls().map((call) => call.args[1])).toEqual([stale, expect.stringContaining('"reconcileLeaseUntil":')]);
+    const leased = jsonObject(casCalls()[0]!.args[3]!);
+    expect(leased.reconcileLeaseId).not.toBe('f'.repeat(64));
+    expect(leased.reconcileLeaseUntil).toBe(RECONCILE_NOW + PURCHASE_RECONCILE_LEASE_SEC * 1_000);
+    const stored = jsonObject(h.store!.strings.get(purchaseIntentKey(settling.intentSalt))!);
+    expect(stored).toMatchObject({ state: 'indeterminate', indeterminateAt: RECONCILE_NOW, nextReconcileAt: RECONCILE_NOW + PURCHASE_RECONCILE_RETRY_MS });
+    expect(stored).not.toHaveProperty('reconcileLeaseId');
+    expect(stored).not.toHaveProperty('reconcileLeaseUntil');
+    expect(pendingScore(settling.intentSalt)).toBe(RECONCILE_NOW + PURCHASE_RECONCILE_RETRY_MS);
+  });
+
+  it('a reconciler holding the lease keeps a concurrent reconciler out (contention)', async () => {
+    const settling = await makeSettling();
+    const inner = reconcileChain(async () => false);
+    let innerResult: unknown;
+    const outer = reconcileChain(async () => {
+      innerResult = await reconcilePurchaseIntent(settling.intentSalt, { now: RECONCILE_NOW, chain: inner });
+      return false;
+    });
+    await expect(reconcilePurchaseIntent(settling.intentSalt, { now: RECONCILE_NOW, chain: outer }))
+      .resolves.toEqual({ ok: true, state: 'pending' });
+    expect(innerResult).toEqual({ ok: true, state: 'pending' });
+    expect(inner.authorizationUsed).not.toHaveBeenCalled();
+    expect(casCalls()).toHaveLength(2);
+    expect(await getPurchaseIntent(settling.intentSalt)).toMatchObject({ state: 'indeterminate' });
+  });
+
+  it('a stale leased raw cannot overwrite a concurrent settle-worker transaction write (CAS)', async () => {
+    const settling = await makeSettling();
+    const chain = reconcileChain(async () => {
+      await expect(recordPurchaseTransaction({
+        intentSalt: settling.intentSalt, attemptId: settling.attemptId, txHash: TX_HASH, now: RECONCILE_NOW,
+      })).resolves.toBe('updated');
+      return false;
+    });
+    await expect(reconcilePurchaseIntent(settling.intentSalt, { now: RECONCILE_NOW, chain }))
+      .resolves.toEqual({ ok: false, reason: 'storage' });
+    const stored = jsonObject(h.store!.strings.get(purchaseIntentKey(settling.intentSalt))!);
+    expect(stored).toMatchObject({ state: 'settling', txHash: TX_HASH, nextReconcileAt: RECONCILE_NOW });
+    expect(stored.reconcileLeaseUntil).toBe(RECONCILE_NOW + PURCHASE_RECONCILE_LEASE_SEC * 1_000);
+    expect(pendingScore(settling.intentSalt)).toBe(RECONCILE_NOW);
+  });
+
+  it.each([
+    ['claimSignedPurchaseIntent', { ok: false, reason: 'corrupt' }],
+    ['claimPurchaseSettlement', { ok: false, reason: 'corrupt' }],
+    ['recordPurchaseTransaction', 'storage'],
+    ['markPurchaseIndeterminate', 'storage'],
+    ['markPurchaseFailedPrebroadcast', 'storage'],
+    ['reconcile lease CAS', { ok: false, reason: 'storage' }],
+  ] as const)('%s maps a wrong-type pending index to %j without any write', async (operation, expected) => {
+    const quote = await makeQuote();
+    const signed = operation === 'claimSignedPurchaseIntent' ? null : await signQuote(quote);
+    const settling = operation === 'claimSignedPurchaseIntent' || operation === 'claimPurchaseSettlement'
+      ? null
+      : await claimPurchaseSettlement({ intentSalt: quote.intentSalt, claim: signed!.claim, now: BASE_NOW + 2_000 });
+    const attemptId = settling?.ok && settling.intent.state === 'settling' ? settling.intent.attemptId : '';
+    h.store!.delete(pendingKey());
+    h.store!.strings.set(pendingKey(), 'wrong-type');
+    const key = purchaseIntentKey(quote.intentSalt);
+    const before = { raw: h.store!.strings.get(key), ttl: h.store!.getTtl(key) };
+    const input = { intentSalt: quote.intentSalt, attemptId, now: BASE_NOW + 3_000 };
+    const chain = reconcileChain(async () => false);
+    const claim = makeClaim(quote);
+    const result = operation === 'claimSignedPurchaseIntent'
+      ? await claimSignedPurchaseIntent({ intentSalt: quote.intentSalt, claim, authorizationHash: authorizationHash(claim), now: BASE_NOW + 1_000 })
+      : operation === 'claimPurchaseSettlement'
+        ? await claimPurchaseSettlement({ intentSalt: quote.intentSalt, claim: signed!.claim, now: BASE_NOW + 2_000 })
+        : operation === 'recordPurchaseTransaction'
+          ? await recordPurchaseTransaction({ ...input, txHash: TX_HASH })
+          : operation === 'markPurchaseIndeterminate'
+            ? await markPurchaseIndeterminate({ ...input, txHash: TX_HASH })
+            : operation === 'markPurchaseFailedPrebroadcast'
+              ? await markPurchaseFailedPrebroadcast({ ...input, reason: 'prebroadcast_rejection' })
+              : await reconcilePurchaseIntent(quote.intentSalt, { now: RECONCILE_NOW, chain });
+    expect(result).toEqual(expected);
+    expect({ raw: h.store!.strings.get(key), ttl: h.store!.getTtl(key) }).toEqual(before);
+    expect(h.store!.strings.get(pendingKey())).toBe('wrong-type');
+    expect(chain.authorizationUsed).not.toHaveBeenCalled();
+  });
+
+  it('record / markIndeterminate re-add a dropped pending member; replays after finalize are idempotent and do not', async () => {
+    const settling = await makeSettling();
+    const salt = settling.intentSalt;
+    const input = { intentSalt: salt, attemptId: settling.attemptId };
+    h.store!.zsets.get(pendingKey())!.delete(salt);
+    await expect(recordPurchaseTransaction({ ...input, txHash: TX_HASH, now: BASE_NOW + 3_000 })).resolves.toBe('updated');
+    expect(pendingScore(salt)).toBe(BASE_NOW + 3_000);
+    h.store!.zsets.get(pendingKey())!.delete(salt);
+    await expect(markPurchaseIndeterminate({ ...input, now: BASE_NOW + 4_000 })).resolves.toBe('updated');
+    expect(pendingScore(salt)).toBe(BASE_NOW + 4_000 + PURCHASE_RECONCILE_RETRY_MS);
+    // broadcast 済み hash がある intent は prebroadcast failure に落とせない。
+    await expect(markPurchaseFailedPrebroadcast({ ...input, reason: 'late', now: BASE_NOW + 5_000 })).resolves.toBe('conflict');
+    await expect(finalizeHostedPurchase({ intentSalt: salt, txHash: TX_HASH, settledAt: BASE_NOW + 5_000 }))
+      .resolves.toMatchObject({ ok: true, kind: 'finalized' });
+    expect(pendingScore(salt)).toBeUndefined();
+    const settledRaw = h.store!.strings.get(purchaseIntentKey(salt));
+    await expect(recordPurchaseTransaction({ ...input, txHash: TX_HASH, now: BASE_NOW + 6_000 })).resolves.toBe('idempotent');
+    await expect(markPurchaseIndeterminate({ ...input, txHash: TX_HASH, now: BASE_NOW + 6_000 })).resolves.toBe('idempotent');
+    await expect(markPurchaseFailedPrebroadcast({ ...input, reason: 'late', now: BASE_NOW + 6_000 })).resolves.toBe('conflict');
+    await expect(recordPurchaseTransaction({ ...input, txHash: OTHER_TX_HASH, now: BASE_NOW + 6_000 })).resolves.toBe('conflict');
+    expect(h.store!.strings.get(purchaseIntentKey(salt))).toBe(settledRaw);
+    expect(pendingScore(salt)).toBeUndefined();
+  });
+
+  it('TTL: an expired quote cannot be signed or recreated; the grace window is expired and keeps its TTL; signed intents outlive it', async () => {
+    const gone = await makeQuote();
+    const grace = await makeQuote();
+    const kept = await makeQuote();
+    const { claim: keptClaim } = await signQuote(kept);
+    h.store!.advance(PURCHASE_QUOTE_TTL_SEC * 1_000);
+    const graceClaim = makeClaim(grace);
+    await expect(claimSignedPurchaseIntent({
+      intentSalt: grace.intentSalt, claim: graceClaim, authorizationHash: authorizationHash(graceClaim), now: grace.quoteExpiresAt,
+    })).resolves.toEqual({ ok: false, reason: 'expired' });
+    expect(h.store!.getTtl(purchaseIntentKey(grace.intentSalt))).toBe(PURCHASE_QUOTE_GRACE_SEC);
+    expect(pendingScore(grace.intentSalt)).toBeUndefined();
+
+    h.store!.advance(PURCHASE_QUOTE_GRACE_SEC * 1_000);
+    const goneClaim = makeClaim(gone);
+    await expect(claimSignedPurchaseIntent({
+      intentSalt: gone.intentSalt, claim: goneClaim, authorizationHash: authorizationHash(goneClaim), now: BASE_NOW + 1_000,
+    })).resolves.toEqual({ ok: false, reason: 'not_found' });
+    expect(h.store!.strings.has(purchaseIntentKey(gone.intentSalt))).toBe(false);
+    expect(pendingScore(gone.intentSalt)).toBeUndefined();
+
+    await expect(claimPurchaseSettlement({ intentSalt: kept.intentSalt, claim: keptClaim, now: BASE_NOW + 2_000 }))
+      .resolves.toMatchObject({ ok: true, kind: 'claimed' });
+    expect(h.store!.getTtl(purchaseIntentKey(kept.intentSalt))).toBe(-1);
   });
 });
