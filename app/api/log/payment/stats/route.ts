@@ -27,6 +27,7 @@ import {
   polygon,
   polygonAmoy,
 } from 'viem/chains';
+import { chainNameForId } from '@/lib/chains';
 import { kvLrange, kvLlen } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { PAYMENT_LOG_KV_KEY } from '@/lib/paymentLog';
@@ -34,11 +35,12 @@ import { requireAdminAuth } from '../_auth';
 
 export const runtime = 'nodejs';
 
-// chainId → 表示名の固定の lookup table (USDC 4 chain × mainnet/testnet + JPYC 2 chain ×
-// mainnet/testnet)。表に無い chain (Ethereum・Avalanche・Arc 等) は `chainId:N` と表示する。
-// lib/chains の chainNameForId は選択中 network の chain しか名前を返さず表示名が変わるため
-// ここでは使わない (寄せるなら表示変更として B-R6d・tests/app/api/payment-log-storage-pinning)。
-const KNOWN_CHAINS = [
+// chainId → 表示名 (B-R6d・C16)。まず lib/chains の chainNameForId (選択中 network で対応する
+// chain の一覧) で引き、無ければ下の固定表、それも無ければ `chainId:N`。chainNameForId は
+// 選択中 network の chain しか名前を返さないため、固定表だけで名前が付いていた反対側 network の
+// id (mainnet 選択時の Amoy・testnet 選択時の Polygon 等) を `chainId:N` に落とさないよう固定表を残す。
+// 両方にある id は同じ viem Chain.name を返すので、既存の名前は変わらない。
+const LEGACY_NAMED_CHAINS = [
   polygon,
   polygonAmoy,
   base,
@@ -52,8 +54,11 @@ const KNOWN_CHAINS = [
 ] as const;
 
 function chainName(chainId: number): string {
-  const c = KNOWN_CHAINS.find((x) => x.id === chainId);
-  return c ? c.name : `chainId:${chainId}`;
+  return (
+    chainNameForId(chainId) ??
+    LEGACY_NAMED_CHAINS.find((x) => x.id === chainId)?.name ??
+    `chainId:${chainId}`
+  );
 }
 
 type LogEntry = {

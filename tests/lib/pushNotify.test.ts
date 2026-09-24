@@ -10,7 +10,7 @@ const hold = vi.hoisted(() => ({
   incr: vi.fn(),
   expire: vi.fn(),
   set: vi.fn(),
-  eval: vi.fn(),
+  getDel: vi.fn(),
   send: vi.fn(),
   warn: vi.fn(),
 }));
@@ -57,10 +57,10 @@ vi.mock('@/lib/kv', () => ({
     if (opts.ttlSec !== undefined) hold.ttl.set(key, hold.now + opts.ttlSec);
     return Promise.resolve({ ok: true, value: 'OK' });
   },
-  kvEval: (script: string, keys: string[], args: string[]) => {
-    hold.eval(script, keys, args);
-    const value = hold.data.get(keys[0]) ?? null;
-    hold.data.delete(keys[0]);
+  kvGetDel: (key: string) => {
+    hold.getDel(key);
+    const value = hold.data.get(key) ?? null;
+    hold.data.delete(key);
     return Promise.resolve({ ok: true, value });
   },
 }));
@@ -117,7 +117,7 @@ beforeEach(() => {
   hold.incr.mockClear();
   hold.expire.mockClear();
   hold.set.mockClear();
-  hold.eval.mockClear();
+  hold.getDel.mockClear();
   hold.send.mockClear();
   hold.warn.mockClear();
 });
@@ -191,16 +191,9 @@ describe('notifyPaymentReceived', () => {
       nx: true,
       ttlSec: PUSH_NOTIFY_COALESCE_TTL_SEC,
     });
-    expect(hold.eval).toHaveBeenCalledTimes(1);
-    const [script, keys, args] = hold.eval.mock.calls[0] as [
-      string,
-      string[],
-      string[],
-    ];
-    expect(script).toContain("redis.call('GET', KEYS[1])");
-    expect(script).toContain("redis.call('DEL', KEYS[1])");
-    expect(keys).toEqual([paymentPendingKey]);
-    expect(args).toEqual([]);
+    // B-R6c: 旧 Lua EVAL (GET+DEL) の script/KEYS/ARGV 検査を native GETDEL の key 検査へ置換。
+    expect(hold.getDel).toHaveBeenCalledTimes(1);
+    expect(hold.getDel).toHaveBeenCalledWith(paymentPendingKey);
     expect(hold.data.has(paymentPendingKey)).toBe(false);
 
     expect(hold.send).toHaveBeenCalledTimes(1);
@@ -215,7 +208,7 @@ describe('notifyPaymentReceived', () => {
     await notifyPaymentReceived(WALLET, 'payment');
 
     expect(hold.data.get(paymentPendingKey)).toBe('1');
-    expect(hold.eval).not.toHaveBeenCalled();
+    expect(hold.getDel).not.toHaveBeenCalled();
     expect(hold.send).not.toHaveBeenCalled();
   });
 
@@ -224,7 +217,7 @@ describe('notifyPaymentReceived', () => {
     await notifyPaymentReceived(WALLET, 'payment');
 
     expect(hold.send).toHaveBeenCalledTimes(1);
-    expect(hold.eval).toHaveBeenCalledTimes(1);
+    expect(hold.getDel).toHaveBeenCalledTimes(1);
     expect(hold.data.get(paymentPendingKey)).toBe('1');
   });
 
@@ -236,8 +229,8 @@ describe('notifyPaymentReceived', () => {
 
     expect(hold.data.get(paymentPendingKey)).toBe('1');
     expect(hold.data.has(orderPendingKey)).toBe(false);
-    expect(hold.eval).toHaveBeenCalledTimes(1);
-    expect(hold.eval.mock.calls[0]?.[1]).toEqual([orderPendingKey]);
+    expect(hold.getDel).toHaveBeenCalledTimes(1);
+    expect(hold.getDel).toHaveBeenCalledWith(orderPendingKey);
     expect(hold.send).toHaveBeenCalledTimes(1);
     const [, orderPayload] = hold.send.mock.calls[0] as [string, Resolver];
     expect(orderPayload('ja', sub())).toEqual({
