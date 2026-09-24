@@ -9,6 +9,8 @@ import { renderWithIntl } from '../_helpers/i18n';
 // R10a (X402DiscoveryView の機械的分割) の網。分割前の component で全 test が通ることを確認してから
 // 分割する: 全 DOM の hash (サインイン前後・節の並び・編集中)・コピー済み表示と展開状態の共有・
 // 認証/アカウント切替を跨ぐ下書きと進行中の mutation・owned/公開カタログ両方の invalidate を固定する。
+// B-R10c: 下書きの破棄と古い mutation の UI 反映抑止・送信元だけの owned 無効化は意図して変更。
+// DOM hash は R10a の値を保つ。
 
 const auth = vi.hoisted(() => ({
   address: undefined as string | undefined,
@@ -319,7 +321,7 @@ describe('R10a pre-extraction pinning', () => {
     expect(within(catalogCard()).getByRole('button', { name: '閉じる' })).toHaveAttribute('aria-expanded', 'true');
   });
 
-  it('retains edit drafts across account/sign-in changes and resets only on cancel', async () => {
+  it.each(['wallet switch', 'sign-out'] as const)('clears edit drafts and editId on %s (B-R10c)', async (transition) => {
     owner();
     const pendingB = deferred<Response>();
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -330,21 +332,31 @@ describe('R10a pre-extraction pinning', () => {
     fireEvent.click(await screen.findByRole('button', { name: '編集' }));
     fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/draft' } });
     fireEvent.click(within(screen.getByText('Owned fixture').closest('li')!).getByRole('button', { name: '続きを読む' }));
-    owner(ADDRESS_B);
-    view.refresh();
-    await waitFor(() => expect(view.qc.isFetching({ queryKey: ['x402', 'owned', ADDRESS_B] })).toBe(1));
-    expect(screen.queryByText('Owned fixture')).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('https://example.com/draft');
-    await act(async () => pendingB.resolve(reply({ resources: [OTHER] })));
-    await screen.findByText('Other account fixture');
-    auth.signedIn = false;
-    view.refresh();
-    expect(screen.queryByPlaceholderText(URL_PLACEHOLDER)).not.toBeInTheDocument();
+    if (transition === 'wallet switch') {
+      owner(ADDRESS_B);
+      view.refresh();
+      await waitFor(() => expect(view.qc.isFetching({ queryKey: ['x402', 'owned', ADDRESS_B] })).toBe(1));
+      expect(screen.queryByText('Owned fixture')).not.toBeInTheDocument();
+      expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('');
+      await act(async () => pendingB.resolve(reply({ resources: [OTHER] })));
+      await screen.findByText('Other account fixture');
+    } else {
+      auth.signedIn = false;
+      view.refresh();
+      expect(screen.queryByPlaceholderText(URL_PLACEHOLDER)).not.toBeInTheDocument();
+      expect(screen.queryByText('掲載を編集')).not.toBeInTheDocument();
+    }
     owner();
     view.refresh();
     await screen.findByText('Owned fixture');
-    expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('https://example.com/draft');
+    expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('');
+    expect(screen.queryByRole('button', { name: '更新する' })).not.toBeInTheDocument();
+    for (const input of registrationSection().querySelectorAll('input:not([type="checkbox"])')) {
+      expect(input).toHaveValue('');
+    }
+    expect(screen.getByRole('checkbox', { name: 'USDC (Base) でも販売する — x402 Bazaar に掲載' })).not.toBeChecked();
     expect(within(screen.getByText('Owned fixture').closest('li')!).getByRole('button', { name: '閉じる' })).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(screen.getByRole('button', { name: '編集' }));
     fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
     expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('');
     expect(screen.queryByRole('button', { name: '更新する' })).not.toBeInTheDocument();
@@ -368,7 +380,7 @@ describe('R10a pre-extraction pinning', () => {
     expect(view.qc.getQueryData(['x402', 'owned', ADDRESS_B])).toEqual([OTHER]);
   });
 
-  it.each(['POST', 'PATCH', 'DELETE'] as const)('pins in-flight %s wire bytes, feedback and invalidation across wallets', async (method) => {
+  it.each(['POST', 'PATCH', 'DELETE'] as const)('pins in-flight %s wire bytes, feedback and invalidation for the submitting wallet', async (method) => {
     owner();
     const pendingMutation = deferred<Response>();
     const pendingCatalog = deferred<Response>();
@@ -377,7 +389,7 @@ describe('R10a pre-extraction pinning', () => {
     const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method) return pendingMutation.promise;
       if (url === '/api/discovery') return completing ? pendingCatalog.promise : reply({ items: [ITEM] });
-      return completing ? pendingOwned.promise : reply({ resources: auth.address === ADDRESS_A ? [OWNED] : [OTHER] });
+      return completing ? pendingOwned.promise : reply({ resources: [OWNED] });
     });
     vi.stubGlobal('fetch', fetchFn);
     const view = mount();
@@ -404,22 +416,19 @@ describe('R10a pre-extraction pinning', () => {
             ? '{"url":"https://example.com/new","description":"","priceJpyc":"","category":"","attested":true}'
             : '{"url":"https://example.com/owned","description":"Owned description","priceJpyc":"101","category":"api","payTo":"0x1111111111111111111111111111111111111111","title":"Owned fixture","docsUrl":"https://example.com/docs","license":"Owned license","usdc":{"priceUsd":"0.02","payTo":"0x1111111111111111111111111111111111111111","serviceName":"Fixture"}}',
         }]);
-    owner(ADDRESS_B);
-    view.refresh();
-    await screen.findByText('Other account fixture');
     if (method !== 'DELETE') expect(screen.getByRole('button', { name: method === 'POST' ? '登録中…' : '更新中…' })).toBeDisabled();
     const invalidate = vi.spyOn(view.qc, 'invalidateQueries');
     completing = true;
     await act(async () => pendingMutation.resolve(reply({ resource: OWNED, paywallSnippet: 'created gate' })));
     await waitFor(() => expect(invalidate.mock.calls).toEqual([
-      [{ queryKey: ['x402', 'discovery'] }], [{ queryKey: ['x402', 'owned'] }],
+      [{ queryKey: ['x402', 'discovery'] }], [{ queryKey: ['x402', 'owned', ADDRESS_A] }],
     ]));
     expect(view.qc.getQueryState(['x402', 'owned', ADDRESS_A])?.isInvalidated).toBe(true);
     expect(screen.queryByText('Catalog fixture')).not.toBeInTheDocument();
     expect(view.container.querySelectorAll('.animate-pulse')).toHaveLength(2);
     await act(async () => {
       pendingCatalog.resolve(reply({ items: [{ ...ITEM, title: 'Refetched catalog' }] }));
-      pendingOwned.resolve(reply({ resources: [OTHER] }));
+      pendingOwned.resolve(reply({ resources: [OWNED] }));
     });
     await screen.findByText('Refetched catalog');
     expect(screen.getByText(method === 'POST' ? '登録しました。' : method === 'PATCH' ? '更新しました。' : '削除しました。')).toBeInTheDocument();
@@ -738,5 +747,330 @@ describe('R10a pre-extraction pinning', () => {
         ],
       }
     `);
+  });
+});
+
+// B-R10c: 送信後の React 再描画を挟み、最新の hook options に置き換わっても送信時の文脈を保つ。
+describe('B-R10c owner mutation regressions', () => {
+  function startMutation(method: 'POST' | 'PATCH' | 'DELETE', usdc = false) {
+    if (method === 'POST') {
+      fireEvent.click(screen.getByText('新しい API を出品する'));
+      fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/new' } });
+      if (usdc) {
+        fireEvent.click(screen.getByRole('checkbox', { name: 'USDC (Base) でも販売する — x402 Bazaar に掲載' }));
+        fireEvent.change(screen.getByPlaceholderText('0.005'), { target: { value: '0.02' } });
+      }
+      fireEvent.click(screen.getByRole('checkbox', { name: '正当な権利と支払い制限を確認しました' }));
+      fireEvent.click(screen.getByRole('button', { name: '登録する' }));
+    } else if (method === 'PATCH') {
+      fireEvent.click(screen.getByRole('button', { name: '編集' }));
+      fireEvent.click(screen.getByRole('button', { name: '更新する' }));
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: '削除' }));
+      fireEvent.click(screen.getByRole('button', { name: '削除する' }));
+    }
+  }
+
+  describe.each(['POST', 'PATCH', 'DELETE'] as const)('%s', (method) => {
+    it.each([
+      ['wallet switch', true], ['wallet switch', false],
+      ['re-sign-in', true], ['re-sign-in', false],
+    ] as const)('ignores stale UI completion after %s (ok=%s), but refreshes successful writes', async (transition, ok) => {
+      owner();
+      const pending = deferred<Response>();
+      const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method) return pending.promise;
+        if (url === '/api/discovery') return reply({ items: [ITEM] });
+        return reply({ resources: auth.address === ADDRESS_A ? [OWNED] : [OTHER] });
+      });
+      vi.stubGlobal('fetch', fetchFn);
+      const view = mount();
+      await screen.findByText('Owned fixture');
+      startMutation(method);
+      await waitFor(() => expect(fetchFn.mock.calls.some(([, init]) => init?.method === method)).toBe(true));
+      if (transition === 'wallet switch') owner(ADDRESS_B);
+      else auth.signedIn = false;
+      view.refresh();
+      if (transition === 're-sign-in') {
+        // 完了前に再ログインする。完了後だと clearing effect が古い error を消し、guard 欠落を見逃す。
+        owner();
+        view.refresh();
+      }
+      await screen.findByText(transition === 'wallet switch' ? 'Other account fixture' : 'Owned fixture');
+      await waitFor(() => expect(view.qc.isFetching()).toBe(0));
+      fireEvent.click(screen.getByRole('button', { name: '編集' }));
+      fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/current-draft' } });
+      const invalidate = vi.spyOn(view.qc, 'invalidateQueries');
+      const callsBeforeCompletion = fetchFn.mock.calls.length;
+      await act(async () => pending.resolve(reply(ok
+        ? { resource: OWNED, paywallSnippet: 'old wallet success snippet' }
+        : { error: 'gate_not_openpay', paywallSnippet: 'old wallet error snippet' }, ok)));
+      await waitFor(() => expect(view.qc.isMutating()).toBe(0));
+      await waitFor(() => expect(view.qc.isFetching()).toBe(0));
+      expect(invalidate.mock.calls).toEqual(ok ? [
+        [{ queryKey: ['x402', 'discovery'] }], [{ queryKey: ['x402', 'owned', ADDRESS_A] }],
+      ] : []);
+      // B の active owned は再取得しない。A に戻っていれば catalog と A の owned の両方を再取得する。
+      expect(fetchFn.mock.calls.slice(callsBeforeCompletion).map(([url]) => url)).toEqual(
+        !ok ? [] : transition === 'wallet switch' ? ['/api/discovery'] : ['/api/discovery', '/api/facilitator/resources'],
+      );
+      if (transition === 'wallet switch') {
+        expect(view.qc.getQueryState(['x402', 'owned', ADDRESS_A])?.isInvalidated).toBe(ok);
+        expect(view.qc.getQueryState(['x402', 'owned', ADDRESS_B])?.isInvalidated).toBe(false);
+      }
+      expect(screen.queryByText(/^(登録しました。|更新しました。|削除しました。)$/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/操作に失敗しました/)).not.toBeInTheDocument();
+      expect(screen.queryByText('old wallet success snippet')).not.toBeInTheDocument();
+      expect(screen.queryByText('old wallet error snippet')).not.toBeInTheDocument();
+      expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('https://example.com/current-draft');
+      expect(screen.getByRole('button', { name: '更新する' })).toBeEnabled();
+    });
+  });
+
+  it('shows the existing error UI for a rejected DELETE fetch and permits retry', async () => {
+    owner();
+    let attempts = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'DELETE') {
+        if (++attempts === 1) throw new TypeError('Failed to fetch');
+        return reply({ ok: true });
+      }
+      return reply(url === '/api/discovery' ? { items: [ITEM] } : { resources: [OWNED] });
+    }));
+    const view = mount();
+    await screen.findByText('Owned fixture');
+    const invalidate = vi.spyOn(view.qc, 'invalidateQueries');
+    startMutation('DELETE');
+    expect(await screen.findByText('操作に失敗しました (error)。')).toBeVisible();
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(screen.queryByText('削除しました。')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '削除する' }));
+    await screen.findByText('削除しました。');
+    expect(screen.queryByText('操作に失敗しました (error)。')).not.toBeInTheDocument();
+    expect(attempts).toBe(2);
+    expect(invalidate.mock.calls).toEqual([
+      [{ queryKey: ['x402', 'discovery'] }], [{ queryKey: ['x402', 'owned', ADDRESS_A] }],
+    ]);
+  });
+
+  describe.each(['POST', 'PATCH', 'DELETE'] as const)('completed %s feedback', (method) => {
+    it.each(['wallet switch', 'sign-out'] as const)('clears success, snippet and reminder on %s', async (transition) => {
+      owner();
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method) return reply({ resource: OWNED, paywallSnippet: 'completed A gate' });
+        if (url === '/api/discovery') return reply({ items: [ITEM] });
+        return reply({ resources: auth.address === ADDRESS_A ? [OWNED] : [OTHER] });
+      }));
+      const view = mount();
+      await screen.findByText('Owned fixture');
+      startMutation(method, true);
+      const success = method === 'POST' ? '登録しました。' : method === 'PATCH' ? '更新しました。' : '削除しました。';
+      expect(await screen.findByText(success)).toBeVisible();
+      if (method === 'POST') expect(screen.getByText('completed A gate')).toBeVisible();
+      if (method !== 'DELETE') expect(screen.getByText(/^USDC で販売するには、サーバーのゲートを/)).toBeVisible();
+      await waitFor(() => expect(view.qc.isFetching()).toBe(0));
+
+      if (transition === 'wallet switch') owner(ADDRESS_B);
+      else auth.signedIn = false;
+      view.refresh();
+      if (transition === 'wallet switch') await screen.findByText('Other account fixture');
+      expect(screen.queryByText(success)).not.toBeInTheDocument();
+      expect(screen.queryByText('completed A gate')).not.toBeInTheDocument();
+      expect(screen.queryByText(/^USDC で販売するには、サーバーのゲートを/)).not.toBeInTheDocument();
+      owner();
+      view.refresh();
+      await screen.findByText('Owned fixture');
+      expect(screen.queryByText(success)).not.toBeInTheDocument();
+      expect(screen.queryByText('completed A gate')).not.toBeInTheDocument();
+      expect(screen.queryByText(/^USDC で販売するには、サーバーのゲートを/)).not.toBeInTheDocument();
+    });
+  });
+
+  it.each(['wallet switch', 'sign-out'] as const)('clears attestation, new draft and delete confirmation across %s and return', async (transition) => {
+    owner();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => reply(url === '/api/discovery'
+      ? { items: [ITEM] } : { resources: auth.address === ADDRESS_A ? [OWNED] : [OTHER] })));
+    const view = mount();
+    await screen.findByText('Owned fixture');
+    fireEvent.click(screen.getByText('新しい API を出品する'));
+    fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/unsubmitted' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '正当な権利と支払い制限を確認しました' }));
+    expect(screen.getByRole('button', { name: '登録する' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '削除' }));
+    expect(screen.getByRole('button', { name: '削除する' })).toBeVisible();
+    if (transition === 'wallet switch') owner(ADDRESS_B);
+    else auth.signedIn = false;
+    view.refresh();
+    if (transition === 'wallet switch') {
+      await screen.findByText('Other account fixture');
+      expect(screen.getByRole('checkbox', { name: '正当な権利と支払い制限を確認しました' })).not.toBeChecked();
+    }
+    owner();
+    view.refresh();
+    await screen.findByText('Owned fixture');
+    expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('');
+    expect(screen.getByRole('checkbox', { name: '正当な権利と支払い制限を確認しました' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: '登録する' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '削除する' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the edit draft through wallet lock and unlock with the same SIWE session', async () => {
+    owner();
+    const view = mount();
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/locked-draft' } });
+    Object.assign(auth, { address: undefined, connected: false, signedIn: false });
+    view.refresh();
+    expect(screen.getByRole('button', { name: 'Connect fixture' })).toBeVisible();
+    expect(screen.queryByPlaceholderText(URL_PLACEHOLDER)).not.toBeInTheDocument();
+    owner();
+    view.refresh();
+    await screen.findByText('Owned fixture');
+    expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('https://example.com/locked-draft');
+    expect(screen.getByRole('button', { name: '更新する' })).toBeVisible();
+    expect(screen.getByRole('checkbox', { name: 'USDC (Base) でも販売する — x402 Bazaar に掲載' })).toBeChecked();
+  });
+
+  it.each([ADDRESS_A, ADDRESS_B])('clears the draft when reconnecting %s without a matching SIWE session', async (address) => {
+    owner();
+    const view = mount();
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/signed-out-draft' } });
+    Object.assign(auth, { address: undefined, connected: false, signedIn: false });
+    view.refresh();
+    Object.assign(auth, { address, connected: true, signedIn: false });
+    view.refresh();
+    expect(screen.queryByText('掲載を編集')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ウォレットでサインイン' })).toBeInTheDocument();
+    owner();
+    view.refresh();
+    await screen.findByText('Owned fixture');
+    expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('');
+    expect(screen.queryByRole('button', { name: '更新する' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['POST', 'while locked'], ['POST', 'after unlock'],
+    ['PATCH', 'while locked'], ['PATCH', 'after unlock'],
+  ] as const)('keeps the in-flight %s result completed %s', async (method, completion) => {
+    owner();
+    const pending = deferred<Response>();
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method) return pending.promise;
+      return reply(url === '/api/discovery' ? { items: [ITEM] } : { resources: [OWNED] });
+    });
+    vi.stubGlobal('fetch', fetchFn);
+    const view = mount();
+    await screen.findByText('Owned fixture');
+    startMutation(method, true);
+    await waitFor(() => expect(fetchFn.mock.calls.some(([, init]) => init?.method === method)).toBe(true));
+    Object.assign(auth, { address: undefined, connected: false, signedIn: false });
+    view.refresh();
+    expect(screen.queryByPlaceholderText(URL_PLACEHOLDER)).not.toBeInTheDocument();
+    if (completion === 'after unlock') {
+      owner();
+      view.refresh();
+    }
+    const invalidate = vi.spyOn(view.qc, 'invalidateQueries');
+    await act(async () => pending.resolve(reply({ resource: OWNED, paywallSnippet: 'locked gate' })));
+    await waitFor(() => expect(view.qc.isMutating()).toBe(0));
+    if (completion === 'while locked') {
+      owner();
+      view.refresh();
+    }
+    expect(await screen.findByText(method === 'POST' ? '登録しました。' : '更新しました。')).toBeVisible();
+    expect(screen.getByText(/^USDC で販売するには、サーバーのゲートを/)).toBeVisible();
+    expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('');
+    if (method === 'POST') expect(screen.getByText('locked gate')).toBeVisible();
+    expect(invalidate.mock.calls).toEqual([
+      [{ queryKey: ['x402', 'discovery'] }], [{ queryKey: ['x402', 'owned', ADDRESS_A] }],
+    ]);
+  });
+
+  it('refreshes a completed POST after A→B→A without resetting a new draft, and resubmits the listing as PATCH without 409', async () => {
+    owner();
+    const pending = deferred<Response>();
+    const registered = { ...OWNED, id: 'registered-a', title: 'New A listing', url: 'https://example.com/new', hidden: false };
+    const resources = [OWNED];
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        const payload = JSON.parse(String(init.body));
+        if (resources.some((resource) => resource.url === payload.url)) {
+          return new Response(JSON.stringify({ error: 'url_taken' }), { status: 409 });
+        }
+        return pending.promise;
+      }
+      if (init?.method === 'PATCH') return reply({ resource: registered });
+      if (url === '/api/discovery') return reply({ items: [ITEM] });
+      return reply({ resources: auth.address === ADDRESS_A ? [...resources] : [OTHER] });
+    });
+    vi.stubGlobal('fetch', fetchFn);
+    const view = mount();
+    await screen.findByText('Owned fixture');
+    startMutation('POST', true);
+    await waitFor(() => expect(fetchFn.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
+    owner(ADDRESS_B);
+    view.refresh();
+    await screen.findByText('Other account fixture');
+    owner();
+    view.refresh();
+    await screen.findByText('Owned fixture');
+    await waitFor(() => expect(view.qc.isFetching()).toBe(0));
+    fireEvent.click(screen.getByText('新しい API を出品する'));
+    fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/next-draft' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: '正当な権利と支払い制限を確認しました' }));
+    const invalidate = vi.spyOn(view.qc, 'invalidateQueries');
+    resources.push(registered);
+    await act(async () => pending.resolve(reply({ resource: registered, paywallSnippet: 'old A result gate' })));
+    await waitFor(() => expect(view.qc.isMutating()).toBe(0));
+    await screen.findByText('New A listing');
+    expect(screen.queryByText('登録しました。')).not.toBeInTheDocument();
+    expect(screen.queryByText('old A result gate')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^USDC で販売するには、サーバーのゲートを/)).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('https://example.com/next-draft');
+    expect(screen.getByRole('checkbox', { name: '正当な権利と支払い制限を確認しました' })).toBeChecked();
+    expect(invalidate.mock.calls).toEqual([
+      [{ queryKey: ['x402', 'discovery'] }], [{ queryKey: ['x402', 'owned', ADDRESS_A] }],
+    ]);
+    // owned に反映された掲載を編集できるので、同じ URL を再 POST して url_taken にする必要がない。
+    fireEvent.click(within(screen.getByText('New A listing').closest('li')!).getByRole('button', { name: '編集' }));
+    fireEvent.click(screen.getByRole('button', { name: '更新する' }));
+    await screen.findByText('更新しました。');
+    expect(fetchFn.mock.calls.filter(([, init]) => init?.method).map(([url, init]) => [url, init?.method])).toEqual([
+      ['/api/facilitator/resources', 'POST'], ['/api/facilitator/resources/registered-a', 'PATCH'],
+    ]);
+    expect(screen.queryByText(/操作に失敗しました/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['POST', true], ['POST', false], ['PATCH', true], ['PATCH', false],
+  ] as const)('uses submitted USDC enabled=%s/%s for the reminder after toggling during fetch', async (method, submittedUsdc) => {
+    owner();
+    const pending = deferred<Response>();
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method) return pending.promise;
+      return reply(url === '/api/discovery' ? { items: [ITEM] } : { resources: [OWNED] });
+    });
+    vi.stubGlobal('fetch', fetchFn);
+    const view = mount();
+    await screen.findByText('Owned fixture');
+    if (method === 'PATCH') fireEvent.click(screen.getByRole('button', { name: '編集' }));
+    else {
+      fireEvent.click(screen.getByText('新しい API を出品する'));
+      fireEvent.click(screen.getByRole('checkbox', { name: '正当な権利と支払い制限を確認しました' }));
+    }
+    const checkbox = screen.getByRole('checkbox', { name: 'USDC (Base) でも販売する — x402 Bazaar に掲載' });
+    if ((checkbox as HTMLInputElement).checked !== submittedUsdc) fireEvent.click(checkbox);
+    if (submittedUsdc) fireEvent.change(screen.getByPlaceholderText('0.005'), { target: { value: '0.02' } });
+    fireEvent.click(screen.getByRole('button', { name: method === 'POST' ? '登録する' : '更新する' }));
+    await waitFor(() => expect(fetchFn.mock.calls.some(([, init]) => init?.method === method)).toBe(true));
+    const body = JSON.parse(String(fetchFn.mock.calls.find(([, init]) => init?.method === method)![1]!.body));
+    expect(Boolean(body.usdc)).toBe(submittedUsdc);
+    fireEvent.click(checkbox);
+    expect((checkbox as HTMLInputElement).checked).toBe(!submittedUsdc);
+    await act(async () => pending.resolve(reply({ resource: OWNED, paywallSnippet: 'gate' })));
+    await screen.findByText(method === 'POST' ? '登録しました。' : '更新しました。');
+    await waitFor(() => expect(view.qc.isMutating()).toBe(0));
+    expect(Boolean(screen.queryByText(/^USDC で販売するには、サーバーのゲートを/))).toBe(submittedUsdc);
   });
 });

@@ -74,7 +74,7 @@ export function DiscoveryRegistrationSection({
   if (legacyCategory && !formCategories.includes(legacyCategory)) {
     formCategories.push(legacyCategory);
   }
-  const autoOpen = owned.length === 0 || editId !== null || created !== null || notice !== null;
+  const autoOpen = owned.length === 0 || editId !== null || created !== null || notice !== null || error !== null;
   // owned>0 のときはフォーム全体を details に畳み、summary が見出しを兼ねる (内側の見出しは出さない)。
   const collapsible = owned.length > 0;
   const registrationContent = (

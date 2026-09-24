@@ -2,9 +2,9 @@
 
 // 出品者 (owner) の状態: 登録フォームの下書き・編集対象・結果/エラー表示と、自分の登録一覧 (SIWE 時のみ・
 // wallet 単位の query key)・登録/編集/削除の mutation。成功時は公開カタログと owned の両方を invalidate する。
-// X402DiscoveryView が 1 回だけ呼ぶ: 節の並び替えや wallet 切替で下書き・進行中の mutation を失わない。
+// X402DiscoveryView が 1 回だけ呼ぶ: 節の並び替えで状態を失わず、wallet 切替・サインアウトでは下書きを破棄する。
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { OwnedResource, RegisteredResource } from './discoveryTypes';
 
@@ -45,6 +45,14 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
   const [snippetOpenId, setSnippetOpenId] = useState<string | null>(null);
   // 出品の正当性表明 (新規登録のみ必須・編集では不要)。送信成功でリセット。
   const [attested, setAttested] = useState(false);
+  // 旧 wallet の通信完了が現在の下書き・結果表示に波及するのを断つ。
+  // 一度離れて同じ wallet に戻った場合も別の操作文脈として扱う。
+  const walletScope = useRef({ address, isSignedIn });
+  // lock/unlock の一時 disconnect → 自動再接続で下書き・送信結果を失わないため、未接続中は保留する。
+  if (address !== undefined && (walletScope.current.address !== address || walletScope.current.isSignedIn !== isSignedIn)) {
+    walletScope.current = { address, isSignedIn };
+  }
+  const scope = walletScope.current;
 
   const queryClient = useQueryClient();
 
@@ -97,12 +105,22 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
     setErrorSnippet('');
   }, []);
 
+  // 旧 wallet の編集対象・下書き・正当性表明・完了表示・削除確認を別の session に持ち越さない。
+  useEffect(() => {
+    onCancelEdit();
+    setAttested(false);
+    setCreated(null);
+    setNotice(null);
+    setUsdcReminder(false);
+    setConfirmDeleteId(null);
+  }, [scope, onCancelEdit]);
+
   // 登録 (editId 無し → POST) / 編集 (editId 有り → PATCH) を出し分ける。成功後は catalog / owned を
   // invalidate して再取得する (従来の void loadCatalog(); void loadOwned(); の置換)。fetch/parse の
   // 例外・!ok・resource 欠落はいずれも {ok:false} を返し、従来と同じエラー文言 (error コード) を出す。
   const submitMutation = useMutation({
     mutationFn: async (): Promise<
-      | { ok: true; wasEdit: boolean; resource: RegisteredResource; paywallSnippet: string }
+      | { ok: true; wasEdit: boolean; usdcEnabled: boolean; resource: RegisteredResource; paywallSnippet: string }
       | { ok: false; error: string; paywallSnippet: string }
     > => {
       const payload = {
@@ -158,6 +176,7 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
         return {
           ok: true,
           wasEdit: Boolean(editId),
+          usdcEnabled: form.usdcEnabled,
           resource: body.resource,
           paywallSnippet: body.paywallSnippet ?? '',
         };
@@ -170,16 +189,22 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
       setErrorSnippet('');
       setNotice(null);
       setUsdcReminder(false);
+      return { wallet: walletScope.current };
     },
-    onSuccess: (result) => {
+    onSuccess: (result, _variables, onMutateResult) => {
+      // サーバーで成功した変更は切替後も反映する。別 wallet の owned を余分に取得しない。
+      if (result.ok) {
+        void queryClient.invalidateQueries({ queryKey: ['x402', 'discovery'] });
+        void queryClient.invalidateQueries({ queryKey: ['x402', 'owned', onMutateResult.wallet.address] });
+      }
+      if (onMutateResult.wallet !== walletScope.current) return;
       if (!result.ok) {
         setError(result.error);
         setErrorSnippet(result.paywallSnippet);
         return;
       }
-      // 送信時点の form 状態で判定 (成功後は form がリセットされるため onSuccess 内で参照しない
-      // ように submit 前の値を使う — mutationFn closure の form は submit 時のもの)。
-      setUsdcReminder(form.usdcEnabled);
+      // onSuccess の options は再描画で更新されるため、payload と同じ form から取得した値を使う。
+      setUsdcReminder(result.usdcEnabled);
       if (result.wasEdit) {
         setNotice('updated');
         setCreated(null);
@@ -193,28 +218,37 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
       setEditId(null);
       setAttested(false);
       setFormOpen(null);
-      void queryClient.invalidateQueries({ queryKey: ['x402', 'discovery'] });
-      void queryClient.invalidateQueries({ queryKey: ['x402', 'owned'] });
     },
   });
 
-  // 無効化 (DELETE)。!ok は {ok:false} を返しエラー文言を出す。fetch 例外は従来どおり握らず
-  // (エラー表示なし・確認 UI も維持)。成功後は catalog / owned を invalidate して再取得する。
+  // 無効化 (DELETE)。通信例外も登録/編集と同じエラー表示に流し、確認 UI から再試行できるようにする。
+  // 成功後は catalog / owned を invalidate して再取得する。
   const deleteMutation = useMutation({
     mutationFn: async (id: string): Promise<{ ok: boolean; error?: string }> => {
-      const res = await fetch(`/api/facilitator/resources/${id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        return { ok: false, error: body.error ?? 'error' };
+      try {
+        const res = await fetch(`/api/facilitator/resources/${id}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          return { ok: false, error: body.error ?? 'error' };
+        }
+        return { ok: true };
+      } catch {
+        return { ok: false, error: 'error' };
       }
-      return { ok: true };
     },
     onMutate: () => {
       setError(null);
       setErrorSnippet('');
       setNotice(null);
+      return { wallet: walletScope.current };
     },
-    onSuccess: (result, id) => {
+    onSuccess: (result, id, onMutateResult) => {
+      // 表示の抑止と一覧の鮮度を分離し、送信元 wallet に戻ったときも削除済みの掲載を残さない。
+      if (result.ok) {
+        void queryClient.invalidateQueries({ queryKey: ['x402', 'discovery'] });
+        void queryClient.invalidateQueries({ queryKey: ['x402', 'owned', onMutateResult.wallet.address] });
+      }
+      if (onMutateResult.wallet !== walletScope.current) return;
       if (!result.ok) {
         setError(result.error ?? 'error');
         return;
@@ -222,8 +256,6 @@ export function useDiscoveryOwner(address: string | undefined, isSignedIn: boole
       setConfirmDeleteId(null);
       if (editId === id) onCancelEdit(); // 編集中の掲載を消したらフォームも閉じる
       setNotice('deleted');
-      void queryClient.invalidateQueries({ queryKey: ['x402', 'discovery'] });
-      void queryClient.invalidateQueries({ queryKey: ['x402', 'owned'] });
     },
   });
 

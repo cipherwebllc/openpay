@@ -6,8 +6,9 @@
 // 本コンポーネントは env.enableX402Facilitator が ON のページからのみマウントされる。
 //
 // 表示は components/x402/ の panel に分けてある (R10a)。状態 (コピー済み表示・展開・カタログの検索/絞り込み・
-// 出品者の下書きと mutation) はここで 1 回だけ持つ: サインイン前後で節の並びが変わり panel が再マウント
-// されても状態を失わない。公開カタログ側の leaf は wagmi / SIWE / 出品者専用の部品に依存しない。
+// 出品者の下書きと mutation) はここで 1 回だけ持つ: 節の並び替えによる panel の再マウントと状態を分離する。
+// 出品者の下書き・結果表示は wallet / SIWE の切替で破棄し、接続の瞬断では保つ。
+// 公開カタログ側の leaf は wagmi / SIWE / 出品者専用の部品に依存しない。
 
 import type { ReactNode } from 'react';
 import { useAccount } from 'wagmi';
