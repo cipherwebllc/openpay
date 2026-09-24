@@ -282,6 +282,26 @@ describe('createServiceMonitorEnvelope', () => {
     expect(row.sourceCheckedAt).toBe('2026-08-26T00:00:00.000Z');
     expect(row.sourceOk).toBe(true);
   });
+
+  it('sourceUrl が変わった後の旧 URL の検証結果と、未検証の行は unknown (null) にする', () => {
+    const [changed, missing] = DIRECTORY_ENTRIES.filter((e) => e.status === 'published');
+    const env = createServiceMonitorEnvelope(
+      { limit: SERVICE_MONITOR_MAX_LIMIT },
+      {
+        [changed.slug]: {
+          checkedAt: '2026-08-26T00:00:00.000Z',
+          ok: false,
+          sourceUrl: 'https://old.example/source',
+        },
+      },
+      NOW,
+    );
+    for (const slug of [changed.slug, missing.slug]) {
+      const row = env.services.find((r) => r.slug === slug)!;
+      expect(row.sourceCheckedAt).toBeNull();
+      expect(row.sourceOk).toBeNull();
+    }
+  });
 });
 
 // 日付境界の切り上げ規則そのもの (実データに依存しない性質を合成データで固定する)。

@@ -2,7 +2,6 @@ import 'server-only';
 
 import { kvGet, kvSet } from '@/lib/kv';
 import type {
-  DirectoryEntry,
   DirectoryVerificationRecord,
   DirectoryVerificationSnapshot,
 } from '@/lib/directory/types';
@@ -51,15 +50,6 @@ export async function writeDirectoryVerificationSnapshot(
 ): Promise<boolean> {
   const saved = await kvSet(DIRECTORY_VERIFICATION_KEY, JSON.stringify(snapshot));
   return saved.ok && saved.value === 'OK';
-}
-
-export function directoryVerificationForEntry(
-  entry: DirectoryEntry,
-  snapshot: DirectoryVerificationSnapshot,
-): DirectoryVerificationRecord | null {
-  const record = snapshot[entry.slug];
-  // sourceUrl がコード変更された後は、旧 URL の死活結果を新 URL の結果として表示しない。
-  return record?.sourceUrl === entry.sourceUrl ? record : null;
 }
 
 // 三値死活判定。true=到達 (2xx/3xx)・false=**確定消滅のみ** (404/410)・null=判定不能。
