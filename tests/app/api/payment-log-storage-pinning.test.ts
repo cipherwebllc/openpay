@@ -227,29 +227,73 @@ describe('R6a POST limiter with the real checkReadRateLimit', () => {
   });
 });
 
-describe('C16: stats names are independent of the selected network', () => {
-  // Literal expectations: do not derive these from chainNameForId or viem.
-  it.each([
-    [137, 'Polygon'], [80002, 'Polygon Amoy'],
-    [8453, 'Base'], [84532, 'Base Sepolia'],
-    [42161, 'Arbitrum One'], [421614, 'Arbitrum Sepolia'],
-    [10, 'OP Mainnet'], [11155420, 'OP Sepolia'],
-    [8217, 'Kaia'], [1001, 'Kairos Testnet'],
-    [1, 'chainId:1'], [11155111, 'chainId:11155111'],
-    [43114, 'chainId:43114'], [43113, 'chainId:43113'],
-    [5042, 'chainId:5042'], [5042002, 'chainId:5042002'],
-    [130, 'chainId:130'], [1301, 'chainId:1301'],
-    [480, 'chainId:480'], [4801, 'chainId:4801'],
-    [146, 'chainId:146'], [57054, 'chainId:57054'],
-    [1329, 'chainId:1329'], [1328, 'chainId:1328'],
-    [999, 'chainId:999'], [998, 'chainId:998'],
-    [999999, 'chainId:999999'],
-  ])('keeps chain %i named %s', async (chainId, chainName) => {
-    vi.mocked(kvLrange).mockResolvedValue({
+// B-R6d (C16): the stats route resolves names via chainNameForId (selected network) first, then
+// the previous fixed table, then `chainId:N`. Before B-R6d every row below was network-independent
+// and only the 10 fixed-table ids had names; now the selected network's supported chains also get
+// names. No id that had a name before loses it (Amoy on mainnet, Polygon on testnet, etc.).
+// Literal expectations: do not derive these from chainNameForId or viem.
+const FIXED_TABLE_NAMES: [number, string][] = [
+  [137, 'Polygon'], [80002, 'Polygon Amoy'],
+  [8453, 'Base'], [84532, 'Base Sepolia'],
+  [42161, 'Arbitrum One'], [421614, 'Arbitrum Sepolia'],
+  [10, 'OP Mainnet'], [11155420, 'OP Sepolia'],
+  [8217, 'Kaia'], [1001, 'Kairos Testnet'],
+];
+const TESTNET_SELECTED_NAMES: [number, string][] = [
+  ...FIXED_TABLE_NAMES,
+  [1, 'chainId:1'], [11155111, 'Sepolia'],
+  [43114, 'chainId:43114'], [43113, 'Avalanche Fuji'],
+  [5042, 'chainId:5042'], [5042002, 'Arc Testnet'],
+  [130, 'chainId:130'], [1301, 'Unichain Sepolia'],
+  [480, 'chainId:480'], [4801, 'World Chain Sepolia'],
+  [146, 'chainId:146'], [57054, 'Sonic Blaze Testnet'],
+  [1329, 'chainId:1329'], [1328, 'Sei Testnet'],
+  [999, 'chainId:999'], [998, 'HyperEVM Testnet'],
+  [999999, 'chainId:999999'],
+];
+const MAINNET_SELECTED_NAMES: [number, string][] = [
+  ...FIXED_TABLE_NAMES,
+  [1, 'Ethereum'], [11155111, 'chainId:11155111'],
+  [43114, 'Avalanche'], [43113, 'chainId:43113'],
+  [5042, 'Arc'], [5042002, 'chainId:5042002'],
+  [130, 'Unichain'], [1301, 'chainId:1301'],
+  [480, 'World Chain'], [4801, 'chainId:4801'],
+  [146, 'Sonic'], [57054, 'chainId:57054'],
+  [1329, 'Sei Network'], [1328, 'chainId:1328'],
+  [999, 'HyperEVM'], [998, 'chainId:998'],
+  [999999, 'chainId:999999'],
+];
+
+// lib/chains fixes the selected network at module load, so each case re-imports the route.
+async function loadStatsFor(network: 'testnet' | 'mainnet') {
+  vi.resetModules();
+  vi.stubEnv('NEXT_PUBLIC_NETWORK_ENV', network);
+  if (network === 'mainnet') {
+    // env.ts refuses to load on mainnet without these (deploy guards unrelated to stats).
+    vi.stubEnv('NEXT_PUBLIC_FEE_RECEIVER_ADDRESS', '0x428483d2bd5E9f0e9f8E9f8e9F8E9F8E9f8e9F8e');
+    vi.stubEnv('NEXT_PUBLIC_PIMLICO_API_KEY', 'dummy');
+    vi.stubEnv('NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID', 'sp_dummy');
+    vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://dummy@o0.ingest.sentry.io/0');
+  }
+  const kv = await import('@/lib/kv');
+  const { isMainnet } = await import('@/lib/env');
+  expect(isMainnet).toBe(network === 'mainnet');
+  vi.mocked(kv.isKvConfigured).mockReturnValue(true);
+  const route = await import('@/app/api/log/payment/stats/route');
+  return { kv, stats: route.GET };
+}
+
+describe.each([
+  { network: 'testnet' as const, names: TESTNET_SELECTED_NAMES },
+  { network: 'mainnet' as const, names: MAINNET_SELECTED_NAMES },
+])('B-R6d: stats names with $network selected', ({ network, names }) => {
+  it.each(names)('names chain %i as %s', async (chainId, chainName) => {
+    const { kv, stats: load } = await loadStatsFor(network);
+    vi.mocked(kv.kvLrange).mockResolvedValue({
       ok: true, value: [JSON.stringify({ ...PAYMENT, chainId })],
     });
-    vi.mocked(kvLlen).mockResolvedValue({ ok: true, value: 1 });
-    const res = await stats(request('stats'));
+    vi.mocked(kv.kvLlen).mockResolvedValue({ ok: true, value: 1 });
+    const res = await load(request('stats'));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.byChain).toHaveLength(1);

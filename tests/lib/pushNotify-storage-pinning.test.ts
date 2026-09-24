@@ -1,4 +1,6 @@
-// R6a: run the real KV transport to pin Lua bytes and the native GETDEL difference.
+// R6a: run the real KV transport to pin the push storage wire contract.
+// B-R6c: the pending consume moved from a Lua EVAL (GET+DEL) to native GETDEL; every other
+// command, key, TTL, failure isolation and coalescing expectation is unchanged.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hold = vi.hoisted(() => ({ enabled: true, send: vi.fn(), warn: vi.fn() }));
@@ -11,7 +13,6 @@ import { notifyPaymentReceived } from '@/lib/push/notify';
 
 const WALLET = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const NORMALIZED = '0x52d4901142e2b5680027da5eb47c86cb02a3ca81';
-const GETDEL_LUA = "\nlocal raw = redis.call('GET', KEYS[1])\nredis.call('DEL', KEYS[1])\nreturn raw\n";
 const data = new Map<string, string>();
 const expiry = new Map<string, number>();
 let now = 0;
@@ -58,10 +59,10 @@ beforeEach(() => {
         data.set(key, args[1]);
         expiry.set(key, now + Number(args[3]));
       }
-    } else if (command === 'EVAL' || command === 'GETDEL') {
-      const pendingKey = command === 'EVAL' ? args[2] : key;
-      result = pendingReply === undefined ? data.get(pendingKey) ?? null : pendingReply;
-      data.delete(pendingKey);
+    } else if (command === 'GETDEL') {
+      // EVAL is intentionally unhandled: any leftover Lua consume fails as an unexpected command.
+      result = pendingReply === undefined ? data.get(key) ?? null : pendingReply;
+      data.delete(key);
     } else {
       throw new Error(`unexpected command: ${command}`);
     }
@@ -83,7 +84,7 @@ function payload(locale: 'ja' | 'en', includeAmount = false, call = 0) {
 }
 
 describe('R6a push storage contract', () => {
-  it.each(['payment', 'order', 'store'] as const)('pins %s keys, value, TTLs, Lua bytes and KEYS/ARGV order', async (kind) => {
+  it.each(['payment', 'order', 'store'] as const)('pins %s keys, value, TTLs and the native GETDEL consume', async (kind) => {
     await notifyPaymentReceived(WALLET, kind);
     const pending = `push:pending:${NORMALIZED}:${kind}`;
     const coalesce = `push:coalesce:${NORMALIZED}:${kind}`;
@@ -91,9 +92,9 @@ describe('R6a push storage contract', () => {
       ['INCR', pending],
       ['EXPIRE', pending, '86400'],
       ['SET', coalesce, '1', 'EX', '60', 'NX'],
-      ['EVAL', GETDEL_LUA, '1', pending],
+      ['GETDEL', pending],
     ];
-    // Compare raw REST bodies as well as parsed commands: whitespace is part of Lua.
+    // Compare raw REST bodies as well as parsed commands.
     expect(fetchMock.mock.calls.map(([, init]) => init.body)).toEqual(expected.map((cmd) => JSON.stringify(cmd)));
     for (const [url, init] of fetchMock.mock.calls) {
       expect(url).toBe('https://r6a-kv.test/');
@@ -108,9 +109,9 @@ describe('R6a push storage contract', () => {
     expect(hold.send.mock.calls[0][0]).toBe(WALLET);
   });
 
-  // R6a keeps the EVAL: kvGetDel returns the same KvResult but sends a different KV command,
-  // so switching is a wire change (B item), not an extraction.
-  it('kvGetDel sends GETDEL, not the push EVAL', async () => {
+  // B-R6c: kvGetDel returns the same KvResult the Lua GET+DEL did (value, then null once
+  // consumed), and the push path now sends only GETDEL for the consume, never EVAL.
+  it('kvGetDel returns the value then null, and the push path never sends EVAL', async () => {
     const key = `push:pending:${NORMALIZED}:payment`;
     data.set(key, '2');
     expect(await kvGetDel(key)).toEqual({ ok: true, value: '2' });
@@ -119,6 +120,12 @@ describe('R6a push storage contract', () => {
       `["GETDEL","${key}"]`,
       `["GETDEL","${key}"]`,
     ]);
+    fetchMock.mockClear();
+    await notifyPaymentReceived(WALLET, 'payment');
+    now = 60;
+    await notifyPaymentReceived(WALLET, 'order');
+    expect(commands().map(([cmd]) => cmd)).not.toContain('EVAL');
+    expect(commands().filter(([cmd]) => cmd === 'GETDEL')).toHaveLength(2);
   });
 
   it('coalesces through second 59, consumes at second 60, and hides amounts for the combined count', async () => {
@@ -128,13 +135,13 @@ describe('R6a push storage contract', () => {
     now = 59;
     await notifyPaymentReceived(WALLET, 'payment', '¥2,000');
     expect(hold.send).toHaveBeenCalledTimes(1);
-    expect(commands().filter(([cmd]) => cmd === 'EVAL')).toHaveLength(1);
+    expect(commands().filter(([cmd]) => cmd === 'GETDEL')).toHaveLength(1);
     now = 60;
     await notifyPaymentReceived(WALLET, 'payment', '¥3,000');
     expect(hold.send).toHaveBeenCalledTimes(2);
     expect(payload('ja', true, 1)).toEqual({ title: '前回通知以降の着金: 2 件' });
     expect(payload('en', true, 1)).toEqual({ title: '2 payments since last notice' });
-    expect(commands().filter(([cmd]) => cmd === 'EVAL')).toHaveLength(2);
+    expect(commands().filter(([cmd]) => cmd === 'GETDEL')).toHaveLength(2);
   });
 
   it.each([
@@ -165,9 +172,9 @@ describe('R6a push storage contract', () => {
 
   it.each([
     { command: 'INCR', event: 'push.notify_pending_incr_failed', trace: ['INCR'], sent: 0 },
-    { command: 'EXPIRE', event: 'push.notify_pending_ttl_failed', trace: ['INCR', 'EXPIRE', 'SET', 'EVAL'], sent: 1 },
+    { command: 'EXPIRE', event: 'push.notify_pending_ttl_failed', trace: ['INCR', 'EXPIRE', 'SET', 'GETDEL'], sent: 1 },
     { command: 'SET', event: 'push.notify_coalesce_claim_failed', trace: ['INCR', 'EXPIRE', 'SET'], sent: 0 },
-    { command: 'EVAL', event: 'push.notify_pending_getdel_failed', trace: ['INCR', 'EXPIRE', 'SET', 'EVAL'], sent: 0 },
+    { command: 'GETDEL', event: 'push.notify_pending_getdel_failed', trace: ['INCR', 'EXPIRE', 'SET', 'GETDEL'], sent: 0 },
   ])('preserves $command failure isolation and continuation', async ({ command, event, trace, sent }) => {
     failure = { command, mode: 'http' };
     await expect(notifyPaymentReceived(WALLET, 'payment')).resolves.toBeUndefined();
@@ -181,7 +188,7 @@ describe('R6a push storage contract', () => {
     { mode: 'parse', reason: 'parse_error' },
     { mode: 'timeout', reason: 'timeout' },
   ] as const)('keeps pending/coalesce state after GETDEL $mode failure', async ({ mode, reason }) => {
-    failure = { command: 'EVAL', mode };
+    failure = { command: 'GETDEL', mode };
     await expect(notifyPaymentReceived(WALLET, 'payment')).resolves.toBeUndefined();
     expect(hold.send).not.toHaveBeenCalled();
     expect(data.get(`push:pending:${NORMALIZED}:payment`)).toBe('1');

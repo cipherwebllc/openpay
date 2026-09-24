@@ -2,7 +2,7 @@ import 'server-only';
 
 import type { Address } from 'viem';
 import { env } from '@/lib/env';
-import { kvEval, kvExpire, kvIncr, kvSet } from '@/lib/kv';
+import { kvExpire, kvGetDel, kvIncr, kvSet } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { sendPushToWallet, type PushPayload } from '@/lib/push/server';
 import type { PushLocale } from '@/lib/push/store';
@@ -11,14 +11,6 @@ export type PaymentNotificationKind = 'payment' | 'order' | 'store';
 
 export const PUSH_NOTIFY_PENDING_TTL_SEC = 24 * 60 * 60;
 export const PUSH_NOTIFY_COALESCE_TTL_SEC = 60;
-
-// lib/kv の kvGetDel (native GETDEL) と結果は同じだが KV へ送る command が変わるため据え置く
-// (切り替えるなら通信の変更として B-R6c・tests/lib/pushNotify-storage-pinning)。
-const GETDEL_SCRIPT = `
-local raw = redis.call('GET', KEYS[1])
-redis.call('DEL', KEYS[1])
-return raw
-`;
 
 export function pushNotifyPendingKey(
   wallet: Address | string,
@@ -104,7 +96,10 @@ async function notifyPaymentReceivedInner(
     return;
   }
 
-  const pending = await kvEval<string | null>(GETDEL_SCRIPT, [pendingKey], []);
+  // pending の読み取りと削除を 1 command で原子的に行う (native GETDEL)。B-R6c で旧 Lua EVAL
+  // (GET+DEL) から置換: 返り値 (未存在は null) と失敗時の KvResult は同一で、変わるのは KV へ
+  // 送る command だけ (tests/lib/pushNotify-storage-pinning が通信を固定)。
+  const pending = await kvGetDel(pendingKey);
   if (!pending.ok) {
     logger.warn('push.notify_pending_getdel_failed', {
       wallet: wallet.toLowerCase(),
