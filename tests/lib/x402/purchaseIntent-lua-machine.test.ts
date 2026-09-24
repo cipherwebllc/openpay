@@ -115,6 +115,10 @@ import {
   type QuotedPurchaseIntent,
   type SettlingPurchaseIntent,
 } from '@/lib/x402/purchaseIntent';
+import {
+  claimSignedStoreUsdcIntent, claimStoreUsdcSettlement, createQuotedStoreUsdcIntent,
+  reconcileStoreUsdcIntent, storeUsdcAuthorizationHash, storeUsdcIntentKey, storeUsdcPendingKey,
+} from '@/lib/x402/storeUsdcIntent';
 import type { HostedPurchaseMetadata } from '@/lib/x402/hostedStore';
 
 const BASE_NOW = 1_800_000_000_000;
@@ -2383,5 +2387,233 @@ describe('R3d pins: digital reconcile branches on real Lua', () => {
     expect(h.loggerWarn.mock.calls.filter(([event]) => event === 'creator_store.purchase_pending_quarantined').map(([, data]) => data))
       // 同点 score は member の辞書順で列挙される ('0x7…' < 'not-a-salt')。
       .toEqual([{ member: missing, reason: 'not_found' }, { member: 'not-a-salt', reason: 'invalid_salt' }]);
+  });
+});
+
+// R4a: these paired traces were run on the detached pre-extraction HEAD first.
+// Both public reconcilers use the same RPC/KV harness; the policy differences are intentional.
+describe('R4a differential reconcile traces (JPYC / USDC)', () => {
+  type Rail = 'jpyc' | 'usdc';
+  const rails: Rail[] = ['jpyc', 'usdc'];
+
+  async function fixture(rail: Rail) {
+    h.kvGet.mockImplementation(kvGetMock);
+    h.kvEval.mockImplementation(kvEvalMock);
+    for (const mock of Object.values(h.publicClient)) mock.mockReset();
+    let salt: Hex;
+    if (rail === 'jpyc') {
+      salt = (await makeSettling()).intentSalt;
+    } else {
+      const quoted = await createQuotedStoreUsdcIntent({
+        resourceId: `h_${'a'.repeat(32)}`, contentRevision: 3, metadata: metadata(), payer: PAYER,
+        usdcQuoteAtomic: '2000000', rateScaled: '150000000', rateFetchedAt: BASE_NOW,
+        rounding: 'ceil', fxQuoteExpiresAt: BASE_NOW + 180_000, anchorBlock: ANCHOR_BLOCK,
+        now: BASE_NOW, intentSalt: nextSalt(),
+      });
+      if (!quoted.ok) throw new Error(quoted.reason);
+      salt = quoted.intent.intentSalt;
+      const claim = {
+        payer: PAYER, to: MERCHANT, value: quoted.intent.usdcQuoteAtomic, validAfter: '0',
+        validBefore: quoted.intent.authorizationValidBeforeMax, nonce: quoted.intent.nonce,
+        signatureFingerprint: SIGNATURE_FINGERPRINT,
+      };
+      const signed = await claimSignedStoreUsdcIntent({
+        intentSalt: salt, claim, authorizationHash: storeUsdcAuthorizationHash(claim), now: BASE_NOW + 1_000,
+      });
+      if (!signed.ok) throw new Error(signed.reason);
+      const claimed = await claimStoreUsdcSettlement({ intentSalt: salt, now: BASE_NOW + 2_000 });
+      if (!claimed.ok || claimed.kind !== 'claimed') throw new Error('USDC settle claim failed');
+    }
+    const key = rail === 'jpyc' ? purchaseIntentKey(salt) : storeUsdcIntentKey(salt);
+    const pending = rail === 'jpyc' ? purchasePendingIndexKey() : storeUsdcPendingKey();
+    const stored = () => jsonObject(h.store!.strings.get(key)!);
+    const patch = (value: Record<string, unknown>) => h.store!.strings.set(key, JSON.stringify({ ...stored(), ...value }));
+    const events: unknown[] = [];
+    const run = async (now = RECONCILE_NOW) => {
+      const result = rail === 'jpyc'
+        ? await reconcilePurchaseIntent(salt, { now })
+        : await reconcileStoreUsdcIntent(salt, { now, client: h.publicClient });
+      events.push(['result', result]);
+      return result;
+    };
+    h.kvGet.mockImplementation((readKey: string) => {
+      events.push(['get', readKey === key ? 'intent' : readKey]);
+      return kvGetMock(readKey);
+    });
+    h.kvEval.mockImplementation(async (script: string, keys: string[], args: string[]) => {
+      const nextRaw = script === purchaseScripts.CAS_PENDING_INTENT ? args[3]
+        : script.includes('if current ~= ARGV[4]') ? args[4] : undefined;
+      const next = nextRaw ? jsonObject(nextRaw) : undefined;
+      events.push(next ? ['cas', next.reconcileLeaseId ? 'lease' : 'reschedule', next.state, next.reconcileFromBlock ?? null]
+        : ['eval', script === purchaseScripts.FINALIZE_PURCHASE ? 'finalize'
+          : script === purchaseScripts.READ_LIBRARY_SCORE ? 'library' : 'other']);
+      return kvEvalMock(script, keys, args);
+    });
+    h.publicClient.readContract.mockImplementation(async () => { events.push(['used']); return true; });
+    h.publicClient.getBlockNumber.mockImplementation(async () => { events.push(['head']); return 14_000n; });
+    h.publicClient.getLogs.mockImplementation(async ({ fromBlock, toBlock }: { fromBlock: bigint; toBlock: bigint }) => {
+      events.push(['page', fromBlock, toBlock]);
+      return [];
+    });
+    h.publicClient.getTransactionReceipt.mockImplementation(async ({ hash }: { hash: Hex }) => {
+      events.push(['receipt', hash]);
+      return { status: 'success', blockNumber: ANCHOR_BLOCK, logs: [] };
+    });
+    // Drop setup writes. The trace begins at each rail's public reconcile entry point.
+    h.calls = [];
+    h.loggerWarn.mockClear();
+    return { salt, key, pending, stored, patch, run, events };
+  }
+
+  const pendingResult = ['result', { ok: true, state: 'pending' }];
+  const scan = [['used'], ['head'], ['page', 10_000n, 11_999n], ['page', 12_000n, 13_999n], ['page', 14_000n, 14_000n]];
+  const lease = ['cas', 'lease', 'settling', null];
+  const rescheduled = (rail: Rail, cursor: string | null) => ['cas', 'reschedule', rail === 'jpyc' ? 'indeterminate' : 'settling', cursor];
+
+  it('JPYC honors the active settlement lease; USDC scans and reschedules the same state', async () => {
+    for (const rail of rails) {
+      const f = await fixture(rail);
+      await f.run(BASE_NOW + 3_000);
+      expect(f.events).toEqual(rail === 'jpyc' ? [['get', 'intent'], pendingResult]
+        : [['get', 'intent'], ...scan, rescheduled(rail, '10000'), pendingResult]);
+    }
+  });
+
+  it('a concurrent JPYC reconciler is kept out by the lease; USDC has no reconcile lease', async () => {
+    for (const rail of rails) {
+      const f = await fixture(rail);
+      const used = h.publicClient.readContract.getMockImplementation()!;
+      h.publicClient.readContract.mockImplementationOnce(async () => {
+        f.events.push(['outer-used']);
+        await f.run();
+        return used();
+      });
+      await f.run();
+      const body = [...scan, rescheduled(rail, '10000'), pendingResult];
+      expect(f.events).toEqual(rail === 'jpyc'
+        ? [['get', 'intent'], lease, ['outer-used'], ['get', 'intent'], pendingResult, ...body]
+        : [['get', 'intent'], ['outer-used'], ['get', 'intent'], ...body, ...body]);
+      expect(f.stored()).not.toHaveProperty('reconcileLeaseId');
+    }
+  });
+
+  it('JPYC repairs a settled library and pending index; USDC returns settled without repair', async () => {
+    for (const rail of rails) {
+      const f = await fixture(rail);
+      if (rail === 'jpyc') {
+        expect(await finalizeHostedPurchase({ intentSalt: f.salt, txHash: TX_HASH, settledAt: BASE_NOW + 3_000 })).toMatchObject({ ok: true });
+      } else {
+        f.patch({ state: 'settled', txHash: TX_HASH, settledAt: BASE_NOW + 3_000 });
+      }
+      zadd(f.pending, String(RECONCILE_NOW), f.salt);
+      f.events.length = 0;
+      h.store!.zsets.delete(purchaseLibraryKey(PAYER));
+      await f.run();
+      expect(f.events.filter((event) => (event as unknown[])[0] !== 'get')).toEqual(rail === 'jpyc'
+        ? [['eval', 'finalize'], ['eval', 'library'], ['result', { ok: true, state: 'settled', txHash: TX_HASH }]]
+        : [['result', { ok: true, state: 'settled' }]]);
+      expect(h.store!.zsets.get(purchaseLibraryKey(PAYER))?.has(String(f.stored().resourceId)) ?? false).toBe(rail === 'jpyc');
+      expect(h.store!.zsets.get(f.pending)?.has(f.salt) ?? false).toBe(rail === 'usdc');
+    }
+  });
+
+  it('reschedule storage failure is JPYC storage but USDC pending with a warning and pending evidence', async () => {
+    for (const rail of rails) {
+      h.fail.eval = false;
+      const f = await fixture(rail);
+      h.publicClient.readContract.mockImplementation(async () => {
+        f.events.push(['used']);
+        h.fail.eval = true;
+        return false;
+      });
+      const before = h.store!.strings.get(f.key);
+      await f.run();
+      expect(f.events).toEqual([
+        ['get', 'intent'], ...(rail === 'jpyc' ? [lease] : []), ['used'], rescheduled(rail, null),
+        ['result', rail === 'jpyc' ? { ok: false, reason: 'storage' } : { ok: true, state: 'pending' }],
+      ]);
+      expect(h.store!.zsets.get(f.pending)?.has(f.salt)).toBe(true);
+      if (rail === 'jpyc') {
+        expect(f.stored()).toHaveProperty('reconcileLeaseId');
+        expect(h.loggerWarn).not.toHaveBeenCalled();
+      } else {
+        expect(h.store!.strings.get(f.key)).toBe(before);
+        expect(h.loggerWarn).toHaveBeenCalledTimes(1);
+        expect(h.loggerWarn).toHaveBeenCalledWith('creator_store.usdc_purchase_reschedule_failed', { intentSalt: f.salt });
+      }
+    }
+  });
+
+  it.each(['1', '10000', '70000'])('bounds 20 pages, resumes and wraps (initial cursor %s) on both rails', async (cursor) => {
+    for (const rail of rails) {
+      const f = await fixture(rail);
+      f.patch({ reconcileFromBlock: cursor });
+      h.publicClient.getBlockNumber.mockResolvedValue(50_001n);
+      await f.run();
+      const pages = () => h.publicClient.getLogs.mock.calls.map(([range]) => [range.fromBlock, range.toBlock]);
+      const first = cursor === '70000' ? [] : Array.from({ length: 20 }, (_, i) => [10_000n + BigInt(i) * 2_000n, 11_999n + BigInt(i) * 2_000n]);
+      expect(pages()).toEqual(first);
+      expect(f.stored().reconcileFromBlock).toBe(cursor === '70000' ? '10000' : '50000');
+      h.publicClient.getLogs.mockClear();
+      if (cursor !== '70000') {
+        await f.run(RECONCILE_NOW + 60_000);
+        expect(pages()).toEqual([[50_000n, 50_001n]]);
+        expect(f.stored().reconcileFromBlock).toBe('10000');
+      }
+    }
+  });
+
+  it('collects all pages before receipts and deduplicates candidates in first-seen order', async () => {
+    for (const rail of rails) {
+      const f = await fixture(rail);
+      const getLogs = h.publicClient.getLogs.getMockImplementation()!;
+      h.publicClient.getLogs.mockImplementation(async (range) => {
+        await getLogs(range);
+        return (range.fromBlock === 10_000n ? [OTHER_TX_HASH, TX_HASH, OTHER_TX_HASH] : [TX_HASH, THIRD_TX_HASH])
+          .map((transactionHash) => ({ transactionHash }));
+      });
+      await f.run();
+      expect(f.events).toEqual([
+        ['get', 'intent'], ...(rail === 'jpyc' ? [lease] : []), ...scan,
+        ...[OTHER_TX_HASH, TX_HASH, THIRD_TX_HASH].map((hash) => ['receipt', hash]),
+        rescheduled(rail, '10000'), pendingResult,
+      ]);
+    }
+  });
+
+  it('a missing candidate receipt advances JPYC but retries the first candidate page on USDC', async () => {
+    for (const rail of rails) {
+      const f = await fixture(rail);
+      h.publicClient.getLogs.mockImplementation(async ({ fromBlock }) => fromBlock === 10_000n ? [] : [{ transactionHash: TX_HASH }]);
+      h.publicClient.getTransactionReceipt.mockRejectedValue(new Error('missing receipt'));
+      await f.run();
+      expect(f.stored().reconcileFromBlock).toBe(rail === 'jpyc' ? '10000' : '12000');
+      expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledTimes(1);
+      expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX_HASH });
+      expect(f.events.at(-1)).toEqual(pendingResult);
+    }
+  });
+
+  it('a failed later page discards earlier candidates and preserves the saved cursor on both rails', async () => {
+    for (const rail of rails) {
+      const f = await fixture(rail);
+      f.patch({ reconcileFromBlock: '12000' });
+      h.publicClient.getLogs.mockResolvedValueOnce([{ transactionHash: TX_HASH }]).mockRejectedValueOnce(new Error('page unavailable'));
+      await f.run();
+      expect(h.publicClient.getTransactionReceipt).not.toHaveBeenCalled();
+      expect(f.stored().reconcileFromBlock).toBe('12000');
+      expect(f.events.at(-1)).toEqual(pendingResult);
+      expect(h.loggerWarn).toHaveBeenCalledTimes(rail === 'jpyc' ? 1 : 0);
+    }
+  });
+
+  it('keeps JPYC hash case while USDC lowercases log hashes before candidate deduplication', async () => {
+    for (const rail of rails) {
+      const f = await fixture(rail);
+      const upper = `0x${'A'.repeat(64)}` as Hex;
+      h.publicClient.getLogs.mockResolvedValue([{ transactionHash: null }, { transactionHash: upper }, { transactionHash: TX_HASH }]);
+      await f.run();
+      expect(h.publicClient.getTransactionReceipt.mock.calls.map(([arg]) => arg.hash)).toEqual(rail === 'jpyc' ? [upper, TX_HASH] : [TX_HASH]);
+    }
   });
 });

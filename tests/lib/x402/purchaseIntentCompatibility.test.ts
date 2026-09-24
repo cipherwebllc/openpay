@@ -782,6 +782,20 @@ describe('module structure (R3a/R3b/R3c/R3d split)', () => {
     }
   });
 
+  it('keeps the shared paging utility below both rails without runtime dependencies', () => {
+    const shared = 'lib/x402/reconcilePaging.ts';
+    const source = readFileSync(shared, 'utf8');
+    expect(specifiers(shared)).toEqual(['viem']);
+    expect(source.match(/^import .+$/gm)).toEqual(["import type { Hex } from 'viem';"]);
+    expect(source).not.toMatch(/\b(?:require|import)\s*\(/);
+    for (const rail of ['lib/x402/purchase/reconcile.ts', 'lib/x402/storeUsdcIntent.ts']) {
+      expect(specifiers(rail)).toContain('@/lib/x402/reconcilePaging');
+    }
+    // Shared mechanics do not extend the facade or bypass its ownership/key mocks.
+    expect(specifiers('lib/x402/purchaseIntent.ts')).not.toContain('@/lib/x402/reconcilePaging');
+    expect(specifiers('lib/x402/storeUsdcIntent.ts')).toContain('@/lib/x402/purchaseIntent');
+  });
+
   it('routes every consumer outside the split through the facade (vi.mock interception)', () => {
     // 検査器の自己検査: facade 自身の分割先 import は検出できる。
     expect(specifiers('lib/x402/purchaseIntent.ts')).toEqual(expect.arrayContaining([

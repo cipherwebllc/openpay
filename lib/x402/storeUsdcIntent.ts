@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
+
 import { createHash, randomBytes } from 'node:crypto';
 import {
   isHostedLabel,
@@ -1439,33 +1441,26 @@ export async function reconcileStoreUsdcIntent(
   const latest = await readStoreUsdcAnchorBlock(input.client);
   if (latest === null) return retry();
   const anchor = BigInt(intent.anchorBlock);
-  let fromBlock = intent.reconcileFromBlock ? BigInt(intent.reconcileFromBlock) : anchor;
-  if (fromBlock < anchor) fromBlock = anchor;
-  const candidates = new Map<Hex, bigint>();
-  let pages = 0;
-  while (fromBlock <= latest && pages < STORE_USDC_RECONCILE_MAX_PAGES) {
-    const pageEnd = fromBlock + STORE_USDC_RECONCILE_PAGE_BLOCKS - 1n;
-    const toBlock = pageEnd > latest ? latest : pageEnd;
-    const hashes = await findStoreUsdcAuthorizationTransactions({
-      payer: intent.claim.payer,
-      nonce: intent.nonce,
-      fromBlock,
-      toBlock,
-      ...(input.client ? { client: input.client } : {}),
-    });
-    // 途中ページの RPC 障害で未検証の候補を飛ばし、entitlement 未付与へ波及させない。
-    if (hashes === 'unavailable') return retry();
-    for (const hash of hashes) {
-      if (!candidates.has(hash)) candidates.set(hash, fromBlock);
-    }
-    fromBlock = toBlock + 1n;
-    pages += 1;
-  }
-  for (const [txHash, candidatePageStart] of candidates) {
+  const scan = await scanReconcileBlockPages({
+    anchor,
+    fromBlock: intent.reconcileFromBlock ? BigInt(intent.reconcileFromBlock) : anchor,
+    latest,
+    pageBlocks: STORE_USDC_RECONCILE_PAGE_BLOCKS,
+    maxPages: STORE_USDC_RECONCILE_MAX_PAGES,
+  }, (fromBlock, toBlock) => findStoreUsdcAuthorizationTransactions({
+    payer: intent.claim.payer,
+    nonce: intent.nonce,
+    fromBlock,
+    toBlock,
+    ...(input.client ? { client: input.client } : {}),
+  }));
+  // 途中ページの RPC 障害で未検証の候補を飛ばし、entitlement 未付与へ波及させない。
+  if (scan === 'unavailable') return retry();
+  for (const [txHash, candidatePageStart] of scan.candidates) {
     const resolved = await finalizeCandidate(txHash, candidatePageStart);
     if (resolved) return resolved;
   }
-  return retry(fromBlock <= latest ? fromBlock : anchor);
+  return retry(scan.nextFromBlock);
 }
 
 // 両 ZSET の型/score を書込前に検査し、隔離先の障害が pending 証拠の消失へ波及しないようにする。
