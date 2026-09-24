@@ -1,21 +1,23 @@
 {
   "AgentConfigGenerator": {
     "modeOptions": {
-      "human-pays": "Approve payments yourself",
-      "agent-pays": "Agent Wallet (local)",
-      "agent-pays-kova": "Agent Wallet (Kova, third party)"
+      "human-pays": "You pay (approve yourself)",
+      "agent-pays": "Agent pays (local wallet)",
+      "agent-pays-kova": "Agent pays (Kova, third party)"
     },
     "kovaWallet": {
       "label": "Kova wallet name",
-      "hint": "The wallet name managed in Kova (letters, digits, ., _, and -; required)"
+      "hint": "Letters, digits, ., _, and - only; required"
     },
     "kovaAgentAddress": {
       "label": "Kova public EVM address",
       "hint": "Check the Kova wallet address with kova wallet info. Never paste a private key."
     },
     "providerNote": "Kova (Komlock lab) is a third-party Execution Provider. OpenPay does not receive Kova keys or credentials.",
-    "policyNote": "Kova policy does not limit amounts on this payment path (tested with Kova 0.1.2). Only this MCP’s settings impose amount limits.",
-    "balanceNote": "Fund it only with a small amount you can afford to lose."
+    "policyNote": "Kova policy does not limit amounts on this payment path (tested with Kova 0.1.2). Only this MCP’s settings (the three limits above) impose amount limits.",
+    "balanceNote": "Fund the Kova wallet only with a small amount you can afford to lose.",
+    "setupNote": "Install Kova CLI separately and add it to PATH. Only macOS/Linux are supported (Windows is unsupported). After restarting the host, use wallet_status to confirm signerMode: kova. You do not need wallet_init.",
+    "fundingNote": "Fund the same public address you entered with JPYC on Polygon. No POL is needed for OpenPay x402 payments."
   },
   "CrossChainForwardPendingPanel": {
     "title": "Check your previous Arc payment",

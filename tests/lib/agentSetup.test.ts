@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { parseUnits } from 'viem';
 // @ts-expect-error The SDK source of truth is JavaScript without declarations.
 import { DEFAULT_MAX_PER_CALL_JPYC, DEFAULT_MAX_SESSION_JPYC, DEFAULT_ALLOWED_HOSTS, DEFAULT_CATALOG_TRUST, readMoneyConfig } from '../../packages/x402-sdk/src/guards.mjs';
@@ -21,11 +21,24 @@ describe('agent setup — package fences', () => {
   it('generated invocations name bins that the MCP package really ships', () => {
     const pkg = JSON.parse(readFileSync('packages/x402-mcp/package.json', 'utf8'));
     expect(pkg.name).toBe(AGENT_MCP_PACKAGE);
-    // Kova を選べる Web と公開準備中の MCP の minor を揃える (npm publish は Web 公開前)。
-    expect(AGENT_MCP_VERSION).toBe(pkg.version.split('.').slice(0, 2).join('.'));
+    // MCP の版更新 → npm publish → Web 切替の間は Web の固定が 1 minor 遅れる。
+    // 未公開版を npx に固定すると利用者環境で起動できないため、同 major の同版または
+    // ちょうど 1 minor 前のみ許容する。Web 先行・2 minor 以上の遅れは引き続き拒否。
+    const [packageMajor, packageMinor] = pkg.version.split('.').map(Number);
+    const [webMajor, webMinor] = AGENT_MCP_VERSION.split('.').map(Number);
+    expect(Number.isInteger(webMajor) && Number.isInteger(webMinor)).toBe(true);
+    // major を跨ぐ版更新 (例 0.16 → 1.0) でも同じ窓が開く: そのときだけ「次の major の .0」を許す。
+    const sameMajorWindow = webMajor === packageMajor && [0, 1].includes(packageMinor - webMinor);
+    const nextMajorWindow = packageMajor === webMajor + 1 && packageMinor === 0;
+    expect(sameMajorWindow || nextMajorWindow).toBe(true);
     expect(AGENT_MCP_SPEC).toBe(`${AGENT_MCP_PACKAGE}@${AGENT_MCP_VERSION}`);
     expect(Object.keys(pkg.bin)).toEqual(expect.arrayContaining([AGENT_MCP_PACKAGE, 'openpay-order-mcp']));
     expect(renderAgentConfig('claude-code', 'human-pays', DEFAULT_AGENT_CONFIG_INPUT)).toContain('openpay-order-mcp');
+  });
+  it('pins a Kova-capable MCP minor when the generator offers Kova', () => {
+    if (AGENT_MODES.includes('agent-pays-kova')) {
+      expect(Number(AGENT_MCP_VERSION.split('.')[1])).toBeGreaterThanOrEqual(18);
+    }
   });
   // setup.md と keyNote の前提: 鍵なしの生成 env で MCP は起動でき、プレースホルダ鍵では起動時に落ちる。
   it('the MCP runtime starts with the generated env and rejects a placeholder key', () => {
@@ -34,6 +47,13 @@ describe('agent setup — package fences', () => {
     expect(() => createToolRuntime({ env })).not.toThrow();
     expect(() => createToolRuntime({ env: { ...env, BUYER_PRIVATE_KEY: '0x...' } })).toThrow(/BUYER_PRIVATE_KEY/);
     expect(() => createToolRuntime({ env: { ...env, SIGNER_MODE: 'steward' } })).toThrow(/steward/);
+  });
+  it('the MCP runtime starts with the generated Kova env without running the CLI', () => {
+    // 実際の wallet・資格情報・日次台帳に触れず、生成 env の受理だけを検証する。
+    const env = { ...Object.fromEntries(buildAgentEnv(KOVA_INPUT, 'agent-pays-kova')), OPENPAY_X402_HOME: mkdtempSync(join(tmpdir(), 'openpay-kova-setup-')) };
+    const kovaExecFile = vi.fn(() => { throw new Error('unexpected Kova CLI execution'); });
+    expect(() => createToolRuntime({ env, kovaExecFile })).not.toThrow();
+    expect(kovaExecFile).not.toHaveBeenCalled();
   });
 });
 
@@ -120,12 +140,23 @@ describe('agent setup', () => {
   it.each([KOVA_INPUT.kovaAgentAddress, KOVA_INPUT.kovaAgentAddress.toLowerCase()])('accepts a public EVM address: %s', (kovaAgentAddress) => {
     expect(invalidAgentConfigFields({ ...KOVA_INPUT, kovaAgentAddress }, 'agent-pays-kova')).toEqual([]);
   });
-  it.each(['', ' ', 'wallet name', 'wallet/name', '$(id)', 'wallet\n'])('rejects an invalid Kova wallet name: %s', (kovaWallet) => {
+  it.each(['', ' ', 'wallet name', 'wallet/name', '$(id)', 'wallet\n', 'wallet\r\n', '.wallet', '_wallet', '-wallet', 'w'.repeat(65)])('rejects an invalid Kova wallet name: %s', (kovaWallet) => {
     const input = { ...KOVA_INPUT, kovaWallet };
     expect(invalidAgentConfigFields(input, 'agent-pays-kova')).toContain('kovaWallet');
     expect(() => buildAgentEnv(input, 'agent-pays-kova')).toThrow('agent config input is invalid');
     expect(invalidAgentConfigFields(input, 'agent-pays')).toEqual([]);
     expect(renderAgentConfig('claude-code', 'human-pays', input)).not.toMatch(/KOVA_|SIGNER_MODE/);
+  });
+  it.each(['a', '1', KOVA_INPUT.kovaWallet, 'w'.repeat(64)])('accepts a Kova wallet name within the 1–64 character boundary: %s', (kovaWallet) => {
+    expect(invalidAgentConfigFields({ ...KOVA_INPUT, kovaWallet }, 'agent-pays-kova')).toEqual([]);
+  });
+  it.each(['abCD'.repeat(16), '0x' + 'abCD'.repeat(16)])('blocks an accidentally pasted private key in the wallet name', (kovaWallet) => {
+    const input = { ...KOVA_INPUT, kovaWallet };
+    expect(invalidAgentConfigFields(input, 'agent-pays-kova')).toContain('kovaWallet');
+    expect(() => buildAgentEnv(input, 'agent-pays-kova')).toThrow('agent config input is invalid');
+    for (const client of AGENT_CLIENTS) {
+      expect(() => renderAgentConfig(client, 'agent-pays-kova', input)).toThrow('agent config input is invalid');
+    }
   });
   it.each(['0', '-1', '1.0000000000000000001', '', '1e2'])('rejects invalid required limits: %s', (value) => {
     for (const field of ['maxPerCallJpyc', 'maxSessionJpyc'] as const) {

@@ -18,8 +18,8 @@ export const AGENT_SETUP_URL = 'https://open-pay.jp/agent/setup.md';
 export const AGENT_MCP_PACKAGE = 'openpay-x402-mcp';
 /**
  * 生成するコマンドは minor を固定する。無固定の `npx` だと、将来の publish が既に配った設定の挙動を
- * 遡って変えてしまい、Web を戻しても取り消せない。packages/x402-mcp/package.json の minor と一致
- * (tests/lib/agentSetup.test.ts のフェンス)。keystore は 0.15 から・購入ログ (wallet_history) は 0.16 から。
+ * 遡って変えてしまい、Web を戻しても取り消せない。MCP の publish 前は Web の pin が
+ * 1 minor 遅れることを許容する (tests/lib/agentSetup.test.ts)。Kova を選べる pin は 0.18 以降。
  */
 export const AGENT_MCP_VERSION = '0.18';
 export const AGENT_MCP_SPEC = `${AGENT_MCP_PACKAGE}@${AGENT_MCP_VERSION}`;
@@ -120,14 +120,19 @@ export function invalidAgentConfigFields(
     invalid.push('allowedHosts');
   }
   if (mode === 'agent-pays-kova') {
-    if (!input.kovaWallet || /[^A-Za-z0-9._-]/.test(input.kovaWallet)) invalid.push('kovaWallet');
+    const wallet = input.kovaWallet;
+    // 誤貼り付けの秘密が設定・argv へ波及するのを断つ。
+    // $ は末尾改行の直前にも一致するため、前後の空白も拒否する。
+    if (wallet !== wallet.trim() || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(wallet) || /^(0x)?[0-9a-fA-F]{64}$/.test(wallet)) {
+      invalid.push('kovaWallet');
+    }
     if (!isAddress(input.kovaAgentAddress)) invalid.push('kovaAgentAddress');
   }
   return invalid;
 }
 
 /** 生成設定に入れる env (秘密は含めない)。入力は検証済みであること。 */
-export function buildAgentEnv(input: AgentConfigInput, mode: AgentMode = 'agent-pays'): [string, string][] {
+export function buildAgentEnv(input: AgentConfigInput, mode: Exclude<AgentMode, 'human-pays'> = 'agent-pays'): [string, string][] {
   const hosts = normalizeAllowedHosts(input.allowedHosts);
   if (hosts === null || invalidAgentConfigFields(input, mode).length > 0) {
     throw new Error('agent config input is invalid');

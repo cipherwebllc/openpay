@@ -13,6 +13,7 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
   const [client, setClient] = useState<AgentClient>('claude-code');
   const [mode, setMode] = useState<AgentMode>('agent-pays');
   const [input, setInput] = useState({ ...DEFAULT_AGENT_CONFIG_INPUT });
+  const [touched, setTouched] = useState<Partial<Record<AgentConfigField, boolean>>>({});
   const generated = useRef(false);
   const [copiedOutput, setCopiedOutput] = useState<string | null>(null);
   const { copy, copied, available: clipboardAvailable } = useCopyToClipboard();
@@ -55,14 +56,18 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
             {AGENT_CLIENTS.map((value) => <option key={value} value={value}>{c.clientOptions[value]}</option>)}
           </select>
         </label>
-        {mode !== 'human-pays' ? (Object.keys(fields) as AgentConfigField[]).map((field) => (
-          <div key={field} className="min-w-0">
-            <label htmlFor={`agent-${field}`} className="text-sm font-medium">{fields[field]!.label}</label>
-            <input id={`agent-${field}`} className={fieldClass} type="text" inputMode={field.startsWith('max') ? 'decimal' : 'text'} value={input[field]} aria-invalid={invalid.includes(field)} aria-describedby={`agent-${field}-hint${invalid.includes(field) ? ` agent-${field}-error` : ''}`} onChange={(e) => { setInput({ ...input, [field]: e.target.value }); recordInteraction(); }} />
-            <p id={`agent-${field}-hint`} className="mt-1 text-xs text-slate-500">{fields[field]!.hint}</p>
-            {invalid.includes(field) ? <p id={`agent-${field}-error`} className="mt-1 text-xs text-red-700">{c.invalid}</p> : null}
-          </div>
-        )) : null}
+        {mode !== 'human-pays' ? (Object.keys(fields) as AgentConfigField[]).map((field) => {
+          const showValidation = !field.startsWith('kova') || touched[field];
+          const hasError = showValidation && invalid.includes(field);
+          return (
+            <div key={field} className="min-w-0">
+              <label htmlFor={`agent-${field}`} className="text-sm font-medium">{fields[field]!.label}</label>
+              <input id={`agent-${field}`} className={fieldClass} type="text" inputMode={field.startsWith('max') ? 'decimal' : 'text'} autoCapitalize="none" autoCorrect="off" spellCheck={false} value={input[field]} aria-invalid={showValidation ? hasError : undefined} aria-describedby={`agent-${field}-hint${hasError ? ` agent-${field}-error` : ''}`} onBlur={() => setTouched((previous) => ({ ...previous, [field]: true }))} onChange={(e) => { setInput({ ...input, [field]: e.target.value }); setTouched((previous) => ({ ...previous, [field]: true })); recordInteraction(); }} />
+              <p id={`agent-${field}-hint`} className="mt-1 text-xs text-slate-500">{fields[field]!.hint}</p>
+              {hasError ? <p id={`agent-${field}-error`} className="mt-1 text-xs text-red-700">{c.invalid}</p> : null}
+            </div>
+          );
+        }) : null}
       </div>
       {mode !== 'human-pays' ? (
         <div className="mt-4">
@@ -70,7 +75,7 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
           <p id="agent-catalog-hint" className="mt-2 text-xs leading-relaxed text-slate-500">{c.catalogTrustHint}</p>
         </div>
       ) : <p className="mt-4 text-sm text-slate-600">{c.humanPaysNote}</p>}
-      {mode === 'agent-pays-kova' ? <div className="mt-4 space-y-2 text-xs leading-relaxed text-slate-600"><p>{t('providerNote')}</p><p>{t('policyNote')}</p><p>{t('balanceNote')}</p></div> : null}
+      {mode === 'agent-pays-kova' ? <div className="mt-4 space-y-2 text-xs leading-relaxed text-slate-600"><p>{t('providerNote')}</p><p>{t('policyNote')}</p><p>{t('balanceNote')}</p><p>{t('setupNote')}</p><p>{t('fundingNote')}</p></div> : null}
       {output !== null ? (
         <div>
           <CodeBlock label={c.outputLabel[client]} code={output} />
@@ -80,9 +85,9 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
               trackAgentEvent('agent_config_copy', { locale, client, mode });
             }
           }}>{copied && copiedOutput === output ? c.copied : c.copy}</button> : null}
-          {mode === 'agent-pays' ? <div className="mt-4 space-y-2 text-xs leading-relaxed text-slate-600"><p>{c.keyNote}</p><p>{c.feeNote}</p></div> : null}
         </div>
       ) : null}
+      {mode !== 'human-pays' ? <div className="mt-4 space-y-2 text-xs leading-relaxed text-slate-600">{mode === 'agent-pays' && output !== null ? <p>{c.keyNote}</p> : null}<p>{c.feeNote}</p></div> : null}
     </details>
   );
 }

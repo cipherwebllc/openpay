@@ -318,7 +318,7 @@ const ja: AgentPageContent = {
     catalogTrustLabel: 'AI ストア掲載の URL を許可 (CATALOG_TRUST)',
     catalogTrustHint:
       'OpenPay のカタログに載っている URL は、接続先に追加しなくても支払えます。その場合、支払い条件が掲載内容と一致しなければ拒否されます (接続先に自分で追加したホストは照合されません)。',
-    humanPaysNote: '「自分で承認」は Agent がウォレットに触れないため、鍵も上限も不要です。',
+    humanPaysNote: '「人が支払う (自分で承認)」は Agent がウォレットに触れないため、鍵も上限も不要です。',
     invalid: '入力を確認してください',
     outputLabel: {
       'claude-code': 'ターミナルで実行',
@@ -583,7 +583,7 @@ const en: AgentPageContent = {
     catalogTrustLabel: 'Allow URLs listed on the AI Store (CATALOG_TRUST)',
     catalogTrustHint:
       'URLs in the OpenPay catalog are payable without adding their host; for those, payment terms that differ from the listing are refused. Hosts you add yourself are not checked against the catalog.',
-    humanPaysNote: '“Approve payments yourself” needs no key and no limits: the agent never touches a wallet.',
+    humanPaysNote: '“You pay (approve yourself)” needs no key and no limits: the agent never touches a wallet.',
     invalid: 'Check this value',
     outputLabel: {
       'claude-code': 'Run in your terminal',

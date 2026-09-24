@@ -69,6 +69,8 @@ describe('AgentConfigGenerator', () => {
     fireEvent.change(screen.getByLabelText('Mode'), { target: { value: 'human-pays' } });
     expect(screen.queryByLabelText('Per-call limit (JPYC)')).toBeNull();
     expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByText(C.feeNote)).toBeNull();
+    expect(screen.queryByText(C.keyNote)).toBeNull();
     expect(container.querySelector('pre')?.textContent).toContain('openpay-order-mcp');
     expect(container.querySelector('pre')?.textContent).not.toMatch(/env|MAX_|PRIVATE_KEY/);
     fireEvent.change(screen.getByLabelText('Mode'), { target: { value: 'agent-pays' } });
@@ -103,14 +105,29 @@ describe('AgentConfigGenerator', () => {
     expect(wallet).toBeVisible();
     expect(address).toBeVisible();
     expect(address).toHaveAttribute('inputmode', 'text');
-    expect(wallet).toHaveAttribute('aria-invalid', 'true');
+    expect(wallet).not.toHaveAttribute('aria-invalid');
+    expect(address).not.toHaveAttribute('aria-invalid');
+    expect(wallet).toHaveAccessibleDescription(t.kovaWallet.hint);
+    expect(address).toHaveAccessibleDescription(t.kovaAgentAddress.hint);
+    expect(screen.queryByText(c.invalid)).toBeNull();
+    for (const field of [wallet, address]) {
+      expect(field).toHaveAttribute('autocapitalize', 'none');
+      expect(field).toHaveAttribute('autocorrect', 'off');
+      expect(field).toHaveAttribute('spellcheck', 'false');
+    }
     expect(container.querySelector('pre')).toBeNull();
     for (const field of Object.values(c.fields)) expect(screen.getByLabelText(field.label)).toBeVisible();
     expect(screen.getByRole('checkbox')).toBeVisible();
-    for (const note of [t.providerNote, t.policyNote, t.balanceNote]) expect(screen.getByText(note)).toBeVisible();
+    for (const note of [t.providerNote, t.policyNote, t.balanceNote, t.setupNote, t.fundingNote]) expect(screen.getByText(note)).toBeVisible();
     expect(screen.queryByText(c.keyNote)).toBeNull();
-    expect(screen.queryByText(c.feeNote)).toBeNull();
+    expect(screen.getByText(c.feeNote)).toBeVisible();
+    fireEvent.blur(wallet);
+    expect(wallet).toHaveAttribute('aria-invalid', 'true');
+    expect(wallet).toHaveAccessibleDescription(`${t.kovaWallet.hint} ${c.invalid}`);
+    expect(address).not.toHaveAttribute('aria-invalid');
+    expect(container.querySelector('pre')).toBeNull();
     fireEvent.change(wallet, { target: { value: 'my-wallet' } });
+    expect(wallet).toHaveAttribute('aria-invalid', 'false');
     fireEvent.change(address, { target: { value: '0x1234' } });
     expect(address).toHaveAttribute('aria-invalid', 'true');
     expect(address).toHaveAccessibleDescription(`${t.kovaAgentAddress.hint} ${c.invalid}`);
@@ -119,6 +136,8 @@ describe('AgentConfigGenerator', () => {
     fireEvent.change(address, { target: { value: '0x52908400098527886E0F7030069857D2E4169EE7' } });
     expect(address).toHaveAttribute('aria-invalid', 'false');
     expect(container.querySelector('pre')?.textContent).toContain('SIGNER_MODE=kova');
+    expect(screen.getByText(c.feeNote)).toBeVisible();
+    expect(screen.queryByText(c.keyNote)).toBeNull();
     await user.click(screen.getByRole('button', { name: c.copy }));
     const output = await navigator.clipboard.readText();
     expect(output).toContain('KOVA_WALLET=my-wallet');
@@ -130,6 +149,8 @@ describe('AgentConfigGenerator', () => {
     expect(screen.queryByLabelText(t.kovaWallet.label)).toBeNull();
     expect(container.querySelector('pre')?.textContent).toContain('openpay-order-mcp');
     expect(container.querySelector('pre')?.textContent).not.toMatch(/SIGNER_MODE|KOVA_/);
+    expect(screen.queryByText(c.feeNote)).toBeNull();
+    expect(screen.queryByText(t.setupNote)).toBeNull();
     await user.selectOptions(mode, 'agent-pays');
     expect(screen.queryByLabelText(t.kovaAgentAddress.label)).toBeNull();
     expect(screen.queryByText(t.providerNote)).toBeNull();

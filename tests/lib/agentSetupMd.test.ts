@@ -14,6 +14,24 @@ describe('agent setup document drift fences', () => {
     expect(md).toContain('`BUYER_PRIVATE_KEY`, `KOVA_CREDENTIAL`, or any `STEWARD_*`');
     expect(md).toContain('For Kova, report only the wallet name and public address');
   });
+  it('routes Kova through the MCP only and separates human-managed operations from local keystore guidance', () => {
+    expect(md).toContain('Do not execute any Kova command except `command -v kova`');
+    expect(md).toContain('Never sign, transfer funds, or change policy through the Kova CLI yourself');
+    expect(md).toContain('All payments must go through the MCP tools');
+    expect(md).toContain('Register it with `SIGNER_MODE=keystore`.\nIf the person chose Kova, register using the Kova section below instead.');
+    expect(md).toContain('do not give this wallet.json explanation to a Kova user');
+    expect(md).toContain('If `openpay-x402` is already registered for keystore');
+    expect(md).toContain('a different name, such as `openpay-kova`');
+    expect(md).toContain('**The person applies them themselves** using interactive `kova policy update`');
+    expect(md).toContain('`domain.name`, `domain.verifyingContract`, and `primaryType`');
+    expect(md).toContain('The agent must not execute that command');
+    const branch = md.slice(md.indexOf('### Kova: alternative to Steps 3 and 5'), md.indexOf('## Step 4: Verify'));
+    const rules = [...branch.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => JSON.parse(match[1]));
+    expect(rules).toHaveLength(2);
+    const readme = readFileSync('packages/x402-mcp/README.md', 'utf8');
+    const documentedRules = [...readme.matchAll(/```json\n([\s\S]*?)\n```/g)].map((match) => JSON.parse(match[1])).filter((value) => value.type === 'sign_allowlist');
+    expect(documentedRules).toEqual(rules.map((rule) => expect.objectContaining(rule)));
+  });
   it('discloses the signed-in owner flow and the single-use proof link restrictions', () => {
     for (const text of ['`wallet_prove`', 'OpenPay (SIWE) on /agent', 'signed-in browser once', 'valid 5 minutes, single-use', 'do not paste it anywhere else', '`feature_disabled`']) expect(md).toContain(text);
   });
