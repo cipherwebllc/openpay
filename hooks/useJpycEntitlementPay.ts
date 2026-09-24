@@ -257,6 +257,10 @@ export function useJpycEntitlementPay(
   const postGaslessRelay = useCallback(
     async (payload: GaslessSignResult, signerWallet: Address): Promise<void> => {
       setRelayError(null);
+      // 保持済み payload の再 POST か (retryRelay / 未解決 CTA ガード / remount resume)。保持される
+      // のは fetch 例外・202 pending(hash 無し)・429 の後だけで、以前の POST が broadcast 済みの
+      // 可能性を否定できない。初回 POST は保持前に呼ばれるので false。
+      const isRePost = gaslessPayloadRef.current === payload;
       let res: Response;
       try {
         res = await fetch(relayEndpoint as string, {
@@ -292,10 +296,24 @@ export function useJpycEntitlementPay(
         return;
       }
 
+      // preflight_unavailable は idem claim より前の on-chain read (残高 / authorizationState) の
+      // RPC 障害で、**この** POST が何もしていないことしか示さない。保持済み payload の再 POST では
+      // 以前の POST が broadcast 済みでありうるため、破棄してガスあり fallback / 再署名へ進めると
+      // 二重支払いに波及する。ip_rate_limited と同じく payload を保持し、同一 payload の再 POST
+      // (retryRelay) だけを再試行経路にする (再 POST は idem + on-chain authorizationState で冪等)。
+      if (isRePost && res.status === 503 && body.error === 'preflight_unavailable') {
+        gaslessPayloadRef.current = payload;
+        savePendingSig({ payload, wallet: signerWallet });
+        setRelayError(new Error('preflight_unavailable'));
+        setPhase('pay-error');
+        return;
+      }
+
       // relay 未構成/不可 (503) → ガスあり fallback を UI に出す (自動フォールバックはしない)。
-      // 503 は route のゲート群 (flag/feeReceiver/PROVIDER/preflight/日次予算) = **すべて submit 前**
-      // なので broadcast は確実に起きていない → payload を破棄して fallback (startGasPaid) を
-      // 機能させる (保持したままだと startGasPaid の未解決ガードに弾かれてボタンが無反応になる・Codex P3)。
+      // 503 は route のゲート群 (flag/feeReceiver/PROVIDER/preflight/日次予算) = **この POST では
+      // submit 前** で broadcast していない (初回 POST の preflight 障害を含む。再 POST の preflight
+      // 障害は上で保持済み) → payload を破棄して fallback (startGasPaid) を機能させる (保持したまま
+      // だと startGasPaid の未解決ガードに弾かれてボタンが無反応になる・Codex P3)。
       if (body.error === 'relay_not_configured' || res.status === 503) {
         gaslessPayloadRef.current = null;
         clearPendingSig();

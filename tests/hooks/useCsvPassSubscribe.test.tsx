@@ -484,6 +484,98 @@ describe('useCsvPassSubscribe ガスレス購入 (relay 経路)', () => {
     expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBeNull();
   });
 
+  // B-R5 (S1): preflight_unavailable は「この POST が何もしていない」ことしか示さない。以前の POST が
+  // broadcast 済みでありうる再 POST では payload を破棄せず、ガスあり fallback も出さない。
+  it.each([
+    ['fetch 例外', 'throw'],
+    ['202 pending(hash 無し)', 'pending'],
+  ] as const)(
+    '%s 後の再 POST が 503 preflight_unavailable → payload 保持・再試行可能・fallback を出さない',
+    async (_label, first) => {
+      let relayCalls = 0;
+      const fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockImplementation(async (url: RequestInfo | URL) => {
+          const u = String(url);
+          if (u === '/api/csv-pass/relay') {
+            relayCalls += 1;
+            if (relayCalls === 1) {
+              if (first === 'throw') throw new TypeError('network error');
+              return new Response(JSON.stringify({ ok: false, pending: true }), {
+                status: 202,
+              });
+            }
+            if (relayCalls === 2) {
+              return new Response(
+                JSON.stringify({ ok: false, error: 'preflight_unavailable' }),
+                { status: 503 },
+              );
+            }
+            return new Response(JSON.stringify({ ok: true, txHash: TX }), {
+              status: 200,
+            });
+          }
+          return new Response(
+            JSON.stringify({ ok: true, wallet: WALLET, expiresAt: 1 }),
+            { status: 200 },
+          );
+        });
+      const { result } = renderHook(() => useCsvPassSubscribe(deployment), {
+        wrapper,
+      });
+      await act(async () => {
+        result.current.start();
+      });
+      await waitFor(() => expect(result.current.canRetryRelay).toBe(true));
+
+      await act(async () => {
+        result.current.retryRelay();
+      });
+      await waitFor(() => expect(relayCalls).toBe(2));
+      await waitFor(() => expect(result.current.isPayError).toBe(true));
+      // payload 保持 (localStorage も) + 再試行可能 + ガスあり fallback を出さない。
+      expect(result.current.error?.message).toBe('preflight_unavailable');
+      expect(result.current.canRetryRelay).toBe(true);
+      expect(result.current.gaslessUnavailable).toBe(false);
+      expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).not.toBeNull();
+      // 未解決 payload がある間はガスあり送金も始まらない。
+      await act(async () => {
+        result.current.startGasPaid();
+      });
+      expect(result.current.isPaying).toBe(false);
+
+      // RPC 復旧後の再試行は同一 payload の再 POST で解決する (再署名なし)。
+      await act(async () => {
+        result.current.retryRelay();
+      });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      const relayBodies = fetchSpy.mock.calls
+        .filter((c) => c[0] === '/api/csv-pass/relay')
+        .map((c) => (c[1] as RequestInit).body);
+      expect(relayBodies).toHaveLength(3);
+      expect(relayBodies.every((body) => body === relayBodies[0])).toBe(true);
+      expect(signTypedDataMock).toHaveBeenCalledTimes(1);
+      expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBeNull();
+    },
+  );
+
+  it('初回 POST の 503 preflight_unavailable は未 broadcast が確定 → payload 破棄 + ガスあり fallback', async () => {
+    relayThenSubscribe({
+      status: 503,
+      body: { ok: false, error: 'preflight_unavailable' },
+    });
+    const { result } = renderHook(() => useCsvPassSubscribe(deployment), {
+      wrapper,
+    });
+    await act(async () => {
+      result.current.start();
+    });
+    await waitFor(() => expect(result.current.gaslessUnavailable).toBe(true));
+    expect(result.current.isPayError).toBe(true);
+    expect(result.current.canRetryRelay).toBe(false);
+    expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBeNull();
+  });
+
   it('未解決 payload がある間は start() でも再署名せず同一 payload を再 POST (構造的強制・Codex P1)', async () => {
     let relayCalls = 0;
     const fetchSpy = vi

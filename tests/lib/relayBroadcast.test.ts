@@ -141,11 +141,10 @@ describe.each<Rail>(['free', 'recover'])('%s broadcast contract', (rail) => {
     );
   });
 
-  it.each(['balance', 'used'])('preserves the existing %s preflight error difference (B-R5 deferred)', async (step) => {
+  it.each(['balance', 'used'])('normalizes %s preflight errors to 503 preflight_unavailable on both rails (B-R5)', async (step) => {
     const h = await harness(rail);
     h.trace.fail = step;
-    if (rail === 'free') await expect(h.run()).rejects.toBe(h.trace.error);
-    else expect(await h.run()).toEqual({ kind: 'rejected', httpStatus: 503, reason: 'preflight_unavailable' });
+    expect(await h.run()).toEqual({ kind: 'rejected', httpStatus: 503, reason: 'preflight_unavailable' });
     expect(h.trace.events).toEqual(step === 'balance' ? ['balance'] : ['balance', 'used']);
   });
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { getAddress, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { logger } from '@/lib/logger';
 import {
   buildTransferWithAuthorizationTypedData,
   type Eip3009Authorization,
@@ -136,6 +137,56 @@ describe('relayJpycAuthorization', () => {
     });
     expect(deps.submitSponsoredCall).not.toHaveBeenCalled();
   });
+
+  // B-R5: broadcast 前の on-chain read の RPC 例外は recover 経路と同じ構造化 503 に正規化し、
+  // claim / rate-limit / 予算 / submit / poll のいずれにも進まない (release/refund も呼ばない)。
+  it.each(['getBalance', 'checkAuthorizationUsed'] as const)(
+    '%s の RPC 例外 → rejected 503 preflight_unavailable (claim/limit/budget/submit なし)',
+    async (step) => {
+      const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+      const rpcError = new Error('rpc timeout');
+      const rpcDown = async (): Promise<never> => {
+        throw rpcError;
+      };
+      const deps = makeDeps({
+        getBalance: step === 'getBalance' ? vi.fn(rpcDown) : vi.fn(async () => 10_000n),
+        checkAuthorizationUsed:
+          step === 'checkAuthorizationUsed' ? vi.fn(rpcDown) : vi.fn(async () => false),
+        claimIdempotency: vi.fn(async () => ({ status: 'first' as const })),
+        releaseIdempotency: vi.fn(async () => {}),
+        recordRelayHash: vi.fn(async () => {}),
+        checkGasBudget: vi.fn(async () => gasBudget(true, true)),
+        refundGasBudget: vi.fn(async () => {}),
+      });
+      const res = await relayJpycAuthorization(await makeInput(), deps);
+      expect(res).toEqual({
+        kind: 'rejected',
+        httpStatus: 503,
+        reason: 'preflight_unavailable',
+      });
+      expect(deps.getBalance).toHaveBeenCalledOnce();
+      // 残高 read で止まった場合は既使用 read にも進まない。
+      expect(deps.checkAuthorizationUsed).toHaveBeenCalledTimes(
+        step === 'getBalance' ? 0 : 1,
+      );
+      expect(deps.claimIdempotency).not.toHaveBeenCalled();
+      expect(deps.releaseIdempotency).not.toHaveBeenCalled();
+      expect(deps.checkRateLimit).not.toHaveBeenCalled();
+      expect(deps.checkGasBudget).not.toHaveBeenCalled();
+      expect(deps.refundGasBudget).not.toHaveBeenCalled();
+      expect(deps.submitSponsoredCall).not.toHaveBeenCalled();
+      expect(deps.pollTask).not.toHaveBeenCalled();
+      expect(deps.recordRelayHash).not.toHaveBeenCalled();
+      // 握った RPC 障害を運営が観測できる (例外は結果ではなく warn にだけ載せる)。
+      expect(warn).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith('relay.jpyc.preflight_unavailable', {
+        chainId: CHAIN,
+        step: step === 'getBalance' ? 'balanceOf' : 'authorizationState',
+        error: rpcError,
+      });
+      warn.mockRestore();
+    },
+  );
 
   it('rate-limit 超過 → rejected rate_limited (429)', async () => {
     const deps = makeDeps({ checkRateLimit: vi.fn(async () => false) });
