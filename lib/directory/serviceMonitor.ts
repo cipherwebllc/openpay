@@ -16,7 +16,7 @@
 import { BASELINE_DATE, MANUAL_CHANGELOG } from './changelogData';
 import type { ServiceChangeEvent, ServiceChangeScope } from './changelogTypes';
 import { DIRECTORY_ENTRIES } from './data';
-import { publishedDirectoryEntries } from './query';
+import { directoryVerificationForEntry, publishedDirectoryEntries } from './query';
 import type {
   DirectoryEntry,
   DirectoryVerificationSnapshot,
@@ -223,8 +223,7 @@ function toRow(
   entry: DirectoryEntry,
   snapshot: DirectoryVerificationSnapshot,
 ): ServiceMonitorRow {
-  const record = snapshot[entry.slug];
-  const source = record?.sourceUrl === entry.sourceUrl ? record : null;
+  const source = directoryVerificationForEntry(entry, snapshot);
   return {
     slug: entry.slug,
     name: entry.name,

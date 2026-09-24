@@ -41,8 +41,8 @@ vi.mock('@/lib/kv', () => ({
 }));
 
 import {
-  getHostedContent, getHostedProduct, getHostedProductsByIds, getHostedProductUpdateSnapshot,
-  hostedContentKey, hostedOwnerIndexKey, hostedProductKey, hostedPurchaseMetadata,
+  createHostedProduct, getHostedContent, getHostedProduct, getHostedProductsByIds, getHostedProductUpdateSnapshot,
+  hostedContentKey, hostedOwnerIndexKey, hostedProductKey, hostedPurchaseMetadata, MAX_HOSTED_PER_OWNER,
   purgeHostedContent, replaceHostedSellerProduct, type HostedProduct,
 } from '@/lib/x402/hostedStore';
 import { hostedPurchaseRecordKey, purchaseIntentKey, purchaseLibraryKey, purchaseOwnershipKey } from '@/lib/x402/purchaseIntent';
@@ -261,5 +261,82 @@ describe('operator-only hosted takedown route', () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ ok: false, error: 'conflict' });
     expect(h.audit).not.toHaveBeenCalled();
+  });
+});
+
+// R15a (hostedStore 分割) の固定: 作成と seller 置換の Lua を本物の Lua で実行し、原子性と
+// 不変 revision (旧 revision の bytes は書き換えない・孤児の次 revision も上書きしない) を確かめる。
+describe('hosted seller writes: real Lua revision semantics', () => {
+  const SELLER = '0x4444444444444444444444444444444444444444' as const;
+  const parsed = {
+    ok: true as const,
+    product: {
+      owner: SELLER, payTo: SELLER, title: 'Created', priceJpyc: '10', contentKind: 'text' as const,
+      label: 'prompt' as const, contentRevision: 1, saleActive: true, contentAvailable: true,
+    },
+    content: { kind: 'text' as const, value: 'created secret' },
+  };
+
+  it('creates product, revision 1 and the owner index in one EVAL; cap and id collision write nothing', async () => {
+    const created = await createHostedProduct(parsed, 7000);
+    if (!created.ok) throw new Error('create failed');
+    const id = created.product.id;
+    expect(kvEval).toHaveBeenCalledOnce();
+    expect(h.store!.strings.get(hostedProductKey(id))).toBe(JSON.stringify(created.product));
+    expect(h.store!.strings.get(hostedContentKey(id, 1))).toBe(JSON.stringify(parsed.content));
+    expect(h.store!.lists.get(hostedOwnerIndexKey(SELLER))).toEqual([id]);
+
+    h.store!.lists.set(hostedOwnerIndexKey(SELLER), Array.from({ length: MAX_HOSTED_PER_OWNER }, (_, i) => `h_${i.toString(16).padStart(32, '0')}`));
+    const beforeCap = new Map(h.store!.strings);
+    expect(await createHostedProduct(parsed, 7001)).toEqual({ ok: false, reason: 'too_many' });
+    expect(h.store!.strings).toEqual(beforeCap);
+
+    h.store!.lists.set(hostedOwnerIndexKey(SELLER), []);
+    vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation(<T extends ArrayBufferView | null>(array: T): T => {
+      if (array) new Uint8Array(array.buffer, array.byteOffset, array.byteLength).fill(0xaa);
+      return array;
+    });
+    const beforeCollision = new Map(h.store!.strings);
+    expect(await createHostedProduct(parsed, 7002)).toEqual({ ok: false, reason: 'conflict' });
+    expect(h.store!.strings).toEqual(beforeCollision);
+    expect(h.store!.lists.get(hostedOwnerIndexKey(SELLER))).toEqual([]);
+  });
+
+  it('adds the next revision with the metadata and leaves older revision bytes untouched', async () => {
+    const rev1 = h.store!.strings.get(hostedContentKey(ID, 1));
+    const rev2 = h.store!.strings.get(hostedContentKey(ID, 2));
+    const updated = await replaceHostedSellerProduct({
+      snapshot: await snapshot(), owner: OWNER, metadata: { ...product, title: 'Third' },
+      content: { kind: 'text', value: 'third secret' }, now: 9000,
+    });
+    if (!updated.ok) throw new Error('replace failed');
+    expect(updated.product.contentRevision).toBe(3);
+    expect(h.store!.strings.get(hostedProductKey(ID))).toBe(JSON.stringify(updated.product));
+    expect(h.store!.strings.get(hostedContentKey(ID, 3))).toBe(JSON.stringify({ kind: 'text', value: 'third secret' }));
+    expect(h.store!.strings.get(hostedContentKey(ID, 1))).toBe(rev1);
+    expect(h.store!.strings.get(hostedContentKey(ID, 2))).toBe(rev2);
+
+    const metadataOnly = await replaceHostedSellerProduct({ snapshot: await snapshot(), owner: OWNER, metadata: { ...product, title: 'Fourth' } });
+    expect(metadataOnly).toMatchObject({ ok: true, product: { contentRevision: 3, title: 'Fourth' } });
+    expect(h.store!.strings.has(hostedContentKey(ID, 4))).toBe(false);
+    expect(h.store!.strings.get(hostedContentKey(ID, 3))).toBe(JSON.stringify({ kind: 'text', value: 'third secret' }));
+  });
+
+  it('never overwrites an orphan next revision and maps missing, foreign-owner and corrupt records', async () => {
+    h.store!.strings.set(hostedContentKey(ID, 3), 'orphan revision');
+    const before = new Map(h.store!.strings);
+    const current = await snapshot();
+    expect(await replaceHostedSellerProduct({
+      snapshot: current, owner: OWNER, metadata: product, content: { kind: 'text', value: 'must not land' },
+    })).toEqual({ ok: false, reason: 'conflict' });
+    expect(h.store!.strings).toEqual(before);
+
+    h.store!.strings.set(hostedProductKey(ID), JSON.stringify({ ...product, owner: BUYER }));
+    expect(await replaceHostedSellerProduct({ snapshot: current, owner: OWNER, metadata: product })).toEqual({ ok: false, reason: 'forbidden' });
+    h.store!.strings.set(hostedProductKey(ID), '{not json');
+    expect(await replaceHostedSellerProduct({ snapshot: current, owner: OWNER, metadata: product })).toEqual({ ok: false, reason: 'corrupt' });
+    h.store!.strings.delete(hostedProductKey(ID));
+    expect(await replaceHostedSellerProduct({ snapshot: current, owner: OWNER, metadata: product })).toEqual({ ok: false, reason: 'not_found' });
+    expect(h.store!.strings.get(hostedContentKey(ID, 3))).toBe('orphan revision');
   });
 });

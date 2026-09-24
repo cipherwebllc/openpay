@@ -12,6 +12,7 @@ import {
   type DirectoryQuery,
   type DirectoryStatus,
   type DirectoryToken,
+  type DirectoryVerificationRecord,
   type DirectoryVerificationSnapshot,
 } from '@/lib/directory/types';
 
@@ -230,6 +231,17 @@ export function queryDirectory(
   };
 }
 
+// 封筒 (createDirectoryEnvelope) と Service Monitor の行 (serviceMonitor.toRow) が共有する規則。
+// R15a: 両方に同じ 2 行が inline されていたのを lib/directory/verification.ts の未使用 export から移して共通化。
+export function directoryVerificationForEntry(
+  entry: DirectoryEntry,
+  snapshot: DirectoryVerificationSnapshot,
+): DirectoryVerificationRecord | null {
+  const record = snapshot[entry.slug];
+  // sourceUrl がコード変更された後は、旧 URL の死活結果を新 URL の結果として表示しない。
+  return record?.sourceUrl === entry.sourceUrl ? record : null;
+}
+
 export function createDirectoryEnvelope<TQuery>(
   query: TQuery,
   result: { items: readonly DirectoryEntry[]; total: number },
@@ -241,8 +253,7 @@ export function createDirectoryEnvelope<TQuery>(
   let oldestSourceCheckedAt: string | null = null;
   const attribution = new Set<string>();
   const items = result.items.map((entry) => {
-    const candidate = verificationSnapshot[entry.slug];
-    const source = candidate?.sourceUrl === entry.sourceUrl ? candidate : null;
+    const source = directoryVerificationForEntry(entry, verificationSnapshot);
     if (
       source &&
       (oldestSourceCheckedAt === null || source.checkedAt < oldestSourceCheckedAt)
