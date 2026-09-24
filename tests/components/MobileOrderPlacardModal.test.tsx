@@ -47,6 +47,21 @@ afterEach(() => {
 });
 
 describe('MobileOrderPlacardModal', () => {
+  it('印刷面のアバターは ExternalImage の対象外: loading/referrer/fallback の指定なしのまま (R7a の網)', () => {
+    vi.stubGlobal('print', vi.fn());
+    const { container } = setup({ avatar: 'https://images.example/print.png' });
+    const expected = '<img alt="" class="mt-4 h-16 w-16 rounded-full object-cover print:mt-6 print:h-28 print:w-28" src="https://images.example/print.png">';
+    expect(container.querySelector('img')?.outerHTML).toBe(expected);
+    fireEvent.click(screen.getByRole('button', { name: '印刷' }));
+    const images = document.querySelectorAll('img[src="https://images.example/print.png"]');
+    expect(images).toHaveLength(2); // ダイアログ + 印刷用 portal。
+    for (const image of images) {
+      expect(image.outerHTML).toBe(expected);
+      fireEvent.error(image);
+      expect(image.outerHTML).toBe(expected);
+    }
+  });
+
   it('open=false は何も描画しない', () => {
     const { container } = render(
       <MobileOrderPlacardModal

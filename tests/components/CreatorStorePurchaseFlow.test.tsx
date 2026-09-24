@@ -287,6 +287,37 @@ describe('CreatorStorePurchaseFlow', () => {
     );
   });
 
+  it('ギャラリー画像: DOM・サムネ失敗で親の選択が次へ移る・外れた node の遅れ error・大画像の失敗 (R7a の網)', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const urls = ['https://images.example/a.png', 'https://images.example/b.png', 'https://images.example/c.png'];
+    const { container } = renderFlow('ja', { ...PRODUCT, imageUrl: urls[0], galleryUrls: urls.slice(1) });
+    const large = container.querySelector('img.max-h-80')!;
+    expect(large.outerHTML).toBe(`<img alt="" aria-hidden="true" width="640" height="360" referrerpolicy="no-referrer" class="aspect-[16/9] max-h-80 w-full bg-slate-100 object-cover" src="${urls[0]}">`);
+    const firstButton = screen.getByRole('button', { name: '1' });
+    const firstThumb = firstButton.querySelector('img')!;
+    expect(firstButton.innerHTML).toBe(`<img alt="" aria-hidden="true" width="48" height="48" referrerpolicy="no-referrer" loading="lazy" class="h-12 w-12 rounded-lg object-cover" src="${urls[0]}"><span class="mt-0.5 block text-center text-[10px] font-bold">1</span>`);
+    expect(large.nextElementSibling).toHaveAttribute('role', 'group');
+    expect(large.nextElementSibling).toHaveAttribute('aria-labelledby', 'creator-store-purchase-product-title');
+    fireEvent.error(firstThumb);
+    expect(large).toHaveAttribute('src', urls[1]);
+    expect(screen.queryByRole('button', { name: '1' })).toBeNull();
+    expect(screen.getByRole('button', { name: '2' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.error(firstThumb); // 選択が B へ移った後に、外れた A のサムネへ遅れて error が届く。
+    expect(large).toHaveAttribute('src', urls[1]);
+    const thirdButton = screen.getByRole('button', { name: '3' });
+    expect(thirdButton.className).toBe('rounded-xl border bg-white p-1 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40 border-slate-200 text-slate-500 hover:border-slate-300');
+    fireEvent.click(thirdButton);
+    expect(container.querySelector('img.max-h-80')).toBe(large);
+    expect(large).toHaveAttribute('src', urls[2]);
+    expect(thirdButton.className).toBe('rounded-xl border bg-white p-1 transition-colors focus:outline-none focus:ring-2 focus:ring-brand/40 border-brand text-brand-dark ring-2 ring-brand/30');
+    fireEvent.error(large);
+    expect(large).toHaveAttribute('src', urls[1]);
+    expect(screen.queryByRole('button', { name: '2' })).toBeNull(); // 残り 1 枚ならサムネ列を出さない。
+    fireEvent.error(large);
+    expect(container.querySelector('img.max-h-80')).toBeNull();
+  });
+
   it('imageUrl がなければギャラリー先頭を大きく表示し、1 枚ではサムネイルを出さない', () => {
     state.phase = 'idle';
     state.quote = null;

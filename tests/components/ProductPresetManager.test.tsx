@@ -63,6 +63,17 @@ describe('ProductPresetManager', () => {
     expect(screen.getByDisplayValue('Tシャツ')).toBeInTheDocument();
   });
 
+  it('商品サムネは loading/referrer/失敗時 fallback の指定なし (R7a の網・統一は B-R7)', () => {
+    setup([preset({ image: 'https://images.example/preset.png' })]);
+    const image = document.querySelector('img')!;
+    expect(image.outerHTML).toBe('<img alt="" class="h-8 w-8 shrink-0 rounded object-cover" src="https://images.example/preset.png">');
+    const parent = image.parentElement!;
+    const before = parent.innerHTML;
+    fireEvent.error(image);
+    expect(parent.innerHTML).toBe(before);
+    expect(image).toBeVisible();
+  });
+
   it('名前編集で updatePreset を呼ぶ', () => {
     const fns = setup([preset({ id: 'a', name: 'コーヒー' })]);
     fireEvent.change(screen.getByDisplayValue('コーヒー'), {

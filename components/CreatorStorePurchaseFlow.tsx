@@ -15,6 +15,7 @@ import { CreatorStoreDeliveryBadge } from '@/components/CreatorStoreDeliveryBadg
 import { CreatorStoreLicenseDetails } from '@/components/CreatorStoreLicenseDetails';
 import { CreatorStorePurchaseConfirmation } from '@/components/CreatorStorePurchaseConfirmation';
 import { CreatorStorePurchaseState } from '@/components/CreatorStorePurchaseState';
+import { ExternalImage } from '@/components/ExternalImage';
 import { useHostedStorePurchase } from '@/hooks/useHostedStorePurchase';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
@@ -610,14 +611,15 @@ function CreatorStorePurchaseGallery({
     <div>
       {/* 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制する。
           パネル最上部のフルブリード (P3 ショーケース化・角丸は親の overflow-hidden)。 */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
+      <ExternalImage
         src={selectedImage.url}
         alt=""
         aria-hidden
         width={640}
         height={360}
         referrerPolicy="no-referrer"
+        loading={undefined}
+        decoding={undefined}
         className="aspect-[16/9] max-h-80 w-full bg-slate-100 object-cover"
         onError={() => hideFailedImage(selectedImage.id)}
       />
@@ -641,8 +643,7 @@ function CreatorStorePurchaseGallery({
                     : 'border-slate-200 text-slate-500 hover:border-slate-300'
                 }`}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
+                <ExternalImage
                   src={image.url}
                   alt=""
                   aria-hidden
@@ -650,6 +651,7 @@ function CreatorStorePurchaseGallery({
                   height={48}
                   referrerPolicy="no-referrer"
                   loading="lazy"
+                  decoding={undefined}
                   className="h-12 w-12 rounded-lg object-cover"
                   onError={() => hideFailedImage(image.id)}
                 />

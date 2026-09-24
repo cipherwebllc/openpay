@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
 import { Clock, MapPin, Phone, RotateCcw } from 'lucide-react';
+import { ExternalImage } from '@/components/ExternalImage';
 import { SocialIconLinks } from '@/components/SocialIconLinks';
 import { env } from '@/lib/env';
 import { shortAddress } from '@/lib/format';
@@ -633,12 +634,12 @@ export function MobileOrderView({
             アバターを下端へ重ねる定番の店舗ヘッダー。読込失敗でカバーは消えアバターのみに。 */}
         {showCover && (
           <div className="relative -mx-4 h-36 overflow-hidden rounded-b-3xl bg-slate-100">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
+            <ExternalImage
               src={coverUrl}
               alt=""
               referrerPolicy="no-referrer"
               loading="lazy"
+              decoding={undefined}
               className="h-full w-full object-cover"
               onError={() => setCoverFailed(true)}
             />
@@ -653,12 +654,12 @@ export function MobileOrderView({
         >
           {showAvatar ? (
             // 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制。
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <ExternalImage
               src={avatarUrl}
               alt={config.shopName}
               referrerPolicy="no-referrer"
               loading="lazy"
+              decoding={undefined}
               className="h-full w-full object-cover"
               onError={() => setAvatarFailed(true)}
             />

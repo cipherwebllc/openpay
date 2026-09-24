@@ -21,6 +21,7 @@ import { ChevronRight, Minus, Plus, QrCode as QrCodeIcon, Star, Trash2 } from 'l
 import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
 import { Field } from './Field';
+import { ExternalImage } from './ExternalImage';
 import { ProductPresetManager } from './ProductPresetManager';
 import { switchTokenKeepingPrefs, useQrSettings } from '@/hooks/useQrSettings';
 import { useReceiverAutofill, type ReceiverSource } from '@/hooks/useReceiverAutofill';
@@ -587,12 +588,12 @@ function RegisterModeContent({
                       </span>
                     )}
                     {showImages && presetImg && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
+                      <ExternalImage
                         src={presetImg}
                         alt=""
                         referrerPolicy="no-referrer"
                         loading="lazy"
+                        decoding={undefined}
                         onError={(e) => {
                           e.currentTarget.style.display = 'none';
                         }}

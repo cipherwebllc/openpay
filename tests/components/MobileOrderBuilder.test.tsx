@@ -68,6 +68,31 @@ beforeEach(() => {
 });
 
 describe('MobileOrderBuilder', () => {
+  it('編集画面のアバター・カバー・メニュー画像は loading/referrer/失敗時 fallback の指定なし (R7a の網・統一は B-R7)', () => {
+    window.localStorage.setItem('openpay:product-presets:v1', JSON.stringify({
+      presets: [{ id: 'p1', name: '画像商品', unitPrice: '500', token: 'jpyc', taxRate: 10, taxCategory: 'taxable_10', memo: null, image: 'https://images.example/menu.png', sortOrder: 0, enabled: true }],
+      receipt: { day: '', n: 0 },
+    }));
+    const { container } = renderWithIntl(<MobileOrderBuilder />);
+    const inputs = screen.getAllByPlaceholderText('https://');
+    fireEvent.change(inputs[0], { target: { value: 'https://images.example/avatar.png' } });
+    fireEvent.change(inputs[1], { target: { value: 'https://images.example/cover.png' } });
+    fireEvent.click(screen.getByRole('button', { name: /登録中のメニュー/ }));
+    const cases = [
+      ['avatar', 'h-full w-full object-cover'],
+      ['cover', 'h-24 w-full rounded-lg object-cover'],
+      ['menu', 'h-7 w-7 rounded object-cover'],
+    ];
+    for (const [kind, className] of cases) {
+      const image = container.querySelector(`img[src="https://images.example/${kind}.png"]`)!;
+      expect(image.outerHTML).toBe(`<img alt="" class="${className}" src="https://images.example/${kind}.png">`);
+      const before = image.parentElement!.innerHTML;
+      fireEvent.error(image);
+      expect(image.parentElement!.innerHTML).toBe(before);
+      expect(image).toBeVisible();
+    }
+  });
+
   it('D3: menu toggle accessible name contains the visible item count', () => {
     renderWithIntl(<MobileOrderBuilder />);
     const toggle = screen.getByRole('button', { name: /登録中のメニュー/ });

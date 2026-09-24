@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { ExternalImage } from './ExternalImage';
 import { Field } from './Field';
 import { ProductOptionEditor } from './ProductOptionEditor';
 import { env } from '@/lib/env';
@@ -164,8 +165,16 @@ export function ProductPresetManager({
               <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   {p.image && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.image} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
+                    // 現行どおり Referer 抑制・lazy・失敗時 fallback の指定なし (方針の統一は B-R7 で行う)。
+                    <ExternalImage
+                      src={p.image}
+                      alt=""
+                      referrerPolicy={undefined}
+                      loading={undefined}
+                      decoding={undefined}
+                      className="h-8 w-8 shrink-0 rounded object-cover"
+                      onError={null}
+                    />
                   )}
                   <input
                     type="url"

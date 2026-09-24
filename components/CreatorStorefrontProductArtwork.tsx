@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ExternalImage } from '@/components/ExternalImage';
 
 // 商品ビジュアル。variant:
 //   'thumb' (既定) = 40px の正方サムネイル (リスト行用・従来表示)
@@ -22,14 +23,14 @@ export function CreatorStorefrontProductArtwork({
   if (imageUrl && failedImageUrl !== imageUrl) {
     return (
       // 任意の第三者 https 画像。referrerPolicy で hotlink トラッキングを抑制する。
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
+      <ExternalImage
         src={imageUrl}
         alt=""
         aria-hidden
         {...(variant === 'thumb' ? { width: 40, height: 40 } : {})}
         referrerPolicy="no-referrer"
         loading="lazy"
+        decoding={undefined}
         className={
           variant === 'cover'
             ? 'aspect-[4/3] w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]'
