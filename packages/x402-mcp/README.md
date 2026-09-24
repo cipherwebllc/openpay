@@ -319,7 +319,8 @@ After the first Steward signature in a process session, the MCP verifies it loca
 Kova by Komlock lab is a third-party Execution Provider for wallet, policy and
 signing. This mode currently requires this repository's unreleased MCP source;
 the pinned npm examples above do not provide it. The CLI contract is based on
-`@komlock_lab/kova` 0.1.2; live Amoy compatibility has not yet been verified.
+`@komlock_lab/kova` 0.1.2 and was verified on 2026-09-25 with one Polygon Amoy purchase
+and one Polygon mainnet purchase of `/api/paid/demo` (2 JPYC each).
 The person installs/configures Kova separately. No dependency or peer dependency
 is added. Target OS: macOS/Linux. Windows is **unsupported**: `.cmd` shims cannot
 be spawned by this shell-free adapter.
@@ -371,12 +372,13 @@ reported by `command -v kova` and the usual system executable directories.
 After restarting the host, use `wallet_status`, `discovery_search` and `x402_quote`
 for read-only checks before a separately agreed purchase.
 
-Only undelegated EOA wallets are supported: revoke any EIP-7702
-delegation or use another wallet. `wallet_init` returns
+`kova init` delegates the wallet on Polygon with EIP-7702 (ZeroDev Kernel). That
+delegation does not block this path: JPYC v3 accepted a delegated wallet's plain
+ECDSA authorization in an `eth_call` simulation on Polygon mainnet, and the mainnet
+purchase above used a delegated wallet. No revoke is needed. `wallet_init` returns
 `wallet_init_requires_keystore_mode`. `wallet_prove` (purchase-history binding on
 `/agent`) is supported: it signs the `OpenPay Agent Proof` typed-data through the
-CLI with `--chain polygon`, so the person must also allow that domain in
-`sign_allowlist` (second rule below); otherwise it returns `kova_policy_denied`.
+CLI with `--chain polygon`; a Kova policy denial returns `kova_policy_denied`.
 Every signature is verified locally; only a 65-byte hex signature is accepted.
 CLI calls close stdin, enforce an independent 30-second deadline with `SIGKILL`,
 and limit each output stream to 64 KiB.
@@ -389,10 +391,17 @@ The validated 402 network selects `--chain`: `eip155:137` → `polygon`,
 override. `wallet_status` reports `signerMode: kova`, but its `chain`, balance and
 funding URL remain **Polygon only**, not Amoy. Use testnet JPYC on Amoy for testing.
 
-Kova's `spending_limit` does **not** apply to this typed-data purchase path.
-The person configures `sign_allowlist` in Kova. This Polygon rule example allows
-up to 2 JPYC only if Kova enforces `maxValue` against this message's value;
-that matching behavior still needs Amoy verification:
+**Kova's policy does not limit this purchase path in `@komlock_lab/kova` 0.1.2.**
+`spending_limit` applies only to send/call/sign transactions (documented), and in
+our test `sign typed-data` was allowed with no `sign_allowlist` rule and also with
+rules that did not match the request (a different domain name and a different
+`primaryType` were both signed; the audit log recorded `agent_policy_allowed`).
+Treat the MCP's `MAX_PER_CALL_JPYC` / `MAX_SESSION_JPYC` / `MAX_DAILY_JPYC` as the
+only amount limits for Kova, keep a small balance, and re-check newer Kova releases.
+Still configure `sign_allowlist` so the intent is recorded and enforced once Kova
+does. The interactive `kova policy update` typed-data prompt takes `domain.name`,
+`domain.verifyingContract` and `primaryType` only; `maxValue` and `chainId` can be
+supplied through `kova policy create --file <policy.json>`:
 
 ```json
 {
