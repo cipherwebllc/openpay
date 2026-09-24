@@ -237,6 +237,18 @@ describe('SIWE routes', () => {
     expect(h.kvSet).toHaveBeenCalledOnce();
   });
 
+  it('verify: 本文が JSON の null → 400 invalid_json (verify_failed の 503 + Sentry にしない・B-R6f)', async () => {
+    h.kvConfigured = true;
+    const headers = new Headers({ 'content-type': 'application/json' });
+    headers.set('sec-fetch-site', 'same-origin');
+    const res = await verifyPOST(new Request('http://localhost/api/auth/siwe/verify', {
+      method: 'POST', headers, body: 'null',
+    }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: 'invalid_json' });
+    expect(h.kvSet).not.toHaveBeenCalled();
+  });
+
   it('verify: JSON-shaped bytes without Content-Type still fail before session writes', async () => {
     h.kvConfigured = true;
     const res = await verifyPOST(new Request('http://localhost/api/auth/siwe/verify', {

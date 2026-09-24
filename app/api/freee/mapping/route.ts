@@ -65,6 +65,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
+  // JSON の `null` / 数値 / 文字列も parse は成功する。object でなければ欄を読む前に 400 で返す
+  // (null のまま欄を読むと TypeError → 500 + Sentry event になっていた・第 6 回 B-R6f)。
+  if (body === null || typeof body !== 'object') {
+    return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
+  }
   if (
     typeof body.accountItemId !== 'number' ||
     typeof body.taxCode !== 'number'

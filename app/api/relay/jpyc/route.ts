@@ -221,7 +221,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
   // JSON.parse は `null` / 数値 / 文字列も返す。`null` のまま raw.chainId を読むと TypeError → 500 + Sentry
-  // になっていた (第 6 回 B-R6f)。object 以外は欄不足と同じ invalid_payload で 400 (register/claim・relay/status と同じ線)。
+  // になっていた (第 6 回 B-R6f)。object 以外は欄不足と同じ invalid_payload で 400 (relay/status も object 以外を拒否する・register/claim は invalid_body で配列も拒否)。
   if (raw === null || typeof raw !== 'object') {
     return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
   }

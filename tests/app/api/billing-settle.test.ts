@@ -358,6 +358,12 @@ describe('POST /api/billing/settle', () => {
     expect(await res.json()).toMatchObject({ error: 'invalid_json' });
   });
 
+  it('本文が JSON の null → 400 invalid_json (分解代入の TypeError で 500 にしない・B-R6f)', async () => {
+    const res = await POST(req(null));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid_json' });
+  });
+
   it('body 上限超過 → JSON parse 前に 413 payload_too_large', async () => {
     const huge = new Request('http://localhost/api/billing/settle', {
       method: 'POST',
