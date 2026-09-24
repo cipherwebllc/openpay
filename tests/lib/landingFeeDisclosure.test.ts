@@ -44,6 +44,10 @@ describe('standard-payment fee scope (review 6 regression)', () => {
     const values = {
       recoverPercent: recoverPct,
       recoverFloor: floorJpyc,
+      // cashSimNote は #595 (E13/D5) 以降 percent / floor を引数にとる (SavingsSimulator が
+      // DISCLOSED_RECOVER_FEE から渡す)。同じ値を両方の名前で渡す。
+      percent: recoverPct,
+      floor: floorJpyc,
       tipFloor: DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc,
       registerPercent: recoverPct,
       storefrontPercent: storefrontPct,
