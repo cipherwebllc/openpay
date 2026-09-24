@@ -2569,7 +2569,7 @@ describe('R4a differential reconcile traces (JPYC / USDC)', () => {
       const getLogs = h.publicClient.getLogs.getMockImplementation()!;
       h.publicClient.getLogs.mockImplementation(async (range) => {
         await getLogs(range);
-        return (range.fromBlock === 10_000n ? [OTHER_TX_HASH, TX_HASH, OTHER_TX_HASH] : [TX_HASH, THIRD_TX_HASH])
+        return (range.fromBlock === 10_000n ? [OTHER_TX_HASH, TX_HASH, OTHER_TX_HASH] : [OTHER_TX_HASH, THIRD_TX_HASH])
           .map((transactionHash) => ({ transactionHash }));
       });
       await f.run();

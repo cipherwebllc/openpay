@@ -1,7 +1,5 @@
 import 'server-only';
 
-import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
-
 import { createHash, randomBytes } from 'node:crypto';
 import {
   isHostedLabel,
@@ -37,6 +35,7 @@ import {
   PURCHASE_INTENT_VERSION,
   PURCHASE_REVISION_POLICY,
 } from '@/lib/x402/purchaseIntent';
+import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
 import {
   associateStoreRailIntent,
   claimStoreRailSelection,
