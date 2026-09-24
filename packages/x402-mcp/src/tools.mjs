@@ -18,6 +18,7 @@ import { createWallet, loadWallet, walletDirectory } from './keystore.mjs';
 import { fetchPolygonRpc } from './wallet-rpc.mjs';
 import { startPurchase, endPurchase, readHistory } from './history.mjs';
 import { proveWallet } from './prove.mjs';
+import { createKovaSigner } from './kova-signer.mjs';
 
 const TOOL_DEFINITIONS = [
   {
@@ -379,6 +380,8 @@ export function createToolRuntime({
   lookup,
   // 履歴 I/O の打ち切り (テスト注入用)。既定は history.mjs の HISTORY_DEADLINE_MS。
   historyDeadlineMs,
+  // Kova child process injection for tests; never installs or launches another signer.
+  kovaExecFile,
 } = {}) {
   if (profile !== 'order' && profile !== 'x402') {
     throw new Error(`invalid profile: ${profile}`);
@@ -389,12 +392,18 @@ export function createToolRuntime({
   const tools = profileDefinitions.map(publicTool);
   const allowedToolNames = new Set(profileDefinitions.map((tool) => tool.name));
   const knownToolNames = new Set(TOOL_DEFINITIONS.map((tool) => tool.name));
-  const config = readRuntimeConfig(env);
+  const kovaMode = env.SIGNER_MODE === 'kova';
+  const kovaSigner = kovaMode ? createKovaSigner(env, { execFileImpl: kovaExecFile }) : null;
+  // MCP's public mode is kova; SDK guards treat a custom signer as steward. An overlay
+  // avoids enumerating unrelated environment values (including Kova credentials).
+  const config = readRuntimeConfig(kovaMode
+    ? Object.assign(Object.create(env), { SIGNER_MODE: SIGNER_MODES.steward })
+    : env);
   const keystoreMode = config.signerMode === SIGNER_MODES.keystore;
   const dailyLimitSource = config.maxDailyAtomic !== null
     ? 'configured'
-    : keystoreMode ? 'default_keystore' : 'disabled';
-  if (dailyLimitSource === 'default_keystore') {
+    : keystoreMode ? 'default_keystore' : kovaMode ? 'default_kova' : 'disabled';
+  if (dailyLimitSource === 'default_keystore' || dailyLimitSource === 'default_kova') {
     config.maxDailyAtomic = config.maxSessionAtomic;
   }
   const walletEnv = { HOME: env.HOME, OPENPAY_X402_HOME: env.OPENPAY_X402_HOME };
@@ -440,10 +449,12 @@ export function createToolRuntime({
       }).catch(rememberWalletFailure)
     : Promise.resolve();
   const session = createPaymentSession();
-  const sessionSigner =
-    config.signerMode === SIGNER_MODES.steward
-      ? createSigner(env, { fetchImpl })
-      : null;
+  let sessionSigner = null;
+  if (kovaMode) {
+    sessionSigner = kovaSigner;
+  } else if (config.signerMode === SIGNER_MODES.steward) {
+    sessionSigner = createSigner(env, { fetchImpl });
+  }
   let envKeySigner = null;
   function getEnvKeySigner() {
     envKeySigner ??= createSigner(env, { fetchImpl });
@@ -473,12 +484,12 @@ export function createToolRuntime({
     discoveryUrl: config.discoveryUrl,
     fetchImpl,
   });
-  // 有効な日次上限 (keystore の既定値を含む) があるときだけ永続ストアを用意する。
+  // 有効な日次上限 (keystore / kova の既定値を含む) があるときだけ永続ストアを用意する。
   // env-key / steward の未設定時は null = 従来経路 (SDK 側で load すら走らない)。
   let dailySpendStore = spendStore ?? null;
   if (config.maxDailyAtomic !== null && dailySpendStore === null) {
     try {
-      dailySpendStore = createFileSpendStore(keystoreMode
+      dailySpendStore = createFileSpendStore(keystoreMode || kovaMode
         ? { path: join(walletDirectory(walletEnv), 'spend.json') }
         : undefined);
     } catch (error) {
@@ -640,7 +651,7 @@ export function createToolRuntime({
       }
     }
     return {
-      signerMode: config.signerMode,
+      signerMode: kovaMode ? 'kova' : config.signerMode,
       address,
       walletError: walletFailure?.code ?? null,
       walletErrorMessage: walletFailure?.message ?? null,
@@ -959,6 +970,12 @@ export function createToolRuntime({
       const unknownTool = `unknown tool: ${name}`;
       return textResult({ ok: false, error: keystoreMode ? errorMessage(unknownTool) : unknownTool }, true);
     } catch (error) {
+      if (kovaMode && error instanceof Error && error.message === 'kova_policy_denied') {
+        return textResult({ ok: false, error: 'kova_policy_denied', message: 'Kova の policy で拒否されました' }, true);
+      }
+      if (kovaMode && error instanceof Error && error.message === 'kova_not_found') {
+        return textResult({ ok: false, error: 'kova_not_found', message: 'Kova CLI が見つかりません' }, true);
+      }
       return textResult(
         { ok: false, error: errorMessage(error) },
         true,

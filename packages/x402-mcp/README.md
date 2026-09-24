@@ -102,7 +102,7 @@ into the configuration. After the host restarts, call `wallet_init` to create th
 wallet on this machine, then fund the returned address — see
 [Local wallet](#local-wallet-signer_modekeystore). Do not put a placeholder such as
 `"BUYER_PRIVATE_KEY": "0x..."` in the configuration: the server rejects it at startup.
-`env-key` and `steward` are described under [Signer Modes](#signer-modes).
+`env-key`, `steward`, and the unreleased `kova` mode are described under [Signer Modes](#signer-modes).
 
 During local development from this repository:
 
@@ -202,7 +202,7 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 
 | Variable | Default | Notes |
 |---|---|---|
-| `SIGNER_MODE` | `env-key` | `env-key` signs in-process with `BUYER_PRIVATE_KEY`. `steward` delegates typed-data signing to Steward. Explicit `keystore` uses the local wallet file, with no fallback to another signer. |
+| `SIGNER_MODE` | `env-key` | `env-key` signs in-process with `BUYER_PRIVATE_KEY`. `steward` delegates typed-data signing to Steward. Explicit `keystore` uses the local wallet file. `kova` (Unreleased) delegates to the separately installed Kova CLI. No fallback to another signer in keystore or kova mode. |
 | `BUYER_PRIVATE_KEY` | unset | Required for `x402_pay` and `wallet_prove` when `SIGNER_MODE=env-key`. Use a dedicated low-balance wallet, never a primary wallet. |
 | `STEWARD_URL` | unset | Required when `SIGNER_MODE=steward`, for example `http://localhost:3900`. |
 | `STEWARD_TENANT` | unset | Required when `SIGNER_MODE=steward`; tenant context sent as `X-Steward-Tenant`. |
@@ -211,13 +211,16 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | `STEWARD_AGENT_ADDRESS` | unset | Required when `SIGNER_MODE=steward`; expected EVM signer address used for local first-signature verification. |
 | `STEWARD_SIGNER_ID` | unset | Required when `SIGNER_MODE=steward`; scoped signer id with typed-data signing permission. |
 | `STEWARD_SIGNER_SECRET` | unset | Required when `SIGNER_MODE=steward`; scoped signer secret. Treated as a secret. |
+| `KOVA_WALLET` | unset | Required when `SIGNER_MODE=kova`; existing Kova wallet name. Missing/blank values stop startup. |
+| `KOVA_AGENT_ADDRESS` | unset | Required when `SIGNER_MODE=kova`; public EVM address confirmed in Kova and verified against every typed-data signature. Missing/invalid values stop startup. |
+| `KOVA_BIN` | `kova` | PATH executable name only, no path or command arguments. Shell disabled; no `npx` fallback or automatic install. |
 | `MAX_PER_CALL_JPYC` | `10` | Upper bound for the tool call's required `maxTotalJpyc`. |
 | `MAX_SESSION_JPYC` | `100` | Process-lifetime cap for successful payments plus signed authorizations exposed to a seller. A non-2xx response or timeout keeps its reservation. Restarting the process resets this cap. |
-| `MAX_DAILY_JPYC` | `MAX_SESSION_JPYC` in keystore; unset otherwise | Per-UTC-day cap that **survives restarts**. Immediately before `X-PAYMENT` is sent, the amount is reserved under an exclusive file lock in `~/.openpay-x402/spend.json` (keystore uses `OPENPAY_X402_HOME/spend.json` when set). Non-2xx/timeout reservations are retained because settlement may already have occurred; unreadable or unwritable state fails closed. |
+| `MAX_DAILY_JPYC` | `MAX_SESSION_JPYC` in keystore/kova; unset otherwise | Per-UTC-day cap that **survives restarts**. Immediately before `X-PAYMENT` is sent, the amount is reserved under an exclusive file lock in `~/.openpay-x402/spend.json` (keystore/kova use `OPENPAY_X402_HOME/spend.json` when set). Non-2xx/timeout reservations are retained because settlement may already have occurred; unreadable or unwritable state fails closed. |
 | `MAX_TIMEOUT_SECONDS` | `600` | Reject seller-declared authorization lifetimes above this many seconds. Configurable from `1` to the facilitator ceiling of `1200`; the value is never silently clamped. |
 | `CATALOG_TRUST` | `true` | When true, exact URLs listed in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. Before signing, the live `accepts` fetched from a catalog URL is checked field-by-field (asset / timeout / forwarder / merchant / fee receiver / amounts) against the catalog listing (server-authored), so a third-party domain cannot bait-and-switch a different destination or authorization lifetime; mismatches are refused (`catalog_accept_mismatch`). Money caps still apply. Set `false` for strict manual allowlisting. |
 | `ALLOWED_HOSTS` | `open-pay.jp` | Comma-separated bare host allowlist. `x402_quote` still works outside the list but returns `host_not_allowed`. |
-| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from `wallet_init`, `wallet_status`, `wallet_history`, and keystore `wallet_prove` while discovery remains available. Does not relocate env-key / Steward spend storage. |
+| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; kova uses `spend.json` without creating a keystore; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from `wallet_init`, `wallet_status`, `wallet_history`, and keystore `wallet_prove` while discovery remains available. Kova rejects a relative path at startup. Does not relocate env-key / Steward spend storage. |
 | `POLYGON_RPC_URL` | unset | Optional read-only `wallet_status` RPC. SDK outbound URL/host checks reject private/link-local addresses, `.internal`, and URL credentials; validated DNS addresses are pinned for the built-in transport. Explicit exception: HTTP on `localhost` / `127.0.0.1`. No public RPC default, redirects rejected, 5-second timeout including DNS and body reads. Never accepted as a tool argument. |
 | `DISCOVERY_URL` | `https://open-pay.jp/api/discovery` | Catalog used by `discovery_search`. |
 | `OPENPAY_ORIGIN` | `https://open-pay.jp` | `wallet_prove` challenge origin, bind-link origin and signed audience. Independent of `DISCOVERY_URL`. Unset or blank uses the default; surrounding whitespace is trimmed. Must be an HTTPS origin with no credentials, path, query or fragment (a trailing slash is accepted). Only override for a trusted deployment that verifies this same audience. |
@@ -290,7 +293,7 @@ URLs or URLs containing credentials, a path, query or fragment return
 `invalid_origin`, without requesting a challenge or signing. Invalid challenges return
 `challenge_invalid` without signing; 429, 5xx, and network failures return
 `challenge_unavailable`. If the server flag `ENABLE_AGENT_PURCHASES` is OFF,
-HTTP 404 returns `feature_disabled`. Steward returns `signer_mode_unsupported`;
+HTTP 404 returns `feature_disabled`. Steward and Kova return `signer_mode_unsupported`;
 an uninitialized keystore returns `wallet_not_initialized`. A missing env key
 returns `buyer_private_key_missing`; a signing failure returns the fixed code
 `proof_signing_failed` without exposing signer details.
@@ -308,6 +311,115 @@ POST {STEWARD_URL}/vault/{STEWARD_AGENT_ID}/sign-typed-data
 with `X-Steward-Key`, `X-Steward-Tenant`, `x-steward-signer-id`, and `x-steward-signer-secret` headers. The request body is `{ domain, types, primaryType, value }`, where `value` is the EIP-712 message.
 
 After the first Steward signature in a process session, the MCP verifies it locally against `STEWARD_AGENT_ADDRESS`. A mismatch fails closed before any paid resource retry is sent.
+
+### Kova (`SIGNER_MODE=kova`, Unreleased)
+
+Kova by Komlock lab is a third-party Execution Provider for wallet, policy and
+signing. This mode currently requires this repository's unreleased MCP source;
+the pinned npm examples above do not provide it. The CLI contract is based on
+`@komlock_lab/kova` 0.1.2; live Amoy compatibility has not yet been verified.
+The person installs/configures Kova separately. No dependency or peer dependency
+is added. Target OS: macOS/Linux. Windows is **unsupported**: `.cmd` shims cannot
+be spawned by this shell-free adapter.
+
+Clone the repository and use a revision containing this unreleased Kova mode.
+Install the root dependencies, then the MCP package dependencies:
+
+```bash
+git clone https://github.com/cipherwebllc/openpay
+cd openpay
+npm ci
+cd packages/x402-mcp
+npm ci
+command -v kova
+```
+
+`command -v kova` must find the separately installed CLI. Confirm the wallet's
+public EVM address in Kova, for example with `kova wallet info`, and use it as
+`KOVA_AGENT_ADDRESS`; never export or paste a private key. Address lookup in
+Kova's agent-mode JSON remains unverified; MCP does not attempt automatic lookup.
+
+Register `node <absolute path>/packages/x402-mcp/src/index.mjs` with an MCP-capable
+host. Example JSON configuration (replace the path, wallet name and public address,
+and use the limits agreed with the person):
+
+```json
+{
+  "mcpServers": {
+    "openpay-x402": {
+      "command": "node",
+      "args": ["/absolute/path/to/openpay/packages/x402-mcp/src/index.mjs"],
+      "env": {
+        "SIGNER_MODE": "kova",
+        "KOVA_WALLET": "<existing Kova wallet name>",
+        "KOVA_AGENT_ADDRESS": "<public EVM address confirmed in Kova>",
+        "MAX_PER_CALL_JPYC": "10",
+        "MAX_SESSION_JPYC": "100",
+        "MAX_DAILY_JPYC": "100",
+        "ALLOWED_HOSTS": "open-pay.jp"
+      }
+    }
+  }
+}
+```
+
+If the host restricts `PATH`, add `PATH` to its MCP `env`, including the directory
+reported by `command -v kova` and the usual system executable directories.
+`KOVA_BIN` defaults to `kova` and accepts an executable name, not an absolute path.
+After restarting the host, use `wallet_status`, `discovery_search` and `x402_quote`
+for read-only checks before a separately agreed purchase.
+
+Only undelegated EOA wallets are supported: revoke any EIP-7702
+delegation or use another wallet. `wallet_init` returns
+`wallet_init_requires_keystore_mode`; `wallet_prove` returns `signer_mode_unsupported`.
+Every signature is verified locally; only a 65-byte hex signature is accepted.
+CLI calls close stdin, enforce an independent 30-second deadline with `SIGKILL`,
+and limit each output stream to 64 KiB.
+Policy denial returns `kova_policy_denied` with `Kova の policy で拒否されました`;
+an executable missing from PATH returns `kova_not_found` with `Kova CLI が見つかりません`;
+other signing failures return `kova_sign_failed`, without child output or native errors.
+
+The validated 402 network selects `--chain`: `eip155:137` → `polygon`,
+`eip155:80002` → `polygon-amoy`; all others are rejected. There is no chain env
+override. `wallet_status` reports `signerMode: kova`, but its `chain`, balance and
+funding URL remain **Polygon only**, not Amoy. Use testnet JPYC on Amoy for testing.
+
+Kova's `spending_limit` does **not** apply to this typed-data purchase path.
+The person configures `sign_allowlist` in Kova. This Polygon rule example allows
+up to 2 JPYC only if Kova enforces `maxValue` against this message's value;
+that matching behavior still needs Amoy verification:
+
+```json
+{
+  "type": "sign_allowlist",
+  "domain": {
+    "name": "JPY Coin",
+    "verifyingContract": "0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29",
+    "chainId": 137
+  },
+  "primaryType": "ReceiveWithAuthorization",
+  "maxValue": "2000000000000000000"
+}
+```
+
+For Amoy, use `chainId: 80002`, verify the token contract, and prepare a test
+server whose `/api/paid/demo` returns the correct Amoy network and resource.
+Its default total is 2 JPYC (price 1 + fee 1). Verify the receipt and on-chain
+settlement during acceptance testing; HTTP 200 or signing success is not payment proof.
+
+The default MCP daily cap equals `MAX_SESSION_JPYC` (`dailyLimitSource: default_kova`),
+or `configured` when `MAX_DAILY_JPYC` is set. Status and payment share
+`OPENPAY_X402_HOME/spend.json` (default `~/.openpay-x402/spend.json`), keyed by
+lowercase signer address + UTC date, across wallet names and chains.
+These local caps cover only payments through this MCP using that ledger, not
+direct Kova CLI use or another machine.
+
+MCP excludes `BUYER_PRIVATE_KEY` and every `STEWARD_*` variable from the child's
+environment. Other variables, including `KOVA_*` and `PATH`, are forwarded.
+MCP does not interpret Kova credentials as configuration, store/display them,
+or send them to OpenPay. Kova reads its own `~/.kova/config.json` and inherited
+credentials. This is not OS-level isolation. Keep only a small balance you are
+willing to lose.
 
 ### Local wallet (`SIGNER_MODE=keystore`)
 
