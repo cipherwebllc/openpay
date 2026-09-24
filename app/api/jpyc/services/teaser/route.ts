@@ -5,20 +5,16 @@
 
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { teaserChangesFor } from '@/lib/directory/monitorTeaser';
 import { JPYC_SERVICES_RESOURCE } from '@/lib/directory/paidResources';
 import {
   createServiceMonitorEnvelope,
-  deltaEffectiveDate,
-  scopedChangelog,
   SERVICE_MONITOR_MAX_LIMIT,
-  sortByDeltaEffectiveDate,
 } from '@/lib/directory/serviceMonitor';
 import { USDC_SERVICE_MONITOR } from '@/lib/directory/usdcResource';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const TEASER_EVENTS = 3;
 
 export async function GET(): Promise<NextResponse> {
   if (!env.enableWeb3Directory) {
@@ -31,22 +27,18 @@ export async function GET(): Promise<NextResponse> {
     {},
     new Date().toISOString(),
   );
-  // snapshot の changes は limit で切られた view (末尾 200 件・date 順)。件数が上限を超えると、date は古いが
-  // 記録は最新の backfill が先に落ちて latestRecordedAt を過小に出す → changelog 全体から計算する。
-  const recorded = sortByDeltaEffectiveDate(scopedChangelog('jpyc-services'));
+  // changes は limit で切られた snapshot view ではなく changelog 全体から (lib/directory/monitorTeaser.ts)。
+  const teaser = teaserChangesFor('jpyc-services');
   return NextResponse.json(
     {
       schemaVersion: full.schemaVersion,
       product: 'jpyc-service-monitor',
       teaser: true,
-      // 「買う前に確かめる」は記録日で判定する (有料 delta と同じ実効日)。date だけだと、後から記録した
-      // 古い date のイベントが「新しい変更なし」に見えて買い控えが起きる (2026-09-23)。
-      latestChanges: recorded.slice(-TEASER_EVENTS).map(({ scopes: _scopes, ...event }) => event),
-      latestRecordedAt: recorded.length > 0 ? deltaEffectiveDate(recorded[recorded.length - 1]) : null,
-      // full.changes は limit で切られた view なので総数の権威にならない (件数が
-      // SERVICE_MONITOR_MAX_LIMIT を超えると開示が過少になる)。changelog の実数を使う
-      // (payments teaser が full.totalEvents を使うのと同じ意味)。
-      totalEvents: scopedChangelog('jpyc-services').length,
+      // 「買う前に確かめる」は記録日で判定する (有料 delta と同じ実効日)。
+      latestChanges: teaser.latestChanges,
+      latestRecordedAt: teaser.latestRecordedAt,
+      // full.changes は limit で切られた view なので総数の権威にならない。changelog の実数を使う。
+      totalEvents: teaser.totalEvents,
       totalServices: full.totalServices,
       generatedAt: full.generatedAt,
       fullFeed: {
