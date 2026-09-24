@@ -9,6 +9,7 @@ import { getAddress, isAddress, isAddressEqual, type Address, type Hex } from 'v
 import { POST as settlePayment } from '@/app/api/facilitator/settle/route';
 import { POST as verifyPayment } from '@/app/api/facilitator/verify/route';
 import { env } from '@/lib/env';
+import { hostedResourceUrl } from '@/lib/x402/storeWire';
 import { licenseVisible, licenseSellerAllowed } from '@/lib/license/config';
 import { sellerRoleFor } from '@/lib/license/sellerRole';
 import type { SellerRole } from '@/lib/licenseUi';
@@ -99,10 +100,6 @@ function decodePaymentHeader(raw: string): unknown {
   return JSON.parse(Buffer.from(raw, 'base64').toString('utf8')) as unknown;
 }
 
-function hostedResourceUrl(resourceId: string, payer: Address): string {
-  return `https://open-pay.jp/api/paid/hosted/${resourceId}?payer=${payer}`;
-}
-
 function requirementsForIntent(
   intent: PurchaseIntent,
 ): X402PaymentRequirements[] {
@@ -124,7 +121,7 @@ function requirementsForIntent(
     maxAmountRequired: (
       BigInt(intent.merchantValue) + BigInt(intent.feeValue)
     ).toString(),
-    resource: hostedResourceUrl(intent.resourceId, intent.payerHint),
+    resource: hostedResourceUrl(intent.resourceId, intent.payerHint, 'jpyc'),
     description: intent.metadata.title,
     mimeType: 'application/json',
     payTo: intent.forwarder,
@@ -148,7 +145,7 @@ function challenge(
 ): NextResponse {
   const accepts = requirementsForIntent(intent);
   const paymentRequired = buildPaymentRequiredV2({
-    url: hostedResourceUrl(intent.resourceId, intent.payerHint),
+    url: hostedResourceUrl(intent.resourceId, intent.payerHint, 'jpyc'),
     description: intent.metadata.title,
     mimeType: 'application/json',
     accepts: accepts.map(toV2Accept),
@@ -312,7 +309,7 @@ async function quoteResponse(input: {
         BigInt(product.priceJpyc) *
         10n ** BigInt(x402FacilitatorConfig.jpycDecimals),
       payTo: product.payTo,
-      resource: hostedResourceUrl(product.id, payer),
+      resource: hostedResourceUrl(product.id, payer, 'jpyc'),
       description: product.title,
       chainId: x402FacilitatorConfig.chainId,
       mimeType: 'application/json',

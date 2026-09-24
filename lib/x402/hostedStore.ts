@@ -23,6 +23,7 @@ import 'server-only';
 //     署名させた後に必ず失敗する構成を作らない。
 
 import { getAddress, isAddress, type Address } from 'viem';
+import { LABELS, type HostedLabel } from '@/lib/x402/storeWire';
 import { parseDeliveryUrl } from '@/lib/store/deliveryUrl';
 import { LICENSE_DEFAULT_INSTRUCTIONS, parseLicenseDefinition, parseLicenseRegistration, parseLicenseCreationTerms, type LicenseDefinition, type LicenseRegistration, type LicenseTermsInput } from '@/lib/license/definition';
 import { licenseDeployment, licenseSellerAllowed, licenseVisible } from '@/lib/license/config';
@@ -36,6 +37,8 @@ import {
 import { kvEval, kvGet, kvLrange, kvMget, kvSet } from '@/lib/kv';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
+
+export { isHostedLabel, type HostedLabel } from '@/lib/x402/storeWire';
 
 /** owner (SIWE wallet) あたりの hosted 商品上限 (不正対策・2026-08-04 user 指示で 12→24)。 */
 export const MAX_HOSTED_PER_OWNER = 24;
@@ -58,15 +61,6 @@ const HOSTED_ID_PREFIX = 'h_';
 const HOSTED_ID_RE = /^h_[0-9a-f]{32}$/;
 const DECIMAL_RE = /^(0|[1-9][0-9]*)$/;
 const UNSAFE_UNICODE_RE = /[\p{Cc}\p{Cf}\p{Cs}]/u;
-
-/** 表示ラベル (商品の見え方だけを変える。配信機構は kind が決める)。 */
-export type HostedLabel =
-  | 'download'
-  | 'pdf'
-  | 'zip'
-  | 'prompt'
-  | 'api'
-  | 'external';
 
 export type HostedContentKind = 'url' | 'text';
 
@@ -225,22 +219,6 @@ function sanitizeEmoji(raw: unknown): string | undefined {
   if (points.length === 0 || points.length > 2) return undefined;
   if (points.some((ch) => UNSAFE_UNICODE_RE.test(ch))) return undefined;
   return points.join('');
-}
-
-const LABELS: readonly HostedLabel[] = [
-  'download',
-  'pdf',
-  'zip',
-  'prompt',
-  'api',
-  'external',
-];
-
-export function isHostedLabel(value: unknown): value is HostedLabel {
-  return (
-    typeof value === 'string' &&
-    (LABELS as readonly string[]).includes(value)
-  );
 }
 
 export type HostedProductInput = {

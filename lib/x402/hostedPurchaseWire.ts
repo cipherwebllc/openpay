@@ -16,6 +16,7 @@ import {
   type Hex,
 } from 'viem';
 import { env } from '@/lib/env';
+import { DISCLOSED_X402_FEE } from '@/lib/disclosedX402Fee';
 import {
   buildReceiveWithAuthorizationTypedData,
   FORWARDER_COMMIT_VERSION,
@@ -25,9 +26,9 @@ import type { JpycRecoverSignPreview } from '@/lib/signPreview';
 import { JPYC_V3_ASSET } from '@/lib/x402/types';
 
 const JPYC_ATOMIC_UNIT = 10n ** BigInt(JPYC_V3_ASSET.decimals);
-const X402_FEE_BPS = 100n;
+const X402_FEE_BPS = BigInt(DISCLOSED_X402_FEE.bps);
 const X402_FEE_BPS_DENOMINATOR = 10_000n;
-const X402_FEE_FLOOR = JPYC_ATOMIC_UNIT;
+const X402_FEE_FLOOR = BigInt(DISCLOSED_X402_FEE.floorJpyc) * JPYC_ATOMIC_UNIT;
 
 export const HOSTED_AUTHORIZATION_WINDOW_SECONDS = 10 * 60;
 
