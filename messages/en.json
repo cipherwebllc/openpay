@@ -485,6 +485,7 @@
     "qrMobileBarHint": "Use \"Show QR code\" in the bar below to present it.",
     "qrModalTitle": "Payment QR code",
     "qrModalClose": "Close",
+    "qrModalConvertExpired": "The indicative FX rate has expired. Close this QR and regenerate it with the latest rate.",
     "qrCopy": "Copy URL",
     "qrCopied": "Copied",
     "downloadSvg": "Save SVG",

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { createRef } from 'react';
 import { QrPreviewModal } from '@/components/QrPreviewModal';
 import ja from '@/messages/ja.json';
+import en from '@/messages/en.json';
 
 const LABELS = {
   title: '決済用 QR コード',
@@ -275,5 +276,115 @@ describe('QrPreviewModal', () => {
     expect(screen.queryByText('1 JPYC = ¥1')).toBeNull();
     expect(screen.queryByText('スマホでスキャン')).toBeNull();
     expect(screen.queryByAltText('OpenPay')).toBeNull();
+  });
+});
+
+describe('QrPreviewModal FX expiry', () => {
+  it.each([['ja', ja], ['en', en]])('%s: keeps the live region mounted and updates its text immediately on expiry', (_locale, messages) => {
+    const { props, rerender } = renderModal({
+      labels: { ...LABELS, convertExpired: messages.QrGenerator.qrModalConvertExpired },
+      convertExpired: false,
+    });
+    const status = screen.getByRole('status');
+    const qr = props.qrRef.current!;
+    expect(status).toBeEmptyDOMElement();
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    expect(status).toHaveAttribute('aria-atomic', 'true');
+    expect(status).not.toHaveAttribute('aria-label');
+    expect(qr.nextElementSibling).toBe(status);
+    expect(qr).not.toHaveClass('opacity-40');
+    expect(screen.getByRole('button', { name: LABELS.copy })).toBeEnabled();
+
+    rerender(<QrPreviewModal {...props} convertExpired />);
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status).toHaveTextContent(messages.QrGenerator.qrModalConvertExpired);
+    expect(status).toHaveClass('border-amber-200', 'bg-amber-50', 'text-amber-900');
+    expect(props.qrRef.current).toBe(qr);
+    expect(qr).toHaveClass('opacity-40');
+
+    rerender(<QrPreviewModal {...props} />);
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status).toBeEmptyDOMElement();
+    expect(qr).not.toHaveClass('opacity-40');
+    expect(screen.getByRole('button', { name: LABELS.copy })).toBeEnabled();
+  });
+
+  it('disables print, copy, downloads and EIP-681 copy while leaving close available', async () => {
+    const user = userEvent.setup();
+    const eipCopy = vi.fn();
+    const { props, container } = renderModal({
+      labels: { ...LABELS, convertExpired: ja.QrGenerator.qrModalConvertExpired },
+      convertExpired: true,
+      eip681: {
+        uri: 'ethereum:0xtoken@137/transfer?address=0xabc&uint256=500',
+        copied: false,
+        onCopy: eipCopy,
+        title: '互換 QR (EIP-681)',
+        badge: '上級者向け',
+        description: '一部ウォレット向け',
+        copy: 'URI をコピー',
+        copiedLabel: 'コピー済み',
+      },
+    });
+    await user.click(screen.getByText('互換 QR (EIP-681)'));
+    expect(container.querySelector('svg[width="180"]')).toHaveClass('opacity-40');
+    for (const name of [LABELS.print, LABELS.copy, LABELS.downloadSvg, LABELS.downloadPng, 'URI をコピー']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toBeDisabled();
+      await user.click(button);
+    }
+    for (const handler of [props.onPrint, props.onCopy, props.onDownloadSvg, props.onDownloadPng, eipCopy]) {
+      expect(handler).not.toHaveBeenCalled();
+    }
+    const close = screen.getByRole('button', { name: LABELS.close });
+    expect(close).toBeEnabled();
+    await user.click(close);
+    expect(props.onClose).toHaveBeenCalledOnce();
+  });
+
+  it('keeps focus on expiry, skips newly disabled actions and restores the opener on close / unmount', async () => {
+    const user = userEvent.setup();
+    render(<button>Open QR</button>);
+    const opener = screen.getByRole('button', { name: 'Open QR' });
+    opener.focus();
+    const { props, rerender, unmount } = renderModal({
+      labels: { ...LABELS, convertExpired: ja.QrGenerator.qrModalConvertExpired },
+      convertExpired: false,
+    });
+    const dialog = screen.getByRole('dialog');
+    const copy = screen.getByRole('button', { name: LABELS.copy });
+    const close = screen.getByRole('button', { name: LABELS.close });
+    copy.focus();
+    rerender(<QrPreviewModal {...props} convertExpired />);
+    expect(screen.getByRole('dialog')).toBe(dialog);
+    expect(copy).toHaveFocus();
+    await user.tab();
+    expect(close).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(close).toHaveFocus();
+    await user.tab();
+    expect(close).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(props.onClose).toHaveBeenCalledOnce();
+    rerender(<QrPreviewModal {...props} convertExpired open={false} />);
+    expect(opener).toHaveFocus();
+    rerender(<QrPreviewModal {...props} convertExpired />);
+    expect(screen.getByRole('dialog')).toHaveFocus();
+    unmount();
+    expect(opener).toHaveFocus();
+  });
+
+  it('does not steal external focus on expiry or close', () => {
+    render(<label>Outside input<input /></label>);
+    const { props, rerender } = renderModal({
+      labels: { ...LABELS, convertExpired: ja.QrGenerator.qrModalConvertExpired },
+      convertExpired: false,
+    });
+    const input = screen.getByRole('textbox', { name: 'Outside input' });
+    input.focus();
+    rerender(<QrPreviewModal {...props} convertExpired />);
+    expect(input).toHaveFocus();
+    rerender(<QrPreviewModal {...props} convertExpired open={false} />);
+    expect(input).toHaveFocus();
   });
 });

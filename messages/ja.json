@@ -485,6 +485,7 @@
     "qrMobileBarHint": "下のバーの「QRコードを表示する」から提示できます。",
     "qrModalTitle": "決済用 QR コード",
     "qrModalClose": "閉じる",
+    "qrModalConvertExpired": "為替レートの目安期限を過ぎました。この QR を閉じて、最新レートで作り直してください。",
     "qrCopy": "URLをコピー",
     "qrCopied": "コピー済み",
     "downloadSvg": "SVG保存",
