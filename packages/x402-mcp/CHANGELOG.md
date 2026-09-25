@@ -1,18 +1,18 @@
 # Changelog
 
-## Unreleased
+## 0.18.0 — 2026-09-25
 
 - Add `SIGNER_MODE=kova` as a third-party CLI signer: fixed Polygon/Amoy mapping from the validated 402 network, lossless bigint JSON, strict 65-byte signatures and address verification on every signature. Use shell-free `execFile`, closed stdin, a 30-second deadline with `SIGKILL` and bounded output; expose only fixed denial/failure messages, never raw child output or errors. Report a missing executable as `kova_not_found`. No signer fallback.
 - Exclude `BUYER_PRIVATE_KEY` and all `STEWARD_*` variables from the Kova child environment while forwarding Kova credentials and other environment variables.
 - Default Kova's daily cap to the session cap with `default_kova`; use the existing address/UTC-date ledger at `OPENPAY_X402_HOME/spend.json` without creating a keystore. Report the public Kova mode and reject `wallet_init`.
-- Support `wallet_prove` in Kova mode: the `OpenPay Agent Proof` typed-data is signed through the CLI (`--chain polygon`) so the Agent can bind its purchase history on `/agent`; a missing `sign_allowlist` rule returns `kova_policy_denied`, a missing executable `kova_not_found`.
-- Document source-checkout setup in the package README, Polygon/Amoy separation and the verified Amoy + Polygon mainnet purchases (2026-09-25). Kova 0.1.2 does not limit typed-data signing through `spending_limit` or `sign_allowlist` in our test, so the MCP caps are the only amount limits for this mode; EIP-7702 delegation set by `kova init` does not block JPYC v3 authorizations. Windows is unsupported.
+- Support `wallet_prove` in Kova mode: the `OpenPay Agent Proof` typed-data is signed through the CLI (`--chain polygon`) so the Agent can bind its purchase history on `/agent`; a Kova policy denial returns `kova_policy_denied`, a missing executable `kova_not_found`.
+- Document pinned npm setup with `openpay-x402-mcp@0.18` in the package README, Polygon/Amoy separation and the verified Amoy + Polygon mainnet purchases (2026-09-25). Kova 0.1.2 does not limit typed-data signing through `spending_limit` or `sign_allowlist` in our test, so the MCP caps are the only amount limits for this mode; EIP-7702 delegation set by `kova init` does not block JPYC v3 authorizations. Windows is unsupported.
 - No additional npm dependencies or peer dependencies. Kova must be installed separately.
 
 ## 0.17.2 — 2026-09-24
 
 - Correct `order_summary` guidance: read `customerPaysJpyc` and `feeBearer` for the exact human checkout total and fee payer. Usually the customer pays the subtotal; preorder shops may add a customer-paid 3% fee. Align the tool description and README with the server's shop-specific fee schedule.
-- Payment/signing behavior, input schemas, and dependencies are unchanged. Unpublished; public wording approval and rule-15 human review are required before release.
+- Payment/signing behavior, input schemas, and dependencies are unchanged.
 
 ## 0.17.1 — 2026-09-23
 
@@ -28,7 +28,7 @@
   spend and wallet files; existing wallet files still require mode 0600.
 - Save `steward-bootstrap` credentials (MCP env and owner TOTP seed) to an exclusive `0600` file instead of printing secrets. Default to a new file under `~/.config/openpay/`; accept `--out` for an explicit path outside a repository, and preserve credentials already issued if a later step fails.
 - Require `--allow-ci` when CI is enabled (`CI=false` and `CI=0` disable this check). Withhold raw errors while retaining safe error names and codes for operator diagnostics.
-- No dependencies added. Unpublished; rule-15 human review is required before adoption.
+- No dependencies added.
 - Release order: publish SDK 0.10.1 first, then MCP 0.17.1. The SDK tarball must
   match the integrity pinned in this package's lockfile. If any SDK package bytes
   change before release, repack it and update the lockfile before publishing.

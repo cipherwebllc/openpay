@@ -580,7 +580,7 @@ export function createToolRuntime({
   function walletProve(args) {
     return serializeWallet(async () => {
       requireEmptyArgs(args);
-      // Kova signs the Proof typed-data through the same CLI adapter (policy-gated by sign_allowlist).
+      // Kova の policy は typed-data を制限しない (0.1.2 実測) — 上限は MCP 側。
       if (!kovaMode && config.signerMode !== SIGNER_MODES.keystore && config.signerMode !== SIGNER_MODES.envKey) {
         return { ok: false, error: 'signer_mode_unsupported' };
       }
