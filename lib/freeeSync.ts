@@ -12,11 +12,9 @@
 
 import { isIncomeSaleEntry } from './historyFilters';
 import { entryYenValue } from './historyYen';
-import {
-  entryLineItems,
-  HISTORY_ASSET_DISPLAY,
-  type HistoryEntry,
-} from './history';
+// route handler でも実値を使うため、'use client' の facade を経由しない。
+import { HISTORY_ASSET_DISPLAY, type HistoryEntry } from './history/model';
+import { entryLineItems } from './history/summaries';
 import { shortAddress } from './format';
 import { tokyoDateKey } from './shopTime';
 

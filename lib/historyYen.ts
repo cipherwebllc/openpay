@@ -12,7 +12,7 @@
 // 会計レポートの円換算なので対称丸めが正。
 
 import { formatUnits } from 'viem';
-import { HISTORY_ASSET_DECIMALS, type HistoryEntry } from './history';
+import { HISTORY_ASSET_DECIMALS, type HistoryEntry } from './history/model';
 // 正の decimal (小数点高々 1 個) の単一情報源。url.ts:541 と共有 (循環 import 無し:
 // url.ts は historyYen を import しない)。anchorAmount の数値検証に使う。
 import { DECIMAL_PATTERN } from './url';
