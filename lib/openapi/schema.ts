@@ -42,6 +42,6 @@ export const JPYC_LIVE_402 = {
 };
 export const JPYC_LIVE_503 = {
   description:
-    'All configured RPC endpoints failed for the requested chains. Nothing is settled; the buyer is not charged.',
+    'RPC data is temporarily unavailable (rpc_unavailable), or the payment facility is unavailable (payment_facility_unavailable). Settlement may already have been submitted; check payment status before retrying.',
 };
 export const JPYC_LIVE_400 = { description: 'Unknown query key, unsupported chain, or malformed address/limit.' };

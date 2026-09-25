@@ -2,6 +2,8 @@
 // 型と全領域共有の Error、responses は全領域が $ref する共通応答 (StorageUnavailable は
 // buildOpenApiDocument が生成時に足す)。
 
+import { DIRECTORY_LIST_RESOURCE } from '@/lib/directory/paidResources';
+
 export const BASE_OPENAPI_SCHEMAS = {
   DirectoryEntry: {
     type: 'object',
@@ -203,7 +205,7 @@ export const BASE_OPENAPI_SCHEMAS = {
   },
   Error: {
     type: 'object',
-    required: ['ok', 'error'],
+    required: ['error'],
     properties: {
       ok: { type: 'boolean', const: false },
       error: {
@@ -213,9 +215,25 @@ export const BASE_OPENAPI_SCHEMAS = {
           'not_found',
           'rate_limited',
           'storage_unavailable',
+          'snapshot_required',
+          'payment_facility_unavailable',
         ],
       },
     },
+    // 既存の { ok: false, error } と任意の追加 field は引き続き受理する。
+    // ok を持たない実応答を追加するため anyOf (旧形との重複を排除しない) にする。
+    anyOf: [
+      { required: ['ok'] },
+      {
+        required: ['x402Version', 'message'],
+        properties: {
+          x402Version: { type: 'integer', const: 1 },
+          error: { const: 'payment_facility_unavailable' },
+          message: { type: 'string' },
+        },
+      },
+      { properties: { error: { const: 'snapshot_required' } } },
+    ],
   },
 } as const;
 
@@ -252,11 +270,11 @@ export const BASE_OPENAPI_RESPONSES = {
   },
   PaymentRequired: {
     description:
-      'x402 payment challenge. Amount is denominated in JPYC on Polygon or Polygon Amoy; the existing buyer-added facilitator fee is included in maxAmountRequired.',
+      'x402 payment challenge. Amount is denominated in JPYC on Polygon or Polygon Amoy; the existing buyer-added facilitator fee is included in maxAmountRequired (amount in the v2 header). The JSON body is the x402 v1 form (x402Version: 1); the PAYMENT-REQUIRED header carries the same requirements in x402 v2 form (x402Version: 2). The example uses illustrative forwarder, merchant and fee receiver addresses; use the requirements returned by the requested resource for payment.',
     headers: {
       'PAYMENT-REQUIRED': {
         schema: { type: 'string' },
-        description: 'Base64-encoded x402 v2 payment requirements.',
+        description: 'Base64-encoded x402 v2 PaymentRequired object.',
       },
     },
     content: {
@@ -267,10 +285,30 @@ export const BASE_OPENAPI_RESPONSES = {
             {
               scheme: 'exact',
               network: 'eip155:137',
+              maxAmountRequired: '3000000000000000000',
               resource:
                 'https://open-pay.jp/api/paid/japan-web3-directory',
-              maxAmountRequired: '3000000000000000000',
-              asset: 'JPYC',
+              description: DIRECTORY_LIST_RESOURCE.description,
+              mimeType: 'application/json',
+              payTo: '0x1111111111111111111111111111111111111111',
+              maxTimeoutSeconds: 600,
+              asset: '0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29',
+              extra: {
+                name: 'JPY Coin',
+                version: '1',
+                decimals: 18,
+                assetTransferMethod: 'eip3009',
+                openpay: {
+                  mode: 'forwarder-split',
+                  forwarder: '0x1111111111111111111111111111111111111111',
+                  merchant: '0x2222222222222222222222222222222222222222',
+                  merchantValue: '2000000000000000000',
+                  feeReceiver: '0x3333333333333333333333333333333333333333',
+                  feeValue: '1000000000000000000',
+                  commitVersion: '0x7ff4e43ca5ec8a7745cdb456a45dc2f4787e1a8dc0ab9121c9941bfb1028ce89',
+                },
+              },
+              outputSchema: DIRECTORY_LIST_RESOURCE.outputSchema,
             },
           ],
           error: 'payment_required',
