@@ -14,6 +14,7 @@ import { CircleCheck, Eye, Printer, ScanLine, X } from 'lucide-react';
 import NextImage from 'next/image';
 import { TokenLogo, ChainLogo } from '@/components/AssetLogo';
 import { QR_CENTER_MARK, QR_CENTER_MARK_RATIO } from '@/lib/qrCenterMark';
+import { trapModalFocus } from '@/lib/trapModalFocus';
 import type { TokenSymbol } from '@/lib/tokens';
 import type { ChainSlug } from '@/lib/chains';
 
@@ -121,20 +122,22 @@ export function QrPreviewModal({
   onCloseRef.current = onClose;
 
   // 開く時だけ focus を移し、close / unmount 時に dialog 側に残っていれば元の要素へ戻す。
-  // TODO(B-R11f): focus trap は別 PR で扱う。
   useEffect(() => {
     if (!open) return;
     const previousFocus = document.activeElement;
     // cleanup 時は ref が detach 済み (StrictMode の擬似 unmount も含む) なので node を捕捉する。
     const dialog = dialogRef.current;
     function onKey(e: KeyboardEvent) {
+      // IME のキャンセル操作で modal を閉じない。
+      if (e.isComposing || e.keyCode === 229) return;
       if (e.key === 'Escape') onCloseRef.current();
+      if (dialog) trapModalFocus(e, dialog);
     }
     window.addEventListener('keydown', onKey);
     dialog?.focus();
     return () => {
       window.removeEventListener('keydown', onKey);
-      // trap が無いので、利用者が背後の入力欄などへ移した focus を opener へ奪わない。
+      // 明示的に別の要素へ移された focus は opener へ奪わない。
       // dialog 除去で body に落ちた場合と、StrictMode の擬似 cleanup で dialog 内に残る場合は戻す。
       const active = document.activeElement;
       if (

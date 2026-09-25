@@ -4,13 +4,14 @@
 // 視認できるよう、決済成功時に画面全体を緑色で塗りつぶす full-screen overlay。
 // PayPay の「ペイペイ！」緑画面相当。
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { Volume2, VolumeX } from 'lucide-react';
 import { pad } from '@/lib/pad';
 import { isSuccessSoundEnabled } from '@/lib/soundPref';
 import { playSuccessChime } from '@/lib/successChime';
+import { trapModalFocus } from '@/lib/trapModalFocus';
 import { useSuccessSoundPref } from '@/hooks/useSuccessSoundPref';
 import { CopyableField } from './CopyableField';
 import { NonCustodialNotice } from './NonCustodialNotice';
@@ -45,8 +46,12 @@ export function SuccessOverlay({
   onDismiss: () => void;
 }) {
   const t = useTranslations('SuccessOverlay');
+  const titleId = useId();
   const [now, setNow] = useState(() => new Date());
   const dialogRef = useRef<HTMLDivElement>(null);
+  // inline onDismiss の更新で focus effect を再実行せず、ESC は最新のハンドラを読む。
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
   const [soundOn, setSoundOn] = useSuccessSoundPref();
 
   // 決済完了チャイム (PayPay の「ペイペイ！」音 相当)。overlay マウント時に 1 回だけ
@@ -73,15 +78,31 @@ export function SuccessOverlay({
     if (next) playSuccessChime();
   }
 
-  // ESC で dismiss + dialog に focus (a11y)
+  // mount が open に相当する。開く時だけ focus し、unmount 時に guard 付きで復元する。
   useEffect(() => {
+    const previousFocus = document.activeElement;
+    // cleanup 時の ref detach (StrictMode を含む) に備えて node を捕捉する。
+    const dialog = dialogRef.current;
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onDismiss();
+      // IME のキャンセル操作で overlay を閉じない。
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Escape') onDismissRef.current();
+      if (dialog) trapModalFocus(e, dialog);
     }
     window.addEventListener('keydown', onKey);
-    dialogRef.current?.focus();
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onDismiss]);
+    dialog?.focus();
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      // 明示的に別の要素へ移された focus は奪わず、dialog 内か除去後の body からだけ戻す。
+      const active = document.activeElement;
+      if (
+        previousFocus instanceof HTMLElement &&
+        (!active || active === document.body || dialog?.contains(active))
+      ) {
+        previousFocus.focus();
+      }
+    };
+  }, []);
 
   const explorerTxUrl =
     explorerBase && txHash ? `${explorerBase}/tx/${txHash}` : undefined;
@@ -95,7 +116,7 @@ export function SuccessOverlay({
       ref={dialogRef}
       role="dialog"
       aria-modal="true"
-      aria-live="assertive"
+      aria-labelledby={titleId}
       tabIndex={-1}
       className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 overflow-y-auto bg-emerald-500 px-4 py-8 text-white"
     >
@@ -123,7 +144,7 @@ export function SuccessOverlay({
         >
           ✓
         </span>
-        <h2 className="text-3xl font-bold sm:text-4xl">{t('title')}</h2>
+        <h2 id={titleId} aria-live="assertive" className="text-3xl font-bold sm:text-4xl">{t('title')}</h2>
       </div>
 
       {/* 巨大金額 (店主が遠くから視認できるサイズ) */}
