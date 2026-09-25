@@ -124,13 +124,10 @@ async function rateLimited(
   req: Request,
   wallet: string,
 ): Promise<NextResponse | null> {
-  try {
-    const keyFor = (ipPrefix: string) => `pushsub:${wallet.toLowerCase()}:${ipPrefix}`;
-    if (!(await checkClientIpPrefixRateLimit(req, keyFor, 20, 60))) {
-      return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
-    }
-  } catch {
-    // Rate-limit outages must not block subscription maintenance.
+  // wrapper が使う checkReadRateLimit は no-throw / KV 障害時 fail-open (R6a #613)。
+  const keyFor = (ipPrefix: string) => `pushsub:${wallet.toLowerCase()}:${ipPrefix}`;
+  if (!(await checkClientIpPrefixRateLimit(req, keyFor, 20, 60))) {
+    return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
   }
   return null;
 }

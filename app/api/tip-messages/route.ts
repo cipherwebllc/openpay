@@ -30,20 +30,13 @@ function privateResponse(response: NextResponse): NextResponse {
 }
 
 async function rateLimitResponse(req: Request): Promise<NextResponse | null> {
-  let allowed = true;
-  try {
-    allowed = await checkClientIpBucketRateLimit(
-      req,
-      'tip-messages',
-      RATE_LIMIT_MAX,
-      RATE_LIMIT_WINDOW_SEC,
-    );
-  } catch {
-    // The IP limiter is ancillary: its storage failure must not propagate into
-    // the owner-authenticated inbox. SIWE and owner-scoped storage remain the
-    // authorization boundary while this guard fails open.
-    allowed = true;
-  }
+  // wrapper が使う checkIpRateLimit は no-throw / KV 障害時 fail-open (R6a #613 と同方針)。
+  const allowed = await checkClientIpBucketRateLimit(
+    req,
+    'tip-messages',
+    RATE_LIMIT_MAX,
+    RATE_LIMIT_WINDOW_SEC,
+  );
   if (allowed) return null;
   return json(
     { error: 'rate_limited' },

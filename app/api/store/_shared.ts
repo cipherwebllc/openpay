@@ -63,17 +63,12 @@ export async function requireStoreSeller(
     return { ok: false, response: session.response };
   }
 
-  let addressAllowed = true;
-  try {
-    addressAllowed = await checkReadRateLimit(
-      `creator-store:${scope}:${session.address.toLowerCase()}`,
-      RATE_LIMIT_MAX,
-      RATE_LIMIT_WINDOW_SEC,
-    );
-  } catch {
-    // 付帯 limiter の障害を、SIWE と owner CAS で守られた出品管理本体へ波及させない。
-    addressAllowed = true;
-  }
+  // checkReadRateLimit / checkIpRateLimit は no-throw (R6a #613) なので catch は不要。
+  const addressAllowed = await checkReadRateLimit(
+    `creator-store:${scope}:${session.address.toLowerCase()}`,
+    RATE_LIMIT_MAX,
+    RATE_LIMIT_WINDOW_SEC,
+  );
   if (!addressAllowed) {
     return { ok: false, response: rateLimitedResponse() };
   }

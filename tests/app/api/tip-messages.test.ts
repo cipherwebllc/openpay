@@ -108,16 +108,7 @@ describe('/api/tip-messages', () => {
     expect(listTipMessages).not.toHaveBeenCalled();
   });
 
-  it('IP limiter 障害は fail-open し、owner SIWE + inbox read を続行する', async () => {
-    checkIpRateLimit.mockRejectedValue(new Error('limiter unavailable'));
-
-    const response = await GET(request());
-
-    expect(response.status).toBe(200);
-    expect(requireSession).toHaveBeenCalledOnce();
-    expect(listTipMessages).toHaveBeenCalledWith(OWNER);
-    expectPrivate(response);
-  });
+  // limiter の no-throw / fail-open は limiter-failopen-pinning.test.ts の実 KV transport で固定する。
 
   it('未サインインは 401 の requireSession 応答にも private no-store を上書きする', async () => {
     requireSession.mockResolvedValue({
