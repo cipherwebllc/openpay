@@ -103,8 +103,11 @@ export async function proveWallet({ signer, origin = AGENT_PROOF_AUDIENCE, fetch
     });
   } catch (error) {
     // Signer errors can contain the typed data; return only a fixed code, never raw proof data.
-    // The Kova adapter throws only these fixed messages, so surfacing them cannot leak child output.
-    if (error instanceof Error && (error.message === 'kova_policy_denied' || error.message === 'kova_not_found')) {
+    // CLI adapters throw only fixed messages, so surfacing this allowlist cannot leak child output.
+    if (error instanceof Error && [
+      'kova_policy_denied', 'kova_not_found',
+      'circle_not_found', 'circle_login_required', 'circle_policy_denied', 'circle_sign_failed',
+    ].includes(error.message)) {
       return failure(error.message);
     }
     return failure('proof_signing_failed');

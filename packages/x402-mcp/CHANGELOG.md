@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add `SIGNER_MODE=circle` for the separately installed Circle Agent Wallet CLI: Polygon/Amoy chain mapping, lossless EIP-712 JSON, strict 65-byte signatures and address verification on every call. Share the shell-free child runner with Kova while preserving Kova's public behavior; Circle uses a 60-second independent deadline, `SIGKILL`, closed stdin, and bounded output.
+- Map the CLI 1.1.4 bundle's `AUTH_REQUIRED`/`AUTH_EXPIRED` to fixed `circle_login_required` errors and missing executables to `circle_not_found`. Do not expose raw CLI output or infer policy denial from the ambiguous `PERMISSION_DENIED` code. Exclude `BUYER_PRIVATE_KEY`, `STEWARD_*`, and `KOVA_*` from Circle's child environment.
+- Default Circle's daily cap to `MAX_SESSION_JPYC` (`default_circle`) using the shared address/UTC-date `spend.json` ledger; expose Circle status, reject `wallet_init`, and support `wallet_prove` through the CLI. No signer fallback or dependency changes.
+- Document human installation, login and Terms acceptance. Circle typed-data policy enforcement, non-TTY challenge completion, and Amoy/mainnet purchases remain unverified; rely on the MCP caps and have a person log in again after session expiry.
+
 ## 0.18.0 — 2026-09-25
 
 - Add `SIGNER_MODE=kova` as a third-party CLI signer: fixed Polygon/Amoy mapping from the validated 402 network, lossless bigint JSON, strict 65-byte signatures and address verification on every signature. Use shell-free `execFile`, closed stdin, a 30-second deadline with `SIGKILL` and bounded output; expose only fixed denial/failure messages, never raw child output or errors. Report a missing executable as `kova_not_found`. No signer fallback.

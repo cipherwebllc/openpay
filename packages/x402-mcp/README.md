@@ -102,7 +102,7 @@ into the configuration. After the host restarts, call `wallet_init` to create th
 wallet on this machine, then fund the returned address — see
 [Local wallet](#local-wallet-signer_modekeystore). Do not put a placeholder such as
 `"BUYER_PRIVATE_KEY": "0x..."` in the configuration: the server rejects it at startup.
-`env-key`, `steward`, and `kova` (available since 0.18.0) are described under [Signer Modes](#signer-modes).
+`env-key`, `steward`, `kova` (available since 0.18.0), and `circle` (Unreleased) are described under [Signer Modes](#signer-modes).
 
 During local development from this repository:
 
@@ -202,7 +202,7 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 
 | Variable | Default | Notes |
 |---|---|---|
-| `SIGNER_MODE` | `env-key` | `env-key` signs in-process with `BUYER_PRIVATE_KEY`. `steward` delegates typed-data signing to Steward. Explicit `keystore` uses the local wallet file. `kova` (since 0.18.0) delegates to the separately installed Kova CLI. No fallback to another signer in keystore or kova mode. |
+| `SIGNER_MODE` | `env-key` | `env-key` signs in-process with `BUYER_PRIVATE_KEY`. `steward` delegates typed-data signing to Steward. Explicit `keystore` uses the local wallet file. `kova` (since 0.18.0) and `circle` (Unreleased) delegate to their separately installed CLIs. No fallback to another signer in keystore, kova, or circle mode. |
 | `BUYER_PRIVATE_KEY` | unset | Required for `x402_pay` and `wallet_prove` when `SIGNER_MODE=env-key`. Use a dedicated low-balance wallet, never a primary wallet. |
 | `STEWARD_URL` | unset | Required when `SIGNER_MODE=steward`, for example `http://localhost:3900`. |
 | `STEWARD_TENANT` | unset | Required when `SIGNER_MODE=steward`; tenant context sent as `X-Steward-Tenant`. |
@@ -214,13 +214,15 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | `KOVA_WALLET` | unset | Required when `SIGNER_MODE=kova`; existing Kova wallet name. Missing/blank values stop startup. |
 | `KOVA_AGENT_ADDRESS` | unset | Required when `SIGNER_MODE=kova`; public EVM address confirmed in Kova and verified against every typed-data signature. Missing/invalid values stop startup. |
 | `KOVA_BIN` | `kova` | PATH executable name only, no path or command arguments. Shell disabled; no `npx` fallback or automatic install. |
+| `CIRCLE_WALLET_ADDRESS` | unset | Required when `SIGNER_MODE=circle` (Unreleased); public EVM address of an existing Circle **agent** wallet, verified against every typed-data signature. Missing/invalid values stop startup. |
+| `CIRCLE_BIN` | `circle` | PATH executable name only, no path or command arguments. Shell disabled; no fallback or automatic install. |
 | `MAX_PER_CALL_JPYC` | `10` | Upper bound for the tool call's required `maxTotalJpyc`. |
 | `MAX_SESSION_JPYC` | `100` | Process-lifetime cap for successful payments plus signed authorizations exposed to a seller. A non-2xx response or timeout keeps its reservation. Restarting the process resets this cap. |
-| `MAX_DAILY_JPYC` | `MAX_SESSION_JPYC` in keystore/kova; unset otherwise | Per-UTC-day cap that **survives restarts**. Immediately before `X-PAYMENT` is sent, the amount is reserved under an exclusive file lock in `~/.openpay-x402/spend.json` (keystore/kova use `OPENPAY_X402_HOME/spend.json` when set). Non-2xx/timeout reservations are retained because settlement may already have occurred; unreadable or unwritable state fails closed. |
+| `MAX_DAILY_JPYC` | `MAX_SESSION_JPYC` in keystore/kova/circle; unset otherwise | Per-UTC-day cap that **survives restarts**. Immediately before `X-PAYMENT` is sent, the amount is reserved under an exclusive file lock in `~/.openpay-x402/spend.json` (keystore/kova/circle use `OPENPAY_X402_HOME/spend.json` when set). Non-2xx/timeout reservations are retained because settlement may already have occurred; unreadable or unwritable state fails closed. |
 | `MAX_TIMEOUT_SECONDS` | `600` | Reject seller-declared authorization lifetimes above this many seconds. Configurable from `1` to the facilitator ceiling of `1200`; the value is never silently clamped. |
 | `CATALOG_TRUST` | `true` | When true, exact URLs listed in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. Before signing, the live `accepts` fetched from a catalog URL is checked field-by-field (asset / timeout / forwarder / merchant / fee receiver / amounts) against the catalog listing (server-authored), so a third-party domain cannot bait-and-switch a different destination or authorization lifetime; mismatches are refused (`catalog_accept_mismatch`). Money caps still apply. Set `false` for strict manual allowlisting. |
 | `ALLOWED_HOSTS` | `open-pay.jp` | Comma-separated bare host allowlist. `x402_quote` still works outside the list but returns `host_not_allowed`. |
-| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; kova uses `spend.json` without creating a keystore; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from `wallet_init`, `wallet_status`, `wallet_history`, and keystore `wallet_prove` while discovery remains available. Kova rejects a relative path at startup. Does not relocate env-key / Steward spend storage. |
+| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; kova/circle use `spend.json` without creating a keystore; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from `wallet_init`, `wallet_status`, `wallet_history`, and keystore `wallet_prove` while discovery remains available. Kova/Circle reject a relative path at startup. Does not relocate env-key / Steward spend storage. |
 | `POLYGON_RPC_URL` | unset | Optional read-only `wallet_status` RPC. SDK outbound URL/host checks reject private/link-local addresses, `.internal`, and URL credentials; validated DNS addresses are pinned for the built-in transport. Explicit exception: HTTP on `localhost` / `127.0.0.1`. No public RPC default, redirects rejected, 5-second timeout including DNS and body reads. Never accepted as a tool argument. |
 | `DISCOVERY_URL` | `https://open-pay.jp/api/discovery` | Catalog used by `discovery_search`. |
 | `OPENPAY_ORIGIN` | `https://open-pay.jp` | `wallet_prove` challenge origin, bind-link origin and signed audience. Independent of `DISCOVERY_URL`. Unset or blank uses the default; surrounding whitespace is trimmed. Must be an HTTPS origin with no credentials, path, query or fragment (a trailing slash is accepted). Only override for a trusted deployment that verifies this same audience. |
@@ -295,10 +297,12 @@ URLs or URLs containing credentials, a path, query or fragment return
 `challenge_unavailable`. If the server flag `ENABLE_AGENT_PURCHASES` is OFF,
 HTTP 404 returns `feature_disabled`. Steward returns `signer_mode_unsupported`; Kova signs the
 proof through its CLI and returns `kova_policy_denied` when Kova denies the
-proof request;
+proof request. Circle (Unreleased) signs through its CLI on `MATIC` and passes through
+the fixed `circle_not_found`, `circle_login_required`, `circle_policy_denied`, and
+`circle_sign_failed` codes (a policy-specific CLI code is not yet confirmed);
 an uninitialized keystore returns `wallet_not_initialized`. A missing env key
 returns `buyer_private_key_missing`; a signing failure returns the fixed code
-`proof_signing_failed` without exposing signer details.
+`proof_signing_failed` in the other supported modes without exposing signer details.
 
 ## Signer Modes
 
@@ -439,6 +443,87 @@ MCP does not interpret Kova credentials as configuration, store/display them,
 or send them to OpenPay. Kova reads its own `~/.kova/config.json` and inherited
 credentials. This is not OS-level isolation. Keep only a small balance you are
 willing to lose.
+
+### Circle Agent Wallet (`SIGNER_MODE=circle`, Unreleased)
+
+Circle is a third-party Execution Provider. Circle **agent** wallets use Circle's
+user-controlled 2-of-2 MPC; the private key is not on this machine. Configure an
+existing agent wallet's public address, not a Circle local wallet address. The CLI
+can also sign with local wallets, and MCP verifies the address but cannot attest
+the CLI's wallet type. MCP delegates only EIP-712 signing; it does not read, store,
+or display Circle sessions or send them to OpenPay.
+
+This integration is **Unreleased** and is based on reading the
+`@circle-fin/cli` **1.1.4** bundle. **Polygon Amoy and Polygon mainnet purchases,
+non-TTY challenge completion, and typed-data policy enforcement are unverified.**
+It is not included in the published MCP 0.18.0 examples above.
+
+A person installs the CLI and logs in with email OTP:
+
+```bash
+npm i -g @circle-fin/cli
+circle wallet login <email> --type agent
+```
+
+The person must review and accept Circle's Terms (for example with
+`circle terms accept`). MCP does not accept Terms or automate login. Mainnet and
+testnet sessions are separate; the person must log in to the appropriate network
+and create/confirm an agent wallet there. Set these MCP environment variables:
+
+```text
+SIGNER_MODE=circle
+CIRCLE_WALLET_ADDRESS=<public EVM address of your Circle agent wallet>
+MAX_PER_CALL_JPYC=10
+MAX_SESSION_JPYC=100
+```
+
+`CIRCLE_BIN` defaults to `circle`; the MCP host must have its executable directory
+on `PATH`. Only executable names are accepted, not paths or command arguments.
+The validated payment network selects `eip155:137` → `MATIC` or `eip155:80002` →
+`MATIC-AMOY`; other chains are rejected. Each call uses:
+
+```text
+circle wallet sign typed-data <json> --address <addr> --chain <CHAIN> --output json
+```
+
+MCP uses argument arrays without a shell, closes stdin, limits stdout/stderr to
+64 KiB each, and rejects after 60 seconds with `SIGKILL` independently of the child
+exit callback. It accepts the bundle's `{ "data": { "signature": "0x..." } }`
+JSON response, a direct JSON `signature`, or trimmed bare hex. Every signature
+must be 65 bytes and verify against the configured address and original typed data.
+There is no fallback to an env key, keystore, Steward, or Kova.
+
+`AUTH_REQUIRED` (missing/locally expired session) and `AUTH_EXPIRED` (API HTTP 401)
+map to `circle_login_required`, with the fixed payment error message
+`Circle CLI にログインしてください (circle wallet login <email> --type agent)`.
+Session expiry requires the **person to log in again**. A missing executable maps
+to `circle_not_found`; other failures map to `circle_sign_failed`. The bundle's
+`PERMISSION_DENIED` also covers unaccepted Terms and generic HTTP 403, so it does
+not establish a policy denial; `circle_policy_denied` is reserved until a specific
+code is confirmed. Raw stdout, stderr, exceptions, and env values are never
+returned as signing errors.
+
+`circle wallet status --output json` reports `{ "data": { "type": "agent",
+"mainnet": { ... }, "testnet": { ... } } }`, with `tokenStatus`
+(`VALID`, `EXPIRED`, or `NOT_LOGGED_IN`), and `email`/`expiresIn` for existing
+sessions. It does **not** expose `expiresAt`; no sessions returns an
+`AUTH_REQUIRED` error envelope. MCP does not call this command. MCP's own
+`wallet_status` reports `signerMode: circle`; its balance/chain fields still refer
+to Polygon mainnet. `wallet_init` is rejected; `wallet_prove` uses the same CLI
+and signature verification on `MATIC`.
+
+**Circle policy enforcement on typed-data is unverified: rely on the MCP caps.**
+The default daily cap equals `MAX_SESSION_JPYC` (`dailyLimitSource: default_circle`),
+or `configured` when `MAX_DAILY_JPYC` is set. Status and payment share the existing
+address/UTC-date ledger at `OPENPAY_X402_HOME/spend.json` (default
+`~/.openpay-x402/spend.json`), including across signer modes and chains. No local
+keystore is created. These caps cover only this MCP's use of that ledger, not
+direct CLI calls or another machine. Keep a small balance.
+
+MCP excludes `BUYER_PRIVATE_KEY`, all `STEWARD_*`, and all `KOVA_*` variables
+before reading child env values. Other variables, including `CIRCLE_*` and `PATH`,
+are forwarded. This is not OS-level isolation. A signature or an HTTP 200 alone
+is not proof of settlement.
 
 ### Local wallet (`SIGNER_MODE=keystore`)
 

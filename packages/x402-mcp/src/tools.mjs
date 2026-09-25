@@ -19,6 +19,7 @@ import { fetchPolygonRpc } from './wallet-rpc.mjs';
 import { startPurchase, endPurchase, readHistory } from './history.mjs';
 import { proveWallet } from './prove.mjs';
 import { createKovaSigner } from './kova-signer.mjs';
+import { createCircleSigner } from './circle-signer.mjs';
 
 const TOOL_DEFINITIONS = [
   {
@@ -380,8 +381,9 @@ export function createToolRuntime({
   lookup,
   // 履歴 I/O の打ち切り (テスト注入用)。既定は history.mjs の HISTORY_DEADLINE_MS。
   historyDeadlineMs,
-  // Kova child process injection for tests; never installs or launches another signer.
+  // CLI child process injection for tests; never installs or launches another signer.
   kovaExecFile,
+  circleExecFile,
 } = {}) {
   if (profile !== 'order' && profile !== 'x402') {
     throw new Error(`invalid profile: ${profile}`);
@@ -393,17 +395,20 @@ export function createToolRuntime({
   const allowedToolNames = new Set(profileDefinitions.map((tool) => tool.name));
   const knownToolNames = new Set(TOOL_DEFINITIONS.map((tool) => tool.name));
   const kovaMode = env.SIGNER_MODE === 'kova';
-  const kovaSigner = kovaMode ? createKovaSigner(env, { execFileImpl: kovaExecFile }) : null;
-  // MCP's public mode is kova; SDK guards treat a custom signer as steward. An overlay
-  // avoids enumerating unrelated environment values (including Kova credentials).
-  const config = readRuntimeConfig(kovaMode
+  const circleMode = env.SIGNER_MODE === 'circle';
+  const cliMode = kovaMode || circleMode;
+  const cliSigner = kovaMode ? createKovaSigner(env, { execFileImpl: kovaExecFile })
+    : circleMode ? createCircleSigner(env, { execFileImpl: circleExecFile }) : null;
+  // MCP keeps the public CLI mode; SDK guards treat a custom signer as steward. An overlay
+  // avoids enumerating unrelated environment values (including CLI credentials).
+  const config = readRuntimeConfig(cliMode
     ? Object.assign(Object.create(env), { SIGNER_MODE: SIGNER_MODES.steward })
     : env);
   const keystoreMode = config.signerMode === SIGNER_MODES.keystore;
   const dailyLimitSource = config.maxDailyAtomic !== null
     ? 'configured'
-    : keystoreMode ? 'default_keystore' : kovaMode ? 'default_kova' : 'disabled';
-  if (dailyLimitSource === 'default_keystore' || dailyLimitSource === 'default_kova') {
+    : keystoreMode ? 'default_keystore' : kovaMode ? 'default_kova' : circleMode ? 'default_circle' : 'disabled';
+  if (dailyLimitSource === 'default_keystore' || dailyLimitSource === 'default_kova' || dailyLimitSource === 'default_circle') {
     config.maxDailyAtomic = config.maxSessionAtomic;
   }
   const walletEnv = { HOME: env.HOME, OPENPAY_X402_HOME: env.OPENPAY_X402_HOME };
@@ -450,8 +455,8 @@ export function createToolRuntime({
     : Promise.resolve();
   const session = createPaymentSession();
   let sessionSigner = null;
-  if (kovaMode) {
-    sessionSigner = kovaSigner;
+  if (cliMode) {
+    sessionSigner = cliSigner;
   } else if (config.signerMode === SIGNER_MODES.steward) {
     sessionSigner = createSigner(env, { fetchImpl });
   }
@@ -484,12 +489,12 @@ export function createToolRuntime({
     discoveryUrl: config.discoveryUrl,
     fetchImpl,
   });
-  // 有効な日次上限 (keystore / kova の既定値を含む) があるときだけ永続ストアを用意する。
+  // 有効な日次上限 (keystore / CLI signer の既定値を含む) があるときだけ永続ストアを用意する。
   // env-key / steward の未設定時は null = 従来経路 (SDK 側で load すら走らない)。
   let dailySpendStore = spendStore ?? null;
   if (config.maxDailyAtomic !== null && dailySpendStore === null) {
     try {
-      dailySpendStore = createFileSpendStore(keystoreMode || kovaMode
+      dailySpendStore = createFileSpendStore(keystoreMode || cliMode
         ? { path: join(walletDirectory(walletEnv), 'spend.json') }
         : undefined);
     } catch (error) {
@@ -581,7 +586,8 @@ export function createToolRuntime({
     return serializeWallet(async () => {
       requireEmptyArgs(args);
       // Kova の policy は typed-data を制限しない (0.1.2 実測) — 上限は MCP 側。
-      if (!kovaMode && config.signerMode !== SIGNER_MODES.keystore && config.signerMode !== SIGNER_MODES.envKey) {
+      // Circle の typed-data policy 適用は未検証。Proof も同じ CLI / 署名検証を通す。
+      if (!cliMode && config.signerMode !== SIGNER_MODES.keystore && config.signerMode !== SIGNER_MODES.envKey) {
         return { ok: false, error: 'signer_mode_unsupported' };
       }
       await walletReady;
@@ -652,7 +658,7 @@ export function createToolRuntime({
       }
     }
     return {
-      signerMode: kovaMode ? 'kova' : config.signerMode,
+      signerMode: kovaMode ? 'kova' : circleMode ? 'circle' : config.signerMode,
       address,
       walletError: walletFailure?.code ?? null,
       walletErrorMessage: walletFailure?.message ?? null,
@@ -976,6 +982,16 @@ export function createToolRuntime({
       }
       if (kovaMode && error instanceof Error && error.message === 'kova_not_found') {
         return textResult({ ok: false, error: 'kova_not_found', message: 'Kova CLI が見つかりません' }, true);
+      }
+      if (circleMode && error instanceof Error) {
+        const messages = {
+          circle_not_found: 'Circle CLI が見つかりません',
+          circle_login_required: 'Circle CLI にログインしてください (circle wallet login <email> --type agent)',
+          circle_policy_denied: 'Circle の policy で拒否されました',
+        };
+        if (Object.hasOwn(messages, error.message)) {
+          return textResult({ ok: false, error: error.message, message: messages[error.message] }, true);
+        }
       }
       return textResult(
         { ok: false, error: errorMessage(error) },
