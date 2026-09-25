@@ -1,6 +1,7 @@
 // next.config.mjs の frame 保護ヘッダー方針のフェンス。
 // - /tip (ja/en) のみ iframe 埋め込み許可 (frame-ancestors *)
 // - それ以外の全ページは default-deny (frame-ancestors 'self' + X-Frame-Options SAMEORIGIN)
+// - C17: 資源制限の CSP は 2026-09-26 に本適用 (Report-Only → Content-Security-Policy・route ごとに frame-ancestors を同梱)
 // - 2 ルールは排他 (tip に X-Frame-Options が付くと CSP を見ない古い実装で埋め込みが壊れる)
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -25,9 +26,10 @@ describe('next.config.mjs headers() — frame 保護', () => {
     const rules = await loadRules();
     const tip = rules.find((r) => r.source.includes('tip/:path*'));
     expect(tip).toBeDefined();
-    expect(tip!.headers).toEqual([
-      { key: 'Content-Security-Policy', value: 'frame-ancestors *' },
-    ]);
+    expect(tip!.headers).toHaveLength(1);
+    expect(tip!.headers[0].key).toBe('Content-Security-Policy');
+    expect(tip!.headers[0].value).toMatch(/^default-src 'self'; .*; frame-ancestors \*$/);
+    expect(tip!.headers[0].value).not.toMatch(/frame-ancestors 'self'/);
   });
 
   it('default-deny ルール: tip 以外に frame-ancestors self + X-Frame-Options SAMEORIGIN', async () => {
@@ -35,7 +37,7 @@ describe('next.config.mjs headers() — frame 保護', () => {
     const deny = rules.find((r) => r.headers.some((h) => h.key === 'X-Frame-Options'));
     expect(deny).toBeDefined();
     expect(deny!.headers).toEqual([
-      { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
+      { key: 'Content-Security-Policy', value: expect.stringMatching(/^default-src 'self'; .*; frame-ancestors 'self'$/) },
       { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
     ]);
   });
@@ -79,9 +81,9 @@ async function baselineHeaders() {
   return new Map(baseline!.headers.map(({ key, value }) => [key, value]));
 }
 
-async function reportOnlyDirectives() {
-  const headers = await baselineHeaders();
-  const policy = headers.get('Content-Security-Policy-Report-Only');
+async function enforcedDirectives(path = '/ja/pay') {
+  const headers = await headersForPath(path);
+  const policy = headers.get('Content-Security-Policy');
   expect(policy).toBeDefined();
   return new Map(policy!.split(';').filter((part) => part.trim()).map((part) => {
     const [name, ...sources] = part.trim().split(/\s+/);
@@ -98,7 +100,7 @@ async function headersForPath(path: string) {
 
 afterEach(() => vi.unstubAllEnvs());
 
-describe('next.config.mjs headers() — baseline and report-only CSP (C17)', () => {
+describe('next.config.mjs headers() — baseline and enforced CSP (C17)', () => {
   it('sets nosniff and the default referrer policy', async () => {
     const headers = await baselineHeaders();
     expect(headers.get('X-Content-Type-Options')).toBe('nosniff');
@@ -113,10 +115,11 @@ describe('next.config.mjs headers() — baseline and report-only CSP (C17)', () 
       const headers = await headersForPath(path);
       expect(headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
       expect(headers.get('X-Content-Type-Options')).toBe('nosniff');
-      expect(headers.has('Content-Security-Policy-Report-Only')).toBe(true);
-      expect(headers.get('Content-Security-Policy')).toBe(
-        path === '/en/tip/0xabc' ? 'frame-ancestors *' : "frame-ancestors 'self'",
+      expect(headers.has('Content-Security-Policy-Report-Only')).toBe(false);
+      expect(headers.get('Content-Security-Policy')).toMatch(
+        path === '/en/tip/0xabc' ? /; frame-ancestors \*$/ : /; frame-ancestors 'self'$/,
       );
+      expect(headers.get('Content-Security-Policy')).toMatch(/^default-src 'self'; script-src /);
       expect(headers.get('X-Frame-Options')).toBe(path === '/en/tip/0xabc' ? undefined : 'SAMEORIGIN');
     }
   });
@@ -128,40 +131,44 @@ describe('next.config.mjs headers() — baseline and report-only CSP (C17)', () 
     );
   });
 
-  it('adds only report-only resource restrictions, leaving enforced framing and platform HSTS alone', async () => {
+  it('keeps the resource policy on the route rules (with frame-ancestors), not on the baseline, and leaves platform HSTS alone', async () => {
     const headers = await baselineHeaders();
     expect(headers.has('Content-Security-Policy')).toBe(false);
+    expect(headers.has('Content-Security-Policy-Report-Only')).toBe(false);
     expect(headers.has('X-Frame-Options')).toBe(false);
     expect(headers.has('Strict-Transport-Security')).toBe(false);
-    const csp = await reportOnlyDirectives();
+    const csp = await enforcedDirectives();
     expect(csp.get('default-src')).toEqual(["'self'"]);
     expect(csp.get('object-src')).toEqual(["'none'"]);
     expect(csp.get('base-uri')).toEqual(["'self'"]);
     expect(csp.get('form-action')).toEqual(["'self'"]);
-    expect(csp.has('frame-ancestors')).toBe(false);
+    expect(csp.get('frame-ancestors')).toEqual(["'self'"]);
+    expect((await enforcedDirectives('/en/tip/0xabc')).get('frame-ancestors')).toEqual(['*']);
     expect(csp.has('report-uri')).toBe(false);
     expect(csp.has('report-to')).toBe(false);
   });
 
   it('allows Next inline RSC scripts but no external script hosts or eval in production', async () => {
     vi.stubEnv('NODE_ENV', 'production');
-    const csp = await reportOnlyDirectives();
+    const csp = await enforcedDirectives();
     // Next App Router inlines RSC payload scripts on every page; without per-request nonces
     // they must be allowed or every page reports (Lighthouse inspector-issues, PR #577).
-    expect(csp.get('script-src')).toEqual(["'self'", "'unsafe-inline'"]);
+    // Cloudflare Web Analytics の beacon (edge 挿入) だけを外部 script として許可 (2026-09-24 観測)。
+    expect(csp.get('script-src')).toEqual(["'self'", "'unsafe-inline'", 'https://static.cloudflareinsights.com']);
     expect(csp.get('script-src-attr')).toEqual(["'none'"]);
+    expect(csp.get('connect-src')).toContain('https://cloudflareinsights.com');
   });
 
   it('allows Next dev eval and the Vercel debug script only in development', async () => {
     vi.stubEnv('NODE_ENV', 'development');
-    const csp = await reportOnlyDirectives();
+    const csp = await enforcedDirectives();
     expect(csp.get('script-src')).toEqual([
-      "'self'", "'unsafe-inline'", "'unsafe-eval'", 'https://va.vercel-scripts.com',
+      "'self'", "'unsafe-inline'", 'https://static.cloudflareinsights.com', "'unsafe-eval'", 'https://va.vercel-scripts.com',
     ]);
   });
 
   it('covers every configured viem default RPC plus local chain definitions and Ethereum fallbacks', async () => {
-    const csp = await reportOnlyDirectives();
+    const csp = await enforcedDirectives();
     const source = readFileSync('lib/chains.ts', 'utf8');
     const imported = source.match(/import \{([\s\S]*?)\} from 'viem\/chains'/)![1];
     for (const name of imported.split(',').map((part) => part.trim().split(' as ')[0]).filter(Boolean)) {
@@ -180,7 +187,7 @@ describe('next.config.mjs headers() — baseline and report-only CSP (C17)', () 
   });
 
   it('covers wallet connections, Pimlico and both Circle environments without broad connect wildcards', async () => {
-    const csp = await reportOnlyDirectives();
+    const csp = await enforcedDirectives();
     const connect = csp.get('connect-src');
     for (const origin of [
       'wss://relay.walletconnect.org', 'https://rpc.walletconnect.org',
@@ -197,7 +204,7 @@ describe('next.config.mjs headers() — baseline and report-only CSP (C17)', () 
   });
 
   it('allows every rebuilt handle iframe origin and WalletConnect verification frames', async () => {
-    const csp = await reportOnlyDirectives();
+    const csp = await enforcedDirectives();
     // facade + lib/handle/ 配下の全ファイル (iframe builder が別モジュールへ移っても取りこぼさない)。
     const handleFiles = ['lib/handle.ts', ...readdirSync('lib/handle', { recursive: true, encoding: 'utf8' })
       .filter((file) => /\.tsx?$/.test(file))
@@ -210,19 +217,20 @@ describe('next.config.mjs headers() — baseline and report-only CSP (C17)', () 
     }
   });
 
-  it('supports third-party HTTPS images, QR blob workers and self-hosted Google Fonts', async () => {
-    const csp = await reportOnlyDirectives();
+  it('supports third-party HTTPS images, QR blob workers, self-hosted fonts plus the WalletConnect modal Google Fonts', async () => {
+    const csp = await enforcedDirectives();
     expect(csp.get('img-src')).toEqual(["'self'", 'https:', 'data:', 'blob:']);
     expect(csp.get('worker-src')).toEqual(["'self'", 'blob:']);
-    expect(csp.get('font-src')).toEqual(["'self'"]);
-    expect(csp.get('style-src')).toEqual(["'self'", "'unsafe-inline'"]);
+    // WalletConnect (Reown) modal が Google Fonts を読む (2026-09-24 観測)。それ以外の外部 style/font は不可。
+    expect(csp.get('font-src')).toEqual(["'self'", 'https://fonts.gstatic.com']);
+    expect(csp.get('style-src')).toEqual(["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com']);
   });
 
   it('adds only origins from public RPC/DSN settings, never credentials, paths or query tokens', async () => {
     vi.stubEnv('NEXT_PUBLIC_BASE_RPC_URL', 'https://user:secret@rpc.example.test/v2/key?token=private#fragment');
     vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://public-key@o123.ingest.us.sentry.io/456');
     vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://server-only.example.test');
-    const connect = (await reportOnlyDirectives()).get('connect-src')!;
+    const connect = (await enforcedDirectives()).get('connect-src')!;
     expect(connect).toContain('https://rpc.example.test');
     expect(connect).toContain('https://o123.ingest.us.sentry.io');
     expect(connect.join(' ')).not.toMatch(/secret|private|public-key|server-only|fragment|\/v2\/|\/456/);
@@ -231,7 +239,7 @@ describe('next.config.mjs headers() — baseline and report-only CSP (C17)', () 
   it('accepts underscores in configured host origins without exposing URL credentials or tokens', async () => {
     vi.stubEnv('NEXT_PUBLIC_BASE_RPC_URL', 'https://user:secret@rpc_primary.example.test:8545/v2/key?token=private');
     vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://public-key@o_123.ingest.sentry.io/456');
-    const connect = (await reportOnlyDirectives()).get('connect-src')!;
+    const connect = (await enforcedDirectives()).get('connect-src')!;
     expect(connect).toContain('https://rpc_primary.example.test:8545');
     expect(connect).toContain('https://o_123.ingest.sentry.io');
     expect(connect.join(' ')).not.toMatch(/user:|secret|private|public-key|\/v2\/|\/456/);
@@ -241,7 +249,7 @@ describe('next.config.mjs headers() — baseline and report-only CSP (C17)', () 
     vi.stubEnv('NEXT_PUBLIC_BASE_RPC_URL', 'not a URL');
     vi.stubEnv('NEXT_PUBLIC_POLYGON_RPC_URL', 'https://rpc.example;script-src');
     vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'data:text/plain,hello');
-    const csp = await reportOnlyDirectives();
+    const csp = await enforcedDirectives();
     expect(csp.get('connect-src')!.join(' ')).not.toMatch(/not a URL|script-src|data:/);
   });
 });
