@@ -10,7 +10,7 @@ import { renderWithIntl } from '../_helpers/i18n';
 // 分割する: 全 DOM の hash (サインイン前後・節の並び・編集中)・コピー済み表示と展開状態の共有・
 // 認証/アカウント切替を跨ぐ下書きと進行中の mutation・owned/公開カタログ両方の invalidate を固定する。
 // B-R10c: 下書きの破棄と古い mutation の UI 反映抑止・送信元だけの owned 無効化は意図して変更。
-// DOM hash は R10a の値を保つ。
+// R10b: owner 一覧・フォームは findBy で dynamic 読み込み後の描画を待ち、DOM hash は R10a の値を保つ。
 
 const auth = vi.hoisted(() => ({
   address: undefined as string | undefined,
@@ -82,6 +82,10 @@ function mount(locale: 'ja' | 'en' = 'ja', overrides: Partial<ComponentProps<typ
   );
   const view = renderWithIntl(tree(), { locale });
   return { ...view, qc, refresh: () => view.rerender(tree()) };
+}
+async function ownerReady(title = 'Owned fixture') {
+  // 一覧とフォームは別 chunk なので、片方の到着だけでは DOM pin / 操作を始めない。
+  await Promise.all([screen.findByText(title), screen.findByPlaceholderText(URL_PLACEHOLDER)]);
 }
 function catalogCard() {
   return screen.getByText('Catalog fixture').closest('li')!;
@@ -156,8 +160,8 @@ describe('R10a pre-extraction pinning', () => {
     const connected = hashDom(view.container);
     owner();
     view.refresh();
-    await screen.findByText('Owned fixture');
-    const registration = screen.getByPlaceholderText(URL_PLACEHOLDER).closest('section')!;
+    await ownerReady();
+    const registration = (await screen.findByPlaceholderText(URL_PLACEHOLDER)).closest('section')!;
     await waitFor(() => expect(registration.querySelector('details')).not.toHaveAttribute('open'));
     const signedIn = hashDom(view.container);
     fireEvent.click(within(screen.getByText('Owned fixture').closest('li')!).getByRole('button', { name: locale === 'ja' ? '編集' : 'Edit' }));
@@ -304,7 +308,7 @@ describe('R10a pre-extraction pinning', () => {
     auth.signingIn = false;
     owner();
     view.refresh();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     await act(async () => clipboard.resolve());
     expect(screen.getByRole('searchbox')).toHaveValue('Catalog');
     expect(within(catalogCard()).getByRole('button', { name: '閉じる' })).toHaveAttribute('aria-expanded', 'true');
@@ -329,6 +333,7 @@ describe('R10a pre-extraction pinning', () => {
       return auth.address === ADDRESS_B ? pendingB.promise : reply({ resources: [OWNED] });
     }));
     const view = mount();
+    await screen.findByPlaceholderText(URL_PLACEHOLDER);
     fireEvent.click(await screen.findByRole('button', { name: '編集' }));
     fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/draft' } });
     fireEvent.click(within(screen.getByText('Owned fixture').closest('li')!).getByRole('button', { name: '続きを読む' }));
@@ -348,7 +353,7 @@ describe('R10a pre-extraction pinning', () => {
     }
     owner();
     view.refresh();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('');
     expect(screen.queryByRole('button', { name: '更新する' })).not.toBeInTheDocument();
     for (const input of registrationSection().querySelectorAll('input:not([type="checkbox"])')) {
@@ -393,7 +398,7 @@ describe('R10a pre-extraction pinning', () => {
     });
     vi.stubGlobal('fetch', fetchFn);
     const view = mount();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     if (method === 'POST') {
       fireEvent.click(screen.getByText('新しい API を出品する'));
       fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/new' } });
@@ -484,6 +489,7 @@ describe('R10a pre-extraction pinning', () => {
     owner();
     view.refresh();
     await waitFor(() => expect(view.qc.getQueryState(['x402', 'owned', ADDRESS_A])?.status).toBe('success'));
+    await screen.findByPlaceholderText(URL_PLACEHOLDER);
     dom.ownerEmpty = hashDom(view.container);
     fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/new' } });
     fireEvent.click(screen.getByRole('checkbox', { name: 'USDC (Base) でも販売する — x402 Bazaar に掲載' }));
@@ -664,7 +670,7 @@ describe('R10a pre-extraction pinning', () => {
     openAndFocus(signedOut);
     owner();
     view.refresh();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     const signedIn = nodes();
     expectRemountedAround(signedOut, signedIn);
     openAndFocus(signedIn);
@@ -684,11 +690,11 @@ describe('R10a pre-extraction pinning', () => {
     mount();
     await screen.findByText('Catalog fixture');
     const section = registrationSection();
-    const urlInput = screen.getByPlaceholderText(URL_PLACEHOLDER);
+    const urlInput = await screen.findByPlaceholderText(URL_PLACEHOLDER);
     expect(urlInput.closest('details')).toBeNull();
     urlInput.focus();
     await act(async () => pendingOwned.resolve(reply({ resources: [OWNED] })));
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     expect(registrationSection()).toBe(section);
     const folded = screen.getByPlaceholderText(URL_PLACEHOLDER);
     expect(folded).not.toBe(urlInput);
@@ -721,7 +727,7 @@ describe('R10a pre-extraction pinning', () => {
   it('registers and fetches the public catalog query before the owned query on a signed-in cold mount', async () => {
     owner();
     const view = mount();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     expect(view.qc.getQueryCache().getAll().map((query) => query.queryKey)).toEqual([
       ['x402', 'discovery'], ['x402', 'owned', ADDRESS_A],
     ]);
@@ -785,7 +791,7 @@ describe('B-R10c owner mutation regressions', () => {
       });
       vi.stubGlobal('fetch', fetchFn);
       const view = mount();
-      await screen.findByText('Owned fixture');
+      await ownerReady();
       startMutation(method);
       await waitFor(() => expect(fetchFn.mock.calls.some(([, init]) => init?.method === method)).toBe(true));
       if (transition === 'wallet switch') owner(ADDRESS_B);
@@ -796,7 +802,7 @@ describe('B-R10c owner mutation regressions', () => {
         owner();
         view.refresh();
       }
-      await screen.findByText(transition === 'wallet switch' ? 'Other account fixture' : 'Owned fixture');
+      await ownerReady(transition === 'wallet switch' ? 'Other account fixture' : 'Owned fixture');
       await waitFor(() => expect(view.qc.isFetching()).toBe(0));
       fireEvent.click(screen.getByRole('button', { name: '編集' }));
       fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/current-draft' } });
@@ -838,7 +844,7 @@ describe('B-R10c owner mutation regressions', () => {
       return reply(url === '/api/discovery' ? { items: [ITEM] } : { resources: [OWNED] });
     }));
     const view = mount();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     const invalidate = vi.spyOn(view.qc, 'invalidateQueries');
     startMutation('DELETE');
     expect(await screen.findByText('操作に失敗しました (error)。')).toBeVisible();
@@ -862,7 +868,7 @@ describe('B-R10c owner mutation regressions', () => {
         return reply({ resources: auth.address === ADDRESS_A ? [OWNED] : [OTHER] });
       }));
       const view = mount();
-      await screen.findByText('Owned fixture');
+      await ownerReady();
       startMutation(method, true);
       const success = method === 'POST' ? '登録しました。' : method === 'PATCH' ? '更新しました。' : '削除しました。';
       expect(await screen.findByText(success)).toBeVisible();
@@ -879,7 +885,7 @@ describe('B-R10c owner mutation regressions', () => {
       expect(screen.queryByText(/^USDC で販売するには、サーバーのゲートを/)).not.toBeInTheDocument();
       owner();
       view.refresh();
-      await screen.findByText('Owned fixture');
+      await ownerReady();
       expect(screen.queryByText(success)).not.toBeInTheDocument();
       expect(screen.queryByText('completed A gate')).not.toBeInTheDocument();
       expect(screen.queryByText(/^USDC で販売するには、サーバーのゲートを/)).not.toBeInTheDocument();
@@ -891,7 +897,7 @@ describe('B-R10c owner mutation regressions', () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => reply(url === '/api/discovery'
       ? { items: [ITEM] } : { resources: auth.address === ADDRESS_A ? [OWNED] : [OTHER] })));
     const view = mount();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     fireEvent.click(screen.getByText('新しい API を出品する'));
     fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/unsubmitted' } });
     fireEvent.click(screen.getByRole('checkbox', { name: '正当な権利と支払い制限を確認しました' }));
@@ -907,7 +913,7 @@ describe('B-R10c owner mutation regressions', () => {
     }
     owner();
     view.refresh();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('');
     expect(screen.getByRole('checkbox', { name: '正当な権利と支払い制限を確認しました' })).not.toBeChecked();
     expect(screen.getByRole('button', { name: '登録する' })).toBeDisabled();
@@ -917,6 +923,7 @@ describe('B-R10c owner mutation regressions', () => {
   it('keeps the edit draft through wallet lock and unlock with the same SIWE session', async () => {
     owner();
     const view = mount();
+    await screen.findByPlaceholderText(URL_PLACEHOLDER);
     fireEvent.click(await screen.findByRole('button', { name: '編集' }));
     fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/locked-draft' } });
     Object.assign(auth, { address: undefined, connected: false, signedIn: false });
@@ -925,7 +932,7 @@ describe('B-R10c owner mutation regressions', () => {
     expect(screen.queryByPlaceholderText(URL_PLACEHOLDER)).not.toBeInTheDocument();
     owner();
     view.refresh();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('https://example.com/locked-draft');
     expect(screen.getByRole('button', { name: '更新する' })).toBeVisible();
     expect(screen.getByRole('checkbox', { name: 'USDC (Base) でも販売する — x402 Bazaar に掲載' })).toBeChecked();
@@ -934,6 +941,7 @@ describe('B-R10c owner mutation regressions', () => {
   it.each([ADDRESS_A, ADDRESS_B])('clears the draft when reconnecting %s without a matching SIWE session', async (address) => {
     owner();
     const view = mount();
+    await screen.findByPlaceholderText(URL_PLACEHOLDER);
     fireEvent.click(await screen.findByRole('button', { name: '編集' }));
     fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/signed-out-draft' } });
     Object.assign(auth, { address: undefined, connected: false, signedIn: false });
@@ -944,7 +952,7 @@ describe('B-R10c owner mutation regressions', () => {
     expect(screen.getByRole('button', { name: 'ウォレットでサインイン' })).toBeInTheDocument();
     owner();
     view.refresh();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     expect(screen.getByPlaceholderText(URL_PLACEHOLDER)).toHaveValue('');
     expect(screen.queryByRole('button', { name: '更新する' })).not.toBeInTheDocument();
   });
@@ -961,7 +969,7 @@ describe('B-R10c owner mutation regressions', () => {
     });
     vi.stubGlobal('fetch', fetchFn);
     const view = mount();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     startMutation(method, true);
     await waitFor(() => expect(fetchFn.mock.calls.some(([, init]) => init?.method === method)).toBe(true));
     Object.assign(auth, { address: undefined, connected: false, signedIn: false });
@@ -1006,7 +1014,7 @@ describe('B-R10c owner mutation regressions', () => {
     });
     vi.stubGlobal('fetch', fetchFn);
     const view = mount();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     startMutation('POST', true);
     await waitFor(() => expect(fetchFn.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true));
     owner(ADDRESS_B);
@@ -1014,7 +1022,7 @@ describe('B-R10c owner mutation regressions', () => {
     await screen.findByText('Other account fixture');
     owner();
     view.refresh();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     await waitFor(() => expect(view.qc.isFetching()).toBe(0));
     fireEvent.click(screen.getByText('新しい API を出品する'));
     fireEvent.change(screen.getByPlaceholderText(URL_PLACEHOLDER), { target: { value: 'https://example.com/next-draft' } });
@@ -1053,7 +1061,7 @@ describe('B-R10c owner mutation regressions', () => {
     });
     vi.stubGlobal('fetch', fetchFn);
     const view = mount();
-    await screen.findByText('Owned fixture');
+    await ownerReady();
     if (method === 'PATCH') fireEvent.click(screen.getByRole('button', { name: '編集' }));
     else {
       fireEvent.click(screen.getByText('新しい API を出品する'));
