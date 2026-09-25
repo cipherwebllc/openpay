@@ -295,6 +295,7 @@ const ja: AgentPageContent = {
       '専用の Agent Wallet には、使ってよい金額だけを入れてください。残高が実質的な上限になります。',
       'このページに秘密鍵の入力欄はありません。鍵を求める OpenPay の画面があれば偽物です。',
       'ウォレットの鍵は、Agent を動かすあなたのマシン上で MCP が作って保管します。会話にも OpenPay にも出ません。ただし、あなたとしてコマンドを実行できるものはこの鍵を読めます。入れるのは失ってもよい少額だけにしてください。OpenPay は鍵を復元できません。',
+      'どこで動かすかで選べる方式が変わります。PC のローカルで動く Claude Code / Codex なら Local Wallet・Kova・Steward のどれでも使えます。スマホの Claude アプリの Code やブラウザ版 Claude Code はクラウド上の使い捨て環境で動くため、そこに Local Wallet を作ると鍵ごと消えます (JPYC を入れないでください)。Kova もその環境に CLI と資格情報が必要なので使えません。スマホやブラウザからは「人が支払う」(決済リンクを自分のウォレットで承認) を選ぶか、Agent に支払わせたい場合は Steward を使ってください。',
     ],
   },
   generator: {
@@ -560,6 +561,7 @@ const en: AgentPageContent = {
       'Fund the dedicated agent wallet only with what you are willing to spend. Its balance is the effective ceiling.',
       'This page has no private-key field. Any OpenPay screen asking for a key is fake.',
       'The wallet key is created and kept by the MCP on your own machine, where your agent runs. It never enters the chat or reaches OpenPay. Anything that can run commands as you can still read it, so fund it only with a small amount you can afford to lose. OpenPay cannot recover the key.',
+      "Where the agent runs decides which mode you can use. Claude Code or Codex on your own PC can use the Local Wallet, Kova, or Steward. The Claude mobile app's Code tab and Claude Code on the web run in a disposable cloud environment: a Local Wallet created there disappears with its key (do not fund it), and Kova needs its CLI and credentials on the same machine, so it does not work there either. From a phone or browser, choose Human pays (approve the payment link in your own wallet), or use Steward if the agent must pay.",
     ],
   },
   generator: {

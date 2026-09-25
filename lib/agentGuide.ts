@@ -79,6 +79,7 @@ export type AgentGuideContent = {
   readonly setupTitle: string;
   readonly setupIntro: string;
   readonly setupSteps: readonly GuideStep[];
+  readonly setupEnvironmentNote: string;
   readonly configLabel: string;
   readonly configCode: string;
   readonly configNote: string;
@@ -176,6 +177,8 @@ const ja: AgentGuideContent = {
       body: '店名を伝えてお店を探すよう頼めば、AI が find_shops で店舗ハンドルを見つけ、order_menu でメニューを読み込みます（鍵は不要です）。',
     },
   ],
+  setupEnvironmentNote:
+    'PC のローカルで動く Claude Code / Codex なら Local Wallet・Kova・Steward が使えます。スマホの Claude アプリの Code やブラウザ版 Claude Code は使い捨てのクラウド環境のため、Local Wallet は鍵ごと消えます（JPYC を入れないでください）。Kova も同じ環境に CLI と資格情報が必要で使えません。「人が支払う」（openpay-order-mcp）は鍵不要でどこでも使えますが、登録はセッションごとに消えることがあります。クラウドから Agent に支払わせるなら、自分のサーバで署名する Steward を使ってください。',
   configLabel: '設定例（支払い用の鍵は不要）',
   configCode: MCP_CONFIG_JSON,
   configNote:
@@ -343,6 +346,8 @@ const en: AgentGuideContent = {
       body: 'Ask the AI to find a shop by name. It uses find_shops to get the handle, then order_menu to read the menu (no key needed).',
     },
   ],
+  setupEnvironmentNote:
+    "Claude Code or Codex on your PC can use Local Wallet, Kova, or Steward. The Claude mobile app's Code tab and Claude Code on the web use disposable cloud environments: a Local Wallet disappears with its key (do not fund it), and Kova cannot run without its CLI and credentials on the same machine. Human pays (openpay-order-mcp) needs no key and works anywhere, but registration may disappear between sessions. For agent payments from the cloud, use Steward, which signs on your own server.",
   configLabel: 'Example config (no payment key needed)',
   configCode: MCP_CONFIG_JSON,
   configNote:

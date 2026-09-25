@@ -25,6 +25,14 @@ Both ship in one npm package, `openpay-x402-mcp` (Node.js 20 or newer). The comm
 
 For **Human pays**, do Step 3 with the `openpay-order` server and no env, then skip to Step 4a. There is nothing to fund and no limit to set, because you never touch a wallet.
 
+### Where this session runs
+
+If this session runs in a cloud sandbox (the Claude mobile app's Code tab, Claude Code on the web, or any environment that is recreated per session), **do not create a Local Wallet (`wallet_init`) and do not use Kova**; choose **Human pays**, or **Steward** if the person already runs one. Tell the person why in one sentence: the wallet key would live in a disposable environment and disappear with it, so do not fund it.
+
+The stdio MCP runs inside that environment: Local Wallet stores `wallet.json` there, and Kova needs its CLI and credentials on the same machine as the MCP. Steward signs on the person's own Steward server, so it works from a cloud sandbox; use their existing Steward configuration instead of the Local Wallet registration and initialization steps below. Human pays (`openpay-order-mcp`) needs no key and works anywhere, but its MCP registration may disappear between sessions.
+
+On a local machine (Claude Code or Codex on the person's PC), Local Wallet, Kova, or Steward can be used. Clues for a cloud sandbox include a non-persistent `$HOME`, `~/.claude` or `~/.openpay-x402` being empty every session, and cloud-sandbox markers in environment-variable names or `uname -a`. These are clues, not proof: if you cannot tell whether this environment persists, ask the person before choosing a signer or creating a wallet.
+
 ## Step 2: Agree the limits (Agent pays)
 
 Ask the person for these amounts; do not pick them yourself. Defaults are what the MCP uses when a variable is unset.

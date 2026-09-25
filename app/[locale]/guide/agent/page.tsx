@@ -116,6 +116,9 @@ export default async function GuideAgentPage({
             steps={c.setupSteps}
             badgeClassName="bg-emerald-100 text-emerald-700"
           />
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">
+            {c.setupEnvironmentNote}
+          </p>
           <CodeBlock label={c.configLabel} code={c.configCode} />
           <p className="mt-3 text-xs leading-relaxed text-slate-500">
             {c.configNote}
