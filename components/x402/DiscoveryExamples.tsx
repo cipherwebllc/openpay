@@ -20,7 +20,7 @@ const MCP_CONFIG_SNIPPET = JSON.stringify(
     mcpServers: {
       'openpay-x402': {
         command: 'npx',
-        args: ['-y', 'openpay-x402-mcp@0.17'],
+        args: ['-y', 'openpay-x402-mcp@0.18'],
         env: { SIGNER_MODE: 'keystore' },
       },
     },

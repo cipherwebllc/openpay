@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { agentPageContentFor, agentPageMetadata } from '@/lib/agentPage';
 import { JPYC_SERVICES_RESOURCE } from '@/lib/directory/paidResources';
 import { DISCLOSED_X402_FEE } from '@/lib/legal';
+import jaMessages from '@/messages/ja.json';
+import enMessages from '@/messages/en.json';
 
 function shape(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(shape);
@@ -13,6 +15,13 @@ function shape(value: unknown): unknown {
 }
 
 describe('agent page content', () => {
+  it.each([
+    ['ja', jaMessages.AgentConfigGenerator.policyNote, '制限しません'],
+    ['en', enMessages.AgentConfigGenerator.policyNote, 'does not limit'],
+  ])('retains the measured Kova policy limitation in the %s generator namespace', (_locale, policyNote, limitation) => {
+    expect(policyNote).toContain('0.1.2');
+    expect(policyNote).toContain(limitation);
+  });
   it('has matching ja/en key structures', () => {
     expect(shape(agentPageContentFor('ja'))).toEqual(shape(agentPageContentFor('en')));
   });

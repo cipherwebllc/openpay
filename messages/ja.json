@@ -1,4 +1,24 @@
 {
+  "AgentConfigGenerator": {
+    "modeOptions": {
+      "human-pays": "人が支払う (自分で承認)",
+      "agent-pays": "Agent が支払う (ローカル wallet)",
+      "agent-pays-kova": "Agent が支払う (Kova・第三者)"
+    },
+    "kovaWallet": {
+      "label": "Kova の wallet 名",
+      "hint": "半角英数字と . _ - のみ・必須"
+    },
+    "kovaAgentAddress": {
+      "label": "Kova の公開 EVM アドレス",
+      "hint": "Kova の wallet アドレスは kova wallet info で確認してください。秘密鍵は貼らないでください。"
+    },
+    "providerNote": "Kova (Komlock lab) は第三者の Execution Provider です。OpenPay は Kova の鍵や資格情報を受け取りません。",
+    "policyNote": "Kova の policy はこの支払い経路の金額を制限しません (Kova 0.1.2 実測)。金額の上限として効くのは、この MCP の設定 (上の上限 3 つ) だけです。",
+    "balanceNote": "失ってもよい少額だけを入れてください。",
+    "setupNote": "Kova CLI を別途導入し、PATH に通してください。macOS/Linux のみ対応しています (Windows 非対応)。host 再起動後に wallet_status で signerMode: kova を確認してください。wallet_init は不要です。",
+    "fundingNote": "入金先は入力した公開アドレスと同じです。Polygon の JPYC を送ってください。OpenPay の x402 支払いに POL は不要です。"
+  },
   "CrossChainForwardPendingPanel": {
     "title": "前回の Arc 支払いを確認",
     "scanning": "保存済みの支払いを確認しています。",
