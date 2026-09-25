@@ -18,7 +18,7 @@ vi.mock('@/lib/kv', () => ({
   kvEval: async (script: string, keys: string[], args: string[]) => {
     h.calls.push({ script, keys, args });
     if (h.failBefore) { h.failBefore = false; return { ok: false, reason: 'network_error' }; }
-    const forced = h.evalOverride?.(script, keys, args); if (forced !== undefined) return { ok: true, value: forced };
+    const forced = await h.evalOverride?.(script, keys, args); if (forced !== undefined) return { ok: true, value: forced };
     const value = await runRedisLua(script, keys, args, h.store!);
     if (h.failAfter) { h.failAfter = false; return { ok: false, reason: 'network_error' }; }
     return { ok: true, value };
@@ -29,7 +29,7 @@ vi.mock('@/lib/x402/hostedStore', () => ({ hostedContentKey: (id: string, revisi
 vi.mock('@/lib/x402/facilitatorSettle', () => ({ parseFacilitatorRequest: vi.fn() }));
 vi.mock('@/lib/x402/paymentRedelivery', () => ({ paymentRedeliveryIdentity: vi.fn() }));
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
-import { createQuotedPurchaseIntent, claimSignedPurchaseIntent, claimPurchaseSettlement, finalizeHostedPurchase, readSettledPurchaseAccess, hostedPurchaseRecordKey, purchaseOwnershipKey, purchaseLibraryKey, getPurchaseIntent, markPurchaseFailedPrebroadcast, markPurchaseIndeterminate, reconcilePurchaseIntent, purchaseIntentKey, purchasePendingIndexKey, parsePurchaseIntent, type PurchaseAuthorizationClaim, type PurchaseIntent } from '@/lib/x402/purchaseIntent';
+import { createQuotedPurchaseIntent, claimSignedPurchaseIntent, claimPurchaseSettlement, finalizeHostedPurchase, readSettledPurchaseAccess, hostedPurchaseRecordKey, purchaseOwnershipKey, purchaseLibraryKey, getPurchaseIntent, markPurchaseFailedPrebroadcast, markPurchaseIndeterminate, reconcilePurchaseIntent, reconcilePendingPurchases, purchaseIntentKey, purchasePendingIndexKey, parsePurchaseIntent, type PurchaseAuthorizationClaim, type PurchaseIntent } from '@/lib/x402/purchaseIntent';
 import { createLicenseDefinition } from '@/lib/license/definition';
 import { LICENSE_DUE_INDEX, LICENSE_HOLD_INDEX, LICENSE_OBLIGATION_INDEX, licenseStockKey, licenseReservationKey, licenseQuotaKey, licenseObligationKey } from '@/lib/license/stock';
 import { repairLicenseIndexes } from '@/lib/license/repair';
@@ -206,7 +206,7 @@ describe('license recovery boundaries', () => {
 // R3c で追加 (分割前のコード 1126ea30 で採取): records / library / finalize を lib/x402/purchase/* に移す前に、
 // license 商品の settled access 読み取りと、finalize の license 固有の分岐を facade 経由で固定する。
 //   - access 読み取りは license でも保存値そのもの (flag OFF でも読める)・finalize は flag OFF で EVAL せず not_found
-//   - FINALIZE の -1/-3 で raced access が同じ txHash を示しても license は idempotent にしない (digital との差)
+//   - settled の再実行で FINALIZE が -1/-3 なら、正常な access でも license の修復失敗を隠さない
 describe('R3c pins: license settled access and license-only finalize branches', () => {
   const isFinalize = (args: string[]) => { try { return JSON.parse(args.at(-1)!).hook === 'finalize'; } catch { return false; } };
   const finalizeCalls = () => h.calls.filter((call) => isFinalize(call.args)).length;
@@ -255,12 +255,12 @@ describe('R3c pins: license settled access and license-only finalize branches', 
     expect(await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX })).toMatchObject({ ok: true, kind: 'idempotent' });
     expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
   });
-  // 現状の挙動の固定 (分割では変えない): 同時 finalize の敗者は license では raced access を使わないため
-  // corrupt を返す (digital は idempotent)。勝者の 1 件だけが売上になり、再実行は idempotent に収束する。
-  it('concurrent double finalize of one license intent: one finalized, the loser corrupt, one sale; a replay is idempotent', async () => {
+  // B-R3e: 同時 finalize の敗者も検証済み access から idempotent を返す。
+  // 勝者の 1 件だけが売上になり、再実行も idempotent に収束する。
+  it('concurrent double finalize of one license intent: one finalized, the loser idempotent, one sale; a replay is idempotent', async () => {
     const input = await quote(); await settling(input);
     const results = await Promise.all([0, 1].map(() => finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX, settledAt: NOW + 2000 })));
-    expect(results.map((result) => result.ok ? result.kind : result.reason).sort()).toEqual(['corrupt', 'finalized']);
+    expect(results.map((result) => result.ok ? result.kind : result.reason).sort()).toEqual(['finalized', 'idempotent']);
     expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
     expect(await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX })).toMatchObject({ ok: true, kind: 'idempotent' });
     expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
@@ -310,5 +310,139 @@ describe('R3d pins: license reconcile dispatch on real Lua', () => {
     expect(await reconcilePurchaseIntent(input.intentSalt, { now: NOW + 700_000, licenseChain: rpc })).toEqual({ ok: true, state: 'pending' });
     expect(h.calls).toEqual([]); expect(rpc.observe).not.toHaveBeenCalled();
     expect({ strings: [...h.store!.strings.entries()], pending: [...(h.store!.zsets.get(purchasePendingIndexKey()) ?? new Map()).entries()] }).toEqual(before);
+  });
+});
+
+describe('B-R3e: concurrent license finalization', () => {
+  const isFinalize = (args: string[]) => {
+    try { return JSON.parse(args.at(-1)!).hook === 'finalize'; } catch { return false; }
+  };
+
+  it.each([
+    ['settling', 0], ['settling', 1000], ['indeterminate', 0], ['indeterminate', 1000],
+  ] as const)('returns identical purchase data from %s with a %i ms timestamp difference and writes each record once', async (state, delay) => {
+    const input = await quote();
+    const intent = await settling(input);
+    if (state === 'indeterminate') {
+      expect(await markPurchaseIndeterminate({ intentSalt: input.intentSalt, attemptId: intent.attemptId, txHash: TX, now: NOW + 1500 })).toBe('updated');
+    }
+    const paymentKey = computeLicensePaymentKey({ paymentChainId: 80002n, paymentToken: input.claim.token, payer: input.claim.payer, authorizationNonce: input.claim.nonce });
+    const writes = vi.spyOn(h.store!.strings, 'set');
+    const indexWrites = vi.spyOn(h.store!.zsets, 'set');
+    h.calls = [];
+
+    const [winner, loser] = await Promise.all([0, delay].map((offset) => finalizeHostedPurchase({
+      intentSalt: input.intentSalt, txHash: TX, settledAt: NOW + 2000 + offset,
+    })));
+
+    expect(winner).toMatchObject({ ok: true, kind: 'finalized', intent: { state: 'settled', txHash: TX, settledAt: NOW + 2000 } });
+    expect(loser).toEqual({ ...winner, kind: 'idempotent' });
+    // Both finalizers read the same pre-commit intent and empty ownership/record.
+    // The second EVAL loses the CAS; only the first EVAL flushes its buffered writes.
+    const calls = h.calls.filter((call) => isFinalize(call.args));
+    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => JSON.parse(call.args[8]!).state)).toEqual([state, state]);
+    expect(calls[0]!.args[8]).toBe(calls[1]!.args[8]);
+    expect(calls.map((call) => call.args.slice(24, 26))).toEqual([['', ''], ['', '']]);
+    expect(writes.mock.calls.map(([key]) => key).sort()).toEqual([
+      purchaseIntentKey(input.intentSalt), purchaseOwnershipKey(input.claim.payer, ID),
+      hostedPurchaseRecordKey(80002, TX), licenseReservationKey(ID, input.intentSalt),
+      licenseStockKey(ID), licenseQuotaKey(ID, input.claim.payer), licenseObligationKey(paymentKey),
+    ].sort());
+    expect(indexWrites.mock.calls.map(([key]) => key).sort()).toEqual([
+      purchaseLibraryKey(input.claim.payer), LICENSE_OBLIGATION_INDEX, LICENSE_DUE_INDEX,
+    ].sort());
+    expect(stock()).toMatchObject({ supply: 1, reserved: 0, sold: 1 });
+    expect(h.store!.strings.get(licenseQuotaKey(ID, input.claim.payer))).toBe('0');
+    expect(JSON.parse(h.store!.strings.get(licenseReservationKey(ID, input.intentSalt))!)).toMatchObject({ state: 'sold' });
+    expect(h.store!.zsets.get(LICENSE_HOLD_INDEX)?.has(input.intentSalt) ?? false).toBe(false);
+    expect(h.store!.zsets.get(purchasePendingIndexKey())?.has(input.intentSalt) ?? false).toBe(false);
+    expect([...h.store!.zsets.get(LICENSE_OBLIGATION_INDEX)!.keys()]).toEqual([paymentKey]);
+    expect(JSON.parse(h.store!.strings.get(licenseObligationKey(paymentKey))!)).toMatchObject({ txHash: TX, purchasedAt: NOW + 2000 });
+  });
+
+  it('does not treat a different transaction hash as an idempotent success', async () => {
+    const input = await quote();
+    await settling(input);
+    const otherTx = toHex(456n, { size: 32 });
+    const [winner, loser] = await Promise.all([TX, otherTx].map((txHash) => finalizeHostedPurchase({
+      intentSalt: input.intentSalt, txHash, settledAt: NOW + 2000,
+    })));
+    expect(winner).toMatchObject({ ok: true, kind: 'finalized', intent: { txHash: TX } });
+    expect(loser).toEqual({ ok: false, reason: 'conflict' });
+    expect(h.store!.strings.has(hostedPurchaseRecordKey(80002, otherTx))).toBe(false);
+    expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
+  });
+
+  it.each(['missing', 'mismatched', 'unavailable'] as const)('does not report success when the raced library access is %s', async (failure) => {
+    const input = await quote();
+    await settling(input);
+    let finishWinner!: () => void;
+    const winnerCompleted = new Promise<void>((resolve) => { finishWinner = resolve; });
+    const writes = vi.spyOn(h.store!.strings, 'set');
+    let finalizers = 0;
+    h.calls = [];
+    h.evalOverride = async (script, keys, args) => {
+      if (!isFinalize(args) || ++finalizers !== 2) return undefined;
+      // 両者が settling を読んだ後、勝者の commit/access 検証を待ってから敗者の EVAL 直前に壊す。
+      await winnerCompleted;
+      writes.mockClear();
+      if (failure === 'missing') h.store!.delete(purchaseLibraryKey(input.claim.payer));
+      if (failure === 'mismatched') h.store!.zsets.get(purchaseLibraryKey(input.claim.payer))!.set(ID, NOW);
+      if (failure === 'unavailable') h.failBefore = true;
+      const result = await runRedisLua(script, keys, args, h.store!);
+      expect(result).toBe(-3);
+      return result;
+    };
+
+    const finalize = () => finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX, settledAt: NOW + 2000 });
+    const [winner, loser] = await Promise.all([finalize().finally(finishWinner), finalize()]);
+    expect(winner).toMatchObject({ ok: true, kind: 'finalized' });
+    expect(loser).toEqual({ ok: false, reason: 'corrupt' });
+    const calls = h.calls.filter((call) => isFinalize(call.args));
+    expect(calls).toHaveLength(2);
+    expect(calls.map((call) => JSON.parse(call.args[8]!).state)).toEqual(['settling', 'settling']);
+    expect(calls.map((call) => call.args.slice(24, 26))).toEqual([['', ''], ['', '']]);
+    expect(writes).not.toHaveBeenCalled();
+    expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
+  });
+
+  it('counts a settled license hook repair failure as storage even when purchase access is valid', async () => {
+    const input = await quote();
+    await settling(input);
+    expect(await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX, settledAt: NOW + 2000 })).toMatchObject({ ok: true });
+    h.store!.delete(LICENSE_DUE_INDEX);
+    h.store!.lists.set(LICENSE_DUE_INDEX, ['wrong-type']);
+    // A stale pending member must keep the repair error visible to the batch summary.
+    h.store!.zsets.set(purchasePendingIndexKey(), new Map([[input.intentSalt, NOW + 3000]]));
+    expect(await readSettledPurchaseAccess(input.intentSalt)).toMatchObject({ ok: true });
+    const writes = vi.spyOn(h.store!.strings, 'set');
+
+    expect(await reconcilePendingPurchases({ now: NOW + 3000 })).toEqual({
+      checked: 1, settled: 0, pending: 0, failedPrebroadcast: 0, storageErrors: 1,
+    });
+    expect(writes).not.toHaveBeenCalled();
+    expect(h.store!.lists.get(LICENSE_DUE_INDEX)).toEqual(['wrong-type']);
+    expect(h.store!.zsets.get(purchasePendingIndexKey())?.has(input.intentSalt)).toBe(true);
+    expect(stock()).toMatchObject({ reserved: 0, sold: 1 });
+  });
+
+  it.each([-3, -1])('does not write an indeterminate intent as settled after a %i finalizer failure', async (code) => {
+    const input = await quote();
+    const intent = await settling(input);
+    expect(await markPurchaseIndeterminate({ intentSalt: input.intentSalt, attemptId: intent.attemptId, txHash: TX, now: NOW + 1500 })).toBe('updated');
+    const before = h.store!.strings.get(purchaseIntentKey(input.intentSalt));
+    const writes = vi.spyOn(h.store!.strings, 'set');
+    h.evalOverride = (_script, _keys, args) => isFinalize(args) ? code : undefined;
+
+    expect(await finalizeHostedPurchase({ intentSalt: input.intentSalt, txHash: TX, settledAt: NOW + 2000 }))
+      .toEqual({ ok: false, reason: code === -3 ? 'corrupt' : 'conflict' });
+    expect(writes).not.toHaveBeenCalled();
+    expect(h.store!.strings.get(purchaseIntentKey(input.intentSalt))).toBe(before);
+    expect(await getPurchaseIntent(input.intentSalt)).toMatchObject({ state: 'indeterminate', txHash: TX });
+    expect(stock()).toMatchObject({ reserved: 1, sold: 0 });
+    expect(h.store!.zsets.get(LICENSE_HOLD_INDEX)?.has(input.intentSalt)).toBe(true);
+    expect(h.store!.zsets.get(purchasePendingIndexKey())?.has(input.intentSalt)).toBe(true);
+    expect(h.store!.strings.has(hostedPurchaseRecordKey(80002, TX))).toBe(false);
   });
 });

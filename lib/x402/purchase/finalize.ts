@@ -215,8 +215,12 @@ async function finalizeHostedPurchaseInternal(
     const racedAccess = await readSettledPurchaseAccess(
       input.intentSalt,
     );
+    // license の settled は、license 側の在庫・obligation の書込みと同じ EVAL で
+    // 原子的に flush されたときだけ生まれる。初回読取りが settling/indeterminate なら、
+    // 同じ tx の検証済み settled は競合相手の完全な commit なので、その購入結果を返す。
+    // 初回から settled の再実行は race ではなく、license hook の修復失敗 (-3) を成功で隠さない。
     if (
-      current.metadata.productKind !== 'license' &&
+      (current.metadata.productKind !== 'license' || current.state !== 'settled') &&
       racedAccess.ok &&
       racedAccess.intent.txHash === txHash
     ) {
