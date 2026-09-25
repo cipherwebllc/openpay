@@ -67,9 +67,11 @@ function configuredConnectOrigins() {
   });
 }
 
-function reportOnlyCsp() {
+// C17 / D6: Report-Only で 2026-09-24 に本番 37 ページ (desktop/mobile/webkit + WalletConnect/Coinbase modal) を
+// 巡回し、違反は Cloudflare Web Analytics の beacon と WalletConnect modal の Google Fonts の 3 種だけだった
+// → その 3 出所を許可して本適用 (user 裁定 A・2026-09-26)。frame-ancestors は route ごとに付ける。
+function enforcedCsp(frameAncestors) {
   const isDev = process.env.NODE_ENV === 'development';
-  // C17 / D6: observe for 1–2 weeks, then review enforcement in a separate PR.
   // Next 15.5.25 nonces require dynamic rendering (including the static locale
   // layout): https://nextjs.org/docs/15/app/guides/content-security-policy
   // Use a host allowlist without changing rendering/caching. Next's inline RSC
@@ -88,23 +90,27 @@ function reportOnlyCsp() {
     // script-src must allow inline scripts or every page reports a violation (Lighthouse
     // inspector-issues failed on all 7 URLs, PR #577). External script hosts stay
     // disallowed. A nonce-based policy is evaluated in the enforcement PR.
-    `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval' https://va.vercel-scripts.com" : ''}`,
+    // Cloudflare Web Analytics は edge で beacon.min.js を自動挿入する (本番のみ・観測で確認)。
+    `script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com${isDev ? " 'unsafe-eval' https://va.vercel-scripts.com" : ''}`,
     "script-src-attr 'none'",
-    // React style props and the wallet modal inject inline CSS.
-    "style-src 'self' 'unsafe-inline'",
+    // React style props and the wallet modal inject inline CSS. WalletConnect (Reown) modal は
+    // Google Fonts の stylesheet を読む (観測で確認)。
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     // HandleProfile, storefronts, MobileOrderView and AccountingAffiliates accept
     // third-party HTTPS images. Their explicit referrerPolicy=no-referrer stays.
     "img-src 'self' https: data: blob:",
-    // components/handleFonts.ts uses next/font/google: fonts are self-hosted.
-    "font-src 'self'",
-    `connect-src 'self' ${[...new Set([...connectOrigins, ...configuredConnectOrigins()])].join(' ')}${isDev ? ' ws://localhost:* ws://127.0.0.1:*' : ''}`,
+    // components/handleFonts.ts uses next/font/google: fonts are self-hosted. WalletConnect modal の
+    // Google Fonts だけ外部 (観測で確認)。
+    "font-src 'self' https://fonts.gstatic.com",
+    // Cloudflare Web Analytics の beacon 送信先を含める。
+    `connect-src 'self' https://cloudflareinsights.com ${[...new Set([...connectOrigins, ...configuredConnectOrigins()])].join(' ')}${isDev ? ' ws://localhost:* ws://127.0.0.1:*' : ''}`,
     `frame-src 'self' ${frameOrigins.join(' ')}`,
     // hooks/useQrScanner.ts → qr-scanner's blob worker; public/sw.js is self.
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    // frame-ancestors remains exclusively in the existing enforced CSP below.
+    `frame-ancestors ${frameAncestors}`,
   ].join('; ');
 }
 
@@ -143,7 +149,6 @@ const nextConfig = {
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           // /scan → hooks/useQrScanner.ts needs camera access from our own origin.
           { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=(), display-capture=()' },
-          { key: 'Content-Security-Policy-Report-Only', value: reportOnlyCsp() },
           // HSTS is owned by Vercel (default max-age=63072000), possibly overridden
           // by Cloudflare. Avoid a competing value/includeSubDomains/preload here:
           // https://vercel.com/docs/headers/response-headers#strict-transport-security
@@ -159,13 +164,13 @@ const nextConfig = {
       {
         source: '/:locale(ja|en)/tip/:path*',
         headers: [
-          { key: 'Content-Security-Policy', value: 'frame-ancestors *' },
+          { key: 'Content-Security-Policy', value: enforcedCsp('*') },
         ],
       },
       {
         source: '/((?!(?:ja|en)/tip(?:/|$)).*)',
         headers: [
-          { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
+          { key: 'Content-Security-Policy', value: enforcedCsp("'self'") },
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
         ],
       },
