@@ -5,7 +5,7 @@
 // (buildReceiveWithAuthorizationTypedData = hook/facilitator と同式)。submit/poll は selfHostRelayer を
 // モックして success に倒す。Amoy(80002・testnet) を使い MAINNET_CHAINS の KV/gas-ceiling 前提を回避。
 
-import { describe, it, expect, beforeAll, afterAll, vi, type Mock } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { privateKeyToAccount } from 'viem/accounts';
 import { getAddress, type Hex } from 'viem';
 import {
@@ -1004,5 +1004,97 @@ describe('x402 facilitator /verify-receipt (入力検証)', () => {
       }),
     );
     expect(((await res.json()) as { valid: boolean }).valid).toBe(false);
+  });
+});
+
+// B-R6e: limiter 自体は差し替えず、R6a (#613) と同じ実 KV transport へ障害を注入する。
+// fail-open は付帯 limiter だけ。署名検証まで成功扱いにしないことを本物の recover で固定する。
+describe('B-R6e facilitator limiter transport failures', () => {
+  const fetchMock = vi.fn();
+  const cases = ['INCR', 'EXPIRE'].flatMap((command) => [
+    { command, failure: 'throw', fail: () => { throw new Error('KV offline'); } },
+    { command, failure: 'reject', fail: () => Promise.reject(new Error('KV offline')) },
+  ]);
+
+  beforeEach(() => {
+    vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://r6e-kv.test');
+    vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'r6e-test-token');
+    vi.stubEnv('KV_REST_API_URL', '');
+    vi.stubEnv('KV_REST_API_TOKEN', '');
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  function transportFailure(command: string, fail: () => Promise<never>): void {
+    fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+      const [op] = JSON.parse(init.body as string);
+      if (op === command) return fail();
+      return Promise.resolve(new Response('{"result":1}'));
+    });
+  }
+
+  function expectLimiterCalls(command: string, scope: string): void {
+    const calls = fetchMock.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string));
+    const operations = command === 'INCR' ? ['INCR'] : ['INCR', 'EXPIRE'];
+    expect(calls.map(([op]) => op)).toEqual([...operations, ...operations]);
+    for (const [, key] of calls) {
+      expect(key).toMatch(new RegExp(`^rl:read:${scope}:unknown:\\d+$`));
+    }
+  }
+
+  it.each([
+    { handler: 'verify', scope: 'x402verify', body: { isValid: false, invalidReason: 'rate_limited' } },
+    { handler: 'verifyReceipt', scope: 'x402receipt', body: { valid: false, error: 'rate_limited' } },
+  ] as const)('$handler: INCR の結果 61 は本文解析より先に既存の 429 を返す', async ({ handler, scope, body }) => {
+    const handlers = await loadFacilitator();
+    fetchMock.mockResolvedValue(new Response('{"result":61}'));
+    const req = new Request(`http://x/${handler}`, { method: 'POST', body: '{invalid json' });
+    const readBody = vi.spyOn(req, 'text');
+
+    const response = await handlers[handler](req);
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual(body);
+    expect(readBody).not.toHaveBeenCalled();
+    expect(reservationState.reserve).not.toHaveBeenCalled();
+    const calls = fetchMock.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string));
+    expect(calls).toEqual([['INCR', expect.stringMatching(new RegExp(`^rl:read:${scope}:unknown:\\d+$`))]]);
+  });
+
+  it.each(cases)('/verify: $command $failure でも署名の成功/拒否応答を保つ', async ({ command, fail }) => {
+    const { verify } = await loadFacilitator();
+    transportFailure(command, fail);
+    const params = goodParams();
+    const valid = await verify(reqOf('http://x/verify', facilitatorBody(params, await signReceive(params))));
+    expect(valid.status).toBe(200);
+    expect(await valid.json()).toEqual({ isValid: true, payer: CUSTOMER, reservationToken: RESERVATION_TOKEN });
+
+    const invalid = await verify(reqOf('http://x/verify', facilitatorBody(params, await signReceive(params, wrongAccount))));
+    expect(invalid.status).toBe(200);
+    expect(await invalid.json()).toEqual({ isValid: false, invalidReason: 'signature_mismatch', payer: CUSTOMER });
+    expect(reservationState.reserve).toHaveBeenCalledOnce();
+    expectLimiterCalls(command, 'x402verify');
+  });
+
+  it.each(cases)('/verify-receipt: $command $failure でも署名の成功/拒否応答を保つ', async ({ command, fail }) => {
+    const { verifyReceipt } = await loadFacilitator();
+    const { makeSettlementReceipt, signReceipt } = await import('@/lib/x402/receipt');
+    const receipt = makeSettlementReceipt(TX_HASH, AMOY, FORWARDER, JPYC_AMOY, goodParams());
+    const signature = await signReceipt(receipt);
+    expect(signature).not.toBeNull();
+    transportFailure(command, fail);
+
+    const valid = await verifyReceipt(reqOf('http://x/verify-receipt', { receipt, signature }));
+    expect(valid.status).toBe(200);
+    expect(await valid.json()).toEqual({ valid: true, signer: RECEIPT_SIGNER });
+
+    const invalid = await verifyReceipt(reqOf('http://x/verify-receipt', { receipt, signature: `0x${'00'.repeat(65)}` }));
+    expect(invalid.status).toBe(200);
+    expect(await invalid.json()).toEqual({ valid: false, signer: null });
+    expectLimiterCalls(command, 'x402receipt');
   });
 });

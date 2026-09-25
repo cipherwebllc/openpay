@@ -25,16 +25,13 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
 
-  try {
-    const ipPrefix = anonymizeIp(clientIp(req) ?? '');
-    if (!(await checkReadRateLimit(`x402verify:${ipPrefix}`, 60, 60))) {
-      return NextResponse.json(
-        { isValid: false, invalidReason: 'rate_limited' },
-        { status: 429 },
-      );
-    }
-  } catch {
-    // Rate-limit outages must not turn /verify into a hard failure.
+  // checkReadRateLimit は no-throw / KV 障害時 fail-open (R6a #613)。
+  const ipPrefix = anonymizeIp(clientIp(req) ?? '');
+  if (!(await checkReadRateLimit(`x402verify:${ipPrefix}`, 60, 60))) {
+    return NextResponse.json(
+      { isValid: false, invalidReason: 'rate_limited' },
+      { status: 429 },
+    );
   }
 
   let bodyText: string;

@@ -22,16 +22,13 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   // DoS ガード (兄弟 /verify・/settle と同型): 無認証エンドポイントなので IP レート制限 + body 上限を
   // 前段に置く。レート制限ストレージ障害は本体判定を止めない (fail-open・掟13)。
-  try {
-    const ipPrefix = anonymizeIp(clientIp(req) ?? '');
-    if (!(await checkReadRateLimit(`x402receipt:${ipPrefix}`, 60, 60))) {
-      return NextResponse.json(
-        { valid: false, error: 'rate_limited' },
-        { status: 429 },
-      );
-    }
-  } catch {
-    // Rate-limit outages must not turn /verify-receipt into a hard failure.
+  // checkReadRateLimit は no-throw / KV 障害時 fail-open (R6a #613)。
+  const ipPrefix = anonymizeIp(clientIp(req) ?? '');
+  if (!(await checkReadRateLimit(`x402receipt:${ipPrefix}`, 60, 60))) {
+    return NextResponse.json(
+      { valid: false, error: 'rate_limited' },
+      { status: 429 },
+    );
   }
 
   let bodyText: string;

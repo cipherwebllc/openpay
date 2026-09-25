@@ -19,13 +19,10 @@ export async function POST(req: Request): Promise<NextResponse> {
   const session = await requireSession();
   if (!session.ok) return session.response;
 
-  try {
-    const keyFor = (ipPrefix: string) => `pushtest:${session.address.toLowerCase()}:${ipPrefix}`;
-    if (!(await checkClientIpPrefixRateLimit(req, keyFor, 1, 60))) {
-      return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
-    }
-  } catch {
-    // rate limit 障害でテスト通知を止めない (subscribe route と同方針)。
+  // wrapper が使う checkReadRateLimit は no-throw / KV 障害時 fail-open (R6a #613)。
+  const keyFor = (ipPrefix: string) => `pushtest:${session.address.toLowerCase()}:${ipPrefix}`;
+  if (!(await checkClientIpPrefixRateLimit(req, keyFor, 1, 60))) {
+    return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
   }
 
   const summary = await sendPushToWallet(session.address, (locale) => ({
