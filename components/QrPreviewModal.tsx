@@ -37,6 +37,8 @@ export type QrPreviewModalLabels = {
   copied: string;
   downloadSvg?: string;
   downloadPng?: string;
+  /** FX 換算時のみ指定。期限前から空の status を mount し、期限切れを通知する。 */
+  convertExpired?: string;
   /** 「この QR は端末内で生成 (通信不要)」の安心表示 (任意)。圏外の現場でも
    *  QR の生成・提示ができることを店員に伝える。印刷ポスターには出さない。 */
   localGenNote?: string;
@@ -77,6 +79,7 @@ export type QrPreviewEip681 = {
 
 export function QrPreviewModal({
   open,
+  convertExpired = false,
   onClose,
   labels,
   qrValue,
@@ -97,6 +100,7 @@ export function QrPreviewModal({
   paymentStatus,
 }: {
   open: boolean;
+  convertExpired?: boolean;
   onClose: () => void;
   labels: QrPreviewModalLabels;
   qrValue: string;
@@ -242,7 +246,7 @@ export function QrPreviewModal({
             </div>
             <div
               ref={qrRef}
-              className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 print:mt-6 print:p-6"
+              className={`mt-5 rounded-2xl border border-slate-200 bg-white p-4 print:mt-6 print:p-6${convertExpired ? ' opacity-40' : ''}`}
             >
               {/* 中央に OpenPay マークを置く (ブランド認知 + 「読んでよい QR か」の判断材料)。
                   level は **'Q' (25% 訂正)**。マークの被覆は面積の約 3% しかないので Q で十分余裕が
@@ -263,6 +267,16 @@ export function QrPreviewModal({
                 }}
               />
             </div>
+            {labels.convertExpired && (
+              <p
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 empty:mt-0 empty:border-0 empty:p-0"
+              >
+                {convertExpired ? labels.convertExpired : ''}
+              </p>
+            )}
             {note && (
               <p className="mt-4 text-sm font-medium text-slate-700 print:text-xl">
                 {note}
@@ -356,7 +370,8 @@ export function QrPreviewModal({
             <button
               type="button"
               onClick={onPrint}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
+              disabled={convertExpired}
+              className={`inline-flex items-center gap-1.5 rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
             >
               <Printer className="h-4 w-4" aria-hidden />
               {labels.print}
@@ -365,7 +380,8 @@ export function QrPreviewModal({
           <button
             type="button"
             onClick={onCopy}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+            disabled={convertExpired}
+            className={`rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
           >
             {copied ? labels.copied : labels.copy}
           </button>
@@ -373,7 +389,8 @@ export function QrPreviewModal({
             <button
               type="button"
               onClick={onDownloadSvg}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+              disabled={convertExpired}
+              className={`rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
             >
               {labels.downloadSvg}
             </button>
@@ -382,7 +399,8 @@ export function QrPreviewModal({
             <button
               type="button"
               onClick={onDownloadPng}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+              disabled={convertExpired}
+              className={`rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
             >
               {labels.downloadPng}
             </button>
@@ -407,14 +425,15 @@ export function QrPreviewModal({
               <p className="self-start text-xs text-slate-500">
                 {eip681.description}
               </p>
-              <QRCodeSVG value={eip681.uri} size={180} includeMargin level="M" />
+              <QRCodeSVG value={eip681.uri} size={180} includeMargin level="M" className={convertExpired ? 'opacity-40' : undefined} />
               <div className="w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-600">
                 {eip681.uri}
               </div>
               <button
                 type="button"
                 onClick={eip681.onCopy}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                disabled={convertExpired}
+                className={`rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
               >
                 {eip681.copied ? eip681.copiedLabel : eip681.copy}
               </button>

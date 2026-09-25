@@ -328,6 +328,7 @@ describe('R11b: generated payment URL fixtures', () => {
 // lucide-react / qrcode.react の更新だけで digest が変わるなら除外 (withoutSvgInternals) の漏れ。
 // B-R11d: fresh-ja/en の static/modal だけ amount/full を更新。金額欄・エディタが
 // hidden で残るため。amount モードの DOM と、それ以外の節の digest は不変。
+// B-R11f: usdc/fx-modal の modal/full だけ更新 (期限前から mount する空の FX 通知領域)。
 const DOM_BASELINE: Record<string, string> = {
   'fresh-ja/empty':
     'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=58f78ef36af2 receiver=e7e8e741048e accounting=1ae21b00fd1a settings=52f60fef0496 preview=df6fdaa1b2ab full=87e6a26fdc72',
@@ -370,7 +371,7 @@ const DOM_BASELINE: Record<string, string> = {
   'usdc/fx-applied':
     'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=8246c076c52b receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=248c7149dc79 preview=a2659703e1e8 bar=6f06b167fcfe full=6ea0cb5a67de',
   'usdc/fx-modal':
-    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=8246c076c52b receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=248c7149dc79 pwa=f0506b8ca563 preview=a2659703e1e8 modal=265a751d0adb bar=6f06b167fcfe full=c049fec9aa50',
+    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=8246c076c52b receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=248c7149dc79 pwa=f0506b8ca563 preview=a2659703e1e8 modal=d861551cfa0d bar=6f06b167fcfe full=3894130a185e',
   'usdc/fx-expired':
     'shape=2/3/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=905cb32ce2af receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=248c7149dc79 pwa=f0506b8ca563 preview=a2659703e1e8 bar=6f06b167fcfe full=b0d30d24b2f9',
   'standard/closed':
@@ -852,6 +853,57 @@ describe('B-R11d: modal focus survives parent updates', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     expect(screen.getByText(/残り 2:59/)).toBeInTheDocument();
     expect(close).toHaveFocus();
+  });
+});
+
+describe('B-R11f: FX expiry in the open modal', () => {
+  it.each(['ja', 'en'] as const)('%s: propagates expiry without reopening or replacing the QR', async (lang) => {
+    locale = lang;
+    seed();
+    renderQr();
+    await settle();
+    amount('1000');
+    fireEvent.click(screen.getByRole('button', { name: labels().convertButton.replace('{symbol}', 'USDC') }));
+    const dialog = openQr();
+    const status = within(dialog).getAllByRole('status').find((node) => !node.textContent)!;
+    const qr = dialog.querySelector('svg[width="340"]')!;
+    const url = displayedUrl();
+    const close = within(dialog).getByRole('button', { name: labels().qrModalClose });
+    close.focus();
+    expect(status).toBeEmptyDOMElement();
+    expect(within(dialog).getByRole('button', { name: labels().qrCopy })).toBeEnabled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000); });
+    expect(status).toBeEmptyDOMElement(); // Existing expiry is strictly after exp.
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(within(dialog).getByText(labels().qrModalConvertExpired)).toBe(status);
+    expect(status).toHaveAttribute('role', 'status');
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    expect(screen.getByRole('dialog')).toBe(dialog);
+    expect(dialog.querySelector('svg[width="340"]')).toBe(qr);
+    expect(qr.parentElement).toHaveClass('opacity-40');
+    expect(displayedUrl()).toBe(url);
+    expect(close).toHaveFocus();
+    expect(close).toBeEnabled();
+    for (const name of [labels().qrCopy, labels().printPoster, labels().downloadSvg, labels().downloadPng]) {
+      expect(within(dialog).getByRole('button', { name })).toBeDisabled();
+    }
+    closeQr();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('leaves a regular QR unchanged after the FX expiry interval', async () => {
+    seed();
+    renderQr();
+    await settle();
+    amount('1000');
+    const dialog = openQr();
+    const before = dialog.outerHTML;
+    await act(async () => { await vi.advanceTimersByTimeAsync(181_000); });
+    expect(dialog.outerHTML).toBe(before);
+    expect(within(dialog).queryByText(labels().qrModalConvertExpired)).toBeNull();
+    for (const button of within(dialog).getAllByRole('button')) {
+      expect(button).toBeEnabled();
+    }
   });
 });
 

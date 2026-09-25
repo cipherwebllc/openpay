@@ -595,10 +595,12 @@ export function QrGenerator() {
       {payUrl && (
         <QrPreviewModal
           open={qrModalOpen}
+          convertExpired={convertExpired}
           onClose={() => setQrModalOpen(false)}
           labels={{
             title: t('qrModalTitle'),
             close: t('qrModalClose'),
+            convertExpired: convert ? t('qrModalConvertExpired') : undefined,
             eyebrow: t('posterEyebrow'),
             print: t('printPoster'),
             copy: t('qrCopy'),
