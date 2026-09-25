@@ -16,7 +16,7 @@ const LABELS = {
   downloadPng: 'PNG保存',
 };
 
-function renderModal(overrides: Record<string, unknown> = {}) {
+function renderModal(overrides: Partial<Parameters<typeof QrPreviewModal>[0]> = {}) {
   const props = {
     open: true,
     onClose: vi.fn(),
@@ -36,9 +36,7 @@ function renderModal(overrides: Record<string, unknown> = {}) {
     onDownloadPng: vi.fn(),
     ...overrides,
   };
-  const utils = render(
-    <QrPreviewModal {...(props as Parameters<typeof QrPreviewModal>[0])} />,
-  );
+  const utils = render(<QrPreviewModal {...props} />);
   return { ...utils, props };
 }
 
@@ -87,6 +85,53 @@ describe('QrPreviewModal', () => {
     expect(props.onClose).toHaveBeenCalledOnce();
     await user.keyboard('{Escape}');
     expect(props.onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('B-R11e: onClose の更新で focus を奪わず Escape / close は最新のハンドラを呼ぶ', async () => {
+    const user = userEvent.setup();
+    render(<label>Outside input<input /></label>);
+    const { props, rerender } = renderModal();
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveFocus();
+    const input = screen.getByRole('textbox', { name: 'Outside input' });
+    input.focus();
+    const onClose = vi.fn();
+    rerender(<QrPreviewModal {...props} onClose={onClose} />);
+    expect(input).toHaveFocus();
+    expect(screen.getByRole('dialog')).toBe(dialog);
+
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: LABELS.close }));
+    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(props.onClose).not.toHaveBeenCalled();
+    rerender(<QrPreviewModal {...props} onClose={onClose} open={false} />);
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('B-R11e: close / unmount で開く直前の focus を戻し、再表示時は起点を取り直す', async () => {
+    const user = userEvent.setup();
+    render(<><button>First opener</button><button>Second opener</button></>);
+    const first = screen.getByRole('button', { name: 'First opener' });
+    const second = screen.getByRole('button', { name: 'Second opener' });
+    first.focus();
+    const { props, rerender, unmount } = renderModal();
+    expect(screen.getByRole('dialog')).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: LABELS.copy }));
+    const onClose = vi.fn();
+    rerender(<QrPreviewModal {...props} onClose={onClose} />);
+    rerender(<QrPreviewModal {...props} onClose={onClose} open={false} />);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(first).toHaveFocus();
+
+    second.focus();
+    rerender(<QrPreviewModal {...props} onClose={onClose} />);
+    expect(screen.getByRole('dialog')).toHaveFocus();
+    unmount();
+    expect(second).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('印刷/コピー/SVG/PNG ボタンが各ハンドラを呼ぶ', async () => {
