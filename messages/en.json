@@ -1984,6 +1984,7 @@
     "relayUnavailable": "Gasless purchase is currently unavailable. You can buy by sending with gas instead.",
     "fallbackGasPaid": "Buy by sending with gas",
     "retryRelay": "Retry sending (no need to sign again)",
+    "relayResultUnconfirmed": "The transfer result is not confirmed yet. Press “Retry sending” (no new signature or gas-paid transfer is needed).",
     "paying": "Sending… (approve in your wallet)",
     "verifying": "Verifying…",
     "retryVerify": "Retry verification",

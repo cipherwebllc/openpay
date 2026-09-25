@@ -47,6 +47,8 @@ export type EntitlementSubscription = {
   gaslessUnavailable?: boolean;
   /** pending(hash 無し) の同一 payload 再 POST が可能か。 */
   canRetryRelay?: boolean;
+  /** 再 POST の結果が不明。失敗と断定せず確認中を表示する。 */
+  isRelayUncertain?: boolean;
   /** pending(hash 無し) の relay 再試行 (同一署名を再送信・再署名しない)。 */
   retryRelay?: () => void;
   /** ガスあり送金開始 (relay 503 fallback)。 */
@@ -272,6 +274,7 @@ export function EntitlementPaywall({
                 </div>
               )}
               {sub.isPayError &&
+                !sub.isRelayUncertain &&
                 (!sub.gaslessUnavailable || gasPaidFallbackConfirmed) && (
                   <p className="text-[11px] text-red-600">
                     {t('payError', { reason: sub.error?.message ?? 'error' })}
@@ -280,6 +283,13 @@ export function EntitlementPaywall({
             </div>
           )}
         </div>
+      )}
+
+      {/* CSV パスの live region は常時 mount し、結果不明時だけ文言を入れて通知する。 */}
+      {config.supportsGasless && (
+        <p className="text-[11px] text-amber-700" role="status">
+          {canRetryRelay && sub.isRelayUncertain ? t('relayResultUnconfirmed') : ''}
+        </p>
       )}
 
       <p className="mt-3 text-[10px] leading-relaxed text-slate-500">

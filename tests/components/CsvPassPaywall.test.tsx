@@ -11,6 +11,7 @@ const sub = vi.hoisted(() => ({
   gasless: true,
   gaslessUnavailable: false,
   canRetryRelay: false,
+  isRelayUncertain: false,
   isPaying: false,
   isSubscribing: false,
   isSuccess: false,
@@ -71,6 +72,7 @@ beforeEach(() => {
   sub.gasless = true;
   sub.gaslessUnavailable = false;
   sub.canRetryRelay = false;
+  sub.isRelayUncertain = false;
   sub.isPaying = false;
   sub.isSubscribing = false;
   sub.isSuccess = false;
@@ -81,6 +83,40 @@ beforeEach(() => {
 });
 
 describe('CsvPassPaywall gas-paid fallback consent', () => {
+  it.each(['ja', 'en'] as const)('%s: 再 POST の結果不明時は確認中・再試行を表示し、失敗や再購入へ誘導しない', (locale) => {
+    wording.locale = locale;
+    const messages = locale === 'ja' ? ja.CsvPass : en.CsvPass;
+    const view = render(<CsvPassPaywall />);
+    const status = screen.getByRole('status');
+    expect(status).toBeEmptyDOMElement();
+
+    sub.canRetryRelay = true;
+    sub.isRelayUncertain = true;
+    sub.isPayError = true;
+    view.rerender(<CsvPassPaywall />);
+
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status).toHaveTextContent(locale === 'ja'
+      ? '送金結果をまだ確認できていません。「送信を再試行」を押してください（再署名やガス払いの送金は不要です）'
+      : 'The transfer result is not confirmed yet. Press “Retry sending” (no new signature or gas-paid transfer is needed).');
+    expect(screen.queryByText(messages.verifying)).toBeNull();
+    expect(screen.queryByText(messages.payError.replace('{reason}', 'error'))).toBeNull();
+    expect(screen.queryByText(messages.relayUnavailable)).toBeNull();
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: messages.retryRelay }));
+    expect(sub.retryRelay).toHaveBeenCalledTimes(1);
+    expect(sub.start).not.toHaveBeenCalled();
+    expect(sub.startGasPaid).not.toHaveBeenCalled();
+
+    sub.canRetryRelay = false;
+    sub.isRelayUncertain = false;
+    sub.isPayError = false;
+    sub.isSuccess = true;
+    view.rerender(<CsvPassPaywall />);
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status).toBeEmptyDOMElement();
+  });
+
   it('503 後はガスレス同意を流用せず、ガス代負担表示で再確認してから fallback を実行する', () => {
     const view = render(<CsvPassPaywall />);
     expect(screen.getByText('confirmGasGasless')).toBeInTheDocument();

@@ -178,6 +178,8 @@ export function useJpycEntitlementPay(
   // 署名済 payload の同一再 POST だけを許可する relay 契約エラー。通常の送金/subscribe error と
   // 分離し、CSV pass UI が生の payWrite error と取り違えないようにする。
   const [relayError, setRelayError] = useState<Error | null>(null);
+  // 再 POST の応答だけでは以前の送金を否定できない場合、UI は失敗ではなく確認中を表示する。
+  const [relayUncertain, setRelayUncertain] = useState(false);
   // 送金確定後の txHash / その chain を保持し、subscribe 失敗時はこの hash で subscribe だけ再試行する。
   const payTxRef = useRef<Hex | null>(null);
   const payChainIdRef = useRef<number | null>(null);
@@ -257,9 +259,10 @@ export function useJpycEntitlementPay(
   const postGaslessRelay = useCallback(
     async (payload: GaslessSignResult, signerWallet: Address): Promise<void> => {
       setRelayError(null);
+      setRelayUncertain(false);
       // 保持済み payload の再 POST か (retryRelay / 未解決 CTA ガード / remount resume)。保持される
-      // のは fetch 例外・202 pending(hash 無し)・429 の後だけで、以前の POST が broadcast 済みの
-      // 可能性を否定できない。初回 POST は保持前に呼ばれるので false。
+      // のは fetch 例外・202 pending(hash 無し)・429・再 POST の結果不明時で、以前の POST が
+      // broadcast 済みの可能性を否定できない。初回 POST は保持前に呼ばれるので false。
       const isRePost = gaslessPayloadRef.current === payload;
       let res: Response;
       try {
@@ -280,7 +283,12 @@ export function useJpycEntitlementPay(
       }
       let body: RelayResponse = {};
       try {
-        body = (await res.json()) as RelayResponse;
+        const parsed: unknown = await res.json();
+        // JSON null 等で property access が throw し、mining のまま再試行不能になる波及を断つ。
+        // 兄弟 hook と同じ object 判定にし、不正な形は非 JSON と同じ空の応答として扱う。
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          body = parsed as RelayResponse;
+        }
       } catch {
         /* non-JSON */
       }
@@ -309,11 +317,31 @@ export function useJpycEntitlementPay(
         return;
       }
 
+      // 再 POST の 5xx は以前の POST の broadcast 有無を確認できないため、同一 authorization の
+      // 再試行だけを許可し、再署名やガス払いへの二重支払いの波及を断つ。例外は idem claim 後にしか
+      // 返らない daily_budget_exceeded / relay_error (前の POST は claim していない) のみ。
+      // route 入口のエラーコードは列挙せず、未知の 5xx も保持する。初回 POST の既存経路は変えない。
+      if (
+        isRePost &&
+        res.status >= 500 &&
+        body.error !== 'daily_budget_exceeded' &&
+        body.error !== 'relay_error'
+      ) {
+        // 既知の制約 (B-R5c): 入口 503 は validBefore 検証より前に返るため、条件が続く限り
+        // 期限切れ後も payload を保持する。relay 未構成の運用では利用者が「確認中」から抜けられない。
+        // client の期限だけでは以前の broadcast を否定できず、安全な解決経路の追加は B-R5c で扱う。
+        gaslessPayloadRef.current = payload;
+        savePendingSig({ payload, wallet: signerWallet });
+        setRelayUncertain(true);
+        setPhase('pay-error');
+        return;
+      }
+
       // relay 未構成/不可 (503) → ガスあり fallback を UI に出す (自動フォールバックはしない)。
       // 503 は route のゲート群 (flag/feeReceiver/PROVIDER/preflight/日次予算) = **この POST では
       // submit 前** で broadcast していない (初回 POST の preflight 障害を含む。再 POST の preflight
-      // 障害は上で保持済み) → payload を破棄して fallback (startGasPaid) を機能させる (保持したまま
-      // だと startGasPaid の未解決ガードに弾かれてボタンが無反応になる・Codex P3)。
+      // 障害・例外 2 コード以外の 5xx は上で保持済み) → payload を破棄して fallback (startGasPaid)
+      // を機能させる (保持したままだと未解決ガードに弾かれてボタンが無反応になる・Codex P3)。
       if (body.error === 'relay_not_configured' || res.status === 503) {
         gaslessPayloadRef.current = null;
         clearPendingSig();
@@ -367,8 +395,7 @@ export function useJpycEntitlementPay(
       // relay_error (502 = submit 層の throw・relay の確立済み不変条件で「fallback safe = 未送信扱い」)。
       // いずれも broadcast されていないので payload を**破棄**する — 保持すると壊れた payload の
       // 無限リプレイに閉じ込め、再署名もガスあり購入もできなくなる (Codex P2)。ユーザは通常 CTA から
-      // 新しい署名でやり直せる。payload を保持するのは fetch-throw と 202 pending(hash 無し) の
-      // 「届いたか/broadcast されたか不確定」な 2 経路のみ。
+      // 新しい署名でやり直せる。broadcast の有無を確認できない応答は上の保持経路で処理済み。
       gaslessPayloadRef.current = null;
       clearPendingSig();
       setPhase('pay-error');
@@ -619,6 +646,7 @@ export function useJpycEntitlementPay(
     gasless: gaslessAvailable,
     gaslessUnavailable,
     canRetryRelay,
+    isRelayUncertain: canRetryRelay && relayUncertain,
     isPaying: phase === 'paying' || phase === 'mining',
     isSubscribing: phase === 'subscribing',
     isSuccess: phase === 'success',

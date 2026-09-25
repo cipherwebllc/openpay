@@ -41,6 +41,7 @@ const accountHold = vi.hoisted(() => ({
   chainId: 137,
 }));
 const signTypedDataMock = vi.fn(async (_typed: SignTypedDataArgs) => SIGNATURE);
+const writeContractMock = vi.fn();
 vi.mock('wagmi', () => ({
   useAccount: () => ({ address: accountHold.address, chainId: accountHold.chainId }),
   useWriteContract: () => ({
@@ -48,7 +49,7 @@ vi.mock('wagmi', () => ({
     isPending: false,
     error: null,
     reset: vi.fn(),
-    writeContract: vi.fn(),
+    writeContract: writeContractMock,
   }),
   useWaitForTransactionReceipt: () => ({
     data: undefined,
@@ -93,6 +94,7 @@ beforeEach(() => {
   vi.restoreAllMocks();
   signTypedDataMock.mockClear();
   signTypedDataMock.mockResolvedValue(SIGNATURE);
+  writeContractMock.mockClear();
   accountHold.address = WALLET;
   accountHold.chainId = 137;
   window.localStorage.clear();
@@ -576,6 +578,150 @@ describe('useCsvPassSubscribe ガスレス購入 (relay 経路)', () => {
     expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBeNull();
   });
 
+  // B-R5b: 例外 2 コード以外の 5xx は、応答形式や以前の POST の結果によらず保持する。
+  it.each(
+    (['pending', 'throw', 'rate-limited'] as const).flatMap((firstResponse) =>
+      ([
+        [500, '<html>Internal Server Error</html>'],
+        [502, '<html>Bad Gateway</html>'],
+        [503, '<html>Service Unavailable</html>'],
+        [504, '<html>Gateway Timeout</html>'],
+        [500, JSON.stringify({ ok: false, error: 'internal_error' })],
+        [503, 'null'],
+        ...[
+          'relay_not_configured',
+          'csvpass_misconfigured',
+          'gas_ceiling_required',
+          'kv_required',
+          'session_storage_unavailable',
+          'future_admission_error',
+        ].map((error) => [503, JSON.stringify({ ok: false, error })] as const),
+      ] as const).map(([status, body]) => [firstResponse, status, body] as const),
+    ),
+  )(
+    '%s 後の再 POST の %s %s → 確認中・同一 payload の再試行のみ (remount 後も保持)',
+    async (firstResponse, status, body) => {
+      let relayCalls = 0;
+      let recovered = false;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        if (String(url) === '/api/csv-pass/relay') {
+          relayCalls += 1;
+          if (relayCalls === 1) {
+            if (firstResponse === 'throw') throw new TypeError('network error');
+            if (firstResponse === 'rate-limited') {
+              return new Response(JSON.stringify({ error: 'ip_rate_limited' }), {
+                status: 429,
+              });
+            }
+            return new Response(JSON.stringify({ ok: false, pending: true }), {
+              status: 202,
+            });
+          }
+          return recovered
+            ? new Response(JSON.stringify({ ok: true, txHash: TX }), { status: 200 })
+            : new Response(body, { status });
+        }
+        return new Response(JSON.stringify({ ok: true, wallet: WALLET, expiresAt: 1 }));
+      });
+      const first = renderHook(() => useCsvPassSubscribe(deployment), { wrapper });
+      await act(async () => first.result.current.start());
+      await waitFor(() => expect(first.result.current.canRetryRelay).toBe(true));
+      const originalBody = (fetchSpy.mock.calls[0][1] as RequestInit).body as string;
+      const stored = window.localStorage.getItem(CSVPASS_SIG_KEY);
+      expect(JSON.parse(stored!)).toEqual({ payload: JSON.parse(originalBody), wallet: WALLET });
+
+      await act(async () => first.result.current.retryRelay());
+      await waitFor(() => expect(first.result.current.isPayError).toBe(true));
+      expect(first.result.current.canRetryRelay).toBe(true);
+      expect(first.result.current.isRelayUncertain).toBe(true);
+      expect(first.result.current.gaslessUnavailable).toBe(false);
+      expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBe(stored);
+      expect(window.localStorage.getItem(CSVPASS_PENDING_KEY)).toBeNull();
+      expect(fetchSpy.mock.calls.every(([url]) => url === '/api/csv-pass/relay')).toBe(true);
+
+      await act(async () => first.result.current.startGasPaid());
+      expect(writeContractMock).not.toHaveBeenCalled();
+      expect(first.result.current.isPayError).toBe(true);
+      // 通常 CTA を直接呼んでも再署名せず、同じ authorization を再 POST する。
+      await act(async () => first.result.current.start());
+      await waitFor(() => expect(first.result.current.isRelayUncertain).toBe(true));
+      first.unmount();
+
+      const second = renderHook(() => useCsvPassSubscribe(deployment), { wrapper });
+      await waitFor(() => expect(second.result.current.isRelayUncertain).toBe(true));
+      expect(second.result.current.canRetryRelay).toBe(true);
+      expect(second.result.current.gaslessUnavailable).toBe(false);
+      expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBe(stored);
+
+      recovered = true;
+      await act(async () => second.result.current.retryRelay());
+      await waitFor(() => expect(second.result.current.isSuccess).toBe(true));
+      const relayBodies = fetchSpy.mock.calls
+        .filter(([url]) => url === '/api/csv-pass/relay')
+        .map(([, init]) => init?.body);
+      expect(relayBodies).toEqual(Array(5).fill(originalBody));
+      expect(signTypedDataMock).toHaveBeenCalledTimes(1);
+      expect(writeContractMock).not.toHaveBeenCalled();
+      expect(second.result.current.canRetryRelay).toBe(false);
+      expect(second.result.current.isRelayUncertain).toBe(false);
+      expect(fetchSpy.mock.calls.at(-1)).toEqual([
+        '/api/csv-pass/subscribe',
+        expect.objectContaining({ body: JSON.stringify({ txHash: TX, chainId: 137 }) }),
+      ]);
+      expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBeNull();
+      expect(window.localStorage.getItem(CSVPASS_PENDING_KEY)).toBeNull();
+    },
+  );
+
+  it.each([500, 502, 503, 504])('初回 POST の非 JSON %s は従来どおり payload を破棄する', async (status) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('<html>Server Error</html>', { status }));
+    const { result } = renderHook(() => useCsvPassSubscribe(deployment), { wrapper });
+    await act(async () => result.current.start());
+    await waitFor(() => expect(result.current.isPayError).toBe(true));
+    expect(result.current.canRetryRelay).toBe(false);
+    expect(result.current.isRelayUncertain).toBe(false);
+    expect(result.current.gaslessUnavailable).toBe(status === 503);
+    expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBeNull();
+    expect(window.localStorage.getItem(CSVPASS_PENDING_KEY)).toBeNull();
+  });
+
+  it.each([null, [], 42, 'error', true].map((body) => [body] as const))('object でない JSON 本文 %j でも mining に取り残さない', async (body) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    const { result } = renderHook(() => useCsvPassSubscribe(deployment), { wrapper });
+    await act(async () => result.current.start());
+    await waitFor(() => expect(result.current.isPayError).toBe(true));
+    expect(result.current.isPaying).toBe(false);
+    expect(result.current.isSuccess).toBe(false);
+    expect(result.current.canRetryRelay).toBe(false);
+    expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBeNull();
+  });
+
+  it('再 POST の JSON 502 relay_error は payload を破棄し、新しい署名で再購入できる', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, pending: true }), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, error: 'relay_error' }), { status: 502 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, txHash: TX }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, wallet: WALLET, expiresAt: 1 }), { status: 200 }));
+    const { result } = renderHook(() => useCsvPassSubscribe(deployment), { wrapper });
+    await act(async () => result.current.start());
+    await waitFor(() => expect(result.current.canRetryRelay).toBe(true));
+
+    await act(async () => result.current.retryRelay());
+    await waitFor(() => expect(result.current.isPayError).toBe(true));
+    expect(result.current.canRetryRelay).toBe(false);
+    expect(result.current.isRelayUncertain).toBe(false);
+    expect(result.current.gaslessUnavailable).toBe(false);
+    expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBeNull();
+    expect(fetchSpy.mock.calls[1][1]?.body).toBe(fetchSpy.mock.calls[0][1]?.body);
+    expect(signTypedDataMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => result.current.start());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(signTypedDataMock).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[2][1]?.body).not.toBe(fetchSpy.mock.calls[0][1]?.body);
+    expect(writeContractMock).not.toHaveBeenCalled();
+  });
+
   it('未解決 payload がある間は start() でも再署名せず同一 payload を再 POST (構造的強制・Codex P1)', async () => {
     let relayCalls = 0;
     const fetchSpy = vi
@@ -681,7 +827,7 @@ describe('useCsvPassSubscribe ガスレス購入 (relay 経路)', () => {
     expect(signTypedDataMock).toHaveBeenCalledTimes(2); // 再署名された
   });
 
-  it('pending 保持中の再試行が 503 → payload 破棄 + fallback (startGasPaid) が機能する (Codex P3)', async () => {
+  it('pending 保持中の再試行が 503 daily_budget_exceeded → payload 破棄 + fallback (startGasPaid) が機能する (Codex P3)', async () => {
     // 1 回目 202 pending(hash 無し) → 2 回目 (retryRelay) 503。
     let relayCalls = 0;
     vi.spyOn(globalThis, 'fetch').mockImplementation(
@@ -716,9 +862,10 @@ describe('useCsvPassSubscribe ガスレス購入 (relay 経路)', () => {
     await act(async () => {
       result.current.retryRelay();
     });
-    // 503 = submit 前ゲート → payload 破棄 + gaslessUnavailable。
+    // daily_budget_exceeded は idem claim 後の拒否 → payload 破棄 + gaslessUnavailable。
     await waitFor(() => expect(result.current.gaslessUnavailable).toBe(true));
     expect(result.current.canRetryRelay).toBe(false);
+    expect(result.current.isRelayUncertain).toBe(false);
     expect(window.localStorage.getItem(CSVPASS_SIG_KEY)).toBeNull();
 
     // fallback ボタン (startGasPaid) が無反応にならず送金を開始できる。
