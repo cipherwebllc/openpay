@@ -34,6 +34,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'agent-kova-2026-09-25',
+    date: '2026-09-25',
+    category: 'feature',
+    title: {
+      ja: 'Agent の支払いに Kova (第三者の Agent Wallet) を選べるようになりました（MCP 0.18）',
+      en: 'Agents can now pay through Kova, a third-party agent wallet (MCP 0.18)',
+    },
+    body: {
+      ja: 'openpay-x402-mcp 0.18 に SIGNER_MODE=kova を追加しました。Komlock lab の Kova で管理するウォレットに署名だけを頼み、OpenPay は Kova の鍵や資格情報を受け取りません。Agent ページの設定生成で「Agent が支払う (Kova・第三者)」を選ぶと登録用の設定が作れ、購入履歴の紐づけ (wallet_prove) も使えます。Kova 0.1.2 の policy はこの支払い経路の金額を制限しないことを実測で確認しているため、金額の上限は MCP の設定だけが効きます。失ってもよい少額だけを入れてください。\nCircle Agent Wallet からは、USDC 建ての商品 (Base / Arc) を Circle CLI で購入できることを確認しました。JPYC 建ては JPYC の契約仕様上、Circle Agent Wallet では支払えません。',
+      en: 'openpay-x402-mcp 0.18 adds SIGNER_MODE=kova. The MCP asks a wallet managed in Kova (by Komlock lab) only for signatures; OpenPay never receives Kova keys or credentials. Choose “Agent pays (Kova, third party)” in the Agent page config generator to get the registration config; purchase-history binding (wallet_prove) works too. In our test, Kova 0.1.2 policy did not limit amounts on this payment path, so only the MCP settings cap amounts — fund the wallet with a small amount you can afford to lose.\nCircle Agent Wallets can buy USDC-priced items (Base / Arc) through the Circle CLI; JPYC items cannot be paid from a Circle Agent Wallet because of the JPYC contract.',
+    },
+    link: { href: '/agent', labelJa: 'Agent ページを開く', labelEn: 'Open the Agent page' },
+  },
+  {
     id: 'agent-wallet-history-try-prompts-2026-09-22',
     date: '2026-09-22',
     category: 'feature',
