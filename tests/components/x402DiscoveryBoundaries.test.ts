@@ -25,6 +25,7 @@ const FORBIDDEN = [
   'components/ConnectButton.tsx',
   'components/x402/useDiscoveryOwner.ts',
   'components/x402/DiscoveryRegistrationSection.tsx',
+  'components/x402/DiscoveryRegistrationForm.tsx',
   'components/x402/DiscoveryOwnedResources.tsx',
   'components/x402/PaywallSnippet.tsx',
 ];

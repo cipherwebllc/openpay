@@ -10,7 +10,9 @@
 // 出品者の下書き・結果表示は wallet / SIWE の切替で破棄し、接続の瞬断では保つ。
 // 公開カタログ側の leaf は wagmi / SIWE / 出品者専用の部品に依存しない。
 
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
+import dynamic from 'next/dynamic';
+import { useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import type { UsdcCatalogItem } from '@/lib/x402/usdcCatalog';
@@ -18,9 +20,28 @@ import type { MonitorFreshness } from '@/lib/directory/monitorFreshness';
 import { DiscoveryCatalogPanel, useDiscoveryCatalog } from './x402/DiscoveryCatalogPanel';
 import { useDiscoveryDisplay } from './x402/discoveryDisplay';
 import { DiscoveryExamples } from './x402/DiscoveryExamples';
-import { DiscoveryOwnedResources } from './x402/DiscoveryOwnedResources';
 import { DiscoveryRegistrationSection } from './x402/DiscoveryRegistrationSection';
 import { useDiscoveryOwner } from './x402/useDiscoveryOwner';
+
+function DiscoveryOwnedResourcesLoading() {
+  const t = useTranslations('Facilitator');
+  return (
+    <section aria-busy="true">
+      <h3 className="text-base font-bold text-slate-900">{t('yourResourcesTitle')}</h3>
+      <p role="status" className="mt-1 text-sm text-slate-500">{t('loading')}</p>
+    </section>
+  );
+}
+
+const DiscoveryOwnedResources = dynamic(
+  () => import('./x402/DiscoveryOwnedResources').then((m) => m.DiscoveryOwnedResources),
+  {
+    // 一覧はブラウザーの SIWE 認証後に取得する private UI なので SSR しない。
+    // 接続/サインイン入口を持つ DiscoveryRegistrationSection は eager のまま保つ。
+    ssr: false,
+    loading: DiscoveryOwnedResourcesLoading,
+  },
+);
 
 const EMPTY_USDC_ITEMS: UsdcCatalogItem[] = [];
 
@@ -46,11 +67,22 @@ export function X402DiscoveryView({
   // hook の順序 = 分割前と同じく公開カタログの query を owned の query より先に登録する。
   const display = useDiscoveryDisplay(freshnessByPath);
   const catalog = useDiscoveryCatalog(usdcItems);
+  // controller は dynamic 境界の外で維持し、下書き・展開・進行中の結果表示を失わない。
   const owner = useDiscoveryOwner(address, isSignedIn);
 
-  const ownedResourcesSection = (
+  useEffect(() => {
+    if (!isSignedIn) return;
+    // SIWE 成立時に両 chunk を先読みし、一覧の取得後にさらに chunk を待つ段差を減らす。
+    // 付帯的な先読みの失敗を認証・カタログへ波及させない。表示時の失敗は dynamic 側で扱う。
+    void Promise.all([
+      import('./x402/DiscoveryRegistrationForm'),
+      import('./x402/DiscoveryOwnedResources'),
+    ]).catch(() => {});
+  }, [isSignedIn]);
+
+  const ownedResourcesSection = isSignedIn && owner.owned.length > 0 ? (
     <DiscoveryOwnedResources owner={owner} display={display} isSignedIn={isSignedIn} />
-  );
+  ) : null;
   const registrationSection = (
     <DiscoveryRegistrationSection
       owner={owner}

@@ -191,7 +191,8 @@ describe('X402DiscoveryView', () => {
 
   it('owner: あなたの登録 → 閉じたフォーム → featured → カタログ、summary で手動開閉', async () => {
     renderAsOwner();
-    const owned = await screen.findByText('あなたの登録');
+    const owned = await screen.findByText(OWNED.description);
+    await screen.findByPlaceholderText('https://api.example.jp/paid/weather');
     const summary = screen.getByText('新しい API を出品する');
     const details = summary.closest('details')!;
     const featured = screen.getByRole('heading', { name: 'Featured APIs' });
@@ -202,7 +203,7 @@ describe('X402DiscoveryView', () => {
     expect(details).not.toHaveAttribute('open');
     fireEvent.click(summary);
     await waitFor(() => expect(details).toHaveAttribute('open'));
-    fireEvent.click(screen.getByRole('button', { name: 'data' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'data' }));
     expect(details).toHaveAttribute('open');
     fireEvent.click(summary);
     await waitFor(() => expect(details).not.toHaveAttribute('open'));
@@ -215,7 +216,7 @@ describe('X402DiscoveryView', () => {
     await waitFor(() => expect(global.fetch).toHaveBeenCalledWith('/api/facilitator/resources', { cache: 'no-store' }));
     if (count === 0) {
       expect(screen.queryByText(/^登録済み \d/)).not.toBeInTheDocument();
-      expect(screen.getByPlaceholderText('https://api.example.jp/paid/weather').closest('details')).toBeNull();
+      expect((await screen.findByPlaceholderText('https://api.example.jp/paid/weather')).closest('details')).toBeNull();
       expect(screen.getByRole('button', { name: '登録する' })).toBeVisible();
       expect(screen.queryByText('新しい API を出品する')).not.toBeInTheDocument();
     } else {
@@ -231,7 +232,7 @@ describe('X402DiscoveryView', () => {
     const details = summary.closest('details')!;
     fireEvent.click(summary);
     await waitFor(() => expect(details).toHaveAttribute('open'));
-    fireEvent.change(screen.getByPlaceholderText('https://api.example.jp/paid/weather'), {
+    fireEvent.change(await screen.findByPlaceholderText('https://api.example.jp/paid/weather'), {
       target: { value: 'https://api.example.jp/paid/new' },
     });
     fireEvent.click(screen.getByRole('checkbox'));
@@ -481,7 +482,9 @@ describe('X402DiscoveryView', () => {
 
   it('owner: 自分の登録一覧 (あなたの登録) を編集/削除ボタン付きで表示', async () => {
     renderAsOwner();
-    expect(await screen.findByText('あなたの登録')).toBeInTheDocument();
+    await screen.findByText(OWNED.description);
+    await screen.findByPlaceholderText('https://api.example.jp/paid/weather');
+    expect(screen.getByText('あなたの登録')).toBeInTheDocument();
     expect(
       screen.getByText('登録済み 1 件'),
     ).toBeInTheDocument();
