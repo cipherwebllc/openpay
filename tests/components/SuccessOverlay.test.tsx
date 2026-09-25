@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import { SuccessOverlay } from '@/components/SuccessOverlay';
@@ -94,6 +94,100 @@ describe('SuccessOverlay', () => {
     );
     await user.keyboard('{Escape}');
     expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it('B-R11f: onDismiss の更新で内部の focus を奪わず、Escape / close は最新のハンドラを呼ぶ', async () => {
+    const user = userEvent.setup();
+    const previousDismiss = vi.fn();
+    const onDismiss = vi.fn();
+    const { rerender } = render(
+      <SuccessOverlay amountDisplay="100 USDC" txHash={TX_HASH} onDismiss={previousDismiss} />,
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveFocus();
+    const history = screen.getByRole('link', { name: /このブラウザの履歴を見る/ });
+    history.focus();
+    rerender(<SuccessOverlay amountDisplay="100 USDC" txHash={TX_HASH} onDismiss={onDismiss} />);
+    expect(history).toHaveFocus();
+    expect(screen.getByRole('dialog')).toBe(dialog);
+
+    await user.keyboard('{Escape}');
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: '閉じる' }));
+    expect(onDismiss).toHaveBeenCalledTimes(2);
+    expect(previousDismiss).not.toHaveBeenCalled();
+  });
+
+  it('B-R11f: Tab / Shift+Tab が overlay 内を循環し、外からの Tab も引き戻す', async () => {
+    const user = userEvent.setup();
+    render(<>
+      <SuccessOverlay amountDisplay="100 USDC" txHash={TX_HASH} onDismiss={() => undefined} />
+      <button>Outside</button>
+    </>);
+    const first = screen.getByRole('button', { name: '完了音をオフにする' });
+    const copy = screen.getByRole('button', { name: /Tx Hash をコピー/ });
+    const last = screen.getByRole('button', { name: '閉じる' });
+    await user.tab();
+    expect(first).toHaveFocus();
+    await user.tab();
+    expect(copy).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(first).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(last).toHaveFocus();
+    await user.tab();
+    expect(first).toHaveFocus();
+    screen.getByRole('button', { name: 'Outside' }).focus();
+    await user.tab({ shift: true });
+    expect(last).toHaveFocus();
+  });
+
+  it.each([{ isComposing: true }, { keyCode: 229 }])('B-R11f: IME 中は Escape / Tab を処理しない (%j)', (ime) => {
+    const onDismiss = vi.fn();
+    render(<SuccessOverlay amountDisplay="100 USDC" txHash={TX_HASH} onDismiss={onDismiss} />);
+    const close = screen.getByRole('button', { name: '閉じる' });
+    close.focus();
+    expect(fireEvent.keyDown(close, { key: 'Tab', ...ime })).toBe(true);
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: 'Escape', ...ime });
+    expect(onDismiss).not.toHaveBeenCalled();
+    fireEvent.keyDown(close, { key: 'Escape' });
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it('B-R11f: StrictMode の mount で focus し、unmount で起点に戻して listener を解除する', async () => {
+    const user = userEvent.setup();
+    render(<button>Opener</button>);
+    const opener = screen.getByRole('button', { name: 'Opener' });
+    opener.focus();
+    const onDismiss = vi.fn();
+    const { unmount } = render(
+      <SuccessOverlay amountDisplay="100 USDC" txHash={TX_HASH} onDismiss={onDismiss} />,
+      { reactStrictMode: true },
+    );
+    expect(screen.getByRole('dialog')).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    screen.getByRole('button', { name: '閉じる' }).focus();
+    unmount();
+    expect(opener).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('B-R11f: 外へ移した focus は再描画 / unmount でも奪わない', () => {
+    render(<><button>Opener</button><input aria-label="Outside" /></>);
+    const opener = screen.getByRole('button', { name: 'Opener' });
+    opener.focus();
+    const { rerender, unmount } = render(
+      <SuccessOverlay amountDisplay="100 USDC" txHash={TX_HASH} onDismiss={() => undefined} />,
+    );
+    const outside = screen.getByRole('textbox', { name: 'Outside' });
+    outside.focus();
+    rerender(<SuccessOverlay amountDisplay="100 USDC" txHash={TX_HASH} onDismiss={() => undefined} />);
+    expect(outside).toHaveFocus();
+    unmount();
+    expect(outside).toHaveFocus();
   });
 
   it('explorerBase 指定時は Tx Explorer リンクが描画される', () => {
@@ -238,7 +332,7 @@ describe('SuccessOverlay', () => {
     expect(screen.queryByText('受付番号')).toBeNull();
   });
 
-  it('a11y: role="dialog" + aria-modal + aria-live=assertive', () => {
+  it('a11y: dialog の名前は可視見出しから導出し、読み上げ対象に時計を含めない', () => {
     render(
       <SuccessOverlay
         amountDisplay="100 USDC"
@@ -247,9 +341,13 @@ describe('SuccessOverlay', () => {
         onDismiss={() => undefined}
       />,
     );
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole('dialog', { name: '決済完了' });
+    const heading = screen.getByRole('heading', { name: '決済完了' });
     expect(dialog.getAttribute('aria-modal')).toBe('true');
-    expect(dialog.getAttribute('aria-live')).toBe('assertive');
+    expect(dialog).toHaveAttribute('aria-labelledby', heading.id);
+    expect(dialog).not.toHaveAttribute('aria-live');
+    expect(heading).toHaveAttribute('aria-live', 'assertive');
+    expect(screen.getByText(/^\d{2}:\d{2}:\d{2}$/).closest('[aria-live]')).toBeNull();
     expect(dialog.getAttribute('tabIndex')).toBe('-1');
   });
 

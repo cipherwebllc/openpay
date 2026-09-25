@@ -30,6 +30,18 @@ function Parent({ onClose }: { onClose: (value: string) => void }) {
 }
 
 describe('CsvPassModal focus (B-R11e)', () => {
+  it('B-R11f: 操作対象が閉じるボタンだけでも Tab / Shift+Tab は外へ出ない', async () => {
+    const user = userEvent.setup();
+    render(<><CsvPassModal open onClose={vi.fn()} /><button>Outside</button></>);
+    const close = screen.getByRole('button', { name: ja.CsvPass.close });
+    await user.tab();
+    expect(close).toHaveFocus();
+    await user.tab();
+    expect(close).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(close).toHaveFocus();
+  });
+
   it('親の再描画で外側の入力から focus を奪わず、Escape は最新の onClose を使う', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
