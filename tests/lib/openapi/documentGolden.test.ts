@@ -6,7 +6,9 @@
 // openapi-discovery.test.ts は構造と挙動を見るだけなので、ここで未整列の raw JSON
 // (JSON.stringify そのまま) の sha256 を flag 構成ごとに固定する。
 //
-// 期待値は分割前 (origin/main b13da8c2) のコードで採取した。文書の文言・構造を**意図して**
+// 初期の期待値は分割前 (origin/main b13da8c2) のコードで採取した。B-R9d とレビュー指摘の
+// 文言・example・Error schema の修正だけを raw JSON 比較で確認し、意図して再採取した。
+// 文書の文言・構造を**意図して**
 // 変えた PR では、差分を目視確認したうえでこの表を更新する (採取は
 // `OPENAPI_GOLDEN_CAPTURE=1 CI=true npx vitest run tests/lib/openapi/documentGolden.test.ts` で
 // hash と key 順を stdout に出す)。
@@ -83,38 +85,38 @@ const PROFILES: Profile[] = [
   { name: 'directory+license-child-only', env: { NEXT_PUBLIC_ENABLE_WEB3_DIRECTORY: '1', ENABLE_LICENSE_NFT: '1' } },
 ];
 
-// 分割前のコードで採取した sha256 (JSON.stringify の生出力・key 未整列)。
+// B-R9d の文書修正後に再採取した sha256 (JSON.stringify の生出力・key 未整列)。
 const EXPECTED_SHA256: Record<string, string> = {
   'all-on':
-    '359c31a65bb13cfc5436c9a5ce4bd2910dc89f53568a38dbb10f84b2a4117256',
+    'ee21eaad787fe97b26f640b52d6512139c7c5aee9bf31e8f3f3569326e385f35',
   'all-on+arc':
-    'f165cb69a40c2127a743160f82760931f7d7cd79d727cfdd473092d89bdc778a',
+    '38f750d78734147ebd3a8b2deb72642476811e6e08008f02703b681adc856dfd',
   'all-on+mainnet':
-    '34a212ada04358cd078ee684a1c51c26ca1e93fd31e4e792c3b21d4667252cc7',
+    'ffeae779d1cafb927f4ed5d0fa78e3c9c9c64cd0241b65449d1032fdf4c02f9b',
   'all-on+mainnet+avalanche+ethereum':
-    '6ddd39a0ff2a050a266e991fc55e6cfd68d108debecdab4332cab3ad36ad08bf',
+    '60fdccc805c3978b860332cffad8a4f0bfcaebeaf48da8a23562610d5ff94d53',
   'all-on+fee':
-    '60b8ba31881d10617cfb8fad140959be78052cd828eae37ab8eac1d2375a6791',
+    'aefdff41f7fffa319d4025d48f51dfcbf4bf6103f56bdf397d0dc98a7d16a8a3',
   'all-on+default-hello-price':
-    '421c52ad7ed7c2fe63d98ccd59ca7b43b2e6b2f50a1a333d2bdcd59a54614531',
+    'a65c97abf7762f845bcc36b2ba7848468a5809779991d3e8aa243e4fec7946e3',
   'all-on+invalid-hello-price-unlisted':
-    '3916e45c364dd7495818e4c633354f136d4276c8703d2bb0ddc71161fb1d103c',
+    '4ea047ed23abfb8eea041dc00cbeea5aef8fafcd97d5dc3921666589ef7db1a1',
   'directory-only':
-    '10754367c345071fb515f8f2be481aa3172ab52240204f94de383266fbc4119d',
+    '065ba3c26f996b54fbd1530812d78eb3cb4486c29bea3778585799a73c0bfcd9',
   'facilitator-only':
-    'acece8ccd294805a317fa7c9170c684a17f5c15176e6a9124f523ae568c21741',
+    '9b67a5dda6b5ebc7ca9421c329bd911d4f8fcee9c8c83a9603fd1832fc01c265',
   'facilitator+shops':
-    'd4b95911d6ceb194426ae5b5173c9a3e64f962a01c2270edc6463bfe60db418e',
+    '5baa7e721449b0f3b3cdcc1be9b01117cd8aa7a55eb9e014cf13828ab286e887',
   'directory+facilitator':
-    'f0b6f2b57d604da9d345c17c54ba00d47ef97cda11316652ca9a95b8d2b96867',
+    'f00d900be605d099483eeeb63bac49d9e79732c9a301de71f733718daab8044e',
   'license-only':
-    'a53d315d1eaa8a988a54cbea9099816a3f105d4e6de2ab7385795f8ea36eed14',
+    'c41e879807807f32d55b07731bc6a90f226abca9aff1f9f2f49f89250c9537c1',
   'directory+license-child-only':
-    '10754367c345071fb515f8f2be481aa3172ab52240204f94de383266fbc4119d',
+    '065ba3c26f996b54fbd1530812d78eb3cb4486c29bea3778585799a73c0bfcd9',
   'late-mutation':
-    '92f492bd2d59d236d34341da822e3f6bb2b50229a5f147a30e05cb7cc3e5d782',
+    'a99572780ecd725cd1c2cb198c84e70703bb7c456e9d994f6fd684327cc809b4',
   'late-facilitator':
-    '700f416a61219d0e35a83fe493ad8b62e3ad1fab5ced2faaa14da6d2aaeda132',
+    '65facd6b265dfa1ecef0fb542d1a7d06062c8eef5ef9cd397ac6a27e7d5a2c7a',
 };
 
 // all-on の paths の key 順 (spread 順の固定)。

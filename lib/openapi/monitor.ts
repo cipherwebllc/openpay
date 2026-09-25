@@ -13,7 +13,23 @@ import {
   USDC_SERVICE_MONITOR_BAZAAR,
 } from '@/lib/directory/usdcResource';
 import { paymentInfo, usdcPaymentChains, usdcPaymentInfo } from '@/lib/openapi/payment';
-import { JPYC_LIVE_400, JPYC_LIVE_402, JPYC_LIVE_503, schemaFromExample } from '@/lib/openapi/schema';
+import { JPYC_LIVE_402, schemaFromExample } from '@/lib/openapi/schema';
+
+const MONITOR_400 = {
+  description:
+    'Invalid monitor query (invalid_query): unknown query key, invalid changedSince calendar date (YYYY-MM-DD), or invalid limit (integer from 1 to 200).',
+};
+
+// USDC は vanillaGate の settle 例外も 503。JPYC は設定・preflight・予算の拒否が 503、
+// broadcast 後の pending は 202。保証は今回の要求だけに限定し、過去の課金状態を断定しない。
+const USDC_MONITOR_503 = {
+  description:
+    'The payment facility is temporarily unavailable (payment_facility_unavailable). Settlement may already have been submitted; check payment status before retrying.',
+};
+const JPYC_MONITOR_503 = {
+  description:
+    'The payment facility is temporarily unavailable (payment_facility_unavailable or a facilitator configuration, preflight or budget error). No new settlement is submitted by this request; an earlier payment may already have settled.',
+};
 
 // JPYC Service Monitor (両通貨版共通)。実装 (lib/directory/serviceMonitor.ts の
 // parseServiceMonitorQuery) と一致させる — ずれるとエージェントが 400 を踏む。
@@ -67,9 +83,12 @@ export const VANILLA_DIRECTORY_OPENAPI_PATHS = {
             },
           },
         },
-        '400': JPYC_LIVE_400,
+        '400': MONITOR_400,
         '402': JPYC_LIVE_402,
-        '503': JPYC_LIVE_503,
+        '503': {
+          description:
+            'Monitor storage is temporarily unavailable (storage_unavailable), or the payment facility is unavailable (payment_facility_unavailable). Storage failures skip settlement for this request. If payment settlement fails, settlement may already have been submitted; check payment status before retrying.',
+        },
       },
     },
   },
@@ -120,9 +139,9 @@ export const VANILLA_DIRECTORY_OPENAPI_PATHS = {
             },
           },
         },
-        '400': JPYC_LIVE_400,
+        '400': MONITOR_400,
         '402': JPYC_LIVE_402,
-        '503': JPYC_LIVE_503,
+        '503': USDC_MONITOR_503,
       },
     },
   },
@@ -153,9 +172,12 @@ export const JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS = {
             },
           },
         },
-        '400': JPYC_LIVE_400,
-        '402': { description: 'Payment required (x402 challenge with accepts)' },
-        '503': JPYC_LIVE_503,
+        '400': MONITOR_400,
+        '402': { $ref: '#/components/responses/PaymentRequired' },
+        '503': {
+          description:
+            'Monitor storage is temporarily unavailable (storage_unavailable), or the payment facility is unavailable (payment_facility_unavailable or a facilitator configuration, preflight or budget error). No new settlement is submitted by this request; an earlier payment may already have settled.',
+        },
       },
     },
   },
@@ -180,9 +202,9 @@ export const JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS = {
             },
           },
         },
-        '400': JPYC_LIVE_400,
-        '402': { description: 'Payment required (x402 challenge with accepts)' },
-        '503': JPYC_LIVE_503,
+        '400': MONITOR_400,
+        '402': { $ref: '#/components/responses/PaymentRequired' },
+        '503': JPYC_MONITOR_503,
       },
     },
   },

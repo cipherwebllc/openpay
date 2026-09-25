@@ -104,7 +104,7 @@ export function buildOpenApiDocument(): Record<string, unknown> | null {
         ...OPENAPI_DOCUMENT.components.responses,
         StorageUnavailable: {
           description:
-            'The shop snapshot could not be completed before payment verification.',
+            'The request could not be completed because required data or storage is temporarily unavailable.',
           content: {
             'application/json': {
               schema: { $ref: '#/components/schemas/Error' },
