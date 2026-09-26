@@ -26,6 +26,21 @@ const RECENT_MAX = 5;
 const LABEL_MAX = 20;
 type RecentWallet = { address: string; label?: string; color?: AgentColor; icon?: AgentIcon };
 type WalletLook = Omit<RecentWallet, 'address'>;
+const hasLook = (item: RecentWallet) => Boolean(item.label || item.color || item.icon);
+
+// 上限を超えたら、見た目 (名前・色・アイコン) のない Wallet から落とす。利用者が手をかけた見た目を、
+// 打ち間違えたアドレスを何件か表示しただけで黙って失わないように。先頭 (表示中の Wallet) は落とさない。
+function trimRecent(list: RecentWallet[]): RecentWallet[] {
+  const next = [...list];
+  while (next.length > RECENT_MAX) {
+    let drop = next.length - 1;
+    for (let index = next.length - 1; index > 0; index -= 1) {
+      if (!hasLook(next[index])) { drop = index; break; }
+    }
+    next.splice(drop, 1);
+  }
+  return next;
+}
 const sameAddress = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 function readRecent(): RecentWallet[] {
@@ -156,7 +171,7 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
     if (!restored || !address) return;
     setRecent((current) => {
       const existing = current.find((item) => sameAddress(item.address, address));
-      const next = [existing ? { ...existing, address } : { address }, ...current.filter((item) => !sameAddress(item.address, address))].slice(0, RECENT_MAX);
+      const next = trimRecent([existing ? { ...existing, address } : { address }, ...current.filter((item) => !sameAddress(item.address, address))]);
       writeRecent(next);
       return next;
     });
@@ -170,8 +185,8 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
       const next = current.map((item) => {
         if (!sameAddress(item.address, address)) return item;
         const merged = { ...item, ...patch };
-        // 空の名前・未選択は項目ごと消す (控えに空文字や undefined を残さない)。
-        return Object.fromEntries(Object.entries(merged).filter(([, value]) => value !== undefined && value !== '')) as RecentWallet;
+        // 空白だけの名前・未選択は項目ごと消す (控えに空文字や undefined を残さない)。入力中の値は切り詰めない (打った空白を消さない)。
+        return Object.fromEntries(Object.entries(merged).filter(([, value]) => (typeof value === 'string' ? value.trim() !== '' : value !== undefined))) as RecentWallet;
       });
       writeRecent(next);
       return next;

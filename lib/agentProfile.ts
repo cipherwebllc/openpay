@@ -36,8 +36,9 @@ export function isAgentIcon(value: unknown): value is AgentIcon {
 }
 
 // アイコン未設定のときの丸。アドレスの先頭から 2 つの色相を作るだけの見分け用で、種類や所有の推測には使わない。
+// 呼び出し元は isAddress を通したアドレスだけを渡す (先頭 8 桁は必ず 16 進)。
 export function addressHues(address: string): readonly [number, number] {
   const hex = address.slice(2).toLowerCase();
-  const hue = (from: number) => (Number.parseInt(hex.slice(from, from + 4), 16) || 0) % 360;
+  const hue = (from: number) => Number.parseInt(hex.slice(from, from + 4), 16) % 360;
   return [hue(0), hue(4)];
 }

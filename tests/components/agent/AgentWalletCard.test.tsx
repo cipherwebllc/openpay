@@ -5,6 +5,7 @@ import type { AgentActivity } from '@/components/agent/AgentActivity';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { AgentWalletCard } from '@/components/agent/AgentWalletCard';
+import { getAddress } from 'viem';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
 import { chainNameForId } from '@/lib/chains';
 import { agentPageContentFor } from '@/lib/agentPage';
@@ -402,6 +403,35 @@ describe('AgentWalletCard', () => {
     fireEvent.click(screen.getByRole('radio', { name: C.colorNames.ink }));
     fireEvent.click(screen.getByRole('radio', { name: C.iconNone }));
     expect(JSON.parse(window.localStorage.getItem('openpay.agent.recent')!)[0]).toEqual({ address });
+  });
+  it('never saves a whitespace-only name, but keeps the spaces while typing a real one', () => {
+    state.query = `address=${address}`;
+    render(<AgentWalletCard purchases={purchases} c={C} activity={activity} />);
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    fireEvent.change(screen.getByLabelText(C.nameLabel), { target: { value: '   ' } });
+    expect(JSON.parse(window.localStorage.getItem('openpay.agent.recent')!)).toEqual([{ address }]);
+    fireEvent.change(screen.getByLabelText(C.nameLabel), { target: { value: 'My ' } });
+    expect(screen.getByLabelText(C.nameLabel)).toHaveValue('My ');
+  });
+  it('evicts wallets without a look first when the recent list overflows, and keeps a look across address casing', () => {
+    const styled = { address: '0xabcdefabcdefabcdefabcdefabcdefabcdef0003', label: 'Main', color: 'rose' };
+    const plain = ['0x4444444444444444444444444444444444444444', '0x5555555555555555555555555555555555555555', '0x6666666666666666666666666666666666666666'].map((a) => ({ address: a }));
+    // 見た目つきを末尾に置く: 単純に末尾から落とすと消えてしまう位置。
+    window.localStorage.setItem('openpay.agent.recent', JSON.stringify([...plain, { address: '0x7777777777777777777777777777777777777777' }, styled]));
+    state.query = `address=${address}`;
+    render(<AgentWalletCard purchases={purchases} c={C} activity={activity} />);
+    const saved = JSON.parse(window.localStorage.getItem('openpay.agent.recent')!) as { address: string }[];
+    // 6 件目を足しても、見た目つきの Main は残り、いちばん後ろの見た目なしが落ちる。
+    expect(saved).toHaveLength(5);
+    expect(saved[0]).toEqual({ address });
+    expect(saved).toContainEqual(styled);
+    expect(saved.map((item) => item.address)).not.toContain('0x7777777777777777777777777777777777777777');
+    // 大文字小文字違いで同じアドレスを表示しても、見た目は引き継ぐ。
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    const checksummed = getAddress(styled.address);
+    expect(checksummed).not.toBe(styled.address);
+    fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: checksummed } });
+    expect(screen.getByText('Main')).toBeInTheDocument();
   });
   it('drops unknown colors and icons from the saved look', () => {
     window.localStorage.setItem('openpay.agent.address', address);
