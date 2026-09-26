@@ -8,6 +8,7 @@ import { AgentWalletCard } from '@/components/agent/AgentWalletCard';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
 import { chainNameForId } from '@/lib/chains';
 import { agentPageContentFor } from '@/lib/agentPage';
+import { resetAgentView, useAgentHasWallet } from '@/hooks/useAgentView';
 
 const C = agentPageContentFor('en').wallet;
 const activity = agentPageContentFor('en').activity;
@@ -35,9 +36,35 @@ vi.mock('next/dynamic', () => ({ default: vi.fn(() => function Dynamic(props: Co
   state.fund(props);
   return <button type="button" onClick={props.onSent}>Mock funding confirmed</button>;
 }), }));
-beforeEach(() => { flags.enabled = true; window.localStorage.clear(); window.history.replaceState(null, '', '/'); state.query = ''; state.data = undefined; state.isError = false; state.connected = false; vi.clearAllMocks(); });
+function ViewProbe() {
+  const hasWallet = useAgentHasWallet();
+  return <output data-testid="view">{String(hasWallet)}</output>;
+}
+beforeEach(() => { resetAgentView(); flags.enabled = true; window.localStorage.clear(); window.history.replaceState(null, '', '/'); state.query = ''; state.data = undefined; state.isError = false; state.connected = false; vi.clearAllMocks(); });
 
 describe('AgentWalletCard', () => {
+  it('decides the page order once restored: setup without an address, wallet with one', () => {
+    const empty = render(<><ViewProbe /><AgentWalletCard c={C} activity={activity} purchases={purchases} /></>);
+    expect(screen.getByTestId('view')).toHaveTextContent('false');
+    fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
+    fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: address } });
+    expect(screen.getByTestId('view')).toHaveTextContent('true');
+    // 打ち直しの途中で空になっても初回の並びへ戻さない (入力中の欄が節ごと画面外へ飛ぶのを防ぐ)。
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: '' } });
+    expect(screen.getByTestId('view')).toHaveTextContent('true');
+    empty.unmount();
+    resetAgentView();
+    window.localStorage.setItem('openpay.agent.address', address);
+    render(<><ViewProbe /><AgentWalletCard c={C} activity={activity} purchases={purchases} /></>);
+    expect(screen.getByTestId('view')).toHaveTextContent('true');
+  });
+  it('offers the AI Store instead of a jump back to the connect card on the balance card', () => {
+    state.query = `address=${address}`;
+    render(<AgentWalletCard c={C} activity={activity} purchases={purchases} />);
+    expect(screen.getByRole('link', { name: C.storeCta })).toHaveAttribute('href', '/en/discovery');
+    expect(document.querySelector('a[href="#agent-connect"]')).toBeNull();
+  });
   it('renders purchases below activity with the Agent address and server-supplied copy', () => {
     state.query = `address=${address}`;
     const { container } = render(<AgentWalletCard c={C} activity={activity} purchases={purchases} />);
@@ -74,8 +101,9 @@ describe('AgentWalletCard', () => {
     const empty = render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={c} activity={agentPageContentFor(locale).activity} />);
     expect(screen.getByRole('heading', { name: c.title })).toBeVisible();
     // 初期状態は入力欄を出さない: ウォレットは「Agent を接続」のセットアップで作られ、Agent が返すリンクで反映される。
+    // 接続カードは初回訪問の並びで真上にあるので、そこへ戻るリンクは置かない。
     expect(screen.getByText(c.emptyLead)).toBeVisible();
-    expect(screen.getByRole('link', { name: c.emptyConnectCta })).toHaveAttribute('href', '#agent-connect');
+    expect(document.querySelector('a[href="#agent-connect"]')).toBeNull();
     expect(screen.getByLabelText(c.inputLabel)).not.toBeVisible();
     // まだ何も読み取っていないので、読み取りの注記も出さない。
     expect(screen.queryByText(c.ownershipNote)).toBeNull();
@@ -322,7 +350,7 @@ describe('AgentWalletCard', () => {
     fireEvent.change(screen.getByLabelText('Agent wallet address'), { target: { value: address } });
     expect(window.localStorage.getItem('openpay.agent.address')).toBe(address);
     expect(screen.getByRole('button', { name: 'Add funds' })).toHaveAttribute('aria-controls', 'agent-fund');
-    expect(screen.getByRole('link', { name: 'Connect agent' })).toHaveAttribute('href', '#agent-connect');
+    expect(screen.getByRole('link', { name: C.storeCta })).toHaveAttribute('href', '/en/discovery');
     first.unmount();
     render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(screen.getByLabelText('Agent wallet address')).toHaveValue(address);
