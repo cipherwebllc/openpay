@@ -37,6 +37,30 @@ test.describe('landing / (LP)', () => {
     await expect(createCta).toHaveAttribute('href', '/ja/create');
   });
 
+  // 2026-09-26: 1 行固定のビッグナンバー (en "No sign-up" 等) が狭いカードからはみ出し、
+  // /en の 390px 幅で文書幅が 411px になっていた。文字サイズをカード幅に合わせる修正の回帰防止。
+  test('ビッグナンバーはカードに収まり、トップに横はみ出しが無い (ja/en)', async ({ page }) => {
+    for (const locale of ['ja', 'en']) {
+      await page.goto(`/${locale}`);
+      const result = await page.evaluate(() => {
+        const focals = [...document.querySelectorAll('[data-focal]')];
+        const overflowing = focals.flatMap((p) => {
+          const card = p.closest('li');
+          if (!card) return [p.textContent];
+          const contentRight = card.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(card).paddingRight);
+          const range = document.createRange();
+          range.selectNodeContents(p);
+          return range.getBoundingClientRect().right > contentRight + 0.5 ? [p.textContent] : [];
+        });
+        const root = document.documentElement;
+        return { count: focals.length, overflowing, pageOverflow: root.scrollWidth - root.clientWidth };
+      });
+      expect(result.count, locale).toBeGreaterThan(0);
+      expect(result.overflowing, locale).toEqual([]);
+      expect(result.pageOverflow, locale).toBe(0);
+    }
+  });
+
   test('en: Hero の 2 CTA は英語表記で描画される', async ({ page }) => {
     await page.goto('/en');
     await expect(

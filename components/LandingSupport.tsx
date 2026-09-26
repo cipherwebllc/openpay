@@ -8,7 +8,9 @@
 // (dogfooding)。href は canonical な本番 URL (open-pay.jp) を指す (運営の固定プロフなので preview/local
 // でも本番ページへ遷移する)。トークン/チェーン選択はプロフ側 (JPYC Polygon/Kaia + USDC) が担う。
 
+import type { CSSProperties } from 'react';
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
+import { focalFitCqi } from '@/lib/focalFit';
 import Image from 'next/image';
 import { getTranslations } from 'next-intl/server';
 import {
@@ -65,13 +67,15 @@ export async function LandingSupport() {
         <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('supportSubtitle')}</p>
       </div>
 
-      {/* 4 方法の利用料カード (導入メリットと同じビッグナンバー様式)。focal は "1% / 3%" が
-          最も幅広いため text-3xl/4xl (benefits より一段小さめ) で 2 列でも 1 行に収める。 */}
+      {/* 4 方法の利用料カード (導入メリットと同じビッグナンバー様式)。focal は benefits より一段小さい
+          最大 (1.875rem / sm 2.25rem) と「カード幅に収まる大きさ」の小さい方で 1 行に収める (lib/focalFit.ts)。 */}
       <ul className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {FEE_CARDS.map(({ id, audience, Icon }) => (
+        {FEE_CARDS.map(({ id, audience, Icon }) => {
+          const focal = t(`supportFee${id}Focal`, LANDING_PAYMENT_FEE_VALUES);
+          return (
           <li
             key={id}
-            className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6"
+            className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 [container-type:inline-size] sm:p-6"
           >
             <span className="flex items-center justify-between gap-2">
               <Icon className="h-5 w-5 text-brand" aria-hidden />
@@ -82,9 +86,11 @@ export async function LandingSupport() {
               </span>
             </span>
             <p
-              className={`mt-4 whitespace-nowrap break-keep text-3xl font-extrabold leading-none sm:text-4xl ${FEE_TONE[audience].focal}`}
+              className={`mt-4 whitespace-nowrap break-keep text-[length:min(1.875rem,var(--focal-fit))] font-extrabold leading-none sm:text-[length:min(2.25rem,var(--focal-fit))] ${FEE_TONE[audience].focal}`}
+              style={{ '--focal-fit': focalFitCqi(focal) } as CSSProperties}
+              data-focal=""
             >
-              {t(`supportFee${id}Focal`, LANDING_PAYMENT_FEE_VALUES)}
+              {focal}
             </p>
             <h3 className="mt-3 text-sm font-semibold text-slate-900 sm:text-base">
               {t(`supportFee${id}Title`)}
@@ -93,7 +99,8 @@ export async function LandingSupport() {
               {t(`supportFee${id}Body`, LANDING_PAYMENT_FEE_VALUES)}
             </p>
           </li>
-        ))}
+          );
+        })}
       </ul>
 
       <p className="mx-auto mt-6 max-w-2xl text-center text-xs leading-relaxed text-slate-500">
