@@ -28,6 +28,9 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
       kovaWallet: { label: t('kovaWallet.label'), hint: t('kovaWallet.hint') },
       kovaAgentAddress: { label: t('kovaAgentAddress.label'), hint: t('kovaAgentAddress.hint') },
     } : {}),
+    ...(mode === 'agent-pays-metamask' ? {
+      metamaskAgentAddress: { label: t('metamaskAgentAddress.label'), hint: t('metamaskAgentAddress.hint') },
+    } : {}),
   };
   function recordInteraction(nextClient = client, nextMode = mode) {
     if (generated.current) return;
@@ -57,7 +60,7 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
           </select>
         </label>
         {mode !== 'human-pays' ? (Object.keys(fields) as AgentConfigField[]).map((field) => {
-          const showValidation = !field.startsWith('kova') || touched[field];
+          const showValidation = (!field.startsWith('kova') && field !== 'metamaskAgentAddress') || touched[field];
           const hasError = showValidation && invalid.includes(field);
           return (
             <div key={field} className="min-w-0">
@@ -76,6 +79,7 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
         </div>
       ) : <p className="mt-4 text-sm text-slate-600">{c.humanPaysNote}</p>}
       {mode === 'agent-pays-kova' ? <div className="mt-4 space-y-2 text-xs leading-relaxed text-slate-600"><p>{t('providerNote')}</p><p>{t('policyNote')}</p><p>{t('balanceNote')}</p><p>{t('setupNote')}</p><p>{t('fundingNote')}</p></div> : null}
+      {mode === 'agent-pays-metamask' ? <p className="mt-4 text-xs leading-relaxed text-slate-600">{t('metamaskNote')}</p> : null}
       {output !== null ? (
         <div>
           <CodeBlock label={c.outputLabel[client]} code={output} />

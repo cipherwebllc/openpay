@@ -96,6 +96,7 @@ describe('AgentConfigGenerator', () => {
       ['human-pays', t.modeOptions['human-pays']],
       ['agent-pays', t.modeOptions['agent-pays']],
       ['agent-pays-kova', t.modeOptions['agent-pays-kova']],
+      ['agent-pays-metamask', t.modeOptions['agent-pays-metamask']],
     ]);
     expect(screen.queryByLabelText(t.kovaWallet.label)).toBeNull();
     expect(screen.queryByText(t.policyNote)).toBeNull();
@@ -154,6 +155,73 @@ describe('AgentConfigGenerator', () => {
     await user.selectOptions(mode, 'agent-pays');
     expect(screen.queryByLabelText(t.kovaAgentAddress.label)).toBeNull();
     expect(screen.queryByText(t.providerNote)).toBeNull();
+    expect(container.querySelector('pre')?.textContent).toContain('SIGNER_MODE=keystore');
+    expect(screen.getByText(c.keyNote)).toBeVisible();
+    expect(screen.getByText(c.feeNote)).toBeVisible();
+  });
+  it.each(['ja', 'en'])('shows MetaMask fields and disclosures only in MetaMask mode in %s, and hides invalid output', async (locale) => {
+    const user = userEvent.setup();
+    const { container } = renderGenerator(locale);
+    const c = agentPageContentFor(locale).generator;
+    const t = (locale === 'ja' ? ja : en).AgentConfigGenerator;
+    await user.click(screen.getByText(c.title));
+    const mode = screen.getByLabelText(c.modeLabel);
+    expect(Array.from(mode.querySelectorAll('option')).map((option) => [option.value, option.textContent])).toEqual([
+      ['human-pays', t.modeOptions['human-pays']],
+      ['agent-pays', t.modeOptions['agent-pays']],
+      ['agent-pays-kova', t.modeOptions['agent-pays-kova']],
+      ['agent-pays-metamask', t.modeOptions['agent-pays-metamask']],
+    ]);
+    expect(screen.queryByText(t.metamaskNote)).toBeNull();
+    expect(screen.queryByLabelText(t.metamaskAgentAddress.label)).toBeNull();
+    await user.selectOptions(mode, 'agent-pays-metamask');
+    expect(screen.queryByLabelText(t.kovaWallet.label)).toBeNull();
+    expect(screen.queryByLabelText(t.kovaAgentAddress.label)).toBeNull();
+    const address = screen.getByLabelText(t.metamaskAgentAddress.label);
+    expect(address).toBeVisible();
+    expect(address).toHaveAttribute('inputmode', 'text');
+    expect(address).not.toHaveAttribute('aria-invalid');
+    expect(address).toHaveAccessibleDescription(t.metamaskAgentAddress.hint);
+    expect(screen.queryByText(c.invalid)).toBeNull();
+    for (const field of [address]) {
+      expect(field).toHaveAttribute('autocapitalize', 'none');
+      expect(field).toHaveAttribute('autocorrect', 'off');
+      expect(field).toHaveAttribute('spellcheck', 'false');
+    }
+    expect(container.querySelector('pre')).toBeNull();
+    for (const field of Object.values(c.fields)) expect(screen.getByLabelText(field.label)).toBeVisible();
+    expect(screen.getByRole('checkbox')).toBeVisible();
+    for (const note of [t.metamaskNote]) expect(screen.getByText(note)).toBeVisible();
+    expect(screen.queryByText(c.keyNote)).toBeNull();
+    expect(screen.getByText(c.feeNote)).toBeVisible();
+    fireEvent.blur(address);
+    expect(address).toHaveAttribute('aria-invalid', 'true');
+    expect(address).toHaveAccessibleDescription(`${t.metamaskAgentAddress.hint} ${c.invalid}`);
+    expect(container.querySelector('pre')).toBeNull();
+    fireEvent.change(address, { target: { value: '0x1234' } });
+    expect(address).toHaveAttribute('aria-invalid', 'true');
+    expect(address).toHaveAccessibleDescription(`${t.metamaskAgentAddress.hint} ${c.invalid}`);
+    expect(container.querySelector('pre')).toBeNull();
+    expect(screen.queryByRole('button', { name: c.copy })).toBeNull();
+    fireEvent.change(address, { target: { value: '0x52908400098527886E0F7030069857D2E4169EE7' } });
+    expect(address).toHaveAttribute('aria-invalid', 'false');
+    expect(container.querySelector('pre')?.textContent).toContain('SIGNER_MODE=metamask');
+    expect(screen.getByText(c.feeNote)).toBeVisible();
+    expect(screen.queryByText(c.keyNote)).toBeNull();
+    await user.click(screen.getByRole('button', { name: c.copy }));
+    const output = await navigator.clipboard.readText();
+    expect(output).toContain('METAMASK_AGENT_ADDRESS=0x52908400098527886E0F7030069857D2E4169EE7');
+    expect(output).not.toMatch(/BUYER_PRIVATE_KEY|MM_/);
+    expect(track).toHaveBeenLastCalledWith('agent_config_copy', { locale, client: 'claude-code', mode: 'agent-pays-metamask' });
+    fireEvent.change(address, { target: { value: 'invalid' } });
+    await user.selectOptions(mode, 'human-pays');
+    expect(container.querySelector('pre')?.textContent).toContain('openpay-order-mcp');
+    expect(container.querySelector('pre')?.textContent).not.toMatch(/SIGNER_MODE|METAMASK_|MM_/);
+    expect(screen.queryByText(c.feeNote)).toBeNull();
+    expect(screen.queryByText(t.metamaskNote)).toBeNull();
+    await user.selectOptions(mode, 'agent-pays');
+    expect(screen.queryByLabelText(t.metamaskAgentAddress.label)).toBeNull();
+    expect(screen.queryByText(t.metamaskNote)).toBeNull();
     expect(container.querySelector('pre')?.textContent).toContain('SIGNER_MODE=keystore');
     expect(screen.getByText(c.keyNote)).toBeVisible();
     expect(screen.getByText(c.feeNote)).toBeVisible();

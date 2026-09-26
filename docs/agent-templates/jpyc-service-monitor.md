@@ -60,7 +60,7 @@ A weekly change feed for Japan-related JPYC/Web3 services, designed to be wired 
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["--yes", "openpay-x402-mcp@0.18"],
+      "args": ["--yes", "openpay-x402-mcp@0.19"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "3",

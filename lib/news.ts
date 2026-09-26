@@ -34,6 +34,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'agent-metamask-2026-09-26',
+    date: '2026-09-26',
+    category: 'feature',
+    title: {
+      ja: 'Agent の支払いに MetaMask Agent Wallet を選べるようになりました（MCP 0.19）',
+      en: 'Agents can now pay through MetaMask Agent Wallet (MCP 0.19)',
+    },
+    body: {
+      ja: 'openpay-x402-mcp 0.19 に SIGNER_MODE=metamask を追加しました。MetaMask Agent Wallet (CLI `mm`) の server wallet に署名だけを頼み、OpenPay は MetaMask の鍵やログイン情報を受け取りません。Agent ページの設定生成で「Agent が支払う (MetaMask Agent Wallet)」を選ぶと登録用の設定が作れ、購入履歴の紐づけ (wallet_prove) も使えます。7.0.0 の実測では、この署名に 2FA は要求されず、MetaMask 側の allowed_chains と outflow 上限も適用されませんでした。金額の上限は MCP の設定だけが効きます。失ってもよい少額だけを入れてください。',
+      en: 'openpay-x402-mcp 0.19 adds SIGNER_MODE=metamask. The MCP asks a MetaMask Agent Wallet server wallet (CLI `mm`) only for signatures; OpenPay never receives MetaMask keys or login credentials. Choose "Agent pays (MetaMask Agent Wallet)" in the Agent page config generator to get the registration config; purchase-history binding (wallet_prove) works too. In our test with 7.0.0, this signature required no 2FA and MetaMask\'s allowed_chains and outflow limits did not apply, so only the MCP settings cap amounts — fund the wallet with a small amount you can afford to lose.',
+    },
+    link: { href: '/agent', labelJa: 'Agent ページを開く', labelEn: 'Open the Agent page' },
+  },
+  {
     id: 'agent-kova-2026-09-25',
     date: '2026-09-25',
     category: 'feature',

@@ -19,9 +19,9 @@ export const AGENT_MCP_PACKAGE = 'openpay-x402-mcp';
 /**
  * 生成するコマンドは minor を固定する。無固定の `npx` だと、将来の publish が既に配った設定の挙動を
  * 遡って変えてしまい、Web を戻しても取り消せない。MCP の publish 前は Web の pin が
- * 1 minor 遅れることを許容する (tests/lib/agentSetup.test.ts)。Kova を選べる pin は 0.18 以降。
+ * 1 minor 遅れることを許容する (tests/lib/agentSetup.test.ts)。Kova を選べる pin は 0.18 以降、MetaMask は 0.19 以降。
  */
-export const AGENT_MCP_VERSION = '0.18';
+export const AGENT_MCP_VERSION = '0.19';
 export const AGENT_MCP_SPEC = `${AGENT_MCP_PACKAGE}@${AGENT_MCP_VERSION}`;
 export const AGENT_PAYS_SERVER = 'openpay-x402';
 export const HUMAN_PAYS_SERVER = 'openpay-order';
@@ -42,7 +42,7 @@ export const AGENT_CLIENTS = [
 ] as const;
 export type AgentClient = (typeof AGENT_CLIENTS)[number];
 
-export const AGENT_MODES = ['human-pays', 'agent-pays', 'agent-pays-kova'] as const;
+export const AGENT_MODES = ['human-pays', 'agent-pays', 'agent-pays-kova', 'agent-pays-metamask'] as const;
 export type AgentMode = (typeof AGENT_MODES)[number];
 
 export type AgentConfigInput = {
@@ -55,6 +55,7 @@ export type AgentConfigInput = {
   catalogTrust: boolean;
   kovaWallet: string;
   kovaAgentAddress: string;
+  metamaskAgentAddress: string;
 };
 
 export type AgentConfigField =
@@ -63,7 +64,8 @@ export type AgentConfigField =
   | 'maxDailyJpyc'
   | 'allowedHosts'
   | 'kovaWallet'
-  | 'kovaAgentAddress';
+  | 'kovaAgentAddress'
+  | 'metamaskAgentAddress';
 
 export const DEFAULT_AGENT_CONFIG_INPUT: AgentConfigInput = {
   maxPerCallJpyc: AGENT_LIMIT_DEFAULTS.maxPerCallJpyc,
@@ -73,6 +75,7 @@ export const DEFAULT_AGENT_CONFIG_INPUT: AgentConfigInput = {
   catalogTrust: AGENT_LIMIT_DEFAULTS.catalogTrust,
   kovaWallet: '',
   kovaAgentAddress: '',
+  metamaskAgentAddress: '',
 };
 
 // guards.mjs parseJpycToAtomic と同じ受理形 (小数 18 桁まで・0 より大きい)。
@@ -128,6 +131,9 @@ export function invalidAgentConfigFields(
     }
     if (!isAddress(input.kovaAgentAddress)) invalid.push('kovaAgentAddress');
   }
+  if (mode === 'agent-pays-metamask' && !isAddress(input.metamaskAgentAddress)) {
+    invalid.push('metamaskAgentAddress');
+  }
   return invalid;
 }
 
@@ -138,12 +144,15 @@ export function buildAgentEnv(input: AgentConfigInput, mode: Exclude<AgentMode, 
     throw new Error('agent config input is invalid');
   }
   const entries: [string, string][] = [
-    ['SIGNER_MODE', mode === 'agent-pays-kova' ? 'kova' : 'keystore'],
+    ['SIGNER_MODE', mode === 'agent-pays-metamask' ? 'metamask' : mode === 'agent-pays-kova' ? 'kova' : 'keystore'],
     ['MAX_PER_CALL_JPYC', input.maxPerCallJpyc],
     ['MAX_SESSION_JPYC', input.maxSessionJpyc],
   ];
   if (mode === 'agent-pays-kova') {
     entries.push(['KOVA_WALLET', input.kovaWallet], ['KOVA_AGENT_ADDRESS', input.kovaAgentAddress]);
+  }
+  if (mode === 'agent-pays-metamask') {
+    entries.push(['METAMASK_AGENT_ADDRESS', input.metamaskAgentAddress]);
   }
   if (input.maxDailyJpyc !== '') {
     entries.push(['MAX_DAILY_JPYC', input.maxDailyJpyc]);
@@ -232,7 +241,7 @@ export function buildSetupPrompt(locale: string): string {
       `Run \`curl -sL ${AGENT_SETUP_URL}\` and follow the returned instructions.`,
       '',
       'Rules:',
-      '- Never ask me for a private key, and never read, print, log, or send one anywhere (not to this chat, not to OpenPay, not to any third party). The MCP server creates the wallet key on this machine and shows you only its public address.',
+      '- Never ask me for a private key, and never read, print, log, or send one anywhere (not to this chat, not to OpenPay, not to any third party). For Local Wallet, the MCP server creates the wallet key on this machine and shows you only its public address. For Kova, the person manages the wallet in Kova. For MetaMask, the key stays in MetaMask’s server wallet; this machine only needs an `mm` login performed by the person.',
       '- Assume a dedicated low-balance agent wallet, not my main wallet.',
       '- Set the per-call, per-session, and daily spending limits and the allowed hosts. Ask me for the amounts if I have not given them.',
       '- Do not make any real payment during setup.',
@@ -246,7 +255,7 @@ export function buildSetupPrompt(locale: string): string {
     `\`curl -sL ${AGENT_SETUP_URL}\` を実行し、返ってきた手順に従ってください。`,
     '',
     'ルール:',
-    '- 秘密鍵を私に尋ねないでください。秘密鍵を読み出したり、このチャット・OpenPay・その他の第三者へ表示・記録・送信したりしないでください。ウォレットの鍵は MCP サーバーがこのマシン上で作り、あなたには公開アドレスだけが返ります。',
+    '- 秘密鍵を私に尋ねないでください。秘密鍵を読み出したり、このチャット・OpenPay・その他の第三者へ表示・記録・送信したりしないでください。Local Wallet では、ウォレットの鍵は MCP サーバーがこのマシン上で作り、あなたには公開アドレスだけが返ります。Kova では、人が Kova でウォレットを管理します。MetaMask では、鍵は MetaMask の server wallet に置かれ、このマシンでは人が `mm` にログインするだけです。',
     '- 支払いには、メインのウォレットではなく少額の専用 Agent Wallet を使う前提で進めてください。',
     '- 1 回・セッション・1 日の支払い上限と、接続先の制限を設定してください。金額を私が指定していなければ尋ねてください。',
     '- 設定中に実際の支払いはしないでください。',
