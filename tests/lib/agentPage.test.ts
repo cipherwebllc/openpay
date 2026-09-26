@@ -37,6 +37,8 @@ describe('agent page content', () => {
     expect(ja).toHaveLength(7);
     expect(new Set(ja.map((item) => item.id)).size).toBe(7);
     expect(ja.map(({ id, kind }) => ({ id, kind }))).toEqual(en.map(({ id, kind }) => ({ id, kind })));
+    // 最初に見える 3 件 (AgentTryPrompts の PRIMARY_COUNT) は「買う・注文する」。並べ替えで支払いの注記や実績がたたまれないよう固定する。
+    expect(ja.slice(0, 3).map((item) => item.id)).toEqual(['catalog', 'buy-monitor', 'order']);
   });
   it.each(['ja', 'en'])('keeps history-web free in %s', (locale) => {
     expect(agentPageContentFor(locale).tryPrompts.items.find((item) => item.id === 'history-web')?.kind).toBe('free');
