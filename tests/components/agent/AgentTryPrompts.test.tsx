@@ -51,6 +51,8 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
     render(<AgentTryPrompts locale={locale} c={c} />);
     expect(screen.getAllByRole('listitem')).toHaveLength(6);
     expect(screen.queryByText(c.items.find((item) => item.id === 'history-web')!.prompt)).toBeNull();
+    // たたむ件数も表示中の件数に合わせる (7 件中 history-web を除いた残り 3 件)。
+    expect(screen.getByText(c.moreLabel.replace('{count}', '3'))).toBeVisible();
   });
 
   it('copies each exact prompt, changes only its button and tracks only its ID after success', async () => {

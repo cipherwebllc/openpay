@@ -115,6 +115,12 @@ describe('AgentPurchases', () => {
     expect(track).not.toHaveBeenCalled();
   });
 
+  it('opens the connect entry up front when a binding link arrives while no wallet is connected', () => {
+    landing();
+    mount({ isConnected: false });
+    expect(screen.getByRole('status')).toHaveTextContent(c.continueAfterSignIn);
+    expect(screen.getByRole('button', { name: 'Mock connect' })).toBeVisible();
+  });
   it('lets the owner copy the step-1 request in place, tracked by id only (separate from the try-prompt card)', async () => {
     const user = userEvent.setup();
     h.sessionAddress = owner;
@@ -495,6 +501,7 @@ describe('AgentPurchases', () => {
     mount({ isConnected: false });
     expect(screen.queryByRole('button', { name: c.signIn })).toBeNull();
     // ウォレットの一覧はたたんだ入口の中 (開くと header と同じ接続の部品)。
+    expect(screen.getByRole('button', { name: 'Mock connect' })).not.toBeVisible();
     fireEvent.click(screen.getByText(c.connectFirst));
     expect(screen.getByRole('button', { name: 'Mock connect' })).toBeVisible();
     expect(h.signIn).not.toHaveBeenCalled();
