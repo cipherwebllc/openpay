@@ -15,6 +15,39 @@ import { defaultDeploymentForSymbol } from '@/lib/tokens';
 
 // 再訪時に残高カードをすぐ出すための端末ローカルの控え (公開アドレスのみ・秘密ではない)。
 const STORAGE_KEY = 'openpay.agent.address';
+// 最近表示した Wallet (公開アドレスと、利用者が自分で付けた名前だけ)。Wallet の種類 (Kova 等) を
+// アドレスから推測しない — 名前は利用者が入力したときだけ出す。ここでの切替は「表示する Wallet」だけで、
+// Agent の署名方式は変わらない (切替は設定生成か Agent への依頼で行う)。
+const RECENT_KEY = 'openpay.agent.recent';
+const RECENT_MAX = 5;
+const LABEL_MAX = 20;
+type RecentWallet = { address: string; label?: string };
+const sameAddress = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+function readRecent(): RecentWallet[] {
+  // ブラウザ API の失敗や壊れた控えをページ描画へ波及させない (壊れた要素は捨てる)。
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item: unknown) => {
+      if (!item || typeof item !== 'object') return [];
+      const { address, label } = item as { address?: unknown; label?: unknown };
+      if (typeof address !== 'string' || !isAddress(address)) return [];
+      const name = typeof label === 'string' ? label.trim().slice(0, LABEL_MAX) : '';
+      return [name ? { address, label: name } : { address }];
+    }).slice(0, RECENT_MAX);
+  } catch {
+    return [];
+  }
+}
+
+function writeRecent(list: RecentWallet[]): void {
+  try {
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch {
+    // 控えの保存失敗は一覧が出ないだけで、表示中の Wallet には波及しない。
+  }
+}
 
 const QRCodeSVG = dynamic(() => import('qrcode.react').then((m) => m.QRCodeSVG), { ssr: false });
 const AgentFundFromWallet = dynamic(() => import('./AgentFundFromWallet').then((m) => m.AgentFundFromWallet), { ssr: false });
@@ -43,6 +76,7 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
   const inputRef = useRef<HTMLInputElement>(null);
   const [fundBusy, setFundBusy] = useState(false);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
+  const [recent, setRecent] = useState<RecentWallet[]>([]);
   // localStorage は SSR と初回描画に無いので mount 後に 1 回だけ読む。
   // ブラウザ API の失敗 (private mode 等) をページ描画へ波及させないための try-catch。
   useEffect(() => {
@@ -58,6 +92,7 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
       // 控えが読めなくても手入力で使える。
     }
     setInput(initial);
+    setRecent(readRecent());
     setRestored(true);
     function openFundFromHash() {
       if (window.location.hash === '#agent-fund') setFundOpen(true);
@@ -98,6 +133,26 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
       // 控えの保存失敗は次回の手入力で足りる。
     }
   }, [address, value, restored]);
+  useEffect(() => {
+    if (!restored || !address) return;
+    setRecent((current) => {
+      const existing = current.find((item) => sameAddress(item.address, address));
+      const next = [existing?.label ? { address, label: existing.label } : { address }, ...current.filter((item) => !sameAddress(item.address, address))].slice(0, RECENT_MAX);
+      writeRecent(next);
+      return next;
+    });
+  }, [address, restored]);
+  const currentLabel = address ? recent.find((item) => sameAddress(item.address, address))?.label ?? '' : '';
+  const otherRecent = recent.filter((item) => !address || !sameAddress(item.address, address));
+  function renameCurrent(name: string) {
+    if (!address) return;
+    const label = name.slice(0, LABEL_MAX);
+    setRecent((current) => {
+      const next = current.map((item) => (sameAddress(item.address, address) ? (label.trim() ? { address: item.address, label } : { address: item.address }) : item));
+      writeRecent(next);
+      return next;
+    });
+  }
   const deployment = defaultDeploymentForSymbol('jpyc');
   const balance = useReadContract({
     abi: erc20Abi,
@@ -165,11 +220,28 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
             }}>{c.useConnected}</button> : null}
           </div>
           {value && !address ? <p id="agent-wallet-error" className="mt-2 text-xs text-red-700">{c.invalidAddress}</p> : null}
+          {address ? <>
+            <label htmlFor="agent-wallet-label" className="mt-3 block text-sm font-medium">{c.labelInputLabel}</label>
+            <input id="agent-wallet-label" className={`mt-2 block w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 text-sm sm:max-w-xs ${focus}`} placeholder={c.labelPlaceholder} maxLength={LABEL_MAX} value={currentLabel} onChange={(e) => renameCurrent(e.target.value)} />
+          </> : null}
+          {otherRecent.length > 0 ? <div className="mt-4">
+            <p className="text-sm font-medium text-slate-700">{c.recentTitle}</p>
+            <ul className="mt-2 flex flex-wrap gap-2">
+              {otherRecent.map((item) => <li key={item.address.toLowerCase()}>
+                <button type="button" className={`min-h-11 rounded-xl bg-slate-100 px-3 py-2 text-left text-xs ${focus}`} onClick={() => {
+                  setInput(item.address);
+                  setEditing(false);
+                  // 押したボタンごと入力欄が畳まれる。フォーカスが body に落ちないよう「変更」へ移す。
+                  requestAnimationFrame(() => changeRef.current?.focus());
+                }}>{item.label ? <span className="font-bold">{item.label} </span> : null}<span className="font-mono">{item.address.slice(0, 6)}…{item.address.slice(-4)}</span></button>
+              </li>)}
+            </ul>
+          </div> : null}
         </div>
         {address ? (
           <div className="mt-4 grid grid-cols-1 gap-4 rounded-2xl bg-slate-900 p-5 text-white sm:p-6">
             <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
-              <span className="rounded-full bg-white/10 px-3 py-1 font-mono text-slate-200">{address.slice(0, 6)}…{address.slice(-4)}</span>
+              <span className="rounded-full bg-white/10 px-3 py-1 text-slate-200">{currentLabel ? <span className="font-bold">{currentLabel} · </span> : null}<span className="font-mono">{address.slice(0, 6)}…{address.slice(-4)}</span></span>
               {available ? <button type="button" className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-white ${focus}`} onClick={async () => { if (await copy(address)) setCopiedAddress(address); }}><Copy aria-hidden size={14} />{copied && copiedAddress === address ? c.copied : c.copyShort}</button> : null}
               <button ref={changeRef} type="button" aria-expanded={inputExpanded} aria-controls="agent-wallet-input" className={`rounded-lg px-2 py-1 text-xs text-white underline ${focus}`} onClick={() => setEditing((current) => !current)}>{c.changeAddress}</button>
             </div>

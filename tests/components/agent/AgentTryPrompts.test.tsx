@@ -23,12 +23,12 @@ afterEach(() => {
 describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
   const c = agentPageContentFor(locale).tryPrompts;
 
-  it('shows the heading, lead and six selectable prompts with payment notes only on paid items', () => {
+  it('shows the heading, lead and seven selectable prompts with payment notes only on paid items', () => {
     render(<AgentTryPrompts locale={locale} c={c} />);
     expect(screen.getByRole('heading', { level: 2, name: c.title })).toBeVisible();
     expect(screen.getByText(c.lead)).toBeVisible();
     const items = within(screen.getByRole('list')).getAllByRole('listitem');
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(7);
     for (const [index, item] of c.items.entries()) {
       const row = within(items[index]);
       expect(row.getByText(item.tag)).toBeVisible();
@@ -44,7 +44,7 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
   it('hides history-web when purchases are disabled', () => {
     flags.enableAgentPurchases = false;
     render(<AgentTryPrompts locale={locale} c={c} />);
-    expect(screen.getAllByRole('listitem')).toHaveLength(5);
+    expect(screen.getAllByRole('listitem')).toHaveLength(6);
     expect(screen.queryByText(c.items.find((item) => item.id === 'history-web')!.prompt)).toBeNull();
   });
 
@@ -53,17 +53,17 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
     const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
     render(<AgentTryPrompts locale={locale} c={c} />);
     const buttons = screen.getAllByRole('button', { name: c.copy });
-    expect(buttons).toHaveLength(6);
+    expect(buttons).toHaveLength(7);
 
     for (const [index, item] of c.items.entries()) {
       await user.click(buttons[index]);
       expect(write).toHaveBeenNthCalledWith(index + 1, item.prompt);
       expect(track).toHaveBeenNthCalledWith(index + 1, 'agent_try_prompt_copy', { locale, id: item.id });
       expect(screen.getAllByRole('button', { name: c.copied })).toEqual([buttons[index]]);
-      expect(screen.getAllByRole('button', { name: c.copy })).toHaveLength(5);
+      expect(screen.getAllByRole('button', { name: c.copy })).toHaveLength(6);
     }
-    expect(write).toHaveBeenCalledTimes(6);
-    expect(track).toHaveBeenCalledTimes(6);
+    expect(write).toHaveBeenCalledTimes(7);
+    expect(track).toHaveBeenCalledTimes(7);
   });
 
   it('uses visible button names and distinct prompt descriptions without aria-label overrides', () => {
@@ -71,13 +71,13 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
     const { container } = render(<AgentTryPrompts locale={locale} c={c} />);
     expect(container.querySelector('[aria-label]')).toBeNull();
     const buttons = screen.getAllByRole('button', { name: c.copy });
-    expect(buttons).toHaveLength(6);
+    expect(buttons).toHaveLength(7);
     for (const [index, item] of c.items.entries()) {
       expect(buttons[index]).toHaveAccessibleName(c.copy);
       expect(buttons[index]).toHaveAccessibleDescription(item.prompt);
       expect(document.getElementById(buttons[index].getAttribute('aria-describedby')!)?.textContent).toBe(item.prompt);
     }
-    expect(new Set(buttons.map((button) => button.getAttribute('aria-describedby'))).size).toBe(6);
+    expect(new Set(buttons.map((button) => button.getAttribute('aria-describedby'))).size).toBe(7);
   });
 
   it.each([false, true])('matches SSR to the initial client render and then respects clipboard availability (%s)', async (hasClipboard) => {
@@ -89,7 +89,7 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
       const html = renderToString(<AgentTryPrompts locale={locale} c={c} />);
       container.innerHTML = html;
-      expect(within(container).getAllByRole('button', { name: c.copy })).toHaveLength(6);
+      expect(within(container).getAllByRole('button', { name: c.copy })).toHaveLength(7);
       if (hasClipboard) Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
 
       let initialClientHtml = '';
@@ -104,7 +104,7 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
       });
       expect(initialClientHtml).toBe(html);
       expect(onRecoverableError).not.toHaveBeenCalled();
-      expect(within(container).queryAllByRole('button')).toHaveLength(hasClipboard ? 6 : 0);
+      expect(within(container).queryAllByRole('button')).toHaveLength(hasClipboard ? 7 : 0);
       for (const item of c.items) expect(within(container).getByText(item.prompt).textContent).toBe(item.prompt);
     } finally {
       if (root) await act(async () => root?.unmount());
@@ -125,7 +125,7 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
     await act(async () => { rejectCopy(new Error('clipboard denied')); });
     expect(track).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: c.copied })).toBeNull();
-    expect(screen.getAllByRole('button', { name: c.copy })).toHaveLength(6);
+    expect(screen.getAllByRole('button', { name: c.copy })).toHaveLength(7);
   });
 
   it('keeps successful copy feedback when analytics throws', async () => {
@@ -149,6 +149,6 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
     expect(screen.getAllByRole('button', { name: c.copied })).toHaveLength(1);
     act(() => { vi.advanceTimersByTime(COPIED_FEEDBACK_MS); });
     expect(screen.queryByRole('button', { name: c.copied })).toBeNull();
-    expect(screen.getAllByRole('button', { name: c.copy })).toHaveLength(6);
+    expect(screen.getAllByRole('button', { name: c.copy })).toHaveLength(7);
   });
 });
