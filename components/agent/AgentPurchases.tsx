@@ -227,7 +227,7 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, pr
       {/* 未接続ではサインインの署名ができない (useSiweSession が wallet_not_connected を投げる) → その場で接続できる入口を出す。 */}
       {signedOut ? (isConnected
         ? <button type="button" className={`mt-3 ${button}`} disabled={session.isSigningIn} onClick={() => void signIn()}>{session.isSigningIn ? c.signingIn : c.signIn}</button>
-        : <div className="mt-3"><p className="text-sm text-slate-600">{c.connectFirst}</p><div className="mt-3"><ConnectButton variant="secondary" /></div></div>) : null}
+        : <details className="mt-3"><summary className={`cursor-pointer rounded-sm text-sm font-medium text-emerald-700 ${focus}`}>{c.connectFirst}</summary><div className="mt-3"><ConnectButton variant="secondary" /></div></details>) : null}
       {needsConfirmation ? <div className="mt-3 rounded-xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
         {proofMismatch ? <p className="mb-3 break-all">{c.proofAddressMismatch.replace('{proofAddress}', parsedProof!.address).replace('{cardAddress}', address)}</p> : null}
         {proofLinkMismatch && proofLinkAddress !== address ? <p className="mb-3 break-all">{c.proofLinkAddressMismatch.replace('{proofAddress}', parsedProof!.address).replace('{linkAddress}', proofLinkAddress!)}</p> : null}

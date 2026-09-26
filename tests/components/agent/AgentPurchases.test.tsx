@@ -494,7 +494,8 @@ describe('AgentPurchases', () => {
   it('offers connecting in place instead of a sign-in button while no wallet is connected', () => {
     mount({ isConnected: false });
     expect(screen.queryByRole('button', { name: c.signIn })).toBeNull();
-    expect(screen.getByText(c.connectFirst)).toBeInTheDocument();
+    // ウォレットの一覧はたたんだ入口の中 (開くと header と同じ接続の部品)。
+    fireEvent.click(screen.getByText(c.connectFirst));
     expect(screen.getByRole('button', { name: 'Mock connect' })).toBeVisible();
     expect(h.signIn).not.toHaveBeenCalled();
   });

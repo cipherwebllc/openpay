@@ -27,8 +27,13 @@ describe.each(['ja', 'en'])('AgentTryPrompts (%s)', (locale) => {
     render(<AgentTryPrompts locale={locale} c={c} />);
     expect(screen.getByRole('heading', { level: 2, name: c.title })).toBeVisible();
     expect(screen.getByText(c.lead)).toBeVisible();
-    const items = within(screen.getByRole('list')).getAllByRole('listitem');
+    const items = screen.getAllByRole('listitem');
     expect(items).toHaveLength(7);
+    // 最初に見えるのは先頭 3 件 (買う・注文する)。残り 4 件は「ほかの依頼」を開くと見える。
+    expect(items.slice(0, 3).every((item) => item.closest('details') === null)).toBe(true);
+    expect(items.slice(3).every((item) => item.closest('details') !== null)).toBe(true);
+    for (const item of items.slice(3)) expect(item).not.toBeVisible();
+    fireEvent.click(screen.getByText(c.moreLabel.replace('{count}', '4')));
     for (const [index, item] of c.items.entries()) {
       const row = within(items[index]);
       expect(row.getByText(item.tag)).toBeVisible();

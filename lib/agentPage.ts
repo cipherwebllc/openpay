@@ -230,6 +230,8 @@ export type AgentPageContent = {
     readonly copied: string;
     /** 支払いが起きる依頼文にだけ出す注記。 */
     readonly paidNote: string;
+    /** 先頭 3 件のあとにたたむ依頼の見出し ({count} 件)。 */
+    readonly moreLabel: string;
     readonly items: readonly {
       readonly id: 'catalog' | 'buy-monitor' | 'order' | 'history' | 'limits' | 'history-web' | 'switch-signer';
       /** free = 支払いなし / paid = Agent が支払う / human = 人が支払う。 */
@@ -454,7 +456,7 @@ const ja: AgentPageContent = {
     title: '購入 (何を買ったか)',
     lead: 'この Agent が x402 で買ったものを、OpenPay の決済記録から表示します。持ち主だけが見られます。',
     signIn: 'ログインして購入履歴を見る',
-    connectFirst: 'ログインには、ウォレットの接続が必要です。',
+    connectFirst: 'ウォレットを接続してログイン',
     signingIn: 'ウォレットで署名しています…',
     signInError: 'ログインできませんでした。もう一度お試しください。',
     signedInAs: 'ログイン中:',
@@ -508,10 +510,11 @@ const ja: AgentPageContent = {
   },
   tryPrompts: {
     title: 'Agent に頼めること',
-    lead: 'セットアップが済んだら、そのまま話しかけてください。コピーして Agent に貼るだけです。「Agent が支払う」で接続したときの例で、店の注文は「人が支払う」でも使えます。',
+    lead: 'コピーして Agent に貼るだけ。店の注文は「人が支払う」でも使えます。',
     copy: 'プロンプトをコピー',
     copied: 'コピーしました',
     paidNote: '依頼文の上限を超える支払いは行われません。Agent 側の上限のほうが小さいときは、支払いは拒否されます。',
+    moreLabel: 'ほかの依頼 ({count})',
     items: [
       { id: 'catalog', kind: 'free', tag: '無料', prompt: 'OpenPay で今買える JPYC のデータと API を一覧にして、それぞれの価格と利用料を教えてください。支払いはしないでください。' },
       {
@@ -733,7 +736,7 @@ const en: AgentPageContent = {
     title: 'Purchases (what it bought)',
     lead: 'What this agent bought over x402, from OpenPay’s payment records. Only the owner can see it.',
     signIn: 'Sign in to see purchases',
-    connectFirst: 'Connect a wallet to sign in.',
+    connectFirst: 'Connect a wallet to sign in',
     signingIn: 'Signing with your wallet…',
     signInError: 'Sign-in failed. Please try again.',
     signedInAs: 'Signed in as',
@@ -787,10 +790,11 @@ const en: AgentPageContent = {
   },
   tryPrompts: {
     title: 'What you can ask your agent',
-    lead: 'Once setup is done, just talk to it. Copy a prompt and paste it to your agent. These examples are for the “Agent pays” setup; ordering from a shop also works with “You pay”.',
+    lead: 'Copy one and paste it into your agent. Shop orders also work with “Human pays.”',
     copy: 'Copy prompt',
     copied: 'Copied',
     paidNote: 'Nothing above the cap in the prompt is paid. If the limit on the agent side is lower, the payment is refused.',
+    moreLabel: 'More requests ({count})',
     items: [
       { id: 'catalog', kind: 'free', tag: 'Free', prompt: 'List the JPYC data and APIs I can buy on OpenPay right now, with the price and fee for each. Do not pay.' },
       {
