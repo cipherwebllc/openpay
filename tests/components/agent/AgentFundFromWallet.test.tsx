@@ -52,6 +52,7 @@ vi.mock('next/dynamic', () => ({ default: () => function Dynamic(props: Componen
   return 'value' in props ? <svg data-value={props.value} /> : <AgentFundFromWallet {...props} />;
 } }));
 vi.mock('@vercel/analytics', () => ({ track: vi.fn() }));
+vi.mock('@/components/ConnectButton', () => ({ ConnectButton: () => <button type="button">Mock connect</button> }));
 
 const C = agentPageContentFor('en').wallet.fundFromWallet;
 const deployment = defaultDeploymentForSymbol('jpyc');
@@ -155,6 +156,26 @@ describe('AgentFundFromWallet', () => {
     expect(state.write).toHaveBeenCalledTimes(1);
   });
 
+  it('fills the amount from shortcuts and shows the connected wallet balance, without skipping the review', () => {
+    state.address = sender; state.chainId = deployment.chainId; state.balance = parseUnits('800.25', 18);
+    render(ui());
+    expect(screen.getByText(C.walletBalance.replace('{amount}', '800.25'))).toBeVisible();
+    const preset = screen.getByRole('button', { name: '500 JPYC' });
+    fireEvent.click(preset);
+    expect(screen.getByLabelText(C.amountLabel)).toHaveValue('500');
+    expect(preset).toHaveAttribute('aria-pressed', 'true');
+    // 近道は入力欄に入れるだけ。送金は従来どおり確認画面を通る。
+    expect(state.write).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: C.send }));
+    expect(screen.getByText(C.confirmTitle)).toBeVisible();
+    expect(state.write).not.toHaveBeenCalled();
+    // 残高を超える近道は、手入力と同じく不足として止まる。
+    fireEvent.click(screen.getByRole('button', { name: C.back }));
+    fireEvent.click(screen.getByRole('button', { name: '1,000 JPYC' }));
+    expect(screen.getByLabelText(C.amountLabel)).toHaveValue('1000');
+    expect(screen.getByText(C.insufficient)).toBeVisible();
+    expect(screen.getByRole('button', { name: C.send })).toBeDisabled();
+  });
   it('renders nothing and disables balance reads while disconnected', () => {
     state.connected = false;
     state.address = undefined;

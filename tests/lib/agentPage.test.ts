@@ -40,6 +40,8 @@ describe('agent page content', () => {
   });
   it.each(['ja', 'en'])('keeps history-web free in %s', (locale) => {
     expect(agentPageContentFor(locale).tryPrompts.items.find((item) => item.id === 'history-web')?.kind).toBe('free');
+    // 購入欄の紐づけ手順でコピーする依頼文は「Agent に頼めること」と同じ文 (片方だけ直してずれない)。
+    expect(agentPageContentFor(locale).purchases.notBoundPrompt).toBe(agentPageContentFor(locale).tryPrompts.items.find((item) => item.id === 'history-web')?.prompt);
   });
   it.each(['ja', 'en'])('includes a spending cap in every paid prompt in %s', (locale) => {
     const paid = agentPageContentFor(locale).tryPrompts.items.filter((item) => item.kind === 'paid');

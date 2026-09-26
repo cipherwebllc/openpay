@@ -5,6 +5,7 @@ import { hydrateRoot, type Root } from 'react-dom/client';
 import { renderToString } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NextIntlClientProvider } from 'next-intl';
+import userEvent from '@testing-library/user-event';
 import { track } from '@vercel/analytics';
 import { AgentPurchases } from '@/components/agent/AgentPurchases';
 import { agentPageContentFor } from '@/lib/agentPage';
@@ -19,6 +20,8 @@ const h = vi.hoisted(() => ({
 vi.mock('@/lib/env', () => ({ env: { get enableAgentPurchases() { return h.enabled; } } }));
 vi.mock('@/hooks/useSiweSession', () => ({ useSiweSession: () => ({ ...h }) }));
 vi.mock('@vercel/analytics', () => ({ track: vi.fn() }));
+// 接続の入口は header と同じ部品。ここでは置き場所だけを確かめる (wagmi の接続 hook は他のテストで検証済み)。
+vi.mock('@/components/ConnectButton', () => ({ ConnectButton: () => <button type="button">Mock connect</button> }));
 vi.mock('@/lib/chains', () => ({ txExplorerUrl: (chain: number, tx: string) => {
   const base = ({ 137: 'https://polygonscan.com', 8453: 'https://basescan.org' } as Record<number, string>)[chain];
   return base ? `${base}/tx/${tx}` : undefined;
@@ -112,6 +115,17 @@ describe('AgentPurchases', () => {
     expect(track).not.toHaveBeenCalled();
   });
 
+  it('lets the owner copy the step-1 request in place, tracked like the try prompt (id only)', async () => {
+    const user = userEvent.setup();
+    h.sessionAddress = owner;
+    mockFetch.mockImplementation(async () => response({ reason: 'not_bound' }, 401));
+    mount();
+    await screen.findByText(c.notBoundLead);
+    await user.click(screen.getByRole('button', { name: c.copyPrompt }));
+    expect(await navigator.clipboard.readText()).toBe(c.notBoundPrompt);
+    expect(screen.getByRole('button', { name: c.copied })).toBeVisible();
+    expect(track).toHaveBeenCalledWith('agent_try_prompt_copy', { locale: 'en', id: 'history-web' });
+  });
   it('erases proof immediately, preserves URL and history state, then verifies once after sign-in (StrictMode)', async () => {
     landing();
     const replace = vi.spyOn(window.history, 'replaceState');
@@ -477,10 +491,11 @@ describe('AgentPurchases', () => {
     }
   });
 
-  it('shows the connect hint instead of a sign-in button while no wallet is connected', () => {
+  it('offers connecting in place instead of a sign-in button while no wallet is connected', () => {
     mount({ isConnected: false });
     expect(screen.queryByRole('button', { name: c.signIn })).toBeNull();
     expect(screen.getByText(c.connectFirst)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mock connect' })).toBeVisible();
     expect(h.signIn).not.toHaveBeenCalled();
   });
 

@@ -92,7 +92,12 @@ export type AgentPageContent = {
     readonly copyShort: string;
     readonly ownershipNote: string;
     readonly fundTitle: string;
+    /** アドレスへ送る道の見出し (未接続 / 接続中は「または」)。 */
+    readonly fundAddressTitle: string;
+    readonly fundAddressTitleAlt: string;
+    /** アドレスの下の小さな注記 (POL の要否)。 */
     readonly fundBody: string;
+    readonly fundConnectLead: string;
     readonly copyAddress: string;
     readonly copied: string;
     /** 残高カードの 2 番目の操作 (AI ストアへ)。 */
@@ -120,6 +125,8 @@ export type AgentPageContent = {
       readonly title: string;
       readonly amountLabel: string;
       readonly amountPlaceholder: string;
+      /** 接続中のウォレットの JPYC 残高 ({amount})。 */
+      readonly walletBalance: string;
       readonly send: string;
       readonly confirmTitle: string;
       readonly confirmSend: string;
@@ -179,6 +186,10 @@ export type AgentPageContent = {
     readonly signedInAs: string;
     readonly notBoundLead: string;
     readonly notBoundSteps: readonly string[];
+    /** 手順 1 でコピーする依頼文 (「Agent に頼めること」の history-web と同じ文)。 */
+    readonly notBoundPrompt: string;
+    readonly copyPrompt: string;
+    readonly copied: string;
     readonly continueAfterSignIn: string;
     readonly verifying: string;
     readonly bound: string;
@@ -245,6 +256,9 @@ function feeText(locale: 'ja' | 'en'): string {
     ? `${percent}% (minimum ${DISCLOSED_X402_FEE.floorJpyc} JPYC)`
     : `${percent}%（最低 ${DISCLOSED_X402_FEE.floorJpyc} JPYC）`;
 }
+
+// 購入履歴を Web で開く依頼文。「Agent に頼めること」と購入欄の紐づけ手順で同じ文を使う。
+const HISTORY_WEB_PROMPT = { ja: '購入履歴を Web で開いてください。', en: 'Open my purchase history on the web.' } as const;
 
 const ja: AgentPageContent = {
   metaTitle: 'OpenPay Agent — AI に JPYC を使わせる',
@@ -358,8 +372,10 @@ const ja: AgentPageContent = {
     ownershipNote:
       'オンチェーンの公開情報を読み取っているだけです。このアドレスの所有や、Agent が動いているかどうかは確認していません。',
     fundTitle: 'JPYC を入金',
-    fundBody:
-      'このアドレスへ JPYC を送ってください。OpenPay での x402 支払いは署名 (EIP-3009) で行われるため、支払いに POL は要りません (残った JPYC を後で別のウォレットへ送るときは POL が必要です)。',
+    fundAddressTitle: 'このアドレスへ JPYC を送る',
+    fundAddressTitleAlt: 'または、取引所や別のウォレットからこのアドレスへ',
+    fundBody: 'x402 の支払いは署名 (EIP-3009) で行うため、Agent Wallet に POL は要りません。残った JPYC を別のウォレットへ移すときだけ POL が必要です。',
+    fundConnectLead: 'ウォレットを接続して、ここから送る',
     copyAddress: 'アドレスをコピー',
     copied: 'コピーしました',
     storeCta: '買えるものを見る',
@@ -385,6 +401,7 @@ const ja: AgentPageContent = {
       title: '接続中のウォレットから送る',
       amountLabel: '金額 (JPYC)',
       amountPlaceholder: '例: 100',
+      walletBalance: '接続中のウォレット: {amount} JPYC',
       send: '送る',
       confirmTitle: '送金内容の確認',
       confirmSend: 'この内容で送る',
@@ -437,7 +454,7 @@ const ja: AgentPageContent = {
     title: '購入 (何を買ったか)',
     lead: 'この Agent が x402 で買ったものを、OpenPay の決済記録から表示します。持ち主だけが見られます。',
     signIn: 'ログインして購入履歴を見る',
-    connectFirst: 'ログインするには、まずヘッダの「接続」でウォレットを接続してください。',
+    connectFirst: 'ログインには、ウォレットの接続が必要です。',
     signingIn: 'ウォレットで署名しています…',
     signInError: 'ログインできませんでした。もう一度お試しください。',
     signedInAs: 'ログイン中:',
@@ -446,6 +463,9 @@ const ja: AgentPageContent = {
       'Agent に「購入履歴を Web で開いて」と頼みます。',
       '返ってきたリンク (5 分有効・1 回だけ) を、このログイン中のブラウザで開きます。',
     ],
+    notBoundPrompt: HISTORY_WEB_PROMPT.ja,
+    copyPrompt: '依頼文をコピー',
+    copied: 'コピーしました',
     continueAfterSignIn: 'Agent のリンクを受け取りました。ログインすると紐づけを続けます。',
     verifying: '紐づけを確認しています…',
     bound: 'この Agent をあなたのアカウントに紐づけました。',
@@ -507,7 +527,7 @@ const ja: AgentPageContent = {
       { id: 'order', kind: 'human', tag: '支払いは自分で', prompt: 'JPYC で注文できる店を探して、メニューと合計額を見せてください。支払いは私がします。' },
       { id: 'history', kind: 'free', tag: '無料', prompt: '最近なにを買ったか、金額と取引ハッシュつきで見せてください。' },
       { id: 'limits', kind: 'free', tag: '無料', prompt: 'いまの支払い上限と、今日使った額を教えてください。' },
-      { id: 'history-web', kind: 'free', tag: '無料', prompt: '購入履歴を Web で開いてください。' },
+      { id: 'history-web', kind: 'free', tag: '無料', prompt: HISTORY_WEB_PROMPT.ja },
       { id: 'switch-signer', kind: 'free', tag: '無料', prompt: 'Agent の支払い方式を切り替えたい。今の設定と上限を見せてから、https://open-pay.jp/agent/setup.md の手順で Kova か MetaMask Agent Wallet に切り替えて。鍵は聞かないで。' },
     ],
   },
@@ -631,8 +651,10 @@ const en: AgentPageContent = {
     ownershipNote:
       'This only reads public on-chain data. It does not verify who owns the address or whether an agent is running.',
     fundTitle: 'Fund it with JPYC',
-    fundBody:
-      'Send JPYC to this address. OpenPay x402 payments are signed authorizations (EIP-3009), so paying needs no POL (moving leftover JPYC out later does).',
+    fundAddressTitle: 'Send JPYC to this address',
+    fundAddressTitleAlt: 'Or send to this address from an exchange or another wallet',
+    fundBody: 'x402 payments are signed authorizations (EIP-3009), so the agent wallet needs no POL. You only need POL to move leftover JPYC to another wallet.',
+    fundConnectLead: 'Connect a wallet and send from here',
     copyAddress: 'Copy address',
     copied: 'Copied',
     storeCta: 'See what it can buy',
@@ -658,6 +680,7 @@ const en: AgentPageContent = {
       title: 'Send from the connected wallet',
       amountLabel: 'Amount (JPYC)',
       amountPlaceholder: 'e.g. 100',
+      walletBalance: 'Connected wallet: {amount} JPYC',
       send: 'Send',
       confirmTitle: 'Review transfer',
       confirmSend: 'Confirm and send',
@@ -710,7 +733,7 @@ const en: AgentPageContent = {
     title: 'Purchases (what it bought)',
     lead: 'What this agent bought over x402, from OpenPay’s payment records. Only the owner can see it.',
     signIn: 'Sign in to see purchases',
-    connectFirst: 'To sign in, first connect a wallet from “Connect” in the header.',
+    connectFirst: 'Connect a wallet to sign in.',
     signingIn: 'Signing with your wallet…',
     signInError: 'Sign-in failed. Please try again.',
     signedInAs: 'Signed in as',
@@ -719,6 +742,9 @@ const en: AgentPageContent = {
       'Ask your agent: “Open my purchase history on the web.”',
       'Open the link it returns (valid 5 minutes, single use) in this signed-in browser.',
     ],
+    notBoundPrompt: HISTORY_WEB_PROMPT.en,
+    copyPrompt: 'Copy the request',
+    copied: 'Copied',
     continueAfterSignIn: 'Link received from your agent. Sign in to continue linking.',
     verifying: 'Confirming the link…',
     bound: 'This agent is now linked to your account.',
@@ -780,7 +806,7 @@ const en: AgentPageContent = {
       { id: 'order', kind: 'human', tag: 'You pay yourself', prompt: 'Find shops where I can order with JPYC and show me the menu and the total. I will pay myself.' },
       { id: 'history', kind: 'free', tag: 'Free', prompt: 'Show me what you bought recently, with amounts and transaction hashes.' },
       { id: 'limits', kind: 'free', tag: 'Free', prompt: 'Tell me my current spending limits and how much I have spent today.' },
-      { id: 'history-web', kind: 'free', tag: 'Free', prompt: 'Open my purchase history on the web.' },
+      { id: 'history-web', kind: 'free', tag: 'Free', prompt: HISTORY_WEB_PROMPT.en },
       { id: 'switch-signer', kind: 'free', tag: 'Free', prompt: 'I want to switch my agent’s payment method. Show me the current config and limits first, then switch to Kova or MetaMask Agent Wallet following https://open-pay.jp/agent/setup.md. Never ask me for a key.' },
     ],
   },
