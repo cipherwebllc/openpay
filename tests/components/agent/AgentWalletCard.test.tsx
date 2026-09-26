@@ -5,6 +5,7 @@ import type { AgentActivity } from '@/components/agent/AgentActivity';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { AgentWalletCard } from '@/components/agent/AgentWalletCard';
+import { getAddress } from 'viem';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
 import { chainNameForId } from '@/lib/chains';
 import { agentPageContentFor } from '@/lib/agentPage';
@@ -362,8 +363,8 @@ describe('AgentWalletCard', () => {
     fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
     // No name is inferred from the address; the chip shows only the short address until the user names it.
     expect(screen.queryByText(/Kova/)).toBeNull();
-    fireEvent.change(screen.getByLabelText(C.labelInputLabel), { target: { value: 'Kova' } });
-    expect(screen.getByText('Kova ·')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(C.nameLabel), { target: { value: 'Kova' } });
+    expect(screen.getByText('Kova')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: other } });
     expect(JSON.parse(window.localStorage.getItem('openpay.agent.recent')!)).toEqual([{ address: other }, { address, label: 'Kova' }]);
     fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
@@ -373,8 +374,72 @@ describe('AgentWalletCard', () => {
     await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
     expect(screen.getByLabelText(C.inputLabel)).toHaveValue(address);
     expect(screen.getByLabelText(C.inputLabel)).not.toBeVisible();
-    expect(screen.getByText('Kova ·')).toBeInTheDocument();
+    expect(screen.getByText('Kova')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: C.changeAddress })).toHaveFocus();
+  });
+  it('lets the owner pick a color and an icon per wallet, saved on this device and shown on the balance surface', () => {
+    const other = '0x2222222222222222222222222222222222222222';
+    state.query = `address=${address}`;
+    const { container } = render(<AgentWalletCard purchases={purchases} c={C} activity={activity} />);
+    const surface = () => container.querySelector('.bg-gradient-to-br')!;
+    // 既定は墨。選ぶまで色もアイコンも保存しない。
+    expect(surface()).toHaveClass('from-slate-900');
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    // 選択肢は見えている名前 (色名・絵文字) を名前にする (掟 8)。
+    const indigo = screen.getByRole('radio', { name: C.colorNames.indigo });
+    expect(screen.getByRole('radio', { name: C.colorNames.ink })).toBeChecked();
+    fireEvent.click(indigo);
+    expect(surface()).toHaveClass('from-indigo-950');
+    fireEvent.click(screen.getByRole('radio', { name: '🦊' }));
+    expect(JSON.parse(window.localStorage.getItem('openpay.agent.recent')!)).toEqual([{ address, color: 'indigo', icon: '🦊' }]);
+    // 見た目は Wallet ごと。別の Wallet に切り替えると既定に戻り、戻すと選んだ見た目が戻る。
+    fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: other } });
+    expect(surface()).toHaveClass('from-slate-900');
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    fireEvent.click(screen.getByRole('button', { name: /0x1111…1111/ }));
+    expect(surface()).toHaveClass('from-indigo-950');
+    // 墨・なしに戻すと項目ごと消す (控えに既定値を残さない)。
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    fireEvent.click(screen.getByRole('radio', { name: C.colorNames.ink }));
+    fireEvent.click(screen.getByRole('radio', { name: C.iconNone }));
+    expect(JSON.parse(window.localStorage.getItem('openpay.agent.recent')!)[0]).toEqual({ address });
+  });
+  it('never saves a whitespace-only name, but keeps the spaces while typing a real one', () => {
+    state.query = `address=${address}`;
+    render(<AgentWalletCard purchases={purchases} c={C} activity={activity} />);
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    fireEvent.change(screen.getByLabelText(C.nameLabel), { target: { value: '   ' } });
+    expect(JSON.parse(window.localStorage.getItem('openpay.agent.recent')!)).toEqual([{ address }]);
+    fireEvent.change(screen.getByLabelText(C.nameLabel), { target: { value: 'My ' } });
+    expect(screen.getByLabelText(C.nameLabel)).toHaveValue('My ');
+  });
+  it('evicts wallets without a look first when the recent list overflows, and keeps a look across address casing', () => {
+    const styled = { address: '0xabcdefabcdefabcdefabcdefabcdefabcdef0003', label: 'Main', color: 'rose' };
+    const plain = ['0x4444444444444444444444444444444444444444', '0x5555555555555555555555555555555555555555', '0x6666666666666666666666666666666666666666'].map((a) => ({ address: a }));
+    // 見た目つきを末尾に置く: 単純に末尾から落とすと消えてしまう位置。
+    window.localStorage.setItem('openpay.agent.recent', JSON.stringify([...plain, { address: '0x7777777777777777777777777777777777777777' }, styled]));
+    state.query = `address=${address}`;
+    render(<AgentWalletCard purchases={purchases} c={C} activity={activity} />);
+    const saved = JSON.parse(window.localStorage.getItem('openpay.agent.recent')!) as { address: string }[];
+    // 6 件目を足しても、見た目つきの Main は残り、いちばん後ろの見た目なしが落ちる。
+    expect(saved).toHaveLength(5);
+    expect(saved[0]).toEqual({ address });
+    expect(saved).toContainEqual(styled);
+    expect(saved.map((item) => item.address)).not.toContain('0x7777777777777777777777777777777777777777');
+    // 大文字小文字違いで同じアドレスを表示しても、見た目は引き継ぐ。
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    const checksummed = getAddress(styled.address);
+    expect(checksummed).not.toBe(styled.address);
+    fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: checksummed } });
+    expect(screen.getByText('Main')).toBeInTheDocument();
+  });
+  it('drops unknown colors and icons from the saved look', () => {
+    window.localStorage.setItem('openpay.agent.address', address);
+    window.localStorage.setItem('openpay.agent.recent', JSON.stringify([{ address, label: 'Mine', color: 'neon', icon: '<img>' }]));
+    const { container } = render(<AgentWalletCard purchases={purchases} c={C} activity={activity} />);
+    expect(container.querySelector('.bg-gradient-to-br')).toHaveClass('from-slate-900');
+    expect(screen.getByText('Mine')).toBeInTheDocument();
+    expect(container.textContent).not.toContain('<img>');
   });
   it('ignores a corrupt recent-wallet store without breaking the saved wallet', () => {
     window.localStorage.setItem('openpay.agent.address', address);

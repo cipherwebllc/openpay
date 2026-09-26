@@ -14,16 +14,33 @@ import { AGENT_WALLET_RESERVE } from '@/lib/agentLayout';
 import { chainNameForId } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
+import { AGENT_COLORS, AGENT_COLOR_DOT, AGENT_COLOR_SURFACE, AGENT_ICONS, addressHues, isAgentColor, isAgentIcon, type AgentColor, type AgentIcon } from '@/lib/agentProfile';
 import { AgentStoreLink } from './AgentStoreLink';
 
 const STORAGE_KEY = AGENT_ADDRESS_STORAGE_KEY;
-// 最近表示した Wallet (公開アドレスと、利用者が自分で付けた名前だけ)。Wallet の種類 (Kova 等) を
-// アドレスから推測しない — 名前は利用者が入力したときだけ出す。ここでの切替は「表示する Wallet」だけで、
+// 最近表示した Wallet (公開アドレスと、利用者が自分で選んだ見た目 = 名前・色・アイコンだけ)。Wallet の種類 (Kova 等) を
+// アドレスから推測しない — 見た目は利用者が選んだときだけ出す。ここでの切替は「表示する Wallet」だけで、
 // Agent の署名方式は変わらない (切替は設定生成か Agent への依頼で行う)。
 const RECENT_KEY = 'openpay.agent.recent';
 const RECENT_MAX = 5;
 const LABEL_MAX = 20;
-type RecentWallet = { address: string; label?: string };
+type RecentWallet = { address: string; label?: string; color?: AgentColor; icon?: AgentIcon };
+type WalletLook = Omit<RecentWallet, 'address'>;
+const hasLook = (item: RecentWallet) => Boolean(item.label || item.color || item.icon);
+
+// 上限を超えたら、見た目 (名前・色・アイコン) のない Wallet から落とす。利用者が手をかけた見た目を、
+// 打ち間違えたアドレスを何件か表示しただけで黙って失わないように。先頭 (表示中の Wallet) は落とさない。
+function trimRecent(list: RecentWallet[]): RecentWallet[] {
+  const next = [...list];
+  while (next.length > RECENT_MAX) {
+    let drop = next.length - 1;
+    for (let index = next.length - 1; index > 0; index -= 1) {
+      if (!hasLook(next[index])) { drop = index; break; }
+    }
+    next.splice(drop, 1);
+  }
+  return next;
+}
 const sameAddress = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 function readRecent(): RecentWallet[] {
@@ -33,10 +50,11 @@ function readRecent(): RecentWallet[] {
     if (!Array.isArray(parsed)) return [];
     return parsed.flatMap((item: unknown) => {
       if (!item || typeof item !== 'object') return [];
-      const { address, label } = item as { address?: unknown; label?: unknown };
+      const { address, label, color, icon } = item as { address?: unknown; label?: unknown; color?: unknown; icon?: unknown };
       if (typeof address !== 'string' || !isAddress(address)) return [];
       const name = typeof label === 'string' ? label.trim().slice(0, LABEL_MAX) : '';
-      return [name ? { address, label: name } : { address }];
+      // 知らない色・アイコン (古い版や手で書き換えた控え) は捨てて既定の見た目にする。
+      return [{ address, ...(name ? { label: name } : {}), ...(isAgentColor(color) ? { color } : {}), ...(isAgentIcon(icon) ? { icon } : {}) }];
     }).slice(0, RECENT_MAX);
   } catch {
     return [];
@@ -49,6 +67,13 @@ function writeRecent(list: RecentWallet[]): void {
   } catch {
     // 控えの保存失敗は一覧が出ないだけで、表示中の Wallet には波及しない。
   }
+}
+
+// アイコンがあればアイコン、なければアドレス由来の 2 色の丸。隣に名前かアドレスの文字があるので読み上げない。
+function AgentAvatar({ address, icon, className }: { address: string; icon?: AgentIcon; className: string }) {
+  if (icon) return <span aria-hidden className={`inline-flex shrink-0 items-center justify-center rounded-full bg-white/90 leading-none ${className}`}>{icon}</span>;
+  const [from, to] = addressHues(address);
+  return <span aria-hidden className={`inline-block shrink-0 rounded-full ${className}`} style={{ background: `linear-gradient(135deg, hsl(${from} 70% 55%), hsl(${to} 70% 40%))` }} />;
 }
 
 const QRCodeSVG = dynamic(() => import('qrcode.react').then((m) => m.QRCodeSVG), { ssr: false });
@@ -146,18 +171,23 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
     if (!restored || !address) return;
     setRecent((current) => {
       const existing = current.find((item) => sameAddress(item.address, address));
-      const next = [existing?.label ? { address, label: existing.label } : { address }, ...current.filter((item) => !sameAddress(item.address, address))].slice(0, RECENT_MAX);
+      const next = trimRecent([existing ? { ...existing, address } : { address }, ...current.filter((item) => !sameAddress(item.address, address))]);
       writeRecent(next);
       return next;
     });
   }, [address, restored]);
-  const currentLabel = address ? recent.find((item) => sameAddress(item.address, address))?.label ?? '' : '';
+  const currentLook: WalletLook = (address ? recent.find((item) => sameAddress(item.address, address)) : undefined) ?? {};
+  const currentLabel = currentLook.label ?? '';
   const otherRecent = recent.filter((item) => !address || !sameAddress(item.address, address));
-  function renameCurrent(name: string) {
+  function updateCurrent(patch: WalletLook) {
     if (!address) return;
-    const label = name.slice(0, LABEL_MAX);
     setRecent((current) => {
-      const next = current.map((item) => (sameAddress(item.address, address) ? (label.trim() ? { address: item.address, label } : { address: item.address }) : item));
+      const next = current.map((item) => {
+        if (!sameAddress(item.address, address)) return item;
+        const merged = { ...item, ...patch };
+        // 空白だけの名前・未選択は項目ごと消す (控えに空文字や undefined を残さない)。入力中の値は切り詰めない (打った空白を消さない)。
+        return Object.fromEntries(Object.entries(merged).filter(([, value]) => (typeof value === 'string' ? value.trim() !== '' : value !== undefined))) as RecentWallet;
+      });
       writeRecent(next);
       return next;
     });
@@ -228,10 +258,6 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
             }}>{c.useConnected}</button> : null}
           </div>
           {value && !address ? <p id="agent-wallet-error" className="mt-2 text-xs text-red-700">{c.invalidAddress}</p> : null}
-          {address ? <>
-            <label htmlFor="agent-wallet-label" className="mt-3 block text-sm font-medium">{c.labelInputLabel}</label>
-            <input id="agent-wallet-label" className={`mt-2 block w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 text-sm sm:max-w-xs ${focus}`} placeholder={c.labelPlaceholder} maxLength={LABEL_MAX} value={currentLabel} onChange={(e) => renameCurrent(e.target.value)} />
-          </> : null}
           {otherRecent.length > 0 ? <div className="mt-4">
             <p className="text-sm font-medium text-slate-700">{c.recentTitle}</p>
             <ul className="mt-2 flex flex-wrap gap-2">
@@ -241,29 +267,62 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
                   setEditing(false);
                   // 押したボタンごと入力欄が畳まれる。フォーカスが body に落ちないよう「変更」へ移す。
                   requestAnimationFrame(() => changeRef.current?.focus());
-                }}>{item.label ? <span className="font-bold">{item.label} </span> : null}<span className="font-mono">{item.address.slice(0, 6)}…{item.address.slice(-4)}</span></button>
+                }}><span className="inline-flex items-center gap-2"><AgentAvatar address={item.address} icon={item.icon} className="h-5 w-5 text-xs" /><span>{item.label ? <span className="font-bold">{item.label} </span> : null}<span className="font-mono">{item.address.slice(0, 6)}…{item.address.slice(-4)}</span></span></span></button>
               </li>)}
             </ul>
           </div> : null}
+          {/* 見た目は切替 (アドレス・最近の Wallet) の後ろ。表示中の Wallet にだけ効く。 */}
+          {/* 区切り線は外側の div に引く (fieldset の枠に引くと legend が線の上に載る)。 */}
+          {address ? <div className="mt-5 border-t border-slate-200 pt-4"><fieldset className="min-w-0">
+            <legend className="text-sm font-medium">{c.lookTitle}</legend>
+            <label htmlFor="agent-wallet-label" className="mt-2 block text-xs text-slate-600">{c.nameLabel}</label>
+            <input id="agent-wallet-label" className={`mt-1 block w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 text-sm sm:max-w-xs ${focus}`} placeholder={c.labelPlaceholder} maxLength={LABEL_MAX} value={currentLabel} onChange={(e) => updateCurrent({ label: e.target.value.slice(0, LABEL_MAX) })} />
+            {/* 色・アイコンは名前つきの選択肢 (見本だけのボタンに名前を後付けしない・掟 8)。選んだ瞬間に上の残高の面へ反映される。 */}
+            <fieldset className="mt-3 min-w-0">
+              <legend className="text-xs text-slate-600">{c.colorLabel}</legend>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {AGENT_COLORS.map((color) => <label key={color} className="relative cursor-pointer">
+                  <input type="radio" name="agent-wallet-color" value={color} className="peer sr-only" checked={(currentLook.color ?? 'ink') === color} onChange={() => updateCurrent({ color: color === 'ink' ? undefined : color })} />
+                  <span className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs text-slate-700 ring-slate-900 peer-checked:bg-white peer-checked:font-bold peer-checked:ring-2 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-emerald-600"><span aria-hidden className={`h-3 w-3 rounded-full ${AGENT_COLOR_DOT[color]}`} />{c.colorNames[color]}</span>
+                </label>)}
+              </div>
+            </fieldset>
+            <fieldset className="mt-3 min-w-0">
+              <legend className="text-xs text-slate-600">{c.iconLabel}</legend>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {([undefined, ...AGENT_ICONS] as const).map((icon) => <label key={icon ?? 'none'} className="relative cursor-pointer">
+                  <input type="radio" name="agent-wallet-icon" value={icon ?? ''} className="peer sr-only" checked={currentLook.icon === icon} onChange={() => updateCurrent({ icon })} />
+                  <span className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-full bg-slate-100 px-2.5 py-1.5 text-sm text-slate-700 ring-slate-900 peer-checked:bg-white peer-checked:ring-2 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-emerald-600">{icon ?? <span className="text-xs">{c.iconNone}</span>}</span>
+                </label>)}
+              </div>
+            </fieldset>
+          </fieldset></div> : null}
         </div>
         {address ? (
-          <div className="mt-4 grid grid-cols-1 gap-4 rounded-2xl bg-slate-900 p-5 text-white sm:p-6">
-            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
-              <span className="rounded-full bg-white/10 px-3 py-1 text-slate-200">{currentLabel ? <span className="font-bold">{currentLabel} · </span> : null}<span className="font-mono">{address.slice(0, 6)}…{address.slice(-4)}</span></span>
+          // 面の色は利用者が選んだもの (既定は墨)。文字は白の濃淡だけにして、どの色でもコントラストを保つ。
+          <div className={`mt-4 grid grid-cols-1 gap-4 rounded-2xl p-5 text-white sm:p-6 ${AGENT_COLOR_SURFACE[currentLook.color ?? 'ink']}`}>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 text-xs">
+              <span className="mr-auto inline-flex min-w-0 items-center gap-2.5">
+                <AgentAvatar address={address} icon={currentLook.icon} className="h-9 w-9 text-lg" />
+                <span className="min-w-0">
+                  {currentLabel ? <span className="block truncate text-sm font-bold text-white">{currentLabel}</span> : null}
+                  <span className="block font-mono text-white/75">{address.slice(0, 6)}…{address.slice(-4)}</span>
+                </span>
+              </span>
               {available ? <button type="button" className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-white ${focus}`} onClick={async () => { if (await copy(address)) setCopiedAddress(address); }}><Copy aria-hidden size={14} />{copied && copiedAddress === address ? c.copied : c.copyShort}</button> : null}
               <button ref={changeRef} type="button" aria-expanded={inputExpanded} aria-controls="agent-wallet-input" className={`rounded-lg px-2 py-1 text-xs text-white underline ${focus}`} onClick={() => setEditing((current) => !current)}>{c.changeAddress}</button>
             </div>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
               <div className="min-w-0">
-                <div role="status" className="text-sm text-slate-300">
+                <div role="status" className="text-sm text-white/80">
                   {balance.isError ? c.balanceError : balance.data === undefined ? c.balanceLoading : (
                     <p className="break-all text-5xl font-light tracking-tight text-white sm:text-6xl">
                       {formatUnits(balance.data, deployment.decimals)}
-                      <span className="ml-2 text-base font-normal text-slate-400">JPYC</span>
+                      <span className="ml-2 text-base font-normal text-white/70">JPYC</span>
                     </p>
                   )}
                 </div>
-                <p className="mt-2 text-xs text-slate-400">{c.balanceLabel} · {chainNameForId(deployment.chainId)}</p>
+                <p className="mt-2 text-xs text-white/70">{c.balanceLabel} · {chainNameForId(deployment.chainId)}</p>
               </div>
               <div className="flex flex-wrap gap-2">
                 <AgentStoreLink locale={locale} className={`rounded-xl border border-white/30 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/10 ${focus}`}>{c.storeCta}</AgentStoreLink>
