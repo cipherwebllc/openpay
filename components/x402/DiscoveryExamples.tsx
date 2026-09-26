@@ -32,7 +32,9 @@ const MCP_CONFIG_SNIPPET = JSON.stringify(
 const BUYER_SCRIPT_COMMAND = [
   'npm install openpay-x402-sdk viem',
   `curl -fsSL ${BUYER_SCRIPT_URL} -o x402-buyer-example.mjs`,
-  `BUYER_PRIVATE_KEY=0x... RESOURCE_URL=${DEMO_RESOURCE_URL} node x402-buyer-example.mjs`,
+  '# Enter the key at the prompt so it stays out of shell history (use a dedicated low-balance wallet)',
+  'read -s BUYER_PRIVATE_KEY && export BUYER_PRIVATE_KEY',
+  `RESOURCE_URL=${DEMO_RESOURCE_URL} node x402-buyer-example.mjs`,
 ].join('\n');
 
 export function DiscoveryExamples({ display }: { display: DiscoveryDisplay }) {

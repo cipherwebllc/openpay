@@ -905,7 +905,7 @@ describe('X402DiscoveryView', () => {
     const copyButtons = screen.getAllByRole('button', { name: 'コピー' });
     for (const button of copyButtons) fireEvent.click(button);
     const copied = writeText.mock.calls.map((call) => String(call[0]));
-    expect(copied.some((text) => text.includes('npm install openpay-x402-sdk viem') && text.includes('BUYER_PRIVATE_KEY=0x...'))).toBe(true);
+    expect(copied.some((text) => text.includes('npm install openpay-x402-sdk viem') && text.includes('read -s BUYER_PRIVATE_KEY') && !text.includes('BUYER_PRIVATE_KEY=0x'))).toBe(true);
   });
 
   it('MCP セクション: 設定 JSON (openpay-x402-mcp) をコピーできる', async () => {
