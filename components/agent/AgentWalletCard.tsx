@@ -7,14 +7,16 @@ import { useLocale } from 'next-intl';
 import { Copy } from 'lucide-react';
 import { useAccount, useReadContract } from 'wagmi';
 import { erc20Abi, formatUnits, isAddress, zeroAddress, type Address } from 'viem';
+import { AGENT_ADDRESS_STORAGE_KEY, setAgentHasWallet } from '@/hooks/useAgentView';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
+import { AGENT_WALLET_RESERVE } from '@/lib/agentLayout';
 import { chainNameForId } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
+import { AgentStoreLink } from './AgentStoreLink';
 
-// 再訪時に残高カードをすぐ出すための端末ローカルの控え (公開アドレスのみ・秘密ではない)。
-const STORAGE_KEY = 'openpay.agent.address';
+const STORAGE_KEY = AGENT_ADDRESS_STORAGE_KEY;
 // 最近表示した Wallet (公開アドレスと、利用者が自分で付けた名前だけ)。Wallet の種類 (Kova 等) を
 // アドレスから推測しない — 名前は利用者が入力したときだけ出す。ここでの切替は「表示する Wallet」だけで、
 // Agent の署名方式は変わらない (切替は設定生成か Agent への依頼で行う)。
@@ -94,6 +96,8 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
     setInput(initial);
     setRecent(readRecent());
     setRestored(true);
+    // ページの並び (Wallet を先頭に出すか) を確定する。初回は復元した控え・リンクのアドレスの有無で決める。
+    setAgentHasWallet(Boolean(initial));
     function openFundFromHash() {
       if (window.location.hash === '#agent-fund') setFundOpen(true);
     }
@@ -133,6 +137,11 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
       // 控えの保存失敗は次回の手入力で足りる。
     }
   }, [address, value, restored]);
+  // 手入力・最近の Wallet から表示したときも Wallet を先頭へ。逆向き (消したら初回の並びへ戻す) はしない:
+  // 「変更」で打ち直している途中に節ごと入れ替わると、入力中の欄が画面外へ飛ぶ。
+  useEffect(() => {
+    if (restored && address) setAgentHasWallet(true);
+  }, [address, restored]);
   useEffect(() => {
     if (!restored || !address) return;
     setRecent((current) => {
@@ -165,8 +174,8 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
   const focus = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600';
   return (
     // 控えの復元 (mount 後) までは中身を出さない: 空状態 → 残高カードへの差し替わりを見せないため。
-    // 高さの予約はしない (空状態と残高カードの高さは近く、予約すると空状態に大きな空白ができる)。
-    <section className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
+    // 高さは再訪のときだけ残高カードぶんを予約する (lib/agentLayout.ts)。
+    <section className={`min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6 ${restored ? '' : AGENT_WALLET_RESERVE}`}>
       <h2 className="text-xl font-bold text-slate-900">{c.title}</h2>
       <div hidden={!restored}>
         {pendingLinkedAddress ? <div className="mt-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
@@ -187,8 +196,7 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
         {!address && !inputExpanded ? (
           <div className="mt-2">
             <p className="text-sm leading-relaxed text-slate-700">{c.emptyLead}</p>
-            <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-              <a href="#agent-connect" className={`-my-1.5 py-1.5 font-bold text-brand underline underline-offset-2 ${focus}`}>{c.emptyConnectCta}</a>
+            <p className="mt-3 text-sm">
               <button type="button" aria-expanded={false} aria-controls="agent-wallet-input" className={`-my-1.5 py-1.5 text-slate-600 underline underline-offset-2 ${focus}`} onClick={() => {
                 setEditing(true);
                 // 押したボタン自身が消える。フォーカスが body に落ちないよう、開いた入力欄へ移す (すぐ打てる)。
@@ -258,7 +266,7 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
                 <p className="mt-2 text-xs text-slate-400">{c.balanceLabel} · {chainNameForId(deployment.chainId)}</p>
               </div>
               <div className="flex flex-wrap gap-2">
-                <a href="#agent-connect" className={`rounded-xl border border-white/30 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/10 ${focus}`}>{c.connectCta}</a>
+                <AgentStoreLink locale={locale} className={`rounded-xl border border-white/30 px-4 py-2 text-sm font-bold text-white transition hover:bg-white/10 ${focus}`}>{c.storeCta}</AgentStoreLink>
                 <button type="button" aria-expanded={fundVisible} aria-controls="agent-fund" disabled={fundBusy} className={`rounded-xl bg-white px-4 py-2 text-sm font-bold text-slate-900 transition hover:bg-slate-100 disabled:opacity-50 ${focus}`} onClick={() => setFundOpen((current) => !current)}>{fundVisible ? c.closeFund : c.fundCta}</button>
               </div>
             </div>

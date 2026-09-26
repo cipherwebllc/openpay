@@ -42,12 +42,14 @@ describe('AgentConnect', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(container.querySelector('pre')?.textContent).toBe(buildSetupPrompt(locale));
   });
-  it('shows the prompt and non-link host chips; tracks successful copy only', async () => {
+  it('shows the prompt and names shell hosts in plain text, not chips; tracks successful copy only', async () => {
     const user = userEvent.setup();
     const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
     const { container } = render(<AgentConnect locale="en" c={C} />);
     expect(container.querySelector('pre')?.textContent).toBe(buildSetupPrompt('en'));
-    expect(screen.getByText('Claude Code').closest('a')).toBeNull();
+    // ホスト名はボタンに見える装飾をせず、注記の文中で挙げる。
+    expect(container.textContent).toContain(C.shellNote);
+    expect(container.querySelector('.rounded-full')).toBeNull();
     expect(screen.getByRole('link', { name: /setup\.md/ })).toHaveAttribute('href', '/agent/setup.md');
     expect(screen.getByRole('button', { name: C.promptExpand })).toHaveAttribute('aria-expanded', 'false');
     expect(container.querySelector('pre')).toHaveClass('max-h-40');
@@ -55,6 +57,23 @@ describe('AgentConnect', () => {
     expect(write).toHaveBeenCalledWith(buildSetupPrompt('en'));
     expect(track).toHaveBeenCalledWith('agent_prompt_copy', { locale: 'en' });
     write.mockRestore();
+  });
+  it.each(['ja', 'en'])('folds to a heading and one line while a wallet is shown, with an accessible toggle in %s', async (locale) => {
+    const user = userEvent.setup();
+    const c = agentPageContentFor(locale).connect;
+    render(<div className="group" data-agent-view="wallet"><AgentConnect locale={locale} c={c}><p>modes</p></AgentConnect></div>);
+    const body = document.getElementById('agent-connect-body');
+    // 見た目の開閉は data-agent-view の CSS (Tailwind の group-data)。jsdom は CSS を当てないので class で確かめる。
+    expect(body).toHaveClass('group-data-[agent-view=wallet]:hidden');
+    expect(screen.getByText(c.againLead)).toHaveClass('group-data-[agent-view=wallet]:block');
+    const toggle = screen.getByRole('button', { name: c.showSetup });
+    expect(toggle).toHaveAttribute('aria-controls', 'agent-connect-body');
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveAccessibleName(c.promptCollapse);
+    expect(body).not.toHaveClass('group-data-[agent-view=wallet]:hidden');
+    expect(body).toHaveTextContent('modes');
   });
   it('does not track a failed copy', async () => {
     const user = userEvent.setup();
@@ -70,7 +89,9 @@ describe('AgentConnect', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
     try {
       const { container } = render(<AgentConnect locale="en" c={C} />);
-      expect(screen.queryByRole('button')).toBeNull();
+      // コピーと全文の開閉は出さない (再訪時にカードをたたむボタンは clipboard と無関係なので残る)。
+      expect(screen.queryByRole('button', { name: C.copy })).toBeNull();
+      expect(screen.queryByRole('button', { name: C.promptExpand })).toBeNull();
       expect(container.querySelector('pre')?.textContent).toBe(buildSetupPrompt('en'));
       expect(container.querySelector('pre')).not.toHaveClass('max-h-40', 'overflow-hidden');
     } finally {

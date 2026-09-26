@@ -32,12 +32,13 @@ export type AgentPageContent = {
     readonly openIn: string;
     readonly openInApps: Record<AgentOpenInApp, string>;
     readonly openInNote: string;
-    readonly pasteInto: string;
-    readonly hosts: readonly string[];
     readonly shellNote: string;
     readonly setupLinkLabel: string;
     readonly promptExpand: string;
     readonly promptCollapse: string;
+    /** Wallet を表示中 (接続済みの再訪) に、たたんだカードへ出す 1 行と開くボタン。 */
+    readonly againLead: string;
+    readonly showSetup: string;
   };
   readonly modes: {
     readonly title: string;
@@ -92,7 +93,8 @@ export type AgentPageContent = {
     readonly fundBody: string;
     readonly copyAddress: string;
     readonly copied: string;
-    readonly connectCta: string;
+    /** 残高カードの 2 番目の操作 (AI ストアへ)。 */
+    readonly storeCta: string;
     readonly fundCta: string;
     readonly changeAddress: string;
     readonly recentTitle: string;
@@ -102,7 +104,6 @@ export type AgentPageContent = {
     readonly useLinkedAddress: string;
     readonly keepSavedAddress: string;
     readonly emptyLead: string;
-    readonly emptyConnectCta: string;
     readonly manualEntry: string;
     readonly closeFund: string;
     readonly fundLockedNote: string;
@@ -222,9 +223,8 @@ export type AgentPageContent = {
       readonly example?: { readonly text: string; readonly linkLabel: string; readonly href: string };
     }[];
   };
-  readonly next: {
+  readonly more: {
     readonly title: string;
-    readonly body: string;
     readonly storeLabel: string;
     readonly guideLabel: string;
     readonly noteLabel: string;
@@ -249,20 +249,18 @@ const ja: AgentPageContent = {
   subtitle: 'ウォレットも秘密鍵も、OpenPay は預かりません。',
   connect: {
     title: 'Agent を接続',
-    lead: 'このプロンプトを Agent に渡すだけ。セットアップは Agent が進めます。支払いは、専用ウォレットに入金してからです。',
+    lead: 'このプロンプトを Agent に渡すだけ。セットアップは Agent が進めます。',
     copy: 'セットアッププロンプトをコピー',
     copied: 'コピーしました',
     openIn: 'またはアプリで開く',
     openInApps: { claude: 'Claude', codex: 'Codex' },
-    openInNote:
-      'アプリが入っていれば、プロンプト入りで開きます。送信するのはあなたです。',
-    pasteInto: 'コピーして貼り付ける場合',
-    hosts: ['Claude Code', 'Codex CLI', 'Hermes'],
-    shellNote:
-      'シェルを使える Agent 向け。上の「Claude」ボタンは Claude アプリ内の Claude Code で開くので、そのまま使えます。チャットだけの環境 (Agent が設定を書けない) は下の「自分で設定を書く」へ。',
+    openInNote: 'アプリが入っていれば、プロンプト入りで開きます (Claude は Claude Code)。送信はあなたが行います。',
+    shellNote: 'シェルを使える Agent (Claude Code・Codex CLI・Hermes など) 向けです。チャットだけの環境は、下の「自分で設定を書く」へ。',
     setupLinkLabel: 'Agent が読む手順 (setup.md) を見る',
     promptExpand: '全文を表示',
     promptCollapse: 'たたむ',
+    againLead: '別の Agent や端末をつなぐときも、同じプロンプトを渡すだけです。',
+    showSetup: 'プロンプトを表示',
   },
   modes: {
     title: '2 つの使い方',
@@ -355,7 +353,7 @@ const ja: AgentPageContent = {
       'このアドレスへ JPYC を送ってください。OpenPay での x402 支払いは署名 (EIP-3009) で行われるため、支払いに POL は要りません (残った JPYC を後で別のウォレットへ送るときは POL が必要です)。',
     copyAddress: 'アドレスをコピー',
     copied: 'コピーしました',
-    connectCta: 'Agent を接続',
+    storeCta: '買えるものを見る',
     fundCta: '入金する',
     changeAddress: '変更',
     recentTitle: '最近表示した Wallet',
@@ -364,8 +362,7 @@ const ja: AgentPageContent = {
     linkedAddressConfirm: 'リンクのアドレス {address} は、この端末に保存済みの Agent Wallet と異なります。置き換えますか?',
     useLinkedAddress: 'リンクのアドレスに置き換える',
     keepSavedAddress: '保存済みのアドレスを使う',
-    emptyLead: '下の「Agent を接続」で「Agent が支払う」をセットアップすると、あなたのマシン上にウォレットが作られます。Agent が返すリンクを開くと、ここに残高が表示されます。',
-    emptyConnectCta: 'Agent を接続する',
+    emptyLead: '「Agent が支払う」でセットアップすると、あなたのマシン上に Wallet が作られます。Agent が返すリンクを開くと、ここに残高が出ます。',
     manualEntry: 'アドレスを手入力する',
     closeFund: '閉じる',
     fundLockedNote: '送金の結果を確認できるまで、このパネルは閉じられません。',
@@ -500,10 +497,9 @@ const ja: AgentPageContent = {
       { id: 'switch-signer', kind: 'free', tag: '無料', prompt: 'Agent の支払い方式を切り替えたい。今の設定と上限を見せてから、https://open-pay.jp/agent/setup.md の手順で Kova か MetaMask Agent Wallet に切り替えて。鍵は聞かないで。' },
     ],
   },
-  next: {
-    title: '買えるものを見る',
-    body: 'セットアップが済んだら、Agent が JPYC で購入できるリソースを AI ストアで確認できます。',
-    storeLabel: 'AI ストアを開く',
+  more: {
+    title: 'もっと知る',
+    storeLabel: 'AI ストア',
     guideLabel: 'AI が支払うガイド',
     noteLabel: 'note で読む: AI に JPYC を使わせる。OpenPay Agent の始め方',
   },
@@ -520,20 +516,18 @@ const en: AgentPageContent = {
   subtitle: 'OpenPay never holds your wallet or your private key.',
   connect: {
     title: 'Connect your agent',
-    lead: 'Hand this prompt to your agent. It does the setup itself. Payments start once you fund the agent’s wallet.',
+    lead: 'Hand this prompt to your agent. It does the setup itself.',
     copy: 'Copy setup prompt',
     copied: 'Copied',
     openIn: 'Or open in',
     openInApps: { claude: 'Claude', codex: 'Codex' },
-    openInNote:
-      'If the app is installed, it opens with the prompt filled in. You press send.',
-    pasteInto: 'Or copy and paste into',
-    hosts: ['Claude Code', 'Codex CLI', 'Hermes'],
-    shellNote:
-      'For agents with shell access. The “Claude” button above opens Claude Code inside the Claude app, so it works as is. Chat-only hosts, where the agent can’t write its own config, should use “Write the config yourself” below.',
+    openInNote: 'If the app is installed, it opens with the prompt filled in (Claude opens in Claude Code). You press send.',
+    shellNote: 'For agents with shell access, such as Claude Code, Codex CLI, and Hermes. For chat-only hosts, use “Write the config yourself” below.',
     setupLinkLabel: 'Read the instructions your agent follows (setup.md)',
     promptExpand: 'Show full prompt',
     promptCollapse: 'Collapse',
+    againLead: 'To connect another agent or machine, hand it the same prompt.',
+    showSetup: 'Show the prompt',
   },
   modes: {
     title: 'Two ways to use it',
@@ -626,7 +620,7 @@ const en: AgentPageContent = {
       'Send JPYC to this address. OpenPay x402 payments are signed authorizations (EIP-3009), so paying needs no POL (moving leftover JPYC out later does).',
     copyAddress: 'Copy address',
     copied: 'Copied',
-    connectCta: 'Connect agent',
+    storeCta: 'See what it can buy',
     fundCta: 'Add funds',
     changeAddress: 'Change',
     recentTitle: 'Recently viewed wallets',
@@ -635,8 +629,7 @@ const en: AgentPageContent = {
     linkedAddressConfirm: 'The link’s address {address} differs from the Agent Wallet saved on this device. Replace it?',
     useLinkedAddress: 'Use the link’s address',
     keepSavedAddress: 'Keep the saved address',
-    emptyLead: 'Set up “Agent pays” with “Connect your agent” below and a wallet is created on your own machine. Open the link your agent returns and its balance appears here.',
-    emptyConnectCta: 'Connect your agent',
+    emptyLead: 'Set up “Agent pays” and a wallet is created on your own machine. Open the link your agent returns to see its balance here.',
     manualEntry: 'Enter an address manually',
     closeFund: 'Close',
     fundLockedNote: 'This panel stays open until the transfer’s result is confirmed.',
@@ -771,10 +764,9 @@ const en: AgentPageContent = {
       { id: 'switch-signer', kind: 'free', tag: 'Free', prompt: 'I want to switch my agent’s payment method. Show me the current config and limits first, then switch to Kova or MetaMask Agent Wallet following https://open-pay.jp/agent/setup.md. Never ask me for a key.' },
     ],
   },
-  next: {
-    title: 'See what it can buy',
-    body: 'Once set up, browse the AI Store for the resources your agent can buy with JPYC.',
-    storeLabel: 'Open the AI Store',
+  more: {
+    title: 'Learn more',
+    storeLabel: 'AI Store',
     guideLabel: 'Guide: how AI pays',
     noteLabel: 'Read on note (Japanese): getting started with OpenPay Agent',
   },
