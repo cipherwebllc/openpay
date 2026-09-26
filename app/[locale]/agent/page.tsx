@@ -11,6 +11,9 @@ import { AgentSafety } from '@/components/agent/AgentSafety';
 import { AgentStoreLink } from '@/components/agent/AgentStoreLink';
 import { agentPageContentFor, agentPageMetadata } from '@/lib/agentPage';
 
+// 運営 (masia02) による解説記事。外部依存ゆえ参照は 1 箇所に集約する (LandingMobileOrder と同じ流儀)。
+const AGENT_NOTE_ARTICLE_URL = 'https://note.com/masia02/n/nccfa34379929';
+
 export async function generateMetadata({ params }: { params: Promise<{ locale: string }> }): Promise<Metadata> {
   const { locale } = await params;
   setRequestLocale(locale);
@@ -52,6 +55,7 @@ export default async function AgentPage({ params }: { params: Promise<{ locale: 
           <div className="mt-4 flex flex-wrap items-center gap-4">
             <AgentStoreLink locale={locale}>{c.next.storeLabel}</AgentStoreLink>
             <Link href={`/${locale}/guide/ai-pay`} prefetch={false} className="text-sm text-emerald-700 underline">{c.next.guideLabel}</Link>
+            <a href={AGENT_NOTE_ARTICLE_URL} target="_blank" rel="noopener noreferrer" className="text-sm text-emerald-700 underline">{c.next.noteLabel}</a>
           </div>
         </section>
       </article>
