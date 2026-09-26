@@ -327,6 +327,45 @@ describe('AgentWalletCard', () => {
     render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
     expect(screen.getByLabelText('Agent wallet address')).toHaveValue(address);
   });
+  it('lists recently viewed wallets with only user-given names and switches the shown wallet from the list', async () => {
+    const other = '0x2222222222222222222222222222222222222222';
+    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
+    fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: address } });
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    // No name is inferred from the address; the chip shows only the short address until the user names it.
+    expect(screen.queryByText(/Kova/)).toBeNull();
+    fireEvent.change(screen.getByLabelText(C.labelInputLabel), { target: { value: 'Kova' } });
+    expect(screen.getByText('Kova ·')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: other } });
+    expect(JSON.parse(window.localStorage.getItem('openpay.agent.recent')!)).toEqual([{ address: other }, { address, label: 'Kova' }]);
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    expect(screen.getByText(C.recentTitle)).toBeInTheDocument();
+    const entry = screen.getByRole('button', { name: /Kova 0x1111…1111/ });
+    fireEvent.click(entry);
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
+    expect(screen.getByLabelText(C.inputLabel)).toHaveValue(address);
+    expect(screen.getByLabelText(C.inputLabel)).not.toBeVisible();
+    expect(screen.getByText('Kova ·')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: C.changeAddress })).toHaveFocus();
+  });
+  it('ignores a corrupt recent-wallet store without breaking the saved wallet', () => {
+    window.localStorage.setItem('openpay.agent.address', address);
+    window.localStorage.setItem('openpay.agent.recent', '{not json');
+    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
+    expect(screen.getByLabelText(C.inputLabel)).toHaveValue(address);
+    expect(screen.queryByText(C.recentTitle)).toBeNull();
+    expect(JSON.parse(window.localStorage.getItem('openpay.agent.recent')!)).toEqual([{ address }]);
+  });
+  it('drops malformed recent entries, trims names and keeps at most five', () => {
+    const many = Array.from({ length: 7 }, (_, i) => ({ address: `0x${String(i + 3).repeat(40)}`, label: i === 0 ? '  ' + 'x'.repeat(30) : undefined }));
+    window.localStorage.setItem('openpay.agent.recent', JSON.stringify([{ address: 'not-an-address', label: 'bad' }, 42, ...many]));
+    render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);
+    fireEvent.click(screen.getByRole('button', { name: C.manualEntry }));
+    const buttons = screen.getAllByRole('button').filter((button) => /0x[0-9a-f]{4}…[0-9a-f]{4}/.test(button.textContent ?? ''));
+    expect(buttons).toHaveLength(5);
+    expect(buttons[0]).toHaveTextContent('x'.repeat(20));
+    expect(buttons[0].textContent).not.toContain('x'.repeat(21));
+  });
   it('passes the funding copy, locale and address inside the funding block and refreshes on confirmation', () => {
     state.query = `address=${address}`;
     render(<AgentWalletCard purchases={agentPageContentFor('en').purchases} c={C} activity={activity} />);

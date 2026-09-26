@@ -95,6 +95,9 @@ export type AgentPageContent = {
     readonly connectCta: string;
     readonly fundCta: string;
     readonly changeAddress: string;
+    readonly recentTitle: string;
+    readonly labelInputLabel: string;
+    readonly labelPlaceholder: string;
     readonly linkedAddressConfirm: string;
     readonly useLinkedAddress: string;
     readonly keepSavedAddress: string;
@@ -208,7 +211,7 @@ export type AgentPageContent = {
     /** 支払いが起きる依頼文にだけ出す注記。 */
     readonly paidNote: string;
     readonly items: readonly {
-      readonly id: 'catalog' | 'buy-monitor' | 'order' | 'history' | 'limits' | 'history-web';
+      readonly id: 'catalog' | 'buy-monitor' | 'order' | 'history' | 'limits' | 'history-web' | 'switch-signer';
       /** free = 支払いなし / paid = Agent が支払う / human = 人が支払う。 */
       readonly kind: 'free' | 'paid' | 'human';
       readonly tag: string;
@@ -301,7 +304,7 @@ const ja: AgentPageContent = {
   },
   generator: {
     title: '自分で設定を書く (手動)',
-    summaryHint: 'Claude のチャットなど、Agent が自分で設定を書けない環境向け',
+    summaryHint: '支払い方式 (ローカル / Kova / MetaMask) を切り替えるときや、Agent が設定を書けない環境向け',
     lead: 'Agent の実行環境へ貼り付ける設定を作ります。貼り付けるのはあなたです。',
     modeLabel: '使い方',
     clientLabel: '利用環境',
@@ -355,6 +358,9 @@ const ja: AgentPageContent = {
     connectCta: 'Agent を接続',
     fundCta: '入金する',
     changeAddress: '変更',
+    recentTitle: '最近表示した Wallet',
+    labelInputLabel: '名前 (任意・この端末だけに保存)',
+    labelPlaceholder: '例: Kova',
     linkedAddressConfirm: 'リンクのアドレス {address} は、この端末に保存済みの Agent Wallet と異なります。置き換えますか?',
     useLinkedAddress: 'リンクのアドレスに置き換える',
     keepSavedAddress: '保存済みのアドレスを使う',
@@ -491,6 +497,7 @@ const ja: AgentPageContent = {
       { id: 'history', kind: 'free', tag: '無料', prompt: '最近なにを買ったか、金額と取引ハッシュつきで見せてください。' },
       { id: 'limits', kind: 'free', tag: '無料', prompt: 'いまの支払い上限と、今日使った額を教えてください。' },
       { id: 'history-web', kind: 'free', tag: '無料', prompt: '購入履歴を Web で開いてください。' },
+      { id: 'switch-signer', kind: 'free', tag: '無料', prompt: 'Agent の支払い方式を切り替えたい。今の設定と上限を見せてから、https://open-pay.jp/agent/setup.md の手順で Kova か MetaMask Agent Wallet に切り替えて。鍵は聞かないで。' },
     ],
   },
   next: {
@@ -568,7 +575,7 @@ const en: AgentPageContent = {
   },
   generator: {
     title: 'Write the config yourself (manual)',
-    summaryHint: 'For Claude chat and other hosts where the agent can’t write its own config',
+    summaryHint: 'For switching the payment method (local / Kova / MetaMask) or hosts where the agent can’t write its own config',
     lead: 'Builds the config to paste into your agent’s environment. You do the pasting.',
     modeLabel: 'Mode',
     clientLabel: 'Environment',
@@ -622,6 +629,9 @@ const en: AgentPageContent = {
     connectCta: 'Connect agent',
     fundCta: 'Add funds',
     changeAddress: 'Change',
+    recentTitle: 'Recently viewed wallets',
+    labelInputLabel: 'Name (optional, saved on this device only)',
+    labelPlaceholder: 'e.g. Kova',
     linkedAddressConfirm: 'The link’s address {address} differs from the Agent Wallet saved on this device. Replace it?',
     useLinkedAddress: 'Use the link’s address',
     keepSavedAddress: 'Keep the saved address',
@@ -758,6 +768,7 @@ const en: AgentPageContent = {
       { id: 'history', kind: 'free', tag: 'Free', prompt: 'Show me what you bought recently, with amounts and transaction hashes.' },
       { id: 'limits', kind: 'free', tag: 'Free', prompt: 'Tell me my current spending limits and how much I have spent today.' },
       { id: 'history-web', kind: 'free', tag: 'Free', prompt: 'Open my purchase history on the web.' },
+      { id: 'switch-signer', kind: 'free', tag: 'Free', prompt: 'I want to switch my agent’s payment method. Show me the current config and limits first, then switch to Kova or MetaMask Agent Wallet following https://open-pay.jp/agent/setup.md. Never ask me for a key.' },
     ],
   },
   next: {
