@@ -39,6 +39,7 @@ export type AgentPageContent = {
     /** Wallet を表示中 (接続済みの再訪) に、たたんだカードへ出す 1 行と開くボタン。 */
     readonly againLead: string;
     readonly showSetup: string;
+    readonly hideSetup: string;
   };
   readonly modes: {
     readonly title: string;
@@ -261,6 +262,7 @@ const ja: AgentPageContent = {
     promptCollapse: 'たたむ',
     againLead: '別の Agent や端末をつなぐときも、同じプロンプトを渡すだけです。',
     showSetup: 'プロンプトを表示',
+    hideSetup: 'プロンプトを隠す',
   },
   modes: {
     title: '2 つの使い方',
@@ -528,6 +530,7 @@ const en: AgentPageContent = {
     promptCollapse: 'Collapse',
     againLead: 'To connect another agent or machine, hand it the same prompt.',
     showSetup: 'Show the prompt',
+    hideSetup: 'Hide the prompt',
   },
   modes: {
     title: 'Two ways to use it',

@@ -6,11 +6,12 @@ import { track } from '@vercel/analytics';
 import { AgentConnect } from '@/components/agent/AgentConnect';
 import { buildSetupPrompt } from '@/lib/agentSetup';
 import { agentPageContentFor } from '@/lib/agentPage';
+import { resetAgentView, setAgentHasWallet } from '@/hooks/useAgentView';
 
 const C = agentPageContentFor('en').connect;
 vi.mock('@vercel/analytics', () => ({ track: vi.fn() }));
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => { vi.clearAllMocks(); resetAgentView(); window.localStorage.clear(); });
 describe('AgentConnect', () => {
   it('server の描画は clipboard が無くても client の初回描画と同じ形 (hydration 不一致を起こさない)', () => {
     // server には navigator.clipboard が無い。以前は「clipboard なし = 展開・ボタンなし」で描画し、
@@ -61,19 +62,30 @@ describe('AgentConnect', () => {
   it.each(['ja', 'en'])('folds to a heading and one line while a wallet is shown, with an accessible toggle in %s', async (locale) => {
     const user = userEvent.setup();
     const c = agentPageContentFor(locale).connect;
-    render(<div className="group" data-agent-view="wallet"><AgentConnect locale={locale} c={c}><p>modes</p></AgentConnect></div>);
+    setAgentHasWallet(true);
+    render(<AgentConnect locale={locale} c={c}><p>modes</p></AgentConnect>);
     const body = document.getElementById('agent-connect-body');
-    // 見た目の開閉は data-agent-view の CSS (Tailwind の group-data)。jsdom は CSS を当てないので class で確かめる。
-    expect(body).toHaveClass('group-data-[agent-view=wallet]:hidden');
-    expect(screen.getByText(c.againLead)).toHaveClass('group-data-[agent-view=wallet]:block');
+    expect(body).not.toBeVisible();
+    expect(screen.getByText(c.againLead)).toBeVisible();
+    expect(screen.queryByText(c.lead)).toBeNull();
     const toggle = screen.getByRole('button', { name: c.showSetup });
     expect(toggle).toHaveAttribute('aria-controls', 'agent-connect-body');
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(toggle).toHaveAccessibleName(c.promptCollapse);
-    expect(body).not.toHaveClass('group-data-[agent-view=wallet]:hidden');
+    expect(body).toBeVisible();
     expect(body).toHaveTextContent('modes');
+    // カードの開閉と全文の開閉は別の名前 (同じ「たたむ」が 2 つ並ばない)。
+    expect(toggle).toHaveAccessibleName(c.hideSetup);
+    expect(c.hideSetup).not.toBe(c.promptCollapse);
+    await user.click(screen.getByRole('button', { name: c.promptExpand }));
+    expect(screen.getAllByRole('button', { name: c.promptCollapse })).toHaveLength(1);
+  });
+  it('stays open on first visits and before React decides (the pre-paint attribute alone never folds it)', () => {
+    render(<div className="group" data-agent-view="wallet"><AgentConnect locale="en" c={C} /></div>);
+    expect(document.getElementById('agent-connect-body')).toBeVisible();
+    expect(screen.getByText(C.lead)).toBeVisible();
+    expect(screen.queryByRole('button', { name: C.showSetup })).toBeNull();
   });
   it('does not track a failed copy', async () => {
     const user = userEvent.setup();
@@ -89,9 +101,7 @@ describe('AgentConnect', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
     try {
       const { container } = render(<AgentConnect locale="en" c={C} />);
-      // コピーと全文の開閉は出さない (再訪時にカードをたたむボタンは clipboard と無関係なので残る)。
-      expect(screen.queryByRole('button', { name: C.copy })).toBeNull();
-      expect(screen.queryByRole('button', { name: C.promptExpand })).toBeNull();
+      expect(screen.queryByRole('button')).toBeNull();
       expect(container.querySelector('pre')?.textContent).toBe(buildSetupPrompt('en'));
       expect(container.querySelector('pre')).not.toHaveClass('max-h-40', 'overflow-hidden');
     } finally {

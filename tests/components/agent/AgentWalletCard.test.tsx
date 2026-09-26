@@ -8,7 +8,7 @@ import { AgentWalletCard } from '@/components/agent/AgentWalletCard';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
 import { chainNameForId } from '@/lib/chains';
 import { agentPageContentFor } from '@/lib/agentPage';
-import { resetAgentViewForTest, useAgentHasWallet } from '@/hooks/useAgentView';
+import { resetAgentView, useAgentHasWallet } from '@/hooks/useAgentView';
 
 const C = agentPageContentFor('en').wallet;
 const activity = agentPageContentFor('en').activity;
@@ -40,7 +40,7 @@ function ViewProbe() {
   const hasWallet = useAgentHasWallet();
   return <output data-testid="view">{String(hasWallet)}</output>;
 }
-beforeEach(() => { resetAgentViewForTest(); flags.enabled = true; window.localStorage.clear(); window.history.replaceState(null, '', '/'); state.query = ''; state.data = undefined; state.isError = false; state.connected = false; vi.clearAllMocks(); });
+beforeEach(() => { resetAgentView(); flags.enabled = true; window.localStorage.clear(); window.history.replaceState(null, '', '/'); state.query = ''; state.data = undefined; state.isError = false; state.connected = false; vi.clearAllMocks(); });
 
 describe('AgentWalletCard', () => {
   it('decides the page order once restored: setup without an address, wallet with one', () => {
@@ -54,7 +54,7 @@ describe('AgentWalletCard', () => {
     fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: '' } });
     expect(screen.getByTestId('view')).toHaveTextContent('true');
     empty.unmount();
-    resetAgentViewForTest();
+    resetAgentView();
     window.localStorage.setItem('openpay.agent.address', address);
     render(<><ViewProbe /><AgentWalletCard c={C} activity={activity} purchases={purchases} /></>);
     expect(screen.getByTestId('view')).toHaveTextContent('true');

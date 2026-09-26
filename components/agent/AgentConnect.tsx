@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
+import { useAgentHasWallet } from '@/hooks/useAgentView';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import type { AgentPageContent } from '@/lib/agentPage';
 import { AGENT_OPEN_IN_APPS, buildOpenInLink, buildSetupPrompt } from '@/lib/agentSetup';
@@ -15,21 +16,24 @@ export function AgentConnect({ locale, c, children }: { locale: string; c: Agent
   const available = useHydrationSafeAvailable(clipboardAvailable);
   const [expanded, setExpanded] = useState(false);
   // Wallet を表示中 (再訪) は接続を済ませた人なので、カードをたたんで見出しと 1 行だけにする。
-  // 開閉は CSS (並びと同じ data-agent-view) で決める: 描画前の script の判定にも追従し、ちらつかない。
+  // たたむのは React の判定後だけ (描画前 script の属性には従わない): JS が読めない環境でもプロンプトを読めるように。
+  // 再訪の並びでは接続カードは画面の下のほうなので、hydration 後にたたんでも見えている範囲はずれない。
+  const hasWallet = useAgentHasWallet() === true;
   const [open, setOpen] = useState(false);
+  const folded = hasWallet && !open;
   const promptExpanded = expanded || !available;
   const focus = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600';
   return (
-    <section id="agent-connect" className="scroll-mt-24 min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-brand/30 group-data-[agent-view=wallet]:ring-slate-200/70 sm:p-8">
+    <section id="agent-connect" className={`scroll-mt-24 min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 sm:p-8 ${hasWallet ? 'ring-slate-200/70' : 'ring-brand/30'}`}>
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 className="text-xl font-bold text-slate-900">{c.title}</h2>
-          <p className="mt-2 text-sm text-slate-700 group-data-[agent-view=wallet]:hidden">{c.lead}</p>
-          <p className="mt-2 hidden text-sm text-slate-600 group-data-[agent-view=wallet]:block">{c.againLead}</p>
+          <p className={`mt-2 text-sm ${hasWallet ? 'text-slate-600' : 'text-slate-700'}`}>{hasWallet ? c.againLead : c.lead}</p>
         </div>
-        <button type="button" aria-expanded={open} aria-controls="agent-connect-body" className={`hidden shrink-0 rounded-lg px-2 py-1 text-sm font-medium text-emerald-700 group-data-[agent-view=wallet]:block ${focus}`} onClick={() => setOpen((current) => !current)}>{open ? c.promptCollapse : c.showSetup}</button>
+        {/* 名前は全文の開閉 (たたむ) と別にする: 同じ名前のボタンが別の場所を開閉すると区別できない。 */}
+        {hasWallet ? <button type="button" aria-expanded={open} aria-controls="agent-connect-body" className={`shrink-0 rounded-lg px-2 py-1 text-sm font-medium text-emerald-700 ${focus}`} onClick={() => setOpen((current) => !current)}>{open ? c.hideSetup : c.showSetup}</button> : null}
       </div>
-      <div id="agent-connect-body" className={open ? '' : 'group-data-[agent-view=wallet]:hidden'}>
+      <div id="agent-connect-body" hidden={folded}>
         {/* prompt は人が読んで確かめる文章なので折り返す (CodeBlock は横スクロールで後半が隠れる)。 */}
         <div className="relative mt-4 overflow-hidden rounded-xl bg-slate-900 ring-1 ring-slate-700">
           <pre id="agent-setup-prompt" className={`whitespace-pre-wrap break-words p-4 text-xs leading-relaxed text-slate-100 ${promptExpanded ? '' : 'max-h-40 overflow-hidden'}`}>

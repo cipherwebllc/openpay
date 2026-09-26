@@ -1,13 +1,14 @@
 'use client';
 
-import { useSyncExternalStore, type ReactNode } from 'react';
-import { AGENT_ADDRESS_STORAGE_KEY, useAgentHasWallet } from '@/hooks/useAgentView';
+import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
+import { AGENT_ADDRESS_PATTERN, AGENT_ADDRESS_STORAGE_KEY, resetAgentView, useAgentHasWallet } from '@/hooks/useAgentView';
 
 // 静的 HTML は初回訪問の並び (接続が先頭)。再訪者 (端末の控え or ?address= のリンク) は描画前にこの script が
 // 並びを Wallet 先頭へ切り替え、残高カードの復元 (hydration 後) を待つ間に接続カードが先頭でちらつくのを防ぐ。
 // 失敗しても初回訪問の並びのまま表示され、復元後に React が並べ直す (ブラウザ API の失敗を描画へ波及させない)。
+// script が決めるのは並びと高さの予約だけ。接続カードのたたみは React の判定後 (JS が読めない環境でもプロンプトを読める)。
 // ⚠️ CSP の script-src が 'unsafe-inline' 前提 (next.config.mjs)。nonce 方式へ移るときはこの script にも nonce を渡す。
-export const AGENT_VIEW_PREPAINT = `(function(){try{var r=/^0x[0-9a-fA-F]{40}$/,q=new URLSearchParams(location.search).get('address')||'';if(r.test(q)||r.test(localStorage.getItem(${JSON.stringify(AGENT_ADDRESS_STORAGE_KEY)})||''))document.currentScript.parentElement.setAttribute('data-agent-view','wallet')}catch(e){}})()`;
+export const AGENT_VIEW_PREPAINT = `(function(){try{var r=new RegExp(${JSON.stringify(AGENT_ADDRESS_PATTERN)}),q=new URLSearchParams(location.search).get('address')||'';if(r.test(q)||r.test(localStorage.getItem(${JSON.stringify(AGENT_ADDRESS_STORAGE_KEY)})||''))document.currentScript.parentElement.setAttribute('data-agent-view','wallet')}catch(e){}})()`;
 
 const noopSubscribe = () => () => {};
 
@@ -20,13 +21,15 @@ export function AgentPageSections({ connect, wallet, tryPrompts, children }: { c
   // script は server の HTML と hydration のときだけ描く。client だけの描画 (ページ間の移動) では実行されない
   // (React は client で作った script を実行しない) ので描かず、hydration 後も DOM から外す。
   const prerendered = useSyncExternalStore(noopSubscribe, () => false, () => true);
+  // ページを離れたら判定を捨てる。次にアプリ内で戻ったとき、前回の値ではなく今の控えから推定し直す。
+  useEffect(() => resetAgentView, []);
   const connectSlot: Slot = { key: 'connect', node: connect, className: 'order-1 group-data-[agent-view=wallet]:order-3' };
   const walletSlot: Slot = { key: 'wallet', node: wallet, className: 'order-2 group-data-[agent-view=wallet]:order-1' };
   const trySlot: Slot = { key: 'try', node: tryPrompts, className: 'order-3 group-data-[agent-view=wallet]:order-2' };
   const slots = hasWallet ? [walletSlot, trySlot, connectSlot] : [connectSlot, walletSlot, trySlot];
   return (
-    // 未確定 (null) の間は属性を描かず、script が付けた値を hydration で消さない。確定後は明示の値で上書きする
-    // (script の推定と残高カードの判定が食い違っても、判定のほうへ揃う)。
+    // null は server と hydration のときだけ。属性を描かず、script が付けた値を hydration で消さない。
+    // client では推定 → 残高カードの判定の順に明示の値で上書きする (食い違っても判定のほうへそろう)。
     <div data-agent-view={hasWallet === null ? undefined : hasWallet ? 'wallet' : 'setup'} suppressHydrationWarning className="group flex min-w-0 flex-col gap-8">
       {prerendered ? <script dangerouslySetInnerHTML={{ __html: AGENT_VIEW_PREPAINT }} /> : null}
       {slots.map((slot) => <div key={slot.key} className={`min-w-0 ${slot.className}`}>{slot.node}</div>)}

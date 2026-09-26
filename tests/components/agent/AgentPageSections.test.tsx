@@ -1,8 +1,9 @@
 import { renderToString } from 'react-dom/server';
+import { hydrateRoot } from 'react-dom/client';
 import { act, render } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_VIEW_PREPAINT, AgentPageSections } from '@/components/agent/AgentPageSections';
-import { resetAgentViewForTest, setAgentHasWallet } from '@/hooks/useAgentView';
+import { resetAgentView, setAgentHasWallet } from '@/hooks/useAgentView';
 
 const WALLET = '0x1111111111111111111111111111111111111111';
 
@@ -15,19 +16,24 @@ function page() {
 }
 const order = (root: ParentNode) => [...root.querySelectorAll('section')].map((section) => section.id);
 
-function runPrepaint(parent: HTMLElement) {
-  const script = document.createElement('script');
-  parent.appendChild(script);
+// jsdom は innerHTML で入れた script を実行しないので、document.currentScript をその script にして中身を実行する。
+function execScript(script: HTMLScriptElement) {
   Object.defineProperty(document, 'currentScript', { configurable: true, get: () => script });
   try {
-    new Function(AGENT_VIEW_PREPAINT)();
+    new Function(script.textContent ?? '')();
   } finally {
     Reflect.deleteProperty(document, 'currentScript');
   }
 }
+function runPrepaint(parent: HTMLElement) {
+  const script = document.createElement('script');
+  script.textContent = AGENT_VIEW_PREPAINT;
+  parent.appendChild(script);
+  execScript(script);
+}
 
 beforeEach(() => {
-  resetAgentViewForTest();
+  resetAgentView();
   window.localStorage.clear();
   window.history.replaceState(null, '', '/');
 });
@@ -54,6 +60,48 @@ describe('AgentPageSections', () => {
     act(() => setAgentHasWallet(false));
     expect(container.querySelector('[data-agent-view]')).toHaveAttribute('data-agent-view', 'setup');
     expect(order(container)).toEqual(['c', 'w', 't', 'rest']);
+  });
+  it('hydrates over the pre-paint attribute without warnings, then drops the script', async () => {
+    window.localStorage.setItem('openpay.agent.address', WALLET);
+    const host = document.createElement('div');
+    host.innerHTML = renderToString(page());
+    document.body.appendChild(host);
+    // server の HTML に入っている script そのものを実行する (実ブラウザの parse 時と同じ)。
+    execScript(host.querySelector('script')!);
+    expect(host.firstElementChild).toHaveAttribute('data-agent-view', 'wallet');
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const recoverable = vi.fn();
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+    try {
+      await act(async () => { root = hydrateRoot(host, page(), { onRecoverableError: recoverable }); });
+      expect(errors).not.toHaveBeenCalled();
+      expect(recoverable).not.toHaveBeenCalled();
+      expect(host.firstElementChild).toHaveAttribute('data-agent-view', 'wallet');
+      expect(host.querySelector('script')).toBeNull();
+      // hydration 直後に client の推定 (控えあり) で DOM も Wallet 先頭へ。
+      expect(order(host)).toEqual(['w', 't', 'c', 'rest']);
+    } finally {
+      errors.mockRestore();
+      act(() => root?.unmount());
+      host.remove();
+    }
+  });
+  it('guesses the returning order on the first client render (in-app navigation has no pre-paint script)', () => {
+    window.localStorage.setItem('openpay.agent.address', WALLET);
+    const { container, unmount } = render(page());
+    expect(order(container)).toEqual(['w', 't', 'c', 'rest']);
+    expect(container.querySelector('[data-agent-view]')).toHaveAttribute('data-agent-view', 'wallet');
+    // 残高カードの判定が推定より優先される。
+    act(() => setAgentHasWallet(false));
+    expect(order(container)).toEqual(['c', 'w', 't', 'rest']);
+    // ページを離れたら判定を捨て、次に来たときは今の控えから推定し直す。
+    unmount();
+    window.localStorage.clear();
+    const next = render(page());
+    expect(order(next.container)).toEqual(['c', 'w', 't', 'rest']);
+    next.unmount();
+    window.localStorage.setItem('openpay.agent.address', WALLET);
+    expect(order(render(page()).container)).toEqual(['w', 't', 'c', 'rest']);
   });
   it('keeps CSS order in step with the DOM order for both views', () => {
     const { container } = render(page());
