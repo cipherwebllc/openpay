@@ -9,7 +9,7 @@ const WALLET = '0x1111111111111111111111111111111111111111';
 
 function page() {
   return (
-    <AgentPageSections connect={<section id="c">connect</section>} wallet={<section id="w"><input aria-label="w" /></section>} tryPrompts={<section id="t">try</section>}>
+    <AgentPageSections hero={<header id="h">hero</header>} connect={<section id="c">connect</section>} wallet={<section id="w"><input aria-label="w" /></section>} tryPrompts={<section id="t">try</section>}>
       <section id="rest">rest</section>
     </AgentPageSections>
   );
@@ -105,11 +105,33 @@ describe('AgentPageSections', () => {
   });
   it('keeps CSS order in step with the DOM order for both views', () => {
     const { container } = render(page());
-    const slot = (id: string) => container.querySelector(`#${id}`)!.parentElement!;
+    const slot = (id: string) => container.querySelector(`#${id}`)!.closest('[class*="order-"]')!;
     expect(slot('c')).toHaveClass('order-1', 'group-data-[agent-view=wallet]:order-3');
     expect(slot('w')).toHaveClass('order-2', 'group-data-[agent-view=wallet]:order-1');
     expect(slot('t')).toHaveClass('order-3', 'group-data-[agent-view=wallet]:order-2');
     expect(slot('rest')).toHaveClass('order-4');
+    // 描画前 (DOM は初回訪問の並び) の PC の暫定配置: 主列 = 残高 → 頼めること、右の列 = 接続 → 残り。
+    expect(slot('w')).toHaveClass('lg:group-data-[agent-view=wallet]:col-start-1', 'lg:group-data-[agent-view=wallet]:row-[1/2]');
+    expect(slot('t')).toHaveClass('lg:group-data-[agent-view=wallet]:col-start-1', 'lg:group-data-[agent-view=wallet]:row-[2/3]');
+    expect(slot('c')).toHaveClass('lg:group-data-[agent-view=wallet]:col-start-2', 'lg:group-data-[agent-view=wallet]:row-[1/2]');
+    expect(slot('rest')).toHaveClass('lg:group-data-[agent-view=wallet]:col-start-2', 'lg:group-data-[agent-view=wallet]:row-[2/3]');
+    expect(new Set(['c', 'w', 't', 'rest'].map((id) => slot(id).parentElement)).size).toBe(1);
+  });
+  it('groups connect and the rest into one right column once React decides, keeping the wallet slot in place', () => {
+    const { container } = render(page());
+    const grid = container.querySelector('#w')!.parentElement!.parentElement!;
+    const wallet = container.querySelector('#w');
+    act(() => setAgentHasWallet(true));
+    // 右の列は 1 つの要素 (1〜2 行目) にまとまる: 左右が独立に積まれ、右が長くても頼めることが押し下げられない。
+    const aside = container.querySelector('#c')!.closest('[class*="row-[1/3]"]')!;
+    expect(aside).toHaveClass('lg:group-data-[agent-view=wallet]:col-start-2', 'order-3');
+    expect(aside.contains(container.querySelector('#rest'))).toBe(true);
+    expect(aside.parentElement).toBe(grid);
+    // 残高と頼めることは同じ親のまま (残高カードを作り直さない)。
+    expect(container.querySelector('#w')).toBe(wallet);
+    expect(container.querySelector('#w')!.parentElement!.parentElement).toBe(grid);
+    expect(container.querySelector('#t')!.parentElement!.parentElement).toBe(grid);
+    expect([...grid.children].map((child) => child.querySelector('section')?.id)).toEqual(['w', 't', 'c']);
   });
   it.each([
     ['a saved address', () => window.localStorage.setItem('openpay.agent.address', WALLET), 'wallet'],

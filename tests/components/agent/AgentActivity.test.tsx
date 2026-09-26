@@ -148,19 +148,19 @@ describe('AgentActivity', () => {
     expect(screen.queryByRole('table')).toBeNull();
   });
 
-  it('shows ten more fetched transfers per click and resets pagination on a filter change', async () => {
+  it('starts with five transfers, shows ten more per click and resets pagination on a filter change', async () => {
     const items = Array.from({ length: 25 }, (_, i) => item({ key: `transfer-${i}`, direction: i < 12 ? 'in' : 'out' }));
     mockFetch.mockResolvedValue(response(success(items)));
     mount();
     await screen.findByRole('table');
-    expect(table().getAllByRole('row')).toHaveLength(11);
+    expect(table().getAllByRole('row')).toHaveLength(6);
     fireEvent.click(screen.getByRole('button', { name: c.more }));
-    expect(table().getAllByRole('row')).toHaveLength(21);
+    expect(table().getAllByRole('row')).toHaveLength(16);
     fireEvent.click(screen.getByRole('button', { name: c.more }));
     expect(table().getAllByRole('row')).toHaveLength(26);
     expect(screen.queryByRole('button', { name: c.more })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: c.filterIn }));
-    expect(table().getAllByRole('row')).toHaveLength(11);
+    expect(table().getAllByRole('row')).toHaveLength(6);
     fireEvent.click(screen.getByRole('button', { name: c.more }));
     expect(table().getAllByRole('row')).toHaveLength(13);
     expect(mockFetch).toHaveBeenCalledTimes(1);
@@ -185,7 +185,10 @@ describe('AgentActivity', () => {
       const link = screen.getByRole('link', { name: copy.explorerLink });
       expect(link).toHaveAttribute('href', `https://polygonscan.com/token/${tokenAddress}?a=${address.toLowerCase()}`);
       expect(screen.queryByText(copy.empty)).toBeNull();
-      expect(screen.getAllByText('—')).toHaveLength(2);
+      // 読み取れないときは集計の枠ごと出さない (「—」を並べない)。絞り込みも出さない。
+      expect(screen.queryByText('—')).toBeNull();
+      expect(screen.queryByText(copy.stat24h)).toBeNull();
+      expect(screen.queryByRole('button', { name: copy.filterAll })).toBeNull();
     });
   });
 
@@ -260,7 +263,8 @@ describe('AgentActivity', () => {
     await screen.findByRole('table');
     expect(screen.getByText(c.stat24h).parentElement).toHaveTextContent('11 JPYC');
     expect(screen.getByText(c.stat7d).parentElement).toHaveTextContent(`—${c.statsPartial}`);
-    expect(table().getAllByRole('row')).toHaveLength(11);
+    // 表示は最初の 5 件だけでも、集計は取得した全件から出す。
+    expect(table().getAllByRole('row')).toHaveLength(6);
   });
 
   it('discards old rows and totals immediately when the address changes', async () => {

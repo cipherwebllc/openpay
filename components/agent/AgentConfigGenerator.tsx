@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { CodeBlock } from '@/components/guide/AgentGuidePieces';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
+import { AGENT_SIDE_SINGLE_COLUMN } from '@/lib/agentLayout';
 import type { AgentPageContent } from '@/lib/agentPage';
 import { AGENT_CLIENTS, AGENT_MODES, DEFAULT_AGENT_CONFIG_INPUT, invalidAgentConfigFields, renderAgentConfig, type AgentClient, type AgentMode, type AgentConfigField } from '@/lib/agentSetup';
 import { trackAgentEvent } from '@/lib/agentTrack';
@@ -39,7 +40,7 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
   }
   const fieldClass = 'mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900';
   return (
-    <details className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-8">
+    <details className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
       <summary className="cursor-pointer rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600">
         {/* summary の中身は「phrasing content か見出し 1 つ」。見出しを保ってアウトライン (h2 の並び) から消さない。 */}
         <h2 className="inline text-lg font-bold text-slate-900">
@@ -48,7 +49,7 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
         </h2>
       </summary>
       <p className="mt-3 text-sm text-slate-700">{c.lead}</p>
-      <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className={`mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 ${AGENT_SIDE_SINGLE_COLUMN}`}>
         <label className="min-w-0 text-sm font-medium">{c.modeLabel}
           <select className={fieldClass} value={mode} onChange={(e) => { const value = e.target.value as AgentMode; setMode(value); recordInteraction(client, value); }}>
             {AGENT_MODES.map((value) => <option key={value} value={value}>{t(`modeOptions.${value}`)}</option>)}

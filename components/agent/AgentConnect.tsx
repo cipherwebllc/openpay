@@ -24,10 +24,11 @@ export function AgentConnect({ locale, c, children }: { locale: string; c: Agent
   const promptExpanded = expanded || !available;
   const focus = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600';
   return (
-    <section id="agent-connect" className={`scroll-mt-24 min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 sm:p-8 ${hasWallet ? 'ring-slate-200/70' : 'ring-brand/30'}`}>
-      <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-xl font-bold text-slate-900">{c.title}</h2>
+    <section id="agent-connect" className={`scroll-mt-24 min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ${hasWallet ? 'ring-slate-200/70 sm:p-6' : 'ring-brand/30 sm:p-8'}`}>
+      {/* 狭い列 (PC の右の列) では開閉ボタンを見出し・説明の下へ折り返す (横に並べると説明が細長く詰まる)。 */}
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-2">
+        <div className="min-w-0 flex-1 basis-56">
+          <h2 className="text-xl font-bold text-slate-900 lg:group-data-[agent-view=wallet]:text-lg">{c.title}</h2>
           <p className={`mt-2 text-sm ${hasWallet ? 'text-slate-600' : 'text-slate-700'}`}>{hasWallet ? c.againLead : c.lead}</p>
         </div>
         {/* 名前は全文の開閉 (たたむ) と別にする: 同じ名前のボタンが別の場所を開閉すると区別できない。 */}
