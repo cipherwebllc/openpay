@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { estimateFocalEm, focalFitCqi } from '@/lib/focalFit';
 
-// 実測 (Chromium・本番フォント・2026-09-26) の em 幅。見積もりは必ずこれ以上 (= 収まる側) であること。
+// 実幅 (em)。見積もりは必ずこれ以上 (= 収まる側) であること。Mac の実測 (Chromium・system-ui) と、
+// CI の Linux で使われる字幅の広い DejaVu Sans Bold の字幅表からの近似 (末尾 wide) の両方を置く。
+const WIDE_FONT_EM: Record<string, number> = {
+  'No sign-up (wide)': 6.08,
+  'Seconds (wide)': 4.7,
+  'JPYC 1% (wide)': 4.68,
+  '≈2 JPYC (wide)': 4.51,
+  '1% / 3% (wide)': 4.46,
+  '1% (wide)': 1.7,
+};
 const MEASURED_EM: Record<string, number> = {
   'No sign-up': 5.22,
   Seconds: 4.15,
@@ -18,6 +27,10 @@ const MEASURED_EM: Record<string, number> = {
 describe('estimateFocalEm', () => {
   it.each(Object.entries(MEASURED_EM))('%s は実測 %s em 以上に見積もる (はみ出さない側)', (text, measured) => {
     expect(estimateFocalEm(text)).toBeGreaterThanOrEqual(measured);
+  });
+
+  it.each(Object.entries(WIDE_FONT_EM))('%s: 字幅の広い書体の近似 %s em 以上に見積もる', (label, wide) => {
+    expect(estimateFocalEm(label.replace(' (wide)', ''))).toBeGreaterThanOrEqual(wide);
   });
 
   it('CJK は 1 文字 1em を基準に、英小文字より広く数える', () => {

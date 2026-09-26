@@ -68,7 +68,8 @@ export async function LandingSupport() {
       </div>
 
       {/* 4 方法の利用料カード (導入メリットと同じビッグナンバー様式)。focal は benefits より一段小さい
-          最大 (1.875rem / sm 2.25rem) と「カード幅に収まる大きさ」の小さい方で 1 行に収める (lib/focalFit.ts)。 */}
+          最大 (1.875rem / sm 2.25rem) と「カード幅に収まる大きさ」の小さい方で 1 行に収める (lib/focalFit.ts)。
+          未知の書体で収まらなければ空白で折り返す。 */}
       <ul className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {FEE_CARDS.map(({ id, audience, Icon }) => {
           const focal = t(`supportFee${id}Focal`, LANDING_PAYMENT_FEE_VALUES);
@@ -86,7 +87,7 @@ export async function LandingSupport() {
               </span>
             </span>
             <p
-              className={`mt-4 whitespace-nowrap break-keep text-[length:min(1.875rem,var(--focal-fit))] font-extrabold leading-none sm:text-[length:min(2.25rem,var(--focal-fit))] ${FEE_TONE[audience].focal}`}
+              className={`mt-4 break-keep text-[length:min(1.875rem,var(--focal-fit))] font-extrabold leading-none sm:text-[length:min(2.25rem,var(--focal-fit))] ${FEE_TONE[audience].focal}`}
               style={{ '--focal-fit': focalFitCqi(focal) } as CSSProperties}
               data-focal=""
             >

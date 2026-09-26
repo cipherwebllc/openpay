@@ -84,10 +84,10 @@ export async function LandingBenefits() {
                 <Icon className={`h-5 w-5 ${c.iconInk}`} aria-hidden />
               </div>
 
-              {/* focal: ビッグナンバー。1 行固定のまま、文字サイズを「最大 (2.25rem / sm 3rem)」と
-                  「カード幅に収まる大きさ」の小さい方にする (lib/focalFit.ts)。 */}
+              {/* focal: ビッグナンバー。文字サイズを「最大 (2.25rem / sm 3rem)」と「カード幅に収まる
+                  大きさ」の小さい方にして 1 行に収める (lib/focalFit.ts)。未知の書体で収まらなければ空白で折り返す。 */}
               <p
-                className={`mt-4 whitespace-nowrap break-keep text-[length:min(2.25rem,var(--focal-fit))] font-extrabold leading-none ${c.focal} sm:text-[length:min(3rem,var(--focal-fit))]`}
+                className={`mt-4 break-keep text-[length:min(2.25rem,var(--focal-fit))] font-extrabold leading-none ${c.focal} sm:text-[length:min(3rem,var(--focal-fit))]`}
                 style={{ '--focal-fit': focalFitCqi(focal) } as CSSProperties}
                 data-focal=""
               >
