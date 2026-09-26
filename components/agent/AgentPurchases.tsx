@@ -238,8 +238,9 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, pr
       </div> : null}
       {notBound && !verify.isPending && !verify.isError ? <div className="mt-3 text-sm text-slate-600"><p>{c.notBoundLead}</p><ol className="mt-2 list-decimal space-y-2 pl-5">{c.notBoundSteps.map((step, index) => <li key={step}>
         {step}
-        {/* 1 つ目の手順 (Agent への依頼) はその場でコピーできる。「Agent に頼めること」と同じ依頼文・同じ計測 (id だけ)。 */}
-        {index === 0 && clipboardAvailable ? <button type="button" className={`ml-2 rounded-sm font-medium text-emerald-700 underline underline-offset-2 ${focus}`} onClick={async () => { if (await copy(c.notBoundPrompt)) trackAgentEvent('agent_try_prompt_copy', { locale, id: 'history-web' }); }}>{copied ? c.copied : c.copyPrompt}</button> : null}
+        {/* 1 つ目の手順 (Agent への依頼) はその場でコピーできる。「Agent に頼めること」と同じ依頼文。計測は id だけで、
+            どちらの場所からのコピーかを分ける (history-web-bind = 紐づけ手順から)。 */}
+        {index === 0 && clipboardAvailable ? <button type="button" className={`ml-2 rounded-sm font-medium text-emerald-700 underline underline-offset-2 ${focus}`} onClick={async () => { if (await copy(c.notBoundPrompt)) trackAgentEvent('agent_try_prompt_copy', { locale, id: 'history-web-bind' }); }}>{copied ? c.copied : c.copyPrompt}</button> : null}
       </li>)}</ol></div> : null}
       {result ? (
         <>

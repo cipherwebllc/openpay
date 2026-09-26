@@ -115,7 +115,7 @@ describe('AgentPurchases', () => {
     expect(track).not.toHaveBeenCalled();
   });
 
-  it('lets the owner copy the step-1 request in place, tracked like the try prompt (id only)', async () => {
+  it('lets the owner copy the step-1 request in place, tracked by id only (separate from the try-prompt card)', async () => {
     const user = userEvent.setup();
     h.sessionAddress = owner;
     mockFetch.mockImplementation(async () => response({ reason: 'not_bound' }, 401));
@@ -124,7 +124,7 @@ describe('AgentPurchases', () => {
     await user.click(screen.getByRole('button', { name: c.copyPrompt }));
     expect(await navigator.clipboard.readText()).toBe(c.notBoundPrompt);
     expect(screen.getByRole('button', { name: c.copied })).toBeVisible();
-    expect(track).toHaveBeenCalledWith('agent_try_prompt_copy', { locale: 'en', id: 'history-web' });
+    expect(track).toHaveBeenCalledWith('agent_try_prompt_copy', { locale: 'en', id: 'history-web-bind' });
   });
   it('erases proof immediately, preserves URL and history state, then verifies once after sign-in (StrictMode)', async () => {
     landing();
