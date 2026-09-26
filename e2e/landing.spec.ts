@@ -19,8 +19,11 @@ test.describe('landing / (LP)', () => {
       page.getByRole('heading', { name: '売上を待たない。' }),
     ).toBeVisible();
     await expect(
-      page.getByRole('heading', { name: '人だけじゃない。AIも支払う時代へ。' }),
+      page.getByRole('heading', { name: '人だけじゃない。AIも JPYC を使う時代へ。' }),
     ).toBeVisible();
+    const agentCta = page.getByRole('link', { name: 'OpenPay Agent を試す', exact: true });
+    await expect(agentCta).toBeVisible();
+    await expect(agentCta).toHaveAttribute('href', '/ja/agent');
     await expect(
       page.getByRole('heading', { name: '人にも、AIにも。オープンな決済を。' }),
     ).toBeVisible();
@@ -40,8 +43,9 @@ test.describe('landing / (LP)', () => {
       page.getByRole('heading', { name: 'Never wait for your sales.' }),
     ).toBeVisible();
     await expect(
-      page.getByRole('heading', { name: 'Not just people. AI pays now, too.' }),
+      page.getByRole('heading', { name: 'Not just people. AI uses JPYC now, too.' }),
     ).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Try OpenPay Agent', exact: true })).toHaveAttribute('href', '/en/agent');
     await expect(
       page.getByRole('heading', {
         name: 'Open payments — for people and AI.',

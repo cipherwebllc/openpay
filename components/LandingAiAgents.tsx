@@ -67,13 +67,25 @@ export async function LandingAiAgents() {
         ))}
       </ol>
 
-      <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
+      {/* 主導線は /agent (Agent を接続して試す)。/agent は flag なしで常に公開。 */}
+      <div className="mt-8 flex flex-col items-center">
+        <Link
+          href={`/${locale}/agent`}
+          prefetch={false}
+          className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-full bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98] sm:w-auto sm:text-base"
+        >
+          {t('aiEraCtaAgent')}
+        </Link>
+        <p className="mt-3 text-center text-xs text-slate-500 sm:text-sm">{t('aiEraAgentNote')}</p>
+      </div>
+
+      <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
         {/* /discovery は flag OFF で notFound になるため、OFF 環境では 404 導線を出さない。 */}
         {env.enableX402Facilitator && (
           <Link
             href={`/${locale}/discovery`}
             prefetch={false}
-            className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-full bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 active:scale-[0.98] sm:w-auto"
+            className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:w-auto"
           >
             {t('aiEraCtaStore')}
           </Link>
