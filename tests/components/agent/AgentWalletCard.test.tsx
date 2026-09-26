@@ -362,8 +362,8 @@ describe('AgentWalletCard', () => {
     fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
     // No name is inferred from the address; the chip shows only the short address until the user names it.
     expect(screen.queryByText(/Kova/)).toBeNull();
-    fireEvent.change(screen.getByLabelText(C.labelInputLabel), { target: { value: 'Kova' } });
-    expect(screen.getByText('Kova ·')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(C.nameLabel), { target: { value: 'Kova' } });
+    expect(screen.getByText('Kova')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: other } });
     expect(JSON.parse(window.localStorage.getItem('openpay.agent.recent')!)).toEqual([{ address: other }, { address, label: 'Kova' }]);
     fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
@@ -373,8 +373,43 @@ describe('AgentWalletCard', () => {
     await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => resolve(null))); });
     expect(screen.getByLabelText(C.inputLabel)).toHaveValue(address);
     expect(screen.getByLabelText(C.inputLabel)).not.toBeVisible();
-    expect(screen.getByText('Kova ·')).toBeInTheDocument();
+    expect(screen.getByText('Kova')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: C.changeAddress })).toHaveFocus();
+  });
+  it('lets the owner pick a color and an icon per wallet, saved on this device and shown on the balance surface', () => {
+    const other = '0x2222222222222222222222222222222222222222';
+    state.query = `address=${address}`;
+    const { container } = render(<AgentWalletCard purchases={purchases} c={C} activity={activity} />);
+    const surface = () => container.querySelector('.bg-gradient-to-br')!;
+    // 既定は墨。選ぶまで色もアイコンも保存しない。
+    expect(surface()).toHaveClass('from-slate-900');
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    // 選択肢は見えている名前 (色名・絵文字) を名前にする (掟 8)。
+    const indigo = screen.getByRole('radio', { name: C.colorNames.indigo });
+    expect(screen.getByRole('radio', { name: C.colorNames.ink })).toBeChecked();
+    fireEvent.click(indigo);
+    expect(surface()).toHaveClass('from-indigo-950');
+    fireEvent.click(screen.getByRole('radio', { name: '🦊' }));
+    expect(JSON.parse(window.localStorage.getItem('openpay.agent.recent')!)).toEqual([{ address, color: 'indigo', icon: '🦊' }]);
+    // 見た目は Wallet ごと。別の Wallet に切り替えると既定に戻り、戻すと選んだ見た目が戻る。
+    fireEvent.change(screen.getByLabelText(C.inputLabel), { target: { value: other } });
+    expect(surface()).toHaveClass('from-slate-900');
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    fireEvent.click(screen.getByRole('button', { name: /0x1111…1111/ }));
+    expect(surface()).toHaveClass('from-indigo-950');
+    // 墨・なしに戻すと項目ごと消す (控えに既定値を残さない)。
+    fireEvent.click(screen.getByRole('button', { name: C.changeAddress }));
+    fireEvent.click(screen.getByRole('radio', { name: C.colorNames.ink }));
+    fireEvent.click(screen.getByRole('radio', { name: C.iconNone }));
+    expect(JSON.parse(window.localStorage.getItem('openpay.agent.recent')!)[0]).toEqual({ address });
+  });
+  it('drops unknown colors and icons from the saved look', () => {
+    window.localStorage.setItem('openpay.agent.address', address);
+    window.localStorage.setItem('openpay.agent.recent', JSON.stringify([{ address, label: 'Mine', color: 'neon', icon: '<img>' }]));
+    const { container } = render(<AgentWalletCard purchases={purchases} c={C} activity={activity} />);
+    expect(container.querySelector('.bg-gradient-to-br')).toHaveClass('from-slate-900');
+    expect(screen.getByText('Mine')).toBeInTheDocument();
+    expect(container.textContent).not.toContain('<img>');
   });
   it('ignores a corrupt recent-wallet store without breaking the saved wallet', () => {
     window.localStorage.setItem('openpay.agent.address', address);

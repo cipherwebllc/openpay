@@ -10,6 +10,7 @@
 import type { Metadata } from 'next';
 import { DISCLOSED_X402_FEE } from '@/lib/legal';
 import { guidePageMetadata } from '@/lib/guideMetadata';
+import type { AgentColor } from '@/lib/agentProfile';
 import type {
   AgentClient,
   AgentConfigField,
@@ -99,8 +100,14 @@ export type AgentPageContent = {
     readonly fundCta: string;
     readonly changeAddress: string;
     readonly recentTitle: string;
-    readonly labelInputLabel: string;
+    /** 見た目 (名前・色・アイコン)。利用者が選んだものだけを端末に保存する。 */
+    readonly lookTitle: string;
+    readonly nameLabel: string;
     readonly labelPlaceholder: string;
+    readonly colorLabel: string;
+    readonly colorNames: Record<AgentColor, string>;
+    readonly iconLabel: string;
+    readonly iconNone: string;
     readonly linkedAddressConfirm: string;
     readonly useLinkedAddress: string;
     readonly keepSavedAddress: string;
@@ -359,8 +366,13 @@ const ja: AgentPageContent = {
     fundCta: '入金する',
     changeAddress: '変更',
     recentTitle: '最近表示した Wallet',
-    labelInputLabel: '名前 (任意・この端末だけに保存)',
+    lookTitle: '見た目 (この端末だけに保存)',
+    nameLabel: '名前 (任意)',
     labelPlaceholder: '例: Kova',
+    colorLabel: '色',
+    colorNames: { ink: '墨', indigo: '藍', emerald: '翠', amber: '琥珀', rose: '紅', violet: '紫' },
+    iconLabel: 'アイコン',
+    iconNone: 'なし',
     linkedAddressConfirm: 'リンクのアドレス {address} は、この端末に保存済みの Agent Wallet と異なります。置き換えますか?',
     useLinkedAddress: 'リンクのアドレスに置き換える',
     keepSavedAddress: '保存済みのアドレスを使う',
@@ -627,8 +639,13 @@ const en: AgentPageContent = {
     fundCta: 'Add funds',
     changeAddress: 'Change',
     recentTitle: 'Recently viewed wallets',
-    labelInputLabel: 'Name (optional, saved on this device only)',
+    lookTitle: 'Look (saved on this device only)',
+    nameLabel: 'Name (optional)',
     labelPlaceholder: 'e.g. Kova',
+    colorLabel: 'Color',
+    colorNames: { ink: 'Ink', indigo: 'Indigo', emerald: 'Green', amber: 'Amber', rose: 'Rose', violet: 'Violet' },
+    iconLabel: 'Icon',
+    iconNone: 'None',
     linkedAddressConfirm: 'The link’s address {address} differs from the Agent Wallet saved on this device. Replace it?',
     useLinkedAddress: 'Use the link’s address',
     keepSavedAddress: 'Keep the saved address',
