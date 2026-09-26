@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.19.0 — 2026-09-26
+
+- Move Kova onto the shared CLI signer without changing its arguments, environment filtering, deadlines or error contract. Add opt-in stderr envelope parsing.
+- Add `SIGNER_MODE=metamask` for the separately installed MetaMask Agent Wallet 7.0.0 server wallet CLI on macOS/Linux. Verify every signature against `METAMASK_AGENT_ADDRESS`; support only Polygon/Amoy typed data, with no signer fallback or BYOK.
+- Serialize proof/payment signing, use a 30-second deadline and a 20-second wallet wait, and expose five fixed error codes. Pending requests must be rejected on the MetaMask side; the server does not resume them.
+- Reject `MM_CLI_TOKEN`, `MM_MNEMONIC` and `MM_PASSWORD` in the MCP environment. Exclude OpenPay/Steward/Kova secrets and `POLYGON_RPC_URL` from mm's environment.
+- Add `default_metamask` daily limits, public wallet status and wallet proof support. Limits are local to `OPENPAY_X402_HOME`; MetaMask's `allowed_chains` and `outflow_limits_usd` did not limit typed-data signing in the 7.0.0 test.
+- No dependency changes. Agent UI, setup instructions and news remain for a separate release.
+
 ## 0.18.0 — 2026-09-25
 
 - Add `SIGNER_MODE=kova` as a third-party CLI signer: fixed Polygon/Amoy mapping from the validated 402 network, lossless bigint JSON, strict 65-byte signatures and address verification on every signature. Use shell-free `execFile`, closed stdin, a 30-second deadline with `SIGKILL` and bounded output; expose only fixed denial/failure messages, never raw child output or errors. Report a missing executable as `kova_not_found`. No signer fallback.

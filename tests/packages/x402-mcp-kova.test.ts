@@ -145,6 +145,13 @@ function runtime(overrides: Record<string, string | undefined> = {}, kovaExecFil
 const pay = (active: Runtime, maxTotalJpyc = '2') => active.callTool('x402_pay', { url: resource, maxTotalJpyc });
 
 describe('Kova signer adapter', () => {
+  it('ignores a POLICY_DENIED stderr envelope when stdout contains a valid signature', async () => {
+    const signature = await account.signTypedData(typedData());
+    const execFileImpl = child(JSON.stringify({ ok: true, data: { signature } }), null,
+      JSON.stringify({ ok: false, error: { code: 'POLICY_DENIED' } }));
+    await expect(createKovaSigner(env(), { execFileImpl }).signTypedData(typedData())).resolves.toBe(signature);
+  });
+
   it.each([[137, 'polygon'], [80002, 'polygon-amoy']] as const)('serializes bigint losslessly, selects %s, and verifies the original typed-data', async (chainId, chain) => {
     const execFileImpl = signingChild();
     const wallet = 'wallet ; $(never-run)';
