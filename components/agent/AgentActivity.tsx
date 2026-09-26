@@ -28,10 +28,13 @@ export function AgentActivity(props: Props) {
 // 開き直すまで新しい行が出ない。120 秒まで追う。上流の呼び出しは CDN (s-maxage=30) が吸収する。
 const REFRESH_INTERVAL_MS = 20_000;
 const REFRESH_ATTEMPTS = 6;
+// 最初は直近 5 件だけ (残高カードの下で活動が画面を占めない)。「もっと見る」で 10 件ずつ。
+const INITIAL_ROWS = 5;
+const MORE_ROWS = 10;
 
 function ActivityForAddress({ address, locale, c, refreshKey, chainId, tokenAddress }: Props & { chainId: number; tokenAddress: string }) {
   const [filter, setFilter] = useState<'all' | 'in' | 'out'>('all');
-  const [visibleCount, setVisibleCount] = useState(10);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_ROWS);
   const [refreshing, setRefreshing] = useState(false);
   const previousRefreshKey = useRef(refreshKey);
   const supported = chainId === 137;
@@ -92,7 +95,8 @@ function ActivityForAddress({ address, locale, c, refreshKey, chainId, tokenAddr
     return <span className="inline-flex items-center gap-1 align-middle"><Icon size={16} aria-hidden />{item.direction === 'in' ? c.filterIn : c.filterOut}</span>;
   }
   function counterparty(item: AgentActivityItem) {
-    return <span className="inline-flex flex-wrap items-center gap-1">{item.viaOpenPay ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">{c.viaOpenPay}</span> : null}<span className="font-mono">{shortAddress(item.counterparty)}</span></span>;
+    // チップとアドレスを 1 行に並べる (縦に積むと 1 行が 2 段になり、一覧が倍の高さになる)。
+    return <span className="inline-flex max-w-full items-center gap-1.5 whitespace-nowrap">{item.viaOpenPay ? <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-700">{c.viaOpenPay}</span> : null}<span className="font-mono">{shortAddress(item.counterparty)}</span></span>;
   }
   function amount(item: AgentActivityItem) {
     return <span className={`break-all tabular-nums ${item.direction === 'in' ? 'text-emerald-700' : 'text-slate-900'}`}>{item.direction === 'in' ? '+' : '−'}{formatJpyc(BigInt(item.valueAtomic))} JPYC</span>;
@@ -102,17 +106,18 @@ function ActivityForAddress({ address, locale, c, refreshKey, chainId, tokenAddr
     <section className="mt-6 min-w-0 border-t border-slate-200 pt-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <h3 className="text-lg font-bold text-slate-900">{c.title}</h3>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:text-right">
+        {/* 読み取れない (テストネット・失敗) ときは集計の「—」を並べない。読み込み中は枠を保つ。 */}
+        {failure ? null : <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:text-right">
           {([[c.stat24h, 86_400], [c.stat7d, 604_800]] as const).map(([label, windowSec]) => {
             const stat = result ? sumOutgoing(result.items, result.asOf, windowSec, result.truncated) : undefined;
             return <div key={label} className="min-w-0"><dt className="text-slate-500">{label}</dt><dd className="mt-0.5 break-all text-base font-semibold tabular-nums text-slate-900">{stat?.complete ? `${formatJpyc(stat.totalAtomic)} JPYC` : '—'}</dd>{stat && !stat.complete ? <dd className="mt-1 text-slate-500">{c.statsPartial}</dd> : null}</div>;
           })}
-        </dl>
+        </dl>}
       </div>
-      <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.publicNote}</p>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {(['all', 'in', 'out'] as const).map((value) => <button key={value} type="button" aria-pressed={filter === value} className={`min-h-9 rounded-full px-3.5 py-1.5 text-xs font-medium ${filter === value ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'} ${focus}`} onClick={() => { setFilter(value); setVisibleCount(10); }}>{value === 'all' ? c.filterAll : value === 'in' ? c.filterIn : c.filterOut}</button>)}
-      </div>
+      {/* 絞り込みは取引があるときだけ (空の一覧や読めないときに押せるチップを並べない)。 */}
+      {result && result.items.length > 0 ? <div className="mt-4 flex flex-wrap gap-2">
+        {(['all', 'in', 'out'] as const).map((value) => <button key={value} type="button" aria-pressed={filter === value} className={`min-h-9 rounded-full px-3.5 py-1.5 text-xs font-medium ${filter === value ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'} ${focus}`} onClick={() => { setFilter(value); setVisibleCount(INITIAL_ROWS); }}>{value === 'all' ? c.filterAll : value === 'in' ? c.filterIn : c.filterOut}</button>)}
+      </div> : null}
       {refreshing ? <p role="status" className="mt-3 text-xs text-slate-500">{c.refreshing}</p> : null}
       {failure ? <p className="mt-4 text-sm text-slate-600">{failure === 'unsupported_chain' ? c.unsupported : failure === 'busy' || failure === 'rate_limited' ? c.busy : c.error} {explorerLink}</p> : isPending ? (
         <div aria-busy="true" className="mt-4 space-y-3"><p className="text-sm text-slate-500">{c.loading}</p>{[0, 1, 2].map((key) => <div key={key} aria-hidden className="h-12 animate-pulse rounded-lg bg-slate-100" />)}</div>
@@ -125,21 +130,24 @@ function ActivityForAddress({ address, locale, c, refreshKey, chainId, tokenAddr
           ) : (
             <>
               <table className="mt-4 hidden w-full table-fixed text-left text-xs sm:table">
+                <colgroup><col className="w-[30%]" /><col className="w-[14%]" /><col className="w-[36%]" /><col className="w-[20%]" /></colgroup>
                 <thead className="text-slate-500"><tr>{[c.colDate, c.colType, c.colCounterparty, c.colAmount].map((label) => <th key={label} scope="col" className={`px-2 py-2 font-medium ${label === c.colAmount ? 'text-right' : ''}`}>{label}</th>)}</tr></thead>
-                <tbody>{rows.map((item) => <tr key={item.key} className="border-t border-slate-100 align-middle"><td className="break-words px-2 py-2">{date(item)}</td><td className="px-2 py-3">{direction(item)}</td><td className="break-words px-2 py-3">{counterparty(item)}</td><td className="px-2 py-3 text-right">{amount(item)}</td></tr>)}</tbody>
+                <tbody>{rows.map((item) => <tr key={item.key} className="border-t border-slate-100 align-middle"><td className="break-words px-2 py-1.5">{date(item)}</td><td className="px-2 py-1.5">{direction(item)}</td><td className="overflow-hidden px-2 py-1.5">{counterparty(item)}</td><td className="px-2 py-1.5 text-right">{amount(item)}</td></tr>)}</tbody>
               </table>
               <ul className="mt-4 divide-y divide-slate-100 sm:hidden">
-                {rows.map((item) => <li key={item.key} className="space-y-2 py-3 text-xs">
+                {rows.map((item) => <li key={item.key} className="space-y-1 py-2.5 text-xs">
                   <div className="flex min-w-0 flex-wrap items-start justify-between gap-2"><span><span className="sr-only">{c.colType}: </span>{direction(item)}</span><span className="min-w-0 break-all"><span className="sr-only">{c.colAmount}: </span>{amount(item)}</span></div>
                   <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-slate-600"><span><span className="sr-only">{c.colDate}: </span>{date(item)}</span><span><span className="sr-only">{c.colCounterparty}: </span>{counterparty(item)}</span></div>
                 </li>)}
               </ul>
             </>
           )}
-          {filtered.length > visibleCount ? <button type="button" className={`mt-3 min-h-11 rounded-lg border border-slate-300 px-4 py-2 text-sm ${focus}`} onClick={() => setVisibleCount((count) => count + 10)}>{c.more}</button> : null}
+          {filtered.length > visibleCount ? <button type="button" className={`mt-3 min-h-11 rounded-lg border border-slate-300 px-4 py-2 text-sm ${focus}`} onClick={() => setVisibleCount((count) => count + MORE_ROWS)}>{c.more}</button> : null}
           {result.truncated ? <p className="mt-3 text-xs text-slate-500">{c.truncatedNote} {explorerLink}</p> : null}
         </>
       ) : null}
+      {/* 何を表示しているかの注記は一覧の後ろ (見出しと一覧の間に挟まない)。 */}
+      <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.publicNote}</p>
     </section>
   );
 }

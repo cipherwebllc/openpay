@@ -9,7 +9,7 @@ const WALLET = '0x1111111111111111111111111111111111111111';
 
 function page() {
   return (
-    <AgentPageSections connect={<section id="c">connect</section>} wallet={<section id="w"><input aria-label="w" /></section>} tryPrompts={<section id="t">try</section>}>
+    <AgentPageSections hero={<header id="h">hero</header>} connect={<section id="c">connect</section>} wallet={<section id="w"><input aria-label="w" /></section>} tryPrompts={<section id="t">try</section>}>
       <section id="rest">rest</section>
     </AgentPageSections>
   );
@@ -110,6 +110,12 @@ describe('AgentPageSections', () => {
     expect(slot('w')).toHaveClass('order-2', 'group-data-[agent-view=wallet]:order-1');
     expect(slot('t')).toHaveClass('order-3', 'group-data-[agent-view=wallet]:order-2');
     expect(slot('rest')).toHaveClass('order-4');
+    // PC の再訪はダッシュボード: 主列 = 残高 → 頼めること、右の列 = 接続 → 残り。要素の親は 1 つのまま (作り直さない)。
+    expect(slot('w')).toHaveClass('lg:group-data-[agent-view=wallet]:col-start-1', 'lg:group-data-[agent-view=wallet]:row-[1/4]');
+    expect(slot('t')).toHaveClass('lg:group-data-[agent-view=wallet]:col-start-1', 'lg:group-data-[agent-view=wallet]:row-[4/5]');
+    expect(slot('c')).toHaveClass('lg:group-data-[agent-view=wallet]:col-start-2', 'lg:group-data-[agent-view=wallet]:row-[1/2]');
+    expect(slot('rest')).toHaveClass('lg:group-data-[agent-view=wallet]:col-start-2', 'lg:group-data-[agent-view=wallet]:row-[2/3]');
+    expect(new Set([slot('c'), slot('w'), slot('t'), slot('rest')].map((el) => el.parentElement)).size).toBe(1);
   });
   it.each([
     ['a saved address', () => window.localStorage.setItem('openpay.agent.address', WALLET), 'wallet'],

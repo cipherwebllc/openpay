@@ -2,6 +2,7 @@
 
 import { useEffect, useSyncExternalStore, type ReactNode } from 'react';
 import { AGENT_ADDRESS_PATTERN, AGENT_ADDRESS_STORAGE_KEY, resetAgentView, useAgentHasWallet } from '@/hooks/useAgentView';
+import { AGENT_PAGE_AREA, AGENT_PAGE_GRID, AGENT_PAGE_WIDTH } from '@/lib/agentLayout';
 
 // 静的 HTML は初回訪問の並び (接続が先頭)。再訪者 (端末の控え or ?address= のリンク) は描画前にこの script が
 // 並びを Wallet 先頭へ切り替え、残高カードの復元 (hydration 後) を待つ間に接続カードが先頭でちらつくのを防ぐ。
@@ -16,24 +17,28 @@ type Slot = { readonly key: string; readonly node: ReactNode; readonly className
 
 // 状態で変わるのは先頭 3 節の順番だけ。初回訪問: 接続 → Wallet → 頼めること。Wallet あり: Wallet → 頼めること → 接続。
 // CSS の order は描画前 (script) の見た目用、DOM の並べ替えは復元後の読み上げ・フォーカス順用。両者の順番は一致させる。
-export function AgentPageSections({ connect, wallet, tryPrompts, children }: { connect: ReactNode; wallet: ReactNode; tryPrompts: ReactNode; children: ReactNode }) {
+// PC の再訪時はダッシュボードの 2 列 (lib/agentLayout.ts)。hero は幅の切り替えに合わせるため中に置く。
+export function AgentPageSections({ hero, connect, wallet, tryPrompts, children }: { hero: ReactNode; connect: ReactNode; wallet: ReactNode; tryPrompts: ReactNode; children: ReactNode }) {
   const hasWallet = useAgentHasWallet();
   // script は server の HTML と hydration のときだけ描く。client だけの描画 (ページ間の移動) では実行されない
   // (React は client で作った script を実行しない) ので描かず、hydration 後も DOM から外す。
   const prerendered = useSyncExternalStore(noopSubscribe, () => false, () => true);
   // ページを離れたら判定を捨てる。次にアプリ内で戻ったとき、前回の値ではなく今の控えから推定し直す。
   useEffect(() => resetAgentView, []);
-  const connectSlot: Slot = { key: 'connect', node: connect, className: 'order-1 group-data-[agent-view=wallet]:order-3' };
-  const walletSlot: Slot = { key: 'wallet', node: wallet, className: 'order-2 group-data-[agent-view=wallet]:order-1' };
-  const trySlot: Slot = { key: 'try', node: tryPrompts, className: 'order-3 group-data-[agent-view=wallet]:order-2' };
+  const connectSlot: Slot = { key: 'connect', node: connect, className: `order-1 group-data-[agent-view=wallet]:order-3 ${AGENT_PAGE_AREA.connect}` };
+  const walletSlot: Slot = { key: 'wallet', node: wallet, className: `order-2 group-data-[agent-view=wallet]:order-1 ${AGENT_PAGE_AREA.wallet}` };
+  const trySlot: Slot = { key: 'try', node: tryPrompts, className: `order-3 group-data-[agent-view=wallet]:order-2 ${AGENT_PAGE_AREA.tryPrompts}` };
   const slots = hasWallet ? [walletSlot, trySlot, connectSlot] : [connectSlot, walletSlot, trySlot];
   return (
     // null は server と hydration のときだけ。属性を描かず、script が付けた値を hydration で消さない。
     // client では推定 → 残高カードの判定の順に明示の値で上書きする (食い違っても判定のほうへそろう)。
-    <div data-agent-view={hasWallet === null ? undefined : hasWallet ? 'wallet' : 'setup'} suppressHydrationWarning className="group flex min-w-0 flex-col gap-8">
+    <div data-agent-view={hasWallet === null ? undefined : hasWallet ? 'wallet' : 'setup'} suppressHydrationWarning className={`group ${AGENT_PAGE_WIDTH}`}>
       {prerendered ? <script dangerouslySetInnerHTML={{ __html: AGENT_VIEW_PREPAINT }} /> : null}
-      {slots.map((slot) => <div key={slot.key} className={`min-w-0 ${slot.className}`}>{slot.node}</div>)}
-      <div className="order-4 flex min-w-0 flex-col gap-8">{children}</div>
+      {hero}
+      <div className={AGENT_PAGE_GRID}>
+        {slots.map((slot) => <div key={slot.key} className={`min-w-0 ${slot.className}`}>{slot.node}</div>)}
+        <div className={`order-4 flex min-w-0 flex-col gap-8 ${AGENT_PAGE_AREA.rest}`}>{children}</div>
+      </div>
     </div>
   );
 }

@@ -39,7 +39,7 @@ export function AgentConfigGenerator({ locale, c }: { locale: string; c: AgentPa
   }
   const fieldClass = 'mt-2 block w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900';
   return (
-    <details className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-8">
+    <details className="min-w-0 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6">
       <summary className="cursor-pointer rounded-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-600">
         {/* summary の中身は「phrasing content か見出し 1 つ」。見出しを保ってアウトライン (h2 の並び) から消さない。 */}
         <h2 className="inline text-lg font-bold text-slate-900">
