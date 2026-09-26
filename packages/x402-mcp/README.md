@@ -102,7 +102,7 @@ into the configuration. After the host restarts, call `wallet_init` to create th
 wallet on this machine, then fund the returned address — see
 [Local wallet](#local-wallet-signer_modekeystore). Do not put a placeholder such as
 `"BUYER_PRIVATE_KEY": "0x..."` in the configuration: the server rejects it at startup.
-`env-key`, `steward`, and `kova` (available since 0.18.0) are described under [Signer Modes](#signer-modes).
+`env-key`, `steward`, `kova` (since 0.18.0), and `metamask` (since 0.19.0) are described under [Signer Modes](#signer-modes).
 
 During local development from this repository:
 
@@ -202,7 +202,7 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 
 | Variable | Default | Notes |
 |---|---|---|
-| `SIGNER_MODE` | `env-key` | `env-key` signs in-process with `BUYER_PRIVATE_KEY`. `steward` delegates typed-data signing to Steward. Explicit `keystore` uses the local wallet file. `kova` (since 0.18.0) delegates to the separately installed Kova CLI. No fallback to another signer in keystore or kova mode. |
+| `SIGNER_MODE` | `env-key` | `env-key` signs in-process with `BUYER_PRIVATE_KEY`. `steward` delegates typed-data signing to Steward. Explicit `keystore` uses the local wallet file. `kova` (since 0.18.0) delegates to the separately installed Kova CLI. `metamask` (since 0.19.0) delegates to the separately installed MetaMask Agent Wallet CLI. No fallback in keystore, kova or metamask mode. |
 | `BUYER_PRIVATE_KEY` | unset | Required for `x402_pay` and `wallet_prove` when `SIGNER_MODE=env-key`. Use a dedicated low-balance wallet, never a primary wallet. |
 | `STEWARD_URL` | unset | Required when `SIGNER_MODE=steward`, for example `http://localhost:3900`. |
 | `STEWARD_TENANT` | unset | Required when `SIGNER_MODE=steward`; tenant context sent as `X-Steward-Tenant`. |
@@ -214,13 +214,16 @@ Ordering flow (autonomous): `find_shops` → `order_menu` → pick items → `or
 | `KOVA_WALLET` | unset | Required when `SIGNER_MODE=kova`; existing Kova wallet name. Missing/blank values stop startup. |
 | `KOVA_AGENT_ADDRESS` | unset | Required when `SIGNER_MODE=kova`; public EVM address confirmed in Kova and verified against every typed-data signature. Missing/invalid values stop startup. |
 | `KOVA_BIN` | `kova` | PATH executable name only, no path or command arguments. Shell disabled; no `npx` fallback or automatic install. |
+| `METAMASK_AGENT_ADDRESS` | unset | Required public EVM address when `SIGNER_MODE=metamask`; checked against every signature. Missing/invalid values stop startup. |
+| `MM_BIN` | `mm` | PATH executable name only; no path, command arguments, automatic install or fallback. |
+| `MM_CLI_TOKEN`, `MM_MNEMONIC`, `MM_PASSWORD` | must be absent | Presence of any of these stops startup in metamask mode, even if empty. Authenticate mm separately on the same machine. |
 | `MAX_PER_CALL_JPYC` | `10` | Upper bound for the tool call's required `maxTotalJpyc`. |
 | `MAX_SESSION_JPYC` | `100` | Process-lifetime cap for successful payments plus signed authorizations exposed to a seller. A non-2xx response or timeout keeps its reservation. Restarting the process resets this cap. |
-| `MAX_DAILY_JPYC` | `MAX_SESSION_JPYC` in keystore/kova; unset otherwise | Per-UTC-day cap that **survives restarts**. Immediately before `X-PAYMENT` is sent, the amount is reserved under an exclusive file lock in `~/.openpay-x402/spend.json` (keystore/kova use `OPENPAY_X402_HOME/spend.json` when set). Non-2xx/timeout reservations are retained because settlement may already have occurred; unreadable or unwritable state fails closed. |
+| `MAX_DAILY_JPYC` | `MAX_SESSION_JPYC` in keystore/kova/metamask; unset otherwise | Per-UTC-day cap that **survives restarts**. Immediately before `X-PAYMENT` is sent, the amount is reserved under an exclusive file lock in `~/.openpay-x402/spend.json` (keystore/kova/metamask use `OPENPAY_X402_HOME/spend.json` when set). Non-2xx/timeout reservations are retained because settlement may already have occurred; unreadable or unwritable state fails closed. |
 | `MAX_TIMEOUT_SECONDS` | `600` | Reject seller-declared authorization lifetimes above this many seconds. Configurable from `1` to the facilitator ceiling of `1200`; the value is never silently clamped. |
 | `CATALOG_TRUST` | `true` | When true, exact URLs listed in the OpenPay discovery catalog are payable without editing `ALLOWED_HOSTS`. Before signing, the live `accepts` fetched from a catalog URL is checked field-by-field (asset / timeout / forwarder / merchant / fee receiver / amounts) against the catalog listing (server-authored), so a third-party domain cannot bait-and-switch a different destination or authorization lifetime; mismatches are refused (`catalog_accept_mismatch`). Money caps still apply. Set `false` for strict manual allowlisting. |
 | `ALLOWED_HOSTS` | `open-pay.jp` | Comma-separated bare host allowlist. `x402_quote` still works outside the list but returns `host_not_allowed`. |
-| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; kova uses `spend.json` without creating a keystore; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from `wallet_init`, `wallet_status`, `wallet_history`, and keystore `wallet_prove` while discovery remains available. Kova rejects a relative path at startup. Does not relocate env-key / Steward spend storage. |
+| `OPENPAY_X402_HOME` | `~/.openpay-x402` | Absolute path only. Storage directory override: keystore uses `wallet.json` and the daily spend ledger `spend.json`; kova and metamask use `spend.json` without creating a keystore; all signer modes use `purchases.jsonl` and `purchases.1.jsonl` for history. A relative path returns `wallet_home_not_absolute` from `wallet_init`, `wallet_status`, `wallet_history`, and keystore `wallet_prove` while discovery remains available. Kova and MetaMask reject a relative path at startup. Does not relocate env-key / Steward spend storage. |
 | `POLYGON_RPC_URL` | unset | Optional read-only `wallet_status` RPC. SDK outbound URL/host checks reject private/link-local addresses, `.internal`, and URL credentials; validated DNS addresses are pinned for the built-in transport. Explicit exception: HTTP on `localhost` / `127.0.0.1`. No public RPC default, redirects rejected, 5-second timeout including DNS and body reads. Never accepted as a tool argument. |
 | `DISCOVERY_URL` | `https://open-pay.jp/api/discovery` | Catalog used by `discovery_search`. |
 | `OPENPAY_ORIGIN` | `https://open-pay.jp` | `wallet_prove` challenge origin, bind-link origin and signed audience. Independent of `DISCOVERY_URL`. Unset or blank uses the default; surrounding whitespace is trimmed. Must be an HTTPS origin with no credentials, path, query or fragment (a trailing slash is accepted). Only override for a trusted deployment that verifies this same audience. |
@@ -439,6 +442,95 @@ MCP does not interpret Kova credentials as configuration, store/display them,
 or send them to OpenPay. Kova reads its own `~/.kova/config.json` and inherited
 credentials. This is not OS-level isolation. Keep only a small balance you are
 willing to lose.
+
+### MetaMask (`SIGNER_MODE=metamask`, since 0.19.0)
+
+MetaMask Agent Wallet is a separately installed CLI signer. This adapter uses the
+`@metamask/agent-wallet` 7.0.0 server wallet contract, verified on Polygon Amoy
+on 2026-09-26. It adds no npm dependency or peer dependency. Target OS: macOS/Linux;
+Windows is unsupported because shell-free `execFile` cannot run `.cmd` shims.
+BYOK is outside this mode's scope; use Local Wallet (`SIGNER_MODE=keystore`).
+
+The person installs and authenticates mm on the same machine as the MCP host,
+and initializes a server wallet. OpenPay does not perform login, initialization,
+policy changes or wallet selection. Check PATH availability:
+
+```bash
+command -v mm
+```
+
+Set `METAMASK_AGENT_ADDRESS` to the server wallet's public EVM address confirmed
+by the person. MCP does not look it up automatically. Do not place
+`MM_CLI_TOKEN`, `MM_MNEMONIC` or `MM_PASSWORD` in the MCP environment: startup
+rejects their presence, including empty values. mm keeps its own session under
+`~/.metamask/`; OpenPay does not receive or store the wallet key or session token.
+
+Register the MCP with a host using the public address and agreed limits:
+
+```json
+{
+  "mcpServers": {
+    "openpay-x402": {
+      "command": "npx",
+      "args": ["--yes", "openpay-x402-mcp@0.19"],
+      "env": {
+        "SIGNER_MODE": "metamask",
+        "METAMASK_AGENT_ADDRESS": "<server wallet public EVM address>",
+        "MAX_PER_CALL_JPYC": "10",
+        "MAX_SESSION_JPYC": "100",
+        "MAX_DAILY_JPYC": "100",
+        "ALLOWED_HOSTS": "open-pay.jp",
+        "CATALOG_TRUST": "true"
+      }
+    }
+  }
+}
+```
+
+If the host restricts PATH, include mm's installation directory and normal system
+executable directories in its MCP `PATH`. `MM_BIN` defaults to `mm` and accepts
+only a PATH executable name. There is no automatic installation or signer fallback.
+Restart the host and use `wallet_status`, `discovery_search` and `x402_quote`
+before a separately agreed purchase. Keep only a small balance you are willing to lose.
+
+The validated typed-data domain selects `--chain-id 137` or `--chain-id 80002`;
+other chains are rejected before launching mm. There is no chain env override.
+`wallet_status` reports `signerMode: metamask`; its chain, balance and funding URL
+remain Polygon only. Use testnet JPYC for Amoy. `wallet_init` requires keystore mode.
+`wallet_prove` is supported and signs `Proof` on chain 137 with the fixed intent
+`OpenPay wallet proof (no payment)`. Payments use `OpenPay x402 payment`.
+
+Calls close stdin, bound each output stream to 64 KiB, pass `--wait --wallet-timeout 20 --json`,
+and have an independent 30-second deadline with `SIGKILL`. Proof and payment
+signatures are serialized. Only a single successful JSON envelope with
+`mode: server`, `status: SIGNED` and a 65-byte hex signature that verifies against
+the configured address is accepted. Child output and native errors are withheld.
+
+The fixed errors are `metamask_not_found`, `metamask_login_required`,
+`metamask_approval_pending`, `metamask_denied` and `metamask_sign_failed`.
+For pending requests (including deadline expiry), reject the request on the
+MetaMask side: **this server does not resume it**. MFA/Guard approval flows,
+NDJSON, job resume/cancellation and telemetry/policy changes are outside scope.
+`wallet_prove` passes through the first four errors; other signature failures
+return `proof_signing_failed`.
+
+**The only amount limits on this path are OpenPay MCP's `MAX_PER_CALL_JPYC`,
+`MAX_SESSION_JPYC` and `MAX_DAILY_JPYC`.** In the 7.0.0 test, MetaMask's
+`allowed_chains` and `outflow_limits_usd` did not apply to typed-data signing,
+and this signature did not require MFA. A signed-in mm on this machine can sign
+or transfer directly without going through the MCP limits.
+
+The default daily cap equals `MAX_SESSION_JPYC` (`dailyLimitSource: default_metamask`),
+or reports `configured` when `MAX_DAILY_JPYC` is set. Status and payments share
+`OPENPAY_X402_HOME/spend.json` (default `~/.openpay-x402/spend.json`), keyed by
+lowercase address and UTC date across chains. Limits are local to each
+`OPENPAY_X402_HOME`, not wallet-wide: using the same server wallet on multiple
+machines does not aggregate limits. No keystore is created.
+
+The child environment excludes `BUYER_PRIVATE_KEY`, every `STEWARD_*` and `KOVA_*`
+variable, and `POLYGON_RPC_URL`. Non-secret settings such as `MM_ENV` and PATH are
+forwarded. This is not OS-level isolation. HTTP 200 or a signed authorization is
+not payment proof; payment verification remains with the facilitator and on-chain settlement.
 
 ### Local wallet (`SIGNER_MODE=keystore`)
 

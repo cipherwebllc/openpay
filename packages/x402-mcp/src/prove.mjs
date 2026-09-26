@@ -103,8 +103,9 @@ export async function proveWallet({ signer, origin = AGENT_PROOF_AUDIENCE, fetch
     });
   } catch (error) {
     // Signer errors can contain the typed data; return only a fixed code, never raw proof data.
-    // The Kova adapter throws only these fixed messages, so surfacing them cannot leak child output.
-    if (error instanceof Error && (error.message === 'kova_policy_denied' || error.message === 'kova_not_found')) {
+    // CLI adapters throw only these fixed messages, so surfacing them cannot leak child output.
+    if (error instanceof Error && ['kova_policy_denied', 'kova_not_found', 'metamask_login_required',
+      'metamask_approval_pending', 'metamask_not_found', 'metamask_denied'].includes(error.message)) {
       return failure(error.message);
     }
     return failure('proof_signing_failed');
