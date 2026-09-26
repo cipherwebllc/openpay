@@ -19,7 +19,7 @@ forwarder-split extension.
 ### Install / run
 
 ```bash
-npx --yes --package=openpay-x402-mcp@0.18 -- openpay-order-mcp
+npx --yes --package=openpay-x402-mcp@0.19 -- openpay-order-mcp
 ```
 
 ### Claude Desktop
@@ -29,7 +29,7 @@ npx --yes --package=openpay-x402-mcp@0.18 -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp@0.18", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.19", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -42,7 +42,7 @@ npx --yes --package=openpay-x402-mcp@0.18 -- openpay-order-mcp
   "mcpServers": {
     "openpay-order": {
       "command": "npx",
-      "args": ["--yes", "--package=openpay-x402-mcp@0.18", "--", "openpay-order-mcp"]
+      "args": ["--yes", "--package=openpay-x402-mcp@0.19", "--", "openpay-order-mcp"]
     }
   }
 }
@@ -56,7 +56,7 @@ This profile needs no `BUYER_PRIVATE_KEY`. It exposes four tools: `find_shops`,
 ### Install / run
 
 ```bash
-npx openpay-x402-mcp@0.18
+npx openpay-x402-mcp@0.19
 ```
 
 ### Claude Desktop
@@ -66,7 +66,7 @@ npx openpay-x402-mcp@0.18
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp@0.18"],
+      "args": ["openpay-x402-mcp@0.19"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -85,7 +85,7 @@ npx openpay-x402-mcp@0.18
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["openpay-x402-mcp@0.18"],
+      "args": ["openpay-x402-mcp@0.19"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",
@@ -125,7 +125,7 @@ from strands import Agent
 from strands.tools.mcp import MCPClient
 
 openpay = MCPClient(lambda: stdio_client(StdioServerParameters(
-    command="npx", args=["-y", "openpay-x402-mcp@0.18"],
+    command="npx", args=["-y", "openpay-x402-mcp@0.19"],
     env={...},  # same env as the Claude examples above
 )))
 
@@ -338,7 +338,7 @@ public EVM address in Kova, for example with `kova wallet info`, and use it as
 `KOVA_AGENT_ADDRESS`; never export or paste a private key. Address lookup in
 Kova's agent-mode JSON remains unverified; MCP does not attempt automatic lookup.
 
-Register `npx --yes openpay-x402-mcp@0.18` with an MCP-capable
+Register `npx --yes openpay-x402-mcp@0.19` with an MCP-capable
 host. Example JSON configuration (replace the wallet name and public address,
 and use the limits agreed with the person):
 
@@ -347,7 +347,7 @@ and use the limits agreed with the person):
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["--yes", "openpay-x402-mcp@0.18"],
+      "args": ["--yes", "openpay-x402-mcp@0.19"],
       "env": {
         "SIGNER_MODE": "kova",
         "KOVA_WALLET": "<existing Kova wallet name>",
@@ -543,7 +543,7 @@ Use this explicit mode to avoid pasting a private key into MCP configuration:
   "mcpServers": {
     "openpay-x402": {
       "command": "npx",
-      "args": ["--yes", "openpay-x402-mcp@0.18"],
+      "args": ["--yes", "openpay-x402-mcp@0.19"],
       "env": {
         "SIGNER_MODE": "keystore",
         "MAX_PER_CALL_JPYC": "10",

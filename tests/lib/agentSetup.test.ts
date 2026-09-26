@@ -17,6 +17,8 @@ const KOVA_INPUT = {
   maxDailyJpyc: '300',
 };
 
+const METAMASK_INPUT = { ...DEFAULT_AGENT_CONFIG_INPUT, metamaskAgentAddress: KOVA_INPUT.kovaAgentAddress, maxDailyJpyc: '300' };
+
 describe('agent setup — package fences', () => {
   it('generated invocations name bins that the MCP package really ships', () => {
     const pkg = JSON.parse(readFileSync('packages/x402-mcp/package.json', 'utf8'));
@@ -39,6 +41,17 @@ describe('agent setup — package fences', () => {
     if (AGENT_MODES.includes('agent-pays-kova')) {
       expect(Number(AGENT_MCP_VERSION.split('.')[1])).toBeGreaterThanOrEqual(18);
     }
+  });
+  it('pins a MetaMask-capable MCP minor when the generator offers MetaMask', () => {
+    expect(AGENT_MODES).toContain('agent-pays-metamask');
+    expect(Number(AGENT_MCP_VERSION.split('.')[1])).toBeGreaterThanOrEqual(19);
+  });
+  it('constructs the generated MetaMask runtime without running mm', () => {
+    // 実際の session・日次台帳に触れず、生成 env の受理だけを検証する。
+    const env = { ...Object.fromEntries(buildAgentEnv(METAMASK_INPUT, 'agent-pays-metamask')), OPENPAY_X402_HOME: mkdtempSync(join(tmpdir(), 'openpay-metamask-setup-')) };
+    const metamaskExecFile = vi.fn(() => { throw new Error('unexpected mm execution'); });
+    expect(() => createToolRuntime({ env, metamaskExecFile })).not.toThrow();
+    expect(metamaskExecFile).not.toHaveBeenCalled();
   });
   // setup.md と keyNote の前提: 鍵なしの生成 env で MCP は起動でき、プレースホルダ鍵では起動時に落ちる。
   it('the MCP runtime starts with the generated env and rejects a placeholder key', () => {
@@ -87,9 +100,9 @@ describe('agent setup', () => {
   });
   for (const client of AGENT_CLIENTS) for (const mode of AGENT_MODES) {
     it(`${client} / ${mode} produces a keyless config in the host format`, () => {
-      const input = mode === 'agent-pays-kova' ? KOVA_INPUT : DEFAULT_AGENT_CONFIG_INPUT;
+      const input = mode === 'agent-pays-metamask' ? METAMASK_INPUT : mode === 'agent-pays-kova' ? KOVA_INPUT : DEFAULT_AGENT_CONFIG_INPUT;
       const output = renderAgentConfig(client, mode, input);
-      expect(output).not.toMatch(/PRIVATE_KEY|STEWARD|KOVA_CREDENTIAL/);
+      expect(output).not.toMatch(/PRIVATE_KEY|STEWARD|KOVA_CREDENTIAL|MM_/);
       const server = mode === 'human-pays' ? 'openpay-order' : 'openpay-x402';
       expect(output).toContain(server);
       if (mode === 'human-pays') expect(output).not.toMatch(/SIGNER_MODE|MAX_|ALLOWED_HOSTS|CATALOG_TRUST|\benv\b/);
@@ -101,7 +114,14 @@ describe('agent setup', () => {
         expect(output).toContain(input.kovaWallet);
         expect(output).toContain('KOVA_AGENT_ADDRESS');
         expect(output).toContain(input.kovaAgentAddress);
-      } else expect(output).not.toMatch(/KOVA_|0x/);
+      } else {
+        expect(output).not.toMatch(/KOVA_/);
+        if (mode === 'agent-pays-metamask') {
+          expect(output).toMatch(/SIGNER_MODE\W+metamask/);
+          expect(output).toContain('METAMASK_AGENT_ADDRESS');
+          expect(output).toContain(input.metamaskAgentAddress);
+        } else expect(output).not.toContain('0x');
+      }
       if (client === 'claude-desktop') {
         const entry = JSON.parse(output).mcpServers[server];
         expect(entry.command).toBe('npx');
@@ -120,6 +140,25 @@ describe('agent setup', () => {
       }
     });
   }
+  it('generates only public MetaMask configuration and the configured local limits', () => {
+    expect(Object.fromEntries(buildAgentEnv({ ...METAMASK_INPUT, allowedHosts: 'EXAMPLE.COM,open-pay.jp', catalogTrust: false }, 'agent-pays-metamask'))).toEqual({
+      SIGNER_MODE: 'metamask',
+      METAMASK_AGENT_ADDRESS: METAMASK_INPUT.metamaskAgentAddress,
+      MAX_PER_CALL_JPYC: '10',
+      MAX_SESSION_JPYC: '100',
+      MAX_DAILY_JPYC: '300',
+      ALLOWED_HOSTS: 'example.com,open-pay.jp',
+      CATALOG_TRUST: 'false',
+    });
+  });
+  it.each(['', '0x1234', '0x52908400098527886E0F7030069857D2E4169Ee7', '0x' + 'g'.repeat(40)])('rejects an invalid MetaMask address: %s', (metamaskAgentAddress) => {
+    const input = { ...METAMASK_INPUT, metamaskAgentAddress };
+    expect(invalidAgentConfigFields(input, 'agent-pays-metamask')).toContain('metamaskAgentAddress');
+    for (const client of AGENT_CLIENTS) expect(() => renderAgentConfig(client, 'agent-pays-metamask', input)).toThrow('agent config input is invalid');
+  });
+  it.each([METAMASK_INPUT.metamaskAgentAddress, METAMASK_INPUT.metamaskAgentAddress.toLowerCase()])('accepts a public EVM address: %s', (metamaskAgentAddress) => {
+    expect(invalidAgentConfigFields({ ...METAMASK_INPUT, metamaskAgentAddress }, 'agent-pays-metamask')).toEqual([]);
+  });
   it('generates only public Kova configuration and the configured local limits', () => {
     expect(Object.fromEntries(buildAgentEnv({ ...KOVA_INPUT, allowedHosts: 'EXAMPLE.COM,open-pay.jp', catalogTrust: false }, 'agent-pays-kova'))).toEqual({
       SIGNER_MODE: 'kova',
@@ -180,6 +219,8 @@ describe('agent setup', () => {
   it.each(['ja', 'en'])('includes the setup URL and key prohibition in %s prompt', (locale) => {
     const prompt = buildSetupPrompt(locale);
     expect(prompt).toContain(AGENT_SETUP_URL);
+    expect(prompt).toContain(locale === 'ja' ? 'MetaMask では、鍵は MetaMask の server wallet' : 'For MetaMask, the key stays in MetaMask’s server wallet');
+    expect(prompt).toContain(locale === 'ja' ? 'Local Wallet では' : 'For Local Wallet');
     expect(prompt).toMatch(locale === 'ja' ? /秘密鍵を私に尋ねない/ : /Never ask me for a private key/);
   });
 });

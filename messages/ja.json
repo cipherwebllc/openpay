@@ -3,7 +3,8 @@
     "modeOptions": {
       "human-pays": "人が支払う (自分で承認)",
       "agent-pays": "Agent が支払う (ローカル wallet)",
-      "agent-pays-kova": "Agent が支払う (Kova・第三者)"
+      "agent-pays-kova": "Agent が支払う (Kova・第三者)",
+      "agent-pays-metamask": "Agent が支払う (MetaMask Agent Wallet)"
     },
     "kovaWallet": {
       "label": "Kova の wallet 名",
@@ -17,7 +18,12 @@
     "policyNote": "Kova の policy はこの支払い経路の金額を制限しません (Kova 0.1.2 実測)。金額の上限として効くのは、この MCP の設定 (上の上限 3 つ) だけです。",
     "balanceNote": "失ってもよい少額だけを入れてください。",
     "setupNote": "Kova CLI を別途導入し、PATH に通してください。macOS/Linux のみ対応しています (Windows 非対応)。host 再起動後に wallet_status で signerMode: kova を確認してください。wallet_init は不要です。",
-    "fundingNote": "入金先は入力した公開アドレスと同じです。Polygon の JPYC を送ってください。OpenPay の x402 支払いに POL は不要です。"
+    "fundingNote": "入金先は入力した公開アドレスと同じです。Polygon の JPYC を送ってください。OpenPay の x402 支払いに POL は不要です。",
+    "metamaskAgentAddress": {
+      "label": "MetaMask Agent Wallet のアドレス (`mm wallet address --json` で表示)",
+      "hint": "公開 EVM アドレスだけを貼り付けてください。秘密鍵やログイン情報は貼らないでください。"
+    },
+    "metamaskNote": "鍵は MetaMask が保持し、OpenPay は受け取りません。ただし、このマシンで mm にログイン済みなら、mm から MCP の上限を経ずに直接署名・送金できます。7.0.0 の実測では、この署名に 2FA は要求されず、MetaMask の allowed_chains と outflow 上限も適用されませんでした。この支払い経路の金額を制限するのは MCP の設定だけです。失ってもよい少額だけを入れてください。"
   },
   "CrossChainForwardPendingPanel": {
     "title": "前回の Arc 支払いを確認",

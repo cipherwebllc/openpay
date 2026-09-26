@@ -3,7 +3,8 @@
     "modeOptions": {
       "human-pays": "You pay (approve yourself)",
       "agent-pays": "Agent pays (local wallet)",
-      "agent-pays-kova": "Agent pays (Kova, third party)"
+      "agent-pays-kova": "Agent pays (Kova, third party)",
+      "agent-pays-metamask": "Agent pays (MetaMask Agent Wallet)"
     },
     "kovaWallet": {
       "label": "Kova wallet name",
@@ -17,7 +18,12 @@
     "policyNote": "Kova policy does not limit amounts on this payment path (tested with Kova 0.1.2). Only this MCP’s settings (the three limits above) impose amount limits.",
     "balanceNote": "Fund the Kova wallet only with a small amount you can afford to lose.",
     "setupNote": "Install Kova CLI separately and add it to PATH. Only macOS/Linux are supported (Windows is unsupported). After restarting the host, use wallet_status to confirm signerMode: kova. You do not need wallet_init.",
-    "fundingNote": "Fund the same public address you entered with JPYC on Polygon. No POL is needed for OpenPay x402 payments."
+    "fundingNote": "Fund the same public address you entered with JPYC on Polygon. No POL is needed for OpenPay x402 payments.",
+    "metamaskAgentAddress": {
+      "label": "MetaMask Agent Wallet address (shown by `mm wallet address --json`)",
+      "hint": "Paste only the public EVM address, never a private key or login credentials."
+    },
+    "metamaskNote": "MetaMask holds the key; OpenPay never receives it. However, an mm session already signed in on this machine can sign or transfer directly, bypassing MCP limits. In our 7.0.0 test, this signing required no 2FA, and MetaMask’s allowed_chains and outflow limits did not apply. Only the MCP settings cap amounts on this payment path. Fund only a small amount you can afford to lose."
   },
   "CrossChainForwardPendingPanel": {
     "title": "Check your previous Arc payment",

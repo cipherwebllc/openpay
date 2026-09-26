@@ -178,7 +178,7 @@ const ja: AgentGuideContent = {
     },
   ],
   setupEnvironmentNote:
-    'PC のローカルで動く Claude Code / Codex なら Local Wallet・Kova・Steward が使えます。スマホの Claude アプリの Code やブラウザ版 Claude Code は使い捨てのクラウド環境のため、Local Wallet は鍵ごと消えます（JPYC を入れないでください）。Kova も同じ環境に CLI と資格情報が必要で使えません。「人が支払う」（openpay-order-mcp）は鍵不要でどこでも使えますが、登録はセッションごとに消えることがあります。クラウドから Agent に支払わせるなら、自分のサーバで署名する Steward を使ってください。',
+    'PC のローカルで動く Claude Code / Codex なら Local Wallet・Kova・MetaMask Agent Wallet・Steward が使えます。スマホの Claude アプリの Code やブラウザ版 Claude Code は使い捨てのクラウド環境のため、Local Wallet は鍵ごと消えます（JPYC を入れないでください）。Kova も同じ環境に CLI と資格情報が必要で使えません。MetaMask Agent Wallet も MCP と同じマシンに mm のログイン状態が必要で使えません。「人が支払う」（openpay-order-mcp）は鍵不要でどこでも使えますが、登録はセッションごとに消えることがあります。クラウドから Agent に支払わせるなら、自分のサーバで署名する Steward を使ってください。',
   configLabel: '設定例（支払い用の鍵は不要）',
   configCode: MCP_CONFIG_JSON,
   configNote:
@@ -347,7 +347,7 @@ const en: AgentGuideContent = {
     },
   ],
   setupEnvironmentNote:
-    "Claude Code or Codex on your PC can use Local Wallet, Kova, or Steward. The Claude mobile app's Code tab and Claude Code on the web use disposable cloud environments: a Local Wallet disappears with its key (do not fund it), and Kova cannot run without its CLI and credentials on the same machine. Human pays (openpay-order-mcp) needs no key and works anywhere, but registration may disappear between sessions. For agent payments from the cloud, use Steward, which signs on your own server.",
+    "Claude Code or Codex on your PC can use Local Wallet, Kova, MetaMask Agent Wallet, or Steward. The Claude mobile app's Code tab and Claude Code on the web use disposable cloud environments: a Local Wallet disappears with its key (do not fund it), and Kova cannot run without its CLI and credentials on the same machine. MetaMask Agent Wallet also needs an mm session on the same machine as the MCP and cannot run there. Human pays (openpay-order-mcp) needs no key and works anywhere, but registration may disappear between sessions. For agent payments from the cloud, use Steward, which signs on your own server.",
   configLabel: 'Example config (no payment key needed)',
   configCode: MCP_CONFIG_JSON,
   configNote:

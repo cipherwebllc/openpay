@@ -6,6 +6,15 @@ import { DEFAULT_MAX_PER_CALL_JPYC, DEFAULT_MAX_SESSION_JPYC, DEFAULT_ALLOWED_HO
 
 const md = readFileSync('public/agent/setup.md', 'utf8');
 describe('agent setup document drift fences', () => {
+  it('restricts agent mm commands and documents the MetaMask setup boundary', () => {
+    expect(md).toContain('**The only mm commands the agent may run are `mm auth status --json` and `mm wallet address --json`.**');
+    expect(md).toContain('Never run `mm login`, `mm init`, `mm policy`, `mm trading-mode`, `mm wallet requests`, `mm wallet select`, `mm transfer`, or any `mm sign-*` command (including `mm wallet sign-*`).');
+    const branch = md.slice(md.indexOf('### MetaMask: alternative to Steps 3 and 5'), md.indexOf('## Step 4: Verify'));
+    for (const text of ['npm install -g @metamask/agent-wallet', 'Server wallet', 'Guard Mode', 'person performs setup themselves', '/agent config generator', 'SIGNER_MODE=metamask', 'METAMASK_AGENT_ADDRESS=<0x…>', 'openpay-x402-mcp@0.19', 'signerMode: metamask', "Skip Step 5's `wallet_init`", 'wallet_prove', '7.0.0', 'no 2FA', 'allowed_chains', 'outflow limits', 'bypassing', 'afford to lose', 'Windows', 'BYOK', 'MFA', 'reject it inside MetaMask itself', 'MM_CLI_TOKEN', 'MM_MNEMONIC', 'MM_PASSWORD']) expect(branch).toContain(text);
+    expect(md).toContain('MetaMask mode does not work in a cloud sandbox');
+    expect(md).toContain('The commands below pin `@0.19`');
+    expect(md).toContain('For MetaMask, report only the public address');
+  });
   it('keeps the Kova branch public-only and discloses the measured policy limitation', () => {
     const branch = md.slice(md.indexOf('### Kova: alternative to Steps 3 and 5'), md.indexOf('## Step 4: Verify'));
     for (const text of ['third-party Execution Provider', '`kova init`', '`kova wallet info`', 'person performs owner operations themselves', 'command -v kova', '`PATH`', 'SIGNER_MODE=kova', 'KOVA_WALLET=<name>', 'KOVA_AGENT_ADDRESS=<0x…>', 'signerMode: kova', "Skip Step 5's `wallet_init`", '`wallet_prove`', 'Polygon JPYC', 'No POL', 'Kova policy does not limit amounts', 'Kova 0.1.2', "Only this MCP's settings impose amount limits", 'record of intent', 'JPY Coin', 'ReceiveWithAuthorization', 'OpenPay Agent Proof', '"Proof"', 'kova_policy_denied', 'kova_not_found', 'kova_sign_failed']) expect(branch).toContain(text);
