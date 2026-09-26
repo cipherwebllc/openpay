@@ -56,14 +56,14 @@ export function createCliSigner({
   return {
     mode: 'custom',
     address,
-    async signTypedData({ domain, types, primaryType, message }) {
+    async signTypedData({ domain, types, primaryType, message }, { deadlineMs: callDeadlineMs = deadlineMs } = {}) {
       try {
         const typedData = { domain, types, primaryType, message };
         const json = JSON.stringify(typedData, (_key, value) =>
           typeof value === 'bigint' ? value.toString(10) : value,
         );
         const { error, stdout, stderr } = await runCli(execFileImpl, bin, args(typedData, json),
-          childEnvironment(env, excludedEnvPrefixes, excludedEnvKeys), deadlineMs, errors.deadline ?? errors.failed);
+          childEnvironment(env, excludedEnvPrefixes, excludedEnvKeys), callDeadlineMs, errors.deadline ?? errors.failed);
         if (error?.code === 'ENOENT') throw new CliSigningError(errors.notFound);
         // Timeout, signals, spawn failures and output overflow take priority over partial JSON.
         // Only an ordinary nonzero exit can still carry a complete error envelope.

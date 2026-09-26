@@ -2,8 +2,9 @@ import { getAddress } from 'viem';
 import { createCliSigner } from './cliSigner.mjs';
 
 const LOGIN_CODES = [
-  'AUTH_FAILED', 'SESSION_EXPIRED', 'SESSION_NOT_FOUND',
-  'TOKEN_INVALID', 'TOKEN_NOT_FOUND', 'REFRESH_CLI_TOKEN_FAILED',
+  'AUTH_FAILED', 'AUTH_ERROR', 'TOKEN_INVALID', 'TOKEN_REFRESH_FAILED',
+  'NO_AUTH_TOKEN', 'NO_PROJECT_ID', 'SESSION_EXPIRED', 'SESSION_NOT_FOUND',
+  'REFRESH_CLI_TOKEN_FAILED',
 ];
 
 export function createMetamaskSigner(env = process.env, { execFileImpl } = {}) {
@@ -41,12 +42,15 @@ export function createMetamaskSigner(env = process.env, { execFileImpl } = {}) {
       // 失敗封筒 (ok:false の JSON) だけを解釈し、それ以外の stderr は stdout の判定に委ねる。
       let body;
       try {
-        body = JSON.parse(stderr);
+        const start = stderr.startsWith('{') ? 0 : stderr.indexOf('\n{');
+        if (start < 0) return undefined;
+        body = JSON.parse(stderr.slice(start));
       } catch {
         return undefined;
       }
       if (body?.ok !== false) return undefined;
-      return { errorCode: LOGIN_CODES.includes(body?.error?.code) ? 'LOGIN' : 'FAILED' };
+      const code = body?.error?.code;
+      return { errorCode: LOGIN_CODES.includes(code) ? 'LOGIN' : code === 'JOB_TIMEOUT' ? 'PENDING' : 'FAILED' };
     },
     parseResponse(stdout) {
       const body = JSON.parse(stdout);
@@ -54,6 +58,7 @@ export function createMetamaskSigner(env = process.env, { execFileImpl } = {}) {
       const { status, signature, pollingId } = body.data;
       if (status === 'SIGNED') return { signature };
       if (status === 'REJECTED' || status === 'BLOCKED') return { errorCode: 'DENIED' };
+      if (['EXPIRED', 'CANCELLED', 'FAILED', 'SIGNING_FAILED'].includes(status)) return { errorCode: 'FAILED' };
       if (['EVALUATING', 'AWAITING_MFA', 'SIGNING'].includes(status) || pollingId != null) {
         return { errorCode: 'PENDING' };
       }
@@ -75,7 +80,12 @@ export function createMetamaskSigner(env = process.env, { execFileImpl } = {}) {
   return {
     ...signer,
     signTypedData(typedData) {
-      const result = queue.then(() => signer.signTypedData(typedData));
+      const enqueuedAt = Date.now();
+      const result = queue.then(() => {
+        const deadlineMs = 30_000 - (Date.now() - enqueuedAt);
+        if (deadlineMs <= 0) throw new Error('metamask_sign_failed');
+        return signer.signTypedData(typedData, { deadlineMs });
+      });
       queue = result.then(() => undefined, () => undefined);
       return result;
     },

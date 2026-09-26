@@ -446,7 +446,7 @@ willing to lose.
 ### MetaMask (`SIGNER_MODE=metamask`, since 0.19.0)
 
 MetaMask Agent Wallet is a separately installed CLI signer. This adapter uses the
-`@metamask/agent-wallet` 7.0.0 server wallet contract, verified on Polygon Amoy
+`@metamask/agent-wallet` 7.0.0 CLI output contract, verified on Polygon Amoy
 on 2026-09-26. It adds no npm dependency or peer dependency. Target OS: macOS/Linux;
 Windows is unsupported because shell-free `execFile` cannot run `.cmd` shims.
 BYOK is outside this mode's scope; use Local Wallet (`SIGNER_MODE=keystore`).
@@ -501,14 +501,16 @@ remain Polygon only. Use testnet JPYC for Amoy. `wallet_init` requires keystore 
 `OpenPay wallet proof (no payment)`. Payments use `OpenPay x402 payment`.
 
 Calls close stdin, bound each output stream to 64 KiB, pass `--wait --wallet-timeout 20 --json`,
-and have an independent 30-second deadline with `SIGKILL`. Proof and payment
-signatures are serialized. Only a single successful JSON envelope with
+and have an independent 30-second deadline with `SIGKILL`, including queue wait time.
+Proof and payment signatures are serialized. A call whose budget expires in the
+queue returns `metamask_sign_failed` without launching mm. Only a single successful JSON envelope with
 `mode: server`, `status: SIGNED` and a 65-byte hex signature that verifies against
 the configured address is accepted. Child output and native errors are withheld.
 
 The fixed errors are `metamask_not_found`, `metamask_login_required`,
 `metamask_approval_pending`, `metamask_denied` and `metamask_sign_failed`.
-For pending requests (including deadline expiry), reject the request on the
+If `--wait` returns `JOB_TIMEOUT` or a running call reaches its deadline, the
+result is `metamask_approval_pending`. Reject the pending request on the
 MetaMask side: **this server does not resume it**. MFA/Guard approval flows,
 NDJSON, job resume/cancellation and telemetry/policy changes are outside scope.
 `wallet_prove` passes through the first four errors; other signature failures

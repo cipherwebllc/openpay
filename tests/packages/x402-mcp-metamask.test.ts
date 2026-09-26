@@ -156,7 +156,9 @@ describe('Metamask signer adapter', () => {
     const payload = JSON.stringify(data, (_key, value) => typeof value === 'bigint' ? String(value) : value);
     expect(args).toEqual(['wallet', 'sign-typed-data', '--chain-id', String(chainId), '--payload', payload,
       '--intent', 'OpenPay x402 payment', '--wait', '--wallet-timeout', '20', '--json']);
-    expect(options).toEqual({ shell: false, timeout: 30_000, killSignal: 'SIGKILL', maxBuffer: 65536,
+    expect(options.timeout).toBeGreaterThan(0);
+    expect(options.timeout).toBeLessThanOrEqual(30_000);
+    expect(options).toMatchObject({ shell: false, killSignal: 'SIGKILL', maxBuffer: 65536,
       encoding: 'utf8', env: env({ MM_BIN: 'mm-test' }) });
   });
 
@@ -259,6 +261,38 @@ describe('Metamask child lifetime', () => {
     // Late output cannot turn a timed-out signature into success.
     execFileImpl.mock.calls[0][3](null, JSON.stringify({ ok: true, data: { mode: 'server', status: 'SIGNED', signature: await account.signTypedData(typedData()) } }), secret);
     await expect(pending).rejects.toThrow(/^metamask_approval_pending$/);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('does not launch a queued call after its 30-second budget expires', async () => {
+    const execFileImpl = vi.fn<ExecFile>(() => fakeChild());
+    const signer = createMetamaskSigner(env(), { execFileImpl });
+    const first = expect(signer.signTypedData(typedData())).rejects.toThrow(/^metamask_approval_pending$/);
+    const second = expect(signer.signTypedData(typedData())).rejects.toThrow(/^metamask_sign_failed$/);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(execFileImpl).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.all([first, second]);
+    expect(execFileImpl).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('passes only the remaining queue budget to the child timeout', async () => {
+    const signature = await account.signTypedData(typedData());
+    const stdout = JSON.stringify({ ok: true, data: { mode: 'server', status: 'SIGNED', signature } });
+    const execFileImpl = child(stdout).mockImplementationOnce(() => fakeChild());
+    const signer = createMetamaskSigner(env(), { execFileImpl });
+    const first = signer.signTypedData(typedData());
+    const second = signer.signTypedData(typedData());
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(execFileImpl).toHaveBeenCalledOnce();
+    execFileImpl.mock.calls[0][3](null, stdout, '');
+    await expect(first).resolves.toBe(signature);
+    await expect(second).resolves.toBe(signature);
+    expect(execFileImpl).toHaveBeenCalledTimes(2);
+    const timeout = execFileImpl.mock.calls[1][2].timeout;
+    expect(timeout).toBeGreaterThan(0);
+    expect(timeout).toBeLessThanOrEqual(30_000 - 12_000);
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -507,14 +541,15 @@ describe('MetaMask envelope and error containment', () => {
   const envelope = (code: string) => JSON.stringify({ ok: false, error: { code, message: secret, hint: secret } });
 
   it.each([
-    'AUTH_FAILED', 'SESSION_EXPIRED', 'SESSION_NOT_FOUND', 'TOKEN_INVALID', 'TOKEN_NOT_FOUND', 'REFRESH_CLI_TOKEN_FAILED',
+    'AUTH_FAILED', 'AUTH_ERROR', 'TOKEN_INVALID', 'TOKEN_REFRESH_FAILED', 'NO_AUTH_TOKEN', 'NO_PROJECT_ID', 'SESSION_EXPIRED', 'SESSION_NOT_FOUND', 'REFRESH_CLI_TOKEN_FAILED',
+    'TOKEN_NOT_FOUND', 'RATE_LIMITED',
     'PERMISSION_DENIED', 'WALLET_POLICY_APPROVAL_REJECTED', 'TRADING_MODE_APPROVAL_REJECTED',
     '__proto__', 'constructor', 'DENIED', 'PENDING', 'LOGIN', 'unknown',
   ])('contains stderr code %s on exit 1', async (code) => {
     const execFileImpl = child('', failure(1), envelope(code));
     const { active, paidFetch } = runtime({}, execFileImpl);
     const result = await pay(active);
-    const expected = ['AUTH_FAILED', 'SESSION_EXPIRED', 'SESSION_NOT_FOUND', 'TOKEN_INVALID', 'TOKEN_NOT_FOUND', 'REFRESH_CLI_TOKEN_FAILED'].includes(code)
+    const expected = ['AUTH_FAILED', 'AUTH_ERROR', 'TOKEN_INVALID', 'TOKEN_REFRESH_FAILED', 'NO_AUTH_TOKEN', 'NO_PROJECT_ID', 'SESSION_EXPIRED', 'SESSION_NOT_FOUND', 'REFRESH_CLI_TOKEN_FAILED'].includes(code)
       ? 'metamask_login_required' : 'metamask_sign_failed';
     expect(decode(result)).toMatchObject({ ok: false, error: expected });
     expect(result.isError).toBe(true);
@@ -529,6 +564,7 @@ describe('MetaMask envelope and error containment', () => {
     ...['EVALUATING', 'AWAITING_MFA', 'SIGNING'].map((status): [string, Record<string, unknown>, string] => [status, { mode: 'server', status, pollingId: secret }, 'metamask_approval_pending']),
     ...['REJECTED', 'BLOCKED'].map((status): [string, Record<string, unknown>, string] => [status, { mode: 'server', status }, 'metamask_denied']),
     ...['EXPIRED', 'CANCELLED', 'FAILED', 'SIGNING_FAILED'].map((status): [string, Record<string, unknown>, string] => [status, { mode: 'server', status }, 'metamask_sign_failed']),
+    ...['EXPIRED', 'CANCELLED', 'FAILED', 'SIGNING_FAILED'].map((status): [string, Record<string, unknown>, string] => [`${status} with pollingId`, { mode: 'server', status, pollingId: secret }, 'metamask_sign_failed']),
     ['polling only', { mode: 'server', pollingId: secret }, 'metamask_approval_pending'],
     ['missing status', { mode: 'server' }, 'metamask_sign_failed'],
   ])('rejects %s even with an otherwise valid signature', async (_label, data, code) => {
@@ -554,6 +590,22 @@ describe('MetaMask envelope and error containment', () => {
     expect(decode(result)).toMatchObject({ ok: false, error: code });
     expect(JSON.stringify(result)).not.toContain(secret);
     expect(paidFetch).not.toHaveBeenCalled();
+  });
+
+  it('prioritizes an AUTH_FAILED stderr envelope over valid SIGNED stdout on exit 0', async () => {
+    const signature = await account.signTypedData(typedData());
+    const execFileImpl = child(JSON.stringify({ ok: true, data: { mode: 'server', status: 'SIGNED', signature } }), null, envelope('AUTH_FAILED'));
+    await expect(createMetamaskSigner(env(), { execFileImpl }).signTypedData(typedData())).rejects.toThrow(/^metamask_login_required$/);
+  });
+
+  it.each([
+    ['AUTH_FAILED', 'metamask_login_required'],
+    ['JOB_TIMEOUT', 'metamask_approval_pending'],
+    ['RATE_LIMITED', 'metamask_sign_failed'],
+  ])('parses an intent echo followed by a pretty JSON %s envelope on exit 1', async (code, expected) => {
+    const stderr = `Intent: OpenPay x402 payment\n${JSON.stringify({ ok: false, error: { code, message: secret } }, null, 2)}\n`;
+    const execFileImpl = child('', failure(1), stderr);
+    await expect(createMetamaskSigner(env(), { execFileImpl }).signTypedData(typedData())).rejects.toThrow(new RegExp(`^${expected}$`));
   });
 
   it('returns the signature when stderr only carries the intent echo (mm 7.0.0 success shape)', async () => {
@@ -659,8 +711,8 @@ describe('MetaMask adapter mutex', () => {
     const signer = createMetamaskSigner(env(), { execFileImpl });
     const first = signer.signTypedData(typedData());
     const rejected = expect(first).rejects.toThrow(/^metamask_approval_pending$/);
-    const second = signer.signTypedData(typedData(137));
     await vi.advanceTimersByTimeAsync(29_999);
+    const second = signer.signTypedData(typedData(137));
     expect(execFileImpl).toHaveBeenCalledOnce();
     await vi.advanceTimersByTimeAsync(1);
     await rejected;

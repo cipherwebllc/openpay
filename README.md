@@ -222,10 +222,6 @@ The table below is a **curated subset** (core setup + production feature flags).
 
 | Variable | Purpose | Required |
 |---|---|---|
-| `SIGNER_MODE` | Separate x402 MCP process only: `metamask` uses the MetaMask Agent Wallet server wallet CLI. See [MCP signer modes](packages/x402-mcp/README.md#signer-modes). | MCP only |
-| `METAMASK_AGENT_ADDRESS` | Separate MCP only: required public EVM address for `SIGNER_MODE=metamask`. | metamask mode |
-| `MM_BIN` | Separate MCP only: PATH executable name, default `mm`. | optional |
-| `MM_CLI_TOKEN`, `MM_MNEMONIC`, `MM_PASSWORD` | Must be absent in the MCP environment when `SIGNER_MODE=metamask`. | forbidden in metamask mode |
 | `NEXT_PUBLIC_NETWORK_ENV` | `testnet` (default) or `mainnet` | yes |
 | `NEXT_PUBLIC_PIMLICO_API_KEY` | Gasless mode (<https://dashboard.pimlico.io>) | gasless only |
 | `NEXT_PUBLIC_PIMLICO_SPONSORSHIP_POLICY_ID` | Pimlico sponsorship policy (gasless JPYC) | gasless only |
