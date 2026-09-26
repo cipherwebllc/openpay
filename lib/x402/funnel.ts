@@ -63,14 +63,27 @@ export function funnelField(stage: FunnelStage, rail: FunnelRail, resourceUrl: s
 // HINCRBY と初回 TTL を 1 EVAL に閉じる (TTL 欠落でハッシュが永久残存する波及を断つ)。
 // ⚠️ 補間なしの単一リテラルで書く — minifier が `+` 連結中のテンプレートを壊した実害あり (check-lua-bundle.mjs)。
 const FUNNEL_HINCR =
-  "local n = redis.call('HINCRBY', KEYS[1], ARGV[1], 1) if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[2]) end return n";
+  "local n = redis.call('HINCRBY', KEYS[1], ARGV[1], tonumber(ARGV[3])) if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[2]) end return n";
+
+// KV コマンド予算 (Upstash 無料枠・2026-09-26): 1 件の計上は Lua 込みで 3〜4 コマンド。支払い前の 402
+// (challenge) は検索クローラの巡回で大量に出るため、10 件に 1 件だけ記録して 10 を足す (期待値は同じ・
+// 表示は 10 単位の概数)。支払いを試みた後の段階 (verify 以降) は件数が少なく判断に使うので全件記録する。
+export const FUNNEL_CHALLENGE_SAMPLE_RATE = 10;
 
 /** 1 件を計上する。失敗しても throw しない (付帯処理の隔離)。 */
-export async function recordFunnel(stage: FunnelStage, rail: FunnelRail, resourceUrl: string): Promise<void> {
+export async function recordFunnel(
+  stage: FunnelStage,
+  rail: FunnelRail,
+  resourceUrl: string,
+  random: () => number = Math.random,
+): Promise<void> {
   try {
+    const sampled = stage === 'challenge';
+    if (sampled && random() * FUNNEL_CHALLENGE_SAMPLE_RATE >= 1) return;
     const result = await kvEval<number>(FUNNEL_HINCR, [funnelKey(funnelDay())], [
       funnelField(stage, rail, resourceUrl),
       String(FUNNEL_TTL_SEC),
+      String(sampled ? FUNNEL_CHALLENGE_SAMPLE_RATE : 1),
     ]);
     // KV 未構成は既定の開発環境で常に起きるので黙る。構成済みでの失敗だけ warn。
     if (!result.ok && result.reason !== 'unconfigured') {

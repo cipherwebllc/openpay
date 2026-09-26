@@ -1150,7 +1150,7 @@ describe('x402 /discovery', () => {
     const res = await discovery();
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toBe(
-      'public, s-maxage=10, stale-while-revalidate=30',
+      'public, s-maxage=60, stale-while-revalidate=120',
     );
   });
 

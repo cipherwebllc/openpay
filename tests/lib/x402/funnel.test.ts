@@ -12,6 +12,7 @@ vi.mock('@/lib/logger', () => ({ logger: { warn, info: vi.fn(), error: vi.fn(), 
 
 import {
   FUNNEL_STAGES,
+  FUNNEL_CHALLENGE_SAMPLE_RATE,
   FUNNEL_TTL_SEC,
   funnelDay,
   funnelField,
@@ -55,14 +56,32 @@ describe('x402 funnel counters', () => {
   });
 
   it('recordFunnel: 1 EVAL で HINCRBY + 初回 TTL (180 日)・Lua に補間なし', async () => {
-    await recordFunnel('challenge', 'none', 'https://open-pay.jp/api/paid/hello');
+    await recordFunnel('settled', 'base', 'https://open-pay.jp/api/paid/hello');
     expect(kv.evalMock).toHaveBeenCalledTimes(1);
     const [script, keys, args] = kv.evalMock.mock.calls[0];
-    expect(script).toContain("redis.call('HINCRBY', KEYS[1], ARGV[1], 1)");
+    expect(script).toContain("redis.call('HINCRBY', KEYS[1], ARGV[1], tonumber(ARGV[3]))");
     expect(script).toContain("redis.call('EXPIRE', KEYS[1], ARGV[2])");
     expect(script).not.toContain('${');
     expect(keys).toEqual([funnelKey(funnelDay())]);
-    expect(args).toEqual(['challenge|none|/api/paid/hello', String(FUNNEL_TTL_SEC)]);
+    expect(args).toEqual(['settled|base|/api/paid/hello', String(FUNNEL_TTL_SEC), '1']);
+  });
+
+  it('challenge は 10 件に 1 件だけ記録して 10 を足す (KV 予算・期待値は同じ)', async () => {
+    await recordFunnel('challenge', 'none', 'https://open-pay.jp/api/paid/hello', () => 0.5);
+    expect(kv.evalMock).not.toHaveBeenCalled();
+    await recordFunnel('challenge', 'none', 'https://open-pay.jp/api/paid/hello', () => 0.09);
+    expect(kv.evalMock).toHaveBeenCalledTimes(1);
+    expect(kv.evalMock.mock.calls[0][2]).toEqual([
+      'challenge|none|/api/paid/hello', String(FUNNEL_TTL_SEC), String(FUNNEL_CHALLENGE_SAMPLE_RATE),
+    ]);
+  });
+
+  it('支払いを試みた後の段階は乱数に関係なく全件 1 ずつ記録する', async () => {
+    for (const stage of ['invalid_payload', 'verify_failed', 'conflict', 'content_error', 'settle_failed', 'facilitator_unavailable', 'settled'] as const) {
+      await recordFunnel(stage, 'base', 'https://open-pay.jp/api/paid/hello', () => 0.99);
+    }
+    expect(kv.evalMock).toHaveBeenCalledTimes(7);
+    expect(kv.evalMock.mock.calls.every((call) => call[2][2] === '1')).toBe(true);
   });
 
   it('KV 未構成は黙る・構成済みの失敗は warn・例外も throw しない', async () => {
