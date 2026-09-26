@@ -293,6 +293,14 @@ async function processJob(member: string, token: string, deadline: number): Prom
 
 export type LicenseWorkerResult = { ok: true; skipped?: 'disabled' | 'locked'; processed: number; failed: number } | { ok: false; error: 'storage_unavailable' };
 
+// KV コマンド予算 (Upstash 無料枠・2026-09-26): index 修復は 3 本の Lua で 1 回約 27 コマンドを使い、
+// 5 分ごとの cron で月約 24 万コマンドになっていた。修復は取りこぼしを拾う安全網で、通常の購入・登録は
+// due index へ直接入る (stock.ts / product.ts) ため、各 UTC 時の最初の run (0〜4 分) だけ行っても発行は遅れない。
+const REPAIR_WINDOW_MINUTES = 5;
+export function isLicenseRepairRun(nowMs: number): boolean {
+  return new Date(nowMs).getUTCMinutes() < REPAIR_WINDOW_MINUTES;
+}
+
 /** cron と after() が同じロックを使う。receipt 待ちはせず、due を次 run へ引き継ぐ。 */
 export async function runLicenseWorker(options: { member?: string; deadline?: number } = {}): Promise<LicenseWorkerResult> {
   if (!licenseNftEnabled()) return { ok: true, skipped: 'disabled', processed: 0, failed: 0 };
@@ -305,7 +313,7 @@ export async function runLicenseWorker(options: { member?: string; deadline?: nu
   let processed = 0; let failed = 0;
   try {
     if (Date.now() >= deadline) return { ok: true, processed, failed };
-    if (!options.member && !await repairLicenseIndexes()) return { ok: false, error: 'storage_unavailable' };
+    if (!options.member && isLicenseRepairRun(started) && !await repairLicenseIndexes()) return { ok: false, error: 'storage_unavailable' };
     if (Date.now() >= deadline) return { ok: true, processed, failed };
     let members: string[];
     if (options.member) members = [options.member];

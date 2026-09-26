@@ -130,12 +130,13 @@ export async function GET(): Promise<NextResponse> {
   ];
 
   // 公開カタログは AI エージェントがポーリングする read-only エンドポイント。edge (Vercel CDN) で
-  // 短期キャッシュし、ポーリング毎の KV ファンアウトを抑える。s-maxage=10 = 最大 10 秒の鮮度
-  // (新規登録/無効化/hidden はこの範囲で反映)、stale-while-revalidate=30 = revalidate 中も即応。
-  // 再検証による非表示/復帰が最大およそ 40 秒 stale になる点は、3 回の時間閾値に対して受容する。
+  // 短期キャッシュし、ポーリング毎の KV ファンアウトを抑える。1 回の miss は index 1 + 掲載数ぶんの GET +
+  // first-party 2 件を読むため、Upstash 無料枠の予算 (2026-09-26) に合わせて s-maxage=60 = 最大 60 秒の鮮度
+  // (新規登録/無効化/hidden はこの範囲で反映)、stale-while-revalidate=120 = revalidate 中も即応。
+  // 取り下げ・非表示の反映が最大およそ 3 分 stale になる点は、購入時の catalog 照合 (SDK) があるので受容する。
   // 認証なしの公開データのみなので edge 共有キャッシュは安全 (owner 専用一覧は別 route で無キャッシュ)。
   return NextResponse.json(
     { x402Version: 1, items: rankedItems },
-    { headers: { 'Cache-Control': 'public, s-maxage=10, stale-while-revalidate=30' } },
+    { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } },
   );
 }

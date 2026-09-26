@@ -35,7 +35,7 @@ vi.mock('@/lib/kv', () => ({
     return { ok: true, value };
   },
 }));
-import { licenseBackoff, runLicenseWorker, LICENSE_ABI } from '@/lib/license/minter';
+import { licenseBackoff, isLicenseRepairRun, runLicenseWorker, LICENSE_ABI } from '@/lib/license/minter';
 import { LICENSE_ACTIVE_SUBMISSION, LICENSE_WORKER_LOCK, saveLicenseJob } from '@/lib/license/workerStore';
 import { createLicenseDefinition } from '@/lib/license/definition';
 import { computeLicensePaymentKey } from '@/lib/license/paymentKey';
@@ -405,6 +405,19 @@ describe('license worker: viem + real Lua CAS', () => {
   it('stops dispatch at the deadline and rebuilds a lost due entry from the permanent index', async () => {
     h.rpc.getBlock.mockImplementation(async () => { h.store!.advance(40_000); return { number: 100n, hash: BLOCK }; });
     await runLicenseWorker(); expect(h.store!.zsets.get(LICENSE_DUE_INDEX)?.has(job.paymentKey)).toBe(true); expect(h.rpc.getTransactionReceipt).not.toHaveBeenCalled(); expect(h.wallet.signTransaction).not.toHaveBeenCalled();
+  });
+  it('runs the index repair only in the first run of each UTC hour (KV command budget)', async () => {
+    // REBUILD always writes its cursor key, so the key's presence shows whether the repair ran.
+    const cursor = 'store:license:repair:mint';
+    advance(10 * 60_000);
+    await runLicenseWorker();
+    expect(h.store!.strings.has(cursor)).toBe(false);
+    advance(51 * 60_000);
+    await runLicenseWorker();
+    expect(h.store!.strings.get(cursor)).toBeDefined();
+  });
+  it('isLicenseRepairRun: true only for minutes 0-4 of each UTC hour', () => {
+    expect([0, 4, 5, 30, 59].map((minute) => isLicenseRepairRun(Date.UTC(2026, 8, 26, 10, minute)))).toEqual([true, true, false, false, false]);
   });
   it('isolates corrupt jobs and leaves them in the permanent index', async () => {
     const bad = toHex(123n, { size: 32 }); h.store!.zsets.set(LICENSE_DUE_INDEX, new Map([[bad, NOW - 1], [job.paymentKey, NOW]]));

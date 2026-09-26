@@ -1646,7 +1646,20 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - リクエストごとの行は残さない (402 は巡回で大量に出る)。誰が・いくらで買ったかは settle 台帳 (`x402:settle:ledger:<月>`)。
 - 読み出し = `node scripts/x402-funnel-report.mjs [日数]` (本番 KV の URL/TOKEN を export・読み取りのみ)。
   ⚠️ challenge は検索クローラを含む = 買い手の数ではない。成立率は「支払いを試みた件数」を分母にする。
+  2026-09-26 から challenge は **10 件に 1 件だけ記録して 10 を足す** (Upstash 無料枠の KV 予算。期待値は同じで表示は 10 単位の概数)。
+  支払いを試みた後の段階 (invalid_payload 以降) は全件記録のまま。
 - 対象外 (今回): JPYC の first-party 経路・Store の閲覧〜購入。必要になったら同じ形で足す。
+
+### §14.9c Upstash の月間コマンド予算 (無料枠 50 万/月)
+
+2026-09-26 に 90% 通知。開発用 DB での実測で、**Lua スクリプトは「EVAL 自体 1 + 中の redis.call の数」で数えられる**
+(GET 5 回を含む EVAL 10 回 = 60)。パイプラインも 1 件ずつ数える。Lua を多用する処理は見た目の何倍も消費する。
+- 主な消費と対策 (2026-09-26): license-mint の index 修復 (Lua 3 本で 1 回約 27) を各 UTC 時の最初の run (0〜4 分) だけに
+  (`lib/license/minter.ts`・通常の購入/登録は due へ直接入るので発行は遅れない)。`/api/discovery` の CDN キャッシュを 10 秒 → 60 秒。
+  402 challenge の計測を 1/10 抽出。reverify は UA 交代 (1 時間単位) と連動するため毎時のまま。
+- 1 回あたりの目安: レート制限の判定 3〜4 (多くの API は分・日の 2 窓で 6〜8)・funnel 3〜4・`/api/discovery` の miss は
+  index 1 + 掲載数ぶんの GET + 2・license-mint (修復なし) 約 4・同 (修復あり) 約 28。
+- 総数は `INFO stats` の `total_commands_processed` で見られるが、複数ノードで値が分かれる (書き込みは主ノード側の値)。
 
 ### §14.9b OpenPay Agent の North Star (月間の外部 JPYC Agent 購入者数)
 
