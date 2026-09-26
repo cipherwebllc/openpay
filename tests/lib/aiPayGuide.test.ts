@@ -256,3 +256,20 @@ describe('AI_PAY_GUIDE: agent guide の JPYC 入手文言を一字不変で再�
     }
   });
 });
+
+describe('AI_PAY_GUIDE: セットアップ C (Kova / MetaMask Agent Wallet)', () => {
+  it.each(LOCALES)('%s: 第三者 wallet 節は /agent へ導き、事実 3 点が非空', (loc) => {
+    const c = AI_PAY_GUIDE[loc];
+    expect(c.thirdPartyLink.href).toBe('/agent');
+    expect(c.thirdPartyFacts).toHaveLength(3);
+    for (const fact of c.thirdPartyFacts) expect(fact.length).toBeGreaterThan(20);
+    expect(c.thirdPartyTitle).toMatch(/Kova/);
+    expect(c.thirdPartyTitle).toMatch(/MetaMask Agent Wallet/);
+  });
+  it('ja: policy が署名に効かない実測と MCP 側の上限をドリフトなく明記する', () => {
+    const facts = AI_PAY_GUIDE.ja.thirdPartyFacts.join('\n');
+    expect(facts).toMatch(/policy/);
+    expect(facts).toMatch(/MCP/);
+    expect(facts).not.toMatch(/安心です|安全です/);
+  });
+});

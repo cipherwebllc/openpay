@@ -121,6 +121,20 @@ export default async function GuideAiPayPage({
           </p>
         </Section>
 
+        <Section title={c.thirdPartyTitle}>
+          <p className="mt-3 text-sm leading-relaxed text-slate-700">
+            {c.thirdPartyBody}
+          </p>
+          <BulletList
+            items={c.thirdPartyFacts}
+            marker="•"
+            markerClassName="text-emerald-600"
+          />
+          <Link href={`/${locale}${c.thirdPartyLink.href}`} prefetch={false} className="mt-3 inline-block text-sm font-medium text-emerald-700 underline">
+            {c.thirdPartyLink.label}
+          </Link>
+        </Section>
+
         <Section title={c.guardsTitle}>
           <BulletList
             items={c.guards}

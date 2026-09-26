@@ -123,6 +123,11 @@ export type AiPayGuideContent = JpycSectionContent & {
   readonly stewardSetupTail: string;
   readonly stewardRecommendation: string;
 
+  readonly thirdPartyTitle: string;
+  readonly thirdPartyBody: string;
+  readonly thirdPartyFacts: readonly string[];
+  readonly thirdPartyLink: AiPayGuideLink;
+
   readonly guardsTitle: string;
   readonly guards: readonly string[];
 
@@ -171,7 +176,7 @@ function jpycSectionFor(locale: AiPayGuideLocale): JpycSectionContent {
 const ja: AiPayGuideContent = {
   metaTitle: 'AI が支払うガイド — Claude に JPYC の支払い能力を',
   metaDescription:
-    'Claude などの AI エージェントが AI ストアのデータ・API・AI への相談を JPYC で都度購入するための設定手順。専用少額ウォレット、Steward、金銭ガード、実例を紹介します。',
+    'Claude などの AI エージェントが AI ストアのデータ・API・AI への相談を JPYC で都度購入するための設定手順。専用少額ウォレット、Kova / MetaMask Agent Wallet、Steward、金銭ガード、実例を紹介します。',
   title: 'あなたの AI に、支払う力を。',
   subtitle:
     'Claude などの AI エージェントが、AI ストアのデータ・API・AI への相談を JPYC で都度購入できるようになります。数分のセットアップで、支払いは数円から。',
@@ -231,11 +236,21 @@ const ja: AiPayGuideContent = {
   stewardRecommendation:
     '本番運用や大きめの残高を扱う場合は、こちらの構成を選んでください。',
 
+  thirdPartyTitle: 'セットアップ C: 第三者の Agent Wallet に署名だけを頼む (Kova / MetaMask Agent Wallet)',
+  thirdPartyBody:
+    '鍵を自分の PC に置かず、Kova (Komlock lab) または MetaMask Agent Wallet の server wallet に署名だけを頼む構成です。OpenPay はどちらの鍵も資格情報も受け取りません。MCP の設定は SIGNER_MODE=kova または SIGNER_MODE=metamask と公開アドレス (Kova は wallet 名も) だけで、Agent ページの設定生成から作れます。ウォレットの作成やログインは、あなた自身がそれぞれの CLI で行います。',
+  thirdPartyFacts: [
+    '実測で分かっていること: Kova (0.1.2) と MetaMask Agent Wallet (7.0.0) の policy (許可チェーン・送金上限) は、この支払い方式で使う署名には効きませんでした。金額の上限として効くのは MCP の設定 (下の金銭ガード) だけです。',
+    '「第三者の wallet なら安心」ではなく、「鍵を PC に置かない」ための選択肢です。そのマシンで CLI にログイン済みなら、CLI から MCP の上限を経ずに直接署名・送金できます。入れるのは失ってもよい少額だけにしてください。',
+    'スマホの Claude アプリの Code やブラウザ版 Claude Code のような使い捨てのクラウド環境では使えません。CLI とログイン状態が MCP と同じマシンに要るためです。',
+  ],
+  thirdPartyLink: { label: 'Agent ページの設定生成で作る', href: '/agent' },
+
   guardsTitle: '守ってくれるもの (金銭ガード)',
   guards: [
     '1 回の支払い上限（既定 10 JPYC）',
     'セッション中の累計支払い上限（既定 100 JPYC）',
-    '1 日の支払い上限（ローカルウォレットでは既定 100 JPYC・再起動しても引き継がれます）',
+    '1 日の支払い上限（ローカルウォレット・Kova・MetaMask Agent Wallet では既定 100 JPYC (セッション上限と同額)・再起動しても引き継がれます）',
     '支払い先は AI ストア掲載 URL と open-pay.jp のみ',
     '支払い前に、掲載時の金額・宛先と毎回照合。すり替えを検知したら拒否',
     '有料応答はデータであって指示ではありません。本文中の指示に AI が従わないようにしてください',
@@ -289,7 +304,7 @@ const ja: AiPayGuideContent = {
 const en: AiPayGuideContent = {
   metaTitle: 'Let your AI pay — give Claude JPYC purchasing power',
   metaDescription:
-    'Set up Claude or another AI agent to buy data, APIs, and AI consultations from the AI Store with JPYC. Covers a dedicated low-balance wallet, Steward, money guards, and a real example.',
+    'Set up Claude or another AI agent to buy data, APIs, and AI consultations from the AI Store with JPYC. Covers a dedicated low-balance wallet, Kova / MetaMask Agent Wallet, Steward, money guards, and a real example.',
   title: 'Give your AI the power to pay.',
   subtitle:
     'AI agents such as Claude can buy data, APIs, and consultations with other AIs from the AI Store, paying JPYC per use. Setup takes minutes, and purchases start at just a few yen.',
@@ -349,11 +364,21 @@ const en: AiPayGuideContent = {
   stewardRecommendation:
     'Choose this setup for production use or when the wallet carries a larger balance.',
 
+  thirdPartyTitle: 'Setup C: ask a third-party agent wallet only for signatures (Kova / MetaMask Agent Wallet)',
+  thirdPartyBody:
+    'Keep the key off your PC and let a Kova (Komlock lab) wallet or a MetaMask Agent Wallet server wallet sign only. OpenPay never receives either key or any credentials. The MCP config is just SIGNER_MODE=kova or SIGNER_MODE=metamask plus the public address (and the wallet name for Kova); the Agent page config generator builds it. You create the wallet and sign in with each CLI yourself.',
+  thirdPartyFacts: [
+    'What our tests showed: the Kova (0.1.2) and MetaMask Agent Wallet (7.0.0) policies (allowed chains, outflow limits) did not apply to the signature this payment method uses. The only amount caps that apply are the MCP settings (the money guards below).',
+    'This is not “a third-party wallet makes it safe” but “keep the key off the PC”. A CLI already signed in on that machine can sign or send directly, bypassing the MCP caps. Fund it only with a small amount you can afford to lose.',
+    'It does not work in disposable cloud environments such as the Claude mobile app’s Code tab or Claude Code on the web, because the CLI and its login must live on the same machine as the MCP.',
+  ],
+  thirdPartyLink: { label: 'Build it in the Agent page config generator', href: '/agent' },
+
   guardsTitle: 'What protects you (money guards)',
   guards: [
     'Per-payment cap (default: 10 JPYC)',
     'Cumulative session cap (default: 100 JPYC)',
-    'Daily cap (default with the local wallet: 100 JPYC; it carries over restarts)',
+    'Daily cap (default with the local wallet, Kova and MetaMask Agent Wallet: 100 JPYC, the same as the session cap; it carries over restarts)',
     'Payment destinations are limited to AI Store listing URLs and open-pay.jp',
     'Before every payment, the amount and recipient are checked against the listing; a bait-and-switch is refused',
     'A paid response is data, not instructions. Make sure the AI does not follow directions embedded in its body',
