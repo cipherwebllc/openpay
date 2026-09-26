@@ -7,7 +7,11 @@ import type { AgentPageContent } from '@/lib/agentPage';
 import { trackAgentEvent } from '@/lib/agentTrack';
 import { chainNameForId, txExplorerUrl } from '@/lib/chains';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
+import { formatJpyc } from '@/lib/agent/activityView';
 import { isUserRejection } from '@/lib/walletErrors';
+
+// よく使う額。入力欄に入れるだけで、検証・確認・送金の流れは手入力と同じ (確認画面を飛ばさない)。
+const QUICK_AMOUNTS = ['100', '500', '1000'] as const;
 
 type Review = { sender: Address; recipient: Address; amount: bigint };
 
@@ -129,13 +133,24 @@ export function AgentFundFromWallet({ locale, c, agentAddress, onSent, onBusyCha
           {amountError ? <p className="text-sm text-red-700">{amountError}</p> : null}
           <div className="flex flex-wrap gap-2">
             <button type="button" className="min-h-11 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50" disabled={!canReview || !currentReview || wrongChain} onClick={send}>{c.confirmSend}</button>
-            <button type="button" className="min-h-11 rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium disabled:opacity-50" disabled={inFlight} onClick={() => { if (settled) setValue(''); setReview(null); setReplacement(null); write.reset(); switcher.reset(); }}>{c.back}</button>
+            <button type="button" className="min-h-11 rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium disabled:opacity-50" disabled={inFlight} onClick={() => {
+              // 送金が済んだあとに入力へ戻るときは、送り手の残高を読み直す (古い残高のまま、表示と不足の判定が続くのを断つ)。
+              if (settled) { setValue(''); void balance.refetch(); }
+              setReview(null); setReplacement(null); write.reset(); switcher.reset();
+            }}>{c.back}</button>
           </div>
         </div>
       ) : (
         <div className="mt-4">
-          <label htmlFor="agent-fund-amount" className="block text-sm font-medium">{c.amountLabel}</label>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <label htmlFor="agent-fund-amount" className="block text-sm font-medium">{c.amountLabel}</label>
+            {/* 送れる上限の目安。読めないときは出さない (不足の判定は従来どおり送金前に行う)。 */}
+            {balance.data !== undefined ? <p className="text-xs text-slate-500">{c.walletBalance.replace('{amount}', formatJpyc(balance.data))}</p> : null}
+          </div>
           <input id="agent-fund-amount" type="text" inputMode="decimal" className="mt-2 block w-full min-w-0 rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder={c.amountPlaceholder} value={value} disabled={locked} aria-invalid={Boolean(amountError)} aria-describedby={amountError ? 'agent-fund-amount-error' : undefined} onChange={(event) => setValue(event.target.value)} />
+          <div className="mt-2 flex flex-wrap gap-2">
+            {QUICK_AMOUNTS.map((preset) => <button key={preset} type="button" disabled={locked} aria-pressed={validAmount && amount === parseUnits(preset, deployment.decimals)} className={`min-h-9 rounded-full px-3 py-1.5 text-xs font-medium tabular-nums disabled:opacity-50 ${validAmount && amount === parseUnits(preset, deployment.decimals) ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'}`} onClick={() => setValue(preset)}>{Number(preset).toLocaleString('en-US')} JPYC</button>)}
+          </div>
           {amountError ? <p id="agent-fund-amount-error" className="mt-2 text-sm text-red-700">{amountError}</p> : null}
           <button type="button" className="mt-3 min-h-11 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white disabled:opacity-50" disabled={!canReview} onClick={openReview}>{c.send}</button>
         </div>

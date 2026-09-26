@@ -15,6 +15,7 @@ import { chainNameForId } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
 import { AGENT_COLORS, AGENT_COLOR_DOT, AGENT_COLOR_SURFACE, AGENT_ICONS, addressHues, isAgentColor, isAgentIcon, type AgentColor, type AgentIcon } from '@/lib/agentProfile';
+import { ConnectButton } from '@/components/ConnectButton';
 import { AgentStoreLink } from './AgentStoreLink';
 
 const STORAGE_KEY = AGENT_ADDRESS_STORAGE_KEY;
@@ -334,22 +335,30 @@ export function AgentWalletCard({ c, activity, purchases }: { c: AgentPageConten
         {/* まだ何も読み取っていない初期状態では出さない (読み取りが起きる = アドレスあり / 手入力中 のときの注記)。 */}
         {address || inputExpanded ? <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.ownershipNote}</p> : null}
         {/* hidden は grid と別の要素に付け、display:grid による上書きも防ぐ。開閉・編集で子を再生成しない。 */}
+        {/* 入金の道は 2 つ。接続中のウォレットがあればそこから送るのが最短なので先に置き、アドレス (取引所・別のウォレット) は後ろ。
+            未接続ならアドレスが先で、接続の入口は後ろ。送金フォームは常に mount したまま (未接続では何も描かない)。 */}
         <div id="agent-fund" hidden={!fundVisible} className="mt-5 scroll-mt-24">
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-[1fr_auto]">
+          <h3 className="font-bold text-slate-900">{c.fundTitle}</h3>
+          <div className="mt-3 min-w-0">
+            {fundBusy ? <p className="mb-3 text-xs leading-relaxed text-slate-600">{c.fundLockedNote}</p> : null}
+            {pendingToOther ? <p className="mb-3 break-all rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-200">{c.pendingToOther} <span className="font-mono">{fundAddress}</span></p> : null}
+            <AgentFundFromWallet locale={locale} c={c.fundFromWallet} agentAddress={fundAddress} onSent={() => { void balance.refetch(); setActivityRefreshKey((key) => key + 1); }} onBusyChange={setFundBusy} />
+          </div>
+          <div className={`grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto] sm:items-start ${isConnected ? 'mt-5' : ''}`}>
             <div className="min-w-0">
-              <h3 className="font-bold text-slate-900">{c.fundTitle}</h3>
-              <p className="mt-2 text-sm leading-relaxed text-slate-600">{c.fundBody}</p>
-              <p className="mt-3 select-all break-all font-mono text-sm">{shownAddress}</p>
-              {available ? <button type="button" className={`mt-3 rounded-xl bg-brand px-4 py-2 text-sm font-bold text-white ${focus}`} onClick={async () => { if (await copy(shownAddress)) setCopiedAddress(shownAddress); }}>{copied && copiedAddress === shownAddress ? c.copied : c.copyAddress}</button> : null}
+              <p className="text-sm font-medium text-slate-900">{isConnected ? c.fundAddressTitleAlt : c.fundAddressTitle}</p>
+              <p className="mt-2 select-all break-all font-mono text-sm">{shownAddress}</p>
+              {available ? <button type="button" className={`mt-3 rounded-xl px-4 py-2 text-sm font-bold ${isConnected ? 'bg-slate-100 text-slate-900' : 'bg-brand text-white'} ${focus}`} onClick={async () => { if (await copy(shownAddress)) setCopiedAddress(shownAddress); }}>{copied && copiedAddress === shownAddress ? c.copied : c.copyAddress}</button> : null}
+              <p className="mt-3 text-xs leading-relaxed text-slate-500">{c.fundBody}</p>
             </div>
             {/* QR は直前のアドレス行と同じ情報なので a11y ツリーからは外す (掟 8)。 */}
-            <div aria-hidden className="h-fit w-fit rounded-xl bg-white p-3 ring-1 ring-slate-200/70"><QRCodeSVG value={shownAddress} size={160} /></div>
-            <div className="min-w-0 sm:col-span-2">
-              {fundBusy ? <p className="mb-3 text-xs leading-relaxed text-slate-600">{c.fundLockedNote}</p> : null}
-              {pendingToOther ? <p className="mb-3 break-all rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-900 ring-1 ring-amber-200">{c.pendingToOther} <span className="font-mono">{fundAddress}</span></p> : null}
-              <AgentFundFromWallet locale={locale} c={c.fundFromWallet} agentAddress={fundAddress} onSent={() => { void balance.refetch(); setActivityRefreshKey((key) => key + 1); }} onBusyChange={setFundBusy} />
-            </div>
+            <div aria-hidden className="h-fit w-fit rounded-xl bg-white p-3 ring-1 ring-slate-200/70"><QRCodeSVG value={shownAddress} size={isConnected ? 120 : 160} /></div>
           </div>
+          {/* 未接続時の「接続して送る」は 2 つ目の道なので、ウォレットの一覧はたたんでおく (開くと header と同じ接続の部品)。 */}
+          {!isConnected ? <details className="mt-5 rounded-xl border border-dashed border-slate-300 p-4">
+            <summary className={`cursor-pointer rounded-sm text-sm font-medium text-emerald-700 ${focus}`}>{c.fundConnectLead}</summary>
+            <div className="mt-3"><ConnectButton variant="secondary" /></div>
+          </details> : null}
         </div>
         {address ? <AgentActivity address={address} locale={locale} c={activity} refreshKey={activityRefreshKey} /> : null}
         {address && AgentPurchases ? <AgentPurchases address={address} locale={locale} c={purchases} isConnected={isConnected} /> : null}

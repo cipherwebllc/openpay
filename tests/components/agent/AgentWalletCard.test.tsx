@@ -24,6 +24,8 @@ const state = vi.hoisted(() => ({ query: '', data: undefined as bigint | undefin
 const address = '0x1111111111111111111111111111111111111111';
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(state.query) }));
 vi.mock('next-intl', () => ({ useLocale: () => 'en' }));
+// 接続の入口は header と同じ部品。ここでは置き場所だけを確かめる (wagmi の接続 hook は他のテストで検証済み)。
+vi.mock('@/components/ConnectButton', () => ({ ConnectButton: () => <button type="button">Mock connect</button> }));
 vi.mock('wagmi', () => ({
   useAccount: () => ({ address, isConnected: state.connected }),
   useReadContract: (options: unknown) => { state.read(options); return { data: state.data, isError: state.isError, refetch: state.refetch }; },
@@ -59,6 +61,21 @@ describe('AgentWalletCard', () => {
     window.localStorage.setItem('openpay.agent.address', address);
     render(<><ViewProbe /><AgentWalletCard c={C} activity={activity} purchases={purchases} /></>);
     expect(screen.getByTestId('view')).toHaveTextContent('true');
+  });
+  it('puts sending from the connected wallet first and the address second; folds connecting away while disconnected', () => {
+    state.query = `address=${address}`;
+    state.connected = true;
+    const view = render(<AgentWalletCard c={C} activity={activity} purchases={purchases} />);
+    const fund = screen.getByRole('button', { name: 'Mock funding confirmed' });
+    expect(fund.compareDocumentPosition(screen.getByText(C.fundAddressTitleAlt)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText(C.fundConnectLead)).toBeNull();
+    view.unmount();
+    state.connected = false;
+    render(<AgentWalletCard c={C} activity={activity} purchases={purchases} />);
+    expect(screen.getByText(C.fundAddressTitle)).toBeVisible();
+    // 接続は 2 つ目の道。ウォレットの一覧はたたみ、開くと header と同じ接続の部品が出る。
+    fireEvent.click(screen.getByText(C.fundConnectLead));
+    expect(screen.getAllByRole('button', { name: 'Mock connect' })[0]).toBeVisible();
   });
   it('offers the AI Store instead of a jump back to the connect card on the balance card', () => {
     state.query = `address=${address}`;

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 import { getAddress } from 'viem';
+import { ConnectButton } from '@/components/ConnectButton';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import type { AgentPageContent } from '@/lib/agentPage';
 import type { PurchaseItem } from '@/lib/agent/purchases';
@@ -96,6 +98,7 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, pr
   const proofLinkMismatch = !!parsedProof && !!proofLinkAddress && parsedProof.address !== proofLinkAddress;
   const needsConfirmation = proof !== null && !!parsedProof && !!owner && (!session.isSignedIn || proofMismatch || proofLinkMismatch);
   const instance = useId();
+  const { copy, copied, available: clipboardAvailable } = useCopyToClipboard();
   const queryKey = ['agent-purchases', address, owner, instance] as const;
   const [verification, setVerification] = useState<{ status: 'idle' | 'pending' | 'success' | 'error'; error?: Error; address?: string }>({ status: 'idle' });
   const verify = {
@@ -221,10 +224,10 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, pr
     <>
       {signedOut ? <p className="mt-3 text-sm text-slate-600">{c.lead}</p> : <p className="mt-3 text-xs text-slate-500">{c.signedInAs} <span className="font-mono">{owner!.slice(0, 6)}…{owner!.slice(-4)}</span></p>}
       <p id={`${instance}-status`} role="status" className="mt-3 break-all text-sm text-slate-600">{status}</p>
-      {/* 未接続ではサインインの署名ができない (useSiweSession が wallet_not_connected を投げる) → ボタンではなく接続への案内。 */}
+      {/* 未接続ではサインインの署名ができない (useSiweSession が wallet_not_connected を投げる) → その場で接続できる入口を出す。 */}
       {signedOut ? (isConnected
         ? <button type="button" className={`mt-3 ${button}`} disabled={session.isSigningIn} onClick={() => void signIn()}>{session.isSigningIn ? c.signingIn : c.signIn}</button>
-        : <p className="mt-3 text-sm text-slate-600">{c.connectFirst}</p>) : null}
+        : <div className="mt-3"><p className="text-sm text-slate-600">{c.connectFirst}</p><div className="mt-3"><ConnectButton variant="secondary" /></div></div>) : null}
       {needsConfirmation ? <div className="mt-3 rounded-xl bg-amber-50 p-4 text-sm text-amber-900 ring-1 ring-amber-200">
         {proofMismatch ? <p className="mb-3 break-all">{c.proofAddressMismatch.replace('{proofAddress}', parsedProof!.address).replace('{cardAddress}', address)}</p> : null}
         {proofLinkMismatch && proofLinkAddress !== address ? <p className="mb-3 break-all">{c.proofLinkAddressMismatch.replace('{proofAddress}', parsedProof!.address).replace('{linkAddress}', proofLinkAddress!)}</p> : null}
@@ -233,7 +236,12 @@ function PurchasesForOwner({ address, locale, c, isConnected, session, proof, pr
           <button type="button" className={button} onClick={consumeProof}>{c.cancelBind}</button>
         </div>
       </div> : null}
-      {notBound && !verify.isPending && !verify.isError ? <div className="mt-3 text-sm text-slate-600"><p>{c.notBoundLead}</p><ol className="mt-2 list-decimal space-y-2 pl-5">{c.notBoundSteps.map((step) => <li key={step}>{step}</li>)}</ol></div> : null}
+      {notBound && !verify.isPending && !verify.isError ? <div className="mt-3 text-sm text-slate-600"><p>{c.notBoundLead}</p><ol className="mt-2 list-decimal space-y-2 pl-5">{c.notBoundSteps.map((step, index) => <li key={step}>
+        {step}
+        {/* 1 つ目の手順 (Agent への依頼) はその場でコピーできる。「Agent に頼めること」と同じ依頼文。計測は id だけで、
+            どちらの場所からのコピーかを分ける (history-web-bind = 紐づけ手順から)。 */}
+        {index === 0 && clipboardAvailable ? <button type="button" className={`ml-2 rounded-sm font-medium text-emerald-700 underline underline-offset-2 ${focus}`} onClick={async () => { if (await copy(c.notBoundPrompt)) trackAgentEvent('agent_try_prompt_copy', { locale, id: 'history-web-bind' }); }}>{copied ? c.copied : c.copyPrompt}</button> : null}
+      </li>)}</ol></div> : null}
       {result ? (
         <>
           {result.items.length > 0 ? <div className="mt-4 min-w-0 max-w-full overflow-x-auto">
