@@ -224,6 +224,7 @@ export type AgentPageContent = {
     readonly body: string;
     readonly storeLabel: string;
     readonly guideLabel: string;
+    readonly noteLabel: string;
   };
 };
 
@@ -497,6 +498,7 @@ const ja: AgentPageContent = {
     body: 'セットアップが済んだら、Agent が JPYC で購入できるリソースを AI ストアで確認できます。',
     storeLabel: 'AI ストアを開く',
     guideLabel: 'AI が支払うガイド',
+    noteLabel: 'note で読む: AI に JPYC を使わせる。OpenPay Agent の始め方',
   },
 };
 
@@ -763,6 +765,7 @@ const en: AgentPageContent = {
     body: 'Once set up, browse the AI Store for the resources your agent can buy with JPYC.',
     storeLabel: 'Open the AI Store',
     guideLabel: 'Guide: how AI pays',
+    noteLabel: 'Read on note (Japanese): getting started with OpenPay Agent',
   },
 };
 
