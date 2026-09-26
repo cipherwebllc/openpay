@@ -1648,6 +1648,21 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
   ⚠️ challenge は検索クローラを含む = 買い手の数ではない。成立率は「支払いを試みた件数」を分母にする。
 - 対象外 (今回): JPYC の first-party 経路・Store の閲覧〜購入。必要になったら同じ形で足す。
 
+### §14.9b OpenPay Agent の North Star (月間の外部 JPYC Agent 購入者数)
+
+外部提案の裁定 (2026-09-26)。技術 KPI (MCP 導入数など) ではなく、実際に JPYC を動かした外部 Agent の数を追う。
+- 読み出し = `node scripts/agent-north-star-report.mjs [YYYY-MM ...] [--json]` (本番 KV の URL/TOKEN を export・読み取りのみ)。
+  settle 台帳 (`x402:settle:ledger:<月>`) の JPYC facilitator 行だけを使い、本番コードには何も足していない。
+- 数え方: Agent 購入 = resource が `/api/paid/hosted/` 以外 (hosted は Store で人が買う商品なので「参考」に分ける)。
+  外部 = 自社ウォレットの公開一覧 (`lib/firstPartyWallets.json`) にも**非公開一覧**にも無い payer。
+  初回 = 台帳開始 (2026-09) 以降の最初の Agent 購入。再購入 = 初回から 7 日以内の 2 回目 (7 日未満は「判定中」)。
+- **非公開一覧** = `plans/first-party-private-wallets.json` (gitignore 済み・`FIRST_PARTY_PRIVATE_WALLETS_FILE` で差し替え可)。
+  運営者個人のウォレット (ローカル Agent keystore・Steward・HashPort・Kova / MetaMask のテスト用) を公開リポジトリに
+  載せないための分離。新しいテスト用ウォレットを作ったらここに足す。無い環境では警告を出し、運営者が外部として数えられうる。
+- 2026-09-26 時点の基準値: Polygon の x402 forwarder への JPYC 支払い元はすべて自社・運営者のウォレットで、外部の JPYC 購入は 0 件
+  (Etherscan V2 で全件確認)。次のマイルストーンは「初の外部 JPYC 購入 (1 JPYC でも可)」。
+- まだ測れない段階: MCP 接続・Discovery 検索・JPYC の 402 (見積もり)。必要になったら §14.9 と同じ形 (応答返却後・no-throw) で足す。
+
 ### §14.8 Arc x402 rail (Circle Gateway facilitator) — 設計・go-live・運用
 
 **裁定 (2026-09-17 user)**: Base = 実績ある x402 rail (CDP・Bazaar/agentic.market 掲載)、Arc = Circle 直系の
