@@ -7,7 +7,9 @@
 //
 // audience pill のカラーは LandingHowItWorks (merchant=emerald / customer=blue) と整合。
 
+import type { CSSProperties } from 'react';
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
+import { focalFitCqi } from '@/lib/focalFit';
 import { getTranslations } from 'next-intl/server';
 import { Coins, Rocket, Zap, UserCheck } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -67,10 +69,11 @@ export async function LandingBenefits() {
       <ul className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {CARDS.map(({ id, audience, Icon }) => {
           const c = TONE[audience];
+          const focal = t(`benefits${id}Focal`, LANDING_PAYMENT_FEE_VALUES);
           return (
             <li
               key={id}
-              className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6"
+              className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 [container-type:inline-size] sm:p-6"
             >
               <div className="flex items-center justify-between">
                 <span
@@ -81,12 +84,14 @@ export async function LandingBenefits() {
                 <Icon className={`h-5 w-5 ${c.iconInk}`} aria-hidden />
               </div>
 
-              {/* focal: ビッグナンバー。break-keep + whitespace-nowrap で mobile
-                  2 列でも 1 行に収める。 */}
+              {/* focal: ビッグナンバー。文字サイズを「最大 (2.25rem / sm 3rem)」と「カード幅に収まる
+                  大きさ」の小さい方にして 1 行に収める (lib/focalFit.ts)。未知の書体で収まらなければ空白で折り返す。 */}
               <p
-                className={`mt-4 whitespace-nowrap break-keep text-4xl font-extrabold leading-none ${c.focal} sm:text-5xl`}
+                className={`mt-4 break-keep text-[length:min(2.25rem,var(--focal-fit))] font-extrabold leading-none ${c.focal} sm:text-[length:min(3rem,var(--focal-fit))]`}
+                style={{ '--focal-fit': focalFitCqi(focal) } as CSSProperties}
+                data-focal=""
               >
-                {t(`benefits${id}Focal`, LANDING_PAYMENT_FEE_VALUES)}
+                {focal}
               </p>
 
               <h3 className="mt-3 text-sm font-semibold text-slate-900 sm:text-base">
