@@ -28,7 +28,10 @@ export function AgentPageSections({ hero, connect, wallet, tryPrompts, children 
   const connectSlot: Slot = { key: 'connect', node: connect, className: `order-1 group-data-[agent-view=wallet]:order-3 ${AGENT_PAGE_AREA.connect}` };
   const walletSlot: Slot = { key: 'wallet', node: wallet, className: `order-2 group-data-[agent-view=wallet]:order-1 ${AGENT_PAGE_AREA.wallet}` };
   const trySlot: Slot = { key: 'try', node: tryPrompts, className: `order-3 group-data-[agent-view=wallet]:order-2 ${AGENT_PAGE_AREA.tryPrompts}` };
-  const slots = hasWallet ? [walletSlot, trySlot, connectSlot] : [connectSlot, walletSlot, trySlot];
+  const restSlot: Slot = { key: 'rest', node: <div className="flex min-w-0 flex-col gap-8">{children}</div>, className: `order-4 ${AGENT_PAGE_AREA.rest}` };
+  // Wallet あり (React の判定後) は、接続と残りを 1 つの要素にまとめて右の列にする (lib/agentLayout.ts)。
+  const asideSlot: Slot = { key: 'aside', node: <div className="flex min-w-0 flex-col gap-8">{connect}{children}</div>, className: `order-3 ${AGENT_PAGE_AREA.aside}` };
+  const slots = hasWallet ? [walletSlot, trySlot, asideSlot] : [connectSlot, walletSlot, trySlot, restSlot];
   return (
     // null は server と hydration のときだけ。属性を描かず、script が付けた値を hydration で消さない。
     // client では推定 → 残高カードの判定の順に明示の値で上書きする (食い違っても判定のほうへそろう)。
@@ -37,7 +40,6 @@ export function AgentPageSections({ hero, connect, wallet, tryPrompts, children 
       {hero}
       <div className={AGENT_PAGE_GRID}>
         {slots.map((slot) => <div key={slot.key} className={`min-w-0 ${slot.className}`}>{slot.node}</div>)}
-        <div className={`order-4 flex min-w-0 flex-col gap-8 ${AGENT_PAGE_AREA.rest}`}>{children}</div>
       </div>
     </div>
   );

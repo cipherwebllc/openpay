@@ -11,7 +11,7 @@ import { AgentSafety } from '@/components/agent/AgentSafety';
 import { AgentStoreLink } from '@/components/agent/AgentStoreLink';
 import { AgentPageSections } from '@/components/agent/AgentPageSections';
 import { agentPageContentFor, agentPageMetadata } from '@/lib/agentPage';
-import { AGENT_WALLET_RESERVE } from '@/lib/agentLayout';
+import { AGENT_SIDE_SINGLE_COLUMN, AGENT_WALLET_RESERVE } from '@/lib/agentLayout';
 
 // 運営 (masia02) による解説記事。外部依存ゆえ参照は 1 箇所に集約する (LandingMobileOrder と同じ流儀)。
 const AGENT_NOTE_ARTICLE_URL = 'https://note.com/masia02/n/nccfa34379929';
@@ -38,7 +38,7 @@ export default async function AgentPage({ params }: { params: Promise<{ locale: 
           </header>}
           connect={<AgentConnect locale={locale} c={c.connect}>
             <h3 className="font-bold text-slate-900">{c.modes.title}</h3>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className={`mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 ${AGENT_SIDE_SINGLE_COLUMN}`}>
               {c.modes.items.map((item) => <div key={item.mode} className="min-w-0 rounded-xl bg-slate-50 p-4 ring-1 ring-slate-200/70">
                 <p className="text-xs font-medium text-brand">{item.tagline}</p>
                 <p className="mt-1 font-bold text-slate-900">{item.name}</p>
