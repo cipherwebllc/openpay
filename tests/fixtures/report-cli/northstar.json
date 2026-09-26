@@ -1,0 +1,124 @@
+[
+ {
+  "name": "defaults: first-timers, 7-day repeat yes/no/pending, public+private first-party, unknown payer, Store split, USDC/malformed/invalid rows ignored",
+  "script": "agent-north-star-report.mjs",
+  "args": [],
+  "env": {
+   "FIRST_PARTY_PRIVATE_WALLETS_FILE": "report-cli/first-party-private.json"
+  },
+  "replies": [
+   {
+    "command": [
+     "LRANGE",
+     "x402:settle:ledger:2026-09",
+     "0",
+     "-1"
+    ],
+    "body": {
+     "result": [
+      "{\"at\": \"2026-09-05T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0xAAAA000000000000000000000000000000000001\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-09-01T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0xAAAA000000000000000000000000000000000001\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-09-10T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0xbbbb000000000000000000000000000000000002\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-09-20T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo?q=1\", \"payer\": \"0xbbbb000000000000000000000000000000000002\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-09-28T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0xcccc000000000000000000000000000000000003\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-09-02T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0x8F16EF365676C405C739175FE7A11343E864343B\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-09-03T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0xdddd000000000000000000000000000000000004\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-09-04T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": null, \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-09-06T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/hosted/abc\", \"payer\": \"0xeeee000000000000000000000000000000000005\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-09-07T00:00:00Z\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/directory?q=x\", \"payer\": \"0xffff000000000000000000000000000000000006\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-09-08T00:00:00Z\", \"source\": \"usdc-vanilla\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0x1111000000000000000000000000000000000007\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"USDC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{bad",
+      "{\"at\": \"not-a-date\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0x9999000000000000000000000000000000000009\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
+     ]
+    }
+   }
+  ],
+  "stdout": "OpenPay Agent North Star — 外部 JPYC Agent 購入者 (x402 settle 台帳・UTC 月・server 観測範囲)\n非公開の自社ウォレット一覧: 1 件を除外に使用\n\n== 2026-09 ==\n  North Star (外部 JPYC Agent 購入者): 4 人\n    うち初回: 4 人 / 初回から 7 日以内の再購入: 1 人 (判定中 1 人)\n  Agent 購入 settle: 外部 6 件 / 自社 2 件 / payer 不明 1 件\n  参考 Store (人の購入): 外部購入者 1 人 / 1 件\n  -- 外部 Agent 購入者 --\n    0xaaaa…0001  初回 2026-09-01  当月 2 件  7 日内再購入 あり  /api/paid/demo\n    0xffff…0006  初回 2026-09-07  当月 1 件  7 日内再購入 なし  /api/paid/directory\n    0xbbbb…0002  初回 2026-09-10  当月 2 件  7 日内再購入 なし  /api/paid/demo\n    0xcccc…0003  初回 2026-09-28  当月 1 件  7 日内再購入 判定中  /api/paid/demo\n\n== 2026-08 ==\n  (台帳の記録開始 2026-09 より前)\n\n",
+  "stderr": "",
+  "status": 0
+ },
+ {
+  "name": "--json across months: first purchase in the previous month is not a first-timer; missing private list counts that wallet as external",
+  "script": "agent-north-star-report.mjs",
+  "args": [
+   "2026-10",
+   "--json"
+  ],
+  "env": {
+   "FIRST_PARTY_PRIVATE_WALLETS_FILE": "report-cli/no-such-private.json"
+  },
+  "replies": [
+   {
+    "command": [
+     "LRANGE",
+     "x402:settle:ledger:2026-09",
+     "0",
+     "-1"
+    ],
+    "body": {
+     "result": [
+      "{\"at\": \"2026-09-25T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0xAAAA000000000000000000000000000000000001\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
+     ]
+    }
+   },
+   {
+    "command": [
+     "LRANGE",
+     "x402:settle:ledger:2026-10",
+     "0",
+     "-1"
+    ],
+    "body": {
+     "result": [
+      "{\"at\": \"2026-10-01T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0xAAAA000000000000000000000000000000000001\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-10-02T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0x9999000000000000000000000000000000000009\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+      "{\"at\": \"2026-10-03T00:00:00Z\", \"source\": \"jpyc-facilitator\", \"network\": \"eip155:137\", \"resource\": \"https://open-pay.jp/api/paid/demo\", \"payer\": \"0xdddd000000000000000000000000000000000004\", \"payTo\": \"0x52d4901142e2b5680027da5eb47c86cb02a3ca81\", \"amount\": \"1\", \"asset\": \"JPYC\", \"fee\": \"1\", \"tx\": \"0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"
+     ]
+    }
+   }
+  ],
+  "stdout": "{\n \"ledgerStart\": \"2026-09\",\n \"privateListLoaded\": false,\n \"privateListCount\": 0,\n \"reports\": [\n  {\n   \"month\": \"2026-10\",\n   \"northStar\": 3,\n   \"firstTimers\": 2,\n   \"repeat7d\": 0,\n   \"repeat7dPending\": 2,\n   \"agentSettles\": {\n    \"external\": 3,\n    \"firstParty\": 0,\n    \"unknownPayer\": 0\n   },\n   \"store\": {\n    \"externalBuyers\": 0,\n    \"externalSettles\": 0\n   },\n   \"buyers\": [\n    {\n     \"payer\": \"0xaaaa000000000000000000000000000000000001\",\n     \"firstAt\": \"2026-09-25T00:00:00.000Z\",\n     \"firstThisMonth\": false,\n     \"settlesThisMonth\": 1,\n     \"repeat7d\": null,\n     \"resources\": [\n      \"/api/paid/demo\"\n     ]\n    },\n    {\n     \"payer\": \"0x9999000000000000000000000000000000000009\",\n     \"firstAt\": \"2026-10-02T00:00:00.000Z\",\n     \"firstThisMonth\": true,\n     \"settlesThisMonth\": 1,\n     \"repeat7d\": \"pending\",\n     \"resources\": [\n      \"/api/paid/demo\"\n     ]\n    },\n    {\n     \"payer\": \"0xdddd000000000000000000000000000000000004\",\n     \"firstAt\": \"2026-10-03T00:00:00.000Z\",\n     \"firstThisMonth\": true,\n     \"settlesThisMonth\": 1,\n     \"repeat7d\": \"pending\",\n     \"resources\": [\n      \"/api/paid/demo\"\n     ]\n    }\n   ]\n  }\n ]\n}\n",
+  "stderr": "",
+  "status": 0
+ },
+ {
+  "name": "text: missing private list warns; empty ledger month",
+  "script": "agent-north-star-report.mjs",
+  "args": [
+   "2026-09"
+  ],
+  "env": {
+   "FIRST_PARTY_PRIVATE_WALLETS_FILE": "report-cli/no-such-private.json"
+  },
+  "replies": [
+   {
+    "command": [
+     "LRANGE",
+     "x402:settle:ledger:2026-09",
+     "0",
+     "-1"
+    ],
+    "body": {
+     "result": []
+    }
+   }
+  ],
+  "stdout": "OpenPay Agent North Star — 外部 JPYC Agent 購入者 (x402 settle 台帳・UTC 月・server 観測範囲)\n⚠ 非公開の自社ウォレット一覧が見つかりません (report-cli/no-such-private.json) — 運営者のウォレットが外部として数えられる可能性があります\n\n== 2026-09 ==\n  North Star (外部 JPYC Agent 購入者): 0 人\n    うち初回: 0 人 / 初回から 7 日以内の再購入: 0 人 (判定中 0 人)\n  Agent 購入 settle: 外部 0 件 / 自社 0 件 / payer 不明 0 件\n  参考 Store (人の購入): 外部購入者 0 人 / 0 件\n\n",
+  "stderr": "",
+  "status": 0
+ },
+ {
+  "name": "month before the ledger start makes no KV request",
+  "script": "agent-north-star-report.mjs",
+  "args": [
+   "2026-07"
+  ],
+  "env": {
+   "FIRST_PARTY_PRIVATE_WALLETS_FILE": "report-cli/first-party-private.json"
+  },
+  "replies": [],
+  "stdout": "OpenPay Agent North Star — 外部 JPYC Agent 購入者 (x402 settle 台帳・UTC 月・server 観測範囲)\n非公開の自社ウォレット一覧: 1 件を除外に使用\n\n== 2026-07 ==\n  (台帳の記録開始 2026-09 より前)\n\n",
+  "stderr": "",
+  "status": 0
+ }
+]
