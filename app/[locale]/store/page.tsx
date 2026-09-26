@@ -14,7 +14,7 @@ import { notFound } from 'next/navigation';
 import { AppShell } from '@/components/AppShell';
 import { StoreBrowser } from '@/components/StoreBrowser';
 import { env } from '@/lib/env';
-import { listStoreListings } from '@/lib/x402/storeListing';
+import { listStoreListingsCached } from '@/lib/x402/storeListingCache';
 import { STORE_DEV_FIXTURE_LISTINGS } from '@/lib/devStoreFixtures';
 import { guidePageMetadata } from '@/lib/guideMetadata';
 
@@ -61,7 +61,7 @@ export default async function StorePage({
     !process.env.VERCEL && process.env.STORE_DEV_FIXTURES === '1';
   const listings = useDevFixtures
     ? [...STORE_DEV_FIXTURE_LISTINGS]
-    : await listStoreListings();
+    : await listStoreListingsCached();
   // ?q= で検索欄を事前入力 (プロフの「すべての商品を見る」→ /store?q=@handle 用)。
   const sp = (await (searchParams ?? Promise.resolve({}))) as {
     q?: string | string[];
