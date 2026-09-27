@@ -13,6 +13,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowRight } from 'lucide-react';
 import { TokenLogo } from '@/components/AssetLogo';
 import { SavingsSimulator } from '@/components/SavingsSimulator';
+import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
 // 比較表の行定義。i18n key は `cashCell{Row}{Col}` で命名統一。
 type RowId = 'Fee' | 'Settle' | 'Setup' | 'Lock';
@@ -29,116 +30,115 @@ export async function LandingCashComparison() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-          {t('cashTitle')}
-        </h2>
-        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('cashSubtitle')}</p>
-      </div>
+      <LandingSectionHeader eyebrow={t('eyebrowShops')} title={t('cashTitle')} lead={t('cashSubtitle')} />
 
-      {/* 比較表: モバイルでも 3 列が 1 画面に収まるよう圧縮 (結論の OpenPay 列を隠さない)。overflow-x-auto は保険。
-          OpenPay 列を brand tint で強調しつつ、現金列を否定しないトーン。 */}
-      <div className="mx-auto mt-8 max-w-3xl overflow-x-auto rounded-2xl border border-slate-200 shadow-card">
-        <table className="w-full border-collapse bg-white text-[13px] sm:text-sm">
-          <thead>
-            <tr className="border-b border-slate-200">
-              <th className="px-2 py-3 sm:px-4 text-left text-xs font-semibold text-slate-400" />
-              <th className="px-2 py-3 sm:px-4 text-center font-semibold text-slate-700">
-                {t('cashColCash')}
-              </th>
-              <th className="px-2 py-3 sm:px-4 text-center font-semibold text-slate-700">
-                {t('cashColCard')}
-              </th>
-              <th className="bg-brand/5 px-2 py-3 sm:px-4 text-center font-bold text-brand-dark">
-                {t('cashColOpenPay')}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {ROWS.map(({ id, labelKey }) => (
-              <tr
-                key={id}
-                className="border-b border-slate-100 last:border-b-0"
-              >
-                <th
-                  scope="row"
-                  className="whitespace-nowrap px-2 py-3 sm:px-4 text-left text-xs font-semibold text-slate-500"
-                >
-                  {t(labelKey)}
+      {/* PC (lg 以上) は 左 = 比較表・1:1 の帯 / 右 = 試算 の 2 列 (縦に積むと 1 画面半・plans/lp-polish-2026-09.md P2)。 */}
+      <div className="mx-auto max-w-3xl lg:grid lg:max-w-none lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-start lg:gap-8">
+        <div className="min-w-0">
+        {/* 比較表: モバイルでも 3 列が 1 画面に収まるよう圧縮 (結論の OpenPay 列を隠さない)。overflow-x-auto は保険。
+            OpenPay 列を brand tint で強調しつつ、現金列を否定しないトーン。 */}
+        <div className="mx-auto mt-8 max-w-3xl overflow-x-auto rounded-2xl border border-slate-200 shadow-card">
+          <table className="w-full border-collapse bg-white text-[13px] sm:text-sm">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <th className="px-2 py-3 sm:px-4 text-left text-xs font-semibold text-slate-400" />
+                <th className="min-w-[3.25rem] px-2 py-3 sm:px-4 text-center font-semibold text-slate-700">
+                  {t('cashColCash')}
                 </th>
-                <td className="px-2 py-3 sm:px-4 text-center text-slate-600">
-                  {t(`cashCell${id}Cash`)}
-                </td>
-                <td className="px-2 py-3 sm:px-4 text-center text-slate-600">
-                  {t(`cashCell${id}Card`)}
-                </td>
-                <td className="bg-brand/5 px-2 py-3 sm:px-4 text-center font-semibold text-slate-900">
-                  {t(`cashCell${id}OpenPay`, LANDING_PAYMENT_FEE_VALUES)}
-                  {id === 'Fee' && (
-                    <span className="mt-1 block text-[11px] font-normal leading-snug text-slate-500">
-                      {t('cashCellFeeOpenPayNote', LANDING_PAYMENT_FEE_VALUES)}
-                    </span>
-                  )}
-                </td>
+                <th className="min-w-[4.5rem] px-2 py-3 sm:px-4 text-center font-semibold text-slate-700">
+                  {t('cashColCard')}
+                </th>
+                <th className="bg-brand/5 px-2 py-3 sm:px-4 text-center font-bold text-brand-dark">
+                  {t('cashColOpenPay')}
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <p className="mx-auto mt-3 max-w-3xl text-[11px] leading-relaxed text-slate-500">
-        {t('cashTableFootnote')}
-      </p>
-      <div className="mx-auto mt-4 flex max-w-3xl justify-center">
-        <Link
-          href={`/${locale}/kit`}
-          prefetch={false}
-          className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-card hover:border-brand hover:text-brand-dark"
-        >
-          {t('cashStoreKitCta')}
-        </Link>
-      </div>
-
-      {/* 円⇄JPYC の 1:1 図解: 円 → (購入) → JPYC → (JPYC EX で 1:1 換金) → 円。帯の地色の上では slate-600 以上 (AA)。
-          既存 FAQ / MarketRates の表現を踏襲し、新しい法的主張は発明しない。大きなカードにせず 1 本の帯にする
-          (直前の「なぜ今」で 1 JPYC = 1 円は伝えてあるので、ここは「円に戻せる」道筋だけを短く・plans/lp-polish-2026-09.md P1)。 */}
-      <div className="mx-auto mt-6 max-w-3xl rounded-2xl bg-slate-100/70 px-4 py-4 sm:px-6">
-        <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between sm:gap-6">
-          <h3 className="shrink-0 text-sm font-bold text-slate-900 sm:text-base">{t('cashFlowTitle')}</h3>
-          <div className="flex items-center gap-2 sm:gap-3">
-            <FlowStep label={t('cashFlowYen')}>
-              <span className="text-base font-bold text-slate-700">¥</span>
-            </FlowStep>
-            <FlowArrow label={t('cashFlowBuy')} />
-            <FlowStep label="JPYC">
-              <TokenLogo symbol="jpyc" size={24} alt="JPYC" />
-            </FlowStep>
-            <FlowArrow label={t('cashFlowRedeem')} />
-            <FlowStep label={t('cashFlowBackYen')}>
-              <span className="text-base font-bold text-slate-700">¥</span>
-            </FlowStep>
-          </div>
+            </thead>
+            <tbody>
+              {ROWS.map(({ id, labelKey }) => (
+                <tr
+                  key={id}
+                  className="border-b border-slate-100 last:border-b-0"
+                >
+                  <th
+                    scope="row"
+                    className="whitespace-nowrap px-2 py-3 sm:px-4 text-left text-xs font-semibold text-slate-500"
+                  >
+                    {t(labelKey)}
+                  </th>
+                  <td className="px-2 py-3 sm:px-4 text-center text-slate-600">
+                    {t(`cashCell${id}Cash`)}
+                  </td>
+                  <td className="px-2 py-3 sm:px-4 text-center text-slate-600">
+                    {t(`cashCell${id}Card`)}
+                  </td>
+                  <td className="bg-brand/5 px-2 py-3 sm:px-4 text-center font-semibold text-slate-900">
+                    {t(`cashCell${id}OpenPay`, LANDING_PAYMENT_FEE_VALUES)}
+                    {id === 'Fee' && (
+                      <span className="mt-1 block text-[11px] font-normal leading-snug text-slate-500">
+                        {t('cashCellFeeOpenPayNote', LANDING_PAYMENT_FEE_VALUES)}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        <p className="mt-3 text-center text-xs leading-relaxed text-slate-600 sm:text-right">
-          {/* JPYC EX はテキストリンク (新規タブ)。href/描画は LandingFaq の <jpycEx> と同一パターン。 */}
-          {t.rich('cashFlowNote', {
-            jpycEx: (chunks) => (
-              <a
-                href="https://jpyc.co.jp/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
-              >
-                {chunks}
-              </a>
-            ),
-          })}
-        </p>
-      </div>
 
-      {/* 節約シミュレータ (client) */}
-      <div className="mx-auto max-w-3xl">
-        <SavingsSimulator />
+        <p className="mx-auto mt-3 max-w-3xl text-[11px] leading-relaxed text-slate-500">
+          {t('cashTableFootnote')}
+        </p>
+        <div className="mx-auto mt-4 flex max-w-3xl justify-center">
+          <Link
+            href={`/${locale}/kit`}
+            prefetch={false}
+            className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-card hover:border-brand hover:text-brand-dark"
+          >
+            {t('cashStoreKitCta')}
+          </Link>
+        </div>
+
+        {/* 円⇄JPYC の 1:1 図解: 円 → (購入) → JPYC → (JPYC EX で 1:1 換金) → 円。帯の地色の上では slate-600 以上 (AA)。
+            既存 FAQ / MarketRates の表現を踏襲し、新しい法的主張は発明しない。大きなカードにせず 1 本の帯にする
+            (直前の「なぜ今」で 1 JPYC = 1 円は伝えてあるので、ここは「円に戻せる」道筋だけを短く・plans/lp-polish-2026-09.md P1)。 */}
+        <div className="mx-auto mt-6 max-w-3xl rounded-2xl bg-slate-100/70 px-4 py-4 sm:px-6">
+          <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between sm:gap-6">
+            <h3 className="shrink-0 text-sm font-bold text-slate-900 sm:text-base">{t('cashFlowTitle')}</h3>
+            <div className="flex items-center gap-2 sm:gap-3">
+              <FlowStep label={t('cashFlowYen')}>
+                <span className="text-base font-bold text-slate-700">¥</span>
+              </FlowStep>
+              <FlowArrow label={t('cashFlowBuy')} />
+              <FlowStep label="JPYC">
+                <TokenLogo symbol="jpyc" size={24} alt="JPYC" />
+              </FlowStep>
+              <FlowArrow label={t('cashFlowRedeem')} />
+              <FlowStep label={t('cashFlowBackYen')}>
+                <span className="text-base font-bold text-slate-700">¥</span>
+              </FlowStep>
+            </div>
+          </div>
+          <p className="mt-3 text-center text-xs leading-relaxed text-slate-600 sm:text-right">
+            {/* JPYC EX はテキストリンク (新規タブ)。href/描画は LandingFaq の <jpycEx> と同一パターン。 */}
+            {t.rich('cashFlowNote', {
+              jpycEx: (chunks) => (
+                <a
+                  href="https://jpyc.co.jp/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+                >
+                  {chunks}
+                </a>
+              ),
+            })}
+          </p>
+        </div>
+        </div>
+        {/* 節約シミュレータ (client) */}
+        <div className="min-w-0 lg:mt-8 lg:[&>*:first-child]:mt-0">
+          <SavingsSimulator />
+        </div>
       </div>
     </section>
   );

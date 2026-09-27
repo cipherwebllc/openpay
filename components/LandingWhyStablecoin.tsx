@@ -12,6 +12,7 @@ import {
   ExternalLink,
   type LucideIcon,
 } from 'lucide-react';
+import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
 // JPYC 入門+運用・ウォレット選びの note 記事 (2026-08-05 user 指示で追加)。
 const JPYC_NOTE_ARTICLE_URL = 'https://note.com/masia02/n/ned04a4cdb00a';
@@ -28,16 +29,9 @@ export async function LandingWhyStablecoin() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-          {t('whyStablecoinTitle')}
-        </h2>
-        <p className="mt-3 text-sm text-slate-500 sm:text-base">
-          {t('whyStablecoinSubtitle')}
-        </p>
-      </div>
+      <LandingSectionHeader eyebrow={t('eyebrowWhy')} title={t('whyStablecoinTitle')} lead={t('whyStablecoinSubtitle')} />
       {/* スマホでも 2×2 の小さなタイル (1 列の大きなカード 4 枚 ≒ 2 画面ぶんを半分に・plans/lp-polish-2026-09.md P1)。 */}
-      <div className="mx-auto mt-8 grid max-w-4xl grid-cols-2 gap-3 sm:gap-4">
+      <div className="mx-auto mt-8 grid max-w-4xl grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {ITEMS.map(({ key, icon: Icon }) => (
           <div
             key={key}
@@ -57,19 +51,17 @@ export async function LandingWhyStablecoin() {
           </div>
         ))}
       </div>
-      {/* JPYC の一言説明 — 独立セクションにせず補足カードとして添える。 */}
-      <div className="mx-auto mt-3 max-w-4xl rounded-2xl border border-blue-200/70 bg-gradient-to-br from-blue-50 to-blue-100/30 p-4 sm:mt-4 sm:p-6">
-        <h3 className="text-base font-bold text-blue-900 sm:text-lg">
-          {t('jpycNoteTitle')}
-        </h3>
-        <p className="mt-2 text-sm leading-relaxed text-blue-800/90">
-          {t('jpycNoteBody')}
+      {/* JPYC の一言説明 — 独立の大きなカードにせず、見出しと本文を 1 段落に詰めた注記として添える。 */}
+      <div className="mx-auto mt-3 max-w-4xl rounded-2xl border border-blue-200/70 bg-blue-50/70 px-4 py-3 text-sm leading-relaxed text-blue-900 sm:mt-4 sm:px-5 sm:py-4">
+        <p>
+          <span className="font-bold">{t('jpycNoteTitle')}</span>
+          <span className="text-blue-800/90">　{t('jpycNoteBody')}</span>
         </p>
         <a
           href={JPYC_NOTE_ARTICLE_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-brand underline-offset-2 hover:underline"
+          className="mt-1.5 inline-flex items-center gap-1.5 text-sm font-semibold text-brand underline-offset-2 hover:underline"
         >
           {t('jpycNoteLink')}
           <ExternalLink className="h-4 w-4" aria-hidden />

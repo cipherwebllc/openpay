@@ -11,6 +11,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ChevronDown } from 'lucide-react';
+import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
 type FaqKey = 'faqQ1' | 'faqQ7' | 'faqQ2' | 'faqQ3' | 'faqQ4' | 'faqQ5' | 'faqQ8';
 type FaqAnswerKey = 'faqA1' | 'faqA7' | 'faqA2' | 'faqA3' | 'faqA4' | 'faqA5' | 'faqA8';
@@ -61,11 +62,7 @@ export async function LandingFaq() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-          {t('faqTitle')}
-        </h2>
-      </div>
+      <LandingSectionHeader eyebrow={t('eyebrowFaq')} title={t('faqTitle')} />
 
       <ul className="mx-auto mt-8 max-w-3xl divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
         {QA.map(({ q, a }) => (

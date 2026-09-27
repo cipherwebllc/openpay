@@ -20,6 +20,7 @@ import { LandingFaq } from '@/components/LandingFaq';
 import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
 import { MarketRates } from '@/components/MarketRates';
+import { LandingBand } from '@/components/LandingSectionHeader';
 import { TodayCard } from '@/components/TodayCard';
 
 export default async function HomePage({
@@ -47,10 +48,13 @@ export default async function HomePage({
         <LandingMobileOrder />
         {/* モバイル注文の直後に「売上を待たない。」を見出しにした導入メリット (旧: 1 行だけの独立節を統合・
             plans/lp-polish-2026-09.md P1)。即時着金の価値と、店舗・顧客の実利を 1 か所で見せる。 */}
-        <LandingBenefits />
-        {/* 総合案内化 P1 (plans/site-ia-guides-ruling.md): 初訪問者の前提知識「なぜステーブルコイン/JPYCとは」。 */}
-        <LandingWhyStablecoin />
-        <LandingCashComparison />
+        {/* 章「店舗の実利」を白の帯でまとめる (地色と交互にしてリズムを作る・plans/lp-polish-2026-09.md P2)。 */}
+        <LandingBand>
+          <LandingBenefits />
+          {/* 総合案内化 P1 (plans/site-ia-guides-ruling.md): 初訪問者の前提知識「なぜステーブルコイン/JPYCとは」。 */}
+          <LandingWhyStablecoin />
+          <LandingCashComparison />
+        </LandingBand>
         {/* 販売セクション (plans/lp-restructure-ruling.md P2)。店舗向けの後に
             「決済だけでなく販売プラットフォーム」への広がりを見せる。カテゴリは
             storeMeta から自動生成 (裁定 M2)・Store flag OFF では非表示。 */}
@@ -59,8 +63,11 @@ export default async function HomePage({
             流れで読ませる (LP 再構成 P3・提案順: 販売→AI→シーン→3 ステップ)。 */}
         <LandingAiAgents />
         {/* 特長 3 カードは FAQ 等と一部重複するが「わかりやすさ優先で残す」(2026-08-05 user 裁定)。 */}
-        <LandingFeatures />
-        <LandingUseCases />
+        {/* 章「しくみと活用例」も白の帯。 */}
+        <LandingBand>
+          <LandingFeatures />
+          <LandingUseCases />
+        </LandingBand>
         {/* 3 ステップは「使いたくなった読者」への締め (シーンの後・FAQ の前)。用途別の 3 入口 (旧「用途から選ぶ」) も
             ここに統合する (入口を 1 か所に・plans/lp-polish-2026-09.md P1)。 */}
         <LandingHowItWorks />

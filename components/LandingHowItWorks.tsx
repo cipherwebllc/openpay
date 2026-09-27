@@ -8,6 +8,8 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { LandingEntryPoints } from '@/components/LandingEntryPoints';
+import { Smartphone, Store } from 'lucide-react';
+import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
 export async function LandingHowItWorks() {
   const locale = await getLocale();
@@ -36,12 +38,7 @@ export async function LandingHowItWorks() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-          {t('howItWorksTitle')}
-        </h2>
-        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('howItWorksSubtitle')}</p>
-      </div>
+      <LandingSectionHeader eyebrow={t('eyebrowStart')} title={t('howItWorksTitle')} lead={t('howItWorksSubtitle')} />
 
       {/* 実機 (iPhone) で撮った実際の操作デモ 3 本。静止画の図より「本当に動く」が
           伝わる。受取 (決済QR) / レジ (POS) は店舗側、支払い は顧客側を提示。
@@ -99,7 +96,8 @@ export async function LandingHowItWorks() {
 
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <article className="rounded-2xl bg-white p-6 shadow-card ring-1 ring-slate-200/70">
-          <h3 className="text-base font-semibold text-emerald-900">
+          <h3 className="flex items-center gap-2 text-base font-semibold text-emerald-900">
+            <Store aria-hidden className="h-5 w-5 text-emerald-600" />
             {t('howItWorksMerchantTitle')}
           </h3>
           <ol className="mt-3 space-y-3">
@@ -115,7 +113,8 @@ export async function LandingHowItWorks() {
         </article>
 
         <article className="rounded-2xl bg-white p-6 shadow-card ring-1 ring-slate-200/70">
-          <h3 className="text-base font-semibold text-blue-900">
+          <h3 className="flex items-center gap-2 text-base font-semibold text-blue-900">
+            <Smartphone aria-hidden className="h-5 w-5 text-blue-600" />
             {t('howItWorksCustomerTitle')}
           </h3>
           <ol className="mt-3 space-y-3">
