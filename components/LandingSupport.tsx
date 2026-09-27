@@ -80,9 +80,9 @@ export async function LandingSupport() {
             key={id}
             className="flex gap-4 rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 sm:gap-6 sm:p-5"
           >
-            <div className="w-24 shrink-0 [container-type:inline-size] sm:w-40">
+            <div className="w-28 shrink-0 [container-type:inline-size] sm:w-40">
               <span className="flex items-center justify-between gap-2">
-                <Icon className="h-5 w-5 text-brand" aria-hidden />
+                <Icon className="h-5 w-5 shrink-0 text-brand" aria-hidden />
                 <span
                   className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${FEE_TONE[audience].pillBg} ${FEE_TONE[audience].pillInk}`}
                 >

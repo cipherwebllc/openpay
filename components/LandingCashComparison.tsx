@@ -99,7 +99,7 @@ export async function LandingCashComparison() {
         </Link>
       </div>
 
-      {/* 円⇄JPYC の 1:1 図解: 円 → (購入) → JPYC → (JPYC EX で 1:1 換金) → 円。
+      {/* 円⇄JPYC の 1:1 図解: 円 → (購入) → JPYC → (JPYC EX で 1:1 換金) → 円。帯の地色の上では slate-600 以上 (AA)。
           既存 FAQ / MarketRates の表現を踏襲し、新しい法的主張は発明しない。大きなカードにせず 1 本の帯にする
           (直前の「なぜ今」で 1 JPYC = 1 円は伝えてあるので、ここは「円に戻せる」道筋だけを短く・plans/lp-polish-2026-09.md P1)。 */}
       <div className="mx-auto mt-6 max-w-3xl rounded-2xl bg-slate-100/70 px-4 py-4 sm:px-6">
@@ -119,7 +119,7 @@ export async function LandingCashComparison() {
             </FlowStep>
           </div>
         </div>
-        <p className="mt-3 text-center text-xs leading-relaxed text-slate-500 sm:text-right">
+        <p className="mt-3 text-center text-xs leading-relaxed text-slate-600 sm:text-right">
           {/* JPYC EX はテキストリンク (新規タブ)。href/描画は LandingFaq の <jpycEx> と同一パターン。 */}
           {t.rich('cashFlowNote', {
             jpycEx: (chunks) => (
@@ -161,7 +161,7 @@ function FlowArrow({ label }: { label: string }) {
   return (
     <span className="flex flex-col items-center text-slate-400">
       <ArrowRight className="h-4 w-4" aria-hidden />
-      <span className="mt-1 whitespace-nowrap text-[10px] text-slate-500">{label}</span>
+      <span className="mt-1 whitespace-nowrap text-[10px] text-slate-600">{label}</span>
     </span>
   );
 }

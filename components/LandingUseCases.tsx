@@ -74,7 +74,7 @@ export async function LandingUseCases() {
         role="region"
         aria-labelledby="lp-use-cases-title"
         tabIndex={0}
-        className="-mx-4 mt-8 snap-x snap-mandatory overflow-x-auto px-4 pb-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:mx-0 sm:mt-10 sm:overflow-visible sm:px-0 sm:pb-0"
+        className="-mx-4 mt-8 snap-x snap-mandatory scroll-px-4 overflow-x-auto px-4 pb-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:mx-0 sm:mt-10 sm:scroll-px-0 sm:overflow-visible sm:px-0 sm:pb-0"
       >
         <ul className="flex gap-3 sm:flex-wrap sm:justify-center sm:gap-4">
           {USE_CASES.map((useCase) => (

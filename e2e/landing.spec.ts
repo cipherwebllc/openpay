@@ -45,7 +45,9 @@ test.describe('landing / (LP)', () => {
       const result = await page.evaluate(() => {
         const focals = [...document.querySelectorAll('[data-focal]')];
         const overflowing = focals.flatMap((p) => {
-          const card = p.closest('li');
+          // 数字が入る枠 (文字サイズの基準 = container-type を持つ要素) を基準に測る。利用料の行は左の列、
+          // 導入メリットはカード (li) そのもの。
+          const card = p.closest('[class*="container-type"]') ?? p.closest('li');
           if (!card) return [p.textContent];
           const contentRight = card.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(card).paddingRight);
           const range = document.createRange();
