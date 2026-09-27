@@ -11,6 +11,7 @@ import { ArrowRight, BookOpen } from 'lucide-react';
 import { env } from '@/lib/env';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
+import { LandingProfileDemo } from '@/components/LandingProfileDemo';
 
 export async function LandingSellables() {
   if (!env.enableCreatorStoreUi) return null;
@@ -34,6 +35,31 @@ export async function LandingSellables() {
       <p className="mx-auto mt-5 max-w-xl text-center text-sm leading-relaxed text-slate-600">
         {t('sellablesBody')}
       </p>
+      {/* 自己表現: 自分のページ (テーマ・色) を作れることを、触って伝える (plans/lp-polish-2026-09.md P3)。 */}
+      <LandingProfileDemo
+        c={{
+          title: t('profileDemoTitle'),
+          hint: t('profileDemoHint'),
+          themeLabel: t('profileDemoTheme'),
+          colorLabel: t('profileDemoColor'),
+          colorNames: {
+            blue: t('profileDemoColorBlue'),
+            green: t('profileDemoColorGreen'),
+            rose: t('profileDemoColorRose'),
+            amber: t('profileDemoColorAmber'),
+            violet: t('profileDemoColorViolet'),
+          },
+          sample: {
+            tag: t('profileDemoSampleTag'),
+            initial: t('profileDemoSampleInitial'),
+            name: t('profileDemoSampleName'),
+            handle: t('profileDemoSampleHandle'),
+            bio: t('profileDemoSampleBio'),
+            featured: t('profileDemoSampleFeatured'),
+            link: t('profileDemoSampleLink'),
+          },
+        }}
+      />
       <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
         <Link
           href={`/${locale}/create?tab=profile`}
