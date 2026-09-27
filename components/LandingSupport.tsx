@@ -23,6 +23,7 @@ import {
   ShoppingBag,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
 const TIP_ORIGIN = 'https://open-pay.jp';
 // 運営の恒久プロフィール (link-in-bio + JPYC/USDC 応援)。会社 @handle は FEE_RECEIVER ウォレットで
@@ -60,12 +61,7 @@ export async function LandingSupport() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-          {t('supportTitle')}
-        </h2>
-        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('supportSubtitle')}</p>
-      </div>
+      <LandingSectionHeader eyebrow={t('eyebrowPricing')} title={t('supportTitle')} lead={t('supportSubtitle')} />
 
       {/* 5 つの利用料カード (導入メリットと同じビッグナンバー様式)。スマホは 1 列の行で、左 = 数字と負担者・
           右 = 名前と説明 (2 列の細いカードで説明が 10 行以上に折り返すのを避ける・plans/lp-polish-2026-09.md P1)。

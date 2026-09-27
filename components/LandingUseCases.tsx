@@ -13,31 +13,38 @@
 // 提供しているが、トップから見えにくかった)。
 
 import Image from 'next/image';
+import { Bot, Gift, Landmark, Palette, ShoppingBag, Store, Ticket, type LucideIcon } from 'lucide-react';
 import { getTranslations } from 'next-intl/server';
+import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
 const USE_CASES = [
   {
     id: '1',
+    icon: Store,
     image: '/landing/usecase-store-event.avif',
     altKey: 'useCase1ImageAlt',
   },
   {
     id: '2',
+    icon: Ticket,
     image: '/landing/usecase-web3-event.avif',
     altKey: 'useCase2ImageAlt',
   },
   {
     id: '3',
+    icon: Palette,
     image: '/landing/usecase-creator-tip.avif',
     altKey: 'useCase3ImageAlt',
   },
   {
     id: '4',
+    icon: Landmark,
     image: '/landing/usecase-community-dues.avif',
     altKey: 'useCase4ImageAlt',
   },
   {
     id: '5',
+    icon: Gift,
     image: '/landing/usecase-popup-payment.avif',
     altKey: 'useCase5ImageAlt',
   },
@@ -45,27 +52,24 @@ const USE_CASES = [
   // で既存 5 枚とスタイルを揃えて生成 (960x540 avif)。
   {
     id: '6',
+    icon: ShoppingBag,
     image: '/landing/usecase-digital-goods.avif',
     altKey: 'useCase6ImageAlt',
   },
   {
     id: '7',
+    icon: Bot,
     image: '/landing/usecase-ai-api.avif',
     altKey: 'useCase7ImageAlt',
   },
-] as const;
+] as const satisfies readonly { id: string; icon: LucideIcon; image: string; altKey: string }[];
 
 export async function LandingUseCases() {
   const t = await getTranslations('Landing');
 
   return (
     <section className="mt-16 sm:mt-28">
-      <div className="mx-auto max-w-3xl text-center">
-        <h2 id="lp-use-cases-title" className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-          {t('useCasesTitle')}
-        </h2>
-        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('useCasesSubtitle')}</p>
-      </div>
+      <LandingSectionHeader id="lp-use-cases-title" eyebrow={t('eyebrowUseCases')} title={t('useCasesTitle')} lead={t('useCasesSubtitle')} />
 
       {/* スマホは横スクロールの 1 行 (2 列の格子 4 段 ≒ 1 画面強を 1 段に・plans/lp-polish-2026-09.md P1)。
           次のカードが少し見えて「横に続く」と分かる幅にする。スクロール領域はキーボードでも動かせるよう
@@ -80,18 +84,20 @@ export async function LandingUseCases() {
           {USE_CASES.map((useCase) => (
             <li
               key={useCase.id}
-              className="w-[72%] shrink-0 snap-start overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 sm:w-[calc(50%-0.5rem)] sm:shrink lg:w-[calc((100%-2rem)/3)]"
+              className="w-[72%] shrink-0 snap-start overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 sm:w-[calc(50%-0.5rem)] sm:shrink lg:w-[calc((100%-3rem)/4)]"
             >
               <Image
                 src={useCase.image}
                 alt={t(useCase.altKey)}
                 width={960}
                 height={540}
-                sizes="(min-width: 1024px) 31vw, (min-width: 640px) 46vw, 72vw"
+                sizes="(min-width: 1024px) 23vw, (min-width: 640px) 46vw, 72vw"
                 className="aspect-video w-full object-cover"
               />
               <div className="flex flex-col gap-1.5 p-3.5 sm:gap-2 sm:p-5">
-                <h3 className="text-sm font-semibold text-slate-900 sm:text-base">
+                {/* 見出しの記号は線のアイコンでそろえる (絵文字は端末ごとに見た目が変わる・plans/lp-polish-2026-09.md P2)。 */}
+                <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 sm:text-base">
+                  <useCase.icon aria-hidden className="h-4 w-4 shrink-0 text-brand" />
                   {t(`useCase${useCase.id}Title`)}
                 </h3>
                 <p className="text-xs leading-relaxed text-slate-600 sm:text-sm">

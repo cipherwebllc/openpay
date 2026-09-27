@@ -5,6 +5,7 @@ import { Fuel, Network, Lock } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { ChainLogo } from '@/components/AssetLogo';
 import type { ChainSlug } from '@/lib/chains';
+import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
 type FeatureCard = {
   Icon: LucideIcon;
@@ -72,12 +73,7 @@ export async function LandingFeatures() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-          {t('featuresTitle')}
-        </h2>
-        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('featuresSubtitle')}</p>
-      </div>
+      <LandingSectionHeader eyebrow={t('eyebrowTech')} title={t('featuresTitle')} lead={t('featuresSubtitle')} />
 
       {/* 開発者向けの技術詳細は最下部 Trust「オープン技術と透明性」の技術スタックに
           一本化した (旧: ガスレスカード下に featuresGaslessTech の小注釈を出していた)。

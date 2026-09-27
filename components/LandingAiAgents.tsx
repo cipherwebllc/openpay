@@ -7,6 +7,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { Banknote, Bot, CreditCard, QrCode } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { env } from '@/lib/env';
+import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
 type EraStep = {
   Icon: LucideIcon;
@@ -28,14 +29,7 @@ export async function LandingAiAgents() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-          {t('aiEraTitle')}
-        </h2>
-        <p className="mt-4 text-sm leading-relaxed text-slate-600 sm:text-base">
-          {t('aiEraBody')}
-        </p>
-      </div>
+      <LandingSectionHeader eyebrow={t('eyebrowAgent')} title={t('aiEraTitle')} lead={t('aiEraBody')} />
 
       {/* 囲み (枠 + ラベル) は見た目だけの重ね描き。読み上げは各マスの「OpenPay はここ」で伝える。
           行の高さは auto-rows-fr でそろえるので (文字を大きくしてラベルが折り返しても)、囲みは PC で右半分・スマホで下半分に一致する。

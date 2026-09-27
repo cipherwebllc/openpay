@@ -147,7 +147,8 @@ export function SavingsSimulator() {
       <div className="mt-6 text-center">
         <p className="text-sm text-slate-600">{t('cashSimResultPrefix')}</p>
         <p className="mt-1 flex items-baseline justify-center gap-1">
-          <span className="tabular-nums text-5xl font-extrabold leading-none text-brand sm:text-6xl">
+          {/* PC (lg) はトップの右の列 (約 400px) に入るので一段小さく (最大額でも列に収まる)。 */}
+          <span className="tabular-nums text-5xl font-extrabold leading-none text-brand sm:text-6xl lg:text-5xl">
             {heroNumber}
           </span>
           <span className="text-2xl font-bold text-brand-dark">

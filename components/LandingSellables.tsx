@@ -10,6 +10,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { ArrowRight, BookOpen } from 'lucide-react';
 import { env } from '@/lib/env';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
+import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 
 export async function LandingSellables() {
   if (!env.enableCreatorStoreUi) return null;
@@ -19,14 +20,7 @@ export async function LandingSellables() {
 
   return (
     <section className="mt-16 sm:mt-28">
-      <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-          {t('sellablesTitle')}
-        </h2>
-        <p className="mt-3 text-sm text-slate-500 sm:text-base">
-          {t('sellablesSubtitle')}
-        </p>
-      </div>
+      <LandingSectionHeader eyebrow={t('eyebrowSell')} title={t('sellablesTitle')} lead={t('sellablesSubtitle')} />
       <div className="mx-auto mt-7 flex max-w-2xl flex-wrap justify-center gap-2">
         {HOSTED_PRODUCT_CATEGORIES.map((category) => (
           <span
