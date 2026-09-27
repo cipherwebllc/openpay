@@ -26,8 +26,10 @@ export const RESERVED_HANDLES: ReadonlySet<string> = new Set<string>([
   'signout', 'settings', 'dashboard', 'about', 'contact', 'home', 'www',
   'app',
   // トップの自己表現デモ (LandingProfileDemo) の見本ハンドル。第三者が取って「トップで紹介された
-  // ページ」に見せかけるのを防ぐ (2026-09-28 時点で未取得を確認)。
+  // ページ」に見せかけるのを防ぐ (2026-09-28 時点でどちらも未取得を確認)。your_shop は店舗の見本を
+  // 出していた間 (#675) の分で、公開済みのスクショ等に残るため予約のままにする。
   'your_shop',
+  'your_name',
 ]);
 
 // URL のパスセグメントは `@` が `%40` にエンコードされて届くことがある (Next.js は
