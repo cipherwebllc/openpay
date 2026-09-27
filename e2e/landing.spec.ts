@@ -69,27 +69,46 @@ test.describe('landing / (LP)', () => {
   test('再訪の接続者にはヒーローより前に「あなたの OpenPay」を出し、hydration 後も消さない・初めての訪問者には出さない', async ({
     page,
   }) => {
+    const frame = page.locator('[data-returning]');
+    // hydration の完了 = 描画前 script が外れた (script は server の HTML と hydration のときだけ描く)。
+    const hydrated = () => expect(page.locator('[data-returning] > script')).toHaveCount(0);
+
     await page.goto('/ja');
-    await expect(page.getByRole('heading', { name: 'あなたの OpenPay' })).toBeHidden();
+    await hydrated();
+    await expect(frame).toHaveCount(1);
+    await expect(frame).toHaveAttribute('data-returning', 'no');
+    await expect(page.getByRole('region', { name: 'あなたの OpenPay' })).toBeHidden();
 
     await page.addInitScript(() => {
       window.localStorage.setItem(
         'wagmi.store',
         JSON.stringify({ state: { connections: { __type: 'Map', value: [] }, chainId: 137, current: 'e2e-uid' }, version: 2 }),
       );
+      // 表示のずれ (layout shift) を読み込みの最初から数える。
+      const w = window as unknown as { __cls: number };
+      w.__cls = 0;
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries() as (PerformanceEntry & { value: number; hadRecentInput: boolean })[]) {
+          if (!entry.hadRecentInput) w.__cls += entry.value;
+        }
+      }).observe({ type: 'layout-shift', buffered: true });
     });
     await page.goto('/ja');
     const strip = page.getByRole('region', { name: 'あなたの OpenPay' });
     await expect(strip).toBeVisible();
     await expect(strip.getByRole('link', { name: '履歴' })).toHaveAttribute('href', '/ja/history');
     // hydration と再接続の試行が済んでも枠は残る (wagmi の書き戻しで消えない)。
+    await hydrated();
     await page.waitForLoadState('networkidle');
-    await expect(page.locator('[data-returning]')).toHaveAttribute('data-returning', 'yes');
+    await expect(frame).toHaveAttribute('data-returning', 'yes');
     await expect(strip).toBeVisible();
     // ヒーローより前にある (1 画面目で自分の道具へ行ける)。
     const stripBox = await strip.boundingBox();
     const heroBox = await page.getByRole('heading', { name: /スマホひとつで、JPYCを支払いにも販売にも/ }).boundingBox();
     expect(stripBox && heroBox && stripBox.y < heroBox.y).toBe(true);
+    // 枠が後から出入りすると、ヒーロー以下が丸ごと動いて 0.1 前後になる。最初の描画から場所を取っていれば 0。
+    const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls);
+    expect(cls).toBeLessThan(0.01);
   });
 
   test('en: Hero の 2 CTA は英語表記で描画される', async ({ page }) => {

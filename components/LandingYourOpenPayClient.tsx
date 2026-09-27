@@ -9,21 +9,24 @@ import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
-import { formatUnits } from 'viem';
+import { useMutationState } from '@tanstack/react-query';
 import { ChevronRight } from 'lucide-react';
-import { HISTORY_ASSET_DECIMALS, localDateKey, readTodaySummary, type TodayMerchantSummary } from '@/lib/history';
+import { HISTORY_ASSET_DECIMALS, localDateKey, readTodaySummary, todayAtomicToNumber, type TodayMerchantSummary } from '@/lib/history';
 import { RETURNING_WALLET_PREPAINT, useReturningWallet } from '@/hooks/useReturningWallet';
 
 export function YourOpenPayFrame({ children }: { children: ReactNode }) {
-  const { hydrating, returning } = useReturningWallet();
   const { status } = useAccount();
-  // 再訪の目印があれば、このページを開いている間は枠を出し続ける (再接続の失敗・切断で下の節を押し上げない)。
-  // 目印がなくても、つながっていれば出す (このページでつないだとき = user の操作・アプリ内の移動で来たとき = 最初から)。
-  const visible = returning === null ? null : returning || status === 'connected';
+  const { hydrating, returning } = useReturningWallet(status === 'connected');
+  const connectedHere = useConnectedOnThisPage(status === 'connected');
+  // 枠を出すのは、開いたときに決まった分 (再訪の目印・アプリ内の移動で来たときの接続) と、このページで user がつないだときだけ。
+  // 自動の再接続では後から出さない (ヒーローより前に差し込むと、操作なしで下の節を押し下げる)。
+  // 開いたときに出した枠は、再接続の失敗・切断でも消さない (同じく押し上げない)。
+  const visible = returning === null ? null : returning || connectedHere;
   return (
     // null は server と hydration のときだけ。属性を描かず、script が付けた値を hydration で消さない。
     // 判定後は yes / no を明示して上書きする (script の値が残らないように)。
-    <div data-returning={visible === null ? undefined : visible ? 'yes' : 'no'} suppressHydrationWarning className="hidden data-[returning=yes]:block print:hidden">
+    // 印刷では出さない: data 属性の block は print:hidden より詳細度が高いので ! で上書きする。
+    <div data-returning={visible === null ? undefined : visible ? 'yes' : 'no'} suppressHydrationWarning className="hidden data-[returning=yes]:block print:!hidden">
       {/* script は server の HTML と hydration のときだけ描く (client だけの描画では React が script を実行しない)。 */}
       {hydrating ? <script dangerouslySetInnerHTML={{ __html: RETURNING_WALLET_PREPAINT }} /> : null}
       {children}
@@ -31,11 +34,16 @@ export function YourOpenPayFrame({ children }: { children: ReactNode }) {
   );
 }
 
-// raw atomic → 表示用の数値 (非数値は 0)。表示の丸めだけに使い、累積はしない (TodayCard と同じ)。
-function atomicToNumber(atomic: string, decimals: number): number {
-  if (!/^\d+$/.test(atomic)) return 0;
-  const n = Number(formatUnits(BigInt(atomic), decimals));
-  return Number.isFinite(n) ? n : 0;
+// このページで user がつないだか = ヘッダの接続 (wagmi の connect 操作・mutationKey ['connect']) が、この帯を出したあとに成功した。
+// 自動の再接続は connect 操作を通らないので数えない。status や useAccountEffect の isReconnected では見分けられない
+// (wagmi は起動時に保存の current を null へ書き戻すので、再接続も 'connecting' から始まり isReconnected=false になる・2026-09-28 確認)。
+function useConnectedOnThisPage(connectedNow: boolean): boolean {
+  const [mountedAt] = useState(() => Date.now());
+  const submittedAt = useMutationState({
+    filters: { mutationKey: ['connect'], status: 'success' },
+    select: (mutation) => mutation.state.submittedAt,
+  });
+  return connectedNow && submittedAt.some((at) => at >= mountedAt);
 }
 
 export function YourOpenPayToday({ label }: { label: string }) {
@@ -56,8 +64,8 @@ export function YourOpenPayToday({ label }: { label: string }) {
   }, [status, address]);
 
   if (!today) return null;
-  const yen = Math.round(atomicToNumber(today.jpycAtomic, HISTORY_ASSET_DECIMALS.jpyc));
-  const usdc = atomicToNumber(today.usdcAtomic, HISTORY_ASSET_DECIMALS.usdc);
+  const yen = Math.round(todayAtomicToNumber(today.jpycAtomic, HISTORY_ASSET_DECIMALS.jpyc));
+  const usdc = todayAtomicToNumber(today.usdcAtomic, HISTORY_ASSET_DECIMALS.usdc);
 
   // 見出しの行 (高さ固定) の右に 1 行で収める。出ても消えても、行の高さと下の段は動かない。
   return (

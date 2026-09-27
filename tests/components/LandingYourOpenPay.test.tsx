@@ -1,11 +1,11 @@
 import { createTranslator, NextIntlClientProvider } from 'next-intl';
-import { act, type ReactNode } from 'react';
+import { act, type ReactElement, type ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
-import { hydrateRoot } from 'react-dom/client';
+import { hydrateRoot, type Root } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import ja from '../../messages/ja.json';
-import { renderWithIntl } from '../_helpers/i18n';
 import { localDateKey, TODAY_SUMMARY_KEY } from '@/lib/history';
 
 // wagmi の接続状態を test ごとに切り替える。
@@ -20,11 +20,30 @@ vi.mock('next-intl/server', () => ({
 
 import { LandingYourOpenPay } from '@/components/LandingYourOpenPay';
 import { YourOpenPayFrame } from '@/components/LandingYourOpenPayClient';
-import { RETURNING_WALLET_PREPAINT, WAGMI_STORE_KEY } from '@/hooks/useReturningWallet';
+import { RETURNING_WALLET_PREPAINT, WAGMI_STORE_KEY, resetReturningWalletForTest } from '@/hooks/useReturningWallet';
 
 const SHOP = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa';
 const GLOBAL = '__openpayReturningWallet';
 const win = window as unknown as Record<string, unknown>;
+let queryClient: QueryClient;
+
+function Providers({ children }: { children: ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <NextIntlClientProvider locale="ja" messages={ja}>
+        {children}
+      </NextIntlClientProvider>
+    </QueryClientProvider>
+  );
+}
+const renderStrip = (ui: ReactElement) => render(ui, { wrapper: Providers });
+
+// ヘッダの「接続」と同じ wagmi の connect 操作 (mutationKey ['connect']) が成功したことを再現する。
+async function userConnects() {
+  await act(async () => {
+    await queryClient.getMutationCache().build(queryClient, { mutationKey: ['connect'], mutationFn: async () => 'ok' }).execute(undefined);
+  });
+}
 
 function storeToday(address: string, count = 8) {
   const summary = {
@@ -49,8 +68,10 @@ function runPrepaint(parent: HTMLElement) {
 }
 
 beforeEach(() => {
+  queryClient = new QueryClient();
   window.localStorage.clear();
   delete win[GLOBAL];
+  resetReturningWalletForTest();
   account.address = undefined;
   account.status = 'disconnected';
   Object.assign(flags, { enableHandles: true, enableOrderRelay: true, enableShopLive: false, enableMobileOrder: true });
@@ -90,29 +111,16 @@ describe('描画前 script (再訪の目印)', () => {
 describe('YourOpenPayFrame (枠を出すか)', () => {
   const frame = () => document.querySelector('[data-returning]');
 
-  it('アプリ内の移動で来たとき (静的 HTML でない) は、つながっているときだけ出す (前回の script の結果を持ち越さない)', () => {
-    win[GLOBAL] = true; // 前のページ読み込みの結果が残っていても使わない
-    renderWithIntl(<YourOpenPayFrame>strip</YourOpenPayFrame>);
-    expect(frame()).toHaveAttribute('data-returning', 'no');
-    expect(document.querySelector('script')).toBeNull();
-  });
-  it('このページでつないだら出る', () => {
-    account.status = 'connected';
-    account.address = SHOP;
-    renderWithIntl(<YourOpenPayFrame>strip</YourOpenPayFrame>);
-    expect(frame()).toHaveAttribute('data-returning', 'yes');
-  });
-
-  async function hydrate(returning: boolean) {
-    const tree = (children: ReactNode) => (
-      <NextIntlClientProvider locale="ja" messages={ja}>
-        <YourOpenPayFrame>{children}</YourOpenPayFrame>
-      </NextIntlClientProvider>
+  // server の HTML (属性なし + 描画前 script) を置き、script の働きを再現してから hydrate する。
+  async function hydrate(returning: boolean): Promise<{ el: HTMLElement; root: Root; rerender: () => Promise<void> }> {
+    const tree = () => (
+      <Providers>
+        <YourOpenPayFrame>strip</YourOpenPayFrame>
+      </Providers>
     );
     const container = document.createElement('div');
-    container.innerHTML = renderToString(tree('strip'));
+    container.innerHTML = renderToString(tree());
     document.body.appendChild(container);
-    // server の HTML: 属性なし (未接続の見た目) + 描画前 script。script の働きを再現する。
     const el = container.querySelector('div') as HTMLElement;
     expect(el.hasAttribute('data-returning')).toBe(false);
     expect(container.querySelector('script')?.textContent).toBe(RETURNING_WALLET_PREPAINT);
@@ -120,28 +128,80 @@ describe('YourOpenPayFrame (枠を出すか)', () => {
     if (returning) el.setAttribute('data-returning', 'yes');
     // RTL を通さない hydrateRoot なので、act を使える環境だと React に伝える。
     (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    let root!: Root;
     await act(async () => {
-      hydrateRoot(container, tree('strip'));
+      root = hydrateRoot(container, tree());
     });
-    return el;
+    const rerender = async () => {
+      await act(async () => {
+        root.render(tree());
+      });
+    };
+    return { el, root, rerender };
   }
 
   it('静的 HTML から hydrate したときは描画前 script の結果を引き継ぐ (再接続に失敗しても消さない = 押し上げない)', async () => {
-    account.status = 'disconnected';
-    const el = await hydrate(true);
+    const { el, rerender } = await hydrate(true);
     expect(el).toHaveAttribute('data-returning', 'yes');
     // hydration が済んだら script は DOM から外す。
     expect(el.querySelector('script')).toBeNull();
+    account.status = 'disconnected';
+    await rerender();
+    expect(el).toHaveAttribute('data-returning', 'yes');
   });
-  it('目印のない訪問者は hydrate 後も出さない', async () => {
-    const el = await hydrate(false);
+  it('目印のない訪問者は、自動の再接続でつながっても後から出さない (ヒーローより前に差し込まない)', async () => {
+    const { el, rerender } = await hydrate(false);
     expect(el).toHaveAttribute('data-returning', 'no');
+    account.status = 'connecting';
+    await rerender();
+    account.status = 'connected';
+    account.address = SHOP;
+    await rerender();
+    expect(el).toHaveAttribute('data-returning', 'no');
+  });
+  it('このページで user がつないだら出す (ヘッダの connect 操作が成功したあと)', async () => {
+    const { el, rerender } = await hydrate(false);
+    await userConnects();
+    account.status = 'connected';
+    account.address = SHOP;
+    await rerender();
+    expect(el).toHaveAttribute('data-returning', 'yes');
+  });
+  it('帯を出す前の connect 操作 (前のページでつないだ分) は数えない', async () => {
+    await queryClient.getMutationCache().build(queryClient, { mutationKey: ['connect'], mutationFn: async () => 'ok' }).execute(undefined);
+    await new Promise((r) => setTimeout(r, 5));
+    account.status = 'connected';
+    const { el } = await hydrate(false);
+    expect(el).toHaveAttribute('data-returning', 'no');
+  });
+  it('アプリ内の移動で来た帯は、読み込み時の script の結果を持ち越さず、mount の時点の接続で決める', () => {
+    // この document で最初の帯 (hydration 済み) を一度出してから外す。
+    win[GLOBAL] = true;
+    const first = renderStrip(<YourOpenPayFrame>strip</YourOpenPayFrame>);
+    expect(frame()).toHaveAttribute('data-returning', 'yes');
+    first.unmount();
+    // 戻ってきた帯: 未接続なら出さない (script の結果 true は使わない)。
+    const again = renderStrip(<YourOpenPayFrame>strip</YourOpenPayFrame>);
+    expect(frame()).toHaveAttribute('data-returning', 'no');
+    expect(document.querySelector('script')).toBeNull();
+    again.unmount();
+    // つながったまま戻ってきたら最初から出す。
+    account.status = 'connected';
+    account.address = SHOP;
+    renderStrip(<YourOpenPayFrame>strip</YourOpenPayFrame>);
+    expect(frame()).toHaveAttribute('data-returning', 'yes');
+  });
+  it('ほかの場所の hydration の失敗で client が描き直しても、この document で最初の帯は script の結果を使う', () => {
+    win[GLOBAL] = true;
+    renderStrip(<YourOpenPayFrame>strip</YourOpenPayFrame>);
+    expect(frame()).toHaveAttribute('data-returning', 'yes');
   });
 });
 
 describe('LandingYourOpenPay (中身)', () => {
   it('道具への近道は見えている名前で並び、未接続では今日の売上を出さない', async () => {
-    renderWithIntl(await LandingYourOpenPay());
+    storeToday(SHOP);
+    renderStrip(await LandingYourOpenPay());
     const nav = screen.getByRole('region', { name: ja.Landing.yourOpenPayTitle });
     const links = within(nav).getAllByRole('link');
     expect(links.map((a) => a.getAttribute('href'))).toEqual([
@@ -153,14 +213,13 @@ describe('LandingYourOpenPay (中身)', () => {
     ]);
     expect(links[0]).toHaveTextContent(ja.Landing.yourOpenPayToolQr);
     expect(nav.querySelector('[aria-label]')).toBeNull();
-    storeToday(SHOP);
     expect(within(nav).queryByText(ja.Landing.yourOpenPayToday)).toBeNull();
   });
   it('つながっているときだけ、そのアドレスの今日の売上を見出しの行に出す', async () => {
     storeToday(SHOP);
     account.status = 'connected';
     account.address = SHOP;
-    renderWithIntl(await LandingYourOpenPay());
+    renderStrip(await LandingYourOpenPay());
     const pill = screen.getByText(ja.Landing.yourOpenPayToday).closest('a');
     expect(pill).toHaveAttribute('href', '/ja/history');
     expect(pill).toHaveTextContent('¥12,300');
@@ -170,22 +229,22 @@ describe('LandingYourOpenPay (中身)', () => {
     storeToday(SHOP);
     account.status = 'reconnecting';
     account.address = SHOP;
-    const { unmount } = renderWithIntl(await LandingYourOpenPay());
+    const { unmount } = renderStrip(await LandingYourOpenPay());
     expect(screen.queryByText(ja.Landing.yourOpenPayToday)).toBeNull();
     unmount();
     account.status = 'connected';
     account.address = '0xBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb';
-    renderWithIntl(await LandingYourOpenPay());
+    renderStrip(await LandingYourOpenPay());
     expect(screen.queryByText(ja.Landing.yourOpenPayToday)).toBeNull();
   });
   it('flag で道具が決まる (注文の一覧がなければモバイルオーダーの設定・どちらもなければ 3 つ・handle OFF なら自分のページなし)', async () => {
     Object.assign(flags, { enableOrderRelay: false, enableShopLive: false, enableMobileOrder: true, enableHandles: false });
-    const { unmount } = renderWithIntl(await LandingYourOpenPay());
+    const { unmount } = renderStrip(await LandingYourOpenPay());
     let links = within(screen.getByRole('region')).getAllByRole('link').map((a) => a.getAttribute('href'));
     expect(links).toEqual(['/ja/create?tab=qr', '/ja/create?tab=register', '/ja/create?tab=mobileOrder', '/ja/history']);
     unmount();
     Object.assign(flags, { enableMobileOrder: false });
-    renderWithIntl(await LandingYourOpenPay());
+    renderStrip(await LandingYourOpenPay());
     links = within(screen.getByRole('region')).getAllByRole('link').map((a) => a.getAttribute('href'));
     expect(links).toEqual(['/ja/create?tab=qr', '/ja/create?tab=register', '/ja/history']);
   });
