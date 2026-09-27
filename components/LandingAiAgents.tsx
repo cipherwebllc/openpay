@@ -38,9 +38,9 @@ export async function LandingAiAgents() {
       </div>
 
       {/* 囲み (枠 + ラベル) は見た目だけの重ね描き。読み上げは各マスの「OpenPay はここ」で伝える。
-          マスの高さはどれも同じ (アイコン + 1 行) なので、囲みは PC で右半分・スマホで下半分に一致する。 */}
+          行の高さは auto-rows-fr でそろえるので (文字を大きくしてラベルが折り返しても)、囲みは PC で右半分・スマホで下半分に一致する。 */}
       <div className="relative mt-12">
-        <ol className="grid overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-card divide-y divide-slate-200 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+        <ol className="grid auto-rows-fr overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-card divide-y divide-slate-200 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
           {ERA_STEPS.map(({ Icon, labelKey, openPay }) => (
             <li
               key={labelKey}
@@ -57,7 +57,7 @@ export async function LandingAiAgents() {
               </span>
               <span className={`text-sm font-semibold ${openPay ? 'text-brand' : 'text-slate-700'}`}>
                 {t(labelKey)}
-                {openPay ? <span className="sr-only">（{t('aiEraNow')}）</span> : null}
+                {openPay ? <span className="sr-only"> {t('aiEraNow')}</span> : null}
               </span>
             </li>
           ))}
