@@ -11,6 +11,9 @@ import { localDateKey, TODAY_SUMMARY_KEY } from '@/lib/history';
 // wagmi の接続状態を test ごとに切り替える。
 const account = vi.hoisted(() => ({ address: undefined as string | undefined, status: 'disconnected' as string }));
 vi.mock('wagmi', () => ({ useAccount: () => account }));
+// SIWE のセッション (ヘッダと同じ hook)。サインインの有無を test ごとに切り替える。
+const siwe = vi.hoisted(() => ({ isSignedIn: false, sessionAddress: null as string | null }));
+vi.mock('@/hooks/useSiweSession', () => ({ useSiweSession: () => siwe }));
 const flags = vi.hoisted(() => ({ enableHandles: true, enableOrderRelay: true, enableShopLive: false, enableMobileOrder: true }));
 vi.mock('@/lib/env', () => ({ env: flags }));
 vi.mock('next-intl/server', () => ({
@@ -19,7 +22,8 @@ vi.mock('next-intl/server', () => ({
 }));
 
 import { LandingYourOpenPay } from '@/components/LandingYourOpenPay';
-import { YourOpenPayFrame } from '@/components/LandingYourOpenPayClient';
+import { YourOpenPayFrame, YourOpenPayPage } from '@/components/LandingYourOpenPayClient';
+import { handleViewTheme } from '@/lib/handleTheme';
 import { RETURNING_WALLET_PREPAINT, WAGMI_STORE_KEY, resetReturningWalletForTest } from '@/hooks/useReturningWallet';
 
 const SHOP = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa';
@@ -74,10 +78,13 @@ beforeEach(() => {
   resetReturningWalletForTest();
   account.address = undefined;
   account.status = 'disconnected';
+  siwe.isSignedIn = false;
+  siwe.sessionAddress = null;
   Object.assign(flags, { enableHandles: true, enableOrderRelay: true, enableShopLive: false, enableMobileOrder: true });
 });
 afterEach(() => {
   document.body.innerHTML = '';
+  vi.restoreAllMocks();
 });
 
 describe('描画前 script (再訪の目印)', () => {
@@ -247,5 +254,100 @@ describe('LandingYourOpenPay (中身)', () => {
     renderStrip(await LandingYourOpenPay());
     links = within(screen.getByRole('region')).getAllByRole('link').map((a) => a.getAttribute('href'));
     expect(links).toEqual(['/ja/create?tab=qr', '/ja/create?tab=register', '/ja/history']);
+  });
+});
+
+describe('YourOpenPayPage (自分のページ・P4b)', () => {
+  const OWNER = '0xAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAaAa';
+  const page = () => (
+    <YourOpenPayPage fallback={<a href="#default-row">既定の行</a>} pageLabel={ja.Landing.yourOpenPayPageTitle} editLabel={ja.Landing.yourOpenPayPageEdit} />
+  );
+  function mockHandles(body: unknown, status = 200) {
+    return vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify(body), { status }));
+  }
+  function signIn() {
+    account.status = 'connected';
+    account.address = OWNER;
+    siwe.isSignedIn = true;
+    siwe.sessionAddress = OWNER;
+  }
+
+  it('サインインしていなければ取りに行かず、既定の行 (作る・編集する) のまま', async () => {
+    const fetchSpy = mockHandles({ ok: true, handles: [], max: 3 });
+    account.status = 'connected';
+    account.address = OWNER;
+    renderStrip(page());
+    expect(screen.getByRole('link', { name: '既定の行' })).toBeInTheDocument();
+    await act(async () => {});
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+  it('サインイン済みでも再接続の途中は取りに行かない (今つながっているときだけ)', async () => {
+    const fetchSpy = mockHandles({ ok: true, handles: [], max: 3 });
+    signIn();
+    account.status = 'reconnecting';
+    renderStrip(page());
+    await act(async () => {});
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+  it('サインイン済みなら最後に更新した @handle を、公開ページと同じテーマと色で出す', async () => {
+    const fetchSpy = mockHandles({
+      ok: true,
+      max: 3,
+      handles: [
+        { handle: 'old_page', config: { to: OWNER, name: '古いページ', color: '#000000', methods: [] }, profile: { theme: 'bold' }, updatedAt: 1 },
+        { handle: 'komorebi', config: { to: OWNER, name: 'こもれび', color: '#7c3aed', methods: [] }, profile: { theme: 'night' }, updatedAt: 2 },
+      ],
+    });
+    signIn();
+    renderStrip(page());
+    const link = await screen.findByRole('link', { name: /こもれび/ });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][0]).toBe('/api/handle');
+    expect(link).toHaveAttribute('href', '/ja/@komorebi');
+    expect(link).toHaveTextContent('@komorebi');
+    expect(screen.queryByText('古いページ')).toBeNull();
+    // 名前 = inkColor・@handle = handleColor (components/HandleProfile.tsx と同じ割り当て)。
+    const view = handleViewTheme('#7c3aed', 'night');
+    expect(screen.getByText('こもれび').style.color).toBe('rgb(248, 250, 252)');
+    expect(view.inkColor).toBe('#f8fafc');
+    expect(screen.getByText('@komorebi')).toHaveStyle({ color: view.handleColor });
+    expect(screen.getByRole('link', { name: ja.Landing.yourOpenPayPageEdit })).toHaveAttribute('href', '/ja/create?tab=profile');
+    expect(screen.queryByRole('link', { name: '既定の行' })).toBeNull();
+    expect(document.querySelector('[aria-label]')).toBeNull();
+  });
+  it('色とテーマは公開ページと同じ検証 (不正な色は既定の青・未知のテーマは clean)・名前がなければ「自分のページ」', async () => {
+    mockHandles({ ok: true, max: 3, handles: [{ handle: 'plain', config: { to: OWNER, color: 'red', methods: [] }, profile: { theme: 'neon' } }] });
+    signIn();
+    renderStrip(page());
+    const link = await screen.findByRole('link', { name: /@plain/ });
+    expect(link).toHaveTextContent(ja.Landing.yourOpenPayPageTitle);
+    expect(screen.getByText('@plain')).toHaveStyle({ color: handleViewTheme('#2563eb', 'clean').handleColor });
+  });
+  it('本人のアバター画像があれば出し、読めなければ頭文字に戻す', async () => {
+    mockHandles({ ok: true, max: 3, handles: [{ handle: 'pic', config: { to: OWNER, name: 'Pic', methods: [] }, profile: { avatar: 'https://example.com/a.png' } }] });
+    signIn();
+    const { container } = renderStrip(page());
+    await screen.findByRole('link', { name: /Pic/ });
+    const img = container.querySelector('img') as HTMLImageElement;
+    expect(img).toHaveAttribute('src', 'https://example.com/a.png');
+    expect(img).toHaveAttribute('referrerpolicy', 'no-referrer');
+    await act(async () => {
+      img.dispatchEvent(new Event('error'));
+    });
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByText('P')).toBeInTheDocument();
+  });
+  it('handle がない・取得に失敗したときは既定の行のまま (0 件と失敗を偽装しない = 既定の行に戻すだけ)', async () => {
+    mockHandles({ ok: true, max: 3, handles: [] });
+    signIn();
+    const first = renderStrip(page());
+    await act(async () => {});
+    expect(screen.getByRole('link', { name: '既定の行' })).toBeInTheDocument();
+    first.unmount();
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    mockHandles({ ok: false, error: 'kv_error' }, 502);
+    renderStrip(page());
+    await act(async () => {});
+    expect(screen.getByRole('link', { name: '既定の行' })).toBeInTheDocument();
   });
 });
