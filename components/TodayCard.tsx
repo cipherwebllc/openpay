@@ -15,24 +15,17 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { formatUnits } from 'viem';
 import { CalendarDays, ArrowRight } from 'lucide-react';
 import { useAccount } from 'wagmi';
 import {
   HISTORY_ASSET_DECIMALS,
   localDateKey,
   readTodaySummary,
+  todayAtomicToNumber,
   type TodayMerchantSummary,
 } from '@/lib/history';
 import { pad } from '@/lib/pad';
 import type { Locale } from '@/i18n';
-
-// raw atomic → 表示用の数値 (非数値は 0)。表示丸めのみに使い、累積計算はしない。
-function atomicToNumber(atomic: string, decimals: number): number {
-  if (!/^\d+$/.test(atomic)) return 0;
-  const n = Number(formatUnits(BigInt(atomic), decimals));
-  return Number.isFinite(n) ? n : 0;
-}
 
 function formatClock(ts: number): string {
   const d = new Date(ts);
@@ -62,8 +55,8 @@ export function TodayCard() {
 
   if (!today) return null;
 
-  const yen = Math.round(atomicToNumber(today.jpycAtomic, HISTORY_ASSET_DECIMALS.jpyc));
-  const usdc = atomicToNumber(today.usdcAtomic, HISTORY_ASSET_DECIMALS.usdc);
+  const yen = Math.round(todayAtomicToNumber(today.jpycAtomic, HISTORY_ASSET_DECIMALS.jpyc));
+  const usdc = todayAtomicToNumber(today.usdcAtomic, HISTORY_ASSET_DECIMALS.usdc);
   const hasUsdc = usdc > 0;
 
   return (

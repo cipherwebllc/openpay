@@ -153,6 +153,13 @@ export function localDateKey(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+// 当日 summary の raw atomic → 表示用の数値 (表示の丸めだけに使い、累積はしない)。summary は localStorage の値なので、
+// 数字以外 (壊れた値) は 0 にする (BigInt の例外で LP / 販売画面の描画を止めない)。
+export function todayAtomicToNumber(atomic: string, decimals: number): number {
+  if (!/^\d+$/.test(atomic)) return 0;
+  return Number(formatUnits(BigInt(atomic), decimals));
+}
+
 // raw atomic (10進整数文字列) を BigInt で安全に加算。非数値は 0 とみなす (float 不使用)。
 function addAtomic(a: string, b: string): string {
   const av = /^\d+$/.test(a) ? BigInt(a) : 0n;

@@ -63,7 +63,7 @@ describe('history extraction contracts', () => {
       'entryTotals', 'formatHistoryTimestamp', 'hasSeparatedBreakdown',
       'isValidTodaySummary', 'loadHistory', 'localDateKey', 'migrateToLatest',
       'networkFeeEquivalentOf', 'promotePendingHistoryByTxHash', 'readTodaySummary',
-      'removeHistoryEntry',
+      'removeHistoryEntry', 'todayAtomicToNumber',
     ]);
     for (const leaf of [model, migrations, storage, builders, summaries]) {
       for (const [name, value] of Object.entries(leaf)) {

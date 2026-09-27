@@ -67,6 +67,7 @@ export {
   entryTotals,
   formatHistoryTimestamp,
   localDateKey,
+  todayAtomicToNumber,
   isValidTodaySummary,
   addEntryToTodaySummary,
   buildTodaySummary,
