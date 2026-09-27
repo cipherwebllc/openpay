@@ -45,7 +45,9 @@ test.describe('landing / (LP)', () => {
       const result = await page.evaluate(() => {
         const focals = [...document.querySelectorAll('[data-focal]')];
         const overflowing = focals.flatMap((p) => {
-          const card = p.closest('li');
+          // 数字が入る枠 (文字サイズの基準 = container-type を持つ要素) を基準に測る。利用料の行は左の列、
+          // 導入メリットはカード (li) そのもの。
+          const card = p.closest('[class*="container-type"]') ?? p.closest('li');
           if (!card) return [p.textContent];
           const contentRight = card.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(card).paddingRight);
           const range = document.createRange();
@@ -194,9 +196,10 @@ test.describe('landing / (LP)', () => {
     await page.goto('/ja');
     // Fee カードはレジ JPYC の店舗負担率とガスレスの最低額を併記する。
     // focal のビッグナンバーは 1% のまま。Cost / Settlement / NoSignup と合わせ 4 cards。
+    // 「売上を待たない。」が導入メリットの見出し (旧・独立節を統合)。「導入メリット」は章ラベル。
     const benefits = page
       .locator('section')
-      .filter({ has: page.getByRole('heading', { name: '導入メリット' }) });
+      .filter({ has: page.getByRole('heading', { name: '売上を待たない。' }) });
     await expect(benefits).toBeVisible();
     // 4 focal text (ビッグナンバー) — Benefits section 内に scope
     await expect(benefits.getByText('1%', { exact: true })).toBeVisible();

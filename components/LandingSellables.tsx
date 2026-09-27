@@ -18,7 +18,7 @@ export async function LandingSellables() {
   const locale = await getLocale();
 
   return (
-    <section className="mt-24 sm:mt-28">
+    <section className="mt-16 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
         <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('sellablesTitle')}

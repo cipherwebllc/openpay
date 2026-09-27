@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
+import { LandingEntryPoints } from '@/components/LandingEntryPoints';
 
 export async function LandingHowItWorks() {
   const locale = await getLocale();
@@ -34,7 +35,7 @@ export async function LandingHowItWorks() {
   ];
 
   return (
-    <section className="mt-24 sm:mt-28">
+    <section className="mt-16 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
         <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('howItWorksTitle')}
@@ -77,7 +78,7 @@ export async function LandingHowItWorks() {
                 グレー余白を出さない (overflow-hidden で角丸クリップ)。 */}
             <div className="overflow-hidden rounded-2xl border border-slate-200 shadow-card">
               <video
-                className="block h-auto w-[200px]"
+                className="block h-auto w-[168px] sm:w-[200px]"
                 autoPlay
                 muted
                 loop
@@ -129,6 +130,9 @@ export async function LandingHowItWorks() {
           </ol>
         </article>
       </div>
+
+      {/* 用途別の 3 入口 (旧「用途から選ぶ」の独立節) を、手順を読んだ直後の「次の一歩」として置く。 */}
+      <LandingEntryPoints />
 
       <p className="mt-6 text-center text-sm">
         <Link

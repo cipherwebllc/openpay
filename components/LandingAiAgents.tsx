@@ -27,7 +27,7 @@ export async function LandingAiAgents() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-24 sm:mt-28">
+    <section className="mt-16 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
         <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('aiEraTitle')}
@@ -38,14 +38,15 @@ export async function LandingAiAgents() {
       </div>
 
       {/* 囲み (枠 + ラベル) は見た目だけの重ね描き。読み上げは各マスの「OpenPay はここ」で伝える。
-          行の高さは auto-rows-fr でそろえるので (文字を大きくしてラベルが折り返しても)、囲みは PC で右半分・スマホで下半分に一致する。 */}
+          行の高さは auto-rows-fr でそろえるので (文字を大きくしてラベルが折り返しても)、囲みは PC で右半分・スマホで下半分に一致する。
+          スマホは 2×2 (下の段 = QR と AI) で、縦 4 段の半分の高さにする。区切り線は 1px の隙間 (gap-px) で引く。 */}
       <div className="relative mt-12">
-        <ol className="grid auto-rows-fr overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-card divide-y divide-slate-200 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+        <ol className="grid auto-rows-fr grid-cols-2 gap-px overflow-hidden rounded-3xl border border-slate-200/80 bg-slate-200 shadow-card sm:grid-cols-4">
           {ERA_STEPS.map(({ Icon, labelKey, openPay }) => (
             <li
               key={labelKey}
-              className={`flex items-center gap-4 p-5 sm:min-h-44 sm:flex-col sm:justify-center sm:text-center ${
-                openPay ? 'bg-blue-50/80' : ''
+              className={`flex flex-col items-center justify-center gap-3 p-4 text-center sm:min-h-44 sm:gap-4 sm:p-5 ${
+                openPay ? 'bg-blue-50' : 'bg-white'
               }`}
             >
               <span
@@ -84,13 +85,14 @@ export async function LandingAiAgents() {
         <p className="mt-3 text-center text-xs text-slate-500 sm:text-sm">{t('aiEraAgentNote')}</p>
       </div>
 
-      <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
+      {/* 補助の 3 つは小さな横並び (スマホで 3 段の全幅ボタンにすると主導線と同じ重さに見える)。 */}
+      <div className="mt-5 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
         {/* /discovery は flag OFF で notFound になるため、OFF 環境では 404 導線を出さない。 */}
         {env.enableX402Facilitator && (
           <Link
             href={`/${locale}/discovery`}
             prefetch={false}
-            className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:w-auto"
+            className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:px-5 sm:py-2.5 sm:text-sm"
           >
             {t('aiEraCtaStore')}
           </Link>
@@ -98,14 +100,14 @@ export async function LandingAiAgents() {
         <Link
           href={`/${locale}/guide/ai-pay`}
           prefetch={false}
-          className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:w-auto"
+          className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:px-5 sm:py-2.5 sm:text-sm"
         >
           {t('aiEraCtaPay')}
         </Link>
         <Link
           href={`/${locale}/guide/sell`}
           prefetch={false}
-          className="inline-flex w-full items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-5 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:w-auto"
+          className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-300 hover:text-brand active:scale-[0.98] sm:px-5 sm:py-2.5 sm:text-sm"
         >
           {t('aiEraCtaSell')}
         </Link>

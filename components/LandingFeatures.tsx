@@ -71,7 +71,7 @@ export async function LandingFeatures() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-24 sm:mt-28">
+    <section className="mt-16 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
         <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('featuresTitle')}
@@ -82,15 +82,16 @@ export async function LandingFeatures() {
       {/* 開発者向けの技術詳細は最下部 Trust「オープン技術と透明性」の技術スタックに
           一本化した (旧: ガスレスカード下に featuresGaslessTech の小注釈を出していた)。
           ここは一般読者向けの主文のみに留める。 */}
-      <ul className="mt-8 grid gap-4 sm:grid-cols-3">
+      {/* スマホはアイコン左・文章右の詰めた行 (大きなカード 3 枚の余白を減らす・plans/lp-polish-2026-09.md P1)。 */}
+      <ul className="mt-8 grid gap-3 sm:grid-cols-3 sm:gap-4">
         {CARDS.map(({ Icon, titleKey, bodyKey, tone, chains }) => {
           const c = TONE[tone];
           return (
             <li
               key={titleKey}
-              className="flex flex-col gap-2 rounded-2xl bg-white p-6 shadow-card ring-1 ring-slate-200/70"
+              className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 sm:flex sm:flex-col sm:gap-2 sm:p-6"
             >
-              <Icon className={`h-6 w-6 ${c.ink}`} aria-hidden />
+              <Icon className={`row-span-3 mt-0.5 h-6 w-6 ${c.ink}`} aria-hidden />
               <h3 className="text-base font-semibold text-slate-900">
                 {t(titleKey)}
               </h3>
