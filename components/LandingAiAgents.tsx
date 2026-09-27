@@ -1,4 +1,6 @@
 // 決済手段の変遷と、AI エージェントが支払う次の時代を示す。Server Component。
+// OpenPay が受け持つのは QR 決済 (人が払う) から AI が支払うまで。AI だけを強調すると
+// 「OpenPay = AI の支払い」と読まれるので、2 つをまとめて 1 つの「OpenPay はここ」で囲む。
 
 import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
@@ -9,14 +11,15 @@ import { env } from '@/lib/env';
 type EraStep = {
   Icon: LucideIcon;
   labelKey: 'aiEraCash' | 'aiEraCard' | 'aiEraQr' | 'aiEraAgent';
-  current?: true;
+  openPay?: true;
 };
 
+// OpenPay の 2 マスは末尾に並べる (囲みの位置 = PC は右半分・スマホは下半分、を前提にしている)。
 const ERA_STEPS: readonly EraStep[] = [
   { Icon: Banknote, labelKey: 'aiEraCash' },
   { Icon: CreditCard, labelKey: 'aiEraCard' },
-  { Icon: QrCode, labelKey: 'aiEraQr' },
-  { Icon: Bot, labelKey: 'aiEraAgent', current: true },
+  { Icon: QrCode, labelKey: 'aiEraQr', openPay: true },
+  { Icon: Bot, labelKey: 'aiEraAgent', openPay: true },
 ];
 
 export async function LandingAiAgents() {
@@ -34,38 +37,40 @@ export async function LandingAiAgents() {
         </p>
       </div>
 
-      <ol className="mt-10 grid overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-card divide-y divide-slate-200 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
-        {ERA_STEPS.map(({ Icon, labelKey, current }) => (
-          <li
-            key={labelKey}
-            className={`flex items-center gap-4 p-5 sm:min-h-44 sm:flex-col sm:justify-center sm:text-center ${
-              current ? 'bg-blue-50/80' : ''
-            }`}
-          >
-            <span
-              className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl ${
-                current ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+      {/* 囲み (枠 + ラベル) は見た目だけの重ね描き。読み上げは各マスの「OpenPay はここ」で伝える。
+          行の高さは auto-rows-fr でそろえるので (文字を大きくしてラベルが折り返しても)、囲みは PC で右半分・スマホで下半分に一致する。 */}
+      <div className="relative mt-12">
+        <ol className="grid auto-rows-fr overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-card divide-y divide-slate-200 sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+          {ERA_STEPS.map(({ Icon, labelKey, openPay }) => (
+            <li
+              key={labelKey}
+              className={`flex items-center gap-4 p-5 sm:min-h-44 sm:flex-col sm:justify-center sm:text-center ${
+                openPay ? 'bg-blue-50/80' : ''
               }`}
             >
-              <Icon className="h-6 w-6" strokeWidth={1.75} aria-hidden />
-            </span>
-            <span className="flex flex-col items-start gap-1.5 sm:items-center">
               <span
-                className={`text-sm font-semibold ${
-                  current ? 'text-brand' : 'text-slate-700'
+                className={`flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl ${
+                  openPay ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
                 }`}
               >
-                {t(labelKey)}
+                <Icon className="h-6 w-6" strokeWidth={1.75} aria-hidden />
               </span>
-              {current ? (
-                <span className="rounded-full border border-blue-200 bg-white px-2.5 py-1 text-xs font-semibold text-brand">
-                  {t('aiEraNow')}
-                </span>
-              ) : null}
-            </span>
-          </li>
-        ))}
-      </ol>
+              <span className={`text-sm font-semibold ${openPay ? 'text-brand' : 'text-slate-700'}`}>
+                {t(labelKey)}
+                {openPay ? <span className="sr-only"> {t('aiEraNow')}</span> : null}
+              </span>
+            </li>
+          ))}
+        </ol>
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 top-1/2 rounded-b-3xl border-2 border-blue-500 sm:inset-y-0 sm:left-1/2 sm:right-0 sm:rounded-bl-none sm:rounded-r-3xl"
+        >
+          <span className="absolute left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white shadow-sm">
+            {t('aiEraNow')}
+          </span>
+        </div>
+      </div>
 
       {/* 主導線は /agent (Agent を接続して試す)。/agent は flag なしで常に公開。 */}
       <div className="mt-8 flex flex-col items-center">
