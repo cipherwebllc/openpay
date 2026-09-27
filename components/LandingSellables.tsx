@@ -50,6 +50,7 @@ export async function LandingSellables() {
             violet: t('profileDemoColorViolet'),
           },
           sample: {
+            tag: t('profileDemoSampleTag'),
             initial: t('profileDemoSampleInitial'),
             name: t('profileDemoSampleName'),
             handle: t('profileDemoSampleHandle'),

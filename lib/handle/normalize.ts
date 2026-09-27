@@ -25,6 +25,9 @@ export const RESERVED_HANDLES: ReadonlySet<string> = new Set<string>([
   'jpyc', 'usdc', 'wallet', 'account', 'login', 'logout', 'signin',
   'signout', 'settings', 'dashboard', 'about', 'contact', 'home', 'www',
   'app',
+  // トップの自己表現デモ (LandingProfileDemo) の見本ハンドル。第三者が取って「トップで紹介された
+  // ページ」に見せかけるのを防ぐ (2026-09-28 時点で未取得を確認)。
+  'your_shop',
 ]);
 
 // URL のパスセグメントは `@` が `%40` にエンコードされて届くことがある (Next.js は

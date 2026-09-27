@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { LandingProfileDemo, type LandingProfileDemoCopy } from '@/components/LandingProfileDemo';
 import { handlePageTheme, handleViewTheme } from '@/lib/handleTheme';
+import { normalizeHandle, validateHandle } from '@/lib/handle';
+import ja from '../../messages/ja.json';
+import en from '../../messages/en.json';
 
 const c: LandingProfileDemoCopy = {
   title: 'Make the page yours',
@@ -9,7 +12,7 @@ const c: LandingProfileDemoCopy = {
   themeLabel: 'Theme',
   colorLabel: 'Color',
   colorNames: { blue: 'Blue', green: 'Green', rose: 'Rose', amber: 'Amber', violet: 'Violet' },
-  sample: { initial: 'H', name: 'Hidamari Coffee', handle: '@your_shop', bio: 'Coffee.', featured: 'Recipe book', link: 'See the menu' },
+  sample: { tag: 'Sample', initial: 'H', name: 'Hidamari Coffee', handle: '@your_shop', bio: 'Coffee.', featured: 'Recipe book', link: 'See the menu' },
 };
 
 describe('LandingProfileDemo', () => {
@@ -39,5 +42,12 @@ describe('LandingProfileDemo', () => {
     }
     expect(container.querySelector('[aria-label]')).toBeNull();
     expect(screen.getByText('Hidamari Coffee').closest('[aria-hidden]')).not.toBeNull();
+  });
+  it('uses a reserved handle for the sample, so no one can claim the page the top page shows', () => {
+    // 見本のハンドルを第三者が取ると「トップで紹介されたページ」に見せかけられる。予約語で塞ぐ。
+    for (const messages of [ja, en]) {
+      const handle = normalizeHandle(messages.Landing.profileDemoSampleHandle);
+      expect(validateHandle(handle)).toEqual({ ok: false, reason: 'reserved' });
+    }
   });
 });

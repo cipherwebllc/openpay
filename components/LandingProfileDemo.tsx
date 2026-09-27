@@ -29,7 +29,7 @@ export type LandingProfileDemoCopy = {
   themeLabel: string;
   colorLabel: string;
   colorNames: Record<AccentKey, string>;
-  sample: { initial: string; name: string; handle: string; bio: string; featured: string; link: string };
+  sample: { tag: string; initial: string; name: string; handle: string; bio: string; featured: string; link: string };
 };
 
 // clean の通常リンクは公開ページでも class だけで描く (トークン無し)。見本では同じ見た目を inline で近似する。
@@ -82,6 +82,10 @@ export function LandingProfileDemo({ c }: { c: LandingProfileDemoCopy }) {
         style={{ background: page.full ? page.background : '#ffffff' }}
       >
         {page.full ? null : <div className="absolute inset-x-0 top-0 h-40" style={{ background: page.background }} />}
+        {/* 実在のお店に見えないよう、見本であることをカードの上に出す。 */}
+        <span className={`absolute left-3 top-3 rounded-full px-2 py-0.5 text-[10px] font-bold ${page.dark ? 'bg-white/15 text-white' : 'bg-slate-900/80 text-white'}`}>
+          {c.sample.tag}
+        </span>
         <div className="relative flex flex-col items-center px-5 pb-6 pt-8 text-center">
           <span
             className="grid h-16 w-16 place-items-center rounded-full text-2xl font-bold text-white"
