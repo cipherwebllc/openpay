@@ -63,6 +63,35 @@ test.describe('landing / (LP)', () => {
     }
   });
 
+  // 接続後の表示 (plans/lp-polish-2026-09.md P4a): 前回つないだまま離れた端末には、描画前 script がヒーローより前に
+  // 「あなたの OpenPay」の場所を取る。wagmi は起動時に wagmi.store を初期状態へ書き戻すので、hydration 後も
+  // script の結果を保つこと (再接続できない CI でも消えない = 下の節を押し上げない) を実ブラウザで確かめる。
+  test('再訪の接続者にはヒーローより前に「あなたの OpenPay」を出し、hydration 後も消さない・初めての訪問者には出さない', async ({
+    page,
+  }) => {
+    await page.goto('/ja');
+    await expect(page.getByRole('heading', { name: 'あなたの OpenPay' })).toBeHidden();
+
+    await page.addInitScript(() => {
+      window.localStorage.setItem(
+        'wagmi.store',
+        JSON.stringify({ state: { connections: { __type: 'Map', value: [] }, chainId: 137, current: 'e2e-uid' }, version: 2 }),
+      );
+    });
+    await page.goto('/ja');
+    const strip = page.getByRole('region', { name: 'あなたの OpenPay' });
+    await expect(strip).toBeVisible();
+    await expect(strip.getByRole('link', { name: '履歴' })).toHaveAttribute('href', '/ja/history');
+    // hydration と再接続の試行が済んでも枠は残る (wagmi の書き戻しで消えない)。
+    await page.waitForLoadState('networkidle');
+    await expect(page.locator('[data-returning]')).toHaveAttribute('data-returning', 'yes');
+    await expect(strip).toBeVisible();
+    // ヒーローより前にある (1 画面目で自分の道具へ行ける)。
+    const stripBox = await strip.boundingBox();
+    const heroBox = await page.getByRole('heading', { name: /スマホひとつで、JPYCを支払いにも販売にも/ }).boundingBox();
+    expect(stripBox && heroBox && stripBox.y < heroBox.y).toBe(true);
+  });
+
   test('en: Hero の 2 CTA は英語表記で描画される', async ({ page }) => {
     await page.goto('/en');
     await expect(

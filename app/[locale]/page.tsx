@@ -21,7 +21,7 @@ import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
 import { MarketRates } from '@/components/MarketRates';
 import { LandingBand } from '@/components/LandingSectionHeader';
-import { TodayCard } from '@/components/TodayCard';
+import { LandingYourOpenPay } from '@/components/LandingYourOpenPay';
 
 export default async function HomePage({
   params,
@@ -36,10 +36,11 @@ export default async function HomePage({
       <AppShell>
         {/* SEO/AIEO: SoftwareApplication + FAQPage の JSON-LD (表示 UI なし) */}
         <StructuredData />
+        {/* 再訪の接続者だけに、ヒーローより前に「あなたの OpenPay」(道具への近道 + 今日の売上・plans/lp-polish-2026-09.md P4a)。
+            出すかどうかは描画前 script で決め、最初の描画から場所を取る (後から押し下げない)。未接続の訪問者には描かない (LP 不変)。
+            ヒーローの下だと PC ではヒーローの画像の下 (1 画面目の外) になり、戻ってきた人が自分の道具へすぐ行けない。 */}
+        <LandingYourOpenPay />
         <LandingHero />
-        {/* 接続済み店主のみ mount 後に描画 (未接続/当日データなしは null = LP 不変)。
-            Hero 直下・MarketRates の前に置き、Hero を押し下げない (CLS/LCP 保護)。 */}
-        <TodayCard />
         <div className="mt-6">
           <MarketRates />
         </div>
