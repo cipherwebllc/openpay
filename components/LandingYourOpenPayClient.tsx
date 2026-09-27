@@ -106,21 +106,28 @@ function initialOf(name: string | undefined, handle: string): string {
  * 帯の「自分のページ」の行。サインイン済み (接続中のアドレス = セッション) で @handle を持っていれば、公開ページと
  * 同じテーマと色の小さなカードに差し替える。それ以外 (未サインイン・読み込み中・handle なし・失敗) は server が描いた
  * 既定の行 (作る・編集する) のまま。どちらも同じ高さなので、差し替えても下の段は動かない。
- * 取得は GET /api/handle を他の画面と同じ cache で 1 回 (KV 2〜5 コマンド・サインイン済みの持ち主だけ)。
+ * 取得は GET /api/handle を他の画面と同じ cache で、ページの読み込みごとに 1 回 (KV 2〜5 コマンド・サインイン済みの持ち主だけ)。
+ * 再読み込みを越えて控える (sessionStorage) ことはしない: 編集画面で保存した直後に開き直すと古いテーマが出るため
+ * (plans/lp-polish-2026-09.md §2.4.2)。
  */
 export function YourOpenPayPage({ fallback, pageLabel, editLabel }: { fallback: ReactNode; pageLabel: string; editLabel: string }) {
   const locale = useLocale();
   const { status } = useAccount();
   const { isSignedIn, sessionAddress } = useSiweSession();
-  const [avatarFailed, setAvatarFailed] = useState(false);
+  // 読めなかった画像の URL (URL が変われば、新しい画像をもう一度試す・components/HandleProfile.tsx と同じ)。
+  const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
   const enabled = isSignedIn && status === 'connected';
   const mine = useQuery({
     queryKey: myHandlesQueryKey(sessionAddress),
     enabled,
     queryFn: fetchMyHandles,
-    // トップを開き直すたびに取り直さない (編集画面の保存は ['handle-mine'] を invalidate するので古いままにならない)。
+    // アプリ内の移動で戻ってきたときは取り直さない (編集画面の保存は ['handle-mine'] を invalidate するので古いままにならない)。
     staleTime: 5 * 60_000,
+    // 飾りのカードなので、失敗は既定の行に戻すだけで取り直さない (401・502 のたびに KV を叩き直さない)。
+    retry: false,
   });
+  // 無効な query も、前にサインインした wallet の cache を返す。別の wallet でつないでいる間 (isSignedIn = false) に
+  // その人のページを出さないよう、今の条件を満たすときだけ使う。
   const own = enabled ? latestHandle(mine.data?.handles) : null;
   if (!own) return <>{fallback}</>;
 
@@ -129,7 +136,7 @@ export function YourOpenPayPage({ fallback, pageLabel, editLabel }: { fallback: 
   const theme = resolveHandleTheme(own.profile?.theme);
   const view = handleViewTheme(accent, theme);
   const page = handlePageTheme(accent, theme);
-  const avatar = own.profile?.avatar && !avatarFailed ? own.profile.avatar : null;
+  const avatar = own.profile?.avatar && own.profile.avatar !== failedAvatar ? own.profile.avatar : null;
   const name = own.config.name?.trim();
 
   return (
@@ -140,8 +147,9 @@ export function YourOpenPayPage({ fallback, pageLabel, editLabel }: { fallback: 
       {page.full ? null : <div aria-hidden className="absolute inset-0" style={{ background: page.background }} />}
       {/* リンク名 = 見えている名前と @handle (掟 8)。 */}
       <Link href={`/${locale}/@${own.handle}`} prefetch={false} className="relative flex min-w-0 flex-1 items-center gap-3">
+        {/* PC は行の高さが 40px (道具のボタンと同じ)。アバターの外側の輪 (最大 6px) ごと収まるよう 28px にする。 */}
         <span
-          className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full text-base font-bold text-white"
+          className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full text-base font-bold text-white lg:h-7 lg:w-7 lg:text-xs"
           style={{ backgroundColor: accent, boxShadow: view.avatarRing }}
         >
           {avatar ? (
@@ -153,7 +161,7 @@ export function YourOpenPayPage({ fallback, pageLabel, editLabel }: { fallback: 
               loading={undefined}
               decoding="async"
               className="h-full w-full object-cover"
-              onError={() => setAvatarFailed(true)}
+              onError={() => setFailedAvatar(avatar)}
             />
           ) : (
             <span aria-hidden>{initialOf(name, own.handle)}</span>

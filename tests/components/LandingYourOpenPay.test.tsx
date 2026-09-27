@@ -308,8 +308,7 @@ describe('YourOpenPayPage (自分のページ・P4b)', () => {
     expect(screen.queryByText('古いページ')).toBeNull();
     // 名前 = inkColor・@handle = handleColor (components/HandleProfile.tsx と同じ割り当て)。
     const view = handleViewTheme('#7c3aed', 'night');
-    expect(screen.getByText('こもれび').style.color).toBe('rgb(248, 250, 252)');
-    expect(view.inkColor).toBe('#f8fafc');
+    expect(screen.getByText('こもれび')).toHaveStyle({ color: view.inkColor });
     expect(screen.getByText('@komorebi')).toHaveStyle({ color: view.handleColor });
     expect(screen.getByRole('link', { name: ja.Landing.yourOpenPayPageEdit })).toHaveAttribute('href', '/ja/create?tab=profile');
     expect(screen.queryByRole('link', { name: '既定の行' })).toBeNull();
@@ -337,6 +336,39 @@ describe('YourOpenPayPage (自分のページ・P4b)', () => {
     expect(container.querySelector('img')).toBeNull();
     expect(screen.getByText('P')).toBeInTheDocument();
   });
+  it('別の wallet でつないでいる間は、前にサインインした wallet の cache があっても出さず、取りにも行かない', async () => {
+    const fetchSpy = mockHandles({ ok: true, handles: [], max: 3 });
+    // セッション (OWNER) の cache は残っている (前に /create で読んだ)。
+    queryClient.setQueryData(['handle-mine', OWNER], {
+      max: 3,
+      handles: [{ handle: 'owner_page', config: { to: OWNER, name: '持ち主', methods: [] }, updatedAt: 1 }],
+    });
+    account.status = 'connected';
+    account.address = '0xBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBbBb';
+    siwe.isSignedIn = false; // 接続中のアドレス ≠ セッションのアドレス
+    siwe.sessionAddress = OWNER;
+    renderStrip(page());
+    await act(async () => {});
+    expect(screen.queryByText('持ち主')).toBeNull();
+    expect(screen.getByRole('link', { name: '既定の行' })).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+  it('開き直しても 5 分以内は取り直さず、編集画面の保存 (invalidate) の後は取り直す', async () => {
+    const fetchSpy = mockHandles({ ok: true, max: 3, handles: [{ handle: 'komorebi', config: { to: OWNER, name: 'こもれび', methods: [] } }] });
+    signIn();
+    const first = renderStrip(page());
+    await screen.findByRole('link', { name: /こもれび/ });
+    first.unmount();
+    renderStrip(page());
+    await screen.findByRole('link', { name: /こもれび/ });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({ ok: true, max: 3, handles: [] }), { status: 200 }));
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['handle-mine'] });
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole('link', { name: '既定の行' })).toBeInTheDocument();
+  });
   it('handle がない・取得に失敗したときは既定の行のまま (0 件と失敗を偽装しない = 既定の行に戻すだけ)', async () => {
     mockHandles({ ok: true, max: 3, handles: [] });
     signIn();
@@ -344,10 +376,13 @@ describe('YourOpenPayPage (自分のページ・P4b)', () => {
     await act(async () => {});
     expect(screen.getByRole('link', { name: '既定の行' })).toBeInTheDocument();
     first.unmount();
-    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    mockHandles({ ok: false, error: 'kv_error' }, 502);
+    queryClient = new QueryClient();
+    const failing = mockHandles({ ok: false, error: 'kv_error' }, 502);
     renderStrip(page());
     await act(async () => {});
     expect(screen.getByRole('link', { name: '既定の行' })).toBeInTheDocument();
+    // 飾りのカードなので失敗しても取り直さない (KV を叩き直さない)。既定の再試行は 1 秒後からなので、設定そのものを見る。
+    expect(failing).toHaveBeenCalledTimes(1);
+    expect(queryClient.getQueryCache().find({ queryKey: ['handle-mine', OWNER] })?.options.retry).toBe(false);
   });
 });
