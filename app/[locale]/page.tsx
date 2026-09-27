@@ -9,7 +9,6 @@ import { StructuredData } from '@/components/StructuredData';
 import { LandingHero } from '@/components/LandingHero';
 import { LandingAiAgents } from '@/components/LandingAiAgents';
 import { LandingBenefits } from '@/components/LandingBenefits';
-import { LandingEntryPoints } from '@/components/LandingEntryPoints';
 import { LandingFeatures } from '@/components/LandingFeatures';
 import { LandingWhyStablecoin } from '@/components/LandingWhyStablecoin';
 import { LandingCashComparison } from '@/components/LandingCashComparison';
@@ -17,7 +16,6 @@ import { LandingSellables } from '@/components/LandingSellables';
 import { LandingUseCases } from '@/components/LandingUseCases';
 import { LandingHowItWorks } from '@/components/LandingHowItWorks';
 import { LandingMobileOrder } from '@/components/LandingMobileOrder';
-import { LandingPayoutStatement } from '@/components/LandingPayoutStatement';
 import { LandingFaq } from '@/components/LandingFaq';
 import { LandingSupport } from '@/components/LandingSupport';
 import { LandingTrust } from '@/components/LandingTrust';
@@ -47,15 +45,11 @@ export default async function HomePage({
         {/* 決済 QR はコモディティ化 (競合も 0% JPYC QR)。差別化はその先の店舗オペレーション =
             モバイル注文を Hero 直下へ昇格し「決済だけでない深さ」を最初に見せる (定番/インフラ positioning)。 */}
         <LandingMobileOrder />
-        {/* モバイル注文昇格の直後に「売上を待たない」の一枚で、即時着金の価値を一文で刻む。 */}
-        <LandingPayoutStatement />
-        {/* 総合案内化 P1 (plans/site-ia-guides-ruling.md): 初訪問者の前提知識
-            「なぜステーブルコイン/JPYCとは」を、できること一覧の前に置く。 */}
-        <LandingWhyStablecoin />
-        {/* 用途別 3 入口 (総合案内化 P1)。「できること 4 区分」はジョブズ・パス第 2 弾で
-            削除 (下部ナビが常時同じ 4 入口 = ページ内複製は冗長。plans/lp-jobs-pass2.md P1)。 */}
-        <LandingEntryPoints />
+        {/* モバイル注文の直後に「売上を待たない。」を見出しにした導入メリット (旧: 1 行だけの独立節を統合・
+            plans/lp-polish-2026-09.md P1)。即時着金の価値と、店舗・顧客の実利を 1 か所で見せる。 */}
         <LandingBenefits />
+        {/* 総合案内化 P1 (plans/site-ia-guides-ruling.md): 初訪問者の前提知識「なぜステーブルコイン/JPYCとは」。 */}
+        <LandingWhyStablecoin />
         <LandingCashComparison />
         {/* 販売セクション (plans/lp-restructure-ruling.md P2)。店舗向けの後に
             「決済だけでなく販売プラットフォーム」への広がりを見せる。カテゴリは
@@ -67,7 +61,8 @@ export default async function HomePage({
         {/* 特長 3 カードは FAQ 等と一部重複するが「わかりやすさ優先で残す」(2026-08-05 user 裁定)。 */}
         <LandingFeatures />
         <LandingUseCases />
-        {/* 3 ステップは「使いたくなった読者」への締め (シーンの後・FAQ の前)。 */}
+        {/* 3 ステップは「使いたくなった読者」への締め (シーンの後・FAQ の前)。用途別の 3 入口 (旧「用途から選ぶ」) も
+            ここに統合する (入口を 1 か所に・plans/lp-polish-2026-09.md P1)。 */}
         <LandingHowItWorks />
         <LandingFaq />
         <LandingSupport />

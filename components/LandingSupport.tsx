@@ -59,7 +59,7 @@ export async function LandingSupport() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-24 sm:mt-28">
+    <section className="mt-16 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
         <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('supportTitle')}
@@ -67,38 +67,44 @@ export async function LandingSupport() {
         <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('supportSubtitle')}</p>
       </div>
 
-      {/* 4 方法の利用料カード (導入メリットと同じビッグナンバー様式)。focal は benefits より一段小さい
-          最大 (1.875rem / sm 2.25rem) と「カード幅に収まる大きさ」の小さい方で 1 行に収める (lib/focalFit.ts)。
-          未知の書体で収まらなければ空白で折り返す。 */}
-      <ul className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      {/* 5 つの利用料カード (導入メリットと同じビッグナンバー様式)。スマホは 1 列の行で、左 = 数字と負担者・
+          右 = 名前と説明 (2 列の細いカードで説明が 10 行以上に折り返すのを避ける・plans/lp-polish-2026-09.md P1)。
+          説明は全文を常に見せる (たたまない: 負担者・最低額・対象は開示なので見える場所に置く)。
+          focal はその列の幅に収まる大きさ (lib/focalFit.ts)。PC も同じ行の形で 1 列に並べる
+          (5 枚を 4 列に置くと 1 枚だけ次の段に取り残される)。 */}
+      <ul className="mx-auto mt-8 grid max-w-4xl grid-cols-1 gap-3">
         {FEE_CARDS.map(({ id, audience, Icon }) => {
           const focal = t(`supportFee${id}Focal`, LANDING_PAYMENT_FEE_VALUES);
           return (
           <li
             key={id}
-            className="flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 [container-type:inline-size] sm:p-6"
+            className="flex gap-4 rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70 sm:gap-6 sm:p-5"
           >
-            <span className="flex items-center justify-between gap-2">
-              <Icon className="h-5 w-5 text-brand" aria-hidden />
-              <span
-                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${FEE_TONE[audience].pillBg} ${FEE_TONE[audience].pillInk}`}
-              >
-                {t(FEE_AUDIENCE_LABEL_KEY[audience])}
+            <div className="w-24 shrink-0 [container-type:inline-size] sm:w-40">
+              <span className="flex items-center justify-between gap-2">
+                <Icon className="h-5 w-5 text-brand" aria-hidden />
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${FEE_TONE[audience].pillBg} ${FEE_TONE[audience].pillInk}`}
+                >
+                  {t(FEE_AUDIENCE_LABEL_KEY[audience])}
+                </span>
               </span>
-            </span>
-            <p
-              className={`mt-4 break-keep text-[length:min(1.875rem,var(--focal-fit))] font-extrabold leading-none sm:text-[length:min(2.25rem,var(--focal-fit))] ${FEE_TONE[audience].focal}`}
-              style={{ '--focal-fit': focalFitCqi(focal) } as CSSProperties}
-              data-focal=""
-            >
-              {focal}
-            </p>
-            <h3 className="mt-3 text-sm font-semibold text-slate-900 sm:text-base">
-              {t(`supportFee${id}Title`)}
-            </h3>
-            <p className="mt-2 text-xs leading-relaxed text-slate-600 sm:text-sm">
-              {t(`supportFee${id}Body`, LANDING_PAYMENT_FEE_VALUES)}
-            </p>
+              <p
+                className={`mt-3 break-keep text-[length:min(1.875rem,var(--focal-fit))] font-extrabold leading-none sm:mt-4 sm:text-[length:min(2.25rem,var(--focal-fit))] ${FEE_TONE[audience].focal}`}
+                style={{ '--focal-fit': focalFitCqi(focal) } as CSSProperties}
+                data-focal=""
+              >
+                {focal}
+              </p>
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-sm font-semibold text-slate-900 sm:text-base">
+                {t(`supportFee${id}Title`)}
+              </h3>
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-600 sm:mt-2 sm:text-sm">
+                {t(`supportFee${id}Body`, LANDING_PAYMENT_FEE_VALUES)}
+              </p>
+            </div>
           </li>
           );
         })}

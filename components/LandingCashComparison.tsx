@@ -28,7 +28,7 @@ export async function LandingCashComparison() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-24 sm:mt-28">
+    <section className="mt-16 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
         <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('cashTitle')}
@@ -100,57 +100,26 @@ export async function LandingCashComparison() {
       </div>
 
       {/* 円⇄JPYC の 1:1 図解: 円 → (購入) → JPYC → (JPYC EX で 1:1 換金) → 円。
-          既存 FAQ / MarketRates の表現を踏襲し、新しい法的主張は発明しない。 */}
-      <div className="mx-auto mt-8 max-w-3xl rounded-2xl border border-slate-200 bg-white p-5 shadow-card sm:p-6">
-        <h3 className="text-center text-base font-bold text-slate-900 sm:text-lg">
-          {t('cashFlowTitle')}
-        </h3>
-        <div className="mt-5 overflow-x-auto">
-          <div className="mx-auto flex min-w-max items-center justify-center gap-3 sm:gap-4">
-            {/* 円 */}
-            <div className="flex flex-col items-center">
-              <span className="flex h-14 w-14 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-2xl font-bold text-slate-700">
-                ¥
-              </span>
-              <span className="mt-1.5 text-xs font-semibold text-slate-600">
-                {t('cashFlowYen')}
-              </span>
-            </div>
-            {/* → 購入 */}
-            <div className="flex flex-col items-center text-slate-400">
-              <ArrowRight className="h-5 w-5" aria-hidden />
-              <span className="mt-1 whitespace-nowrap text-[11px] text-slate-500">
-                {t('cashFlowBuy')}
-              </span>
-            </div>
-            {/* JPYC */}
-            <div className="flex flex-col items-center">
-              <span className="flex h-14 w-14 items-center justify-center rounded-full border border-slate-200 bg-white">
-                <TokenLogo symbol="jpyc" size={36} alt="JPYC" />
-              </span>
-              <span className="mt-1.5 text-xs font-semibold text-slate-600">
-                JPYC
-              </span>
-            </div>
-            {/* → 換金 */}
-            <div className="flex flex-col items-center text-slate-400">
-              <ArrowRight className="h-5 w-5" aria-hidden />
-              <span className="mt-1 whitespace-nowrap text-[11px] text-slate-500">
-                {t('cashFlowRedeem')}
-              </span>
-            </div>
-            {/* 円 */}
-            <div className="flex flex-col items-center">
-              <span className="flex h-14 w-14 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-2xl font-bold text-slate-700">
-                ¥
-              </span>
-              <span className="mt-1.5 text-xs font-semibold text-slate-600">
-                {t('cashFlowBackYen')}
-              </span>
-            </div>
+          既存 FAQ / MarketRates の表現を踏襲し、新しい法的主張は発明しない。大きなカードにせず 1 本の帯にする
+          (直前の「なぜ今」で 1 JPYC = 1 円は伝えてあるので、ここは「円に戻せる」道筋だけを短く・plans/lp-polish-2026-09.md P1)。 */}
+      <div className="mx-auto mt-6 max-w-3xl rounded-2xl bg-slate-100/70 px-4 py-4 sm:px-6">
+        <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between sm:gap-6">
+          <h3 className="shrink-0 text-sm font-bold text-slate-900 sm:text-base">{t('cashFlowTitle')}</h3>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <FlowStep label={t('cashFlowYen')}>
+              <span className="text-base font-bold text-slate-700">¥</span>
+            </FlowStep>
+            <FlowArrow label={t('cashFlowBuy')} />
+            <FlowStep label="JPYC">
+              <TokenLogo symbol="jpyc" size={24} alt="JPYC" />
+            </FlowStep>
+            <FlowArrow label={t('cashFlowRedeem')} />
+            <FlowStep label={t('cashFlowBackYen')}>
+              <span className="text-base font-bold text-slate-700">¥</span>
+            </FlowStep>
           </div>
         </div>
-        <p className="mt-4 text-center text-xs leading-relaxed text-slate-500">
+        <p className="mt-3 text-center text-xs leading-relaxed text-slate-500 sm:text-right">
           {/* JPYC EX はテキストリンク (新規タブ)。href/描画は LandingFaq の <jpycEx> と同一パターン。 */}
           {t.rich('cashFlowNote', {
             jpycEx: (chunks) => (
@@ -172,5 +141,27 @@ export async function LandingCashComparison() {
         <SavingsSimulator />
       </div>
     </section>
+  );
+}
+
+// 1:1 図解の 1 段 (丸 + ラベル)。
+function FlowStep({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <span className="flex flex-col items-center">
+      <span className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white">
+        {children}
+      </span>
+      <span className="mt-1 text-[11px] font-semibold text-slate-600">{label}</span>
+    </span>
+  );
+}
+
+// 1:1 図解の矢印 (装飾の矢印 + 可視ラベル)。
+function FlowArrow({ label }: { label: string }) {
+  return (
+    <span className="flex flex-col items-center text-slate-400">
+      <ArrowRight className="h-4 w-4" aria-hidden />
+      <span className="mt-1 whitespace-nowrap text-[10px] text-slate-500">{label}</span>
+    </span>
   );
 }

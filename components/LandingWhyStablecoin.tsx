@@ -27,7 +27,7 @@ export async function LandingWhyStablecoin() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-24 sm:mt-28">
+    <section className="mt-16 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
         <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('whyStablecoinTitle')}
@@ -36,28 +36,29 @@ export async function LandingWhyStablecoin() {
           {t('whyStablecoinSubtitle')}
         </p>
       </div>
-      <div className="mx-auto mt-8 grid max-w-4xl grid-cols-1 gap-4 sm:grid-cols-2">
+      {/* スマホでも 2×2 の小さなタイル (1 列の大きなカード 4 枚 ≒ 2 画面ぶんを半分に・plans/lp-polish-2026-09.md P1)。 */}
+      <div className="mx-auto mt-8 grid max-w-4xl grid-cols-2 gap-3 sm:gap-4">
         {ITEMS.map(({ key, icon: Icon }) => (
           <div
             key={key}
-            className="flex flex-col rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)]"
+            className="flex flex-col rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.07)] sm:p-5"
           >
-            <span className="flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand/10">
+            <span className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand/10 sm:h-10 sm:w-10">
                 <Icon className="h-5 w-5 text-brand" aria-hidden />
               </span>
-              <span className="text-lg font-bold text-slate-900">
+              <span className="text-sm font-bold text-slate-900 sm:text-lg">
                 {t(`whyItem${key}Title`)}
               </span>
             </span>
-            <p className="mt-3 text-sm leading-relaxed text-slate-600">
+            <p className="mt-2 text-xs leading-relaxed text-slate-600 sm:mt-3 sm:text-sm">
               {t(`whyItem${key}Body`)}
             </p>
           </div>
         ))}
       </div>
       {/* JPYC の一言説明 — 独立セクションにせず補足カードとして添える。 */}
-      <div className="mx-auto mt-4 max-w-4xl rounded-2xl border border-blue-200/70 bg-gradient-to-br from-blue-50 to-blue-100/30 p-5 sm:p-6">
+      <div className="mx-auto mt-3 max-w-4xl rounded-2xl border border-blue-200/70 bg-gradient-to-br from-blue-50 to-blue-100/30 p-4 sm:mt-4 sm:p-6">
         <h3 className="text-base font-bold text-blue-900 sm:text-lg">
           {t('jpycNoteTitle')}
         </h3>

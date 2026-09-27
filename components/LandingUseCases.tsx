@@ -59,41 +59,49 @@ export async function LandingUseCases() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-24 sm:mt-28">
+    <section className="mt-16 sm:mt-28">
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
+        <h2 id="lp-use-cases-title" className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
           {t('useCasesTitle')}
         </h2>
         <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('useCasesSubtitle')}</p>
       </div>
 
-      {/* 7 件 grid。mobile も 2 col (縦積み 1 col ≒ 3 画面分の縦長を半減 —
-          plans/lp-jobs-pass2.md P3)。lg 3 col。端数は justify-center で中央寄せ。 */}
-      <ul className="mt-10 flex flex-wrap justify-center gap-3 sm:gap-4">
-        {USE_CASES.map((useCase) => (
-          <li
-            key={useCase.id}
-            className="w-[calc(50%-0.375rem)] overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 sm:w-[calc(50%-0.5rem)] lg:w-[calc((100%-2rem)/3)]"
-          >
-            <Image
-              src={useCase.image}
-              alt={t(useCase.altKey)}
-              width={960}
-              height={540}
-              sizes="(min-width: 1024px) 31vw, 46vw"
-              className="aspect-video w-full object-cover"
-            />
-            <div className="flex flex-col gap-1.5 p-3.5 sm:gap-2 sm:p-5">
-              <h3 className="text-sm font-semibold text-slate-900 sm:text-base">
-                {t(`useCase${useCase.id}Title`)}
-              </h3>
-              <p className="text-xs leading-relaxed text-slate-600 sm:text-sm">
-                {t(`useCase${useCase.id}Body`)}
-              </p>
-            </div>
-          </li>
-        ))}
-      </ul>
+      {/* スマホは横スクロールの 1 行 (2 列の格子 4 段 ≒ 1 画面強を 1 段に・plans/lp-polish-2026-09.md P1)。
+          次のカードが少し見えて「横に続く」と分かる幅にする。スクロール領域はキーボードでも動かせるよう
+          フォーカス可能にし、名前は見出しから取る (掟 8: 可視テキスト由来)。sm 以上は従来の格子。 */}
+      <div
+        role="region"
+        aria-labelledby="lp-use-cases-title"
+        tabIndex={0}
+        className="-mx-4 mt-8 snap-x snap-mandatory overflow-x-auto px-4 pb-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:mx-0 sm:mt-10 sm:overflow-visible sm:px-0 sm:pb-0"
+      >
+        <ul className="flex gap-3 sm:flex-wrap sm:justify-center sm:gap-4">
+          {USE_CASES.map((useCase) => (
+            <li
+              key={useCase.id}
+              className="w-[72%] shrink-0 snap-start overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 sm:w-[calc(50%-0.5rem)] sm:shrink lg:w-[calc((100%-2rem)/3)]"
+            >
+              <Image
+                src={useCase.image}
+                alt={t(useCase.altKey)}
+                width={960}
+                height={540}
+                sizes="(min-width: 1024px) 31vw, (min-width: 640px) 46vw, 72vw"
+                className="aspect-video w-full object-cover"
+              />
+              <div className="flex flex-col gap-1.5 p-3.5 sm:gap-2 sm:p-5">
+                <h3 className="text-sm font-semibold text-slate-900 sm:text-base">
+                  {t(`useCase${useCase.id}Title`)}
+                </h3>
+                <p className="text-xs leading-relaxed text-slate-600 sm:text-sm">
+                  {t(`useCase${useCase.id}Body`)}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
     </section>
   );
 }

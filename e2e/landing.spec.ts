@@ -194,9 +194,10 @@ test.describe('landing / (LP)', () => {
     await page.goto('/ja');
     // Fee カードはレジ JPYC の店舗負担率とガスレスの最低額を併記する。
     // focal のビッグナンバーは 1% のまま。Cost / Settlement / NoSignup と合わせ 4 cards。
+    // 「売上を待たない。」が導入メリットの見出し (旧・独立節を統合)。「導入メリット」は章ラベル。
     const benefits = page
       .locator('section')
-      .filter({ has: page.getByRole('heading', { name: '導入メリット' }) });
+      .filter({ has: page.getByRole('heading', { name: '売上を待たない。' }) });
     await expect(benefits).toBeVisible();
     // 4 focal text (ビッグナンバー) — Benefits section 内に scope
     await expect(benefits.getByText('1%', { exact: true })).toBeVisible();

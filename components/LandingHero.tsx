@@ -47,20 +47,22 @@ export async function LandingHero() {
         </div>
       </section>
 
-      <section className="mt-7 grid gap-3.5 sm:mt-10 sm:grid-cols-2 sm:gap-4">
+      {/* スマホも 2 列 (縦に 2 枚積むと 1 画面の半分を使う・plans/lp-polish-2026-09.md P1)。説明文は見出しと
+          同じことを言うので sm 以上だけに出す。リンク名は見出し + ボタンの可視テキスト。 */}
+      <section className="mt-7 grid grid-cols-2 gap-3 sm:mt-10 sm:gap-4">
         <Link
           href={`/${locale}/scan`}
           prefetch={false}
-          className="group flex flex-col gap-4 rounded-3xl border border-blue-200/70 bg-gradient-to-br from-blue-50 to-blue-100/30 p-6 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-card-hover active:translate-y-0 active:scale-[0.99] sm:p-7"
+          className="group flex min-w-0 flex-col gap-3 rounded-3xl border border-blue-200/70 bg-gradient-to-br from-blue-50 to-blue-100/30 p-4 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-card-hover active:translate-y-0 active:scale-[0.99] sm:gap-4 sm:p-7"
         >
-          <div className="flex items-center gap-3 text-blue-900">
-            <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-blue-600/10 text-blue-700">
+          <div className="flex flex-col items-start gap-2 text-blue-900 sm:flex-row sm:items-center sm:gap-3">
+            <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-blue-600/10 text-blue-700 sm:h-11 sm:w-11">
               <ScanLine className="h-[22px] w-[22px]" aria-hidden />
             </span>
-            <h3 className="text-lg font-semibold sm:text-xl">{t('ctaScanTitle')}</h3>
+            <h3 className="text-base font-semibold leading-snug sm:text-xl">{t('ctaScanTitle')}</h3>
           </div>
-          <p className="text-sm leading-relaxed text-blue-800/90">{t('ctaScanBody')}</p>
-          <span className="mt-auto inline-flex w-fit items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors group-hover:bg-blue-700">
+          <p className="hidden text-sm leading-relaxed text-blue-800/90 sm:block">{t('ctaScanBody')}</p>
+          <span className="mt-auto inline-flex w-full items-center justify-center gap-1 rounded-xl bg-blue-600 px-3 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors group-hover:bg-blue-700 sm:w-fit sm:gap-1.5 sm:px-4 sm:text-sm">
             {t('ctaScanButton')}
             <span
               aria-hidden
@@ -74,20 +76,20 @@ export async function LandingHero() {
         <Link
           href={`/${locale}/create`}
           prefetch={false}
-          className="group flex flex-col gap-4 rounded-3xl border border-emerald-200/70 bg-gradient-to-br from-emerald-50 to-emerald-100/30 p-6 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-card-hover active:translate-y-0 active:scale-[0.99] sm:p-7"
+          className="group flex min-w-0 flex-col gap-3 rounded-3xl border border-emerald-200/70 bg-gradient-to-br from-emerald-50 to-emerald-100/30 p-4 shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-card-hover active:translate-y-0 active:scale-[0.99] sm:gap-4 sm:p-7"
         >
-          <div className="flex items-center gap-3 text-emerald-900">
-            <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-2xl bg-emerald-600/10 text-emerald-700">
+          <div className="flex flex-col items-start gap-2 text-emerald-900 sm:flex-row sm:items-center sm:gap-3">
+            <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-emerald-600/10 text-emerald-700 sm:h-11 sm:w-11">
               <QrCode className="h-[22px] w-[22px]" aria-hidden />
             </span>
-            <h3 className="text-lg font-semibold sm:text-xl">
+            <h3 className="text-base font-semibold leading-snug sm:text-xl">
               {t('ctaCreateTitle')}
             </h3>
           </div>
-          <p className="text-sm leading-relaxed text-emerald-800/90">
+          <p className="hidden text-sm leading-relaxed text-emerald-800/90 sm:block">
             {t('ctaCreateBody')}
           </p>
-          <span className="mt-auto inline-flex w-fit items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors group-hover:bg-emerald-700">
+          <span className="mt-auto inline-flex w-full items-center justify-center gap-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors group-hover:bg-emerald-700 sm:w-fit sm:gap-1.5 sm:px-4 sm:text-sm">
             {t('ctaCreateButton')}
             <span
               aria-hidden

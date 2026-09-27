@@ -11,7 +11,7 @@ export async function LandingTrust() {
   ]);
 
   return (
-    <section className="relative mt-24 overflow-hidden rounded-[2rem] bg-slate-900 p-8 sm:mt-28 sm:p-12">
+    <section className="relative mt-16 overflow-hidden rounded-[2rem] bg-slate-900 p-8 sm:mt-28 sm:p-12">
       {/* 装飾: 上部の淡いブランドグロー (ダーク面の奥行き)。 */}
       <div
         aria-hidden

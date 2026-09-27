@@ -58,12 +58,15 @@ export async function LandingBenefits() {
   const t = await getTranslations('Landing');
 
   return (
-    <section className="mt-24 sm:mt-28">
+    <section className="mt-16 sm:mt-28">
+      {/* 見出しは「売上を待たない。」(旧・独立節の一文)。「導入メリット」は章ラベルに回し、
+          即時着金の一文と 4 枚の実利を 1 か所で読ませる。 */}
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
-          {t('benefitsTitle')}
+        <p className="text-sm font-bold text-brand">{t('benefitsTitle')}</p>
+        <h2 className="mt-2 text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
+          {t('payoutStatementTitle')}
         </h2>
-        <p className="mt-3 text-sm text-slate-500 sm:text-base">{t('benefitsSubtitle')}</p>
+        <p className="mt-3 text-sm leading-relaxed text-slate-600 sm:text-base">{t('payoutStatementBody')}</p>
       </div>
 
       <ul className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
