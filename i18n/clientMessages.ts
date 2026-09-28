@@ -9,20 +9,37 @@ import { getMessages } from 'next-intl/server';
 
 type Messages = Record<string, unknown>;
 
-/** messages から指定 namespace だけを取り出す (存在しないキーは無視する)。 */
+/**
+ * messages から指定 namespace だけを取り出す (存在しないキーは無視する)。
+ * keyPrefixes に載っている namespace は、その接頭辞で始まるキーだけを渡す (i18n/clientNamespaces.ts の
+ * ROUTE_CLIENT_KEY_PREFIXES)。
+ */
 export function pickNamespaces(
   messages: Messages,
   namespaces: readonly string[],
+  keyPrefixes: Readonly<Record<string, readonly string[]>> = {},
 ): Messages {
   const picked: Messages = {};
   for (const namespace of namespaces) {
-    if (namespace in messages) picked[namespace] = messages[namespace];
+    if (!(namespace in messages)) continue;
+    const prefixes = keyPrefixes[namespace];
+    const value = messages[namespace];
+    if (!prefixes || !value || typeof value !== 'object') {
+      picked[namespace] = value;
+      continue;
+    }
+    picked[namespace] = Object.fromEntries(
+      Object.entries(value as Messages).filter(([key]) => prefixes.some((prefix) => key.startsWith(prefix))),
+    );
   }
   return picked;
 }
 
 /** 現在の request locale の messages から指定 namespace だけを取り出す。 */
-export async function clientMessagesFor(namespaces: readonly string[]) {
+export async function clientMessagesFor(
+  namespaces: readonly string[],
+  keyPrefixes?: Readonly<Record<string, readonly string[]>>,
+) {
   const messages = (await getMessages()) as Messages;
-  return pickNamespaces(messages, namespaces);
+  return pickNamespaces(messages, namespaces, keyPrefixes);
 }

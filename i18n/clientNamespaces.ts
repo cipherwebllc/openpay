@@ -380,3 +380,14 @@ export const ROUTE_CLIENT_NAMESPACES = {
 } as const satisfies Record<string, readonly string[]>;
 
 export type ClientRoute = keyof typeof ROUTE_CLIENT_NAMESPACES;
+
+/**
+ * namespace の一部のキーだけを client へ渡すルート (route → namespace → キーの接頭辞)。
+ * 大きな namespace のほとんどを server が描くページで、HTML に丸ごと inline しないため
+ * (トップの Landing は 245 キー・ja 約 21 KB のうち client の試算が使うのは cashSim* の 13 キーだけ)。
+ * フェンス: tests/lib/i18nClientNamespaces.test.ts が、そのルートの client 依存グラフでこの namespace を使う
+ * ファイルの t('key') がすべて接頭辞に収まり、動的なキー (t(`...${x}`)) がないことを検査する。
+ */
+export const ROUTE_CLIENT_KEY_PREFIXES: Partial<Record<ClientRoute, Readonly<Record<string, readonly string[]>>>> = {
+  '': { Landing: ['cashSim'] },
+};

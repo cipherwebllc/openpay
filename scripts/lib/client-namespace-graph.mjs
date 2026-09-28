@@ -116,6 +116,63 @@ export function collectNamespaces(entryFile) {
   return [...namespaces].sort();
 }
 
+/**
+ * entry から到達できるファイルのうち `useTranslations('<namespace>')` を使うものについて、
+ * その translator で引いているキー (t('k') / t.rich('k') / t.raw('k') / t.markup('k') / t.has('k')) を集める。
+ * キーが文字列リテラルでない呼び出し (t(`...${x}`)・t(key)) は dynamic として返す
+ * (ROUTE_CLIENT_KEY_PREFIXES で絞ったときに、静的に確かめられないキーを使っていないかのフェンス)。
+ * @param {string} entryFile 絶対パス
+ * @param {string} namespace
+ */
+export function collectKeysForNamespace(entryFile, namespace) {
+  const seen = new Set();
+  const keys = new Set();
+  const dynamic = [];
+  const files = [];
+  const queue = [entryFile];
+  const escaped = namespace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // 読み取れる形は `const t = useTranslations('<ns>')` だけ。ほかの形 (hook の return・分割代入・'<ns>.sub'・generic 付き)
+  // は、キーを静的に確かめられないので dynamic に数える (見逃さず CI で落とす)。
+  const anyUseRe = new RegExp(`useTranslations\\s*(?:<[^>]*>)?\\(\\s*['"]${escaped}(?:\\.[^'"]*)?['"]\\s*\\)`, 'g');
+  const declRe = new RegExp(`(?:const|let)\\s+(\\w+)\\s*=\\s*useTranslations\\(\\s*['"]${escaped}['"]\\s*\\)`, 'g');
+  while (queue.length > 0) {
+    const file = queue.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    if (!existsSync(file)) continue;
+    const source = stripComments(readFileSync(file, 'utf8'));
+    const rel = path.relative(REPO_ROOT, file);
+    const uses = [...source.matchAll(anyUseRe)].length;
+    const decls = [...source.matchAll(declRe)];
+    if (uses > 0) files.push(rel);
+    if (uses > decls.length) dynamic.push(`${rel}: useTranslations('${namespace}') の使い方を読み取れない (const t = useTranslations('${namespace}') の形だけ解析できる)`);
+    for (const decl of decls) {
+      const name = decl[1];
+      const after = source.slice(decl.index + decl[0].length);
+      // translator の名前が出てくるたびに、直後が呼び出し (t( / t.rich( など) かを見る。props で渡す・別名に入れる・
+      // t?.( などは、その先で引くキーを追えないので dynamic。
+      const mentionRe = new RegExp(`(?<![\\w.$])${name}\\b`, 'g');
+      for (const mention of after.matchAll(mentionRe)) {
+        const rest = after.slice(mention.index + mention[0].length);
+        const call = rest.match(/^(?:\.(?:rich|raw|markup|has))?\(\s*/);
+        if (!call) {
+          dynamic.push(`${rel}: ${name}${rest.slice(0, 30)}`);
+          continue;
+        }
+        // キーは文字列リテラル 1 つだけ (直後が , か ))。連結・変数・template literal は dynamic。
+        const literal = rest.slice(call[0].length).match(/^(['"])([^'"]+)\1\s*[,)]/);
+        if (literal) keys.add(literal[2]);
+        else dynamic.push(`${rel}: ${name}${rest.slice(0, 40)}`);
+      }
+    }
+    for (const spec of importSpecifiers(source)) {
+      const resolved = resolveImport(spec, file);
+      if (resolved && !seen.has(resolved)) queue.push(resolved);
+    }
+  }
+  return { files: [...new Set(files)].sort(), keys: [...keys].sort(), dynamic };
+}
+
 /** app/[locale] 配下の page.tsx を列挙し、route key (layout からの相対ディレクトリ) を返す。 */
 export function listLocalePages() {
   const localeRoot = path.join(REPO_ROOT, 'app', '[locale]');

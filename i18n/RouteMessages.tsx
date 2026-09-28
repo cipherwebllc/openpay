@@ -6,6 +6,7 @@
 import { NextIntlClientProvider } from 'next-intl';
 import { clientMessagesFor } from './clientMessages';
 import {
+  ROUTE_CLIENT_KEY_PREFIXES,
   ROUTE_CLIENT_NAMESPACES,
   SHARED_CLIENT_NAMESPACES,
   type ClientRoute,
@@ -18,10 +19,10 @@ export async function RouteMessages({
   route: ClientRoute;
   children: React.ReactNode;
 }) {
-  const messages = await clientMessagesFor([
-    ...SHARED_CLIENT_NAMESPACES,
-    ...ROUTE_CLIENT_NAMESPACES[route],
-  ]);
+  const messages = await clientMessagesFor(
+    [...SHARED_CLIENT_NAMESPACES, ...ROUTE_CLIENT_NAMESPACES[route]],
+    ROUTE_CLIENT_KEY_PREFIXES[route],
+  );
   return (
     <NextIntlClientProvider messages={messages}>
       {children}
