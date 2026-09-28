@@ -9,8 +9,9 @@
 //   - 新しい useTranslations('X') を足した → 該当ルートの配列に 'X' を足す
 //   - ページを新設した → i18n/clientNamespaces.ts に route を足し、
 //     app/[locale]/<route>/layout.tsx に <RouteMessages route="..."> を置く
-import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {
   ROUTE_CLIENT_KEY_PREFIXES,
@@ -106,7 +107,7 @@ describe('一部のキーだけ渡す namespace (ROUTE_CLIENT_KEY_PREFIXES)', ()
     expect(entries).toContainEqual({ route: '', namespace: 'Landing', prefixes: ['cashSim'] });
   });
 
-  it.each(entries)('$route の $namespace: client が引くキーはすべて接頭辞に収まり、動的なキーがない', ({ route, namespace, prefixes }) => {
+  it.each(entries.map((entry) => ({ ...entry, label: entry.route || '(トップ)' })))('$label の $namespace: client が引くキーはすべて接頭辞に収まり、動的なキーがない', ({ route, namespace, prefixes }) => {
     const page = pages.find((p) => p.route === route);
     expect(page).toBeDefined();
     expect(declared[route]).toContain(namespace);
@@ -128,5 +129,35 @@ describe('一部のキーだけ渡す namespace (ROUTE_CLIENT_KEY_PREFIXES)', ()
     const messages = { A: { cashSimX: 'x', faqQ1: 'q' }, B: { k: 'v' } };
     expect(pickNamespaces(messages, ['A', 'B'], { A: ['cashSim'] })).toEqual({ A: { cashSimX: 'x' }, B: { k: 'v' } });
     expect(pickNamespaces(messages, ['A'])).toEqual({ A: { cashSimX: 'x', faqQ1: 'q' } });
+  });
+
+  // 解析器が「読めない書き方」を見逃さない (見逃すと接頭辞で絞った messages にないキーを実行時に引いてしまう)。
+  describe('collectKeysForNamespace は読み取れない使い方を dynamic として返す', () => {
+    const cases: [string, string][] = [
+      ['props で translator を渡す', "const t = useTranslations('Landing');\nexport const A = () => <B label={t} />;"],
+      ['別名に入れる', "const t = useTranslations('Landing');\nconst tt = t;\ntt('faqA1');"],
+      ['optional call', "const t = useTranslations('Landing');\nt?.('heroTitle');"],
+      ['hook から返す', "export function useL() { return useTranslations('Landing'); }"],
+      ['下位の namespace', "const t = useTranslations('Landing.sub');\nt('x');"],
+      ['generic 付き', "const t = useTranslations<'Landing'>('Landing');\nt('x');"],
+      ['キーの連結', "const t = useTranslations('Landing');\nt('cashSimChip' + id);"],
+      ['template literal', "const t = useTranslations('Landing');\nt(`cashSim${id}`);"],
+    ];
+    let dir = '';
+    beforeAll(() => {
+      dir = mkdtempSync(path.join(os.tmpdir(), 'ns-keys-'));
+    });
+    afterAll(() => rmSync(dir, { recursive: true, force: true }));
+    it.each(cases.map(([label, body], index) => ({ label, body, index })))('$label', ({ label, body, index }) => {
+      const file = path.join(dir, `case-${index}.tsx`);
+      writeFileSync(file, body);
+      const { dynamic } = collectKeysForNamespace(file, 'Landing');
+      expect(dynamic.length, label).toBeGreaterThan(0);
+    });
+    it('読める書き方 (複数行・rich・has) はキーとして集める', () => {
+      const file = path.join(dir, 'ok.tsx');
+      writeFileSync(file, "const t = useTranslations('Landing');\nt(\n  'cashSimTitle',\n);\nt.rich('cashSimNote', { b: (c) => c });\nt.has('cashSimX');");
+      expect(collectKeysForNamespace(file, 'Landing')).toMatchObject({ keys: ['cashSimNote', 'cashSimTitle', 'cashSimX'], dynamic: [] });
+    });
   });
 });
