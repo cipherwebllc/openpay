@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { Calculator, ChevronRight, ClipboardList, History, Palette, QrCode, type LucideIcon } from 'lucide-react';
 import { env } from '@/lib/env';
-import { YourOpenPayFrame, YourOpenPayToday } from '@/components/LandingYourOpenPayClient';
+import { YourOpenPayFrame, YourOpenPayPage, YourOpenPayToday } from '@/components/LandingYourOpenPayClient';
 
 type Tool = { key: string; href: string; label: string; icon: LucideIcon };
 
@@ -53,22 +53,29 @@ export async function LandingYourOpenPay() {
               </li>
             ))}
           </ul>
-          {/* 自分のページ: 作る・編集する入口 (P4b でサインイン済みなら自分のテーマのカードに差し替える・高さは同じ)。 */}
+          {/* 自分のページ: 既定は作る・編集する入口。サインイン済みで @handle があれば、そのテーマと色のカードに差し替える
+              (YourOpenPayPage・同じ高さ)。 */}
           {env.enableHandles ? (
-            <Link
-              href={`/${locale}/create?tab=profile`}
-              prefetch={false}
-              className="group flex h-14 items-center gap-3 rounded-2xl bg-slate-50 px-3 ring-1 ring-slate-200/70 transition hover:bg-white hover:ring-brand/40 lg:h-auto"
-            >
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand/10">
-                <Palette className="h-5 w-5 text-brand" aria-hidden />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm font-bold text-slate-900">{t('yourOpenPayPageTitle')}</span>
-                <span className="block truncate text-xs text-slate-600">{t('yourOpenPayPageBody')}</span>
-              </span>
-              <ChevronRight className="h-4 w-4 shrink-0 text-brand transition-transform group-hover:translate-x-0.5" aria-hidden />
-            </Link>
+            <YourOpenPayPage
+              pageLabel={t('yourOpenPayPageTitle')}
+              editLabel={t('yourOpenPayPageEdit')}
+              fallback={
+                <Link
+                  href={`/${locale}/create?tab=profile`}
+                  prefetch={false}
+                  className="group flex h-14 items-center gap-3 rounded-2xl bg-slate-50 px-3 ring-1 ring-slate-200/70 transition hover:bg-white hover:ring-brand/40 lg:h-auto"
+                >
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand/10">
+                    <Palette className="h-5 w-5 text-brand" aria-hidden />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold text-slate-900">{t('yourOpenPayPageTitle')}</span>
+                    <span className="block truncate text-xs text-slate-600">{t('yourOpenPayPageBody')}</span>
+                  </span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-brand transition-transform group-hover:translate-x-0.5" aria-hidden />
+                </Link>
+              }
+            />
           ) : null}
         </div>
       </section>

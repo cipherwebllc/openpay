@@ -3,14 +3,19 @@
 // トップの「あなたの OpenPay」帯の client 部分 (plans/lp-polish-2026-09.md P4a)。
 //   - YourOpenPayFrame: 帯を出すかの切り替えだけ (中身は server が描く)。
 //   - YourOpenPayToday: 今日の売上 (TodayCard と同じ端末内の集計・ネットワークなし)。
+//   - YourOpenPayPage: サインイン済みなら自分の @handle をそのテーマと色で (P4b・GET /api/handle)。
 // 未接続の訪問者には帯を描かず (display:none)、リクエストも増やさない。
 
 import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
-import { useMutationState } from '@tanstack/react-query';
+import { useMutationState, useQuery } from '@tanstack/react-query';
 import { ChevronRight } from 'lucide-react';
+import { ExternalImage } from '@/components/ExternalImage';
+import { useSiweSession } from '@/hooks/useSiweSession';
+import { fetchMyHandles, myHandlesQueryKey, type OwnedHandle } from '@/lib/handleMine';
+import { handlePageTheme, handleViewTheme, resolveHandleTheme } from '@/lib/handleTheme';
 import { HISTORY_ASSET_DECIMALS, localDateKey, readTodaySummary, todayAtomicToNumber, type TodayMerchantSummary } from '@/lib/history';
 import { RETURNING_WALLET_PREPAINT, useReturningWallet } from '@/hooks/useReturningWallet';
 
@@ -80,5 +85,106 @@ export function YourOpenPayToday({ label }: { label: string }) {
       <span className="text-xs text-slate-600">{t('count', { count: today.count })}</span>
       <ChevronRight className="h-4 w-4 shrink-0 text-brand" aria-hidden />
     </Link>
+  );
+}
+
+const DEFAULT_ACCENT = '#2563eb';
+
+// 複数持っていれば最後に更新した 1 つ (いま手を入れているページ)。
+function latestHandle(handles: readonly OwnedHandle[] | undefined): OwnedHandle | null {
+  if (!handles?.length) return null;
+  return handles.reduce((a, b) => ((b.updatedAt ?? 0) > (a.updatedAt ?? 0) ? b : a));
+}
+
+function initialOf(name: string | undefined, handle: string): string {
+  const n = (name ?? '').trim() || handle;
+  // コードポイント単位で先頭 1 文字 (絵文字・補助漢字を割らない・components/HandleProfile.tsx と同じ)。
+  return ([...n][0] ?? '@').toUpperCase();
+}
+
+/**
+ * 帯の「自分のページ」の行。サインイン済み (接続中のアドレス = セッション) で @handle を持っていれば、公開ページと
+ * 同じテーマと色の小さなカードに差し替える。それ以外 (未サインイン・読み込み中・handle なし・失敗) は server が描いた
+ * 既定の行 (作る・編集する) のまま。どちらも同じ高さなので、差し替えても下の段は動かない。
+ * 取得は GET /api/handle を他の画面と同じ cache で、ページの読み込みごとに 1 回 (KV 2〜5 コマンド・サインイン済みの持ち主だけ)。
+ * 再読み込みを越えて控える (sessionStorage) ことはしない: 編集画面で保存した直後に開き直すと古いテーマが出るため
+ * (plans/lp-polish-2026-09.md §2.4.2)。
+ */
+export function YourOpenPayPage({ fallback, pageLabel, editLabel }: { fallback: ReactNode; pageLabel: string; editLabel: string }) {
+  const locale = useLocale();
+  const { status } = useAccount();
+  const { isSignedIn, sessionAddress } = useSiweSession();
+  // 読めなかった画像の URL (URL が変われば、新しい画像をもう一度試す・components/HandleProfile.tsx と同じ)。
+  const [failedAvatar, setFailedAvatar] = useState<string | null>(null);
+  const enabled = isSignedIn && status === 'connected';
+  const mine = useQuery({
+    queryKey: myHandlesQueryKey(sessionAddress),
+    enabled,
+    queryFn: fetchMyHandles,
+    // アプリ内の移動で戻ってきたときは取り直さない (編集画面の保存は ['handle-mine'] を invalidate するので古いままにならない)。
+    staleTime: 5 * 60_000,
+    // 飾りのカードなので、失敗は既定の行に戻すだけで取り直さない (401・502 のたびに KV を叩き直さない)。
+    retry: false,
+  });
+  // 無効な query も、前にサインインした wallet の cache を返す。別の wallet でつないでいる間 (isSignedIn = false) に
+  // その人のページを出さないよう、今の条件を満たすときだけ使う。
+  const own = enabled ? latestHandle(mine.data?.handles) : null;
+  if (!own) return <>{fallback}</>;
+
+  // 色とテーマは公開ページ (app/[locale]/[handle]/page.tsx) と同じ検証: #rrggbb 以外は既定の青・未知のテーマは clean。
+  const accent = own.config.color && /^#[0-9a-fA-F]{6}$/.test(own.config.color) ? own.config.color : DEFAULT_ACCENT;
+  const theme = resolveHandleTheme(own.profile?.theme);
+  const view = handleViewTheme(accent, theme);
+  const page = handlePageTheme(accent, theme);
+  const avatar = own.profile?.avatar && own.profile.avatar !== failedAvatar ? own.profile.avatar : null;
+  const name = own.config.name?.trim();
+
+  return (
+    <div
+      className="relative flex h-14 items-center gap-3 overflow-hidden rounded-2xl pl-3.5 pr-2 ring-1 ring-slate-200/70 lg:h-auto"
+      style={{ background: page.full ? page.background : '#ffffff' }}
+    >
+      {page.full ? null : <div aria-hidden className="absolute inset-0" style={{ background: page.background }} />}
+      {/* リンク名 = 見えている名前と @handle (掟 8)。 */}
+      <Link href={`/${locale}/@${own.handle}`} prefetch={false} className="relative flex min-w-0 flex-1 items-center gap-3">
+        {/* PC は行の高さが 40px (道具のボタンと同じ)。アバターの外側の輪 (最大 6px) ごと収まるよう 28px にする。 */}
+        <span
+          className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full text-base font-bold text-white lg:h-7 lg:w-7 lg:text-xs"
+          style={{ backgroundColor: accent, boxShadow: view.avatarRing }}
+        >
+          {avatar ? (
+            // 本人が設定した第三者 https 画像。名前は隣に文字で出ているので alt は空 (二重に読ませない)。
+            <ExternalImage
+              src={avatar}
+              alt=""
+              referrerPolicy="no-referrer"
+              loading={undefined}
+              decoding="async"
+              className="h-full w-full object-cover"
+              onError={() => setFailedAvatar(avatar)}
+            />
+          ) : (
+            <span aria-hidden>{initialOf(name, own.handle)}</span>
+          )}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-bold" style={{ color: view.inkColor ?? '#0f172a' }}>
+            {name || pageLabel}
+          </span>
+          <span className="block truncate text-xs font-semibold" style={{ color: view.handleColor }}>
+            @{own.handle}
+          </span>
+        </span>
+      </Link>
+      <Link
+        href={`/${locale}/create?tab=profile`}
+        prefetch={false}
+        className={`relative shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+          page.dark ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-white/90 text-slate-700 ring-1 ring-slate-200 hover:ring-brand/40'
+        }`}
+      >
+        {editLabel}
+      </Link>
+    </div>
   );
 }
