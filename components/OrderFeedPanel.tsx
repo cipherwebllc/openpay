@@ -20,22 +20,13 @@ import { useSiweSession } from '@/hooks/useSiweSession';
 import { ShopLivePanel } from '@/components/ShopLivePanel';
 import { OrderOperatorTokenPanel } from '@/components/OrderOperatorTokenPanel';
 import { txExplorerUrl } from '@/lib/chains';
-import { jpycChainLabel, type StorefrontParts } from '@/lib/mobileOrder';
-import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
+import { jpycChainLabel } from '@/lib/mobileOrder';
 import { declaredItemsTotalMinor, type StoredOrder } from '@/lib/orderRelay';
 import { ELAPSED_LATE_MIN, ELAPSED_WARN_MIN } from '@/components/OrderCard';
 import { OrderCallSection } from '@/components/OrderCallSection';
 import { isOrderAlertSoundEnabled } from '@/lib/soundPref';
 import { playNewOrderChime } from '@/lib/successChime';
-
-// /api/handle が返す所有 handle (StorefrontPublishPanel と同形・同 cache キーを共有)。
-// 営業中の操作 (ShopLivePanel) は公開済み店舗 (storefront あり) の handle に紐づく。
-type OwnedHandle = {
-  handle: string;
-  config: HandleTipConfig;
-  profile?: HandleProfile;
-  storefront?: StorefrontParts;
-};
+import { fetchMyHandles, myHandlesQueryKey } from '@/lib/handleMine';
 
 // JPYC は全チェーン 18 decimals。保存 amount は minor units の十進文字列 (parseStoredOrder で検証済み)。
 const JPYC_DECIMALS = 18;
@@ -58,20 +49,10 @@ export function OrderFeedPanel() {
   // 営業中の操作 (ShopLivePanel) 用の所有 handle (公開済み店舗のみ)。enableShopLive のときだけ取得。
   // queryKey は StorefrontPublishPanel / HandleClaimPanel と共有 (同 cache・返り値の形 {handles,max} 一致必須)。
   const mine = useQuery({
-    queryKey: ['handle-mine', sessionAddress],
+    // 取得と返り値の形は lib/handleMine.ts に 1 つ (他の画面・トップと同じ cache を共有する)。
+    queryKey: myHandlesQueryKey(sessionAddress),
     enabled: env.enableHandles && env.enableShopLive && isSignedIn,
-    queryFn: async (): Promise<{ handles: OwnedHandle[]; max: number }> => {
-      const res = await fetch('/api/handle');
-      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!res.ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${res.status}`);
-      const list = Array.isArray(json.handles)
-        ? (json.handles as unknown[]).filter(
-            (h): h is OwnedHandle =>
-              !!h && typeof h === 'object' && typeof (h as OwnedHandle).handle === 'string' && !!(h as OwnedHandle).config,
-          )
-        : [];
-      return { handles: list, max: typeof json.max === 'number' ? json.max : list.length };
-    },
+    queryFn: fetchMyHandles,
   });
   // 公開済み店舗 (storefront あり) の handle のみが営業中の操作の対象。
   const liveHandles = useMemo(

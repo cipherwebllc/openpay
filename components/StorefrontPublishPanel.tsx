@@ -18,7 +18,7 @@ import { ConnectButton } from '@/components/ConnectButton';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
-import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
+import type { HandleTipConfig } from '@/lib/handle';
 import {
   JPYC_CHAIN_LABEL,
   storefrontPartsEquivalent,
@@ -27,22 +27,7 @@ import {
 import { formatPublishedRelativeTime } from '@/lib/handlePublish';
 import { shortAddress } from '@/lib/format';
 import type { Address } from 'viem';
-
-// GET /api/handle が返す所有 handle (storefront 公開済みかの判定に storefront も読む)。
-// profile はプラカードのアバター fallback に使う (公開ページ handleStorefrontConfig と同じく
-// storefront.avatar が無ければ profile.avatar を使うため)。
-type OwnedHandle = {
-  handle: string;
-  config: HandleTipConfig;
-  profile?: HandleProfile;
-  storefront?: StorefrontParts;
-  updatedAt?: number;
-};
-// ⚠️ queryKey `['handle-mine', …]` と**この返り値の形** `{handles, max}` は HandleClaimPanel と
-// 共有する (同一 endpoint・同一 cache)。HandleClaim が先に profile タブで cache を `{handles, max}`
-// で埋めるため、形を一致させないと cache 衝突で handles がオブジェクトになり handles.find が
-// 落ちる (実際に発生したクラッシュ)。両者の形は必ず一致させること。
-type MineResponse = { handles: OwnedHandle[]; max: number };
+import { MY_HANDLES_ROOT_KEY, fetchMyHandles, myHandlesQueryKey, type MineResponse } from '@/lib/handleMine';
 
 async function fetchJson(url: string, init?: RequestInit) {
   const res = await fetch(url, init);
@@ -86,25 +71,10 @@ export function StorefrontPublishPanel({
   const [confirmLoad, setConfirmLoad] = useState(false);
 
   const mine = useQuery({
-    // wallet 切替で前 wallet の cache を流用しないよう session address でスコープ (HandleClaim と同流儀)。
-    // 返り値の形 `{handles, max}` は HandleClaimPanel と一致させる (同一 cache キーを共有するため)。
-    queryKey: ['handle-mine', sessionAddress],
+    // 取得と返り値の形は lib/handleMine.ts に 1 つ (他の画面・トップと同じ cache を共有する)。
+    queryKey: myHandlesQueryKey(sessionAddress),
     enabled: env.enableHandles && isSignedIn,
-    queryFn: async (): Promise<MineResponse> => {
-      const { ok, status, json } = await fetchJson('/api/handle');
-      // KV 障害 (502 等) を「handle 0 件」と偽装しない (isError でエラー表示 + 再試行)。
-      if (!ok) throw new Error(typeof json.error === 'string' ? json.error : `http_${status}`);
-      const list = Array.isArray(json.handles)
-        ? (json.handles as unknown[]).filter(
-            (h): h is OwnedHandle =>
-              !!h &&
-              typeof h === 'object' &&
-              typeof (h as OwnedHandle).handle === 'string' &&
-              !!(h as OwnedHandle).config,
-          )
-        : [];
-      return { handles: list, max: typeof json.max === 'number' ? json.max : list.length };
-    },
+    queryFn: fetchMyHandles,
   });
 
   const handles = useMemo(() => mine.data?.handles ?? [], [mine.data]);
@@ -193,7 +163,7 @@ export function StorefrontPublishPanel({
       // POST が返した server timestamp と、実際に送った snapshot を同一 cache へ即反映する。
       // invalidate 後の GET でも同じ record に収束し、送信中に下書きを変えた場合は dirty が残る。
       const updatedAt = typeof json.updatedAt === 'number' ? json.updatedAt : undefined;
-      qc.setQueryData<MineResponse>(['handle-mine', sessionAddress], (current) =>
+      qc.setQueryData<MineResponse>(myHandlesQueryKey(sessionAddress), (current) =>
         current
           ? {
               ...current,
@@ -210,7 +180,7 @@ export function StorefrontPublishPanel({
             }
           : current,
       );
-      qc.invalidateQueries({ queryKey: ['handle-mine'] });
+      qc.invalidateQueries({ queryKey: MY_HANDLES_ROOT_KEY });
     },
   });
 

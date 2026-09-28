@@ -34,6 +34,7 @@ import type {
   HandlePublishPayload,
   PublishedHandleSnapshot,
 } from '@/lib/handlePublish';
+import { MY_HANDLES_ROOT_KEY, fetchMyHandles, myHandlesQueryKey } from '@/lib/handleMine';
 
 // 削除確認の danger モーダル。LinkQrModal と同じ a11y パターン: 開いたら確定ボタンへ
 // フォーカス・Tab は背後へ抜けないようトラップ・閉じたら元の要素へ復元・ESC/背景で閉じる。
@@ -139,13 +140,6 @@ function ReleaseConfirmModal({
 }
 
 type Availability = { available: boolean; reason?: string };
-type OwnedHandle = {
-  handle: string;
-  config: HandleTipConfig;
-  profile?: HandleProfile;
-  updatedAt?: number;
-};
-type MineResponse = { handles: OwnedHandle[]; max: number };
 type PublishMutationSnapshot = {
   handle: string;
   payload: HandlePublishPayload;
@@ -259,29 +253,10 @@ export function HandleClaimPanel({
   });
 
   const mine = useQuery({
-    // wallet 切替で前 wallet の cache を流用しないよう session address でスコープする。
-    queryKey: ['handle-mine', sessionAddress],
+    // 取得と返り値の形は lib/handleMine.ts に 1 つ (他の画面・トップと同じ cache を共有する)。
+    queryKey: myHandlesQueryKey(sessionAddress),
     enabled: env.enableHandles && isSignedIn,
-    queryFn: async (): Promise<MineResponse> => {
-      const { ok, status, json } = await fetchJson('/api/handle');
-      // KV 障害 (502 等) を「ハンドル 0 件」と偽装しない — isError でエラー表示 + 再試行へ。
-      if (!ok) {
-        throw new Error(typeof json.error === 'string' ? json.error : `http_${status}`);
-      }
-      const handles = Array.isArray(json.handles)
-        ? (json.handles as unknown[]).filter(
-            (h): h is OwnedHandle =>
-              !!h &&
-              typeof h === 'object' &&
-              typeof (h as OwnedHandle).handle === 'string' &&
-              !!(h as OwnedHandle).config,
-          )
-        : [];
-      return {
-        handles,
-        max: typeof json.max === 'number' ? json.max : MAX_HANDLES_PER_WALLET,
-      };
-    },
+    queryFn: fetchMyHandles,
   });
 
   const publish = useMutation({
@@ -313,7 +288,7 @@ export function HandleClaimPanel({
       };
     },
     onSuccess: (json, snapshot) => {
-      qc.invalidateQueries({ queryKey: ['handle-mine'] });
+      qc.invalidateQueries({ queryKey: MY_HANDLES_ROOT_KEY });
       qc.invalidateQueries({ queryKey: ['handle-availability'] });
       // 入力は消さず「いま @handle を編集している」状態に遷移する (続けて微調整できる)。
       setPublished({
@@ -344,7 +319,7 @@ export function HandleClaimPanel({
       return json;
     },
     onSuccess: (_json, handle) => {
-      qc.invalidateQueries({ queryKey: ['handle-mine'] });
+      qc.invalidateQueries({ queryKey: MY_HANDLES_ROOT_KEY });
       // 解放した handle を空き確認キャッシュからも無効化 (旧 'taken' を残さない)。
       qc.invalidateQueries({ queryKey: ['handle-availability'] });
       // 確認モーダルを閉じる (成功で消す。失敗時は開いたまま再試行できるよう残す)。
