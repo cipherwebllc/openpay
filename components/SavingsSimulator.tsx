@@ -161,7 +161,7 @@ export function SavingsSimulator() {
         {/* 万円ヒーロー (ja) は端数を丸めるため、正確な円差額を補足。en は
             ヒーローが full 円ゆえ重複しないよう出さない。 */}
         {isJa && (
-          <p className="mt-1 tabular-nums text-xs text-slate-500">
+          <p className="mt-1 tabular-nums text-xs text-slate-600">
             {t('cashSimYenExact', {
               yen: `${annualDiffYen < 0 ? '-' : ''}¥${formatYen(Math.abs(annualDiffYen))}`,
             })}
@@ -169,7 +169,7 @@ export function SavingsSimulator() {
         )}
       </div>
 
-      <p className="mt-4 text-[11px] leading-relaxed text-slate-500">
+      <p className="mt-4 text-[11px] leading-relaxed text-slate-600">
         {t('cashSimNote', {
           percent: DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100,
           floor: DISCLOSED_RECOVER_FEE.floorJpyc,

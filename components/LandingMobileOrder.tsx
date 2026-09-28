@@ -26,17 +26,17 @@ export async function LandingMobileOrder() {
       <div className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-emerald-50 via-teal-50/60 to-emerald-100/40 ring-1 ring-emerald-200/50">
         <div className="grid items-center gap-8 p-6 sm:p-10 lg:grid-cols-[5fr,6fr] lg:gap-12 lg:p-12">
           <div className="text-center lg:text-left">
-            <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl">
+            <h2 className="text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 [word-break:auto-phrase] text-balance sm:text-4xl">
               {t('mobileOrderBannerTitle')}
             </h2>
             <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-slate-600 sm:text-base lg:mx-0">
               {t('mobileOrderBannerLead')}
             </p>
-            <div className="mt-7 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-center lg:justify-start">
+            <div className="mt-7 flex flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-center lg:justify-start">
               <Link
                 href={createHref}
                 prefetch={false}
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-card-hover active:translate-y-0"
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-700 px-6 py-3 sm:whitespace-nowrap text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-800 hover:shadow-card-hover active:translate-y-0"
               >
                 {t('mobileOrderBannerCta')}
                 <ArrowRight className="h-4 w-4" aria-hidden />
@@ -45,7 +45,7 @@ export async function LandingMobileOrder() {
                 href={NOTE_ARTICLE_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-white/80 px-6 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200/80 transition-colors hover:bg-white hover:text-emerald-800 hover:ring-emerald-300"
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-white/80 px-6 py-3 sm:whitespace-nowrap text-sm font-semibold text-slate-700 ring-1 ring-slate-200/80 transition-colors hover:bg-white hover:text-emerald-800 hover:ring-emerald-300"
               >
                 {t('mobileOrderBannerLearnMore')}
                 <ExternalLink className="h-4 w-4" aria-hidden />
@@ -53,7 +53,7 @@ export async function LandingMobileOrder() {
             </div>
             {/* お客様向けの副導線: やり方ガイド (/guide/mobile-order) と AI 注文ガイド (/guide/agent)。
                 店側 CTA の下に控えめなテキストリンクで置く (guide/pos を「使い方」に置くのと同じ体裁)。 */}
-            <p className="mt-4 flex flex-col items-center gap-1.5 text-sm sm:flex-row sm:justify-center sm:gap-4 lg:justify-start">
+            <p className="mt-4 flex flex-col items-center gap-1.5 text-sm sm:flex-row sm:flex-wrap sm:justify-center sm:gap-x-4 lg:justify-start">
               <Link
                 href={`/${locale}/guide/mobile-order`}
                 prefetch={false}

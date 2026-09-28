@@ -18,7 +18,7 @@ export async function LandingTrust() {
         className="pointer-events-none absolute inset-x-0 -top-24 mx-auto h-64 max-w-2xl bg-[radial-gradient(60%_60%_at_50%_0%,rgba(59,130,246,0.25),transparent_70%)]"
       />
       <div className="mx-auto max-w-3xl text-center">
-        <h2 className="text-2xl font-bold leading-tight tracking-tight text-white sm:text-4xl">
+        <h2 className="text-2xl font-bold leading-tight tracking-tight text-white [word-break:auto-phrase] text-balance sm:text-4xl">
           {t('closingTitle')}
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-base">
@@ -53,7 +53,7 @@ export async function LandingTrust() {
         </div>
         {/* 技術スタックは開発者向け補足として小さく出す (一般読者には trustBody
             だけで充足、開発者は具体技術名で OpenPay の構成を検証できる)。 */}
-        <p className="mx-auto mt-6 max-w-2xl text-[11px] leading-relaxed text-slate-500">
+        <p className="mx-auto mt-6 max-w-2xl text-[11px] leading-relaxed text-slate-400">
           {t('trustTechStack')}
         </p>
       </div>

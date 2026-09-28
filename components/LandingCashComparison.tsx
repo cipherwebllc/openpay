@@ -38,14 +38,14 @@ export async function LandingCashComparison() {
         {/* 比較表: モバイルでも 3 列が 1 画面に収まるよう圧縮 (結論の OpenPay 列を隠さない)。overflow-x-auto は保険。
             OpenPay 列を brand tint で強調しつつ、現金列を否定しないトーン。 */}
         <div className="mx-auto mt-8 max-w-3xl overflow-x-auto rounded-2xl border border-slate-200 shadow-card">
-          <table className="w-full border-collapse bg-white text-[13px] sm:text-sm">
+          <table className="w-full border-collapse bg-white text-[13px] [word-break:auto-phrase] sm:text-sm">
             <thead>
               <tr className="border-b border-slate-200">
-                <th className="px-2 py-3 sm:px-4 text-left text-xs font-semibold text-slate-400" />
-                <th className="min-w-[3.25rem] px-2 py-3 sm:px-4 text-center font-semibold text-slate-700">
+                <td className="px-2 py-3 sm:px-4" />
+                <th className="min-w-[3.25rem] px-2 py-3 sm:min-w-[4.75rem] sm:px-4 text-center font-semibold text-slate-700">
                   {t('cashColCash')}
                 </th>
-                <th className="min-w-[4.5rem] px-2 py-3 sm:px-4 text-center font-semibold text-slate-700">
+                <th className="min-w-[4.5rem] px-2 py-3 sm:min-w-[6.5rem] sm:px-4 text-center font-semibold text-slate-700">
                   {t('cashColCard')}
                 </th>
                 <th className="bg-brand/5 px-2 py-3 sm:px-4 text-center font-bold text-brand-dark">
@@ -74,7 +74,7 @@ export async function LandingCashComparison() {
                   <td className="bg-brand/5 px-2 py-3 sm:px-4 text-center font-semibold text-slate-900">
                     {t(`cashCell${id}OpenPay`, LANDING_PAYMENT_FEE_VALUES)}
                     {id === 'Fee' && (
-                      <span className="mt-1 block text-[11px] font-normal leading-snug text-slate-500">
+                      <span className="mt-1 block text-[11px] font-normal leading-snug text-slate-600">
                         {t('cashCellFeeOpenPayNote', LANDING_PAYMENT_FEE_VALUES)}
                       </span>
                     )}

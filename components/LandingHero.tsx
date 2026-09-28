@@ -24,10 +24,10 @@ export async function LandingHero() {
             <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-brand" />
             {t('tagline')}
           </p>
-          <h2 className="mt-5 text-[2.25rem] font-bold leading-[1.05] tracking-[-0.02em] text-slate-900 sm:text-6xl">
+          <h2 className="mt-5 text-[2.25rem] font-bold leading-[1.05] tracking-[-0.02em] text-slate-900 [word-break:auto-phrase] text-balance sm:text-6xl">
             {t('heroLeadline')}
           </h2>
-          <p className="mx-auto mt-5 max-w-xl text-balance text-[15px] leading-relaxed text-slate-500 sm:text-base">
+          <p className="mx-auto mt-5 max-w-xl text-balance text-[15px] leading-relaxed text-slate-500 [word-break:auto-phrase] sm:text-base">
             {t.rich('heroBody', {
               b: (chunks) => <strong className="font-bold text-slate-900">{chunks}</strong>,
             })}
@@ -89,7 +89,7 @@ export async function LandingHero() {
           <p className="hidden text-sm leading-relaxed text-emerald-800/90 sm:block">
             {t('ctaCreateBody')}
           </p>
-          <span className="mt-auto inline-flex w-full items-center justify-center gap-1 rounded-xl bg-emerald-600 px-3 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors group-hover:bg-emerald-700 sm:w-fit sm:gap-1.5 sm:px-4 sm:text-sm">
+          <span className="mt-auto inline-flex w-full items-center justify-center gap-1 rounded-xl bg-emerald-700 px-3 py-2.5 text-xs font-semibold text-white shadow-sm transition-colors group-hover:bg-emerald-800 sm:w-fit sm:gap-1.5 sm:px-4 sm:text-sm">
             {t('ctaCreateButton')}
             <span
               aria-hidden

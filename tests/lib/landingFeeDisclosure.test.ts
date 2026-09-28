@@ -61,6 +61,13 @@ describe('standard-payment fee scope (review 6 regression)', () => {
       expect(text).toContain(`${recoverPct}%`);
       expect(text).toContain(`${floorJpyc} JPYC`);
     });
+    // faqA1 の料率は messages に手書き。構造化データ (FAQPage) に残る唯一の料率なので、検索エンジン・AI に
+    // 古い料率が渡らないよう DISCLOSED と照合する (P5 で faqA6 を構造化データから外した後の drift フェンス)。
+    it(`${locale}: faqA1 (構造化データに出る料率) は DISCLOSED の料率と最低額に一致する`, () => {
+      const text = t('faqA1', values);
+      expect(text).toContain(`${recoverPct}%`);
+      expect(text).toContain(`${floorJpyc} JPYC`);
+    });
     it(`${locale}: QR and simulator exemptions exclude register and mobile order`, () => {
       for (const key of ['supportFeePayBody', 'cashSimNote'] as const) {
         const text = t(key, values);
