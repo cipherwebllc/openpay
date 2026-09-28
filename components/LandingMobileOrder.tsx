@@ -36,7 +36,7 @@ export async function LandingMobileOrder() {
               <Link
                 href={createHref}
                 prefetch={false}
-                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-emerald-700 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-800 hover:shadow-card-hover active:translate-y-0"
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-emerald-700 px-6 py-3 sm:whitespace-nowrap text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-800 hover:shadow-card-hover active:translate-y-0"
               >
                 {t('mobileOrderBannerCta')}
                 <ArrowRight className="h-4 w-4" aria-hidden />
@@ -45,7 +45,7 @@ export async function LandingMobileOrder() {
                 href={NOTE_ARTICLE_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-white/80 px-6 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200/80 transition-colors hover:bg-white hover:text-emerald-800 hover:ring-emerald-300"
+                className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-white/80 px-6 py-3 sm:whitespace-nowrap text-sm font-semibold text-slate-700 ring-1 ring-slate-200/80 transition-colors hover:bg-white hover:text-emerald-800 hover:ring-emerald-300"
               >
                 {t('mobileOrderBannerLearnMore')}
                 <ExternalLink className="h-4 w-4" aria-hidden />

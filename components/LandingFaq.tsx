@@ -14,7 +14,6 @@ import { ChevronDown } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LANDING_FAQ, type LandingFaqAnswerKey } from '@/lib/landingFaq';
 
-
 export async function LandingFaq() {
   const locale = await getLocale();
   const t = await getTranslations('Landing');
