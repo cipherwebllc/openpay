@@ -27,7 +27,7 @@ import {
 import { formatPublishedRelativeTime } from '@/lib/handlePublish';
 import { shortAddress } from '@/lib/format';
 import type { Address } from 'viem';
-import { fetchMyHandles, myHandlesQueryKey, type MineResponse } from '@/lib/handleMine';
+import { MY_HANDLES_ROOT_KEY, fetchMyHandles, myHandlesQueryKey, type MineResponse } from '@/lib/handleMine';
 
 async function fetchJson(url: string, init?: RequestInit) {
   const res = await fetch(url, init);
@@ -180,7 +180,7 @@ export function StorefrontPublishPanel({
             }
           : current,
       );
-      qc.invalidateQueries({ queryKey: ['handle-mine'] });
+      qc.invalidateQueries({ queryKey: MY_HANDLES_ROOT_KEY });
     },
   });
 

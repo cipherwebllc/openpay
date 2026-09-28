@@ -34,7 +34,7 @@ import type {
   HandlePublishPayload,
   PublishedHandleSnapshot,
 } from '@/lib/handlePublish';
-import { fetchMyHandles, myHandlesQueryKey } from '@/lib/handleMine';
+import { MY_HANDLES_ROOT_KEY, fetchMyHandles, myHandlesQueryKey } from '@/lib/handleMine';
 
 // 削除確認の danger モーダル。LinkQrModal と同じ a11y パターン: 開いたら確定ボタンへ
 // フォーカス・Tab は背後へ抜けないようトラップ・閉じたら元の要素へ復元・ESC/背景で閉じる。
@@ -288,7 +288,7 @@ export function HandleClaimPanel({
       };
     },
     onSuccess: (json, snapshot) => {
-      qc.invalidateQueries({ queryKey: ['handle-mine'] });
+      qc.invalidateQueries({ queryKey: MY_HANDLES_ROOT_KEY });
       qc.invalidateQueries({ queryKey: ['handle-availability'] });
       // 入力は消さず「いま @handle を編集している」状態に遷移する (続けて微調整できる)。
       setPublished({
@@ -319,7 +319,7 @@ export function HandleClaimPanel({
       return json;
     },
     onSuccess: (_json, handle) => {
-      qc.invalidateQueries({ queryKey: ['handle-mine'] });
+      qc.invalidateQueries({ queryKey: MY_HANDLES_ROOT_KEY });
       // 解放した handle を空き確認キャッシュからも無効化 (旧 'taken' を残さない)。
       qc.invalidateQueries({ queryKey: ['handle-availability'] });
       // 確認モーダルを閉じる (成功で消す。失敗時は開いたまま再試行できるよう残す)。

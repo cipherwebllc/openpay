@@ -15,10 +15,14 @@ export type OwnedHandle = {
   storefront?: StorefrontParts;
   updatedAt?: number;
 };
-export type MineResponse = { handles: OwnedHandle[]; max: number };
+// max は API が常に返す (app/api/handle/route.ts)。欠けたら未定義のまま渡し、使う側の既定 (HandleClaimPanel は上限) に任せる。
+export type MineResponse = { handles: OwnedHandle[]; max?: number };
+
+/** 保存・解除の後に全 wallet 分をまとめて invalidate する接頭辞。 */
+export const MY_HANDLES_ROOT_KEY = ['handle-mine'] as const;
 
 /** wallet 切替で前 wallet の cache を流用しないよう、セッションのアドレスでスコープする。 */
-export const myHandlesQueryKey = (sessionAddress: string | null) => ['handle-mine', sessionAddress] as const;
+export const myHandlesQueryKey = (sessionAddress: string | null) => [...MY_HANDLES_ROOT_KEY, sessionAddress] as const;
 
 export async function fetchMyHandles(): Promise<MineResponse> {
   const res = await fetch('/api/handle');
@@ -31,6 +35,5 @@ export async function fetchMyHandles(): Promise<MineResponse> {
           !!h && typeof h === 'object' && typeof (h as OwnedHandle).handle === 'string' && !!(h as OwnedHandle).config,
       )
     : [];
-  // max は API が常に返す (app/api/handle/route.ts)。以前の 4 つの fetcher のうち 3 つと同じく、欠けたら件数にする。
-  return { handles, max: typeof json.max === 'number' ? json.max : handles.length };
+  return { handles, max: typeof json.max === 'number' ? json.max : undefined };
 }
