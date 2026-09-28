@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createTranslator } from 'next-intl';
 import { screen } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import TermsPage from '@/app/[locale]/terms/page';
@@ -9,7 +8,6 @@ import TokuteiPage from '@/app/[locale]/tokutei/page';
 import { polygon, avalanche } from 'viem/chains';
 import {
   LEGAL_ENTITY,
-  LANDING_PAYMENT_FEE_VALUES,
   DISCLOSED_TIP_FEE_MODELS,
   DISCLOSED_RECOVER_FEE,
   DISCLOSED_STORE_USDC_PAYMENT,
@@ -1484,8 +1482,7 @@ it('Arc の USDC 決済 (通常決済のみ・顧客が USDC でネットワー�
 describe('three disclosed tip fee models', () => {
   it.each(['ja', 'en'] as const)('%s: every surface distinguishes JPYC, Base and Arc', async (locale) => {
     const m = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
-    const t = createTranslator({ locale, messages: m, namespace: 'Landing' });
-    const surfaces = [m.Landing.supportFeeTipBody, m.Landing.faqA1, t('faqA6', LANDING_PAYMENT_FEE_VALUES),
+    const surfaces = [m.Landing.supportFeeTipBody, m.Landing.faqA1,
       m.Terms.article5.body.split('(2)')[0], m.Tokutei.rows.price.value, m.Disclaimer.section7.body];
     expect(DISCLOSED_TIP_FEE_MODELS.usdcBase).toBe('paymaster-usdc');
     expect(DISCLOSED_TIP_FEE_MODELS.usdcArc).toBe('standard-usdc-network-fee-no-openpay-fee');

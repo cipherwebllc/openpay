@@ -1,6 +1,6 @@
 // トップの FAQ の並び (表示 components/LandingFaq.tsx と構造化データ components/StructuredData.tsx の単一情報源)。
 // 構造化データ (FAQPage) は画面に見えている Q&A と一致させる (検索エンジンの指針・AI の引用元)。
-// faqQ6 (利用料) は「利用料について」の節へ移したので、ここには入れない (表示にも構造化データにも出さない)。
+// 番号は歴史的経緯のまま (faqQ6「利用料」は「利用料について」の節へ移して廃止・2026-09-28)。
 export const LANDING_FAQ = [
   { q: 'faqQ1', a: 'faqA1' },
   // 「JPYC・USDC とは」= 基礎説明。「どちらを受け取るか (faqQ2)」の直前に置く。
