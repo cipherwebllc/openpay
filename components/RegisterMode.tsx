@@ -40,7 +40,6 @@ import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { safeHttpUrl } from '@/lib/mobileOrder';
-import type { StorefrontParts } from '@/lib/mobileOrder';
 import { composeLineName, effectiveUnitPrice, type OptionChoice } from '@/lib/menuOptions';
 import { OptionSelectModal } from './OptionSelectModal';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
@@ -56,8 +55,8 @@ import { taxAmountDecimal, taxDisplayDecimals, type TaxCategory } from '@/lib/ta
 import { TaxCategorySelect } from './TaxCategorySelect';
 import { TokenLogo, ChainLogo } from './AssetLogo';
 import { categoryColorClasses } from '@/lib/categoryColor';
-import type { HandleTipConfig } from '@/lib/handle';
 import type { ShopLiveState } from '@/lib/shopLive';
+import { fetchMyHandles, myHandlesQueryKey } from '@/lib/handleMine';
 
 type CartLine = {
   id: string;
@@ -73,12 +72,6 @@ type CartLine = {
 type RegisterModeProps = {
   /** 通貨/チェーンを変更する導線 (page が QR タブへ切替える)。レジは読み取り専用表示。 */
   onEditCurrency?: () => void;
-};
-
-type OwnedHandle = {
-  handle: string;
-  config: HandleTipConfig;
-  storefront?: StorefrontParts;
 };
 
 type RegisterShopLive = {
@@ -99,26 +92,10 @@ export function RegisterMode(props: RegisterModeProps) {
 function RegisterModeWithShopLive(props: RegisterModeProps) {
   const { isSignedIn, sessionAddress } = useSiweSession();
   const mine = useQuery({
-    // OrderFeedPanel / StorefrontPublishPanel と同一 cache キー・同一 `{handles,max}` 形を共有する。
-    queryKey: ['handle-mine', sessionAddress],
+    // 取得と返り値の形は lib/handleMine.ts に 1 つ (他の画面・トップと同じ cache を共有する)。
+    queryKey: myHandlesQueryKey(sessionAddress),
     enabled: env.enableHandles && env.enableShopLive && isSignedIn,
-    queryFn: async (): Promise<{ handles: OwnedHandle[]; max: number }> => {
-      const res = await fetch('/api/handle');
-      const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-      if (!res.ok) {
-        throw new Error(typeof json.error === 'string' ? json.error : `http_${res.status}`);
-      }
-      const list = Array.isArray(json.handles)
-        ? (json.handles as unknown[]).filter(
-            (h): h is OwnedHandle =>
-              !!h &&
-              typeof h === 'object' &&
-              typeof (h as OwnedHandle).handle === 'string' &&
-              !!(h as OwnedHandle).config,
-          )
-        : [];
-      return { handles: list, max: typeof json.max === 'number' ? json.max : list.length };
-    },
+    queryFn: fetchMyHandles,
   });
   const liveHandle = mine.data?.handles.find((h) => h.storefront)?.handle ?? '';
   const { live, patch } = useShopLive(liveHandle);
