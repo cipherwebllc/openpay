@@ -12,3 +12,12 @@ export function collectNamespaces(entryFile: string): string[];
 
 /** app/[locale] 配下の page.tsx を列挙する (route = layout からの相対ディレクトリ)。 */
 export function listLocalePages(): Array<{ route: string; file: string }>;
+
+/**
+ * entry から到達可能なファイルのうち useTranslations('<namespace>') を使うものについて、
+ * その translator で引いているキーと、文字列リテラルでない (動的な) 呼び出しを返す。
+ */
+export function collectKeysForNamespace(
+  entryFile: string,
+  namespace: string,
+): { files: string[]; keys: string[]; dynamic: string[] };

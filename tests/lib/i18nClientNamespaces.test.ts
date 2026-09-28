@@ -13,13 +13,17 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
+  ROUTE_CLIENT_KEY_PREFIXES,
   ROUTE_CLIENT_NAMESPACES,
   SHARED_CLIENT_NAMESPACES,
 } from '@/i18n/clientNamespaces';
+import { pickNamespaces } from '@/i18n/clientMessages';
 import jaMessages from '@/messages/ja.json';
+import enMessages from '@/messages/en.json';
 import {
   LOCALE_LAYOUT,
   REPO_ROOT,
+  collectKeysForNamespace,
   collectNamespaces,
   listLocalePages,
 } from '@/scripts/lib/client-namespace-graph.mjs';
@@ -88,5 +92,41 @@ describe('i18n client namespaces フェンス', () => {
       )
       .map(({ route }) => route);
     expect(missing).toEqual([]);
+  });
+});
+
+// ROUTE_CLIENT_KEY_PREFIXES: namespace の一部のキーだけを渡すルート。キーの渡し漏れも実行時の
+// MISSING_MESSAGE になるので、そのルートの client 依存グラフで引いているキーを静的に集めて照合する。
+describe('一部のキーだけ渡す namespace (ROUTE_CLIENT_KEY_PREFIXES)', () => {
+  const entries = Object.entries(ROUTE_CLIENT_KEY_PREFIXES).flatMap(([route, byNamespace]) =>
+    Object.entries(byNamespace ?? {}).map(([namespace, prefixes]) => ({ route, namespace, prefixes })),
+  );
+
+  it('少なくとも 1 つ宣言がある (トップの Landing)', () => {
+    expect(entries).toContainEqual({ route: '', namespace: 'Landing', prefixes: ['cashSim'] });
+  });
+
+  it.each(entries)('$route の $namespace: client が引くキーはすべて接頭辞に収まり、動的なキーがない', ({ route, namespace, prefixes }) => {
+    const page = pages.find((p) => p.route === route);
+    expect(page).toBeDefined();
+    expect(declared[route]).toContain(namespace);
+    const { files, keys, dynamic } = collectKeysForNamespace(page!.file, namespace);
+    expect(files.length).toBeGreaterThan(0);
+    expect(dynamic).toEqual([]);
+    expect(keys.filter((key: string) => !prefixes.some((prefix) => key.startsWith(prefix)))).toEqual([]);
+    // 接頭辞はどれも実在のキーに当たる (古い接頭辞を残さない)。
+    const namespaceKeys = Object.keys((jaMessages as Record<string, Record<string, unknown>>)[namespace]);
+    for (const prefix of prefixes) expect(namespaceKeys.some((key) => key.startsWith(prefix)), prefix).toBe(true);
+    // 絞ったあとの messages に、client が引くキーがすべて残る (ja/en)。
+    for (const messages of [jaMessages, enMessages] as Record<string, unknown>[]) {
+      const picked = pickNamespaces(messages, [namespace], { [namespace]: prefixes })[namespace] as Record<string, unknown>;
+      for (const key of keys) expect(picked, key).toHaveProperty(key);
+    }
+  });
+
+  it('pickNamespaces: 接頭辞の指定がある namespace だけを絞り、ほかはそのまま渡す', () => {
+    const messages = { A: { cashSimX: 'x', faqQ1: 'q' }, B: { k: 'v' } };
+    expect(pickNamespaces(messages, ['A', 'B'], { A: ['cashSim'] })).toEqual({ A: { cashSimX: 'x' }, B: { k: 'v' } });
+    expect(pickNamespaces(messages, ['A'])).toEqual({ A: { cashSimX: 'x', faqQ1: 'q' } });
   });
 });

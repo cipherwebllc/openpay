@@ -116,6 +116,49 @@ export function collectNamespaces(entryFile) {
   return [...namespaces].sort();
 }
 
+/**
+ * entry から到達できるファイルのうち `useTranslations('<namespace>')` を使うものについて、
+ * その translator で引いているキー (t('k') / t.rich('k') / t.raw('k') / t.markup('k') / t.has('k')) を集める。
+ * キーが文字列リテラルでない呼び出し (t(`...${x}`)・t(key)) は dynamic として返す
+ * (ROUTE_CLIENT_KEY_PREFIXES で絞ったときに、静的に確かめられないキーを使っていないかのフェンス)。
+ * @param {string} entryFile 絶対パス
+ * @param {string} namespace
+ */
+export function collectKeysForNamespace(entryFile, namespace) {
+  const seen = new Set();
+  const keys = new Set();
+  const dynamic = [];
+  const files = [];
+  const queue = [entryFile];
+  const escaped = namespace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declRe = new RegExp(`(?:const|let)\\s+(\\w+)\\s*=\\s*useTranslations\\(\\s*['"]${escaped}['"]\\s*\\)`, 'g');
+  while (queue.length > 0) {
+    const file = queue.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    if (!existsSync(file)) continue;
+    const source = stripComments(readFileSync(file, 'utf8'));
+    const rel = path.relative(REPO_ROOT, file);
+    for (const decl of source.matchAll(declRe)) {
+      files.push(rel);
+      const name = decl[1];
+      const callRe = new RegExp(`\\b${name}(?:\\.(?:rich|raw|markup|has))?\\(\\s*([^\\s)])`, 'g');
+      const after = source.slice(decl.index + decl[0].length);
+      for (const call of after.matchAll(callRe)) {
+        const rest = after.slice(call.index + call[0].length - 1);
+        const literal = rest.match(/^(['"])([^'"]+)\1/);
+        if (literal) keys.add(literal[2]);
+        else dynamic.push(`${rel}: ${rest.slice(0, 40)}`);
+      }
+    }
+    for (const spec of importSpecifiers(source)) {
+      const resolved = resolveImport(spec, file);
+      if (resolved && !seen.has(resolved)) queue.push(resolved);
+    }
+  }
+  return { files: [...new Set(files)].sort(), keys: [...keys].sort(), dynamic };
+}
+
 /** app/[locale] 配下の page.tsx を列挙し、route key (layout からの相対ディレクトリ) を返す。 */
 export function listLocalePages() {
   const localeRoot = path.join(REPO_ROOT, 'app', '[locale]');
