@@ -1,5 +1,7 @@
 # 掲載リソース再検証の毎時トリガー (無料)。Vercel Hobby は cron が日次限定のため、
 # 毎時実行は GitHub Actions から HTTP で叩く (vercel.json の日次 cron はフォールバック)。
+# ⚠️ GitHub の schedule は混雑で遅れ・間引きされ、実測は 2〜7 時間おき (中央値約 4 時間・2026-09 実測)。
+# 本番設定の検証 (scripts/verify-production-config-helpers.mjs) の鮮度の基準は実測に合わせて 8 時間。
 # route 側は runId (UTC 時) + KV lock で重複配送に冪等 — 二重トリガーでも安全。
 # 必要 secret: CRON_SECRET (Vercel env と同じ値を GitHub リポ secret にも登録)。
 name: reverify-cron

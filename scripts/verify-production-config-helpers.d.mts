@@ -16,3 +16,6 @@ export function assessReverifyRun(
   log: string,
   nowMs?: number,
 ): ReverifyRunAssessment;
+
+/** Pimlico 残高 cron の最新 run のログから、実際に残高を読んだかを判定する。 */
+export function assessPimlicoRun(log: string): { ok: boolean; detail: string };

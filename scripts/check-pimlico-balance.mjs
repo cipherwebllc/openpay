@@ -19,6 +19,7 @@ import {
   getAddress,
 } from 'viem';
 import { base, kaia, polygon } from 'viem/chains';
+import { PIMLICO_BALANCE_HEADER } from './lib/pimlico-balance-output.mjs';
 import { entryPoint07Address, entryPoint08Address } from 'viem/account-abstraction';
 
 // simpleAccount=0.8、metamask/mav2=0.7。0.8 のアラートは版別しきい値で明示 opt-in。
@@ -173,7 +174,8 @@ export async function runBalanceCheck({
     targets.map((t) => getBalance(t.config.chain, t.rpcUrl, t.paymasterAddress, t.entryPoint.address)),
   );
 
-  const lines = ['Pimlico EntryPoint deposit 残高:'];
+  // 見出しは本番設定の検証がログで探す (scripts/lib/pimlico-balance-output.mjs・変えるときもそこだけ)。
+  const lines = [PIMLICO_BALANCE_HEADER];
   const alerts = [];
   const failures = [];
 

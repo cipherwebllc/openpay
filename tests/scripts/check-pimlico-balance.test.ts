@@ -3,6 +3,7 @@
 // chain 追加 / required=false の skip / threshold breach 通知の各経路を実走。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { base, kaia, polygon } from 'viem/chains';
+import { PIMLICO_BALANCE_HEADER } from '@/scripts/lib/pimlico-balance-output.mjs';
 
 // viem の境界モック (HTTP / RPC layer)
 const readContractMock = vi.fn();
@@ -92,6 +93,8 @@ describe('check-pimlico-balance: X8 default compatibility and opt-in 0.8 alerts'
       .toEqual([[v08, paymaster], [v08, paymaster]]);
     expect(result).toMatchObject({ breached: false, alerts: [], failures: [], message: null });
     expect(result.lines.join('\n')).toContain('Polygon (EntryPoint 0.8): 0 POL');
+    // 本番設定の検証 (verify-production-config) はログでこの見出しを探す。共有の定数で出していること。
+    expect(result.lines[0]).toBe(PIMLICO_BALANCE_HEADER);
     expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('::warning::'));
     expect(fetchMock).not.toHaveBeenCalled();
   });
