@@ -53,7 +53,7 @@ describe('standard-payment fee scope (review 6 regression)', () => {
       storefrontPercent: storefrontPct,
       preorderPercent: preorderPct,
     };
-    it.each(['cashCellFeeOpenPayNote', 'benefitsFeeBody', 'supportFeeRegisterBody', 'faqA6'] as const)(`${locale}: %s discloses merchant-paid register JPYC including standard mode`, (key) => {
+    it.each(['cashCellFeeOpenPayNote', 'benefitsFeeBody', 'supportFeeRegisterBody'] as const)(`${locale}: %s discloses merchant-paid register JPYC including standard mode`, (key) => {
       const text = t(key, values);
       expect(text).toMatch(locale === 'ja' ? /レジ/ : /register/i);
       expect(text).toMatch(locale === 'ja' ? /通常決済/ : /standard/i);
@@ -62,7 +62,7 @@ describe('standard-payment fee scope (review 6 regression)', () => {
       expect(text).toContain(`${floorJpyc} JPYC`);
     });
     // faqA1 の料率は messages に手書き。構造化データ (FAQPage) に残る唯一の料率なので、検索エンジン・AI に
-    // 古い料率が渡らないよう DISCLOSED と照合する (P5 で faqA6 を構造化データから外した後の drift フェンス)。
+    // 古い料率が渡らないよう DISCLOSED と照合する (表示されない faqA6 を廃止した後の drift フェンス)。
     it(`${locale}: faqA1 (構造化データに出る料率) は DISCLOSED の料率と最低額に一致する`, () => {
       const text = t('faqA1', values);
       expect(text).toContain(`${recoverPct}%`);

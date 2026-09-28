@@ -922,7 +922,7 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'howItWorksCustomerStep1',
     'howItWorksCustomerStep2',
     'howItWorksCustomerStep3',
-    // FAQ (6 Q/A pairs — Q6/A6 は Phase 1 で「OpenPay の手数料はいくらか」を追加)
+    // FAQ (Q6/A6「OpenPay の手数料はいくらか」は「利用料について」の節へ移したあと表示されなくなったので廃止・2026-09-28)
     'faqTitle',
     'faqQ1',
     'faqA1',
@@ -934,8 +934,6 @@ describe('i18n: Nav / Landing 名前空間 (AppShell + LP, ja/en parity)', () =>
     'faqA4',
     'faqQ5',
     'faqA5',
-    'faqQ6',
-    'faqA6',
     // faqQ7/A7 = 「JPYC・USDC とは何ですか?」(LandingFaq で faqQ2 の前に表示)
     'faqQ7',
     'faqA7',
