@@ -9,7 +9,7 @@
 // exit 0 = 全 active、1 = 1 件以上 inactive。
 
 import { spawnSync } from 'node:child_process';
-import { assessReverifyRun } from './verify-production-config-helpers.mjs';
+import { assessPimlicoRun, assessReverifyRun } from './verify-production-config-helpers.mjs';
 
 const BASE = process.argv[2] ?? 'https://open-pay.jp';
 
@@ -112,30 +112,13 @@ for (const [name, path] of [
         ['run', 'view', String(runId), '--repo=cipherwebllc/openpay', '--log'],
         { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 },
       );
-      // log には shell script の SOURCE CODE 行も含まれるため、単純 grep だと
-      // skip 判定文字列が source code 中の echo 文 (`echo "::warning::Secrets 未設定..."`)
-      // にも match して false-positive 検出する。actual 実行された warning 行を
-      // 探すため `##[warning]Secrets 未設定` (GH Actions のレンダ済 warning 形式) を使う。
-      const isSkip = /##\[warning\]Secrets 未設定/.test(log.stdout ?? '');
-      // 同様に actual balance check が走った証拠は実行 output 行 (script の
-      // 出力文字列「Pimlico Sponsorship Paymaster 残高:」がある = 完走)。
-      const didActualCheck = /Pimlico Sponsorship Paymaster 残高:/.test(
-        log.stdout ?? '',
-      );
-      record(
-        `Pimlico balance cron actual check (最新 run #${runId})`,
-        didActualCheck,
-        didActualCheck
-          ? '実 balance check 実行済 (script output 検出)'
-          : isSkip
-            ? 'graceful skip — PIMLICO_PAYMASTER_POLYGON / BASE / ALERT_WEBHOOK_URL 未設定。balance 監視ゼロ'
-            : 'run は実行されたが balance output 不在 (workflow 変更直後の build 失敗 / script error の可能性)',
-      );
+      const assessment = assessPimlicoRun(log.stdout ?? '');
+      record(`Pimlico balance cron actual check (最新 run #${runId})`, assessment.ok, assessment.detail);
     }
   }
 }
 
-// --- (6) hourly reverify が直近3時間内に HTTP 200 で完走したか ---
+// --- (6) reverify cron が直近 8 時間内に HTTP 200 で完走したか (GitHub の schedule は毎時指定でも実測 2〜7 時間おき) ---
 // secret 欠落・ローテーション不一致・schedule 停止が日次 fallback に隠れて波及する前に、
 // read-only の Actions 履歴と実 HTTP 出力から operator 設定不全を検出する。
 {
@@ -154,7 +137,7 @@ for (const [name, path] of [
   );
   if (r.status !== 0 || !r.stdout) {
     record(
-      'Hourly reverify cron freshness',
+      'Reverify cron freshness',
       false,
       'gh CLI 未認証 / repo access 不可',
     );
@@ -168,7 +151,7 @@ for (const [name, path] of [
     const run = runs.find((candidate) => candidate.status === 'completed');
     if (!run) {
       const assessment = assessReverifyRun(undefined, '');
-      record('Hourly reverify cron freshness', assessment.ok, assessment.detail);
+      record('Reverify cron freshness', assessment.ok, assessment.detail);
     } else {
       const log = spawnSync(
         'gh',
@@ -185,7 +168,7 @@ for (const [name, path] of [
         run,
         log.status === 0 ? (log.stdout ?? '') : '',
       );
-      record('Hourly reverify cron freshness', assessment.ok, assessment.detail);
+      record('Reverify cron freshness', assessment.ok, assessment.detail);
     }
   }
 }
