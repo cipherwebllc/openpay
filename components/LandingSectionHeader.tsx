@@ -17,13 +17,15 @@ export function LandingSectionHeader({
   return (
     <div className="mx-auto max-w-3xl text-center">
       {eyebrow ? <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand sm:text-sm">{eyebrow}</p> : null}
+      {/* 見出しは文節で折り返し、行の長さをそろえる (「ステーブルコインなの / か」のような 1 文字だけの行や、
+          単語の途中の改行を出さない・日本語は html lang=ja で効く word-break:auto-phrase)。 */}
       <h2
         id={id}
-        className={`text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 sm:text-4xl ${eyebrow ? 'mt-2' : ''}`}
+        className={`text-[1.75rem] font-bold leading-tight tracking-tight text-slate-900 [word-break:auto-phrase] text-balance sm:text-4xl ${eyebrow ? 'mt-2' : ''}`}
       >
         {title}
       </h2>
-      {lead ? <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-slate-600 sm:text-base">{lead}</p> : null}
+      {lead ? <p className="mx-auto mt-3 max-w-2xl text-balance text-sm leading-relaxed text-slate-600 [word-break:auto-phrase] sm:text-base">{lead}</p> : null}
     </div>
   );
 }

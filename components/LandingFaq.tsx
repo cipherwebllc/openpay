@@ -12,28 +12,14 @@ import Link from 'next/link';
 import { getLocale, getTranslations } from 'next-intl/server';
 import { ChevronDown } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
+import { LANDING_FAQ, type LandingFaqAnswerKey } from '@/lib/landingFaq';
 
-type FaqKey = 'faqQ1' | 'faqQ7' | 'faqQ2' | 'faqQ3' | 'faqQ4' | 'faqQ5' | 'faqQ8';
-type FaqAnswerKey = 'faqA1' | 'faqA7' | 'faqA2' | 'faqA3' | 'faqA4' | 'faqA5' | 'faqA8';
-
-const QA: readonly { q: FaqKey; a: FaqAnswerKey }[] = [
-  { q: 'faqQ1', a: 'faqA1' },
-  // 「JPYC・USDC とは」= 基礎説明。「どちらを受け取るか (faqQ2)」の直前に置く。
-  { q: 'faqQ7', a: 'faqA7' },
-  { q: 'faqQ2', a: 'faqA2' },
-  { q: 'faqQ3', a: 'faqA3' },
-  { q: 'faqQ4', a: 'faqA4' },
-  { q: 'faqQ5', a: 'faqA5' },
-  // B2B 請求 (開発費/保守費) の利用例 — Mi&T の法人 JPYC 受付 (2026-07-27) を受けた
-  // 訴求拡張 (user 承認 2026-07-30)。新機能の約束はせず既存の決済リンクの説明のみ。
-  { q: 'faqQ8', a: 'faqA8' },
-];
 
 export async function LandingFaq() {
   const locale = await getLocale();
   const t = await getTranslations('Landing');
 
-  function renderAnswer(key: FaqAnswerKey): ReactNode {
+  function renderAnswer(key: LandingFaqAnswerKey): ReactNode {
     if (key === 'faqA4') {
       return t.rich(key, {
         jpycEx: (chunks) => (
@@ -65,7 +51,7 @@ export async function LandingFaq() {
       <LandingSectionHeader eyebrow={t('eyebrowFaq')} title={t('faqTitle')} />
 
       <ul className="mx-auto mt-8 max-w-3xl divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
-        {QA.map(({ q, a }) => (
+        {LANDING_FAQ.map(({ q, a }) => (
           <li key={q}>
             <details className="group px-5 py-4 transition-colors open:bg-slate-50/60 sm:px-6 sm:py-5">
               <summary className="flex cursor-pointer list-none items-start gap-3 text-left text-sm font-semibold text-slate-800 sm:text-[15px]">

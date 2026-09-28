@@ -44,12 +44,18 @@ export async function LandingHowItWorks() {
           伝わる。受取 (決済QR) / レジ (POS) は店舗側、支払い は顧客側を提示。
           autoplay/muted/loop/playsInline で GIF 同等に自動再生 (iOS Safari 含む)、
           自動再生が抑止される環境では poster を表示する。 */}
-      <p className="mt-6 text-center text-xs font-medium text-slate-500">
+      <p id="lp-how-demo-caption" className="mt-6 text-center text-xs font-medium text-slate-500">
         {t('howItWorksDemoCaption')}
       </p>
       {/* モバイルは横スクロール 1 行 (縦積み 3 本 ≒ 3 画面分の縦長を 1 画面に圧縮 —
-          plans/lp-jobs-pass2.md P1)。sm 以上は従来どおり 3 カラム。 */}
-      <div className="-mx-4 mt-3 flex snap-x snap-mandatory gap-5 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0 sm:pb-0">
+          plans/lp-jobs-pass2.md P1)。sm 以上は従来どおり 3 カラム。横スクロールはキーボードでも動かせるよう
+          フォーカス可能な region にし、名前は上のキャプションから取る (掟 8・こんな用途の横スクロールと同じ)。 */}
+      <div
+        role="region"
+        aria-labelledby="lp-how-demo-caption"
+        tabIndex={0}
+        className="-mx-4 mt-3 flex snap-x snap-mandatory gap-5 overflow-x-auto px-4 pb-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand sm:mx-0 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0 sm:pb-0"
+      >
         {[
           {
             src: '/demo/create-qr-mobile.mp4',

@@ -1,17 +1,13 @@
 // SEO/AIEO: LP に JSON-LD (schema.org) を埋め込む Server Component。
 // - SoftwareApplication: OpenPay のエンティティ定義 (AI 引用/ナレッジパネルの素)
-// - FAQPage: LP の FAQ (Landing.faqQ1..7) をそのまま構造化 — 文言の単一情報源は messages
+// - FAQPage: LP に見えている FAQ (lib/landingFaq.ts の並び) をそのまま構造化 — 文言の単一情報源は messages。
+//   回答は画面と同じ値で差し込み値を埋め、タグは中身の文字だけにする (穴あきの料率や生のタグを出さない)。
 // 表示 UI は持たない (head/body どちらでも valid・LP page から render)。
 import { getLocale, getTranslations } from 'next-intl/server';
+import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
+import { LANDING_FAQ } from '@/lib/landingFaq';
 
 export const SITE_URL = 'https://open-pay.jp';
-const FAQ_COUNT = 8;
-
-// FAQ 回答の rich タグ (<jpycEx>…</jpycEx> 等) を落として平文化する。
-// JSON-LD の text にマークアップを残すと検証エラー/引用劣化になるのを防ぐ。
-function stripTags(s: string): string {
-  return s.replace(/<[^>]*>/g, '');
-}
 
 // <script> 内 JSON の `<` を < にエスケープ。将来 messages の文言に
 // "</script>" 相当が紛れても script 文脈脱出 (XSS) に波及させないための防御
@@ -54,12 +50,13 @@ export async function StructuredData() {
   const faqPage = {
     '@context': 'https://schema.org',
     '@type': 'FAQPage',
-    mainEntity: Array.from({ length: FAQ_COUNT }, (_, i) => ({
+    mainEntity: LANDING_FAQ.map(({ q, a }) => ({
       '@type': 'Question',
-      name: stripTags(landing.raw(`faqQ${i + 1}`) as string),
+      name: landing(q),
       acceptedAnswer: {
         '@type': 'Answer',
-        text: stripTags(landing.raw(`faqA${i + 1}`) as string),
+        // 表示 (LandingFaq) と同じ値で埋める。リンクのタグ (faqA4 の <jpycEx>・<create>) は中身の文字だけにする。
+        text: landing.markup(a, { ...LANDING_PAYMENT_FEE_VALUES, jpycEx: (chunks) => chunks, create: (chunks) => chunks }),
       },
     })),
   };
