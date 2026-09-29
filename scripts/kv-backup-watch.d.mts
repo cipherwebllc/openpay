@@ -4,3 +4,6 @@ export interface WatchOptions { r2?: Pick<R2Client, 'listObjects' | 'getObjectTo
 export function validateMeta(meta: unknown, key: string): Meta;
 export function watchBackups(options?: WatchOptions): Promise<{ completeFinishedAt: string; ageMs: number; metaCount: number }>;
 export function main(args?: string[], options?: WatchOptions & { log?: (message: string) => void; error?: (message: string) => void }): Promise<number>;
+
+/** 最新の完全なバックアップがこれより古ければ fail する閾値 (ms)。 */
+export const BACKUP_MAX_AGE_MS: number;

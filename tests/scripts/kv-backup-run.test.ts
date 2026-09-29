@@ -259,7 +259,7 @@ describe('run / verify / workflows', () => {
   it('keeps dependency-free workflows, schedules, secrets and operational docs synchronized', async () => {
     const backup = await readFile('.github/workflows/kv-backup.yml', 'utf8');
     const watch = await readFile('.github/workflows/kv-backup-watch.yml', 'utf8');
-    expect(backup).toContain("cron: '17 3,15 * * *'"); expect(watch).toContain("cron: '47 3,9,15,21 * * *'");
+    expect(backup).toContain("cron: '17 3 * * *'"); expect(watch).toContain("cron: '47 3,9,15,21 * * *'");
     for (const workflow of [backup, watch]) {
       expect(workflow).toContain("node-version: '22'"); expect(workflow).toContain('cancel-in-progress: false');
       expect(workflow).toContain('timeout-minutes: 30'); expect(workflow).toContain('::error::'); expect(workflow).not.toContain('npm ci');
