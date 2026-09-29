@@ -46,7 +46,7 @@ for (let i = 0; i < days; i++) {
 }
 
 console.log(`x402 funnel — 直近 ${days} 日 (UTC)\n`);
-console.log('[支払い前] resource: 402 発行 / 形不正');
+console.log('[支払い前] resource: 402 発行 (抽出記録からの推定・概数) / 形不正');
 for (const [path, row] of [...challenges].sort()) {
   console.log(`  ${path}: challenge ${row.challenge ?? 0} / invalid_payload ${row.invalid_payload ?? 0}`);
 }
