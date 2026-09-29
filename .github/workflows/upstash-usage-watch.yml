@@ -1,0 +1,50 @@
+name: upstash-usage-watch
+# Upstash の使用量の監視 (scripts/upstash-usage-watch.mjs・plans/upstash-usage-watch.md)。
+# 今月の見込みが上限 (既定 25 万コマンド = 月 $0.5・変数 UPSTASH_CAP_COMMANDS で変更) を超えそうなら失敗させる
+# (total_monthly_billing は単位が未確認なので警告だけ)
+# (GitHub Actions の失敗通知。schedule の workflow はスケジュールを最後に変更したユーザーへ・通知設定に依存)。
+# 呼ぶのは Upstash Developer API の stats だけ。Secrets: UPSTASH_MGMT_EMAIL / UPSTASH_MGMT_API_KEY (Read Only) / UPSTASH_DB_ID。
+on:
+  schedule:
+    - cron: '30 0 * * *' # 毎日 UTC 00:30 = JST 09:30
+  workflow_dispatch:
+    inputs:
+      probe:
+        description: 'stats の呼び出しがコマンド (課金) に数えられるかを実測する (初回に 1 回・約 13 分・最悪 29 分・対照区間と比べる)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: upstash-usage-watch
+  cancel-in-progress: false
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check Upstash usage
+        env:
+          UPSTASH_MGMT_EMAIL: ${{ secrets.UPSTASH_MGMT_EMAIL }}
+          UPSTASH_MGMT_API_KEY: ${{ secrets.UPSTASH_MGMT_API_KEY }}
+          UPSTASH_DB_ID: ${{ secrets.UPSTASH_DB_ID }}
+          UPSTASH_CAP_COMMANDS: ${{ vars.UPSTASH_CAP_COMMANDS }}
+          PROBE: ${{ inputs.probe }}
+        run: |
+          for key in UPSTASH_MGMT_EMAIL UPSTASH_MGMT_API_KEY UPSTASH_DB_ID; do
+            if [ -z "${!key}" ]; then
+              echo "::error::$key secret is not set. Upstash usage watch cannot run."
+              exit 1
+            fi
+          done
+          if [ "$PROBE" = "true" ]; then
+            node scripts/upstash-usage-watch.mjs --probe
+          else
+            node scripts/upstash-usage-watch.mjs
+          fi
