@@ -65,10 +65,10 @@ export function funnelField(stage: FunnelStage, rail: FunnelRail, resourceUrl: s
 const FUNNEL_HINCR =
   "local n = redis.call('HINCRBY', KEYS[1], ARGV[1], tonumber(ARGV[3])) if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[2]) end return n";
 
-// KV コマンド予算 (Upstash 無料枠・2026-09-26): 1 件の計上は Lua 込みで 3〜4 コマンド。支払い前の 402
-// (challenge) は検索クローラの巡回で大量に出るため、10 件に 1 件だけ記録して 10 を足す (期待値は同じ・
-// 表示は 10 単位の概数)。支払いを試みた後の段階 (verify 以降) は件数が少なく判断に使うので全件記録する。
-export const FUNNEL_CHALLENGE_SAMPLE_RATE = 10;
+// KV コマンド予算 (Upstash 従量課金・上限 月 $0.5・2026-09-29 に 10 → 50): 1 件の計上は Lua 込みで 3〜4 コマンド。
+// 支払い前の 402 (challenge) は検索クローラの巡回で大量に出るため、50 件に 1 件だけ記録して 50 を足す
+// (期待値は同じ・表示は 50 単位の概数)。支払いを試みた後の段階 (verify 以降) は件数が少なく判断に使うので全件記録する。
+export const FUNNEL_CHALLENGE_SAMPLE_RATE = 50;
 
 /** 1 件を計上する。失敗しても throw しない (付帯処理の隔離)。 */
 export async function recordFunnel(
