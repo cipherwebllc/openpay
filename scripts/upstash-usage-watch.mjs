@@ -156,7 +156,7 @@ export async function probe({ env = process.env, fetchImpl = fetch, now = () => 
   const config = readEnv(env);
   const read = async () => countOf((await fetchStats({ ...config, fetchImpl }))?.total_monthly_requests);
   const minute = new Date(now()).getUTCMinutes();
-  if (minute < 10) log('  note: :00-:09 has hourly cron bursts (license repair・reverify); the control window may differ more');
+  if (minute < 15) log('  note: :00-:14 has hourly cron bursts (license repair・reverify); the control window may differ more');
 
   const controlStart = await read();
   await sleep(waitMs);
