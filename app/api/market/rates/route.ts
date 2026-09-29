@@ -2,8 +2,8 @@
 //
 // 目的:
 //   - LP と /create の MarketRates strip 用の単一データソース
-//   - 取得元への直接 client fetch は IP ごとの rate limit に当たりやすいため
-//     に当たりやすいため、Next route で集約 + revalidate: 300 で server 側 1 req/5min
+//   - 取得元への直接 client fetch は IP ごとの rate limit に当たりやすいため、
+//     Next route で集約 + revalidate: 300 で server 側 1 req/5min
 //     に圧縮 (per-IP ではなく per-region/edge cache)
 //   - JPYC は 1:1 peg なので fetch せず client 側で fixed 表示
 //
@@ -31,7 +31,8 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 300;
 
 export async function GET(): Promise<Response> {
-  // Coinbase は cache-control: no-store を返すが、Next の data cache (next.revalidate) は上流のヘッダを見ないので 5 分のまま。
+  // 5 分の再検証は fetch の next.revalidate で指定する。Coinbase は cache-control: no-store を返すので、
+  // 本番で上流への呼び出しが 5 分に 1 回へ集約されているかは deploy 後に確かめる (未確認・2026-09-29)。
   const res = await fetch(USDC_JPY_SOURCE_URL, {
     next: { revalidate: 300 },
     headers: { 'User-Agent': 'OpenPay/1.0 (https://open-pay.jp)' },
