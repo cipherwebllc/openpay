@@ -1,6 +1,7 @@
 name: upstash-usage-watch
 # Upstash の使用量の監視 (scripts/upstash-usage-watch.mjs・plans/upstash-usage-watch.md)。
 # 今月の見込みが上限 (既定 25 万コマンド = 月 $0.5・変数 UPSTASH_CAP_COMMANDS で変更) を超えそうなら失敗させる
+# (total_monthly_billing は単位が未確認なので警告だけ)
 # (GitHub Actions の失敗通知。schedule の workflow はスケジュールを最後に変更したユーザーへ・通知設定に依存)。
 # 呼ぶのは Upstash Developer API の stats だけ。Secrets: UPSTASH_MGMT_EMAIL / UPSTASH_MGMT_API_KEY (Read Only) / UPSTASH_DB_ID。
 on:
@@ -9,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       probe:
-        description: 'stats の呼び出しがコマンド (課金) に数えられるかを実測する (初回に 1 回・約 10 分・対照区間と比べる)'
+        description: 'stats の呼び出しがコマンド (課金) に数えられるかを実測する (初回に 1 回・約 13 分・最悪 29 分・対照区間と比べる)'
         type: boolean
         default: false
 permissions:
@@ -22,7 +23,7 @@ env:
 jobs:
   watch:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -64,13 +64,21 @@ describe('upstash-usage-watch: 見込みと判定', () => {
     expect(dailySeries({ dailyrequests: [{ x: day(9), y: null }, { x: day(8), y: '5' }, { x: 'bad', y: 1 }, 'x'] })).toEqual([]);
   });
 
-  it('上限 (既定 25 万 = 月 $0.5): 超えたら over・80% 以上で warn・請求額で超えたら billing が理由', () => {
+  it('公式の例の形 (ナノ秒・その日の時刻) を UTC の日に丸め、時差の書かれていない点は読まない', () => {
+    expect(dailySeries({ dailyrequests: [
+      { x: '2026-10-09 15:12:52.799480932 +0000 UTC', y: 4_000 },
+      { x: '2026-10-08 00:00:00', y: 9_999 },
+    ] })).toEqual([{ date: Date.UTC(2026, 9, 9), count: 4_000 }]);
+  });
+
+  it('上限 (既定 25 万 = 月 $0.5): 見込みが超えたら over・80% 以上で warn・請求額 (単位未確認) は超えても warn だけ', () => {
     expect(DEFAULT_CAP_COMMANDS).toBe(250_000);
     expect(assess({ projected: 250_000.4, billing: 0 }, 250_000)).toEqual({ level: 'over', trigger: 'commands' });
     expect(assess({ projected: 250_000, billing: 0 }, 250_000)).toEqual({ level: 'warn', trigger: 'commands' });
     expect(assess({ projected: 200_000, billing: 0 }, 250_000)).toEqual({ level: 'warn', trigger: 'commands' });
     expect(assess({ projected: 199_999, billing: 0 }, 250_000)).toEqual({ level: 'ok', trigger: null });
-    expect(assess({ projected: 100_000, billing: 0.51 }, 250_000)).toEqual({ level: 'over', trigger: 'billing' });
+    expect(assess({ projected: 100_000, billing: 222.3 }, 250_000)).toEqual({ level: 'warn', trigger: 'billing' });
+    expect(assess({ projected: null, billing: 0.51 }, 250_000)).toEqual({ level: 'warn', trigger: 'billing' });
     expect(assess({ projected: null, billing: null }, 250_000)).toEqual({ level: 'unknown', trigger: null });
   });
 });
@@ -107,13 +115,14 @@ describe('upstash-usage-watch: main', () => {
     for (const secret of [EMAIL, KEY, DB]) expect(text).not.toContain(secret);
   });
 
-  it('見込みが上限を超えたら 1・請求額で超えたらそう書く・80% 以上は警告で 0・上限は変数で変えられる', async () => {
+  it('見込みが上限を超えたら 1・請求額 (単位未確認) の超過は警告で 0・80% 以上は警告で 0・上限は変数で変えられる', async () => {
     const over = await run([], { env: ENV, now: NOW, fetchImpl: async () => okResponse(stats(66_000, 10_000)) });
     expect(over.code).toBe(1);
     expect(over.text).toContain('::error::Upstash projected monthly commands exceed the cap');
-    const billing = await run([], { env: ENV, now: NOW, fetchImpl: async () => okResponse(stats(66_000, 1_000, 0.6)) });
-    expect(billing.code).toBe(1);
-    expect(billing.text).toContain('::error::Upstash billing this month exceeds the cap');
+    const billing = await run([], { env: ENV, now: NOW, fetchImpl: async () => okResponse(stats(66_000, 1_000, 222.3)) });
+    expect(billing.code).toBe(0);
+    expect(billing.text).toContain('::warning::total_monthly_billing exceeds $0.50 if it is in dollars (unit unverified)');
+    expect(billing.text).toContain('dailyrequests: 10 points → 10 UTC days (2026-10-01 … 2026-10-10)');
     const warn = await run([], { env: ENV, now: NOW, fetchImpl: async () => okResponse(stats(66_000, 7_000)) });
     expect(warn.code).toBe(0);
     expect(warn.text).toContain('::warning::');
@@ -162,9 +171,17 @@ describe('upstash-usage-watch: probe (stats の呼び出しがコマンドに数
     expect(out.join('\n')).toContain('APPEAR TO BE COUNTED');
   });
 
-  it('stats が更新されない (対照の増分 0)・数値の欠け・月の変わり目 (減少) は「判定できない」で 1', async () => {
+  it('既定は 200 回 (+ 読み取り 4 回) を 5 秒の timeout で呼ぶ', async () => {
+    const deps = probeDeps({ controlStart: 1_000, controlEnd: 1_030, probeStart: 1_030, probeEnd: 1_060 }, 200);
+    const result = await probe({ env: ENV, fetchImpl: deps.fetchImpl, now: deps.now, sleep: deps.sleep, log: () => {} });
+    expect(deps.fetchImpl).toHaveBeenCalledTimes(204);
+    expect(result.verdict).toBe('not_counted');
+  });
+
+  it('stats が更新されない (対照の増分 0)・数値の欠け・月の変わり目 (減少)・対照区間に利用の山 (差 < −calls/2) は「判定できない」で 1', async () => {
     for (const totals of [
       { controlStart: 1_000, controlEnd: 1_000, probeStart: 1_000, probeEnd: 1_000 },
+      { controlStart: 1_000, controlEnd: 1_040, probeStart: 1_040, probeEnd: 1_050 },
       { controlStart: 1_000, controlEnd: null, probeStart: 1_000, probeEnd: 1_100 },
       { controlStart: 1_000, controlEnd: 1_030, probeStart: 1_030, probeEnd: 5 },
     ]) {

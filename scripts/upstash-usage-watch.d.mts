@@ -8,7 +8,7 @@ export class WatchError extends Error {
   constructor(code: string);
 }
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
-export function fetchStats(input: { email: string; apiKey: string; dbId: string; fetchImpl?: FetchLike }): Promise<Record<string, unknown>>;
+export function fetchStats(input: { email: string; apiKey: string; dbId: string; fetchImpl?: FetchLike; timeoutMs?: number }): Promise<Record<string, unknown>>;
 export function dailySeries(stats: unknown): { date: number; count: number }[];
 export type Projection = { monthTotal: number; avgDaily: number | null; projected: number | null; basis: string };
 export function projectMonth(stats: unknown, nowMs: number): Projection;
