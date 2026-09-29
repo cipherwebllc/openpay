@@ -403,28 +403,23 @@ describe('license worker: viem + real Lua CAS', () => {
     h.store!.strings.set(LICENSE_ACTIVE_SUBMISSION, 'another-job'); await run(); expect(h.wallet.signTransaction).not.toHaveBeenCalled();
   });
   it('stops dispatch at the deadline and rebuilds a lost due entry from the permanent index', async () => {
-    // 修復は UTC 0/6/12/18 時の最初の run だけ (isLicenseRepairRun)。NOW = 08:00Z から 12:00Z へ進めて修復の run にする。
-    advance(4 * 60 * 60_000);
     h.rpc.getBlock.mockImplementation(async () => { h.store!.advance(40_000); return { number: 100n, hash: BLOCK }; });
     await runLicenseWorker(); expect(h.store!.zsets.get(LICENSE_DUE_INDEX)?.has(job.paymentKey)).toBe(true); expect(h.rpc.getTransactionReceipt).not.toHaveBeenCalled(); expect(h.wallet.signTransaction).not.toHaveBeenCalled();
   });
-  it('runs the index repair only in the first run of UTC hours 0/6/12/18 (KV command budget)', async () => {
+  it('runs the index repair only in the first run of each UTC hour (KV command budget)', async () => {
     // REBUILD always writes its cursor key, so the key's presence shows whether the repair ran.
-    // NOW = 2027-01-15T08:00Z。08:00 は修復の時ではない → 12:20 は窓 (0〜14 分) の外 → 18:05 で修復。
+    // NOW = 2027-01-15T08:00Z。08:20 は窓 (0〜14 分) の外 → 09:05 で修復。
     const cursor = 'store:license:repair:mint';
+    advance(20 * 60_000);
     await runLicenseWorker();
     expect(h.store!.strings.has(cursor)).toBe(false);
-    advance(260 * 60_000);
-    await runLicenseWorker();
-    expect(h.store!.strings.has(cursor)).toBe(false);
-    advance(345 * 60_000);
+    advance(45 * 60_000);
     await runLicenseWorker();
     expect(h.store!.strings.get(cursor)).toBeDefined();
   });
-  it('isLicenseRepairRun: true only for minutes 0-14 of UTC hours 0/6/12/18 (15-minute cron・6-hour repair)', () => {
-    expect([0, 14, 15, 30, 59].map((minute) => isLicenseRepairRun(Date.UTC(2026, 8, 26, 12, minute)))).toEqual([true, true, false, false, false]);
-    expect([0, 6, 12, 18].every((hour) => isLicenseRepairRun(Date.UTC(2026, 8, 26, hour, 3)))).toBe(true);
-    expect([1, 5, 7, 11, 13, 23].some((hour) => isLicenseRepairRun(Date.UTC(2026, 8, 26, hour, 3)))).toBe(false);
+  it('isLicenseRepairRun: true only for minutes 0-14 of each UTC hour (15-minute cron・hourly repair)', () => {
+    expect([0, 14, 15, 30, 45, 59].map((minute) => isLicenseRepairRun(Date.UTC(2026, 8, 26, 10, minute)))).toEqual([true, true, false, false, false, false]);
+    expect([0, 5, 13, 23].every((hour) => isLicenseRepairRun(Date.UTC(2026, 8, 26, hour, 3)))).toBe(true);
   });
   it('isolates corrupt jobs and leaves them in the permanent index', async () => {
     const bad = toHex(123n, { size: 32 }); h.store!.zsets.set(LICENSE_DUE_INDEX, new Map([[bad, NOW - 1], [job.paymentKey, NOW]]));

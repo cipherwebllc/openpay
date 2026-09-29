@@ -293,17 +293,16 @@ async function processJob(member: string, token: string, deadline: number): Prom
 
 export type LicenseWorkerResult = { ok: true; skipped?: 'disabled' | 'locked'; processed: number; failed: number } | { ok: false; error: 'storage_unavailable' };
 
-// KV コマンド予算 (Upstash 無料枠・2026-09-26 / 09-29): index 修復は 3 本の Lua で 1 回約 27 コマンドを使う。
-// 修復は取りこぼしを拾う安全網で、通常の購入・登録は due index へ直接入る (stock.ts / product.ts) ため、
-// 6 時間ごとの UTC 0/6/12/18 時の最初の run だけ行っても発行は遅れない。cron は 15 分ごと (vercel.json) なので
-// 窓も 15 分にする: 開始が数分遅れても修復を落とさず、同じ時の :15 の run とは重ならない。
-// 購入時の発行は after() で即時 (app/api/paid/hosted/[id]/route.ts)。cron が受け持つのは送信済み tx の確定確認・
-// 失敗の再試行・販売者の登録の送信で、間隔を 5 分 → 15 分にしても権利 (lib/license/rights.ts) は待たない。
+// KV コマンド予算 (Upstash・2026-09-26 / 09-29): index 修復は 3 本の Lua で 1 回約 27 コマンドを使う。
+// 修復は取りこぼしを拾う安全網で、通常の購入・登録は due index へ直接入る (stock.ts / product.ts)。各 UTC 時の最初の
+// run だけ行う。cron は 15 分ごと (vercel.json) なので窓も 15 分: 開始が数分遅れても修復を落とさず、:15 の run とは重ならない。
+// 修復を毎時より減らさない: repair.ts は恒久 index を 1 回 50 件ずつ巡るので、間隔を空けると index が大きいとき
+// 取りこぼしの発見が規約の 7 日 (licenseTermsTemplate) を超えうる (2026-09-29 コードレビュー)。
+// 購入時は after() で即時に発行を試みる (app/api/paid/hosted/[id]/route.ts)。支払いの確定待ち・lock の競合・
+// 他の送信中なら次の cron (最大 15 分) に回る。権利 (lib/license/rights.ts) は発行を待たない。
 const REPAIR_WINDOW_MINUTES = 15;
-const REPAIR_EVERY_HOURS = 6;
 export function isLicenseRepairRun(nowMs: number): boolean {
-  const at = new Date(nowMs);
-  return at.getUTCHours() % REPAIR_EVERY_HOURS === 0 && at.getUTCMinutes() < REPAIR_WINDOW_MINUTES;
+  return new Date(nowMs).getUTCMinutes() < REPAIR_WINDOW_MINUTES;
 }
 
 /** cron と after() が同じロックを使う。receipt 待ちはせず、due を次 run へ引き継ぐ。 */

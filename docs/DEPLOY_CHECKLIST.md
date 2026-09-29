@@ -1654,7 +1654,7 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 
 2026-09-26 に 90% 通知。開発用 DB での実測で、**Lua スクリプトは「EVAL 自体 1 + 中の redis.call の数」で数えられる**
 (GET 5 回を含む EVAL 10 回 = 60)。パイプラインも 1 件ずつ数える。Lua を多用する処理は見た目の何倍も消費する。
-- 主な消費と対策 (2026-09-26 → 09-29): license-mint の cron を 5 分 → 15 分、index 修復 (Lua 3 本で 1 回約 27) を UTC 0/6/12/18 時の最初の run (0〜14 分) だけに。KV バックアップを 1 日 2 回 → 1 回
+- 主な消費と対策 (2026-09-26 → 09-29): license-mint の cron を 5 分 → 15 分、index 修復 (Lua 3 本で 1 回約 27) は各 UTC 時の最初の run (0〜14 分) だけ (修復は 50 件ずつ巡るので毎時より減らさない)。KV バックアップを 1 日 2 回 → 1 回
   (`lib/license/minter.ts`・通常の購入/登録は due へ直接入るので発行は遅れない)。`/api/discovery` の CDN キャッシュを 10 秒 → 60 秒。
   402 challenge の計測を 1/10 抽出。reverify は UA 交代 (1 時間単位) と連動するため毎時のまま。
 - 1 回あたりの目安: レート制限の判定 3〜4 (多くの API は分・日の 2 窓で 6〜8)・funnel 3〜4・`/api/discovery` の miss は
@@ -1925,7 +1925,7 @@ PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下�
 4. **登録と公開を分離**: 作成時は paused + pending。worker が `registerLicense` を送信し、
    finalized receipt・LicenseRegistered・licenseOf を照合して registered にする。
    自動公開はしない。販売者が登録確認後に明示的に販売開始する。
-5. **cron**: Vercel Pro の `/api/cron/license-mint` を `*/15 * * * *` で有効化し (2026-09-29 に KV のコマンド予算のため 5 分から変更。購入時の発行は after() で即時)、
+5. **cron**: Vercel Pro の `/api/cron/license-mint` を `*/15 * * * *` で有効化し (2026-09-29 に KV のコマンド予算のため 5 分から変更。購入時は after() で即時に発行を試みるが、支払いの確定待ち・lock の競合・他の送信中は次の cron = 最大 15 分に回る)、
    `CRON_SECRET` と既存 `ALERT_WEBHOOK_URL` の到達を確認。store-reconcile 日次は維持する。
    after の即時試行も同じ 55 秒 lock と恒久送信枠を使う。cron は 40 秒で dispatch を止める。
    未採掘 receipt を待ち続けず次 run で読む。バックログと実測容量を確認するまで発行時間を保証しない。
@@ -1999,7 +1999,7 @@ JSONL → gzip → AES-256-GCM (鍵 1 本・header を AAD) → Cloudflare R2 pr
 **成功状態**: Stored (保存と照合完了) → Capture complete (errors=0) → Needs reconciliation (復元後・gate 前は常にここ) → Released (16.6.3 の gate 通過を人が宣言)。
 run green = archive と meta が Stored かつ status complete。partial は保存するが run は赤。
 
-**監視**: `kv-backup-watch.yml` (6h ごと) が最新 complete meta の `capture.finishedAt` を見て 26h 超で赤 (通知 = workflow 失敗メール)。
+**監視**: `kv-backup-watch.yml` (6h ごと) が最新 complete meta の `capture.finishedAt` を見て 36h 超で赤 (取得 1 日 1 回 + GitHub の schedule の遅れを見込む・24h の RPO を保証するものではない) (通知 = workflow 失敗メール)。
 **backup job 単独の停止検知**であり、Actions 全体停止・リポの Actions 無効化・公開リポの 60 日無活動停止は検知できない (未充足)。
 
 **運用 secret** (app env ではない・`lib/env.ts` に入れない・`.env.local.example` 運用節と README に名前のみ):
