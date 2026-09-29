@@ -21,7 +21,7 @@ const ENV = { UPSTASH_MGMT_EMAIL: EMAIL, UPSTASH_MGMT_API_KEY: KEY, UPSTASH_DB_I
 const NOW = Date.UTC(2026, 9, 10, 12, 0, 0);
 const day = (d: number) => `2026-10-${String(d).padStart(2, '0')} 00:00:00 +0000 UTC`;
 
-function stats(monthTotal: number, perDay: number | null, billing = 0.1) {
+function stats(monthTotal: unknown, perDay: number | null, billing: unknown = 0.1) {
   return {
     total_monthly_requests: monthTotal,
     daily_net_commands: 3_000,
@@ -33,42 +33,56 @@ function stats(monthTotal: number, perDay: number | null, billing = 0.1) {
 const okResponse = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 
 describe('upstash-usage-watch: 見込みと判定', () => {
-  it('今月の実績 + 直近 7 日 (今日を除く) の平均 × 残り日数で見込む', () => {
+  it('今月の実績 + 直近 7 暦日 (今日を除く) の平均 × 残り日数で見込む', () => {
     const p = projectMonth(stats(66_000, 7_000), NOW);
     expect(p.basis).toBe('trailing_7d');
     expect(p.avgDaily).toBe(7_000);
-    expect(p.projected).toBe(Math.round(66_000 + 7_000 * 21.5));
+    expect(p.projected).toBe(66_000 + 7_000 * 21.5);
   });
 
-  it('日ごとの系列が無い・形が違うときは今月の実績の日割り', () => {
+  it('7 暦日より古い日・同じ日の重なりは平均に入れない', () => {
+    const s = { total_monthly_requests: 0, dailyrequests: [
+      { x: '2026-09-20 00:00:00 +0000 UTC', y: 999_999 },
+      { x: day(9), y: 1_000 },
+      { x: '2026-10-09 12:00:00 +0000 UTC', y: 2_000 },
+    ] };
+    const p = projectMonth(s, NOW);
+    expect(p.basis).toBe('trailing_1d');
+    expect(p.avgDaily).toBe(2_000);
+  });
+
+  it('系列が無ければ今月の実績を経過時間 (小数の日) で伸ばす・1 日未満はデータ不足として見込まない', () => {
     const p = projectMonth(stats(66_000, null), NOW);
     expect(p.basis).toBe('month_to_date');
-    expect(p.projected).toBe(Math.round((66_000 / 9.5) * 31));
-    expect(dailySeries({ dailyrequests: [{ x: 'bad', y: 1 }, { x: day(1), y: -1 }, 'x'] })).toEqual([]);
+    expect(p.projected).toBeCloseTo((66_000 / 9.5) * 31);
+    const monthStart = projectMonth(stats(500, null), Date.UTC(2026, 9, 1, 0, 30));
+    expect(monthStart).toMatchObject({ basis: 'insufficient_data', projected: null });
   });
 
-  it('上限 (既定 25 万 = 月 $0.5) を超えたら over・80% 超で warn・請求額が上限の金額を超えても over', () => {
+  it('数でない今月の実績・日ごとの値 (null・空文字・文字列) を 0 と取り違えない', () => {
+    for (const bad of [null, '', '66000', undefined, -1]) expect(() => projectMonth({ total_monthly_requests: bad }, NOW)).toThrow(WatchError);
+    expect(dailySeries({ dailyrequests: [{ x: day(9), y: null }, { x: day(8), y: '5' }, { x: 'bad', y: 1 }, 'x'] })).toEqual([]);
+  });
+
+  it('上限 (既定 25 万 = 月 $0.5): 超えたら over・80% 以上で warn・請求額で超えたら billing が理由', () => {
     expect(DEFAULT_CAP_COMMANDS).toBe(250_000);
-    expect(assess({ projected: 250_001, billing: 0 }, 250_000)).toBe('over');
-    expect(assess({ projected: 250_000, billing: 0 }, 250_000)).toBe('warn');
-    expect(assess({ projected: 200_001, billing: 0 }, 250_000)).toBe('warn');
-    expect(assess({ projected: 200_000, billing: 0 }, 250_000)).toBe('ok');
-    expect(assess({ projected: 100_000, billing: 0.51 }, 250_000)).toBe('over');
-    expect(assess({ projected: 100_000, billing: Number.NaN }, 250_000)).toBe('ok');
-  });
-
-  it('今月の実績が無い応答は失敗 (見込みを 0 と偽らない)', () => {
-    expect(() => projectMonth({}, NOW)).toThrow(WatchError);
+    expect(assess({ projected: 250_000.4, billing: 0 }, 250_000)).toEqual({ level: 'over', trigger: 'commands' });
+    expect(assess({ projected: 250_000, billing: 0 }, 250_000)).toEqual({ level: 'warn', trigger: 'commands' });
+    expect(assess({ projected: 200_000, billing: 0 }, 250_000)).toEqual({ level: 'warn', trigger: 'commands' });
+    expect(assess({ projected: 199_999, billing: 0 }, 250_000)).toEqual({ level: 'ok', trigger: null });
+    expect(assess({ projected: 100_000, billing: 0.51 }, 250_000)).toEqual({ level: 'over', trigger: 'billing' });
+    expect(assess({ projected: null, billing: null }, 250_000)).toEqual({ level: 'unknown', trigger: null });
   });
 });
 
 describe('upstash-usage-watch: stats の取得', () => {
-  it('stats だけを Basic 認証 (email:key) で呼ぶ', async () => {
+  it('stats だけを Basic 認証 (email:key) で呼び、転送は追わない', async () => {
     const fetchImpl = vi.fn(async () => okResponse(stats(1, 1)));
     await fetchStats({ email: EMAIL, apiKey: KEY, dbId: DB, fetchImpl });
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe(`${STATS_BASE_URL}${DB}`);
     expect(url).toBe(`https://api.upstash.com/v2/redis/stats/${DB}`);
+    expect(init.redirect).toBe('error');
     expect((init.headers as Record<string, string>).Authorization).toBe(`Basic ${Buffer.from(`${EMAIL}:${KEY}`).toString('base64')}`);
   });
 
@@ -93,15 +107,24 @@ describe('upstash-usage-watch: main', () => {
     for (const secret of [EMAIL, KEY, DB]) expect(text).not.toContain(secret);
   });
 
-  it('見込みが上限を超えたら 1 (通知)・80% 超は警告で 0・上限は変数で変えられる', async () => {
+  it('見込みが上限を超えたら 1・請求額で超えたらそう書く・80% 以上は警告で 0・上限は変数で変えられる', async () => {
     const over = await run([], { env: ENV, now: NOW, fetchImpl: async () => okResponse(stats(66_000, 10_000)) });
     expect(over.code).toBe(1);
     expect(over.text).toContain('::error::Upstash projected monthly commands exceed the cap');
+    const billing = await run([], { env: ENV, now: NOW, fetchImpl: async () => okResponse(stats(66_000, 1_000, 0.6)) });
+    expect(billing.code).toBe(1);
+    expect(billing.text).toContain('::error::Upstash billing this month exceeds the cap');
     const warn = await run([], { env: ENV, now: NOW, fetchImpl: async () => okResponse(stats(66_000, 7_000)) });
     expect(warn.code).toBe(0);
     expect(warn.text).toContain('::warning::');
     const raised = await run([], { env: { ...ENV, UPSTASH_CAP_COMMANDS: '500000' }, now: NOW, fetchImpl: async () => okResponse(stats(66_000, 10_000)) });
     expect(raised.code).toBe(0);
+  });
+
+  it('月初でデータが 1 日未満なら失敗にせず警告', async () => {
+    const r = await run([], { env: ENV, now: Date.UTC(2026, 9, 1, 0, 30), fetchImpl: async () => okResponse(stats(500, null, 0)) });
+    expect(r.code).toBe(0);
+    expect(r.text).toContain('needs at least one day of data');
   });
 
   it('Secrets の欠け・不正な上限・取得の失敗は固定のコードで 1 (本文や URL を出さない)', async () => {
@@ -114,32 +137,41 @@ describe('upstash-usage-watch: main', () => {
   });
 });
 
-describe('upstash-usage-watch: probe (stats の呼び出しが課金されないかの実測)', () => {
-  function probeDeps(beforeTotal: number, afterTotal: number) {
-    let calls = 0;
-    const fetchImpl = vi.fn(async () => {
-      calls += 1;
-      // 1 回目 = 前・最後 = 後。間の 100 回は前と同じ値。
-      return okResponse(stats(calls === 102 ? afterTotal : beforeTotal, 8_640));
-    });
-    let clock = NOW;
-    return { fetchImpl, now: () => clock, sleep: async (ms: number) => { clock += ms; } };
+describe('upstash-usage-watch: probe (stats の呼び出しがコマンドに数えられるかの実測)', () => {
+  // 読み取りの順: 対照の前・後、試験の前、(試験の呼び出し calls 回)、試験の後。
+  function probeDeps(totals: { controlStart: unknown; controlEnd: unknown; probeStart: unknown; probeEnd: unknown }, calls = 10) {
+    const sequence = [totals.controlStart, totals.controlEnd, totals.probeStart, ...Array.from({ length: calls }, () => totals.probeStart), totals.probeEnd];
+    let i = 0;
+    const fetchImpl = vi.fn(async () => okResponse({ total_monthly_requests: sequence[Math.min(i++, sequence.length - 1)] }));
+    let clock = NOW + 20 * 60_000; // :20 (毎時の cron の外)
+    return { fetchImpl, now: () => clock, sleep: async (ms: number) => { clock += ms; }, calls };
   }
 
-  it('増分が背景 (日平均から出した待ち時間ぶん) + 呼び出し回数の半分以内なら「数えられていない」', async () => {
-    // 日平均 8,640 = 0.1/秒 → 300 秒で背景 30。増分 40 は 30 + 50 以内。
-    const deps = probeDeps(66_000, 66_040);
+  it('試験区間の増分 − 対照区間の増分 が呼び出しの半分以内なら「数えられていない」', async () => {
+    const deps = probeDeps({ controlStart: 1_000, controlEnd: 1_030, probeStart: 1_030, probeEnd: 1_062 });
     const result = await probe({ env: ENV, ...deps, log: () => {} });
-    expect(deps.fetchImpl).toHaveBeenCalledTimes(102);
-    expect(result).toMatchObject({ counted: false, delta: 40 });
-    expect(result.background).toBeCloseTo(30);
+    expect(deps.fetchImpl).toHaveBeenCalledTimes(14);
+    expect(result).toEqual({ verdict: 'not_counted', controlDelta: 30, probeDelta: 32 });
   });
 
-  it('増分が大きければ「数えられている」として main は 1', async () => {
-    const deps = probeDeps(66_000, 66_200);
+  it('差が呼び出しの半分を超えれば「数えられている」として main は 1', async () => {
+    const deps = probeDeps({ controlStart: 1_000, controlEnd: 1_030, probeStart: 1_030, probeEnd: 1_070 });
     const out: string[] = [];
     const code = await main(['--probe'], { env: ENV, ...deps, log: (l: string) => out.push(l), error: (l: string) => out.push(l) });
     expect(code).toBe(1);
     expect(out.join('\n')).toContain('APPEAR TO BE COUNTED');
+  });
+
+  it('stats が更新されない (対照の増分 0)・数値の欠け・月の変わり目 (減少) は「判定できない」で 1', async () => {
+    for (const totals of [
+      { controlStart: 1_000, controlEnd: 1_000, probeStart: 1_000, probeEnd: 1_000 },
+      { controlStart: 1_000, controlEnd: null, probeStart: 1_000, probeEnd: 1_100 },
+      { controlStart: 1_000, controlEnd: 1_030, probeStart: 1_030, probeEnd: 5 },
+    ]) {
+      const out: string[] = [];
+      const code = await main(['--probe'], { env: ENV, ...probeDeps(totals), log: (l: string) => out.push(l), error: (l: string) => out.push(l) });
+      expect(code).toBe(1);
+      expect(out.join('\n')).toContain('inconclusive');
+    }
   });
 });
