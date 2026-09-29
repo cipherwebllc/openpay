@@ -110,9 +110,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeCategory: 'pilot',
     assets: ['JPYC'],
     summary:
-      'Sowaka Japan started an in-store trial of MisePay, a QR payment app for accepting JPYC, at two stores in Shibuya and one in Nagoya from July 2026; merchant fee 0% and no setup cost; supported wallets and networks are to be announced at the official launch.',
+      'Sowaka Japan started an in-store trial of MisePay, a QR payment app for accepting JPYC, at two stores in Shibuya and one in Nagoya from 2026-07-08; merchant fee 0% and no setup cost; supported wallets and networks are to be announced at the official launch.',
     summaryJa:
-      'Sowaka Japan が JPYC 受付用の QR 決済アプリ「MisePay」の店頭トライアルを 2026 年 7 月から渋谷 2 店・名古屋 1 店で開始。加盟店手数料 0%・導入費 0 円。対応ウォレットとネットワークは正式提供時に案内。',
+      'Sowaka Japan が JPYC 受付用の QR 決済アプリ「MisePay」の店頭トライアルを 2026-07-08 から渋谷 2 店・名古屋 1 店で開始。加盟店手数料 0%・導入費 0 円。対応ウォレットとネットワークは正式提供時に案内。',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000001.000186655.html',
   },
   {
@@ -158,7 +158,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeCategory: 'pilot',
     assets: ['JPYC', 'USDC', 'USDT'],
     summary:
-      "Lawson announced an insiders-only pilot of stablecoin payments at POS registers in two Tokyo stores: 2026-08-06 (HashPort Wallet, JPYC) and 2026-08-17 (MetaMask, USDC/USDT/JPYC), settled through Canal Payment Service's PAYTREE gateway with HashPort and NetStars cooperating.",
+      "Lawson announced an insiders-only pilot of stablecoin payments at POS registers in two Tokyo stores: 2026-08-06 (HashPort Wallet, JPYC) and 2026-08-17 (MetaMask, USDC/USDT/JPYC), processed through Canal Payment Service's PAYTREE gateway with HashPort and NetStars cooperating.",
     summaryJa:
       'ローソンが都内 2 店舗の POS レジでステーブルコイン決済を関係者限定で実証すると発表: 8/6 高輪ゲートウェイシティ店 (HashPort Wallet・JPYC)、8/17 ゲートシティ大崎アトリウム店 (MetaMask・USDC/USDT/JPYC)。キャナルペイメントサービスの PAYTREE 経由で、HashPort とネットスターズが協力。',
     sourceUrl: 'https://www.lawson.co.jp/company/news/detail/1530711_2504.html',
@@ -621,9 +621,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeCategory: 'partnership',
     assets: ['JPYC'],
     summary:
-      'Kaia signed an MOU with DOZN, a KOSDAQ-listed Korean fintech company, to build and test cross-border settlement of Asian local stablecoins into Korean won, including settlement from JPYC into Korean won bank accounts.',
+      'Kaia signed an MOU with DOZN, a KOSDAQ-listed Korean fintech company, to build and test cross-border settlement of Asian local stablecoins into Korean won, including settlement from JPYC into Korean won bank accounts (the PoC covers JPYC, IDRP and PHPC).',
     summaryJa:
-      'Kaia が韓国の KOSDAQ 上場フィンテック企業 DOZN と MOU を締結。アジアのローカルステーブルコインを韓国ウォンで精算するクロスボーダー基盤に向け、JPYC から韓国ウォン口座への精算を検証する。',
+      'Kaia が韓国の KOSDAQ 上場フィンテック企業 DOZN と MOU を締結。アジアのローカルステーブルコインを韓国ウォンで精算するクロスボーダー基盤に向け、JPYC から韓国ウォン口座への精算を検証する (検証対象は JPYC・IDRP・PHPC)。',
     sourceUrl: 'https://x.com/KaiaChain_JP/status/2102343536872230986',
   },
   {
@@ -648,6 +648,8 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     slug: 'jpyc',
     changeType: 'updated',
     changeCategory: 'update',
+    assets: ['JPYC'],
+    chains: ['ethereum', 'kaia', 'polygon'],
     summary:
       "Upbit's deposit/withdrawal status page (checked 2026-09-29) lists JPYC on Ethereum, Kaia and Polygon as open for both deposits and withdrawals, status normal; as of 2026-09-17 only deposits had opened on Kaia and Polygon. No announcement of the withdrawal start was found, so the start date is unknown.",
     summaryJa:

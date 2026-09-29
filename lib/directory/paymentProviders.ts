@@ -181,14 +181,16 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
   },
   {
     // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-01-28 の PR TIMES・backfill)。
-    // 手数料と対象資産は公式ページ (2026-07-09) の記載。導入方式・チェーンは明記なし。
+    // 手数料・対象資産・導入方式は公式ページ (2026-07-09) の記載: 手数料ゼロ・JPYC/USDC・店頭 QR (③)。チェーンは明記なし。
+    // stage=commercial の根拠 = 同ページ「最短即日から決済受付を開始」「千房など多くの飲食店で利用」。
+    // PR TIMES (1/28) は「開始予定」のみなので startedAt は null。
     provider: 'HashPort Wallet for Biz',
     stage: 'commercial',
     assets: ['JPYC', 'USDC'],
     chains: [],
     settlementCurrency: null,
     merchantFee: '0%',
-    integrations: [],
+    integrations: ['in-store'],
     posIntegration: null,
     region: 'Japan',
     announcedAt: '2026-01-28',
@@ -198,7 +200,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     verifiedAt: '2026-09-29',
   },
   {
-    // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-07-07・backfill)。開始は「2026 年 7 月より」で日付の明示なし。
+    // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-07-07・backfill)。開始は 2026-07-08 (PR TIMES 本文「2026年7月8日より」)。
     provider: 'MisePay (Sowaka Japan)',
     stage: 'pilot',
     assets: ['JPYC'],
@@ -209,7 +211,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     posIntegration: null,
     region: 'Japan',
     announcedAt: '2026-07-07',
-    startedAt: null,
+    startedAt: '2026-07-08',
     plannedPeriod: null,
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000001.000186655.html',
     verifiedAt: '2026-09-29',
