@@ -6,6 +6,9 @@ import { pathToFileURL } from 'node:url';
 import { BackupError } from './lib/kv-backup-core.mjs';
 import { createR2Client } from './lib/r2.mjs';
 
+/** 最新の完全なバックアップがこれより古ければ fail (取得 1 日 1 回 + GitHub schedule の遅れ + 余裕)。 */
+export const BACKUP_MAX_AGE_MS = 36 * 60 * 60 * 1000;
+
 const ARCHIVE_SUFFIX = '-full.jsonl.gz.enc';
 const META_SUFFIX = '-full.meta.json';
 const OBJECT = /^openpay-kv\/\d{4}\/\d{8}T\d{6}Z-r\d+-a(?:\d+|[a-f0-9]{8})-full\.(?:jsonl\.gz\.enc|meta\.json)$/;
@@ -59,7 +62,9 @@ export async function watchBackups({ r2, env = process.env, now = new Date() } =
       if (meta && archiveHead.size !== meta.size) throw new BackupError('archive_size_mismatch');
     }
     const ageMs = now.getTime() - latest;
-    if (!Number.isFinite(latest) || ageMs > 26 * 60 * 60 * 1000 || ageMs < 0) throw new BackupError('stale_complete_backup');
+    // 取得は 1 日 1 回 (kv-backup.yml・2026-09-29 に KV のコマンド予算のため 12h → 24h)。GitHub の schedule は
+    // 実測で数時間遅れる (reverify で最大 6.6h) ので、24h + 遅れ + 余裕で 36h を超えたら古いとみなす。
+    if (!Number.isFinite(latest) || ageMs > BACKUP_MAX_AGE_MS || ageMs < 0) throw new BackupError('stale_complete_backup');
     return { completeFinishedAt: new Date(latest).toISOString(), ageMs, metaCount: metas.length };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }

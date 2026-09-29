@@ -293,10 +293,14 @@ async function processJob(member: string, token: string, deadline: number): Prom
 
 export type LicenseWorkerResult = { ok: true; skipped?: 'disabled' | 'locked'; processed: number; failed: number } | { ok: false; error: 'storage_unavailable' };
 
-// KV コマンド予算 (Upstash 無料枠・2026-09-26): index 修復は 3 本の Lua で 1 回約 27 コマンドを使い、
-// 5 分ごとの cron で月約 24 万コマンドになっていた。修復は取りこぼしを拾う安全網で、通常の購入・登録は
-// due index へ直接入る (stock.ts / product.ts) ため、各 UTC 時の最初の run (0〜4 分) だけ行っても発行は遅れない。
-const REPAIR_WINDOW_MINUTES = 5;
+// KV コマンド予算 (Upstash・2026-09-26 / 09-29): index 修復は 3 本の Lua で 1 回約 27 コマンドを使う。
+// 修復は取りこぼしを拾う安全網で、通常の購入・登録は due index へ直接入る (stock.ts / product.ts)。各 UTC 時の最初の
+// run だけ行う。cron は 15 分ごと (vercel.json) なので窓も 15 分: 開始が数分遅れても修復を落とさず、:15 の run とは重ならない。
+// 修復を毎時より減らさない: repair.ts は恒久 index を 1 回 50 件ずつ巡るので、間隔を空けると index が大きいとき
+// 取りこぼしの発見が規約の 7 日 (licenseTermsTemplate) を超えうる (2026-09-29 コードレビュー)。
+// 購入時は after() で即時に発行を試みる (app/api/paid/hosted/[id]/route.ts)。支払いの確定待ち・lock の競合・
+// 他の送信中なら次の cron (最大 15 分) に回る。権利 (lib/license/rights.ts) は発行を待たない。
+const REPAIR_WINDOW_MINUTES = 15;
 export function isLicenseRepairRun(nowMs: number): boolean {
   return new Date(nowMs).getUTCMinutes() < REPAIR_WINDOW_MINUTES;
 }

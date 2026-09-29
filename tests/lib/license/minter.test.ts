@@ -408,16 +408,18 @@ describe('license worker: viem + real Lua CAS', () => {
   });
   it('runs the index repair only in the first run of each UTC hour (KV command budget)', async () => {
     // REBUILD always writes its cursor key, so the key's presence shows whether the repair ran.
+    // NOW = 2027-01-15T08:00Z。08:20 は窓 (0〜14 分) の外 → 09:05 で修復。
     const cursor = 'store:license:repair:mint';
-    advance(10 * 60_000);
+    advance(20 * 60_000);
     await runLicenseWorker();
     expect(h.store!.strings.has(cursor)).toBe(false);
-    advance(51 * 60_000);
+    advance(45 * 60_000);
     await runLicenseWorker();
     expect(h.store!.strings.get(cursor)).toBeDefined();
   });
-  it('isLicenseRepairRun: true only for minutes 0-4 of each UTC hour', () => {
-    expect([0, 4, 5, 30, 59].map((minute) => isLicenseRepairRun(Date.UTC(2026, 8, 26, 10, minute)))).toEqual([true, true, false, false, false]);
+  it('isLicenseRepairRun: true only for minutes 0-14 of each UTC hour (15-minute cron・hourly repair)', () => {
+    expect([0, 14, 15, 30, 45, 59].map((minute) => isLicenseRepairRun(Date.UTC(2026, 8, 26, 10, minute)))).toEqual([true, true, false, false, false, false]);
+    expect([0, 5, 13, 23].every((hour) => isLicenseRepairRun(Date.UTC(2026, 8, 26, hour, 3)))).toBe(true);
   });
   it('isolates corrupt jobs and leaves them in the permanent index', async () => {
     const bad = toHex(123n, { size: 32 }); h.store!.zsets.set(LICENSE_DUE_INDEX, new Map([[bad, NOW - 1], [job.paymentKey, NOW]]));

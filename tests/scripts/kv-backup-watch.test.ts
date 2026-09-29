@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { readFile, writeFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
-import { main, validateMeta, watchBackups } from '@/scripts/kv-backup-watch.mjs';
+import { BACKUP_MAX_AGE_MS, main, validateMeta, watchBackups } from '@/scripts/kv-backup-watch.mjs';
 import { archiveIdentity } from '@/scripts/kv-backup.mjs';
 import { createManifest, createMeta } from '@/scripts/lib/kv-backup-core.mjs';
 import { createR2Client } from '@/scripts/lib/r2.mjs';
@@ -34,9 +34,10 @@ function fake(entries: ReturnType<typeof metaAt>[], { missing = '', listFailure 
 }
 
 describe('KV backup watch', () => {
-  it('accepts exactly 26h, fails one ms older and never lets partial advance freshness', async () => {
-    const boundary = new Date(now.getTime() - 26 * 3600000);
-    expect((await watchBackups({ ...fake([metaAt(boundary)]), now })).ageMs).toBe(26 * 3600000);
+  it('accepts exactly 36h (daily backup + GitHub schedule delay), fails one ms older and never lets partial advance freshness', async () => {
+    expect(BACKUP_MAX_AGE_MS).toBe(36 * 3600000);
+    const boundary = new Date(now.getTime() - 36 * 3600000);
+    expect((await watchBackups({ ...fake([metaAt(boundary)]), now })).ageMs).toBe(36 * 3600000);
     const stale = metaAt(new Date(boundary.getTime() - 1));
     await expect(watchBackups({ ...fake([metaAt(now, true), stale]), now })).rejects.toThrow('stale_complete_backup');
     await expect(watchBackups({ ...fake([metaAt(now, true)]), now })).rejects.toThrow('stale_complete_backup');

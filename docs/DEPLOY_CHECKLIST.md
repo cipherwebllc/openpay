@@ -1654,7 +1654,7 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 
 2026-09-26 に 90% 通知。開発用 DB での実測で、**Lua スクリプトは「EVAL 自体 1 + 中の redis.call の数」で数えられる**
 (GET 5 回を含む EVAL 10 回 = 60)。パイプラインも 1 件ずつ数える。Lua を多用する処理は見た目の何倍も消費する。
-- 主な消費と対策 (2026-09-26): license-mint の index 修復 (Lua 3 本で 1 回約 27) を各 UTC 時の最初の run (0〜4 分) だけに
+- 主な消費と対策 (2026-09-26 → 09-29): license-mint の cron を 5 分 → 15 分、index 修復 (Lua 3 本で 1 回約 27) は各 UTC 時の最初の run (0〜14 分) だけ (修復は 50 件ずつ巡るので毎時より減らさない)。KV バックアップを 1 日 2 回 → 1 回
   (`lib/license/minter.ts`・通常の購入/登録は due へ直接入るので発行は遅れない)。`/api/discovery` の CDN キャッシュを 10 秒 → 60 秒。
   402 challenge の計測を 1/10 抽出。reverify は UA 交代 (1 時間単位) と連動するため毎時のまま。
 - 1 回あたりの目安: レート制限の判定 3〜4 (多くの API は分・日の 2 窓で 6〜8)・funnel 3〜4・`/api/discovery` の miss は
@@ -1925,7 +1925,7 @@ PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下�
 4. **登録と公開を分離**: 作成時は paused + pending。worker が `registerLicense` を送信し、
    finalized receipt・LicenseRegistered・licenseOf を照合して registered にする。
    自動公開はしない。販売者が登録確認後に明示的に販売開始する。
-5. **cron**: Vercel Pro の `/api/cron/license-mint` を `*/5 * * * *` で有効化し、
+5. **cron**: Vercel Pro の `/api/cron/license-mint` を `*/15 * * * *` で有効化し (2026-09-29 に KV のコマンド予算のため 5 分から変更。購入時は after() で即時に発行を試みるが、支払いの確定待ち・lock の競合・他の送信中は次の cron = 最大 15 分に回る)、
    `CRON_SECRET` と既存 `ALERT_WEBHOOK_URL` の到達を確認。store-reconcile 日次は維持する。
    after の即時試行も同じ 55 秒 lock と恒久送信枠を使う。cron は 40 秒で dispatch を止める。
    未採掘 receipt を待ち続けず次 run で読む。バックログと実測容量を確認するまで発行時間を保証しない。
@@ -1964,14 +1964,14 @@ PR A/B/C/D の採用、公開文言と第13条の施行日、Amoy E2E、以下�
 運用上の制約 (2026-09-16 確認): **Upstash 無料プランは DB 1 つまで**なので drill 専用 DB は作れない → drill は dev DB
 (`.env.local` の KV_REST_API_URL) を一時的に空にして行い、事前に取った全キーのコピーを終了後に戻す。**Upstash Daily Backup も無料プランでは不可**
 (二線目なし・有料化は user 裁定)。
-v1 が満たすのは「12h 周期の fuzzy snapshot を独立保存先に置き、空の隔離 DB へ復元・検証できる」ことまで。
-**未充足** (v1 で解決しない・別設計または user 裁定): RPO 5 分 (v1 は 12h)・terms 本文 (売り手 URL の本文と購入時点の証明)・
+v1 が満たすのは「24h 周期 (2026-09-29 に KV のコマンド予算のため 12h から変更) の fuzzy snapshot を独立保存先に置き、空の隔離 DB へ復元・検証できる」ことまで。
+**未充足** (v1 で解決しない・別設計または user 裁定): RPO 5 分 (v1 は 24h)・terms 本文 (売り手 URL の本文と購入時点の証明)・
 GitHub 外の監視 (Actions 共通停止は検知不能)・独立監査の恒久化 (v1 は復元レポートを R2 `audits/` へ手動 PUT)・本番 in-place 修復 (旧値 CAS)。
 
 点灯前に、KV と独立した保存先への暗号化バックアップを実装・試験すること。
 本 PR はバックアップサービスを作成しない。取得主体は運営の認証済み管理アカウントとし、
 復号・復元権限を限定し監査ログを残す。運用目標案は増分 5 分以内・日次全量、RPO 5 分・RTO 24 時間
-(**v1 到達値: 独立コピー 12h 周期・検知閾値 26h/監視 6h。二線目の Upstash Daily Backup は無料プランでは使えず未設定**)。
+(**v1 到達値: 独立コピー 24h 周期・検知閾値 36h/監視 6h。二線目の Upstash Daily Backup は無料プランでは使えず未設定**)。
 
 #### 16.6.1 独立バックアップ v1 (`scripts/kv-backup.mjs` / `kv-restore.mjs`)
 
@@ -1980,7 +1980,7 @@ GitHub 外の監視 (Actions 共通停止は検知不能)・独立監査の恒�
 ledger/payer は best-effort ヒント・決済の真実ではない。payer 索引は最終書込から 400 日の TTL、bound/owner は TTL なし。
 復元は取得時の絶対期限から残り TTL を計算し、期限切れを飛ばす（400 日を復元時に延長しない）。紐づけは恒久キーとして復元する。
 既存 v2 archive（旧 5 prefix）も検証・復元可。ただし未収録の Agent キーは復元されない。
-**復元後は Agent の紐づけを再確認する**。RPO（約 12h）内の unbind/rebind が巻き戻り、解除済みの紐づけが復活しうる。
+**復元後は Agent の紐づけを再確認する**。RPO（約 24h）内の unbind/rebind が巻き戻り、解除済みの紐づけが復活しうる。
 R2 archive は 180 日 lifecycle のため、payer/ledger の行は稼働 KV の 400 日 TTL を過ぎてもバックアップ内に残りうる（復元時の期限切れスキップは archive 内の削除ではない）。
 denylist (完全一致または `<key>:` 家族): `store:quote:rl`・`store:license:verify:rpc`・`store:delivery:rpc`・`store:license:worker:lock`。
 **全 app の DR ではない** (handle・受注・チップ・push・SIWE・external registry は対象外。受注/チップ/push は保存期間を開示済みのため複製しない)。
@@ -1991,7 +1991,7 @@ denylist (完全一致または `<key>:` 家族): `store:quote:rl`・`store:lice
 merge 後は `main` の定期 backup job が新 prefix を走査するため、未更新のままでは NOPERM により archive が partial となり、Store を含む complete backup が更新されない。
 コード更新だけでは本番 ACL は変更されない。
 
-**取得**: GitHub Actions `kv-backup.yml` (12h ごと・`17 3,15 * * *` UTC・dispatch 可) が Upstash REST を **backup 専用 ACL user の token** で
+**取得**: GitHub Actions `kv-backup.yml` (1 日 1 回・`17 3 * * *` UTC・dispatch 可・2026-09-29 に 12h から変更) が Upstash REST を **backup 専用 ACL user の token** で
 `SCAN` → key ごとに `/multi-exec [TYPE, PTTL, 値]` で原子取得 (base64 応答・bytes 保持・小コレクションは全量・大コレクションは chunk で `uncertain`) →
 JSONL → gzip → AES-256-GCM (鍵 1 本・header を AAD) → Cloudflare R2 private bucket へ S3 API (自前 SigV4) で PUT + HEAD 照合 → 平文 `meta.json` (機密なし) を隣に PUT。
 これは **fuzzy snapshot** (走査中の遷移は前後どちらかの状態で入る)。
@@ -1999,7 +1999,7 @@ JSONL → gzip → AES-256-GCM (鍵 1 本・header を AAD) → Cloudflare R2 pr
 **成功状態**: Stored (保存と照合完了) → Capture complete (errors=0) → Needs reconciliation (復元後・gate 前は常にここ) → Released (16.6.3 の gate 通過を人が宣言)。
 run green = archive と meta が Stored かつ status complete。partial は保存するが run は赤。
 
-**監視**: `kv-backup-watch.yml` (6h ごと) が最新 complete meta の `capture.finishedAt` を見て 26h 超で赤 (通知 = workflow 失敗メール)。
+**監視**: `kv-backup-watch.yml` (6h ごと) が最新 complete meta の `capture.finishedAt` を見て 36h 超で赤 (取得 1 日 1 回 + GitHub の schedule の遅れを見込む・24h の RPO を保証するものではない) (通知 = workflow 失敗メール)。
 **backup job 単独の停止検知**であり、Actions 全体停止・リポの Actions 無効化・公開リポの 60 日無活動停止は検知できない (未充足)。
 
 **運用 secret** (app env ではない・`lib/env.ts` に入れない・`.env.local.example` 運用節と README に名前のみ):

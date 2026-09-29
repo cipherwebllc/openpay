@@ -1,7 +1,9 @@
 name: kv-backup
 on:
   schedule:
-    - cron: '17 3,15 * * *'
+    # 1 日 1 回 (UTC 03:17 = JST 12:17)。2026-09-29 に Upstash のコマンド予算のため 12h → 24h (RPO 約 24h)。
+    # 鮮度の監視 (kv-backup-watch) は 36h で fail。
+    - cron: '17 3 * * *'
   workflow_dispatch: {}
 permissions:
   contents: read
