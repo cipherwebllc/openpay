@@ -8,9 +8,8 @@ import {
   rateIsSane,
 } from '@/lib/fx';
 import { kvEval, kvGet, kvSet } from '@/lib/kv';
+import { USDC_JPY_SOURCE_URL, parseUsdcJpy } from '@/lib/usdcJpyRate';
 
-const COINGECKO_URL =
-  'https://api.coingecko.com/api/v3/simple/price?ids=usd-coin&vs_currencies=jpy';
 const RATE_SCALE = 1_000_000n;
 const CACHE_TTL_SEC = 60;
 const RATE_CACHE_KEY = 'store:fx:usdc-jpy:cache:v1';
@@ -121,20 +120,20 @@ export async function getStoreUsdcRate(input: {
   }
 
   let response: Response;
-  let data: { 'usd-coin'?: { jpy?: unknown } };
+  let data: unknown;
   try {
-    response = await (input.fetchImpl ?? fetch)(COINGECKO_URL, {
+    response = await (input.fetchImpl ?? fetch)(USDC_JPY_SOURCE_URL, {
       cache: 'no-store',
       headers: { 'User-Agent': 'OpenPay/1.0 (https://open-pay.jp)' },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) return { ok: false, reason: 'unavailable' };
-    data = (await response.json()) as typeof data;
+    data = await response.json();
   } catch {
     return { ok: false, reason: 'unavailable' };
   }
-  const rate = data['usd-coin']?.jpy;
-  if (typeof rate !== 'number' || !rateIsSane(rate)) {
+  const rate = parseUsdcJpy(data);
+  if (rate === null || !rateIsSane(rate)) {
     return { ok: false, reason: 'out_of_band' };
   }
   // fetch/parse が完了した時刻が上流の実取得時刻。API response の生成時刻は流用しない。

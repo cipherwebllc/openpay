@@ -1,7 +1,7 @@
 'use client';
 
 // JPYC / USDC のレートを 1 strip にまとめて表示。LP と /create の上部に貼る。
-// JPYC は 1:1 peg のため fetch せず固定表示、USDC は CoinGecko 経由で取得。
+// JPYC は 1:1 peg のため fetch せず固定表示、USDC は Coinbase の公開 API 経由で取得 (lib/usdcJpyRate.ts)。
 // 視認性向上のため各 row の冒頭に token シンボル SVG (/public/tokens/{slug}.svg) を表示。
 
 import NextImage from 'next/image';

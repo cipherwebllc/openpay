@@ -11,7 +11,7 @@
 //
 // 計測対象 (重み付き mix で実トラフィックを模す):
 //   - LP (/ja)                         : SSR + static、最も多い入口
-//   - market rates (/api/market/rates) : 動的 API (CoinGecko + 5分キャッシュ)。
+//   - market rates (/api/market/rates) : 動的 API (Coinbase + 5分キャッシュ)。
 //                                        キャッシュ層と外部依存の負荷耐性を見る
 //   - payment page (/ja/pay?...)       : SSR + URL parse、決済導線
 //   - x402 discovery (/api/discovery)  : facilitator 公開カタログ (KV ファンアウト + edge キャッシュ)。

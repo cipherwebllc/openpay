@@ -138,7 +138,7 @@ Rule で個別に設定する:
 | `scan.external_qr` | `event:"scan.external_qr"` | 20 events / 1 hour | フィッシング QR の流通可能性 → 警告 UI 文言の強化 + Slack 通知 |
 | `scan.eip681_rejected` | `event:"scan.eip681_rejected"` | 5 events / 1 day | ethereum: URI の実需要 signal → Phase 2 検討入り |
 | `scan.unrecognized_qr` | `event:"scan.unrecognized_qr"` | 30 events / 1 hour | 未知 QR が連発 → 別決済 system QR の誤読 / URL 仕様変更の可能性 |
-| `market.rates.upstream_error` | `event:"market.rates.upstream_error"` | 5 events / 15 min | CoinGecko /simple/price の outage または shape 変更 → LP / /create の MarketRates strip が「レート取得不可」表示。client UI は graceful fallback、blocking ではない。10 件超で free-tier rate-limit の可能性も検討 |
+| `market.rates.upstream_error` | `event:"market.rates.upstream_error"` | 5 events / 15 min | 取得元 (Coinbase `/v2/exchange-rates?currency=USDC`・lib/usdcJpyRate.ts) の outage または shape 変更 → LP / /create の MarketRates strip・動的 QR の円建て USDC 換算・履歴の円換算が unavailable。**Store の USDC 見積もり (lib/x402/storeUsdcRateProvider.ts) も同じ取得元で、取れないと 503 `fx_rate_unavailable` = USDC 購入が止まる** (2026-09-29 まで CoinGecko。鍵なしの simple/price が 403 になり切替) |
 | 全体 error level spike | `level:error` | 任意 (既存) | 既存 generic alert を継続 |
 
 注: `scan.before_hydrate` も logger には残してあるが、`useOrigin` の useEffect が
@@ -1302,7 +1302,7 @@ npm run load-test -- --url http://localhost:3000 -c 20 -d 15
 
 - [ ] **本番/preview URL に対して負荷測定を実行**し、p99 と error_rate が許容範囲か確認
       (本番は Vercel cold start / network 込みで local より遅くなる前提)。market-rates は
-      CoinGecko 5 分キャッシュ層の挙動 (cache hit/miss 比) を併せて観察。
+      取得元 (Coinbase) の 5 分キャッシュ層の挙動 (cache hit/miss 比) を併せて観察。
 - [ ] 想定ピーク同時接続数で error_rate < 1% を確認
 
 ### §11.5 Accepted production risks (現状未対処)

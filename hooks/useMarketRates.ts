@@ -16,7 +16,7 @@ async function fetchMarketRates(): Promise<MarketRates> {
   if (!res.ok) {
     throw new Error(`market rates fetch failed: ${res.status}`);
   }
-  // 200 でも shape 検証 (defense in depth、free-tier CoinGecko の quirks 対策)。
+  // 200 でも shape 検証 (defense in depth、取得元の応答の quirks 対策)。
   const json = (await res.json()) as Partial<MarketRates>;
   if (
     typeof json.usdcJpy !== 'number' ||

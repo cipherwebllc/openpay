@@ -459,7 +459,7 @@ export function QrGenerator() {
 
   // 金額入力の真下に出す参考円換算 (店員が即座に「いくら相当か」を掴むため)。
   // JPYC は ¥ ペッグ (=入力額そのもの) ゆえ冗長なので非表示。USDC のときのみ
-  // CoinGecko レート (sane 検証済) で概算円を表示。あくまで参考値・QR が encode する
+  // 市場レート (Coinbase・sane 検証済) で概算円を表示。あくまで参考値・QR が encode する
   // 額は入力した USDC のまま (convert とは別経路で、ここでは額を一切書き換えない)。
   const fiatHint = useMemo(() => {
     if (mode !== 'amount' || settings.token !== 'usdc') return null;
