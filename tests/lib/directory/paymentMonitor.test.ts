@@ -61,7 +61,7 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(env.changes.some((c) => c.provider === 'Aegis')).toBe(false);
   });
 
-  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 13 件', () => {
+  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 18 件', () => {
     const jpyc = createServiceMonitorEnvelope(
       { changedSince: '2026-08-01', limit: SERVICE_MONITOR_MAX_LIMIT },
       {},
@@ -71,10 +71,12 @@ describe('createPaymentMonitorEnvelope', () => {
     // dg-sps 追加 (発表日 8/10)・aegis (8/27)・coincheck 登録 (8/27・第 2 回週次)・
     // 9/04 の verified 4 件 (sbi-vc-trade/jpyc/jpyc-ex/aegis)・9/11 kaia MOU・9/16 jpyc (Circle StableFX)・9/17 jpyc (Upbit 取引支援)・
     // 9/17 jpyc-ex (発行予約の一時停止と復旧)・9/18 jpyc (累計発行 100 億円・第 5 回)・9/23 coincheck verified (第 5 回) の 13 件
-    // + 実効日で照合するため、5/15 発表・8/27 記録の backfill 2 件 (jpyc / jpyc-ex の Kaia 追加) も入る = 15 件。
+    // + 実効日で照合するため、5/15 発表・8/27 記録の backfill 2 件 (jpyc / jpyc-ex の Kaia 追加) も入る = 15 件
+    // + 第 6 回 (9/29) の 3 件 (9/22 kaia × DOZN MOU・9/25 jpyc-ex UPBOND Wallet・9/29 jpyc Upbit 出金) = 18 件。
     // 決済スコープ専用の 8/10 DG SPS launch・8/26 大阪府採択 3 件・8/31 Mi&T・9/04 verified 2 件・
-    // 9/11 の 4 件 (NetStars 更新 + verified 3)・9/18 verified 4 件・9/23 verified 4 件が混ざれば 34 件になる = スコープ分離の証明。
-    expect(jpyc.changes).toHaveLength(15);
+    // 9/11 の 4 件 (NetStars 更新 + verified 3)・9/18 verified 4 件・9/23 verified 4 件・
+    // 第 6 回で 9/29 に記録した backfill 3 件が混ざれば 40 件になる = スコープ分離の証明。
+    expect(jpyc.changes).toHaveLength(18);
     expect(jpyc.changes.every((c) => c.slug !== undefined)).toBe(true);
     // 応答に内部ルーティング用 scopes を漏らさない。
     expect(jpyc.changes[0]).not.toHaveProperty('scopes');
@@ -89,8 +91,9 @@ describe('createPaymentMonitorEnvelope', () => {
     // 8/10 DG SPS launch + 8/26 大阪府採択 3 件 + 8/31 Mi&T 手数料開示 + 9/04 verified 2 件
     // + 9/11 NetStars × Kaia MOU + 9/11 verified 3 件 + 9/18 verified 4 件 + 9/23 verified 4 件 = 19 件
     // + 実効日で照合するため、7/13 発表・9/04 記録の backfill (NetStars Stablecoin Pay added) も入る = 20 件
+    // + 第 6 回で 9/29 に記録した backfill 3 件 (1/28 HashPort Wallet for Biz・7/07 MisePay・8/03 ローソン) = 23 件
     // (以前の backfill 3 件 = TIS/DG 実証/JCB は collectedAt が無く date < 8/10 なので含まない)
-    expect(delta.changes).toHaveLength(20);
+    expect(delta.changes).toHaveLength(23);
     expect(delta.changes[0].date).toBe('2026-08-10');
     // 並びは実効日順なので、date が cursor より古い backfill が混ざる (collectedAt は必ず cursor 以降)。
     expect(delta.changes.every((c) => (c.collectedAt ?? c.date) >= '2026-08-10')).toBe(true);
@@ -244,9 +247,10 @@ describe('createPaymentMonitorEnvelope.providers (事業者の現況行)', () =>
     );
     // 大阪府 3 件 + 8/31 Mi&T 手数料開示 + 9/04 verified 2 件 + 9/11 NetStars 更新 + 9/11 verified 3 件
     // + 9/18 verified 4 件 + 9/23 verified 4 件 + 9/04 記録の backfill (7/13 NetStars added) = 19 イベント・
-    // 現況行は大阪 3 社 + NetStars の 4 社分
-    expect(delta.changes).toHaveLength(19);
-    expect(delta.providers.map((p) => p.region).sort()).toEqual(['Japan', 'Osaka', 'Osaka', 'Osaka']);
+    // + 第 6 回で 9/29 に記録した backfill 3 件 = 22 イベント・現況行は大阪 3 社 + NetStars + 第 6 回の 3 社 (HashPort Wallet for Biz・
+    // MisePay・ローソン) の 7 社分
+    expect(delta.changes).toHaveLength(22);
+    expect(delta.providers.map((p) => p.region).sort()).toEqual(['Japan', 'Japan', 'Japan', 'Japan', 'Osaka', 'Osaka', 'Osaka']);
     // 第 2 回週次更新: 現況が変わった社は changelog の diffs と行の値が一致する (同一 PR の掟)。
     const mit = delta.providers.find((p) => p.provider.startsWith('Mi&T'))!;
     expect(mit.merchantFee).toBe('1.0%');

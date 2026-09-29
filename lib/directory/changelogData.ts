@@ -27,6 +27,20 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     sourceUrl: 'https://www.tis.co.jp/news/2025/tis_news/20251114_1.html',
   },
   {
+    // 週次更新 第 6 回 (2026-09-29) で追跡開始 (発表は 2026-01-28・backfill)。
+    date: '2026-01-28',
+    collectedAt: '2026-09-29',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort Wallet for Biz',
+    changeType: 'added',
+    changeCategory: 'service_launch',
+    summary:
+      'HashPort announced HashPort Wallet for Biz, a stablecoin payment service for businesses planned to start on 2026-01-28, with no payment, monthly or registration fees for merchants; payers using HashPort Wallet pay no gas.',
+    summaryJa:
+      'HashPort が企業向けステーブルコイン決済サービス「HashPort Wallet for Biz」を発表 (2026-01-28 提供開始予定)。加盟店の決済手数料・月額・登録料は無料で、HashPort Wallet で支払う利用者はガス代も不要。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000159.000046288.html',
+  },
+  {
     date: '2026-02-19',
     scopes: ['stablecoin-payments'],
     provider: 'Digital Garage / JCB / Resona HD',
@@ -87,6 +101,21 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     ],
   },
   {
+    // 週次更新 第 6 回 (2026-09-29) で追跡開始 (発表は 2026-07-07・backfill)。
+    date: '2026-07-07',
+    collectedAt: '2026-09-29',
+    scopes: ['stablecoin-payments'],
+    provider: 'MisePay (Sowaka Japan)',
+    changeType: 'added',
+    changeCategory: 'pilot',
+    assets: ['JPYC'],
+    summary:
+      'Sowaka Japan started an in-store trial of MisePay, a QR payment app for accepting JPYC, at two stores in Shibuya and one in Nagoya from 2026-07-08; merchant fee 0% and no setup cost; supported wallets and networks are to be announced at the official launch.',
+    summaryJa:
+      'Sowaka Japan が JPYC 受付用の QR 決済アプリ「MisePay」の店頭トライアルを 2026-07-08 から渋谷 2 店・名古屋 1 店で開始。加盟店手数料 0%・導入費 0 円。対応ウォレットとネットワークは正式提供時に案内。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000001.000186655.html',
+  },
+  {
     // 第 2 回週次更新 (2026-09-04) で未追跡だった商用サービスを backfill。発表日 = PR TIMES。
     date: '2026-07-13',
     collectedAt: '2026-09-04',
@@ -118,6 +147,21 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summaryJa:
       'JCB が Circle 関連会社とステーブルコイン活用の協業検討に関する基本合意書 (MOU) を締結。社内 USDC 資金移動の実証から、クロスボーダー・加盟店決済も検討対象に。',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000001423.000011361.html',
+  },
+  {
+    // 週次更新 第 6 回 (2026-09-29) で追跡開始 (発表は 2026-08-03・backfill)。
+    date: '2026-08-03',
+    collectedAt: '2026-09-29',
+    scopes: ['stablecoin-payments'],
+    provider: 'Lawson (POS pilot)',
+    changeType: 'added',
+    changeCategory: 'pilot',
+    assets: ['JPYC', 'USDC', 'USDT'],
+    summary:
+      "Lawson announced an insiders-only pilot of stablecoin payments at POS registers in two Tokyo stores: 2026-08-06 (HashPort Wallet, JPYC) and 2026-08-17 (MetaMask, USDC/USDT/JPYC), processed through Canal Payment Service's PAYTREE gateway with HashPort and NetStars cooperating.",
+    summaryJa:
+      'ローソンが都内 2 店舗の POS レジでステーブルコイン決済を関係者限定で実証すると発表: 8/6 高輪ゲートウェイシティ店 (HashPort Wallet・JPYC)、8/17 ゲートシティ大崎アトリウム店 (MetaMask・USDC/USDT/JPYC)。キャナルペイメントサービスの PAYTREE 経由で、HashPort とネットスターズが協力。',
+    sourceUrl: 'https://www.lawson.co.jp/company/news/detail/1530711_2504.html',
   },
   {
     date: '2026-08-10',
@@ -566,6 +610,51 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summaryJa:
       'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降の発表なし。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
     sourceUrl: 'https://www.netstars.co.jp/news/',
+  },
+  {
+    // 週次更新 第 6 回 (2026-09-29)。Kaia Japan 公式 X (本文を syndication API で確認)。
+    date: '2026-09-22',
+    collectedAt: '2026-09-29',
+    scopes: ['jpyc-services'],
+    slug: 'kaia',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    assets: ['JPYC'],
+    summary:
+      'Kaia signed an MOU with DOZN, a KOSDAQ-listed Korean fintech company, to build and test cross-border settlement of Asian local stablecoins into Korean won, including settlement from JPYC into Korean won bank accounts (the PoC covers JPYC, IDRP and PHPC).',
+    summaryJa:
+      'Kaia が韓国の KOSDAQ 上場フィンテック企業 DOZN と MOU を締結。アジアのローカルステーブルコインを韓国ウォンで精算するクロスボーダー基盤に向け、JPYC から韓国ウォン口座への精算を検証する (検証対象は JPYC・IDRP・PHPC)。',
+    sourceUrl: 'https://x.com/KaiaChain_JP/status/2102343536872230986',
+  },
+  {
+    // JPYC 公式 X (本文を syndication API で確認)。
+    date: '2026-09-25',
+    collectedAt: '2026-09-29',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'update',
+    summary:
+      'JPYC EX added UPBOND Wallet as a connectable wallet: users pick it on the connect screen and sign in with Google, LINE or email, with keys managed by passkey (biometrics).',
+    summaryJa:
+      'JPYC EX が UPBOND Wallet の接続に対応。接続画面で選び、Google・LINE・メールでログインでき、鍵はパスキー (生体認証) で管理する。',
+    sourceUrl: 'https://x.com/jpyc_official/status/2103303475224305989',
+  },
+  {
+    // Upbit の入出金状況ページ (JS 描画・Playwright で 2026-09-29 に確認)。開始告知は公式 API の一覧に無し。
+    date: '2026-09-29',
+    collectedAt: '2026-09-29',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    chains: ['ethereum', 'kaia', 'polygon'],
+    summary:
+      "Upbit's deposit/withdrawal status page (checked 2026-09-29) lists JPYC on Ethereum, Kaia and Polygon as open for both deposits and withdrawals, status normal; as of 2026-09-17 only deposits had opened on Kaia and Polygon. No announcement of the withdrawal start was found, so the start date is unknown.",
+    summaryJa:
+      'Upbit の入出金状況ページ (2026-09-29 確認) で、JPYC の Ethereum・Kaia・Polygon がいずれも入出金可・正常。2026-09-17 時点では Kaia・Polygon は入金のみだった。出金開始の告知は見つからず、開始日は不明。',
+    sourceUrl: 'https://upbit.com/service_center/wallet_status',
   },
 ];
 

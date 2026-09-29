@@ -179,4 +179,58 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000185.000019526.html',
     verifiedAt: '2026-09-18',
   },
+  {
+    // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-01-28 の PR TIMES・backfill)。
+    // 手数料・対象資産・導入方式は公式ページ (2026-07-09) の記載: 手数料ゼロ・JPYC/USDC・店頭 QR (③)。チェーンは明記なし。
+    // stage=commercial の根拠 = 同ページ「最短即日から決済受付を開始」「千房など多くの飲食店で利用」。
+    // PR TIMES (1/28) は「開始予定」のみなので startedAt は null。
+    provider: 'HashPort Wallet for Biz',
+    stage: 'commercial',
+    assets: ['JPYC', 'USDC'],
+    chains: [],
+    settlementCurrency: null,
+    merchantFee: '0%',
+    integrations: ['in-store'],
+    posIntegration: null,
+    region: 'Japan',
+    announcedAt: '2026-01-28',
+    startedAt: null,
+    plannedPeriod: null,
+    sourceUrl: 'https://wallet.hashport.com/news/forbiz',
+    verifiedAt: '2026-09-29',
+  },
+  {
+    // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-07-07・backfill)。開始は 2026-07-08 (PR TIMES 本文「2026年7月8日より」)。
+    provider: 'MisePay (Sowaka Japan)',
+    stage: 'pilot',
+    assets: ['JPYC'],
+    chains: [],
+    settlementCurrency: null,
+    merchantFee: '0%',
+    integrations: ['in-store'],
+    posIntegration: null,
+    region: 'Japan',
+    announcedAt: '2026-07-07',
+    startedAt: '2026-07-08',
+    plannedPeriod: null,
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000001.000186655.html',
+    verifiedAt: '2026-09-29',
+  },
+  {
+    // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-08-03・backfill)。関係者限定の実証 (8/6・8/17)。
+    provider: 'Lawson (POS pilot)',
+    stage: 'pilot',
+    assets: ['JPYC', 'USDC', 'USDT'],
+    chains: [],
+    settlementCurrency: null,
+    merchantFee: null,
+    integrations: ['in-store'],
+    posIntegration: true,
+    region: 'Japan',
+    announcedAt: '2026-08-03',
+    startedAt: '2026-08-06',
+    plannedPeriod: null,
+    sourceUrl: 'https://www.lawson.co.jp/company/news/detail/1530711_2504.html',
+    verifiedAt: '2026-09-29',
+  },
 ];
