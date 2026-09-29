@@ -34,9 +34,10 @@ export const DIRECTORY_ENTRIES = [
     nameJa: 'JPYC EX',
     status: 'published',
     // 2026-08-27: Kaia 対応 (発行・償還・アドレス登録) + 発行上限 1日→1回 100万円 (PR TIMES 2026-05-15)
+    // 2026-09-25: UPBOND Wallet の接続に対応 (JPYC 公式 X・第 6 回週次更新)
     ...provenance('https://jpyc.co.jp/', 'JPYC株式会社', 'official', {
-      verifiedAt: '2026-09-04',
-      updatedAt: '2026-08-27',
+      verifiedAt: '2026-09-29',
+      updatedAt: '2026-09-25',
     }),
     facts: {
       description: 'JPYCの発行と償還を受け付ける公式プラットフォーム。発行上限は1回あたり100万円。',
@@ -226,7 +227,7 @@ export const DIRECTORY_ENTRIES = [
       'https://corporate.jpyc.co.jp/news/posts/jpyc-ex-launch',
       'JPYC株式会社',
       'official',
-      { verifiedAt: '2026-09-23', updatedAt: '2026-08-27' },
+      { verifiedAt: '2026-09-29', updatedAt: '2026-08-27' },
     ),
     facts: {
       description: '日本円と連動するよう設計された電子決済手段のステーブルコイン。',
@@ -319,7 +320,8 @@ export const DIRECTORY_ENTRIES = [
     name: 'Kaia',
     nameJa: 'Kaia',
     status: 'published',
-    ...provenance('https://www.kaia.io/ja/about', 'Kaia DLT Foundation', 'official', { verifiedAt: '2026-09-11', updatedAt: '2026-09-11' }),
+    // 2026-09-22: DOZN と JPYC → 韓国ウォン精算の検証 MOU (Kaia Japan 公式 X・第 6 回週次更新)
+    ...provenance('https://www.kaia.io/ja/about', 'Kaia DLT Foundation', 'official', { verifiedAt: '2026-09-29', updatedAt: '2026-09-22' }),
     facts: {
       description: 'アジア圏のステーブルコイン利用を対象に含むEVM互換レイヤー1ネットワーク。',
       category: 'network',
