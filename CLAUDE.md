@@ -7,7 +7,7 @@ AI エージェント（Claude/Codex/その他）と人間の両方が守る、�
 
 ```bash
 npm run typecheck        # tsc --noEmit
-npx vitest run           # unit/integration 全 suite (~35s)。summary は末尾 5 行を読む
+npx vitest run           # unit/integration 全 suite (約 1 分)。summary は末尾 5 行を読む
 node scripts/run-lua-tests.mjs # scripts/lib/luaRealTests.mjs に登録した file だけをプロセス再起動つきで最大 3 回 (CI の lua-real job と同じ)
                          #   ⚠️ 出力を grep すると test 内の意図的エラーログ (SA init noise 等) に誤マッチする
 npm run e2e:local        # Playwright (ローカル環境依存 → 下記「e2e は CI が権威」参照)
@@ -37,7 +37,7 @@ node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--onc
 15. **money-path / x402 wire / 秘密情報に触れる変更は「初期生成」と「正式採用」を分離**（2026-07-18 採用）: AI が実装しテストが green でも、merge 前に人間（user）の明示レビューを必須とし、決済状態の判定を LLM の出力に委ねる実装（"paid" 文字列や会話履歴を信じて解錠する等）を導入しない。決済状態の真実は facilitator の verify/settle とオンチェーンのみ。
 16. **依存の追加は公式 npm レジストリのみ**（2026-07-20 採用）: git URL・独自レジストリ・http 取得を lockfile に入れない（`scripts/lockfile-gate.mjs` が CI で全 package-lock.json を検査）。install スクリプトを持つ新規パッケージ・既存名と紛らわしい類似名は導入前に個別確認し、AI エージェントには依存追加の前に追加予定一覧を出させる。
 
-## 自律運転の型（全モデル共通・Fable/Opus/Sonnet/Codex）
+## 自律運転の型（全モデル共通）
 
 **確認なしで進めてよい**（止まると逆に遅い）:
 
@@ -61,7 +61,7 @@ node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--onc
 
 ## PR / 検証の型
 
-- ブランチ → conventional commit → push → `gh pr create` → CI 監視 → **conclusion を明示確認**（`gh pr checks` の `--watch` は旧 run で exit したり checks 登録前に終わることがある。登録を待ってから watch し、最後に一覧で pass を確認）→ squash merge → main 同期。
+- ブランチ → conventional commit → push → `gh pr create` → CI 待ち（上記「作業の型」の `scripts/ci-wait.mjs`・HEAD 一致と nonSUCCESS=0 を確認）→ squash merge → main 同期。
 - コミット trailer: `Co-Authored-By` と `Claude-Session`（エージェント作業時）。
 - UI 変更は実機スクショで検証（`scripts/dev-shot.mjs`）。印刷面（ポスター/kit）は `emulateMedia('print')` で A4 フィット（scrollHeight ≤ viewport）まで確認。
 - **page ファイルを含む変更の検証には `npm run build` を含める**（掟 3 の検出はこれのみ）。
@@ -72,6 +72,6 @@ node scripts/ci-wait.mjs <PR> # PR の CI settle 待ち+conclusion 判定 (--onc
 
 ## 参照
 
-- 運用 runbook / go-live SOP: `docs/DEPLOY_CHECKLIST.md`（§15 Push・§15.7 オフライン QR・§14 x402）
+- 運用 runbook / go-live SOP: `docs/DEPLOY_CHECKLIST.md`（§15 Push・§15 末尾のオフライン受け取り QR・§14 x402）
 - 実装計画の置き場: `plans/`（gitignore 対象・ローカル）
 - Web Push の自動 E2E は不可（Playwright Chromium は FCM キー欠如・自動化 Chrome も push service 拒否）→ 実機 smoke（DEPLOY_CHECKLIST §15.6）
