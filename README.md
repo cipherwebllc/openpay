@@ -508,6 +508,12 @@ OpenPay is **not** a wallet, exchange, custodian, or redemption provider. Users 
 - Demand-driven additional chains and tokens
 - Solana cross-chain (shelved 2026-05-24 pending Circle official confirmation that Solana is a supported **source** chain for the Forwarding Service — see [`docs/research/circle-forwarding-service.md`](./docs/research/circle-forwarding-service.md))
 
+## Contact
+
+Want to build OpenPay's payment stack (JPYC/USDC payments, AI-agent payments) into your own service? Reach us on the [OpenPay Discord](https://discord.gg/Cfywb3aNWg), or add a message to a JPYC tip from the "Support" section of [@cipherweb](https://open-pay.jp/en/@cipherweb) (only the recipient can read it).
+
+OpenPay の仕組み（JPYC・USDC 決済、AI エージェントの支払い）を自社のサービスに組み込みたい方は、[OpenPay の Discord](https://discord.gg/Cfywb3aNWg) か、[@cipherweb のページ](https://open-pay.jp/ja/@cipherweb)の「応援する」からメッセージを添えてご相談ください（読めるのは本人だけです）。
+
 ## License
 
 MIT. Self-hosting and forking are fully permitted under MIT. The OpenPay brand and the `open-pay.jp` domain belong to the operator and are not part of the license grant.
