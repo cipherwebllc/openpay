@@ -3759,6 +3759,8 @@ describe('A2c saved-order-only notification', () => {
     const user = userEvent.setup(); setupRelayReady();
     render(<CheckoutForm params={{ ...JPYC_PARAMS, orderId: undefined, webhook: `${location.origin}/api/order/notify?h=alice` }} />);
     await user.click(screen.getByRole('button', { name: /を支払う/ }));
+    // 署名までに注文の束縛 (lib/orderBind) を非同期で読む。並列実行の負荷で遅れても落ちないよう、呼ばれるまで待つ。
+    await waitFor(() => expect(relayMutate).toHaveBeenCalled());
     expect(relayMutate.mock.calls[0][0].order.orderId.length).toBeGreaterThan(0);
   });
   it('a matching saved checkout can recover its original notification after route flags change', async () => {
