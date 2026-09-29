@@ -147,6 +147,7 @@ export async function watch({ env = process.env, fetchImpl = fetch, now = Date.n
   const rawPoints = Array.isArray(stats?.dailyrequests) ? stats.dailyrequests.length : 0;
   log(`Upstash usage (${new Date(now).toISOString()}):`);
   log(`  dailyrequests: ${rawPoints} points → ${series.length} UTC days${series.length > 0 ? ` (${day(series[0].date)} … ${day(series.at(-1).date)})` : ''}`);
+  for (const p of series) log(`    ${day(p.date)}: ${fmt(p.count)}`);
   log(`  today: ${fmt(countOf(stats?.daily_net_commands))} commands`);
   log(`  month to date: ${fmt(projection.monthTotal)} (total_monthly_requests)`);
   log(`  daily average: ${fmt(projection.avgDaily)} (${projection.basis})`);

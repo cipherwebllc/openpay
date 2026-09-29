@@ -75,7 +75,7 @@ describe('funnel day arguments retain existing coercion and clamping', () => {
         command: ['HGETALL', `x402:funnel:${new Date(Date.UTC(2026, 8, 30) - i * 86_400_000).toISOString().slice(0, 10)}`],
         body: { result: [] },
       })),
-      stdout: `x402 funnel — 直近 ${displayed} 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n`,
+      stdout: `x402 funnel — 直近 ${displayed} 日 (UTC)\n\n[支払い前] resource: 402 発行 (抽出記録からの推定・概数) / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n`,
       stderr: '', status: 0,
     });
   });

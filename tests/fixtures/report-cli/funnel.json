@@ -59,7 +59,7 @@
         }
       }
     ],
-    "stdout": "x402 funnel — 直近 2 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n  /aaa: challenge 0 / invalid_payload 0\n  /商品|preview: challenge 10 / invalid_payload 2\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  /aaa|jpyc: 2 / 2 (100%)\n  /invalid-only|jpyc: 0 / 0 (-) — invalid_payload 8\n  /商品|preview|usdc: 3 / 8 (38%) — challenge 4, invalid_payload 99, verify_failed 1, conflict 1, content_error 1, settle_failed 1, facilitator_unavailable 1\n",
+    "stdout": "x402 funnel — 直近 2 日 (UTC)\n\n[支払い前] resource: 402 発行 (抽出記録からの推定・概数) / 形不正\n  /aaa: challenge 0 / invalid_payload 0\n  /商品|preview: challenge 10 / invalid_payload 2\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  /aaa|jpyc: 2 / 2 (100%)\n  /invalid-only|jpyc: 0 / 0 (-) — invalid_payload 8\n  /商品|preview|usdc: 3 / 8 (38%) — challenge 4, invalid_payload 99, verify_failed 1, conflict 1, content_error 1, settle_failed 1, facilitator_unavailable 1\n",
     "stderr": "",
     "status": 0
   },
@@ -132,7 +132,7 @@
         }
       }
     ],
-    "stdout": "x402 funnel — 直近 7 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stdout": "x402 funnel — 直近 7 日 (UTC)\n\n[支払い前] resource: 402 発行 (抽出記録からの推定・概数) / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
     "stderr": "",
     "status": 0
   },
@@ -157,7 +157,7 @@
         }
       }
     ],
-    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n  /bad: challenge NaN / invalid_payload 0\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  /odd|usdc: NaN / NaN (-)\n",
+    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 (抽出記録からの推定・概数) / 形不正\n  /bad: challenge NaN / invalid_payload 0\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  /odd|usdc: NaN / NaN (-)\n",
     "stderr": "",
     "status": 0
   },
@@ -178,7 +178,7 @@
         }
       }
     ],
-    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 (抽出記録からの推定・概数) / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
     "stderr": "",
     "status": 0
   },
@@ -212,7 +212,7 @@
         }
       }
     ],
-    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n  /nested: challenge 2 / invalid_payload 0\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  /nested|usdc: 3 / 3 (100%)\n",
+    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 (抽出記録からの推定・概数) / 形不正\n  /nested: challenge 2 / invalid_payload 0\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  /nested|usdc: 3 / 3 (100%)\n",
     "stderr": "",
     "status": 0
   },
@@ -223,7 +223,7 @@
       "garbage"
     ],
     "replies": [],
-    "stdout": "x402 funnel — 直近 NaN 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stdout": "x402 funnel — 直近 NaN 日 (UTC)\n\n[支払い前] resource: 402 発行 (抽出記録からの推定・概数) / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
     "stderr": "",
     "status": 0
   },
@@ -234,7 +234,7 @@
       "--help"
     ],
     "replies": [],
-    "stdout": "x402 funnel — 直近 NaN 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stdout": "x402 funnel — 直近 NaN 日 (UTC)\n\n[支払い前] resource: 402 発行 (抽出記録からの推定・概数) / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
     "stderr": "",
     "status": 0
   },
@@ -256,7 +256,7 @@
         }
       }
     ],
-    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 (抽出記録からの推定・概数) / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
     "stderr": "",
     "status": 0
   },
@@ -277,7 +277,7 @@
         }
       }
     ],
-    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
+    "stdout": "x402 funnel — 直近 1 日 (UTC)\n\n[支払い前] resource: 402 発行 (抽出記録からの推定・概数) / 形不正\n\n[支払い後] resource | rail: 成立 / 試行 (成立率) — 内訳\n  (記録なし — 計上開始前か KV 未構成)\n",
     "stderr": "",
     "status": 0
   }

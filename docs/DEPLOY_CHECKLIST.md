@@ -1646,7 +1646,7 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 - リクエストごとの行は残さない (402 は巡回で大量に出る)。誰が・いくらで買ったかは settle 台帳 (`x402:settle:ledger:<月>`)。
 - 読み出し = `node scripts/x402-funnel-report.mjs [日数]` (本番 KV の URL/TOKEN を export・読み取りのみ)。
   ⚠️ challenge は検索クローラを含む = 買い手の数ではない。成立率は「支払いを試みた件数」を分母にする。
-  2026-09-26 から challenge は **10 件に 1 件だけ記録して 10 を足す** (Upstash 無料枠の KV 予算。期待値は同じで表示は 10 単位の概数)。
+  2026-09-26 から challenge は抽出して記録 (Upstash の KV 予算。期待値は同じ): 9/26〜 **10 件に 1 件で 10 を足す**・2026-09-29 の変更の反映後は **50 件に 1 件で 50 を足す** (表示は 50 単位の概数)。
   支払いを試みた後の段階 (invalid_payload 以降) は全件記録のまま。
 - 対象外 (今回): JPYC の first-party 経路・Store の閲覧〜購入。必要になったら同じ形で足す。
 
@@ -1655,6 +1655,7 @@ flag ON + forwarder/JPYC 設定済の Amoy (80002) で 1 周する。route テ�
 2026-09-26 に 90% 通知。開発用 DB での実測で、**Lua スクリプトは「EVAL 自体 1 + 中の redis.call の数」で数えられる**
 (GET 5 回を含む EVAL 10 回 = 60)。パイプラインも 1 件ずつ数える。Lua を多用する処理は見た目の何倍も消費する。
 - **使用量の監視 (2026-09-29)**: `.github/workflows/upstash-usage-watch.yml` が毎日 JST 9:30 に Upstash Developer API の stats だけを読み、今月の見込み (今月の実績 + 直近 7 日の平均 × 残り日数) が `UPSTASH_CAP_COMMANDS` (GitHub の変数・既定 25 万 = 月 $0.5) を超えそうなら失敗 (GitHub Actions の失敗通知・通知設定に依存)、80% 以上で警告・`total_monthly_billing` が上限の金額を超えたら警告 (単位が未確認のため失敗にしない)。日ごとの系列が無く、月初でデータが 1 日未満なら見込まない。Secrets = `UPSTASH_MGMT_EMAIL` / `UPSTASH_MGMT_API_KEY` (Read Only) / `UPSTASH_DB_ID`。**未確認 (初回の実行で確かめる)**: `total_monthly_requests` が請求の単位 (コマンド数) と一致するか・`dailyrequests` の形・月の区切り (UTC か)・`total_monthly_billing` の単位・stats の呼び出しがコマンドに数えられるか (`probe` = 対照区間と比べて実測・判定できなければ inconclusive・stats の反映の遅れが 4 分以内という前提も未確認)。
+- **実測 (stats の日ごとの値・UTC 日)**: 9/25 38,659 → 9/26 22,798 (#664/#665) → **9/27 9,019・9/28 10,404** → 9/29 #685。月 $0.5 = 1 日 約 8,065 が上限なので、402 の計測を 50 件に 1 件へ (見込み 約 1,250 減/日・推定)。
 - 主な消費と対策 (2026-09-26 → 09-29): license-mint の cron を 5 分 → 15 分、index 修復 (Lua 3 本で 1 回約 27) は各 UTC 時の最初の run (0〜14 分) だけ (修復は 50 件ずつ巡るので毎時より減らさない)。KV バックアップを 1 日 2 回 → 1 回
   (`lib/license/minter.ts`・通常の購入/登録は due へ直接入るので発行は遅れない)。`/api/discovery` の CDN キャッシュを 10 秒 → 60 秒。
   402 challenge の計測を 1/10 抽出。reverify は UA 交代 (1 時間単位) と連動するため毎時のまま。
