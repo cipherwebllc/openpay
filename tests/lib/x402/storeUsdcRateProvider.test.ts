@@ -48,7 +48,7 @@ const CACHE_KEY = 'store:fx:usdc-jpy:cache:v1';
 
 function upstream(rate: number) {
   return vi.fn(async () =>
-    // 取得元 (Coinbase) の応答の形: レートは文字列 (lib/usdcJpyRate.ts が小数第 2 位に丸めて読む)。
+    // 取得元 (Coinbase) の応答の形: レートは 10 進数の文字列 (見積もりは全桁で使う)。
     new Response(JSON.stringify({ data: { currency: 'USDC', rates: { JPY: String(rate) } } }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -118,13 +118,11 @@ describe('Creator Store USDC rate provider', () => {
     expect(result.ok && result.quote.fxQuoteExpiresAt).toBe(NOW + 90_000);
   });
 
-  // 取得元のレートは小数第 2 位に丸めて読む (lib/usdcJpyRate.ts) ので、境界の 1 つ外は 0.01 刻み。
-  // scaled (1e6) での厳密な境界は下の bigint のテストが直接見る。
   it.each([
     [165, false],
-    [165.01, true],
+    [165.000001, true],
     [135, false],
-    [134.99, true],
+    [134.999999, true],
   ])('LKG=150 に対する rate=%s の ±10%% 境界', async (rate, rejected) => {
     putLkg(150);
     const result = await getStoreUsdcRate({
@@ -139,7 +137,7 @@ describe('Creator Store USDC rate provider', () => {
 
   it('sanity band 外と LKG storage 障害は quote を返さない', async () => {
     await expect(
-      getStoreUsdcRate({ now: NOW, fetchImpl: upstream(49.99) }),
+      getStoreUsdcRate({ now: NOW, fetchImpl: upstream(49.999999) }),
     ).resolves.toEqual({ ok: false, reason: 'out_of_band' });
 
     state.fail = true;

@@ -141,6 +141,22 @@ describe('/api/market/rates: GET', () => {
     }
   });
 
+  it('取得元の長い小数は、帯の確認は全桁で行い、client へは小数第 2 位に 10 進数のまま丸めて返す', async () => {
+    for (const [jpy, expected] of [['157.4318856113143365644986761414795', 157.43], ['150.015', 150.02]] as const) {
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { currency: 'USDC', rates: { JPY: jpy } } }), { status: 200 }),
+      );
+      const res = await GET();
+      expect(res.status).toBe(200);
+      expect((await res.json()).usdcJpy).toBe(expected);
+    }
+    // 下限 50 のわずかに下 (丸めると 50.00) は、全桁で判定して帯の外。
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: { currency: 'USDC', rates: { JPY: '49.999' } } }), { status: 200 }),
+    );
+    expect((await GET()).status).toBe(502);
+  });
+
   it('User-Agent ヘッダ + Next revalidate オプションが付いて fetch される', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ data: { currency: 'USDC', rates: { JPY: String(150) } } }), { status: 200 }),

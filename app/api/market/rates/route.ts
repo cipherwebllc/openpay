@@ -18,7 +18,7 @@
 
 import { logger } from '@/lib/logger';
 import { FX_RATE_MIN, FX_RATE_MAX } from '@/lib/fx';
-import { USDC_JPY_SOURCE_URL, parseUsdcJpy } from '@/lib/usdcJpyRate';
+import { USDC_JPY_SOURCE_URL, parseUsdcJpy, roundUsdcJpyForDisplay } from '@/lib/usdcJpyRate';
 
 // Next 15: revalidate を export すると route が build 時に prerender される。
 // 取得元が build 時に到達不能だと fetch reject で `Export encountered an
@@ -48,24 +48,25 @@ export async function GET(): Promise<Response> {
     );
   }
 
-  const usdcJpy = parseUsdcJpy(await res.json());
-  if (usdcJpy === null) {
+  const parsed = parseUsdcJpy(await res.json());
+  if (parsed === null) {
     logger.warn('market.rates.upstream_error', { reason: 'invalid-shape' });
     return Response.json({ error: 'invalid-shape' }, { status: 502 });
   }
   // 決済 (動的 QR の FX 換算) で使う前提の sanity band。取得元が単位ミス
   // (USD を返す等) や桁化けを起こした絶対額を generator が焼き込まないための guard。
-  // 表示専用 strip も band 外を出すより unavailable に倒す方が安全。
-  if (usdcJpy < FX_RATE_MIN || usdcJpy > FX_RATE_MAX) {
+  // 表示専用 strip も band 外を出すより unavailable に倒す方が安全。判定は丸める前の全桁で行う。
+  if (parsed.value < FX_RATE_MIN || parsed.value > FX_RATE_MAX) {
     logger.warn('market.rates.upstream_error', {
       reason: 'out-of-band',
-      usdcJpy,
+      usdcJpy: parsed.value,
     });
     return Response.json({ error: 'out-of-band' }, { status: 502 });
   }
 
   return Response.json({
-    usdcJpy,
+    // client (表示・動的 QR の fxRate・支払い控え・会計 CSV) へは小数第 2 位に丸めて渡す (lib/usdcJpyRate.ts)。
+    usdcJpy: roundUsdcJpyForDisplay(parsed.decimal),
     updatedAt: new Date().toISOString(),
   });
 }

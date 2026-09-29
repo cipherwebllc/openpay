@@ -132,8 +132,9 @@ export async function getStoreUsdcRate(input: {
   } catch {
     return { ok: false, reason: 'unavailable' };
   }
-  const rate = parseUsdcJpy(data);
-  if (rate === null || !rateIsSane(rate)) {
+  // 見積もりと安全確認は全桁の値で行う (丸めると sanity band・±10% ブレーカーの境界の判定が変わる)。
+  const rate = parseUsdcJpy(data)?.value;
+  if (rate === undefined || !rateIsSane(rate)) {
     return { ok: false, reason: 'out_of_band' };
   }
   // fetch/parse が完了した時刻が上流の実取得時刻。API response の生成時刻は流用しない。
