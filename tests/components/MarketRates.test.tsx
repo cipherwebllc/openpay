@@ -36,7 +36,7 @@ describe('MarketRates', () => {
     renderWithIntl(<MarketRates />);
     expect(screen.getByText(/1 USDC = ¥154\.50/)).toBeInTheDocument();
     expect(screen.getByText(/1 JPYC = ¥1\.00 \(peg 1:1\)/)).toBeInTheDocument();
-    expect(screen.getByText(/CoinGecko/)).toBeInTheDocument();
+    expect(screen.getByText(/Coinbase/)).toBeInTheDocument();
   });
 
   it('大きな USDC レートで桁区切り (1543.21 → 1,543.21)', () => {
@@ -74,7 +74,7 @@ describe('MarketRates', () => {
     renderWithIntl(<MarketRates />, { locale: 'en' });
     expect(screen.getByText(/Market rate \(reference\)/)).toBeInTheDocument();
     expect(screen.getByText(/1 USDC = ¥154\.50/)).toBeInTheDocument();
-    expect(screen.getByText(/via CoinGecko/)).toBeInTheDocument();
+    expect(screen.getByText(/via Coinbase/)).toBeInTheDocument();
   });
 });
 

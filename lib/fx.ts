@@ -17,7 +17,7 @@
 import { formatUnits, parseUnits } from 'viem';
 import type { TokenSymbol } from './tokens';
 
-// usdcJpy (= 1 USDC が何円か) の異常値バンド。CoinGecko が単位ミス (USD を返す等) や
+// usdcJpy (= 1 USDC が何円か) の異常値バンド。取得元 (Coinbase・lib/usdcJpyRate.ts) が単位ミス (USD を返す等) や
 // 桁化けを起こしたとき、絶対額をミスって焼き込まないための sanity guard。
 // USD/JPY は近代史上 ~75〜360 の範囲なので 50〜500 は十分広い「あり得ない値」検出帯。
 // app/api/market/rates/route.ts と本モジュールの単一情報源。
@@ -35,7 +35,7 @@ const TOKEN_DECIMALS: Record<TokenSymbol, number> = {
   usdc: 6,
 };
 
-// レートを整数 bigint 化する際のスケール (6 桁精度)。CoinGecko は概ね 2 桁なので十分。
+// レートを整数 bigint 化する際のスケール (6 桁精度)。取得元のレートは小数第 2 位に丸めて読む (lib/usdcJpyRate.ts) ので十分。
 const RATE_SCALE = 1_000_000n;
 
 export function rateIsSane(usdcJpy: number): boolean {
@@ -102,7 +102,7 @@ export function convertAnchorAmount(args: ConvertAnchorArgs): ConvertAnchorResul
 // last-known-good (LKG) レート急変検知 (F8・defense-in-depth)
 // ---------------------------------------------------------------------------
 //
-// CoinGecko の障害 / MITM が ~300s のキャッシュ窓内で歪んだレートを返し、それが動的 QR に
+// 取得元 (Coinbase) の障害 / MITM が ~300s のキャッシュ窓内で歪んだレートを返し、それが動的 QR に
 // 焼き込まれる事故を「警告」で捕まえる (hard-reject はしない — 実際の >20% 相場変動で正当な
 // マーチャントを止めないため)。FX_RATE_MIN/MAX の sanity band はそのまま維持し、その内側で
 // 前回良好値 (LKG) から ±20% を超える跳ねだけを検知する。DOM/localStorage には依存しない

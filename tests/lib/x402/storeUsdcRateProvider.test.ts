@@ -48,7 +48,8 @@ const CACHE_KEY = 'store:fx:usdc-jpy:cache:v1';
 
 function upstream(rate: number) {
   return vi.fn(async () =>
-    new Response(JSON.stringify({ 'usd-coin': { jpy: rate } }), {
+    // 取得元 (Coinbase) の応答の形: レートは 10 進数の文字列 (見積もりは全桁で使う)。
+    new Response(JSON.stringify({ data: { currency: 'USDC', rates: { JPY: String(rate) } } }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     }),

@@ -315,7 +315,7 @@
     "loading": "レート取得中…",
     "usdcRate": "1 USDC = ¥{rate}",
     "jpycPeg": "1 JPYC = ¥1.00 (peg 1:1)",
-    "referenceNote": "※ CoinGecko (5 分キャッシュ) / 参考値",
+    "referenceNote": "※ Coinbase (5 分キャッシュ) / 参考値",
     "unavailable": "USDC のレートを取得できませんでした"
   },
   "Today": {
