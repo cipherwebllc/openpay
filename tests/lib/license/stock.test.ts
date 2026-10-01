@@ -9,6 +9,7 @@ const h = vi.hoisted(() => ({ store: null as FakeRedisStore | null, failBefore: 
   evalOverride: null as null | ((script: string, keys: string[], args: string[]) => unknown) }));
 vi.mock('@/lib/env', () => ({ env: { enableCreatorStore: true, get enableLicenseNft() { return h.enabled; }, networkEnv: 'testnet', licenseNftAmoy: '0x3333333333333333333333333333333333333333' } }));
 vi.mock('@/lib/kv', () => ({
+  kvExists: async (keys: string[]) => ({ ok: true, value: keys.filter((k) => h.store!.keys().includes(k)).length }),
   kvGet: async (key: string) => ({ ok: true, value: h.store!.strings.get(key) ?? null }),
   kvSet: async (key: string, value: string, options?: { nx?: boolean; ttlSec?: number }) => {
     if (options?.nx && h.store!.strings.has(key)) return { ok: true, value: null };

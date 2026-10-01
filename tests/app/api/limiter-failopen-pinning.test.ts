@@ -80,12 +80,12 @@ const routes: Route[] = [
   {
     name: 'tip-messages', method: 'GET',
     call: async (req) => (await import('@/app/api/tip-messages/route')).GET(req),
-    result: { items: [] }, effect: h.listMessages, command: 'EVAL',
+    result: { items: [] }, effect: h.listMessages, command: 'PIPELINE:INCR+EXPIRE',
   },
   {
     name: 'tip-messages', method: 'DELETE',
     call: async (req) => (await import('@/app/api/tip-messages/route')).DELETE(req),
-    result: { ok: true }, effect: h.deleteMessages, command: 'EVAL',
+    result: { ok: true }, effect: h.deleteMessages, command: 'PIPELINE:INCR+EXPIRE',
   },
 ];
 
@@ -99,8 +99,15 @@ function request(route: Pick<Route, 'name' | 'method' | 'body'>): Request {
     ...(route.body === undefined ? {} : { body: JSON.stringify(route.body) }),
   });
 }
+// kvIncr(key, { initialTtlSec }) (checkIpRateLimit 等) は INCR + EXPIRE NX を pipeline の 1 往復で送る (lib/kv.ts)。
+// pipeline は 'PIPELINE:INCR+EXPIRE' の 1 行に畳み、2 列目以降に各要素の鍵を並べる。
 function commands(): unknown[][] {
-  return fetchMock.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string));
+  return fetchMock.mock.calls.map(([url, init]) => {
+    const body = JSON.parse((init as RequestInit).body as string) as unknown[];
+    if (!String(url).endsWith('/pipeline')) return body;
+    const steps = body as unknown[][];
+    return ['PIPELINE:' + steps.map((step) => step[0]).join('+'), ...steps.map((step) => step[1])];
+  });
 }
 
 beforeEach(() => {
@@ -156,19 +163,19 @@ describe('B-R6e store seller address limiter', () => {
     const { requireStoreSeller } = await import('@/app/api/store/_shared');
     await expect(requireStoreSeller(request({ name: 'store/products', method: 'GET' }), 'products-read'))
       .resolves.toEqual({ ok: true, address: OWNER });
-    expect(commands().map(([command]) => command)).toEqual(['EVAL', 'INCR']);
+    expect(commands().map(([command]) => command)).toEqual(['PIPELINE:INCR+EXPIRE', 'INCR']);
     expect(commands()[1][1]).toMatch(new RegExp(`^rl:read:creator-store:products-read:${OWNER.toLowerCase()}:\\d+$`));
     expect(h.session).toHaveBeenCalledOnce();
   });
 
   it.each(failures)('address TTL transport $name でも SIWE owner を返す', async ({ fail }) => {
     fetchMock.mockImplementation(fail)
-      .mockResolvedValueOnce(new Response('{"result":1}'))
+      .mockResolvedValueOnce(new Response('[{"result":1},{"result":1}]'))
       .mockResolvedValueOnce(new Response('{"result":1}'));
     const { requireStoreSeller } = await import('@/app/api/store/_shared');
     await expect(requireStoreSeller(request({ name: 'store/products', method: 'GET' }), 'products-read'))
       .resolves.toEqual({ ok: true, address: OWNER });
-    expect(commands().map(([command]) => command)).toEqual(['EVAL', 'INCR', 'EXPIRE']);
+    expect(commands().map(([command]) => command)).toEqual(['PIPELINE:INCR+EXPIRE', 'INCR', 'EXPIRE']);
   });
 
   it.each([401, 503])('limiter 障害でも session の %i を許可へ変えない', async (status) => {
@@ -183,6 +190,6 @@ describe('B-R6e store seller address limiter', () => {
     expect(await auth.response.json()).toEqual(body);
     expect(auth.response.headers.get('cache-control')).toBe('private, no-store');
     expect(auth.response.headers.get('vary')).toBe('Cookie');
-    expect(commands().map(([command]) => command)).toEqual(['EVAL']);
+    expect(commands().map(([command]) => command)).toEqual(['PIPELINE:INCR+EXPIRE']);
   });
 });

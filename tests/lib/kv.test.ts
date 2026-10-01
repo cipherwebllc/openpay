@@ -436,12 +436,12 @@ describe('lib/kv', () => {
     expect(JSON.parse(init.body)).toEqual(['INCR', 'relay:budget:137:20260602']);
   });
 
-  it('kvIncr atomic opts は INCR と初回/欠落時 EXPIRE を 1 EVAL に閉じる', async () => {
+  it('kvIncr atomic opts は INCR と EXPIRE NX を pipeline の 1 往復で送る (EVAL を使わない = 常に 2 コマンド)', async () => {
     process.env.KV_REST_API_URL = 'https://example.upstash.io';
     process.env.KV_REST_API_TOKEN = 'secret';
     const fetchMock = vi
       .fn()
-      .mockResolvedValue({ ok: true, json: async () => ({ result: 2 }) });
+      .mockResolvedValue({ ok: true, json: async () => [{ result: 2 }, { result: 0 }] });
     vi.stubGlobal('fetch', fetchMock);
     const { kvIncr } = await import('@/lib/kv');
 
@@ -450,19 +450,102 @@ describe('lib/kv', () => {
     });
 
     expect(res).toEqual({ ok: true, value: 2 });
-    const [, init] = fetchMock.mock.calls[0];
-    const body = JSON.parse(init.body) as string[];
-    expect(body[0]).toBe('EVAL');
-    expect(body[1]).toContain("redis.call('INCR'");
-    expect(body[1]).toContain("redis.call('TTL'");
-    expect(body[1]).toContain('if count == 1 or ttl < 0');
-    expect(body[1]).toContain("redis.call('EXPIRE'");
-    expect(body.slice(2)).toEqual([
-      '1',
-      'iprl:v1:siwe-nonce:hash',
-      '60',
-    ]);
     expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://example.upstash.io/pipeline');
+    expect(JSON.parse(init.body)).toEqual([
+      ['INCR', 'iprl:v1:siwe-nonce:hash'],
+      ['EXPIRE', 'iprl:v1:siwe-nonce:hash', '60', 'NX'],
+    ]);
+  });
+
+  it('kvIncr atomic opts: EXPIRE だけ失敗しても INCR の数は返す (取れた超過判定を捨てない)・INCR の失敗と壊れた応答は ok:false', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvIncr } = await import('@/lib/kv');
+    const opts = { initialTtlSec: 60 };
+
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => [{ result: 61 }, { error: 'ERR syntax error' }] });
+    expect(await kvIncr('k', opts)).toEqual({ ok: true, value: 61 });
+
+    fetchMock.mockResolvedValueOnce({ ok: true, json: async () => [{ error: 'ERR value is not an integer or out of range' }, { result: 1 }] });
+    expect(await kvIncr('k', opts)).toEqual({ ok: false, reason: 'http_error', detail: 'ERR value is not an integer or out of range' });
+
+    for (const body of [{ result: 1 }, [], [{}], [{ result: '1' }], null]) {
+      fetchMock.mockResolvedValueOnce({ ok: true, json: async () => body });
+      expect(await kvIncr('k', opts)).toEqual({ ok: false, reason: 'parse_error', detail: 'unexpected pipeline result' });
+    }
+
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 400, json: async () => ({ error: 'ERR bad pipeline' }) });
+    expect(await kvIncr('k', opts)).toEqual({ ok: false, reason: 'http_error', status: 400, detail: 'ERR bad pipeline' });
+
+    fetchMock.mockRejectedValueOnce(new Error('ECONNRESET'));
+    expect(await kvIncr('k', opts)).toEqual({ ok: false, reason: 'network_error', detail: 'ECONNRESET' });
+  });
+
+  it('kvIncr atomic opts: EXPIRE だけの失敗は鍵を出さずに警告 (10 分に 1 回まで)・次の呼び出しの EXPIRE NX で期限が付く', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const warn = vi.fn();
+    vi.doMock('@/lib/logger', () => ({ logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
+    // 1 キーだけの小さな Redis (INCR と EXPIRE NX の意味だけ)。Lua ハーネス (tests/_helpers/redisLua) は使わない。
+    let now = 1_700_000_000_000;
+    let value = 0;
+    let expiresAt: number | null = null;
+    const ttl = () => (expiresAt === null ? -1 : Math.ceil((expiresAt - now) / 1000));
+    const purge = () => { if (expiresAt !== null && expiresAt <= now) { value = 0; expiresAt = null; } };
+    let failExpire = 2;
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const [[incrCmd], [expireCmd, , seconds, option]] = JSON.parse(init.body as string) as string[][];
+      expect([incrCmd, expireCmd, option]).toEqual(['INCR', 'EXPIRE', 'NX']);
+      purge();
+      value += 1;
+      const replies: unknown[] = [{ result: value }];
+      if (failExpire > 0) {
+        failExpire -= 1;
+        replies.push({ error: 'ERR injected' });
+      } else if (expiresAt === null) {
+        expiresAt = now + Number(seconds) * 1000;
+        replies.push({ result: 1 });
+      } else {
+        replies.push({ result: 0 });
+      }
+      return { ok: true, json: async () => replies };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvIncr } = await import('@/lib/kv');
+    const key = 'iprl:v1:scope:hmac-of-ip';
+
+    expect(await kvIncr(key, { initialTtlSec: 60 })).toEqual({ ok: true, value: 1 });
+    expect(ttl()).toBe(-1);
+    expect(await kvIncr(key, { initialTtlSec: 60 })).toEqual({ ok: true, value: 2 });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith('kv.incr_expire_failed', { detail: 'ERR injected' });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('hmac-of-ip');
+
+    expect(await kvIncr(key, { initialTtlSec: 60 })).toEqual({ ok: true, value: 3 });
+    expect(ttl()).toBe(60);
+    now += 30_000;
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    expect(await kvIncr(key, { initialTtlSec: 60 })).toEqual({ ok: true, value: 4 });
+    expect(ttl()).toBe(30);
+    now += 30_000;
+    expect(await kvIncr(key, { initialTtlSec: 60 })).toEqual({ ok: true, value: 1 });
+    vi.doUnmock('@/lib/logger');
+  });
+
+  it('kvExists は EXISTS に複数キーを渡し、存在する数を返す', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ result: 1 }) });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvExists } = await import('@/lib/kv');
+    expect(await kvExists(['a', 'b', 'c'])).toEqual({ ok: true, value: 1 });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://example.upstash.io/');
+    expect(JSON.parse(init.body)).toEqual(['EXISTS', 'a', 'b', 'c']);
   });
 
   it('kvDecr は DECR を送り number を返す', async () => {

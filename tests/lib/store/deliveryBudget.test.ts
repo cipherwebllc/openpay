@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createFakeRedisStore, runRedisLua, closeRedisLuaEngine, type FakeRedisStore } from '@/tests/_helpers/redisLua';
+import { createFakeRedisStore, runRedisLua, runRedisPipeline, closeRedisLuaEngine, type FakeRedisStore } from '@/tests/_helpers/redisLua';
 import { acquireDeliveryBudget, releaseDeliveryBudget } from '@/lib/store/deliveryBudget';
 import { kvIncr } from '@/lib/kv';
 let store: FakeRedisStore;
@@ -9,8 +9,10 @@ beforeEach(() => {
   store = createFakeRedisStore(1700000000000); failed = false;
   vi.spyOn(Date, 'now').mockImplementation(() => store.now());
   vi.stubEnv('UPSTASH_REDIS_REST_URL', 'https://redis.example'); vi.stubEnv('UPSTASH_REDIS_REST_TOKEN', 'test-only');
-  vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string, options: RequestInit) => {
     if (failed) throw new Error('offline');
+    // kvIncr の窓カウンタは INCR + EXPIRE NX の pipeline (lib/kv.ts)・delivery の lease は EVAL。
+    if (url.endsWith('/pipeline')) return Response.json(runRedisPipeline(store, JSON.parse(options.body as string)));
     const [cmd, script, keyCount, ...args] = JSON.parse(options.body as string);
     expect(cmd).toBe('EVAL');
     const value = await runRedisLua(script, args.slice(0, Number(keyCount)), args.slice(Number(keyCount)), store);
@@ -19,7 +21,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 afterAll(closeRedisLuaEngine);
-it('uses real counter Lua with a fixed 60-second window, lowercased address namespace and TTL repair', async () => {
+it('uses the real counter commands (INCR + EXPIRE NX) with a fixed 60-second window, lowercased address namespace and TTL repair', async () => {
   const key = 'creator-store:delivery:ticket:0x52908400098527886e0f7030069857d2e4169ee7';
   for (let i = 1; i <= 21; i++) expect(await kvIncr(key, { initialTtlSec: 60 })).toEqual({ ok: true, value: i });
   expect(store.getTtl(key)).toBe(60); store.advance(59000);

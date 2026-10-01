@@ -300,7 +300,11 @@ export function dispatchRedisCommand(
     case 'TTL':
       return store.getTtl(key);
     case 'EXPIRE': {
-      if (store.getTtl(key) === -2) return 0;
+      // 第 3 引数は NX (期限が無いときだけ付ける・Redis 7) のみ扱う。他の option を黙って無視して意味を取り違えない。
+      if (args.length > 3 || (args.length === 3 && args[2].toUpperCase() !== 'NX')) throw new Error('unsupported EXPIRE option');
+      const ttl = store.getTtl(key);
+      if (ttl === -2) return 0;
+      if (args.length === 3 && ttl !== -1) return 0;
       store.setTtl(key, Number(args[1]));
       return 1;
     }
@@ -562,6 +566,19 @@ export async function closeRedisLuaEngine(): Promise<void> {
  * lib/ の Lua 定数をそのまま実行する。KEYS/ARGV/redis/cjson を注入し、返り値を
  * Redis の Lua → RESP 規則で変換して返す (= kvEval の呼び元が受け取る形)。
  */
+/** Upstash REST の pipeline (POST /pipeline) の応答の形: 要素ごとに {result} か {error}。1 要素の失敗で他は止まらない。
+ *  Lua の nil (false) は JSON の null。 */
+export function runRedisPipeline(store: FakeRedisStore, steps: unknown[][]): ({ result: unknown } | { error: string })[] {
+  return steps.map(([command, ...args]) => {
+    try {
+      const reply = dispatchRedisCommand(store, String(command), args);
+      return { result: reply === false ? null : reply };
+    } catch (e) {
+      return { error: 'ERR ' + (e instanceof Error ? e.message : String(e)) };
+    }
+  });
+}
+
 export function runRedisLua(
   script: string,
   keys: string[],

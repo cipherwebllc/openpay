@@ -2,7 +2,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getAddress } from 'viem';
 import { createFakeRedisStore, runRedisLua, closeRedisLuaEngine, type FakeRedisStore } from '../../_helpers/redisLua';
-const h = vi.hoisted(() => ({ store: null as FakeRedisStore | null, enabled: true, creator: true, network: 'testnet', calls: 0 }));
+const h = vi.hoisted(() => ({ store: null as FakeRedisStore | null, enabled: true, creator: true, network: 'testnet', calls: 0, existsFails: false }));
 vi.mock('@/lib/env', () => ({ env: {
   get enableLicenseNft() { return h.enabled; }, get enableCreatorStore() { return h.creator; }, get networkEnv() { return h.network; },
   licenseNftAmoy: '0x3333333333333333333333333333333333333333', licenseNftPolygon: '0x4444444444444444444444444444444444444444',
@@ -11,6 +11,7 @@ vi.mock('@/lib/handle', () => ({ isValidHandleFormat: () => true, normalizeHandl
 vi.mock('@/lib/x402/facilitatorConfig', () => ({ x402FacilitatorConfig: { chainId: 80002, feeReceiver: '0x9999999999999999999999999999999999999999' } }));
 vi.mock('@/lib/relay/forwarderConfig', () => ({ configuredJpycForwarderFor: () => '0x8888888888888888888888888888888888888888' }));
 vi.mock('@/lib/kv', () => ({
+  kvExists: async (keys: string[]) => (h.existsFails ? { ok: false, reason: 'network_error' } : { ok: true, value: keys.filter((k) => h.store!.keys().includes(k)).length }),
   kvGet: async (key: string) => ({ ok: true, value: h.store!.strings.get(key) ?? null }),
   kvMget: async (keys: string[]) => ({ ok: true, value: keys.map((k) => h.store!.strings.get(k) ?? null) }),
   kvLrange: async (key: string) => ({ ok: true, value: h.store!.lists.get(key) ?? [] }),
@@ -25,7 +26,7 @@ import { licenseRegistrationJobKey, LICENSE_REGISTRATION_INDEX } from '@/lib/lic
 import { repairLicenseIndexes } from '@/lib/license/repair';
 const OWNER = getAddress('0x1111111111111111111111111111111111111111');
 const base = { owner: OWNER, title: 'License', priceJpyc: '1000', contentKind: 'text', content: '', productKind: 'license', license: { supply: 2, transferable: false, termsUrl: 'https://seller.example/terms', termsVersion: 'v1' } };
-beforeEach(() => { h.store = createFakeRedisStore(1000); h.enabled = true; h.creator = true; h.network = 'testnet'; h.calls = 0; vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', OWNER); vi.stubEnv('ENABLE_LICENSE_NFT_PUBLIC', ''); });
+beforeEach(() => { h.store = createFakeRedisStore(1000); h.enabled = true; h.creator = true; h.network = 'testnet'; h.calls = 0; h.existsFails = false; vi.stubEnv('LICENSE_NFT_SELLER_ALLOWLIST', OWNER); vi.stubEnv('ENABLE_LICENSE_NFT_PUBLIC', ''); });
 afterAll(() => { vi.unstubAllEnvs(); return closeRedisLuaEngine(); });
 async function create() {
   const input = parseHostedInput(base); if (!input.ok) throw new Error(input.error);
@@ -124,5 +125,13 @@ describe('license product foundation', () => {
     expect(await repairLicenseIndexes(2000, 1)).toBe(true);
     expect(h.store!.zsets.get(LICENSE_DUE_INDEX)?.has('registration:' + p.id)).toBe(true);
     h.enabled = false; const calls = h.calls; expect(await repairLicenseIndexes()).toBe(true); expect(h.calls).toBe(calls);
+  });
+  it('skips the three repair scripts while no permanent index exists (KV command budget), and storage failure is not a silent success', async () => {
+    expect(await repairLicenseIndexes()).toBe(true);
+    expect(h.calls).toBe(0);
+    expect(h.store!.keys()).toEqual([]);
+    h.existsFails = true;
+    expect(await repairLicenseIndexes()).toBe(false);
+    expect(h.calls).toBe(0);
   });
 });
