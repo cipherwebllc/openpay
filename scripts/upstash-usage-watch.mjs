@@ -17,6 +17,7 @@
 // 使い方:
 //   node scripts/upstash-usage-watch.mjs          # 毎日の確認
 //   node scripts/upstash-usage-watch.mjs --probe  # stats の呼び出しがコマンドに数えられるかの実測 (初回に 1 回)
+//   node scripts/upstash-usage-watch.mjs --minutes  # 直近 60 分の 1 分ごとのコマンド数 (定期実行の 1 回あたりの切り分け・診断)
 import { pathToFileURL } from 'node:url';
 
 export const STATS_BASE_URL = 'https://api.upstash.com/v2/redis/stats/';
@@ -121,6 +122,36 @@ export function commandBreakdown(stats) {
   rows.sort((a, b) => b.last - a.last || b.sum - a.sum || a.command.localeCompare(b.command));
   const totalLast = rows.reduce((acc, r) => acc + r.last, 0);
   return { rows, totalLast, from: Number.isFinite(from) ? from : null, to: Number.isFinite(to) ? to : null, points: maxPoints };
+}
+
+/**
+ * 直近 60 分の 1 分ごとの増え方 (command_counts の各点は「その日 (UTC) の累計」= 2026-10-01 の実測で、最新の点の合計が
+ * その日の総数とほぼ一致)。定期実行 (license-mint は毎時 :00/:15/:30/:45) の 1 回あたりのコストを切り分けるための診断。
+ * 隣り合う点の差を分ごとに足す。差が負 (UTC の日付が変わった) の分はその点の値をそのまま増分とみなす。
+ */
+export function minuteDeltas(stats) {
+  const raw = stats?.command_counts;
+  if (!Array.isArray(raw)) return [];
+  const byMinute = new Map();
+  for (const entry of raw) {
+    const name = entry?.metric_identifier;
+    if (typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_.]{0,39}$/.test(name) || !Array.isArray(entry?.data_points)) continue;
+    const points = entry.data_points
+      .map((p) => ({ t: pointTime(p), y: countOf(p?.y) }))
+      .filter((p) => Number.isFinite(p.t) && p.y !== null)
+      .sort((a, b) => a.t - b.t);
+    for (let i = 1; i < points.length; i += 1) {
+      const diff = points[i].y - points[i - 1].y;
+      const delta = diff >= 0 ? diff : points[i].y;
+      if (delta === 0) continue;
+      const minute = Math.floor(points[i].t / 60_000) * 60_000;
+      const row = byMinute.get(minute) ?? { minute, total: 0, commands: {} };
+      row.total += delta;
+      row.commands[name.toUpperCase()] = (row.commands[name.toUpperCase()] ?? 0) + delta;
+      byMinute.set(minute, row);
+    }
+  }
+  return [...byMinute.values()].sort((a, b) => a.minute - b.minute);
 }
 
 /**
@@ -272,6 +303,17 @@ export async function main(argv = process.argv.slice(2), { log = console.log, er
       if (result.verdict === 'inconclusive') {
         error('::error::Upstash stats probe was inconclusive; rerun it later');
         return 1;
+      }
+      return 0;
+    }
+    if (argv.includes('--minutes')) {
+      const config = readEnv(deps.env ?? process.env);
+      const stats = await fetchStats({ ...config, fetchImpl: deps.fetchImpl ?? fetch });
+      const rows = minuteDeltas(stats);
+      log(`Upstash commands per minute (last 60 min・UTC・${rows.length} minutes with activity・total ${fmt(rows.reduce((a, r) => a + r.total, 0))}):`);
+      for (const r of rows) {
+        const top = Object.entries(r.commands).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${n}`).join(' ');
+        log(`  ${new Date(r.minute).toISOString().slice(11, 16)}  ${String(r.total).padStart(4)}  ${top}`);
       }
       return 0;
     }

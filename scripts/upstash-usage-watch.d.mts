@@ -12,6 +12,7 @@ export function fetchStats(input: { email: string; apiKey: string; dbId: string;
 export function dailySeries(stats: unknown): { date: number; count: number }[];
 export type CommandBreakdown = { rows: { command: string; last: number; first: number; sum: number }[]; totalLast: number; from: number | null; to: number | null; points: number };
 export function commandBreakdown(stats: unknown): CommandBreakdown | null;
+export function minuteDeltas(stats: unknown): { minute: number; total: number; commands: Record<string, number> }[];
 export type Projection = { monthTotal: number; avgDaily: number | null; projected: number | null; basis: string };
 export function projectMonth(stats: unknown, nowMs: number): Projection;
 export type Assessment = { level: 'ok' | 'warn' | 'over' | 'unknown'; trigger: 'commands' | 'billing' | null };

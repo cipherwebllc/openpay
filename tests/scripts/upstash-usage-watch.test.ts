@@ -7,6 +7,7 @@ import {
   assess,
   commandBreakdown,
   dailySeries,
+  minuteDeltas,
   fetchStats,
   main,
   probe,
@@ -117,6 +118,34 @@ describe('upstash-usage-watch: コマンドの種類ごとの内訳', () => {
     });
     expect(b?.rows).toEqual([{ command: 'SET', last: 2, first: 2, sum: 2 }]);
     expect(commandBreakdown({})).toBeNull();
+  });
+});
+
+describe('upstash-usage-watch: 1 分ごとの増え方 (--minutes)', () => {
+  const at = (m: number, y: unknown) => ({ x: `2026-10-10 16:${String(m).padStart(2, '0')}:30.5 +0000 UTC`, y });
+
+  it('累計の隣り合う差を分ごとに足し、増えた分だけを返す (日付の変わり目で減ったら値そのものを増分)', () => {
+    const rows = minuteDeltas({
+      command_counts: [
+        { metric_identifier: 'GET', data_points: [at(0, 100), at(1, 103), at(2, 103), at(3, 2)] },
+        { metric_identifier: 'TYPE', data_points: [at(0, 50), at(1, 59)] },
+        { metric_identifier: 'bad name!', data_points: [at(0, 0), at(1, 999)] },
+      ],
+    });
+    expect(rows).toEqual([
+      { minute: Date.parse('2026-10-10T16:01:00Z'), total: 12, commands: { GET: 3, TYPE: 9 } },
+      { minute: Date.parse('2026-10-10T16:03:00Z'), total: 2, commands: { GET: 2 } },
+    ]);
+    expect(minuteDeltas({})).toEqual([]);
+  });
+
+  it('main --minutes は 1 分ごとの行を出して 0 (判定はしない・秘密は出さない)', async () => {
+    const out: string[] = [];
+    const body = { command_counts: [{ metric_identifier: 'EVAL', data_points: [at(14, 10), at(15, 15)] }] };
+    const code = await main(['--minutes'], { env: ENV, fetchImpl: async () => okResponse(body), log: (l: string) => out.push(l), error: (l: string) => out.push(l) });
+    expect(code).toBe(0);
+    expect(out.join('\n')).toContain('  16:15     5  EVAL 5');
+    for (const secret of [EMAIL, KEY, DB]) expect(out.join('\n')).not.toContain(secret);
   });
 });
 

@@ -13,6 +13,10 @@ on:
         description: 'stats の呼び出しがコマンド (課金) に数えられるかを実測する (初回に 1 回・約 13 分・最悪 29 分・対照区間と比べる)'
         type: boolean
         default: false
+      minutes:
+        description: '直近 60 分の 1 分ごとのコマンド数を出す (定期実行の 1 回あたりの切り分け・診断・判定はしない)'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -36,6 +40,7 @@ jobs:
           UPSTASH_DB_ID: ${{ secrets.UPSTASH_DB_ID }}
           UPSTASH_CAP_COMMANDS: ${{ vars.UPSTASH_CAP_COMMANDS }}
           PROBE: ${{ inputs.probe }}
+          MINUTES: ${{ inputs.minutes }}
         run: |
           for key in UPSTASH_MGMT_EMAIL UPSTASH_MGMT_API_KEY UPSTASH_DB_ID; do
             if [ -z "${!key}" ]; then
@@ -43,7 +48,9 @@ jobs:
               exit 1
             fi
           done
-          if [ "$PROBE" = "true" ]; then
+          if [ "$MINUTES" = "true" ]; then
+            node scripts/upstash-usage-watch.mjs --minutes
+          elif [ "$PROBE" = "true" ]; then
             node scripts/upstash-usage-watch.mjs --probe
           else
             node scripts/upstash-usage-watch.mjs
