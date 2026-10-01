@@ -102,6 +102,7 @@ const JA: StartGuideContent = {
       body: [
         'OpenPay で JPYC を受け取るには、対応ウォレットを用意します。店舗でもクリエイターでも、受け取る側の流れは 3 ステップです。',
         'JPYC そのものを手に入れるなら、発行元の JPYC EX が使えます。本人確認のうえ発行予約をし、指定の銀行口座へ日本円を振り込むと、登録したウォレットに JPYC が届きます。',
+        'お店の受け取り用には、Google・LINE・メールで作れる UPBOND Wallet も使えます。受け取りにガス代はかかりませんが、UPBOND から送るとき (返金や JPYC EX での償還) は、ガス代として少額の POL が必要です。お客様の支払い用には使えません。',
       ],
       flow: ['ウォレットを準備', 'OpenPay に接続', '受取先を設定'],
       callout: {
@@ -285,6 +286,7 @@ const EN: StartGuideContent = {
       body: [
         'To receive JPYC through OpenPay you need a supported wallet. Whether you run a shop or sell as a creator, receiving is three steps.',
         'To obtain JPYC itself, you can use JPYC EX, run by the issuer. After identity verification you reserve an issuance and wire yen to the specified bank account; JPYC then arrives in your registered wallet.',
+        'For receiving at your shop, you can also use UPBOND Wallet, which you create with Google, LINE or email. Receiving costs no gas, but sending from UPBOND (refunds or redemption at JPYC EX) needs a small amount of POL for gas. It cannot be used to pay as a customer.',
       ],
       flow: ['Set up a wallet', 'Connect to OpenPay', 'Set the receiving address'],
       callout: {
