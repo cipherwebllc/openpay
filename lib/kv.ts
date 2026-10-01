@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { logger } from '@/lib/logger';
+
 // Upstash Redis REST への薄い fetch wrapper。env (KV_REST_API_URL /
 // KV_REST_API_TOKEN) 未設定時は ok:false / unconfigured を返し、呼出側で
 // 「server log のみ」に degrade させる前提。
@@ -216,7 +218,10 @@ type KvIncrAtomicOptions = {
 // 波及を断つ)、期限が在るキーは延長しないため初回起点の固定窓の意味論は維持する。
 // 以前は INCR・TTL・EXPIRE を 1 本の EVAL に閉じていたが、Upstash は EVAL を「本体 1 + 中の命令」で数えるので
 // 1 回 3〜4 コマンドかかり、rate limit が KV 消費の最大要因だった (2026-10-01 本番実測)。pipeline は中の命令数
-// だけ = 常に 2。2 命令は原子的でないが、間に他の INCR が入っても期限は最初の EXPIRE NX の時点から張られる。
+// だけ = 常に 2。2 命令は原子的でないので、窓の起点は「最初に成功した EXPIRE NX」になる (旧 Lua の「最初の INCR」と
+// 厳密には同じでない)。同じ pipeline の INCR の直後に実行されるので、差は Upstash 内で他の要求が間に入った分だけ。
+// 旧 Lua は「値 0 で期限ありのキーが INCR で 1 になる」と期限を張り直したが、opts 付きのキーを DECR / SET 0 する
+// 呼出元は無い (2026-10-02 確認)。
 // EXPIRE だけが失敗しても INCR の数は返す: 取れた「超過」の判定を捨てない。期限は次の呼び出しの EXPIRE NX が付ける。
 export async function kvIncr(
   key: string,
@@ -237,7 +242,23 @@ export async function kvIncr(
   if (!incr || typeof incr.result !== 'number') {
     return { ok: false, reason: 'parse_error', detail: 'unexpected pipeline result' };
   }
+  const expire = (sent.value as unknown[])[1] as { result?: unknown; error?: unknown } | null | undefined;
+  if (!expire || typeof expire.result !== 'number') noteExpireFailure(expire?.error);
   return { ok: true, value: incr.result };
+}
+
+// EXPIRE NX だけの失敗は INCR の数を返すので呼出側から見えない。失敗が続くと日付を含まない窓キー (IP 別 rate limit 等)
+// が失効せず拒否し続けうるため、運用で気づけるよう警告する。鍵・値は出さない (鍵は IP の HMAC やアドレスを含む)。
+// 1 instance 10 分に 1 回まで: 障害時に Sentry へ同じ警告を溢れさせない。
+const EXPIRE_FAILURE_LOG_INTERVAL_MS = 10 * 60_000;
+let lastExpireFailureLogAt = -Infinity;
+function noteExpireFailure(error: unknown): void {
+  const now = Date.now();
+  if (now - lastExpireFailureLogAt < EXPIRE_FAILURE_LOG_INTERVAL_MS) return;
+  lastExpireFailureLogAt = now;
+  logger.warn('kv.incr_expire_failed', {
+    detail: typeof error === 'string' ? error.slice(0, 120) : 'unexpected pipeline result',
+  });
 }
 
 // 原子デクリメント (gas budget の refund 等)。INCR で消費した枠を戻すのに使う。

@@ -485,6 +485,57 @@ describe('lib/kv', () => {
     expect(await kvIncr('k', opts)).toEqual({ ok: false, reason: 'network_error', detail: 'ECONNRESET' });
   });
 
+  it('kvIncr atomic opts: EXPIRE だけの失敗は鍵を出さずに警告 (10 分に 1 回まで)・次の呼び出しの EXPIRE NX で期限が付く', async () => {
+    process.env.KV_REST_API_URL = 'https://example.upstash.io';
+    process.env.KV_REST_API_TOKEN = 'secret';
+    const warn = vi.fn();
+    vi.doMock('@/lib/logger', () => ({ logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
+    // 1 キーだけの小さな Redis (INCR と EXPIRE NX の意味だけ)。Lua ハーネス (tests/_helpers/redisLua) は使わない。
+    let now = 1_700_000_000_000;
+    let value = 0;
+    let expiresAt: number | null = null;
+    const ttl = () => (expiresAt === null ? -1 : Math.ceil((expiresAt - now) / 1000));
+    const purge = () => { if (expiresAt !== null && expiresAt <= now) { value = 0; expiresAt = null; } };
+    let failExpire = 2;
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const [[incrCmd], [expireCmd, , seconds, option]] = JSON.parse(init.body as string) as string[][];
+      expect([incrCmd, expireCmd, option]).toEqual(['INCR', 'EXPIRE', 'NX']);
+      purge();
+      value += 1;
+      const replies: unknown[] = [{ result: value }];
+      if (failExpire > 0) {
+        failExpire -= 1;
+        replies.push({ error: 'ERR injected' });
+      } else if (expiresAt === null) {
+        expiresAt = now + Number(seconds) * 1000;
+        replies.push({ result: 1 });
+      } else {
+        replies.push({ result: 0 });
+      }
+      return { ok: true, json: async () => replies };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { kvIncr } = await import('@/lib/kv');
+    const key = 'iprl:v1:scope:hmac-of-ip';
+
+    expect(await kvIncr(key, { initialTtlSec: 60 })).toEqual({ ok: true, value: 1 });
+    expect(ttl()).toBe(-1);
+    expect(await kvIncr(key, { initialTtlSec: 60 })).toEqual({ ok: true, value: 2 });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith('kv.incr_expire_failed', { detail: 'ERR injected' });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('hmac-of-ip');
+
+    expect(await kvIncr(key, { initialTtlSec: 60 })).toEqual({ ok: true, value: 3 });
+    expect(ttl()).toBe(60);
+    now += 30_000;
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    expect(await kvIncr(key, { initialTtlSec: 60 })).toEqual({ ok: true, value: 4 });
+    expect(ttl()).toBe(30);
+    now += 30_000;
+    expect(await kvIncr(key, { initialTtlSec: 60 })).toEqual({ ok: true, value: 1 });
+    vi.doUnmock('@/lib/logger');
+  });
+
   it('kvExists は EXISTS に複数キーを渡し、存在する数を返す', async () => {
     process.env.KV_REST_API_URL = 'https://example.upstash.io';
     process.env.KV_REST_API_TOKEN = 'secret';
