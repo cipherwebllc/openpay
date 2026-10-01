@@ -66,12 +66,13 @@ export function kvEndpointInfo(): {
   };
 }
 
-async function call<T>(body: unknown[]): Promise<KvResult<T>> {
+// 1 往復の送信と HTTP 層の失敗の判定。本文の解釈 (単発 = {result}・pipeline = 要素ごとの配列) は呼出側。
+async function post(path: '' | 'pipeline', body: unknown): Promise<KvResult<unknown>> {
   const ep = endpoint();
   if (!ep) return { ok: false, reason: 'unconfigured' };
   let res: Response;
   try {
-    res = await fetch(`${ep.url}/`, {
+    res = await fetch(`${ep.url}/${path}`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${ep.token}`,
@@ -108,7 +109,17 @@ async function call<T>(body: unknown[]): Promise<KvResult<T>> {
     };
   }
   try {
-    const json = (await res.json()) as { result?: T; error?: string };
+    return { ok: true, value: await res.json() };
+  } catch (e) {
+    return { ok: false, reason: 'parse_error', detail: errInfo(e).detail };
+  }
+}
+
+async function call<T>(body: unknown[]): Promise<KvResult<T>> {
+  const sent = await post('', body);
+  if (!sent.ok) return sent;
+  try {
+    const json = sent.value as { result?: T; error?: string };
     if (json.error) {
       return { ok: false, reason: 'http_error', detail: json.error };
     }
@@ -199,28 +210,34 @@ type KvIncrAtomicOptions = {
   initialTtlSec: number;
 };
 
-const INCR_EXPIRE_ON_FIRST = `
-local count = redis.call('INCR', KEYS[1])
-local ttl = redis.call('TTL', KEYS[1])
-if count == 1 or ttl < 0 then
-  redis.call('EXPIRE', KEYS[1], ARGV[1])
-end
-return count
-`;
-
-// 原子インクリメント (採番カウンタ・gas budget)。初回は 1。opts 指定時は初回 TTL も同じ
-// EVAL に閉じる。旧実装で既に TTL を失った counter も検知して期限を張り直し、後続リクエストを
-// 恒久拒否する波及を断つ。期限が在る通常キーは延長しないため、固定窓の意味論は維持する。
-export function kvIncr(
+// 原子インクリメント (採番カウンタ・gas budget)。初回は 1。opts 指定時は INCR と
+// 「期限が無いときだけ期限を付ける」EXPIRE NX (Redis 7) を pipeline の 1 往復で送る。初回の INCR で
+// できたキーにも、旧実装で TTL を失った counter にも同じ 1 命令で期限が付き (後続リクエストを恒久拒否する
+// 波及を断つ)、期限が在るキーは延長しないため初回起点の固定窓の意味論は維持する。
+// 以前は INCR・TTL・EXPIRE を 1 本の EVAL に閉じていたが、Upstash は EVAL を「本体 1 + 中の命令」で数えるので
+// 1 回 3〜4 コマンドかかり、rate limit が KV 消費の最大要因だった (2026-10-01 本番実測)。pipeline は中の命令数
+// だけ = 常に 2。2 命令は原子的でないが、間に他の INCR が入っても期限は最初の EXPIRE NX の時点から張られる。
+// EXPIRE だけが失敗しても INCR の数は返す: 取れた「超過」の判定を捨てない。期限は次の呼び出しの EXPIRE NX が付ける。
+export async function kvIncr(
   key: string,
   opts?: KvIncrAtomicOptions,
 ): Promise<KvResult<number>> {
-  if (opts) {
-    return kvEval<number>(INCR_EXPIRE_ON_FIRST, [key], [
-      String(opts.initialTtlSec),
-    ]);
+  if (!opts) return call<number>(['INCR', key]);
+  const sent = await post('pipeline', [
+    ['INCR', key],
+    ['EXPIRE', key, String(opts.initialTtlSec), 'NX'],
+  ]);
+  if (!sent.ok) return sent;
+  const incr = Array.isArray(sent.value)
+    ? (sent.value[0] as { result?: unknown; error?: unknown } | null | undefined)
+    : undefined;
+  if (incr && typeof incr.error === 'string') {
+    return { ok: false, reason: 'http_error', detail: incr.error.slice(0, 300) };
   }
-  return call<number>(['INCR', key]);
+  if (!incr || typeof incr.result !== 'number') {
+    return { ok: false, reason: 'parse_error', detail: 'unexpected pipeline result' };
+  }
+  return { ok: true, value: incr.result };
 }
 
 // 原子デクリメント (gas budget の refund 等)。INCR で消費した枠を戻すのに使う。
@@ -261,6 +278,11 @@ export function kvSet(
 // TTL 設定 (採番カウンタ等の自然失効)。設定できれば 1、キー無しは 0。
 export function kvExpire(key: string, ttlSec: number): Promise<KvResult<number>> {
   return call<number>(['EXPIRE', key, String(ttlSec)]);
+}
+
+// EXISTS k1 k2 …: 存在するキーの数 (1 コマンド)。空振りの多い定期処理を、対象が在るときだけ動かす判定に使う。
+export function kvExists(keys: readonly string[]): Promise<KvResult<number>> {
+  return call<number>(['EXISTS', ...keys]);
 }
 
 // キー削除 (idempotency claim の解放等)。削除数を返す (無ければ 0)。

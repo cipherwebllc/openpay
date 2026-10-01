@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { kvEval } from '@/lib/kv';
+import { kvEval, kvExists } from '@/lib/kv';
 import { licenseNftEnabled } from './config';
 import { LICENSE_DUE_INDEX, LICENSE_HOLD_INDEX, LICENSE_OBLIGATION_INDEX } from './stock';
 import { LICENSE_REGISTRATION_INDEX } from './product';
@@ -30,6 +30,12 @@ const REBUILD =
 
 export async function repairLicenseIndexes(now = Date.now(), limit = 50): Promise<boolean> {
   if (!licenseNftEnabled()) return true;
+  // 巡る元の恒久 index が 3 つとも無い (ライセンスの購入・登録がまだ 1 件も無い) なら拾うものが無い。
+  // 3 本の Lua は型の確かめと offset の書き戻しだけで 1 回 約 30 コマンドを使うので、EXISTS 1 コマンドで飛ばす
+  // (2026-10-01 本番実測: 毎時の修復 run が 34 コマンド・商品ゼロのまま 1 日 約 800)。
+  const sources = await kvExists([LICENSE_HOLD_INDEX, LICENSE_OBLIGATION_INDEX, LICENSE_REGISTRATION_INDEX]);
+  if (!sources.ok) return false;
+  if (sources.value === 0) return true;
   for (const [source, dest, prefix, kind, memberPrefix] of [
     [LICENSE_HOLD_INDEX, 'store:intent:pending', 'store:intent:', 'hold', ''],
     [LICENSE_OBLIGATION_INDEX, LICENSE_DUE_INDEX, 'store:license:ob:', 'mint', ''],

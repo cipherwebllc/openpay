@@ -19,6 +19,7 @@ vi.mock('@/lib/x402/hostedStore', () => ({ getHostedProduct: h.product }));
 vi.mock('@/lib/license/registration', () => ({ confirmLicenseRegistration: h.confirm }));
 vi.mock('@/lib/x402/reverify', () => ({ sendReverifyAlert: h.alert }));
 vi.mock('@/lib/kv', () => ({
+  kvExists: async (keys: string[]) => ({ ok: true, value: keys.filter((k) => h.store!.keys().includes(k)).length }),
   kvGet: async (key: string) => ({ ok: true, value: h.store!.strings.get(key) ?? null }),
   kvSetNxGet: async (key: string, value: string, ttl: number) => {
     if (h.lockError) return { ok: false };

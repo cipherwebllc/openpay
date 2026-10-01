@@ -36,8 +36,8 @@ async function consumeBudgetWindow(
 ): Promise<boolean> {
   // 守るのは無料 API 枠で決済ではない。KV 障害 (カウントそのものが取れない) を閲覧へ波及させないため fail-open。
   // 枠が尽きても上流の NOTOK が upstream になるだけで、履歴なしの偽成功にはしない。
-  // INCR と初回 TTL は 1 回の EVAL に閉じる (lib/kv.ts INCR_EXPIRE_ON_FIRST): TTL の設定失敗を理由に、
-  // 既に取得できた「超過」の判定まで捨てて通すことをしない。KV コマンドも 1 窓 1 回で済む。
+  // INCR と初回 TTL は 1 往復で送る (lib/kv.ts kvIncr の INCR + EXPIRE NX): TTL の設定失敗を理由に、
+  // 既に取得できた「超過」の判定まで捨てて通すことをしない (期限は次の呼び出しの EXPIRE NX が付ける)。
   try {
     const count = await kvIncr(key, { initialTtlSec: ttlSec });
     if (!count.ok) return true;
