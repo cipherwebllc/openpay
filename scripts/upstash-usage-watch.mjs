@@ -87,8 +87,10 @@ export function dailySeries(stats) {
 
 /**
  * コマンドの種類ごとの回数 (`command_counts`: 公式の例は [{ metric_identifier: 'EXISTS', data_points: [{ x, y }] }])。
- * 削減の的を決めるための内訳 (EVAL = rate limit 等の Lua・GET/SET = 読み書き・INCR = 計測 …)。系列の期間は未確認なので、
- * 点の最初と最後の時刻と点の数も返してログで確かめる。名前はコマンド名の形のものだけを出す (想定外の文字列をログに流さない)。
+ * 削減の的を決めるための内訳 (EVAL = rate limit 等の Lua・GET/SET = 読み書き・INCR = 計測 …)。
+ * 2026-10-01 の実測: 系列は直近 60 分・1 分おきの 60 点で、60 点の合計 (約 33 万) がその日の総数 (約 6 千) と合わない
+ * = 各点は「その 1 分の回数」ではなく累計らしい (未確認)。そこで最新の点 (last)・最古の点 (first)・合計 (sum) を全部返し、
+ * 並べるのは last の多い順にする。名前はコマンド名の形のものだけを出す (想定外の文字列をログに流さない)。
  */
 export function commandBreakdown(stats) {
   const raw = stats?.command_counts;
@@ -100,21 +102,25 @@ export function commandBreakdown(stats) {
   for (const entry of raw) {
     const name = entry?.metric_identifier;
     if (typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_.]{0,39}$/.test(name) || !Array.isArray(entry?.data_points)) continue;
-    let count = 0;
+    let sum = 0;
+    let first = null;
+    let last = null;
     for (const point of entry.data_points) {
       const y = countOf(point?.y);
       const t = pointTime(point);
       if (y === null || !Number.isFinite(t)) continue;
-      count += y;
+      sum += y;
+      if (first === null || t < first.t) first = { t, y };
+      if (last === null || t >= last.t) last = { t, y };
       from = Math.min(from, t);
       to = Math.max(to, t);
     }
     maxPoints = Math.max(maxPoints, entry.data_points.length);
-    rows.push({ command: name.toUpperCase(), count });
+    rows.push({ command: name.toUpperCase(), last: last?.y ?? 0, first: first?.y ?? 0, sum });
   }
-  rows.sort((a, b) => b.count - a.count || a.command.localeCompare(b.command));
-  const total = rows.reduce((sum, r) => sum + r.count, 0);
-  return { rows, total, from: Number.isFinite(from) ? from : null, to: Number.isFinite(to) ? to : null, points: maxPoints };
+  rows.sort((a, b) => b.last - a.last || b.sum - a.sum || a.command.localeCompare(b.command));
+  const totalLast = rows.reduce((acc, r) => acc + r.last, 0);
+  return { rows, totalLast, from: Number.isFinite(from) ? from : null, to: Number.isFinite(to) ? to : null, points: maxPoints };
 }
 
 /**
@@ -195,9 +201,9 @@ export async function watch({ env = process.env, fetchImpl = fetch, now = Date.n
     log('  commands by type: n/a (command_counts missing)');
   } else {
     const minute = (ms) => (ms === null ? 'n/a' : new Date(ms).toISOString().slice(0, 16).replace('T', ' '));
-    log(`  commands by type (command_counts・${minute(breakdown.from)} … ${minute(breakdown.to)} UTC・up to ${breakdown.points} points each・total ${fmt(breakdown.total)}):`);
+    log(`  commands by type (command_counts・${minute(breakdown.from)} … ${minute(breakdown.to)} UTC・up to ${breakdown.points} points each・sum of latest points ${fmt(breakdown.totalLast)}):`);
     for (const r of breakdown.rows.slice(0, 20)) {
-      log(`    ${r.command}: ${fmt(r.count)}${breakdown.total > 0 ? ` (${(r.count / breakdown.total * 100).toFixed(1)}%)` : ''}`);
+      log(`    ${r.command}: latest ${fmt(r.last)}${breakdown.totalLast > 0 ? ` (${(r.last / breakdown.totalLast * 100).toFixed(1)}%)` : ''}・first ${fmt(r.first)}・sum ${fmt(r.sum)}`);
     }
     if (breakdown.rows.length > 20) log(`    (+${breakdown.rows.length - 20} more types)`);
   }

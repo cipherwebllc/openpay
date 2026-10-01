@@ -87,7 +87,7 @@ describe('upstash-usage-watch: 見込みと判定', () => {
 describe('upstash-usage-watch: コマンドの種類ごとの内訳', () => {
   const point = (h: number, y: unknown) => ({ x: `2026-10-10 ${String(h).padStart(2, '0')}:00:00.123456789 +0000 UTC`, y });
 
-  it('command_counts を種類ごとに合計して多い順に並べ、点の期間と数を返す', () => {
+  it('command_counts の種類ごとに最新・最古の点と合計を返し、最新の多い順に並べる (点の期間と数も)', () => {
     const b = commandBreakdown({
       command_counts: [
         { metric_identifier: 'get', data_points: [point(1, 10), point(2, 5)] },
@@ -96,11 +96,11 @@ describe('upstash-usage-watch: コマンドの種類ごとの内訳', () => {
       ],
     });
     expect(b?.rows).toEqual([
-      { command: 'EVAL', count: 50 },
-      { command: 'GET', count: 15 },
-      { command: 'JSON.GET', count: 0 },
+      { command: 'EVAL', last: 20, first: 30, sum: 50 },
+      { command: 'GET', last: 5, first: 10, sum: 15 },
+      { command: 'JSON.GET', last: 0, first: 0, sum: 0 },
     ]);
-    expect(b?.total).toBe(65);
+    expect(b?.totalLast).toBe(25);
     expect(b?.from).toBe(Date.parse('2026-10-10T00:00:00.123Z'));
     expect(b?.to).toBe(Date.parse('2026-10-10T03:00:00.123Z'));
     expect(b?.points).toBe(2);
@@ -115,7 +115,7 @@ describe('upstash-usage-watch: コマンドの種類ごとの内訳', () => {
         { metric_identifier: 'DEL' },
       ],
     });
-    expect(b?.rows).toEqual([{ command: 'SET', count: 2 }]);
+    expect(b?.rows).toEqual([{ command: 'SET', last: 2, first: 2, sum: 2 }]);
     expect(commandBreakdown({})).toBeNull();
   });
 });
@@ -167,9 +167,9 @@ describe('upstash-usage-watch: main', () => {
     const { code, text } = await run([], { env: ENV, now: NOW, fetchImpl: async () => okResponse(body) });
     expect(code).toBe(0);
     expect(text).toContain('today reads / writes: 1,200 / 800・scripts this month: 9,000');
-    expect(text).toContain('commands by type (command_counts・2026-10-09 00:00 … 2026-10-10 00:00 UTC・up to 2 points each・total 500):');
-    expect(text).toContain('    EVAL: 400 (80.0%)');
-    expect(text).toContain('    GET: 100 (20.0%)');
+    expect(text).toContain('commands by type (command_counts・2026-10-09 00:00 … 2026-10-10 00:00 UTC・up to 2 points each・sum of latest points 200):');
+    expect(text).toContain('    EVAL: latest 100 (50.0%)・first 300・sum 400');
+    expect(text).toContain('    GET: latest 100 (50.0%)・first 100・sum 100');
   });
 
   it('見込みが上限を超えたら 1・請求額 (単位未確認) の超過は警告で 0・80% 以上は警告で 0・上限は変数で変えられる', async () => {
