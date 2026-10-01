@@ -8,7 +8,7 @@
 // 呼ぶのは Upstash Developer API の stats (GET /v2/redis/stats/{id}) だけ。公式の Get Database の説明に
 // 「credentials=hide で接続情報を応答から外す」とある = 既定では database の詳細に接続情報が含まれるので、それは呼ばない。
 // 転送 (redirect) は追わない (stats 以外の URL へ認証ヘッダを送らない)。
-// ログに出すのは数値と固定のエラーコードだけ (キー・メール・DB ID・応答本文・fetch の例外文は出さない)。
+// ログに出すのは数値・固定のエラーコード・コマンド名 (形を確かめたもの) だけ (キー・メール・DB ID・応答本文・fetch の例外文は出さない)。
 //
 // 未確認 (初回の実行で確かめる・plans/upstash-usage-watch.md): total_monthly_requests が請求の単位 (コマンド数) と
 // 一致するか・total_monthly_billing の単位 (公式の例は requests 7 に billing 222.3 でドルとは限らない → 超えても警告だけ)・
@@ -17,6 +17,7 @@
 // 使い方:
 //   node scripts/upstash-usage-watch.mjs          # 毎日の確認
 //   node scripts/upstash-usage-watch.mjs --probe  # stats の呼び出しがコマンドに数えられるかの実測 (初回に 1 回)
+//   node scripts/upstash-usage-watch.mjs --minutes  # 直近 60 分の 1 分ごとのコマンド数 (定期実行の 1 回あたりの切り分け・診断)
 import { pathToFileURL } from 'node:url';
 
 export const STATS_BASE_URL = 'https://api.upstash.com/v2/redis/stats/';
@@ -66,19 +67,91 @@ function countOf(value) {
  * UTC の日ごとに 1 つへ。時差の書かれていない点は読まない (実行した端末の時差で日がずれるため)。
  * 読めない点は捨てて続ける = 壊れた点 1 つで監視全体を止めないための防御。系列が空になれば basis が month_to_date になり、ログで見える。
  */
+function pointTime(point) {
+  const iso = typeof point?.x === 'string' ? point.x.replace(/ \+0000 UTC$/, 'Z').replace(' ', 'T') : '';
+  return /(Z|[+-]\d{2}:\d{2})$/.test(iso) ? Date.parse(iso) : NaN;
+}
+
 export function dailySeries(stats) {
   const raw = stats?.dailyrequests;
   if (!Array.isArray(raw)) return [];
   const byDay = new Map();
   for (const point of raw) {
-    const iso = typeof point?.x === 'string' ? point.x.replace(/ \+0000 UTC$/, 'Z').replace(' ', 'T') : '';
-    const date = /(Z|[+-]\d{2}:\d{2})$/.test(iso) ? Date.parse(iso) : NaN;
+    const date = pointTime(point);
     const count = countOf(point?.y);
     if (!Number.isFinite(date) || count === null) continue;
     const day = Math.floor(date / DAY_MS) * DAY_MS;
     byDay.set(day, count); // 同じ日が重なったら後のもの (系列は時刻順) を使う
   }
   return [...byDay.entries()].map(([date, count]) => ({ date, count })).sort((a, b) => a.date - b.date);
+}
+
+/**
+ * コマンドの種類ごとの回数 (`command_counts`: 公式の例は [{ metric_identifier: 'EXISTS', data_points: [{ x, y }] }])。
+ * 削減の的を決めるための内訳 (EVAL = rate limit 等の Lua・GET/SET = 読み書き・INCR = 計測 …)。
+ * 2026-10-01 の実測: 系列は直近 60 分・1 分おきの 60 点で、60 点の合計 (約 33 万) がその日の総数 (約 6 千) と合わない
+ * = 各点は「その 1 分の回数」ではなく累計らしい (未確認)。そこで最新の点 (last)・最古の点 (first)・合計 (sum) を全部返し、
+ * 並べるのは last の多い順にする。名前はコマンド名の形のものだけを出す (想定外の文字列をログに流さない)。
+ */
+export function commandBreakdown(stats) {
+  const raw = stats?.command_counts;
+  if (!Array.isArray(raw)) return null;
+  const rows = [];
+  let from = Infinity;
+  let to = -Infinity;
+  let maxPoints = 0;
+  for (const entry of raw) {
+    const name = entry?.metric_identifier;
+    if (typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_.]{0,39}$/.test(name) || !Array.isArray(entry?.data_points)) continue;
+    let sum = 0;
+    let first = null;
+    let last = null;
+    for (const point of entry.data_points) {
+      const y = countOf(point?.y);
+      const t = pointTime(point);
+      if (y === null || !Number.isFinite(t)) continue;
+      sum += y;
+      if (first === null || t < first.t) first = { t, y };
+      if (last === null || t >= last.t) last = { t, y };
+      from = Math.min(from, t);
+      to = Math.max(to, t);
+    }
+    maxPoints = Math.max(maxPoints, entry.data_points.length);
+    rows.push({ command: name.toUpperCase(), last: last?.y ?? 0, first: first?.y ?? 0, sum });
+  }
+  rows.sort((a, b) => b.last - a.last || b.sum - a.sum || a.command.localeCompare(b.command));
+  const totalLast = rows.reduce((acc, r) => acc + r.last, 0);
+  return { rows, totalLast, from: Number.isFinite(from) ? from : null, to: Number.isFinite(to) ? to : null, points: maxPoints };
+}
+
+/**
+ * 直近 60 分の 1 分ごとの増え方 (command_counts の各点は「その日 (UTC) の累計」= 2026-10-01 の実測で、最新の点の合計が
+ * その日の総数とほぼ一致)。定期実行 (license-mint は毎時 :00/:15/:30/:45) の 1 回あたりのコストを切り分けるための診断。
+ * 隣り合う点の差を分ごとに足す。差が負 (UTC の日付が変わった) の分はその点の値をそのまま増分とみなす。
+ */
+export function minuteDeltas(stats) {
+  const raw = stats?.command_counts;
+  if (!Array.isArray(raw)) return [];
+  const byMinute = new Map();
+  for (const entry of raw) {
+    const name = entry?.metric_identifier;
+    if (typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_.]{0,39}$/.test(name) || !Array.isArray(entry?.data_points)) continue;
+    const points = entry.data_points
+      .map((p) => ({ t: pointTime(p), y: countOf(p?.y) }))
+      .filter((p) => Number.isFinite(p.t) && p.y !== null)
+      .sort((a, b) => a.t - b.t);
+    for (let i = 1; i < points.length; i += 1) {
+      const diff = points[i].y - points[i - 1].y;
+      const delta = diff >= 0 ? diff : points[i].y;
+      if (delta === 0) continue;
+      const minute = Math.floor(points[i].t / 60_000) * 60_000;
+      const row = byMinute.get(minute) ?? { minute, total: 0, commands: {} };
+      row.total += delta;
+      row.commands[name.toUpperCase()] = (row.commands[name.toUpperCase()] ?? 0) + delta;
+      byMinute.set(minute, row);
+    }
+  }
+  return [...byMinute.values()].sort((a, b) => a.minute - b.minute);
 }
 
 /**
@@ -153,6 +226,18 @@ export async function watch({ env = process.env, fetchImpl = fetch, now = Date.n
   log(`  daily average: ${fmt(projection.avgDaily)} (${projection.basis})`);
   log(`  projected month: ${fmt(projection.projected)} / cap ${fmt(config.cap)}${projection.projected === null ? '' : ` (${(projection.projected / config.cap * 100).toFixed(0)}%)`}`);
   log(`  billing this month: ${billing === null ? 'n/a' : `${billing.toFixed(4)} (total_monthly_billing・単位はドルとみなす・未確認)`} / cap $${(config.cap * DOLLARS_PER_COMMAND).toFixed(2)}`);
+  log(`  today reads / writes: ${fmt(countOf(stats?.daily_read_requests))} / ${fmt(countOf(stats?.daily_write_requests))}・scripts this month: ${fmt(countOf(stats?.total_monthly_script_requests))}`);
+  const breakdown = commandBreakdown(stats);
+  if (breakdown === null) {
+    log('  commands by type: n/a (command_counts missing)');
+  } else {
+    const minute = (ms) => (ms === null ? 'n/a' : new Date(ms).toISOString().slice(0, 16).replace('T', ' '));
+    log(`  commands by type (command_counts・${minute(breakdown.from)} … ${minute(breakdown.to)} UTC・up to ${breakdown.points} points each・sum of latest points ${fmt(breakdown.totalLast)}):`);
+    for (const r of breakdown.rows.slice(0, 20)) {
+      log(`    ${r.command}: latest ${fmt(r.last)}${breakdown.totalLast > 0 ? ` (${(r.last / breakdown.totalLast * 100).toFixed(1)}%)` : ''}・first ${fmt(r.first)}・sum ${fmt(r.sum)}`);
+    }
+    if (breakdown.rows.length > 20) log(`    (+${breakdown.rows.length - 20} more types)`);
+  }
   return { ...result, projection, billing, cap: config.cap };
 }
 
@@ -218,6 +303,17 @@ export async function main(argv = process.argv.slice(2), { log = console.log, er
       if (result.verdict === 'inconclusive') {
         error('::error::Upstash stats probe was inconclusive; rerun it later');
         return 1;
+      }
+      return 0;
+    }
+    if (argv.includes('--minutes')) {
+      const config = readEnv(deps.env ?? process.env);
+      const stats = await fetchStats({ ...config, fetchImpl: deps.fetchImpl ?? fetch });
+      const rows = minuteDeltas(stats);
+      log(`Upstash commands per minute (last 60 min・UTC・${rows.length} minutes with activity・total ${fmt(rows.reduce((a, r) => a + r.total, 0))}):`);
+      for (const r of rows) {
+        const top = Object.entries(r.commands).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${n}`).join(' ');
+        log(`  ${new Date(r.minute).toISOString().slice(11, 16)}  ${String(r.total).padStart(4)}  ${top}`);
       }
       return 0;
     }

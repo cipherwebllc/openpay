@@ -5,7 +5,9 @@ import {
   STATS_BASE_URL,
   WatchError,
   assess,
+  commandBreakdown,
   dailySeries,
+  minuteDeltas,
   fetchStats,
   main,
   probe,
@@ -83,6 +85,70 @@ describe('upstash-usage-watch: 見込みと判定', () => {
   });
 });
 
+describe('upstash-usage-watch: コマンドの種類ごとの内訳', () => {
+  const point = (h: number, y: unknown) => ({ x: `2026-10-10 ${String(h).padStart(2, '0')}:00:00.123456789 +0000 UTC`, y });
+
+  it('command_counts の種類ごとに最新・最古の点と合計を返し、最新の多い順に並べる (点の期間と数も)', () => {
+    const b = commandBreakdown({
+      command_counts: [
+        { metric_identifier: 'get', data_points: [point(1, 10), point(2, 5)] },
+        { metric_identifier: 'EVAL', data_points: [point(0, 30), point(3, 20)] },
+        { metric_identifier: 'JSON.GET', data_points: [point(2, 0)] },
+      ],
+    });
+    expect(b?.rows).toEqual([
+      { command: 'EVAL', last: 20, first: 30, sum: 50 },
+      { command: 'GET', last: 5, first: 10, sum: 15 },
+      { command: 'JSON.GET', last: 0, first: 0, sum: 0 },
+    ]);
+    expect(b?.totalLast).toBe(25);
+    expect(b?.from).toBe(Date.parse('2026-10-10T00:00:00.123Z'));
+    expect(b?.to).toBe(Date.parse('2026-10-10T03:00:00.123Z'));
+    expect(b?.points).toBe(2);
+  });
+
+  it('コマンド名の形でない名前・数でない値・時差の無い点は出さない/数えない・欄が無ければ null', () => {
+    const b = commandBreakdown({
+      command_counts: [
+        { metric_identifier: 'owner@example.test', data_points: [point(1, 99)] },
+        { metric_identifier: 'SET key value', data_points: [point(1, 99)] },
+        { metric_identifier: 'SET', data_points: [point(1, '7'), point(2, null), { x: '2026-10-10 05:00:00', y: 4 }, point(3, 2)] },
+        { metric_identifier: 'DEL' },
+      ],
+    });
+    expect(b?.rows).toEqual([{ command: 'SET', last: 2, first: 2, sum: 2 }]);
+    expect(commandBreakdown({})).toBeNull();
+  });
+});
+
+describe('upstash-usage-watch: 1 分ごとの増え方 (--minutes)', () => {
+  const at = (m: number, y: unknown) => ({ x: `2026-10-10 16:${String(m).padStart(2, '0')}:30.5 +0000 UTC`, y });
+
+  it('累計の隣り合う差を分ごとに足し、増えた分だけを返す (日付の変わり目で減ったら値そのものを増分)', () => {
+    const rows = minuteDeltas({
+      command_counts: [
+        { metric_identifier: 'GET', data_points: [at(0, 100), at(1, 103), at(2, 103), at(3, 2)] },
+        { metric_identifier: 'TYPE', data_points: [at(0, 50), at(1, 59)] },
+        { metric_identifier: 'bad name!', data_points: [at(0, 0), at(1, 999)] },
+      ],
+    });
+    expect(rows).toEqual([
+      { minute: Date.parse('2026-10-10T16:01:00Z'), total: 12, commands: { GET: 3, TYPE: 9 } },
+      { minute: Date.parse('2026-10-10T16:03:00Z'), total: 2, commands: { GET: 2 } },
+    ]);
+    expect(minuteDeltas({})).toEqual([]);
+  });
+
+  it('main --minutes は 1 分ごとの行を出して 0 (判定はしない・秘密は出さない)', async () => {
+    const out: string[] = [];
+    const body = { command_counts: [{ metric_identifier: 'EVAL', data_points: [at(14, 10), at(15, 15)] }] };
+    const code = await main(['--minutes'], { env: ENV, fetchImpl: async () => okResponse(body), log: (l: string) => out.push(l), error: (l: string) => out.push(l) });
+    expect(code).toBe(0);
+    expect(out.join('\n')).toContain('  16:15     5  EVAL 5');
+    for (const secret of [EMAIL, KEY, DB]) expect(out.join('\n')).not.toContain(secret);
+  });
+});
+
 describe('upstash-usage-watch: stats の取得', () => {
   it('stats だけを Basic 認証 (email:key) で呼び、転送は追わない', async () => {
     const fetchImpl = vi.fn(async () => okResponse(stats(1, 1)));
@@ -112,7 +178,27 @@ describe('upstash-usage-watch: main', () => {
     const { code, text } = await run([], { env: ENV, now: NOW, fetchImpl: async () => okResponse(stats(66_000, 5_000)) });
     expect(code).toBe(0);
     expect(text).toContain('projected month:');
+    expect(text).toContain('commands by type: n/a (command_counts missing)');
     for (const secret of [EMAIL, KEY, DB]) expect(text).not.toContain(secret);
+  });
+
+  it('内訳 (command_counts) と今日の読み書き・今月の Lua 実行数をログに出す', async () => {
+    const body = {
+      ...stats(66_000, 5_000),
+      daily_read_requests: 1_200,
+      daily_write_requests: 800,
+      total_monthly_script_requests: 9_000,
+      command_counts: [
+        { metric_identifier: 'EVAL', data_points: [{ x: day(9), y: 300 }, { x: day(10), y: 100 }] },
+        { metric_identifier: 'GET', data_points: [{ x: day(10), y: 100 }] },
+      ],
+    };
+    const { code, text } = await run([], { env: ENV, now: NOW, fetchImpl: async () => okResponse(body) });
+    expect(code).toBe(0);
+    expect(text).toContain('today reads / writes: 1,200 / 800・scripts this month: 9,000');
+    expect(text).toContain('commands by type (command_counts・2026-10-09 00:00 … 2026-10-10 00:00 UTC・up to 2 points each・sum of latest points 200):');
+    expect(text).toContain('    EVAL: latest 100 (50.0%)・first 300・sum 400');
+    expect(text).toContain('    GET: latest 100 (50.0%)・first 100・sum 100');
   });
 
   it('見込みが上限を超えたら 1・請求額 (単位未確認) の超過は警告で 0・80% 以上は警告で 0・上限は変数で変えられる', async () => {
