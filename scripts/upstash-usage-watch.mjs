@@ -8,7 +8,7 @@
 // 呼ぶのは Upstash Developer API の stats (GET /v2/redis/stats/{id}) だけ。公式の Get Database の説明に
 // 「credentials=hide で接続情報を応答から外す」とある = 既定では database の詳細に接続情報が含まれるので、それは呼ばない。
 // 転送 (redirect) は追わない (stats 以外の URL へ認証ヘッダを送らない)。
-// ログに出すのは数値と固定のエラーコードだけ (キー・メール・DB ID・応答本文・fetch の例外文は出さない)。
+// ログに出すのは数値・固定のエラーコード・コマンド名 (形を確かめたもの) だけ (キー・メール・DB ID・応答本文・fetch の例外文は出さない)。
 //
 // 未確認 (初回の実行で確かめる・plans/upstash-usage-watch.md): total_monthly_requests が請求の単位 (コマンド数) と
 // 一致するか・total_monthly_billing の単位 (公式の例は requests 7 に billing 222.3 でドルとは限らない → 超えても警告だけ)・
@@ -66,19 +66,55 @@ function countOf(value) {
  * UTC の日ごとに 1 つへ。時差の書かれていない点は読まない (実行した端末の時差で日がずれるため)。
  * 読めない点は捨てて続ける = 壊れた点 1 つで監視全体を止めないための防御。系列が空になれば basis が month_to_date になり、ログで見える。
  */
+function pointTime(point) {
+  const iso = typeof point?.x === 'string' ? point.x.replace(/ \+0000 UTC$/, 'Z').replace(' ', 'T') : '';
+  return /(Z|[+-]\d{2}:\d{2})$/.test(iso) ? Date.parse(iso) : NaN;
+}
+
 export function dailySeries(stats) {
   const raw = stats?.dailyrequests;
   if (!Array.isArray(raw)) return [];
   const byDay = new Map();
   for (const point of raw) {
-    const iso = typeof point?.x === 'string' ? point.x.replace(/ \+0000 UTC$/, 'Z').replace(' ', 'T') : '';
-    const date = /(Z|[+-]\d{2}:\d{2})$/.test(iso) ? Date.parse(iso) : NaN;
+    const date = pointTime(point);
     const count = countOf(point?.y);
     if (!Number.isFinite(date) || count === null) continue;
     const day = Math.floor(date / DAY_MS) * DAY_MS;
     byDay.set(day, count); // 同じ日が重なったら後のもの (系列は時刻順) を使う
   }
   return [...byDay.entries()].map(([date, count]) => ({ date, count })).sort((a, b) => a.date - b.date);
+}
+
+/**
+ * コマンドの種類ごとの回数 (`command_counts`: 公式の例は [{ metric_identifier: 'EXISTS', data_points: [{ x, y }] }])。
+ * 削減の的を決めるための内訳 (EVAL = rate limit 等の Lua・GET/SET = 読み書き・INCR = 計測 …)。系列の期間は未確認なので、
+ * 点の最初と最後の時刻と点の数も返してログで確かめる。名前はコマンド名の形のものだけを出す (想定外の文字列をログに流さない)。
+ */
+export function commandBreakdown(stats) {
+  const raw = stats?.command_counts;
+  if (!Array.isArray(raw)) return null;
+  const rows = [];
+  let from = Infinity;
+  let to = -Infinity;
+  let maxPoints = 0;
+  for (const entry of raw) {
+    const name = entry?.metric_identifier;
+    if (typeof name !== 'string' || !/^[A-Za-z][A-Za-z0-9_.]{0,39}$/.test(name) || !Array.isArray(entry?.data_points)) continue;
+    let count = 0;
+    for (const point of entry.data_points) {
+      const y = countOf(point?.y);
+      const t = pointTime(point);
+      if (y === null || !Number.isFinite(t)) continue;
+      count += y;
+      from = Math.min(from, t);
+      to = Math.max(to, t);
+    }
+    maxPoints = Math.max(maxPoints, entry.data_points.length);
+    rows.push({ command: name.toUpperCase(), count });
+  }
+  rows.sort((a, b) => b.count - a.count || a.command.localeCompare(b.command));
+  const total = rows.reduce((sum, r) => sum + r.count, 0);
+  return { rows, total, from: Number.isFinite(from) ? from : null, to: Number.isFinite(to) ? to : null, points: maxPoints };
 }
 
 /**
@@ -153,6 +189,18 @@ export async function watch({ env = process.env, fetchImpl = fetch, now = Date.n
   log(`  daily average: ${fmt(projection.avgDaily)} (${projection.basis})`);
   log(`  projected month: ${fmt(projection.projected)} / cap ${fmt(config.cap)}${projection.projected === null ? '' : ` (${(projection.projected / config.cap * 100).toFixed(0)}%)`}`);
   log(`  billing this month: ${billing === null ? 'n/a' : `${billing.toFixed(4)} (total_monthly_billing・単位はドルとみなす・未確認)`} / cap $${(config.cap * DOLLARS_PER_COMMAND).toFixed(2)}`);
+  log(`  today reads / writes: ${fmt(countOf(stats?.daily_read_requests))} / ${fmt(countOf(stats?.daily_write_requests))}・scripts this month: ${fmt(countOf(stats?.total_monthly_script_requests))}`);
+  const breakdown = commandBreakdown(stats);
+  if (breakdown === null) {
+    log('  commands by type: n/a (command_counts missing)');
+  } else {
+    const minute = (ms) => (ms === null ? 'n/a' : new Date(ms).toISOString().slice(0, 16).replace('T', ' '));
+    log(`  commands by type (command_counts・${minute(breakdown.from)} … ${minute(breakdown.to)} UTC・up to ${breakdown.points} points each・total ${fmt(breakdown.total)}):`);
+    for (const r of breakdown.rows.slice(0, 20)) {
+      log(`    ${r.command}: ${fmt(r.count)}${breakdown.total > 0 ? ` (${(r.count / breakdown.total * 100).toFixed(1)}%)` : ''}`);
+    }
+    if (breakdown.rows.length > 20) log(`    (+${breakdown.rows.length - 20} more types)`);
+  }
   return { ...result, projection, billing, cap: config.cap };
 }
 

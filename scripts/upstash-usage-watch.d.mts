@@ -10,6 +10,8 @@ export class WatchError extends Error {
 type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 export function fetchStats(input: { email: string; apiKey: string; dbId: string; fetchImpl?: FetchLike; timeoutMs?: number }): Promise<Record<string, unknown>>;
 export function dailySeries(stats: unknown): { date: number; count: number }[];
+export type CommandBreakdown = { rows: { command: string; count: number }[]; total: number; from: number | null; to: number | null; points: number };
+export function commandBreakdown(stats: unknown): CommandBreakdown | null;
 export type Projection = { monthTotal: number; avgDaily: number | null; projected: number | null; basis: string };
 export function projectMonth(stats: unknown, nowMs: number): Projection;
 export type Assessment = { level: 'ok' | 'warn' | 'over' | 'unknown'; trigger: 'commands' | 'billing' | null };
