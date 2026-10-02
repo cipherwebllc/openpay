@@ -58,6 +58,8 @@ import {
   resolveModeAlias,
   sanitizeText,
   sanitizeUrl,
+  urlFail,
+  type UrlError,
   type SearchParamsLike,
 } from './shared';
 
@@ -286,7 +288,7 @@ export function buildCheckoutUrl(origin: string, params: CheckoutParams): string
 
 export type ParsedCheckoutParams =
   | { ok: true; params: CheckoutParams }
-  | { ok: false; error: string };
+  | { ok: false; error: string; urlError: UrlError };
 
 export function parseCheckoutParams(
   searchParams: SearchParamsLike,
@@ -308,36 +310,29 @@ export function parseCheckoutParams(
   const storeHandle = searchParams.get('store_handle');
   const pickupAtRaw = searchParams.get('pickup_at');
 
-  if (!to) return { ok: false, error: '宛先アドレス (to) が指定されていません' };
-  if (!isAddress(to)) return { ok: false, error: '宛先アドレス (to) が不正です' };
+  if (!to) return { ok: false, ...urlFail('missingTo') };
+  if (!isAddress(to)) return { ok: false, ...urlFail('invalidTo') };
   if (!token || !isValidTokenSymbol(token)) {
-    return { ok: false, error: 'token は jpyc または usdc を指定してください' };
+    return { ok: false, ...urlFail('invalidToken') };
   }
 
   const chainResult = resolveChainSlugParam(chainRaw, token);
   if (!chainResult.ok) {
-    return { ok: false, error: chainResult.error };
+    return { ok: false, error: chainResult.error, urlError: chainResult.urlError };
   }
   const chainSlug = chainResult.slug;
   if (!symbolHasDeployment(token, chainSlug)) {
-    return {
-      ok: false,
-      error: `${token} は ${chainSlug} に対応していません`,
-    };
+    return { ok: false, ...urlFail('tokenNotOnChain', { token, chain: chainSlug }) };
   }
 
   if (!itemsRaw || itemsRaw.length === 0) {
-    return { ok: false, error: 'items を指定してください (最低 1 件)' };
+    return { ok: false, ...urlFail('missingItems') };
   }
   // decimals は token に依存。defaultDeployment で取得 (USDC は全 chain 6 / JPYC は 18 で chain 不変)
   const decimals = defaultDeploymentForSymbol(token).decimals;
   const items = parseItemsParam(itemsRaw, decimals);
   if (items === null) {
-    return {
-      ok: false,
-      error:
-        'items は "name:qty:price,..." 形式 (qty 1〜999、price は token decimals 以内、最大 10 件) で指定してください',
-    };
+    return { ok: false, ...urlFail('invalidItems') };
   }
 
   const gas: GasMode = parseGasParam(gasRaw);
@@ -350,7 +345,7 @@ export function parseCheckoutParams(
   // /pay と同じく、standard mode 要求は通す。条件/文言は pay と共通 helper。
   const gaslessErr = gaslessSupportError(token, chainSlug, mode);
   if (gaslessErr) {
-    return { ok: false, error: gaslessErr };
+    return { ok: false, ...gaslessErr };
   }
 
   // 記帳補助メタ (税率/税区分/レシート番号) は pay と共通の shared helper で parse。

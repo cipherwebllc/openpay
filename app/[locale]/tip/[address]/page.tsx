@@ -124,22 +124,24 @@ export default async function TipPage({
       inner = <NativeTipForm params={parsedNative.params} />;
     } else {
       const tn = await getTranslations('NativeTipForm');
+      const tu = await getTranslations('UrlErrors');
       inner = (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
           <p className="font-semibold">{tn('urlInvalidTitle')}</p>
-          <p className="mt-2">{parsedNative.error}</p>
+          <p className="mt-2">{tu(parsedNative.urlError.code, parsedNative.urlError.values)}</p>
         </div>
       );
     }
   } else {
     const parsed = parseTipParams(address, sp);
     const t = await getTranslations('TipForm');
+    const tu = await getTranslations('UrlErrors');
     inner = parsed.ok ? (
       <TipForm params={parsed.params} />
     ) : (
       <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
         <p className="font-semibold">{t('urlInvalidTitle')}</p>
-        <p className="mt-2">{parsed.error}</p>
+        <p className="mt-2">{tu(parsed.urlError.code, parsed.urlError.values)}</p>
         <p
           className="mt-3 text-xs text-red-600/80"
           dangerouslySetInnerHTML={{ __html: t.raw('urlExample') as string }}

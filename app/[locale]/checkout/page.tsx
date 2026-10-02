@@ -34,6 +34,7 @@ export default async function CheckoutPage({
   const raw = await searchParams;
   const parsed = parseCheckoutParams(searchParamsFromNext(raw));
   const t = await getTranslations('CheckoutForm');
+  const tu = await getTranslations('UrlErrors');
 
   // 戻り先リンク: モバイルオーダー店舗から来た場合は ?back=/…&backName=店名 が付く。
   // back は attacker-controllable なので同一オリジンの内部パスのみ許可 (open-redirect 防止)。
@@ -65,7 +66,7 @@ export default async function CheckoutPage({
       ) : (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
           <p className="font-semibold">{t('urlInvalidTitle')}</p>
-          <p className="mt-2">{parsed.error}</p>
+          <p className="mt-2">{tu(parsed.urlError.code, parsed.urlError.values)}</p>
           <p className="mt-3 text-xs text-red-600/80">{t('urlExample')}</p>
         </div>
       )}
