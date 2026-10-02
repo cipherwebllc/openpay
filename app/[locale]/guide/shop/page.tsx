@@ -13,6 +13,8 @@ import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { Section } from '@/components/guide/PosGuidePieces';
+import { GuideVideo } from '@/components/guide/GuideVideo';
+import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { shopGuideContentFor, shopGuideMetadata } from '@/lib/shopGuide';
 
 export async function generateMetadata({
@@ -33,6 +35,7 @@ export default async function GuideShopPage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = shopGuideContentFor(locale);
+  const video = howtoVideoFor(locale, 'mobileOrder');
   const tLanding = await getTranslations({ locale, namespace: 'Landing' });
 
   const fees = [
@@ -102,6 +105,12 @@ export default async function GuideShopPage({
             />
           </div>
         </header>
+
+        {video && (
+          <Section title={HOWTO_VIDEO_UI.sectionTitle}>
+            <GuideVideo video={video} />
+          </Section>
+        )}
 
         <Section title={c.relationTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">

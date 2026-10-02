@@ -14,6 +14,8 @@ import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { Section } from '@/components/guide/PosGuidePieces';
+import { GuideVideo } from '@/components/guide/GuideVideo';
+import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { qrGuideContentFor, qrGuideMetadata } from '@/lib/qrGuide';
 
 export async function generateMetadata({
@@ -49,6 +51,7 @@ export default async function GuideQrPage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = qrGuideContentFor(locale);
+  const video = howtoVideoFor(locale, 'qr');
   const tLanding = await getTranslations({ locale, namespace: 'Landing' });
 
   const guideLinks = [
@@ -103,6 +106,12 @@ export default async function GuideQrPage({
             />
           </div>
         </header>
+
+        {video && (
+          <Section title={HOWTO_VIDEO_UI.sectionTitle}>
+            <GuideVideo video={video} />
+          </Section>
+        )}
 
         <Section title={c.forWhoTitle}>
           <div className="mt-3 flex flex-wrap gap-1.5">

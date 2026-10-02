@@ -18,6 +18,8 @@ import {
   AddressCallout,
   CodeBlock,
 } from '@/components/guide/AgentGuidePieces';
+import { GuideVideo } from '@/components/guide/GuideVideo';
+import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import {
   aiPayGuideContentFor,
   guideAiPayMetadata,
@@ -41,6 +43,7 @@ export default async function GuideAiPayPage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = aiPayGuideContentFor(locale);
+  const video = howtoVideoFor(locale, 'agent');
 
   return (
     <AppShell>
@@ -61,6 +64,12 @@ export default async function GuideAiPayPage({
             {c.subtitle}
           </p>
         </header>
+
+        {video && (
+          <Section title={HOWTO_VIDEO_UI.sectionTitle}>
+            <GuideVideo video={video} />
+          </Section>
+        )}
 
         <Section title={c.mechanismTitle}>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">

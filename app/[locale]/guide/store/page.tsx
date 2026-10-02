@@ -11,6 +11,8 @@ import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { BulletList, Section } from '@/components/guide/PosGuidePieces';
+import { GuideVideo } from '@/components/guide/GuideVideo';
+import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { storeGuideContentFor, storeGuideMetadata, licenseStoreGuideContentFor, deliveryStoreGuideContentFor, DELIVERY_SDK_README_URL } from '@/lib/storeGuide';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { env } from '@/lib/env';
@@ -33,6 +35,7 @@ export default async function GuideStorePage({
   const { locale } = await params;
   setRequestLocale(locale);
   const c = storeGuideContentFor(locale);
+  const video = howtoVideoFor(locale, 'creator');
   // license 節と同じく UI flag の子。OFF の本番/CI に未点灯機能のガイドを出さない。
   const deliveryGuide = env.enableStoreDeliveryTicketUi ? deliveryStoreGuideContentFor(locale) : null;
   const licenseGuide = env.enableLicenseNftUi ? licenseStoreGuideContentFor(locale) : null;
@@ -88,6 +91,12 @@ export default async function GuideStorePage({
             />
           </div>
         </header>
+
+        {video && (
+          <Section title={HOWTO_VIDEO_UI.sectionTitle}>
+            <GuideVideo video={video} />
+          </Section>
+        )}
 
         <Section title={c.forWhoTitle}>
           <div className="mt-3 flex flex-wrap gap-1.5">
