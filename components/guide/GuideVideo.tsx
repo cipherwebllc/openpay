@@ -18,7 +18,8 @@ export function GuideVideo({ video }: { video: HowtoVideo }) {
   const [playing, setPlaying] = useState(false);
   return (
     <figure className="mt-4">
-      <div className="relative aspect-video overflow-hidden rounded-2xl bg-slate-900 shadow-lift ring-1 ring-slate-200/60">
+      {/* キーボードのフォーカス枠は親に出す (ボタンは overflow-hidden の親いっぱいなので、ボタン自身の枠は切れて見えない)。 */}
+      <div className="relative aspect-video overflow-hidden rounded-2xl bg-slate-900 shadow-lift ring-1 ring-slate-200/60 has-[:focus-visible]:ring-4 has-[:focus-visible]:ring-emerald-400">
         {playing ? (
           <iframe
             src={howtoVideoEmbedUrl(video)}
@@ -36,7 +37,7 @@ export function GuideVideo({ video }: { video: HowtoVideo }) {
           <button
             type="button"
             onClick={() => setPlaying(true)}
-            className="group absolute inset-0 block h-full w-full cursor-pointer focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-400"
+            className="group absolute inset-0 block h-full w-full cursor-pointer focus-visible:outline-none"
           >
             <Image
               src={video.thumbnail}
