@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import { SiteFooter } from '@/components/SiteFooter';
 import { LEGAL_ENTITY } from '@/lib/legal';
+import { detectSocialPlatform, socialIconPath } from '@/lib/socialLinks';
 
 // @handle compact 判定 (P3) 用に usePathname だけ差し替え可能にする。既定 null =
 // 従来挙動 (フル footer) なので既存テストは無影響。
@@ -100,7 +101,7 @@ describe('SiteFooter', () => {
     expect(link.getAttribute('href')).toBe('https://discord.gg/Cfywb3aNWg');
   });
 
-  it('note (OpenPay マガジン) へのテキストリンクが露出 (ja)', () => {
+  it('note (OpenPay マガジン) へのアイコンリンクが aria-label 付きで露出 (ja)', () => {
     renderWithIntl(<SiteFooter />, { locale: 'ja' });
     const link = screen.getByRole('link', { name: 'note (OpenPay マガジン)' });
     expect(link.getAttribute('href')).toBe(
@@ -116,6 +117,41 @@ describe('SiteFooter', () => {
     expect(link.getAttribute('href')).toBe(
       'https://note.com/masia02/m/mf28261a21eb1',
     );
+  });
+
+  it('YouTube チャンネル (登録の確認つき) へのアイコンリンクが aria-label 付きで露出 (ja)', () => {
+    renderWithIntl(<SiteFooter />, { locale: 'ja' });
+    const link = screen.getByRole('link', { name: 'OpenPay の YouTube' });
+    expect(link.getAttribute('href')).toBe(
+      'https://www.youtube.com/@openpay_jp?sub_confirmation=1',
+    );
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('en locale で YouTube link aria-label が "OpenPay on YouTube" として render', () => {
+    renderWithIntl(<SiteFooter />, { locale: 'en' });
+    const link = screen.getByRole('link', { name: 'OpenPay on YouTube' });
+    expect(link.getAttribute('href')).toBe(
+      'https://www.youtube.com/@openpay_jp?sub_confirmation=1',
+    );
+  });
+
+  it('最下段は X・YouTube・note・Discord・GitHub の順のアイコンだけ (文字なし・名前は aria-label = title・@handle の SNS 行と同じアイコン)', () => {
+    renderWithIntl(<SiteFooter />, { locale: 'ja' });
+    const names = ['OpenPay の X (旧 Twitter)', 'OpenPay の YouTube', 'note (OpenPay マガジン)', 'OpenPay の Discord', 'ソースコード (GitHub)'];
+    const links = names.map((name) => screen.getByRole('link', { name }));
+    // 5 つとも同じ段に、この順で並ぶ。
+    const row = links[0].parentElement!;
+    expect(Array.from(row.querySelectorAll('a'))).toEqual(links);
+    for (const link of links) {
+      expect(link.textContent).toBe('');
+      expect(link.getAttribute('title')).toBe(link.getAttribute('aria-label'));
+      const path = link.querySelector('svg[aria-hidden] path');
+      expect(path).not.toBeNull();
+      // プロフィール (@handle) の SNS アイコンと同じ形。
+      expect(path!.getAttribute('d')).toBe(socialIconPath(detectSocialPlatform(link.getAttribute('href')!)));
+    }
   });
 
   it('print:hidden が footer 要素に付与されている (QR ポスター印刷時非表示)', () => {
@@ -225,7 +261,10 @@ describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () =
         screen.getByText(new RegExp(LEGAL_ENTITY.companyName)),
       ).toBeInTheDocument();
       // OpenPay 宣伝味の行は出さない
-      expect(screen.queryByText(/GitHub/)).toBeNull();
+      // SNS・ソースの段 (アイコンだけで文字が無い) はリンクの名前で確かめる。
+      for (const name of ['OpenPay の X (旧 Twitter)', 'OpenPay の YouTube', 'note (OpenPay マガジン)', 'OpenPay の Discord', 'ソースコード (GitHub)']) {
+        expect(screen.queryByRole('link', { name })).toBeNull();
+      }
       expect(screen.queryByText(/ステーブルコイン決済技術/)).toBeNull();
       expect(screen.queryByRole('link', { name: 'AIストア' })).toBeNull();
     } finally {
@@ -238,6 +277,7 @@ describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () =
     try {
       renderWithIntl(<SiteFooter />, { locale: 'ja' });
       expect(screen.getByText(/ステーブルコイン決済技術/)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'OpenPay の YouTube' })).toBeInTheDocument();
     } finally {
       pathnameMock.value = null;
     }
