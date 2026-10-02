@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { getPathMatch } from 'next/dist/shared/lib/router/utils/path-match';
 import * as chains from 'viem/chains';
 import config from '../../next.config.mjs';
+import { HOWTO_VIDEO_EMBED_ORIGIN } from '@/lib/howtoVideos';
 
 type HeaderRule = {
   source: string;
@@ -214,6 +215,14 @@ describe('next.config.mjs headers() — baseline and enforced CSP (C17)', () => 
     expect(origins).toHaveLength(9);
     for (const origin of [...origins, 'https://verify.walletconnect.org', 'https://verify.walletconnect.com', 'https://secure.walletconnect.org']) {
       expect(csp.get('frame-src')).toContain(origin);
+    }
+  });
+
+  it('allows the guide how-to video embed origin on the guide pages', async () => {
+    // lib/howtoVideos.ts の iframe (components/guide/GuideVideo.tsx) が CSP で塞がれないこと。
+    for (const path of ['/ja/guide/qr', '/ja/guide/shop', '/ja/guide/ai-pay', '/ja/guide/store']) {
+      const csp = await enforcedDirectives(path);
+      expect(csp.get('frame-src')).toContain(HOWTO_VIDEO_EMBED_ORIGIN);
     }
   });
 

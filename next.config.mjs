@@ -42,6 +42,7 @@ const connectOrigins = [
 
 const frameOrigins = [
   // lib/handle.ts extractHandleEmbed rebuilds URLs for these nine providers.
+  // youtube-nocookie is also the guide how-to video embed (lib/howtoVideos.ts).
   'https://www.youtube-nocookie.com', 'https://open.spotify.com',
   'https://embed.nicovideo.jp', 'https://player.vimeo.com',
   'https://embed.music.apple.com', 'https://www.tiktok.com',
