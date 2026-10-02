@@ -40,7 +40,9 @@ import {
   resolveChainSlugParam,
   resolveModeAlias,
   sanitizeText,
+  urlFail,
   type SearchParamsLike,
+  type UrlError,
 } from './shared';
 
 export type SplitEntry = {
@@ -256,7 +258,7 @@ export function buildPayUrl(origin: string, params: PayParams): string {
 
 export type ParsedPayParams =
   | { ok: true; params: PayParams }
-  | { ok: false; errorKind: 'empty' | 'invalid'; error: string };
+  | { ok: false; errorKind: 'empty' | 'invalid'; error: string; urlError: UrlError };
 
 // `/pay` URL に乗っている query key の集合。bare /pay (search 空) と
 // 「to は無いが他は付いている (URL 半壊)」を区別するために使う。
@@ -306,20 +308,20 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     return {
       ok: false,
       errorKind: hasAnyParam ? 'invalid' : 'empty',
-      error: '宛先アドレス (to) が指定されていません',
+      ...urlFail('missingTo'),
     };
   }
   if (!isAddress(to))
     return {
       ok: false,
       errorKind: 'invalid',
-      error: '宛先アドレス (to) が不正です',
+      ...urlFail('invalidTo'),
     };
   if (!token || !isValidTokenSymbol(token)) {
     return {
       ok: false,
       errorKind: 'invalid',
-      error: 'token は jpyc または usdc を指定してください',
+      ...urlFail('invalidToken'),
     };
   }
   // mode=direct は旧名 (fee=0)。既発行 QR を破壊しないため legacy alias として受理し、
@@ -333,13 +335,13 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     return {
       ok: false,
       errorKind: 'invalid',
-      error: 'mode は gasless または standard を指定してください',
+      ...urlFail('invalidMode'),
     };
   }
 
   const chainResult = resolveChainSlugParam(chainRaw, token);
   if (!chainResult.ok) {
-    return { ok: false, errorKind: 'invalid', error: chainResult.error };
+    return { ok: false, errorKind: 'invalid', error: chainResult.error, urlError: chainResult.urlError };
   }
   const chainSlug = chainResult.slug;
   // (token, chain) 組合せに deployment があるか確認 (例: jpyc + arbitrum は不可)
@@ -347,7 +349,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     return {
       ok: false,
       errorKind: 'invalid',
-      error: `${token} は ${chainSlug} に対応していません`,
+      ...urlFail('tokenNotOnChain', { token, chain: chainSlug }),
     };
   }
 
@@ -360,8 +362,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
       return {
         ok: false,
         errorKind: 'invalid',
-        error:
-          'split は "0xB:30,0xC:20" 形式 (整数 %、合計 < 100、最大 3 件、宛先重複不可) で指定してください',
+        ...urlFail('invalidSplit'),
       };
     }
     // 主 to との重複も禁止
@@ -370,7 +371,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
       return {
         ok: false,
         errorKind: 'invalid',
-        error: 'split に主 to と同じアドレスを含めることはできません',
+        ...urlFail('splitIncludesTo'),
       };
     }
     parsedSplit = r;
@@ -384,7 +385,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   // ケースは buyer-only chain のみ。
   const gaslessErr = gaslessSupportError(token, chainSlug, normalizedMode);
   if (gaslessErr) {
-    return { ok: false, errorKind: 'invalid', error: gaslessErr };
+    return { ok: false, errorKind: 'invalid', ...gaslessErr };
   }
 
   // crossChain は明示的 "false" のみ false、それ以外 (未指定 / "true" / 不明値)

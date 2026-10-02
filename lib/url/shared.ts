@@ -40,22 +40,66 @@ export function searchParamsFromNext(raw: RouteSearch): SearchParamsLike {
   };
 }
 
+// URL 検査の失敗の種類。画面は locale の文 (messages の UrlErrors) を出す — 英語のページに日本語の固定文が
+// 出ていた (2026-10-02)。error (日本語の固定文) はログ・テスト・既存の呼出側のために残し、文面は 1 文字も変えない
+// (ja の UrlErrors と URL_ERROR_JA が同じ文を作ることを tests/lib/url/urlErrors.test.ts で固定)。
+export type UrlErrorCode =
+  | 'missingTo'
+  | 'invalidTo'
+  | 'missingRecipient'
+  | 'invalidRecipient'
+  | 'invalidToken'
+  | 'invalidMode'
+  | 'invalidChain'
+  | 'tokenNotOnChain'
+  | 'gaslessUnsupported'
+  | 'invalidSplit'
+  | 'splitIncludesTo'
+  | 'missingItems'
+  | 'invalidItems'
+  | 'tipWidgetUnsupported'
+  | 'invalidNative';
+export type UrlError = { code: UrlErrorCode; values?: Record<string, string> };
+
+const URL_ERROR_JA: Record<UrlErrorCode, (v: Record<string, string>) => string> = {
+  missingTo: () => '宛先アドレス (to) が指定されていません',
+  invalidTo: () => '宛先アドレス (to) が不正です',
+  missingRecipient: () => '宛先アドレスが指定されていません',
+  invalidRecipient: () => '宛先アドレスが不正です',
+  invalidToken: () => 'token は jpyc または usdc を指定してください',
+  invalidMode: () => 'mode は gasless または standard を指定してください',
+  invalidChain: (v) => `chain は ${v.chains} のいずれかを指定してください`,
+  tokenNotOnChain: (v) => `${v.token} は ${v.chain} に対応していません`,
+  gaslessUnsupported: (v) => `${v.token} on ${v.chain} は gasless mode 非対応です (mode=standard を指定してください)`,
+  invalidSplit: () => 'split は "0xB:30,0xC:20" 形式 (整数 %、合計 < 100、最大 3 件、宛先重複不可) で指定してください',
+  splitIncludesTo: () => 'split に主 to と同じアドレスを含めることはできません',
+  missingItems: () => 'items を指定してください (最低 1 件)',
+  invalidItems: () => 'items は "name:qty:price,..." 形式 (qty 1〜999、price は token decimals 以内、最大 10 件) で指定してください',
+  tipWidgetUnsupported: (v) => `${v.token} on ${v.chain} は tip widget 非対応です (gasless mode 必須のため)`,
+  invalidNative: () => 'native は polygon または kaia を指定してください',
+};
+
+/** 失敗の戻り値の共通部分: 日本語の固定文 (error) と、画面で locale の文に引くための種類 (urlError)。 */
+export function urlFail(code: UrlErrorCode, values: Record<string, string> = {}): { error: string; urlError: UrlError } {
+  return {
+    error: URL_ERROR_JA[code](values),
+    urlError: Object.keys(values).length > 0 ? { code, values } : { code },
+  };
+}
+
 // chain query 解決: 明示があれば検証して採用、無ければ token の default。
 // pay/tip/checkout 全 parser で同一ロジックなので集約する。
 export function resolveChainSlugParam(
   chainRaw: string | null,
   token: TokenSymbol,
-): { ok: true; slug: ChainSlug } | { ok: false; error: string } {
+): { ok: true; slug: ChainSlug } | { ok: false; error: string; urlError: UrlError } {
   if (chainRaw === null || chainRaw.length === 0) {
     return { ok: true, slug: DEFAULT_CHAIN_FOR_SYMBOL[token] };
   }
   if (isValidChainSlug(chainRaw)) {
     return { ok: true, slug: chainRaw };
   }
-  return {
-    ok: false,
-    error: `chain は ${validChainSlugs().join(' / ')} のいずれかを指定してください`,
-  };
+  return { ok: false, ...urlFail('invalidChain', { chains: validChainSlugs().join(' / ') }) };
 }
 
 // Arc の新規 cross-chain は両 flag が有効な場合のみ。URL と保存設定で共用。
@@ -78,20 +122,20 @@ export function resolveModeAlias(modeRaw: string | null): PayMode {
 }
 
 // (token, chain) が gasless mode を提供できない (Pimlico paymaster 未対応) 場合の
-// エラーメッセージを返す (gasless 要求かつ非対応のときだけ message、それ以外は null)。
+// エラー (日本語の固定文と種類) を返す (gasless 要求かつ非対応のときだけ、それ以外は null)。
 // standard mode 要求は常に通す。pay/checkout で条件・文言が同一。
 // ⚠️ 呼出側の返却シェイプは異なる (pay は errorKind:'invalid' を持つ) ため、本 helper は
-// string|null のみ返し、各呼出側が自分の返却形へ包む。
+// {error, urlError}|null のみ返し、各呼出側が自分の返却形へ包む。
 export function gaslessSupportError(
   token: TokenSymbol,
   chainSlug: ChainSlug,
   mode: PayMode,
-): string | null {
+): { error: string; urlError: UrlError } | null {
   if (
     mode === 'gasless' &&
     !isGaslessSupported(deploymentForSlug(token, chainSlug))
   ) {
-    return `${token} on ${chainSlug} は gasless mode 非対応です (mode=standard を指定してください)`;
+    return urlFail('gaslessUnsupported', { token, chain: chainSlug });
   }
   return null;
 }

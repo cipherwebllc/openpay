@@ -3074,5 +3074,22 @@
   "OrderBinding": {
     "unverified": "Payment/order association unverified — manual verification required before handover",
     "scope": "Standard ERC-20 transfers and non-relay ERC-4337/7702 gasless payments do not cryptographically verify the association between payment and order."
+  },
+  "UrlErrors": {
+    "missingTo": "The recipient address (to) is missing.",
+    "invalidTo": "The recipient address (to) is invalid.",
+    "missingRecipient": "The recipient address is missing.",
+    "invalidRecipient": "The recipient address is invalid.",
+    "invalidToken": "Set token to jpyc or usdc.",
+    "invalidMode": "Set mode to gasless or standard.",
+    "invalidChain": "Set chain to one of: {chains}.",
+    "tokenNotOnChain": "{token} is not available on {chain}.",
+    "gaslessUnsupported": "{token} on {chain} does not support gasless payments. Use mode=standard.",
+    "invalidSplit": "Set split in the form \"0xB:30,0xC:20\" (whole percentages, total under 100, up to 3 entries, no duplicate recipients).",
+    "splitIncludesTo": "split cannot include the main recipient (to).",
+    "missingItems": "Add at least one item (items).",
+    "invalidItems": "Set items in the form \"name:qty:price,...\" (qty 1–999, price within the token's decimals, up to 10 items).",
+    "tipWidgetUnsupported": "{token} on {chain} is not supported by the tip widget (it requires gasless payments).",
+    "invalidNative": "Set native to polygon or kaia."
   }
 }

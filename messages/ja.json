@@ -3074,5 +3074,22 @@
   "OrderBinding": {
     "unverified": "支払いと注文の結びつき未確認 — 受け渡し前に手動確認が必要",
     "scope": "標準 ERC-20 送金と relay を使わない ERC-4337/7702 ガスレス決済では、支払いと注文の結びつきは暗号学的に検証されません。"
+  },
+  "UrlErrors": {
+    "missingTo": "宛先アドレス (to) が指定されていません",
+    "invalidTo": "宛先アドレス (to) が不正です",
+    "missingRecipient": "宛先アドレスが指定されていません",
+    "invalidRecipient": "宛先アドレスが不正です",
+    "invalidToken": "token は jpyc または usdc を指定してください",
+    "invalidMode": "mode は gasless または standard を指定してください",
+    "invalidChain": "chain は {chains} のいずれかを指定してください",
+    "tokenNotOnChain": "{token} は {chain} に対応していません",
+    "gaslessUnsupported": "{token} on {chain} は gasless mode 非対応です (mode=standard を指定してください)",
+    "invalidSplit": "split は \"0xB:30,0xC:20\" 形式 (整数 %、合計 < 100、最大 3 件、宛先重複不可) で指定してください",
+    "splitIncludesTo": "split に主 to と同じアドレスを含めることはできません",
+    "missingItems": "items を指定してください (最低 1 件)",
+    "invalidItems": "items は \"name:qty:price,...\" 形式 (qty 1〜999、price は token decimals 以内、最大 10 件) で指定してください",
+    "tipWidgetUnsupported": "{token} on {chain} は tip widget 非対応です (gasless mode 必須のため)",
+    "invalidNative": "native は polygon または kaia を指定してください"
   }
 }

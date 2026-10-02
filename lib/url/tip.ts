@@ -32,7 +32,9 @@ import {
   resolveChainSlugParam,
   sanitizeText,
   sanitizeUrl,
+  urlFail,
   type SearchParamsLike,
+  type UrlError,
 } from './shared';
 
 // ---------------------------------------------------------------------------
@@ -217,34 +219,32 @@ export function buildTipUrl(origin: string, params: TipLinkParams): string {
 
 export type ParsedTipParams =
   | { ok: true; params: TipParams }
-  | { ok: false; error: string };
+  | { ok: false; error: string; urlError: UrlError };
 
 export function parseTipParams(
   addressParam: string,
   searchParams: SearchParamsLike,
 ): ParsedTipParams {
   if (!addressParam) {
-    return { ok: false, error: '宛先アドレスが指定されていません' };
+    return { ok: false, ...urlFail('missingRecipient') };
   }
   if (!isAddress(addressParam)) {
-    return { ok: false, error: '宛先アドレスが不正です' };
+    return { ok: false, ...urlFail('invalidRecipient') };
   }
   const token = searchParams.get('token');
   if (!token || !isValidTokenSymbol(token)) {
-    return { ok: false, error: 'token は jpyc または usdc を指定してください' };
+    return { ok: false, ...urlFail('invalidToken') };
   }
   const chainRaw = searchParams.get('chain');
   const chainResult = resolveChainSlugParam(chainRaw, token);
   if (!chainResult.ok) {
-    return { ok: false, error: chainResult.error };
+    return { ok: false, error: chainResult.error, urlError: chainResult.urlError };
   }
   const chainSlug = chainResult.slug;
   const capability = resolveTipCapability(token, chainSlug);
   if (!capability.ok) return {
     ok: false,
-    error: capability.reason === 'unsupported-pair'
-      ? `${token} は ${chainSlug} に対応していません`
-      : `${token} on ${chainSlug} は tip widget 非対応です (gasless mode 必須のため)`,
+    ...urlFail(capability.reason === 'unsupported-pair' ? 'tokenNotOnChain' : 'tipWidgetUnsupported', { token, chain: chainSlug }),
   };
 
   const name = searchParams.get('name');
@@ -309,21 +309,18 @@ export type NativeTipParams = {
 
 export type ParsedNativeTipParams =
   | { ok: true; params: NativeTipParams }
-  | { ok: false; error: string };
+  | { ok: false; error: string; urlError: UrlError };
 
 export function parseNativeTipParams(
   addressParam: string,
   searchParams: SearchParamsLike,
 ): ParsedNativeTipParams {
   if (!addressParam || !isAddress(addressParam)) {
-    return { ok: false, error: '宛先アドレスが不正です' };
+    return { ok: false, ...urlFail('invalidRecipient') };
   }
   const native = searchParams.get('native');
   if (!native || !isJpycChainSlug(native)) {
-    return {
-      ok: false,
-      error: 'native は polygon または kaia を指定してください',
-    };
+    return { ok: false, ...urlFail('invalidNative') };
   }
   const name = searchParams.get('name');
   const message = searchParams.get('message');

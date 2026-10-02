@@ -115,11 +115,12 @@ function MethodForm({
     const pc = methodToPublishableConfig(config, method);
     return parseTipParams(pc.to, configToSearchParams(pc));
   }, [config, method]);
+  const tu = useTranslations('UrlErrors');
 
   if (!parsed.ok) {
     return (
       <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
-        {parsed.error}
+        {tu(parsed.urlError.code, parsed.urlError.values)}
       </div>
     );
   }

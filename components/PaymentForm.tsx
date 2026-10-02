@@ -135,6 +135,7 @@ export function PaymentForm() {
   const search = useSearchParams();
   const parsed = useMemo(() => parsePayParams(search), [search]);
   const t = useTranslations('PaymentForm');
+  const tu = useTranslations('UrlErrors');
 
   if (!parsed.ok) {
     // bare /pay (query 一切なし) は誤訪問の可能性が高いので friendly landing を出す。
@@ -143,7 +144,7 @@ export function PaymentForm() {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-red-700">
         <h2 className="font-semibold">{t('urlInvalidTitle')}</h2>
-        <p className="mt-2 text-sm">{parsed.error}</p>
+        <p className="mt-2 text-sm">{tu(parsed.urlError.code, parsed.urlError.values)}</p>
       </div>
     );
   }

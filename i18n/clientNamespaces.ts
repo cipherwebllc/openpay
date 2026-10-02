@@ -43,6 +43,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'SmartAccountFallback',
     'SuccessOverlay',
     'TipForm',
+    'UrlErrors',
   ],
   'admin/billing': [
     'AdminBilling',
@@ -123,6 +124,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'TipEmbedGenerator',
     'TipForm',
     'Today',
+    'UrlErrors',
     'UsageFee',
   ],
   'directory': [
@@ -311,6 +313,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'SignReassurance',
     'SmartAccountFallback',
     'SuccessOverlay',
+    'UrlErrors',
   ],
   'privacy': [
     'Privacy',
