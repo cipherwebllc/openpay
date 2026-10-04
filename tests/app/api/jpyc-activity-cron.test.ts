@@ -356,9 +356,12 @@ describe('activity cron', () => {
     if (stage === 'bucket') expect(bucketWrites()).toHaveLength(1);
   });
 
-  it('workflow は毎時20分・手動復旧・同じcron secret', () => {
+  it('定期実行は Vercel Cron の毎時20分・workflow は手動復旧だけ・同じcron secret', () => {
+    // GitHub の schedule は平均 5.4 時間おきでしか動かなかったため Vercel Cron へ移した (2026-10-05)。
+    const vercel = JSON.parse(readFileSync('vercel.json', 'utf8')) as { crons: Array<{ path: string; schedule: string }> };
+    expect(vercel.crons).toContainEqual({ path: '/api/cron/jpyc-activity', schedule: '20 * * * *' });
     const workflow = readFileSync('.github/workflows/jpyc-activity-cron.yml', 'utf8');
-    expect(workflow).toContain("cron: '20 * * * *'");
+    expect(workflow).not.toContain('schedule:');
     expect(workflow).toContain('workflow_dispatch: {}');
     expect(workflow).toContain('secrets.CRON_SECRET');
     expect(workflow).toContain('https://open-pay.jp/api/cron/jpyc-activity');
