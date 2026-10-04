@@ -88,6 +88,17 @@ if (dsn) {
       // ネイティブへのメッセージ送信を使わない (自前コードは tests/instrumentation-client.test.ts が検査・バンドルは
       // 2026-10-05 に本番 /ja/create の初期 chunk と手元 build の全 chunk で確認) ので実シグナルは落ちない。
       /The WKWebView was deallocated before the message was delivered/,
+      // WalletConnect の接続のお願い (proposal) は 5 分で期限切れになる。接続画面を閉じても SDK 内部の待ちが
+      // 残り、5 分後に期限切れで拒否されて onunhandledrejection へ漏れる。2026-09-23 mainnet 実観測: トップ・
+      // 接続画面を閉じた (Connection request reset) ちょうど 5 分後・計 11 件。文言は WalletConnect の
+      // sign-client 内部の定数で、自前コードはこの文言を使わない (tests/instrumentation-client.test.ts が検査)。
+      // 接続の失敗そのものは接続画面と ConnectButton が表示するので、Sentry では非アクショナブル。
+      /^(?:Error: )?Proposal expired$/,
+      // ブラウザ拡張 (ウォレット拡張等) が差し込んだスクリプトの拡張機能 API 呼び出しの失敗 (タブが閉じた等)。
+      // スタックに拡張の URL が無いと denyUrls をすり抜ける。2026-09〜10 に Sentry で計 21 件 (トップ)。
+      // 自前コードと自前バンドルは拡張機能 API を使わない (自前コードは tests/instrumentation-client.test.ts が
+      // 検査・バンドルは 2026-10-05 に手元 build の全 chunk で確認) ので実シグナルは落ちない。
+      /Invalid call to runtime\.sendMessage\(\)\. Tab not found/,
     ],
     // ブラウザ拡張 (ウォレット/広告ブロッカー/パスワードマネージャ等) が注入したスクリプト由来の
     // エラーは自前アプリのバグではない。スタック該当フレームの URL が拡張スキームのイベントを drop。

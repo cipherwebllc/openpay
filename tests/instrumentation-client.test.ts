@@ -171,13 +171,32 @@ describe('instrumentation-client telemetry hooks', () => {
     expect(matches('Error: message was not delivered to the shop')).toBe(false);
   });
 
+  it('ignoreErrors が WalletConnect の proposal 期限切れと拡張機能 API の失敗を落とす', async () => {
+    await import('@/instrumentation-client');
+    const options = sentry.init.mock.calls[0][0] as { ignoreErrors: RegExp[] };
+    const matches = (msg: string) => options.ignoreErrors.some((re) => re.test(msg));
+    // 2026-09 に Sentry で観測 (トップ)
+    expect(matches('Error: Proposal expired')).toBe(true);
+    expect(matches('Proposal expired')).toBe(true);
+    expect(matches('Error: Invalid call to runtime.sendMessage(). Tab not found.')).toBe(true);
+    // 似て非なる実シグナルは落とさない
+    expect(matches('Error: Proposal expired before the order was paid')).toBe(false);
+    expect(matches('Error: quote expired')).toBe(false);
+    expect(matches('Error: Invalid call to relay settle')).toBe(false);
+  });
+
   // 上の環境由来フィルタが自前の失敗を隠さない前提: 自前コードはこれらのブラウザ機能を使わない。
   // 使い始めたらテストが落ちるので、そのときは該当フィルタを見直す。
   it.each([
     ['IndexedDB (容量不足フィルタ)', /\bindexedDB\b/],
     ['WKWebView のネイティブ宛てメッセージ (WKWebView 破棄フィルタ)', /\bmessageHandlers\b/],
+    ['拡張機能 API (runtime.sendMessage フィルタ)', /\b(?:chrome|browser)\.runtime\b/],
+    // フィルタ自身 (instrumentation-client.ts の正規表現) は除いて、自前のエラー文言に使っていないことを見る。
+    ['WalletConnect の期限切れ文言 (Proposal expired フィルタ)', /Proposal expired/],
   ])('自前コードは %s を使わない', (_label, pattern) => {
-    const users = ownSourceFiles().filter((file) => pattern.test(readFileSync(file, 'utf8')));
+    const users = ownSourceFiles()
+      .filter((file) => file !== 'instrumentation-client.ts')
+      .filter((file) => pattern.test(readFileSync(file, 'utf8')));
     expect(users).toEqual([]);
   });
 
