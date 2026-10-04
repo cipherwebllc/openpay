@@ -17,6 +17,20 @@ vi.mock('@/lib/sentryReplayLazy', () => {
   return { installSentryReplay: lazy.installSentryReplay };
 });
 
+
+function ownSourceFiles(): string[] {
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (/\.(tsx?|m?js)$/.test(entry.name)) files.push(path);
+    }
+  };
+  for (const dir of ['app', 'components', 'hooks', 'lib']) walk(dir);
+  return [...files, 'instrumentation-client.ts', 'public/sw.js'];
+}
+
 describe('instrumentation-client telemetry hooks', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -147,18 +161,23 @@ describe('instrumentation-client telemetry hooks', () => {
     expect(matches('Error: database query failed')).toBe(false);
   });
 
-  it('自前コードは IndexedDB を使わない (上の容量不足フィルタで自前の失敗を隠さない前提)', () => {
-    const files: string[] = [];
-    const walk = (dir: string) => {
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        const path = join(dir, entry.name);
-        if (entry.isDirectory()) walk(path);
-        else if (/\.(tsx?|m?js)$/.test(entry.name)) files.push(path);
-      }
-    };
-    for (const dir of ['app', 'components', 'hooks', 'lib']) walk(dir);
-    files.push('instrumentation-client.ts', 'public/sw.js');
-    const users = files.filter((file) => /\bindexedDB\b/.test(readFileSync(file, 'utf8')));
+  it('ignoreErrors がアプリ内ブラウザ (WKWebView) の破棄で届かなかったネイティブ宛てメッセージを落とす', async () => {
+    await import('@/instrumentation-client');
+    const options = sentry.init.mock.calls[0][0] as { ignoreErrors: RegExp[] };
+    const matches = (msg: string) => options.ignoreErrors.some((re) => re.test(msg));
+    // 2026-09-23 mainnet 実観測 (/:locale/create)
+    expect(matches('Error: The WKWebView was deallocated before the message was delivered')).toBe(true);
+    // 似て非なる実シグナルは落とさない
+    expect(matches('Error: message was not delivered to the shop')).toBe(false);
+  });
+
+  // 上の環境由来フィルタが自前の失敗を隠さない前提: 自前コードはこれらのブラウザ機能を使わない。
+  // 使い始めたらテストが落ちるので、そのときは該当フィルタを見直す。
+  it.each([
+    ['IndexedDB (容量不足フィルタ)', /\bindexedDB\b/],
+    ['WKWebView のネイティブ宛てメッセージ (WKWebView 破棄フィルタ)', /\bmessageHandlers\b/],
+  ])('自前コードは %s を使わない', (_label, pattern) => {
+    const users = ownSourceFiles().filter((file) => pattern.test(readFileSync(file, 'utf8')));
     expect(users).toEqual([]);
   });
 
