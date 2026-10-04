@@ -11,7 +11,7 @@ export const PIMLICO_SIMPLE7702_ADDRESS: Address = getAddress(
   '0xe6Cae83BdE06E4c305530e199D7217f42808555B',
 );
 export const ALCHEMY_MAV2_ADDRESS: Address = getAddress(
-  '0x69007702764179F14f51cdcE752f4F775d74E139',
+  '0x69007702764179f14F51cdce752f4f775d74E139',
 );
 // MetaMask Smart Account (EIP7702StatelessDeleGatorImpl v1.3.0)。CREATE2 salt
 // "GATOR" で全 23 mainnet に同 address で deploy 済 (Ethereum / Polygon / BSC /
