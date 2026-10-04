@@ -64,3 +64,20 @@ describe('GitHub Actions reverify-cron', () => {
     expect(exportsGet(file), `${file} が GET を export していない`).toBe(true);
   });
 });
+
+describe('JPYC Activity の定期実行', () => {
+  // 有料の窓は最新バケットから 4 時間で 503 data_stale になる。GitHub の schedule は実測で平均 5.4 時間おき
+  // にしか動かなかったため Vercel Cron で毎時回す (2026-10-05)。
+  it('Vercel Cron が毎時 20 分に /api/cron/jpyc-activity を呼ぶ', () => {
+    expect(vercelConfig.crons).toEqual(
+      expect.arrayContaining([{ path: '/api/cron/jpyc-activity', schedule: '20 * * * *' }]),
+    );
+  });
+
+  it('GitHub Actions 側は手動復旧だけ (schedule を置いて二重に回さない)', () => {
+    const workflow = readFileSync(resolve(root, '.github/workflows/jpyc-activity-cron.yml'), 'utf8');
+    expect(workflow).toMatch(/workflow_dispatch/);
+    expect(workflow).not.toMatch(/^\s*schedule:/m);
+    expect(workflow).not.toMatch(/^\s*-\s*cron:/m);
+  });
+});
