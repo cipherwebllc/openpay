@@ -221,10 +221,14 @@ export default async function HandlePage({
   if (!resolved.ok) throw new Error('handle_store_unavailable');
   if (!resolved.record) {
     // 診断: KV は応答しているのに未存在 = 真の not-found。kvConfigured も記録し「env が
-    // 解決時に見えない」系の取りこぼしと区別する (Sentry / Vercel logs)。
-    logger.warn('handle.resolve.miss', {
+    // 解決時に見えない」系の取りこぼしと区別する。普通の not-found (存在しない名前・予約名・
+    // ボットの総当たり) は info に留め Sentry へ送らない: 1 件ずつ送ると総当たりで Sentry の枠を
+    // 使い切り、本物のエラーが記録されなくなる波及を断つ (2026-10 に 168 件・すべて kvConfigured=true)。
+    // 404 自体は Vercel のリクエストログに残る。env が見えない疑いのときだけ warn で Sentry に上げる。
+    const kvConfigured = isKvConfigured();
+    (kvConfigured ? logger.info : logger.warn)('handle.resolve.miss', {
       handle: normalized,
-      kvConfigured: isKvConfigured(),
+      kvConfigured,
     });
     notFound();
   }
