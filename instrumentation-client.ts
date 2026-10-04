@@ -81,6 +81,13 @@ if (dsn) {
       // is full" (OPENPAY-3C)。端末側の状態で自前のバグではなく、自前コードは IndexedDB を使わない
       // (tests/instrumentation-client.test.ts が検査) ので実シグナルは落ちない。
       /database or disk is full/,
+      // iPhone のアプリ内ブラウザ (WKWebView) で、アプリ側が差し込んだスクリプトがネイティブへ
+      // WebKit の message handler で送ったメッセージの返事を待つ間に、利用者がアプリ内ブラウザを
+      // 閉じた (WKWebView が破棄された) ときの拒否。2026-09-23 mainnet 実観測: /:locale/create・
+      // 最後の操作から 7 秒後・1 件。自前コードと自前バンドル (ウォレット SDK を含む) は
+      // ネイティブへのメッセージ送信を使わない (自前コードは tests/instrumentation-client.test.ts が検査・バンドルは
+      // 2026-10-05 に本番 /ja/create の初期 chunk と手元 build の全 chunk で確認) ので実シグナルは落ちない。
+      /The WKWebView was deallocated before the message was delivered/,
     ],
     // ブラウザ拡張 (ウォレット/広告ブロッカー/パスワードマネージャ等) が注入したスクリプト由来の
     // エラーは自前アプリのバグではない。スタック該当フレームの URL が拡張スキームのイベントを drop。
