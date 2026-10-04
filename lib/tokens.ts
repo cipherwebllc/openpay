@@ -92,10 +92,12 @@ const USDC_UNICHAIN_MAINNET: Address =
   '0x078D782b760474a361dDA0AF3839290b0EF57AD6';
 // phase 4b-3: World Chain / Sonic / Sei / HyperEVM (buyer-only)
 // addresses sourced from Circle docs (developers.circle.com/stablecoins/usdc-contract-addresses)。
+// 大文字小文字は EIP-55 の checksum どおりに書く (viem は checksum 違いを不正アドレスとして拒否する・
+// World Chain / Sonic が誤記で残高照会と支払いが失敗していた 2026-10-05 修正・tests/lib/addressChecksum.test.ts が検査)。
 const USDC_WORLDCHAIN_MAINNET: Address =
-  '0x79A02482A880bCe3F13E09da970dC34dB4cD24D1';
+  '0x79A02482A880bCE3F13e09Da970dC34db4CD24d1';
 const USDC_SONIC_MAINNET: Address =
-  '0x29219dd400f2Bf60E5a23d13be72b486d4038894';
+  '0x29219dd400f2Bf60E5a23d13Be72B486D4038894';
 const USDC_SEI_MAINNET: Address =
   '0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392';
 const USDC_HYPEREVM_MAINNET: Address =

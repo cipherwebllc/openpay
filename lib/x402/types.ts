@@ -8,7 +8,7 @@ import type { RouteConfig } from 'x402-next';
 //   JPYC v3 が EIP-3009 (transferWithAuthorization / authorizationState /
 //   cancelAuthorization / receiveWithAuthorization) を実装していることを
 //   Polygon mainnet 実 RPC で 2026-05-14 に verify 済 (implementation
-//   0xafAc17fc3936A29CA2d2787CEd3C5d1c52007D2E)。
+//   0xafAC17FC3936A29CA2D2787cEd3c5d1c52007d2e)。
 //   EIP-712 domain は name="JPY Coin" / version="1" を仮定 (DOMAIN_SEPARATOR /
 //   eip712Domain は publicly 未公開、OpenZeppelin の default に従う)。
 //   実 signature 通過は alpha のユーザー試用で確認。
