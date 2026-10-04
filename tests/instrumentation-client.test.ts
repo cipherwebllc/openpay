@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 const sentry = vi.hoisted(() => ({
   init: vi.fn(),
@@ -131,6 +132,34 @@ describe('instrumentation-client telemetry hooks', () => {
     // 似て非なる実シグナルは落とさない
     expect(matches('NotFoundError: order not found')).toBe(false);
     expect(matches("TypeError: null is not an object (evaluating 'order.items')")).toBe(false);
+  });
+
+  it('ignoreErrors が端末の容量不足による IndexedDB の作成失敗 (ウォレット SDK 起因) を落とす', async () => {
+    await import('@/instrumentation-client');
+    const options = sentry.init.mock.calls[0][0] as { ignoreErrors: RegExp[] };
+    const matches = (msg: string) => options.ignoreErrors.some((re) => re.test(msg));
+    // 2026-10-04 mainnet 実観測 (iPhone / Mobile Safari・トップ・OPENPAY-3C)
+    expect(
+      matches('UnknownError: Error creating Records table (13) - database or disk is full'),
+    ).toBe(true);
+    // 似て非なる実シグナルは落とさない
+    expect(matches('QuotaExceededError: The quota has been exceeded.')).toBe(false);
+    expect(matches('Error: database query failed')).toBe(false);
+  });
+
+  it('自前コードは IndexedDB を使わない (上の容量不足フィルタで自前の失敗を隠さない前提)', () => {
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) walk(path);
+        else if (/\.(tsx?|m?js)$/.test(entry.name)) files.push(path);
+      }
+    };
+    for (const dir of ['app', 'components', 'hooks', 'lib']) walk(dir);
+    files.push('instrumentation-client.ts', 'public/sw.js');
+    const users = files.filter((file) => /\bindexedDB\b/.test(readFileSync(file, 'utf8')));
+    expect(users).toEqual([]);
   });
 
   it('beforeBreadcrumb / beforeSendTransaction に URL scrubber を設定する', async () => {
