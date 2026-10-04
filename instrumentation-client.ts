@@ -72,6 +72,15 @@ if (dsn) {
       // 翻訳を禁止する (translate="no") 案は訪日客の利用を損なうため不採用。
       /The object can not be found here/,
       /evaluating 'e\.contentDocument\.body'/,
+      // 端末の空き容量不足で IndexedDB を作れない (WebKit の SQLite エラー 13 = SQLITE_FULL)。
+      // トップ等で wagmi の自動再接続がウォレット SDK を読み込み、開いただけで WalletConnect
+      // (WALLET_CONNECT_V2_INDEXED_DB) と Coinbase Wallet SDK (cbwsdk・keyval-store) が
+      // IndexedDB を作る (2026-10-04 本番を WebKit/Chromium で実測)。SDK 内部の promise が
+      // 受け止められずに onunhandledrejection へ漏れる。2026-10-04 mainnet 実観測: iPhone /
+      // Mobile Safari・トップ・"UnknownError: Error creating Records table (13) - database or disk
+      // is full" (OPENPAY-3C)。端末側の状態で自前のバグではなく、自前コードは IndexedDB を使わない
+      // (tests/instrumentation-client.test.ts が検査) ので実シグナルは落ちない。
+      /database or disk is full/,
     ],
     // ブラウザ拡張 (ウォレット/広告ブロッカー/パスワードマネージャ等) が注入したスクリプト由来の
     // エラーは自前アプリのバグではない。スタック該当フレームの URL が拡張スキームのイベントを drop。
