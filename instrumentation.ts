@@ -1,3 +1,4 @@
+import { sentryEnvironment } from '@/lib/sentryEnvironment';
 import {
   scrubSentryServerEvent,
   scrubSentryServerTransaction,
@@ -31,7 +32,10 @@ export async function register(): Promise<void> {
     const Sentry = await import('@sentry/nextjs');
     Sentry.init({
       dsn,
-      environment: process.env.NEXT_PUBLIC_NETWORK_ENV ?? 'unknown',
+      // Vercel の Node 実行環境は VERCEL=1 を持つ (build・runtime とも)。無いのは手元の dev / next start だけ
+      // なので local-<network> にして本番の通知に混ぜない。edge は VERCEL の有無を確かめていないので変えない
+      // (本番を local と誤って付けて通知から漏らす方が害が大きい)。
+      environment: sentryEnvironment(process.env.NEXT_PUBLIC_NETWORK_ENV, !process.env.VERCEL),
       tracesSampleRate: 1.0,
       ...sentryPrivacyOptions,
     });

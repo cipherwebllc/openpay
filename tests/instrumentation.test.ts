@@ -43,4 +43,22 @@ describe('server instrumentation telemetry hooks', () => {
       expect(options.beforeSendTransaction).toBeTypeOf('function');
     },
   );
+
+  // 手元の dev / next start (VERCEL なし) の event は local-<network> にして mainnet の通知に混ぜない。
+  it.each([
+    ['nodejs', '1', 'mainnet'],
+    ['nodejs', undefined, 'local-mainnet'],
+    // edge は VERCEL の有無を確かめていないので変えない (本番を local と誤って付けないため)。
+    ['edge', undefined, 'mainnet'],
+    ['edge', '1', 'mainnet'],
+  ])('%s runtime・VERCEL=%s の environment は %s', async (runtime, vercel, expected) => {
+    vi.stubEnv('NEXT_RUNTIME', runtime);
+    vi.stubEnv('NEXT_PUBLIC_NETWORK_ENV', 'mainnet');
+    vi.stubEnv('VERCEL', vercel);
+    const { register } = await import('@/instrumentation');
+
+    await register();
+
+    expect((sentry.init.mock.calls[0][0] as { environment: string }).environment).toBe(expected);
+  });
 });
