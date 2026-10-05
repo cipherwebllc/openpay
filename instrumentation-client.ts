@@ -6,6 +6,7 @@ import {
   scrubSentryServerEvent,
   scrubSentryTransaction,
 } from '@/lib/telemetryRedaction';
+import { isLocalHostname, sentryEnvironment } from '@/lib/sentryEnvironment';
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 
@@ -36,7 +37,11 @@ if (dsn) {
   );
   Sentry.init({
     dsn,
-    environment: process.env.NEXT_PUBLIC_NETWORK_ENV ?? 'unknown',
+    // 手元 (localhost・社内ネットワーク) からの event は local-<network> にして本番の通知に混ぜない。
+    environment: sentryEnvironment(
+      process.env.NEXT_PUBLIC_NETWORK_ENV,
+      isLocalHostname(window.location.hostname),
+    ),
     // 注入ウォレット拡張 (MetaMask/Rabby/Coinbase) や WalletConnect/Coinbase SDK は
     // 内部 promise を Error でない値 (undefined / [object Object] 等) で reject することがあり、
     // それが onunhandledrejection でグローバルに漏れて "Non-Error promise rejection captured

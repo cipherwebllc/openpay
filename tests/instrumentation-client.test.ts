@@ -52,6 +52,14 @@ describe('instrumentation-client telemetry hooks', () => {
     vi.unstubAllEnvs();
   });
 
+  it('手元 (localhost 等) から送る event の environment は local-<network> にする', async () => {
+    // テストの jsdom のページは http://test.local (手元扱い)。本番のホスト名の判定は tests/lib/sentryEnvironment.test.ts。
+    expect(window.location.hostname).toBe('test.local');
+    vi.stubEnv('NEXT_PUBLIC_NETWORK_ENV', 'mainnet');
+    await import('@/instrumentation-client');
+    expect((sentry.init.mock.calls[0][0] as { environment: string }).environment).toBe('local-mainnet');
+  });
+
   it('初期 bundle に Replay の static import / transport wrapper を含めない', async () => {
     const source = readFileSync('instrumentation-client.ts', 'utf8');
     expect(source).not.toMatch(/(?:from\s+|^import\s*)['"][^'"]*sentryReplay/m);
