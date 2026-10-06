@@ -157,6 +157,35 @@ const ALLOWED_ADVISORIES = {
       'stream-json の Parser / StreamValues 本体 (path filter 以外) に同種の DoS 報告',
     ],
   },
+  'GHSA-hqr4-qq8f-hg3x': {
+    pkg: 'stream-json',
+    summary:
+      'stream-json: JSONC parser and verifier re-scan the whole accumulated comment on every input chunk (<=3.5.0)',
+    chain:
+      '@account-kit/smart-contracts@4.88.3 → @account-kit/infra@4.88.3 → alchemy-sdk@3.6.5 → @solana/web3.js@1.99.0 → jayson@4.3.0 → stream-json@1.9.1',
+    reason:
+      '到達性ゼロ (2026-10-06 再評価): app/api・lib・hooks・components・packages・scripts に @solana / jayson / stream-json の import はゼロ、next build の出力 (.next/static・.next/server) にも jayson / stream-json は入っていない。jayson が stream-json を使うのは lib/utils.js の parseStream (StreamValues + Verifier) で、JSON-RPC の TCP/TLS トランスポートの受信だけ。OpenPay は jayson の TCP/TLS を使わない。修正版 3.6.0 は major で jayson@4.3.0 は ^1.9.1 を pin → in-range の fix が無く、GHSA-528h と同じく jayson / @solana 側の bump 待ち。さらに脆弱経路は JSONC (コメント付き JSON) の処理で、導入済みの 1.9.1 には JSONC の部品自体が無い (コメントを受け付けない)。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.13',
+    reviewTriggers: [
+      'jayson が stream-json>=3.6.0 を pin する版へ更新 → npm update で解消し allowlist 削除',
+      'OpenPay に Solana adapter / jayson の TCP・TLS トランスポートを導入 (即再評価)',
+    ],
+  },
+  'GHSA-mjw6-4jj6-33hc': {
+    pkg: 'stream-json',
+    summary:
+      'stream-json: prototype pollution — Assembler writes this.current[this.key] on plain objects (<3.6.0)',
+    chain:
+      '@account-kit/smart-contracts@4.88.3 → @account-kit/infra@4.88.3 → alchemy-sdk@3.6.5 → @solana/web3.js@1.99.0 → jayson@4.3.0 → stream-json@1.9.1',
+    reason:
+      '到達性ゼロ (2026-10-06 再評価): app/api・lib・hooks・components・packages・scripts に @solana / jayson / stream-json の import はゼロ、next build の出力 (.next/static・.next/server) にも jayson / stream-json は入っていない。jayson が stream-json を使うのは lib/utils.js の parseStream (StreamValues + Verifier) で、JSON-RPC の TCP/TLS トランスポートの受信だけ。OpenPay は jayson の TCP/TLS を使わない。修正版 3.6.0 は major で jayson@4.3.0 は ^1.9.1 を pin → in-range の fix が無く、GHSA-528h と同じく jayson / @solana 側の bump 待ち。Assembler に攻撃者の JSON を流し込めるのは jayson の TCP/TLS で受信したときだけで、その経路を OpenPay は持たない。',
+    docRef: 'docs/DEPLOY_CHECKLIST.md §7.13',
+    reviewTriggers: [
+      'jayson が stream-json>=3.6.0 を pin する版へ更新 → npm update で解消し allowlist 削除',
+      'OpenPay に Solana adapter / jayson の TCP・TLS トランスポートを導入 (即再評価)',
+      'stream-json を自前コードから直接使う (Assembler / StreamValues に外部入力を流す) 変更',
+    ],
+  },
 };
 
 // CI gate 対象 severity。LOW は監視対象外 (Section 1 のコメント参照)。
