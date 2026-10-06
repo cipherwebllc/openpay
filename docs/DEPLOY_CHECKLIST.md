@@ -592,6 +592,15 @@ wagmi → @wagmi/connectors@6.2.0 → @walletconnect/ethereum-provider@2.21.1
 - OpenPay に Solana adapter / jayson の TCP・TLS トランスポートを導入 (**導入 PR で即再評価**)
 - stream-json の Parser / StreamValues 本体 (path filter 以外) に同種の DoS 報告
 
+**2026-10-06 追加 (同じ stream-json@1.9.1・同じく accepted risk)**:
+- [GHSA-hqr4-qq8f-hg3x](https://github.com/advisories/GHSA-hqr4-qq8f-hg3x) (JSONC の parser / verifier がコメントを chunk ごとに再走査・<=3.5.0) と
+  [GHSA-mjw6-4jj6-33hc](https://github.com/advisories/GHSA-mjw6-4jj6-33hc) (Assembler の prototype pollution・<3.6.0)。修正版はどちらも 3.6.0 (major)
+- 依存の経路は現在 `@account-kit/smart-contracts@4.88.3 → @account-kit/infra → alchemy-sdk@3.6.5 → @solana/web3.js@1.99.0 → jayson@4.3.0 → stream-json@1.9.1`
+- 再評価 (上の 3 つ目の trigger に該当したため): 自前コードに @solana / jayson / stream-json の import はゼロ、next build の出力 (.next/static・.next/server) にも
+  jayson / stream-json は入っていない。jayson が使うのは `lib/utils.js` の parseStream (StreamValues + Verifier) だけで、JSON-RPC の TCP/TLS 受信専用。
+  OpenPay は jayson の TCP/TLS を使わない → 外部入力が Assembler に届く経路が無い。JSONC の部品は 1.9.1 に存在しない
+- 同時に [GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q) (source-map-js・HIGH) は in-range の 1.2.2 へ lockfile 更新で解消 (allowlist 追加なし)
+
 ### 7.7 CI gate: allowlist 方式 (`scripts/audit-gate.mjs`)
 
 `.github/workflows/ci.yml` の audit step は `node scripts/audit-gate.mjs` を呼ぶ。
@@ -614,6 +623,8 @@ allowlist 追加 / 削除は本 §7 の update と必ず同期させること (=
 | GHSA-r28c-9q8g-f849 | postcss | HIGH | §7.10 |
 | GHSA-vcc3-ghjq-m6fr | decode-uri-component | MODERATE | §7.12 |
 | GHSA-528h-pc64-c93x | stream-json | MODERATE | §7.13 |
+| GHSA-hqr4-qq8f-hg3x | stream-json | MODERATE | §7.13 |
+| GHSA-mjw6-4jj6-33hc | stream-json | MODERATE | §7.13 |
 
 (§7.1 js-cookie / §7.4 ws〔GHSA-58qx〕/ §7.6 otel core〔GHSA-8988〕は upstream fix 済で
 allowlist から削除済 = 上表は現行の実体。)
