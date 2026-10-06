@@ -44,24 +44,23 @@ describe('mobile-order fee disclosure fence', () => {
   });
 });
 
-// レジ (店頭POS) の OpenPay利用料 経路非依存化の carve-in が「standard=無料」の各クローズに入っているか。
-describe('register (レジ) standard fee disclosure carve-in', () => {
-  it('ja: レジ standard が 7月から1% の対象である旨を 3 つの load-bearing 文書に carve-in', () => {
+// 2026-10-07: レジの通常決済の利用料 (2026 年 7 月から 1%) を廃止。Terms 第3条・第5条 / 免責 §7 / 特商法 役務の対価
+// に「廃止日と過去分」を明記し、旧の carve-in (通常決済でも 1% を申し受ける) は残さない。
+describe('register (レジ) standard fee abolition disclosure', () => {
+  it('ja: 廃止の文が load-bearing 文書に入り、旧の carve-in は無い', () => {
     const ja = JSON.stringify(jaMessages);
-    expect(ja).toContain('レジ (店頭POS) 機能を用いてお会計した JPYC の決済');
-    expect(ja).toContain('通常決済 (ガスあり) モードであっても');
-    expect(ja).toContain('2026 年 7 月のご利用分から');
-    // Terms 第5条 / 免責 §7 / 特商法 役務の対価 の 3 箇所に入っている。
     const count = (
-      ja.match(/レジ \(店頭POS\) 機能を用いてお会計した JPYC の決済/g) || []
+      ja.match(/レジ \(店頭POS\) 機能を用いてお会計した JPYC の通常決済 \(ガスあり\) モードの決済についても、2026 年 10 月 7 日以降のご利用分から OpenPay 利用料は発生しません/g) || []
     ).length;
     expect(count).toBeGreaterThanOrEqual(3);
+    expect(ja).not.toContain('通常決済 (ガスあり) モードであっても、2026 年 7 月のご利用分から');
   });
 
-  it('en: register standard carve-in present (even in Standard mode, from July)', () => {
+  it('en: abolition sentence present and the old carve-in removed', () => {
     const en = JSON.stringify(enMessages);
-    expect(en).toContain('register (in-store POS) feature');
-    expect(en).toContain('even in Standard (with-gas) mode');
-    expect(en).toContain('from the July 2026 usage period');
+    const count = (en.match(/in Standard \(with-gas\) mode also have no OpenPay usage fee for usage from October 7, 2026/g) || []).length;
+    expect(count).toBeGreaterThanOrEqual(3);
+    expect(en).not.toContain('even in Standard (with-gas) mode');
+    expect(en).not.toContain('from the July 2026 usage period the same OpenPay usage fee');
   });
 });

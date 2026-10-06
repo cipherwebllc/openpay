@@ -68,10 +68,12 @@ describe('standard-payment fee scope (review 6 regression)', () => {
       expect(text).toContain(`${recoverPct}%`);
       expect(text).toContain(`${floorJpyc} JPYC`);
     });
-    it(`${locale}: QR and simulator exemptions exclude register and mobile order`, () => {
+    // 2026-10-07: レジの通常決済の利用料を廃止 → 通常決済の無料から除くのはモバイル注文だけ。
+    it(`${locale}: QR and simulator exemptions exclude only mobile orders (register standard is free)`, () => {
       for (const key of ['supportFeePayBody', 'cashSimNote'] as const) {
         const text = t(key, values);
-        expect(text).toMatch(locale === 'ja' ? /レジ.*モバイル注文.*除く/ : /excluding.*register.*mobile order/i);
+        expect(text).toMatch(locale === 'ja' ? /モバイル注文.*除く/ : /excluding.*mobile order/i);
+        expect(text).not.toMatch(locale === 'ja' ? /レジ/ : /register/i);
       }
       expect(t('cashSimNote', values)).toContain(`${floorJpyc} JPYC`);
     });

@@ -11,7 +11,7 @@
 // 文面の誠実性: pricing 項目は lib/legal.ts の開示 (施行日 2026-06-13・JPYC ガスレスは
 // 決済1件ごとの利用料 = 当面 約2 JPYC・2026 年 7 月利用分から決済額の 1%・最低 2 JPYC・
 // 決済は店舗負担固定でお客様は表示額のみ／チップはガス相当額をお客様(チッパー)負担で 1% 非適用・
-// レジ JPYC・モバイル注文を除く通常決済/受け取り自体/USDC 経路は無料) と矛盾させない。確定でないことを断定で書かない。
+// モバイル注文を除く通常決済 (2026-10-07 からレジを含む)/受け取り自体/USDC 経路は無料) と矛盾させない。確定でないことを断定で書かない。
 // 過去のお知らせは黙って書き換えず「置き換え済み」注記で更新する。
 
 export type NewsCategory = 'feature' | 'pricing' | 'notice'; // 新機能 / 料金 / お知らせ
@@ -33,6 +33,20 @@ export type NewsItem = {
 // date 降順 (新しい順) で宣言する。sortedNews() が降順を保証するため宣言順自体は
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
+  {
+    id: 'register-standard-fee-free-2026-10-07',
+    date: '2026-10-07',
+    category: 'pricing',
+    title: {
+      ja: 'レジの通常決済の利用料を無料にしました',
+      en: 'Standard register payments no longer carry a usage fee',
+    },
+    body: {
+      ja: 'レジ (店頭POS) でお会計した JPYC の通常決済 (お客様がガス代を払う決済) について、2026 年 7 月から申し受けていた OpenPay 利用料 (決済額の 1%) を、2026 年 10 月 7 日のご利用分から廃止しました。お客様は 1 回の送金で支払えます。OpenPay がガス代を負担するガスレス決済は、これまでどおり決済額の 1%・最低 2 JPYC (店舗負担) です。',
+      en: 'From October 7, 2026, JPYC standard payments checked out at the register (in-store POS), where the customer pays the gas, no longer carry the OpenPay usage fee (1% of the payment) charged since July 2026. Customers now pay in a single transfer. Gasless payments, where OpenPay covers the gas, stay at 1% of the payment, minimum 2 JPYC, merchant-paid.',
+    },
+    link: { href: '/terms', labelJa: '利用規約を見る', labelEn: 'Read the Terms' },
+  },
   {
     id: 'agent-metamask-2026-09-26',
     date: '2026-09-26',

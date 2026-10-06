@@ -21,12 +21,28 @@ import { USDC_CHAINS, arc, arcTestnet, chainForSlug } from '@/lib/chains';
 const ARC_CHAIN_IDS = new Set<number>([arc.id, arcTestnet.id]);
 
 describe('Legal pages', () => {
-  it.each(['ja', 'en'] as const)('%s: standard fee exemptions explicitly exclude register and mobile order', async (locale) => {
+  // 2026-10-07: レジの通常決済の利用料 (2026 年 7 月から 1%) を廃止。無料の例外はモバイル注文だけになり、
+  // レジの廃止は日付と過去分の注記つきで明記する (値下げでも過去分の課金を黙って消さない)。
+  it.each(['ja', 'en'] as const)('%s: Terms/特商法/免責は レジの通常決済の利用料の廃止日と過去分を明記する', async (locale) => {
+    const m = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
+    for (const body of [m.Terms.article3.body, m.Terms.article5.body, m.Disclaimer.section7.body, m.Tokutei.rows.price.value]) {
+      expect(body).toContain(locale === 'ja'
+        ? '2026 年 10 月 7 日以降のご利用分から OpenPay 利用料は発生しません (2026 年 7 月のご利用分から同年 10 月 6 日までのご利用分には'
+        : 'also have no OpenPay usage fee for usage from October 7, 2026 (for usage from July 2026 through October 6, 2026, 1% of the payment was charged');
+      expect(body).toContain(locale === 'ja' ? 'モバイル注文以外の通常決済では、レジ (店頭POS)・決済QR (/pay)' : 'For standard payments outside mobile orders, the register (in-store POS), payment QR (/pay)');
+    }
+  });
+
+  it.each(['ja', 'en'] as const)('%s: standard fee exemptions exclude only mobile orders; register standard is free from 2026-10-07', async (locale) => {
     const m = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
     for (const body of [m.Terms.article3.body, m.Terms.article5.body, m.Disclaimer.intro, m.Disclaimer.section7.body, m.Tokutei.rows.price.value]) {
       expect(body).toMatch(locale === 'ja'
-        ? /レジ・モバイル注文を除[くき]/
-        : /outside register JPYC and mobile orders/);
+        ? /モバイル注文を除[くき]/
+        : /outside mobile orders/);
+      expect(body).not.toMatch(locale === 'ja' ? /レジ・モバイル注文を除/ : /outside register JPYC/);
+      expect(body).not.toContain(locale === 'ja'
+        ? '通常決済 (ガスあり) モードであっても、2026 年 7 月のご利用分から、ガスレス決済と同じ'
+        : 'from the July 2026 usage period the same OpenPay usage fee as gasless');
       expect(body).not.toContain(locale === 'ja'
         ? 'および通常決済（ガスあり）モードのご利用は無料です'
         : 'and the use of Standard Payment (with Gas) mode are free');
@@ -44,7 +60,7 @@ describe('Legal pages', () => {
         : ['seller operates', 'availability', '60 seconds', 'wallet address, product, revision and timestamps', 'does not store or serve', 'responsible for delivery', '(6)', 'third parties', 'not immediately recalled', 'holder without a purchase history', '(14)', '(7)', '(11)']) expect(clause).toContain(text);
       renderWithIntl(<TermsPage />, { locale });
       expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-09-10');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-07');
       expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-09-10');
     });
@@ -70,7 +86,7 @@ describe('Legal pages', () => {
       expect(clause(ja, 17)).toContain('公開台帳'); expect(clause(en, 17)).toContain('public ledger');
       expect(clause(ja, 17)).toContain('公開 Verify API'); expect(clause(en, 17)).toContain('public Verify API');
       expect(clause(ja, 16)).toContain('法的適合性の認定を意味しません'); expect(clause(en, 16)).toContain('not legal clearance');
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-09-10');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-07');
     });
     it('ja: h1 と 11 条すべての title が render される', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
@@ -730,9 +746,10 @@ describe('Legal pages', () => {
       // 2026-08-17: デジタル商品ストアの Base USDC 決済を 13 条に追加。
       // 2026-08-24: dual-rail 出品 (第三者出品の USDC/Base 併売・利用料 0%) を 5 条 (10) に追加。
       // 2026-09-10 改定案: 保護配布の第13条 (18) 追記 (公開前承認対象)。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-09-10');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-07-30');
-      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-06-13');
+      // 2026-10-07: レジの通常決済の利用料の廃止で Terms/特商法/免責を同日改定。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-07');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-07');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-07');
       // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
       expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-09-10');
     });
