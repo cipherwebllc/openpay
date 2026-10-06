@@ -227,6 +227,16 @@ Report, in the person's language:
 4. The JPYC resources this agent can buy right now, and the price, fee, and total you quoted for one.
 5. What is left for the person: send JPYC to the wallet address.
 6. That no payment was made.
+7. How to stop and what happens to leftover funds, from the section below.
+
+## Stopping and leftover funds
+
+Tell the person this in your report. It is for the person; do not act on it yourself.
+
+- **To stop the agent from paying**, remove the `openpay-x402` entry from this host's MCP settings and restart the host (Claude Code: `claude mcp remove openpay-x402`). Not funding the wallet also stops it.
+- Each payment is a one-time EIP-3009 signature that expires within `MAX_TIMEOUT_SECONDS` (default 600 seconds, at most 1,200). No token approval (allowance) is ever granted, so nothing else needs cancelling.
+- **Local Wallet has no export tool.** Never read, print, or copy `~/.openpay-x402/wallet.json`, even to help move funds. Fund it only with what the person plans to spend. For a balance the person wants to manage or take back later, use the MetaMask mode: the key stays in MetaMask, and the person moves funds there.
+- With Kova or MetaMask, the person stops the wallet or moves funds in Kova or MetaMask themselves (owner operations). Never run those for the person.
 
 ## Reference
 
