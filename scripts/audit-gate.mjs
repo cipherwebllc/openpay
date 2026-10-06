@@ -99,34 +99,6 @@ const ALLOWED_ADVISORIES = {
       'GHSA-w5hq-g745-h8pq に v4 API も含む拡張 advisory 出現',
     ],
   },
-  'GHSA-96hv-2xvq-fx4p': {
-    pkg: 'ws',
-    summary:
-      'ws: Memory exhaustion DoS from tiny fragments and data chunks (fix 未リリース・ws@8.21.0 最新も影響範囲)',
-    chain: '@reown/appkit / @walletconnect/* / viem → ws (websocket client)',
-    reason:
-      'ws は OpenPay では WalletConnect リレー / RPC subscription の websocket **client** として動作し、ws **server** は本 codebase で一切起動しない。本 advisory の DoS は ws を server として動かし攻撃者が極小 fragment / data chunk を送りつけメモリを枯渇させる経路で、client 用途では到達しない。加えて 2026-06 時点で upstream に修正版が無く (最新 8.21.0 も影響範囲)、override での upgrade では解消できないため accepted risk とする。',
-    docRef: 'docs/DEPLOY_CHECKLIST.md §7.5',
-    reviewTriggers: [
-      'ws が本 advisory の patched 版をリリース (8.21.0 超で fix 済) → override で bump',
-      'OpenPay が ws を server mode で利用する機能を追加 (webhook server 等)',
-      'GHSA-96hv-2xvq-fx4p に client-side exploit PoC 公開',
-    ],
-  },
-  'GHSA-f88m-g3jw-g9cj': {
-    pkg: 'sharp',
-    summary:
-      'sharp inherited vulnerabilities in libvips: CVE-2026-33327/33328/35590/35591 (sharp<0.35.0)',
-    chain: 'next (optionalDependencies sharp ^0.34.3) → sharp → libvips',
-    reason:
-      'libvips の脆弱性は不正な画像ファイルの解析経路で trigger。OpenPay の next/image は next.config.mjs に images.remotePatterns/domains が無く外部 URL 画像を最適化できないため、sharp が処理するのはリポ内静的アセット (トークン/チェーンロゴ・LP 画像) のみ = 攻撃者制御の画像が libvips に到達する経路が無い。ユーザ提供のアバター等は素の <img> 直リンクで sharp を通らない。修正版 sharp 0.35 は next の ^0.34 range 外で、native module の override は到達性ゼロの脆弱性に対しリスク不相応 → next 側の bump 待ち accepted risk とする。',
-    docRef: 'docs/DEPLOY_CHECKLIST.md §7.8',
-    reviewTriggers: [
-      'next が sharp>=0.35 を含む版へ更新 → 通常の npm update で解消し allowlist 削除',
-      'next.config.mjs に images.remotePatterns / domains 等の remote 画像最適化を導入 (到達性が変わるため即再評価)',
-      'GHSA-f88m-g3jw-g9cj に next/image 経由の exploit PoC 公開',
-    ],
-  },
   'GHSA-vcc3-ghjq-m6fr': {
     pkg: 'decode-uri-component',
     summary:

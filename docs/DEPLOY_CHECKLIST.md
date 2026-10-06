@@ -366,7 +366,10 @@ viem@2.50.3 → ws@8.18.0  ← affected (脆弱性 fix は ws>=8.20.1)
 - OpenPay が ws を server mode で利用する機能を追加 (= webhook server 等)
 - GHSA-58qx-3vcg-4xpx に client-side exploit PoC 公開
 
-### 7.5 HIGH: `ws` (GHSA-96hv-2xvq-fx4p)
+### 7.5 ✅ RESOLVED: `ws` (GHSA-96hv-2xvq-fx4p)
+
+**2026-10-06 解消**: advisory が 2026-07-13 に更新され、8.21.0 以上が patched になった。現在入っている ws は 7.5.13・8.21.0・8.21.1 だけで、
+すべて patched の範囲 (7.5.11+ / 8.21.0+) = `npm audit` で no longer detected。`scripts/audit-gate.mjs` の allowlist からも削除済。以下は歴史的記録。
 
 **Root advisory**: [GHSA-96hv-2xvq-fx4p](https://github.com/advisories/GHSA-96hv-2xvq-fx4p)
 — "ws: Memory exhaustion DoS from tiny fragments and data chunks"
@@ -421,7 +424,11 @@ allowlist からも削除済。以下は歴史的記録。
 - OpenPay が外部 W3C Baggage ヘッダを計測/伝播する機能を追加
 - GHSA-8988-4f7v-96qf に高到達性の exploit PoC 公開
 
-### 7.8 HIGH: `sharp` (GHSA-f88m-g3jw-g9cj)
+### 7.8 ✅ RESOLVED: `sharp` (GHSA-f88m-g3jw-g9cj)
+
+**2026-10-06 解消**: next 15.5.25 が optional の sharp を `^0.34.3 || ^0.35.4` に広げ、sharp 0.35.4 (patched 0.35.0+) にそろった
+(devDependencies の sharp も `^0.35.4`) = `npm audit` で no longer detected。Reassess triggers の 1 項目目どおりの自然解消。
+`scripts/audit-gate.mjs` の allowlist からも削除済。以下は歴史的記録。
 
 **Root advisory**: [GHSA-f88m-g3jw-g9cj](https://github.com/advisories/GHSA-f88m-g3jw-g9cj)
 — "sharp inherited vulnerabilities in libvips" (CVE-2026-33327 / 33328 / 35590 / 35591、
@@ -475,6 +482,10 @@ next (exact pin postcss 8.4.31) → postcss
 - next が postcss>=8.5.12 を内包する版へ更新 → npm update で解消し allowlist 削除
 - 第三者由来の CSS を build/postcss で処理する機能を追加 (**導入 PR で即再評価**)
 - build-time 以外の exploit 経路の報告
+
+**同族の追加 (2026-08-04)**: [GHSA-fxqj-rqcc-2cmp](https://github.com/advisories/GHSA-fxqj-rqcc-2cmp) (GHSA-6g55 の不完全修正・`from`
+未指定時に sourceMappingURL で任意の .map を読む・MODERATE) も同一の到達性判断で accepted (`scripts/audit-gate.mjs` に記録済み・
+本表への記載漏れを 2026-10-06 に補完)。
 
 ### 7.10 HIGH: `postcss` (GHSA-r28c-9q8g-f849)
 
@@ -617,17 +628,16 @@ allowlist 追加 / 削除は本 §7 の update と必ず同期させること (=
 |---|---|---|---|
 | GHSA-qx2v-qp2m-jg93 | postcss | MODERATE | §7.2 |
 | GHSA-w5hq-g745-h8pq | uuid | MODERATE | §7.3 |
-| GHSA-96hv-2xvq-fx4p | ws | HIGH | §7.5 |
-| GHSA-f88m-g3jw-g9cj | sharp | HIGH | §7.8 |
 | GHSA-6g55-p6wh-862q | postcss | HIGH | §7.9 |
+| GHSA-fxqj-rqcc-2cmp | postcss | MODERATE | §7.9 |
 | GHSA-r28c-9q8g-f849 | postcss | HIGH | §7.10 |
 | GHSA-vcc3-ghjq-m6fr | decode-uri-component | MODERATE | §7.12 |
 | GHSA-528h-pc64-c93x | stream-json | MODERATE | §7.13 |
 | GHSA-hqr4-qq8f-hg3x | stream-json | MODERATE | §7.13 |
 | GHSA-mjw6-4jj6-33hc | stream-json | MODERATE | §7.13 |
 
-(§7.1 js-cookie / §7.4 ws〔GHSA-58qx〕/ §7.6 otel core〔GHSA-8988〕は upstream fix 済で
-allowlist から削除済 = 上表は現行の実体。)
+(§7.1 js-cookie / §7.4 ws〔GHSA-58qx〕/ §7.5 ws〔GHSA-96hv〕/ §7.6 otel core〔GHSA-8988〕/
+§7.8 sharp〔GHSA-f88m〕は upstream fix 済で allowlist から削除済 = 上表は現行の実体。)
 
 (2026-05-22 から moderate も gate 対象に昇格、warning-only count threshold は廃止)
 
