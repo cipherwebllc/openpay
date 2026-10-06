@@ -7,6 +7,8 @@ import { JPYC_SERVICES_RESOURCE } from '@/lib/directory/paidResources';
 import { DISCLOSED_X402_FEE } from '@/lib/legal';
 import jaMessages from '@/messages/ja.json';
 import enMessages from '@/messages/en.json';
+// @ts-expect-error The SDK source of truth is JavaScript without declarations.
+import { DEFAULT_MAX_TIMEOUT_SECONDS, MAX_SUPPORTED_TIMEOUT_SECONDS } from '../../packages/x402-sdk/src/guards.mjs';
 
 function shape(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(shape);
@@ -118,6 +120,8 @@ describe('agent page content', () => {
         'このページに秘密鍵の入力欄はありません。鍵を求める OpenPay の画面があれば偽物です。',
         'ウォレットの鍵は、Agent を動かすあなたのマシン上で MCP が作って保管します。会話にも OpenPay にも出ません。ただし、あなたとしてコマンドを実行できるものはこの鍵を読めます。入れるのは失ってもよい少額だけにしてください。OpenPay は鍵を復元できません。',
         'どこで動かすかで選べる方式が変わります。PC のローカルで動く Claude Code / Codex なら Local Wallet・Kova・MetaMask Agent Wallet・Steward のどれでも使えます。スマホの Claude アプリの Code やブラウザ版 Claude Code はクラウド上の使い捨て環境で動くため、そこに Local Wallet を作ると鍵ごと消えます (JPYC を入れないでください)。Kova もその環境に CLI と資格情報が必要なので使えません。MetaMask Agent Wallet も MCP と同じマシンに mm のログイン状態が必要なので使えません。スマホやブラウザからは「人が支払う」(決済リンクを自分のウォレットで承認) を選ぶか、Agent に支払わせたい場合は Steward を使ってください。',
+        'すぐ止めたいときは、AI アプリの設定から OpenPay の MCP (openpay-x402) を外してください (Claude Code なら claude mcp remove openpay-x402)。支払いは 1 回ごとの署名で、トークンの事前承認は使いません。出した署名も最長 20 分 (既定 10 分) で失効するので、ほかに取り消すものはありません。',
+        'Local Wallet には鍵を取り出す機能がありません。入れるのは使い切る分だけにしてください。残高をあとで自分で管理したい・戻したい場合は、鍵が MetaMask の中にある MetaMask Agent Wallet の方式を選び、残高は MetaMask で自分で移してください。',
       ],
     });
   });
@@ -129,8 +133,17 @@ describe('agent page content', () => {
         'This page has no private-key field. Any OpenPay screen asking for a key is fake.',
         'The wallet key is created and kept by the MCP on your own machine, where your agent runs. It never enters the chat or reaches OpenPay. Anything that can run commands as you can still read it, so fund it only with a small amount you can afford to lose. OpenPay cannot recover the key.',
         "Where the agent runs decides which mode you can use. Claude Code or Codex on your own PC can use the Local Wallet, Kova, MetaMask Agent Wallet, or Steward. The Claude mobile app's Code tab and Claude Code on the web run in a disposable cloud environment: a Local Wallet created there disappears with its key (do not fund it), and Kova needs its CLI and credentials on the same machine, so it does not work there either. MetaMask Agent Wallet also needs an mm session on the same machine as the MCP and cannot run there. From a phone or browser, choose Human pays (approve the payment link in your own wallet), or use Steward if the agent must pay.",
+        'To stop the agent from paying right away, remove the OpenPay MCP (openpay-x402) from your AI app’s settings (Claude Code: claude mcp remove openpay-x402). Each payment is a one-time signature with no token approval, and any signature already given expires within 20 minutes at most (10 by default), so there is nothing else to cancel.',
+        'The Local Wallet has no way to export its key. Fund it only with what you plan to spend. If you want to manage the balance yourself or take it back later, choose MetaMask Agent Wallet, where the key stays in MetaMask, and move the funds in MetaMask yourself.',
       ],
     });
+  });
+  // 止め方の案内に書いた署名の有効期限 (最長・既定) が SDK の設定値とずれないこと。
+  it('止め方の案内の有効期限は SDK の上限・既定値と一致する', () => {
+    const ja = agentPageContentFor('ja').safety.points.find((p) => p.startsWith('すぐ止めたいときは'));
+    const en = agentPageContentFor('en').safety.points.find((p) => p.startsWith('To stop the agent'));
+    expect(ja).toContain(`最長 ${MAX_SUPPORTED_TIMEOUT_SECONDS / 60} 分 (既定 ${DEFAULT_MAX_TIMEOUT_SECONDS / 60} 分)`);
+    expect(en).toContain(`within ${MAX_SUPPORTED_TIMEOUT_SECONDS / 60} minutes at most (${DEFAULT_MAX_TIMEOUT_SECONDS / 60} by default)`);
   });
   it.each(['ja', 'en'])('states local enforcement and factual wallet status in %s', (locale) => {
     const c = agentPageContentFor(locale);

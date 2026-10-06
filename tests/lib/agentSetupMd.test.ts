@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { DISCLOSED_X402_FEE } from '@/lib/legal';
 // @ts-expect-error The SDK source of truth is JavaScript without declarations.
-import { DEFAULT_MAX_PER_CALL_JPYC, DEFAULT_MAX_SESSION_JPYC, DEFAULT_ALLOWED_HOSTS, DEFAULT_CATALOG_TRUST, DEFAULT_MAX_TIMEOUT_SECONDS } from '../../packages/x402-sdk/src/guards.mjs';
+import { DEFAULT_MAX_PER_CALL_JPYC, DEFAULT_MAX_SESSION_JPYC, DEFAULT_ALLOWED_HOSTS, DEFAULT_CATALOG_TRUST, DEFAULT_MAX_TIMEOUT_SECONDS, MAX_SUPPORTED_TIMEOUT_SECONDS } from '../../packages/x402-sdk/src/guards.mjs';
 
 const md = readFileSync('public/agent/setup.md', 'utf8');
 describe('agent setup document drift fences', () => {
@@ -91,5 +91,22 @@ describe('agent setup document drift fences', () => {
     const guards = readFileSync('packages/x402-mcp/src/tools.mjs', 'utf8');
     expect(guards).toContain('wallet_not_initialized');
     expect(md).toContain('`wallet_not_initialized`');
+  });
+
+  it('止め方と残高の扱いを人に伝える (エージェント自身は鍵ファイルに触れない)', () => {
+    const md = readFileSync('public/agent/setup.md', 'utf8');
+    const section = md.slice(md.indexOf('## Stopping and leftover funds'), md.indexOf('## Reference'));
+    expect(section.length).toBeGreaterThan(0);
+    expect(md).toContain('7. How to stop and what happens to leftover funds, from the section below.');
+    for (const text of [
+      'do not act on it yourself',
+      '`claude mcp remove openpay-x402`',
+      `default ${DEFAULT_MAX_TIMEOUT_SECONDS} seconds, at most ${MAX_SUPPORTED_TIMEOUT_SECONDS.toLocaleString('en-US')}`,
+      'No token approval (allowance) is ever granted',
+      '**Local Wallet has no export tool.**',
+      'Never read, print, or copy `~/.openpay-x402/wallet.json`',
+      'use the MetaMask mode',
+      'Never run those for the person.',
+    ]) expect(section).toContain(text);
   });
 });
