@@ -32,6 +32,7 @@ const hold = vi.hoisted(() => ({
   dismiss: vi.fn(),
   setOn: vi.fn(),
   panelBlocked: [] as unknown[],
+  panelLocked: [] as unknown[],
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -71,12 +72,13 @@ vi.mock('@/components/StoreGasWalletPanel', () => ({
     storeDevice,
   }: {
     onAddressChange?: (a: string | null) => void;
-    storeDevice?: { blocked: unknown };
+    storeDevice?: { blocked: unknown; locked?: unknown };
   }) => {
     useEffect(() => {
       onAddressChange?.(hold.gas);
     }, [onAddressChange]);
     hold.panelBlocked.push(storeDevice?.blocked);
+    hold.panelLocked.push(storeDevice?.locked);
     return <div>gas-wallet-panel</div>;
   },
 }));
@@ -123,6 +125,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     hold.busy = false;
     hold.dismiss.mockReset();
     hold.panelBlocked.length = 0;
+    hold.panelLocked.length = 0;
     Object.defineProperty(window.navigator, 'locks', { value: { request: vi.fn() }, configurable: true });
     global.fetch = vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }) as Response) as unknown as typeof fetch;
   });
@@ -184,6 +187,8 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
       return v;
     });
     expect(hold.start).not.toHaveBeenCalled();
+    // 切替 OFF でも、通常の QR の前に切替 ON の頃の受け渡しを片付ける (遅れて署名を送らない)
+    expect(hold.release).toHaveBeenCalled();
     expect(sp.get('submit')).toBeNull();
     expect(sp.get('fee_kind')).toBe('register');
   });
@@ -209,12 +214,13 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(shownCheckout()).toBeNull();
   });
 
-  it('受け取った署名を送っている間は QR のボタンを押せない', async () => {
+  it('受け取った署名を送っている間は QR のボタンも切替も押せない', async () => {
     seed();
     hold.busy = true;
     render(<RegisterMode />);
     await screen.findByRole('button', { name: /コーヒー/ });
     for (const b of screen.getAllByRole('button', { name: /QRコードを表示する/ })) expect(b).toBeDisabled();
+    expect(hold.panelLocked.at(-1)).toBe(true);
   });
 
   it('受取先が OpenPay の受取口 (forwarder が revert する) なら使えないと知らせて通常の QR を出す', async () => {

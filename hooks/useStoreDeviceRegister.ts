@@ -213,7 +213,8 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       retryRef.current = null;
       // 送っている・結果を待っている支払いがあれば、その表示 (と次の QR を出さない状態) は残す
       // (取り消せない送信の結果を隠して、通常の QR で二重に払わせない)。
-      if (!activeRef.current && !isBusy(stateRef.current)) {
+      // QR を作っている途中なら作るのをやめる (遅れて返ったセッションは start が手放す)。
+      if (!activeRef.current && (!isBusy(stateRef.current) || stateRef.current.phase === 'creating')) {
         stateRef.current = { phase: 'idle' };
         if (mountedRef.current) setState({ phase: 'idle' });
       }
@@ -452,8 +453,10 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       }
       const { readSentMarks } = await import('@/lib/storeDeviceSend');
       const marks = readSentMarks();
-      // 起動の処理の間に次の QR を出していたら、前回の結果で上書きしない。
+      // 起動の処理の間に次の QR を出していた・この会計の結果を待っている (切替の OFF→ON) なら、前回の結果で
+      // 上書きしない (「この会計の結果が分からない」を「前回」に変えて次の QR を出させない)。
       if (cancelled || !marks.ok || gen !== genRef.current) return;
+      if (activeRef.current || stateRef.current.phase !== 'idle') return;
       const recent = marks.marks
         .filter((m) => Date.now() - m.at < RECENT_MARK_MS && m.chainId === chainId)
         .sort((a, b) => b.at - a.at)[0];
@@ -590,6 +593,12 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
           amount: amount.toString(),
           chainId,
         };
+        // 作っている間に切替を OFF にした・通常の QR に切り替えた → この QR は出さず、手放して締め切る。
+        if (gen !== genRef.current || !enabledRef.current) {
+          abandonedRef.current.add(session.id);
+          void finalize(session);
+          return null;
+        }
         sessionRef.current = session;
         processingRef.current = null;
         storeSession(session);
@@ -597,7 +606,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         return session;
       }
     },
-    [enabled, chainId, settlePrevious, setIf],
+    [enabled, chainId, settlePrevious, setIf, finalize],
   );
 
   /** QR を閉じる: 署名を待っていたセッションは締め切る (署名が入っていれば送る)。 */

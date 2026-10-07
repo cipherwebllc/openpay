@@ -527,6 +527,47 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     expect(result.current.busy).toBe(false);
   });
 
+  it('この会計の結果が分からないまま切替を OFF→ON にしても、「前回」に変えず次の QR を出さないまま', async () => {
+    send.waitReceipt.mockResolvedValueOnce(null);
+    send.readSentMarks.mockReturnValue({ ok: true, marks: [] });
+    readRes = () => json({ ok: true, state: 'signed', merchant: SHOP, amount: AMOUNT.toString(), auth: AUTH });
+    const { result, rerender } = renderHook((p: StoreDeviceRegisterInput) => useStoreDeviceRegister(p), { initialProps: input });
+    await advance(0);
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toMatchObject({ phase: 'unknown', previous: false });
+    // この送信の印が残っている (起動時の処理が「前回の送信」として拾いうる)
+    send.readSentMarks.mockReturnValue({ ok: true, marks: [{ ...MARK, at: Date.now() }] });
+    rerender({ ...input, enabled: false });
+    rerender(input);
+    await advance(0);
+    expect(result.current.state).toMatchObject({ phase: 'unknown', previous: false });
+    expect(result.current.busy).toBe(true);
+  });
+
+  it('QR を作っている途中で切替を OFF にしたら表示を戻し、遅れて返ったセッションは出さずに締め切る', async () => {
+    let release!: (v: Response) => void;
+    createRes = () => new Promise<Response>((r) => { release = r; });
+    const { result, rerender } = renderHook((p: StoreDeviceRegisterInput) => useStoreDeviceRegister(p), { initialProps: input });
+    let starting!: Promise<unknown>;
+    act(() => {
+      starting = result.current.start(SHOP, AMOUNT);
+    });
+    await advance(0);
+    expect(result.current.state).toEqual({ phase: 'creating' });
+    rerender({ ...input, enabled: false });
+    expect(result.current.state).toEqual({ phase: 'idle' });
+    expect(result.current.busy).toBe(false);
+    let created!: unknown;
+    await act(async () => {
+      release(new Response(JSON.stringify({ ok: true, id: ID, token: TOKEN, expiresAt: nowSec() + 600 }), { status: 200 }));
+      created = await starting;
+    });
+    expect(created).toBeNull();
+    expect(of('/close')).toHaveLength(1);
+    expect(window.sessionStorage.getItem(STORE_DEVICE_SESSION_KEY)).toBeNull();
+  });
+
   it('再読み込み後: 最近送った印があれば、その結果を「前回の送信」として出す', async () => {
     send.readSentMarks.mockReturnValue({ ok: true, marks: [{ ...MARK, at: Date.now() - 60_000 }] });
     const { result } = renderHook(() => useStoreDeviceRegister(input));

@@ -507,8 +507,9 @@ function RegisterModeContent({
       // 作れなかった (理由は状態に出る)・前の会計の署名の送信を優先した → QR は開かない。
       if (!s) return;
       setStoreSessionId(s.id);
-    } else if (sdEnabled) {
-      // 通常の QR: 前の受け渡しを締め切ってから出す (署名が入っていたら端末が送るので、通常の QR は出さない)。
+    } else if (env.enableStoreGasWallet) {
+      // 通常の QR: 前の受け渡し (切替を OFF にする前のものも) を締め切ってから出す。署名が入っていたら
+      // 端末が送るので、通常の QR は出さない。受け渡しが無ければ通信せずにすぐ出す。
       if (!(await device.releaseForNormal())) return;
       setStoreSessionId(null);
     }
@@ -1001,7 +1002,12 @@ function RegisterModeContent({
       )}
       {env.enableStoreGasWallet && (
         <StoreGasWalletPanel
-          storeDevice={{ on: storeDeviceOn, onToggle: setStoreDeviceOn, blocked: sdBlocked }}
+          storeDevice={{
+            on: storeDeviceOn,
+            onToggle: setStoreDeviceOn,
+            blocked: sdBlocked,
+            locked: device.busy || qrModalOpen || sdState.phase === 'waiting',
+          }}
           onAddressChange={setGasAddress}
         />
       )}

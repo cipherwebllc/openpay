@@ -32,6 +32,8 @@ export type StoreDeviceToggle = {
   on: boolean;
   onToggle: (on: boolean) => void;
   blocked: 'no_locks' | 'config' | null;
+  /** QR を出している・支払いを送っている・結果を待っている間は切り替えさせない。 */
+  locked?: boolean;
 };
 
 export function StoreGasWalletPanel({
@@ -196,7 +198,7 @@ export function StoreGasWalletPanel({
                   type="checkbox"
                   className="mt-0.5"
                   checked={storeDevice.on}
-                  disabled={storeDevice.blocked !== null}
+                  disabled={storeDevice.blocked !== null || !!storeDevice.locked}
                   onChange={(e) => storeDevice.onToggle(e.target.checked)}
                 />
                 <span>{t('storeDevice.toggle')}</span>
