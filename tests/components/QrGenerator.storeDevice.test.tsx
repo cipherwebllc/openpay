@@ -138,6 +138,21 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
 
+    it('締め切りを待つ間にお店負担へ切り替えたら、通常の QR は出さない', async () => {
+      const user = userEvent.setup();
+      let resolve!: (v: boolean) => void;
+      sd.releaseForNormal.mockReturnValue(new Promise<boolean>((r) => { resolve = r; }));
+      const [btn] = await ready(user);
+      await user.click(btn);
+      const toggle = await screen.findByRole('button', { name: /高度な設定/ });
+      if (toggle.getAttribute('aria-expanded') !== 'true') await user.click(toggle);
+      await user.click(screen.getByRole('button', { name: /お店がガス代を肩代わり/ }));
+      resolve(true);
+      await waitFor(() => expect(sd.releaseForNormal).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 0));
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
     it('受け渡しを締め切れたら (または無ければ) 通常の QR を開く・お店の端末には「使わない」と知らせる', async () => {
       const user = userEvent.setup();
       const [btn] = await ready(user);
@@ -250,6 +265,32 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       const [btn] = await ready(user);
       await user.click(btn);
       await waitFor(() => expect(sd.start).toHaveBeenCalled());
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('受け渡しを作る間に金額を変えたら、その QR は出さずに締め切る (請求額の違う QR を出さない)', async () => {
+      const user = userEvent.setup();
+      seed();
+      let resolve!: (v: unknown) => void;
+      sd.start.mockReturnValue(new Promise((r) => { resolve = r; }));
+      const [btn] = await ready(user);
+      await user.click(btn);
+      await user.type(screen.getByPlaceholderText('1000'), '0'); // 500 → 5000
+      resolve({ id: HS, token: 'ab'.repeat(32), expiresAt: 0, merchant: VALID, amount: '1', chainId: 80002 });
+      await waitFor(() => expect(sd.stop).toHaveBeenCalled());
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('受け渡しを作る間に金額なしへ切り替えても、通常の QR を黙って出さない', async () => {
+      const user = userEvent.setup();
+      seed();
+      let resolve!: (v: unknown) => void;
+      sd.start.mockReturnValue(new Promise((r) => { resolve = r; }));
+      const [btn] = await ready(user);
+      await user.click(btn);
+      await user.click(screen.getByRole('button', { name: /据え置き/ }));
+      resolve({ id: HS, token: 'ab'.repeat(32), expiresAt: 0, merchant: VALID, amount: '1', chainId: 80002 });
+      await waitFor(() => expect(sd.stop).toHaveBeenCalled());
       expect(screen.queryByRole('dialog')).toBeNull();
     });
 

@@ -101,8 +101,9 @@ export function QrGenerator() {
   // 状態はタブの上に出る)。締め切っていない受け渡しは締め切ってから (署名が入っていたら端末が送るので出さない)。
   // flag OFF では今までどおりそのまま開く。
   const storeDevice = useStoreDeviceMode();
-  // 「お店がガス代を肩代わりして送る」の QR を出している受け渡し (null = 出していない)。
-  const [storeSessionId, setStoreSessionId] = useState<string | null>(null);
+  // 「お店がガス代を肩代わりして送る」の QR (受け渡しを作った時点の会計で組み立てたもの・null = 出していない)。
+  // 受け渡しの請求額と QR の会計を必ず揃えるため、表示はこの写しから作る (後から入力が変わっても混ぜない)。
+  const [storeQr, setStoreQr] = useState<{ id: string; url: string; amountText: string } | null>(null);
   // 店員が「通常の QR を出す」を選んだ (お店負担の QR を作れない・読み取れないとき)。
   const [forceNormalQr, setForceNormalQr] = useState(false);
   // 初回に QR モーダルを開いた「ピークモーメント」を latch。以降 A2HS hint を出す
@@ -351,15 +352,16 @@ export function QrGenerator() {
   const storeForSale = storeRequested && storeBlocked === null && storeDevice.enabled;
   // お店負担の QR を出す・出している (通常の QR を店員が選んだときを除く)。
   const storeQrMode = storeRequested && !forceNormalQr;
-  // お客様が開く /checkout (1 品・feeKind は付けない = parse が fail-closed で弾くため・金額は上の検証済みの値)。
-  const storeQrUrl =
-    storeQrMode && storeSessionId && effectiveReceiver && origin && amountValid && mode === 'amount'
-      ? buildCheckoutUrl(origin, {
+  // お客様が開く /checkout の中身 (1 品・feeKind は付けない = parse が fail-closed で弾くため・金額は上の検証済みの値)。
+  // 受け渡しの id は作った後に足す。
+  const storeCheckout =
+    storeQrMode && effectiveReceiver && origin && amountValid && mode === 'amount'
+      ? {
           to: effectiveReceiver,
           token: settings.token,
           chain: settings.chain,
           gas: effectiveGasMode,
-          mode: 'gasless',
+          mode: 'gasless' as const,
           items: [
             {
               name: settings.productName.trim() || t('storeDevice.itemName'),
@@ -373,10 +375,22 @@ export function QrGenerator() {
           receiptNo: receiptNo || undefined,
           storeName: settings.storeName.trim() || undefined,
           invoiceNo: settings.invoiceNo || undefined,
-          submit: 'store',
-          handoffId: storeSessionId,
-        })
-      : '';
+          submit: 'store' as const,
+        }
+      : null;
+  // QR を出す判断の時点と、受け渡しを作り終えた時点で会計・設定が同じか (作っている間に金額・受取先・決済モード等を
+  // 変えたら、その QR は出さずに受け渡しを締め切る = 請求額の違う QR・黙って通常の QR にしない)。
+  const storeOpenKey = JSON.stringify([
+    storeRequested,
+    storeForSale,
+    storeBillWei.toString(),
+    storeCheckout,
+    payUrl,
+  ]);
+  const storeOpenKeyRef = useRef(storeOpenKey);
+  useEffect(() => {
+    storeOpenKeyRef.current = storeOpenKey;
+  }, [storeOpenKey]);
 
   const handleResolved = useCallback((addr: Address | null) => {
     setResolvedReceiver(addr);
@@ -598,48 +612,78 @@ export function QrGenerator() {
       }
       if (device.busy) return;
       setForceNormalQr(false);
+      const key = storeOpenKeyRef.current;
       if (storeRequested) {
         // 使えない会計・準備中 (ガス用ウォレットの確認待ち等) は出さない (ボタンも押せない・理由を出す)。
-        if (!storeForSale || !effectiveReceiver) return;
-        void device.start(getAddress(effectiveReceiver), storeBillWei).then((session) => {
-          // 作れなかった (理由は状態に出る)・前の会計の署名の送信を優先した → QR は開かない。
-          if (!session) return;
-          setStoreSessionId(session.id);
-          setQrModalOpen(true);
-        });
+        if (!storeForSale || !effectiveReceiver || !storeCheckout) return;
+        void openStoreQr(key, getAddress(effectiveReceiver), storeBillWei, storeCheckout, amountLabelText);
         return;
       }
       void device.releaseForNormal().then((ok) => {
-        if (!ok) return;
-        setStoreSessionId(null);
+        // 締め切りを待つ間にお店負担へ切り替えた等 → 通常の QR は出さない (押し直してもらう)。
+        if (!ok || storeOpenKeyRef.current !== key) return;
+        setStoreQr(null);
         setQrModalOpen(true);
       });
     },
-    [device, storeRequested, storeForSale, effectiveReceiver, storeBillWei],
+    // openStoreQr は描画ごとに作り直すが、中身は引数と ref だけを使う。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [device, storeRequested, storeForSale, effectiveReceiver, storeBillWei, storeCheckout, amountLabelText],
   );
+  /** 受け渡しを作り、作った時点の会計で QR を組み立てて出す。作る間に会計・設定が変わったら出さずに締め切る。 */
+  async function openStoreQr(
+    key: string,
+    merchant: Address,
+    wei: bigint,
+    checkout: NonNullable<typeof storeCheckout>,
+    amountText: string,
+  ): Promise<boolean> {
+    const session = await device.start(merchant, wei);
+    // 作れなかった (理由は状態に出る)・前の会計の署名の送信を優先した → QR は開かない。
+    if (!session) return false;
+    if (storeOpenKeyRef.current !== key) {
+      device.stop();
+      return false;
+    }
+    setStoreQr({ id: session.id, url: buildCheckoutUrl(origin, { ...checkout, handoffId: session.id }), amountText });
+    setQrModalOpen(true);
+    return true;
+  }
   function closeQrModal() {
     setQrModalOpen(false);
     setForceNormalQr(false);
-    if (storeSessionId) {
+    if (storeQr) {
       // 署名を待っていた受け渡しは締め切る (署名が入っていれば送る・結果はタブの上に出る)。
       device.stop();
-      setStoreSessionId(null);
+      setStoreQr(null);
     }
   }
   async function reissueStoreQr() {
-    if (!effectiveReceiver || !storeForSale) return;
-    const session = await device.start(getAddress(effectiveReceiver), storeBillWei);
-    setStoreSessionId(session?.id ?? null);
-    setQrModalOpen(!!session);
+    // 出し直す間は前の (薄くした) QR のまま。出せなければ閉じる (通常の QR に変えない)。
+    const opened =
+      !!effectiveReceiver &&
+      storeForSale &&
+      !!storeCheckout &&
+      (await openStoreQr(
+        storeOpenKeyRef.current,
+        getAddress(effectiveReceiver),
+        storeBillWei,
+        storeCheckout,
+        amountLabelText,
+      ));
+    if (!opened) {
+      setStoreQr(null);
+      setQrModalOpen(false);
+    }
   }
   async function showNormalQr() {
     // 店員が選んだときだけ通常の QR (署名を待っていた受け渡しを締め切ってから・署名が入っていたら出さない)。
     if (!(await device.releaseForNormal())) return;
-    setStoreSessionId(null);
+    setStoreQr(null);
     setForceNormalQr(true);
     setQrModalOpen(true);
   }
-  const storeQrShown = storeQrMode && storeSessionId !== null && storeQrUrl !== '';
+  const storeQrShown = storeQr !== null && !forceNormalQr;
   const sdState = device.state;
   // QR を薄くする: 署名を受け取った後・受付時間の終わり (次のお客様に読ませない)。
   const storeQrDimmed =
@@ -780,7 +824,8 @@ export function QrGenerator() {
       />
 
       {/* 全画面プレビュー (ポスター調 + 印刷/コピー/SVG/PNG + × 閉じる)。決済QR/レジ共通。 */}
-      {payUrl && (
+      {/* お店負担を選んでいる間は、お店負担の QR (受け渡し済み) か、店員が選んだ通常の QR だけを出す。 */}
+      {payUrl && (!storeQrMode || storeQr) && (
         <QrPreviewModal
           open={qrModalOpen}
           convertExpired={convertExpired || storeQrDimmed}
@@ -800,10 +845,10 @@ export function QrGenerator() {
             step2: t('posterStepConfirm'),
             step3: t('posterStepDone'),
           }}
-          qrValue={storeQrShown ? storeQrUrl : payUrl}
+          qrValue={storeQrShown ? storeQr.url : payUrl}
           qrRef={qrRef}
           storeName={settings.storeName.trim() || t('posterDefaultStoreName')}
-          amountText={amountLabelText}
+          amountText={storeQrShown ? storeQr.amountText : amountLabelText}
           payModeBadge={storeQrShown ? { text: t('storeDevice.posterBadge'), tone: 'gasless' } : {
             text:
               payMode === 'gasless'

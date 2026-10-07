@@ -112,12 +112,14 @@ describe('useQrSettings', () => {
     expect(result.current.settings.chain).toBe('base');
   });
 
-  it('決済モードの 3 つ目 (storePays) は厳密に true かつガスレスのときだけ・既定 false', async () => {
+  it('決済モードの 3 つ目 (storePays) は厳密に true のときだけ・既定 false・通常決済との組み合わせでも消さない', async () => {
+    // 通常決済との組み合わせは「選んでいない」扱い (lib/storePaysMode.ts) だが、保存値は残す (レジの商品で USDC・
+    // 通常決済に暗黙に切り替わってから JPYC に戻ったとき、選んだ状態が黙って消えない)。
     for (const [saved, want] of [
       [{ payMode: 'gasless', storePays: true }, true],
       [{ payMode: 'gasless', storePays: 'true' }, false],
       [{ payMode: 'gasless', storePays: 1 }, false],
-      [{ payMode: 'standard', storePays: true }, false],
+      [{ payMode: 'standard', storePays: true }, true],
       [{ payMode: 'gasless' }, false],
     ] as const) {
       window.localStorage.setItem(KEY, JSON.stringify({ token: 'jpyc', chain: 'polygon', ...saved }));

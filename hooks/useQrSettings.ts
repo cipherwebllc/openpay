@@ -305,8 +305,10 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
         ? loaded.gasMode
         : DEFAULT_SETTINGS.gasMode,
     payMode,
-    // 厳密に true で、ガスレスのときだけ (旧 schema・不正値・通常決済との組み合わせは false)。
-    storePays: loaded.storePays === true && payMode === 'gasless',
+    // 厳密に true のときだけ (旧 schema・不正値は false)。通常決済 (standard) との組み合わせは消さずに残し、
+    // 使うかは lib/storePaysMode.ts が payMode も見て決める (レジの商品で USDC・通常決済に暗黙に切り替わってから
+    // JPYC に戻ったとき、選んだ「お店がガス代を肩代わり」が黙って消えない)。
+    storePays: loaded.storePays === true,
     splits: sanitizeSplits(loaded.splits),
     storeName: sanitizeText(loaded.storeName, STORE_NAME_MAX),
     invoiceNo: sanitizeText(loaded.invoiceNo, INVOICE_REGISTRATION_INPUT_MAX),
