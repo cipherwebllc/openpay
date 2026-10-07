@@ -150,9 +150,14 @@ describe('HistoryRow', () => {
   });
 
   it('お店の端末で送る経路の手数料欄 1 wei は「1 wei（仕組み上・0 円）」と表示 (記録は 1 wei のまま)', () => {
-    render(<HistoryRow entry={entry({ feeAmount: '1' })} onRemove={() => undefined} />);
+    render(<HistoryRow entry={entry({ feeAmount: '1', gasMode: 'merchant' })} onRemove={() => undefined} />);
     expect(screen.getByText('1 wei（仕組み上・0 円）')).toBeInTheDocument();
     expect(screen.queryByText(/0\.000000000000000001/)).toBeNull();
+  });
+
+  it('他の経路の手数料が 1 wei でも、この表示にはしない (お客様がガスを払う経路)', () => {
+    render(<HistoryRow entry={entry({ feeAmount: '1' })} onRemove={() => undefined} />);
+    expect(screen.queryByText('1 wei（仕組み上・0 円）')).toBeNull();
   });
 
   it('standard mode + gasMode=null → "—" 表示', () => {

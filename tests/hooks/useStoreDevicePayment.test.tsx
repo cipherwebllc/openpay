@@ -220,6 +220,33 @@ describe('useStoreDevicePayment', () => {
     expect(stored()).not.toBeNull();
   });
 
+  it('別タブが結果不明にした記録は、このタブで支払い済みの結論が出ても消さない', async () => {
+    seedIntent(OTHER_HS, Math.floor(Date.now() / 1000) - 100);
+    resolveResponse = () => {
+      seedIntent(OTHER_HS, Math.floor(Date.now() / 1000) - 100, { unknown: true }); // 別タブが結果不明にした
+      return json({ ok: true, state: 'settled', txHash: TX });
+    };
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await advance(10);
+    expect(result.current.status).toMatchObject({ phase: 'previous', outcome: 'success' });
+    expect(JSON.parse(stored()!)).toMatchObject({ unknown: true });
+  });
+
+  it('確認中に記録が別タブで消えても、QR が変わったら初期化せず確認を続け、署名しない', async () => {
+    seedIntent(HS);
+    const { result, rerender } = renderHook(({ hs }) => useStoreDevicePayment(deployment, hs), {
+      initialProps: { hs: HS },
+    });
+    await advance(10);
+    expect(result.current.status).toMatchObject({ phase: 'waiting', otherCheckout: false });
+    window.localStorage.removeItem(STORE_DEVICE_INTENT_KEY); // 別タブが結論を受けて消した
+    rerender({ hs: OTHER_HS });
+    await advance(0);
+    expect(result.current.status).toMatchObject({ phase: 'waiting', otherCheckout: true });
+    await payNow(result);
+    expect(w.signTypedData).not.toHaveBeenCalled();
+  });
+
   it('Web Locks が無いブラウザではこの方法を使わない (署名しない)', async () => {
     setLocks(undefined);
     const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));

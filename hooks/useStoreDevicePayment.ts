@@ -182,13 +182,17 @@ function saveIntent(intent: StoreDeviceIntent): boolean {
 
 /**
  * 保存されているのが同じ署名 (nonce) のときだけ消す (別タブの新しい支払いの記録を消さない)。
- * その署名の記録がもう無いと確かめられたら true。
+ * 結果不明の記録は、お客様の「確かめました」(acknowledged) でしか消さない (別タブが結論を受けても、
+ * その結論をお客様が見ていないことがあるため)。その署名の記録がもう無いと確かめられたら true。
  */
-function clearIntentIf(nonce: Hex): boolean {
+function clearIntentIf(nonce: Hex, acknowledged = false): boolean {
   const same = (r: ReturnType<typeof readIntentResult>) =>
     r.ok && r.intent?.nonce.toLowerCase() === nonce.toLowerCase();
   try {
-    if (same(readIntentResult())) window.localStorage.removeItem(STORE_DEVICE_INTENT_KEY);
+    const before = readIntentResult();
+    if (same(before) && (acknowledged || !(before.ok && before.intent?.unknown))) {
+      window.localStorage.removeItem(STORE_DEVICE_INTENT_KEY);
+    }
   } catch {
     return false;
   }
@@ -300,12 +304,17 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
       setStatus(waitingStatus(saved, handoffId));
       return;
     }
-    // (前の QR の誤り・ブロックも新しい QR には持ち越さない)
-    setStatus((s) =>
-      s.phase === 'error' || ('intent' in s && s.intent.handoffId !== handoffId && s.phase !== 'previous')
-        ? { phase: 'idle' }
-        : s,
-    );
+    // (前の QR の誤り・ブロックも新しい QR には持ち越さない)。ただし確認中・結果不明は初期化しない
+    // (記録が別タブで消えていても、このタブで確認を続ける・お客様の確認を待つ)。
+    setStatus((s) => {
+      if (s.phase === 'waiting' || s.phase === 'used_unresolved') {
+        return { ...s, otherCheckout: s.intent.handoffId !== handoffId };
+      }
+      if (s.phase === 'error' || ((s.phase === 'success' || s.phase === 'expired') && s.intent.handoffId !== handoffId)) {
+        return { phase: 'idle' };
+      }
+      return s;
+    });
   }, [handoffId]);
 
   // 結論が出るまでの確認。
@@ -330,8 +339,7 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
         setTracking(null);
         return true;
       }
-      // 結果不明の記録も、支払い済みの証明 (確定ブロックの Settled) が出たら消してよい (二重払いの恐れが無い)。
-      // 期限切れ・未使用は、確定ブロックで使用済みの結果不明と両立しない。
+      // 別タブが結果不明にした記録は消さない (お客様の「確かめました」まで残す)。
       // 消せなくても、次に開いたときは判定で同じ結論が出て消える。
       void withPayLock(async () => clearIntentIf(tracking.nonce));
       if (other) {
@@ -447,7 +455,7 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
   const acknowledge = useCallback(async () => {
     if (status.phase !== 'used_unresolved') return;
     const current = status;
-    const cleared = await withPayLock(async () => clearIntentIf(current.intent.nonce));
+    const cleared = await withPayLock(async () => clearIntentIf(current.intent.nonce, true));
     // 消せなかったら閉じない (閉じても次の支払いで同じ案内に戻り、行き来するだけになる)。
     setStatus(cleared ? { phase: 'idle' } : { ...current, ackFailed: true });
   }, [status]);
@@ -464,6 +472,8 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
     }): Promise<void> => {
       if (inFlight.current) return;
       if (status.phase === 'error' && status.blocking) return;
+      // 確認中・結果不明の間は新しい署名を作らない (画面のボタンだけに頼らない)。
+      if (status.phase === 'waiting' || status.phase === 'used_unresolved') return;
       if (!walletClient || !address || chainId === undefined) {
         setStatus({ phase: 'error', reason: 'wallet_not_connected', blocking: false });
         return;

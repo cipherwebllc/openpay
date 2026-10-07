@@ -280,7 +280,10 @@ export function HistoryRow({
             <dt className="text-slate-500">{t('columnFee')}</dt>
             {/* お店の端末で送る経路の手数料欄は仕組み上の 1 wei (user 裁定: 記録は 1 wei のまま、表示だけ短く)。 */}
             <dd>
-              {entry.asset === 'jpyc' && entry.feeAmount === '1'
+              {entry.asset === 'jpyc' &&
+              entry.payMode === 'gasless' &&
+              entry.gasMode === 'merchant' &&
+              entry.feeAmount === '1'
                 ? t('feeOneWei')
                 : fmt(entry.feeAmount, entry.asset)}
             </dd>

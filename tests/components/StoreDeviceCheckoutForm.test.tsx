@@ -197,10 +197,12 @@ describe('StoreDeviceCheckoutForm', () => {
     expect(hold.acknowledge).toHaveBeenCalled();
   });
 
-  it('「確かめました」で記録を消せなかったら、通常の決済を案内する', () => {
+  it('「確かめました」で記録を消せなかったら、成立していないことを確かめてから店員に伝えるよう案内する (通常の決済を無条件に勧めない)', () => {
     hold.status = { phase: 'used_unresolved', intent: INTENT, otherCheckout: false, ackFailed: true };
     render(<StoreDeviceCheckoutForm params={params} />);
-    expect(screen.getByRole('alert')).toHaveTextContent(/この端末の記録を消せませんでした/);
+    expect(screen.getByRole('alert')).toHaveTextContent(/この端末の記録を消せなかったため/);
+    expect(screen.getByRole('alert')).toHaveTextContent(/成立していないことを確かめてから/);
+    expect(screen.queryByText(/通常の決済を頼んでください/)).toBeNull();
   });
 
   it('前の会計の結果不明は、前の会計の店名・金額を添えて案内する', () => {
