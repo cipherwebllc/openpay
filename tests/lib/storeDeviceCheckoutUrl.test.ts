@@ -15,6 +15,8 @@ vi.mock('@/lib/env', async (importOriginal) => {
 });
 
 import { buildCheckoutPath, parseCheckoutParams, type CheckoutItem } from '@/lib/url';
+import { storeDeviceChainId } from '@/lib/storeDevicePayment';
+import { storeGasWalletChain } from '@/lib/storeGasWallet';
 
 const TO = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
 const HS = 'AbCdEfGhIjKlMnOpQrStUv';
@@ -79,5 +81,9 @@ describe('/checkout の「お店の端末で送る」(submit=store&hs=)', () => 
       expect(path).toContain('submit=store');
       expect(parse(path)).toMatchObject({ ok: false, urlError: { code: 'storeDeviceUnavailable' } });
     }
+  });
+
+  it('URL の検査のチェーンと、ガス用ウォレット・受け渡しのチェーンは同じ (二重定義のずれを防ぐ)', () => {
+    expect(storeDeviceChainId()).toBe(storeGasWalletChain().id);
   });
 });

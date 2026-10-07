@@ -117,16 +117,28 @@ const handoffFeeReceiverFor = (chainId: number) => {
 export function resolveDeps(): StoreHandoffResolveDeps {
   return {
     expectedChainId: storeGasWalletChain().id,
+    nowSec: () => Math.floor(Date.now() / 1000),
     jpycAddressFor,
     forwarderFor: jpycForwarderFor,
     feeReceiverFor: handoffFeeReceiverFor,
-    async successfulReceiptLogs(chainId: number, txHash: Hex): Promise<Log[] | null> {
+    async successfulReceipt(chainId: number, txHash: Hex) {
       try {
         const receipt = await publicClientFor(chainId).getTransactionReceipt({ hash: txHash });
-        return receipt.status === 'success' ? receipt.logs : null;
+        return receipt.status === 'success'
+          ? { logs: receipt.logs as Log[], blockNumber: receipt.blockNumber, blockHash: receipt.blockHash }
+          : null;
       } catch {
         return null; // 見つからない・RPC 障害は「確かめられなかった」(結論は pending)
       }
+    },
+    async isFinalizedCanonical(chainId: number, blockNumber: bigint, blockHash: Hex) {
+      // 確定ブロックがそのブロック以降まで進み、いまの正規チェーンの同じ番号のブロックが同じ hash か
+      // (reorg で消えた成功を「支払い済み」にしない)。
+      const client = publicClientFor(chainId);
+      const finalized = await client.getBlock({ blockTag: 'finalized' });
+      if (typeof finalized.number !== 'bigint' || finalized.number < blockNumber) return false;
+      const canonical = await client.getBlock({ blockNumber });
+      return canonical.hash === blockHash;
     },
     hasMatchingSettlement: hasMatchingForwarderSettlement,
     readAuthorizationUsed,

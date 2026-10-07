@@ -17,7 +17,7 @@ import {
   type StoreDeviceIntent,
   type StoreDevicePaymentSnapshot,
 } from '@/hooks/useStoreDevicePayment';
-import { chainForSlug, txExplorerUrl } from '@/lib/chains';
+import { addressExplorerUrl, chainForSlug, txExplorerUrl } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { formatTokenAmount } from '@/lib/format';
 import { STORE_DEVICE_FEE_WEI } from '@/lib/storeDevicePayment';
@@ -37,12 +37,18 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
   const { address, isConnected } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
   const handoffId = params.handoffId ?? '';
-  const { status, pay } = useStoreDevicePayment(deployment, handoffId);
-  // 署名した時点で固定した値 (履歴・控えはこれで作る・後からウォレットや URL が変わっても動かない)。
+  const { status, pay, checkNow } = useStoreDevicePayment(deployment, handoffId);
+  // 署名した時点で固定した値 (表示・履歴・控えはこれで作る・後からウォレットや URL が変わっても動かない)。
   const frozen: StoreDeviceIntent | null =
-    status.phase === 'waiting' || status.phase === 'success' || status.phase === 'expired'
+    status.phase === 'waiting' ||
+    status.phase === 'success' ||
+    status.phase === 'expired' ||
+    status.phase === 'used_unresolved' ||
+    status.phase === 'previous'
       ? status.intent
       : null;
+  // 結論待ちの間 (この会計でも前の会計でも) は、別の支払いを勧める案内を出さない。
+  const unresolved = status.phase === 'waiting';
 
   const bill = useMemo(
     () => calcCheckoutTotal(params.items, deployment.decimals),
@@ -124,7 +130,13 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
       locale,
     };
   }, [frozen, deployment, chainSlug, params, bill, address, locale]);
-  const successTx = status.phase === 'success' ? status.txHash : null;
+  // 記録するのは「支払い済み」の結論だけ (前の会計の結論も、その会計の値で記録する)。
+  const successTx =
+    status.phase === 'success'
+      ? status.txHash
+      : status.phase === 'previous' && status.outcome === 'success'
+        ? status.txHash
+        : null;
   const gaslessSnapshot: GaslessSnapshot = useMemo(() => {
     const merchantValue = frozen ? BigInt(frozen.merchantValue) : bill;
     const variables = {
@@ -147,7 +159,8 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
 
   const busy =
     status.phase === 'signing' || status.phase === 'submitting' || status.phase === 'waiting';
-  const done = status.phase === 'success' || status.phase === 'expired';
+  const done =
+    status.phase === 'success' || status.phase === 'expired' || status.phase === 'used_unresolved';
   const blocked = status.phase === 'error' && status.blocking;
   const canPay =
     isConnected && !wrongChain && !insufficientBalance && !busy && !done && !blocked && bill > 0n;
@@ -198,7 +211,7 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
               {t('balanceLabel')} <span className="font-mono">{fmt(balance)}</span>
             </p>
           )}
-          {insufficientBalance && (
+          {insufficientBalance && !unresolved && (
             <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
               {t('storeDevice.insufficientBalance', { amount: fmt(bill) })}
             </p>
@@ -239,13 +252,75 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
       )}
 
       {status.phase === 'waiting' && (
-        <div className="rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-900">
+        <div className="space-y-2 rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-900">
           {/* 読み上げは状態だけ (秒数の更新を毎秒読み上げない)。 */}
           <p role="status">
-            {status.otherCheckout ? t('storeDevice.waitingOther') : t('storeDevice.waiting')}
+            {status.otherCheckout
+              ? t('storeDevice.waitingOther')
+              : status.confirming
+                ? t('storeDevice.confirming')
+                : t('storeDevice.waiting')}
           </p>
+          {status.otherCheckout && (
+            <p className="text-xs text-sky-800">
+              {t('storeDevice.previousPayment', {
+                store: status.intent.snapshot.storeName ?? '—',
+                amount: fmt(BigInt(status.intent.merchantValue)),
+              })}
+            </p>
+          )}
           {remaining > 0 && (
-            <p className="mt-1 text-xs text-sky-800">{t('storeDevice.remaining', { seconds: remaining })}</p>
+            <p className="text-xs text-sky-800">{t('storeDevice.remaining', { seconds: remaining })}</p>
+          )}
+          {status.autoStopped && <p className="text-xs text-sky-800">{t('storeDevice.autoStopped')}</p>}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={checkNow}
+              className="rounded-lg border border-sky-300 bg-white px-3 py-1.5 text-xs font-semibold text-sky-900 hover:bg-sky-100"
+            >
+              {t('storeDevice.checkNow')}
+            </button>
+            {(() => {
+              const href = status.txHint
+                ? txExplorerUrl(deployment.chainId, status.txHint)
+                : addressExplorerUrl(deployment.chainId, status.intent.from);
+              return href ? (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="text-xs text-sky-800 underline underline-offset-2"
+                >
+                  {status.txHint ? t('storeDevice.viewTx') : t('storeDevice.viewWallet')}
+                </a>
+              ) : null;
+            })()}
+          </div>
+        </div>
+      )}
+
+      {status.phase === 'previous' && (
+        <p role="status" className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-800">
+          {t(`storeDevice.previous.${status.outcome}`, {
+            store: status.intent.snapshot.storeName ?? '—',
+            amount: fmt(BigInt(status.intent.merchantValue)),
+          })}
+        </p>
+      )}
+
+      {status.phase === 'used_unresolved' && (
+        <div role="alert" className="space-y-1 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p>{t('storeDevice.usedUnresolved')}</p>
+          {addressExplorerUrl(deployment.chainId, status.intent.from) && (
+            <a
+              href={addressExplorerUrl(deployment.chainId, status.intent.from)}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-xs underline underline-offset-2"
+            >
+              {t('storeDevice.viewWallet')}
+            </a>
           )}
         </div>
       )}
@@ -266,7 +341,6 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
           <PayerReceiptCompletion candidateIds={[status.txHash]} />
         </section>
       )}
-
 
       {status.phase === 'expired' && (
         <p role="alert" className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">

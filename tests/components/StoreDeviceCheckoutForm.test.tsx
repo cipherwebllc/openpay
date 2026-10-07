@@ -5,6 +5,7 @@ import { renderWithIntl as render } from '../_helpers/i18n';
 const hold = vi.hoisted(() => ({
   status: { phase: 'idle' } as Record<string, unknown>,
   pay: vi.fn(),
+  checkNow: vi.fn(),
   balance: { balance: 10n ** 22n, insufficientBalance: false, wrongChain: false } as Record<string, unknown>,
   history: [] as unknown[][],
   connected: true,
@@ -18,7 +19,7 @@ vi.mock('@/components/PayerReceiptCompletion', () => ({
   PayerReceiptCompletion: ({ candidateIds }: { candidateIds: unknown[] }) => <div>receipt:{String(candidateIds[0])}</div>,
 }));
 vi.mock('@/hooks/useStoreDevicePayment', () => ({
-  useStoreDevicePayment: () => ({ status: hold.status, pay: hold.pay }),
+  useStoreDevicePayment: () => ({ status: hold.status, pay: hold.pay, checkNow: hold.checkNow }),
 }));
 vi.mock('@/hooks/useErc20BalanceAndChain', () => ({ useErc20BalanceAndChain: () => hold.balance }));
 vi.mock('@/hooks/usePaymentHistory', () => ({
@@ -31,7 +32,9 @@ import { StoreDeviceCheckoutForm } from '@/components/StoreDeviceCheckoutForm';
 import type { CheckoutParams } from '@/lib/url';
 
 const INTENT = {
-  v: 2,
+  v: 3,
+  forwarder: '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4',
+  feeReceiver: '0x428483FbA62eDCef1E3a100d3799F6d71759c560',
   handoffId: 'AbCdEfGhIjKlMnOpQrStUv',
   chainId: 80002,
   from: '0x0000000000000000000000000000000000000aaa',
@@ -88,7 +91,7 @@ describe('StoreDeviceCheckoutForm', () => {
   });
 
   it('送信待ちは状態だけを読み上げ (秒数は読み上げ領域の外)、押せない', () => {
-    hold.status = { phase: 'waiting', intent: INTENT, otherCheckout: false };
+    hold.status = { phase: 'waiting', intent: INTENT, otherCheckout: false, txHint: null, confirming: false, autoStopped: false };
     render(<StoreDeviceCheckoutForm params={params} />);
     expect(screen.getByRole('status')).toHaveTextContent('お店の端末の送信と確認を待っています…');
     expect(screen.getByRole('status')).not.toHaveTextContent(/秒/);
@@ -97,9 +100,10 @@ describe('StoreDeviceCheckoutForm', () => {
   });
 
   it('別の会計の未解決の支払いを確認中なら、その旨を出して押せない', () => {
-    hold.status = { phase: 'waiting', intent: { ...INTENT, handoffId: 'ZZZZZZZZZZZZZZZZZZZZZZ' }, otherCheckout: true };
+    hold.status = { phase: 'waiting', intent: { ...INTENT, handoffId: 'ZZZZZZZZZZZZZZZZZZZZZZ' }, otherCheckout: true, txHint: null, confirming: false, autoStopped: false };
     render(<StoreDeviceCheckoutForm params={params} />);
     expect(screen.getByRole('status')).toHaveTextContent(/前のお支払いの結果を確認しています/);
+    expect(screen.getByText(/前のお支払い: OpenPay Cafe/)).toBeTruthy();
     expect(screen.getByRole('button', { name: /を支払う/ })).toBeDisabled();
   });
 
@@ -155,5 +159,38 @@ describe('StoreDeviceCheckoutForm', () => {
     rerender(<StoreDeviceCheckoutForm params={params} />);
     const second = (hold.history.at(-1) as unknown[])[1] as { data: unknown };
     expect(second).toBe(first);
+  });
+
+  it('確認中は「いま確認する」と取引/ウォレットを見るリンクを出し、確定待ちの文言も出せる', () => {
+    hold.status = { phase: 'waiting', intent: INTENT, otherCheckout: false, txHint: `0x${'ab'.repeat(32)}`, confirming: true, autoStopped: true };
+    render(<StoreDeviceCheckoutForm params={params} />);
+    expect(screen.getByRole('status')).toHaveTextContent(/確定を待っています/);
+    expect(screen.getByText(/自動の確認を止めました/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'いま確認する' }));
+    expect(hold.checkNow).toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: '取引を見る' })).toBeTruthy();
+  });
+
+  it('確認中は残高不足でも「通常の決済を頼んで」を出さない (元の署名が成立しうるため)', () => {
+    hold.status = { phase: 'waiting', intent: INTENT, otherCheckout: false, txHint: null, confirming: false, autoStopped: false };
+    hold.balance = { balance: 0n, insufficientBalance: true, wrongChain: false };
+    render(<StoreDeviceCheckoutForm params={params} />);
+    expect(screen.queryByText(/通常の決済を頼んでください/)).toBeNull();
+  });
+
+  it('結果を確かめられない (used_unresolved) はウォレットでの確認を案内し、支払い済み・未払いを言わない', () => {
+    hold.status = { phase: 'used_unresolved', intent: INTENT };
+    render(<StoreDeviceCheckoutForm params={params} />);
+    expect(screen.getByRole('alert')).toHaveTextContent(/こちらでは確かめられませんでした/);
+    expect(screen.queryByText('お支払いが完了しました')).toBeNull();
+    expect(screen.queryByText(/お支払いは行われていません/)).toBeNull();
+  });
+
+  it('前の会計の結論は前の会計の店名・金額で出し、この会計は払える', () => {
+    hold.status = { phase: 'previous', outcome: 'success', intent: { ...INTENT, snapshot: { storeName: 'Prev Shop', items: [] } }, txHash: `0x${'ab'.repeat(32)}` };
+    render(<StoreDeviceCheckoutForm params={params} />);
+    expect(screen.getByRole('status')).toHaveTextContent(/前のお支払い（Prev Shop/);
+    expect(screen.queryByText('お支払いが完了しました')).toBeNull();
+    expect(screen.getByRole('button', { name: /を支払う/ })).not.toBeDisabled();
   });
 });

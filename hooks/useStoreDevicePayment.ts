@@ -3,15 +3,18 @@
 // 「お店の端末で送る」のお客様側 (plans/store-gas-wallet.md P2b)。既存 forwarder 宛て・手数料欄 1 wei の
 // ReceiveWithAuthorization に署名し、受け渡し (/api/register/handoff/<id>/auth) に渡す。送信はお店の端末が
 // 自分のガスで行う。結論はサーバの判定 (/api/register/handoff/resolve) だけに従う:
-//   - 支払い済み = 信頼する forwarder の Settled (payer・nonce・分割額) を receipt で確かめたとき
+//   - 支払い済み = 信頼する forwarder の Settled を、確定済み・正規のブロックの receipt で確かめたとき
 //   - 行われていない = 確定ブロックの時刻が期限を過ぎ、そのブロックで未使用だと確かめたとき
-//   - それ以外は確認中 (お客様の端末の時計・受け渡しの状態・revert した 1 本の tx・あいまいな応答は根拠にしない)
+//   - 使用済みだが結果を確かめられない = この署名はもう使えない (支払い済みとも、行われていないとも言わない)
+//   - それ以外は確認中 (端末の時計・受け渡しの状態・revert した 1 本の tx・あいまいな応答は根拠にしない)
 //
 // 二重払いを起こさない決まり:
-//   - 署名した時点で「未解決の支払い」として専用の key に残し、結論が出るまで消さない。未解決が残っている間は、
-//     別の QR (別の会計) を開いても新しい署名を作らせず、その確認を続ける。
-//   - 消すのは、結論が出たとき・サーバが「この署名は預かっていない」と確定的に返したとき (400/404/410/409 枠埋まり) だけ。
-//   - 履歴と控えは、署名した時点の値 (支払者・店・金額・明細) で作る (後からウォレットや URL が変わっても動かない)。
+//   - 署名の前に別タブと排他し (Web Locks)、未解決の支払いが無いことを確かめ直す。署名したら未解決として
+//     保存し、保存できたと確かめてから送る (保存できない端末では送らない)。
+//   - 未解決の記録を消すのは、結論が出たとき、またはサーバがこの署名を預かっていないと確定したとき
+//     (一度も「届いたか分からない」が無く、400/404/410/429/409 枠埋まりを受け取ったとき) だけ。
+//   - 未解決が残っている間は、別の QR を開いても新しい署名を作らず、その確認を続ける。
+//   - 履歴と控えは、署名した時点の値 (支払者・店・金額・明細) で作る。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAccount, useWalletClient } from 'wagmi';
@@ -32,15 +35,18 @@ import type { TokenDeployment } from '@/lib/tokens';
 import type { CheckoutItem } from '@/lib/url';
 import { isUserRejection } from '@/lib/walletErrors';
 
-export const STORE_DEVICE_INTENT_KEY = 'openpay:store-device-intent:v2';
-// 受け渡しの読み取り間隔 (署名の期限まで・お客様側の KV 消費を抑える・Fable 監査)。
+export const STORE_DEVICE_INTENT_KEY = 'openpay:store-device-intent:v3';
+const PAY_LOCK = 'openpay:store-device-pay';
+// 受け渡し・判定の読み取り間隔 (署名の期限まで)。
 export const STORE_DEVICE_POLL_MS = 5_000;
 // 署名の期限からこれだけ過ぎたら、受け渡しの読み取りをやめてチェーンの判定だけにする。
 export const STORE_DEVICE_EXPIRY_GRACE_SEC = 30;
+// 期限からこれだけ過ぎたら自動の確認を止め、「いま確認する」だけにする (放置したタブで読み続けない)。
+export const STORE_DEVICE_AUTO_STOP_SEC = 600;
 // 期限後の判定の間隔 (確定ブロックを待つ・RPC に負担をかけない)。
 const RESOLVE_BACKOFF_MS = [10_000, 20_000, 30_000, 60_000];
 
-/** 署名した時点で固定する、履歴と控えの元になる値。 */
+/** 署名した時点で固定する、表示・履歴・控えの元になる値。 */
 export type StoreDevicePaymentSnapshot = {
   storeName?: string;
   invoiceNo?: string;
@@ -52,7 +58,7 @@ export type StoreDevicePaymentSnapshot = {
 };
 
 export type StoreDeviceIntent = {
-  v: 2;
+  v: 3;
   handoffId: string;
   chainId: number;
   from: Address;
@@ -62,6 +68,9 @@ export type StoreDeviceIntent = {
   intentSalt: Hex;
   validBefore: number;
   nonce: Hex;
+  /** 署名した時点の forwarder・手数料受取口 (設定が変わったら判定しない)。 */
+  forwarder: Address;
+  feeReceiver: Address;
   snapshot: StoreDevicePaymentSnapshot;
 };
 
@@ -69,8 +78,10 @@ export type StoreDeviceErrorReason =
   | 'wallet_not_connected'
   | 'wrong_chain'
   | 'unavailable'
+  | 'storage_unavailable'
   | 'rejected'
   | 'insufficient_balance'
+  | 'busy'
   | 'session_expired'
   | 'session_taken'
   | 'server_rejected';
@@ -78,28 +89,46 @@ export type StoreDeviceErrorReason =
 // これらは、この QR ではもう支払いを始めない (出し直し・店員への確認が要る)。
 const BLOCKING_REASONS: readonly StoreDeviceErrorReason[] = ['session_expired', 'session_taken'];
 
+export type StoreDeviceOutcome = 'success' | 'expired' | 'used_unresolved';
+
 export type StoreDeviceStatus =
   | { phase: 'idle' }
   | { phase: 'signing' }
   | { phase: 'submitting' }
-  // 結論待ち (送信待ち・確定待ち・期限後の判定待ち)。otherCheckout = 別の会計の未解決の支払いを確認中
-  | { phase: 'waiting'; intent: StoreDeviceIntent; otherCheckout: boolean }
+  // 結論待ち。otherCheckout = 別の会計の未解決の支払い。confirming = 支払いを見つけて確定待ち。
+  // autoStopped = 自動の確認を止めた (「いま確認する」で続ける)。
+  | {
+      phase: 'waiting';
+      intent: StoreDeviceIntent;
+      otherCheckout: boolean;
+      txHint: Hex | null;
+      confirming: boolean;
+      autoStopped: boolean;
+    }
   | { phase: 'success'; txHash: Hex; intent: StoreDeviceIntent }
   // 確定ブロックで期限切れ・未使用を確かめた = お支払いは行われていない
   | { phase: 'expired'; intent: StoreDeviceIntent }
+  // 使用済み (この署名はもう使えない) だが、結果をこちらで確かめられない
+  | { phase: 'used_unresolved'; intent: StoreDeviceIntent }
+  // 別の会計の未解決の支払いに結論が出た (この QR の会計はこれから払える)
+  | { phase: 'previous'; outcome: StoreDeviceOutcome; intent: StoreDeviceIntent; txHash: Hex | null }
   | { phase: 'error'; reason: StoreDeviceErrorReason; blocking: boolean };
 
 function isIntent(v: unknown): v is StoreDeviceIntent {
   if (!v || typeof v !== 'object') return false;
   const o = v as Record<string, unknown>;
   return (
-    o.v === 2 &&
+    o.v === 3 &&
     typeof o.handoffId === 'string' &&
     typeof o.chainId === 'number' &&
     typeof o.from === 'string' &&
     isAddress(o.from) &&
     typeof o.merchant === 'string' &&
     isAddress(o.merchant) &&
+    typeof o.forwarder === 'string' &&
+    isAddress(o.forwarder) &&
+    typeof o.feeReceiver === 'string' &&
+    isAddress(o.feeReceiver) &&
     typeof o.merchantValue === 'string' &&
     /^\d+$/.test(o.merchantValue) &&
     typeof o.intentSalt === 'string' &&
@@ -111,7 +140,7 @@ function isIntent(v: unknown): v is StoreDeviceIntent {
   );
 }
 
-// 未解決の支払いは端末をまたがないが、タブの再読み込み・別の QR を開いた後も残るよう localStorage に置く。
+// 未解決の支払いは、タブの再読み込み・別の QR を開いた後も残るよう localStorage に置く。
 function readIntent(): StoreDeviceIntent | null {
   try {
     const raw = window.localStorage.getItem(STORE_DEVICE_INTENT_KEY);
@@ -119,23 +148,42 @@ function readIntent(): StoreDeviceIntent | null {
     const v = JSON.parse(raw) as unknown;
     return isIntent(v) ? v : null;
   } catch {
-    // 保存先が使えない端末 (再読み込みで確認に戻れないだけ・今の画面の確認は続く)
     return null;
   }
 }
 
-function writeIntent(intent: StoreDeviceIntent | null): void {
+/** 保存して読み戻しで確かめる。保存できなければ false (呼び出し側は署名を送らない)。 */
+function saveIntent(intent: StoreDeviceIntent): boolean {
   try {
-    if (intent) window.localStorage.setItem(STORE_DEVICE_INTENT_KEY, JSON.stringify(intent));
-    else window.localStorage.removeItem(STORE_DEVICE_INTENT_KEY);
+    window.localStorage.setItem(STORE_DEVICE_INTENT_KEY, JSON.stringify(intent));
+    return readIntent()?.nonce === intent.nonce;
   } catch {
-    // 同上
+    return false;
   }
+}
+
+function clearIntent(): void {
+  try {
+    window.localStorage.removeItem(STORE_DEVICE_INTENT_KEY);
+  } catch {
+    // 消せなくても、次に開いたときは判定で結論が出て消える (結論済みの判定は変わらない)。
+  }
+}
+
+/** 同じ端末の別タブと署名・保存を直列化する。Web Locks が無ければそのまま (タブ内は inFlight で止める)。 */
+async function withPayLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
+  if (!locks?.request) return fn();
+  return locks.request(PAY_LOCK, fn) as Promise<T>;
 }
 
 const nowSec = () => Math.floor(Date.now() / 1000);
 
-type Resolution = { state: 'settled'; txHash: Hex } | { state: 'expired_unused' } | { state: 'pending' };
+type Resolution =
+  | { state: 'settled'; txHash: Hex }
+  | { state: 'expired_unused' }
+  | { state: 'used_unresolved' }
+  | { state: 'pending'; confirming: boolean };
 
 async function resolveIntent(intent: StoreDeviceIntent, txHint: Hex | null): Promise<Resolution> {
   try {
@@ -149,20 +197,24 @@ async function resolveIntent(intent: StoreDeviceIntent, txHint: Hex | null): Pro
         merchantValue: intent.merchantValue,
         validBefore: String(intent.validBefore),
         intentSalt: intent.intentSalt,
+        nonce: intent.nonce,
+        forwarder: intent.forwarder,
+        feeReceiver: intent.feeReceiver,
         ...(txHint ? { txHash: txHint } : {}),
       }),
     });
     const body = (await res.json().catch(() => null)) as
-      | { ok?: boolean; state?: string; txHash?: string }
+      | { ok?: boolean; state?: string; txHash?: string; confirming?: boolean }
       | null;
-    if (!res.ok || !body?.ok) return { state: 'pending' };
+    if (!res.ok || !body?.ok) return { state: 'pending', confirming: false };
     if (body.state === 'settled' && typeof body.txHash === 'string' && /^0x[0-9a-fA-F]{64}$/.test(body.txHash)) {
       return { state: 'settled', txHash: body.txHash as Hex };
     }
     if (body.state === 'expired_unused') return { state: 'expired_unused' };
-    return { state: 'pending' };
+    if (body.state === 'used_unresolved') return { state: 'used_unresolved' };
+    return { state: 'pending', confirming: body.confirming === true };
   } catch {
-    return { state: 'pending' }; // 判定を読めないうちは結論を出さない
+    return { state: 'pending', confirming: false }; // 判定を読めないうちは結論を出さない
   }
 }
 
@@ -177,19 +229,39 @@ async function readTxHint(handoffId: string): Promise<Hex | null> {
   }
 }
 
+function waitingStatus(
+  intent: StoreDeviceIntent,
+  handoffId: string,
+  extra: Partial<{ txHint: Hex | null; confirming: boolean; autoStopped: boolean }> = {},
+): StoreDeviceStatus {
+  return {
+    phase: 'waiting',
+    intent,
+    otherCheckout: intent.handoffId !== handoffId,
+    txHint: extra.txHint ?? null,
+    confirming: extra.confirming ?? false,
+    autoStopped: extra.autoStopped ?? false,
+  };
+}
+
 export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: string) {
   const { data: walletClient } = useWalletClient();
   const { address, chainId } = useAccount();
   const [status, setStatus] = useState<StoreDeviceStatus>({ phase: 'idle' });
   const [tracking, setTracking] = useState<StoreDeviceIntent | null>(null);
   const inFlight = useRef(false);
+  // 確認ループと「いま確認する」が共有する最新の tx ヒント。
+  const hintRef = useRef<Hex | null>(null);
+  // 「いま確認する」を確認ループへ伝える。
+  const manualRef = useRef<(() => void) | null>(null);
 
   // 起動時: 未解決の支払いがあれば、どの QR でもまずその確認に戻る (新しい署名を作らせない)。
   useEffect(() => {
     const saved = readIntent();
     if (saved) {
+      hintRef.current = null;
       setTracking(saved);
-      setStatus({ phase: 'waiting', intent: saved, otherCheckout: saved.handoffId !== handoffId });
+      setStatus(waitingStatus(saved, handoffId));
     }
   }, [handoffId]);
 
@@ -198,51 +270,105 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
     if (!tracking) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let txHint: Hex | null = null;
-    let lastResolvedHint: Hex | null = null;
     let backoff = 0;
 
     const conclude = (r: Resolution): boolean => {
       if (stopped || r.state === 'pending') return false;
-      writeIntent(null);
-      setStatus(
-        r.state === 'settled'
-          ? { phase: 'success', txHash: r.txHash, intent: tracking }
-          : { phase: 'expired', intent: tracking },
-      );
+      clearIntent();
+      const other = tracking.handoffId !== handoffId;
+      const outcome: StoreDeviceOutcome =
+        r.state === 'settled' ? 'success' : r.state === 'expired_unused' ? 'expired' : 'used_unresolved';
+      if (other) {
+        setStatus({
+          phase: 'previous',
+          outcome,
+          intent: tracking,
+          txHash: r.state === 'settled' ? r.txHash : null,
+        });
+      } else if (r.state === 'settled') {
+        setStatus({ phase: 'success', txHash: r.txHash, intent: tracking });
+      } else if (r.state === 'expired_unused') {
+        setStatus({ phase: 'expired', intent: tracking });
+      } else {
+        setStatus({ phase: 'used_unresolved', intent: tracking });
+      }
       setTracking(null);
       return true;
     };
 
-    const tick = async () => {
+    const once = async (): Promise<boolean> => {
       const beforeGrace = nowSec() <= tracking.validBefore + STORE_DEVICE_EXPIRY_GRACE_SEC;
-      if (beforeGrace) {
-        // 期限まで: 受け渡しを読み、端末の tx が出たらサーバの判定で確かめる。
+      // 期限まで、tx のヒントがまだ無いときだけ受け渡しを読む (ヒントが出たら KV を読まない)。
+      if (beforeGrace && !hintRef.current) {
         const hint = await readTxHint(tracking.handoffId);
-        if (stopped) return;
-        if (hint) txHint = hint;
-        if (txHint && txHint !== lastResolvedHint) {
-          lastResolvedHint = txHint;
-          if (conclude(await resolveIntent(tracking, txHint))) return;
-        }
-        if (stopped) return;
-        timer = setTimeout(() => void tick(), STORE_DEVICE_POLL_MS);
-        return;
+        if (stopped) return true;
+        if (hint) hintRef.current = hint;
       }
-      // 期限後: 受け渡しの読み取りはやめ、チェーンの判定だけを間隔を広げて続ける。
-      if (conclude(await resolveIntent(tracking, txHint))) return;
-      if (stopped) return;
-      const wait = RESOLVE_BACKOFF_MS[Math.min(backoff, RESOLVE_BACKOFF_MS.length - 1)];
-      backoff += 1;
-      timer = setTimeout(() => void tick(), wait);
+      // ヒントがある・期限を過ぎた → サーバの判定 (ヒントは毎回確かめ直す)。
+      if (hintRef.current || !beforeGrace) {
+        const r = await resolveIntent(tracking, hintRef.current);
+        if (conclude(r)) return true;
+        if (stopped) return true;
+        setStatus(
+          waitingStatus(tracking, handoffId, {
+            txHint: hintRef.current,
+            confirming: r.state === 'pending' && r.confirming,
+          }),
+        );
+      }
+      return false;
     };
 
-    void tick();
+    const schedule = () => {
+      if (stopped) return;
+      const now = nowSec();
+      if (now > tracking.validBefore + STORE_DEVICE_AUTO_STOP_SEC) {
+        // 自動の確認はここまで (「いま確認する」で続ける・未解決のロックは外さない)。
+        setStatus(waitingStatus(tracking, handoffId, { txHint: hintRef.current, autoStopped: true }));
+        return;
+      }
+      const beforeGrace = now <= tracking.validBefore + STORE_DEVICE_EXPIRY_GRACE_SEC;
+      const wait = beforeGrace
+        ? STORE_DEVICE_POLL_MS
+        : RESOLVE_BACKOFF_MS[Math.min(backoff++, RESOLVE_BACKOFF_MS.length - 1)];
+      timer = setTimeout(() => {
+        void once().then((done) => {
+          if (!done) schedule();
+        });
+      }, wait);
+    };
+
+    manualRef.current = () => {
+      if (timer) clearTimeout(timer);
+      backoff = 0;
+      void resolveIntent(tracking, hintRef.current).then((r) => {
+        if (!conclude(r) && !stopped) {
+          setStatus(
+            waitingStatus(tracking, handoffId, {
+              txHint: hintRef.current,
+              confirming: r.state === 'pending' && r.confirming,
+              autoStopped: nowSec() > tracking.validBefore + STORE_DEVICE_AUTO_STOP_SEC,
+            }),
+          );
+          schedule();
+        }
+      });
+    };
+
+    void once().then((done) => {
+      if (!done) schedule();
+    });
     return () => {
       stopped = true;
+      manualRef.current = null;
       if (timer) clearTimeout(timer);
     };
-  }, [tracking]);
+  }, [tracking, handoffId]);
+
+  /** 「いま確認する」(確認中・自動の確認を止めた後の出口)。 */
+  const checkNow = useCallback(() => {
+    manualRef.current?.();
+  }, []);
 
   const pay = useCallback(
     async ({
@@ -255,8 +381,6 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
       snapshot: StoreDevicePaymentSnapshot;
     }): Promise<void> => {
       if (inFlight.current) return;
-      // 未解決の支払いがある間は始めない (二重払いの種を作らない)。
-      if (tracking || readIntent()) return;
       if (status.phase === 'error' && status.blocking) return;
       if (!walletClient || !address || chainId === undefined) {
         setStatus({ phase: 'error', reason: 'wallet_not_connected', blocking: false });
@@ -273,59 +397,80 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
       }
       inFlight.current = true;
       try {
-        const validBefore = nowSec() + STORE_DEVICE_VALIDITY_SEC;
-        const params: ForwarderSettleParams = {
-          from: getAddress(address),
-          merchant: getAddress(merchant),
-          // 店の受取 = 請求額ちょうど・手数料欄 1 wei はお客様の送金に上乗せ (user 裁定)。
-          merchantValue: bill,
-          feeReceiver: getAddress(env.feeReceiver),
-          feeValue: STORE_DEVICE_FEE_WEI,
-          validAfter: 0n,
-          validBefore: BigInt(validBefore),
-          intentSalt: randomAuthorizationNonce(),
-        };
-        const typed = buildReceiveWithAuthorizationTypedData(params, chainId, deployment.address, forwarder);
-        setStatus({ phase: 'signing' });
-        let signature: Hex;
-        try {
-          signature = await walletClient.signTypedData({ account: params.from, ...typed });
-        } catch (err) {
-          setStatus({
-            phase: 'error',
-            reason: isUserRejection(err) ? 'rejected' : 'unavailable',
-            blocking: false,
-          });
-          return;
-        }
-        const intent: StoreDeviceIntent = {
-          v: 2,
-          handoffId,
-          chainId,
-          from: params.from,
-          merchant: params.merchant,
-          merchantValue: bill.toString(),
-          intentSalt: params.intentSalt,
-          validBefore,
-          nonce: buildForwarderNonce(params, chainId, forwarder),
-          snapshot,
-        };
-        // 署名した時点で未解決として残す (応答を受け取る前に閉じても、次に開いたとき確認に戻る)。
-        writeIntent(intent);
+        // 別タブと排他し、その中で未解決の支払いが無いことを確かめ直してから署名・保存する。
+        const signed = await withPayLock(async () => {
+          const existing = readIntent();
+          if (existing) {
+            hintRef.current = null;
+            setTracking(existing);
+            setStatus(waitingStatus(existing, handoffId));
+            return null;
+          }
+          const validBefore = nowSec() + STORE_DEVICE_VALIDITY_SEC;
+          const params: ForwarderSettleParams = {
+            from: getAddress(address),
+            merchant: getAddress(merchant),
+            // 店の受取 = 請求額ちょうど・手数料欄 1 wei はお客様の送金に上乗せ (user 裁定)。
+            merchantValue: bill,
+            feeReceiver: getAddress(env.feeReceiver),
+            feeValue: STORE_DEVICE_FEE_WEI,
+            validAfter: 0n,
+            validBefore: BigInt(validBefore),
+            intentSalt: randomAuthorizationNonce(),
+          };
+          const typed = buildReceiveWithAuthorizationTypedData(params, chainId, deployment.address, forwarder);
+          setStatus({ phase: 'signing' });
+          let signature: Hex;
+          try {
+            signature = await walletClient.signTypedData({ account: params.from, ...typed });
+          } catch (err) {
+            setStatus({
+              phase: 'error',
+              reason: isUserRejection(err) ? 'rejected' : 'unavailable',
+              blocking: false,
+            });
+            return null;
+          }
+          const intent: StoreDeviceIntent = {
+            v: 3,
+            handoffId,
+            chainId,
+            from: params.from,
+            merchant: params.merchant,
+            merchantValue: bill.toString(),
+            intentSalt: params.intentSalt,
+            validBefore,
+            nonce: buildForwarderNonce(params, chainId, forwarder),
+            forwarder: getAddress(forwarder),
+            feeReceiver: params.feeReceiver,
+            snapshot,
+          };
+          // 未解決として保存できたと確かめてから送る (保存できない端末では送らない = 署名はこの端末にしか無い)。
+          if (!saveIntent(intent)) {
+            setStatus({ phase: 'error', reason: 'storage_unavailable', blocking: false });
+            return null;
+          }
+          return { intent, signature, params };
+        });
+        if (!signed) return;
+        const { intent, signature, params } = signed;
         setStatus({ phase: 'submitting' });
         const body = JSON.stringify({
           from: params.from,
           merchant: params.merchant,
-          merchantValue: bill.toString(),
+          merchantValue: params.merchantValue.toString(),
           feeValue: STORE_DEVICE_FEE_WEI.toString(),
           validAfter: '0',
-          validBefore: String(validBefore),
+          validBefore: String(intent.validBefore),
           intentSalt: params.intentSalt,
           signature,
         });
-        let res: Response | null = null;
-        // 応答を受け取れないときは同じ本文で 1 回だけ送り直す (サーバは同じ署名を冪等に受ける)。
-        for (let attempt = 0; attempt < 2 && res === null; attempt += 1) {
+        // 一度でも「届いたか分からない」(通信断・5xx・読めない応答) があれば、後の拒否では記録を消さない。
+        let uncertain = false;
+        let definitive: { status: number; error?: string } | null = null;
+        let accepted = false;
+        for (let attempt = 0; attempt < 2 && !accepted && definitive === null; attempt += 1) {
+          let res: Response;
           try {
             res = await fetch(`/api/register/handoff/${encodeURIComponent(handoffId)}/auth`, {
               method: 'POST',
@@ -333,39 +478,53 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
               body,
             });
           } catch {
-            res = null;
+            uncertain = true;
+            continue;
+          }
+          const out = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+          if (res.ok && out?.ok) {
+            accepted = true;
+          } else if (
+            out !== null &&
+            (res.status === 400 ||
+              res.status === 404 ||
+              res.status === 410 ||
+              res.status === 429 ||
+              (res.status === 409 && out.error === 'slot_taken'))
+          ) {
+            definitive = { status: res.status, error: out.error };
+          } else if (res.status === 409 && out?.error === 'authorization_used') {
+            accepted = true; // この署名はもう使われている → 判定で確かめる
+          } else {
+            uncertain = true; // 5xx・読めない応答
           }
         }
-        const out =
-          res === null
-            ? null
-            : ((await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null);
-        const status400s = res !== null && (res.status === 400 || res.status === 404 || res.status === 410);
-        const slotTaken = res !== null && res.status === 409 && out?.error === 'slot_taken';
-        if (!status400s && !slotTaken) {
-          // 預けた・使用済み (authorization_used)・届いたか分からない (通信・503・読めない応答) はすべて確認へ。
-          // 結論はチェーンで出す (失敗とも、行われていないとも言わない)。
+        if (accepted || uncertain || definitive === null) {
+          // 預けた・使用済み・届いたか分からない → 結論はチェーンで出す (失敗とも、行われていないとも言わない)。
+          hintRef.current = null;
           setTracking(intent);
-          setStatus({ phase: 'waiting', intent, otherCheckout: false });
+          setStatus(waitingStatus(intent, handoffId));
           return;
         }
         // ここから先は、サーバがこの署名を預かっていないことが確定している (署名はこの端末にしか無い)。
-        writeIntent(null);
-        const error = out?.error;
-        const reason: StoreDeviceErrorReason = slotTaken
-          ? 'session_taken'
-          : error === 'insufficient_balance'
-            ? 'insufficient_balance'
-            : error === 'expired' || error === 'not_found' || res?.status === 404 || res?.status === 410
-              ? 'session_expired'
-              : 'server_rejected';
+        clearIntent();
+        const reason: StoreDeviceErrorReason =
+          definitive.status === 409
+            ? 'session_taken'
+            : definitive.status === 429
+              ? 'busy'
+              : definitive.error === 'insufficient_balance'
+                ? 'insufficient_balance'
+                : definitive.status === 404 || definitive.status === 410
+                  ? 'session_expired'
+                  : 'server_rejected';
         setStatus({ phase: 'error', reason, blocking: BLOCKING_REASONS.includes(reason) });
       } finally {
         inFlight.current = false;
       }
     },
-    [walletClient, address, chainId, deployment.chainId, deployment.address, handoffId, tracking, status],
+    [walletClient, address, chainId, deployment.chainId, deployment.address, handoffId, status],
   );
 
-  return { status, pay };
+  return { status, pay, checkNow };
 }

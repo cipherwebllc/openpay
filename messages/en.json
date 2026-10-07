@@ -1586,11 +1586,16 @@
       "insufficientBalance": "Insufficient balance. You need {amount} plus 1 wei. Ask the shop for a standard payment instead.",
       "btnSigning": "Sign in your wallet…",
       "waiting": "Waiting for the shop's device to send and confirm it…",
+      "confirming": "Payment found. Waiting for it to be finalized…",
       "waitingOther": "Checking the result of your previous payment. You can't start a new payment until it's confirmed.",
       "remaining": "About {seconds} seconds left before the signature expires",
+      "previousPayment": "Previous payment: {store} · {amount}",
+      "autoStopped": "Automatic checking has stopped. Use “Check now” to check again.",
+      "checkNow": "Check now",
       "success": "Payment complete",
       "viewTx": "View transaction",
-      "expired": "The shop's device couldn't send it. No payment was made. Please tell the staff and ask for a new QR code.",
+      "viewWallet": "View your wallet's transactions",
+      "expired": "It wasn't sent before the time limit. No payment was made. Please tell the staff and ask for a new QR code.",
       "error": {
         "wallet_not_connected": "Connect your wallet.",
         "wrong_chain": "Switch the network.",
@@ -1599,7 +1604,15 @@
         "insufficient_balance": "Insufficient balance (the amount plus 1 wei is needed). Ask the shop for a standard payment.",
         "session_expired": "This QR code has expired. Ask the shop to show a new one.",
         "session_taken": "Another payment is already in progress for this checkout. Please tell the staff.",
-        "server_rejected": "The payment couldn't be accepted. No payment was made. Please tell the staff."
+        "server_rejected": "The payment couldn't be accepted. No payment was made. Please tell the staff.",
+        "storage_unavailable": "This device can't keep a record of the payment, so this method can't be used (e.g. private browsing). No payment was made.",
+        "busy": "It's busy right now. Please wait a moment and try again. No payment was made."
+      },
+      "usedUnresolved": "This signature can no longer be used. We couldn't confirm whether the payment went through. Please check your wallet's transaction history and tell the staff if needed.",
+      "previous": {
+        "success": "Your previous payment ({store} · {amount}) is complete. You can now pay for this checkout.",
+        "expired": "Your previous payment ({store} · {amount}) was not made. You can now pay for this checkout.",
+        "used_unresolved": "We couldn't confirm the result of your previous payment ({store} · {amount}). Please check your wallet's transaction history. You can now pay for this checkout."
       }
     }
   },

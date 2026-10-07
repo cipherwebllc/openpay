@@ -1,13 +1,16 @@
 import 'server-only';
 
 // 「お店の端末で送る」1 件の結論 (plans/store-gas-wallet.md P2b)。お客様の画面はこの結論だけに従う。
-//   - settled: 信頼する forwarder の Settled (payer・nonce・分割額の 6 項目一致) を receipt で確かめた → txHash
-//   - expired_unused: 確定 (finalized) ブロックの時刻が期限を過ぎ、そのブロックで authorizationState が未使用
+//   - settled: 信頼する forwarder の Settled (payer・nonce・分割額の 6 項目一致) を、確定 (finalized) 済みで
+//     正規 (canonical) のブロックの receipt で確かめた → txHash
+//   - expired_unused: 確定ブロックの時刻が期限を過ぎ、そのブロックで authorizationState が未使用
 //     (= この署名はもう使えない。お支払いは行われていない)
-//   - pending: それ以外 (送信待ち・確定待ち・取消済みの可能性・RPC 障害)。「行われていない」とは言わない
-// 判定に使うのはチェーンだけ (KV の受け渡しの状態・お客様の端末の時計・revert した 1 本の tx は根拠にしない)。
-// 受け渡しのセッションが消えた後でも判定できるよう、意図の値はお客様の画面から受け取り、nonce はサーバが
-// 自分の forwarder・手数料受取口で計算し直す (値をごまかしても別の nonce になるだけで、他人の支払いは動かない)。
+//   - used_unresolved: 使用済み (= この署名はもう二度と使えない) だが、この支払いの Settled を見つけられない
+//     (検索範囲より前・取消の可能性)。支払い済みとも、行われていないとも言わない。ロックを外すための結論
+//   - pending: それ以外 (送信待ち・確定待ち・RPC 障害・署名時と設定が違う)。「行われていない」とは言わない
+// 判定に使うのはチェーンだけ。nonce は署名した時点の forwarder・手数料受取口でお客様が計算した値を受け取り、
+// それがサーバの今の設定と一致し、かつ同じ値から計算し直した nonce と一致するときだけ判定する (設定変更後に
+// 別の nonce の「未使用」で未払いを誤って証明しない)。
 
 import { getAddress, isAddress, isHex, type Address, type Hex, type Log } from 'viem';
 import { buildForwarderNonce, type ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
@@ -16,15 +19,21 @@ import { STORE_DEVICE_FEE_WEI } from '@/lib/storeDevicePayment';
 export type StoreHandoffResolution =
   | { ok: true; state: 'settled'; txHash: Hex }
   | { ok: true; state: 'expired_unused' }
-  | { ok: true; state: 'pending' };
+  | { ok: true; state: 'used_unresolved' }
+  | { ok: true; state: 'pending'; confirming?: boolean };
+
+export type SuccessfulReceipt = { logs: Log[]; blockNumber: bigint; blockHash: Hex };
 
 export type StoreHandoffResolveDeps = {
   expectedChainId: number;
+  nowSec: () => number;
   jpycAddressFor: (chainId: number) => Address | null;
   forwarderFor: (chainId: number) => Address | null;
   feeReceiverFor: (chainId: number) => Address | null;
-  /** 成功した receipt の logs (見つからない・revert・RPC 障害は null)。 */
-  successfulReceiptLogs: (chainId: number, txHash: Hex) => Promise<Log[] | null>;
+  /** 成功した receipt (見つからない・revert・RPC 障害は null)。 */
+  successfulReceipt: (chainId: number, txHash: Hex) => Promise<SuccessfulReceipt | null>;
+  /** そのブロックが確定済み (finalized 以下) で、いまの正規チェーンの同じブロックか。 */
+  isFinalizedCanonical: (chainId: number, blockNumber: bigint, blockHash: Hex) => Promise<boolean>;
   hasMatchingSettlement: (
     logs: Log[],
     forwarder: Address,
@@ -45,11 +54,13 @@ export type StoreHandoffResolveDeps = {
     payer: Address;
     nonce: Hex;
     validBefore: bigint;
-    txHash?: Hex;
   }) => Promise<boolean>;
 };
 
 export type StoreHandoffResolveFailure = { ok: false; status: number; error: string };
+
+/** 使用済みなのに Settled が見つからないとき、期限からこれだけ待ってから used_unresolved にする (ログの遅れ)。 */
+export const USED_UNRESOLVED_AFTER_SEC = 300;
 
 function parseWei(value: unknown): bigint | null {
   if (typeof value !== 'string' || !/^\d{1,78}$/.test(value)) return null;
@@ -60,7 +71,40 @@ function isTxHash(value: unknown): value is Hex {
   return typeof value === 'string' && isHex(value) && value.length === 66;
 }
 
-const PENDING: StoreHandoffResolution = { ok: true, state: 'pending' };
+function sameAddress(a: unknown, b: Address): boolean {
+  return typeof a === 'string' && isAddress(a, { strict: false }) && getAddress(a) === b;
+}
+
+// 同じ支払いの照会が続いても RPC (ログ検索を含む) を何度も走らせない、インスタンス内の短い覚え。
+// 結論 (settled・expired_unused・used_unresolved) は変わらないので長め、pending は短く。
+const CACHE_MAX = 500;
+const FINAL_TTL_MS = 10 * 60_000;
+const PENDING_TTL_MS = 5_000;
+const cache = new Map<string, { at: number; ttl: number; value: StoreHandoffResolution }>();
+
+function cached(key: string): StoreHandoffResolution | null {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > hit.ttl) {
+    cache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function remember(key: string, value: StoreHandoffResolution): StoreHandoffResolution {
+  if (cache.size >= CACHE_MAX) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(key, { at: Date.now(), ttl: value.state === 'pending' ? PENDING_TTL_MS : FINAL_TTL_MS, value });
+  return value;
+}
+
+/** テスト用 (インスタンス内の覚えを消す)。 */
+export function clearStoreHandoffResolveCache(): void {
+  cache.clear();
+}
 
 export async function resolveStoreHandoff(
   body: Record<string, unknown>,
@@ -81,6 +125,9 @@ export async function resolveStoreHandoff(
     typeof body.intentSalt !== 'string' ||
     !isHex(body.intentSalt) ||
     body.intentSalt.length !== 66 ||
+    typeof body.nonce !== 'string' ||
+    !isHex(body.nonce) ||
+    body.nonce.length !== 66 ||
     (body.txHash !== undefined && body.txHash !== null && !isTxHash(body.txHash))
   ) {
     return { ok: false, status: 400, error: 'invalid_body' };
@@ -90,6 +137,10 @@ export async function resolveStoreHandoff(
   const feeReceiver = deps.feeReceiverFor(chainId);
   if (!token || !forwarder || !feeReceiver) {
     return { ok: false, status: 400, error: 'unsupported_chain' };
+  }
+  // 署名した時点の forwarder・手数料受取口がいまの設定と違う (設定が変わった) なら判定しない。
+  if (!sameAddress(body.forwarder, forwarder) || !sameAddress(body.feeReceiver, feeReceiver)) {
+    return { ok: true, state: 'pending' };
   }
   const params: ForwarderSettleParams = {
     from: getAddress(body.from),
@@ -102,40 +153,61 @@ export async function resolveStoreHandoff(
     intentSalt: body.intentSalt as Hex,
   };
   const nonce = buildForwarderNonce(params, chainId, forwarder);
+  if (nonce.toLowerCase() !== (body.nonce as string).toLowerCase()) {
+    return { ok: false, status: 400, error: 'nonce_mismatch' };
+  }
+  const hint = isTxHash(body.txHash) ? body.txHash : undefined;
+  const cacheKey = `${chainId}:${nonce.toLowerCase()}:${hint ?? ''}`;
+  const hit = cached(cacheKey);
+  if (hit) return hit;
+
   const split = {
     merchant: params.merchant,
     merchantValue,
     feeReceiver,
     feeValue: STORE_DEVICE_FEE_WEI,
   };
-  const settledBy = async (txHash: Hex): Promise<boolean> => {
-    const logs = await deps.successfulReceiptLogs(chainId, txHash);
-    return logs !== null && deps.hasMatchingSettlement(logs, forwarder, params.from, nonce, split);
+  // この支払いの Settled を含み、確定済みのブロックにある成功 receipt か。一致するが未確定なら 'unconfirmed'。
+  const checkTx = async (txHash: Hex): Promise<'settled' | 'unconfirmed' | 'no'> => {
+    const receipt = await deps.successfulReceipt(chainId, txHash);
+    if (!receipt || !deps.hasMatchingSettlement(receipt.logs, forwarder, params.from, nonce, split)) {
+      return 'no';
+    }
+    return (await deps.isFinalizedCanonical(chainId, receipt.blockNumber, receipt.blockHash))
+      ? 'settled'
+      : 'unconfirmed';
   };
 
   try {
     // 端末が知らせた tx (ヒント) を先に確かめる。別の取引・revert・置換は一致しないので無視される。
-    const hint = isTxHash(body.txHash) ? body.txHash : undefined;
-    if (hint && (await settledBy(hint))) return { ok: true, state: 'settled', txHash: hint };
-
+    if (hint) {
+      const r = await checkTx(hint);
+      if (r === 'settled') return remember(cacheKey, { ok: true, state: 'settled', txHash: hint });
+      if (r === 'unconfirmed') return remember(cacheKey, { ok: true, state: 'pending', confirming: true });
+    }
     const used = await deps.readAuthorizationUsed(chainId, token, params.from, nonce);
     if (used) {
       // 使用済みは入金の証明ではない (取消の可能性)。この nonce を使った tx を探し、Settled を照合する。
       const found = await deps.findAuthorizationUsedTransactionHash(chainId, token, params.from, nonce);
-      if (found && (await settledBy(found))) return { ok: true, state: 'settled', txHash: found };
-      return PENDING;
+      if (found) {
+        const r = await checkTx(found);
+        if (r === 'settled') return remember(cacheKey, { ok: true, state: 'settled', txHash: found });
+        if (r === 'unconfirmed') return remember(cacheKey, { ok: true, state: 'pending', confirming: true });
+      }
+      // 見つからない (検索範囲より前・取消)。使用済みの nonce は二度と使えないので、期限から十分たったら
+      // ロックを外すための結論を返す (支払い済みとも、行われていないとも言わない)。
+      return remember(
+        cacheKey,
+        deps.nowSec() > Number(validBefore) + USED_UNRESOLVED_AFTER_SEC
+          ? { ok: true, state: 'used_unresolved' }
+          : { ok: true, state: 'pending' },
+      );
     }
-    const expired = await deps.expiredUnused({
-      chainId,
-      token,
-      payer: params.from,
-      nonce,
-      validBefore,
-      ...(hint ? { txHash: hint } : {}),
-    });
-    return expired ? { ok: true, state: 'expired_unused' } : PENDING;
+    // 確定ブロックで期限切れ・未使用なら、この署名はもう使えない (無関係な tx のヒントは判定に混ぜない)。
+    const expired = await deps.expiredUnused({ chainId, token, payer: params.from, nonce, validBefore });
+    return remember(cacheKey, expired ? { ok: true, state: 'expired_unused' } : { ok: true, state: 'pending' });
   } catch {
-    // RPC 障害は結論を出さない (支払い済みとも、行われていないとも言わない)。
-    return PENDING;
+    // RPC 障害は結論を出さない (支払い済みとも、行われていないとも言わない)。覚えない。
+    return { ok: true, state: 'pending' };
   }
 }
