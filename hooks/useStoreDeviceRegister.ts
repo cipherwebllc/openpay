@@ -77,6 +77,11 @@ export type StoreDeviceRegisterState =
 
 type FinalizeResult = 'closed' | 'processing' | 'unknown';
 
+/** 新しい QR (通常の QR を含む) を出せない状態か。 */
+function isBusy(s: StoreDeviceRegisterState): boolean {
+  return s.phase === 'creating' || s.phase === 'processing' || (s.phase === 'sent' && !s.previous);
+}
+
 export type StoreDeviceRegisterInput = {
   enabled: boolean;
   chainId: number;
@@ -158,9 +163,16 @@ async function closeSession(s: DeviceSession): Promise<{ closed: true } | { clos
 export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   const { enabled, chainId, token, forwarder, feeReceiver, gasAddress } = input;
   const [state, setState] = useState<StoreDeviceRegisterState>({ phase: 'idle' });
+  // いまの状態の写し (描画を待たずに読む)。「通常の QR を出してよいか」などの判定は描画前の古い state で
+  // しない (署名を受け取って送り始めた直後に、古い「署名待ち」を見て通常の QR を出す = 二重払いの種)。
+  const stateRef = useRef<StoreDeviceRegisterState>({ phase: 'idle' });
   const sessionRef = useRef<DeviceSession | null>(null);
   // 同じ署名を二度処理しない (読み取りの次の回・締め切りの応答が重なっても)。
   const processingRef = useRef<string | null>(null);
+  // いま確かめて送っている署名 (送信の結果が出るまで)。
+  const activeRef = useRef<string | null>(null);
+  // QR を作っている最中 (二度押しで二つのセッションを作らない)。
+  const startingRef = useRef(false);
   // 「もう一度送る」に使う、確かめ済みの署名 (送らなかったときだけ・このタブのメモリだけ)。
   const retryRef = useRef<{ view: DeviceView & { auth: DeviceAuth }; session: DeviceSession } | null>(null);
   const finalityStopRef = useRef<(() => void) | null>(null);
@@ -185,10 +197,12 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       genRef.current += 1;
       finalityStopRef.current?.();
       retryRef.current = null;
+      stateRef.current = { phase: 'idle' };
       if (mountedRef.current) setState({ phase: 'idle' });
     }
   }, [enabled]);
   const set = useCallback((s: StoreDeviceRegisterState) => {
+    stateRef.current = s;
     if (mountedRef.current) setState(s);
   }, []);
   /** gen の時点からの結果だけを表示する (新しい QR・切替 OFF の後は捨てる)。 */
@@ -295,64 +309,69 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
     if (readStoredSession()?.id === s.id) storeSession(null);
   }, []);
 
-  // 受け取った署名を確かめて送る。
+  // 受け取った署名を確かめて送る。送り始めたら、その結果 (送った・送らなかった・入金の確認) は必ず表示する
+  // (実際の支払いの行方なので、次の会計の表示より優先する・送っている間は次の QR を出させない)。
   const process = useCallback(
     async (view: DeviceView & { auth: DeviceAuth }, session: DeviceSession) => {
       // 切替 OFF の後に届いた署名は送らない (送らなければお客様は期限後に「行われていない」で結論が出る)。
       if (!enabledRef.current) return;
       if (processingRef.current === view.auth.nonce) return;
       processingRef.current = view.auth.nonce;
+      activeRef.current = view.auth.nonce;
       // 処理に入った受け渡しは、再読み込み・次の会計で自動で処理し直さない (送らなかった署名を後から送らない)。
       retire(session);
-      const gen = genRef.current;
-      setIf(gen, { phase: 'processing' });
-      const loaded = await loadIo();
-      if (!loaded || !forwarder || !feeReceiver) {
-        setIf(gen, { phase: 'not_sent', reason: 'rpc', canRetry: false });
-        return;
+      set({ phase: 'processing' });
+      try {
+        const loaded = await loadIo();
+        if (!loaded || !forwarder || !feeReceiver) {
+          set({ phase: 'not_sent', reason: 'rpc', canRetry: false });
+          return;
+        }
+        const { mod, io } = loaded;
+        const verified = await mod.verifyDeviceAuth(
+          { merchant: view.merchant, amount: view.amount, auth: view.auth },
+          {
+            chainId: session.chainId,
+            token,
+            forwarder,
+            feeReceiver,
+            merchant: session.merchant,
+            amount: BigInt(session.amount),
+          },
+        );
+        if (!verified.ok) {
+          set({ phase: 'rejected', reason: verified.reason });
+          return;
+        }
+        if (!enabledRef.current) return;
+        const r = await mod.sendStoreDeviceSettle(
+          verified.value,
+          { handoffId: session.id, chainId: session.chainId, forwarder },
+          io,
+        );
+        if (r.kind === 'not_sent') {
+          const canRetry = RETRYABLE.includes(r.reason);
+          retryRef.current = canRetry ? { view, session } : null;
+          // 「もう一度送る」で同じ署名を処理できるように戻す (印は残っていない)。
+          processingRef.current = null;
+          set({ phase: 'not_sent', reason: r.reason, canRetry });
+          return;
+        }
+        retryRef.current = null;
+        // 送った tx をお客様の画面に知らせる (付帯・失敗しても送信は成立している)。
+        void fetch(`/api/register/handoff/${encodeURIComponent(session.id)}/tx`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', [STORE_HANDOFF_TOKEN_HEADER]: session.token },
+          body: JSON.stringify({ txHash: r.hash }),
+        }).catch(() => undefined);
+        set({ phase: 'sent', mark: r.mark, previous: false });
+        const receipt = await io.waitReceipt(r.hash, RECEIPT_TIMEOUT_MS);
+        showReceipt(mod, r.mark, receipt, false, genRef.current);
+      } finally {
+        if (activeRef.current === view.auth.nonce) activeRef.current = null;
       }
-      const { mod, io } = loaded;
-      const verified = await mod.verifyDeviceAuth(
-        { merchant: view.merchant, amount: view.amount, auth: view.auth },
-        {
-          chainId: session.chainId,
-          token,
-          forwarder,
-          feeReceiver,
-          merchant: session.merchant,
-          amount: BigInt(session.amount),
-        },
-      );
-      if (!verified.ok) {
-        setIf(gen, { phase: 'rejected', reason: verified.reason });
-        return;
-      }
-      if (!enabledRef.current) return;
-      const r = await mod.sendStoreDeviceSettle(
-        verified.value,
-        { handoffId: session.id, chainId: session.chainId, forwarder },
-        io,
-      );
-      if (r.kind === 'not_sent') {
-        const canRetry = RETRYABLE.includes(r.reason);
-        retryRef.current = canRetry ? { view, session } : null;
-        // 「もう一度送る」で同じ署名を処理できるように戻す (印は残っていない)。
-        processingRef.current = null;
-        setIf(gen, { phase: 'not_sent', reason: r.reason, canRetry });
-        return;
-      }
-      retryRef.current = null;
-      // 送った tx をお客様の画面に知らせる (付帯・失敗しても送信は成立している)。
-      void fetch(`/api/register/handoff/${encodeURIComponent(session.id)}/tx`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', [STORE_HANDOFF_TOKEN_HEADER]: session.token },
-        body: JSON.stringify({ txHash: r.hash }),
-      }).catch(() => undefined);
-      setIf(gen, { phase: 'sent', mark: r.mark, previous: false });
-      const receipt = await io.waitReceipt(r.hash, RECEIPT_TIMEOUT_MS);
-      showReceipt(mod, r.mark, receipt, false, gen);
     },
-    [loadIo, forwarder, feeReceiver, token, retire, setIf, showReceipt],
+    [loadIo, forwarder, feeReceiver, token, retire, set, showReceipt],
   );
 
   // セッションを締め切る (署名が入っていれば送る)。
@@ -364,7 +383,9 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         retire(s);
         return 'closed';
       }
-      // すでにこの署名を処理した (送った・送らなかった) → 二度処理しない。
+      // いま送っている署名 → 二度処理しない・通常の QR も出させない。
+      if (activeRef.current === r.auth.nonce) return 'processing';
+      // すでに処理を終えた署名 (送った・送らなかった)・切替 OFF → 二度処理しない。
       if (processingRef.current === r.auth.nonce || !enabledRef.current) {
         retire(s);
         return 'closed';
@@ -478,49 +499,60 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   /** QR を出す: 前のセッションを締め切ってから、新しいセッションを作る。作れなければ null。 */
   const start = useCallback(
     async (merchant: Address, amount: bigint): Promise<DeviceSession | null> => {
-      if (!enabled) return null;
-      genRef.current += 1;
-      finalityStopRef.current?.();
-      // 前の会計の「もう一度送る」は、新しい QR を出したら使わせない (別の支払いと重ねない)。
-      retryRef.current = null;
-      // 前の会計に署名が入っていた → その送信を優先する (新しい QR は出さない)。
-      if ((await settlePrevious()) === 'processing') return null;
-      const gen = genRef.current;
-      setIf(gen, { phase: 'creating' });
-      let res: Response;
+      // 二度押しで二つのセッションを作らない。送っている・送った結果を待っている間は次の QR を作らない
+      // (どちらも描画を待たずに判定)。
+      if (!enabled || startingRef.current || activeRef.current || isBusy(stateRef.current)) return null;
+      startingRef.current = true;
       try {
-        res = await fetch('/api/register/handoff', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ chainId, merchant, amount: amount.toString() }),
-        });
-      } catch {
-        setIf(gen, { phase: 'create_failed', reason: 'unavailable' });
-        return null;
+        return await createNext(merchant, amount);
+      } finally {
+        startingRef.current = false;
       }
-      const body = (await res.json().catch(() => null)) as
-        | { ok?: boolean; id?: string; token?: string; expiresAt?: number }
-        | null;
-      if (!res.ok || !body?.ok || !body.id || !body.token || typeof body.expiresAt !== 'number') {
-        setIf(gen, {
-          phase: 'create_failed',
-          reason: res.status === 429 ? 'busy' : res.status === 400 ? 'invalid' : 'unavailable',
-        });
-        return null;
+
+      async function createNext(merchant: Address, amount: bigint): Promise<DeviceSession | null> {
+        genRef.current += 1;
+        finalityStopRef.current?.();
+        // 前の会計の「もう一度送る」は、新しい QR を出したら使わせない (別の支払いと重ねない)。
+        retryRef.current = null;
+        // 前の会計に署名が入っていた → その送信を優先する (新しい QR は出さない)。
+        if ((await settlePrevious()) === 'processing') return null;
+        const gen = genRef.current;
+        setIf(gen, { phase: 'creating' });
+        let res: Response;
+        try {
+          res = await fetch('/api/register/handoff', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ chainId, merchant, amount: amount.toString() }),
+          });
+        } catch {
+          setIf(gen, { phase: 'create_failed', reason: 'unavailable' });
+          return null;
+        }
+        const body = (await res.json().catch(() => null)) as
+          | { ok?: boolean; id?: string; token?: string; expiresAt?: number }
+          | null;
+        if (!res.ok || !body?.ok || !body.id || !body.token || typeof body.expiresAt !== 'number') {
+          setIf(gen, {
+            phase: 'create_failed',
+            reason: res.status === 429 ? 'busy' : res.status === 400 ? 'invalid' : 'unavailable',
+          });
+          return null;
+        }
+        const session: DeviceSession = {
+          id: body.id,
+          token: body.token,
+          expiresAt: body.expiresAt,
+          merchant,
+          amount: amount.toString(),
+          chainId,
+        };
+        sessionRef.current = session;
+        processingRef.current = null;
+        storeSession(session);
+        setIf(gen, { phase: 'waiting', session, stale: false, degraded: false });
+        return session;
       }
-      const session: DeviceSession = {
-        id: body.id,
-        token: body.token,
-        expiresAt: body.expiresAt,
-        merchant,
-        amount: amount.toString(),
-        chainId,
-      };
-      sessionRef.current = session;
-      processingRef.current = null;
-      storeSession(session);
-      setIf(gen, { phase: 'waiting', session, stale: false, degraded: false });
-      return session;
     },
     [enabled, chainId, settlePrevious, setIf],
   );
@@ -528,10 +560,10 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   /** QR を閉じる: 署名を待っていたセッションは締め切る (署名が入っていれば送る)。 */
   const stop = useCallback(() => {
     const s = sessionRef.current;
-    if (!s || state.phase !== 'waiting') return;
+    if (!s || stateRef.current.phase !== 'waiting') return;
     set({ phase: 'idle' });
     pendingCloseRef.current = finalize(s);
-  }, [state.phase, finalize, set]);
+  }, [finalize, set]);
 
   /**
    * 通常の QR に切り替えてよいか: 署名を待っていたセッションを締め切り、署名が入っていなかったときだけ true
@@ -539,21 +571,22 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
    * ときは、そのセッションを自動で処理しない (送らない) ことにして true。
    */
   const releaseForNormal = useCallback(async (): Promise<boolean> => {
-    if (state.phase === 'processing' || (state.phase === 'sent' && !state.previous)) return false;
+    // 描画前の古い state ではなく、いまの状態で判定する (送り始めた直後に通常の QR を出さない)。
+    if (activeRef.current || isBusy(stateRef.current)) return false;
     genRef.current += 1;
     finalityStopRef.current?.();
     retryRef.current = null;
-    const s = sessionRef.current;
-    if (s && state.phase === 'waiting') set({ phase: 'idle' });
+    if (sessionRef.current && stateRef.current.phase === 'waiting') set({ phase: 'idle' });
     const r = await settlePrevious();
-    if (r === 'processing') return false;
+    // 締め切りの応答を待つ間に送り始めた (読み取りが署名を受け取った) ときも出さない。
+    if (r === 'processing' || activeRef.current || isBusy(stateRef.current)) return false;
     if (r === 'unknown') {
       const prev = sessionRef.current ?? readStoredSession();
       if (prev) retire(prev);
     }
     set({ phase: 'idle' });
     return true;
-  }, [state, set, settlePrevious, retire]);
+  }, [set, settlePrevious, retire]);
 
   /** 「いま確認する」(結果が分からないとき)。 */
   const checkNow = useCallback(async () => {
@@ -574,17 +607,15 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
 
   /** 結果の表示を閉じる (「もう一度送る」も使わせない)。署名を待っている・送っている間は何もしない。 */
   const dismiss = useCallback(() => {
-    if (state.phase === 'waiting' || state.phase === 'processing' || state.phase === 'creating') return;
+    const phase = stateRef.current.phase;
+    if (activeRef.current || phase === 'waiting' || phase === 'processing' || phase === 'creating') return;
     finalityStopRef.current?.();
     retryRef.current = null;
     set({ phase: 'idle' });
-  }, [state.phase, set]);
+  }, [set]);
 
   // 新しい QR を出せない間 (受け取った署名を確かめて送っている・送った tx の結果を待っている)。
-  const busy =
-    state.phase === 'creating' ||
-    state.phase === 'processing' ||
-    (state.phase === 'sent' && !state.previous);
+  const busy = isBusy(state);
 
   return { state, busy, start, stop, releaseForNormal, checkNow, retry, dismiss };
 }

@@ -395,6 +395,47 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     expect(calls.filter((c) => c.url === '/api/register/handoff')).toHaveLength(1);
   });
 
+  it('署名を受け取って送り始めた直後 (描画前) に「通常の QR」を求めても出させない・二重に送らない', async () => {
+    let release!: (v: unknown) => void;
+    send.verifyDeviceAuth.mockReturnValueOnce(new Promise((r) => { release = r; }));
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    // 描画前の古い関数 (署名待ちの state を閉じ込めたもの) を握っておく
+    const staleRelease = result.current.releaseForNormal;
+    const staleStart = result.current.start;
+    const staleDismiss = result.current.dismiss;
+    readRes = () => json({ ok: true, state: 'signed', merchant: SHOP, amount: AMOUNT.toString(), auth: AUTH });
+    await advance(3_000); // 読み取りが署名を受け取り、確かめ始める (verify が終わらない)
+    let ok!: boolean;
+    let next!: unknown;
+    await act(async () => {
+      staleDismiss();
+      ok = await staleRelease();
+      next = await staleStart(SHOP, AMOUNT);
+    });
+    expect(ok).toBe(false);
+    expect(next).toBeNull();
+    expect(result.current.state).toEqual({ phase: 'processing' });
+    expect(result.current.busy).toBe(true);
+    await act(async () => {
+      release({ ok: true, value: { params: {}, signature: '0x', nonce: NONCE } });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(send.sendStoreDeviceSettle).toHaveBeenCalledTimes(1);
+    expect(result.current.state).toMatchObject({ phase: 'received' });
+  });
+
+  it('QR のボタンの二度押しで受け渡しを二つ作らない', async () => {
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    let a!: unknown;
+    let b!: unknown;
+    await act(async () => {
+      [a, b] = await Promise.all([result.current.start(SHOP, AMOUNT), result.current.start(SHOP, AMOUNT)]);
+    });
+    expect([a, b].filter(Boolean)).toHaveLength(1);
+    expect(calls.filter((c) => c.url === '/api/register/handoff')).toHaveLength(1);
+  });
+
   it('再読み込み後: 最近送った印があれば、その結果を「前回の送信」として出す', async () => {
     send.readSentMarks.mockReturnValue({ ok: true, marks: [{ ...MARK, at: Date.now() - 60_000 }] });
     const { result } = renderHook(() => useStoreDeviceRegister(input));
