@@ -97,6 +97,20 @@ describe('/api/register/handoff/*', () => {
     expect(await auth.json()).toEqual({ ok: false, error: 'slot_taken' });
   });
 
+  it('お客様の読み取り (トークンなし) は IP ごとに制限し、端末の読み取り (トークンあり) には付けない', async () => {
+    hold.rateOk = false;
+    const pub = await readGet(new Request(`https://open-pay.jp/api/register/handoff/${ID}`), params);
+    expect(pub.status).toBe(429);
+    const device = await readGet(
+      new Request(`https://open-pay.jp/api/register/handoff/${ID}`, {
+        headers: { 'x-store-handoff-token': 'cd'.repeat(32) },
+      }),
+      params,
+    );
+    expect(device.status).toBe(200);
+    expect(hold.calls.map((c) => c.fn)).toEqual(['read']);
+  });
+
   it('読み取りトークンはヘッダから渡す (URL のクエリは使わない)', async () => {
     await readGet(
       new Request(`https://open-pay.jp/api/register/handoff/${ID}?t=from-query`, {

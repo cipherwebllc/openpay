@@ -8,19 +8,22 @@ import 'server-only';
 //     第三者が読んで送っても店に入るだけ。
 //   - 1 セッション 1 枠: 最初の有効な署名で固定 (SET NX)。同じ署名 (from・nonce) の再送は冪等。枠は解放しない
 //     (解放すると、まだ生きている 1 枚目と 2 枚目が両方使われる二重払いの種になる)。
-//   - 端末だけが読める項目 (署名) は読み取りトークン (ヘッダ) で守る。トークンは sha256 だけを保存する。
+//   - セッション id とお店の端末の読み取りトークンは、サーバの秘密値 (IP_HASH_SECRET を用途で分けた HMAC) で
+//     作る。偽の id・トークンは KV に触れる前に弾く (任意の id で KV の読み取りを消費させない)。
+//   - 端末だけが読める項目 (署名) はトークン (ヘッダ) で守る。トークンは保存しない (id から導き直して照合)。
 //   - KV 障害は fail-closed (受け渡しを止める・偽の成功を返さない)。
 
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { getAddress, isAddress, isHex, type Address, type Hex } from 'viem';
 import {
   verifyForwarderSettle,
   type ForwarderVerifyDeps,
 } from '@/lib/relay/forwarderRecover';
-import type { ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
+import { buildForwarderNonce, type ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
 import {
   STORE_DEVICE_FEE_WEI,
   STORE_DEVICE_MAX_VALIDITY_SEC,
+  STORE_DEVICE_MIN_CLAIM_REMAINING_SEC,
   STORE_HANDOFF_TOKEN_PATTERN,
   STORE_HANDOFF_TTL_SEC,
   isStoreDeviceAmount,
@@ -33,7 +36,6 @@ export type HandoffSession = {
   merchant: Address;
   /** 請求額 (wei の 10 進文字列)。お客様はこれ + 1 wei を払う。 */
   amount: string;
-  tokenHash: string;
   createdAt: number;
   expiresAt: number;
 };
@@ -83,8 +85,9 @@ export type HandoffDeps = ForwarderVerifyDeps & {
     from: Address,
     nonce: Hex,
   ) => Promise<boolean>;
-  randomId: () => string;
-  randomToken: () => string;
+  /** HMAC (hex)。秘密値が無い・短いときは null (受け渡しを止める)。 */
+  mac: (message: string) => string | null;
+  randomBytes: (n: number) => Buffer;
 };
 
 export type HandoffError =
@@ -116,23 +119,43 @@ function fail(status: number, error: HandoffError): HandoffFailure {
   return { ok: false, status, error };
 }
 
-export function hashHandoffToken(token: string): string {
-  return createHash('sha256').update(token, 'utf8').digest('hex');
+// id = base64url(乱数 10 byte ‖ HMAC 先頭 6 byte) = 22 文字。偽の id は KV に触れる前に弾ける。
+const ID_RANDOM_BYTES = 10;
+const ID_TAG_BYTES = 6;
+
+function idTag(random: Buffer, mac: HandoffDeps['mac']): Buffer | null {
+  const h = mac(`store-handoff-id:v1:${random.toString('hex')}`);
+  return h ? Buffer.from(h, 'hex').subarray(0, ID_TAG_BYTES) : null;
 }
 
-function tokenMatches(token: string | null, tokenHash: string): boolean {
+export function newHandoffId(deps: Pick<HandoffDeps, 'mac' | 'randomBytes'>): string | null {
+  const random = deps.randomBytes(ID_RANDOM_BYTES);
+  const tag = idTag(random, deps.mac);
+  return tag ? Buffer.concat([random, tag]).toString('base64url') : null;
+}
+
+/** 形 (22 文字) と HMAC の両方を満たす id か (KV を読む前の判定)。 */
+export function isGenuineHandoffId(id: string, mac: HandoffDeps['mac']): boolean {
+  if (!isStoreHandoffId(id)) return false;
+  const raw = Buffer.from(id, 'base64url');
+  if (raw.length !== ID_RANDOM_BYTES + ID_TAG_BYTES) return false;
+  const expected = idTag(raw.subarray(0, ID_RANDOM_BYTES), mac);
+  const actual = raw.subarray(ID_RANDOM_BYTES);
+  return expected !== null && expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+/** お店の端末の読み取りトークン (id から導く・保存しない)。 */
+export function handoffTokenFor(id: string, mac: HandoffDeps['mac']): string | null {
+  return mac(`store-handoff-token:v1:${id}`);
+}
+
+function tokenMatches(token: string | null, id: string, mac: HandoffDeps['mac']): boolean {
   if (!token || !STORE_HANDOFF_TOKEN_PATTERN.test(token)) return false;
-  const a = Buffer.from(hashHandoffToken(token), 'hex');
-  const b = Buffer.from(tokenHash, 'hex');
+  const expected = handoffTokenFor(id, mac);
+  if (!expected) return false;
+  const a = Buffer.from(token, 'hex');
+  const b = Buffer.from(expected, 'hex');
   return a.length === b.length && timingSafeEqual(a, b);
-}
-
-export function newHandoffId(): string {
-  return randomBytes(16).toString('base64url');
-}
-
-export function newHandoffToken(): string {
-  return randomBytes(32).toString('hex');
 }
 
 function parseWei(value: unknown): bigint | null {
@@ -175,15 +198,16 @@ export async function createHandoffSession(
     return fail(400, 'invalid_amount');
   }
 
-  const id = deps.randomId();
-  const token = deps.randomToken();
+  // 秘密値が無ければ id もトークンも作れない → 受け渡しを止める (偽の成功を出さない)。
+  const id = newHandoffId(deps);
+  const token = id ? handoffTokenFor(id, deps.mac) : null;
+  if (!id || !token) return fail(503, 'handoff_unavailable');
   const now = deps.nowSec();
   const session: HandoffSession = {
     v: 1,
     chainId,
     merchant,
     amount: amount.toString(),
-    tokenHash: hashHandoffToken(token),
     createdAt: now,
     expiresAt: now + STORE_HANDOFF_TTL_SEC,
   };
@@ -204,12 +228,11 @@ export async function submitHandoffAuth(
   body: Record<string, unknown>,
   deps: HandoffDeps,
 ): Promise<AcceptedAuth | HandoffFailure> {
-  if (!isStoreHandoffId(id)) return fail(404, 'not_found');
+  if (!isGenuineHandoffId(id, deps.mac)) return fail(404, 'not_found');
   const snap = await deps.store.read(id);
   if (snap === null) return fail(503, 'handoff_unavailable');
   const session = snap.session;
   if (!session) return fail(404, 'not_found');
-  if (session.expiresAt <= deps.nowSec()) return fail(410, 'expired');
 
   const merchantValue = parseWei(body.merchantValue);
   const feeValue = parseWei(body.feeValue);
@@ -237,7 +260,8 @@ export async function submitHandoffAuth(
   if (merchantValue !== BigInt(session.amount)) return fail(400, 'amount_mismatch');
 
   const feeReceiver = deps.feeReceiverFor(session.chainId);
-  if (!feeReceiver) return fail(400, 'unsupported_chain');
+  const forwarder = deps.forwarderFor(session.chainId);
+  if (!feeReceiver || !forwarder) return fail(400, 'unsupported_chain');
   const params: ForwarderSettleParams = {
     from: getAddress(body.from),
     merchant: session.merchant,
@@ -248,6 +272,23 @@ export async function submitHandoffAuth(
     validBefore,
     intentSalt: body.intentSalt as Hex,
   };
+
+  // 既に預かっている署名と同じなら、RPC より先に冪等に受ける (応答を受け取れずに再送したお客様が、
+  // 端末の送信後・期限後・RPC 障害時に「失敗」を見ないように)。別の署名は枠が埋まっている。
+  if (snap.auth) {
+    const nonce = buildForwarderNonce(params, session.chainId, forwarder);
+    return snap.auth.nonce.toLowerCase() === nonce.toLowerCase() &&
+      snap.auth.signature.toLowerCase() === (body.signature as string).toLowerCase()
+      ? { ok: true, idempotent: true, nonce }
+      : fail(409, 'slot_taken');
+  }
+  if (session.expiresAt <= deps.nowSec()) return fail(410, 'expired');
+  // 署名の期限はセッションの期限以内 (預かりが先に消えて署名だけが生き残らないように)。
+  if (validBefore > BigInt(session.expiresAt)) return fail(400, 'validity_beyond_session');
+  // 端末が受け取って送れるだけの残り時間がない署名で枠を占有させない。
+  if (validBefore < BigInt(deps.nowSec() + STORE_DEVICE_MIN_CLAIM_REMAINING_SEC)) {
+    return fail(400, 'validity_too_short');
+  }
   const verified = await verifyForwarderSettle(
     { chainId: session.chainId, params, signature: body.signature as Hex, rateLimitKeys: [] },
     { ...deps, expectedFeeValue: STORE_DEVICE_FEE_WEI, maxValidityWindowSec: STORE_DEVICE_MAX_VALIDITY_SEC },
@@ -277,7 +318,9 @@ export async function submitHandoffAuth(
     nonce: verified.nonce,
     at: deps.nowSec(),
   };
-  const ttl = Math.max(1, session.expiresAt - deps.nowSec());
+  // 検証 (RPC) の間にセッションが切れていたら預からない (孤立した署名を置いて成功を返さない)。
+  const ttl = session.expiresAt - deps.nowSec();
+  if (ttl <= 0) return fail(410, 'expired');
   const claimed = await deps.store.claimAuth(id, auth, ttl);
   if (claimed === null) return fail(503, 'handoff_unavailable');
   if (claimed.existing) {
@@ -310,9 +353,11 @@ export type HandoffDeviceView = HandoffPublicView & {
 export async function readHandoff(
   id: string,
   token: string | null,
-  deps: Pick<HandoffDeps, 'store' | 'nowSec'>,
+  deps: Pick<HandoffDeps, 'store' | 'nowSec' | 'mac'>,
 ): Promise<HandoffPublicView | HandoffDeviceView | HandoffFailure> {
-  if (!isStoreHandoffId(id)) return fail(404, 'not_found');
+  if (!isGenuineHandoffId(id, deps.mac)) return fail(404, 'not_found');
+  // トークン付きの読み取りは KV に触れる前に照合する。
+  if (token !== null && !tokenMatches(token, id, deps.mac)) return fail(403, 'bad_token');
   const snap = await deps.store.read(id);
   if (snap === null) return fail(503, 'handoff_unavailable');
   const session = snap.session;
@@ -324,7 +369,6 @@ export async function readHandoff(
     txHash: snap.txHash,
   };
   if (token === null) return view;
-  if (!tokenMatches(token, session.tokenHash)) return fail(403, 'bad_token');
   const auth = snap.auth;
   return {
     ...view,
@@ -354,9 +398,10 @@ export async function recordHandoffTx(
   id: string,
   token: string | null,
   body: Record<string, unknown>,
-  deps: Pick<HandoffDeps, 'store' | 'nowSec'>,
+  deps: Pick<HandoffDeps, 'store' | 'nowSec' | 'mac'>,
 ): Promise<{ ok: true } | HandoffFailure> {
-  if (!isStoreHandoffId(id)) return fail(404, 'not_found');
+  if (!isGenuineHandoffId(id, deps.mac)) return fail(404, 'not_found');
+  if (!tokenMatches(token, id, deps.mac)) return fail(403, 'bad_token');
   const txHash = body.txHash;
   if (typeof txHash !== 'string' || !isHex(txHash) || txHash.length !== 66) {
     return fail(400, 'invalid_tx');
@@ -365,7 +410,6 @@ export async function recordHandoffTx(
   if (snap === null) return fail(503, 'handoff_unavailable');
   const session = snap.session;
   if (!session) return fail(404, 'not_found');
-  if (!tokenMatches(token, session.tokenHash)) return fail(403, 'bad_token');
   if (!snap.auth) return fail(409, 'not_signed');
   const ttl = Math.max(1, session.expiresAt - deps.nowSec());
   const ok = await deps.store.putTx(id, txHash as Hex, ttl);

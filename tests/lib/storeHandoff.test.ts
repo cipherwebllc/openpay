@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { createHmac } from 'node:crypto';
 import { getAddress, type Address, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import {
@@ -13,7 +14,9 @@ import {
 } from '@/lib/storeDevicePayment';
 import {
   createHandoffSession,
-  hashHandoffToken,
+  handoffTokenFor,
+  isGenuineHandoffId,
+  newHandoffId,
   readHandoff,
   recordHandoffTx,
   submitHandoffAuth,
@@ -29,8 +32,10 @@ const FWD = getAddress('0x752B7AaD0089286EB7b553d84D05233d80c9FCB4');
 const FEE = getAddress('0x428483FbA62eDCef1E3a100d3799F6d71759c560');
 const SHOP = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
 const NOW = 1_800_000_000;
-const ID = 'AAAAAAAAAAAAAAAAAAAAAA';
-const TOKEN = 'ab'.repeat(32);
+const mac = (m: string) => createHmac('sha256', 'test-secret-'.repeat(4)).update(m).digest('hex');
+const fixedBytes = (n: number) => Buffer.alloc(n, 7);
+const ID = newHandoffId({ mac, randomBytes: fixedBytes })!;
+const TOKEN = handoffTokenFor(ID, mac)!;
 const AMOUNT = 1000n * 10n ** 18n;
 
 function memoryStore(): HandoffStore & { failRead: boolean; data: Map<string, string> } {
@@ -85,8 +90,8 @@ function deps(over: Partial<HandoffDeps> = {}): HandoffDeps {
     feeReceiverFor: () => FEE,
     getBalance: async () => balance,
     readAuthorizationUsed: async () => used,
-    randomId: () => ID,
-    randomToken: () => TOKEN,
+    mac,
+    randomBytes: fixedBytes,
     ...over,
   };
 }
@@ -131,12 +136,24 @@ beforeEach(() => {
 });
 
 describe('受け渡しセッションを作る', () => {
-  it('セッションを置き、トークンは sha256 だけを保存する', async () => {
+  it('セッションを置き、トークンは保存しない (id から HMAC で導き直す)', async () => {
     const r = await openSession();
     expect(r).toEqual({ ok: true, id: ID, token: TOKEN, expiresAt: NOW + 600 });
     const saved = JSON.parse(store.data.get(`s:${ID}`)!);
-    expect(saved).toMatchObject({ chainId: CHAIN, merchant: SHOP, amount: AMOUNT.toString(), tokenHash: hashHandoffToken(TOKEN) });
+    expect(saved).toMatchObject({ chainId: CHAIN, merchant: SHOP, amount: AMOUNT.toString() });
     expect(JSON.stringify(saved)).not.toContain(TOKEN);
+  });
+
+  it('id は HMAC 付き: 秘密値の違う・作り話の id は本物と見なさない', () => {
+    expect(isGenuineHandoffId(ID, mac)).toBe(true);
+    expect(isGenuineHandoffId('AAAAAAAAAAAAAAAAAAAAAA', mac)).toBe(false);
+    const otherMac = (m: string) => createHmac('sha256', 'other-secret-'.repeat(3)).update(m).digest('hex');
+    expect(isGenuineHandoffId(ID, otherMac)).toBe(false);
+  });
+
+  it('秘密値が無い環境では作らない (受け渡しを止める)', async () => {
+    const r = await createHandoffSession({ chainId: CHAIN, merchant: SHOP, amount: AMOUNT.toString() }, deps({ mac: () => null }));
+    expect(r).toMatchObject({ ok: false, status: 503, error: 'handoff_unavailable' });
   });
 
   it.each([
@@ -175,6 +192,45 @@ describe('お客様の署名を受け取る', () => {
     expect(await submitHandoffAuth(ID, body, deps())).toMatchObject({ ok: true, idempotent: true });
   });
 
+  it('預かった署名の再送は、端末が送った後 (使用済み)・残高が減った後・RPC 障害時でも冪等に受ける', async () => {
+    await openSession();
+    const body = await signedBody();
+    await submitHandoffAuth(ID, body, deps());
+    used = true;
+    balance = 0n;
+    const r = await submitHandoffAuth(
+      ID,
+      body,
+      deps({ getBalance: async () => { throw new Error('rpc down'); } }),
+    );
+    expect(r).toMatchObject({ ok: true, idempotent: true });
+  });
+
+  it('署名の期限がセッションの期限を超えるものは受けない', async () => {
+    await openSession();
+    const late = deps({ nowSec: () => NOW + 500 });
+    const r = await submitHandoffAuth(ID, await signedBody({ validBefore: BigInt(NOW + 650) }), late);
+    expect(r).toMatchObject({ ok: false, error: 'validity_beyond_session' });
+  });
+
+  it('検証 (RPC) の間にセッションが切れたら預からない (孤立した署名を置いて成功を返さない)', async () => {
+    await openSession();
+    let t = NOW + 520;
+    const r = await submitHandoffAuth(
+      ID,
+      await signedBody({ validBefore: BigInt(NOW + 599) }),
+      deps({
+        nowSec: () => t,
+        getBalance: async () => {
+          t = NOW + 600; // 残高照会の間にセッション切れ
+          return balance;
+        },
+      }),
+    );
+    expect(r).toMatchObject({ ok: false, status: 410, error: 'expired' });
+    expect(store.data.has(`a:${ID}`)).toBe(false);
+  });
+
   it('枠が埋まったあとの別の署名は受けない (二重払いの種を作らない)', async () => {
     await openSession();
     await submitHandoffAuth(ID, await signedBody(), deps());
@@ -186,7 +242,7 @@ describe('お客様の署名を受け取る', () => {
     ['金額がセッションと違う', { merchantValue: AMOUNT + 1n }, 'amount_mismatch'],
     ['手数料欄が 1 wei でない', { feeValue: 2n }, 'fee_value_mismatch'],
     ['有効窓が 180 秒を超える', { validBefore: BigInt(NOW + 181) }, 'validity_too_far'],
-    ['期限切れ', { validBefore: BigInt(NOW) }, 'expired'],
+    ['残り 60 秒未満 (端末が送れない署名で枠を占有させない)', { validBefore: BigInt(NOW + 59) }, 'validity_too_short'],
   ])('%s → %s', async (_, over, error) => {
     await openSession();
     expect(await submitHandoffAuth(ID, await signedBody(over), deps())).toMatchObject({ ok: false, error });
@@ -215,7 +271,7 @@ describe('お客様の署名を受け取る', () => {
     used = true;
     expect(await submitHandoffAuth(ID, await signedBody(), deps())).toMatchObject({ ok: false, status: 409, error: 'authorization_used' });
     used = false;
-    expect(await submitHandoffAuth('BBBBBBBBBBBBBBBBBBBBBB', await signedBody(), deps())).toMatchObject({ ok: false, status: 404 });
+    expect(await submitHandoffAuth('AAAAAAAAAAAAAAAAAAAAAA', await signedBody(), deps())).toMatchObject({ ok: false, status: 404 });
     expect(await submitHandoffAuth('bad id', await signedBody(), deps())).toMatchObject({ ok: false, status: 404 });
     expect(await submitHandoffAuth(ID, await signedBody(), deps({ nowSec: () => NOW + 601 }))).toMatchObject({ ok: false, status: 410 });
     store.failRead = true;
@@ -234,6 +290,16 @@ describe('状態を読む・送った tx を記録する', () => {
     expect(device).toMatchObject({ ok: true, state: 'signed', merchant: SHOP, amount: AMOUNT.toString(), auth: { from: customer.address, feeValue: '1' } });
     expect(await readHandoff(ID, 'cd'.repeat(32), deps())).toMatchObject({ ok: false, status: 403, error: 'bad_token' });
     expect(await readHandoff(ID, 'not-a-token', deps())).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it('偽の id・偽のトークンは KV を読まずに弾く', async () => {
+    await openSession();
+    let reads = 0;
+    const counting = { ...store, read: async (id: string) => { reads += 1; return store.read(id); } };
+    expect(await readHandoff('AAAAAAAAAAAAAAAAAAAAAA', null, deps({ store: counting }))).toMatchObject({ ok: false, status: 404 });
+    expect(await readHandoff(ID, 'cd'.repeat(32), deps({ store: counting }))).toMatchObject({ ok: false, status: 403 });
+    expect(await recordHandoffTx(ID, 'cd'.repeat(32), { txHash: `0x${'ef'.repeat(32)}` }, deps({ store: counting }))).toMatchObject({ ok: false, status: 403 });
+    expect(reads).toBe(0);
   });
 
   it('tx の記録はトークンと署名が要る・記録後は sent', async () => {

@@ -93,8 +93,15 @@ function scrubTraceUrlFields(event: Event): void {
   }
 }
 
+// 認可に使うヘッダ (お店の端末の受け渡しトークン・受注フィードのトークン)。RequestData integration が
+// error event の request.headers に生値を残すので、大文字小文字を問わず落とす。
+const SECRET_HEADER_NAMES = new Set(['x-store-handoff-token', 'x-order-token']);
+
 function scrubRefererHeaders(headers: Record<string, string> | undefined): void {
   if (!headers) return;
+  for (const key of Object.keys(headers)) {
+    if (SECRET_HEADER_NAMES.has(key.toLowerCase())) delete headers[key];
+  }
   for (const [key, value] of Object.entries(headers)) {
     if (REFERER_HEADER_NAMES.has(key.toLowerCase()) || key.toLowerCase() === 'location') {
       headers[key] = urlOriginForTelemetry(value);

@@ -22,6 +22,9 @@ export const STORE_DEVICE_VALIDITY_SEC = 150;
 /** サーバが受け付ける署名の有効窓の上限 (秒・時計のずれの余裕込み)。 */
 export const STORE_DEVICE_MAX_VALIDITY_SEC = 180;
 
+/** サーバが署名を預かるのに要る残り時間 (秒)。端末の読み取り間隔 (最大 6 秒) と送信の余裕を見込む。 */
+export const STORE_DEVICE_MIN_CLAIM_REMAINING_SEC = 60;
+
 /** 端末が送らない残り時間 (秒)。ブロック時刻とのずれで期限切れの revert にガスを払わない。 */
 export const STORE_DEVICE_MIN_REMAINING_SEC = 15;
 

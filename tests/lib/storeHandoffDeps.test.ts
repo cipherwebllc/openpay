@@ -56,4 +56,11 @@ describe('kvHandoffStore (Upstash への写像)', () => {
     kv.setNxGet.mockResolvedValueOnce({ ok: false, error: 'down' });
     expect(await kvHandoffStore.claimAuth(ID, auth, 300)).toBeNull();
   });
+
+  it('既存値が壊れている・文字列 "null" のときは置けていないので成功にしない (null = 止める)', async () => {
+    kv.setNxGet.mockResolvedValueOnce({ ok: true, value: '{broken' });
+    expect(await kvHandoffStore.claimAuth(ID, auth, 300)).toBeNull();
+    kv.setNxGet.mockResolvedValueOnce({ ok: true, value: 'null' });
+    expect(await kvHandoffStore.claimAuth(ID, auth, 300)).toBeNull();
+  });
 });
