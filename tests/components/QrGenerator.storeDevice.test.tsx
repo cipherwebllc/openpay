@@ -381,6 +381,21 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(shownQr()).toMatch(/\/pay\?/);
     });
 
+    it('作れなかった後の「通常の QR を出す」の締め切り待ちの間に金額を変えたら、開かない', async () => {
+      const user = userEvent.setup();
+      seed();
+      sd.state = { phase: 'create_failed', reason: 'unavailable' };
+      let resolve!: (v: boolean) => void;
+      sd.releaseForNormal.mockReturnValue(new Promise<boolean>((r) => { resolve = r; }));
+      await ready(user);
+      await user.click(await screen.findByRole('button', { name: '通常の QR を出す' }));
+      await user.type(screen.getByPlaceholderText('1000'), '0'); // 500 → 5000
+      resolve(true);
+      await waitFor(() => expect(sd.releaseForNormal).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 0));
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
     it('圏外のときも、お店負担を選んでいる間は保存した通常の QR を出さない', async () => {
       seed();
       window.localStorage.setItem(

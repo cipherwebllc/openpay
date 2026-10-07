@@ -683,8 +683,15 @@ export function QrGenerator() {
   async function showNormalQr() {
     // 店員が選んだときだけ通常の QR (署名を待っていた受け渡しを締め切ってから・署名が入っていたら出さない)。
     const attempt = storeOpenAttemptRef.current;
-    // 締め切りを待つ間に閉じた → 開き直さない。
-    if (!(await device.releaseForNormal()) || storeOpenAttemptRef.current !== attempt) return;
+    const key = storeOpenKeyRef.current;
+    // 締め切りを待つ間に閉じた・会計や設定を変えた → 開かない (押し直してもらう)。
+    if (
+      !(await device.releaseForNormal()) ||
+      storeOpenAttemptRef.current !== attempt ||
+      storeOpenKeyRef.current !== key
+    ) {
+      return;
+    }
     setStoreQr(null);
     setForceNormalQr(true);
     setQrModalOpen(true);

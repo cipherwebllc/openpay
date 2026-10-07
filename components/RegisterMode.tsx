@@ -575,8 +575,15 @@ function RegisterModeContent({
   async function showNormalQr() {
     // 署名を待っていた受け渡しを締め切ってから。署名が入っていたら端末が送る (通常の QR は出さない)。
     const attempt = storeOpenAttemptRef.current;
-    // 締め切りを待つ間に閉じた → 開き直さない。
-    if (!(await device.releaseForNormal()) || storeOpenAttemptRef.current !== attempt) return;
+    const key = storeOpenKeyRef.current;
+    // 締め切りを待つ間に閉じた・会計や設定を変えた → 開かない (押し直してもらう)。
+    if (
+      !(await device.releaseForNormal()) ||
+      storeOpenAttemptRef.current !== attempt ||
+      storeOpenKeyRef.current !== key
+    ) {
+      return;
+    }
     setStoreQr(null);
     setForceNormalQr(true);
     setQrModalOpen(true);
