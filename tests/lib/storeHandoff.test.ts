@@ -13,6 +13,7 @@ import {
   STORE_DEVICE_MIN_AMOUNT_WEI,
 } from '@/lib/storeDevicePayment';
 import {
+  closeHandoff,
   createHandoffSession,
   handoffTokenFor,
   isGenuineHandoffId,
@@ -21,6 +22,7 @@ import {
   recordHandoffTx,
   submitHandoffAuth,
   type HandoffAuth,
+  type HandoffClosedMark,
   type HandoffDeps,
   type HandoffSession,
   type HandoffStore,
@@ -51,23 +53,39 @@ function memoryStore(): HandoffStore & { failRead: boolean; data: Map<string, st
     async read(id: string) {
       if (s.failRead) return null;
       const session = data.get(`s:${id}`);
-      const auth = data.get(`a:${id}`);
+      const slot = data.get(`a:${id}`);
       const tx = data.get(`t:${id}`);
+      const parsed = slot ? (JSON.parse(slot) as HandoffAuth & { closed?: true }) : null;
       return {
         session: session ? (JSON.parse(session) as HandoffSession) : null,
-        auth: auth ? (JSON.parse(auth) as HandoffAuth) : null,
+        auth: parsed && !parsed.closed ? parsed : null,
         txHash: (tx as Hex) ?? null,
+        closed: !!parsed?.closed,
       };
     },
     async claimAuth(id: string, auth: HandoffAuth) {
       const existing = data.get(`a:${id}`);
-      if (existing) return { existing: JSON.parse(existing) as HandoffAuth };
+      if (existing) {
+        const v = JSON.parse(existing) as HandoffAuth & { closed?: true };
+        return v.closed ? { existing: null, closed: true as const } : { existing: v };
+      }
       data.set(`a:${id}`, JSON.stringify(auth));
       return { existing: null };
     },
+    async closeSlot(id: string, mark: HandoffClosedMark) {
+      const existing = data.get(`a:${id}`);
+      if (existing) {
+        const v = JSON.parse(existing) as HandoffAuth & { closed?: true };
+        return v.closed ? { closed: true as const } : { closed: false as const, existing: v };
+      }
+      data.set(`a:${id}`, JSON.stringify(mark));
+      return { closed: true as const };
+    },
     async putTx(id: string, txHash: Hex) {
+      const existing = data.get(`t:${id}`);
+      if (existing) return existing as Hex;
       data.set(`t:${id}`, txHash);
-      return true;
+      return txHash;
     },
   };
   return s;
@@ -309,8 +327,85 @@ describe('状態を読む・送った tx を記録する', () => {
     await submitHandoffAuth(ID, await signedBody(), deps());
     expect(await recordHandoffTx(ID, null, { txHash: tx }, deps())).toMatchObject({ ok: false, status: 403 });
     expect(await recordHandoffTx(ID, TOKEN, { txHash: '0x12' }, deps())).toMatchObject({ ok: false, error: 'invalid_tx' });
-    expect(await recordHandoffTx(ID, TOKEN, { txHash: tx }, deps())).toEqual({ ok: true });
+    expect(await recordHandoffTx(ID, TOKEN, { txHash: tx }, deps())).toEqual({ ok: true, txHash: tx });
     expect(await readHandoff(ID, null, deps())).toMatchObject({ state: 'sent', txHash: tx });
+  });
+
+  it('別の hash が後から来ても上書きせず、記録済みの hash を返す (端末が別の送信に気づける)', async () => {
+    await openSession();
+    await submitHandoffAuth(ID, await signedBody(), deps());
+    const first = `0x${'ef'.repeat(32)}`;
+    const second = `0x${'cd'.repeat(32)}`;
+    expect(await recordHandoffTx(ID, TOKEN, { txHash: first }, deps())).toEqual({ ok: true, txHash: first });
+    expect(await recordHandoffTx(ID, TOKEN, { txHash: second }, deps())).toEqual({ ok: true, txHash: first });
+  });
+});
+
+describe('締め切る (お店の端末が使わなくなったセッション)', () => {
+  it('署名が無ければ締め切り、以後のお客様の署名は期限切れ (410) で受けない・状態は closed', async () => {
+    await openSession();
+    expect(await closeHandoff(ID, TOKEN, deps())).toEqual({ ok: true, closed: true });
+    expect(await closeHandoff(ID, TOKEN, deps())).toEqual({ ok: true, closed: true }); // 冪等
+    expect(await submitHandoffAuth(ID, await signedBody(), deps())).toMatchObject({ ok: false, status: 410, error: 'expired' });
+    expect(await readHandoff(ID, null, deps())).toMatchObject({ state: 'closed', txHash: null });
+    expect(await readHandoff(ID, TOKEN, deps())).toMatchObject({ state: 'closed', auth: null });
+  });
+
+  it('署名が先に入っていれば締め切らず、その署名を返す (端末が受け取って送る)', async () => {
+    await openSession();
+    await submitHandoffAuth(ID, await signedBody(), deps());
+    const r = await closeHandoff(ID, TOKEN, deps());
+    expect(r).toMatchObject({ ok: true, closed: false, txHash: null, auth: { from: customer.address, feeValue: '1' } });
+    expect(await readHandoff(ID, null, deps())).toMatchObject({ state: 'signed' });
+  });
+
+  it('端末が送った後 (tx 記録済み) の締め切りは、署名と記録済みの hash を返す (端末は送り直さない)', async () => {
+    await openSession();
+    await submitHandoffAuth(ID, await signedBody(), deps());
+    const tx = `0x${'ef'.repeat(32)}`;
+    await recordHandoffTx(ID, TOKEN, { txHash: tx }, deps());
+    expect(await closeHandoff(ID, TOKEN, deps())).toMatchObject({ ok: true, closed: false, txHash: tx, auth: { from: customer.address } });
+    expect(await readHandoff(ID, null, deps())).toMatchObject({ state: 'sent', txHash: tx });
+  });
+
+  it('お客様の検証 (RPC) の間に締め切られたら預からない (枠は締め切りが先に取った)', async () => {
+    await openSession();
+    const body = await signedBody();
+    const racing = {
+      ...store,
+      claimAuth: async (id: string, auth: HandoffAuth, ttl: number) => {
+        await closeHandoff(ID, TOKEN, deps());
+        return store.claimAuth(id, auth, ttl);
+      },
+    };
+    expect(await submitHandoffAuth(ID, body, deps({ store: racing }))).toMatchObject({ ok: false, status: 410, error: 'expired' });
+    expect(await readHandoff(ID, TOKEN, deps())).toMatchObject({ state: 'closed', auth: null });
+  });
+
+  it('締め切りと署名が同時なら、枠を先に取った方が勝つ (締め切りの直前に署名が入れば署名を返す)', async () => {
+    await openSession();
+    const body = await signedBody();
+    const racing = {
+      ...store,
+      closeSlot: async (id: string, mark: HandoffClosedMark, ttl: number) => {
+        await submitHandoffAuth(ID, body, deps());
+        return store.closeSlot(id, mark, ttl);
+      },
+    };
+    expect(await closeHandoff(ID, TOKEN, deps({ store: racing }))).toMatchObject({ ok: true, closed: false, auth: { from: customer.address } });
+  });
+
+  it('トークンが要る・偽の id は KV を読まない・無いセッションは 404・KV 障害は 503', async () => {
+    await openSession();
+    let reads = 0;
+    const counting = { ...store, read: async (id: string) => { reads += 1; return store.read(id); } };
+    expect(await closeHandoff(ID, null, deps({ store: counting }))).toMatchObject({ ok: false, status: 403 });
+    expect(await closeHandoff('AAAAAAAAAAAAAAAAAAAAAA', TOKEN, deps({ store: counting }))).toMatchObject({ ok: false, status: 404 });
+    expect(reads).toBe(0);
+    const other = newHandoffId({ mac, randomBytes: (n) => Buffer.alloc(n, 9) })!;
+    expect(await closeHandoff(other, handoffTokenFor(other, mac), deps())).toMatchObject({ ok: false, status: 404 });
+    store.failRead = true;
+    expect(await closeHandoff(ID, TOKEN, deps())).toMatchObject({ ok: false, status: 503 });
   });
 });
 
