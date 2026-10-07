@@ -1100,7 +1100,8 @@ function RegisterModeContent({
             eyebrow: t('qrPosterEyebrow'),
             copy: t('copyUrl'),
             copied: t('copied'),
-            localGenNote: t('qrLocalGenNote'),
+            // お店負担の QR は端末が通信して送るので「圏外でも提示できます」は出さない。
+            localGenNote: storeQrActive ? undefined : t('qrLocalGenNote'),
           }}
           convertExpired={storeQrDimmed}
           payModeBadge={storeQrActive ? { text: t('storeDevice.badge'), tone: 'gasless' } : undefined}

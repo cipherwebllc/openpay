@@ -168,13 +168,15 @@ export function QrSettingsSection({
                     : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
               }`}
             >
-              <div className="flex items-center gap-2 font-semibold">
-                <Store className="h-4 w-4 flex-none text-sky-600" aria-hidden />
-                <span>{t('storeDevice.cardTitle')}</span>
-                <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-sky-700">
-                  {t('storeDevice.cardBadge')}
-                </span>
+              {/* 3 枚並びでは幅が狭いので、見出しは「お店が / ガス代を肩代わり」でだけ折り返し (語の途中・1 文字だけの行で
+                  折らない)、バッジは次の行に。 */}
+              <div className="flex items-start gap-2 font-semibold">
+                <Store className="mt-0.5 h-4 w-4 flex-none text-sky-600" aria-hidden />
+                <span className="break-keep">{t.rich('storeDevice.cardTitle', { wbr: () => <wbr /> })}</span>
               </div>
+              <span className="mt-1 inline-block whitespace-nowrap rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-sky-700">
+                {t('storeDevice.cardBadge')}
+              </span>
               <div className="mt-0.5 text-xs text-slate-500">
                 {storeUsable
                   ? t('storeDevice.cardDesc')

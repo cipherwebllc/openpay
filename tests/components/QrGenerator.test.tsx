@@ -367,7 +367,7 @@ describe('QrGenerator', () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await openAdvanced(user);
-      expect(screen.queryByRole('button', { name: /お店がガス代を肩代わり/ })).toBeNull();
+      expect(screen.queryByRole('button', { name: /お店が\s?ガス代を肩代わり/ })).toBeNull();
     });
 
     it('payUrl 有効時のみ「QRコードを表示する」CTA を2箇所 (右サイドバー + モバイル下部バー) 描画', async () => {

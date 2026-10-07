@@ -176,7 +176,7 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       await user.click(btn);
       const toggle = await screen.findByRole('button', { name: /高度な設定/ });
       if (toggle.getAttribute('aria-expanded') !== 'true') await user.click(toggle);
-      await user.click(screen.getByRole('button', { name: /お店がガス代を肩代わり/ }));
+      await user.click(screen.getByRole('button', { name: /お店が\s?ガス代を肩代わり/ }));
       resolve(true);
       await waitFor(() => expect(sd.releaseForNormal).toHaveBeenCalled());
       await new Promise((r) => setTimeout(r, 0));
@@ -194,6 +194,8 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
     });
   });
 
+  // 3 枚目のカードの見出しは「お店が<wbr>ガス代を肩代わり」(折り返し位置の指定)。jsdom は <wbr> を名前の空白として
+  // 数えるので、名前の照合は空白を許す (実際のブラウザでは空白なし)。
   describe('決済モードの 3 つ目のカード', () => {
     async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
       const toggle = await screen.findByRole('button', { name: /高度な設定/ });
@@ -205,7 +207,7 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       seed({ storePays: false, payMode: 'standard' });
       render(<QrGenerator />);
       await openAdvanced(user);
-      await user.click(screen.getByRole('button', { name: /お店がガス代を肩代わり/ }));
+      await user.click(screen.getByRole('button', { name: /お店が\s?ガス代を肩代わり/ }));
       await waitFor(() => {
         const saved = JSON.parse(window.localStorage.getItem(KEY)!);
         expect(saved.storePays).toBe(true);
@@ -221,7 +223,7 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       seed({ storePays: false, token: 'usdc', chain: 'base' });
       render(<QrGenerator />);
       await openAdvanced(user);
-      const card = screen.getByRole('button', { name: /お店がガス代を肩代わり/ });
+      const card = screen.getByRole('button', { name: /お店が\s?ガス代を肩代わり/ });
       expect(card).toBeDisabled();
       expect(card).toHaveTextContent(/JPYC・.* のときだけ選べます/);
     });
@@ -274,6 +276,8 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(screen.queryByText(/\/checkout\?/)).toBeNull();
       expect(screen.getByText(/この QR は画面に表示している間だけ使えます/)).toBeTruthy();
       expect(screen.getByText('ガス代はお店が負担')).toBeTruthy();
+      // 端末が通信して送るので「圏外でも提示できます」は出さない
+      expect(screen.queryByText(/圏外でも/)).toBeNull();
       expect(window.localStorage.getItem(LAST_QR_KEY)).toBeNull();
     });
 

@@ -864,7 +864,8 @@ export function QrGenerator() {
             copied: t('qrCopied'),
             downloadSvg: t('downloadSvg'),
             downloadPng: t('downloadPng'),
-            localGenNote: t('localGenNote'),
+            // お店負担の QR は端末が通信して送るので「圏外でも提示できます」は出さない。
+            localGenNote: storeQrShown ? undefined : t('localGenNote'),
             step1: t('posterStepScan'),
             step2: t('posterStepConfirm'),
             step3: t('posterStepDone'),

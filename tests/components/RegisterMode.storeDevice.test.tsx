@@ -145,6 +145,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(screen.queryByText(/\/checkout\?/)).toBeNull();
     expect(screen.queryByRole('button', { name: /URL をコピー|コピー/ })).toBeNull();
     expect(screen.getByText(/この QR は画面に表示している間だけ使えます/)).toBeTruthy();
+    expect(screen.queryByText(/圏外でも/)).toBeNull();
   });
 
   it('受け渡しを作れなければ QR を開かない (黙って通常の QR に切り替えない)', async () => {

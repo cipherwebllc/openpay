@@ -591,7 +591,7 @@
     "receiptNoLabel": "管理番号 / レシート番号",
     "receiptNoPlaceholder": "任意",
     "storeDevice": {
-      "cardTitle": "お店がガス代を肩代わり",
+      "cardTitle": "お店が<wbr></wbr>ガス代を肩代わり",
       "cardBadge": "利用料 0 円",
       "cardDesc": "お客様は署名するだけ。この端末のガス用ウォレットの POL でガス代を払って送ります（お店の負担はガス代の実費だけ）。",
       "cardUnavailable": "JPYC・{chain} のときだけ選べます。",
