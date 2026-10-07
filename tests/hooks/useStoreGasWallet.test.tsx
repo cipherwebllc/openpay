@@ -149,6 +149,41 @@ describe('useStoreGasWallet', () => {
     expect(rpc.calls.some((c) => c.method === 'eth_sendRawTransaction')).toBe(false);
   });
 
+  it('「不明」の間は宛先の入力ミスで状態を上書きせず、消せないまま (届いたか分からない送金の鍵を消させない)', async () => {
+    rpc.receiptStatus = null; // receipt が見つからない → 確定待ちの時間切れ → 不明
+    const { result } = await setup();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let pending: Promise<unknown> = Promise.resolve();
+      act(() => {
+        pending = result.current.withdraw(DEST);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(120_000);
+        await pending;
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(result.current.withdrawStatus).toEqual({ phase: 'unknown', hash: TX });
+    expect(result.current.removeBlocked).toBe(true);
+    await act(async () => {
+      await result.current.withdraw('0x123');
+    });
+    expect(result.current.withdrawStatus).toEqual({ phase: 'unknown', hash: TX });
+    expect(result.current.removeBlocked).toBe(true);
+    await act(async () => {
+      expect(await result.current.remove()).toBe(false);
+    });
+    // 残高を更新して receipt が見つかれば、確定に変わり消せるようになる
+    rpc.receiptStatus = '0x1';
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.withdrawStatus).toEqual({ phase: 'confirmed', hash: TX });
+    expect(result.current.removeBlocked).toBe(false);
+  });
+
   it('消すと鍵も残高表示も消える', async () => {
     const { result } = await setup();
     await act(async () => {

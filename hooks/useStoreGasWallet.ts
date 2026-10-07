@@ -66,6 +66,8 @@ export function useStoreGasWallet() {
   const [withdrawStatus, setWithdrawStatus] = useState<WithdrawStatus>({ phase: 'idle' });
   // タブ内の多重押しを止める (state の反映前に 2 回目が走らないよう ref で持つ)。
   const inFlight = useRef(false);
+  // 「不明」の状態を refresh から読むための写し (refresh の依存を増やさない)。
+  const unknownRef = useRef<{ hash?: Hex } | null>(null);
 
   // localStorage は描画後にだけ読む (server と初回 client の描画を揃える)。
   useEffect(() => {
@@ -73,6 +75,11 @@ export function useStoreGasWallet() {
   }, []);
 
   const address = walletState?.state === 'ok' ? walletState.info.address : null;
+
+  useEffect(() => {
+    unknownRef.current =
+      withdrawStatus.phase === 'unknown' ? { hash: withdrawStatus.hash } : null;
+  }, [withdrawStatus]);
 
   const refresh = useCallback(async () => {
     if (!address) return;
@@ -87,6 +94,28 @@ export function useStoreGasWallet() {
     } catch {
       // RPC の一時的な失敗。残高を 0 と見せず「読めなかった」と出す (偽の残高を表示しない)。
       setReadFailed(true);
+      return;
+    }
+    // 「不明」の出口: hash があれば receipt で確定/取り消しを確かめる。hash が無い (送信中に切れた) ときは
+    // 残高を読めた時点で解除する (残高が残っていれば「消す」の確認で先に戻すよう出る)。
+    if (unknownRef.current) {
+      const pendingHash = unknownRef.current.hash;
+      if (!pendingHash) {
+        unknownRef.current = null;
+        setWithdrawStatus({ phase: 'idle' });
+        return;
+      }
+      try {
+        const receipt = await publicClient.getTransactionReceipt({ hash: pendingHash });
+        unknownRef.current = null;
+        setWithdrawStatus(
+          receipt.status === 'success'
+            ? { phase: 'confirmed', hash: pendingHash }
+            : { phase: 'reverted', hash: pendingHash },
+        );
+      } catch {
+        // まだ見つからない。不明のまま (消せないまま) にする。
+      }
     }
   }, [publicClient, address]);
 
@@ -122,6 +151,16 @@ export function useStoreGasWallet() {
 
   const withdraw = useCallback(
     async (rawTo: string): Promise<WithdrawStatus> => {
+      // 送信中・確定待ち・不明の間は何もしない (状態を上書きすると「消せない」が外れ、届いたか分からない
+      // 送金の鍵を消せてしまう)。
+      if (
+        inFlight.current ||
+        withdrawStatus.phase === 'sending' ||
+        withdrawStatus.phase === 'pending' ||
+        withdrawStatus.phase === 'unknown'
+      ) {
+        return withdrawStatus;
+      }
       const reject = (reason: WithdrawRejectReason): WithdrawStatus => {
         const s: WithdrawStatus = { phase: 'rejected', reason };
         setWithdrawStatus(s);
@@ -134,67 +173,71 @@ export function useStoreGasWallet() {
       const to: Address = getAddress(trimmed);
       if (to === zeroAddress) return reject('zero_address');
       if (to.toLowerCase() === address.toLowerCase()) return reject('same_address');
-      if (inFlight.current) return withdrawStatus;
       inFlight.current = true;
       setWithdrawStatus({ phase: 'sending' });
       try {
-        return await withStoreGasWalletLock(async () => {
-          // 別タブで作り直された等で鍵が変わっていたら送らない。
-          const key = readStoreGasWalletKey(address);
-          if (!key) return reject('no_wallet');
-          let value: bigint;
-          let fees: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
-          try {
-            const [code, current, estimated] = await Promise.all([
-              publicClient.getCode({ address: to }),
-              publicClient.getBalance({ address }),
-              publicClient.estimateFeesPerGas(),
-            ]);
-            // 戻し先はウォレット (EOA) に限る (コントラクトは受け取りの処理でガスが 21,000 を超えうる)。
-            if (code && code !== '0x') return reject('contract_recipient');
-            fees = estimated;
-            value = withdrawableAmount(current, STORE_GAS_WITHDRAW_GAS, fees.maxFeePerGas);
-          } catch {
-            return reject('read_failed');
-          }
-          if (value <= 0n) return reject('insufficient');
-          let hash: Hex;
-          try {
-            const walletClient = createWalletClient({
-              account: privateKeyToAccount(key),
-              chain,
-              transport: transportForChain(chain.id),
-            });
-            hash = await walletClient.sendTransaction({
-              to,
-              value,
-              gas: STORE_GAS_WITHDRAW_GAS,
-              maxFeePerGas: fees.maxFeePerGas,
-              maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
-            });
-          } catch {
-            // 送信の途中で切れた等。届いたかどうか分からないので失敗とは言わない。
-            const s: WithdrawStatus = { phase: 'unknown' };
-            setWithdrawStatus(s);
-            return s;
-          }
-          setWithdrawStatus({ phase: 'pending', hash });
-          let final: WithdrawStatus;
-          try {
-            const receipt = await publicClient.waitForTransactionReceipt({
-              hash,
-              timeout: RECEIPT_TIMEOUT_MS,
-            });
-            final =
-              receipt.status === 'success'
-                ? { phase: 'confirmed', hash }
-                : { phase: 'reverted', hash };
-          } catch {
-            final = { phase: 'unknown', hash };
-          }
-          setWithdrawStatus(final);
-          return final;
-        });
+        // ロックは「鍵を読む → 署名 → 送る」までに限る (確定待ちの間に別タブの操作を止めない)。
+        const sent = await withStoreGasWalletLock(
+          async (): Promise<{ hash: Hex } | WithdrawStatus> => {
+            // 別タブで作り直された等で鍵が変わっていたら送らない。
+            const key = readStoreGasWalletKey(address);
+            if (!key) return reject('no_wallet');
+            let value: bigint;
+            let fees: { maxFeePerGas: bigint; maxPriorityFeePerGas: bigint };
+            try {
+              const [code, current, estimated] = await Promise.all([
+                publicClient.getCode({ address: to }),
+                publicClient.getBalance({ address }),
+                publicClient.estimateFeesPerGas(),
+              ]);
+              // 戻し先はウォレット (EOA) に限る (コントラクトは受け取りの処理でガスが 21,000 を超えうる)。
+              if (code && code !== '0x') return reject('contract_recipient');
+              fees = estimated;
+              value = withdrawableAmount(current, STORE_GAS_WITHDRAW_GAS, fees.maxFeePerGas);
+            } catch {
+              return reject('read_failed');
+            }
+            if (value <= 0n) return reject('insufficient');
+            try {
+              const walletClient = createWalletClient({
+                account: privateKeyToAccount(key),
+                chain,
+                transport: transportForChain(chain.id),
+              });
+              const hash = await walletClient.sendTransaction({
+                to,
+                value,
+                gas: STORE_GAS_WITHDRAW_GAS,
+                maxFeePerGas: fees.maxFeePerGas,
+                maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+              });
+              return { hash };
+            } catch {
+              // 送信の途中で切れた等。届いたかどうか分からないので失敗とは言わない。
+              const s: WithdrawStatus = { phase: 'unknown' };
+              setWithdrawStatus(s);
+              return s;
+            }
+          },
+        );
+        if ('phase' in sent) return sent;
+        const { hash } = sent;
+        setWithdrawStatus({ phase: 'pending', hash });
+        let final: WithdrawStatus;
+        try {
+          const receipt = await publicClient.waitForTransactionReceipt({
+            hash,
+            timeout: RECEIPT_TIMEOUT_MS,
+          });
+          final =
+            receipt.status === 'success'
+              ? { phase: 'confirmed', hash }
+              : { phase: 'reverted', hash };
+        } catch {
+          final = { phase: 'unknown', hash };
+        }
+        setWithdrawStatus(final);
+        return final;
       } finally {
         inFlight.current = false;
         void refresh();
