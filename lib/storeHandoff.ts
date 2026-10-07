@@ -212,7 +212,7 @@ export async function createHandoffSession(
     expiresAt: now + STORE_HANDOFF_TTL_SEC,
   };
   const put = await deps.store.putSession(id, session, STORE_HANDOFF_TTL_SEC);
-  // KV 障害・id 衝突 (16 byte 乱数でまず起きない) は作れなかったとして返す (偽の成功を出さない)。
+  // KV 障害・id 衝突 (乱数 10 byte = 80 bit でまず起きない) は作れなかったとして返す (偽の成功を出さない)。
   if (put !== true) return fail(503, 'handoff_unavailable');
   return { ok: true, id, token, expiresAt: session.expiresAt };
 }
@@ -229,11 +229,7 @@ export async function submitHandoffAuth(
   deps: HandoffDeps,
 ): Promise<AcceptedAuth | HandoffFailure> {
   if (!isGenuineHandoffId(id, deps.mac)) return fail(404, 'not_found');
-  const snap = await deps.store.read(id);
-  if (snap === null) return fail(503, 'handoff_unavailable');
-  const session = snap.session;
-  if (!session) return fail(404, 'not_found');
-
+  // 形の検証は KV を読む前に (壊れた本文で KV の読み取りを消費させない)。
   const merchantValue = parseWei(body.merchantValue);
   const feeValue = parseWei(body.feeValue);
   const validAfter = parseWei(body.validAfter);
@@ -254,6 +250,11 @@ export async function submitHandoffAuth(
   ) {
     return fail(400, 'invalid_body');
   }
+  const snap = await deps.store.read(id);
+  if (snap === null) return fail(503, 'handoff_unavailable');
+  const session = snap.session;
+  if (!session) return fail(404, 'not_found');
+
   if (typeof body.merchant === 'string' && body.merchant.toLowerCase() !== session.merchant.toLowerCase()) {
     return fail(400, 'merchant_mismatch');
   }
