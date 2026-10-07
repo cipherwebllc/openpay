@@ -236,6 +236,23 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('「通常の QR を出す」の締め切り待ちの途中で閉じたら、開き直さない', async () => {
+    const user = userEvent.setup();
+    seed();
+    hold.state = { phase: 'waiting', session: { id: HS }, stale: false, degraded: true };
+    render(<RegisterMode />);
+    await addItemAndOpen(user);
+    await waitFor(() => expect(shownCheckout()).not.toBeNull());
+    let resolve!: (v: boolean) => void;
+    hold.release.mockReturnValue(new Promise<boolean>((r) => { resolve = r; }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '通常の QR を出す' }));
+    await user.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: /閉じる/ })[0]);
+    resolve(true);
+    await waitFor(() => expect(hold.release).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('受け取った署名を送っている間は QR のボタンを押せない', async () => {
     seed();
     hold.busy = true;
