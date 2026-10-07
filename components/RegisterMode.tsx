@@ -16,11 +16,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useQuery } from '@tanstack/react-query';
-import { formatUnits, type Address } from 'viem';
+import { formatUnits, getAddress, isAddress, type Address } from 'viem';
 import { ChevronRight, Minus, Plus, QrCode as QrCodeIcon, Star, Trash2 } from 'lucide-react';
 import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
 import { StoreGasWalletPanel } from './StoreGasWalletPanel';
+import { StoreDeviceRegisterStatus } from './StoreDeviceRegisterStatus';
+import { useStoreDeviceRegister, useStoreDeviceToggle } from '@/hooks/useStoreDeviceRegister';
+import { STORE_DEVICE_MIN_AMOUNT_WEI, storeDeviceChainId } from '@/lib/storeDevicePayment';
 import { Field } from './Field';
 import { ExternalImage } from './ExternalImage';
 import { ProductPresetManager } from './ProductPresetManager';
@@ -38,12 +41,12 @@ import { isLikelyName } from '@/lib/nameDetection';
 import { paymentPolicyKey } from '@/lib/paymentPolicy';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
-import { chainForSlug } from '@/lib/chains';
+import { chainForSlug, chainNameForId } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { safeHttpUrl } from '@/lib/mobileOrder';
 import { composeLineName, effectiveUnitPrice, type OptionChoice } from '@/lib/menuOptions';
 import { OptionSelectModal } from './OptionSelectModal';
-import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
+import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug, resolveDeployment } from '@/lib/tokens';
 import {
   buildCheckoutUrl,
   calcCheckoutTotal,
@@ -136,6 +139,39 @@ function RegisterModeContent({
   const [optionModalPreset, setOptionModalPreset] = useState<ProductPreset | null>(null);
   const qrRef = useRef<HTMLDivElement>(null);
   const totalBarRef = useRef<HTMLDivElement>(null);
+
+  // お店の端末で送る (flag 裏・端末ごとの切替・plans/store-gas-wallet.md P2b-2)。flag OFF・切替 OFF では
+  // hook は通信も effect も起こさず、QR・URL・ボタンの動きは今のまま。
+  const [storeDeviceOn, setStoreDeviceOn] = useStoreDeviceToggle();
+  // ガス用ウォレットのアドレス (パネルが知らせる・undefined = まだ分からない / null = 無い)。
+  const [gasAddress, setGasAddress] = useState<Address | null | undefined>(undefined);
+  const [storeSessionId, setStoreSessionId] = useState<string | null>(null);
+  // 「通常の QR を出す」を店員が選んだ (お店の端末で送るの QR を作れない・読み取れないとき)。
+  const [forceNormalQr, setForceNormalQr] = useState(false);
+  const [hasWebLocks, setHasWebLocks] = useState(false);
+  useEffect(() => {
+    setHasWebLocks(typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function');
+  }, []);
+  const sdChainId = storeDeviceChainId();
+  const sdDeployment = resolveDeployment('jpyc', sdChainId);
+  const sdForwarder = env.enableStoreGasWallet ? jpycForwarderFor(sdChainId) : null;
+  const sdFeeReceiver =
+    env.enableStoreGasWallet && isAddress(env.feeReceiver) ? getAddress(env.feeReceiver) : null;
+  const sdBlocked: 'no_locks' | 'config' | null = !hasWebLocks
+    ? 'no_locks'
+    : !sdForwarder || !sdFeeReceiver || !sdDeployment
+      ? 'config'
+      : null;
+  const sdEnabled =
+    env.enableStoreGasWallet && storeDeviceOn && sdBlocked === null && !!gasAddress && !!sdDeployment;
+  const device = useStoreDeviceRegister({
+    enabled: sdEnabled,
+    chainId: sdChainId,
+    token: sdDeployment?.address ?? ('0x0000000000000000000000000000000000000000' as Address),
+    forwarder: sdForwarder,
+    feeReceiver: sdFeeReceiver,
+    gasAddress: gasAddress ?? null,
+  });
 
   const effectiveReceiver = pickEffectiveAddress(settings.receiver, resolvedReceiver);
   const setReceiver = useCallback(
@@ -419,6 +455,107 @@ function RegisterModeContent({
           ...(env.enableRegisterFee ? { feeKind: 'register' as const } : {}),
         })
       : '';
+
+  // この会計でお店の端末で送るを使えるか (JPYC・対象チェーン・受取先・最低 1 JPYC)。使えないときは理由を出し、
+  // 通常の QR を出す (黙って切り替えない)。
+  const sdSaleBlocked: 'token' | 'receiver' | 'min_amount' | 'no_wallet' | null =
+    !env.enableStoreGasWallet || !storeDeviceOn || sdBlocked !== null
+      ? null
+      : gasAddress === null
+        ? 'no_wallet'
+        : settings.token !== 'jpyc' || deployment.chainId !== sdChainId
+          ? 'token'
+          : effectiveReceiver &&
+              [sdForwarder, sdFeeReceiver].some(
+                (a) => a && a.toLowerCase() === effectiveReceiver.toLowerCase(),
+              )
+            ? 'receiver'
+            : validItems.length > 0 && totalWei < STORE_DEVICE_MIN_AMOUNT_WEI
+              ? 'min_amount'
+              : null;
+  const storeDeviceForSale = sdEnabled && sdSaleBlocked === null;
+  const storeQrActive = storeDeviceForSale && !forceNormalQr && storeSessionId !== null;
+  // お店の端末で送るの QR (receiptNo 等は通常と同じ・feeKind は付けない = parse が fail-closed で弾くため)。
+  const storeCheckoutUrl =
+    storeQrActive && checkoutUrl && effectiveReceiver
+      ? buildCheckoutUrl(origin, {
+          to: effectiveReceiver,
+          token: settings.token,
+          chain: settings.chain,
+          gas: effectiveGasMode,
+          mode: settings.payMode,
+          items: validItems,
+          receiptNo: receiptNo || undefined,
+          storeName: settings.storeName.trim() || undefined,
+          invoiceNo: settings.invoiceNo || undefined,
+          submit: 'store',
+          handoffId: storeSessionId,
+        })
+      : '';
+  const qrValue = storeQrActive ? storeCheckoutUrl : checkoutUrl;
+  const sdState = device.state;
+  // QR を薄くする: 署名を受け取った後・受付時間の終わり (次のお客様に読ませない)。
+  const storeQrDimmed =
+    storeQrActive && !(sdState.phase === 'waiting' && !sdState.stale) && sdState.phase !== 'creating';
+
+  async function openQr() {
+    // 受け取った署名を送っている・結果を待っている間は次の QR を出さない (二重払いにしない)。
+    if (device.busy) return;
+    setForceNormalQr(false);
+    if (storeDeviceForSale && effectiveReceiver) {
+      const s = await device.start(getAddress(effectiveReceiver), totalWei);
+      // 作れなかった (理由は状態に出る)・前の会計の署名の送信を優先した → QR は開かない。
+      if (!s) return;
+      setStoreSessionId(s.id);
+    } else if (env.enableStoreGasWallet) {
+      // 通常の QR: 前の受け渡し (切替を OFF にする前のものも) を締め切ってから出す。署名が入っていたら
+      // 端末が送るので、通常の QR は出さない。受け渡しが無ければ通信せずにすぐ出す。
+      if (!(await device.releaseForNormal())) return;
+      setStoreSessionId(null);
+    }
+    setQrModalOpen(true);
+  }
+
+  function closeQr() {
+    setQrModalOpen(false);
+    setForceNormalQr(false);
+    if (storeSessionId) {
+      // 署名を待っていたセッションは締め切る (署名が入っていれば送る・結果は会計ボタンの下に出る)。
+      device.stop();
+      setStoreSessionId(null);
+    }
+  }
+
+  async function showNormalQr() {
+    // 署名を待っていた受け渡しを締め切ってから。署名が入っていたら端末が送る (通常の QR は出さない)。
+    if (!(await device.releaseForNormal())) return;
+    setStoreSessionId(null);
+    setForceNormalQr(true);
+    setQrModalOpen(true);
+  }
+
+  async function reissueStoreQr() {
+    if (!effectiveReceiver) return;
+    const s = await device.start(getAddress(effectiveReceiver), totalWei);
+    setStoreSessionId(s?.id ?? null);
+    // 閉じた後 (会計ボタンの下) から出し直したときも、新しい QR を見せる (QR の無い「署名待ち」を残さない)。
+    setQrModalOpen(!!s);
+  }
+
+  const storeDeviceStatus = (
+    <StoreDeviceRegisterStatus
+      state={sdState}
+      chainId={sdChainId}
+      formatAmount={(wei) =>
+        `${formatUnits(BigInt(wei), sdDeployment?.decimals ?? 18)} ${sdDeployment?.displaySymbol ?? 'JPYC'}`
+      }
+      onCheckNow={() => void device.checkNow()}
+      onRetry={device.retry}
+      onReissue={() => void reissueStoreQr()}
+      onShowNormal={() => void showNormalQr()}
+      onDismiss={device.dismiss}
+    />
+  );
 
   return (
     <div className="space-y-5">
@@ -837,8 +974,8 @@ function RegisterModeContent({
             <div className="hidden border-t border-slate-100 p-3 lg:block">
               <button
                 type="button"
-                onClick={() => setQrModalOpen(true)}
-                disabled={!checkoutUrl}
+                onClick={() => void openQr()}
+                disabled={!checkoutUrl || device.busy}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
               >
                 <QrCodeIcon className="h-5 w-5" aria-hidden />
@@ -850,7 +987,31 @@ function RegisterModeContent({
       </div>
 
       {/* お店の端末のガス用ウォレット (flag OFF では出さない・plans/store-gas-wallet.md)。 */}
-      {env.enableStoreGasWallet && <StoreGasWalletPanel />}
+      {env.enableStoreGasWallet && (storeDeviceForSale || sdSaleBlocked || (sdState.phase !== 'idle' && !qrModalOpen)) && (
+        <div className="space-y-2">
+          {storeDeviceForSale && (
+            <p className="text-xs font-semibold text-emerald-800">{t('storeDevice.badge')}</p>
+          )}
+          {sdSaleBlocked && (
+            <p role="status" className="text-xs text-amber-800">
+              {t(`storeDevice.saleBlocked.${sdSaleBlocked}`, { chain: chainNameForId(sdChainId) ?? '' })}
+            </p>
+          )}
+          {/* 切替を OFF にしても、送っている・結果を待っている支払いの表示は残す (次の QR を出せない理由)。 */}
+          {sdState.phase !== 'idle' && !qrModalOpen && storeDeviceStatus}
+        </div>
+      )}
+      {env.enableStoreGasWallet && (
+        <StoreGasWalletPanel
+          storeDevice={{
+            on: storeDeviceOn,
+            onToggle: setStoreDeviceOn,
+            blocked: sdBlocked,
+            locked: device.busy || qrModalOpen || sdState.phase === 'waiting',
+          }}
+          onAddressChange={setGasAddress}
+        />
+      )}
 
       {/* モバイル下部固定 会計バー (合計 + QR ボタン)。lg では右サイドバー CTA を使う。
           グローバルの BottomNav (fixed bottom-0 z-20・md:hidden) の上に重ねるため、
@@ -867,8 +1028,8 @@ function RegisterModeContent({
         </div>
         <button
           type="button"
-          onClick={() => setQrModalOpen(true)}
-          disabled={!checkoutUrl}
+          onClick={() => void openQr()}
+          disabled={!checkoutUrl || device.busy}
           className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
         >
           <QrCodeIcon className="h-5 w-5" aria-hidden />
@@ -880,7 +1041,7 @@ function RegisterModeContent({
       {checkoutUrl && (
         <QrPreviewModal
           open={qrModalOpen}
-          onClose={() => setQrModalOpen(false)}
+          onClose={closeQr}
           labels={{
             title: t('qrModalTitle'),
             close: t('qrModalClose'),
@@ -889,7 +1050,10 @@ function RegisterModeContent({
             copied: t('copied'),
             localGenNote: t('qrLocalGenNote'),
           }}
-          qrValue={checkoutUrl}
+          convertExpired={storeQrDimmed}
+          payModeBadge={storeQrActive ? { text: t('storeDevice.badge'), tone: 'gasless' } : undefined}
+          deviceStatus={env.enableStoreGasWallet && sdState.phase !== 'idle' ? storeDeviceStatus : undefined}
+          qrValue={qrValue}
           qrRef={qrRef}
           storeName={settings.storeName.trim() || t('qrPosterDefaultStoreName')}
           amountText={`${totalHuman} ${symbol}`}
@@ -903,7 +1067,7 @@ function RegisterModeContent({
           }}
           receiverShort={effectiveReceiver ? shortAddress(effectiveReceiver) : ''}
           copied={copied}
-          onCopy={() => copy(checkoutUrl)}
+          onCopy={() => copy(qrValue)}
         />
       )}
 

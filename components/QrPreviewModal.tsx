@@ -8,7 +8,7 @@
 // 状態は持たず props で受ける (labels-as-props)。印刷はポスター部に print: クラスを
 // 持たせ、モーダルの chrome (header / ボタン) は print:hidden で隠す。
 
-import { useEffect, useRef, type RefObject } from 'react';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { CircleCheck, Eye, Printer, ScanLine, X } from 'lucide-react';
 import NextImage from 'next/image';
@@ -98,6 +98,7 @@ export function QrPreviewModal({
   onDownloadPng,
   eip681,
   paymentStatus,
+  deviceStatus,
 }: {
   open: boolean;
   convertExpired?: boolean;
@@ -119,6 +120,8 @@ export function QrPreviewModal({
   onDownloadPng?: () => void;
   eip681?: QrPreviewEip681;
   paymentStatus?: QrPreviewPaymentStatus;
+  /** レジの「お店の端末で送る」の状態 (任意・印刷には出さない)。省略時は何も描画しない。 */
+  deviceStatus?: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   // inline onClose の更新で focus effect を再実行せず、ESC は最新のハンドラを読む。
@@ -346,6 +349,7 @@ export function QrPreviewModal({
                   {paymentStatus.text}
                 </p>
               ))}
+            {deviceStatus && <div className="mt-3 w-full print:hidden">{deviceStatus}</div>}
             {/* フッター OpenPay ロゴ (asset 指定時のみ・ブランド信頼)。印刷でも残す。 */}
             {asset && (
               <NextImage

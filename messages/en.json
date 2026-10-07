@@ -2487,6 +2487,62 @@
       "corruptNote": "The gas wallet saved on this device couldn't be read. To avoid overwriting it, a new one can't be created. If it holds POL, leave it as is and don't clear the browser data.",
       "removeBlockedNote": "You can't remove it while a transfer is waiting for confirmation.",
       "removeFailed": "Couldn't remove it from this device. Please try again."
+    },
+    "storeDevice": {
+      "toggle": "The shop pays the gas and sends it (OpenPay usage fee 0)",
+      "toggleNote": "The customer only signs. This device sends it, paying the gas with the POL in its gas wallet, so there's no OpenPay usage fee (the shop only pays the actual gas). Available for JPYC on {chain}.",
+      "blocked": {
+        "no_locks": "Not available in this browser (it can't prevent sending twice from another tab).",
+        "config": "This method isn't available right now."
+      },
+      "badge": "The shop pays the gas (usage fee 0)",
+      "saleBlocked": {
+        "token": "This checkout can't use “The shop pays the gas” (JPYC on {chain} only). Showing the standard QR.",
+        "receiver": "This recipient can't use “The shop pays the gas”. Showing the standard QR.",
+        "min_amount": "Checkouts under 1 JPYC can't use “The shop pays the gas”. Showing the standard QR.",
+        "no_wallet": "There's no gas wallet, so the standard QR is shown."
+      },
+      "creating": "Preparing the QR code…",
+      "createFailed": {
+        "busy": "It's busy, so the QR where the shop pays the gas couldn't be created. Wait a moment or show the standard QR.",
+        "unavailable": "The QR where the shop pays the gas couldn't be created. Show the standard QR instead.",
+        "invalid": "The QR where the shop pays the gas couldn't be created for this checkout. Show the standard QR instead."
+      },
+      "showNormalQr": "Show the standard QR",
+      "waiting": "Waiting for the customer's signature",
+      "stale": "This QR code will stop accepting payments soon.",
+      "reissue": "Show a new QR",
+      "degraded": "Can't read the handoff. You can switch to the standard QR.",
+      "expired": "This QR code no longer accepts payments.",
+      "processing": "Signature received. Checking and sending…",
+      "sent": "Sent. Waiting for it to be included in a block…",
+      "received": "Payment confirmed ({amount}). You can hand over the goods.",
+      "receivedPrevious": "Payment confirmed ({amount}).",
+      "finalized": "Finalized.",
+      "previousLabel": "Previous send",
+      "reverted": "The transaction failed (reverted). No payment was made.",
+      "unknown": "We can't confirm the result yet. To avoid charging the same checkout twice if it went through, you can't show the next QR until it's confirmed. Check it with “View transaction”, then close this.",
+      "unknownPrevious": "We can't confirm the result yet. Check it with “View transaction”.",
+      "unknownAck": "I checked the transaction (close)",
+      "failed": "The transaction didn't go through. No payment was made.",
+      "checkNow": "Check now",
+      "notSent": {
+        "expiring": "Not sent because the signature is about to expire.",
+        "used": "This signature has already been used. Check the result on the customer's screen.",
+        "customer_balance": "Not sent because the customer's balance is insufficient.",
+        "simulate_failed": "Not sent because the pre-send check failed.",
+        "gas_limit": "Not sent because the gas estimate exceeded the limit.",
+        "gas_too_high": "Not sent because the gas price is too high.",
+        "native_insufficient": "Not sent because the gas wallet doesn't have enough POL.",
+        "storage": "Not sent because this device can't keep a record of the send.",
+        "send_rejected": "The transaction was not accepted.",
+        "rpc": "Not sent because the chain couldn't be read."
+      },
+      "rejected": "Not sent because the received signature doesn't match this checkout.",
+      "notPaidGuide": "No payment was made. After the customer's screen shows “No payment was made” (this takes a few minutes), show a new QR or use a standard payment.",
+      "retry": "Send again",
+      "viewTx": "View transaction",
+      "dismiss": "Close"
     }
   },
   "ProductPresetManager": {

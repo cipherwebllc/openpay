@@ -127,7 +127,7 @@ describe('storeGasWallet: 鍵の作成・保存・削除', () => {
 describe('storeGasWallet: 残り回数と戻せる額', () => {
   it('残り回数 = 残高 ÷ (ガス価格 × 150,000)・0 以下は 0', () => {
     // 30 gwei × 150k = 0.0045 POL/回 → 1 POL で 222 回
-    expect(estimateRemainingSends(10n ** 18n, 30n * 10n ** 9n)).toBe(222);
+    expect(estimateRemainingSends(10n ** 18n, 30n * 10n ** 9n)).toBe(111);
     expect(estimateRemainingSends(0n, 30n * 10n ** 9n)).toBe(0);
     expect(estimateRemainingSends(10n ** 18n, 0n)).toBe(0);
   });

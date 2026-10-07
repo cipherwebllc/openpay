@@ -1,5 +1,10 @@
 // 「お店の端末で送る」(レジ・plans/store-gas-wallet.md) の共有定数と純関数 (client / server 共通)。
 //
+// 呼び名: コード・計画・テストでは仕組みの名前「お店の端末で送る」(store device / store-device・handoff) を使う。
+// 店員に見せる名前は「お店がガス代を肩代わりして送る」(messages RegisterMode.storeDevice・2026-10-07 user 裁定)。
+// どちらも同じ機能 = お客様は署名だけ、レジ端末のガス用ウォレット (POL) がガス代を払って送る、OpenPay 利用料 0 円
+// (仕組み上 1 wei)。今の既定のガスレス (OpenPay の中継がガス代を払い、利用料 1%・最低 2 JPYC) とは別の選択肢。
+//
 // お客様は今の回収モードと同じ形 (ReceiveWithAuthorization・to = 既存 forwarder・nonce = commit) に署名し、
 // 手数料欄だけ 1 wei にする (お客様の送金に上乗せ・店の受取 = 請求額ちょうど)。お店の端末のガス用ウォレットが
 // forwarder.settle を自分のガスで呼ぶ。OpenPay は署名を短時間受け渡すだけで、送信もガスもしない。
@@ -59,3 +64,19 @@ export const STORE_HANDOFF_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 export function isStoreDeviceAmount(amountWei: bigint, maxWei: bigint): boolean {
   return amountWei >= STORE_DEVICE_MIN_AMOUNT_WEI && amountWei <= maxWei;
 }
+
+/** 端末が settle に使うガスの上限 (relayer と同じ・実測 約 25〜30 万)。見積 × 1.2 がこれを超えたら送らない。 */
+export const STORE_DEVICE_SETTLE_GAS_CAP = 500_000n;
+
+/** 1 回の送信のガス代の上限 (0.2 POL・サーバの RELAY_MAX_GAS_COST_WEI の本番値と同じ)。超えたら送らない。 */
+export const STORE_DEVICE_MAX_GAS_COST_WEI = 2n * 10n ** 17n;
+
+/** 署名の期限の上限を確かめるときの時計のずれの余裕 (秒)。 */
+export const STORE_DEVICE_CLOCK_SKEW_SEC = 30;
+
+/**
+ * QR を見せてよいセッションの残り (秒)。お客様の署名窓 (150 秒) と、サーバが預かる最低残り (60 秒) が
+ * 収まらないセッションの QR は読ませない (読んでも「期限が切れています」になる)。
+ */
+export const STORE_DEVICE_QR_MIN_REMAINING_SEC =
+  STORE_DEVICE_VALIDITY_SEC + STORE_DEVICE_MIN_CLAIM_REMAINING_SEC;

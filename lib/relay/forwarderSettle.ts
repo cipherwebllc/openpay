@@ -1,6 +1,7 @@
-// forwarder.settle の server 専用ヘルパー (sig 分解 / 署名 recover / settle calldata)。
-// client バンドルに encodeFunctionData / recoverTypedDataAddress / parseAbi を載せないため
-// forwarderIntent (軽量・共有) から分離。route と forwarderRecover (server) のみが import する。
+// forwarder.settle のヘルパー (sig 分解 / 署名 recover / settle calldata)。
+// client バンドルに encodeFunctionData / recoverTypedDataAddress / parseAbi を常には載せないため
+// forwarderIntent (軽量・共有) から分離。server (route・forwarderRecover) と、レジ端末の送信
+// (lib/storeDeviceSend・使うときだけ dynamic import) が import する。
 
 import {
   encodeFunctionData,
