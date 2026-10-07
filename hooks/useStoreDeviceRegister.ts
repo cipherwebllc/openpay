@@ -181,8 +181,10 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   const processingRef = useRef<string | null>(null);
   // いま確かめて送っている署名 (送信の結果が出るまで)。
   const activeRef = useRef<string | null>(null);
-  // QR を作っている最中 (二度押しで二つのセッションを作らない)。
-  const startingRef = useRef(false);
+  // 次の QR を作る・通常の QR に切り替える処理の最中 (どちらも前の受け渡しの締め切りを待つので、重ねると
+  // 同じ会計で二つの QR を出しうる)。一つずつ通し、その間は次の QR も切替も操作させない。
+  const transitionRef = useRef(false);
+  const [transitioning, setTransitioning] = useState(false);
   // 「もう一度送る」に使う、確かめ済みの署名 (送らなかったときだけ・このタブのメモリだけ)。
   const retryRef = useRef<{ view: DeviceView & { auth: DeviceAuth }; session: DeviceSession } | null>(null);
   const finalityStopRef = useRef<(() => void) | null>(null);
@@ -223,6 +225,17 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   const set = useCallback((s: StoreDeviceRegisterState) => {
     stateRef.current = s;
     if (mountedRef.current) setState(s);
+  }, []);
+  const withTransition = useCallback(async <T,>(busyResult: T, fn: () => Promise<T>): Promise<T> => {
+    if (transitionRef.current) return busyResult;
+    transitionRef.current = true;
+    if (mountedRef.current) setTransitioning(true);
+    try {
+      return await fn();
+    } finally {
+      transitionRef.current = false;
+      if (mountedRef.current) setTransitioning(false);
+    }
   }, []);
   /** gen の時点からの結果だけを表示する (新しい QR・切替 OFF の後は捨てる)。 */
   const setIf = useCallback(
@@ -547,22 +560,19 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
     async (merchant: Address, amount: bigint): Promise<DeviceSession | null> => {
       // 二度押しで二つのセッションを作らない。送っている・送った結果を待っている間は次の QR を作らない
       // (どちらも描画を待たずに判定)。
-      if (!enabled || startingRef.current || activeRef.current || isBusy(stateRef.current)) return null;
-      startingRef.current = true;
-      try {
-        return await createNext(merchant, amount);
-      } finally {
-        startingRef.current = false;
-      }
+      if (!enabled || activeRef.current || isBusy(stateRef.current)) return null;
+      return withTransition<DeviceSession | null>(null, () => createNext(merchant, amount));
 
       async function createNext(merchant: Address, amount: bigint): Promise<DeviceSession | null> {
         genRef.current += 1;
+        const gen = genRef.current;
         finalityStopRef.current?.();
         // 前の会計の「もう一度送る」は、新しい QR を出したら使わせない (別の支払いと重ねない)。
         retryRef.current = null;
         // 前の会計に署名が入っていた → その送信を優先する (新しい QR は出さない)。
         if ((await settlePrevious()) === 'processing') return null;
-        const gen = genRef.current;
+        // 締め切りを待つ間に切替を OFF にした・別の操作で世代が進んだ → 作らずに終える。
+        if (gen !== genRef.current || !enabledRef.current) return null;
         setIf(gen, { phase: 'creating' });
         let res: Response;
         try {
@@ -606,7 +616,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         return session;
       }
     },
-    [enabled, chainId, settlePrevious, setIf, finalize],
+    [enabled, chainId, settlePrevious, setIf, finalize, withTransition],
   );
 
   /** QR を閉じる: 署名を待っていたセッションは締め切る (署名が入っていれば送る)。 */
@@ -622,27 +632,31 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
    * (署名が入っていたら端末が送るので、通常の QR は出さない = 二重払いにしない)。締め切りの応答が分からない
    * ときは、そのセッションを自動で処理しない (送らない) ことにして true。
    */
-  const releaseForNormal = useCallback(async (): Promise<boolean> => {
-    // 描画前の古い state ではなく、いまの状態で判定する (送り始めた直後に通常の QR を出さない)。
-    if (activeRef.current || isBusy(stateRef.current)) return false;
-    genRef.current += 1;
-    finalityStopRef.current?.();
-    retryRef.current = null;
-    if (sessionRef.current && stateRef.current.phase === 'waiting') set({ phase: 'idle' });
-    const r = await settlePrevious();
-    // 締め切りの応答を待つ間に送り始めた (読み取りが署名を受け取った) ときも出さない。
-    if (r === 'processing' || activeRef.current || isBusy(stateRef.current)) return false;
-    if (r === 'unknown') {
-      // 締め切れたか分からないセッションは手放す (後から応答・署名が届いても送らない)。
-      const prev = sessionRef.current ?? readStoredSession();
-      if (prev) {
-        abandonedRef.current.add(prev.id);
-        retire(prev);
-      }
-    }
-    set({ phase: 'idle' });
-    return true;
-  }, [set, settlePrevious, retire]);
+  const releaseForNormal = useCallback(
+    (): Promise<boolean> =>
+      withTransition(false, async () => {
+        // 描画前の古い state ではなく、いまの状態で判定する (送り始めた直後に通常の QR を出さない)。
+        if (activeRef.current || isBusy(stateRef.current)) return false;
+        genRef.current += 1;
+        finalityStopRef.current?.();
+        retryRef.current = null;
+        if (sessionRef.current && stateRef.current.phase === 'waiting') set({ phase: 'idle' });
+        const r = await settlePrevious();
+        // 締め切りの応答を待つ間に送り始めた (読み取りが署名を受け取った) ときも出さない。
+        if (r === 'processing' || activeRef.current || isBusy(stateRef.current)) return false;
+        if (r === 'unknown') {
+          // 締め切れたか分からないセッションは手放す (後から応答・署名が届いても送らない)。
+          const prev = sessionRef.current ?? readStoredSession();
+          if (prev) {
+            abandonedRef.current.add(prev.id);
+            retire(prev);
+          }
+        }
+        set({ phase: 'idle' });
+        return true;
+      }),
+    [withTransition, set, settlePrevious, retire],
+  );
 
   /** 「いま確認する」(結果が分からないとき)。 */
   const checkNow = useCallback(async () => {
@@ -671,7 +685,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   }, [set]);
 
   // 新しい QR を出せない間 (受け取った署名を確かめて送っている・送った tx の結果を待っている)。
-  const busy = isBusy(state);
+  const busy = isBusy(state) || transitioning;
 
   return { state, busy, start, stop, releaseForNormal, checkNow, retry, dismiss };
 }

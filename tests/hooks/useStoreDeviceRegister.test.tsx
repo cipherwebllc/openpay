@@ -557,15 +557,71 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     expect(result.current.state).toEqual({ phase: 'creating' });
     rerender({ ...input, enabled: false });
     expect(result.current.state).toEqual({ phase: 'idle' });
-    expect(result.current.busy).toBe(false);
+    // 作成の応答を待つ間はまだ操作中 (次の QR・切替を重ねない)
+    expect(result.current.busy).toBe(true);
     let created!: unknown;
     await act(async () => {
       release(new Response(JSON.stringify({ ok: true, id: ID, token: TOKEN, expiresAt: nowSec() + 600 }), { status: 200 }));
       created = await starting;
     });
     expect(created).toBeNull();
+    expect(result.current.busy).toBe(false);
     expect(of('/close')).toHaveLength(1);
     expect(window.sessionStorage.getItem(STORE_DEVICE_SESSION_KEY)).toBeNull();
+  });
+
+  it('締め切りを待つ間は「通常の QR」と「次の QR」を重ねない (同じ会計で二つの QR を出さない)', async () => {
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    let open!: () => void;
+    const gate = new Promise<void>((r) => { open = r; });
+    closeRes = () => gate.then(() => json({ ok: true, closed: true }));
+    act(() => {
+      result.current.stop();
+    });
+    let releasing!: Promise<boolean>;
+    act(() => {
+      releasing = result.current.releaseForNormal();
+    });
+    expect(result.current.busy).toBe(true);
+    let next!: unknown;
+    await act(async () => {
+      next = await result.current.start(SHOP, AMOUNT);
+    });
+    expect(next).toBeNull(); // 切り替えの最中は次の QR を作らない
+    let ok!: boolean;
+    await act(async () => {
+      open();
+      ok = await releasing;
+    });
+    expect(ok).toBe(true);
+    expect(calls.filter((c) => c.url === '/api/register/handoff')).toHaveLength(1);
+    expect(result.current.busy).toBe(false);
+  });
+
+  it('次の QR が前の締め切りを待つ間に切替を OFF にしたら、作らずに終える (操作できないまま残らない)', async () => {
+    const { result, rerender } = renderHook((p: StoreDeviceRegisterInput) => useStoreDeviceRegister(p), { initialProps: input });
+    await started(result);
+    let open!: () => void;
+    const gate = new Promise<void>((r) => { open = r; });
+    closeRes = () => gate.then(() => json({ ok: true, closed: true }));
+    act(() => {
+      result.current.stop();
+    });
+    let starting!: Promise<unknown>;
+    act(() => {
+      starting = result.current.start(SHOP, AMOUNT);
+    });
+    rerender({ ...input, enabled: false });
+    let next!: unknown;
+    await act(async () => {
+      open();
+      next = await starting;
+    });
+    expect(next).toBeNull();
+    expect(calls.filter((c) => c.url === '/api/register/handoff')).toHaveLength(1);
+    expect(result.current.state).toEqual({ phase: 'idle' });
+    expect(result.current.busy).toBe(false);
   });
 
   it('再読み込み後: 最近送った印があれば、その結果を「前回の送信」として出す', async () => {
