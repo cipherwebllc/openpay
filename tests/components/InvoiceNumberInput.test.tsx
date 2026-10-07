@@ -7,7 +7,10 @@ const text = { invalid: '形式が違います', lookup: '公表サイトで確�
 function renderInput(value: string, hasStoreName = true) {
   const onChange = vi.fn();
   render(
-    <InvoiceNumberInput value={value} onChange={onChange} hasStoreName={hasStoreName} className="" text={text} />,
+    <>
+      <label htmlFor="inv">インボイス登録番号</label>
+      <InvoiceNumberInput id="inv" value={value} onChange={onChange} hasStoreName={hasStoreName} className="" text={text} />
+    </>,
   );
   return onChange;
 }
@@ -37,6 +40,11 @@ describe('InvoiceNumberInput', () => {
   it('店名が空なら、控えに出ない注意を添える', () => {
     renderInput('T1234567890123', false);
     expect(screen.getByText(text.needsStoreName)).toBeTruthy();
+  });
+
+  it('可視の見出しが入力のラベルになり、確認リンクの文言は名前に混ざらない', () => {
+    renderInput('T1234567890123');
+    expect(screen.getByRole('textbox', { name: 'インボイス登録番号' })).toBeTruthy();
   });
 
   it('入力は生の文字列のまま親へ渡す', () => {

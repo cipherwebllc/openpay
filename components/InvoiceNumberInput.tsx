@@ -12,12 +12,15 @@ import {
 } from '@/lib/invoice';
 
 export function InvoiceNumberInput({
+  id,
   value,
   onChange,
   hasStoreName,
   className,
   text,
 }: {
+  /** 可視の見出し (<label htmlFor>) と結び付けるための id。 */
+  id: string;
   value: string;
   onChange: (next: string) => void;
   /** 店名が空だと控えに出ないので、その注意を出すかの判定に使う。 */
@@ -30,6 +33,7 @@ export function InvoiceNumberInput({
   return (
     <>
       <input
+        id={id}
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}

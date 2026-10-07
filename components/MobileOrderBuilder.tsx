@@ -462,8 +462,14 @@ export function MobileOrderBuilder({
                 />
               </Field>
 
-              <Field label={t('invoiceNoLabel')} hint={t('invoiceNoHint')}>
+              {/* 確認リンクと注意を <label> の外に置く (入力のアクセシブル名にリンク文言を混ぜない)。 */}
+              <div className="block">
+                <label htmlFor="mobile-order-invoice-no" className="text-sm font-medium text-slate-700">
+                  {t('invoiceNoLabel')}
+                </label>
+                <div className="mt-1">
                 <InvoiceNumberInput
+                  id="mobile-order-invoice-no"
                   value={draft.invoiceNo}
                   onChange={(next) => update({ invoiceNo: next })}
                   hasStoreName={draft.shopName.trim().length > 0}
@@ -474,7 +480,9 @@ export function MobileOrderBuilder({
                     needsStoreName: t('invoiceNoNeedsStoreName'),
                   }}
                 />
-              </Field>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{t('invoiceNoHint')}</p>
+              </div>
 
               <h3 className="flex items-center gap-1.5 border-t border-slate-100 pt-4 text-sm font-medium text-slate-700">
                 <UtensilsCrossed className="h-4 w-4 text-slate-400" aria-hidden />{' '}

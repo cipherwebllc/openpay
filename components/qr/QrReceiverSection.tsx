@@ -121,8 +121,9 @@ export function QrReceiverSection({
           />
         </Field>
 
-        <Field label={t('invoiceNoLabel')}>
+        <Field label={t('invoiceNoLabel')} htmlFor="qr-invoice-no">
           <InvoiceNumberInput
+            id="qr-invoice-no"
             value={settings.invoiceNo}
             onChange={(next) => setSettings((s) => ({ ...s, invoiceNo: next }))}
             hasStoreName={settings.storeName.trim().length > 0}
