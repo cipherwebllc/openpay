@@ -1610,6 +1610,7 @@
       },
       "usedUnresolved": "This signature can no longer be used. We couldn't confirm whether the payment went through. Please check your wallet's transaction history. To avoid paying the same checkout twice if it did go through, you can't start a new payment until you've checked.",
       "acknowledge": "I've checked my wallet",
+      "ackFailed": "We couldn't clear the record on this device, so this method can't be used here. Please ask the shop for a standard payment.",
       "previous": {
         "success": "Your previous payment ({store} · {amount}) is complete. You can now pay for this checkout.",
         "expired": "Your previous payment ({store} · {amount}) was not made. You can now pay for this checkout."

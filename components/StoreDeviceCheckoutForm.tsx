@@ -312,6 +312,7 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
       {status.phase === 'used_unresolved' && (
         <div role="alert" className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p>{t('storeDevice.usedUnresolved')}</p>
+          {status.ackFailed && <p className="text-xs font-semibold">{t('storeDevice.ackFailed')}</p>}
           {status.otherCheckout && (
             <p className="text-xs">
               {t('storeDevice.previousPayment', {

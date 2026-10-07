@@ -197,6 +197,12 @@ describe('StoreDeviceCheckoutForm', () => {
     expect(hold.acknowledge).toHaveBeenCalled();
   });
 
+  it('「確かめました」で記録を消せなかったら、通常の決済を案内する', () => {
+    hold.status = { phase: 'used_unresolved', intent: INTENT, otherCheckout: false, ackFailed: true };
+    render(<StoreDeviceCheckoutForm params={params} />);
+    expect(screen.getByRole('alert')).toHaveTextContent(/この端末の記録を消せませんでした/);
+  });
+
   it('前の会計の結果不明は、前の会計の店名・金額を添えて案内する', () => {
     hold.status = {
       phase: 'used_unresolved',

@@ -181,6 +181,45 @@ describe('useStoreDevicePayment', () => {
     expect(w.signTypedData).not.toHaveBeenCalled();
   });
 
+  it('記録を読めない (読み取りの失敗) ときは「記録なし」と扱わず、署名しない', async () => {
+    seedIntent(OTHER_HS, Math.floor(Date.now() / 1000) - 1_000, { unknown: true });
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await advance(10);
+    await act(async () => {
+      await result.current.acknowledge(); // 一旦閉じて idle に
+    });
+    seedIntent(OTHER_HS, Math.floor(Date.now() / 1000) - 1_000, { unknown: true }); // 別タブが結果不明を保存
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    try {
+      await payNow(result);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(result.current.status).toEqual({ phase: 'error', reason: 'storage_unavailable', blocking: false });
+    expect(w.signTypedData).not.toHaveBeenCalled();
+    expect(JSON.parse(stored()!)).toMatchObject({ unknown: true });
+  });
+
+  it('「確かめました」で記録を消せなければ閉じない (行き来させない)', async () => {
+    seedIntent(OTHER_HS, Math.floor(Date.now() / 1000) - 1_000, { unknown: true });
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await advance(10);
+    const spy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    try {
+      await act(async () => {
+        await result.current.acknowledge();
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(result.current.status).toMatchObject({ phase: 'used_unresolved', ackFailed: true });
+    expect(stored()).not.toBeNull();
+  });
+
   it('Web Locks が無いブラウザではこの方法を使わない (署名しない)', async () => {
     setLocks(undefined);
     const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));

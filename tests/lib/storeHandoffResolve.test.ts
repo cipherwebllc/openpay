@@ -142,6 +142,25 @@ describe('resolveStoreHandoff (お店の端末で送る 1 件の結論)', () => 
     expect(spy.find).toHaveBeenCalledTimes(1);
   });
 
+  it('ヒントの確認を待つ間に別の照会が覚えた結論を使う (ログ検索を繰り返さない)', async () => {
+    used = true;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const slow = deps({
+      successfulReceipt: async () => {
+        await gate;
+        return null;
+      },
+    });
+    const second = resolveStoreHandoff(body({ txHash: OTHER_TX }), slow);
+    await resolveStoreHandoff(body(), deps());
+    release();
+    await second;
+    expect(spy.find).toHaveBeenCalledTimes(1);
+  });
+
   it('未使用: 確定ブロックで期限切れ・未使用のときだけ「行われていない」・無関係な tx のヒントは判定に混ぜない', async () => {
     expect(await resolveStoreHandoff(body(), deps())).toEqual({ ok: true, state: 'pending' });
     clearStoreHandoffResolveCache();

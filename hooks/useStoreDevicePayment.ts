@@ -115,7 +115,8 @@ export type StoreDeviceStatus =
   | { phase: 'expired'; intent: StoreDeviceIntent }
   // 使用済み (この署名はもう使えない) だが、結果をこちらで確かめられない。お客様がウォレットで確かめて
   // 「確かめた」を押すまで記録を残し、新しい支払いを止める (成立済みなら同じ請求の二重払いになるため)。
-  | { phase: 'used_unresolved'; intent: StoreDeviceIntent; otherCheckout: boolean }
+  // ackFailed = 「確かめました」で記録を消せなかった (この端末ではこの方法を使えない)。
+  | { phase: 'used_unresolved'; intent: StoreDeviceIntent; otherCheckout: boolean; ackFailed?: boolean }
   // 別の会計の未解決の支払いに結論が出た (この QR の会計はこれから払える)
   | { phase: 'previous'; outcome: StoreDeviceOutcome; intent: StoreDeviceIntent; txHash: Hex | null }
   | { phase: 'error'; reason: StoreDeviceErrorReason; blocking: boolean };
@@ -147,15 +148,26 @@ function isIntent(v: unknown): v is StoreDeviceIntent {
 }
 
 // 未解決の支払いは、タブの再読み込み・別の QR を開いた後も残るよう localStorage に置く。
-function readIntent(): StoreDeviceIntent | null {
+// 読み取りの失敗 (ok: false) は「記録なし」と区別する (失敗を記録なしと読むと、結果不明の記録を上書きしうる)。
+function readIntentResult(): { ok: true; intent: StoreDeviceIntent | null } | { ok: false } {
+  let raw: string | null;
   try {
-    const raw = window.localStorage.getItem(STORE_DEVICE_INTENT_KEY);
-    if (!raw) return null;
-    const v = JSON.parse(raw) as unknown;
-    return isIntent(v) ? v : null;
+    raw = window.localStorage.getItem(STORE_DEVICE_INTENT_KEY);
   } catch {
-    return null;
+    return { ok: false };
   }
+  if (!raw) return { ok: true, intent: null };
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return { ok: true, intent: isIntent(v) ? v : null };
+  } catch {
+    return { ok: true, intent: null }; // 読めない形の記録は追跡できない (この版の記録ではない)
+  }
+}
+
+function readIntent(): StoreDeviceIntent | null {
+  const r = readIntentResult();
+  return r.ok ? r.intent : null;
 }
 
 /** 保存して読み戻しで確かめる。保存できなければ false (呼び出し側は署名を送らない)。 */
@@ -168,15 +180,20 @@ function saveIntent(intent: StoreDeviceIntent): boolean {
   }
 }
 
-/** 保存されているのが同じ署名 (nonce) のときだけ消す (別タブの新しい支払いの記録を消さない)。 */
-function clearIntentIf(nonce: Hex): void {
+/**
+ * 保存されているのが同じ署名 (nonce) のときだけ消す (別タブの新しい支払いの記録を消さない)。
+ * その署名の記録がもう無いと確かめられたら true。
+ */
+function clearIntentIf(nonce: Hex): boolean {
+  const same = (r: ReturnType<typeof readIntentResult>) =>
+    r.ok && r.intent?.nonce.toLowerCase() === nonce.toLowerCase();
   try {
-    if (readIntent()?.nonce.toLowerCase() === nonce.toLowerCase()) {
-      window.localStorage.removeItem(STORE_DEVICE_INTENT_KEY);
-    }
+    if (same(readIntentResult())) window.localStorage.removeItem(STORE_DEVICE_INTENT_KEY);
   } catch {
-    // 消せなくても、次に開いたときは判定で同じ結論が出て消える。
+    return false;
   }
+  const after = readIntentResult();
+  return after.ok && !same(after);
 }
 
 function hasPayLock(): boolean {
@@ -313,6 +330,9 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
         setTracking(null);
         return true;
       }
+      // 結果不明の記録も、支払い済みの証明 (確定ブロックの Settled) が出たら消してよい (二重払いの恐れが無い)。
+      // 期限切れ・未使用は、確定ブロックで使用済みの結果不明と両立しない。
+      // 消せなくても、次に開いたときは判定で同じ結論が出て消える。
       void withPayLock(async () => clearIntentIf(tracking.nonce));
       if (other) {
         setStatus({
@@ -426,9 +446,10 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
   /** 結果を確かめられなかった支払いを、お客様がウォレットで確かめた後に閉じる。 */
   const acknowledge = useCallback(async () => {
     if (status.phase !== 'used_unresolved') return;
-    const nonce = status.intent.nonce;
-    await withPayLock(async () => clearIntentIf(nonce));
-    setStatus({ phase: 'idle' });
+    const current = status;
+    const cleared = await withPayLock(async () => clearIntentIf(current.intent.nonce));
+    // 消せなかったら閉じない (閉じても次の支払いで同じ案内に戻り、行き来するだけになる)。
+    setStatus(cleared ? { phase: 'idle' } : { ...current, ackFailed: true });
   }, [status]);
 
   const pay = useCallback(
@@ -461,7 +482,12 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
       try {
         // 別タブと排他し、その中で未解決の支払いが無いことを確かめ直してから署名・保存する。
         const signed = await withPayLock(async () => {
-          const existing = readIntent();
+          const read = readIntentResult();
+          if (!read.ok) {
+            setStatus({ phase: 'error', reason: 'storage_unavailable', blocking: false });
+            return null;
+          }
+          const existing = read.intent;
           if (existing?.unknown) {
             setStatus({ phase: 'used_unresolved', intent: existing, otherCheckout: existing.handoffId !== handoffId });
             return null;

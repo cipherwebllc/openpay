@@ -202,7 +202,9 @@ export async function resolveStoreHandoff(
   } catch {
     return { ok: true, state: 'pending' }; // RPC 障害は結論を出さず覚えない
   }
-  if (known) return known; // 重い確認 (ログ検索) は短い間は繰り返さない
+  // ヒントの確認を待つ間に、同じ支払いの別の照会が結論を覚えたかもしれないので読み直す。
+  const latest = cached(key);
+  if (latest) return latest; // 重い確認 (ログ検索) は短い間は繰り返さない
 
   const running = inflight.get(key);
   if (running) return (await running) ?? { ok: true, state: 'pending' };
