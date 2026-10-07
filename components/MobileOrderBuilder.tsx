@@ -57,6 +57,7 @@ import {
 } from '@/lib/mobileOrder';
 import { MobileOrderView } from '@/components/MobileOrderView';
 import { MIN_LEAD_MAX } from '@/lib/shopTime';
+import { InvoiceNumberInput } from './InvoiceNumberInput';
 
 const inputClass =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
@@ -154,6 +155,7 @@ export function MobileOrderBuilder({
         address: draft.address.trim() || undefined,
         hours: draft.hours.trim() || undefined,
         phone: draft.phone.trim() || undefined,
+        invoiceNo: draft.invoiceNo.trim() || undefined, // 形式外は validateStorefrontParts が除外
         acceptingOrders: draft.acceptingOrders,
         dineIn: draft.dineIn, // 店内なら公開ページで注文時にテーブル番号を入力させる
         openFrom: draft.openFrom.trim() || undefined,
@@ -459,6 +461,28 @@ export function MobileOrderBuilder({
                   className={inputClass}
                 />
               </Field>
+
+              {/* 確認リンクと注意を <label> の外に置く (入力のアクセシブル名にリンク文言を混ぜない)。 */}
+              <div className="block">
+                <label htmlFor="mobile-order-invoice-no" className="text-sm font-medium text-slate-700">
+                  {t('invoiceNoLabel')}
+                </label>
+                <div className="mt-1">
+                <InvoiceNumberInput
+                  id="mobile-order-invoice-no"
+                  value={draft.invoiceNo}
+                  onChange={(next) => update({ invoiceNo: next })}
+                  hasStoreName={draft.shopName.trim().length > 0}
+                  className={inputClass}
+                  text={{
+                    invalid: t('invoiceNoInvalid'),
+                    lookup: t('invoiceNoLookup'),
+                    needsStoreName: t('invoiceNoNeedsStoreName'),
+                  }}
+                />
+                </div>
+                <p className="mt-1 text-xs text-slate-500">{t('invoiceNoHint')}</p>
+              </div>
 
               <h3 className="flex items-center gap-1.5 border-t border-slate-100 pt-4 text-sm font-medium text-slate-700">
                 <UtensilsCrossed className="h-4 w-4 text-slate-400" aria-hidden />{' '}

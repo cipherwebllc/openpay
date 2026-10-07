@@ -30,6 +30,7 @@ import {
   type FeePayer,
   type StorefrontParts,
 } from '@/lib/mobileOrder';
+import { INVOICE_REGISTRATION_INPUT_MAX } from '@/lib/invoice';
 import type { ProductPreset } from './useProductPresets';
 import type { ReceiverSource } from './useReceiverAutofill';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
@@ -48,6 +49,7 @@ export interface MobileOrderDraft {
   address: string; // 住所 (任意・生入力)
   hours: string; // 営業時間 (任意・自由記入)
   phone: string; // 電話番号 (任意・生入力)
+  invoiceNo: string; // インボイス登録番号 (任意・生入力・正規化と形式検証は validateStorefrontParts)
   acceptingOrders: boolean; // 注文受付 (既定 true)。false で公開ページの支払いを止める。
   dineIn: boolean; // 提供形態 (既定 false=テイクアウト)。true=店内 (注文時にテーブル番号を入力)。
   // 時間系 (Phase 4・生入力)。検証 (HH:mm / 数値範囲) は draftToConfig→validateOrderConfig が行う。
@@ -78,6 +80,7 @@ export const DEFAULT_MOBILE_ORDER_DRAFT: MobileOrderDraft = {
   address: '',
   hours: '',
   phone: '',
+  invoiceNo: '',
   acceptingOrders: true, // 既定は受付中
   dineIn: false, // 既定はテイクアウト・店頭受け渡し (テーブル番号入力なし)
   openFrom: '', // 既定は制限なし (受付開始指定なし)
@@ -121,6 +124,7 @@ function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
     address: clampStr(loaded.address, ADDRESS_MAX),
     hours: clampStr(loaded.hours, HOURS_MAX),
     phone: clampStr(loaded.phone, PHONE_MAX),
+    invoiceNo: clampStr(loaded.invoiceNo, INVOICE_REGISTRATION_INPUT_MAX),
     // 既定は受付中 (true)。明示的に false のときだけ停止として復元。
     acceptingOrders: loaded.acceptingOrders === false ? false : true,
     // 既定はテイクアウト (false)。明示的に true のときだけ店内 (テーブル番号) として復元。
@@ -196,6 +200,7 @@ export function draftToConfig(
     address: draft.address.trim(),
     hours: draft.hours.trim(),
     phone: draft.phone.trim(),
+    invoiceNo: draft.invoiceNo.trim(),
     acceptingOrders: draft.acceptingOrders,
     // 店内のときだけ true が保存される (validateOrderConfig が round-trip 最小化)。
     dineIn: draft.dineIn,
@@ -258,6 +263,7 @@ export function storefrontPartsToDraft(
     address: parts.address ?? '',
     hours: parts.hours ?? '',
     phone: parts.phone ?? '',
+    invoiceNo: parts.invoiceNo ?? '',
     acceptingOrders: parts.acceptingOrders ?? true,
     dineIn: parts.dineIn ?? false,
     openFrom: parts.openFrom ?? '',

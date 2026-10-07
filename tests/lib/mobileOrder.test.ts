@@ -449,6 +449,25 @@ describe('mobileOrder: validateStorefrontParts (@handle storefront の単一情�
     expect(r?.address).toBeUndefined();
     expect(r?.phone).toBeUndefined();
   });
+  it('invoiceNo は正規化して保持し、形式外/欠落は載せない (注文は壊さない)', () => {
+    expect(validateStorefrontParts({ ...good, invoiceNo: 't-1234-5678-90123' })?.invoiceNo).toBe(
+      'T1234567890123',
+    );
+    for (const value of ['T123', '', 1234567890123, undefined]) {
+      const r = validateStorefrontParts({ ...good, invoiceNo: value });
+      expect(r).not.toBeNull();
+      expect('invoiceNo' in (r ?? {})).toBe(false);
+    }
+  });
+  it('storefrontPartsEquivalent は invoiceNo の違いを検出する (未公開の変更)', () => {
+    expect(storefrontPartsEquivalent(good, { ...good, invoiceNo: 'T1234567890123' })).toBe(false);
+    expect(
+      storefrontPartsEquivalent(
+        { ...good, invoiceNo: 'T1234567890123' },
+        { ...good, invoiceNo: 'T-1234-5678-90123' },
+      ),
+    ).toBe(true);
+  });
   it('openFrom は有効な HH:mm のみ保持し、不正/欠落は載せない', () => {
     expect(validateStorefrontParts({ ...good, openFrom: '09:30' })?.openFrom).toBe('09:30');
     expect('openFrom' in (validateStorefrontParts({ ...good, openFrom: '9:30' }) ?? {})).toBe(
@@ -471,6 +490,12 @@ describe('mobileOrder: validateOrderConfig は店舗情報を parts から載せ
     expect(c?.hours).toBe('11:00-22:00');
     expect(c?.phone).toBe('03-1234-5678');
     expect(c?.acceptingOrders).toBe(false);
+  });
+  it('invoiceNo を parts から config に載せる (形式外は落とす)', () => {
+    expect(validateOrderConfig({ ...baseConfig(), invoiceNo: 'T1234567890123' })?.invoiceNo).toBe(
+      'T1234567890123',
+    );
+    expect('invoiceNo' in (validateOrderConfig({ ...baseConfig(), invoiceNo: 'x' }) ?? {})).toBe(false);
   });
   it('openFrom を parts から config に載せる', () => {
     expect(validateOrderConfig({ ...baseConfig(), openFrom: '09:30' })?.openFrom).toBe('09:30');

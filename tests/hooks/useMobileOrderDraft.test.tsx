@@ -133,6 +133,7 @@ function baseDraft(): MobileOrderDraft {
     address: '',
     hours: '',
     phone: '',
+    invoiceNo: '',
     acceptingOrders: true,
     dineIn: false,
     openFrom: '',
@@ -339,6 +340,7 @@ describe('storefrontPartsToDraft: 公開 storefront + 受取先 → 下書き (�
       address: '東京',
       hours: '10-18',
       phone: '03',
+      invoiceNo: 'T1234567890123',
       acceptingOrders: false,
       dineIn: true,
       openFrom: '09:30',
@@ -360,6 +362,7 @@ describe('storefrontPartsToDraft: 公開 storefront + 受取先 → 下書き (�
       address: '東京',
       hours: '10-18',
       phone: '03',
+      invoiceNo: 'T1234567890123',
       acceptingOrders: false,
       dineIn: true,
       openFrom: '09:30', // 時間系も復元 (P2-6)

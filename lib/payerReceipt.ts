@@ -184,7 +184,11 @@ export function buildPayerReceipt(
 // 明細 (lineItems) の無い単品 QR の 1 行。金額は顧客が払った総額 (gross) で組み、entry の税率を
 // 引き継ぐ (店舗側の entryLineItems は手取り額で組むため、店主がガス代を負担すると総額とずれる)。
 // 商品名も税率も無ければ [] を返し、buildPayerReceipt の仮想行 (対象外) に任せる。
-function singleReceiptLine(entry: HistoryEntry, grossTotal: string): HistoryLineItem[] {
+function singleReceiptLine(
+  entry: HistoryEntry,
+  grossTotal: string,
+  merchantName?: string | null,
+): HistoryLineItem[] {
   if (!entry.productName && entry.taxRate == null) return [];
   const taxAmount = taxAmountDecimal(
     Number(grossTotal),
@@ -194,7 +198,11 @@ function singleReceiptLine(entry: HistoryEntry, grossTotal: string): HistoryLine
   return [
     {
       id: `${entry.id}-0`,
-      name: entry.productName || entry.storeName?.trim() || VIRTUAL_FALLBACK_NAME,
+      name:
+        entry.productName ||
+        entry.storeName?.trim() ||
+        merchantName?.trim() ||
+        VIRTUAL_FALLBACK_NAME,
       quantity: 1,
       unitPrice: grossTotal,
       amount: grossTotal,
@@ -230,7 +238,7 @@ export function payerReceiptFromHistoryEntry(
     : totals.total;
   // 明細の無い単品は総額 (gross) の 1 行で組み、税額もその行から取る (手取り由来の entryTotals と
   // 混ぜると、同じ控えの中で行の税額と合計の税額が食い違う)。
-  const single = entry.lineItems && entry.lineItems.length > 0 ? null : singleReceiptLine(entry, grossTotal);
+  const single = entry.lineItems && entry.lineItems.length > 0 ? null : singleReceiptLine(entry, grossTotal, opts.merchantName);
   const lineItems = single ?? entryLineItems(entry);
   const totalTaxAmount = single && single.length > 0 ? (single[0].taxAmount ?? '0') : totals.totalTax;
   const status: PayerReceiptStatus =

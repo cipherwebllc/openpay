@@ -205,6 +205,23 @@ describe('invoiceReceiptView', () => {
     expect(invoiceReceiptView(receipt({ lineItems: null, amount: '500', totalAmount: '500' }))).toBeNull();
   });
 
+  it('チップの控え (明細なし・対象外の仮想行) は登録番号があっても出さない', () => {
+    // TipForm は buildPayerReceipt に明細を渡さない → 仮想行 (taxRate null・対象外)
+    expect(
+      invoiceReceiptView(
+        receipt({ lineItems: null, amount: '300', totalAmount: '300', sourceRoute: '/tip' }),
+      ),
+    ).toBeNull();
+  });
+
+  it('cross-chain (USDC) の控えは登録番号があっても出さない', () => {
+    expect(
+      invoiceReceiptView(
+        receipt({ asset: 'usdc', amount: '10', totalAmount: '10', lineItems: [line({ amount: '10' })] }),
+      ),
+    ).toBeNull();
+  });
+
   it('課税の行が 1 つも無い (全部 対象外) は出さない', () => {
     expect(
       invoiceReceiptView(

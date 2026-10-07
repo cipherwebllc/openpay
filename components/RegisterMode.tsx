@@ -408,6 +408,10 @@ function RegisterModeContent({
           mode: settings.payMode,
           items: validItems,
           receiptNo: receiptNo || undefined,
+          // 店名とインボイス登録番号 (QR タブの共通設定)。顧客の控えに出す表示専用の値で、
+          // 金額・受取先・手数料には関与しない (形式外の番号は buildCheckoutUrl が出さない)。
+          storeName: settings.storeName.trim() || undefined,
+          invoiceNo: settings.invoiceNo || undefined,
           // レジ システム利用料 (flag ON のときだけ)。CheckoutForm が standard 経路の JPYC 決済に
           // recover の OpenPay利用料 % を店舗負担で課金する合図。USDC/relay/7月前は実質無料・flag
           // OFF では付かず従来動作 (inert)。

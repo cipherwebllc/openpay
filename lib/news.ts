@@ -34,6 +34,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'invoice-receipt-2026-10-07',
+    date: '2026-10-07',
+    category: 'feature',
+    title: {
+      ja: 'お客様の控えに、インボイスの記載事項を出せるようにしました',
+      en: 'Customer receipts can now show simplified invoice details',
+    },
+    body: {
+      ja: '決済 QR・レジ・モバイル注文の設定でインボイス登録番号 (T + 13 桁) を入れると、JPYC で支払ったお客様の控えに、店名・登録番号・税率ごとの金額と消費税 (円)・軽減税率の対象を示す ※ が出ます。追加料金はかかりません。登録番号は店舗が設定した値をそのまま出し、OpenPay は登録状況を確かめていません。税務上の扱いは税理士等にご確認ください。',
+      en: 'Enter your invoice registration number (T + 13 digits) in the payment QR, register or mobile order settings, and the receipts of customers who pay in JPYC show your shop name, registration number, the amount and consumption tax (in yen) for each tax rate, and a ※ mark on reduced-rate items. There is no extra charge. The number is shown as the shop set it; OpenPay does not check the registration. Ask a tax professional how to treat it for tax purposes.',
+    },
+    link: { href: '/guide/start', labelJa: '導入前チェックリストを見る', labelEn: 'Read the setup checklist' },
+  },
+  {
     id: 'register-standard-fee-free-2026-10-07',
     date: '2026-10-07',
     category: 'pricing',

@@ -13,6 +13,7 @@ import {
 import type { SplitDraft } from '@/lib/url';
 import { PAY_MEMO_MAX, PAY_PRODUCT_NAME_MAX } from '@/lib/url';
 import { isTaxCategory, type TaxCategory } from '@/lib/tax';
+import { INVOICE_REGISTRATION_INPUT_MAX } from '@/lib/invoice';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
 // token ごとに店主が最後に使っていた (受取チェーン, 決済モード)。レジは商品プリセットを押すだけで
@@ -42,6 +43,9 @@ export type QrSettings = {
   splits: SplitDraft[];
   // 店舗向け表示。DB を持たず、端末ローカルのレジ/印刷設定として保存する。
   storeName: string;
+  // インボイス登録番号 (任意・生入力)。形式 (T + 13 桁) に合うときだけ QR/レジの URL に乗り、
+  // 顧客の控えに出る (lib/invoice.ts)。
+  invoiceNo: string;
   posterNote: string;
   // レジの商品プリセットグリッドに商品画像を出すか (既定 true)。店主が画像オフで
   // 文字主体の高速レジ表示にできる (顧客メニュー側の表示には影響しない・端末ローカル設定)。
@@ -94,6 +98,7 @@ const DEFAULT_SETTINGS: QrSettings = {
   payMode: 'gasless',
   splits: [],
   storeName: '',
+  invoiceNo: '',
   posterNote: '',
   showPresetImages: true,
   quickAmounts: {
@@ -297,6 +302,7 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
     payMode,
     splits: sanitizeSplits(loaded.splits),
     storeName: sanitizeText(loaded.storeName, STORE_NAME_MAX),
+    invoiceNo: sanitizeText(loaded.invoiceNo, INVOICE_REGISTRATION_INPUT_MAX),
     posterNote: sanitizeText(loaded.posterNote, POSTER_NOTE_MAX),
     // 既定 true (旧 schema・未指定は画像表示)。明示的に false のときだけ非表示。
     showPresetImages: loaded.showPresetImages !== false,
