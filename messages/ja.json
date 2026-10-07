@@ -1578,7 +1578,29 @@
     "previousPaymentConfirmingOther": "以前のお支払いを確認中です。このお店へのお支払いは続けられます。",
     "orderBindingRestoreUnavailable": "以前の注文の復元情報を読み込めませんでした。支払い済みの場合は、支払い直さずお店のスタッフに確認してください。",
     "previousOrderNotifyPending": "以前の注文の登録が保留中です。このお支払いは続けられます。",
-    "previousOrderNotifyStaff": "以前の注文を登録できませんでした。そのお店のスタッフに支払い履歴またはトランザクションを提示してください。"
+    "previousOrderNotifyStaff": "以前の注文を登録できませんでした。そのお店のスタッフに支払い履歴またはトランザクションを提示してください。",
+    "storeDevice": {
+      "totalLabel": "お支払い額",
+      "feeNote": "ガス代はお店の端末が負担し、OpenPay 利用料は 0 円です（仕組み上、送金 1 回につき 1 wei = 0.000000000000000001 JPYC が加わります）。",
+      "signNote": "ウォレットの署名画面には、受け取り先として OpenPay の仲介コントラクトと、お支払い額 + 1 wei が表示されます。署名したあとの送信はお店の端末が行います。",
+      "insufficientBalance": "残高が足りません。{amount} に加えて 1 wei が必要です。お店に通常の決済を頼んでください。",
+      "btnSigning": "ウォレットで署名してください…",
+      "waiting": "お店の端末が送信しています…（残り約 {seconds} 秒）",
+      "success": "お支払いが完了しました",
+      "viewTx": "取引を見る",
+      "reverted": "送金が失敗しました（取り消されました）。お支払いは行われていません。店員にお伝えください。",
+      "expired": "お店の端末が送れませんでした。お支払いは行われていません。店員にお伝えのうえ、QR を出し直してもらってください。",
+      "error": {
+        "wallet_not_connected": "ウォレットをつないでください。",
+        "wrong_chain": "ネットワークを切り替えてください。",
+        "unavailable": "いまはこの方法で支払えません。お店に通常の決済を頼んでください。",
+        "rejected": "署名がキャンセルされました。お支払いは行われていません。",
+        "insufficient_balance": "残高が足りません（お支払い額 + 1 wei が必要です）。お店に通常の決済を頼んでください。",
+        "session_expired": "この QR の期限が切れています。お店で QR を出し直してもらってください。",
+        "session_taken": "この会計はすでに別のお支払いが進んでいます。店員にお伝えください。",
+        "server_rejected": "お支払いを受け付けられませんでした。お支払いは行われていません。店員にお伝えください。"
+      }
+    }
   },
   "CopyableField": {
     "copy": "コピー",
@@ -1810,6 +1832,7 @@
     "columnAsset": "通貨",
     "columnAmount": "金額",
     "columnFee": "OpenPay 利用手数料",
+    "feeOneWei": "1 wei（仕組み上・0 円）",
     "columnNetworkFee": "ネットワーク手数料相当額",
     "columnSaleAmount": "売上総額",
     "columnNetwork": "ネットワーク",
@@ -3154,6 +3177,7 @@
     "missingItems": "items を指定してください (最低 1 件)",
     "invalidItems": "items は \"name:qty:price,...\" 形式 (qty 1〜999、price は token decimals 以内、最大 10 件) で指定してください",
     "tipWidgetUnsupported": "{token} on {chain} は tip widget 非対応です (gasless mode 必須のため)",
-    "invalidNative": "native は polygon または kaia を指定してください"
+    "invalidNative": "native は polygon または kaia を指定してください",
+    "storeDeviceUnavailable": "この QR は使えません。お店で QR を出し直してもらってください"
   }
 }

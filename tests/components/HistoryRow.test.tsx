@@ -149,6 +149,12 @@ describe('HistoryRow', () => {
     expect(screen.getByText(/0.005 USDC/)).toBeInTheDocument();
   });
 
+  it('お店の端末で送る経路の手数料欄 1 wei は「1 wei（仕組み上・0 円）」と表示 (記録は 1 wei のまま)', () => {
+    render(<HistoryRow entry={entry({ feeAmount: '1' })} onRemove={() => undefined} />);
+    expect(screen.getByText('1 wei（仕組み上・0 円）')).toBeInTheDocument();
+    expect(screen.queryByText(/0\.000000000000000001/)).toBeNull();
+  });
+
   it('standard mode + gasMode=null → "—" 表示', () => {
     render(
       <HistoryRow

@@ -30,6 +30,7 @@ const VALUES: Record<UrlErrorCode, Record<string, string>> = {
   invalidItems: {},
   tipWidgetUnsupported: { token: 'usdc', chain: 'arc' },
   invalidNative: {},
+  storeDeviceUnavailable: {},
 };
 const CODES = Object.keys(VALUES) as UrlErrorCode[];
 const JAPANESE = /[ぁ-んァ-ヶ一-龠々〜]/;

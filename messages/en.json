@@ -1578,7 +1578,29 @@
     "previousPaymentConfirmingOther": "A previous payment is still being confirmed. You can still pay this store.",
     "orderBindingRestoreUnavailable": "Previous order recovery information could not be read. If you already paid, check with store staff before paying again.",
     "previousOrderNotifyPending": "A previous order is awaiting registration. You can still make this payment.",
-    "previousOrderNotifyStaff": "A previous order could not be registered. Show its payment history or transaction to that store’s staff."
+    "previousOrderNotifyStaff": "A previous order could not be registered. Show its payment history or transaction to that store’s staff.",
+    "storeDevice": {
+      "totalLabel": "Amount to pay",
+      "feeNote": "The shop's device pays the gas and the OpenPay usage fee is 0 (by design, 1 wei = 0.000000000000000001 JPYC is added to each transfer).",
+      "signNote": "Your wallet will show OpenPay's intermediary contract as the recipient and the amount plus 1 wei. After you sign, the shop's device sends it.",
+      "insufficientBalance": "Insufficient balance. You need {amount} plus 1 wei. Ask the shop for a standard payment instead.",
+      "btnSigning": "Sign in your wallet…",
+      "waiting": "The shop's device is sending it… (about {seconds} seconds left)",
+      "success": "Payment complete",
+      "viewTx": "View transaction",
+      "reverted": "The transfer failed (it was reverted). No payment was made. Please tell the staff.",
+      "expired": "The shop's device couldn't send it. No payment was made. Please tell the staff and ask for a new QR code.",
+      "error": {
+        "wallet_not_connected": "Connect your wallet.",
+        "wrong_chain": "Switch the network.",
+        "unavailable": "This method isn't available right now. Ask the shop for a standard payment.",
+        "rejected": "The signature was cancelled. No payment was made.",
+        "insufficient_balance": "Insufficient balance (the amount plus 1 wei is needed). Ask the shop for a standard payment.",
+        "session_expired": "This QR code has expired. Ask the shop to show a new one.",
+        "session_taken": "Another payment is already in progress for this checkout. Please tell the staff.",
+        "server_rejected": "The payment couldn't be accepted. No payment was made. Please tell the staff."
+      }
+    }
   },
   "CopyableField": {
     "copy": "Copy",
@@ -1810,6 +1832,7 @@
     "columnAsset": "Asset",
     "columnAmount": "Amount",
     "columnFee": "OpenPay fee",
+    "feeOneWei": "1 wei (by design, ¥0)",
     "columnNetworkFee": "Network fee (equivalent)",
     "columnSaleAmount": "Gross sale",
     "columnNetwork": "Network",
@@ -3154,6 +3177,7 @@
     "missingItems": "Add at least one item (items).",
     "invalidItems": "Set items in the form \"name:qty:price,...\" (qty 1–999, price within the token's decimals, up to 10 items).",
     "tipWidgetUnsupported": "{token} on {chain} is not supported by the tip widget (it requires gasless payments).",
-    "invalidNative": "Set native to polygon or kaia."
+    "invalidNative": "Set native to polygon or kaia.",
+    "storeDeviceUnavailable": "This QR code can't be used. Ask the shop to show a new one."
   }
 }

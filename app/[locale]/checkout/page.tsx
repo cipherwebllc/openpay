@@ -5,6 +5,7 @@ import { hasLocale } from 'next-intl';
 import { notFound } from 'next/navigation';
 import { LOCALES } from '@/i18n';
 import { CheckoutForm } from '@/components/CheckoutForm';
+import { StoreDeviceCheckoutForm } from '@/components/StoreDeviceCheckoutForm';
 import { LocaleSwitcher } from '@/components/LocaleSwitcher';
 import { env } from '@/lib/env';
 import {
@@ -62,7 +63,13 @@ export default async function CheckoutPage({
       </header>
 
       {parsed.ok ? (
-        <CheckoutForm params={parsed.params} />
+        // お店の端末で送る QR (submit=store) は専用の画面で描画し、既存の CheckoutForm には触れない
+        // (parse が条件を fail-closed で確かめ済み・plans/store-gas-wallet.md §11)。
+        parsed.params.submit === 'store' ? (
+          <StoreDeviceCheckoutForm params={parsed.params} />
+        ) : (
+          <CheckoutForm params={parsed.params} />
+        )
       ) : (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-5 text-sm text-red-700">
           <p className="font-semibold">{t('urlInvalidTitle')}</p>
