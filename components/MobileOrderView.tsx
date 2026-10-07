@@ -485,6 +485,12 @@ export function MobileOrderView({
           // CheckoutForm の enableMobileOrderFee gate が従来どおり決め、flag OFF では発生しない。
           feeKind: config.mode,
           feePayer: config.feePayer,
+          // 店名とインボイス登録番号 (顧客の控えに出す表示専用・金額/受取先/束縛には関与しない)。
+          // 店名が @handle の代用名のときは「発行事業者の名称」にならないので番号を付けない。
+          storeName: config.shopName,
+          ...(config.invoiceNo && !config.shopName.startsWith('@')
+            ? { invoiceNo: config.invoiceNo }
+            : {}),
           // @handle 店舗は checkout submit の署名前 admission で最新 KV 設定へ再束縛する。
           // self-contained ?s= 注文は server 権威の handle が無いため付けない。
           ...(handle ? { storeHandle: handle } : {}),

@@ -237,6 +237,8 @@ export function QrGenerator() {
       fxRate: convert?.fxRate,
       // 記帳補助メタ (任意・空は undefined で URL に出さない)。決済側の履歴に記録される。
       storeName: settings.storeName || undefined,
+      // インボイス登録番号 (任意・形式外は buildPayUrl が出さない)。顧客の控えに出す表示専用。
+      invoiceNo: settings.invoiceNo || undefined,
       productName: settings.productName || undefined,
       memo: settings.memo || undefined,
       taxRate: settings.taxRate ?? undefined,
@@ -254,6 +256,7 @@ export function QrGenerator() {
     effectiveGasMode,
     settings.crossChain,
     settings.storeName,
+    settings.invoiceNo,
     settings.productName,
     settings.memo,
     settings.taxRate,

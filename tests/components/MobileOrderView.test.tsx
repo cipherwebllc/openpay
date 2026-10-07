@@ -675,6 +675,34 @@ describe('MobileOrderView', () => {
     container.remove();
   });
 
+  it('checkout に店名とインボイス登録番号を付ける (控えの表示専用)', () => {
+    renderWithIntl(
+      <MobileOrderView config={{ ...config, invoiceNo: 'T1234567890123' }} handle="alice" />,
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const u = new URL(
+      screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+      'http://localhost',
+    );
+    expect(u.searchParams.get('store')).toBe(config.shopName);
+    expect(u.searchParams.get('inv')).toBe('T1234567890123');
+  });
+
+  it('店名が @handle の代用名なら登録番号は付けない (発行事業者の名称にならない)', () => {
+    renderWithIntl(
+      <MobileOrderView
+        config={{ ...config, shopName: '@alice', invoiceNo: 'T1234567890123' }}
+        handle="alice"
+      />,
+    );
+    fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);
+    const u = new URL(
+      screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+      'http://localhost',
+    );
+    expect(u.searchParams.get('inv')).toBeNull();
+  });
+
   it('受注リレー flag OFF (既定): webhook/order_id を付けない (inert)', () => {
     renderWithIntl(<MobileOrderView config={config} handle="alice" />);
     fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[0]);

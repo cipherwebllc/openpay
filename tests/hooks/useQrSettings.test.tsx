@@ -21,6 +21,7 @@ describe('useQrSettings', () => {
       payMode: 'gasless',
       splits: [],
       storeName: '',
+      invoiceNo: '',
       posterNote: '',
       showPresetImages: true,
       quickAmounts: {
@@ -219,6 +220,7 @@ describe('useQrSettings', () => {
         payMode: 'standard',
         splits: [{ address: '0xb1', percent: '40' }],
         storeName: 'Coffee Stand',
+        invoiceNo: '',
         posterNote: 'Scan to pay',
         showPresetImages: true,
         quickAmounts: {

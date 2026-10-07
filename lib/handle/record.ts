@@ -44,6 +44,7 @@ export function handleStorefrontConfig(
     address: sf.address,
     hours: sf.hours,
     phone: sf.phone,
+    invoiceNo: sf.invoiceNo, // インボイス登録番号 (任意・validateOrderConfig が再検証)
     acceptingOrders: sf.acceptingOrders,
     dineIn: sf.dineIn, // 提供形態 (店内ならテーブル番号入力・validateOrderConfig が再検証)
     // 時間系 (任意)。@handle 公開ページも self-contained 注文 URL と同じ受付制御を使う。

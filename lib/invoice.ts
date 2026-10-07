@@ -14,6 +14,8 @@ import type { HistoryLineItem } from './history';
 import type { PayerReceipt } from './payerReceipt';
 
 export const INVOICE_REGISTRATION_NUMBER_PATTERN = /^T\d{13}$/;
+// 設定欄の生入力の上限 (区切りや空白を含む書き方を受けるため 14 字より長めに取る)。
+export const INVOICE_REGISTRATION_INPUT_MAX = 32;
 
 // 「T-1234-5678-90123」「Ｔ１２３…」のような書き方も受ける (問18 はハイフン区切りの表記例あり)。
 const INVOICE_SEPARATOR_RE = /[\s\-‐‑‒–—―−ー]/g;

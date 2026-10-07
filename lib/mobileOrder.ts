@@ -14,6 +14,7 @@ import { isJpycChainSlug, JPYC_CHAINS, slugForChain, type JpycChainSlug } from '
 import { isTaxCategory, type TaxCategory } from './tax';
 import { validOptionGroups, type OptionGroup } from './menuOptions';
 import { parseHHMM, sanitizeMinLead } from './shopTime';
+import { normalizeInvoiceRegistrationNumber } from './invoice';
 
 export type MobileOrderMode = 'storefront' | 'preorder'; // 店頭/券売機 | 事前モバイルオーダー
 export type FeePayer = 'merchant' | 'customer'; // 3% を店舗負担 | 顧客上乗せ (preorder 時のみ意味を持つ)
@@ -63,6 +64,8 @@ export type MobileOrderConfig = {
   address?: string;
   hours?: string;
   phone?: string;
+  // インボイス登録番号 (任意・T + 13 桁・正規化済み)。/checkout へ渡し、顧客の控えに出す表示専用の値。
+  invoiceNo?: string;
   // 注文受付の可否。false のとき公開ページは支払いを止める (不可逆決済の事故防止)。
   // 既定 (未設定) は受付中。
   acceptingOrders?: boolean;
@@ -97,6 +100,7 @@ export type StorefrontParts = {
   address?: string;
   hours?: string;
   phone?: string;
+  invoiceNo?: string; // インボイス登録番号 (T + 13 桁・正規化済み・顧客の控えに出す表示専用)
   acceptingOrders?: boolean;
   dineIn?: boolean; // true=店内 (テーブル番号入力)、false/未設定=テイクアウト。storefront のみ (preorder は常にテイクアウト)
   openFrom?: string; // 受付開始 "HH:mm" (Phase 4・Asia/Tokyo・開始前は受付停止)
@@ -363,6 +367,8 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
   if (isNonEmptyStr(o.address, ADDRESS_MAX)) parts.address = o.address.trim();
   if (isNonEmptyStr(o.hours, HOURS_MAX)) parts.hours = o.hours.trim();
   if (isNonEmptyStr(o.phone, PHONE_MAX)) parts.phone = o.phone.trim();
+  const invoiceNo = normalizeInvoiceRegistrationNumber(o.invoiceNo);
+  if (invoiceNo) parts.invoiceNo = invoiceNo;
   // 既定 (受付中) は「フィールド無し」で表し、停止時のみ false を保持 (round-trip 最小化)。
   if (o.acceptingOrders === false) parts.acceptingOrders = false;
   // 提供形態: 既定 (テイクアウト) は「フィールド無し」、店内のときのみ true を保持。
@@ -472,6 +478,7 @@ export function validateOrderConfig(raw: unknown): MobileOrderConfig | null {
   if (parts.address) config.address = parts.address;
   if (parts.hours) config.hours = parts.hours;
   if (parts.phone) config.phone = parts.phone;
+  if (parts.invoiceNo) config.invoiceNo = parts.invoiceNo;
   if (parts.acceptingOrders === false) config.acceptingOrders = false;
   if (parts.dineIn) config.dineIn = true;
   // 時間系は parts (validateStorefrontParts) で検証済み → そのまま載せる (単一情報源)。

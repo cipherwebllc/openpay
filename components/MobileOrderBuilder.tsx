@@ -57,6 +57,7 @@ import {
 } from '@/lib/mobileOrder';
 import { MobileOrderView } from '@/components/MobileOrderView';
 import { MIN_LEAD_MAX } from '@/lib/shopTime';
+import { InvoiceNumberInput } from './InvoiceNumberInput';
 
 const inputClass =
   'w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none';
@@ -154,6 +155,7 @@ export function MobileOrderBuilder({
         address: draft.address.trim() || undefined,
         hours: draft.hours.trim() || undefined,
         phone: draft.phone.trim() || undefined,
+        invoiceNo: draft.invoiceNo.trim() || undefined, // 形式外は validateStorefrontParts が除外
         acceptingOrders: draft.acceptingOrders,
         dineIn: draft.dineIn, // 店内なら公開ページで注文時にテーブル番号を入力させる
         openFrom: draft.openFrom.trim() || undefined,
@@ -457,6 +459,20 @@ export function MobileOrderBuilder({
                   placeholder={t('phonePlaceholder')}
                   onChange={(e) => update({ phone: e.target.value })}
                   className={inputClass}
+                />
+              </Field>
+
+              <Field label={t('invoiceNoLabel')} hint={t('invoiceNoHint')}>
+                <InvoiceNumberInput
+                  value={draft.invoiceNo}
+                  onChange={(next) => update({ invoiceNo: next })}
+                  hasStoreName={draft.shopName.trim().length > 0}
+                  className={inputClass}
+                  text={{
+                    invalid: t('invoiceNoInvalid'),
+                    lookup: t('invoiceNoLookup'),
+                    needsStoreName: t('invoiceNoNeedsStoreName'),
+                  }}
                 />
               </Field>
 

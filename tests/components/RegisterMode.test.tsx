@@ -821,4 +821,41 @@ describe('RegisterMode', () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.feeKind).toBeUndefined();
   });
+
+  // インボイス: QR タブの共通設定 (店舗名・登録番号) を /checkout に載せ、顧客の控えに出す (表示専用)。
+  it('店舗名とインボイス登録番号を /checkout URL に載せる (形式外の番号は載せない)', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      QR_KEY,
+      JSON.stringify({
+        receiver: VALID,
+        token: 'jpyc',
+        chain: 'polygon',
+        storeName: 'OpenPay Cafe',
+        invoiceNo: 't-1234-5678-90123',
+      }),
+    );
+    render(<RegisterMode />);
+    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    const r = await parsedCheckout();
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.params.storeName).toBe('OpenPay Cafe');
+    expect(r.params.invoiceNo).toBe('T1234567890123');
+  });
+
+  it('登録番号が形式外なら /checkout URL に載せない', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      QR_KEY,
+      JSON.stringify({ receiver: VALID, token: 'jpyc', chain: 'polygon', invoiceNo: 'T123' }),
+    );
+    render(<RegisterMode />);
+    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    const r = await parsedCheckout();
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.params.invoiceNo).toBeUndefined();
+  });
 });

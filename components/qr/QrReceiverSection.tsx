@@ -8,6 +8,7 @@ import { env } from '@/lib/env';
 import { AddressInput } from '../AddressInput';
 import { ReceiverWalletChip } from '../ReceiverWalletChip';
 import { Field } from '../Field';
+import { InvoiceNumberInput } from '../InvoiceNumberInput';
 import { StepCard } from '../StepCard';
 import { Step2Summary } from './QrSummaries';
 import {
@@ -118,6 +119,21 @@ export function QrReceiverSection({
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
             maxLength={STORE_NAME_MAX}
           />
+        </Field>
+
+        <Field label={t('invoiceNoLabel')}>
+          <InvoiceNumberInput
+            value={settings.invoiceNo}
+            onChange={(next) => setSettings((s) => ({ ...s, invoiceNo: next }))}
+            hasStoreName={settings.storeName.trim().length > 0}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+            text={{
+              invalid: t('invoiceNoInvalid'),
+              lookup: t('invoiceNoLookup'),
+              needsStoreName: t('invoiceNoNeedsStoreName'),
+            }}
+          />
+          <p className="mt-1 text-xs text-slate-500">{t('invoiceNoHint')}</p>
         </Field>
 
         <Field label={t('posterNoteLabel')}>
