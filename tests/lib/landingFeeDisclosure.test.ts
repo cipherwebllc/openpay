@@ -30,12 +30,13 @@ const x402FloorJpyc = DISCLOSED_X402_FEE.floorJpyc; // 1 (JPYC)
 const storeUsdcPct = DISCLOSED_STORE_USDC_PAYMENT.openPayFeeBps / 100; // 0 (%)
 
 describe('standard-payment fee scope (review 6 regression)', () => {
-  it('README scopes standard and USDC exemptions and includes register and mobile-order fees', () => {
+  it('README scopes standard and USDC exemptions (register standard free since 2026-10-07) and includes mobile-order fees', () => {
     const readme = readFileSync(join(process.cwd(), 'README.md'), 'utf8');
     const paragraph = readme.split('\n\n').find((text) => text.startsWith('There are **no'))!;
-    expect(paragraph).toContain("**standard** (with-gas) mode outside the register's JPYC path and mobile orders");
+    expect(paragraph).toContain("**standard** (with-gas) mode outside mobile orders — including the register's standard JPYC path since 2026-10-07");
     expect(paragraph).toContain('**USDC** paths outside mobile orders');
-    expect(paragraph).toContain("plus the register's standard JPYC path and mobile orders described below");
+    expect(paragraph).toContain('plus mobile orders described below');
+    expect(paragraph).not.toContain("plus the register's standard JPYC path");
     expect(paragraph).not.toContain('The usage fee applies only');
   });
 

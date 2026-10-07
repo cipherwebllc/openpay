@@ -113,16 +113,19 @@ describe('transparencyMetadata: indexable metadata', () => {
 });
 
 describe('手数料の SOT fence', () => {
-  it.each(LOCALES)('%s: レジの通常 JPYC 決済も店舗負担の利用料の対象', (locale) => {
+  it.each(LOCALES)('%s: レジの通常 JPYC 決済は 2026-10-07 から利用料無料・ガスレスは店舗負担の利用料 (#713)', (locale) => {
     const fees = transparency.TRANSPARENCY[locale].fees;
     const register = fees.find((fee) => fee.startsWith(locale === 'ja' ? 'レジ（POS）:' : 'Register (POS):'));
     expect(register).toBeDefined();
     expect(register).toContain(percentFromBps(legal.DISCLOSED_RECOVER_FEE.percentFromJulyBps));
     expect(register).toContain(`${legal.DISCLOSED_RECOVER_FEE.floorJpyc} JPYC`);
-    expect(register).toContain(locale === 'ja' ? '通常決済（ガスあり）を含む' : 'including standard payments');
-    expect(register).toContain(locale === 'ja' ? '店舗が負担' : 'merchant bears');
-    expect(register).toContain(locale === 'ja' ? 'ガスレス経路のみ' : 'only on gasless paths');
-    expect(fees[0]).toContain(locale === 'ja' ? 'レジ' : 'register');
+    expect(register).toContain(
+      locale === 'ja' ? 'お客様がガス代を払う通常決済は OpenPay 利用料無料' : 'Standard payments, where the customer pays the gas, have no OpenPay usage fee',
+    );
+    expect(register).toContain(locale === 'ja' ? '2026 年 10 月 7 日に廃止' : 'discontinued on October 7, 2026');
+    expect(register).not.toContain(locale === 'ja' ? '通常決済（ガスあり）を含む' : 'including standard payments');
+    expect(fees[0]).not.toContain(locale === 'ja' ? 'レジの JPYC 通常決済には' : 'through the register incur');
+    expect(fees[0]).toContain(locale === 'ja' ? 'モバイル注文を除き' : 'except for mobile orders');
   });
 
   it.each(LOCALES)('%s: チップの JPYC / USDC Base / USDC Arc の送る側負担を開示する', (locale) => {
