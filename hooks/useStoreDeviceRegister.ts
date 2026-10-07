@@ -29,7 +29,6 @@ import type {
 } from '@/lib/storeDeviceSend';
 
 export const STORE_DEVICE_SESSION_KEY = 'openpay:register-store-device-session:v1';
-export const STORE_DEVICE_TOGGLE_KEY = 'openpay:register-store-device:v1';
 // 署名を待つ間の読み取り間隔 (最初の 60 秒は 3 秒・以降 6 秒)。
 export const STORE_DEVICE_READ_FAST_MS = 3_000;
 export const STORE_DEVICE_READ_SLOW_MS = 6_000;
@@ -795,28 +794,4 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   const busy = isBusy(state) || transitioning || recovering;
 
   return { state, busy, start, stop, releaseForNormal, hasPendingSale, leave, checkNow, retry, dismiss };
-}
-
-/** 端末ごとの切替 (localStorage・既定 OFF)。描画後に読む (server と初回 client の描画を揃える)。 */
-export function useStoreDeviceToggle(active = true): [boolean, (on: boolean) => void] {
-  const [on, setOn] = useState(false);
-  useEffect(() => {
-    // 使わない実体 (作成ページの Provider の中で部品側が呼んだもの) は読まない。
-    if (!active) return;
-    try {
-      setOn(window.localStorage.getItem(STORE_DEVICE_TOGGLE_KEY) === '1');
-    } catch {
-      // 読めなければ OFF のまま (今のレジのまま)。
-    }
-  }, [active]);
-  const update = useCallback((value: boolean) => {
-    setOn(value);
-    try {
-      if (value) window.localStorage.setItem(STORE_DEVICE_TOGGLE_KEY, '1');
-      else window.localStorage.removeItem(STORE_DEVICE_TOGGLE_KEY);
-    } catch {
-      // 保存できなくてもこの表示の間は切り替わる (次に開いたときは OFF)。
-    }
-  }, []);
-  return [on, update];
 }

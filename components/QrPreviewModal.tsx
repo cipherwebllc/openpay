@@ -99,6 +99,8 @@ export function QrPreviewModal({
   eip681,
   paymentStatus,
   deviceStatus,
+  actionsNote,
+  hideUrl = false,
 }: {
   open: boolean;
   convertExpired?: boolean;
@@ -113,8 +115,9 @@ export function QrPreviewModal({
   chainText: string;
   receiverShort?: string;
   asset?: QrPreviewAsset;
-  copied: boolean;
-  onCopy: () => void;
+  /** URL のコピー (省略時はコピーのボタンを出さない)。 */
+  copied?: boolean;
+  onCopy?: () => void;
   onPrint?: () => void;
   onDownloadSvg?: () => void;
   onDownloadPng?: () => void;
@@ -122,6 +125,10 @@ export function QrPreviewModal({
   paymentStatus?: QrPreviewPaymentStatus;
   /** レジの「お店の端末で送る」の状態 (任意・印刷には出さない)。省略時は何も描画しない。 */
   deviceStatus?: ReactNode;
+  /** 操作ボタンの下の注記 (例: 画面に表示している間だけ使える QR で、印刷・保存・コピーはできない)。 */
+  actionsNote?: string;
+  /** 決済 URL の表示を出さない (画面に表示している間だけ使える QR)。 */
+  hideUrl?: boolean;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   // inline onClose の更新で focus effect を再実行せず、ESC は最新のハンドラを読む。
@@ -364,9 +371,11 @@ export function QrPreviewModal({
         </section>
 
         {/* URL 表示 */}
-        <div className="mt-4 w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600 print:hidden">
-          {qrValue}
-        </div>
+        {!hideUrl && (
+          <div className="mt-4 w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600 print:hidden">
+            {qrValue}
+          </div>
+        )}
 
         {/* 操作ボタン (印刷では隠す)。Print が primary CTA、他は outline。 */}
         <div className="mt-4 flex flex-wrap justify-center gap-2 print:hidden">
@@ -381,14 +390,16 @@ export function QrPreviewModal({
               {labels.print}
             </button>
           )}
-          <button
-            type="button"
-            onClick={onCopy}
-            disabled={convertExpired}
-            className={`rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
-          >
-            {copied ? labels.copied : labels.copy}
-          </button>
+          {onCopy && (
+            <button
+              type="button"
+              onClick={onCopy}
+              disabled={convertExpired}
+              className={`rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark${convertExpired ? ' cursor-not-allowed opacity-50' : ''}`}
+            >
+              {copied ? labels.copied : labels.copy}
+            </button>
+          )}
           {onDownloadSvg && labels.downloadSvg && (
             <button
               type="button"
@@ -410,6 +421,10 @@ export function QrPreviewModal({
             </button>
           )}
         </div>
+
+        {actionsNote && (
+          <p className="mt-3 text-center text-xs text-slate-500 print:hidden">{actionsNote}</p>
+        )}
 
         {/* EIP-681 互換 QR (任意・EIP-7702 非対応 wallet 救済の fallback) */}
         {eip681 && (

@@ -4,8 +4,9 @@ import { crossChainAllowed } from '@/lib/url/shared';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useTranslations } from 'next-intl';
+import dynamic from 'next/dynamic';
 import type { Address } from 'viem';
-import { parseUnits } from 'viem';
+import { formatUnits, getAddress, parseUnits } from 'viem';
 import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
 import { PwaInstallHint } from './PwaInstallHint';
@@ -26,6 +27,7 @@ import { useLocalStorageRecord } from '@/hooks/useLocalStorageRecord';
 import { useOfflineQrServiceWorker } from '@/hooks/useOfflineQrServiceWorker';
 import { isLastQrRecord, LAST_QR_KEY } from '@/lib/offlineQr';
 import {
+  buildCheckoutUrl,
   buildPayUrl,
   DECIMAL_PATTERN,
   parseSplitDrafts,
@@ -57,7 +59,21 @@ import { pickEffectiveAddress, shortAddress, formatTokenAmount } from '@/lib/for
 import { useIncomingPaymentWatch } from '@/hooks/useIncomingPaymentWatch';
 import { useStoreDeviceMode } from '@/components/StoreDeviceProvider';
 import { env } from '@/lib/env';
+import { chainNameForId } from '@/lib/chains';
+import { STORE_DEVICE_MIN_AMOUNT_WEI } from '@/lib/storeDevicePayment';
+import { storePaysActive, storePaysRequested } from '@/lib/storePaysMode';
 import { truncateAmount } from '@/lib/amount';
+
+// 「お店がガス代を肩代わりして送る」(flag 裏) の部品は選んだときだけ読み込む (ガス用ウォレットの鍵の扱い = viem の
+// アカウント部品を、使わない店の初回の読み込みに載せない)。
+const StoreGasWalletPanel = dynamic(
+  () => import('./StoreGasWalletPanel').then((m) => m.StoreGasWalletPanel),
+  { ssr: false },
+);
+const StoreDeviceRegisterStatus = dynamic(
+  () => import('./StoreDeviceRegisterStatus').then((m) => m.StoreDeviceRegisterStatus),
+  { ssr: false },
+);
 
 export function QrGenerator() {
   const { settings: savedSettings, setSettings: saveSettings, hydrated } = useQrSettings();
@@ -85,19 +101,10 @@ export function QrGenerator() {
   // 状態はタブの上に出る)。締め切っていない受け渡しは締め切ってから (署名が入っていたら端末が送るので出さない)。
   // flag OFF では今までどおりそのまま開く。
   const storeDevice = useStoreDeviceMode();
-  const openQrModal = useCallback<Dispatch<SetStateAction<boolean>>>(
-    (value) => {
-      if (!env.enableStoreGasWallet || value !== true) {
-        setQrModalOpen(value);
-        return;
-      }
-      if (storeDevice.device.busy) return;
-      void storeDevice.device.releaseForNormal().then((ok) => {
-        if (ok) setQrModalOpen(true);
-      });
-    },
-    [storeDevice.device],
-  );
+  // 「お店がガス代を肩代わりして送る」の QR を出している受け渡し (null = 出していない)。
+  const [storeSessionId, setStoreSessionId] = useState<string | null>(null);
+  // 店員が「通常の QR を出す」を選んだ (お店負担の QR を作れない・読み取れないとき)。
+  const [forceNormalQr, setForceNormalQr] = useState(false);
   // 初回に QR モーダルを開いた「ピークモーメント」を latch。以降 A2HS hint を出す
   // (毎日この QR を使う店主に、ホーム画面への追加を提案する)。閉じても latch は保持。
   const [hasOpenedQr, setHasOpenedQr] = useState(false);
@@ -223,6 +230,8 @@ export function QrGenerator() {
   // Recover モードの手数料開示に渡す請求額 (wei) と負担者。FREE モード (forwarder null)
   // では共有 RecoverFeeNotice が null を返してパネルを描画しない。JPYC recover は merchant 固定。
   const recoverBillAmount = useMemo(() => {
+    // お店がガス代を肩代わりして送るときは OpenPay の利用料がかからない (回収の開示を出さない)。
+    if (storePaysRequested(settings)) return null;
     if (!amountValid || mode !== 'amount' || settings.token !== 'jpyc') return null;
     const dep = deploymentForSlug(settings.token, settings.chain);
     try {
@@ -231,7 +240,7 @@ export function QrGenerator() {
     } catch {
       return null;
     }
-  }, [amountValid, mode, settings.token, settings.chain, amount]);
+  }, [amountValid, mode, settings, amount]);
   const recoverGasMode: GasMode = effectiveGasMode;
 
   const payUrl = useMemo(() => {
@@ -289,6 +298,86 @@ export function QrGenerator() {
     convert,
   ]);
 
+  // --- 決済モードの 3 つ目「お店がガス代を肩代わりして送る」(flag 裏・plans/store-gas-wallet.md §19) ---
+  // 選んでいる (requested) と、いまの通貨・チェーンで使える (active) を分ける。使えるのは画面に表示する
+  // 金額ありの QR だけ (金額なし・分割受取・為替換算では押せなくして理由を出す・黙って通常の QR にしない)。
+  const storeRequested = storePaysRequested(settings);
+  const storeCfgActive = storePaysActive(settings);
+  const { setOn: setStoreDeviceOn } = storeDevice;
+  useEffect(() => {
+    // 設定を読み込む前の既定値 (OFF) で、送っている支払いの「次の QR を出せない間」や「もう一度送る」を消さない。
+    if (hydrated) setStoreDeviceOn(storeCfgActive);
+  }, [hydrated, storeCfgActive, setStoreDeviceOn]);
+  const storeBillWei = useMemo(() => {
+    if (mode !== 'amount' || !amountValid) return 0n;
+    try {
+      return parseUnits(amount, deploymentForSlug(settings.token, settings.chain).decimals);
+    } catch {
+      return 0n;
+    }
+  }, [mode, amountValid, amount, settings.token, settings.chain]);
+  const storeBlocked:
+    | 'token'
+    | 'no_locks'
+    | 'config'
+    | 'no_wallet'
+    | 'static'
+    | 'split'
+    | 'fx'
+    | 'receiver'
+    | 'min_amount'
+    | null = !storeRequested
+    ? null
+    : !storeCfgActive
+      ? 'token'
+      : storeDevice.blocked !== null
+        ? storeDevice.blocked
+        : storeDevice.gasAddress === null
+          ? 'no_wallet'
+          : mode !== 'amount'
+            ? 'static'
+            : splitsForUrl
+              ? 'split'
+              : convert
+                ? 'fx'
+                : effectiveReceiver &&
+                    [storeDevice.forwarder, storeDevice.feeReceiver].some(
+                      (a) => a && a.toLowerCase() === effectiveReceiver.toLowerCase(),
+                    )
+                  ? 'receiver'
+                  : amountValid && storeBillWei < STORE_DEVICE_MIN_AMOUNT_WEI
+                    ? 'min_amount'
+                    : null;
+  const storeForSale = storeRequested && storeBlocked === null && storeDevice.enabled;
+  // お店負担の QR を出す・出している (通常の QR を店員が選んだときを除く)。
+  const storeQrMode = storeRequested && !forceNormalQr;
+  // お客様が開く /checkout (1 品・feeKind は付けない = parse が fail-closed で弾くため・金額は上の検証済みの値)。
+  const storeQrUrl =
+    storeQrMode && storeSessionId && effectiveReceiver && origin && amountValid && mode === 'amount'
+      ? buildCheckoutUrl(origin, {
+          to: effectiveReceiver,
+          token: settings.token,
+          chain: settings.chain,
+          gas: effectiveGasMode,
+          mode: 'gasless',
+          items: [
+            {
+              name: settings.productName.trim() || t('storeDevice.itemName'),
+              qty: 1,
+              price: amount,
+              ...(settings.memo.trim() ? { memo: settings.memo.trim() } : {}),
+            },
+          ],
+          taxRate: settings.taxRate ?? undefined,
+          taxCategory: settings.taxCategory ?? undefined,
+          receiptNo: receiptNo || undefined,
+          storeName: settings.storeName.trim() || undefined,
+          invoiceNo: settings.invoiceNo || undefined,
+          submit: 'store',
+          handoffId: storeSessionId,
+        })
+      : '';
+
   const handleResolved = useCallback((addr: Address | null) => {
     setResolvedReceiver(addr);
   }, []);
@@ -311,7 +400,8 @@ export function QrGenerator() {
   // QrPreviewModal を開いた時点 (qrValue=payUrl 確定) で「前回の受け取り QR」を保存。
   // 圏外時に OfflineLastQr が端末内で再描画する。flag OFF でも保存は無害 (読む側が inert)。
   useEffect(() => {
-    if (!qrModalOpen || !payUrl) return;
+    // お店負担の QR (画面に表示している間だけ使える) は「前回の受け取り QR」に残さない。
+    if (!qrModalOpen || !payUrl || storeQrMode) return;
     saveLastQr({
       payUrl,
       amountLabel: amountLabelText,
@@ -326,6 +416,7 @@ export function QrGenerator() {
     tokenChainLabelText,
     settings.storeName,
     saveLastQr,
+    storeQrMode,
   ]);
 
   // 固定額 QR が表す請求額 (wei)。parseUnits(deployment.decimals) で QR が encode
@@ -368,7 +459,8 @@ export function QrGenerator() {
     tokenAddress: deployment.address,
     chainId: deployment.chainId,
     expectedAmountWei,
-    enabled: qrModalOpen && mode === 'amount' && receiverValid && amountValid,
+    // お店負担の QR では止める (支払いの行方の正本は端末の送信の結果)。
+    enabled: qrModalOpen && mode === 'amount' && receiverValid && amountValid && !storeQrMode,
   });
 
   const qrFilename = useMemo(() => {
@@ -475,7 +567,7 @@ export function QrGenerator() {
   // (受取先未設定で convert すると入力が遅い間に「生成前に画面上の期限超過」となる QR を
   // 作れてしまう)。exp は未署名なのでサーバ強制の期限ではない。
   const canShowConvert =
-    receiverValid && mode === 'amount' && amountValid && !splitsForUrl && !convert;
+    receiverValid && mode === 'amount' && amountValid && !splitsForUrl && !convert && !storeRequested;
   const convertAnchorDisplay = convert
     ? displaySymbolFor(convert.anchorSymbol)
     : convertTargetDisplay;
@@ -492,6 +584,73 @@ export function QrGenerator() {
     const yen = Math.round(value * marketRates.usdcJpy);
     return t('fiatApprox', { yen: yen.toLocaleString('en-US') });
   }, [mode, settings.token, marketRates, amount, t]);
+
+  // 「QRコードを表示する」(右サイドバーとモバイル下部バーの 2 か所)。flag OFF では今までどおりそのまま開く。
+  // flag ON: お店の端末が支払いを送っている・結果を待っている間は出さない (同じ会計を二重に払わせない・状態は
+  // タブの上に出る)。お店負担を選んでいれば受け渡しを作ってからその QR を、そうでなければ締め切っていない受け渡しを
+  // 締め切ってから通常の QR を出す (署名が入っていたら端末が送るので出さない)。
+  const { device } = storeDevice;
+  const openQrModal = useCallback<Dispatch<SetStateAction<boolean>>>(
+    (value) => {
+      if (!env.enableStoreGasWallet || value !== true) {
+        setQrModalOpen(value);
+        return;
+      }
+      if (device.busy) return;
+      setForceNormalQr(false);
+      if (storeRequested) {
+        // 使えない会計・準備中 (ガス用ウォレットの確認待ち等) は出さない (ボタンも押せない・理由を出す)。
+        if (!storeForSale || !effectiveReceiver) return;
+        void device.start(getAddress(effectiveReceiver), storeBillWei).then((session) => {
+          // 作れなかった (理由は状態に出る)・前の会計の署名の送信を優先した → QR は開かない。
+          if (!session) return;
+          setStoreSessionId(session.id);
+          setQrModalOpen(true);
+        });
+        return;
+      }
+      void device.releaseForNormal().then((ok) => {
+        if (!ok) return;
+        setStoreSessionId(null);
+        setQrModalOpen(true);
+      });
+    },
+    [device, storeRequested, storeForSale, effectiveReceiver, storeBillWei],
+  );
+  function closeQrModal() {
+    setQrModalOpen(false);
+    setForceNormalQr(false);
+    if (storeSessionId) {
+      // 署名を待っていた受け渡しは締め切る (署名が入っていれば送る・結果はタブの上に出る)。
+      device.stop();
+      setStoreSessionId(null);
+    }
+  }
+  async function reissueStoreQr() {
+    if (!effectiveReceiver || !storeForSale) return;
+    const session = await device.start(getAddress(effectiveReceiver), storeBillWei);
+    setStoreSessionId(session?.id ?? null);
+    setQrModalOpen(!!session);
+  }
+  async function showNormalQr() {
+    // 店員が選んだときだけ通常の QR (署名を待っていた受け渡しを締め切ってから・署名が入っていたら出さない)。
+    if (!(await device.releaseForNormal())) return;
+    setStoreSessionId(null);
+    setForceNormalQr(true);
+    setQrModalOpen(true);
+  }
+  const storeQrShown = storeQrMode && storeSessionId !== null && storeQrUrl !== '';
+  const sdState = device.state;
+  // QR を薄くする: 署名を受け取った後・受付時間の終わり (次のお客様に読ませない)。
+  const storeQrDimmed =
+    storeQrShown && !(sdState.phase === 'waiting' && !sdState.stale) && sdState.phase !== 'creating';
+  // 押せない理由 (お店負担を選んでいてこの会計では使えない)。準備中は理由なしで押せない。
+  const storeShowQrBlocked =
+    storeRequested && storeBlocked !== null
+      ? t(`storeDevice.blocked.${storeBlocked}`, { chain: chainNameForId(storeDevice.chainId) ?? '' })
+      : storeRequested && !storeForSale
+        ? ''
+        : undefined;
 
   // モバイル: grid-cols-1 (= minmax(0,1fr)) を明示しないと単一列が auto track となり、下部固定バー
   // (nowrap の「QRコードを表示する」+ 金額) の max-content まで広がって横はみ出す。
@@ -595,6 +754,11 @@ export function QrGenerator() {
           splitsForUrl={splitsForUrl}
         />
 
+        {/* お店がガス代を肩代わりして送る: この端末のガス用ウォレット (作る・残高・戻す)。 */}
+        {env.enableStoreGasWallet && storeRequested && (
+          <StoreGasWalletPanel onAddressChange={storeDevice.setGasAddress} />
+        )}
+
         {/* A2HS 導線: 初回 QR モーダルを開いた後 (ピークモーメント) にだけ出す。
             standalone / dismiss 済では PwaInstallHint 側で自動非表示。 */}
         {hasOpenedQr && (
@@ -612,14 +776,15 @@ export function QrGenerator() {
         settings={settings}
         setAmount={setAmount}
         setQrModalOpen={openQrModal}
+        {...(storeShowQrBlocked !== undefined ? { showQrBlocked: storeShowQrBlocked } : {})}
       />
 
       {/* 全画面プレビュー (ポスター調 + 印刷/コピー/SVG/PNG + × 閉じる)。決済QR/レジ共通。 */}
       {payUrl && (
         <QrPreviewModal
           open={qrModalOpen}
-          convertExpired={convertExpired}
-          onClose={() => setQrModalOpen(false)}
+          convertExpired={convertExpired || storeQrDimmed}
+          onClose={closeQrModal}
           labels={{
             title: t('qrModalTitle'),
             close: t('qrModalClose'),
@@ -635,11 +800,11 @@ export function QrGenerator() {
             step2: t('posterStepConfirm'),
             step3: t('posterStepDone'),
           }}
-          qrValue={payUrl}
+          qrValue={storeQrShown ? storeQrUrl : payUrl}
           qrRef={qrRef}
           storeName={settings.storeName.trim() || t('posterDefaultStoreName')}
           amountText={amountLabelText}
-          payModeBadge={{
+          payModeBadge={storeQrShown ? { text: t('storeDevice.posterBadge'), tone: 'gasless' } : {
             text:
               payMode === 'gasless'
                 ? t('posterPayModeGasless')
@@ -648,6 +813,32 @@ export function QrGenerator() {
                   }),
             tone: payMode === 'gasless' ? 'gasless' : 'standard',
           }}
+          // お店負担の QR は画面に表示している間だけ使える (印刷・保存・URL のコピー・互換 QR は出さない)。
+          {...(storeQrShown
+            ? { hideUrl: true, actionsNote: t('storeDevice.actionsNote') }
+            : {
+                copied,
+                onCopy: () => copy(payUrl),
+                onPrint: () => window.print(),
+                onDownloadSvg: () => downloadSvg(`${qrFilename}.svg`, qrRef),
+                onDownloadPng: () => downloadPng(`${qrFilename}.png`, qrRef),
+              })}
+          deviceStatus={
+            env.enableStoreGasWallet && sdState.phase !== 'idle' ? (
+              <StoreDeviceRegisterStatus
+                state={sdState}
+                chainId={storeDevice.chainId}
+                formatAmount={(wei) =>
+                  `${formatUnits(BigInt(wei), storeDevice.deployment?.decimals ?? 18)} ${storeDevice.deployment?.displaySymbol ?? 'JPYC'}`
+                }
+                onCheckNow={() => void device.checkNow()}
+                onRetry={device.retry}
+                onReissue={() => void reissueStoreQr()}
+                onShowNormal={() => void showNormalQr()}
+                onDismiss={device.dismiss}
+              />
+            ) : undefined
+          }
           note={settings.posterNote.trim() || t('posterDefaultNote')}
           chainText={tokenChainLabelText}
           receiverShort={
@@ -660,13 +851,8 @@ export function QrGenerator() {
             chainSlug: settings.chain,
             chainLabel: chain.name,
           }}
-          copied={copied}
-          onCopy={() => copy(payUrl)}
-          onPrint={() => window.print()}
-          onDownloadSvg={() => downloadSvg(`${qrFilename}.svg`, qrRef)}
-          onDownloadPng={() => downloadPng(`${qrFilename}.png`, qrRef)}
           eip681={
-            eip681Uri
+            eip681Uri && !storeQrShown
               ? {
                   uri: eip681Uri,
                   copied: eip681Copied,
@@ -710,6 +896,7 @@ export function QrGenerator() {
         amountLabelText={amountLabelText}
         fiatHint={fiatHint}
         setQrModalOpen={openQrModal}
+        {...(storeShowQrBlocked !== undefined ? { showQrBlocked: storeShowQrBlocked } : {})}
       />
       </div>
     </>

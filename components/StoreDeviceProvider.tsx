@@ -16,10 +16,13 @@ import { env } from '@/lib/env';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { storeDeviceChainId } from '@/lib/storeDevicePayment';
 import { resolveDeployment, type TokenDeployment } from '@/lib/tokens';
-import { useStoreDeviceRegister, useStoreDeviceToggle } from '@/hooks/useStoreDeviceRegister';
+import { useStoreDeviceRegister } from '@/hooks/useStoreDeviceRegister';
 
 export type StoreDeviceMode = {
-  /** 「お店がガス代を肩代わりして送る」を選んでいるか (端末ごと)。 */
+  /**
+   * いま開いているタブの会計で「お店がガス代を肩代わりして送る」を使うか (設定 storePays と通貨・チェーンから
+   * lib/storePaysMode.ts で導出し、開いているタブが知らせる)。タブが外れても最後の値のまま (送信中は続く)。
+   */
   on: boolean;
   setOn: (on: boolean) => void;
   /** ガス用ウォレットのアドレス (パネルが知らせる・undefined = まだ分からない / null = 無い)。 */
@@ -39,7 +42,7 @@ export type StoreDeviceMode = {
 const StoreDeviceContext = createContext<StoreDeviceMode | null>(null);
 
 function useStoreDeviceModeState(active: boolean): StoreDeviceMode {
-  const [on, setOn] = useStoreDeviceToggle(active && env.enableStoreGasWallet);
+  const [on, setOn] = useState(false);
   const [gasAddress, setGasAddress] = useState<Address | null | undefined>(undefined);
   const [hasWebLocks, setHasWebLocks] = useState(false);
   useEffect(() => {

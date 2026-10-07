@@ -62,26 +62,15 @@ describe('StoreGasWalletPanel', () => {
     expect(onAddressChange).toHaveBeenLastCalledWith(ADDR);
   });
 
-  it('お店の端末で送るの切替: ウォレットがあるときだけ出し、変更を知らせる・使えない理由があれば押せない', () => {
-    const onToggle = vi.fn();
+  it('使えるガス用ウォレットのアドレスを知らせる (無いときは null)・切替は出さない (決済QRタブの決済モードで選ぶ)', () => {
     const onAddressChange = vi.fn();
-    const { unmount } = render(
-      <StoreGasWalletPanel storeDevice={{ on: false, onToggle, blocked: null }} onAddressChange={onAddressChange} />,
-    );
-    expect(screen.queryByRole('checkbox')).toBeNull(); // 未作成では出さない
+    const { unmount } = render(<StoreGasWalletPanel onAddressChange={onAddressChange} />);
     expect(onAddressChange).toHaveBeenLastCalledWith(null);
     unmount();
     hold.state = ready();
-    const r = render(
-      <StoreGasWalletPanel storeDevice={{ on: false, onToggle, blocked: null }} onAddressChange={onAddressChange} />,
-    );
+    render(<StoreGasWalletPanel onAddressChange={onAddressChange} />);
     expect(onAddressChange).toHaveBeenLastCalledWith(ADDR);
-    fireEvent.click(screen.getByRole('checkbox', { name: /お店がガス代を肩代わりして送る/ }));
-    expect(onToggle).toHaveBeenCalledWith(true);
-    r.unmount();
-    render(<StoreGasWalletPanel storeDevice={{ on: true, onToggle, blocked: 'no_locks' }} />);
-    expect(screen.getByRole('checkbox', { name: /お店がガス代を肩代わりして送る/ })).toBeDisabled();
-    expect(screen.getByText(/このブラウザでは使えません/)).toBeTruthy();
+    expect(screen.queryByRole('checkbox')).toBeNull();
   });
 
   it('保存できない端末では作れなかったと出す', async () => {

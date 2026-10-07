@@ -37,10 +37,18 @@ describe('StoreDevicePageStatus (レジ以外のタブでも支払いの行方�
     expect(hold.dismiss).toHaveBeenCalled();
   });
 
-  it('「もう一度送る」はレジの外では出さない (会計と結びつくのでレジで行う)', () => {
+  it('「もう一度送る」も出す (決済QRタブの会計を続ける)・「QR を出し直す」「通常の QR を出す」は出さない', () => {
     hold.state = { phase: 'not_sent', reason: 'rpc', canRetry: true };
     renderWithIntl(<StoreDevicePageStatus />);
-    expect(screen.queryByRole('button', { name: 'もう一度送る' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'もう一度送る' }));
+    expect(hold.retry).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '閉じる' })).toBeTruthy();
+  });
+
+  it('作れなかった: 「通常の QR を出す」は出さない (会計と結びつく)・閉じられる', () => {
+    hold.state = { phase: 'create_failed', reason: 'busy' };
+    renderWithIntl(<StoreDevicePageStatus />);
+    expect(screen.queryByRole('button', { name: '通常の QR を出す' })).toBeNull();
     expect(screen.getByRole('button', { name: '閉じる' })).toBeTruthy();
   });
 

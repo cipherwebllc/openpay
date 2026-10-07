@@ -38,6 +38,10 @@ export type QrSettings = {
   //   gasless:  OpenPay が gas を肩代わり (default)
   //   standard: 顧客が wallet で自前 gas を支払う
   payMode: PayMode;
+  // 決済モードの 3 つ目「お店がガス代を肩代わりして送る」(flag NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET・
+  // plans/store-gas-wallet.md §19)。選ぶと payMode は gasless のまま true。通貨・チェーンを切り替えても消さず、
+  // 使えるかは lib/storePaysMode.ts で導出する (JPYC・Polygon のときだけ)。
+  storePays: boolean;
   // 追加受取人 (最大 3、合計 % < 100)。空配列 = 単独受取人。
   // standard mode では UI 側で split を無効化するが、設定としては保持可能 (mode 切替時に復元される)。
   splits: SplitDraft[];
@@ -96,6 +100,7 @@ const DEFAULT_SETTINGS: QrSettings = {
   chain: 'polygon',
   gasMode: 'customer',
   payMode: 'gasless',
+  storePays: false,
   splits: [],
   storeName: '',
   invoiceNo: '',
@@ -300,6 +305,8 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
         ? loaded.gasMode
         : DEFAULT_SETTINGS.gasMode,
     payMode,
+    // 厳密に true で、ガスレスのときだけ (旧 schema・不正値・通常決済との組み合わせは false)。
+    storePays: loaded.storePays === true && payMode === 'gasless',
     splits: sanitizeSplits(loaded.splits),
     storeName: sanitizeText(loaded.storeName, STORE_NAME_MAX),
     invoiceNo: sanitizeText(loaded.invoiceNo, INVOICE_REGISTRATION_INPUT_MAX),
