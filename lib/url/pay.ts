@@ -88,6 +88,8 @@ export type PayParams = {
   // --- 記帳補助メタデータ (任意・表示/会計用)。在るときだけ URL に出る (旧 QR 不変)。 ---
   // 店舗名 (予約済 storeName field を URL に乗せ、決済側の履歴に記録できるようにする)。
   storeName?: string;
+  // 店舗のインボイス登録番号 (T + 13 桁)。顧客の控えにインボイス欄を出すための表示専用の値。
+  invoiceNo?: string;
   // 商品名 / 用途名。
   productName?: string;
   // 会計補助メモ。
@@ -280,6 +282,7 @@ const PAY_PARAM_KEYS = [
   'tax',
   'taxcat',
   'rcpt',
+  'inv',
 ] as const;
 
 export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams {
@@ -417,7 +420,8 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
     : undefined;
   const memo = memoRaw ? sanitizeText(memoRaw, PAY_MEMO_MAX) : undefined;
   // 記帳補助メタ (税率/税区分/レシート番号) は checkout と共通の shared helper で parse。
-  const { taxRate, taxCategory, receiptNo } = parseTaxReceiptParams(searchParams);
+  const { taxRate, taxCategory, receiptNo, invoiceNo } =
+    parseTaxReceiptParams(searchParams);
 
   return {
     ok: true,
@@ -439,6 +443,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
       taxRate,
       taxCategory,
       receiptNo,
+      invoiceNo,
     },
   };
 }

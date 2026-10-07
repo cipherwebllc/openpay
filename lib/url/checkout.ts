@@ -102,6 +102,11 @@ export type CheckoutParams = {
   taxRate?: number;
   taxCategory?: TaxCategory;
   receiptNo?: string;
+  // 店名と店舗のインボイス登録番号 (T + 13 桁)。顧客の控えに出す表示専用の値で、金額・受取先・
+  // 手数料・注文の束縛 (lib/orderBind.ts)・admission には関与しない。URL は誰でも作れるので、
+  // 控えでは「店舗が設定した値」として扱う (/pay の store と同じ性質)。
+  storeName?: string;
+  invoiceNo?: string;
   // --- モバイル注文システム利用料 (任意・MobileOrderView のみが設定)。 ---
   // feeKind が present のとき CheckoutForm が経路非依存 (relay/standard 両方) に 1%(店頭)/3%(事前)
   // を分割する (実際の発火は flag env.enableMobileOrderFee と AND)。不在 = 従来動作 (手数料ゼロ・
@@ -121,6 +126,8 @@ export type CheckoutParams = {
 };
 
 export const CHECKOUT_MAX_ITEMS = 10;
+// 店名の上限は /pay の store (PAY_STORE_NAME_MAX) と同じ。
+export const CHECKOUT_STORE_NAME_MAX = 48;
 export const CHECKOUT_QTY_MAX = 999;
 const CHECKOUT_NAME_MAX = 80;
 const CHECKOUT_ITEM_MEMO_MAX = 80;
@@ -269,6 +276,10 @@ export function buildCheckoutPath(params: CheckoutParams): string {
     const v = sanitizeText(params.storeHandle, CHECKOUT_STORE_HANDLE_MAX);
     if (v) sp.set('store_handle', v);
   }
+  if (params.storeName) {
+    const v = sanitizeText(params.storeName, CHECKOUT_STORE_NAME_MAX);
+    if (v) sp.set('store', v);
+  }
   // 記帳補助メタ (在るときだけ・税は checkout 単位の共通値)。pay と共通の shared helper で追記。
   appendTaxReceiptParams(sp, params);
   // 受取予定時刻 (在るときだけ・正の安全整数 ms)。preorder のスロット選択。
@@ -308,6 +319,7 @@ export function parseCheckoutParams(
   const feeKindRaw = searchParams.get('fee_kind');
   const feePayerRaw = searchParams.get('fee_payer');
   const storeHandle = searchParams.get('store_handle');
+  const storeNameRaw = searchParams.get('store');
   const pickupAtRaw = searchParams.get('pickup_at');
 
   if (!to) return { ok: false, ...urlFail('missingTo') };
@@ -349,7 +361,8 @@ export function parseCheckoutParams(
   }
 
   // 記帳補助メタ (税率/税区分/レシート番号) は pay と共通の shared helper で parse。
-  const { taxRate, taxCategory, receiptNo } = parseTaxReceiptParams(searchParams);
+  const { taxRate, taxCategory, receiptNo, invoiceNo } =
+    parseTaxReceiptParams(searchParams);
 
   return {
     ok: true,
@@ -373,6 +386,10 @@ export function parseCheckoutParams(
       taxRate,
       taxCategory,
       receiptNo,
+      storeName: storeNameRaw
+        ? sanitizeText(storeNameRaw, CHECKOUT_STORE_NAME_MAX)
+        : undefined,
+      invoiceNo,
       // モバイル注文システム利用料 (strict 検証・不正値は undefined = 従来動作)。feePayer は
       // 有効な feeKind があるときのみ採用 (feeKind 無しの孤立 feePayer は無視)。
       feeKind: isCheckoutFeeKind(feeKindRaw) ? feeKindRaw : undefined,

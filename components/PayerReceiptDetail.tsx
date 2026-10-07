@@ -11,6 +11,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import { addressExplorerUrl } from '@/lib/chains';
 import { downloadBlob } from '@/lib/download';
 import { shortAddress } from '@/lib/format';
+import { invoiceLookupUrl, invoiceReceiptView } from '@/lib/invoice';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import {
   formatReceiptDateTime,
@@ -62,6 +63,8 @@ export function PayerReceiptDetail({
   const items = receipt.lineItems ?? [];
   const currency = receipt.currency;
   const hasTax = payerReceiptHasTax(receipt);
+  // インボイス (適格簡易請求書) の記載事項を出せる控えだけ非 null。出せない控えは従来表示のまま。
+  const invoice = invoiceReceiptView(receipt);
   const payerExplorerUrl =
     receipt.payerAddress != null && receipt.chainId != null
       ? addressExplorerUrl(receipt.chainId, receipt.payerAddress)
@@ -133,6 +136,12 @@ export function PayerReceiptDetail({
             <dd className="break-words">{receipt.merchantName}</dd>
           </div>
         )}
+        {invoice && (
+          <div>
+            <dt className="text-slate-500">{t('invoiceRegistrationNoLabel')}</dt>
+            <dd className="font-mono">{invoice.registrationNumber}</dd>
+          </div>
+        )}
         <div>
           <dt className="text-slate-500">{t('merchantWalletLabel')}</dt>
           <dd className="font-mono">{shortAddress(receipt.merchantAddress)}</dd>
@@ -181,6 +190,9 @@ export function PayerReceiptDetail({
                   {li.taxRate != null && li.taxRate > 0 && (
                     <span className="ml-1 text-slate-500">{li.taxRate}%</span>
                   )}
+                  {invoice && li.taxRate === 8 && (
+                    <span className="ml-1 text-slate-500">※</span>
+                  )}
                 </span>
                 <span className="font-mono text-slate-700">
                   @{li.unitPrice} = {li.amount} {currency}
@@ -191,9 +203,23 @@ export function PayerReceiptDetail({
         </div>
       )}
 
-      {/* 合計欄。税額が計上されているときだけ小計/消費税を併記 (0 のときは合計のみ)。 */}
+      {/* 合計欄。インボイス欄を出せる控えは税率ごとの税込合計と消費税額 (円・税率ごとに 1 回の端数処理)。
+          それ以外は税額が計上されているときだけ小計/消費税を併記 (0 のときは合計のみ)。
+          行ごとに丸めた税額の合計とインボイスの税額を同じ控えに並べない (数字が食い違うため)。 */}
       <dl className="mt-3 space-y-0.5 text-xs">
-        {hasTax && (
+        {invoice &&
+          invoice.groups.map((g) => (
+            <div key={g.rate} className="flex flex-wrap justify-between gap-x-2">
+              <dt className="text-slate-500">
+                {g.rate === 0 ? t('invoiceExemptGroup') : t('invoiceRateGroup', { rate: g.rate })}
+              </dt>
+              <dd className="font-mono">
+                {g.total} {currency}
+                {g.rate !== 0 && ` (${t('invoiceRateGroupTax', { tax: g.tax })})`}
+              </dd>
+            </div>
+          ))}
+        {!invoice && hasTax && (
           <>
             {receipt.subtotalAmount && (
               <div className="flex justify-between">
@@ -218,6 +244,9 @@ export function PayerReceiptDetail({
           </dd>
         </div>
       </dl>
+      {invoice?.hasReducedRate && (
+        <p className="mt-1 text-[11px] text-slate-500">{t('invoiceReducedNote')}</p>
+      )}
 
       {/* 異通貨建て: 顧客が QR で見た元価格 (請求建て) を併記。settled 金額が実支払額。 */}
       {receipt.anchorAmount && receipt.anchorSymbol && (
@@ -290,10 +319,25 @@ export function PayerReceiptDetail({
         )}
       </div>
 
-      {/* 免責: 正式な領収書/税務証憑ではない。 */}
-      <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-        {t('disclaimer')}
-      </p>
+      {/* 免責: 正式な領収書/税務証憑ではない。インボイス欄を出した控えは、値の出どころ (店舗の設定) と
+          OpenPay が登録状況を確かめていないことを書き、公表サイトで番号を確かめられるようにする。 */}
+      {invoice ? (
+        <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+          {t('invoiceDisclaimer')}{' '}
+          <a
+            href={invoiceLookupUrl(invoice.registrationNumber)}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-2 hover:text-slate-700 print:no-underline"
+          >
+            {t('invoiceLookupLink')}
+          </a>
+        </p>
+      ) : (
+        <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+          {t('disclaimer')}
+        </p>
+      )}
 
       {/* 成長ループ CTA: 支払った顧客 = 将来の店主候補への控えめな導線。
           印刷時は広告を紙に載せないため print:hidden。

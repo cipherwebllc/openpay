@@ -636,6 +636,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       taxRate: params.taxRate ?? null,
       taxCategory: params.taxCategory ?? null,
       receiptNo: params.receiptNo ?? null,
+      invoiceNo: params.invoiceNo ?? null,
       lineItems: params.productName
         ? [
             {
@@ -675,6 +676,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       params.taxRate,
       params.taxCategory,
       params.receiptNo,
+      params.invoiceNo,
       locale,
     ],
   );
