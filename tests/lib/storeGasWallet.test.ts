@@ -1,30 +1,88 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { privateKeyToAccount } from 'viem/accounts';
+import { logger } from '@/lib/logger';
 import {
   STORE_GAS_WALLET_STORAGE_KEY,
   createStoreGasWallet,
   estimateRemainingSends,
   loadStoreGasWallet,
+  readStoreGasWalletKey,
   removeStoreGasWallet,
+  withStoreGasWalletLock,
   withdrawableAmount,
 } from '@/lib/storeGasWallet';
+
+const OTHER = '0x1111111111111111111111111111111111111111';
 
 describe('storeGasWallet: 鍵の作成・保存・削除', () => {
   beforeEach(() => window.localStorage.clear());
 
-  it('作った鍵を保存し、読み戻せる (アドレスは鍵から導いたもの)', () => {
+  it('作った鍵を保存し、公開情報だけを返す (鍵は送る直前に読む)', () => {
     const r = createStoreGasWallet(1_000);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.wallet.address).toBe(privateKeyToAccount(r.wallet.privateKey).address);
-    expect(loadStoreGasWallet()).toEqual(r.wallet);
+    expect(r.info).toEqual({ address: r.info.address, createdAt: 1_000 });
+    expect(JSON.stringify(r)).not.toContain('privateKey');
+    expect(loadStoreGasWallet()).toEqual({ state: 'ok', info: r.info });
+    const key = readStoreGasWalletKey(r.info.address);
+    expect(key && privateKeyToAccount(key).address).toBe(r.info.address);
+    expect(readStoreGasWalletKey(OTHER)).toBeNull();
   });
 
-  it('既に鍵があるときは上書きしない (入っている POL を失わない)', () => {
+  it('既に鍵があるときは上書きしない', () => {
     const first = createStoreGasWallet();
-    const second = createStoreGasWallet();
-    expect(second).toEqual({ ok: false, reason: 'already_exists' });
-    expect(first.ok && loadStoreGasWallet()?.privateKey).toBe(first.ok && first.wallet.privateKey);
+    expect(createStoreGasWallet()).toEqual({ ok: false, reason: 'already_exists' });
+    expect(first.ok && loadStoreGasWallet()).toEqual(first.ok && { state: 'ok', info: first.info });
+  });
+
+  it.each([
+    ['壊れた JSON', '{"v":1,"privateKey":"0xabc'],
+    ['欠けた値', '{"v":1}'],
+    ['ゼロの鍵 (曲線の範囲外)', JSON.stringify({ v: 1, privateKey: `0x${'0'.repeat(64)}`, address: OTHER, createdAt: 1 })],
+  ])('%s は「壊れている」と扱い、上に新しい鍵を作らない (入っている POL を失わない)', (_, raw) => {
+    window.localStorage.setItem(STORE_GAS_WALLET_STORAGE_KEY, raw);
+    expect(loadStoreGasWallet()).toEqual({ state: 'corrupt' });
+    expect(createStoreGasWallet()).toEqual({ ok: false, reason: 'corrupt' });
+    expect(window.localStorage.getItem(STORE_GAS_WALLET_STORAGE_KEY)).toBe(raw);
+  });
+
+  it('鍵とアドレスが食い違う値は「壊れている」', () => {
+    const r = createStoreGasWallet();
+    if (!r.ok) throw new Error('setup');
+    const stored = JSON.parse(window.localStorage.getItem(STORE_GAS_WALLET_STORAGE_KEY)!);
+    window.localStorage.setItem(STORE_GAS_WALLET_STORAGE_KEY, JSON.stringify({ ...stored, address: OTHER }));
+    expect(loadStoreGasWallet()).toEqual({ state: 'corrupt' });
+    expect(readStoreGasWalletKey(OTHER)).toBeNull();
+  });
+
+  it('壊れた値を読んでも、保存内容の断片をログに出さない', () => {
+    const fragment = 'deadbeefcafebabe';
+    window.localStorage.setItem(STORE_GAS_WALLET_STORAGE_KEY, `{"v":1,"privateKey":"0x${fragment}`);
+    const spies = [
+      vi.spyOn(logger, 'warn'),
+      vi.spyOn(logger, 'error'),
+      vi.spyOn(console, 'warn'),
+      vi.spyOn(console, 'error'),
+    ];
+    try {
+      loadStoreGasWallet();
+      createStoreGasWallet();
+      for (const s of spies) expect(JSON.stringify(s.mock.calls)).not.toContain(fragment);
+    } finally {
+      for (const s of spies) s.mockRestore();
+    }
+  });
+
+  it('ストレージを読めない端末は「読めない」と扱い、作らない', () => {
+    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    try {
+      expect(loadStoreGasWallet()).toEqual({ state: 'unavailable' });
+      expect(createStoreGasWallet()).toEqual({ ok: false, reason: 'storage_unavailable' });
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('保存できない端末では成功にしない (アドレスを見せて POL を入れた後に鍵が消える偽成功を断つ)', () => {
@@ -38,22 +96,31 @@ describe('storeGasWallet: 鍵の作成・保存・削除', () => {
     }
   });
 
-  it('壊れた値・鍵とアドレスが食い違う値は使わない', () => {
-    window.localStorage.setItem(STORE_GAS_WALLET_STORAGE_KEY, '{"v":1}');
-    expect(loadStoreGasWallet()).toBeNull();
-    const r = createStoreGasWallet();
-    if (!r.ok) throw new Error('setup');
-    window.localStorage.setItem(
-      STORE_GAS_WALLET_STORAGE_KEY,
-      JSON.stringify({ ...r.wallet, address: '0x1111111111111111111111111111111111111111' }),
-    );
-    expect(loadStoreGasWallet()).toBeNull();
+  it('消せたときだけ true (消せなかったのに「未作成」に戻さない)', () => {
+    createStoreGasWallet();
+    const spy = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    try {
+      expect(removeStoreGasWallet()).toBe(false);
+      expect(loadStoreGasWallet().state).toBe('ok');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(removeStoreGasWallet()).toBe(true);
+    expect(loadStoreGasWallet()).toEqual({ state: 'none' });
   });
 
-  it('消すと読めなくなる', () => {
-    createStoreGasWallet();
-    removeStoreGasWallet();
-    expect(loadStoreGasWallet()).toBeNull();
+  it('Web Locks があれば同じ名前のロックで直列化する', async () => {
+    const request = vi.fn((_name: string, fn: () => Promise<unknown>) => fn());
+    const original = (navigator as { locks?: unknown }).locks;
+    Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true });
+    try {
+      await expect(withStoreGasWalletLock(async () => 42)).resolves.toBe(42);
+      expect(request).toHaveBeenCalledWith('openpay:store-gas-wallet', expect.any(Function));
+    } finally {
+      Object.defineProperty(navigator, 'locks', { value: original, configurable: true });
+    }
   });
 });
 

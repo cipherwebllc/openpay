@@ -2423,24 +2423,32 @@
       "remaining": "あと約 {count} 回送れます",
       "lowBalance": "残高が少なくなっています。POL を入れてください。",
       "withdrawTitle": "残りの POL を戻す",
-      "withdrawPlaceholder": "戻し先のアドレス (0x...)",
       "withdrawButton": "戻す",
-      "withdrawConfirm": "残りの POL をすべて (ガス代を除く) このアドレスに送ります。送ったあとは取り消せません。",
+      "withdrawConfirm": "ガス代の上限を差し引いた残りの POL を、このアドレスに送ります。実際のガス代は上限より少ないため、少額が残ることがあります。送ったあとは取り消せません。",
       "withdrawSend": "送る",
-      "withdrawDone": "送りました。",
+      "withdrawDone": "戻しました。",
       "viewTx": "取引を見る",
       "withdrawError": {
         "no_wallet": "ガス用ウォレットがありません。",
-        "invalid_address": "アドレスの形が正しくありません。",
+        "invalid_address": "アドレスの形が正しくありません (大文字・小文字の混ざり方も確かめてください)。",
         "same_address": "このウォレット自身には戻せません。",
         "insufficient": "ガス代を払うと残りがありません。",
-        "send_failed": "送れませんでした。時間をおいてもう一度お試しください。"
+        "zero_address": "ゼロアドレスには送れません。",
+        "contract_recipient": "コントラクトのアドレスには戻せません。ウォレットのアドレスを入れてください。",
+        "read_failed": "残高やガス代を読めませんでした。時間をおいてもう一度お試しください。"
       },
       "removeButton": "この端末から消す",
       "removeConfirm": "鍵をこの端末から消します。消したあとは、このアドレスに送られた POL を戻せません。",
       "removeConfirmWithBalance": "まだ {amount} POL 残っています。先に「残りの POL を戻す」で戻してください。消すと戻せません。",
       "removeYes": "消す",
-      "cancel": "やめる"
+      "cancel": "やめる",
+      "withdrawToHint": "戻し先のウォレットのアドレス (0x...)。コントラクトのアドレスには戻せません。",
+      "withdrawPending": "送信しました。確定を待っています…",
+      "withdrawReverted": "送金が失敗しました (取り消されました)。残高を更新して確かめてください。",
+      "withdrawUnknown": "送れたかどうかを確かめられませんでした。しばらくして残高を更新し、取引を確かめてください。",
+      "corruptNote": "この端末に保存されたガス用ウォレットを読めませんでした。上書きを防ぐため、新しく作れません。POL が入っている場合は消さずにそのままにし、サポートにご相談ください。",
+      "removeBlockedNote": "送金の確定を待っている間は消せません。",
+      "removeFailed": "この端末から消せませんでした。もう一度お試しください。"
     }
   },
   "ProductPresetManager": {

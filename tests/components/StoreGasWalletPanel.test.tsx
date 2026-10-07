@@ -12,22 +12,29 @@ vi.mock('@/hooks/useStoreGasWallet', () => ({
 import { StoreGasWalletPanel } from '@/components/StoreGasWalletPanel';
 
 const ADDR = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const TX = `0x${'ab'.repeat(32)}`;
 
 function base(over: Record<string, unknown> = {}) {
   return {
     chain: { id: 80002, name: 'Polygon Amoy' },
     hydrated: true,
-    wallet: null,
+    walletState: { state: 'none' },
+    address: null,
     balance: null,
     gasPrice: null,
     readFailed: false,
-    busy: false,
+    withdrawStatus: { phase: 'idle' },
+    removeBlocked: false,
     refresh: vi.fn(),
-    create: vi.fn(() => ({ ok: true })),
-    remove: vi.fn(),
-    withdraw: vi.fn(async () => ({ ok: true, hash: `0x${'ab'.repeat(32)}` })),
+    create: vi.fn(async () => ({ ok: true })),
+    remove: vi.fn(async () => true),
+    withdraw: vi.fn(async () => ({ phase: 'confirmed', hash: TX })),
     ...over,
   };
+}
+
+function ready(over: Record<string, unknown> = {}) {
+  return base({ walletState: { state: 'ok', info: { address: ADDR, createdAt: 1 } }, address: ADDR, ...over });
 }
 
 describe('StoreGasWalletPanel', () => {
@@ -41,22 +48,25 @@ describe('StoreGasWalletPanel', () => {
     expect(screen.getByText(/OpenPay は預かりません/)).toBeTruthy();
     expect(screen.getByText(/JPYC は入れないでください/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'この端末にガス用ウォレットを作る' }));
-    expect((hold.state.create as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
+    expect(hold.state.create).toHaveBeenCalled();
   });
 
-  it('保存できない端末では作れなかったと出す', () => {
-    hold.state = base({ create: vi.fn(() => ({ ok: false, reason: 'storage_unavailable' })) });
+  it('保存できない端末では作れなかったと出す', async () => {
+    hold.state = base({ create: vi.fn(async () => ({ ok: false, reason: 'storage_unavailable' })) });
     render(<StoreGasWalletPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'この端末にガス用ウォレットを作る' }));
-    expect(screen.getByText(/保存できませんでした/)).toBeTruthy();
+    expect(await screen.findByRole('alert')).toHaveTextContent(/保存できませんでした/);
+  });
+
+  it('保存データが壊れているときは作るボタンを出さず、上書きしない旨を出す', () => {
+    hold.state = base({ walletState: { state: 'corrupt' } });
+    render(<StoreGasWalletPanel />);
+    expect(screen.queryByRole('button', { name: 'この端末にガス用ウォレットを作る' })).toBeNull();
+    expect(screen.getByText(/上書きを防ぐため、新しく作れません/)).toBeTruthy();
   });
 
   it('作成済み: アドレス・残高・残り回数・少ないときの注意', () => {
-    hold.state = base({
-      wallet: { address: ADDR },
-      balance: 10n ** 16n, // 0.01 POL
-      gasPrice: 30n * 10n ** 9n,
-    });
+    hold.state = ready({ balance: 10n ** 16n, gasPrice: 30n * 10n ** 9n });
     render(<StoreGasWalletPanel />);
     expect(screen.getByText(ADDR)).toBeTruthy();
     expect(screen.getAllByText('0.01 POL').length).toBeGreaterThan(0);
@@ -65,44 +75,53 @@ describe('StoreGasWalletPanel', () => {
   });
 
   it('残高を読めないときは 0 と見せず「読めませんでした」', () => {
-    hold.state = base({ wallet: { address: ADDR }, readFailed: true });
+    hold.state = ready({ readFailed: true });
     render(<StoreGasWalletPanel />);
     expect(screen.getByText('残高を読めませんでした')).toBeTruthy();
   });
 
-  it('残りの POL を戻す: 確認してから送り、結果を出す', async () => {
-    hold.state = base({ wallet: { address: ADDR }, balance: 10n ** 18n, gasPrice: 1n });
+  it('戻し先の欄は見出しで名前が付き、確認してから送る', () => {
+    hold.state = ready({ balance: 10n ** 18n, gasPrice: 1n });
     render(<StoreGasWalletPanel />);
-    fireEvent.change(screen.getByPlaceholderText('戻し先のアドレス (0x...)'), {
-      target: { value: '0x1111111111111111111111111111111111111111' },
-    });
+    const input = screen.getByRole('textbox', { name: '残りの POL を戻す' });
+    fireEvent.change(input, { target: { value: '0x1111111111111111111111111111111111111111' } });
     fireEvent.click(screen.getByRole('button', { name: '戻す' }));
-    expect(screen.getByText(/取り消せません/)).toBeTruthy();
+    expect(screen.getByText(/少額が残ることがあります/)).toBeTruthy();
     expect(hold.state.withdraw).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '送る' }));
-    expect(await screen.findByText('送りました。')).toBeTruthy();
     expect(hold.state.withdraw).toHaveBeenCalledWith('0x1111111111111111111111111111111111111111');
   });
 
-  it('戻せなかった理由を出す', async () => {
-    hold.state = base({
-      wallet: { address: ADDR },
-      withdraw: vi.fn(async () => ({ ok: false, reason: 'insufficient' })),
-    });
-    render(<StoreGasWalletPanel />);
-    fireEvent.change(screen.getByPlaceholderText('戻し先のアドレス (0x...)'), { target: { value: '0x1' } });
-    fireEvent.click(screen.getByRole('button', { name: '戻す' }));
-    fireEvent.click(screen.getByRole('button', { name: '送る' }));
-    expect(await screen.findByText('ガス代を払うと残りがありません。')).toBeTruthy();
+  it('結果は読み上げ領域に出す: 確定・確定待ち・不明・取り消し・拒否', () => {
+    const cases: [Record<string, unknown>, RegExp, 'status' | 'alert'][] = [
+      [{ phase: 'confirmed', hash: TX }, /戻しました/, 'status'],
+      [{ phase: 'pending', hash: TX }, /確定を待っています/, 'status'],
+      [{ phase: 'unknown', hash: TX }, /確かめられませんでした/, 'alert'],
+      [{ phase: 'reverted', hash: TX }, /失敗しました/, 'alert'],
+      [{ phase: 'rejected', reason: 'contract_recipient' }, /コントラクトのアドレスには戻せません/, 'alert'],
+    ];
+    for (const [status, text, role] of cases) {
+      hold.state = ready({ withdrawStatus: status });
+      const { unmount } = render(<StoreGasWalletPanel />);
+      expect(screen.getByRole(role)).toHaveTextContent(text);
+      unmount();
+    }
   });
 
-  it('消す: 残高があるときは先に戻すよう注意し、確認してから消す', () => {
-    hold.state = base({ wallet: { address: ADDR }, balance: 10n ** 18n, gasPrice: 1n });
+  it('確定待ちの間は消せない', () => {
+    hold.state = ready({ withdrawStatus: { phase: 'pending', hash: TX }, removeBlocked: true });
+    render(<StoreGasWalletPanel />);
+    expect(screen.getByRole('button', { name: 'この端末から消す' })).toBeDisabled();
+    expect(screen.getByText(/確定を待っている間は消せません/)).toBeTruthy();
+  });
+
+  it('消す: 残高があるときは先に戻すよう注意し、確認してから消す・消せなければそう出す', async () => {
+    hold.state = ready({ balance: 10n ** 18n, gasPrice: 1n, remove: vi.fn(async () => false) });
     render(<StoreGasWalletPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'この端末から消す' }));
     expect(screen.getByText(/まだ 1 POL 残っています/)).toBeTruthy();
-    expect(hold.state.remove).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '消す' }));
     expect(hold.state.remove).toHaveBeenCalled();
+    expect(await screen.findByText('この端末から消せませんでした。もう一度お試しください。')).toBeTruthy();
   });
 });

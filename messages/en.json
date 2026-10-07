@@ -2423,24 +2423,32 @@
       "remaining": "About {count} more sends",
       "lowBalance": "The balance is running low. Add more POL.",
       "withdrawTitle": "Return the remaining POL",
-      "withdrawPlaceholder": "Destination address (0x...)",
       "withdrawButton": "Return",
-      "withdrawConfirm": "Sends all remaining POL (minus gas) to this address. This can't be undone.",
+      "withdrawConfirm": "Sends the remaining POL minus the maximum gas fee to this address. The actual fee is usually lower, so a small amount may remain. This can't be undone.",
       "withdrawSend": "Send",
-      "withdrawDone": "Sent.",
+      "withdrawDone": "Returned.",
       "viewTx": "View transaction",
       "withdrawError": {
         "no_wallet": "There is no gas wallet.",
-        "invalid_address": "That address isn't valid.",
+        "invalid_address": "That address isn't valid (check the upper/lower case too).",
         "same_address": "You can't return it to the gas wallet itself.",
         "insufficient": "Nothing is left after paying gas.",
-        "send_failed": "Couldn't send. Please try again later."
+        "zero_address": "You can't send to the zero address.",
+        "contract_recipient": "Contract addresses aren't supported. Enter a wallet address.",
+        "read_failed": "Couldn't read the balance or gas price. Please try again later."
       },
       "removeButton": "Remove from this device",
       "removeConfirm": "Removes the key from this device. POL sent to this address afterwards can't be recovered.",
       "removeConfirmWithBalance": "{amount} POL is still left. Return it first with “Return the remaining POL”. Once removed, it can't be recovered.",
       "removeYes": "Remove",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "withdrawToHint": "The destination wallet address (0x...). Contract addresses aren't supported.",
+      "withdrawPending": "Sent. Waiting for confirmation…",
+      "withdrawReverted": "The transfer failed (it was reverted). Refresh the balance to check.",
+      "withdrawUnknown": "Couldn't confirm whether it was sent. Refresh the balance in a moment and check the transaction.",
+      "corruptNote": "The gas wallet saved on this device couldn't be read. To avoid overwriting it, a new one can't be created. If it holds POL, leave it as is and contact support.",
+      "removeBlockedNote": "You can't remove it while a transfer is waiting for confirmation.",
+      "removeFailed": "Couldn't remove it from this device. Please try again."
     }
   },
   "ProductPresetManager": {
