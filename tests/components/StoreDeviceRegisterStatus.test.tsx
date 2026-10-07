@@ -75,6 +75,15 @@ describe('StoreDeviceRegisterStatus (店員向けの表示)', () => {
     expect(h.onShowNormal).toHaveBeenCalled();
   });
 
+  it.each([
+    [{ phase: 'expired' } as const],
+    [{ phase: 'create_failed', reason: 'unavailable' } as const],
+  ])('受付時間の終わり・作れなかった (%o) も「閉じる」で消せる (レジ以外のタブでも残り続けない)', (state) => {
+    const h = show(state);
+    fireEvent.click(screen.getByRole('button', { name: '閉じる' }));
+    expect(h.onDismiss).toHaveBeenCalled();
+  });
+
   it('受付時間が残りわずか: 「QR を出し直す」', () => {
     const h = show({ phase: 'waiting', session: { id: 'x', token: 't', expiresAt: 0, merchant: MARK.merchant, amount: '1', chainId: 80002 }, stale: true, degraded: false });
     fireEvent.click(screen.getByRole('button', { name: 'QR を出し直す' }));

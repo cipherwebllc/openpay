@@ -51,6 +51,17 @@ describe('StoreGasWalletPanel', () => {
     expect(hold.state.create).toHaveBeenCalled();
   });
 
+  it('読み込む前は「無い」と知らせない (タブを戻ったときに送信中の支払いを消さない)・読み込んだら知らせる', () => {
+    const onAddressChange = vi.fn();
+    hold.state = base({ hydrated: false, walletState: null });
+    const r = render(<StoreGasWalletPanel onAddressChange={onAddressChange} />);
+    expect(onAddressChange).not.toHaveBeenCalled();
+    hold.state = ready();
+    r.rerender(<StoreGasWalletPanel onAddressChange={onAddressChange} />);
+    expect(onAddressChange).toHaveBeenCalledTimes(1);
+    expect(onAddressChange).toHaveBeenLastCalledWith(ADDR);
+  });
+
   it('お店の端末で送るの切替: ウォレットがあるときだけ出し、変更を知らせる・使えない理由があれば押せない', () => {
     const onToggle = vi.fn();
     const onAddressChange = vi.fn();

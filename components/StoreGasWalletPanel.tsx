@@ -48,8 +48,11 @@ export function StoreGasWalletPanel({
   const g = useStoreGasWallet();
   const usableAddress = g.walletState?.state === 'ok' ? g.address : null;
   useEffect(() => {
+    // 読み込む前は知らせない (読み込み前の「無い」で、タブを戻ったときに送信中の支払いや「もう一度送る」を
+    // 消さない = 作成ページでは前に知らせたアドレスのまま)。
+    if (!g.hydrated) return;
     onAddressChange?.(usableAddress);
-  }, [onAddressChange, usableAddress]);
+  }, [onAddressChange, usableAddress, g.hydrated]);
   const { copy, copied, available } = useCopyToClipboard();
   const copyAvailable = useHydrationSafeAvailable(available);
   const [createError, setCreateError] = useState<string | null>(null);

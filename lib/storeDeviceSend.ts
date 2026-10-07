@@ -433,10 +433,6 @@ export function createDeviceIo(input: {
   const chain = storeGasWalletChain();
   const client = createPublicClient({ chain, transport: transportForChain(chain.id) });
   const { token, forwarder, gasAddress } = input;
-  const toReceipt = (r: { status: 'success' | 'reverted'; logs: Log[] }): DeviceReceipt => ({
-    status: r.status,
-    logs: r.logs,
-  });
   return {
     chainNowSec: async () => (await client.getBlock({ blockTag: 'latest' })).timestamp,
     authorizationUsed: (from, nonce) =>
@@ -476,6 +472,16 @@ export function createDeviceIo(input: {
     },
     withLock: withStoreGasWalletLock,
     nowMs: () => Date.now(),
+    ...watchIoFor(client),
+  };
+}
+
+function watchIoFor(client: ReturnType<typeof createPublicClient>): DeviceWatchIo {
+  const toReceipt = (r: { status: 'success' | 'reverted'; logs: Log[] }): DeviceReceipt => ({
+    status: r.status,
+    logs: r.logs,
+  });
+  return {
     waitReceipt: async (hash, timeoutMs) => {
       try {
         return toReceipt(await client.waitForTransactionReceipt({ hash, timeout: timeoutMs }));
@@ -491,4 +497,13 @@ export function createDeviceIo(input: {
       }
     },
   };
+}
+
+/**
+ * 送った tx の結果を読むだけの IO (鍵もガス用ウォレットも使わない)。送る設定を OFF にした・ガス用ウォレットを
+ * 消した後も、送った支払いの行方 (入金の確認・取り消し) は確かめ続ける。
+ */
+export function createDeviceWatchIo(): DeviceWatchIo {
+  const chain = storeGasWalletChain();
+  return watchIoFor(createPublicClient({ chain, transport: transportForChain(chain.id) }));
 }

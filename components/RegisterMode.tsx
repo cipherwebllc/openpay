@@ -22,8 +22,8 @@ import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
 import { StoreGasWalletPanel } from './StoreGasWalletPanel';
 import { StoreDeviceRegisterStatus } from './StoreDeviceRegisterStatus';
-import { useStoreDeviceRegister, useStoreDeviceToggle } from '@/hooks/useStoreDeviceRegister';
-import { STORE_DEVICE_MIN_AMOUNT_WEI, storeDeviceChainId } from '@/lib/storeDevicePayment';
+import { useStoreDeviceMode } from './StoreDeviceProvider';
+import { STORE_DEVICE_MIN_AMOUNT_WEI } from '@/lib/storeDevicePayment';
 import { Field } from './Field';
 import { ExternalImage } from './ExternalImage';
 import { ProductPresetManager } from './ProductPresetManager';
@@ -46,7 +46,7 @@ import { env } from '@/lib/env';
 import { safeHttpUrl } from '@/lib/mobileOrder';
 import { composeLineName, effectiveUnitPrice, type OptionChoice } from '@/lib/menuOptions';
 import { OptionSelectModal } from './OptionSelectModal';
-import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug, resolveDeployment } from '@/lib/tokens';
+import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   buildCheckoutUrl,
   calcCheckoutTotal,
@@ -140,38 +140,25 @@ function RegisterModeContent({
   const qrRef = useRef<HTMLDivElement>(null);
   const totalBarRef = useRef<HTMLDivElement>(null);
 
-  // お店の端末で送る (flag 裏・端末ごとの切替・plans/store-gas-wallet.md P2b-2)。flag OFF・切替 OFF では
-  // hook は通信も effect も起こさず、QR・URL・ボタンの動きは今のまま。
-  const [storeDeviceOn, setStoreDeviceOn] = useStoreDeviceToggle();
-  // ガス用ウォレットのアドレス (パネルが知らせる・undefined = まだ分からない / null = 無い)。
-  const [gasAddress, setGasAddress] = useState<Address | null | undefined>(undefined);
+  // お店の端末で送る (flag 裏・端末ごとの切替・plans/store-gas-wallet.md P2b-2・§19)。状態は作成ページの両タブの外
+  // (StoreDeviceProvider) に 1 つ (タブを切り替えても送信と「次の QR を出せない間」が続く)。flag OFF・切替 OFF では
+  // 通信も effect も起こさず、QR・URL・ボタンの動きは今のまま。
+  const {
+    on: storeDeviceOn,
+    setOn: setStoreDeviceOn,
+    gasAddress,
+    setGasAddress,
+    chainId: sdChainId,
+    deployment: sdDeployment,
+    forwarder: sdForwarder,
+    feeReceiver: sdFeeReceiver,
+    blocked: sdBlocked,
+    enabled: sdEnabled,
+    device,
+  } = useStoreDeviceMode();
   const [storeSessionId, setStoreSessionId] = useState<string | null>(null);
   // 「通常の QR を出す」を店員が選んだ (お店の端末で送るの QR を作れない・読み取れないとき)。
   const [forceNormalQr, setForceNormalQr] = useState(false);
-  const [hasWebLocks, setHasWebLocks] = useState(false);
-  useEffect(() => {
-    setHasWebLocks(typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function');
-  }, []);
-  const sdChainId = storeDeviceChainId();
-  const sdDeployment = resolveDeployment('jpyc', sdChainId);
-  const sdForwarder = env.enableStoreGasWallet ? jpycForwarderFor(sdChainId) : null;
-  const sdFeeReceiver =
-    env.enableStoreGasWallet && isAddress(env.feeReceiver) ? getAddress(env.feeReceiver) : null;
-  const sdBlocked: 'no_locks' | 'config' | null = !hasWebLocks
-    ? 'no_locks'
-    : !sdForwarder || !sdFeeReceiver || !sdDeployment
-      ? 'config'
-      : null;
-  const sdEnabled =
-    env.enableStoreGasWallet && storeDeviceOn && sdBlocked === null && !!gasAddress && !!sdDeployment;
-  const device = useStoreDeviceRegister({
-    enabled: sdEnabled,
-    chainId: sdChainId,
-    token: sdDeployment?.address ?? ('0x0000000000000000000000000000000000000000' as Address),
-    forwarder: sdForwarder,
-    feeReceiver: sdFeeReceiver,
-    gasAddress: gasAddress ?? null,
-  });
 
   const effectiveReceiver = pickEffectiveAddress(settings.receiver, resolvedReceiver);
   const setReceiver = useCallback(
