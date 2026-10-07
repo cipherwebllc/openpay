@@ -41,7 +41,7 @@ import { isLikelyName } from '@/lib/nameDetection';
 import { paymentPolicyKey } from '@/lib/paymentPolicy';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
-import { chainForSlug } from '@/lib/chains';
+import { chainForSlug, chainNameForId } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { safeHttpUrl } from '@/lib/mobileOrder';
 import { composeLineName, effectiveUnitPrice, type OptionChoice } from '@/lib/menuOptions';
@@ -499,6 +499,8 @@ function RegisterModeContent({
     storeQrActive && !(sdState.phase === 'waiting' && !sdState.stale) && sdState.phase !== 'creating';
 
   async function openQr() {
+    // 受け取った署名を送っている・結果を待っている間は次の QR を出さない (二重払いにしない)。
+    if (device.busy) return;
     setForceNormalQr(false);
     if (storeDeviceForSale && effectiveReceiver) {
       const s = await device.start(getAddress(effectiveReceiver), totalWei);
@@ -506,8 +508,8 @@ function RegisterModeContent({
       if (!s) return;
       setStoreSessionId(s.id);
     } else if (sdEnabled) {
-      // 通常の QR を出すときは、前の結果と「もう一度送る」を片付ける (別の支払いと重ねない)。
-      device.dismiss();
+      // 通常の QR: 前の受け渡しを締め切ってから出す (署名が入っていたら端末が送るので、通常の QR は出さない)。
+      if (!(await device.releaseForNormal())) return;
       setStoreSessionId(null);
     }
     setQrModalOpen(true);
@@ -523,12 +525,10 @@ function RegisterModeContent({
     }
   }
 
-  function showNormalQr() {
-    if (storeSessionId) {
-      device.stop();
-      setStoreSessionId(null);
-    }
-    device.dismiss();
+  async function showNormalQr() {
+    // 署名を待っていた受け渡しを締め切ってから。署名が入っていたら端末が送る (通常の QR は出さない)。
+    if (!(await device.releaseForNormal())) return;
+    setStoreSessionId(null);
     setForceNormalQr(true);
     setQrModalOpen(true);
   }
@@ -550,7 +550,7 @@ function RegisterModeContent({
       onCheckNow={() => void device.checkNow()}
       onRetry={device.retry}
       onReissue={() => void reissueStoreQr()}
-      onShowNormal={showNormalQr}
+      onShowNormal={() => void showNormalQr()}
       onDismiss={device.dismiss}
     />
   );
@@ -973,7 +973,7 @@ function RegisterModeContent({
               <button
                 type="button"
                 onClick={() => void openQr()}
-                disabled={!checkoutUrl || sdState.phase === 'creating'}
+                disabled={!checkoutUrl || device.busy}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
               >
                 <QrCodeIcon className="h-5 w-5" aria-hidden />
@@ -992,7 +992,7 @@ function RegisterModeContent({
           )}
           {sdSaleBlocked && (
             <p role="status" className="text-xs text-amber-800">
-              {t(`storeDevice.saleBlocked.${sdSaleBlocked}`, { chain: chainForSlug(settings.chain).name })}
+              {t(`storeDevice.saleBlocked.${sdSaleBlocked}`, { chain: chainNameForId(sdChainId) ?? '' })}
             </p>
           )}
           {sdEnabled && !qrModalOpen && storeDeviceStatus}
@@ -1021,7 +1021,7 @@ function RegisterModeContent({
         <button
           type="button"
           onClick={() => void openQr()}
-          disabled={!checkoutUrl || sdState.phase === 'creating'}
+          disabled={!checkoutUrl || device.busy}
           className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
         >
           <QrCodeIcon className="h-5 w-5" aria-hidden />

@@ -296,10 +296,10 @@ export type DeviceNotSentReason =
   | 'rpc';
 
 export type DeviceSendResult =
-  // 送った (または送ったかもしれない)。この hash を見る。
-  | { kind: 'sent'; hash: Hex }
+  // 送った (または送ったかもしれない)。この印 (hash) を見る。印は結果に含める (読み直しの失敗で見失わない)。
+  | { kind: 'sent'; hash: Hex; mark: DeviceSentMark }
   // この署名は前に送った印がある (別タブ・再読み込み前)。その hash を見る。
-  | { kind: 'already'; hash: Hex }
+  | { kind: 'already'; hash: Hex; mark: DeviceSentMark }
   // 送っていない (確実)。お客様の署名は期限まで有効なまま (端末は自動で再送しない)。
   | { kind: 'not_sent'; reason: DeviceNotSentReason };
 
@@ -319,7 +319,7 @@ export async function sendStoreDeviceSettle(
     const marks = readSentMarks();
     if (!marks.ok) return { kind: 'not_sent', reason: 'storage' };
     const prior = marks.marks.find((m) => m.nonce.toLowerCase() === v.nonce.toLowerCase());
-    if (prior) return { kind: 'already', hash: prior.hash };
+    if (prior) return { kind: 'already', hash: prior.hash, mark: prior };
 
     let signed: { raw: Hex; hash: Hex; maxFeePerGas: bigint };
     let gas: bigint;
@@ -366,19 +366,19 @@ export async function sendStoreDeviceSettle(
 
     try {
       await io.sendRawTransaction(signed.raw);
-      return { kind: 'sent', hash: signed.hash };
+      return { kind: 'sent', hash: signed.hash, mark };
     } catch (err) {
       const cls = classifySendError(err instanceof Error ? err.message : String(err));
-      if (cls === 'known' || cls === 'uncertain') return { kind: 'sent', hash: signed.hash };
+      if (cls === 'known' || cls === 'uncertain') return { kind: 'sent', hash: signed.hash, mark };
       // 'fatal' / 'collision' = この tx は mempool に届いていない。この署名が未使用だと確かめられたときだけ
       // 印を消して「送れませんでした」(確かめられなければ送ったかもしれないとして hash を見る)。
       let used: boolean;
       try {
         used = await io.authorizationUsed(v.params.from, v.nonce);
       } catch {
-        return { kind: 'sent', hash: signed.hash };
+        return { kind: 'sent', hash: signed.hash, mark };
       }
-      if (used || !removeSentMark(signed.hash)) return { kind: 'sent', hash: signed.hash };
+      if (used || !removeSentMark(signed.hash)) return { kind: 'sent', hash: signed.hash, mark };
       const insufficient = /insufficient funds/i.test(err instanceof Error ? err.message : String(err));
       return { kind: 'not_sent', reason: insufficient ? 'native_insufficient' : 'send_rejected' };
     }

@@ -151,7 +151,7 @@ describe('sendStoreDeviceSettle (二重に送らない・鍵は送る直前に)'
   it('ロックの中で確かめて署名し、印を保存してから送る (見積 × 1.2・pending の nonce)', async () => {
     const calls: Calls = [];
     const v = await verified();
-    expect(await sendStoreDeviceSettle(v, ctx, fakeIo(calls))).toEqual({ kind: 'sent', hash: HASH });
+    expect(await sendStoreDeviceSettle(v, ctx, fakeIo(calls))).toMatchObject({ kind: 'sent', hash: HASH, mark: { hash: HASH } });
     expect(calls).toEqual(['lock', 'now', 'used', 'balance', 'simulate', 'estimate', 'nonce', 'sign:300000:7', 'native', 'send:marked=true']);
     const marks = readSentMarks();
     expect(marks).toMatchObject({ ok: true, marks: [{ nonce: v.nonce, hash: HASH, amount: AMOUNT.toString(), handoffId: ctx.handoffId }] });
@@ -161,7 +161,7 @@ describe('sendStoreDeviceSettle (二重に送らない・鍵は送る直前に)'
     const calls: Calls = [];
     const v = await verified();
     await sendStoreDeviceSettle(v, ctx, fakeIo([]));
-    expect(await sendStoreDeviceSettle(v, ctx, fakeIo(calls))).toEqual({ kind: 'already', hash: HASH });
+    expect(await sendStoreDeviceSettle(v, ctx, fakeIo(calls))).toMatchObject({ kind: 'already', hash: HASH, mark: { hash: HASH } });
     expect(calls).toEqual(['lock']);
   });
 
@@ -215,7 +215,7 @@ describe('sendStoreDeviceSettle (二重に送らない・鍵は送る直前に)'
     ['通信断・timeout (届いたか分からない)', 'fetch failed'],
   ])('送信の失敗が %s → 送ったかもしれない: hash を見る (印は残す・再送しない)', async (_, message) => {
     const io = fakeIo([], { sendRawTransaction: async () => { throw new Error(message); } });
-    expect(await sendStoreDeviceSettle(await verified(), ctx, io)).toEqual({ kind: 'sent', hash: HASH });
+    expect(await sendStoreDeviceSettle(await verified(), ctx, io)).toMatchObject({ kind: 'sent', hash: HASH, mark: { hash: HASH } });
     expect(readSentMarks()).toMatchObject({ ok: true, marks: [{ hash: HASH }] });
   });
 
@@ -234,7 +234,7 @@ describe('sendStoreDeviceSettle (二重に送らない・鍵は送る直前に)'
       authorizationUsed: async () => n++ > 0,
       sendRawTransaction: async () => { throw new Error('insufficient funds'); },
     });
-    expect(await sendStoreDeviceSettle(await verified(), ctx, usedAfter)).toEqual({ kind: 'sent', hash: HASH });
+    expect(await sendStoreDeviceSettle(await verified(), ctx, usedAfter)).toMatchObject({ kind: 'sent', hash: HASH, mark: { hash: HASH } });
     window.localStorage.clear();
     let m = 0;
     const unreadable = fakeIo([], {
@@ -244,7 +244,7 @@ describe('sendStoreDeviceSettle (二重に送らない・鍵は送る直前に)'
       },
       sendRawTransaction: async () => { throw new Error('insufficient funds'); },
     });
-    expect(await sendStoreDeviceSettle(await verified(), ctx, unreadable)).toEqual({ kind: 'sent', hash: HASH });
+    expect(await sendStoreDeviceSettle(await verified(), ctx, unreadable)).toMatchObject({ kind: 'sent', hash: HASH, mark: { hash: HASH } });
     expect(readSentMarks()).toMatchObject({ ok: true, marks: [{ hash: HASH }] });
   });
 

@@ -81,7 +81,7 @@ beforeEach(() => {
     return readRes();
   }));
   send.verifyDeviceAuth.mockReset().mockResolvedValue({ ok: true, value: { params: {}, signature: '0x', nonce: NONCE } });
-  send.sendStoreDeviceSettle.mockReset().mockResolvedValue({ kind: 'sent', hash: HASH });
+  send.sendStoreDeviceSettle.mockReset().mockResolvedValue({ kind: 'sent', hash: HASH, mark: MARK });
   send.readSentMarks.mockReset().mockReturnValue({ ok: true, marks: [MARK] });
   send.receiptHasSettlement.mockReset().mockReturnValue(true);
   send.waitReceipt.mockReset().mockResolvedValue({ status: 'success', logs: [] });
@@ -289,6 +289,110 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(result.current.state).toMatchObject({ phase: 'waiting' });
+  });
+
+  it('送らなかった署名は、再読み込みで自動で処理し直さない (保存したセッションを外す)', async () => {
+    send.sendStoreDeviceSettle.mockResolvedValueOnce({ kind: 'not_sent', reason: 'native_insufficient' });
+    readRes = () => json({ ok: true, state: 'signed', merchant: SHOP, amount: AMOUNT.toString(), auth: AUTH });
+    const first = renderHook(() => useStoreDeviceRegister(input));
+    await started(first.result);
+    await advance(3_000);
+    expect(first.result.current.state).toMatchObject({ phase: 'not_sent', canRetry: true });
+    expect(window.sessionStorage.getItem(STORE_DEVICE_SESSION_KEY)).toBeNull();
+    first.unmount();
+    send.sendStoreDeviceSettle.mockClear();
+    const closesBefore = of('/close').length;
+    renderHook(() => useStoreDeviceRegister(input));
+    await advance(0);
+    expect(of('/close').length).toBe(closesBefore);
+    expect(send.sendStoreDeviceSettle).not.toHaveBeenCalled();
+  });
+
+  it('送った後、次の会計の QR はすぐ作れる (処理済みのセッションを引きずらない)', async () => {
+    readRes = () => json({ ok: true, state: 'signed', merchant: SHOP, amount: AMOUNT.toString(), auth: AUTH });
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toMatchObject({ phase: 'received' });
+    // サーバは送信済みのセッションの締め切りに署名を返す (締め切らない) → 引きずると次の QR を作れない
+    closeRes = () => json({ ok: true, closed: false, auth: AUTH, txHash: HASH });
+    readRes = () => json({ ok: true, state: 'open', merchant: SHOP, amount: AMOUNT.toString(), auth: null });
+    expect(await started(result)).toMatchObject({ id: ID });
+    expect(result.current.state).toMatchObject({ phase: 'waiting' });
+  });
+
+  it('「いま確認する」の遅れた結果も、新しい会計の表示を上書きしない', async () => {
+    send.readSentMarks.mockReturnValue({ ok: true, marks: [{ ...MARK, at: Date.now() - 60_000 }] });
+    send.waitReceipt.mockResolvedValueOnce(null);
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await advance(0);
+    expect(result.current.state).toMatchObject({ phase: 'unknown', previous: true });
+    let release!: (v: unknown) => void;
+    send.getReceipt.mockReturnValueOnce(new Promise((r) => { release = r; }));
+    let checking!: Promise<void>;
+    act(() => {
+      checking = result.current.checkNow();
+    });
+    await started(result);
+    await act(async () => {
+      release({ status: 'success', logs: [] });
+      await checking;
+    });
+    expect(result.current.state).toMatchObject({ phase: 'waiting' });
+  });
+
+  it('切替を OFF にしたら表示を戻し、遅れて返った締め切りの署名も送らない', async () => {
+    const { result, rerender } = renderHook((p: StoreDeviceRegisterInput) => useStoreDeviceRegister(p), { initialProps: input });
+    await started(result);
+    let release!: (v: Response) => void;
+    closeRes = () => new Promise<Response>((r) => { release = r; });
+    act(() => {
+      result.current.stop();
+    });
+    rerender({ ...input, enabled: false });
+    await act(async () => {
+      release(new Response(JSON.stringify({ ok: true, closed: false, auth: AUTH }), { status: 200 }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.state).toEqual({ phase: 'idle' });
+    expect(send.sendStoreDeviceSettle).not.toHaveBeenCalled();
+  });
+
+  it('通常の QR に切り替える前に締め切る: 署名が入っていたら端末が送り、通常の QR は出させない', async () => {
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    closeRes = () => json({ ok: true, closed: false, auth: AUTH, txHash: null });
+    let ok!: boolean;
+    await act(async () => {
+      ok = await result.current.releaseForNormal();
+    });
+    expect(ok).toBe(false);
+    expect(send.sendStoreDeviceSettle).toHaveBeenCalledTimes(1);
+  });
+
+  it('通常の QR に切り替える: 締め切れたら出してよい・締め切りの応答が無ければそのセッションは自動で処理しない', async () => {
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    closeRes = () => Promise.reject(new TypeError('net'));
+    let ok!: boolean;
+    await act(async () => {
+      ok = await result.current.releaseForNormal();
+    });
+    expect(ok).toBe(true);
+    expect(window.sessionStorage.getItem(STORE_DEVICE_SESSION_KEY)).toBeNull();
+    expect(result.current.state).toEqual({ phase: 'idle' });
+  });
+
+  it('QR を閉じた直後に次の QR を出すと、締め切りの応答を待つ (署名が入っていたら新しい QR は出さない)', async () => {
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    closeRes = () => json({ ok: true, closed: false, auth: AUTH, txHash: null });
+    act(() => {
+      result.current.stop();
+    });
+    expect(await started(result)).toBeNull();
+    expect(send.sendStoreDeviceSettle).toHaveBeenCalledTimes(1);
+    expect(calls.filter((c) => c.url === '/api/register/handoff')).toHaveLength(1);
   });
 
   it('再読み込み後: 最近送った印があれば、その結果を「前回の送信」として出す', async () => {

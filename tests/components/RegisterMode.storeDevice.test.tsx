@@ -27,6 +27,8 @@ const hold = vi.hoisted(() => ({
   state: { phase: 'idle' } as Record<string, unknown>,
   start: vi.fn(),
   stop: vi.fn(),
+  release: vi.fn(),
+  busy: false,
   dismiss: vi.fn(),
   setOn: vi.fn(),
   panelBlocked: [] as unknown[],
@@ -54,8 +56,10 @@ vi.mock('@/hooks/useStoreDeviceRegister', () => ({
   useStoreDeviceToggle: () => [hold.on, hold.setOn],
   useStoreDeviceRegister: () => ({
     state: hold.state,
+    busy: hold.busy,
     start: hold.start,
     stop: hold.stop,
+    releaseForNormal: hold.release,
     checkNow: vi.fn(),
     retry: vi.fn(),
     dismiss: hold.dismiss,
@@ -115,6 +119,8 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     hold.state = { phase: 'idle' };
     hold.start.mockReset().mockResolvedValue({ id: HS, token: 'ab'.repeat(32), expiresAt: 0, merchant: VALID, amount: '1', chainId: 80002 });
     hold.stop.mockReset();
+    hold.release.mockReset().mockResolvedValue(true);
+    hold.busy = false;
     hold.dismiss.mockReset();
     hold.panelBlocked.length = 0;
     Object.defineProperty(window.navigator, 'locks', { value: { request: vi.fn() }, configurable: true });
@@ -191,6 +197,24 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     await waitFor(() => expect(shownCheckout()).not.toBeNull());
     expect(hold.start).not.toHaveBeenCalled();
     expect(hold.panelBlocked).toContain('no_locks');
+  });
+
+  it('通常の QR に切り替えられない (前の受け渡しに署名が入っていて端末が送る) なら QR を開かない', async () => {
+    const user = userEvent.setup();
+    seed(FEE);
+    hold.release.mockResolvedValue(false);
+    render(<RegisterMode />);
+    await addItemAndOpen(user);
+    expect(hold.release).toHaveBeenCalled();
+    expect(shownCheckout()).toBeNull();
+  });
+
+  it('受け取った署名を送っている間は QR のボタンを押せない', async () => {
+    seed();
+    hold.busy = true;
+    render(<RegisterMode />);
+    await screen.findByRole('button', { name: /コーヒー/ });
+    for (const b of screen.getAllByRole('button', { name: /QRコードを表示する/ })) expect(b).toBeDisabled();
   });
 
   it('受取先が OpenPay の受取口 (forwarder が revert する) なら使えないと知らせて通常の QR を出す', async () => {
