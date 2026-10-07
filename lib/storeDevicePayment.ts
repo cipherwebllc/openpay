@@ -59,3 +59,19 @@ export const STORE_HANDOFF_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 export function isStoreDeviceAmount(amountWei: bigint, maxWei: bigint): boolean {
   return amountWei >= STORE_DEVICE_MIN_AMOUNT_WEI && amountWei <= maxWei;
 }
+
+/** 端末が settle に使うガスの上限 (relayer と同じ・実測 約 25〜30 万)。見積 × 1.2 がこれを超えたら送らない。 */
+export const STORE_DEVICE_SETTLE_GAS_CAP = 500_000n;
+
+/** 1 回の送信のガス代の上限 (0.2 POL・サーバの RELAY_MAX_GAS_COST_WEI の本番値と同じ)。超えたら送らない。 */
+export const STORE_DEVICE_MAX_GAS_COST_WEI = 2n * 10n ** 17n;
+
+/** 署名の期限の上限を確かめるときの時計のずれの余裕 (秒)。 */
+export const STORE_DEVICE_CLOCK_SKEW_SEC = 30;
+
+/**
+ * QR を見せてよいセッションの残り (秒)。お客様の署名窓 (150 秒) と、サーバが預かる最低残り (60 秒) が
+ * 収まらないセッションの QR は読ませない (読んでも「期限が切れています」になる)。
+ */
+export const STORE_DEVICE_QR_MIN_REMAINING_SEC =
+  STORE_DEVICE_VALIDITY_SEC + STORE_DEVICE_MIN_CLAIM_REMAINING_SEC;

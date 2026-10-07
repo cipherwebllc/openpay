@@ -51,6 +51,28 @@ describe('StoreGasWalletPanel', () => {
     expect(hold.state.create).toHaveBeenCalled();
   });
 
+  it('お店の端末で送るの切替: ウォレットがあるときだけ出し、変更を知らせる・使えない理由があれば押せない', () => {
+    const onToggle = vi.fn();
+    const onAddressChange = vi.fn();
+    const { unmount } = render(
+      <StoreGasWalletPanel storeDevice={{ on: false, onToggle, blocked: null }} onAddressChange={onAddressChange} />,
+    );
+    expect(screen.queryByRole('checkbox')).toBeNull(); // 未作成では出さない
+    expect(onAddressChange).toHaveBeenLastCalledWith(null);
+    unmount();
+    hold.state = ready();
+    const r = render(
+      <StoreGasWalletPanel storeDevice={{ on: false, onToggle, blocked: null }} onAddressChange={onAddressChange} />,
+    );
+    expect(onAddressChange).toHaveBeenLastCalledWith(ADDR);
+    fireEvent.click(screen.getByRole('checkbox', { name: /お店の端末で送る/ }));
+    expect(onToggle).toHaveBeenCalledWith(true);
+    r.unmount();
+    render(<StoreGasWalletPanel storeDevice={{ on: true, onToggle, blocked: 'no_locks' }} />);
+    expect(screen.getByRole('checkbox', { name: /お店の端末で送る/ })).toBeDisabled();
+    expect(screen.getByText(/このブラウザでは使えません/)).toBeTruthy();
+  });
+
   it('保存できない端末では作れなかったと出す', async () => {
     hold.state = base({ create: vi.fn(async () => ({ ok: false, reason: 'storage_unavailable' })) });
     render(<StoreGasWalletPanel />);
@@ -70,7 +92,7 @@ describe('StoreGasWalletPanel', () => {
     render(<StoreGasWalletPanel />);
     expect(screen.getByText(ADDR)).toBeTruthy();
     expect(screen.getAllByText('0.01 POL').length).toBeGreaterThan(0);
-    expect(screen.getByText('あと約 2 回送れます')).toBeTruthy();
+    expect(screen.getByText('あと約 1 回送れます')).toBeTruthy();
     expect(screen.getByText(/残高が少なくなっています/)).toBeTruthy();
   });
 

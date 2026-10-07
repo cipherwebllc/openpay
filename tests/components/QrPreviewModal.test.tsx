@@ -79,6 +79,14 @@ describe('QrPreviewModal', () => {
     ).toBeInTheDocument();
   });
 
+  it('deviceStatus (お店の端末で送るの状態) は指定時だけ出し、印刷には出さない', () => {
+    renderModal();
+    expect(screen.queryByText('お客様の署名を待っています')).toBeNull();
+    renderModal({ deviceStatus: <p>お客様の署名を待っています</p> });
+    const el = screen.getByText('お客様の署名を待っています');
+    expect(el.parentElement?.className).toContain('print:hidden');
+  });
+
   it('× 閉じる で onClose、ESC でも onClose', async () => {
     const user = userEvent.setup();
     const { props } = renderModal();

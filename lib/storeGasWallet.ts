@@ -18,8 +18,9 @@ import { env } from './env';
 
 export const STORE_GAS_WALLET_STORAGE_KEY = 'openpay:store-gas-wallet:v1';
 
-// forwarder.settle 1 回の目安ガス (残り回数の概算用・送信時の上限ではない)。
-export const STORE_GAS_SETTLE_GAS_ESTIMATE = 150_000n;
+// forwarder.settle 1 回の目安ガス (残り回数の概算用・送信時の上限ではない)。relayer の実測 (約 25〜30 万) に揃え、
+// 少なめに見積もる (残り回数を多く見せて POL 切れで送れない、を避ける)。Amoy 実機の gasUsed で見直す。
+export const STORE_GAS_SETTLE_GAS_ESTIMATE = 300_000n;
 
 // 端末をまたがない直列化の鍵 (同じ端末の別タブで作る・消す・送るが重ならないように)。
 export const STORE_GAS_WALLET_LOCK = 'openpay:store-gas-wallet';
