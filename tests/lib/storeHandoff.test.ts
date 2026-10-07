@@ -359,6 +359,15 @@ describe('締め切る (お店の端末が使わなくなったセッション)'
     expect(await readHandoff(ID, null, deps())).toMatchObject({ state: 'signed' });
   });
 
+  it('端末が送った後 (tx 記録済み) の締め切りは、署名と記録済みの hash を返す (端末は送り直さない)', async () => {
+    await openSession();
+    await submitHandoffAuth(ID, await signedBody(), deps());
+    const tx = `0x${'ef'.repeat(32)}`;
+    await recordHandoffTx(ID, TOKEN, { txHash: tx }, deps());
+    expect(await closeHandoff(ID, TOKEN, deps())).toMatchObject({ ok: true, closed: false, txHash: tx, auth: { from: customer.address } });
+    expect(await readHandoff(ID, null, deps())).toMatchObject({ state: 'sent', txHash: tx });
+  });
+
   it('お客様の検証 (RPC) の間に締め切られたら預からない (枠は締め切りが先に取った)', async () => {
     await openSession();
     const body = await signedBody();
