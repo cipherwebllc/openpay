@@ -235,6 +235,10 @@ function RegisterModeContent({
       ? 'merchant'
       : settings.gasMode;
   const taxDec = taxDisplayDecimals(settings.token);
+  // レジ上部の 1 行に出す、決済QRタブから引き継いだ決済モード。
+  const policyText = isFreeGasless
+    ? t('paymentPolicy.gaslessFree')
+    : t(`paymentPolicy.${paymentPolicyKey(settings.payMode, effectiveGasMode)}`);
 
   // レジ表示設定 (Phase 1・flag 裏)。flag OFF では従来どおり = 画像常時表示・絞り込みなし。
   const showImages = !env.enableShopLive || settings.showPresetImages !== false;
@@ -474,6 +478,11 @@ function RegisterModeContent({
               ? 'min_amount'
               : null;
   const storeDeviceForSale = sdEnabled && sdSaleBlocked === null;
+  // QR を出している・送っている・結果を待っている間は決済モードを切り替えさせない。
+  const sdLocked = device.busy || qrModalOpen || device.state.phase === 'waiting';
+  // 「お店がガス代を肩代わりして送る」を選んだが、この端末・設定では使えない理由 (上部の 1 行の下に出す)。
+  const sdModeBlocked: 'no_locks' | 'config' | 'no_wallet' | null =
+    !env.enableStoreGasWallet || !storeDeviceOn ? null : sdBlocked ?? (gasAddress === null ? 'no_wallet' : null);
   const storeQrActive = storeDeviceForSale && !forceNormalQr && storeSessionId !== null;
   // お店の端末で送るの QR (receiptNo 等は通常と同じ・feeKind は付けない = parse が fail-closed で弾くため)。
   const storeCheckoutUrl =
@@ -582,13 +591,24 @@ function RegisterModeContent({
         <span className="text-slate-300" aria-hidden>
           ｜
         </span>
-        <span className="text-slate-500">
-          {isFreeGasless
-            ? t('paymentPolicy.gaslessFree')
-            : t(
-                `paymentPolicy.${paymentPolicyKey(settings.payMode, effectiveGasMode)}`,
-              )}
-        </span>
+        {env.enableStoreGasWallet ? (
+          // 決済モードはレジだけの 2 択 (決済QRタブの設定に従う / お店がガス代を肩代わりして送る)。
+          // 後者はこの端末のガス用ウォレットで送るので、決済QRタブ (決済QR と共通の設定) には置かない。
+          <label className="flex w-full min-w-0 flex-wrap items-center gap-1 text-slate-500 sm:w-auto">
+            <span className="shrink-0 whitespace-nowrap font-medium">{t('storeDevice.modeLabel')}:</span>
+            <select
+              value={storeDeviceOn ? 'store' : 'inherit'}
+              onChange={(e) => setStoreDeviceOn(e.target.value === 'store')}
+              disabled={sdLocked}
+              className="min-w-0 max-w-full rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-xs text-slate-700 disabled:opacity-60"
+            >
+              <option value="inherit">{t('storeDevice.modeInherit', { policy: policyText })}</option>
+              <option value="store">{t('storeDevice.modeStore')}</option>
+            </select>
+          </label>
+        ) : (
+          <span className="text-slate-500">{policyText}</span>
+        )}
         {onEditCurrency && (
           <button
             type="button"
@@ -599,6 +619,16 @@ function RegisterModeContent({
           </button>
         )}
       </div>
+      {env.enableStoreGasWallet && storeDeviceOn && (
+        <p
+          role={sdModeBlocked ? 'alert' : undefined}
+          className={`-mt-3 text-xs ${sdModeBlocked ? 'text-amber-800' : 'text-slate-500'}`}
+        >
+          {sdModeBlocked
+            ? t(`storeDevice.blocked.${sdModeBlocked}`)
+            : t('storeDevice.modeNote', { chain: chainNameForId(sdChainId) ?? '' })}
+        </p>
+      )}
 
       {/* POS 2カラム: 左=操作 (page scroll) / 右=会計サマリ (lg で sticky 追従)。 */}
       <div className="lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
@@ -1002,15 +1032,7 @@ function RegisterModeContent({
         </div>
       )}
       {env.enableStoreGasWallet && (
-        <StoreGasWalletPanel
-          storeDevice={{
-            on: storeDeviceOn,
-            onToggle: setStoreDeviceOn,
-            blocked: sdBlocked,
-            locked: device.busy || qrModalOpen || sdState.phase === 'waiting',
-          }}
-          onAddressChange={setGasAddress}
-        />
+        <StoreGasWalletPanel onAddressChange={setGasAddress} />
       )}
 
       {/* モバイル下部固定 会計バー (合計 + QR ボタン)。lg では右サイドバー CTA を使う。

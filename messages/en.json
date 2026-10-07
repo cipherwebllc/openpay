@@ -2489,11 +2489,14 @@
       "removeFailed": "Couldn't remove it from this device. Please try again."
     },
     "storeDevice": {
-      "toggle": "The shop pays the gas and sends it (OpenPay usage fee 0)",
-      "toggleNote": "The customer only signs. This device sends it, paying the gas with the POL in its gas wallet, so there's no OpenPay usage fee (the shop only pays the actual gas). Available for JPYC on {chain}.",
+      "modeLabel": "Payment mode",
+      "modeInherit": "Follow the Payment QR tab ({policy})",
+      "modeStore": "The shop pays the gas and sends it (OpenPay usage fee 0)",
+      "modeNote": "The customer only signs. This device sends it, paying the gas with the POL in its gas wallet, so there's no OpenPay usage fee (the shop only pays the actual gas; by design, 1 wei = 0.000000000000000001 JPYC is added to the customer's payment per transfer and sent to OpenPay). Available for JPYC on {chain}.",
       "blocked": {
         "no_locks": "Not available in this browser (it can't prevent sending twice from another tab).",
-        "config": "This method isn't available right now."
+        "config": "This method isn't available right now.",
+        "no_wallet": "Create a gas wallet first (in “Store-device gas wallet” below). Until then, the standard QR is shown."
       },
       "badge": "The shop pays the gas (usage fee 0)",
       "saleBlocked": {

@@ -27,21 +27,10 @@ function formatPol(wei: bigint): string {
   return n.toLocaleString('en-US', { maximumFractionDigits: 4 });
 }
 
-/** レジの「お店の端末で送る」の切替 (P2b-2・任意)。blocked = この端末・設定で使えない理由。 */
-export type StoreDeviceToggle = {
-  on: boolean;
-  onToggle: (on: boolean) => void;
-  blocked: 'no_locks' | 'config' | null;
-  /** QR を出している・支払いを送っている・結果を待っている間は切り替えさせない。 */
-  locked?: boolean;
-};
-
 export function StoreGasWalletPanel({
-  storeDevice,
   onAddressChange,
 }: {
-  storeDevice?: StoreDeviceToggle;
-  /** 使えるガス用ウォレットのアドレス (無い・読めないは null) をレジに知らせる。 */
+  /** 使えるガス用ウォレットのアドレス (無い・読めないは null) をレジに知らせる (レジ上部の決済モードで使う)。 */
   onAddressChange?: (address: Address | null) => void;
 } = {}) {
   const t = useTranslations('RegisterMode');
@@ -191,28 +180,6 @@ export function StoreGasWalletPanel({
 
       {g.walletState.state === 'ok' && g.address && (
         <div className="mt-3 space-y-3">
-          {storeDevice && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <label className="flex items-start gap-2 text-xs font-semibold text-slate-800">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={storeDevice.on}
-                  disabled={storeDevice.blocked !== null || !!storeDevice.locked}
-                  onChange={(e) => storeDevice.onToggle(e.target.checked)}
-                />
-                <span>{t('storeDevice.toggle')}</span>
-              </label>
-              <p className="mt-1 text-xs text-slate-500">
-                {t('storeDevice.toggleNote', { chain: g.chain.name })}
-              </p>
-              {storeDevice.blocked && (
-                <p role="alert" className="mt-1 text-xs text-amber-800">
-                  {t(`storeDevice.blocked.${storeDevice.blocked}`)}
-                </p>
-              )}
-            </div>
-          )}
           <div>
             <p className="text-xs text-slate-500">
               {t('storeGasWallet.addressLabel', { chain: g.chain.name })}

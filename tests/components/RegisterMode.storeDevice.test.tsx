@@ -31,8 +31,6 @@ const hold = vi.hoisted(() => ({
   busy: false,
   dismiss: vi.fn(),
   setOn: vi.fn(),
-  panelBlocked: [] as unknown[],
-  panelLocked: [] as unknown[],
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -69,16 +67,12 @@ vi.mock('@/hooks/useStoreDeviceRegister', () => ({
 vi.mock('@/components/StoreGasWalletPanel', () => ({
   StoreGasWalletPanel: ({
     onAddressChange,
-    storeDevice,
   }: {
     onAddressChange?: (a: string | null) => void;
-    storeDevice?: { blocked: unknown; locked?: unknown };
   }) => {
     useEffect(() => {
       onAddressChange?.(hold.gas);
     }, [onAddressChange]);
-    hold.panelBlocked.push(storeDevice?.blocked);
-    hold.panelLocked.push(storeDevice?.locked);
     return <div>gas-wallet-panel</div>;
   },
 }));
@@ -124,8 +118,6 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     hold.release.mockReset().mockResolvedValue(true);
     hold.busy = false;
     hold.dismiss.mockReset();
-    hold.panelBlocked.length = 0;
-    hold.panelLocked.length = 0;
     Object.defineProperty(window.navigator, 'locks', { value: { request: vi.fn() }, configurable: true });
     global.fetch = vi.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }) as Response) as unknown as typeof fetch;
   });
@@ -193,15 +185,35 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(sp.get('fee_kind')).toBe('register');
   });
 
-  it('Web Locks の無いブラウザでは使えない (理由をパネルに渡し、通常の QR)', async () => {
+  it('Web Locks の無いブラウザでは使えない (決済モードの下に理由・通常の QR)', async () => {
     Object.defineProperty(window.navigator, 'locks', { value: undefined, configurable: true });
     const user = userEvent.setup();
     seed();
     render(<RegisterMode />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/このブラウザでは使えません/);
     await addItemAndOpen(user);
     await waitFor(() => expect(shownCheckout()).not.toBeNull());
     expect(hold.start).not.toHaveBeenCalled();
-    expect(hold.panelBlocked).toContain('no_locks');
+  });
+
+  it('決済モードはレジ上部の 2 択 (決済QRタブの設定に従う / お店がガス代を肩代わりして送る)', async () => {
+    const user = userEvent.setup();
+    seed();
+    hold.on = false;
+    render(<RegisterMode />);
+    const select = await screen.findByRole('combobox', { name: /決済モード/ });
+    expect(select).toHaveValue('inherit');
+    expect(screen.getByRole('option', { name: /決済QRタブの設定に従う（/ })).toBeTruthy();
+    await user.selectOptions(select, 'store');
+    expect(hold.setOn).toHaveBeenCalledWith(true);
+  });
+
+  it('お店がガス代を肩代わりを選んだときは、決済モードの下に説明 (1 wei の行き先) を出す', async () => {
+    seed();
+    render(<RegisterMode />);
+    expect(await screen.findByText(/この端末のガス用ウォレットの POL でガス代を払って送る/)).toBeTruthy();
+    expect(screen.getByText(/OpenPay へ送られます/)).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: /決済モード/ })).toHaveValue('store');
   });
 
   it('通常の QR に切り替えられない (前の受け渡しに署名が入っていて端末が送る) なら QR を開かない', async () => {
@@ -225,13 +237,13 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     await waitFor(() => expect(shownCheckout()?.get('hs')).toBe(HS));
   });
 
-  it('受け取った署名を送っている間は QR のボタンも切替も押せない', async () => {
+  it('受け取った署名を送っている間は QR のボタンも決済モードも操作できない', async () => {
     seed();
     hold.busy = true;
     render(<RegisterMode />);
     await screen.findByRole('button', { name: /コーヒー/ });
     for (const b of screen.getAllByRole('button', { name: /QRコードを表示する/ })) expect(b).toBeDisabled();
-    expect(hold.panelLocked.at(-1)).toBe(true);
+    expect(screen.getByRole('combobox', { name: /決済モード/ })).toBeDisabled();
   });
 
   it('受取先が OpenPay の受取口 (forwarder が revert する) なら使えないと知らせて通常の QR を出す', async () => {
@@ -244,7 +256,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(screen.getByText(/この受取先ではガス代の肩代わりを使えません/)).toBeTruthy();
   });
 
-  it('ガス用ウォレットが無ければ知らせて通常の QR を出す', async () => {
+  it('ガス用ウォレットが無ければ知らせて (決済モードの下にも) 通常の QR を出す', async () => {
     const user = userEvent.setup();
     seed();
     hold.gas = null;
