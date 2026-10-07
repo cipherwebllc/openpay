@@ -15,6 +15,7 @@ import { MarketRates } from '@/components/MarketRates';
 import { MiniHistoryRecent } from '@/components/MiniHistoryRecent';
 import { QrGenerator } from '@/components/QrGenerator';
 import { OrdersTabBadge } from '@/components/OrdersTabBadge';
+import { StoreDeviceProvider, useStoreDeviceMode } from '@/components/StoreDeviceProvider';
 import { env } from '@/lib/env';
 import type { Locale } from '@/i18n';
 import { getExchangeLink } from '@/lib/links';
@@ -63,14 +64,33 @@ const CreatorStoreSellerPanel = dynamic(() =>
   ),
 );
 
+// 「お店の端末で送る」の状態はタブの外に 1 つ (タブを切り替えて部品が外れても、送信と結果の表示が続く・
+// components/StoreDeviceProvider.tsx)。
 export default function CreatePage() {
+  return (
+    <StoreDeviceProvider>
+      <CreatePageBody />
+    </StoreDeviceProvider>
+  );
+}
+
+function CreatePageBody() {
   const tabBarRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLButtonElement>(null);
   const [tab, setTab] = useState<Tab>('qr');
   const [publishedHandle, setPublishedHandle] = useState<string | null>(null);
   const t = useTranslations('Create');
   const locale = useLocale() as Locale;
+  const storeDevice = useStoreDeviceMode();
+  // お店の端末が支払いを送っている・結果を待っている間はタブを切り替えさせない (別のタブで通常の QR を出して
+  // 同じ会計を二重に払わせない)。
+  const [tabLocked, setTabLocked] = useState(false);
   const changeTab = (nextTab: Tab) => {
+    if (nextTab !== tab && storeDevice.device.busy) {
+      setTabLocked(true);
+      return;
+    }
+    setTabLocked(false);
     setTab(nextTab);
     if (nextTab !== 'profile') setPublishedHandle(null);
   };
@@ -151,6 +171,12 @@ export default function CreatePage() {
           </button>
         ))}
       </div>
+
+      {tabLocked && storeDevice.device.busy && (
+        <p role="alert" className="mb-4 text-sm text-amber-800">
+          {t('storeDeviceTabLocked')}
+        </p>
+      )}
 
       {/* 決済QR タブのみ 1 行説明を出す。レジ / チップは各パネル先頭に見出し+説明が
           あり重複するため出さない。 */}

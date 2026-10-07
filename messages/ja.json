@@ -427,6 +427,7 @@
     "tabDesc": {
       "qr": "店舗向け: レジ掲示用の決済 QR を作成します。"
     },
+    "storeDeviceTabLocked": "お店の端末が支払いを送っています（または結果を確かめています）。結果が出るまでタブを切り替えられません。",
     "tipPanel": {
       "heading": "応援を受け取る Tip widget を作成",
       "subheading": "ブログ・ポートフォリオ・配信ページに貼るだけで、JPYC / USDC のチップを受け取れます。"

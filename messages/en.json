@@ -427,6 +427,7 @@
     "tabDesc": {
       "qr": "For merchants: create a payment QR to display at the register."
     },
+    "storeDeviceTabLocked": "The shop's device is sending a payment (or checking its result). You can't switch tabs until the result is shown.",
     "tipPanel": {
       "heading": "Create a Tip widget to receive support",
       "subheading": "Add it to your blog, portfolio, or stream page to receive JPYC / USDC tips."
