@@ -1432,6 +1432,10 @@ on-chain 検証経路 (実 `getTransactionReceipt` → 実 JPYC `Transfer` log �
 
 ## §13 モバイル注文 / レジ システム利用料 go-live SOP
 
+> **2026-10-07: レジの通常決済 (standard) の利用料は廃止しました (#713)。** 本番は
+> `NEXT_PUBLIC_ENABLE_REGISTER_FEE=0`。以下のレジ部分は履歴として残す (再点灯は利用料の再導入 = 開示 3 点セットの
+> 更新が先・点灯しない)。モバイル注文の手順は現役。
+
 決済コアは無料のまま、モバイル注文 (店頭 1% / 事前 3%) と レジ standard (7 月から 1%) の
 システム利用料を**経路非依存**で課金する。料金は決済と同一 tx 内で `FEE_RECEIVER` へ分割
 (ノンカストディ不変)。詳細実装は memory:project_mobile_order_fee。料率の真実点は
@@ -1460,7 +1464,7 @@ on-chain 検証経路 (実 `getTransactionReceipt` → 実 JPYC `Transfer` log �
 5. フラグ点灯 (NEXT_PUBLIC_* は build-time inline → **再デプロイ必須**):
    - モバイル注文公開: `NEXT_PUBLIC_ENABLE_MOBILE_ORDER=1` + `NEXT_PUBLIC_ENABLE_ORDER_RELAY=1`
      (受注が店主へ届く・KV 必須 §11) + `NEXT_PUBLIC_ENABLE_MOBILE_ORDER_FEE=1`。
-   - レジ利用料: `NEXT_PUBLIC_ENABLE_REGISTER_FEE=1` + (7 月から) `RECOVER_FEE_BPS=100`。
+   - レジ利用料 (**2026-10-07 廃止・点灯しない**・履歴): `NEXT_PUBLIC_ENABLE_REGISTER_FEE=1` + (7 月から) `RECOVER_FEE_BPS=100`。
      ⚠️ `RECOVER_FEE_BPS` は決済QR / relay の既存 recover 利用料と**共有**。7 月前は 0 = フラグ ON でも
      レジ standard は無料。変更は開示済数値の変更 → legal フェンス (`DISCLOSED_RECOVER_FEE`) 確認必須。
 
