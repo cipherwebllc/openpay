@@ -37,6 +37,7 @@ import {
   handoffTxKey,
   type HandoffAuth,
   type HandoffDeps,
+  type HandoffClosedMark,
   type HandoffSession,
   type HandoffStore,
 } from '@/lib/storeHandoff';
@@ -50,6 +51,15 @@ function parseJson<T>(raw: string | null): T | null {
   }
 }
 
+// 署名の枠の中身: 署名・締め切りの印・壊れた値 (読めない)。
+type AuthSlot = { auth: HandoffAuth } | { closed: true } | null;
+function parseAuthSlot(raw: string): AuthSlot {
+  const v = parseJson<Record<string, unknown>>(raw);
+  if (!v || typeof v !== 'object') return null;
+  if (v.closed === true) return { closed: true };
+  return typeof v.nonce === 'string' ? { auth: v as unknown as HandoffAuth } : null;
+}
+
 export const kvHandoffStore: HandoffStore = {
   async putSession(id: string, session: HandoffSession, ttlSec: number) {
     const r = await kvSet(handoffSessionKey(id), JSON.stringify(session), { nx: true, ttlSec });
@@ -60,10 +70,12 @@ export const kvHandoffStore: HandoffStore = {
     const r = await kvMget([handoffSessionKey(id), handoffAuthKey(id), handoffTxKey(id)]);
     if (!r.ok) return null;
     const [session, auth, tx] = r.value;
+    const slot = typeof auth === 'string' ? parseAuthSlot(auth) : null;
     return {
       session: parseJson<HandoffSession>(session ?? null),
-      auth: parseJson<HandoffAuth>(auth ?? null),
+      auth: slot && 'auth' in slot ? slot.auth : null,
       txHash: typeof tx === 'string' && /^0x[0-9a-fA-F]{64}$/.test(tx) ? (tx as Hex) : null,
+      closed: !!slot && 'closed' in slot,
     };
   },
   async claimAuth(id: string, auth: HandoffAuth, ttlSec: number) {
@@ -72,13 +84,25 @@ export const kvHandoffStore: HandoffStore = {
     // 生の null だけが「新しく置けた」。既存値が読めない (壊れている) ときは置けていないので、
     // 成功とは言わず KV 障害として止める (偽の成功を出さない)。
     if (r.value === null) return { existing: null };
-    const existing = parseJson<HandoffAuth>(r.value);
-    return existing ? { existing } : null;
+    const slot = parseAuthSlot(r.value);
+    if (!slot) return null;
+    return 'closed' in slot ? { existing: null, closed: true } : { existing: slot.auth };
+  },
+  async closeSlot(id: string, mark: HandoffClosedMark, ttlSec: number) {
+    const r = await kvSetNxGet(handoffAuthKey(id), JSON.stringify(mark), ttlSec);
+    if (!r.ok) return null;
+    if (r.value === null) return { closed: true };
+    // 既存が読めない値なら締め切れたとは言わない (止める)。
+    const slot = parseAuthSlot(r.value);
+    if (!slot) return null;
+    return 'closed' in slot ? { closed: true } : { closed: false, existing: slot.auth };
   },
   async putTx(id: string, txHash: Hex, ttlSec: number) {
-    const r = await kvSet(handoffTxKey(id), txHash, { nx: true, ttlSec });
-    // 既に記録済み (NX で null) も成功扱い (端末の再送)。
-    return r.ok;
+    const r = await kvSetNxGet(handoffTxKey(id), txHash, ttlSec);
+    if (!r.ok) return null;
+    // 既に記録済みならその hash (端末の再送・別の送信)。読めない値なら記録できたとは言わない。
+    if (r.value === null) return txHash;
+    return /^0x[0-9a-fA-F]{64}$/.test(r.value) ? (r.value as Hex) : null;
   },
 };
 

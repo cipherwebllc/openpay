@@ -45,12 +45,17 @@ vi.mock('@/lib/storeHandoff', () => ({
     hold.calls.push({ fn: 'tx', args });
     return { ok: true };
   }),
+  closeHandoff: vi.fn(async (...args: unknown[]) => {
+    hold.calls.push({ fn: 'close', args });
+    return { ok: true, closed: true };
+  }),
 }));
 
 import { POST as createPost } from '@/app/api/register/handoff/route';
 import { GET as readGet } from '@/app/api/register/handoff/[id]/route';
 import { POST as authPost } from '@/app/api/register/handoff/[id]/auth/route';
 import { POST as txPost } from '@/app/api/register/handoff/[id]/tx/route';
+import { POST as closePost } from '@/app/api/register/handoff/[id]/close/route';
 import { POST as resolvePost } from '@/app/api/register/handoff/resolve/route';
 
 const ID = 'AAAAAAAAAAAAAAAAAAAAAA';
@@ -76,6 +81,7 @@ describe('/api/register/handoff/*', () => {
       await readGet(new Request(`https://open-pay.jp/api/register/handoff/${ID}`), params),
       await authPost(json({}), params),
       await txPost(json({}), params),
+      await closePost(json({}), params),
       await resolvePost(json({})),
     ]) {
       expect(res.status).toBe(404);
@@ -132,5 +138,14 @@ describe('/api/register/handoff/*', () => {
     await txPost(json({ txHash: '0x' }, { 'x-store-handoff-token': 'ef'.repeat(32) }), params);
     expect(hold.calls[1].fn).toBe('tx');
     expect(hold.calls[1].args.slice(0, 2)).toEqual([ID, 'ef'.repeat(32)]);
+  });
+
+  it('締め切りは端末のトークン (ヘッダ) を渡し、回数制限は付けない・応答は no-store', async () => {
+    hold.rateOk = false;
+    const res = await closePost(json({}, { 'x-store-handoff-token': 'ef'.repeat(32) }), params);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(await res.json()).toEqual({ ok: true, closed: true });
+    expect(hold.calls[0]).toMatchObject({ fn: 'close', args: [ID, 'ef'.repeat(32), {}] });
   });
 });
