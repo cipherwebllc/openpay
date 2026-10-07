@@ -90,6 +90,11 @@ function CreatePageBody() {
   // 同じ会計を二重に払わせない)。署名を待っている・閉じた QR の締め切りを待っている受け渡しは、移る前に締め切る
   // (署名が入っていたら端末が送るので移らない)。
   const [tabLocked, setTabLocked] = useState(false);
+  // 結果が出て送っていなくなったら、前に押したときの「切り替えられません」を消す (次の会計で出し直さない)。
+  const storeDeviceBusy = storeDevice.device.busy;
+  useEffect(() => {
+    if (!storeDeviceBusy) setTabLocked(false);
+  }, [storeDeviceBusy]);
   const showTab = (nextTab: Tab) => {
     setTabLocked(false);
     setTab(nextTab);

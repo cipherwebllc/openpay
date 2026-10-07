@@ -197,6 +197,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   // 起動時に最近の送信の結果を確かめている間 (読み込みが遅いと「何もしていない」に見える)。その間は次の QR も
   // 通常の QR も出させない (送っている途中で再読み込みした会計を、もう一度払わせない)。
   const recoveringRef = useRef(false);
+  const recoveryRunRef = useRef(0);
   const [recovering, setRecovering] = useState(false);
   // 「もう一度送る」に使う、確かめ済みの署名 (送らなかったときだけ・このタブのメモリだけ)。
   const retryRef = useRef<{ view: DeviceView & { auth: DeviceAuth }; session: DeviceSession } | null>(null);
@@ -506,6 +507,9 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   useEffect(() => {
     if (!monitor) return;
     let cancelled = false;
+    // この回の確認だけが「確かめている間」を下ろす (開発時の StrictMode で effect が 2 回走っても、
+    // 1 回目の終わりで 2 回目の確認中を「終わった」にしない)。
+    const run = (recoveryRunRef.current += 1);
     recoveringRef.current = true;
     setRecovering(true);
     void (async () => {
@@ -520,8 +524,10 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         // 「送信しました」を出すまでを待つ (その後は sent / unknown が次の QR を止める)。
         if (recent) await watch(recent, true);
       } finally {
-        recoveringRef.current = false;
-        if (mountedRef.current) setRecovering(false);
+        if (recoveryRunRef.current === run) {
+          recoveringRef.current = false;
+          if (mountedRef.current) setRecovering(false);
+        }
       }
     })();
     return () => {

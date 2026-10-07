@@ -63,11 +63,14 @@ export function StoreDeviceRegisterStatus({
       return (
         <div role="alert" className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p>{t(`createFailed.${state.reason}`)}</p>
-          {onShowNormal && (
-            <button type="button" className={BTN} onClick={onShowNormal}>
-              {t('showNormalQr')}
-            </button>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {onShowNormal && (
+              <button type="button" className={BTN} onClick={onShowNormal}>
+                {t('showNormalQr')}
+              </button>
+            )}
+            {dismiss}
+          </div>
         </div>
       );
     case 'waiting':
@@ -97,11 +100,14 @@ export function StoreDeviceRegisterStatus({
       return (
         <div role="status" className="space-y-2 text-sm text-slate-700">
           <p>{t('expired')}</p>
-          {onReissue && (
-            <button type="button" className={BTN} onClick={onReissue}>
-              {t('reissue')}
-            </button>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {onReissue && (
+              <button type="button" className={BTN} onClick={onReissue}>
+                {t('reissue')}
+              </button>
+            )}
+            {dismiss}
+          </div>
         </div>
       );
     case 'processing':

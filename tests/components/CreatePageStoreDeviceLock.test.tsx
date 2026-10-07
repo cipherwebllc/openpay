@@ -71,6 +71,18 @@ describe('作成ページ × お店の端末で送る', () => {
     expect(hold.leave).not.toHaveBeenCalled();
   });
 
+  it('結果が出て送っていなくなったら「切り替えられません」を消す (次の会計で押していないのに出し直さない)', () => {
+    hold.busy = true;
+    const r = renderWithIntl(<CreatePage />);
+    fireEvent.click(screen.getByRole('button', { name: 'レジ' }));
+    expect(screen.getByRole('alert')).toBeTruthy();
+    hold.busy = false;
+    r.rerender(<CreatePage />);
+    hold.busy = true; // 次の会計で送り始めた
+    r.rerender(<CreatePage />);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('締め切っていない受け渡しがあれば、締め切ってから移る', async () => {
     hold.pending = true;
     renderWithIntl(<CreatePage />);
