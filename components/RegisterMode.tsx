@@ -157,7 +157,8 @@ function RegisterModeContent({
     enabled: sdEnabled,
     device,
   } = useStoreDeviceMode();
-  const [storeSessionId, setStoreSessionId] = useState<string | null>(null);
+  // お店負担の QR (受け渡しを作った時点の会計で組み立てたもの・null = 出していない)。
+  const [storeQr, setStoreQr] = useState<{ id: string; url: string } | null>(null);
   // 「通常の QR を出す」を店員が選んだ (お店の端末で送るの QR を作れない・読み取れないとき)。
   const [forceNormalQr, setForceNormalQr] = useState(false);
   // 決済モードの 3 つ目「お店がガス代を肩代わりして送る」(決済QRタブで選び、レジは引き継ぐ・§19)。
@@ -481,11 +482,11 @@ function RegisterModeContent({
   // お店負担を選んでいて使えるはずだが、まだ準備中 (ガス用ウォレットの確認待ち等) → QR は出さない
   // (黙って通常の QR を出さない)。
   const storeDeviceNotReady = storeRequested && sdSaleBlocked === null && !storeDeviceForSale;
-  const storeQrActive = storeDeviceForSale && !forceNormalQr && storeSessionId !== null;
-  // お店の端末で送るの QR (receiptNo 等は通常と同じ・feeKind は付けない = parse が fail-closed で弾くため)。
-  const storeCheckoutUrl =
-    storeQrActive && checkoutUrl && effectiveReceiver
-      ? buildCheckoutUrl(origin, {
+  // お店の端末で送るの QR に載せる会計 (receiptNo 等は通常と同じ・feeKind は付けない = parse が fail-closed で弾くため)。
+  // 受け渡しの id は作った後に足す。
+  const storeCheckout =
+    storeDeviceForSale && checkoutUrl && effectiveReceiver
+      ? {
           to: effectiveReceiver,
           token: settings.token,
           chain: settings.chain,
@@ -495,34 +496,67 @@ function RegisterModeContent({
           receiptNo: receiptNo || undefined,
           storeName: settings.storeName.trim() || undefined,
           invoiceNo: settings.invoiceNo || undefined,
-          submit: 'store',
-          handoffId: storeSessionId,
-        })
-      : '';
-  const qrValue = storeQrActive ? storeCheckoutUrl : checkoutUrl;
+          submit: 'store' as const,
+        }
+      : null;
+  // QR を出す判断の時点と、受け渡しを作り終えた時点で会計・設定が同じか (作っている間にカートや設定を変えたら、
+  // その QR は出さずに受け渡しを締め切る = 請求額の違う QR・黙って通常の QR にしない)。
+  const storeOpenKey = JSON.stringify([
+    storeRequested,
+    storeDeviceForSale,
+    totalWei.toString(),
+    storeCheckout,
+    checkoutUrl,
+  ]);
+  const storeOpenKeyRef = useRef(storeOpenKey);
+  useEffect(() => {
+    storeOpenKeyRef.current = storeOpenKey;
+  }, [storeOpenKey]);
+  // QR を閉じたら進める (出し直しの途中で閉じたとき、遅れて返った受け渡しで QR を開き直さない)。
+  const storeOpenAttemptRef = useRef(0);
+  // 表示中のお店負担の QR は、受け渡しを作った時点の会計で組み立てた写しから出す (後から変わっても混ぜない)。
+  const storeQrActive = storeQr !== null && !forceNormalQr;
+  const qrValue = storeQrActive ? storeQr.url : checkoutUrl;
   const sdState = device.state;
   // QR を薄くする: この QR の受け渡しが署名を待っている (受付時間が十分残る) とき以外 (署名を受け取った後・受付時間の
   // 終わり・出し直しの途中 = 次のお客様に読ませない)。
   const storeQrDimmed =
     storeQrActive &&
-    !(sdState.phase === 'waiting' && !sdState.stale && sdState.session.id === storeSessionId);
-  // QR を閉じたら進める (出し直しの途中で閉じたとき、遅れて返った受け渡しで QR を開き直さない)。
-  const storeOpenAttemptRef = useRef(0);
+    !(sdState.phase === 'waiting' && !sdState.stale && sdState.session.id === storeQr.id);
+
+  /** 受け渡しを作り、作った時点の会計で QR を組み立てて出す。作る間に会計・設定が変わった・閉じたら出さずに締め切る。 */
+  async function openStoreQr(): Promise<boolean> {
+    if (!effectiveReceiver || !storeCheckout) return false;
+    const key = storeOpenKeyRef.current;
+    const attempt = storeOpenAttemptRef.current;
+    const checkout = storeCheckout;
+    const s = await device.start(getAddress(effectiveReceiver), totalWei);
+    // 作れなかった (理由は状態に出る)・前の会計の署名の送信を優先した → QR は開かない。
+    if (!s) return false;
+    if (storeOpenKeyRef.current !== key || storeOpenAttemptRef.current !== attempt) {
+      device.stop();
+      return false;
+    }
+    setStoreQr({ id: s.id, url: buildCheckoutUrl(origin, { ...checkout, handoffId: s.id }) });
+    setQrModalOpen(true);
+    return true;
+  }
 
   async function openQr() {
     // 受け取った署名を送っている・結果を待っている間は次の QR を出さない (二重払いにしない)。
     if (device.busy || storeDeviceNotReady) return;
     setForceNormalQr(false);
     if (storeDeviceForSale && effectiveReceiver) {
-      const s = await device.start(getAddress(effectiveReceiver), totalWei);
-      // 作れなかった (理由は状態に出る)・前の会計の署名の送信を優先した → QR は開かない。
-      if (!s) return;
-      setStoreSessionId(s.id);
-    } else if (env.enableStoreGasWallet) {
+      await openStoreQr();
+      return;
+    }
+    if (env.enableStoreGasWallet) {
       // 通常の QR: 前の受け渡し (切替を OFF にする前のものも) を締め切ってから出す。署名が入っていたら
-      // 端末が送るので、通常の QR は出さない。受け渡しが無ければ通信せずにすぐ出す。
-      if (!(await device.releaseForNormal())) return;
-      setStoreSessionId(null);
+      // 端末が送るので、通常の QR は出さない。受け渡しが無ければ通信せずにすぐ出す。締め切りを待つ間に
+      // 会計・設定が変わったら出さない (押し直してもらう)。
+      const key = storeOpenKeyRef.current;
+      if (!(await device.releaseForNormal()) || storeOpenKeyRef.current !== key) return;
+      setStoreQr(null);
     }
     setQrModalOpen(true);
   }
@@ -531,10 +565,10 @@ function RegisterModeContent({
     storeOpenAttemptRef.current += 1;
     setQrModalOpen(false);
     setForceNormalQr(false);
-    if (storeSessionId) {
+    if (storeQr) {
       // 署名を待っていたセッションは締め切る (署名が入っていれば送る・結果は会計ボタンの下に出る)。
       device.stop();
-      setStoreSessionId(null);
+      setStoreQr(null);
     }
   }
 
@@ -543,23 +577,18 @@ function RegisterModeContent({
     const attempt = storeOpenAttemptRef.current;
     // 締め切りを待つ間に閉じた → 開き直さない。
     if (!(await device.releaseForNormal()) || storeOpenAttemptRef.current !== attempt) return;
-    setStoreSessionId(null);
+    setStoreQr(null);
     setForceNormalQr(true);
     setQrModalOpen(true);
   }
 
   async function reissueStoreQr() {
-    if (!effectiveReceiver) return;
-    const attempt = storeOpenAttemptRef.current;
-    const s = await device.start(getAddress(effectiveReceiver), totalWei);
-    if (s && storeOpenAttemptRef.current !== attempt) {
-      // 出し直しの途中で閉じた → この受け渡しは出さずに締め切る。
-      device.stop();
-      return;
+    // 出し直す間は前の (薄くした) QR のまま。出せなければ閉じる (通常の QR に変えない)。閉じた後 (会計ボタンの下)
+    // から出し直したときも、新しい QR を見せる (QR の無い「署名待ち」を残さない)。
+    if (!(await openStoreQr())) {
+      setStoreQr(null);
+      setQrModalOpen(false);
     }
-    setStoreSessionId(s?.id ?? null);
-    // 閉じた後 (会計ボタンの下) から出し直したときも、新しい QR を見せる (QR の無い「署名待ち」を残さない)。
-    setQrModalOpen(!!s);
   }
 
   const storeDeviceStatus = (

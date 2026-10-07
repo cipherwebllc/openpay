@@ -600,6 +600,7 @@
       "itemName": "Payment",
       "posterBadge": "Gas paid by the shop",
       "actionsNote": "This QR works only while it’s shown on this screen (it can’t be printed, saved or copied).",
+      "showNormalQr": "Show the standard QR",
       "blocked": {
         "token": "“The shop pays the gas” works only for JPYC on {chain}. Change the payment mode.",
         "no_locks": "Not available in this browser (it can’t prevent sending twice from another tab). Change the payment mode.",

@@ -138,6 +138,25 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
 
+    it('圏外のとき、保存した通常の QR を出す (今までどおり)・送っている間は出さない', async () => {
+      window.localStorage.setItem(
+        LAST_QR_KEY,
+        JSON.stringify({ payUrl: 'https://test.local/pay?to=x', amountLabel: '500 JPYC', tokenChainLabel: 'JPYC · Polygon', ts: 1 }),
+      );
+      const online = Object.getOwnPropertyDescriptor(window.navigator, 'onLine');
+      Object.defineProperty(window.navigator, 'onLine', { value: false, configurable: true });
+      try {
+        const r = render(<QrGenerator />);
+        expect(await screen.findByText(/圏外です/)).toBeTruthy();
+        sd.busy = true;
+        r.rerender(<QrGenerator />);
+        expect(screen.queryByText(/圏外です/)).toBeNull();
+      } finally {
+        if (online) Object.defineProperty(window.navigator, 'onLine', online);
+        else delete (window.navigator as { onLine?: boolean }).onLine;
+      }
+    });
+
     it('締め切りを待つ間にお店負担へ切り替えたら、通常の QR は出さない', async () => {
       const user = userEvent.setup();
       let resolve!: (v: boolean) => void;
@@ -346,6 +365,38 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       sd.state = { phase: 'waiting', session: { id: 'ZzZzZzZzZzZzZzZzZzZzZz' }, stale: false, degraded: false };
       r.rerender(<QrGenerator />);
       expect(wrapper().className).toMatch(/opacity-40/); // 別の受け渡しの「署名待ち」ではこの QR をはっきり出さない
+    });
+
+    it('作れなかったときは、店員が選んで通常の QR を出せる (モーダルの外に出す)', async () => {
+      const user = userEvent.setup();
+      seed();
+      sd.state = { phase: 'create_failed', reason: 'unavailable' };
+      sd.start.mockResolvedValue(null);
+      const [btn] = await ready(user);
+      await user.click(btn);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      await user.click(await screen.findByRole('button', { name: '通常の QR を出す' }));
+      expect(await screen.findByRole('dialog')).toBeTruthy();
+      expect(sd.releaseForNormal).toHaveBeenCalled();
+      expect(shownQr()).toMatch(/\/pay\?/);
+    });
+
+    it('圏外のときも、お店負担を選んでいる間は保存した通常の QR を出さない', async () => {
+      seed();
+      window.localStorage.setItem(
+        LAST_QR_KEY,
+        JSON.stringify({ payUrl: 'https://test.local/pay?to=x', amountLabel: '500 JPYC', tokenChainLabel: 'JPYC · Polygon', ts: 1 }),
+      );
+      const online = Object.getOwnPropertyDescriptor(window.navigator, 'onLine');
+      Object.defineProperty(window.navigator, 'onLine', { value: false, configurable: true });
+      try {
+        render(<QrGenerator />);
+        await screen.findByPlaceholderText('1000');
+        expect(screen.queryByText(/圏外です/)).toBeNull();
+      } finally {
+        if (online) Object.defineProperty(window.navigator, 'onLine', online);
+        else delete (window.navigator as { onLine?: boolean }).onLine;
+      }
     });
 
     it('ガス用ウォレットのパネルを出す', async () => {

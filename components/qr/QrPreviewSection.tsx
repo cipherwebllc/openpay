@@ -23,6 +23,7 @@ export function QrPreviewSection({
   setAmount,
   setQrModalOpen,
   showQrBlocked,
+  secondaryAction,
 }: {
   payUrl: string;
   receiverValid: boolean;
@@ -32,6 +33,8 @@ export function QrPreviewSection({
   setQrModalOpen: Dispatch<SetStateAction<boolean>>;
   /** 「QRコードを表示する」を押せない理由 (お店がガス代を肩代わりして送るで使えない会計など)。省略時は今のまま。 */
   showQrBlocked?: string;
+  /** 補助の操作 (例: お店負担の QR を作れなかったときの「通常の QR を出す」)。省略時は今のまま。 */
+  secondaryAction?: { label: string; onClick: () => void };
 }) {
   const t = useTranslations('QrGenerator');
   return (
@@ -69,6 +72,15 @@ export function QrPreviewSection({
                 <p role="status" className="text-center text-xs text-amber-800">
                   {showQrBlocked}
                 </p>
+              )}
+              {secondaryAction && (
+                <button
+                  type="button"
+                  onClick={secondaryAction.onClick}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                >
+                  {secondaryAction.label}
+                </button>
               )}
               <p className="text-center text-sm text-slate-500 lg:hidden">
                 {t('qrMobileBarHint')}

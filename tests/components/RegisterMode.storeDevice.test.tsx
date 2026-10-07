@@ -253,6 +253,19 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('受け渡しを作る間にカートを変えたら、その QR は出さずに締め切る (請求額の違う QR・黙って通常の QR を出さない)', async () => {
+    const user = userEvent.setup();
+    seed();
+    let resolve!: (v: unknown) => void;
+    hold.start.mockReturnValue(new Promise((r) => { resolve = r; }));
+    render(<RegisterMode />);
+    await addItemAndOpen(user);
+    await user.click(await screen.findByRole('button', { name: /コーヒー/ })); // 500 → 1000
+    resolve({ id: HS, token: 'ab'.repeat(32), expiresAt: 0, merchant: VALID, amount: '1', chainId: 80002 });
+    await waitFor(() => expect(hold.stop).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
   it('受け取った署名を送っている間は QR のボタンを押せない', async () => {
     seed();
     hold.busy = true;
