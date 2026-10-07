@@ -332,6 +332,8 @@ export async function sendStoreDeviceSettle(
       }
       if (await io.authorizationUsed(v.params.from, v.nonce)) return { kind: 'not_sent', reason: 'used' };
       if ((await io.tokenBalance(v.params.from)) < total) return { kind: 'not_sent', reason: 'customer_balance' };
+      // POL が 0 だと見積もりの失敗 (= 読み取れない) に見えるので、先に「POL が足りない」と分かるようにする。
+      if ((await io.nativeBalance()) === 0n) return { kind: 'not_sent', reason: 'native_insufficient' };
       try {
         await io.simulate(data);
       } catch {

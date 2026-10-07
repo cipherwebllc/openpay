@@ -29,9 +29,10 @@ describe('StoreDeviceRegisterStatus (店員向けの表示)', () => {
     expect(screen.queryByText('確定しました。')).toBeNull();
   });
 
-  it('前回の送信の結果には「前回の送信」を添える', () => {
+  it('前回の送信の結果には「前回の送信」を添え、「品物をお渡しください」は付けない', () => {
     show({ phase: 'received', mark: MARK, finalized: true, previous: true });
     expect(screen.getByRole('status')).toHaveTextContent(/前回の送信:.*入金を確認しました/);
+    expect(screen.getByRole('status')).not.toHaveTextContent(/品物をお渡しください/);
     expect(screen.getByText('確定しました。')).toBeTruthy();
   });
 

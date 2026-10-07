@@ -465,7 +465,7 @@ function RegisterModeContent({
         ? 'no_wallet'
         : settings.token !== 'jpyc' || deployment.chainId !== sdChainId
           ? 'token'
-          : !effectiveReceiver ||
+          : effectiveReceiver &&
               [sdForwarder, sdFeeReceiver].some(
                 (a) => a && a.toLowerCase() === effectiveReceiver.toLowerCase(),
               )
@@ -538,7 +538,8 @@ function RegisterModeContent({
     if (!effectiveReceiver) return;
     const s = await device.start(getAddress(effectiveReceiver), totalWei);
     setStoreSessionId(s?.id ?? null);
-    if (!s) setQrModalOpen(false);
+    // 閉じた後 (会計ボタンの下) から出し直したときも、新しい QR を見せる (QR の無い「署名待ち」を残さない)。
+    setQrModalOpen(!!s);
   }
 
   const storeDeviceStatus = (

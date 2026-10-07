@@ -152,7 +152,7 @@ describe('sendStoreDeviceSettle (二重に送らない・鍵は送る直前に)'
     const calls: Calls = [];
     const v = await verified();
     expect(await sendStoreDeviceSettle(v, ctx, fakeIo(calls))).toMatchObject({ kind: 'sent', hash: HASH, mark: { hash: HASH } });
-    expect(calls).toEqual(['lock', 'now', 'used', 'balance', 'simulate', 'estimate', 'nonce', 'sign:300000:7', 'native', 'send:marked=true']);
+    expect(calls).toEqual(['lock', 'now', 'used', 'balance', 'native', 'simulate', 'estimate', 'nonce', 'sign:300000:7', 'native', 'send:marked=true']);
     const marks = readSentMarks();
     expect(marks).toMatchObject({ ok: true, marks: [{ nonce: v.nonce, hash: HASH, amount: AMOUNT.toString(), handoffId: ctx.handoffId }] });
   });
@@ -187,6 +187,16 @@ describe('sendStoreDeviceSettle (二重に送らない・鍵は送る直前に)'
     ['見積 × 1.2 が上限 500,000 を超える (切り詰めない)', { estimateGas: async () => 420_000n }, 'gas_limit'],
     ['ガス代が 0.2 POL を超える', { signTx: async () => ({ raw: RAW, hash: HASH, maxFeePerGas: 10n ** 12n }) }, 'gas_too_high'],
     ['POL が足りない', { nativeBalance: async () => 10n ** 15n }, 'native_insufficient'],
+    [
+      'POL が 0 (見積もりの失敗に見せない)',
+      {
+        nativeBalance: async (): Promise<bigint> => 0n,
+        estimateGas: async (): Promise<bigint> => {
+          throw new Error('insufficient funds for gas');
+        },
+      } as Partial<DeviceSendIo>,
+      'native_insufficient',
+    ],
     ['鍵が読めない・RPC 障害', { signTx: async () => { throw new Error('no_key'); } }, 'rpc'],
   ])('%s → 送らない・印を残さない', async (_, over, reason) => {
     const sends: Calls = [];

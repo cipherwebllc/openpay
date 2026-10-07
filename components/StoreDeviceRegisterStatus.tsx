@@ -140,7 +140,8 @@ export function StoreDeviceRegisterStatus({
         <div role="status" className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
           <p className="font-semibold">
             {previous}
-            {t('received', { amount: formatAmount(state.mark.amount) })}
+            {/* 前回の送信 (再読み込み後) には「品物をお渡しください」を付けない (渡し済みの会計への二重の合図にしない)。 */}
+            {t(state.previous ? 'receivedPrevious' : 'received', { amount: formatAmount(state.mark.amount) })}
           </p>
           {state.finalized && <p className="text-xs">{t('finalized')}</p>}
           <div className="flex flex-wrap items-center gap-2">

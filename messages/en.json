@@ -2517,6 +2517,7 @@
       "processing": "Signature received. Checking and sending…",
       "sent": "Sent. Waiting for it to be included in a block…",
       "received": "Payment confirmed ({amount}). You can hand over the goods.",
+      "receivedPrevious": "Payment confirmed ({amount}).",
       "finalized": "Finalized.",
       "previousLabel": "Previous send",
       "reverted": "The transaction failed (reverted). No payment was made.",
@@ -2538,7 +2539,7 @@
         "rpc": "Not sent because the chain couldn't be read."
       },
       "rejected": "Not sent because the received signature doesn't match this checkout.",
-      "notPaidGuide": "No payment was made. After the customer's screen shows “No payment was made” (about 3 minutes), show a new QR or use a standard payment.",
+      "notPaidGuide": "No payment was made. After the customer's screen shows “No payment was made” (this takes a few minutes), show a new QR or use a standard payment.",
       "retry": "Send again",
       "viewTx": "View transaction",
       "dismiss": "Close"

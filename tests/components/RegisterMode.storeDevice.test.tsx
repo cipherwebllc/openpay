@@ -214,6 +214,17 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(shownCheckout()).toBeNull();
   });
 
+  it('閉じた後の「受付時間が終わりました」から出し直すと、新しい QR を開く', async () => {
+    const user = userEvent.setup();
+    seed();
+    hold.state = { phase: 'expired' };
+    render(<RegisterMode />);
+    await user.click(await screen.findByRole('button', { name: /コーヒー/ }));
+    await user.click(await screen.findByRole('button', { name: 'QR を出し直す' }));
+    expect(hold.start).toHaveBeenCalledWith(VALID, 500n * 10n ** 18n);
+    await waitFor(() => expect(shownCheckout()?.get('hs')).toBe(HS));
+  });
+
   it('受け取った署名を送っている間は QR のボタンも切替も押せない', async () => {
     seed();
     hold.busy = true;
