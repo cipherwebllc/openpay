@@ -46,8 +46,10 @@ export type AppendPaymentHistoryCtx = {
   /** ネットワーク手数料相当額 (非 circle の gasless 経路)。standard / circle は null
    * (circle は result 由来の circlePaymasterNetUsdc を使う)。 */
   networkFeeEquivalent: bigint | null;
-  /** 店舗名。/pay と /checkout の URL の store (任意) から流す。無ければ ''。 */
+  /** 店舗名。/pay の URL の store (任意) から流す。無ければ ''。会計 CSV の取引先にも使われる。 */
   storeName: string;
+  /** 顧客控えだけに出す店名 (/checkout の store)。店舗側履歴の storeName (= 会計 CSV の取引先) は変えない。 */
+  receiptMerchantName?: string | null;
   note: string;
   /** 異通貨建て決済の anchor (FX 換算 QR のみ非 null)。元の価格建て金額 (人間可読)・
    *  建てトークン・適用 FX レート。通常決済は省略 (= null)。全 sale leg 横断で同一値。 */
@@ -80,6 +82,7 @@ function saveReceiptFor(entry: HistoryEntry, ctx: AppendPaymentHistoryCtx): void
       sourceRoute: ctx.sourceRoute,
       locale: ctx.locale,
       orderId: ctx.orderId,
+      merchantName: ctx.receiptMerchantName,
       invoiceNo: ctx.invoiceNo,
     }),
   );

@@ -779,6 +779,19 @@ describe('payerReceiptFromHistoryEntry: インボイス登録番号', () => {
     );
     expect(r.lineItems?.[0].amount).toBe('1100');
     expect(r.totalAmount).toBe('1100');
+    // 合計の税額も総額の行から取る (手取り 1090 由来の 99 と混ぜない)
+    expect(r.lineItems?.[0].taxAmount).toBe('100');
+    expect(r.totalTaxAmount).toBe('100');
+  });
+
+  it('opts.merchantName は履歴の店名が空のときだけ控えに使う (会計 CSV の取引先は変えない)', () => {
+    const fromOpts = payerReceiptFromHistoryEntry(saleEntry({ storeName: '' }), {
+      merchantName: 'Checkout Cafe',
+      now: NOW,
+    });
+    expect(fromOpts.merchantName).toBe('Checkout Cafe');
+    const fromEntry = payerReceiptFromHistoryEntry(saleEntry(), { merchantName: 'X', now: NOW });
+    expect(fromEntry.merchantName).toBe('OpenPay Cafe');
   });
 
   it('商品名も税率も無い単品は従来どおり仮想行 (対象外・税率なし)', () => {
@@ -807,6 +820,11 @@ describe('payerReceiptFromHistoryEntry: インボイス登録番号', () => {
     expect(ja).toContain('8% 対象：540 JPYC（うち消費税 40 円）');
     expect(ja).toContain('※ は軽減税率 (8%) の対象です');
     expect(ja).not.toContain('消費税：');
+    // 共有先でも「店舗が設定した未確認の番号」とわかるように、注意と確認先を残す
+    expect(ja).toContain('OpenPay は登録状況を確かめていません');
+    expect(ja).toContain(
+      '確認：https://www.invoice-kohyo.nta.go.jp/regno-search/detail?selRegNo=1234567890123',
+    );
     const en = payerReceiptCopyText(r, 'en');
     expect(en).toContain('Registration no.：T1234567890123');
     expect(en).toContain('8% items：540 JPYC (incl. consumption tax ¥40)');

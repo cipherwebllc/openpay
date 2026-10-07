@@ -1184,7 +1184,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       feeAmount: breakdown.feeAmount,
       saleAmount: totalWei,
       networkFeeEquivalent,
-      storeName: params.storeName ?? '',
+      // 店舗側履歴の storeName は従来どおり空 (会計 CSV の取引先 = 顧客のまま)。店名は控えにだけ出す。
+      storeName: '',
+      receiptMerchantName: params.storeName ?? null,
       note: params.description ?? params.orderId ?? '',
       productName: params.items.map((it) => it.name).join(', '),
       memo: params.description ?? null,

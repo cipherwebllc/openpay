@@ -23,7 +23,11 @@ import {
 } from './history';
 import { displaySymbolFor, type TokenSymbol } from './tokens';
 import { taxAmountDecimal, taxDisplayDecimals } from './tax';
-import { invoiceReceiptView, normalizeInvoiceRegistrationNumber } from './invoice';
+import {
+  invoiceLookupUrl,
+  invoiceReceiptView,
+  normalizeInvoiceRegistrationNumber,
+} from './invoice';
 
 export const PAYER_RECEIPTS_STORAGE_KEY = 'openpay:payerReceipts:v1';
 export const PAYER_RECEIPTS_CHANGED_EVENT = 'openpay:payer-receipts-changed';
@@ -210,6 +214,8 @@ export function payerReceiptFromHistoryEntry(
     sourceRoute?: string;
     locale?: string;
     orderId?: string;
+    /** 控えに出す店名 (店舗側履歴の storeName が空の経路用。履歴・会計 CSV の取引先は変えない)。 */
+    merchantName?: string | null;
     invoiceNo?: string | null;
     now?: Date;
   } = {},
@@ -222,6 +228,11 @@ export function payerReceiptFromHistoryEntry(
   const grossTotal = /^\d+$/.test(grossRaw)
     ? formatUnits(BigInt(grossRaw), HISTORY_ASSET_DECIMALS[entry.asset])
     : totals.total;
+  // 明細の無い単品は総額 (gross) の 1 行で組み、税額もその行から取る (手取り由来の entryTotals と
+  // 混ぜると、同じ控えの中で行の税額と合計の税額が食い違う)。
+  const single = entry.lineItems && entry.lineItems.length > 0 ? null : singleReceiptLine(entry, grossTotal);
+  const lineItems = single ?? entryLineItems(entry);
+  const totalTaxAmount = single && single.length > 0 ? (single[0].taxAmount ?? '0') : totals.totalTax;
   const status: PayerReceiptStatus =
     entry.status === 'success'
       ? 'confirmed'
@@ -237,17 +248,14 @@ export function payerReceiptFromHistoryEntry(
       tokenAddress: entry.tokenAddress,
       amount: grossTotal,
       merchantAddress: entry.merchant,
-      merchantName: entry.storeName,
+      merchantName: entry.storeName.trim() || opts.merchantName,
       merchantInvoiceNo: opts.invoiceNo,
       payerAddress: entry.customer,
       paymentMode: entry.payMode,
       gasMode: entry.gasMode,
-      lineItems:
-        entry.lineItems && entry.lineItems.length > 0
-          ? entryLineItems(entry)
-          : singleReceiptLine(entry, grossTotal),
+      lineItems,
       subtotalAmount: grossTotal,
-      totalTaxAmount: totals.totalTax,
+      totalTaxAmount,
       totalAmount: grossTotal,
       memo: entry.memo,
       receiptNo: entry.receiptNo,
@@ -518,6 +526,16 @@ export function payerReceiptCopyText(r: PayerReceipt, locale?: string): string {
   if (r.txHash) lines.push(`${en ? 'Tx hash' : '取引hash'}：${r.txHash}`);
   lines.push(`${en ? 'Merchant wallet' : '店舗ウォレット'}：${r.merchantAddress}`);
   if (r.payerAddress) lines.push(`${en ? 'Payer wallet' : '顧客ウォレット'}：${r.payerAddress}`);
+  if (invoice) {
+    // 画面の免責と同じ前提を、コピーして共有した先にも残す (未確認の番号を確認済みに見せない)。
+    lines.push('');
+    lines.push(
+      en
+        ? 'The registration number is set by the shop; OpenPay does not check the registration. The date and time come from the device used to pay.'
+        : '登録番号は店舗が設定した値で、OpenPay は登録状況を確かめていません。日時はお支払いに使った端末の時刻です。',
+    );
+    lines.push(`${en ? 'Check' : '確認'}：${invoiceLookupUrl(invoice.registrationNumber)}`);
+  }
   return lines.join('\n');
 }
 

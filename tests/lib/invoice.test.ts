@@ -122,6 +122,25 @@ describe('invoiceRateGroups', () => {
     expect(invoiceRateGroups([line({ amount: '100' }), line({ amount: '100', taxRate: null })])).toBeNull();
   });
 
+  it('税率と税区分が食い違う行 (任意税率の 8%・税区分なしの 8%・10% に軽減の区分) → null', () => {
+    expect(invoiceRateGroups([line({ amount: '108', taxRate: 8, taxCategory: 'custom' })])).toBeNull();
+    expect(invoiceRateGroups([line({ amount: '108', taxRate: 8, taxCategory: null })])).toBeNull();
+    expect(invoiceRateGroups([line({ amount: '110', taxRate: 10, taxCategory: 'taxable_8' })])).toBeNull();
+    expect(invoiceRateGroups([line({ amount: '100', taxRate: 0, taxCategory: 'taxable_10' })])).toBeNull();
+  });
+
+  it('税区分が未指定の 10% と 0% は受ける (旧い QR)', () => {
+    expect(
+      invoiceRateGroups([
+        line({ amount: '110', taxCategory: null }),
+        line({ amount: '50', taxRate: 0, taxCategory: null }),
+      ]),
+    ).toEqual([
+      { rate: 10, total: '110', tax: '10' },
+      { rate: 0, total: '50', tax: '0' },
+    ]);
+  });
+
   it('10/8/0 以外の任意税率 (custom 5%) がある → null', () => {
     expect(invoiceRateGroups([line({ amount: '105', taxRate: 5, taxCategory: 'custom' })])).toBeNull();
   });
@@ -150,6 +169,12 @@ describe('invoiceReceiptView', () => {
       hasReducedRate: true,
       totalTax: '140',
     });
+  });
+
+  it('支払いが確定していない控え (pending / failed / unknown) は出さない', () => {
+    for (const status of ['pending', 'failed', 'unknown'] as const) {
+      expect(invoiceReceiptView(receipt({ status }))).toBeNull();
+    }
   });
 
   it('USDC の控えは出さない (消費税額は円で書く必要がある)', () => {

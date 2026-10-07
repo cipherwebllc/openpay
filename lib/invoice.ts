@@ -67,9 +67,21 @@ function innerTaxYen(totalMinor: bigint, rate: InvoiceRate): bigint {
   return (num * 2n + den) / (den * 2n);
 }
 
+// 税率と税区分の組み合わせ。税率が未指定 (null)・10/8/0 以外・税区分と食い違う (任意税率の 8% 等)
+// 行は null。軽減税率は税区分 taxable_8 で明示された 8% だけ (※ の判定を税区分に揃える)。
+function invoiceRateOf(li: HistoryLineItem): InvoiceRate | null {
+  const { taxRate: rate, taxCategory: category } = li;
+  if (rate === 10 && (category === 'taxable_10' || category == null)) return 10;
+  if (rate === 8 && category === 'taxable_8') return 8;
+  if (rate === 0 && (category === 'tax_free' || category === 'out_of_scope' || category == null)) {
+    return 0;
+  }
+  return null;
+}
+
 /**
  * 明細を税率ごとに束ねる (JPYC 前提)。並びは 10% → 8% → 0%・空のグループは出さない。
- * 税率が未指定 (null) か 10/8/0 以外 (任意税率) の行が 1 つでもあれば null
+ * invoiceRateOf が null の行が 1 つでもあれば null
  * (= 記載事項がそろわない、または存在しない税率の「インボイス」になる)。
  */
 export function invoiceRateGroups(
@@ -78,8 +90,8 @@ export function invoiceRateGroups(
   if (!lineItems || lineItems.length === 0) return null;
   const sums = new Map<InvoiceRate, bigint>();
   for (const li of lineItems) {
-    const rate = li.taxRate;
-    if (rate !== 10 && rate !== 8 && rate !== 0) return null;
+    const rate = invoiceRateOf(li);
+    if (rate == null) return null;
     const minor = toMinor(li.amount);
     if (minor == null) return null;
     sums.set(rate, (sums.get(rate) ?? 0n) + minor);
@@ -109,10 +121,13 @@ export type InvoiceReceiptView = {
 
 /**
  * 控えにインボイス欄を出せるなら、その表示用の値を返す。出せなければ null (従来の控えのまま)。
- * 条件: JPYC・登録番号が形式どおり・店名が実際に設定されている (@handle の代用名ではない)・
- * 全行の税率が 10/8/0・課税の行が 1 つ以上・明細の合計が支払総額と一致。
+ * 条件: 支払いが確定 (confirmed)・JPYC・登録番号が形式どおり・店名が実際に設定されている
+ * (@handle の代用名ではない)・全行の税率と税区分が 10/8/0 で整合・課税の行が 1 つ以上・
+ * 明細の合計が支払総額と一致。
  */
 export function invoiceReceiptView(r: PayerReceipt): InvoiceReceiptView | null {
+  // 失敗・未確定の控えを「支払い済みのインボイス」として共有させない。
+  if (r.status !== 'confirmed') return null;
   if (r.tokenSymbol !== 'JPYC' || r.currency !== 'JPYC') return null;
   const registrationNumber = normalizeInvoiceRegistrationNumber(r.merchantInvoiceNo);
   if (!registrationNumber) return null;
