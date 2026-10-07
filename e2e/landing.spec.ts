@@ -257,9 +257,9 @@ test.describe('landing / (LP)', () => {
     // 旧 % 訴求「0.5%」と旧「0%」永続コミット文脈は撤去済 (regression fence)
     expect(await benefits.getByText('0.5%', { exact: true }).count()).toBe(0);
     expect(await benefits.getByText('0%', { exact: true }).count()).toBe(0);
-    // 4 title (Fee カードの適用先はレジの JPYC 決済)
+    // 4 title (Fee カードはガスレス決済の利用料。2026-10-07 にレジの通常決済の利用料を廃止)
     await expect(
-      benefits.getByRole('heading', { name: 'レジの JPYC 利用料' }),
+      benefits.getByRole('heading', { name: 'ガスレス決済の利用料' }),
     ).toBeVisible();
     await expect(
       benefits.getByRole('heading', { name: '導入コスト 0 円' }),

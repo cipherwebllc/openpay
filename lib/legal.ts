@@ -129,13 +129,16 @@ export const LEGAL_ENTITY = {
   // 2026-09-08 改定案: 第13条に自社出品・利用ライセンス NFT の条件と公開情報を追加。
   // 文言と施行日は公開前の user 承認対象 (flag の点灯とは別)。
   // 2026-09-10 改定案: 保護配布の外部ホスト・チケット・回収の限界を第13条 (18) に追加。
-  termsEffectiveDate: '2026-09-10',
+  // 2026-10-07 改定: レジ (店頭POS) の通常決済 (ガスあり) の OpenPay 利用料 (2026 年 7 月から決済額の 1%) を
+  //   廃止 (第 3 条・第 5 条)。値下げ = 利用者に有利な変更。特商法・免責事項も同日改定。
+  termsEffectiveDate: '2026-10-07',
   // 2026-07-29 改定: 非公開チップメッセージ (質問箱 Phase 1) の取得項目 (2-1(7))・
   //   利用目的 (2-2(9))・保管期間 (最長 180 日+本人削除) を追加。実質的改定のため施行日を更新。
   // 2026-09-10 改定案: 購入歴のない保有者も含む配布先へのチケット情報の提供を明示。
   privacyEffectiveDate: '2026-09-10',
-  disclaimerEffectiveDate: '2026-06-13',
-  tokuteiEffectiveDate: '2026-07-30',
+  // 2026-10-07 改定: レジの通常決済の利用料の廃止 (Terms と同日)。
+  disclaimerEffectiveDate: '2026-10-07',
+  tokuteiEffectiveDate: '2026-10-07',
   // モバイル注文システム利用料の施行日 (本利用料を新設した開示の公表日)。doc 全体の施行日 (上記
   // 2026-06-13) とは別管理 — 本利用料は新規・任意の付加機能 (モバイル注文) に対する個別条項で、機能の
   // 提供開始 (flag 点灯) まで実際の徴収は発生しない。本文は本定数の日付を補間して表示する。
@@ -346,14 +349,13 @@ export const DISCLOSED_TIP_FEE_MODELS = {
   usdcArc: 'standard-usdc-network-fee-no-openpay-fee',
 } as const;
 
-// LP / 導入ガイドの補間値。レジ JPYC は通常決済でも店舗負担で recover の % 部分を適用
-// (registerFeeClaim.ts の recoverPercentValue と同じ料率)。最低額はガスレス経路のみ。
-// 通常決済の無料表記からはレジ・モバイル注文を除く。下記は開示数値の参照のみで徴収額を変えない。
+// LP / 導入ガイドの補間値。通常決済の無料表記からはモバイル注文を除く。下記は開示数値の参照のみで
+// 徴収額を変えない。レジの通常決済の利用料 (registerPercent) は 2026-10-07 に廃止 (本番
+// NEXT_PUBLIC_ENABLE_REGISTER_FEE=OFF と同一リリース)。再び点灯するなら開示 3 点セットを書き戻すこと。
 export const LANDING_PAYMENT_FEE_VALUES = {
   recoverPercent: DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100,
   recoverFloor: DISCLOSED_RECOVER_FEE.floorJpyc,
   tipFloor: DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc,
-  registerPercent: DISCLOSED_RECOVER_FEE.percentFromJulyBps / 100,
   storefrontPercent: DISCLOSED_MOBILE_ORDER_FEE.storefrontBps / 100,
   preorderPercent: DISCLOSED_MOBILE_ORDER_FEE.preorderBps / 100,
 } as const;

@@ -32,11 +32,11 @@ describe('LandingCashComparison', () => {
     expect(screen.getByText('導入費と機器')).toBeInTheDocument();
     expect(screen.getByText('解約縛り')).toBeInTheDocument();
 
-    // 手数料セルはレジの料金とガスレス最低額を区別する。
+    // 手数料セルは「通常決済は無料 (レジ含む)・ガスレスは % と最低額」を区別する (2026-10-07 レジの通常決済の利用料を廃止)。
     expect(screen.getByText('1.98〜3.24%')).toBeInTheDocument();
-    expect(screen.getByText('レジ 1%')).toBeInTheDocument();
+    expect(screen.getByText('ガスレス 1%')).toBeInTheDocument();
     expect(
-      screen.getByText(/レジの JPYC は通常決済も店舗負担。ガスレス JPYC は 1%・最低 2 JPYC/),
+      screen.getByText(/お客様がガス代を払う通常決済は OpenPay 利用料無料（レジ含む）。ガスレス JPYC は 1%・最低 2 JPYC/),
     ).toBeInTheDocument();
 
     // 脚注 (一般的な料率の例)
