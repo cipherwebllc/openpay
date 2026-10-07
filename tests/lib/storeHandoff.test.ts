@@ -1,0 +1,264 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { getAddress, type Address, type Hex } from 'viem';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+import {
+  buildReceiveWithAuthorizationTypedData,
+  type ForwarderSettleParams,
+} from '@/lib/relay/forwarderIntent';
+import { recoverFeeValue } from '@/lib/relay/recoverFee';
+import { mobileOrderFeeValue } from '@/lib/mobileOrderFee';
+import {
+  STORE_DEVICE_FEE_WEI,
+  STORE_DEVICE_MIN_AMOUNT_WEI,
+} from '@/lib/storeDevicePayment';
+import {
+  createHandoffSession,
+  hashHandoffToken,
+  readHandoff,
+  recordHandoffTx,
+  submitHandoffAuth,
+  type HandoffAuth,
+  type HandoffDeps,
+  type HandoffSession,
+  type HandoffStore,
+} from '@/lib/storeHandoff';
+
+const CHAIN = 80002;
+const JPYC = getAddress('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29');
+const FWD = getAddress('0x752B7AaD0089286EB7b553d84D05233d80c9FCB4');
+const FEE = getAddress('0x428483FbA62eDCef1E3a100d3799F6d71759c560');
+const SHOP = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+const NOW = 1_800_000_000;
+const ID = 'AAAAAAAAAAAAAAAAAAAAAA';
+const TOKEN = 'ab'.repeat(32);
+const AMOUNT = 1000n * 10n ** 18n;
+
+function memoryStore(): HandoffStore & { failRead: boolean; data: Map<string, string> } {
+  const data = new Map<string, string>();
+  const s = {
+    data,
+    failRead: false,
+    async putSession(id: string, session: HandoffSession) {
+      if (data.has(`s:${id}`)) return false;
+      data.set(`s:${id}`, JSON.stringify(session));
+      return true;
+    },
+    async read(id: string) {
+      if (s.failRead) return null;
+      const session = data.get(`s:${id}`);
+      const auth = data.get(`a:${id}`);
+      const tx = data.get(`t:${id}`);
+      return {
+        session: session ? (JSON.parse(session) as HandoffSession) : null,
+        auth: auth ? (JSON.parse(auth) as HandoffAuth) : null,
+        txHash: (tx as Hex) ?? null,
+      };
+    },
+    async claimAuth(id: string, auth: HandoffAuth) {
+      const existing = data.get(`a:${id}`);
+      if (existing) return { existing: JSON.parse(existing) as HandoffAuth };
+      data.set(`a:${id}`, JSON.stringify(auth));
+      return { existing: null };
+    },
+    async putTx(id: string, txHash: Hex) {
+      data.set(`t:${id}`, txHash);
+      return true;
+    },
+  };
+  return s;
+}
+
+let store: ReturnType<typeof memoryStore>;
+let balance: bigint;
+let used: boolean;
+
+function deps(over: Partial<HandoffDeps> = {}): HandoffDeps {
+  return {
+    store,
+    expectedChainId: CHAIN,
+    nowSec: () => NOW,
+    expectedFeeValue: 1n,
+    maxValue: 50_000n * 10n ** 18n,
+    maxValidityWindowSec: 180,
+    jpycAddressFor: () => JPYC,
+    forwarderFor: () => FWD,
+    feeReceiverFor: () => FEE,
+    getBalance: async () => balance,
+    readAuthorizationUsed: async () => used,
+    randomId: () => ID,
+    randomToken: () => TOKEN,
+    ...over,
+  };
+}
+
+const customer = privateKeyToAccount(generatePrivateKey());
+
+async function signedBody(over: Partial<ForwarderSettleParams> = {}, signer = customer) {
+  const params: ForwarderSettleParams = {
+    from: customer.address,
+    merchant: SHOP,
+    merchantValue: AMOUNT,
+    feeReceiver: FEE,
+    feeValue: STORE_DEVICE_FEE_WEI,
+    validAfter: 0n,
+    validBefore: BigInt(NOW + 150),
+    intentSalt: `0x${'11'.repeat(32)}` as Hex,
+    ...over,
+  };
+  const signature = await signer.signTypedData(buildReceiveWithAuthorizationTypedData(params, CHAIN, JPYC, FWD));
+  return {
+    from: params.from,
+    merchant: params.merchant,
+    merchantValue: params.merchantValue.toString(),
+    feeValue: params.feeValue.toString(),
+    validAfter: params.validAfter.toString(),
+    validBefore: params.validBefore.toString(),
+    intentSalt: params.intentSalt,
+    signature,
+  };
+}
+
+async function openSession() {
+  const r = await createHandoffSession({ chainId: CHAIN, merchant: SHOP, amount: AMOUNT.toString() }, deps());
+  if (!r.ok) throw new Error(`setup ${r.error}`);
+  return r;
+}
+
+beforeEach(() => {
+  store = memoryStore();
+  balance = 10_000n * 10n ** 18n;
+  used = false;
+});
+
+describe('受け渡しセッションを作る', () => {
+  it('セッションを置き、トークンは sha256 だけを保存する', async () => {
+    const r = await openSession();
+    expect(r).toEqual({ ok: true, id: ID, token: TOKEN, expiresAt: NOW + 600 });
+    const saved = JSON.parse(store.data.get(`s:${ID}`)!);
+    expect(saved).toMatchObject({ chainId: CHAIN, merchant: SHOP, amount: AMOUNT.toString(), tokenHash: hashHandoffToken(TOKEN) });
+    expect(JSON.stringify(saved)).not.toContain(TOKEN);
+  });
+
+  it.each([
+    [{ chainId: 137 }, 'unsupported_chain'],
+    [{ merchant: '0x123' }, 'invalid_merchant'],
+    [{ merchant: '0x0000000000000000000000000000000000000000' }, 'invalid_merchant'],
+    [{ merchant: FEE }, 'merchant_is_fee_receiver'],
+    [{ merchant: FWD }, 'merchant_is_forwarder'],
+    [{ amount: (STORE_DEVICE_MIN_AMOUNT_WEI - 1n).toString() }, 'invalid_amount'],
+    [{ amount: (50_000n * 10n ** 18n).toString() }, 'invalid_amount'], // 上限 − 1 wei を超える
+    [{ amount: '12.5' }, 'invalid_amount'],
+  ])('%o → %s', async (over, error) => {
+    const r = await createHandoffSession({ chainId: CHAIN, merchant: SHOP, amount: AMOUNT.toString(), ...over }, deps());
+    expect(r).toMatchObject({ ok: false, error });
+  });
+
+  it('forwarder が無い構成では作らない', async () => {
+    const r = await createHandoffSession({ chainId: CHAIN, merchant: SHOP, amount: AMOUNT.toString() }, deps({ forwarderFor: () => null }));
+    expect(r).toMatchObject({ ok: false, error: 'unsupported_chain' });
+  });
+
+  it('KV に置けなければ作れなかったと返す (偽の成功にしない)', async () => {
+    const r = await createHandoffSession(
+      { chainId: CHAIN, merchant: SHOP, amount: AMOUNT.toString() },
+      deps({ store: { ...memoryStore(), putSession: async () => null } }),
+    );
+    expect(r).toMatchObject({ ok: false, status: 503, error: 'handoff_unavailable' });
+  });
+});
+
+describe('お客様の署名を受け取る', () => {
+  it('検証を通った最初の署名で枠を取り、同じ署名の再送は冪等', async () => {
+    await openSession();
+    const body = await signedBody();
+    expect(await submitHandoffAuth(ID, body, deps())).toMatchObject({ ok: true, idempotent: false });
+    expect(await submitHandoffAuth(ID, body, deps())).toMatchObject({ ok: true, idempotent: true });
+  });
+
+  it('枠が埋まったあとの別の署名は受けない (二重払いの種を作らない)', async () => {
+    await openSession();
+    await submitHandoffAuth(ID, await signedBody(), deps());
+    const other = await signedBody({ intentSalt: `0x${'22'.repeat(32)}` as Hex });
+    expect(await submitHandoffAuth(ID, other, deps())).toMatchObject({ ok: false, status: 409, error: 'slot_taken' });
+  });
+
+  it.each([
+    ['金額がセッションと違う', { merchantValue: AMOUNT + 1n }, 'amount_mismatch'],
+    ['手数料欄が 1 wei でない', { feeValue: 2n }, 'fee_value_mismatch'],
+    ['有効窓が 180 秒を超える', { validBefore: BigInt(NOW + 181) }, 'validity_too_far'],
+    ['期限切れ', { validBefore: BigInt(NOW) }, 'expired'],
+  ])('%s → %s', async (_, over, error) => {
+    await openSession();
+    expect(await submitHandoffAuth(ID, await signedBody(over), deps())).toMatchObject({ ok: false, error });
+  });
+
+  it('店がセッションと違う署名は受けない', async () => {
+    await openSession();
+    const body = { ...(await signedBody()), merchant: FEE };
+    expect(await submitHandoffAuth(ID, body, deps())).toMatchObject({ ok: false, error: 'merchant_mismatch' });
+  });
+
+  it('別の鍵で署名された・壊れた署名は受けない', async () => {
+    await openSession();
+    const other = privateKeyToAccount(generatePrivateKey());
+    expect(await submitHandoffAuth(ID, await signedBody({}, other), deps())).toMatchObject({ ok: false, error: 'signature_mismatch' });
+  });
+
+  it('残高が請求額 + 1 wei に足りないと受けない (残高ちょうどのお客様)', async () => {
+    await openSession();
+    balance = AMOUNT; // 1 wei 足りない
+    expect(await submitHandoffAuth(ID, await signedBody(), deps())).toMatchObject({ ok: false, error: 'insufficient_balance' });
+  });
+
+  it('使用済みの署名・無いセッション・期限切れのセッション・読めない KV', async () => {
+    await openSession();
+    used = true;
+    expect(await submitHandoffAuth(ID, await signedBody(), deps())).toMatchObject({ ok: false, status: 409, error: 'authorization_used' });
+    used = false;
+    expect(await submitHandoffAuth('BBBBBBBBBBBBBBBBBBBBBB', await signedBody(), deps())).toMatchObject({ ok: false, status: 404 });
+    expect(await submitHandoffAuth('bad id', await signedBody(), deps())).toMatchObject({ ok: false, status: 404 });
+    expect(await submitHandoffAuth(ID, await signedBody(), deps({ nowSec: () => NOW + 601 }))).toMatchObject({ ok: false, status: 410 });
+    store.failRead = true;
+    expect(await submitHandoffAuth(ID, await signedBody(), deps())).toMatchObject({ ok: false, status: 503, error: 'handoff_unavailable' });
+  });
+});
+
+describe('状態を読む・送った tx を記録する', () => {
+  it('お客様には公開項目だけ、お店の端末にはトークンで署名まで', async () => {
+    await openSession();
+    expect(await readHandoff(ID, null, deps())).toEqual({ ok: true, state: 'open', expiresAt: NOW + 600, txHash: null });
+    await submitHandoffAuth(ID, await signedBody(), deps());
+    const pub = await readHandoff(ID, null, deps());
+    expect(pub).toEqual({ ok: true, state: 'signed', expiresAt: NOW + 600, txHash: null });
+    const device = await readHandoff(ID, TOKEN, deps());
+    expect(device).toMatchObject({ ok: true, state: 'signed', merchant: SHOP, amount: AMOUNT.toString(), auth: { from: customer.address, feeValue: '1' } });
+    expect(await readHandoff(ID, 'cd'.repeat(32), deps())).toMatchObject({ ok: false, status: 403, error: 'bad_token' });
+    expect(await readHandoff(ID, 'not-a-token', deps())).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it('tx の記録はトークンと署名が要る・記録後は sent', async () => {
+    await openSession();
+    const tx = `0x${'ef'.repeat(32)}`;
+    expect(await recordHandoffTx(ID, TOKEN, { txHash: tx }, deps())).toMatchObject({ ok: false, status: 409 });
+    await submitHandoffAuth(ID, await signedBody(), deps());
+    expect(await recordHandoffTx(ID, null, { txHash: tx }, deps())).toMatchObject({ ok: false, status: 403 });
+    expect(await recordHandoffTx(ID, TOKEN, { txHash: '0x12' }, deps())).toMatchObject({ ok: false, error: 'invalid_tx' });
+    expect(await recordHandoffTx(ID, TOKEN, { txHash: tx }, deps())).toEqual({ ok: true });
+    expect(await readHandoff(ID, null, deps())).toMatchObject({ state: 'sent', txHash: tx });
+  });
+});
+
+describe('1 wei の署名は OpenPay の中継を通らない (最低 1 JPYC のとき)', () => {
+  // /api/relay/jpyc は feeValue を server で再計算して照合する。最低額 1 JPYC 以上なら、どの gasMode /
+  // feeKind の組み合わせでも期待手数料は 1 wei より大きく fee_value_mismatch で拒否される。
+  for (const amount of [STORE_DEVICE_MIN_AMOUNT_WEI, AMOUNT]) {
+    for (const gasMode of ['merchant', 'customer'] as const) {
+      const bill = gasMode === 'merchant' ? amount + STORE_DEVICE_FEE_WEI : amount;
+      it(`amount=${amount} gasMode=${gasMode}: 回収・店頭 1%・事前 3% の期待手数料がすべて 1 wei を超える`, () => {
+        expect(recoverFeeValue(bill, gasMode, 137)).toBeGreaterThan(STORE_DEVICE_FEE_WEI);
+        expect(mobileOrderFeeValue(bill, 'storefront')).toBeGreaterThan(STORE_DEVICE_FEE_WEI);
+        expect(mobileOrderFeeValue(bill, 'preorder')).toBeGreaterThan(STORE_DEVICE_FEE_WEI);
+      });
+    }
+  }
+});
