@@ -167,8 +167,10 @@ function RegisterModeContent({
   const storeCfgActive = storePaysActive(settings);
   useEffect(() => {
     // 設定を読み込む前の既定値 (OFF) で、送っている支払いの「次の QR を出せない間」や「もう一度送る」を消さない。
-    if (hydrated) setStoreDeviceOn(storeCfgActive);
-  }, [hydrated, storeCfgActive, setStoreDeviceOn]);
+    // 選んでいるか (requested) で知らせる。いまの通貨・チェーンで使えるかは会計ごとに止める (理由 'token') ので、レジの
+    // 商品で USDC に暗黙に切り替わっても送る設定は OFF にしない (送れなかった支払いの「もう一度送る」を黙って消さない)。
+    if (hydrated) setStoreDeviceOn(storeRequested);
+  }, [hydrated, storeRequested, setStoreDeviceOn]);
 
   const effectiveReceiver = pickEffectiveAddress(settings.receiver, resolvedReceiver);
   const setReceiver = useCallback(

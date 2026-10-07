@@ -212,6 +212,27 @@ describe('StoreDeviceProvider (お店の端末で送るの状態を作成ペー�
     expect(screen.getByTestId('phase').textContent).toBe('received:false');
   });
 
+  it('「お店がガス代を肩代わり」を選んでいれば、レジ・決済QR 以外のタブで再読み込みしても前のタブの受け渡しを締め切る (署名があれば送る)', async () => {
+    wallet.address = GAS;
+    window.localStorage.setItem(
+      'openpay:qr-settings:v2',
+      JSON.stringify({ token: 'jpyc', chain: 'polygon', payMode: 'gasless', storePays: true }),
+    );
+    window.sessionStorage.setItem(
+      'openpay:register-store-device-session:v1',
+      JSON.stringify({ id: ID, token: 'ab'.repeat(32), expiresAt: nowSec() + 600, merchant: SHOP, amount: AMOUNT.toString(), chainId: 80002 }),
+    );
+    render(
+      <StoreDeviceProvider>
+        <Other />
+      </StoreDeviceProvider>,
+    );
+    await advance(0);
+    await advance(0);
+    expect(urls.filter((u) => u.endsWith('/close'))).toHaveLength(1);
+    window.localStorage.removeItem('openpay:qr-settings:v2');
+  });
+
   it('Provider の中の部品側の実体は動かない (ウォレットを読まない・通信しない)', async () => {
     render(
       <StoreDeviceProvider>

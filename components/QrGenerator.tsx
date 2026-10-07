@@ -307,8 +307,10 @@ export function QrGenerator() {
   const { setOn: setStoreDeviceOn } = storeDevice;
   useEffect(() => {
     // 設定を読み込む前の既定値 (OFF) で、送っている支払いの「次の QR を出せない間」や「もう一度送る」を消さない。
-    if (hydrated) setStoreDeviceOn(storeCfgActive);
-  }, [hydrated, storeCfgActive, setStoreDeviceOn]);
+    // 選んでいるか (requested) で知らせる。いまの通貨・チェーンで使えるかは会計ごとに止める (理由 'token') ので、レジの
+    // 商品で USDC に暗黙に切り替わっても送る設定は OFF にしない (送れなかった支払いの「もう一度送る」を黙って消さない)。
+    if (hydrated) setStoreDeviceOn(storeRequested);
+  }, [hydrated, storeRequested, setStoreDeviceOn]);
   const storeBillWei = useMemo(() => {
     if (mode !== 'amount' || !amountValid) return 0n;
     try {
@@ -704,8 +706,11 @@ export function QrGenerator() {
     storeQrShown &&
     !(sdState.phase === 'waiting' && !sdState.stale && sdState.session.id === storeQr.id);
   // 押せない理由 (お店負担を選んでいてこの会計では使えない)。準備中は理由なしで押せない。
+  // お店の端末が送っている・結果を待っている・判断の最中も押せない (理由はタブの上の状態に出る)。
   const storeShowQrBlocked =
-    storeRequested && storeBlocked !== null
+    env.enableStoreGasWallet && device.busy
+      ? ''
+      : storeRequested && storeBlocked !== null
       ? t(`storeDevice.blocked.${storeBlocked}`, { chain: chainNameForId(storeDevice.chainId) ?? '' })
       : storeRequested && !storeForSale
         ? ''

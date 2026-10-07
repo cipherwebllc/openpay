@@ -126,8 +126,11 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
     it('お店の端末が送っている・結果を待っている間は、通常の QR を開かない', async () => {
       const user = userEvent.setup();
       sd.busy = true;
-      const [btn] = await ready(user);
-      await user.click(btn);
+      render(<QrGenerator />);
+      await user.type(await screen.findByPlaceholderText('1000'), '500');
+      const btns = await screen.findAllByRole('button', { name: /QRコードを表示する/ });
+      for (const b of btns) expect(b).toBeDisabled();
+      await user.click(btns[0]);
       expect(screen.queryByRole('dialog')).toBeNull();
       expect(sd.releaseForNormal).not.toHaveBeenCalled();
     });
@@ -475,7 +478,8 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       for (const b of btns) expect(b).toBeDisabled();
       expect(screen.getByText(/JPYC・.* のときだけです/)).toBeTruthy();
       expect(JSON.parse(window.localStorage.getItem(KEY)!).storePays).toBe(true);
-      expect(sd.setOn).toHaveBeenLastCalledWith(false);
+      // 選んでいる状態は保つ (送る設定は OFF にしない = 送れなかった支払いの「もう一度送る」を消さない)
+      expect(sd.setOn).toHaveBeenLastCalledWith(true);
     });
   });
 });

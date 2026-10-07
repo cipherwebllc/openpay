@@ -14,6 +14,7 @@ import type { SplitDraft } from '@/lib/url';
 import { PAY_MEMO_MAX, PAY_PRODUCT_NAME_MAX } from '@/lib/url';
 import { isTaxCategory, type TaxCategory } from '@/lib/tax';
 import { INVOICE_REGISTRATION_INPUT_MAX } from '@/lib/invoice';
+import { safeGet } from '@/lib/storage';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
 // token ごとに店主が最後に使っていた (受取チェーン, 決済モード)。レジは商品プリセットを押すだけで
@@ -334,6 +335,11 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
     taxCategory: isTaxCategory(loaded.taxCategory) ? loaded.taxCategory : null,
     tokenPrefs: sanitizeTokenPrefs(loaded.tokenPrefs),
   };
+}
+
+/** 保存された設定を読むだけ (書き戻さない)。作成ページの Provider が、どのタブを開いていても最初の値を知るために使う。 */
+export function readQrSettings(): QrSettings {
+  return sanitize(safeGet<Partial<QrSettings>>(STORAGE_KEY, {}));
 }
 
 export function useQrSettings() {
