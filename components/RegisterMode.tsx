@@ -20,6 +20,7 @@ import { formatUnits, type Address } from 'viem';
 import { ChevronRight, Minus, Plus, QrCode as QrCodeIcon, Star, Trash2 } from 'lucide-react';
 import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
+import { StoreGasWalletPanel } from './StoreGasWalletPanel';
 import { Field } from './Field';
 import { ExternalImage } from './ExternalImage';
 import { ProductPresetManager } from './ProductPresetManager';
@@ -847,6 +848,9 @@ function RegisterModeContent({
           </div>
         </aside>
       </div>
+
+      {/* お店の端末のガス用ウォレット (flag OFF では出さない・plans/store-gas-wallet.md)。 */}
+      {env.enableStoreGasWallet && <StoreGasWalletPanel />}
 
       {/* モバイル下部固定 会計バー (合計 + QR ボタン)。lg では右サイドバー CTA を使う。
           グローバルの BottomNav (fixed bottom-0 z-20・md:hidden) の上に重ねるため、

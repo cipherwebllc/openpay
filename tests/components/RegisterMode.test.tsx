@@ -45,6 +45,7 @@ const envHold = vi.hoisted(() => ({
   enableShopLive: false,
   enableHandles: false,
   enableMenuOptions: false,
+  enableStoreGasWallet: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -63,6 +64,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableMenuOptions() {
         return envHold.enableMenuOptions;
+      },
+      get enableStoreGasWallet() {
+        return envHold.enableStoreGasWallet;
       },
     },
   };
@@ -820,6 +824,21 @@ describe('RegisterMode', () => {
     const r = await parsedCheckout();
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.feeKind).toBeUndefined();
+  });
+
+  it('お店の端末のガス用ウォレット: flag OFF (既定) では出さない・ON で出す', async () => {
+    seedReceiver();
+    const { unmount } = render(<RegisterMode />);
+    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    expect(screen.queryByText('お店の端末のガス用ウォレット')).toBeNull();
+    unmount();
+    envHold.enableStoreGasWallet = true;
+    try {
+      render(<RegisterMode />);
+      expect(await screen.findByText('お店の端末のガス用ウォレット')).toBeTruthy();
+    } finally {
+      envHold.enableStoreGasWallet = false;
+    }
   });
 
   // インボイス: QR タブの共通設定 (店舗名・登録番号) を /checkout に載せ、顧客の控えに出す (表示専用)。

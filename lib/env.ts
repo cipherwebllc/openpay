@@ -593,6 +593,13 @@ export const env = {
     'NEXT_PUBLIC_ENABLE_REGISTER_FEE',
     process.env.NEXT_PUBLIC_ENABLE_REGISTER_FEE,
   ),
+  // レジの「お店の端末のガス用ウォレット」(client 露出・plans/store-gas-wallet.md)。**既定 OFF で完全
+  // inert** (レジに設定欄を出さない)。お店の端末が自分の POL でお客様の署名を送る経路 (OpenPay 利用料
+  // 0) の土台。点灯は受け渡し・送信 (P2) と開示 3 点セット (P3) がそろった同一リリースで。
+  enableStoreGasWallet: parseBoolFlag(
+    'NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET',
+    process.env.NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET,
+  ),
   // 実店舗向け Phase 1 強化のマスターフラグ (client 露出)。**既定 OFF で完全 inert** (merge して
   // も本番の挙動は不変)。gate 対象:
   //   - ライブ運用状態 (売り切れ / 受付一時停止): /api/shop/live (OFF=404)・店主のライブ操作
