@@ -231,3 +231,20 @@ it('delivery redirect and JSON fields are scrubbed by the installed browser/serv
     expect(JSON.stringify(scrubbed)).not.toContain(ticket); expect(JSON.stringify(scrubbed)).not.toContain('/private-gate');
   }
 });
+
+describe('認可トークンのヘッダ', () => {
+  it('error event の request.headers から認可トークンのヘッダを大文字小文字を問わず落とす', () => {
+    const event = scrubSentryServerEvent({
+      request: {
+        url: 'https://open-pay.jp/api/register/handoff/abc',
+        headers: {
+          'X-Store-Handoff-Token': SECRET,
+          'x-order-token': SECRET,
+          'x-safe': 'kept',
+        },
+      },
+    });
+    expect(JSON.stringify(event)).not.toContain(SECRET);
+    expect(event.request?.headers).toEqual({ 'x-safe': 'kept' });
+  });
+});
