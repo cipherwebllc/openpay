@@ -94,7 +94,7 @@ const JA: ShopGuideContent = {
     },
     {
       title: '電子レシート',
-      body: 'お客様は支払い控えをブラウザに保存できます。紙のレシートやレシートプリンターは不要です。',
+      body: 'お客様は支払い控えをブラウザに保存できます。紙のレシートやレシートプリンターは不要です。インボイス登録番号を設定すると、控えに登録番号と税率ごとの金額・消費税も出ます。',
     },
   ],
 
@@ -179,7 +179,7 @@ const EN: ShopGuideContent = {
     },
     {
       title: 'Digital receipts',
-      body: 'Customers keep a payment record in their browser. No paper receipts or receipt printer needed.',
+      body: 'Customers keep a payment record in their browser. No paper receipts or receipt printer needed. Set your invoice registration number and the record also shows it, with the amount and consumption tax for each tax rate.',
     },
   ],
 

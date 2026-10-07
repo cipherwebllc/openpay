@@ -91,7 +91,7 @@ const JA: QrGuideContent = {
     },
     {
       title: '電子レシート',
-      body: 'お客様は支払い控えをブラウザに保存できます。レシートプリンターは不要です。',
+      body: 'お客様は支払い控えをブラウザに保存できます。レシートプリンターは不要です。インボイス登録番号を設定すると、控えに登録番号と税率ごとの金額・消費税も出ます。',
     },
     {
       title: '会計向け CSV',
@@ -171,7 +171,7 @@ const EN: QrGuideContent = {
     },
     {
       title: 'Digital receipts',
-      body: 'Customers keep a payment record in their browser. No receipt printer needed.',
+      body: 'Customers keep a payment record in their browser. No receipt printer needed. Set your invoice registration number and the record also shows it, with the amount and consumption tax for each tax rate.',
     },
     {
       title: 'Accounting CSV',

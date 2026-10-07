@@ -191,6 +191,7 @@ const JA: StartGuideContent = {
       title: '売上と会計の記録を残す',
       body: [
         '取引履歴は CSV に出力できます。transaction hash から、ブロックチェーン上の取引をいつでも再確認できます。',
+        'インボイス登録番号を設定すると、お客様の控えに適格簡易請求書の記載事項 (店名・登録番号・税率ごとの金額と消費税) が出ます。控えはお客様の端末に保存されます。宛名が必要な取引 (会社あての請求書) には使えません。店舗側も交付した内容の写しの保存が必要です。履歴 CSV の消費税は商品ごとの計算のため、控えの税率ごとの消費税と 1 円程度ずれることがあります。',
         '最低限、次を残しておくと後から追跡しやすくなります。',
         '税務・会計の具体的な処理は、法人か個人か、会計方針、取引内容によって変わります。OpenPay は特定の仕訳方法を示しません。必要に応じて税理士等の専門家にご確認ください。',
       ],
@@ -378,6 +379,7 @@ const EN: StartGuideContent = {
       title: 'Keep sales and accounting records',
       body: [
         'Transaction history exports to CSV, and any transaction hash lets you re-check the on-chain record at any time.',
+        "If you set your invoice registration number, customer receipts show the items required for a simplified qualified invoice (shop name, registration number, and the amount and consumption tax for each tax rate). The receipt is stored on the customer's device. It cannot be used where an addressee is required (invoices to companies). You also need to keep a copy of what you issued. The history CSV calculates consumption tax per item, so it can differ by about 1 yen from the per-rate tax on the receipt.",
         'At minimum, keeping the following makes later reconciliation straightforward.',
         'How this is treated for tax and accounting depends on whether you are incorporated, your accounting policy, and the nature of each transaction. OpenPay does not prescribe a bookkeeping treatment; consult a tax professional as needed.',
       ],
