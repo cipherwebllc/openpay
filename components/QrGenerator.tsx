@@ -388,6 +388,8 @@ export function QrGenerator() {
     payUrl,
   ]);
   const storeOpenKeyRef = useRef(storeOpenKey);
+  // QR を閉じたら進める (出し直しの途中で閉じたとき、遅れて返った受け渡しで QR を開き直さない)。
+  const storeOpenAttemptRef = useRef(0);
   useEffect(() => {
     storeOpenKeyRef.current = storeOpenKey;
   }, [storeOpenKey]);
@@ -638,10 +640,11 @@ export function QrGenerator() {
     checkout: NonNullable<typeof storeCheckout>,
     amountText: string,
   ): Promise<boolean> {
+    const attempt = storeOpenAttemptRef.current;
     const session = await device.start(merchant, wei);
     // 作れなかった (理由は状態に出る)・前の会計の署名の送信を優先した → QR は開かない。
     if (!session) return false;
-    if (storeOpenKeyRef.current !== key) {
+    if (storeOpenKeyRef.current !== key || storeOpenAttemptRef.current !== attempt) {
       device.stop();
       return false;
     }
@@ -650,6 +653,7 @@ export function QrGenerator() {
     return true;
   }
   function closeQrModal() {
+    storeOpenAttemptRef.current += 1;
     setQrModalOpen(false);
     setForceNormalQr(false);
     if (storeQr) {
@@ -685,9 +689,11 @@ export function QrGenerator() {
   }
   const storeQrShown = storeQr !== null && !forceNormalQr;
   const sdState = device.state;
-  // QR を薄くする: 署名を受け取った後・受付時間の終わり (次のお客様に読ませない)。
+  // QR を薄くする: この QR の受け渡しが署名を待っている (受付時間が十分残る) とき以外 (署名を受け取った後・受付時間の
+  // 終わり・出し直しの途中 = 次のお客様に読ませない)。
   const storeQrDimmed =
-    storeQrShown && !(sdState.phase === 'waiting' && !sdState.stale) && sdState.phase !== 'creating';
+    storeQrShown &&
+    !(sdState.phase === 'waiting' && !sdState.stale && sdState.session.id === storeQr.id);
   // 押せない理由 (お店負担を選んでいてこの会計では使えない)。準備中は理由なしで押せない。
   const storeShowQrBlocked =
     storeRequested && storeBlocked !== null

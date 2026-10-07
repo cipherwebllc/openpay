@@ -501,9 +501,13 @@ function RegisterModeContent({
       : '';
   const qrValue = storeQrActive ? storeCheckoutUrl : checkoutUrl;
   const sdState = device.state;
-  // QR を薄くする: 署名を受け取った後・受付時間の終わり (次のお客様に読ませない)。
+  // QR を薄くする: この QR の受け渡しが署名を待っている (受付時間が十分残る) とき以外 (署名を受け取った後・受付時間の
+  // 終わり・出し直しの途中 = 次のお客様に読ませない)。
   const storeQrDimmed =
-    storeQrActive && !(sdState.phase === 'waiting' && !sdState.stale) && sdState.phase !== 'creating';
+    storeQrActive &&
+    !(sdState.phase === 'waiting' && !sdState.stale && sdState.session.id === storeSessionId);
+  // QR を閉じたら進める (出し直しの途中で閉じたとき、遅れて返った受け渡しで QR を開き直さない)。
+  const storeOpenAttemptRef = useRef(0);
 
   async function openQr() {
     // 受け取った署名を送っている・結果を待っている間は次の QR を出さない (二重払いにしない)。
@@ -524,6 +528,7 @@ function RegisterModeContent({
   }
 
   function closeQr() {
+    storeOpenAttemptRef.current += 1;
     setQrModalOpen(false);
     setForceNormalQr(false);
     if (storeSessionId) {
@@ -543,7 +548,13 @@ function RegisterModeContent({
 
   async function reissueStoreQr() {
     if (!effectiveReceiver) return;
+    const attempt = storeOpenAttemptRef.current;
     const s = await device.start(getAddress(effectiveReceiver), totalWei);
+    if (s && storeOpenAttemptRef.current !== attempt) {
+      // 出し直しの途中で閉じた → この受け渡しは出さずに締め切る。
+      device.stop();
+      return;
+    }
     setStoreSessionId(s?.id ?? null);
     // 閉じた後 (会計ボタンの下) から出し直したときも、新しい QR を見せる (QR の無い「署名待ち」を残さない)。
     setQrModalOpen(!!s);

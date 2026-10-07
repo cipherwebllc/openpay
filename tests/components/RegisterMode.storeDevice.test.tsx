@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, type ReactElement } from 'react';
 import userEvent from '@testing-library/user-event';
@@ -216,6 +216,24 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     await user.click(await screen.findByRole('button', { name: 'QR を出し直す' }));
     expect(hold.start).toHaveBeenCalledWith(VALID, 500n * 10n ** 18n);
     await waitFor(() => expect(shownCheckout()?.get('hs')).toBe(HS));
+  });
+
+  it('出し直しの途中で閉じたら、遅れて返った受け渡しで QR を開き直さない (締め切る)', async () => {
+    const user = userEvent.setup();
+    seed();
+    hold.state = { phase: 'expired' };
+    render(<RegisterMode />);
+    await addItemAndOpen(user);
+    await waitFor(() => expect(shownCheckout()).not.toBeNull());
+    let resolve!: (v: unknown) => void;
+    hold.start.mockReturnValue(new Promise((r) => { resolve = r; }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'QR を出し直す' }));
+    await user.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: /閉じる/ })[0]);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const stopsBefore = hold.stop.mock.calls.length;
+    resolve({ id: 'ZzZzZzZzZzZzZzZzZzZzZz', token: 'cd'.repeat(32), expiresAt: 0, merchant: VALID, amount: '1', chainId: 80002 });
+    await waitFor(() => expect(hold.stop.mock.calls.length).toBeGreaterThan(stopsBefore));
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('受け取った署名を送っている間は QR のボタンを押せない', async () => {

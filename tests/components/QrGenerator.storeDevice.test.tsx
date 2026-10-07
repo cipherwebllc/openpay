@@ -294,6 +294,43 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
 
+    it('出し直しの途中で閉じたら、遅れて返った受け渡しで QR を開き直さない (締め切る)', async () => {
+      const user = userEvent.setup();
+      seed();
+      sd.state = { phase: 'expired' };
+      const [btn] = await ready(user);
+      await user.click(btn);
+      await waitFor(() => expect(shownQr()).not.toBeNull());
+      let resolve!: (v: unknown) => void;
+      sd.start.mockReturnValue(new Promise((r) => { resolve = r; }));
+      // 状態の表示は遅延読み込み (お店負担を選んだときだけ) なので現れるのを待つ
+      await user.click(await within(screen.getByRole('dialog')).findByRole('button', { name: 'QR を出し直す' }));
+      await user.click(within(screen.getByRole('dialog')).getAllByRole('button', { name: /閉じる/ })[0]);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      const stopsBefore = sd.stop.mock.calls.length;
+      resolve({ id: 'ZzZzZzZzZzZzZzZzZzZzZz', token: 'cd'.repeat(32), expiresAt: 0, merchant: VALID, amount: '1', chainId: 80002 });
+      await waitFor(() => expect(sd.stop.mock.calls.length).toBeGreaterThan(stopsBefore));
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('この QR の受け渡しが署名を待っている間だけはっきり出し、出し直しの途中は薄くする', async () => {
+      const user = userEvent.setup();
+      seed();
+      sd.state = { phase: 'waiting', session: { id: HS }, stale: false, degraded: false };
+      const r = render(<QrGenerator />);
+      await user.type(await screen.findByPlaceholderText('1000'), '500');
+      await user.click((await screen.findAllByRole('button', { name: /QRコードを表示する/ }))[0]);
+      await waitFor(() => expect(shownQr()).not.toBeNull());
+      const wrapper = () => screen.getByTestId('qr').parentElement!;
+      expect(wrapper().className).not.toMatch(/opacity-40/);
+      sd.state = { phase: 'creating' };
+      r.rerender(<QrGenerator />);
+      expect(wrapper().className).toMatch(/opacity-40/);
+      sd.state = { phase: 'waiting', session: { id: 'ZzZzZzZzZzZzZzZzZzZzZz' }, stale: false, degraded: false };
+      r.rerender(<QrGenerator />);
+      expect(wrapper().className).toMatch(/opacity-40/); // 別の受け渡しの「署名待ち」ではこの QR をはっきり出さない
+    });
+
     it('ガス用ウォレットのパネルを出す', async () => {
       seed();
       render(<QrGenerator />);
