@@ -58,6 +58,10 @@ const OrderFeedPanel = dynamic(
   () => import('@/components/OrderFeedPanel').then((m) => m.OrderFeedPanel),
   { ssr: false, loading: TabPanelFallback },
 );
+const StoreDevicePageStatus = dynamic(
+  () => import('@/components/StoreDevicePageStatus').then((m) => m.StoreDevicePageStatus),
+  { ssr: false },
+);
 const CreatorStoreSellerPanel = dynamic(() =>
   import('@/components/CreatorStoreSellerPanel').then(
     (module) => module.CreatorStoreSellerPanel,
@@ -83,16 +87,26 @@ function CreatePageBody() {
   const locale = useLocale() as Locale;
   const storeDevice = useStoreDeviceMode();
   // お店の端末が支払いを送っている・結果を待っている間はタブを切り替えさせない (別のタブで通常の QR を出して
-  // 同じ会計を二重に払わせない)。
+  // 同じ会計を二重に払わせない)。署名を待っている・閉じた QR の締め切りを待っている受け渡しは、移る前に締め切る
+  // (署名が入っていたら端末が送るので移らない)。
   const [tabLocked, setTabLocked] = useState(false);
-  const changeTab = (nextTab: Tab) => {
-    if (nextTab !== tab && storeDevice.device.busy) {
-      setTabLocked(true);
-      return;
-    }
+  const showTab = (nextTab: Tab) => {
     setTabLocked(false);
     setTab(nextTab);
     if (nextTab !== 'profile') setPublishedHandle(null);
+  };
+  const changeTab = (nextTab: Tab) => {
+    // flag OFF ではお店の端末の状態を見ない (通信もしない・今までと同じ)。
+    const guarded = env.enableStoreGasWallet && nextTab !== tab;
+    if (guarded && storeDevice.device.busy) {
+      setTabLocked(true);
+      return;
+    }
+    if (guarded && storeDevice.device.hasPendingSale()) {
+      void storeDevice.device.leave().then((ok) => (ok ? showTab(nextTab) : setTabLocked(true)));
+      return;
+    }
+    showTab(nextTab);
   };
 
   // `/create?tab=mobileOrder` 等の deep-link で初期タブを切替える (LP のバナー CTA 用)。
@@ -176,6 +190,11 @@ function CreatePageBody() {
         <p role="alert" className="mb-4 text-sm text-amber-800">
           {t('storeDeviceTabLocked')}
         </p>
+      )}
+
+      {/* レジ以外のタブでも、お店の端末が送った支払いの行方は隠さない (レジでは会計ボタンの下に出る)。 */}
+      {env.enableStoreGasWallet && tab !== 'register' && storeDevice.device.state.phase !== 'idle' && (
+        <StoreDevicePageStatus />
       )}
 
       {/* 決済QR タブのみ 1 行説明を出す。レジ / チップは各パネル先頭に見出し+説明が

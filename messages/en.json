@@ -428,6 +428,7 @@
       "qr": "For merchants: create a payment QR to display at the register."
     },
     "storeDeviceTabLocked": "The shop's device is sending a payment (or checking its result). You can't switch tabs until the result is shown.",
+    "storeDeviceStatusLabel": "Payment sent with the store paying gas",
     "tipPanel": {
       "heading": "Create a Tip widget to receive support",
       "subheading": "Add it to your blog, portfolio, or stream page to receive JPYC / USDC tips."
@@ -2523,7 +2524,6 @@
       "previousLabel": "Previous send",
       "reverted": "The transaction failed (reverted). No payment was made.",
       "unknown": "We can't confirm the result yet. To avoid charging the same checkout twice if it went through, you can't show the next QR until it's confirmed. Check it with “View transaction”, then close this.",
-      "unknownPrevious": "We can't confirm the result yet. Check it with “View transaction”.",
       "unknownAck": "I checked the transaction (close)",
       "failed": "The transaction didn't go through. No payment was made.",
       "checkNow": "Check now",

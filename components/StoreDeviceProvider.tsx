@@ -39,12 +39,30 @@ export type StoreDeviceMode = {
 const StoreDeviceContext = createContext<StoreDeviceMode | null>(null);
 
 function useStoreDeviceModeState(active: boolean): StoreDeviceMode {
-  const [on, setOn] = useStoreDeviceToggle();
+  const [on, setOn] = useStoreDeviceToggle(active && env.enableStoreGasWallet);
   const [gasAddress, setGasAddress] = useState<Address | null | undefined>(undefined);
   const [hasWebLocks, setHasWebLocks] = useState(false);
   useEffect(() => {
+    // 使わない実体 (Provider の中で部品側が呼んだもの)・flag OFF は状態を変えない (余計な描画をしない)。
+    if (!active || !env.enableStoreGasWallet) return;
     setHasWebLocks(typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function');
-  }, []);
+  }, [active]);
+  // ガス用ウォレットのアドレスは自分でも読む (レジのパネルを開いていないタブで再読み込みしても、前のタブの
+  // 受け渡しの締め切りと送った支払いの結果の確認を始める = 送っている途中の支払いを隠さない)。パネルが先に
+  // 知らせていればそちらを使う (作った・消した直後の値)。鍵は読まない。
+  useEffect(() => {
+    if (!active || !env.enableStoreGasWallet) return;
+    let cancelled = false;
+    void import('@/lib/storeGasWallet').then(({ loadStoreGasWallet }) => {
+      if (cancelled) return;
+      const w = loadStoreGasWallet();
+      const address = w.state === 'ok' ? w.info.address : null;
+      setGasAddress((prev) => (prev === undefined ? address : prev));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [active]);
   const chainId = storeDeviceChainId();
   const deployment = resolveDeployment('jpyc', chainId);
   const forwarder = env.enableStoreGasWallet ? jpycForwarderFor(chainId) : null;
@@ -57,8 +75,11 @@ function useStoreDeviceModeState(active: boolean): StoreDeviceMode {
       : null;
   const enabled =
     active && env.enableStoreGasWallet && on && blocked === null && !!gasAddress && !!deployment;
+  // 送った支払いの結果の確認は、送る設定 (on)・ガス用ウォレット・Web Locks と関係なく続ける (行方を隠さない)。
+  const monitor = active && env.enableStoreGasWallet && !!forwarder && !!feeReceiver && !!deployment;
   const device = useStoreDeviceRegister({
     enabled,
+    monitor,
     chainId,
     token: deployment?.address ?? ('0x0000000000000000000000000000000000000000' as Address),
     forwarder,

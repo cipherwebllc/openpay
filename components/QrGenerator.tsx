@@ -2,7 +2,7 @@
 
 import { crossChainAllowed } from '@/lib/url/shared';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { useTranslations } from 'next-intl';
 import type { Address } from 'viem';
 import { parseUnits } from 'viem';
@@ -55,6 +55,8 @@ import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { pickEffectiveAddress, shortAddress, formatTokenAmount } from '@/lib/format';
 import { useIncomingPaymentWatch } from '@/hooks/useIncomingPaymentWatch';
+import { useStoreDeviceMode } from '@/components/StoreDeviceProvider';
+import { env } from '@/lib/env';
 import { truncateAmount } from '@/lib/amount';
 
 export function QrGenerator() {
@@ -78,6 +80,24 @@ export function QrGenerator() {
   const [step2Initialized, setStep2Initialized] = useState(false);
   // QR は即時表示せず「QRコードを表示する」ボタン → 全画面モーダルで提示。
   const [qrModalOpen, setQrModalOpen] = useState(false);
+  // 「お店がガス代を肩代わりして送る」(内部名「お店の端末で送る」・flag 裏) の状態は作成ページで 1 つ。お店の端末が
+  // 支払いを送っている・結果を待っている間は、このタブでも通常の QR を出さない (同じ会計を二重に払わせない・
+  // 状態はタブの上に出る)。締め切っていない受け渡しは締め切ってから (署名が入っていたら端末が送るので出さない)。
+  // flag OFF では今までどおりそのまま開く。
+  const storeDevice = useStoreDeviceMode();
+  const openQrModal = useCallback<Dispatch<SetStateAction<boolean>>>(
+    (value) => {
+      if (!env.enableStoreGasWallet || value !== true) {
+        setQrModalOpen(value);
+        return;
+      }
+      if (storeDevice.device.busy) return;
+      void storeDevice.device.releaseForNormal().then((ok) => {
+        if (ok) setQrModalOpen(true);
+      });
+    },
+    [storeDevice.device],
+  );
   // 初回に QR モーダルを開いた「ピークモーメント」を latch。以降 A2HS hint を出す
   // (毎日この QR を使う店主に、ホーム画面への追加を提案する)。閉じても latch は保持。
   const [hasOpenedQr, setHasOpenedQr] = useState(false);
@@ -591,7 +611,7 @@ export function QrGenerator() {
         amountValid={amountValid}
         settings={settings}
         setAmount={setAmount}
-        setQrModalOpen={setQrModalOpen}
+        setQrModalOpen={openQrModal}
       />
 
       {/* 全画面プレビュー (ポスター調 + 印刷/コピー/SVG/PNG + × 閉じる)。決済QR/レジ共通。 */}
@@ -689,7 +709,7 @@ export function QrGenerator() {
         deployment={deployment}
         amountLabelText={amountLabelText}
         fiatHint={fiatHint}
-        setQrModalOpen={setQrModalOpen}
+        setQrModalOpen={openQrModal}
       />
       </div>
     </>

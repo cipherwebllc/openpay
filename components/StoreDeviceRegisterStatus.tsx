@@ -26,7 +26,8 @@ export function StoreDeviceRegisterStatus({
   /** 請求額 (wei の 10 進文字列) を表示用に整える。 */
   formatAmount: (wei: string) => string;
   onCheckNow: () => void;
-  onRetry: () => void;
+  /** 「もう一度送る」(無ければ出さない・レジの外では出さない)。 */
+  onRetry?: () => void;
   onReissue?: () => void;
   onShowNormal?: () => void;
   onDismiss?: () => void;
@@ -116,7 +117,7 @@ export function StoreDeviceRegisterStatus({
           <p>{state.phase === 'rejected' ? t('rejected') : t(`notSent.${state.reason}`)}</p>
           {!(state.phase === 'not_sent' && state.reason === 'used') && <p className="text-xs">{t('notPaidGuide')}</p>}
           <div className="flex flex-wrap gap-2">
-            {state.phase === 'not_sent' && state.canRetry && (
+            {state.phase === 'not_sent' && state.canRetry && onRetry && (
               <button type="button" className={BTN} onClick={onRetry}>
                 {t('retry')}
               </button>
@@ -169,7 +170,8 @@ export function StoreDeviceRegisterStatus({
         <div role="status" className="space-y-2 text-sm text-slate-700">
           <p>
             {previous}
-            {state.previous ? t('unknownPrevious') : t('unknown')}
+            {/* 「前回の送信」(再読み込みの後) も、確かめられるまで次の QR は出せない (同じ案内)。 */}
+            {t('unknown')}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" className={BTN} onClick={onCheckNow}>
