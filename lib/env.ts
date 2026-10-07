@@ -589,6 +589,7 @@ export const env = {
   // JPYC standard 決済にも既存 recover の OpenPay利用料 (recoverFeeBps・7月から1%・フロア無し) を
   // 店舗負担で課金する (relay 経路は既存 recover が徴収済で不変)。USDC は無料据置・決済QR(/pay)・
   // チップ・手動 checkout リンクは対象外。点灯は 7月 (recoverFeeBps=100) + 開示更新と同一リリース。
+  // 2026-10-07 にレジ通常決済の利用料を廃止し、本番は 0 (OFF)。再び点けるなら開示 3 点セットの更新が先。
   enableRegisterFee: parseBoolFlag(
     'NEXT_PUBLIC_ENABLE_REGISTER_FEE',
     process.env.NEXT_PUBLIC_ENABLE_REGISTER_FEE,
