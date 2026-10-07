@@ -19,6 +19,7 @@ describe('useQrSettings', () => {
       chain: 'polygon',
       gasMode: 'customer',
       payMode: 'gasless',
+      storePays: false,
       splits: [],
       storeName: '',
       invoiceNo: '',
@@ -109,6 +110,24 @@ describe('useQrSettings', () => {
     const { result } = renderHook(() => useQrSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings.chain).toBe('base');
+  });
+
+  it('決済モードの 3 つ目 (storePays) は厳密に true のときだけ・既定 false・通常決済との組み合わせでも消さない', async () => {
+    // 通常決済との組み合わせは「選んでいない」扱い (lib/storePaysMode.ts) だが、保存値は残す (レジの商品で USDC・
+    // 通常決済に暗黙に切り替わってから JPYC に戻ったとき、選んだ状態が黙って消えない)。
+    for (const [saved, want] of [
+      [{ payMode: 'gasless', storePays: true }, true],
+      [{ payMode: 'gasless', storePays: 'true' }, false],
+      [{ payMode: 'gasless', storePays: 1 }, false],
+      [{ payMode: 'standard', storePays: true }, true],
+      [{ payMode: 'gasless' }, false],
+    ] as const) {
+      window.localStorage.setItem(KEY, JSON.stringify({ token: 'jpyc', chain: 'polygon', ...saved }));
+      const { result, unmount } = renderHook(() => useQrSettings());
+      await waitFor(() => expect(result.current.hydrated).toBe(true));
+      expect(result.current.settings.storePays).toBe(want);
+      unmount();
+    }
   });
 
   it('payMode=standard の保存値をハイドレート', async () => {
@@ -218,6 +237,7 @@ describe('useQrSettings', () => {
         chain: 'polygon',
         gasMode: 'merchant',
         payMode: 'standard',
+        storePays: false,
         splits: [{ address: '0xb1', percent: '40' }],
         storeName: 'Coffee Stand',
         invoiceNo: '',

@@ -14,6 +14,7 @@ import type { SplitDraft } from '@/lib/url';
 import { PAY_MEMO_MAX, PAY_PRODUCT_NAME_MAX } from '@/lib/url';
 import { isTaxCategory, type TaxCategory } from '@/lib/tax';
 import { INVOICE_REGISTRATION_INPUT_MAX } from '@/lib/invoice';
+import { safeGet } from '@/lib/storage';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
 
 // token ごとに店主が最後に使っていた (受取チェーン, 決済モード)。レジは商品プリセットを押すだけで
@@ -38,6 +39,10 @@ export type QrSettings = {
   //   gasless:  OpenPay が gas を肩代わり (default)
   //   standard: 顧客が wallet で自前 gas を支払う
   payMode: PayMode;
+  // 決済モードの 3 つ目「お店がガス代を肩代わりして送る」(flag NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET・
+  // plans/store-gas-wallet.md §19)。選ぶと payMode は gasless のまま true。通貨・チェーンを切り替えても消さず、
+  // 使えるかは lib/storePaysMode.ts で導出する (JPYC・Polygon のときだけ)。
+  storePays: boolean;
   // 追加受取人 (最大 3、合計 % < 100)。空配列 = 単独受取人。
   // standard mode では UI 側で split を無効化するが、設定としては保持可能 (mode 切替時に復元される)。
   splits: SplitDraft[];
@@ -96,6 +101,7 @@ const DEFAULT_SETTINGS: QrSettings = {
   chain: 'polygon',
   gasMode: 'customer',
   payMode: 'gasless',
+  storePays: false,
   splits: [],
   storeName: '',
   invoiceNo: '',
@@ -300,6 +306,10 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
         ? loaded.gasMode
         : DEFAULT_SETTINGS.gasMode,
     payMode,
+    // 厳密に true のときだけ (旧 schema・不正値は false)。通常決済 (standard) との組み合わせは消さずに残し、
+    // 使うかは lib/storePaysMode.ts が payMode も見て決める (レジの商品で USDC・通常決済に暗黙に切り替わってから
+    // JPYC に戻ったとき、選んだ「お店がガス代を肩代わり」が黙って消えない)。
+    storePays: loaded.storePays === true,
     splits: sanitizeSplits(loaded.splits),
     storeName: sanitizeText(loaded.storeName, STORE_NAME_MAX),
     invoiceNo: sanitizeText(loaded.invoiceNo, INVOICE_REGISTRATION_INPUT_MAX),
@@ -325,6 +335,11 @@ function sanitize(loaded: Partial<QrSettings>): QrSettings {
     taxCategory: isTaxCategory(loaded.taxCategory) ? loaded.taxCategory : null,
     tokenPrefs: sanitizeTokenPrefs(loaded.tokenPrefs),
   };
+}
+
+/** 保存された設定を読むだけ (書き戻さない)。作成ページの Provider が、どのタブを開いていても最初の値を知るために使う。 */
+export function readQrSettings(): QrSettings {
+  return sanitize(safeGet<Partial<QrSettings>>(STORAGE_KEY, {}));
 }
 
 export function useQrSettings() {

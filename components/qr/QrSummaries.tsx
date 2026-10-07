@@ -27,9 +27,12 @@ export function SettingsSummary({
   payMode,
   showGasMode,
   jpycRecover,
+  storePays = false,
 }: {
   gasMode: GasMode;
   payMode: PayMode;
+  // 決済モードの 3 つ目「お店がガス代を肩代わりして送る」を選んでいる (flag ON のときだけ true が来る)。
+  storePays?: boolean;
   // 負担者 (顧客/店主) を summary にトグル選択として出すのは USDC recover 等のみ。
   // free (概念なし) / JPYC recover (merchant 固定) では選択トグルを出さない。
   showGasMode: boolean;
@@ -42,8 +45,9 @@ export function SettingsSummary({
   // 自然文で表示する。token / chain は Step 1、receiver は Step 2 summary に出るので
   // ここでは重複させない。font-mono は外し、開発者向け内部値に見えないようにする。
   const t = useTranslations('QrGenerator');
-  const label =
-    payMode === 'standard'
+  const label = storePays
+    ? t('storeDevice.summary')
+    : payMode === 'standard'
       ? t('advancedSummary.standard')
       : jpycRecover
         ? t('advancedSummary.gaslessMerchantFixed')

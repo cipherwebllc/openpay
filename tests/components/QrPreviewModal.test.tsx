@@ -87,6 +87,28 @@ describe('QrPreviewModal', () => {
     expect(el.parentElement?.className).toContain('print:hidden');
   });
 
+  it('画面に表示している間だけ使える QR: コピーと URL の表示を出さず、注記を出す (お店がガス代を肩代わり)', () => {
+    renderModal({
+      onCopy: undefined,
+      copied: undefined,
+      onPrint: undefined,
+      onDownloadSvg: undefined,
+      onDownloadPng: undefined,
+      hideUrl: true,
+      actionsNote: 'この QR は画面に表示している間だけ使えます',
+    });
+    expect(screen.queryByRole('button', { name: 'URLをコピー' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '印刷' })).toBeNull();
+    expect(screen.queryByText('https://test.local/pay?to=0xabc&amount=500')).toBeNull();
+    expect(screen.getByText('この QR は画面に表示している間だけ使えます')).toBeTruthy();
+  });
+
+  it('既定 (指定なし) では URL とコピーを今までどおり出す', () => {
+    renderModal();
+    expect(screen.getByRole('button', { name: 'URLをコピー' })).toBeTruthy();
+    expect(screen.getByText('https://test.local/pay?to=0xabc&amount=500')).toBeTruthy();
+  });
+
   it('× 閉じる で onClose、ESC でも onClose', async () => {
     const user = userEvent.setup();
     const { props } = renderModal();

@@ -22,6 +22,8 @@ export function QrPreviewSection({
   settings,
   setAmount,
   setQrModalOpen,
+  showQrBlocked,
+  secondaryAction,
 }: {
   payUrl: string;
   receiverValid: boolean;
@@ -29,6 +31,10 @@ export function QrPreviewSection({
   settings: QrSettings;
   setAmount: Dispatch<SetStateAction<string>>;
   setQrModalOpen: Dispatch<SetStateAction<boolean>>;
+  /** 「QRコードを表示する」を押せない理由 (お店がガス代を肩代わりして送るで使えない会計など)。省略時は今のまま。 */
+  showQrBlocked?: string;
+  /** 補助の操作 (例: お店負担の QR を作れなかったときの「通常の QR を出す」)。省略時は今のまま。 */
+  secondaryAction?: { label: string; onClick: () => void };
 }) {
   const t = useTranslations('QrGenerator');
   return (
@@ -52,11 +58,30 @@ export function QrPreviewSection({
               <button
                 type="button"
                 onClick={() => setQrModalOpen(true)}
-                className="hidden w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 lg:inline-flex"
+                {...(showQrBlocked !== undefined ? { disabled: true } : {})}
+                className={`hidden w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 lg:inline-flex${
+                  showQrBlocked !== undefined
+                    ? ' disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0'
+                    : ''
+                }`}
               >
                 <QrCodeIcon className="h-5 w-5" aria-hidden />
                 {t('showQr')}
               </button>
+              {showQrBlocked && (
+                <p role="status" className="text-center text-xs text-amber-800">
+                  {showQrBlocked}
+                </p>
+              )}
+              {secondaryAction && (
+                <button
+                  type="button"
+                  onClick={secondaryAction.onClick}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                >
+                  {secondaryAction.label}
+                </button>
+              )}
               <p className="text-center text-sm text-slate-500 lg:hidden">
                 {t('qrMobileBarHint')}
               </p>
@@ -112,6 +137,7 @@ export function QrMobileBar({
   amountLabelText,
   fiatHint,
   setQrModalOpen,
+  showQrBlocked,
 }: {
   payUrl: string;
   amount: string;
@@ -120,6 +146,8 @@ export function QrMobileBar({
   amountLabelText: string;
   fiatHint: string | null;
   setQrModalOpen: Dispatch<SetStateAction<boolean>>;
+  /** 「QRコードを表示する」を押せない理由 (理由は右サイドバー・本文側に出す)。省略時は今のまま。 */
+  showQrBlocked?: string;
 }) {
   const t = useTranslations('QrGenerator');
   const bottomBarRef = useRef<HTMLDivElement>(null);
@@ -161,7 +189,12 @@ export function QrMobileBar({
       <button
         type="button"
         onClick={() => setQrModalOpen(true)}
-        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0"
+        {...(showQrBlocked !== undefined ? { disabled: true } : {})}
+        className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0${
+          showQrBlocked !== undefined
+            ? ' disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0'
+            : ''
+        }`}
       >
         <QrCodeIcon className="h-5 w-5" aria-hidden />
         {t('showQr')}

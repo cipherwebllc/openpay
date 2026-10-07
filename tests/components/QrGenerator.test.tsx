@@ -363,6 +363,13 @@ describe('QrGenerator', () => {
       ).toBeNull();
     });
 
+    it('flag OFF では決済モードは 2 枚のまま (お店がガス代を肩代わりのカードは出ない)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await openAdvanced(user);
+      expect(screen.queryByRole('button', { name: /お店が\s?ガス代を肩代わり/ })).toBeNull();
+    });
+
     it('payUrl 有効時のみ「QRコードを表示する」CTA を2箇所 (右サイドバー + モバイル下部バー) 描画', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);

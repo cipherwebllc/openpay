@@ -2,7 +2,7 @@
 
 import type { Dispatch, SetStateAction } from 'react';
 import { useTranslations } from 'next-intl';
-import { ChevronDown, Fuel, Zap } from 'lucide-react';
+import { ChevronDown, Fuel, Store, Zap } from 'lucide-react';
 import { Field } from '../Field';
 import { SplitEditor } from './SplitEditor';
 import { SettingsSummary } from './QrSummaries';
@@ -15,6 +15,10 @@ import {
   type SplitEntry,
 } from '@/lib/url';
 import { isGaslessSupported, type TokenDeployment } from '@/lib/tokens';
+import { chainForSlug, chainNameForId } from '@/lib/chains';
+import { env } from '@/lib/env';
+import { storeDeviceChainId } from '@/lib/storeDevicePayment';
+import { storePaysRequested } from '@/lib/storePaysMode';
 import type { GasMode, PayMode } from '@/lib/fee';
 
 // 高度な設定 (決済モード / ガス負担者 / 売上の自動分配 / 他チェーンからの受取)。
@@ -66,6 +70,12 @@ export function QrSettingsSection({
     );
   }
 
+  // 決済モードの 3 つ目。選んでいる (flag ON のときだけ) と、いまの通貨・チェーンで選べる (JPYC・対象チェーン) を分ける。
+  const storeSelected = storePaysRequested(settings);
+  const storeUsable =
+    settings.token === 'jpyc' && chainForSlug(settings.chain).id === storeDeviceChainId();
+  const storeChainName = chainNameForId(storeDeviceChainId()) ?? '';
+
   return (
     <SettingsAccordion
       open={accordionOpen}
@@ -77,13 +87,17 @@ export function QrSettingsSection({
           payMode={payMode}
           showGasMode={!hideGasMode}
           jpycRecover={isJpycRecover}
+          storePays={storeSelected}
         />
       }
     >
       <Field label={t('payModeLabel')}>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div
+          className={`grid grid-cols-1 gap-2 ${env.enableStoreGasWallet ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
+        >
           {(['gasless', 'standard'] as PayMode[]).map((pm) => {
-            const active = settings.payMode === pm;
+            // 3 つ目 (お店がガス代を肩代わり) を選んでいる間は、1・2 枚目は選ばれていない。
+            const active = settings.payMode === pm && !storeSelected;
             const isGasless = pm === 'gasless';
             const ModeIcon = isGasless ? Zap : Fuel;
             const iconColor = isGasless ? 'text-emerald-600' : 'text-amber-600';
@@ -99,7 +113,7 @@ export function QrSettingsSection({
                 aria-disabled={disabled}
                 onClick={() => {
                   if (disabled) return;
-                  setSettings((s) => ({ ...s, payMode: pm }));
+                  setSettings((s) => ({ ...s, payMode: pm, storePays: false }));
                 }}
                 className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
                   disabled
@@ -133,8 +147,50 @@ export function QrSettingsSection({
               </button>
             );
           })}
+          {/* 3 つ目: お店がガス代を肩代わりして送る (flag ON のときだけ・JPYC と対象チェーンで選べる・
+              画面に表示する金額ありの QR だけで使える = plans/store-gas-wallet.md §19)。 */}
+          {env.enableStoreGasWallet && (
+            <button
+              type="button"
+              disabled={!storeUsable}
+              aria-disabled={!storeUsable}
+              onClick={() => {
+                if (!storeUsable) return;
+                setSettings((s) => ({ ...s, payMode: 'gasless', storePays: true }));
+              }}
+              className={`rounded-lg border px-3 py-3 text-left text-sm transition ${
+                !storeUsable
+                  ? storeSelected
+                    ? 'cursor-not-allowed border-amber-300 bg-amber-50 text-amber-900'
+                    : 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-500'
+                  : storeSelected
+                    ? 'border-brand bg-brand/5 text-brand-dark'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+              }`}
+            >
+              {/* 3 枚並びでは幅が狭いので、見出しは「お店が / ガス代を肩代わり」でだけ折り返し (語の途中・1 文字だけの行で
+                  折らない)、バッジは次の行に。 */}
+              <div className="flex items-start gap-2 font-semibold">
+                <Store className="mt-0.5 h-4 w-4 flex-none text-sky-600" aria-hidden />
+                <span className="break-keep">{t.rich('storeDevice.cardTitle', { wbr: () => <wbr /> })}</span>
+              </div>
+              <span className="mt-1 inline-block whitespace-nowrap rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-sky-700">
+                {t('storeDevice.cardBadge')}
+              </span>
+              <div className="mt-0.5 text-xs text-slate-500">
+                {storeUsable
+                  ? t('storeDevice.cardDesc')
+                  : t('storeDevice.cardUnavailable', { chain: storeChainName })}
+              </div>
+            </button>
+          )}
         </div>
       </Field>
+      {storeSelected && (
+        <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-3 text-xs text-sky-900">
+          {t('storeDevice.note', { chain: storeChainName })}
+        </p>
+      )}
 
       {isStandard ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-800">

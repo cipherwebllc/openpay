@@ -10,16 +10,21 @@
 // Provider の外 (部品の単体テスト・単独の描画) では、useStoreDeviceMode を呼んだ部品が自分の状態で動く (今までと同じ)。
 // Provider の中では、部品側の状態は使わない (通信も effect も起こさない)。
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getAddress, isAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { storeDeviceChainId } from '@/lib/storeDevicePayment';
 import { resolveDeployment, type TokenDeployment } from '@/lib/tokens';
-import { useStoreDeviceRegister, useStoreDeviceToggle } from '@/hooks/useStoreDeviceRegister';
+import { useStoreDeviceRegister } from '@/hooks/useStoreDeviceRegister';
+import { readQrSettings } from '@/hooks/useQrSettings';
+import { storePaysRequested } from '@/lib/storePaysMode';
 
 export type StoreDeviceMode = {
-  /** 「お店がガス代を肩代わりして送る」を選んでいるか (端末ごと)。 */
+  /**
+   * いま開いているタブの会計で「お店がガス代を肩代わりして送る」を使うか (設定 storePays と通貨・チェーンから
+   * lib/storePaysMode.ts で導出し、開いているタブが知らせる)。タブが外れても最後の値のまま (送信中は続く)。
+   */
   on: boolean;
   setOn: (on: boolean) => void;
   /** ガス用ウォレットのアドレス (パネルが知らせる・undefined = まだ分からない / null = 無い)。 */
@@ -39,13 +44,25 @@ export type StoreDeviceMode = {
 const StoreDeviceContext = createContext<StoreDeviceMode | null>(null);
 
 function useStoreDeviceModeState(active: boolean): StoreDeviceMode {
-  const [on, setOn] = useStoreDeviceToggle(active && env.enableStoreGasWallet);
+  const [on, setOnState] = useState(false);
+  // 開いているタブが一度でも知らせたら、そちらを使う (下の保存値の読み込みで上書きしない)。
+  const reportedRef = useRef(false);
+  const setOn = useCallback((value: boolean) => {
+    reportedRef.current = true;
+    setOnState(value);
+  }, []);
   const [gasAddress, setGasAddress] = useState<Address | null | undefined>(undefined);
   const [hasWebLocks, setHasWebLocks] = useState(false);
   useEffect(() => {
     // 使わない実体 (Provider の中で部品側が呼んだもの)・flag OFF は状態を変えない (余計な描画をしない)。
     if (!active || !env.enableStoreGasWallet) return;
     setHasWebLocks(typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function');
+  }, [active]);
+  // 「お店がガス代を肩代わり」を選んでいるかは、保存された設定から最初の値を読む (レジ・決済QR 以外のタブで再読み込み
+  // しても、前のタブの受け渡しの締め切り = 署名が入っていれば送る、をすぐ始める)。以後は開いているタブが知らせる。
+  useEffect(() => {
+    if (!active || !env.enableStoreGasWallet || reportedRef.current) return;
+    setOnState(storePaysRequested(readQrSettings()));
   }, [active]);
   // ガス用ウォレットのアドレスは自分でも読む (レジのパネルを開いていないタブで再読み込みしても、前のタブの
   // 受け渡しの締め切りと送った支払いの結果の確認を始める = 送っている途中の支払いを隠さない)。パネルが先に

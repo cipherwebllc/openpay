@@ -32,10 +32,12 @@ vi.mock('@/lib/env', async (importOriginal) => {
     },
   };
 });
-const wallet = vi.hoisted(() => ({ address: null as string | null }));
+const wallet = vi.hoisted(() => ({ address: null as string | null, loads: 0 }));
 vi.mock('@/lib/storeGasWallet', () => ({
-  loadStoreGasWallet: () =>
-    wallet.address ? { state: 'ok', info: { address: wallet.address, createdAt: 1 } } : { state: 'none' },
+  loadStoreGasWallet: () => {
+    wallet.loads += 1;
+    return wallet.address ? { state: 'ok', info: { address: wallet.address, createdAt: 1 } } : { state: 'none' };
+  },
 }));
 vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/relay/forwarderConfig')>()),
@@ -43,7 +45,6 @@ vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
 }));
 
 import { StoreDeviceProvider, useStoreDeviceMode } from '@/components/StoreDeviceProvider';
-import { STORE_DEVICE_TOGGLE_KEY } from '@/hooks/useStoreDeviceRegister';
 
 const SHOP = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
 const GAS = getAddress('0x0000000000000000000000000000000000000abc');
@@ -77,10 +78,10 @@ beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: false });
   vi.setSystemTime(new Date('2026-10-07T03:00:00Z'));
   window.sessionStorage.clear();
-  window.localStorage.setItem(STORE_DEVICE_TOGGLE_KEY, '1');
   Object.defineProperty(window.navigator, 'locks', { value: { request: vi.fn() }, configurable: true });
   urls = [];
   wallet.address = null;
+  wallet.loads = 0;
   readRes = () => json({ ok: true, state: 'open', merchant: SHOP, amount: AMOUNT.toString(), auth: null });
   vi.stubGlobal('fetch', vi.fn((url: string) => {
     urls.push(url);
@@ -100,7 +101,6 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
-  window.localStorage.removeItem(STORE_DEVICE_TOGGLE_KEY);
 });
 
 async function advance(ms: number) {
@@ -109,10 +109,11 @@ async function advance(ms: number) {
   });
 }
 
-/** レジ役: ガス用ウォレットを知らせ (reportGas のときだけ)、QR を出す。 */
+/** レジ役: お店負担を選んでいると知らせ、ガス用ウォレットを知らせ (reportGas のときだけ)、QR を出す。 */
 function Register({ reportGas = true }: { reportGas?: boolean }) {
   const mode = useStoreDeviceMode();
   useEffect(() => {
+    mode.setOn(true);
     if (reportGas) mode.setGasAddress(GAS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -211,17 +212,35 @@ describe('StoreDeviceProvider (お店の端末で送るの状態を作成ペー�
     expect(screen.getByTestId('phase').textContent).toBe('received:false');
   });
 
-  it('Provider の中の部品側の実体は動かない (切替を読まない・通信しない)', async () => {
-    const getItem = vi.spyOn(Storage.prototype, 'getItem');
+  it('「お店がガス代を肩代わり」を選んでいれば、レジ・決済QR 以外のタブで再読み込みしても前のタブの受け渡しを締め切る (署名があれば送る)', async () => {
+    wallet.address = GAS;
+    window.localStorage.setItem(
+      'openpay:qr-settings:v2',
+      JSON.stringify({ token: 'jpyc', chain: 'polygon', payMode: 'gasless', storePays: true }),
+    );
+    window.sessionStorage.setItem(
+      'openpay:register-store-device-session:v1',
+      JSON.stringify({ id: ID, token: 'ab'.repeat(32), expiresAt: nowSec() + 600, merchant: SHOP, amount: AMOUNT.toString(), chainId: 80002 }),
+    );
     render(
       <StoreDeviceProvider>
         <Other />
       </StoreDeviceProvider>,
     );
     await advance(0);
-    const toggleReads = getItem.mock.calls.filter(([k]) => k === STORE_DEVICE_TOGGLE_KEY);
-    expect(toggleReads).toHaveLength(1); // Provider の 1 回だけ
-    getItem.mockRestore();
+    await advance(0);
+    expect(urls.filter((u) => u.endsWith('/close'))).toHaveLength(1);
+    window.localStorage.removeItem('openpay:qr-settings:v2');
+  });
+
+  it('Provider の中の部品側の実体は動かない (ウォレットを読まない・通信しない)', async () => {
+    render(
+      <StoreDeviceProvider>
+        <Other />
+      </StoreDeviceProvider>,
+    );
+    await advance(0);
+    expect(wallet.loads).toBe(1); // Provider の 1 回だけ
   });
 
   it('Provider の外 (単独の描画) では、部品が自分の実体で動く (今までと同じ)', async () => {
