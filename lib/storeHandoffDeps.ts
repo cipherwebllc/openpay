@@ -3,12 +3,20 @@ import 'server-only';
 // 受け渡し (lib/storeHandoff.ts) の本番の依存: Upstash KV と、中継と同じ forwarder 設定・RPC 読み取り。
 
 import { createHmac, randomBytes } from 'node:crypto';
-import { getAddress, isAddress, type Hex } from 'viem';
+import { createPublicClient, getAddress, isAddress, type Hex, type Log } from 'viem';
+import { chainObjectForId, transportForChain } from '@/lib/chains';
+import { hasMatchingForwarderSettlement } from '@/lib/relay/settlementReceipt';
+import {
+  authorizationExpiredUnused,
+  type AuthorizationExpiryClient,
+} from '@/lib/x402/authorizationExpiry';
+import type { StoreHandoffResolveDeps } from '@/lib/storeHandoffResolve';
 import { kvMget, kvSet, kvSetNxGet } from '@/lib/kv';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { feeReceiverFor } from '@/lib/relay/forwarderSettleService';
 import {
   MAX_VALUE,
+  findAuthorizationUsedTransactionHash,
   getBalance,
   jpycAddressFor,
   readAuthorizationUsed,
@@ -92,5 +100,41 @@ export function handoffDeps(): HandoffDeps {
     readAuthorizationUsed,
     mac: handoffMac,
     randomBytes,
+  };
+}
+
+function publicClientFor(chainId: number) {
+  const chain = chainObjectForId(chainId);
+  if (!chain) throw new Error('unsupported_chain');
+  return createPublicClient({ chain, transport: transportForChain(chainId) });
+}
+
+const handoffFeeReceiverFor = (chainId: number) => {
+  const r = feeReceiverFor(chainId);
+  return r && isAddress(r) ? getAddress(r) : null;
+};
+
+export function resolveDeps(): StoreHandoffResolveDeps {
+  return {
+    expectedChainId: storeGasWalletChain().id,
+    jpycAddressFor,
+    forwarderFor: jpycForwarderFor,
+    feeReceiverFor: handoffFeeReceiverFor,
+    async successfulReceiptLogs(chainId: number, txHash: Hex): Promise<Log[] | null> {
+      try {
+        const receipt = await publicClientFor(chainId).getTransactionReceipt({ hash: txHash });
+        return receipt.status === 'success' ? receipt.logs : null;
+      } catch {
+        return null; // 見つからない・RPC 障害は「確かめられなかった」(結論は pending)
+      }
+    },
+    hasMatchingSettlement: hasMatchingForwarderSettlement,
+    readAuthorizationUsed,
+    findAuthorizationUsedTransactionHash,
+    expiredUnused: ({ chainId, ...input }) =>
+      authorizationExpiredUnused({
+        ...input,
+        client: publicClientFor(chainId) as unknown as AuthorizationExpiryClient,
+      }),
   };
 }

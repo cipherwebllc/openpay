@@ -12,14 +12,19 @@ import { ConnectButton } from './ConnectButton';
 import { PayerReceiptCompletion } from './PayerReceiptCompletion';
 import { useErc20BalanceAndChain } from '@/hooks/useErc20BalanceAndChain';
 import { usePaymentHistory, type GaslessSnapshot } from '@/hooks/usePaymentHistory';
-import { useStoreDevicePayment } from '@/hooks/useStoreDevicePayment';
+import {
+  useStoreDevicePayment,
+  type StoreDeviceIntent,
+  type StoreDevicePaymentSnapshot,
+} from '@/hooks/useStoreDevicePayment';
 import { chainForSlug, txExplorerUrl } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { formatTokenAmount } from '@/lib/format';
 import { STORE_DEVICE_FEE_WEI } from '@/lib/storeDevicePayment';
 import { taxAmountDecimal, taxDisplayDecimals } from '@/lib/tax';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
-import { calcCheckoutTotal, type CheckoutParams } from '@/lib/url';
+import { calcCheckoutTotal, type CheckoutItem, type CheckoutParams } from '@/lib/url';
+import type { Address } from 'viem';
 
 const IDLE_STANDARD = { phase: 'idle', error: null } as const;
 
@@ -33,6 +38,11 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
   const { switchChain, isPending: isSwitching } = useSwitchChain();
   const handoffId = params.handoffId ?? '';
   const { status, pay } = useStoreDevicePayment(deployment, handoffId);
+  // 署名した時点で固定した値 (履歴・控えはこれで作る・後からウォレットや URL が変わっても動かない)。
+  const frozen: StoreDeviceIntent | null =
+    status.phase === 'waiting' || status.phase === 'success' || status.phase === 'expired'
+      ? status.intent
+      : null;
 
   const bill = useMemo(
     () => calcCheckoutTotal(params.items, deployment.decimals),
@@ -48,8 +58,7 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
   const fmt = (wei: bigint) => formatTokenAmount(wei, deployment);
 
   // 残り時間の表示 (送信待ちの間だけ 1 秒ごと)。
-  const waitingUntil =
-    status.phase === 'waiting' || status.phase === 'confirming' ? status.validBefore : null;
+  const waitingUntil = status.phase === 'waiting' ? status.intent.validBefore : null;
   const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
   useEffect(() => {
     if (waitingUntil === null) return;
@@ -59,34 +68,44 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
   const remaining = waitingUntil === null ? 0 : Math.max(0, waitingUntil - nowSec);
 
   // 履歴と控え: 既存の usePaymentHistory に、この経路の結果を「ガスレスの 1 件」として渡す
-  // (店の受取 = 請求額・利用料欄 = 1 wei・お客様はガスを払わない)。
-  const historyCtx = useMemo(
-    () => ({
+  // (店の受取 = 請求額・利用料欄 = 1 wei・お客様はガスを払わない・ガス代は店の端末)。値は署名した時点で固定。
+  const historyCtx = useMemo(() => {
+    const snap: StoreDevicePaymentSnapshot = frozen?.snapshot ?? {
+      storeName: params.storeName,
+      invoiceNo: params.invoiceNo,
+      items: params.items,
+      description: params.description,
+      taxRate: params.taxRate,
+      taxCategory: params.taxCategory,
+      receiptNo: params.receiptNo,
+    };
+    const merchantValue = frozen ? BigInt(frozen.merchantValue) : bill;
+    return {
       chainId: deployment.chainId,
       chainSlug,
       asset: params.token,
       tokenAddress: deployment.address,
       payMode: 'gasless' as const,
-      gasMode: 'customer' as const,
-      merchant: params.to,
-      merchantAmount: bill,
-      customer: address,
+      gasMode: 'merchant' as const,
+      merchant: (frozen?.merchant ?? params.to) as Address,
+      merchantAmount: merchantValue,
+      customer: (frozen?.from ?? address) as Address | undefined,
       feeReceiver: env.feeReceiver,
       feeAmount: STORE_DEVICE_FEE_WEI,
-      saleAmount: bill,
+      saleAmount: merchantValue,
       networkFeeEquivalent: null,
       storeName: '',
-      receiptMerchantName: params.storeName ?? null,
-      invoiceNo: params.invoiceNo ?? null,
-      note: params.description ?? '',
-      productName: params.items.map((it) => it.name).join(', '),
-      memo: params.description ?? null,
-      taxRate: params.taxRate ?? null,
-      taxCategory: params.taxCategory ?? null,
-      receiptNo: params.receiptNo ?? null,
-      lineItems: params.items.map((it, i) => {
+      receiptMerchantName: snap.storeName ?? null,
+      invoiceNo: snap.invoiceNo ?? null,
+      note: snap.description ?? '',
+      productName: snap.items.map((it) => it.name).join(', '),
+      memo: snap.description ?? null,
+      taxRate: snap.taxRate ?? null,
+      taxCategory: snap.taxCategory ?? null,
+      receiptNo: snap.receiptNo ?? null,
+      lineItems: snap.items.map((it: CheckoutItem, i: number) => {
         const amount = formatUnits(calcCheckoutTotal([it], deployment.decimals), deployment.decimals);
-        const taxRate = it.taxRate ?? params.taxRate ?? null;
+        const taxRate = it.taxRate ?? snap.taxRate ?? null;
         const taxAmt = taxAmountDecimal(Number(amount), taxRate, taxDisplayDecimals(params.token));
         return {
           id: String(i),
@@ -96,46 +115,42 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
           amount,
           currency: params.token,
           taxRate,
-          taxCategory: it.taxCategory ?? params.taxCategory ?? null,
+          taxCategory: it.taxCategory ?? snap.taxCategory ?? null,
           taxAmount: taxAmt == null ? '0' : String(taxAmt),
           memo: it.memo ?? null,
         };
       }),
       sourceRoute: '/checkout',
       locale,
-    }),
-    [deployment, chainSlug, params, bill, address, locale],
-  );
+    };
+  }, [frozen, deployment, chainSlug, params, bill, address, locale]);
+  const successTx = status.phase === 'success' ? status.txHash : null;
   const gaslessSnapshot: GaslessSnapshot = useMemo(() => {
+    const merchantValue = frozen ? BigInt(frozen.merchantValue) : bill;
     const variables = {
-      merchantAmount: bill,
+      merchantAmount: merchantValue,
       feeAmount: STORE_DEVICE_FEE_WEI,
-      saleAmount: bill,
+      saleAmount: merchantValue,
       networkFeeEquivalent: null,
     };
-    if (status.phase === 'success' || status.phase === 'reverted') {
+    // 記録するのは結論が「支払い済み」のときだけ (txHash は必ずある・控えの id = txHash で安定)。
+    if (successTx) {
       return {
-        data: {
-          txHash: status.txHash,
-          userOpHash: null,
-          blockNumber: null,
-          success: status.phase === 'success',
-        },
+        data: { txHash: successTx, userOpHash: null, blockNumber: null, success: true },
         error: null,
         variables,
       };
     }
     return { error: null, variables };
-  }, [status, bill]);
+  }, [successTx, frozen, bill]);
   usePaymentHistory(historyCtx, gaslessSnapshot, IDLE_STANDARD);
 
   const busy =
-    status.phase === 'signing' ||
-    status.phase === 'submitting' ||
-    status.phase === 'waiting' ||
-    status.phase === 'confirming';
-  const done = status.phase === 'success';
-  const canPay = isConnected && !wrongChain && !insufficientBalance && !busy && !done && bill > 0n;
+    status.phase === 'signing' || status.phase === 'submitting' || status.phase === 'waiting';
+  const done = status.phase === 'success' || status.phase === 'expired';
+  const blocked = status.phase === 'error' && status.blocking;
+  const canPay =
+    isConnected && !wrongChain && !insufficientBalance && !busy && !done && !blocked && bill > 0n;
 
   return (
     <div className="space-y-4">
@@ -197,7 +212,21 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
           <button
             type="button"
             disabled={!canPay}
-            onClick={() => void pay({ merchant: params.to, bill })}
+            onClick={() =>
+              void pay({
+                merchant: params.to,
+                bill,
+                snapshot: {
+                  storeName: params.storeName,
+                  invoiceNo: params.invoiceNo,
+                  items: params.items,
+                  description: params.description,
+                  taxRate: params.taxRate,
+                  taxCategory: params.taxCategory,
+                  receiptNo: params.receiptNo,
+                },
+              })
+            }
             className="w-full rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-card hover:bg-brand-dark disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
           >
             {status.phase === 'signing'
@@ -209,10 +238,16 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
         </>
       )}
 
-      {(status.phase === 'waiting' || status.phase === 'confirming') && (
-        <p role="status" className="rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-900">
-          {t('storeDevice.waiting', { seconds: remaining })}
-        </p>
+      {status.phase === 'waiting' && (
+        <div className="rounded-xl bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          {/* 読み上げは状態だけ (秒数の更新を毎秒読み上げない)。 */}
+          <p role="status">
+            {status.otherCheckout ? t('storeDevice.waitingOther') : t('storeDevice.waiting')}
+          </p>
+          {remaining > 0 && (
+            <p className="mt-1 text-xs text-sky-800">{t('storeDevice.remaining', { seconds: remaining })}</p>
+          )}
+        </div>
       )}
 
       {status.phase === 'success' && (
@@ -228,15 +263,10 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
               {t('storeDevice.viewTx')}
             </a>
           )}
-          <PayerReceiptCompletion candidateIds={[status.txHash ?? undefined]} />
+          <PayerReceiptCompletion candidateIds={[status.txHash]} />
         </section>
       )}
 
-      {status.phase === 'reverted' && (
-        <p role="alert" className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
-          {t('storeDevice.reverted')}
-        </p>
-      )}
 
       {status.phase === 'expired' && (
         <p role="alert" className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">

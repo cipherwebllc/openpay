@@ -18,7 +18,7 @@ vi.mock('@/components/PayerReceiptCompletion', () => ({
   PayerReceiptCompletion: ({ candidateIds }: { candidateIds: unknown[] }) => <div>receipt:{String(candidateIds[0])}</div>,
 }));
 vi.mock('@/hooks/useStoreDevicePayment', () => ({
-  useStoreDevicePayment: () => ({ status: hold.status, pay: hold.pay, reset: vi.fn() }),
+  useStoreDevicePayment: () => ({ status: hold.status, pay: hold.pay }),
 }));
 vi.mock('@/hooks/useErc20BalanceAndChain', () => ({ useErc20BalanceAndChain: () => hold.balance }));
 vi.mock('@/hooks/usePaymentHistory', () => ({
@@ -29,6 +29,19 @@ vi.mock('@/hooks/usePaymentHistory', () => ({
 
 import { StoreDeviceCheckoutForm } from '@/components/StoreDeviceCheckoutForm';
 import type { CheckoutParams } from '@/lib/url';
+
+const INTENT = {
+  v: 2,
+  handoffId: 'AbCdEfGhIjKlMnOpQrStUv',
+  chainId: 80002,
+  from: '0x0000000000000000000000000000000000000aaa',
+  merchant: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  merchantValue: (1100n * 10n ** 18n).toString(),
+  intentSalt: `0x${'11'.repeat(32)}`,
+  validBefore: Math.floor(Date.now() / 1000) + 100,
+  nonce: `0x${'22'.repeat(32)}`,
+  snapshot: { storeName: 'OpenPay Cafe', items: [{ name: 'カフェラテ', qty: 2, price: '550' }] },
+};
 
 const params: CheckoutParams = {
   to: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
@@ -58,7 +71,13 @@ describe('StoreDeviceCheckoutForm', () => {
     expect(screen.getByText(/OpenPay 利用料は 0 円です/)).toBeTruthy();
     expect(screen.getByText(/1 wei = 0.000000000000000001 JPYC/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /1100 JPYC を支払う|1,100 JPYC を支払う/ }));
-    expect(hold.pay).toHaveBeenCalledWith({ merchant: params.to, bill: 1100n * 10n ** 18n });
+    expect(hold.pay).toHaveBeenCalledWith(
+      expect.objectContaining({
+        merchant: params.to,
+        bill: 1100n * 10n ** 18n,
+        snapshot: expect.objectContaining({ storeName: 'OpenPay Cafe', items: params.items }),
+      }),
+    );
   });
 
   it('残高が請求額 + 1 wei に足りなければ押せず、通常の決済を案内する', () => {
@@ -68,15 +87,30 @@ describe('StoreDeviceCheckoutForm', () => {
     expect(screen.getByRole('button', { name: /を支払う/ })).toBeDisabled();
   });
 
-  it('送信待ちは残り時間を出し、押せない', () => {
-    hold.status = { phase: 'waiting', validBefore: Math.floor(Date.now() / 1000) + 100 };
+  it('送信待ちは状態だけを読み上げ (秒数は読み上げ領域の外)、押せない', () => {
+    hold.status = { phase: 'waiting', intent: INTENT, otherCheckout: false };
     render(<StoreDeviceCheckoutForm params={params} />);
-    expect(screen.getByRole('status')).toHaveTextContent(/お店の端末が送信しています/);
+    expect(screen.getByRole('status')).toHaveTextContent('お店の端末の送信と確認を待っています…');
+    expect(screen.getByRole('status')).not.toHaveTextContent(/秒/);
+    expect(screen.getByText(/署名の期限まで残り約/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /を支払う/ })).toBeDisabled();
+  });
+
+  it('別の会計の未解決の支払いを確認中なら、その旨を出して押せない', () => {
+    hold.status = { phase: 'waiting', intent: { ...INTENT, handoffId: 'ZZZZZZZZZZZZZZZZZZZZZZ' }, otherCheckout: true };
+    render(<StoreDeviceCheckoutForm params={params} />);
+    expect(screen.getByRole('status')).toHaveTextContent(/前のお支払いの結果を確認しています/);
+    expect(screen.getByRole('button', { name: /を支払う/ })).toBeDisabled();
+  });
+
+  it('枠が埋まっている (session_taken) ときは押せない', () => {
+    hold.status = { phase: 'error', reason: 'session_taken', blocking: true };
+    render(<StoreDeviceCheckoutForm params={params} />);
     expect(screen.getByRole('button', { name: /を支払う/ })).toBeDisabled();
   });
 
   it('完了: 支払いボタンを消し、控えを出す', () => {
-    hold.status = { phase: 'success', txHash: `0x${'ab'.repeat(32)}` };
+    hold.status = { phase: 'success', txHash: `0x${'ab'.repeat(32)}`, intent: INTENT };
     render(<StoreDeviceCheckoutForm params={params} />);
     expect(screen.getByText('お支払いが完了しました')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /を支払う/ })).toBeNull();
@@ -84,29 +118,42 @@ describe('StoreDeviceCheckoutForm', () => {
   });
 
   it('期限切れ (未使用を確認済み) は「お支払いは行われていません」・理由つきのエラーも出す', () => {
-    hold.status = { phase: 'expired' };
+    hold.status = { phase: 'expired', intent: INTENT };
     const { unmount } = render(<StoreDeviceCheckoutForm params={params} />);
     expect(screen.getByRole('alert')).toHaveTextContent(/お支払いは行われていません/);
     unmount();
-    hold.status = { phase: 'error', reason: 'session_taken' };
+    hold.status = { phase: 'error', reason: 'session_taken', blocking: true };
     render(<StoreDeviceCheckoutForm params={params} />);
     expect(screen.getByRole('alert')).toHaveTextContent(/すでに別のお支払いが進んでいます/);
   });
 
-  it('履歴と控えには、店の受取 = 請求額・利用料欄 = 1 wei・お客様はガスなしで渡す', () => {
-    hold.status = { phase: 'success', txHash: `0x${'ab'.repeat(32)}` };
-    render(<StoreDeviceCheckoutForm params={params} />);
+  it('履歴と控えは署名した時点の値で作る (店の受取 = 請求額・利用料欄 = 1 wei・ガスは店舗負担)', () => {
+    hold.status = { phase: 'success', txHash: `0x${'ab'.repeat(32)}`, intent: INTENT };
+    // 署名後に URL やウォレットが変わっても、記録は署名時点の値のまま
+    render(<StoreDeviceCheckoutForm params={{ ...params, storeName: 'Changed', items: [{ name: 'x', qty: 9, price: '1' }] }} />);
     const [ctx, gasless] = hold.history.at(-1) as [Record<string, unknown>, Record<string, unknown>];
     expect(ctx).toMatchObject({
       merchantAmount: 1100n * 10n ** 18n,
       feeAmount: 1n,
       saleAmount: 1100n * 10n ** 18n,
       payMode: 'gasless',
+      gasMode: 'merchant',
+      customer: INTENT.from,
       receiptMerchantName: 'OpenPay Cafe',
+      productName: 'カフェラテ',
     });
     expect(gasless).toMatchObject({
       data: { txHash: `0x${'ab'.repeat(32)}`, success: true },
       variables: { merchantAmount: 1100n * 10n ** 18n, feeAmount: 1n, saleAmount: 1100n * 10n ** 18n },
     });
+  });
+
+  it('描き直しても履歴に渡すデータは同じもの (同じ支払いを二重に記録しない)', () => {
+    hold.status = { phase: 'success', txHash: `0x${'ab'.repeat(32)}`, intent: INTENT };
+    const { rerender } = render(<StoreDeviceCheckoutForm params={params} />);
+    const first = (hold.history.at(-1) as unknown[])[1] as { data: unknown };
+    rerender(<StoreDeviceCheckoutForm params={params} />);
+    const second = (hold.history.at(-1) as unknown[])[1] as { data: unknown };
+    expect(second).toBe(first);
   });
 });

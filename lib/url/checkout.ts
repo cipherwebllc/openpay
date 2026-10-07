@@ -288,9 +288,10 @@ export function buildCheckoutPath(params: CheckoutParams): string {
     const v = sanitizeText(params.storeName, CHECKOUT_STORE_NAME_MAX);
     if (v) sp.set('store', v);
   }
-  if (params.submit === 'store' && isStoreHandoffId(params.handoffId)) {
+  // お店の端末で送る: hs が不正・欠落でも submit=store は残す (通常の経路の URL を作らず、parse で必ず止める)。
+  if (params.submit === 'store') {
     sp.set('submit', 'store');
-    sp.set('hs', params.handoffId);
+    if (params.handoffId) sp.set('hs', params.handoffId);
   }
   // 記帳補助メタ (在るときだけ・税は checkout 単位の共通値)。pay と共通の shared helper で追記。
   appendTaxReceiptParams(sp, params);

@@ -73,9 +73,11 @@ describe('/checkout の「お店の端末で送る」(submit=store&hs=)', () => 
     expect(parse(kaia, `&submit=store&hs=${HS}`)).toMatchObject({ ok: false, urlError: { code: 'storeDeviceUnavailable' } });
   });
 
-  it('build は hs の形が違えば submit を出さない', () => {
-    const path = buildCheckoutPath({ ...base, submit: 'store', handoffId: 'bad' });
-    expect(path).not.toContain('submit=');
-    expect(path).not.toContain('hs=');
+  it('build は hs が不正・欠落でも submit=store を残し、parse で止まる (通常の経路の URL を作らない)', () => {
+    for (const handoffId of ['bad', undefined]) {
+      const path = buildCheckoutPath({ ...base, submit: 'store', handoffId });
+      expect(path).toContain('submit=store');
+      expect(parse(path)).toMatchObject({ ok: false, urlError: { code: 'storeDeviceUnavailable' } });
+    }
   });
 });

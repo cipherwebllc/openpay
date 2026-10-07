@@ -1585,10 +1585,11 @@
       "signNote": "Your wallet will show OpenPay's intermediary contract as the recipient and the amount plus 1 wei. After you sign, the shop's device sends it.",
       "insufficientBalance": "Insufficient balance. You need {amount} plus 1 wei. Ask the shop for a standard payment instead.",
       "btnSigning": "Sign in your wallet…",
-      "waiting": "The shop's device is sending it… (about {seconds} seconds left)",
+      "waiting": "Waiting for the shop's device to send and confirm it…",
+      "waitingOther": "Checking the result of your previous payment. You can't start a new payment until it's confirmed.",
+      "remaining": "About {seconds} seconds left before the signature expires",
       "success": "Payment complete",
       "viewTx": "View transaction",
-      "reverted": "The transfer failed (it was reverted). No payment was made. Please tell the staff.",
       "expired": "The shop's device couldn't send it. No payment was made. Please tell the staff and ask for a new QR code.",
       "error": {
         "wallet_not_connected": "Connect your wallet.",

@@ -4,14 +4,11 @@ import { getAddress } from 'viem';
 
 const w = vi.hoisted(() => ({
   signTypedData: vi.fn(),
-  readContract: vi.fn(),
-  waitForTransactionReceipt: vi.fn(),
   account: { address: '0x0000000000000000000000000000000000000def' as string | undefined, chainId: 80002 as number | undefined },
 }));
 vi.mock('wagmi', () => ({
   useWalletClient: () => ({ data: { signTypedData: w.signTypedData } }),
   useAccount: () => w.account,
-  usePublicClient: () => ({ readContract: w.readContract, waitForTransactionReceipt: w.waitForTransactionReceipt }),
 }));
 const FWD = '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4';
 vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
@@ -33,30 +30,32 @@ const TX = `0x${'ab'.repeat(32)}`;
 const deployment = { chainId: 80002, address: JPYC, decimals: 18 } as unknown as TokenDeployment;
 const BILL = 1000n * 10n ** 18n;
 const SIG = `0x${'1b'.repeat(65)}`;
+const SNAPSHOT = { storeName: 'OpenPay Cafe', items: [{ name: 'カフェラテ', qty: 1, price: '1000' }] };
 
-type FetchCall = { url: string; init?: RequestInit };
-let fetchCalls: FetchCall[];
+type Call = { url: string; init?: RequestInit };
+let calls: Call[];
 let authResponse: () => Promise<Response>;
 let readResponse: () => Promise<Response>;
+let resolveResponse: () => Promise<Response>;
 
-function json(body: unknown, status = 200) {
-  return Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }));
-}
+const json = (body: unknown, status = 200) =>
+  Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }));
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: false });
   vi.setSystemTime(new Date('2026-10-07T03:00:00Z'));
-  window.sessionStorage.clear();
+  window.localStorage.clear();
   w.signTypedData.mockReset().mockResolvedValue(SIG);
-  w.readContract.mockReset();
-  w.waitForTransactionReceipt.mockReset();
   w.account = { address: '0x0000000000000000000000000000000000000def', chainId: 80002 };
-  fetchCalls = [];
+  calls = [];
   authResponse = () => json({ ok: true, idempotent: false });
   readResponse = () => json({ ok: true, state: 'signed', expiresAt: 0, txHash: null });
+  resolveResponse = () => json({ ok: true, state: 'pending' });
   vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
-    fetchCalls.push({ url, init });
-    return url.endsWith('/auth') ? authResponse() : readResponse();
+    calls.push({ url, init });
+    if (url.endsWith('/auth')) return authResponse();
+    if (url.endsWith('/resolve')) return resolveResponse();
+    return readResponse();
   }));
 });
 afterEach(() => {
@@ -64,124 +63,128 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const resolveCalls = () => calls.filter((c) => c.url.endsWith('/resolve'));
+
 async function payNow(result: { current: ReturnType<typeof useStoreDevicePayment> }) {
   await act(async () => {
-    await result.current.pay({ merchant: SHOP, bill: BILL });
+    await result.current.pay({ merchant: SHOP, bill: BILL, snapshot: SNAPSHOT });
   });
 }
+async function advance(ms: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+const stored = () => window.localStorage.getItem(STORE_DEVICE_INTENT_KEY);
 
 describe('useStoreDevicePayment', () => {
-  it('既存 forwarder 宛て・請求額 + 1 wei に署名し、受け渡しへ渡して送信待ちに入る', async () => {
+  it('既存 forwarder 宛て・請求額 + 1 wei に署名し、署名した時点で未解決として残してから受け渡しへ', async () => {
     const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
     await payNow(result);
     const typed = w.signTypedData.mock.calls[0][0];
     expect(typed.primaryType).toBe('ReceiveWithAuthorization');
     expect(typed.message.to).toBe(FWD);
     expect(typed.message.value).toBe(BILL + 1n);
-    const auth = fetchCalls.find((c) => c.url.endsWith('/auth'))!;
-    expect(auth.url).toBe(`/api/register/handoff/${HS}/auth`);
-    expect(JSON.parse(String(auth.init!.body))).toMatchObject({
-      merchant: SHOP,
-      merchantValue: BILL.toString(),
-      feeValue: '1',
-      signature: SIG,
+    expect(JSON.parse(String(calls.find((c) => c.url.endsWith('/auth'))!.init!.body))).toMatchObject({
+      merchant: SHOP, merchantValue: BILL.toString(), feeValue: '1', signature: SIG,
     });
-    expect(result.current.status.phase).toBe('waiting');
-    expect(JSON.parse(window.sessionStorage.getItem(STORE_DEVICE_INTENT_KEY)!)).toMatchObject({ handoffId: HS });
+    expect(result.current.status).toMatchObject({ phase: 'waiting', otherCheckout: false });
+    expect(JSON.parse(stored()!)).toMatchObject({ handoffId: HS, merchantValue: BILL.toString(), snapshot: SNAPSHOT });
   });
 
-  it('お店の端末が送った tx の receipt 成功で完了し、待ちの情報を消す', async () => {
+  it('端末の tx をサーバの判定で確かめて支払い済みにし、未解決の記録を消す', async () => {
     readResponse = () => json({ ok: true, state: 'sent', expiresAt: 0, txHash: TX });
-    w.waitForTransactionReceipt.mockResolvedValue({ status: 'success' });
+    resolveResponse = () => json({ ok: true, state: 'settled', txHash: TX });
     const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
     await payNow(result);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10);
-    });
-    expect(result.current.status).toEqual({ phase: 'success', txHash: TX });
-    expect(window.sessionStorage.getItem(STORE_DEVICE_INTENT_KEY)).toBeNull();
+    await advance(10);
+    expect(JSON.parse(String(resolveCalls()[0].init!.body))).toMatchObject({ txHash: TX, merchantValue: BILL.toString() });
+    expect(result.current.status).toMatchObject({ phase: 'success', txHash: TX });
+    expect(stored()).toBeNull();
   });
 
-  it('期限 + 30 秒を過ぎても送られず、チェーンで未使用なら「お支払いは行われていません」', async () => {
-    w.readContract.mockResolvedValue(false);
+  it('判定が確認中のまま (revert・別の取引) なら支払い済みにも未払いにもしない', async () => {
+    readResponse = () => json({ ok: true, state: 'sent', expiresAt: 0, txHash: TX });
     const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
     await payNow(result);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(150_000);
-    });
+    await advance(20_000);
     expect(result.current.status.phase).toBe('waiting');
-    expect(w.readContract).not.toHaveBeenCalled();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(40_000);
-    });
-    expect(w.readContract).toHaveBeenCalled();
-    expect(result.current.status).toEqual({ phase: 'expired' });
+    expect(stored()).not.toBeNull();
   });
 
-  it('期限後に使用済みなら支払い済み・チェーンを読めないうちは「行われていない」と言わない', async () => {
-    w.readContract.mockRejectedValueOnce(new Error('rpc down')).mockResolvedValue(true);
+  it('期限 + 30 秒までは判定 API を呼ばず (tx が無いとき)、その後は判定の「行われていない」だけで期限切れにする', async () => {
     const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
     await payNow(result);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(185_000);
-    });
-    // 1 回目の読み取りは失敗 → 待ちのまま、次の読み取りで使用済み → 支払い済み
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10_000);
-    });
-    expect(result.current.status).toEqual({ phase: 'success', txHash: null });
+    await advance(150_000);
+    expect(resolveCalls()).toHaveLength(0);
+    resolveResponse = () => json({ ok: true, state: 'expired_unused' });
+    await advance(60_000);
+    expect(resolveCalls().length).toBeGreaterThan(0);
+    expect(result.current.status.phase).toBe('expired');
+    expect(stored()).toBeNull();
   });
 
   it.each([
-    ['insufficient_balance', 400, 'insufficient_balance'],
-    ['slot_taken', 409, 'session_taken'],
-    ['expired', 410, 'session_expired'],
-    ['fee_value_mismatch', 400, 'server_rejected'],
-  ])('受け渡しが %s を返したら、待ちの情報を消して理由を出す', async (error, status, reason) => {
+    ['503 (保存されたか分からない)', () => json({ ok: false, error: 'handoff_unavailable' }, 503)],
+    ['読めない応答', () => Promise.resolve(new Response('<html>', { status: 200 }))],
+    ['通信断 (2 回とも)', () => Promise.reject(new TypeError('network'))],
+    ['使用済み (authorization_used)', () => json({ ok: false, error: 'authorization_used' }, 409)],
+  ])('%s → 失敗と言わず確認へ (未解決の記録を残す)', async (_, response) => {
+    authResponse = response;
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await payNow(result);
+    expect(result.current.status.phase).toBe('waiting');
+    expect(stored()).not.toBeNull();
+  });
+
+  it.each([
+    ['insufficient_balance', 400, 'insufficient_balance', false],
+    ['fee_value_mismatch', 400, 'server_rejected', false],
+    ['expired', 410, 'session_expired', true],
+    ['slot_taken', 409, 'session_taken', true],
+  ])('預かっていないと確定 (%s) → 未解決の記録を消して理由を出す', async (error, status, reason, blocking) => {
     authResponse = () => json({ ok: false, error }, status);
     const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
     await payNow(result);
-    expect(result.current.status).toEqual({ phase: 'error', reason });
-    expect(window.sessionStorage.getItem(STORE_DEVICE_INTENT_KEY)).toBeNull();
+    expect(result.current.status).toEqual({ phase: 'error', reason, blocking });
+    expect(stored()).toBeNull();
   });
 
-  it('使用済みの署名 (authorization_used) は支払い済みとして扱う', async () => {
-    authResponse = () => json({ ok: false, error: 'authorization_used' }, 409);
+  it('枠が埋まっていたら、この QR ではもう署名させない', async () => {
+    authResponse = () => json({ ok: false, error: 'slot_taken' }, 409);
     const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
     await payNow(result);
-    expect(result.current.status).toEqual({ phase: 'success', txHash: null });
-  });
-
-  it('応答を受け取れないときは 1 回だけ送り直し、それでもだめなら失敗とは言わず待ちに入る', async () => {
-    authResponse = () => Promise.reject(new TypeError('network'));
-    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
     await payNow(result);
-    expect(fetchCalls.filter((c) => c.url.endsWith('/auth'))).toHaveLength(2);
-    expect(result.current.status.phase).toBe('waiting');
-  });
-
-  it('署名をキャンセルしたら rejected・別ネットワークなら wrong_chain (署名を求めない)', async () => {
-    w.signTypedData.mockRejectedValueOnce(Object.assign(new Error('User rejected'), { code: 4001 }));
-    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
-    await payNow(result);
-    expect(result.current.status).toEqual({ phase: 'error', reason: 'rejected' });
-    w.account = { ...w.account, chainId: 137 };
-    const other = renderHook(() => useStoreDevicePayment(deployment, HS));
-    await payNow(other.result);
-    expect(other.result.current.status).toEqual({ phase: 'error', reason: 'wrong_chain' });
     expect(w.signTypedData).toHaveBeenCalledTimes(1);
   });
 
-  it('再読み込み: 同じ会計で署名済みなら、新しい署名を作らずに待ちへ戻る', async () => {
-    window.sessionStorage.setItem(
+  it('別の会計の未解決の支払いがあれば、その確認に戻り、新しい署名を作らない', async () => {
+    window.localStorage.setItem(
       STORE_DEVICE_INTENT_KEY,
-      JSON.stringify({ v: 1, handoffId: HS, chainId: 80002, from: '0x0000000000000000000000000000000000000def', nonce: `0x${'11'.repeat(32)}`, validBefore: Math.floor(Date.now() / 1000) + 100 }),
+      JSON.stringify({
+        v: 2, handoffId: 'ZZZZZZZZZZZZZZZZZZZZZZ', chainId: 80002,
+        from: '0x0000000000000000000000000000000000000def', merchant: SHOP, merchantValue: '1',
+        intentSalt: `0x${'22'.repeat(32)}`, validBefore: Math.floor(Date.now() / 1000) + 100,
+        nonce: `0x${'33'.repeat(32)}`, snapshot: { items: [] },
+      }),
     );
     const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    expect(result.current.status.phase).toBe('waiting');
+    await advance(0);
+    expect(result.current.status).toMatchObject({ phase: 'waiting', otherCheckout: true });
+    await payNow(result);
     expect(w.signTypedData).not.toHaveBeenCalled();
+  });
+
+  it('署名をキャンセルしたら rejected (未解決を残さない)・別ネットワークなら署名を求めない', async () => {
+    w.signTypedData.mockRejectedValueOnce(Object.assign(new Error('User rejected'), { code: 4001 }));
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await payNow(result);
+    expect(result.current.status).toEqual({ phase: 'error', reason: 'rejected', blocking: false });
+    expect(stored()).toBeNull();
+    w.account = { ...w.account, chainId: 137 };
+    const other = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await payNow(other.result);
+    expect(other.result.current.status).toEqual({ phase: 'error', reason: 'wrong_chain', blocking: false });
+    expect(w.signTypedData).toHaveBeenCalledTimes(1);
   });
 });

@@ -21,7 +21,13 @@ vi.mock('@/lib/env', async (importOriginal) => {
 vi.mock('@/lib/relay/relayGuards', () => ({
   checkIpRateLimit: vi.fn(async () => hold.rateOk),
 }));
-vi.mock('@/lib/storeHandoffDeps', () => ({ handoffDeps: () => ({}) }));
+vi.mock('@/lib/storeHandoffDeps', () => ({ handoffDeps: () => ({}), resolveDeps: () => ({}) }));
+vi.mock('@/lib/storeHandoffResolve', () => ({
+  resolveStoreHandoff: vi.fn(async (...args: unknown[]) => {
+    hold.calls.push({ fn: 'resolve', args });
+    return { ok: true, state: 'pending' };
+  }),
+}));
 vi.mock('@/lib/storeHandoff', () => ({
   createHandoffSession: vi.fn(async (...args: unknown[]) => {
     hold.calls.push({ fn: 'create', args });
@@ -45,6 +51,7 @@ import { POST as createPost } from '@/app/api/register/handoff/route';
 import { GET as readGet } from '@/app/api/register/handoff/[id]/route';
 import { POST as authPost } from '@/app/api/register/handoff/[id]/auth/route';
 import { POST as txPost } from '@/app/api/register/handoff/[id]/tx/route';
+import { POST as resolvePost } from '@/app/api/register/handoff/resolve/route';
 
 const ID = 'AAAAAAAAAAAAAAAAAAAAAA';
 const params = { params: Promise.resolve({ id: ID }) };
@@ -69,6 +76,7 @@ describe('/api/register/handoff/*', () => {
       await readGet(new Request(`https://open-pay.jp/api/register/handoff/${ID}`), params),
       await authPost(json({}), params),
       await txPost(json({}), params),
+      await resolvePost(json({})),
     ]) {
       expect(res.status).toBe(404);
     }
@@ -79,6 +87,7 @@ describe('/api/register/handoff/*', () => {
     hold.rateOk = false;
     expect((await createPost(json({}))).status).toBe(429);
     expect((await authPost(json({}), params)).status).toBe(429);
+    expect((await resolvePost(json({}))).status).toBe(429);
     expect(hold.calls).toHaveLength(0);
   });
 
