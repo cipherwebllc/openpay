@@ -150,7 +150,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(sp.get('fee_kind')).toBeNull();
     const parsed = parseCheckoutParams(sp);
     expect(parsed.ok).toBe(true);
-    expect(screen.getAllByText('お店の端末で送る（利用料 0 円）').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('お店がガス代を肩代わり（利用料 0 円）').length).toBeGreaterThan(0);
     expect(screen.getByText('お客様の署名を待っています')).toBeTruthy();
   });
 
@@ -241,7 +241,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     await addItemAndOpen(user);
     await waitFor(() => expect(shownCheckout()).not.toBeNull());
     expect(hold.start).not.toHaveBeenCalled();
-    expect(screen.getByText(/この受取先ではお店の端末で送るを使えません/)).toBeTruthy();
+    expect(screen.getByText(/この受取先ではガス代の肩代わりを使えません/)).toBeTruthy();
   });
 
   it('ガス用ウォレットが無ければ知らせて通常の QR を出す', async () => {

@@ -2489,24 +2489,24 @@
       "removeFailed": "Couldn't remove it from this device. Please try again."
     },
     "storeDevice": {
-      "toggle": "Use “Send from the shop's device” on this register (OpenPay usage fee 0)",
-      "toggleNote": "The customer only signs; this device's gas wallet sends it and pays the gas (POL). Available for JPYC on {chain}.",
+      "toggle": "The shop pays the gas and sends it (OpenPay usage fee 0)",
+      "toggleNote": "The customer only signs. This device sends it, paying the gas with the POL in its gas wallet, so there's no OpenPay usage fee (the shop only pays the actual gas). Available for JPYC on {chain}.",
       "blocked": {
         "no_locks": "Not available in this browser (it can't prevent sending twice from another tab).",
         "config": "This method isn't available right now."
       },
-      "badge": "Send from the shop's device (usage fee 0)",
+      "badge": "The shop pays the gas (usage fee 0)",
       "saleBlocked": {
-        "token": "This checkout can't use “Send from the shop's device” (JPYC on {chain} only). Showing the standard QR.",
-        "receiver": "This recipient can't use “Send from the shop's device”. Showing the standard QR.",
-        "min_amount": "Checkouts under 1 JPYC can't use “Send from the shop's device”. Showing the standard QR.",
+        "token": "This checkout can't use “The shop pays the gas” (JPYC on {chain} only). Showing the standard QR.",
+        "receiver": "This recipient can't use “The shop pays the gas”. Showing the standard QR.",
+        "min_amount": "Checkouts under 1 JPYC can't use “The shop pays the gas”. Showing the standard QR.",
         "no_wallet": "There's no gas wallet, so the standard QR is shown."
       },
       "creating": "Preparing the QR code…",
       "createFailed": {
-        "busy": "It's busy, so the QR for “Send from the shop's device” couldn't be created. Wait a moment or show the standard QR.",
-        "unavailable": "The QR for “Send from the shop's device” couldn't be created. Show the standard QR instead.",
-        "invalid": "The QR for “Send from the shop's device” couldn't be created for this checkout. Show the standard QR instead."
+        "busy": "It's busy, so the QR where the shop pays the gas couldn't be created. Wait a moment or show the standard QR.",
+        "unavailable": "The QR where the shop pays the gas couldn't be created. Show the standard QR instead.",
+        "invalid": "The QR where the shop pays the gas couldn't be created for this checkout. Show the standard QR instead."
       },
       "showNormalQr": "Show the standard QR",
       "waiting": "Waiting for the customer's signature",

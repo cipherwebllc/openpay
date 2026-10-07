@@ -65,11 +65,11 @@ describe('StoreGasWalletPanel', () => {
       <StoreGasWalletPanel storeDevice={{ on: false, onToggle, blocked: null }} onAddressChange={onAddressChange} />,
     );
     expect(onAddressChange).toHaveBeenLastCalledWith(ADDR);
-    fireEvent.click(screen.getByRole('checkbox', { name: /お店の端末で送る/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /お店がガス代を肩代わりして送る/ }));
     expect(onToggle).toHaveBeenCalledWith(true);
     r.unmount();
     render(<StoreGasWalletPanel storeDevice={{ on: true, onToggle, blocked: 'no_locks' }} />);
-    expect(screen.getByRole('checkbox', { name: /お店の端末で送る/ })).toBeDisabled();
+    expect(screen.getByRole('checkbox', { name: /お店がガス代を肩代わりして送る/ })).toBeDisabled();
     expect(screen.getByText(/このブラウザでは使えません/)).toBeTruthy();
   });
 

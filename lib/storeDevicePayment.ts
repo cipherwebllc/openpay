@@ -1,5 +1,10 @@
 // 「お店の端末で送る」(レジ・plans/store-gas-wallet.md) の共有定数と純関数 (client / server 共通)。
 //
+// 呼び名: コード・計画・テストでは仕組みの名前「お店の端末で送る」(store device / store-device・handoff) を使う。
+// 店員に見せる名前は「お店がガス代を肩代わりして送る」(messages RegisterMode.storeDevice・2026-10-07 user 裁定)。
+// どちらも同じ機能 = お客様は署名だけ、レジ端末のガス用ウォレット (POL) がガス代を払って送る、OpenPay 利用料 0 円
+// (仕組み上 1 wei)。今の既定のガスレス (OpenPay の中継がガス代を払い、利用料 1%・最低 2 JPYC) とは別の選択肢。
+//
 // お客様は今の回収モードと同じ形 (ReceiveWithAuthorization・to = 既存 forwarder・nonce = commit) に署名し、
 // 手数料欄だけ 1 wei にする (お客様の送金に上乗せ・店の受取 = 請求額ちょうど)。お店の端末のガス用ウォレットが
 // forwarder.settle を自分のガスで呼ぶ。OpenPay は署名を短時間受け渡すだけで、送信もガスもしない。
