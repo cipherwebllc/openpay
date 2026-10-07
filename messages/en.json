@@ -1608,11 +1608,11 @@
         "storage_unavailable": "This device can't keep a record of the payment, so this method can't be used (e.g. private browsing). No payment was made.",
         "busy": "It's busy right now. Please wait a moment and try again. No payment was made."
       },
-      "usedUnresolved": "This signature can no longer be used. We couldn't confirm whether the payment went through. Please check your wallet's transaction history and tell the staff if needed.",
+      "usedUnresolved": "This signature can no longer be used. We couldn't confirm whether the payment went through. Please check your wallet's transaction history. To avoid paying the same checkout twice if it did go through, you can't start a new payment until you've checked.",
+      "acknowledge": "I've checked my wallet",
       "previous": {
         "success": "Your previous payment ({store} · {amount}) is complete. You can now pay for this checkout.",
-        "expired": "Your previous payment ({store} · {amount}) was not made. You can now pay for this checkout.",
-        "used_unresolved": "We couldn't confirm the result of your previous payment ({store} · {amount}). Please check your wallet's transaction history. You can now pay for this checkout."
+        "expired": "Your previous payment ({store} · {amount}) was not made. You can now pay for this checkout."
       }
     }
   },

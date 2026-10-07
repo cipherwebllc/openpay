@@ -37,7 +37,7 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
   const { address, isConnected } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
   const handoffId = params.handoffId ?? '';
-  const { status, pay, checkNow } = useStoreDevicePayment(deployment, handoffId);
+  const { status, pay, checkNow, acknowledge } = useStoreDevicePayment(deployment, handoffId);
   // 署名した時点で固定した値 (表示・履歴・控えはこれで作る・後からウォレットや URL が変わっても動かない)。
   const frozen: StoreDeviceIntent | null =
     status.phase === 'waiting' ||
@@ -310,18 +310,35 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
       )}
 
       {status.phase === 'used_unresolved' && (
-        <div role="alert" className="space-y-1 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div role="alert" className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p>{t('storeDevice.usedUnresolved')}</p>
-          {addressExplorerUrl(deployment.chainId, status.intent.from) && (
-            <a
-              href={addressExplorerUrl(deployment.chainId, status.intent.from)}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="text-xs underline underline-offset-2"
-            >
-              {t('storeDevice.viewWallet')}
-            </a>
+          {status.otherCheckout && (
+            <p className="text-xs">
+              {t('storeDevice.previousPayment', {
+                store: status.intent.snapshot.storeName ?? '—',
+                amount: fmt(BigInt(status.intent.merchantValue)),
+              })}
+            </p>
           )}
+          <div className="flex flex-wrap items-center gap-3">
+            {addressExplorerUrl(deployment.chainId, status.intent.from) && (
+              <a
+                href={addressExplorerUrl(deployment.chainId, status.intent.from)}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-xs underline underline-offset-2"
+              >
+                {t('storeDevice.viewWallet')}
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={() => void acknowledge()}
+              className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+            >
+              {t('storeDevice.acknowledge')}
+            </button>
+          </div>
         </div>
       )}
 

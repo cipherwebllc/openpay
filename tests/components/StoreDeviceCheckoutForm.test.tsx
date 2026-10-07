@@ -6,6 +6,7 @@ const hold = vi.hoisted(() => ({
   status: { phase: 'idle' } as Record<string, unknown>,
   pay: vi.fn(),
   checkNow: vi.fn(),
+  acknowledge: vi.fn(),
   balance: { balance: 10n ** 22n, insufficientBalance: false, wrongChain: false } as Record<string, unknown>,
   history: [] as unknown[][],
   connected: true,
@@ -19,7 +20,12 @@ vi.mock('@/components/PayerReceiptCompletion', () => ({
   PayerReceiptCompletion: ({ candidateIds }: { candidateIds: unknown[] }) => <div>receipt:{String(candidateIds[0])}</div>,
 }));
 vi.mock('@/hooks/useStoreDevicePayment', () => ({
-  useStoreDevicePayment: () => ({ status: hold.status, pay: hold.pay, checkNow: hold.checkNow }),
+  useStoreDevicePayment: () => ({
+    status: hold.status,
+    pay: hold.pay,
+    checkNow: hold.checkNow,
+    acknowledge: hold.acknowledge,
+  }),
 }));
 vi.mock('@/hooks/useErc20BalanceAndChain', () => ({ useErc20BalanceAndChain: () => hold.balance }));
 vi.mock('@/hooks/usePaymentHistory', () => ({
@@ -62,6 +68,7 @@ describe('StoreDeviceCheckoutForm', () => {
   beforeEach(() => {
     hold.status = { phase: 'idle' };
     hold.pay.mockReset();
+    hold.acknowledge.mockReset();
     hold.balance = { balance: 10n ** 22n, insufficientBalance: false, wrongChain: false };
     hold.history.length = 0;
     hold.connected = true;
@@ -179,11 +186,26 @@ describe('StoreDeviceCheckoutForm', () => {
   });
 
   it('結果を確かめられない (used_unresolved) はウォレットでの確認を案内し、支払い済み・未払いを言わない', () => {
-    hold.status = { phase: 'used_unresolved', intent: INTENT };
+    hold.status = { phase: 'used_unresolved', intent: INTENT, otherCheckout: false };
     render(<StoreDeviceCheckoutForm params={params} />);
     expect(screen.getByRole('alert')).toHaveTextContent(/こちらでは確かめられませんでした/);
     expect(screen.queryByText('お支払いが完了しました')).toBeNull();
     expect(screen.queryByText(/お支払いは行われていません/)).toBeNull();
+    // 確かめるまで新しい支払いは始めさせない (支払いボタンを出さない)
+    expect(screen.queryByRole('button', { name: /を支払う/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'ウォレットで確かめました' }));
+    expect(hold.acknowledge).toHaveBeenCalled();
+  });
+
+  it('前の会計の結果不明は、前の会計の店名・金額を添えて案内する', () => {
+    hold.status = {
+      phase: 'used_unresolved',
+      intent: { ...INTENT, snapshot: { storeName: 'Prev Shop', items: [] } },
+      otherCheckout: true,
+    };
+    render(<StoreDeviceCheckoutForm params={params} />);
+    expect(screen.getByRole('alert')).toHaveTextContent(/前のお支払い: Prev Shop/);
+    expect(screen.queryByRole('button', { name: /を支払う/ })).toBeNull();
   });
 
   it('前の会計の結論は前の会計の店名・金額で出し、この会計は払える', () => {

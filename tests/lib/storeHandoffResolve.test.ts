@@ -31,8 +31,9 @@ let finalized: boolean;
 let used: boolean;
 let foundTx: Hex | null;
 let expiredUnused: boolean;
+let usedFinal: boolean;
 let now: number;
-const spy = { expired: vi.fn(), used: vi.fn() };
+const spy = { expired: vi.fn(), used: vi.fn(), find: vi.fn() };
 
 function deps(over: Partial<StoreHandoffResolveDeps> = {}): StoreHandoffResolveDeps {
   return {
@@ -49,7 +50,11 @@ function deps(over: Partial<StoreHandoffResolveDeps> = {}): StoreHandoffResolveD
       spy.used();
       return used;
     },
-    findAuthorizationUsedTransactionHash: async () => foundTx,
+    usedAtFinalized: async () => usedFinal,
+    findAuthorizationUsedTransactionHash: async () => {
+      spy.find();
+      return foundTx;
+    },
     expiredUnused: async (input) => {
       spy.expired(input);
       return expiredUnused;
@@ -78,9 +83,11 @@ beforeEach(() => {
   used = false;
   foundTx = null;
   expiredUnused = false;
+  usedFinal = true;
   now = VALID_BEFORE + 10;
   spy.expired.mockClear();
   spy.used.mockClear();
+  spy.find.mockClear();
 });
 
 describe('resolveStoreHandoff (お店の端末で送る 1 件の結論)', () => {
@@ -102,14 +109,37 @@ describe('resolveStoreHandoff (お店の端末で送る 1 件の結論)', () => 
     expect(await resolveStoreHandoff(body({ txHash: OTHER_TX }), deps())).toEqual({ ok: true, state: 'settled', txHash: TX });
   });
 
-  it('使用済みで Settled が見つからない: 期限 + 5 分までは確認中、その後は「結果を確かめられない」(ロックを外す)', async () => {
+  it('使用済みで Settled が見つからない: 期限 + 5 分まで・確定ブロックで未確認なら確認中、両方満たせば「結果を確かめられない」', async () => {
     used = true;
     now = VALID_BEFORE + USED_UNRESOLVED_AFTER_SEC;
     expect(await resolveStoreHandoff(body(), deps())).toEqual({ ok: true, state: 'pending' });
     clearStoreHandoffResolveCache();
     now = VALID_BEFORE + USED_UNRESOLVED_AFTER_SEC + 1;
+    usedFinal = false; // 確定ブロックではまだ使用済みでない (未確定の取消・使用)
+    expect(await resolveStoreHandoff(body(), deps())).toEqual({ ok: true, state: 'pending' });
+    clearStoreHandoffResolveCache();
+    usedFinal = true;
     expect(await resolveStoreHandoff(body(), deps())).toEqual({ ok: true, state: 'used_unresolved' });
     expect(spy.expired).not.toHaveBeenCalled();
+  });
+
+  it('receipt の RPC 障害は「無い」と区別し、結論を出さず覚えない', async () => {
+    used = true;
+    foundTx = TX;
+    now = VALID_BEFORE + USED_UNRESOLVED_AFTER_SEC + 1;
+    const failing = deps({ successfulReceipt: async () => { throw new Error('rpc'); } });
+    expect(await resolveStoreHandoff(body(), failing)).toEqual({ ok: true, state: 'pending' });
+    matchTx = TX;
+    expect(await resolveStoreHandoff(body(), deps())).toEqual({ ok: true, state: 'settled', txHash: TX });
+  });
+
+  it('ヒントを付け替えても重い確認 (ログ検索) は短い間は繰り返さない・同時の照会は 1 回にまとめる', async () => {
+    used = true;
+    await Promise.all([resolveStoreHandoff(body(), deps()), resolveStoreHandoff(body(), deps())]);
+    expect(spy.find).toHaveBeenCalledTimes(1);
+    await resolveStoreHandoff(body({ txHash: OTHER_TX }), deps());
+    await resolveStoreHandoff(body({ txHash: `0x${'77'.repeat(32)}` }), deps());
+    expect(spy.find).toHaveBeenCalledTimes(1);
   });
 
   it('未使用: 確定ブロックで期限切れ・未使用のときだけ「行われていない」・無関係な tx のヒントは判定に混ぜない', async () => {

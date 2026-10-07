@@ -3,7 +3,16 @@ import 'server-only';
 // 受け渡し (lib/storeHandoff.ts) の本番の依存: Upstash KV と、中継と同じ forwarder 設定・RPC 読み取り。
 
 import { createHmac, randomBytes } from 'node:crypto';
-import { createPublicClient, getAddress, isAddress, type Hex, type Log } from 'viem';
+import {
+  TransactionReceiptNotFoundError,
+  createPublicClient,
+  getAddress,
+  isAddress,
+  parseAbi,
+  type Address,
+  type Hex,
+  type Log,
+} from 'viem';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { hasMatchingForwarderSettlement } from '@/lib/relay/settlementReceipt';
 import {
@@ -103,6 +112,10 @@ export function handoffDeps(): HandoffDeps {
   };
 }
 
+const AUTHORIZATION_STATE_ABI = parseAbi([
+  'function authorizationState(address authorizer, bytes32 nonce) view returns (bool)',
+]);
+
 function publicClientFor(chainId: number) {
   const chain = chainObjectForId(chainId);
   if (!chain) throw new Error('unsupported_chain');
@@ -127,9 +140,26 @@ export function resolveDeps(): StoreHandoffResolveDeps {
         return receipt.status === 'success'
           ? { logs: receipt.logs as Log[], blockNumber: receipt.blockNumber, blockHash: receipt.blockHash }
           : null;
-      } catch {
-        return null; // 見つからない・RPC 障害は「確かめられなかった」(結論は pending)
+      } catch (error) {
+        // 「見つからない」だけを null にする。RPC 障害は throw のまま (判定は結論を出さない)。
+        if (error instanceof TransactionReceiptNotFoundError) return null;
+        throw error;
       }
+    },
+    async usedAtFinalized(chainId: number, token: Address, from: Address, nonce: Hex) {
+      // 確定ブロックで使用済みか。読んだ後で同じ番号の正規ブロックの hash を確かめる (reorg 中は false)。
+      const client = publicClientFor(chainId);
+      const block = await client.getBlock({ blockTag: 'finalized' });
+      if (typeof block.number !== 'bigint' || typeof block.hash !== 'string') return false;
+      const used = await client.readContract({
+        address: token,
+        abi: AUTHORIZATION_STATE_ABI,
+        functionName: 'authorizationState',
+        args: [from, nonce],
+        blockNumber: block.number,
+      });
+      const canonical = await client.getBlock({ blockNumber: block.number });
+      return used === true && canonical.hash === block.hash;
     },
     async isFinalizedCanonical(chainId: number, blockNumber: bigint, blockHash: Hex) {
       // 確定ブロックがそのブロック以降まで進み、いまの正規チェーンの同じ番号のブロックが同じ hash か

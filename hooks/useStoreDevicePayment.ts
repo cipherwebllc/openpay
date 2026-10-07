@@ -13,7 +13,10 @@
 //     保存し、保存できたと確かめてから送る (保存できない端末では送らない)。
 //   - 未解決の記録を消すのは、結論が出たとき、またはサーバがこの署名を預かっていないと確定したとき
 //     (一度も「届いたか分からない」が無く、400/404/410/429/409 枠埋まりを受け取ったとき) だけ。
+//     消すのは排他の中で、保存されているのが同じ署名のときだけ。
 //   - 未解決が残っている間は、別の QR を開いても新しい署名を作らず、その確認を続ける。
+//   - 使用済みだが結果を確かめられないときは、お客様がウォレットで確かめて「確かめた」を押すまで記録を残し、
+//     新しい支払いを止める。別タブとの排他 (Web Locks) が無いブラウザでは、この方法を使わない。
 //   - 履歴と控えは、署名した時点の値 (支払者・店・金額・明細) で作る。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -72,6 +75,8 @@ export type StoreDeviceIntent = {
   forwarder: Address;
   feeReceiver: Address;
   snapshot: StoreDevicePaymentSnapshot;
+  /** 使用済みだが結果を確かめられなかった (お客様が「確かめた」を押すまで新しい支払いを止める)。 */
+  unknown?: true;
 };
 
 export type StoreDeviceErrorReason =
@@ -89,7 +94,7 @@ export type StoreDeviceErrorReason =
 // これらは、この QR ではもう支払いを始めない (出し直し・店員への確認が要る)。
 const BLOCKING_REASONS: readonly StoreDeviceErrorReason[] = ['session_expired', 'session_taken'];
 
-export type StoreDeviceOutcome = 'success' | 'expired' | 'used_unresolved';
+export type StoreDeviceOutcome = 'success' | 'expired';
 
 export type StoreDeviceStatus =
   | { phase: 'idle' }
@@ -108,8 +113,9 @@ export type StoreDeviceStatus =
   | { phase: 'success'; txHash: Hex; intent: StoreDeviceIntent }
   // 確定ブロックで期限切れ・未使用を確かめた = お支払いは行われていない
   | { phase: 'expired'; intent: StoreDeviceIntent }
-  // 使用済み (この署名はもう使えない) だが、結果をこちらで確かめられない
-  | { phase: 'used_unresolved'; intent: StoreDeviceIntent }
+  // 使用済み (この署名はもう使えない) だが、結果をこちらで確かめられない。お客様がウォレットで確かめて
+  // 「確かめた」を押すまで記録を残し、新しい支払いを止める (成立済みなら同じ請求の二重払いになるため)。
+  | { phase: 'used_unresolved'; intent: StoreDeviceIntent; otherCheckout: boolean }
   // 別の会計の未解決の支払いに結論が出た (この QR の会計はこれから払える)
   | { phase: 'previous'; outcome: StoreDeviceOutcome; intent: StoreDeviceIntent; txHash: Hex | null }
   | { phase: 'error'; reason: StoreDeviceErrorReason; blocking: boolean };
@@ -162,19 +168,25 @@ function saveIntent(intent: StoreDeviceIntent): boolean {
   }
 }
 
-function clearIntent(): void {
+/** 保存されているのが同じ署名 (nonce) のときだけ消す (別タブの新しい支払いの記録を消さない)。 */
+function clearIntentIf(nonce: Hex): void {
   try {
-    window.localStorage.removeItem(STORE_DEVICE_INTENT_KEY);
+    if (readIntent()?.nonce.toLowerCase() === nonce.toLowerCase()) {
+      window.localStorage.removeItem(STORE_DEVICE_INTENT_KEY);
+    }
   } catch {
-    // 消せなくても、次に開いたときは判定で結論が出て消える (結論済みの判定は変わらない)。
+    // 消せなくても、次に開いたときは判定で同じ結論が出て消える。
   }
 }
 
-/** 同じ端末の別タブと署名・保存を直列化する。Web Locks が無ければそのまま (タブ内は inFlight で止める)。 */
+function hasPayLock(): boolean {
+  return typeof navigator !== 'undefined' && typeof navigator.locks?.request === 'function';
+}
+
+/** 同じ端末の別タブと署名・保存・記録の消去を直列化する (Web Locks)。 */
 async function withPayLock<T>(fn: () => Promise<T>): Promise<T> {
-  const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
-  if (!locks?.request) return fn();
-  return locks.request(PAY_LOCK, fn) as Promise<T>;
+  if (!hasPayLock()) return fn();
+  return navigator.locks.request(PAY_LOCK, fn) as Promise<T>;
 }
 
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -255,14 +267,28 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
   // 「いま確認する」を確認ループへ伝える。
   const manualRef = useRef<(() => void) | null>(null);
 
-  // 起動時: 未解決の支払いがあれば、どの QR でもまずその確認に戻る (新しい署名を作らせない)。
+  // 起動時・QR が変わったとき: 未解決の支払いがあれば、どの QR でもまずその確認に戻る (新しい署名を作らせない)。
+  // 結果を確かめられなかった記録は、お客様が「確かめた」を押すまでその案内を出し続ける。
+  // 未解決が無ければ、別の QR の会計の結果を残さない (新しい会計の下に前の結果を出さない)。
   useEffect(() => {
     const saved = readIntent();
+    if (saved?.unknown) {
+      setTracking(null);
+      setStatus({ phase: 'used_unresolved', intent: saved, otherCheckout: saved.handoffId !== handoffId });
+      return;
+    }
     if (saved) {
       hintRef.current = null;
       setTracking(saved);
       setStatus(waitingStatus(saved, handoffId));
+      return;
     }
+    // (前の QR の誤り・ブロックも新しい QR には持ち越さない)
+    setStatus((s) =>
+      s.phase === 'error' || ('intent' in s && s.intent.handoffId !== handoffId && s.phase !== 'previous')
+        ? { phase: 'idle' }
+        : s,
+    );
   }, [handoffId]);
 
   // 結論が出るまでの確認。
@@ -274,29 +300,49 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
 
     const conclude = (r: Resolution): boolean => {
       if (stopped || r.state === 'pending') return false;
-      clearIntent();
+      stopped = true; // 結論が出たら、遅れて返る確認で状態を上書きしない
+      if (timer) clearTimeout(timer);
       const other = tracking.handoffId !== handoffId;
-      const outcome: StoreDeviceOutcome =
-        r.state === 'settled' ? 'success' : r.state === 'expired_unused' ? 'expired' : 'used_unresolved';
+      if (r.state === 'used_unresolved') {
+        // 記録は消さず「結果不明」として残す (お客様が確かめるまで新しい支払いを止める)。
+        const unknown: StoreDeviceIntent = { ...tracking, unknown: true };
+        void withPayLock(async () => {
+          if (readIntent()?.nonce.toLowerCase() === tracking.nonce.toLowerCase()) saveIntent(unknown);
+        });
+        setStatus({ phase: 'used_unresolved', intent: unknown, otherCheckout: other });
+        setTracking(null);
+        return true;
+      }
+      void withPayLock(async () => clearIntentIf(tracking.nonce));
       if (other) {
         setStatus({
           phase: 'previous',
-          outcome,
+          outcome: r.state === 'settled' ? 'success' : 'expired',
           intent: tracking,
           txHash: r.state === 'settled' ? r.txHash : null,
         });
       } else if (r.state === 'settled') {
         setStatus({ phase: 'success', txHash: r.txHash, intent: tracking });
-      } else if (r.state === 'expired_unused') {
-        setStatus({ phase: 'expired', intent: tracking });
       } else {
-        setStatus({ phase: 'used_unresolved', intent: tracking });
+        setStatus({ phase: 'expired', intent: tracking });
       }
       setTracking(null);
       return true;
     };
 
+    // 確認は一度に一つだけ (自動のタイマーと「いま確認する」が重ならないように)。
+    let running = false;
     const once = async (): Promise<boolean> => {
+      if (running || stopped) return stopped;
+      running = true;
+      try {
+        return await onceInner();
+      } finally {
+        running = false;
+      }
+    };
+
+    const onceInner = async (): Promise<boolean> => {
       const beforeGrace = nowSec() <= tracking.validBefore + STORE_DEVICE_EXPIRY_GRACE_SEC;
       // 期限まで、tx のヒントがまだ無いときだけ受け渡しを読む (ヒントが出たら KV を読まない)。
       if (beforeGrace && !hintRef.current) {
@@ -321,6 +367,7 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
 
     const schedule = () => {
       if (stopped) return;
+      if (timer) clearTimeout(timer);
       const now = nowSec();
       if (now > tracking.validBefore + STORE_DEVICE_AUTO_STOP_SEC) {
         // 自動の確認はここまで (「いま確認する」で続ける・未解決のロックは外さない)。
@@ -339,10 +386,13 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
     };
 
     manualRef.current = () => {
+      if (running || stopped) return; // 確認中の連打は重ねない
       if (timer) clearTimeout(timer);
       backoff = 0;
-      void resolveIntent(tracking, hintRef.current).then((r) => {
-        if (!conclude(r) && !stopped) {
+      running = true;
+      void resolveIntent(tracking, hintRef.current)
+        .then((r) => {
+          if (conclude(r) || stopped) return;
           setStatus(
             waitingStatus(tracking, handoffId, {
               txHint: hintRef.current,
@@ -350,9 +400,12 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
               autoStopped: nowSec() > tracking.validBefore + STORE_DEVICE_AUTO_STOP_SEC,
             }),
           );
-          schedule();
-        }
-      });
+        })
+        .finally(() => {
+          running = false;
+          // 自動の確認を止めた後は、手動の結果 (上の表示) をそのまま残す。
+          if (nowSec() <= tracking.validBefore + STORE_DEVICE_AUTO_STOP_SEC) schedule();
+        });
     };
 
     void once().then((done) => {
@@ -369,6 +422,14 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
   const checkNow = useCallback(() => {
     manualRef.current?.();
   }, []);
+
+  /** 結果を確かめられなかった支払いを、お客様がウォレットで確かめた後に閉じる。 */
+  const acknowledge = useCallback(async () => {
+    if (status.phase !== 'used_unresolved') return;
+    const nonce = status.intent.nonce;
+    await withPayLock(async () => clearIntentIf(nonce));
+    setStatus({ phase: 'idle' });
+  }, [status]);
 
   const pay = useCallback(
     async ({
@@ -391,7 +452,8 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
         return;
       }
       const forwarder = jpycForwarderFor(chainId);
-      if (!forwarder || !isAddress(env.feeReceiver)) {
+      // 別タブとの排他 (Web Locks) が使えないブラウザでは、二つの署名を作らないよう、この方法を使わない。
+      if (!forwarder || !isAddress(env.feeReceiver) || !hasPayLock()) {
         setStatus({ phase: 'error', reason: 'unavailable', blocking: false });
         return;
       }
@@ -400,6 +462,10 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
         // 別タブと排他し、その中で未解決の支払いが無いことを確かめ直してから署名・保存する。
         const signed = await withPayLock(async () => {
           const existing = readIntent();
+          if (existing?.unknown) {
+            setStatus({ phase: 'used_unresolved', intent: existing, otherCheckout: existing.handoffId !== handoffId });
+            return null;
+          }
           if (existing) {
             hintRef.current = null;
             setTracking(existing);
@@ -507,7 +573,7 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
           return;
         }
         // ここから先は、サーバがこの署名を預かっていないことが確定している (署名はこの端末にしか無い)。
-        clearIntent();
+        await withPayLock(async () => clearIntentIf(intent.nonce));
         const reason: StoreDeviceErrorReason =
           definitive.status === 409
             ? 'session_taken'
@@ -526,5 +592,5 @@ export function useStoreDevicePayment(deployment: TokenDeployment, handoffId: st
     [walletClient, address, chainId, deployment.chainId, deployment.address, handoffId, status],
   );
 
-  return { status, pay, checkNow };
+  return { status, pay, checkNow, acknowledge };
 }

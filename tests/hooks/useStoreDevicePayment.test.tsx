@@ -39,6 +39,21 @@ let authResponses: (() => Promise<Response>)[];
 let readResponse: () => Promise<Response>;
 let resolveResponse: () => Promise<Response>;
 
+// Web Locks の代わり (同じ名前の要求を順に実行する)。jsdom には navigator.locks が無い。
+function fakeLocks() {
+  let chain: Promise<unknown> = Promise.resolve();
+  return {
+    request: vi.fn((_name: string, fn: () => Promise<unknown>) => {
+      const run = chain.then(() => fn());
+      chain = run.catch(() => undefined);
+      return run;
+    }),
+  };
+}
+function setLocks(value: unknown) {
+  Object.defineProperty(window.navigator, 'locks', { value, configurable: true });
+}
+
 const json = (body: unknown, status = 200) =>
   Promise.resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }));
 
@@ -47,6 +62,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-10-07T03:00:00Z'));
   window.localStorage.clear();
   w.signTypedData.mockReset().mockResolvedValue(SIG);
+  setLocks(fakeLocks());
   w.account = { address: '0x0000000000000000000000000000000000000def', chainId: 80002 };
   calls = [];
   authResponses = [() => json({ ok: true, idempotent: false })];
@@ -60,6 +76,7 @@ beforeEach(() => {
   }));
 });
 afterEach(() => {
+  setLocks(undefined);
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
@@ -78,14 +95,19 @@ async function advance(ms: number) {
     await vi.advanceTimersByTimeAsync(ms);
   });
 }
-function seedIntent(handoffId: string, validBefore = Math.floor(Date.now() / 1000) + 100) {
+function seedIntent(
+  handoffId: string,
+  validBefore = Math.floor(Date.now() / 1000) + 100,
+  extra: { nonce?: string; unknown?: true } = {},
+) {
   window.localStorage.setItem(
     STORE_DEVICE_INTENT_KEY,
     JSON.stringify({
       v: 3, handoffId, chainId: 80002, from: '0x0000000000000000000000000000000000000def', merchant: SHOP,
-      merchantValue: '1', intentSalt: `0x${'22'.repeat(32)}`, validBefore, nonce: `0x${'33'.repeat(32)}`,
+      merchantValue: '1', intentSalt: `0x${'22'.repeat(32)}`, validBefore, nonce: extra.nonce ?? `0x${'33'.repeat(32)}`,
       forwarder: FWD, feeReceiver: '0x428483FbA62eDCef1E3a100d3799F6d71759c560',
       snapshot: { storeName: 'Prev Shop', items: [] },
+      ...(extra.unknown ? { unknown: true } : {}),
     }),
   );
 }
@@ -130,13 +152,94 @@ describe('useStoreDevicePayment', () => {
     expect(stored()).toBeNull();
   });
 
-  it('使用済みで結果を確かめられない → used_unresolved (ロックを外す・支払い済みにはしない)', async () => {
+  it('使用済みで結果を確かめられない → used_unresolved。お客様が確かめるまで記録を残し、新しい支払いを止める', async () => {
     const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
     await payNow(result);
     resolveResponse = () => json({ ok: true, state: 'used_unresolved' });
     await advance(200_000);
+    expect(result.current.status).toMatchObject({ phase: 'used_unresolved', otherCheckout: false });
+    expect(JSON.parse(stored()!)).toMatchObject({ unknown: true });
+    await payNow(result);
+    expect(w.signTypedData).toHaveBeenCalledTimes(1); // 新しい署名は作らない
     expect(result.current.status.phase).toBe('used_unresolved');
+    await act(async () => {
+      await result.current.acknowledge();
+    });
+    expect(result.current.status.phase).toBe('idle');
     expect(stored()).toBeNull();
+    await payNow(result);
+    expect(w.signTypedData).toHaveBeenCalledTimes(2);
+  });
+
+  it('結果不明の記録が残っていれば、別の QR を開いてもその案内を出し、判定は呼ばない', async () => {
+    seedIntent(OTHER_HS, Math.floor(Date.now() / 1000) - 1_000, { unknown: true });
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await advance(10);
+    expect(result.current.status).toMatchObject({ phase: 'used_unresolved', otherCheckout: true });
+    expect(of('/resolve')).toHaveLength(0);
+    await payNow(result);
+    expect(w.signTypedData).not.toHaveBeenCalled();
+  });
+
+  it('Web Locks が無いブラウザではこの方法を使わない (署名しない)', async () => {
+    setLocks(undefined);
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await payNow(result);
+    expect(result.current.status).toEqual({ phase: 'error', reason: 'unavailable', blocking: false });
+    expect(w.signTypedData).not.toHaveBeenCalled();
+  });
+
+  it('結論が出ても、保存されているのが別の署名ならその記録は消さない', async () => {
+    seedIntent(OTHER_HS, Math.floor(Date.now() / 1000) - 100);
+    const newer = `0x${'44'.repeat(32)}`;
+    resolveResponse = () => {
+      seedIntent(HS, Math.floor(Date.now() / 1000) + 100, { nonce: newer }); // 別タブが新しい署名を保存
+      return json({ ok: true, state: 'expired_unused' });
+    };
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await advance(10);
+    expect(result.current.status).toMatchObject({ phase: 'previous', outcome: 'expired' });
+    expect(JSON.parse(stored()!)).toMatchObject({ nonce: newer });
+  });
+
+  it('「いま確認する」を連打しても、確認は一度に一つだけ', async () => {
+    seedIntent(HS, Math.floor(Date.now() / 1000) - 100);
+    let release: (() => void) | undefined;
+    resolveResponse = () =>
+      new Promise<Response>((r) => {
+        release = () => r(new Response(JSON.stringify({ ok: true, state: 'pending' }), { status: 200 }));
+      });
+    const { result } = renderHook(() => useStoreDevicePayment(deployment, HS));
+    await advance(0);
+    expect(of('/resolve')).toHaveLength(1);
+    await act(async () => {
+      result.current.checkNow();
+      result.current.checkNow();
+      result.current.checkNow();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(of('/resolve')).toHaveLength(1);
+    await act(async () => {
+      release?.();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      result.current.checkNow();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(of('/resolve')).toHaveLength(2);
+  });
+
+  it('QR が変わったら、前の QR の誤り (ブロック) を持ち越さない', async () => {
+    authResponses = [() => json({ ok: false, error: 'slot_taken' }, 409)];
+    const { result, rerender } = renderHook(({ hs }) => useStoreDevicePayment(deployment, hs), {
+      initialProps: { hs: HS },
+    });
+    await payNow(result);
+    expect(result.current.status).toMatchObject({ phase: 'error', reason: 'session_taken', blocking: true });
+    rerender({ hs: OTHER_HS });
+    await advance(0);
+    expect(result.current.status.phase).toBe('idle');
   });
 
   it('期限 + 10 分で自動の確認を止め、「いま確認する」で判定を呼ぶ', async () => {
