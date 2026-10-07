@@ -59,7 +59,8 @@ export type UrlErrorCode =
   | 'missingItems'
   | 'invalidItems'
   | 'tipWidgetUnsupported'
-  | 'invalidNative';
+  | 'invalidNative'
+  | 'storeDeviceUnavailable';
 export type UrlError = { code: UrlErrorCode; values?: Record<string, string> };
 
 const URL_ERROR_JA: Record<UrlErrorCode, (v: Record<string, string>) => string> = {
@@ -78,6 +79,7 @@ const URL_ERROR_JA: Record<UrlErrorCode, (v: Record<string, string>) => string> 
   invalidItems: () => 'items は "name:qty:price,..." 形式 (qty 1〜999、price は token decimals 以内、最大 10 件) で指定してください',
   tipWidgetUnsupported: (v) => `${v.token} on ${v.chain} は tip widget 非対応です (gasless mode 必須のため)`,
   invalidNative: () => 'native は polygon または kaia を指定してください',
+  storeDeviceUnavailable: () => 'この QR は使えません。お店で QR を出し直してもらってください',
 };
 
 /** 失敗の戻り値の共通部分: 日本語の固定文 (error) と、画面で locale の文に引くための種類 (urlError)。 */

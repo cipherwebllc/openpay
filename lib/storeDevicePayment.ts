@@ -5,6 +5,7 @@
 // forwarder.settle を自分のガスで呼ぶ。OpenPay は署名を短時間受け渡すだけで、送信もガスもしない。
 
 import { polygon, polygonAmoy } from 'viem/chains';
+import { env } from './env';
 
 /** 手数料欄 (forwarder は feeValue == 0 を拒否するので最小単位の 1 wei)。お客様の送金に上乗せする。 */
 export const STORE_DEVICE_FEE_WEI = 1n;
@@ -36,6 +37,11 @@ export const STORE_DEVICE_CHAIN_IDS: readonly number[] = [polygon.id, polygonAmo
 
 export function isStoreDeviceChain(chainId: number): boolean {
   return STORE_DEVICE_CHAIN_IDS.includes(chainId);
+}
+
+/** この環境で使うチェーン (mainnet = Polygon・testnet = Amoy)。鍵の生成コードを読み込まずに済む軽い版。 */
+export function storeDeviceChainId(): number {
+  return env.networkEnv === 'mainnet' ? polygon.id : polygonAmoy.id;
 }
 
 /** 受け渡しセッション id (16 byte を base64url = 22 文字)。 */

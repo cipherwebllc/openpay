@@ -44,10 +44,13 @@ import {
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
+  deploymentForSlug,
   isValidTokenSymbol,
   symbolHasDeployment,
   type TokenSymbol,
 } from '../tokens';
+import { env } from '../env';
+import { isStoreHandoffId, storeDeviceChainId } from '../storeDevicePayment';
 import {
   appendTaxReceiptParams,
   DECIMAL_PATTERN,
@@ -123,6 +126,11 @@ export type CheckoutParams = {
   // --- 受取予定時刻 (任意・Phase 4・preorder のスロット選択・MobileOrderView のみが設定)。 ---
   // 絶対 ms。webhook payload へ素通しされ受注に保存・厨房/ホールが表示する (advisory・money-path 非該当)。
   pickupAt?: number;
+  // --- お店の端末で送る (任意・RegisterMode のみが設定・plans/store-gas-wallet.md)。 ---
+  // submit='store' のとき、お客様は既存 forwarder 宛て・手数料欄 1 wei に署名し、受け渡し (hs) 経由で
+  // お店の端末が送る。条件に合わない URL は parse で止める (回収 1% に黙って倒さない)。
+  submit?: 'store';
+  handoffId?: string;
 };
 
 export const CHECKOUT_MAX_ITEMS = 10;
@@ -280,6 +288,11 @@ export function buildCheckoutPath(params: CheckoutParams): string {
     const v = sanitizeText(params.storeName, CHECKOUT_STORE_NAME_MAX);
     if (v) sp.set('store', v);
   }
+  // お店の端末で送る: hs が不正・欠落でも submit=store は残す (通常の経路の URL を作らず、parse で必ず止める)。
+  if (params.submit === 'store') {
+    sp.set('submit', 'store');
+    if (params.handoffId) sp.set('hs', params.handoffId);
+  }
   // 記帳補助メタ (在るときだけ・税は checkout 単位の共通値)。pay と共通の shared helper で追記。
   appendTaxReceiptParams(sp, params);
   // 受取予定時刻 (在るときだけ・正の安全整数 ms)。preorder のスロット選択。
@@ -321,6 +334,8 @@ export function parseCheckoutParams(
   const storeHandle = searchParams.get('store_handle');
   const storeNameRaw = searchParams.get('store');
   const pickupAtRaw = searchParams.get('pickup_at');
+  const submitRaw = searchParams.get('submit');
+  const handoffRaw = searchParams.get('hs');
 
   if (!to) return { ok: false, ...urlFail('missingTo') };
   if (!isAddress(to)) return { ok: false, ...urlFail('invalidTo') };
@@ -352,6 +367,22 @@ export function parseCheckoutParams(
   // checkout では default の gasless に倒す (請求書文脈では UI を壊さない方が大事)。
   // ⚠️ pay.ts と違い不明 mode を error で弾くゲートは持たない (silently gasless)。
   const mode: PayMode = resolveModeAlias(modeRaw);
+
+  // お店の端末で送る QR は fail-closed: 条件に合わなければ「使えない」と止める (未知の submit 値も同じ)。
+  // ここで通常の経路 (回収 1%) に倒すと、利用料 0 を選んだ店で 1% が発生してしまう。
+  const storeSubmit = submitRaw !== null;
+  if (
+    storeSubmit &&
+    (submitRaw !== 'store' ||
+      !env.enableStoreGasWallet ||
+      !isStoreHandoffId(handoffRaw) ||
+      token !== 'jpyc' ||
+      deploymentForSlug(token, chainSlug).chainId !== storeDeviceChainId() ||
+      feeKindRaw !== null ||
+      storeHandle !== null)
+  ) {
+    return { ok: false, ...urlFail('storeDeviceUnavailable') };
+  }
 
   // (token, chain) が gasless mode を提供できない場合は gasless 要求を reject。
   // /pay と同じく、standard mode 要求は通す。条件/文言は pay と共通 helper。
@@ -410,6 +441,7 @@ export function parseCheckoutParams(
         Number(pickupAtRaw) > 0
           ? Number(pickupAtRaw)
           : undefined,
+      ...(storeSubmit ? { submit: 'store' as const, handoffId: handoffRaw as string } : {}),
     },
   };
 }
