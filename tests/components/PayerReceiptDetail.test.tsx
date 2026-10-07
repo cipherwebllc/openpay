@@ -381,3 +381,59 @@ describe('PayerReceiptDetail — 成長ループ CTA', () => {
     expect(screen.queryByRole('link', { name: 'あなたも無料でお店を開く →' })).toBeNull();
   });
 });
+
+describe('PayerReceiptDetail — インボイス (適格簡易請求書) の記載事項', () => {
+  function invoiceReceipt(over: Partial<Parameters<typeof buildPayerReceipt>[0]> = {}) {
+    return receipt({
+      amount: '1640',
+      merchantInvoiceNo: 'T1234567890123',
+      lineItems: [
+        { name: 'コーヒー', quantity: 2, unitPrice: '550', amount: '1100', taxRate: 10, taxCategory: 'taxable_10', taxAmount: '100', memo: null },
+        { name: 'パン', quantity: 1, unitPrice: '540', amount: '540', taxRate: 8, taxCategory: 'taxable_8', taxAmount: '40', memo: null },
+      ],
+      subtotalAmount: '1640',
+      totalTaxAmount: '140',
+      totalAmount: '1640',
+      ...over,
+    });
+  }
+
+  it('登録番号・税率ごとの金額と消費税 (円)・軽減税率の ※ と脚注を出す', () => {
+    render(<PayerReceiptDetail receipt={invoiceReceipt()} />);
+    expect(screen.getByText('登録番号')).toBeTruthy();
+    expect(screen.getByText('T1234567890123')).toBeTruthy();
+    expect(screen.getByText('10% 対象')).toBeTruthy();
+    expect(screen.getByText('1100 JPYC (うち消費税 100 円)')).toBeTruthy();
+    expect(screen.getByText('8% 対象')).toBeTruthy();
+    expect(screen.getByText('540 JPYC (うち消費税 40 円)')).toBeTruthy();
+    expect(screen.getByText('※')).toBeTruthy();
+    expect(screen.getByText('※ は軽減税率 (8%) の対象です。')).toBeTruthy();
+    // 行ごとに丸めた税額の合計の行 (消費税) は並べない
+    expect(screen.queryByText('消費税')).toBeNull();
+  });
+
+  it('免責はインボイス用に切り替わり、国税庁の公表サイトへのリンクが付く', () => {
+    render(<PayerReceiptDetail receipt={invoiceReceipt()} />);
+    expect(screen.getByText(/OpenPay は店舗の登録状況を確かめていません。/)).toBeTruthy();
+    expect(screen.queryByText(/正式な領収書・税務証憑ではありません/)).toBeNull();
+    const link = screen.getByRole('link', { name: '登録番号を国税庁の公表サイトで確かめる' });
+    expect(link.getAttribute('href')).toBe(
+      'https://www.invoice-kohyo.nta.go.jp/regno-search/detail?selRegNo=1234567890123',
+    );
+  });
+
+  it('登録番号の無い控え・USDC の控えは従来どおり (インボイス欄なし・従来の免責)', () => {
+    const { unmount } = render(
+      <PayerReceiptDetail receipt={invoiceReceipt({ merchantInvoiceNo: undefined })} />,
+    );
+    expect(screen.queryByText('登録番号')).toBeNull();
+    expect(screen.queryByText('10% 対象')).toBeNull();
+    expect(screen.getByText('消費税')).toBeTruthy();
+    expect(screen.getByText(/正式な領収書・税務証憑ではありません/)).toBeTruthy();
+    unmount();
+
+    render(<PayerReceiptDetail receipt={invoiceReceipt({ asset: 'usdc' })} />);
+    expect(screen.queryByText('登録番号')).toBeNull();
+    expect(screen.queryByRole('link', { name: '登録番号を国税庁の公表サイトで確かめる' })).toBeNull();
+  });
+});

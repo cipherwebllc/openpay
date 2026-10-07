@@ -46,12 +46,10 @@ export type AppendPaymentHistoryCtx = {
   /** ネットワーク手数料相当額 (非 circle の gasless 経路)。standard / circle は null
    * (circle は result 由来の circlePaymasterNetUsdc を使う)。 */
   networkFeeEquivalent: bigint | null;
-  /**
-   * 店舗名 — 現状は常に '' を渡す前提。URL params に店舗名 key が無いため
-   * parent (PaymentForm / CheckoutForm) から流す source が無い。HistoryEntry の
-   * schema 互換性のため field は保持。
-   */
+  /** 店舗名。/pay の URL の store (任意) から流す。無ければ ''。会計 CSV の取引先にも使われる。 */
   storeName: string;
+  /** 顧客控えだけに出す店名 (/checkout の store)。店舗側履歴の storeName (= 会計 CSV の取引先) は変えない。 */
+  receiptMerchantName?: string | null;
   note: string;
   /** 異通貨建て決済の anchor (FX 換算 QR のみ非 null)。元の価格建て金額 (人間可読)・
    *  建てトークン・適用 FX レート。通常決済は省略 (= null)。全 sale leg 横断で同一値。 */
@@ -67,6 +65,8 @@ export type AppendPaymentHistoryCtx = {
   receiptNo?: string | null;
   /** 顧客控えだけに保存する注文束縛キー。店舗履歴の receiptNo とは独立。 */
   orderId?: string;
+  /** 店舗のインボイス登録番号 (URL の inv)。顧客控えだけに保存する (店舗履歴の schema は変えない)。 */
+  invoiceNo?: string | null;
   lineItems?: HistoryLineItem[] | null;
   /** 顧客向け電子レシート (PayerReceipt) を保存する際の発生元 route / locale。
    *  sale 成功 leg のみで使用。store 側 HistoryEntry には影響しない (受領控え専用)。 */
@@ -82,6 +82,8 @@ function saveReceiptFor(entry: HistoryEntry, ctx: AppendPaymentHistoryCtx): void
       sourceRoute: ctx.sourceRoute,
       locale: ctx.locale,
       orderId: ctx.orderId,
+      merchantName: ctx.receiptMerchantName,
+      invoiceNo: ctx.invoiceNo,
     }),
   );
 }

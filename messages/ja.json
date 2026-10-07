@@ -2464,6 +2464,13 @@
     "clearAllConfirm": "この端末に保存された電子レシートをすべて消去しますか？（取り消せません）",
     "scanLink": "/scan で支払い履歴 (電子レシート) を見る ↗",
     "disclaimer": "支払い確認用の控えです。正式な領収書・税務証憑ではありません。取扱いは所属先・税理士にご確認を。",
+    "invoiceRegistrationNoLabel": "登録番号",
+    "invoiceRateGroup": "{rate}% 対象",
+    "invoiceRateGroupTax": "うち消費税 {tax} 円",
+    "invoiceExemptGroup": "非課税・対象外",
+    "invoiceReducedNote": "※ は軽減税率 (8%) の対象です。",
+    "invoiceDisclaimer": "店舗が設定した登録番号と、お支払い時の商品・税率から作った控えです。日時はお支払いに使った端末の時刻です。OpenPay は店舗の登録状況を確かめていません。税務上の扱いは店舗・税理士にご確認ください。",
+    "invoiceLookupLink": "登録番号を国税庁の公表サイトで確かめる",
     "ctaText": "このお店は OpenPay で受け取っています。",
     "ctaLink": "あなたも無料でお店を開く →"
   },

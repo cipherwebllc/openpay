@@ -22,6 +22,12 @@ import {
   type HistoryLineItem,
 } from './history';
 import { displaySymbolFor, type TokenSymbol } from './tokens';
+import { taxAmountDecimal, taxDisplayDecimals } from './tax';
+import {
+  invoiceLookupUrl,
+  invoiceReceiptView,
+  normalizeInvoiceRegistrationNumber,
+} from './invoice';
 
 export const PAYER_RECEIPTS_STORAGE_KEY = 'openpay:payerReceipts:v1';
 export const PAYER_RECEIPTS_CHANGED_EVENT = 'openpay:payer-receipts-changed';
@@ -54,6 +60,8 @@ export type PayerReceipt = {
   amount: string;
   currency: string;
   merchantName?: string;
+  /** 店舗が設定したインボイス登録番号 (T + 13 桁・正規化済み)。OpenPay は登録状況を確かめない。 */
+  merchantInvoiceNo?: string;
   merchantAddress: string;
   payerAddress?: string;
   paymentMode?: string;
@@ -85,6 +93,7 @@ export type BuildPayerReceiptInput = {
   amount: string;
   merchantAddress: string;
   merchantName?: string | null;
+  merchantInvoiceNo?: string | null;
   payerAddress?: string | null;
   paymentMode?: string | null;
   gasMode?: string | null;
@@ -152,6 +161,7 @@ export function buildPayerReceipt(
     amount: input.amount,
     currency: tokenSymbol,
     merchantName: input.merchantName?.trim() || undefined,
+    merchantInvoiceNo: normalizeInvoiceRegistrationNumber(input.merchantInvoiceNo) ?? undefined,
     merchantAddress: input.merchantAddress,
     payerAddress: input.payerAddress ?? undefined,
     paymentMode: input.paymentMode ?? undefined,
@@ -171,10 +181,44 @@ export function buildPayerReceipt(
   };
 }
 
+// 明細 (lineItems) の無い単品 QR の 1 行。金額は顧客が払った総額 (gross) で組み、entry の税率を
+// 引き継ぐ (店舗側の entryLineItems は手取り額で組むため、店主がガス代を負担すると総額とずれる)。
+// 商品名も税率も無ければ [] を返し、buildPayerReceipt の仮想行 (対象外) に任せる。
+function singleReceiptLine(entry: HistoryEntry, grossTotal: string): HistoryLineItem[] {
+  if (!entry.productName && entry.taxRate == null) return [];
+  const taxAmount = taxAmountDecimal(
+    Number(grossTotal),
+    entry.taxRate,
+    taxDisplayDecimals(entry.asset),
+  );
+  return [
+    {
+      id: `${entry.id}-0`,
+      name: entry.productName || entry.storeName?.trim() || VIRTUAL_FALLBACK_NAME,
+      quantity: 1,
+      unitPrice: grossTotal,
+      amount: grossTotal,
+      currency: entry.asset,
+      taxRate: entry.taxRate,
+      taxCategory: entry.taxCategory,
+      taxAmount: taxAmount == null ? '0' : String(taxAmount),
+      memo: entry.memo,
+    },
+  ];
+}
+
 /** 店舗側 HistoryEntry (sale 成功 leg) → 顧客向け PayerReceipt 写像。 */
 export function payerReceiptFromHistoryEntry(
   entry: HistoryEntry,
-  opts: { sourceRoute?: string; locale?: string; orderId?: string; now?: Date } = {},
+  opts: {
+    sourceRoute?: string;
+    locale?: string;
+    orderId?: string;
+    /** 控えに出す店名 (店舗側履歴の storeName が空の経路用。履歴・会計 CSV の取引先は変えない)。 */
+    merchantName?: string | null;
+    invoiceNo?: string | null;
+    now?: Date;
+  } = {},
 ): PayerReceipt {
   const totals = entryTotals(entry);
   // 顧客控えの総額は「商品の請求額 (gross sale)」を使う。店主が gas を吸収する gasMode では
@@ -184,6 +228,11 @@ export function payerReceiptFromHistoryEntry(
   const grossTotal = /^\d+$/.test(grossRaw)
     ? formatUnits(BigInt(grossRaw), HISTORY_ASSET_DECIMALS[entry.asset])
     : totals.total;
+  // 明細の無い単品は総額 (gross) の 1 行で組み、税額もその行から取る (手取り由来の entryTotals と
+  // 混ぜると、同じ控えの中で行の税額と合計の税額が食い違う)。
+  const single = entry.lineItems && entry.lineItems.length > 0 ? null : singleReceiptLine(entry, grossTotal);
+  const lineItems = single ?? entryLineItems(entry);
+  const totalTaxAmount = single && single.length > 0 ? (single[0].taxAmount ?? '0') : totals.totalTax;
   const status: PayerReceiptStatus =
     entry.status === 'success'
       ? 'confirmed'
@@ -199,13 +248,14 @@ export function payerReceiptFromHistoryEntry(
       tokenAddress: entry.tokenAddress,
       amount: grossTotal,
       merchantAddress: entry.merchant,
-      merchantName: entry.storeName,
+      merchantName: entry.storeName.trim() || opts.merchantName,
+      merchantInvoiceNo: opts.invoiceNo,
       payerAddress: entry.customer,
       paymentMode: entry.payMode,
       gasMode: entry.gasMode,
-      lineItems: entryLineItems(entry),
+      lineItems,
       subtotalAmount: grossTotal,
-      totalTaxAmount: totals.totalTax,
+      totalTaxAmount,
       totalAmount: grossTotal,
       memo: entry.memo,
       receiptNo: entry.receiptNo,
@@ -433,17 +483,31 @@ export function payerReceiptCopyText(r: PayerReceipt, locale?: string): string {
   if (r.receiptNo) lines.push(`${en ? 'Receipt no.' : 'レシート番号'}：${r.receiptNo}`);
   lines.push(`${en ? 'Date' : '日時'}：${formatReceiptDateTime(r.paidAt ?? r.createdAt, locale)}`);
   if (r.merchantName) lines.push(`${en ? 'Merchant' : '店舗'}：${r.merchantName}`);
-  lines.push('');
-  for (const li of r.lineItems ?? []) {
-    lines.push(`${li.name} x ${li.quantity}    ${li.amount} ${r.currency}`);
+  const invoice = invoiceReceiptView(r);
+  if (invoice) {
+    lines.push(`${en ? 'Registration no.' : '登録番号'}：${invoice.registrationNumber}`);
   }
   lines.push('');
-  // 税額が計上されているときだけ小計/消費税を併記 (0 のときは合計のみで十分)。
-  if (payerReceiptHasTax(r)) {
+  for (const li of r.lineItems ?? []) {
+    const reduced = invoice && li.taxRate === 8 ? ' ※' : '';
+    lines.push(`${li.name} x ${li.quantity}${reduced}    ${li.amount} ${r.currency}`);
+  }
+  lines.push('');
+  if (invoice) {
+    // インボイス欄: 税率ごとの税込合計と消費税額 (円・税率ごとに 1 回の端数処理)。
+    // 行ごとに丸めた税額の合計 (totalTaxAmount) は並べない (同じ控えで数字が食い違うため)。
+    for (const g of invoice.groups) {
+      lines.push(invoiceGroupCopyLine(g.rate, g.total, g.tax, r.currency, en));
+    }
+  } else if (payerReceiptHasTax(r)) {
+    // 税額が計上されているときだけ小計/消費税を併記 (0 のときは合計のみで十分)。
     if (r.subtotalAmount) lines.push(`${en ? 'Subtotal' : '小計'}：${r.subtotalAmount} ${r.currency}`);
     lines.push(`${en ? 'Tax' : '消費税'}：${r.totalTaxAmount} ${r.currency}`);
   }
   lines.push(`${en ? 'Total' : '合計'}：${r.totalAmount ?? r.amount} ${r.currency}`);
+  if (invoice?.hasReducedRate) {
+    lines.push(en ? '※ Reduced tax rate (8%) item' : '※ は軽減税率 (8%) の対象です');
+  }
   // 異通貨建て: 元価格 (請求建て) を併記し、顧客が QR で見た価格を控えに残す。
   if (r.anchorAmount && r.anchorSymbol) {
     lines.push(
@@ -462,12 +526,39 @@ export function payerReceiptCopyText(r: PayerReceipt, locale?: string): string {
   if (r.txHash) lines.push(`${en ? 'Tx hash' : '取引hash'}：${r.txHash}`);
   lines.push(`${en ? 'Merchant wallet' : '店舗ウォレット'}：${r.merchantAddress}`);
   if (r.payerAddress) lines.push(`${en ? 'Payer wallet' : '顧客ウォレット'}：${r.payerAddress}`);
+  if (invoice) {
+    // 画面の免責と同じ前提を、コピーして共有した先にも残す (未確認の番号を確認済みに見せない)。
+    lines.push('');
+    lines.push(
+      en
+        ? 'The registration number is set by the shop; OpenPay does not check the registration. The date and time come from the device used to pay.'
+        : '登録番号は店舗が設定した値で、OpenPay は登録状況を確かめていません。日時はお支払いに使った端末の時刻です。',
+    );
+    lines.push(`${en ? 'Check' : '確認'}：${invoiceLookupUrl(invoice.registrationNumber)}`);
+  }
   return lines.join('\n');
 }
 
-/** JSON エクスポート (レシートそのまま・秘密情報なし)。 */
+function invoiceGroupCopyLine(
+  rate: number,
+  total: string,
+  tax: string,
+  currency: string,
+  en: boolean,
+): string {
+  if (rate === 0) {
+    return `${en ? 'Tax-exempt / out of scope' : '非課税・対象外'}：${total} ${currency}`;
+  }
+  return en
+    ? `${rate}% items：${total} ${currency} (incl. consumption tax ¥${tax})`
+    : `${rate}% 対象：${total} ${currency}（うち消費税 ${tax} 円）`;
+}
+
+/** JSON エクスポート (レシートそのまま・秘密情報なし)。インボイス欄を出せる控えは税率別の集計も添える
+ *  (行ごとの taxAmount を第三者が足すと税率ごとの 1 回の端数処理とずれるため)。 */
 export function payerReceiptToJson(r: PayerReceipt): string {
-  return JSON.stringify(r, null, 2);
+  const invoice = invoiceReceiptView(r);
+  return JSON.stringify(invoice ? { ...r, invoice } : r, null, 2);
 }
 
 const CSV_HEADER: readonly string[] = [

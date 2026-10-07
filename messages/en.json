@@ -2464,6 +2464,13 @@
     "clearAllConfirm": "Clear all payment receipts saved on this device? (cannot be undone)",
     "scanLink": "View payment receipts on /scan ↗",
     "disclaimer": "A payment reference — not an official receipt or tax document. Confirm handling with your organization or accountant.",
+    "invoiceRegistrationNoLabel": "Registration no.",
+    "invoiceRateGroup": "{rate}% items",
+    "invoiceRateGroupTax": "incl. consumption tax ¥{tax}",
+    "invoiceExemptGroup": "Tax-exempt / out of scope",
+    "invoiceReducedNote": "※ Reduced tax rate (8%) item.",
+    "invoiceDisclaimer": "Made from the registration number the shop set and the items and tax rates at the time of payment. The date and time come from the device used to pay. OpenPay does not check the shop's registration. Ask the shop or a tax accountant how to treat it for tax purposes.",
+    "invoiceLookupLink": "Check the registration number on the National Tax Agency site",
     "ctaText": "This store receives payments with OpenPay.",
     "ctaLink": "Open your own store for free →"
   },

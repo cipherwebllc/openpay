@@ -270,3 +270,73 @@ describe('/checkout items parse: 境界・不正入力 (per-item)', () => {
     expect(parseCheckout(path.split('?')[1]).ok).toBe(false);
   });
 });
+
+describe('インボイス登録番号 (inv) と /checkout の店名 (store)', () => {
+  const items: CheckoutItem[] = [{ name: 'コーヒー', qty: 2, price: '500' }];
+  const checkoutBase = {
+    to: TO as `0x${string}`,
+    token: 'jpyc' as const,
+    gas: 'customer' as const,
+    mode: 'gasless' as const,
+    items,
+  };
+
+  it('/pay: inv は正規化して出し、parse で戻る', () => {
+    const path = buildPayPath({
+      to: TO as `0x${string}`,
+      token: 'jpyc',
+      gas: 'customer',
+      amount: '1100',
+      mode: 'gasless',
+      storeName: 'OpenPay Cafe',
+      invoiceNo: 't-1234-5678-90123',
+    });
+    expect(path).toContain('inv=T1234567890123');
+    const r = parsePay(path.split('?')[1]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.params.invoiceNo).toBe('T1234567890123');
+    expect(r.params.storeName).toBe('OpenPay Cafe');
+  });
+
+  it('/checkout: store と inv の往復', () => {
+    const path = buildCheckoutPath({ ...checkoutBase, storeName: 'OpenPay Cafe', invoiceNo: 'T1234567890123' });
+    expect(path).toContain('inv=T1234567890123');
+    const r = parseCheckout(path.split('?')[1]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.params.storeName).toBe('OpenPay Cafe');
+    expect(r.params.invoiceNo).toBe('T1234567890123');
+  });
+
+  it('形式外の inv は build で出さず、parse でも捨てる (支払いは止めない)', () => {
+    const path = buildCheckoutPath({ ...checkoutBase, invoiceNo: 'T123' });
+    expect(path).not.toContain('inv=');
+    const r = parseCheckout(`${path.split('?')[1]}&inv=T999`);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.params.invoiceNo).toBeUndefined();
+  });
+
+  it('未指定なら store / inv は出ない (旧 URL 不変)', () => {
+    const path = buildCheckoutPath(checkoutBase);
+    expect(path).not.toContain('store=');
+    expect(path).not.toContain('inv=');
+    const r = parseCheckout(path.split('?')[1]);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.params.storeName).toBeUndefined();
+    expect(r.params.invoiceNo).toBeUndefined();
+  });
+
+  it('store / inv は金額・受取先に関与しない (同じ items・to のまま)', () => {
+    const a = parseCheckout(buildCheckoutPath(checkoutBase).split('?')[1]);
+    const b = parseCheckout(
+      buildCheckoutPath({ ...checkoutBase, storeName: 'X', invoiceNo: 'T1234567890123' }).split('?')[1],
+    );
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    expect(b.params.items).toEqual(a.params.items);
+    expect(b.params.to).toBe(a.params.to);
+  });
+});

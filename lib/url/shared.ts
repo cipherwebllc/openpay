@@ -16,6 +16,7 @@ import {
   parseTaxRateParam,
   type TaxCategory,
 } from '../tax';
+import { normalizeInvoiceRegistrationNumber } from '../invoice';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   deploymentForSlug,
@@ -192,11 +193,17 @@ export function sanitizeText(value: string, max: number): string | undefined {
   return truncateSafe(cleaned, max);
 }
 
-// 記帳補助メタ (税率 / 税区分 / レシート番号) を URL に追記する。pay/checkout の build で同一。
-// taxRate は 0 (非課税/対象外) もあるため undefined 判定。receiptNo は sanitize + cap。
+// 記帳補助メタ (税率 / 税区分 / レシート番号 / インボイス登録番号) を URL に追記する。pay/checkout の
+// build で同一。taxRate は 0 (非課税/対象外) もあるため undefined 判定。receiptNo は sanitize + cap。
+// invoiceNo は顧客の控えに出す表示専用の値 (金額・受取先・手数料には関与しない)。形式外は出さない。
 export function appendTaxReceiptParams(
   sp: URLSearchParams,
-  meta: { taxRate?: number; taxCategory?: TaxCategory; receiptNo?: string },
+  meta: {
+    taxRate?: number;
+    taxCategory?: TaxCategory;
+    receiptNo?: string;
+    invoiceNo?: string;
+  },
 ): void {
   if (meta.taxRate !== undefined) {
     sp.set('tax', String(meta.taxRate));
@@ -208,13 +215,19 @@ export function appendTaxReceiptParams(
     const v = sanitizeText(meta.receiptNo, PAY_RECEIPT_NO_MAX);
     if (v) sp.set('rcpt', v);
   }
+  if (meta.invoiceNo) {
+    const v = normalizeInvoiceRegistrationNumber(meta.invoiceNo);
+    if (v) sp.set('inv', v);
+  }
 }
 
-// 記帳補助メタ (税率 / 税区分 / レシート番号) を URL から parse する。pay/checkout の parser で同一。
+// 記帳補助メタ (税率 / 税区分 / レシート番号 / インボイス登録番号) を URL から parse する。
+// pay/checkout の parser で同一。不正/欠落は undefined (= 従来 URL と同じ挙動)。
 export function parseTaxReceiptParams(searchParams: SearchParamsLike): {
   taxRate: number | undefined;
   taxCategory: TaxCategory | undefined;
   receiptNo: string | undefined;
+  invoiceNo: string | undefined;
 } {
   const rcptRaw = searchParams.get('rcpt');
   const taxRaw = searchParams.get('tax');
@@ -223,6 +236,7 @@ export function parseTaxReceiptParams(searchParams: SearchParamsLike): {
     taxRate: parseTaxRateParam(taxRaw),
     taxCategory: parseTaxCategoryParam(taxcatRaw),
     receiptNo: rcptRaw ? sanitizeText(rcptRaw, PAY_RECEIPT_NO_MAX) : undefined,
+    invoiceNo: normalizeInvoiceRegistrationNumber(searchParams.get('inv')) ?? undefined,
   };
 }
 

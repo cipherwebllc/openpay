@@ -1184,13 +1184,16 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       feeAmount: breakdown.feeAmount,
       saleAmount: totalWei,
       networkFeeEquivalent,
+      // 店舗側履歴の storeName は従来どおり空 (会計 CSV の取引先 = 顧客のまま)。店名は控えにだけ出す。
       storeName: '',
+      receiptMerchantName: params.storeName ?? null,
       note: params.description ?? params.orderId ?? '',
       productName: params.items.map((it) => it.name).join(', '),
       memo: params.description ?? null,
       taxRate: params.taxRate ?? null,
       taxCategory: params.taxCategory ?? null,
       receiptNo: params.receiptNo ?? null,
+      invoiceNo: params.invoiceNo ?? null,
       ...(params.orderId ? { orderId: params.orderId } : {}),
       lineItems: params.items.map((it, i) => {
         // amount = price × qty を人間可読 decimal で (raw wei ではない)。
@@ -1237,6 +1240,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       params.taxRate,
       params.taxCategory,
       params.receiptNo,
+      params.storeName,
+      params.invoiceNo,
       isStandard,
       breakdown.merchantReceives,
       breakdown.feeAmount,

@@ -734,3 +734,111 @@ it('Gateway receipt backfill updates an existing identity after a reorg without 
   backfillGatewayPayerReceipt(80002, `0x${'cd'.repeat(32)}`, canonical);
   expect(loadPayerReceipts()).toHaveLength(1);
 });
+
+describe('payerReceiptFromHistoryEntry: インボイス登録番号', () => {
+  it('opts.invoiceNo を正規化して控えに残す (形式外は残さない)', () => {
+    const r = payerReceiptFromHistoryEntry(saleEntry(), { invoiceNo: 't-1234-5678-90123', now: NOW });
+    expect(r.merchantInvoiceNo).toBe('T1234567890123');
+    const bad = payerReceiptFromHistoryEntry(saleEntry(), { invoiceNo: 'T123', now: NOW });
+    expect(bad.merchantInvoiceNo).toBeUndefined();
+    expect(payerReceiptFromHistoryEntry(saleEntry(), { now: NOW }).merchantInvoiceNo).toBeUndefined();
+  });
+
+  it('商品名なしで税率だけの単品 QR も、税率を引き継いだ 1 行になる', () => {
+    const r = payerReceiptFromHistoryEntry(
+      saleEntry({
+        lineItems: null,
+        productName: null,
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+        merchantAmount: 1100n * 10n ** 18n,
+      }),
+      { invoiceNo: 'T1234567890123', now: NOW },
+    );
+    expect(r.lineItems).toHaveLength(1);
+    expect(r.lineItems?.[0]).toMatchObject({
+      name: 'OpenPay Cafe',
+      amount: '1100',
+      taxRate: 10,
+      taxCategory: 'taxable_10',
+      taxAmount: '100',
+    });
+  });
+
+  it('明細なしの単品は、店主がガス代を負担しても総額 (gross) で 1 行を組む', () => {
+    const r = payerReceiptFromHistoryEntry(
+      saleEntry({
+        lineItems: null,
+        productName: 'コーヒー',
+        taxRate: 10,
+        taxCategory: 'taxable_10',
+        merchantAmount: 1090n * 10n ** 18n,
+        saleAmount: 1100n * 10n ** 18n,
+      }),
+      { now: NOW },
+    );
+    expect(r.lineItems?.[0].amount).toBe('1100');
+    expect(r.totalAmount).toBe('1100');
+    // 合計の税額も総額の行から取る (手取り 1090 由来の 99 と混ぜない)
+    expect(r.lineItems?.[0].taxAmount).toBe('100');
+    expect(r.totalTaxAmount).toBe('100');
+  });
+
+  it('opts.merchantName は履歴の店名が空のときだけ控えに使う (会計 CSV の取引先は変えない)', () => {
+    const fromOpts = payerReceiptFromHistoryEntry(saleEntry({ storeName: '' }), {
+      merchantName: 'Checkout Cafe',
+      now: NOW,
+    });
+    expect(fromOpts.merchantName).toBe('Checkout Cafe');
+    const fromEntry = payerReceiptFromHistoryEntry(saleEntry(), { merchantName: 'X', now: NOW });
+    expect(fromEntry.merchantName).toBe('OpenPay Cafe');
+  });
+
+  it('商品名も税率も無い単品は従来どおり仮想行 (対象外・税率なし)', () => {
+    const r = payerReceiptFromHistoryEntry(
+      saleEntry({ lineItems: null, productName: null, taxRate: null, taxCategory: null }),
+      { now: NOW },
+    );
+    expect(r.lineItems?.[0]).toMatchObject({ taxRate: null, taxCategory: 'out_of_scope' });
+  });
+
+  it('コピー文: 登録番号・軽減税率の ※・税率ごとの合計と消費税 (円)・脚注', () => {
+    const r = payerReceiptFromHistoryEntry(
+      saleEntry({
+        merchantAmount: 1640n * 10n ** 18n,
+        lineItems: [
+          { name: 'コーヒー', quantity: 2, unitPrice: '550', amount: '1100', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+          { name: 'パン', quantity: 1, unitPrice: '540', amount: '540', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+        ],
+      }),
+      { invoiceNo: 'T1234567890123', now: NOW },
+    );
+    const ja = payerReceiptCopyText(r, 'ja');
+    expect(ja).toContain('登録番号：T1234567890123');
+    expect(ja).toContain('パン x 1 ※    540 JPYC');
+    expect(ja).toContain('10% 対象：1100 JPYC（うち消費税 100 円）');
+    expect(ja).toContain('8% 対象：540 JPYC（うち消費税 40 円）');
+    expect(ja).toContain('※ は軽減税率 (8%) の対象です');
+    expect(ja).not.toContain('消費税：');
+    // 共有先でも「店舗が設定した未確認の番号」とわかるように、注意と確認先を残す
+    expect(ja).toContain('OpenPay は登録状況を確かめていません');
+    expect(ja).toContain(
+      '確認：https://www.invoice-kohyo.nta.go.jp/regno-search/detail?selRegNo=1234567890123',
+    );
+    const en = payerReceiptCopyText(r, 'en');
+    expect(en).toContain('Registration no.：T1234567890123');
+    expect(en).toContain('8% items：540 JPYC (incl. consumption tax ¥40)');
+  });
+
+  it('JSON: インボイス欄を出せる控えは税率別の集計を添える・出せない控えは従来どおり', () => {
+    const withInvoice = payerReceiptFromHistoryEntry(saleEntry(), { invoiceNo: 'T1234567890123', now: NOW });
+    const parsed = JSON.parse(payerReceiptToJson(withInvoice));
+    expect(parsed.merchantInvoiceNo).toBe('T1234567890123');
+    expect(parsed.invoice).toMatchObject({
+      registrationNumber: 'T1234567890123',
+      groups: [{ rate: 10, total: '4000', tax: '364' }],
+    });
+    const plain = payerReceiptFromHistoryEntry(saleEntry(), { now: NOW });
+    expect(JSON.parse(payerReceiptToJson(plain))).toEqual(JSON.parse(JSON.stringify(plain)));
+  });
+});
