@@ -51,6 +51,7 @@ const sd = vi.hoisted(() => ({
   stop: vi.fn(),
   releaseForNormal: vi.fn(),
   setOn: vi.fn(),
+  pending: false,
 }));
 vi.mock('@/components/StoreDeviceProvider', () => ({
   useStoreDeviceMode: () => ({
@@ -70,6 +71,7 @@ vi.mock('@/components/StoreDeviceProvider', () => ({
       start: sd.start,
       stop: sd.stop,
       releaseForNormal: sd.releaseForNormal,
+      hasPendingSale: () => sd.pending,
       checkNow: vi.fn(),
       retry: vi.fn(),
       dismiss: vi.fn(),
@@ -115,6 +117,7 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
     sd.stop.mockReset();
     sd.releaseForNormal.mockReset().mockResolvedValue(true);
     sd.setOn.mockReset();
+    sd.pending = false;
   });
 
   describe('通常の決済モード (お店負担を選んでいない)', () => {
@@ -151,6 +154,14 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
         sd.busy = true;
         r.rerender(<QrGenerator />);
         expect(screen.queryByText(/圏外です/)).toBeNull();
+        // 締め切れなかったお店負担の受け渡しが残っている間も出さない
+        sd.busy = false;
+        sd.pending = true;
+        r.rerender(<QrGenerator />);
+        expect(screen.queryByText(/圏外です/)).toBeNull();
+        sd.pending = false;
+        r.rerender(<QrGenerator />);
+        expect(await screen.findByText(/圏外です/)).toBeTruthy();
       } finally {
         if (online) Object.defineProperty(window.navigator, 'onLine', online);
         else delete (window.navigator as { onLine?: boolean }).onLine;

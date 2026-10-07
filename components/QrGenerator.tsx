@@ -720,9 +720,12 @@ export function QrGenerator() {
     <>
       {/* 圏外時のみ描画される「前回の受け取り QR」(オンライン時は null)。ページ最上部に置く。 */}
       <div className="mb-4 print:hidden">
-        {/* お店負担を選んでいる・お店の端末が送っている間は、保存した通常の QR を出さない (店員が選ばずに通常の QR を
-            出さない・同じ会計を二重に払わせない)。flag OFF では今までどおり。 */}
-        {!(env.enableStoreGasWallet && (storeRequested || device.busy)) && <OfflineLastQr />}
+        {/* お店負担を選んでいる・お店の端末が送っている・締め切っていない受け渡しが残っている間は、保存した通常の QR を
+            出さない (店員が選ばずに通常の QR を出さない・圏外で締め切れなかったお店負担の QR と二重に払わせない)。
+            flag OFF では今までどおり。 */}
+        {!(env.enableStoreGasWallet && (storeRequested || device.busy || device.hasPendingSale())) && (
+          <OfflineLastQr />
+        )}
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:items-start print:block print:gap-0">
         <div className="space-y-5 print:hidden">
