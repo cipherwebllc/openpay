@@ -42,6 +42,8 @@ const RECEIPT_TIMEOUT_MS = 90_000;
 // 確定の確認 (サーバの判定) の間隔と、確認を続ける時間。
 const FINALITY_POLL_MS = 10_000;
 const FINALITY_WATCH_MS = 5 * 60_000;
+// 結果が分からない送信の結論を待つ時間 (署名の期限 150 秒 + 確定ブロックまで十分に)。
+const UNKNOWN_WATCH_MS = 15 * 60_000;
 // 再読み込み後に結果を出す送信の新しさ。
 const RECENT_MARK_MS = 15 * 60_000;
 
@@ -72,6 +74,8 @@ export type StoreDeviceRegisterState =
   // 入金を確認 (この支払いの Settled が receipt にある = 品物を渡す合図)。finalized = サーバの判定で確定。
   | { phase: 'received'; mark: DeviceSentMark; finalized: boolean; previous: boolean }
   | { phase: 'reverted'; mark: DeviceSentMark; previous: boolean }
+  // 送った tx が期限までに成立しなかったとサーバの判定で確かめた (お支払いは行われていない)
+  | { phase: 'failed'; mark: DeviceSentMark; previous: boolean }
   // まだ結果が分からない (receipt 待ちの時間切れ・通信断)。「いま確認する」で続ける。
   | { phase: 'unknown'; mark: DeviceSentMark; previous: boolean };
 
@@ -79,7 +83,13 @@ type FinalizeResult = 'closed' | 'processing' | 'unknown';
 
 /** 新しい QR (通常の QR を含む) を出せない状態か。 */
 function isBusy(s: StoreDeviceRegisterState): boolean {
-  return s.phase === 'creating' || s.phase === 'processing' || (s.phase === 'sent' && !s.previous);
+  return (
+    s.phase === 'creating' ||
+    s.phase === 'processing' ||
+    // この会計で送った tx の結果がまだ分からない間も次の QR を出さない (成立していれば二重払いになる)。
+    // 出口は結論 (入金の確認・成立しなかった) か、店員が取引を確かめて閉じること。
+    ((s.phase === 'sent' || s.phase === 'unknown') && !s.previous)
+  );
 }
 
 export type StoreDeviceRegisterInput = {
@@ -179,6 +189,10 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   // QR を閉じたときの締め切り (応答待ち)。次の QR・通常の QR はこれを待ってから出す
   // (遅れて返った署名を送ったのに、通常の QR でも払わせる、を起こさない)。
   const pendingCloseRef = useRef<Promise<FinalizeResult> | null>(null);
+  // セッションごとの締め切り (同じセッションの締め切りは一つの応答を共有する = 遅れて返った応答で別の判断をしない)。
+  const closesRef = useRef(new Map<string, Promise<FinalizeResult>>());
+  // 店員が通常の QR を選んで手放したセッション (後から署名が見つかっても送らない = 二重払いにしない)。
+  const abandonedRef = useRef(new Set<string>());
   // 新しい QR を出す・切替を OFF にするたびに進める。遅れて返った結果で今の表示を上書きしない。
   const genRef = useRef(0);
   const enabledRef = useRef(enabled);
@@ -197,8 +211,12 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       genRef.current += 1;
       finalityStopRef.current?.();
       retryRef.current = null;
-      stateRef.current = { phase: 'idle' };
-      if (mountedRef.current) setState({ phase: 'idle' });
+      // 送っている・結果を待っている支払いがあれば、その表示 (と次の QR を出さない状態) は残す
+      // (取り消せない送信の結果を隠して、通常の QR で二重に払わせない)。
+      if (!activeRef.current && !isBusy(stateRef.current)) {
+        stateRef.current = { phase: 'idle' };
+        if (mountedRef.current) setState({ phase: 'idle' });
+      }
     }
   }, [enabled]);
   const set = useCallback((s: StoreDeviceRegisterState) => {
@@ -219,9 +237,11 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
     return { mod, io: mod.createDeviceIo({ token, forwarder, gasAddress }) };
   }, [token, forwarder, gasAddress]);
 
-  // 確定の確認 (サーバの判定・10 秒おき・最長 5 分)。失敗しても「入金を確認」の表示は変えない。
+  // サーバの判定で結論を待つ (10 秒おき)。「入金を確認」の後は確定 (最長 5 分)、結果が分からないときは
+  // 成立 (= 入金の確認・確定) か、期限までに成立しなかった (= お支払いは行われていない) まで (最長 15 分)。
+  // 確認の失敗は表示を変えない。
   const watchFinality = useCallback(
-    (mark: DeviceSentMark, previous: boolean, gen: number) => {
+    (mark: DeviceSentMark, previous: boolean, gen: number, fromUnknown = false) => {
       finalityStopRef.current?.();
       if (!forwarder || !feeReceiver) return;
       let stopped = false;
@@ -250,10 +270,15 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
             setIf(gen, { phase: 'received', mark, finalized: true, previous });
             return;
           }
+          if (!stopped && fromUnknown && body?.ok && body.state === 'expired_unused') {
+            setIf(gen, { phase: 'failed', mark, previous });
+            return;
+          }
         } catch {
           // 確定の確認は付帯 (次の回へ)
         }
-        if (!stopped && Date.now() - started < FINALITY_WATCH_MS) setTimeout(tick, FINALITY_POLL_MS);
+        const limit = fromUnknown ? UNKNOWN_WATCH_MS : FINALITY_WATCH_MS;
+        if (!stopped && Date.now() - started < limit) setTimeout(tick, FINALITY_POLL_MS);
       };
       setTimeout(tick, FINALITY_POLL_MS);
       finalityStopRef.current = () => {
@@ -275,6 +300,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       if (gen !== genRef.current) return;
       if (!receipt || !forwarder || !feeReceiver) {
         set({ phase: 'unknown', mark, previous });
+        watchFinality(mark, previous, gen, true);
         return;
       }
       if (receipt.status === 'reverted') {
@@ -287,13 +313,14 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         return;
       }
       set({ phase: 'unknown', mark, previous });
+      watchFinality(mark, previous, gen, true);
     },
     [forwarder, feeReceiver, set, watchFinality],
   );
 
   const watch = useCallback(
-    async (mark: DeviceSentMark, previous: boolean) => {
-      const gen = genRef.current;
+    async (mark: DeviceSentMark, previous: boolean, startGen?: number) => {
+      const gen = startGen ?? genRef.current;
       const loaded = await loadIo();
       if (!loaded || gen !== genRef.current) return;
       set({ phase: 'sent', mark, previous });
@@ -343,7 +370,11 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
           set({ phase: 'rejected', reason: verified.reason });
           return;
         }
-        if (!enabledRef.current) return;
+        // 確かめている間に切替を OFF にした → 送らない (送らなければお支払いは行われない・表示を戻す)。
+        if (!enabledRef.current) {
+          set({ phase: 'idle' });
+          return;
+        }
         const r = await mod.sendStoreDeviceSettle(
           verified.value,
           { handoffId: session.id, chainId: session.chainId, forwarder },
@@ -374,24 +405,34 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
     [loadIo, forwarder, feeReceiver, token, retire, set, showReceipt],
   );
 
-  // セッションを締め切る (署名が入っていれば送る)。
+  // セッションを締め切る (署名が入っていれば送る)。同じセッションの締め切りは一つの応答を共有する。
   const finalize = useCallback(
-    async (s: DeviceSession): Promise<FinalizeResult> => {
-      const r = await closeSession(s);
-      if (r === null) return 'unknown';
-      if (r.closed) {
-        retire(s);
-        return 'closed';
-      }
-      // いま送っている署名 → 二度処理しない・通常の QR も出させない。
-      if (activeRef.current === r.auth.nonce) return 'processing';
-      // すでに処理を終えた署名 (送った・送らなかった)・切替 OFF → 二度処理しない。
-      if (processingRef.current === r.auth.nonce || !enabledRef.current) {
-        retire(s);
-        return 'closed';
-      }
-      void process({ merchant: s.merchant, amount: s.amount, auth: r.auth }, s);
-      return 'processing';
+    (s: DeviceSession): Promise<FinalizeResult> => {
+      const running = closesRef.current.get(s.id);
+      if (running) return running;
+      const p = (async (): Promise<FinalizeResult> => {
+        const r = await closeSession(s);
+        if (r === null) return 'unknown';
+        if (r.closed) {
+          retire(s);
+          return 'closed';
+        }
+        // いま送っている署名 → 二度処理しない・通常の QR も出させない。
+        if (activeRef.current === r.auth.nonce) return 'processing';
+        // 手放したセッション・処理を終えた署名・切替 OFF → 送らない。
+        if (abandonedRef.current.has(s.id) || processingRef.current === r.auth.nonce || !enabledRef.current) {
+          retire(s);
+          return 'closed';
+        }
+        void process({ merchant: s.merchant, amount: s.amount, auth: r.auth }, s);
+        return 'processing';
+      })();
+      closesRef.current.set(s.id, p);
+      // 応答が分からなかったときは、次に締め切るときに問い合わせ直せるようにする。
+      void p.then((r) => {
+        if (r === 'unknown' && closesRef.current.get(s.id) === p) closesRef.current.delete(s.id);
+      });
+      return p;
     },
     [process, retire],
   );
@@ -400,6 +441,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    const gen = genRef.current;
     void (async () => {
       const stored = readStoredSession();
       if (stored && stored.expiresAt > nowSec()) {
@@ -410,11 +452,12 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       }
       const { readSentMarks } = await import('@/lib/storeDeviceSend');
       const marks = readSentMarks();
-      if (cancelled || !marks.ok) return;
+      // 起動の処理の間に次の QR を出していたら、前回の結果で上書きしない。
+      if (cancelled || !marks.ok || gen !== genRef.current) return;
       const recent = marks.marks
         .filter((m) => Date.now() - m.at < RECENT_MARK_MS && m.chainId === chainId)
         .sort((a, b) => b.at - a.at)[0];
-      if (recent) void watch(recent, true);
+      if (recent) void watch(recent, true, gen);
     })();
     return () => {
       cancelled = true;
@@ -581,8 +624,12 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
     // 締め切りの応答を待つ間に送り始めた (読み取りが署名を受け取った) ときも出さない。
     if (r === 'processing' || activeRef.current || isBusy(stateRef.current)) return false;
     if (r === 'unknown') {
+      // 締め切れたか分からないセッションは手放す (後から応答・署名が届いても送らない)。
       const prev = sessionRef.current ?? readStoredSession();
-      if (prev) retire(prev);
+      if (prev) {
+        abandonedRef.current.add(prev.id);
+        retire(prev);
+      }
     }
     set({ phase: 'idle' });
     return true;

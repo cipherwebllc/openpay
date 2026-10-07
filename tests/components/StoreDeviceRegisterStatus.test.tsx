@@ -56,6 +56,18 @@ describe('StoreDeviceRegisterStatus (店員向けの表示)', () => {
     expect(screen.getByRole('link', { name: '取引を見る' })).toBeTruthy();
   });
 
+  it('この会計の結果が分からない: 次の QR を出せない理由と、取引を確かめて閉じるボタン', () => {
+    const h = show({ phase: 'unknown', mark: MARK, previous: false });
+    expect(screen.getByRole('status')).toHaveTextContent(/確かめられるまで次の QR は出せません/);
+    fireEvent.click(screen.getByRole('button', { name: '取引を確かめた（閉じる）' }));
+    expect(h.onDismiss).toHaveBeenCalled();
+  });
+
+  it('成立しなかった (サーバの判定): 「お支払いは行われていません」', () => {
+    show({ phase: 'failed', mark: MARK, previous: false });
+    expect(screen.getByRole('alert')).toHaveTextContent('送信は成立しませんでした。お支払いは行われていません。');
+  });
+
   it('作れなかった・読み取れない: 「通常の QR を出す」(店員が選ぶ)', () => {
     const h = show({ phase: 'create_failed', reason: 'busy' });
     fireEvent.click(screen.getByRole('button', { name: '通常の QR を出す' }));

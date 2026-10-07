@@ -168,13 +168,31 @@ export function StoreDeviceRegisterStatus({
         <div role="status" className="space-y-2 text-sm text-slate-700">
           <p>
             {previous}
-            {t('unknown')}
+            {state.previous ? t('unknownPrevious') : t('unknown')}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" className={BTN} onClick={onCheckNow}>
               {t('checkNow')}
             </button>
             {txLink(state.mark.hash)}
+            {onDismiss && (
+              <button type="button" className={BTN} onClick={onDismiss}>
+                {t('unknownAck')}
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    case 'failed':
+      return (
+        <div role="alert" className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <p>
+            {previous}
+            {t('failed')}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {txLink(state.mark.hash)}
+            {dismiss}
           </div>
         </div>
       );

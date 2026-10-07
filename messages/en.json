@@ -2520,7 +2520,10 @@
       "finalized": "Finalized.",
       "previousLabel": "Previous send",
       "reverted": "The transaction failed (reverted). No payment was made.",
-      "unknown": "We can't confirm the result yet.",
+      "unknown": "We can't confirm the result yet. To avoid charging the same checkout twice if it went through, you can't show the next QR until it's confirmed. Check it with “View transaction”, then close this.",
+      "unknownPrevious": "We can't confirm the result yet. Check it with “View transaction”.",
+      "unknownAck": "I checked the transaction (close)",
+      "failed": "The transaction didn't go through. No payment was made.",
       "checkNow": "Check now",
       "notSent": {
         "expiring": "Not sent because the signature is about to expire.",

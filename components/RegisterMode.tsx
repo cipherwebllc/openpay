@@ -985,7 +985,7 @@ function RegisterModeContent({
       </div>
 
       {/* お店の端末のガス用ウォレット (flag OFF では出さない・plans/store-gas-wallet.md)。 */}
-      {env.enableStoreGasWallet && (storeDeviceForSale || sdSaleBlocked || (sdEnabled && sdState.phase !== 'idle' && !qrModalOpen)) && (
+      {env.enableStoreGasWallet && (storeDeviceForSale || sdSaleBlocked || (sdState.phase !== 'idle' && !qrModalOpen)) && (
         <div className="space-y-2">
           {storeDeviceForSale && (
             <p className="text-xs font-semibold text-emerald-800">{t('storeDevice.badge')}</p>
@@ -995,7 +995,8 @@ function RegisterModeContent({
               {t(`storeDevice.saleBlocked.${sdSaleBlocked}`, { chain: chainNameForId(sdChainId) ?? '' })}
             </p>
           )}
-          {sdEnabled && !qrModalOpen && storeDeviceStatus}
+          {/* 切替を OFF にしても、送っている・結果を待っている支払いの表示は残す (次の QR を出せない理由)。 */}
+          {sdState.phase !== 'idle' && !qrModalOpen && storeDeviceStatus}
         </div>
       )}
       {env.enableStoreGasWallet && (
@@ -1044,7 +1045,7 @@ function RegisterModeContent({
           }}
           convertExpired={storeQrDimmed}
           payModeBadge={storeQrActive ? { text: t('storeDevice.badge'), tone: 'gasless' } : undefined}
-          deviceStatus={sdEnabled && sdState.phase !== 'idle' ? storeDeviceStatus : undefined}
+          deviceStatus={env.enableStoreGasWallet && sdState.phase !== 'idle' ? storeDeviceStatus : undefined}
           qrValue={qrValue}
           qrRef={qrRef}
           storeName={settings.storeName.trim() || t('qrPosterDefaultStoreName')}
