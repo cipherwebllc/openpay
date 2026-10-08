@@ -206,7 +206,7 @@ describe('directory query pure functions', () => {
     expect(directoryStats(DIRECTORY_ENTRIES)).toEqual({
       entryCount: publishedDirectoryEntries(DIRECTORY_ENTRIES).length,
       categoryCount: directoryCategoryCounts(DIRECTORY_ENTRIES).length,
-      lastUpdated: '2026-09-25', // 週次更新 (第 6 回・jpyc-ex の UPBOND Wallet 対応 9/25)
+      lastUpdated: '2026-10-06', // 週次更新 (第 7 回・jpyc-ex のマイナウォレット連携 10/06)
     });
   });
 

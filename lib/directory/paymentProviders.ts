@@ -233,4 +233,23 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     sourceUrl: 'https://www.lawson.co.jp/company/news/detail/1530711_2504.html',
     verifiedAt: '2026-09-29',
   },
+  {
+    // 2026-10-08 の第 7 回週次更新で追跡開始。KDDI ニュースルーム: 2026-09-30 13:00 提供開始。
+    // JPYC を au PAY 残高 (前払式支払手段) にチャージして au PAY 加盟店で使う wallet 型 (Mina Wallet 行と同じ型)。
+    // WBTC・ETH は非ステーブルコインなので assets に入れない。チェーン・精算通貨・手数料は記載なし → [] / null。
+    provider: 'αU wallet (KDDI / au Coincheck Digital Assets / HashPort)',
+    stage: 'commercial',
+    assets: ['JPYC'],
+    chains: [],
+    settlementCurrency: null,
+    merchantFee: null,
+    integrations: ['wallet'],
+    posIntegration: null,
+    region: 'Japan',
+    announcedAt: '2026-09-30',
+    startedAt: '2026-09-30',
+    plannedPeriod: null,
+    sourceUrl: 'https://newsroom.kddi.com/news/detail/kddi_nr-1182_4741.html',
+    verifiedAt: '2026-10-08',
+  },
 ];
