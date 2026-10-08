@@ -4,7 +4,7 @@
 // 未接続なら接続ボタン、接続済みならサインインボタン、失敗したら赤の 1 行。見た目と言葉を全タブで揃える。
 // 署名される文面 (statement) は呼び出し側のまま受け取る (SIWE の流れと署名内容は変えない)。
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import { useAccount } from 'wagmi';
 import { ConnectButton } from '@/components/ConnectButton';
@@ -29,6 +29,15 @@ export function SignInGate({
   const { signIn, isSigningIn, signInError } = useSiweSession();
   // 未接続のときもボタンは 1 つ (押すとウォレットの一覧を開く)。同じページに入口が 2 つあっても一覧を並べない。
   const [showWallets, setShowWallets] = useState(false);
+  // 押した「ウォレットを接続」は一覧に置き換わって消えるので、focus を一覧の先頭へ移す (キーボード操作で
+  // focus が body に落ちて行き先を見失わない)。ウォレットの検出が遅れてボタンがまだ無ければ一覧の枠へ。
+  const walletsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showWallets) return;
+    const box = walletsRef.current;
+    const first = box?.querySelector<HTMLElement>('button, a[href]');
+    (first ?? box)?.focus();
+  }, [showWallets]);
   return (
     <div className={className}>
       {prompt ? <p className="text-sm text-slate-600">{prompt}</p> : null}
@@ -50,7 +59,9 @@ export function SignInGate({
         // (ConnectButton はウォレットの数だけボタンを並べるので、押したときだけ開く)。
         <div className={prompt ? 'mt-3' : ''}>
           {showWallets ? (
-            <ConnectButton variant="secondary" />
+            <div ref={walletsRef} tabIndex={-1} className="outline-none">
+              <ConnectButton variant="secondary" />
+            </div>
           ) : (
             <>
               <button
