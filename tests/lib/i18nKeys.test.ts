@@ -273,9 +273,7 @@ describe('i18n: 非公開 tip message の namespace / privacy disclosure', () =>
   const RECEIVE_KEYS = [
     'tipInboxTitle',
     'tipInboxDescription',
-    'tipInboxSignInRequired',
     'tipInboxSignInCta',
-    'tipInboxSignInError',
     'tipInboxLoading',
     'tipInboxError',
     'tipInboxRetry',

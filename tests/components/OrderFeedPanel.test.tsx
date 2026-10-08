@@ -14,6 +14,15 @@ const h = vi.hoisted(() => ({
   feedStatus: 200,
   handles: [] as unknown[], // GET /api/handle (営業中の操作 用所有 handle)
   calls: [] as unknown[],
+  isConnected: true,
+}));
+
+// サインインの入口 (SignInGate) は接続状態で出し分ける: 未接続 = 接続ボタン / 接続済み = サインインボタン。
+vi.mock('wagmi', () => ({
+  useAccount: () => ({ isConnected: h.isConnected, address: h.isConnected ? ADDR : undefined }),
+}));
+vi.mock('@/components/ConnectButton', () => ({
+  ConnectButton: () => <button type="button">Connect wallet</button>,
 }));
 
 vi.mock('@/hooks/useSiweSession', () => ({
@@ -76,6 +85,7 @@ function jsonRes(body: unknown, status = 200) {
 
 beforeEach(() => {
   h.isSignedIn = true;
+  h.isConnected = true;
   h.feedOk = true;
   h.orders = [];
   h.feedStatus = 200;
@@ -129,7 +139,18 @@ describe('OrderFeedPanel', () => {
   it('未サインイン → サインイン導線 (受注は取得しない)', () => {
     h.isSignedIn = false;
     render();
-    expect(screen.getByText('受取ウォレットでサインイン')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '受取ウォレットでサインイン' })).toBeInTheDocument();
+  });
+
+  it('未接続なら押しても進まないサインインボタンは出さず、先に接続へ誘導する', () => {
+    h.isSignedIn = false;
+    h.isConnected = false;
+    render();
+    expect(screen.getByText('接続すると、サインインできます。')).toBeInTheDocument();
+    // 未接続はボタン 1 つ (押すとウォレットの一覧を開く)。
+    fireEvent.click(screen.getByRole('button', { name: 'ウォレットを接続' }));
+    expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '受取ウォレットでサインイン' })).toBeNull();
   });
 
   it('サインイン後 + 受注あり → テーブル・明細・実着金額を描画', async () => {
@@ -139,6 +160,12 @@ describe('OrderFeedPanel', () => {
     expect(screen.getByText('水 × 2')).toBeInTheDocument();
     expect(screen.getByText('1')).toBeInTheDocument(); // 実着金 1 JPYC (formatUnits)
     expect(screen.getByRole('button', { name: '対応済みにする' })).toBeInTheDocument();
+  });
+
+  it('実着金額は桁区切りで表示する (表示だけ・1650 → 1,650)', async () => {
+    h.orders = [{ ...order, amount: '1650000000000000000000' }];
+    render();
+    expect(await screen.findByText('1,650')).toBeInTheDocument();
   });
 
   it('呼び出しを受注一覧の先頭セクションに表示し「対応した」を POST', async () => {

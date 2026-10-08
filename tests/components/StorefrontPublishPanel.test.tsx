@@ -106,7 +106,9 @@ describe('StorefrontPublishPanel', () => {
     h.isConnected = false;
     vi.stubGlobal('fetch', vi.fn());
     renderPanel();
-    expect(screen.getByText('まずウォレットを接続してください。接続後にサインインして公開できます。')).toBeInTheDocument();
+    expect(screen.getByText('接続すると、サインインできます。')).toBeInTheDocument();
+    // 未接続はボタン 1 つ (押すとウォレットの一覧を開く)。
+    fireEvent.click(screen.getByRole('button', { name: 'ウォレットを接続' }));
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument();
     expect(screen.queryByText('サインインして公開')).not.toBeInTheDocument();
   });

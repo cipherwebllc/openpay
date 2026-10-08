@@ -131,6 +131,23 @@ describe('MobileOrderView', () => {
     ]);
   });
 
+  it('アバターが無いときの頭文字は先頭の記号を飛ばす (「（店名未設定）」で「（」を出さない)', () => {
+    const initial = (shopName: string) => {
+      const { container, unmount } = renderWithIntl(
+        <MobileOrderView config={{ ...config, shopName, avatar: undefined }} />,
+      );
+      const text = container.querySelector('h1')?.previousElementSibling?.textContent ?? '';
+      unmount();
+      return text;
+    };
+    expect(initial('（店名未設定）')).toBe('店');
+    expect(initial('「OpenPay」カフェ')).toBe('O');
+    expect(initial('☕ Cafe')).toBe('☕');
+    expect(initial('テスト珈琲店')).toBe('テ');
+    // 記号だけの名前は既定のアイコン (頭文字にできる字が無い)。
+    expect(initial('「」')).toBe('🏪');
+  });
+
   it('店舗名 + 受取チェーン + メニュー (名前/価格) を描画', () => {
     renderWithIntl(<MobileOrderView config={config} />);
     expect(screen.getByText('テスト珈琲店')).toBeInTheDocument();

@@ -115,6 +115,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'RegisterMode',
     'Scan',
     'ShopLive',
+    'SignInGate',
     'SignReassurance',
     'SmartAccountFallback',
     'StoreCatalog',

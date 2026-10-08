@@ -12,11 +12,13 @@ import { useMemo, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatUnits } from 'viem';
+import { groupAmountDigits } from '@/lib/amount';
 import { CheckCircle2, ChefHat, Clock, RefreshCw, RotateCcw, UtensilsCrossed } from 'lucide-react';
 import { env } from '@/lib/env';
 import { fetchOrderFeed, orderFeedQueryKey } from '@/hooks/useOrderFeed';
 import { useOrderCalls } from '@/hooks/useOrderCalls';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { SignInGate } from '@/components/SignInGate';
 import { ShopLivePanel } from '@/components/ShopLivePanel';
 import { OrderOperatorTokenPanel } from '@/components/OrderOperatorTokenPanel';
 import { txExplorerUrl } from '@/lib/chains';
@@ -43,7 +45,7 @@ export function OrderFeedPanel() {
   const tF = useTranslations('OrderFulfillment'); // 厨房/ホール導線ラベル
   const tLive = useTranslations('ShopLive'); // 営業中の操作 見出し
   const locale = useLocale();
-  const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } = useSiweSession();
+  const { isSignedIn, sessionAddress } = useSiweSession();
   const qc = useQueryClient();
 
   // 営業中の操作 (ShopLivePanel) 用の所有 handle (公開済み店舗のみ)。enableShopLive のときだけ取得。
@@ -100,12 +102,13 @@ export function OrderFeedPanel() {
     const amountWarningClass = o.amountMismatch
       ? 'bg-red-600 text-white'
       : 'border border-amber-300 bg-amber-50 text-amber-800';
-    const formattedAmount = formatUnits(BigInt(o.amount), JPYC_DECIMALS);
+    // 表示だけ桁区切り (1,650)。検証済みの実着金額そのものは変えない。
+    const formattedAmount = groupAmountDigits(formatUnits(BigInt(o.amount), JPYC_DECIMALS));
     const declaredAmount = o.amountMismatch
       ? declaredItemsTotalMinor(o.items, JPYC_DECIMALS)
       : null;
     const formattedDeclaredAmount =
-      declaredAmount !== null ? formatUnits(declaredAmount, JPYC_DECIMALS) : null;
+      declaredAmount !== null ? groupAmountDigits(formatUnits(declaredAmount, JPYC_DECIMALS)) : null;
     return (
       <li
         key={o.txHash}
@@ -252,17 +255,8 @@ export function OrderFeedPanel() {
       )}
 
       {!isSignedIn ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center">
-          <p className="text-sm text-slate-600">{t('signInPrompt')}</p>
-          <button
-            type="button"
-            onClick={() => signIn(t('signInStatement'))}
-            disabled={isSigningIn}
-            className="mt-3 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
-          >
-            {isSigningIn ? t('signingIn') : t('signIn')}
-          </button>
-          {signInError && <p className="mt-2 text-xs text-red-600">{t('signInError')}</p>}
+        <div className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
+          <SignInGate statement={t('signInStatement')} cta={t('signIn')} prompt={t('signInPrompt')} />
         </div>
       ) : (
         <div className="space-y-3">

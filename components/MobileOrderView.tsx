@@ -105,9 +105,15 @@ function generateOrderCode(): string {
 }
 
 // アバター読込失敗/未設定時のフォールバック頭文字 (@handle と同じくコードポイント単位)。
+// 先頭の記号 (括弧・「」・句読点・空白) は飛ばし、最初の文字・数字・絵文字を出す (「（店名未設定）」→「店」・
+// 「（株）〇〇」→「株」)。Unicode プロパティ (\p{…}) は古いブラウザ (Firefox 77 以前) で正規表現の構文エラーになり、
+// 公開の注文ページごと壊れるので使わない (飛ばす記号を列挙する)。
+const LEADING_SYMBOLS = new Set([
+  ...'()（）[]［］{}｛｝<>＜＞〈〉《》「」『』【】〔〕"＂\'＇`・･、。,，.．:：;；!！?？~〜—_＿/／\\＼|｜*＊#＃@＠&＆+＋=＝%％$＄^',
+]);
 function initialOf(name: string): string {
-  const n = name.trim();
-  return n ? ([...n][0] ?? '').toUpperCase() : '🏪';
+  const first = [...name.trim()].find((c) => c.trim() !== '' && !LEADING_SYMBOLS.has(c));
+  return first ? first.toUpperCase() : '🏪';
 }
 
 // テーマ色 (config.accent) 未設定時のブランド既定 (= tailwind brand.DEFAULT)。

@@ -111,10 +111,12 @@ describe('HandleClaimPanel', () => {
     h.walletAddress = address;
     h.signInError = 'wallet_not_connected';
     renderPanel(null);
-    expect(screen.getByText('まずウォレットを接続してください。接続後にサインインして取得できます。')).toBeInTheDocument();
+    expect(screen.getByText('接続すると、サインインできます。')).toBeInTheDocument();
+    // 未接続はボタン 1 つ (押すとウォレットの一覧を開く)。
+    fireEvent.click(screen.getByRole('button', { name: 'ウォレットを接続' }));
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'サインインして取得' })).not.toBeInTheDocument();
-    expect(screen.queryByText('サインインに失敗しました。ウォレットで署名を承認してから、もう一度お試しください。')).not.toBeInTheDocument();
+    expect(screen.queryByText('サインインできませんでした。ウォレットで署名を承認して、もう一度お試しください。')).not.toBeInTheDocument();
   });
 
   it('flag OFF → 何も描画しない (inert)', () => {

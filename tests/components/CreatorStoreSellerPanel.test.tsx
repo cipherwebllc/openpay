@@ -240,10 +240,12 @@ describe('CreatorStoreSellerPanel', () => {
     state.walletAddress = address;
     state.signInError = 'wallet_not_connected';
     renderPanel();
-    expect(screen.getByText('まずウォレットを接続してください。接続後にログインして管理できます。')).toBeInTheDocument();
+    expect(screen.getByText('接続すると、サインインできます。')).toBeInTheDocument();
+    // 未接続はボタン 1 つ (押すとウォレットの一覧を開く)。
+    fireEvent.click(screen.getByRole('button', { name: 'ウォレットを接続' }));
     expect(screen.getByRole('button', { name: 'Connect wallet' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'ログインして管理' })).not.toBeInTheDocument();
-    expect(screen.queryByText('ログインに失敗しました。ウォレットで署名を承認してから、もう一度お試しください。')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'サインインして管理' })).not.toBeInTheDocument();
+    expect(screen.queryByText('サインインできませんでした。ウォレットで署名を承認して、もう一度お試しください。')).not.toBeInTheDocument();
   });
 
   it('client flag OFF は何も描画せず API にも到達しない', () => {
@@ -264,7 +266,7 @@ describe('CreatorStoreSellerPanel', () => {
 
     renderPanel();
     fireEvent.click(
-      screen.getByRole('button', { name: 'ログインして管理' }),
+      screen.getByRole('button', { name: 'サインインして管理' }),
     );
 
     expect(signIn).toHaveBeenCalledWith(
