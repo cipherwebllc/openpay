@@ -320,7 +320,7 @@ describe('ガス代の上限はチェーンごと (ネイティブ通貨の単�
 });
 
 describe('createDeviceIo の「いま」(期限の判定)', () => {
-  const io = () => createDeviceIo({ chainId: 43113, token: JPYC, forwarder: FWD, gasAddress: SHOP });
+  const io = (chainId = 43113) => createDeviceIo({ chainId, token: JPYC, forwarder: FWD, gasAddress: SHOP });
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(Number(NOW) * 1000));
@@ -337,6 +337,12 @@ describe('createDeviceIo の「いま」(期限の判定)', () => {
   it('ブロック時刻が端末の時計より進んでいればブロック時刻を使う', async () => {
     rpcHold.blockTime = NOW + 5n;
     expect(await io().chainNowSec()).toBe(NOW + 5n);
+  });
+
+  it('Avalanche 以外 (Amoy・Kairos) はブロック時刻だけ (端末の時計が進んでいても、まだ送れる署名を止めない)', async () => {
+    rpcHold.blockTime = NOW - 40n;
+    expect(await io(80002).chainNowSec()).toBe(NOW - 40n);
+    expect(await io(1001).chainNowSec()).toBe(NOW - 40n);
   });
 });
 

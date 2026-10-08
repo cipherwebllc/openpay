@@ -39,6 +39,7 @@ import { hasMatchingForwarderSettlement } from '@/lib/relay/forwarderSettledEven
 import { classifySendError } from '@/lib/relay/selfHostRelayer';
 import { readStoreGasWalletKey, withStoreGasWalletLock } from '@/lib/storeGasWallet';
 import { chainObjectForId } from '@/lib/chains';
+import { avalanche, avalancheFuji } from 'viem/chains';
 import {
   STORE_DEVICE_CLOCK_SKEW_SEC,
   STORE_DEVICE_FEE_WEI,
@@ -424,6 +425,9 @@ export type DeviceWatchIo = {
  * レジ端末の送信と確認に使う IO を組む。鍵は signTx の中で送る直前にだけ読み、戻り値にも state にも載せない。
  * 別タブとの直列化はガス用ウォレットの Web Locks (「残りを戻す」と同じロック = nonce を取り合わない)。
  */
+// tx が無いとブロックが出ないチェーン (最新ブロックの時刻が数十秒古いことがある)。
+const STALE_BLOCK_TIME_CHAINS: ReadonlySet<number> = new Set([avalanche.id, avalancheFuji.id]);
+
 export function createDeviceIo(input: {
   chainId: number;
   token: Address;
@@ -435,10 +439,12 @@ export function createDeviceIo(input: {
   const client = createPublicClient({ chain, transport: transportForChain(chain.id) });
   const { token, forwarder, gasAddress } = input;
   return {
-    // 期限の判定の「いま」は最新ブロックの時刻と端末の時計の遅い方 (Avalanche は tx が無いとブロックが出ず、
-    // 最新ブロックの時刻が数十秒古いことがある = 期限ぎりぎりの署名を送って revert にガスを捨てない)。
+    // 期限の判定の「いま」は最新ブロックの時刻。Avalanche だけは端末の時計との遅い方 (tx が無いとブロックが出ず、
+    // 最新ブロックの時刻が数十秒古いことがある = 期限ぎりぎりの署名を送って revert にガスを捨てない)。他のチェーンは
+    // ブロックが数秒おきに出るので端末の時計を混ぜない (時計の進んだ端末で、まだ送れる署名を止めない)。
     chainNowSec: async () => {
       const blockTime = (await client.getBlock({ blockTag: 'latest' })).timestamp;
+      if (!STALE_BLOCK_TIME_CHAINS.has(chain.id)) return blockTime;
       const deviceTime = BigInt(Math.floor(Date.now() / 1000));
       return blockTime > deviceTime ? blockTime : deviceTime;
     },

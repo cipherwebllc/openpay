@@ -2506,6 +2506,7 @@
       "removeButton": "この端末から消す",
       "removeConfirm": "鍵をこの端末から消します。消したあとは、このアドレスに送られたガス代のトークンを戻せません。",
       "removeConfirmWithBalance": "まだ {amount} 残っています。先に「残りを戻す」で戻してください。消すと戻せません。",
+      "removeConfirmUnread": "残高を読めていないチェーンがあります。「残高を更新」で確かめてから消してください。",
       "removeYes": "消す",
       "cancel": "やめる",
       "withdrawToHint": "戻し先のウォレットのアドレス (0x...)。コントラクトのアドレスには戻せません。",

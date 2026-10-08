@@ -62,6 +62,8 @@ export function StoreGasWalletPanel({
   const active = g.chains.filter((c) => c.active);
   // 表示するチェーン = 使えるチェーンと、使えないが残高があるチェーン (前に読めた値を含む)。
   const funded = g.chains.filter((c) => c.balance != null && c.balance > 0n);
+  // 一度も読めていないチェーン (残高が分からない)。消す前に知らせる (残っているかもしれない)。
+  const unread = g.chains.some((c) => c.readFailed && c.balance == null);
   const shown = g.chains.filter((c) => c.active || funded.includes(c));
   const chainsLabel = active.map((c) => `${c.chain.name} (${symbolOf(c.chainId)})`).join('・');
   const fundGuide = active.map((c) => `${symbolOf(c.chainId)} ${storeGasFundGuide(c.chainId)}`).join('・');
@@ -121,6 +123,7 @@ export function StoreGasWalletPanel({
             {funded.length > 0
               ? t('storeGasWallet.removeConfirmWithBalance', { amount: amountsLabel })
               : t('storeGasWallet.removeConfirm')}
+            {unread && ` ${t('storeGasWallet.removeConfirmUnread')}`}
           </p>
           <div className="mt-2 flex gap-2">
             <button
@@ -155,7 +158,8 @@ export function StoreGasWalletPanel({
         <span className="ml-2 text-xs font-normal text-slate-500">
           {g.walletState.state === 'ok'
             ? shown
-                .filter((c) => c.balance != null)
+                // 読めていない間は前に読めた値を見出しに出さない (行には「読めませんでした」が出る)
+                .filter((c) => c.balance != null && !c.readFailed)
                 .map((c) => t('storeGasWallet.balanceValue', { amount: formatNative(c.balance!), symbol: symbolOf(c.chainId) }))
                 .join('・')
             : g.walletState.state === 'none'
@@ -227,7 +231,9 @@ export function StoreGasWalletPanel({
           <div className="space-y-1 text-xs">
             {shown.map((c) => {
               const remaining =
-                c.balance != null && c.gasPrice != null ? estimateRemainingSends(c.balance, c.gasPrice) : null;
+                !c.readFailed && c.balance != null && c.gasPrice != null
+                  ? estimateRemainingSends(c.balance, c.gasPrice)
+                  : null;
               return (
                 <div key={c.chainId}>
                   <span className="text-slate-500">

@@ -2506,6 +2506,7 @@
       "removeButton": "Remove from this device",
       "removeConfirm": "Removes the key from this device. Gas tokens sent to this address afterwards can’t be recovered.",
       "removeConfirmWithBalance": "{amount} is still left. Return it first with “Return the remaining balance”. Once removed, it can’t be recovered.",
+      "removeConfirmUnread": "The balance on some chains couldn’t be read. Check it with “Refresh balance” before removing.",
       "removeYes": "Remove",
       "cancel": "Cancel",
       "withdrawToHint": "The destination wallet address (0x...). Contract addresses aren't supported.",

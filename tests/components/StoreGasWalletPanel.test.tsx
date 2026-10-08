@@ -202,12 +202,23 @@ describe('StoreGasWalletPanel', () => {
     expect(options.map((o) => o.textContent)).toEqual(['Polygon Amoy (POL)', 'Kairos (KAIA)']);
   });
 
-  it('読み取りに失敗しても、前に読めた残高があれば消す前に「先に戻して」を出す', () => {
+  it('読み取りに失敗しても、前に読めた残高があれば消す前に「先に戻して」を出す (見出しと残り回数には古い値を出さない)', () => {
     hold.state = ready({ balance: 10n ** 18n, gasPrice: 1n, readFailed: true });
     render(<StoreGasWalletPanel />);
     expect(screen.getByText('残高を読めませんでした')).toBeTruthy();
+    expect(screen.queryByText('1 POL')).toBeNull();
+    expect(screen.queryByText(/あと約/)).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'この端末から消す' }));
     expect(screen.getByText(/まだ 1 POL 残っています/)).toBeTruthy();
+  });
+
+  it('一度も読めていないチェーンがあれば、消す前にそれを知らせる', () => {
+    hold.state = ready({
+      chains: [chain(AMOY, { balance: 0n, gasPrice: 1n }), chain(KAIROS, { readFailed: true, active: false })],
+    });
+    render(<StoreGasWalletPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'この端末から消す' }));
+    expect(screen.getByText(/残高を読めていないチェーンがあります/)).toBeTruthy();
   });
 
   it('複数チェーン: 消す前の注意は残っているチェーンの額をすべて出す', () => {
