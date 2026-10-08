@@ -4,25 +4,38 @@
 // (POL・KAIA・AVAX) を送る。送るのはお店のウォレット (wagmi) で、ガス用ウォレットの鍵は使わない。
 // 1 回で送れるのは入れておく目安の上限まで (開示どおり「少額だけ入れる」・もっと入れたいときは繰り返す)。
 //
-// 二重に送らない・届く途中の宛先を消さないための決まり:
-//   - 送る直前に、保存されている鍵のアドレスが表示中の宛先と同じかを (鍵のロックの中で) 確かめ、補充の途中の印を置く
-//     (別のタブで作り直された古いアドレスへ送らない・別のタブの「消す」は印を見て止まる)。
-//   - 頼んでから結果 (確定・取り消し・置き換え) が出るまでは、次の送信・チェーンや額の変更をさせない。確定の確認が
-//     失敗しても「途中」のまま (tx へのリンクと確かめ直すボタンを出す)。
-//   - ウォレットで取り消し・別の取引に置き換えられたら「補充しました」と言わない。
+// 二重に送らない・届く途中の宛先を消さないための決まり (操作の記録は lib/storeGasTopUp.ts・タブをまたいで共有):
+//   - 押した瞬間に (描画を待たず) 二度押しを止める。鍵のロックの中で、保存されている鍵が表示中の宛先と同じかを確かめ、
+//     補充の記録を置く (別のタブで作り直された古いアドレスへ送らない・同じ宛先への補充を重ねない)。
+//   - 記録がある間 (ウォレットで確認中・結果待ち) は次の送信・額・チェーンを変えさせず、鍵も消させない。画面を離れて
+//     戻っても記録から続きを見る。確認中は 1 分ごとに記録を延ばす (画面を離れても、確認が終わるまで)。
+//   - 結果は receipt で決める。確認が失敗しても途中のまま (tx へのリンクと「結果を確かめ直す」)。取引が失敗
+//     (revert) しても結果として扱う。ウォレットで取り消し・ガス用ウォレット以外への置き換えなら「補充しました」と
+//     言わない。
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { parseEther, type Address, type Hex } from 'viem';
-import { useAccount, useBalance, useSendTransaction, useSwitchChain, useWaitForTransactionReceipt } from 'wagmi';
-import { nativeSymbolForChainId, txExplorerUrl } from '@/lib/chains';
 import {
-  clearStoreGasTopUp,
-  loadStoreGasWallet,
-  markStoreGasTopUp,
-  storeGasFundRange,
-  withStoreGasWalletLock,
-} from '@/lib/storeGasWallet';
+  useAccount,
+  useBalance,
+  usePublicClient,
+  useSendTransaction,
+  useSwitchChain,
+  useWaitForTransactionReceipt,
+} from 'wagmi';
+import { nativeSymbolForChainId, txExplorerUrl } from '@/lib/chains';
+import { loadStoreGasWallet, storeGasFundRange, withStoreGasWalletLock } from '@/lib/storeGasWallet';
+import {
+  STORE_GAS_TOPUP_KEY,
+  TOPUP_HEARTBEAT_MS,
+  attachStoreGasTopUpHash,
+  finishStoreGasTopUp,
+  liveStoreGasTopUps,
+  reserveStoreGasTopUp,
+  touchStoreGasTopUp,
+  type StoreGasTopUpRecord,
+} from '@/lib/storeGasTopUp';
 import { isUserRejection } from '@/lib/walletErrors';
 import type { StoreGasChainState } from '@/hooks/useStoreGasWallet';
 
@@ -33,6 +46,8 @@ const AMOUNT_ID = 'store-gas-topup-amount';
 const CHAIN_ID = 'store-gas-topup-chain';
 // 10 進の数 (18 桁まで)。
 const DECIMAL = /^\d+(\.\d{1,18})?$/;
+// 記録の読み直し (別のタブの変化は storage イベントでも届く・途中の間だけ)。
+const RELOAD_MS = 3_000;
 
 type AmountCheck = { ok: true; wei: bigint } | { ok: false; reason: 'invalid' | 'too_much' };
 
@@ -45,15 +60,11 @@ function checkAmount(raw: string, max: string): AmountCheck {
   return { ok: true, wei };
 }
 
-type Phase =
-  | { kind: 'idle' }
-  // ウォレットで確認中 (まだ tx が無い)
-  | { kind: 'approving'; chainId: number }
-  // 送った・結果待ち (確定の確認が失敗しても、ここに留まる)
-  | { kind: 'sent'; chainId: number; hash: Hex }
-  | { kind: 'done'; chainId: number; hash: Hex; result: 'success' | 'reverted' | 'cancelled' | 'replaced' };
+const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
-type LocalError = 'wallet_changed' | 'storage' | 'failed';
+type Result = { chainId: number; hash: Hex; result: 'success' | 'reverted' | 'cancelled' | 'replaced' };
+type LocalError = 'wallet_changed' | 'storage' | 'busy' | 'failed';
+type Replacement = { reason: 'cancelled' | 'replaced' | 'repriced'; to: Address | null; value: bigint };
 
 export function StoreGasWalletTopUp({
   chains,
@@ -74,25 +85,48 @@ export function StoreGasWalletTopUp({
   const target = chains.find((c) => c.chainId === chainId) ?? chains[0];
   const range = target ? storeGasFundRange(target.chainId) : null;
   const [amount, setAmount] = useState('');
-  const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
+  const [submitting, setSubmitting] = useState(false);
+  const inFlightRef = useRef(false);
+  const ownIdRef = useRef<string | null>(null);
+  const [result, setResult] = useState<Result | null>(null);
   const [localError, setLocalError] = useState<LocalError | null>(null);
-  // ウォレットでの置き換え (速くする・取り消す・別の取引)。確定の結果の見分けに使う。
-  const replacedRef = useRef<{ reason: 'cancelled' | 'replaced' | 'repriced' } | null>(null);
+  const replacedRef = useRef<Replacement | null>(null);
+  const finishedRef = useRef(new Set<string>());
+
+  // この宛先への途中の補充 (このタブ・別のタブ・画面を離れる前)。記録から続きを見る。
+  const [op, setOp] = useState<StoreGasTopUpRecord | null>(null);
+  const reload = useCallback(() => {
+    setOp(liveStoreGasTopUps(gasAddress)[0] ?? null);
+  }, [gasAddress]);
+  useEffect(() => {
+    reload();
+    function onStorage(e: StorageEvent) {
+      if (e.key === STORE_GAS_TOPUP_KEY || e.key === null) reload();
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [reload]);
+  useEffect(() => {
+    if (!op) return;
+    const timer = setInterval(reload, RELOAD_MS);
+    return () => clearInterval(timer);
+  }, [op, reload]);
 
   const { address: wallet, isConnected, chainId: walletChainId } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
   const { data: balance } = useBalance({ address: wallet, chainId: target?.chainId });
   const { sendTransactionAsync } = useSendTransaction();
-  const sent = phase.kind === 'sent' ? phase : null;
+  const watching = op?.hash ? (op as StoreGasTopUpRecord & { hash: Hex }) : null;
   const receipt = useWaitForTransactionReceipt({
-    hash: sent?.hash,
-    chainId: sent?.chainId,
+    hash: watching?.hash,
+    chainId: watching?.chainId,
     onReplaced: (r) => {
-      replacedRef.current = { reason: r.reason };
+      replacedRef.current = { reason: r.reason, to: r.transaction.to, value: r.transaction.value };
     },
   });
+  const publicClient = usePublicClient({ chainId: watching?.chainId });
 
-  const pending = phase.kind === 'approving' || phase.kind === 'sent';
+  const pending = submitting || op !== null;
   useEffect(() => {
     onPendingChange?.(pending);
   }, [pending, onPendingChange]);
@@ -104,62 +138,101 @@ export function StoreGasWalletTopUp({
     if (rangeMin) setAmount(rangeMin);
   }, [targetId, rangeMin]);
 
-  // 結果が出たら印を外し、1 回だけ残高を読み直す。
+  // 結果が出たら記録を片付け、1 回だけ残高を読み直す。
+  const finalize = useCallback(
+    async (rec: StoreGasTopUpRecord & { hash: Hex }, status: 'success' | 'reverted', txHash: Hex) => {
+      if (finishedRef.current.has(rec.id)) return;
+      finishedRef.current.add(rec.id);
+      const rep = replacedRef.current;
+      const toGas = !!rep?.to && same(rep.to, gasAddress) && rep.value > 0n;
+      const outcome: Result['result'] =
+        rep?.reason === 'cancelled'
+          ? 'cancelled'
+          : rep?.reason === 'replaced' && !toGas
+            ? 'replaced'
+            : status;
+      await withStoreGasWalletLock(async () => finishStoreGasTopUp(rec.id));
+      setResult({ chainId: rec.chainId, hash: txHash, result: outcome });
+      reload();
+      onDone();
+    },
+    [gasAddress, reload, onDone],
+  );
   const receiptData = receipt.data;
   useEffect(() => {
-    if (phase.kind !== 'sent' || !receiptData) return;
-    const rep = replacedRef.current;
-    const result =
-      rep?.reason === 'cancelled'
-        ? 'cancelled'
-        : rep?.reason === 'replaced'
-          ? 'replaced'
-          : receiptData.status === 'success'
-            ? 'success'
-            : 'reverted';
-    clearStoreGasTopUp(gasAddress);
-    setPhase({ kind: 'done', chainId: phase.chainId, hash: receiptData.transactionHash, result });
-    onDone();
-  }, [phase, receiptData, gasAddress, onDone]);
+    if (watching && receiptData) void finalize(watching, receiptData.status, receiptData.transactionHash);
+  }, [watching, receiptData, finalize]);
+
+  // 確定の確認が失敗した (取引の失敗 = revert でも wagmi は失敗を返す・RPC の障害)。receipt を直接読み、
+  // あれば結果にする (無ければ途中のまま)。
+  const checkAgain = useCallback(async () => {
+    if (!watching || !publicClient) return;
+    try {
+      const r = await publicClient.getTransactionReceipt({ hash: watching.hash });
+      await finalize(watching, r.status, r.transactionHash);
+    } catch {
+      // まだ見つからない・読めない。途中のまま (もう一度確かめられる)。
+    }
+  }, [watching, publicClient, finalize]);
+  const receiptFailed = receipt.isError;
+  useEffect(() => {
+    if (receiptFailed) void checkAgain();
+  }, [receiptFailed, checkAgain]);
 
   if (!target || !range) return null;
   const symbol = nativeSymbolForChainId(target.chainId) ?? '';
   const check = checkAmount(amount, range.max);
   const wrongChain = isConnected && walletChainId !== target.chainId;
-  const sameAddress = !!wallet && wallet.toLowerCase() === gasAddress.toLowerCase();
+  const sameAddress = !!wallet && same(wallet, gasAddress);
   const insufficient = check.ok && balance !== undefined && check.wei > balance.value;
   const canSend = isConnected && !wrongChain && !sameAddress && check.ok && !insufficient && !pending;
 
   async function onSend() {
-    if (!canSend || !check.ok || !target) return;
+    // 押した瞬間に止める (描画やロック待ちの間の二度押しで 2 回送らない)。
+    if (!canSend || !check.ok || !target || inFlightRef.current) return;
+    inFlightRef.current = true;
+    setSubmitting(true);
     const sendChainId = target.chainId;
     const value = check.wei;
     setLocalError(null);
-    // 送る直前に、保存されている鍵が表示中の宛先と同じかを確かめ、補充の途中の印を置く (鍵のロックの中で)。
-    const ready = await withStoreGasWalletLock(async (): Promise<'ok' | LocalError> => {
-      const current = loadStoreGasWallet();
-      if (current.state !== 'ok' || current.info.address.toLowerCase() !== gasAddress.toLowerCase()) {
-        return 'wallet_changed';
-      }
-      return markStoreGasTopUp(gasAddress) ? 'ok' : 'storage';
-    });
-    if (ready !== 'ok') {
-      setLocalError(ready);
-      return;
-    }
-    replacedRef.current = null;
-    setPhase({ kind: 'approving', chainId: sendChainId });
-    let hash: Hex;
+    setResult(null);
     try {
-      hash = await sendTransactionAsync({ to: gasAddress, value, chainId: sendChainId });
-    } catch (e) {
-      // 送っていない (ウォレットで断った・送る前の失敗)。印を外して元に戻す。
-      clearStoreGasTopUp(gasAddress);
-      setPhase({ kind: 'idle' });
-      if (!isUserRejection(e)) setLocalError('failed');
-      return;
+      const reserved = await withStoreGasWalletLock(async () => {
+        const current = loadStoreGasWallet();
+        if (current.state !== 'ok' || !same(current.info.address, gasAddress)) {
+          return { ok: false as const, reason: 'wallet_changed' as const };
+        }
+        return reserveStoreGasTopUp(gasAddress, sendChainId);
+      });
+      if (!reserved.ok) {
+        setLocalError(reserved.reason);
+        return;
+      }
+      const id = reserved.id;
+      ownIdRef.current = id;
+      replacedRef.current = null;
+      reload();
+      // 確認中は記録を延ばす (画面を離れても、確認が終わるまで)。
+      const heartbeat = setInterval(() => {
+        void withStoreGasWalletLock(async () => touchStoreGasTopUp(id));
+      }, TOPUP_HEARTBEAT_MS);
+      try {
+        const hash = await sendTransactionAsync({ to: gasAddress, value, chainId: sendChainId });
+        await withStoreGasWalletLock(async () =>
+          attachStoreGasTopUpHash({ id, address: gasAddress, chainId: sendChainId }, hash),
+        );
+      } catch (e) {
+        // 送っていない (ウォレットで断った・送る前の失敗)。記録を片付ける。
+        await withStoreGasWalletLock(async () => finishStoreGasTopUp(id));
+        if (!isUserRejection(e)) setLocalError('failed');
+      } finally {
+        clearInterval(heartbeat);
+        reload();
+      }
+    } finally {
+      inFlightRef.current = false;
+      setSubmitting(false);
     }
-    setPhase({ kind: 'sent', chainId: sendChainId, hash });
   }
 
   const inputError = !check.ok
@@ -178,6 +251,8 @@ export function StoreGasWalletTopUp({
       {t('viewTx')}
     </a>
   );
+  // 確認中の記録が別のタブ (または画面を離れる前) のもの。
+  const approvingHere = submitting || (op !== null && !op.hash && op.id === ownIdRef.current);
 
   return (
     <div className="border-t border-slate-100 pt-3">
@@ -198,7 +273,7 @@ export function StoreGasWalletTopUp({
                 onChange={(e) => {
                   setChainId(Number(e.target.value));
                   setLocalError(null);
-                  if (phase.kind === 'done') setPhase({ kind: 'idle' });
+                  setResult(null);
                 }}
                 className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs disabled:opacity-50"
               >
@@ -249,32 +324,32 @@ export function StoreGasWalletTopUp({
               {error}
             </p>
           )}
-          {phase.kind === 'approving' && (
+          {!watching && pending && (
             <p role="status" className="text-slate-600">
-              {t('topUpConfirmInWallet')}
+              {approvingHere ? t('topUpConfirmInWallet') : t('topUpApprovingElsewhere')}
             </p>
           )}
-          {phase.kind === 'sent' &&
+          {watching &&
             (receipt.isError ? (
               <div role="alert" className="text-amber-700">
                 <p>
-                  {t('topUpUnknown')} {txLink(phase.chainId, phase.hash)}
+                  {t('topUpUnknown')} {txLink(watching.chainId, watching.hash)}
                 </p>
-                <button type="button" className={`${BTN} mt-1`} onClick={() => void receipt.refetch()}>
+                <button type="button" className={`${BTN} mt-1`} onClick={() => void checkAgain()}>
                   {t('topUpCheckAgain')}
                 </button>
               </div>
             ) : (
               <p role="status" className="text-slate-600">
-                {t('topUpMining')} {txLink(phase.chainId, phase.hash)}
+                {t('topUpMining')} {txLink(watching.chainId, watching.hash)}
               </p>
             ))}
-          {phase.kind === 'done' && (
+          {result && !pending && (
             <p
-              role={phase.result === 'success' ? 'status' : 'alert'}
-              className={phase.result === 'success' ? 'text-emerald-700' : 'text-red-600'}
+              role={result.result === 'success' ? 'status' : 'alert'}
+              className={result.result === 'success' ? 'text-emerald-700' : 'text-red-600'}
             >
-              {t(`topUpResult.${phase.result}`)} {txLink(phase.chainId, phase.hash)}
+              {t(`topUpResult.${result.result}`)} {txLink(result.chainId, result.hash)}
             </p>
           )}
         </div>

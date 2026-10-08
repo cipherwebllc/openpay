@@ -20,13 +20,13 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { storeDeviceChainIds, storeGasWalletChainIds } from '@/lib/storeDevicePayment';
+import { finishStoreGasTopUp, liveStoreGasTopUps } from '@/lib/storeGasTopUp';
 import {
   STORE_GAS_WITHDRAW_GAS,
   createStoreGasWallet,
   loadStoreGasWallet,
   readStoreGasWalletKey,
   STORE_GAS_WALLET_STORAGE_KEY,
-  hasPendingStoreGasTopUp,
   removeStoreGasWallet,
   requestStoreGasWalletPersistence,
   withStoreGasWalletLock,
@@ -67,6 +67,9 @@ export type StoreGasChainState = {
   gasPrice: bigint | null;
   readFailed: boolean;
 };
+
+// 補充の記録を補充の欄に任せる時間 (これより古い、送った補充の記録は、残高の読み直しのときにここで片付ける)。
+const TOPUP_SETTLE_BY_PANEL_MS = 10 * 60 * 1000;
 
 // 確定待ちの上限 (Polygon・Kaia・Avalanche とも通常数秒)。超えたら「確認中」として残高の更新を促す。
 const RECEIPT_TIMEOUT_MS = 90_000;
@@ -165,6 +168,18 @@ export function useStoreGasWallet() {
       }),
     );
     if (gen !== walletGenRef.current) return;
+    // 送ってから時間のたった補充の結果を片付ける (補充の欄が出ていない間に取引が入っても、記録を外す = 鍵を消せない
+    // 状態を残さない)。新しい記録は補充の欄が結果を出すので触らない (先に片付けて結果の表示を消さない)。
+    for (const op of liveStoreGasTopUps(address)) {
+      const client = op.hash ? clients.get(op.chainId) : undefined;
+      if (!op.hash || !client || Date.now() - op.at < TOPUP_SETTLE_BY_PANEL_MS) continue;
+      try {
+        await client.getTransactionReceipt({ hash: op.hash });
+        await withStoreGasWalletLock(async () => finishStoreGasTopUp(op.id));
+      } catch {
+        // まだ見つからない・読めない。記録は残す (補充の画面が結果を見る)。
+      }
+    }
     // 「不明」の出口: hash があれば receipt で確定/取り消しを確かめる。hash が無い (送信中に切れた) ときは
     // そのチェーンの残高を読めた時点で解除する (残高が残っていれば「消す」の確認で先に戻すよう出る)。
     const unknown = unknownRef.current;
@@ -212,10 +227,16 @@ export function useStoreGasWallet() {
 
   const remove = useCallback(async (): Promise<boolean> => {
     if (removeBlocked) return false;
-    // 接続中のウォレットからの補充が途中 (このタブ・別のタブ) なら消さない (届く途中の補充の宛先の鍵を消さない)。
-    const removed = await withStoreGasWalletLock(async () =>
-      address && hasPendingStoreGasTopUp(address) ? false : removeStoreGasWallet(),
-    );
+    // 消すのは、いま保存されている鍵が表示中のものと同じで、その鍵への補充が途中 (このタブ・別のタブ) でないときだけ
+    // (別のタブで作り直された鍵を古い表示のまま消さない・届く途中の補充の宛先の鍵を消さない)。
+    const removed = await withStoreGasWalletLock(async () => {
+      const current = loadStoreGasWallet();
+      if (current.state !== 'ok' || !address || current.info.address.toLowerCase() !== address.toLowerCase()) {
+        return false;
+      }
+      if (liveStoreGasTopUps(current.info.address).length > 0) return false;
+      return removeStoreGasWallet();
+    });
     // 消えたかどうかは保存状態を読み直して決める (消せなかったのに「未作成」に戻さない)。
     setWalletState(loadStoreGasWallet());
     if (removed) {

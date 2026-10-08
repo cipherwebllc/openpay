@@ -66,47 +66,6 @@ export async function requestStoreGasWalletPersistence(address: Address): Promis
   }
 }
 
-// 「接続中のウォレットから補充」の途中の印 (頼んでから確定・取り消しまで)。別タブの「消す」もこれを見て止まる
-// (届く途中の補充の宛先の鍵を消さない)。タブを閉じても残り続けないよう 30 分で無効にする。
-export const STORE_GAS_TOPUP_KEY = 'openpay:store-gas-wallet:topup:v1';
-const TOPUP_MARK_TTL_MS = 30 * 60 * 1000;
-
-/** 補充の途中の印を置く。置けなければ false (印なしでは別タブの削除を止められない = 補充しない)。 */
-export function markStoreGasTopUp(address: Address, now: number = Date.now()): boolean {
-  try {
-    window.localStorage.setItem(STORE_GAS_TOPUP_KEY, JSON.stringify({ address, at: now }));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** 補充の途中の印を外す (確定・取り消し・送らなかった)。 */
-export function clearStoreGasTopUp(address: Address): void {
-  try {
-    const raw = window.localStorage.getItem(STORE_GAS_TOPUP_KEY);
-    const mark = raw ? (JSON.parse(raw) as { address?: unknown }) : null;
-    if (!mark || mark.address === address) window.localStorage.removeItem(STORE_GAS_TOPUP_KEY);
-  } catch {
-    // 外せなくても 30 分で無効になる (補充の結果の表示は止めない)。
-  }
-}
-
-/**
- * このアドレスへの補充が途中か (印があり 30 分以内)。読めないときは途中とみなす (消す側で使う = 迷ったら消さない)。
- */
-export function hasPendingStoreGasTopUp(address: Address, now: number = Date.now()): boolean {
-  try {
-    const raw = window.localStorage.getItem(STORE_GAS_TOPUP_KEY);
-    if (!raw) return false;
-    const mark = JSON.parse(raw) as { address?: unknown; at?: unknown };
-    if (typeof mark.at !== 'number' || typeof mark.address !== 'string') return false;
-    return mark.address === address && now - mark.at < TOPUP_MARK_TTL_MS;
-  } catch {
-    return true;
-  }
-}
-
 // 端末をまたがない直列化の鍵 (同じ端末の別タブで作る・消す・送るが重ならないように)。
 export const STORE_GAS_WALLET_LOCK = 'openpay:store-gas-wallet';
 

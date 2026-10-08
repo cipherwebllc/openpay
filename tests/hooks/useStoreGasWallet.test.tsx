@@ -82,7 +82,8 @@ vi.mock('@/lib/chains', async (importOriginal) => {
 });
 
 import { useStoreGasWallet } from '@/hooks/useStoreGasWallet';
-import { STORE_GAS_WALLET_STORAGE_KEY, clearStoreGasTopUp, markStoreGasTopUp } from '@/lib/storeGasWallet';
+import { STORE_GAS_WALLET_STORAGE_KEY, createStoreGasWallet } from '@/lib/storeGasWallet';
+import { attachStoreGasTopUpHash, finishStoreGasTopUp, liveStoreGasTopUps, reserveStoreGasTopUp } from '@/lib/storeGasTopUp';
 
 const DEST = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
@@ -297,15 +298,38 @@ describe('useStoreGasWallet', () => {
 
   it('接続中のウォレットからの補充が途中 (別のタブを含む) なら消さない', async () => {
     const { result } = await setup();
-    markStoreGasTopUp(result.current.address!);
+    const r = reserveStoreGasTopUp(result.current.address!, 80002);
+    if (!r.ok) throw new Error('setup');
     await act(async () => {
       expect(await result.current.remove()).toBe(false);
     });
     expect(window.localStorage.getItem(STORE_GAS_WALLET_STORAGE_KEY)).not.toBeNull();
-    clearStoreGasTopUp(result.current.address!);
+    finishStoreGasTopUp(r.id);
     await act(async () => {
       expect(await result.current.remove()).toBe(true);
     });
+  });
+
+  it('別のタブで作り直された鍵は、古い表示のまま消さない (いま保存されている鍵で確かめる)', async () => {
+    const { result } = await setup();
+    window.localStorage.removeItem(STORE_GAS_WALLET_STORAGE_KEY);
+    createStoreGasWallet(); // 別のタブが作り直した (この tab にはまだ届いていない)
+    const recreated = window.localStorage.getItem(STORE_GAS_WALLET_STORAGE_KEY);
+    await act(async () => {
+      expect(await result.current.remove()).toBe(false);
+    });
+    expect(window.localStorage.getItem(STORE_GAS_WALLET_STORAGE_KEY)).toBe(recreated);
+  });
+
+  it('送ってから時間のたった補充の記録は、取引が入っていれば残高の読み直しで片付ける', async () => {
+    const { result } = await setup();
+    const address = result.current.address!;
+    attachStoreGasTopUpHash({ id: 'old', address, chainId: 80002 }, TX as `0x${string}`, Date.now() - 11 * 60_000);
+    attachStoreGasTopUpHash({ id: 'new', address, chainId: 80002 }, TX as `0x${string}`, Date.now());
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(liveStoreGasTopUps(address).map((r) => r.id)).toEqual(['new']); // 新しい記録は補充の欄に任せる
   });
 
   it('別のタブで鍵を消す・作り直すと読み直す (古いアドレスを見せたままにしない)', async () => {

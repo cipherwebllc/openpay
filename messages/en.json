@@ -2532,6 +2532,7 @@
       "topUpSend": "Send {amount} {symbol}",
       "topUpSwitch": "Switch the wallet to {chain}",
       "topUpConfirmInWallet": "Confirm in your wallet…",
+      "topUpApprovingElsewhere": "A top-up is awaiting wallet confirmation on another screen.",
       "topUpMining": "Sending. Waiting for confirmation…",
       "topUpUnknown": "We can’t confirm the result of the sent transaction yet (it may have gone through).",
       "topUpCheckAgain": "Check the result again",
@@ -2547,7 +2548,8 @@
         "insufficient": "The connected wallet doesn’t have enough {symbol}.",
         "failed": "Couldn’t send. Please try again.",
         "wallet_changed": "The gas wallet has changed (for example, recreated in another tab). Reload the page before sending.",
-        "storage": "Can’t send because this device can’t save the top-up record."
+        "storage": "Can’t send because this device can’t save the top-up record.",
+        "busy": "A top-up to this gas wallet is already in progress (possibly on another screen). Try again after it has a result."
       }
     },
     "storeDevice": {
