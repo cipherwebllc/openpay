@@ -33,6 +33,12 @@ vi.mock('@/lib/env', async (importOriginal) => {
     },
   };
 });
+// 対象のチェーン = forwarder を設定したチェーン (Amoy・Kairos)。
+vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/relay/forwarderConfig')>()),
+  jpycForwarderFor: (chainId: number) =>
+    chainId === 80002 || chainId === 1001 ? '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4' : null,
+}));
 // QR の中身 (URL) を読む (お店負担の QR は URL を画面に出さないため)。
 vi.mock('qrcode.react', () => ({
   QRCodeSVG: ({ value }: { value: string }) => <svg data-testid="qr" data-value={value} />,
@@ -59,10 +65,7 @@ vi.mock('@/components/StoreDeviceProvider', () => ({
     setOn: sd.setOn,
     gasAddress: sd.gasAddress,
     setGasAddress: vi.fn(),
-    chainId: 80002,
-    deployment: { decimals: 18, displaySymbol: 'JPYC' },
-    forwarder: '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4',
-    feeReceiver: '0x428483FbA62eDCef1E3a100d3799F6d71759c560',
+    chainIds: [80002, 1001],
     blocked: sd.blocked,
     enabled: sd.enabled,
     device: {
@@ -221,6 +224,17 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       await waitFor(() => expect(JSON.parse(window.localStorage.getItem(KEY)!).storePays).toBe(false));
     });
 
+    it.each([
+      ['polygon', 'POL'],
+      ['kaia', 'KAIA'],
+    ] as const)('注記: ガス用ウォレットに入れるのは選んでいるチェーンの通貨 (%s → %s)', async (chain, symbol) => {
+      const user = userEvent.setup();
+      seed({ chain });
+      render(<QrGenerator />);
+      await openAdvanced(user);
+      expect(screen.getByText(new RegExp(`ガス用ウォレット」に ${symbol} を入れてお使いください`))).toBeTruthy();
+    });
+
     it('JPYC・対象チェーン以外では押せない (理由を出す)', async () => {
       const user = userEvent.setup();
       seed({ storePays: false, token: 'usdc', chain: 'base' });
@@ -240,7 +254,7 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(sd.setOn).toHaveBeenLastCalledWith(true);
       await user.click(btn);
       await waitFor(() => expect(shownQr()).not.toBeNull());
-      expect(sd.start).toHaveBeenCalledWith(VALID, 500n * 10n ** 18n);
+      expect(sd.start).toHaveBeenCalledWith(VALID, 500n * 10n ** 18n, 80002);
       const url = new URL(shownQr()!);
       expect(url.pathname).toBe('/checkout');
       expect(url.searchParams.get('submit')).toBe('store');
@@ -251,6 +265,18 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       if (!parsed.ok) return;
       expect(parsed.params.items).toEqual([{ name: 'お支払い', qty: 1, price: '500' }]);
       expect(parsed.params.mode).toBe('gasless');
+    });
+
+    it('Kaia を選んでいれば、受け渡しも QR も Kaia (QR の写しと同じチェーンで作る)', async () => {
+      const user = userEvent.setup();
+      seed({ chain: 'kaia' });
+      const [btn] = await ready(user);
+      await user.click(btn);
+      await waitFor(() => expect(shownQr()).not.toBeNull());
+      expect(sd.start).toHaveBeenCalledWith(VALID, 500n * 10n ** 18n, 1001);
+      const url = new URL(shownQr()!);
+      expect(url.searchParams.get('chain')).toBe('kaia');
+      expect(parseCheckoutParams(url.searchParams)).toMatchObject({ ok: true, params: { submit: 'store', handoffId: HS } });
     });
 
     it('商品名・メモ・税率・店名を引き継ぐ', async () => {

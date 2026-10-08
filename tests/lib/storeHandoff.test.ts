@@ -98,7 +98,7 @@ let used: boolean;
 function deps(over: Partial<HandoffDeps> = {}): HandoffDeps {
   return {
     store,
-    expectedChainId: CHAIN,
+    isAllowedChain: (id) => id === CHAIN,
     nowSec: () => NOW,
     expectedFeeValue: 1n,
     maxValue: 50_000n * 10n ** 18n,

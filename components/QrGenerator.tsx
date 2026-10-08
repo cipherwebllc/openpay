@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import { useTranslations } from 'next-intl';
 import dynamic from 'next/dynamic';
 import type { Address } from 'viem';
-import { formatUnits, getAddress, parseUnits } from 'viem';
+import { getAddress, parseUnits } from 'viem';
 import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
 import { PwaInstallHint } from './PwaInstallHint';
@@ -59,8 +59,12 @@ import { pickEffectiveAddress, shortAddress, formatTokenAmount } from '@/lib/for
 import { useIncomingPaymentWatch } from '@/hooks/useIncomingPaymentWatch';
 import { useStoreDeviceMode } from '@/components/StoreDeviceProvider';
 import { env } from '@/lib/env';
-import { chainNameForId } from '@/lib/chains';
-import { STORE_DEVICE_MIN_AMOUNT_WEI } from '@/lib/storeDevicePayment';
+import {
+  STORE_DEVICE_MIN_AMOUNT_WEI,
+  formatStoreDeviceAmount,
+  storeDeviceChainConfig,
+  storeDeviceChainNames,
+} from '@/lib/storeDevicePayment';
 import { storePaysActive, storePaysRequested } from '@/lib/storePaysMode';
 import { truncateAmount } from '@/lib/amount';
 
@@ -319,6 +323,8 @@ export function QrGenerator() {
       return 0n;
     }
   }, [mode, amountValid, amount, settings.token, settings.chain]);
+  // この会計のチェーンでお店負担に使う値 (受取先が OpenPay の受取口でないかの判定に使う)。
+  const storeConfig = storeDeviceChainConfig(chainForSlug(settings.chain).id);
   const storeBlocked:
     | 'token'
     | 'no_locks'
@@ -344,7 +350,7 @@ export function QrGenerator() {
               : convert
                 ? 'fx'
                 : effectiveReceiver &&
-                    [storeDevice.forwarder, storeDevice.feeReceiver].some(
+                    [storeConfig?.forwarder, storeConfig?.feeReceiver].some(
                       (a) => a && a.toLowerCase() === effectiveReceiver.toLowerCase(),
                     )
                   ? 'receiver'
@@ -643,7 +649,8 @@ export function QrGenerator() {
     amountText: string,
   ): Promise<boolean> {
     const attempt = storeOpenAttemptRef.current;
-    const session = await device.start(merchant, wei);
+    // チェーンは QR の写し (checkout) と同じもの (受け渡しとお客様の URL のチェーンが食い違わない)。
+    const session = await device.start(merchant, wei, chainForSlug(checkout.chain).id);
     // 作れなかった (理由は状態に出る)・前の会計の署名の送信を優先した → QR は開かない。
     if (!session) return false;
     if (storeOpenKeyRef.current !== key || storeOpenAttemptRef.current !== attempt) {
@@ -711,7 +718,7 @@ export function QrGenerator() {
     env.enableStoreGasWallet && device.busy
       ? ''
       : storeRequested && storeBlocked !== null
-      ? t(`storeDevice.blocked.${storeBlocked}`, { chain: chainNameForId(storeDevice.chainId) ?? '' })
+      ? t(`storeDevice.blocked.${storeBlocked}`, { chain: storeDeviceChainNames(storeDevice.chainIds) })
       : storeRequested && !storeForSale
         ? ''
         : undefined;
@@ -902,10 +909,7 @@ export function QrGenerator() {
             env.enableStoreGasWallet && sdState.phase !== 'idle' ? (
               <StoreDeviceRegisterStatus
                 state={sdState}
-                chainId={storeDevice.chainId}
-                formatAmount={(wei) =>
-                  `${formatUnits(BigInt(wei), storeDevice.deployment?.decimals ?? 18)} ${storeDevice.deployment?.displaySymbol ?? 'JPYC'}`
-                }
+                formatAmount={formatStoreDeviceAmount}
                 onCheckNow={() => void device.checkNow()}
                 onRetry={device.retry}
                 onReissue={() => void reissueStoreQr()}

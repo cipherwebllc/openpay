@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const hold = vi.hoisted(() => ({ enabled: true }));
+const hold = vi.hoisted(() => ({ enabled: true, forwarders: new Set<number>() }));
+// forwarder を設定したチェーンだけが「お店の端末で送る」の対象 (lib/storeDevicePayment の storeDeviceChainIds)。
+vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/relay/forwarderConfig')>();
+  return {
+    ...actual,
+    jpycForwarderFor: (chainId: number) =>
+      hold.forwarders.has(chainId) ? ('0x00000000000000000000000000000000000000f1' as const) : null,
+  };
+});
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return {
@@ -15,8 +24,6 @@ vi.mock('@/lib/env', async (importOriginal) => {
 });
 
 import { buildCheckoutPath, parseCheckoutParams, type CheckoutItem } from '@/lib/url';
-import { storeDeviceChainId } from '@/lib/storeDevicePayment';
-import { storeGasWalletChain } from '@/lib/storeGasWallet';
 
 const TO = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913' as const;
 const HS = 'AbCdEfGhIjKlMnOpQrStUv';
@@ -30,6 +37,7 @@ function parse(path: string, extra = '') {
 describe('/checkout の「お店の端末で送る」(submit=store&hs=)', () => {
   beforeEach(() => {
     hold.enabled = true;
+    hold.forwarders = new Set([80002, 1001]); // Amoy・Kairos
   });
 
   it('往復: submit と hs が残り、通常の項目もそのまま', () => {
@@ -68,10 +76,15 @@ describe('/checkout の「お店の端末で送る」(submit=store&hs=)', () => 
     expect(r.urlError.code).toBe('storeDeviceUnavailable');
   });
 
-  it('JPYC 以外・対象外のチェーンは止める', () => {
+  it('JPYC 以外は止める', () => {
     const usdc = buildCheckoutPath({ ...base, token: 'usdc', chain: 'base', items: [{ name: 'x', qty: 1, price: '1' }] });
     expect(parse(usdc, `&submit=store&hs=${HS}`)).toMatchObject({ ok: false, urlError: { code: 'storeDeviceUnavailable' } });
+  });
+
+  it('チェーンは受け渡しの作成と同じ集合: forwarder を設定したチェーンだけ通し、無いチェーンは止める', () => {
     const kaia = buildCheckoutPath({ ...base, chain: 'kaia' });
+    expect(parse(kaia, `&submit=store&hs=${HS}`)).toMatchObject({ ok: true, params: { submit: 'store' } });
+    hold.forwarders = new Set([80002]);
     expect(parse(kaia, `&submit=store&hs=${HS}`)).toMatchObject({ ok: false, urlError: { code: 'storeDeviceUnavailable' } });
   });
 
@@ -81,9 +94,5 @@ describe('/checkout の「お店の端末で送る」(submit=store&hs=)', () => 
       expect(path).toContain('submit=store');
       expect(parse(path)).toMatchObject({ ok: false, urlError: { code: 'storeDeviceUnavailable' } });
     }
-  });
-
-  it('URL の検査のチェーンと、ガス用ウォレット・受け渡しのチェーンは同じ (二重定義のずれを防ぐ)', () => {
-    expect(storeDeviceChainId()).toBe(storeGasWalletChain().id);
   });
 });

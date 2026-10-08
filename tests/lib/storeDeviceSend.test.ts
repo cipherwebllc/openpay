@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
+  custom,
   encodeAbiParameters,
   encodeEventTopics,
   getAddress,
@@ -9,6 +10,22 @@ import {
   type Log,
 } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+
+// createDeviceIo の RPC (最新ブロックの時刻だけ使う)。
+const rpcHold = vi.hoisted(() => ({ blockTime: 0n }));
+vi.mock('@/lib/chains', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/chains')>()),
+  transportForChain: (chainId: number) =>
+    custom({
+      async request({ method }: { method: string }) {
+        if (method === 'eth_chainId') return `0x${chainId.toString(16)}`;
+        if (method === 'eth_getBlockByNumber') {
+          return { number: '0x1', hash: `0x${'aa'.repeat(32)}`, timestamp: `0x${rpcHold.blockTime.toString(16)}`, transactions: [] };
+        }
+        throw new Error(`unexpected ${method}`);
+      },
+    }),
+}));
 import {
   buildForwarderNonce,
   buildReceiveWithAuthorizationTypedData,
@@ -17,6 +34,7 @@ import {
 import {
   STORE_DEVICE_SENT_KEY,
   addSentMark,
+  createDeviceIo,
   readSentMarks,
   receiptHasSettlement,
   sendStoreDeviceSettle,
@@ -185,7 +203,7 @@ describe('sendStoreDeviceSettle (二重に送らない・鍵は送る直前に)'
     ['お客様の残高が請求額 + 1 wei に足りない', { tokenBalance: async () => AMOUNT }, 'customer_balance'],
     ['simulate が revert', { simulate: async () => { throw new Error('revert'); } }, 'simulate_failed'],
     ['見積 × 1.2 が上限 500,000 を超える (切り詰めない)', { estimateGas: async () => 420_000n }, 'gas_limit'],
-    ['ガス代が 0.2 POL を超える', { signTx: async () => ({ raw: RAW, hash: HASH, maxFeePerGas: 10n ** 12n }) }, 'gas_too_high'],
+    ['ガス代が 0.2 POL を超える (Amoy)', { signTx: async () => ({ raw: RAW, hash: HASH, maxFeePerGas: 10n ** 12n }) }, 'gas_too_high'],
     ['POL が足りない', { nativeBalance: async () => 10n ** 15n }, 'native_insufficient'],
     [
       'POL が 0 (見積もりの失敗に見せない)',
@@ -266,6 +284,65 @@ describe('sendStoreDeviceSettle (二重に送らない・鍵は送る直前に)'
     window.localStorage.setItem(STORE_DEVICE_SENT_KEY, JSON.stringify([old]));
     expect(addSentMark({ ...old, nonce: `0x${'04'.repeat(32)}`, hash: HASH, at: 3_600_001 }, 3_600_001)).toBe(true);
     expect(readSentMarks()).toMatchObject({ ok: true, marks: [{ hash: HASH }] });
+  });
+});
+
+describe('ガス代の上限はチェーンごと (ネイティブ通貨の単位が違う)', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  // ガス上限は 見積 25 万 × 1.2 = 30 万。cost = 30 万 × maxFeePerGas。
+  it.each([
+    ['Polygon: 0.06 POL は送る', 137, 2n * 10n ** 11n, 'sent'],
+    ['Avalanche: 同じ 0.06 AVAX は上限 0.05 を超えるので送らない', 43114, 2n * 10n ** 11n, 'gas_too_high'],
+    ['Avalanche: 0.03 AVAX は送る', 43114, 10n ** 11n, 'sent'],
+    ['Kaia: 0.45 KAIA は送る (上限 0.5)', 8217, 15n * 10n ** 11n, 'sent'],
+    ['Polygon: 同じ 0.45 POL は上限 0.2 を超えるので送らない', 137, 15n * 10n ** 11n, 'gas_too_high'],
+    ['上限の表に無いチェーンは送らない (集合とずれたまま黙って送らない)', 1, 10n ** 9n, 'gas_too_high'],
+  ] as const)('%s', async (_, chainId, maxFeePerGas, expected) => {
+    const sends: Calls = [];
+    const io = fakeIo([], {
+      signTx: async () => ({ raw: RAW, hash: HASH, maxFeePerGas }),
+      sendRawTransaction: async () => {
+        sends.push('send');
+      },
+    });
+    const r = await sendStoreDeviceSettle(await verified(), { ...ctx, chainId }, io);
+    if (expected === 'sent') {
+      expect(r).toMatchObject({ kind: 'sent', mark: { chainId } });
+      expect(sends).toHaveLength(1);
+    } else {
+      expect(r).toEqual({ kind: 'not_sent', reason: expected });
+      expect(sends).toHaveLength(0);
+    }
+  });
+});
+
+describe('createDeviceIo の「いま」(期限の判定)', () => {
+  const io = (chainId = 43113) => createDeviceIo({ chainId, token: JPYC, forwarder: FWD, gasAddress: SHOP });
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(Number(NOW) * 1000));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('最新ブロックが古い (Avalanche でブロックが出ていない) ときは端末の時計を使う (期限ぎりぎりを送らない)', async () => {
+    rpcHold.blockTime = NOW - 40n;
+    expect(await io().chainNowSec()).toBe(NOW);
+  });
+
+  it('ブロック時刻が端末の時計より進んでいればブロック時刻を使う', async () => {
+    rpcHold.blockTime = NOW + 5n;
+    expect(await io().chainNowSec()).toBe(NOW + 5n);
+  });
+
+  it('Avalanche 以外 (Amoy・Kairos) はブロック時刻だけ (端末の時計が進んでいても、まだ送れる署名を止めない)', async () => {
+    rpcHold.blockTime = NOW - 40n;
+    expect(await io(80002).chainNowSec()).toBe(NOW - 40n);
+    expect(await io(1001).chainNowSec()).toBe(NOW - 40n);
   });
 });
 

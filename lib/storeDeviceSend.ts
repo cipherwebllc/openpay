@@ -37,18 +37,16 @@ import {
 } from '@/lib/relay/forwarderSettle';
 import { hasMatchingForwarderSettlement } from '@/lib/relay/forwarderSettledEvent';
 import { classifySendError } from '@/lib/relay/selfHostRelayer';
-import {
-  readStoreGasWalletKey,
-  storeGasWalletChain,
-  withStoreGasWalletLock,
-} from '@/lib/storeGasWallet';
+import { readStoreGasWalletKey, withStoreGasWalletLock } from '@/lib/storeGasWallet';
+import { chainObjectForId } from '@/lib/chains';
+import { avalanche, avalancheFuji } from 'viem/chains';
 import {
   STORE_DEVICE_CLOCK_SKEW_SEC,
   STORE_DEVICE_FEE_WEI,
-  STORE_DEVICE_MAX_GAS_COST_WEI,
   STORE_DEVICE_MAX_VALIDITY_SEC,
   STORE_DEVICE_MIN_REMAINING_SEC,
   STORE_DEVICE_SETTLE_GAS_CAP,
+  storeDeviceMaxGasCostWei,
 } from '@/lib/storeDevicePayment';
 
 /** 受け渡し (端末の読み取り・締め切り) が返す、お客様の署名の値 (10 進文字列)。 */
@@ -270,7 +268,7 @@ export type DeviceSendIo = {
   authorizationUsed: (from: Address, nonce: Hex) => Promise<boolean>;
   /** お客様の JPYC 残高 (wei)。 */
   tokenBalance: (from: Address) => Promise<bigint>;
-  /** ガス用ウォレットの POL 残高 (wei)。 */
+  /** ガス用ウォレットのネイティブ通貨の残高 (wei)。 */
   nativeBalance: () => Promise<bigint>;
   /** settle を simulate する (revert なら throw)。 */
   simulate: (data: Hex) => Promise<void>;
@@ -333,7 +331,7 @@ export async function sendStoreDeviceSettle(
       }
       if (await io.authorizationUsed(v.params.from, v.nonce)) return { kind: 'not_sent', reason: 'used' };
       if ((await io.tokenBalance(v.params.from)) < total) return { kind: 'not_sent', reason: 'customer_balance' };
-      // POL が 0 だと見積もりの失敗 (= 読み取れない) に見えるので、先に「POL が足りない」と分かるようにする。
+      // 残高が 0 だと見積もりの失敗 (= 読み取れない) に見えるので、先に「ガス代が足りない」と分かるようにする。
       if ((await io.nativeBalance()) === 0n) return { kind: 'not_sent', reason: 'native_insufficient' };
       try {
         await io.simulate(data);
@@ -345,7 +343,9 @@ export async function sendStoreDeviceSettle(
       if (gas > STORE_DEVICE_SETTLE_GAS_CAP) return { kind: 'not_sent', reason: 'gas_limit' };
       signed = await io.signTx(data, gas, await io.pendingNonce());
       const cost = gas * signed.maxFeePerGas;
-      if (cost > STORE_DEVICE_MAX_GAS_COST_WEI) return { kind: 'not_sent', reason: 'gas_too_high' };
+      // 上限はチェーンごと (ネイティブ通貨の単位が違う)。表に無いチェーンは送らない。
+      const maxCost = storeDeviceMaxGasCostWei(ctx.chainId);
+      if (maxCost === null || cost > maxCost) return { kind: 'not_sent', reason: 'gas_too_high' };
       if ((await io.nativeBalance()) < cost) return { kind: 'not_sent', reason: 'native_insufficient' };
     } catch {
       // 送る前の読み取り・署名の失敗 (RPC 障害・鍵が読めない) = 送っていない。
@@ -423,18 +423,31 @@ export type DeviceWatchIo = {
 
 /**
  * レジ端末の送信と確認に使う IO を組む。鍵は signTx の中で送る直前にだけ読み、戻り値にも state にも載せない。
- * 別タブとの直列化はガス用ウォレットの Web Locks (「残りの POL を戻す」と同じロック = nonce を取り合わない)。
+ * 別タブとの直列化はガス用ウォレットの Web Locks (「残りを戻す」と同じロック = nonce を取り合わない)。
  */
+// tx が無いとブロックが出ないチェーン (最新ブロックの時刻が数十秒古いことがある)。
+const STALE_BLOCK_TIME_CHAINS: ReadonlySet<number> = new Set([avalanche.id, avalancheFuji.id]);
+
 export function createDeviceIo(input: {
+  chainId: number;
   token: Address;
   forwarder: Address;
   gasAddress: Address;
 }): DeviceSendIo & DeviceWatchIo {
-  const chain = storeGasWalletChain();
+  const chain = chainObjectForId(input.chainId);
+  if (!chain) throw new Error('store_device_unsupported_chain');
   const client = createPublicClient({ chain, transport: transportForChain(chain.id) });
   const { token, forwarder, gasAddress } = input;
   return {
-    chainNowSec: async () => (await client.getBlock({ blockTag: 'latest' })).timestamp,
+    // 期限の判定の「いま」は最新ブロックの時刻。Avalanche だけは端末の時計との遅い方 (tx が無いとブロックが出ず、
+    // 最新ブロックの時刻が数十秒古いことがある = 期限ぎりぎりの署名を送って revert にガスを捨てない)。他のチェーンは
+    // ブロックが数秒おきに出るので端末の時計を混ぜない (時計の進んだ端末で、まだ送れる署名を止めない)。
+    chainNowSec: async () => {
+      const blockTime = (await client.getBlock({ blockTag: 'latest' })).timestamp;
+      if (!STALE_BLOCK_TIME_CHAINS.has(chain.id)) return blockTime;
+      const deviceTime = BigInt(Math.floor(Date.now() / 1000));
+      return blockTime > deviceTime ? blockTime : deviceTime;
+    },
     authorizationUsed: (from, nonce) =>
       client.readContract({
         address: token,
@@ -503,7 +516,8 @@ function watchIoFor(client: ReturnType<typeof createPublicClient>): DeviceWatchI
  * 送った tx の結果を読むだけの IO (鍵もガス用ウォレットも使わない)。送る設定を OFF にした・ガス用ウォレットを
  * 消した後も、送った支払いの行方 (入金の確認・取り消し) は確かめ続ける。
  */
-export function createDeviceWatchIo(): DeviceWatchIo {
-  const chain = storeGasWalletChain();
+export function createDeviceWatchIo(chainId: number): DeviceWatchIo {
+  const chain = chainObjectForId(chainId);
+  if (!chain) throw new Error('store_device_unsupported_chain');
   return watchIoFor(createPublicClient({ chain, transport: transportForChain(chain.id) }));
 }

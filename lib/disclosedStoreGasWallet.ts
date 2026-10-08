@@ -7,9 +7,10 @@
 export const DISCLOSED_STORE_GAS_WALLET = {
   // OpenPay 利用料は 0 円。仕組み上 (既存の分割用コントラクト) 送金 1 回につき 1 wei をお客様の支払いに上乗せし当社指定ウォレットへ。
   feeWei: 1,
-  // 点灯するチェーン (Kaia・Avalanche は次の段階・user 裁定 2026-10-08)。
-  chainId: 137,
-  chainName: 'Polygon',
+  // 点灯するチェーン (mainnet・lib/storeDevicePayment.ts の storeDeviceChainIds がここから導く = ここに足す開示の
+  // merge がそのチェーンの点灯)。Kaia・Avalanche は次の段階 (P5-2・user 裁定 2026-10-08)。
+  chainIds: [137],
+  chainNames: ['Polygon'],
   // ネットワーク手数料は店主の端末のガス用ウォレットが払う (当社は肩代わりしない・送信もしない)。
   gasPayer: 'merchant',
   // お客様の署名を店主の端末へ受け渡すための保管は最長 10 分。
@@ -17,3 +18,13 @@ export const DISCLOSED_STORE_GAS_WALLET = {
   // 新設日 (= 提供開始日・規約 第 5 条 (11) の適用開始)。
   effectiveDate: '2026-10-08',
 } as const;
+
+/**
+ * 本文に書く対象チェーンの並び (ja: 「Polygon・Kaia・Avalanche」・en: 「Polygon, Kaia and Avalanche」)。
+ * /transparency とフェンスが同じ書き方を使う (本文の書き方とフェンスの期待がずれないように)。
+ */
+export function disclosedStoreGasChains(locale: 'ja' | 'en'): string {
+  const names: readonly string[] = DISCLOSED_STORE_GAS_WALLET.chainNames;
+  if (locale === 'ja') return names.join('・');
+  return names.length <= 1 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}

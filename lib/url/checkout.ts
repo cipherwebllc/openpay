@@ -50,7 +50,7 @@ import {
   type TokenSymbol,
 } from '../tokens';
 import { env } from '../env';
-import { isStoreHandoffId, storeDeviceChainId } from '../storeDevicePayment';
+import { isStoreDeviceChain, isStoreHandoffId } from '../storeDevicePayment';
 import {
   appendTaxReceiptParams,
   DECIMAL_PATTERN,
@@ -377,7 +377,7 @@ export function parseCheckoutParams(
       !env.enableStoreGasWallet ||
       !isStoreHandoffId(handoffRaw) ||
       token !== 'jpyc' ||
-      deploymentForSlug(token, chainSlug).chainId !== storeDeviceChainId() ||
+      !isStoreDeviceChain(deploymentForSlug(token, chainSlug).chainId) ||
       feeKindRaw !== null ||
       storeHandle !== null)
   ) {

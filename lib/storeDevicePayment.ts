@@ -2,15 +2,20 @@
 //
 // 呼び名: コード・計画・テストでは仕組みの名前「お店の端末で送る」(store device / store-device・handoff) を使う。
 // 店員に見せる名前は「お店がガス代を肩代わりして送る」(messages RegisterMode.storeDevice・2026-10-07 user 裁定)。
-// どちらも同じ機能 = お客様は署名だけ、レジ端末のガス用ウォレット (POL) がガス代を払って送る、OpenPay 利用料 0 円
+// どちらも同じ機能 = お客様は署名だけ、レジ端末のガス用ウォレット (POL・KAIA・AVAX) がガス代を払って送る、OpenPay 利用料 0 円
 // (仕組み上 1 wei)。今の既定のガスレス (OpenPay の中継がガス代を払い、利用料 1%・最低 2 JPYC) とは別の選択肢。
 //
 // お客様は今の回収モードと同じ形 (ReceiveWithAuthorization・to = 既存 forwarder・nonce = commit) に署名し、
 // 手数料欄だけ 1 wei にする (お客様の送金に上乗せ・店の受取 = 請求額ちょうど)。お店の端末のガス用ウォレットが
 // forwarder.settle を自分のガスで呼ぶ。OpenPay は署名を短時間受け渡すだけで、送信もガスもしない。
 
-import { polygon, polygonAmoy } from 'viem/chains';
+import { formatUnits, getAddress, isAddress, type Address } from 'viem';
+import { avalanche, avalancheFuji, kaia, kairos, polygon, polygonAmoy } from 'viem/chains';
 import { env } from './env';
+import { JPYC_CHAINS, chainNameForId, slugForChain } from './chains';
+import { DISCLOSED_STORE_GAS_WALLET } from './disclosedStoreGasWallet';
+import { jpycForwarderFor } from './relay/forwarderConfig';
+import { resolveDeployment } from './tokens';
 
 /** 手数料欄 (forwarder は feeValue == 0 を拒否するので最小単位の 1 wei)。お客様の送金に上乗せする。 */
 export const STORE_DEVICE_FEE_WEI = 1n;
@@ -37,16 +42,67 @@ export const STORE_DEVICE_MIN_REMAINING_SEC = 15;
 /** 受け渡しセッションの寿命 (秒)。 */
 export const STORE_HANDOFF_TTL_SEC = 600;
 
-/** 対応チェーン (Polygon と testnet の Amoy だけ)。 */
-export const STORE_DEVICE_CHAIN_IDS: readonly number[] = [polygon.id, polygonAmoy.id];
+// --- チェーン (plans/store-gas-wallet.md §20) ---
+// 使えるチェーンは開示の SOT (lib/disclosedStoreGasWallet.ts の chainIds) から導く: mainnet は開示したチェーンのうち
+// 設定がそろったものだけ (= チェーンを増やす開示の merge がそのまま点灯)。testnet は対応する testnet を全部 (公開の
+// 約束ではないため・実機確認用)。どのチェーンで送るかは会計 (受け渡しセッション・送った印) が持ち、端末の状態は 1 つ。
 
-export function isStoreDeviceChain(chainId: number): boolean {
-  return STORE_DEVICE_CHAIN_IDS.includes(chainId);
+/** mainnet のチェーンに対応する testnet。 */
+const TESTNET_FOR: Readonly<Record<number, number>> = {
+  [polygon.id]: polygonAmoy.id,
+  [kaia.id]: kairos.id,
+  [avalanche.id]: avalancheFuji.id,
+};
+
+export type StoreDeviceChainConfig = {
+  chainId: number;
+  token: Address;
+  forwarder: Address;
+  feeReceiver: Address;
+};
+
+/**
+ * このチェーンで送るための値 (JPYC・forwarder・手数料受取口)。いまのネットワーク (mainnet / testnet) の JPYC
+ * チェーンで、どれもそろっているときだけ。開示の集合とは別 (送った支払いの結果の確認は、開示から外したチェーンでも続ける)。
+ */
+export function storeDeviceChainConfig(chainId: number): StoreDeviceChainConfig | null {
+  const slug = slugForChain(chainId);
+  if (!slug || !(JPYC_CHAINS as readonly string[]).includes(slug)) return null;
+  const deployment = resolveDeployment('jpyc', chainId);
+  const forwarder = jpycForwarderFor(chainId);
+  const feeReceiver = isAddress(env.feeReceiver ?? '') ? getAddress(env.feeReceiver as string) : null;
+  if (!deployment || deployment.chainId !== chainId || !forwarder || !feeReceiver) return null;
+  return { chainId, token: deployment.address, forwarder, feeReceiver };
 }
 
-/** この環境で使うチェーン (mainnet = Polygon・testnet = Amoy)。鍵の生成コードを読み込まずに済む軽い版。 */
-export function storeDeviceChainId(): number {
-  return env.networkEnv === 'mainnet' ? polygon.id : polygonAmoy.id;
+/** 新しい会計 (受け渡しの作成) に使えるチェーン。mainnet = 開示したチェーン ∩ 設定済み・testnet = 対応 testnet ∩ 設定済み。 */
+export function storeDeviceChainIds(): number[] {
+  const candidates =
+    env.networkEnv === 'mainnet' ? [...DISCLOSED_STORE_GAS_WALLET.chainIds] : Object.values(TESTNET_FOR);
+  return candidates.filter((id) => storeDeviceChainConfig(id) !== null);
+}
+
+/**
+ * ガス用ウォレットの残高を読み、残りを戻せるチェーン (いまのネットワークの Polygon・Kaia・Avalanche すべて)。
+ * 新しい会計に使えるか (storeDeviceChainIds) とは別: 開示や設定から外したチェーン (a1 の点灯を含む) に残った
+ * ガス代のトークンも、見えて戻せるようにする (使えなくなったチェーンで鍵の中身を見失わない)。
+ */
+export function storeGasWalletChainIds(): number[] {
+  return env.networkEnv === 'mainnet' ? Object.keys(TESTNET_FOR).map(Number) : Object.values(TESTNET_FOR);
+}
+
+export function isStoreDeviceChain(chainId: number): boolean {
+  return storeDeviceChainIds().includes(chainId);
+}
+
+/** 状態の表示に出す請求額 (wei の 10 進文字列)。JPYC v3 はどのチェーンでも 18 桁。 */
+export function formatStoreDeviceAmount(wei: string): string {
+  return `${formatUnits(BigInt(wei), 18)} JPYC`;
+}
+
+/** 画面の案内に出すチェーン名の並び (例: 「Polygon・Kaia・Avalanche」)。 */
+export function storeDeviceChainNames(chainIds: readonly number[], separator = '・'): string {
+  return chainIds.map((id) => chainNameForId(id) ?? String(id)).join(separator);
 }
 
 /** 受け渡しセッション id (16 byte を base64url = 22 文字)。 */
@@ -68,8 +124,23 @@ export function isStoreDeviceAmount(amountWei: bigint, maxWei: bigint): boolean 
 /** 端末が settle に使うガスの上限 (relayer と同じ・実測 約 25〜30 万)。見積 × 1.2 がこれを超えたら送らない。 */
 export const STORE_DEVICE_SETTLE_GAS_CAP = 500_000n;
 
-/** 1 回の送信のガス代の上限 (0.2 POL・サーバの RELAY_MAX_GAS_COST_WEI の本番値と同じ)。超えたら送らない。 */
-export const STORE_DEVICE_MAX_GAS_COST_WEI = 2n * 10n ** 17n;
+/**
+ * 1 回の送信のガス代の上限 (ネイティブ通貨・チェーンごと)。超えたら送らない。ガス上限 50 万 × 想定の最高単価:
+ * Polygon 0.2 POL (サーバの RELAY_MAX_GAS_COST_WEI の本番値と同じ)・Kaia 0.5 KAIA (base fee 上限 750 gkei)・
+ * Avalanche 0.05 AVAX (100 nAVAX)。表に無いチェーンは送らない (集合の導出とずれたまま黙って送らない)。
+ */
+const MAX_GAS_COST_WEI: Readonly<Record<number, bigint>> = {
+  [polygon.id]: 2n * 10n ** 17n,
+  [polygonAmoy.id]: 2n * 10n ** 17n,
+  [kaia.id]: 5n * 10n ** 17n,
+  [kairos.id]: 5n * 10n ** 17n,
+  [avalanche.id]: 5n * 10n ** 16n,
+  [avalancheFuji.id]: 5n * 10n ** 16n,
+};
+
+export function storeDeviceMaxGasCostWei(chainId: number): bigint | null {
+  return MAX_GAS_COST_WEI[chainId] ?? null;
+}
 
 /** 署名の期限の上限を確かめるときの時計のずれの余裕 (秒)。 */
 export const STORE_DEVICE_CLOCK_SKEW_SEC = 30;

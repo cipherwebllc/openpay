@@ -19,6 +19,8 @@ import {
   STORE_DEVICE_QR_MIN_REMAINING_SEC,
   STORE_HANDOFF_TOKEN_HEADER,
   STORE_HANDOFF_TTL_SEC,
+  isStoreDeviceChain,
+  storeDeviceChainConfig,
 } from '@/lib/storeDevicePayment';
 import type {
   DeviceAuth,
@@ -101,10 +103,6 @@ export type StoreDeviceRegisterInput = {
    * ガス用ウォレットを消した後も、送った支払いの行方は隠さない。省略時は enabled と同じ。
    */
   monitor?: boolean;
-  chainId: number;
-  token: Address;
-  forwarder: Address | null;
-  feeReceiver: Address | null;
   gasAddress: Address | null;
 };
 
@@ -178,7 +176,7 @@ async function closeSession(s: DeviceSession): Promise<{ closed: true } | { clos
 }
 
 export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
-  const { enabled, chainId, token, forwarder, feeReceiver, gasAddress } = input;
+  const { enabled, gasAddress } = input;
   const monitor = input.monitor ?? enabled;
   const [state, setState] = useState<StoreDeviceRegisterState>({ phase: 'idle' });
   // いまの状態の写し (描画を待たずに読む)。「通常の QR を出してよいか」などの判定は描画前の古い state で
@@ -267,17 +265,24 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
     [set],
   );
 
-  const loadIo = useCallback(async () => {
-    if (!forwarder || !gasAddress) return null;
-    const mod = await import('@/lib/storeDeviceSend');
-    return { mod, io: mod.createDeviceIo({ token, forwarder, gasAddress }) };
-  }, [token, forwarder, gasAddress]);
+  // チェーン由来の値 (JPYC・forwarder・手数料受取口・RPC) は、いつもセッション/印の chainId から引く (Fable 必須 1:
+  // 設定のチェーンを切り替えた直後に、前の会計の署名を別チェーンの値で確かめたり送ったりしない)。
+  const loadIo = useCallback(
+    async (chainId: number) => {
+      const config = storeDeviceChainConfig(chainId);
+      if (!config || !gasAddress) return null;
+      const mod = await import('@/lib/storeDeviceSend');
+      return { mod, config, io: mod.createDeviceIo({ ...config, gasAddress }) };
+    },
+    [gasAddress],
+  );
   // 結果を読むだけ (ガス用ウォレットが無くても読める)。
-  const loadWatch = useCallback(async () => {
-    if (!forwarder) return null;
+  const loadWatch = useCallback(async (chainId: number) => {
+    const config = storeDeviceChainConfig(chainId);
+    if (!config) return null;
     const mod = await import('@/lib/storeDeviceSend');
-    return { mod, io: mod.createDeviceWatchIo() };
-  }, [forwarder]);
+    return { mod, config, io: mod.createDeviceWatchIo(chainId) };
+  }, []);
 
   // サーバの判定で結論を待つ (10 秒おき)。「入金を確認」の後は確定 (最長 5 分)、結果が分からないときは
   // 成立 (= 入金の確認・確定) か、期限までに成立しなかった (= お支払いは行われていない) まで (最長 15 分)。
@@ -285,7 +290,8 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   const watchFinality = useCallback(
     (mark: DeviceSentMark, previous: boolean, gen: number, fromUnknown = false) => {
       finalityStopRef.current?.();
-      if (!forwarder || !feeReceiver) return;
+      const config = storeDeviceChainConfig(mark.chainId);
+      if (!config) return;
       let stopped = false;
       const started = Date.now();
       const tick = async () => {
@@ -302,8 +308,8 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
               validBefore: mark.validBefore,
               intentSalt: mark.intentSalt,
               nonce: mark.nonce,
-              forwarder,
-              feeReceiver,
+              forwarder: config.forwarder,
+              feeReceiver: config.feeReceiver,
               txHash: mark.hash,
             }),
           });
@@ -327,7 +333,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         stopped = true;
       };
     },
-    [forwarder, feeReceiver, setIf, showsMark],
+    [setIf, showsMark],
   );
 
   // receipt で結果を出す (成功 + この支払いの Settled = 入金を確認)。
@@ -340,7 +346,8 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       gen: number,
     ) => {
       if (gen !== genRef.current) return;
-      if (!receipt || !forwarder || !feeReceiver) {
+      const config = storeDeviceChainConfig(mark.chainId);
+      if (!receipt || !config) {
         set({ phase: 'unknown', mark, previous });
         watchFinality(mark, previous, gen, true);
         return;
@@ -349,7 +356,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         set({ phase: 'reverted', mark, previous });
         return;
       }
-      if (mod.receiptHasSettlement(receipt.logs, forwarder, mark, feeReceiver)) {
+      if (mod.receiptHasSettlement(receipt.logs, config.forwarder, mark, config.feeReceiver)) {
         set({ phase: 'received', mark, finalized: false, previous });
         watchFinality(mark, previous, gen);
         return;
@@ -357,13 +364,13 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       set({ phase: 'unknown', mark, previous });
       watchFinality(mark, previous, gen, true);
     },
-    [forwarder, feeReceiver, set, watchFinality],
+    [set, watchFinality],
   );
 
   /** 送った tx の結果を確かめる。「送信しました」を出したところで返り、結果は続けて確かめる。 */
   const watch = useCallback(
     async (mark: DeviceSentMark, previous: boolean): Promise<void> => {
-      const loaded = await loadWatch();
+      const loaded = await loadWatch(mark.chainId);
       // 読み込みの間に別の会計の表示 (送っている・署名を待っている) に変わっていたら上書きしない。
       if (!loaded || activeRef.current || stateRef.current.phase !== 'idle') return;
       set({ phase: 'sent', mark, previous });
@@ -403,19 +410,19 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       finalityStopRef.current?.();
       set({ phase: 'processing' });
       try {
-        const loaded = await loadIo();
-        if (!loaded || !forwarder || !feeReceiver) {
+        const loaded = await loadIo(session.chainId);
+        if (!loaded) {
           set({ phase: 'not_sent', reason: 'rpc', canRetry: false });
           return;
         }
-        const { mod, io } = loaded;
+        const { mod, io, config } = loaded;
         const verified = await mod.verifyDeviceAuth(
           { merchant: view.merchant, amount: view.amount, auth: view.auth },
           {
             chainId: session.chainId,
-            token,
-            forwarder,
-            feeReceiver,
+            token: config.token,
+            forwarder: config.forwarder,
+            feeReceiver: config.feeReceiver,
             merchant: session.merchant,
             amount: BigInt(session.amount),
           },
@@ -431,7 +438,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         }
         const r = await mod.sendStoreDeviceSettle(
           verified.value,
-          { handoffId: session.id, chainId: session.chainId, forwarder },
+          { handoffId: session.id, chainId: session.chainId, forwarder: config.forwarder },
           io,
         );
         if (r.kind === 'not_sent') {
@@ -456,7 +463,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         if (activeRef.current === view.auth.nonce) activeRef.current = null;
       }
     },
-    [loadIo, forwarder, feeReceiver, token, retire, set, showReceipt],
+    [loadIo, retire, set, showReceipt],
   );
 
   // セッションを締め切る (署名が入っていれば送る)。同じセッションの締め切りは一つの応答を共有する。
@@ -518,7 +525,8 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         // 前のタブのセッションの署名を送っている (この会計) なら、前回の結果で上書きしない。
         if (cancelled || !marks.ok || activeRef.current || stateRef.current.phase !== 'idle') return;
         const recent = marks.marks
-          .filter((m) => Date.now() - m.at < RECENT_MARK_MS && m.chainId === chainId)
+          // 送った印はどのチェーンでも (開示から外したチェーンでも、設定が残っていれば結果を確かめる)。
+          .filter((m) => Date.now() - m.at < RECENT_MARK_MS && storeDeviceChainConfig(m.chainId) !== null)
           .sort((a, b) => b.at - a.at)[0];
         // 「送信しました」を出すまでを待つ (その後は sent / unknown が次の QR を止める)。
         if (recent) await watch(recent, true);
@@ -612,10 +620,12 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
 
   /** QR を出す: 前のセッションを締め切ってから、新しいセッションを作る。作れなければ null。 */
   const start = useCallback(
-    async (merchant: Address, amount: bigint): Promise<DeviceSession | null> => {
+    async (merchant: Address, amount: bigint, chainId: number): Promise<DeviceSession | null> => {
       // 二度押しで二つのセッションを作らない。送っている・送った結果を待っている間は次の QR を作らない
-      // (どちらも描画を待たずに判定)。
+      // (どちらも描画を待たずに判定)。チェーンは QR の写しと同じもの (呼び出し側が渡す)・新しい会計に使えないチェーン
+      // (開示していない・設定が無い) では作らない。
       if (!enabled || activeRef.current || recoveringRef.current || isBusy(stateRef.current)) return null;
+      if (!isStoreDeviceChain(chainId)) return null;
       return withTransition<DeviceSession | null>(null, () => createNext(merchant, amount));
 
       async function createNext(merchant: Address, amount: bigint): Promise<DeviceSession | null> {
@@ -671,7 +681,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         return session;
       }
     },
-    [enabled, chainId, settlePrevious, setIf, finalize, withTransition],
+    [enabled, settlePrevious, setIf, finalize, withTransition],
   );
 
   /** QR を閉じる: 署名を待っていたセッションは締め切る (署名が入っていれば送る)。 */
@@ -764,7 +774,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   const checkNow = useCallback(async () => {
     const cur = stateRef.current;
     if (cur.phase !== 'unknown') return;
-    const loaded = await loadWatch();
+    const loaded = await loadWatch(cur.mark.chainId);
     if (!loaded) return;
     const receipt = await loaded.io.getReceipt(cur.mark.hash);
     // 待つ間に閉じた (取引を確かめた)・次の会計に進んだ → 遅れた結果で「次の QR を出せない」に戻さない。

@@ -97,8 +97,8 @@ export type HandoffStore = {
 
 export type HandoffDeps = ForwarderVerifyDeps & {
   store: HandoffStore;
-  /** この環境の対象チェーン (mainnet = Polygon・testnet = Amoy)。 */
-  expectedChainId: number;
+  /** 新しい受け渡しを作ってよいチェーンか (lib/storeDevicePayment.ts の isStoreDeviceChain = 開示した ∩ 設定済み)。 */
+  isAllowedChain: (chainId: number) => boolean;
   readAuthorizationUsed: (
     chainId: number,
     token: Address,
@@ -194,7 +194,7 @@ export async function createHandoffSession(
   deps: HandoffDeps,
 ): Promise<CreatedHandoff | HandoffFailure> {
   const chainId = body.chainId;
-  if (typeof chainId !== 'number' || chainId !== deps.expectedChainId) {
+  if (typeof chainId !== 'number' || !deps.isAllowedChain(chainId)) {
     return fail(400, 'unsupported_chain');
   }
   const forwarder = deps.forwarderFor(chainId);

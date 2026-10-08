@@ -1,13 +1,15 @@
 'use client';
 
 // レジの「お店の端末のガス用ウォレット」(flag NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET・plans/store-gas-wallet.md P1)。
-// 作る・残高を見る・残りの POL を戻す・この端末から消す。鍵は表示も書き出しもしない (戻すのは送金で)。
+// 作る・チェーンごとの残高を見る・残りを戻す・この端末から消す。鍵は表示も書き出しもしない (戻すのは送金で)。
+// 鍵 (アドレス) は 1 つで、対象のチェーン (Polygon・Kaia・Avalanche のうち使えるもの) すべてで使う。使えないチェーンも、
+// 残高があれば見せて戻せるようにする (開示や設定から外したチェーンに残ったガス代を見失わない)。
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { formatEther, type Address, type Hex } from 'viem';
-import { txExplorerUrl } from '@/lib/chains';
-import { estimateRemainingSends } from '@/lib/storeGasWallet';
+import { nativeSymbolForChainId, txExplorerUrl } from '@/lib/chains';
+import { estimateRemainingSends, storeGasFundGuide } from '@/lib/storeGasWallet';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import { useStoreGasWallet } from '@/hooks/useStoreGasWallet';
 
@@ -21,11 +23,14 @@ const DANGER_BTN =
 
 const WITHDRAW_INPUT_ID = 'store-gas-withdraw-to';
 const WITHDRAW_MESSAGE_ID = 'store-gas-withdraw-message';
+const WITHDRAW_CHAIN_ID = 'store-gas-withdraw-chain';
 
-function formatPol(wei: bigint): string {
+function formatNative(wei: bigint): string {
   const n = Number(formatEther(wei));
   return n.toLocaleString('en-US', { maximumFractionDigits: 4 });
 }
+
+const symbolOf = (chainId: number) => nativeSymbolForChainId(chainId) ?? '';
 
 export function StoreGasWalletPanel({
   onAddressChange,
@@ -46,14 +51,27 @@ export function StoreGasWalletPanel({
   const copyAvailable = useHydrationSafeAvailable(available);
   const [createError, setCreateError] = useState<string | null>(null);
   const [withdrawTo, setWithdrawTo] = useState('');
+  // 戻すチェーン (1 つだけのときは選ばせない)。
+  const [withdrawChainId, setWithdrawChainId] = useState<number | null>(null);
   const [confirmingWithdraw, setConfirmingWithdraw] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [removeFailed, setRemoveFailed] = useState(false);
 
   if (!g.hydrated || !g.walletState) return null;
 
-  const remaining =
-    g.balance != null && g.gasPrice != null ? estimateRemainingSends(g.balance, g.gasPrice) : null;
+  const active = g.chains.filter((c) => c.active);
+  // 表示するチェーン = 使えるチェーンと、使えないが残高があるチェーン (前に読めた値を含む)。
+  const funded = g.chains.filter((c) => c.balance != null && c.balance > 0n);
+  // 一度も読めていないチェーン (残高が分からない)。消す前に知らせる (残っているかもしれない)。
+  const unread = g.chains.some((c) => c.readFailed && c.balance == null);
+  const shown = g.chains.filter((c) => c.active || funded.includes(c));
+  const chainsLabel = active.map((c) => `${c.chain.name} (${symbolOf(c.chainId)})`).join('・');
+  const fundGuide = active.map((c) => `${symbolOf(c.chainId)} ${storeGasFundGuide(c.chainId)}`).join('・');
+  const amountsLabel = funded.map((c) => `${formatNative(c.balance!)} ${symbolOf(c.chainId)}`).join('・');
+  const targetChainId =
+    (withdrawChainId !== null && shown.some((c) => c.chainId === withdrawChainId) ? withdrawChainId : null) ??
+    shown[0]?.chainId ??
+    null;
   const ws = g.withdrawStatus;
   const withdrawing = ws.phase === 'sending' || ws.phase === 'pending';
   const inputRejected =
@@ -74,9 +92,9 @@ export function StoreGasWalletPanel({
     if (ok) setConfirmingRemove(false);
   }
 
-  const txLink = (hash: Hex) => (
+  const txLink = (chainId: number, hash: Hex) => (
     <a
-      href={txExplorerUrl(g.chain.id, hash)}
+      href={txExplorerUrl(chainId, hash)}
       target="_blank"
       rel="noreferrer noopener"
       className="underline underline-offset-2"
@@ -102,9 +120,10 @@ export function StoreGasWalletPanel({
       ) : (
         <div className="rounded-lg bg-red-50 p-2 text-xs text-red-800">
           <p>
-            {g.balance != null && g.balance > 0n
-              ? t('storeGasWallet.removeConfirmWithBalance', { amount: formatPol(g.balance) })
+            {funded.length > 0
+              ? t('storeGasWallet.removeConfirmWithBalance', { amount: amountsLabel })
               : t('storeGasWallet.removeConfirm')}
+            {unread && ` ${t('storeGasWallet.removeConfirmUnread')}`}
           </p>
           <div className="mt-2 flex gap-2">
             <button
@@ -138,17 +157,23 @@ export function StoreGasWalletPanel({
         {t('storeGasWallet.title')}
         <span className="ml-2 text-xs font-normal text-slate-500">
           {g.walletState.state === 'ok'
-            ? g.balance != null
-              ? t('storeGasWallet.balanceValue', { amount: formatPol(g.balance) })
-              : ''
+            ? shown
+                // 読めていない間は前に読めた値を見出しに出さない (行には「読めませんでした」が出る)
+                .filter((c) => c.balance != null && !c.readFailed)
+                .map((c) => t('storeGasWallet.balanceValue', { amount: formatNative(c.balance!), symbol: symbolOf(c.chainId) }))
+                .join('・')
             : g.walletState.state === 'none'
               ? t('storeGasWallet.badgeNone')
               : ''}
         </span>
       </summary>
 
-      <p className="mt-3 text-xs leading-relaxed text-slate-600">{t('storeGasWallet.intro')}</p>
-      <p className="mt-2 text-xs leading-relaxed text-amber-800">{t('storeGasWallet.keyNote')}</p>
+      <p className="mt-3 text-xs leading-relaxed text-slate-600">
+        {t('storeGasWallet.intro', { chains: chainsLabel })}
+      </p>
+      <p className="mt-2 text-xs leading-relaxed text-amber-800">
+        {t('storeGasWallet.keyNote', { guide: fundGuide })}
+      </p>
       <p className="mt-1 text-xs leading-relaxed text-slate-500">{t('storeGasWallet.safariNote')}</p>
 
       {g.walletState.state === 'unavailable' && (
@@ -185,7 +210,7 @@ export function StoreGasWalletPanel({
         <div className="mt-3 space-y-3">
           <div>
             <p className="text-xs text-slate-500">
-              {t('storeGasWallet.addressLabel', { chain: g.chain.name })}
+              {t('storeGasWallet.addressLabel', { chain: active.map((c) => c.chain.name).join('・') })}
             </p>
             <p className="break-all font-mono text-xs text-slate-800">{g.address}</p>
             <div className="mt-1 flex flex-wrap gap-2">
@@ -199,29 +224,49 @@ export function StoreGasWalletPanel({
               </button>
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              {t('storeGasWallet.fundHint', { chain: g.chain.name })}
+              {t('storeGasWallet.fundHint', { chains: chainsLabel })}
             </p>
           </div>
 
-          <div className="text-xs">
-            <span className="text-slate-500">{t('storeGasWallet.balanceLabel')}: </span>
-            {g.readFailed ? (
-              <span className="text-amber-700">{t('storeGasWallet.balanceUnknown')}</span>
-            ) : g.balance != null ? (
-              <span className="font-mono">
-                {t('storeGasWallet.balanceValue', { amount: formatPol(g.balance) })}
-              </span>
-            ) : (
-              <span className="text-slate-400">…</span>
-            )}
-            {remaining != null && (
-              <span className="ml-2 text-slate-500">
-                {t('storeGasWallet.remaining', { count: remaining })}
-              </span>
-            )}
-            {remaining != null && remaining < LOW_REMAINING_SENDS && (
-              <p className="mt-1 text-amber-700">{t('storeGasWallet.lowBalance')}</p>
-            )}
+          <div className="space-y-1 text-xs">
+            {shown.map((c) => {
+              const remaining =
+                !c.readFailed && c.balance != null && c.gasPrice != null
+                  ? estimateRemainingSends(c.balance, c.gasPrice)
+                  : null;
+              return (
+                <div key={c.chainId}>
+                  <span className="text-slate-500">
+                    {t('storeGasWallet.balanceLabel')} ({c.chain.name}):{' '}
+                  </span>
+                  {c.readFailed ? (
+                    <span className="text-amber-700">{t('storeGasWallet.balanceUnknown')}</span>
+                  ) : c.balance != null ? (
+                    <span className="font-mono">
+                      {t('storeGasWallet.balanceValue', {
+                        amount: formatNative(c.balance),
+                        symbol: symbolOf(c.chainId),
+                      })}
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">…</span>
+                  )}
+                  {remaining != null && (
+                    <span className="ml-2 text-slate-500">
+                      {t('storeGasWallet.remaining', { count: remaining })}
+                    </span>
+                  )}
+                  {c.active && remaining != null && remaining < LOW_REMAINING_SENDS && (
+                    <p className="mt-1 text-amber-700">
+                      {t('storeGasWallet.lowBalance', { symbol: symbolOf(c.chainId) })}
+                    </p>
+                  )}
+                  {!c.active && (
+                    <p className="mt-1 text-slate-500">{t('storeGasWallet.inactiveNote')}</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           <div className="border-t border-slate-100 pt-3">
@@ -229,6 +274,28 @@ export function StoreGasWalletPanel({
               {t('storeGasWallet.withdrawTitle')}
             </label>
             <p className="text-xs text-slate-500">{t('storeGasWallet.withdrawToHint')}</p>
+            {shown.length > 1 && (
+              <div className="mt-1">
+                <label htmlFor={WITHDRAW_CHAIN_ID} className="mr-2 text-xs text-slate-600">
+                  {t('storeGasWallet.withdrawChainLabel')}
+                </label>
+                <select
+                  id={WITHDRAW_CHAIN_ID}
+                  value={targetChainId ?? ''}
+                  onChange={(e) => {
+                    setWithdrawChainId(Number(e.target.value));
+                    setConfirmingWithdraw(false);
+                  }}
+                  className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+                >
+                  {shown.map((c) => (
+                    <option key={c.chainId} value={c.chainId}>
+                      {c.chain.name} ({symbolOf(c.chainId)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="mt-1 flex flex-wrap gap-2">
               <input
                 id={WITHDRAW_INPUT_ID}
@@ -249,7 +316,7 @@ export function StoreGasWalletPanel({
                 <button
                   type="button"
                   className={BTN}
-                  disabled={!withdrawTo.trim() || withdrawing}
+                  disabled={!withdrawTo.trim() || withdrawing || targetChainId === null}
                   onClick={() => setConfirmingWithdraw(true)}
                 >
                   {t('storeGasWallet.withdrawButton')}
@@ -258,15 +325,20 @@ export function StoreGasWalletPanel({
             </div>
             {confirmingWithdraw && (
               <div className="mt-2 rounded-lg bg-slate-50 p-2 text-xs">
-                <p>{t('storeGasWallet.withdrawConfirm')}</p>
+                <p>
+                  {t('storeGasWallet.withdrawConfirm', {
+                    symbol: targetChainId !== null ? symbolOf(targetChainId) : '',
+                    chain: g.chains.find((c) => c.chainId === targetChainId)?.chain.name ?? '',
+                  })}
+                </p>
                 <div className="mt-2 flex gap-2">
                   <button
                     type="button"
                     className={BTN}
-                    disabled={withdrawing}
+                    disabled={withdrawing || targetChainId === null}
                     onClick={() => {
                       setConfirmingWithdraw(false);
-                      void g.withdraw(withdrawTo);
+                      if (targetChainId !== null) void g.withdraw(targetChainId, withdrawTo);
                     }}
                   >
                     {t('storeGasWallet.withdrawSend')}
@@ -281,22 +353,22 @@ export function StoreGasWalletPanel({
               {(ws.phase === 'sending' || ws.phase === 'pending') && (
                 <p role="status" className="text-slate-600">
                   {t('storeGasWallet.withdrawPending')}{' '}
-                  {ws.phase === 'pending' && txLink(ws.hash)}
+                  {ws.phase === 'pending' && txLink(ws.chainId, ws.hash)}
                 </p>
               )}
               {ws.phase === 'confirmed' && (
                 <p role="status" className="text-emerald-700">
-                  {t('storeGasWallet.withdrawDone')} {txLink(ws.hash)}
+                  {t('storeGasWallet.withdrawDone')} {txLink(ws.chainId, ws.hash)}
                 </p>
               )}
               {ws.phase === 'reverted' && (
                 <p role="alert" className="text-red-600">
-                  {t('storeGasWallet.withdrawReverted')} {txLink(ws.hash)}
+                  {t('storeGasWallet.withdrawReverted')} {txLink(ws.chainId, ws.hash)}
                 </p>
               )}
               {ws.phase === 'unknown' && (
                 <p role="alert" className="text-amber-700">
-                  {t('storeGasWallet.withdrawUnknown')} {ws.hash && txLink(ws.hash)}
+                  {t('storeGasWallet.withdrawUnknown')} {ws.hash && txLink(ws.chainId, ws.hash)}
                 </p>
               )}
               {ws.phase === 'rejected' && (

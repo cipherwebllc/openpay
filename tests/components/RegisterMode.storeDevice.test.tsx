@@ -128,7 +128,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     hold.state = { phase: 'waiting', session: { id: HS }, stale: false, degraded: false };
     render(<RegisterMode />);
     await addItemAndOpen(user);
-    expect(hold.start).toHaveBeenCalledWith(VALID, 500n * 10n ** 18n);
+    expect(hold.start).toHaveBeenCalledWith(VALID, 500n * 10n ** 18n, 80002);
     const sp = await waitFor(() => {
       const v = shownCheckout();
       if (!v) throw new Error('not yet');
@@ -215,7 +215,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     render(<RegisterMode />);
     await user.click(await screen.findByRole('button', { name: /コーヒー/ }));
     await user.click(await screen.findByRole('button', { name: 'QR を出し直す' }));
-    expect(hold.start).toHaveBeenCalledWith(VALID, 500n * 10n ** 18n);
+    expect(hold.start).toHaveBeenCalledWith(VALID, 500n * 10n ** 18n, 80002);
     await waitFor(() => expect(shownCheckout()?.get('hs')).toBe(HS));
   });
 

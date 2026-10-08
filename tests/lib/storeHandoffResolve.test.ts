@@ -37,7 +37,7 @@ const spy = { expired: vi.fn(), used: vi.fn(), find: vi.fn() };
 
 function deps(over: Partial<StoreHandoffResolveDeps> = {}): StoreHandoffResolveDeps {
   return {
-    expectedChainId: CHAIN,
+    isConfiguredChain: (id) => id === CHAIN,
     nowSec: () => now,
     jpycAddressFor: () => JPYC,
     forwarderFor: () => FWD,

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 
 const hold = vi.hoisted(() => ({
@@ -14,26 +14,31 @@ import { StoreGasWalletPanel } from '@/components/StoreGasWalletPanel';
 const ADDR = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const TX = `0x${'ab'.repeat(32)}`;
 
-function base(over: Record<string, unknown> = {}) {
+type ChainRead = { balance?: bigint | null; gasPrice?: bigint | null; readFailed?: boolean };
+const AMOY = { id: 80002, name: 'Polygon Amoy' };
+const KAIROS = { id: 1001, name: 'Kairos' };
+function chain(c: { id: number; name: string }, read: ChainRead & { active?: boolean } = {}) {
+  return { chainId: c.id, chain: c, active: true, balance: null, gasPrice: null, readFailed: false, ...read };
+}
+
+/** 既定は Amoy だけ。balance/gasPrice/readFailed は Amoy の読み取り (chains を渡せば複数チェーン)。 */
+function base({ balance, gasPrice, readFailed, ...over }: Record<string, unknown> & ChainRead = {}) {
   return {
-    chain: { id: 80002, name: 'Polygon Amoy' },
+    chains: [chain(AMOY, { balance: balance ?? null, gasPrice: gasPrice ?? null, readFailed: readFailed ?? false })],
     hydrated: true,
     walletState: { state: 'none' },
     address: null,
-    balance: null,
-    gasPrice: null,
-    readFailed: false,
     withdrawStatus: { phase: 'idle' },
     removeBlocked: false,
     refresh: vi.fn(),
     create: vi.fn(async () => ({ ok: true })),
     remove: vi.fn(async () => true),
-    withdraw: vi.fn(async () => ({ phase: 'confirmed', hash: TX })),
+    withdraw: vi.fn(async () => ({ phase: 'confirmed', chainId: 80002, hash: TX })),
     ...over,
   };
 }
 
-function ready(over: Record<string, unknown> = {}) {
+function ready(over: Record<string, unknown> & ChainRead = {}) {
   return base({ walletState: { state: 'ok', info: { address: ADDR, createdAt: 1 } }, address: ADDR, ...over });
 }
 
@@ -105,21 +110,22 @@ describe('StoreGasWalletPanel', () => {
   it('戻し先の欄は見出しで名前が付き、確認してから送る', () => {
     hold.state = ready({ balance: 10n ** 18n, gasPrice: 1n });
     render(<StoreGasWalletPanel />);
-    const input = screen.getByRole('textbox', { name: '残りの POL を戻す' });
+    expect(screen.queryByRole('combobox')).toBeNull(); // チェーンが 1 つなら選ばせない
+    const input = screen.getByRole('textbox', { name: '残りを戻す' });
     fireEvent.change(input, { target: { value: '0x1111111111111111111111111111111111111111' } });
     fireEvent.click(screen.getByRole('button', { name: '戻す' }));
-    expect(screen.getByText(/少額が残ることがあります/)).toBeTruthy();
+    expect(screen.getByText(/残りの POL を、Polygon Amoy でこのアドレスに送ります。.*少額が残ることがあります/)).toBeTruthy();
     expect(hold.state.withdraw).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '送る' }));
-    expect(hold.state.withdraw).toHaveBeenCalledWith('0x1111111111111111111111111111111111111111');
+    expect(hold.state.withdraw).toHaveBeenCalledWith(80002, '0x1111111111111111111111111111111111111111');
   });
 
   it('結果は読み上げ領域に出す: 確定・確定待ち・不明・取り消し・拒否', () => {
     const cases: [Record<string, unknown>, RegExp, 'status' | 'alert'][] = [
-      [{ phase: 'confirmed', hash: TX }, /戻しました/, 'status'],
-      [{ phase: 'pending', hash: TX }, /確定を待っています/, 'status'],
-      [{ phase: 'unknown', hash: TX }, /確かめられませんでした/, 'alert'],
-      [{ phase: 'reverted', hash: TX }, /失敗しました/, 'alert'],
+      [{ phase: 'confirmed', chainId: 80002, hash: TX }, /戻しました/, 'status'],
+      [{ phase: 'pending', chainId: 80002, hash: TX }, /確定を待っています/, 'status'],
+      [{ phase: 'unknown', chainId: 80002, hash: TX }, /確かめられませんでした/, 'alert'],
+      [{ phase: 'reverted', chainId: 80002, hash: TX }, /失敗しました/, 'alert'],
       [{ phase: 'rejected', reason: 'contract_recipient' }, /コントラクトのアドレスには戻せません/, 'alert'],
     ];
     for (const [status, text, role] of cases) {
@@ -131,7 +137,7 @@ describe('StoreGasWalletPanel', () => {
   });
 
   it('確定待ちの間は消せない', () => {
-    hold.state = ready({ withdrawStatus: { phase: 'pending', hash: TX }, removeBlocked: true });
+    hold.state = ready({ withdrawStatus: { phase: 'pending', chainId: 80002, hash: TX }, removeBlocked: true });
     render(<StoreGasWalletPanel />);
     expect(screen.getByRole('button', { name: 'この端末から消す' })).toBeDisabled();
     expect(screen.getByText(/確定を待っている間は消せません/)).toBeTruthy();
@@ -145,5 +151,82 @@ describe('StoreGasWalletPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '消す' }));
     expect(hold.state.remove).toHaveBeenCalled();
     expect(await screen.findByText('この端末から消せませんでした。もう一度お試しください。')).toBeTruthy();
+  });
+
+  it('複数チェーン: 残高・残り回数・少ないときの注意はチェーンごと (通貨の記号つき)', () => {
+    hold.state = ready({
+      chains: [
+        chain(AMOY, { balance: 10n ** 18n, gasPrice: 1n }),
+        chain(KAIROS, { balance: 10n ** 16n, gasPrice: 30n * 10n ** 9n }),
+      ],
+    });
+    render(<StoreGasWalletPanel />);
+    expect(screen.getAllByText('1 POL').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('0.01 KAIA').length).toBeGreaterThan(0);
+    expect(screen.getByText('残高が少なくなっています。KAIA を入れてください。')).toBeTruthy();
+    expect(screen.queryByText('残高が少なくなっています。POL を入れてください。')).toBeNull();
+    // 説明と入金の案内に、対象のチェーンと通貨を並べる
+    expect(screen.getAllByText(/Polygon Amoy \(POL\)・Kairos \(KAIA\)/, { selector: 'p' })).toHaveLength(2);
+  });
+
+  it('複数チェーン: 戻すチェーンを選び、確認文とお金の動きはそのチェーン', () => {
+    hold.state = ready({
+      chains: [chain(AMOY, { balance: 10n ** 18n, gasPrice: 1n }), chain(KAIROS, { balance: 10n ** 18n, gasPrice: 1n })],
+    });
+    render(<StoreGasWalletPanel />);
+    fireEvent.change(screen.getByRole('combobox', { name: '戻すチェーン' }), { target: { value: '1001' } });
+    fireEvent.change(screen.getByRole('textbox', { name: '残りを戻す' }), {
+      target: { value: '0x1111111111111111111111111111111111111111' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '戻す' }));
+    expect(screen.getByText(/残りの KAIA を、Kairos でこのアドレスに送ります/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '送る' }));
+    expect(hold.state.withdraw).toHaveBeenCalledWith(1001, '0x1111111111111111111111111111111111111111');
+  });
+
+  it('使えないチェーンは、残高があるときだけ出し、戻せる (説明・入金の案内には出さない)', () => {
+    const FUJI = { id: 43113, name: 'Avalanche Fuji' };
+    hold.state = ready({
+      chains: [
+        chain(AMOY, { balance: 10n ** 18n, gasPrice: 1n }),
+        chain(KAIROS, { balance: 2n * 10n ** 18n, gasPrice: 1n, active: false }),
+        chain(FUJI, { balance: 0n, gasPrice: 1n, active: false }),
+      ],
+    });
+    render(<StoreGasWalletPanel />);
+    expect(screen.getAllByText('2 KAIA').length).toBeGreaterThan(0);
+    expect(screen.getByText(/このチェーンでは今は送れません/)).toBeTruthy();
+    expect(screen.queryByText(/Avalanche Fuji/)).toBeNull(); // 残高 0 の使えないチェーンは出さない
+    expect(screen.getAllByText(/Polygon Amoy \(POL\)/, { selector: 'p' })[0].textContent).not.toContain('Kairos');
+    const options = within(screen.getByRole('combobox', { name: '戻すチェーン' })).getAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual(['Polygon Amoy (POL)', 'Kairos (KAIA)']);
+  });
+
+  it('読み取りに失敗しても、前に読めた残高があれば消す前に「先に戻して」を出す (見出しと残り回数には古い値を出さない)', () => {
+    hold.state = ready({ balance: 10n ** 18n, gasPrice: 1n, readFailed: true });
+    render(<StoreGasWalletPanel />);
+    expect(screen.getByText('残高を読めませんでした')).toBeTruthy();
+    expect(screen.queryByText('1 POL')).toBeNull();
+    expect(screen.queryByText(/あと約/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'この端末から消す' }));
+    expect(screen.getByText(/まだ 1 POL 残っています/)).toBeTruthy();
+  });
+
+  it('一度も読めていないチェーンがあれば、消す前にそれを知らせる', () => {
+    hold.state = ready({
+      chains: [chain(AMOY, { balance: 0n, gasPrice: 1n }), chain(KAIROS, { readFailed: true, active: false })],
+    });
+    render(<StoreGasWalletPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'この端末から消す' }));
+    expect(screen.getByText(/残高を読めていないチェーンがあります/)).toBeTruthy();
+  });
+
+  it('複数チェーン: 消す前の注意は残っているチェーンの額をすべて出す', () => {
+    hold.state = ready({
+      chains: [chain(AMOY, { balance: 0n, gasPrice: 1n }), chain(KAIROS, { balance: 2n * 10n ** 18n, gasPrice: 1n })],
+    });
+    render(<StoreGasWalletPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'この端末から消す' }));
+    expect(screen.getByText(/まだ 2 KAIA 残っています/)).toBeTruthy();
   });
 });

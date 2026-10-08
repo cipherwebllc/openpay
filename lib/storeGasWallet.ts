@@ -1,27 +1,41 @@
 // お店の端末のガス用ウォレット (レジ・plans/store-gas-wallet.md)。
 //
-// レジの端末がお客様の署名を自分のガス (POL) で送るための専用の鍵。鍵はこの端末の localStorage にだけ
+// レジの端末がお客様の署名を自分のガス (各チェーンのネイティブ通貨: POL・KAIA・AVAX) で送るための専用の鍵。鍵はこの端末の localStorage にだけ
 // 置き、OpenPay のサーバには送らない (fetch の body に載せない)。JPYC を受け取る店のウォレットとは別の鍵で、
-// 入れるのは少額の POL だけ (端末の紛失・ブラウザの侵害で失いうるのは入れた POL のみ)。
-// 対象チェーンは Polygon (testnet は Amoy) だけ。
+// 入れるのは少額のガス代のトークンだけ (端末の紛失・ブラウザの侵害で失いうるのは入れた分のみ)。
+// 同じ鍵 (同じアドレス) を対象のチェーン (lib/storeDevicePayment.ts の storeDeviceChainIds) すべてで使う。
 //
 // 鍵の扱いの決まり:
 //   - 読み書きは lib/storage.ts の safeGet/safeSet を使わない (JSON 解析エラーの文面に保存内容の断片が
 //     入り、logger → console / Sentry に鍵の断片が流れうるため)。失敗は固定の文言だけを返す。
-//   - 「無い」と「壊れている / 読めない」を区別する。壊れた値の上に新しい鍵を作らない (入っている POL を失う)。
+//   - 「無い」と「壊れている / 読めない」を区別する。壊れた値の上に新しい鍵を作らない (入っているガス代のトークンを失う)。
 //   - 鍵を React の state や戻り値に載せない。使う直前に readStoreGasWalletKey で読む。
 
 import { isAddress, type Address, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { polygon, polygonAmoy } from 'viem/chains';
-import { env } from './env';
 
 export const STORE_GAS_WALLET_STORAGE_KEY = 'openpay:store-gas-wallet:v1';
 
 // forwarder.settle 1 回の目安ガス (残り回数の概算用・送信時の上限ではない)。Amoy 実機の gasUsed は 15.6〜17.4 万
-// (2026-10-08・レジ/決済QR から各 1 回) なので 20 万で少し多めに見積もる (残り回数を多く見せて POL 切れで送れない、
+// (2026-10-08・レジ/決済QR から各 1 回) なので 20 万で少し多めに見積もる (残り回数を多く見せてガス代切れで送れない、
 // を避ける)。送信時の上限は別 (lib/storeDevicePayment.ts の STORE_DEVICE_SETTLE_GAS_CAP = 50 万・見積もりを切り詰めない)。
 export const STORE_GAS_SETTLE_GAS_ESTIMATE = 200_000n;
+
+// 入れておく目安 (ネイティブ通貨・チェーンごと)。1 回の送信 (約 17 万 gas) の目安: Polygon 0.01〜0.05 POL
+// (単価 55〜274 gwei)・Kaia 約 0.005 KAIA (27.5 gkei)・Avalanche 約 0.001 AVAX (5 gwei)。少額にとどめる (端末の紛失・
+// ブラウザの侵害で失いうるのは入れた分だけ)。
+const FUND_GUIDE: Readonly<Record<number, string>> = {
+  137: '1〜2',
+  80002: '1〜2',
+  8217: '1〜2',
+  1001: '1〜2',
+  43114: '0.05〜0.1',
+  43113: '0.05〜0.1',
+};
+
+export function storeGasFundGuide(chainId: number): string {
+  return FUND_GUIDE[chainId] ?? '';
+}
 
 // 端末をまたがない直列化の鍵 (同じ端末の別タブで作る・消す・送るが重ならないように)。
 export const STORE_GAS_WALLET_LOCK = 'openpay:store-gas-wallet';
@@ -39,10 +53,6 @@ export type StoreGasWalletState =
   // localStorage を読めない (プライベートブラウズ・ストレージ拒否)
   | { state: 'unavailable' };
 
-/** ガス用ウォレットを使うチェーン (mainnet = Polygon・testnet = Amoy)。 */
-export function storeGasWalletChain() {
-  return env.networkEnv === 'mainnet' ? polygon : polygonAmoy;
-}
 
 type RawRead = { ok: true; raw: string | null } | { ok: false };
 
@@ -110,7 +120,7 @@ export type CreateStoreGasWalletResult =
 
 /**
  * 新しい鍵を作って保存する。**何も無いときだけ** 作る (壊れた値・読めない状態の上には作らない)。
- * 保存できたことを読み戻しで確かめてから成功を返す (保存できない端末でアドレスを見せ、POL を入れた後に
+ * 保存できたことを読み戻しで確かめてから成功を返す (保存できない端末でアドレスを見せ、ガス代のトークンを入れた後に
  * 鍵が消える偽成功を断つ)。
  */
 export function createStoreGasWallet(now: number = Date.now()): CreateStoreGasWalletResult {
@@ -168,11 +178,11 @@ export function estimateRemainingSends(balanceWei: bigint, gasPriceWei: bigint):
   return n > 9999n ? 9999 : Number(n);
 }
 
-// 「残りの POL を戻す」の送金ガス。戻し先はウォレット (EOA) に限るので素の送金と同じ 21,000。
+// 「残りを戻す」の送金ガス。戻し先はウォレット (EOA) に限るので素の送金と同じ 21,000。
 export const STORE_GAS_WITHDRAW_GAS = 21_000n;
 
 /**
- * 「残りの POL を戻す」で送れる額 (残高 − gas × maxFeePerGas)。実際のガス代はこの上限以下なので、
+ * 「残りを戻す」で送れる額 (残高 − gas × maxFeePerGas)。実際のガス代はこの上限以下なので、
  * 差の少額が残ることがある。送れないなら 0。
  */
 export function withdrawableAmount(

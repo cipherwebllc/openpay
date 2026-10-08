@@ -120,7 +120,7 @@ function Register({ reportGas = true }: { reportGas?: boolean }) {
   return (
     <>
       <p data-testid="phase">{`register:${mode.device.state.phase}:${String(mode.enabled)}`}</p>
-      <button type="button" onClick={() => void mode.device.start(SHOP, AMOUNT)}>
+      <button type="button" onClick={() => void mode.device.start(SHOP, AMOUNT, 80002)}>
         start
       </button>
     </>
