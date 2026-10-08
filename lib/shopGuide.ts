@@ -82,7 +82,7 @@ const JA: ShopGuideContent = {
     },
     {
       title: 'お店がガス代を肩代わりして送る',
-      body: '店頭レジや、画面に表示した金額指定の決済QRでは、お店の端末のガス用ウォレット（少額の POL）がガス代を払って送る設定も選べます（JPYC・Polygon のみ。決済QRの決済モードで選び、レジも同じ設定）。お客様は署名するだけで、OpenPay 利用料は 0 円（ガス代は実費・仕組み上 1 wei）。',
+      body: '店頭レジや、画面に表示した金額指定の決済QRでは、お店の端末のガス用ウォレット（少額のガス代のトークン: POL・KAIA・AVAX）がガス代を払って送る設定も選べます（JPYC・Polygon・Kaia・Avalanche のみ。決済QRの決済モードで選び、レジも同じ設定）。お客様は署名するだけで、OpenPay 利用料は 0 円（ガス代は実費・仕組み上 1 wei）。',
     },
     {
       title: 'モバイルオーダー',
@@ -171,7 +171,7 @@ const EN: ShopGuideContent = {
     },
     {
       title: 'The shop pays the gas',
-      body: 'At the in-store register and with a fixed-amount payment QR shown on screen, the shop can also have its device’s gas wallet (a little POL) pay the gas and send the payment (JPYC on Polygon only; choose it as the payment mode on the payment QR tab; the register uses the same setting). Customers only sign, and the OpenPay usage fee is 0 (the shop pays the actual gas; 1 wei by design).',
+      body: 'At the in-store register and with a fixed-amount payment QR shown on screen, the shop can also have its device’s gas wallet (a little of the gas token: POL, KAIA or AVAX) pay the gas and send the payment (JPYC on Polygon, Kaia and Avalanche only; choose it as the payment mode on the payment QR tab; the register uses the same setting). Customers only sign, and the OpenPay usage fee is 0 (the shop pays the actual gas; 1 wei by design).',
     },
     {
       title: 'Mobile ordering',

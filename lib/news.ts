@@ -34,6 +34,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'store-pays-gas-kaia-avalanche-2026-10-08',
+    date: '2026-10-08',
+    category: 'feature',
+    title: {
+      ja: '「お店がガス代を肩代わりして送る」が Kaia・Avalanche でも使えるようになりました',
+      en: '“The shop pays the gas” now works on Kaia and Avalanche too',
+    },
+    body: {
+      ja: '店頭レジと、画面に表示した金額指定の決済QRで選べる「お店がガス代を肩代わりして送る」が、Polygon に加えて Kaia・Avalanche の JPYC でも使えるようになりました（JPYC・Polygon・Kaia・Avalanche）。OpenPay 利用料は 0 円のままです（お店の負担はガス代の実費。仕組み上、送金 1 回につき 1 wei がお客様の支払いに上乗せされ OpenPay へ送られます）。ガス用ウォレットは同じアドレスのまま、使うチェーンのガス代のトークン（KAIA・AVAX）を少額入れてください。印刷・保存した QR は対象外です。',
+      en: '“The shop pays the gas”, available at the in-store register and with a fixed-amount payment QR shown on screen (not printed or saved QR codes), now works with JPYC on Kaia and Avalanche as well as Polygon (JPYC on Polygon, Kaia and Avalanche). The OpenPay usage fee is 0, as before (you pay only the actual gas; by design, 1 wei is added to the customer’s payment per transfer and sent to OpenPay). Your gas wallet keeps the same address; add a little of the gas token for the chain you use (KAIA or AVAX).',
+    },
+    link: { href: '/guide/qr', labelJa: '使い方を見る', labelEn: 'See how it works' },
+  },
+  {
     id: 'store-pays-gas-2026-10-08',
     date: '2026-10-08',
     category: 'feature',

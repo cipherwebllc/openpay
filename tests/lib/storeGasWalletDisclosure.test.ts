@@ -42,6 +42,8 @@ const WEI = `${D.feeWei} wei`;
 // 本文に書く対象チェーンの並び (SOT から導出)
 const CH_JA = disclosedStoreGasChains('ja');
 const CH_EN = disclosedStoreGasChains('en');
+// 対象のチェーンのネイティブトークン (SOT の chainIds から導出)
+const NATIVE_SYMBOLS = D.chainIds.map((id) => [polygon, kaia, avalanche].find((c) => c.id === id)!.nativeCurrency.symbol);
 const MIN = D.handoffRetentionSec / 60;
 const [y, m, d] = D.effectiveDate.split('-').map(Number);
 const JA_DATE = `${y} 年 ${m} 月 ${d} 日`;
@@ -96,8 +98,16 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
     for (const w of ['is 0', WEI, 'designated by the Company', 'printed or saved payment QR codes are not eligible', CH_EN]) {
       expect(te.price.value).toContain(w);
     }
-    expect(tj.additionalFees.value).toContain('ガス用ウォレットで POL');
-    expect(te.additionalFees.value).toContain('POL from the gas wallet');
+    // 店主が払うネットワーク手数料の通貨は、対象のチェーンのネイティブトークンをすべて書く (チェーンを足したら通貨も)
+    expect(tj.additionalFees.value).toContain('ガス用ウォレットで当該チェーンのネイティブトークン');
+    expect(te.additionalFees.value).toContain('native token (POL, KAIA or AVAX) from the gas wallet');
+    for (const symbol of NATIVE_SYMBOLS) {
+      for (const body of [tj.additionalFees.value, te.additionalFees.value, ja.Disclaimer.section7.body, en.Disclaimer.section7.body]) {
+        expect(body).toContain(symbol);
+      }
+      expect(ja.Terms.article5.body.split('(11)').at(-1)).toContain(symbol);
+      expect(en.Terms.article5.body.split('(11)').at(-1)).toContain(symbol);
+    }
     expect(tj.returnPolicy.value).toContain(`お店がガス代を肩代わりして送る経路の ${WEI}`);
     expect(te.returnPolicy.value).toContain(`The ${WEI} on`);
     for (const w of ['0 円', WEI, '当社指定ウォレットへ']) expect(ja.Disclaimer.intro).toContain(w);
@@ -156,7 +166,9 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
       for (const w of qrOnly) expect(qr).toContain(w);
     }
     // お知らせ (提供開始日・0 円・1 wei・対象チェーン・印刷/保存は対象外)
-    const news = NEWS_ITEMS.find((n) => n.id === `store-pays-gas-${D.effectiveDate}`);
+    // 一番新しい「お店がガス代を肩代わりして送る」のお知らせが、いまの開示 (日付・対象チェーン) と一致する
+    // (チェーンを足したらお知らせを足す・前のお知らせは過去の告知として書き換えない)。
+    const news = NEWS_ITEMS.find((n) => n.id.startsWith('store-pays-gas-'));
     expect(news?.date).toBe(D.effectiveDate);
     for (const w of ['0 円', `${D.feeWei} wei`, `JPYC・${CH_JA}`, '印刷・保存した QR は対象外']) expect(news?.body.ja).toContain(w);
     for (const w of ['is 0', `${D.feeWei} wei`, `JPYC on ${CH_EN}`, 'not printed or saved']) expect(news?.body.en).toContain(w);

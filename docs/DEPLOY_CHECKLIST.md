@@ -2398,16 +2398,19 @@ manual transaction lookup. Settled receipts must never re-enter the invoice scan
 ## §17 お店がガス代を肩代わりして送る go-live SOP
 
 内部名「お店の端末で送る」(計画 plans/store-gas-wallet.md・開示の SOT は lib/disclosedStoreGasWallet.ts)。お客様は既存の
-Eip3009Forwarder 宛てに「請求額 + 1 wei」へ署名し、店主の端末のガス用ウォレット (POL) が `forwarder.settle` を送る。
+Eip3009Forwarder 宛てに「請求額 + 1 wei」へ署名し、店主の端末のガス用ウォレット (POL・KAIA・AVAX) が `forwarder.settle` を送る。
 OpenPay は署名を最長 10 分受け渡すだけで、ガスを払わず送信もしない。決済QRタブの決済モードの 3 つ目で選び、レジは同じ設定を
 引き継ぐ。使えるのは画面に表示する金額指定の QR だけ (印刷・保存・URL のコピー・金額なしは対象外)。
 
 ### 17.1 flag と前提
 - `NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET` (コードの既定 OFF)。build 時に埋め込まれるので、変えたら再デプロイ。
 - `IP_HASH_SECRET` (32 byte 以上) が本番にあること。無い・短いと受け渡しは 503 で止まる (fail-closed)。
-- `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON`・`NEXT_PUBLIC_FEE_RECEIVER` が今の中継と同じ値であること (変えない)。
+- `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON`・`_KAIA`・`_AVALANCHE`・`NEXT_PUBLIC_FEE_RECEIVER` が今の中継と同じ値であること (変えない)。
+  Avalanche は `NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE` も ON であること (OFF だと Avalanche だけ黙って対象外になる)。
 - 手数料受取口 (会社 @handle) を受取先にした店では使えない (forwarder が merchant == feeReceiver で revert するため画面で止める)。
-- チェーンは Polygon だけ (Kaia・Avalanche は次の段階・user 裁定 2026-10-08)。
+- チェーンは開示の SOT (`DISCLOSED_STORE_GAS_WALLET.chainIds`) のうち設定がそろったもの = Polygon・Kaia・Avalanche
+  (2026-10-08 に Polygon で点灯し、同日 Kaia・Avalanche を追加 = 開示の merge が点灯)。チェーンを足す・外すときは SOT と
+  開示の本文を同じ PR で変える (`tests/lib/storeGasWalletDisclosure.test.ts`)。点灯前の読むだけの確認 = `plans/store-pays-preflight.mjs`。
 - 利用料メーター a1 (`NEXT_PUBLIC_ENABLE_USAGE_FEE`) が OFF であること (ON だと forwarder が無効になり受け渡しは unsupported_chain で止まる・本番は未提供のまま)。
 
 ### 17.2 点灯 (merge と同じ日・user 承認)
@@ -2416,10 +2419,10 @@ OpenPay は署名を最長 10 分受け渡すだけで、ガスを払わず送�
 2. Vercel の Production に `NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET=1` を入れて再デプロイ。
 3. 本番の確認 (少額・自社のウォレット):
    - 決済QRタブ → 高度な設定 → 決済モードに 3 枚目「お店がガス代を肩代わり」が出る。選ぶとガス用ウォレットのパネルが出る。
-   - ガス用ウォレットを作り、POL を少額 (目安 1〜2 POL) 入れる。JPYC は入れない。
+   - ガス用ウォレットを作り、使うチェーンのガス代のトークンを少額入れる (目安 POL 1〜2・KAIA 1〜2・AVAX 0.05〜0.1)。JPYC は入れない。
    - 金額 (1 JPYC 以上) を入れて「QRコードを表示する」→ 全画面に印刷・保存・コピー・URL が無い / 「この QR は画面に表示している
      間だけ使えます」が出る → 別の端末で読み取り、署名 → 「入金を確認しました」→ 確定。受取額が請求額ちょうど、お客様の支払いが
-     請求額 + 1 wei であることを Polygonscan で確かめる。
+     請求額 + 1 wei であることをエクスプローラ (Polygonscan・Kaiascan・Snowtrace) で確かめる。チェーンを足したら、そのチェーンでも 1 件。
    - 金額なし (据え置き) では押せず理由が出る。レジに移ると上の 1 行が「お店がガス代を肩代わり（利用料 0 円）」になる。
 4. お知らせ・LP・規約の表示を本番で確認する。
 
@@ -2431,4 +2434,4 @@ OpenPay は署名を最長 10 分受け渡すだけで、ガスを払わず送�
 ### 17.4 監視
 - Sentry: 受け渡し API (`/api/register/handoff*`) の 5xx・お客様画面の `storeDeviceUnavailable`。
 - Upstash のコマンド数 (受け渡し 1 件あたり作成・読み取り・締め切りで数十件)。
-- 店主のガス用ウォレットの POL は店主の負担 (OpenPay は監視しない・画面に残り回数の目安を出す)。
+- 店主のガス用ウォレットのガス代のトークン (POL・KAIA・AVAX) は店主の負担 (OpenPay は監視しない・画面にチェーンごとの残り回数の目安を出す)。
