@@ -61,20 +61,25 @@ beforeEach(() => {
 });
 
 describe('MiniHistoryRecent', () => {
-  it('hydrated=false なら描画 skip (CLS placeholder のみ)', () => {
-    useHistoryMock.mockReturnValue({ entries: [], hydrated: false });
-    renderWithIntl(<MiniHistoryRecent />);
-    expect(screen.queryByText('最近の取引 (最新 3 件)')).toBeNull();
+  it('hydrated=false なら何も描画しない', () => {
+    useHistoryMock.mockReturnValue({ entries: [entry({ id: 'e1' })], hydrated: false });
+    const { container } = renderWithIntl(<MiniHistoryRecent />);
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it('0 件 → empty 文言が出て view-all link は出ない', () => {
+  it('0 件 → カードごと出さない (空の状態で会計画面を長くしない)', () => {
     useHistoryMock.mockReturnValue({ entries: [], hydrated: true });
-    renderWithIntl(<MiniHistoryRecent />);
-    expect(screen.getByText('最近の取引 (最新 3 件)')).toBeInTheDocument();
-    expect(
-      screen.getByText(/このブラウザにはまだ取引履歴がありません/),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /全件を見る/ })).toBeNull();
+    const { container } = renderWithIntl(<MiniHistoryRecent />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('利用手数料の行だけ → 売上が無いので出さない', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [entry({ id: 'f1', flow: 'standard-fee' })],
+      hydrated: true,
+    });
+    const { container } = renderWithIntl(<MiniHistoryRecent />);
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('1 件 → 行が描画されて view-all link が出る', () => {
@@ -155,13 +160,11 @@ describe('MiniHistoryRecent', () => {
     expect(txLinks).toHaveLength(0);
   });
 
-  it('en locale: view-all link href が /en/history、empty 文言が英語', () => {
-    useHistoryMock.mockReturnValue({ entries: [], hydrated: true });
+  it('en locale: 見出しが英語・view-all link href が /en/history', () => {
+    useHistoryMock.mockReturnValue({ entries: [entry({ id: 'e1' })], hydrated: true });
     renderWithIntl(<MiniHistoryRecent />, { locale: 'en' });
     expect(screen.getByText(/Recent transactions/)).toBeInTheDocument();
-    expect(
-      screen.getByText(/No transaction history in this browser yet/),
-    ).toBeInTheDocument();
+    expect(screen.getAllByRole('link').some((a) => a.getAttribute('href') === '/en/history')).toBe(true);
   });
 });
 

@@ -40,6 +40,7 @@ export function QrAmountSection({
   setAmount,
   resetConvert,
   fiatHint,
+  rateHint,
   selectToken,
   selectChain,
   canShowConvert,
@@ -66,6 +67,8 @@ export function QrAmountSection({
   setAmount: Dispatch<SetStateAction<string>>;
   resetConvert: () => void;
   fiatHint: string | null;
+  /** USDC のときの参考レート (例「1 USDC ≈ ¥158.19 (参考)」)。null なら出さない。 */
+  rateHint: string | null;
   selectToken: (tok: TokenSymbol) => void;
   selectChain: (slug: ChainSlug) => void;
   canShowConvert: boolean;
@@ -219,6 +222,9 @@ export function QrAmountSection({
                   <div className="mt-1 text-right text-sm font-medium text-slate-500">
                     {fiatHint}
                   </div>
+                )}
+                {rateHint && (
+                  <div className="mt-0.5 text-right text-xs text-slate-400">{rateHint}</div>
                 )}
               </div>
               {activeQuickAmounts.length > 0 && (

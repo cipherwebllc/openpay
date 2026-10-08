@@ -414,7 +414,6 @@
     "title": "OpenPay",
     "subtitle": "Wallet-only setup for merchant gasless payment QR",
     "recentHistoryTitle": "Recent transactions (latest 3)",
-    "recentHistoryEmpty": "No transaction history in this browser yet. Completed payments will appear here.",
     "recentHistoryViewAll": "View all",
     "tabs": {
       "qr": "Payment QR",
@@ -423,9 +422,6 @@
       "profile": "Profile",
       "mobileOrder": "Mobile order",
       "orders": "Orders"
-    },
-    "tabDesc": {
-      "qr": "For merchants: create a payment QR to display at the register."
     },
     "storeDeviceTabLocked": "The shop's device is sending a payment (or checking its result). You can't switch tabs until the result is shown.",
     "storeDeviceStatusLabel": "Payment sent with the store paying gas",
@@ -469,6 +465,7 @@
     "modeStatic": "Open amount",
     "staticHint": "With an open-amount QR, the customer enters the amount.",
     "fiatApprox": "≈ ¥{yen}",
+    "usdcRateHint": "1 USDC ≈ ¥{rate} (reference)",
     "advancedSettings": "Advanced settings",
     "advancedSummary": {
       "standard": "Standard (customer pays gas)",
@@ -2407,8 +2404,6 @@
     "custom": "Custom"
   },
   "RegisterMode": {
-    "heading": "Register",
-    "subheading": "Pick a product, set quantity, and generate an itemized payment QR.",
     "merchantAddressLabel": "Receiving wallet address",
     "useConnectedWallet": "Use connected wallet",
     "receiverMatchesWallet": "Connected wallet = receiver",

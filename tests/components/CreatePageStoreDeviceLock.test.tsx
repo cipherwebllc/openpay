@@ -7,7 +7,6 @@ vi.mock('@/components/AppShell', () => ({
   AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main>,
 }));
 vi.mock('@/components/BillingDueBanner', () => ({ BillingDueBanner: () => null }));
-vi.mock('@/components/MarketRates', () => ({ MarketRates: () => null }));
 vi.mock('@/components/MiniHistoryRecent', () => ({ MiniHistoryRecent: () => null }));
 vi.mock('@/components/QrGenerator', () => ({ QrGenerator: () => <p>qr-panel</p> }));
 vi.mock('@/components/OrdersTabBadge', () => ({ OrdersTabBadge: () => null }));

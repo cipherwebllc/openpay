@@ -8,10 +8,9 @@ import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useLocale, useTranslations } from 'next-intl';
-import { ArrowRightLeft, ChevronRight, Fuel } from 'lucide-react';
+import { ArrowRightLeft, ChevronDown, ChevronRight, Fuel } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
 import { BillingDueBanner } from '@/components/BillingDueBanner';
-import { MarketRates } from '@/components/MarketRates';
 import { MiniHistoryRecent } from '@/components/MiniHistoryRecent';
 import { QrGenerator } from '@/components/QrGenerator';
 import { OrdersTabBadge } from '@/components/OrdersTabBadge';
@@ -146,14 +145,13 @@ function CreatePageBody() {
   return (
     <AppShell>
       <BillingDueBanner />
-      <div className="mb-4">
-        <MarketRates />
-      </div>
+      {/* 市場レートの帯は出さない (JPYC は 1:1・USDC は金額の下に「≈ ¥」とレートを出す・2026-10 磨き上げ P1 / user 裁定)。 */}
 
-      {/* タブバー: inline-flex のまま (flex にすると desktop で全幅に伸びる)。flex-nowrap +
+      {/* タブ名で用途が分かるので、タブの下に説明の行は出さない (2026-10 磨き上げ P1)。
+          タブバー: inline-flex のまま (flex にすると desktop で全幅に伸びる)。flex-nowrap +
           overflow-x-auto + 各ボタン whitespace-nowrap/shrink-0 で、ラベル短縮済みでもスマホ
           (360–390px) で 1 行を保ち、将来タブが増えても横スクロールで崩れない。 */}
-      <div ref={tabBarRef} className="mb-2 inline-flex max-w-full flex-nowrap overflow-x-auto rounded-xl bg-slate-100/80 p-1 ring-1 ring-slate-200/60 print:hidden">
+      <div ref={tabBarRef} className="mb-5 inline-flex max-w-full flex-nowrap overflow-x-auto rounded-xl bg-slate-100/80 p-1 ring-1 ring-slate-200/60 print:hidden">
         {(
           [
             ['qr', t('tabs.qr')],
@@ -202,12 +200,6 @@ function CreatePageBody() {
         <StoreDevicePageStatus />
       )}
 
-      {/* 決済QR タブのみ 1 行説明を出す。レジ / チップは各パネル先頭に見出し+説明が
-          あり重複するため出さない。 */}
-      {tab === 'qr' && (
-        <p className="mb-4 text-sm text-slate-500">{t('tabDesc.qr')}</p>
-      )}
-
       {tab === 'qr' && <QrGenerator />}
       {tab === 'register' && (
         <div className="space-y-5">
@@ -251,19 +243,24 @@ function CreatePageBody() {
       {/* 受注・プロフタブでは下部の参照系 (最近の取引 / 換金) を隠す。 */}
       {tab !== 'orders' && tab !== 'profile' && <MiniHistoryRecent />}
 
+      {/* 換金は受け取った後の話で会計の最中には使わないので、1 行に畳む (中身・文言はそのまま)。 */}
       {tab !== 'orders' && tab !== 'profile' && (
-      <section
-        aria-labelledby="offramp-heading"
-        className="mt-6 rounded-3xl bg-white p-6 shadow-card ring-1 ring-slate-200/70 sm:p-8 print:hidden"
-      >
-        <h2
-          id="offramp-heading"
-          className="flex items-center gap-2 text-base font-semibold text-slate-800"
-        >
-          <ArrowRightLeft className="h-5 w-5 text-brand" aria-hidden />
-          {t('offramp.heading')}
-        </h2>
-        <p className="mt-1 text-[11px] text-slate-500">{t('offramp.subheading')}</p>
+      <details className="group/offramp mt-6 rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 print:hidden">
+        <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-4 [&::-webkit-details-marker]:hidden">
+          <ArrowRightLeft className="h-4 w-4 flex-none text-slate-400" aria-hidden />
+          <h2
+            id="offramp-heading"
+            className="flex-1 text-sm font-medium text-slate-700"
+          >
+            {t('offramp.heading')}
+          </h2>
+          <ChevronDown
+            className="h-4 w-4 flex-none text-slate-400 transition-transform group-open/offramp:rotate-180"
+            aria-hidden
+          />
+        </summary>
+        <div className="border-t border-slate-100 px-5 pb-5 pt-3">
+        <p className="text-[11px] text-slate-500">{t('offramp.subheading')}</p>
         <ul className="mt-3 space-y-2">
           {TOKEN_SYMBOLS.map((token) => {
             const link = getExchangeLink(token, locale);
@@ -331,7 +328,8 @@ function CreatePageBody() {
             {t('offramp.gasHint.disclaimer')}
           </p>
         </details>
-      </section>
+        </div>
+      </details>
       )}
 
       {/* 販売ハブとしての用途別ガイド入口 (P5・plans/site-ia-guides-ruling.md N10)。 */}
