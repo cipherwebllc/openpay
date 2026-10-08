@@ -58,7 +58,8 @@ export function ShopSettingsSheet({
 
   return (
     // 背景を押したら閉じる (キーボードは Escape・「完了」)。パネル内の操作は閉じない (既存のモーダルと同じ形)。
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 print:hidden" onClick={onClose}>
+    // !mt-0: 親の space-y-* が付ける上の余白で fixed の全面がずれないように (レジの親は space-y)。
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 !mt-0 print:hidden" onClick={onClose}>
       <div
         ref={panelRef}
         role="dialog"

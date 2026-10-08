@@ -172,7 +172,8 @@ export function QrPreviewModal({
       aria-modal="true"
       aria-label={labels.title}
       tabIndex={-1}
-      className={`fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-slate-900/70 px-4 py-8 max-sm:p-0 ${
+      // !mt-0: 親の space-y-* (レジ) が付ける上の余白で fixed の全面がずれないように (上にページが覗いていた)。
+      className={`fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-slate-900/70 !mt-0 px-4 py-8 max-sm:p-0 ${
         // 印刷対応 (QR) はポスターを全画面印刷。印刷非対応 (レジ) はモーダルごと
         // 印刷対象外にして背後のカートとの重なり (bleed) を防ぐ。
         onPrint ? 'print:static print:bg-white print:p-0' : 'print:hidden'

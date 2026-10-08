@@ -16,9 +16,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { useQuery } from '@tanstack/react-query';
-import { formatUnits, getAddress, isAddress, type Address } from 'viem';
-import { ChevronRight, Minus, Plus, QrCode as QrCodeIcon, Star, Trash2 } from 'lucide-react';
+import { formatUnits, getAddress, type Address } from 'viem';
+import { Pencil, Plus, QrCode as QrCodeIcon, Star } from 'lucide-react';
 import { AccountingSection } from './AccountingSection';
+import { ShopSettingsSection, ShopSettingsSheet } from './ShopSettingsSheet';
+import { ShopSummaryRow } from './ShopSummaryRow';
+import { ChainChooser } from './ChainChooser';
+import { QrReceiptPosterFields, QrReceiverFields, QrStoreNameField } from './qr/QrReceiverSection';
+import { QrSettingsSection } from './qr/QrSettingsSection';
+import { RegisterCartLine } from './register/RegisterCartLine';
 import { QrPreviewModal } from './QrPreviewModal';
 import { StoreGasWalletPanel } from './StoreGasWalletPanel';
 import { StoreDeviceRegisterStatus } from './StoreDeviceRegisterStatus';
@@ -30,10 +36,9 @@ import {
   storeDeviceChainNames,
 } from '@/lib/storeDevicePayment';
 import { storePaysActive, storePaysRequested } from '@/lib/storePaysMode';
-import { Field } from './Field';
 import { ExternalImage } from './ExternalImage';
 import { ProductPresetManager } from './ProductPresetManager';
-import { switchTokenKeepingPrefs, useQrSettings } from '@/hooks/useQrSettings';
+import { switchTokenKeepingPrefs, useQrSettings, withChain } from '@/hooks/useQrSettings';
 import { useReceiverAutofill, type ReceiverSource } from '@/hooks/useReceiverAutofill';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { useProductPresets, type ProductPreset } from '@/hooks/useProductPresets';
@@ -44,10 +49,9 @@ import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { pickEffectiveAddress, shortAddress } from '@/lib/format';
 import { isLikelyName } from '@/lib/nameDetection';
-import { paymentPolicyKey } from '@/lib/paymentPolicy';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
-import { chainForSlug } from '@/lib/chains';
+import { chainForSlug, JPYC_CHAINS, USDC_CHAINS } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { safeHttpUrl } from '@/lib/mobileOrder';
 import { composeLineName, effectiveUnitPrice, type OptionChoice } from '@/lib/menuOptions';
@@ -59,11 +63,11 @@ import {
   CHECKOUT_MAX_ITEMS,
   DECIMAL_PATTERN,
   exceedsTokenPrecision,
+  parseSplitDrafts,
   type CheckoutItem,
 } from '@/lib/url';
+import { groupAmountDigits } from '@/lib/amount';
 import { taxAmountDecimal, taxDisplayDecimals, type TaxCategory } from '@/lib/tax';
-import { TaxCategorySelect } from './TaxCategorySelect';
-import { TokenLogo, ChainLogo } from './AssetLogo';
 import { categoryColorClasses } from '@/lib/categoryColor';
 import type { ShopLiveState } from '@/lib/shopLive';
 import { fetchMyHandles, myHandlesQueryKey } from '@/lib/handleMine';
@@ -79,10 +83,7 @@ type CartLine = {
   presetId?: string;
 };
 
-type RegisterModeProps = {
-  /** 通貨/チェーンを変更する導線 (page が QR タブへ切替える)。レジは読み取り専用表示。 */
-  onEditCurrency?: () => void;
-};
+type RegisterModeProps = {};
 
 type RegisterShopLive = {
   state: ShopLiveState;
@@ -125,7 +126,6 @@ function RegisterModeWithShopLive(props: RegisterModeProps) {
 }
 
 function RegisterModeContent({
-  onEditCurrency,
   shopLive,
 }: RegisterModeProps & { shopLive?: RegisterShopLive }) {
   const t = useTranslations('RegisterMode');
@@ -138,7 +138,10 @@ function RegisterModeContent({
   const [cart, setCart] = useState<CartLine[]>([]);
   const [receiptNo, setReceiptNo] = useState('');
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
-  const [managerOpen, setManagerOpen] = useState(false);
+  // 「お店の設定」シート・商品の編集シート・開いているカートの行 (2026-10 磨き上げ P3)。
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [productsOpen, setProductsOpen] = useState(false);
+  const [openLineId, setOpenLineId] = useState<string | null>(null);
   const [currencyWarning, setCurrencyWarning] = useState(false);
   // レジの QR も即時表示せず「QRコードを表示する」→ 全画面モーダルで提示。
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -180,9 +183,9 @@ function RegisterModeContent({
       setSettings((s) => ({ ...s, receiver: value, receiverSource: source })),
     [setSettings],
   );
-  // 受取先は決済QRタブから継承 (レジでは編集しない)。autofill は接続ウォレットからの
-  // 受取先自動補完の side-effect のために呼ぶ (返り値は読まない)。
-  useReceiverAutofill({
+  // 受取先は決済QRタブと共有 (useQrSettings)。autofill は接続ウォレットからの受取先自動補完と、
+  // 受取先の欄の「接続中のウォレットを使う」に使う。
+  const autofill = useReceiverAutofill({
     receiver: settings.receiver,
     receiverSource: settings.receiverSource,
     effectiveReceiver,
@@ -202,13 +205,18 @@ function RegisterModeContent({
       receiverName && resolveQuery.data ? resolveQuery.data.address : null,
     );
   }, [receiverName, resolveQuery.data]);
+  // 受取先の欄 (AddressInput) も名前を解決して知らせてくるが、レジは上の useResolveAddress を正本にする
+  // (同じ hook で同じ値・二重に state を持たない)。
+  const ignoreResolved = useCallback(() => {}, []);
 
-  // 通貨/チェーンは QR タブで設定 (レジは読み取り専用)。QR タブへ切替えるとレジは unmount され
-  // カート/管理番号の編集中 state が破棄されるため、非空カート時は確認してから遷移する。
-  function handleEditCurrency() {
-    if (cart.length > 0 && !window.confirm(t('editCurrencyConfirm'))) return;
-    onEditCurrency?.();
-  }
+  // 受取先が未設定のときは会計画面に受取先の欄を出す。読み込み後に未設定だったら出し、入力し終えても消さない
+  // (打っている途中で欄が消えない・次に開いたときは保存済みなので出ない)。
+  const [receiverInline, setReceiverInline] = useState(false);
+  useEffect(() => {
+    if (hydrated && !effectiveReceiver && !receiverName) setReceiverInline(true);
+  }, [hydrated, effectiveReceiver, receiverName]);
+  // 支払い方法の区切りは自動分配を出さないので、空の分配で渡す (レジの明細 QR は分配しない)。
+  const noSplits = useMemo(() => parseSplitDrafts([], null), []);
 
   const deployment = deploymentForSlug(settings.token, settings.chain);
   // この会計のチェーンでお店負担に使う値 (JPYC・forwarder・手数料受取口・使えないチェーンなら null)。
@@ -346,13 +354,17 @@ function RegisterModeContent({
 
   function addEmptyLine() {
     setCurrencyWarning(false);
+    if (cart.length >= CHECKOUT_MAX_ITEMS) return;
+    // 自由入力の行は名前と単価を入れてもらうので、開いた状態で足す。
+    const id = randomId();
+    setOpenLineId(id);
     setCart((c) =>
       c.length >= CHECKOUT_MAX_ITEMS
         ? c
         : [
             ...c,
             {
-              id: randomId(),
+              id,
               name: '',
               unitPrice: '',
               quantity: 1,
@@ -617,477 +629,454 @@ function RegisterModeContent({
     />
   );
 
-  return (
-    <div className="space-y-5">
-      {/* 見出し・説明は出さない (タブ名「レジ」で足りる・2026-10 磨き上げ P1)。 */}
-      {/* 受取先/通貨/チェーン/決済設定は決済QRタブから継承。レジでは大きく露出させず、
-          確認用に 1 行のステータスバー (受取先・通貨/チェーン・決済設定 + 変更導線) へ圧縮し、
-          上部の縦幅を削って商品プリセットを上に押し上げる。 */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-        <span className="font-medium text-slate-500">{t('statusReceiverLabel')}:</span>
-        <span className="font-mono text-slate-600">
-          {effectiveReceiver
-            ? shortAddress(effectiveReceiver)
-            : settings.receiver.trim() || '—'}
-        </span>
-        <span className="inline-flex items-center gap-1 text-slate-500">
-          <TokenLogo symbol={settings.token} size={14} className="h-3.5 w-3.5" />
-          <ChainLogo slug={settings.chain} size={14} className="h-3.5 w-3.5" />
-          ({chainForSlug(settings.chain).name} / {symbol})
-        </span>
-        <span className="text-slate-300" aria-hidden>
-          ｜
-        </span>
-        <span className="text-slate-500">
-          {storeRequested
-            ? t('storeDevice.badge')
-            : isFreeGasless
-              ? t('paymentPolicy.gaslessFree')
-              : t(
-                  `paymentPolicy.${paymentPolicyKey(settings.payMode, effectiveGasMode)}`,
-                )}
-        </span>
-        {onEditCurrency && (
-          <button
-            type="button"
-            onClick={handleEditCurrency}
-            className="font-medium text-brand hover:underline"
-          >
-            {t('statusChangeLink')}
-          </button>
-        )}
-      </div>
+  // 押せない理由 (未入力の項目)。商品 → 受取先の順に 1 つだけ。
+  const notReady = checkoutUrl
+    ? null
+    : validItems.length === 0
+      ? t('notReady.items')
+      : !effectiveReceiver
+        ? t('notReady.receiver')
+        : null;
+  const lineCount = cart.reduce((n, l) => n + l.quantity, 0);
+  const qrDisabled = !checkoutUrl || device.busy || storeDeviceNotReady;
+  const qrLabel = sdSaleBlocked ? t('storeDevice.showNormalQr') : t('showQr');
 
-      {/* POS 2カラム: 左=操作 (page scroll) / 右=会計サマリ (lg で sticky 追従)。 */}
-      <div className="lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
-        {/* ── LEFT: メイン操作エリア ── */}
-        <div className="min-w-0 space-y-5">
-          {/* 商品プリセット (常時描画・末尾に ＋カスタム追加 を同サイズで統合) */}
-          <div>
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold text-slate-500">{t('presetsLabel')}</p>
-              {env.enableShopLive && (
-                <label className="flex shrink-0 items-center gap-1 text-[11px] text-slate-500">
-                  <input
-                    type="checkbox"
-                    checked={showImages}
-                    onChange={(e) =>
-                      setSettings((s) => ({ ...s, showPresetImages: e.target.checked }))
-                    }
-                  />
-                  {t('showImagesLabel')}
-                </label>
-              )}
+  return (
+    <div className="space-y-4">
+      {/* 2026-10 磨き上げ P3: 決済QR と同じ骨格 (左 = 操作 / 右 = 注文パネル / スマホ = 下部の会計バー)。
+          受取先・チェーン・支払い方法は「お店の設定」シート (決済QR タブと同じ部品・同じ設定を共有)。 */}
+      {/* PC: 注文パネルは 2 行にまたがり、1 行目は商品の高さに合わせる (ガス用ウォレットが商品のすぐ下に来る)。 */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-6">
+        {/* ── LEFT: 商品 ── */}
+        <div className="min-w-0 space-y-4">
+          <section
+            aria-labelledby="register-products-heading"
+            className="rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70"
+          >
+            <div className="border-b border-slate-100 px-5 py-4">
+              <ShopSummaryRow
+                storeName={settings.storeName}
+                receiver={effectiveReceiver}
+                token={settings.token}
+                tokenLabel={symbol}
+                chainSlug={settings.chain}
+                chainName={chainForSlug(settings.chain).name}
+                payLabel={
+                  storeRequested
+                    ? tQr('storeDevice.posterBadge')
+                    : settings.payMode === 'gasless'
+                      ? tQr('posterPayModeGasless')
+                      : tQr('shopSummary.payStandard')
+                }
+                payTone={storeRequested || settings.payMode === 'gasless' ? 'gasless' : 'standard'}
+                onOpenSettings={() => setSettingsOpen(true)}
+                labels={{
+                  settings: tQr('shopSettings.open'),
+                  noStoreName: tQr('shopSummary.noStoreName'),
+                  noReceiver: tQr('shopSummary.noReceiver'),
+                }}
+              />
             </div>
-            {/* カテゴリー絞り込み (flag 裏・カテゴリーを 1 つ以上付けた店舗のみ表示)。 */}
-            {env.enableShopLive && presetCategories.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-1.5">
+            <div className="px-5 pb-5 pt-4">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h2 id="register-products-heading" className="text-sm font-semibold text-slate-700">
+                  {t('presetsLabel')}
+                </h2>
                 <button
                   type="button"
-                  onClick={() => setCatFilter(null)}
-                  aria-pressed={effectiveCatFilter === null}
-                  className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
-                    effectiveCatFilter === null
-                      ? 'border-brand bg-brand text-white'
-                      : 'border-slate-300 text-slate-600 hover:border-brand'
-                  }`}
+                  onClick={() => setProductsOpen(true)}
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-brand hover:underline"
                 >
-                  {t('filterAll')}
+                  <Pencil className="h-3.5 w-3.5" aria-hidden />
+                  {t('presetManagerTitle')}
                 </button>
-                {presetCategories.map((c) => {
-                  const colors = categoryColorClasses(c);
+              </div>
+              {/* カテゴリー絞り込み (flag 裏・カテゴリーを 1 つ以上付けた店舗のみ表示)。 */}
+              {env.enableShopLive && presetCategories.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setCatFilter(null)}
+                    aria-pressed={effectiveCatFilter === null}
+                    className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
+                      effectiveCatFilter === null
+                        ? 'border-brand bg-brand text-white'
+                        : 'border-slate-300 text-slate-600 hover:border-brand'
+                    }`}
+                  >
+                    {t('filterAll')}
+                  </button>
+                  {presetCategories.map((c) => {
+                    const colors = categoryColorClasses(c);
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => setCatFilter(c)}
+                        aria-pressed={effectiveCatFilter === c}
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
+                          effectiveCatFilter === c
+                            ? 'border-brand bg-brand text-white'
+                            : 'border-slate-300 text-slate-600 hover:border-brand'
+                        }`}
+                      >
+                        <span
+                          className={`h-2 w-2 rounded-full ${colors.dot}`}
+                          aria-hidden
+                        />
+                        {c}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {visiblePresets.map((p) => {
+                  // 商品画像 (https のみ・任意)。管理で入れた image をプリセットのカードにもサムネ表示する
+                  // (モバイルオーダーのメニュー画像と同じ image を共有)。https 以外は描画しない (二重防御)。
+                  // 読込失敗は onError で隠し、名前+価格のテキスト表示へフォールバック (グリッドを壊さない)。
+                  const presetImg = safeHttpUrl(p.image);
+                  const category = p.category?.trim() ?? '';
+                  const categoryColors = category ? categoryColorClasses(category) : null;
+                  const isSoldOut = soldOut.has(p.id);
+                  // このプリセットが今カートにいくつ入っているか (0 = 未投入)。
+                  const qty = presetQty.get(p.id) ?? 0;
+                  const inCart = qty > 0;
                   return (
                     <button
-                      key={c}
+                      key={p.id}
                       type="button"
-                      onClick={() => setCatFilter(c)}
-                      aria-pressed={effectiveCatFilter === c}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium transition ${
-                        effectiveCatFilter === c
-                          ? 'border-brand bg-brand text-white'
-                          : 'border-slate-300 text-slate-600 hover:border-brand'
+                      onClick={() => (hasPresetOptions(p) ? setOptionModalPreset(p) : addFromPreset(p))}
+                      className={`relative flex min-h-[76px] flex-col justify-center rounded-xl border bg-white px-3 py-3 text-left transition hover:border-brand active:scale-[0.98] active:bg-brand/5 ${categoryColors ? `border-l-4 ${categoryColors.border}` : ''} ${
+                        inCart
+                          ? 'border-brand ring-2 ring-brand/15'
+                          : 'border-slate-200'
                       }`}
                     >
-                      <span
-                        className={`h-2 w-2 rounded-full ${colors.dot}`}
-                        aria-hidden
-                      />
-                      {c}
+                      {/* カート投入数バッジ (POS の要・右上)。タップごとに +1 され、何個入れたかを一目で。 */}
+                      {inCart && (
+                        <span
+                          className="absolute -right-1.5 -top-1.5 z-10 inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-brand px-1.5 text-xs font-bold tabular-nums text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.6)]"
+                          aria-hidden
+                        >
+                          {qty}
+                        </span>
+                      )}
+                      {env.enableShopLive && p.recommended && (
+                        <span
+                          className="absolute left-1.5 top-1.5 z-10 inline-flex items-center rounded-full bg-amber-100 px-1 py-0.5"
+                          title={t('recommendedBadge')}
+                        >
+                          <Star className="h-3 w-3 fill-amber-400 text-amber-400" aria-hidden />
+                          <span className="sr-only">{t('recommendedBadge')}</span>
+                        </span>
+                      )}
+                      {isSoldOut && (
+                        <span className="mb-1 inline-flex w-fit rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                          {t('soldOutBadge')}
+                        </span>
+                      )}
+                      {showImages && presetImg && (
+                        <ExternalImage
+                          src={presetImg}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
+                          decoding="async"
+                          // 第三者画像の読込失敗を壊れ画像 icon として商品ボタンに出さない。URL を直すと
+                          // ExternalImage が node を作り直すので、この display:none は新 URL に残らない。
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                          }}
+                          className={`mb-2 h-16 w-full rounded-lg object-cover ${isSoldOut ? 'grayscale' : ''}`}
+                        />
+                      )}
+                      <div className="truncate text-sm font-semibold text-slate-800">
+                        {p.name}
+                      </div>
+                      <div className="text-xs tabular-nums text-slate-500">
+                        {groupAmountDigits(p.unitPrice)}{' '}
+                        {deploymentForSlug(p.token, DEFAULT_CHAIN_FOR_SYMBOL[p.token])
+                          .displaySymbol}
+                      </div>
+                      {inCart && <span className="sr-only">{t('presetInCart', { count: qty })}</span>}
                     </button>
                   );
                 })}
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {visiblePresets.map((p) => {
-                // 商品画像 (https のみ・任意)。管理で入れた image をプリセットのカードにもサムネ表示する
-                // (モバイルオーダーのメニュー画像と同じ image を共有)。https 以外は描画しない (二重防御)。
-                // 読込失敗は onError で隠し、名前+価格のテキスト表示へフォールバック (グリッドを壊さない)。
-                const presetImg = safeHttpUrl(p.image);
-                const category = p.category?.trim() ?? '';
-                const categoryColors = category ? categoryColorClasses(category) : null;
-                const isSoldOut = soldOut.has(p.id);
-                // このプリセットが今カートにいくつ入っているか (0 = 未投入)。
-                const qty = presetQty.get(p.id) ?? 0;
-                const inCart = qty > 0;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => (hasPresetOptions(p) ? setOptionModalPreset(p) : addFromPreset(p))}
-                    className={`relative flex min-h-[76px] flex-col justify-center rounded-xl border bg-white px-3 py-3 text-left shadow-card transition hover:-translate-y-0.5 hover:border-brand hover:shadow-card-hover active:translate-y-0 active:scale-[0.98] active:bg-brand/5 ${categoryColors ? `border-l-4 ${categoryColors.border}` : ''} ${
-                      inCart
-                        ? 'border-brand ring-2 ring-brand/15'
-                        : 'border-slate-200'
-                    }`}
-                  >
-                    {/* カート投入数バッジ (POS の要・右上)。タップごとに +1 され、何個入れたかを一目で。 */}
-                    {inCart && (
-                      <span
-                        className="absolute -right-1.5 -top-1.5 z-10 inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-brand px-1.5 text-xs font-bold tabular-nums text-white shadow-[0_2px_8px_-2px_rgba(37,99,235,0.6)]"
-                        aria-hidden
-                      >
-                        {qty}
-                      </span>
-                    )}
-                    {env.enableShopLive && p.recommended && (
-                      <span
-                        className="absolute left-1.5 top-1.5 z-10 inline-flex items-center rounded-full bg-amber-100 px-1 py-0.5"
-                        title={t('recommendedBadge')}
-                        aria-label={t('recommendedBadge')}
-                      >
-                        <Star className="h-3 w-3 fill-amber-400 text-amber-400" aria-hidden />
-                      </span>
-                    )}
-                    {isSoldOut && (
-                      <span className="mb-1 inline-flex w-fit rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
-                        {t('soldOutBadge')}
-                      </span>
-                    )}
-                    {showImages && presetImg && (
-                      <ExternalImage
-                        src={presetImg}
-                        alt=""
-                        referrerPolicy="no-referrer"
-                        loading="lazy"
-                        decoding="async"
-                        // 第三者画像の読込失敗を壊れ画像 icon として商品ボタンに出さない。URL を直すと
-                        // ExternalImage が node を作り直すので、この display:none は新 URL に残らない。
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                        }}
-                        className={`mb-2 h-16 w-full rounded-lg object-cover ${isSoldOut ? 'grayscale' : ''}`}
-                      />
-                    )}
-                    <div className="truncate text-sm font-semibold text-slate-800">
-                      {p.name}
-                    </div>
-                    <div className="font-mono text-xs text-slate-500">
-                      {p.unitPrice}{' '}
-                      {deploymentForSlug(p.token, DEFAULT_CHAIN_FOR_SYMBOL[p.token])
-                        .displaySymbol}
-                    </div>
-                    {inCart && <span className="sr-only">{t('presetInCart', { count: qty })}</span>}
-                  </button>
-                );
-              })}
-              {/* カスタム追加 (空行) — プリセットと同サイズの末尾セル。 */}
-              <button
-                type="button"
-                onClick={addEmptyLine}
-                disabled={cart.length >= CHECKOUT_MAX_ITEMS}
-                className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-slate-300 text-sm font-medium text-slate-500 transition hover:border-brand hover:text-brand-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <Plus className="h-5 w-5" aria-hidden />
-                {t('addLine')}
-              </button>
-            </div>
-            {currencyWarning && (
-              <p className="mt-2 text-xs text-amber-600">
-                {t('currencyMismatch', { symbol })}
-              </p>
-            )}
-          </div>
-
-          {/* カート (商品行カード) */}
-          {cart.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-500">
-              {t('cartEmpty')}
-            </p>
-          ) : (
-            <ul className="space-y-3">
-              {lines.map(({ l, amountHuman, valid }) => (
-                <li
-                  key={l.id}
-                  className="space-y-3 rounded-2xl bg-white p-3 ring-1 ring-slate-200/70"
+                {/* 自由入力 (空行) — プリセットと同サイズの末尾セル。 */}
+                <button
+                  type="button"
+                  onClick={addEmptyLine}
+                  disabled={cart.length >= CHECKOUT_MAX_ITEMS}
+                  className="flex min-h-[76px] flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-slate-300 text-sm font-medium text-slate-500 transition hover:border-brand hover:text-brand-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <div className="flex items-start gap-2">
-                    <input
-                      type="text"
-                      value={l.name}
-                      onChange={(e) => updateLine(l.id, { name: e.target.value })}
-                      placeholder={t('productNamePlaceholder')}
-                      aria-label={t('productNameLabel')}
-                      className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-brand focus:outline-none"
-                      maxLength={80}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeLine(l.id)}
-                      aria-label={t('removeLine')}
-                      className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:border-red-300 hover:text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4" aria-hidden />
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap items-end gap-3">
-                    <Field label={t('unitPriceLabel', { symbol })}>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={l.unitPrice}
-                        onChange={(e) =>
-                          updateLine(l.id, {
-                            unitPrice: e.target.value.replace(/[^\d.]/g, ''),
-                          })
-                        }
-                        placeholder="0"
-                        aria-label={t('unitPriceLabel', { symbol })}
-                        className="w-28 rounded-lg border border-slate-300 px-3 py-2 text-right font-mono text-base focus:border-brand focus:outline-none"
-                      />
-                    </Field>
-                    <Field label={t('quantityLabel')}>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setQty(l.id, l.quantity - 1)}
-                          aria-label={t('quantityDecrement')}
-                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:border-brand"
-                        >
-                          <Minus className="h-5 w-5" aria-hidden />
-                        </button>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={l.quantity}
-                          aria-label={t('quantityLabel')}
-                          onChange={(e) => {
-                            const n = Number(e.target.value.replace(/[^\d]/g, ''));
-                            setQty(l.id, Number.isFinite(n) && n >= 1 ? n : 1);
-                          }}
-                          className="h-11 w-14 rounded-lg border border-slate-300 text-center font-mono text-lg focus:border-brand focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setQty(l.id, l.quantity + 1)}
-                          aria-label={t('quantityIncrement')}
-                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:border-brand"
-                        >
-                          <Plus className="h-5 w-5" aria-hidden />
-                        </button>
-                      </div>
-                    </Field>
-                    <Field label={t('taxLabel')}>
-                      <TaxCategorySelect
-                        taxRate={l.taxRate}
-                        taxCategory={l.taxCategory}
-                        onChange={(next) => updateLine(l.id, next)}
-                        ariaLabel={t('taxLabel')}
-                        customAriaLabel={t('taxCustomLabel')}
-                      />
-                    </Field>
-                    <div className="ml-auto text-right">
-                      <div className="text-[11px] text-slate-500">{t('lineAmount')}</div>
-                      <div className="font-mono text-sm font-semibold text-slate-800">
-                        {valid ? `${amountHuman} ${symbol}` : '—'}
-                      </div>
-                    </div>
-                  </div>
-
-                  <input
-                    type="text"
-                    value={l.memo}
-                    onChange={(e) => updateLine(l.id, { memo: e.target.value })}
-                    placeholder={t('memoPlaceholder')}
-                    aria-label={t('memoLabel')}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs focus:border-brand focus:outline-none"
-                    maxLength={80}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {/* ▸ 記帳・会計 (任意): 3 モード共通 AccountingSection。レジは cart variant =
-              商品名/税はカート明細から自動反映するので手入力欄は出さず、管理番号 + 採番 のみ。 */}
-          <AccountingSection
-            variant="cart"
-            receiptNo={receiptNo}
-            onReceiptNoChange={setReceiptNo}
-            onGenerateReceiptNo={() => setReceiptNo(presetStore.nextReceiptNo())}
-            labels={{
-              title: t('accountingTitle'),
-              receiptNo: t('receiptNoLabel'),
-              receiptNoPlaceholder: t('receiptNoPlaceholder'),
-              generate: t('receiptNoGenerate'),
-              cartAutoNote: t('cartAutoNote'),
-            }}
-          />
-
-          {/* 商品プリセット管理 (折りたたみ) */}
-          <details
-            className="group rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70"
-            open={managerOpen}
-          >
-            <summary
-              onClick={(e) => {
-                e.preventDefault();
-                setManagerOpen((o) => !o);
-              }}
-              className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-slate-700"
-            >
-              <span>{t('presetManagerTitle')}</span>
-              <ChevronRight
-                className="h-4 w-4 text-slate-500 transition-transform group-open:rotate-90"
-                aria-hidden
-              />
-            </summary>
-            <div className="mt-3">
-              <ProductPresetManager
-                presets={presetStore.presets}
-                addPreset={presetStore.addPreset}
-                updatePreset={presetStore.updatePreset}
-                removePreset={presetStore.removePreset}
-                movePreset={presetStore.movePreset}
-                shopLive={shopLive}
-              />
+                  <Plus className="h-5 w-5" aria-hidden />
+                  {t('addLine')}
+                </button>
+              </div>
+              {currencyWarning && (
+                <p className="mt-3 text-xs text-amber-700">
+                  {t('currencyMismatch', { symbol })}
+                </p>
+              )}
             </div>
-          </details>
+          </section>
+
+          {/* 受取先が未設定のときだけ、会計画面に受取先の欄を出す (QR を出す前提・設定済みならシートの中)。 */}
+          {receiverInline && (
+            <section
+              aria-labelledby="register-receiver-inline-heading"
+              className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70"
+            >
+              <h2 id="register-receiver-inline-heading" className="text-sm font-semibold text-slate-800">
+                {tQr('receiverInline.title')}
+              </h2>
+              <p className="mb-3 mt-0.5 text-xs text-slate-500">{tQr('receiverInline.hint')}</p>
+              <QrReceiverFields
+                settings={settings}
+                deployment={deployment}
+                chain={chainForSlug(settings.chain)}
+                effectiveReceiver={effectiveReceiver}
+                receiverValid={effectiveReceiver !== null}
+                autofill={autofill}
+                handleResolved={ignoreResolved}
+              />
+            </section>
+          )}
         </div>
 
-        {/* ── RIGHT: 会計サマリ (lg で sticky 追従・モバイルは in-flow) ── */}
-        <aside className="mt-6 min-w-0 self-start lg:mt-0 lg:sticky lg:top-20 lg:max-h-[calc(100vh-6rem)]">
-          <div className="flex flex-col overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 lg:max-h-[calc(100vh-6rem)]">
-            <div className="border-b border-slate-100 px-4 py-3">
-              <p className="text-sm font-semibold text-slate-700">
+        {/* ── RIGHT: 注文パネル (カート = ご注文・PC は sticky・スマホは商品の下) ── */}
+        <aside className="min-w-0 self-start lg:sticky lg:top-20 lg:row-span-2">
+          <section
+            aria-labelledby="register-order-heading"
+            className="flex flex-col overflow-hidden rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 lg:max-h-[calc(100vh-6rem)]"
+          >
+            <div className="flex items-baseline justify-between border-b border-slate-100 px-5 py-4">
+              <h2 id="register-order-heading" className="text-sm font-semibold text-slate-800">
                 {t('orderSummaryTitle')}
-              </p>
+              </h2>
+              {lineCount > 0 && (
+                <span className="text-xs tabular-nums text-slate-500">{t('itemCount', { count: lineCount })}</span>
+              )}
             </div>
 
-            {/* 注文明細 (読み取り・確定行のみ。長いカートは内部スクロール) */}
-            <div className="min-h-[3rem] flex-1 overflow-y-auto px-4 py-3">
-              {summaryLines.length === 0 ? (
-                <p className="py-3 text-center text-xs text-slate-500">
-                  {t('previewPlaceholder')}
-                </p>
+            <div className="min-h-[3rem] flex-1 overflow-y-auto">
+              {cart.length === 0 ? (
+                <p className="px-5 py-6 text-center text-sm text-slate-500">{t('cartEmpty')}</p>
               ) : (
-                <ul className="space-y-2 text-sm">
-                  {summaryLines.map(({ l, amountHuman }) => (
-                    <li
+                <ul className="divide-y divide-slate-100">
+                  {lines.map(({ l, amountHuman, valid }) => (
+                    <RegisterCartLine
                       key={l.id}
-                      className="flex items-baseline justify-between gap-2"
-                    >
-                      <span className="min-w-0 truncate text-slate-700">
-                        {l.name}
-                        <span className="ml-1 text-slate-500">×{l.quantity}</span>
-                      </span>
-                      <span className="shrink-0 font-mono text-slate-800">
-                        {amountHuman} {symbol}
-                      </span>
-                    </li>
+                      line={l}
+                      amountText={valid ? `${groupAmountDigits(amountHuman)} ${symbol}` : '—'}
+                      symbol={symbol}
+                      open={openLineId === l.id}
+                      onToggle={() => setOpenLineId((id) => (id === l.id ? null : l.id))}
+                      onUpdate={(patch) => updateLine(l.id, patch)}
+                      onRemove={() => removeLine(l.id)}
+                      onQty={(q) => setQty(l.id, q)}
+                    />
                   ))}
                 </ul>
               )}
             </div>
 
-            {/* 小計 / 税額 / 合計 (大) */}
-            <div className="border-t border-slate-200 bg-slate-50 px-4 py-3">
+            {/* 小計 / 税額 / 合計 (大)。空のカートでは 0 を並べない。 */}
+            {cart.length > 0 && (
+            <>
+            <div className="border-t border-slate-100 bg-slate-50/70 px-5 py-4">
               <dl className="space-y-1.5 text-sm">
                 <div className="flex justify-between">
                   <dt className="text-slate-500">{t('subtotal')}</dt>
-                  <dd className="font-mono text-slate-800">
-                    {totalHuman} {symbol}
+                  <dd className="tabular-nums text-slate-800">
+                    {groupAmountDigits(totalHuman)} {symbol}
                   </dd>
                 </div>
                 {totalTaxRounded > 0 && (
                   <div className="flex justify-between">
                     <dt className="text-slate-500">{t('taxAmount')}</dt>
-                    <dd className="font-mono text-slate-600">
+                    <dd className="tabular-nums text-slate-600">
                       {totalTaxRounded} {symbol}
                     </dd>
                   </div>
                 )}
                 <div className="flex items-baseline justify-between border-t border-slate-200 pt-2">
                   <dt className="text-sm font-semibold text-slate-700">{t('total')}</dt>
-                  <dd className="font-mono text-xl font-bold text-slate-900">
-                    {totalHuman} {symbol}
+                  <dd className="text-2xl font-bold tabular-nums tracking-tight text-slate-900">
+                    {groupAmountDigits(totalHuman)} {symbol}
                   </dd>
                 </div>
               </dl>
               <p className="mt-2 text-[11px] text-slate-500">{t('taxInclusiveNote')}</p>
             </div>
 
-            {/* デスクトップ CTA (サイドバー最下部に固定表示)。モバイルは下部バー側を使う。 */}
-            <div className="hidden border-t border-slate-100 p-3 lg:block">
+            {/* ▸ 管理番号 (任意): 商品名・税はカート明細から自動で記録されるので、手入力は管理番号だけ。 */}
+            <div className="border-t border-slate-100 px-5 py-3">
+              <AccountingSection
+                variant="cart"
+                bare
+                receiptNo={receiptNo}
+                onReceiptNoChange={setReceiptNo}
+                onGenerateReceiptNo={() => setReceiptNo(presetStore.nextReceiptNo())}
+                labels={{
+                  title: t('accountingTitle'),
+                  receiptNo: t('receiptNoLabel'),
+                  receiptNoPlaceholder: t('receiptNoPlaceholder'),
+                  generate: t('receiptNoGenerate'),
+                  cartAutoNote: t('cartAutoNote'),
+                }}
+              />
+            </div>
+            </>
+            )}
+
+            {/* PC の QR ボタン (パネルの最下部)。スマホは下部の会計バー。 */}
+            <div className="hidden border-t border-slate-100 p-4 lg:block">
               <button
                 type="button"
                 onClick={() => void openQr()}
-                disabled={!checkoutUrl || device.busy || storeDeviceNotReady}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
+                disabled={qrDisabled}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-card transition-[transform,box-shadow] hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:hover:translate-y-0"
               >
                 <QrCodeIcon className="h-5 w-5" aria-hidden />
                 {/* お店負担を選んでいるがこの会計では使えない → 店員が通常の QR を選ぶ (黙って切り替えない)。 */}
-                {sdSaleBlocked ? t('storeDevice.showNormalQr') : t('showQr')}
+                {qrLabel}
               </button>
+              {notReady && <p className="mt-2 text-center text-xs text-slate-500">{notReady}</p>}
             </div>
-          </div>
+          </section>
         </aside>
+
+        {/* お店の端末で送る (ガス代の肩代わり) の状態とガス用ウォレット。PC は左列の商品の下、スマホは注文の下。 */}
+        {env.enableStoreGasWallet && (
+          <div className="min-w-0 space-y-4 lg:col-start-1">
+            {(storeDeviceForSale || sdSaleBlocked || (sdState.phase !== 'idle' && !qrModalOpen)) && (
+              <div className="space-y-2">
+                {storeDeviceForSale && (
+                  <p className="text-xs font-semibold text-emerald-800">{t('storeDevice.badge')}</p>
+                )}
+                {sdSaleBlocked && (
+                  <p role="status" className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    {t(`storeDevice.saleBlocked.${sdSaleBlocked}`, { chain: storeDeviceChainNames(sdChainIds) })}{' '}
+                    {t('storeDevice.saleBlockedHint')}
+                  </p>
+                )}
+                {/* 切替を OFF にしても、送っている・結果を待っている支払いの表示は残す (次の QR を出せない理由)。 */}
+                {sdState.phase !== 'idle' && !qrModalOpen && storeDeviceStatus}
+              </div>
+            )}
+            {/* お店の端末のガス用ウォレット (flag OFF では出さない・plans/store-gas-wallet.md)。 */}
+            <StoreGasWalletPanel onAddressChange={setGasAddress} />
+          </div>
+        )}
       </div>
 
-      {/* お店の端末のガス用ウォレット (flag OFF では出さない・plans/store-gas-wallet.md)。 */}
-      {env.enableStoreGasWallet && (storeDeviceForSale || sdSaleBlocked || (sdState.phase !== 'idle' && !qrModalOpen)) && (
-        <div className="space-y-2">
-          {storeDeviceForSale && (
-            <p className="text-xs font-semibold text-emerald-800">{t('storeDevice.badge')}</p>
-          )}
-          {sdSaleBlocked && (
-            <p role="status" className="text-xs text-amber-800">
-              {t(`storeDevice.saleBlocked.${sdSaleBlocked}`, { chain: storeDeviceChainNames(sdChainIds) })}{' '}
-              {t('storeDevice.saleBlockedHint')}
-            </p>
-          )}
-          {/* 切替を OFF にしても、送っている・結果を待っている支払いの表示は残す (次の QR を出せない理由)。 */}
-          {sdState.phase !== 'idle' && !qrModalOpen && storeDeviceStatus}
-        </div>
-      )}
-      {env.enableStoreGasWallet && (
-        <StoreGasWalletPanel onAddressChange={setGasAddress} />
-      )}
-
-      {/* モバイル下部固定 会計バー (合計 + QR ボタン)。lg では右サイドバー CTA を使う。
-          グローバルの BottomNav (fixed bottom-0 z-20・md:hidden) の上に重ねるため、
-          < md は bottom-14 で nav 分浮かせ、md 以上 (nav 非表示) は bottom-0。 */}
+      {/* モバイル下部固定 会計バー (合計 + QR ボタン)。lg では注文パネルのボタンを使う。下のナビと 1 枚に見えるよう
+          同じ半透明の白・影なし (user 裁定: ナビは残して一体化)。< md は bottom-14 で nav 分浮かせ、md 以上は bottom-0。 */}
       <div
         ref={totalBarRef}
-        className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/80 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_-6px_rgba(15,23,42,0.14)] backdrop-blur md:bottom-0 lg:hidden"
+        className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/70 bg-white/85 px-4 py-2.5 backdrop-blur-md supports-[backdrop-filter]:bg-white/75 md:bottom-0 lg:hidden"
       >
         <div className="min-w-0 flex-1">
           <div className="text-[11px] text-slate-500">{t('total')}</div>
-          <div className="truncate font-mono text-lg font-bold text-slate-900">
-            {totalHuman} {symbol}
-          </div>
+          {notReady ? (
+            <div className="truncate text-sm font-medium text-slate-500">{notReady}</div>
+          ) : (
+            <div className="truncate text-lg font-bold tabular-nums text-slate-900">
+              {groupAmountDigits(totalHuman)} {symbol}
+            </div>
+          )}
         </div>
         <button
           type="button"
           onClick={() => void openQr()}
-          disabled={!checkoutUrl || device.busy || storeDeviceNotReady}
-          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0"
+          disabled={qrDisabled}
+          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-base font-bold text-white transition-transform hover:bg-brand-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
         >
           <QrCodeIcon className="h-5 w-5" aria-hidden />
-          {sdSaleBlocked ? t('storeDevice.showNormalQr') : t('showQr')}
+          {qrLabel}
         </button>
       </div>
+
+      {/* お店の設定 (決済QR タブと同じ部品・同じ設定を共有・user 裁定)。レジでは通貨は商品で決まるのでチェーンだけ選ぶ。
+          売上の自動分配・他チェーンからの受取はレジの明細 QR (checkout) で使わないので出さない。 */}
+      <ShopSettingsSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        title={tQr('shopSettings.title')}
+        doneLabel={tQr('shopSettings.done')}
+      >
+        <ShopSettingsSection title={tQr('shopSettings.sections.receive')}>
+          <QrReceiverFields
+            settings={settings}
+            deployment={deployment}
+            chain={chainForSlug(settings.chain)}
+            effectiveReceiver={effectiveReceiver}
+            receiverValid={effectiveReceiver !== null}
+            autofill={autofill}
+            handleResolved={ignoreResolved}
+          />
+          <QrStoreNameField settings={settings} setSettings={setSettings} />
+        </ShopSettingsSection>
+        <ShopSettingsSection title={tQr('shopSettings.sections.currency')}>
+          <p className="text-xs text-slate-500">{t('currencyFromProducts', { symbol })}</p>
+          <ChainChooser
+            slugs={settings.token === 'usdc' ? USDC_CHAINS : JPYC_CHAINS}
+            selected={settings.chain}
+            onSelect={(slug) => setSettings((s) => withChain(s, slug))}
+            gridClassName="grid grid-cols-2 gap-2"
+            showId={false}
+          />
+        </ShopSettingsSection>
+        <ShopSettingsSection title={tQr('shopSettings.sections.payment')}>
+          <QrSettingsSection
+            settings={settings}
+            setSettings={setSettings}
+            deployment={deployment}
+            hideGasMode={isFreeGasless || isJpycRecover}
+            isJpycRecover={isJpycRecover}
+            isStandard={settings.payMode === 'standard'}
+            splitParsed={noSplits}
+            splitsForUrl={undefined}
+            showSplitAndCrossChain={false}
+          />
+        </ShopSettingsSection>
+        <ShopSettingsSection title={tQr('shopSettings.sections.receipt')}>
+          <QrReceiptPosterFields settings={settings} setSettings={setSettings} />
+        </ShopSettingsSection>
+      </ShopSettingsSheet>
+
+      {/* 商品の編集 (モバイル注文のメニューと同じ商品)。 */}
+      <ShopSettingsSheet
+        open={productsOpen}
+        onClose={() => setProductsOpen(false)}
+        title={t('productsSheetTitle')}
+        doneLabel={tQr('shopSettings.done')}
+      >
+        {env.enableShopLive && (
+          <label className="flex items-center gap-2 px-1 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              checked={showImages}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, showPresetImages: e.target.checked }))
+              }
+            />
+            {t('showImagesLabel')}
+          </label>
+        )}
+        <div className="rounded-2xl bg-white p-4 ring-1 ring-slate-200/70">
+          <ProductPresetManager
+            presets={presetStore.presets}
+            addPreset={presetStore.addPreset}
+            updatePreset={presetStore.updatePreset}
+            removePreset={presetStore.removePreset}
+            movePreset={presetStore.movePreset}
+            shopLive={shopLive}
+          />
+        </div>
+      </ShopSettingsSheet>
 
       {/* 全画面プレビュー (ポスター調 + 印刷/URLコピー + × 閉じる)。決済QRと共通コンポーネント。 */}
       {checkoutUrl && (

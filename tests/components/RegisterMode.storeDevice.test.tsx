@@ -94,7 +94,7 @@ function seed(receiver = VALID, storePays = true) {
 }
 
 async function addItemAndOpen(user: ReturnType<typeof userEvent.setup>, cta: RegExp = /QRコードを表示する/) {
-  await user.click(await screen.findByRole('button', { name: /コーヒー/ }));
+  await user.click(await findTile(/コーヒー/));
   const btns = await screen.findAllByRole('button', { name: cta });
   await user.click(btns[0]);
 }
@@ -102,6 +102,16 @@ async function addItemAndOpen(user: ReturnType<typeof userEvent.setup>, cta: Reg
 function shownCheckout() {
   const el = screen.queryByTestId('qr');
   return el ? new URL(el.getAttribute('data-value')!).searchParams : null;
+}
+
+
+// 2026-10 磨き上げ P3: カートの行にも商品名のボタン (詳細の開閉) があるので、商品のタイルは「商品」の区切りの中で探す。
+function tiles() {
+  return within(screen.getByRole('region', { name: /^(商品|Products)$/ }));
+}
+async function findTile(name: RegExp) {
+  const region = await screen.findByRole('region', { name: /^(商品|Products)$/ });
+  return within(region).findByRole('button', { name });
 }
 
 describe('RegisterMode × お店の端末で送る (flag ON)', () => {
@@ -213,7 +223,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     seed();
     hold.state = { phase: 'expired' };
     render(<RegisterMode />);
-    await user.click(await screen.findByRole('button', { name: /コーヒー/ }));
+    await user.click(await findTile(/コーヒー/));
     await user.click(await screen.findByRole('button', { name: 'QR を出し直す' }));
     expect(hold.start).toHaveBeenCalledWith(VALID, 500n * 10n ** 18n, 80002);
     await waitFor(() => expect(shownCheckout()?.get('hs')).toBe(HS));
@@ -261,7 +271,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     hold.start.mockReturnValue(new Promise((r) => { resolve = r; }));
     render(<RegisterMode />);
     await addItemAndOpen(user);
-    await user.click(await screen.findByRole('button', { name: /コーヒー/ })); // 500 → 1000
+    await user.click(await findTile(/コーヒー/)); // 500 → 1000
     resolve({ id: HS, token: 'ab'.repeat(32), expiresAt: 0, merchant: VALID, amount: '1', chainId: 80002 });
     await waitFor(() => expect(hold.stop).toHaveBeenCalled());
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -271,7 +281,7 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     seed();
     hold.busy = true;
     render(<RegisterMode />);
-    await screen.findByRole('button', { name: /コーヒー/ });
+    await findTile(/コーヒー/);
     for (const b of screen.getAllByRole('button', { name: /QRコードを表示する/ })) expect(b).toBeDisabled();
   });
 

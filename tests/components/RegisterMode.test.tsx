@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
 import { renderWithIntl } from '../_helpers/i18n';
@@ -107,6 +107,24 @@ async function parsedCheckout() {
   return parseCheckoutParams(new URL(el.textContent!).searchParams);
 }
 
+
+// 2026-10 磨き上げ P3: カートの行にも商品名のボタン (詳細の開閉) があるので、商品のタイルは「商品」の区切りの中で探す。
+function tiles() {
+  return within(screen.getByRole('region', { name: /^(商品|Products)$/ }));
+}
+async function findTile(name: RegExp) {
+  const region = await screen.findByRole('region', { name: /^(商品|Products)$/ });
+  return within(region).findByRole('button', { name });
+}
+// カートの行は 1 行表示 (名前・数量・金額)。名前を押すと単価・税・メモ・名前・削除が開く。
+function orderPanel() {
+  return within(screen.getByRole('region', { name: /^(ご注文|Order)$/ }));
+}
+async function openLine(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+  const toggle = orderPanel().getByRole('button', { name });
+  if (toggle.getAttribute('aria-expanded') !== 'true') await user.click(toggle);
+}
+
 describe('RegisterMode', () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -120,7 +138,7 @@ describe('RegisterMode', () => {
 
   it('D3: preset accessible name retains price and in-cart quantity', async () => {
     render(<RegisterMode />);
-    const tile = await screen.findByRole('button', { name: /コーヒー/ });
+    const tile = await findTile(/コーヒー/);
     expect(tile).toHaveAccessibleName(/コーヒー.*500.*JPYC/);
     await userEvent.setup().click(tile);
     expect(tile).toHaveAccessibleName(/500.*JPYC/);
@@ -130,10 +148,10 @@ describe('RegisterMode', () => {
   it('初期サンプルプリセットが表示される (コーヒー/Tシャツ/イベント参加費/Tip)', async () => {
     render(<RegisterMode />);
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /コーヒー/ })).toBeInTheDocument(),
+      expect(tiles().getByRole('button', { name: /コーヒー/ })).toBeInTheDocument(),
     );
-    expect(screen.getByRole('button', { name: /Tシャツ/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Tip/ })).toBeInTheDocument();
+    expect(tiles().getByRole('button', { name: /Tシャツ/ })).toBeInTheDocument();
+    expect(tiles().getByRole('button', { name: /Tip/ })).toBeInTheDocument();
   });
 
   it('プリセットに画像URL(https)があればレジのカードにサムネ表示・無ければ出ない', async () => {
@@ -169,13 +187,13 @@ describe('RegisterMode', () => {
       }),
     );
     render(<RegisterMode />);
-    const withImg = await screen.findByRole('button', { name: /限定グッズ/ });
+    const withImg = await findTile(/限定グッズ/);
     expect(withImg.querySelector('img')).toHaveAttribute(
       'src',
       'https://example.com/item.png',
     );
     // 画像なしプリセットのカードには img を出さない (条件描画)。
-    const noImg = screen.getByRole('button', { name: /画像なし商品/ });
+    const noImg = tiles().getByRole('button', { name: /画像なし商品/ });
     expect(noImg.querySelector('img')).toBeNull();
   });
 
@@ -185,7 +203,7 @@ describe('RegisterMode', () => {
       receipt: { day: '', n: 0 },
     }));
     render(<RegisterMode />);
-    const button = await screen.findByRole('button', { name: /画像商品/ });
+    const button = await findTile(/画像商品/);
     const image = button.querySelector('img')!;
     // B-R7: decoding="async" を追加。
     expect(image.outerHTML).toBe('<img alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="mb-2 h-16 w-full rounded-lg object-cover " src="https://images.example/a.png">');
@@ -197,8 +215,9 @@ describe('RegisterMode', () => {
     fireEvent.click(button);
     expect(button.querySelector('img')).toBe(image);
     expect(image).toHaveAttribute('style', 'display: none;');
-    // 同じ画面の商品管理で URL を直すと新しい node になり、旧 node の display:none は残らない
+    // 同じ画面の商品管理 (「商品を編集」のシート) で URL を直すと新しい node になり、旧 node の display:none は残らない
     // (R7a までは node を使い回し、直した URL も隠れたままだった)。
+    fireEvent.click(screen.getByRole('button', { name: '商品を編集' }));
     fireEvent.change(screen.getByLabelText('画像URL(任意)'), { target: { value: 'https://images.example/b.png' } });
     const corrected = button.querySelector('img')!;
     expect(corrected).not.toBe(image);
@@ -230,12 +249,14 @@ describe('RegisterMode', () => {
       }),
     );
     render(<RegisterMode />);
-    const card = await screen.findByRole('button', { name: /限定グッズ/ });
+    const card = await findTile(/限定グッズ/);
     expect(card.querySelector('img')).not.toBeNull(); // 既定 ON
+    // 画像の表示切替は「商品を編集」のシートの中 (2026-10 磨き上げ P3)。
+    await user.click(screen.getByRole('button', { name: '商品を編集' }));
     await user.click(screen.getByLabelText('商品画像を表示'));
     // OFF にするとカードは残るが画像は出ない。
     expect(
-      (await screen.findByRole('button', { name: /限定グッズ/ })).querySelector('img'),
+      (await findTile(/限定グッズ/)).querySelector('img'),
     ).toBeNull();
   });
 
@@ -275,16 +296,16 @@ describe('RegisterMode', () => {
       }),
     );
     render(<RegisterMode />);
-    await screen.findByRole('button', { name: /コーラ/ });
+    await findTile(/コーラ/);
     // チップ: ドリンク / フード が出る。
     expect(screen.getByRole('button', { name: 'ドリンク' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'フード' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'ドリンク' }).querySelector('.h-2')).not.toBeNull();
-    expect(screen.getByRole('button', { name: /コーラ/ })).toHaveClass('border-l-4');
+    expect(tiles().getByRole('button', { name: /コーラ/ })).toHaveClass('border-l-4');
     // 「フード」で絞ると コーラ (ドリンク) はグリッドから消え、ポテトは残る。
     await user.click(screen.getByRole('button', { name: 'フード' }));
-    expect(screen.queryByRole('button', { name: /コーラ/ })).toBeNull();
-    expect(screen.getByRole('button', { name: /ポテト/ })).toBeInTheDocument();
+    expect(tiles().queryByRole('button', { name: /コーラ/ })).toBeNull();
+    expect(tiles().getByRole('button', { name: /ポテト/ })).toBeInTheDocument();
   });
 
   it('公開店舗の live soldOut に含まれる商品へバッジと grayscale を表示し、販売操作は塞がない', async () => {
@@ -336,9 +357,12 @@ describe('RegisterMode', () => {
 
     render(<RegisterMode />);
 
+    // タイルのバッジ + 商品の編集シートの「売り切れ」切替 (シートを開いて 2 つ)。
+    expect(await screen.findAllByText('売り切れ')).toHaveLength(1);
+    await userEvent.setup().click(screen.getByRole('button', { name: '商品を編集' }));
     expect(await screen.findAllByText('売り切れ')).toHaveLength(2);
-    const productButton = screen.getByRole('button', { name: /限定グッズ/ });
-    expect(productButton).toHaveAccessibleName(/売り切れ.*限定グッズ.*1200.*JPYC/);
+    const productButton = tiles().getByRole('button', { name: /限定グッズ/ });
+    expect(productButton).toHaveAccessibleName(/売り切れ.*限定グッズ.*1,200.*JPYC/);
     expect(productButton).not.toBeDisabled();
     expect(productButton.querySelector('img')).toHaveClass('grayscale');
     const toggle = screen.getByRole('checkbox', { name: '売り切れ' });
@@ -354,7 +378,7 @@ describe('RegisterMode', () => {
   it('shop-live flag OFF ではサインイン済みでも売り切れ UI を出さない', async () => {
     sessionHold.isSignedIn = true;
     render(<RegisterMode />);
-    await screen.findByRole('button', { name: /コーヒー/ });
+    await findTile(/コーヒー/);
     expect(screen.queryByText('売り切れ')).toBeNull();
     expect(global.fetch).not.toHaveBeenCalled();
   });
@@ -363,7 +387,7 @@ describe('RegisterMode', () => {
     envHold.enableShopLive = true;
     envHold.enableHandles = true;
     render(<RegisterMode />);
-    await screen.findByRole('button', { name: /コーヒー/ });
+    await findTile(/コーヒー/);
     expect(screen.queryByText('売り切れ')).toBeNull();
     expect(global.fetch).not.toHaveBeenCalled();
   });
@@ -394,7 +418,7 @@ describe('RegisterMode', () => {
       expect(global.fetch).toHaveBeenCalledWith('/api/shop/live?h=shop', undefined),
     );
     expect(screen.queryByText('売り切れ')).toBeNull();
-    expect(screen.getByRole('button', { name: /コーヒー/ })).toBeEnabled();
+    expect(tiles().getByRole('button', { name: /コーヒー/ })).toBeEnabled();
   });
 
   it('オプション付き preset: 選択モーダル → 実効単価(850) + サフィックス名で行追加', async () => {
@@ -439,11 +463,12 @@ describe('RegisterMode', () => {
     );
     render(<RegisterMode />);
     // options 付き preset をタップ → 即追加でなくモーダル。
-    await user.click(await screen.findByRole('button', { name: /牛丼/ }));
+    await user.click(await findTile(/牛丼/));
     await user.click(screen.getByRole('radio', { name: /大盛り/ }));
     await user.click(screen.getByRole('checkbox', { name: /えび/ }));
     await user.click(screen.getByRole('button', { name: 'カートに追加' }));
-    // カート行: サフィックス名 + 実効単価 850 が入力欄に反映 (行は編集可)。
+    // カート行: サフィックス名 + 実効単価 850 が入力欄に反映 (行を開くと編集可)。
+    await openLine(user, /牛丼（大盛り・えび）/);
     expect(screen.getByDisplayValue('牛丼（大盛り・えび）')).toBeInTheDocument();
     expect(screen.getByDisplayValue('850')).toBeInTheDocument();
   });
@@ -451,22 +476,23 @@ describe('RegisterMode', () => {
   it('プリセット選択で商品名・単価がレジ入力欄に反映される', async () => {
     const user = userEvent.setup();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    // 選択前: プリセット管理 (折りたたみ内) の行に 1 件だけ存在。
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    // 選択前: カートは空 (商品の編集はシートの中で、閉じている間は入力欄を出さない)。
+    expect(screen.queryAllByDisplayValue('コーヒー')).toHaveLength(0);
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
+    // 選択後: カートの行に 1 行・開くと名前と単価の入力欄に反映されている。
+    expect(orderPanel().getByRole('button', { name: /コーヒー/ })).toBeInTheDocument();
+    await openLine(user, /コーヒー/);
     expect(screen.getAllByDisplayValue('コーヒー')).toHaveLength(1);
     expect(screen.getAllByDisplayValue('500')).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
-    // 選択後: レジ入力欄にも反映され 2 件になる。
-    expect(screen.getAllByDisplayValue('コーヒー')).toHaveLength(2);
-    expect(screen.getAllByDisplayValue('500')).toHaveLength(2);
   });
 
   it('受取先 + プリセット選択 → /checkout URL を生成 (items + 税 + 管理番号)', async () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
 
     const r1 = await parsedCheckout();
     expect(r1.ok).toBe(true);
@@ -492,8 +518,8 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
 
     expect((await parsedCheckout()).ok).toBe(true);
 
@@ -509,8 +535,8 @@ describe('RegisterMode', () => {
   it('受取先未設定なら QR は生成されない (プレースホルダ表示)', async () => {
     const user = userEvent.setup();
     render(<RegisterMode />); // receiver 未 seed
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
     expect(screen.queryByText(/\/checkout\?/)).toBeNull();
   });
 
@@ -518,9 +544,9 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /Tシャツ/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /Tシャツ/ }));
     await waitFor(async () => {
       const r = await parsedCheckout();
       expect(r.ok && r.params.items).toHaveLength(2);
@@ -534,9 +560,9 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
     await waitFor(async () => {
       const r = await parsedCheckout();
       expect(r.ok && r.params.items).toHaveLength(1);
@@ -548,9 +574,9 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /Tip/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /Tip/ }));
     await waitFor(async () => {
       const r = await parsedCheckout();
       expect(r.ok && r.params.items).toHaveLength(2);
@@ -569,9 +595,11 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
     expect((await parsedCheckout()).ok).toBe(true);
+    await user.click(screen.getByRole('button', { name: /閉じる/ }));
+    await openLine(user, /コーヒー/);
     await user.click(screen.getByRole('button', { name: 'この商品を削除' }));
     await waitFor(() => expect(screen.queryByText(/\/checkout\?/)).toBeNull());
   });
@@ -580,9 +608,9 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ })); // 有効 1 行
-    await user.click(screen.getByRole('button', { name: '＋ カスタム追加' })); // 空行 (無効)
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ })); // 有効 1 行
+    await user.click(screen.getByRole('button', { name: '自由入力' })); // 空行 (無効)
     const r = await parsedCheckout();
     expect(r.ok && r.params.items).toHaveLength(1); // 空行は除外
   });
@@ -591,9 +619,9 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: '＋ カスタム追加' }));
-    // カート行の入力欄 (placeholder='0' は単価のみ・名前は DOM 先頭の "例: コーヒー")。
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(screen.getByRole('button', { name: '自由入力' }));
+    // 自由入力の行は開いた状態で足される (placeholder='0' は単価のみ・名前は "例: コーヒー")。
     await user.type(screen.getAllByPlaceholderText('例: コーヒー')[0], 'おにぎり');
     await user.type(screen.getByPlaceholderText('0'), '120');
     await waitFor(async () => {
@@ -610,19 +638,19 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ })); // qty 1
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ })); // qty 1
     await user.click(screen.getByRole('button', { name: '数量を減らす' }));
     await user.click(screen.getByRole('button', { name: '数量を減らす' }));
     const r = await parsedCheckout();
     expect(r.ok && r.params.items[0].qty).toBe(1);
   });
 
-  it('明細は最大 10 件 (＋カスタム追加が 10 件で disabled)', async () => {
+  it('明細は最大 10 件 (自由入力が 10 件で disabled)', async () => {
     const user = userEvent.setup();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: '＋ カスタム追加' }));
-    const add = () => screen.getByRole('button', { name: '＋ カスタム追加' });
+    await waitFor(() => screen.getByRole('button', { name: '自由入力' }));
+    const add = () => screen.getByRole('button', { name: '自由入力' });
     for (let i = 0; i < 10; i += 1) await user.click(add());
     expect(add()).toBeDisabled();
   });
@@ -641,9 +669,9 @@ describe('RegisterMode', () => {
       }),
     );
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ })); // JPYC でカート確定
-    await user.click(screen.getByRole('button', { name: /USDCグッズ/ })); // 異通貨 → 警告
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ })); // JPYC でカート確定
+    await user.click(tiles().getByRole('button', { name: /USDCグッズ/ })); // 異通貨 → 警告
     expect(screen.getByText(/カートは JPYC のみ/)).toBeInTheDocument();
     const r = await parsedCheckout();
     expect(r.ok && r.params.items).toHaveLength(1); // コーヒーのみ
@@ -666,58 +694,69 @@ describe('RegisterMode', () => {
       }),
     );
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
     // JPYC 商品を打つ → JPYC へ暗黙に切替。会計を終えた想定でカートを空にする。
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
     const jpyc = await parsedCheckout();
     // 初めての JPYC は既定のガスレス (直前の USDC の通常決済を引き継がない)。
     expect(jpyc.ok && jpyc.params).toMatchObject({ token: 'jpyc', chain: 'polygon', mode: 'gasless' });
+    await user.click(screen.getByRole('button', { name: /閉じる/ }));
+    await openLine(user, /コーヒー/);
     await user.click(screen.getAllByRole('button', { name: 'この商品を削除' })[0]);
     // 次の客は USDC 商品 → 店主が選んだ Arbitrum・通常決済に戻る (従来は Base に巻き戻っていた)。
-    await user.click(screen.getByRole('button', { name: /USDCグッズ/ }));
+    await user.click(tiles().getByRole('button', { name: /USDCグッズ/ }));
     const usdc = await parsedCheckout();
     expect(usdc.ok && usdc.params).toMatchObject({ token: 'usdc', chain: 'arbitrum', mode: 'standard' });
   });
 
-  it('受取先/通貨/決済設定を読み取り表示 +「決済QRの受取先で変更」リンク', async () => {
+  it('先頭の要約に受取先・支払い方法・「設定」(2026-10 磨き上げ P3: 決済QR と同じ要約と設定シート)', async () => {
     seedReceiver();
-    render(<RegisterMode onEditCurrency={vi.fn()} />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    // 受取先は静的短縮表示 (編集 input は無い)。
-    expect(screen.getByText(/0x8335.*2913/)).toBeInTheDocument();
+    render(<RegisterMode />);
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    // 受取先は短縮表示・保存済みなので会計画面に入力欄は出さない。
+    expect(screen.getByText('0x8335…2913')).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/0x\.\.\./)).toBeNull();
-    // 決済設定サマリ (gasless 既定 = ガス代:お客様負担)。
-    expect(
-      screen.getByText(/ガスレス決済 \/ ガス代：お客様負担/),
-    ).toBeInTheDocument();
-    // 受取先ラベル + コンパクトな「変更」リンク。
-    expect(screen.getByText('受取先:')).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: '変更' }),
-    ).toBeInTheDocument();
+    expect(screen.getByText('ガス代不要')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^設定$/ })).toBeInTheDocument();
   });
 
-  it('空カートでも非空カートでも「決済QRの受取先で変更」→ onEditCurrency (非空は確認)', async () => {
+  it('カートがあっても「設定」はタブを移らずにシートで開く (カートは消えない・確認も出さない)', async () => {
     const user = userEvent.setup();
-    const onEditCurrency = vi.fn();
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = vi.spyOn(window, 'confirm');
     seedReceiver();
-    render(<RegisterMode onEditCurrency={onEditCurrency} />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    // 非空カート → 確認ダイアログ → OK で遷移。
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: '変更' }));
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(onEditCurrency).toHaveBeenCalled();
+    render(<RegisterMode />);
+    await user.click(await findTile(/コーヒー/));
+    await user.click(screen.getByRole('button', { name: /^設定$/ }));
+    const sheet = screen.getByRole('dialog', { name: 'お店の設定' });
+    for (const title of ['受け取り', '通貨とチェーン', '支払い方法', '控えとポスター']) {
+      expect(within(sheet).getByRole('heading', { name: title })).toBeInTheDocument();
+    }
+    // レジの明細 QR は自動分配を使わないので、その欄は出さない。
+    expect(within(sheet).queryByText(/売上の自動分配/)).toBeNull();
+    await user.click(within(sheet).getByRole('button', { name: '完了' }));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(orderPanel().getByRole('button', { name: /コーヒー/ })).toBeInTheDocument();
     confirmSpy.mockRestore();
+  });
+
+  it('お店の設定でチェーンを変えると /checkout の chain が変わる (決済QR タブと同じ規則)', async () => {
+    const user = userEvent.setup();
+    seedReceiver();
+    render(<RegisterMode />);
+    await user.click(await findTile(/コーヒー/));
+    await user.click(screen.getByRole('button', { name: /^設定$/ }));
+    await user.click(within(screen.getByRole('dialog', { name: 'お店の設定' })).getByRole('button', { name: /^Kai/ }));
+    await user.click(screen.getByRole('button', { name: '完了' }));
+    const r = await parsedCheckout();
+    expect(r.ok && r.params).toMatchObject({ token: 'jpyc', chain: 'kaia' });
   });
 
   it('QR は「QRコードを表示する」→ 全画面モーダルで提示 (×閉じるで戻る)', async () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
     // 即時には checkout URL を出さない。
     expect(screen.queryByText(/\/checkout\?/)).toBeNull();
     // ボタン → モーダルで URL / ポスター / コピー が出る (CTA は2箇所描画なので先頭)。
@@ -735,13 +774,14 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await user.click(await screen.findByRole('button', { name: /コーヒー/ }));
+    await user.click(await findTile(/コーヒー/));
+    // カートの行を開いておく (商品名の入力欄は QR の外)。
+    await openLine(user, /コーヒー/);
     const opener = screen.getAllByRole('button', { name: /QRコードを表示する/ })[0];
     await user.click(opener);
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveFocus();
 
-    // 先頭はカート行 (後続はプリセット編集欄)。
     const input = screen.getAllByRole('textbox', { name: ja.RegisterMode.productNameLabel })[0];
     expect(dialog).not.toContainElement(input);
     // 実際の親 state 更新で inline onClose が変わる。focus trap はこの PR の対象外。
@@ -759,7 +799,7 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await user.click(await screen.findByRole('button', { name: /コーヒー/ }));
+    await user.click(await findTile(/コーヒー/));
     const opener = screen.getAllByRole('button', { name: /QRコードを表示する/ })[0];
     await user.click(opener);
     const copy = screen.getByRole('button', { name: ja.RegisterMode.copyUrl });
@@ -772,20 +812,20 @@ describe('RegisterMode', () => {
     expect(opener).toHaveFocus();
   });
 
-  it('右サイドバーに注文サマリ (ご注文内容 + 小計/合計) を表示する', async () => {
+  it('注文パネル (ご注文 + 点数 + 小計/合計) を表示する', async () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
-    // POS サマリ: 見出し + 小計ラベルが描画される (旧・単独サマリボックスから刷新)。
-    expect(screen.getByText('ご注文内容')).toBeInTheDocument();
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
+    // 注文パネル: 見出し・点数・小計 (カート = ご注文。旧「ご注文内容」の重複表示は廃止)。
+    expect(screen.getByRole('heading', { name: 'ご注文' })).toBeInTheDocument();
+    expect(screen.getByText('1 点')).toBeInTheDocument();
     expect(screen.getByText('小計')).toBeInTheDocument();
-    // 確定行がサマリ明細に出る (商品名 ×数量)。
-    expect(screen.getByText('×1')).toBeInTheDocument();
+    expect(orderPanel().getAllByText('500 JPYC').length).toBeGreaterThan(0);
   });
 
-  it('プリセット0件でも「＋ カスタム追加」を常時描画する (グリッド統合)', async () => {
+  it('プリセット0件でも「自由入力」を常時描画する (グリッド統合)', async () => {
     // 有効プリセットが空でも空行追加導線は出す (常時描画化のエッジ)。
     window.localStorage.setItem(
       'openpay:product-presets:v1',
@@ -794,11 +834,11 @@ describe('RegisterMode', () => {
     render(<RegisterMode />);
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: '＋ カスタム追加' }),
+        screen.getByRole('button', { name: '自由入力' }),
       ).toBeInTheDocument(),
     );
     // サンプルプリセット (コーヒー等) は出ない。
-    expect(screen.queryByRole('button', { name: /コーヒー/ })).toBeNull();
+    expect(tiles().queryByRole('button', { name: /コーヒー/ })).toBeNull();
   });
 
   // レジ システム利用料: flag ON のとき /checkout に feeKind='register' を付け、CheckoutForm が
@@ -808,8 +848,8 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
     const r = await parsedCheckout();
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.feeKind).toBe('register');
@@ -819,8 +859,8 @@ describe('RegisterMode', () => {
     const user = userEvent.setup();
     seedReceiver();
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
     const r = await parsedCheckout();
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.feeKind).toBeUndefined();
@@ -829,7 +869,7 @@ describe('RegisterMode', () => {
   it('お店の端末のガス用ウォレット: flag OFF (既定) では出さない・ON で出す', async () => {
     seedReceiver();
     const { unmount } = render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
     expect(screen.queryByText('お店の端末のガス用ウォレット')).toBeNull();
     unmount();
     envHold.enableStoreGasWallet = true;
@@ -855,8 +895,8 @@ describe('RegisterMode', () => {
       }),
     );
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
     const r = await parsedCheckout();
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -871,8 +911,8 @@ describe('RegisterMode', () => {
       JSON.stringify({ receiver: VALID, token: 'jpyc', chain: 'polygon', invoiceNo: 'T123' }),
     );
     render(<RegisterMode />);
-    await waitFor(() => screen.getByRole('button', { name: /コーヒー/ }));
-    await user.click(screen.getByRole('button', { name: /コーヒー/ }));
+    await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+    await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
     const r = await parsedCheckout();
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.params.invoiceNo).toBeUndefined();
