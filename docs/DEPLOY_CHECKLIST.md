@@ -2394,3 +2394,40 @@ expired-unused, investigate the reorg and reconcile accounting before another
 payment. Hashless receipts remain valid; automatic backfill uses known validity
 bounds and backs off on RPC failures. Legacy records without a lower bound need
 manual transaction lookup. Settled receipts must never re-enter the invoice scan.
+
+## §17 お店がガス代を肩代わりして送る go-live SOP
+
+内部名「お店の端末で送る」(計画 plans/store-gas-wallet.md・開示の SOT は lib/disclosedStoreGasWallet.ts)。お客様は既存の
+Eip3009Forwarder 宛てに「請求額 + 1 wei」へ署名し、店主の端末のガス用ウォレット (POL) が `forwarder.settle` を送る。
+OpenPay は署名を最長 10 分受け渡すだけで、ガスを払わず送信もしない。決済QRタブの決済モードの 3 つ目で選び、レジは同じ設定を
+引き継ぐ。使えるのは画面に表示する金額指定の QR だけ (印刷・保存・URL のコピー・金額なしは対象外)。
+
+### 17.1 flag と前提
+- `NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET` (コードの既定 OFF)。build 時に埋め込まれるので、変えたら再デプロイ。
+- `IP_HASH_SECRET` (32 byte 以上) が本番にあること。無い・短いと受け渡しは 503 で止まる (fail-closed)。
+- `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON`・`NEXT_PUBLIC_FEE_RECEIVER` が今の中継と同じ値であること (変えない)。
+- 手数料受取口 (会社 @handle) を受取先にした店では使えない (forwarder が merchant == feeReceiver で revert するため画面で止める)。
+- チェーンは Polygon だけ (Kaia・Avalanche は次の段階・user 裁定 2026-10-08)。
+
+### 17.2 点灯 (merge と同じ日・user 承認)
+1. 開示 (Terms 第 2 条 (6)(c)・第 3 条・第 5 条 (1)(11)・特商法・免責・プライバシー・LP・llms.txt・ガイド・お知らせ) の PR を merge する。
+   施行日 (LEGAL_ENTITY の 4 文書・DISCLOSED_STORE_GAS_WALLET.effectiveDate) が点灯日と同じであること。ずれたら日付を直してから merge。
+2. Vercel の Production に `NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET=1` を入れて再デプロイ。
+3. 本番の確認 (少額・自社のウォレット):
+   - 決済QRタブ → 高度な設定 → 決済モードに 3 枚目「お店がガス代を肩代わり」が出る。選ぶとガス用ウォレットのパネルが出る。
+   - ガス用ウォレットを作り、POL を少額 (目安 1〜2 POL) 入れる。JPYC は入れない。
+   - 金額 (1 JPYC 以上) を入れて「QRコードを表示する」→ 全画面に印刷・保存・コピー・URL が無い / 「この QR は画面に表示している
+     間だけ使えます」が出る → 別の端末で読み取り、署名 → 「入金を確認しました」→ 確定。受取額が請求額ちょうど、お客様の支払いが
+     請求額 + 1 wei であることを Polygonscan で確かめる。
+   - 金額なし (据え置き) では押せず理由が出る。レジに移ると上の 1 行が「お店がガス代を肩代わり（利用料 0 円）」になる。
+4. お知らせ・LP・規約の表示を本番で確認する。
+
+### 17.3 ロールバック
+- `NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET` を外して再デプロイ。決済モードの 3 枚目は出なくなり、お客様の `/checkout?…&submit=store` は
+  「使えません」で止まる (通常の経路に黙って倒れない)。進行中の受け渡しは最長 10 分で消え、送られなかった署名は期限後に無効
+  (お客様の画面は「お支払いは行われていません」)。開示はそのまま残してよい (提供停止を告知する場合は規約の手続きで)。
+
+### 17.4 監視
+- Sentry: 受け渡し API (`/api/register/handoff*`) の 5xx・お客様画面の `storeDeviceUnavailable`。
+- Upstash のコマンド数 (受け渡し 1 件あたり作成・読み取り・締め切りで数十件)。
+- 店主のガス用ウォレットの POL は店主の負担 (OpenPay は監視しない・画面に残り回数の目安を出す)。

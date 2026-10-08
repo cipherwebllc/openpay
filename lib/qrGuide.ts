@@ -97,6 +97,10 @@ const JA: QrGuideContent = {
       title: '会計向け CSV',
       body: '売上履歴は会計ソフト向けの CSV (freee/弥生形式) に出力できます。確定申告の集計にも。',
     },
+    {
+      title: 'お店がガス代を肩代わりして送る',
+      body: '決済モードで「お店がガス代を肩代わり」を選ぶと、画面に表示した金額指定の QR では、お店の端末のガス用ウォレット（少額の POL）がガス代を払って送ります。お客様は署名するだけで、OpenPay 利用料は 0 円（ガス代は実費・仕組み上 1 wei）。QR は画面に表示している間だけ使えます。印刷・保存・URL のコピーをした QR や、金額なしの QR では使えません。',
+    },
   ],
 
   receiveFlowTitle: '受け取りの流れ (お店側)',
@@ -176,6 +180,10 @@ const EN: QrGuideContent = {
     {
       title: 'Accounting CSV',
       body: 'Export sales history as CSV for accounting software (freee/Yayoi formats).',
+    },
+    {
+      title: 'The shop pays the gas',
+      body: 'Choose “The shop pays the gas” as the payment mode, and for a fixed-amount QR shown on screen, this device’s gas wallet (a little POL) pays the gas and sends the payment. Customers only sign, and the OpenPay usage fee is 0 (the shop pays the actual gas; 1 wei by design). The QR works only while shown on screen; it doesn’t work when printed, saved or copied, or without an amount.',
     },
   ],
 

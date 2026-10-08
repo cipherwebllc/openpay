@@ -236,6 +236,10 @@ const JA: StartGuideContent = {
           desc: 'OpenPay のサーバに保存されます。保存期間は 180 日です。',
         },
         {
+          term: 'お店がガス代を肩代わりして送るときの受け渡し',
+          desc: 'お客様の署名などを、お店の端末へ渡すために OpenPay のサーバに一時保存します。最長 10 分で消えます。',
+        },
+        {
           term: 'ブロックチェーン上の記録',
           desc: '送金の事実・金額・アドレスは公開台帳に永続的に残ります。',
         },
@@ -422,6 +426,10 @@ const EN: StartGuideContent = {
         {
           term: 'Messages attached to tips',
           desc: 'Stored on OpenPay servers and retained for 180 days.',
+        },
+        {
+          term: 'Hand-off for “The shop pays the gas”',
+          desc: 'The customer’s signature and related details are kept on OpenPay servers only to pass them to the shop’s device, and are deleted within 10 minutes.',
         },
         {
           term: 'On-chain records',

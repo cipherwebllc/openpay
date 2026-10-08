@@ -34,6 +34,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'store-pays-gas-2026-10-08',
+    date: '2026-10-08',
+    category: 'feature',
+    title: {
+      ja: 'レジと決済QRで「お店がガス代を肩代わりして送る」を選べるようになりました',
+      en: '“The shop pays the gas” is now available at the register and with payment QR',
+    },
+    body: {
+      ja: '決済QRの決済モードで「お店がガス代を肩代わり」を選ぶと、店頭レジや画面に表示した金額指定の決済QRで、お店の端末のガス用ウォレット（少額の POL）がガス代を払って送るようになりました（印刷・保存した QR は対象外）。お客様は署名するだけで、OpenPay 利用料は 0 円です（お店の負担はガス代の実費。仕組み上、送金 1 回につき 1 wei がお客様の支払いに上乗せされ OpenPay へ送られます）。JPYC・Polygon の会計で使えます。これまでのガスレス決済（決済額の 1%・最低 2 JPYC・店舗負担）もそのまま選べます。',
+      en: 'Choose “The shop pays the gas” as the payment mode, and at the in-store register or with a fixed-amount payment QR shown on screen (not printed or saved QR codes), your device’s gas wallet (a little POL) now pays the gas and sends the payment. Customers only sign, and the OpenPay usage fee is 0 (you pay only the actual gas; by design, 1 wei is added to the customer’s payment per transfer and sent to OpenPay). Available for JPYC on Polygon. The existing gasless payment (1% of the payment, minimum 2 JPYC, merchant-paid) remains available.',
+    },
+    link: { href: '/guide/qr', labelJa: '使い方を見る', labelEn: 'See how it works' },
+  },
+  {
     id: 'invoice-receipt-2026-10-07',
     date: '2026-10-07',
     category: 'feature',
