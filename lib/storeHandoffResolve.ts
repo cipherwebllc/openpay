@@ -13,7 +13,12 @@ import 'server-only';
 
 import { getAddress, isAddress, isHex, type Address, type Hex, type Log } from 'viem';
 import { buildForwarderNonce, type ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
-import { STORE_DEVICE_FEE_WEI } from '@/lib/storeDevicePayment';
+import type { AuthorizationWindow } from '@/lib/relay/authorizationUsedLookup';
+import {
+  STORE_DEVICE_CLOCK_SKEW_SEC,
+  STORE_DEVICE_FEE_WEI,
+  STORE_DEVICE_MAX_VALIDITY_SEC,
+} from '@/lib/storeDevicePayment';
 
 export type StoreHandoffResolution =
   | { ok: true; state: 'settled'; txHash: Hex }
@@ -52,6 +57,7 @@ export type StoreHandoffResolveDeps = {
     token: Address,
     from: Address,
     nonce: Hex,
+    window?: AuthorizationWindow,
   ) => Promise<Hex | null>;
   expiredUnused: (input: {
     chainId: number;
@@ -217,7 +223,12 @@ export async function resolveStoreHandoff(
       const used = await deps.readAuthorizationUsed(chainId, token, params.from, nonce);
       if (used) {
         // 使用済みは入金の証明ではない (取消の可能性)。この nonce を使った tx を探し、Settled を照合する。
-        const found = await deps.findAuthorizationUsedTransactionHash(chainId, token, params.from, nonce);
+        // 署名が使われうる時刻 (受け渡しが受け付けた有効窓の上限 + 時計のずれ) に絞れるようにする (RPC の範囲制限)。
+        const found = await deps.findAuthorizationUsedTransactionHash(chainId, token, params.from, nonce, {
+          validAfter: params.validAfter,
+          validBefore,
+          maxWindowSec: STORE_DEVICE_MAX_VALIDITY_SEC + STORE_DEVICE_CLOCK_SKEW_SEC,
+        });
         if (found) {
           const r = await checkTx(found);
           if (r === 'settled') return remember(key, { ok: true, state: 'settled', txHash: found });

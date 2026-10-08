@@ -51,8 +51,8 @@ function deps(over: Partial<StoreHandoffResolveDeps> = {}): StoreHandoffResolveD
       return used;
     },
     usedAtFinalized: async () => usedFinal,
-    findAuthorizationUsedTransactionHash: async () => {
-      spy.find();
+    findAuthorizationUsedTransactionHash: async (_c, _t, _f, _n, window) => {
+      spy.find(window);
       return foundTx;
     },
     expiredUnused: async (input) => {
@@ -137,6 +137,8 @@ describe('resolveStoreHandoff (お店の端末で送る 1 件の結論)', () => 
     used = true;
     await Promise.all([resolveStoreHandoff(body(), deps()), resolveStoreHandoff(body(), deps())]);
     expect(spy.find).toHaveBeenCalledTimes(1);
+    // tx 探しには署名の有効期限と受け渡しの有効窓の上限 (180 秒 + 時計のずれ 30 秒) を渡す (RPC の範囲制限)
+    expect(spy.find).toHaveBeenCalledWith({ validAfter: 0n, validBefore: BigInt(VALID_BEFORE), maxWindowSec: 210 });
     await resolveStoreHandoff(body({ txHash: OTHER_TX }), deps());
     await resolveStoreHandoff(body({ txHash: `0x${'77'.repeat(32)}` }), deps());
     expect(spy.find).toHaveBeenCalledTimes(1);

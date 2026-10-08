@@ -380,6 +380,12 @@ describe('resolveFacilitatorPaymentStatus', () => {
       txHash: LOG_HASH,
     });
     expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledOnce();
+    // 署名の有効期限と facilitator の有効窓の上限 (20 分) を渡す (RPC の範囲制限で拒まれたときに範囲を絞れる)
+    expect(vi.mocked(findAuthorizationUsedTransactionHash).mock.calls[0][4]).toEqual({
+      validAfter: 0n,
+      validBefore: 9999999999n,
+      maxWindowSec: 1200,
+    });
   });
 
   it('AuthorizationUsed 再解決経路も複数 settle batch の対象 event で解錠する', async () => {

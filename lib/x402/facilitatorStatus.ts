@@ -26,6 +26,7 @@ import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
 import { recoverReceiveWithAuthorizationSigner } from '@/lib/relay/forwarderSettle';
 import { feeReceiverFor } from '@/lib/relay/forwarderSettleService';
+import { MAX_VALIDITY_WINDOW_SEC } from '@/lib/relay/validityWindow';
 import { readIdempotency } from '@/lib/relay/relayGuards';
 import { parseFacilitatorRequest } from '@/lib/x402/facilitatorSettle';
 import { hasMatchingForwarderSettlement } from '@/lib/relay/settlementReceipt';
@@ -197,12 +198,12 @@ export async function resolveFacilitatorPaymentStatus(
     // relayer replacement 後は broadcast 直後に保存した hash と、authorization を実際に
     // 消費した tx hash が異なりうる。旧 hash の不成立が 30 分の回復不能へ波及するのを断つため、
     // その場合だけ署名 nonce の AuthorizationUsed event から実行 tx を再解決する。
-    const txHash = await findAuthorizationUsedTransactionHash(
-      chainId,
-      token,
-      params.from,
-      nonce,
-    );
+    // 署名が使われうる時刻 (facilitator が受け付ける有効窓の上限 20 分) に絞れるようにする (RPC の範囲制限)。
+    const txHash = await findAuthorizationUsedTransactionHash(chainId, token, params.from, nonce, {
+      validAfter: params.validAfter,
+      validBefore: params.validBefore,
+      maxWindowSec: MAX_VALIDITY_WINDOW_SEC,
+    });
     if (
       !txHash ||
       !(await receiptMatchesSettlementOrFalse(
