@@ -142,12 +142,17 @@ describe('HandleClaimPanel', () => {
     expect(screen.getByText('接続済み: 0x52d4…cA81。取得にはサインインが必要です。')).toBeInTheDocument();
   });
 
-  it('サインイン済みの状態にはウォレットではなくセッションのアドレスを表示する', () => {
+  it('サインイン済みでも「サインイン済み: 0x…」の行は出さない (ヘッダと受け取りのカードが示す)・説明は未取得の人にだけ', async () => {
     h.isSignedIn = true;
-    h.walletAddress = '0x000000000000000000000000000000000000dead';
     stubMine([]);
+    const first = renderPanel(CONFIG);
+    expect(screen.queryByText(/サインイン済み: /)).toBeNull();
+    expect(screen.getByText('覚えやすい固定リンク。受取先や金額を変えてもリンクは不変です。')).toBeInTheDocument();
+    first.unmount();
+    stubMine([{ handle: 'alice', config: CONFIG }]);
     renderPanel(CONFIG);
-    expect(screen.getByText('サインイン済み: 0x52d4…cA81')).toBeInTheDocument();
+    await screen.findByText('@alice');
+    expect(screen.queryByText('覚えやすい固定リンク。受取先や金額を変えてもリンクは不変です。')).toBeNull();
   });
 
   it('flag ON + config あり + 未サインイン → サインインボタン', () => {
@@ -177,14 +182,18 @@ describe('HandleClaimPanel', () => {
     h.isSignedIn = true;
     stubMine([{ handle: 'alice', config: CONFIG }]);
     renderPanel(CONFIG, { editingHandle: 'alice' });
-    await waitFor(() =>
-      expect(screen.getByText('@alice')).toBeInTheDocument(),
-    );
+    // 編集中は公開の帯にも @alice が出るので、一覧の行が届くのを待つ。
+    await screen.findByText('編集中');
     // 編集中の行に「編集中」(公開状態・更新時刻・編集をやめる はビルダーの「あなたのページ」の見出しの下に 1 か所)。
-    expect(within(screen.getByText('@alice').closest('li')!).getByText('編集中')).toBeInTheDocument();
+    expect(within(screen.getByRole('listitem')).getByText('編集中')).toBeInTheDocument();
     expect(screen.queryByText('公開中 @alice')).toBeNull();
     expect(screen.queryByRole('button', { name: '編集をやめる' })).toBeNull();
-    // 別名を入力すると「同内容の複製になる」事前警告
+    // 編集中の @handle には「編集」を出さない・@handle の入力欄は畳む (公開先は編集中の @handle)。
+    expect(screen.queryByRole('button', { name: '編集' })).toBeNull();
+    expect(screen.queryByPlaceholderText('alice')).toBeNull();
+    expect(screen.getByRole('button', { name: '公開を更新' })).toBeInTheDocument();
+    // 「新しいハンドルを取得」で入力欄を開き、別名を入力すると「同内容の複製になる」事前警告
+    fireEvent.click(screen.getByRole('button', { name: '新しいハンドルを取得' }));
     fireEvent.change(screen.getByPlaceholderText('alice'), {
       target: { value: 'bob' },
     });
@@ -193,6 +202,10 @@ describe('HandleClaimPanel', () => {
         '「@alice」はそのまま残し、同じ内容で新しいハンドル「@bob」を取得します。',
       ),
     ).toBeInTheDocument();
+    // 「やめる」で入力欄を畳み、公開先を編集中の @alice に戻す。
+    fireEvent.click(screen.getByRole('button', { name: 'やめる' }));
+    expect(screen.queryByPlaceholderText('alice')).toBeNull();
+    expect(screen.getByRole('button', { name: '公開を更新' })).toBeInTheDocument();
   });
 
   it('この端末が手付かずで @handle が 1 つだけなら、サインイン時にその編集へ 1 回だけ自動で入る', async () => {
@@ -374,13 +387,8 @@ describe('HandleClaimPanel', () => {
       isDirty: true,
       onPublished,
     });
-    await waitFor(() =>
-      expect(screen.getByText(`@${handle}`)).toBeInTheDocument(),
-    );
-    fireEvent.change(screen.getByPlaceholderText('alice'), {
-      target: { value: handle },
-    });
-    // 自分の所有 handle は「使用済み」でも更新ボタンが有効
+    await screen.findByText('編集中');
+    // 編集に入ると公開先 (畳んだ入力欄) は編集中の @handle。自分の所有 handle は「使用済み」でも更新ボタンが有効
     const update = screen.getByRole('button', { name: '公開を更新' });
     // 未公開の変更があることは帯の左に出す (押す前に気づける)。
     expect(update.parentElement).toHaveTextContent('未公開の変更があります');
@@ -493,10 +501,7 @@ describe('HandleClaimPanel', () => {
       expectedUpdatedAt: 200,
       onEdit,
     });
-    await waitFor(() => expect(screen.getByText('@alice')).toBeInTheDocument());
-    fireEvent.change(screen.getByPlaceholderText('alice'), {
-      target: { value: 'alice' },
-    });
+    await screen.findByText('編集中');
     fireEvent.click(screen.getByRole('button', { name: '公開を更新' }));
     await waitFor(() =>
       expect(
@@ -737,7 +742,6 @@ it('blocks a disabled published Arc record even after unrelated edits', async ()
   h.isSignedIn = true;
   stubMine([{ handle: 'alice', config: CONFIG, updatedAt: 10 }]);
   renderPanel(CONFIG, { editingHandle: 'alice', expectedUpdatedAt: 10, publishBlockedReason: 'Arc disabled: cannot republish', isDirty: true });
-  fireEvent.change(screen.getByPlaceholderText('alice'), { target: { value: 'alice' } });
   expect(await screen.findByRole('alert')).toHaveTextContent('Arc disabled: cannot republish');
   expect(await screen.findByRole('button', { name: '公開を更新' })).toBeDisabled();
 });

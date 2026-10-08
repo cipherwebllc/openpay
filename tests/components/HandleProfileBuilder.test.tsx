@@ -762,6 +762,15 @@ describe('HandleProfileBuilder', () => {
     expect(screen.getByTestId('claim')).toHaveTextContent(`config-ready:${getAddress(ADDR)}`);
   });
 
+  it('受取先が未設定でも「設定」のシートの先頭に受取先の欄があり、開いている間はカードの欄を外す (同じ欄は 1 つ)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    expect(screen.getAllByTestId('addr')).toHaveLength(1);
+    openReceiveSettings();
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByTestId('addr')).toBeInTheDocument();
+    expect(screen.getAllByTestId('addr')).toHaveLength(1);
+  });
+
   it('保存済みの受取先を消しても、接続中のウォレットで埋め直さない・シートの入力欄は消えない', async () => {
     localStorage.setItem('openpay:handle-profile-draft:v1', JSON.stringify({ to: ADDR2 }));
     h.connectedAddress = ADDR;

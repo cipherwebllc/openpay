@@ -626,7 +626,8 @@ export function HandleProfileBuilder({
               </button>
             }
           >
-            {receiverInline ? (
+            {/* 設定シートを開いている間は、受取先の欄はシートの中の 1 つだけ (同じ欄を 2 か所に出さない)。 */}
+            {receiverInline && !receiveOpen ? (
               <Field label={t('receiverLabel')} hint={t('receiverHint')}>
                 <AddressInput
                   value={draft.to}
@@ -669,24 +670,23 @@ export function HandleProfileBuilder({
             doneLabel={t('receiveDone')}
           >
             <ShopSettingsSection title={t('receiveHeading')}>
-              {/* 受取先の欄は未設定の間は受け取りカードに直接出している (同じ欄を 2 か所に出さない)。 */}
-              {!receiverInline && (
-                <Field label={t('receiverLabel')} hint={t('receiverHint')}>
-                  <AddressInput
-                    value={draft.to}
-                    onChange={(v) => update({ to: v })}
-                  />
-                  {connected && (
-                    <button
-                      type="button"
-                      onClick={onUseConnected}
-                      className="mt-1.5 text-xs font-medium text-brand hover:underline"
-                    >
-                      {t('useConnectedWallet')}
-                    </button>
-                  )}
-                </Field>
-              )}
+              {/* 受取先はいつもシートの先頭にも置く (「設定」から受取先を決めようとした人が迷わない)。
+                  未設定の間に受け取りカードへ出している欄は、シートを開いている間は外している。 */}
+              <Field label={t('receiverLabel')} hint={t('receiverHint')}>
+                <AddressInput
+                  value={draft.to}
+                  onChange={(v) => update({ to: v })}
+                />
+                {connected && (
+                  <button
+                    type="button"
+                    onClick={onUseConnected}
+                    className="mt-1.5 text-xs font-medium text-brand hover:underline"
+                  >
+                    {t('useConnectedWallet')}
+                  </button>
+                )}
+              </Field>
                 <fieldset>
                   <legend className="text-sm font-medium text-slate-700">{t('methodsLabel')}</legend>
                   <div className="mt-1 space-y-1.5">

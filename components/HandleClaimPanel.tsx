@@ -226,12 +226,18 @@ export function HandleClaimPanel({
   // 削除確認モーダルの対象 handle (null = 閉)。window.confirm を置き換える danger 確認。
   const [releaseTarget, setReleaseTarget] = useState<string | null>(null);
   const config = payload?.config ?? null;
+  // 編集中は @handle の入力欄を畳み (公開先は編集中の @handle)、「新しいハンドルを取得」で開く。
+  const [showNewHandle, setShowNewHandle] = useState(false);
 
-  // 親が編集モードを解除したら入力欄も新規取得モードへ戻す。
+  // 親が編集モードを解除したら入力欄も新規取得モードへ戻す。編集に入ったら入力欄は畳み、公開先 (入力値) を
+  // 編集中の @handle に揃える (畳んだ入力欄に別の値が残ったまま公開しない)。
   useEffect(() => {
+    setShowNewHandle(false);
     if (editingHandle === null) {
       setInput('');
       setPublished(null);
+    } else {
+      setInput(editingHandle);
     }
   }, [editingHandle]);
 
@@ -385,6 +391,8 @@ export function HandleClaimPanel({
   const owned = mine.data?.handles ?? [];
   const ownedNames = owned.map((o) => o.handle);
   const atLimit = owned.length >= max;
+  // @handle の入力欄を出すか (新規取得のとき・編集中に「新しいハンドルを取得」を押したとき)。
+  const showHandleInput = editingHandle === null || showNewHandle;
   // 公開 (取得/更新) を押せるか。
   const publishDisabled =
     !isSignedIn ||
@@ -452,7 +460,8 @@ export function HandleClaimPanel({
 
   return (
     <div>
-      <p className="text-xs text-slate-500">{t('description')}</p>
+      {/* 何のための @handle かの説明は、まだ 1 つも持っていない人にだけ。 */}
+      {owned.length === 0 && <p className="text-xs text-slate-500">{t('description')}</p>}
 
       {!isSignedIn ? (
         // サインインは config の有無に関わらず出す (既存 handle の編集/削除を受取先未設定でも到達可能に)。
@@ -464,12 +473,7 @@ export function HandleClaimPanel({
           prompt={isConnected && address ? t('statusConnected', { address: shortAddress(address) }) : undefined}
         />
       ) : (
-        <div className="mt-3 space-y-3">
-          {sessionAddress && (
-            <p className="text-xs text-slate-500">
-              {t('statusSignedIn', { address: shortAddress(sessionAddress) })}
-            </p>
-          )}
+        <div className={`${owned.length === 0 ? 'mt-3 ' : ''}space-y-3`}>
           {/* 一覧の読み込み失敗は隠さない (KV 障害を「0件」と誤認させない)。 */}
           {mine.isError && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -513,7 +517,8 @@ export function HandleClaimPanel({
                         )}
                       </p>
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                          {onEdit && (
+                          {/* 編集中の @handle には「編集」を出さない (もう編集している)。 */}
+                          {onEdit && !isEditing && (
                             <button
                               type="button"
                               onClick={() => {
@@ -552,65 +557,95 @@ export function HandleClaimPanel({
           {/* 取得/更新フォーム */}
           <div className={owned.length > 0 ? 'border-t border-slate-100 pt-3' : ''}>
             {/* 編集中の表示 (公開中・更新時刻・未公開の変更・編集をやめる) は「あなたのページ」の見出しの下に 1 か所。 */}
-            {!editingHandle && owned.length > 0 && (
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                {t('newHandleTitle')}
-              </h4>
-            )}
-            {/* 受取先/方法 未確定なら取得は不可だが、サインイン + 取得済み一覧の編集は可能。 */}
-            {!config && (
-              <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                {t('needReceiver')}
-              </p>
-            )}
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm text-slate-500">{origin || 'open-pay.jp'}/@</span>
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => {
-                  setInput(e.target.value);
+            {showHandleInput ? (
+              <>
+                {owned.length > 0 && (
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      {t('newHandleTitle')}
+                    </h4>
+                    {editingHandle && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNewHandle(false);
+                          setInput(editingHandle);
+                          setPublished(null);
+                        }}
+                        className="text-xs font-medium text-slate-500 underline underline-offset-2 hover:text-slate-700"
+                      >
+                        {t('newHandleCancel')}
+                      </button>
+                    )}
+                  </div>
+                )}
+              {/* 受取先/方法 未確定なら取得は不可だが、サインイン + 取得済み一覧の編集は可能。 */}
+              {!config && (
+                <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                  {t('needReceiver')}
+                </p>
+              )}
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm text-slate-500">{origin || 'open-pay.jp'}/@</span>
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => {
+                    setInput(e.target.value);
+                    setPublished(null);
+                  }}
+                  placeholder={t('handlePlaceholder')}
+                  maxLength={30}
+                  className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                />
+              </div>
+              <p className="mt-1 text-xs text-slate-500">{t('formatHint')}</p>
+              {/* 入力検証 + 空き状態 */}
+              {input.length > 0 && !validation.ok && (
+                <p className="mt-1 text-xs text-red-600">
+                  {validation.reason === 'reserved' ? t('reservedWord') : t('invalidFormat')}
+                </p>
+              )}
+              {/* 自分が既に所有する handle は「使用済み」を出さない (更新フロー)。
+                  KV 障害 (reason:'unavailable') は「使用済み」と偽らず「確認できない」と正直に出す。 */}
+              {validation.ok &&
+                debounced === normalized &&
+                !ownedNames.includes(normalized) && (
+                  <p className="mt-1 text-xs">
+                    {availability.isFetching ? (
+                      <span className="text-slate-500">{t('checking')}</span>
+                    ) : availability.data?.available ? (
+                      <span className="text-emerald-600">{t('available')}</span>
+                    ) : availability.data?.reason === 'unavailable' ||
+                      availability.isError ? (
+                      <span className="text-amber-700">{t('availabilityUnknown')}</span>
+                    ) : availability.data ? (
+                      <span className="text-red-600">{t('taken')}</span>
+                    ) : null}
+                  </p>
+                )}
+              {/* 編集中に別名を入れた場合: 同内容の複製になることを事前警告。 */}
+              {editingHandle &&
+                validation.ok &&
+                normalized !== editingHandle && (
+                  <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                    {t('copyAsNewHint', { editing: editingHandle, name: normalized })}
+                  </p>
+                )}
+              </>
+            ) : !atLimit ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowNewHandle(true);
+                  setInput('');
                   setPublished(null);
                 }}
-                placeholder={t('handlePlaceholder')}
-                maxLength={30}
-                className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-              />
-            </div>
-            <p className="mt-1 text-xs text-slate-500">{t('formatHint')}</p>
-            {/* 入力検証 + 空き状態 */}
-            {input.length > 0 && !validation.ok && (
-              <p className="mt-1 text-xs text-red-600">
-                {validation.reason === 'reserved' ? t('reservedWord') : t('invalidFormat')}
-              </p>
-            )}
-            {/* 自分が既に所有する handle は「使用済み」を出さない (更新フロー)。
-                KV 障害 (reason:'unavailable') は「使用済み」と偽らず「確認できない」と正直に出す。 */}
-            {validation.ok &&
-              debounced === normalized &&
-              !ownedNames.includes(normalized) && (
-                <p className="mt-1 text-xs">
-                  {availability.isFetching ? (
-                    <span className="text-slate-500">{t('checking')}</span>
-                  ) : availability.data?.available ? (
-                    <span className="text-emerald-600">{t('available')}</span>
-                  ) : availability.data?.reason === 'unavailable' ||
-                    availability.isError ? (
-                    <span className="text-amber-700">{t('availabilityUnknown')}</span>
-                  ) : availability.data ? (
-                    <span className="text-red-600">{t('taken')}</span>
-                  ) : null}
-                </p>
-              )}
-            {/* 編集中に別名を入れた場合: 同内容の複製になることを事前警告。 */}
-            {editingHandle &&
-              validation.ok &&
-              normalized !== editingHandle && (
-                <p className="mt-1 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                  {t('copyAsNewHint', { editing: editingHandle, name: normalized })}
-                </p>
-              )}
-
+                className="text-xs font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+              >
+                {t('newHandleTitle')}
+              </button>
+            ) : null}
             {/* 公開結果のフィードバック (無言で入力が消えるのは「何が起きたか」不明だった) */}
             {published && !publish.isPending && (
               <div className="mt-2">
