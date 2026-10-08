@@ -20,8 +20,22 @@ vi.mock('@/hooks/usePwaDisplayMode', () => ({
 }));
 // 補充 (wagmi を使う) は別のテストで確かめる。ここでは渡すチェーンだけ見る。
 vi.mock('@/components/StoreGasWalletTopUp', () => ({
-  StoreGasWalletTopUp: ({ chains }: { chains: { chainId: number }[] }) => (
-    <div data-testid="topup">{chains.map((c) => c.chainId).join(',')}</div>
+  StoreGasWalletTopUp: ({
+    chains,
+    onPendingChange,
+  }: {
+    chains: { chainId: number }[];
+    onPendingChange?: (p: boolean) => void;
+  }) => (
+    <div data-testid="topup">
+      {chains.map((c) => c.chainId).join(',')}
+      <button type="button" onClick={() => onPendingChange?.(true)}>
+        topup-start
+      </button>
+      <button type="button" onClick={() => onPendingChange?.(false)}>
+        topup-end
+      </button>
+    </div>
   ),
 }));
 
@@ -248,12 +262,12 @@ describe('StoreGasWalletPanel', () => {
     expect(screen.getByText(/まだ 2 KAIA 残っています/)).toBeTruthy();
   });
 
-  describe('iPhone・iPad (ブラウザは 7 日ほど開かないとデータを消す)', () => {
+  describe('iPhone・iPad (ブラウザは 7 日ほど操作しないとデータを消す)', () => {
     it('ブラウザでは、ホーム画面に追加したアプリで作るよう手順を出し、作るボタンは「それでも」を押してから', () => {
       hold.platform = 'ios';
       render(<StoreGasWalletPanel />);
       expect(screen.getByText('iPhone・iPad では、ホーム画面に追加した OpenPay で作ってください')).toBeTruthy();
-      expect(screen.getByText(/7 日ほど OpenPay を開かないと、この端末に保存した鍵が消えることがあります/)).toBeTruthy();
+      expect(screen.getByText(/OpenPay をタップなどで操作しない日が 7 日ほど続くと、この端末に保存した鍵が消えることがあります（開くだけでは防げません/)).toBeTruthy();
       expect(screen.getByText(/ホーム画面に追加/, { selector: 'li' })).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'この端末にガス用ウォレットを作る' })).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'それでもこのブラウザで作る' }));
@@ -265,7 +279,7 @@ describe('StoreGasWalletPanel', () => {
       hold.platform = 'ios';
       hold.state = ready({ balance: 10n ** 18n, gasPrice: 1n });
       render(<StoreGasWalletPanel />);
-      expect(screen.getByText(/この鍵はブラウザに保存されています。7 日ほど OpenPay を開かないと消えることがあります/)).toBeTruthy();
+      expect(screen.getByText(/この鍵はブラウザに保存されています。OpenPay をタップなどで操作しない日が 7 日ほど続くと消えることがあります/)).toBeTruthy();
     });
 
     it('ホーム画面のアプリでは、手順を出さずにすぐ作れる・消えにくいことを出す', () => {
@@ -301,5 +315,15 @@ describe('StoreGasWalletPanel', () => {
     render(<StoreGasWalletPanel />);
     expect(screen.getByTestId('topup')).toHaveTextContent('80002');
     expect(screen.getByTestId('topup')).not.toHaveTextContent('1001');
+  });
+
+  it('補充の結果が出るまでは消せない (届く途中の宛先の鍵を消さない)', () => {
+    hold.state = ready({ balance: 10n ** 18n, gasPrice: 1n });
+    render(<StoreGasWalletPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'topup-start' }));
+    expect(screen.getByRole('button', { name: 'この端末から消す' })).toBeDisabled();
+    expect(screen.getByText('補充の結果が出るまでは消せません。')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'topup-end' }));
+    expect(screen.getByRole('button', { name: 'この端末から消す' })).not.toBeDisabled();
   });
 });

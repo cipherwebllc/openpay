@@ -59,6 +59,9 @@ export function StoreGasWalletPanel({
   const iosBrowser = isIos && !isStandalone;
   // iPhone・iPad のブラウザで「それでもブラウザで作る」を選んだ (作るボタンを出す)。
   const [createInBrowser, setCreateInBrowser] = useState(false);
+  // 接続中のウォレットからの補充が途中 (ウォレットで確認中・結果待ち)。途中は鍵を消させない (届く途中の宛先を消さない)。
+  const [topUpPending, setTopUpPending] = useState(false);
+  const removeBlocked = g.removeBlocked || topUpPending;
   const usableAddress = g.walletState?.state === 'ok' ? g.address : null;
   useEffect(() => {
     // 読み込む前は知らせない (読み込み前の「無い」で、タブを戻ったときに送信中の支払いや「もう一度送る」を
@@ -132,7 +135,7 @@ export function StoreGasWalletPanel({
         <button
           type="button"
           className={DANGER_BTN}
-          disabled={g.removeBlocked}
+          disabled={removeBlocked}
           onClick={() => {
             setConfirmingRemove(true);
             setRemoveFailed(false);
@@ -152,7 +155,7 @@ export function StoreGasWalletPanel({
             <button
               type="button"
               className={DANGER_BTN}
-              disabled={g.removeBlocked}
+              disabled={removeBlocked}
               onClick={() => void handleRemove()}
             >
               {t('storeGasWallet.removeYes')}
@@ -163,8 +166,10 @@ export function StoreGasWalletPanel({
           </div>
         </div>
       )}
-      {g.removeBlocked && (
-        <p className="mt-1 text-xs text-slate-500">{t('storeGasWallet.removeBlockedNote')}</p>
+      {removeBlocked && (
+        <p className="mt-1 text-xs text-slate-500">
+          {topUpPending ? t('storeGasWallet.removeBlockedTopUpNote') : t('storeGasWallet.removeBlockedNote')}
+        </p>
       )}
       {removeFailed && (
         <p role="alert" className="mt-1 text-xs text-red-600">
@@ -324,7 +329,12 @@ export function StoreGasWalletPanel({
           </div>
 
           {active.length > 0 && (
-            <StoreGasWalletTopUp chains={active} gasAddress={g.address} onDone={refreshAfterTopUp} />
+            <StoreGasWalletTopUp
+              chains={active}
+              gasAddress={g.address}
+              onDone={refreshAfterTopUp}
+              onPendingChange={setTopUpPending}
+            />
           )}
 
           <div className="border-t border-slate-100 pt-3">

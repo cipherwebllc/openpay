@@ -8,6 +8,10 @@ import {
   STORE_GAS_SETTLE_GAS_ESTIMATE,
   loadStoreGasWallet,
   readStoreGasWalletKey,
+  STORE_GAS_TOPUP_KEY,
+  clearStoreGasTopUp,
+  hasPendingStoreGasTopUp,
+  markStoreGasTopUp,
   removeStoreGasWallet,
   requestStoreGasWalletPersistence,
   storeGasFundGuide,
@@ -161,9 +165,11 @@ describe('storeGasWallet: 入れておく目安', () => {
 
 describe('storeGasWallet: 消されにくい保存を頼む (navigator.storage.persist)', () => {
   const original = Object.getOwnPropertyDescriptor(window.navigator, 'storage');
+  const ADDR = '0x0000000000000000000000000000000000000abc' as const;
   function setStorage(value: unknown) {
     Object.defineProperty(window.navigator, 'storage', { value, configurable: true });
   }
+  beforeEach(() => window.localStorage.clear());
   afterEach(() => {
     if (original) Object.defineProperty(window.navigator, 'storage', original);
     else delete (window.navigator as { storage?: unknown }).storage;
@@ -172,16 +178,56 @@ describe('storeGasWallet: 消されにくい保存を頼む (navigator.storage.p
   it('認められていればそのまま true・まだなら頼んで結果を返す', async () => {
     const persist = vi.fn(async () => true);
     setStorage({ persisted: async () => true, persist });
-    expect(await requestStoreGasWalletPersistence()).toBe(true);
+    expect(await requestStoreGasWalletPersistence(ADDR)).toBe(true);
     expect(persist).not.toHaveBeenCalled();
     setStorage({ persisted: async () => false, persist: vi.fn(async () => false) });
-    expect(await requestStoreGasWalletPersistence()).toBe(false);
+    expect(await requestStoreGasWalletPersistence(ADDR)).toBe(false);
+  });
+
+  it('頼むのは鍵ごとに 1 回だけ (Firefox で開くたびに許可を尋ねない)・新しい鍵ではもう一度頼む', async () => {
+    const persist = vi.fn(async () => false);
+    setStorage({ persisted: async () => false, persist });
+    await requestStoreGasWalletPersistence(ADDR);
+    await requestStoreGasWalletPersistence(ADDR);
+    expect(persist).toHaveBeenCalledTimes(1);
+    await requestStoreGasWalletPersistence('0x0000000000000000000000000000000000000def');
+    expect(persist).toHaveBeenCalledTimes(2);
   });
 
   it('頼めない・失敗しても throw しない (鍵の作成や表示を止めない)', async () => {
     setStorage(undefined);
-    expect(await requestStoreGasWalletPersistence()).toBeNull();
+    expect(await requestStoreGasWalletPersistence(ADDR)).toBeNull();
     setStorage({ persist: async () => { throw new Error('denied'); } });
-    expect(await requestStoreGasWalletPersistence()).toBeNull();
+    expect(await requestStoreGasWalletPersistence(ADDR)).toBeNull();
+  });
+});
+
+describe('storeGasWallet: 補充の途中の印 (別のタブの「消す」を止める)', () => {
+  const ADDR = '0x0000000000000000000000000000000000000abc' as const;
+  const OTHER_ADDR = '0x0000000000000000000000000000000000000def' as const;
+  beforeEach(() => window.localStorage.clear());
+
+  it('置くと 30 分は途中・同じアドレスの印だけを外す', () => {
+    expect(markStoreGasTopUp(ADDR, 1_000)).toBe(true);
+    expect(hasPendingStoreGasTopUp(ADDR, 1_000 + 29 * 60_000)).toBe(true);
+    expect(hasPendingStoreGasTopUp(ADDR, 1_000 + 30 * 60_000)).toBe(false); // タブを閉じても残り続けない
+    expect(hasPendingStoreGasTopUp(OTHER_ADDR, 1_000)).toBe(false);
+    clearStoreGasTopUp(OTHER_ADDR); // 別のアドレスの印は外さない
+    expect(hasPendingStoreGasTopUp(ADDR, 1_000)).toBe(true);
+    clearStoreGasTopUp(ADDR);
+    expect(hasPendingStoreGasTopUp(ADDR, 1_000)).toBe(false);
+  });
+
+  it('印を読めないときは途中とみなす (迷ったら消さない)・置けないときは false (補充しない)', () => {
+    window.localStorage.setItem(STORE_GAS_TOPUP_KEY, '{broken');
+    expect(hasPendingStoreGasTopUp(ADDR)).toBe(true);
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    try {
+      expect(markStoreGasTopUp(ADDR)).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

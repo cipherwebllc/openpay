@@ -25,6 +25,8 @@ import {
   createStoreGasWallet,
   loadStoreGasWallet,
   readStoreGasWalletKey,
+  STORE_GAS_WALLET_STORAGE_KEY,
+  hasPendingStoreGasTopUp,
   removeStoreGasWallet,
   requestStoreGasWalletPersistence,
   withStoreGasWalletLock,
@@ -100,9 +102,18 @@ export function useStoreGasWallet() {
   // 鍵の世代 (作る・消すで進める)。古い鍵の読み取りが遅れて返っても、新しい鍵の残高に書かない。
   const walletGenRef = useRef(0);
 
-  // localStorage は描画後にだけ読む (server と初回 client の描画を揃える)。
+  // localStorage は描画後にだけ読む (server と初回 client の描画を揃える)。別のタブで作る・消すと読み直す
+  // (古いアドレスを見せたまま、そこへ補充や戻し先の確認をさせない)。
   useEffect(() => {
     setWalletState(loadStoreGasWallet());
+    function onStorage(e: StorageEvent) {
+      if (e.key !== STORE_GAS_WALLET_STORAGE_KEY && e.key !== null) return;
+      walletGenRef.current += 1;
+      setWalletState(loadStoreGasWallet());
+      setReads({});
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   const address = walletState?.state === 'ok' ? walletState.info.address : null;
@@ -112,7 +123,7 @@ export function useStoreGasWallet() {
   useEffect(() => {
     if (!address) return;
     let live = true;
-    void requestStoreGasWalletPersistence().then((r) => {
+    void requestStoreGasWalletPersistence(address).then((r) => {
       if (live) setPersisted(r);
     });
     return () => {
@@ -201,7 +212,10 @@ export function useStoreGasWallet() {
 
   const remove = useCallback(async (): Promise<boolean> => {
     if (removeBlocked) return false;
-    const removed = await withStoreGasWalletLock(async () => removeStoreGasWallet());
+    // 接続中のウォレットからの補充が途中 (このタブ・別のタブ) なら消さない (届く途中の補充の宛先の鍵を消さない)。
+    const removed = await withStoreGasWalletLock(async () =>
+      address && hasPendingStoreGasTopUp(address) ? false : removeStoreGasWallet(),
+    );
     // 消えたかどうかは保存状態を読み直して決める (消せなかったのに「未作成」に戻さない)。
     setWalletState(loadStoreGasWallet());
     if (removed) {
@@ -210,7 +224,7 @@ export function useStoreGasWallet() {
       setWithdrawStatus({ phase: 'idle' });
     }
     return removed;
-  }, [removeBlocked]);
+  }, [removeBlocked, address]);
 
   const withdraw = useCallback(
     async (chainId: number, rawTo: string): Promise<WithdrawStatus> => {

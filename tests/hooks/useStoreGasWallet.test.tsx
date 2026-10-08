@@ -82,7 +82,7 @@ vi.mock('@/lib/chains', async (importOriginal) => {
 });
 
 import { useStoreGasWallet } from '@/hooks/useStoreGasWallet';
-import { STORE_GAS_WALLET_STORAGE_KEY } from '@/lib/storeGasWallet';
+import { STORE_GAS_WALLET_STORAGE_KEY, clearStoreGasTopUp, markStoreGasTopUp } from '@/lib/storeGasWallet';
 
 const DEST = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
@@ -293,6 +293,31 @@ describe('useStoreGasWallet', () => {
     } finally {
       delete (window.navigator as { storage?: unknown }).storage;
     }
+  });
+
+  it('接続中のウォレットからの補充が途中 (別のタブを含む) なら消さない', async () => {
+    const { result } = await setup();
+    markStoreGasTopUp(result.current.address!);
+    await act(async () => {
+      expect(await result.current.remove()).toBe(false);
+    });
+    expect(window.localStorage.getItem(STORE_GAS_WALLET_STORAGE_KEY)).not.toBeNull();
+    clearStoreGasTopUp(result.current.address!);
+    await act(async () => {
+      expect(await result.current.remove()).toBe(true);
+    });
+  });
+
+  it('別のタブで鍵を消す・作り直すと読み直す (古いアドレスを見せたままにしない)', async () => {
+    const { result } = await setup();
+    const before = result.current.address;
+    act(() => {
+      window.localStorage.removeItem(STORE_GAS_WALLET_STORAGE_KEY);
+      window.dispatchEvent(new StorageEvent('storage', { key: STORE_GAS_WALLET_STORAGE_KEY }));
+    });
+    expect(result.current.walletState).toEqual({ state: 'none' });
+    expect(result.current.address).toBeNull();
+    expect(before).not.toBeNull();
   });
 
   it('消すと鍵も残高表示も消える', async () => {
