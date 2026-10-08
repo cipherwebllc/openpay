@@ -549,6 +549,8 @@ function RegisterModeContent({
   const storeQrActive = storeQr !== null && !forceNormalQr;
   const qrValue = storeQrActive ? storeQr.url : checkoutUrl;
   const sdState = device.state;
+  // お店の端末で送る状態の表示 (使える / 使えない理由 / 送っている・結果待ち)。
+  const sdStatusShown = storeDeviceForSale || sdSaleBlocked !== null || (sdState.phase !== 'idle' && !qrModalOpen);
   // QR を薄くする: この QR の受け渡しが署名を待っている (受付時間が十分残る) とき以外 (署名を受け取った後・受付時間の
   // 終わり・出し直しの途中 = 次のお客様に読ませない)。
   const storeQrDimmed =
@@ -979,10 +981,12 @@ function RegisterModeContent({
           <MobileOrderBridge onStart={startMobileOrder} onDismiss={dismissBridge} className="lg:hidden" />
         )}
 
-        {/* お店の端末で送る (ガス代の肩代わり) の状態とガス用ウォレット。PC は左列の商品の下、スマホは注文の下。 */}
-        {env.enableStoreGasWallet && (
+        {/* お店の端末で送る (ガス代の肩代わり) の状態とガス用ウォレット。PC は左列の商品の下、スマホは注文の下。
+            ガス用ウォレットは支払い方法が「お店がガス代を肩代わりして送る」のときだけ (決済QR と同じ)。送っている・結果を
+            待っている支払いの表示は、切替を外しても残す。 */}
+        {env.enableStoreGasWallet && (storeRequested || sdStatusShown) && (
           <div className="min-w-0 space-y-4 lg:col-start-1">
-            {(storeDeviceForSale || sdSaleBlocked || (sdState.phase !== 'idle' && !qrModalOpen)) && (
+            {sdStatusShown && (
               <div className="space-y-2">
                 {storeDeviceForSale && (
                   <p className="text-xs font-semibold text-emerald-800">{t('storeDevice.badge')}</p>
@@ -998,7 +1002,7 @@ function RegisterModeContent({
               </div>
             )}
             {/* お店の端末のガス用ウォレット (flag OFF では出さない・plans/store-gas-wallet.md)。 */}
-            <StoreGasWalletPanel onAddressChange={setGasAddress} />
+            {storeRequested && <StoreGasWalletPanel onAddressChange={setGasAddress} />}
           </div>
         )}
       </div>
