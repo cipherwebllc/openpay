@@ -1869,7 +1869,11 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText('1,000'), '500');
       await openQrModal(user);
       const dialog = await screen.findByRole('dialog', { name: '決済用 QR コード' });
-      expect(within(dialog).getByText(`支払先 ${shortAddress(VALID)}`)).toBeInTheDocument();
+      // 見出しは通常の書体・アドレスだけ等幅。
+      const addr = within(dialog).getByText(shortAddress(VALID));
+      expect(addr).toHaveClass('font-mono');
+      expect(addr.parentElement).toHaveTextContent(`支払先 ${shortAddress(VALID)}`);
+      expect(addr.parentElement).not.toHaveClass('font-mono');
     });
 
     it('QR empty state: receiver のみ入力 → サンプル金額ワンタップで QR が生成される', async () => {
@@ -2480,7 +2484,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
     ).toBeInTheDocument();
   });
 
-  it('レート取得不可なら convert ボタンの代わりに注意文', async () => {
+  it('レート取得不可なら convert ボタンを出さないだけ (頼まれていない説明で会計画面を増やさない)', async () => {
     marketRatesData.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -2494,7 +2498,7 @@ describe('QrGenerator: 他トークン建てで受け取る (FX 換算・UI 期�
     expect(
       screen.queryByRole('button', { name: /USDC 建てで受取る/ }),
     ).toBeNull();
-    expect(screen.getByText(/為替レートを取得できない/)).toBeInTheDocument();
+    expect(screen.queryByText(/為替レートを取得できない/)).toBeNull();
   });
 
   it('再計算ボタンで換算パスが再実行される (額は同レートで維持・panel 継続)', async () => {

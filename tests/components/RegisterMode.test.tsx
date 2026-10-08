@@ -573,6 +573,33 @@ describe('RegisterMode', () => {
     await waitFor(() => expect(within(bar()).getByText('合計')).toBeInTheDocument());
   });
 
+  it('税額も桁区切り・英語の点数は単数/複数 (1 item / 2 items)', async () => {
+    const user = userEvent.setup();
+    seedReceiver();
+    window.localStorage.setItem(
+      'openpay:product-presets:v1',
+      JSON.stringify({
+        presets: [
+          { id: 'big', name: 'Big', unitPrice: '12000', token: 'jpyc', taxRate: 10, taxCategory: 'taxable_10', memo: null, sortOrder: 0, enabled: true },
+        ],
+        receipt: { day: '', n: 0 },
+      }),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithIntl(
+      <QueryClientProvider client={qc}>
+        <RegisterMode />
+      </QueryClientProvider>,
+      { locale: 'en' },
+    );
+    await user.click(await findTile(/Big/));
+    // 12,000 の内税 10% = 1,091 (税額だけ素の数にならない)。
+    await waitFor(() => expect(orderPanel().getByText('1,091 JPYC')).toBeInTheDocument());
+    expect(orderPanel().getByText('1 item')).toBeInTheDocument();
+    await user.click(await findTile(/Big/));
+    await waitFor(() => expect(orderPanel().getByText('2 items')).toBeInTheDocument());
+  });
+
   it('複数商品をカートに追加 → checkout items が複数になる', async () => {
     const user = userEvent.setup();
     seedReceiver();
@@ -883,8 +910,15 @@ describe('RegisterMode', () => {
       const user = userEvent.setup();
       render(<RegisterMode onStartMobileOrder={onStart} />);
       await findTile(/コーヒー/);
-      expect(screen.getByText('このメニューで、スマホ注文も受けられます')).toBeInTheDocument();
-      await user.click(screen.getByRole('button', { name: 'モバイル注文を始める' }));
+      // PC は商品カードの中・スマホはご注文の後ろ (CSS で片方だけ見せる・jsdom には両方ある)。
+      const bridges = screen.getAllByText('このメニューで、モバイル注文も受けられます');
+      expect(bridges).toHaveLength(2);
+      expect(bridges[0].closest('[aria-labelledby="register-products-heading"]')).not.toBeNull();
+      const orderSection = screen.getByRole('region', { name: 'ご注文' });
+      expect(
+        orderSection.compareDocumentPosition(bridges[1]) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      await user.click(screen.getAllByRole('button', { name: 'モバイル注文を始める' })[1]);
       expect(onStart).toHaveBeenCalledOnce();
     });
 
@@ -893,18 +927,19 @@ describe('RegisterMode', () => {
       const user = userEvent.setup();
       const { unmount } = render(<RegisterMode onStartMobileOrder={vi.fn()} />);
       await findTile(/コーヒー/);
-      await user.click(screen.getByRole('button', { name: '閉じる' }));
-      expect(screen.queryByText('このメニューで、スマホ注文も受けられます')).toBeNull();
+      // どちらで閉じても両方消える (閉じた状態は 1 つ)。
+      await user.click(screen.getAllByRole('button', { name: '閉じる' })[1]);
+      expect(screen.queryAllByText('このメニューで、モバイル注文も受けられます')).toHaveLength(0);
       unmount();
       render(<RegisterMode onStartMobileOrder={vi.fn()} />);
       await findTile(/コーヒー/);
-      expect(screen.queryByText('このメニューで、スマホ注文も受けられます')).toBeNull();
+      expect(screen.queryAllByText('このメニューで、モバイル注文も受けられます')).toHaveLength(0);
     });
 
     it('モバイル注文が使えない (flag OFF) ・メニューにできる商品 (有効な JPYC) が無いときは出さない', async () => {
       const first = render(<RegisterMode onStartMobileOrder={vi.fn()} />);
       await findTile(/コーヒー/);
-      expect(screen.queryByText('このメニューで、スマホ注文も受けられます')).toBeNull();
+      expect(screen.queryAllByText('このメニューで、モバイル注文も受けられます')).toHaveLength(0);
       first.unmount();
       envHold.enableMobileOrder = true;
       window.localStorage.setItem('openpay:product-presets:v1', JSON.stringify({
@@ -913,7 +948,7 @@ describe('RegisterMode', () => {
       }));
       render(<RegisterMode onStartMobileOrder={vi.fn()} />);
       await findTile(/USDCグッズ/);
-      expect(screen.queryByText('このメニューで、スマホ注文も受けられます')).toBeNull();
+      expect(screen.queryAllByText('このメニューで、モバイル注文も受けられます')).toHaveLength(0);
     });
 
     it('商品の編集シートの先頭に「モバイル注文のメニューにもなる」の 1 行', async () => {

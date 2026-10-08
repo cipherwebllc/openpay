@@ -1060,7 +1060,6 @@ describe('i18n: 動的 QR / FX 換算 keys (ja/en parity)', () => {
   // QrGenerator の convert (他トークン建てで受け取る) keys。
   const QR_CONVERT_KEYS = [
     'convertButton',
-    'convertRateUnavailable',
     'convertActiveSummary',
     'convertRate',
     'convertRemaining',

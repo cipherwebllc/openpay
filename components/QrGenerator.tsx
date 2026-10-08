@@ -978,6 +978,7 @@ export function QrGenerator() {
             downloadPng: t('downloadPng'),
             // お店負担の QR は端末が通信して送るので「圏外でも提示できます」は出さない。
             localGenNote: storeQrShown ? undefined : t('localGenNote'),
+            payTo: t('qrPayTo'),
             showUrl: t('qrShowUrl'),
             step1: t('posterStepScan'),
             step2: t('posterStepConfirm'),
@@ -1022,7 +1023,7 @@ export function QrGenerator() {
           note={settings.posterNote.trim() || t('posterDefaultNote')}
           chainText={tokenChainLabelText}
           receiverShort={
-            effectiveReceiver ? t('qrPayTo', { addr: shortAddress(effectiveReceiver) }) : ''
+            effectiveReceiver ? shortAddress(effectiveReceiver) : ''
           }
           // ポスターを「読まずに分かる」形にする token/chain 情報 (labels-as-props)。
           // chainSlug は public/chains/{slug}.svg と一致 (settings.chain = ChainSlug)。

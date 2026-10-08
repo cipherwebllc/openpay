@@ -25,7 +25,7 @@ import { ChainChooser } from './ChainChooser';
 import { QrReceiptPosterFields, QrReceiverFields, QrStoreNameField } from './qr/QrReceiverSection';
 import { QrSettingsSection } from './qr/QrSettingsSection';
 import { RegisterCartLine } from './register/RegisterCartLine';
-import { MobileOrderBridge } from './register/MobileOrderBridge';
+import { MobileOrderBridge, useMobileOrderBridgeDismissed } from './register/MobileOrderBridge';
 import { QrPreviewModal } from './QrPreviewModal';
 import { StoreGasWalletPanel } from './StoreGasWalletPanel';
 import { StoreDeviceRegisterStatus } from './StoreDeviceRegisterStatus';
@@ -277,6 +277,11 @@ function RegisterModeContent({
     : presetStore.enabledPresets;
   // モバイル注文のメニューになる商品があるか (メニューを作る presetsToMenu そのもので数える = 条件を二重に持たない)。
   const hasMenuItem = useMemo(() => presetsToMenu(presetStore.presets).length > 0, [presetStore.presets]);
+  // モバイル注文への橋 (使えて・メニューにできる商品があり・閉じていないときだけ)。PC とスマホで置き場所が違うので
+  // 閉じた状態はここで 1 つ持つ。
+  const [bridgeDismissed, dismissBridge] = useMobileOrderBridgeDismissed();
+  const startMobileOrder =
+    env.enableMobileOrder && hasMenuItem && !bridgeDismissed ? onStartMobileOrder : undefined;
   const soldOut = useMemo(
     () => new Set(shopLive?.state.soldOut ?? []),
     [shopLive?.state.soldOut],
@@ -831,9 +836,14 @@ function RegisterModeContent({
                   {t('currencyMismatch', { symbol })}
                 </p>
               )}
-              {/* レジの商品 (有効な JPYC 商品) はそのままモバイル注文のメニュー。メニューにできる商品があるときだけ橋を出す。 */}
-              {env.enableMobileOrder && onStartMobileOrder && hasMenuItem && (
-                <MobileOrderBridge onStart={onStartMobileOrder} />
+              {/* レジの商品 (有効な JPYC 商品) はそのままモバイル注文のメニュー。メニューにできる商品があるときだけ橋を出す。
+                  PC はここ (商品カードの中)・スマホはご注文の後ろ (タイル → ご注文の間に挟まない)。 */}
+              {startMobileOrder && (
+                <MobileOrderBridge
+                  onStart={startMobileOrder}
+                  onDismiss={dismissBridge}
+                  className="mt-4 max-lg:hidden"
+                />
               )}
             </div>
           </section>
@@ -914,7 +924,7 @@ function RegisterModeContent({
                   <div className="flex justify-between">
                     <dt className="text-slate-500">{t('taxAmount')}</dt>
                     <dd className="tabular-nums text-slate-600">
-                      {totalTaxRounded} {symbol}
+                      {groupAmountDigits(String(totalTaxRounded))} {symbol}
                     </dd>
                   </div>
                 )}
@@ -964,6 +974,10 @@ function RegisterModeContent({
             </div>
           </section>
         </aside>
+
+        {startMobileOrder && (
+          <MobileOrderBridge onStart={startMobileOrder} onDismiss={dismissBridge} className="lg:hidden" />
+        )}
 
         {/* お店の端末で送る (ガス代の肩代わり) の状態とガス用ウォレット。PC は左列の商品の下、スマホは注文の下。 */}
         {env.enableStoreGasWallet && (
@@ -1118,6 +1132,7 @@ function RegisterModeContent({
             copied: t('copied'),
             // お店負担の QR は端末が通信して送るので「圏外でも提示できます」は出さない。
             localGenNote: storeQrActive ? undefined : t('qrLocalGenNote'),
+            payTo: tQr('qrPayTo'),
             showUrl: tQr('qrShowUrl'),
             // お客様向けの 3 ステップ (決済QR と同じ・2026-10 磨き上げ P5 でレジにも)。
             step1: tQr('posterStepScan'),
@@ -1154,7 +1169,7 @@ function RegisterModeContent({
             chainSlug: settings.chain,
             chainLabel: chainForSlug(settings.chain).name,
           }}
-          receiverShort={effectiveReceiver ? tQr('qrPayTo', { addr: shortAddress(effectiveReceiver) }) : ''}
+          receiverShort={effectiveReceiver ? shortAddress(effectiveReceiver) : ''}
           // お店負担の QR は画面に表示している間だけ使える (URL の表示・コピーは出さない・決済QRタブと同じ)。
           {...(storeQrActive
             ? { hideUrl: true, actionsNote: tQr('storeDevice.actionsNote') }

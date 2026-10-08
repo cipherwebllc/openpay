@@ -44,6 +44,8 @@ export type QrPreviewModalLabels = {
   /** 「この QR は端末内で生成 (通信不要)」の安心表示 (任意)。圏外の現場でも
    *  QR の生成・提示ができることを店員に伝える。印刷ポスターには出さない。 */
   localGenNote?: string;
+  /** 受取先の見出し (例「支払先」・お客様の支払い画面と同じ言葉)。省略時はアドレスだけ。 */
+  payTo?: string;
   /** ポスター読者 (顧客) 向け 3 ステップ行の文言 (①スキャン ②確認 ③完了)。
    *  asset 指定 + 3 つ揃ったときのみポスターに描画 (印刷でも表示)。 */
   step1?: string;
@@ -347,10 +349,11 @@ export function QrPreviewModal({
                 ))}
               </ol>
             )}
-            {/* 支払先 (お客様の支払い画面と同じ言葉・届く先をその場で見比べられる)。 */}
+            {/* 支払先 (お客様の支払い画面と同じ言葉・届く先をその場で見比べられる)。等幅はアドレスだけ。 */}
             {receiverShort && (
-              <p className="mt-3 break-all font-mono text-[11px] text-slate-500 print:max-w-2xl print:text-sm">
-                {receiverShort}
+              <p className="mt-3 break-all text-[11px] text-slate-500 print:max-w-2xl print:text-sm">
+                {labels.payTo && <span>{labels.payTo} </span>}
+                <span className="font-mono">{receiverShort}</span>
               </p>
             )}
             {deviceStatus && <div className="mt-3 w-full print:hidden">{deviceStatus}</div>}

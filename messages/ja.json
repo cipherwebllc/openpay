@@ -510,7 +510,7 @@
     "qrModalConvertExpired": "為替レートの目安期限を過ぎました。この QR を閉じて、最新レートで作り直してください。",
     "qrCopy": "リンクをコピー",
     "qrShowUrl": "リンクを表示",
-    "qrPayTo": "支払先 {addr}",
+    "qrPayTo": "支払先",
     "qrCopied": "コピー済み",
     "downloadSvg": "SVG保存",
     "downloadPng": "PNG保存",
@@ -544,7 +544,6 @@
     "eip681Copied": "コピー済み",
     "merchantExplorerLink": "店舗ウォレットの履歴を {chainName} Explorer で見る ↗",
     "convertButton": "{symbol} 建てで受取る",
-    "convertRateUnavailable": "為替レートを取得できないため、現在は他トークン建てに換算できません。",
     "convertActiveSummary": "{anchorAmount} {anchorSymbol} ≈ {amount} {symbol}",
     "convertRate": "レート: 1 USDC = {rate} 円",
     "convertRemaining": "OpenPay 画面上の目安 残り {time}（未署名 QR のためサーバ強制ではありません）",
@@ -2621,7 +2620,7 @@
       "receiver": "受取先が未設定"
     },
     "mobileOrderBridge": {
-      "title": "このメニューで、<wbr></wbr>スマホ注文も受けられます",
+      "title": "このメニューで、<wbr></wbr>モバイル注文も受けられます",
       "cta": "モバイル注文を始める",
       "dismiss": "閉じる",
       "sheetNote": "ここで編集した商品は、モバイル注文のメニューにもなります。"

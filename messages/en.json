@@ -510,7 +510,7 @@
     "qrModalConvertExpired": "The indicative FX rate has expired. Close this QR and regenerate it with the latest rate.",
     "qrCopy": "Copy link",
     "qrShowUrl": "Show link",
-    "qrPayTo": "Pay to {addr}",
+    "qrPayTo": "Pay to",
     "qrCopied": "Copied",
     "downloadSvg": "Save SVG",
     "downloadPng": "Save PNG",
@@ -544,7 +544,6 @@
     "eip681Copied": "Copied",
     "merchantExplorerLink": "View merchant wallet activity on {chainName} Explorer ↗",
     "convertButton": "Receive in {symbol} at today's FX rate",
-    "convertRateUnavailable": "FX rate unavailable — can't convert to the other token right now.",
     "convertActiveSummary": "{anchorAmount} {anchorSymbol} ≈ {amount} {symbol}",
     "convertRate": "Rate: 1 USDC = ¥{rate}",
     "convertRemaining": "OpenPay UI guide: {time} left (not server-enforced because the QR is unsigned)",
@@ -2610,7 +2609,7 @@
       "saleBlockedHint": "Use “Show the standard QR” to show the standard (gas-free) QR."
     },
     "productsSheetTitle": "Products",
-    "itemCount": "{count} items",
+    "itemCount": "{count, plural, one {# item} other {# items}}",
     "currencyFromProducts": "The currency follows your items (now {symbol}).",
     "notReady": {
       "items": "Pick an item",
@@ -2621,7 +2620,7 @@
       "receiver": "No receiver set"
     },
     "mobileOrderBridge": {
-      "title": "Take orders on customers’ phones with this menu",
+      "title": "Take mobile orders with this menu",
       "cta": "Start mobile ordering",
       "dismiss": "Dismiss",
       "sheetNote": "Items you edit here also appear on your mobile-order menu."
