@@ -1686,7 +1686,8 @@
   },
   "AddressInput": {
     "placeholder": "0x... または vitalik.eth / name.base.eth",
-    "resolving": "名前を解決しています…"
+    "resolving": "名前を解決しています…",
+    "resolveFailed": "名前を解決できませんでした。少し待ってからもう一度試すか、0x アドレスを入力してください。"
   },
   "CrossChainHint": {
     "progressForwardPending": "Arc の着金を確認中",

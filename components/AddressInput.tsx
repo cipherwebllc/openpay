@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import type { Address } from 'viem';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { isLikelyName } from '@/lib/nameDetection';
+import { ResolveAddressError } from '@/lib/resolveAddressError';
 
 // 0x / .eth / .base.eth を受け付ける。名前解決成功時のみ onResolved に
 // checksum 化された Address を通知。入力値の永続化は親の責任 (生入力を
@@ -50,7 +51,10 @@ export function AddressInput({
         <p className="mt-1 text-xs text-slate-500">{t('resolving')}</p>
       )}
       {looksLikeName && query.error && (
-        <p className="mt-1 text-xs text-red-600">{query.error.message}</p>
+        // 未登録・形式違いはそのまま。RPC や外部サーバ (CCIP-Read) の失敗は生の技術的な文面を見せず言い換える。
+        <p className="mt-1 text-xs text-red-600">
+          {query.error instanceof ResolveAddressError ? query.error.message : t('resolveFailed')}
+        </p>
       )}
       {looksLikeName && query.data?.name && (
         // R: span 直接に break-all を付ける。iOS Safari は font-family 切替時に

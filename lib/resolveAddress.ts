@@ -8,6 +8,7 @@ import {
 import { mainnet } from 'viem/chains';
 import { normalize } from 'viem/ens';
 import { env } from './env';
+import { ResolveAddressError } from './resolveAddressError';
 
 // ENS (.eth) も Basenames (.base.eth) も Ethereum mainnet の ENS Universal
 // Resolver で解決する。Basenames は L2 (Base) の Registry / Resolver を
@@ -44,10 +45,10 @@ export async function resolveAddress(
     const name = normalize(trimmed);
     const address = await ensClient.getEnsAddress({ name });
     if (!address) {
-      throw new Error(`${trimmed} は登録されていません`);
+      throw new ResolveAddressError(`${trimmed} は登録されていません`);
     }
     return { address: getAddress(address), name: trimmed };
   }
 
-  throw new Error('0x アドレスまたは .eth / .base.eth を入力してください');
+  throw new ResolveAddressError('0x アドレスまたは .eth / .base.eth を入力してください');
 }

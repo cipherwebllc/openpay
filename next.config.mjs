@@ -38,6 +38,9 @@ const connectOrigins = [
   'https://api.pimlico.io',
   'https://gateway-api.circle.com', 'https://gateway-api-testnet.circle.com',
   'https://iris-api.circle.com', 'https://iris-api-sandbox.circle.com',
+  // lib/resolveAddress.ts → ブラウザが ENS の CCIP-Read (ERC-3668) の外部サーバに問い合わせる名前:
+  // Basenames (*.base.eth) と MynaWallet (*.myna.eth)。ほかのオフチェーン名は解決できない旨を画面に出す。
+  'https://api.coinbase.com', 'https://prd-api.mynawallet.jp',
 ];
 
 const frameOrigins = [
