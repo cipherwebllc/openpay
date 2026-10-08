@@ -619,11 +619,7 @@ function RegisterModeContent({
 
   return (
     <div className="space-y-5">
-      <div>
-        <h2 className="text-lg font-semibold text-slate-800">{t('heading')}</h2>
-        <p className="mt-1 text-sm text-slate-500">{t('subheading')}</p>
-      </div>
-
+      {/* 見出し・説明は出さない (タブ名「レジ」で足りる・2026-10 磨き上げ P1)。 */}
       {/* 受取先/通貨/チェーン/決済設定は決済QRタブから継承。レジでは大きく露出させず、
           確認用に 1 行のステータスバー (受取先・通貨/チェーン・決済設定 + 変更導線) へ圧縮し、
           上部の縦幅を削って商品プリセットを上に押し上げる。 */}

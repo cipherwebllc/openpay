@@ -608,6 +608,16 @@ export function QrGenerator() {
     const yen = Math.round(value * marketRates.usdcJpy);
     return t('fiatApprox', { yen: yen.toLocaleString('en-US') });
   }, [mode, settings.token, marketRates, amount, t]);
+  // USDC のときだけ、金額の下に参考レートを添える (作成画面の上の市場レートの帯の代わり・表示だけ)。
+  const rateHint = useMemo(() => {
+    if (settings.token !== 'usdc' || !marketRates || !rateIsSane(marketRates.usdcJpy)) return null;
+    return t('usdcRateHint', {
+      rate: marketRates.usdcJpy.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }),
+    });
+  }, [settings.token, marketRates, t]);
 
   // 「QRコードを表示する」(右サイドバーとモバイル下部バーの 2 か所)。flag OFF では今までどおりそのまま開く。
   // flag ON: お店の端末が支払いを送っている・結果を待っている間は出さない (同じ会計を二重に払わせない・状態は
@@ -753,6 +763,7 @@ export function QrGenerator() {
           setAmount={setAmount}
           resetConvert={resetConvert}
           fiatHint={fiatHint}
+          rateHint={rateHint}
           selectToken={selectToken}
           selectChain={selectChain}
           canShowConvert={canShowConvert}

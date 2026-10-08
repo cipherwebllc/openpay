@@ -19,6 +19,17 @@ function receiverInput(page: Page): Locator {
   return page.getByPlaceholder(/0x\.\.\./);
 }
 
+// 換金は 1 行の折りたたみ (2026-10 磨き上げ P1)。見出しを押して開き、開いたことを確かめてから中身を見る。
+async function openOfframp(page: Page): Promise<Locator> {
+  const offramp = page.locator('details:has(#offramp-heading)').first();
+  await expect(offramp).toBeVisible();
+  await expect(async () => {
+    if ((await offramp.getAttribute('open')) === null) await page.locator('#offramp-heading').click();
+    expect(await offramp.getAttribute('open')).not.toBeNull();
+  }).toPass({ timeout: 15000 });
+  return offramp;
+}
+
 async function hydratedStep2Toggle(page: Page): Promise<Locator> {
   await page.addInitScript(() => {
     window.localStorage.setItem('openpay:qr-settings:v2', JSON.stringify({
@@ -105,6 +116,9 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
       name: '受け取った通貨を換金',
     });
     await expect(offrampHeading).toBeVisible();
+    // 閉じている間はリンクを出さない (会計画面を短く保つ)。
+    await expect(page.getByRole('link', { name: /JPYC EX/ })).toBeHidden();
+    await openOfframp(page);
     const jpycLink = page.getByRole('link', { name: /JPYC EX/ });
     await expect(jpycLink).toHaveAttribute('href', 'https://jpyc.co.jp/');
     await expect(jpycLink).toHaveAttribute('target', '_blank');
@@ -151,11 +165,15 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     // ことがある既知の非互換で、値が不安定なため (旧テストの flaky 真因)。回転 variant が build で
     // purge された場合の silent UX 劣化検知は chromium 側で担保する (機能=開閉自体は両ブラウザで担保)。
     await page.goto('/ja/create');
+    const offramp = await openOfframp(page);
     const gasHintTitle = page.getByText(
       /ガス代 \(POL \/ ETH\) が無くて取引所に送れないとき/,
     );
     const body = page.getByText(/Base \/ Arbitrum \/ Optimism は ETH/);
-    const detailsEl = page.locator('details:has(summary:has-text("ガス代 (POL / ETH)"))');
+    // 換金の折りたたみの中の、ガス代のヒントの折りたたみ (外側の換金の details を含めない)。
+    const detailsEl = offramp
+      .locator('details')
+      .filter({ has: page.locator('summary', { hasText: 'ガス代 (POL / ETH)' }) });
     // ChevronIcon = summary 内で transition-transform クラスを持つ唯一の SVG。
     // 同 summary 内の GasPumpIcon (width=18) と区別するため class で選択。
     const chevron = detailsEl.locator('summary svg.transition-transform');
@@ -192,7 +210,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     // から消えるが、DOM 上は token row 各々に <svg> として存在し、glyph (¥/$) を
     // 持つ。SVG 描画失敗 (例: import 漏れ、render error) を検知する。
     await page.goto('/ja/create');
-    const offrampSection = page.locator('section[aria-labelledby="offramp-heading"]');
+    const offrampSection = await openOfframp(page);
     // 各 row の text に対する SVG sibling を確認
     const jpycRow = offrampSection
       .locator('li')
@@ -304,6 +322,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await expect(
       page.getByRole('heading', { name: 'Off-ramp received tokens' }),
     ).toBeVisible();
+    await openOfframp(page);
     const jpycLink = page.getByRole('link', { name: /JPYC EX/ });
     await expect(jpycLink).toHaveAttribute('href', 'https://jpyc.co.jp/');
     await expect(page.getByText('(Japan residents only)')).toBeVisible();

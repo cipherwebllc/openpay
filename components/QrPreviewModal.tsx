@@ -172,13 +172,15 @@ export function QrPreviewModal({
       aria-modal="true"
       aria-label={labels.title}
       tabIndex={-1}
-      className={`fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-slate-900/70 px-4 py-8 ${
+      className={`fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-slate-900/70 px-4 py-8 max-sm:p-0 ${
         // 印刷対応 (QR) はポスターを全画面印刷。印刷非対応 (レジ) はモーダルごと
         // 印刷対象外にして背後のカートとの重なり (bleed) を防ぐ。
         onPrint ? 'print:static print:bg-white print:p-0' : 'print:hidden'
       }`}
     >
-      <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-xl print:static print:max-w-none print:rounded-none print:p-0 print:shadow-none">
+      {/* スマホ (幅 640px 未満) は全画面のシート: 外側と内側の余白を最小にして QR を大きく出す (390px で約 5px / マス)。
+          max-sm: だけで変える = タブレット以上と印刷 (A4 幅) の見た目は今のまま。 */}
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-5 shadow-xl max-sm:min-h-full max-sm:max-w-none max-sm:rounded-none max-sm:p-4 print:static print:max-w-none print:rounded-none print:p-0 print:shadow-none">
         {/* header: タイトル + × 閉じる (印刷では隠す) */}
         <div className="mb-4 flex items-center justify-between gap-3 print:hidden">
           <h2 className="text-base font-semibold text-slate-800">
@@ -196,7 +198,7 @@ export function QrPreviewModal({
 
         {/* ポスター調プレビュー (印刷対象。print: で全画面に展開)。
             print-color-adjust:exact でブランド色 / バッジが白抜けせず印刷される。 */}
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 [print-color-adjust:exact] print:fixed print:inset-0 print:z-50 print:flex print:min-h-screen print:flex-col print:items-center print:justify-center print:border-0 print:p-10 print:[print-color-adjust:exact]">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 max-sm:border-0 max-sm:p-0 [print-color-adjust:exact] print:fixed print:inset-0 print:z-50 print:flex print:min-h-screen print:flex-col print:items-center print:justify-center print:border-0 print:p-10 print:[print-color-adjust:exact]">
           <div className="mx-auto flex max-w-sm flex-col items-center text-center">
             <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 print:text-base">
               {labels.eyebrow}
@@ -254,9 +256,12 @@ export function QrPreviewModal({
                 </span>
               )}
             </div>
+            {/* スマホ (640px 未満) だけ、QR を枠の幅まで縮める (はみ出さない)。タブレット以上と印刷は QR_SIZE のまま
+                (縮める指定はすべて max-sm: に閉じる)。縮める指定は stylesheet の class (SVG の属性・style は変えない =
+                PNG / SVG 保存の大きさは不変)。includeMargin が白い余白を持つので、スマホでは枠の内側の余白を削る。 */}
             <div
               ref={qrRef}
-              className={`mt-5 rounded-2xl border border-slate-200 bg-white p-4 print:mt-6 print:p-6${convertExpired ? ' opacity-40' : ''}`}
+              className={`mt-5 rounded-2xl border border-slate-200 bg-white p-4 max-sm:w-full max-sm:max-w-max max-sm:p-1 print:mt-6 print:p-6 max-sm:[&>svg]:h-auto max-sm:[&>svg]:w-full${convertExpired ? ' opacity-40' : ''}`}
             >
               {/* 中央に OpenPay マークを置く (ブランド認知 + 「読んでよい QR か」の判断材料)。
                   level は **'Q' (25% 訂正)**。マークの被覆は面積の約 3% しかないので Q で十分余裕が

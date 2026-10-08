@@ -215,7 +215,7 @@ describe('i18n: 取引履歴の受取/支払い統合キー (ja/en parity)', () 
   });
 });
 
-describe('i18n: Create.tabs / tabDesc キー (ja/en parity)', () => {
+describe('i18n: Create.tabs キー (ja/en parity)', () => {
   // タブラベルは短縮済 (決済QR/レジ/チップ) で 3 タブ分必要。
   const TAB_KEYS = ['qr', 'register', 'tip'] as const;
   for (const key of TAB_KEYS) {
@@ -228,18 +228,10 @@ describe('i18n: Create.tabs / tabDesc キー (ja/en parity)', () => {
     });
   }
 
-  // tabDesc は決済QR タブのみ表示 (レジ/チップは各パネル先頭の見出し+説明と重複する
-  // ため非表示)。qr のみ非空 + parity を fence する。
-  it('ja/en の Create.tabDesc.qr は非空文字列 (register/tip は撤去)', () => {
+  // タブ下の説明 (tabDesc) は撤去済み (タブ名で用途が分かる・2026-10 決済QR/レジ磨き上げ P1)。
+  it('ja/en とも Create.tabDesc を持たない (撤去した説明の行を戻さない)', () => {
     for (const m of [ja, en]) {
-      const desc = (m.Create as Record<string, unknown>).tabDesc as Record<
-        string,
-        unknown
-      >;
-      expect(typeof desc.qr).toBe('string');
-      expect(desc.qr).not.toBe('');
-      expect(desc.register).toBeUndefined();
-      expect(desc.tip).toBeUndefined();
+      expect((m.Create as Record<string, unknown>).tabDesc).toBeUndefined();
     }
   });
 });

@@ -52,11 +52,6 @@ export function MiniHistoryRecent() {
   const locale = useLocale() as Locale;
   const { entries, hydrated } = useHistory();
 
-  // SSR / hydrate 前は固定高 placeholder で CLS を抑える。
-  if (!hydrated) {
-    return <div aria-hidden className="mt-6 h-32" />;
-  }
-
   // standard-fee (OpenPay 利用手数料の独立 tx) は merchant への売上ではないので
   // mini 表示からは除外。standard-merchant + batch + direct のみを最新 N 件として
   // 表示する。
@@ -64,87 +59,85 @@ export function MiniHistoryRecent() {
     .filter((e) => e.flow !== 'standard-fee')
     .slice(0, RECENT_LIMIT);
 
+  // 履歴が無い間は何も出さない (空のカードで会計画面を長くしない・2026-10 磨き上げ P1)。
+  // ページの最下部なので、読み込み後に現れても上の操作は動かない。
+  if (!hydrated || recent.length === 0) return null;
+
   return (
     <section
       aria-labelledby="mini-history-heading"
-      className="mt-6 rounded-3xl bg-white p-6 shadow-card ring-1 ring-slate-200/70 sm:p-8 print:hidden"
+      className="mt-6 rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:p-6 print:hidden"
     >
       <h2
         id="mini-history-heading"
-        className="flex items-center gap-2 text-base font-semibold text-slate-800"
+        className="flex items-center gap-2 text-sm font-semibold text-slate-800"
       >
-        <HistoryIcon className="h-5 w-5 text-brand" aria-hidden />
+        <HistoryIcon className="h-4 w-4 text-slate-400" aria-hidden />
         {t('recentHistoryTitle')}
       </h2>
 
-      {recent.length === 0 ? (
-        <p className="mt-3 text-sm text-slate-500">{t('recentHistoryEmpty')}</p>
-      ) : (
-        <>
-          <ul className="mt-4 space-y-2">
-            {recent.map((entry) => {
-              const txUrl = entry.txHash
-                ? txExplorerUrl(entry.chainId, entry.txHash)
-                : undefined;
-              const chainName = chainNameForId(entry.chainId);
-              return (
-                <li
-                  key={entry.id}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span
-                      className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${STATUS_DOT_CLASS[entry.status]}`}
-                      aria-label={tHistory(STATUS_I18N_KEY[entry.status])}
+      <ul className="mt-3 space-y-2">
+        {recent.map((entry) => {
+          const txUrl = entry.txHash
+            ? txExplorerUrl(entry.chainId, entry.txHash)
+            : undefined;
+          const chainName = chainNameForId(entry.chainId);
+          return (
+            <li
+              key={entry.id}
+              className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 text-sm"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span
+                  className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${STATUS_DOT_CLASS[entry.status]}`}
+                  aria-label={tHistory(STATUS_I18N_KEY[entry.status])}
+                />
+                <div className="min-w-0">
+                  {/* 受取方向 ↓ + トークンロゴ (HistoryRow #190 と同じ意味論・この
+                      strip は受取のみを表示するため常に ↓)。 */}
+                  <p className="flex items-center gap-1.5 font-semibold text-slate-900">
+                    <ArrowDown
+                      className="h-3.5 w-3.5 shrink-0 text-emerald-600"
+                      strokeWidth={2.5}
+                      aria-hidden
                     />
-                    <div className="min-w-0">
-                      {/* 受取方向 ↓ + トークンロゴ (HistoryRow #190 と同じ意味論・この
-                          strip は受取のみを表示するため常に ↓)。 */}
-                      <p className="flex items-center gap-1.5 font-semibold text-slate-900">
-                        <ArrowDown
-                          className="h-3.5 w-3.5 shrink-0 text-emerald-600"
-                          strokeWidth={2.5}
-                          aria-hidden
-                        />
-                        <TokenLogo
-                          symbol={entry.asset}
-                          size={16}
-                          className="h-4 w-4 shrink-0"
-                        />
-                        <span className="truncate">
-                          {formatAmount(entry.merchantAmount, entry.asset)}
-                        </span>
-                      </p>
-                      <p className="truncate text-[11px] text-slate-500">
-                        {formatHistoryTimestamp(entry.ts)}
-                        {chainName && <> · {chainName}</>}
-                      </p>
-                    </div>
-                  </div>
-                  {txUrl && (
-                    <a
-                      href={txUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-shrink-0 text-[11px] font-medium text-brand hover:underline"
-                    >
-                      tx ↗
-                    </a>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          <Link
-            href={`/${locale}/history`}
-            prefetch={false}
-            className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-brand hover:underline"
-          >
-            {t('recentHistoryViewAll')}
-            <ArrowRight className="h-3.5 w-3.5" aria-hidden />
-          </Link>
-        </>
-      )}
+                    <TokenLogo
+                      symbol={entry.asset}
+                      size={16}
+                      className="h-4 w-4 shrink-0"
+                    />
+                    <span className="truncate">
+                      {formatAmount(entry.merchantAmount, entry.asset)}
+                    </span>
+                  </p>
+                  <p className="truncate text-[11px] text-slate-500">
+                    {formatHistoryTimestamp(entry.ts)}
+                    {chainName && <> · {chainName}</>}
+                  </p>
+                </div>
+              </div>
+              {txUrl && (
+                <a
+                  href={txUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-shrink-0 text-[11px] font-medium text-brand hover:underline"
+                >
+                  tx ↗
+                </a>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <Link
+        href={`/${locale}/history`}
+        prefetch={false}
+        className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-brand hover:underline"
+      >
+        {t('recentHistoryViewAll')}
+        <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+      </Link>
     </section>
   );
 }
