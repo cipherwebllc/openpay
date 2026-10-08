@@ -639,13 +639,16 @@ function RegisterModeContent({
 
   // 押せない理由 (未入力の項目)。商品 → 受取先の順に 1 つだけ。
   // 受取先が無いのが初めての店の本当の壁なので、受取先を先に出す (2026-10 磨き上げ P5・Fable 監査)。
-  const notReady = checkoutUrl
+  const notReadyKey = checkoutUrl
     ? null
     : !effectiveReceiver && !receiverName
-      ? t('notReady.receiver')
+      ? 'receiver'
       : validItems.length === 0
-        ? t('notReady.items')
+        ? 'items'
         : null;
+  const notReady = notReadyKey ? t(`notReady.${notReadyKey}`) : null;
+  // 下部バーは幅が狭いので短い言い方 (「受取先が未設定」・会計画面の要約と同じ言葉)。
+  const notReadyShort = notReadyKey ? t(`notReadyShort.${notReadyKey}`) : null;
   const lineCount = cart.reduce((n, l) => n + l.quantity, 0);
   const qrDisabled = !checkoutUrl || device.busy || storeDeviceNotReady;
   const qrLabel = sdSaleBlocked ? t('storeDevice.showNormalQr') : t('showQr');
@@ -993,13 +996,16 @@ function RegisterModeContent({
         className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/70 bg-white/85 px-4 py-2.5 backdrop-blur-md supports-[backdrop-filter]:bg-white/75 md:bottom-0 lg:hidden"
       >
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] text-slate-500">{t('total')}</div>
-          {notReady ? (
-            <div className="truncate text-sm font-medium text-slate-500">{notReady}</div>
+          {/* 押せないときは見出しを外し、短い理由だけを出す。 */}
+          {notReadyShort ? (
+            <div className="truncate text-sm font-medium text-slate-500">{notReadyShort}</div>
           ) : (
-            <div className="truncate text-lg font-bold tabular-nums text-slate-900">
-              {groupAmountDigits(totalHuman)} {symbol}
-            </div>
+            <>
+              <div className="text-[11px] text-slate-500">{t('total')}</div>
+              <div className="truncate text-lg font-bold tabular-nums text-slate-900">
+                {groupAmountDigits(totalHuman)} {symbol}
+              </div>
+            </>
           )}
         </div>
         <button
@@ -1017,7 +1023,11 @@ function RegisterModeContent({
           売上の自動分配・他チェーンからの受取はレジの明細 QR (checkout) で使わないので出さない。 */}
       <ShopSettingsSheet
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          // シートで受取先を決めたら、会計画面の受取先の欄は役目を終える (同じ欄を 2 か所に出さない)。
+          if (effectiveReceiver) setReceiverInline(false);
+        }}
         title={tQr('shopSettings.title')}
         doneLabel={tQr('shopSettings.done')}
       >

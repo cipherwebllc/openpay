@@ -530,8 +530,6 @@
     "posterStepScan": "スマホでスキャン",
     "posterStepConfirm": "金額を確認",
     "posterStepDone": "お支払い完了",
-    "qrPlaceholderNoAddress": "受取先アドレスを入力 (Step 2)",
-    "qrPlaceholderNoAmount": "金額を入力",
     "qrEmptyState": {
       "trySample": "サンプル金額 {amount} で試す"
     },
@@ -615,6 +613,10 @@
     "notReady": {
       "amount": "金額を入れてください",
       "receiver": "受取先を設定してください"
+    },
+    "notReadyShort": {
+      "amount": "金額が未入力",
+      "receiver": "受取先が未設定"
     }
   },
   "RecoverFee": {
@@ -2612,6 +2614,10 @@
     "notReady": {
       "items": "商品を選んでください",
       "receiver": "受取先を設定してください"
+    },
+    "notReadyShort": {
+      "items": "商品が未選択",
+      "receiver": "受取先が未設定"
     },
     "mobileOrderBridge": {
       "title": "このメニューで、<wbr></wbr>スマホ注文も受けられます",

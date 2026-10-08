@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -83,6 +84,21 @@ export function QrAmountSection({
 }) {
   const t = useTranslations('QrGenerator');
   const amountInputRef = useRef<HTMLInputElement>(null);
+  // 金額は桁区切りつきで見せる (1500 → 1,500・よく使う金額や QR の画面と同じ表記)。持つ値は区切りなしのまま
+  // (QR の URL に入るのはこの値)。区切りが増減しても caret が末尾へ飛ばないよう、caret より右の数字の数を
+  // 覚えておき、描画後に同じ位置へ戻す。
+  const caretFromEndRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = amountInputRef.current;
+    const fromEnd = caretFromEndRef.current;
+    caretFromEndRef.current = null;
+    if (!el || fromEnd === null || document.activeElement !== el) return;
+    let pos = el.value.length;
+    for (let seen = 0; pos > 0 && seen < fromEnd; pos -= 1) {
+      if (el.value[pos - 1] !== ',') seen += 1;
+    }
+    el.setSelectionRange(pos, pos);
+  });
   const [editingQuick, setEditingQuick] = useState(false);
 
   // クイック金額は token (JPYC=円 / USDC=ドル) ごとに独立。エディタ・適用とも
@@ -139,12 +155,13 @@ export function QrAmountSection({
     >
       <div className="border-b border-slate-100 px-5 py-4">{header}</div>
       <div className="space-y-4 px-5 pb-5 pt-4">
-        <div className="flex items-center justify-between gap-3">
-          <h2 id="qr-amount-heading" className="text-sm font-semibold text-slate-700">
+        {/* 狭い画面 (英語・360px) では切替を次の行の右へ回す (見出しを 2 行に割らない・カードからはみ出さない)。 */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <h2 id="qr-amount-heading" className="whitespace-nowrap text-sm font-semibold text-slate-700">
             {t('amountLabel', { symbol: deployment.displaySymbol })}
           </h2>
           {/* 金額指定 / 据え置き (金額なし) の切替。金額が主役なので小さく右に置く。 */}
-          <div className="inline-flex shrink-0 rounded-full bg-slate-100 p-0.5">
+          <div className="ml-auto inline-flex shrink-0 rounded-full bg-slate-100 p-0.5">
             {(
               [
                 ['amount', t('modeAmount')],
@@ -165,7 +182,7 @@ export function QrAmountSection({
                   }
                   resetConvert();
                 }}
-                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                className={`rounded-full px-2.5 py-1 text-xs font-semibold transition ${
                   mode === m
                     ? 'bg-white text-slate-900 shadow-sm'
                     : 'text-slate-500 hover:text-slate-800'
@@ -187,14 +204,17 @@ export function QrAmountSection({
                 ref={amountInputRef}
                 type="text"
                 inputMode="decimal"
-                value={amount}
+                value={groupAmountDigits(amount)}
                 onChange={(e) => {
+                  const el = e.target;
+                  const caret = el.selectionStart ?? el.value.length;
+                  caretFromEndRef.current = el.value.slice(caret).replace(/,/g, '').length;
                   setAmount(
-                    truncateAmount(e.target.value, deployment.decimals),
+                    truncateAmount(el.value.replace(/,/g, ''), deployment.decimals),
                   );
                   resetConvert();
                 }}
-                placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
+                placeholder={settings.token === 'jpyc' ? '1,000' : '10.00'}
                 aria-label={t('amountLabel', {
                   symbol: deployment.displaySymbol,
                 })}
@@ -293,6 +313,7 @@ export function QrAmountSection({
           chainId={deployment.chainId}
           gasMode={recoverGasMode}
           tone="neutral"
+          groupDigits
         />
       </div>
     </section>

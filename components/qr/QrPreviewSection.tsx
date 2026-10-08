@@ -135,7 +135,7 @@ export function QrMobileBar({
   mode: Mode;
   deployment: TokenDeployment;
   amountLabelText: string;
-  /** 押せない理由 (未入力の項目)。null = 入力は揃っている。 */
+  /** 押せない理由 (未入力の項目・バー用の短い言い方)。null = 入力は揃っている。 */
   notReady: string | null;
   fiatHint: string | null;
   setQrModalOpen: Dispatch<SetStateAction<boolean>>;
@@ -164,9 +164,10 @@ export function QrMobileBar({
       className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/70 bg-white/85 px-4 py-2.5 backdrop-blur-md supports-[backdrop-filter]:bg-white/75 md:bottom-0 lg:hidden print:hidden"
     >
       <div className="min-w-0 flex-1">
-        <div className="text-[11px] text-slate-500">
-          {t('bottomAmountLabel')}
-        </div>
+        {/* 押せないときは見出しを外し、短い理由だけを出す (「請求金額」の下に受取先の話を並べない)。 */}
+        {ready ? (
+          <div className="text-[11px] text-slate-500">{t('bottomAmountLabel')}</div>
+        ) : null}
         {ready ? (
           <div className="flex items-baseline gap-2">
             <span className="truncate text-lg font-bold tabular-nums text-slate-900">

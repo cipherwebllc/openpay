@@ -30,7 +30,8 @@ export function TopNav() {
             href={`/${locale}${item.href}`}
             prefetch={false}
             aria-current={active ? 'page' : undefined}
-            className={`rounded-lg px-3 py-1.5 transition ${
+            // タブレット幅 (md〜lg) では語の途中で折り返さないよう詰める (「決/済」と縦に割れていた・2026-10 磨き上げ P6)。
+            className={`whitespace-nowrap rounded-lg px-2 py-1.5 transition lg:px-3 ${
               active
                 ? 'bg-slate-100 text-brand'
                 : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'

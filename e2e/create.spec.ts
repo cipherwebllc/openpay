@@ -341,7 +341,10 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await page.goto('/ja/create');
     await expect(page.getByRole('heading', { name: '請求金額 (JPYC)' })).toBeVisible();
     await expect(page.getByText('店名未設定')).toBeVisible();
-    await expect(page.getByText('受取先が未設定')).toBeVisible();
+    // 要約の「受取先が未設定」(下部バーにも同じ言葉が出るので、会計のカードの中に絞る)。
+    await expect(
+      page.locator('section[aria-labelledby="qr-amount-heading"]').getByText('受取先が未設定'),
+    ).toBeVisible();
     await expect(page.getByRole('heading', { name: '受け取るウォレット' })).toBeVisible();
     await expect(receiverInput(page)).toBeVisible();
     // 旧 ①②③ の見出しは出さない
@@ -398,7 +401,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
       '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
     );
     // 金額入力 (main amount)。よく使う金額の編集欄の placeholder「例: 1000」と区別するため exact。
-    await page.getByPlaceholder('1000', { exact: true }).fill('500');
+    await page.getByPlaceholder('1,000', { exact: true }).fill('500');
     // desktop は右の会計パネル、mobile は下部固定バーのボタン (どちらも同じ label)。
     // getByRole は display:none の要素を拾わないので、画面幅に合った方 (表示中の 1 つ) が先頭になる。
     await page
@@ -427,7 +430,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
       '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
     );
     // amount 入力 (JPYC plain で 750)。quick-amount 編集欄「例: 1000」と区別するため exact。
-    await page.getByPlaceholder('1000', { exact: true }).fill('750');
+    await page.getByPlaceholder('1,000', { exact: true }).fill('750');
     // QR / 印刷ボタンは「QRコードを表示する」→ 全画面 QrPreviewModal に集約済み。先にモーダルを開く。
     await page
       .getByRole('button', { name: 'QRコードを表示する' })

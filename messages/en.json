@@ -455,8 +455,8 @@
     "installHintTitle": "Use this QR every day? Add OpenPay to your home screen",
     "installHintIosStep3": "Next time, one tap on the icon opens it",
     "amountLabel": "Amount ({symbol})",
-    "modeAmount": "Fixed amount",
-    "modeStatic": "Open amount",
+    "modeAmount": "Fixed",
+    "modeStatic": "Any amount",
     "staticHint": "With an open-amount QR, the customer enters the amount.",
     "fiatApprox": "≈ ¥{yen}",
     "usdcRateHint": "1 USDC ≈ ¥{rate} (reference)",
@@ -530,8 +530,6 @@
     "posterStepScan": "Scan with your phone",
     "posterStepConfirm": "Check the amount",
     "posterStepDone": "Payment complete",
-    "qrPlaceholderNoAddress": "Enter receiver address (Step 2)",
-    "qrPlaceholderNoAmount": "Enter an amount",
     "qrEmptyState": {
       "trySample": "Try with sample amount {amount}"
     },
@@ -602,7 +600,7 @@
     },
     "shopSummary": {
       "noStoreName": "No shop name",
-      "noReceiver": "No receiving wallet",
+      "noReceiver": "No receiver set",
       "payStandard": "Standard payment"
     },
     "receiverInline": {
@@ -615,6 +613,10 @@
     "notReady": {
       "amount": "Enter an amount",
       "receiver": "Set a receiving wallet"
+    },
+    "notReadyShort": {
+      "amount": "No amount yet",
+      "receiver": "No receiver set"
     }
   },
   "RecoverFee": {
@@ -2612,6 +2614,10 @@
     "notReady": {
       "items": "Pick an item",
       "receiver": "Set a receiving wallet"
+    },
+    "notReadyShort": {
+      "items": "No items yet",
+      "receiver": "No receiver set"
     },
     "mobileOrderBridge": {
       "title": "Take orders on customers’ phones with this menu",

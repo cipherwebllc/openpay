@@ -545,6 +545,34 @@ describe('RegisterMode', () => {
     expect(screen.queryByText(/\/checkout\?/)).toBeNull();
   });
 
+  it('シートで受取先を決めて閉じたら、会計画面の受取先の欄は消える (同じ欄を 2 か所に出さない)', async () => {
+    const user = userEvent.setup();
+    render(<RegisterMode />); // receiver 未 seed
+    await screen.findByRole('heading', { name: '受け取るウォレット' });
+    await user.click(screen.getByRole('button', { name: /^設定$/ }));
+    const sheet = await screen.findByRole('dialog', { name: 'お店の設定' });
+    await user.type(within(sheet).getByPlaceholderText(/0x\.\.\./), VALID);
+    await user.click(within(sheet).getByRole('button', { name: '完了' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: '受け取るウォレット' })).toBeNull(),
+    );
+  });
+
+  it('下部バーは短い言い方で未入力の項目を出す (受取先 → 商品・要約と同じ言葉)', async () => {
+    const user = userEvent.setup();
+    render(<RegisterMode />); // receiver 未 seed
+    const bar = () =>
+      screen
+        .getAllByRole('button', { name: 'QRコードを表示する' })
+        .map((b) => b.parentElement!)
+        .find((el) => el.className.includes('sticky'))!;
+    await waitFor(() => expect(within(bar()).getByText('受取先が未設定')).toBeInTheDocument());
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    await waitFor(() => expect(within(bar()).getByText('商品が未選択')).toBeInTheDocument());
+    await user.click(await findTile(/コーヒー/));
+    await waitFor(() => expect(within(bar()).getByText('合計')).toBeInTheDocument());
+  });
+
   it('複数商品をカートに追加 → checkout items が複数になる', async () => {
     const user = userEvent.setup();
     seedReceiver();

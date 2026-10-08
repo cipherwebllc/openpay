@@ -16,6 +16,7 @@
 
 import { useTranslations } from 'next-intl';
 import { buildRecoverFeeDisplay } from '@/lib/recoverFeeDisplay';
+import { groupAmountDigits } from '@/lib/amount';
 
 type Props = {
   /** 請求額 (wei・18 decimals)。null / 0 では何も描画しない。 */
@@ -27,14 +28,31 @@ type Props = {
   /** 見た目。既定 amber (支払う側の画面)。neutral = 店の会計画面 (正常な情報を警告色で出さない・文言は同じ)。
    *  受付不可 (tooSmall) は tone に関わらず amber (本当の注意)。 */
   tone?: 'amber' | 'neutral';
+  /** 金額を桁区切りつきで見せる (表示だけ・計算と記録の値は変えない)。店の会計画面は金額欄・ボタン・QR の画面が
+   *  桁区切りなので、ここも揃える。 */
+  groupDigits?: boolean;
 };
 
-export function RecoverFeeNotice({ billAmount, chainId, gasMode, tone = 'amber' }: Props) {
+export function RecoverFeeNotice({
+  billAmount,
+  chainId,
+  gasMode,
+  tone = 'amber',
+  groupDigits = false,
+}: Props) {
   const t = useTranslations('RecoverFee');
 
   if (billAmount === null || billAmount <= 0n) return null;
-  const disclosure = buildRecoverFeeDisplay(billAmount, chainId, gasMode);
-  if (disclosure === null) return null;
+  const raw = buildRecoverFeeDisplay(billAmount, chainId, gasMode);
+  if (raw === null) return null;
+  const fmt = groupDigits ? groupAmountDigits : (s: string) => s;
+  const disclosure = {
+    ...raw,
+    feeHuman: fmt(raw.feeHuman),
+    floorHuman: fmt(raw.floorHuman),
+    customerPaysHuman: fmt(raw.customerPaysHuman),
+    merchantReceivesHuman: fmt(raw.merchantReceivesHuman),
+  };
 
   const feeLabel =
     disclosure.bps === 0
