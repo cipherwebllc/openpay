@@ -36,6 +36,10 @@ vi.mock('@/components/StorefrontPublishPanel', () => ({
     <output data-testid="storefront-publish-parts">{JSON.stringify(storefront)}</output>
   ),
 }));
+// ENS 名の解決 (シートを閉じていても受取先を解決する): 'shop.eth' だけ ADDR に解決する。
+vi.mock('@/hooks/useResolveAddress', () => ({
+  useResolveAddress: (input: string) => ({ data: input === 'shop.eth' ? { address: ADDR } : null }),
+}));
 // AddressInput: 入力時に onChange + onResolved(ADDR) を発火する軽量スタブ。
 vi.mock('@/components/AddressInput', () => ({
   AddressInput: ({
@@ -167,6 +171,16 @@ describe('MobileOrderBuilder', () => {
       target: { value: 'テスト店舗' },
     });
     expect(screen.queryByText(/\/order\?s=/)).toBeNull();
+  });
+
+  it('受取先が ENS 名なら、設定シートを開かなくても解決した受取先で公開する (受取先のずれを防ぐ)', () => {
+    window.localStorage.setItem(
+      'openpay:mobile-order-draft:v1',
+      JSON.stringify({ receiver: 'shop.eth', receiverSource: 'manual', chains: ['polygon'] }),
+    );
+    renderWithIntl(<MobileOrderBuilder />);
+    const receive = screen.getByRole('region', { name: '受け取り' });
+    expect(within(receive).getByText('0x52d4…cA81')).toBeInTheDocument();
   });
 
   it('店舗情報 (住所/営業時間/電話) の入力欄を描画する', () => {

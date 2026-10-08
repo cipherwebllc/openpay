@@ -43,7 +43,7 @@ export function StorefrontPublishPanel({
   canAutoLoad = false,
   accepting,
   onToggleAccepting,
-  barSlot,
+  barSlots = [],
 }: {
   /** 公開する店舗固有部分。メニュー未充足など公開不可なら null (公開ボタンを無効化)。 */
   storefront: StorefrontParts | null;
@@ -62,9 +62,9 @@ export function StorefrontPublishPanel({
   /** 注文の受付 (下書き)。渡されたときだけ状態カードに切替を出す。公開を更新するとお店のページに反映される。 */
   accepting?: boolean;
   onToggleAccepting?: () => void;
-  /** スマホの下部バーを描く場所 (ビルダーの末尾の sticky な枠)。同じ公開処理をバーからも押せるよう、
-   *  この部品がそこへ描く。無ければバーは出さない。 */
-  barSlot?: HTMLElement | null;
+  /** 公開ボタンの帯を描く場所 (スマホ: ビルダーの末尾の sticky な枠 / PC: プレビューの下)。同じ公開処理を
+   *  どこからでも押せるよう、この部品がそこへ描く。 */
+  barSlots?: ReadonlyArray<HTMLElement | null>;
 }) {
   const t = useTranslations('MobileOrder');
   const locale = useLocale();
@@ -147,7 +147,8 @@ export function StorefrontPublishPanel({
   const autoLoadTried = useRef<string | null>(null);
   const [autoLoaded, setAutoLoaded] = useState(false);
   useEffect(() => {
-    if (!canAutoLoad || !onLoadStorefront || !sessionAddress || !mine.isSuccess) return;
+    // isSignedIn = セッションと接続中のウォレットが一致 (別のウォレットのセッション・キャッシュから読み込まない)。
+    if (!canAutoLoad || !onLoadStorefront || !isSignedIn || !sessionAddress || !mine.isSuccess) return;
     if (autoLoadTried.current === sessionAddress) return;
     autoLoadTried.current = sessionAddress;
     const live = handles.filter((hh) => hh.storefront);
@@ -155,7 +156,7 @@ export function StorefrontPublishPanel({
     setSelected(live[0].handle);
     onLoadStorefront(live[0].storefront, live[0].config.to);
     setAutoLoaded(true);
-  }, [canAutoLoad, onLoadStorefront, sessionAddress, mine.isSuccess, handles]);
+  }, [canAutoLoad, onLoadStorefront, isSignedIn, sessionAddress, mine.isSuccess, handles]);
 
   const publish = useMutation({
     mutationFn: async () => {
@@ -448,10 +449,11 @@ export function StorefrontPublishPanel({
                 </details>
               </div>
             )}
-            {/* 別端末で編集した内容を捨てて公開中に戻す (下書きが公開中と違うときだけ)。破壊的なので確認を挟む。 */}
+            {/* 別端末で編集した内容を捨てて公開中に戻す (下書きが公開中と違う・この端末のメニューが空のとき)。
+                破壊的なので確認を挟む。 */}
             {selectedHandle.storefront &&
               onLoadStorefront &&
-              hasUnpublishedChanges &&
+              (hasUnpublishedChanges || !storefront) &&
               (confirmLoad ? (
                 <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                   <p>{t('editLoadConfirm')}</p>
@@ -485,15 +487,7 @@ export function StorefrontPublishPanel({
                   {t('editLoadButton')}
                 </button>
               ))}
-            {/* 公開ボタン (PC)。スマホは画面下のバー (同じ処理) から押す。 */}
-            <button
-              type="button"
-              disabled={!canPublish}
-              onClick={() => publish.mutate()}
-              className="hidden w-full rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50 lg:block"
-            >
-              {publishLabel}
-            </button>
+            {/* 公開ボタンは帯 (スマホは画面下・PC はプレビューの下) から押す (同じ処理)。 */}
             {!storefront && <p className="text-xs text-amber-700">{t('publishNeedMenu')}</p>}
             {publish.isError && <p className="text-xs text-red-600">{t('publishError')}</p>}
           </div>
@@ -502,8 +496,10 @@ export function StorefrontPublishPanel({
 
       {/* スマホの下部バー: いちばん大事な「公開」を編集中いつでも押せるように (決済QR・レジの会計バーと同じ
           見た目・同じ公開処理)。常に出し、押せないときは理由を 1 行。 */}
-      {barSlot
-        ? createPortal(
+      {barSlots.map((slot, i) =>
+        slot ? (
+          <span key={i} hidden>
+            {createPortal(
             <div className="flex items-center gap-3">
               <div className="min-w-0 flex-1">
                 {barReason ? (
@@ -524,9 +520,11 @@ export function StorefrontPublishPanel({
                 {publishLabel}
               </button>
             </div>,
-            barSlot,
-          )
-        : null}
+            slot,
+            )}
+          </span>
+        ) : null,
+      )}
 
       <MobileOrderPlacardModal
         open={showQr && shopUrl !== ''}

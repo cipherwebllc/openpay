@@ -45,6 +45,8 @@ import {
 import { isUntouchedSeedCatalog, useProductPresets } from '@/hooks/useProductPresets';
 import { useReceiverAutofill } from '@/hooks/useReceiverAutofill';
 import { useQrSettings } from '@/hooks/useQrSettings';
+import { useResolveAddress } from '@/hooks/useResolveAddress';
+import { isLikelyName } from '@/lib/nameDetection';
 import { useDragReorderList } from '@/hooks/useDragReorderList';
 import { type JpycChainSlug } from '@/lib/chains';
 import {
@@ -142,6 +144,7 @@ export function MobileOrderBuilder({
   const [menuOpen, setMenuOpen] = useState(false);
   // スマホの下部バー (お店のページの「公開」) を描く枠。StorefrontPublishPanel がここへ描く。
   const [barSlot, setBarSlot] = useState<HTMLDivElement | null>(null);
+  const [desktopBarSlot, setDesktopBarSlot] = useState<HTMLDivElement | null>(null);
   // 受け取り (受取先・受取チェーン) の設定シートの開閉。
   const [receiveOpen, setReceiveOpen] = useState(false);
   // 編集画面の第三者画像 (アイコン/カバー/メニュー) の読込失敗を壊れ画像 icon として出さない。
@@ -151,12 +154,17 @@ export function MobileOrderBuilder({
     setFailedImageUrls((current) => (current.includes(url) ? current : [...current, url]));
   }, []);
 
-  // 受取先: 生 0x は入力値を最優先 (ENS 名のときだけ AddressInput の解決値を使う)。
+  // 受取先が ENS 名のときは、設定シート (その中の AddressInput) を開いていなくても名前を解決しておく。
+  // シートを閉じたまま公開しても、選んだ受取先で公開されるように (受取先のずれを防ぐ)。
+  const receiverName = draft.receiver.trim();
+  const ens = useResolveAddress(isLikelyName(receiverName) ? receiverName : '');
+
+  // 受取先: 生 0x は入力値を最優先 (ENS 名のときだけ解決値を使う)。
   const effectiveReceiver = useMemo<Address | null>(() => {
     const raw = draft.receiver.trim();
     if (isAddress(raw)) return getAddress(raw);
-    return resolved;
-  }, [draft.receiver, resolved]);
+    return resolved ?? ens.data?.address ?? null;
+  }, [draft.receiver, resolved, ens.data]);
 
   // setReceiver は useMobileOrderDraft 側で useCallback 安定なのでそのまま渡す。
   const autofill = useReceiverAutofill({
@@ -309,15 +317,11 @@ export function MobileOrderBuilder({
   );
 
   return (
-    // 並び: スマホは「お店のページ (状態・公開) → 設定 → プレビュー」、PC は左に設定・右にお店のページと
-    // プレビュー (右列は sticky)。右列の部品は DOM で先に置き (focus 順 = スマホの見た目の順)、スマホでは
-    // contents + order で設定の前後に振り分ける。
-    <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:items-start lg:gap-6">
-        <div className="contents lg:sticky lg:top-4 lg:col-start-2 lg:row-start-1 lg:flex lg:max-h-[calc(100vh-2rem)] lg:min-w-0 lg:flex-col lg:gap-5 lg:self-start lg:overflow-y-auto">
-          {/* お店のページ: 公開状態・URL・受付・公開 (handles ON のときだけマウント: react-query を使うため
-              OFF 環境/テストで QueryClient を要求しない)。スマホの公開ボタンは同じ部品の下部バー。 */}
+    // 並び: スマホは「お店のページ (状態・公開) → 設定 → プレビュー」(DOM の順 = 見た目の順 = focus の順)。
+    // PC は左に設定 (2 行ぶち抜き)・右上にお店のページ・右下にプレビュー (追従・公開ボタンの帯つき)。
+    <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-x-6 lg:gap-y-5">
           {env.enableHandles && (
-            <div className="order-1 min-w-0 lg:order-none">
+            <div className="min-w-0 lg:col-start-2 lg:row-start-1">
               <StorefrontPublishPanel
                 storefront={storefrontParts}
                 receiver={effectiveReceiver}
@@ -326,31 +330,11 @@ export function MobileOrderBuilder({
                 canAutoLoad={canAutoLoad}
                 accepting={draft.acceptingOrders}
                 onToggleAccepting={() => update({ acceptingOrders: !draft.acceptingOrders })}
-                barSlot={barSlot}
+                barSlots={[barSlot, desktopBarSlot]}
               />
             </div>
           )}
-          <div className="order-3 min-w-0 lg:order-none">
-            <SectionCard title={t('stepPreviewTitle')} headingId="mobile-order-preview-heading" icon={Eye}>
-              {/* 客のスマホでの見え方を、実際の店舗ページ (MobileOrderView) を下書きで描いて
-                  WYSIWYG 表示 (カバー/ヘッダー/メニュー/テーマ/カートバーまで実物どおり)。
-                  スマホフレーム内に収め、スクロールで全体を確認できる。高さは控えめにして
-                  (max-h-[46vh])、ページ/サイド列のスクロールバーと内側バーが隣り合って二重に
-                  見えるのを避ける。 */}
-              {hydrated && (
-                <div className="mx-auto max-w-[360px] overflow-hidden rounded-[2rem] border-[6px] border-slate-900 bg-white shadow-xl ring-1 ring-black/5">
-                  <div className="max-h-[46vh] overflow-y-auto px-4 py-4">
-                    <MobileOrderView config={previewConfig} />
-                  </div>
-                </div>
-              )}
-  
-              <p className="mt-3 text-xs text-slate-500">{t('previewOpenHint')}</p>
-            </SectionCard>
-          </div>
-        </div>
-
-        <div className="order-2 min-w-0 space-y-5 lg:order-none lg:col-start-1 lg:row-start-1">
+        <div className="min-w-0 space-y-5 lg:col-start-1 lg:row-span-2 lg:row-start-1">
           {/* @handle の公開が使えない構成では、受付トグルをここに出す (状態カードが無いため)。 */}
           {!env.enableHandles && acceptingToggle}
 
@@ -860,12 +844,35 @@ export function MobileOrderBuilder({
           </SectionCard>
         </div>
 
+          <div className="min-w-0 lg:sticky lg:top-4 lg:col-start-2 lg:row-start-2 lg:self-start">
+            <SectionCard title={t('stepPreviewTitle')} headingId="mobile-order-preview-heading" icon={Eye}>
+              {/* 客のスマホでの見え方を、実際の店舗ページ (MobileOrderView) を下書きで描いて
+                  WYSIWYG 表示 (カバー/ヘッダー/メニュー/テーマ/カートバーまで実物どおり)。
+                  スマホフレーム内に収め、スクロールで全体を確認できる。高さは控えめにして
+                  (max-h-[46vh])、ページ/サイド列のスクロールバーと内側バーが隣り合って二重に
+                  見えるのを避ける。 */}
+              {hydrated && (
+                <div className="mx-auto max-w-[360px] overflow-hidden rounded-[2rem] border-[6px] border-slate-900 bg-white shadow-xl ring-1 ring-black/5">
+                  <div className="max-h-[46vh] overflow-y-auto px-4 py-4">
+                    <MobileOrderView config={previewConfig} />
+                  </div>
+                </div>
+              )}
+  
+              <p className="mt-3 text-xs text-slate-500">{t('previewOpenHint')}</p>
+              {/* 公開ボタンの帯 (PC)。プレビューと一緒に追従する。スマホは画面下のバー。どちらもお店のページの部品が描く。 */}
+              {env.enableHandles && (
+                <div ref={setDesktopBarSlot} className="mt-4 hidden border-t border-slate-100 pt-4 lg:block" />
+              )}
+            </SectionCard>
+          </div>
+
       {/* スマホの下部バー (お店のページの「公開」)。決済QR・レジの会計バーと同じく sticky で、ビルダーを
           見ている間は画面の下に張り付き、下の換金・ガイドまで進むと一緒に流れる (フッターを隠さない)。 */}
       {env.enableHandles && (
         <div
           ref={setBarSlot}
-          className="sticky bottom-14 z-20 -mx-4 order-4 border-t border-slate-200/70 bg-white/85 px-4 py-2.5 backdrop-blur-md supports-[backdrop-filter]:bg-white/75 md:bottom-0 lg:hidden print:hidden"
+          className="sticky bottom-14 z-20 -mx-4 border-t border-slate-200/70 bg-white/85 px-4 py-2.5 backdrop-blur-md supports-[backdrop-filter]:bg-white/75 md:bottom-0 lg:hidden print:hidden"
         />
       )}
     </div>
