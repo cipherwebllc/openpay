@@ -224,7 +224,7 @@ export function QrAmountSection({
                   </div>
                 )}
                 {rateHint && (
-                  <div className="mt-0.5 text-right text-xs text-slate-400">{rateHint}</div>
+                  <div className="mt-0.5 text-right text-xs text-slate-500">{rateHint}</div>
                 )}
               </div>
               {activeQuickAmounts.length > 0 && (

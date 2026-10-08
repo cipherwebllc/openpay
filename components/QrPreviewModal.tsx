@@ -256,12 +256,12 @@ export function QrPreviewModal({
                 </span>
               )}
             </div>
-            {/* 画面が QR_SIZE より狭いときだけ、QR を枠の幅まで縮める (はみ出さない)。広い画面と印刷は QR_SIZE のまま。
-                縮める指定は stylesheet の class (SVG の属性・style は変えない = PNG / SVG 保存の大きさは不変)。
-                includeMargin が白い余白を持つので、スマホでは枠の内側の余白を削る。 */}
+            {/* スマホ (640px 未満) だけ、QR を枠の幅まで縮める (はみ出さない)。タブレット以上と印刷は QR_SIZE のまま
+                (縮める指定はすべて max-sm: に閉じる)。縮める指定は stylesheet の class (SVG の属性・style は変えない =
+                PNG / SVG 保存の大きさは不変)。includeMargin が白い余白を持つので、スマホでは枠の内側の余白を削る。 */}
             <div
               ref={qrRef}
-              className={`mt-5 w-full max-w-max rounded-2xl border border-slate-200 bg-white p-4 max-sm:p-1 print:mt-6 print:p-6 [&>svg]:h-auto [&>svg]:w-full${convertExpired ? ' opacity-40' : ''}`}
+              className={`mt-5 rounded-2xl border border-slate-200 bg-white p-4 max-sm:w-full max-sm:max-w-max max-sm:p-1 print:mt-6 print:p-6 max-sm:[&>svg]:h-auto max-sm:[&>svg]:w-full${convertExpired ? ' opacity-40' : ''}`}
             >
               {/* 中央に OpenPay マークを置く (ブランド認知 + 「読んでよい QR か」の判断材料)。
                   level は **'Q' (25% 訂正)**。マークの被覆は面積の約 3% しかないので Q で十分余裕が
