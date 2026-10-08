@@ -116,6 +116,28 @@ function sanitizePreset(raw: unknown, index: number): ProductPreset | null {
   };
 }
 
+/** カタログが初期の見本 (seed) のまま手付かずか。公開中のメニューで置き換えても店主が作ったものを失わない
+ *  ときだけ自動で読み込む判定に使う (モバイル注文: 公開中の店をこの端末へ読み込む)。 */
+export function isUntouchedSeedCatalog(presets: readonly ProductPreset[]): boolean {
+  if (presets.length !== SEED_PRESETS.length) return false;
+  return presets.every((p, i) => {
+    const seed = SEED_PRESETS[i];
+    return (
+      p.name === seed.name &&
+      p.unitPrice === seed.unitPrice &&
+      p.token === seed.token &&
+      p.taxRate === seed.taxRate &&
+      p.taxCategory === seed.taxCategory &&
+      (p.memo ?? null) === seed.memo &&
+      p.enabled === seed.enabled &&
+      !p.image &&
+      !p.category &&
+      !p.recommended &&
+      !p.options
+    );
+  });
+}
+
 function seedPresets(): ProductPreset[] {
   return SEED_PRESETS.map((p, i) => ({ ...p, id: randomId(), sortOrder: i }));
 }

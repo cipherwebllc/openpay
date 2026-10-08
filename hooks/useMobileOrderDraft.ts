@@ -88,6 +88,33 @@ export const DEFAULT_MOBILE_ORDER_DRAFT: MobileOrderDraft = {
   minLeadMinutes: '', // 既定は即時 (最短受け渡し指定なし)
 };
 
+/** 下書きが既定のまま (この端末でまだ何も設定していない) か。接続ウォレットから自動で入った受取先
+ *  (receiverSource='auto') は「設定した」に数えない。公開中の店を自動で読み込む判定に使う。 */
+export function isPristineMobileOrderDraft(d: MobileOrderDraft): boolean {
+  const base = DEFAULT_MOBILE_ORDER_DRAFT;
+  if (d.receiverSource === 'manual' && d.receiver.trim() !== '') return false;
+  return (
+    d.chains.length === base.chains.length &&
+    d.chains.every((c, i) => c === base.chains[i]) &&
+    d.socials.length === 0 &&
+    d.shopName === base.shopName &&
+    d.tagline === base.tagline &&
+    d.avatar === base.avatar &&
+    d.cover === base.cover &&
+    d.mode === base.mode &&
+    d.feePayer === base.feePayer &&
+    d.address === base.address &&
+    d.hours === base.hours &&
+    d.phone === base.phone &&
+    d.invoiceNo === base.invoiceNo &&
+    d.acceptingOrders === base.acceptingOrders &&
+    d.dineIn === base.dineIn &&
+    d.openFrom === base.openFrom &&
+    d.lastOrder === base.lastOrder &&
+    d.minLeadMinutes === base.minLeadMinutes
+  );
+}
+
 // 旧 schema (menu フィールド) は無視される — メニューは presets が単一情報源になったため。
 function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
   return {
