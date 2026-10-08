@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { CircleCheck, Eye, Printer, ScanLine, X } from 'lucide-react';
+import { ChevronDown, CircleCheck, Eye, Printer, ScanLine, X } from 'lucide-react';
 import NextImage from 'next/image';
 import { TokenLogo, ChainLogo } from '@/components/AssetLogo';
 import { QR_CENTER_MARK, QR_CENTER_MARK_RATIO } from '@/lib/qrCenterMark';
@@ -39,6 +39,8 @@ export type QrPreviewModalLabels = {
   downloadPng?: string;
   /** FX 換算時のみ指定。期限前から空の status を mount し、期限切れを通知する。 */
   convertExpired?: string;
+  /** 決済リンクの文字列を開く折りたたみの見出し (例「リンクを表示」)。省略時は「Link」。 */
+  showUrl?: string;
   /** 「この QR は端末内で生成 (通信不要)」の安心表示 (任意)。圏外の現場でも
    *  QR の生成・提示ができることを店員に伝える。印刷ポスターには出さない。 */
   localGenNote?: string;
@@ -64,6 +66,8 @@ export type QrPreviewAsset = {
 export type QrPreviewPaymentStatus = {
   state: 'watching' | 'received';
   text: string;
+  /** 小さな注記 (例: 検知は目安・結果は取引履歴で)。省略可。 */
+  note?: string;
 };
 
 export type QrPreviewEip681 = {
@@ -283,6 +287,23 @@ export function QrPreviewModal({
                 }}
               />
             </div>
+            {/* 着金検知ヒント (任意・advisory・2026-10 磨き上げ P5 で QR のすぐ下へ)。短い状態をピルで、注意は小さな注記で。
+                決済成功の意匠 (緑・チェック) は使わない (残高の増加の観測であり、この支払いの確定ではない)。印刷時と prop 省略時は非描画。 */}
+            {paymentStatus && (
+              <div role="status" aria-live="polite" className="mt-4 flex flex-col items-center gap-1 print:hidden">
+                <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700">
+                  {paymentStatus.state === 'received' ? (
+                    <Eye className="h-4 w-4 flex-none" aria-hidden />
+                  ) : (
+                    <span aria-hidden className="inline-block h-2 w-2 flex-none animate-pulse rounded-full bg-brand" />
+                  )}
+                  {paymentStatus.text}
+                </span>
+                {paymentStatus.note && (
+                  <span className="max-w-xs text-[11px] leading-snug text-slate-500">{paymentStatus.note}</span>
+                )}
+              </div>
+            )}
             {labels.convertExpired && (
               <p
                 role="status"
@@ -301,7 +322,8 @@ export function QrPreviewModal({
             {/* 3 ステップ行 (asset + step 文言が揃ったとき・印刷でも表示)。
                 ポスターの読者 = 顧客が初見で操作を理解できるように番号 + アイコン + 短文。 */}
             {asset && labels.step1 && labels.step2 && labels.step3 && (
-              <ol className="mt-5 flex w-full max-w-xs flex-col gap-2 text-left print:mt-6 print:max-w-md">
+              // 画面では横 1 行の小さな手順 (縦に長くしない)・印刷は従来どおり縦に番号 + アイコン + 短文。
+              <ol className="mt-4 grid w-full max-w-xs grid-cols-3 gap-2 print:mt-6 print:flex print:max-w-md print:flex-col print:gap-2 print:text-left">
                 {[
                   { n: 1, Icon: ScanLine, text: labels.step1 },
                   { n: 2, Icon: Eye, text: labels.step2 },
@@ -309,16 +331,16 @@ export function QrPreviewModal({
                 ].map(({ n, Icon, text }) => (
                   <li
                     key={n}
-                    className="flex items-center gap-2.5 print:gap-3"
+                    className="flex flex-col items-center gap-1 text-center print:flex-row print:gap-3 print:text-left"
                   >
                     <span className="flex h-6 w-6 flex-none items-center justify-center rounded-full border border-slate-900 text-xs font-bold text-slate-900 print:h-8 print:w-8 print:text-base">
                       {n}
                     </span>
                     <Icon
-                      className="h-4 w-4 flex-none text-slate-500 print:h-5 print:w-5"
+                      className="hidden h-4 w-4 flex-none text-slate-500 print:block print:h-5 print:w-5"
                       aria-hidden
                     />
-                    <span className="text-sm font-medium text-slate-700 print:text-lg">
+                    <span className="text-xs font-medium leading-snug text-slate-700 print:text-lg">
                       {text}
                     </span>
                   </li>
@@ -330,38 +352,6 @@ export function QrPreviewModal({
                 {receiverShort}
               </p>
             )}
-            {/* 圏外の現場向け安心表示。QR の生成・提示は端末内で完結し通信不要。
-                印刷ポスターには不要なので print:hidden。 */}
-            {labels.localGenNote && (
-              <p className="mt-3 text-xs text-slate-500 print:hidden">
-                {labels.localGenNote}
-              </p>
-            )}
-            {/* 着金検知ヒント (任意・advisory)。watching=監視中 (淡い slate + 脈打つドット)、
-                received=残高増加の観測 (slate + Eye)。決済成功の意匠を避け、印刷時と prop 省略時は非描画。 */}
-            {paymentStatus &&
-              (paymentStatus.state === 'received' ? (
-                <p
-                  role="status"
-                  aria-live="polite"
-                  className="mt-3 inline-flex items-center gap-1.5 text-sm text-slate-600 print:hidden"
-                >
-                  <Eye className="h-4 w-4 flex-none" aria-hidden />
-                  {paymentStatus.text}
-                </p>
-              ) : (
-                <p
-                  role="status"
-                  aria-live="polite"
-                  className="mt-3 inline-flex items-center gap-1.5 text-xs text-slate-500 print:hidden"
-                >
-                  <span
-                    aria-hidden
-                    className="inline-block h-2 w-2 flex-none animate-pulse rounded-full bg-slate-400"
-                  />
-                  {paymentStatus.text}
-                </p>
-              ))}
             {deviceStatus && <div className="mt-3 w-full print:hidden">{deviceStatus}</div>}
             {/* フッター OpenPay ロゴ (asset 指定時のみ・ブランド信頼)。印刷でも残す。 */}
             {asset && (
@@ -373,15 +363,14 @@ export function QrPreviewModal({
                 className="mt-6 h-4 w-auto opacity-70 print:mt-10 print:h-7"
               />
             )}
+            {/* 圏外の現場向け安心表示 (店員向け)。QR の生成・提示は端末内で完結し通信不要。印刷ポスターには不要。 */}
+            {labels.localGenNote && (
+              <p className="mt-2 text-[11px] text-slate-500 print:hidden">
+                {labels.localGenNote}
+              </p>
+            )}
           </div>
         </section>
-
-        {/* URL 表示 */}
-        {!hideUrl && (
-          <div className="mt-4 w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600 print:hidden">
-            {qrValue}
-          </div>
-        )}
 
         {/* 操作ボタン (印刷では隠す)。Print が primary CTA、他は outline。 */}
         <div className="mt-4 flex flex-wrap justify-center gap-2 print:hidden">
@@ -430,6 +419,19 @@ export function QrPreviewModal({
 
         {actionsNote && (
           <p className="mt-3 text-center text-xs text-slate-500 print:hidden">{actionsNote}</p>
+        )}
+
+        {/* 決済リンク (店員向け・お客様に見せる画面に長い URL を出さない = 折りたたみ・2026-10 磨き上げ P5)。 */}
+        {!hideUrl && (
+          <details className="group/url mt-4 w-full print:hidden">
+            <summary className="flex cursor-pointer list-none items-center justify-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700 [&::-webkit-details-marker]:hidden">
+              {labels.showUrl ?? 'Link'}
+              <ChevronDown className="h-3.5 w-3.5 transition-transform group-open/url:rotate-180" aria-hidden />
+            </summary>
+            <div className="mt-2 w-full break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-600">
+              {qrValue}
+            </div>
+          </details>
         )}
 
         {/* EIP-681 互換 QR (任意・EIP-7702 非対応 wallet 救済の fallback) */}

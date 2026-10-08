@@ -11,13 +11,14 @@ import { QrCode as QrCodeIcon } from 'lucide-react';
 import type { TokenDeployment } from '@/lib/tokens';
 import type { Mode } from './QrAmountSection';
 
-// QR を出せない理由 (未入力の項目) のキー。金額 → 受取先の順に 1 つだけ出す。
+// QR を出せない理由 (未入力の項目) のキー。受取先 → 金額の順に 1 つだけ出す (受取先が無いのが初めての店の本当の壁・
+// 2026-10 磨き上げ P5)。
 export function qrNotReadyKey(
   amountValid: boolean,
   receiverValid: boolean,
 ): 'amount' | 'receiver' | null {
-  if (!amountValid) return 'amount';
   if (!receiverValid) return 'receiver';
+  if (!amountValid) return 'amount';
   return null;
 }
 

@@ -31,6 +31,7 @@ export function QrReceiverFields({
   receiverValid,
   autofill,
   handleResolved,
+  bare = false,
 }: {
   settings: QrSettings;
   deployment: TokenDeployment;
@@ -39,11 +40,14 @@ export function QrReceiverFields({
   receiverValid: boolean;
   autofill: ReturnType<typeof useReceiverAutofill>;
   handleResolved: (addr: Address | null) => void;
+  /** 欄の見出しを出さない (会計画面の「受け取るウォレット」の節は見出しが既にある)。 */
+  bare?: boolean;
 }) {
   const t = useTranslations('QrGenerator');
   const tFee = useTranslations('UsageFee');
-  return (
-    <Field label={t('receiverLabel')}>
+  // 中身は同じ要素の並びのまま、外枠だけ切り替える (描画のたびに部品を作り直さない = 入力中の focus を失わない)。
+  const content = (
+    <>
       <AddressInput
         value={settings.receiver}
         onChange={autofill.handleManualChange}
@@ -84,8 +88,9 @@ export function QrReceiverFields({
           {t('merchantExplorerLink', { chainName: chain.name })}
         </a>
       )}
-    </Field>
+    </>
   );
+  return bare ? <div>{content}</div> : <Field label={t('receiverLabel')}>{content}</Field>;
 }
 
 // 店舗名 (お店の設定シート)。

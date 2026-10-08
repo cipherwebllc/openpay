@@ -383,22 +383,22 @@ describe('QrGenerator', () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-      // 受取先/金額 未入力 → payUrl 無し → ボタンは出したまま押せない (理由は「金額を入れてください」)。
+      // 受取先/金額 未入力 → payUrl 無し → ボタンは出したまま押せない (理由は受取先から = 初めての店の本当の壁)。
       const before = screen.getAllByRole('button', { name: /QRコードを表示する/ });
       expect(before).toHaveLength(2);
       before.forEach((b) => expect(b).toBeDisabled());
-      expect(screen.getAllByText('金額を入れてください').length).toBeGreaterThan(0);
-      // 金額だけ → 次は受取先の不足を出す。
-      await user.type(screen.getByPlaceholderText('1000'), '500');
-      expect((await screen.findAllByText('受取先を設定してください')).length).toBeGreaterThan(0);
-      // 受取先 + 金額 → payUrl 有効 → 2 か所とも押せる。
+      expect(screen.getAllByText('受取先を設定してください').length).toBeGreaterThan(0);
+      // 受取先だけ → 次は金額の不足を出す。
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      expect((await screen.findAllByText('金額を入れてください')).length).toBeGreaterThan(0);
+      // 受取先 + 金額 → payUrl 有効 → 2 か所とも押せる。
+      await user.type(screen.getByPlaceholderText('1000'), '500');
       await waitFor(() =>
         screen
           .getAllByRole('button', { name: /QRコードを表示する/ })
           .forEach((b) => expect(b).toBeEnabled()),
       );
-      expect(screen.queryByText('受取先を設定してください')).toBeNull();
+      expect(screen.queryByText('金額を入れてください')).toBeNull();
     });
 
     it('据え置きモードへ切替: JPYC の金額入力が非表示になりメッセージが出る', async () => {
@@ -876,9 +876,7 @@ describe('QrGenerator', () => {
       );
       render(<QrGenerator />);
       const user = userEvent.setup();
-      // preset receiver → Step 2 default 折り畳まれているので展開。
-      // Explorer link は receiver Field 内 (Step 2 visible 領域) にあるため、
-      // 高度な設定 accordion は開かなくて良い。
+      // 受取先が保存済みなので、受取先の欄 (Explorer link を含む) は「お店の設定」シートの中。
       await openStep2(user);
       const link = await screen.findByRole('link', {
         name: /店舗ウォレットの履歴を.+Explorer で見る/,
@@ -1472,7 +1470,7 @@ describe('QrGenerator', () => {
       // URLをコピー ボタンはモーダル内。
       await openQrModal(user);
       const copyBtn = await screen.findByRole('button', {
-        name: /URLをコピー/,
+        name: /リンクをコピー/,
       });
       await user.click(copyBtn);
 
@@ -1780,10 +1778,14 @@ describe('QrGenerator', () => {
       expect(standardBtn.textContent).not.toMatch(/おすすめ/);
     });
 
-    it('未入力の理由: 金額が空なら「金額を入れてください」(金額 → 受取先の順に 1 つだけ)', async () => {
+    it('未入力の理由: 受取先が無ければ「受取先を設定してください」(受取先 → 金額の順に 1 つだけ)', async () => {
+      const user = userEvent.setup();
       render(<QrGenerator />);
-      expect((await screen.findAllByText('金額を入れてください')).length).toBeGreaterThan(0);
-      expect(screen.queryByText('受取先を設定してください')).toBeNull();
+      expect((await screen.findAllByText('受取先を設定してください')).length).toBeGreaterThan(0);
+      expect(screen.queryByText('金額を入れてください')).toBeNull();
+      // 金額を入れても、受取先が無い間は受取先の理由のまま。
+      await user.type(screen.getByPlaceholderText('1000'), '500');
+      expect(screen.getAllByText('受取先を設定してください').length).toBeGreaterThan(0);
     });
 
     it('未入力の理由: 受取先だけ入れたら、まだ金額の理由を出す', async () => {
@@ -1815,7 +1817,7 @@ describe('QrGenerator', () => {
 
     it('QR empty state: receiver 未入力なら サンプル導線ボタンは出ない', async () => {
       render(<QrGenerator />);
-      await waitFor(() => screen.getAllByText('金額を入れてください'));
+      await waitFor(() => screen.getAllByText('受取先を設定してください'));
       // 受取先未済の段階ではサンプル導線を出さない (まず受取先を促す)
       expect(
         screen.queryByRole('button', { name: /サンプル金額/ }),

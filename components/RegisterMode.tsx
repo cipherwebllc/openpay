@@ -638,12 +638,13 @@ function RegisterModeContent({
   );
 
   // 押せない理由 (未入力の項目)。商品 → 受取先の順に 1 つだけ。
+  // 受取先が無いのが初めての店の本当の壁なので、受取先を先に出す (2026-10 磨き上げ P5・Fable 監査)。
   const notReady = checkoutUrl
     ? null
-    : validItems.length === 0
-      ? t('notReady.items')
-      : !effectiveReceiver
-        ? t('notReady.receiver')
+    : !effectiveReceiver && !receiverName
+      ? t('notReady.receiver')
+      : validItems.length === 0
+        ? t('notReady.items')
         : null;
   const lineCount = cart.reduce((n, l) => n + l.quantity, 0);
   const qrDisabled = !checkoutUrl || device.busy || storeDeviceNotReady;
@@ -852,6 +853,7 @@ function RegisterModeContent({
                 receiverValid={effectiveReceiver !== null}
                 autofill={autofill}
                 handleResolved={ignoreResolved}
+                bare
               />
             </section>
           )}
@@ -1106,15 +1108,35 @@ function RegisterModeContent({
             copied: t('copied'),
             // お店負担の QR は端末が通信して送るので「圏外でも提示できます」は出さない。
             localGenNote: storeQrActive ? undefined : t('qrLocalGenNote'),
+            showUrl: tQr('qrShowUrl'),
+            // お客様向けの 3 ステップ (決済QR と同じ・2026-10 磨き上げ P5 でレジにも)。
+            step1: tQr('posterStepScan'),
+            step2: tQr('posterStepConfirm'),
+            step3: tQr('posterStepDone'),
           }}
           convertExpired={storeQrDimmed}
-          payModeBadge={storeQrActive ? { text: t('storeDevice.badge'), tone: 'gasless' } : undefined}
+          // お客様に見せる画面の支払い方法のピル (決済QR と同じ語・2026-10 磨き上げ P5 でレジにも)。
+          payModeBadge={
+            storeQrActive
+              ? { text: t('storeDevice.badge'), tone: 'gasless' }
+              : settings.payMode === 'gasless'
+                ? { text: tQr('posterPayModeGasless'), tone: 'gasless' }
+                : {
+                    text:
+                      settings.chain === 'arc'
+                        ? tQr('posterPayModeArc')
+                        : tQr('posterPayModeStandard', {
+                            nativeToken: chainForSlug(settings.chain).nativeCurrency.symbol,
+                          }),
+                    tone: 'standard',
+                  }
+          }
           deviceStatus={env.enableStoreGasWallet && sdState.phase !== 'idle' ? storeDeviceStatus : undefined}
           qrValue={qrValue}
           qrRef={qrRef}
           storeName={settings.storeName.trim() || t('qrPosterDefaultStoreName')}
-          amountText={`${totalHuman} ${symbol}`}
-          note={settings.posterNote.trim() || undefined}
+          amountText={`${groupAmountDigits(totalHuman)} ${symbol}`}
+          note={settings.posterNote.trim() || tQr('posterDefaultNote')}
           chainText={`${symbol} · ${chainForSlug(settings.chain).name}`}
           // 決済QR の全画面表示と同じトークン/チェーンロゴ行を出す (視認性)。
           asset={{

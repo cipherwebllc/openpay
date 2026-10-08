@@ -57,7 +57,11 @@ describe.each([
     render(<><button>Before</button>{modal()}<button>After</button></>);
     const dialog = screen.getByRole('dialog');
     const first = within(dialog).getAllByRole('button')[0];
-    const last = within(dialog).queryByRole('link') ?? within(dialog).getByRole('button', { name: 'Copy' });
+    // QrPreviewModal の末尾は「リンクを表示」の折りたたみ (summary・2026-10 磨き上げ P5)。
+    const last =
+      within(dialog).queryByRole('link') ??
+      dialog.querySelector<HTMLElement>('summary') ??
+      within(dialog).getByRole('button', { name: 'Copy' });
     expect(dialog).toHaveFocus();
 
     await user.tab({ shift: true });
@@ -65,7 +69,10 @@ describe.each([
     await user.tab();
     expect(first).toHaveFocus();
     await user.tab();
-    const input = within(dialog).queryByRole('textbox');
+    // 先頭と末尾の間の操作 (CsvPass = 入力欄 / QR = 「Copy」・末尾は「リンクを表示」)。
+    const input =
+      within(dialog).queryByRole('textbox') ??
+      (dialog.querySelector('summary') ? within(dialog).getByRole('button', { name: 'Copy' }) : null);
     expect(input ?? last).toHaveFocus();
     if (input) await user.tab();
     expect(last).toHaveFocus();
@@ -86,7 +93,11 @@ describe.each([
     render(<><button>Outside</button>{modal()}</>);
     const dialog = screen.getByRole('dialog');
     const first = within(dialog).getAllByRole('button')[0];
-    const last = within(dialog).queryByRole('link') ?? within(dialog).getByRole('button', { name: 'Copy' });
+    // QrPreviewModal の末尾は「リンクを表示」の折りたたみ (summary・2026-10 磨き上げ P5)。
+    const last =
+      within(dialog).queryByRole('link') ??
+      dialog.querySelector<HTMLElement>('summary') ??
+      within(dialog).getByRole('button', { name: 'Copy' });
     const outside = screen.getByRole('button', { name: 'Outside' });
     outside.focus();
     await user.tab();

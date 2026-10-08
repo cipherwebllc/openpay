@@ -836,6 +836,7 @@ export function QrGenerator() {
               receiverValid={receiverValid}
               autofill={autofill}
               handleResolved={handleResolved}
+              bare
             />
           </section>
         )}
@@ -971,6 +972,7 @@ export function QrGenerator() {
             downloadPng: t('downloadPng'),
             // お店負担の QR は端末が通信して送るので「圏外でも提示できます」は出さない。
             localGenNote: storeQrShown ? undefined : t('localGenNote'),
+            showUrl: t('qrShowUrl'),
             step1: t('posterStepScan'),
             step2: t('posterStepConfirm'),
             step3: t('posterStepDone'),
@@ -1047,9 +1049,10 @@ export function QrGenerator() {
                   text: t('paymentReceived', {
                     amount: formatTokenAmount(receivedWei, deployment),
                   }),
+                  note: t('paymentReceivedNote'),
                 }
               : incomingStatus === 'watching'
-                ? { state: 'watching' as const, text: t('paymentWatching') }
+                ? { state: 'watching' as const, text: t('paymentWatching'), note: t('paymentWatchingNote') }
                 : undefined
           }
         />

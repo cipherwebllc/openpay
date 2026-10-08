@@ -408,6 +408,8 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     // モーダル (role=dialog) 内の URL 表示 box に query が焼き込まれている。
     const dialog = page.getByRole('dialog', { name: '決済用 QR コード' });
     await expect(dialog).toBeVisible();
+    // 決済リンクは店員向けの折りたたみ「リンクを表示」の中 (お客様に見せる画面に長い URL を出さない)。
+    await dialog.getByText('リンクを表示').click();
     const urlBox = dialog.locator('.font-mono.bg-slate-50').first();
     await expect(urlBox).toBeVisible();
     await expect(urlBox).toContainText('chain=kaia');
