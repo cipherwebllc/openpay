@@ -96,11 +96,20 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
   theme: 'clean',
 };
 
-/** 下書きが既定のまま (この端末でまだプロフィールを作っていない) か。受取先 (to) は接続中のウォレットで
- *  自動で入るので数えない。持っている @handle を自動で編集に入る判定に使う。 */
-export function isPristineProfileDraft(d: HandleProfileDraft): boolean {
-  return (Object.keys(DEFAULT_PROFILE_DRAFT) as (keyof HandleProfileDraft)[]).every(
-    (k) => k === 'to' || JSON.stringify(d[k]) === JSON.stringify(DEFAULT_PROFILE_DRAFT[k]),
+/** 既定値を持たない任意の文字列項目 (高度な設定)。空のままなら手付かず。 */
+const OPTIONAL_TEXT_KEYS = ['message', 'thanks', 'thanksUrl', 'webhook'] as const satisfies readonly (keyof HandleProfileDraft)[];
+
+/** 下書きが既定のまま (この端末でまだプロフィールを作っていない) か。持っている @handle を自動で編集に入る判定に使う。
+ *  受取先 (to) は空か、接続中のウォレット (自動で入る値) のときだけ手付かずと見なす (別の宛先を打った人の入力を消さない)。 */
+export function isPristineProfileDraft(d: HandleProfileDraft, wallet?: string): boolean {
+  const to = d.to.trim();
+  const toUntouched = to === '' || (!!wallet && to.toLowerCase() === wallet.toLowerCase());
+  return (
+    toUntouched &&
+    OPTIONAL_TEXT_KEYS.every((k) => !d[k]?.trim()) &&
+    (Object.keys(DEFAULT_PROFILE_DRAFT) as (keyof HandleProfileDraft)[]).every(
+      (k) => k === 'to' || JSON.stringify(d[k]) === JSON.stringify(DEFAULT_PROFILE_DRAFT[k]),
+    )
   );
 }
 

@@ -180,7 +180,15 @@ export function HandleProfileBuilder({
   const [showQr, setShowQr] = useState(false);
   // どの @handle を編集中か (null = 新規作成)。「編集」でフォームが黙って書き換わるのが
   // 混乱源だったため、ヘッダのバッジ + パネルのバナーで対象を常時明示する。
-  const [editingHandle, setEditingHandle] = useState<string | null>(null);
+  const [editingHandle, setEditingHandleState] = useState<string | null>(null);
+  // 同じ値を ref にも持つ。自動で編集に入るときは子 (HandleClaimPanel) の effect が先に onEdit を呼び、同じ描画の
+  // 親の effect は古い editingHandle (null) を見てしまう。受取先の自動補完と入力欄の切り替えはこの ref を実行時に
+  // 読み、読み込んだ公開中の受取先を接続中のウォレットで上書きしない (公開中の着金先が黙って変わる事故を断つ)。
+  const editingRef = useRef<string | null>(null);
+  const setEditingHandle = (handle: string | null) => {
+    editingRef.current = handle;
+    setEditingHandleState(handle);
+  };
   // 編集に入る直前の下書き (未公開の新規入力)。編集をやめたら丸ごと復元し、確認なしの
   // 上書きで作業が消えるのを防ぐ。新規作成モード (editingHandle===null) の間だけ撮る。
   const preEditDraftRef = useRef<typeof draft | null>(null);
@@ -309,24 +317,30 @@ export function HandleProfileBuilder({
 
   // 受取先が空なら接続中のウォレットで 1 回だけ埋める (user 裁定 A)。ウォレットを切り替えても追いかけない
   // (公開中の @handle の着金先が黙って変わる事故を防ぐ)・編集中は触らない・消した人には入れ直さない。
+  // 一度でも受取先が入っていたら (保存済み・手入力・公開中の読み込み) 自分で決めた人なので、以後は埋めない。
   const autoFilledTo = useRef(false);
   useEffect(() => {
-    if (autoFilledTo.current || !hydrated || editingHandle !== null) return;
-    if (draft.to.trim() !== '' || !connected || !isAddress(connected)) return;
+    if (autoFilledTo.current || !hydrated || editingRef.current !== null) return;
+    if (draft.to.trim() !== '') {
+      autoFilledTo.current = true;
+      return;
+    }
+    if (!connected || !isAddress(connected)) return;
     autoFilledTo.current = true;
     setSettings((s) => ({ ...s, to: connected }));
     setResolved(getAddress(connected));
   }, [hydrated, editingHandle, draft.to, connected, setSettings]);
 
   // 受取先が未設定のときは、公開に欠かせないので受け取りカードの中に入力欄を直接出す (決済QR と同じ型)。読み込み後に
-  // 未設定だったら出し、入力の途中で消さない (シートで受取先を決めて閉じたら要約に戻す)。
+  // 未設定だったら出し、入力の途中で消さない (シートで受取先を決めて閉じたら要約に戻す)。シートを開いている間は
+  // 切り替えない (シートの入力欄を空にした瞬間に欄が裏へ移り、focus を失って打ち直せなくなるため)。
   const [receiverInline, setReceiverInline] = useState(false);
   useEffect(() => {
-    if (hydrated && draft.to.trim() === '' && editingHandle === null) setReceiverInline(true);
-  }, [hydrated, draft.to, editingHandle]);
+    if (hydrated && !receiveOpen && draft.to.trim() === '' && editingRef.current === null) setReceiverInline(true);
+  }, [hydrated, receiveOpen, draft.to, editingHandle]);
 
   // 戻ってきた人: この端末の下書きがまだ既定のままなら、持っている @handle (1 つだけのとき) の編集に自動で入る。
-  const canAutoEdit = hydrated && editingHandle === null && isPristineProfileDraft(draft);
+  const canAutoEdit = hydrated && editingHandle === null && isPristineProfileDraft(draft, connected);
 
   if (!env.enableHandles) return null;
 
@@ -497,7 +511,7 @@ export function HandleProfileBuilder({
         <div className="min-w-0 space-y-5 lg:[&>section:first-of-type]:mt-0">
           {/* 上のミニプレビューは、この端末で手を入れ始めたか編集中のときだけ (何も触っていない新規の状態で
               ダミーの「@handle」「H」を貼り付けない)。 */}
-          {hydrated && (!isPristineProfileDraft(draft) || editingHandle !== null) && (
+          {hydrated && (!isPristineProfileDraft(draft, connected) || editingHandle !== null) && (
             // AppShell → AppHeader: h-8 + py-3 × 2 + border-b = 57px。
             // 外側は不透明の地 (白/濃紺) にして、半透明グラデーションのテーマ地色でも本文が透けないようにする。
             <div

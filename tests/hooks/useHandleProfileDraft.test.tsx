@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_PROFILE_DRAFT, useHandleProfileDraft } from '@/hooks/useHandleProfileDraft';
+import { DEFAULT_PROFILE_DRAFT, isPristineProfileDraft, useHandleProfileDraft } from '@/hooks/useHandleProfileDraft';
 import {
   MAX_LINK_IMAGE_URL_LEN,
   MAX_PROFILE_EMBEDS,
@@ -341,4 +341,24 @@ it.each([undefined, null, 1, 'true', true, false])('usdcArc draft is additive an
   await waitFor(() => expect(result.current.hydrated).toBe(true));
   expect(result.current.settings.usdcArc).toBe(value === true);
   expect(result.current.settings.usdcBase).toBe(true);
+});
+
+describe('isPristineProfileDraft (持っている @handle の編集に自動で入ってよいか)', () => {
+  const WALLET = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+
+  it('既定のまま・受取先が空か接続中のウォレット (大文字小文字を問わない) なら手付かず', () => {
+    expect(isPristineProfileDraft(DEFAULT_PROFILE_DRAFT)).toBe(true);
+    expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, to: WALLET }, WALLET)).toBe(true);
+    expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, to: WALLET.toLowerCase() }, WALLET)).toBe(true);
+  });
+
+  it('別の受取先を打った下書きは手付かずではない', () => {
+    expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, to: WALLET })).toBe(false);
+    expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, to: 'alice.eth' }, WALLET)).toBe(false);
+  });
+
+  it.each(['message', 'thanks', 'thanksUrl', 'webhook'] as const)('高度な設定 (%s) だけ書いた下書きも手付かずではない', (key) => {
+    expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, [key]: 'x' })).toBe(false);
+    expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, [key]: '' })).toBe(true);
+  });
 });

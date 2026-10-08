@@ -14,6 +14,8 @@ const h = vi.hoisted(() => ({
   enableHandles: true,
   enableJpycAvalanche: false,
   connectedAddress: undefined as string | undefined,
+  // 子 (HandleClaimPanel) が描画直後に自動で編集に入る (本物と同じく effect から onEdit を呼ぶ) ときの公開中の受取先。
+  autoEditTo: undefined as string | undefined,
 }));
 
 vi.mock('@/lib/env', async (importOriginal) => {
@@ -65,15 +67,19 @@ vi.mock('@/components/AddressInput', () => ({
 }));
 // claim panel は config の有無だけ反映 (SIWE/react-query を持ち込まない)。
 // edit-legacy-usdc: 旧 USDC method 持ちレコードの「編集」を模擬し onEdit を発火する。
-vi.mock('@/components/HandleClaimPanel', () => ({
+vi.mock('@/components/HandleClaimPanel', async () => {
+  const { useEffect } = await vi.importActual<typeof import('react')>('react');
+  return {
   HandleClaimPanel: ({
     payload,
     onEdit,
     onPublished,
     expectedUpdatedAt,
     publishBlockedReason,
+    canAutoEdit,
   }: {
     payload: { config: { to: string }; profile: unknown } | null;
+    canAutoEdit?: boolean;
     onEdit?: (
       handle: string,
       config: unknown,
@@ -87,7 +93,15 @@ vi.mock('@/components/HandleClaimPanel', () => ({
     }) => void;
     publishBlockedReason?: string;
     expectedUpdatedAt?: number;
-  }) => (
+  }) => {
+    useEffect(() => {
+      if (canAutoEdit && h.autoEditTo) {
+        onEdit?.('alice', { to: h.autoEditTo, methods: [{ token: 'jpyc', chain: 'polygon' }] }, undefined, 123);
+      }
+      // 本物と同じく「自動で入れるようになった描画」で 1 回だけ呼ぶ。
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [canAutoEdit]);
+    return (
     <div
       data-testid="claim"
       data-payload={JSON.stringify(payload)}
@@ -169,8 +183,10 @@ vi.mock('@/components/HandleClaimPanel', () => ({
         }
       />
     </div>
-  ),
-}));
+    );
+  },
+  };
+});
 
 import { HandleProfileBuilder } from '@/components/HandleProfileBuilder';
 
@@ -187,6 +203,7 @@ beforeEach(() => {
   h.enableHandles = true;
   h.enableJpycAvalanche = false;
   h.connectedAddress = undefined;
+  h.autoEditTo = undefined;
   localStorage.clear();
 });
 
@@ -674,6 +691,47 @@ describe('HandleProfileBuilder', () => {
     expect(new URL(share.getAttribute('href')!).searchParams.get('text')).toBe(
       '@alice をシェア',
     );
+  });
+
+  it('自動で編集に入ったとき、読み込んだ公開中の受取先を接続中のウォレットで上書きしない', async () => {
+    // 子の effect が先に onEdit を呼び、同じ描画の親の補完 effect は古い状態 (編集なし・受取先が空) を見る。
+    h.connectedAddress = ADDR;
+    h.autoEditTo = ADDR2;
+    renderWithIntl(<HandleProfileBuilder />);
+    await waitFor(() =>
+      expect(JSON.parse(screen.getByTestId('claim').getAttribute('data-payload')!).config.to).toBe(getAddress(ADDR2)),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(JSON.parse(screen.getByTestId('claim').getAttribute('data-payload')!).config.to).toBe(getAddress(ADDR2));
+  });
+
+  it('保存済みの受取先を消しても、接続中のウォレットで埋め直さない・シートの入力欄は消えない', async () => {
+    localStorage.setItem('openpay:handle-profile-draft:v1', JSON.stringify({ to: ADDR2 }));
+    h.connectedAddress = ADDR;
+    renderWithIntl(<HandleProfileBuilder />);
+    await waitFor(() => expect(screen.getByTestId('claim')).toHaveTextContent(`config-ready:${getAddress(ADDR2)}`));
+    openReceiveSettings();
+    const dialog = screen.getByRole('dialog');
+    const input = within(dialog).getByTestId('addr');
+    input.focus();
+    fireEvent.change(input, { target: { value: '' } });
+    // 入力欄はシートに残り (focus を失わない)、空のまま (ウォレットで埋め直さない)。
+    expect(within(dialog).getByTestId('addr')).toBe(input);
+    expect(input).toHaveValue('');
+    expect(input).toHaveFocus();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(input).toHaveValue('');
+  });
+
+  it('受取先を手で打ってから消した人には、あとで接続しても埋めない', async () => {
+    const view = renderWithIntl(<HandleProfileBuilder />);
+    const input = await screen.findByTestId('addr');
+    fireEvent.change(input, { target: { value: ADDR2 } });
+    fireEvent.change(input, { target: { value: '' } });
+    h.connectedAddress = ADDR;
+    view.rerender(<HandleProfileBuilder />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByTestId('addr')).toHaveValue('');
   });
 
   it('公開済み handle の選択と解除を親へ通知する', () => {

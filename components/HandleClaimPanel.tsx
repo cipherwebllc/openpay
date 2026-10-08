@@ -368,13 +368,15 @@ export function HandleClaimPanel({
     if (!canAutoEdit || !onEdit || editingHandle !== null || !isSignedIn || !sessionAddress || !mine.isSuccess) return;
     if (autoEditTried.current === sessionAddress) return;
     autoEditTried.current = sessionAddress;
+    // 一覧の取得を待つあいだに @handle を打ち始めた人は、新しく取ろうとしている。打った文字を上書きしない。
+    if (input.trim() !== '') return;
     const handles = mine.data?.handles ?? [];
     if (handles.length !== 1) return;
     const only = handles[0];
     setInput(only.handle);
     setPublished(null);
     onEdit(only.handle, only.config, only.profile, only.updatedAt);
-  }, [canAutoEdit, onEdit, editingHandle, isSignedIn, sessionAddress, mine.isSuccess, mine.data]);
+  }, [canAutoEdit, onEdit, editingHandle, isSignedIn, sessionAddress, mine.isSuccess, mine.data, input]);
 
   if (!env.enableHandles) return null;
 

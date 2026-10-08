@@ -199,6 +199,38 @@ describe('HandleClaimPanel', () => {
     expect(onEdit).toHaveBeenCalledTimes(1);
   });
 
+  it('一覧の取得を待つあいだに @handle を打ち始めたら、自動で編集に入らず打った文字を残す', async () => {
+    h.isSignedIn = true;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: RequestInfo | URL) => {
+        if (String(url) === '/api/handle') {
+          await gate;
+          return new Response(JSON.stringify({ ok: true, handles: [{ handle: 'alice', config: CONFIG }], max: 3 }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ ok: true, available: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }),
+    );
+    const onEdit = vi.fn();
+    renderPanel(CONFIG, { canAutoEdit: true, onEdit });
+    const input = screen.getByPlaceholderText('alice');
+    fireEvent.change(input, { target: { value: 'bob' } });
+    release();
+    await screen.findByText('@alice');
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(input).toHaveValue('bob');
+  });
+
   it('@handle が 2 つ以上・この端末に手が入っているときは自動で編集に入らない', async () => {
     h.isSignedIn = true;
     stubMine([{ handle: 'alice', config: CONFIG }, { handle: 'bob', config: CONFIG }]);
