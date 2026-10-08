@@ -53,7 +53,8 @@ type EditableProps = CommonProps & {
     addressInvalid?: string;
   };
   onReceiverChange: (v: string) => void;
-  onResolved: (addr: Address | null) => void;
+  /** 名前 (ENS 等) の解決結果を受け取る (任意・自前で同じ名前を解決している呼び出し側は渡さない)。 */
+  onResolved?: (addr: Address | null) => void;
   showAddressInvalid: boolean;
   wallet: { canUse: boolean; matches: boolean; onUse: () => void };
   availableChains: readonly ChainSlug[];

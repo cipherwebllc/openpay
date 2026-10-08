@@ -250,7 +250,6 @@ export function TipEmbedGenerator() {
   const origin = useOrigin();
   const urlCopy = useCopyToClipboard();
   const iframeCopy = useCopyToClipboard();
-  const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
   const [publishMode, setPublishMode] = useState<PublishMode>('share');
   const [embedFormat, setEmbedFormat] = useState<EmbedFormat>('iframe');
   const [qrOpen, setQrOpen] = useState(false);
@@ -263,12 +262,14 @@ export function TipEmbedGenerator() {
   const t = useTranslations('TipEmbedGenerator');
   const tProfile = useTranslations('HandleProfile');
 
-  // 受取先が ENS 名のときは、設定シート (その中の AddressInput) を開いていなくても名前を解決しておく。
+  // 受取先が ENS 名のときは、設定シート (その中の AddressInput) を開いていなくても名前を解決しておき、この解決結果
+  // だけを使う (シートの AddressInput も同じ query を見る)。シートから受け取った解決値を別に持つと、閉じた後の
+  // 再解決が届かず、リンクと埋め込みコードが古いアドレスを指したままになる (着金先のずれ)。
   const receiverName = settings.receiver.trim();
   const ens = useResolveAddress(isLikelyName(receiverName) ? receiverName : '');
   const effectiveReceiver = useMemo(
-    () => pickEffectiveAddress(settings.receiver, resolvedReceiver ?? ens.data?.address ?? null),
-    [settings.receiver, resolvedReceiver, ens.data],
+    () => pickEffectiveAddress(settings.receiver, ens.data?.address ?? null),
+    [settings.receiver, ens.data],
   );
 
   const setReceiver = useCallback(
@@ -293,6 +294,17 @@ export function TipEmbedGenerator() {
     setReceiverInline(effectiveReceiver === null);
     setReceiverChecked(true);
   }, [hydrated, receiverChecked, settings.receiver, autofill.connected, effectiveReceiver]);
+
+  // 受取先を触り始めたら、入力欄を出すか要約にするかの初回の判定はもう行わない (保存済みの ENS 名の解決待ちの間に
+  // 打ち直した名前が解決した瞬間、触っている入力欄が要約に置き換わって focus を失わないように)。
+  const onReceiverInput = (value: string) => {
+    setReceiverChecked(true);
+    autofill.handleManualChange(value);
+  };
+  const onUseConnectedWallet = () => {
+    setReceiverChecked(true);
+    autofill.useConnectedWallet();
+  };
 
   const colorValid = COLOR_PATTERN.test(settings.color);
   const deployment = deploymentForSlug(settings.token, settings.chain);
@@ -378,10 +390,6 @@ export function TipEmbedGenerator() {
     settings.webhook,
     settings.crossChain,
   ]);
-
-  const handleResolved = useCallback((addr: Address | null) => {
-    setResolvedReceiver(addr);
-  }, []);
 
   const iframeSnippet = useMemo(() => {
     if (!tipUrl) return '';
@@ -546,8 +554,7 @@ export function TipEmbedGenerator() {
             <div className="space-y-4">
               <ReceiverBlock
                 receiver={settings.receiver}
-                onReceiverChange={autofill.handleManualChange}
-                onResolved={handleResolved}
+                onReceiverChange={onReceiverInput}
                 showAddressInvalid={
                   !!settings.receiver &&
                   !effectiveReceiver &&
@@ -556,7 +563,7 @@ export function TipEmbedGenerator() {
                 wallet={{
                   canUse: autofill.canUseConnected,
                   matches: autofill.matchesConnected,
-                  onUse: autofill.useConnectedWallet,
+                  onUse: onUseConnectedWallet,
                 }}
                 token={settings.token}
                 chain={settings.chain}
@@ -635,8 +642,7 @@ export function TipEmbedGenerator() {
           <ShopSettingsSection title={t('receiveHeading')}>
           <ReceiverBlock
             receiver={settings.receiver}
-            onReceiverChange={autofill.handleManualChange}
-            onResolved={handleResolved}
+            onReceiverChange={onReceiverInput}
             showAddressInvalid={
               !!settings.receiver &&
               !effectiveReceiver &&
@@ -645,7 +651,7 @@ export function TipEmbedGenerator() {
             wallet={{
               canUse: autofill.canUseConnected,
               matches: autofill.matchesConnected,
-              onUse: autofill.useConnectedWallet,
+              onUse: onUseConnectedWallet,
             }}
             token={settings.token}
             chain={settings.chain}

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
@@ -94,6 +94,7 @@ vi.mock('@/components/TipForm', () => ({
 }));
 
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
+import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { chainForSlug } from '@/lib/chains';
 import { useAccount } from 'wagmi';
 
@@ -1100,5 +1101,42 @@ describe('TipEmbedGenerator — レイアウト (mobile overflow / preview 位�
     headings.slice(0, -1).forEach((heading, index) => {
       expect(heading.compareDocumentPosition(headings[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
+  });
+});
+
+describe('TipEmbedGenerator — ENS 名の受取先', () => {
+  const OTHER = '0x000000000000000000000000000000000000dEaD';
+  // 名前ごとの解決先 (AddressInput と builder は同じ hook = 同じ結果を見る)。
+  const resolveTo = (map: Record<string, string>) =>
+    vi.mocked(useResolveAddress).mockImplementation(((input: string) => {
+      const address = map[input.trim().toLowerCase()];
+      return { data: address ? { address } : null, isFetching: false, error: null };
+    }) as unknown as typeof useResolveAddress);
+  afterEach(() => resolveTo({}));
+
+  it('設定シートを閉じた後に名前の解決先が変わったら、リンクも新しい解決先を指す (古い解決値を使わない)', async () => {
+    resolveTo({ 'alice.eth': VALID });
+    window.localStorage.setItem(KEY, JSON.stringify({ receiver: 'alice.eth' }));
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => expectInUrl(new RegExp(`/tip/${VALID}`)));
+    await user.click(screen.getByRole('button', { name: '設定' }));
+    await user.click(screen.getByRole('button', { name: '完了' }));
+    resolveTo({ 'alice.eth': OTHER });
+    await user.type(screen.getByPlaceholderText('例: 山田太郎'), 'A');
+    await waitFor(() => expectInUrl(new RegExp(`/tip/${OTHER}`)));
+  });
+
+  it('保存済みの名前が解決できない間に打ち直しても、入力欄は消えず focus を保つ', async () => {
+    resolveTo({ 'alice.eth': VALID });
+    window.localStorage.setItem(KEY, JSON.stringify({ receiver: 'pending.eth' }));
+    render(<TipEmbedGenerator />);
+    const input = await screen.findByDisplayValue('pending.eth');
+    // 全選択して貼り付けた想定 (1 回の変更で、解決できる名前に置き換わる)。
+    input.focus();
+    fireEvent.change(input, { target: { value: 'alice.eth' } });
+    await waitFor(() => expectInUrl(new RegExp(`/tip/${VALID}`)));
+    expect(screen.getByDisplayValue('alice.eth')).toBe(input);
+    expect(input).toHaveFocus();
   });
 });
