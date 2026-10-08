@@ -18,7 +18,7 @@ import { ConvertPanel } from './ConvertPanel';
 import { QUICK_AMOUNT_MAX, type QrSettings } from '@/hooks/useQrSettings';
 import type { TokenDeployment } from '@/lib/tokens';
 import type { GasMode } from '@/lib/fee';
-import { groupAmountDigits, normalizeAmountList, truncateAmount } from '@/lib/amount';
+import { editGroupedAmount, groupAmountDigits, normalizeAmountList, truncateAmount } from '@/lib/amount';
 
 export type Mode = 'amount' | 'static';
 
@@ -85,17 +85,18 @@ export function QrAmountSection({
   const t = useTranslations('QrGenerator');
   const amountInputRef = useRef<HTMLInputElement>(null);
   // 金額は桁区切りつきで見せる (1500 → 1,500・よく使う金額や QR の画面と同じ表記)。持つ値は区切りなしのまま
-  // (QR の URL に入るのはこの値)。区切りが増減しても caret が末尾へ飛ばないよう、caret より右の数字の数を
-  // 覚えておき、描画後に同じ位置へ戻す。
-  const caretFromEndRef = useRef<number | null>(null);
+  // (QR の URL に入るのはこの値)。編集ごとに caret より左の文字の数 (区切りを除く) を覚えておき、描画後に同じ
+  // 位置へ戻す (区切りが増減しても末尾へ飛ばない)。値が変わらない編集でも描画し直して置き直す。
+  const caretLeftRef = useRef<number | null>(null);
+  const [, setCaretTick] = useState(0);
   useLayoutEffect(() => {
     const el = amountInputRef.current;
-    const fromEnd = caretFromEndRef.current;
-    caretFromEndRef.current = null;
-    if (!el || fromEnd === null || document.activeElement !== el) return;
-    let pos = el.value.length;
-    for (let seen = 0; pos > 0 && seen < fromEnd; pos -= 1) {
-      if (el.value[pos - 1] !== ',') seen += 1;
+    const left = caretLeftRef.current;
+    caretLeftRef.current = null;
+    if (!el || left === null || document.activeElement !== el) return;
+    let pos = 0;
+    for (let seen = 0; pos < el.value.length && seen < left; pos += 1) {
+      if (el.value[pos] !== ',') seen += 1;
     }
     el.setSelectionRange(pos, pos);
   });
@@ -207,11 +208,16 @@ export function QrAmountSection({
                 value={groupAmountDigits(amount)}
                 onChange={(e) => {
                   const el = e.target;
-                  const caret = el.selectionStart ?? el.value.length;
-                  caretFromEndRef.current = el.value.slice(caret).replace(/,/g, '').length;
-                  setAmount(
-                    truncateAmount(el.value.replace(/,/g, ''), deployment.decimals),
-                  );
+                  const edit = editGroupedAmount({
+                    value: el.value,
+                    caret: el.selectionStart ?? el.value.length,
+                    inputType: (e.nativeEvent as InputEvent).inputType ?? '',
+                    prev: amount,
+                    decimals: deployment.decimals,
+                  });
+                  caretLeftRef.current = edit.caretLeft;
+                  if (edit.amount === amount) setCaretTick((n) => n + 1);
+                  setAmount(edit.amount);
                   resetConvert();
                 }}
                 placeholder={settings.token === 'jpyc' ? '1,000' : '10.00'}

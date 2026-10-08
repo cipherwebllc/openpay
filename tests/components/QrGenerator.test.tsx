@@ -438,11 +438,19 @@ describe('QrGenerator', () => {
       // 先頭の 1 の後ろに 9 を足す → 19,234。caret は足した 9 の直後 (区切りの位置がずれても末尾へ飛ばない)。
       await user.type(input, '9', { initialSelectionStart: 1, initialSelectionEnd: 1 });
       expect(input.value).toBe('19,234');
-      expect(input.selectionStart).toBe(3);
+      expect(input.selectionStart).toBe(2);
+      // 区切りの直後 (19,|234) で Backspace → 区切りの左の 9 を消す → 1,234 (caret は 1 の直後)。
+      await user.type(input, '{Backspace}', { initialSelectionStart: 3, initialSelectionEnd: 3 });
+      expect(input.value).toBe('1,234');
+      expect(input.selectionStart).toBe(1);
       // 区切りつきで貼り付けても数字として受け取る。
       await user.clear(input);
       await user.paste('1,500');
       expect(input.value).toBe('1,500');
+      // 小数点は 1 つだけ (2 つ目は受け付けない・表示から隠れた文字で QR が出せなくなることがない)。
+      await user.clear(input);
+      await user.type(input, '12.5.');
+      expect(input.value).toBe('12.5');
     });
 
     it('クイック金額ボタンでレジ入力を即時反映する', async () => {
