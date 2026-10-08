@@ -67,7 +67,7 @@ const MOCK_FORWARDER = '0x1234567890123456789012345678901234567890' as `0x${stri
 const VALID_RECEIVER = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
 async function fillAmount(user: ReturnType<typeof userEvent.setup>, amount: string) {
-  const input = screen.getByPlaceholderText('1000');
+  const input = screen.getByPlaceholderText('1,000');
   await user.clear(input);
   await user.type(input, amount);
 }
@@ -150,6 +150,21 @@ describe('QrGenerator recover fee disclosure', () => {
       screen.getByText(/決済手数料:\s*10 JPYC（決済額の1%/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/決済手数料:\s*110 JPYC/)).toBeNull();
+  });
+
+  it('店の会計画面の開示は桁区切りつき (金額欄・ボタン・QR の画面と同じ表記・値は変えない)', async () => {
+    vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
+    vi.mocked(recoverFeeBps).mockReturnValue(100);
+    vi.mocked(recoverFeeValue).mockReturnValue(12345n * 10n ** 16n); // 1% of 12345 = 123.45
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await openStep2(user);
+    await user.type(screen.getByPlaceholderText(/0x/i), VALID_RECEIVER);
+    await fillAmount(user, '12345');
+    expect(screen.getByText(/決済手数料:\s*123\.45 JPYC（決済額の1%/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/お客様支払:\s*12,345 JPYC \/ 店舗受取:\s*12,221\.55 JPYC/),
+    ).toBeInTheDocument();
   });
 
   // 確定モデル (2026-06-13): JPYC recover は店舗負担固定。開示は merchant 分担行を出す。

@@ -123,13 +123,16 @@ describe('X10: activation-specific fresh balance', () => {
   });
 
   it('Japanese and English hints describe balance growth and do not confirm an invoice', () => {
+    // 2026-10 磨き上げ P5: 短い状態 (ピル) と注記に分けた。注記で「この支払いとは限らない」「直後は検知できない」
+    // 「結果は取引履歴で」を伝え続ける (決済の確定に見せない)。
     expect(ja.QrGenerator.paymentReceived).toContain('残高');
-    expect(ja.QrGenerator.paymentReceived).toContain('支払いを特定');
+    expect(ja.QrGenerator.paymentReceivedNote).toContain('この支払いとは限りません');
+    expect(ja.QrGenerator.paymentReceivedNote).toContain('取引履歴');
     expect(en.QrGenerator.paymentReceived).toContain('Balance');
-    expect(en.QrGenerator.paymentReceived).toContain('not identify');
-    expect(ja.QrGenerator.paymentWatching).toContain('表示直後（残高の取得中）に届いた支払い');
-    expect(en.QrGenerator.paymentWatching).toContain('just after the QR appears, while the initial balance is being fetched');
-    expect(ja.QrGenerator.paymentWatching).toContain('取引履歴');
-    expect(en.QrGenerator.paymentWatching).toContain('history');
+    expect(en.QrGenerator.paymentReceivedNote).toContain('may not be this payment');
+    expect(ja.QrGenerator.paymentWatchingNote).toContain('表示した直後に届いた支払い');
+    expect(en.QrGenerator.paymentWatchingNote).toContain('right after this screen opens');
+    expect(ja.QrGenerator.paymentWatchingNote).toContain('取引履歴');
+    expect(en.QrGenerator.paymentWatchingNote).toContain('history');
   });
 });

@@ -46,6 +46,7 @@ const envHold = vi.hoisted(() => ({
   enableHandles: false,
   enableMenuOptions: false,
   enableStoreGasWallet: false,
+  enableMobileOrder: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -67,6 +68,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableStoreGasWallet() {
         return envHold.enableStoreGasWallet;
+      },
+      get enableMobileOrder() {
+        return envHold.enableMobileOrder;
       },
     },
   };
@@ -132,6 +136,7 @@ describe('RegisterMode', () => {
     envHold.enableShopLive = false; // Phase 1 flag も OFF 起点
     envHold.enableHandles = false;
     envHold.enableMenuOptions = false; // Phase 2 flag も OFF 起点
+    envHold.enableMobileOrder = false;
     sessionHold.isSignedIn = false;
     global.fetch = vi.fn(async () => jsonRes({ ok: false }, 404)) as unknown as typeof fetch;
   });
@@ -540,6 +545,61 @@ describe('RegisterMode', () => {
     expect(screen.queryByText(/\/checkout\?/)).toBeNull();
   });
 
+  it('シートで受取先を決めて閉じたら、会計画面の受取先の欄は消える (同じ欄を 2 か所に出さない)', async () => {
+    const user = userEvent.setup();
+    render(<RegisterMode />); // receiver 未 seed
+    await screen.findByRole('heading', { name: '受け取るウォレット' });
+    await user.click(screen.getByRole('button', { name: /^設定$/ }));
+    const sheet = await screen.findByRole('dialog', { name: 'お店の設定' });
+    await user.type(within(sheet).getByPlaceholderText(/0x\.\.\./), VALID);
+    await user.click(within(sheet).getByRole('button', { name: '完了' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('heading', { name: '受け取るウォレット' })).toBeNull(),
+    );
+  });
+
+  it('下部バーは短い言い方で未入力の項目を出す (受取先 → 商品・要約と同じ言葉)', async () => {
+    const user = userEvent.setup();
+    render(<RegisterMode />); // receiver 未 seed
+    const bar = () =>
+      screen
+        .getAllByRole('button', { name: 'QRコードを表示する' })
+        .map((b) => b.parentElement!)
+        .find((el) => el.className.includes('sticky'))!;
+    await waitFor(() => expect(within(bar()).getByText('受取先が未設定')).toBeInTheDocument());
+    await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+    await waitFor(() => expect(within(bar()).getByText('商品が未選択')).toBeInTheDocument());
+    await user.click(await findTile(/コーヒー/));
+    await waitFor(() => expect(within(bar()).getByText('合計')).toBeInTheDocument());
+  });
+
+  it('税額も桁区切り・英語の点数は単数/複数 (1 item / 2 items)', async () => {
+    const user = userEvent.setup();
+    seedReceiver();
+    window.localStorage.setItem(
+      'openpay:product-presets:v1',
+      JSON.stringify({
+        presets: [
+          { id: 'big', name: 'Big', unitPrice: '12000', token: 'jpyc', taxRate: 10, taxCategory: 'taxable_10', memo: null, sortOrder: 0, enabled: true },
+        ],
+        receipt: { day: '', n: 0 },
+      }),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithIntl(
+      <QueryClientProvider client={qc}>
+        <RegisterMode />
+      </QueryClientProvider>,
+      { locale: 'en' },
+    );
+    await user.click(await findTile(/Big/));
+    // 12,000 の内税 10% = 1,091 (税額だけ素の数にならない)。
+    await waitFor(() => expect(orderPanel().getByText('1,091 JPYC')).toBeInTheDocument());
+    expect(orderPanel().getByText('1 item')).toBeInTheDocument();
+    await user.click(await findTile(/Big/));
+    await waitFor(() => expect(orderPanel().getByText('2 items')).toBeInTheDocument());
+  });
+
   it('複数商品をカートに追加 → checkout items が複数になる', async () => {
     const user = userEvent.setup();
     seedReceiver();
@@ -843,6 +903,64 @@ describe('RegisterMode', () => {
 
   // レジ システム利用料: flag ON のとき /checkout に feeKind='register' を付け、CheckoutForm が
   // standard 経路の JPYC 決済に recover の OpenPay利用料 % を課金する合図にする。
+  describe('モバイル注文への橋 (2026-10 磨き上げ P4)', () => {
+    it('モバイル注文が使えて、メニューにできる商品があれば出す・押すとモバイル注文タブへ', async () => {
+      envHold.enableMobileOrder = true;
+      const onStart = vi.fn();
+      const user = userEvent.setup();
+      render(<RegisterMode onStartMobileOrder={onStart} />);
+      await findTile(/コーヒー/);
+      // PC は商品カードの中・スマホはご注文の後ろ (CSS で片方だけ見せる・jsdom には両方ある)。
+      const bridges = screen.getAllByText('このメニューで、モバイル注文も受けられます');
+      expect(bridges).toHaveLength(2);
+      expect(bridges[0].closest('[aria-labelledby="register-products-heading"]')).not.toBeNull();
+      const orderSection = screen.getByRole('region', { name: 'ご注文' });
+      expect(
+        orderSection.compareDocumentPosition(bridges[1]) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      await user.click(screen.getAllByRole('button', { name: 'モバイル注文を始める' })[1]);
+      expect(onStart).toHaveBeenCalledOnce();
+    });
+
+    it('閉じたらこの端末では出さない (次に開いても)', async () => {
+      envHold.enableMobileOrder = true;
+      const user = userEvent.setup();
+      const { unmount } = render(<RegisterMode onStartMobileOrder={vi.fn()} />);
+      await findTile(/コーヒー/);
+      // どちらで閉じても両方消える (閉じた状態は 1 つ)。
+      await user.click(screen.getAllByRole('button', { name: '閉じる' })[1]);
+      expect(screen.queryAllByText('このメニューで、モバイル注文も受けられます')).toHaveLength(0);
+      unmount();
+      render(<RegisterMode onStartMobileOrder={vi.fn()} />);
+      await findTile(/コーヒー/);
+      expect(screen.queryAllByText('このメニューで、モバイル注文も受けられます')).toHaveLength(0);
+    });
+
+    it('モバイル注文が使えない (flag OFF) ・メニューにできる商品 (有効な JPYC) が無いときは出さない', async () => {
+      const first = render(<RegisterMode onStartMobileOrder={vi.fn()} />);
+      await findTile(/コーヒー/);
+      expect(screen.queryAllByText('このメニューで、モバイル注文も受けられます')).toHaveLength(0);
+      first.unmount();
+      envHold.enableMobileOrder = true;
+      window.localStorage.setItem('openpay:product-presets:v1', JSON.stringify({
+        presets: [{ id: 'u', name: 'USDCグッズ', unitPrice: '5', token: 'usdc', taxRate: 10, taxCategory: 'taxable_10', memo: null, sortOrder: 0, enabled: true }],
+        receipt: { day: '', n: 0 },
+      }));
+      render(<RegisterMode onStartMobileOrder={vi.fn()} />);
+      await findTile(/USDCグッズ/);
+      expect(screen.queryAllByText('このメニューで、モバイル注文も受けられます')).toHaveLength(0);
+    });
+
+    it('商品の編集シートの先頭に「モバイル注文のメニューにもなる」の 1 行', async () => {
+      envHold.enableMobileOrder = true;
+      const user = userEvent.setup();
+      render(<RegisterMode onStartMobileOrder={vi.fn()} />);
+      await findTile(/コーヒー/);
+      await user.click(screen.getByRole('button', { name: '商品を編集' }));
+      expect(screen.getByText('ここで編集した商品は、モバイル注文のメニューにもなります。')).toBeInTheDocument();
+    });
+  });
+
   it('flag ON: レジの /checkout URL に fee_kind=register が付く (standard 課金の合図)', async () => {
     envHold.enableRegisterFee = true;
     const user = userEvent.setup();

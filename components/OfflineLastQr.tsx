@@ -55,7 +55,10 @@ export function OfflineLastQr() {
             {record.storeName}
           </p>
         ) : null}
-        <p className="text-sm text-slate-700">{record.amountLabel}</p>
+        {/* お客様に見せる画面なので、金額を主役に (QR の画面と同じ太さ)。 */}
+        <p className="text-2xl font-bold tabular-nums tracking-tight text-slate-900">
+          {record.amountLabel}
+        </p>
         <p className="text-xs text-slate-500">{record.tokenChainLabel}</p>
         <p className="text-[11px] text-slate-500">
           {t('savedAt', { time: savedAt })}

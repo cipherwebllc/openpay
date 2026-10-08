@@ -254,8 +254,9 @@ describe('QrPreviewModal', () => {
     });
     const status = screen.getByRole('status');
     expect(status).toHaveTextContent(ja.QrGenerator.paymentReceived.replace('{amount}', '1000 JPYC'));
-    expect(status).toHaveClass('text-slate-600');
-    expect(status).not.toHaveClass('text-emerald-600', 'font-semibold');
+    // 中立な灰色のピル (決済成功の緑・チェックは使わない)。
+    expect(status.innerHTML).not.toMatch(/emerald/);
+    expect(status.querySelector('.bg-slate-100')).not.toBeNull();
     expect(status.querySelector('.lucide-circle-check')).toBeNull();
   });
 
@@ -388,12 +389,14 @@ describe('QrPreviewModal FX expiry', () => {
     rerender(<QrPreviewModal {...props} convertExpired />);
     expect(screen.getByRole('dialog')).toBe(dialog);
     expect(copy).toHaveFocus();
+    // 期限切れで押せなくなった操作は飛ばす。残る操作は「閉じる」と「リンクを表示」(折りたたみ・2026-10 磨き上げ P5)。
+    const showUrl = dialog.querySelector<HTMLElement>('summary')!;
+    await user.tab();
+    expect(showUrl).toHaveFocus();
     await user.tab();
     expect(close).toHaveFocus();
     await user.tab({ shift: true });
-    expect(close).toHaveFocus();
-    await user.tab();
-    expect(close).toHaveFocus();
+    expect(showUrl).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(props.onClose).toHaveBeenCalledOnce();
     rerender(<QrPreviewModal {...props} convertExpired open={false} />);

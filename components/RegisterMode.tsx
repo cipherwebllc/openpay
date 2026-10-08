@@ -25,6 +25,7 @@ import { ChainChooser } from './ChainChooser';
 import { QrReceiptPosterFields, QrReceiverFields, QrStoreNameField } from './qr/QrReceiverSection';
 import { QrSettingsSection } from './qr/QrSettingsSection';
 import { RegisterCartLine } from './register/RegisterCartLine';
+import { MobileOrderBridge, useMobileOrderBridgeDismissed } from './register/MobileOrderBridge';
 import { QrPreviewModal } from './QrPreviewModal';
 import { StoreGasWalletPanel } from './StoreGasWalletPanel';
 import { StoreDeviceRegisterStatus } from './StoreDeviceRegisterStatus';
@@ -42,6 +43,7 @@ import { switchTokenKeepingPrefs, useQrSettings, withChain } from '@/hooks/useQr
 import { useReceiverAutofill, type ReceiverSource } from '@/hooks/useReceiverAutofill';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { useProductPresets, type ProductPreset } from '@/hooks/useProductPresets';
+import { presetsToMenu } from '@/hooks/useMobileOrderDraft';
 import { useShopLive } from '@/hooks/useShopLive';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { randomId } from '@/lib/id';
@@ -83,7 +85,10 @@ type CartLine = {
   presetId?: string;
 };
 
-type RegisterModeProps = {};
+type RegisterModeProps = {
+  /** モバイル注文タブへ移る (page が渡す・モバイル注文が使えるときだけ)。レジの商品がそのままメニューになる。 */
+  onStartMobileOrder?: () => void;
+};
 
 type RegisterShopLive = {
   state: ShopLiveState;
@@ -127,6 +132,7 @@ function RegisterModeWithShopLive(props: RegisterModeProps) {
 
 function RegisterModeContent({
   shopLive,
+  onStartMobileOrder,
 }: RegisterModeProps & { shopLive?: RegisterShopLive }) {
   const t = useTranslations('RegisterMode');
   const tQr = useTranslations('QrGenerator');
@@ -269,6 +275,13 @@ function RegisterModeContent({
         (p) => (p.category?.trim() ?? '') === effectiveCatFilter,
       )
     : presetStore.enabledPresets;
+  // モバイル注文のメニューになる商品があるか (メニューを作る presetsToMenu そのもので数える = 条件を二重に持たない)。
+  const hasMenuItem = useMemo(() => presetsToMenu(presetStore.presets).length > 0, [presetStore.presets]);
+  // モバイル注文への橋 (使えて・メニューにできる商品があり・閉じていないときだけ)。PC とスマホで置き場所が違うので
+  // 閉じた状態はここで 1 つ持つ。
+  const [bridgeDismissed, dismissBridge] = useMobileOrderBridgeDismissed();
+  const startMobileOrder =
+    env.enableMobileOrder && hasMenuItem && !bridgeDismissed ? onStartMobileOrder : undefined;
   const soldOut = useMemo(
     () => new Set(shopLive?.state.soldOut ?? []),
     [shopLive?.state.soldOut],
@@ -630,13 +643,17 @@ function RegisterModeContent({
   );
 
   // 押せない理由 (未入力の項目)。商品 → 受取先の順に 1 つだけ。
-  const notReady = checkoutUrl
+  // 受取先が無いのが初めての店の本当の壁なので、受取先を先に出す (2026-10 磨き上げ P5・Fable 監査)。
+  const notReadyKey = checkoutUrl
     ? null
-    : validItems.length === 0
-      ? t('notReady.items')
-      : !effectiveReceiver
-        ? t('notReady.receiver')
+    : !effectiveReceiver && !receiverName
+      ? 'receiver'
+      : validItems.length === 0
+        ? 'items'
         : null;
+  const notReady = notReadyKey ? t(`notReady.${notReadyKey}`) : null;
+  // 下部バーは幅が狭いので短い言い方 (「受取先が未設定」・会計画面の要約と同じ言葉)。
+  const notReadyShort = notReadyKey ? t(`notReadyShort.${notReadyKey}`) : null;
   const lineCount = cart.reduce((n, l) => n + l.quantity, 0);
   const qrDisabled = !checkoutUrl || device.busy || storeDeviceNotReady;
   const qrLabel = sdSaleBlocked ? t('storeDevice.showNormalQr') : t('showQr');
@@ -819,6 +836,15 @@ function RegisterModeContent({
                   {t('currencyMismatch', { symbol })}
                 </p>
               )}
+              {/* レジの商品 (有効な JPYC 商品) はそのままモバイル注文のメニュー。メニューにできる商品があるときだけ橋を出す。
+                  PC はここ (商品カードの中)・スマホはご注文の後ろ (タイル → ご注文の間に挟まない)。 */}
+              {startMobileOrder && (
+                <MobileOrderBridge
+                  onStart={startMobileOrder}
+                  onDismiss={dismissBridge}
+                  className="mt-4 max-lg:hidden"
+                />
+              )}
             </div>
           </section>
 
@@ -840,6 +866,7 @@ function RegisterModeContent({
                 receiverValid={effectiveReceiver !== null}
                 autofill={autofill}
                 handleResolved={ignoreResolved}
+                bare
               />
             </section>
           )}
@@ -897,7 +924,7 @@ function RegisterModeContent({
                   <div className="flex justify-between">
                     <dt className="text-slate-500">{t('taxAmount')}</dt>
                     <dd className="tabular-nums text-slate-600">
-                      {totalTaxRounded} {symbol}
+                      {groupAmountDigits(String(totalTaxRounded))} {symbol}
                     </dd>
                   </div>
                 )}
@@ -948,6 +975,10 @@ function RegisterModeContent({
           </section>
         </aside>
 
+        {startMobileOrder && (
+          <MobileOrderBridge onStart={startMobileOrder} onDismiss={dismissBridge} className="lg:hidden" />
+        )}
+
         {/* お店の端末で送る (ガス代の肩代わり) の状態とガス用ウォレット。PC は左列の商品の下、スマホは注文の下。 */}
         {env.enableStoreGasWallet && (
           <div className="min-w-0 space-y-4 lg:col-start-1">
@@ -979,13 +1010,16 @@ function RegisterModeContent({
         className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/70 bg-white/85 px-4 py-2.5 backdrop-blur-md supports-[backdrop-filter]:bg-white/75 md:bottom-0 lg:hidden"
       >
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] text-slate-500">{t('total')}</div>
-          {notReady ? (
-            <div className="truncate text-sm font-medium text-slate-500">{notReady}</div>
+          {/* 押せないときは見出しを外し、短い理由だけを出す。 */}
+          {notReadyShort ? (
+            <div className="truncate text-sm font-medium text-slate-500">{notReadyShort}</div>
           ) : (
-            <div className="truncate text-lg font-bold tabular-nums text-slate-900">
-              {groupAmountDigits(totalHuman)} {symbol}
-            </div>
+            <>
+              <div className="text-[11px] text-slate-500">{t('total')}</div>
+              <div className="truncate text-lg font-bold tabular-nums text-slate-900">
+                {groupAmountDigits(totalHuman)} {symbol}
+              </div>
+            </>
           )}
         </div>
         <button
@@ -1003,7 +1037,11 @@ function RegisterModeContent({
           売上の自動分配・他チェーンからの受取はレジの明細 QR (checkout) で使わないので出さない。 */}
       <ShopSettingsSheet
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          // シートで受取先を決めたら、会計画面の受取先の欄は役目を終える (同じ欄を 2 か所に出さない)。
+          if (effectiveReceiver) setReceiverInline(false);
+        }}
         title={tQr('shopSettings.title')}
         doneLabel={tQr('shopSettings.done')}
       >
@@ -1054,6 +1092,9 @@ function RegisterModeContent({
         title={t('productsSheetTitle')}
         doneLabel={tQr('shopSettings.done')}
       >
+        {env.enableMobileOrder && (
+          <p className="px-1 text-xs leading-relaxed text-slate-600">{t('mobileOrderBridge.sheetNote')}</p>
+        )}
         {env.enableShopLive && (
           <label className="flex items-center gap-2 px-1 text-xs text-slate-600">
             <input
@@ -1091,15 +1132,36 @@ function RegisterModeContent({
             copied: t('copied'),
             // お店負担の QR は端末が通信して送るので「圏外でも提示できます」は出さない。
             localGenNote: storeQrActive ? undefined : t('qrLocalGenNote'),
+            payTo: tQr('qrPayTo'),
+            showUrl: tQr('qrShowUrl'),
+            // お客様向けの 3 ステップ (決済QR と同じ・2026-10 磨き上げ P5 でレジにも)。
+            step1: tQr('posterStepScan'),
+            step2: tQr('posterStepConfirm'),
+            step3: tQr('posterStepDone'),
           }}
           convertExpired={storeQrDimmed}
-          payModeBadge={storeQrActive ? { text: t('storeDevice.badge'), tone: 'gasless' } : undefined}
+          // お客様に見せる画面の支払い方法のピル (決済QR と同じ語・2026-10 磨き上げ P5 でレジにも)。
+          payModeBadge={
+            storeQrActive
+              ? { text: t('storeDevice.badge'), tone: 'gasless' }
+              : settings.payMode === 'gasless'
+                ? { text: tQr('posterPayModeGasless'), tone: 'gasless' }
+                : {
+                    text:
+                      settings.chain === 'arc'
+                        ? tQr('posterPayModeArc')
+                        : tQr('posterPayModeStandard', {
+                            nativeToken: chainForSlug(settings.chain).nativeCurrency.symbol,
+                          }),
+                    tone: 'standard',
+                  }
+          }
           deviceStatus={env.enableStoreGasWallet && sdState.phase !== 'idle' ? storeDeviceStatus : undefined}
           qrValue={qrValue}
           qrRef={qrRef}
           storeName={settings.storeName.trim() || t('qrPosterDefaultStoreName')}
-          amountText={`${totalHuman} ${symbol}`}
-          note={settings.posterNote.trim() || undefined}
+          amountText={`${groupAmountDigits(totalHuman)} ${symbol}`}
+          note={settings.posterNote.trim() || tQr('posterDefaultNote')}
           chainText={`${symbol} · ${chainForSlug(settings.chain).name}`}
           // 決済QR の全画面表示と同じトークン/チェーンロゴ行を出す (視認性)。
           asset={{

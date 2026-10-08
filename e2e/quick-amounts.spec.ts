@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-// 「高度な設定 > レジ用クイック金額」が token (JPYC=円 / USDC=ドル) ごとに
+// 「よく使う金額」(金額欄の下のチップ・2026-10 磨き上げ P2) が token (JPYC=円 / USDC=ドル) ごとに
 // 独立していること、旧 schema (単一 array 共有) からの migration が正しいことを
 // 実 browser で検証する。jsdom 単体テストでは拾えない hydrate + localStorage 経路
 // 全体を本物で走らせる。

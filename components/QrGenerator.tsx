@@ -745,7 +745,8 @@ export function QrGenerator() {
 
   // QR を出せない理由 (未入力の項目)。下部の会計バーと PC の会計パネルで同じものを出す。
   const notReadyKey = payUrl ? null : qrNotReadyKey(amountValid, receiverValid);
-  const notReadyText = notReadyKey ? t(`notReady.${notReadyKey}`) : null;
+  // 下部バーは幅が狭いので短い言い方 (「受取先が未設定」・会計画面の要約と同じ言葉)。右の会計パネルは指示の文。
+  const notReadyText = notReadyKey ? t(`notReadyShort.${notReadyKey}`) : null;
 
   // モバイル: grid-cols-1 (= minmax(0,1fr)) を明示しないと単一列が auto track となり、下部固定バー
   // (nowrap の「QRコードを表示する」+ 金額) の max-content まで広がって横はみ出す。
@@ -754,8 +755,9 @@ export function QrGenerator() {
   // 両軸とも minmax(0,1fr) (min-width:0) に固定し、列幅をコンテナ内で安定させる。
   return (
     <>
-      {/* 圏外時のみ描画される「前回の受け取り QR」(オンライン時は null)。ページ最上部に置く。 */}
-      <div className="mb-4 print:hidden">
+      {/* 圏外時のみ描画される「前回の受け取り QR」(オンライン時は null)。ページ最上部に置く。
+          中身が無いときは枠ごと消す (空の枠の余白でタブと会計カードの間が空かない)。 */}
+      <div className="mb-4 empty:hidden print:hidden">
         {/* お店負担を選んでいる・お店の端末が送っている・締め切っていない受け渡しが残っている間は、保存した通常の QR を
             出さない (店員が選ばずに通常の QR を出さない・圏外で締め切れなかったお店負担の QR と二重に払わせない)。
             flag OFF では今までどおり。 */}
@@ -836,6 +838,7 @@ export function QrGenerator() {
               receiverValid={receiverValid}
               autofill={autofill}
               handleResolved={handleResolved}
+              bare
             />
           </section>
         )}
@@ -909,7 +912,11 @@ export function QrGenerator() {
       {/* お店の設定 (受取先・通貨とチェーン・支払い方法・控えとポスター)。値の変え方は今までの handler のまま。 */}
       <ShopSettingsSheet
         open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          // シートで受取先を決めたら、会計画面の受取先の欄は役目を終える (同じ欄を 2 か所に出さない)。
+          if (receiverValid) setReceiverInline(false);
+        }}
         title={t('shopSettings.title')}
         doneLabel={t('shopSettings.done')}
       >
@@ -971,6 +978,8 @@ export function QrGenerator() {
             downloadPng: t('downloadPng'),
             // お店負担の QR は端末が通信して送るので「圏外でも提示できます」は出さない。
             localGenNote: storeQrShown ? undefined : t('localGenNote'),
+            payTo: t('qrPayTo'),
+            showUrl: t('qrShowUrl'),
             step1: t('posterStepScan'),
             step2: t('posterStepConfirm'),
             step3: t('posterStepDone'),
@@ -1047,9 +1056,10 @@ export function QrGenerator() {
                   text: t('paymentReceived', {
                     amount: formatTokenAmount(receivedWei, deployment),
                   }),
+                  note: t('paymentReceivedNote'),
                 }
               : incomingStatus === 'watching'
-                ? { state: 'watching' as const, text: t('paymentWatching') }
+                ? { state: 'watching' as const, text: t('paymentWatching'), note: t('paymentWatchingNote') }
                 : undefined
           }
         />

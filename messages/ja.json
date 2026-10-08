@@ -487,6 +487,7 @@
     "gasCustomerDesc": "請求金額にネットワーク手数料見積を上乗せして顧客が支払う (gas spike 時も店主の取り分は安定)",
     "gasMerchantDesc": "店主がネットワーク手数料見積も吸収、顧客は請求金額のみ支払う (顧客 UX 重視、店主は gas 変動を被る)",
     "quickAmountPlaceholder": "例: 1000",
+    "quickAmountItem": "よく使う金額 {n}",
     "quickAmountAdd": "+ 金額を追加",
     "quickAmountRemove": "クイック金額を削除",
     "splitLabel": "売上の自動分配 (主受取人 = 残り {primaryPercent}%)",
@@ -507,13 +508,17 @@
     "qrModalTitle": "決済用 QR コード",
     "qrModalClose": "閉じる",
     "qrModalConvertExpired": "為替レートの目安期限を過ぎました。この QR を閉じて、最新レートで作り直してください。",
-    "qrCopy": "URLをコピー",
+    "qrCopy": "リンクをコピー",
+    "qrShowUrl": "リンクを表示",
+    "qrPayTo": "支払先",
     "qrCopied": "コピー済み",
     "downloadSvg": "SVG保存",
     "downloadPng": "PNG保存",
     "localGenNote": "この QR は端末内で生成（通信不要）。圏外でも表示・提示できます。",
-    "paymentWatching": "残高を監視中…表示直後（残高の取得中）に届いた支払いは検知できない場合があります。支払いは取引履歴で確認してください。",
-    "paymentReceived": "残高の増加を検知（+{amount}）。この支払いを特定するものではありません。取引履歴で確認してください。",
+    "paymentWatching": "お支払いを待っています…",
+    "paymentWatchingNote": "表示した直後に届いた支払いは検知できないことがあります。結果は取引履歴で確かめてください。",
+    "paymentReceived": "残高が増えました（+{amount}）",
+    "paymentReceivedNote": "この支払いとは限りません。取引履歴で確かめてください。",
     "printPoster": "印刷",
     "posterEyebrow": "OpenPay ステーブルコイン決済 QR",
     "posterDefaultStoreName": "お支払いはこちら",
@@ -526,8 +531,6 @@
     "posterStepScan": "スマホでスキャン",
     "posterStepConfirm": "金額を確認",
     "posterStepDone": "お支払い完了",
-    "qrPlaceholderNoAddress": "受取先アドレスを入力 (Step 2)",
-    "qrPlaceholderNoAmount": "金額を入力",
     "qrEmptyState": {
       "trySample": "サンプル金額 {amount} で試す"
     },
@@ -541,7 +544,6 @@
     "eip681Copied": "コピー済み",
     "merchantExplorerLink": "店舗ウォレットの履歴を {chainName} Explorer で見る ↗",
     "convertButton": "{symbol} 建てで受取る",
-    "convertRateUnavailable": "為替レートを取得できないため、現在は他トークン建てに換算できません。",
     "convertActiveSummary": "{anchorAmount} {anchorSymbol} ≈ {amount} {symbol}",
     "convertRate": "レート: 1 USDC = {rate} 円",
     "convertRemaining": "OpenPay 画面上の目安 残り {time}（未署名 QR のためサーバ強制ではありません）",
@@ -611,6 +613,10 @@
     "notReady": {
       "amount": "金額を入れてください",
       "receiver": "受取先を設定してください"
+    },
+    "notReadyShort": {
+      "amount": "金額が未入力",
+      "receiver": "受取先が未設定"
     }
   },
   "RecoverFee": {
@@ -2608,6 +2614,16 @@
     "notReady": {
       "items": "商品を選んでください",
       "receiver": "受取先を設定してください"
+    },
+    "notReadyShort": {
+      "items": "商品が未選択",
+      "receiver": "受取先が未設定"
+    },
+    "mobileOrderBridge": {
+      "title": "このメニューで、<wbr></wbr>モバイル注文も受けられます",
+      "cta": "モバイル注文を始める",
+      "dismiss": "閉じる",
+      "sheetNote": "ここで編集した商品は、モバイル注文のメニューにもなります。"
     }
   },
   "ProductPresetManager": {

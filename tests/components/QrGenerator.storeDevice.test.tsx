@@ -98,7 +98,7 @@ function seed(over: Record<string, unknown> = {}) {
 
 async function ready(user: ReturnType<typeof userEvent.setup>, amount = '500') {
   render(<QrGenerator />);
-  const input = await screen.findByPlaceholderText('1000');
+  const input = await screen.findByPlaceholderText('1,000');
   if (amount) await user.type(input, amount);
   return screen.findAllByRole('button', { name: /QRコードを表示する/ });
 }
@@ -130,7 +130,7 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       const user = userEvent.setup();
       sd.busy = true;
       render(<QrGenerator />);
-      await user.type(await screen.findByPlaceholderText('1000'), '500');
+      await user.type(await screen.findByPlaceholderText('1,000'), '500');
       const btns = await screen.findAllByRole('button', { name: /QRコードを表示する/ });
       for (const b of btns) expect(b).toBeDisabled();
       await user.click(btns[0]);
@@ -354,7 +354,7 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       sd.start.mockReturnValue(new Promise((r) => { resolve = r; }));
       const [btn] = await ready(user);
       await user.click(btn);
-      await user.type(screen.getByPlaceholderText('1000'), '0'); // 500 → 5000
+      await user.type(screen.getByPlaceholderText('1,000'), '0'); // 500 → 5000
       resolve({ id: HS, token: 'ab'.repeat(32), expiresAt: 0, merchant: VALID, amount: '1', chainId: 80002 });
       await waitFor(() => expect(sd.stop).toHaveBeenCalled());
       expect(screen.queryByRole('dialog')).toBeNull();
@@ -414,7 +414,7 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       seed();
       sd.state = { phase: 'waiting', session: { id: HS }, stale: false, degraded: false };
       const r = render(<QrGenerator />);
-      await user.type(await screen.findByPlaceholderText('1000'), '500');
+      await user.type(await screen.findByPlaceholderText('1,000'), '500');
       await user.click((await screen.findAllByRole('button', { name: /QRコードを表示する/ }))[0]);
       await waitFor(() => expect(shownQr()).not.toBeNull());
       const wrapper = () => screen.getByTestId('qr').parentElement!;
@@ -447,10 +447,10 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       sd.state = { phase: 'create_failed', reason: 'unavailable' };
       await ready(user);
       expect(await screen.findByRole('button', { name: '通常の QR を出す' })).toBeTruthy();
-      await user.clear(screen.getByPlaceholderText('1000'));
+      await user.clear(screen.getByPlaceholderText('1,000'));
       expect(screen.queryByRole('button', { name: '通常の QR を出す' })).toBeNull();
       // 金額を入れ直しても、押していない QR は開かない。
-      await user.type(screen.getByPlaceholderText('1000'), '5');
+      await user.type(screen.getByPlaceholderText('1,000'), '5');
       await new Promise((r) => setTimeout(r, 0));
       expect(screen.queryByRole('dialog', { name: '決済用 QR コード' })).toBeNull();
     });
@@ -463,7 +463,7 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       sd.releaseForNormal.mockReturnValue(new Promise<boolean>((r) => { resolve = r; }));
       await ready(user);
       await user.click(await screen.findByRole('button', { name: '通常の QR を出す' }));
-      await user.type(screen.getByPlaceholderText('1000'), '0'); // 500 → 5000
+      await user.type(screen.getByPlaceholderText('1,000'), '0'); // 500 → 5000
       resolve(true);
       await waitFor(() => expect(sd.releaseForNormal).toHaveBeenCalled());
       await new Promise((r) => setTimeout(r, 0));
@@ -480,7 +480,7 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       Object.defineProperty(window.navigator, 'onLine', { value: false, configurable: true });
       try {
         render(<QrGenerator />);
-        await screen.findByPlaceholderText('1000');
+        await screen.findByPlaceholderText('1,000');
         expect(screen.queryByText(/圏外です/)).toBeNull();
       } finally {
         if (online) Object.defineProperty(window.navigator, 'onLine', online);
@@ -505,11 +505,11 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       if (kind === 'no_wallet') sd.gasAddress = null;
       if (kind === 'no_locks') sd.blocked = 'no_locks';
       render(<QrGenerator />);
-      await screen.findByPlaceholderText('1000');
+      await screen.findByPlaceholderText('1,000');
       if (kind === 'static') {
         await user.click(screen.getByRole('button', { name: /据え置き/ }));
       } else {
-        await user.type(screen.getByPlaceholderText('1000'), '500');
+        await user.type(screen.getByPlaceholderText('1,000'), '500');
       }
       const btns = await screen.findAllByRole('button', { name: /QRコードを表示する/ });
       for (const b of btns) expect(b).toBeDisabled();

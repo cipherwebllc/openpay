@@ -40,8 +40,9 @@ export function ShopSummaryRow({
   return (
     <div className="flex items-center gap-3">
       <div className="min-w-0 flex-1">
-        <p className="flex min-w-0 items-baseline gap-2">
-          <span className={`truncate text-sm font-semibold ${name ? 'text-slate-900' : 'text-slate-500'}`}>
+        {/* 狭い画面では受取先の表示を次の行へ回す (店名を「No shop…」と切らない)。 */}
+        <p className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+          <span className={`max-w-full truncate text-sm font-semibold ${name ? 'text-slate-900' : 'text-slate-500'}`}>
             {name || labels.noStoreName}
           </span>
           {receiver ? (
