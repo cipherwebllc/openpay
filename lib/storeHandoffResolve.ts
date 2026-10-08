@@ -24,7 +24,11 @@ export type StoreHandoffResolution =
 export type SuccessfulReceipt = { logs: Log[]; blockNumber: bigint; blockHash: Hex };
 
 export type StoreHandoffResolveDeps = {
-  expectedChainId: number;
+  /**
+   * 結果を確かめてよいチェーンか (設定済みのチェーン = storeDeviceChainConfig が値を返す)。読むだけで資金を動かさない
+   * ので開示の集合では絞らない (チェーンを開示から外した後も、そのチェーンで送った会計の結論を出す)。
+   */
+  isConfiguredChain: (chainId: number) => boolean;
   nowSec: () => number;
   jpycAddressFor: (chainId: number) => Address | null;
   forwarderFor: (chainId: number) => Address | null;
@@ -129,7 +133,7 @@ export async function resolveStoreHandoff(
   const validBefore = parseWei(body.validBefore);
   if (
     typeof chainId !== 'number' ||
-    chainId !== deps.expectedChainId ||
+    !deps.isConfiguredChain(chainId) ||
     typeof body.from !== 'string' ||
     !isAddress(body.from, { strict: false }) ||
     typeof body.merchant !== 'string' ||

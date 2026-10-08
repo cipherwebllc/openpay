@@ -9,14 +9,32 @@ const send = vi.hoisted(() => ({
   receiptHasSettlement: vi.fn(),
   waitReceipt: vi.fn(),
   getReceipt: vi.fn(),
+  createDeviceIo: vi.fn(),
+  createDeviceWatchIo: vi.fn(),
 }));
 vi.mock('@/lib/storeDeviceSend', () => ({
   verifyDeviceAuth: send.verifyDeviceAuth,
   sendStoreDeviceSettle: send.sendStoreDeviceSettle,
   readSentMarks: send.readSentMarks,
   receiptHasSettlement: send.receiptHasSettlement,
-  createDeviceIo: () => ({ waitReceipt: send.waitReceipt, getReceipt: send.getReceipt }),
-  createDeviceWatchIo: () => ({ waitReceipt: send.waitReceipt, getReceipt: send.getReceipt }),
+  createDeviceIo: send.createDeviceIo,
+  createDeviceWatchIo: send.createDeviceWatchIo,
+}));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: { ...actual.env, networkEnv: 'testnet', feeReceiver: '0x428483FbA62eDCef1E3a100d3799F6d71759c560' },
+  };
+});
+// チェーンごとに別の forwarder (どのチェーンの値で確かめ・送ったかを見分ける)。Fuji は未設定 (= 対象外)。
+const fwd = vi.hoisted(() => ({
+  80002: '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4',
+  1001: '0x0000000000000000000000000000000000000F01',
+}) as Record<number, string>);
+vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/relay/forwarderConfig')>()),
+  jpycForwarderFor: (chainId: number) => fwd[chainId] ?? null,
 }));
 
 import {
@@ -28,12 +46,11 @@ import {
 const SHOP = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
 const input: StoreDeviceRegisterInput = {
   enabled: true,
-  chainId: 80002,
-  token: getAddress('0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29'),
-  forwarder: getAddress('0x752B7AaD0089286EB7b553d84D05233d80c9FCB4'),
-  feeReceiver: getAddress('0x428483FbA62eDCef1E3a100d3799F6d71759c560'),
   gasAddress: getAddress('0x0000000000000000000000000000000000000abc'),
 };
+const FWD = getAddress(fwd[80002]);
+const FWD_KAIROS = getAddress(fwd[1001]);
+const FEE = getAddress('0x428483FbA62eDCef1E3a100d3799F6d71759c560');
 const AMOUNT = 1000n * 10n ** 18n;
 const ID = 'AbCdEfGhIjKlMnOpQrStUv';
 const TOKEN = 'ab'.repeat(32);
@@ -87,6 +104,9 @@ beforeEach(() => {
   send.receiptHasSettlement.mockReset().mockReturnValue(true);
   send.waitReceipt.mockReset().mockResolvedValue({ status: 'success', logs: [] });
   send.getReceipt.mockReset().mockResolvedValue({ status: 'success', logs: [] });
+  const io = () => ({ waitReceipt: send.waitReceipt, getReceipt: send.getReceipt });
+  send.createDeviceIo.mockReset().mockImplementation(io);
+  send.createDeviceWatchIo.mockReset().mockImplementation(io);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -105,7 +125,7 @@ async function started(result: { current: ReturnType<typeof useStoreDeviceRegist
   await act(async () => {
     // 起動時の「最近の送信」の確認 (読み込みの間は次の QR を出さない) を終えてから
     if (result.current.busy) await vi.advanceTimersByTimeAsync(0);
-    s = await result.current.start(SHOP, AMOUNT);
+    s = await result.current.start(SHOP, AMOUNT, 80002);
   });
   return s;
 }
@@ -115,7 +135,7 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     window.sessionStorage.setItem(STORE_DEVICE_SESSION_KEY, JSON.stringify({ id: ID, token: TOKEN, expiresAt: nowSec() + 600, merchant: SHOP, amount: '1', chainId: 80002 }));
     const { result } = renderHook(() => useStoreDeviceRegister({ ...input, enabled: false }));
     await advance(10_000);
-    expect(await result.current.start(SHOP, AMOUNT)).toBeNull();
+    expect(await result.current.start(SHOP, AMOUNT, 80002)).toBeNull();
     expect(calls).toHaveLength(0);
   });
 
@@ -148,7 +168,7 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     await advance(3_000);
     expect(send.verifyDeviceAuth).toHaveBeenCalledWith(
       { merchant: SHOP, amount: AMOUNT.toString(), auth: AUTH },
-      expect.objectContaining({ merchant: SHOP, amount: AMOUNT, feeReceiver: input.feeReceiver, forwarder: input.forwarder }),
+      expect.objectContaining({ merchant: SHOP, amount: AMOUNT, feeReceiver: FEE, forwarder: FWD }),
     );
     expect(send.sendStoreDeviceSettle).toHaveBeenCalledTimes(1);
     expect(JSON.parse(String(of('/tx')[0].init!.body))).toEqual({ txHash: HASH });
@@ -288,7 +308,7 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     let next!: unknown;
     let normal!: boolean;
     await act(async () => {
-      next = await result.current.start(SHOP, AMOUNT);
+      next = await result.current.start(SHOP, AMOUNT, 80002);
       normal = await result.current.releaseForNormal();
     });
     expect(next).toBeNull();
@@ -533,7 +553,7 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     await act(async () => {
       staleDismiss();
       ok = await staleRelease();
-      next = await staleStart(SHOP, AMOUNT);
+      next = await staleStart(SHOP, AMOUNT, 80002);
     });
     expect(ok).toBe(false);
     expect(next).toBeNull();
@@ -553,7 +573,7 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     let a!: unknown;
     let b!: unknown;
     await act(async () => {
-      [a, b] = await Promise.all([result.current.start(SHOP, AMOUNT), result.current.start(SHOP, AMOUNT)]);
+      [a, b] = await Promise.all([result.current.start(SHOP, AMOUNT, 80002), result.current.start(SHOP, AMOUNT, 80002)]);
     });
     expect([a, b].filter(Boolean)).toHaveLength(1);
     expect(calls.filter((c) => c.url === '/api/register/handoff')).toHaveLength(1);
@@ -826,7 +846,7 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     await advance(0); // 起動時の確認を終える
     let starting!: Promise<unknown>;
     act(() => {
-      starting = result.current.start(SHOP, AMOUNT);
+      starting = result.current.start(SHOP, AMOUNT, 80002);
     });
     await advance(0);
     expect(result.current.state).toEqual({ phase: 'creating' });
@@ -861,7 +881,7 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     expect(result.current.busy).toBe(true);
     let next!: unknown;
     await act(async () => {
-      next = await result.current.start(SHOP, AMOUNT);
+      next = await result.current.start(SHOP, AMOUNT, 80002);
     });
     expect(next).toBeNull(); // 切り替えの最中は次の QR を作らない
     let ok!: boolean;
@@ -885,7 +905,7 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     });
     let starting!: Promise<unknown>;
     act(() => {
-      starting = result.current.start(SHOP, AMOUNT);
+      starting = result.current.start(SHOP, AMOUNT, 80002);
     });
     rerender({ ...input, enabled: false });
     let next!: unknown;
@@ -897,6 +917,48 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     expect(calls.filter((c) => c.url === '/api/register/handoff')).toHaveLength(1);
     expect(result.current.state).toEqual({ phase: 'idle' });
     expect(result.current.busy).toBe(false);
+  });
+
+  it('新しい会計に使えないチェーン (testnet で mainnet・forwarder の無い Fuji) では QR を作らない', async () => {
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await advance(0);
+    for (const chainId of [137, 43113, 1]) {
+      let s: unknown;
+      await act(async () => {
+        s = await result.current.start(SHOP, AMOUNT, chainId);
+      });
+      expect(s).toBeNull();
+    }
+    expect(calls.filter((c) => c.url === '/api/register/handoff')).toHaveLength(0);
+    expect(result.current.state).toEqual({ phase: 'idle' });
+  });
+
+  it('チェーン由来の値はセッションのチェーンから引く (Kairos の会計は Kairos の forwarder で確かめて送る)', async () => {
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await advance(0);
+    await act(async () => {
+      await result.current.start(SHOP, AMOUNT, 1001);
+    });
+    expect(JSON.parse(String(calls[0].init!.body))).toEqual({ chainId: 1001, merchant: SHOP, amount: AMOUNT.toString() });
+    send.sendStoreDeviceSettle.mockResolvedValue({ kind: 'sent', hash: HASH, mark: { ...MARK, chainId: 1001 } });
+    readRes = () => json({ ok: true, state: 'signed', merchant: SHOP, amount: AMOUNT.toString(), auth: AUTH });
+    await advance(3_000);
+    expect(send.verifyDeviceAuth).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ chainId: 1001, forwarder: FWD_KAIROS, feeReceiver: FEE }),
+    );
+    expect(send.createDeviceIo).toHaveBeenLastCalledWith(expect.objectContaining({ chainId: 1001, forwarder: FWD_KAIROS }));
+    expect(send.sendStoreDeviceSettle.mock.calls[0][1]).toMatchObject({ chainId: 1001, forwarder: FWD_KAIROS });
+    expect(send.receiptHasSettlement).toHaveBeenCalledWith(expect.anything(), FWD_KAIROS, expect.anything(), FEE);
+  });
+
+  it('送った印の結果は印のチェーンで確かめる (いまの設定のチェーンに関係なく)', async () => {
+    send.readSentMarks.mockReturnValue({ ok: true, marks: [{ ...MARK, chainId: 1001, at: Date.now() - 60_000 }] });
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await advance(0);
+    expect(send.createDeviceWatchIo).toHaveBeenCalledWith(1001);
+    expect(send.receiptHasSettlement).toHaveBeenCalledWith(expect.anything(), FWD_KAIROS, expect.anything(), FEE);
+    expect(result.current.state).toMatchObject({ phase: 'received', previous: true });
   });
 
   it('再読み込み後: 最近送った印があれば、その結果を「前回の送信」として出す', async () => {

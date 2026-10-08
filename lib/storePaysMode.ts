@@ -4,7 +4,7 @@
 
 import { chainForSlug, type ChainSlug } from './chains';
 import { env } from './env';
-import { storeDeviceChainId } from './storeDevicePayment';
+import { isStoreDeviceChain } from './storeDevicePayment';
 import type { PayMode } from './fee';
 import type { TokenSymbol } from './tokens';
 
@@ -19,7 +19,7 @@ export function storePaysRequested(s: StorePaysSettings): boolean {
   return env.enableStoreGasWallet && s.storePays === true && s.payMode === 'gasless';
 }
 
-/** 選んでいて、いまの通貨・チェーン (JPYC・Polygon / testnet は Amoy) で使える。 */
+/** 選んでいて、いまの通貨・チェーン (JPYC・lib/storeDevicePayment.ts の storeDeviceChainIds のチェーン) で使える。 */
 export function storePaysActive(s: StorePaysSettings): boolean {
-  return storePaysRequested(s) && s.token === 'jpyc' && chainForSlug(s.chain).id === storeDeviceChainId();
+  return storePaysRequested(s) && s.token === 'jpyc' && isStoreDeviceChain(chainForSlug(s.chain).id);
 }

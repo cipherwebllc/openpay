@@ -23,7 +23,12 @@ import { QrPreviewModal } from './QrPreviewModal';
 import { StoreGasWalletPanel } from './StoreGasWalletPanel';
 import { StoreDeviceRegisterStatus } from './StoreDeviceRegisterStatus';
 import { useStoreDeviceMode } from './StoreDeviceProvider';
-import { STORE_DEVICE_MIN_AMOUNT_WEI } from '@/lib/storeDevicePayment';
+import {
+  STORE_DEVICE_MIN_AMOUNT_WEI,
+  formatStoreDeviceAmount,
+  storeDeviceChainConfig,
+  storeDeviceChainNames,
+} from '@/lib/storeDevicePayment';
 import { storePaysActive, storePaysRequested } from '@/lib/storePaysMode';
 import { Field } from './Field';
 import { ExternalImage } from './ExternalImage';
@@ -42,7 +47,7 @@ import { isLikelyName } from '@/lib/nameDetection';
 import { paymentPolicyKey } from '@/lib/paymentPolicy';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
-import { chainForSlug, chainNameForId } from '@/lib/chains';
+import { chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { safeHttpUrl } from '@/lib/mobileOrder';
 import { composeLineName, effectiveUnitPrice, type OptionChoice } from '@/lib/menuOptions';
@@ -149,10 +154,7 @@ function RegisterModeContent({
     setOn: setStoreDeviceOn,
     gasAddress,
     setGasAddress,
-    chainId: sdChainId,
-    deployment: sdDeployment,
-    forwarder: sdForwarder,
-    feeReceiver: sdFeeReceiver,
+    chainIds: sdChainIds,
     blocked: sdBlocked,
     enabled: sdEnabled,
     device,
@@ -209,6 +211,8 @@ function RegisterModeContent({
   }
 
   const deployment = deploymentForSlug(settings.token, settings.chain);
+  // この会計のチェーンでお店負担に使う値 (JPYC・forwarder・手数料受取口・使えないチェーンなら null)。
+  const sdConfig = storeDeviceChainConfig(deployment.chainId);
   const symbol = deployment.displaySymbol;
   // 決済QRタブから継承する設定に stale な gasMode が残っていても、経路ごとに正規化する:
   //   JPYC free (relay・無徴収): 負担者の概念が無いため gas=customer 相当 (決済側 useRelay
@@ -473,7 +477,7 @@ function RegisterModeContent({
         : gasAddress === null
           ? 'no_wallet'
           : effectiveReceiver &&
-              [sdForwarder, sdFeeReceiver].some(
+              [sdConfig?.forwarder, sdConfig?.feeReceiver].some(
                 (a) => a && a.toLowerCase() === effectiveReceiver.toLowerCase(),
               )
             ? 'receiver'
@@ -532,7 +536,8 @@ function RegisterModeContent({
     const key = storeOpenKeyRef.current;
     const attempt = storeOpenAttemptRef.current;
     const checkout = storeCheckout;
-    const s = await device.start(getAddress(effectiveReceiver), totalWei);
+    // チェーンは QR の写し (storeCheckout) と同じもの (この会計のチェーン)。
+    const s = await device.start(getAddress(effectiveReceiver), totalWei, deployment.chainId);
     // 作れなかった (理由は状態に出る)・前の会計の署名の送信を優先した → QR は開かない。
     if (!s) return false;
     if (storeOpenKeyRef.current !== key || storeOpenAttemptRef.current !== attempt) {
@@ -603,10 +608,7 @@ function RegisterModeContent({
   const storeDeviceStatus = (
     <StoreDeviceRegisterStatus
       state={sdState}
-      chainId={sdChainId}
-      formatAmount={(wei) =>
-        `${formatUnits(BigInt(wei), sdDeployment?.decimals ?? 18)} ${sdDeployment?.displaySymbol ?? 'JPYC'}`
-      }
+      formatAmount={formatStoreDeviceAmount}
       onCheckNow={() => void device.checkNow()}
       onRetry={device.retry}
       onReissue={() => void reissueStoreQr()}
@@ -1055,7 +1057,7 @@ function RegisterModeContent({
           )}
           {sdSaleBlocked && (
             <p role="status" className="text-xs text-amber-800">
-              {t(`storeDevice.saleBlocked.${sdSaleBlocked}`, { chain: chainNameForId(sdChainId) ?? '' })}{' '}
+              {t(`storeDevice.saleBlocked.${sdSaleBlocked}`, { chain: storeDeviceChainNames(sdChainIds) })}{' '}
               {t('storeDevice.saleBlockedHint')}
             </p>
           )}

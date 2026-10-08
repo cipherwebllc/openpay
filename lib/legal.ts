@@ -18,7 +18,7 @@ import { STOREFRONT_FEE_BPS, PREORDER_FEE_BPS } from '@/lib/mobileOrderFee';
 import { env } from '@/lib/env';
 import { DISCLOSED_RECOVER_FEE } from './disclosedRecoverFee';
 import { DISCLOSED_X402_FEE } from './disclosedX402Fee';
-import { DISCLOSED_STORE_GAS_WALLET } from './disclosedStoreGasWallet';
+import { DISCLOSED_STORE_GAS_WALLET, disclosedStoreGasChains } from './disclosedStoreGasWallet';
 
 export const LEGAL_ENTITY = {
   serviceName: 'OpenPay',
@@ -279,7 +279,7 @@ export function mobileOrderFeeDisclosureDivergence(): string | null {
 
 // 本体は lib/disclosedX402Fee.ts (client の hosted 購入が法務本文を bundle しないように分離)。
 export { DISCLOSED_X402_FEE };
-export { DISCLOSED_STORE_GAS_WALLET };
+export { DISCLOSED_STORE_GAS_WALLET, disclosedStoreGasChains };
 
 // デジタル商品ストアの USDC 決済 leg に関する開示 SOT。出品価格は JPYC 建てのまま、
 // Base native USDC へ換算し、OpenPay の x402 利用料は徴収しない。Terms 第 13 条・LP・

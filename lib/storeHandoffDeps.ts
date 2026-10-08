@@ -30,7 +30,7 @@ import {
   jpycAddressFor,
   readAuthorizationUsed,
 } from '@/lib/relay/relayProvider';
-import { storeGasWalletChain } from '@/lib/storeGasWallet';
+import { isStoreDeviceChain, storeDeviceChainConfig } from '@/lib/storeDevicePayment';
 import {
   handoffAuthKey,
   handoffSessionKey,
@@ -118,7 +118,7 @@ export function handoffMac(message: string): string | null {
 export function handoffDeps(): HandoffDeps {
   return {
     store: kvHandoffStore,
-    expectedChainId: storeGasWalletChain().id,
+    isAllowedChain: isStoreDeviceChain,
     nowSec: () => Math.floor(Date.now() / 1000),
     expectedFeeValue: 1n,
     maxValue: MAX_VALUE,
@@ -153,7 +153,7 @@ const handoffFeeReceiverFor = (chainId: number) => {
 
 export function resolveDeps(): StoreHandoffResolveDeps {
   return {
-    expectedChainId: storeGasWalletChain().id,
+    isConfiguredChain: (chainId: number) => storeDeviceChainConfig(chainId) !== null,
     nowSec: () => Math.floor(Date.now() / 1000),
     jpycAddressFor,
     forwarderFor: jpycForwarderFor,

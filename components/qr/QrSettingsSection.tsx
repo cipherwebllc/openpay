@@ -15,9 +15,9 @@ import {
   type SplitEntry,
 } from '@/lib/url';
 import { isGaslessSupported, type TokenDeployment } from '@/lib/tokens';
-import { chainForSlug, chainNameForId } from '@/lib/chains';
+import { chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
-import { storeDeviceChainId } from '@/lib/storeDevicePayment';
+import { isStoreDeviceChain, storeDeviceChainIds, storeDeviceChainNames } from '@/lib/storeDevicePayment';
 import { storePaysRequested } from '@/lib/storePaysMode';
 import type { GasMode, PayMode } from '@/lib/fee';
 
@@ -72,9 +72,8 @@ export function QrSettingsSection({
 
   // 決済モードの 3 つ目。選んでいる (flag ON のときだけ) と、いまの通貨・チェーンで選べる (JPYC・対象チェーン) を分ける。
   const storeSelected = storePaysRequested(settings);
-  const storeUsable =
-    settings.token === 'jpyc' && chainForSlug(settings.chain).id === storeDeviceChainId();
-  const storeChainName = chainNameForId(storeDeviceChainId()) ?? '';
+  const storeUsable = settings.token === 'jpyc' && isStoreDeviceChain(chainForSlug(settings.chain).id);
+  const storeChainName = storeDeviceChainNames(storeDeviceChainIds());
 
   return (
     <SettingsAccordion

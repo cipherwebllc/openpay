@@ -13,7 +13,6 @@ const BTN =
 
 export function StoreDeviceRegisterStatus({
   state,
-  chainId,
   formatAmount,
   onCheckNow,
   onRetry,
@@ -22,7 +21,6 @@ export function StoreDeviceRegisterStatus({
   onDismiss,
 }: {
   state: StoreDeviceRegisterState;
-  chainId: number;
   /** 請求額 (wei の 10 進文字列) を表示用に整える。 */
   formatAmount: (wei: string) => string;
   onCheckNow: () => void;
@@ -35,7 +33,8 @@ export function StoreDeviceRegisterStatus({
   const t = useTranslations('RegisterMode.storeDevice');
   if (state.phase === 'idle') return null;
 
-  const txLink = (hash: `0x${string}`) => {
+  // 取引のリンクは送った印のチェーン (会計ごとにチェーンが違いうる)。
+  const txLink = (chainId: number, hash: `0x${string}`) => {
     const href = txExplorerUrl(chainId, hash);
     return href ? (
       <a href={href} target="_blank" rel="noreferrer noopener" className="text-xs underline underline-offset-2">
@@ -139,7 +138,7 @@ export function StoreDeviceRegisterStatus({
             {previous}
             {t('sent')}
           </p>
-          {txLink(state.mark.hash)}
+          {txLink(state.mark.chainId, state.mark.hash)}
         </div>
       );
     case 'received':
@@ -152,7 +151,7 @@ export function StoreDeviceRegisterStatus({
           </p>
           {state.finalized && <p className="text-xs">{t('finalized')}</p>}
           <div className="flex flex-wrap items-center gap-2">
-            {txLink(state.mark.hash)}
+            {txLink(state.mark.chainId, state.mark.hash)}
             {dismiss}
           </div>
         </div>
@@ -166,7 +165,7 @@ export function StoreDeviceRegisterStatus({
           </p>
           <p className="text-xs">{t('notPaidGuide')}</p>
           <div className="flex flex-wrap items-center gap-2">
-            {txLink(state.mark.hash)}
+            {txLink(state.mark.chainId, state.mark.hash)}
             {dismiss}
           </div>
         </div>
@@ -183,7 +182,7 @@ export function StoreDeviceRegisterStatus({
             <button type="button" className={BTN} onClick={onCheckNow}>
               {t('checkNow')}
             </button>
-            {txLink(state.mark.hash)}
+            {txLink(state.mark.chainId, state.mark.hash)}
             {onDismiss && (
               <button type="button" className={BTN} onClick={onDismiss}>
                 {t('unknownAck')}
@@ -200,7 +199,7 @@ export function StoreDeviceRegisterStatus({
             {t('failed')}
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            {txLink(state.mark.hash)}
+            {txLink(state.mark.chainId, state.mark.hash)}
             {dismiss}
           </div>
         </div>

@@ -18,7 +18,7 @@ const handlers = () => ({
   onDismiss: vi.fn(),
 });
 function show(state: StoreDeviceRegisterState, h = handlers()) {
-  render(<StoreDeviceRegisterStatus state={state} chainId={80002} formatAmount={() => '500 JPYC'} {...h} />);
+  render(<StoreDeviceRegisterStatus state={state} formatAmount={() => '500 JPYC'} {...h} />);
   return h;
 }
 
@@ -38,7 +38,7 @@ describe('StoreDeviceRegisterStatus (店員向けの表示)', () => {
 
   it('送らなかった: 理由と「お支払いは行われていません」・再送できるときだけ「もう一度送る」', () => {
     const h = show({ phase: 'not_sent', reason: 'native_insufficient', canRetry: true });
-    expect(screen.getByRole('alert')).toHaveTextContent(/POL が足りない/);
+    expect(screen.getByRole('alert')).toHaveTextContent('残高 (ガス代) が足りない');
     expect(screen.getByRole('alert')).toHaveTextContent(/お支払いは行われていません/);
     fireEvent.click(screen.getByRole('button', { name: 'もう一度送る' }));
     expect(h.onRetry).toHaveBeenCalled();

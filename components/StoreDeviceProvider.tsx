@@ -10,12 +10,10 @@
 // Provider の外 (部品の単体テスト・単独の描画) では、useStoreDeviceMode を呼んだ部品が自分の状態で動く (今までと同じ)。
 // Provider の中では、部品側の状態は使わない (通信も effect も起こさない)。
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { getAddress, isAddress, type Address } from 'viem';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { Address } from 'viem';
 import { env } from '@/lib/env';
-import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
-import { storeDeviceChainId } from '@/lib/storeDevicePayment';
-import { resolveDeployment, type TokenDeployment } from '@/lib/tokens';
+import { storeDeviceChainIds } from '@/lib/storeDevicePayment';
 import { useStoreDeviceRegister } from '@/hooks/useStoreDeviceRegister';
 import { readQrSettings } from '@/hooks/useQrSettings';
 import { storePaysRequested } from '@/lib/storePaysMode';
@@ -30,10 +28,11 @@ export type StoreDeviceMode = {
   /** ガス用ウォレットのアドレス (パネルが知らせる・undefined = まだ分からない / null = 無い)。 */
   gasAddress: Address | null | undefined;
   setGasAddress: (address: Address | null) => void;
-  chainId: number;
-  deployment: TokenDeployment | undefined;
-  forwarder: Address | null;
-  feeReceiver: Address | null;
+  /**
+   * 新しい会計に使えるチェーン (lib/storeDevicePayment.ts の storeDeviceChainIds・mainnet は開示したチェーン)。
+   * どのチェーンで送るかは会計ごと (QR の写しのチェーン)・端末の状態は 1 つ。
+   */
+  chainIds: readonly number[];
   /** この端末・設定で使えない理由。 */
   blocked: 'no_locks' | 'config' | null;
   /** 選んでいて、この端末・設定で使える (会計ごとの条件は呼び出し側で見る)。 */
@@ -80,27 +79,20 @@ function useStoreDeviceModeState(active: boolean): StoreDeviceMode {
       cancelled = true;
     };
   }, [active]);
-  const chainId = storeDeviceChainId();
-  const deployment = resolveDeployment('jpyc', chainId);
-  const forwarder = env.enableStoreGasWallet ? jpycForwarderFor(chainId) : null;
-  const feeReceiver =
-    env.enableStoreGasWallet && isAddress(env.feeReceiver) ? getAddress(env.feeReceiver) : null;
+  // env から決まる (描画の間で変わらない)。flag OFF では空。
+  const chainIds = useMemo(() => (env.enableStoreGasWallet ? storeDeviceChainIds() : []), []);
   const blocked: 'no_locks' | 'config' | null = !hasWebLocks
     ? 'no_locks'
-    : !forwarder || !feeReceiver || !deployment
+    : chainIds.length === 0
       ? 'config'
       : null;
-  const enabled =
-    active && env.enableStoreGasWallet && on && blocked === null && !!gasAddress && !!deployment;
-  // 送った支払いの結果の確認は、送る設定 (on)・ガス用ウォレット・Web Locks と関係なく続ける (行方を隠さない)。
-  const monitor = active && env.enableStoreGasWallet && !!forwarder && !!feeReceiver && !!deployment;
+  const enabled = active && env.enableStoreGasWallet && on && blocked === null && !!gasAddress;
+  // 送った支払いの結果の確認は、送る設定 (on)・ガス用ウォレット・Web Locks と関係なく続ける (行方を隠さない・
+  // どのチェーンの印を確かめるかは hook が印ごとに決める)。
+  const monitor = active && env.enableStoreGasWallet;
   const device = useStoreDeviceRegister({
     enabled,
     monitor,
-    chainId,
-    token: deployment?.address ?? ('0x0000000000000000000000000000000000000000' as Address),
-    forwarder,
-    feeReceiver,
     gasAddress: gasAddress ?? null,
   });
   return {
@@ -108,10 +100,7 @@ function useStoreDeviceModeState(active: boolean): StoreDeviceMode {
     setOn,
     gasAddress,
     setGasAddress,
-    chainId,
-    deployment,
-    forwarder,
-    feeReceiver,
+    chainIds,
     blocked,
     enabled,
     device,

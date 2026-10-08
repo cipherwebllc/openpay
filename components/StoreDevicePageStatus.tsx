@@ -8,23 +8,20 @@
 // 出し (releaseForNormal)、タブを移るときも使えなくする (leave) ので、通常の QR で払った後に同じ署名を送らない。
 
 import { useTranslations } from 'next-intl';
-import { formatUnits } from 'viem';
 import { StoreDeviceRegisterStatus } from '@/components/StoreDeviceRegisterStatus';
 import { useStoreDeviceMode } from '@/components/StoreDeviceProvider';
+import { formatStoreDeviceAmount } from '@/lib/storeDevicePayment';
 
 export function StoreDevicePageStatus() {
   const t = useTranslations('Create');
-  const { device, chainId, deployment } = useStoreDeviceMode();
+  const { device } = useStoreDeviceMode();
   if (device.state.phase === 'idle') return null;
   return (
     <section aria-label={t('storeDeviceStatusLabel')} className="mb-4 space-y-2 rounded-2xl bg-white px-4 py-3 shadow-card ring-1 ring-slate-200/70 print:hidden">
       <p className="text-xs font-semibold text-slate-500">{t('storeDeviceStatusLabel')}</p>
       <StoreDeviceRegisterStatus
         state={device.state}
-        chainId={chainId}
-        formatAmount={(wei) =>
-          `${formatUnits(BigInt(wei), deployment?.decimals ?? 18)} ${deployment?.displaySymbol ?? 'JPYC'}`
-        }
+        formatAmount={formatStoreDeviceAmount}
         onCheckNow={() => void device.checkNow()}
         onRetry={device.retry}
         onDismiss={device.dismiss}
