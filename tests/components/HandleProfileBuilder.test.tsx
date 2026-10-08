@@ -39,6 +39,10 @@ vi.mock('wagmi', () => ({
   useAccount: () => ({ address: h.connectedAddress }),
 }));
 // AddressInput: 入力時に onResolved を ADDR で発火する軽量スタブ。
+// ENS 名の解決 (受け取りの設定シートを開いていなくても受取先を解決する): 'alice.eth' だけ ADDR に解決する。
+vi.mock('@/hooks/useResolveAddress', () => ({
+  useResolveAddress: (input: string) => ({ data: input === 'alice.eth' ? { address: ADDR } : null }),
+}));
 vi.mock('@/components/AddressInput', () => ({
   AddressInput: ({
     value,
@@ -170,6 +174,15 @@ vi.mock('@/components/HandleClaimPanel', () => ({
 
 import { HandleProfileBuilder } from '@/components/HandleProfileBuilder';
 
+// 受け取る方法 (JPYC/USDC のチェック・ラジオ) は「受け取り」の「設定」シートの中 (2026-10 磨き上げ P5)。
+function openReceiveSettings() {
+  fireEvent.click(screen.getAllByRole('button', { name: /^(設定|Settings)$/ })[0]);
+}
+// 任意のまとまり (見た目・SNS・リンク・高度な設定) は閉じた折りたたみ。見出しを押して開く。
+function openGroup(name: RegExp) {
+  fireEvent.click(screen.getByText(name, { selector: 'summary span' }));
+}
+
 beforeEach(() => {
   h.enableHandles = true;
   h.enableJpycAvalanche = false;
@@ -294,6 +307,9 @@ describe('HandleProfileBuilder', () => {
 
   it('renders cover in both previews, hides failures and retries changed URLs', () => {
     renderWithIntl(<HandleProfileBuilder />);
+    // ミニプレビューは手を入れ始めてから出る (何も触っていない新規の状態ではダミーを出さない)。
+    expect(screen.queryByTestId('handle-mini-preview')).toBeNull();
+    fireEvent.change(screen.getByLabelText('表示名'), { target: { value: 'Alice' } });
     const input = screen.getByRole('textbox', { name: /^カバー画像 URL/ });
     expect(input).toHaveAttribute('type', 'url');
     expect(input).toHaveAttribute('placeholder', 'https://');
@@ -335,9 +351,9 @@ describe('HandleProfileBuilder', () => {
 
   it('ミニプレビューが表示名・テーマ色・テーマ・アバターに追従する', () => {
     renderWithIntl(<HandleProfileBuilder />);
+    fireEvent.change(screen.getByLabelText('表示名'), { target: { value: 'Alice' } });
     const mini = screen.getByTestId('handle-mini-preview');
     expect(mini).toHaveClass('sticky', 'top-[57px]', 'lg:hidden');
-    fireEvent.change(screen.getByLabelText('表示名'), { target: { value: 'Alice' } });
     expect(within(mini).getByText('Alice')).toBeInTheDocument();
     expect(within(mini).getByText('A')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('#2563eb'), { target: { value: '#ef4444' } });
@@ -365,14 +381,17 @@ describe('HandleProfileBuilder', () => {
 
   it('ミニプレビューのリンクが実在する④見出しを指す (ja/en)', () => {
     const { unmount } = renderWithIntl(<HandleProfileBuilder />);
+    // 何も触っていない新規の状態ではミニプレビュー (ダミーの @handle) を出さない。編集に入ると出る。
+    expect(screen.queryByTestId('handle-mini-preview')).toBeNull();
+    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
     const link = screen.getByRole('link', { name: 'プレビューへ' });
     expect(link).toHaveAttribute('href', '#step-4-heading');
     expect(document.getElementById('step-4-heading')).toHaveTextContent('プレビュー');
-    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
     // 表示名が空なら 1 行目が @alice になり、2 行目の @alice は重ねない。
     expect(within(screen.getByTestId('handle-mini-preview')).getAllByText('@alice')).toHaveLength(1);
     unmount();
     renderWithIntl(<HandleProfileBuilder />, { locale: 'en' });
+    fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
     expect(screen.getByRole('link', { name: 'Preview' })).toHaveAttribute('href', '#step-4-heading');
   });
 
@@ -401,6 +420,7 @@ describe('HandleProfileBuilder', () => {
 
   it('flag ON → JPYC 2 受取方法トグル + USDC は単一選択 (受け取らない/Base) + claim panel を描画', () => {
     renderWithIntl(<HandleProfileBuilder />);
+    openReceiveSettings();
     expect(
       screen.getByRole('checkbox', { name: 'JPYC (Polygon)' }),
     ).toBeInTheDocument();
@@ -420,6 +440,7 @@ describe('HandleProfileBuilder', () => {
     h.arc = true; h.tip = true;
     try {
       renderWithIntl(<HandleProfileBuilder />);
+      openReceiveSettings();
       const none = screen.getByRole('radio', { name: 'USDC は受け取らない' });
       const base = screen.getByRole('radio', { name: 'USDC (Base)' });
       const arc = screen.getByRole('radio', { name: 'USDC (Arc)' });
@@ -443,6 +464,7 @@ describe('HandleProfileBuilder', () => {
 
   it('enableJpycAvalanche OFF (既定) → JPYC (Avalanche) トグルは出ない (inert)', () => {
     renderWithIntl(<HandleProfileBuilder />);
+    openReceiveSettings();
     expect(
       screen.getByRole('checkbox', { name: 'JPYC (Polygon)' }),
     ).toBeInTheDocument();
@@ -454,6 +476,7 @@ describe('HandleProfileBuilder', () => {
   it('enableJpycAvalanche ON → JPYC (Avalanche) を ON にすると methods に伝播し受取方法として描画される', () => {
     h.enableJpycAvalanche = true;
     renderWithIntl(<HandleProfileBuilder />);
+    openReceiveSettings();
     const avax = screen.getByRole('checkbox', { name: 'JPYC (Avalanche)' });
     expect(avax).toBeInTheDocument();
     expect(avax).not.toBeChecked(); // opt-in (flag ON でも既定 OFF)
@@ -475,6 +498,7 @@ describe('HandleProfileBuilder', () => {
     h.enableJpycAvalanche = true;
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.click(screen.getByTestId('edit-avalanche'));
+    openReceiveSettings();
     // config.methods から draft.jpycAvalanche を復元 → checkbox checked + 受取方法も描画。
     expect(
       screen.getByRole('checkbox', { name: 'JPYC (Avalanche)' }),
@@ -584,36 +608,36 @@ describe('HandleProfileBuilder', () => {
     expect(screen.getByText('プレビュー')).toBeInTheDocument();
   });
 
-  it('4 ステップの番号見出しを描画する (① 受取先 / ② 恒久リンク / ③ プロフィール / ④ プレビュー)', () => {
+  it('番号なしのカードを あなたのページ → 受け取り → プロフィール の順に並べ、プレビューの見出し id は残す', () => {
     renderWithIntl(<HandleProfileBuilder />);
-    const headings = Array.from(document.querySelectorAll('[id^="step-"][id$="-heading"]'));
-    expect(headings.map((heading) => heading.id)).toEqual([
-      'step-1-heading', 'step-2-heading', 'step-3-heading', 'step-4-heading',
-    ]);
-    // StepCard は section[aria-labelledby=step-N-heading] + 見出し内に番号 badge + title。
-    for (const [step, title] of [
-      [1, '受取先'],
-      [2, '恒久リンク (@handle)'],
-      [3, 'プロフィール'],
-      [4, 'プレビュー'],
-    ] as const) {
-      const heading = document.getElementById(`step-${step}-heading`);
-      expect(heading).not.toBeNull();
-      expect(heading!.textContent).toContain(title);
-      expect(heading!.textContent).toContain(String(step));
-    }
+    // ①〜③ の番号付き見出しは無くし、プレビューの見出し (ミニプレビューのリンク先) だけ id を残す。
+    expect(
+      Array.from(document.querySelectorAll('[id^="step-"][id$="-heading"]')).map((heading) => heading.id),
+    ).toEqual(['step-4-heading']);
+    const headings = [
+      ['handle-page-heading', 'あなたのページ'],
+      ['handle-receive-heading', '受け取り'],
+      ['handle-profile-heading', 'プロフィール'],
+      ['step-4-heading', 'プレビュー'],
+    ].map(([id, name]) => {
+      const el = document.getElementById(id) as HTMLElement;
+      expect(el).toHaveTextContent(name);
+      return el;
+    });
+    headings.slice(0, -1).forEach((heading, index) => {
+      expect(heading.compareDocumentPosition(headings[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
   });
 
-  it('表示名・テーマ色入力は ③ プロフィール step に置かれる (① 受取先 ではない)', () => {
+  it('表示名はプロフィールのカード・テーマ色は「見た目（任意）」の中 (受け取りのカードには置かない)', () => {
     renderWithIntl(<HandleProfileBuilder />);
-    const step3 = document.getElementById('step-3-body')!;
-    const step1 = document.getElementById('step-1-body')!;
-    // 表示名 (nameLabel)・テーマ色 (colorLabel) は ③ プロフィール側に存在。
-    expect(within(step3).getByText('表示名')).toBeInTheDocument();
-    expect(within(step3).getByText('テーマ色')).toBeInTheDocument();
-    // 受取先 step には表示名/テーマ色を置かない。
-    expect(within(step1).queryByText('表示名')).not.toBeInTheDocument();
-    expect(within(step1).queryByText('テーマ色')).not.toBeInTheDocument();
+    const profileCard = screen.getByRole('region', { name: 'プロフィール' });
+    const receiveCard = screen.getByRole('region', { name: '受け取り' });
+    expect(within(profileCard).getByText('表示名')).toBeInTheDocument();
+    const look = within(profileCard).getByText('見た目（任意）').closest('details') as HTMLElement;
+    expect(within(look).getByText('テーマ色')).toBeInTheDocument();
+    expect(within(receiveCard).queryByText('表示名')).not.toBeInTheDocument();
+    expect(within(receiveCard).queryByText('テーマ色')).not.toBeInTheDocument();
   });
 
   it('金額プリセット editor は描画されない (UI 非表示・config 導出は温存)', () => {
@@ -765,17 +789,20 @@ describe('HandleProfileBuilder', () => {
 
   it('全方法 OFF にすると config=null (最低1必須の警告)', () => {
     renderWithIntl(<HandleProfileBuilder />);
+    openReceiveSettings();
     fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR } });
     expect(screen.getByTestId('claim')).toHaveTextContent('config-ready');
     fireEvent.click(screen.getByRole('checkbox', { name: 'JPYC (Polygon)' }));
     fireEvent.click(screen.getByRole('checkbox', { name: 'JPYC (Kaia)' }));
     expect(screen.getByTestId('claim')).toHaveTextContent('no-config');
-    expect(screen.getByText('受取方法を 1 つ以上選んでください。')).toBeInTheDocument();
+    // 受け取りのカードの要約とシートの中の両方に出る。
+    expect(screen.getAllByText('受取方法を 1 つ以上選んでください。').length).toBeGreaterThan(0);
   });
 
   it('旧 USDC method 持ちレコードの編集時は USDC (Base) チェックが ON で引き継がれる (2026-08-17 復活)', () => {
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    openReceiveSettings();
     // 廃止通知は撤去済み (提供再開により偽になるため)
     expect(
       screen.queryByText(/プロフでの USDC 提供は終了しました/),
@@ -792,6 +819,8 @@ describe('HandleProfileBuilder', () => {
     // 編集 prefill で resolved に旧アドレス (ADDR) が入る
     fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
     expect(screen.getByTestId('claim')).toHaveTextContent(`config-ready:${ADDR}`);
+    // 公開中の受取先を読み込んだので、受取先の欄は受け取りの設定シートの中。
+    openReceiveSettings();
     // 別の生アドレスを手入力 — mock の AddressInput は常に stale な ADDR を
     // onResolved で発火し続けるが、isAddress な生入力が最優先で採用されること
     fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR2 } });
@@ -818,6 +847,7 @@ describe('HandleProfileBuilder', () => {
   it('旧 USDC レコードを再公開しても USDC は維持される (更新で外れない)', () => {
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.click(screen.getByTestId('edit-legacy-usdc'));
+    openReceiveSettings();
     fireEvent.click(screen.getByTestId('publish-mock'));
     // 公開後も編集モード継続+USDC ヒント表示 = チェックは ON のまま
     expect(screen.getByText('公開中 @alice')).toBeInTheDocument();
@@ -1234,6 +1264,7 @@ describe('Arc profile exact payload round trips', () => {
     ];
     renderWithIntl(<HandleProfileBuilder />);
     fireEvent.click(screen.getByTestId('edit-arc'));
+    openReceiveSettings();
     const claim = screen.getByTestId('claim');
     const payload = JSON.parse(claim.getAttribute('data-payload')!);
     expect(payload).toEqual({

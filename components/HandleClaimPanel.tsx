@@ -14,6 +14,7 @@
 import { resolveTipCapability } from '@/lib/url/tip';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '@/lib/env';
 import { useAccount } from 'wagmi';
@@ -179,6 +180,8 @@ export function HandleClaimPanel({
   isDirty = false,
   onStopEditing,
   onPublished,
+  canAutoEdit = false,
+  barSlots = [],
 }: {
   payload: HandlePublishPayload | null;
   publishBlockedReason?: string;
@@ -194,7 +197,13 @@ export function HandleClaimPanel({
   expectedUpdatedAt?: number;
   /** 読込/送信 snapshot と現在の canonical payload が異なる。 */
   isDirty?: boolean;
+  /** 編集中の handle を削除したときに編集をやめる (親の編集モードを解除)。 */
   onStopEditing?: () => void;
+  /** この端末の下書きがまだ手付かず (既定のまま) なら true。持っている @handle が 1 つだけなら、サインイン時に
+   *  確認なしでその編集に入る (戻ってきた人に空の編集画面を見せない・失うものが無いときだけ)。 */
+  canAutoEdit?: boolean;
+  /** 公開ボタンの帯を描く場所 (スマホの下部バー・PC のプレビュー下)。同じ公開処理をどこからでも押せるように。 */
+  barSlots?: ReadonlyArray<HTMLElement | null>;
   /** 公開成功後、mutation 変数の送信 snapshot を親の baseline にする。 */
   onPublished?: (snapshot: PublishedHandleSnapshot) => void;
 }) {
@@ -351,6 +360,22 @@ export function HandleClaimPanel({
     publish.reset();
   };
 
+  // 戻ってきた人: この端末がまだ手付かずで、持っている @handle が 1 つだけなら、その編集に入る (セッションごとに
+  // 1 回だけ試す・再取得や下書きの変化で何度も走らせない)。2 つ以上なら一覧から選んでもらう。
+  const autoEditTried = useRef<string | null>(null);
+  useEffect(() => {
+    // isSignedIn = セッションと接続中のウォレットが一致 (別のウォレットのセッション・キャッシュから編集に入らない)。
+    if (!canAutoEdit || !onEdit || editingHandle !== null || !isSignedIn || !sessionAddress || !mine.isSuccess) return;
+    if (autoEditTried.current === sessionAddress) return;
+    autoEditTried.current = sessionAddress;
+    const handles = mine.data?.handles ?? [];
+    if (handles.length !== 1) return;
+    const only = handles[0];
+    setInput(only.handle);
+    setPublished(null);
+    onEdit(only.handle, only.config, only.profile, only.updatedAt);
+  }, [canAutoEdit, onEdit, editingHandle, isSignedIn, sessionAddress, mine.isSuccess, mine.data]);
+
   if (!env.enableHandles) return null;
 
   const max = mine.data?.max ?? MAX_HANDLES_PER_WALLET;
@@ -361,6 +386,72 @@ export function HandleClaimPanel({
     isDirty &&
     normalized === editingHandle &&
     ownedNames.includes(normalized);
+  // 取得/更新を押せるか (カードのボタンと帯のボタンで同じ条件)。
+  const publishDisabled =
+    !isSignedIn ||
+    !!publishBlockedReason ||
+    !config || // 受取先/方法 未確定では取得/更新できない
+    !validation.ok ||
+    publish.isPending ||
+    // 他人が使用中なら不可。自分が所有する handle の更新は許可する。
+    (availability.data?.available === false && !ownedNames.includes(normalized)) ||
+    (atLimit && !ownedNames.includes(normalized));
+  const publishLabel = publish.isPending
+    ? t('claiming')
+    : ownedNames.includes(normalized)
+      ? t('updateButton')
+      : t('claimButton');
+  // 帯のボタンは短い言い方 (モバイル注文の帯と同じ「公開する / 公開を更新」・理由の文を切らない)。
+  const barLabel = publish.isPending
+    ? t('claiming')
+    : ownedNames.includes(normalized)
+      ? t('barUpdate')
+      : t('barPublish');
+  const onPublishClick = () =>
+    normalized &&
+    payload &&
+    publish.mutate({
+      handle: normalized,
+      payload,
+      expectedUpdatedAt: normalized === editingHandle ? expectedUpdatedAt : undefined,
+    });
+  // 帯の左: 押せない理由を 1 行 (サインイン / 受取先 / @handle)、押せるときは対象の @handle と状態。
+  const barReason = !isSignedIn
+    ? t('barReasonSignIn')
+    : !config
+      ? t('barReasonReceiver')
+      : !validation.ok
+        ? t('barReasonHandle')
+        : null;
+  const barStatus = editingHandle && normalized === editingHandle
+    ? isDirty
+      ? t('unpublishedChanges')
+      : t('barStatusLive')
+    : ownedNames.includes(normalized)
+      ? t('barStatusLive')
+      : t('barStatusNew');
+  const bar = (
+    <div className="flex items-center gap-3">
+      <div className="min-w-0 flex-1">
+        {barReason ? (
+          <p className="truncate text-sm font-medium text-slate-500">{barReason}</p>
+        ) : (
+          <>
+            <p className="truncate text-[11px] text-slate-500">@{normalized}</p>
+            <p className="truncate text-sm font-semibold text-slate-900">{barStatus}</p>
+          </>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={onPublishClick}
+        disabled={publishDisabled}
+        className="inline-flex shrink-0 items-center justify-center rounded-xl bg-brand px-5 py-3 text-base font-bold text-white transition-transform hover:bg-brand-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+      >
+        {barLabel}
+      </button>
+    </div>
+  );
 
   return (
     <div>
@@ -463,28 +554,11 @@ export function HandleClaimPanel({
 
           {/* 取得/更新フォーム */}
           <div className={owned.length > 0 ? 'border-t border-slate-100 pt-3' : ''}>
-            {editingHandle ? (
-              // 編集モードを明示 (黙ってフォームが書き換わるのが最大の混乱源)。
-              <div className="mb-2 flex items-center justify-between gap-2 rounded-lg bg-emerald-50 px-3 py-2">
-                <span className="text-xs font-medium text-emerald-800">
-                  {t('publishedStatus', { handle: editingHandle })}
-                </span>
-                {onStopEditing && (
-                  <button
-                    type="button"
-                    onClick={onStopEditing}
-                    className="flex-none text-xs font-semibold text-emerald-700 underline hover:text-emerald-900"
-                  >
-                    {t('stopEditing')}
-                  </button>
-                )}
-              </div>
-            ) : (
-              owned.length > 0 && (
-                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {t('newHandleTitle')}
-                </h4>
-              )
+            {/* 編集中の表示 (公開中・更新時刻・未公開の変更・編集をやめる) は「あなたのページ」の見出しの下に 1 か所。 */}
+            {!editingHandle && owned.length > 0 && (
+              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {t('newHandleTitle')}
+              </h4>
             )}
             {/* 受取先/方法 未確定なら取得は不可だが、サインイン + 取得済み一覧の編集は可能。 */}
             {!config && (
@@ -542,35 +616,13 @@ export function HandleClaimPanel({
 
             <button
               type="button"
-              onClick={() =>
-                normalized &&
-                payload &&
-                publish.mutate({
-                  handle: normalized,
-                  payload,
-                  expectedUpdatedAt:
-                    normalized === editingHandle ? expectedUpdatedAt : undefined,
-                })
-              }
-              disabled={
-                !!publishBlockedReason ||
-                !config || // 受取先/方法 未確定では取得/更新できない
-                !validation.ok ||
-                publish.isPending ||
-                // 他人が使用中なら不可。自分が所有する handle の更新は許可する。
-                (availability.data?.available === false &&
-                  !ownedNames.includes(normalized)) ||
-                (atLimit && !ownedNames.includes(normalized))
-              }
+              onClick={onPublishClick}
+              disabled={publishDisabled}
               className={`mt-2 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-40 ${
                 emphasizeUpdate ? 'ring-2 ring-amber-300 ring-offset-2' : ''
               }`}
             >
-              {publish.isPending
-                ? t('claiming')
-                : ownedNames.includes(normalized)
-                  ? t('updateButton')
-                  : t('claimButton')}
+              {publishLabel}
             </button>
             {/* 公開結果のフィードバック (無言で入力が消えるのは「何が起きたか」不明だった) */}
             {published && !publish.isPending && (
@@ -633,6 +685,9 @@ export function HandleClaimPanel({
           </div>
         </div>
       )}
+
+      {/* 公開ボタンの帯 (スマホの下部バー・PC のプレビュー下)。同じ条件・同じ公開処理。 */}
+      {barSlots.map((slot, i) => (slot ? <span key={i} hidden>{createPortal(bar, slot)}</span> : null))}
 
       {/* 削除 (解放) 確認モーダル。不可逆操作なので window.confirm でなく danger ダイアログで明示。 */}
       <ReleaseConfirmModal

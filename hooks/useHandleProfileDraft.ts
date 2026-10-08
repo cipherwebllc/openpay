@@ -96,6 +96,14 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
   theme: 'clean',
 };
 
+/** 下書きが既定のまま (この端末でまだプロフィールを作っていない) か。受取先 (to) は接続中のウォレットで
+ *  自動で入るので数えない。持っている @handle を自動で編集に入る判定に使う。 */
+export function isPristineProfileDraft(d: HandleProfileDraft): boolean {
+  return (Object.keys(DEFAULT_PROFILE_DRAFT) as (keyof HandleProfileDraft)[]).every(
+    (k) => k === 'to' || JSON.stringify(d[k]) === JSON.stringify(DEFAULT_PROFILE_DRAFT[k]),
+  );
+}
+
 function sanitizePresetList(loaded: unknown, fallback: string[]): string[] {
   if (!Array.isArray(loaded)) return [...fallback];
   const seen = new Set<string>();

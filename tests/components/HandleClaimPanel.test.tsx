@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { screen, waitFor, fireEvent } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import type { HandleProfile, HandleTipConfig } from '@/lib/handle';
 
@@ -169,16 +169,16 @@ describe('HandleClaimPanel', () => {
     expect(screen.getByText('新しいハンドルを取得')).toBeInTheDocument();
   });
 
-  it('編集モード: バナー + 編集をやめる + 別名入力で複製警告', async () => {
+  it('編集モード: 一覧の該当行に公開中の表示 + 別名入力で複製警告', async () => {
     h.isSignedIn = true;
     stubMine([{ handle: 'alice', config: CONFIG }]);
-    const onStopEditing = vi.fn();
-    renderPanel(CONFIG, { editingHandle: 'alice', onStopEditing });
+    renderPanel(CONFIG, { editingHandle: 'alice' });
     await waitFor(() =>
       expect(screen.getByText('@alice')).toBeInTheDocument(),
     );
-    // バナーは一覧側 (該当行) とフォーム側の両方に出る
+    // 編集中の行に公開中の表示 (公開状態・更新時刻・編集をやめる はビルダーの「あなたのページ」の見出しの下に 1 か所)。
     expect(screen.getAllByText('公開中 @alice').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '編集をやめる' })).toBeNull();
     // 別名を入力すると「同内容の複製になる」事前警告
     fireEvent.change(screen.getByPlaceholderText('alice'), {
       target: { value: 'bob' },
@@ -188,9 +188,40 @@ describe('HandleClaimPanel', () => {
         '「@alice」はそのまま残し、同じ内容で新しいハンドル「@bob」を取得します。',
       ),
     ).toBeInTheDocument();
-    // 編集をやめる → 親へ通知
-    fireEvent.click(screen.getByRole('button', { name: '編集をやめる' }));
-    expect(onStopEditing).toHaveBeenCalled();
+  });
+
+  it('この端末が手付かずで @handle が 1 つだけなら、サインイン時にその編集へ 1 回だけ自動で入る', async () => {
+    h.isSignedIn = true;
+    stubMine([{ handle: 'alice', config: CONFIG }]);
+    const onEdit = vi.fn();
+    renderPanel(CONFIG, { canAutoEdit: true, onEdit });
+    await waitFor(() => expect(onEdit).toHaveBeenCalledWith('alice', CONFIG, undefined, undefined));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it('@handle が 2 つ以上・この端末に手が入っているときは自動で編集に入らない', async () => {
+    h.isSignedIn = true;
+    stubMine([{ handle: 'alice', config: CONFIG }, { handle: 'bob', config: CONFIG }]);
+    const onEdit = vi.fn();
+    const first = renderPanel(CONFIG, { canAutoEdit: true, onEdit });
+    await screen.findByText('@bob');
+    expect(onEdit).not.toHaveBeenCalled();
+    first.unmount();
+    stubMine([{ handle: 'alice', config: CONFIG }]);
+    renderPanel(CONFIG, { canAutoEdit: false, onEdit });
+    await screen.findByText('@alice');
+    expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it('公開ボタンの帯 (スマホ下部・PC プレビュー下) にも同じ公開処理を描く・押せない理由を 1 行', async () => {
+    h.isSignedIn = true;
+    stubMine([]);
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    renderPanel(CONFIG, { barSlots: [slot] });
+    // @handle を決めるまでは押せない理由を出す。
+    expect(await within(slot).findByText('@handle を決めると公開できます')).toBeInTheDocument();
+    expect(within(slot).getByRole('button', { name: '公開する' })).toBeDisabled();
   });
 
   it('publish (新規): POST body に handle/config/profile・成功メッセージ + onPublished', async () => {

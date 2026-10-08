@@ -91,17 +91,16 @@ function EnabledCreatorStoreSellerPanel({
   return (
     <section
       aria-labelledby="creator-store-seller-heading"
-      className="rounded-3xl bg-white p-6 shadow-card ring-1 ring-slate-200/70 sm:p-8 print:hidden"
+      className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 print:hidden"
     >
-      <div className="flex items-start gap-3">
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand/10 text-brand">
-          <Store className="h-5 w-5" aria-hidden />
-        </span>
+      {/* 見出しは他のカード (あなたのページ・受け取り・プロフィール) と同じ小さな見出し。 */}
+      <div>
         <div className="min-w-0">
           <h2
             id="creator-store-seller-heading"
-            className="text-lg font-semibold text-slate-800"
+            className="flex items-center gap-2 text-sm font-semibold text-slate-700"
           >
+            <Store className="h-4 w-4 text-slate-400" aria-hidden />
             {t('heading')}
           </h2>
           <p className="mt-1 text-sm leading-relaxed text-slate-500">
