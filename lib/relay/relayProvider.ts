@@ -41,6 +41,7 @@ import { logger } from '@/lib/logger';
 import { env } from '@/lib/env';
 import { resolveDeployment } from '@/lib/tokens';
 import { isRecoverRequiredChain } from './forwarderConfig';
+import { findAuthorizationUsedInWindow, type AuthorizationWindow } from './authorizationUsedLookup';
 import type { Eip3009Authorization } from '@/lib/jpycEip3009';
 import {
   relayJpycAuthorization,
@@ -218,11 +219,15 @@ export async function readAuthorizationUsed(
 // authorizationState=true だが KV に hash が残っていない場合の read-only recovery。
 // EIP-3009 の AuthorizationUsed(authorizer,nonce) は両値 indexed なので、対象 intent のログだけを
 // RPC 側で絞る。走査は署名の通常有効窓を十分上回る直近 10,000 block に限定する。
+// window (署名の有効期限と受け付けた有効窓の上限) を渡すと、1 回の検索が RPC の範囲制限 (無料枠: drpc 100・
+// Alchemy 10 ブロック) で拒まれたときだけ、署名が使われうる時刻のブロックに絞って小分けに探す
+// (lib/relay/authorizationUsedLookup.ts)。渡さない呼び出し・1 回で検索できる RPC は従来どおり。
 export async function findAuthorizationUsedTransactionHash(
   chainId: number,
   token: Address,
   from: Address,
   nonce: Hex,
+  window?: AuthorizationWindow,
 ): Promise<Hex | null> {
   const client = publicClientFor(chainId);
   const latest = await client.getBlockNumber();
@@ -230,14 +235,39 @@ export async function findAuthorizationUsedTransactionHash(
     latest > STATUS_LOG_LOOKBACK_BLOCKS
       ? latest - STATUS_LOG_LOOKBACK_BLOCKS
       : 0n;
-  const logs = await client.getLogs({
-    address: token,
-    event: AUTHORIZATION_USED_EVENT,
-    args: { authorizer: from, nonce },
-    fromBlock,
-    toBlock: latest,
-  });
-  return logs.at(-1)?.transactionHash ?? null;
+  try {
+    const logs = await client.getLogs({
+      address: token,
+      event: AUTHORIZATION_USED_EVENT,
+      args: { authorizer: from, nonce },
+      fromBlock,
+      toBlock: latest,
+    });
+    return logs.at(-1)?.transactionHash ?? null;
+  } catch (error) {
+    if (!window) throw error;
+    return findAuthorizationUsedInWindow(
+      {
+        latestBlock: async () => {
+          const b = await client.getBlock({ blockTag: 'latest' });
+          return { number: b.number, timestamp: b.timestamp };
+        },
+        blockTimestamp: async (blockNumber) => (await client.getBlock({ blockNumber })).timestamp,
+        logs: async (fromBlock, toBlock) =>
+          (
+            await client.getLogs({
+              address: token,
+              event: AUTHORIZATION_USED_EVENT,
+              args: { authorizer: from, nonce },
+              fromBlock,
+              toBlock,
+            })
+          ).map((l) => l.transactionHash),
+      },
+      window,
+      { lookbackBlocks: STATUS_LOG_LOOKBACK_BLOCKS },
+    );
+  }
 }
 
 // self-host: relayer EOA / chain client から SelfHostIo を組む (chainId は対応済前提)。

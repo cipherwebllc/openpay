@@ -276,6 +276,14 @@ describe('POST /api/relay/jpyc/status', () => {
       state: 'settled',
       txHash: LOG_HASH,
     });
+    // tx 探しには署名の有効期限と中継の有効窓の上限 (20 分) を渡す (RPC の範囲制限で拒まれたときに範囲を絞れる)
+    expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(
+      80002,
+      expect.any(String),
+      FROM,
+      expect.any(String),
+      { validAfter: 0n, validBefore: 9999999999n, maxWindowSec: 1230 },
+    );
   });
 
   it('used/cancelled だが有界ログ走査で見つからなければ indeterminate', async () => {
@@ -319,11 +327,13 @@ describe('POST /api/relay/jpyc/status', () => {
       FROM,
       NONCE,
     );
+    // 再読み込み後の照会 (nonce だけ) は有効期限を持たないので、範囲を絞った検索 (window) は渡さない
     expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledWith(
       80002,
       expect.any(String),
       FROM,
       NONCE,
+      undefined,
     );
     expect(recoverTransferAuthorizationSigner).not.toHaveBeenCalled();
   });

@@ -29,6 +29,7 @@ import { checkIpRateLimit, readIdempotency } from '@/lib/relay/relayGuards';
 import { MAX_BODY_BYTES, anonymizeIp, isDec } from '@/lib/relay/relayRoute';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { feeReceiverFor } from '@/lib/relay/forwarderSettleService';
+import { AUTHORIZATION_LOOKUP_WINDOW_SEC } from '@/lib/relay/validityWindow';
 import {
   buildForwarderNonce,
   type ForwarderSettleParams,
@@ -50,6 +51,8 @@ type ParsedIntent = {
   forwarder?: Address;
   settlement?: ForwarderSettleParams;
   transfer?: Pick<Eip3009Authorization, 'to' | 'value'>;
+  // 署名の有効期限 (tx 探しを、署名が使われうる時刻のブロックに絞るため)。再読み込み後の照会 (nonce だけ) には無い。
+  validity?: { validAfter: bigint; validBefore: bigint };
   verifySignature: () => Promise<Address>;
 };
 
@@ -130,11 +133,14 @@ export async function POST(req: Request): Promise<NextResponse> {
 
     // KV hash は別 authorization の置換 tx の可能性がある。対象 nonce の実行 tx を再解決し、
     // こちらも receipt を照合してから返す。used/cancelled フラグだけでは決済成功としない。
+    // 有効期限が分かれば、RPC の範囲制限で 1 回の検索が拒まれても署名が使われうる時刻に絞って探せる
+    // (有効窓の上限は中継が受け付ける 20 分 + 時計のずれの余裕)。
     const txHash = await findAuthorizationUsedTransactionHash(
       parsed.chainId,
       token,
       parsed.from,
       parsed.nonce,
+      parsed.validity && { ...parsed.validity, maxWindowSec: AUTHORIZATION_LOOKUP_WINDOW_SEC },
     );
     if (!txHash || !(await receiptMatchesIntent(parsed, token, txHash))) {
       return json({ ok: true, state: 'indeterminate' });
@@ -301,6 +307,7 @@ function parseIntent(raw: Record<string, unknown>): ParsedIntent | null {
       nonce: buildForwarderNonce(params, chainId, forwarder),
       forwarder,
       settlement: params,
+      validity: { validAfter: params.validAfter, validBefore: params.validBefore },
       verifySignature: () =>
         recoverReceiveWithAuthorizationSigner(
           params,
@@ -333,6 +340,7 @@ function parseIntent(raw: Record<string, unknown>): ParsedIntent | null {
     from,
     nonce: auth.nonce,
     transfer: auth,
+    validity: { validAfter: auth.validAfter, validBefore: auth.validBefore },
     verifySignature: () =>
       recoverTransferAuthorizationSigner(auth, chainId, token, signature),
   };

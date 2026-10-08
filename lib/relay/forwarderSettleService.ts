@@ -43,9 +43,10 @@ import {
 } from './forwarderIntent';
 import { verifyForwarderHealth } from './forwarderHealth';
 import type { RelayResult } from './jpycRelay';
+import { MAX_VALIDITY_WINDOW_SEC } from './validityWindow';
 
-// 署名有効窓の最大 (validBefore - now がこれを超える far-future を弾く)。両 route 共通。
-export const MAX_VALIDITY_WINDOW_SEC = 20 * 60;
+// 署名有効窓の最大 (validBefore - now がこれを超える far-future を弾く)。両 route 共通 (定義は lib/relay/validityWindow.ts)。
+export { MAX_VALIDITY_WINDOW_SEC };
 
 // 回収先 (= OpenPay fee receiver)。forwarder の immutable feeReceiver と一致必須 (health check で照合)。
 // 両 route + handleFree (isFeePayment 判定) の単一情報源。
