@@ -65,6 +65,7 @@ vi.mock('@/lib/jpycGaslessProvider', async (importOriginal) => {
 
 import { QrGenerator } from '@/components/QrGenerator';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
+import { shortAddress } from '@/lib/format';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
@@ -1858,6 +1859,17 @@ describe('QrGenerator', () => {
       await waitFor(() => expect(within(bar()).getByText('金額が未入力')).toBeInTheDocument());
       await user.type(screen.getByPlaceholderText('1,000'), '500');
       await waitFor(() => expect(within(bar()).getByText('請求金額')).toBeInTheDocument());
+    });
+
+    it('QR の画面の受取先は「支払先」として出す (お客様の支払い画面と同じ言葉)', async () => {
+      const user = userEvent.setup();
+      render(<QrGenerator />);
+      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      await user.type(screen.getByPlaceholderText('1,000'), '500');
+      await openQrModal(user);
+      const dialog = await screen.findByRole('dialog', { name: '決済用 QR コード' });
+      expect(within(dialog).getByText(`支払先 ${shortAddress(VALID)}`)).toBeInTheDocument();
     });
 
     it('QR empty state: receiver のみ入力 → サンプル金額ワンタップで QR が生成される', async () => {

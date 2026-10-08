@@ -1154,7 +1154,7 @@ function RegisterModeContent({
             chainSlug: settings.chain,
             chainLabel: chainForSlug(settings.chain).name,
           }}
-          receiverShort={effectiveReceiver ? shortAddress(effectiveReceiver) : ''}
+          receiverShort={effectiveReceiver ? tQr('qrPayTo', { addr: shortAddress(effectiveReceiver) }) : ''}
           // お店負担の QR は画面に表示している間だけ使える (URL の表示・コピーは出さない・決済QRタブと同じ)。
           {...(storeQrActive
             ? { hideUrl: true, actionsNote: tQr('storeDevice.actionsNote') }

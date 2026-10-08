@@ -510,6 +510,7 @@
     "qrModalConvertExpired": "The indicative FX rate has expired. Close this QR and regenerate it with the latest rate.",
     "qrCopy": "Copy link",
     "qrShowUrl": "Show link",
+    "qrPayTo": "Pay to {addr}",
     "qrCopied": "Copied",
     "downloadSvg": "Save SVG",
     "downloadPng": "Save PNG",

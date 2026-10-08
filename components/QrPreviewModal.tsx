@@ -347,8 +347,9 @@ export function QrPreviewModal({
                 ))}
               </ol>
             )}
+            {/* 支払先 (お客様の支払い画面と同じ言葉・届く先をその場で見比べられる)。 */}
             {receiverShort && (
-              <p className="mt-1 break-all font-mono text-[10px] text-slate-500 print:max-w-2xl print:text-sm">
+              <p className="mt-3 break-all font-mono text-[11px] text-slate-500 print:max-w-2xl print:text-sm">
                 {receiverShort}
               </p>
             )}

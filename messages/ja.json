@@ -510,6 +510,7 @@
     "qrModalConvertExpired": "為替レートの目安期限を過ぎました。この QR を閉じて、最新レートで作り直してください。",
     "qrCopy": "リンクをコピー",
     "qrShowUrl": "リンクを表示",
+    "qrPayTo": "支払先 {addr}",
     "qrCopied": "コピー済み",
     "downloadSvg": "SVG保存",
     "downloadPng": "PNG保存",

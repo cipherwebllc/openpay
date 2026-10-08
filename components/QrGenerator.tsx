@@ -1022,7 +1022,7 @@ export function QrGenerator() {
           note={settings.posterNote.trim() || t('posterDefaultNote')}
           chainText={tokenChainLabelText}
           receiverShort={
-            effectiveReceiver ? shortAddress(effectiveReceiver) : ''
+            effectiveReceiver ? t('qrPayTo', { addr: shortAddress(effectiveReceiver) }) : ''
           }
           // ポスターを「読まずに分かる」形にする token/chain 情報 (labels-as-props)。
           // chainSlug は public/chains/{slug}.svg と一致 (settings.chain = ChainSlug)。
