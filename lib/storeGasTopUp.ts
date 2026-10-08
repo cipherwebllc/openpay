@@ -16,6 +16,8 @@ export const STORE_GAS_TOPUP_KEY = 'openpay:store-gas-wallet:topup:v2';
 export const TOPUP_APPROVAL_TTL_MS = 30 * 60 * 1000;
 export const TOPUP_SENT_TTL_MS = 24 * 60 * 60 * 1000;
 export const TOPUP_HEARTBEAT_MS = 60 * 1000;
+// 端末の時計の小さなずれは許し、それより先の時刻の記録は捨てる (先の時刻で切れずに残り続けない)。
+const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 export type StoreGasTopUpRecord = {
   id: string;
@@ -26,7 +28,7 @@ export type StoreGasTopUpRecord = {
   hash?: Hex;
 };
 
-function isRecord(v: unknown): v is StoreGasTopUpRecord {
+function isRecord(v: unknown, now: number): v is StoreGasTopUpRecord {
   if (!v || typeof v !== 'object') return false;
   const r = v as Record<string, unknown>;
   return (
@@ -35,12 +37,14 @@ function isRecord(v: unknown): v is StoreGasTopUpRecord {
     isAddress(r.address, { strict: false }) &&
     typeof r.chainId === 'number' &&
     typeof r.at === 'number' &&
+    Number.isFinite(r.at) &&
+    r.at <= now + FUTURE_SKEW_MS &&
     (r.hash === undefined || (typeof r.hash === 'string' && isHex(r.hash) && r.hash.length === 66))
   );
 }
 
-/** 記録をすべて読む。壊れた値・形の違う記録は捨てる (壊れた記録で鍵を永久に消せなくしない)。 */
-function readAll(): Record<string, StoreGasTopUpRecord> {
+/** 記録をすべて読む。壊れた値・形の違う記録・先の時刻の記録は捨てる (壊れた記録で鍵を永久に消せなくしない)。 */
+function readAll(now: number = Date.now()): Record<string, StoreGasTopUpRecord> {
   let raw: string | null;
   try {
     raw = window.localStorage.getItem(STORE_GAS_TOPUP_KEY);
@@ -51,7 +55,7 @@ function readAll(): Record<string, StoreGasTopUpRecord> {
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed).filter(([, v]) => isRecord(v))) as Record<
+    return Object.fromEntries(Object.entries(parsed).filter(([, v]) => isRecord(v, now))) as Record<
       string,
       StoreGasTopUpRecord
     >;
@@ -78,7 +82,7 @@ const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /** このアドレスへの途中の補充 (確認中・送った) の記録。 */
 export function liveStoreGasTopUps(address: Address, now: number = Date.now()): StoreGasTopUpRecord[] {
-  return Object.values(readAll()).filter((r) => same(r.address, address) && alive(r, now));
+  return Object.values(readAll(now)).filter((r) => same(r.address, address) && alive(r, now));
 }
 
 /**
@@ -90,7 +94,7 @@ export function reserveStoreGasTopUp(
   chainId: number,
   now: number = Date.now(),
 ): { ok: true; id: string } | { ok: false; reason: 'busy' | 'storage' } {
-  const records = readAll();
+  const records = readAll(now);
   // 切れた記録は掃除する (この端末の記録が溜まり続けない)。
   for (const [id, r] of Object.entries(records)) if (!alive(r, now)) delete records[id];
   if (Object.values(records).some((r) => same(r.address, address))) return { ok: false, reason: 'busy' };
@@ -101,7 +105,7 @@ export function reserveStoreGasTopUp(
 
 /** 確認中の記録を延ばす (確認中のタブが 1 分ごとに呼ぶ)。 */
 export function touchStoreGasTopUp(id: string, now: number = Date.now()): void {
-  const records = readAll();
+  const records = readAll(now);
   const r = records[id];
   if (!r || r.hash) return;
   records[id] = { ...r, at: now };
@@ -116,15 +120,15 @@ export function attachStoreGasTopUpHash(
   op: { id: string; address: Address; chainId: number },
   hash: Hex,
   now: number = Date.now(),
-): void {
-  const records = readAll();
+): boolean {
+  const records = readAll(now);
   records[op.id] = { id: op.id, address: op.address, chainId: op.chainId, at: now, hash };
-  writeAll(records);
+  return writeAll(records);
 }
 
 /** 記録を片付ける (結果が出た・送らなかった)。自分の id だけ。 */
-export function finishStoreGasTopUp(id: string): void {
-  const records = readAll();
+export function finishStoreGasTopUp(id: string, now: number = Date.now()): void {
+  const records = readAll(now);
   if (!(id in records)) return;
   delete records[id];
   writeAll(records);

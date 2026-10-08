@@ -13,7 +13,7 @@ type Receipt = {
 type ReceiptArgs = {
   hash?: string;
   chainId?: number;
-  onReplaced?: (r: { reason: string; transaction: { to: string | null; value: bigint } }) => void;
+  onReplaced?: (r: { reason: string; transaction: { to: string | null; value: bigint; hash?: string } }) => void;
 };
 const w = vi.hoisted(() => ({
   account: { address: undefined as string | undefined, isConnected: false, chainId: undefined as number | undefined },
@@ -229,6 +229,81 @@ describe('StoreGasWalletTopUp', () => {
       expect(screen.getByText(text)).toBeTruthy();
       expect(records()).toHaveLength(0);
       cleanup();
+    }
+  });
+
+  it('置き換え先の取引が失敗 (revert) しても、置き換え先の receipt で結果を出す', async () => {
+    const v = show();
+    await act(async () => {
+      fireEvent.click(sendButton());
+    });
+    await act(async () => {
+      lastReplaced()({ reason: 'repriced', transaction: { to: gas, value: 10n ** 18n, hash: TX2 } as never });
+    });
+    // 記録の tx は置き換え先に変わる (画面を離れても置き換え先を見る)
+    expect(records()[0]).toMatchObject({ hash: TX2 });
+    w.receipt = { data: undefined, isError: true }; // wagmi は revert を失敗で返す
+    w.rawReceipt.mockImplementation(async ({ hash }: { hash: string }) => {
+      if (hash !== TX2) throw new Error('not found');
+      return { status: 'reverted', transactionHash: TX2 };
+    });
+    await act(async () => {
+      v.rerender();
+    });
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('補充に失敗しました'));
+    expect(records()).toHaveLength(0);
+  });
+
+  it('前の操作の置き換え (取り消し) を、次の操作の結果に持ち越さない', async () => {
+    const v = show();
+    await act(async () => {
+      fireEvent.click(sendButton());
+    });
+    act(() => {
+      lastReplaced()({ reason: 'cancelled', transaction: { to: SHOP, value: 0n, hash: TX2 } as never });
+    });
+    w.receipt = { data: { status: 'success', transactionHash: TX2 }, isError: false };
+    await act(async () => {
+      v.rerender();
+    });
+    expect(screen.getByText('ウォレットで取り消されました。補充されていません。')).toBeTruthy();
+    // 別の画面で始めた補充 (送った) を、この画面が続きから見る
+    w.receipt = { data: undefined, isError: false };
+    attachStoreGasTopUpHash({ id: 'other', address: gas, chainId: 80002 }, TX);
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'openpay:store-gas-wallet:topup:v2' }));
+    });
+    w.receipt = { data: { status: 'success', transactionHash: TX }, isError: false };
+    await act(async () => {
+      v.rerender();
+    });
+    expect(screen.getByText('補充しました。')).toBeTruthy();
+  });
+
+  it('送った tx を記録に残せなくても (端末の保存容量)、この画面で見張って結果を出す', async () => {
+    const realSetItem = Storage.prototype.setItem;
+    let calls = 0;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, k: string, val: string) {
+      // 1 回目 (記録を置く) は通し、tx を残す 2 回目は失敗させる
+      calls += 1;
+      if (k === 'openpay:store-gas-wallet:topup:v2' && calls > 1) throw new Error('QuotaExceededError');
+      return realSetItem.call(this, k, val);
+    });
+    try {
+      const v = show();
+      await act(async () => {
+        fireEvent.click(sendButton());
+      });
+      expect(screen.getByRole('status')).toHaveTextContent('送っています。確定を待っています');
+      expect(screen.getByRole('link', { name: '取引を見る' }).getAttribute('href')).toContain(TX);
+      expect(sendButton()).toBeDisabled();
+      w.receipt = { data: { status: 'success', transactionHash: TX }, isError: false };
+      await act(async () => {
+        v.rerender();
+      });
+      expect(screen.getByText('補充しました。')).toBeTruthy();
+    } finally {
+      spy.mockRestore();
     }
   });
 

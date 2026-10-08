@@ -15,7 +15,8 @@ import {
 const A = '0x0000000000000000000000000000000000000abc' as const;
 const B = '0x0000000000000000000000000000000000000def' as const;
 const TX = `0x${'ab'.repeat(32)}` as const;
-const T0 = 1_800_000_000_000;
+// 実際の時計に合わせる (先の時刻の記録は捨てるため)
+const T0 = Date.now();
 
 function reserve(address: `0x${string}` = A, now = T0) {
   const r = reserveStoreGasTopUp(address, 80002, now);
@@ -80,5 +81,28 @@ describe('storeGasTopUp', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it('時刻が数でない・無限大・先の時刻の記録は捨てる (切れずに残り続けない)', () => {
+    window.localStorage.setItem(
+      STORE_GAS_TOPUP_KEY,
+      '{"a":{"id":"a","address":"' + A + '","chainId":80002,"at":1e309},' +
+        '"b":{"id":"b","address":"' + A + '","chainId":80002,"at":' + (T0 + 60 * 60_000) + '}}',
+    );
+    expect(liveStoreGasTopUps(A, T0)).toEqual([]);
+    expect(reserveStoreGasTopUp(A, 80002, T0).ok).toBe(true);
+  });
+
+  it('tx を記録に残せなかったら false を返す (呼び出し側が画面で見張る)', () => {
+    const id = reserve(A);
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    try {
+      expect(attachStoreGasTopUpHash({ id, address: A, chainId: 80002 }, TX, T0)).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(attachStoreGasTopUpHash({ id, address: A, chainId: 80002 }, TX, T0)).toBe(true);
   });
 });

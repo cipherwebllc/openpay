@@ -321,15 +321,27 @@ describe('useStoreGasWallet', () => {
     expect(window.localStorage.getItem(STORE_GAS_WALLET_STORAGE_KEY)).toBe(recreated);
   });
 
-  it('送ってから時間のたった補充の記録は、取引が入っていれば残高の読み直しで片付ける', async () => {
+  it('壊れた保存データは「消す」で消せる (作り直すための出口)', async () => {
+    window.localStorage.setItem(STORE_GAS_WALLET_STORAGE_KEY, '{broken');
+    const { result } = renderHook(() => useStoreGasWallet());
+    await waitFor(() => expect(result.current.walletState).toEqual({ state: 'corrupt' }));
+    await act(async () => {
+      expect(await result.current.remove()).toBe(true);
+    });
+    expect(result.current.walletState).toEqual({ state: 'none' });
+  });
+
+  it('送ってから時間のたった補充の記録は、取引が入っていれば、残高を読み直してから片付ける', async () => {
     const { result } = await setup();
     const address = result.current.address!;
+    rpc.balance = 5n * 10n ** 17n; // 補充が入った後の残高
     attachStoreGasTopUpHash({ id: 'old', address, chainId: 80002 }, TX as `0x${string}`, Date.now() - 11 * 60_000);
     attachStoreGasTopUpHash({ id: 'new', address, chainId: 80002 }, TX as `0x${string}`, Date.now());
     await act(async () => {
       await result.current.refresh();
     });
     expect(liveStoreGasTopUps(address).map((r) => r.id)).toEqual(['new']); // 新しい記録は補充の欄に任せる
+    expect(result.current.chains[0]?.balance).toBe(5n * 10n ** 17n);
   });
 
   it('別のタブで鍵を消す・作り直すと読み直す (古いアドレスを見せたままにしない)', async () => {
