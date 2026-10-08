@@ -136,6 +136,22 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     ],
   },
   {
+    // 週次更新 第 7 回 (2026-10-08) で記録漏れを補充 (発表は 2026-07-13 の PR TIMES)。Avalanche / Ethereum は
+    // 「8 月下旬対応予定」の記載のみで実施を確認できていない → 予定のまま書き、現況行の chains は変えない。
+    date: '2026-07-13',
+    collectedAt: '2026-10-09',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort Wallet for Biz',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'HashPort began rolling out new HashPort Wallet for Biz features: payments from external wallets such as MetaMask and Unifi (a trial through January 2027, via dynamic QR only; gasless payment stays HashPort Wallet only and external-wallet payers pay gas), dynamic per-checkout QR codes, a Business tab for sales and history with one-tap refunds, and planned Avalanche and Ethereum support for both JPYC and USDC in late August 2026. zERC20 became reachable from the HashPort Wallet DApps tab via WalletConnect; full integration into for Biz is only under consideration.',
+    summaryJa:
+      'HashPort が HashPort Wallet for Biz の新機能を順次提供開始: MetaMask・Unifi など外部ウォレットからの支払い (2027 年 1 月までの試験運用・動的 QR のみ。ガスレスは引き続き HashPort Wallet のみで、外部ウォレットのガス代はお客様負担)、会計ごとの動的 QR、売上・取引履歴とワンタップ返金の「ビジネス」タブ、8 月下旬に JPYC・USDC とも Avalanche・Ethereum 対応予定。zERC20 は HashPort Wallet の DApps タブから WalletConnect 経由で利用でき、for Biz への本格実装は今後検討。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000182.000046288.html',
+  },
+  {
     date: '2026-07-15',
     scopes: ['stablecoin-payments'],
     provider: 'JCB / Circle',
@@ -288,6 +304,20 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'Mi&T が大阪府補助の JPYC 実店舗決済実証の詳細を公表: 店舗側の決済手数料は決済額の 1.0% のみ、大阪公立大学キャンパス周辺の飲食店・小売店 5 店舗程度、2026 年 11 月中旬〜2027 年 3 月中旬 (予定)。',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000003.000187870.html',
     diffs: [{ field: 'fee', previousValue: null, currentValue: '1.0%' }],
+  },
+  {
+    // 週次更新 第 7 回 (2026-10-08) で記録漏れを補充 (発表は 2026-09-03・9/11 の Kaia MOU より前)。
+    date: '2026-09-03',
+    collectedAt: '2026-10-09',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    summary:
+      "NetStars signed a basic agreement (MOU) with imToken Pte. Ltd. to study linking Stablecoin Pay with imToken's wallet infrastructure, aiming at stablecoin payments in physical stores in Japan for residents and inbound visitors. The MOU names no target tokens, chains or fees and states that it does not currently commit to providing or introducing any specific service.",
+    summaryJa:
+      'ネットスターズが Web3 ウォレット「imToken」と基本合意 (MOU) を締結。Stablecoin Pay と imToken のウォレット基盤の連携を検討し、国内の実店舗で居住者・訪日客がステーブルコインで支払える環境づくりを目指す。MOU は対象トークン・チェーン・手数料を挙げておらず、「現時点において具体的なサービスの提供や導入を約束するものではありません」としている。',
+    sourceUrl: 'https://www.netstars.co.jp/news/9616/',
   },
   {
     date: '2026-09-04',
@@ -655,6 +685,68 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summaryJa:
       'Upbit の入出金状況ページ (2026-09-29 確認) で、JPYC の Ethereum・Kaia・Polygon がいずれも入出金可・正常。2026-09-17 時点では Kaia・Polygon は入金のみだった。出金開始の告知は見つからず、開始日は不明。',
     sourceUrl: 'https://upbit.com/service_center/wallet_status',
+  },
+  {
+    // 週次更新 第 7 回 (2026-10-08)。KDDI ニュースルーム (HashPort の PR TIMES 000000196.000046288 と同内容)。
+    // JPYC のチェーンは一次ソースに無い → 書かない。
+    date: '2026-09-30',
+    collectedAt: '2026-10-09',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      'KDDI, au Coincheck Digital Assets, HashPort and au Financial Service launched the new αU wallet as a mini app inside the au PAY app on 2026-09-30 13:00: users can exchange Ponta points for JPYC (alongside WBTC and ETH, up to 300 points per month) without a crypto exchange account, and charge held JPYC to their au PAY balance.',
+    summaryJa:
+      'KDDI・au Coincheck Digital Assets・HashPort・au フィナンシャルサービスが、au PAY アプリのミニアプリとして新しい「αU wallet」を 2026-09-30 13:00 に提供開始。暗号資産の取引口座なしで Ponta ポイントを JPYC に交換でき (WBTC・ETH も対象・月 300 ポイントまで)、保有する JPYC を au PAY 残高にチャージできる。',
+    sourceUrl: 'https://newsroom.kddi.com/news/detail/kddi_nr-1182_4741.html',
+  },
+  {
+    // 同上 (決済側)。加盟店はステーブルコインではなく au PAY 残高 (前払式支払手段) を受け取る — summary で明示。
+    date: '2026-09-30',
+    collectedAt: '2026-10-09',
+    scopes: ['stablecoin-payments'],
+    provider: 'αU wallet (KDDI / au Coincheck Digital Assets / HashPort)',
+    changeType: 'added',
+    changeCategory: 'service_launch',
+    assets: ['JPYC'],
+    summary:
+      'KDDI, au Coincheck Digital Assets and HashPort launched αU wallet in the au PAY app on 2026-09-30: held JPYC (and WBTC, ETH) can be charged to the au PAY balance, which becomes au PAY Money Lite (a third-party prepaid payment instrument under the Payment Services Act) usable at au PAY merchants nationwide. Merchants receive au PAY, not stablecoins; merchant settlement, fees and chains are not stated.',
+    summaryJa:
+      'KDDI・au Coincheck Digital Assets・HashPort が au PAY アプリで「αU wallet」を 2026-09-30 に提供開始。保有する JPYC (WBTC・ETH も) を au PAY 残高にチャージでき、残高は au PAY マネーライト (資金決済法上の第三者型前払式支払手段) として全国の au PAY 加盟店で使える。加盟店が受け取るのはステーブルコインではなく au PAY の決済で、加盟店の精算・手数料・チェーンは記載なし。',
+    sourceUrl: 'https://newsroom.kddi.com/news/detail/kddi_nr-1182_4741.html',
+  },
+  {
+    // 週次更新 第 7 回 (2026-10-08)。マイナウォレット PR TIMES (JPYC 公式 X 2026-10-07 でも告知)。
+    date: '2026-10-06',
+    collectedAt: '2026-10-09',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      'Mina Wallet (v1.2.2 or later) started a JPYC EX integration built on the JPYC EX integration API: users link their JPYC EX account and complete issuance (reservation to receipt) and redemption (reservation to transfer) inside the app. Review, additional authentication and final acceptance stay with JPYC Inc.; Mina Wallet covers the gas for redemption transfers, though fees may apply depending on the chain (Ethereum) or the number of transfers. JPYC EX account registration, identity verification and a withdrawal bank account are required in advance.',
+    summaryJa:
+      'マイナウォレット (v1.2.2 以上) が JPYC EX 連携 API を使った連携機能を提供開始。アプリ内で JPYC EX のアカウント連携・発行予約〜受取・償還予約〜送金まで完結する。審査・追加認証・申込みの受付と確定は従来どおり JPYC 社。償還時の送金ガス代はマイナウォレット社が負担するが、対象チェーン (Ethereum) や送信回数等により手数料が発生する場合あり。事前に JPYC EX でのアカウント登録・本人確認・出金口座の登録が必要。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000013.000125732.html',
+  },
+  {
+    // 週次更新 第 7 回 (2026-10-08)。JPYC 公式 X (RatioFX の投稿を引用・本文を fxtwitter API で確認)。
+    // Kaia の FX 層「Ratio」(9/11 行) と同一かは一次ソースに無い → 結び付けない。
+    date: '2026-10-08',
+    collectedAt: '2026-10-09',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    assets: ['JPYC'],
+    summary:
+      'JPYC Inc. signed an MOU with RatioFX to explore collaboration in stablecoin FX, cross-border payments and digital asset infrastructure. Launch dates, chains and fees are not disclosed.',
+    summaryJa:
+      'JPYC 社が RatioFX と MOU を締結。ステーブルコイン FX・クロスボーダー決済・デジタル資産インフラでの協力を探る。稼働日・対象チェーン・手数料は未公表。',
+    sourceUrl: 'https://x.com/jpyc_official/status/2108085042459398248',
   },
 ];
 
