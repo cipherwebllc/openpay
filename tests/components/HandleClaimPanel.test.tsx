@@ -266,6 +266,21 @@ describe('HandleClaimPanel', () => {
     expect(onEdit).not.toHaveBeenCalled();
   });
 
+  it('上限まで取得済みで編集していないときは、新しい @handle の入力欄を出さず「編集」へ案内する', async () => {
+    h.isSignedIn = true;
+    stubMine([
+      { handle: 'alice', config: CONFIG },
+      { handle: 'bob', config: CONFIG },
+      { handle: 'carol', config: CONFIG },
+    ]);
+    renderPanel(CONFIG, { onEdit: vi.fn() });
+    expect(await screen.findByText('@carol')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('alice')).toBeNull();
+    expect(screen.getByText('@handle は 3 個まで取得できます。更新するときは上の一覧で「編集」を押してください。')).toBeInTheDocument();
+    expect(screen.getByText('一覧の「編集」から更新できます')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '公開する' })).toBeDisabled();
+  });
+
   it('公開のボタンは帯の 1 つだけ (カードの中に同じ働きのボタンを並べない)', async () => {
     h.isSignedIn = true;
     stubMine([]);
