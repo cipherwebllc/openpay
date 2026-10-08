@@ -139,7 +139,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     // 週次更新 第 7 回 (2026-10-08) で記録漏れを補充 (発表は 2026-07-13 の PR TIMES)。Avalanche / Ethereum は
     // 「8 月下旬対応予定」の記載のみで実施を確認できていない → 予定のまま書き、現況行の chains は変えない。
     date: '2026-07-13',
-    collectedAt: '2026-10-08',
+    collectedAt: '2026-10-09',
     scopes: ['stablecoin-payments'],
     provider: 'HashPort Wallet for Biz',
     changeType: 'updated',
@@ -308,7 +308,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   {
     // 週次更新 第 7 回 (2026-10-08) で記録漏れを補充 (発表は 2026-09-03・9/11 の Kaia MOU より前)。
     date: '2026-09-03',
-    collectedAt: '2026-10-08',
+    collectedAt: '2026-10-09',
     scopes: ['stablecoin-payments'],
     provider: 'NetStars Stablecoin Pay',
     changeType: 'updated',
@@ -690,7 +690,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     // 週次更新 第 7 回 (2026-10-08)。KDDI ニュースルーム (HashPort の PR TIMES 000000196.000046288 と同内容)。
     // JPYC のチェーンは一次ソースに無い → 書かない。
     date: '2026-09-30',
-    collectedAt: '2026-10-08',
+    collectedAt: '2026-10-09',
     scopes: ['jpyc-services'],
     slug: 'jpyc',
     changeType: 'updated',
@@ -705,7 +705,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   {
     // 同上 (決済側)。加盟店はステーブルコインではなく au PAY 残高 (前払式支払手段) を受け取る — summary で明示。
     date: '2026-09-30',
-    collectedAt: '2026-10-08',
+    collectedAt: '2026-10-09',
     scopes: ['stablecoin-payments'],
     provider: 'αU wallet (KDDI / au Coincheck Digital Assets / HashPort)',
     changeType: 'added',
@@ -720,7 +720,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   {
     // 週次更新 第 7 回 (2026-10-08)。マイナウォレット PR TIMES (JPYC 公式 X 2026-10-07 でも告知)。
     date: '2026-10-06',
-    collectedAt: '2026-10-08',
+    collectedAt: '2026-10-09',
     scopes: ['jpyc-services'],
     slug: 'jpyc-ex',
     changeType: 'updated',
@@ -736,7 +736,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     // 週次更新 第 7 回 (2026-10-08)。JPYC 公式 X (RatioFX の投稿を引用・本文を fxtwitter API で確認)。
     // Kaia の FX 層「Ratio」(9/11 行) と同一かは一次ソースに無い → 結び付けない。
     date: '2026-10-08',
-    collectedAt: '2026-10-08',
+    collectedAt: '2026-10-09',
     scopes: ['jpyc-services'],
     slug: 'jpyc',
     changeType: 'updated',
