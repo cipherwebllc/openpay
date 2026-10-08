@@ -96,7 +96,6 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'History',
     'InfoTooltip',
     'LocaleSwitcher',
-    'Market',
     'MenuOptions',
     'MobileOrder',
     'Nav',
