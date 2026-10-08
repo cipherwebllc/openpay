@@ -183,6 +183,19 @@ describe('MobileOrderBuilder', () => {
     expect(within(receive).getByText('0x52d4…cA81')).toBeInTheDocument();
   });
 
+  it('ENS 名の受取先は名前の解決結果だけを使う (シートで受け取った古い解決値で公開しない)', () => {
+    window.localStorage.setItem(
+      'openpay:mobile-order-draft:v1',
+      JSON.stringify({ receiver: 'shop.eth', receiverSource: 'manual', chains: ['polygon'] }),
+    );
+    renderWithIntl(<MobileOrderBuilder />);
+    const receive = screen.getByRole('region', { name: '受け取り' });
+    fireEvent.click(within(receive).getByRole('button', { name: '設定' }));
+    // スタブの AddressInput は打つたびに ADDR を「解決できた」と知らせるが、'nobody.eth' は解決できない名前。
+    fireEvent.change(screen.getByTestId('addr'), { target: { value: 'nobody.eth' } });
+    expect(within(receive).queryByText('0x52d4…cA81')).toBeNull();
+  });
+
   it('店舗情報 (住所/営業時間/電話) の入力欄を描画する', () => {
     renderWithIntl(<MobileOrderBuilder />);
     expect(screen.getByPlaceholderText(/東京都渋谷区/)).toBeInTheDocument();

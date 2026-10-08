@@ -168,6 +168,18 @@ describe('StorefrontPublishPanel', () => {
     expect(screen.getByText('https://open-pay.jp/@shop')).toBeInTheDocument();
   });
 
+  it('公開に失敗したら帯にも 1 行出す (画面下の帯から押した人が気づける)', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? { ok: false, status: 500, json: async () => ({ ok: false, error: 'kv' }) }
+        : { ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }) },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel();
+    fireEvent.click(await readyButton('公開する'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('公開に失敗しました。時間をおいて再度お試しください。');
+  });
+
   it('時間系未設定の店は従来の POST 生バイトから不変', async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
       init?.method === 'POST'

@@ -139,7 +139,6 @@ export function MobileOrderBuilder({
   // 決済QR タブの受取先 (レジと同じく「引き継ぐ」ショートカット用)。
   const { settings: qrSettings } = useQrSettings();
   const qrReceiver = qrSettings.receiver.trim();
-  const [resolved, setResolved] = useState<Address | null>(null);
   // ③メニュー (レジ管理の読み取り専用一覧) の開閉。多いと長くなるので既定は閉じる。
   const [menuOpen, setMenuOpen] = useState(false);
   // スマホの下部バー (お店のページの「公開」) を描く枠。StorefrontPublishPanel がここへ描く。
@@ -159,12 +158,13 @@ export function MobileOrderBuilder({
   const receiverName = draft.receiver.trim();
   const ens = useResolveAddress(isLikelyName(receiverName) ? receiverName : '');
 
-  // 受取先: 生 0x は入力値を最優先 (ENS 名のときだけ解決値を使う)。
+  // 受取先: 生 0x は入力値を最優先。ENS 名はこの解決結果だけを使う (シートの AddressInput も同じ query を見る)。
+  // シートから受け取った解決値を別に持つと、閉じた後の再解決が届かず古いアドレスのまま公開される (着金先のずれ)。
   const effectiveReceiver = useMemo<Address | null>(() => {
     const raw = draft.receiver.trim();
     if (isAddress(raw)) return getAddress(raw);
-    return resolved ?? ens.data?.address ?? null;
-  }, [draft.receiver, resolved, ens.data]);
+    return ens.data?.address ?? null;
+  }, [draft.receiver, ens.data]);
 
   // setReceiver は useMobileOrderDraft 側で useCallback 安定なのでそのまま渡す。
   const autofill = useReceiverAutofill({
@@ -379,7 +379,6 @@ export function MobileOrderBuilder({
                     <AddressInput
                       value={draft.receiver}
                       onChange={autofill.handleManualChange}
-                      onResolved={setResolved}
                     />
                     <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
                       {autofill.canUseConnected && (
