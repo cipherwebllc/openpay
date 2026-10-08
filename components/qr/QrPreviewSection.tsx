@@ -59,9 +59,10 @@ export function QrPreviewSection({
     <aside className="flex flex-col print:hidden lg:sticky lg:top-20">
       {/* お店負担で押せない理由と「通常の QR を出す」(1 か所だけ・お店負担を選んでいないときは何も出さない)。
           スマホは本文の流れの中 (下部の会計バーには理由を書く場所が無い)、PC は会計パネルの下。 */}
-      {((payUrl && showQrBlocked) || secondaryAction) && (
+      {/* どちらも QR の会計 (payUrl) があるときだけ (金額を消した後に押すと、次の入力で QR が勝手に開くのを防ぐ)。 */}
+      {payUrl && (showQrBlocked || secondaryAction) && (
         <div className="space-y-3 lg:order-last lg:mt-3">
-          {payUrl && showQrBlocked && (
+          {showQrBlocked && (
             <p role="status" className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
               {showQrBlocked}
             </p>

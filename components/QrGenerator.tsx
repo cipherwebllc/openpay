@@ -178,6 +178,11 @@ export function QrGenerator() {
   useEffect(() => {
     if (hydrated && !receiverValid) setReceiverInline(true);
   }, [hydrated, receiverValid]);
+  // QR の画面が開いたら設定シートは閉じる (QR を作っている間に設定を開いても、2 つの dialog を重ねない =
+  // Escape 1 回で両方が閉じる・focus の行き先が混ざるのを防ぐ)。
+  useEffect(() => {
+    if (qrModalOpen) setSettingsOpen(false);
+  }, [qrModalOpen]);
   const amountValid =
     mode === 'static' ||
     (mode === 'amount' && DECIMAL_PATTERN.test(amount) && Number(amount) > 0);

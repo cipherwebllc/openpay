@@ -190,6 +190,19 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(screen.queryByRole('dialog', { name: '決済用 QR コード' })).toBeNull();
     });
 
+    it('QR を出す準備の間に設定を開いても、QR が開いたら設定シートは閉じる (dialog を重ねない)', async () => {
+      const user = userEvent.setup();
+      let resolve!: (v: boolean) => void;
+      sd.releaseForNormal.mockReturnValue(new Promise<boolean>((r) => { resolve = r; }));
+      const [btn] = await ready(user);
+      await user.click(btn);
+      await user.click(screen.getByRole('button', { name: /^設定$/ }));
+      expect(screen.getByRole('dialog', { name: 'お店の設定' })).toBeTruthy();
+      resolve(true);
+      expect(await screen.findByRole('dialog', { name: '決済用 QR コード' })).toBeTruthy();
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'お店の設定' })).toBeNull());
+    });
+
     it('受け渡しを締め切れたら (または無ければ) 通常の QR を開く・お店の端末には「使わない」と知らせる', async () => {
       const user = userEvent.setup();
       const [btn] = await ready(user);
@@ -426,6 +439,20 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(await screen.findByRole('dialog')).toBeTruthy();
       expect(sd.releaseForNormal).toHaveBeenCalled();
       expect(shownQr()).toMatch(/\/pay\?/);
+    });
+
+    it('作れなかった後でも、金額を消したら「通常の QR を出す」は出さない (後の入力で QR が勝手に開かない)', async () => {
+      const user = userEvent.setup();
+      seed();
+      sd.state = { phase: 'create_failed', reason: 'unavailable' };
+      await ready(user);
+      expect(await screen.findByRole('button', { name: '通常の QR を出す' })).toBeTruthy();
+      await user.clear(screen.getByPlaceholderText('1000'));
+      expect(screen.queryByRole('button', { name: '通常の QR を出す' })).toBeNull();
+      // 金額を入れ直しても、押していない QR は開かない。
+      await user.type(screen.getByPlaceholderText('1000'), '5');
+      await new Promise((r) => setTimeout(r, 0));
+      expect(screen.queryByRole('dialog', { name: '決済用 QR コード' })).toBeNull();
     });
 
     it('作れなかった後の「通常の QR を出す」の締め切り待ちの間に金額を変えたら、開かない', async () => {

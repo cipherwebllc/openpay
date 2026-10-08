@@ -119,6 +119,14 @@ async function openQrModal(
   await user.click(btns[0]);
 }
 
+// QR の画面を閉じる (設定を変えて出し直すテスト用)。
+async function closeQrModal(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  const dialog = screen.getByRole('dialog', { name: '決済用 QR コード' });
+  await user.click(within(dialog).getByRole('button', { name: '閉じる' }));
+}
+
 // モーダルを開き、その中の EIP-681 互換 QR (details) を展開する。
 async function openEip681(
   user: ReturnType<typeof userEvent.setup>,
@@ -748,32 +756,37 @@ describe('QrGenerator', () => {
     });
 
     it('gas トグル: 切替で URL に gas=merchant が付く / 外れる', async () => {
+      // 設定シートで切り替え → QR を出し直して URL を見る (QR を開くと設定シートは閉じる)。
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '5');
-      await openAdvanced(user);
-      // URL はモーダル内。開いたまま gas トグル (背後の accordion ボタンは操作可)。
-      await openQrModal(user);
 
       // 既定は customer → URL に gas= は付かない
+      await openQrModal(user);
       await waitFor(() => {
         expect(
           screen.queryByText((t) => t.includes('gas=')),
         ).toBeNull();
       });
+      await closeQrModal(user);
 
       // 店主 gas 負担ボタン → URL に gas=merchant が出る
+      await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /店主が gas 相当額/ }));
+      await openQrModal(user);
       await waitFor(() => {
         expect(
           screen.getByText((t) => t.includes('gas=merchant')),
         ).toBeInTheDocument();
       });
+      await closeQrModal(user);
 
       // 顧客 gas 負担に戻す → gas= が消える
+      await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /顧客が gas 相当額/ }));
+      await openQrModal(user);
       await waitFor(() => {
         expect(
           screen.queryByText((t) => t.includes('gas=')),
@@ -922,7 +935,14 @@ describe('QrGenerator', () => {
       });
       await user.click(standardBtn);
 
-      // URL はモーダル内に表示。
+      // Phase 1: 通常決済モードの説明 (hint) が表示される (手数料% 表記なし)
+      expect(
+        screen.getByText(/自分のウォレットでガス/),
+      ).toBeInTheDocument();
+      // gas 負担方法 (顧客 / 店主) フィールドは消える (standard モードでは irrelevant)
+      expect(screen.queryByRole('button', { name: /顧客が gas/ })).toBeNull();
+
+      // URL はモーダル内に表示 (QR を開くと設定シートは閉じる)。
       await openQrModal(user);
       // URL に mode=standard が出る (font-mono の payUrl 表示 + 警告文等にも
       // "mode=standard" 文字列が含まれるため、payUrl 限定で /pay?... 形式の URL を assert)
@@ -931,11 +951,6 @@ describe('QrGenerator', () => {
           screen.getByText((t) => /\/pay\?[^ ]*mode=standard/.test(t)),
         ).toBeInTheDocument();
       });
-
-      // Phase 1: 通常決済モードの説明 (hint) が表示される (手数料% 表記なし)
-      expect(
-        screen.getByText(/自分のウォレットでガス/),
-      ).toBeInTheDocument();
 
       // gas 負担方法 (顧客 / 店主) フィールドは消える (standard モードでは irrelevant)
       expect(screen.queryByRole('button', { name: /顧客が gas/ })).toBeNull();
@@ -1305,14 +1320,17 @@ describe('QrGenerator', () => {
       await user.click(
         screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }),
       );
-      // URI はモーダル内。開いたまま payMode を切替 (背後の accordion は操作可)。
+      // URI はモーダル内 (QR を開くと設定シートは閉じる)。
       await openQrModal(user);
       await waitFor(() =>
         expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
       );
+      await closeQrModal(user);
 
       // ガスレス決済に戻すと EIP-681 URI は非表示 (gasless では EIP-681 で表現不可)
-      await user.click(screen.getByRole('button', { name: /ガス代不要/ }));
+      await openAdvanced(user);
+      await user.click(screen.getByRole('button', { name: /^ガス代不要/ }));
+      await openQrModal(user);
       await waitFor(() =>
         expect(screen.queryByText(/^ethereum:/)).toBeNull(),
       );
