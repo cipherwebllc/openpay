@@ -384,7 +384,7 @@ describe('resolveFacilitatorPaymentStatus', () => {
     expect(vi.mocked(findAuthorizationUsedTransactionHash).mock.calls[0][4]).toEqual({
       validAfter: 0n,
       validBefore: 9999999999n,
-      maxWindowSec: 1200,
+      maxWindowSec: 1230,
     });
   });
 

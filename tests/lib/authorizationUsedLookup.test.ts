@@ -7,6 +7,9 @@ import {
   findAuthorizationUsedInWindow,
   type AuthorizationLogClient,
 } from '@/lib/relay/authorizationUsedLookup';
+import { AUTHORIZATION_VALIDITY_WINDOW_SEC } from '@/lib/jpycEip3009';
+import { AUTHORIZATION_LOOKUP_WINDOW_SEC, MAX_VALIDITY_WINDOW_SEC } from '@/lib/relay/validityWindow';
+import { STORE_DEVICE_MAX_VALIDITY_SEC } from '@/lib/storeDevicePayment';
 
 const TX = `0x${'ab'.repeat(32)}` as Hex;
 const OTHER = `0x${'cd'.repeat(32)}` as Hex;
@@ -62,7 +65,27 @@ const OPTS = { lookbackBlocks: 10_000n };
 const T0 = 1_800_000_000n;
 const every2s = (n: number) => Array.from({ length: n }, () => 2);
 
+describe('範囲の下限に使う有効窓の上限は、受け付ける側の上限と一致 (ずれると探す範囲が足りなくなる)', () => {
+  it('中継 (recover・通常送金)・facilitator は 20 分・受け渡しは 180 秒。探す側はそれに時計のずれの余裕を足す', () => {
+    expect(MAX_VALIDITY_WINDOW_SEC).toBe(AUTHORIZATION_VALIDITY_WINDOW_SEC * 4); // 通常送金の validateAuthorization
+    expect(AUTHORIZATION_LOOKUP_WINDOW_SEC).toBeGreaterThan(MAX_VALIDITY_WINDOW_SEC);
+    expect(STORE_DEVICE_MAX_VALIDITY_SEC).toBe(180);
+  });
+});
+
 describe('findAuthorizationUsedInWindow', () => {
+  it('範囲の両端のブロック (時刻 = 下限・時刻 = validBefore − 1) も探す', async () => {
+    // 1 秒おきのチェーンで、下限ちょうど・上限ちょうどのブロックにログを置く
+    const ones = Array.from({ length: 3000 }, () => 1);
+    const low = chain(T0, ones, [[2000, TX]], 10n);
+    const validBefore = low.ts[2000] + 210n;
+    expect(await findAuthorizationUsedInWindow(client(low).api, { validAfter: 0n, validBefore, maxWindowSec: 210 }, OPTS)).toBe(TX);
+    const high = chain(T0, ones, [[2209, TX]], 10n); // 時刻 = validBefore − 1
+    expect(await findAuthorizationUsedInWindow(client(high).api, { validAfter: 0n, validBefore, maxWindowSec: 210 }, OPTS)).toBe(TX);
+    const outside = chain(T0, ones, [[2210, TX], [1999, OTHER]], 10n); // 時刻 = validBefore・下限 − 1
+    expect(await findAuthorizationUsedInWindow(client(outside).api, { validAfter: 0n, validBefore, maxWindowSec: 210 }, OPTS)).toBeNull();
+  });
+
   it('10 ブロックまでの RPC (Alchemy 無料枠) でも、有効期限の前のブロックから見つける', async () => {
     // 3,000 ブロック (2 秒おき)。署名の期限は 2,500 番の時刻・使われたのは 2,450 番。
     const c = chain(T0, every2s(3000), [[2450, TX]], 10n);

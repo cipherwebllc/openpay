@@ -282,7 +282,7 @@ describe('POST /api/relay/jpyc/status', () => {
       expect.any(String),
       FROM,
       expect.any(String),
-      { validAfter: 0n, validBefore: 9999999999n, maxWindowSec: 1200 },
+      { validAfter: 0n, validBefore: 9999999999n, maxWindowSec: 1230 },
     );
   });
 
