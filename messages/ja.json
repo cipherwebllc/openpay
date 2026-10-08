@@ -425,10 +425,6 @@
     },
     "storeDeviceTabLocked": "お店の端末が支払いを送っています（または結果を確かめています）。結果が出るまでタブを切り替えられません。",
     "storeDeviceStatusLabel": "お店がガス代を肩代わりして送る支払い",
-    "tipPanel": {
-      "heading": "応援を受け取る Tip widget を作成",
-      "subheading": "ブログ・ポートフォリオ・配信ページに貼るだけで、JPYC / USDC のチップを受け取れます。"
-    },
     "offramp": {
       "heading": "受け取った通貨を換金",
       "subheading": "受取済みの JPYC / USDC を JPY に換金する場合の取引所リンクです。",
@@ -905,11 +901,19 @@
     "poweredBy": "powered by"
   },
   "TipEmbedGenerator": {
-    "step1Title": "受取先",
+    "receiveHeading": "受け取り",
+    "receiveEdit": "設定",
+    "receiveSettingsTitle": "受け取りの設定",
+    "receiveDone": "完了",
+    "receiverIsWallet": "接続中のウォレット",
+    "presetsLabelWithSymbol": "チップ金額プリセット ({symbol})",
+    "presetAmountItem": "金額 {n} ({symbol})",
+    "presetLabelItem": "ラベル {n}",
+    "optionalFilled": "{count} 件入力済み",
     "step2Title": "表示をカスタマイズ",
     "step3Title": "公開する",
     "tipInboxTitle": "受け取った質問",
-    "tipInboxDescription": "公開されません。受取ウォレットでサインインした画面にのみ表示されます。",
+    "tipInboxDescription": "非公開です。受取ウォレットでサインインすると表示されます。",
     "tipInboxSignInCta": "受取ウォレットでサインイン",
     "tipInboxLoading": "受け取った質問を読み込んでいます…",
     "tipInboxError": "受け取った質問を取得できませんでした。",
@@ -937,7 +941,6 @@
     "messageCounter": "{count} / 200",
     "colorLabel": "テーマカラー",
     "colorInvalid": "色は #rrggbb 形式で指定してください",
-    "presetsLabel": "チップ金額プリセット",
     "presetsHint": "例: {defaults}",
     "presetAmountPlaceholder": "例: 1000",
     "presetLabelPlaceholder": "☕ コーヒー1杯",
@@ -977,8 +980,7 @@
     "buttonSnippetHint": "note・Linktree・ブログに貼れる「チップ」ボタンです。",
     "buttonLabelNamed": "{name} さんにチップ",
     "buttonLabelGeneric": "チップを送る",
-    "qrClose": "閉じる",
-    "changeButton": "変更"
+    "qrClose": "閉じる"
   },
   "HandleClaim": {
     "barPublish": "公開する",

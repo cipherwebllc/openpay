@@ -62,7 +62,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await page.goto('/ja/create');
     await page.getByRole('button', { name: 'チップ' }).click();
     await expect(
-      page.getByRole('heading', { name: /応援を受け取る Tip widget を作成/ }),
+      page.getByRole('heading', { name: '表示をカスタマイズ' }),
     ).toBeVisible();
     await expect(
       page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/),

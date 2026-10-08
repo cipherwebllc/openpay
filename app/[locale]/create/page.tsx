@@ -209,19 +209,8 @@ function CreatePageBody() {
           />
         </div>
       )}
-      {tab === 'tip' && (
-        <div className="space-y-5">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800">
-              {t('tipPanel.heading')}
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">
-              {t('tipPanel.subheading')}
-            </p>
-          </div>
-          <TipEmbedGenerator />
-        </div>
-      )}
+      {/* 見出しはタブ名に任せる (決済QR・レジ・モバイル注文・プロフと同じ・2026-10 磨き上げ P4)。 */}
+      {tab === 'tip' && <TipEmbedGenerator />}
       {tab === 'profile' && env.enableHandles && (
         env.enableCreatorStoreUi ? (
           <div className="space-y-6">
