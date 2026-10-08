@@ -18,6 +18,7 @@ import { STOREFRONT_FEE_BPS, PREORDER_FEE_BPS } from '@/lib/mobileOrderFee';
 import { env } from '@/lib/env';
 import { DISCLOSED_RECOVER_FEE } from './disclosedRecoverFee';
 import { DISCLOSED_X402_FEE } from './disclosedX402Fee';
+import { DISCLOSED_STORE_GAS_WALLET } from './disclosedStoreGasWallet';
 
 export const LEGAL_ENTITY = {
   serviceName: 'OpenPay',
@@ -131,14 +132,19 @@ export const LEGAL_ENTITY = {
   // 2026-09-10 改定案: 保護配布の外部ホスト・チケット・回収の限界を第13条 (18) に追加。
   // 2026-10-07 改定: レジ (店頭POS) の通常決済 (ガスあり) の OpenPay 利用料 (2026 年 7 月から決済額の 1%) を
   //   廃止 (第 3 条・第 5 条)。値下げ = 利用者に有利な変更。特商法・免責事項も同日改定。
-  termsEffectiveDate: '2026-10-07',
+  // 2026-10-08 改定: 「お店がガス代を肩代わりして送る」(店主の端末がガス代を払って送る・OpenPay 利用料 0 円・仕組み上
+  //   1 wei・署名の受け渡しは最長 10 分) を新設 (第 2 条 (6)(c)・第 3 条・第 5 条 (1)(11))。特商法・免責事項・
+  //   プライバシーも同日改定。SOT は DISCLOSED_STORE_GAS_WALLET。提供開始 (flag 点灯) と同じ日。
+  termsEffectiveDate: '2026-10-08',
   // 2026-07-29 改定: 非公開チップメッセージ (質問箱 Phase 1) の取得項目 (2-1(7))・
   //   利用目的 (2-2(9))・保管期間 (最長 180 日+本人削除) を追加。実質的改定のため施行日を更新。
   // 2026-09-10 改定案: 購入歴のない保有者も含む配布先へのチケット情報の提供を明示。
-  privacyEffectiveDate: '2026-09-10',
+  // 2026-10-08 改定: 「お店がガス代を肩代わりして送る」の受け渡し情報 (取得 1-(10)・利用目的 2-(12)・最長 10 分で削除)。
+  privacyEffectiveDate: '2026-10-08',
   // 2026-10-07 改定: レジの通常決済の利用料の廃止 (Terms と同日)。
-  disclaimerEffectiveDate: '2026-10-07',
-  tokuteiEffectiveDate: '2026-10-07',
+  // 2026-10-08 改定: 「お店がガス代を肩代わりして送る」の新設 (Terms と同日)。
+  disclaimerEffectiveDate: '2026-10-08',
+  tokuteiEffectiveDate: '2026-10-08',
   // モバイル注文システム利用料の施行日 (本利用料を新設した開示の公表日)。doc 全体の施行日 (上記
   // 2026-06-13) とは別管理 — 本利用料は新規・任意の付加機能 (モバイル注文) に対する個別条項で、機能の
   // 提供開始 (flag 点灯) まで実際の徴収は発生しない。本文は本定数の日付を補間して表示する。
@@ -273,6 +279,7 @@ export function mobileOrderFeeDisclosureDivergence(): string | null {
 
 // 本体は lib/disclosedX402Fee.ts (client の hosted 購入が法務本文を bundle しないように分離)。
 export { DISCLOSED_X402_FEE };
+export { DISCLOSED_STORE_GAS_WALLET };
 
 // デジタル商品ストアの USDC 決済 leg に関する開示 SOT。出品価格は JPYC 建てのまま、
 // Base native USDC へ換算し、OpenPay の x402 利用料は徴収しない。Terms 第 13 条・LP・

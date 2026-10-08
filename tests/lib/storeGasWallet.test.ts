@@ -5,6 +5,7 @@ import {
   STORE_GAS_WALLET_STORAGE_KEY,
   createStoreGasWallet,
   estimateRemainingSends,
+  STORE_GAS_SETTLE_GAS_ESTIMATE,
   loadStoreGasWallet,
   readStoreGasWalletKey,
   removeStoreGasWallet,
@@ -125,9 +126,10 @@ describe('storeGasWallet: 鍵の作成・保存・削除', () => {
 });
 
 describe('storeGasWallet: 残り回数と戻せる額', () => {
-  it('残り回数 = 残高 ÷ (ガス価格 × 150,000)・0 以下は 0', () => {
-    // 30 gwei × 150k = 0.0045 POL/回 → 1 POL で 222 回
-    expect(estimateRemainingSends(10n ** 18n, 30n * 10n ** 9n)).toBe(111);
+  it('残り回数 = 残高 ÷ (ガス価格 × 目安ガス 20 万)・0 以下は 0', () => {
+    // 30 gwei × 20 万 = 0.006 POL/回 → 1 POL で 166 回 (Amoy 実測 gasUsed 15.6〜17.4 万を少し多めに見積もる)
+    expect(STORE_GAS_SETTLE_GAS_ESTIMATE).toBe(200_000n);
+    expect(estimateRemainingSends(10n ** 18n, 30n * 10n ** 9n)).toBe(166);
     expect(estimateRemainingSends(0n, 30n * 10n ** 9n)).toBe(0);
     expect(estimateRemainingSends(10n ** 18n, 0n)).toBe(0);
   });

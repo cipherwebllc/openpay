@@ -81,6 +81,10 @@ const JA: ShopGuideContent = {
       body: '2 カラムの POS 画面で商品を選び、その場で QR 会計。現金と併用でき、専用端末は不要です。',
     },
     {
+      title: 'お店がガス代を肩代わりして送る',
+      body: '店頭レジや、画面に表示した金額指定の決済QRでは、お店の端末のガス用ウォレット（少額の POL）がガス代を払って送る設定も選べます（JPYC・Polygon のみ。決済QRの決済モードで選び、レジも同じ設定）。お客様は署名するだけで、OpenPay 利用料は 0 円（ガス代は実費・仕組み上 1 wei）。',
+    },
+    {
       title: 'モバイルオーダー',
       body: 'お客様は QR を読み取り、スマホでメニューを選んでそのまま JPYC で支払い。アプリのインストールは不要です。',
     },
@@ -164,6 +168,10 @@ const EN: ShopGuideContent = {
     {
       title: 'Counter POS',
       body: 'Pick items on a two-column POS screen and settle with a QR on the spot. Works alongside cash; no dedicated terminal.',
+    },
+    {
+      title: 'The shop pays the gas',
+      body: 'At the in-store register and with a fixed-amount payment QR shown on screen, the shop can also have its device’s gas wallet (a little POL) pay the gas and send the payment (JPYC on Polygon only; choose it as the payment mode on the payment QR tab; the register uses the same setting). Customers only sign, and the OpenPay usage fee is 0 (the shop pays the actual gas; 1 wei by design).',
     },
     {
       title: 'Mobile ordering',

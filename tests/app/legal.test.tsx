@@ -60,9 +60,9 @@ describe('Legal pages', () => {
         : ['seller operates', 'availability', '60 seconds', 'wallet address, product, revision and timestamps', 'does not store or serve', 'responsible for delivery', '(6)', 'third parties', 'not immediately recalled', 'holder without a purchase history', '(14)', '(7)', '(11)']) expect(clause).toContain(text);
       renderWithIntl(<TermsPage />, { locale });
       expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-07');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-08');
       expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-09-10');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-08');
     });
 
     it('第13条: license の政策値・売り手・権利・返金・公開情報を同じ namespace 内で固定する', async () => {
@@ -86,7 +86,7 @@ describe('Legal pages', () => {
       expect(clause(ja, 17)).toContain('公開台帳'); expect(clause(en, 17)).toContain('public ledger');
       expect(clause(ja, 17)).toContain('公開 Verify API'); expect(clause(en, 17)).toContain('public Verify API');
       expect(clause(ja, 16)).toContain('法的適合性の認定を意味しません'); expect(clause(en, 16)).toContain('not legal clearance');
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-07');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-08');
     });
     it('ja: h1 と 11 条すべての title が render される', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
@@ -747,11 +747,12 @@ describe('Legal pages', () => {
       // 2026-08-24: dual-rail 出品 (第三者出品の USDC/Base 併売・利用料 0%) を 5 条 (10) に追加。
       // 2026-09-10 改定案: 保護配布の第13条 (18) 追記 (公開前承認対象)。
       // 2026-10-07: レジの通常決済の利用料の廃止で Terms/特商法/免責を同日改定。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-07');
-      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-07');
-      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-07');
+      // 2026-10-08: 「お店がガス代を肩代わりして送る」の新設で Terms/特商法/免責/プライバシーを同日改定。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-10-08');
+      expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-10-08');
+      expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-10-08');
       // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-09-10');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-10-08');
     });
   });
 

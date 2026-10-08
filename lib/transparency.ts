@@ -10,6 +10,7 @@ import {
   DISCLOSED_MOBILE_ORDER_FEE,
   DISCLOSED_RECOVER_FEE,
   DISCLOSED_TIP_FEE_MODELS,
+  DISCLOSED_STORE_GAS_WALLET,
   DISCLOSED_X402_FEE,
 } from './legal';
 import { sellGuideContentFor } from './sellGuide';
@@ -161,6 +162,7 @@ const ja: TransparencyContent = {
     `モバイル注文: 店頭・券売機は決済額の ${percentFromBps(DISCLOSED_MOBILE_ORDER_FEE.storefrontBps)}、事前モバイルオーダーは ${percentFromBps(DISCLOSED_MOBILE_ORDER_FEE.preorderBps)}。ガスレス決済の利用料とは重複せず、モバイル注文ではこの料率だけを決済経路を問わず適用します。事前モバイルオーダーは店舗の選択で店舗負担または顧客上乗せです。`,
     `x402 facilitator: 決済額の ${percentFromBps(DISCLOSED_X402_FEE.bps)}・最低 ${DISCLOSED_X402_FEE.floorJpyc} JPYC。買い手側への上乗せで、売り手は表示額をそのまま受け取ります。`,
     `レジ（POS）: レジの機能は無料。お客様がガス代を払う通常決済は OpenPay 利用料無料、ガスレス決済は決済額の ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)}・最低 ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC（店舗負担）。レジの通常決済の利用料は 2026 年 10 月 7 日に廃止しました。`,
+    `お店がガス代を肩代わりして送る（店頭レジ・画面に表示した金額指定の決済QR・JPYC・${DISCLOSED_STORE_GAS_WALLET.chainName}）: OpenPay 利用料は 0 円。ネットワーク手数料は店舗の端末のガス用ウォレットが払い、仕組み上、送金 1 回につき ${DISCLOSED_STORE_GAS_WALLET.feeWei} wei がお客様の支払いに上乗せされ OpenPay へ送られます。OpenPay は署名を最長 ${DISCLOSED_STORE_GAS_WALLET.handoffRetentionSec / 60} 分受け渡すだけで、ガスを払わず送信もしません。印刷・保存した QR は対象外です。`,
     `チップ: 受け取り手数料はなし。JPYC は送る側がガス相当（約 ${DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc} JPYC）を上乗せ（決済額の ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} は適用しません）。USDC (Base) は送る側が Paymaster にガスを USDC で支払い、USDC (Arc) は送る側がネットワーク手数料を USDC でウォレットから直接負担。いずれも OpenPay の徴収はありません。`,
   ],
   feeDetailsLead: '正確な適用条件と支払時期は、',
@@ -257,6 +259,7 @@ const en: TransparencyContent = {
     `Mobile ordering: ${percentFromBps(DISCLOSED_MOBILE_ORDER_FEE.storefrontBps)} for in-store or kiosk orders and ${percentFromBps(DISCLOSED_MOBILE_ORDER_FEE.preorderBps)} for pre-orders. It does not stack with the gasless-payment fee; only the mobile-order rate applies regardless of payment path. For pre-orders, the store selects merchant-borne or customer-added.`,
     `x402 facilitator: ${percentFromBps(DISCLOSED_X402_FEE.bps)} of the payment, with a ${DISCLOSED_X402_FEE.floorJpyc} JPYC minimum. It is added on the buyer’s side, and the seller receives the listed amount in full.`,
     `Register (POS): The register itself is free. Standard payments, where the customer pays the gas, have no OpenPay usage fee; gasless payments are ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} of the payment, minimum ${DISCLOSED_RECOVER_FEE.floorJpyc} JPYC, merchant-paid. The register’s standard-payment fee was discontinued on October 7, 2026.`,
+    `The shop pays the gas (in-store register or a fixed-amount payment QR shown on screen, JPYC on ${DISCLOSED_STORE_GAS_WALLET.chainName}): the OpenPay usage fee is 0. The shop device’s gas wallet pays the network fee; by design, ${DISCLOSED_STORE_GAS_WALLET.feeWei} wei is added to the customer’s payment per transfer and sent to OpenPay. OpenPay only hands over the signature for up to ${DISCLOSED_STORE_GAS_WALLET.handoffRetentionSec / 60} minutes and neither pays the gas nor sends the payment. Printed or saved QR codes are not eligible.`,
     `Tips: Receiving tips is free. For JPYC, the sender adds the gas equivalent (about ${DISCLOSED_TIP_FEE_MODELS.jpycRelay.floorJpyc} JPYC; the ${percentFromBps(DISCLOSED_RECOVER_FEE.percentFromJulyBps)} fee does not apply). For USDC (Base), the sender pays gas in USDC to the Paymaster; for USDC (Arc), the sender pays network fees in USDC directly from their wallet. OpenPay collects nothing for any of these tips.`,
   ],
   feeDetailsLead: 'For exact applicability and payment timing, see the ',
