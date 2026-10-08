@@ -179,6 +179,18 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(hold.stop).toHaveBeenCalled();
   });
 
+  it('ガス用ウォレットの枠は「お店がガス代を肩代わりして送る」を選んでいるときだけ出す (決済QR と同じ)', async () => {
+    seed(VALID, true);
+    const first = render(<RegisterMode />);
+    await findTile(/コーヒー/);
+    expect(await screen.findByText('gas-wallet-panel')).toBeTruthy();
+    first.unmount();
+    seed(VALID, false);
+    render(<RegisterMode />);
+    await findTile(/コーヒー/);
+    expect(screen.queryByText('gas-wallet-panel')).toBeNull();
+  });
+
   it('お店負担を選んでいない: 受け渡しを作らず、今のレジのまま (fee_kind も今のまま)', async () => {
     const user = userEvent.setup();
     seed(VALID, false);

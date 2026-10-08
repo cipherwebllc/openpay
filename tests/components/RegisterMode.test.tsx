@@ -984,14 +984,23 @@ describe('RegisterMode', () => {
     if (r.ok) expect(r.params.feeKind).toBeUndefined();
   });
 
-  it('お店の端末のガス用ウォレット: flag OFF (既定) では出さない・ON で出す', async () => {
+  it('お店の端末のガス用ウォレット: flag OFF (既定) では出さない・ON でも「お店がガス代を肩代わりして送る」を選んだときだけ出す', async () => {
     seedReceiver();
-    const { unmount } = render(<RegisterMode />);
+    const first = render(<RegisterMode />);
     await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
     expect(screen.queryByText('お店の端末のガス用ウォレット')).toBeNull();
-    unmount();
+    first.unmount();
     envHold.enableStoreGasWallet = true;
     try {
+      // flag ON でも、支払い方法でお店負担を選んでいなければ出さない (決済QR と同じ)。
+      const second = render(<RegisterMode />);
+      await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+      expect(screen.queryByText('お店の端末のガス用ウォレット')).toBeNull();
+      second.unmount();
+      window.localStorage.setItem(
+        QR_KEY,
+        JSON.stringify({ receiver: VALID, token: 'jpyc', chain: 'polygon', payMode: 'gasless', storePays: true }),
+      );
       render(<RegisterMode />);
       expect(await screen.findByText('お店の端末のガス用ウォレット')).toBeTruthy();
     } finally {
