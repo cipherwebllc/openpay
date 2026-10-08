@@ -4,9 +4,25 @@ import { renderWithIntl as render } from '../_helpers/i18n';
 
 const hold = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
+  platform: 'other' as 'ios' | 'android' | 'other',
+  standalone: false,
 }));
 vi.mock('@/hooks/useStoreGasWallet', () => ({
   useStoreGasWallet: () => hold.state,
+}));
+// 端末の種類とホーム画面のアプリかどうか (iPhone・iPad のブラウザでは鍵が消えうる)。
+vi.mock('@/lib/walletDeepLink', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/walletDeepLink')>()),
+  detectMobilePlatform: () => hold.platform,
+}));
+vi.mock('@/hooks/usePwaDisplayMode', () => ({
+  usePwaDisplayMode: () => ({ isStandalone: hold.standalone }),
+}));
+// 補充 (wagmi を使う) は別のテストで確かめる。ここでは渡すチェーンだけ見る。
+vi.mock('@/components/StoreGasWalletTopUp', () => ({
+  StoreGasWalletTopUp: ({ chains }: { chains: { chainId: number }[] }) => (
+    <div data-testid="topup">{chains.map((c) => c.chainId).join(',')}</div>
+  ),
 }));
 
 import { StoreGasWalletPanel } from '@/components/StoreGasWalletPanel';
@@ -45,6 +61,8 @@ function ready(over: Record<string, unknown> & ChainRead = {}) {
 describe('StoreGasWalletPanel', () => {
   beforeEach(() => {
     hold.state = base();
+    hold.platform = 'other';
+    hold.standalone = false;
   });
 
   it('未作成: 説明と注意 (鍵は端末だけ・少額・JPYC を入れない) と作成ボタン', () => {
@@ -228,5 +246,60 @@ describe('StoreGasWalletPanel', () => {
     render(<StoreGasWalletPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'この端末から消す' }));
     expect(screen.getByText(/まだ 2 KAIA 残っています/)).toBeTruthy();
+  });
+
+  describe('iPhone・iPad (ブラウザは 7 日ほど開かないとデータを消す)', () => {
+    it('ブラウザでは、ホーム画面に追加したアプリで作るよう手順を出し、作るボタンは「それでも」を押してから', () => {
+      hold.platform = 'ios';
+      render(<StoreGasWalletPanel />);
+      expect(screen.getByText('iPhone・iPad では、ホーム画面に追加した OpenPay で作ってください')).toBeTruthy();
+      expect(screen.getByText(/7 日ほど OpenPay を開かないと、この端末に保存した鍵が消えることがあります/)).toBeTruthy();
+      expect(screen.getByText(/ホーム画面に追加/, { selector: 'li' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'この端末にガス用ウォレットを作る' })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'それでもこのブラウザで作る' }));
+      fireEvent.click(screen.getByRole('button', { name: 'この端末にガス用ウォレットを作る' }));
+      expect(hold.state.create).toHaveBeenCalled();
+    });
+
+    it('ブラウザで作った鍵には、消えうることと作り直し方を出し続ける', () => {
+      hold.platform = 'ios';
+      hold.state = ready({ balance: 10n ** 18n, gasPrice: 1n });
+      render(<StoreGasWalletPanel />);
+      expect(screen.getByText(/この鍵はブラウザに保存されています。7 日ほど OpenPay を開かないと消えることがあります/)).toBeTruthy();
+    });
+
+    it('ホーム画面のアプリでは、手順を出さずにすぐ作れる・消えにくいことを出す', () => {
+      hold.platform = 'ios';
+      hold.standalone = true;
+      render(<StoreGasWalletPanel />);
+      expect(screen.queryByText('iPhone・iPad では、ホーム画面に追加した OpenPay で作ってください')).toBeNull();
+      expect(screen.getByText(/ホーム画面のアプリに保存しています/)).toBeTruthy();
+      expect(screen.queryByText(/Safari では、しばらく開かないと/)).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'この端末にガス用ウォレットを作る' }));
+      expect(hold.state.create).toHaveBeenCalled();
+    });
+
+    it('iPhone・iPad 以外は今までどおり (手順なし・一般の注意)', () => {
+      hold.platform = 'android';
+      render(<StoreGasWalletPanel />);
+      expect(screen.queryByText('iPhone・iPad では、ホーム画面に追加した OpenPay で作ってください')).toBeNull();
+      expect(screen.getByText(/Safari では、しばらく開かないと/)).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'この端末にガス用ウォレットを作る' })).toBeTruthy();
+    });
+  });
+
+  it('消されにくい保存を認められたら、そう出す', () => {
+    hold.state = ready({ balance: 10n ** 18n, gasPrice: 1n, persisted: true });
+    render(<StoreGasWalletPanel />);
+    expect(screen.getByText(/データを消されにくくする保存を認めてもらっています/)).toBeTruthy();
+  });
+
+  it('補充の欄には、新しい会計に使えるチェーンだけを渡す', () => {
+    hold.state = ready({
+      chains: [chain(AMOY, { balance: 10n ** 18n, gasPrice: 1n }), chain(KAIROS, { balance: 10n ** 18n, gasPrice: 1n, active: false })],
+    });
+    render(<StoreGasWalletPanel />);
+    expect(screen.getByTestId('topup')).toHaveTextContent('80002');
+    expect(screen.getByTestId('topup')).not.toHaveTextContent('1001');
   });
 });

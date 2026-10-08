@@ -2515,7 +2515,31 @@
       "withdrawUnknown": "送れたかどうかを確かめられませんでした。しばらくして残高を更新し、取引を確かめてください。",
       "corruptNote": "この端末に保存されたガス用ウォレットを読めませんでした。上書きを防ぐため、新しく作れません。ガス代のトークンが入っている場合は、ブラウザのデータを消さずにそのままにしておいてください。",
       "removeBlockedNote": "送金の確定を待っている間は消せません。",
-      "removeFailed": "この端末から消せませんでした。もう一度お試しください。"
+      "removeFailed": "この端末から消せませんでした。もう一度お試しください。",
+      "iosBrowserTitle": "iPhone・iPad では、ホーム画面に追加した OpenPay で作ってください",
+      "iosBrowserBody": "Safari などのブラウザでは、7 日ほど OpenPay を開かないと、この端末に保存した鍵が消えることがあります（入れたガス代のトークンは戻せません）。ホーム画面に追加したアプリは、この消去の対象になりません。ブラウザとアプリは保存場所が別なので、レジに使うアプリの方で作ってください。",
+      "iosBrowserStep3": "ホーム画面の OpenPay を開き、この「ガス用ウォレット」の欄で作る",
+      "iosBrowserCreateAnyway": "それでもこのブラウザで作る",
+      "iosBrowserKeptNote": "この鍵はブラウザに保存されています。7 日ほど OpenPay を開かないと消えることがあります。毎日開くか、「残りを戻す」で戻してから、ホーム画面に追加したアプリで作り直してください。",
+      "iosAppNote": "ホーム画面のアプリに保存しています（ブラウザの 7 日の消去の対象になりません）。",
+      "persistedNote": "このブラウザに、データを消されにくくする保存を認めてもらっています。",
+      "topUpTitle": "接続中のウォレットから補充",
+      "topUpConnectHint": "右上の「接続」でお店のウォレットをつなぐと、ここからガス代のトークンを送れます。",
+      "topUpChainLabel": "補充するチェーン",
+      "topUpAmountLabel": "送る額 ({symbol})",
+      "topUpRange": "目安 {min}〜{max} {symbol}・1 回 {max} {symbol} まで（少額だけ入れてください）",
+      "topUpSend": "{amount} {symbol} を送る",
+      "topUpSwitch": "ウォレットを {chain} に切り替える",
+      "topUpConfirmInWallet": "ウォレットで確認してください…",
+      "topUpMining": "送っています。確定を待っています…",
+      "topUpDone": "補充しました。",
+      "topUpReverted": "補充に失敗しました（取り消されました）。",
+      "topUpError": {
+        "invalid": "送る額を数字で入れてください。",
+        "too_much": "1 回に送れるのは {max} {symbol} までです（ガス用ウォレットには少額だけ入れてください）。",
+        "insufficient": "接続中のウォレットの {symbol} が足りません。",
+        "failed": "送れませんでした。もう一度お試しください。"
+      }
     },
     "storeDevice": {
       "badge": "お店がガス代を肩代わり（利用料 0 円）",

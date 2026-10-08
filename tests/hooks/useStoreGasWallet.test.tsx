@@ -280,6 +280,21 @@ describe('useStoreGasWallet', () => {
     expect(result.current.chains[0]?.balance).toBe(7n * 10n ** 18n);
   });
 
+  it('鍵があるときは、ブラウザに消されにくい保存を頼み、結果を返す', async () => {
+    const persist = vi.fn(async () => true);
+    Object.defineProperty(window.navigator, 'storage', {
+      value: { persisted: async () => false, persist },
+      configurable: true,
+    });
+    try {
+      const { result } = await setup();
+      await waitFor(() => expect(result.current.persisted).toBe(true));
+      expect(persist).toHaveBeenCalled();
+    } finally {
+      delete (window.navigator as { storage?: unknown }).storage;
+    }
+  });
+
   it('消すと鍵も残高表示も消える', async () => {
     const { result } = await setup();
     await act(async () => {

@@ -21,20 +21,44 @@ export const STORE_GAS_WALLET_STORAGE_KEY = 'openpay:store-gas-wallet:v1';
 // を避ける)。送信時の上限は別 (lib/storeDevicePayment.ts の STORE_DEVICE_SETTLE_GAS_CAP = 50 万・見積もりを切り詰めない)。
 export const STORE_GAS_SETTLE_GAS_ESTIMATE = 200_000n;
 
-// 入れておく目安 (ネイティブ通貨・チェーンごと)。1 回の送信 (約 17 万 gas) の目安: Polygon 0.01〜0.05 POL
-// (単価 55〜274 gwei)・Kaia 約 0.005 KAIA (27.5 gkei)・Avalanche 約 0.001 AVAX (5 gwei)。少額にとどめる (端末の紛失・
-// ブラウザの侵害で失いうるのは入れた分だけ)。
-const FUND_GUIDE: Readonly<Record<number, string>> = {
-  137: '1〜2',
-  80002: '1〜2',
-  8217: '1〜2',
-  1001: '1〜2',
-  43114: '0.05〜0.1',
-  43113: '0.05〜0.1',
+// 入れておく目安 (ネイティブ通貨・チェーンごと・10 進の文字列)。1 回の送信 (約 13〜17 万 gas) の実測: Polygon 0.01〜0.05 POL
+// (単価 55〜274 gwei)・Kaia 約 0.003 KAIA (25 gkei)・Avalanche 約 0.0008 AVAX (5 gwei)。少額にとどめる (端末の紛失・
+// ブラウザの侵害で失いうるのは入れた分だけ)。「接続中のウォレットから補充」の既定額 (min) と 1 回の上限 (max) にも使う。
+const FUND_GUIDE: Readonly<Record<number, { min: string; max: string }>> = {
+  137: { min: '1', max: '2' },
+  80002: { min: '1', max: '2' },
+  8217: { min: '1', max: '2' },
+  1001: { min: '1', max: '2' },
+  43114: { min: '0.05', max: '0.1' },
+  43113: { min: '0.05', max: '0.1' },
 };
 
+/** 入れておく目安の表示 (例: 「1〜2」)。表に無いチェーンは空。 */
 export function storeGasFundGuide(chainId: number): string {
-  return FUND_GUIDE[chainId] ?? '';
+  const g = FUND_GUIDE[chainId];
+  return g ? `${g.min}〜${g.max}` : '';
+}
+
+/** 入れておく目安の数値 (補充の既定額と 1 回の上限)。表に無いチェーンは null。 */
+export function storeGasFundRange(chainId: number): { min: string; max: string } | null {
+  return FUND_GUIDE[chainId] ?? null;
+}
+
+/**
+ * ブラウザに「この端末のデータを消されにくくする」よう頼む (navigator.storage.persist)。認めるかはブラウザが決める
+ * (Safari 17 以降はホーム画面に追加したアプリなどで認める・Chrome は利用状況で判断)。結果: true = 認められた /
+ * false = 認められない / null = 頼めない。鍵の作成・表示を止めない (頼めなくても失敗にしない = 付帯の処理を本体に
+ * 波及させない)。
+ */
+export async function requestStoreGasWalletPersistence(): Promise<boolean | null> {
+  try {
+    const storage = typeof navigator === 'undefined' ? undefined : navigator.storage;
+    if (!storage?.persist) return null;
+    if (storage.persisted && (await storage.persisted())) return true;
+    return await storage.persist();
+  } catch {
+    return null;
+  }
 }
 
 // 端末をまたがない直列化の鍵 (同じ端末の別タブで作る・消す・送るが重ならないように)。

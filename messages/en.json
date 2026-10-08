@@ -2515,7 +2515,31 @@
       "withdrawUnknown": "Couldn't confirm whether it was sent. Refresh the balance in a moment and check the transaction.",
       "corruptNote": "The gas wallet saved on this device couldn’t be read. To avoid overwriting it, a new one can’t be created. If it holds gas tokens, leave it as is and don’t clear the browser data.",
       "removeBlockedNote": "You can't remove it while a transfer is waiting for confirmation.",
-      "removeFailed": "Couldn't remove it from this device. Please try again."
+      "removeFailed": "Couldn't remove it from this device. Please try again.",
+      "iosBrowserTitle": "On iPhone and iPad, create it in OpenPay added to your Home Screen",
+      "iosBrowserBody": "In Safari and other browsers, the key saved on this device may be deleted if you don’t open OpenPay for about 7 days (any gas tokens in it can’t be recovered). Apps added to the Home Screen are not subject to this deletion. The browser and the app keep separate storage, so create it in the app you use for the register.",
+      "iosBrowserStep3": "Open OpenPay from the Home Screen and create it in this “gas wallet” section",
+      "iosBrowserCreateAnyway": "Create it in this browser anyway",
+      "iosBrowserKeptNote": "This key is saved in the browser. It may be deleted if you don’t open OpenPay for about 7 days. Open it every day, or return the balance with “Return the remaining balance” and create a new one in the app added to your Home Screen.",
+      "iosAppNote": "Saved in the Home Screen app (not subject to the browser’s 7-day deletion).",
+      "persistedNote": "This browser has granted storage that is less likely to be cleared.",
+      "topUpTitle": "Top up from the connected wallet",
+      "topUpConnectHint": "Connect your shop wallet with “Connect” at the top right to send gas tokens from here.",
+      "topUpChainLabel": "Chain to top up",
+      "topUpAmountLabel": "Amount ({symbol})",
+      "topUpRange": "Guide: {min}–{max} {symbol}; up to {max} {symbol} per top-up (keep only a small amount)",
+      "topUpSend": "Send {amount} {symbol}",
+      "topUpSwitch": "Switch the wallet to {chain}",
+      "topUpConfirmInWallet": "Confirm in your wallet…",
+      "topUpMining": "Sending. Waiting for confirmation…",
+      "topUpDone": "Topped up.",
+      "topUpReverted": "The top-up failed (it was reverted).",
+      "topUpError": {
+        "invalid": "Enter the amount as a number.",
+        "too_much": "You can send up to {max} {symbol} at a time (keep only a small amount in the gas wallet).",
+        "insufficient": "The connected wallet doesn’t have enough {symbol}.",
+        "failed": "Couldn’t send. Please try again."
+      }
     },
     "storeDevice": {
       "badge": "The shop pays the gas (usage fee 0)",

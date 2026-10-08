@@ -26,6 +26,7 @@ import {
   loadStoreGasWallet,
   readStoreGasWalletKey,
   removeStoreGasWallet,
+  requestStoreGasWalletPersistence,
   withStoreGasWalletLock,
   withdrawableAmount,
   type CreateStoreGasWalletResult,
@@ -105,6 +106,19 @@ export function useStoreGasWallet() {
   }, []);
 
   const address = walletState?.state === 'ok' ? walletState.info.address : null;
+
+  // 鍵があるときは、ブラウザに消されにくい保存を頼む (作った直後・開いたとき)。結果は画面の案内に使うだけ。
+  const [persisted, setPersisted] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!address) return;
+    let live = true;
+    void requestStoreGasWalletPersistence().then((r) => {
+      if (live) setPersisted(r);
+    });
+    return () => {
+      live = false;
+    };
+  }, [address]);
 
   useEffect(() => {
     unknownRef.current =
@@ -313,6 +327,7 @@ export function useStoreGasWallet() {
     hydrated: walletState !== null,
     walletState,
     address,
+    persisted,
     withdrawStatus,
     removeBlocked,
     refresh,
