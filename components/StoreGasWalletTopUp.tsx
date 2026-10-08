@@ -104,7 +104,11 @@ export function StoreGasWalletTopUp({
     if (heartbeatRef.current) clearInterval(heartbeatRef.current);
   }, []);
   const reload = useCallback(() => {
-    setOp(liveStoreGasTopUps(gasAddress)[0] ?? null);
+    const next = liveStoreGasTopUps(gasAddress)[0] ?? null;
+    // 同じ記録なら同じオブジェクトのまま (読み直しのたびに描画や interval を作り直さない)。
+    setOp((prev) =>
+      prev && next && prev.id === next.id && prev.hash === next.hash && prev.at === next.at ? prev : next,
+    );
   }, [gasAddress]);
   useEffect(() => {
     reload();

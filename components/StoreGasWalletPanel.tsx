@@ -209,7 +209,8 @@ export function StoreGasWalletPanel({
       ) : (
         <p className="mt-1 text-xs leading-relaxed text-slate-500">{t('storeGasWallet.safariNote')}</p>
       )}
-      {g.persisted === true && !(isIos && isStandalone) && (
+      {/* iPhone・iPad では出さない (消されにくい保存が 7 日の消去を防ぐ根拠は無い = 偽の安心にしない) */}
+      {g.persisted === true && !isIos && (
         <p className="mt-1 text-xs leading-relaxed text-slate-500">{t('storeGasWallet.persistedNote')}</p>
       )}
       {iosBrowser && g.walletState.state === 'ok' && (

@@ -267,7 +267,7 @@ describe('StoreGasWalletPanel', () => {
       hold.platform = 'ios';
       render(<StoreGasWalletPanel />);
       expect(screen.getByText('iPhone・iPad では、ホーム画面に追加した OpenPay で作ってください')).toBeTruthy();
-      expect(screen.getByText(/OpenPay をタップなどで操作しない日が 7 日ほど続くと、この端末に保存した鍵が消えることがあります（開くだけでは防げません/)).toBeTruthy();
+      expect(screen.getByText(/OpenPay をタップなどで操作しないまま、ブラウザを使った日が 7 日ほどたつと、この端末に保存した鍵が消えることがあります（開くだけでは防げません/)).toBeTruthy();
       expect(screen.getByText(/ホーム画面に追加/, { selector: 'li' })).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'この端末にガス用ウォレットを作る' })).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'それでもこのブラウザで作る' }));
@@ -279,7 +279,7 @@ describe('StoreGasWalletPanel', () => {
       hold.platform = 'ios';
       hold.state = ready({ balance: 10n ** 18n, gasPrice: 1n });
       render(<StoreGasWalletPanel />);
-      expect(screen.getByText(/この鍵はブラウザに保存されています。OpenPay をタップなどで操作しない日が 7 日ほど続くと消えることがあります/)).toBeTruthy();
+      expect(screen.getByText(/この鍵はブラウザに保存されています。OpenPay をタップなどで操作しないまま、ブラウザを使った日が 7 日ほどたつと消えることがあります/)).toBeTruthy();
     });
 
     it('ホーム画面のアプリでは、手順を出さずにすぐ作れる・消えにくいことを出す', () => {
@@ -302,10 +302,15 @@ describe('StoreGasWalletPanel', () => {
     });
   });
 
-  it('消されにくい保存を認められたら、そう出す', () => {
+  it('消されにくい保存を認められたら、そう出す (iPhone・iPad では出さない = 7 日の消去を防ぐ根拠が無い)', () => {
     hold.state = ready({ balance: 10n ** 18n, gasPrice: 1n, persisted: true });
-    render(<StoreGasWalletPanel />);
+    const r = render(<StoreGasWalletPanel />);
     expect(screen.getByText(/データを消されにくくする保存を認めてもらっています/)).toBeTruthy();
+    r.unmount();
+    hold.platform = 'ios';
+    render(<StoreGasWalletPanel />);
+    expect(screen.getByText(/この鍵はブラウザに保存されています/)).toBeTruthy();
+    expect(screen.queryByText(/データを消されにくくする保存を認めてもらっています/)).toBeNull();
   });
 
   it('補充の欄には、新しい会計に使えるチェーンだけを渡す', () => {

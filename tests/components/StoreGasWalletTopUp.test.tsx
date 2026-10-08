@@ -136,7 +136,7 @@ describe('StoreGasWalletTopUp', () => {
   it('別の画面で同じ宛先への補充が途中なら、送らせない (その旨を出す)', () => {
     reserveStoreGasTopUp(gas, 80002);
     const v = show();
-    expect(screen.getByRole('status')).toHaveTextContent('別の画面で、ウォレットの確認中の補充があります。');
+    expect(screen.getByRole('status')).toHaveTextContent('別の画面（または再読み込みの前）で、ウォレットの確認中の補充があります。');
     expect(sendButton()).toBeDisabled();
     expect(v.onPendingChange).toHaveBeenLastCalledWith(true);
   });
