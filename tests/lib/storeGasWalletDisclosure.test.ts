@@ -21,6 +21,7 @@ import { qrGuideContentFor } from '@/lib/qrGuide';
 import { shopGuideContentFor } from '@/lib/shopGuide';
 import { startGuideContentFor } from '@/lib/startGuide';
 import { transparencyContentFor } from '@/lib/transparency';
+import { NEWS_ITEMS } from '@/lib/news';
 
 const WEI = `${D.feeWei} wei`;
 const MIN = D.handoffRetentionSec / 60;
@@ -56,10 +57,10 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
     expect(en.Terms.article5.body).toContain('path in paragraph (11) are not in scope');
     const ja11 = ja.Terms.article5.body.split('(11)').at(-1)!;
     const en11 = en.Terms.article5.body.split('(11)').at(-1)!;
-    for (const w of ['店頭レジ (POS)', '画面に表示した金額指定の決済QR', D.chainName, 'チップ', '印刷・保存・URL のコピー', '金額を指定しない', '0 円', WEI, '当社指定ウォレットへ', `最長 ${MIN} 分`, JA_DATE]) {
+    for (const w of ['店頭レジ (POS)', '画面に表示した金額指定の決済QR', D.chainName, 'モバイル注文', 'チップ', '印刷・保存・URL のコピー', '金額を指定しない', '0 円', WEI, '当社指定ウォレットへ', `最長 ${MIN} 分`, JA_DATE]) {
       expect(ja11).toContain(w);
     }
-    for (const w of ['in-store register (POS)', 'fixed-amount payment QR shown', D.chainName, 'tips', 'printed, saved or copied', 'no amount', 'is 0', WEI, 'designated by the Company', `up to ${MIN} minutes`, EN_DATE]) {
+    for (const w of ['in-store register (POS)', 'fixed-amount payment QR shown', D.chainName, 'mobile orders', 'tips', 'printed, saved or copied', 'no amount', 'is 0', WEI, 'designated by the Company', `up to ${MIN} minutes`, EN_DATE]) {
       expect(en11).toContain(w);
     }
   });
@@ -83,16 +84,18 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
     expect(en.Disclaimer.section7.body).toContain('stored only in the browser on that device');
     expect(ja.Privacy.section1.body).toContain('(10) 「お店がガス代を肩代わりして送る」');
     expect(ja.Privacy.section2.body).toContain('(12) 「お店がガス代を肩代わりして送る」');
+    expect(en.Privacy.section1.body).toContain('(10) When “The shop pays the gas” is used');
+    expect(en.Privacy.section2.body).toContain('(12) Hand-off information for “The shop pays the gas”');
     expect(ja.Privacy.section4.body).toContain(`最長 ${MIN} 分で自動的に削除`);
     expect(en.Privacy.section4.body).toContain(`within ${MIN} minutes`);
   });
 
   it('LP (レジ・決済QR の料金カード・FAQ) は 0 円と 1 wei の行き先を書く (大きな 0% は出さない)', () => {
     for (const body of [ja.Landing.supportFeeRegisterBody, ja.Landing.supportFeePayBody, ja.Landing.faqA1]) {
-      for (const w of ['0 円', WEI, 'OpenPay へ']) expect(body).toContain(w);
+      for (const w of ['0 円', WEI, 'OpenPay へ', `JPYC・${D.chainName} のみ`]) expect(body).toContain(w);
     }
     for (const body of [en.Landing.supportFeeRegisterBody, en.Landing.supportFeePayBody, en.Landing.faqA1]) {
-      for (const w of [' 0 ', WEI, 'sent to OpenPay']) expect(body).toContain(w);
+      for (const w of [' 0 ', WEI, 'sent to OpenPay', `JPYC on ${D.chainName} only`]) expect(body).toContain(w);
     }
     // 決済QR のカードには「レジ」を含めない (決済QR の話に限る)・印刷/保存は対象外
     expect(ja.Landing.supportFeePayBody).not.toContain('レジ');
@@ -117,10 +120,24 @@ describe('「お店がガス代を肩代わりして送る」の開示 (DISCLOSE
     const llms = readFileSync(join(process.cwd(), 'public/llms.txt'), 'utf8');
     const line = llms.split('\n').find((l) => l.includes('お店がガス代を肩代わりして送る')) ?? '';
     for (const w of ['0 円', WEI, D.chainName, '印刷や保存した QR は対象外', 'OpenPay へ']) expect(line).toContain(w);
-    for (const [locale, title] of [['ja', 'お店がガス代を肩代わりして送る'], ['en', 'The shop pays the gas']] as const) {
-      expect(shopGuideContentFor(locale).features.some((f) => f.title === title)).toBe(true);
-      expect(qrGuideContentFor(locale).features.some((f) => f.title === title)).toBe(true);
+    // ガイドの本文も 0 円・1 wei・対象チェーン (と決済QRでは印刷/保存/コピー/金額なしは対象外) を書く
+    for (const [locale, title, words, qrOnly] of [
+      ['ja', 'お店がガス代を肩代わりして送る', ['0 円', WEI, `JPYC・${D.chainName} のみ`], ['印刷・保存・URL のコピー', '金額なし']],
+      ['en', 'The shop pays the gas', ['is 0', WEI, `JPYC on ${D.chainName} only`], ['printed, saved or copied', 'without an amount']],
+    ] as const) {
+      const shop = shopGuideContentFor(locale).features.find((f) => f.title === title)?.body ?? '';
+      const qr = qrGuideContentFor(locale).features.find((f) => f.title === title)?.body ?? '';
+      for (const w of words) {
+        expect(shop).toContain(w);
+        expect(qr).toContain(w);
+      }
+      for (const w of qrOnly) expect(qr).toContain(w);
     }
+    // お知らせ (提供開始日・0 円・1 wei・対象チェーン・印刷/保存は対象外)
+    const news = NEWS_ITEMS.find((n) => n.id === `store-pays-gas-${D.effectiveDate}`);
+    expect(news?.date).toBe(D.effectiveDate);
+    for (const w of ['0 円', `${D.feeWei} wei`, `JPYC・${D.chainName}`, '印刷・保存した QR は対象外']) expect(news?.body.ja).toContain(w);
+    for (const w of ['is 0', `${D.feeWei} wei`, `JPYC on ${D.chainName}`, 'not printed or saved']) expect(news?.body.en).toContain(w);
     const startJa = startGuideContentFor('ja').sections.find((s) => s.n === 8)?.defs ?? [];
     const startEn = startGuideContentFor('en').sections.find((s) => s.n === 8)?.defs ?? [];
     expect(startJa.find((x) => x.term.includes('お店がガス代を肩代わり'))?.desc).toContain(`最長 ${MIN} 分`);

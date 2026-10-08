@@ -2408,6 +2408,7 @@ OpenPay は署名を最長 10 分受け渡すだけで、ガスを払わず送�
 - `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON`・`NEXT_PUBLIC_FEE_RECEIVER` が今の中継と同じ値であること (変えない)。
 - 手数料受取口 (会社 @handle) を受取先にした店では使えない (forwarder が merchant == feeReceiver で revert するため画面で止める)。
 - チェーンは Polygon だけ (Kaia・Avalanche は次の段階・user 裁定 2026-10-08)。
+- 利用料メーター a1 (`NEXT_PUBLIC_ENABLE_USAGE_FEE`) が OFF であること (ON だと forwarder が無効になり受け渡しは unsupported_chain で止まる・本番は未提供のまま)。
 
 ### 17.2 点灯 (merge と同じ日・user 承認)
 1. 開示 (Terms 第 2 条 (6)(c)・第 3 条・第 5 条 (1)(11)・特商法・免責・プライバシー・LP・llms.txt・ガイド・お知らせ) の PR を merge する。

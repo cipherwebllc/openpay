@@ -99,7 +99,7 @@ const JA: QrGuideContent = {
     },
     {
       title: 'お店がガス代を肩代わりして送る',
-      body: '決済モードで「お店がガス代を肩代わり」を選ぶと、画面に表示した金額指定の QR では、お店の端末のガス用ウォレット（少額の POL）がガス代を払って送ります。お客様は署名するだけで、OpenPay 利用料は 0 円（ガス代は実費・仕組み上 1 wei）。QR は画面に表示している間だけ使えます。印刷・保存・URL のコピーをした QR や、金額なしの QR では使えません。',
+      body: '決済モードで「お店がガス代を肩代わり」を選ぶと、画面に表示した金額指定の QR（JPYC・Polygon のみ）では、お店の端末のガス用ウォレット（少額の POL）がガス代を払って送ります。お客様は署名するだけで、OpenPay 利用料は 0 円（ガス代は実費・仕組み上 1 wei）。QR は画面に表示している間だけ使えます。印刷・保存・URL のコピーをした QR や、金額なしの QR では使えません。',
     },
   ],
 
@@ -183,7 +183,7 @@ const EN: QrGuideContent = {
     },
     {
       title: 'The shop pays the gas',
-      body: 'Choose “The shop pays the gas” as the payment mode, and for a fixed-amount QR shown on screen, this device’s gas wallet (a little POL) pays the gas and sends the payment. Customers only sign, and the OpenPay usage fee is 0 (the shop pays the actual gas; 1 wei by design). The QR works only while shown on screen; it doesn’t work when printed, saved or copied, or without an amount.',
+      body: 'Choose “The shop pays the gas” as the payment mode, and for a fixed-amount QR shown on screen (JPYC on Polygon only), this device’s gas wallet (a little POL) pays the gas and sends the payment. Customers only sign, and the OpenPay usage fee is 0 (the shop pays the actual gas; 1 wei by design). The QR works only while shown on screen; it doesn’t work when printed, saved or copied, or without an amount.',
     },
   ],
 
