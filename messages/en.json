@@ -2608,6 +2608,12 @@
     "notReady": {
       "items": "Pick an item",
       "receiver": "Set a receiving wallet"
+    },
+    "mobileOrderBridge": {
+      "title": "Take orders on customers’ phones with this menu",
+      "cta": "Start mobile ordering",
+      "dismiss": "Dismiss",
+      "sheetNote": "Items you edit here also appear on your mobile-order menu."
     }
   },
   "ProductPresetManager": {

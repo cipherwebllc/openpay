@@ -204,7 +204,9 @@ function CreatePageBody() {
       {tab === 'register' && (
         <div className="space-y-5">
           <TodayCard />
-          <RegisterMode />
+          <RegisterMode
+            {...(env.enableMobileOrder ? { onStartMobileOrder: () => changeTab('mobileOrder') } : {})}
+          />
         </div>
       )}
       {tab === 'tip' && (

@@ -2608,6 +2608,12 @@
     "notReady": {
       "items": "商品を選んでください",
       "receiver": "受取先を設定してください"
+    },
+    "mobileOrderBridge": {
+      "title": "このメニューで、<wbr></wbr>スマホ注文も受けられます",
+      "cta": "モバイル注文を始める",
+      "dismiss": "閉じる",
+      "sheetNote": "ここで編集した商品は、モバイル注文のメニューにもなります。"
     }
   },
   "ProductPresetManager": {

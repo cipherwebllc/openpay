@@ -46,6 +46,7 @@ const envHold = vi.hoisted(() => ({
   enableHandles: false,
   enableMenuOptions: false,
   enableStoreGasWallet: false,
+  enableMobileOrder: false,
 }));
 vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
@@ -67,6 +68,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       },
       get enableStoreGasWallet() {
         return envHold.enableStoreGasWallet;
+      },
+      get enableMobileOrder() {
+        return envHold.enableMobileOrder;
       },
     },
   };
@@ -132,6 +136,7 @@ describe('RegisterMode', () => {
     envHold.enableShopLive = false; // Phase 1 flag も OFF 起点
     envHold.enableHandles = false;
     envHold.enableMenuOptions = false; // Phase 2 flag も OFF 起点
+    envHold.enableMobileOrder = false;
     sessionHold.isSignedIn = false;
     global.fetch = vi.fn(async () => jsonRes({ ok: false }, 404)) as unknown as typeof fetch;
   });
@@ -843,6 +848,56 @@ describe('RegisterMode', () => {
 
   // レジ システム利用料: flag ON のとき /checkout に feeKind='register' を付け、CheckoutForm が
   // standard 経路の JPYC 決済に recover の OpenPay利用料 % を課金する合図にする。
+  describe('モバイル注文への橋 (2026-10 磨き上げ P4)', () => {
+    it('モバイル注文が使えて、メニューにできる商品があれば出す・押すとモバイル注文タブへ', async () => {
+      envHold.enableMobileOrder = true;
+      const onStart = vi.fn();
+      const user = userEvent.setup();
+      render(<RegisterMode onStartMobileOrder={onStart} />);
+      await findTile(/コーヒー/);
+      expect(screen.getByText('このメニューで、スマホ注文も受けられます')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'モバイル注文を始める' }));
+      expect(onStart).toHaveBeenCalledOnce();
+    });
+
+    it('閉じたらこの端末では出さない (次に開いても)', async () => {
+      envHold.enableMobileOrder = true;
+      const user = userEvent.setup();
+      const { unmount } = render(<RegisterMode onStartMobileOrder={vi.fn()} />);
+      await findTile(/コーヒー/);
+      await user.click(screen.getByRole('button', { name: '閉じる' }));
+      expect(screen.queryByText('このメニューで、スマホ注文も受けられます')).toBeNull();
+      unmount();
+      render(<RegisterMode onStartMobileOrder={vi.fn()} />);
+      await findTile(/コーヒー/);
+      expect(screen.queryByText('このメニューで、スマホ注文も受けられます')).toBeNull();
+    });
+
+    it('モバイル注文が使えない (flag OFF) ・メニューにできる商品 (有効な JPYC) が無いときは出さない', async () => {
+      const first = render(<RegisterMode onStartMobileOrder={vi.fn()} />);
+      await findTile(/コーヒー/);
+      expect(screen.queryByText('このメニューで、スマホ注文も受けられます')).toBeNull();
+      first.unmount();
+      envHold.enableMobileOrder = true;
+      window.localStorage.setItem('openpay:product-presets:v1', JSON.stringify({
+        presets: [{ id: 'u', name: 'USDCグッズ', unitPrice: '5', token: 'usdc', taxRate: 10, taxCategory: 'taxable_10', memo: null, sortOrder: 0, enabled: true }],
+        receipt: { day: '', n: 0 },
+      }));
+      render(<RegisterMode onStartMobileOrder={vi.fn()} />);
+      await findTile(/USDCグッズ/);
+      expect(screen.queryByText('このメニューで、スマホ注文も受けられます')).toBeNull();
+    });
+
+    it('商品の編集シートの先頭に「モバイル注文のメニューにもなる」の 1 行', async () => {
+      envHold.enableMobileOrder = true;
+      const user = userEvent.setup();
+      render(<RegisterMode onStartMobileOrder={vi.fn()} />);
+      await findTile(/コーヒー/);
+      await user.click(screen.getByRole('button', { name: '商品を編集' }));
+      expect(screen.getByText('ここで編集した商品は、モバイル注文のメニューにもなります。')).toBeInTheDocument();
+    });
+  });
+
   it('flag ON: レジの /checkout URL に fee_kind=register が付く (standard 課金の合図)', async () => {
     envHold.enableRegisterFee = true;
     const user = userEvent.setup();

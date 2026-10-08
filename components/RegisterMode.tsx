@@ -25,6 +25,7 @@ import { ChainChooser } from './ChainChooser';
 import { QrReceiptPosterFields, QrReceiverFields, QrStoreNameField } from './qr/QrReceiverSection';
 import { QrSettingsSection } from './qr/QrSettingsSection';
 import { RegisterCartLine } from './register/RegisterCartLine';
+import { MobileOrderBridge } from './register/MobileOrderBridge';
 import { QrPreviewModal } from './QrPreviewModal';
 import { StoreGasWalletPanel } from './StoreGasWalletPanel';
 import { StoreDeviceRegisterStatus } from './StoreDeviceRegisterStatus';
@@ -42,6 +43,7 @@ import { switchTokenKeepingPrefs, useQrSettings, withChain } from '@/hooks/useQr
 import { useReceiverAutofill, type ReceiverSource } from '@/hooks/useReceiverAutofill';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { useProductPresets, type ProductPreset } from '@/hooks/useProductPresets';
+import { presetsToMenu } from '@/hooks/useMobileOrderDraft';
 import { useShopLive } from '@/hooks/useShopLive';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { randomId } from '@/lib/id';
@@ -83,7 +85,10 @@ type CartLine = {
   presetId?: string;
 };
 
-type RegisterModeProps = {};
+type RegisterModeProps = {
+  /** モバイル注文タブへ移る (page が渡す・モバイル注文が使えるときだけ)。レジの商品がそのままメニューになる。 */
+  onStartMobileOrder?: () => void;
+};
 
 type RegisterShopLive = {
   state: ShopLiveState;
@@ -127,6 +132,7 @@ function RegisterModeWithShopLive(props: RegisterModeProps) {
 
 function RegisterModeContent({
   shopLive,
+  onStartMobileOrder,
 }: RegisterModeProps & { shopLive?: RegisterShopLive }) {
   const t = useTranslations('RegisterMode');
   const tQr = useTranslations('QrGenerator');
@@ -269,6 +275,8 @@ function RegisterModeContent({
         (p) => (p.category?.trim() ?? '') === effectiveCatFilter,
       )
     : presetStore.enabledPresets;
+  // モバイル注文のメニューになる商品があるか (メニューを作る presetsToMenu そのもので数える = 条件を二重に持たない)。
+  const hasMenuItem = useMemo(() => presetsToMenu(presetStore.presets).length > 0, [presetStore.presets]);
   const soldOut = useMemo(
     () => new Set(shopLive?.state.soldOut ?? []),
     [shopLive?.state.soldOut],
@@ -819,6 +827,10 @@ function RegisterModeContent({
                   {t('currencyMismatch', { symbol })}
                 </p>
               )}
+              {/* レジの商品 (有効な JPYC 商品) はそのままモバイル注文のメニュー。メニューにできる商品があるときだけ橋を出す。 */}
+              {env.enableMobileOrder && onStartMobileOrder && hasMenuItem && (
+                <MobileOrderBridge onStart={onStartMobileOrder} />
+              )}
             </div>
           </section>
 
@@ -1054,6 +1066,9 @@ function RegisterModeContent({
         title={t('productsSheetTitle')}
         doneLabel={tQr('shopSettings.done')}
       >
+        {env.enableMobileOrder && (
+          <p className="px-1 text-xs leading-relaxed text-slate-600">{t('mobileOrderBridge.sheetNote')}</p>
+        )}
         {env.enableShopLive && (
           <label className="flex items-center gap-2 px-1 text-xs text-slate-600">
             <input
