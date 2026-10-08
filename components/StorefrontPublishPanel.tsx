@@ -13,9 +13,8 @@ import { useLocale, useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '@/lib/env';
 import { MobileOrderPlacardModal } from '@/components/MobileOrderPlacardModal';
-import { useAccount } from 'wagmi';
-import { ConnectButton } from '@/components/ConnectButton';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { SignInGate } from '@/components/SignInGate';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import type { HandleTipConfig } from '@/lib/handle';
@@ -55,8 +54,7 @@ export function StorefrontPublishPanel({
 }) {
   const t = useTranslations('MobileOrder');
   const locale = useLocale();
-  const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } = useSiweSession();
-  const { isConnected, address: walletAddress } = useAccount();
+  const { isSignedIn, sessionAddress } = useSiweSession();
   const origin = useOrigin();
   const linkCopy = useCopyToClipboard();
   const qc = useQueryClient();
@@ -206,28 +204,7 @@ export function StorefrontPublishPanel({
       <p className="mt-1 text-xs text-slate-500">{t('publishIntro')}</p>
 
       {!isSignedIn ? (
-        <div className="mt-3">
-          {/* 未接続では signIn が wallet_not_connected で失敗するだけなので、サインインボタンの
-              代わりに接続導線を出す (プロフタブ P1 #476 と同型)。@handle 取得/公開の処理は不変。 */}
-          {isConnected && walletAddress ? (
-            <>
-              <button
-                type="button"
-                onClick={() => void signIn(t('publishSignInStatement')).catch(() => {})}
-                disabled={isSigningIn}
-                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
-              >
-                {isSigningIn ? t('publishSigningIn') : t('publishSignIn')}
-              </button>
-              {signInError && <p className="mt-2 text-xs text-red-600">{t('publishSignInError')}</p>}
-            </>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-xs text-slate-500">{t('publishConnectFirst')}</p>
-              <ConnectButton variant="secondary" />
-            </div>
-          )}
-        </div>
+        <SignInGate className="mt-3" statement={t('publishSignInStatement')} cta={t('publishSignIn')} />
       ) : mine.isLoading ? (
         <p className="mt-3 text-xs text-slate-500">{t('publishLoading')}</p>
       ) : mine.isError ? (

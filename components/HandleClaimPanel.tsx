@@ -17,9 +17,9 @@ import { useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '@/lib/env';
 import { useAccount } from 'wagmi';
-import { ConnectButton } from '@/components/ConnectButton';
 import { shortAddress } from '@/lib/format';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { SignInGate } from '@/components/SignInGate';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { getPublicHandleUrl } from '@/lib/publicHandleUrl';
@@ -200,8 +200,7 @@ export function HandleClaimPanel({
 }) {
   const { isConnected, address } = useAccount();
   const t = useTranslations('HandleClaim');
-  const { isSignedIn, sessionAddress, signIn, isSigningIn, signInError } =
-    useSiweSession();
+  const { isSignedIn, sessionAddress } = useSiweSession();
   const origin = useOrigin();
   const linkCopy = useCopyToClipboard();
   const qc = useQueryClient();
@@ -369,31 +368,13 @@ export function HandleClaimPanel({
 
       {!isSignedIn ? (
         // サインインは config の有無に関わらず出す (既存 handle の編集/削除を受取先未設定でも到達可能に)。
-        <div className="mt-3">
-          {isConnected && address ? (
-            <>
-              <p className="mb-2 text-xs text-slate-500">
-                {t('statusConnected', { address: shortAddress(address) })}
-              </p>
-              <button
-                type="button"
-                onClick={() => void signIn(t('signInStatement')).catch(() => {})}
-                disabled={isSigningIn}
-                className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-40"
-              >
-                {isSigningIn ? t('signingIn') : t('signInButton')}
-              </button>
-              {signInError && (
-                <p className="mt-2 text-xs text-red-600">{t('signInError')}</p>
-              )}
-            </>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-xs text-slate-500">{t('connectFirst')}</p>
-              <ConnectButton variant="secondary" />
-            </div>
-          )}
-        </div>
+        <SignInGate
+          className="mt-3"
+          statement={t('signInStatement')}
+          cta={t('signInButton')}
+          // どのウォレットで取得するかを見せる (接続済みのときだけ)。
+          prompt={isConnected && address ? t('statusConnected', { address: shortAddress(address) }) : undefined}
+        />
       ) : (
         <div className="mt-3 space-y-3">
           {sessionAddress && (

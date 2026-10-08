@@ -105,9 +105,10 @@ function generateOrderCode(): string {
 }
 
 // アバター読込失敗/未設定時のフォールバック頭文字 (@handle と同じくコードポイント単位)。
+// 先頭の記号 (括弧・「」等) は飛ばし、最初の文字・数字・絵文字を出す (「（店名未設定）」→「店」・「（株）〇〇」→「株」)。
 function initialOf(name: string): string {
-  const n = name.trim();
-  return n ? ([...n][0] ?? '').toUpperCase() : '🏪';
+  const first = [...name.trim()].find((c) => /[\p{L}\p{N}\p{Extended_Pictographic}]/u.test(c));
+  return first ? first.toUpperCase() : '🏪';
 }
 
 // テーマ色 (config.accent) 未設定時のブランド既定 (= tailwind brand.DEFAULT)。

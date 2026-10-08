@@ -11,9 +11,8 @@ import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Store } from 'lucide-react';
 import { env } from '@/lib/env';
-import { useAccount } from 'wagmi';
-import { ConnectButton } from '@/components/ConnectButton';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { SignInGate } from '@/components/SignInGate';
 import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
 import { useOrigin } from '@/hooks/useOrigin';
 import { LICENSE_STANDARD_TERMS } from '@/lib/license/standardTerms';
@@ -84,16 +83,9 @@ function EnabledCreatorStoreSellerPanel({
 }: {
   handle: string | null;
 }) {
-  const { isConnected, address } = useAccount();
   const t = useTranslations('CreatorStoreSeller');
   const guideLocale = useLocale();
-  const {
-    isSignedIn,
-    sessionAddress,
-    signIn,
-    isSigningIn,
-    signInError,
-  } = useSiweSession();
+  const { isSignedIn, sessionAddress } = useSiweSession();
   useStoreCacheScope(sessionAddress);
 
   return (
@@ -128,32 +120,7 @@ function EnabledCreatorStoreSellerPanel({
       </div>
 
       {!isSignedIn || !sessionAddress ? (
-        <div className="mt-5">
-          <p className="text-sm text-slate-600">{t('signInPrompt')}</p>
-          {isConnected && address ? (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  // 拒否理由は hook の signInError で表示し、click handler の未処理 rejection だけを断つ。
-                  void signIn(t('signInStatement')).catch(() => undefined);
-                }}
-                disabled={isSigningIn}
-                className="mt-3 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {isSigningIn ? t('signingIn') : t('signIn')}
-              </button>
-              {signInError ? (
-                <p className="mt-2 text-sm text-red-600">{t('signInError')}</p>
-              ) : null}
-            </>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-xs text-slate-500">{t('connectFirst')}</p>
-              <ConnectButton variant="secondary" />
-            </div>
-          )}
-        </div>
+        <SignInGate className="mt-5" statement={t('signInStatement')} cta={t('signIn')} prompt={t('signInPrompt')} />
       ) : (
         // sessionAddress を key にして wallet 切替時に本文を含む全 local state を破棄する。
         <SignedInSellerPanel

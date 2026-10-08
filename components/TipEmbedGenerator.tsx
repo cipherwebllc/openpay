@@ -28,6 +28,7 @@ import {
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { SignInGate } from '@/components/SignInGate';
 import { env } from '@/lib/env';
 import { crossChainAllowed } from '@/lib/url/shared';
 import {
@@ -117,8 +118,8 @@ function TipMessageInbox() {
   const t = useTranslations('TipEmbedGenerator');
   const tNav = useTranslations('Nav');
   const locale = useLocale();
-  const { address, isConnected } = useAccount();
-  const { isSignedIn, signIn, isSigningIn, signInError } = useSiweSession();
+  const { address } = useAccount();
+  const { isSignedIn } = useSiweSession();
   const queryClient = useQueryClient();
   const queryKey = ['tip-messages', address] as const;
   const inbox = useQuery({
@@ -169,28 +170,12 @@ function TipMessageInbox() {
       </div>
 
       {!isSignedIn ? (
-        <div className="mt-3">
-          <p className="text-sm text-slate-600">
-            {t('tipInboxSignInRequired')}
-          </p>
-          {isConnected ? (
-            <button
-              type="button"
-              disabled={isSigningIn}
-              onClick={() =>
-                void signIn(tNav('siweStatement')).catch(() => undefined)
-              }
-              className="mt-3 rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
-            >
-              {t('tipInboxSignInCta')}
-            </button>
-          ) : null}
-          {signInError ? (
-            <p className="mt-2 text-xs text-red-600">
-              {t('tipInboxSignInError')}
-            </p>
-          ) : null}
-        </div>
+        <SignInGate
+          className="mt-3"
+          statement={tNav('siweStatement')}
+          // 何のためのサインインかは上の説明 (tipInboxDescription) が言っているので、案内の文は重ねない。
+          cta={t('tipInboxSignInCta')}
+        />
       ) : inbox.isLoading ? (
         <p className="mt-4 text-center text-sm text-slate-500">
           {t('tipInboxLoading')}
