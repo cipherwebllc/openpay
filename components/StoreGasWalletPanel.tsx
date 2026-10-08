@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
+import { ChevronRight } from 'lucide-react';
 import { formatEther, type Address, type Hex } from 'viem';
 import { nativeSymbolForChainId, txExplorerUrl } from '@/lib/chains';
 import { estimateRemainingSends, storeGasFundGuide } from '@/lib/storeGasWallet';
@@ -189,8 +190,10 @@ export function StoreGasWalletPanel({
   );
 
   return (
-    <details className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
-      <summary className="cursor-pointer font-semibold text-slate-800">
+    // 見た目は会計画面の他の行 (明細・換金) と同じ折りたたみの行 (2026-10 磨き上げ P2・中身と文言は不変)。
+    <details className="group/gas rounded-2xl bg-white p-4 text-sm text-slate-700 shadow-card ring-1 ring-slate-200/70">
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-slate-700 [&::-webkit-details-marker]:hidden">
+        <span className="flex-1">
         {t('storeGasWallet.title')}
         <span className="ml-2 text-xs font-normal text-slate-500">
           {g.walletState.state === 'ok'
@@ -203,6 +206,11 @@ export function StoreGasWalletPanel({
               ? t('storeGasWallet.badgeNone')
               : ''}
         </span>
+        </span>
+        <ChevronRight
+          className="h-4 w-4 flex-none text-slate-400 transition-transform group-open/gas:rotate-90"
+          aria-hidden
+        />
       </summary>
 
       <p className="mt-3 text-xs leading-relaxed text-slate-600">
