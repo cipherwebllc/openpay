@@ -12,6 +12,8 @@ const rpc = vi.hoisted(() => ({
   code: '0x',
   receiptStatus: '0x1' as string | null,
   chainIds: [80002] as number[],
+  // この宛先の残高の応答を止める (古い鍵の読み取りが遅れて返る競合の再現用)。
+  hold: null as { address: string; gate: Promise<void> } | null,
 }));
 // 対象のチェーン (既定は Amoy だけ・複数チェーンのテストで差し替える)。
 vi.mock('@/lib/storeDevicePayment', async (importOriginal) => ({
@@ -30,8 +32,14 @@ vi.mock('@/lib/chains', async (importOriginal) => {
           switch (method) {
             case 'eth_chainId':
               return `0x${chainId.toString(16)}`;
-            case 'eth_getBalance':
+            case 'eth_getBalance': {
+              const hold = rpc.hold;
+              if (hold && String((params as unknown[])[0]).toLowerCase() === hold.address.toLowerCase()) {
+                await hold.gate;
+                return '0x0';
+              }
               return `0x${(rpc.balanceByChain[chainId] ?? rpc.balance).toString(16)}`;
+            }
             case 'eth_gasPrice':
               return '0x6fc23ac00'; // 30 gwei
             case 'eth_getCode':
@@ -97,6 +105,7 @@ describe('useStoreGasWallet', () => {
     rpc.chainIds = [80002];
     rpc.balanceByChain = {};
     rpc.failChains = new Set();
+    rpc.hold = null;
   });
 
   it('作ると残高とガス価格を読み、鍵は戻り値に載らない', async () => {
@@ -218,9 +227,57 @@ describe('useStoreGasWallet', () => {
     });
     const sends = rpc.calls.filter((c) => c.method === 'eth_sendRawTransaction');
     expect(sends.map((c) => c.chainId)).toEqual([1001]);
+    // いまのネットワークに無いチェーン (testnet で Polygon mainnet) には送らない
     await act(async () => {
-      expect(await result.current.withdraw(43113, DEST)).toEqual({ phase: 'rejected', reason: 'read_failed' });
+      expect(await result.current.withdraw(137, DEST)).toEqual({ phase: 'rejected', reason: 'read_failed' });
     });
+  });
+
+  it('新しい会計に使えないチェーン (設定から外した・a1 の点灯) も、残高を読み、残りを戻せる', async () => {
+    rpc.chainIds = [80002]; // Kairos・Fuji は使えない
+    rpc.balanceByChain = { 80002: 0n, 1001: 3n * 10n ** 18n, 43113: 0n };
+    const { result } = await setup();
+    await waitFor(() => expect(result.current.chains.find((c) => c.chainId === 1001)?.balance).toBe(3n * 10n ** 18n));
+    expect(result.current.chains.map((c) => [c.chainId, c.active])).toEqual([[80002, true], [1001, false], [43113, false]]);
+    await act(async () => {
+      expect(await result.current.withdraw(1001, DEST)).toEqual({ phase: 'confirmed', chainId: 1001, hash: TX });
+    });
+  });
+
+  it('読み取りに失敗しても、前に読めた残高は残す (消す前の「先に戻して」を失わない)', async () => {
+    const { result } = await setup();
+    await waitFor(() => expect(result.current.chains[0]?.balance).toBe(10n ** 18n));
+    rpc.failChains = new Set([80002]);
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.chains[0]).toMatchObject({ chainId: 80002, balance: 10n ** 18n, readFailed: true });
+  });
+
+  it('作り直した後に、古い鍵の読み取りが遅れて返っても新しい鍵の残高に書かない', async () => {
+    const { result } = await setup();
+    await waitFor(() => expect(result.current.chains[0]?.balance).toBe(10n ** 18n));
+    const oldAddress = result.current.address!;
+    let release!: () => void;
+    rpc.hold = { address: oldAddress, gate: new Promise<void>((r) => { release = r; }) };
+    let stale: Promise<void> = Promise.resolve();
+    act(() => {
+      stale = result.current.refresh();
+    });
+    await act(async () => {
+      expect(await result.current.remove()).toBe(true);
+    });
+    rpc.balance = 7n * 10n ** 18n;
+    await act(async () => {
+      await result.current.create();
+    });
+    await waitFor(() => expect(result.current.chains[0]?.balance).toBe(7n * 10n ** 18n));
+    expect(result.current.address).not.toBe(oldAddress);
+    await act(async () => {
+      release();
+      await stale;
+    });
+    expect(result.current.chains[0]?.balance).toBe(7n * 10n ** 18n);
   });
 
   it('消すと鍵も残高表示も消える', async () => {

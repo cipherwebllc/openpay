@@ -224,6 +224,17 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       await waitFor(() => expect(JSON.parse(window.localStorage.getItem(KEY)!).storePays).toBe(false));
     });
 
+    it.each([
+      ['polygon', 'POL'],
+      ['kaia', 'KAIA'],
+    ] as const)('注記: ガス用ウォレットに入れるのは選んでいるチェーンの通貨 (%s → %s)', async (chain, symbol) => {
+      const user = userEvent.setup();
+      seed({ chain });
+      render(<QrGenerator />);
+      await openAdvanced(user);
+      expect(screen.getByText(new RegExp(`ガス用ウォレット」に ${symbol} を入れてお使いください`))).toBeTruthy();
+    });
+
     it('JPYC・対象チェーン以外では押せない (理由を出す)', async () => {
       const user = userEvent.setup();
       seed({ storePays: false, token: 'usdc', chain: 'base' });

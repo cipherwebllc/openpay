@@ -82,6 +82,15 @@ export function storeDeviceChainIds(): number[] {
   return candidates.filter((id) => storeDeviceChainConfig(id) !== null);
 }
 
+/**
+ * ガス用ウォレットの残高を読み、残りを戻せるチェーン (いまのネットワークの Polygon・Kaia・Avalanche すべて)。
+ * 新しい会計に使えるか (storeDeviceChainIds) とは別: 開示や設定から外したチェーン (a1 の点灯を含む) に残った
+ * ガス代のトークンも、見えて戻せるようにする (使えなくなったチェーンで鍵の中身を見失わない)。
+ */
+export function storeGasWalletChainIds(): number[] {
+  return env.networkEnv === 'mainnet' ? Object.keys(TESTNET_FOR).map(Number) : Object.values(TESTNET_FOR);
+}
+
 export function isStoreDeviceChain(chainId: number): boolean {
   return storeDeviceChainIds().includes(chainId);
 }

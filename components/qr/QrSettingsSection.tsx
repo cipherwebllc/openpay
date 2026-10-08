@@ -15,7 +15,7 @@ import {
   type SplitEntry,
 } from '@/lib/url';
 import { isGaslessSupported, type TokenDeployment } from '@/lib/tokens';
-import { chainForSlug } from '@/lib/chains';
+import { chainForSlug, nativeSymbolForChainId } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { isStoreDeviceChain, storeDeviceChainIds, storeDeviceChainNames } from '@/lib/storeDevicePayment';
 import { storePaysRequested } from '@/lib/storePaysMode';
@@ -74,6 +74,10 @@ export function QrSettingsSection({
   const storeSelected = storePaysRequested(settings);
   const storeUsable = settings.token === 'jpyc' && isStoreDeviceChain(chainForSlug(settings.chain).id);
   const storeChainName = storeDeviceChainNames(storeDeviceChainIds());
+  // ガス用ウォレットに入れる通貨: 選んでいるチェーンで使えるならその通貨、使えないなら対象のチェーンの通貨すべて。
+  const storeSymbol = (storeUsable ? [chainForSlug(settings.chain).id] : storeDeviceChainIds())
+    .map((id) => nativeSymbolForChainId(id) ?? '')
+    .join(' / ');
 
   return (
     <SettingsAccordion
@@ -187,7 +191,7 @@ export function QrSettingsSection({
       </Field>
       {storeSelected && (
         <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-3 text-xs text-sky-900">
-          {t('storeDevice.note', { chain: storeChainName })}
+          {t('storeDevice.note', { chain: storeChainName, symbol: storeSymbol })}
         </p>
       )}
 

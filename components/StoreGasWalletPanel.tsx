@@ -2,7 +2,8 @@
 
 // レジの「お店の端末のガス用ウォレット」(flag NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET・plans/store-gas-wallet.md P1)。
 // 作る・チェーンごとの残高を見る・残りを戻す・この端末から消す。鍵は表示も書き出しもしない (戻すのは送金で)。
-// 鍵 (アドレス) は 1 つで、対象のチェーン (Polygon・Kaia・Avalanche のうち使えるもの) すべてで使う。
+// 鍵 (アドレス) は 1 つで、対象のチェーン (Polygon・Kaia・Avalanche のうち使えるもの) すべてで使う。使えないチェーンも、
+// 残高があれば見せて戻せるようにする (開示や設定から外したチェーンに残ったガス代を見失わない)。
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
@@ -58,13 +59,17 @@ export function StoreGasWalletPanel({
 
   if (!g.hydrated || !g.walletState) return null;
 
-  const chainsLabel = g.chains.map((c) => `${c.chain.name} (${symbolOf(c.chainId)})`).join('・');
-  const fundGuide = g.chains
-    .map((c) => `${symbolOf(c.chainId)} ${storeGasFundGuide(c.chainId)}`)
-    .join('・');
+  const active = g.chains.filter((c) => c.active);
+  // 表示するチェーン = 使えるチェーンと、使えないが残高があるチェーン (前に読めた値を含む)。
   const funded = g.chains.filter((c) => c.balance != null && c.balance > 0n);
+  const shown = g.chains.filter((c) => c.active || funded.includes(c));
+  const chainsLabel = active.map((c) => `${c.chain.name} (${symbolOf(c.chainId)})`).join('・');
+  const fundGuide = active.map((c) => `${symbolOf(c.chainId)} ${storeGasFundGuide(c.chainId)}`).join('・');
   const amountsLabel = funded.map((c) => `${formatNative(c.balance!)} ${symbolOf(c.chainId)}`).join('・');
-  const targetChainId = withdrawChainId ?? g.chains[0]?.chainId ?? null;
+  const targetChainId =
+    (withdrawChainId !== null && shown.some((c) => c.chainId === withdrawChainId) ? withdrawChainId : null) ??
+    shown[0]?.chainId ??
+    null;
   const ws = g.withdrawStatus;
   const withdrawing = ws.phase === 'sending' || ws.phase === 'pending';
   const inputRejected =
@@ -149,7 +154,7 @@ export function StoreGasWalletPanel({
         {t('storeGasWallet.title')}
         <span className="ml-2 text-xs font-normal text-slate-500">
           {g.walletState.state === 'ok'
-            ? g.chains
+            ? shown
                 .filter((c) => c.balance != null)
                 .map((c) => t('storeGasWallet.balanceValue', { amount: formatNative(c.balance!), symbol: symbolOf(c.chainId) }))
                 .join('・')
@@ -201,7 +206,7 @@ export function StoreGasWalletPanel({
         <div className="mt-3 space-y-3">
           <div>
             <p className="text-xs text-slate-500">
-              {t('storeGasWallet.addressLabel', { chain: g.chains.map((c) => c.chain.name).join('・') })}
+              {t('storeGasWallet.addressLabel', { chain: active.map((c) => c.chain.name).join('・') })}
             </p>
             <p className="break-all font-mono text-xs text-slate-800">{g.address}</p>
             <div className="mt-1 flex flex-wrap gap-2">
@@ -220,7 +225,7 @@ export function StoreGasWalletPanel({
           </div>
 
           <div className="space-y-1 text-xs">
-            {g.chains.map((c) => {
+            {shown.map((c) => {
               const remaining =
                 c.balance != null && c.gasPrice != null ? estimateRemainingSends(c.balance, c.gasPrice) : null;
               return (
@@ -245,10 +250,13 @@ export function StoreGasWalletPanel({
                       {t('storeGasWallet.remaining', { count: remaining })}
                     </span>
                   )}
-                  {remaining != null && remaining < LOW_REMAINING_SENDS && (
+                  {c.active && remaining != null && remaining < LOW_REMAINING_SENDS && (
                     <p className="mt-1 text-amber-700">
                       {t('storeGasWallet.lowBalance', { symbol: symbolOf(c.chainId) })}
                     </p>
+                  )}
+                  {!c.active && (
+                    <p className="mt-1 text-slate-500">{t('storeGasWallet.inactiveNote')}</p>
                   )}
                 </div>
               );
@@ -260,7 +268,7 @@ export function StoreGasWalletPanel({
               {t('storeGasWallet.withdrawTitle')}
             </label>
             <p className="text-xs text-slate-500">{t('storeGasWallet.withdrawToHint')}</p>
-            {g.chains.length > 1 && (
+            {shown.length > 1 && (
               <div className="mt-1">
                 <label htmlFor={WITHDRAW_CHAIN_ID} className="mr-2 text-xs text-slate-600">
                   {t('storeGasWallet.withdrawChainLabel')}
@@ -274,7 +282,7 @@ export function StoreGasWalletPanel({
                   }}
                   className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
                 >
-                  {g.chains.map((c) => (
+                  {shown.map((c) => (
                     <option key={c.chainId} value={c.chainId}>
                       {c.chain.name} ({symbolOf(c.chainId)})
                     </option>
