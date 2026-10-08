@@ -155,6 +155,7 @@ export function MobileOrderView({
   handle,
   live,
   initialCart,
+  shopNamePending = false,
 }: {
   config: MobileOrderConfig;
   /** 「支払いへ進む」後の /checkout から戻る店舗ページのパス (同一オリジン)。@handle 公開時に渡る。 */
@@ -171,6 +172,8 @@ export function MobileOrderView({
    * 未指定 (bare @handle / ?s= 経路) では従来挙動と完全同一 (構造的 inert)。
    */
   initialCart?: AgentCartItem[] | null;
+  /** 店名がまだ無い (ビルダーのプレビューで仮の店名を見せている)。仮の店名の 1 文字を頭文字にしない。 */
+  shopNamePending?: boolean;
 }) {
   const t = useTranslations('MobileOrder');
   const origin = useOrigin();
@@ -677,7 +680,7 @@ export function MobileOrderView({
               onError={() => setAvatarFailed(true)}
             />
           ) : (
-            <span aria-hidden>{initialOf(config.shopName)}</span>
+            <span aria-hidden>{shopNamePending ? '🏪' : initialOf(config.shopName)}</span>
           )}
         </div>
         <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">{config.shopName}</h1>

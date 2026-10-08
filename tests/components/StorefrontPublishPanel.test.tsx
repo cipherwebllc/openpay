@@ -71,6 +71,8 @@ function renderPanel(
     onGetHandle: () => void;
     onLoadStorefront: (parts: StorefrontParts, receiver: string) => void;
     canAutoLoad: boolean;
+    accepting: boolean;
+    onToggleAccepting: () => void;
     qc: QueryClient;
   }> = {},
 ) {
@@ -78,7 +80,7 @@ function renderPanel(
   // 公開ボタンは帯 (スマホ: 画面下・PC: プレビュー下) に描かれる。テストでは帯の置き場所を 1 つ渡す。
   const slot = document.createElement('div');
   document.body.appendChild(slot);
-  return renderWithIntl(
+  const view = renderWithIntl(
     <QueryClientProvider client={qc}>
       <StorefrontPublishPanel
         storefront={props.storefront === undefined ? STORE : props.storefront}
@@ -86,10 +88,13 @@ function renderPanel(
         onGetHandle={props.onGetHandle}
         onLoadStorefront={props.onLoadStorefront}
         canAutoLoad={props.canAutoLoad}
+        accepting={props.accepting}
+        onToggleAccepting={props.onToggleAccepting}
         barSlots={[slot]}
       />
     </QueryClientProvider>,
   );
+  return Object.assign(view, { slot });
 }
 
 // 公開ボタンは帯に常に出る (読み込み中は押せない)。@handle の読み込みが終わって押せるようになるまで待つ。
@@ -178,6 +183,31 @@ describe('StorefrontPublishPanel', () => {
     renderPanel();
     fireEvent.click(await readyButton('公開する'));
     expect(await screen.findByRole('alert')).toHaveTextContent('公開に失敗しました。時間をおいて再度お試しください。');
+  });
+
+  it('受取先が変わる公開は、帯にも「受取先が変わります」と変更前 → 後を出す', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ handles: [{ handle: 'shop', config: CFG, storefront: STORE, updatedAt: 100 }] }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { slot } = renderPanel({ receiver: ADDR2 as Address });
+    await readyButton('公開を更新');
+    expect(within(slot).getByText('受取先が変わります')).toBeInTheDocument();
+    expect(within(slot).getByText('0x52d4…cA81 → 0xC02a…6Cc2')).toBeInTheDocument();
+  });
+
+  it('注文の受付のスイッチは、サインインして公開先の @handle が決まるまで出さない', () => {
+    h.isSignedIn = false;
+    renderPanel({ accepting: true, onToggleAccepting: vi.fn() });
+    expect(screen.queryByRole('switch')).toBeNull();
+  });
+
+  it('サインイン後は注文の受付のスイッチを出し、名前に見えている文字を含める (掟 8)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }) })));
+    renderPanel({ accepting: false, onToggleAccepting: vi.fn() });
+    expect(await screen.findByRole('switch', { name: '注文の受付 停止中' })).toHaveAttribute('aria-checked', 'false');
   });
 
   it('時間系未設定の店は従来の POST 生バイトから不変', async () => {
@@ -638,6 +668,30 @@ describe('StorefrontPublishPanel', () => {
     await waitFor(() => expect(onLoadStorefront).toHaveBeenCalledWith(STORE, CFG.to));
     expect(onLoadStorefront).toHaveBeenCalledTimes(1);
     expect(await screen.findByText('公開中の内容をこの端末に読み込みました。')).toBeInTheDocument();
+  });
+
+  it('読み込みの確認は、下書きに手を入れたら消す (状態カードを公開状態だけに戻す)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG, storefront: STORE }] }),
+      }),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    const panel = (storefront: StorefrontParts) => (
+      <QueryClientProvider client={qc}>
+        <StorefrontPublishPanel storefront={storefront} receiver={null} onLoadStorefront={vi.fn()} canAutoLoad barSlots={[slot]} />
+      </QueryClientProvider>
+    );
+    const view = renderWithIntl(panel(STORE));
+    expect(await screen.findByText('公開中の内容をこの端末に読み込みました。')).toBeInTheDocument();
+    view.rerender(panel({ ...STORE, menu: [{ id: 'a', name: 'ブレンド', price: '550' }] }));
+    await waitFor(() => expect(screen.queryByText('公開中の内容をこの端末に読み込みました。')).toBeNull());
+    expect(screen.getAllByText('未公開の変更があります').length).toBeGreaterThan(0);
   });
 
   it('この端末に手が入っている・公開中の店が 2 つ以上なら、自動では読み込まない', async () => {

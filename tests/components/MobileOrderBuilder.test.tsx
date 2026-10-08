@@ -278,12 +278,21 @@ describe('MobileOrderBuilder', () => {
 
   it('受付トグルを切替えると aria-checked と表示が変わる (既定=受付中)', () => {
     renderWithIntl(<MobileOrderBuilder />);
-    const sw = screen.getByRole('switch', { name: '注文の受付' });
+    // 名前は見えている文字を含める (掟 8): 「注文の受付 受付中」。
+    const sw = screen.getByRole('switch', { name: '注文の受付 受付中' });
     expect(sw).toHaveAttribute('aria-checked', 'true');
     expect(sw).toHaveTextContent('受付中');
     fireEvent.click(sw);
     expect(sw).toHaveAttribute('aria-checked', 'false');
     expect(sw).toHaveTextContent('停止中');
+    expect(sw).toHaveAccessibleName('注文の受付 停止中');
+  });
+
+  it('店名が空のプレビューは仮の店名の 1 文字を頭文字にせず、お店のマークを出す', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    expect(screen.getAllByText('（店名未設定）').length).toBeGreaterThan(0);
+    expect(screen.queryByText('店', { exact: true })).toBeNull();
+    expect(screen.getAllByText('🏪').length).toBeGreaterThan(0);
   });
 
   it('③メニュー一覧は既定で折りたたみ、トグルで開閉できる (レジ管理・長くなる対策)', () => {

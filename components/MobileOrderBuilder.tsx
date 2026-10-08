@@ -298,18 +298,19 @@ export function MobileOrderBuilder({
   const acceptingToggle = (
     <div className="rounded-2xl bg-white p-4 shadow-card ring-1 ring-slate-200/70">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-sm font-medium text-slate-700">{t('acceptingLabel')}</span>
+        <span id="mobile-order-accepting-label" className="text-sm font-medium text-slate-700">{t('acceptingLabel')}</span>
+        {/* 名前は「注文の受付 受付中」(見えている文字を含める・掟 8)。 */}
         <button
           type="button"
           role="switch"
           aria-checked={draft.acceptingOrders}
-          aria-label={t('acceptingLabel')}
+          aria-labelledby="mobile-order-accepting-label mobile-order-accepting-state"
           onClick={() => update({ acceptingOrders: !draft.acceptingOrders })}
           className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
             draft.acceptingOrders ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
           }`}
         >
-          {draft.acceptingOrders ? t('acceptingOn') : t('acceptingOff')}
+          <span id="mobile-order-accepting-state">{draft.acceptingOrders ? t('acceptingOn') : t('acceptingOff')}</span>
         </button>
       </div>
       <p className="mt-1 text-xs text-slate-500">{t('acceptingHint')}</p>
@@ -853,7 +854,7 @@ export function MobileOrderBuilder({
               {hydrated && (
                 <div className="mx-auto max-w-[360px] overflow-hidden rounded-[2rem] border-[6px] border-slate-900 bg-white shadow-xl ring-1 ring-black/5">
                   <div className="max-h-[46vh] overflow-y-auto px-4 py-4">
-                    <MobileOrderView config={previewConfig} />
+                    <MobileOrderView config={previewConfig} shopNamePending={!draft.shopName.trim()} />
                   </div>
                 </div>
               )}

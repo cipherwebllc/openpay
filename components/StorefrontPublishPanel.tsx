@@ -146,6 +146,10 @@ export function StorefrontPublishPanel({
   // ときはどれを読むか店主が選ぶ (従来どおり「編集」から)。
   const autoLoadTried = useRef<string | null>(null);
   const [autoLoaded, setAutoLoaded] = useState(false);
+  // 「読み込みました」は読み込んだ直後の確認。下書きに手を入れたら消す (状態カードを @handle と公開状態だけに戻す)。
+  useEffect(() => {
+    if (autoLoaded && hasUnpublishedChanges) setAutoLoaded(false);
+  }, [autoLoaded, hasUnpublishedChanges]);
   useEffect(() => {
     // isSignedIn = セッションと接続中のウォレットが一致 (別のウォレットのセッション・キャッシュから読み込まない)。
     if (!canAutoLoad || !onLoadStorefront || !isSignedIn || !sessionAddress || !mine.isSuccess) return;
@@ -379,24 +383,26 @@ export function StorefrontPublishPanel({
 
         {/* 注文の受付 (開店=受付中 / 閉店=停止中)。停止中は公開ページの支払いを止める (不可逆決済の事故防止)。
             下書きの値なので、公開中と違うときだけ「公開を更新で反映」を出す。 */}
-        {onToggleAccepting && accepting !== undefined && (
+        {/* サインインして公開先の @handle が決まってから出す (それまでは押しても公開で反映できない下書きの値)。 */}
+        {onToggleAccepting && accepting !== undefined && isSignedIn && !mine.isLoading && !mine.isError && selectedHandle && (
           <div className="border-t border-slate-100 px-5 py-3">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-700">{t('acceptingLabel')}</p>
+                <p id="storefront-accepting-label" className="text-sm font-medium text-slate-700">{t('acceptingLabel')}</p>
                 <p className="mt-0.5 text-xs text-slate-500">{t('acceptingHint')}</p>
               </div>
+              {/* 名前は「注文の受付 受付中」(見えている文字を含める・掟 8)。 */}
               <button
                 type="button"
                 role="switch"
                 aria-checked={accepting}
-                aria-label={t('acceptingLabel')}
+                aria-labelledby="storefront-accepting-label storefront-accepting-state"
                 onClick={onToggleAccepting}
                 className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
                   accepting ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
                 }`}
               >
-                {accepting ? t('acceptingOn') : t('acceptingOff')}
+                <span id="storefront-accepting-state">{accepting ? t('acceptingOn') : t('acceptingOff')}</span>
               </button>
             </div>
             {publishedAccepting !== null && publishedAccepting !== accepting ? (
@@ -507,6 +513,14 @@ export function StorefrontPublishPanel({
                   <p role="alert" className="line-clamp-2 text-sm font-medium text-red-600">{t('publishError')}</p>
                 ) : barReason ? (
                   <p className="truncate text-sm font-medium text-slate-500">{barReason}</p>
+                ) : receiverWillChange && receiver && selectedHandle ? (
+                  // 受取先が変わる公開は、押す場所 (帯) で気づけるように。全文の注意は状態カードにも出す。
+                  <>
+                    <p className="truncate text-[11px] font-semibold text-amber-700">{t('barReceiverWillChange')}</p>
+                    <p className="truncate font-mono text-xs text-amber-900">
+                      {shortAddress(selectedHandle.config.to)} → {shortAddress(receiver)}
+                    </p>
+                  </>
                 ) : (
                   <>
                     <p className="truncate text-[11px] text-slate-500">@{effectiveSelected}</p>
