@@ -123,6 +123,18 @@ describe('resolveStoreHandoff (お店の端末で送る 1 件の結論)', () => 
     expect(spy.expired).not.toHaveBeenCalled();
   });
 
+  it('tx 探しが探しきれない (RPC の範囲制限・時間切れ・遡り幅) ときは、期限から時間がたっても「結果を確かめられない」で確定させない', async () => {
+    used = true;
+    usedFinal = true;
+    now = VALID_BEFORE + USED_UNRESOLVED_AFTER_SEC + 1;
+    const incomplete = deps({
+      findAuthorizationUsedTransactionHash: async () => {
+        throw new Error('authorization_lookup_incomplete:lookback');
+      },
+    });
+    expect(await resolveStoreHandoff(body(), incomplete)).toEqual({ ok: true, state: 'pending' });
+  });
+
   it('receipt の RPC 障害は「無い」と区別し、結論を出さず覚えない', async () => {
     used = true;
     foundTx = TX;

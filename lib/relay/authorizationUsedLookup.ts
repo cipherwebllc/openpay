@@ -7,8 +7,9 @@
 // (呼び出し側が受け付けた有効窓の上限。それより前に使われた署名は見つけない = 結論を出さない側に倒れる)。
 //
 // 時刻の範囲に入るブロックは、ブロックの時刻で探す (補間と二分を交互に・数回で収まる)。検索は新しいブロックから
-// 100 ブロックずつ、拒まれたら 10 ブロックずつ。問い合わせの回数に上限を置き、範囲を探しきれなければ throw する
-// (呼び出し側は今の RPC 障害と同じく「結論を出さない」に倒す。見つからなかったとは言わない)。
+// 100 ブロックずつ、拒まれたら 10 ブロックずつ。問い合わせの回数と経過時間 (route の maxDuration より十分短く) に
+// 上限を置き、範囲を探しきれなければ throw する (呼び出し側は今の RPC 障害と同じく「結論を出さない」に倒す。
+// 見つからなかったとは言わない)。範囲の一部が遡り幅より古い (探せない) ときも、見つからなければ throw する。
 
 import type { Hex } from 'viem';
 
@@ -33,10 +34,16 @@ export type AuthorizationLookupOptions = {
   chunkSizes?: readonly bigint[];
   /** 問い合わせの回数の上限 (ブロック時刻の読み取りとログ検索の合計)。 */
   maxRequests?: number;
+  /** 経過時間の上限 (ミリ秒)。超えたら待っている問い合わせも打ち切って throw。 */
+  deadlineMs?: number;
+  /** いまの時刻 (ミリ秒・テスト用)。 */
+  nowMs?: () => number;
 };
 
 const DEFAULT_CHUNK_SIZES: readonly bigint[] = [100n, 10n];
 const DEFAULT_MAX_REQUESTS = 60;
+// 状態確認の route は maxDuration 15〜20 秒。最初の 1 回の検索と他の読み取りの分を残して 6 秒で打ち切る。
+const DEFAULT_DEADLINE_MS = 6_000;
 
 export class AuthorizationLookupIncomplete extends Error {
   constructor(reason: string) {
@@ -47,7 +54,8 @@ export class AuthorizationLookupIncomplete extends Error {
 
 /**
  * 署名が使われうる時刻の範囲のブロックで AuthorizationUsed を探し、使った tx hash を返す。
- * 範囲を探しきって無ければ null。探しきれない (問い合わせの上限・最小の範囲でも拒まれる) ときは throw。
+ * 範囲を探しきって無ければ null。探しきれない (問い合わせの上限・時間切れ・最小の範囲でも拒まれる・範囲の一部が
+ * 遡り幅より古い) ときは throw。
  */
 export async function findAuthorizationUsedInWindow(
   client: AuthorizationLogClient,
@@ -56,10 +64,26 @@ export async function findAuthorizationUsedInWindow(
 ): Promise<Hex | null> {
   const chunkSizes = options.chunkSizes ?? DEFAULT_CHUNK_SIZES;
   const maxRequests = options.maxRequests ?? DEFAULT_MAX_REQUESTS;
+  const nowMs = options.nowMs ?? Date.now;
+  const deadline = nowMs() + (options.deadlineMs ?? DEFAULT_DEADLINE_MS);
   let requests = 0;
-  const spend = () => {
+  // 1 回の問い合わせ: 回数を数え、残り時間で打ち切る (遅い RPC・再試行で route の時間切れに波及させない)。
+  const ask = async <T>(run: () => Promise<T>): Promise<T> => {
     requests += 1;
     if (requests > maxRequests) throw new AuthorizationLookupIncomplete('budget');
+    const remaining = deadline - nowMs();
+    if (remaining <= 0) throw new AuthorizationLookupIncomplete('deadline');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        run(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new AuthorizationLookupIncomplete('deadline')), remaining);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   };
 
   // EIP-3009: validAfter < block.timestamp < validBefore。下限は有効窓の上限でも絞る。
@@ -68,8 +92,7 @@ export async function findAuthorizationUsedInWindow(
   const notAfter = window.validBefore - 1n;
   if (notAfter < notBefore) return null;
 
-  spend();
-  const latest = await client.latestBlock();
+  const latest = await ask(() => client.latestBlock());
   // まだ範囲の時刻のブロックが無い (これから使われうる) なら、いまは見つからない。
   if (latest.timestamp < notBefore) return null;
   const lowest = latest.number > options.lookbackBlocks ? latest.number - options.lookbackBlocks : 0n;
@@ -78,8 +101,7 @@ export async function findAuthorizationUsedInWindow(
   const timestampOf = async (n: bigint): Promise<bigint> => {
     const known = timestamps.get(n);
     if (known !== undefined) return known;
-    spend();
-    const t = await client.blockTimestamp(n);
+    const t = await ask(() => client.blockTimestamp(n));
     timestamps.set(n, t);
     return t;
   };
@@ -115,10 +137,17 @@ export async function findAuthorizationUsedInWindow(
   };
 
   const start = await firstAtOrAfter(notBefore, lowest, latest.number);
+  // 範囲の始まりが遡り幅の端で切れた (遡り幅より古いブロックにも範囲がかかりうる) なら、見つからなくても
+  // 「無い」とは言わない (探していない所にあるかもしれない)。
+  const clipped = start === lowest && lowest > 0n && (await timestampOf(lowest)) >= notBefore;
   // notAfter より後のブロックは探さない (署名はそこでは使えない)。
   const afterEnd = await firstAtOrAfter(notAfter + 1n, start, latest.number);
   const end = afterEnd - 1n;
-  if (end < start) return null;
+  const notFound = (): null => {
+    if (clipped) throw new AuthorizationLookupIncomplete('lookback');
+    return null;
+  };
+  if (end < start) return notFound();
 
   // 新しいブロックから探す (使われた tx は期限の近くにあることが多い)。
   let size = 0;
@@ -127,12 +156,12 @@ export async function findAuthorizationUsedInWindow(
     const chunk = chunkSizes[size];
     if (chunk === undefined) throw new AuthorizationLookupIncomplete('range');
     const from = to - chunk + 1n > start ? to - chunk + 1n : start;
-    spend();
     let hashes: readonly (Hex | null)[];
     try {
-      hashes = await client.logs(from, to);
-    } catch {
-      // 範囲が広すぎる (無料枠の制限) など。小さい範囲で同じ所を探し直す。
+      hashes = await ask(() => client.logs(from, to));
+    } catch (error) {
+      // 回数・時間の上限は打ち切り。それ以外 (範囲が広すぎる = 無料枠の制限など) は小さい範囲で同じ所を探し直す。
+      if (error instanceof AuthorizationLookupIncomplete) throw error;
       size += 1;
       continue;
     }
@@ -140,5 +169,5 @@ export async function findAuthorizationUsedInWindow(
     if (found) return found;
     to = from - 1n;
   }
-  return null;
+  return notFound();
 }

@@ -142,13 +142,45 @@ describe('findAuthorizationUsedInWindow', () => {
     ).rejects.toBeInstanceOf(AuthorizationLookupIncomplete);
   });
 
-  it('遡り幅 (今の 1 回検索と同じ 10,000 ブロック) より古いブロックは探さない', async () => {
+  it('範囲がまるごと遡り幅 (今の 1 回検索と同じ 10,000 ブロック) より古いなら、探さずに throw (「無い」と言わない)', async () => {
     const c = chain(T0, every2s(3000), [[100, TX]], 100n);
     const { api, calls } = client(c);
     const validBefore = c.ts[150];
-    expect(
-      await findAuthorizationUsedInWindow(api, { validAfter: 0n, validBefore, maxWindowSec: 1200 }, { lookbackBlocks: 2_000n }),
-    ).toBeNull();
+    await expect(
+      findAuthorizationUsedInWindow(api, { validAfter: 0n, validBefore, maxWindowSec: 1200 }, { lookbackBlocks: 2_000n }),
+    ).rejects.toThrow(/lookback/);
     expect(calls.logs).toHaveLength(0);
+  });
+
+  it('範囲の一部が遡り幅の外: 探せる所で見つかれば返し、見つからなければ throw', async () => {
+    // 遡り幅 2,000 → 1,000 番より古いブロックは探せない。範囲は 950〜1,050 番あたり。
+    const c = chain(T0, every2s(3000), [[1020, TX]], 100n);
+    const validBefore = c.ts[1050];
+    const opts = { lookbackBlocks: 2_000n };
+    expect(await findAuthorizationUsedInWindow(client(c).api, { validAfter: 0n, validBefore, maxWindowSec: 200 }, opts)).toBe(TX);
+    const missing = chain(T0, every2s(3000), [[960, TX]], 100n); // 探せない所にある
+    await expect(
+      findAuthorizationUsedInWindow(client(missing).api, { validAfter: 0n, validBefore, maxWindowSec: 200 }, opts),
+    ).rejects.toThrow(/lookback/);
+  });
+
+  it('時間の締め切りを過ぎたら、待っている問い合わせも打ち切って throw (route の時間切れに波及させない)', async () => {
+    const c = chain(T0, every2s(3000), [], 10n);
+    const { api } = client(c);
+    const slow: typeof api = { ...api, logs: (f, t) => new Promise((r) => setTimeout(() => r(api.logs(f, t)), 40)) };
+    const started = Date.now();
+    await expect(
+      findAuthorizationUsedInWindow(slow, { validAfter: 0n, validBefore: c.ts[2500], maxWindowSec: 210 }, { ...OPTS, deadlineMs: 100 }),
+    ).rejects.toThrow(/deadline/);
+    expect(Date.now() - started).toBeLessThan(400);
+  });
+
+  it('問い合わせが返らない (RPC が固まる) ときも締め切りで throw', async () => {
+    const c = chain(T0, every2s(3000), [], 10n);
+    const { api } = client(c);
+    const hung: typeof api = { ...api, logs: () => new Promise(() => {}) };
+    await expect(
+      findAuthorizationUsedInWindow(hung, { validAfter: 0n, validBefore: c.ts[2500], maxWindowSec: 210 }, { ...OPTS, deadlineMs: 50 }),
+    ).rejects.toThrow(/deadline/);
   });
 });
