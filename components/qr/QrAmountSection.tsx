@@ -3,34 +3,31 @@
 import {
   useMemo,
   useRef,
+  useState,
   type ComponentProps,
   type Dispatch,
+  type ReactNode,
   type SetStateAction,
 } from 'react';
 import { flushSync } from 'react-dom';
 import { useTranslations } from 'next-intl';
-import { Coins } from 'lucide-react';
 import { RecoverFeeNotice } from '../RecoverFeeNotice';
-import { ChainChooser } from '../ChainChooser';
-import { TokenChooser } from '../TokenChooser';
-import { Field } from '../Field';
-import { StepCard } from '../StepCard';
 import { QuickAmountEditor } from './QuickAmountEditor';
 import { ConvertPanel } from './ConvertPanel';
 import { QUICK_AMOUNT_MAX, type QrSettings } from '@/hooks/useQrSettings';
-import type { TokenDeployment, TokenSymbol } from '@/lib/tokens';
-import { JPYC_CHAINS, USDC_CHAINS, type ChainSlug } from '@/lib/chains';
+import type { TokenDeployment } from '@/lib/tokens';
 import type { GasMode } from '@/lib/fee';
-import { normalizeAmountList, truncateAmount } from '@/lib/amount';
+import { groupAmountDigits, normalizeAmountList, truncateAmount } from '@/lib/amount';
 
 export type Mode = 'amount' | 'static';
 
 type ConvertPanelProps = ComponentProps<typeof ConvertPanel>;
 
-// ① 金額 (通貨 / 受取チェーン / 請求金額 / クイック金額 / FX 換算 / recover 手数料開示)。
-// 金額・モード・FX・保存設定の状態と token/chain 切替は QrGenerator が持つ。ここは描画と、
-// 現在の token のクイック金額サブリストの編集だけを行う。
+// 会計のカード (2026-10 磨き上げ P2): 先頭にお店の設定の要約 (header)、その下に金額を主役に置く
+// (金額 / よく使う金額 / 他の通貨建て / 手数料の開示)。通貨・チェーン・受取先・支払い方法は「お店の設定」シートへ。
+// 金額・モード・FX・保存設定の状態は QrGenerator が持つ。ここは描画と、いまの通貨のよく使う金額の編集だけ。
 export function QrAmountSection({
+  header,
   settings,
   setSettings,
   deployment,
@@ -41,8 +38,6 @@ export function QrAmountSection({
   resetConvert,
   fiatHint,
   rateHint,
-  selectToken,
-  selectChain,
   canShowConvert,
   rateOk,
   convert,
@@ -58,6 +53,8 @@ export function QrAmountSection({
   recoverBillAmount,
   recoverGasMode,
 }: {
+  /** カードの先頭 (お店の設定の要約)。 */
+  header: ReactNode;
   settings: QrSettings;
   setSettings: Dispatch<SetStateAction<QrSettings>>;
   deployment: TokenDeployment;
@@ -69,8 +66,6 @@ export function QrAmountSection({
   fiatHint: string | null;
   /** USDC のときの参考レート (例「1 USDC ≈ ¥158.19 (参考)」)。null なら出さない。 */
   rateHint: string | null;
-  selectToken: (tok: TokenSymbol) => void;
-  selectChain: (slug: ChainSlug) => void;
   canShowConvert: boolean;
   rateOk: boolean;
   convert: ConvertPanelProps['convert'];
@@ -88,6 +83,7 @@ export function QrAmountSection({
 }) {
   const t = useTranslations('QrGenerator');
   const amountInputRef = useRef<HTMLInputElement>(null);
+  const [editingQuick, setEditingQuick] = useState(false);
 
   // クイック金額は token (JPYC=円 / USDC=ドル) ごとに独立。エディタ・適用とも
   // 現在の token のサブリストだけを操作する。
@@ -137,99 +133,106 @@ export function QrAmountSection({
   );
 
   return (
-    <StepCard step={1} icon={Coins} title={t('steps.amount')}>
-      <div className="space-y-4">
-        {/* token + chain は金額のシンボル表示にも影響するので金額と同じ① に。 */}
-        <Field label={t('tokenLabel')}>
-          <TokenChooser selected={settings.token} onSelect={selectToken} />
-        </Field>
+    <section
+      aria-labelledby="qr-amount-heading"
+      className="rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70 print:hidden"
+    >
+      <div className="border-b border-slate-100 px-5 py-4">{header}</div>
+      <div className="space-y-4 px-5 pb-5 pt-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 id="qr-amount-heading" className="text-sm font-semibold text-slate-700">
+            {t('amountLabel', { symbol: deployment.displaySymbol })}
+          </h2>
+          {/* 金額指定 / 据え置き (金額なし) の切替。金額が主役なので小さく右に置く。 */}
+          <div className="inline-flex shrink-0 rounded-full bg-slate-100 p-0.5">
+            {(
+              [
+                ['amount', t('modeAmount')],
+                ['static', t('modeStatic')],
+              ] as const
+            ).map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                aria-pressed={mode === m}
+                onClick={() => {
+                  if (m === 'amount' && mode === 'static') {
+                    // iOS のキーボードを開けるよう、表示を反映してからタップ中に focus する。
+                    flushSync(() => setMode('amount'));
+                    amountInputRef.current?.focus();
+                  } else {
+                    setMode(m);
+                  }
+                  resetConvert();
+                }}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+                  mode === m
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-        <Field label={t('chainLabel')}>
-          <ChainChooser
-            slugs={settings.token === 'usdc' ? USDC_CHAINS : JPYC_CHAINS}
-            selected={settings.chain}
-            onSelect={selectChain}
-            gridClassName={
-              settings.token === 'usdc'
-                ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
-                : 'grid grid-cols-2 gap-2'
-            }
-          />
-        </Field>
-
-        <Field label={t('amountLabel', { symbol: deployment.displaySymbol })}>
-          <div className="flex flex-col gap-2">
-            <div className="inline-flex w-full rounded-lg border border-slate-200 bg-slate-100 p-1">
-              {(
-                [
-                  ['amount', t('modeAmount')],
-                  ['static', t('modeStatic')],
-                ] as const
-              ).map(([m, label]) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => {
-                    if (m === 'amount' && mode === 'static') {
-                      // iOS のキーボードを開けるよう、表示を反映してからタップ中に focus する。
-                      flushSync(() => setMode('amount'));
-                      amountInputRef.current?.focus();
-                    } else {
-                      setMode(m);
-                    }
-                    resetConvert();
-                  }}
-                  className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                    mode === m
-                      ? 'bg-white text-brand-dark shadow-sm'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+        {/* 非表示でも node を保持し、再表示で入力欄を作り直さない。 */}
+        <div className="space-y-4" hidden={mode !== 'amount'}>
+          {/* 金額ヒーロー: 入力欄を「表示器」化して数字を主役に。通貨記号は控えめな接尾、
+              その下に参考円とレート (USDC のみ・JPYC は ¥ ペッグで冗長ゆえ非表示)。 */}
+          <div className="rounded-2xl bg-slate-50 px-5 py-4 ring-1 ring-slate-200 transition focus-within:bg-white focus-within:ring-2 focus-within:ring-brand">
+            <div className="flex items-baseline gap-2">
+              <input
+                ref={amountInputRef}
+                type="text"
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => {
+                  setAmount(
+                    truncateAmount(e.target.value, deployment.decimals),
+                  );
+                  resetConvert();
+                }}
+                placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
+                aria-label={t('amountLabel', {
+                  symbol: deployment.displaySymbol,
+                })}
+                className="min-w-0 flex-1 bg-transparent text-right text-4xl font-bold tabular-nums tracking-tight text-slate-900 placeholder:text-slate-300 focus:outline-none sm:text-5xl"
+                autoFocus
+              />
+              <span className="shrink-0 text-lg font-semibold text-slate-500">
+                {deployment.displaySymbol}
+              </span>
             </div>
-            {/* 非表示でも node を保持し、再表示で入力欄を作り直さない。 */}
-            <div className="space-y-3" hidden={mode !== 'amount'}>
-              {/* 金額ヒーロー: 入力欄を「表示器」化して数字を主役に。通貨記号は控えめな
-                  接尾、その真下に参考円 (USDC のみ・JPYC は ¥ ペッグで冗長ゆえ非表示)。
-                  枠線は container 側に寄せ、focus で brand + 浮き影。 */}
-              <div className="rounded-2xl border-2 border-slate-200 bg-gradient-to-br from-white to-brand/[0.03] px-5 py-4 transition focus-within:border-brand focus-within:shadow-card">
-                <div className="flex items-baseline gap-2">
-                  <input
-                    ref={amountInputRef}
-                    type="text"
-                    inputMode="decimal"
-                    value={amount}
-                    onChange={(e) => {
-                      setAmount(
-                        truncateAmount(e.target.value, deployment.decimals),
-                      );
-                      resetConvert();
-                    }}
-                    placeholder={settings.token === 'jpyc' ? '1000' : '10.00'}
-                    aria-label={t('amountLabel', {
-                      symbol: deployment.displaySymbol,
-                    })}
-                    className="min-w-0 flex-1 bg-transparent text-right text-4xl font-bold tabular-nums tracking-tight text-slate-900 placeholder:text-slate-300 focus:outline-none sm:text-5xl"
-                    autoFocus
-                  />
-                  <span className="shrink-0 text-xl font-semibold text-slate-500">
-                    {deployment.displaySymbol}
-                  </span>
-                </div>
-                {fiatHint && (
-                  <div className="mt-1 text-right text-sm font-medium text-slate-500">
-                    {fiatHint}
-                  </div>
-                )}
-                {rateHint && (
-                  <div className="mt-0.5 text-right text-xs text-slate-500">{rateHint}</div>
-                )}
+            {fiatHint && (
+              <div className="mt-1 text-right text-sm font-medium text-slate-500">
+                {fiatHint}
               </div>
-              {activeQuickAmounts.length > 0 && (
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {activeQuickAmounts.map((q) => (
+            )}
+            {rateHint && (
+              <div className="mt-0.5 text-right text-xs text-slate-500">{rateHint}</div>
+            )}
+          </div>
+
+          {/* よく使う金額: 1 行のチップ (通貨記号は金額欄に 1 度だけ・読み上げには付ける)。編集は右の小さなボタンから。 */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-500">{t('quickAmountsTitle')}</span>
+              <button
+                type="button"
+                onClick={() => setEditingQuick((v) => !v)}
+                aria-expanded={editingQuick}
+                className="text-xs font-semibold text-brand hover:underline"
+              >
+                {editingQuick ? t('quickAmountsDone') : t('quickAmountsEdit')}
+              </button>
+            </div>
+            {activeQuickAmounts.length > 0 && (
+              <div className="grid grid-cols-4 gap-2">
+                {activeQuickAmounts.map((q) => {
+                  const selected = amount === q;
+                  return (
                     <button
                       key={q}
                       type="button"
@@ -237,32 +240,35 @@ export function QrAmountSection({
                         setAmount(q);
                         resetConvert();
                       }}
-                      className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:border-brand hover:text-brand-dark hover:shadow-card active:translate-y-0"
+                      className={`truncate rounded-full border px-2 py-2 text-sm font-semibold tabular-nums transition ${
+                        selected
+                          ? 'border-brand bg-brand/5 text-brand-dark'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-brand hover:text-brand-dark'
+                      }`}
                     >
-                      {q} {deployment.displaySymbol}
+                      {groupAmountDigits(q)}
+                      <span className="sr-only"> {deployment.displaySymbol}</span>
                     </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {mode === 'static' && (
-              <p className="rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-500">
-                {t('staticHint')}
-              </p>
+                  );
+                })}
+              </div>
+            )}
+            {editingQuick && (
+              <QuickAmountEditor
+                items={tokenQuickAmounts}
+                max={QUICK_AMOUNT_MAX}
+                onUpdate={updateQuickAmount}
+                onAdd={addQuickAmount}
+                onRemove={removeQuickAmount}
+              />
             )}
           </div>
-        </Field>
-
-        {/* クイック金額の編集 (任意・token ごと独立)。金額入力の近くで設定できる
-            よう高度な設定から①へ移設。 */}
-        <QuickAmountEditor
-          hidden={mode !== 'amount'}
-          items={tokenQuickAmounts}
-          max={QUICK_AMOUNT_MAX}
-          onUpdate={updateQuickAmount}
-          onAdd={addQuickAmount}
-          onRemove={removeQuickAmount}
-        />
+        </div>
+        {mode === 'static' && (
+          <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
+            {t('staticHint')}
+          </p>
+        )}
 
         <ConvertPanel
           canShowConvert={canShowConvert}
@@ -281,12 +287,14 @@ export function QrAmountSection({
           fxWarning={fxWarning}
           onAcknowledgeFxWarning={acknowledgeFxWarning}
         />
+
+        <RecoverFeeNotice
+          billAmount={recoverBillAmount}
+          chainId={deployment.chainId}
+          gasMode={recoverGasMode}
+          tone="neutral"
+        />
       </div>
-      <RecoverFeeNotice
-        billAmount={recoverBillAmount}
-        chainId={deployment.chainId}
-        gasMode={recoverGasMode}
-      />
-    </StepCard>
+    </section>
   );
 }

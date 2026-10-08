@@ -35,12 +35,13 @@ describe('Arc receive UI with flag ON', () => {
     render(<QrGenerator />);
     expect(USDC_CHAINS).toHaveLength(7);
     const user = userEvent.setup();
+    // 通貨とチェーンは「お店の設定」シートの中 (2026-10 磨き上げ P2)。
+    await user.click(await screen.findByRole('button', { name: /^設定$/ }));
     await user.click(await screen.findByRole('button', { name: /^Arc Testnet/ }));
     await waitFor(() => {
       const saved = JSON.parse(window.localStorage.getItem('openpay:qr-settings:v2')!);
       expect(saved).toMatchObject({ chain: 'arc', payMode: 'standard', crossChain: false });
     });
-    await user.click(screen.getByRole('button', { name: /高度な設定/ }));
     expect(screen.getByRole('button', { name: /^ガス代不要/ })).toBeDisabled();
   });
 
@@ -54,7 +55,7 @@ describe('Arc receive UI with flag ON', () => {
       expect(saved).toMatchObject({ chain: 'arc', payMode: 'standard', crossChain: false });
     });
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /高度な設定/ }));
+    await user.click(screen.getByRole('button', { name: /^設定$/ }));
     expect(screen.getByRole('button', { name: /^ガス代不要/ })).toBeDisabled();
     expect(screen.getAllByText(/ガスは USDC で支払われるため別トークン不要/).length).toBeGreaterThan(0);
     expect(screen.queryByRole('checkbox', { name: /別チェーン/ })).not.toBeInTheDocument();

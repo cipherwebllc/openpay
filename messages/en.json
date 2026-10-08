@@ -454,28 +454,12 @@
   "QrGenerator": {
     "installHintTitle": "Use this QR every day? Add OpenPay to your home screen",
     "installHintIosStep3": "Next time, one tap on the icon opens it",
-    "steps": {
-      "amount": "Amount",
-      "receiver": "Recipient",
-      "receiverNotSet": "Not set",
-      "qr": "QR code"
-    },
     "amountLabel": "Amount ({symbol})",
     "modeAmount": "Fixed amount",
     "modeStatic": "Open amount",
     "staticHint": "With an open-amount QR, the customer enters the amount.",
     "fiatApprox": "≈ ¥{yen}",
     "usdcRateHint": "1 USDC ≈ ¥{rate} (reference)",
-    "advancedSettings": "Advanced settings",
-    "advancedSummary": {
-      "standard": "Standard (customer pays gas)",
-      "gaslessFree": "Gasless (OpenPay covers gas)",
-      "gaslessCustomerGas": "Gasless / gas: customer pays",
-      "gaslessMerchantGas": "Gasless / gas: merchant pays",
-      "gaslessMerchantFixed": "Gasless / fee: merchant pays (customer pays only the displayed amount)"
-    },
-    "tokenLabel": "Token",
-    "chainLabel": "Receiving chain",
     "receiverLabel": "Receiver wallet address",
     "useConnectedWallet": "Use connected wallet",
     "receiverMatchesWallet": "Connected wallet = receiver",
@@ -489,7 +473,6 @@
     "storeNamePlaceholder": "e.g. OpenPay Coffee",
     "posterNoteLabel": "Poster note (optional)",
     "posterNotePlaceholder": "e.g. Show the completed payment screen to staff",
-    "payModeLabel": "Payment mode",
     "payModeGaslessTitle": "No gas fee",
     "payModeGaslessBadge": "Recommended",
     "payModeGaslessDesc": "Customers pay without gas tokens. JPYC: OpenPay sponsors gas; the OpenPay usage fee is 1% (min 2 JPYC), borne by the store — customers pay the displayed amount. USDC: customers pay gas in USDC (EIP-7702 wallet required; otherwise standard).",
@@ -503,7 +486,6 @@
     "gasMerchantTitle": "Merchant absorbs gas equivalent",
     "gasCustomerDesc": "The estimated network fee is added on top of the bill and paid by the customer (your take is stable across gas spikes).",
     "gasMerchantDesc": "You absorb the estimated network fee; customer pays only the displayed amount (gas variability is your risk).",
-    "quickAmountsLabel": "Edit quick amounts",
     "quickAmountPlaceholder": "e.g. 1000",
     "quickAmountAdd": "+ Add amount",
     "quickAmountRemove": "Remove quick amount",
@@ -520,10 +502,8 @@
       "dup": "Duplicate address (same as primary, or within split)"
     },
     "qrTitle": "QR code",
-    "qrDescription": "Confirm the amount, then tap \"Show QR code\" to present it full-screen to your customer.",
     "showQr": "Show QR code",
     "bottomAmountLabel": "Amount",
-    "qrMobileBarHint": "Use \"Show QR code\" in the bar below to present it.",
     "qrModalTitle": "Payment QR code",
     "qrModalClose": "Close",
     "qrModalConvertExpired": "The indicative FX rate has expired. Close this QR and regenerate it with the latest rate.",
@@ -548,12 +528,7 @@
     "posterStepDone": "Payment complete",
     "qrPlaceholderNoAddress": "Enter receiver address (Step 2)",
     "qrPlaceholderNoAmount": "Enter an amount",
-    "qrPlaceholderGenerating": "Generating QR…",
     "qrEmptyState": {
-      "title": "Not ready to create the QR code yet",
-      "needLabel": "Required:",
-      "needAddress": "Receiver wallet address",
-      "needAmount": "Amount",
       "trySample": "Try with sample amount {amount}"
     },
     "crossChainHeading": "From another chain (USDC only)",
@@ -577,7 +552,7 @@
     "fxWarnTitle": "A sudden rate change was detected. Please verify the latest rate",
     "fxWarnDetail": "Previous rate: {lkg} JPY / Current: {current} JPY",
     "fxWarnAck": "Acknowledged",
-    "accountingFieldsTitle": "Optional accounting fields (sales detail)",
+    "accountingFieldsTitle": "Add line details (optional)",
     "accountingFieldsHint": "Adds bookkeeping detail to history and CSVs. Optional — the QR works without it.",
     "productNameLabel": "Product / purpose",
     "productNamePlaceholder": "e.g. Coffee / Event fee",
@@ -599,16 +574,43 @@
       "actionsNote": "This QR works only while it’s shown on this screen (it can’t be printed, saved or copied).",
       "showNormalQr": "Show the standard QR",
       "blocked": {
-        "token": "“The shop pays the gas” works only for JPYC on {chain}. Change the payment mode.",
-        "no_locks": "Not available in this browser (it can’t prevent sending twice from another tab). Change the payment mode.",
-        "config": "This method isn’t available right now. Change the payment mode.",
-        "no_wallet": "There’s no gas wallet. Create one in “This device’s gas wallet” below.",
+        "token": "“The shop pays the gas” works only for JPYC on {chain}. Change the payment method in Settings.",
+        "no_locks": "Not available in this browser (it can’t prevent sending twice from another tab). Change the payment method in Settings.",
+        "config": "This method isn’t available right now. Change the payment method in Settings.",
+        "no_wallet": "There’s no gas wallet. Create one in “This device’s gas wallet”.",
         "static": "Works only with a QR that has an amount. Enter an amount.",
         "split": "Can’t be used together with automatic revenue split.",
         "fx": "Can’t be used together with receiving in another currency.",
         "receiver": "Not available for this recipient.",
         "min_amount": "Not available for checkouts under 1 JPYC."
       }
+    },
+    "shopSettings": {
+      "title": "Shop settings",
+      "open": "Settings",
+      "done": "Done",
+      "sections": {
+        "receive": "Receiving",
+        "currency": "Currency and chain",
+        "payment": "Payment method",
+        "receipt": "Receipt and poster"
+      }
+    },
+    "shopSummary": {
+      "noStoreName": "No shop name",
+      "noReceiver": "No receiving wallet",
+      "payStandard": "Standard payment"
+    },
+    "receiverInline": {
+      "title": "Receiving wallet",
+      "hint": "Payments arrive at this address."
+    },
+    "quickAmountsTitle": "Quick amounts",
+    "quickAmountsEdit": "Edit",
+    "quickAmountsDone": "Done",
+    "notReady": {
+      "amount": "Enter an amount",
+      "receiver": "Set a receiving wallet"
     }
   },
   "RecoverFee": {

@@ -8,18 +8,29 @@ import {
 } from 'react';
 import { useTranslations } from 'next-intl';
 import { QrCode as QrCodeIcon } from 'lucide-react';
-import { StepCard } from '../StepCard';
-import type { QrSettings } from '@/hooks/useQrSettings';
 import type { TokenDeployment } from '@/lib/tokens';
 import type { Mode } from './QrAmountSection';
 
-// ③ QR (右列): 表示ボタン / 生成中 / 空状態。モーダルの開閉状態・payUrl の導出・
-// モーダル本体 (qrRef・保存・印刷・前回 QR の保存) は QrGenerator に残す。
+// QR を出せない理由 (未入力の項目) のキー。金額 → 受取先の順に 1 つだけ出す。
+export function qrNotReadyKey(
+  amountValid: boolean,
+  receiverValid: boolean,
+): 'amount' | 'receiver' | null {
+  if (!amountValid) return 'amount';
+  if (!receiverValid) return 'receiver';
+  return null;
+}
+
+// 会計パネル (PC の右列・2026-10 磨き上げ P2): 請求金額と「QRコードを表示する」。レジの右列 (会計サマリー) と
+// 同じ型。押せないときは理由を 1 行で出す。スマホは下部の会計バーが担うので出さない。
+// モーダルの開閉状態・payUrl の導出・モーダル本体は QrGenerator に残す。
 export function QrPreviewSection({
   payUrl,
   receiverValid,
   amountValid,
-  settings,
+  amountText,
+  fiatHint,
+  sampleAmount,
   setAmount,
   setQrModalOpen,
   showQrBlocked,
@@ -28,7 +39,11 @@ export function QrPreviewSection({
   payUrl: string;
   receiverValid: boolean;
   amountValid: boolean;
-  settings: QrSettings;
+  /** 表示する請求金額 (例「1,000 JPYC」・据え置きは「金額はお客様が入力」)。未入力は null。 */
+  amountText: string | null;
+  fiatHint: string | null;
+  /** 受取先は済んだが金額が空のとき、試しに入れる金額 (例 '1000')。 */
+  sampleAmount: string;
   setAmount: Dispatch<SetStateAction<string>>;
   setQrModalOpen: Dispatch<SetStateAction<boolean>>;
   /** 「QRコードを表示する」を押せない理由 (お店がガス代を肩代わりして送るで使えない会計など)。省略時は今のまま。 */
@@ -37,104 +52,79 @@ export function QrPreviewSection({
   secondaryAction?: { label: string; onClick: () => void };
 }) {
   const t = useTranslations('QrGenerator');
+  const notReadyKey = payUrl ? null : qrNotReadyKey(amountValid, receiverValid);
+  const notReady = notReadyKey ? t(`notReady.${notReadyKey}`) : null;
+  const disabled = !payUrl || showQrBlocked !== undefined;
   return (
-    <div className="space-y-4 print:hidden lg:sticky lg:top-20">
-      <StepCard
-        step={3}
-        icon={QrCodeIcon}
-        title={t('steps.qr')}
-        variant="qr-prominent"
-      >
-        <p className="-mt-2 mb-3 text-xs text-slate-500">
-          {t('qrDescription')}
-        </p>
-        <div className="flex flex-col items-center gap-4">
-          {payUrl ? (
-            // 即時表示せず、目立つボタン → 全画面モーダルで提示 (店員が金額を確認
-            // してからお客様に画面を見せる対面フロー)。
-            // ボタンは lg (右サイドバー) のみ表示。モバイルは下部固定バーが担うので
-            // ここでは出さず、「QRコードを表示する」が2つ並ぶのを防ぐ (誘導文だけ出す)。
-            <>
-              <button
-                type="button"
-                onClick={() => setQrModalOpen(true)}
-                {...(showQrBlocked !== undefined ? { disabled: true } : {})}
-                className={`hidden w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 lg:inline-flex${
-                  showQrBlocked !== undefined
-                    ? ' disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0'
-                    : ''
-                }`}
-              >
-                <QrCodeIcon className="h-5 w-5" aria-hidden />
-                {t('showQr')}
-              </button>
-              {showQrBlocked && (
-                <p role="status" className="text-center text-xs text-amber-800">
-                  {showQrBlocked}
-                </p>
-              )}
-              {secondaryAction && (
-                <button
-                  type="button"
-                  onClick={secondaryAction.onClick}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
-                >
-                  {secondaryAction.label}
-                </button>
-              )}
-              <p className="text-center text-sm text-slate-500 lg:hidden">
-                {t('qrMobileBarHint')}
-              </p>
-            </>
-          ) : receiverValid && amountValid ? (
-            // receiver + amount valid だが payUrl 未確定の遷移状態 (origin 空 = SSR /
-            // hydrate 直後の数フレーム間)。「生成中」で混乱を回避する。
-            <p className="rounded-lg bg-slate-50 px-4 py-6 text-sm text-slate-500">
-              {t('qrPlaceholderGenerating')}
+    <aside className="flex flex-col print:hidden lg:sticky lg:top-20">
+      {/* お店負担で押せない理由と「通常の QR を出す」(1 か所だけ・お店負担を選んでいないときは何も出さない)。
+          スマホは本文の流れの中 (下部の会計バーには理由を書く場所が無い)、PC は会計パネルの下。 */}
+      {/* どちらも QR の会計 (payUrl) があるときだけ (金額を消した後に押すと、次の入力で QR が勝手に開くのを防ぐ)。 */}
+      {payUrl && (showQrBlocked || secondaryAction) && (
+        <div className="space-y-3 lg:order-last lg:mt-3">
+          {showQrBlocked && (
+            <p role="status" className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              {showQrBlocked}
             </p>
-          ) : (
-            <QrEmptyState
-              title={t('qrEmptyState.title')}
-              needLabel={t('qrEmptyState.needLabel')}
-              items={[
-                {
-                  label: t('qrEmptyState.needAmount'),
-                  done: amountValid,
-                },
-                {
-                  label: t('qrEmptyState.needAddress'),
-                  done: receiverValid,
-                },
-              ]}
-              // 受取先は済だが金額が空のとき、サンプル金額ワンタップで
-              // 最初の QR を出して操作感を掴ませる導線。
-              sample={
-                receiverValid && !amountValid
-                  ? {
-                      label: t('qrEmptyState.trySample', {
-                        amount: settings.token === 'usdc' ? '5' : '1000',
-                      }),
-                      onUse: () =>
-                        setAmount(settings.token === 'usdc' ? '5' : '1000'),
-                    }
-                  : undefined
-              }
-            />
+          )}
+          {secondaryAction && (
+            <button
+              type="button"
+              onClick={secondaryAction.onClick}
+              className="w-full rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+            >
+              {secondaryAction.label}
+            </button>
           )}
         </div>
-      </StepCard>
-    </div>
+      )}
+      <div className="hidden rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 lg:block">
+        <p className="text-xs font-medium text-slate-500">{t('bottomAmountLabel')}</p>
+        <p
+          className={`mt-1 break-all text-3xl font-bold tabular-nums tracking-tight ${
+            amountText ? 'text-slate-900' : 'text-slate-300'
+          }`}
+        >
+          {amountText ?? '—'}
+        </p>
+        {fiatHint && <p className="mt-0.5 text-sm font-medium text-slate-500">{fiatHint}</p>}
+        {/* 店員が金額を確かめてから、全画面の QR をお客様に見せる (対面の流れ)。 */}
+        <button
+          type="button"
+          onClick={() => setQrModalOpen(true)}
+          disabled={disabled}
+          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand px-5 py-4 text-base font-bold text-white shadow-card transition-[transform,box-shadow] hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:hover:translate-y-0"
+        >
+          <QrCodeIcon className="h-5 w-5" aria-hidden />
+          {t('showQr')}
+        </button>
+        {notReady && (
+          <p className="mt-3 text-center text-xs text-slate-500">{notReady}</p>
+        )}
+        {/* 受取先は済んだが金額が空 → サンプル金額ワンタップで最初の QR を試せる。 */}
+        {!payUrl && receiverValid && !amountValid && (
+          <button
+            type="button"
+            onClick={() => setAmount(sampleAmount)}
+            className="mx-auto mt-2 block text-xs font-semibold text-brand hover:underline"
+          >
+            {t('qrEmptyState.trySample', { amount: sampleAmount })}
+          </button>
+        )}
+      </div>
+    </aside>
   );
 }
 
-// モバイル下部固定 会計バー。payUrl が無い間は null。URL の内容だけの変更では
-// 再描画を促さず、バーの出現と表示金額 / モード / 通貨記号の変更に追従する。
+// モバイル下部固定 会計バー (2026-10 磨き上げ P2): 常に出す (押せないときは未入力の項目を金額の位置に出す)。
+// 下のナビと 1 枚に見えるよう、同じ半透明の白・影なし・境目は細い線だけ (user 裁定: ナビは残して一体化)。
 export function QrMobileBar({
   payUrl,
   amount,
   mode,
   deployment,
   amountLabelText,
+  notReady,
   fiatHint,
   setQrModalOpen,
   showQrBlocked,
@@ -144,17 +134,19 @@ export function QrMobileBar({
   mode: Mode;
   deployment: TokenDeployment;
   amountLabelText: string;
+  /** 押せない理由 (未入力の項目)。null = 入力は揃っている。 */
+  notReady: string | null;
   fiatHint: string | null;
   setQrModalOpen: Dispatch<SetStateAction<boolean>>;
-  /** 「QRコードを表示する」を押せない理由 (理由は右サイドバー・本文側に出す)。省略時は今のまま。 */
+  /** 「QRコードを表示する」を押せない理由 (理由は本文側に出す)。省略時は今のまま。 */
   showQrBlocked?: string;
 }) {
   const t = useTranslations('QrGenerator');
   const bottomBarRef = useRef<HTMLDivElement>(null);
-  const visible = Boolean(payUrl);
+  const ready = Boolean(payUrl);
   // WebKit (モバイル Safari・SNS アプリ内ブラウザ) では position:sticky な下部バーの子テキストを
   // JS で書き換えても合成レイヤーが再ラスタライズされず古い表示が残ることがある (RegisterMode
-  // と同根)。バーの出現時と表示金額/通貨/モードが変わるたび transform を 1 フレーム
+  // と同根)。表示金額/通貨/モード/押せるかが変わるたび transform を 1 フレーム
   // 入れて再描画を強制する (金額を先に入力し、後から受取先が確定する場合も含む)。
   useEffect(() => {
     const el = bottomBarRef.current;
@@ -164,98 +156,40 @@ export function QrMobileBar({
       if (el) el.style.transform = '';
     });
     return () => cancelAnimationFrame(id);
-  }, [visible, amount, mode, deployment.displaySymbol]);
-  if (!visible) return null;
+  }, [ready, amount, mode, deployment.displaySymbol, notReady]);
   return (
     <div
       ref={bottomBarRef}
-      className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/80 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_-6px_rgba(15,23,42,0.14)] backdrop-blur md:bottom-0 lg:hidden print:hidden"
+      className="sticky bottom-14 z-20 -mx-4 flex items-center gap-3 border-t border-slate-200/70 bg-white/85 px-4 py-2.5 backdrop-blur-md supports-[backdrop-filter]:bg-white/75 md:bottom-0 lg:hidden print:hidden"
     >
       <div className="min-w-0 flex-1">
         <div className="text-[11px] text-slate-500">
           {t('bottomAmountLabel')}
         </div>
-        <div className="flex items-baseline gap-2">
-          <span className="truncate font-mono text-lg font-bold text-slate-900">
-            {amountLabelText}
-          </span>
-          {fiatHint && (
-            <span className="shrink-0 text-xs font-medium text-slate-500">
-              {fiatHint}
+        {ready ? (
+          <div className="flex items-baseline gap-2">
+            <span className="truncate text-lg font-bold tabular-nums text-slate-900">
+              {amountLabelText}
             </span>
-          )}
-        </div>
+            {fiatHint && (
+              <span className="shrink-0 text-xs font-medium text-slate-500">
+                {fiatHint}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="truncate text-sm font-medium text-slate-500">{notReady}</div>
+        )}
       </div>
       <button
         type="button"
         onClick={() => setQrModalOpen(true)}
-        {...(showQrBlocked !== undefined ? { disabled: true } : {})}
-        className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-5 py-3 text-base font-bold text-white shadow-card transition hover:-translate-y-0.5 hover:bg-brand-dark hover:shadow-card-hover active:translate-y-0${
-          showQrBlocked !== undefined
-            ? ' disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none disabled:hover:translate-y-0'
-            : ''
-        }`}
+        disabled={!ready || showQrBlocked !== undefined}
+        className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-base font-bold text-white transition-transform hover:bg-brand-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
       >
         <QrCodeIcon className="h-5 w-5" aria-hidden />
         {t('showQr')}
       </button>
-    </div>
-  );
-}
-
-// 必要な項目を checkmark 付きで明示する empty state。初見店主が「何を
-// 入れれば QR が出るか」を一目で理解できるようにする (review #2 + #8)。
-function QrEmptyState({
-  title,
-  needLabel,
-  items,
-  sample,
-}: {
-  title: string;
-  needLabel: string;
-  items: { label: string; done: boolean }[];
-  // 受取先は済だが金額未入力のとき、サンプル金額ワンタップで最初の QR を出す導線。
-  sample?: { label: string; onUse: () => void };
-}) {
-  return (
-    <div className="flex w-full max-w-xs flex-col items-center gap-3 rounded-lg bg-slate-50 px-4 py-6 text-center">
-      <p className="text-sm font-medium text-slate-700">{title}</p>
-      <div className="w-full">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          {needLabel}
-        </p>
-        <ul className="space-y-1.5 text-left">
-          {items.map((item) => (
-            <li
-              key={item.label}
-              className="flex items-center gap-2 text-sm"
-            >
-              <span
-                aria-hidden
-                className={`inline-flex h-4 w-4 flex-none items-center justify-center rounded-full text-[10px] font-bold ${
-                  item.done
-                    ? 'bg-emerald-500 text-white'
-                    : 'border border-slate-300 bg-white text-slate-500'
-                }`}
-              >
-                {item.done ? '✓' : ''}
-              </span>
-              <span className={item.done ? 'text-slate-500 line-through' : 'text-slate-700'}>
-                {item.label}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
-      {sample && (
-        <button
-          type="button"
-          onClick={sample.onUse}
-          className="rounded-lg border border-brand/40 bg-brand/5 px-3 py-1.5 text-xs font-semibold text-brand-dark hover:border-brand"
-        >
-          {sample.label}
-        </button>
-      )}
     </div>
   );
 }

@@ -24,9 +24,12 @@ type Props = {
   chainId: number;
   /** 手数料の負担者。customer=お客様上乗せ / merchant=店舗吸収。 */
   gasMode: 'customer' | 'merchant';
+  /** 見た目。既定 amber (支払う側の画面)。neutral = 店の会計画面 (正常な情報を警告色で出さない・文言は同じ)。
+   *  受付不可 (tooSmall) は tone に関わらず amber (本当の注意)。 */
+  tone?: 'amber' | 'neutral';
 };
 
-export function RecoverFeeNotice({ billAmount, chainId, gasMode }: Props) {
+export function RecoverFeeNotice({ billAmount, chainId, gasMode, tone = 'amber' }: Props) {
   const t = useTranslations('RecoverFee');
 
   if (billAmount === null || billAmount <= 0n) return null;
@@ -68,6 +71,15 @@ export function RecoverFeeNotice({ billAmount, chainId, gasMode }: Props) {
           customerPays: disclosure.customerPaysHuman,
           merchantReceives: disclosure.merchantReceivesHuman,
         });
+
+  if (tone === 'neutral') {
+    return (
+      <div className="rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-600">
+        <p className="font-semibold text-slate-700">{feeLabel}</p>
+        <p className="mt-0.5">{splitLabel}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900">

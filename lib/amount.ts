@@ -32,3 +32,11 @@ export function normalizeAmountList(
   }
   return out;
 }
+
+// 表示用に整数部へ 3 桁区切りを入れる ("3000" → "3,000"・"1000.5" → "1,000.5")。
+// 文字列のまま区切る (Number に通さない = 18 桁の小数でも丸めない)。URL・保存値には使わない (表示専用)。
+export function groupAmountDigits(raw: string): string {
+  const [int, frac] = raw.split('.');
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return frac === undefined ? grouped : `${grouped}.${frac}`;
+}

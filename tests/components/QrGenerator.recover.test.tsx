@@ -175,9 +175,10 @@ describe('QrGenerator gas-bearer toggle (確定モデル: JPYC recover は merch
     vi.mocked(recoverFeeBps).mockReturnValue(0);
   });
 
+  // 支払い方法は「お店の設定」シートの中 (2026-10 磨き上げ P2)。
   async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
-    const adv = screen.getByText('高度な設定');
-    await user.click(adv);
+    if (screen.queryByRole('dialog', { name: 'お店の設定' })) return;
+    await user.click(screen.getByRole('button', { name: /^設定$/ }));
   }
 
   it('JPYC recover: gas 負担者トグルも固定ヒントも出ない (開示は payModeGaslessDesc が担う)', async () => {
@@ -221,9 +222,10 @@ describe('QrGenerator gas-bearer toggle (確定モデル: JPYC recover は merch
     vi.mocked(jpycForwarderFor).mockReturnValue(MOCK_FORWARDER);
     const user = userEvent.setup();
     render(<QrGenerator />);
-    // token を USDC に切替 (TokenChooser)。
-    const usdcBtn = screen.getByRole('button', { name: /USDC/i });
-    await user.click(usdcBtn);
+    // token を USDC に切替 (TokenChooser・お店の設定シートの中)。
+    await openAdvanced(user);
+    await user.click(screen.getByRole('button', { name: /^USDC$/ }));
+    await user.click(screen.getByRole('button', { name: '完了' }));
     await openStep2(user);
     const receiverInput = screen.getByPlaceholderText(/0x/i);
     await user.type(receiverInput, VALID_RECEIVER);

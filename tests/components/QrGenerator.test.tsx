@@ -68,27 +68,41 @@ import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
-// UX 詰め (2026-06-05): 決済QR は ①金額 → ②受取先(折りたたみ) に戻した。② 受取先
-// (アドレス / 店舗名 / ポスター補足文) は折りたたみ可能。受取先未設定なら default open
-// なので空 LS のテストでは no-op。seeded receiver で閉じている場合のみ開く。
+// 2026-10 磨き上げ P2: 受取先・通貨とチェーン・支払い方法・控えとポスターは「お店の設定」シート (dialog) に移った。
+// 受取先が未設定なら会計画面にも受取先の欄が出る (その場合 openStep2 は何もしない)。
+async function openShopSettings(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  if (screen.queryByRole('dialog', { name: 'お店の設定' })) return;
+  await user.click(await screen.findByRole('button', { name: /^設定$/ }));
+  await screen.findByRole('dialog', { name: 'お店の設定' });
+}
+
+// お店の設定シートで通貨・チェーンなどのボタンを押す (既定は押した後にシートを閉じて会計画面に戻る)。
+async function pickInSettings(
+  user: ReturnType<typeof userEvent.setup>,
+  name: RegExp,
+  opts: { keepOpen?: boolean } = {},
+): Promise<void> {
+  await openShopSettings(user);
+  const sheet = screen.getByRole('dialog', { name: 'お店の設定' });
+  await user.click(within(sheet).getByRole('button', { name }));
+  if (!opts.keepOpen) await user.click(within(sheet).getByRole('button', { name: '完了' }));
+}
+
+// 受取先の欄を出す (未設定なら会計画面に出ている・設定済みならシートを開く)。
 async function openStep2(
   user: ReturnType<typeof userEvent.setup>,
 ): Promise<void> {
-  const toggle = screen.queryByRole('button', { name: /受取先/ });
-  if (toggle && toggle.getAttribute('aria-expanded') === 'false') {
-    await user.click(toggle);
-  }
+  if (screen.queryByPlaceholderText(/0x\.\.\./)) return;
+  await openShopSettings(user);
 }
 
-// 高度な設定 accordion は ② 受取先 の後ろの独立セクション (default 閉)。payMode / gas /
-// split を触るテストはこの accordion を開く。
+// 支払い方法 (payMode / gas / split / 他チェーンからの受取) はシートの中。
 async function openAdvanced(
   user: ReturnType<typeof userEvent.setup>,
 ): Promise<void> {
-  const toggle = await screen.findByRole('button', { name: /高度な設定/ });
-  if (toggle.getAttribute('aria-expanded') !== 'true') {
-    await user.click(toggle);
-  }
+  await openShopSettings(user);
 }
 
 // QR は即時表示せず「QRコードを表示する」ボタン → 全画面モーダルで提示。QR 本体 / 決済
@@ -103,6 +117,14 @@ async function openQrModal(
     name: /QRコードを表示する/,
   });
   await user.click(btns[0]);
+}
+
+// QR の画面を閉じる (設定を変えて出し直すテスト用)。
+async function closeQrModal(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<void> {
+  const dialog = screen.getByRole('dialog', { name: '決済用 QR コード' });
+  await user.click(within(dialog).getByRole('button', { name: '閉じる' }));
 }
 
 // モーダルを開き、その中の EIP-681 互換 QR (details) を展開する。
@@ -127,7 +149,7 @@ describe('QrGenerator', () => {
   });
 
   describe('JPYC ガス無料化: free 経路 (EIP-3009 relay・forwarder 未設定)', () => {
-    it('gas 負担者トグルが非表示・サマリは「OpenPay がガス負担」・gas=customer 固定', async () => {
+    it('gas 負担者トグルが非表示・要約は「ガス代不要」・gas=customer 固定', async () => {
       // free 経路を模す: provider=relay + forwarder=null (env 未設定で既定 null)。
       vi.mocked(resolveJpycGaslessProvider).mockReturnValue('eip3009-relay');
       window.localStorage.setItem(
@@ -142,13 +164,9 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await openStep2(user);
-      // accordion 閉のサマリ: 負担者ではなく「OpenPay がガス負担」
-      const toggle = await screen.findByRole('button', { name: /高度な設定/ });
-      expect(
-        within(toggle).getByText(/ガスレス決済（OpenPay がガス負担）/),
-      ).toBeInTheDocument();
-      // accordion を開く → 負担者トグルは存在しない
+      // 会計画面の先頭の要約: 支払い方法は「ガス代不要」
+      expect(await screen.findByText('ガス代不要')).toBeInTheDocument();
+      // お店の設定を開く → 負担者トグルは存在しない
       await openAdvanced(user);
       expect(
         screen.queryByRole('button', { name: /店主が gas 相当額/ }),
@@ -157,6 +175,7 @@ describe('QrGenerator', () => {
         screen.queryByRole('button', { name: /顧客が gas 相当額/ }),
       ).not.toBeInTheDocument();
       // storage に gasMode=merchant が残っていても URL は gas=customer 固定 (merchant 出ない)
+      await user.click(screen.getByRole('button', { name: '完了' }));
       await user.type(screen.getByPlaceholderText('1000'), '5');
       await openQrModal(user);
       await waitFor(() => {
@@ -196,11 +215,11 @@ describe('QrGenerator', () => {
   });
 
   describe('初期レンダリング', () => {
-    it('LocalStorage 空: Step 1 で token chooser は常時表示、JPYC が active (default)', async () => {
-      // 3-step refactor v2 (2026-05-23 追補): token / chain は顧客ごとに変更する
-      // 頻度が高いため Step 1 (金額) に移動。Step 2 (受取先) は折り畳み可能で
-      // 設定後変更しない情報のみを格納。
+    it('LocalStorage 空: お店の設定の通貨は JPYC が active (default)', async () => {
+      // 2026-10 磨き上げ P2: 通貨とチェーンは「お店の設定」シートへ (会計画面の先頭は要約だけ)。
+      const user = userEvent.setup();
       render(<QrGenerator />);
+      await openShopSettings(user);
       await waitFor(() => {
         expect(
           screen.getByRole('button', { name: /^JPYC$/ }),
@@ -218,6 +237,7 @@ describe('QrGenerator', () => {
       // Chain.name のみ。ここでは img の src 属性に slug が含まれるかを検査する。
       const user = userEvent.setup();
       render(<QrGenerator />);
+      await openShopSettings(user);
       await waitFor(() => screen.getByRole('button', { name: /^Polygon/ }));
       // 既定 JPYC: chain chooser は Polygon + Kaia (testnet env では Kairos)
       const polygonBtn = screen.getByRole('button', { name: /^Polygon/ });
@@ -229,7 +249,7 @@ describe('QrGenerator', () => {
         /kaia\.svg/,
       );
       // USDC に切替 → chain chooser に Base/Arbitrum/Optimism/Polygon/Ethereum logo
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
+      await pickInSettings(user, /^USDC$/, { keepOpen: true });
       await waitFor(() =>
         screen.getByRole('button', { name: /^Base/ }),
       );
@@ -253,7 +273,9 @@ describe('QrGenerator', () => {
       // displaySymbol だけになる (上の test で button name='JPYC'/'USDC' 検証済)。
       // ここでは「ロゴ asset 経路 (public/tokens/...) が UI に出ているか」を
       // src 属性で検査する (alt は空 / aria-hidden なので role=img では取れない)。
+      const user = userEvent.setup();
       render(<QrGenerator />);
+      await openShopSettings(user);
       await waitFor(() =>
         screen.getByRole('button', { name: /^JPYC$/ }),
       );
@@ -269,7 +291,7 @@ describe('QrGenerator', () => {
       expect(usdcImg?.getAttribute('src')).toMatch(/usdc\.svg/);
     });
 
-    it('LocalStorage に有効アドレス + gasMode=merchant: サマリに「ガス代：店主負担」が出る', async () => {
+    it('LocalStorage に有効アドレス + gasMode=merchant: お店の設定で「店主が gas 相当額を吸収」が選ばれている', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -282,24 +304,19 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      // Step 2 は preset receiver で default 折り畳まれる → 高度な設定 toggle が
-      // 出るように Step 2 を expand。
-      await openStep2(user);
-      await waitFor(() => {
-        const toggle = screen.getByRole('button', { name: /高度な設定/ });
-        expect(toggle.getAttribute('aria-expanded')).toBe('false');
-      });
-      const toggle = screen.getByRole('button', { name: /高度な設定/ });
-      // direct=false / gasMode=merchant → 日本語サマリ "ガス代：店主負担" (Phase 1: 手数料% 表記なし)
+      // 会計画面の要約は「ガス代不要」(負担者の内訳は設定の中)。
+      expect(await screen.findByText('ガス代不要')).toBeInTheDocument();
+      await openAdvanced(user);
       expect(
-        within(toggle).getByText(/ガスレス決済 \/ ガス代：店主負担/),
-      ).toBeInTheDocument();
+        screen.getByRole('button', { name: /店主が gas 相当額/ }).className,
+      ).toMatch(/border-brand/);
+      expect(
+        screen.getByRole('button', { name: /顧客が gas 相当額/ }).className,
+      ).not.toMatch(/border-brand/);
     });
 
-    it('LocalStorage に有効アドレス: アコーディオンは閉じて payMode サマリ表示', async () => {
-      // refactor 後 SettingsSummary は payMode + gasMode 由来の tail のみ表示
-      // (token / chain は Step 1 で確認、receiver は Step 2 summary で確認できるため
-      // 重複表示しない)。
+    it('LocalStorage に有効アドレス: シートは閉じたまま・要約に受取先と支払い方法', async () => {
+      // 2026-10 磨き上げ P2: 会計画面の先頭の 1 行に、店名・受取先・通貨とチェーン・支払い方法を出す。
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -308,23 +325,16 @@ describe('QrGenerator', () => {
           directTransfer: false,
         }),
       );
-      const user = userEvent.setup();
       render(<QrGenerator />);
-      await openStep2(user);
-      await waitFor(() => {
-        const toggle = screen.getByRole('button', { name: /高度な設定/ });
-        expect(toggle.getAttribute('aria-expanded')).toBe('false');
-      });
-      const toggle = screen.getByRole('button', { name: /高度な設定/ });
-      // gasMode default = customer → 日本語サマリ "ガス代：お客様負担" (Phase 1: 手数料% 表記なし)
-      expect(
-        within(toggle).getByText(/ガスレス決済 \/ ガス代：お客様負担/),
-      ).toBeInTheDocument();
+      expect(await screen.findByText('ガス代不要')).toBeInTheDocument();
+      expect(screen.getByText('0x8335…2913')).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).toBeNull();
+      // 受取先は保存済みなので、会計画面に受取先の欄は出さない。
+      expect(screen.queryByPlaceholderText(/0x\.\.\./)).toBeNull();
     });
 
-    it('LocalStorage に無効アドレス: receiver field (Step 2 visible) に validation エラー', async () => {
-      // 3-step refactor 後: receiver は Step 2 で常時 visible、accordion 開閉に
-      // 関係なくエラー文言が見える。高度な設定 accordion はあくまで default 閉。
+    it('LocalStorage に無効アドレス: 会計画面の受取先の欄に validation エラー', async () => {
+      // 受取先が有効でないので、会計画面に受取先の欄が出て、エラー文言が見える。シートは閉じたまま。
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -335,8 +345,7 @@ describe('QrGenerator', () => {
       );
       render(<QrGenerator />);
       await screen.findByText(/アドレス形式が正しくありません/);
-      const toggle = screen.getByRole('button', { name: /高度な設定/ });
-      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      expect(screen.queryByRole('dialog')).toBeNull();
     });
   });
 
@@ -370,22 +379,26 @@ describe('QrGenerator', () => {
       expect(screen.queryByRole('button', { name: /お店が\s?ガス代を肩代わり/ })).toBeNull();
     });
 
-    it('payUrl 有効時のみ「QRコードを表示する」CTA を2箇所 (右サイドバー + モバイル下部バー) 描画', async () => {
+    it('「QRコードを表示する」は PC の会計パネル + モバイル下部バーの 2 か所・payUrl 有効時だけ押せる', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-      // 受取先/金額 未入力 → payUrl 無し → CTA は描画されない (空状態を維持)。
-      expect(
-        screen.queryAllByRole('button', { name: /QRコードを表示する/ }),
-      ).toHaveLength(0);
-      // 受取先 + 金額 → payUrl 有効 → デスクトップ右サイドバー + モバイル下部バーの2箇所。
-      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
+      // 受取先/金額 未入力 → payUrl 無し → ボタンは出したまま押せない (理由は「金額を入れてください」)。
+      const before = screen.getAllByRole('button', { name: /QRコードを表示する/ });
+      expect(before).toHaveLength(2);
+      before.forEach((b) => expect(b).toBeDisabled());
+      expect(screen.getAllByText('金額を入れてください').length).toBeGreaterThan(0);
+      // 金額だけ → 次は受取先の不足を出す。
       await user.type(screen.getByPlaceholderText('1000'), '500');
+      expect((await screen.findAllByText('受取先を設定してください')).length).toBeGreaterThan(0);
+      // 受取先 + 金額 → payUrl 有効 → 2 か所とも押せる。
+      await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await waitFor(() =>
-        expect(
-          screen.getAllByRole('button', { name: /QRコードを表示する/ }),
-        ).toHaveLength(2),
+        screen
+          .getAllByRole('button', { name: /QRコードを表示する/ })
+          .forEach((b) => expect(b).toBeEnabled()),
       );
+      expect(screen.queryByText('受取先を設定してください')).toBeNull();
     });
 
     it('据え置きモードへ切替: JPYC の金額入力が非表示になりメッセージが出る', async () => {
@@ -420,7 +433,8 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText('1000'));
 
-      await user.click(screen.getByRole('button', { name: /1500 JPYC/ }));
+      // チップの表示は桁区切り・通貨記号は読み上げ用 (sr-only) に付く。
+      await user.click(screen.getByRole('button', { name: '1,500 JPYC' }));
 
       const input = screen.getByPlaceholderText('1000') as HTMLInputElement;
       expect(input.value).toBe('1500');
@@ -433,6 +447,8 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '750');
 
+      // 店舗名とポスターの補足文は「お店の設定」シートの中。
+      await openShopSettings(user);
       await user.type(
         screen.getByPlaceholderText(/OpenPay Coffee/),
         'Kanda Coffee',
@@ -441,6 +457,7 @@ describe('QrGenerator', () => {
         screen.getByPlaceholderText(/完了画面をスタッフ/),
         'Show success screen',
       );
+      await user.click(screen.getByRole('button', { name: '完了' }));
 
       // ポスター調プレビューはモーダル内。金額は下部バーにも出るため dialog 内に限定して照合。
       await openQrModal(user);
@@ -454,14 +471,15 @@ describe('QrGenerator', () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-      await openAdvanced(user);
+      // よく使う金額の「編集」で編集欄を開く。
+      await user.click(screen.getByRole('button', { name: '編集' }));
 
       await user.click(screen.getByRole('button', { name: /\+ 金額を追加/ }));
       const inputs = screen.getAllByPlaceholderText(/例: 1000/);
       await user.type(inputs[inputs.length - 1], '2500');
 
       expect(
-        screen.getByRole('button', { name: /2500 JPYC/ }),
+        screen.getByRole('button', { name: '2,500 JPYC' }),
       ).toBeInTheDocument();
     });
 
@@ -542,7 +560,7 @@ describe('QrGenerator', () => {
       ).toBeInTheDocument();
 
       // USDC へ切替 → USDC リスト。JPYC の値は出ない (= 連動しない)。
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
+      await pickInSettings(user, /^USDC$/);
       await waitFor(() => screen.getByPlaceholderText('10.00'));
 
       expect(
@@ -564,7 +582,8 @@ describe('QrGenerator', () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText('1000'));
-      await openAdvanced(user);
+      // よく使う金額の「編集」で編集欄を開く (2026-10 磨き上げ P2)。
+      await user.click(screen.getByRole('button', { name: '編集' }));
 
       // 既定 ['500','1000','1500','3000'] のうち 2 番目 (1000) を削除
       const editInputs = screen.getAllByPlaceholderText(/例: 1000/);
@@ -583,7 +602,7 @@ describe('QrGenerator', () => {
       expect((after[2] as HTMLInputElement).value).toBe('3000');
       // 表示側 (activeQuickAmounts) も同期: 1000 のクイックボタンは消える
       expect(
-        screen.queryByRole('button', { name: /1000 JPYC/ }),
+        screen.queryByRole('button', { name: '1,000 JPYC' }),
       ).toBeNull();
     });
 
@@ -591,7 +610,8 @@ describe('QrGenerator', () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText('1000'));
-      await openAdvanced(user);
+      // よく使う金額の「編集」で編集欄を開く (2026-10 磨き上げ P2)。
+      await user.click(screen.getByRole('button', { name: '編集' }));
 
       // 全 4 件を順に削除
       for (let i = 0; i < 4; i++) {
@@ -617,7 +637,8 @@ describe('QrGenerator', () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText('1000'));
-      await openAdvanced(user);
+      // よく使う金額の「編集」で編集欄を開く (2026-10 磨き上げ P2)。
+      await user.click(screen.getByRole('button', { name: '編集' }));
 
       const addBtn = screen.getByRole('button', { name: /\+ 金額を追加/ });
       await user.click(addBtn);
@@ -715,9 +736,9 @@ describe('QrGenerator', () => {
       ).toBeNull();
     });
 
-    it('受信者 / 金額 valid + payUrl 空 → "生成中" プレースホルダ表示', async () => {
-      // useOrigin を空に倒すと payUrl 計算が短絡 → QR ではなく「生成中」が出る。
-      // hydrate 直後 / SSR 中継時の一瞬の遷移状態を再現。
+    it('受信者 / 金額 valid + payUrl 空 → ボタンは押せないが「足りない項目」は出さない', async () => {
+      // useOrigin を空に倒すと payUrl 計算が短絡する (hydrate 直後 / SSR 中継時の一瞬の遷移状態)。
+      // 入力は揃っているので、未入力の理由 (金額・受取先) は出さない。
       useOriginMock.mockReturnValue('');
       const user = userEvent.setup();
       render(<QrGenerator />);
@@ -725,39 +746,47 @@ describe('QrGenerator', () => {
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '750');
 
-      // payUrl が出ない → placeholder が描画される。受信者 + 金額両方 valid の枝。
-      expect(screen.getByText(/生成中|generating/i)).toBeInTheDocument();
+      screen
+        .getAllByRole('button', { name: /QRコードを表示する/ })
+        .forEach((b) => expect(b).toBeDisabled());
+      expect(screen.queryByText('金額を入れてください')).toBeNull();
+      expect(screen.queryByText('受取先を設定してください')).toBeNull();
       // QR (SVG) と SVG保存ボタンは出ていない
       expect(screen.queryByRole('button', { name: /SVG保存/ })).toBeNull();
     });
 
     it('gas トグル: 切替で URL に gas=merchant が付く / 外れる', async () => {
+      // 設定シートで切り替え → QR を出し直して URL を見る (QR を開くと設定シートは閉じる)。
       const user = userEvent.setup();
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '5');
-      await openAdvanced(user);
-      // URL はモーダル内。開いたまま gas トグル (背後の accordion ボタンは操作可)。
-      await openQrModal(user);
 
       // 既定は customer → URL に gas= は付かない
+      await openQrModal(user);
       await waitFor(() => {
         expect(
           screen.queryByText((t) => t.includes('gas=')),
         ).toBeNull();
       });
+      await closeQrModal(user);
 
       // 店主 gas 負担ボタン → URL に gas=merchant が出る
+      await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /店主が gas 相当額/ }));
+      await openQrModal(user);
       await waitFor(() => {
         expect(
           screen.getByText((t) => t.includes('gas=merchant')),
         ).toBeInTheDocument();
       });
+      await closeQrModal(user);
 
       // 顧客 gas 負担に戻す → gas= が消える
+      await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /顧客が gas 相当額/ }));
+      await openQrModal(user);
       await waitFor(() => {
         expect(
           screen.queryByText((t) => t.includes('gas=')),
@@ -801,17 +830,15 @@ describe('QrGenerator', () => {
     it('JPYC タブへ切替で chainId 表記が変わる', async () => {
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await waitFor(() =>
-        screen.getByRole('button', { name: /^JPYC$/ }),
-      );
-      await user.click(screen.getByRole('button', { name: /^JPYC$/ }));
+      await waitFor(() => screen.getByPlaceholderText('1000'));
+      await pickInSettings(user, /^JPYC$/);
       // JPYC 用プレースホルダ '1000' に切替
       expect(screen.getByPlaceholderText('1000')).toBeInTheDocument();
     });
   });
 
-  describe('アコーディオン操作', () => {
-    it('クリックで開閉が切り替わる', async () => {
+  describe('お店の設定シート', () => {
+    it('「設定」で開き、「完了」・Escape で閉じる (開いている間は区切りが 4 つ)', async () => {
       const user = userEvent.setup();
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
@@ -822,17 +849,18 @@ describe('QrGenerator', () => {
         }),
       );
       render(<QrGenerator />);
-      await openStep2(user);
-      const toggle = await screen.findByRole('button', {
-        name: /高度な設定/,
-      });
-      await waitFor(() =>
-        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
-      );
-      await user.click(toggle);
-      expect(toggle.getAttribute('aria-expanded')).toBe('true');
-      await user.click(toggle);
-      expect(toggle.getAttribute('aria-expanded')).toBe('false');
+      expect(screen.queryByRole('dialog')).toBeNull();
+      await user.click(await screen.findByRole('button', { name: /^設定$/ }));
+      const sheet = screen.getByRole('dialog', { name: 'お店の設定' });
+      for (const title of ['受け取り', '通貨とチェーン', '支払い方法', '控えとポスター']) {
+        expect(within(sheet).getByRole('heading', { name: title })).toBeInTheDocument();
+      }
+      await user.click(within(sheet).getByRole('button', { name: '完了' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      await user.click(screen.getByRole('button', { name: /^設定$/ }));
+      expect(screen.getByRole('dialog', { name: 'お店の設定' })).toBeInTheDocument();
+      await user.keyboard('{Escape}');
+      expect(screen.queryByRole('dialog')).toBeNull();
     });
   });
 
@@ -869,10 +897,7 @@ describe('QrGenerator', () => {
     it('receiver 未入力 → link は描画しない', async () => {
       render(<QrGenerator />);
       const user = userEvent.setup();
-      const toggle = await screen.findByRole('button', { name: /高度な設定/ });
-      if (toggle.getAttribute('aria-expanded') === 'false') {
-        await user.click(toggle);
-      }
+      await openShopSettings(user);
       expect(
         screen.queryByRole('link', { name: /店舗ウォレットの履歴を/ }),
       ).toBeNull();
@@ -910,7 +935,14 @@ describe('QrGenerator', () => {
       });
       await user.click(standardBtn);
 
-      // URL はモーダル内に表示。
+      // Phase 1: 通常決済モードの説明 (hint) が表示される (手数料% 表記なし)
+      expect(
+        screen.getByText(/自分のウォレットでガス/),
+      ).toBeInTheDocument();
+      // gas 負担方法 (顧客 / 店主) フィールドは消える (standard モードでは irrelevant)
+      expect(screen.queryByRole('button', { name: /顧客が gas/ })).toBeNull();
+
+      // URL はモーダル内に表示 (QR を開くと設定シートは閉じる)。
       await openQrModal(user);
       // URL に mode=standard が出る (font-mono の payUrl 表示 + 警告文等にも
       // "mode=standard" 文字列が含まれるため、payUrl 限定で /pay?... 形式の URL を assert)
@@ -919,11 +951,6 @@ describe('QrGenerator', () => {
           screen.getByText((t) => /\/pay\?[^ ]*mode=standard/.test(t)),
         ).toBeInTheDocument();
       });
-
-      // Phase 1: 通常決済モードの説明 (hint) が表示される (手数料% 表記なし)
-      expect(
-        screen.getByText(/自分のウォレットでガス/),
-      ).toBeInTheDocument();
 
       // gas 負担方法 (顧客 / 店主) フィールドは消える (standard モードでは irrelevant)
       expect(screen.queryByRole('button', { name: /顧客が gas/ })).toBeNull();
@@ -948,7 +975,7 @@ describe('QrGenerator', () => {
       });
     });
 
-    it('Phase 1: payMode=standard でアコーディオン閉時のサマリに「通常決済（ガス代は顧客負担）」と出る', async () => {
+    it('Phase 1: payMode=standard で会計画面の要約に「通常決済」と出る', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -957,22 +984,12 @@ describe('QrGenerator', () => {
           payMode: 'standard',
         }),
       );
-      const user = userEvent.setup();
       render(<QrGenerator />);
-      await openStep2(user);
-      const toggle = await screen.findByRole('button', {
-        name: /高度な設定/,
-      });
-      // 自動閉じ
-      await waitFor(() =>
-        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
-      );
-      expect(
-        within(toggle).getByText(/通常決済（ガス代は顧客負担）/),
-      ).toBeInTheDocument();
+      expect(await screen.findByText('通常決済')).toBeInTheDocument();
+      expect(screen.queryByText('ガス代不要')).toBeNull();
     });
 
-    it('Phase 1: payMode=gasless (default) でサマリに「ガスレス決済 / ガス代：お客様負担」と出る', async () => {
+    it('Phase 1: payMode=gasless (default) で要約は「ガス代不要」・設定では「顧客が gas 相当額を上乗せ」が選ばれている', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({
@@ -984,20 +1001,15 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await openStep2(user);
-      const toggle = await screen.findByRole('button', {
-        name: /高度な設定/,
-      });
-      await waitFor(() =>
-        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
-      );
+      expect(await screen.findByText('ガス代不要')).toBeInTheDocument();
+      await openAdvanced(user);
       expect(
-        within(toggle).getByText(/ガスレス決済 \/ ガス代：お客様負担/),
-      ).toBeInTheDocument();
+        screen.getByRole('button', { name: /顧客が gas 相当額/ }).className,
+      ).toMatch(/border-brand/);
     });
   });
 
-  describe('Poster: pay mode badge (高度な設定を閉じた creator が気付ける可視化)', () => {
+  describe('Poster: pay mode badge (設定を開かなくても気付ける可視化)', () => {
     it('JPYC + Polygon (gasless 平常時): "ガスレス決済" badge が poster に出る', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
@@ -1011,12 +1023,14 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await openStep2(user);
       await user.type(screen.getByPlaceholderText('1000'), '100');
       // payMode バッジはポスター調プレビュー (モーダル内)。
       await openQrModal(user);
+      // 会計画面の要約にも同じ語が出るので、QR の画面の中に限定して照合する。
       await waitFor(() => {
-        expect(screen.getByText('ガス代不要')).toBeInTheDocument();
+        expect(
+          within(screen.getByRole('dialog', { name: '決済用 QR コード' })).getByText('ガス代不要'),
+        ).toBeInTheDocument();
       });
     });
 
@@ -1035,7 +1049,6 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await openStep2(user);
       // USDC placeholder は '10.00' (decimals=6 想定の例値)
       await user.type(screen.getByPlaceholderText('10.00'), '5');
       // payMode バッジはポスター調プレビュー (モーダル内)。
@@ -1047,7 +1060,9 @@ describe('QrGenerator', () => {
         ).toBeInTheDocument();
       });
       // gasless badge は出ない (誤って併発しないこと)
-      expect(screen.queryByText('ガス代不要')).toBeNull();
+      expect(
+        within(screen.getByRole('dialog', { name: '決済用 QR コード' })).queryByText('ガス代不要'),
+      ).toBeNull();
     });
 
     it('USDC + Polygon (gasless 対応): "ガスレス決済" badge (色 emerald 系)', async () => {
@@ -1063,12 +1078,11 @@ describe('QrGenerator', () => {
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      await openStep2(user);
       await user.type(screen.getByPlaceholderText('10.00'), '5');
       // payMode バッジはポスター調プレビュー (モーダル内)。
       await openQrModal(user);
       await waitFor(() => {
-        const badge = screen.getByText('ガス代不要');
+        const badge = within(screen.getByRole('dialog', { name: '決済用 QR コード' })).getByText('ガス代不要');
         expect(badge).toBeInTheDocument();
         // gasless = emerald 系 (creator/顧客の安心 visual cue)
         expect(badge.className).toMatch(/emerald/);
@@ -1228,7 +1242,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
+      await pickInSettings(user, /^USDC$/);
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
 
@@ -1256,7 +1270,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
+      await pickInSettings(user, /^USDC$/);
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
 
@@ -1288,7 +1302,7 @@ describe('QrGenerator', () => {
       expect(jpycInput.value).toBe('1.1234567890');
 
       // USDC へ切替 → amount が 6 桁に truncate されているはず
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
+      await pickInSettings(user, /^USDC$/);
       const usdcInput = screen.getByPlaceholderText(
         '10.00',
       ) as HTMLInputElement;
@@ -1306,14 +1320,17 @@ describe('QrGenerator', () => {
       await user.click(
         screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }),
       );
-      // URI はモーダル内。開いたまま payMode を切替 (背後の accordion は操作可)。
+      // URI はモーダル内 (QR を開くと設定シートは閉じる)。
       await openQrModal(user);
       await waitFor(() =>
         expect(screen.getByText(/^ethereum:/)).toBeInTheDocument(),
       );
+      await closeQrModal(user);
 
       // ガスレス決済に戻すと EIP-681 URI は非表示 (gasless では EIP-681 で表現不可)
-      await user.click(screen.getByRole('button', { name: /ガス代不要/ }));
+      await openAdvanced(user);
+      await user.click(screen.getByRole('button', { name: /^ガス代不要/ }));
+      await openQrModal(user);
       await waitFor(() =>
         expect(screen.queryByText(/^ethereum:/)).toBeNull(),
       );
@@ -1400,7 +1417,7 @@ describe('QrGenerator', () => {
       expect(jpycUri).toContain('uint256=1000000000000000000');
 
       // amount state は token 切替で reset されず、新しい decimals で再評価される。
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
+      await pickInSettings(user, /^USDC$/);
       await waitFor(() => {
         const usdcUri = screen.getByText((t) => t.startsWith('ethereum:'))
           .textContent!;
@@ -1414,7 +1431,7 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
+      await pickInSettings(user, /^USDC$/);
       await user.type(screen.getByPlaceholderText('10.00'), '1');
       await openAdvanced(user);
       await user.click(screen.getByRole('button', { name: /通常決済（ガス代は顧客負担）/ }));
@@ -1428,7 +1445,7 @@ describe('QrGenerator', () => {
       expect(baseUri).toMatch(/@(8453|84532)\/transfer/);
 
       // Arbitrum へ切替
-      await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
+      await pickInSettings(user, /^Arbitrum/);
       await waitFor(() => {
         const arbUri = screen.getByText((t) => t.startsWith('ethereum:'))
           .textContent!;
@@ -1528,10 +1545,13 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '750');
+      // 店舗名は「お店の設定」シートの中 (2026-10 磨き上げ P2)。
+      await openShopSettings(user);
       await user.type(
         screen.getByPlaceholderText(/OpenPay Coffee/),
         '神田珈琲',
       );
+      await user.click(screen.getByRole('button', { name: '完了' }));
 
       await openQrModal(user);
       await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
@@ -1633,10 +1653,13 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.type(screen.getByPlaceholderText('1000'), '5');
+      // 店舗名は「お店の設定」シートの中 (2026-10 磨き上げ P2)。
+      await openShopSettings(user);
       await user.type(
         screen.getByPlaceholderText(/OpenPay Coffee/),
         'a/b\\c:d*e?f"g<h>i|j',
       );
+      await user.click(screen.getByRole('button', { name: '完了' }));
 
       await openQrModal(user);
       await user.click(await screen.findByRole('button', { name: /SVG保存/ }));
@@ -1719,30 +1742,26 @@ describe('QrGenerator', () => {
   });
 
   describe('3-step UI refresh', () => {
-    it('Step 1 / 2 / 3 の heading が見える (aria-labelledby = step-N-heading)', async () => {
+    it('会計のカード: 先頭に店名の要約と「設定」、見出しは請求金額 (2026-10 磨き上げ P2)', async () => {
       const { container } = render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-
-      const step1 = container.querySelector('[aria-labelledby="step-1-heading"]');
-      const step2 = container.querySelector('[aria-labelledby="step-2-heading"]');
-      const step3 = container.querySelector('[aria-labelledby="step-3-heading"]');
-      expect(step1).not.toBeNull();
-      expect(step2).not.toBeNull();
-      expect(step3).not.toBeNull();
-      // step badge と icon は aria-hidden、accessible name は title text のみ。
-      expect(screen.getByRole('heading', { name: /^金額$/ })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { name: /^受取先$/ })).toBeInTheDocument();
-      expect(
-        screen.getByRole('heading', { name: /^QR コード$/ }),
-      ).toBeInTheDocument();
+      const card = container.querySelector('[aria-labelledby="qr-amount-heading"]') as HTMLElement;
+      expect(card).not.toBeNull();
+      expect(within(card).getByRole('heading', { name: '請求金額 (JPYC)' })).toBeInTheDocument();
+      expect(within(card).getByRole('button', { name: /^設定$/ })).toBeInTheDocument();
+      // 店名・受取先が未設定であることを要約で示す。
+      expect(within(card).getByText('店名未設定')).toBeInTheDocument();
+      expect(within(card).getByText('受取先が未設定')).toBeInTheDocument();
+      // 旧 3 ステップ (①②③) の見出しは出さない。
+      expect(container.querySelector('[aria-labelledby^="step-"]')).toBeNull();
     });
 
-    it('Step 3 (QR) card は qr-prominent variant の brand border / ring', async () => {
-      const { container } = render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-      const step3 = container.querySelector('[aria-labelledby="step-3-heading"]')!;
-      expect(step3.className).toMatch(/ring-brand\/25/);
-      expect(step3.className).toMatch(/ring-1/);
+    it('受取先が未設定なら、会計画面に「受け取るウォレット」の欄を出す', async () => {
+      render(<QrGenerator />);
+      expect(
+        await screen.findByRole('heading', { name: '受け取るウォレット' }),
+      ).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/0x\.\.\./)).toBeVisible();
     });
 
     it('「ガスレス決済」option の傍に「おすすめ」 badge が出る (open advanced 後)', async () => {
@@ -1761,47 +1780,18 @@ describe('QrGenerator', () => {
       expect(standardBtn.textContent).not.toMatch(/おすすめ/);
     });
 
-    it('QR empty state: receiver / amount いずれも未入力 → checklist で両方 ✗', async () => {
-      const { container } = render(<QrGenerator />);
-      await waitFor(() =>
-        screen.getByText(/QR コードを作成する準備ができていません/),
-      );
-      // 不足項目が Step 3 内の ul に 2 件並ぶ (Step 2 visible 内の同名 label と
-      // 区別するため、Step 3 領域に scope して assertion)。
-      const list = container.querySelector(
-        '[aria-labelledby="step-3-heading"] ul',
-      );
-      expect(list).not.toBeNull();
-      expect(within(list as HTMLElement).getByText(/受取先ウォレットアドレス/)).toBeInTheDocument();
-      expect(within(list as HTMLElement).getByText(/請求金額/)).toBeInTheDocument();
+    it('未入力の理由: 金額が空なら「金額を入れてください」(金額 → 受取先の順に 1 つだけ)', async () => {
+      render(<QrGenerator />);
+      expect((await screen.findAllByText('金額を入れてください')).length).toBeGreaterThan(0);
+      expect(screen.queryByText('受取先を設定してください')).toBeNull();
     });
 
-    it('QR empty state: receiver のみ入力 → 受取先は done (✓)、金額は未 done', async () => {
+    it('未入力の理由: 受取先だけ入れたら、まだ金額の理由を出す', async () => {
       const user = userEvent.setup();
-      const { container } = render(<QrGenerator />);
+      render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-
-      // empty state は依然表示 (金額未入力)
-      await waitFor(() =>
-        expect(
-          screen.getByText(/QR コードを作成する準備ができていません/),
-        ).toBeInTheDocument(),
-      );
-
-      // checklist items の done badge を class で識別
-      // (done: bg-emerald-500、not done: border bg-white)
-      const list = container.querySelector(
-        '[aria-labelledby="step-3-heading"] ul',
-      );
-      expect(list).not.toBeNull();
-      const items = list!.querySelectorAll('li');
-      expect(items.length).toBe(2);
-      // checklist 順は ①金額 → ②受取先。receiver のみ入力済なので:
-      // 1 つ目 (金額) は未 done = border
-      expect(items[0].querySelector('span')!.className).toMatch(/border/);
-      // 2 つ目 (受取先) は done = emerald
-      expect(items[1].querySelector('span')!.className).toMatch(/bg-emerald-500/);
+      expect((await screen.findAllByText('金額を入れてください')).length).toBeGreaterThan(0);
     });
 
     it('QR empty state: receiver のみ入力 → サンプル金額ワンタップで QR が生成される', async () => {
@@ -1816,20 +1806,16 @@ describe('QrGenerator', () => {
       });
       await user.click(sampleBtn);
 
-      // 金額が 1000 で埋まり、empty state は消える (QR 生成可能状態へ)
+      // 金額が 1000 で埋まり、未入力の理由は消える (QR 生成可能状態へ)
       expect(screen.getByPlaceholderText('1000')).toHaveValue('1000');
       await waitFor(() =>
-        expect(
-          screen.queryByText(/QR コードを作成する準備ができていません/),
-        ).toBeNull(),
+        expect(screen.queryByText('金額を入れてください')).toBeNull(),
       );
     });
 
     it('QR empty state: receiver 未入力なら サンプル導線ボタンは出ない', async () => {
       render(<QrGenerator />);
-      await waitFor(() =>
-        screen.getByText(/QR コードを作成する準備ができていません/),
-      );
+      await waitFor(() => screen.getAllByText('金額を入れてください'));
       // 受取先未済の段階ではサンプル導線を出さない (まず受取先を促す)
       expect(
         screen.queryByRole('button', { name: /サンプル金額/ }),
@@ -1884,81 +1870,41 @@ describe('QrGenerator', () => {
       expect(printBtn.className).toMatch(/text-white/);
     });
 
-    it('Step 1 内に token chooser (JPYC / USDC) が置かれている', async () => {
-      const { container } = render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-      const step1 = container.querySelector(
-        '[aria-labelledby="step-1-heading"]',
-      ) as HTMLElement;
-      expect(step1).not.toBeNull();
-      // Step 1 領域内に JPYC / USDC ボタンが両方存在
-      expect(
-        within(step1).getByRole('button', { name: /^JPYC$/ }),
-      ).toBeInTheDocument();
-      expect(
-        within(step1).getByRole('button', { name: /^USDC$/ }),
-      ).toBeInTheDocument();
-    });
-
-    it('Step 1 内に chain chooser: USDC 5 chain + JPYC 2 chain (token 切替で内容変化)', async () => {
-      // 2026-05-23 JPYC が Kaia 対応で multi-chain 化したため、JPYC 選択時も
-      // chain chooser が出る (旧: JPYC は Polygon 固定で chain chooser 非表示)。
-      // phase 4a で USDC は Ethereum L1 追加 (4 → 5 chain)。
+    it('通貨とチェーンは「お店の設定」の区切りの中 (JPYC は Polygon / Kaia、USDC に切替で USDC のチェーン)', async () => {
+      // 2026-05-23 JPYC が Kaia 対応で multi-chain 化。phase 4a で USDC は Ethereum L1 追加。
+      // 2026-10 磨き上げ P2: 会計画面からシートへ移した (一度決めたら変えない設定)。
       const user = userEvent.setup();
-      const { container } = render(<QrGenerator />);
-      await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-      const step1 = container.querySelector(
-        '[aria-labelledby="step-1-heading"]',
-      ) as HTMLElement;
-      // 既定 JPYC のとき chain chooser に Polygon / Kaia 両方が出る
-      expect(
-        within(step1).getByRole('button', { name: /^Polygon/ }),
-      ).toBeInTheDocument();
-      expect(
-        within(step1).getByRole('button', { name: /^Kai/ }),
-      ).toBeInTheDocument();
-      // USDC chain (Base 等) は出ない
-      expect(
-        within(step1).queryByRole('button', { name: /^Base/ }),
-      ).toBeNull();
-      // USDC に切替 → chain chooser が USDC 5 chain に切替
-      await user.click(within(step1).getByRole('button', { name: /^USDC$/ }));
-      await waitFor(() => {
-        expect(
-          within(step1).getByRole('button', { name: /^Base/ }),
-        ).toBeInTheDocument();
-      });
-      // Arbitrum / Optimism / Polygon / Ethereum (Sepolia in testnet) も Step 1 内に並ぶ
-      expect(
-        within(step1).getByRole('button', { name: /^Arbitrum/ }),
-      ).toBeInTheDocument();
-      // Ethereum L1 chain — testnet env では viem の sepolia.name = "Sepolia"
-      expect(
-        within(step1).getByRole('button', { name: /^(Sepolia|Ethereum)/ }),
-      ).toBeInTheDocument();
-      // Kaia は USDC では出ない (USDC は Kaia 未対応)
-      expect(
-        within(step1).queryByRole('button', { name: /^Kai/ }),
-      ).toBeNull();
+      render(<QrGenerator />);
+      await openShopSettings(user);
+      const sheet = screen.getByRole('dialog', { name: 'お店の設定' });
+      const section = screen.getByRole('heading', { name: '通貨とチェーン' }).parentElement as HTMLElement;
+      expect(within(section).getByRole('button', { name: /^JPYC$/ })).toBeInTheDocument();
+      expect(within(section).getByRole('button', { name: /^USDC$/ })).toBeInTheDocument();
+      expect(within(section).getByRole('button', { name: /^Polygon/ })).toBeInTheDocument();
+      expect(within(section).getByRole('button', { name: /^Kai/ })).toBeInTheDocument();
+      expect(within(section).queryByRole('button', { name: /^Base/ })).toBeNull();
+      // 店の会計画面では chain id (開発者向けの値) を出さない。
+      expect(within(sheet).queryByText(/^id: /)).toBeNull();
+      await user.click(within(section).getByRole('button', { name: /^USDC$/ }));
+      await waitFor(() =>
+        expect(within(section).getByRole('button', { name: /^Base/ })).toBeInTheDocument(),
+      );
+      expect(within(section).getByRole('button', { name: /^Arbitrum/ })).toBeInTheDocument();
+      expect(within(section).getByRole('button', { name: /^(Sepolia|Ethereum)/ })).toBeInTheDocument();
+      expect(within(section).queryByRole('button', { name: /^Kai/ })).toBeNull();
     });
 
-    // UX 詰め (2026-06-05): ② 受取先は折りたたみに戻した (初期設定後あまり変えない)。
-    // 受取先 seed 済 → default closed (toggle button あり・input は unmount)。開くと出る。
-    it('② 受取先は折りたたみ: seed 済は閉じて開くと input が出る', async () => {
+    // 2026-10 磨き上げ P2: 受取先が保存済みなら会計画面に欄は出さず、「お店の設定」の中で変える。
+    it('受取先 seed 済: 会計画面に欄は出さず、設定を開くと受取先の欄がある', async () => {
       window.localStorage.setItem(
         'openpay:qr-settings:v2',
         JSON.stringify({ receiver: VALID, token: 'jpyc' }),
       );
       const user = userEvent.setup();
       render(<QrGenerator />);
-      // 受取先 seed 済 → ② は閉じる → toggle button が出て input は未 mount。
-      const toggle = await screen.findByRole('button', { name: /受取先/ });
-      await waitFor(() =>
-        expect(toggle.getAttribute('aria-expanded')).toBe('false'),
-      );
+      await screen.findByText('0x8335…2913');
       expect(screen.queryByPlaceholderText(/0x\.\.\./)).toBeNull();
-      // 開くと receiver input が出る。
-      await user.click(toggle);
+      await openShopSettings(user);
       expect(await screen.findByPlaceholderText(/0x\.\.\./)).toBeVisible();
     });
   });
@@ -1966,30 +1912,14 @@ describe('QrGenerator', () => {
   describe('3-step UI: 境界条件 / エッジケース', () => {
     // IA 統一で ① 受取先の折りたたみを廃止したため、collapsible 起因のエッジ
     // (init 一度のみ / clear で open 維持 / collapsed で input unmount 保護) は仕様消滅。
-    it('据え置きモード: amount input 無し → QR empty state の "請求金額" は auto-done (✓)', async () => {
+    it('据え置きモード: 金額欄が無いので、未入力の理由は受取先だけ', async () => {
       // mode=static は amount input が存在せず、amountValid = true 固定。
-      // empty state の checklist で「請求金額」項目が done 扱いになる検証。
       const user = userEvent.setup();
-      const { container } = render(<QrGenerator />);
+      render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-      // 据え置きモードへ切替 (Step 1 内)
       await user.click(screen.getByRole('button', { name: /据え置き/ }));
-      // 受取先未設定なので empty state は表示
-      await waitFor(() =>
-        expect(
-          screen.getByText(/QR コードを作成する準備ができていません/),
-        ).toBeInTheDocument(),
-      );
-      const list = container.querySelector(
-        '[aria-labelledby="step-3-heading"] ul',
-      )!;
-      const items = list.querySelectorAll('li');
-      expect(items.length).toBe(2);
-      // checklist 順は ①金額 → ②受取先。
-      // 1 つ目 (金額) は据え置きなので auto-done = emerald
-      expect(items[0].querySelector('span')!.className).toMatch(/bg-emerald-500/);
-      // 2 つ目 (受取先) は未入力 = border
-      expect(items[1].querySelector('span')!.className).toMatch(/border/);
+      expect((await screen.findAllByText('受取先を設定してください')).length).toBeGreaterThan(0);
+      expect(screen.queryByText('金額を入れてください')).toBeNull();
     });
 
     it('据え置きモード + 受取先 valid → "生成中" でも空状態でもなく QR が出る', async () => {
@@ -1998,11 +1928,11 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       await user.click(screen.getByRole('button', { name: /据え置き/ }));
-      // 入力画面は empty state も "生成中" も出ず「QRコードを表示する」ボタンになる。
-      expect(
-        screen.queryByText(/QR コードを作成する準備ができていません/),
-      ).toBeNull();
-      expect(screen.queryByText(/QR を生成中/)).toBeNull();
+      // 入力画面は未入力の理由を出さず「QRコードを表示する」が押せる。
+      expect(screen.queryByText('受取先を設定してください')).toBeNull();
+      screen
+        .getAllByRole('button', { name: /QRコードを表示する/ })
+        .forEach((b) => expect(b).toBeEnabled());
       // QR 本体はモーダル内 (size=340)。サイズは読取性に直結するため固定値で見る
       // (level と対で決めており、縮めるとモジュールが細って実機で読めなくなる)。
       await openQrModal(user);
@@ -2023,22 +1953,22 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       // USDC へ
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
+      await pickInSettings(user, /^USDC$/);
       // chain chooser から Arbitrum を選択
-      await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
+      await pickInSettings(user, /^Arbitrum/);
       // chain=arbitrum を localStorage で確認
       await waitFor(() => {
         const raw = window.localStorage.getItem('openpay:qr-settings:v2');
         expect(JSON.parse(raw!).chain).toBe('arbitrum');
       });
       // JPYC へ戻す → chain は polygon にリセット
-      await user.click(screen.getByRole('button', { name: /^JPYC$/ }));
+      await pickInSettings(user, /^JPYC$/);
       await waitFor(() => {
         const raw = window.localStorage.getItem('openpay:qr-settings:v2');
         expect(JSON.parse(raw!).chain).toBe('polygon');
       });
       // 再 USDC → chain は base に戻る (直前の arbitrum は引き継がない)
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
+      await pickInSettings(user, /^USDC$/);
       await waitFor(() => {
         const raw = window.localStorage.getItem('openpay:qr-settings:v2');
         expect(JSON.parse(raw!).chain).toBe('base');
@@ -2050,8 +1980,8 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
-      await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
+      await pickInSettings(user, /^USDC$/);
+      await pickInSettings(user, /^Arbitrum/);
       await user.type(screen.getByPlaceholderText('10.00'), '1');
       // poster はモーダル内。
       await openQrModal(user);
@@ -2071,15 +2001,16 @@ describe('QrGenerator', () => {
       render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
-      await user.click(screen.getByRole('button', { name: /^Arbitrum/ }));
-      // 高度な設定 accordion を開く (cross-chain toggle が中にある)
-      await user.click(screen.getByRole('button', { name: /高度な設定|Advanced settings/ }));
+      await pickInSettings(user, /^USDC$/);
+      await pickInSettings(user, /^Arbitrum/);
+      // お店の設定を開く (cross-chain toggle は支払い方法の中)
+      await openShopSettings(user);
       // cross-chain toggle を OFF
       const toggle = screen.getByRole('checkbox', {
         name: /他チェーンからの支払を許可|Allow cross-chain payments/,
       });
       await user.click(toggle);
+      await user.click(screen.getByRole('button', { name: '完了' }));
       await user.type(screen.getByPlaceholderText('10.00'), '1');
       // poster はモーダル内。
       await openQrModal(user);
@@ -2118,7 +2049,7 @@ describe('QrGenerator', () => {
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
       await user.type(screen.getByPlaceholderText(/0x\.\.\./), VALID);
       // JPYC は default なので Kaia chain button を直接 click
-      await user.click(screen.getByRole('button', { name: /^Kai/ }));
+      await pickInSettings(user, /^Kai/);
       await user.type(screen.getByPlaceholderText('1000'), '500');
       // payUrl 表示 box / poster はモーダル内 (font-mono.text-xs.bg-slate-50)
       await openQrModal(user);
@@ -2155,7 +2086,7 @@ describe('QrGenerator', () => {
         expect(JSON.parse(raw!).chain).toBe('polygon');
       });
       // Kaia に切替
-      await user.click(screen.getByRole('button', { name: /^Kai/ }));
+      await pickInSettings(user, /^Kai/);
       await waitFor(() => {
         const raw = window.localStorage.getItem('openpay:qr-settings:v2');
         expect(JSON.parse(raw!).chain).toBe('kaia');
@@ -2165,7 +2096,7 @@ describe('QrGenerator', () => {
         expect(urlBox.textContent).toContain('chain=kaia');
       });
       // Polygon に戻す
-      await user.click(screen.getByRole('button', { name: /^Polygon/ }));
+      await pickInSettings(user, /^Polygon/);
       await waitFor(() => {
         const raw = window.localStorage.getItem('openpay:qr-settings:v2');
         expect(JSON.parse(raw!).chain).toBe('polygon');
@@ -2177,41 +2108,22 @@ describe('QrGenerator', () => {
       });
     });
 
-    it('Step 1 token chooser: USDC ↔ JPYC 切替で chain chooser の中身が入替 (USDC 5 chain / JPYC 2 chain)', async () => {
+    it('お店の設定: USDC ↔ JPYC 切替で chain chooser の中身が入替 (USDC のチェーン / JPYC のチェーン)', async () => {
       // 2026-05-23 JPYC Kaia 対応で JPYC も multi-chain 化。USDC ↔ JPYC 切替で
-      // chain chooser はどちらの token でも出るが、表示される chain set が変わる
-      // (USDC: Base/Arb/Op/Polygon/Ethereum 5 chain、JPYC: Polygon/Kaia 2 chain)。
+      // chain chooser はどちらの token でも出るが、表示される chain set が変わる。
       const user = userEvent.setup();
-      const { container } = render(<QrGenerator />);
+      render(<QrGenerator />);
       await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-      // 一度 USDC にして USDC chain chooser を露出
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
-      const step1 = container.querySelector(
-        '[aria-labelledby="step-1-heading"]',
-      ) as HTMLElement;
-      expect(
-        within(step1).getByRole('button', { name: /^Base/ }),
-      ).toBeInTheDocument();
-      // Kaia は USDC では出ない
-      expect(
-        within(step1).queryByRole('button', { name: /^Kai/ }),
-      ).toBeNull();
+      await pickInSettings(user, /^USDC$/, { keepOpen: true });
+      const section = screen.getByRole('heading', { name: '通貨とチェーン' }).parentElement as HTMLElement;
+      expect(within(section).getByRole('button', { name: /^Base/ })).toBeInTheDocument();
+      expect(within(section).queryByRole('button', { name: /^Kai/ })).toBeNull();
       // JPYC へ戻す
-      await user.click(screen.getByRole('button', { name: /^JPYC$/ }));
-      // USDC chain (Base / Arbitrum) は消える
-      expect(
-        within(step1).queryByRole('button', { name: /^Base/ }),
-      ).toBeNull();
-      expect(
-        within(step1).queryByRole('button', { name: /^Arbitrum/ }),
-      ).toBeNull();
-      // 代わりに JPYC chain chooser (Polygon / Kaia) が出る
-      expect(
-        within(step1).getByRole('button', { name: /^Polygon/ }),
-      ).toBeInTheDocument();
-      expect(
-        within(step1).getByRole('button', { name: /^Kai/ }),
-      ).toBeInTheDocument();
+      await user.click(within(section).getByRole('button', { name: /^JPYC$/ }));
+      expect(within(section).queryByRole('button', { name: /^Base/ })).toBeNull();
+      expect(within(section).queryByRole('button', { name: /^Arbitrum/ })).toBeNull();
+      expect(within(section).getByRole('button', { name: /^Polygon/ })).toBeInTheDocument();
+      expect(within(section).getByRole('button', { name: /^Kai/ })).toBeInTheDocument();
     });
 
     // IA 統一で ① 受取先は常時表示。payUrl 生成 + token 切替→poster 同期は折りたたみ
@@ -2255,7 +2167,7 @@ describe('QrGenerator', () => {
         expect(dialog.getByText(/JPYC/)).toBeInTheDocument();
         expect(dialog.getByText(/Polygon/)).toBeInTheDocument();
       });
-      await user.click(screen.getByRole('button', { name: /^USDC$/ }));
+      await pickInSettings(user, /^USDC$/);
       await waitFor(() => {
         const dialog = within(screen.getByRole('dialog'));
         expect(dialog.getByText(/USDC/)).toBeInTheDocument();
@@ -2285,39 +2197,19 @@ describe('QrGenerator', () => {
           gasMode: 'customer',
         }),
       );
-      const user = userEvent.setup();
       const { container } = render(<QrGenerator />);
-      await openStep2(user);
-      const toggle = await screen.findByRole('button', { name: /高度な設定/ });
-      // closed 状態でも summary 全体に旧トークンが含まれない
+      // 会計画面の要約は日本語の短い語 (ガス代不要) で、旧トークンは含まれない
+      expect(await screen.findByText('ガス代不要')).toBeInTheDocument();
       expect(container.textContent).not.toMatch(/gas:cust|gas:merch|%\/std/);
-      // toggle 内に新文言 (Phase 1: 手数料% 表記なし) が出る
-      expect(
-        within(toggle).getByText(/ガスレス決済 \/ ガス代：お客様負担/),
-      ).toBeInTheDocument();
     });
 
-    // en locale で advancedSummary.* 3 key を実 render 経路で exercise。
-    // ja default のテストでは en 値のタイポ / 翻訳間違いを検知できないので、
-    // payMode × gasMode の 3 組合せを localStorage で固定して i18n 経路を実走。
+    // en locale で会計画面の要約 (支払い方法・設定のボタン・見出し) を実 render 経路で exercise。
     it.each([
-      {
-        payMode: 'gasless',
-        gasMode: 'customer',
-        expected: /Gasless \/ gas: customer pays/,
-      },
-      {
-        payMode: 'gasless',
-        gasMode: 'merchant',
-        expected: /Gasless \/ gas: merchant pays/,
-      },
-      {
-        payMode: 'standard',
-        gasMode: 'customer',
-        expected: /Standard \(customer pays gas\)/,
-      },
+      { payMode: 'gasless', gasMode: 'customer', expected: 'No gas fee' },
+      { payMode: 'gasless', gasMode: 'merchant', expected: 'No gas fee' },
+      { payMode: 'standard', gasMode: 'customer', expected: 'Standard payment' },
     ] as const)(
-      'en locale: payMode=$payMode gasMode=$gasMode → 英文サマリ "$expected"',
+      'en locale: payMode=$payMode gasMode=$gasMode → 要約 "$expected"',
       async ({ payMode, gasMode, expected }) => {
         window.localStorage.setItem(
           'openpay:qr-settings:v2',
@@ -2329,14 +2221,9 @@ describe('QrGenerator', () => {
           }),
         );
         render(<QrGenerator />, { locale: 'en' });
-        // 高度な設定は ② の後の独立セクション (default 閉) なので直接 toggle を取る。
-        const advancedToggle = await screen.findByRole('button', {
-          name: /Advanced settings/,
-        });
-        await waitFor(() =>
-          expect(advancedToggle.getAttribute('aria-expanded')).toBe('false'),
-        );
-        expect(within(advancedToggle).getByText(expected)).toBeInTheDocument();
+        expect(await screen.findByText(expected)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /^Settings$/ })).toBeInTheDocument();
+        expect(screen.getByText('No shop name')).toBeInTheDocument();
       },
     );
   });
@@ -2635,7 +2522,7 @@ describe('QrGenerator: モバイル下部バー (請求金額 + QR ボタン重�
     useOriginMock.mockReturnValue('https://test.local');
   });
 
-  it('金額入力 → 下部バーに請求金額を表示・「QRコードを表示する」は重複しない (Step3=lg限定/バー=モバイル限定)', async () => {
+  it('金額入力 → 下部バーに請求金額 (桁区切り) を表示・会計パネルは PC だけ・バーはモバイルだけ', async () => {
     window.localStorage.setItem(
       'openpay:qr-settings:v2',
       JSON.stringify({ receiver: VALID, token: 'jpyc', chain: 'polygon' }),
@@ -2644,24 +2531,18 @@ describe('QrGenerator: モバイル下部バー (請求金額 + QR ボタン重�
     render(<QrGenerator />);
     await user.type(screen.getByPlaceholderText('1000'), '12345');
 
-    // payUrl 確定後、CTA は Step3 (lg 右サイド) と下部バー (モバイル) の 2 箇所に出る。
-    await waitFor(() =>
-      expect(
-        screen.getAllByRole('button', { name: /QRコードを表示する/ }),
-      ).toHaveLength(2),
-    );
+    // CTA は PC の会計パネル (lg だけ) と下部バー (モバイル) の 2 か所。
     const btns = screen.getAllByRole('button', { name: /QRコードを表示する/ });
-    // DOM 先頭 = Step3 ボタン。モバイル非表示 (lg のみ) になっている。
-    expect(btns[0].className).toContain('hidden');
-    expect(btns[0].className).toContain('lg:inline-flex');
-    // 2 つ目 = 下部バー側。モバイル限定 (lg:hidden) コンテナで、請求金額を表示する。
+    expect(btns).toHaveLength(2);
+    await waitFor(() => btns.forEach((b) => expect(b).toBeEnabled()));
+    // DOM 先頭 = 会計パネル。パネルの箱はモバイル非表示 (lg だけ)。
+    expect(btns[0].parentElement?.className).toContain('hidden');
+    expect(btns[0].parentElement?.className).toContain('lg:block');
+    expect(btns[0].parentElement?.textContent).toContain('12,345 JPYC');
+    // 2 つ目 = 下部バー側。モバイル限定 (lg:hidden) で、請求金額を桁区切りで表示する。
     const bar = btns[1].closest('div');
     expect(bar?.className).toContain('lg:hidden');
-    expect(bar?.textContent).toContain('12345 JPYC');
-    // モバイルでは重複ボタンの代わりに誘導文を出す。
-    expect(
-      screen.getByText(/下のバーの「QRコードを表示する」から/),
-    ).toBeInTheDocument();
+    expect(bar?.textContent).toContain('12,345 JPYC');
   });
 
   it('据え置き (static) モードは固定額が無いので金額入力の案内を出す', async () => {
