@@ -36,6 +36,7 @@ import {
   useHandleProfileDraft,
   DEFAULT_PROFILE_DRAFT,
   isPristineProfileDraft,
+  sameProfileDraft,
   type HandleProfileDraft,
 } from '@/hooks/useHandleProfileDraft';
 import {
@@ -70,7 +71,6 @@ import {
   handlePublishBaselineReducer,
   hasDroppedProfileUrl,
   hasUnpublishedHandleChanges,
-  publishPayloadsEqual,
   type PublishedHandleSnapshot,
 } from '@/lib/handlePublish';
 
@@ -374,19 +374,12 @@ export function HandleProfileBuilder({
   }, [hydrated, receiveOpen, draft.to, editingHandle]);
 
   // 戻ってきた人: 持っている @handle (1 つだけのとき) の編集に自動で入ってよいか。この端末の下書きがまだ既定のまま
-  // か、公開中の内容とまったく同じ (前に編集へ入った後の再読み込み・タブを戻ったとき) なら、入っても失うものが無い。
-  // 公開に載らない入力 (http のリンク・不正な URL) が残っている下書きは、読み込みで消えるので入らない。
+  // か、公開中の内容から組み直した下書きとすべての項目で同じ (前に編集へ入った後の再読み込み・タブを戻ったとき)
+  // なら、入っても失うものが無い。公開に載らない入力途中の値 (空の URL のリンク行・ENS 名の受取先) も比べるので、
+  // それが残っている下書きでは入らない (受取先の解決を待たずに決まる)。
   const canAutoEdit = hydrated && editingHandle === null
-    ? (c: HandleTipConfig, p?: HandleProfile) => {
-      if (isPristineProfileDraft(draft, connected)) return true;
-      if (!publishPayload || hasInsecure || invalidThanksUrl || invalidWebhook) return false;
-      const published = buildPublishPayload(draftFromPublished(c, p), {
-        receiver: isAddress(c.to) ? getAddress(c.to) : null,
-        enableJpycAvalanche: env.enableJpycAvalanche,
-        arcTip: isArcTipEnabled(),
-      });
-      return !!published && publishPayloadsEqual(published, publishPayload);
-    }
+    ? (c: HandleTipConfig, p?: HandleProfile) =>
+      isPristineProfileDraft(draft, connected) || sameProfileDraft(draftFromPublished(c, p), draft)
     : undefined;
 
   if (!env.enableHandles) return null;

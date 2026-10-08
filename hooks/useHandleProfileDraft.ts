@@ -228,6 +228,12 @@ function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
   };
 }
 
+/** 2 つの下書きが (保存時と同じ正規化のうえで) すべての項目で同じか。公開に載らない入力途中の値 (空の URL の
+ *  リンク行・ENS 名の受取先など) も比べる。持っている @handle の編集に自動で入っても失うものが無いかの判定に使う。 */
+export function sameProfileDraft(a: HandleProfileDraft, b: HandleProfileDraft): boolean {
+  return JSON.stringify(sanitize(a)) === JSON.stringify(sanitize(b));
+}
+
 export function useHandleProfileDraft() {
   return useLocalStorageSettings<HandleProfileDraft>(
     STORAGE_KEY,

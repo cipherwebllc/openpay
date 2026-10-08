@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_PROFILE_DRAFT, isPristineProfileDraft, useHandleProfileDraft } from '@/hooks/useHandleProfileDraft';
+import { DEFAULT_PROFILE_DRAFT, isPristineProfileDraft, sameProfileDraft, useHandleProfileDraft } from '@/hooks/useHandleProfileDraft';
 import {
   MAX_LINK_IMAGE_URL_LEN,
   MAX_PROFILE_EMBEDS,
@@ -360,5 +360,15 @@ describe('isPristineProfileDraft (持っている @handle の編集に自動で�
   it.each(['message', 'thanks', 'thanksUrl', 'webhook'] as const)('高度な設定 (%s) だけ書いた下書きも手付かずではない', (key) => {
     expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, [key]: 'x' })).toBe(false);
     expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, [key]: '' })).toBe(true);
+  });
+});
+
+describe('sameProfileDraft (保存時と同じ正規化で、すべての項目を比べる)', () => {
+  it('色の大文字小文字やキーの順序は同じと見なす', () => {
+    expect(sameProfileDraft({ ...DEFAULT_PROFILE_DRAFT, color: '#2563EB' }, DEFAULT_PROFILE_DRAFT)).toBe(true);
+  });
+  it('公開に載らない入力途中の値 (空の URL のリンク・空の SNS 行) も違いとして数える', () => {
+    expect(sameProfileDraft({ ...DEFAULT_PROFILE_DRAFT, links: [{ label: 'x', url: '' }] }, DEFAULT_PROFILE_DRAFT)).toBe(false);
+    expect(sameProfileDraft({ ...DEFAULT_PROFILE_DRAFT, socials: [''] }, DEFAULT_PROFILE_DRAFT)).toBe(false);
   });
 });

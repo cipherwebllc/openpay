@@ -726,6 +726,20 @@ describe('HandleProfileBuilder', () => {
     expect(screen.getByDisplayValue('未公開の名前')).toBeInTheDocument();
   });
 
+  it.each([
+    ['URL が空の入力途中のリンク行', { to: ADDR2, jpycKaia: false, links: [{ label: '新しいリンク', url: '' }] }],
+    ['公開中のアドレスに解決される ENS 名の受取先', { to: 'alice.eth', jpycKaia: false }],
+  ])('公開に載らない入力 (%s) が残る下書きでは、自動で編集に入らない', async (_label, stored) => {
+    // alice.eth は ADDR に解決される (公開中の受取先も ADDR)。読み込むと名前が素のアドレスに置き換わってしまう。
+    localStorage.setItem('openpay:handle-profile-draft:v1', JSON.stringify(stored));
+    h.connectedAddress = ADDR;
+    h.autoEditTo = stored.to === 'alice.eth' ? ADDR : ADDR2;
+    renderWithIntl(<HandleProfileBuilder />);
+    await waitFor(() => expect(screen.getByTestId('claim')).toBeInTheDocument());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('published-status')).toBeNull();
+  });
+
   it('自動で編集に入った後に受取先を消して編集をやめても、空の下書きを接続中のウォレットで埋めない', async () => {
     h.connectedAddress = ADDR;
     h.autoEditTo = ADDR2;
