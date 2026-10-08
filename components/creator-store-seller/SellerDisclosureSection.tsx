@@ -35,7 +35,8 @@ export function SellerDisclosureSection({ seller, sellerForm, sellerSaved, isLic
               <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
                 {t('sellerRegistered')}
               </span>{' '}
-              <span className="text-sm font-normal text-slate-600">{seller.name}</span>
+              {/* 名前の途中で折り返さない (狭い画面では名前ごと次の行へ)。 */}
+              <span className="inline-block text-sm font-normal text-slate-600">{seller.name}</span>
             </summary>
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
               {t('sellerIntro')}

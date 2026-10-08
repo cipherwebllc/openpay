@@ -180,7 +180,7 @@ export function HandleClaimPanel({
   isDirty = false,
   onStopEditing,
   onPublished,
-  canAutoEdit = false,
+  canAutoEdit,
   barSlots = [],
 }: {
   payload: HandlePublishPayload | null;
@@ -199,9 +199,9 @@ export function HandleClaimPanel({
   isDirty?: boolean;
   /** 編集中の handle を削除したときに編集をやめる (親の編集モードを解除)。 */
   onStopEditing?: () => void;
-  /** この端末の下書きがまだ手付かず (既定のまま) なら true。持っている @handle が 1 つだけなら、サインイン時に
-   *  確認なしでその編集に入る (戻ってきた人に空の編集画面を見せない・失うものが無いときだけ)。 */
-  canAutoEdit?: boolean;
+  /** 持っている @handle が 1 つだけのとき、そのレコードの編集に確認なしで入ってよいか (親が下書きと比べて、失うものが
+   *  無いときだけ true)。戻ってきた人に空の新規取得画面を見せない。未指定 = 自動では入らない。 */
+  canAutoEdit?: (config: HandleTipConfig, profile?: HandleProfile) => boolean;
   /** 公開ボタンの帯を描く場所 (スマホの下部バー・PC のプレビュー下)。同じ公開処理をどこからでも押せるように。 */
   barSlots?: ReadonlyArray<HTMLElement | null>;
   /** 公開成功後、mutation 変数の送信 snapshot を親の baseline にする。 */
@@ -373,6 +373,7 @@ export function HandleClaimPanel({
     const handles = mine.data?.handles ?? [];
     if (handles.length !== 1) return;
     const only = handles[0];
+    if (!canAutoEdit(only.config, only.profile)) return;
     setInput(only.handle);
     setPublished(null);
     onEdit(only.handle, only.config, only.profile, only.updatedAt);
@@ -384,11 +385,7 @@ export function HandleClaimPanel({
   const owned = mine.data?.handles ?? [];
   const ownedNames = owned.map((o) => o.handle);
   const atLimit = owned.length >= max;
-  const emphasizeUpdate =
-    isDirty &&
-    normalized === editingHandle &&
-    ownedNames.includes(normalized);
-  // 取得/更新を押せるか (カードのボタンと帯のボタンで同じ条件)。
+  // 公開 (取得/更新) を押せるか。
   const publishDisabled =
     !isSignedIn ||
     !!publishBlockedReason ||
@@ -398,12 +395,7 @@ export function HandleClaimPanel({
     // 他人が使用中なら不可。自分が所有する handle の更新は許可する。
     (availability.data?.available === false && !ownedNames.includes(normalized)) ||
     (atLimit && !ownedNames.includes(normalized));
-  const publishLabel = publish.isPending
-    ? t('claiming')
-    : ownedNames.includes(normalized)
-      ? t('updateButton')
-      : t('claimButton');
-  // 帯のボタンは短い言い方 (モバイル注文の帯と同じ「公開する / 公開を更新」・理由の文を切らない)。
+  // 公開のボタンは帯 (スマホの画面下・PC のプレビューの下) の 1 つだけ。モバイル注文の帯と同じ「公開する / 公開を更新」。
   const barLabel = publish.isPending
     ? t('claiming')
     : ownedNames.includes(normalized)
@@ -435,7 +427,10 @@ export function HandleClaimPanel({
   const bar = (
     <div className="flex items-center gap-3">
       <div className="min-w-0 flex-1">
-        {barReason ? (
+        {publish.isError && !publish.isPending ? (
+          // 帯から押して失敗したとき、理由 (競合・取得失敗) は「あなたのページ」のカードに出す。帯は気づける 1 行だけ。
+          <p role="alert" className="line-clamp-2 text-sm font-medium text-red-600">{t('barError')}</p>
+        ) : barReason ? (
           <p className="truncate text-sm font-medium text-slate-500">{barReason}</p>
         ) : (
           <>
@@ -509,8 +504,13 @@ export function HandleClaimPanel({
                     >
                       {/* 1段目: ハンドル名のみ (URL 全文は詰まって読めないため出さない —
                           開く/コピー/QR は ④ プレビュー下に集約)。2段目: 操作ボタン。 */}
-                      <p className="break-all font-mono text-sm font-semibold text-slate-800">
-                        @{h}
+                      <p className="flex flex-wrap items-center gap-2">
+                        <span className="break-all font-mono text-sm font-semibold text-slate-800">@{h}</span>
+                        {isEditing && (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800">
+                            {t('editingBadge')}
+                          </span>
+                        )}
                       </p>
                       <div className="mt-2 flex flex-wrap gap-1.5">
                           {onEdit && (
@@ -536,11 +536,6 @@ export function HandleClaimPanel({
                             {t('delete')}
                           </button>
                       </div>
-                      {isEditing && (
-                        <p className="mt-1.5 text-xs font-medium text-emerald-700">
-                          {t('publishedStatus', { handle: h })}
-                        </p>
-                      )}
                     </li>
                   );
                 })}
@@ -616,16 +611,6 @@ export function HandleClaimPanel({
                 </p>
               )}
 
-            <button
-              type="button"
-              onClick={onPublishClick}
-              disabled={publishDisabled}
-              className={`mt-2 rounded-md bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-40 ${
-                emphasizeUpdate ? 'ring-2 ring-amber-300 ring-offset-2' : ''
-              }`}
-            >
-              {publishLabel}
-            </button>
             {/* 公開結果のフィードバック (無言で入力が消えるのは「何が起きたか」不明だった) */}
             {published && !publish.isPending && (
               <div className="mt-2">

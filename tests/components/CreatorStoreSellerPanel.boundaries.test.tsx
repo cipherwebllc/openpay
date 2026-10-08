@@ -256,17 +256,18 @@ describe('seller extraction DOM and request pins', () => {
   // 文字・順序の bytes を固定する。code の移動では採り直さない (落ちたら DOM か文言が変わっている)。
   // 2026-10 プロフ磨き上げ P5 で採り直した: 外枠 (rounded-3xl p-6 sm:p-8 → rounded-2xl p-5) と見出し
   // (アイコンの四角 + text-lg → 他のカードと同じ text-sm の見出し) だけを他のカードに揃えた差分。
+  // 同 P6 で販売者情報の要約の名前に inline-block (名前の途中で折り返さない) を足して採り直した。
   const domHashes: Record<string, string> = {
     'ja/empty': '7c5718cbc1fe202e944ca72620527bedd7e48d7e825ec0b948d2401b7885a916',
-    'ja/list': '4b594f3c9cf6ad7a34dc2515db57a8860f459dea001d3cf1e3e2ff0cde16bd8c',
-    'ja/digital-edit': 'b3f97619103a5293eb28d2273f0838d8630d1f7a5879e1afa8852b691b12f3af',
-    'ja/license-new': 'aeeb6a4d0eca10db755024998d1e7f569abd0056fa9eb8706ea419c4d3b63b4d',
-    'ja/license-edit': 'a817128084f525b56ff2abf0937e270a328b4ae0cf702a77b4a5e24286ab2c0a',
+    'ja/list': 'c5e3c51d98aa458b062298c17f94085bacbe306334a829461a94497add55a39e',
+    'ja/digital-edit': '9020415269cf5f930e8afce9165013dd6547722280407ec76803547317b676e5',
+    'ja/license-new': 'b6f261cf226bb487a3d3d7362c3cc68974c6e04281e50a713d96fb9ee1d1acc9',
+    'ja/license-edit': '1c932215893fe5c616975671f4f80fd6a68aa6bd080c2c2da3fe2cbb3e8ec1d5',
     'en/empty': '2c6b7bf9819d05a90260a82c1d1e4769da0c3bae0cf743ffc5fe016f2389397c',
-    'en/list': '8fccbffb5a512c348efdc138980ddc8798fdab141958dd7e6c02f97cc5516ea8',
-    'en/digital-edit': '2ad5839c4c3bfe0a29a85d6d9bf18de9e8a396a41716cde707216a64847ec27d',
-    'en/license-new': '5e6716e870b671364040268649f720c0ccf16d430368b1835fe8e1bf1b22dd21',
-    'en/license-edit': 'a327e940ad3d0e5211b5ce85659ebfd7cb7e6b948c8282ae53318892ed8226ab',
+    'en/list': '390540f6e20b8e2c3862b7d6dc3e5b7603be653aeb716b728fc939067832f34f',
+    'en/digital-edit': '0a50bbf02dee67ab38fe1fd66cbdcaba89f73bc570fd4d095f27919f500378cd',
+    'en/license-new': '06cb3e2df0c52c33417abcf4c9aa9f126d73cd23101ee5b587c8c7193512ffe4',
+    'en/license-edit': '557164b3b03b90cbca195dddfbda3bb52dee42566ed62a467a14215267f09615',
   };
   it.each((['ja', 'en'] as const).flatMap((locale) => ['empty', 'list', 'digital-edit', 'license-new', 'license-edit'].map((mode) => ({ locale, mode }))))('$locale $mode DOM bytes', async ({ locale, mode }) => {
     state.license = mode !== 'empty';
@@ -485,11 +486,12 @@ describe('seller request pins for update, license and sale toggles', () => {
 describe('seller extraction DOM pins for error states', () => {
   // domHash (<svg> の中身だけ除く) の基準値。分割前の merge-base 164f49c2 で採取した。
   // code の移動では採り直さない (落ちたら DOM か文言が変わっている)。2026-10 P5 で外枠と見出しの class だけ採り直し。
+  // 同 P6 で販売者情報の要約の名前に inline-block を足して採り直し。
   const domHashes: Record<string, string> = {
-    'ja/errors': '00e7bde4e1f279581f82b9a92c2eee33a2e89de93d184b3e4de6b928966b3628',
-    'ja/license-invalid': '7d4424dd0b9838570d38d4b06479a9ece33cfe5561ec9abd0ebd7ee231e2b4ed',
-    'en/errors': 'e747840502d7f9eb2bcf48ae64ab0f2c6d056c0526fd5af5c28b9d8ba823fafa',
-    'en/license-invalid': '5fe0f05e4be1ef957639e00ba73170bd866135fe4bde968447122d50786c58f7',
+    'ja/errors': '020a54824d590a8f2f15cdee2276c4a299fd33f4afcee4c427e2b7a6c44b3fd7',
+    'ja/license-invalid': 'aecd955b97e808230428d5416e3e9a6e4f8d567a2d252ba489f87fcce3b049f0',
+    'en/errors': '823d93225ac5aa9d32853c9b7d6299f83b6b2c530d9a2d3ecec356840bbde343',
+    'en/license-invalid': '0d072e8e086d1d9fb41d7073cc8cfe6718b6b7ed90e77dbac4e082c363a3eabd',
   };
   it.each((['ja', 'en'] as const).flatMap((locale) => ['errors', 'license-invalid'].map((mode) => ({ locale, mode }))))('$locale $mode DOM bytes', async ({ locale, mode }) => {
     state.license = true;

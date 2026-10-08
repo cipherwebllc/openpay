@@ -51,10 +51,14 @@ function renderPanel(
   locale: 'ja' | 'en' = 'ja',
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // 公開のボタンは帯 (ビルダーが渡す描画先) の 1 つだけ。既定で描画先を 1 つ用意する。
+  const slot = document.createElement('div');
+  document.body.appendChild(slot);
   return renderWithIntl(
     <QueryClientProvider client={qc}>
       <HandleClaimPanel
         payload={config ? { config, profile: {} } : null}
+        barSlots={[slot]}
         {...extra}
       />
     </QueryClientProvider>,
@@ -176,8 +180,9 @@ describe('HandleClaimPanel', () => {
     await waitFor(() =>
       expect(screen.getByText('@alice')).toBeInTheDocument(),
     );
-    // 編集中の行に公開中の表示 (公開状態・更新時刻・編集をやめる はビルダーの「あなたのページ」の見出しの下に 1 か所)。
-    expect(screen.getAllByText('公開中 @alice').length).toBeGreaterThan(0);
+    // 編集中の行に「編集中」(公開状態・更新時刻・編集をやめる はビルダーの「あなたのページ」の見出しの下に 1 か所)。
+    expect(within(screen.getByText('@alice').closest('li')!).getByText('編集中')).toBeInTheDocument();
+    expect(screen.queryByText('公開中 @alice')).toBeNull();
     expect(screen.queryByRole('button', { name: '編集をやめる' })).toBeNull();
     // 別名を入力すると「同内容の複製になる」事前警告
     fireEvent.change(screen.getByPlaceholderText('alice'), {
@@ -194,7 +199,7 @@ describe('HandleClaimPanel', () => {
     h.isSignedIn = true;
     stubMine([{ handle: 'alice', config: CONFIG }]);
     const onEdit = vi.fn();
-    renderPanel(CONFIG, { canAutoEdit: true, onEdit });
+    renderPanel(CONFIG, { canAutoEdit: () => true, onEdit });
     await waitFor(() => expect(onEdit).toHaveBeenCalledWith('alice', CONFIG, undefined, undefined));
     expect(onEdit).toHaveBeenCalledTimes(1);
   });
@@ -222,7 +227,7 @@ describe('HandleClaimPanel', () => {
       }),
     );
     const onEdit = vi.fn();
-    renderPanel(CONFIG, { canAutoEdit: true, onEdit });
+    renderPanel(CONFIG, { canAutoEdit: () => true, onEdit });
     const input = screen.getByPlaceholderText('alice');
     fireEvent.change(input, { target: { value: 'bob' } });
     release();
@@ -235,14 +240,26 @@ describe('HandleClaimPanel', () => {
     h.isSignedIn = true;
     stubMine([{ handle: 'alice', config: CONFIG }, { handle: 'bob', config: CONFIG }]);
     const onEdit = vi.fn();
-    const first = renderPanel(CONFIG, { canAutoEdit: true, onEdit });
+    const first = renderPanel(CONFIG, { canAutoEdit: () => true, onEdit });
     await screen.findByText('@bob');
     expect(onEdit).not.toHaveBeenCalled();
     first.unmount();
     stubMine([{ handle: 'alice', config: CONFIG }]);
-    renderPanel(CONFIG, { canAutoEdit: false, onEdit });
+    const check = vi.fn(() => false);
+    renderPanel(CONFIG, { canAutoEdit: check, onEdit });
     await screen.findByText('@alice');
+    // 親はそのレコードと下書きを比べて決める (公開中と同じ下書きなら入る・違えば入らない)。
+    expect(check).toHaveBeenCalledWith(CONFIG, undefined);
     expect(onEdit).not.toHaveBeenCalled();
+  });
+
+  it('公開のボタンは帯の 1 つだけ (カードの中に同じ働きのボタンを並べない)', async () => {
+    h.isSignedIn = true;
+    stubMine([]);
+    renderPanel(CONFIG);
+    fireEvent.change(screen.getByPlaceholderText('alice'), { target: { value: 'bob' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '公開する' })).toBeEnabled());
+    expect(screen.getAllByRole('button', { name: /公開|取得|更新/ })).toHaveLength(1);
   });
 
   it('公開ボタンの帯 (スマホ下部・PC プレビュー下) にも同じ公開処理を描く・押せない理由を 1 行', async () => {
@@ -291,7 +308,7 @@ describe('HandleClaimPanel', () => {
     fireEvent.change(screen.getByPlaceholderText('alice'), {
       target: { value: 'bob' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'この handle を取得' }));
+    fireEvent.click(screen.getByRole('button', { name: '公開する' }));
     await waitFor(() =>
       expect(
         screen.getByText('「@bob」を取得しました！続けてこのまま編集・更新できます。'),
@@ -364,8 +381,9 @@ describe('HandleClaimPanel', () => {
       target: { value: handle },
     });
     // 自分の所有 handle は「使用済み」でも更新ボタンが有効
-    const update = screen.getByRole('button', { name: '設定を更新' });
-    expect(update.className).toContain('ring-2');
+    const update = screen.getByRole('button', { name: '公開を更新' });
+    // 未公開の変更があることは帯の左に出す (押す前に気づける)。
+    expect(update.parentElement).toHaveTextContent('未公開の変更があります');
     fireEvent.click(update);
     await waitFor(() =>
       expect(screen.getByText(`「@${handle}」を更新しました。`)).toBeInTheDocument(),
@@ -389,12 +407,12 @@ describe('HandleClaimPanel', () => {
   it.each([
     [
       'ja' as const,
-      'この handle を取得',
+      '公開する',
       'Audius のトラックを確認できず、埋め込み表示を有効にできないため保存できませんでした。URL を確認して、もう一度お試しください。',
     ],
     [
       'en' as const,
-      'Claim this handle',
+      'Publish',
       'Could not save because the Audius track could not be verified for embedding. Check the URL and try again.',
     ],
   ])('Audius resolve failure shows the dedicated %s builder error', async (locale, button, message) => {
@@ -434,6 +452,8 @@ describe('HandleClaimPanel', () => {
 
     await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
     expect(screen.queryByText(/audius resolve failed/)).not.toBeInTheDocument();
+    // 帯から押したときにも気づけるよう、帯に 1 行 (理由はカード側)。
+    expect(screen.getByRole('alert')).toHaveTextContent(locale === 'ja' ? '公開できませんでした' : "Couldn't publish");
   });
 
   it('publish 409 conflict → 専用文言・最新一覧を再取得・明示再読込で baseline を更新', async () => {
@@ -477,7 +497,7 @@ describe('HandleClaimPanel', () => {
     fireEvent.change(screen.getByPlaceholderText('alice'), {
       target: { value: 'alice' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '設定を更新' }));
+    fireEvent.click(screen.getByRole('button', { name: '公開を更新' }));
     await waitFor(() =>
       expect(
         screen.getByText('別の端末で更新されました。再読込してください。'),
@@ -700,7 +720,7 @@ it.each([[false, false], [false, true], [true, false], [true, true]])('prevalida
   vi.stubGlobal('fetch', fetchMock);
   renderPanel(config, { onPublished });
   fireEvent.change(screen.getByPlaceholderText('alice'), { target: { value: 'bob' } });
-  fireEvent.click(screen.getByRole('button', { name: 'この handle を取得' }));
+  fireEvent.click(screen.getByRole('button', { name: '公開する' }));
   if (arc && tip) {
     await waitFor(() => expect(onPublished).toHaveBeenCalledTimes(1));
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST');
@@ -719,5 +739,5 @@ it('blocks a disabled published Arc record even after unrelated edits', async ()
   renderPanel(CONFIG, { editingHandle: 'alice', expectedUpdatedAt: 10, publishBlockedReason: 'Arc disabled: cannot republish', isDirty: true });
   fireEvent.change(screen.getByPlaceholderText('alice'), { target: { value: 'alice' } });
   expect(await screen.findByRole('alert')).toHaveTextContent('Arc disabled: cannot republish');
-  expect(await screen.findByRole('button', { name: '設定を更新' })).toBeDisabled();
+  expect(await screen.findByRole('button', { name: '公開を更新' })).toBeDisabled();
 });

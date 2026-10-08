@@ -68,7 +68,7 @@ vi.mock('@/components/AddressInput', () => ({
 // claim panel は config の有無だけ反映 (SIWE/react-query を持ち込まない)。
 // edit-legacy-usdc: 旧 USDC method 持ちレコードの「編集」を模擬し onEdit を発火する。
 vi.mock('@/components/HandleClaimPanel', async () => {
-  const { useEffect } = await vi.importActual<typeof import('react')>('react');
+  const { useEffect, useRef } = await vi.importActual<typeof import('react')>('react');
   return {
   HandleClaimPanel: ({
     payload,
@@ -79,7 +79,7 @@ vi.mock('@/components/HandleClaimPanel', async () => {
     canAutoEdit,
   }: {
     payload: { config: { to: string }; profile: unknown } | null;
-    canAutoEdit?: boolean;
+    canAutoEdit?: (config: { to: string; methods: unknown[] }) => boolean;
     onEdit?: (
       handle: string,
       config: unknown,
@@ -94,13 +94,14 @@ vi.mock('@/components/HandleClaimPanel', async () => {
     publishBlockedReason?: string;
     expectedUpdatedAt?: number;
   }) => {
+    // 本物と同じく、自動で入れるようになった最初の描画で 1 回だけ判定し、親が良いと言えば onEdit を呼ぶ。
+    const tried = useRef(false);
     useEffect(() => {
-      if (canAutoEdit && h.autoEditTo) {
-        onEdit?.('alice', { to: h.autoEditTo, methods: [{ token: 'jpyc', chain: 'polygon' }] }, undefined, 123);
-      }
-      // 本物と同じく「自動で入れるようになった描画」で 1 回だけ呼ぶ。
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [canAutoEdit]);
+      if (tried.current || !canAutoEdit || !h.autoEditTo) return;
+      tried.current = true;
+      const record = { to: h.autoEditTo, methods: [{ token: 'jpyc', chain: 'polygon' }] };
+      if (canAutoEdit(record)) onEdit?.('alice', record, undefined, 123);
+    });
     return (
     <div
       data-testid="claim"
@@ -703,6 +704,48 @@ describe('HandleProfileBuilder', () => {
     );
     await new Promise((r) => setTimeout(r, 0));
     expect(JSON.parse(screen.getByTestId('claim').getAttribute('data-payload')!).config.to).toBe(getAddress(ADDR2));
+  });
+
+  it('この端末の下書きが公開中と同じなら (再読み込み・タブを戻ったとき)、自動で編集に入る', async () => {
+    // 公開中 = 受取先 ADDR2・JPYC (Polygon) だけ。下書きも同じ内容 (接続中のウォレットとは別の受取先)。
+    localStorage.setItem('openpay:handle-profile-draft:v1', JSON.stringify({ to: ADDR2, jpycKaia: false }));
+    h.connectedAddress = ADDR;
+    h.autoEditTo = ADDR2;
+    renderWithIntl(<HandleProfileBuilder />);
+    expect(await screen.findByTestId('published-status')).toBeInTheDocument();
+  });
+
+  it('公開中と違う下書き (未公開の変更) があるときは、自動で編集に入らず下書きを残す', async () => {
+    localStorage.setItem('openpay:handle-profile-draft:v1', JSON.stringify({ to: ADDR2, jpycKaia: false, name: '未公開の名前' }));
+    h.connectedAddress = ADDR;
+    h.autoEditTo = ADDR2;
+    renderWithIntl(<HandleProfileBuilder />);
+    await waitFor(() => expect(screen.getByDisplayValue('未公開の名前')).toBeInTheDocument());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('published-status')).toBeNull();
+    expect(screen.getByDisplayValue('未公開の名前')).toBeInTheDocument();
+  });
+
+  it('自動で編集に入った後に受取先を消して編集をやめても、空の下書きを接続中のウォレットで埋めない', async () => {
+    h.connectedAddress = ADDR;
+    h.autoEditTo = ADDR2;
+    renderWithIntl(<HandleProfileBuilder />);
+    expect(await screen.findByTestId('published-status')).toBeInTheDocument();
+    openReceiveSettings();
+    fireEvent.change(within(screen.getByRole('dialog')).getByTestId('addr'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: '編集をやめる' }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('published-status')).toBeNull();
+    expect(screen.getByTestId('addr')).toHaveValue('');
+  });
+
+  it('ENS 名の受取先は名前の解決結果だけを使う (シートで受け取った古い解決値で公開しない)', () => {
+    renderWithIntl(<HandleProfileBuilder />);
+    // スタブの AddressInput は打つたびに ADDR を「解決できた」と知らせうるが、'nobody.eth' は解決できない名前。
+    fireEvent.change(screen.getByTestId('addr'), { target: { value: 'nobody.eth' } });
+    expect(screen.getByTestId('claim')).toHaveTextContent('no-config');
+    fireEvent.change(screen.getByTestId('addr'), { target: { value: 'alice.eth' } });
+    expect(screen.getByTestId('claim')).toHaveTextContent(`config-ready:${getAddress(ADDR)}`);
   });
 
   it('保存済みの受取先を消しても、接続中のウォレットで埋め直さない・シートの入力欄は消えない', async () => {

@@ -983,6 +983,8 @@
   "HandleClaim": {
     "barPublish": "Publish",
     "barUpdate": "Update",
+    "editingBadge": "Editing",
+    "barError": "Couldn't publish. See “Your page” for why.",
     "barReasonSignIn": "Sign in to publish",
     "barReasonReceiver": "Set a receiving wallet to publish",
     "barReasonHandle": "Choose an @handle to publish",
@@ -1003,8 +1005,6 @@
     "checking": "Checking…",
     "available": "Available",
     "taken": "Already taken",
-    "claimButton": "Claim this handle",
-    "updateButton": "Update settings",
     "claiming": "Claiming…",
     "limitReached": "You can hold up to {max} handles.",
     "claimError": "Failed to claim ({error})",

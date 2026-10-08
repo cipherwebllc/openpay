@@ -36,6 +36,7 @@ import {
   useHandleProfileDraft,
   DEFAULT_PROFILE_DRAFT,
   isPristineProfileDraft,
+  type HandleProfileDraft,
 } from '@/hooks/useHandleProfileDraft';
 import {
   handlePreviewBackground,
@@ -69,6 +70,7 @@ import {
   handlePublishBaselineReducer,
   hasDroppedProfileUrl,
   hasUnpublishedHandleChanges,
+  publishPayloadsEqual,
   type PublishedHandleSnapshot,
 } from '@/lib/handlePublish';
 
@@ -161,6 +163,41 @@ function stripResolvedEmbedsForDraft(
   });
 }
 
+/** 公開中のレコードから下書きを組み直す (編集に入るとき・下書きが公開中と同じかを確かめるとき)。
+ *  USDC は flag に依らず chain ごとに復元し、公開済み Arc を Base に置き換えない。
+ *  編集対象レコードに無いフィールドは「前の下書き値」ではなく **builder 既定**へ戻す。
+ *  でないと別プロフィールの色/プリセットが update 時にこの handle へ混入する。 */
+function draftFromPublished(c: HandleTipConfig, p?: HandleProfile): HandleProfileDraft {
+  return {
+    to: c.to,
+    name: c.name ?? '',
+    message: c.message,
+    thanks: c.thanks,
+    thanksUrl: c.thanksUrl,
+    webhook: c.webhook,
+    color:
+      c.color && COLOR_PATTERN.test(c.color)
+        ? c.color
+        : DEFAULT_PROFILE_DRAFT.color,
+    jpycPolygon: c.methods.some((m) => m.token === 'jpyc' && m.chain === 'polygon'),
+    jpycKaia: c.methods.some((m) => m.token === 'jpyc' && m.chain === 'kaia'),
+    jpycAvalanche: c.methods.some(
+      (m) => m.token === 'jpyc' && m.chain === 'avalanche',
+    ),
+    usdcBase: c.methods.some((m) => m.token === 'usdc' && m.chain === 'base'),
+    usdcArc: c.methods.some((m) => m.token === 'usdc' && m.chain === 'arc'),
+    presetsJpyc: c.presets?.jpyc ?? DEFAULT_PROFILE_DRAFT.presetsJpyc,
+    bio: p?.bio ?? '',
+    avatar: p?.avatar ?? '',
+    cover: p?.cover ?? '',
+    font: p?.font ?? DEFAULT_PROFILE_DRAFT.font,
+    linkLayout: p?.linkLayout ?? DEFAULT_PROFILE_DRAFT.linkLayout,
+    socials: p?.socials ?? [],
+    links: stripResolvedEmbedsForDraft(p?.links),
+    theme: p?.theme ?? DEFAULT_PROFILE_DRAFT.theme,
+  };
+}
+
 export function HandleProfileBuilder({
   onPublishedHandleChange,
 }: {
@@ -175,7 +212,6 @@ export function HandleProfileBuilder({
   const { address: connected } = useAccount();
   const origin = useOrigin();
   const linkCopy = useCopyToClipboard();
-  const [resolved, setResolved] = useState<Address | null>(null);
   // ④ プレビュー下の QR モーダル開閉 (編集中 handle のフル URL を提示)。
   const [showQr, setShowQr] = useState(false);
   // どの @handle を編集中か (null = 新規作成)。「編集」でフォームが黙って書き換わるのが
@@ -258,19 +294,17 @@ export function HandleProfileBuilder({
     ...(showArcChoice ? [['arc', methodLabel({ token: 'usdc', chain: 'arc' }, t('crossChain'))] as ['arc', string]] : []),
   ];
 
-  // 受取先: 生 0x アドレスは**入力値を最優先**で採用する。AddressInput は ENS 名以外で
-  // onResolved を再発火しないため、「接続ウォレットを使う」/編集 prefill で resolved に入った
-  // 旧アドレスが、その後に手入力した別アドレスを上書きしてしまう (誤送金) のを防ぐ。
-  // ENS 名 (= isAddress 偽) のときだけ AddressInput が解決した resolved を使う。
-  // 受取先が ENS 名のときは、受け取りの設定シート (その中の AddressInput) を開いていなくても名前を解決しておく
-  // (シートを閉じたまま公開しても、選んだ受取先で公開されるように)。
+  // 受取先: 生 0x アドレスは**入力値を最優先**で採用する (前に解決した別のアドレスで上書きしない・誤送金防止)。
+  // ENS 名のときは、受け取りの設定シート (その中の AddressInput) を開いていなくても名前を解決しておき、この解決結果
+  // だけを使う (シートの AddressInput も同じ query を見る)。シートから受け取った解決値を別に持つと、閉じた後の
+  // 再解決が届かず古いアドレスのまま公開される (着金先のずれ)。
   const toName = draft.to.trim();
   const ens = useResolveAddress(isLikelyName(toName) ? toName : '');
   const effectiveReceiver = useMemo<Address | null>(() => {
     const raw = draft.to.trim();
     if (isAddress(raw)) return getAddress(raw);
-    return resolved ?? ens.data?.address ?? null;
-  }, [draft.to, resolved, ens.data]);
+    return ens.data?.address ?? null;
+  }, [draft.to, ens.data]);
 
   // publish 送信と dirty 比較の単一情報源。旧 Builder のインライン trim/filter は
   // lib/handlePublish.ts へ移し、request body の形とキー順を保っている。
@@ -320,15 +354,15 @@ export function HandleProfileBuilder({
   // 一度でも受取先が入っていたら (保存済み・手入力・公開中の読み込み) 自分で決めた人なので、以後は埋めない。
   const autoFilledTo = useRef(false);
   useEffect(() => {
-    if (autoFilledTo.current || !hydrated || editingRef.current !== null) return;
+    if (autoFilledTo.current || !hydrated) return;
+    // 編集中に読み込んだ公開中の受取先も「入っていた」に数える (編集をやめて空の下書きに戻っても埋めない)。
     if (draft.to.trim() !== '') {
       autoFilledTo.current = true;
       return;
     }
-    if (!connected || !isAddress(connected)) return;
+    if (editingRef.current !== null || !connected || !isAddress(connected)) return;
     autoFilledTo.current = true;
     setSettings((s) => ({ ...s, to: connected }));
-    setResolved(getAddress(connected));
   }, [hydrated, editingHandle, draft.to, connected, setSettings]);
 
   // 受取先が未設定のときは、公開に欠かせないので受け取りカードの中に入力欄を直接出す (決済QR と同じ型)。読み込み後に
@@ -339,8 +373,21 @@ export function HandleProfileBuilder({
     if (hydrated && !receiveOpen && draft.to.trim() === '' && editingRef.current === null) setReceiverInline(true);
   }, [hydrated, receiveOpen, draft.to, editingHandle]);
 
-  // 戻ってきた人: この端末の下書きがまだ既定のままなら、持っている @handle (1 つだけのとき) の編集に自動で入る。
-  const canAutoEdit = hydrated && editingHandle === null && isPristineProfileDraft(draft, connected);
+  // 戻ってきた人: 持っている @handle (1 つだけのとき) の編集に自動で入ってよいか。この端末の下書きがまだ既定のまま
+  // か、公開中の内容とまったく同じ (前に編集へ入った後の再読み込み・タブを戻ったとき) なら、入っても失うものが無い。
+  // 公開に載らない入力 (http のリンク・不正な URL) が残っている下書きは、読み込みで消えるので入らない。
+  const canAutoEdit = hydrated && editingHandle === null
+    ? (c: HandleTipConfig, p?: HandleProfile) => {
+      if (isPristineProfileDraft(draft, connected)) return true;
+      if (!publishPayload || hasInsecure || invalidThanksUrl || invalidWebhook) return false;
+      const published = buildPublishPayload(draftFromPublished(c, p), {
+        receiver: isAddress(c.to) ? getAddress(c.to) : null,
+        enableJpycAvalanche: env.enableJpycAvalanche,
+        arcTip: isArcTipEnabled(),
+      });
+      return !!published && publishPayloadsEqual(published, publishPayload);
+    }
+    : undefined;
 
   if (!env.enableHandles) return null;
 
@@ -388,7 +435,6 @@ export function HandleProfileBuilder({
   const onUseConnected = () => {
     if (connected && isAddress(connected)) {
       update({ to: connected });
-      setResolved(getAddress(connected));
     }
   };
 
@@ -401,7 +447,6 @@ export function HandleProfileBuilder({
     const snapshot = preEditDraftRef.current;
     preEditDraftRef.current = null;
     if (snapshot) {
-      setResolved(isAddress(snapshot.to) ? getAddress(snapshot.to) : null);
       setSettings(() => snapshot);
     } else {
       setSettings((s) => ({ ...DEFAULT_PROFILE_DRAFT, to: s.to }));
@@ -423,41 +468,9 @@ export function HandleProfileBuilder({
     // フォーム先頭へスクロールして「いま編集している」ことを視覚的に伝える。
     headingRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     const loadedReceiver = isAddress(c.to) ? getAddress(c.to) : null;
-    setResolved(loadedReceiver);
     // 公開中の受取先を読み込んだので、受け取りのカードは入力欄ではなく要約に戻す。
     if (c.to.trim()) setReceiverInline(false);
-    // USDC は flag に依らず chain ごとに復元し、公開済み Arc を Base に置き換えない。
-    // 編集対象レコードに無いフィールドは「前の下書き値」(s.*) ではなく **builder 既定**へ戻す。
-    // でないと別プロフィールの色/プリセットが update 時にこの handle へ混入する。
-    const loadedDraft: typeof draft = {
-      ...draft,
-      to: c.to,
-      name: c.name ?? '',
-      message: c.message,
-      thanks: c.thanks,
-      thanksUrl: c.thanksUrl,
-      webhook: c.webhook,
-      color:
-        c.color && COLOR_PATTERN.test(c.color)
-          ? c.color
-          : DEFAULT_PROFILE_DRAFT.color,
-      jpycPolygon: c.methods.some((m) => m.token === 'jpyc' && m.chain === 'polygon'),
-      jpycKaia: c.methods.some((m) => m.token === 'jpyc' && m.chain === 'kaia'),
-      jpycAvalanche: c.methods.some(
-        (m) => m.token === 'jpyc' && m.chain === 'avalanche',
-      ),
-      usdcBase: c.methods.some((m) => m.token === 'usdc' && m.chain === 'base'),
-      usdcArc: c.methods.some((m) => m.token === 'usdc' && m.chain === 'arc'),
-      presetsJpyc: c.presets?.jpyc ?? DEFAULT_PROFILE_DRAFT.presetsJpyc,
-      bio: p?.bio ?? '',
-      avatar: p?.avatar ?? '',
-      cover: p?.cover ?? '',
-      font: p?.font ?? DEFAULT_PROFILE_DRAFT.font,
-      linkLayout: p?.linkLayout ?? DEFAULT_PROFILE_DRAFT.linkLayout,
-      socials: p?.socials ?? [],
-      links: stripResolvedEmbedsForDraft(p?.links),
-      theme: p?.theme ?? DEFAULT_PROFILE_DRAFT.theme,
-    };
+    const loadedDraft = draftFromPublished(c, p);
     setSettings(() => loadedDraft);
     const loadedPayload = buildPublishPayload(loadedDraft, {
       receiver: loadedReceiver,
@@ -625,7 +638,6 @@ export function HandleProfileBuilder({
                 <AddressInput
                   value={draft.to}
                   onChange={(v) => update({ to: v })}
-                  onResolved={setResolved}
                 />
                 {connected && (
                   <button
@@ -670,7 +682,6 @@ export function HandleProfileBuilder({
                   <AddressInput
                     value={draft.to}
                     onChange={(v) => update({ to: v })}
-                    onResolved={setResolved}
                   />
                   {connected && (
                     <button
