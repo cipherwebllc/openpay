@@ -40,7 +40,12 @@ function chainLabel(chainId: number): string {
   return label ? `JPYC (${label})` : `chain ${chainId}`;
 }
 
-export function OrderFeedPanel() {
+export function OrderFeedPanel({
+  onOpenMobileOrder,
+}: {
+  /** 受注が無いときの「モバイル注文を開く」(モバイル注文タブが使えるときだけ親が渡す)。 */
+  onOpenMobileOrder?: () => void;
+} = {}) {
   const t = useTranslations('OrderRelay');
   const tF = useTranslations('OrderFulfillment'); // 厨房/ホール導線ラベル
   const tLive = useTranslations('ShopLive'); // 営業中の操作 見出し
@@ -119,7 +124,7 @@ export function OrderFeedPanel() {
               ? 'border-red-400 bg-red-50/60'
               : ageMin !== null && ageMin >= ELAPSED_WARN_MIN
                 ? 'border-amber-400 bg-amber-50/70'
-                : 'border-slate-200 bg-white'
+                : 'border-slate-200 bg-white shadow-card'
         }`}
       >
         <OrderBindingNotice order={o} />
@@ -199,8 +204,6 @@ export function OrderFeedPanel() {
             </p>
           </div>
         ) : null}
-        {/* 明細/テーブルは顧客申告・金額はオンチェーン検証済み (advisory 原則の明示)。 */}
-        <p className="mt-1 text-[11px] text-slate-500">{t('claimedNote')}</p>
         <div className="mt-3 flex items-center justify-between gap-2">
           {explorer ? (
             <a
@@ -218,7 +221,7 @@ export function OrderFeedPanel() {
             type="button"
             onClick={() => fulfill.mutate({ txHash: o.txHash, fulfilled: !done })}
             disabled={fulfill.isPending}
-            className="flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50"
           >
             {done ? (
               <>
@@ -239,110 +242,151 @@ export function OrderFeedPanel() {
   const active = orders.filter((o) => !o.fulfilled);
   const done = orders.filter((o) => o.fulfilled);
 
-  return (
-    <div className="space-y-5">
-      {/* 受注フィードの見出しは enableOrderRelay のときだけ (shop-live 単独では営業中の操作のみ)。 */}
-      {env.enableOrderRelay && (
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800">{t('heading')}</h2>
-          <p className="mt-1 text-sm text-slate-500">{t('subheading')}</p>
-          <OrderBindingScope />
-          {/* 完了フローのヒント。飲食 (厨房/ホール) を使う場合は配膳済み=対応済みを案内。 */}
-          <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            {env.enableOrderFulfillment ? t('completionHintRestaurant') : t('completionHintRetail')}
-          </p>
-        </div>
-      )}
+  const calls = callFeed.calls.data ?? [];
+  const countReady = !feed.isLoading && !feed.isError;
+  // 完了の流れの案内 (飲食は厨房→ホールで配膳済みにすると自動で対応済み)。
+  const completionHint = env.enableOrderFulfillment ? t('completionHintRestaurant') : t('completionHintRetail');
 
+  return (
+    <div className="space-y-4">
       {!isSignedIn ? (
         <div className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70">
           <SignInGate statement={t('signInStatement')} cta={t('signIn')} prompt={t('signInPrompt')} />
         </div>
       ) : (
-        <div className="space-y-3">
-          {/* 飲食店向け: 厨房モニター / ホール配膳 への直接導線。店員用リンク (受注閲覧トークン) を配る
-              運用では不要なので、enableOrderToken OFF のときだけ出す (token ON ではトークンパネルが導線)。 */}
-          {env.enableOrderFulfillment && !env.enableOrderToken && (
-            <div className="flex flex-wrap gap-2">
-              <a
-                href={`/${locale}/orders/kitchen`}
-                className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand-dark"
-              >
-                <ChefHat className="h-4 w-4" aria-hidden /> {tF('kitchenTitle')}
-              </a>
-              <a
-                href={`/${locale}/orders/hall`}
-                className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand-dark"
-              >
-                <UtensilsCrossed className="h-4 w-4" aria-hidden /> {tF('hallTitle')}
-              </a>
-            </div>
+        <>
+          {/* 先頭の要約: 未対応の件数・呼び出し・更新、飲食店は厨房/ホールへ (タブのバッジと同じ受注フィードを数える)。 */}
+          {env.enableOrderRelay && (
+            <section
+              aria-labelledby="orders-open-heading"
+              className="rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70"
+            >
+              <div className="flex items-start justify-between gap-3 px-5 py-4">
+                <div className="min-w-0">
+                  <h2 id="orders-open-heading" className="text-sm font-semibold text-slate-700">
+                    {t('openHeading')}
+                  </h2>
+                  <p className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-slate-500">
+                    <span>
+                      {countReady
+                        ? t.rich('openCount', {
+                            count: active.length,
+                            n: (chunks) => (
+                              <span className="text-3xl font-bold tabular-nums text-slate-900">{chunks}</span>
+                            ),
+                          })
+                        : '—'}
+                    </span>
+                    {env.enableOrderCall && calls.length > 0 ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                        {t('callsChip', { count: calls.length })}
+                      </span>
+                    ) : null}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void feed.refetch();
+                      if (env.enableOrderCall) void callFeed.calls.refetch();
+                    }}
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-brand hover:bg-brand/5"
+                  >
+                    <RefreshCw className="h-4 w-4" aria-hidden /> {t('refresh')}
+                  </button>
+                  <p className="mt-0.5 text-[11px] text-slate-500">{t('autoRefresh')}</p>
+                </div>
+              </div>
+              {/* 飲食店向け: 厨房モニター / ホール配膳 への直接導線。店員用リンク (受注閲覧トークン) を配る
+                  運用では不要なので、enableOrderToken OFF のときだけ出す (token ON ではトークンパネルが導線)。 */}
+              {env.enableOrderFulfillment && !env.enableOrderToken && (
+                <div className="grid grid-cols-2 gap-2 border-t border-slate-100 px-5 py-3">
+                  <a
+                    href={`/${locale}/orders/kitchen`}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand-dark"
+                  >
+                    <ChefHat className="h-4 w-4" aria-hidden /> {tF('kitchenTitle')}
+                  </a>
+                  <a
+                    href={`/${locale}/orders/hall`}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand-dark"
+                  >
+                    <UtensilsCrossed className="h-4 w-4" aria-hidden /> {tF('hallTitle')}
+                  </a>
+                </div>
+              )}
+            </section>
           )}
           {/* 店員用リンク (受注閲覧トークン)。オーナーが発行し、店員端末は資金鍵なしで厨房/ホールへ。 */}
           {env.enableOrderToken && <OrderOperatorTokenPanel sessionAddress={sessionAddress} />}
           {/* 受注フィード本体は enableOrderRelay のときだけ描画 (shop-live 単独では営業中の操作のみ)。 */}
           {env.enableOrderRelay && (
             <>
-          {env.enableOrderCall ? (
-            <OrderCallSection
-              calls={callFeed.calls.data ?? []}
-              subject={sessionAddress}
-              enabled={isSignedIn && !callFeed.calls.isLoading && !callFeed.calls.isError}
-              isLoading={callFeed.calls.isLoading}
-              isError={callFeed.calls.isError || callFeed.resolve.isError}
-              isPending={callFeed.resolve.isPending}
-              onResolve={(id) => callFeed.resolve.mutate(id)}
-              onNewCalls={() => {
-                if (isOrderAlertSoundEnabled()) playNewOrderChime();
-              }}
-            />
-          ) : null}
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-slate-500">{t('autoRefresh')}</p>
-            <button
-              type="button"
-              onClick={() => {
-                void feed.refetch();
-                if (env.enableOrderCall) void callFeed.calls.refetch();
-              }}
-              className="flex items-center gap-1 text-xs font-medium text-brand hover:underline"
-            >
-              <RefreshCw className="h-3.5 w-3.5" aria-hidden /> {t('refresh')}
-            </button>
-          </div>
+              {env.enableOrderCall ? (
+                <OrderCallSection
+                  calls={calls}
+                  subject={sessionAddress}
+                  enabled={isSignedIn && !callFeed.calls.isLoading && !callFeed.calls.isError}
+                  isLoading={callFeed.calls.isLoading}
+                  isError={callFeed.calls.isError || callFeed.resolve.isError}
+                  isPending={callFeed.resolve.isPending}
+                  onResolve={(id) => callFeed.resolve.mutate(id)}
+                  onNewCalls={() => {
+                    if (isOrderAlertSoundEnabled()) playNewOrderChime();
+                  }}
+                  hideWhenEmpty
+                />
+              ) : null}
 
-          {feed.isError ? (
-            <p className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              {t('loadError')}
-            </p>
-          ) : feed.isLoading ? (
-            <p className="text-center text-sm text-slate-500">{t('loading')}</p>
-          ) : (
-            <>
-              {active.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
-                  {t('empty')}
+              {feed.isError ? (
+                <p className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  {t('loadError')}
                 </p>
+              ) : feed.isLoading ? (
+                <p className="text-center text-sm text-slate-500">{t('loading')}</p>
               ) : (
-                <ul className="space-y-3">{active.map((o) => renderCard(o, false))}</ul>
-              )}
+                <>
+                  {active.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-8 text-center">
+                      <p className="text-sm font-medium text-slate-600">{t('empty')}</p>
+                      {onOpenMobileOrder ? (
+                        <>
+                          <p className="mt-1 text-xs text-slate-500">{t('emptyHint')}</p>
+                          <button
+                            type="button"
+                            onClick={onOpenMobileOrder}
+                            className="mt-3 inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-brand hover:text-brand-dark"
+                          >
+                            {t('openMobileOrder')}
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <>
+                      {/* 明細/テーブルは顧客申告・金額はオンチェーン検証済み (advisory 原則の明示・一覧に 1 回)。 */}
+                      <p className="text-[11px] text-slate-500">{t('claimedNote')}</p>
+                      <ul className="grid gap-3 lg:grid-cols-2 lg:items-start">{active.map((o) => renderCard(o, false))}</ul>
+                    </>
+                  )}
 
-              {/* 対応済み: 削除でなく折りたたみで保持 (誤操作は「未対応に戻す」で復旧)。 */}
-              {done.length > 0 && (
-                <details className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                  <summary className="cursor-pointer text-sm font-medium text-slate-600">
-                    {t('fulfilledHeading')} ({done.length})
-                  </summary>
-                  <ul className="mt-3 space-y-3">{done.map((o) => renderCard(o, true))}</ul>
-                </details>
+                  {/* 対応済み: 削除でなく折りたたみで保持 (誤操作は「未対応に戻す」で復旧)。 */}
+                  {done.length > 0 && (
+                    <details className="rounded-2xl bg-white px-4 py-3 shadow-card ring-1 ring-slate-200/70">
+                      <summary className="cursor-pointer text-sm font-medium text-slate-600">
+                        {t('fulfilledHeading')} ({done.length})
+                      </summary>
+                      <ul className="mt-3 grid gap-3 lg:grid-cols-2 lg:items-start">{done.map((o) => renderCard(o, true))}</ul>
+                    </details>
+                  )}
+                </>
               )}
-            </>
-          )}
             </>
           )}
           {/* 営業中の操作 (売り切れ / 受付一時停止) は受注リストの下へ。頻度が低いので通常は閉じる (details)。 */}
           {env.enableShopLive && liveSelected?.storefront && (
-            <details className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <details className="rounded-2xl bg-white px-4 py-3 shadow-card ring-1 ring-slate-200/70">
               <summary className="cursor-pointer text-sm font-medium text-slate-700">
                 {tLive('heading')}
               </summary>
@@ -369,11 +413,17 @@ export function OrderFeedPanel() {
               </div>
             </details>
           )}
-        </div>
+        </>
       )}
 
+      {/* 末尾: 完了の流れの案内と、開示 (文言は変えない: 支払いと注文の結びつきの範囲・受注データの保存)。
+          注文 (主役) を 1 画面目に出すため、読めば足りるものはここへ。 */}
       {env.enableOrderRelay && (
-        <p className="text-xs text-slate-500">{t('disclosure')}</p>
+        <div className="space-y-2 pt-2">
+          {isSignedIn ? <p className="text-xs text-slate-500">{completionHint}</p> : null}
+          <OrderBindingScope />
+          <p className="text-xs text-slate-500">{t('disclosure')}</p>
+        </div>
       )}
     </div>
   );
