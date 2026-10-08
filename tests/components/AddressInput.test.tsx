@@ -13,6 +13,7 @@ vi.mock('@/hooks/useResolveAddress', () => ({
 import { AddressInput } from '@/components/AddressInput';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { mockHook } from '../_helpers/wagmiMock';
+import { ResolveAddressError } from '@/lib/resolveAddressError';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -104,7 +105,7 @@ describe('AddressInput', () => {
     mockHook(useResolveAddress, {
       data: null,
       isFetching: false,
-      error: new Error('foo.eth は登録されていません'),
+      error: new ResolveAddressError('foo.eth は登録されていません'),
     });
     render(
       <AddressInput
@@ -117,5 +118,16 @@ describe('AddressInput', () => {
       screen.getByText('foo.eth は登録されていません'),
     ).toBeInTheDocument();
     expect(onResolved).toHaveBeenCalledWith(null);
+  });
+
+  it('外部サーバ (CCIP-Read) や RPC の失敗は生の英語の文面を出さず、言い換えて 0x アドレスを案内する', () => {
+    mockHook(useResolveAddress, {
+      data: null,
+      isFetching: false,
+      error: new Error('The contract function "resolveWithGateways" reverted with the following reason: HTTP request failed.'),
+    });
+    render(<AddressInput value="masia.myna.eth" onChange={() => {}} />);
+    expect(screen.queryByText(/resolveWithGateways/)).toBeNull();
+    expect(screen.getByText(/名前を解決できませんでした。.*0x アドレスを入力してください/)).toBeInTheDocument();
   });
 });

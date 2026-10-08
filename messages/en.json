@@ -1686,7 +1686,8 @@
   },
   "AddressInput": {
     "placeholder": "0x... or vitalik.eth / name.base.eth",
-    "resolving": "Resolving name…"
+    "resolving": "Resolving name…",
+    "resolveFailed": "Couldn’t resolve this name. Try again in a moment, or enter the 0x address."
   },
   "CrossChainHint": {
     "progressForwardPending": "Checking the Arc mint",

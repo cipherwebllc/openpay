@@ -199,6 +199,8 @@ describe('next.config.mjs headers() — baseline and enforced CSP (C17)', () => 
       'https://cca-lite.coinbase.com', 'https://api.pimlico.io',
       'https://gateway-api.circle.com', 'https://gateway-api-testnet.circle.com',
       'https://iris-api.circle.com', 'https://iris-api-sandbox.circle.com',
+      // ENS の CCIP-Read (Basenames・MynaWallet) はブラウザが外部サーバに問い合わせる
+      'https://api.coinbase.com', 'https://prd-api.mynawallet.jp',
     ]) expect(connect).toContain(origin);
     expect(connect).not.toContain('*');
     expect(connect).not.toContain('https:');
