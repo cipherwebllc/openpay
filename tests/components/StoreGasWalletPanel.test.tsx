@@ -288,17 +288,39 @@ describe('StoreGasWalletPanel', () => {
       render(<StoreGasWalletPanel />);
       expect(screen.queryByText('iPhone・iPad では、ホーム画面に追加した OpenPay で作ってください')).toBeNull();
       expect(screen.getByText(/ホーム画面のアプリに保存しています/)).toBeTruthy();
-      expect(screen.queryByText(/Safari では、しばらく開かないと/)).toBeNull();
+      expect(screen.queryByText(/Safari を使った日が 7 日ほどたつと/)).toBeNull();
+      expect(screen.queryByText(/Cookie とサイトデータを削除する設定/)).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'この端末にガス用ウォレットを作る' }));
       expect(hold.state.create).toHaveBeenCalled();
     });
 
-    it('iPhone・iPad 以外は今までどおり (手順なし・一般の注意)', () => {
+    it('iPhone・iPad 以外は手順を出さずに作れる・Safari 以外 (Chrome・Brave など) は閉じるときの削除設定の注意', () => {
       hold.platform = 'android';
       render(<StoreGasWalletPanel />);
       expect(screen.queryByText('iPhone・iPad では、ホーム画面に追加した OpenPay で作ってください')).toBeNull();
-      expect(screen.getByText(/Safari では、しばらく開かないと/)).toBeTruthy();
+      expect(screen.getByText(/閉じるたびに鍵が消えます。この端末ではその設定を OFF にしてください。/)).toBeTruthy();
+      expect(screen.queryByText(/Safari を使った日が 7 日ほどたつと/)).toBeNull();
       expect(screen.getByRole('button', { name: 'この端末にガス用ウォレットを作る' })).toBeTruthy();
+    });
+
+    it.each([
+      ['Mac の Safari', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15', 'safari'],
+      ['Mac の Brave (Chrome と同じ UA)', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36', 'clear'],
+      ['Edge', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0', 'clear'],
+      ['Firefox', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14.6; rv:131.0) Gecko/20100101 Firefox/131.0', 'clear'],
+    ] as const)('%s → 端末に合った注意', (_, ua, kind) => {
+      const original = Object.getOwnPropertyDescriptor(window.navigator, 'userAgent');
+      Object.defineProperty(window.navigator, 'userAgent', { value: ua, configurable: true });
+      try {
+        render(<StoreGasWalletPanel />);
+        const safari = screen.queryByText(/Safari を使った日が 7 日ほどたつと、この端末の鍵が消えることがあります/);
+        const clear = screen.queryByText(/閉じるたびに鍵が消えます/);
+        expect(!!safari).toBe(kind === 'safari');
+        expect(!!clear).toBe(kind === 'clear');
+      } finally {
+        if (original) Object.defineProperty(window.navigator, 'userAgent', original);
+        else delete (window.navigator as { userAgent?: string }).userAgent;
+      }
     });
   });
 

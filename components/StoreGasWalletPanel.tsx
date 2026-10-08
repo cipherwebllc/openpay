@@ -40,6 +40,13 @@ function isIosDevice(): boolean {
   return detectMobilePlatform() === 'ios' || (typeof navigator !== 'undefined' && /iPad/.test(navigator.userAgent));
 }
 
+// Safari (Mac など)。Chrome・Brave・Edge・Firefox などは UA に Safari/ を含んでも除く。
+function isSafariBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  return /Safari\//.test(ua) && !/Chrome\/|Chromium|CriOS|FxiOS|Edg\/|OPR\/|Firefox\//.test(ua);
+}
+
 export function StoreGasWalletPanel({
   onAddressChange,
 }: {
@@ -53,8 +60,10 @@ export function StoreGasWalletPanel({
   // ホーム画面のアプリはこの消去の対象外で保存場所も別なので、アプリで作るよう案内する (描画後に判定 = hydration 安全)。
   const { isStandalone } = usePwaDisplayMode();
   const [isIos, setIsIos] = useState(false);
+  const [isSafari, setIsSafari] = useState(false);
   useEffect(() => {
     setIsIos(isIosDevice());
+    setIsSafari(isSafariBrowser());
   }, []);
   const iosBrowser = isIos && !isStandalone;
   // iPhone・iPad のブラウザで「それでもブラウザで作る」を選んだ (作るボタンを出す)。
@@ -202,12 +211,15 @@ export function StoreGasWalletPanel({
       <p className="mt-2 text-xs leading-relaxed text-amber-800">
         {t('storeGasWallet.keyNote', { guide: fundGuide })}
       </p>
+      {/* 鍵が消える場面は端末・ブラウザで違う: iPhone・iPad = 下の案内 / Safari = 7 日の消去 / それ以外 = 閉じるときの削除設定 */}
       {isIos ? (
         isStandalone && (
           <p className="mt-1 text-xs leading-relaxed text-emerald-700">{t('storeGasWallet.iosAppNote')}</p>
         )
       ) : (
-        <p className="mt-1 text-xs leading-relaxed text-slate-500">{t('storeGasWallet.safariNote')}</p>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">
+          {isSafari ? t('storeGasWallet.safariNote') : t('storeGasWallet.browserClearNote')}
+        </p>
       )}
       {/* iPhone・iPad では出さない (消されにくい保存が 7 日の消去を防ぐ根拠は無い = 偽の安心にしない) */}
       {g.persisted === true && !isIos && (
