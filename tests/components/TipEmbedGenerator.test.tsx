@@ -1107,10 +1107,12 @@ describe('TipEmbedGenerator — レイアウト (mobile overflow / preview 位�
 describe('TipEmbedGenerator — ENS 名の受取先', () => {
   const OTHER = '0x000000000000000000000000000000000000dEaD';
   // 名前ごとの解決先 (AddressInput と builder は同じ hook = 同じ結果を見る)。
-  const resolveTo = (map: Record<string, string>) =>
+  const resolveTo = (map: Record<string, string>, failing: string[] = []) =>
     vi.mocked(useResolveAddress).mockImplementation(((input: string) => {
-      const address = map[input.trim().toLowerCase()];
-      return { data: address ? { address } : null, isFetching: false, error: null };
+      const key = input.trim().toLowerCase();
+      const address = map[key];
+      // failing: 再解決に失敗した名前 (react-query は前回の解決結果を data に残したまま error を立てる)。
+      return { data: address ? { address } : null, isFetching: false, error: failing.includes(key) ? new Error('rpc down') : null };
     }) as unknown as typeof useResolveAddress);
   afterEach(() => resolveTo({}));
 
@@ -1138,5 +1140,13 @@ describe('TipEmbedGenerator — ENS 名の受取先', () => {
     await waitFor(() => expectInUrl(new RegExp(`/tip/${VALID}`)));
     expect(screen.getByDisplayValue('alice.eth')).toBe(input);
     expect(input).toHaveFocus();
+  });
+
+  it('名前の再解決に失敗している間は、前回の解決結果でリンクを作らない', async () => {
+    resolveTo({ 'alice.eth': VALID }, ['alice.eth']);
+    window.localStorage.setItem(KEY, JSON.stringify({ receiver: 'alice.eth' }));
+    render(<TipEmbedGenerator />);
+    await screen.findByDisplayValue('alice.eth');
+    expect(screen.queryByText(new RegExp(`/tip/${VALID}`))).toBeNull();
   });
 });

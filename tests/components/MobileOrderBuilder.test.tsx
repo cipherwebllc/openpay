@@ -37,8 +37,12 @@ vi.mock('@/components/StorefrontPublishPanel', () => ({
   ),
 }));
 // ENS 名の解決 (シートを閉じていても受取先を解決する): 'shop.eth' だけ ADDR に解決する。
+// 'stale.eth' は再解決に失敗した名前 (react-query は前回の解決結果 ADDR を data に残したまま error を立てる)。
 vi.mock('@/hooks/useResolveAddress', () => ({
-  useResolveAddress: (input: string) => ({ data: input === 'shop.eth' ? { address: ADDR } : null }),
+  useResolveAddress: (input: string) =>
+    input === 'stale.eth'
+      ? { data: { address: ADDR }, error: new Error('rpc down') }
+      : { data: input === 'shop.eth' ? { address: ADDR } : null },
 }));
 // AddressInput: 入力時に onChange + onResolved(ADDR) を発火する軽量スタブ。
 vi.mock('@/components/AddressInput', () => ({
@@ -193,6 +197,16 @@ describe('MobileOrderBuilder', () => {
     fireEvent.click(within(receive).getByRole('button', { name: '設定' }));
     // スタブの AddressInput は打つたびに ADDR を「解決できた」と知らせるが、'nobody.eth' は解決できない名前。
     fireEvent.change(screen.getByTestId('addr'), { target: { value: 'nobody.eth' } });
+    expect(within(receive).queryByText('0x52d4…cA81')).toBeNull();
+  });
+
+  it('名前の再解決に失敗している間は、前回の解決結果を受取先に使わない', () => {
+    window.localStorage.setItem(
+      'openpay:mobile-order-draft:v1',
+      JSON.stringify({ receiver: 'stale.eth', receiverSource: 'manual', chains: ['polygon'] }),
+    );
+    renderWithIntl(<MobileOrderBuilder />);
+    const receive = screen.getByRole('region', { name: '受け取り' });
     expect(within(receive).queryByText('0x52d4…cA81')).toBeNull();
   });
 

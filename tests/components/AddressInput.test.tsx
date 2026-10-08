@@ -100,6 +100,19 @@ describe('AddressInput', () => {
     expect(span.className).toMatch(/\bbreak-all\b/);
   });
 
+  it('再解決に失敗したら、前回の解決結果 (react-query が残す data) を表示も通知もしない', () => {
+    const onResolved = vi.fn();
+    mockHook(useResolveAddress, {
+      data: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', name: 'vitalik.eth' },
+      isFetching: false,
+      error: new Error('rpc down'),
+    });
+    render(<AddressInput value="vitalik.eth" onChange={() => {}} onResolved={onResolved} />);
+    expect(screen.queryByText('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913')).toBeNull();
+    expect(onResolved).toHaveBeenCalledWith(null);
+    expect(onResolved).not.toHaveBeenCalledWith('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+  });
+
   it('解決失敗 → エラー文言表示 + onResolved(null)', () => {
     const onResolved = vi.fn();
     mockHook(useResolveAddress, {

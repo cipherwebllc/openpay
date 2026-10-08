@@ -267,9 +267,10 @@ export function TipEmbedGenerator() {
   // 再解決が届かず、リンクと埋め込みコードが古いアドレスを指したままになる (着金先のずれ)。
   const receiverName = settings.receiver.trim();
   const ens = useResolveAddress(isLikelyName(receiverName) ? receiverName : '');
+  // 再解決に失敗しても react-query は前回の解決結果を残すので、失敗中は使わない (古いアドレスのリンクを出さない)。
   const effectiveReceiver = useMemo(
-    () => pickEffectiveAddress(settings.receiver, ens.data?.address ?? null),
-    [settings.receiver, ens.data],
+    () => pickEffectiveAddress(settings.receiver, ens.error ? null : ens.data?.address ?? null),
+    [settings.receiver, ens.data, ens.error],
   );
 
   const setReceiver = useCallback(
