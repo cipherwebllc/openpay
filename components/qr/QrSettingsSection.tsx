@@ -32,6 +32,7 @@ export function QrSettingsSection({
   isStandard,
   splitParsed,
   splitsForUrl,
+  showSplitAndCrossChain = true,
 }: {
   settings: QrSettings;
   setSettings: Dispatch<SetStateAction<QrSettings>>;
@@ -41,6 +42,8 @@ export function QrSettingsSection({
   isStandard: boolean;
   splitParsed: SplitDraftsParseResult;
   splitsForUrl: SplitEntry[] | undefined;
+  /** 売上の自動分配・他チェーンからの受取を出すか (既定 true)。レジの明細 QR (checkout) はどちらも使わないので false。 */
+  showSplitAndCrossChain?: boolean;
 }) {
   const t = useTranslations('QrGenerator');
 
@@ -217,7 +220,7 @@ export function QrSettingsSection({
         </Field>
       ) : null}
 
-      {!isStandard && (
+      {showSplitAndCrossChain && !isStandard && (
         <SplitEditor
           splits={settings.splits}
           max={SPLIT_MAX_ENTRIES}
@@ -233,7 +236,7 @@ export function QrSettingsSection({
       {/* Cross-chain 受信許可 toggle (USDC のみ意味あり、JPYC では disable)。
           Default ON。Off にすると PaymentForm が代替経路 hint を出さない
           (店主が「同一 chain で受け取りたい」と明示する用途)。 */}
-      {settings.token === 'usdc' && crossChainAllowed(settings.chain) && (
+      {showSplitAndCrossChain && settings.token === 'usdc' && crossChainAllowed(settings.chain) && (
         <AdvancedSection label={t('crossChainHeading')}>
           <label className="flex cursor-pointer items-start gap-3">
             <input

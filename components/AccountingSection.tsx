@@ -31,6 +31,8 @@ type CommonProps = {
   receiptNo: string;
   onReceiptNoChange: (v: string) => void;
   onGenerateReceiptNo?: () => void;
+  /** 枠なしで出す (レジの注文パネルの中の 1 行・2026-10 磨き上げ P3)。既定は白いカードの行。 */
+  bare?: boolean;
 };
 
 type ManualProps = CommonProps & {
@@ -65,10 +67,14 @@ type CartProps = CommonProps & {
 export type AccountingSectionProps = ManualProps | CartProps;
 
 export function AccountingSection(props: AccountingSectionProps) {
-  const { labels, receiptNo, onReceiptNoChange, onGenerateReceiptNo } = props;
+  const { labels, receiptNo, onReceiptNoChange, onGenerateReceiptNo, bare = false } = props;
   return (
-    <details className="group rounded-2xl border border-slate-200 bg-white p-4">
-      <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-medium text-slate-700">
+    <details className={bare ? 'group' : 'group rounded-2xl border border-slate-200 bg-white p-4'}>
+      <summary
+        className={`flex cursor-pointer list-none items-center justify-between font-medium [&::-webkit-details-marker]:hidden ${
+          bare ? 'text-xs text-slate-600' : 'text-sm text-slate-700'
+        }`}
+      >
         <span>{labels.title}</span>
         <ChevronRight
           className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-90"

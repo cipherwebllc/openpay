@@ -204,7 +204,7 @@ function CreatePageBody() {
       {tab === 'register' && (
         <div className="space-y-5">
           <TodayCard />
-          <RegisterMode onEditCurrency={() => changeTab('qr')} />
+          <RegisterMode />
         </div>
       )}
       {tab === 'tip' && (

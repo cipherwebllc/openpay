@@ -2430,7 +2430,7 @@
     "qrPosterEyebrow": "OpenPay お会計",
     "qrLocalGenNote": "この QR は端末内で生成（通信不要）。圏外でも表示・提示できます。",
     "qrPosterDefaultStoreName": "お会計",
-    "presetsLabel": "商品プリセット",
+    "presetsLabel": "商品",
     "showImagesLabel": "商品画像を表示",
     "filterAll": "すべて",
     "recommendedBadge": "おすすめ",
@@ -2447,7 +2447,7 @@
     "receiptNoLabel": "管理番号 / レシート番号",
     "receiptNoPlaceholder": "任意",
     "receiptNoGenerate": "採番",
-    "accountingTitle": "記帳・会計 (任意)",
+    "accountingTitle": "管理番号を付ける（任意）",
     "cartAutoNote": "商品名・税率はカート明細から自動で記録されます。",
     "subtotal": "小計",
     "taxAmount": "うち税額",
@@ -2456,15 +2456,15 @@
     "copyUrl": "決済リンクをコピー",
     "copied": "コピーしました",
     "previewPlaceholder": "受取先と商品・単価を入力すると QR が表示されます。",
-    "presetManagerTitle": "商品プリセットを管理",
+    "presetManagerTitle": "商品を編集",
     "currencyMismatch": "カートは {symbol} のみです。別通貨の商品は別のカートで作成してください。",
-    "cartEmpty": "商品プリセットを選ぶか「＋ カスタム追加」でカートに入れてください。",
+    "cartEmpty": "商品を選ぶか「自由入力」で追加してください。",
     "removeLine": "この商品を削除",
     "lineAmount": "金額",
     "memoLabel": "メモ",
     "memoPlaceholder": "メモ (任意)",
-    "addLine": "＋ カスタム追加",
-    "orderSummaryTitle": "ご注文内容",
+    "addLine": "自由入力",
+    "orderSummaryTitle": "ご注文",
     "storeGasWallet": {
       "title": "お店の端末のガス用ウォレット",
       "badgeNone": "未作成",
@@ -2601,6 +2601,13 @@
       "viewTx": "取引を見る",
       "dismiss": "閉じる",
       "saleBlockedHint": "「通常の QR を出す」で、通常の QR（ガス代不要）を出せます。"
+    },
+    "productsSheetTitle": "商品",
+    "itemCount": "{count} 点",
+    "currencyFromProducts": "通貨は商品の通貨に合わせて切り替わります（いまは {symbol}）。",
+    "notReady": {
+      "items": "商品を選んでください",
+      "receiver": "受取先を設定してください"
     }
   },
   "ProductPresetManager": {

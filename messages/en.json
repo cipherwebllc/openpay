@@ -2430,7 +2430,7 @@
     "qrPosterEyebrow": "OpenPay checkout",
     "qrLocalGenNote": "This QR is generated on your device (no network needed) — it works even with no signal.",
     "qrPosterDefaultStoreName": "Checkout",
-    "presetsLabel": "Product presets",
+    "presetsLabel": "Products",
     "showImagesLabel": "Show product images",
     "filterAll": "All",
     "recommendedBadge": "Recommended",
@@ -2447,7 +2447,7 @@
     "receiptNoLabel": "Receipt / reference no.",
     "receiptNoPlaceholder": "Optional",
     "receiptNoGenerate": "Generate",
-    "accountingTitle": "Bookkeeping / accounting (optional)",
+    "accountingTitle": "Add a reference no. (optional)",
     "cartAutoNote": "Product names and tax are recorded automatically from the cart items.",
     "subtotal": "Subtotal",
     "taxAmount": "Tax (incl.)",
@@ -2456,14 +2456,14 @@
     "copyUrl": "Copy payment link",
     "copied": "Copied",
     "previewPlaceholder": "Enter address, product and price to see the QR.",
-    "presetManagerTitle": "Manage product presets",
+    "presetManagerTitle": "Edit products",
     "currencyMismatch": "This cart is {symbol}-only. Use a separate cart for other currencies.",
-    "cartEmpty": "Pick a preset or tap “Custom item” to start the cart.",
+    "cartEmpty": "Pick an item or add a custom one.",
     "removeLine": "Remove item",
     "lineAmount": "Amount",
     "memoLabel": "Memo",
     "memoPlaceholder": "Memo (optional)",
-    "addLine": "+ Custom item",
+    "addLine": "Custom item",
     "orderSummaryTitle": "Order",
     "storeGasWallet": {
       "title": "Store device gas wallet",
@@ -2601,6 +2601,13 @@
       "viewTx": "View transaction",
       "dismiss": "Close",
       "saleBlockedHint": "Use “Show the standard QR” to show the standard (gas-free) QR."
+    },
+    "productsSheetTitle": "Products",
+    "itemCount": "{count} items",
+    "currencyFromProducts": "The currency follows your items (now {symbol}).",
+    "notReady": {
+      "items": "Pick an item",
+      "receiver": "Set a receiving wallet"
     }
   },
   "ProductPresetManager": {

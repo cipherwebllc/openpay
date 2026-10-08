@@ -363,75 +363,75 @@ describe('R11b: generated payment URL fixtures', () => {
 // 常に出す下部バー)。節の名前も中身で付け直したので、全シナリオを記録し直した (決済 URL のバイト一致は上の fixture が別に固定)。
 const DOM_BASELINE: Record<string, string> = {
   'fresh-ja/empty':
-    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=85dfdd0d3bf7 receiver=4117653b704e accounting=873bf027a72b preview=91ce8d987557 bar=860c5085eb95 full=9545b8ec4cbd',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=85dfdd0d3bf7 receiver=4117653b704e accounting=855d11756642 preview=91ce8d987557 bar=860c5085eb95 full=04ec8619926a',
   'fresh-ja/receiver-typed':
-    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=bf94698895a4 receiver=a562a4a4d865 accounting=873bf027a72b preview=3fcd31b86f55 bar=860c5085eb95 full=39dd8012df18',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=bf94698895a4 receiver=a562a4a4d865 accounting=855d11756642 preview=3fcd31b86f55 bar=860c5085eb95 full=971138504026',
   'fresh-ja/amount':
-    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=fbbd9151f654 receiver=a562a4a4d865 accounting=873bf027a72b preview=99b871383cb3 bar=6bdf93b197f0 full=36c473e3f418',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=fbbd9151f654 receiver=a562a4a4d865 accounting=855d11756642 preview=99b871383cb3 bar=6bdf93b197f0 full=1f280291633b',
   'fresh-ja/advanced':
-    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=fbbd9151f654 receiver=a562a4a4d865 accounting=873bf027a72b preview=99b871383cb3 sheet=e71fef2e7ec9 bar=6bdf93b197f0 full=8970968a5caa',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=fbbd9151f654 receiver=a562a4a4d865 accounting=855d11756642 preview=99b871383cb3 sheet=1b9866df718d bar=6bdf93b197f0 full=1d5ed3592b9e',
   'fresh-ja/static':
-    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=ea4178b2d5c8 receiver=a562a4a4d865 accounting=873bf027a72b preview=a3758a9929a3 bar=ed7e724d0a8d full=22ff03f81b92',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=ea4178b2d5c8 receiver=a562a4a4d865 accounting=855d11756642 preview=a3758a9929a3 bar=ed7e724d0a8d full=20f18375ef16',
   'fresh-ja/modal':
-    'shape=2/4/4/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=ea4178b2d5c8 receiver=a562a4a4d865 accounting=873bf027a72b left3=f0506b8ca563 preview=a3758a9929a3 modal=dcf3ede433ea bar=ed7e724d0a8d full=13cbc34bbf39',
+    'shape=2/4/4/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=ea4178b2d5c8 receiver=a562a4a4d865 accounting=855d11756642 left3=f0506b8ca563 preview=a3758a9929a3 modal=1f8540102a8d bar=ed7e724d0a8d full=0dc9eb858431',
   'fresh-en/empty':
-    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=c29363ca4536 receiver=066dee05ee8c accounting=ca64158ac253 preview=4f7c6f85b84b bar=eb0c167d1b09 full=00f08b1f30ec',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=c29363ca4536 receiver=066dee05ee8c accounting=1dc4435d9178 preview=4f7c6f85b84b bar=eb0c167d1b09 full=51626f967f71',
   'fresh-en/receiver-typed':
-    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=f533e5dcf725 receiver=57f61194a9dc accounting=ca64158ac253 preview=ed60ab2dd260 bar=eb0c167d1b09 full=e860b724914a',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=f533e5dcf725 receiver=57f61194a9dc accounting=1dc4435d9178 preview=ed60ab2dd260 bar=eb0c167d1b09 full=13ca512e7463',
   'fresh-en/amount':
-    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=7a1d507cb983 receiver=57f61194a9dc accounting=ca64158ac253 preview=b419161ef24a bar=684cc53ba128 full=fe9098abeb45',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=7a1d507cb983 receiver=57f61194a9dc accounting=1dc4435d9178 preview=b419161ef24a bar=684cc53ba128 full=97dc6be8a1ac',
   'fresh-en/advanced':
-    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=7a1d507cb983 receiver=57f61194a9dc accounting=ca64158ac253 preview=b419161ef24a sheet=81ebc0c42ff3 bar=684cc53ba128 full=452153b4e000',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=7a1d507cb983 receiver=57f61194a9dc accounting=1dc4435d9178 preview=b419161ef24a sheet=9f6742c83f22 bar=684cc53ba128 full=a235802dcf6b',
   'fresh-en/static':
-    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=f11035668953 receiver=57f61194a9dc accounting=ca64158ac253 preview=6e9095c6e7c5 bar=e93e13762e55 full=cfe01f141dbe',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=f11035668953 receiver=57f61194a9dc accounting=1dc4435d9178 preview=6e9095c6e7c5 bar=e93e13762e55 full=a3663747aa62',
   'fresh-en/modal':
-    'shape=2/4/4/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=f11035668953 receiver=57f61194a9dc accounting=ca64158ac253 left3=3e04971c2b53 preview=6e9095c6e7c5 modal=6677ebf10f18 bar=e93e13762e55 full=6bc7b5a01263',
+    'shape=2/4/4/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=f11035668953 receiver=57f61194a9dc accounting=1dc4435d9178 left3=3e04971c2b53 preview=6e9095c6e7c5 modal=e9858f0644f6 bar=e93e13762e55 full=85f4561a03e8',
   'seeded/collapsed':
-    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=a4a310e8db48 accounting=873bf027a72b preview=3fcd31b86f55 bar=860c5085eb95 full=bd72412dee15',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=a4a310e8db48 accounting=855d11756642 preview=3fcd31b86f55 bar=860c5085eb95 full=e27af2175278',
   'seeded/step2-open':
-    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=a4a310e8db48 accounting=873bf027a72b preview=3fcd31b86f55 sheet=827d06cf8749 bar=860c5085eb95 full=4034658c9eed',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=a4a310e8db48 accounting=855d11756642 preview=3fcd31b86f55 sheet=d07042772fe5 bar=860c5085eb95 full=60b42111df57',
   'seeded/advanced-split':
-    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=7f8504020ad4 accounting=873bf027a72b preview=99b871383cb3 sheet=827d06cf8749 bar=6bdf93b197f0 full=194e34408328',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=7f8504020ad4 accounting=855d11756642 preview=99b871383cb3 sheet=d07042772fe5 bar=6bdf93b197f0 full=16e3a572aab0',
   'seeded/quick-editor':
-    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=a751f759de15 accounting=873bf027a72b preview=99b871383cb3 bar=6bdf93b197f0 full=61ed4007c0b9',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=a751f759de15 accounting=855d11756642 preview=99b871383cb3 bar=6bdf93b197f0 full=6d3a21e52e83',
   'seeded/accounting':
-    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=a751f759de15 accounting=cb35fe61e7d1 preview=99b871383cb3 bar=6bdf93b197f0 full=4cd1571bac12',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=a751f759de15 accounting=ad0f69b8927f preview=99b871383cb3 bar=6bdf93b197f0 full=1a5aee35e927',
   'usdc/amount-fiat':
-    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=379554492659 accounting=873bf027a72b preview=934ceead99e8 bar=7309dd8672ad full=1c8efc08202b',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=379554492659 accounting=855d11756642 preview=934ceead99e8 bar=7309dd8672ad full=bac58cd87e34',
   'usdc/advanced-crosschain':
-    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=379554492659 accounting=873bf027a72b preview=934ceead99e8 sheet=e09826367dba bar=7309dd8672ad full=04c9cf132ce1',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=379554492659 accounting=855d11756642 preview=934ceead99e8 sheet=760db63b847f bar=7309dd8672ad full=cfb431e636f4',
   'usdc/fx-applied':
-    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=88e16650c3d9 accounting=873bf027a72b preview=1f554979d6b2 sheet=e71fef2e7ec9 bar=9297eecd7c80 full=5d33ec6421c9',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=88e16650c3d9 accounting=855d11756642 preview=1f554979d6b2 sheet=1b9866df718d bar=9297eecd7c80 full=adec0c8b4872',
   'usdc/fx-modal':
-    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=88e16650c3d9 accounting=873bf027a72b left2=f0506b8ca563 preview=1f554979d6b2 modal=735e7ddaaa84 bar=9297eecd7c80 full=d6a6e7f7a9aa',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=88e16650c3d9 accounting=855d11756642 left2=f0506b8ca563 preview=1f554979d6b2 modal=a9bbf30986a8 bar=9297eecd7c80 full=c1ac3c5a8cdb',
   'usdc/fx-expired':
-    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=7bdf9ce858d9 accounting=873bf027a72b left2=f0506b8ca563 preview=1f554979d6b2 bar=9297eecd7c80 full=16ffca44117c',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=7bdf9ce858d9 accounting=855d11756642 left2=f0506b8ca563 preview=1f554979d6b2 bar=9297eecd7c80 full=cc6a89277620',
   'standard/closed':
-    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=75c6f01dab74 accounting=873bf027a72b preview=4b4a106c5654 bar=75d49299c4ea full=a4231af56fe0',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=75c6f01dab74 accounting=855d11756642 preview=4b4a106c5654 bar=75d49299c4ea full=d0f4b39edf4d',
   'standard/advanced':
-    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=75c6f01dab74 accounting=873bf027a72b preview=4b4a106c5654 sheet=11a21846cc67 bar=75d49299c4ea full=c3bb62afde54',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=75c6f01dab74 accounting=855d11756642 preview=4b4a106c5654 sheet=fc8d703c8b68 bar=75d49299c4ea full=030efbff3204',
   'standard/modal-eip681':
-    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=75c6f01dab74 accounting=873bf027a72b left2=f0506b8ca563 preview=4b4a106c5654 modal=d9753be56bfa bar=75d49299c4ea full=3fff8362d098',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=75c6f01dab74 accounting=855d11756642 left2=f0506b8ca563 preview=4b4a106c5654 modal=ac3d0dbad31f bar=75d49299c4ea full=a800cf485375',
   'recover/closed':
-    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=e2b3930f8e54 accounting=873bf027a72b preview=2cc76e1c1637 bar=26fa70486c48 full=4f075946bc58',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=e2b3930f8e54 accounting=855d11756642 preview=2cc76e1c1637 bar=26fa70486c48 full=005c92181311',
   'recover/advanced':
-    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=e2b3930f8e54 accounting=873bf027a72b preview=2cc76e1c1637 sheet=4c34b59039fe bar=26fa70486c48 full=7f3b6d41af14',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=e2b3930f8e54 accounting=855d11756642 preview=2cc76e1c1637 sheet=32f251bdd9ee bar=26fa70486c48 full=92f807633c41',
   'free/closed':
-    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=e768cc9f166b accounting=873bf027a72b preview=2cc76e1c1637 bar=26fa70486c48 full=126a62eb7c6d',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=e768cc9f166b accounting=855d11756642 preview=2cc76e1c1637 bar=26fa70486c48 full=12e9afec5463',
   'free/advanced':
-    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=e768cc9f166b accounting=873bf027a72b preview=2cc76e1c1637 sheet=4c34b59039fe bar=26fa70486c48 full=ef6cd8e55f1a',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=e768cc9f166b accounting=855d11756642 preview=2cc76e1c1637 sheet=32f251bdd9ee bar=26fa70486c48 full=97477bc62913',
   'invalid/invalid':
-    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=85dfdd0d3bf7 receiver=732522c0f3a2 accounting=873bf027a72b preview=91ce8d987557 bar=860c5085eb95 full=8fcc25480317',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=85dfdd0d3bf7 receiver=732522c0f3a2 accounting=855d11756642 preview=91ce8d987557 bar=860c5085eb95 full=ddd7c59f795f',
   'generating/generating':
-    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=fbbd9151f654 accounting=873bf027a72b preview=22857315cdab bar=fe831b19db10 full=50a420fa8d0f',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=fbbd9151f654 accounting=855d11756642 preview=22857315cdab bar=fe831b19db10 full=207065068624',
   'usage-fee/mismatch':
-    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=bf94698895a4 accounting=873bf027a72b preview=3fcd31b86f55 sheet=5af813c4fff5 bar=860c5085eb95 full=35d7430070b0',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=bf94698895a4 accounting=855d11756642 preview=3fcd31b86f55 sheet=d93c64303ec2 bar=860c5085eb95 full=0190bbc96017',
   'watch/watching':
-    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=92b2143c2ba1 accounting=873bf027a72b left2=f0506b8ca563 preview=21a611c68df2 modal=acde9c690e97 bar=7ec07a0f813b full=0e214dac5614',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=92b2143c2ba1 accounting=855d11756642 left2=f0506b8ca563 preview=21a611c68df2 modal=e04308972476 bar=7ec07a0f813b full=5a9885bf6c7a',
   'watch/received':
-    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=92b2143c2ba1 accounting=873bf027a72b left2=f0506b8ca563 preview=21a611c68df2 modal=542c60a88692 bar=7ec07a0f813b full=42462a30df2e',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=92b2143c2ba1 accounting=855d11756642 left2=f0506b8ca563 preview=21a611c68df2 modal=aa55b5c428bb bar=7ec07a0f813b full=cf8b4c155191',
   'watch/closed-with-pwa-hint':
-    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=92b2143c2ba1 accounting=873bf027a72b left2=f0506b8ca563 preview=21a611c68df2 bar=7ec07a0f813b full=6bbc878e5007',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=92b2143c2ba1 accounting=855d11756642 left2=f0506b8ca563 preview=21a611c68df2 bar=7ec07a0f813b full=b9103577c450',
 };
 
 type Snap = (name: string) => void;

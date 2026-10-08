@@ -263,6 +263,20 @@ export function switchTokenKeepingPrefs(s: QrSettings, token: TokenSymbol): QrSe
   return { ...s, token, chain, payMode, tokenPrefs };
 }
 
+/**
+ * いまの token のままチェーンを選ぶ (レジの「お店の設定」シート用・決済QR タブの selectChain と同じ規則)。
+ * gasless 非対応の組合せは standard に倒し (URL parser に拒否される QR を出さない)、他チェーンからの受取は
+ * そのチェーンで許される値に揃える。
+ */
+export function withChain(s: QrSettings, slug: ChainSlug): QrSettings {
+  return {
+    ...s,
+    chain: slug,
+    payMode: coercePayMode(s.token, slug, s.payMode),
+    crossChain: crossChainAllowed(slug, s.crossChain),
+  };
+}
+
 export function sanitizeTokenSymbol(
   value: unknown,
   fallback: TokenSymbol,
