@@ -30,20 +30,17 @@ async function openOfframp(page: Page): Promise<Locator> {
   return offramp;
 }
 
-async function hydratedStep2Toggle(page: Page): Promise<Locator> {
+// 受取先を保存済みにして開く (returning user)。会計画面の要約に短いアドレスが出たら hydrate 完了の印
+// (fill → inputValue の一致だけでは React の handler が動いた証拠にならない)。「設定」ボタンを返す。
+async function hydratedSettingsButton(page: Page): Promise<Locator> {
   await page.addInitScript(() => {
     window.localStorage.setItem('openpay:qr-settings:v2', JSON.stringify({
       receiver: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
     }));
   });
   await page.goto('/ja/create');
-  const toggle = page.getByRole('button', { name: /^受取先/ });
-  // SSR は open。保存済み receiver による closed への遷移は useQrSettings の hydrate と
-  // Step 2 の初期化が完了した印。fill → inputValue の一致だけでは React の handler が
-  // 動いた証拠にならず、後から初期化や金額欄の autoFocus が toggle/focus を上書きし得る。
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false', { timeout: 15000 });
-  await expect(toggle.getByText('0x52d4…cA81')).toBeVisible();
-  return toggle;
+  await expect(page.getByText('0x52d4…cA81').first()).toBeVisible({ timeout: 15000 });
+  return page.getByRole('button', { name: '設定', exact: true });
 }
 
 test.describe('create /create (QR generator + Tip widget tab)', () => {
@@ -336,121 +333,86 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     ).toBeVisible();
   });
 
-  // 3-step UI refactor (2026-05-23): Step 1/2/3 が縦に並んで heading badge を
-  // 持つこと、Step 3 (QR) が brand border で prominent に描画されること、
-  // 「おすすめ」 badge が gasless option に付くことを e2e で実 browser 描画確認。
-  test('ja: Step 1/2/3 の heading badge と Step 3 prominent border が visible', async ({
+  // 2026-10 磨き上げ P2: ①②③ の手順カードをやめ、会計のカード (先頭にお店の設定の要約・金額が主役) と
+  // 「お店の設定」シート (受取先・通貨とチェーン・支払い方法・控えとポスター) に分けた。
+  test('ja: 会計のカード (請求金額) と要約・未設定なら「受け取るウォレット」の欄', async ({
     page,
   }) => {
     await page.goto('/ja/create');
-    await expect(page.getByRole('heading', { name: '金額' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: '受取先' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'QR コード' })).toBeVisible();
-    // Step 3 は qr-prominent variant の brand border + ring を持つ
-    const step3 = page.locator('section[aria-labelledby="step-3-heading"]');
-    await expect(step3).toBeVisible();
-    const className = await step3.getAttribute('class');
-    expect(className).toMatch(/ring-brand\/25/);
-    expect(className).toMatch(/ring-1/);
+    await expect(page.getByRole('heading', { name: '請求金額 (JPYC)' })).toBeVisible();
+    await expect(page.getByText('店名未設定')).toBeVisible();
+    await expect(page.getByText('受取先が未設定')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '受け取るウォレット' })).toBeVisible();
+    await expect(receiverInput(page)).toBeVisible();
+    // 旧 ①②③ の見出しは出さない
+    await expect(page.locator('[aria-labelledby^="step-"]')).toHaveCount(0);
   });
 
-  test('ja: 高度な設定 を開くと gasless option に「おすすめ」 badge が出る', async ({
+  test('ja: 設定を開くと支払い方法の gasless option に「おすすめ」 badge が出る', async ({
     page,
   }) => {
     await page.goto('/ja/create');
-    // Step 2 が default open (受取先未設定) なので高度な設定 toggle が見える。
-    // accordion はデフォルト閉。click で開く。
-    const toggle = page.getByRole('button', { name: /高度な設定/ });
-    await expect(toggle).toBeVisible();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    // gasless option button に「おすすめ」 badge。タイトルは payModeGaslessTitle=「ガス代不要」
-    // (旧「ガスレス決済」から短縮)、badge は payModeGaslessBadge=「おすすめ」。
-    const gaslessBtn = page.getByRole('button', {
-      name: /ガス代不要.*おすすめ/,
-    });
-    await expect(gaslessBtn).toBeVisible();
+    await page.getByRole('button', { name: '設定', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: 'お店の設定' });
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByRole('heading', { name: '支払い方法' })).toBeVisible();
+    // タイトルは payModeGaslessTitle=「ガス代不要」、badge は payModeGaslessBadge=「おすすめ」。
+    await expect(sheet.getByRole('button', { name: /ガス代不要.*おすすめ/ })).toBeVisible();
   });
 
-  test('ja: Step 1 に token/chain chooser が同居 (JPYC は Polygon/Kaia、USDC は 6 chain (Arc flag OFF))', async ({
+  test('ja: 通貨とチェーンは設定の中 (JPYC は Polygon/Kaia、USDC は 6 chain (Arc flag OFF))', async ({
     page,
   }) => {
-    // 2026-05-23 JPYC Kaia 対応で JPYC も multi-chain 化。
-    // phase 4a で USDC は Ethereum L1 追加 (4 → 5 chain)。
+    // 2026-05-23 JPYC Kaia 対応で JPYC も multi-chain 化。phase 4a で USDC は Ethereum L1 追加。
     await page.goto('/ja/create');
-    const step1 = page.locator('section[aria-labelledby="step-1-heading"]');
-    await expect(step1).toBeVisible();
-    // token (JPYC/USDC) ボタンが Step 1 内、JPYC は multi-chain hint
-    await expect(step1.getByRole('button', { name: /^JPYC$/ })).toBeVisible();
-    await expect(step1.getByRole('button', { name: /^USDC/ })).toBeVisible();
-    // JPYC default → chain chooser に Polygon / Kaia 2 つ
-    await expect(step1.getByRole('button', { name: /^Polygon/ })).toBeVisible();
-    await expect(step1.getByRole('button', { name: /^Kai/ })).toBeVisible();
-    // USDC click → chain chooser が USDC 5 chain に切替
-    await step1.getByRole('button', { name: /^USDC/ }).click();
-    await expect(step1.getByRole('button', { name: /^Base/ })).toBeVisible();
-    await expect(
-      step1.getByRole('button', { name: /^Arbitrum/ }),
-    ).toBeVisible();
+    await page.getByRole('button', { name: '設定', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: 'お店の設定' });
+    await expect(sheet.getByRole('button', { name: /^JPYC$/ })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: /^USDC/ })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: /^Polygon/ })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: /^Kai/ })).toBeVisible();
+    // 店の会計画面では chain id (開発者向けの値) を出さない
+    await expect(sheet.getByText(/^id: \d+/)).toHaveCount(0);
+    await sheet.getByRole('button', { name: /^USDC/ }).click();
+    await expect(sheet.getByRole('button', { name: /^Base/ })).toBeVisible();
+    await expect(sheet.getByRole('button', { name: /^Arbitrum/ })).toBeVisible();
     // Ethereum L1 — testnet env では "Sepolia"
-    await expect(
-      step1.getByRole('button', { name: /^(Sepolia|Ethereum)/ }),
-    ).toBeVisible();
+    await expect(sheet.getByRole('button', { name: /^(Sepolia|Ethereum)/ })).toBeVisible();
     // Kaia は USDC では消える (USDC は Kaia 未対応)
-    await expect(step1.getByRole('button', { name: /^Kai/ })).toHaveCount(0);
+    await expect(sheet.getByRole('button', { name: /^Kai/ })).toHaveCount(0);
   });
 
   test('ja: JPYC + Kaia 選択 → URL に chain=kaia が含まれる', async ({
     page,
   }) => {
     await page.goto('/ja/create');
-    const step1 = page.locator('section[aria-labelledby="step-1-heading"]');
-    // JPYC は default、Kaia chain button を click
-    await step1.getByRole('button', { name: /^Kai/ }).click();
-    // 受取先 + amount を入力 (Step 2 で receiver、Step 1 で amount)
+    // JPYC は default、Kaia chain button を設定の中で click して閉じる
+    await page.getByRole('button', { name: '設定', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: 'お店の設定' });
+    await sheet.getByRole('button', { name: /^Kai/ }).click();
+    await sheet.getByRole('button', { name: '完了' }).click();
+    await expect(sheet).toHaveCount(0);
+    // 受取先 (未設定なので会計画面の欄) + amount を入力
     await fillStable(
       receiverInput(page),
       '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
     );
-    // 金額入力 (main amount)。quick-amount 編集欄の placeholder「例: 1000」と区別するため exact。
+    // 金額入力 (main amount)。よく使う金額の編集欄の placeholder「例: 1000」と区別するため exact。
     await page.getByPlaceholder('1000', { exact: true }).fill('500');
-    // QR URL は即時表示せず「QRコードを表示する」→ 全画面 QrPreviewModal 内に表示される
-    // (UX 簡潔化で QR/URL/印刷をモーダルへ集約)。desktop は右サイドバー、mobile は下部固定バーの
-    // ボタン (どちらも同じ label) を押してモーダルを開く。
+    // desktop は右の会計パネル、mobile は下部固定バーのボタン (どちらも同じ label)。
+    // getByRole は display:none の要素を拾わないので、画面幅に合った方 (表示中の 1 つ) が先頭になる。
     await page
       .getByRole('button', { name: 'QRコードを表示する' })
       .first()
       .click();
     // モーダル (role=dialog) 内の URL 表示 box に query が焼き込まれている。
-    const dialog = page.getByRole('dialog');
+    const dialog = page.getByRole('dialog', { name: '決済用 QR コード' });
     await expect(dialog).toBeVisible();
     const urlBox = dialog.locator('.font-mono.bg-slate-50').first();
     await expect(urlBox).toBeVisible();
     await expect(urlBox).toContainText('chain=kaia');
     await expect(urlBox).toContainText('token=jpyc');
     await expect(urlBox).toContainText('amount=500');
-  });
-
-  test('ja: Step 2 は collapsible — 受取先入力後に手動で折り畳むと summary が出る', async ({
-    page,
-  }) => {
-    await page.goto('/ja/create');
-    const step2Toggle = page.getByRole('button', { name: /^受取先/ });
-    // 初期 (LocalStorage 空) は default open
-    await expect(step2Toggle).toHaveAttribute('aria-expanded', 'true');
-    // 受取先を入力して toggle を click すると collapsed + summary 表示
-    await fillStable(
-      receiverInput(page),
-      '0x52d4901142e2B5680027da5EB47C86CB02a3cA81',
-    );
-    await step2Toggle.click();
-    await expect(step2Toggle).toHaveAttribute('aria-expanded', 'false');
-    // collapsed summary に short address (0x52d4…cA81) が出る
-    await expect(step2Toggle.getByText(/0x52d4…cA81/)).toBeVisible();
-    // 再 click で再展開
-    await step2Toggle.click();
-    await expect(step2Toggle).toHaveAttribute('aria-expanded', 'true');
   });
 
   test('ja: QR 生成時の Print ボタンは brand color (primary CTA) + Printer アイコン', async ({
@@ -502,102 +464,51 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await expect(footer.getByText(/ERC-4337/)).toBeVisible();
   });
 
-  // a11y: collapsible Step 2 のキーボード操作 + focus 維持。実 browser の native
-  // button semantics ([Enter] / [Space] 両対応) を保証 (jsdom では keyboard
-  // 経由の click 発火を要 manual dispatch、e2e でしか実 OS イベント無理)。
-  test('ja: Step 2 toggle は Enter / Space キーで開閉できる (a11y)', async ({
+  // a11y: 「設定」ボタンは native button なので Enter / Space で開き、Escape で閉じて focus が戻る (実 OS イベント)。
+  test('ja: 設定は Enter / Space で開き、Escape で閉じて focus が設定ボタンに戻る (a11y)', async ({
     page,
   }) => {
-    const toggle = await hydratedStep2Toggle(page);
-    // WebKit の click は button に focus を与えるとは限らない。keyboard の開始位置だけ
-    // 明示し、以降は再 focus せず native Enter/Space と focus 維持を検証する。
-    await toggle.focus();
-    await expect(toggle).toBeFocused();
-    // 両キーで open/close を検証。locator.press は毎回 focus し直すので使わない。
+    const settings = await hydratedSettingsButton(page);
     for (const key of ['Enter', 'Space']) {
+      await settings.focus();
+      await expect(settings).toBeFocused();
       await page.keyboard.press(key);
-      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      const sheet = page.getByRole('dialog', { name: 'お店の設定' });
+      await expect(sheet).toBeVisible();
       await expect(receiverInput(page)).toBeVisible();
-      await expect(toggle).toBeFocused();
-      await page.keyboard.press(key);
-      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-      await expect(receiverInput(page)).toHaveCount(0);
-      await expect(toggle).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(sheet).toHaveCount(0);
+      await expect(settings).toBeFocused();
     }
   });
 
-  // ChevronDown の rotation は computed CSS で実測。jsdom では style 計算が乏しいので e2e 必須。
-  test('ja: Step 2 toggle の ChevronDown は open/close で実 CSS transform が変わる', async ({
-    page,
-  }) => {
-    const toggle = await hydratedStep2Toggle(page);
-    // このテストは回転の終点を検証する。実行速度/WebKit の animation frame に依存する
-    // 中間 matrix を読まないよう、対象 chevron の transition だけ test-only で無効化。
-    // transform 自体と rotate-180 の本番 CSS は変更しない。
-    await page.addStyleTag({ content: `
-      button[aria-controls="step-2-body"] svg.transition-transform {
-        transition: none !important;
-      }
-    ` });
-    // closed → chevron は未 rotate (matrix identity or none)
-    const chevron = toggle.locator('svg.transition-transform');
-    await expect(chevron).toHaveCSS('transition-duration', '0s');
-    // closed 状態: rotate-180 class が剥がれた状態の matrix
-    await expect(chevron).toHaveCSS(
-      'transform',
-      /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/,
-    );
-    // open → 180° rotate → matrix(-1, 0, 0, -1, 0, 0) (cosθ=-1, sinθ≈0)
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await expect(chevron).toHaveCSS(
-      'transform',
-      /matrix\(\s*-1,\s*[\d.eE+-]+,\s*[\d.eE+-]+,\s*-1,\s*0,\s*0\s*\)/,
-    );
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(chevron).toHaveCSS(
-      'transform',
-      /^(none|matrix\(1, 0, 0, 1, 0, 0\))$/,
-    );
-  });
-
-  // localStorage の persistence: 入力 → reload → 受取先 default 閉が再現される
-  // ことを実 browser で検証 (useQrSettings + useEffect の hydrate 経路全体)。
-  test('ja: 高度な設定 summary は日本語文 + 旧 mono/手数料% トークンが見えない', async ({
+  test('ja: 会計画面の要約は「ガス代不要」・旧 mono/手数料% トークンが見えない', async ({
     page,
   }) => {
     await page.goto('/ja/create');
-    // Phase 1: default 状態 (gasless + customer) の closed summary は手数料% を
-    // 含まず「ガスレス決済 / ガス代：お客様負担」のみ。
-    const toggle = page.getByRole('button', { name: /高度な設定/ });
-    await expect(toggle).toBeVisible();
-    await expect(
-      toggle.getByText(/ガスレス決済 \/ ガス代：お客様負担/),
-    ).toBeVisible();
+    await expect(page.getByText('ガス代不要').first()).toBeVisible();
     // 旧 mono サマリ + Phase 1 で撤去した手数料% (1.0%/0.5%) は DOM 全体に存在しない
     const bodyText = await page.locator('body').innerText();
     expect(bodyText).not.toMatch(/1%\/gas:cust|0\.5%\/std|gas:merch/);
     expect(bodyText).not.toMatch(/手数料 1\.0%|手数料 0\.5%/);
   });
 
-  test('ja: 手数料徴収先アドレス section は Phase 1 で撤去 (高度な設定 開でも非表示)', async ({
+  test('ja: 手数料徴収先アドレス section は Phase 1 で撤去 (設定を開いても非表示)', async ({
     page,
   }) => {
     await page.goto('/ja/create');
     // Phase 1 (決済手数料 0%) で QrGenerator から fee 徴収先 section を撤去済。
-    // default でも、高度な設定を開いた後でも「OpenPay 利用手数料の徴収先」は出ない。
     await expect(
       page.getByText(/OpenPay 利用手数料の徴収先/),
     ).toHaveCount(0);
-    await page.getByRole('button', { name: /高度な設定/ }).click();
+    await page.getByRole('button', { name: '設定', exact: true }).click();
     // 開いた後も復活しない
     await expect(
       page.getByText(/OpenPay 利用手数料の徴収先/),
     ).toHaveCount(0);
   });
 
-  test('ja: 受取先入力 → reload → Step 2 が default 折り畳まれる (returning user)', async ({
+  test('ja: 受取先入力 → reload → 要約に短いアドレス・会計画面に欄は出さない (returning user)', async ({
     page,
   }) => {
     await page.goto('/ja/create');
@@ -612,9 +523,8 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     });
     // page reload
     await page.reload();
-    // reload 後 Step 2 は default closed + summary に short address
-    const toggle = page.getByRole('button', { name: /^受取先/ });
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(toggle.getByText(/0x52d4…cA81/)).toBeVisible();
+    // reload 後は会計画面の要約に short address、受取先の欄は設定の中だけ
+    await expect(page.getByText('0x52d4…cA81').first()).toBeVisible();
+    await expect(receiverInput(page)).toHaveCount(0);
   });
 });

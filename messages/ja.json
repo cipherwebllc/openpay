@@ -454,28 +454,12 @@
   "QrGenerator": {
     "installHintTitle": "この QR を毎日使うなら、ホーム画面に追加",
     "installHintIosStep3": "次回からはアイコンタップだけで開けます",
-    "steps": {
-      "amount": "金額",
-      "receiver": "受取先",
-      "receiverNotSet": "未設定",
-      "qr": "QR コード"
-    },
     "amountLabel": "請求金額 ({symbol})",
     "modeAmount": "金額指定",
     "modeStatic": "据え置き",
     "staticHint": "据え置き QR では金額を顧客が入力します。",
     "fiatApprox": "≈ ¥{yen}",
     "usdcRateHint": "1 USDC ≈ ¥{rate}（参考）",
-    "advancedSettings": "高度な設定",
-    "advancedSummary": {
-      "standard": "通常決済（ガス代は顧客負担）",
-      "gaslessFree": "ガスレス決済（OpenPay がガス負担）",
-      "gaslessCustomerGas": "ガスレス決済 / ガス代：お客様負担",
-      "gaslessMerchantGas": "ガスレス決済 / ガス代：店主負担",
-      "gaslessMerchantFixed": "ガスレス決済 / 手数料：店舗負担（お客様は表示額のみ）"
-    },
-    "tokenLabel": "通貨",
-    "chainLabel": "受取チェーン",
     "receiverLabel": "受取先ウォレットアドレス",
     "useConnectedWallet": "接続中のウォレットを使う",
     "receiverMatchesWallet": "接続ウォレット＝受取先",
@@ -489,7 +473,6 @@
     "storeNamePlaceholder": "例: OpenPay Coffee",
     "posterNoteLabel": "ポスターの補足文 (任意)",
     "posterNotePlaceholder": "例: お支払い後、完了画面をスタッフにお見せください",
-    "payModeLabel": "決済モード",
     "payModeGaslessTitle": "ガス代不要",
     "payModeGaslessBadge": "おすすめ",
     "payModeGaslessDesc": "お客様はガス代なしで支払えます。JPYC: OpenPay がガスを負担し、OpenPay 利用料 1%・最低 2 JPYC（店舗負担・お客様は表示額のみ）。USDC: お客様が USDC でガスを支払います（EIP-7702 対応ウォレット必須・未対応は通常決済）。",
@@ -503,7 +486,6 @@
     "gasMerchantTitle": "店主が gas 相当額を吸収",
     "gasCustomerDesc": "請求金額にネットワーク手数料見積を上乗せして顧客が支払う (gas spike 時も店主の取り分は安定)",
     "gasMerchantDesc": "店主がネットワーク手数料見積も吸収、顧客は請求金額のみ支払う (顧客 UX 重視、店主は gas 変動を被る)",
-    "quickAmountsLabel": "クイック金額を編集",
     "quickAmountPlaceholder": "例: 1000",
     "quickAmountAdd": "+ 金額を追加",
     "quickAmountRemove": "クイック金額を削除",
@@ -520,10 +502,8 @@
       "dup": "宛先が重複しています (主受取人と同じ、または split 内で重複)"
     },
     "qrTitle": "QRコード",
-    "qrDescription": "金額を確認してから「QRコードを表示する」を押すと、全画面でお客様に提示できます。",
     "showQr": "QRコードを表示する",
     "bottomAmountLabel": "請求金額",
-    "qrMobileBarHint": "下のバーの「QRコードを表示する」から提示できます。",
     "qrModalTitle": "決済用 QR コード",
     "qrModalClose": "閉じる",
     "qrModalConvertExpired": "為替レートの目安期限を過ぎました。この QR を閉じて、最新レートで作り直してください。",
@@ -548,12 +528,7 @@
     "posterStepDone": "お支払い完了",
     "qrPlaceholderNoAddress": "受取先アドレスを入力 (Step 2)",
     "qrPlaceholderNoAmount": "金額を入力",
-    "qrPlaceholderGenerating": "QR を生成中…",
     "qrEmptyState": {
-      "title": "QR コードを作成する準備ができていません",
-      "needLabel": "必要な項目:",
-      "needAddress": "受取先ウォレットアドレス",
-      "needAmount": "請求金額",
       "trySample": "サンプル金額 {amount} で試す"
     },
     "crossChainHeading": "別チェーンからの受取 (USDC のみ)",
@@ -577,7 +552,7 @@
     "fxWarnTitle": "レート急変を検知しました。最新レートをご確認ください",
     "fxWarnDetail": "前回レート: {lkg} 円 / 今回: {current} 円",
     "fxWarnAck": "確認しました",
-    "accountingFieldsTitle": "会計用の任意項目 (売上明細)",
+    "accountingFieldsTitle": "明細を付ける（任意）",
     "accountingFieldsHint": "入力すると履歴と会計 CSV に残ります。未入力でも QR は作れます。",
     "productNameLabel": "商品名 / 用途名",
     "productNamePlaceholder": "例: コーヒー / イベント参加費",
@@ -609,6 +584,33 @@
         "receiver": "この受取先では使えません。",
         "min_amount": "1 JPYC 未満の会計では使えません。"
       }
+    },
+    "shopSettings": {
+      "title": "お店の設定",
+      "open": "設定",
+      "done": "完了",
+      "sections": {
+        "receive": "受け取り",
+        "currency": "通貨とチェーン",
+        "payment": "支払い方法",
+        "receipt": "控えとポスター"
+      }
+    },
+    "shopSummary": {
+      "noStoreName": "店名未設定",
+      "noReceiver": "受取先が未設定",
+      "payStandard": "通常決済"
+    },
+    "receiverInline": {
+      "title": "受け取るウォレット",
+      "hint": "お支払いはこのアドレスに届きます。"
+    },
+    "quickAmountsTitle": "よく使う金額",
+    "quickAmountsEdit": "編集",
+    "quickAmountsDone": "完了",
+    "notReady": {
+      "amount": "金額を入れてください",
+      "receiver": "受取先を設定してください"
     }
   },
   "RecoverFee": {

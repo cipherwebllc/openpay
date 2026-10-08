@@ -2,10 +2,9 @@
 
 import type { Dispatch, SetStateAction } from 'react';
 import { useTranslations } from 'next-intl';
-import { ChevronDown, Fuel, Store, Zap } from 'lucide-react';
+import { Fuel, Store, Zap } from 'lucide-react';
 import { Field } from '../Field';
 import { SplitEditor } from './SplitEditor';
-import { SettingsSummary } from './QrSummaries';
 import type { QrSettings } from '@/hooks/useQrSettings';
 import { crossChainAllowed } from '@/lib/url/shared';
 import {
@@ -21,17 +20,13 @@ import { isStoreDeviceChain, storeDeviceChainIds, storeDeviceChainNames } from '
 import { storePaysRequested } from '@/lib/storePaysMode';
 import type { GasMode, PayMode } from '@/lib/fee';
 
-// 高度な設定 (決済モード / ガス負担者 / 売上の自動分配 / 他チェーンからの受取)。
-// 開閉状態と gas / split の導出 (URL に焼く値) は QrGenerator が持ち、ここは描画と
-// 設定の編集だけを行う。
+// 支払い方法 (決済モード / ガス負担者 / 売上の自動分配 / 他チェーンからの受取)。「お店の設定」シートの 1 区切り
+// (2026-10 磨き上げ P2 で「高度な設定」の折りたたみから移設・中身と文言は不変)。gas / split の導出 (URL に焼く値) は
+// QrGenerator が持ち、ここは描画と設定の編集だけを行う。
 export function QrSettingsSection({
   settings,
   setSettings,
   deployment,
-  accordionOpen,
-  setAccordionOpen,
-  effectiveGasMode,
-  payMode,
   hideGasMode,
   isJpycRecover,
   isStandard,
@@ -41,10 +36,6 @@ export function QrSettingsSection({
   settings: QrSettings;
   setSettings: Dispatch<SetStateAction<QrSettings>>;
   deployment: TokenDeployment;
-  accordionOpen: boolean;
-  setAccordionOpen: Dispatch<SetStateAction<boolean>>;
-  effectiveGasMode: GasMode;
-  payMode: PayMode;
   hideGasMode: boolean;
   isJpycRecover: boolean;
   isStandard: boolean;
@@ -80,24 +71,11 @@ export function QrSettingsSection({
     .join(' / ');
 
   return (
-    <SettingsAccordion
-      open={accordionOpen}
-      onToggle={() => setAccordionOpen((o) => !o)}
-      summaryLabel={t('advancedSettings')}
-      summary={
-        <SettingsSummary
-          gasMode={effectiveGasMode}
-          payMode={payMode}
-          showGasMode={!hideGasMode}
-          jpycRecover={isJpycRecover}
-          storePays={storeSelected}
-        />
-      }
-    >
-      <Field label={t('payModeLabel')}>
-        <div
-          className={`grid grid-cols-1 gap-2 ${env.enableStoreGasWallet ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}
-        >
+    <>
+      {/* 区切りの見出し「支払い方法」が名前になるので、欄の見出し (決済モード) は出さない。
+          シートの幅 (最大 448px) では横に並べると窮屈なので、いつも縦に 1 列。 */}
+      <div>
+        <div className="grid grid-cols-1 gap-2">
           {(['gasless', 'standard'] as PayMode[]).map((pm) => {
             // 3 つ目 (お店がガス代を肩代わり) を選んでいる間は、1・2 枚目は選ばれていない。
             const active = settings.payMode === pm && !storeSelected;
@@ -188,7 +166,7 @@ export function QrSettingsSection({
             </button>
           )}
         </div>
-      </Field>
+      </div>
       {storeSelected && (
         <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-3 text-xs text-sky-900">
           {t('storeDevice.note', { chain: storeChainName, symbol: storeSymbol })}
@@ -282,52 +260,7 @@ export function QrSettingsSection({
       )}
 
       {/* fee=0 のため徴収先 section は撤去 (Phase 1 alpha)。 */}
-    </SettingsAccordion>
-  );
-}
-
-function SettingsAccordion({
-  open,
-  onToggle,
-  summary,
-  summaryLabel,
-  children,
-}: {
-  open: boolean;
-  onToggle: () => void;
-  summary: React.ReactNode;
-  summaryLabel: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-xl bg-white shadow-card ring-1 ring-slate-200/70">
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-      >
-        <div className="flex flex-1 flex-col">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {summaryLabel}
-          </span>
-          {!open && (
-            <span className="mt-0.5 text-xs text-slate-600">{summary}</span>
-          )}
-        </div>
-        <ChevronDown
-          className={`h-4 w-4 flex-none text-slate-500 transition-transform duration-200 ${
-            open ? 'rotate-180' : ''
-          }`}
-          aria-hidden
-        />
-      </button>
-      {open && (
-        <div className="space-y-4 border-t border-slate-200 px-4 py-4">
-          {children}
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 

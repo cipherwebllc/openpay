@@ -840,8 +840,8 @@ describe('Legal pages', () => {
     it('QrGenerator に payMode radio 用 key が全て存在 (ja/en、非空文字列)', async () => {
       const ja = (await import('@/messages/ja.json')).default;
       const en = (await import('@/messages/en.json')).default;
+      // payModeLabel (欄の見出し「決済モード」) は 2026-10 磨き上げ P2 で撤去 (区切りの見出し「支払い方法」が名前になる)。
       const radioKeys = [
-        'payModeLabel',
         'payModeGaslessTitle',
         'payModeGaslessDesc',
         'payModeStandardTitle',

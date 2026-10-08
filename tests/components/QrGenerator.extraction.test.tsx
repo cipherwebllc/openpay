@@ -125,33 +125,44 @@ function receiverInput() {
   return screen.getByPlaceholderText(msgs().AddressInput.placeholder);
 }
 
-function step2Toggle() {
-  return container.querySelector<HTMLButtonElement>(
-    'button[aria-controls="step-2-body"]',
-  )!;
+// 2026-10 磨き上げ P2: 受取先・通貨とチェーン・支払い方法・控えとポスターは「お店の設定」シート。
+// 旧 ② 受取先の開閉と「高度な設定」は、どちらもシートを開く「設定」ボタンになった。
+function settingsButton() {
+  return screen.getByRole('button', {
+    name: new RegExp(`^${labels().shopSettings.open}$`),
+  });
+}
+const step2Toggle = settingsButton;
+const advancedToggle = settingsButton;
+
+function closeSettings() {
+  const sheet = screen.queryByRole('dialog', { name: labels().shopSettings.title });
+  if (sheet) {
+    fireEvent.click(within(sheet).getByRole('button', { name: labels().shopSettings.done }));
+  }
 }
 
-function advancedToggle() {
-  return screen.getByRole('button', {
-    name: new RegExp(labels().advancedSettings),
-  });
+function qrDialog() {
+  return screen.getByRole('dialog', { name: labels().qrModalTitle });
 }
 
 function openQr() {
+  // QR の画面は設定シートを閉じてから開く (2 つの dialog を重ねない)。
+  closeSettings();
   fireEvent.click(screen.getAllByRole('button', { name: labels().showQr })[0]);
-  return screen.getByRole('dialog');
+  return qrDialog();
 }
 
 function closeQr() {
   fireEvent.click(
-    within(screen.getByRole('dialog')).getByRole('button', {
+    within(qrDialog()).getByRole('button', {
       name: labels().qrModalClose,
     }),
   );
 }
 
 function displayedUrl() {
-  return within(screen.getByRole('dialog')).getByText(
+  return within(qrDialog()).getByText(
     /^https:\/\/test\.local\/pay\?/,
   ).textContent;
 }
@@ -204,7 +215,21 @@ function sections(): string {
   flushFrames();
   const [offline, grid, ...outside] = Array.from(container.children);
   const [left, right, ...rest] = Array.from(grid.children);
-  const leftNames = ['amount', 'receiver', 'accounting', 'settings', 'pwa'];
+  // 左列の節は中身で名前を付ける (受取先の欄・ガス用ウォレット等は出たり出なかったりするので位置では決めない)。
+  const leftName = (el: Element, i: number) =>
+    el.getAttribute('aria-labelledby') === 'qr-amount-heading'
+      ? 'amount'
+      : el.getAttribute('aria-labelledby') === 'qr-receiver-inline-heading'
+        ? 'receiver'
+        : el.tagName === 'DETAILS'
+          ? 'accounting'
+          : `left${i}`;
+  const restName = (el: Element) =>
+    el.getAttribute('role') === 'dialog'
+      ? 'modal'
+      : el.querySelector('[aria-labelledby="shop-settings-title"]')
+        ? 'sheet'
+        : 'bar';
   const deep = (el: Element) => h(withoutSvgInternals(el).outerHTML);
   const shallow = (el: Element) => h((el.cloneNode(false) as Element).outerHTML);
   return [
@@ -212,14 +237,9 @@ function sections(): string {
     `offline=${deep(offline)}`,
     `grid=${shallow(grid)}`,
     `left=${shallow(left)}`,
-    ...Array.from(left.children).map(
-      (el, i) => `${leftNames[i] ?? `left${i}`}=${deep(el)}`,
-    ),
+    ...Array.from(left.children).map((el, i) => `${leftName(el, i)}=${deep(el)}`),
     `preview=${deep(right)}`,
-    ...rest.map(
-      (el) =>
-        `${el.getAttribute('role') === 'dialog' ? 'modal' : 'bar'}=${deep(el)}`,
-    ),
+    ...rest.map((el) => `${restName(el)}=${deep(el)}`),
     `full=${h(withoutSvgInternals(container).innerHTML)}`,
   ].join(' ');
 }
@@ -289,6 +309,7 @@ describe('R11b: generated payment URL fixtures', () => {
     openQr();
     expect(displayedUrl()).toBe(BASE_URL + '&token=usdc&chain=arbitrum&amount=5&crossChain=false');
     closeQr();
+    fireEvent.click(advancedToggle());
     fireEvent.click(screen.getByRole('checkbox'));
     openQr();
     expect(displayedUrl()).toBe(BASE_URL + '&token=usdc&chain=arbitrum&amount=5');
@@ -334,81 +355,83 @@ describe('R11b: generated payment URL fixtures', () => {
 // インボイス登録番号の欄 (店舗名の下) を追加: Step 2 を開いている節の receiver/full だけ更新。
 // 2026-10 磨き上げ P1: QR の提示画面をスマホで全画面のシートに (余白と QR の縮み方の class だけ)。modal/full だけ更新。
 // 同 P1: USDC の金額の下に参考レート (市場レートの帯の代わり)。USDC で金額欄を出す節の amount/full だけ更新。
-// 同 P1 (Codex 指摘): QR の縮小をスマホ (max-sm:) に閉じる・参考レートの文字色をコントラスト基準に。modal/amount/full だけ更新。
+// 2026-10 磨き上げ P2: 画面の作りを意図して変えた (①②③ と「高度な設定」→ 会計のカード + お店の設定シート・PC の会計パネル・
+// 常に出す下部バー)。節の名前も中身で付け直したので、全シナリオを記録し直した (決済 URL のバイト一致は上の fixture が別に固定)。
 // 2026-10 磨き上げ P1: QR の提示画面をスマホで全画面のシートに (余白と QR の縮み方の class だけ)。modal/full だけ更新。
 // 同 P1: USDC の金額の下に参考レート (市場レートの帯の代わり)。USDC で金額欄を出す節の amount/full だけ更新。
-// 同 P1 (Codex 指摘): QR の縮小をスマホ (max-sm:) に閉じる・参考レートの文字色をコントラスト基準に。modal/amount/full だけ更新。
+// 2026-10 磨き上げ P2: 画面の作りを意図して変えた (①②③ と「高度な設定」→ 会計のカード + お店の設定シート・PC の会計パネル・
+// 常に出す下部バー)。節の名前も中身で付け直したので、全シナリオを記録し直した (決済 URL のバイト一致は上の fixture が別に固定)。
 const DOM_BASELINE: Record<string, string> = {
   'fresh-ja/empty':
-    'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=58f78ef36af2 receiver=87a5a88c3550 accounting=1ae21b00fd1a settings=52f60fef0496 preview=df6fdaa1b2ab full=05fd9a0c7ac7',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=d1c9723a2ffa receiver=4117653b704e accounting=873bf027a72b preview=91ce8d987557 bar=860c5085eb95 full=a36ee24f2d06',
   'fresh-ja/receiver-typed':
-    'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=58f78ef36af2 receiver=e6e6f5d55a7a accounting=1ae21b00fd1a settings=52f60fef0496 preview=ef5f97440853 full=31c6dcb958cb',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=5af953ed8fba receiver=a562a4a4d865 accounting=873bf027a72b preview=3fcd31b86f55 bar=860c5085eb95 full=06b40286e535',
   'fresh-ja/amount':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=f11c9c908a3d receiver=e6e6f5d55a7a accounting=1ae21b00fd1a settings=52f60fef0496 preview=a2659703e1e8 bar=59ab00522b30 full=d6905cea5187',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=20da2f39c5df receiver=a562a4a4d865 accounting=873bf027a72b preview=99b871383cb3 bar=6bdf93b197f0 full=428bf7b740a1',
   'fresh-ja/advanced':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=f11c9c908a3d receiver=e6e6f5d55a7a accounting=1ae21b00fd1a settings=248c7149dc79 preview=a2659703e1e8 bar=59ab00522b30 full=c772760f83c7',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=20da2f39c5df receiver=a562a4a4d865 accounting=873bf027a72b preview=99b871383cb3 sheet=e71fef2e7ec9 bar=6bdf93b197f0 full=d8e5171e99d9',
   'fresh-ja/static':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=6535b1cbe2da receiver=e6e6f5d55a7a accounting=1ae21b00fd1a settings=248c7149dc79 preview=a2659703e1e8 bar=de07dcf3f38f full=dc49117a4c94',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=ade254c61635 receiver=a562a4a4d865 accounting=873bf027a72b preview=a3758a9929a3 bar=ed7e724d0a8d full=01473de33d07',
   'fresh-ja/modal':
-    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=6535b1cbe2da receiver=e6e6f5d55a7a accounting=1ae21b00fd1a settings=248c7149dc79 pwa=f0506b8ca563 preview=a2659703e1e8 modal=dcf3ede433ea bar=de07dcf3f38f full=53f89e383a4e',
+    'shape=2/4/4/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=ade254c61635 receiver=a562a4a4d865 accounting=873bf027a72b left3=f0506b8ca563 preview=a3758a9929a3 modal=dcf3ede433ea bar=ed7e724d0a8d full=26c638ae8ec3',
   'fresh-en/empty':
-    'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=63f2f3856490 receiver=e9c7c733cc36 accounting=74ed35d7215a settings=16c64a10b7aa preview=fe779a049a06 full=3124294f4a36',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=dd0dd56af8a3 receiver=066dee05ee8c accounting=ca64158ac253 preview=4f7c6f85b84b bar=eb0c167d1b09 full=aa7945d98973',
   'fresh-en/receiver-typed':
-    'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=63f2f3856490 receiver=9251ce4d06f9 accounting=74ed35d7215a settings=16c64a10b7aa preview=0866874a49a0 full=f8cde1d3c786',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=23675b205167 receiver=57f61194a9dc accounting=ca64158ac253 preview=ed60ab2dd260 bar=eb0c167d1b09 full=ce870712f06e',
   'fresh-en/amount':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=225a60671bb5 receiver=9251ce4d06f9 accounting=74ed35d7215a settings=16c64a10b7aa preview=af1a40c48a66 bar=8fd7054ec7dc full=479757b640d9',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=3560d8351db9 receiver=57f61194a9dc accounting=ca64158ac253 preview=b419161ef24a bar=684cc53ba128 full=a7064fedb01d',
   'fresh-en/advanced':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=225a60671bb5 receiver=9251ce4d06f9 accounting=74ed35d7215a settings=8d52fa6c9d78 preview=af1a40c48a66 bar=8fd7054ec7dc full=7c51aac99989',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=3560d8351db9 receiver=57f61194a9dc accounting=ca64158ac253 preview=b419161ef24a sheet=81ebc0c42ff3 bar=684cc53ba128 full=eb8014acfad5',
   'fresh-en/static':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=0967e76f4762 receiver=9251ce4d06f9 accounting=74ed35d7215a settings=8d52fa6c9d78 preview=af1a40c48a66 bar=7af51957c9d0 full=68e742ecdca6',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=2e505f628cb9 receiver=57f61194a9dc accounting=ca64158ac253 preview=6e9095c6e7c5 bar=e93e13762e55 full=ab05d6e4ecca',
   'fresh-en/modal':
-    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=0967e76f4762 receiver=9251ce4d06f9 accounting=74ed35d7215a settings=8d52fa6c9d78 pwa=3e04971c2b53 preview=af1a40c48a66 modal=6677ebf10f18 bar=7af51957c9d0 full=12e9724ae580',
+    'shape=2/4/4/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=2e505f628cb9 receiver=57f61194a9dc accounting=ca64158ac253 left3=3e04971c2b53 preview=6e9095c6e7c5 modal=6677ebf10f18 bar=e93e13762e55 full=e0841dc1cba1',
   'seeded/collapsed':
-    'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=58f78ef36af2 receiver=a40a7c4b7637 accounting=1ae21b00fd1a settings=52f60fef0496 preview=ef5f97440853 full=16d1e09dc74d',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=722d72f23ea2 accounting=873bf027a72b preview=3fcd31b86f55 bar=860c5085eb95 full=6e70c1afc7e7',
   'seeded/step2-open':
-    'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=58f78ef36af2 receiver=8911714bd2e7 accounting=1ae21b00fd1a settings=52f60fef0496 preview=ef5f97440853 full=cf9444144655',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=722d72f23ea2 accounting=873bf027a72b preview=3fcd31b86f55 sheet=827d06cf8749 bar=860c5085eb95 full=0da291c2d7fb',
   'seeded/advanced-split':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=0c61aca9e357 receiver=8911714bd2e7 accounting=1ae21b00fd1a settings=a0ad50b9662c preview=a2659703e1e8 bar=59ab00522b30 full=a13b1075f528',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=0de6f9e75009 accounting=873bf027a72b preview=99b871383cb3 sheet=827d06cf8749 bar=6bdf93b197f0 full=87ac5430bb30',
   'seeded/quick-editor':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=8b58a06e7024 receiver=8911714bd2e7 accounting=1ae21b00fd1a settings=a0ad50b9662c preview=a2659703e1e8 bar=59ab00522b30 full=9936b9a881f4',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=421b370c8c56 accounting=873bf027a72b preview=99b871383cb3 bar=6bdf93b197f0 full=d2d28b6f067a',
   'seeded/accounting':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=8b58a06e7024 receiver=8911714bd2e7 accounting=c1efa3a4b75e settings=a0ad50b9662c preview=a2659703e1e8 bar=59ab00522b30 full=51204f316149',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=421b370c8c56 accounting=cb35fe61e7d1 preview=99b871383cb3 bar=6bdf93b197f0 full=ad5e90825a4b',
   'usdc/amount-fiat':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=3979539cf875 receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=52f60fef0496 preview=a2659703e1e8 bar=f03f88810f5b full=0ef4094be87d',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=9e9cc9d227da accounting=873bf027a72b preview=934ceead99e8 bar=7309dd8672ad full=10e8adb213d0',
   'usdc/advanced-crosschain':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=3979539cf875 receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=481ca9776306 preview=a2659703e1e8 bar=f03f88810f5b full=f299fb430d39',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=9e9cc9d227da accounting=873bf027a72b preview=934ceead99e8 sheet=e09826367dba bar=7309dd8672ad full=65cf4978cb67',
   'usdc/fx-applied':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=8246c076c52b receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=248c7149dc79 preview=a2659703e1e8 bar=6f06b167fcfe full=6ea0cb5a67de',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=498ec48b2795 accounting=873bf027a72b preview=1f554979d6b2 sheet=e71fef2e7ec9 bar=9297eecd7c80 full=06217522b040',
   'usdc/fx-modal':
-    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=8246c076c52b receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=248c7149dc79 pwa=f0506b8ca563 preview=a2659703e1e8 modal=b6c4ecdbdba7 bar=6f06b167fcfe full=e4e0489ce31a',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=498ec48b2795 accounting=873bf027a72b left2=f0506b8ca563 preview=1f554979d6b2 modal=735e7ddaaa84 bar=9297eecd7c80 full=1164f46ce321',
   'usdc/fx-expired':
-    'shape=2/3/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=905cb32ce2af receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=248c7149dc79 pwa=f0506b8ca563 preview=a2659703e1e8 bar=6f06b167fcfe full=b0d30d24b2f9',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=0829a160689e accounting=873bf027a72b left2=f0506b8ca563 preview=1f554979d6b2 bar=9297eecd7c80 full=44edafbb0616',
   'standard/closed':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=bd19822654a6 receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=e521d1b1f9d3 preview=a2659703e1e8 bar=f316e8a8778c full=e8eed8b72e4e',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=ef082243e081 accounting=873bf027a72b preview=4b4a106c5654 bar=75d49299c4ea full=3d29690803a4',
   'standard/advanced':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=bd19822654a6 receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=587b06de2156 preview=a2659703e1e8 bar=f316e8a8778c full=02f78741ac45',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=ef082243e081 accounting=873bf027a72b preview=4b4a106c5654 sheet=11a21846cc67 bar=75d49299c4ea full=7456dc1dfdc8',
   'standard/modal-eip681':
-    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=bd19822654a6 receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=587b06de2156 pwa=f0506b8ca563 preview=a2659703e1e8 modal=d9753be56bfa bar=f316e8a8778c full=6ae951ca59e3',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=ef082243e081 accounting=873bf027a72b left2=f0506b8ca563 preview=4b4a106c5654 modal=d9753be56bfa bar=75d49299c4ea full=bbf339d0394f',
   'recover/closed':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=6e41c8856081 receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=58804c1d9ee2 preview=a2659703e1e8 bar=70c6ee9f9cf5 full=639a69d0c511',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=453afd895a05 accounting=873bf027a72b preview=2cc76e1c1637 bar=26fa70486c48 full=d0c19f7b29ff',
   'recover/advanced':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=6e41c8856081 receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=852c863652e2 preview=a2659703e1e8 bar=70c6ee9f9cf5 full=673215778dbf',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=453afd895a05 accounting=873bf027a72b preview=2cc76e1c1637 sheet=4c34b59039fe bar=26fa70486c48 full=cb15e17e0625',
   'free/closed':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=2957e6520b93 receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=a181c16167ab preview=a2659703e1e8 bar=70c6ee9f9cf5 full=6948bd29d66e',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=a80f11fc65b2 accounting=873bf027a72b preview=2cc76e1c1637 bar=26fa70486c48 full=75148ba5733b',
   'free/advanced':
-    'shape=2/3/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=2957e6520b93 receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=852c863652e2 preview=a2659703e1e8 bar=70c6ee9f9cf5 full=048079129c84',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=a80f11fc65b2 accounting=873bf027a72b preview=2cc76e1c1637 sheet=4c34b59039fe bar=26fa70486c48 full=4c598bc21b41',
   'invalid/invalid':
-    'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=58f78ef36af2 receiver=5f5e974a0ce1 accounting=1ae21b00fd1a settings=52f60fef0496 preview=df6fdaa1b2ab full=d4293d378feb',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=d1c9723a2ffa receiver=732522c0f3a2 accounting=873bf027a72b preview=91ce8d987557 bar=860c5085eb95 full=bf30d9de7d69',
   'generating/generating':
-    'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=f11c9c908a3d receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=52f60fef0496 preview=8c5d0f2ab6ef full=059e91c5a89c',
+    'shape=2/3/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=20da2f39c5df accounting=873bf027a72b preview=22857315cdab bar=fe831b19db10 full=0ae5d0b07b0c',
   'usage-fee/mismatch':
-    'shape=2/2/4/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=58f78ef36af2 receiver=a32d0f67fadf accounting=1ae21b00fd1a settings=52f60fef0496 preview=ef5f97440853 full=02ec7d92257e',
+    'shape=2/4/2/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=5af953ed8fba accounting=873bf027a72b preview=3fcd31b86f55 sheet=5af813c4fff5 bar=860c5085eb95 full=17e5f0d86108',
   'watch/watching':
-    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=e74441b2f95e receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=52f60fef0496 pwa=f0506b8ca563 preview=a2659703e1e8 modal=acde9c690e97 bar=5f5f11543bcb full=e7231577a537',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=64a5f599647e accounting=873bf027a72b left2=f0506b8ca563 preview=21a611c68df2 modal=acde9c690e97 bar=7ec07a0f813b full=27217af3d965',
   'watch/received':
-    'shape=2/4/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=e74441b2f95e receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=52f60fef0496 pwa=f0506b8ca563 preview=a2659703e1e8 modal=542c60a88692 bar=5f5f11543bcb full=cc88b7671aa7',
+    'shape=2/4/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=64a5f599647e accounting=873bf027a72b left2=f0506b8ca563 preview=21a611c68df2 modal=542c60a88692 bar=7ec07a0f813b full=919e0b22f985',
   'watch/closed-with-pwa-hint':
-    'shape=2/3/5/0 offline=f77ebeefe1a1 grid=8c2858128be8 left=2b7c226170e0 amount=e74441b2f95e receiver=f06e1dbf118c accounting=1ae21b00fd1a settings=52f60fef0496 pwa=f0506b8ca563 preview=a2659703e1e8 bar=5f5f11543bcb full=5e5d9dc6cb7b',
+    'shape=2/3/3/0 offline=f77ebeefe1a1 grid=bf14446808c6 left=f91415023c7f amount=64a5f599647e accounting=873bf027a72b left2=f0506b8ca563 preview=21a611c68df2 bar=7ec07a0f813b full=6f0a57546aea',
 };
 
 type Snap = (name: string) => void;
@@ -426,6 +449,7 @@ async function freshFlow(snap: Snap) {
   fireEvent.click(advancedToggle());
   await settle();
   snap('advanced');
+  closeSettings();
   fireEvent.click(screen.getByRole('button', { name: labels().modeStatic }));
   await settle();
   snap('static');
@@ -451,7 +475,8 @@ const SCENARIOS: Record<string, { locale: Locale; run: (snap: Snap) => Promise<v
       fireEvent.click(advancedToggle());
       await settle();
       snap('advanced-split');
-      detailsOf(labels().quickAmountsLabel).open = true;
+      closeSettings();
+      fireEvent.click(screen.getByRole('button', { name: labels().quickAmountsEdit }));
       await settle();
       snap('quick-editor');
       detailsOf(labels().accountingFieldsTitle).open = true;
@@ -616,29 +641,32 @@ describe('R11b: no remount when sections become child components', () => {
     await settle();
     const amountEl = amountInput();
     expect(document.activeElement).toBe(amountEl);
-    fireEvent.click(advancedToggle());
-    fireEvent.click(step2Toggle());
-    await settle();
-    const quickDetails = detailsOf(labels().quickAmountsLabel);
+    // よく使う金額の編集欄 (2026-10 P2: 折りたたみから「編集」の切替に) と、明細 (details) を開く。
+    fireEvent.click(screen.getByRole('button', { name: labels().quickAmountsEdit }));
     const accountingDetails = detailsOf(labels().accountingFieldsTitle);
-    quickDetails.open = true;
     accountingDetails.open = true;
-    const requery = () => ({
+    // お店の設定シートを開く (開くとシートに focus が移るので、店員の入力位置 = 金額欄へ戻して以降の再描画を見る)。
+    fireEvent.click(settingsButton());
+    await settle();
+    amountEl.focus();
+    const pageNodes = () => ({
       amountEl: amountInput(),
-      quickDetails: detailsOf(labels().quickAmountsLabel),
+      quickEdit: screen.getByRole('button', { name: labels().quickAmountsDone, expanded: true }),
       accountingDetails: detailsOf(labels().accountingFieldsTitle),
-      quickInput: within(detailsOf(labels().quickAmountsLabel)).getAllByRole('textbox')[0],
-      storeName: screen.getByPlaceholderText(labels().storeNamePlaceholder),
-      posterNote: screen.getByPlaceholderText(labels().posterNotePlaceholder),
-      receiver: receiverInput(),
+      quickInput: screen.getAllByPlaceholderText(labels().quickAmountPlaceholder)[0],
       receipt: screen.getByPlaceholderText(labels().receiptNoPlaceholder),
-      crossChain: screen.getByRole('checkbox'),
-      splitAddress: screen.getByDisplayValue(SPLIT),
-      advanced: advancedToggle(),
-      step2: step2Toggle(),
+      settings: settingsButton(),
       modeAmount: screen.getByRole('button', { name: labels().modeAmount }),
       modeStatic: screen.getByRole('button', { name: labels().modeStatic }),
     });
+    const sheetNodes = () => ({
+      storeName: screen.getByPlaceholderText(labels().storeNamePlaceholder),
+      posterNote: screen.getByPlaceholderText(labels().posterNotePlaceholder),
+      receiver: receiverInput(),
+      crossChain: screen.getByRole('checkbox'),
+      splitAddress: screen.getByDisplayValue(SPLIT),
+    });
+    const requery = () => ({ ...pageNodes(), ...sheetNodes() });
     const nodes = requery();
     const rerenders: [string, () => void][] = [
       ['amount', () => amount('12')],
@@ -659,31 +687,32 @@ describe('R11b: no remount when sections become child components', () => {
       for (const [key, node] of Object.entries(nodes)) {
         expect({ what, key, connected: node.isConnected }).toEqual({ what, key, connected: true });
       }
-      expect({ what, quick: quickDetails.open, accounting: accountingDetails.open }).toEqual({
+      expect({
         what,
-        quick: true,
-        accounting: true,
-      });
+        quick: nodes.quickEdit.getAttribute('aria-expanded'),
+        accounting: accountingDetails.open,
+      }).toEqual({ what, quick: 'true', accounting: true });
       expect({ what, focused: document.activeElement === amountEl }).toEqual({ what, focused: true });
     }
-    // モーダルは dialog に focus を移す (既存挙動)。閉じた後も節の node と開閉状態は同じ。
+    const page = pageNodes();
+    // モーダルは dialog に focus を移す (既存挙動)。QR の画面は設定シートを閉じてから開く
+    // (閉じたシートの中身は unmount)。閉じた後も会計画面の節の node と開閉状態は同じ。
     openQr();
     await settle();
-    expect(document.activeElement).toBe(screen.getByRole('dialog'));
+    expect(document.activeElement).toBe(qrDialog());
     closeQr();
     await settle();
-    expect(requery()).toEqual(nodes);
-    expect([quickDetails.open, accountingDetails.open]).toEqual([true, true]);
+    expect(pageNodes()).toEqual(page);
+    expect([nodes.quickEdit.getAttribute('aria-expanded'), accountingDetails.open]).toEqual(['true', true]);
     // B-R11d S1: 据え置き中も金額欄とエディタを保持。ユーザーが金額指定へ
-    // 戻した時だけ同じ入力 node に focus し、クイック金額の開閉も保持する。
-    // モード切替ボタン自体は ① の節ごと作り直されない (同じ node のまま)。
+    // 戻した時だけ同じ入力 node に focus し、よく使う金額の編集欄も保持する。
+    // モード切替ボタン自体は金額の節ごと作り直されない (同じ node のまま)。
     fireEvent.click(screen.getByRole('button', { name: labels().modeStatic }));
     await settle();
     expect(amountEl).toBeInTheDocument();
     expect(amountEl).not.toBeVisible();
-    expect(quickDetails).toBeInTheDocument();
-    expect(quickDetails).not.toBeVisible();
-    expect(within(quickDetails).queryAllByRole('textbox')).toHaveLength(0);
+    expect(nodes.quickInput).toBeInTheDocument();
+    expect(nodes.quickInput).not.toBeVisible();
     expect(screen.getByRole('button', { name: labels().modeStatic })).toBe(nodes.modeStatic);
     expect(screen.getByRole('button', { name: labels().modeAmount })).toBe(nodes.modeAmount);
     const focusAmount = amountEl.focus.bind(amountEl);
@@ -702,15 +731,12 @@ describe('R11b: no remount when sections become child components', () => {
     expect(amountEl).toHaveValue('20');
     expect(focusSpy).toHaveBeenCalledOnce();
     expect(document.activeElement).toBe(amountEl);
-    expect(detailsOf(labels().quickAmountsLabel)).toBe(quickDetails);
-    expect(quickDetails).toBeVisible();
-    expect(quickDetails.open).toBe(true);
-    expect(within(quickDetails).getAllByRole('textbox')[0]).toBe(nodes.quickInput);
+    expect(screen.getAllByPlaceholderText(labels().quickAmountPlaceholder)[0]).toBe(nodes.quickInput);
+    expect(nodes.quickInput).toBeVisible();
     expect(nodes.quickInput).toHaveValue('7');
     expect(detailsOf(labels().accountingFieldsTitle)).toBe(accountingDetails);
     expect(accountingDetails.open).toBe(true);
-    expect(advancedToggle()).toBe(nodes.advanced);
-    expect(screen.getByRole('checkbox')).toBe(nodes.crossChain);
+    expect(settingsButton()).toBe(nodes.settings);
     focusSpy.mockClear();
     nodes.modeAmount.focus();
     fireEvent.click(nodes.modeAmount);
@@ -718,21 +744,23 @@ describe('R11b: no remount when sections become child components', () => {
     expect(document.activeElement).toBe(nodes.modeAmount);
   });
 
-  it('keeps the Step 2 and advanced-settings open state owned by the generator across modal and mode changes', async () => {
+  it('keeps the quick-amount editor open across modal and mode changes; the settings sheet closes before the QR opens', async () => {
     seed();
     renderQr();
     await settle();
-    expect(step2Toggle()).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(step2Toggle());
-    fireEvent.click(advancedToggle());
+    fireEvent.click(screen.getByRole('button', { name: labels().quickAmountsEdit }));
+    fireEvent.click(settingsButton());
+    expect(screen.getByRole('dialog', { name: labels().shopSettings.title })).toBeInTheDocument();
     amount('1000');
     openQr();
+    expect(screen.queryByRole('dialog', { name: labels().shopSettings.title })).toBeNull();
     closeQr();
     fireEvent.click(screen.getByRole('button', { name: labels().modeStatic }));
     fireEvent.click(screen.getByRole('button', { name: labels().modeAmount }));
     await settle();
-    expect(step2Toggle()).toHaveAttribute('aria-expanded', 'true');
-    expect(advancedToggle()).toHaveAttribute('aria-expanded', 'true');
+    expect(
+      screen.getByRole('button', { name: labels().quickAmountsDone, expanded: true }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -769,21 +797,27 @@ describe('B-R11d: retained amount in static mode', () => {
 });
 
 describe('B-R11d: mobile bar repaint effect', () => {
-  it('repaints on appearance and amount/mode/symbol changes, cancelling stale frames on hide or unmount', async () => {
+  it('repaints on mount, readiness and amount/mode/symbol changes, cancelling stale frames on unmount', async () => {
     const view = renderQr();
     await settle();
+    // 2026-10 P2: バーは最初から出ている (押せない間は未入力の理由を出す)。出た時点で WebKit の再描画を促す。
+    const bar = mobileBar()!;
+    expect(bar).not.toBeNull();
+    flushFrames();
+    expect(bar.style.transform).toBe('');
     amount('1000');
     await settle();
-    // 受取先が未設定の間はバーが無い (effect は ref=null で素通り)。
-    expect(mobileBar()).toBeNull();
+    expect(bar.style.transform).toBe('translateZ(0)');
+    flushFrames();
     fireEvent.change(receiverInput(), { target: { value: RECEIVER } });
     await settle();
-    // 金額が先・受取先が後でも、バーの初回表示で WebKit の再描画を促す。
-    const bar = mobileBar()!;
+    // 金額が先・受取先が後でも、押せるようになった時点で再描画を促す (同じバーのまま)。
+    expect(mobileBar()).toBe(bar);
     expect(bar.style.transform).toBe('translateZ(0)');
     expect(frames.size).toBe(1);
     flushFrames();
     expect(bar.style.transform).toBe('');
+    fireEvent.click(settingsButton());
     fireEvent.change(screen.getByPlaceholderText(labels().storeNamePlaceholder), { target: { value: '店' } });
     await settle();
     expect(bar.style.transform).toBe('');
@@ -802,19 +836,16 @@ describe('B-R11d: mobile bar repaint effect', () => {
     flushFrames();
     fireEvent.click(screen.getByRole('button', { name: 'USDC' }));
     await settle();
+    closeSettings();
     expect(mobileBar()).toBe(bar);
     expect(bar.style.transform).toBe('translateZ(0)');
     flushFrames();
     expect(bar.style.transform).toBe('');
     amount('1400');
     expect(frames.size).toBe(1);
+    // 受取先を消しても、バーは出したまま (押せなくなる) で再描画を促す。
     fireEvent.change(receiverInput(), { target: { value: '' } });
-    expect(mobileBar()).toBeNull();
-    expect(frames.size).toBe(0);
-    fireEvent.change(receiverInput(), { target: { value: RECEIVER } });
-    const reappeared = mobileBar()!;
-    expect(reappeared).not.toBe(bar);
-    expect(reappeared.style.transform).toBe('translateZ(0)');
+    expect(mobileBar()).toBe(bar);
     expect(frames.size).toBe(1);
     view.unmount();
     expect(frames.size).toBe(0);
@@ -1061,8 +1092,8 @@ describe('R11b: modal reopen, FX expiry, downloads and print', () => {
       expect(poster).toHaveTextContent('900 JPYC');
       expect(poster.querySelectorAll('ol > li')).toHaveLength(3);
       expect(poster.querySelector('img[alt="OpenPay"]')).toBeInTheDocument();
-      // 入力欄・下部バー・③ の列は印刷に出さない (print:hidden の祖先に居る)。
-      for (const el of [amountInput(), mobileBar()!, screen.getByText(labels().qrDescription)]) {
+      // 入力欄・下部バー・会計パネルは印刷に出さない (print:hidden の祖先に居る)。
+      for (const el of [amountInput(), mobileBar()!, screen.getAllByRole('button', { name: labels().showQr })[0]]) {
         expect(el.closest('.print\\:hidden')).not.toBeNull();
       }
     });

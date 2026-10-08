@@ -7,6 +7,8 @@ interface ChainChooserProps {
   onSelect: (slug: ChainSlug) => void;
   /** Tailwind grid utility class for the container. Default = 2 col mobile / 3 col sm+. */
   gridClassName?: string;
+  /** chain id の行を出すか (既定 true)。店の会計画面 (お店の設定) では出さない (開発者向けの値・2026-10 磨き上げ P2)。 */
+  showId?: boolean;
 }
 
 /**
@@ -19,6 +21,7 @@ export function ChainChooser({
   selected,
   onSelect,
   gridClassName = 'grid grid-cols-2 gap-2 sm:grid-cols-3',
+  showId = true,
 }: ChainChooserProps) {
   return (
     <div className={gridClassName}>
@@ -39,7 +42,7 @@ export function ChainChooser({
             <ChainLogo slug={slug} size={20} className="h-5 w-5 shrink-0" />
             <div className="min-w-0">
               <div className="truncate font-semibold">{c.name}</div>
-              <div className="text-xs text-slate-500">id: {c.id}</div>
+              {showId && <div className="text-xs text-slate-500">id: {c.id}</div>}
             </div>
           </button>
         );

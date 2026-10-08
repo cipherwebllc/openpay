@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { ArrowRightLeft } from 'lucide-react';
 import { formatRemaining } from '@/lib/fx';
 import type { ConvertState, FxRateWarning } from '@/hooks/useFxConvert';
 
@@ -67,11 +68,13 @@ export function ConvertPanel({
           3 分の UI カウントダウン付き QR を生成。未署名 URL なのでサーバ強制の期限ではない。
           スワップ無し (顧客が払った USDC をそのまま受領)。 */}
       {canShowConvert && rateOk && (
+        // まれに使う機能なので、金額の下の控えめな文字のボタンにする (2026-10 磨き上げ P2・動作は不変)。
         <button
           type="button"
           onClick={onApply}
-          className="w-full rounded-lg border border-brand/40 bg-brand/5 px-3 py-2.5 text-sm font-semibold text-brand-dark transition hover:bg-brand/10"
+          className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand hover:underline"
         >
+          <ArrowRightLeft className="h-4 w-4" aria-hidden />
           {t('convertButton', { symbol: convertTargetDisplay })}
         </button>
       )}

@@ -26,21 +26,22 @@ async function getRowsAndCols(locator: Locator): Promise<{
 }
 
 test.describe('chain chooser grid 列数 (viewport 連動)', () => {
-  test('QR generator: USDC 6 chain が viewport に応じた列数で並ぶ', async ({
+  test('QR generator: お店の設定の USDC 6 chain はどの画面幅でも 2 列 (シートの幅は最大 448px)', async ({
     page,
-    viewport,
   }) => {
     await page.goto('/ja/create');
 
-    // USDC tab を選択 (default は JPYC)
-    await page.getByRole('button', { name: 'USDC' }).click();
+    // 2026-10 磨き上げ P2: 通貨とチェーンは「お店の設定」シートの中。
+    await page.getByRole('button', { name: '設定', exact: true }).click();
+    const sheet = page.getByRole('dialog', { name: 'お店の設定' });
+    await expect(sheet).toBeVisible();
+    // USDC を選択 (default は JPYC)
+    await sheet.getByRole('button', { name: 'USDC', exact: true }).click();
 
     // chain chooser が出るまで待機 (CI は Arc flag OFF で USDC は 6 chain あるので Base/Arbitrum 等)
-    await expect(
-      page.getByRole('button', { name: /^Base/ }).first(),
-    ).toBeVisible();
+    await expect(sheet.getByRole('button', { name: /^Base/ }).first()).toBeVisible();
 
-    const chainButtons = page.locator(
+    const chainButtons = sheet.locator(
       'div.grid.grid-cols-2:has(button[type="button"] img[src*="/chains/"]) > button',
     );
 
@@ -48,11 +49,8 @@ test.describe('chain chooser grid 列数 (viewport 連動)', () => {
 
     const { rows, maxColsPerRow, total } = await getRowsAndCols(chainButtons);
     expect(total).toBe(6);
-
-    // < 640px: grid-cols-2 / >= 640px: sm:grid-cols-3
-    const expectedCols = viewport!.width < 640 ? 2 : 3;
-    expect(maxColsPerRow).toBe(expectedCols);
-    expect(rows).toBe(Math.ceil(6 / expectedCols));
+    expect(maxColsPerRow).toBe(2);
+    expect(rows).toBe(3);
   });
 
   test('Tip widget generator: USDC chain chooser も同じ列数', async ({
