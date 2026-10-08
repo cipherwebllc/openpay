@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { privateKeyToAccount } from 'viem/accounts';
 import { logger } from '@/lib/logger';
 import {
@@ -9,6 +9,9 @@ import {
   loadStoreGasWallet,
   readStoreGasWalletKey,
   removeStoreGasWallet,
+  requestStoreGasWalletPersistence,
+  storeGasFundGuide,
+  storeGasFundRange,
   withStoreGasWalletLock,
   withdrawableAmount,
 } from '@/lib/storeGasWallet';
@@ -137,5 +140,60 @@ describe('storeGasWallet: 残り回数と戻せる額', () => {
   it('戻せる額 = 残高 − gas × maxFeePerGas・足りなければ 0', () => {
     expect(withdrawableAmount(10n ** 18n, 21_000n, 100n * 10n ** 9n)).toBe(10n ** 18n - 21_000n * 100n * 10n ** 9n);
     expect(withdrawableAmount(1_000n, 21_000n, 1n)).toBe(0n);
+  });
+});
+
+describe('storeGasWallet: 入れておく目安', () => {
+  it('表示 (1〜2) と数値 (補充の既定額・1 回の上限) は同じ表から・表に無いチェーンは空/null', () => {
+    expect(storeGasFundRange(137)).toEqual({ min: '1', max: '2' });
+    expect(storeGasFundGuide(137)).toBe('1〜2');
+    expect(storeGasFundRange(43114)).toEqual({ min: '0.05', max: '0.1' });
+    expect(storeGasFundGuide(43114)).toBe('0.05〜0.1');
+    for (const id of [137, 80002, 8217, 1001, 43114, 43113]) {
+      const r = storeGasFundRange(id)!;
+      expect(Number(r.min)).toBeGreaterThan(0);
+      expect(Number(r.max)).toBeGreaterThanOrEqual(Number(r.min));
+    }
+    expect(storeGasFundRange(1)).toBeNull();
+    expect(storeGasFundGuide(1)).toBe('');
+  });
+});
+
+describe('storeGasWallet: 消されにくい保存を頼む (navigator.storage.persist)', () => {
+  const original = Object.getOwnPropertyDescriptor(window.navigator, 'storage');
+  const ADDR = '0x0000000000000000000000000000000000000abc' as const;
+  function setStorage(value: unknown) {
+    Object.defineProperty(window.navigator, 'storage', { value, configurable: true });
+  }
+  beforeEach(() => window.localStorage.clear());
+  afterEach(() => {
+    if (original) Object.defineProperty(window.navigator, 'storage', original);
+    else delete (window.navigator as { storage?: unknown }).storage;
+  });
+
+  it('認められていればそのまま true・まだなら頼んで結果を返す', async () => {
+    const persist = vi.fn(async () => true);
+    setStorage({ persisted: async () => true, persist });
+    expect(await requestStoreGasWalletPersistence(ADDR)).toBe(true);
+    expect(persist).not.toHaveBeenCalled();
+    setStorage({ persisted: async () => false, persist: vi.fn(async () => false) });
+    expect(await requestStoreGasWalletPersistence(ADDR)).toBe(false);
+  });
+
+  it('頼むのは鍵ごとに 1 回だけ (Firefox で開くたびに許可を尋ねない)・新しい鍵ではもう一度頼む', async () => {
+    const persist = vi.fn(async () => false);
+    setStorage({ persisted: async () => false, persist });
+    await requestStoreGasWalletPersistence(ADDR);
+    await requestStoreGasWalletPersistence(ADDR);
+    expect(persist).toHaveBeenCalledTimes(1);
+    await requestStoreGasWalletPersistence('0x0000000000000000000000000000000000000def');
+    expect(persist).toHaveBeenCalledTimes(2);
+  });
+
+  it('頼めない・失敗しても throw しない (鍵の作成や表示を止めない)', async () => {
+    setStorage(undefined);
+    expect(await requestStoreGasWalletPersistence(ADDR)).toBeNull();
+    setStorage({ persist: async () => { throw new Error('denied'); } });
+    expect(await requestStoreGasWalletPersistence(ADDR)).toBeNull();
   });
 });

@@ -11,7 +11,10 @@ import { formatEther, type Address, type Hex } from 'viem';
 import { nativeSymbolForChainId, txExplorerUrl } from '@/lib/chains';
 import { estimateRemainingSends, storeGasFundGuide } from '@/lib/storeGasWallet';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
+import { usePwaDisplayMode } from '@/hooks/usePwaDisplayMode';
 import { useStoreGasWallet } from '@/hooks/useStoreGasWallet';
+import { detectMobilePlatform } from '@/lib/walletDeepLink';
+import { StoreGasWalletTopUp } from './StoreGasWalletTopUp';
 
 // 残り回数がこれを下回ったら補充を促す。
 const LOW_REMAINING_SENDS = 20;
@@ -32,6 +35,11 @@ function formatNative(wei: bigint): string {
 
 const symbolOf = (chainId: number) => nativeSymbolForChainId(chainId) ?? '';
 
+// iPhone・iPad (iPad の「モバイル用サイト」の UA も含む)。
+function isIosDevice(): boolean {
+  return detectMobilePlatform() === 'ios' || (typeof navigator !== 'undefined' && /iPad/.test(navigator.userAgent));
+}
+
 export function StoreGasWalletPanel({
   onAddressChange,
 }: {
@@ -39,7 +47,21 @@ export function StoreGasWalletPanel({
   onAddressChange?: (address: Address | null) => void;
 } = {}) {
   const t = useTranslations('RegisterMode');
+  const tScan = useTranslations('Scan');
   const g = useStoreGasWallet();
+  // iPhone・iPad のブラウザ (ホーム画面に追加したアプリでない) は、7 日ほど開かないとサイトのデータ (= 鍵) を消す。
+  // ホーム画面のアプリはこの消去の対象外で保存場所も別なので、アプリで作るよう案内する (描画後に判定 = hydration 安全)。
+  const { isStandalone } = usePwaDisplayMode();
+  const [isIos, setIsIos] = useState(false);
+  useEffect(() => {
+    setIsIos(isIosDevice());
+  }, []);
+  const iosBrowser = isIos && !isStandalone;
+  // iPhone・iPad のブラウザで「それでもブラウザで作る」を選んだ (作るボタンを出す)。
+  const [createInBrowser, setCreateInBrowser] = useState(false);
+  // 接続中のウォレットからの補充が途中 (ウォレットで確認中・結果待ち)。途中は鍵を消させない (届く途中の宛先を消さない)。
+  const [topUpPending, setTopUpPending] = useState(false);
+  const removeBlocked = g.removeBlocked || topUpPending;
   const usableAddress = g.walletState?.state === 'ok' ? g.address : null;
   useEffect(() => {
     // 読み込む前は知らせない (読み込み前の「無い」で、タブを戻ったときに送信中の支払いや「もう一度送る」を
@@ -81,6 +103,10 @@ export function StoreGasWalletPanel({
       ws.reason === 'same_address' ||
       ws.reason === 'contract_recipient');
 
+  function refreshAfterTopUp() {
+    void g.refresh();
+  }
+
   async function handleCreate() {
     const r = await g.create();
     setCreateError(r.ok ? null : r.reason);
@@ -109,7 +135,7 @@ export function StoreGasWalletPanel({
         <button
           type="button"
           className={DANGER_BTN}
-          disabled={g.removeBlocked}
+          disabled={removeBlocked}
           onClick={() => {
             setConfirmingRemove(true);
             setRemoveFailed(false);
@@ -129,7 +155,7 @@ export function StoreGasWalletPanel({
             <button
               type="button"
               className={DANGER_BTN}
-              disabled={g.removeBlocked}
+              disabled={removeBlocked}
               onClick={() => void handleRemove()}
             >
               {t('storeGasWallet.removeYes')}
@@ -140,8 +166,10 @@ export function StoreGasWalletPanel({
           </div>
         </div>
       )}
-      {g.removeBlocked && (
-        <p className="mt-1 text-xs text-slate-500">{t('storeGasWallet.removeBlockedNote')}</p>
+      {removeBlocked && (
+        <p className="mt-1 text-xs text-slate-500">
+          {topUpPending ? t('storeGasWallet.removeBlockedTopUpNote') : t('storeGasWallet.removeBlockedNote')}
+        </p>
       )}
       {removeFailed && (
         <p role="alert" className="mt-1 text-xs text-red-600">
@@ -174,7 +202,22 @@ export function StoreGasWalletPanel({
       <p className="mt-2 text-xs leading-relaxed text-amber-800">
         {t('storeGasWallet.keyNote', { guide: fundGuide })}
       </p>
-      <p className="mt-1 text-xs leading-relaxed text-slate-500">{t('storeGasWallet.safariNote')}</p>
+      {isIos ? (
+        isStandalone && (
+          <p className="mt-1 text-xs leading-relaxed text-emerald-700">{t('storeGasWallet.iosAppNote')}</p>
+        )
+      ) : (
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">{t('storeGasWallet.safariNote')}</p>
+      )}
+      {/* iPhone・iPad では出さない (消されにくい保存が 7 日の消去を防ぐ根拠は無い = 偽の安心にしない) */}
+      {g.persisted === true && !isIos && (
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">{t('storeGasWallet.persistedNote')}</p>
+      )}
+      {iosBrowser && g.walletState.state === 'ok' && (
+        <p role="note" className="mt-2 rounded-lg bg-amber-50 p-2 text-xs leading-relaxed text-amber-900">
+          {t('storeGasWallet.iosBrowserKeptNote')}
+        </p>
+      )}
 
       {g.walletState.state === 'unavailable' && (
         <p role="alert" className="mt-3 text-xs text-red-600">
@@ -193,9 +236,26 @@ export function StoreGasWalletPanel({
 
       {g.walletState.state === 'none' && (
         <div className="mt-3">
-          <button type="button" className={BTN} onClick={() => void handleCreate()}>
-            {t('storeGasWallet.createButton')}
-          </button>
+          {iosBrowser && (
+            <div role="note" className="mb-3 rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+              <p className="font-semibold">{t('storeGasWallet.iosBrowserTitle')}</p>
+              <p className="mt-1">{t('storeGasWallet.iosBrowserBody')}</p>
+              <ol className="mt-2 list-decimal space-y-1 pl-5">
+                <li>{tScan('installHintIosStep1')}</li>
+                <li>{tScan('installHintIosStep2')}</li>
+                <li>{t('storeGasWallet.iosBrowserStep3')}</li>
+              </ol>
+            </div>
+          )}
+          {iosBrowser && !createInBrowser ? (
+            <button type="button" className={BTN} onClick={() => setCreateInBrowser(true)}>
+              {t('storeGasWallet.iosBrowserCreateAnyway')}
+            </button>
+          ) : (
+            <button type="button" className={BTN} onClick={() => void handleCreate()}>
+              {t('storeGasWallet.createButton')}
+            </button>
+          )}
           {createError && (
             <p role="alert" className="mt-2 text-xs text-red-600">
               {createError === 'corrupt'
@@ -268,6 +328,15 @@ export function StoreGasWalletPanel({
               );
             })}
           </div>
+
+          {active.length > 0 && (
+            <StoreGasWalletTopUp
+              chains={active}
+              gasAddress={g.address}
+              onDone={refreshAfterTopUp}
+              onPendingChange={setTopUpPending}
+            />
+          )}
 
           <div className="border-t border-slate-100 pt-3">
             <label htmlFor={WITHDRAW_INPUT_ID} className="text-xs font-semibold text-slate-700">

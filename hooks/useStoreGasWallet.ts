@@ -20,12 +20,15 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { storeDeviceChainIds, storeGasWalletChainIds } from '@/lib/storeDevicePayment';
+import { finishStoreGasTopUp, liveStoreGasTopUps } from '@/lib/storeGasTopUp';
 import {
   STORE_GAS_WITHDRAW_GAS,
   createStoreGasWallet,
   loadStoreGasWallet,
   readStoreGasWalletKey,
+  STORE_GAS_WALLET_STORAGE_KEY,
   removeStoreGasWallet,
+  requestStoreGasWalletPersistence,
   withStoreGasWalletLock,
   withdrawableAmount,
   type CreateStoreGasWalletResult,
@@ -65,6 +68,9 @@ export type StoreGasChainState = {
   readFailed: boolean;
 };
 
+// 補充の記録を補充の欄に任せる時間 (これより古い、送った補充の記録は、残高の読み直しのときにここで片付ける)。
+const TOPUP_SETTLE_BY_PANEL_MS = 10 * 60 * 1000;
+
 // 確定待ちの上限 (Polygon・Kaia・Avalanche とも通常数秒)。超えたら「確認中」として残高の更新を促す。
 const RECEIPT_TIMEOUT_MS = 90_000;
 
@@ -99,12 +105,34 @@ export function useStoreGasWallet() {
   // 鍵の世代 (作る・消すで進める)。古い鍵の読み取りが遅れて返っても、新しい鍵の残高に書かない。
   const walletGenRef = useRef(0);
 
-  // localStorage は描画後にだけ読む (server と初回 client の描画を揃える)。
+  // localStorage は描画後にだけ読む (server と初回 client の描画を揃える)。別のタブで作る・消すと読み直す
+  // (古いアドレスを見せたまま、そこへ補充や戻し先の確認をさせない)。
   useEffect(() => {
     setWalletState(loadStoreGasWallet());
+    function onStorage(e: StorageEvent) {
+      if (e.key !== STORE_GAS_WALLET_STORAGE_KEY && e.key !== null) return;
+      walletGenRef.current += 1;
+      setWalletState(loadStoreGasWallet());
+      setReads({});
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
   }, []);
 
   const address = walletState?.state === 'ok' ? walletState.info.address : null;
+
+  // 鍵があるときは、ブラウザに消されにくい保存を頼む (作った直後・開いたとき)。結果は画面の案内に使うだけ。
+  const [persisted, setPersisted] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!address) return;
+    let live = true;
+    void requestStoreGasWalletPersistence(address).then((r) => {
+      if (live) setPersisted(r);
+    });
+    return () => {
+      live = false;
+    };
+  }, [address]);
 
   useEffect(() => {
     unknownRef.current =
@@ -140,6 +168,22 @@ export function useStoreGasWallet() {
       }),
     );
     if (gen !== walletGenRef.current) return;
+    // 送ってから時間のたった補充の結果を片付ける (補充の欄が出ていない間に取引が入っても、記録を外す = 鍵を消せない
+    // 状態を残さない)。新しい記録は補充の欄が結果を出すので触らない (先に片付けて結果の表示を消さない)。
+    for (const op of liveStoreGasTopUps(address)) {
+      const client = op.hash ? clients.get(op.chainId) : undefined;
+      if (!op.hash || !client || Date.now() - op.at < TOPUP_SETTLE_BY_PANEL_MS) continue;
+      try {
+        await client.getTransactionReceipt({ hash: op.hash });
+        // 記録を外す前に、そのチェーンの残高を読み直す (入った補充を 0 のまま見せて、注意なしに消させない)。
+        const [b, g] = await Promise.all([client.getBalance({ address }), client.getGasPrice()]);
+        if (gen !== walletGenRef.current) return;
+        setReads((prev) => ({ ...prev, [op.chainId]: { balance: b, gasPrice: g, readFailed: false } }));
+        await withStoreGasWalletLock(async () => finishStoreGasTopUp(op.id));
+      } catch {
+        // まだ見つからない・読めない。記録は残す (補充の画面が結果を見る・次の読み直しで片付ける)。
+      }
+    }
     // 「不明」の出口: hash があれば receipt で確定/取り消しを確かめる。hash が無い (送信中に切れた) ときは
     // そのチェーンの残高を読めた時点で解除する (残高が残っていれば「消す」の確認で先に戻すよう出る)。
     const unknown = unknownRef.current;
@@ -187,7 +231,19 @@ export function useStoreGasWallet() {
 
   const remove = useCallback(async (): Promise<boolean> => {
     if (removeBlocked) return false;
-    const removed = await withStoreGasWalletLock(async () => removeStoreGasWallet());
+    // 消すのは、いま保存されている鍵が表示中のものと同じで、その鍵への補充が途中 (このタブ・別のタブ) でないときだけ
+    // (別のタブで作り直された鍵を古い表示のまま消さない・届く途中の補充の宛先の鍵を消さない)。
+    const removed = await withStoreGasWalletLock(async () => {
+      const current = loadStoreGasWallet();
+      // 壊れた保存データは、画面でも壊れていると見えているときだけ消せる (作り直すための出口・アドレスが読めないので
+      // 補充の記録は見られない)。
+      if (current.state === 'corrupt') return walletState?.state === 'corrupt' && removeStoreGasWallet();
+      if (current.state !== 'ok' || !address || current.info.address.toLowerCase() !== address.toLowerCase()) {
+        return false;
+      }
+      if (liveStoreGasTopUps(current.info.address).length > 0) return false;
+      return removeStoreGasWallet();
+    });
     // 消えたかどうかは保存状態を読み直して決める (消せなかったのに「未作成」に戻さない)。
     setWalletState(loadStoreGasWallet());
     if (removed) {
@@ -196,7 +252,7 @@ export function useStoreGasWallet() {
       setWithdrawStatus({ phase: 'idle' });
     }
     return removed;
-  }, [removeBlocked]);
+  }, [removeBlocked, address, walletState]);
 
   const withdraw = useCallback(
     async (chainId: number, rawTo: string): Promise<WithdrawStatus> => {
@@ -313,6 +369,7 @@ export function useStoreGasWallet() {
     hydrated: walletState !== null,
     walletState,
     address,
+    persisted,
     withdrawStatus,
     removeBlocked,
     refresh,
