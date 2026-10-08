@@ -2405,7 +2405,7 @@ OpenPay は署名を最長 10 分受け渡すだけで、ガスを払わず送�
 ### 17.1 flag と前提
 - `NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET` (コードの既定 OFF)。build 時に埋め込まれるので、変えたら再デプロイ。
 - `IP_HASH_SECRET` (32 byte 以上) が本番にあること。無い・短いと受け渡しは 503 で止まる (fail-closed)。
-- `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON`・`_KAIA`・`_AVALANCHE`・`NEXT_PUBLIC_FEE_RECEIVER` が今の中継と同じ値であること (変えない)。
+- `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON`・`_KAIA`・`_AVALANCHE`・`NEXT_PUBLIC_FEE_RECEIVER_ADDRESS` が今の中継と同じ値であること (変えない)。
   Avalanche は `NEXT_PUBLIC_ENABLE_JPYC_AVALANCHE` も ON であること (OFF だと Avalanche だけ黙って対象外になる)。
 - 手数料受取口 (会社 @handle) を受取先にした店では使えない (forwarder が merchant == feeReceiver で revert するため画面で止める)。
 - チェーンは開示の SOT (`DISCLOSED_STORE_GAS_WALLET.chainIds`) のうち設定がそろったもの = Polygon・Kaia・Avalanche
