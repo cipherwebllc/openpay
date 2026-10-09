@@ -5,7 +5,7 @@
 // 保存された受注の値 (重複でも保存済みから読む)。
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { closeRedisLuaEngine } from '../../_helpers/redisLua';
-import { h, SELLER, NOW, orders, reservationKeys, request } from './agentOrderFixture';
+import { h, SELLER, OTHER, NOW, REPLACEMENT, notify, orders, reservationKeys, request, publicRequest, prepareReceipt, success, transfer } from './agentOrderFixture';
 afterAll(closeRedisLuaEngine);
 
 // NOW = 06:46:40 JST。lead 60 → 07:46:40 → ceil 08:00。
@@ -95,5 +95,42 @@ describe('pickup normalization at order save (real Lua)', () => {
     expect(await paid.json()).toMatchObject({ orderRegistered: true, pickupAt: REQUESTED });
     expect(orders()[0].pickupAt).toBe(REQUESTED);
     expect('pickupAtRequested' in orders()[0]).toBe(false);
+  });
+
+  it('normalizes only with the reserved merchant\'s shop: a handle moved to another shop mid-request keeps the raw value', async () => {
+    const pay = await loadPreorderPay();
+    // settle の間に handle が店 B (別の受取先・lead 180 → 10:00) へ移る。予約の受取先は店 A のままなので B の枠では正規化しない。
+    h.settle.mockImplementation(async (req: Request) => {
+      await prepareReceipt(await req.json());
+      h.shop = { owner: OTHER, config: { to: OTHER }, storefront: { chain: 'polygon', mode: 'preorder', feePayer: 'merchant', minLeadMinutes: 180, lastOrder: '12:00', menu: [{ id: 'food', name: 'original', price: '100' }] } };
+      return Response.json(success());
+    });
+    const paid = await pay.GET(request({ pickup: REQUESTED }));
+    expect(paid.status).toBe(200);
+    expect(await paid.json()).toMatchObject({ orderRegistered: true, pickupAt: REQUESTED });
+    expect(orders()).toHaveLength(1); // 店 A の一覧に保存
+    expect(orders()[0].pickupAt).toBe(REQUESTED);
+    expect(orders()[0].pickupAt).not.toBe(Date.UTC(2026, 8, 24, 1, 0)); // 10:00 (店 B の枠) にならない
+    expect('pickupAtRequested' in orders()[0]).toBe(false);
+  });
+
+  it('duplicate reads the stored agent order by chainId + tx hash, not by orderId alone', async () => {
+    const pay = await loadPreorderPay();
+    const first = await (await pay.GET(request({ pickup: REQUESTED }))).json();
+    expect(first).toMatchObject({ orderRegistered: true, pickupAt: SLOT_0800 });
+    const orderId = orders()[0].orderId as string;
+    // 人間の notify が顧客指定の同じ orderId・別 tx・別の受取時刻の受注を保存する (一覧の先頭に入る)
+    h.logs = [transfer(OTHER)];
+    const human = await notify.POST(publicRequest({ txHash: REPLACEMENT, orderId, pickupAt: SLOT_0815 }));
+    expect(human.status).toBe(200);
+    expect(orders()).toHaveLength(2);
+    expect(orders()[0]).toMatchObject({ orderId, txHash: REPLACEMENT, pickupAt: SLOT_0815 });
+
+    vi.setSystemTime(NOW + 5 * 60_000);
+    const again = await pay.GET(request({ pickup: REQUESTED }));
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ orderRegistered: true, pickupAt: SLOT_0800, pickupAtRequested: REQUESTED });
+    expect(orders()).toHaveLength(2);
+    expect(h.settle).toHaveBeenCalledTimes(1);
   });
 });
