@@ -49,6 +49,24 @@ describe('GitHub Actions operation guards', () => {
     expect(tests).toBeGreaterThan(lint);
   });
 
+  it('CI は SDK の node:test (保護配布 verifier・license gate) を test job で実行する', () => {
+    const source = workflow('ci.yml');
+    const tests = source.indexOf('- run: node scripts/run-tests.mjs');
+    const sdk = source.indexOf('run: npm --prefix packages/x402-sdk test');
+    expect(sdk).toBeGreaterThan(tests);
+    // SDK の step 全体 (name から次の step まで) に continue-on-error を付けさせない (run の後ろに付けても検出する)。
+    const stepStart = source.lastIndexOf('- name: SDK tests (node:test)', sdk);
+    const nextStep = source.indexOf('\n      - ', sdk);
+    const step = source.slice(stepStart, nextStep === -1 ? undefined : nextStep);
+    expect(stepStart).toBeGreaterThan(tests);
+    // コメント行は除く (次の step の説明文に「continue-on-error」という語が出るため)。
+    const keys = step.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+    expect(keys).not.toMatch(/continue-on-error\s*:/);
+    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'packages/x402-sdk/package.json'), 'utf8'));
+    expect(pkg.scripts.test).toBe('node --test tests/*.test.mjs');
+    expect(pkg.scripts.prepublishOnly).toBe('npm test');
+  });
+
   it.each([
     { event: 'schedule', configured: true, status: 0, output: 'skip=false' },
     { event: 'workflow_dispatch', configured: true, status: 0, output: 'skip=false' },

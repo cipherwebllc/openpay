@@ -27,7 +27,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "prepublishOnly": "npm test"
   },
   "dependencies": {
     "viem": "^2.45.0"
