@@ -124,6 +124,11 @@ describe('GitHub Actions operation guards', () => {
     const runner = readFileSync(resolve(process.cwd(), 'scripts/run-tests.mjs'), 'utf8');
     expect(runner).toContain("from './lib/coverageThresholds.mjs'");
     expect(runner).toContain("process.env.RUN_TESTS_COVERAGE === '1'");
+    // assertion の外の未処理エラーは JSON の numFailedTests に載らないので、専用 reporter で数えて判定する
+    // (判定そのものは tests/scripts/run-tests-verdict.test.ts が値で固定する)
+    expect(runner).toContain("'--reporter=./scripts/lib/unhandledErrorsReporter.mjs'");
+    expect(runner).toContain('evaluateUnhandled(unhandledText)');
+    expect(runner).toContain('evaluateCoverage(text)');
     // 成功で終わるすべての出口で coverage を確かめる
     const exits = [...runner.matchAll(/process\.exit\(([^)]*)\)/g)].map((m) => m[1]);
     expect(exits.filter((e) => e.trim() === '0')).toHaveLength(0);

@@ -10,3 +10,20 @@ export const COVERAGE_THRESHOLDS = Object.freeze({
   functions: 88,
   lines: 87,
 });
+
+// coverage-summary.json の本文 (読めなければ null) を下限と比べる。run-tests.mjs の判定を
+// テストで固定できるよう純関数にしてある (tests/scripts/runTestsVerdict.test.ts)。
+export function evaluateCoverage(summaryText, thresholds = COVERAGE_THRESHOLDS) {
+  let total;
+  try {
+    total = typeof summaryText === 'string' ? JSON.parse(summaryText)?.total : undefined;
+  } catch {
+    total = undefined;
+  }
+  if (!total || typeof total !== 'object') return { ok: false, readable: false, results: [] };
+  const results = Object.entries(thresholds).map(([metric, min]) => {
+    const pct = total[metric]?.pct;
+    return { metric, pct, min, pass: typeof pct === 'number' && pct >= min };
+  });
+  return { ok: results.every((r) => r.pass), readable: true, results };
+}
