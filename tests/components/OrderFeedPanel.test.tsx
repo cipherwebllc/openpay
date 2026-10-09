@@ -235,6 +235,12 @@ describe('OrderFeedPanel', () => {
     expect(screen.getByText('申告合計: 200 JPYC')).toBeInTheDocument();
   });
 
+  it('店舗の値引きのある受注は「値引き −X JPYC」を出す (実着金が明細の合計より少ない理由)', async () => {
+    h.orders = [{ ...order, discount: '20000000000000000000' }];
+    render();
+    expect(await screen.findByText('値引き −20 JPYC')).toBeInTheDocument();
+  });
+
   it('standard 手数料未収の受注に明示バッジを表示', async () => {
     h.orders = [{ ...order, feeUncollected: true }];
     render();

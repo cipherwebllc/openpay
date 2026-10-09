@@ -15,6 +15,7 @@ import { isTaxCategory, type TaxCategory } from './tax';
 import { validOptionGroups, type OptionGroup } from './menuOptions';
 import { parseHHMM, sanitizeMinLead } from './shopTime';
 import { normalizeInvoiceRegistrationNumber } from './invoice';
+import { validStorefrontDiscount, type StorefrontDiscount } from './mobileOrderDiscount';
 
 export type MobileOrderMode = 'storefront' | 'preorder'; // 店頭/券売機 | 事前モバイルオーダー
 export type FeePayer = 'merchant' | 'customer'; // 3% を店舗負担 | 顧客上乗せ (preorder 時のみ意味を持つ)
@@ -76,6 +77,9 @@ export type MobileOrderConfig = {
   openFrom?: string; // 受付開始 "HH:mm" (開始前は受付停止・同日セマンティクス・lib/shopTime)
   lastOrder?: string; // ラストオーダー "HH:mm" (超過で受付停止・同日セマンティクス・lib/shopTime)
   minLeadMinutes?: number; // 最短受け渡しまでの分 (preorder のスロット起点・1..MIN_LEAD_MAX)
+  // 店舗の値引き (任意・全品・plans/discount-common.md)。@handle の公開設定からだけ載せる
+  // (handleStorefrontConfig)。?s= の自己完結 URL には正本が無いので載せない (validateOrderConfig は写さない)。
+  discount?: StorefrontDiscount;
 };
 
 /**
@@ -106,6 +110,8 @@ export type StorefrontParts = {
   openFrom?: string; // 受付開始 "HH:mm" (Phase 4・Asia/Tokyo・開始前は受付停止)
   lastOrder?: string; // ラストオーダー "HH:mm" (Phase 4・Asia/Tokyo・超過で受付停止)
   minLeadMinutes?: number; // 最短受け渡し分 (Phase 4・preorder のスロット起点)
+  // 店舗の値引き (任意・全品・条件なし・plans/discount-common.md)。注文画面・署名前の確認・受注・人が払う見積もりの正本。
+  discount?: StorefrontDiscount;
   // Shops API の検索掲載に店主が明示同意したときだけ true。false/欠落は未掲載。
   // 顧客向け MobileOrderConfig には写像しない (公開注文ページに同意メタは不要)。
   agentListing?: true;
@@ -382,6 +388,9 @@ export function validateStorefrontParts(raw: unknown): StorefrontParts | null {
   if (minLead !== null) parts.minLeadMinutes = minLead;
   // 検索掲載は明示 opt-in の true だけを保持する。false/欠落/他型はすべて未掲載。
   if (o.agentListing === true) parts.agentListing = true;
+  // 店舗の値引き (任意・不正は黙って除外 = 値引きなし・注文は壊さない)。
+  const discount = validStorefrontDiscount(o.discount);
+  if (discount) parts.discount = discount;
   return parts;
 }
 

@@ -47,6 +47,15 @@ export function parseDiscountAmount(
   return wei;
 }
 
+/** 割引率 (% の 10 進・小数 2 桁まで) を bps (1% = 100) に。0 より大きく 100 より小さくなければ null。 */
+export function discountPercentBps(percentRaw: string): bigint | null {
+  const s = percentRaw.trim();
+  if (!PERCENT_PATTERN.test(s)) return null;
+  const [whole, frac = ''] = s.split('.');
+  const bps = BigInt(whole) * 100n + BigInt(frac.padEnd(DISCOUNT_PERCENT_MAX_DECIMALS, '0'));
+  return bps > 0n && bps < 10000n ? bps : null;
+}
+
 /**
  * 割引率 (% の 10 進・小数 2 桁まで・0 より大きく 100 より小さい) から値引き額 (wei)。
  * 小計 × 率 を表示の最小単位で切り捨てる (JPYC は円未満切り捨て)。0 になる・率が不正なら null。
@@ -57,11 +66,8 @@ export function discountFromPercent(
   decimals: number,
   displayDecimals: number,
 ): bigint | null {
-  const s = percentRaw.trim();
-  if (!PERCENT_PATTERN.test(s)) return null;
-  const [whole, frac = ''] = s.split('.');
-  const bps = BigInt(whole) * 100n + BigInt(frac.padEnd(DISCOUNT_PERCENT_MAX_DECIMALS, '0'));
-  if (bps <= 0n || bps >= 10000n) return null;
+  const bps = discountPercentBps(percentRaw);
+  if (bps === null) return null;
   const unit = discountUnit(decimals, displayDecimals);
   const raw = (subtotalWei * bps) / 10000n;
   const wei = raw - (raw % unit);

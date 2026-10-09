@@ -1448,3 +1448,64 @@ it('A2c verified duplicate reports an OFF migration winner without acknowledging
   expect(delSpy).not.toHaveBeenCalled(); expect(pushNotify.after).not.toHaveBeenCalled();
   expect(setSpy.mock.calls.some(([key]) => String(key).startsWith('order:sv:'))).toBe(false);
 });
+
+// 店舗の値引き (plans/discount-common.md): 金額確認の期待額 = 申告明細の合計 − 公開設定の値引き (body の値引きは使わない)。
+describe('POST /api/order/notify — 店舗の値引き', () => {
+  function withDiscount(discount: unknown) {
+    hold.handle = {
+      ok: true,
+      record: {
+        config: { to: MERCHANT },
+        storefront: { chain: 'polygon', mode: 'preorder', feePayer: 'merchant', discount },
+      },
+    };
+  }
+
+  it('10% 引きの店: 1,000 の注文に 873 着金 (900 − 3%) は金額一致・受注に値引き 100 を残す', async () => {
+    withDiscount({ kind: 'percent', value: '10' });
+    hold.verify = { ok: true, value: 873n * JPYC };
+    const res = await POST(req(goodBody({ discount: '100' })));
+    expect(res.status).toBe(200);
+    const stored = latestStoredOrder();
+    expect('amountMismatch' in stored).toBe(false);
+    expect(stored.discount).toBe((100n * JPYC).toString());
+  });
+
+  it('定価で払った注文 (お客様の画面に値引きが無い・違う) には値引きを出さない (金額確認は公開設定のまま)', async () => {
+    withDiscount({ kind: 'percent', value: '10' });
+    hold.verify = { ok: true, value: 970n * JPYC };
+    await POST(req(goodBody()));
+    let stored = latestStoredOrder();
+    expect('amountMismatch' in stored).toBe(false);
+    expect('discount' in stored).toBe(false);
+    setSpy.mockClear();
+    hold.listValues = [];
+    await POST(req(goodBody({ txHash: `0x${'d'.repeat(64)}`, discount: '999' })));
+    stored = latestStoredOrder();
+    expect('discount' in stored).toBe(false);
+  });
+
+  it('値引きのない店で同じ着金なら従来どおり金額不一致 (値引きは付けない)', async () => {
+    hold.verify = { ok: true, value: 873n * JPYC };
+    await POST(req(goodBody({ discount: '100' })));
+    const stored = latestStoredOrder();
+    expect(stored.amountMismatch).toBe(true);
+    expect('discount' in stored).toBe(false);
+  });
+
+  it('値引き後より少ない着金は金額不一致・値引きは出さない (申告合計 / 実着金の表示に任せる)', async () => {
+    withDiscount({ kind: 'percent', value: '10' });
+    hold.verify = { ok: true, value: 500n * JPYC };
+    await POST(req(goodBody()));
+    const stored = latestStoredOrder();
+    expect(stored.amountMismatch).toBe(true);
+    expect('discount' in stored).toBe(false);
+  });
+
+  it('壊れた値引きの設定は値引きなしとして扱う', async () => {
+    withDiscount({ kind: 'percent', value: '150' });
+    hold.verify = { ok: true, value: 1000n * JPYC };
+    await POST(req(goodBody()));
+    expect('discount' in latestStoredOrder()).toBe(false);
+  });
+});

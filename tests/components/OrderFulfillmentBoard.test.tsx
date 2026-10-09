@@ -241,6 +241,12 @@ describe('OrderFulfillmentBoard', () => {
     expect(screen.getByText('申告合計: 500 JPYC')).toBeInTheDocument();
   });
 
+  it('店舗の値引きのある受注は「値引き −X JPYC」を出す', () => {
+    feedHold.data = [order({ discount: '50000000000000000000' })];
+    renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);
+    expect(screen.getByText('値引き −50 JPYC')).toBeInTheDocument();
+  });
+
   it('standard 手数料未収の受注に厨房/ホール共通バッジを表示', () => {
     feedHold.data = [order({ feeUncollected: true })];
     renderWithIntl(<OrderFulfillmentBoard mode="kitchen" />);

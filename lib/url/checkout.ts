@@ -133,9 +133,10 @@ export type CheckoutParams = {
   // お店の端末が送る。条件に合わない URL は parse で止める (回収 1% に黙って倒さない)。
   submit?: 'store';
   handoffId?: string;
-  // --- レジの値引き (任意・RegisterMode のみが設定・plans/register-discount.md)。 ---
+  // --- 値引き (任意・plans/register-discount.md / plans/discount-common.md)。 ---
   // 小計から引く額 (トークン単位の 10 進・表示の最小単位の倍数・小計より小さい)。支払額 = 小計 − 値引き
-  // (calcCheckoutPayable)。不在 = 値引きなし (従来の URL とバイト不変)。モバイル注文の URL には付けない。
+  // (calcCheckoutPayable)。不在 = 値引きなし (従来の URL とバイト不変)。付けるのはレジ・決済QR のお店負担・
+  // @handle のモバイル注文 (店舗の値引き・署名前に公開設定と照合) だけ。
   discount?: string;
 };
 
@@ -340,6 +341,7 @@ export function parseCheckoutParams(
   const feeKindRaw = searchParams.get('fee_kind');
   const feePayerRaw = searchParams.get('fee_payer');
   const storeHandle = searchParams.get('store_handle');
+  const storeHandleParam = storeHandle ? sanitizeText(storeHandle, CHECKOUT_STORE_HANDLE_MAX) : undefined;
   const storeNameRaw = searchParams.get('store');
   const pickupAtRaw = searchParams.get('pickup_at');
   const submitRaw = searchParams.get('submit');
@@ -394,8 +396,9 @@ export function parseCheckoutParams(
   }
 
   // 値引きは fail-closed: 形式・最小単位・小計より小さいことを確かめ、合わなければ「使えない」と止める
-  // (黙って値引きなしに倒すと、お店が決めた額より多く払わせる)。モバイル注文の URL とは併用させない
-  // (注文の束縛と受注の金額確認は値引きを知らない)。
+  // (黙って値引きなしに倒すと、お店が決めた額より多く払わせる)。モバイル注文の URL で許すのは、店舗の値引きの
+  // 正本 (公開した storefront) と署名前に照合できる @handle の注文 (store_handle と fee_kind storefront/preorder が
+  // そろう = CheckoutForm が admission を呼ぶ条件・plans/discount-common.md) だけ。それ以外の組合せは従来どおり止める。
   let discount: string | undefined;
   if (discountRaw !== null) {
     const discountWei = parseDiscountAmount(
@@ -404,12 +407,11 @@ export function parseCheckoutParams(
       decimals,
       taxDisplayDecimals(token),
     );
-    if (
-      discountWei === null ||
-      isMobileOrderFeeKind(feeKindRaw) ||
-      orderId !== null ||
-      storeHandle !== null
-    ) {
+    const mobileOrderUrl = isMobileOrderFeeKind(feeKindRaw) || orderId !== null || storeHandle !== null;
+    // 「@handle の注文」は parse 後の store_handle が空でないこと (CheckoutForm が admission を呼ぶのと同じ値で判定・
+    // store_handle= の空値で照合を飛ばさせない)。
+    const handleOrder = Boolean(storeHandleParam) && isMobileOrderFeeKind(feeKindRaw);
+    if (discountWei === null || (mobileOrderUrl && !handleOrder)) {
       return { ok: false, ...urlFail('invalidDiscount') };
     }
     discount = formatUnits(discountWei, decimals);
@@ -461,9 +463,7 @@ export function parseCheckoutParams(
           ? feePayerRaw
           : undefined,
       // handle の形式・最新 storefront との束縛は署名前 admission API が権威的に検証する。
-      storeHandle: storeHandle
-        ? sanitizeText(storeHandle, CHECKOUT_STORE_HANDLE_MAX)
-        : undefined,
+      storeHandle: storeHandleParam,
       // 受取予定時刻 (任意・正の安全整数 ms のみ・0/不正は undefined = serialize の > 0 と対称)。
       pickupAt:
         pickupAtRaw &&

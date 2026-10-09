@@ -464,6 +464,28 @@ describe('agent-order summary route (人払い store-borne)', () => {
     ]);
   });
 
+  it.each([
+    ['storefront', 'merchant', '144', '1440', 'merchant'],
+    ['preorder', 'customer', '43.2', '1483.2', 'customer'],
+  ] as const)('店舗の値引き (10%%): %s / %s は値引き後の 1,440 に利用料・人払いの注文画面と同じ内訳', async (mode, feePayer, _x, customerPaysJpyc, feeBearer) => {
+    const base = record();
+    store.record = record({
+      storefront: { ...base.storefront!, mode, feePayer, discount: { kind: 'percent', value: '10' } },
+    });
+    const { summary } = await load();
+    const res = await summary.GET(summaryReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ subtotalJpyc: '1600', discountJpyc: '160', feeBearer, customerPaysJpyc });
+    expect(body.feeJpyc).toBe(mode === 'storefront' ? '14.4' : '43.2');
+  });
+
+  it('値引きのない店は discountJpyc を出さない (従来の応答のまま)', async () => {
+    const { summary } = await load();
+    const body = await (await summary.GET(summaryReq(`h=shop&cart=${CART}`))).json();
+    expect('discountJpyc' in body).toBe(false);
+  });
+
   it('手数料は mobileOrderFee (1%・フロア無し) — x402 の floor (2 JPYC) は効かない', async () => {
     // 100 JPYC の注文: mobileOrderFee 1% = 1 JPYC (フロア無し)。x402FeeValue を誤用すると
     // max(2,1)=2 になる。summary が人払い checkout の実額 (フロア無し) に一致する証明。
@@ -511,6 +533,16 @@ describe('agent-order pay route', () => {
     const res = await pay.GET(payReq('h=shop&cart=%21%21%21bad'));
     expect(res.status).toBe(422);
     expect((await res.json()).error).toBe('invalid_cart');
+  });
+
+  it('店舗の値引きがあっても、AI が x402 で払う注文は定価 (plans/discount-common.md)', async () => {
+    const base = record();
+    store.record = record({ storefront: { ...base.storefront!, discount: { kind: 'percent', value: '10' } } });
+    const { pay } = await load();
+    const res = await pay.GET(payReq(`h=shop&cart=${CART}`));
+    expect(res.status).toBe(402);
+    const body = (await res.json()) as { accepts: Array<{ extra: { openpay: { merchantValue: string } } }> };
+    expect(body.accepts[0].extra.openpay.merchantValue).toBe((1600n * JPYC).toString());
   });
 
   it('payment ヘッダ無し → 402 + accepts (payTo=config.to / amount=合計 / resource 正規)', async () => {

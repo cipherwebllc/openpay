@@ -3,6 +3,7 @@
 import { TOKEN_SYMBOLS, DEFAULT_CHAIN_FOR_SYMBOL, type TokenSymbol } from '@/lib/tokens';
 import type { ChainSlug } from '@/lib/chains';
 import { validateStorefrontParts, validateOrderConfig, type MobileOrderConfig } from '@/lib/mobileOrder';
+import { validStorefrontDiscount } from '@/lib/mobileOrderDiscount';
 import { isHandleTheme } from '@/lib/handleThemeKey';
 import { extractHandleEmbed } from './embeds';
 import {
@@ -27,7 +28,7 @@ export function handleStorefrontConfig(
   if (!sf) return null;
   // ブランディングは storefront (ビルダー由来) を優先し、無ければ @handle 側へフォールバック。
   // 受取先 (receiver) は @handle が権威 (config.to)。
-  return validateOrderConfig({
+  const config = validateOrderConfig({
     receiver: record.config.to,
     chain: sf.chain,
     chains: sf.chains, // 受取チェーン集合 (2 件以上で注文ページに選択 UI)
@@ -52,6 +53,10 @@ export function handleStorefrontConfig(
     lastOrder: sf.lastOrder,
     minLeadMinutes: sf.minLeadMinutes,
   });
+  // 店舗の値引き (任意)。正本のある @handle の公開設定からだけ載せる (validateOrderConfig は写さない = ?s= は値引きなし)。
+  const discount = validStorefrontDiscount(sf.discount);
+  if (config && discount) config.discount = discount;
+  return config;
 }
 
 const STRING_KEYS = [

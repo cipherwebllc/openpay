@@ -776,6 +776,8 @@ describe('CheckoutForm — 送信', () => {
       merchant: MERCHANT,
       mode: 'preorder',
       pickupAt: 1_800_000_000_000,
+      // 明細 (店舗の値引きの照合に使う・plans/discount-common.md)。
+      items: USDC_PARAMS.items.map(({ name, qty, price }) => ({ name, qty, price })),
     });
     expect(mutate).not.toHaveBeenCalled();
     expect(
@@ -846,6 +848,38 @@ describe('CheckoutForm — 送信', () => {
       merchant: MERCHANT,
       mode: 'preorder',
       feePayer: 'customer',
+      items: USDC_PARAMS.items.map(({ name, qty, price }) => ({ name, qty, price })),
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it('店舗の値引き: URL の値引きを明細と一緒に admission body に載せる (公開設定と署名前に照合)', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm
+        params={{ ...USDC_PARAMS, storeHandle: 'coffee_shop', feeKind: 'storefront', discount: '5.5' }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /を支払う/ }));
+
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1].body))).toEqual({
+      handle: 'coffee_shop',
+      merchant: MERCHANT,
+      mode: 'storefront',
+      items: USDC_PARAMS.items.map(({ name, qty, price }) => ({ name, qty, price })),
+      discount: '5.5',
     });
     vi.unstubAllGlobals();
   });

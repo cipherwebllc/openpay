@@ -23,6 +23,7 @@ import { chainForSlug } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
 import { decodeAgentCart, computeAgentOrder } from '@/lib/agentOrder';
 import { mobileOrderBreakdown, mobileOrderGasMode } from '@/lib/mobileOrderFee';
+import { storefrontDiscountWei } from '@/lib/mobileOrderDiscount';
 import { declaredItemsTotalMinor } from '@/lib/orderRelay';
 
 export const runtime = 'nodejs';
@@ -79,7 +80,11 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   // checkout と同じ KV 権威の mode/feePayer で計算し、見積りだけ別の料金になる波及を断つ。
   const { mode, feePayer } = record.storefront;
-  const breakdown = mobileOrderBreakdown(order.totalMinor, mode, feePayer);
+  // 人が払う注文には店舗の値引き (公開設定) が付く (注文画面と同じ関数・plans/discount-common.md)。
+  // 利用料は値引き後の額から。AI が x402 で払う注文 (order_quote / pay route) は定価のまま。
+  const discountMinor = storefrontDiscountWei(record.storefront.discount, order.totalMinor, decimals);
+  const payableMinor = order.totalMinor - discountMinor;
+  const breakdown = mobileOrderBreakdown(payableMinor, mode, feePayer);
 
   const shopName =
     record.storefront.shopName || record.config.name?.trim() || `@${handle}`;
@@ -99,8 +104,9 @@ export async function GET(req: Request): Promise<NextResponse> {
     currency: 'JPYC',
     items,
     subtotalJpyc: formatUnits(order.totalMinor, decimals),
+    ...(discountMinor > 0n ? { discountJpyc: formatUnits(discountMinor, decimals) } : {}),
     feeJpyc: formatUnits(env.enableMobileOrderFee ? breakdown.feeAmount : 0n, decimals),
     feeBearer: mobileOrderGasMode(mode, feePayer),
-    customerPaysJpyc: formatUnits(env.enableMobileOrderFee ? breakdown.customerPays : order.totalMinor, decimals),
+    customerPaysJpyc: formatUnits(env.enableMobileOrderFee ? breakdown.customerPays : payableMinor, decimals),
   });
 }

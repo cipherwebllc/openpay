@@ -81,6 +81,9 @@ export type StoredOrder = {
   ready?: boolean;
   // ready=true にした時刻 (ms・表示用 advisory)。「HH:mm 準備完了」表示に使う。
   readyAt?: number;
+  // 店舗の値引き (JPYC minor units 文字列・plans/discount-common.md)。受注時に公開 storefront の値引きを申告明細の
+  // 合計に当てた額 (server 計算)。金額が合う注文だけが持つ (表示用・在るときだけ)。
+  discount?: string;
   // 金額突合の advisory フラグ。true のときだけ保存し、false/欠落は同一扱い。
   amountMismatch?: boolean;
   amountUnchecked?: boolean;
@@ -390,6 +393,9 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
   if (typeof o.bindingDigest === 'string' && /^0x[0-9a-fA-F]{64}$/.test(o.bindingDigest)) order.bindingDigest = o.bindingDigest;
   if (o.amountMismatch === true) order.amountMismatch = true;
   if (o.amountUnchecked === true) order.amountUnchecked = true;
+  if (typeof o.discount === 'string' && DECIMAL_INT.test(o.discount) && BigInt(o.discount) > 0n) {
+    order.discount = o.discount;
+  }
   if (o.feeUncollected === true) {
     order.feeUncollected = true;
     const feeExpectedAmount = parseFeeExpectedAmount(o.feeExpectedAmount);
