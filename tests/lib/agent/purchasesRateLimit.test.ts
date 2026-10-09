@@ -35,10 +35,10 @@ describe('Agent purchases rate limit with actual shared guard', () => {
     expect(await agentPurchasesRateLimit(req, route)).toBeNull();
     expect(kv.kvIncr).toHaveBeenCalledTimes(1);
   });
-  it.each(['unconfigured', 'error', 'throw'])('rate limit %s fails open', async (failure) => {
+  // lib/kv は KV 障害を reject せず ok:false で返す (tests/lib/kv.test.ts の no-throw 契約)。障害の形は ok:false だけを流す。
+  it.each(['unconfigured', 'timeout', 'network_error'])('rate limit %s fails open', async (failure) => {
     if (failure === 'unconfigured') kv.isKvConfigured.mockReturnValue(false);
-    else if (failure === 'error') kv.kvIncr.mockResolvedValue({ ok: false, reason: 'timeout' });
-    else kv.kvIncr.mockRejectedValue(new Error('down'));
+    else kv.kvIncr.mockResolvedValue({ ok: false, reason: failure });
     expect(await agentPurchasesRateLimit(req, 'purchases')).toBeNull();
   });
 });

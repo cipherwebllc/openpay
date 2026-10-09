@@ -652,3 +652,76 @@ describe('lib/kv', () => {
     });
   });
 });
+
+// 第 7 回レビュー C3: lib/kv の helper は保存先の失敗をすべて { ok: false } で返し、reject しない (no-throw)。
+// 呼び出し側 (limiter・チップのメッセージ・Agent の nonce 等) はこの契約に乗って try で包まない。
+// 送信の失敗・HTTP の失敗・壊れた本文を helper ごとに流し、どれも resolve して ok:false になることを固定する。
+describe('lib/kv の no-throw 契約 (呼び出し側は try で包まない)', () => {
+  function erroredBody(): Response {
+    return new Response(new ReadableStream({ start(controller) { controller.error(new Error('stream broke')); } }));
+  }
+
+  const failures: Array<[string, () => unknown]> = [
+    ['fetch が同期で throw', () => { throw new Error('sync'); }],
+    ['fetch が TypeError で reject', () => Promise.reject(new TypeError('fetch failed'))],
+    ['fetch が TimeoutError で reject', () => Promise.reject(new DOMException('timed out', 'TimeoutError'))],
+    ['fetch が文字列で reject', () => Promise.reject('offline')],
+    ['fetch が null で reject', () => Promise.reject(null)],
+    ['fetch が undefined で reject', () => Promise.reject(undefined)],
+    ['fetch がただの object で reject', () => Promise.reject({ code: 'ECONNRESET' })],
+    ['HTTP 503 の JSON error', () => Promise.resolve(new Response('{"error":"unavailable"}', { status: 503 }))],
+    ['HTTP 502 の HTML', () => Promise.resolve(new Response('<html>bad gateway</html>', { status: 502 }))],
+    ['HTTP 500 の本文 null', () => Promise.resolve(new Response('null', { status: 500 }))],
+    ['HTTP 400 の error が文字列でない', () => Promise.resolve(new Response('{"error":{"x":1}}', { status: 400 }))],
+    ['200 の壊れた JSON', () => Promise.resolve(new Response('{'))],
+    ['200 の null', () => Promise.resolve(new Response('null'))],
+    ['200 の数値', () => Promise.resolve(new Response('5'))],
+    ['200 の文字列', () => Promise.resolve(new Response('"x"'))],
+    ['200 の空 object', () => Promise.resolve(new Response('{}'))],
+    ['200 の空配列', () => Promise.resolve(new Response('[]'))],
+    ['200 の Upstash error', () => Promise.resolve(new Response('{"error":"ERR"}'))],
+    ['200 の本文の stream エラー', () => Promise.resolve(erroredBody())],
+  ];
+
+  beforeEach(() => {
+    process.env.UPSTASH_REDIS_REST_URL = 'https://nothrow.upstash.test';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'secret';
+  });
+  afterEach(() => {
+    delete process.env.UPSTASH_REDIS_REST_URL;
+    delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    vi.unstubAllGlobals();
+  });
+
+  it.each(failures)('%s でも全 helper が resolve して ok:false を返す', async (_name, reply) => {
+    vi.stubGlobal('fetch', vi.fn(reply));
+    const kv = await import('@/lib/kv');
+    const calls: Array<[string, () => Promise<{ ok: boolean }>]> = [
+      ['kvLpush', () => kv.kvLpush('k', 'v')],
+      ['kvLpush(atomic)', () => kv.kvLpush('k', 'v', { trimStart: 0, trimStop: 9, ttlSec: 60 })],
+      ['kvLrange', () => kv.kvLrange('k', 0, 9)],
+      ['kvLlen', () => kv.kvLlen('k')],
+      ['kvLtrim', () => kv.kvLtrim('k', 0, 9)],
+      ['kvLrem', () => kv.kvLrem('k', 'v')],
+      ['kvEval', () => kv.kvEval('return 1', ['k'], ['a'])],
+      ['kvIncr', () => kv.kvIncr('k')],
+      ['kvIncr(atomic)', () => kv.kvIncr('k', { initialTtlSec: 60 })],
+      ['kvDecr', () => kv.kvDecr('k')],
+      ['kvGet', () => kv.kvGet('k')],
+      ['kvMget', () => kv.kvMget(['a', 'b'])],
+      ['kvSet', () => kv.kvSet('k', 'v', { nx: true, ttlSec: 60 })],
+      ['kvExpire', () => kv.kvExpire('k', 60)],
+      ['kvExists', () => kv.kvExists(['a'])],
+      ['kvDel', () => kv.kvDel('k')],
+      ['kvGetDel', () => kv.kvGetDel('k')],
+      ['kvSetNxGet', () => kv.kvSetNxGet('k', 'v', 60)],
+    ];
+    for (const [name, call] of calls) {
+      const settled = await call().then(
+        (value) => ({ name, rejected: false, ok: value.ok }),
+        () => ({ name, rejected: true, ok: undefined }),
+      );
+      expect(settled).toEqual({ name, rejected: false, ok: false });
+    }
+  });
+});
