@@ -9,7 +9,7 @@ const read = (file: string) => readFileSync(file, 'utf8');
 // production / production sets …) is kept apart from OFF wording (production sets `0` / off in production /
 // off on mainnet): a bare `production sets` match counted "production sets `0`" as ON (found when the
 // register standard-payment fee was abolished on 2026-10-07).
-const ON_DECLARATION = /live on mainnet|live in production|production sets (?!`0`)/i;
+const ON_DECLARATION = /live on mainnet|live in production|production sets (?!(?:`[A-Z0-9_]+` to )?`0`)/i;
 const OFF_DECLARATION = /production sets? (?:`[A-Z0-9_]+` to )?`0`|off in production|off on mainnet/i;
 const flagsDeclared = (readme: string, declaration: RegExp) =>
   [
@@ -83,6 +83,10 @@ describe('production-flag Playwright coverage (F13)', () => {
     expect(off('**Off on mainnet since 2026-10-07** (that fee was abolished; production sets `0`)')).toBe(true);
     expect(off('(flag-gated; off in production since 2026-10-07)')).toBe(true);
     expect(off('production set `NEXT_PUBLIC_ENABLE_REGISTER_FEE` to `0`')).toBe(true);
+    // 現在形 + 変数名 + to の OFF 宣言も ON に数えない (Codex #770 P3)
+    expect(on('production sets `NEXT_PUBLIC_ENABLE_REGISTER_FEE` to `0`')).toBe(false);
+    expect(off('production sets `NEXT_PUBLIC_ENABLE_REGISTER_FEE` to `0`')).toBe(true);
+    expect(on('production sets `NEXT_PUBLIC_ENABLE_STORE_GAS_WALLET` to `1`')).toBe(true);
     expect(off('**Live on mainnet** (production sets `1`); code default **off**.')).toBe(false);
   });
 
