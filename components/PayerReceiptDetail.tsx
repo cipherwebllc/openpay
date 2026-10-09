@@ -207,6 +207,25 @@ export function PayerReceiptDetail({
           それ以外は税額が計上されているときだけ小計/消費税を併記 (0 のときは合計のみ)。
           行ごとに丸めた税額の合計とインボイスの税額を同じ控えに並べない (数字が食い違うため)。 */}
       <dl className="mt-3 space-y-0.5 text-xs">
+        {/* レジの値引き: 小計 (値引き前) → 値引き。以下の税率ごとの額・合計は値引き後。 */}
+        {receipt.discountAmount && (
+          <>
+            {receipt.subtotalAmount && (
+              <div className="flex justify-between">
+                <dt className="text-slate-500">{t('subtotalLabel')}</dt>
+                <dd className="font-mono">
+                  {receipt.subtotalAmount} {currency}
+                </dd>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <dt className="text-slate-500">{t('discountLabel')}</dt>
+              <dd className="font-mono">
+                −{receipt.discountAmount} {currency}
+              </dd>
+            </div>
+          </>
+        )}
         {invoice &&
           invoice.groups.map((g) => (
             <div key={g.rate} className="flex flex-wrap justify-between gap-x-2">
@@ -221,7 +240,7 @@ export function PayerReceiptDetail({
           ))}
         {!invoice && hasTax && (
           <>
-            {receipt.subtotalAmount && (
+            {receipt.subtotalAmount && !receipt.discountAmount && (
               <div className="flex justify-between">
                 <dt className="text-slate-500">{t('subtotalLabel')}</dt>
                 <dd className="font-mono">

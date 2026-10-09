@@ -178,6 +178,56 @@ describe('buildPayerReceipt', () => {
   });
 });
 
+describe('レジの値引き (明細に配った discount)', () => {
+  const discounted = () =>
+    saleEntry({
+      merchantAmount: 980n * 10n ** 18n,
+      saleAmount: 980n * 10n ** 18n,
+      lineItems: [
+        { name: 'コーヒー', quantity: 1, unitPrice: '600', amount: '600', taxRate: 10, taxCategory: 'taxable_10', memo: null, taxAmount: '53', discount: '12' },
+        { name: 'パン', quantity: 1, unitPrice: '400', amount: '400', taxRate: 8, taxCategory: 'taxable_8', memo: null, taxAmount: '29', discount: '8' },
+      ],
+    });
+
+  it('控えに 値引き前の小計・値引き・合計 (支払額) を持つ', () => {
+    const r = payerReceiptFromHistoryEntry(discounted(), { now: NOW });
+    expect(r.subtotalAmount).toBe('1000');
+    expect(r.discountAmount).toBe('20');
+    expect(r.totalAmount).toBe('980');
+    expect(r.amount).toBe('980');
+    expect(r.totalTaxAmount).toBe('82');
+  });
+
+  it('コピー文は 小計 → 値引き → 合計 の順・CSV は行ごとの値引き', () => {
+    const r = payerReceiptFromHistoryEntry(discounted(), { now: NOW });
+    const text = payerReceiptCopyText(r);
+    expect(text).toMatch(/小計：1000 JPYC\n値引き：−20 JPYC[\s\S]*合計：980 JPYC/);
+    const rows = payerReceiptCsv(r).replace(/^\uFEFF/, '').trim().split('\r\n');
+    expect(rows[0].split(',').at(-1)).toBe('値引き');
+    expect(rows[1].split(',').at(-1)).toBe('12');
+    expect(rows[2].split(',').at(-1)).toBe('8');
+  });
+
+  it('壊れた保存値: 値引きの合計が明細・小計と合わない控え、明細の値引きが文字列でない控えは読まない', () => {
+    window.localStorage.clear();
+    const good = payerReceiptFromHistoryEntry(discounted(), { now: NOW });
+    const raw = [
+      { ...good, receiptId: 'mismatch', discountAmount: '80' },
+      { ...good, receiptId: 'notdecimal', discountAmount: 'abc' },
+      { ...good, receiptId: 'numberline', lineItems: good.lineItems?.map((li) => ({ ...li, discount: 12 })) },
+      good,
+    ];
+    window.localStorage.setItem('openpay:payerReceipts:v1', JSON.stringify(raw));
+    expect(loadPayerReceipts().map((r) => r.receiptId)).toEqual([good.receiptId]);
+  });
+
+  it('値引きの無い控えは従来どおり (discountAmount を持たない)', () => {
+    const r = payerReceiptFromHistoryEntry(saleEntry(), { now: NOW });
+    expect(r.discountAmount).toBeUndefined();
+    expect(r.subtotalAmount).toBe(r.totalAmount);
+  });
+});
+
 describe('payerReceiptFromHistoryEntry', () => {
   it('HistoryEntry (sale 成功) → 顧客レシートへ写像 (明細/合計/店舗/顧客/status)', () => {
     const r = payerReceiptFromHistoryEntry(saleEntry(), {

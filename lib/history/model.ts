@@ -116,6 +116,9 @@ export type HistoryLineItem = {
   taxAmount?: string;
   /** 由来プリセット id (任意)。 */
   presetId?: string;
+  /** レジの値引きのうち、この行に配った額 (token 単位・plans/register-discount.md)。amount は値引き前のまま。
+   *  支払い時に税率ごと → 明細の順に按分して固定する (後から計算し直さない)。taxAmount は値引き後の行額から。 */
+  discount?: string;
 };
 
 export type HistoryEntry = {

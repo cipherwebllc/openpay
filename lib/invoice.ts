@@ -10,6 +10,7 @@
 // 店舗が設定した値をそのまま出すだけで、OpenPay は登録状況を確かめない (控えの免責文で明示)。
 
 import { parseUnits } from 'viem';
+import { lineDiscountWei } from './discount';
 import type { HistoryLineItem } from './history';
 import type { PayerReceipt } from './payerReceipt';
 
@@ -96,7 +97,11 @@ export function invoiceRateGroups(
     if (rate == null) return null;
     const minor = toMinor(li.amount);
     if (minor == null) return null;
-    sums.set(rate, (sums.get(rate) ?? 0n) + minor);
+    // レジの値引きは支払い時に税率ごと → 明細へ按分して行に固定してある。税率ごとの対価は値引き後の額
+    // (一括値引きの按分)。壊れた値引き (形が不正・行の金額を超える) の控えにはインボイス欄を出さない。
+    const discount = lineDiscountWei(li, JPYC_DECIMALS);
+    if (discount == null) return null;
+    sums.set(rate, (sums.get(rate) ?? 0n) + minor - discount);
   }
   const order: InvoiceRate[] = [10, 8, 0];
   return order

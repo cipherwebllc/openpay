@@ -26,7 +26,7 @@
 //
 // webhook payload は Tip と互換シェイプ (type 識別子だけ "openpay.checkout.success")。
 // マーチャントは 1 つの handler で Tip / Checkout 両対応可能。
-import { getAddress, isAddress, parseUnits } from 'viem';
+import { formatUnits, getAddress, isAddress, parseUnits } from 'viem';
 import type { Address } from 'viem';
 import type { ChainSlug } from '../chains';
 import type { GasMode, PayMode } from '../fee';
@@ -39,8 +39,10 @@ import { stripControlChars, truncateSafe } from '../sanitize';
 import {
   parseTaxCategoryParam,
   parseTaxRateParam,
+  taxDisplayDecimals,
   type TaxCategory,
 } from '../tax';
+import { parseDiscountAmount } from '../discount';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
   defaultDeploymentForSymbol,
@@ -131,6 +133,10 @@ export type CheckoutParams = {
   // お店の端末が送る。条件に合わない URL は parse で止める (回収 1% に黙って倒さない)。
   submit?: 'store';
   handoffId?: string;
+  // --- レジの値引き (任意・RegisterMode のみが設定・plans/register-discount.md)。 ---
+  // 小計から引く額 (トークン単位の 10 進・表示の最小単位の倍数・小計より小さい)。支払額 = 小計 − 値引き
+  // (calcCheckoutPayable)。不在 = 値引きなし (従来の URL とバイト不変)。モバイル注文の URL には付けない。
+  discount?: string;
 };
 
 export const CHECKOUT_MAX_ITEMS = 10;
@@ -240,6 +246,8 @@ export function buildCheckoutPath(params: CheckoutParams): string {
     sp.set('chain', params.chain);
   }
   sp.set('items', encodeItems(params.items));
+  // 値引き (在るときだけ)。値引きなしの URL は従来とバイト不変。
+  if (params.discount) sp.set('disc', params.discount);
   // standard mode では gas は irrelevant なので出力しない (出ても parser が無視する)。
   const effectiveMode: PayMode = params.mode ?? 'gasless';
   if (params.gas === 'merchant' && effectiveMode !== 'standard') {
@@ -336,6 +344,7 @@ export function parseCheckoutParams(
   const pickupAtRaw = searchParams.get('pickup_at');
   const submitRaw = searchParams.get('submit');
   const handoffRaw = searchParams.get('hs');
+  const discountRaw = searchParams.get('disc');
 
   if (!to) return { ok: false, ...urlFail('missingTo') };
   if (!isAddress(to)) return { ok: false, ...urlFail('invalidTo') };
@@ -382,6 +391,28 @@ export function parseCheckoutParams(
       storeHandle !== null)
   ) {
     return { ok: false, ...urlFail('storeDeviceUnavailable') };
+  }
+
+  // 値引きは fail-closed: 形式・最小単位・小計より小さいことを確かめ、合わなければ「使えない」と止める
+  // (黙って値引きなしに倒すと、お店が決めた額より多く払わせる)。モバイル注文の URL とは併用させない
+  // (注文の束縛と受注の金額確認は値引きを知らない)。
+  let discount: string | undefined;
+  if (discountRaw !== null) {
+    const discountWei = parseDiscountAmount(
+      discountRaw,
+      calcCheckoutTotal(items, decimals),
+      decimals,
+      taxDisplayDecimals(token),
+    );
+    if (
+      discountWei === null ||
+      isMobileOrderFeeKind(feeKindRaw) ||
+      orderId !== null ||
+      storeHandle !== null
+    ) {
+      return { ok: false, ...urlFail('invalidDiscount') };
+    }
+    discount = formatUnits(discountWei, decimals);
   }
 
   // (token, chain) が gasless mode を提供できない場合は gasless 要求を reject。
@@ -442,12 +473,25 @@ export function parseCheckoutParams(
           ? Number(pickupAtRaw)
           : undefined,
       ...(storeSubmit ? { submit: 'store' as const, handoffId: handoffRaw as string } : {}),
+      ...(discount !== undefined ? { discount } : {}),
     },
   };
 }
 
 // items 合計を bigint で計算 (token decimals を反映)。fee 計算は既存の calcBreakdown
 // にこの bigint を渡せば良いので、checkout 専用の breakdown 関数は不要。
+/**
+ * 支払額 = 明細の合計 (小計) − 値引き。値引きが無ければ小計そのまま (従来の calcCheckoutTotal と同じ)。
+ * 値引きは parse (parseCheckoutParams) / レジ (parseDiscountAmount) で「小計より小さい」を確かめ済み。
+ */
+export function calcCheckoutPayable(
+  params: Pick<CheckoutParams, 'items' | 'discount'>,
+  decimals: number,
+): bigint {
+  const subtotal = calcCheckoutTotal(params.items, decimals);
+  return params.discount ? subtotal - parseUnits(params.discount, decimals) : subtotal;
+}
+
 export function calcCheckoutTotal(
   items: ReadonlyArray<CheckoutItem>,
   decimals: number,

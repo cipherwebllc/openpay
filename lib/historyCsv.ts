@@ -25,7 +25,7 @@ import {
 } from './history';
 import { isIncomeSaleEntry } from './historyFilters';
 import { entryYenValue } from './historyYen';
-import { lineItemGrossAmount } from './lineItemsCsv';
+import { lineItemChargedAmount } from './lineItemsCsv';
 import {
   taxAmountDecimal,
   taxAmountYen,
@@ -176,12 +176,13 @@ function taxAmountCell(e: HistoryEntry, usdcJpy: number | undefined): string {
   }
   if (items.every((li) => li.taxRate == null)) return '';
 
-  const totalGross = items.reduce((sum, li) => sum + (lineItemGrossAmount(li) ?? 0), 0);
+  // 重みは値引き後の行額 (レジの値引き後の税率ごとの対価に揃える・値引きの無い行は税込額そのもの)。
+  const totalGross = items.reduce((sum, li) => sum + (lineItemChargedAmount(li) ?? 0), 0);
   // 壊れた明細の按分不能な分母が NaN/Infinity の税額として CSV へ波及するのを防ぐ。
   if (!Number.isFinite(totalGross) || totalGross <= 0) return '';
   let tax = 0;
   for (const li of items) {
-    const gross = lineItemGrossAmount(li);
+    const gross = lineItemChargedAmount(li);
     // 金額不明行の円額が他行へ再配分され税額を過大表示するのを防ぐため、取引の税額は出さない。
     if (gross === null) return '';
     // 行円額 = 行 gross / Σ行 gross × 取引 gross 円額。例: gross 4000・net 3880 でも

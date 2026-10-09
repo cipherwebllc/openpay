@@ -7,7 +7,8 @@
 // サーバ送信なし・秘密情報なし (txHash・アドレス・金額・商品名のみ)。端末のブラウザ scope のみ。
 // 設計は lib/history.ts の load/migrate/append/CustomEvent パターンを踏襲 (壊れたデータは drop)。
 
-import { formatUnits } from 'viem';
+import { formatUnits, parseUnits } from 'viem';
+import { lineItemsDiscountWei } from './discount';
 import { safeGet, safeSet } from './storage';
 import { logger } from './logger';
 import { buildCsv } from './csv';
@@ -68,7 +69,10 @@ export type PayerReceipt = {
   gasMode?: string;
   /** 共通の売上明細型を再利用 (店舗側 lineItems と同型)。 */
   lineItems?: HistoryLineItem[];
+  /** 値引き前の小計 (値引きがあるときは 合計 + 値引き)。 */
   subtotalAmount?: string;
+  /** レジの値引きの合計 (token 単位・明細の discount の合計)。値引きの無い控えは省略。 */
+  discountAmount?: string;
   totalTaxAmount?: string;
   totalAmount?: string;
   memo?: string;
@@ -99,6 +103,7 @@ export type BuildPayerReceiptInput = {
   gasMode?: string | null;
   lineItems?: HistoryLineItem[] | null;
   subtotalAmount?: string;
+  discountAmount?: string | null;
   totalTaxAmount?: string;
   totalAmount?: string;
   memo?: string | null;
@@ -168,6 +173,7 @@ export function buildPayerReceipt(
     gasMode: input.gasMode ?? undefined,
     lineItems,
     subtotalAmount: input.subtotalAmount ?? input.totalAmount ?? input.amount,
+    ...(input.discountAmount ? { discountAmount: input.discountAmount } : {}),
     totalTaxAmount: input.totalTaxAmount ?? '0',
     totalAmount: input.totalAmount ?? input.amount,
     memo: input.memo?.trim() || undefined,
@@ -241,6 +247,13 @@ export function payerReceiptFromHistoryEntry(
   const single = entry.lineItems && entry.lineItems.length > 0 ? null : singleReceiptLine(entry, grossTotal, opts.merchantName);
   const lineItems = single ?? entryLineItems(entry);
   const totalTaxAmount = single && single.length > 0 ? (single[0].taxAmount ?? '0') : totals.totalTax;
+  // レジの値引き: 明細に配った額の合計。小計は値引き前 (= 合計 + 値引き)。壊れた値引きは出さない。
+  const decimals = HISTORY_ASSET_DECIMALS[entry.asset];
+  const discountWei = single ? 0n : (lineItemsDiscountWei(entry.lineItems, decimals) ?? 0n);
+  const discountAmount = discountWei > 0n ? formatUnits(discountWei, decimals) : null;
+  const subtotalAmount = discountWei > 0n
+    ? formatUnits(parseUnits(grossTotal, decimals) + discountWei, decimals)
+    : grossTotal;
   const status: PayerReceiptStatus =
     entry.status === 'success'
       ? 'confirmed'
@@ -262,7 +275,8 @@ export function payerReceiptFromHistoryEntry(
       paymentMode: entry.payMode,
       gasMode: entry.gasMode,
       lineItems,
-      subtotalAmount: grossTotal,
+      subtotalAmount,
+      discountAmount,
       totalTaxAmount,
       totalAmount: grossTotal,
       memo: entry.memo,
@@ -293,7 +307,8 @@ function isValidLineItems(value: unknown): boolean {
       typeof o.name === 'string' &&
       typeof o.quantity === 'number' &&
       typeof o.unitPrice === 'string' &&
-      typeof o.amount === 'string'
+      typeof o.amount === 'string' &&
+      (o.discount === undefined || typeof o.discount === 'string')
     );
   });
 }
@@ -309,6 +324,29 @@ const VALID_RECEIPT_STATUSES: ReadonlySet<string> = new Set([
   'unknown',
 ] satisfies PayerReceiptStatus[]);
 
+// 値引きの合計 (discountAmount) は、明細に配った額の合計・小計 − 合計 と一致するときだけ読む (壊れた保存値で
+// インボイス欄の横に違う値引き額を出さない)。
+function isConsistentDiscount(r: Record<string, unknown>): boolean {
+  const decimals = r.currency === 'JPYC' ? 18 : r.currency === 'USDC' ? 6 : null;
+  if (decimals === null || typeof r.discountAmount !== 'string' || !/^\d+(\.\d+)?$/.test(r.discountAmount)) return false;
+  let discount: bigint;
+  try {
+    discount = parseUnits(r.discountAmount, decimals);
+  } catch {
+    return false;
+  }
+  const lines = lineItemsDiscountWei(r.lineItems as HistoryLineItem[] | undefined, decimals);
+  if (lines === null || lines !== discount || discount <= 0n) return false;
+  if (typeof r.subtotalAmount === 'string' && typeof r.totalAmount === 'string') {
+    try {
+      return parseUnits(r.subtotalAmount, decimals) === parseUnits(r.totalAmount, decimals) + discount;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 function isValidReceipt(value: unknown): value is PayerReceipt {
   if (value === null || typeof value !== 'object') return false;
   const r = value as Record<string, unknown>;
@@ -322,6 +360,7 @@ function isValidReceipt(value: unknown): value is PayerReceipt {
   if (typeof r.merchantAddress !== 'string') return false;
   if (r.orderId !== undefined && typeof r.orderId !== 'string') return false;
   if (r.lineItems !== undefined && !isValidLineItems(r.lineItems)) return false;
+  if (r.discountAmount !== undefined && !isConsistentDiscount(r)) return false;
   return true;
 }
 
@@ -501,6 +540,11 @@ export function payerReceiptCopyText(r: PayerReceipt, locale?: string): string {
     lines.push(`${li.name} x ${li.quantity}${reduced}    ${li.amount} ${r.currency}`);
   }
   lines.push('');
+  // レジの値引き: 小計 (値引き前) → 値引き。以下の税率ごとの額・合計は値引き後。
+  if (r.discountAmount) {
+    if (r.subtotalAmount) lines.push(`${en ? 'Subtotal' : '小計'}：${r.subtotalAmount} ${r.currency}`);
+    lines.push(`${en ? 'Discount' : '値引き'}：−${r.discountAmount} ${r.currency}`);
+  }
   if (invoice) {
     // インボイス欄: 税率ごとの税込合計と消費税額 (円・税率ごとに 1 回の端数処理)。
     // 行ごとに丸めた税額の合計 (totalTaxAmount) は並べない (同じ控えで数字が食い違うため)。
@@ -509,7 +553,7 @@ export function payerReceiptCopyText(r: PayerReceipt, locale?: string): string {
     }
   } else if (payerReceiptHasTax(r)) {
     // 税額が計上されているときだけ小計/消費税を併記 (0 のときは合計のみで十分)。
-    if (r.subtotalAmount) lines.push(`${en ? 'Subtotal' : '小計'}：${r.subtotalAmount} ${r.currency}`);
+    if (r.subtotalAmount && !r.discountAmount) lines.push(`${en ? 'Subtotal' : '小計'}：${r.subtotalAmount} ${r.currency}`);
     lines.push(`${en ? 'Tax' : '消費税'}：${r.totalTaxAmount} ${r.currency}`);
   }
   lines.push(`${en ? 'Total' : '合計'}：${r.totalAmount ?? r.amount} ${r.currency}`);
@@ -583,6 +627,8 @@ const CSV_HEADER: readonly string[] = [
   '税額',
   '合計',
   'メモ',
+  // レジの値引き (この行に配った額)。値引きの無い控えは空欄。
+  '値引き',
 ];
 
 function receiptRows(r: PayerReceipt): string[][] {
@@ -600,6 +646,7 @@ function receiptRows(r: PayerReceipt): string[][] {
     li.taxAmount ?? '',
     r.totalAmount ?? r.amount,
     li.memo ?? r.memo ?? '',
+    li.discount ?? '',
   ];
   return (r.lineItems ?? []).map(base);
 }

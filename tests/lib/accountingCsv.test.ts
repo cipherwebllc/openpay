@@ -487,6 +487,37 @@ describe('toAccountingCsv: 混在税率の税区分グループ別分割 (REM-22
       : ['課税売上込10%', '課税売上込8%(軽)']);
   });
 
+  it.each(['freee', 'yayoi'] as const)('レジの値引き: %s は値引き後の税区分ごとの額 (588・392) に分ける', (format) => {
+    const e = entry({
+      merchantAmount: '980000000000000000000',
+      saleAmount: '980000000000000000000',
+      lineItems: [
+        { name: 'A', quantity: 1, unitPrice: '600', amount: '600', taxRate: 10, taxCategory: 'taxable_10', memo: null, discount: '12' },
+        { name: 'B', quantity: 1, unitPrice: '400', amount: '400', taxRate: 8, taxCategory: 'taxable_8', memo: null, discount: '8' },
+      ],
+    });
+    const result = toAccountingCsv([e], { format, usdcJpy: undefined });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const rows = parseRows(result.csv).slice(format === 'freee' ? 1 : 0);
+    expect(rows.map((r) => r[format === 'freee' ? 4 : 14])).toEqual(['588', '392']);
+  });
+
+  it('壊れた値引き (10 進でない 0x10) は按分の重みに使わず、取引を 1 行のまま出す', () => {
+    const e = entry({
+      merchantAmount: '190000000000000000000',
+      saleAmount: '190000000000000000000',
+      lineItems: [
+        { name: 'A', quantity: 1, unitPrice: '100', amount: '100', taxRate: 10, taxCategory: 'taxable_10', memo: null, discount: '0x10' },
+        { name: 'B', quantity: 1, unitPrice: '100', amount: '100', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+      ],
+    });
+    const result = toAccountingCsv([e], { format: 'freee', usdcJpy: undefined });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(parseRows(result.csv).slice(1)).toHaveLength(1);
+  });
+
   it('freee: 2 行に分割・合計 === エントリ yen・各行の税区分ラベルが正しい', () => {
     const r = toAccountingCsv([MIXED_1500], { format: 'freee', usdcJpy: 150 });
     expect(r.ok).toBe(true);

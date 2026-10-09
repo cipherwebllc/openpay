@@ -1043,12 +1043,39 @@ describe('CheckoutForm — 成功時の挙動', () => {
     expect(payload.token).toBe('usdc');
     expect(payload.chain).toBe('base');
     expect(payload.items).toEqual(USDC_PARAMS.items);
+    // 値引きの無い会計の payload に discount は出ない (追加のみ・従来の形のまま)。
+    expect('discount' in payload).toBe(false);
     expect(payload.orderId).toBe('ord-42');
     expect(payload.txHash).toBe(`0x${'b'.repeat(64)}`);
     // URL 仕様で customerEmail は prefill 専用・クライアントから送信しない → payload に不在。
     expect('customerEmail' in payload).toBe(false);
     // お渡し準備完了 flag OFF (既定) → statusToken は payload に不在 (完全 inert)。
     expect('statusToken' in payload).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('レジの値引き: webhook payload に discount を足す (items の合計 − discount = amount)', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    const makeUi = () => (
+      <CheckoutForm
+        params={{ ...USDC_PARAMS, orderId: undefined, discount: '5', webhook: 'https://shop.example.com/hook' }}
+      />
+    );
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(payload.discount).toBe('5');
+    expect(payload.items).toEqual(USDC_PARAMS.items);
+    expect(Number(payload.amount)).toBe(
+      USDC_PARAMS.items.reduce((a, it) => a + Number(it.price) * it.qty, 0) - 5,
+    );
     vi.unstubAllGlobals();
   });
 
@@ -2001,6 +2028,33 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     });
     expect(mutate).not.toHaveBeenCalled(); // useBatchPayment.mutate (Pimlico)
     expect(standardMutate).not.toHaveBeenCalled();
+  });
+
+  it('レジの値引き: 小計 → 値引き の行を出し、relay へ渡す額は値引き後 (3000 − 300 = 2700)', async () => {
+    const user = userEvent.setup();
+    setupRelayReady();
+    setSmartAccount(false);
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, discount: '300' }} />);
+    expect(screen.getByText('値引き')).toBeInTheDocument();
+    expect(screen.getByText(/−300/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /2700 JPYC を支払う/ }));
+    expect(relayMutate).toHaveBeenCalledWith({ merchant: MERCHANT, value: 2700n * 10n ** 18n, gasMode: 'customer' });
+  });
+
+  it('レジの値引き: 成功した支払いの履歴は 支払額 = 値引き後・明細に値引きを固定', () => {
+    window.localStorage.clear();
+    setupRelayReady();
+    const paid = 2700n * 10n ** 18n;
+    setRelayPayment('success', {
+      txHash: `0x${'9'.repeat(64)}`,
+      variables: { merchant: MERCHANT, value: paid, gasMode: 'customer' },
+    });
+    render(<CheckoutForm params={{ ...JPYC_PARAMS, discount: '300' }} />);
+    const e = loadHistory().find((x) => x.txHash === `0x${'9'.repeat(64)}`);
+    expect(e?.saleAmount).toBe(paid.toString());
+    expect(e?.lineItems?.[0]).toMatchObject({ amount: '3000', discount: '300' });
+    const receipt = loadPayerReceipts()[0];
+    expect(receipt).toMatchObject({ subtotalAmount: '3000', discountAmount: '300', totalAmount: '2700' });
   });
 
   it('relay 成功: txHash パネル + 顧客向け控え埋込 (/checkout) + 履歴保存', () => {

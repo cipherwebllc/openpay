@@ -19,7 +19,7 @@ import { tokyoDateKey } from './shopTime';
 import { shortAddress } from './format';
 import { isIncomeSaleEntry } from './historyFilters';
 import { entryYenValue, type YenValue } from './historyYen';
-import { lineItemGrossAmount } from './lineItemsCsv';
+import { lineItemChargedAmount } from './lineItemsCsv';
 import {
   entryLineItems,
   HISTORY_ASSET_DISPLAY,
@@ -116,7 +116,7 @@ function representativeTaxCategory(e: HistoryEntry): TaxCategory | null {
  *   - 明細の金額情報 (li.amount) が数値化できない行が 1 つでもある (按分比率を作れない)
  *
  * 混在時: 行の実効税区分 (li.taxCategory ?? entry default) ごとに per-line 税込額
- * (lineItemGrossAmount = 明細CSV の「明細金額」li.amount と同一) を合計し、その比率で
+ * (lineItemChargedAmount = 明細CSV の「明細金額」li.amount からレジの値引きを引いた額) を合計し、その比率で
  * yv.yen を按分する。比率按分なので per-line 額の通貨単位は約分されて消える
  * (USDC+anchor 決済では明細は販売建て通貨だが、同一通貨同士の比のみに使うため問題ない)。
  */
@@ -135,7 +135,8 @@ function taxGroupsForEntry(
   // 実効税区分 (null 明細は entry default へ) と per-line 税込額を集める。
   const lines: Array<{ cat: TaxCategory | null; gross: number }> = [];
   for (const li of items) {
-    const gross = lineItemGrossAmount(li);
+    // 重みは値引き後の行額 (レジの値引きを税区分へ按分した額に揃える・値引きの無い行は税込額そのもの)。
+    const gross = lineItemChargedAmount(li);
     if (gross === null) return single(); // 金額情報を欠く行 → 按分不能 → 単一行 fallback
     lines.push({ cat: li.taxCategory ?? entryDefault, gross });
   }

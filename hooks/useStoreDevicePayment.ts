@@ -58,6 +58,8 @@ export type StoreDevicePaymentSnapshot = {
   taxRate?: number;
   taxCategory?: CheckoutItem['taxCategory'];
   receiptNo?: string;
+  /** レジの値引き (token 単位の 10 進)。不在 = 値引きなし。 */
+  discount?: string;
 };
 
 export type StoreDeviceIntent = {
@@ -143,7 +145,11 @@ function isIntent(v: unknown): v is StoreDeviceIntent {
     typeof o.nonce === 'string' &&
     !!o.snapshot &&
     typeof o.snapshot === 'object' &&
-    Array.isArray((o.snapshot as Record<string, unknown>).items)
+    Array.isArray((o.snapshot as Record<string, unknown>).items) &&
+    // 値引き (任意) は 10 進の文字列だけ (壊れた保存値で履歴・控えの明細を組むときに落ちない)。
+    ((o.snapshot as Record<string, unknown>).discount === undefined ||
+      (typeof (o.snapshot as Record<string, unknown>).discount === 'string' &&
+        /^\d+(\.\d+)?$/.test((o.snapshot as Record<string, unknown>).discount as string)))
   );
 }
 
