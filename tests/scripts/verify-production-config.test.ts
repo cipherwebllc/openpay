@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assessPimlicoRun,
+  assessReceiptSigner,
   assessReverifyRun,
   REVERIFY_MAX_AGE_MS,
 } from '../../scripts/verify-production-config-helpers.mjs';
@@ -62,5 +63,25 @@ describe('assessPimlicoRun', () => {
   });
   it('古い見出し (#599 より前) だけでは実行済みにしない', () => {
     expect(assessPimlicoRun('Pimlico Sponsorship Paymaster 残高:')).toMatchObject({ ok: false });
+  });
+});
+
+describe('assessReceiptSigner', () => {
+  it('200 で receiptSigner がアドレスなら ok', () => {
+    const signer = '0x2b6F88e71eA4D05469B40853e1E475240D4B59b3';
+    expect(assessReceiptSigner(200, { receiptSigner: signer })).toEqual({
+      ok: true,
+      detail: `receiptSigner ${signer}`,
+    });
+  });
+
+  it.each([
+    ['null (鍵が無い・不正)', 200, { receiptSigner: null }],
+    ['欄が無い', 200, {}],
+    ['アドレスでない', 200, { receiptSigner: '0x1234' }],
+    ['本文が JSON でない', 200, null],
+    ['route が 404', 404, { receiptSigner: '0x2b6F88e71eA4D05469B40853e1E475240D4B59b3' }],
+  ])('%s なら fail', (_label, status, body) => {
+    expect(assessReceiptSigner(status, body).ok).toBe(false);
   });
 });

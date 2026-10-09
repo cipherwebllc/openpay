@@ -9,7 +9,7 @@
 // exit 0 = 全 active、1 = 1 件以上 inactive。
 
 import { spawnSync } from 'node:child_process';
-import { assessPimlicoRun, assessReverifyRun } from './verify-production-config-helpers.mjs';
+import { assessPimlicoRun, assessReceiptSigner, assessReverifyRun } from './verify-production-config-helpers.mjs';
 
 const BASE = process.argv[2] ?? 'https://open-pay.jp';
 
@@ -76,6 +76,20 @@ for (const [name, path] of [
     r.status === 400,
     `HTTP ${r.status} (200/500 なら問題)`,
   );
+}
+
+// --- (4b) x402 の受領証明の署名鍵 (receiptSigner) が入っているか ---
+//   無いと署名付きの有料商品 (JPYC 支払い証明・Directory ライセンス版) が 503 で売れない (第 7 回レビュー E3)。
+{
+  const r = await fetch(`${BASE}/api/facilitator/supported`);
+  let body = null;
+  try {
+    body = await r.json();
+  } catch {
+    body = null;
+  }
+  const assessment = assessReceiptSigner(r.status, body);
+  record('x402 receipt signer (X402_RECEIPT_SIGNING_KEY)', assessment.ok, assessment.detail);
 }
 
 // --- (5) GH Actions Pimlico balance cron が actual check 実行か (skip でないか) ---

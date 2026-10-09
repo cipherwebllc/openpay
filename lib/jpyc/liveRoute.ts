@@ -40,6 +40,12 @@ export function rpcUnavailable(): NextResponse {
   return NextResponse.json({ ok: false, error: 'rpc_unavailable' }, { status: 503 });
 }
 
+/** 署名鍵 (X402_RECEIPT_SIGNING_KEY) が無い・不正。署名付きの証明を売る商品で署名を付けられないので、
+ * 支払いを受けない (5xx は gate が settle しない)。402 (支払い前の案内) はそのまま出す。 */
+export function signerUnavailable(): NextResponse {
+  return NextResponse.json({ ok: false, error: 'signer_unavailable' }, { status: 503 });
+}
+
 export function envelope(body: Record<string, unknown>): NextResponse {
   return NextResponse.json({
     schemaVersion: JPYC_LIVE_SCHEMA_VERSION,

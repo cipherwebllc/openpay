@@ -4,7 +4,7 @@ import {
   directoryContentHash, signDirectoryLicense,
   DIRECTORY_LICENSE_EIP712_DOMAIN, DIRECTORY_LICENSE_TYPES,
 } from '@/lib/directory/licenseAttestation';
-import { receiptSignerAddress } from '@/lib/x402/receipt';
+import { receiptSignerAddress, receiptSigningAccount } from '@/lib/x402/receipt';
 import { NextResponse, type NextRequest } from 'next/server';
 import { env } from '@/lib/env';
 import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
@@ -31,6 +31,14 @@ const LIST_QUERY: DirectoryQuery = {
 };
 
 async function directoryLicensedContent({ payer }: { payer?: string }): Promise<NextResponse> {
+  // 署名付きのライセンスが商品なので、署名鍵が無ければ課金しない (第 7 回レビュー E3)。
+  // 4xx/5xx は gate が settle しない = 買い手は課金されない。402 (支払い前の案内) はそのまま。
+  if (!receiptSigningAccount()) {
+    return NextResponse.json(
+      { ok: false, error: 'signer_unavailable' },
+      { status: 503 },
+    );
+  }
   const verificationSnapshot = await readDirectoryVerificationSnapshot();
   if (verificationSnapshot === null) {
     // 4xx/5xx は gate が settle しない = 買い手は課金されない。
@@ -67,7 +75,7 @@ async function directoryLicensedContent({ payer }: { payer?: string }): Promise<
       issuedAt,
       ...DIRECTORY_LICENSE_PERMISSIONS,
     },
-    attestation: signature ? { message, signature } : null,
+    attestation: { message, signature },
     signer: receiptSignerAddress(),
     verify: {
       method: 'EIP-712 recoverTypedDataAddress',

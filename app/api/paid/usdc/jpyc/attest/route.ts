@@ -6,9 +6,9 @@ import {
   JPYC_PAYMENT_ATTESTATION_EIP712_DOMAIN, JPYC_PAYMENT_ATTESTATION_TYPES,
   signJpycPaymentAttestation, transfersHash,
 } from '@/lib/jpyc/paymentAttestation';
-import { receiptSignerAddress } from '@/lib/x402/receipt';
+import { receiptSignerAddress, receiptSigningAccount } from '@/lib/x402/receipt';
 import { USDC_JPYC_ATTEST } from '@/lib/jpyc/liveResources';
-import { envelope, gated, invalidQuery, rpcUnavailable } from '@/lib/jpyc/liveRoute';
+import { envelope, gated, invalidQuery, rpcUnavailable, signerUnavailable } from '@/lib/jpyc/liveRoute';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -22,6 +22,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const tx = sp.get('tx');
   if ((chainRaw !== null && !chain) || (tx !== null && !/^0x[0-9a-fA-F]{64}$/.test(tx))) return invalidQuery();
   return gated(request, USDC_JPYC_ATTEST, async ({ payer }) => {
+    // 署名付きの証明が商品なので、署名鍵が無ければ課金しない (第 7 回レビュー E3・RPC を読む前に)
+    if (!receiptSigningAccount()) return signerUnavailable();
     if (!chain || !tx) return invalidQuery();
     const result = await readJpycPaymentRecord(chain, tx as Hex);
     if (result.kind === 'rpc_error') return rpcUnavailable();
@@ -37,7 +39,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const signature = await signJpycPaymentAttestation(message);
     return envelope({
       schemaVersion: '1.0', ...result.record, licensee,
-      attestation: signature ? { message, signature } : null,
+      attestation: { message, signature },
       signer: receiptSignerAddress(),
       verify: { method: 'EIP-712 recoverTypedDataAddress', domain: JPYC_PAYMENT_ATTESTATION_EIP712_DOMAIN, types: JPYC_PAYMENT_ATTESTATION_TYPES },
     });
