@@ -13,10 +13,18 @@
 // npm ci より前に実行する。.npmrc の許可キーは legacy-peer-deps のみ。
 // 許容: resolved が https://registry.npmjs.org/ 始まり、または workspace link
 // (resolved がリポ内相対 path で link:true か、root package 自身のエントリ)。
+//
+// 追加 (2026-10-10・第 7 回レビュー E4・user 裁定 R4): install script を持つパッケージ
+// (lockfile の hasInstallScript) は scripts/lib/installScriptAllowlist.mjs の名前だけ許容し、
+// 新規の名前が現れたら fail。取得元が公式でも、install script 付きの新規パッケージは
+// npm ci の時点で任意コードを走らせるため、掟 16 第 2 文の「導入前の個別確認」を機械化する。
+// 注意: hasInstallScript は npm が lockfile に書く値で、手書きで消せば検査をすり抜ける。
+// lockfile の diff は PR レビューの対象 (このフラグが消える diff は疑う)。
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
+import { INSTALL_SCRIPT_ALLOWLIST } from './lib/installScriptAllowlist.mjs';
 
 const ALLOWED_PREFIX = 'https://registry.npmjs.org/';
 // userconfig/globalconfig 経由の別設定ファイルや proxy/CA による取得元の偽装が
@@ -69,6 +77,15 @@ if (lockfiles.length === 0) {
 }
 
 let bad = 0;
+// install script を持つ名前のうち、どの lockfile にも現れなかった allowlist エントリ (= 削除候補)。
+const installScriptNamesSeen = new Set();
+// lockfile の path (例: node_modules/playwright/node_modules/fsevents) からパッケージ名を取る。
+// workspace 自身のエントリ (例: packages/x402-sdk) は node_modules/ を含まないので path をそのまま名前にする。
+const packageNameOf = (path) => {
+  const at = path.lastIndexOf('node_modules/');
+  return at === -1 ? path : path.slice(at + 'node_modules/'.length);
+};
+
 for (const file of npmrcs) {
   const lines = readFileSync(file, 'utf8').split(/\r\n|[\r\n]/);
   for (const [index, line] of lines.entries()) {
@@ -89,6 +106,18 @@ for (const file of lockfiles) {
   const packages = lock.packages ?? {};
   for (const [name, pkg] of Object.entries(packages)) {
     if (name === '') continue; // root package 自身
+    // install script 付きは取得元に関係なく名前で allowlist 照合する (link も含む)。
+    if (pkg.hasInstallScript === true) {
+      const packageName = packageNameOf(name);
+      installScriptNamesSeen.add(packageName);
+      if (!Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, packageName)) {
+        console.error(
+          `NG ${file}: ${name} has an install script (preinstall/install/postinstall) and is not in INSTALL_SCRIPT_ALLOWLIST ` +
+            '(scripts/lib/installScriptAllowlist.mjs). Review the package before adding it (CLAUDE.md 掟 16).',
+        );
+        bad++;
+      }
+    }
     const resolved = pkg.resolved;
     // workspace link (例: "packages/x402-sdk" を link 参照) は resolved がリポ内
     // 相対 path。https 以外でも link エントリだけは許容する。
@@ -108,9 +137,18 @@ for (const file of lockfiles) {
 
 if (bad > 0) {
   console.error(
-    `lockfile-gate: 許可されていない .npmrc 設定・依存の取得元が ${bad} 件あります。` +
-      'git URL / 独自レジストリ / http 取得は禁止 (CLAUDE.md 掟 16)。',
+    `lockfile-gate: 許可されていない .npmrc 設定・依存の取得元・install script 付きの新規パッケージが ${bad} 件あります。` +
+      'git URL / 独自レジストリ / http 取得は禁止、install script 付きの新規パッケージは個別確認のうえ allowlist に追加 (CLAUDE.md 掟 16)。',
   );
   process.exit(1);
 }
-console.log('lockfile-gate: 全 lockfile は公式 npm レジストリのみ、Git 管理下の全 .npmrc は許可キーのみです');
+// allowlist にあるが lockfile に install script 付きで現れない名前 = upstream で script が消えた/依存から外れた。
+// fail にはしない (npm update で native 依存が消えた PR を止めない) が、allowlist の掃除候補として出す。
+const stale = Object.keys(INSTALL_SCRIPT_ALLOWLIST).filter((n) => !installScriptNamesSeen.has(n));
+if (stale.length > 0) {
+  console.log(`lockfile-gate: stale install script allowlist entries (no longer have install scripts): ${stale.join(', ')}`);
+}
+console.log(
+  `lockfile-gate: 全 lockfile は公式 npm レジストリのみ、install script 付きは allowlist の ${installScriptNamesSeen.size} 名のみ、` +
+    'Git 管理下の全 .npmrc は許可キーのみです',
+);

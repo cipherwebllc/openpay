@@ -12,8 +12,26 @@ function workflow(name: string): string {
 describe('GitHub Actions operation guards', () => {
   const workflowFiles = readdirSync(resolve('.github/workflows')).filter((name) => /\.ya?ml$/.test(name));
 
-  it('Lighthouse uses the explicitly approved patch version', () => {
-    expect(workflow('lighthouse.yml')).toMatch(/^\s*npx --yes @lhci\/cli@0\.14\.0 autorun\s*$/m);
+  // 第 7 回レビュー E5: `npx --yes @lhci/cli@x` は推移的依存を実行のたびに lockfile 外で解決する
+  // (掟 16 の gate 外・LHCI_GITHUB_APP_TOKEN を持つ step)。@lhci/cli は tools/lighthouse の lockfile で固定する。
+  it('Lighthouse は lockfile 経由 (tools/lighthouse) の @lhci/cli を使い、npx で都度解決しない', () => {
+    // コメント行は除く (旧手順の説明に npx の語が出るため)。
+    const source = workflow('lighthouse.yml').split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+    expect(source).not.toMatch(/npx\b/);
+    expect(source).not.toMatch(/@lhci\/cli@/);
+    expect(source).toMatch(/^\s*run: npm --prefix tools\/lighthouse ci --ignore-scripts\s*$/m);
+    expect(source).toMatch(/^\s*run: tools\/lighthouse\/node_modules\/\.bin\/lhci autorun\s*$/m);
+    // lockfile-gate (install script allowlist を含む) → npm ci (本体) → lhci の install の順
+    const gate = source.indexOf('run: node scripts/lockfile-gate.mjs');
+    const lhciInstall = source.indexOf('run: npm --prefix tools/lighthouse ci');
+    expect(gate).toBeGreaterThan(-1);
+    expect(lhciInstall).toBeGreaterThan(gate);
+    // 版は tools/lighthouse/package.json の exact pin と lockfile の実体で固定する (承認済み 0.14.0)。
+    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'tools/lighthouse/package.json'), 'utf8'));
+    expect(pkg.private).toBe(true);
+    expect(pkg.devDependencies).toEqual({ '@lhci/cli': '0.14.0' });
+    const lock = JSON.parse(readFileSync(resolve(process.cwd(), 'tools/lighthouse/package-lock.json'), 'utf8'));
+    expect(lock.packages['node_modules/@lhci/cli'].version).toBe('0.14.0');
   });
 
   it.each(workflowFiles)('%s explicitly limits GITHUB_TOKEN permissions', (name) => {
@@ -29,7 +47,8 @@ describe('GitHub Actions operation guards', () => {
     const source = workflow(name);
     const jobs = source.slice(source.indexOf('\njobs:\n')).split(/\n  [\w-]+:\n/).slice(1);
     for (const job of jobs) {
-      const install = job.search(/\brun:\s*npm ci\b/);
+      // `npm --prefix <dir> ci` (tools/lighthouse 等の別 lockfile) も install として扱う。
+      const install = job.search(/\brun:\s*npm (?:--prefix \S+ )?ci\b/);
       if (install === -1) continue;
       const gate = job.indexOf('run: node scripts/lockfile-gate.mjs');
       expect(gate, `${name}: pre-install source gate`).toBeGreaterThan(-1);

@@ -12,11 +12,20 @@ const cleanReport = {
   metadata: { vulnerabilities: { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 } },
 };
 
-async function runGate(stdout: string, status: number | null = 0, error?: Error, signal: NodeJS.Signals | null = null) {
+type SpawnResult = ReturnType<typeof spawnSync>;
+
+function spawnResult(stdout: string, status: number | null = 0, error?: Error, signal: NodeJS.Signals | null = null): SpawnResult {
+  return { pid: 1, output: [null, stdout, ''], stdout, stderr: '', status, signal, error } as SpawnResult;
+}
+
+async function runGate(stdout: string, status: number | null = 0, error?: Error, signal: NodeJS.Signals | null = null, devStdout?: string) {
   vi.resetModules();
-  vi.mocked(spawnSync).mockReturnValue({
-    pid: 1, output: [null, stdout, ''], stdout, stderr: '', status, signal, error,
-  });
+  const mock = vi.mocked(spawnSync);
+  mock.mockReturnValue(spawnResult(stdout, status, error, signal));
+  if (devStdout !== undefined) {
+    // 1 回目 = 本番依存の gate (`--omit=dev`)、2 回目 = dev を含む参考集計。
+    mock.mockReturnValueOnce(spawnResult(stdout, status, error, signal)).mockReturnValueOnce(spawnResult(devStdout, 1));
+  }
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
   const exited = new Error('process.exit');
@@ -97,5 +106,113 @@ describe('audit-gate', () => {
     const result = await runGate(JSON.stringify(report), 1);
     expect(result.status).toBe(expectedStatus);
     expect(result.stdout).toContain(expectedStatus === 0 ? 'audit-gate: OK' : 'UNACCEPTED');
+  });
+
+  // 第 7 回レビュー E21: url の無い advisory object を黙って捨てると、severity が high でも
+  // accepted にも unaccepted にも数えられず CI が通る。集計できない advisory は fail にする。
+  it.each(['moderate', 'high', 'critical'])('fails closed for a %s advisory object without a URL instead of dropping it', async (severity) => {
+    const report = {
+      ...cleanReport,
+      vulnerabilities: {
+        fixture: { severity, via: [{ name: 'fixture', title: 'advisory without url', severity }] },
+      },
+    };
+    const result = await runGate(JSON.stringify(report), 1);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('without an advisory URL');
+    expect(result.stdout).toContain('fixture');
+    expect(result.stdout).not.toContain('audit-gate: OK');
+  });
+
+  it('still ignores a LOW advisory object without a URL (LOW is outside the gate)', async () => {
+    const report = {
+      ...cleanReport,
+      vulnerabilities: { fixture: { severity: 'low', via: [{ name: 'fixture', title: 'low without url', severity: 'low' }] } },
+    };
+    const result = await runGate(JSON.stringify(report), 1);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('audit-gate: OK');
+  });
+
+  it.each([
+    ['empty via', { severity: 'high', via: [] }],
+    ['missing via', { severity: 'high' }],
+    ['non-array via', { severity: 'high', via: 'postcss' }],
+  ])('fails closed for a gated package whose advisories cannot be collected (%s)', async (_name, entry) => {
+    const report = { ...cleanReport, vulnerabilities: { fixture: entry } };
+    const result = await runGate(JSON.stringify(report), 1);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('could not be collected');
+    expect(result.stdout).toContain('fixture');
+    expect(result.stdout).not.toContain('audit-gate: OK');
+  });
+
+  it('keeps accepting a gated package reached only through other vulnerable packages (string via)', async () => {
+    const report = {
+      ...cleanReport,
+      vulnerabilities: {
+        postcss: { severity: 'moderate', via: [{ name: 'postcss', title: 'fixture', severity: 'moderate', url: 'https://github.com/advisories/GHSA-qx2v-qp2m-jg93' }] },
+        indirect: { severity: 'moderate', via: ['postcss'] },
+      },
+    };
+    const result = await runGate(JSON.stringify(report), 1);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('audit-gate: OK');
+  });
+
+  // E21 (dev scope): 本番依存の gate (`--omit=dev`) は変えず、dev 依存だけに出る MODERATE+ を参考として
+  // 可視化する (docs/DEPLOY_CHECKLIST.md §7.11 の裁定対象)。gate の判定には影響しない。
+  describe('dev-scope report', () => {
+    const devOnly = {
+      ...cleanReport,
+      vulnerabilities: {
+        vitest: { severity: 'critical', via: [{ name: 'vitest', title: 'dev only fixture', severity: 'critical', url: 'https://github.com/advisories/GHSA-dev-only-fixture' }] },
+      },
+    };
+
+    it('runs a second audit including devDependencies and lists dev-only advisories without failing', async () => {
+      const result = await runGate(JSON.stringify(cleanReport), 0, undefined, null, JSON.stringify(devOnly));
+      expect(spawnSync).toHaveBeenNthCalledWith(1, 'npm', ['audit', '--omit=dev', '--json'], expect.any(Object));
+      expect(spawnSync).toHaveBeenNthCalledWith(2, 'npm', ['audit', '--json'], expect.any(Object));
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('Dev-scope');
+      expect(result.stdout).toContain('GHSA-dev-only-fixture');
+      expect(result.stdout).toContain('§7.11');
+      expect(result.stdout).toContain('audit-gate: OK');
+    });
+
+    it('does not repeat production advisories in the dev-scope report', async () => {
+      const prod = {
+        ...cleanReport,
+        vulnerabilities: {
+          postcss: { severity: 'moderate', via: [{ name: 'postcss', title: 'fixture', severity: 'moderate', url: 'https://github.com/advisories/GHSA-qx2v-qp2m-jg93' }] },
+        },
+      };
+      const full = { ...prod, vulnerabilities: { ...prod.vulnerabilities, ...devOnly.vulnerabilities } };
+      const result = await runGate(JSON.stringify(prod), 1, undefined, null, JSON.stringify(full));
+      expect(result.status).toBe(0);
+      const devSection = result.stdout.slice(result.stdout.indexOf('Dev-scope'));
+      expect(devSection).toContain('GHSA-dev-only-fixture');
+      expect(devSection).not.toContain('GHSA-qx2v-qp2m-jg93');
+    });
+
+    it.each(['', '{truncated', JSON.stringify({ error: { code: 'E429' } })])('keeps the production verdict when the dev-scope audit is unusable (%j)', async (devStdout) => {
+      const result = await runGate(JSON.stringify(cleanReport), 0, undefined, null, devStdout);
+      expect(result.status).toBe(0);
+      expect(result.stderr).toContain('dev-scope');
+      expect(result.stdout).toContain('audit-gate: OK');
+    });
+
+    it('does not run the dev-scope audit when the production gate already failed', async () => {
+      const report = {
+        ...cleanReport,
+        vulnerabilities: {
+          fixture: { severity: 'high', via: [{ name: 'fixture', title: 'new', severity: 'high', url: 'https://github.com/advisories/GHSA-new-unaccepted' }] },
+        },
+      };
+      const result = await runGate(JSON.stringify(report), 1, undefined, null, JSON.stringify(devOnly));
+      expect(result.status).toBe(1);
+      expect(spawnSync).toHaveBeenCalledTimes(1);
+    });
   });
 });

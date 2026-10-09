@@ -635,7 +635,11 @@ CRITICAL** advisory を GHSA URL で同定、`ALLOWED_ADVISORIES` 辞書と照�
 
 - accepted (allowlist 一致): log 表示のみ、CI pass
 - unaccepted (新規 advisory): 詳細 log + **exit 1** で CI fail
+- uncollectable (MODERATE+ なのに advisory URL が無い / via が空で allowlist と照合できない): **exit 1** で CI fail
+  (黙って捨てると accepted にも unaccepted にも数えられず通ってしまうため・第 7 回レビュー E21)
 - stale (allowlist にあるが現在検出されない): upstream fix の signal、log のみ
+- dev-scope (2 回目の `npm audit --json` で dev 依存だけに出る MODERATE+): **gate ではない**参考一覧 (§7.11 の裁定対象)。
+  2 回目の audit が失敗しても本番 gate の verdict は変えない (warn のみ)
 
 allowlist 追加 / 削除は本 §7 の update と必ず同期させること (= 監査 trail を
 両ファイルの diff で残す)。現在 allowlist:
@@ -1332,11 +1336,14 @@ deploy 完了とみなさない。
 p99 > 上限で exit 1 (gate 化可能)。
 
 ```bash
-# preview / 本番 URL に対して (deploy 済を対象に):
-npm run load-test -- --url https://open-pay.jp -c 50 -d 30 --max-error-rate 0.01 --max-p99-ms 1500
+# preview URL に対して (deploy 済を対象に):
+npm run load-test -- --url https://openpay-<preview>.vercel.app -c 20 -d 30 --max-error-rate 0.01 --max-p99-ms 1500
 # ローカル build で baseline を取る:
 npm run start &  # 別途 build 済前提
 npm run load-test -- --url http://localhost:3000 -c 20 -d 15
+# 本番 (open-pay.jp) は --allow-prod を付けたときだけ実行でき、並列は 5 まで (第 7 回レビュー E20)。
+# Cloudflare の /api 50 req/10s ルールと Upstash のコマンド予算に当たるので、本番は短時間・低並列で:
+npm run load-test -- --url https://open-pay.jp --allow-prod -c 5 -d 15
 ```
 
 ローカル build baseline (2026-05-29 実測、Apple Silicon、concurrency=20 / 12s):

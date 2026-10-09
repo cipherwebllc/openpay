@@ -32,7 +32,11 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            tools/lighthouse/package-lock.json
 
+      # lockfile-gate は tools/lighthouse/package-lock.json (lhci の推移的依存) も検査する。
       - name: Check dependency sources
         run: node scripts/lockfile-gate.mjs
 
@@ -42,8 +46,14 @@ jobs:
       - name: Build
         run: npm run build
 
+      # @lhci/cli は本体の devDependencies に入れず tools/lighthouse の lockfile で固定する
+      # (旧: npx --yes @lhci/cli@0.14.0 = 推移的依存を実行のたびに最新解決・掟 16 の gate 外)。
+      # lhci の依存に install script は無い (lockfile-gate の allowlist で検査済み) ので、この job では
+      # install script を一切走らせない = 依存の侵害が LHCI_GITHUB_APP_TOKEN を持つ step へ波及する経路を断つ。
+      - name: Install Lighthouse CI (lockfile)
+        run: npm --prefix tools/lighthouse ci --ignore-scripts
+
       - name: Run Lighthouse CI
-        run: |
-          npx --yes @lhci/cli@0.14.0 autorun
+        run: tools/lighthouse/node_modules/.bin/lhci autorun
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}

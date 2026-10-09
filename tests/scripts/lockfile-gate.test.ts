@@ -156,4 +156,93 @@ describe('lockfile-gate CLI', () => {
     } }));
     expect(runGate().status).toBe(0);
   });
+
+  // 第 7 回レビュー E4 (user 裁定 R4): install script (preinstall/install/postinstall) を持つ
+  // 新規パッケージは lockfile の hasInstallScript で機械検出し、allowlist 外なら fail にする。
+  describe('install script allowlist (CLAUDE.md 掟 16)', () => {
+    function lockWith(entries: Record<string, Record<string, unknown>>) {
+      const packages: Record<string, Record<string, unknown>> = { '': {} };
+      for (const [path, extra] of Object.entries(entries)) {
+        packages[path] = { resolved: `${OFFICIAL}x/-/x-1.0.0.tgz`, ...extra };
+      }
+      return JSON.stringify({ lockfileVersion: 3, packages });
+    }
+
+    it.each([
+      'node_modules/esbuild',
+      'node_modules/fsevents',
+      'node_modules/playwright/node_modules/fsevents',
+      'node_modules/@swc/core',
+      'node_modules/@sentry/cli',
+    ])('accepts the already reviewed install script package at %s', (path) => {
+      fixture('package-lock.json', lockWith({ [path]: { hasInstallScript: true } }));
+      expect(runGate().status).toBe(0);
+    });
+
+    it.each([
+      'node_modules/evil-postinstall',
+      'node_modules/@scope/evil-postinstall',
+      'node_modules/esbuild/node_modules/evil-postinstall',
+      'node_modules/esbuild-plugin-evil',
+      'node_modules/fsevents-evil',
+    ])('rejects a new install script package at %s even from the official registry', (path) => {
+      fixture('package-lock.json', lockWith({ [path]: { hasInstallScript: true } }));
+      const result = runGate();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(path);
+      expect(result.stderr).toContain('install script');
+      expect(result.stderr).toContain('INSTALL_SCRIPT_ALLOWLIST');
+    });
+
+    it('rejects a workspace package (no node_modules/ in its path) that gains an install script', () => {
+      fixture('package-lock.json', lockWith({
+        'packages/local': { hasInstallScript: true },
+        'node_modules/local': { link: true, resolved: 'packages/local' },
+      }));
+      const result = runGate();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('packages/local');
+    });
+
+    it('rejects a new install script package in a nested lockfile too', () => {
+      fixture('packages/example/package-lock.json', lockWith({ 'node_modules/evil-postinstall': { hasInstallScript: true } }));
+      const result = runGate();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('packages/example/package-lock.json');
+    });
+
+    it('ignores packages without install scripts regardless of name', () => {
+      fixture('package-lock.json', lockWith({
+        'node_modules/evil-postinstall': {},
+        'node_modules/other': { hasInstallScript: false },
+      }));
+      expect(runGate().status).toBe(0);
+    });
+
+    it('lists allowlisted names that no longer have install scripts as stale without failing', () => {
+      fixture('package-lock.json', lockWith({ 'node_modules/esbuild': {} }));
+      const result = runGate();
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('stale');
+      expect(result.stdout).toContain('fsevents');
+    });
+  });
+});
+
+// 実リポの lockfile と allowlist のドリフトは CI の lockfile-gate 実行 (全 workflow の npm ci 前) が
+// 検出する。ここでは allowlist が「現状の固定」であることを lockfile の実体から確かめ、
+// allowlist だけ増やして lockfile に無い名前を入れる (= 将来の新規導入を事前に許す) 運用を止める。
+describe('install script allowlist matches the committed lockfiles', () => {
+  it('every allowlisted name currently has an install script in a committed lockfile', async () => {
+    const { INSTALL_SCRIPT_ALLOWLIST } = await import('../../scripts/lib/installScriptAllowlist.mjs');
+    const { readFileSync } = await import('node:fs');
+    const names = new Set<string>();
+    for (const file of ['package-lock.json', 'packages/x402-mcp/package-lock.json', 'tools/lighthouse/package-lock.json']) {
+      const lock = JSON.parse(readFileSync(resolve(file), 'utf8')) as { packages: Record<string, { hasInstallScript?: boolean }> };
+      for (const [path, pkg] of Object.entries(lock.packages)) {
+        if (pkg.hasInstallScript) names.add(path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length));
+      }
+    }
+    expect([...Object.keys(INSTALL_SCRIPT_ALLOWLIST)].sort()).toEqual([...names].sort());
+  });
 });

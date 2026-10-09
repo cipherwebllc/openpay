@@ -1,0 +1,8 @@
+{
+  "name": "openpay-lighthouse-ci-tooling",
+  "private": true,
+  "description": "Lighthouse CI (.github/workflows/lighthouse.yml) 専用の lockfile。本体の npm ci に 340 件超の推移的依存を足さずに、@lhci/cli とその依存を lockfile で固定する (CLAUDE.md 掟 16・第 7 回レビュー E5)。scripts/lockfile-gate.mjs がこの lockfile も検査する。",
+  "devDependencies": {
+    "@lhci/cli": "0.14.0"
+  }
+}
