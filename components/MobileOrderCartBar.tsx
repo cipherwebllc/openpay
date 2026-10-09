@@ -219,8 +219,9 @@ export function MobileOrderCartBar({
               </p>
             )}
             <p className="text-xs text-amber-700">{t('irreversibleNote')}</p>
-            {needsTable || checkoutPending ? (
-              // テーブル番号 未入力、または受付番号の生成前は支払いを止める。
+            {needsTable || checkoutPending || !checkoutUrl ? (
+              // テーブル番号 未入力、受付番号の生成前、支払い先の URL が無い (値引きを照合できないプレビュー等) ときは
+              // 支払いを止める (行き先の無いリンクを押せる見た目で出さない)。
               <button
                 type="button"
                 disabled

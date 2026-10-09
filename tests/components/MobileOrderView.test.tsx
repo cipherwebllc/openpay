@@ -1526,5 +1526,6 @@ describe('MobileOrderView — 店舗の値引き', () => {
     add(0);
     expect(screen.getByText('450 JPYC')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+    expect(screen.getByRole('button', { name: '支払いへ進む' })).toBeDisabled();
   });
 });
