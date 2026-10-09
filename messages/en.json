@@ -2589,11 +2589,12 @@
       },
       "creating": "Preparing the QR code…",
       "createFailed": {
-        "busy": "It's busy, so the QR where the shop pays the gas couldn't be created. Wait a moment or show the standard QR (the standard QR carries the OpenPay usage fee, paid by the shop).",
-        "unavailable": "The QR where the shop pays the gas couldn't be created. Show the standard QR instead (it carries the OpenPay usage fee, paid by the shop).",
-        "invalid": "The QR where the shop pays the gas couldn't be created for this checkout. Show the standard QR instead (it carries the OpenPay usage fee, paid by the shop)."
+        "busy": "It's busy, so the QR where the shop pays the gas couldn't be created. Wait a moment or show the standard QR.",
+        "unavailable": "The QR where the shop pays the gas couldn't be created. Show the standard QR instead.",
+        "invalid": "The QR where the shop pays the gas couldn't be created for this checkout. Show the standard QR instead."
       },
       "showNormalQr": "Show the standard QR",
+      "normalQrFeeNote": "The standard QR carries the OpenPay usage fee, paid by the shop.",
       "waiting": "Waiting for the customer's signature",
       "stale": "This QR code will stop accepting payments soon.",
       "reissue": "Show a new QR",

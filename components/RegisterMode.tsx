@@ -664,6 +664,8 @@ function RegisterModeContent({
       onRetry={device.retry}
       onReissue={() => void reissueStoreQr()}
       onShowNormal={checkoutUrl ? () => void showNormalQr() : undefined}
+      // JPYC の通常の QR は回収 (OpenPay 利用料・店舗負担)。USDC の通常の QR には OpenPay の利用料がかからない。
+      normalQrFeeNote={settings.token === 'jpyc' ? t('storeDevice.normalQrFeeNote') : undefined}
       onDismiss={device.dismiss}
     />
   );

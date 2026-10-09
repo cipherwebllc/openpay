@@ -9,6 +9,7 @@ import type { Address } from 'viem';
 import { formatUnits, getAddress, parseUnits } from 'viem';
 import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
+import { RecoverFeeNotice } from './RecoverFeeNotice';
 import { PwaInstallHint } from './PwaInstallHint';
 import { OfflineLastQr } from './OfflineLastQr';
 import { QrAmountSection, type Mode } from './qr/QrAmountSection';
@@ -761,6 +762,9 @@ export function QrGenerator() {
     setQrModalOpen(true);
   }
   const storeQrShown = storeQr !== null && !forceNormalQr;
+  // お店負担を選んでいて、店員が通常の QR に切り替えた (出ている QR は回収・利用料は店舗負担)。RecoverFeeNotice は
+  // 回収でない QR (USDC 等) では何も出さない。
+  const normalQrFeeShown = storeRequested && forceNormalQr && recoverBillAmount !== null;
   const sdState = device.state;
   // QR を薄くする: この QR の受け渡しが署名を待っている (受付時間が十分残る) とき以外 (署名を受け取った後・受付時間の
   // 終わり・出し直しの途中 = 次のお客様に読ませない)。
@@ -947,8 +951,9 @@ export function QrGenerator() {
               secondaryAction: {
                 label: t('storeDevice.showNormalQr'),
                 onClick: () => void showNormalQr(),
-                // 通常の QR は回収 (OpenPay 利用料・店舗負担)。お店負担は JPYC だけなので常に当てはまる (第 7 回レビュー D4)。
-                note: t('storeDevice.normalQrFeeNote'),
+                // JPYC の通常の QR は回収 (OpenPay 利用料・店舗負担・第 7 回レビュー D4)。作れなかった後に USDC に
+                // 切り替えた会計の通常の QR には OpenPay の利用料がかからないので付けない。
+                ...(settings.token === 'jpyc' ? { note: t('storeDevice.normalQrFeeNote') } : {}),
               },
             }
           : {})}
@@ -1053,16 +1058,32 @@ export function QrGenerator() {
                 onDownloadPng: () => downloadPng(`${qrFilename}.png`, qrRef),
               })}
           deviceStatus={
-            env.enableStoreGasWallet && sdState.phase !== 'idle' ? (
-              <StoreDeviceRegisterStatus
-                state={sdState}
-                formatAmount={formatStoreDeviceAmount}
-                onCheckNow={() => void device.checkNow()}
-                onRetry={device.retry}
-                onReissue={() => void reissueStoreQr()}
-                onShowNormal={() => void showNormalQr()}
-                onDismiss={device.dismiss}
-              />
+            (env.enableStoreGasWallet && sdState.phase !== 'idle') || normalQrFeeShown ? (
+              <>
+                {env.enableStoreGasWallet && sdState.phase !== 'idle' && (
+                  <StoreDeviceRegisterStatus
+                    state={sdState}
+                    formatAmount={formatStoreDeviceAmount}
+                    onCheckNow={() => void device.checkNow()}
+                    onRetry={device.retry}
+                    onReissue={() => void reissueStoreQr()}
+                    onShowNormal={() => void showNormalQr()}
+                    {...(settings.token === 'jpyc' ? { normalQrFeeNote: t('storeDevice.normalQrFeeNote') } : {})}
+                    onDismiss={device.dismiss}
+                  />
+                )}
+                {/* お店負担から通常の QR に切り替えたとき、その QR の利用料 (店舗負担) を QR の画面の中で開示する
+                    (会計の画面の開示は全画面の QR の裏に隠れるため・第 7 回レビュー D4)。 */}
+                {normalQrFeeShown && (
+                  <RecoverFeeNotice
+                    billAmount={recoverBillAmount}
+                    chainId={deployment.chainId}
+                    gasMode={recoverGasMode}
+                    tone="neutral"
+                    groupDigits
+                  />
+                )}
+              </>
             ) : undefined
           }
           note={settings.posterNote.trim() || t('posterDefaultNote')}

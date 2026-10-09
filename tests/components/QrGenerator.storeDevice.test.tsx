@@ -461,8 +461,18 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(await screen.findByRole('dialog')).toBeTruthy();
       expect(sd.releaseForNormal).toHaveBeenCalled();
       expect(shownQr()).toMatch(/\/pay\?/);
-      // 出した QR は回収 (利用料・店舗負担) なので、開示を出す (第 7 回レビュー D4)。
-      expect(screen.getByText(/決済手数料/)).toBeInTheDocument();
+      // 出した QR は回収 (利用料・店舗負担) なので、QR の画面の中で開示する (第 7 回レビュー D4・裏に隠さない)。
+      expect(within(screen.getByRole('dialog')).getByText(/決済手数料/)).toBeInTheDocument();
+    });
+
+    it('作れなかった後に USDC の会計になったら、通常の QR に利用料の一文を付けない (USDC には OpenPay の利用料が無い)', async () => {
+      const user = userEvent.setup();
+      seed({ token: 'usdc', chain: 'base' });
+      sd.state = { phase: 'create_failed', reason: 'unavailable' };
+      render(<QrGenerator />);
+      await user.type(await screen.findByPlaceholderText('10.00'), '5');
+      expect(await screen.findByRole('button', { name: '通常の QR を出す' })).toBeTruthy();
+      expect(screen.queryByText('通常の QR は OpenPay 利用料が店舗負担でかかります。')).toBeNull();
     });
 
     it('作れなかった後でも、金額を消したら「通常の QR を出す」は出さない (後の入力で QR が勝手に開かない)', async () => {

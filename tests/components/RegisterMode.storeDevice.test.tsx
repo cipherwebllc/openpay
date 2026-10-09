@@ -201,6 +201,21 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(shownCheckout()).toBeNull();
   });
 
+  it('作れなかった理由には、JPYC の通常の QR は利用料 (店舗負担) がかかることを添える・USDC には添えない', async () => {
+    seed();
+    hold.state = { phase: 'create_failed', reason: 'unavailable' };
+    const view = render(<RegisterMode />);
+    expect(await screen.findByText('ガス代を肩代わりする QR を作れませんでした。通常の QR を出してください。')).toBeTruthy();
+    expect(screen.queryByText('通常の QR は OpenPay 利用料が店舗負担でかかります。')).toBeNull(); // カートが空 = 通常の QR を出せない間は出さない
+    view.unmount();
+    const raw = JSON.parse(window.localStorage.getItem('openpay:qr-settings:v2')!);
+    window.localStorage.setItem('openpay:qr-settings:v2', JSON.stringify({ ...raw, token: 'usdc', chain: 'base' }));
+    render(<RegisterMode />);
+    expect(await screen.findByText('ガス代を肩代わりする QR を作れませんでした。通常の QR を出してください。')).toBeTruthy();
+    expect(screen.queryByText(/OpenPay 利用料/)).toBeNull();
+    hold.state = { phase: 'idle' };
+  });
+
   it('QR を閉じたら受け渡しを締め切る', async () => {
     const user = userEvent.setup();
     seed();
