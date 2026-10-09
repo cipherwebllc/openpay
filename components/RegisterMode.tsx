@@ -148,6 +148,15 @@ function RegisterModeContent({
   const [discountOpen, setDiscountOpen] = useState(false);
   const [discountMode, setDiscountMode] = useState<'amount' | 'percent'>('amount');
   const [discountInput, setDiscountInput] = useState('');
+  // 「値引きを追加」で入力欄へ、「外す」で「値引きを追加」へ focus を移す (押したボタンが消えて body に落ちない)。
+  const discountInputRef = useRef<HTMLInputElement>(null);
+  const discountAddRef = useRef<HTMLButtonElement>(null);
+  const discountFocusNext = useRef<'input' | 'add' | null>(null);
+  useEffect(() => {
+    if (discountFocusNext.current === 'input' && discountOpen) discountInputRef.current?.focus();
+    if (discountFocusNext.current === 'add' && !discountOpen) discountAddRef.current?.focus();
+    discountFocusNext.current = null;
+  }, [discountOpen]);
   const [receiptNo, setReceiptNo] = useState('');
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
   // 「お店の設定」シート・商品の編集シート・開いているカートの行 (2026-10 磨き上げ P3)。
@@ -639,6 +648,9 @@ function RegisterModeContent({
   }
 
   async function showNormalQr() {
+    // 会計が QR を出せる状態でない (値引きを直している途中など) なら出さない。開いておくと、直した瞬間に
+    // 途中の額の QR が勝手に開いて入力の focus を奪う。
+    if (!checkoutUrl) return;
     // 署名を待っていた受け渡しを締め切ってから。署名が入っていたら端末が送る (通常の QR は出さない)。
     const attempt = storeOpenAttemptRef.current;
     const key = storeOpenKeyRef.current;
@@ -671,7 +683,7 @@ function RegisterModeContent({
       onCheckNow={() => void device.checkNow()}
       onRetry={device.retry}
       onReissue={() => void reissueStoreQr()}
-      onShowNormal={() => void showNormalQr()}
+      onShowNormal={checkoutUrl ? () => void showNormalQr() : undefined}
       onDismiss={device.dismiss}
     />
   );
@@ -993,6 +1005,7 @@ function RegisterModeContent({
                       </label>
                       <input
                         id="register-discount-input"
+                        ref={discountInputRef}
                         type="text"
                         inputMode="decimal"
                         autoComplete="off"
@@ -1007,6 +1020,7 @@ function RegisterModeContent({
                       <button
                         type="button"
                         onClick={() => {
+                          discountFocusNext.current = 'add';
                           setDiscountOpen(false);
                           setDiscountInput('');
                         }}
@@ -1025,8 +1039,12 @@ function RegisterModeContent({
                   </div>
                 ) : (
                   <button
+                    ref={discountAddRef}
                     type="button"
-                    onClick={() => setDiscountOpen(true)}
+                    onClick={() => {
+                      discountFocusNext.current = 'input';
+                      setDiscountOpen(true);
+                    }}
                     className="text-xs font-medium text-brand hover:underline"
                   >
                     {t('discount.add')}

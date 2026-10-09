@@ -178,6 +178,19 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(sp.get('submit')).toBe('store');
   });
 
+  it('値引きを直している途中 (小計以上) は「通常の QR を出す」を出さない (直した瞬間に途中の額の QR が開かない)', async () => {
+    const user = userEvent.setup();
+    seed();
+    hold.state = { phase: 'create_failed', reason: 'network' };
+    render(<RegisterMode />);
+    await waitFor(() => screen.getAllByRole('button', { name: /コーヒー/ }));
+    await user.click(screen.getAllByRole('button', { name: /コーヒー/ })[0]);
+    expect(screen.getByRole('button', { name: '通常の QR を出す' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
+    await user.type(screen.getByLabelText('値引きの金額'), '500');
+    expect(screen.queryByRole('button', { name: '通常の QR を出す' })).toBeNull();
+  });
+
   it('受け渡しを作れなければ QR を開かない (黙って通常の QR に切り替えない)', async () => {
     const user = userEvent.setup();
     seed();

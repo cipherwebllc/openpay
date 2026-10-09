@@ -569,6 +569,15 @@ describe('RegisterMode', () => {
       expect(screen.getAllByText(/値引きを直してください|値引きを確認/).length).toBeGreaterThan(0);
     });
 
+    it('「値引きを追加」で入力欄へ、「外す」で「値引きを追加」へ focus を移す', async () => {
+      const user = userEvent.setup();
+      await cartWithCoffeeAndShirt(user);
+      await user.click(orderPanel().getByRole('button', { name: '＋ 値引きを追加' }));
+      expect(orderPanel().getByLabelText('値引きの金額')).toHaveFocus();
+      await user.click(orderPanel().getByRole('button', { name: '外す' }));
+      expect(orderPanel().getByRole('button', { name: '＋ 値引きを追加' })).toHaveFocus();
+    });
+
     it('「外す」で値引きをやめる', async () => {
       const user = userEvent.setup();
       await cartWithCoffeeAndShirt(user);
