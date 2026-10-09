@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { acquireLicenseRightsBudget, releaseLicenseRightsBudget } from '@/lib/license/rightsBudget';
 import {
   resolveStoreContentAccess,
   parseStoreContentSelector,
@@ -43,7 +44,12 @@ export async function GET(
       400,
     );
   }
-  const access = await resolveStoreContentAccess({ address: auth.address, resourceId, selector });
+  // license の権利照合 (RPC) は verify/delivery と同じ型の同時実行枠を通す (第 7 回レビュー B9)。
+  // 枠は RPC が実際に始まる直前にだけ取るので、デジタル商品の本文読み出しは枠に触れない。
+  const access = await resolveStoreContentAccess({
+    address: auth.address, resourceId, selector,
+    admission: { acquire: acquireLicenseRightsBudget, release: releaseLicenseRightsBudget },
+  });
   if (access.kind === 'denied') return notFound();
   if (access.kind === 'storage') return storageUnavailable();
   if (access.kind === 'rights_unknown') {

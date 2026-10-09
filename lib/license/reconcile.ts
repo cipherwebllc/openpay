@@ -71,7 +71,8 @@ async function cas(current: PurchaseIntent, raw: string, next: PurchaseIntent, n
  * license 専用。lease の満了・ローカル時計・試行回数だけでは在庫を戻さない。
  * failed_prebroadcast も署名は生きているため、canonical payment の採用か finalized unused まで保持。
  */
-export async function reconcileLicensePurchase(current: PurchaseIntent, raw: string, now: number, finalizePurchase: typeof finalizeHostedPurchase, chain = defaultLicenseReconcileChain): Promise<ReconcilePurchaseIntentResult> {
+// deadline = 経過時間の予算 (epoch ms・第 7 回レビュー B4)。到達後はページを取りに行かず途中 cursor を保存する。
+export async function reconcileLicensePurchase(current: PurchaseIntent, raw: string, now: number, finalizePurchase: typeof finalizeHostedPurchase, chain = defaultLicenseReconcileChain, deadline?: number): Promise<ReconcilePurchaseIntentResult> {
   if (current.state === 'settled') {
     const healed = await finalizePurchase({ intentSalt: current.intentSalt, txHash: current.txHash, settledAt: current.settledAt });
     return healed.ok ? { ok: true, state: 'settled', txHash: current.txHash } : { ok: false, reason: 'storage' };
@@ -105,10 +106,13 @@ export async function reconcileLicensePurchase(current: PurchaseIntent, raw: str
       const evidence: LicenseExpiryEvidence = { blockNumber: block.number.toString(), blockHash: block.hash, timestamp: block.timestamp.toString(), authorizationUsed: false };
       return await cas(leased, leasedRaw, failed, now, evidence) ? { ok: true, state: 'failed_prebroadcast' } : { ok: false, reason: 'storage' };
     }
-    const finalize = async (hash: Hex): Promise<ReconcilePurchaseIntentResult | null> => {
+    const finalize = async (hash: Hex, candidatePageStart?: bigint): Promise<ReconcilePurchaseIntentResult | null> => {
       try {
         if (!await chain.receiptMatches(leased, hash, block)) return null;
       } catch {
+        // 走査で新しく見つけた候補の receipt 一時障害で証拠のページを飛ばさない (第 7 回レビュー B3):
+        // その候補のページを cursor に保存して次回再試行し、在庫 hold と entitlement 未付与の長期化を断つ。
+        if (candidatePageStart !== undefined) { fromBlock = candidatePageStart; return reschedule(); }
         // 欠落した旧 receipt の障害を replacement receipt の探索へ波及させない。
         return null;
       }
@@ -125,9 +129,12 @@ export async function reconcileLicensePurchase(current: PurchaseIntent, raw: str
       const result = await finalize(leased.txHash); if (result) return result;
     }
     for (let page = 0; page < 20 && fromBlock <= block.number; page++) {
+      // 時間予算の到達は取得前に見て、未取得ページの先頭を cursor に残す (打ち切りは失敗でも未払いでもない)。
+      if (deadline !== undefined && Date.now() >= deadline) return reschedule();
       const to = fromBlock + 1999n < block.number ? fromBlock + 1999n : block.number;
-      for (const hash of await chain.transactions(leased, fromBlock, to)) {
-        const result = await finalize(hash); if (result) return result;
+      const pageStart = fromBlock;
+      for (const hash of await chain.transactions(leased, pageStart, to)) {
+        const result = await finalize(hash, pageStart); if (result) return result;
       }
       fromBlock = to + 1n;
     }

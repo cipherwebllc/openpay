@@ -30,6 +30,7 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/license/stock.test.ts',
   'tests/lib/agent/bindings.test.ts',
   'tests/lib/license/verifyBudget.test.ts',
+  'tests/lib/license/rightsBudget.test.ts',
   'tests/lib/store/deliveryBudget.test.ts',
   'tests/lib/x402/purchaseIntent-lua.test.ts',
   'tests/lib/x402/purchaseIntent-lua-machine.test.ts',

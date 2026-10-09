@@ -6,6 +6,7 @@ import { getHostedProduct, isHostedId } from '@/lib/x402/hostedStore';
 import { licenseNftEnabled } from './config';
 import { LICENSE_REGISTRATION_INDEX } from './product';
 import { resolveLicenseRights } from './rights';
+import { acquireLicenseRightsBudget, releaseLicenseRightsBudget } from './rightsBudget';
 
 // 恒久登録 index を stable member cursor で走査。購入 index に holder を書き込まない。
 const PAGE =
@@ -24,22 +25,33 @@ export async function listHeldLicenses(address: Address, cursor: string | null) 
   if (result.value.some((id) => !isHostedId(id))) return { ok: false as const, reason: 'storage_unavailable' as const };
   const items = [];
   let last = cursor;
-  for (const id of result.value) {
-    // 多商品の遅い RPC が request 寿命を使い切らないよう、未処理 member の手前で返す。
-    if (Date.now() >= deadline) return { ok: true as const, page: { items, nextCursor: last } };
-    const product = await getHostedProduct(id);
-    if (product === 'storage') return { ok: false as const, reason: 'storage_unavailable' as const };
-    // index/key と商品 ID の破損を、別商品の保有権利として投影しない。
-    if (product && product.id !== id) return { ok: false as const, reason: 'storage_unavailable' as const };
-    if (product?.productKind === 'license' && product.license?.transferable && product.registration?.status === 'registered') {
-      const rights = await resolveLicenseRights({ address, productId: id, definition: product.license, ownership: null });
-      // RPC 不明で holder をページから消したまま cursor を進める波及を断つ。
-      if (rights.entitled === null) return { ok: false as const, reason: 'license_rights_unknown' as const };
-      if (rights.entitled) items.push({ resourceId: id, productKind: 'license' as const, title: product.title, contentRevision: 1,
-        contentKind: 'text' as const, license: product.license, ...rights,
-        state: product.contentAvailable ? 'ready' as const : 'provided-ended' as const });
+  // 権利照合 (RPC) は verify/delivery と同じ型の同時実行枠を通す (第 7 回レビュー B9)。枠は最初の RPC の直前に
+  // 1 request 1 枠で取り、ページ全体で持つ (各商品は直列なので同時 RPC は枠数を超えない)。
+  let lease: string | null | undefined;
+  try {
+    for (const id of result.value) {
+      // 多商品の遅い RPC が request 寿命を使い切らないよう、未処理 member の手前で返す。
+      if (Date.now() >= deadline) return { ok: true as const, page: { items, nextCursor: last } };
+      const product = await getHostedProduct(id);
+      if (product === 'storage') return { ok: false as const, reason: 'storage_unavailable' as const };
+      // index/key と商品 ID の破損を、別商品の保有権利として投影しない。
+      if (product && product.id !== id) return { ok: false as const, reason: 'storage_unavailable' as const };
+      if (product?.productKind === 'license' && product.license?.transferable && product.registration?.status === 'registered') {
+        if (lease === undefined) lease = await acquireLicenseRightsBudget();
+        // 枠不足/枠の KV 障害は権利 unknown と同じ扱い (holder をページから消さない)。
+        if (!lease) return { ok: false as const, reason: 'license_rights_unknown' as const };
+        // ページ全体の期限を商品ごとの RPC 期限に共有する (第 7 回レビュー B13)。
+        const rights = await resolveLicenseRights({ address, productId: id, definition: product.license, ownership: null, deadline });
+        // RPC 不明で holder をページから消したまま cursor を進める波及を断つ。
+        if (rights.entitled === null) return { ok: false as const, reason: 'license_rights_unknown' as const };
+        if (rights.entitled) items.push({ resourceId: id, productKind: 'license' as const, title: product.title, contentRevision: 1,
+          contentKind: 'text' as const, license: product.license, ...rights,
+          state: product.contentAvailable ? 'ready' as const : 'provided-ended' as const });
+      }
+      last = id;
     }
-    last = id;
+    return { ok: true as const, page: { items, nextCursor: result.value.length === 8 ? last : null } };
+  } finally {
+    if (lease) await releaseLicenseRightsBudget(lease);
   }
-  return { ok: true as const, page: { items, nextCursor: result.value.length === 8 ? last : null } };
 }

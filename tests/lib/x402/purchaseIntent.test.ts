@@ -249,6 +249,47 @@ describe('PurchaseIntent reconciler decisions (no Lua)', () => {
     expect(adapter.receiptMatches).toHaveBeenNthCalledWith(2, expect.anything(), TX);
   });
 
+  // 第 7 回レビュー B3: 新規に発見した候補の receipt 一時障害で、証拠のあるページを飛ばして cursor を
+  // 進めない (そのページから再試行)。保存済み旧 hash の欠落は従来どおり null で replacement 探索へ進む。
+  it('retries from the candidate page when a newly discovered receipt read fails transiently', async () => {
+    const adapter = chain({
+      latestBlock: async () => BigInt(active.anchorBlock) + 50_000n,
+      authorizationUsedTransactions: vi.fn(async (_intent, fromBlock) => fromBlock === 14_000n ? [TX] : []),
+      receiptMatches: vi.fn(async () => { throw new Error('receipt unavailable'); }),
+    });
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter })).toEqual({ ok: true, state: 'pending' });
+    expect(adapter.receiptMatches).toHaveBeenCalledTimes(1);
+    const next = JSON.parse(h.kvEval.mock.calls.at(-1)![2][3]);
+    expect(next).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '14000', nextReconcileAt: NOW + PURCHASE_RECONCILE_RETRY_MS });
+    expect(next).not.toHaveProperty('txHash');
+  });
+
+  // 第 7 回レビュー B4: cron の時間予算 (deadline) で page 取得を打ち切り、次の未取得 page を cursor に保存する。
+  it('stops paging at the deadline and persists the cursor of the next unfetched page', async () => {
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const adapter = chain({
+      latestBlock: async () => BigInt(active.anchorBlock) + 50_000n,
+      authorizationUsedTransactions: vi.fn(async () => { clock += 10_000; return []; }),
+    });
+    try {
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(adapter.authorizationUsedTransactions).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3])).toMatchObject({ reconcileFromBlock: '16000' });
+  });
+
+  it('a batch past its deadline defers the remaining due members to the next run without touching them', async () => {
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: [SALT, SALT] });
+    const adapter = chain();
+    // deadline は実時刻 (Date.now) で見る: fixture の NOW は未来なので、実時刻より前の値を渡す。
+    expect(await reconcilePendingPurchases({ now: NOW, chain: adapter, deadline: Date.now() - 1 })).toMatchObject({ checked: 0, deferred: 2, storageErrors: 0 });
+    expect(adapter.authorizationUsed).not.toHaveBeenCalled();
+    expect(h.kvEval).toHaveBeenCalledTimes(1);
+  });
+
   it('reports quarantine/storage batch outcomes from KV replies', async () => {
     h.kvEval.mockResolvedValueOnce({ ok: true, value: ['invalid-salt', SALT] }).mockResolvedValueOnce({ ok: true, value: 1 });
     reads(key, { ...active, claim: { ...active.claim, validBefore: (1n << 256n).toString() } });

@@ -17,6 +17,9 @@ import {
 } from '@/lib/x402/storePaymentSnapshot';
 
 export const STORE_LIBRARY_PAGE_SIZE = 24;
+// 1 ページの権利照合 (license) 全体の期限。holders ページ (lib/license/holders.ts) と同じ 15 秒。
+const STORE_LIBRARY_RIGHTS_DEADLINE_MS = 15_000;
+const LIBRARY_RIGHTS_UNKNOWN = { entitled: null, basis: null, nft: { status: 'unknown' as const } };
 
 type LibraryCursor = {
   score: number;
@@ -347,13 +350,32 @@ export async function listStoreLibraryPage(input: {
   }
 
   const items: StoreLibraryItem[] = [];
-  for (const ownership of ownerships) {
-    const definition = ownership.latestGrant.metadata.license;
-    if (!definition) { items.push(libraryItem(ownership)); continue; }
-    const { resolveLicenseRights } = await import('@/lib/license/rights');
-    const rights = await resolveLicenseRights({ address: ownership.payer, productId: ownership.resourceId, definition, ownership });
-    // 発行 tx のリンク先は購入時の定義から返し、現在の環境設定で推測させない。
-    items.push({ ...libraryItem(ownership), productKind: 'license', tokenChainId: definition.tokenChainId, ...rights });
+  // ページ全体の権利照合に 1 つの期限を共有する (第 7 回レビュー B13: 商品ごとの 6 秒窓はページ全体の上限に
+  // ならず、24 商品で約 90 秒の直列待機になり得た)。期限内に確認できない商品は entitled: null のまま項目と
+  // cursor を残す。枠 (第 7 回レビュー B9) は最初の RPC の直前に 1 request 1 枠で取り、ページ全体で持つ。
+  const deadline = Date.now() + STORE_LIBRARY_RIGHTS_DEADLINE_MS;
+  let lease: string | null | undefined;
+  try {
+    for (const ownership of ownerships) {
+      const definition = ownership.latestGrant.metadata.license;
+      if (!definition) { items.push(libraryItem(ownership)); continue; }
+      const base = { ...libraryItem(ownership), productKind: 'license' as const, tokenChainId: definition.tokenChainId };
+      if (lease === undefined) {
+        const { acquireLicenseRightsBudget } = await import('@/lib/license/rightsBudget');
+        lease = await acquireLicenseRightsBudget();
+      }
+      // 枠不足/枠の KV 障害は RPC 不明と同じ unknown (購入項目は落とさず、false にもしない)。
+      if (!lease) { items.push({ ...base, ...LIBRARY_RIGHTS_UNKNOWN }); continue; }
+      const { resolveLicenseRights } = await import('@/lib/license/rights');
+      const rights = await resolveLicenseRights({ address: ownership.payer, productId: ownership.resourceId, definition, ownership, deadline });
+      // 発行 tx のリンク先は購入時の定義から返し、現在の環境設定で推測させない。
+      items.push({ ...base, ...rights });
+    }
+  } finally {
+    if (lease) {
+      const { releaseLicenseRightsBudget } = await import('@/lib/license/rightsBudget');
+      await releaseLicenseRightsBudget(lease);
+    }
   }
   const last = visible.at(-1)!;
   return {

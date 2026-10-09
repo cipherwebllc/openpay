@@ -8,6 +8,9 @@ type ScanRange = {
   latest: bigint;
   pageBlocks: bigint;
   maxPages: number;
+  // 経過時間の予算 (epoch ms)。到達したら次のページを取りに行かず、そのページの先頭を cursor として返す
+  // (第 7 回レビュー B4: ページ数の上限だけでは cron の maxDuration を守れない)。打ち切りは失敗ではない。
+  deadline?: number;
 };
 type ScanResult = {
   candidates: Map<Hex, bigint>;
@@ -26,13 +29,15 @@ export function scanReconcileBlockPages(
   fetchPage: FetchPage,
 ): Promise<ScanResult | 'unavailable'>;
 export async function scanReconcileBlockPages(
-  { anchor, fromBlock, latest, pageBlocks, maxPages }: ScanRange,
+  { anchor, fromBlock, latest, pageBlocks, maxPages, deadline }: ScanRange,
   fetchPage: FetchPage,
 ): Promise<ScanResult | 'unavailable'> {
   if (fromBlock < anchor) fromBlock = anchor;
   const candidates = new Map<Hex, bigint>();
   let pages = 0;
   while (fromBlock <= latest && pages < maxPages) {
+    // 予算切れは取得前に見る: 取得済みページの候補は呼出側が照合し、未取得ページの先頭が次回の cursor になる。
+    if (deadline !== undefined && Date.now() >= deadline) break;
     const pageEnd = fromBlock + pageBlocks - 1n;
     const toBlock = pageEnd > latest ? latest : pageEnd;
     const hashes = await fetchPage(fromBlock, toBlock);

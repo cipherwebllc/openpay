@@ -53,6 +53,8 @@ vi.mock('@/lib/x402/purchaseIntent', () => ({
   parsePurchaseOwnership: vi.fn(),
 }));
 vi.mock('@/lib/license/rights', () => ({ resolveLicenseRights: h.rights }));
+// 第 7 回レビュー B9: content の権利照合は RPC 枠 (lib/license/rightsBudget) を通る。ここでは枠は常に取れる。
+vi.mock('@/lib/license/rightsBudget', () => ({ acquireLicenseRightsBudget: async () => 'lease', releaseLicenseRightsBudget: async () => undefined }));
 vi.mock('@/lib/license/jobs', () => ({ readLicenseProof: h.proof }));
 vi.mock('@/lib/license/rpc', () => ({ licenseRpc: vi.fn() }));
 

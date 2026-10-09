@@ -13,6 +13,8 @@ vi.mock('@/lib/env', async (importOriginal) => {
   return { ...actual, env: { ...actual.env, enableCreatorStore: true, get enableLicenseNft() { return licenseState.enabled; } } };
 });
 vi.mock('@/lib/license/rights', () => ({ resolveLicenseRights: vi.fn(async () => ({ entitled: true, basis: 'purchase', nft: { status: 'minted' } })) }));
+const rightsBudget = vi.hoisted(() => ({ acquire: vi.fn<() => Promise<string | null>>(async () => 'lease'), release: vi.fn(async () => undefined) }));
+vi.mock('@/lib/license/rightsBudget', () => ({ acquireLicenseRightsBudget: rightsBudget.acquire, releaseLicenseRightsBudget: rightsBudget.release }));
 
 vi.mock('@/lib/kv', () => ({
   kvEval,
@@ -453,4 +455,41 @@ it('購入時のライセンスチェーンを表示用に投影し、デジタ�
   if (!result.ok) throw new Error('expected page');
   expect(result.page.items[0]).toMatchObject({ productKind: 'license', tokenChainId: 80002, nft: { status: 'minted' } });
   expect(result.page.items[1]).not.toHaveProperty('tokenChainId');
+  // 第 7 回レビュー B9: 権利照合を含まないページは RPC 枠に触れない (デジタルだけのページと同じ)。
+  expect(rightsBudget.acquire).toHaveBeenCalledTimes(1); expect(rightsBudget.release).toHaveBeenCalledWith('lease');
+});
+
+// 第 7 回レビュー B13/B9: ライセンス商品が並ぶページは 1 つの deadline を全商品の権利照合に共有し、
+// 1 request につき 1 つの RPC 枠を取って照合し、枠が無ければ権利 unknown のまま購入項目と cursor を残す。
+it('shares one page deadline and one RPC admission across every license rights lookup of the page', async () => {
+  licenseState.enabled = true;
+  const { resolveLicenseRights } = await import('@/lib/license/rights');
+  const ids = [resource(3), resource(2), resource(1)];
+  const license = (id: string) => {
+    const own = JSON.parse(ownership(id));
+    own.latestGrant.metadata = { ...own.latestGrant.metadata, productKind: 'license', license: { tokenChainId: 80002 } };
+    own.grants[0].metadata = own.latestGrant.metadata;
+    return JSON.stringify(own);
+  };
+  kvEval.mockResolvedValue({ ok: true, value: flatIndex(ids) });
+  kvMget.mockResolvedValue({ ok: true, value: [license(ids[0]!), ownership(ids[1]!), license(ids[2]!)] });
+  const before = Date.now();
+  const result = await listStoreLibraryPage({ payer: PAYER, cursor: null });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error('expected page');
+  expect(vi.mocked(resolveLicenseRights)).toHaveBeenCalledTimes(2);
+  const deadlines = vi.mocked(resolveLicenseRights).mock.calls.map(([input]) => (input as { deadline?: number }).deadline);
+  expect(deadlines[0]).toEqual(expect.any(Number));
+  expect(deadlines[1]).toBe(deadlines[0]);
+  expect(deadlines[0]!).toBeGreaterThan(before);
+  expect(deadlines[0]!).toBeLessThanOrEqual(Date.now() + 15_000);
+  expect(rightsBudget.acquire).toHaveBeenCalledTimes(1); expect(rightsBudget.release).toHaveBeenCalledTimes(1);
+
+  // 枠が取れないときは権利 unknown (null) で項目と cursor を落とさず、RPC (resolver) を始めない。
+  vi.mocked(resolveLicenseRights).mockClear(); rightsBudget.acquire.mockResolvedValueOnce(null);
+  const starved = await listStoreLibraryPage({ payer: PAYER, cursor: null });
+  expect(starved.ok).toBe(true);
+  if (!starved.ok) throw new Error('expected page');
+  expect(starved.page.items.map((item) => [item.resourceId, item.entitled])).toEqual([[ids[0], null], [ids[1], undefined], [ids[2], null]]);
+  expect(vi.mocked(resolveLicenseRights)).not.toHaveBeenCalled();
 });

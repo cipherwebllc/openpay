@@ -369,12 +369,12 @@ describe('USDC pending quarantine with real Lua', () => {
     if (reason === 'corrupt') h.store!.strings.set(storeUsdcIntentKey(member), '{broken');
     h.store!.zsets.get(storeUsdcPendingKey())!.set(member, NOW - 1);
     const input = { now: CHECKED_AT, limit: 1, client: chain(intent.nonce) };
-    expect(await reconcilePendingStoreUsdcPurchases(input)).toEqual({ checked: 1, settled: 0, failed: 0, pending: 0, storageErrors: 0 });
+    expect(await reconcilePendingStoreUsdcPurchases(input)).toEqual({ checked: 1, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 0 });
     expect(h.store!.zsets.get(QUARANTINE)?.get(member)).toBe(CHECKED_AT);
     expect(h.store!.zsets.get(storeUsdcPendingKey())?.has(member)).toBe(false);
     if (reason === 'corrupt') expect(h.store!.strings.get(storeUsdcIntentKey(member))).toBe('{broken');
     expect(logger.warn).toHaveBeenCalledWith('creator_store.usdc_purchase_pending_quarantined', { member, reason });
-    expect(await reconcilePendingStoreUsdcPurchases(input)).toEqual({ checked: 1, settled: 1, failed: 0, pending: 0, storageErrors: 0 });
+    expect(await reconcilePendingStoreUsdcPurchases(input)).toEqual({ checked: 1, settled: 1, failed: 0, pending: 0, storageErrors: 0, deferred: 0 });
     await expectSettled();
   });
 

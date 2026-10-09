@@ -2317,7 +2317,7 @@ describe('R3d pins: digital reconcile branches on real Lua', () => {
 
     const later = RECONCILE_NOW + PURCHASE_RECONCILE_RETRY_MS;
     await expect(reconcilePendingPurchases({ now: later, chain: adapter() })).resolves.toEqual({
-      checked: 1, settled: 0, pending: 0, failedPrebroadcast: 0, storageErrors: 0,
+      checked: 1, settled: 0, pending: 0, failedPrebroadcast: 0, storageErrors: 0, deferred: 0,
     });
     expect(pendingScore(settling.intentSalt)).toBeUndefined();
     expect(h.store!.zsets.get(QUARANTINE_KEY)?.get(settling.intentSalt)).toBe(later);
@@ -2377,7 +2377,7 @@ describe('R3d pins: digital reconcile branches on real Lua', () => {
       receiptMatches: vi.fn(async () => true),
     });
     await expect(reconcilePendingPurchases({ now, chain })).resolves.toEqual({
-      checked: 5, settled: 1, pending: 1, failedPrebroadcast: 1, storageErrors: 0,
+      checked: 5, settled: 1, pending: 1, failedPrebroadcast: 1, storageErrors: 0, deferred: 0,
     });
     expect(stored(settles.intentSalt)).toMatchObject({ state: 'settled', txHash: TX_HASH });
     expect(stored(waits.intentSalt)).toMatchObject({ state: 'indeterminate', nextReconcileAt: now + PURCHASE_RECONCILE_RETRY_MS });
@@ -2581,13 +2581,15 @@ describe('R4a differential reconcile traces (JPYC / USDC)', () => {
     }
   });
 
-  it('a missing candidate receipt advances JPYC but retries the first candidate page on USDC', async () => {
+  // 第 7 回レビュー B3: 新規候補の receipt 一時障害は両 rail とも候補のページ (12000) から再試行する
+  // (以前は JPYC だけ cursor を進めて証拠のページを飛ばしていた)。
+  it('a missing candidate receipt retries the first candidate page on both rails', async () => {
     for (const rail of rails) {
       const f = await fixture(rail);
       h.publicClient.getLogs.mockImplementation(async ({ fromBlock }) => fromBlock === 10_000n ? [] : [{ transactionHash: TX_HASH }]);
       h.publicClient.getTransactionReceipt.mockRejectedValue(new Error('missing receipt'));
       await f.run();
-      expect(f.stored().reconcileFromBlock).toBe(rail === 'jpyc' ? '10000' : '12000');
+      expect(f.stored().reconcileFromBlock).toBe('12000');
       expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledTimes(1);
       expect(h.publicClient.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX_HASH });
       expect(f.events.at(-1)).toEqual(pendingResult);

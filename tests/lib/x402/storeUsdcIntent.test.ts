@@ -252,10 +252,33 @@ describe('Store USDC reconciler decisions (no Lua)', () => {
     if (scenario === 'exhausted') expect(next.reconcileFromBlock).toBe('40090');
   });
 
+  // 第 7 回レビュー B4: cron の時間予算 (deadline) で page 取得を打ち切り、次の未取得 page を cursor に保存する。
+  it('stops paging at the deadline and persists the cursor of the next unfetched page', async () => {
+    h.anchor.mockResolvedValue(50_090n);
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    h.transactions.mockImplementation(async () => { clock += 10_000; return []; });
+    try {
+      expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(h.transactions).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: String(Number(active.anchorBlock) + 6_000), nextReconcileAt: NOW + 30_000 });
+  });
+
+  it('a batch past its deadline defers the remaining due members without touching them', async () => {
+    h.kvEval.mockResolvedValueOnce({ ok: true, value: [SALT, SALT] });
+    // deadline は実時刻 (Date.now) で見る: fixture の NOW は未来なので、実時刻より前の値を渡す。
+    expect(await reconcilePendingStoreUsdcPurchases({ now: NOW, deadline: Date.now() - 1 })).toEqual({ checked: 0, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 2 });
+    expect(h.used).not.toHaveBeenCalled();
+    expect(h.kvEval).toHaveBeenCalledTimes(1);
+  });
+
   it('quarantines corrupt/not-found members and reports batch storage failures', async () => {
     h.kvEval.mockResolvedValueOnce({ ok: true, value: ['invalid-salt', SALT] }).mockResolvedValueOnce({ ok: true, value: 1 });
     reads(key, null);
-    expect(await reconcilePendingStoreUsdcPurchases({ now: NOW })).toEqual({ checked: 2, settled: 0, failed: 0, pending: 0, storageErrors: 0 });
+    expect(await reconcilePendingStoreUsdcPurchases({ now: NOW })).toEqual({ checked: 2, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 0 });
     expect(h.warn).toHaveBeenCalledTimes(2);
     h.kvEval.mockResolvedValue({ ok: false });
     expect(await reconcilePendingStoreUsdcPurchases({ now: NOW })).toBe('storage');

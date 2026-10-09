@@ -150,13 +150,15 @@ export async function reconcilePurchaseIntent(
     now?: number;
     chain?: PurchaseReconcileChain;
     licenseChain?: LicenseReconcileChain;
+    // 経過時間の予算 (epoch ms・第 7 回レビュー B4)。到達後はページを取りに行かず途中 cursor を保存する。
+    deadline?: number;
   } = {},
 ): Promise<ReconcilePurchaseIntentResult> {
   const now = options.now ?? Date.now();
   const chain = options.chain ?? defaultPurchaseReconcileChain;
   const leased = await claimReconcileLease(intentSalt, now);
   if (!leased.ok) {
-    if (leased.reason === 'license') return reconcileLicensePurchase(leased.intent, leased.raw, now, finalizeHostedPurchase, options.licenseChain);
+    if (leased.reason === 'license') return reconcileLicensePurchase(leased.intent, leased.raw, now, finalizeHostedPurchase, options.licenseChain, options.deadline);
     if (leased.reason === 'terminal') {
       const current = await getPurchaseIntent(intentSalt);
       if (current === 'storage' || current === 'corrupt') {
@@ -326,11 +328,28 @@ export async function reconcilePurchaseIntent(
 
     const finalizeCandidate = async (
       txHash: Hex,
+      candidatePageStart?: bigint,
     ): Promise<ReconcilePurchaseIntentResult | null> => {
       let matches: boolean;
       try {
         matches = await chain.receiptMatches(intent, txHash);
       } catch {
+        // 走査で新しく見つけた候補の receipt 一時障害で、証拠のあるページを飛ばして cursor を進めると、
+        // head が走査予算より速く進む間は再発見できない (第 7 回レビュー B3)。entitlement 未付与への
+        // 波及を断つため、その候補のページから次回再試行する (USDC rail と同じ)。
+        if (candidatePageStart !== undefined) {
+          const retried = await rescheduleAfterReconcile({
+            intentSalt,
+            leasedRaw,
+            intent,
+            now,
+            fromBlock: candidatePageStart,
+            makeIndeterminate: true,
+          });
+          return retried === 'updated'
+            ? { ok: true, state: 'pending' }
+            : { ok: false, reason: 'storage' };
+        }
         // 保存済み旧 hash の receipt 欠落が replacement tx の照合まで止める波及を断つ。
         return null;
       }
@@ -411,9 +430,10 @@ export async function reconcilePurchaseIntent(
       latest,
       pageBlocks: PURCHASE_RECONCILE_PAGE_BLOCKS,
       maxPages: PURCHASE_RECONCILE_MAX_PAGES,
+      ...(options.deadline === undefined ? {} : { deadline: options.deadline }),
     }, (fromBlock, toBlock) => chain.authorizationUsedTransactions(intent, fromBlock, toBlock));
-    for (const txHash of candidates.keys()) {
-      const resolved = await finalizeCandidate(txHash);
+    for (const [txHash, candidatePageStart] of candidates) {
+      const resolved = await finalizeCandidate(txHash, candidatePageStart);
       if (resolved) return resolved;
     }
 
@@ -454,24 +474,36 @@ export type ReconcilePendingSummary = {
   pending: number;
   failedPrebroadcast: number;
   storageErrors: number;
+  // 時間予算 (deadline) 到達で手を付けなかった due member の数。pending ZSET に残り次回に回る。
+  deferred: number;
 };
 
 export async function reconcilePendingPurchases(input: {
   now?: number;
   limit?: number;
   chain?: PurchaseReconcileChain;
+  // 経過時間の予算 (epoch ms・第 7 回レビュー B4)。batch と各 intent のページ走査が共有する。
+  deadline?: number;
 } = {}): Promise<ReconcilePendingSummary | 'storage'> {
   const listNow = input.now ?? Date.now();
   const salts = await listPendingPurchaseIntents(listNow, input.limit);
   if (salts === 'storage') return 'storage';
   const summary: ReconcilePendingSummary = {
-    checked: salts.length,
+    checked: 0,
     settled: 0,
     pending: 0,
     failedPrebroadcast: 0,
     storageErrors: 0,
+    deferred: 0,
   };
   for (const rawSalt of salts) {
+    // 重い 1 件が cron の maxDuration を使い切って後続 intent と USDC rail の番を奪う波及を断つ。
+    // 残りは due のまま ZSET に残るので、次回 (status ポーリング or cron) が拾う。
+    if (input.deadline !== undefined && Date.now() >= input.deadline) {
+      summary.deferred += 1;
+      continue;
+    }
+    summary.checked += 1;
     const intentNow = input.now ?? Date.now();
     if (!isPurchaseIntentSalt(rawSalt)) {
       // 壊れた先頭 member が毎 batch を占有し、正常 intent の回復を永久に止める波及を断つ。
@@ -492,6 +524,7 @@ export async function reconcilePendingPurchases(input: {
     const result = await reconcilePurchaseIntent(rawSalt, {
       now: intentNow,
       chain: input.chain,
+      ...(input.deadline === undefined ? {} : { deadline: input.deadline }),
     });
     if (!result.ok) {
       if (

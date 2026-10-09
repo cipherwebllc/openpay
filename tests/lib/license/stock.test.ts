@@ -420,7 +420,7 @@ describe('B-R3e: concurrent license finalization', () => {
     const writes = vi.spyOn(h.store!.strings, 'set');
 
     expect(await reconcilePendingPurchases({ now: NOW + 3000 })).toEqual({
-      checked: 1, settled: 0, pending: 0, failedPrebroadcast: 0, storageErrors: 1,
+      checked: 1, settled: 0, pending: 0, failedPrebroadcast: 0, storageErrors: 1, deferred: 0,
     });
     expect(writes).not.toHaveBeenCalled();
     expect(h.store!.lists.get(LICENSE_DUE_INDEX)).toEqual(['wrong-type']);
@@ -445,5 +445,45 @@ describe('B-R3e: concurrent license finalization', () => {
     expect(h.store!.zsets.get(LICENSE_HOLD_INDEX)?.has(input.intentSalt)).toBe(true);
     expect(h.store!.zsets.get(purchasePendingIndexKey())?.has(input.intentSalt)).toBe(true);
     expect(h.store!.strings.has(hostedPurchaseRecordKey(80002, TX))).toBe(false);
+  });
+});
+
+describe('第 7 回レビュー B3/B4: license reconcile の候補ページ再試行と時間予算', () => {
+  const finalized = (number: bigint) => ({ number, hash: toHex(10n, { size: 32 }), timestamp: BigInt(NOW / 1000 + 601), used: true });
+  it('新規候補の receipt 一時障害ではその候補のページから再試行し、cursor を進めない', async () => {
+    const input = await quote(); const i = await settling(input);
+    const now = i.leaseUntil + 10_000;
+    const rpc: LicenseReconcileChain = {
+      observe: vi.fn(async () => finalized(5_000n)),
+      transactions: vi.fn(async (_intent, from) => from === 2_001n ? [TX] : []),
+      receiptMatches: vi.fn(async () => { throw new Error('receipt unavailable'); }),
+    };
+    expect(await reconcilePurchaseIntent(i.intentSalt, { now, licenseChain: rpc })).toEqual({ ok: true, state: 'pending' });
+    // 候補のページ (2001〜4000) の先頭を cursor に保存し、残りのページは取りに行かない。
+    expect(rpc.transactions).toHaveBeenCalledTimes(2);
+    const stored = JSON.parse(h.store!.strings.get(purchaseIntentKey(i.intentSalt))!);
+    expect(stored).toMatchObject({ state: 'settling', reconcileFromBlock: '2001', nextReconcileAt: now + 30_000 });
+    expect(stored).not.toHaveProperty('txHash');
+    expect(stored).not.toHaveProperty('reconcileLeaseId');
+    expect(stock()).toMatchObject({ reserved: 1, sold: 0 });
+  });
+  it('期限が来たらページ取得を打ち切り、次の未取得ページを cursor として保存する', async () => {
+    const input = await quote(); const i = await settling(input);
+    const now = i.leaseUntil + 10_000;
+    let clock = now;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const rpc: LicenseReconcileChain = {
+      observe: vi.fn(async () => finalized(50_000n)),
+      transactions: vi.fn(async () => { clock += 10_000; return []; }),
+      receiptMatches: vi.fn(async () => true),
+    };
+    try {
+      expect(await reconcilePurchaseIntent(i.intentSalt, { now, licenseChain: rpc, deadline: now + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(rpc.transactions).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(h.store!.strings.get(purchaseIntentKey(i.intentSalt))!)).toMatchObject({ reconcileFromBlock: '6001' });
+    expect(stock()).toMatchObject({ reserved: 1, sold: 0 });
   });
 });

@@ -1317,7 +1317,8 @@ type ReconcileStoreUsdcResult =
 
 export async function reconcileStoreUsdcIntent(
   intentSalt: Hex,
-  input: { now?: number; client?: StoreUsdcPublicClient } = {},
+  // deadline = 経過時間の予算 (epoch ms・第 7 回レビュー B4)。到達後はページを取りに行かず途中 cursor を保存する。
+  input: { now?: number; client?: StoreUsdcPublicClient; deadline?: number } = {},
 ): Promise<ReconcileStoreUsdcResult> {
   const read = await readIntent(intentSalt);
   if (!read.ok) return { ok: false, reason: read.reason };
@@ -1446,6 +1447,7 @@ export async function reconcileStoreUsdcIntent(
     latest,
     pageBlocks: STORE_USDC_RECONCILE_PAGE_BLOCKS,
     maxPages: STORE_USDC_RECONCILE_MAX_PAGES,
+    ...(input.deadline === undefined ? {} : { deadline: input.deadline }),
   }, (fromBlock, toBlock) => findStoreUsdcAuthorizationTransactions({
     payer: intent.claim.payer,
     nonce: intent.nonce,
@@ -1494,8 +1496,11 @@ export async function reconcilePendingStoreUsdcPurchases(input: {
   now?: number;
   limit?: number;
   client?: StoreUsdcPublicClient;
+  // 経過時間の予算 (epoch ms・第 7 回レビュー B4)。batch と各 intent のページ走査が共有する。
+  deadline?: number;
 } = {}): Promise<
-  | { checked: number; settled: number; failed: number; pending: number; storageErrors: number }
+  // deferred = 予算到達で手を付けなかった due member の数 (pending ZSET に残り次回に回る)。
+  | { checked: number; settled: number; failed: number; pending: number; storageErrors: number; deferred: number }
   | 'storage'
 > {
   const now = input.now ?? Date.now();
@@ -1505,8 +1510,13 @@ export async function reconcilePendingStoreUsdcPurchases(input: {
     [String(now), String(input.limit ?? STORE_USDC_RECONCILE_BATCH_SIZE)],
   );
   if (!due.ok || !Array.isArray(due.value)) return 'storage';
-  const summary = { checked: 0, settled: 0, failed: 0, pending: 0, storageErrors: 0 };
+  const summary = { checked: 0, settled: 0, failed: 0, pending: 0, storageErrors: 0, deferred: 0 };
   for (const salt of due.value) {
+    // 重い 1 件が cron の maxDuration を使い切って後続 intent の回復を止める波及を断つ。残りは due のまま残す。
+    if (input.deadline !== undefined && Date.now() >= input.deadline) {
+      summary.deferred += 1;
+      continue;
+    }
     summary.checked += 1;
     const intentNow = input.now ?? Date.now();
     const result = INTENT_RE.test(salt)
