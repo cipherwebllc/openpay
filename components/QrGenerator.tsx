@@ -274,8 +274,9 @@ export function QrGenerator() {
   // Recover モードの手数料開示に渡す請求額 (wei) と負担者。FREE モード (forwarder null)
   // では共有 RecoverFeeNotice が null を返してパネルを描画しない。JPYC recover は merchant 固定。
   const recoverBillAmount = useMemo(() => {
-    // お店がガス代を肩代わりして送るときは OpenPay の利用料がかからない (回収の開示を出さない)。
-    if (storePaysRequested(settings)) return null;
+    // お店がガス代を肩代わりして送る QR を出すときは OpenPay の利用料がかからない (回収の開示を出さない)。店員が
+    // 「通常の QR を出す」に切り替えたら、出る QR は回収 (利用料・店舗負担) なので開示を出す (第 7 回レビュー D4)。
+    if (storePaysRequested(settings) && !forceNormalQr) return null;
     if (!amountValid || mode !== 'amount' || settings.token !== 'jpyc') return null;
     const dep = deploymentForSlug(settings.token, settings.chain);
     try {
@@ -284,7 +285,7 @@ export function QrGenerator() {
     } catch {
       return null;
     }
-  }, [amountValid, mode, settings, chargeAmount]);
+  }, [amountValid, mode, settings, chargeAmount, forceNormalQr]);
   const recoverGasMode: GasMode = effectiveGasMode;
 
   const payUrl = useMemo(() => {
@@ -942,7 +943,14 @@ export function QrGenerator() {
         {...(storeShowQrBlocked !== undefined ? { showQrBlocked: storeShowQrBlocked } : {})}
         // お店負担の QR を作れなかったとき、店員が選んで通常の QR を出せる (モーダルが開いていないので、ここに出す)。
         {...(storeRequested && sdState.phase === 'create_failed'
-          ? { secondaryAction: { label: t('storeDevice.showNormalQr'), onClick: () => void showNormalQr() } }
+          ? {
+              secondaryAction: {
+                label: t('storeDevice.showNormalQr'),
+                onClick: () => void showNormalQr(),
+                // 通常の QR は回収 (OpenPay 利用料・店舗負担)。お店負担は JPYC だけなので常に当てはまる (第 7 回レビュー D4)。
+                note: t('storeDevice.normalQrFeeNote'),
+              },
+            }
           : {})}
       />
 
