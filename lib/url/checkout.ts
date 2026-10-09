@@ -14,7 +14,9 @@
 //   mode            ("gasless" | "standard", 省略時 gasless) ※ standard のときのみ URL に出力
 //   success_url     (任意, http(s) — 決済成功後 redirect 先)
 //   cancel_url      (任意, http(s) — 「中止して戻る」リンク)
-//   webhook         (任意, http(s) — 成功時 POST 先)
+//   webhook         (任意, http(s) — OpenPay 自身の受注 notify (同一 origin の /api/order/notify?h=)
+//                   だけに成功時 POST する。MobileOrderView が付ける。第三者 URL は退役 (2026-10 user
+//                   裁定 R1): CheckoutForm は送らず無視する。旧リンクを壊さないため parse は従来どおり)
 //   store_handle    (任意, @ 無し handle — モバイル注文の署名前 admission 再検証用)
 //
 // items の encoding: name は encodeURIComponent で URI-encode してから ":" qty
@@ -24,8 +26,7 @@
 // 複数商品カートでは per-item の税/メモを履歴に残すため 6 セグへ拡張可:
 // "encName:qty:price:taxRate:taxCategory:encMemo" (在るときのみ・旧 3 セグと後方互換)。
 //
-// webhook payload は Tip と互換シェイプ (type 識別子だけ "openpay.checkout.success")。
-// マーチャントは 1 つの handler で Tip / Checkout 両対応可能。
+// 受注 notify の payload は type 識別子 "openpay.checkout.success" (受け手は /api/order/notify のみ)。
 import { formatUnits, getAddress, isAddress, parseUnits } from 'viem';
 import type { Address } from 'viem';
 import type { ChainSlug } from '../chains';
@@ -101,6 +102,8 @@ export type CheckoutParams = {
   customerEmail?: string;
   successUrl?: string;
   cancelUrl?: string;
+  // OpenPay 自身の受注 notify URL の搬送専用 (第三者 webhook は退役・CheckoutForm が同一 origin の
+  // `/api/order/notify` 以外を無視する)。
   webhook?: string;
   // --- 記帳補助メタ (任意・チェックアウト単位の共通税)。レジモードが設定する。 ---
   // 税率 (%)。0 (非課税/対象外) もありうる。
@@ -126,7 +129,7 @@ export type CheckoutParams = {
   // receiver/mode と checkout の merchant/mode を再束縛する。不在 = 通常 checkout / 旧 URL。
   storeHandle?: string;
   // --- 受取予定時刻 (任意・Phase 4・preorder のスロット選択・MobileOrderView のみが設定)。 ---
-  // 絶対 ms。webhook payload へ素通しされ受注に保存・厨房/ホールが表示する (advisory・money-path 非該当)。
+  // 絶対 ms。受注 notify の payload へ素通しされ受注に保存・厨房/ホールが表示する (advisory・money-path 非該当)。
   pickupAt?: number;
   // --- お店の端末で送る (任意・RegisterMode のみが設定・plans/store-gas-wallet.md)。 ---
   // submit='store' のとき、お客様は既存 forwarder 宛て・手数料欄 1 wei に署名し、受け渡し (hs) 経由で

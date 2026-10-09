@@ -735,7 +735,7 @@ describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め�
   });
 
   it('tipUrl が QR 容量を超えても crash せず QR を省略 (リンク/X シェアは残る)', async () => {
-    // 長い webhook で tipUrl を肥大させると qrcode.react が throw しうる。長さガードで
+    // 長い thanksUrl で tipUrl を肥大させると qrcode.react が throw しうる。長さガードで
     // QR を省略し、share タブが落ちないことを検証する。
     window.localStorage.setItem(
       KEY,
@@ -743,7 +743,7 @@ describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め�
         token: 'jpyc',
         chain: 'polygon',
         receiver: VALID,
-        webhook: `https://hook.example.com/${'a'.repeat(1400)}`,
+        thanksUrl: `https://links.example.com/${'a'.repeat(1400)}`,
       }),
     );
     render(<TipEmbedGenerator />);
@@ -808,7 +808,7 @@ describe('TipEmbedGenerator — Step 1 returning-user 折りたたみ', () => {
 });
 
 describe('TipEmbedGenerator — 開発者向け設定 (折りたたみ)', () => {
-  it('default 閉 (表示のカードの中の任意のまとまり)。開くと thanks / thanksUrl / webhook 入力が出る', async () => {
+  it('default 閉 (表示のカードの中の任意のまとまり)。開くと thanks / thanksUrl 入力が出る (webhook は退役)', async () => {
     const user = userEvent.setup();
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
@@ -817,13 +817,16 @@ describe('TipEmbedGenerator — 開発者向け設定 (折りたたみ)', () => 
     expect(details.open).toBe(false);
     await user.click(screen.getByText(/開発者向け設定/, { selector: 'summary span' }));
     expect(details.open).toBe(true);
-    expect(within(details).getByPlaceholderText(/discord\.com\/api\/webhooks/)).toBeInTheDocument();
+    // 第三者 webhook (R1) は退役したので入力欄を出さない。
+    expect(within(details).queryByPlaceholderText(/discord\.com\/api\/webhooks/)).toBeNull();
+    expect(screen.queryByText(/webhook/i)).toBeNull();
     expect(within(details).getByPlaceholderText(/discord\.gg/)).toBeInTheDocument();
     expect(within(details).getByPlaceholderText(/限定 Discord に招待します/)).toBeInTheDocument();
   });
 
-  it('折りたたんだままでも保存済み webhook / thanks が URL に直列化される', async () => {
+  it('折りたたんだままでも保存済み thanks が URL に直列化され、旧保存の webhook は URL に出ない', async () => {
     // dev 設定 UI は default 閉。だが settings に保存された値は URL に反映される。
+    // 退役した webhook (R1) が旧保存値に残っていても読まずに捨て、URL には出さない。
     window.localStorage.setItem(
       KEY,
       JSON.stringify({
@@ -841,9 +844,9 @@ describe('TipEmbedGenerator — 開発者向け設定 (折りたたみ)', () => 
       screen.getByText(/開発者向け設定/, { selector: 'summary span' }).closest('details')!.open,
     ).toBe(false);
 
-    await waitFor(() => expectInUrl(/webhook=/));
-    expectInUrl(/thanks=/);
+    await waitFor(() => expectInUrl(/thanks=/));
     expectInUrl(/thanksUrl=/);
+    expect(screen.queryByText(/webhook=/)).toBeNull();
   });
 });
 

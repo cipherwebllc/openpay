@@ -119,7 +119,8 @@ export interface HandleTipConfig {
   theme?: HandleTheme;
   thanks?: string;
   thanksUrl?: string;
-  webhook?: string;
+  // 旧 `webhook` は退役 (2026-10 user 裁定 R1)。保存済み record に残っていても読み出しで捨て、
+  // 新規には保存しない (lib/handle/record.ts・lib/handle/tipConfig.ts)。
   methods: HandleReceiveMethod[]; // 1..N
   presets?: Partial<Record<TokenSymbol, string[]>>;
 }

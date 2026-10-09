@@ -6,6 +6,8 @@ import {
 
 // R13 の分割前 (monolith) に対して採取したバイト列。保存済み record の tolerant な読み出しの
 // JSON キー順・バイト列を、意図的に寛容な挙動も含めて固定する (厳格な書き込み検証の期待値ではない)。
+// 2026-10 (user 裁定 R1): 第三者 webhook の退役で config.webhook は「受けて捨てる」に変わった
+// (旧レコードに残っていても型を問わず読まず、直列化にも出さない)。それ以外のバイト列は不変。
 const config: HandleTipConfig = { to: 'receiver', methods: [{ token: 'jpyc', chain: 'polygon' }] };
 const configJson = '{"to":"receiver","methods":[{"token":"jpyc","chain":"polygon"}]}';
 const rawRecord = (patch: Record<string, unknown> = {}) => JSON.stringify({
@@ -41,7 +43,7 @@ const corpus = [
       },
       profile: {}, future: { version: 99 },
     }),
-    expected: recordJson('{"to":"receiver","name":" Alice ","message":"","color":"invalid","theme":"night","thanks":" Thanks ","thanksUrl":"http://legacy.test","webhook":"not a url","methods":[{"token":"usdc","chain":"arc","crossChain":true}]}'),
+    expected: recordJson('{"to":"receiver","name":" Alice ","message":"","color":"invalid","theme":"night","thanks":" Thanks ","thanksUrl":"http://legacy.test","methods":[{"token":"usdc","chain":"arc","crossChain":true}]}'),
   },
   {
     name: 'methods take precedence, preserve duplicates/unknowns, and presets follow token order',
@@ -147,12 +149,22 @@ describe('stored handle record byte corpus', () => {
     expect(parseHandleRecord(rawRecord(patch))).toBeNull();
   });
 
-  it.each(['name', 'message', 'color', 'thanks', 'thanksUrl', 'webhook'])('does not accept persisted null or non-string %s', (field) => {
+  it.each(['name', 'message', 'color', 'thanks', 'thanksUrl'])('does not accept persisted null or non-string %s', (field) => {
     for (const value of [null, 1, false, [], {}]) {
       expect(parseHandleRecord(rawRecord({ config: { ...config, [field]: value } }))).toBeNull();
     }
     // C10: null は更新命令であり、保存済み config の値にはならない。
     expect(serializeHandleRecord(parseHandleRecord(rawRecord({ config: { ...config, [field]: undefined } }))!)).toBe(recordJson());
+  });
+
+  it.each(['https://discord.com/api/webhooks/1/x', 'not a url', '', null, 1, false, [], {}])('reads a legacy record with the retired webhook %j and drops it (R1)', (webhook) => {
+    // 保存済みの旧レコード (KV) を読めなくしない: 型を問わず受けて捨て、他のフィールドはそのまま。
+    const record = parseHandleRecord(rawRecord({ config: { ...config, name: 'Alice', webhook } }));
+    expect(record).not.toBeNull();
+    expect(Object.hasOwn(record!.config, 'webhook')).toBe(false);
+    expect(serializeHandleRecord(record!)).toBe(
+      recordJson('{"to":"receiver","name":"Alice","methods":[{"token":"jpyc","chain":"polygon"}]}'),
+    );
   });
 
   it('turns write-side C10 null clears into omitted keys before a config is saved', () => {
@@ -162,6 +174,7 @@ describe('stored handle record byte corpus', () => {
     });
     if (!result.ok) throw new Error(result.error);
     for (const field of CLEARABLE_HANDLE_TIP_FIELDS) expect(result.config[field]).toBeUndefined();
+    expect(Object.hasOwn(result.config, 'webhook')).toBe(false); // 退役した webhook は null でも値でも保存しない
     expect(serializeHandleRecord({ owner: 'owner', config: result.config, createdAt: 1, updatedAt: 2 })).toBe(
       recordJson(`{"to":"${ADDR}","name":"Alice","methods":[{"token":"jpyc","chain":"polygon"}]}`),
     );
@@ -173,7 +186,7 @@ describe('stored handle record byte corpus', () => {
 
   it('retains undefined own keys and structural-only receiver/method validation on read', () => {
     const record = parseHandleRecord(rawRecord())!;
-    expect(Object.keys(record.config)).toEqual(['to', 'name', 'message', 'color', 'thanks', 'thanksUrl', 'webhook', 'methods', 'presets']);
+    expect(Object.keys(record.config)).toEqual(['to', 'name', 'message', 'color', 'thanks', 'thanksUrl', 'methods', 'presets']);
     expect(Object.hasOwn(record.config.methods[0], 'crossChain')).toBe(true);
     expect(record.config.methods[0].crossChain).toBeUndefined();
     expect(validateHandleTipConfig(record.config).ok).toBe(false);

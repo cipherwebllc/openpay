@@ -120,6 +120,7 @@ vi.mock('@/components/HandleClaimPanel', async () => {
         onClick={() => onEdit?.('alice', {
           to: ADDR, methods: [{ token: 'jpyc', chain: 'polygon' }],
           message: 'Hello', thanks: 'Thank you',
+          // 旧レコードに残る退役 webhook (R1)。編集・再公開で拾わないことを確かめるために残す。
           thanksUrl: 'https://example.com/thanks', webhook: 'https://example.com/hook',
         }, undefined, 123)}
       />
@@ -215,7 +216,6 @@ beforeEach(() => {
 describe('HandleProfileBuilder', () => {
   describe.each([
     ['thanksUrl', 'Link shown after a tip (optional)'],
-    ['webhook', 'Developer: webhook notification URL (optional)'],
   ])('%s validation', (field, label) => {
     it.each(['foo', 'javascript:alert(1)', 'ftp://example.com/file'])('blocks invalid URL %s until corrected or explicitly cleared', (invalid) => {
       renderWithIntl(<HandleProfileBuilder />, { locale: 'en' });
@@ -243,7 +243,6 @@ describe('HandleProfileBuilder', () => {
     ['message', 'Message (optional)', 'Hello'],
     ['thanks', 'Thank-you message after success (optional)', 'Thank you'],
     ['thanksUrl', 'Link shown after a tip (optional)', 'https://example.com/thanks'],
-    ['webhook', 'Developer: webhook notification URL (optional)', 'https://example.com/hook'],
   ])('%s form field', (field, label, original) => {
     it.each(['clear', 'keep', 'set'])('%s is reflected in the publish payload and dirty state', (action) => {
       renderWithIntl(<HandleProfileBuilder />, { locale: 'en' });
@@ -254,7 +253,7 @@ describe('HandleProfileBuilder', () => {
       const originalConfig = payload().config;
       expect(originalConfig[field]).toBe(original);
       expect(screen.getByTestId('published-status')).not.toHaveTextContent('You have unpublished changes');
-      const value = field.endsWith('Url') || field === 'webhook' ? 'https://example.com/new' : 'New text';
+      const value = field.endsWith('Url') ? 'https://example.com/new' : 'New text';
       if (action !== 'keep') fireEvent.change(input, { target: { value: action === 'clear' ? '' : value } });
       expect(payload().config).toEqual({ ...originalConfig, [field]: action === 'clear' ? null : action === 'set' ? value : original });
       if (action !== 'keep') {
@@ -264,6 +263,19 @@ describe('HandleProfileBuilder', () => {
         expect(payload().config[field]).toBe(action === 'clear' ? null : value);
       }
     });
+  });
+
+  it('退役した webhook (R1) の入力欄は出さず、webhook が残る旧レコードを編集しても再公開に載せない', () => {
+    renderWithIntl(<HandleProfileBuilder />, { locale: 'en' });
+    fireEvent.click(screen.getByTestId('edit-tip-metadata'));
+    fireEvent.click(screen.getByText('Advanced (optional)'));
+    expect(screen.queryByLabelText(/webhook/i)).toBeNull();
+    expect(screen.queryByPlaceholderText(/discord\.com\/api\/webhooks/)).toBeNull();
+    const claim = screen.getByTestId('claim');
+    expect(claim).not.toHaveAttribute('data-blocked');
+    expect(JSON.parse(claim.getAttribute('data-payload')!).config).not.toHaveProperty('webhook');
+    // 旧レコードの webhook は比較対象にならない (編集に入っただけで「未公開の変更」にしない)。
+    expect(screen.getByTestId('published-status')).not.toHaveTextContent('You have unpublished changes');
   });
 
   it('reflects font/layout selection in previews and canonical publish payload', () => {

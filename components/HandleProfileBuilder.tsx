@@ -174,7 +174,6 @@ function draftFromPublished(c: HandleTipConfig, p?: HandleProfile): HandleProfil
     message: c.message,
     thanks: c.thanks,
     thanksUrl: c.thanksUrl,
-    webhook: c.webhook,
     color:
       c.color && COLOR_PATTERN.test(c.color)
         ? c.color
@@ -324,8 +323,7 @@ export function HandleProfileBuilder({
   const hasInsecure = useMemo(() => hasDroppedProfileUrl(draft), [draft]);
   // 不正 URL が server で省略扱いになり旧値を保持するため、保存成功の誤表示へ波及させない。
   const invalidThanksUrl = !!draft.thanksUrl?.trim() && !sanitizeUrl(draft.thanksUrl);
-  const invalidWebhook = !!draft.webhook?.trim() && !sanitizeUrl(draft.webhook);
-  const callbackUrlError = invalidThanksUrl || invalidWebhook ? tb('callbackUrlInvalid') : undefined;
+  const callbackUrlError = invalidThanksUrl ? tb('callbackUrlInvalid') : undefined;
   const isDirty = hasUnpublishedHandleChanges(
     publishBaseline,
     editingHandle,
@@ -397,7 +395,7 @@ export function HandleProfileBuilder({
   ].filter(Boolean).length;
   const filledSocials = draft.socials.filter((v) => v.trim()).length;
   const filledLinks = draft.links.filter((l) => l.kind !== 'heading' && l.url.trim()).length;
-  const filledAdvanced = [draft.message, draft.thanks, draft.thanksUrl, draft.webhook].filter((v) => v?.trim()).length;
+  const filledAdvanced = [draft.message, draft.thanks, draft.thanksUrl].filter((v) => v?.trim()).length;
   const filledLabel = (count: number) => t('optionalFilled', { count });
 
   // 「注目」は最大 1 本。ある行を ON にしたら他行は自動 OFF (単一 enforce)。同じ行の再クリックで OFF。
@@ -488,7 +486,6 @@ export function HandleProfileBuilder({
     message: config.message ?? undefined,
     thanks: config.thanks ?? undefined,
     thanksUrl: config.thanksUrl ?? undefined,
-    webhook: config.webhook ?? undefined,
   } : {
     to: effectiveReceiver ?? '',
     name: draft.name.trim() || undefined,
@@ -1111,23 +1108,6 @@ export function HandleProfileBuilder({
                   />
                   {invalidThanksUrl && (
                     <p id="handle-thanks-url-error" className="mt-1 text-xs text-red-600">{callbackUrlError}</p>
-                  )}
-                </Field>
-                <Field
-                  label={tt('webhookLabel')}
-                  hint={tt('webhookHint', { payload: '{ txHash, amount, token, from, message }' })}
-                >
-                  <input
-                    type="url"
-                    value={draft.webhook ?? ''}
-                    aria-invalid={invalidWebhook || undefined}
-                    aria-describedby={invalidWebhook ? 'handle-webhook-error' : undefined}
-                    onChange={(e) => update({ webhook: e.target.value })}
-                    placeholder={tt('webhookPlaceholder')}
-                    className={inputClass}
-                  />
-                  {invalidWebhook && (
-                    <p id="handle-webhook-error" className="mt-1 text-xs text-red-600">{callbackUrlError}</p>
                   )}
                 </Field>
               </div>

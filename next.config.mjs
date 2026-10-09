@@ -78,14 +78,18 @@ function enforcedCsp(frameAncestors) {
   const isDev = process.env.NODE_ENV === 'development';
   // Next 15.5.25 nonces require dynamic rendering (including the static locale
   // layout): https://nextjs.org/docs/15/app/guides/content-security-policy
-  // Use a host allowlist without changing rendering/caching. Next's inline RSC
-  // hydration and Coinbase's inline telemetry will intentionally report; resolve
-  // those with a nonce/hash design before enforcing, not a fixed/reused nonce.
-  // No collector/report-uri: observations are in browser DevTools only. A public
-  // collector needs bounded ingestion/redaction/rate limiting; logger.info is
-  // suppressed at the default log level. Do not send CSP reports to Sentry/KV.
-  // Merchant webhooks (TipForm/CheckoutForm) and ENS CCIP-read URLs are open-ended;
-  // observe these rather than granting all HTTPS connections before review.
+  // Use a host allowlist without changing rendering/caching. Inline scripts are
+  // allowed below via 'unsafe-inline' (see script-src); a nonce/hash design would
+  // replace it, never a fixed/reused nonce.
+  // No collector/report-uri: violations are visible in browser DevTools only. A public
+  // collector needs bounded ingestion/redaction/rate limiting. Do not send CSP reports
+  // to Sentry/KV.
+  // connect-src is a closed allowlist of explicit origins — never `https:` or `*`.
+  // Browser-side POSTs to arbitrary third-party URLs (the former TipForm/CheckoutForm
+  // "webhook on success") were retired (2026-10, user ruling R1) instead of being granted:
+  // the order notification is the same-origin /api/order/notify. ENS CCIP-Read is limited
+  // to the two gateways listed in connectOrigins (#729); other off-chain names are reported
+  // as unresolvable in the UI.
   return [
     "default-src 'self'",
     // app/[locale]/layout.tsx: Vercel scripts are same-origin in production.

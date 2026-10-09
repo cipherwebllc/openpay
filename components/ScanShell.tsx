@@ -54,9 +54,9 @@ export function ScanShell() {
     switch (action.kind) {
       case 'tip':
       case 'checkout':
-        // 同 origin だが callback (webhook/redirect) が第三者ホストを指す場合は、外部 URL と
-        // 同じ amber interstitial + 明示 continue を挟む (自動遷移で silent に第三者へ payer
-        // データを送る / phishing 遷移するのを防ぐ)。off-origin が無ければ従来どおり即遷移。
+        // 同 origin だが callback (redirect / サンクスリンク) が第三者ホストを指す場合は、外部 URL と
+        // 同じ amber interstitial + 明示 continue を挟む (自動遷移の先で silent に第三者ページへ
+        // 誘導される phishing を防ぐ)。off-origin が無ければ従来どおり即遷移。
         if (action.offOriginHosts.length > 0) {
           logger.warn('scan.callback_offorigin', {
             kind: action.kind,

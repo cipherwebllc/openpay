@@ -61,7 +61,6 @@ import { primeChimeAudio } from '@/lib/successChime';
 import { isGasCongestedError } from '@/lib/gasCeiling';
 import { isIncompatibleSmartAccountError } from '@/lib/accountDetection';
 import { logger } from '@/lib/logger';
-import { redactUrlForTelemetry } from '@/lib/telemetryRedaction';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { resolveJpycGaslessProvider } from '@/lib/jpycGaslessProvider';
 import { resolveUsdcGaslessProvider } from '@/lib/circlePaymaster';
@@ -87,7 +86,6 @@ import { useOrigin } from '@/hooks/useOrigin';
 import type { ExecuteResult } from '@/hooks/useCrossChainPayment';
 import { formatTokenAmount } from '@/lib/format';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
-import { computeCrossChainFeeSplit } from '@/lib/crossChain/feeSplit';
 import {
   buildJpycRelaySignPreview,
   buildJpycRecoverSignPreview,
@@ -147,19 +145,17 @@ export function TipForm({
   const { address, isConnected } = useAccount();
   const { switchChain, isPending: isSwitching } = useSwitchChain();
 
-  // F7: webhook / thanksUrl のうち、現在の origin と host が異なる第三者ホスト。決済者データの
-  // POST 先 / 送信成功後に開くリンク先になり得るため、送信前に payer (ファン) へ明示開示する
-  // (block はしない — Discord/Patreon 等の正当な off-origin リンクが存在する)。origin 未確定は空配列。
+  // F7: thanksUrl が現在の origin と host が異なる第三者ホストなら、送信成功後に開くリンク先に
+  // なり得るため、送信前に payer (ファン) へ明示開示する (block はしない — Discord/Patreon 等の
+  // 正当な off-origin リンクが存在する)。origin 未確定は空配列。第三者 webhook (送信成功時の外部
+  // POST) は退役済み (2026-10 user 裁定 R1・#655 の CSP で全滅していた) なので開示の対象に無い。
   const origin = useOrigin();
   const offOriginHosts = useMemo(
     () =>
       origin
-        ? offOriginCallbackHosts(
-            [params.webhook, params.thanksUrl],
-            new URL(origin).host,
-          )
+        ? offOriginCallbackHosts([params.thanksUrl], new URL(origin).host)
         : [],
-    [origin, params.webhook, params.thanksUrl],
+    [origin, params.thanksUrl],
   );
 
   // 決済経路の単一情報源 (Phase 1.1)。散在していた useRelay / useRecover / isCircle を
@@ -438,36 +434,22 @@ export function TipForm({
       logger.error('tip.gas-quote.failed', { error: activeQuote.error });
   }, [activeQuote.error]);
 
-  // userOpHash ごとに 1 回限りの webhook 発火。gasQuote の refetchInterval (30s)
-  // で breakdown が再計算 → effect 再実行 → 二重発火を防ぐ gate。
+  // userOpHash ごとに 1 回限りの成功処理 (控え・ログ)。gasQuote の refetchInterval (30s)
+  // で breakdown が再計算 → effect 再実行 → 二重記録を防ぐ gate。
   const notifiedUserOpHashRef = useRef<string | null>(null);
-  // 送信時点の確定スナップショット。webhook が live state (amountStr / breakdown) を読むと、
-  // 送信後にユーザが額を変えたり gasQuote が refetch されたとき、実際に送ったチップと異なる
-  // 値を creator へ通知してしまう。onSubmit でここに固定し、webhook はこちらを参照する。
-  const submittedRef = useRef<{
-    amount: string;
-    merchantAmount: string;
-    feeAmount: string;
-    customerPays: string;
-  } | null>(null);
+  // 送信時点の確定スナップショット。控えが live state (amountStr) を読むと、送信後にユーザが
+  // 額を変えたとき、実際に送ったチップと異なる額を記録してしまう。onSubmit でここに固定する。
+  const submittedRef = useRef<{ amount: string } | null>(null);
   // 成功 overlay の表示額は送信時点を固定 (送信後に金額編集しても overlay が live 値で
   // ぶれないように・Codex P2)。onSubmit で fmt(totalCustomerOutflow) を保存。
   const submittedAmountDisplayRef = useRef<string | null>(null);
 
   const onCrossChainAttemptStart = useCallback(
     (attemptAmount: bigint) => {
-      const { bridgedAmount, feeAmount } = computeCrossChainFeeSplit(
-        attemptAmount,
-        'usdc',
-        'standard',
-      );
-      // cross-chain の network gas は native token の別払い。webhook / 控えには
-      // execute 開始時点の USDC 額を固定し、後続の preset 変更から切り離す。
+      // cross-chain の network gas は native token の別払い。控えには execute 開始時点の
+      // USDC 額を固定し、後続の preset 変更から切り離す。
       submittedRef.current = {
         amount: formatUnits(attemptAmount, deployment.decimals),
-        merchantAmount: bridgedAmount.toString(),
-        feeAmount: feeAmount.toString(),
-        customerPays: attemptAmount.toString(),
       };
       submittedAmountDisplayRef.current = formatTokenAmount(
         attemptAmount,
@@ -496,20 +478,15 @@ export function TipForm({
   useEffect(() => {
     // mode 中立: relay (txHash のみ) / gasless (userOpHash + blockNumber) 双方を flow* で扱う。
     if (!flowSuccess || !flowTxHash) return;
-    // 元の name/message/webhook は許可済み intent metadata に保存しない。reload 復元 hash から
-    // 現在 URL の webhook・控えを生成して別 tip へ誤帰属させる波及を断ち、hash 表示だけ残す。
+    // 元の name/message は許可済み intent metadata に保存しない。reload 復元 hash から
+    // 現在 URL の控えを生成して別 tip へ誤帰属させる波及を断ち、hash 表示だけ残す。
     if (restoredRelayPayment) return;
     // dedup 鍵: gasless は userOpHash、relay は txHash。
     const dedupKey = flowUserOpHash ?? flowTxHash;
     if (notifiedUserOpHashRef.current === dedupKey) return;
     notifiedUserOpHashRef.current = dedupKey;
     // 送信時スナップショット優先 (live state drift を排除)。万一未設定なら live に fallback。
-    const sent = submittedRef.current ?? {
-      amount: amountStr,
-      merchantAmount: breakdown.merchantReceives.toString(),
-      feeAmount: breakdown.feeAmount.toString(),
-      customerPays: breakdown.customerPays.toString(),
-    };
+    const sent = submittedRef.current ?? { amount: amountStr };
     logger.info('tip.success', {
       mode: crossChainResult ? 'cross-chain' : isStandard ? 'standard' : useRelay ? 'relay' : 'gasless',
       userOpHash: flowUserOpHash,
@@ -539,81 +516,22 @@ export function TipForm({
         locale,
       }),
     );
-    // webhook 失敗 (CORS / non-2xx) は logger.warn のみ。tip は成立しているため UI には出さない。
-    // fetch の Promise は HTTP non-2xx でも resolve するため res.ok を明示確認。
-    if (params.webhook) {
-      // hash は fetch と並行に開始し、失敗 telemetry が必要な場合だけ await する。
-      const webhookTelemetry = redactUrlForTelemetry(params.webhook);
-      const payload = {
-        type: 'openpay.tip.success',
-        creator: params.to,
-        from: isStandard && !crossChainResult ? submittedByThisFormRef.current?.customer : address,
-        token: params.token,
-        chain: chainSlug,
-        amount: sent.amount,
-        merchantAmount: sent.merchantAmount,
-        feeAmount: sent.feeAmount,
-        customerPays: sent.customerPays,
-        message: params.message,
-        txHash: flowTxHash,
-        // relay は userOpHash / blockNumber を持たない → payload から省略 (null 文字列化しない)。
-        ...(flowUserOpHash ? { userOpHash: flowUserOpHash } : {}),
-        ...(flowBlockNumber !== undefined
-          ? { blockNumber: flowBlockNumber.toString() }
-          : {}),
-        chainId: deployment.chainId,
-        ts: Date.now(),
-      };
-      fetch(params.webhook, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        mode: 'cors',
-        keepalive: true,
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            const redacted = await webhookTelemetry;
-            logger.warn('tip.webhook.non_ok', {
-              status: res.status,
-              statusText: res.statusText,
-              webhookOrigin: redacted.origin,
-              webhookHash: redacted.hash,
-            });
-          }
-        })
-        .catch(async (err) => {
-          const redacted = await webhookTelemetry;
-          logger.warn('tip.webhook.failed', {
-            error: err,
-            webhookOrigin: redacted.origin,
-            webhookHash: redacted.hash,
-          });
-        });
-    }
   }, [
     isStandard,
     flowSuccess,
     flowTxHash,
     flowUserOpHash,
-    flowBlockNumber,
     useRelay,
     crossChainResult,
     restoredRelayPayment,
     params.to,
     params.token,
     params.name,
-    chainSlug,
     params.message,
-    params.webhook,
     amountStr,
     address,
-    breakdown.merchantReceives,
-    breakdown.feeAmount,
-    breakdown.customerPays,
     deployment.chainId,
     deployment.address,
-    deployment.decimals,
     locale,
   ]);
 
@@ -621,14 +539,8 @@ export function TipForm({
     if (preview || !canSubmit) return;
     // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
     primeChimeAudio();
-    // 送信時点の値を固定 (webhook はこのスナップショットを使い、後続の編集 / gasQuote
-    // refetch による drift を排除する)。
-    submittedRef.current = {
-      amount: amountStr,
-      merchantAmount: breakdown.merchantReceives.toString(),
-      feeAmount: breakdown.feeAmount.toString(),
-      customerPays: breakdown.customerPays.toString(),
-    };
+    // 送信時点の値を固定 (控えはこのスナップショットを使い、後続の編集による drift を排除する)。
+    submittedRef.current = { amount: amountStr };
     submittedAmountDisplayRef.current = fmt(totalCustomerOutflow);
     if (isStandard) {
       const snapshot: StandardPaymentParams = {
@@ -1102,8 +1014,8 @@ export function TipForm({
         )}
       </section>
 
-      {/* F7: off-origin コールバック開示 (送信前・payer 向け)。webhook/thanksUrl が第三者ホストを
-          指すとき、送信後に通知/遷移する先を明示する (情報提供のみ・送信は妨げない)。 */}
+      {/* F7: off-origin コールバック開示 (送信前・payer 向け)。thanksUrl が第三者ホストを
+          指すとき、送信後に開けるリンク先を明示する (情報提供のみ・送信は妨げない)。 */}
       {!flowSuccess && offOriginHosts.length > 0 && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
           <p>{t('offOriginCallbackNote', { host: offOriginHosts.join('、') })}</p>

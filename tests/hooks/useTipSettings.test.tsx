@@ -25,7 +25,6 @@ describe('useTipSettings', () => {
       presetLabels: { jpyc: ['', '', ''], usdc: ['', '', ''] },
       thanks: '',
       thanksUrl: '',
-      webhook: '',
       crossChain: true,
     });
   });
@@ -65,7 +64,6 @@ describe('useTipSettings', () => {
       presetLabels: { jpyc: ['', '', ''], usdc: ['', ''] },
       thanks: '',
       thanksUrl: '',
-      webhook: '',
       crossChain: true,
     });
   });
@@ -119,7 +117,7 @@ describe('useTipSettings', () => {
     expect(result.current.settings.token).toBe('jpyc');
   });
 
-  it('setSettings → localStorage 書込 (thanks/thanksUrl/webhook 含む)', async () => {
+  it('setSettings → localStorage 書込 (thanks/thanksUrl 含む)', async () => {
     const { result } = renderHook(() => useTipSettings());
     await waitFor(() => expect(result.current.hydrated).toBe(true));
 
@@ -141,7 +139,6 @@ describe('useTipSettings', () => {
         presetLabels,
         thanks: 'ありがとう',
         thanksUrl: 'https://example.com',
-        webhook: 'https://example.com/hook',
         crossChain: true,
       });
     });
@@ -162,7 +159,6 @@ describe('useTipSettings', () => {
         presetLabels,
         thanks: 'ありがとう',
         thanksUrl: 'https://example.com',
-        webhook: 'https://example.com/hook',
         crossChain: true,
       });
     });
@@ -188,7 +184,7 @@ describe('useTipSettings', () => {
     expect(result.current.settings.chain).toBe('arbitrum');
   });
 
-  it('thanks / thanksUrl / webhook を string として保存 → そのまま hydrate', async () => {
+  it('thanks / thanksUrl を string として保存 → そのまま hydrate・退役した webhook は読まずに捨てる', async () => {
     // sanitize の string 分岐 (L62-63, L66-67, L70-71) を踏むため、localStorage に
     // 直接 string を仕込んでから renderHook で load → sanitize 経由で復元される。
     window.localStorage.setItem(
@@ -208,12 +204,11 @@ describe('useTipSettings', () => {
     expect(result.current.settings.thanksUrl).toBe(
       'https://shop.example.com/thanks',
     );
-    expect(result.current.settings.webhook).toBe(
-      'https://discord.com/api/webhooks/abc',
-    );
+    // 第三者 webhook (R1) は退役: 旧保存値はエラーにせず無視し、次の書込みで消える。
+    expect(Object.hasOwn(result.current.settings, 'webhook')).toBe(false);
   });
 
-  it('thanks / thanksUrl / webhook が非文字列 (number / null) → defaults に置換', async () => {
+  it('thanks / thanksUrl が非文字列 (number / null) → defaults に置換 (旧 webhook の壊れ値も無害)', async () => {
     window.localStorage.setItem(
       KEY,
       JSON.stringify({
@@ -227,7 +222,7 @@ describe('useTipSettings', () => {
     await waitFor(() => expect(result.current.hydrated).toBe(true));
     expect(result.current.settings.thanks).toBe('');
     expect(result.current.settings.thanksUrl).toBe('');
-    expect(result.current.settings.webhook).toBe('');
+    expect(Object.hasOwn(result.current.settings, 'webhook')).toBe(false);
   });
 
   it('presets が token 別 object でも CSV でもない形 (数値 array) → token 別既定', async () => {
@@ -504,7 +499,6 @@ describe('useTipSettings', () => {
       presets: { jpyc: ['100', '500'], usdc: ['5', '20', '50'] },
       thanks: 'thx',
       thanksUrl: '',
-      webhook: '',
       crossChain: false,
     };
     window.localStorage.setItem(KEY, JSON.stringify(persisted));
