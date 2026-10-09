@@ -25,6 +25,8 @@ import { TokenChooser } from './TokenChooser';
 import { ChainChooser } from './ChainChooser';
 import { downloadPng, downloadSvg, fileSafe } from './qr/qrDownload';
 import { rememberTokenPrefs, useQrSettings } from '@/hooks/useQrSettings';
+import { useResolveAddress } from '@/hooks/useResolveAddress';
+import { isLikelyName } from '@/lib/nameDetection';
 import { useDiscountInput } from '@/hooks/useDiscountInput';
 import { taxDisplayDecimals } from '@/lib/tax';
 import {
@@ -105,7 +107,6 @@ export function QrGenerator() {
   const qrRef = useRef<HTMLDivElement>(null);
   // 「お店の設定」シート (受取先・通貨とチェーン・支払い方法・控えとポスター) の開閉。
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
   // 受取先が未設定のときは、QR を出す唯一の前提なので会計画面に受取先の欄を直接出す。読み込み後に未設定だったら
   // 出し、入力し終えても消さない (打っている途中で欄が消えない・次に開いたときは保存済みなので出ない)。
   const [receiverInline, setReceiverInline] = useState(false);
@@ -158,9 +159,15 @@ export function QrGenerator() {
     setAmount,
   });
 
+  // 受取先が名前 (shop.eth 等) のときは、設定シート (その中の AddressInput) を開いていなくても名前を解決しておき、この
+  // 解決結果だけを使う (シートの AddressInput も同じ query を見る)。シートから受け取った解決値を別に持つと、閉じた後の
+  // 再解決の失敗が届かず、古いアドレスで QR・お店負担の受け渡しを作る (着金先のずれ・第 7 回レビュー G1)。
+  const receiverName = settings.receiver.trim();
+  const ens = useResolveAddress(isLikelyName(receiverName) ? receiverName : '');
+  // 再解決に失敗しても react-query は前回の解決結果 (data) を残すので、失敗中は使わない (RegisterMode・AddressInput と同じ)。
   const effectiveReceiver = useMemo(
-    () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
-    [settings.receiver, resolvedReceiver],
+    () => pickEffectiveAddress(settings.receiver, ens.error ? null : ens.data?.address ?? null),
+    [settings.receiver, ens.data, ens.error],
   );
 
   const setReceiver = useCallback(
@@ -446,9 +453,9 @@ export function QrGenerator() {
     storeOpenKeyRef.current = storeOpenKey;
   }, [storeOpenKey]);
 
-  const handleResolved = useCallback((addr: Address | null) => {
-    setResolvedReceiver(addr);
-  }, []);
+  // 受取先の欄 (AddressInput) も名前を解決して知らせてくるが、上の useResolveAddress を正本にする
+  // (同じ hook で同じ値・二重に state を持たない・RegisterMode と同じ)。
+  const handleResolved = useCallback(() => {}, []);
 
   // (jpyc + 非 polygon) の不整合は useQrSettings の sanitize で阻止済 → throw 不到達。
   const deployment = deploymentForSlug(settings.token, settings.chain);
@@ -725,6 +732,18 @@ export function QrGenerator() {
       setStoreQr(null);
     }
   }
+  // QR の画面を出せる条件 (下の QrPreviewModal の描画と同じ 1 つの判断)。
+  const qrShowable = !!payUrl && (!storeQrMode || storeQr !== null);
+  // 出している間に QR を出せなくなった (受取先の名前の再解決の失敗 = 着金先を確かめられない等) ときは、画面から消える
+  // だけにせず「閉じる」と同じ終了処理を通す (モーダルの状態・お店負担の QR の写し・受け渡しの締め切り)。残したままだと、
+  // 受取先を直した瞬間に前の受取先宛の受け渡しの QR が勝手に出直る (Codex 再レビュー P1)。閉じると qrModalOpen が
+  // false になるので、同じ失敗で 2 回は走らない。
+  useEffect(() => {
+    if (!qrModalOpen || qrShowable) return;
+    closeQrModal();
+    // closeQrModal は描画ごとに作り直すが、中身は state の setter・ref・device だけを使う。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrModalOpen, qrShowable]);
   async function reissueStoreQr() {
     // 出し直す間は前の (薄くした) QR のまま。出せなければ閉じる (通常の QR に変えない)。
     const opened =
@@ -997,8 +1016,8 @@ export function QrGenerator() {
       </ShopSettingsSheet>
 
       {/* 全画面プレビュー (ポスター調 + 印刷/コピー/SVG/PNG + × 閉じる)。決済QR/レジ共通。 */}
-      {/* お店負担を選んでいる間は、お店負担の QR (受け渡し済み) か、店員が選んだ通常の QR だけを出す。 */}
-      {payUrl && (!storeQrMode || storeQr) && (
+      {/* お店負担を選んでいる間は、お店負担の QR (受け渡し済み) か、店員が選んだ通常の QR だけを出す (qrShowable)。 */}
+      {qrShowable && (
         <QrPreviewModal
           open={qrModalOpen}
           convertExpired={convertExpired || storeQrDimmed}

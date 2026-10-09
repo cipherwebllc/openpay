@@ -212,6 +212,62 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(hold.stop).toHaveBeenCalled();
   });
 
+  // Codex 再レビュー P1 (決済QR と同じ経路): QR を出した後に受取先の名前 (ENS) の再解決が失敗したら、画面から消えるだけ
+  // (qrModalOpen・storeQr・受け渡しが残る) にせず「閉じる」と同じ終了処理を通す。残すと、お店の設定で受取先を B に直した
+  // 瞬間に A 宛の受け渡しの QR が勝手に出直る。
+  it('QR を出した後に受取先の名前 (ENS) の再解決が失敗したら受け渡しを締め切り、受取先を B に直しても A 宛の QR を出し直さない', async () => {
+    const OTHER = '0x1111111111111111111111111111111111111111';
+    const { useResolveAddress } = await import('@/hooks/useResolveAddress');
+    const ens = { data: { address: VALID, name: 'shop.eth' } as unknown, error: null as Error | null, isFetching: false };
+    vi.mocked(useResolveAddress).mockImplementation(
+      (input: string) => (input ? { ...ens } : { data: null, isFetching: false, error: null }) as never,
+    );
+    try {
+      const user = userEvent.setup();
+      seed('shop.eth');
+      hold.state = { phase: 'waiting', session: { id: HS }, stale: false, degraded: false };
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      // 同じ element を渡すと React が再描画を省くので、描画のたびに作る
+      const ui = () => (
+        <QueryClientProvider client={qc}>
+          <RegisterMode />
+        </QueryClientProvider>
+      );
+      const r = renderWithIntl(ui());
+      await addItemAndOpen(user);
+      await waitFor(() => expect(shownCheckout()).not.toBeNull());
+      expect(hold.start).toHaveBeenCalledTimes(1);
+      // 再解決の失敗 (react-query は前回の data を残す)
+      ens.error = new Error('rpc down');
+      r.rerender(ui());
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      // 閉じたときと同じ終了処理 (受け渡しの締め切りは 1 回だけ)
+      await waitFor(() => expect(hold.stop).toHaveBeenCalledTimes(1));
+      // お店の設定で受取先を B に直す
+      await user.click(screen.getByRole('button', { name: /^設定$/ }));
+      const sheet = await screen.findByRole('dialog', { name: 'お店の設定' });
+      const field = within(sheet).getByPlaceholderText(/0x\.\.\./);
+      await user.clear(field);
+      await user.paste(OTHER);
+      await user.click(within(sheet).getByRole('button', { name: '完了' }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'お店の設定' })).toBeNull());
+      await new Promise((res) => setTimeout(res, 0));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(shownCheckout()).toBeNull();
+      expect(hold.start).toHaveBeenCalledTimes(1);
+      expect(hold.stop).toHaveBeenCalledTimes(1);
+      // 押し直したら B 宛で新しい受け渡しを作る (正常時の順序は変えない)
+      await user.click(screen.getAllByRole('button', { name: /QRコードを表示する/ })[0]);
+      await waitFor(() => expect(shownCheckout()).not.toBeNull());
+      expect(hold.start).toHaveBeenCalledTimes(2);
+      expect(hold.start.mock.calls[1][0]).toBe(OTHER);
+      expect(shownCheckout()!.get('to')?.toLowerCase()).toBe(OTHER.toLowerCase());
+    } finally {
+      // 既定 (未解決) に戻して、ほかのテストに解決結果を漏らさない
+      vi.mocked(useResolveAddress).mockImplementation(() => ({ data: null, isFetching: false, error: null }) as never);
+    }
+  });
+
   it('ガス用ウォレットの枠は「お店がガス代を肩代わりして送る」を選んでいるときだけ出す (決済QR と同じ)', async () => {
     seed(VALID, true);
     const first = render(<RegisterMode />);

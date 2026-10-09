@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
@@ -516,6 +516,37 @@ describe('RegisterMode', () => {
     await waitFor(async () => {
       const r = await parsedCheckout();
       expect(r.ok && r.params.receiptNo).toMatch(/^R-\d{8}-\d{3}$/);
+    });
+  });
+
+  // 第 7 回レビュー G1: 名前 (ENS 等) の受取先は、再解決に失敗している間は前回の解決結果を着金先にしない。
+  describe('名前の受取先 (ENS) の解決', () => {
+    afterEach(async () => {
+      // 既定 (未解決) に戻して、ほかのテストに解決結果を漏らさない
+      const { useResolveAddress } = await import('@/hooks/useResolveAddress');
+      vi.mocked(useResolveAddress).mockImplementation(() => ({ data: null, isFetching: false, error: null }) as never);
+    });
+    async function withNameReceiver(result: { data: unknown; error: Error | null }) {
+      const { useResolveAddress } = await import('@/hooks/useResolveAddress');
+      vi.mocked(useResolveAddress).mockImplementation(
+        (input: string) => (input ? { ...result, isFetching: false } : { data: null, isFetching: false, error: null }) as never,
+      );
+      window.localStorage.setItem(QR_KEY, JSON.stringify({ receiver: 'shop.eth', token: 'jpyc', chain: 'polygon' }));
+      const user = userEvent.setup();
+      render(<RegisterMode />);
+      await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+      await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
+    }
+
+    it('解決できていれば、解決したアドレスを受取先にする', async () => {
+      await withNameReceiver({ data: { address: VALID, name: 'shop.eth' }, error: null });
+      const r = await parsedCheckout();
+      expect(r.ok && r.params.to.toLowerCase()).toBe(VALID.toLowerCase());
+    });
+
+    it('再解決に失敗している間は、前回の解決結果 (data) が残っていても QR を出さない', async () => {
+      await withNameReceiver({ data: { address: VALID, name: 'shop.eth' }, error: new Error('rpc down') });
+      for (const btn of screen.getAllByRole('button', { name: /QRコードを表示する/ })) expect(btn).toBeDisabled();
     });
   });
 

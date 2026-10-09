@@ -210,10 +210,12 @@ function RegisterModeContent({
     : '';
   const resolveQuery = useResolveAddress(receiverName);
   useEffect(() => {
+    // 再解決に失敗しても react-query は前回の解決結果 (data) を残す。名前の向き先が変わったあとに
+    // 失敗した場合の古いアドレスを着金先にしない (AddressInput と同じ扱い・第 7 回レビュー G1)。
     setResolvedReceiver(
-      receiverName && resolveQuery.data ? resolveQuery.data.address : null,
+      receiverName && !resolveQuery.error && resolveQuery.data ? resolveQuery.data.address : null,
     );
-  }, [receiverName, resolveQuery.data]);
+  }, [receiverName, resolveQuery.data, resolveQuery.error]);
   // 受取先の欄 (AddressInput) も名前を解決して知らせてくるが、レジは上の useResolveAddress を正本にする
   // (同じ hook で同じ値・二重に state を持たない)。
   const ignoreResolved = useCallback(() => {}, []);
@@ -626,6 +628,16 @@ function RegisterModeContent({
       setStoreQr(null);
     }
   }
+  // 出している間に QR を出せなくなった (受取先の名前の再解決の失敗 = 着金先を確かめられない等・checkoutUrl が空) とき
+  // は、画面から消えるだけにせず「閉じる」と同じ終了処理を通す (モーダルの状態・お店負担の QR の写し・受け渡しの締め切り)。
+  // 残したままだと、お店の設定で受取先を直した瞬間に前の受取先宛の受け渡しの QR が勝手に出直る (Codex 再レビュー P1・
+  // 決済QR と同じ経路)。閉じると qrModalOpen が false になるので、同じ失敗で 2 回は走らない。
+  useEffect(() => {
+    if (!qrModalOpen || checkoutUrl) return;
+    closeQr();
+    // closeQr は描画ごとに作り直すが、中身は state の setter・ref・device だけを使う。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrModalOpen, checkoutUrl]);
 
   async function showNormalQr() {
     // 会計が QR を出せる状態でない (値引きを直している途中など) なら出さない。開いておくと、直した瞬間に
