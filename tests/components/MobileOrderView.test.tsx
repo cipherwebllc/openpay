@@ -1510,6 +1510,8 @@ describe('MobileOrderView — 店舗の値引き', () => {
     add(2); // 水 100
     expect(screen.getByText('100 JPYC')).toBeInTheDocument();
     expect(payUrl().searchParams.get('disc')).toBeNull();
+    // 値引きが付かない理由を出す (入口のバッジと合計が食い違って見えないように)。
+    expect(screen.getByText('値引きは、値引き後に 10 JPYC 以上残る注文に付きます')).toBeInTheDocument();
     add(2); // 水 200
     expect(payUrl().searchParams.get('disc')).toBe('100');
   });
@@ -1527,5 +1529,6 @@ describe('MobileOrderView — 店舗の値引き', () => {
     expect(screen.getByText('450 JPYC')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
     expect(screen.getByRole('button', { name: '支払いへ進む' })).toBeDisabled();
+    expect(screen.getByText('値引きは公開したお店のページで確かめるため、プレビューからは支払えません')).toBeInTheDocument();
   });
 });

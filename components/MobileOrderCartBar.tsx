@@ -27,6 +27,7 @@ export function MobileOrderCartBar({
   lastOrder,
   checkoutUrl,
   checkoutPending,
+  discountNote,
   onCheckout,
 }: {
   /** /checkout の上限 (10 品) 超過。true で明細/支払いを止めて明示する。 */
@@ -68,6 +69,8 @@ export function MobileOrderCartBar({
   checkoutUrl: string;
   /** 受付番号の mount 後生成待ち。true の間は checkout link を無効化する。 */
   checkoutPending: boolean;
+  /** 値引きの補足 (この注文に値引きが付かない理由・プレビューでは支払えない理由)。無ければ出さない。 */
+  discountNote?: string;
   /** @handle 注文の server admission を通してから /checkout へ進む。 */
   onCheckout?: React.MouseEventHandler<HTMLAnchorElement>;
 }) {
@@ -204,6 +207,7 @@ export function MobileOrderCartBar({
                 })}
               </p>
             )}
+            {discountNote && <p className="text-xs text-slate-500">{discountNote}</p>}
             {cart.feeUpcharge > 0n && (
               <p className="text-xs text-slate-500">
                 {t('feeIncludedNote', {

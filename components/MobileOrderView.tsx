@@ -936,6 +936,13 @@ export function MobileOrderView({
           lastOrder={timeEnabled ? config.lastOrder : undefined}
           checkoutUrl={checkoutUrl}
           checkoutPending={awaitsOrderId || admissionPending}
+          discountNote={
+            config.discount && discountWei === 0n && orderWei > 0n
+              ? t('discountNotAppliedNote')
+              : discountWei > 0n && !handle
+                ? t('discountPreviewNote')
+                : undefined
+          }
           onCheckout={checkOrderAdmission}
         />
       )}
