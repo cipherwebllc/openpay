@@ -6,18 +6,27 @@
 //   npm run build 2>&1 | node scripts/check-bundle-budget.mjs   # 既存 build ログを paste
 //   node scripts/check-bundle-budget.mjs --build               # 内部で npm run build を実行
 //
-// 予算は README "Bundle 予算の根拠" 表の数字 + 余裕 (15%) を上限とする。
+// 予算は「本番で点灯している公開 flag (e2e/prodFlags.env) で build した実測 + 小さな余裕」を上限とする
+// (CI の ci.yml が同じベクターを build 前に読む・第 7 回レビュー E7)。flag OFF の build は到達コードが入らず
+// 本番より小さく見えるので、手元で測るときも同じベクターを読み込んでから build する。
+// 超えたら予算を上げる前に code-split (next/dynamic) を優先し、上げるときは理由を各行の注記に残す。
 
 import { stdin } from 'node:process';
 import { spawnSync } from 'node:child_process';
-import { stripVTControlCharacters } from 'node:util';
+import { readFileSync } from 'node:fs';
+import { parseEnv, stripVTControlCharacters } from 'node:util';
 
+// 2026-10-10 第 7 回レビュー F2/E22: 予算を「実測 + 5 kB」に締め直した。実測 = origin/main 9f80dfda を本番 flag
+// (e2e/prodFlags.env) で build した Route 表 (flag OFF の最小 env でも全 route 同値だった)。22〜34 kB 緩んでいた
+// 予算では 30 kB 近い退行が CI を素通りするため。予算対象も顧客の支払い導線・主要画面に広げ、予算表に無い
+// 300 kB 超の route は UNBUDGETED_MAX_KB で検出する (黙って重いページが増えない)。
 const BUDGETS_KB = {
-  '/_not-found': 250,
-  '/[locale]': 320,
+  '/_not-found': 200,
+  '/[locale]': 273,
   // 2026-09-21 /agent 磨き上げ P1: 実測 353kB (P0 時点 352kB) + 3kB。Agent activity (P2) を足す**前**の値で
   // 固定する — 機能追加後の実測に予算を追随させないため。P2 で超えるなら Activity を next/dynamic へ。
-  '/[locale]/agent': 356,
+  // 2026-10-10 F2: 実測 322 + 5。
+  '/[locale]/agent': 327,
   // /pay は慢性的に予算上限張り付き。Option B (会計データ分離・v3) で 420→423kB、
   // JPYC EIP-3009 recover モード (#131c) の forwarderConfig + recover 開示 i18n で 423→424kB。
   // 2026-06-13: 上の comment が要求した code-split pass を実施 — CrossChainHint (USDC 接続時) /
@@ -47,7 +56,8 @@ const BUDGETS_KB = {
   // 2026-09-17 Arc USDC チップ (#B): 開示文言の追記 (messages 増) による再分割 +1kB。/pay からの新規
   //   import 経路なし (tip.ts の変更は既存 env import のみ)。useStandardPayment は TipStandardEngine へ
   //   code-split 済み (tip 448→446 / [handle] 487→484 kB に低減)。
-  '/[locale]/pay': 448,
+  // 2026-10-10 F2: 実測 421 + 5 (上の注記の vendor 増分を含んだ実測)。
+  '/[locale]/pay': 426,
   // 2026-08-18 store USDC P2: /pay と同型の chunk 再分割 +1kB (tip から新規 USDC モジュール
   // への import 経路なしを grep で確認)。
   // 2026-08-17 store USDC P3: Terms 13 条追記 (messages 増) による再分割 +1kB (tip から
@@ -56,20 +66,40 @@ const BUDGETS_KB = {
   // tip の import graph は不変。切り分け実測は上の /pay コメント参照)。
   // 2026-09-09 npm audit fix のベンダー増分 (/pay のコメント参照) で 443kB → +7kB。
   // 2026-09-17 Arc USDC チップ: messages 増による再分割 +1kB (上の /pay コメント参照)。
-  '/[locale]/tip/[address]': 446,
+  // 2026-10-10 F2: 実測 416 + 5。
+  '/[locale]/tip/[address]': 421,
   // 2026-09-02 全コードベースレビュー Phase 5 (F1): 予算対象が 5 route しかなく、実際に最も重い
   //   3 route (/create・/[handle]・/checkout) が無監視だった。/pay と同じ「余裕ゼロ」慣行で
   //   実測 +4kB を上限に据える (実測: [handle] 475 / checkout 442 kB)。
   //   超えたら安易に上げず、まず code-split (next/dynamic) を検討すること。
   // 2026-09-03 Phase 6 (F2) で /create のタブを next/dynamic 化 → 546 → 387 kB。予算も追従。
-  '/[locale]/create': 392,
+  // 2026-10-10 F2: 実測 364 + 5。
+  '/[locale]/create': 369,
   // 2026-09-09 npm audit fix のベンダー増分 (/pay のコメント参照): [handle] 482 / checkout 448 kB。
-  '/[locale]/[handle]': 485,
-  '/[locale]/checkout': 451,
-  '/manifest.webmanifest': 250,
+  // 2026-10-10 F2: 実測 [handle] 459 / checkout 431 に各 +5。
+  '/[locale]/[handle]': 464,
+  '/[locale]/checkout': 436,
+  // 2026-10-10 E22/F2: 予算の外にあった主要画面。顧客の支払い導線 (/order = モバイル注文・/scan = 読み取り)・
+  // お店の画面 (/history・/billing)・AI ストア (/store・/discovery)。実測 order 366 / scan 388 / history 407 /
+  // store 259 / billing 331 / discovery 310 に各 +5。
+  '/[locale]/order': 371,
+  '/[locale]/scan': 393,
+  '/[locale]/history': 412,
+  '/[locale]/store': 264,
+  '/[locale]/billing': 336,
+  '/[locale]/discovery': 315,
+  // 実験ページ (本番導線なし)。UNBUDGETED_MAX_KB を超えるので表に載せる。実測 357 + 5。
+  '/[locale]/experimental/cross-chain-demo': 362,
+  // 2026-10-10 F2: 実測 194 + 5。
+  '/manifest.webmanifest': 199,
   // shared chunks の総和。表の行 "First Load JS shared by all"
-  '__shared__': 250,
+  // 2026-10-10 F2: 実測 193 + 5。
+  '__shared__': 198,
 };
+
+// 予算表に無い route でも First Load JS がこれを超えたら fail させる (E22: 予算の外で重いページが増えていた)。
+// 対処は BUDGETS_KB に「実測 + 小さな余裕」で追加するか、code-split で下げる。
+const UNBUDGETED_MAX_KB = 300;
 
 async function readStdin() {
   let buf = '';
@@ -78,16 +108,10 @@ async function readStdin() {
 }
 
 function runBuild() {
-  const env = {
-    ...process.env,
-    NEXT_PUBLIC_NETWORK_ENV:
-      process.env.NEXT_PUBLIC_NETWORK_ENV ?? 'testnet',
-    NEXT_PUBLIC_PIMLICO_API_KEY:
-      process.env.NEXT_PUBLIC_PIMLICO_API_KEY ?? 'dummy',
-    NEXT_PUBLIC_FEE_RECEIVER_ADDRESS:
-      process.env.NEXT_PUBLIC_FEE_RECEIVER_ADDRESS ??
-      '0x000000000000000000000000000000000000dEaD',
-  };
+  // CI (ci.yml) と同じ本番 flag のベクターで build する。手元の .env.local (flag が違う・実キー) より優先させ、
+  // 予算の計測条件を CI と揃える。
+  const prodFlags = parseEnv(readFileSync(new URL('../e2e/prodFlags.env', import.meta.url), 'utf8'));
+  const env = { ...process.env, ...prodFlags };
   const r = spawnSync('npm', ['run', 'build'], {
     env,
     encoding: 'utf8',
@@ -164,6 +188,14 @@ for (const [route, budget] of Object.entries(BUDGETS_KB)) {
   if (status === 'OVER') failed = true;
   console.log(
     `  [${status}] ${route}: ${Math.round(actual) / 1000} kB / 予算 ${budget} kB`,
+  );
+}
+
+for (const [route, actual] of Object.entries(observed)) {
+  if (route in BUDGETS_KB || actual <= UNBUDGETED_MAX_KB * 1000) continue;
+  failed = true;
+  console.log(
+    `  [UNBUDGETED] ${route}: ${Math.round(actual) / 1000} kB > ${UNBUDGETED_MAX_KB} kB。予算表に無い重い route です。BUDGETS_KB に「実測 + 小さな余裕」で追加するか code-split で下げてください。`,
   );
 }
 
