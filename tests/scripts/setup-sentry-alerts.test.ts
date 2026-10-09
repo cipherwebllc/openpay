@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import ts from 'typescript';
 import { makeRespond } from '@/lib/relay/relayRoute';
 import { logger } from '@/lib/logger';
@@ -17,6 +17,7 @@ import {
   formatPlan,
   type AlertRule,
   type ExistingRule,
+  type SentryRulePayload,
   type TagMatch,
 } from '../../scripts/setup-sentry-alerts.mjs';
 
@@ -34,40 +35,123 @@ const SLACK_ACTION = {
   tags: 'event',
 };
 
-// app/lib/components/hooks の TypeScript AST から logger.warn / logger.error の第 1 引数 (文字列リテラル) を集める。
-// コメントは AST に乗らないので根拠にならない。テンプレートリテラル (`${prefix}.suffix`) は集めない
-// (実配線を通した wiredTags で確かめる)。
-function collectLoggerLiteralTags(): { tags: Set<string>; respondPrefixes: Set<string> } {
+// Sentry が POST / PUT の payload を保存して GET で返すときの補完を模す (src/sentry/rules/conditions/
+// event_frequency.py の comparisonType 既定 'count'・serializer が足す表示用 name・rule レベルの付随 field)。
+// 往復 (POST → GET) で本 script が差分を出さない = 冪等であることをこの形で検証する。
+function sentryStored(payload: SentryRulePayload, id: string): ExistingRule {
+  return {
+    id,
+    ...payload,
+    conditions: payload.conditions.map((c) => ({
+      ...c,
+      ...(c.id.endsWith('EventFrequencyCondition') ? { comparisonType: 'count' } : {}),
+      name: `The issue is seen more than ${c.value} times in ${c.interval}`,
+    })),
+    filters: payload.filters.map((f) => ({
+      ...f,
+      name: `The event's tags match ${f.key} ${f.match} ${f.value}`,
+    })),
+    actions: payload.actions.map((a) => ({ ...a, name: 'Send a notification (for all legacy integrations)' })),
+    // rule レベルで Sentry が足す field (比較対象外)。
+    ...({ dateCreated: '2026-10-10T00:00:00Z', status: 'active', owner: null, projects: ['openpay'], snooze: false } as object),
+  };
+}
+
+// import の module specifier をリポジトリ相対のモジュール path に解決する ('@/lib/logger' / './logger' /
+// '../logger' → 'lib/logger')。拡張子は付けない。
+function resolveModule(specifier: string, fromPath: string): string | null {
+  if (specifier.startsWith('@/')) return specifier.slice(2);
+  if (specifier.startsWith('.')) {
+    return posix.normalize(posix.join(posix.dirname(fromPath), specifier)).replace(/\.(?:ts|tsx|mjs|js)$/, '');
+  }
+  return null; // 外部パッケージ
+}
+
+type Emits = { tags: Set<string>; respondPrefixes: Set<string> };
+
+// 1 ファイルの TypeScript AST から、`@/lib/logger` (相対 path も) から import した binding (別名を含む) の
+// .warn / .error 呼び出しの第 1 引数と、`@/lib/relay/relayRoute` から import した makeRespond の実引数を集める。
+// - コメントは AST に乗らないので根拠にならない。
+// - 同名のローカル変数 `logger` (lib/logger から来ていない) は数えない (偽物の emit を実 emit と誤認しない)。
+// - テンプレートリテラルは、同じファイルの `const X = '…'` だけを参照する静的なものは解決し、
+//   引数や外から来る値を含む動的なもの (`${logPrefix}.reverted`) は集めない (実配線を通した wiredTags で確かめる)。
+function extractEmits(path: string, source: string): Emits {
   const tags = new Set<string>();
-  // makeRespond('<prefix>') の実引数 (route の配線)。コメントではなく呼び出し式から取る。
   const respondPrefixes = new Set<string>();
+  const sf = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
+  const loggerBindings = new Set<string>();
+  const respondBindings = new Set<string>();
+  const constStrings = new Map<string, string>();
+  for (const stmt of sf.statements) {
+    if (ts.isImportDeclaration(stmt) && ts.isStringLiteral(stmt.moduleSpecifier)) {
+      const mod = resolveModule(stmt.moduleSpecifier.text, path);
+      const named = stmt.importClause?.namedBindings;
+      if (!named || !ts.isNamedImports(named)) continue;
+      for (const el of named.elements) {
+        const imported = (el.propertyName ?? el.name).text;
+        if (mod === 'lib/logger' && imported === 'logger') loggerBindings.add(el.name.text);
+        if (mod === 'lib/relay/relayRoute' && imported === 'makeRespond') respondBindings.add(el.name.text);
+      }
+    }
+    if (ts.isVariableStatement(stmt) && stmt.declarationList.flags & ts.NodeFlags.Const) {
+      for (const d of stmt.declarationList.declarations) {
+        if (ts.isIdentifier(d.name) && d.initializer && ts.isStringLiteral(d.initializer)) {
+          constStrings.set(d.name.text, d.initializer.text);
+        }
+      }
+    }
+  }
+  const staticText = (arg: ts.Expression | undefined): string | null => {
+    if (!arg) return null;
+    if (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) return arg.text;
+    if (ts.isTemplateExpression(arg)) {
+      let out = arg.head.text;
+      for (const span of arg.templateSpans) {
+        if (!ts.isIdentifier(span.expression)) return null;
+        const v = constStrings.get(span.expression.text);
+        if (v === undefined) return null;
+        out += v + span.literal.text;
+      }
+      return out;
+    }
+    return null;
+  };
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)) {
-      const arg = node.arguments[0];
-      const isStr = arg && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg));
+      const text = staticText(node.arguments[0]);
+      const callee = node.expression;
       if (
-        ts.isPropertyAccessExpression(node.expression) &&
-        ts.isIdentifier(node.expression.expression) &&
-        node.expression.expression.text === 'logger' &&
-        (node.expression.name.text === 'warn' || node.expression.name.text === 'error') &&
-        isStr
+        text !== null &&
+        ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) &&
+        loggerBindings.has(callee.expression.text) &&
+        (callee.name.text === 'warn' || callee.name.text === 'error')
       ) {
-        tags.add(arg.text);
+        tags.add(text);
       }
-      if (ts.isIdentifier(node.expression) && node.expression.text === 'makeRespond' && isStr) {
-        respondPrefixes.add(arg.text);
+      if (text !== null && ts.isIdentifier(callee) && respondBindings.has(callee.text)) {
+        respondPrefixes.add(text);
       }
     }
     ts.forEachChild(node, visit);
   };
+  visit(sf);
+  return { tags, respondPrefixes };
+}
+
+// app/lib/components/hooks の全ファイルから集める。
+function collectLoggerLiteralTags(): Emits {
+  const tags = new Set<string>();
+  const respondPrefixes = new Set<string>();
   for (const root of ['app', 'lib', 'components', 'hooks']) {
     const files = readdirSync(root, { recursive: true }).filter(
       (f): f is string => typeof f === 'string' && /\.(?:ts|tsx|mjs|js)$/.test(f),
     );
     for (const f of files) {
       const path = join(root, f);
-      const sf = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
-      visit(sf);
+      const e = extractEmits(path, readFileSync(path, 'utf8'));
+      for (const t of e.tags) tags.add(t);
+      for (const p of e.respondPrefixes) respondPrefixes.add(p);
     }
   }
   return { tags, respondPrefixes };
@@ -300,6 +384,45 @@ describe('setup-sentry-alerts: RULES schema', () => {
   });
 });
 
+describe('setup-sentry-alerts: emit 抽出器 (extractEmits) は lib/logger の binding だけを数える', () => {
+  const tagsOf = (path: string, src: string) => [...extractEmits(path, src).tags];
+
+  it("'@/lib/logger' / './logger' / '../logger' からの import を同じ binding として解決する", () => {
+    expect(tagsOf('app/api/x/route.ts', "import { logger } from '@/lib/logger';\nlogger.warn('a.b');")).toEqual(['a.b']);
+    expect(tagsOf('lib/x.ts', "import { logger } from './logger';\nlogger.error('c.d');")).toEqual(['c.d']);
+    expect(tagsOf('lib/sub/x.ts', "import { logger } from '../logger';\nlogger.warn('e.f');")).toEqual(['e.f']);
+  });
+
+  it('別名 import (logger as log) の呼び出しも数える', () => {
+    expect(tagsOf('lib/x.ts', "import { logger as log } from '@/lib/logger';\nlog.warn('alias.tag');")).toEqual(['alias.tag']);
+  });
+
+  it('lib/logger から来ていない同名のローカル logger や別モジュールの logger は数えない (偽物の emit)', () => {
+    expect(tagsOf('lib/x.ts', "const logger = { warn: (_m: string) => {} };\nlogger.warn('fake.local');")).toEqual([]);
+    expect(tagsOf('lib/x.ts', "import { logger } from 'pino';\nlogger.warn('fake.external');")).toEqual([]);
+    expect(tagsOf('lib/x.ts', "import { logger } from '@/lib/other';\nlogger.warn('fake.other');")).toEqual([]);
+    // コメントは AST に乗らない。
+    expect(tagsOf('lib/x.ts', "import { logger } from '@/lib/logger';\n// logger.warn('in.comment');\n")).toEqual([]);
+  });
+
+  it('同じファイルの const 文字列だけを参照する静的なテンプレートは解決し、動的なものは数えない', () => {
+    expect(
+      tagsOf('lib/x.ts', "import { logger } from '@/lib/logger';\nconst P = 'relay.x';\nlogger.warn(`${P}.reverted`);"),
+    ).toEqual(['relay.x.reverted']);
+    expect(
+      tagsOf('lib/x.ts', "import { logger } from '@/lib/logger';\nfunction f(p: string) { logger.warn(`${p}.reverted`); }"),
+    ).toEqual([]);
+    expect(tagsOf('lib/x.ts', "import { logger } from '@/lib/logger';\nlogger.warn(`plain.template`);")).toEqual(['plain.template']);
+  });
+
+  it("makeRespond の prefix は '@/lib/relay/relayRoute' からの binding の呼び出しだけ", () => {
+    const ok = extractEmits('app/api/x/route.ts', "import { makeRespond } from '@/lib/relay/relayRoute';\nconst r = makeRespond('relay.x');");
+    expect([...ok.respondPrefixes]).toEqual(['relay.x']);
+    const fake = extractEmits('app/api/x/route.ts', "const makeRespond = (p: string) => p;\nmakeRespond('relay.fake');");
+    expect([...fake.respondPrefixes]).toEqual([]);
+  });
+});
+
 describe('setup-sentry-alerts: buildRulePayload', () => {
   const SAMPLE: AlertRule = {
     name: 'test rule',
@@ -316,9 +439,11 @@ describe('setup-sentry-alerts: buildRulePayload', () => {
     expect(payload.actionMatch).toBe('all');
     expect(payload.filterMatch).toBe('any');
     expect(payload.frequency).toBe(60);
+    // comparisonType は Sentry 側の既定 'count' を明示する (GET が補って返す値と揃え、往復で差分を出さない)。
     expect(payload.conditions).toEqual([
       {
         id: 'sentry.rules.conditions.event_frequency.EventFrequencyCondition',
+        comparisonType: 'count',
         value: 3,
         interval: '1h',
       },
@@ -394,6 +519,29 @@ describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固�
       { id: '102', name: 'OpenPay: x402.middleware.error rate exceeded' },
     ]);
     expect(plan.create).toHaveLength(RULES.length - 13);
+  });
+
+  it('Sentry の補完 (comparisonType=count・表示用 name・rule の付随 field) を経た GET に対しては全 rule が unchanged (往復で冪等)', () => {
+    const stored = RULES.map((r, i) => sentryStored(buildRulePayload(r, 'mainnet'), String(i)));
+    const plan = planRules(stored, RULES, 'mainnet');
+    expect(plan.update.map((u) => `${u.name}: ${u.changes.join('; ')}`)).toEqual([]);
+    expect(plan.unchanged).toHaveLength(RULES.length);
+  });
+
+  it('comparisonType=percent (前期間比) の既存 rule は count とは別物なので update', () => {
+    const rule = RULES.find((r) => r.eventTags[0] === 'billing.settle.grant-failed')!;
+    const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '3');
+    stored.conditions![0] = { ...stored.conditions![0], comparisonType: 'percent', comparisonInterval: '1d' };
+    const plan = planRules([stored], RULES, 'mainnet');
+    expect(plan.update[0]?.changes).toEqual(['conditions EventFrequencyCondition → EventFrequencyCondition']);
+  });
+
+  it('filter の match 未指定 (Sentry 既定 eq) と明示 eq はキー順が違っても同じ filter (Codex P3)', () => {
+    const rule = RULES.find((r) => r.eventTags[0] === 'billing.settle.grant-failed')!;
+    const stored = sentryStored(buildRulePayload(rule, 'mainnet'), '4');
+    // match を落とし、キー順も value → key → id に入れ替える。
+    stored.filters = stored.filters!.map((f) => ({ value: f.value, key: f.key, id: f.id, name: f.name }));
+    expect(planRules([stored], RULES, 'mainnet').unchanged).toHaveLength(1);
   });
 
   it('同名 rule の environment が違えば update (production → mainnet の取り違えを直す)', () => {
@@ -631,6 +779,35 @@ describe('setup-sentry-alerts: main (fetch mock 経由の挙動検証)', () => {
     for (const body of bodies('POST')) {
       expect(body.actions).toEqual([{ id: 'sentry.rules.actions.notify_event.NotifyEventAction' }]);
     }
+  });
+
+  it('往復: 1 回目の POST / PUT を Sentry の補完つきで保存した GET に対し、2 回目は GET だけで書き込みゼロ (冪等)', async () => {
+    // 1 回目: 旧 14 rule が登録済み → POST 12 / PUT 13。
+    const stored = new Map<string, ExistingRule>();
+    let nextId = 500;
+    fetchSpy.mockImplementation(async (url, init) => {
+      if (init?.method === 'POST') {
+        const id = String(nextId++);
+        stored.set(id, sentryStored(JSON.parse(init.body as string), id));
+        return new Response(JSON.stringify({ id }), { status: 201 });
+      }
+      if (init?.method === 'PUT') {
+        const id = String(url).match(/\/rules\/(\d+)\/$/)![1];
+        stored.set(id, sentryStored(JSON.parse(init.body as string), id));
+        return new Response(JSON.stringify({ id }), { status: 200 });
+      }
+      return new Response(JSON.stringify([...stored.values()]), { status: 200 });
+    });
+    for (const r of LEGACY_SENTRY_RULES) stored.set(r.id, r);
+    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
+    await mod.main([]);
+    expect(calls().filter(([m]) => m !== 'GET')).toHaveLength(RULES.length);
+    // 2 回目: 保存された (補完つきの) rule に対しては差分なし。
+    fetchSpy.mockClear();
+    const plan = await mod.main([]);
+    expect(calls()).toEqual([['GET', 'https://sentry.io/api/0/projects/test-org/test-project/rules/']]);
+    expect(plan.update).toEqual([]);
+    expect(plan.unchanged).toHaveLength(RULES.length);
   });
 
   it('--dry-run は GET だけで計画を出し、書き込みを一切しない', async () => {

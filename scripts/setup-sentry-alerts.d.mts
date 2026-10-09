@@ -22,7 +22,7 @@ export type SentryRulePayload = {
   actionMatch: 'all' | 'any';
   filterMatch: 'all' | 'any';
   frequency: number;
-  conditions: Array<{ id: string; value: number; interval: string }>;
+  conditions: Array<{ id: string; comparisonType: 'count'; value: number; interval: string }>;
   filters: Array<{ id: string; key: string; match: string; value: string }>;
   actions: Array<{ id: string }>;
 };

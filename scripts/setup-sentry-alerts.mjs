@@ -395,7 +395,9 @@ export function buildRulePayload(
     filterMatch: 'any',
     // 同一 issue で何回 fire するか (分単位)。1h おきに 1 度通知すれば十分。
     frequency: 60,
-    conditions: [{ id: EVENT_FREQUENCY_CONDITION, value: threshold, interval }],
+    // comparisonType は Sentry の既定 'count' (回数比較) を明示する。GET は未指定でも 'count' を補って返す
+    // ので、明示しておくと往復で差分にならない ('percent' = 前期間比は別物)。
+    conditions: [{ id: EVENT_FREQUENCY_CONDITION, comparisonType: 'count', value: threshold, interval }],
     filters: eventTags.map((value) => ({
       id: TAGGED_EVENT_FILTER,
       key: 'event',
@@ -421,16 +423,33 @@ export function buildRulePayload(
 // してしまう (Codex P2)。
 const DISPLAY_ONLY_KEYS = new Set(['name', 'label', 'prompt', 'formFields']);
 
+// Sentry が未指定の field に補う既定値 (GET はこの値を付けて返す)。desired と既存の両方に同じ既定値を
+// 補ってから比べ、「未指定」と「既定値を明示」を同じ意味として扱う。
+//   EventFrequencyCondition.comparisonType: 'count' (src/sentry/rules/conditions/event_frequency.py)
+//   TaggedEventFilter.match: 'eq'
+function withSentryDefaults(node) {
+  const out = { ...node };
+  if (node.id === EVENT_FREQUENCY_CONDITION && (out.comparisonType === undefined || out.comparisonType === null)) {
+    out.comparisonType = 'count';
+  }
+  if (node.id === TAGGED_EVENT_FILTER && (out.match === undefined || out.match === null || out.match === '')) {
+    out.match = 'eq';
+  }
+  return out;
+}
+
 function normalizeNode(node) {
+  const filled = withSentryDefaults(node);
   const out = {};
-  for (const key of Object.keys(node).sort()) {
+  // 既定値を補ってからキーを並べ替える (補った key が末尾に付いて JSON のキー順が変わり、同じ filter を
+  // 差分扱いする取り違えを防ぐ)。
+  for (const key of Object.keys(filled).sort()) {
     if (DISPLAY_ONLY_KEYS.has(key)) continue;
-    const v = node[key];
+    const v = filled[key];
     if (v === undefined || v === null || v === '') continue;
     // API は数値を文字列で返すことがある ("100" / 100)。意味は同じなので文字列に揃える。
     out[key] = typeof v === 'object' ? v : String(v);
   }
-  if (node.id === TAGGED_EVENT_FILTER && out.match === undefined) out.match = 'eq';
   return out;
 }
 
