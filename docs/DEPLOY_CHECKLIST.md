@@ -17,9 +17,12 @@ npm run typecheck && npm run lint && npm run test:run   # local 全 pass
 公開 production ON フラグの CI スナップショットは [`e2e/prodFlags.env`](../e2e/prodFlags.env)。
 README の live 表記と user が承認した project memory の点灯記録を含み、名前は
 `.env.local.example`・`lib/env.ts` 等の実装に合わせる (Vercel の実設定は未照合)。
-production の公開フラグを変更するときはこのファイルも確認する。ネットワークは testnet、鍵/forwarder はダミー、
+production の公開フラグを変更するときはこのファイルも確認する。README が本番 OFF と書くフラグ
+(production sets `0`・off in production・off on mainnet) は入れない (`tests/scripts/e2e-prodflags.test.ts` が ON・OFF の両向きに検査)。
+ネットワークは testnet、鍵/forwarder はダミー、
 server-only フラグ/秘密は含めない。`.github/workflows/e2e.yml` の `e2e-prodflags` が同じファイルを
-**build 前**に読み、Chromium のみで `/pay`・`/checkout` (mobile order)・`/tip` の smoke/料金行を検証する。
+**build 前**に読み、Chromium のみで `/pay`・`/checkout` (mobile order・お店がガス代を肩代わりして送る `submit=store`)・`/tip` の
+smoke/料金行を検証する。
 既存の flags-OFF suite は別 job のまま維持する。ブラウザの API は `page.route` で固定し、未定義の
 API/外部通信はテスト失敗にする。例外は Coinbase SDK の同一 origin・非 API の HEAD probe
 (ローカルサーバへ通す) と `cca-lite.coinbase.com` の telemetry (記録せず中断し、外部へ送らない)。
