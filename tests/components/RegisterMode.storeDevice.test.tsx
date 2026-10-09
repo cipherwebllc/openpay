@@ -201,6 +201,21 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(shownCheckout()).toBeNull();
   });
 
+  it('作れなかった理由には、JPYC の通常の QR は利用料 (店舗負担) がかかることを添える・USDC には添えない', async () => {
+    seed();
+    hold.state = { phase: 'create_failed', reason: 'unavailable' };
+    const view = render(<RegisterMode />);
+    expect(await screen.findByText('ガス代を肩代わりする QR を作れませんでした。通常の QR を出してください。')).toBeTruthy();
+    expect(screen.queryByText('通常の QR は OpenPay 利用料が店舗負担でかかります。')).toBeNull(); // カートが空 = 通常の QR を出せない間は出さない
+    view.unmount();
+    const raw = JSON.parse(window.localStorage.getItem('openpay:qr-settings:v2')!);
+    window.localStorage.setItem('openpay:qr-settings:v2', JSON.stringify({ ...raw, token: 'usdc', chain: 'base' }));
+    render(<RegisterMode />);
+    expect(await screen.findByText('ガス代を肩代わりする QR を作れませんでした。通常の QR を出してください。')).toBeTruthy();
+    expect(screen.queryByText(/OpenPay 利用料/)).toBeNull();
+    hold.state = { phase: 'idle' };
+  });
+
   it('QR を閉じたら受け渡しを締め切る', async () => {
     const user = userEvent.setup();
     seed();
@@ -405,6 +420,8 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     await waitFor(() => expect(shownCheckout()).not.toBeNull());
     expect(hold.start).not.toHaveBeenCalled();
     expect(screen.getByText(/ガス用ウォレットが無いため/)).toBeTruthy();
+    // JPYC の通常の QR は回収 (OpenPay 利用料・店舗負担) なので、その旨を添える (第 7 回レビュー D4)。
+    expect(screen.getByText(/OpenPay 利用料は店舗負担でかかります/)).toBeTruthy();
   });
 
   it('お店負担を選んでいて USDC の会計なら理由を出す (設定は消さない)', async () => {
@@ -413,6 +430,8 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     window.localStorage.setItem('openpay:qr-settings:v2', JSON.stringify({ ...raw, token: 'usdc', chain: 'base' }));
     render(<RegisterMode />);
     expect(await screen.findByText(/この会計ではガス代の肩代わりを使えません/)).toBeTruthy();
+    // USDC の通常の QR には OpenPay の利用料がかからないので、利用料の一文は付けない。
+    expect(screen.queryByText(/OpenPay 利用料/)).toBeNull();
     expect(JSON.parse(window.localStorage.getItem('openpay:qr-settings:v2')!).storePays).toBe(true);
   });
 });

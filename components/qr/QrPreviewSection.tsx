@@ -55,8 +55,8 @@ export function QrPreviewSection({
   setQrModalOpen: Dispatch<SetStateAction<boolean>>;
   /** 「QRコードを表示する」を押せない理由 (お店がガス代を肩代わりして送るで使えない会計など)。省略時は今のまま。 */
   showQrBlocked?: string;
-  /** 補助の操作 (例: お店負担の QR を作れなかったときの「通常の QR を出す」)。省略時は今のまま。 */
-  secondaryAction?: { label: string; onClick: () => void };
+  /** 補助の操作 (例: お店負担の QR を作れなかったときの「通常の QR を出す」)。note は押す前に知っておくこと (利用料など)。省略時は今のまま。 */
+  secondaryAction?: { label: string; onClick: () => void; note?: string };
 }) {
   const t = useTranslations('QrGenerator');
   const notReadyKey = payUrl ? null : qrNotReadyKey(amountValid, receiverValid, discountInvalid);
@@ -83,6 +83,7 @@ export function QrPreviewSection({
               {secondaryAction.label}
             </button>
           )}
+          {secondaryAction?.note && <p className="text-xs text-slate-500">{secondaryAction.note}</p>}
         </div>
       )}
       <div className="hidden rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 lg:block">

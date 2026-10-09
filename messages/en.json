@@ -571,6 +571,7 @@
       "posterBadge": "Gas paid by the shop",
       "actionsNote": "This QR works only while it’s shown on this screen (it can’t be printed, saved or copied).",
       "showNormalQr": "Show the standard QR",
+      "normalQrFeeNote": "The standard QR carries the OpenPay usage fee, paid by the shop.",
       "blocked": {
         "token": "“The shop pays the gas” works only for JPYC on {chain}. Change the payment method in Settings.",
         "no_locks": "Not available in this browser (it can’t prevent sending twice from another tab). Change the payment method in Settings.",
@@ -2593,6 +2594,7 @@
         "invalid": "The QR where the shop pays the gas couldn't be created for this checkout. Show the standard QR instead."
       },
       "showNormalQr": "Show the standard QR",
+      "normalQrFeeNote": "The standard QR carries the OpenPay usage fee, paid by the shop.",
       "waiting": "Waiting for the customer's signature",
       "stale": "This QR code will stop accepting payments soon.",
       "reissue": "Show a new QR",
@@ -2626,7 +2628,8 @@
       "retry": "Send again",
       "viewTx": "View transaction",
       "dismiss": "Close",
-      "saleBlockedHint": "Use “Show the standard QR” to show the standard (gas-free) QR."
+      "saleBlockedHint": "Use “Show the standard QR” to show the standard (gas-free) QR.",
+      "saleBlockedHintFee": "Use “Show the standard QR” to show the standard QR (no gas for the customer; the OpenPay usage fee applies, paid by the shop)."
     },
     "productsSheetTitle": "Products",
     "itemCount": "{count, plural, one {# item} other {# items}}",

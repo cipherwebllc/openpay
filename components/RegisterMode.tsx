@@ -676,6 +676,8 @@ function RegisterModeContent({
       onRetry={device.retry}
       onReissue={() => void reissueStoreQr()}
       onShowNormal={checkoutUrl ? () => void showNormalQr() : undefined}
+      // JPYC の通常の QR は回収 (OpenPay 利用料・店舗負担)。USDC の通常の QR には OpenPay の利用料がかからない。
+      normalQrFeeNote={settings.token === 'jpyc' ? t('storeDevice.normalQrFeeNote') : undefined}
       onDismiss={device.dismiss}
     />
   );
@@ -1035,7 +1037,8 @@ function RegisterModeContent({
                 {sdSaleBlocked && (
                   <p role="status" className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
                     {t(`storeDevice.saleBlocked.${sdSaleBlocked}`, { chain: storeDeviceChainNames(sdChainIds) })}{' '}
-                    {t('storeDevice.saleBlockedHint')}
+                    {/* JPYC の通常の QR は回収 (OpenPay 利用料・店舗負担) なので、その旨を添える (第 7 回レビュー D4)。 */}
+                    {settings.token === 'jpyc' ? t('storeDevice.saleBlockedHintFee') : t('storeDevice.saleBlockedHint')}
                   </p>
                 )}
                 {/* 切替を OFF にしても、送っている・結果を待っている支払いの表示は残す (次の QR を出せない理由)。 */}

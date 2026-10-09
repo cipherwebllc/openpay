@@ -18,6 +18,7 @@ export function StoreDeviceRegisterStatus({
   onRetry,
   onReissue,
   onShowNormal,
+  normalQrFeeNote,
   onDismiss,
 }: {
   state: StoreDeviceRegisterState;
@@ -28,6 +29,8 @@ export function StoreDeviceRegisterStatus({
   onRetry?: () => void;
   onReissue?: () => void;
   onShowNormal?: () => void;
+  /** 通常の QR に利用料 (店舗負担) がかかるとき、その一文 (JPYC の回収 QR のときだけ渡す)。 */
+  normalQrFeeNote?: string;
   onDismiss?: () => void;
 }) {
   const t = useTranslations('RegisterMode.storeDevice');
@@ -62,6 +65,7 @@ export function StoreDeviceRegisterStatus({
       return (
         <div role="alert" className="space-y-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p>{t(`createFailed.${state.reason}`)}</p>
+          {onShowNormal && normalQrFeeNote && <p className="text-xs">{normalQrFeeNote}</p>}
           <div className="flex flex-wrap gap-2">
             {onShowNormal && (
               <button type="button" className={BTN} onClick={onShowNormal}>
