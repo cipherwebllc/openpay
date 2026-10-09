@@ -28,8 +28,13 @@ function excludedPrefixesFor(signer) {
 function childEnvironment(env, excludedEnvPrefixes) {
   // 不要な OpenPay / 他 provider の秘密が第三者 CLI へ流れる波及を断つ。
   // Filter own keys before reading values, so excluded getters are never evaluated.
+  // Compare upper-cased so a differently-cased spelling (Owner_Private_Key, Mm_Cli_Token; the same variable on
+  // Windows) cannot slip past; forwarded keys keep their original spelling.
   return Object.fromEntries(Object.keys(env)
-    .filter((key) => !OPENPAY_SECRET_ENV_KEYS.includes(key) && !excludedEnvPrefixes.some((prefix) => key.startsWith(prefix)))
+    .filter((key) => {
+      const upper = key.toUpperCase();
+      return !OPENPAY_SECRET_ENV_KEYS.includes(upper) && !excludedEnvPrefixes.some((prefix) => upper.startsWith(prefix));
+    })
     .map((key) => [key, env[key]]));
 }
 

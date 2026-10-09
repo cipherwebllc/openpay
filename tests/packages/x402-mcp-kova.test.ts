@@ -196,7 +196,9 @@ describe('Kova signer adapter', () => {
     const inherited = Object.defineProperty({}, 'INHERITED_ONLY', { get() { throw new Error(secret); }, enumerable: true });
     const config = Object.assign(Object.create(inherited), env({ KOVA_CREDENTIAL: secret, PATH: '/kova/bin', CUSTOM: 'keep' }));
     // G4: MetaMask signer 用の秘密 (MM_*) と OpenPay の RPC/owner 鍵も、metamask 側と対称に Kova の子へ渡さない。
-    for (const key of ['BUYER_PRIVATE_KEY', 'OWNER_PRIVATE_KEY', 'POLYGON_RPC_URL', 'STEWARD_API_KEY', 'STEWARD_SIGNER_SECRET', 'STEWARD_URL', 'STEWARD_TENANT', 'STEWARD_AGENT_ID', 'STEWARD_AGENT_ADDRESS', 'STEWARD_SIGNER_ID', 'STEWARD_FUTURE_SECRET', 'MM_CLI_TOKEN', 'MM_MNEMONIC', 'MM_PASSWORD', 'MM_ENV', 'MM_FUTURE_SECRET', 'METAMASK_AGENT_ADDRESS']) {
+    for (const key of ['BUYER_PRIVATE_KEY', 'OWNER_PRIVATE_KEY', 'POLYGON_RPC_URL', 'STEWARD_API_KEY', 'STEWARD_SIGNER_SECRET', 'STEWARD_URL', 'STEWARD_TENANT', 'STEWARD_AGENT_ID', 'STEWARD_AGENT_ADDRESS', 'STEWARD_SIGNER_ID', 'STEWARD_FUTURE_SECRET', 'MM_CLI_TOKEN', 'MM_MNEMONIC', 'MM_PASSWORD', 'MM_ENV', 'MM_FUTURE_SECRET', 'METAMASK_AGENT_ADDRESS',
+      // 大文字小文字違いの表記も除外する (Windows では同じ変数)。
+      'Owner_Private_Key', 'Polygon_Rpc_Url', 'Mm_Cli_Token', 'metamask_agent_address', 'steward_api_key', 'buyer_private_key']) {
       Object.defineProperty(config, key, { get() { throw new Error(secret); }, enumerable: true });
     }
     const execFileImpl = signingChild();

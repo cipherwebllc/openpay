@@ -6,7 +6,8 @@
   receives the MetaMask signer's `MM_*` / `METAMASK_*` variables, `OWNER_PRIVATE_KEY`
   or `POLYGON_RPC_URL`, matching what the MetaMask child already lost (`KOVA_*`,
   `POLYGON_RPC_URL`). Each signer's own prefix is declared once in `cliSigner.mjs`,
-  so every other signer's prefix is excluded by construction. Kova 0.1.2 reads none
+  so every other signer's prefix is excluded by construction. Names are compared
+  case-insensitively (`Owner_Private_Key` is excluded too). Kova 0.1.2 reads none
   of the removed variables; arguments, deadlines and error codes are unchanged.
   No dependency changes.
 
