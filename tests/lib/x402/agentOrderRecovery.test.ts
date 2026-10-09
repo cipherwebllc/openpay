@@ -184,48 +184,4 @@ describe('agent-order redelivery snapshot', () => {
     ).toBeNull();
     expect(bound({ ...value, unexpected: true })).toBeNull();
   });
-
-  // 第 7 回レビュー B12: 店舗の候補枠へ正規化した pickupAt を snapshot に持ち、エージェントが resource に書いた
-  // 指定値は pickupAtRequested で結び付ける (resource 照合は指定値・受注は正規化値)。
-  describe('受取時刻の正規化 (pickupAtRequested)', () => {
-    const REQUESTED = 1800000000000; // RESOURCE の pickupAt
-    const NORMALIZED = 1800000300000;
-    function normalized() {
-      return createAgentOrderSnapshot({
-        handle: 'shop', merchant: MERCHANT, payer: PAYER, chainId: CHAIN_ID, decimals: DECIMALS,
-        items: [{ name: '唐揚げ', qty: 2, price: '500' }, { name: 'ビール', qty: 1, price: '600' }],
-        totalMinor: TOTAL, resource: RESOURCE, table: 'A5',
-        pickupAt: NORMALIZED, pickupAtRequested: REQUESTED,
-      });
-    }
-    it('正規化した pickupAt と resource の指定値 (pickupAtRequested) の組で復元する', () => {
-      const value = normalized();
-      expect(value).toMatchObject({ pickupAt: NORMALIZED, pickupAtRequested: REQUESTED });
-      expect(bound(value)).toEqual(value);
-    });
-    it('pickupAtRequested が resource の指定値と違えば拒否する', () => {
-      const value = normalized()!;
-      expect(bound({ ...value, pickupAtRequested: REQUESTED + 60_000 })).toBeNull();
-      // 指定値が無いのに正規化値だけが resource と違うのも従来どおり拒否
-      const { pickupAtRequested: _omit, ...withoutRequested } = value;
-      expect(bound(withoutRequested)).toBeNull();
-    });
-    it('正規化が起きなければ pickupAtRequested を持たない (旧予約と同じ形・digest 不変)', () => {
-      const value = createAgentOrderSnapshot({
-        handle: 'shop', merchant: MERCHANT, payer: PAYER, chainId: CHAIN_ID, decimals: DECIMALS,
-        items: [{ name: '唐揚げ', qty: 2, price: '500' }, { name: 'ビール', qty: 1, price: '600' }],
-        totalMinor: TOTAL, resource: RESOURCE, table: 'A5',
-        pickupAt: REQUESTED, pickupAtRequested: REQUESTED,
-      });
-      expect(value).toEqual(snapshot());
-      expect(value && 'pickupAtRequested' in value).toBe(false);
-    });
-    it('pickupAtRequested の不正 (同値・非数・pickupAt 無し) は拒否する', () => {
-      const value = normalized()!;
-      expect(parseAgentOrderSnapshot({ ...value, pickupAtRequested: NORMALIZED })).toBeNull();
-      expect(parseAgentOrderSnapshot({ ...value, pickupAtRequested: '1800000000000' })).toBeNull();
-      expect(parseAgentOrderSnapshot({ ...value, pickupAtRequested: 0 })).toBeNull();
-      expect(parseAgentOrderSnapshot({ ...value, pickupAt: null })).toBeNull();
-    });
-  });
 });

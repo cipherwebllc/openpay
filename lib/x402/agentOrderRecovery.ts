@@ -38,9 +38,6 @@ const SNAPSHOT_KEYS = [
   'totalMinor',
   'version',
 ] as const;
-// 受取時刻を店舗の候補枠へ正規化したときだけ持つ任意キー (第 7 回レビュー B12)。正規化が無い snapshot は
-// 従来の形のまま (= 旧予約の digest と一致する・feeModel を足した #761 と同じ流儀)。
-const SNAPSHOT_KEYS_WITH_REQUESTED = [...SNAPSHOT_KEYS, 'pickupAtRequested'].sort();
 
 export type AgentOrderSnapshot = Record<string, unknown> & {
   version: typeof SNAPSHOT_VERSION;
@@ -53,10 +50,7 @@ export type AgentOrderSnapshot = Record<string, unknown> & {
   totalMinor: string;
   resource: string;
   table: string | null;
-  // 受注・予約・応答で使う受取時刻 (ms)。preorder 店の候補枠へ正規化済み (正規化した場合は pickupAtRequested が
-  // エージェントの指定値 = resource の pickupAt を保持し、resource との照合はそちらで行う)。
   pickupAt: number | null;
-  pickupAtRequested?: number;
 };
 
 export type AgentOrderSettlement = Record<string, unknown> & {
@@ -123,7 +117,7 @@ export function parseAgentOrderSnapshot(
 ): AgentOrderSnapshot | null {
   if (
     !isRecord(value) ||
-    !(hasExactKeys(value, SNAPSHOT_KEYS) || hasExactKeys(value, SNAPSHOT_KEYS_WITH_REQUESTED)) ||
+    !hasExactKeys(value, SNAPSHOT_KEYS) ||
     value.version !== SNAPSHOT_VERSION
   ) {
     return null;
@@ -202,18 +196,6 @@ export function parseAgentOrderSnapshot(
       ? value.pickupAt
       : undefined;
   if (pickupAt === undefined) return null;
-  // pickupAtRequested は「正規化で値が変わった」ときだけ存在する: 正の整数で、正規化後の pickupAt とは別の値。
-  const hasRequested = 'pickupAtRequested' in value;
-  if (
-    hasRequested &&
-    (pickupAt === null ||
-      typeof value.pickupAtRequested !== 'number' ||
-      !Number.isSafeInteger(value.pickupAtRequested) ||
-      value.pickupAtRequested <= 0 ||
-      value.pickupAtRequested === pickupAt)
-  ) {
-    return null;
-  }
 
   return {
     version: SNAPSHOT_VERSION,
@@ -227,7 +209,6 @@ export function parseAgentOrderSnapshot(
     resource: value.resource,
     table,
     pickupAt,
-    ...(hasRequested ? { pickupAtRequested: value.pickupAtRequested as number } : {}),
   };
 }
 
@@ -242,13 +223,7 @@ export function createAgentOrderSnapshot(input: {
   resource: string;
   table: string | null;
   pickupAt: number | null;
-  /** resource に書かれたエージェントの指定値。pickupAt と同じなら (正規化が無ければ) snapshot に残さない。 */
-  pickupAtRequested?: number | null;
 }): AgentOrderSnapshot | null {
-  const normalized =
-    input.pickupAtRequested !== undefined &&
-    input.pickupAtRequested !== null &&
-    input.pickupAtRequested !== input.pickupAt;
   const value: AgentOrderSnapshot = {
     version: SNAPSHOT_VERSION,
     handle: input.handle,
@@ -261,7 +236,6 @@ export function createAgentOrderSnapshot(input: {
     resource: input.resource,
     table: sanitizeTable(input.table) ?? null,
     pickupAt: input.pickupAt,
-    ...(normalized ? { pickupAtRequested: input.pickupAtRequested as number } : {}),
   };
   return parseAgentOrderSnapshot(value);
 }
@@ -315,10 +289,9 @@ export function parseBoundAgentOrderSnapshot(input: {
     resourceUrl.pathname !== '/api/agent-order/pay' ||
     resourceUrl.searchParams.get('h') !== snapshot.handle ||
     sanitizeTable(resourceUrl.searchParams.get('table')) !== snapshot.table ||
-    // resource の pickupAt はエージェントの指定値。正規化した snapshot は pickupAtRequested で照合する。
     pickupAtForAgentOrderSnapshot(
       resourceUrl.searchParams.get('pickupAt'),
-    ) !== (snapshot.pickupAtRequested ?? snapshot.pickupAt)
+    ) !== snapshot.pickupAt
   ) {
     return null;
   }

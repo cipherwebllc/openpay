@@ -687,8 +687,9 @@ describe('agent-order pay route', () => {
     expect(routeMocks.settle).not.toHaveBeenCalled();
   });
 
-  // 第 7 回レビュー B12・user 裁定 R3: 候補枠にない受取時刻は拒否せず最寄りの枠へ正規化し、
-  // quote (402)・予約 snapshot・settle 応答 (200) で同じ時刻を使う。指定値は pickupAtRequested で分かる。
+  // 第 7 回レビュー B12・user 裁定 R3: 候補枠にない受取時刻は拒否しない。正規化は **受注を保存する瞬間**
+  // (finalize) に 1 回だけ行い (予約 snapshot は生の指定値のまま = digest が時刻に依存しない)、200 の pickupAt は
+  // 保存された受注の値。402 の pickupAtEstimate は見込み (枠の境界を越えて払えば動きうる)。
   describe('受取時刻の正規化 (B12)', () => {
     const preorderShop = () =>
       record({
@@ -707,112 +708,68 @@ describe('agent-order pay route', () => {
     const REQUESTED = Date.UTC(2026, 6, 10, 3, 5); // Asia/Tokyo 12:05 (最短 13:00 より早い)
     const NEAREST = Date.UTC(2026, 6, 10, 4, 0); // Asia/Tokyo 13:00 (= 12:00 + lead 60)
 
-    it('候補枠にない pickupAt は最寄りの枠へ正規化し、quote・予約・応答で同じ時刻を使う', async () => {
+    it('402 は生の pickupAt を echo し、候補枠と違えば見込み pickupAtEstimate を添える', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z')); // Asia/Tokyo 12:00
       store.record = preorderShop();
       const { pay } = await load({ preorderTime: '1' });
-      const query = `h=shop&cart=${CART}&pickupAt=${REQUESTED}`;
-
-      const quote = await pay.GET(payReq(query));
+      const quote = await pay.GET(payReq(`h=shop&cart=${CART}&pickupAt=${REQUESTED}`));
       expect(quote.status).toBe(402);
       const quoteBody = await quote.json();
       expect(quoteBody.error).toBe('payment_required');
-      expect(quoteBody.pickupAt).toBe(NEAREST);
-      expect(quoteBody.pickupAtRequested).toBe(REQUESTED);
-      // accepts.resource はエージェントが組んだ URL のまま (MCP の resource 照合を壊さない)。
+      expect(quoteBody.pickupAt).toBe(REQUESTED);
+      expect(quoteBody.pickupAtEstimate).toBe(NEAREST);
       expect(quoteBody.accepts[0].resource).toContain(`pickupAt=${REQUESTED}`);
 
+      // 枠どおりなら見込みを添えない
+      const onSlot = Date.UTC(2026, 6, 10, 4, 15);
+      const onSlotBody = await (await pay.GET(payReq(`h=shop&cart=${CART}&pickupAt=${onSlot}`))).json();
+      expect(onSlotBody.pickupAt).toBe(onSlot);
+      expect('pickupAtEstimate' in onSlotBody).toBe(false);
+    });
+
+    it('予約 snapshot は生の指定値のまま (main と同じ形)・200 の pickupAt は finalize が保存した受注の値', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z'));
+      store.record = preorderShop();
+      const { pay } = await load({ preorderTime: '1' });
       routeMocks.verify.mockResolvedValue(NextResponse.json({ isValid: true, payer: PAYER }));
       routeMocks.settle.mockResolvedValue(
         NextResponse.json({ success: true, transaction: TX_HASH, payer: PAYER }),
       );
-      routeMocks.finalize.mockResolvedValue({ ok: true, duplicate: false });
-      const res = await pay.GET(payReq(query, { 'X-PAYMENT': paymentHeader() }));
+      routeMocks.finalize.mockResolvedValue({ ok: true, duplicate: false, pickupAt: NEAREST, pickupAtRequested: REQUESTED });
+      const res = await pay.GET(payReq(`h=shop&cart=${CART}&pickupAt=${REQUESTED}`, { 'X-PAYMENT': paymentHeader() }));
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body).toMatchObject({ ok: true, orderRegistered: true, pickupAt: NEAREST, pickupAtRequested: REQUESTED });
       const snapshot = routeMocks.finalize.mock.calls[0][0].reservation.record.snapshot;
-      expect(snapshot.pickupAt).toBe(NEAREST);
-      expect(snapshot.pickupAtRequested).toBe(REQUESTED);
-      expect(snapshot.resource).toContain(`pickupAt=${REQUESTED}`);
+      expect(snapshot.pickupAt).toBe(REQUESTED);
+      expect('pickupAtRequested' in snapshot).toBe(false);
     });
 
-    it('402 で示した枠は、その 402 の有効時間 (maxTimeoutSeconds=600s) 内に払えば動かない・過ぎたら後ろの枠を 200 が返す', async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z')); // Asia/Tokyo 12:00:00.000 (枠の境界)
+    it('finalize が受注の時刻を返さないとき (重複で読めない等) は 200 に pickupAt を出さない', async () => {
       store.record = preorderShop();
       const { pay } = await load({ preorderTime: '1' });
-      const query = `h=shop&cart=${CART}&pickupAt=${REQUESTED}`;
-      const quote = await pay.GET(payReq(query));
-      const quoteBody = await quote.json();
-      expect(quoteBody.pickupAt).toBe(NEAREST);
-      expect(quoteBody.accepts[0].maxTimeoutSeconds).toBe(600);
-
-      // 2 回払うので応答は呼び出しごとに作る (Response の body は 1 回しか読めない)
-      routeMocks.verify.mockImplementation(async () => NextResponse.json({ isValid: true, payer: PAYER }));
-      routeMocks.settle.mockImplementation(
-        async () => NextResponse.json({ success: true, transaction: TX_HASH, payer: PAYER }),
-      );
-      routeMocks.finalize.mockResolvedValue({ ok: true, duplicate: false });
-      // 境界を 1ms 越えても 402 と同じ枠
-      vi.setSystemTime(new Date('2026-07-10T03:00:00.001Z'));
-      const paid = await pay.GET(payReq(query, { 'X-PAYMENT': paymentHeader() }));
-      expect(paid.status).toBe(200);
-      expect((await paid.json()).pickupAt).toBe(NEAREST);
-      expect(routeMocks.finalize.mock.calls[0][0].reservation.record.snapshot.pickupAt).toBe(NEAREST);
-      // 有効時間 (10 分) の途中でも同じ枠
-      vi.setSystemTime(new Date('2026-07-10T03:09:59.000Z'));
-      expect((await (await pay.GET(payReq(query))).json()).pickupAt).toBe(NEAREST);
-      // 過ぎたら後ろの枠 (12:11 + lead 60 = 13:11 → 13:15) になり、200 がそれを返す。
-      // (同じ署名の再提示は settled 済み record から最初の snapshot を返すので、ここでは新しい支払いとして扱う)
-      vi.setSystemTime(new Date('2026-07-10T03:11:00.000Z'));
-      redeliveryMocks.record = null;
-      routeMocks.finalize.mockClear();
-      const late = await pay.GET(payReq(query, { 'X-PAYMENT': paymentHeader() }));
-      expect(late.status).toBe(200);
-      const lateBody = await late.json();
-      expect(lateBody.pickupAt).toBe(Date.UTC(2026, 6, 10, 4, 15));
-      expect(lateBody.pickupAtRequested).toBe(REQUESTED);
-      expect(routeMocks.finalize.mock.calls[0][0].reservation.record.snapshot.pickupAt).toBe(Date.UTC(2026, 6, 10, 4, 15));
-    });
-
-    it('候補枠どおりの pickupAt はそのまま (pickupAtRequested を持たない = 従来の snapshot の形)', async () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z'));
-      store.record = preorderShop();
-      const { pay } = await load({ preorderTime: '1' });
-      const onSlot = Date.UTC(2026, 6, 10, 4, 15); // Asia/Tokyo 13:15
-      const quote = await pay.GET(payReq(`h=shop&cart=${CART}&pickupAt=${onSlot}`));
-      expect(quote.status).toBe(402);
-      const quoteBody = await quote.json();
-      expect(quoteBody.pickupAt).toBe(onSlot);
-      expect('pickupAtRequested' in quoteBody).toBe(false);
-
       routeMocks.verify.mockResolvedValue(NextResponse.json({ isValid: true, payer: PAYER }));
       routeMocks.settle.mockResolvedValue(
         NextResponse.json({ success: true, transaction: TX_HASH, payer: PAYER }),
       );
-      routeMocks.finalize.mockResolvedValue({ ok: true, duplicate: false });
-      const res = await pay.GET(
-        payReq(`h=shop&cart=${CART}&pickupAt=${onSlot}`, { 'X-PAYMENT': paymentHeader() }),
-      );
+      routeMocks.finalize.mockResolvedValue({ ok: true, duplicate: true });
+      const res = await pay.GET(payReq(`h=shop&cart=${CART}&pickupAt=${REQUESTED}`, { 'X-PAYMENT': paymentHeader() }));
       expect(res.status).toBe(200);
-      const snapshot = routeMocks.finalize.mock.calls[0][0].reservation.record.snapshot;
-      expect(snapshot.pickupAt).toBe(onSlot);
-      expect('pickupAtRequested' in snapshot).toBe(false);
+      const body = await res.json();
+      expect(body.orderRegistered).toBe(true);
+      expect('pickupAt' in body).toBe(false);
     });
 
-    it('preorder-time OFF (または storefront モード) では正規化せず指定値のまま', async () => {
+    it('preorder-time OFF (または storefront モード) では見込みを出さない・無指定なら pickupAt も出さない', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z'));
       store.record = preorderShop();
       const { pay } = await load({ preorderTime: '' });
-      const quote = await pay.GET(payReq(`h=shop&cart=${CART}&pickupAt=${REQUESTED}`));
-      expect(quote.status).toBe(402);
-      const quoteBody = await quote.json();
+      const quoteBody = await (await pay.GET(payReq(`h=shop&cart=${CART}&pickupAt=${REQUESTED}`))).json();
       expect(quoteBody.pickupAt).toBe(REQUESTED);
-      expect('pickupAtRequested' in quoteBody).toBe(false);
+      expect('pickupAtEstimate' in quoteBody).toBe(false);
 
       store.record = record({
         storefront: {
@@ -822,17 +779,12 @@ describe('agent-order pay route', () => {
         },
       } as Partial<HandleRecord>);
       const { pay: payTimed } = await load({ preorderTime: '1' });
-      const storefrontQuote = await payTimed.GET(payReq(`h=shop&cart=${CART}&pickupAt=${REQUESTED}`));
-      expect(storefrontQuote.status).toBe(402);
-      expect((await storefrontQuote.json()).pickupAt).toBe(REQUESTED);
-    });
+      const storefrontBody = await (await payTimed.GET(payReq(`h=shop&cart=${CART}&pickupAt=${REQUESTED}`))).json();
+      expect(storefrontBody.pickupAt).toBe(REQUESTED);
+      expect('pickupAtEstimate' in storefrontBody).toBe(false);
 
-    it('pickupAt 無しの quote / 応答には pickupAt を出さない (従来の形)', async () => {
-      const { pay } = await load();
-      const quote = await pay.GET(payReq(`h=shop&cart=${CART}`));
-      const quoteBody = await quote.json();
-      expect(quote.status).toBe(402);
-      expect('pickupAt' in quoteBody).toBe(false);
+      const plain = await (await payTimed.GET(payReq(`h=shop&cart=${CART}`))).json();
+      expect('pickupAt' in plain).toBe(false);
     });
   });
 

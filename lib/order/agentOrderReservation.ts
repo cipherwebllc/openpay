@@ -128,29 +128,6 @@ function digestFor(
     .update(JSON.stringify({ identity, snapshot, tuple, feeConfig, ...(feeModel ? { feeModel } : {}) }))
     .digest('hex');
 }
-// 同じ支払い (identity・tuple・料金条件) の同じ注文 (resource・明細・合計・table・エージェントの指定時刻) か。
-// 受取時刻 (pickupAt) だけは店舗の候補枠へ正規化した値で時刻に依存するため比べない: 402 の有効時間を過ぎた
-// 再試行は snapshot を作り直すと枠が動き digest が合わなくなるが、保存済み予約の snapshot が正本
-// (PR #775 Codex P2-2)。正規化が起きない注文は snapshot が時刻に依存しないので digest が合い、ここに来ない。
-function sameOrderExceptPickup(
-  stored: ReservationRecord,
-  attempt: Pick<ReservationRecord, 'identity' | 'snapshot' | 'tuple' | 'feeConfig' | 'feeModel'>,
-): boolean {
-  const strip = (s: AgentOrderSnapshot) => {
-    const { pickupAt: _pickupAt, pickupAtRequested: _requested, ...rest } = s;
-    return JSON.stringify(rest);
-  };
-  return (
-    stored.identity.keyIdentity === attempt.identity.keyIdentity &&
-    stored.identity.credential === attempt.identity.credential &&
-    JSON.stringify(stored.tuple) === JSON.stringify(attempt.tuple) &&
-    JSON.stringify(stored.feeConfig) === JSON.stringify(attempt.feeConfig) &&
-    stored.feeModel === attempt.feeModel &&
-    strip(stored.snapshot) === strip(attempt.snapshot) &&
-    (stored.snapshot.pickupAtRequested ?? stored.snapshot.pickupAt) ===
-      (attempt.snapshot.pickupAtRequested ?? attempt.snapshot.pickupAt)
-  );
-}
 function decodeReservation(key: string, raw: string): AgentOrderReservation | null {
   try {
     const value = JSON.parse(raw) as ReservationRecord;
@@ -240,9 +217,7 @@ export async function reservationForBinding(
   const stored = await readAgentOrderReservation(key);
   if (stored.kind !== 'match') return stored;
   const r = stored.reservation.record;
-  return digestFor(identity, snapshot, tuple, r.feeConfig, r.feeModel) === r.digest ||
-    sameOrderExceptPickup(r, { identity, snapshot, tuple, feeConfig: r.feeConfig, feeModel: r.feeModel })
-    ? stored : { kind: 'conflict' };
+  return digestFor(identity, snapshot, tuple, r.feeConfig, r.feeModel) === r.digest ? stored : { kind: 'conflict' };
 }
 export async function reserveAgentOrder(input: {
   identity: PaymentRedeliveryIdentity;
@@ -280,17 +255,7 @@ export async function reserveAgentOrder(input: {
     await releaseAgentOrderAttempt({ key, raw, record }, owner);
     return { kind: 'unavailable' };
   }
-  if (result.value[0] === -1) {
-    // digest 不一致でも、受取時刻の正規化だけが違う同じ支払い・同じ注文なら保存済み予約を正本に同じ経路へ進む
-    // (早期復旧の index 読取が落ちた再試行・PR #775 P2-2)。読み直せなければ 503 (新しい支払い要求にしない)。
-    // RESERVE は -1 を返す前に何も書かないので、解放する attempt は無い。
-    const stored = await readAgentOrderReservation(key);
-    if (stored.kind === 'unavailable') return { kind: 'unavailable' };
-    if (stored.kind === 'match' && sameOrderExceptPickup(stored.reservation.record, record)) {
-      return { kind: 'match', reservation: stored.reservation };
-    }
-    return { kind: 'conflict' };
-  }
+  if (result.value[0] === -1) return { kind: 'conflict' };
   const reservation = decodeReservation(key, result.value[1]);
   if (!reservation) {
     await releaseAgentOrderAttempt({ key, raw, record }, owner);

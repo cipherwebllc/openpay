@@ -149,24 +149,6 @@ export function nearestPickupSlot(slots: readonly number[], requested: number): 
   return best;
 }
 
-/**
- * エージェント注文の受取時刻を正規化する候補枠。`pickupSlots(now)` に、graceMs だけ前の時点なら出ていた
- * (それより前に始まる) 枠を前置する。x402 の 402 で示した枠が、その 402 の有効時間内に払えば動かないように
- * するため (quote を server に保存せずに済ませる・PR #775 Codex P2-1)。受付可否 (空判定) は `pickupSlots(now)`
- * のまま = 今の候補が空なら空。
- */
-export function pickupSlotCandidates(
-  nowMs: number,
-  graceMs: number,
-  minLeadMinutes: number | undefined,
-  lastOrder?: string,
-): number[] {
-  const current = pickupSlots(nowMs, minLeadMinutes, lastOrder);
-  if (current.length === 0 || graceMs <= 0) return current;
-  const earlier = pickupSlots(nowMs - graceMs, minLeadMinutes, lastOrder).filter((t) => t < current[0]);
-  return [...earlier, ...current];
-}
-
 /** minLeadMinutes の検証 (整数・1..MIN_LEAD_MAX)。それ以外は null (= 未設定扱い)。 */
 export function sanitizeMinLead(v: unknown): number | null {
   if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > MIN_LEAD_MAX) return null;

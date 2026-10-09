@@ -21,9 +21,7 @@ import { chainForSlug } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { readShopLive } from '@/lib/shopLiveStore';
-import {
-  isBeforeOpen, isPastLastOrder, nearestPickupSlot, pickupSlotCandidates, pickupSlots, PICKUP_SLOT_MIN,
-} from '@/lib/shopTime';
+import { isBeforeOpen, isPastLastOrder, nearestPickupSlot, pickupSlots } from '@/lib/shopTime';
 import { createJpycPaymentRequirements } from '@/lib/x402/requirements';
 import { parseFacilitatorRequest } from '@/lib/x402/facilitatorSettle';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
@@ -135,19 +133,15 @@ function canonicalResourceUrl(
   return `${OPENPAY_CANONICAL_ORIGIN}/api/agent-order/pay?${params.toString()}`;
 }
 
-// 応答に載せる受取時刻 (第 7 回レビュー B12・user 裁定 R3)。pickupAt = 受注・予約で使う正規化後の値、
-// pickupAtRequested = エージェントの指定値 (正規化で変わったときだけ)。指定が無ければ何も足さない (従来の形)。
+// 応答に載せる受取時刻 (第 7 回レビュー B12・user 裁定 R3)。402 の pickupAt = エージェントの指定値の echo、
+// pickupAtEstimate = 402 発行時の候補枠での最寄り枠 (指定値と違うときだけ・**見込み**: 正規化は受注を保存する瞬間に
+// 行うので、枠の境界を越えて払えば動きうる)。保存された受注の時刻は 200 の pickupAt (finalize の結果) が正。
 function pickupFields(
   pickupAt: number | null,
-  requested: number | null | undefined,
-): { pickupAt?: number; pickupAtRequested?: number } {
+  estimate: number | null = null,
+): { pickupAt?: number; pickupAtEstimate?: number } {
   if (pickupAt === null) return {};
-  return {
-    pickupAt,
-    ...(requested !== undefined && requested !== null && requested !== pickupAt
-      ? { pickupAtRequested: requested }
-      : {}),
-  };
+  return { pickupAt, ...(estimate !== null && estimate !== pickupAt ? { pickupAtEstimate: estimate } : {}) };
 }
 
 function paymentInvalidResponse(): NextResponse {
@@ -183,8 +177,7 @@ async function authorizationOriginFailure(
   if (origin === 'indeterminate') return pendingRecoveryResponse(snapshot);
   const accepts = [facilitatorBody.paymentRequirements] as Accepts;
   return challenge(
-    snapshot.resource, accepts[0].description, accepts, 'payment_invalid',
-    pickupFields(snapshot.pickupAt, snapshot.pickupAtRequested),
+    snapshot.resource, accepts[0].description, accepts, 'payment_invalid', pickupFields(snapshot.pickupAt),
   );
 }
 
@@ -199,8 +192,7 @@ function unusedExpiredChallenge(
   // Call only on positive unused status: unknown settlement must never prompt another payment.
   const accepts = [facilitatorBody.paymentRequirements] as Accepts;
   return challenge(
-    snapshot.resource, accepts[0].description, accepts, 'expired',
-    pickupFields(snapshot.pickupAt, snapshot.pickupAtRequested),
+    snapshot.resource, accepts[0].description, accepts, 'expired', pickupFields(snapshot.pickupAt),
   );
 }
 
@@ -219,11 +211,19 @@ async function settledOrderResponse(input: {
   // challenge. Preserve 200 + txHash and expose registration failure for same-payment repair.
   let orderRegistered = false;
   let retryWithSameHeader = reservation !== null;
+  // 保存された受注の受取時刻 (finalize が正規化して保存した値・重複なら保存済みから読んだ値)。
+  let storedPickup: { pickupAt?: number; pickupAtRequested?: number } = {};
   try {
     if (reservation) {
       await rememberAgentSettlement(reservation, settlement);
       const finalized = await finalizeAgentOrder({ reservation, settlement });
       orderRegistered = finalized.ok;
+      if (finalized.ok && finalized.pickupAt !== undefined) {
+        storedPickup = {
+          pickupAt: finalized.pickupAt,
+          ...(finalized.pickupAtRequested !== undefined ? { pickupAtRequested: finalized.pickupAtRequested } : {}),
+        };
+      }
       retryWithSameHeader = !finalized.ok &&
         (finalized.reason === 'processing' || finalized.reason === 'storage_unavailable');
       if (!finalized.ok) {
@@ -278,7 +278,7 @@ async function settledOrderResponse(input: {
       snapshot.decimals,
     ),
     orderRegistered,
-    ...pickupFields(snapshot.pickupAt, snapshot.pickupAtRequested),
+    ...storedPickup,
     ...(!orderRegistered && (reservation || input.allowLegacy === false) ? {
       paymentSettled: true,
       repair: { action: 'do_not_pay_again', retryWithSameHeader, txHash },
@@ -343,7 +343,7 @@ async function recoverMatchedPayment(input: {
         return challenge(
           snapshot.resource, accepts[0].description, accepts,
           verified.invalidReason ?? 'payment_invalid',
-          pickupFields(snapshot.pickupAt, snapshot.pickupAtRequested),
+          pickupFields(snapshot.pickupAt),
         );
       }
       const accepts = [record.facilitatorBody.paymentRequirements] as Accepts;
@@ -596,17 +596,22 @@ export async function GET(req: Request): Promise<NextResponse> {
   ) {
     return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
   }
-  if (
-    env.enablePreorderTime &&
-    record.storefront.mode === 'preorder' &&
-    pickupSlots(
+  // 受取時刻: 予約 snapshot には生の指定値を入れ (digest が時刻に依存しない = main と同じ)、正規化は finalize が
+  // 受注を保存する瞬間に行う。ここでは 402 用の見込み (今の候補枠での最寄り枠) だけ出す (第 7 回レビュー B12)。
+  const pickupAtRaw = pickupAtForAgentOrderSnapshot(pickupAtParam);
+  let pickupAtEstimate: number | null = null;
+  if (env.enablePreorderTime && record.storefront.mode === 'preorder') {
+    const slots = pickupSlots(
       Date.now(),
       record.storefront.minLeadMinutes,
       record.storefront.lastOrder,
-    ).length === 0
-  ) {
-    return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
+    );
+    if (slots.length === 0) {
+      return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
+    }
+    if (pickupAtRaw !== null) pickupAtEstimate = nearestPickupSlot(slots, pickupAtRaw);
   }
+  const pickup = pickupFields(pickupAtRaw, pickupAtEstimate);
   if (soldOut && cartItems.some((item) => soldOut.has(item.id))) {
     return NextResponse.json({ error: 'item_sold_out' }, { status: 409 });
   }
@@ -636,30 +641,6 @@ export async function GET(req: Request): Promise<NextResponse> {
       { status: 503 },
     );
   }
-
-  // 受取時刻: エージェントの指定値 (resource の pickupAt) を、preorder 店では人間の注文画面と同じ候補枠
-  // (最短準備時間・ラストオーダー・15 分刻み) の最寄りへ正規化する。人間の admission のように拒否はしない
-  // (第 7 回レビュー B12・user 裁定 R3)。正規化後の値を quote (402)・予約 snapshot・受注・応答で一貫して使い、
-  // 指定値と違えば応答の pickupAtRequested で分かる。候補枠には 402 の有効時間 (maxTimeoutSeconds) と
-  // 1 枠 (15 分) の小さい方だけ前の時点の枠も含める = 402 で示した枠は有効時間内に払えば動かない (quote を
-  // server に保存しない・PR #775 P2-1)。有効時間を過ぎた支払いは後ろの枠に動きうるので、200 の pickupAt が正。
-  const pickupAtRequested = pickupAtForAgentOrderSnapshot(pickupAtParam);
-  let pickupAt = pickupAtRequested;
-  if (
-    env.enablePreorderTime &&
-    record.storefront.mode === 'preorder' &&
-    pickupAtRequested !== null
-  ) {
-    const graceMs = Math.min(accepts[0].maxTimeoutSeconds, PICKUP_SLOT_MIN * 60) * 1000;
-    const candidates = pickupSlotCandidates(
-      Date.now(),
-      graceMs,
-      record.storefront.minLeadMinutes,
-      record.storefront.lastOrder,
-    );
-    pickupAt = nearestPickupSlot(candidates, pickupAtRequested);
-  }
-  const pickup = pickupFields(pickupAt, pickupAtRequested);
 
   if (!paymentSignatureHeader && !paymentHeader) {
     return challenge(resourceUrl, description, accepts, 'payment_required', pickup);
@@ -771,8 +752,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     totalMinor: order.totalMinor,
     resource: resourceUrl,
     table: sanitizeTable(tableParam),
-    pickupAt,
-    pickupAtRequested,
+    pickupAt: pickupAtRaw,
   });
   if (
     snapshot === null ||
@@ -940,7 +920,7 @@ async function settleBoundOrder(input: {
         description,
         accepts,
         settleBody.errorReason ?? 'settlement_failed',
-        pickupFields(snapshot.pickupAt, snapshot.pickupAtRequested),
+        pickupFields(snapshot.pickupAt),
       );
     }
     return NextResponse.json(settleBody, { status: settleRes.status });
