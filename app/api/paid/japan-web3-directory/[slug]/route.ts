@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { handleFirstPartyPaidGet, paymentHeaderUsable } from '@/app/api/paid/_shared';
+import { handleFirstPartyPaidGetFromSnapshot } from '@/app/api/paid/_shared';
 import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
 import { directoryDetailResource } from '@/lib/directory/paidResources';
 import {
@@ -24,24 +24,17 @@ export async function GET(
   // 存在確認を payment challenge より先に行い、未存在 slug では署名も課金も発生させない。
   if (!entry) return paidDirectoryError('not_found', 404);
 
-  if (!paymentHeaderUsable(req)) {
-    return handleFirstPartyPaidGet(req, directoryDetailResource(slug), () =>
-      paidDirectoryError('snapshot_required', 503),
+  return handleFirstPartyPaidGetFromSnapshot(req, directoryDetailResource(slug), async () => {
+    const verificationSnapshot = await readDirectoryVerificationSnapshot();
+    if (verificationSnapshot === null) {
+      return paidDirectoryError('storage_unavailable', 503);
+    }
+    const envelope = createDirectoryEnvelope(
+      { slug },
+      { items: [entry], total: 1 },
+      new Date().toISOString(),
+      verificationSnapshot,
     );
-  }
-
-  const verificationSnapshot = await readDirectoryVerificationSnapshot();
-  if (verificationSnapshot === null) {
-    return paidDirectoryError('storage_unavailable', 503);
-  }
-  const envelope = createDirectoryEnvelope(
-    { slug },
-    { items: [entry], total: 1 },
-    new Date().toISOString(),
-    verificationSnapshot,
-  );
-
-  return handleFirstPartyPaidGet(req, directoryDetailResource(slug), () =>
-    NextResponse.json(envelope),
-  );
+    return NextResponse.json(envelope);
+  });
 }

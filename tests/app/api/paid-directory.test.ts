@@ -26,6 +26,27 @@ vi.mock('@/app/api/facilitator/settle/route', () => ({
   POST: routeMocks.settle,
 }));
 
+// 再配信 (settled / pending → 復旧) はコアが KV の再配信レコードから content を呼ぶ経路。
+// 既定は「レコード無し」(missing) で、従来どおり verify → settle へ進む。
+const redeliveryMocks = vi.hoisted(() => ({
+  lookup: vi.fn(),
+  promote: vi.fn(),
+  resolveStatus: vi.fn(),
+  statusRateLimit: vi.fn(),
+}));
+vi.mock('@/lib/x402/paymentRedelivery', async (original) => ({
+  ...(await original<typeof import('@/lib/x402/paymentRedelivery')>()),
+  lookupPaymentRedelivery: redeliveryMocks.lookup,
+  claimPaymentRedelivery: async () => ({ kind: 'unavailable' }),
+  promotePaymentRedelivery: redeliveryMocks.promote,
+}));
+vi.mock('@/lib/x402/facilitatorStatus', () => ({
+  resolveFacilitatorPaymentStatus: redeliveryMocks.resolveStatus,
+}));
+vi.mock('@/lib/x402/facilitatorStatusRateLimit', () => ({
+  checkFacilitatorStatusRateLimit: redeliveryMocks.statusRateLimit,
+}));
+
 const FORWARDER = getAddress('0x752b7aad0089286eb7b553d84d05233d80c9fcb4');
 const FEE_RECEIVER = getAddress('0x428483d2bd5E9f0e9f8E9f8e9F8E9F8E9f8e9F8e');
 const JPYC_AMOY = getAddress('0x00000000000000000000000000000000000Ca11a');
@@ -102,6 +123,10 @@ beforeEach(() => {
   routeMocks.settle.mockReset();
   verificationMocks.snapshot = {};
   verificationMocks.read.mockClear();
+  redeliveryMocks.lookup.mockReset().mockResolvedValue({ kind: 'missing' });
+  redeliveryMocks.promote.mockReset().mockResolvedValue({ kind: 'unavailable' });
+  redeliveryMocks.resolveStatus.mockReset();
+  redeliveryMocks.statusRateLimit.mockReset().mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -282,8 +307,114 @@ describe('paid Japan Web3 Directory APIs', () => {
       expect(res.status).toBe(402);
       expect(await res.json()).toMatchObject({ error: 'invalid_payment_payload' });
     }
+    // コアは v2 の構造検査より先に再配信 lookup を行う (再配信レコードが無いから 402 で終わり、snapshot は読まない)。
+    expect(redeliveryMocks.lookup).toHaveBeenCalledTimes(3);
     expect(verificationMocks.read).not.toHaveBeenCalled();
     expect(routeMocks.verify).not.toHaveBeenCalled();
+  });
+
+  // Codex P2 (再レビュー): 先読みしない header でも、コアが同じ identity・credential の再配信レコードから
+  // content を呼ぶ (settled 再配信・pending からの復旧) ときは実コンテンツを返す。snapshot はそのとき 1 回だけ読む。
+  describe('支払い済みの再配信は先読みしない header でも実コンテンツを返す', () => {
+    const settlement = {
+      success: true,
+      transaction: TX_HASH,
+      network: 'eip155:80002',
+      payer: PAYER,
+    };
+    const paymentResponse = (res: Response): unknown =>
+      JSON.parse(Buffer.from(res.headers.get('x-payment-response') ?? '', 'base64').toString('utf8'));
+
+    it.each([
+      ['v1 の payload を PAYMENT-SIGNATURE に載せる', { 'PAYMENT-SIGNATURE': paymentHeader() }],
+      ['空の PAYMENT-SIGNATURE と正常な X-PAYMENT の併存', { 'PAYMENT-SIGNATURE': '', 'X-PAYMENT': paymentHeader() }],
+    ])('settled レコードがあれば %s の再送でも 200 の実コンテンツ', async (_label, headers) => {
+      redeliveryMocks.lookup.mockResolvedValue({ kind: 'match', record: { state: 'settled', settlement } });
+      const { paymentRedeliveryIdentity } = await import('@/lib/x402/paymentRedelivery');
+      const { list, search, detail } = await load();
+
+      const listRes = await list.GET(new Request('https://open-pay.jp/api/paid/japan-web3-directory', { headers }));
+      expect(listRes.status).toBe(200);
+      const listBody = (await listRes.json()) as { schemaVersion: string; items: unknown[]; total: number };
+      expect(listBody.schemaVersion).toBe('1.0');
+      expect(listBody.items).toHaveLength(listBody.total);
+      expect(listBody.total).toBeGreaterThanOrEqual(15);
+      expect(paymentResponse(listRes)).toEqual(settlement);
+      expect(redeliveryMocks.lookup).toHaveBeenCalledWith(
+        paymentRedeliveryIdentity(paymentPayload()),
+        { scope: 'first-party', resource: 'https://open-pay.jp/api/paid/japan-web3-directory' },
+      );
+      expect(verificationMocks.read).toHaveBeenCalledTimes(1);
+
+      verificationMocks.read.mockClear();
+      const searchRes = await search.GET(
+        new Request('https://open-pay.jp/api/paid/japan-web3-directory/search?keyword=MetaMask', { headers }),
+      );
+      expect(searchRes.status).toBe(200);
+      expect((await searchRes.json()) as { items: Array<{ slug: string }> }).toMatchObject({
+        query: { keyword: 'MetaMask' },
+        items: [{ slug: 'metamask' }],
+      });
+      expect(paymentResponse(searchRes)).toEqual(settlement);
+      expect(verificationMocks.read).toHaveBeenCalledTimes(1);
+
+      verificationMocks.read.mockClear();
+      const detailRes = await detail.GET(
+        new Request('https://open-pay.jp/api/paid/japan-web3-directory/jpyc', { headers }),
+        detailCtx('jpyc'),
+      );
+      expect(detailRes.status).toBe(200);
+      expect(await detailRes.json()).toMatchObject({ query: { slug: 'jpyc' }, items: [{ slug: 'jpyc' }] });
+      expect(paymentResponse(detailRes)).toEqual(settlement);
+      expect(verificationMocks.read).toHaveBeenCalledTimes(1);
+
+      expect(routeMocks.verify).not.toHaveBeenCalled();
+      expect(routeMocks.settle).not.toHaveBeenCalled();
+    });
+
+    it('pending レコードが on-chain settled へ復旧したときも 200 の実コンテンツ', async () => {
+      redeliveryMocks.lookup.mockResolvedValue({
+        kind: 'match',
+        record: { state: 'pending', facilitatorBody: { paymentPayload: paymentPayload() } },
+      });
+      redeliveryMocks.resolveStatus.mockResolvedValue({
+        ok: true,
+        state: 'settled',
+        txHash: TX_HASH,
+        chainId: 80002,
+        payer: PAYER,
+      });
+      redeliveryMocks.promote.mockResolvedValue({ kind: 'promoted', record: { state: 'settled', settlement } });
+      const { list } = await load();
+      const res = await list.GET(
+        new Request('https://open-pay.jp/api/paid/japan-web3-directory', {
+          headers: { 'PAYMENT-SIGNATURE': paymentHeader() },
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ schemaVersion: '1.0' });
+      expect(paymentResponse(res)).toEqual(settlement);
+      expect(redeliveryMocks.promote).toHaveBeenCalledTimes(1);
+      expect(verificationMocks.read).toHaveBeenCalledTimes(1);
+      expect(routeMocks.verify).not.toHaveBeenCalled();
+      expect(routeMocks.settle).not.toHaveBeenCalled();
+    });
+
+    it('再配信時に snapshot が読めなければ 503 storage_unavailable (課金は成立済み・settle は走らない)', async () => {
+      redeliveryMocks.lookup.mockResolvedValue({ kind: 'match', record: { state: 'settled', settlement } });
+      verificationMocks.snapshot = null;
+      const { list } = await load();
+      const res = await list.GET(
+        new Request('https://open-pay.jp/api/paid/japan-web3-directory', {
+          headers: { 'PAYMENT-SIGNATURE': paymentHeader() },
+        }),
+      );
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+      expect(verificationMocks.read).toHaveBeenCalledTimes(1);
+      expect(routeMocks.verify).not.toHaveBeenCalled();
+      expect(routeMocks.settle).not.toHaveBeenCalled();
+    });
   });
 
   it('KV snapshot 障害は verify/settle 前に未課金503', async () => {
