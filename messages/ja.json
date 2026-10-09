@@ -2654,7 +2654,8 @@
       "percentInput": "割引率 (%)",
       "percentNote": "（{percent}%）",
       "errorAmount": "小計より小さい金額を、{unit} 単位で入れてください",
-      "errorPercent": "割引率は 0 より大きく 100 未満で入れてください（小数 2 桁まで）"
+      "errorPercent": "割引率は 0 より大きく 100 未満で入れてください（小数 2 桁まで）",
+      "errorPercentTooSmall": "この割引率では値引きが {unit} 未満になります"
     }
   },
   "ProductPresetManager": {

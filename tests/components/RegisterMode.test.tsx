@@ -578,6 +578,28 @@ describe('RegisterMode', () => {
       expect(orderPanel().getByRole('button', { name: '＋ 値引きを追加' })).toHaveFocus();
     });
 
+    it('金額 ↔ 割引率 で入力を持ち越さない・直している間は合計を「—」に', async () => {
+      const user = userEvent.setup();
+      await cartWithCoffeeAndShirt(user);
+      await user.click(orderPanel().getByRole('button', { name: '＋ 値引きを追加' }));
+      await user.type(orderPanel().getByLabelText('値引きの金額'), '20');
+      await user.click(orderPanel().getByRole('button', { name: '割引率' }));
+      expect(orderPanel().getByLabelText('割引率 (%)')).toHaveValue('');
+      expect(orderPanel().queryByText(/^−/)).toBeNull();
+      await user.type(orderPanel().getByLabelText('割引率 (%)'), '100');
+      expect(orderPanel().getByText('—', { selector: 'dd' })).toBeInTheDocument();
+      expect(orderPanel().queryByText('3,500 JPYC', { selector: 'dd.text-2xl' })).toBeNull();
+    });
+
+    it('率は範囲内でも値引きが 1 JPYC 未満になるときは、その理由を出す', async () => {
+      const user = userEvent.setup();
+      await cartWithCoffeeAndShirt(user);
+      await user.click(orderPanel().getByRole('button', { name: '＋ 値引きを追加' }));
+      await user.click(orderPanel().getByRole('button', { name: '割引率' }));
+      await user.type(orderPanel().getByLabelText('割引率 (%)'), '0.01');
+      expect(orderPanel().getByText('この割引率では値引きが 1 JPYC 未満になります')).toBeInTheDocument();
+    });
+
     it('「外す」で値引きをやめる', async () => {
       const user = userEvent.setup();
       await cartWithCoffeeAndShirt(user);

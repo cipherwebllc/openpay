@@ -469,6 +469,11 @@ function RegisterModeContent({
         : discountFromPercent(subtotalWei, discountRaw, deployment.decimals, taxDec);
   // 入力があるのに使えない値引き (形・単位・小計以上・率の範囲)。QR は出さず、理由を 1 行出す。
   const discountInvalid = discountRaw !== '' && discountWei === null;
+  // 率は範囲内なのに、小計が小さく値引きが最小単位 (1 円・0.01) 未満に切り捨てられた。
+  const discountPercentTooSmall =
+    discountInvalid && discountMode === 'percent' && /^\d+(\.\d{1,2})?$/.test(discountRaw) &&
+    Number(discountRaw) > 0 && Number(discountRaw) < 100;
+  const discountUnitLabel = `${taxDec === 0 ? '1' : '0.01'} ${symbol}`;
   const discountParam = discountWei !== null ? formatUnits(discountWei, deployment.decimals) : undefined;
   // お支払い合計 = 小計 − 値引き (QR・お店の端末で送る受け渡しの額・最低額の判定はこの額)。
   const totalWei = subtotalWei - (discountWei ?? 0n);
@@ -991,7 +996,11 @@ function RegisterModeContent({
                             key={mode}
                             type="button"
                             aria-pressed={discountMode === mode}
-                            onClick={() => setDiscountMode(mode)}
+                            onClick={() => {
+                              // 金額 ↔ 割引率 で入力を持ち越さない (20 円のつもりが 20% にならない)。
+                              if (mode !== discountMode) setDiscountInput('');
+                              setDiscountMode(mode);
+                            }}
                             className={`rounded-md px-2.5 py-1 font-medium ${
                               discountMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
                             }`}
@@ -1032,8 +1041,10 @@ function RegisterModeContent({
                     {discountInvalid && (
                       <p id="register-discount-error" className="mt-1.5 text-xs text-red-600">
                         {discountMode === 'amount'
-                          ? t('discount.errorAmount', { unit: `${taxDec === 0 ? '1' : '0.01'} ${symbol}` })
-                          : t('discount.errorPercent')}
+                          ? t('discount.errorAmount', { unit: discountUnitLabel })
+                          : discountPercentTooSmall
+                            ? t('discount.errorPercentTooSmall', { unit: discountUnitLabel })
+                            : t('discount.errorPercent')}
                       </p>
                     )}
                   </div>
@@ -1050,7 +1061,7 @@ function RegisterModeContent({
                     {t('discount.add')}
                   </button>
                 )}
-                {totalTaxRounded > 0 && (
+                {totalTaxRounded > 0 && !discountInvalid && (
                   <div className="flex justify-between">
                     <dt className="text-slate-500">{t('taxAmount')}</dt>
                     <dd className="tabular-nums text-slate-600">
@@ -1061,7 +1072,8 @@ function RegisterModeContent({
                 <div className="flex items-baseline justify-between border-t border-slate-200 pt-2">
                   <dt className="text-sm font-semibold text-slate-700">{t('total')}</dt>
                   <dd className="text-2xl font-bold tabular-nums tracking-tight text-slate-900">
-                    {groupAmountDigits(totalHuman)} {symbol}
+                    {/* 値引きを直している間は合計を決めない (値引き前の額を払う額と読ませない)。 */}
+                    {discountInvalid ? '—' : `${groupAmountDigits(totalHuman)} ${symbol}`}
                   </dd>
                 </div>
               </dl>

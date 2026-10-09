@@ -2654,7 +2654,8 @@
       "percentInput": "Discount rate (%)",
       "percentNote": "({percent}%)",
       "errorAmount": "Enter an amount smaller than the subtotal, in steps of {unit}.",
-      "errorPercent": "Enter a rate above 0 and below 100 (up to 2 decimals)."
+      "errorPercent": "Enter a rate above 0 and below 100 (up to 2 decimals).",
+      "errorPercentTooSmall": "At this rate the discount is less than {unit}."
     }
   },
   "ProductPresetManager": {
