@@ -139,6 +139,10 @@ const JA: MobileOrderGuideContent = {
       a: 'かかりません。表示された金額だけを支払います。',
     },
     {
+      q: 'お店の値引きはどうなる？',
+      a: '値引きを設定しているお店では、注文ページの上に「モバイルオーダーで 5% 引き」のように表示され、カートの合計は値引き後の金額になります。値引き後の支払額が 10 JPYC 未満になる注文には付きません。',
+    },
+    {
       q: '注文を間違えた・キャンセルしたい',
       a: 'ブロックチェーンの送金は原則取り消せません。支払い前に内容をよく確認し、困ったときはお店のスタッフに相談してください。',
     },
@@ -242,6 +246,10 @@ const EN: MobileOrderGuideContent = {
     {
       q: 'Are there fees or gas costs?',
       a: 'No. You pay exactly the amount displayed.',
+    },
+    {
+      q: 'Does the shop’s discount apply?',
+      a: 'Shops that set a discount show it at the top of the order page (for example “5% off mobile orders”), and the cart total is the discounted amount. It does not apply when less than 10 JPYC would remain to pay.',
     },
     {
       q: 'I made a mistake / want to cancel',

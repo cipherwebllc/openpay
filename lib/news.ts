@@ -34,6 +34,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'discount-register-qr-mobile-order-2026-10-09',
+    date: '2026-10-09',
+    category: 'feature',
+    title: {
+      ja: 'レジ・決済QR・モバイル注文で、任意の値引きを付けられるようになりました',
+      en: 'You can now add an optional discount at the register, on payment QR and for mobile orders',
+    },
+    body: {
+      ja: 'レジと金額指定の決済QRでは会計ごとに金額か割引率で、モバイル注文ではお店の設定で全品の割引率か 1 注文あたりの割引額を決めて、値引きを付けられます。お客様の控え・インボイスの記載事項・履歴・CSV は値引き後の金額でそろい、OpenPay 利用料は値引き後の決済額にかかります。JPYC で払ってくれたお客様への還元などにお使いください（AI エージェントが自分で払う注文には付きません）。',
+      en: 'At the register and with a fixed-amount payment QR you can discount each sale by an amount or a percentage, and for mobile orders you can set a store-wide percentage or a fixed amount per order in your shop settings. Customer receipts, invoice details, history and CSV all use the discounted amount, and the OpenPay usage fee is charged on the discounted payment. Use it to give back to customers who pay in JPYC (orders an AI agent pays for itself get no discount).',
+    },
+    link: { href: '/guide/mobile-order', labelJa: 'お客様の画面を見る', labelEn: 'See what customers see' },
+  },
+  {
     id: 'store-pays-gas-kaia-avalanche-2026-10-08',
     date: '2026-10-08',
     category: 'feature',
