@@ -208,6 +208,19 @@ describe('レジの値引き (明細に配った discount)', () => {
     expect(rows[2].split(',').at(-1)).toBe('8');
   });
 
+  it('壊れた保存値: 値引きの合計が明細・小計と合わない控え、明細の値引きが文字列でない控えは読まない', () => {
+    window.localStorage.clear();
+    const good = payerReceiptFromHistoryEntry(discounted(), { now: NOW });
+    const raw = [
+      { ...good, receiptId: 'mismatch', discountAmount: '80' },
+      { ...good, receiptId: 'notdecimal', discountAmount: 'abc' },
+      { ...good, receiptId: 'numberline', lineItems: good.lineItems?.map((li) => ({ ...li, discount: 12 })) },
+      good,
+    ];
+    window.localStorage.setItem('openpay:payerReceipts:v1', JSON.stringify(raw));
+    expect(loadPayerReceipts().map((r) => r.receiptId)).toEqual([good.receiptId]);
+  });
+
   it('値引きの無い控えは従来どおり (discountAmount を持たない)', () => {
     const r = payerReceiptFromHistoryEntry(saleEntry(), { now: NOW });
     expect(r.discountAmount).toBeUndefined();

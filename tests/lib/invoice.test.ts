@@ -267,5 +267,7 @@ describe('レジの値引き (明細に配った discount)', () => {
   it('壊れた値引き (行の金額を超える・形が不正) の控えには出さない', () => {
     expect(invoiceRateGroups([line({ amount: '100', discount: '101' })])).toBeNull();
     expect(invoiceRateGroups([line({ amount: '100', discount: 'abc' })])).toBeNull();
+    // 保存値が数のまま (文字列でない) でも落ちずに出さない。
+    expect(invoiceRateGroups([line({ amount: '100', discount: 10 as unknown as string })])).toBeNull();
   });
 });

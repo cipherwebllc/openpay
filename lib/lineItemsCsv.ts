@@ -58,8 +58,10 @@ export function lineItemChargedAmount(li: HistoryLineItem): number | null {
   const gross = lineItemGrossAmount(li);
   if (gross === null) return null;
   if (li.discount === undefined) return gross;
+  // 10 進でない値 ('0x10' 等を Number が数に読むのを含む) は「金額情報を欠く行」にして按分しない。
+  if (typeof li.discount !== 'string' || !/^\d+(\.\d+)?$/.test(li.discount)) return null;
   const d = Number(li.discount);
-  return Number.isFinite(d) && d >= 0 && d <= gross ? gross - d : null;
+  return Number.isFinite(d) && d <= gross ? gross - d : null;
 }
 
 function rowsForEntry(e: HistoryEntry): string[][] {

@@ -307,7 +307,8 @@ function isValidLineItems(value: unknown): boolean {
       typeof o.name === 'string' &&
       typeof o.quantity === 'number' &&
       typeof o.unitPrice === 'string' &&
-      typeof o.amount === 'string'
+      typeof o.amount === 'string' &&
+      (o.discount === undefined || typeof o.discount === 'string')
     );
   });
 }
@@ -323,6 +324,29 @@ const VALID_RECEIPT_STATUSES: ReadonlySet<string> = new Set([
   'unknown',
 ] satisfies PayerReceiptStatus[]);
 
+// 値引きの合計 (discountAmount) は、明細に配った額の合計・小計 − 合計 と一致するときだけ読む (壊れた保存値で
+// インボイス欄の横に違う値引き額を出さない)。
+function isConsistentDiscount(r: Record<string, unknown>): boolean {
+  const decimals = r.currency === 'JPYC' ? 18 : r.currency === 'USDC' ? 6 : null;
+  if (decimals === null || typeof r.discountAmount !== 'string' || !/^\d+(\.\d+)?$/.test(r.discountAmount)) return false;
+  let discount: bigint;
+  try {
+    discount = parseUnits(r.discountAmount, decimals);
+  } catch {
+    return false;
+  }
+  const lines = lineItemsDiscountWei(r.lineItems as HistoryLineItem[] | undefined, decimals);
+  if (lines === null || lines !== discount || discount <= 0n) return false;
+  if (typeof r.subtotalAmount === 'string' && typeof r.totalAmount === 'string') {
+    try {
+      return parseUnits(r.subtotalAmount, decimals) === parseUnits(r.totalAmount, decimals) + discount;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 function isValidReceipt(value: unknown): value is PayerReceipt {
   if (value === null || typeof value !== 'object') return false;
   const r = value as Record<string, unknown>;
@@ -336,7 +360,7 @@ function isValidReceipt(value: unknown): value is PayerReceipt {
   if (typeof r.merchantAddress !== 'string') return false;
   if (r.orderId !== undefined && typeof r.orderId !== 'string') return false;
   if (r.lineItems !== undefined && !isValidLineItems(r.lineItems)) return false;
-  if (r.discountAmount !== undefined && typeof r.discountAmount !== 'string') return false;
+  if (r.discountAmount !== undefined && !isConsistentDiscount(r)) return false;
   return true;
 }
 

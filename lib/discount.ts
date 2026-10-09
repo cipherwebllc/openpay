@@ -164,6 +164,8 @@ export function lineDiscountWei(
   decimals: number,
 ): bigint | null {
   if (li.discount === undefined) return 0n;
+  // 保存値は壊れうる (端末の localStorage)。文字列でない・10 進でない値は数字を出さない側に倒す。
+  if (typeof li.discount !== 'string' || typeof li.amount !== 'string') return null;
   if (!DECIMAL_PATTERN.test(li.discount) || exceedsTokenPrecision(li.discount, decimals)) return null;
   if (!DECIMAL_PATTERN.test(li.amount) || exceedsTokenPrecision(li.amount, decimals)) return null;
   const d = parseUnits(li.discount, decimals);
