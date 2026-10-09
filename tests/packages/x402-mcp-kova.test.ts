@@ -195,7 +195,8 @@ describe('Kova signer adapter', () => {
     vi.stubEnv('KOVA_PARENT_ONLY', 'not-in-injected-env');
     const inherited = Object.defineProperty({}, 'INHERITED_ONLY', { get() { throw new Error(secret); }, enumerable: true });
     const config = Object.assign(Object.create(inherited), env({ KOVA_CREDENTIAL: secret, PATH: '/kova/bin', CUSTOM: 'keep' }));
-    for (const key of ['BUYER_PRIVATE_KEY', 'STEWARD_API_KEY', 'STEWARD_SIGNER_SECRET', 'STEWARD_URL', 'STEWARD_TENANT', 'STEWARD_AGENT_ID', 'STEWARD_AGENT_ADDRESS', 'STEWARD_SIGNER_ID', 'STEWARD_FUTURE_SECRET']) {
+    // G4: MetaMask signer 用の秘密 (MM_*) と OpenPay の RPC/owner 鍵も、metamask 側と対称に Kova の子へ渡さない。
+    for (const key of ['BUYER_PRIVATE_KEY', 'OWNER_PRIVATE_KEY', 'POLYGON_RPC_URL', 'STEWARD_API_KEY', 'STEWARD_SIGNER_SECRET', 'STEWARD_URL', 'STEWARD_TENANT', 'STEWARD_AGENT_ID', 'STEWARD_AGENT_ADDRESS', 'STEWARD_SIGNER_ID', 'STEWARD_FUTURE_SECRET', 'MM_CLI_TOKEN', 'MM_MNEMONIC', 'MM_PASSWORD', 'MM_ENV', 'MM_FUTURE_SECRET', 'METAMASK_AGENT_ADDRESS']) {
       Object.defineProperty(config, key, { get() { throw new Error(secret); }, enumerable: true });
     }
     const execFileImpl = signingChild();
@@ -210,6 +211,8 @@ describe('Kova signer adapter', () => {
       BUYER_PRIVATE_KEY: `0x${'2'.repeat(64)}`, STEWARD_API_KEY: 'openpay-secret',
       STEWARD_SIGNER_SECRET: 'openpay-secret', STEWARD_URL: 'https://unused.test',
       STEWARD_CUSTOM: 'openpay-secret', KOVA_CREDENTIAL: secret, PATH: '/kova/bin', CUSTOM: 'keep',
+      MM_CLI_TOKEN: 'metamask-secret', MM_MNEMONIC: 'metamask-secret', MM_PASSWORD: 'metamask-secret',
+      METAMASK_AGENT_ADDRESS: `0x${'4'.repeat(40)}`, POLYGON_RPC_URL: 'https://rpc.example/key', OWNER_PRIVATE_KEY: `0x${'5'.repeat(64)}`,
     }, execFileImpl);
     expect(decode(await pay(active)).status).toBe(200);
     expect(execFileImpl.mock.calls[0][2].env).toEqual(env({ KOVA_CREDENTIAL: secret, PATH: '/kova/bin', CUSTOM: 'keep' }));

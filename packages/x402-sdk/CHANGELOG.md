@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.3 — unreleased
+
+- Widen `isPrivatePaymentHost` / `parseSafePaymentUrl` to the same IANA
+  special-purpose table the OpenPay server uses: NAT64 (`64:ff9b::/96`,
+  `64:ff9b:1::/48`), 6to4 (`2002::/16`), Teredo (`2001::/32`), the deprecated
+  6to4 relay (`192.88.99.0/24`), IPv4-translated (`::ffff:0:0:0/96`),
+  documentation, benchmarking, IETF-assignment, discard-only, segment-routing,
+  site-local and reserved ranges are now rejected before DNS, before a custom
+  transport runs and at connect time. Mapped IPv4 is judged against the full
+  IPv4 table. A `::` that stands for no group is treated as malformed (rejected).
+  Public addresses next to each range stay allowed. No dependency changes.
+
 ## 0.10.2 — unreleased
 
 - `resolveLicense` accepts `productUrl: null` (the seller released their last

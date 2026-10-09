@@ -4,11 +4,32 @@ import { verifyTypedData } from 'viem';
 // Only configured fixed messages may cross the SDK, which recreates Error(message).
 class CliSigningError extends Error {}
 
-function childEnvironment(env, excludedEnvPrefixes, excludedEnvKeys) {
+// Env prefixes each CLI signer reads for itself. A signer's child receives its own
+// prefixes and loses every other signer's, so the exclusion stays symmetric by
+// construction when a signer is added here (G4: Kova used to receive MM_* secrets).
+export const SIGNER_ENV_PREFIXES = Object.freeze({
+  kova: Object.freeze(['KOVA_']),
+  metamask: Object.freeze(['MM_', 'METAMASK_']),
+});
+
+// OpenPay-side secrets no CLI signer needs: the env-key signer's private key, the
+// Steward bootstrap owner key and the wallet_status RPC URL (may embed an API key).
+// Neither Kova 0.1.2 nor mm 7.0.0 names any of these in its dist/ (checked 2026-10-10).
+const OPENPAY_SECRET_ENV_KEYS = Object.freeze(['BUYER_PRIVATE_KEY', 'OWNER_PRIVATE_KEY', 'POLYGON_RPC_URL']);
+const STEWARD_ENV_PREFIX = 'STEWARD_';
+
+function excludedPrefixesFor(signer) {
+  if (!Object.hasOwn(SIGNER_ENV_PREFIXES, signer)) throw new Error(`unknown CLI signer: ${signer}`);
+  return [STEWARD_ENV_PREFIX, ...Object.entries(SIGNER_ENV_PREFIXES)
+    .filter(([name]) => name !== signer)
+    .flatMap(([, prefixes]) => prefixes)];
+}
+
+function childEnvironment(env, excludedEnvPrefixes) {
   // 不要な OpenPay / 他 provider の秘密が第三者 CLI へ流れる波及を断つ。
   // Filter own keys before reading values, so excluded getters are never evaluated.
   return Object.fromEntries(Object.keys(env)
-    .filter((key) => key !== 'BUYER_PRIVATE_KEY' && !excludedEnvKeys.includes(key) && !excludedEnvPrefixes.some((prefix) => key.startsWith(prefix)))
+    .filter((key) => !OPENPAY_SECRET_ENV_KEYS.includes(key) && !excludedEnvPrefixes.some((prefix) => key.startsWith(prefix)))
     .map((key) => [key, env[key]]));
 }
 
@@ -50,9 +71,10 @@ function runCli(execFileImpl, bin, args, env, deadlineMs, failed) {
 
 export function createCliSigner({
   address, env, execFileImpl = execFile, bin, args, deadlineMs,
-  excludedEnvPrefixes, excludedEnvKeys = [], parseResponse, parseStderr, errors,
+  signer, parseResponse, parseStderr, errors,
 }) {
   const failure = () => new CliSigningError(errors.failed);
+  const excludedEnvPrefixes = excludedPrefixesFor(signer);
   return {
     mode: 'custom',
     address,
@@ -63,7 +85,7 @@ export function createCliSigner({
           typeof value === 'bigint' ? value.toString(10) : value,
         );
         const { error, stdout, stderr } = await runCli(execFileImpl, bin, args(typedData, json),
-          childEnvironment(env, excludedEnvPrefixes, excludedEnvKeys), callDeadlineMs, errors.deadline ?? errors.failed);
+          childEnvironment(env, excludedEnvPrefixes), callDeadlineMs, errors.deadline ?? errors.failed);
         if (error?.code === 'ENOENT') throw new CliSigningError(errors.notFound);
         // Timeout, signals, spawn failures and output overflow take priority over partial JSON.
         // Only an ordinary nonzero exit can still carry a complete error envelope.

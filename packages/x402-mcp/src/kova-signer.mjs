@@ -29,7 +29,7 @@ export function createKovaSigner(env = process.env, { execFileImpl } = {}) {
   return createCliSigner({
     address, env, execFileImpl, bin,
     deadlineMs: 30_000,
-    excludedEnvPrefixes: ['STEWARD_'],
+    signer: 'kova',
     args({ domain }, json) {
       // The installed SDK derives domain.chainId from the validated 402 network and
       // passes only typed-data to this hook. Never take a chain override from env.

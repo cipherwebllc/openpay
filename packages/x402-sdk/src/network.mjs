@@ -6,13 +6,69 @@ function normalizeHost(hostname) {
   return hostname.replace(/^\[|\]$/g, '').replace(/\.+$/, '').toLowerCase();
 }
 
-function isPrivateIpv4(a, b) {
-  if (a === 0 || a === 10 || a === 127) return true;
-  if (a === 100 && b >= 64 && b <= 127) return true;
-  if (a === 169 && b === 254) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 192 && b === 168) return true;
-  return a >= 224;
+// SSRF boundary shared with the OpenPay server (lib/net/privateHost.ts): private,
+// non-unicast, documentation and transition ranges from the IANA special-purpose
+// registries (checked 2026-09-23). Translation/tunnel ranges (NAT64, 6to4, Teredo)
+// are rejected as a whole even where IANA lists globally reachable exceptions, so a
+// DNS answer like 64:ff9b::a9fe:a9fe (NAT64 to 169.254.169.254) or 2002:c0a8:101::
+// (6to4 to 192.168.1.1) never carries a signed X-PAYMENT into the buyer's own network.
+// Keep both tables identical; tests/packages/x402-sdk-network.test.ts compares them.
+const IPV4_CIDRS = [
+  ['0.0.0.0', 8], // this network
+  ['10.0.0.0', 8], // private
+  ['100.64.0.0', 10], // CGNAT
+  ['127.0.0.0', 8], // loopback
+  ['169.254.0.0', 16], // link-local
+  ['172.16.0.0', 12], // private
+  ['192.0.0.0', 24], // IETF protocol assignments
+  ['192.0.2.0', 24], // documentation
+  ['192.88.99.0', 24], // deprecated 6to4 relay anycast
+  ['192.168.0.0', 16], // private
+  ['198.18.0.0', 15], // benchmarking
+  ['198.51.100.0', 24], // documentation
+  ['203.0.113.0', 24], // documentation
+  ['224.0.0.0', 4], // multicast
+  ['240.0.0.0', 4], // reserved (includes limited broadcast)
+];
+
+const IPV6_CIDRS = [
+  ['::', 128], // unspecified
+  ['::1', 128], // loopback
+  ['::ffff:0:0:0', 96], // IPv4-translated (RFC 6145)
+  ['64:ff9b::', 96], // NAT64 well-known prefix
+  ['64:ff9b:1::', 48], // local-use NAT64
+  ['100::', 64], // discard-only
+  ['100:0:0:1::', 64], // dummy prefix
+  ['2001::', 32], // Teredo
+  ['2001:2::', 48], // benchmarking
+  ['2001:db8::', 32], // documentation
+  ['2002::', 16], // 6to4
+  ['3fff::', 20], // documentation
+  ['5f00::', 16], // segment routing SIDs
+  ['fc00::', 7], // ULA
+  ['fe80::', 10], // link-local
+  ['fec0::', 10], // deprecated site-local
+  ['ff00::', 8], // multicast
+];
+
+const IPV4_PREFIXES = IPV4_CIDRS.map(([base, bits]) => ({
+  groups: base.split('.').map(Number), bits,
+}));
+const IPV6_PREFIXES = IPV6_CIDRS.map(([base, bits]) => ({
+  groups: expandIpv6(base), bits,
+}));
+
+// Compare only the bits inside the prefix, including a CIDR that ends mid-group.
+function matchesPrefix(address, prefix, groupBits) {
+  for (let i = 0; i * groupBits < prefix.bits; i += 1) {
+    const shift = Math.max(0, (i + 1) * groupBits - prefix.bits);
+    if (address[i] >>> shift !== prefix.groups[i] >>> shift) return false;
+  }
+  return true;
+}
+
+function isPrivateIpv4(octets) {
+  return IPV4_PREFIXES.some((prefix) => matchesPrefix(octets, prefix, 8));
 }
 
 function expandIpv6(hostname) {
@@ -35,7 +91,8 @@ function expandIpv6(hostname) {
     groups = head;
   } else {
     const fill = 8 - head.length - tail.length;
-    if (fill < 0) return null;
+    // `::` must stand for at least one zero group (same rule as the server).
+    if (fill < 1) return null;
     groups = [...head, ...Array(fill).fill('0'), ...tail];
   }
   if (groups.length !== 8) return null;
@@ -59,25 +116,19 @@ export function isPrivatePaymentHost(hostname) {
   if (host.includes(':')) {
     const groups = expandIpv6(host);
     if (groups === null) return true;
-    if (groups.every((group) => group === 0)) return true;
-    if (
-      groups.slice(0, 7).every((group) => group === 0) &&
-      groups[7] === 1
-    ) {
-      return true;
-    }
+    if (IPV6_PREFIXES.some((prefix) => matchesPrefix(groups, prefix, 16))) return true;
+    // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible (::a.b.c.d) literals are the
+    // socket's IPv4 form; judge them by the full IPv4 table.
     if (
       groups.slice(0, 5).every((group) => group === 0) &&
       (groups[5] === 0xffff || groups[5] === 0)
     ) {
-      return isPrivateIpv4(
-        (groups[6] >> 8) & 0xff,
-        groups[6] & 0xff,
-      );
+      return isPrivateIpv4([
+        (groups[6] >> 8) & 0xff, groups[6] & 0xff,
+        (groups[7] >> 8) & 0xff, groups[7] & 0xff,
+      ]);
     }
-    if (groups[0] >= 0xfc00 && groups[0] <= 0xfdff) return true;
-    if (groups[0] >= 0xfe80 && groups[0] <= 0xfebf) return true;
-    return groups[0] >= 0xff00;
+    return false;
   }
 
   const ipv4 = host.match(
@@ -86,7 +137,7 @@ export function isPrivatePaymentHost(hostname) {
   if (!ipv4) return false;
   const octets = ipv4.slice(1).map(Number);
   if (octets.some((octet) => octet > 255)) return true;
-  return isPrivateIpv4(octets[0], octets[1]);
+  return isPrivateIpv4(octets);
 }
 
 export function parseSafePaymentUrl(raw) {

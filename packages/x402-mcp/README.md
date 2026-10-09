@@ -436,8 +436,10 @@ lowercase signer address + UTC date, across wallet names and chains.
 These local caps cover only payments through this MCP using that ledger, not
 direct Kova CLI use or another machine.
 
-MCP excludes `BUYER_PRIVATE_KEY` and every `STEWARD_*` variable from the child's
-environment. Other variables, including `KOVA_*` and `PATH`, are forwarded.
+MCP excludes `BUYER_PRIVATE_KEY`, `OWNER_PRIVATE_KEY`, `POLYGON_RPC_URL`, every
+`STEWARD_*` variable and the MetaMask signer's `MM_*` / `METAMASK_*` variables from
+the child's environment (the same rule, mirrored, applies to the MetaMask child).
+Other variables, including `KOVA_*` and `PATH`, are forwarded.
 MCP does not interpret Kova credentials as configuration, store/display them,
 or send them to OpenPay. Kova reads its own `~/.kova/config.json` and inherited
 credentials. This is not OS-level isolation. Keep only a small balance you are
@@ -529,8 +531,9 @@ lowercase address and UTC date across chains. Limits are local to each
 `OPENPAY_X402_HOME`, not wallet-wide: using the same server wallet on multiple
 machines does not aggregate limits. No keystore is created.
 
-The child environment excludes `BUYER_PRIVATE_KEY`, every `STEWARD_*` and `KOVA_*`
-variable, and `POLYGON_RPC_URL`. Non-secret settings such as `MM_ENV` and PATH are
+The child environment excludes `BUYER_PRIVATE_KEY`, `OWNER_PRIVATE_KEY`,
+`POLYGON_RPC_URL`, and every `STEWARD_*` and `KOVA_*` variable (the same rule,
+mirrored, applies to the Kova child). Non-secret settings such as `MM_ENV` and PATH are
 forwarded. This is not OS-level isolation. HTTP 200 or a signed authorization is
 not payment proof; payment verification remains with the facilitator and on-chain settlement.
 
