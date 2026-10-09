@@ -510,6 +510,11 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
         await user.type(await screen.findByPlaceholderText('1,000'), '5');
         expect(await screen.findByRole('button', { name: '通常の QR を出す' })).toBeTruthy();
         expect(screen.queryByText('通常の QR は OpenPay 利用料が店舗負担でかかります。')).toBeNull();
+        // 通常の QR に切り替えても、回収の開示 (決済手数料) は QR の画面にも会計の画面にも出さない (recoverBillAmount)。
+        await user.click(screen.getByRole('button', { name: '通常の QR を出す' }));
+        expect(await screen.findByRole('dialog')).toBeTruthy();
+        expect(shownQr()).toMatch(/\/pay\?/);
+        expect(screen.queryByText(/決済手数料/)).toBeNull();
       } finally {
         envHold.eip3009 = true;
       }

@@ -159,6 +159,59 @@ describe('resolveAddress (ENS / Basenames を mainnet Universal Resolver で解�
     );
   });
 
+  // viem の非 strict は Universal Resolver の HttpError (CCIP-Read のゲートウェイの失敗) まで null にする。
+  // 実際の viem のエラー (ContractFunctionRevertedError を ContractFunctionExecutionError で包んだ形) で分類を固定する。
+  async function resolverRevert(errorName: 'HttpError' | 'ResolverNotFound', args: readonly unknown[]) {
+    const actual = await vi.importActual<typeof import('viem')>('viem');
+    const abi = [
+      { type: 'error', name: 'HttpError', inputs: [{ name: 'status', type: 'uint16' }, { name: 'message', type: 'string' }] },
+      { type: 'error', name: 'ResolverNotFound', inputs: [{ name: 'name', type: 'bytes' }] },
+    ] as const;
+    const data = actual.encodeErrorResult({ abi, errorName, args } as Parameters<typeof actual.encodeErrorResult>[0]);
+    const reverted = new actual.ContractFunctionRevertedError({ abi, data, functionName: 'resolve' });
+    return new actual.ContractFunctionExecutionError(reverted, { abi, functionName: 'resolve', args: [] });
+  }
+
+  // viem の getEnsAddress と同じく、strict でなければこれらの revert (どれも viem の null 扱いの一覧) を null にして返す。
+  function viemLikeGetEnsAddress(error: Error) {
+    return vi.fn(async ({ strict }: { strict?: boolean }) => {
+      if (!strict) return null;
+      throw error;
+    });
+  }
+
+  it.each([
+    ['ゲートウェイの 404 (その名前を知らない)', 'HttpError', [404, 'Not Found']],
+    ['resolver が無い', 'ResolverNotFound', ['0x00']],
+  ] as const)('%s は「登録されていません」の ResolveAddressError (再試行しない)', async (_label, errorName, args) => {
+    const error = await resolverRevert(errorName, args);
+    const getEnsAddress = viemLikeGetEnsAddress(error);
+    vi.doMock('viem', async () => {
+      const actual = await vi.importActual<typeof import('viem')>('viem');
+      return { ...actual, createPublicClient: () => ({ getEnsAddress }) };
+    });
+    const { resolveAddress } = await import('@/lib/resolveAddress');
+    const { ResolveAddressError } = await import('@/lib/resolveAddressError');
+    const err = await resolveAddress('nonexistent-name.eth').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ResolveAddressError);
+    expect((err as Error).message).toMatch(/登録されていません/);
+    expect(getEnsAddress.mock.calls[0][0]).toMatchObject({ strict: true });
+  });
+
+  it.each([502, 429, 500])('ゲートウェイの一時的な失敗 (HttpError %i) は ResolveAddressError にしない (再試行される)', async (status) => {
+    const error = await resolverRevert('HttpError', [status, 'gateway failure']);
+    const getEnsAddress = viemLikeGetEnsAddress(error);
+    vi.doMock('viem', async () => {
+      const actual = await vi.importActual<typeof import('viem')>('viem');
+      return { ...actual, createPublicClient: () => ({ getEnsAddress }) };
+    });
+    const { resolveAddress } = await import('@/lib/resolveAddress');
+    const { ResolveAddressError } = await import('@/lib/resolveAddressError');
+    const err = await resolveAddress('vitalik.eth').catch((e: unknown) => e);
+    expect(err).toBe(error);
+    expect(err).not.toBeInstanceOf(ResolveAddressError);
+  });
+
   it('CCIP-Read 等の RPC エラーがそのまま伝播する (catch しない設計)', async () => {
     const getEnsAddress = vi
       .fn()

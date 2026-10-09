@@ -1,4 +1,6 @@
 import {
+  BaseError,
+  ContractFunctionRevertedError,
   createPublicClient,
   getAddress,
   http,
@@ -52,7 +54,13 @@ export async function resolveAddress(
     } catch {
       throw new ResolveAddressError(INPUT_FORMAT_MESSAGE);
     }
-    const address = await ensClient.getEnsAddress({ name });
+    let address: Address | null;
+    try {
+      address = await ensClient.getEnsAddress({ name, strict: true });
+    } catch (err) {
+      if (isDefinitelyUnregistered(err)) throw new ResolveAddressError(`${trimmed} は登録されていません`);
+      throw err;
+    }
     if (!address) {
       throw new ResolveAddressError(`${trimmed} は登録されていません`);
     }
@@ -60,4 +68,24 @@ export async function resolveAddress(
   }
 
   throw new ResolveAddressError(INPUT_FORMAT_MESSAGE);
+}
+
+// viem の既定 (strict でない) の getEnsAddress は、Universal Resolver の HttpError (CCIP-Read のゲートウェイの失敗) まで
+// 「登録されていない = null」にする。それでは一時的な 5xx・429 が確定した失敗 (ResolveAddressError = 再試行しない) に
+// 化け、会計中の QR を閉じる。strict で例外を受け、確定した「無い」だけを分ける (viem の isNullUniversalResolverError の
+// 一覧から HttpError を外し、HttpError はゲートウェイが 404 = その名前を知らないと答えたときだけ確定とする)。
+const UNREGISTERED_RESOLVER_ERRORS = new Set([
+  'ResolverError',
+  'ResolverNotContract',
+  'ResolverNotFound',
+  'UnsupportedResolverProfile',
+]);
+
+function isDefinitelyUnregistered(err: unknown): boolean {
+  if (!(err instanceof BaseError)) return false;
+  const cause = err.walk((e) => e instanceof ContractFunctionRevertedError);
+  if (!(cause instanceof ContractFunctionRevertedError)) return false;
+  const errorName = cause.data?.errorName;
+  if (errorName === 'HttpError') return Number(cause.data?.args?.[0]) === 404;
+  return errorName !== undefined && UNREGISTERED_RESOLVER_ERRORS.has(errorName);
 }
