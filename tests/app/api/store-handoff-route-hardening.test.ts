@@ -205,23 +205,58 @@ describe('C7: 結論の照会 (resolve) は flag を止めた後も答え、店�
     expect(hold.ipCalls[0]).toEqual({ scope: 'store-handoff-resolve', key: 'h(198.51.100.7)', max: 60, windowSec: 60 });
   });
 
-  it('1 件の支払い (nonce) ごとにも数える: 同じ nonce は 31 回目で 429 (大文字小文字は同じ)・別の nonce は通る', async () => {
+  it('1 件の支払い (nonce) ごとにも数える: 同じ IP の同じ nonce は 31 回目で 429 (大文字小文字は同じ)・別の nonce は通る', async () => {
     const nonce = `0x${'ab'.repeat(32)}`;
     for (let i = 0; i < 30; i++) {
       const n = i % 2 === 0 ? nonce : nonce.toUpperCase().replace('0X', '0x');
-      expect((await resolvePost(post(resolveBody(n), { 'x-test-ip': `203.0.113.${i}` }))).status).toBe(200);
+      expect((await resolvePost(post(resolveBody(n)))).status).toBe(200);
     }
-    const res = await resolvePost(post(resolveBody(nonce), { 'x-test-ip': '203.0.113.200' }));
+    const res = await resolvePost(post(resolveBody(nonce)));
     expect(res.status).toBe(429);
     expect(await res.json()).toEqual({ ok: false, error: 'rate_limited' });
     expect(resolveStoreHandoff).toHaveBeenCalledTimes(30);
-    expect(hold.readCalls[0]).toEqual({ key: `store-handoff-resolve:nonce:${nonce}`, max: 30, windowSec: 60 });
+    // 鍵は作成 API の店ごとの枠 (X2) と同じ型: IP バケットと nonce の組。nonce だけの枠 (rl:read) は使わない。
+    expect(hold.readCalls).toHaveLength(0);
+    expect(hold.ipCalls.filter((c) => c.scope === 'store-handoff-resolve-nonce')[0]).toEqual({
+      scope: 'store-handoff-resolve-nonce',
+      key: `h(198.51.100.7):${nonce}`,
+      max: 30,
+      windowSec: 60,
+    });
     expect((await resolvePost(post(resolveBody(nonceOf(7))))).status).toBe(200);
+  });
+
+  it('第三者が別の IP から対象の nonce を名指しして枠を使い切っても、正規の (別の IP の) 照会は通る', async () => {
+    // オンチェーンの Settled から nonce は誰でも読める。nonce だけで数えると、第三者が毎分 30 回送るだけで
+    // お客様の画面と店の端末の照会が 429 になり、決済済みでも「確認中」に留まる (Codex P2)。
+    const nonce = `0x${'cd'.repeat(32)}`;
+    for (let i = 0; i < 40; i++) {
+      await resolvePost(post(resolveBody(nonce), { 'x-test-ip': '203.0.113.66' }));
+    }
+    expect(resolveStoreHandoff).toHaveBeenCalledTimes(30);
+    // お客様 (携帯回線) と店の端末 (店内 Wi-Fi) は別の IP から同じ nonce を照会する。
+    for (const ip of ['198.51.100.7', '192.0.2.10']) {
+      const res = await resolvePost(post(resolveBody(nonce), { 'x-test-ip': ip }));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, state: 'pending' });
+    }
+    expect(resolveStoreHandoff).toHaveBeenCalledTimes(32);
+  });
+
+  it('IP が分からない (バケット null) ときは nonce の枠も KV に触れず通す (IP の枠と同じ流儀)', async () => {
+    const nonce = `0x${'ab'.repeat(32)}`;
+    for (let i = 0; i < 31; i++) {
+      expect((await resolvePost(post(resolveBody(nonce), { 'x-test-ip': '' }))).status).toBe(200);
+    }
+    expect(hold.readCalls).toHaveLength(0);
+    expect(hold.ipCalls.every((c) => c.key === null)).toBe(true);
+    expect(resolveStoreHandoff).toHaveBeenCalledTimes(31);
   });
 
   it('形の違う nonce は nonce の回数制限を使わず、判定 (400 を返す本体) に任せる', async () => {
     await resolvePost(post(resolveBody('0x12')));
     expect(hold.readCalls).toHaveLength(0);
+    expect(hold.ipCalls.map((c) => c.scope)).toEqual(['store-handoff-resolve']);
     expect(resolveStoreHandoff).toHaveBeenCalledTimes(1);
   });
 });

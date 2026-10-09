@@ -1,7 +1,7 @@
 import type { NextResponse } from 'next/server';
 import { isHex } from 'viem';
 import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
-import { checkIpRateLimit, checkReadRateLimit } from '@/lib/relay/relayGuards';
+import { checkIpRateLimit } from '@/lib/relay/relayGuards';
 import { resolveDeps } from '@/lib/storeHandoffDeps';
 import { resolveStoreHandoff } from '@/lib/storeHandoffResolve';
 import { handoffJson, readHandoffBody } from '@/lib/storeHandoffRoute';
@@ -17,10 +17,14 @@ export const maxDuration = 20;
 // (lib の isConfiguredChain が開示から外したチェーンの結論も出すのと同じ理由)。新しい受け渡しを作る入口は flag で止まる。
 //
 // 回数制限は二段。店内 Wi-Fi・携帯の CGNAT では同じ公開 IP から複数のお客様 (5 秒おき = 12 回/分) と店の端末
-// (10 秒おき = 6 回/分) が照会するので、IP は 60 回/分 (本文の前)。1 件の支払い (nonce) ごとに 30 回/分 (本文の後)。
+// (10 秒おき = 6 回/分) が照会するので、IP は 60 回/分 (本文の前)。同じ IP の中で 1 件の支払い (nonce) ごとに
+// 30 回/分 (本文の後)。nonce の枠は IP と組にする (作成 API の店ごとの枠と同じ型): nonce はオンチェーンの Settled
+// から誰でも読めるので、nonce だけで数えると第三者が別の IP から名指しして枠を使い切り、お客様の画面と店の端末の
+// 照会を 429 にできてしまう (決済済みでも「確認中」に留まり、未解決の支払いのロックが外れない)。
 // 429 のお客様の画面は「確認中」のまま次の回に照会し直す (結論を変えない)。
 export async function POST(req: Request): Promise<NextResponse> {
-  if (!(await checkIpRateLimit('store-handoff-resolve', hashIpBucket(clientIp(req)), 60, 60))) {
+  const ipBucket = hashIpBucket(clientIp(req));
+  if (!(await checkIpRateLimit('store-handoff-resolve', ipBucket, 60, 60))) {
     return handoffJson({ ok: false, error: 'rate_limited' }, 429);
   }
   const parsed = await readHandoffBody(req);
@@ -31,7 +35,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     typeof nonce === 'string' &&
     isHex(nonce) &&
     nonce.length === 66 &&
-    !(await checkReadRateLimit(`store-handoff-resolve:nonce:${nonce.toLowerCase()}`, 30, 60))
+    !(await checkIpRateLimit(
+      'store-handoff-resolve-nonce',
+      ipBucket === null ? null : `${ipBucket}:${nonce.toLowerCase()}`,
+      30,
+      60,
+    ))
   ) {
     return handoffJson({ ok: false, error: 'rate_limited' }, 429);
   }
