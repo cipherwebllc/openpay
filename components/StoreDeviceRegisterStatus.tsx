@@ -155,7 +155,8 @@ export function StoreDeviceRegisterStatus({
           </p>
           {state.finalized && <p className="text-xs">{t('finalized')}</p>}
           <div className="flex flex-wrap items-center gap-2">
-            {txLink(state.mark.chainId, state.mark.hash)}
+            {/* 実際に成立した tx (サーバの判定が見つけた tx。第三者が同じ署名を先に送ったときは端末が送った tx と違う)。 */}
+            {txLink(state.mark.chainId, state.txHash ?? state.mark.hash)}
             {dismiss}
           </div>
         </div>
@@ -175,6 +176,24 @@ export function StoreDeviceRegisterStatus({
         </div>
       );
     case 'unknown':
+      // 端末の tx が revert した後 (第 7 回レビュー A3): 端末の失敗した tx は確認先にせず (判定が見つけた確定待ちの tx が
+      // あればそれ)、「確かめた（閉じる）」も出さない (端末の tx の確認だけで次の QR を出させない = 二重払いを防ぐ)。
+      if (state.storeTxReverted) {
+        return (
+          <div role="status" className="space-y-2 text-sm text-slate-700">
+            <p>
+              {previous}
+              {t('unknownAfterRevert')}
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className={BTN} onClick={onCheckNow}>
+                {t('checkNow')}
+              </button>
+              {state.txHash && txLink(state.mark.chainId, state.txHash)}
+            </div>
+          </div>
+        );
+      }
       return (
         <div role="status" className="space-y-2 text-sm text-slate-700">
           <p>
