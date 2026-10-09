@@ -12,17 +12,29 @@
 // allowlist 外の名前が 1 件でもあれば job を赤にして merge を止める (R4 の裁定 =「CI で検出」の範囲)。
 // 手で編集された lockfile (フラグが消える diff) は PR の diff レビューで見る。
 //
-// 使い方: node scripts/installed-scripts-gate.mjs <node_modules dir> [...]
+// 2 つ目の検査 (PR #778 Codex レビュー 2 回目): optional な native 依存は暗黙ビルドが失敗すると npm が実体を
+// 削除し、install は成功扱いになる = 走査をすり抜ける。root の隣の lockfile から「この環境で入るはず」の
+// エントリ (root の dependencies / optionalDependencies を辿り、os / cpu / libc が合わないものと、そこからしか
+// 辿れないものを除く) を求め、node_modules に無ければ fail する (消えた = ビルド失敗の疑い)。
+//
+// 使い方: node scripts/installed-scripts-gate.mjs [--omit=dev] <node_modules dir> [...]
 //   例: node scripts/installed-scripts-gate.mjs node_modules
 //       node scripts/installed-scripts-gate.mjs tools/lighthouse/node_modules
-// 判定: ディレクトリ名から導いた名前 (@scope/name) が allowlist にあり、package.json の name も一致するときだけ許容。
+//       node scripts/installed-scripts-gate.mjs --omit=dev node_modules   (npm ci --omit=dev の後)
+// 判定:
+//   - registry のパッケージ: ディレクトリ名から導いた名前 (@scope/name) が INSTALL_SCRIPT_ALLOWLIST にあり、
+//     package.json の name も一致するときだけ許容。
+//   - link (symlink = workspace / file:) のパッケージ: 名前ではなく実際のリンク先 (realpath・repo 相対) が
+//     LINKED_PACKAGE_SCRIPT_ALLOWLIST にあるときだけ許容 (registry の承認を別実体へ流用させない)。
 // 依存は Node 標準 API のみ (このゲート自体が新規依存を持つのは本末転倒のため)。
 
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
-import { INSTALL_SCRIPT_ALLOWLIST } from './lib/installScriptAllowlist.mjs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
+import { INSTALL_SCRIPT_ALLOWLIST, LINKED_PACKAGE_SCRIPT_ALLOWLIST } from './lib/installScriptAllowlist.mjs';
 
 const INSTALL_HOOKS = ['preinstall', 'install', 'postinstall'];
+const toPosix = (path) => path.split(sep).join('/');
+const repoRelative = (path) => toPosix(relative(process.cwd(), path));
 
 function readManifest(dir) {
   const file = join(dir, 'package.json');
@@ -47,6 +59,14 @@ function installTriggers(dir, manifest, linked) {
   return triggers;
 }
 
+function safeIsDir(path) {
+  try {
+    return lstatSync(path).isDirectory() || (lstatSync(path).isSymbolicLink() && existsSync(path));
+  } catch {
+    return false;
+  }
+}
+
 /** node_modules 直下 (と @scope 配下) のパッケージ dir を列挙する。dot entry (.bin 等) は除く。 */
 function listPackageDirs(nodeModules) {
   const out = [];
@@ -67,15 +87,7 @@ function listPackageDirs(nodeModules) {
   return out;
 }
 
-function safeIsDir(path) {
-  try {
-    return lstatSync(path).isDirectory() || (lstatSync(path).isSymbolicLink() && existsSync(path));
-  } catch {
-    return false;
-  }
-}
-
-function scan(nodeModules, state) {
+function scanScripts(nodeModules, state) {
   let real;
   try {
     real = realpathSync(nodeModules);
@@ -88,7 +100,7 @@ function scan(nodeModules, state) {
   for (const { dir, name } of listPackageDirs(nodeModules)) {
     const linked = lstatSync(dir).isSymbolicLink();
     const manifest = readManifest(dir);
-    const shown = relative(process.cwd(), dir).split(sep).join('/');
+    const shown = repoRelative(dir);
     if (manifest === null) continue; // package.json の無い dir (キャッシュ等) は npm の package ではない
     state.scanned++;
     if (manifest.__unreadable) {
@@ -96,12 +108,23 @@ function scan(nodeModules, state) {
     } else {
       const triggers = installTriggers(dir, manifest, linked);
       if (triggers.length > 0) {
-        const allowed = Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, name);
         const manifestName = typeof manifest.name === 'string' ? manifest.name : '(no name)';
-        if (allowed && manifestName === name) {
+        if (linked) {
+          // link はリポ内 (または外) の実体なので、registry の名前の承認を使わせず、リンク先の path で照合する。
+          const target = repoRelative(realpathSync(dir));
+          if (Object.hasOwn(LINKED_PACKAGE_SCRIPT_ALLOWLIST, target)) {
+            state.allowed.push(`${shown} -> ${target} [${triggers.join(', ')}] (linked)`);
+            state.allowedNames.add(target);
+          } else {
+            state.failures.push(
+              `${shown}: linked to ${target} (${manifestName}) which runs install-time scripts [${triggers.join(', ')}] and is not in ` +
+                'LINKED_PACKAGE_SCRIPT_ALLOWLIST (scripts/lib/installScriptAllowlist.mjs). A link cannot use the registry allowlist by name.',
+            );
+          }
+        } else if (Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, name) && manifestName === name) {
           state.allowed.push(`${shown} [${triggers.join(', ')}]`);
           state.allowedNames.add(name);
-        } else if (allowed) {
+        } else if (Object.hasOwn(INSTALL_SCRIPT_ALLOWLIST, name)) {
           state.failures.push(
             `${shown}: directory name ${name} is allowlisted but package.json names ${manifestName} ` +
               `[${triggers.join(', ')}] — an alias cannot borrow an allowlisted name`,
@@ -115,13 +138,135 @@ function scan(nodeModules, state) {
       }
     }
     const nested = join(dir, 'node_modules');
-    if (existsSync(nested)) scan(nested, state);
+    if (existsSync(nested)) scanScripts(nested, state);
   }
 }
 
-const roots = process.argv.slice(2);
-if (roots.length === 0) {
-  console.error('installed-scripts-gate: usage: node scripts/installed-scripts-gate.mjs <node_modules dir> [...]');
+// ── lockfile との突き合わせ ──────────────────────────────────────────────
+
+/** npm と同じ os / cpu / libc の判定 ("!x" は否定)。条件が無ければ一致。 */
+function platformMatches(entry) {
+  const current = { os: process.platform, cpu: process.arch, libc: currentLibc() };
+  for (const key of ['os', 'cpu', 'libc']) {
+    const wanted = entry[key];
+    if (!Array.isArray(wanted) || wanted.length === 0) continue;
+    const value = current[key];
+    const negated = wanted.filter((w) => typeof w === 'string' && w.startsWith('!')).map((w) => w.slice(1));
+    const positive = wanted.filter((w) => typeof w === 'string' && !w.startsWith('!'));
+    if (negated.includes(value)) return false;
+    if (positive.length > 0 && !positive.includes(value)) return false;
+  }
+  return true;
+}
+
+function currentLibc() {
+  if (process.platform !== 'linux') return null;
+  try {
+    const header = process.report?.getReport?.()?.header;
+    if (header?.glibcVersionRuntime) return 'glibc';
+  } catch {
+    // report が取れない環境では musl 判定に落とす (glibc の optional を「期待」から外す側 = 過剰検出を避ける)。
+  }
+  return 'musl';
+}
+
+/** path (lockfile の key) から name を Node の解決順で探し、lockfile の key を返す。 */
+function resolveDependency(packages, fromPath, name) {
+  let base = fromPath;
+  for (;;) {
+    const candidate = base === '' ? `node_modules/${name}` : `${base}/node_modules/${name}`;
+    if (Object.hasOwn(packages, candidate)) return candidate;
+    if (base === '') return null;
+    const at = base.lastIndexOf('/node_modules/');
+    if (at === -1) {
+      // workspace の path (packages/x) → root の node_modules へ
+      base = '';
+    } else {
+      base = base.slice(0, at);
+    }
+  }
+}
+
+/**
+ * この環境で node_modules に入っているはずの lockfile エントリを返す (root から到達できる
+ * dependencies / optionalDependencies のうち、os / cpu / libc が合うもの)。
+ */
+function expectedEntries(packages, omitDev) {
+  const expected = new Set();
+  const queue = [];
+  const root = packages[''] ?? {};
+  const rootDeps = { ...(root.dependencies ?? {}), ...(root.optionalDependencies ?? {}), ...(omitDev ? {} : root.devDependencies ?? {}) };
+  for (const name of Object.keys(rootDeps)) {
+    const key = resolveDependency(packages, '', name);
+    if (key !== null) queue.push(key);
+  }
+  while (queue.length > 0) {
+    let key = queue.pop();
+    if (expected.has(key)) continue;
+    const entry = packages[key];
+    if (entry === null || typeof entry !== 'object') continue;
+    if (!platformMatches(entry)) continue; // この環境には入らない (optional の platform 別 binary)
+    expected.add(key);
+    if (entry.link === true && typeof entry.resolved === 'string') {
+      // link の実体 (packages/x) は別エントリ。そちらの依存を辿る。
+      key = entry.resolved;
+      if (!Object.hasOwn(packages, key) || expected.has(key)) continue;
+      expected.add(key);
+    }
+    const target = packages[key];
+    const deps = { ...(target?.dependencies ?? {}), ...(target?.optionalDependencies ?? {}) };
+    for (const name of Object.keys(deps)) {
+      const dep = resolveDependency(packages, key, name);
+      if (dep !== null && !expected.has(dep)) queue.push(dep);
+    }
+  }
+  return expected;
+}
+
+function reconcileWithLockfile(nodeModules, omitDev, state) {
+  const base = dirname(resolve(nodeModules));
+  const lockPath = ['package-lock.json', 'npm-shrinkwrap.json'].map((f) => join(base, f)).find((f) => existsSync(f));
+  if (lockPath === undefined) {
+    state.failures.push(`${repoRelative(nodeModules)}: no package-lock.json / npm-shrinkwrap.json beside it to reconcile against`);
+    return;
+  }
+  let lock;
+  try {
+    lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+  } catch {
+    state.failures.push(`${repoRelative(lockPath)}: cannot be parsed`);
+    return;
+  }
+  const packages = lock?.packages;
+  if (packages === null || typeof packages !== 'object' || Array.isArray(packages)) {
+    state.failures.push(`${repoRelative(lockPath)}: has no packages object (lockfileVersion >= 2 required)`);
+    return;
+  }
+  const expected = expectedEntries(packages, omitDev);
+  let missing = 0;
+  for (const key of expected) {
+    const entry = packages[key];
+    const dir = join(base, key);
+    if (existsSync(dir) && readManifest(dir) !== null) continue;
+    missing++;
+    const flags = ['optional', 'dev', 'devOptional', 'hasInstallScript', 'link'].filter((f) => entry[f] === true).join(', ');
+    state.failures.push(
+      `${repoRelative(dir)}: expected from ${repoRelative(lockPath)} for this platform but absent after install` +
+        (flags ? ` [${flags}]` : '') +
+        (entry.optional || entry.devOptional ? ' — an optional dependency that disappears after npm ci usually means its install script / implicit node-gyp build failed' : ''),
+    );
+  }
+  state.lockfileSummary = `${expected.size} entries expected from ${repoRelative(lockPath)} for ${process.platform}/${process.arch}${omitDev ? ' (omit=dev)' : ''}, ${missing} missing`;
+}
+
+// ── CLI ──────────────────────────────────────────────────────────────
+
+const args = process.argv.slice(2);
+const omitDev = args.includes('--omit=dev');
+const roots = args.filter((a) => !a.startsWith('--'));
+const unknown = args.filter((a) => a.startsWith('--') && a !== '--omit=dev');
+if (roots.length === 0 || unknown.length > 0) {
+  console.error('installed-scripts-gate: usage: node scripts/installed-scripts-gate.mjs [--omit=dev] <node_modules dir> [...]');
   process.exit(1);
 }
 
@@ -134,19 +279,20 @@ for (const root of roots) {
     bad++;
     continue;
   }
-  const state = { visited: new Set(), scanned: 0, allowed: [], allowedNames, failures: [] };
-  scan(root, state);
+  const state = { visited: new Set(), scanned: 0, allowed: [], allowedNames, failures: [], lockfileSummary: '' };
+  scanScripts(root, state);
+  reconcileWithLockfile(root, omitDev, state);
   for (const line of state.failures) console.error(`NG ${line}`);
   bad += state.failures.length;
-  console.log(`OK ${root}: ${state.scanned} packages scanned, ${state.allowed.length} with allowlisted install-time scripts`);
+  console.log(`OK ${root}: ${state.scanned} packages scanned, ${state.allowed.length} with allowlisted install-time scripts; ${state.lockfileSummary}`);
   for (const line of state.allowed) console.log(`   ${line}`);
 }
 
 if (bad > 0) {
   console.error(
-    `installed-scripts-gate: install-time script を持つ allowlist 外のパッケージ (または未検査の root) が ${bad} 件あります。` +
+    `installed-scripts-gate: install-time script を持つ allowlist 外のパッケージ・lockfile にあるのに入っていないパッケージ (または未検査の root) が ${bad} 件あります。` +
       '個別確認のうえ scripts/lib/installScriptAllowlist.mjs に追加するか、依存を外してください (CLAUDE.md 掟 16)。',
   );
   process.exit(1);
 }
-console.log(`installed-scripts-gate: install-time script は allowlist の ${allowedNames.size} 名のみです`);
+console.log(`installed-scripts-gate: install-time script は allowlist の ${allowedNames.size} 件のみ、lockfile のエントリは全て入っています`);

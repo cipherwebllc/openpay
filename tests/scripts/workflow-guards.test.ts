@@ -38,10 +38,16 @@ describe('GitHub Actions operation guards', () => {
     // job 全体の env に token を置かない (step の env だけ)
     const jobEnv = source.slice(source.indexOf('\njobs:'), source.indexOf('    steps:'));
     expect(jobEnv).not.toContain('LHCI_GITHUB_APP_TOKEN');
-    // collect が失敗したら以降は走らない (autorun と同じ)。upload の失敗は autorun と同じく警告止まり。
-    expect(source.indexOf('lhci collect')).toBeLessThan(source.indexOf('lhci upload'));
+    // Codex レビュー 2 回目 (PR #778) 3: upload は assertion-results.json を読んで GitHub の status を決めるので、
+    // assert の**後**に走らせる (前だとスコアに関係なく success を投稿する)。collect が成功していれば assert が
+    // 失敗しても upload は走る (status に failure を載せる)。upload の失敗は autorun と同じく警告止まり。
+    expect(source.indexOf('lhci collect')).toBeLessThan(source.indexOf('lhci assert'));
+    expect(source.indexOf('lhci assert')).toBeLessThan(source.indexOf('lhci upload'));
+    expect(byCommand.collect).toMatch(/^\s+id: collect\s*$/m);
+    expect(byCommand.upload).toMatch(/if: \$\{\{ !cancelled\(\) && steps\.collect\.outcome == 'success' \}\}/);
     expect(byCommand.upload).toMatch(/continue-on-error:\s*true/);
     expect(byCommand.assert).not.toMatch(/continue-on-error/);
+    expect(byCommand.assert).not.toMatch(/^\s+if:/m);
     // 版は tools/lighthouse/package.json の exact pin と lockfile の実体で固定する (承認済み 0.14.0)。
     const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'tools/lighthouse/package.json'), 'utf8'));
     expect(pkg.private).toBe(true);
@@ -82,12 +88,14 @@ describe('GitHub Actions operation guards', () => {
     for (const job of jobs) {
       const steps = job.split(/\n\s+- (?=name:|run:|uses:)/);
       steps.forEach((step, index) => {
-        const install = step.match(/\brun:\s*npm (?:--prefix (\S+) )?ci\b/);
+        const install = step.match(/\brun:\s*npm (?:--prefix (\S+) )?ci\b([^\n]*)/);
         if (!install) return;
         const root = install[1] ? `${install[1]}/node_modules` : 'node_modules';
+        // `npm ci --omit=dev` の後は lockfile との突き合わせも dev を除いて行う (--omit=dev を gate にも渡す)。
+        const omitDev = /--omit=dev\b/.test(install[2]) ? '--omit=dev ' : '';
         const next = steps[index + 1] ?? '';
         expect(next, `${name}: installed scripts gate after "${install[0]}"`).toMatch(
-          new RegExp(`run:\\s*node scripts/installed-scripts-gate\\.mjs ${root.replace(/[./]/g, '\\$&')}\\s*$`, 'm'),
+          new RegExp(`run:\\s*node scripts/installed-scripts-gate\\.mjs ${omitDev}${root.replace(/[./]/g, '\\$&')}\\s*$`, 'm'),
         );
         expect(next).not.toMatch(/continue-on-error:\s*true/);
       });

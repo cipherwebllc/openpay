@@ -216,6 +216,10 @@ describe('lockfile-gate CLI', () => {
       `${OFFICIAL}-/esbuild-1.0.0.tgz`,
       `${OFFICIAL}@scope/-/scope-1.0.0.tgz`,
       `${OFFICIAL}@scope/esbuild/x/-/esbuild-1.0.0.tgz`,
+      `${OFFICIAL}%40scope/-/scope-1.0.0.tgz`,
+      `${OFFICIAL}es%40build/-/esbuild-1.0.0.tgz`,
+      `${OFFICIAL}%40%40scope/esbuild/-/esbuild-1.0.0.tgz`,
+      `${OFFICIAL}@scope/es%40build/-/esbuild-1.0.0.tgz`,
       'https://registry.npmjs.org:443/esbuild/-/esbuild-1.0.0.tgz',
       'https://user@registry.npmjs.org/esbuild/-/esbuild-1.0.0.tgz',
       'https://REGISTRY.NPMJS.ORG/esbuild/-/esbuild-1.0.0.tgz',
@@ -241,6 +245,10 @@ describe('lockfile-gate CLI', () => {
       ['scoped with a slash', 'node_modules/@parcel/watcher', `${OFFICIAL}@parcel/watcher/-/watcher-2.5.6.tgz`],
       ['scoped with %2f', 'node_modules/@parcel/watcher', `${OFFICIAL}@parcel%2fwatcher/-/watcher-2.5.6.tgz`],
       ['scoped with %2F', 'node_modules/@parcel/watcher', `${OFFICIAL}@parcel%2Fwatcher/-/watcher-2.5.6.tgz`],
+      // Codex レビュー 2 回目 (PR #778) 4: scope の @ を %40 で書いた形も npm が出す正規の URL。
+      ['scoped with %40 and a slash', 'node_modules/@parcel/watcher', `${OFFICIAL}%40parcel/watcher/-/watcher-2.5.6.tgz`],
+      ['scoped with %40 and %2F', 'node_modules/@parcel/watcher', `${OFFICIAL}%40parcel%2Fwatcher/-/watcher-2.5.6.tgz`],
+      ['scoped with %40 and %2f', 'node_modules/@parcel/watcher', `${OFFICIAL}%40parcel%2fwatcher/-/watcher-2.5.6.tgz`],
       ['prerelease version', 'node_modules/esbuild', `${OFFICIAL}esbuild/-/esbuild-1.0.0-beta.1.tgz`],
     ])('accepts a well-formed %s tarball URL', (_label, path, url) => {
       fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: { '': {}, [path]: { hasInstallScript: true, resolved: url } } }));

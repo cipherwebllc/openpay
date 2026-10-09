@@ -71,8 +71,9 @@ function iniToken(raw) {
 // だけ。dot segment (生・%2e) は URL 正規化で `/-/` より前の名前をすり替えられるので、形の検査は
 // `new URL()` で正規化した pathname に対して行い、生の文字列にも `.`/`..` の segment を許さない。
 // 返り値: { name, basename } か null (= 取得元として不許可)。
+// scope の先頭 @ は npm が %40 で書くこともある (`%40parcel/watcher`・`%40parcel%2Fwatcher`)。名前照合では @ に戻す。
 const NAME_SEGMENT = '[^/@%]+';
-const TARBALL_PATH = new RegExp(`^/(@${NAME_SEGMENT}(?:/|%2f|%2F)${NAME_SEGMENT}|${NAME_SEGMENT})/-/([^/]+)\\.tgz$`);
+const TARBALL_PATH = new RegExp(`^/((?:@|%40)${NAME_SEGMENT}(?:/|%2f|%2F)${NAME_SEGMENT}|${NAME_SEGMENT})/-/([^/]+)\\.tgz$`);
 function parseRegistryTarball(resolved) {
   if (typeof resolved !== 'string' || !resolved.startsWith(ALLOWED_PREFIX)) return null;
   let url;
@@ -87,7 +88,7 @@ function parseRegistryTarball(resolved) {
   if (rawPath.split('/').some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment))) return null;
   const match = TARBALL_PATH.exec(url.pathname);
   if (!match || url.pathname !== rawPath) return null;
-  const name = match[1].replace(/%2f/i, '/');
+  const name = match[1].replace(/^%40/, '@').replace(/%2f/i, '/');
   const basename = match[2];
   const unscoped = name.slice(name.lastIndexOf('/') + 1);
   if (unscoped === '.' || unscoped === '..' || !basename.startsWith(`${unscoped}-`)) return null;

@@ -18,6 +18,13 @@
 // 2026-10-10 時点の固定 (package-lock.json の hasInstallScript 12 entries = 10 名)。
 // 「経由」は package-lock.json の dependencies / optionalDependencies / peerDependencies から
 // 名前を引く側 (直接の親) を書く (2026-10-10 lockfile 実測)。
+// link (workspace / file:) で node_modules に入る**リポ内ディレクトリ**のうち、install-time script
+// (preinstall / install / postinstall / prepare・binding.gyp) を持ってよいもの。鍵は realpath の repo 相対 path
+// (例: 'packages/x402-sdk')。registry 用の上の一覧は link には効かせない (ローカルの dir を allowlist の名前で
+// link し manifest 名を合わせれば、公式パッケージへの承認を別実体に流用できてしまうため)。
+// 2026-10-10 時点: link は packages/x402-sdk (scripts = test / prepublishOnly のみ) だけで install-time script は無し → 空。
+export const LINKED_PACKAGE_SCRIPT_ALLOWLIST = Object.freeze({});
+
 export const INSTALL_SCRIPT_ALLOWLIST = Object.freeze({
   '@parcel/watcher': 'ファイル監視の native binary。next-intl の依存',
   '@sentry/cli': 'Sentry CLI binary の取得 (sourcemap upload)。@sentry/bundler-plugin-core の依存',

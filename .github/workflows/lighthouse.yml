@@ -62,17 +62,22 @@ jobs:
 
       # autorun (healthcheck → collect → assert → upload) を step に分ける。collect は .lighthouserc.json の
       # `npm run start` でアプリとその依存を同じ env で起動するので、token を持たせない。token は upload
-      # (temporary-public-storage への保存 + GitHub の status 投稿) の step だけに渡す。collect が失敗したら以降は
-      # 走らず、upload の失敗は autorun と同じく警告止まり (assert の結果が job の verdict)。
+      # (temporary-public-storage への保存 + GitHub の status 投稿) の step だけに渡す。
+      # 順序は autorun と同じ collect → assert → upload: upload は assert が書く assertion-results.json を読んで
+      # GitHub の status (success / failure) を決めるので、assert の前に走らせるとスコアに関係なく success を投稿する。
+      # collect が成功していれば assert が失敗しても upload は走る (status に failure を載せる)。upload の失敗は
+      # autorun と同じく警告止まりで、job の verdict は assert の結果。
       # 残るリスク = 先行 step (npm ci の install script) が同じ runner の後続 step を書き換えうる。完全な隔離は job 分割。
       - name: Lighthouse collect
+        id: collect
         run: tools/lighthouse/node_modules/.bin/lhci collect
 
+      - name: Lighthouse assert
+        run: tools/lighthouse/node_modules/.bin/lhci assert
+
       - name: Lighthouse upload
+        if: ${{ !cancelled() && steps.collect.outcome == 'success' }}
         continue-on-error: true
         run: tools/lighthouse/node_modules/.bin/lhci upload
         env:
           LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}
-
-      - name: Lighthouse assert
-        run: tools/lighthouse/node_modules/.bin/lhci assert
