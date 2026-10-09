@@ -270,12 +270,14 @@ describe('Store USDC on-chain entitlement gate', () => {
   // 第 7 回レビュー B6: finality は「高さ」だけで判定していた。RPC が旧フォークの成功 receipt (同じ番号・別 hash)
   // を返しても、safe 到達や 15 confirmations は高さの条件を満たすので confirmed になりうる。receipt の blockHash が
   // 今の正規チェーンの同じ番号のブロックと一致することを、confirmed の前の追加条件にする (license reconcile と同じ)。
+  // 不一致は通常の finality 待ち ('finality') と区別して 'canonical' で返す — 同じ hash を待っても解決しないので、
+  // 呼び出し側 (reconcile) は保存済み hash を「無い」と同じ扱いで replacement 探索へ進める (#776 Codex P2)。
   describe('条件7: receipt のブロックが今の正規チェーンに属する (blockHash の照合)', () => {
-    it('safe 到達でも receipt の blockHash が同じ番号の正規ブロックと違えば pending (finality)・terminal にせず claim も読まない', async () => {
+    it('safe 到達でも receipt の blockHash が同じ番号の正規ブロックと違えば pending (canonical)・terminal にせず claim も読まない', async () => {
       const rpc = client({ safe: 100n, latest: 100n, canonicalHash: FORK_HASH });
       await expect(
         verifyStoreUsdcOnchain({ intent: intent(), txHash: TX, client: rpc }),
-      ).resolves.toEqual({ ok: true, state: 'pending', reason: 'finality' });
+      ).resolves.toEqual({ ok: true, state: 'pending', reason: 'canonical' });
       expect(rpc.getBlock).toHaveBeenCalledWith({ blockNumber: 100n });
       expect(kvGet).not.toHaveBeenCalled();
     });
@@ -287,7 +289,15 @@ describe('Store USDC on-chain entitlement gate', () => {
           txHash: TX,
           client: client({ safe: null, latest: 114n, canonicalHash: FORK_HASH }),
         }),
+      ).resolves.toEqual({ ok: true, state: 'pending', reason: 'canonical' });
+    });
+
+    it('safe 未到達 (通常の finality 待ち) は従来どおり finality で、正規ブロックは照会しない', async () => {
+      const rpc = client({ safe: null, latest: 113n, canonicalHash: FORK_HASH });
+      await expect(
+        verifyStoreUsdcOnchain({ intent: intent(), txHash: TX, client: rpc }),
       ).resolves.toEqual({ ok: true, state: 'pending', reason: 'finality' });
+      expect(rpc.getBlock).not.toHaveBeenCalledWith({ blockNumber: 100n });
     });
 
     it('正規ブロックの照会が落ちたら rpc_unavailable (confirmed にも pending にもしない)', async () => {

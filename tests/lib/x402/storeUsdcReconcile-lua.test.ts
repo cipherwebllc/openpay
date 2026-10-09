@@ -70,6 +70,8 @@ const SALT = `0x${'33'.repeat(32)}` as Hex;
 const OLD = `0x${'44'.repeat(32)}` as Hex;
 const TX = `0x${'55'.repeat(32)}` as Hex;
 const BLOCK_HASH = `0x${'88'.repeat(32)}` as Hex;
+// 旧フォークのブロック hash (同じ番号の正規ブロックは BLOCK_HASH)。
+const FORK_HASH = `0x${'99'.repeat(32)}` as Hex;
 const PAYER = getAddress('0x1111111111111111111111111111111111111111');
 const MERCHANT = getAddress('0x2222222222222222222222222222222222222222');
 const ID = `h_${'a'.repeat(32)}`;
@@ -115,8 +117,11 @@ function patchIntent(patch: Record<string, unknown>) {
 }
 
 function chain(nonce: Hex, input: {
-  latest?: bigint; eventBlock?: bigint; old?: 'missing' | 'reverted';
-  bad?: 'amount' | 'nonce' | 'emitter' | 'finality';
+  latest?: bigint; eventBlock?: bigint;
+  /** 保存済み OLD の receipt: 既定 = 欠落。'noncanonical' = 成功だが旧フォーク (blockHash が正規と違う)。 */
+  old?: 'missing' | 'reverted' | 'noncanonical';
+  /** 候補 TX の証拠の欠陥。'canonical' = receipt は成功だが旧フォークのブロック。 */
+  bad?: 'amount' | 'nonce' | 'emitter' | 'finality' | 'canonical';
 } = {}): StoreUsdcPublicClient {
   const latest = input.latest ?? 114n;
   const eventBlock = input.eventBlock ?? 100n;
@@ -129,11 +134,12 @@ function chain(nonce: Hex, input: {
         ? { number: args.blockNumber, hash: BLOCK_HASH }
         : { number: input.bad === 'finality' ? eventBlock - 1n : latest }),
     getTransactionReceipt: vi.fn(async ({ hash }) => {
-      if (hash === OLD && input.old !== 'reverted') throw new Error('receipt missing');
+      if (hash === OLD && (input.old === undefined || input.old === 'missing')) throw new Error('receipt missing');
+      const fork = hash === OLD ? input.old === 'noncanonical' : input.bad === 'canonical';
       return {
-        status: hash === OLD ? 'reverted' as const : 'success' as const,
+        status: hash === OLD && input.old === 'reverted' ? 'reverted' as const : 'success' as const,
         blockNumber: eventBlock,
-        blockHash: BLOCK_HASH,
+        blockHash: fork ? FORK_HASH : BLOCK_HASH,
         logs: [
           {
             address: input.bad === 'emitter' ? MERCHANT : STORE_USDC_ADDRESS,
@@ -174,7 +180,10 @@ beforeEach(() => {
 afterAll(closeRedisLuaEngine);
 
 describe('USDC reconciliation with real Lua and receipt verification', () => {
-  it.each(['missing', 'reverted'] as const)('adopts a verified replacement when the stored receipt is %s', async (old) => {
+  // 'noncanonical' (#776 Codex P2): 保存済み OLD の receipt は成功だが旧フォーク (block 100 / hash A・正規は hash B)、
+  // 同じ nonce の replacement TX が正規チェーンで支払い済み。条件 7 の不一致を finality 待ちにすると getLogs へ進まず、
+  // RPC が古い receipt を返し続ける限り課金済みの購入を解錠できない → 'canonical' は欠落と同じく replacement 探索へ。
+  it.each(['missing', 'reverted', 'noncanonical'] as const)('adopts a verified replacement when the stored receipt is %s', async (old) => {
     const intent = await active(OLD);
     const client = chain(intent.nonce, { old });
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'settled' });
@@ -233,7 +242,8 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     expect(h.store!.zsets.has(QUARANTINE)).toBe(false);
   });
 
-  it.each(['amount', 'nonce', 'emitter', 'finality', 'claimed'] as const)('does not adopt a candidate with invalid %s evidence', async (bad) => {
+  // 'canonical': 候補の receipt が旧フォークのブロック → 採らない (未払いを解錠しない)・terminal にもしない。
+  it.each(['amount', 'nonce', 'emitter', 'finality', 'canonical', 'claimed'] as const)('does not adopt a candidate with invalid %s evidence', async (bad) => {
     const intent = await active(OLD);
     if (bad === 'claimed') h.store!.strings.set(paymentClaimKey(8453, TX), 'r:billing');
     const client = chain(intent.nonce, { latest: 100n, ...(bad === 'claimed' ? {} : { bad }) });
@@ -269,11 +279,15 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     await expectSettled();
   });
 
-  it.each(['receipt', 'finality', 'rpc_unavailable', 'claim'] as const)('retries the candidate page after transient %s failure even with later pages and a growing daily head', async (failure) => {
+  it.each(['receipt', 'finality', 'canonical', 'rpc_unavailable', 'claim'] as const)('retries the candidate page after transient %s failure even with later pages and a growing daily head', async (failure) => {
     const intent = await active();
     const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n });
     if (failure === 'receipt') {
       vi.mocked(client.getTransactionReceipt).mockRejectedValueOnce(new Error('receipt unavailable'));
+    } else if (failure === 'canonical') {
+      // 1 回だけ旧フォークの receipt (hash A) が返る: 候補を採らず、候補のページ位置から再試行する。
+      const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+      vi.mocked(client.getTransactionReceipt).mockImplementationOnce(async (args) => ({ ...(await receipt(args)), blockHash: FORK_HASH }));
     } else if (failure === 'finality') {
       vi.mocked(client.getBlock).mockResolvedValueOnce({ number: 2_099n });
       vi.mocked(client.getBlockNumber).mockResolvedValueOnce(50_090n).mockResolvedValueOnce(2_113n);

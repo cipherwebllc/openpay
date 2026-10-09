@@ -1424,8 +1424,11 @@ export async function reconcileStoreUsdcIntent(
         : null;
     }
     if (verification.state === 'pending') {
-      // 保存 hash の完全一致 receipt が finality 待ちなら、同じ hash の再探索は不要。
-      // receipt 欠落の保存 hash は replacement 探索へ進める。
+      // 保存 hash の完全一致 receipt が finality 待ち ('finality') なら、同じ hash の再探索は不要。
+      // receipt 欠落 ('receipt') と「receipt のブロックが今の正規チェーンに無い」('canonical'・旧フォーク) の
+      // 保存 hash は replacement 探索へ進める — 同じ nonce の replacement が正規チェーンで支払い済みなのに、
+      // 古い receipt を返し続ける RPC のせいで課金済みの購入を解錠できない波及を断つ (#776 Codex P2)。
+      // 候補 (ページ走査中) は理由を問わず採らずに、そのページから再試行する (未払いを解錠しない・terminal にしない)。
       return candidatePageStart !== undefined || verification.reason === 'finality'
         ? retry(candidatePageStart)
         : null;

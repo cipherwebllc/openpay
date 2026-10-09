@@ -122,7 +122,14 @@ export async function readStoreUsdcAnchorBlock(
 
 export type StoreUsdcOnchainVerification =
   | { ok: true; state: 'confirmed'; blockNumber: bigint }
-  | { ok: true; state: 'pending'; reason: 'receipt' | 'finality' }
+  /**
+   * pending の理由は呼び出し側の分岐に使う:
+   *   'receipt'   = receipt が読めない (欠落/一時障害)
+   *   'finality'  = 正規チェーンにある receipt が safe 未到達・確認数不足 (同じ hash を待てばよい)
+   *   'canonical' = receipt のブロックが今の正規チェーンに無い (旧フォーク)。同じ hash を待っても解決しない —
+   *                 保存済み hash なら replacement 探索へ進む (#776 Codex P2)。
+   */
+  | { ok: true; state: 'pending'; reason: 'receipt' | 'finality' | 'canonical' }
   | {
       ok: false;
       reason:
@@ -199,7 +206,8 @@ async function hasRequiredFinality(
  * hasRequiredFinality は高さしか見ないので、RPC が旧フォークの成功 receipt (同じ番号・別 hash) を返すと
  * safe 到達や 15 confirmations を満たしたまま confirmed にできてしまう (第 7 回レビュー B6)。license の
  * reconcile (lib/license/reconcile.ts) と同じ照合を confirmed の前に置く。不一致は terminal にしない
- * (正当な購入を失敗化しない) — 次回の reconcile が正規チェーンの receipt で判定し直す。
+ * (正当な購入を失敗化しない) — pending 'canonical' として返し、保存済み hash なら reconcile が同じ nonce の
+ * replacement を正規チェーンで探し、候補ならそのページから再試行する。
  */
 async function receiptIsCanonical(
   client: StoreUsdcPublicClient,
@@ -253,7 +261,9 @@ export async function verifyStoreUsdcOnchain(input: {
   if (canonical === 'unavailable') {
     return { ok: false, reason: 'rpc_unavailable' };
   }
-  if (!canonical) return { ok: true, state: 'pending', reason: 'finality' };
+  // 通常の finality 待ちと区別する (同じ hash を待ち続けると、同じ nonce の replacement が正規チェーンで
+  // 支払い済みでも、古い receipt を返し続ける RPC のせいに解錠できない)。terminal にはしない。
+  if (!canonical) return { ok: true, state: 'pending', reason: 'canonical' };
 
   const [claim, legacyBilling] = await Promise.all([
     kvGet(paymentClaimKey(STORE_USDC_CHAIN_ID, input.txHash)),
