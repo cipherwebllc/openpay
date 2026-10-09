@@ -12,6 +12,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import {
+  BadgePercent,
   ChevronDown,
   ChevronUp,
   Clock,
@@ -41,7 +42,9 @@ import {
   menuToPresets,
   storefrontPartsToDraft,
   isPristineMobileOrderDraft,
+  draftDiscount,
 } from '@/hooks/useMobileOrderDraft';
+import { STOREFRONT_DISCOUNT_AMOUNT_MAX } from '@/lib/mobileOrderDiscount';
 import { isUntouchedSeedCatalog, useProductPresets } from '@/hooks/useProductPresets';
 import { useReceiverAutofill } from '@/hooks/useReceiverAutofill';
 import { useQrSettings } from '@/hooks/useQrSettings';
@@ -156,6 +159,11 @@ export function MobileOrderBuilder({
     .map((s) => safeHttpUrl(s.trim()))
     .filter((u): u is string => Boolean(u));
 
+  // 店舗の値引き (任意・plans/discount-common.md)。形が正しいときだけ公開・プレビューに載せる (正規化済み)。
+  const discount = draftDiscount(draft);
+  const discountInvalid =
+    draft.discountKind !== 'none' && draft.discountValue.trim() !== '' && discount === undefined;
+
   // @handle 公開用の店舗固有部分。受取先は @handle が権威だが、店名/アイコン/SNS は
   // ビルダーの設定をそのまま公開ページへ載せる (https 検証は validateStorefrontParts が行う)。
   // メニュー未充足なら null (公開不可)。
@@ -181,6 +189,7 @@ export function MobileOrderBuilder({
         ...(draft.minLeadMinutes.trim()
           ? { minLeadMinutes: Number(draft.minLeadMinutes.trim()) }
           : {}),
+        ...(discount ? { discount } : {}),
         menu: menuItems,
       }
     : null;
@@ -212,6 +221,7 @@ export function MobileOrderBuilder({
     ...(draft.minLeadMinutes.trim()
       ? { minLeadMinutes: Number(draft.minLeadMinutes.trim()) }
       : {}),
+    ...(discount ? { discount } : {}),
   };
 
   const update = (patch: Partial<typeof draft>) => setSettings((s) => ({ ...s, ...patch }));
@@ -250,6 +260,7 @@ export function MobileOrderBuilder({
   const filledShopInfo = [draft.address, draft.hours, draft.phone, draft.invoiceNo].filter((v) => v.trim()).length;
   const filledSns = draft.socials.filter((v) => v.trim()).length;
   const filledTime = [draft.openFrom, draft.lastOrder, draft.minLeadMinutes].filter((v) => v.trim()).length;
+  const filledDiscount = discount ? 1 : 0;
   const filledLabel = (count: number) => t('optionalFilled', { count });
 
   // 戻ってきた店主: この端末の下書きとレジの商品がまだ手付かず (既定・見本のまま) なら、公開中の店を
@@ -714,6 +725,63 @@ export function MobileOrderBuilder({
                     )}
                   </OptionalGroup>
                 )}
+                {/* 値引き (任意・全品・1 注文に 1 つ・plans/discount-common.md)。署名前の確認と受注は公開した値で照合する。 */}
+                <OptionalGroup icon={BadgePercent} title={t('discountGroup')} filled={filledDiscount} filledLabel={filledLabel}>
+                  <fieldset>
+                    <legend className="text-sm font-medium text-slate-700">{t('discountKindLabel')}</legend>
+                    <div className="mt-1 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1">
+                      {(['none', 'percent', 'amount'] as const).map((kind) => (
+                        <button
+                          key={kind}
+                          type="button"
+                          // 種類を変えたら値を持ち越さない (5% のつもりが 5 JPYC にならない)。選んでいる種類をもう一度
+                          // 押しても値は消さない (公開中の値引きを黙って外さない)。
+                          onClick={() => {
+                            if (kind !== draft.discountKind) update({ discountKind: kind, discountValue: '' });
+                          }}
+                          aria-pressed={draft.discountKind === kind}
+                          className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                            draft.discountKind === kind
+                              ? 'bg-white text-brand-dark shadow-sm'
+                              : 'text-slate-500 hover:text-slate-800'
+                          }`}
+                        >
+                          {t(`discountKind.${kind}`)}
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
+                  {draft.discountKind !== 'none' && (
+                    <div>
+                      <label htmlFor="mobile-order-discount-value" className="text-sm font-medium text-slate-700">
+                        {draft.discountKind === 'percent' ? t('discountPercentLabel') : t('discountAmountLabel')}
+                      </label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          id="mobile-order-discount-value"
+                          type="text"
+                          inputMode={draft.discountKind === 'percent' ? 'decimal' : 'numeric'}
+                          autoComplete="off"
+                          value={draft.discountValue}
+                          onChange={(e) => update({ discountValue: e.target.value.replace(/[^\d.]/g, '').slice(0, 8) })}
+                          placeholder={draft.discountKind === 'percent' ? '5' : '50'}
+                          aria-invalid={discountInvalid}
+                          aria-describedby={discountInvalid ? 'mobile-order-discount-error' : undefined}
+                          className="w-28 rounded-lg border border-slate-300 bg-white px-3 py-2 text-right text-sm tabular-nums focus:border-brand focus:outline-none"
+                        />
+                        <span className="text-sm text-slate-600">{draft.discountKind === 'percent' ? '%' : 'JPYC'}</span>
+                      </div>
+                      {discountInvalid && (
+                        <p id="mobile-order-discount-error" className="mt-1 text-xs text-red-600">
+                          {draft.discountKind === 'percent'
+                            ? t('discountPercentInvalid')
+                            : t('discountAmountInvalid', { max: STOREFRONT_DISCOUNT_AMOUNT_MAX.toLocaleString('en-US') })}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-500">{t('discountHint')}</p>
+                </OptionalGroup>
                 {/* 手数料の負担者は事前モバイルオーダー時のみ意味を持つ (店頭は運営負担)。
                     ⚠️ 料率はここでは表示しない (P0/P2 ゲート)。 */}
                 {draft.mode === 'preorder' && (

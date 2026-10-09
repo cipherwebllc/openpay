@@ -27,6 +27,7 @@ export function MobileOrderCartBar({
   lastOrder,
   checkoutUrl,
   checkoutPending,
+  discountNote,
   onCheckout,
 }: {
   /** /checkout の上限 (10 品) 超過。true で明細/支払いを止めて明示する。 */
@@ -53,6 +54,10 @@ export function MobileOrderCartBar({
     decimals: number;
     count: number;
     totalHuman: string;
+    /** 小計 (値引き前・人間可読)。値引きがあるときの注記に使う。 */
+    subtotalHuman: string;
+    /** 店舗の値引き (wei・無ければ 0n)。 */
+    discount: bigint;
     feeUpcharge: bigint;
     feeBps: number;
     onItemQtyChange: (id: string, n: number) => void;
@@ -64,6 +69,8 @@ export function MobileOrderCartBar({
   checkoutUrl: string;
   /** 受付番号の mount 後生成待ち。true の間は checkout link を無効化する。 */
   checkoutPending: boolean;
+  /** 値引きの補足 (この注文に値引きが付かない理由・プレビューでは支払えない理由)。無ければ出さない。 */
+  discountNote?: string;
   /** @handle 注文の server admission を通してから /checkout へ進む。 */
   onCheckout?: React.MouseEventHandler<HTMLAnchorElement>;
 }) {
@@ -192,6 +199,15 @@ export function MobileOrderCartBar({
               </span>
               <span className="text-base font-semibold text-slate-900">{cart.totalHuman} JPYC</span>
             </button>
+            {cart.discount > 0n && (
+              <p className="text-xs font-medium text-rose-700">
+                {t('discountNote', {
+                  subtotal: cart.subtotalHuman,
+                  discount: formatUnits(cart.discount, cart.decimals),
+                })}
+              </p>
+            )}
+            {discountNote && <p className="text-xs text-slate-500">{discountNote}</p>}
             {cart.feeUpcharge > 0n && (
               <p className="text-xs text-slate-500">
                 {t('feeIncludedNote', {
@@ -207,8 +223,9 @@ export function MobileOrderCartBar({
               </p>
             )}
             <p className="text-xs text-amber-700">{t('irreversibleNote')}</p>
-            {needsTable || checkoutPending ? (
-              // テーブル番号 未入力、または受付番号の生成前は支払いを止める。
+            {needsTable || checkoutPending || !checkoutUrl ? (
+              // テーブル番号 未入力、受付番号の生成前、支払い先の URL が無い (値引きを照合できないプレビュー等) ときは
+              // 支払いを止める (行き先の無いリンクを押せる見た目で出さない)。
               <button
                 type="button"
                 disabled

@@ -118,6 +118,29 @@ describe('MobileOrderBuilder', () => {
     expect(editorImage('https://images.example/cover2.png', cases[1][1])).not.toBeNull();
   });
 
+  it('値引き (任意): 割引率を入れるとプレビューの入口に出る・範囲外は理由を出してプレビューに載せない', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    fireEvent.click(screen.getByText('値引き（任意）'));
+    fireEvent.click(screen.getByRole('button', { name: '割引率' }));
+    const input = screen.getByLabelText('割引率（%）');
+    fireEvent.change(input, { target: { value: '5' } });
+    expect(screen.getByText('モバイルオーダーで 5% 引き')).toBeInTheDocument();
+    expect(screen.getByText('1 件入力済み')).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: '150' } });
+    expect(screen.getByText('割引率は 0 より大きく 100 未満で入れてください（小数 2 桁まで）')).toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.queryByText(/モバイルオーダーで .*引き/)).toBeNull();
+
+    // 選んでいる種類をもう一度押しても値は消さない。
+    fireEvent.change(input, { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: '割引率' }));
+    expect(screen.getByLabelText('割引率（%）')).toHaveValue('5');
+    // 種類を変えたら値を持ち越さない (5% のつもりが 5 JPYC にならない)。
+    fireEvent.click(screen.getByRole('button', { name: '割引額' }));
+    expect(screen.getByLabelText('1 注文あたりの割引額（JPYC）')).toHaveValue('');
+  });
+
   it('D3: menu toggle accessible name contains the visible item count', () => {
     renderWithIntl(<MobileOrderBuilder />);
     const toggle = screen.getByRole('button', { name: /登録中のメニュー/ });

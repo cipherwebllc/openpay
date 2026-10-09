@@ -9,6 +9,9 @@ import {
   presetsToMenu,
   menuToPresets,
   storefrontPartsToDraft,
+  draftDiscount,
+  isPristineMobileOrderDraft,
+  DEFAULT_MOBILE_ORDER_DRAFT,
   type MobileOrderDraft,
 } from '@/hooks/useMobileOrderDraft';
 import type { ProductPreset } from '@/hooks/useProductPresets';
@@ -139,6 +142,8 @@ function baseDraft(): MobileOrderDraft {
     openFrom: '',
     lastOrder: '',
     minLeadMinutes: '',
+    discountKind: 'none',
+    discountValue: '',
   };
 }
 
@@ -346,6 +351,7 @@ describe('storefrontPartsToDraft: 公開 storefront + 受取先 → 下書き (�
       openFrom: '09:30',
       lastOrder: '21:30',
       minLeadMinutes: 20,
+      discount: { kind: 'percent', value: '5' },
       menu: [{ id: 'a', name: 'c', price: '500' }],
     };
     expect(storefrontPartsToDraft(parts, ADDR)).toEqual({
@@ -368,6 +374,8 @@ describe('storefrontPartsToDraft: 公開 storefront + 受取先 → 下書き (�
       openFrom: '09:30', // 時間系も復元 (P2-6)
       lastOrder: '21:30', // 時間系も復元 (Phase 4)
       minLeadMinutes: '20', // 数値 → 生入力文字列へ
+      discountKind: 'percent', // 店舗の値引きも復元 (plans/discount-common.md)
+      discountValue: '5',
     });
   });
 
@@ -385,5 +393,33 @@ describe('storefrontPartsToDraft: 公開 storefront + 受取先 → 下書き (�
     expect(d.acceptingOrders).toBe(true);
     expect(d.dineIn).toBe(false);
     expect(d.receiverSource).toBe('manual');
+    expect(d.discountKind).toBe('none');
+    expect(d.discountValue).toBe('');
+  });
+});
+
+describe('店舗の値引きの下書き (plans/discount-common.md)', () => {
+  it('draftDiscount: なし・形が正しくない値は undefined、正しい値は正規化', () => {
+    const d = { ...DEFAULT_MOBILE_ORDER_DRAFT };
+    expect(draftDiscount(d)).toBeUndefined();
+    expect(draftDiscount({ ...d, discountKind: 'percent', discountValue: ' 05 ' })).toEqual({ kind: 'percent', value: '5' });
+    expect(draftDiscount({ ...d, discountKind: 'amount', discountValue: '50' })).toEqual({ kind: 'amount', value: '50' });
+    expect(draftDiscount({ ...d, discountKind: 'percent', discountValue: '100' })).toBeUndefined();
+    expect(draftDiscount({ ...d, discountKind: 'amount', discountValue: '1.5' })).toBeUndefined();
+  });
+
+  it('値引きを設定した下書きは「手付かず」ではない (公開中の店で上書きしない)', () => {
+    expect(isPristineMobileOrderDraft(DEFAULT_MOBILE_ORDER_DRAFT)).toBe(true);
+    expect(isPristineMobileOrderDraft({ ...DEFAULT_MOBILE_ORDER_DRAFT, discountKind: 'percent' })).toBe(false);
+  });
+
+  it('壊れた保存値は「なし」に戻す', () => {
+    window.localStorage.setItem(
+      'openpay:mobile-order-draft:v1',
+      JSON.stringify({ discountKind: 'coupon', discountValue: 123 }),
+    );
+    const { result } = renderHook(() => useMobileOrderDraft());
+    expect(result.current.settings.discountKind).toBe('none');
+    expect(result.current.settings.discountValue).toBe('');
   });
 });

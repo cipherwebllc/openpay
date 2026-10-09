@@ -2954,7 +2954,24 @@
     "lastOrderNote": "ラストオーダー {time}",
     "pickupLabel": "受取時間",
     "pickupAsap": "最短（指定なし）",
-    "pickupNone": "本日受け取れる時間がありません"
+    "pickupNone": "本日受け取れる時間がありません",
+    "discountGroup": "値引き（任意）",
+    "discountKindLabel": "モバイルオーダーの値引き",
+    "discountKind": {
+      "none": "なし",
+      "percent": "割引率",
+      "amount": "割引額"
+    },
+    "discountPercentLabel": "割引率（%）",
+    "discountAmountLabel": "1 注文あたりの割引額（JPYC）",
+    "discountPercentInvalid": "割引率は 0 より大きく 100 未満で入れてください（小数 2 桁まで）",
+    "discountAmountInvalid": "割引額は 1〜{max} の整数で入れてください",
+    "discountHint": "全品に付きます（1 注文に 1 つ）。割引率は 1 円未満を切り捨てます。値引き後の支払額が 10 JPYC 未満になる注文には付きません。システム利用料は値引き後の額にかかります。AI エージェントが自分で払う注文（x402）には付きません。",
+    "discountBadgePercent": "モバイルオーダーで {percent}% 引き",
+    "discountBadgeAmount": "モバイルオーダーで 1 注文 {amount} JPYC 引き",
+    "discountNote": "小計 {subtotal} JPYC から {discount} JPYC 値引き",
+    "discountNotAppliedNote": "値引きは、値引き後に 10 JPYC 以上残る注文に付きます",
+    "discountPreviewNote": "値引きは公開したお店のページで確かめるため、プレビューからは支払えません"
   },
   "OrderFulfillment": {
     "kitchenTitle": "厨房モニター",
