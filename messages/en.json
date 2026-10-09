@@ -2641,22 +2641,22 @@
       "cta": "Start mobile ordering",
       "dismiss": "Dismiss",
       "sheetNote": "Items you edit here also appear on your mobile-order menu."
-    },
-    "discount": {
-      "add": "+ Add a discount",
-      "label": "Discount",
-      "remove": "Remove",
-      "mode": {
-        "amount": "Amount",
-        "percent": "Percent"
-      },
-      "amountInput": "Discount amount",
-      "percentInput": "Discount rate (%)",
-      "percentNote": "({percent}%)",
-      "errorAmount": "Enter an amount smaller than the subtotal, in steps of {unit}.",
-      "errorPercent": "Enter a rate above 0 and below 100 (up to 2 decimals).",
-      "errorPercentTooSmall": "At this rate the discount is less than {unit}."
     }
+  },
+  "Discount": {
+    "add": "+ Add a discount",
+    "label": "Discount",
+    "remove": "Remove",
+    "mode": {
+      "amount": "Amount",
+      "percent": "Percent"
+    },
+    "amountInput": "Discount amount",
+    "percentInput": "Discount rate (%)",
+    "percentNote": "({percent}%)",
+    "errorAmount": "Enter an amount smaller than the subtotal, in steps of {unit}.",
+    "errorPercent": "Enter a rate above 0 and below 100 (up to 2 decimals).",
+    "errorPercentTooSmall": "At this rate the discount is less than {unit}."
   },
   "ProductPresetManager": {
     "empty": "No presets yet. Add one below.",

@@ -58,6 +58,7 @@ import { env } from '@/lib/env';
 import { safeHttpUrl } from '@/lib/mobileOrder';
 import { composeLineName, effectiveUnitPrice, type OptionChoice } from '@/lib/menuOptions';
 import { OptionSelectModal } from './OptionSelectModal';
+import { DiscountField } from './DiscountField';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
   buildCheckoutUrl,
@@ -70,8 +71,8 @@ import {
 } from '@/lib/url';
 import { groupAmountDigits } from '@/lib/amount';
 import { taxAmountDecimal, taxDisplayDecimals, type TaxCategory } from '@/lib/tax';
-import { discountFromPercent, parseDiscountAmount } from '@/lib/discount';
 import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
+import { useDiscountInput } from '@/hooks/useDiscountInput';
 import { categoryColorClasses } from '@/lib/categoryColor';
 import type { ShopLiveState } from '@/lib/shopLive';
 import { fetchMyHandles, myHandlesQueryKey } from '@/lib/handleMine';
@@ -144,19 +145,6 @@ function RegisterModeContent({
   const { copied, copy } = useCopyToClipboard();
 
   const [cart, setCart] = useState<CartLine[]>([]);
-  // 値引き (任意・1 会計に 1 つ・plans/register-discount.md)。「値引きを追加」で開く。金額 / 割引率。
-  const [discountOpen, setDiscountOpen] = useState(false);
-  const [discountMode, setDiscountMode] = useState<'amount' | 'percent'>('amount');
-  const [discountInput, setDiscountInput] = useState('');
-  // 「値引きを追加」で入力欄へ、「外す」で「値引きを追加」へ focus を移す (押したボタンが消えて body に落ちない)。
-  const discountInputRef = useRef<HTMLInputElement>(null);
-  const discountAddRef = useRef<HTMLButtonElement>(null);
-  const discountFocusNext = useRef<'input' | 'add' | null>(null);
-  useEffect(() => {
-    if (discountFocusNext.current === 'input' && discountOpen) discountInputRef.current?.focus();
-    if (discountFocusNext.current === 'add' && !discountOpen) discountAddRef.current?.focus();
-    discountFocusNext.current = null;
-  }, [discountOpen]);
   const [receiptNo, setReceiptNo] = useState('');
   const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
   // 「お店の設定」シート・商品の編集シート・開いているカートの行 (2026-10 磨き上げ P3)。
@@ -460,21 +448,9 @@ function RegisterModeContent({
 
   // 小計 (値引き前) と値引き。値引きは入力があるときだけ確かめる (率は円未満切り捨て)。
   const subtotalWei = calcCheckoutTotal(validItems, deployment.decimals);
-  const discountRaw = discountOpen ? discountInput.trim() : '';
-  const discountWei =
-    discountRaw === ''
-      ? null
-      : discountMode === 'amount'
-        ? parseDiscountAmount(discountRaw, subtotalWei, deployment.decimals, taxDec)
-        : discountFromPercent(subtotalWei, discountRaw, deployment.decimals, taxDec);
-  // 入力があるのに使えない値引き (形・単位・小計以上・率の範囲)。QR は出さず、理由を 1 行出す。
-  const discountInvalid = discountRaw !== '' && discountWei === null;
-  // 率は範囲内なのに、小計が小さく値引きが最小単位 (1 円・0.01) 未満に切り捨てられた。
-  const discountPercentTooSmall =
-    discountInvalid && discountMode === 'percent' && /^\d+(\.\d{1,2})?$/.test(discountRaw) &&
-    Number(discountRaw) > 0 && Number(discountRaw) < 100;
-  const discountUnitLabel = `${taxDec === 0 ? '1' : '0.01'} ${symbol}`;
-  const discountParam = discountWei !== null ? formatUnits(discountWei, deployment.decimals) : undefined;
+  // 値引き (任意・1 会計に 1 つ・plans/discount-common.md)。入力と計算は共通の hook (決済QR と同じ)。
+  const discount = useDiscountInput(subtotalWei, deployment.decimals, taxDec);
+  const { wei: discountWei, invalid: discountInvalid, param: discountParam, reset: resetDiscount } = discount;
   // お支払い合計 = 小計 − 値引き (QR・お店の端末で送る受け渡しの額・最低額の判定はこの額)。
   const totalWei = subtotalWei - (discountWei ?? 0n);
   const totalHuman = formatUnits(totalWei, deployment.decimals);
@@ -489,9 +465,8 @@ function RegisterModeContent({
   // 会計が空になったら (次のお客様) 値引きを外す。
   useEffect(() => {
     if (cart.length > 0) return;
-    setDiscountOpen(false);
-    setDiscountInput('');
-  }, [cart.length]);
+    resetDiscount();
+  }, [cart.length, resetDiscount]);
 
   // WebKit (モバイル Safari・SNS アプリ内ブラウザ) では position:sticky な下部会計バーの
   // 子テキストを JS で書き換えても合成レイヤーが再ラスタライズされず、合計が古いまま残る
@@ -973,94 +948,8 @@ function RegisterModeContent({
                     {groupAmountDigits(subtotalHuman)} {symbol}
                   </dd>
                 </div>
-                {/* 値引き (任意)。使わない店には「値引きを追加」の 1 行だけ。開くと 値引き額 + 金額 / 割引率 と入力欄。 */}
-                {discountOpen ? (
-                  <div role="group" aria-labelledby="register-discount-heading" className="rounded-xl bg-white p-3 ring-1 ring-slate-200">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span id="register-discount-heading" className="text-slate-500">
-                        {t('discount.label')}
-                        {discountMode === 'percent' && discountWei !== null && (
-                          <span className="ml-1 tabular-nums">{t('discount.percentNote', { percent: discountRaw })}</span>
-                        )}
-                      </span>
-                      <span className="tabular-nums font-medium text-rose-700">
-                        {discountWei !== null
-                          ? `−${groupAmountDigits(formatUnits(discountWei, deployment.decimals))} ${symbol}`
-                          : '—'}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex items-center gap-2">
-                      <div className="inline-flex shrink-0 rounded-lg bg-slate-100 p-0.5 text-xs">
-                        {(['amount', 'percent'] as const).map((mode) => (
-                          <button
-                            key={mode}
-                            type="button"
-                            aria-pressed={discountMode === mode}
-                            onClick={() => {
-                              // 金額 ↔ 割引率 で入力を持ち越さない (20 円のつもりが 20% にならない)。
-                              if (mode !== discountMode) setDiscountInput('');
-                              setDiscountMode(mode);
-                            }}
-                            className={`rounded-md px-2.5 py-1 font-medium ${
-                              discountMode === mode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
-                            }`}
-                          >
-                            {t(`discount.mode.${mode}`)}
-                          </button>
-                        ))}
-                      </div>
-                      <label htmlFor="register-discount-input" className="sr-only">
-                        {discountMode === 'amount' ? t('discount.amountInput') : t('discount.percentInput')}
-                      </label>
-                      <input
-                        id="register-discount-input"
-                        ref={discountInputRef}
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
-                        value={discountInput}
-                        onChange={(e) => setDiscountInput(e.target.value)}
-                        placeholder={discountMode === 'amount' ? '20' : '2'}
-                        aria-invalid={discountInvalid}
-                        aria-describedby={discountInvalid ? 'register-discount-error' : undefined}
-                        className="w-20 min-w-0 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-right text-sm tabular-nums focus:border-brand focus:outline-none"
-                      />
-                      <span className="text-sm text-slate-600">{discountMode === 'amount' ? symbol : '%'}</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          discountFocusNext.current = 'add';
-                          setDiscountOpen(false);
-                          setDiscountInput('');
-                        }}
-                        className="ml-auto text-xs text-slate-500 underline underline-offset-2 hover:text-slate-700"
-                      >
-                        {t('discount.remove')}
-                      </button>
-                    </div>
-                    {discountInvalid && (
-                      <p id="register-discount-error" className="mt-1.5 text-xs text-red-600">
-                        {discountMode === 'amount'
-                          ? t('discount.errorAmount', { unit: discountUnitLabel })
-                          : discountPercentTooSmall
-                            ? t('discount.errorPercentTooSmall', { unit: discountUnitLabel })
-                            : t('discount.errorPercent')}
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <button
-                    ref={discountAddRef}
-                    type="button"
-                    onClick={() => {
-                      discountFocusNext.current = 'input';
-                      setDiscountOpen(true);
-                    }}
-                    className="text-xs font-medium text-brand hover:underline"
-                  >
-                    {t('discount.add')}
-                  </button>
-                )}
+                {/* 値引き (任意)。使わない店には「値引きを追加」の 1 行だけ (DiscountField)。 */}
+                <DiscountField discount={discount} idPrefix="register" symbol={symbol} decimals={deployment.decimals} />
                 {totalTaxRounded > 0 && !discountInvalid && (
                   <div className="flex justify-between">
                     <dt className="text-slate-500">{t('taxAmount')}</dt>
