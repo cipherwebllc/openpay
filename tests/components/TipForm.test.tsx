@@ -2244,7 +2244,8 @@ describe('Arc standard tip attribution', () => {
       expect(window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY)).not.toBeNull();
 
       vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify(
-        outcome === 'settled' ? { ok: true, state: 'settled', txHash: tx } : { ok: true, state: 'unused' },
+        // 期限切れはチェーンの finalized による証明 (expiry: 'expired') だけが解除する (第 7 回レビュー A6・#767)。
+        outcome === 'settled' ? { ok: true, state: 'settled', txHash: tx } : { ok: true, state: 'unused', expiry: 'expired' },
       )));
       fireEvent.click(screen.getByRole('button', { name: /同じ送信内容を再確認/ }));
       await act(async () => { await vi.advanceTimersByTimeAsync(9_001); });
