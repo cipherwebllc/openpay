@@ -543,6 +543,9 @@ export async function POST(req: Request): Promise<NextResponse> {
       fulfilled: false,
     };
     if (binding.bindingMissing) order.bindingMissing = true;
+    // 追加のみ (掟 12): 受理の判定は変えず、結びつけられない経路 (receipt に relay の証拠が無い = 通常の送金など)
+    // で届いたことを記録し、受注のカードに「品物はお客様と確かめて」を出す (常時の開示文の代わり)。
+    if (binding.kind === 'standard') order.unboundPayment = true;
     if (binding.digest) order.bindingDigest = binding.digest;
     if (amountAdvisory.mismatch) order.amountMismatch = true;
     if (amountAdvisory.unchecked) order.amountUnchecked = true;

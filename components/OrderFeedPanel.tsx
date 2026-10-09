@@ -7,7 +7,7 @@
 // react-query を使うため、親 (create ページ) は env.enableOrderRelay でこのパネルの**マウント自体**を
 // ゲートする (OFF の単体テストで QueryClient を要求しない)。設計: plans/swift-puzzling-sky.md。
 
-import { OrderBindingNotice, OrderBindingScope } from '@/components/OrderBindingNotice';
+import { OrderBindingNotice } from '@/components/OrderBindingNotice';
 import { useMemo, useState } from 'react';
 import { useTranslations, useLocale } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -421,7 +421,6 @@ export function OrderFeedPanel({
       {env.enableOrderRelay && (
         <div className="space-y-2 pt-2">
           {isSignedIn ? <p className="text-xs text-slate-500">{completionHint}</p> : null}
-          <OrderBindingScope />
           <p className="text-xs text-slate-500">{t('disclosure')}</p>
         </div>
       )}

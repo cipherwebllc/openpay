@@ -373,6 +373,16 @@ it('A2c missing binding warning is independent of amount and fee badges', async 
   h.orders = [{ ...order, bindingMissing: true }, { ...order, orderId: 'other', txHash: `0x${'cd'.repeat(32)}` }];
   render();
   expect(await screen.findByRole('alert')).toHaveTextContent('支払いと注文の結びつき未確認 — 受け渡し前に手動確認が必要');
-  expect(screen.getAllByText(/暗号学的/)).toHaveLength(1);
-  expect(screen.getByText(/暗号学的/)).toHaveClass('text-slate-800', 'bg-slate-50');
+  // 常時の技術的な開示文は出さない (結びつけられない注文には、そのカードにだけ注記が出る)。
+  expect(screen.queryByText(/暗号学的/)).toBeNull();
+});
+
+it('通常の送金で届いた注文のカードにだけ「品物はお客様と確かめて」を出す (警告ではなく注記)', async () => {
+  envHold.enableOrderRelay = true;
+  h.orders = [{ ...order, unboundPayment: true }, { ...order, orderId: 'other', txHash: `0x${'cd'.repeat(32)}` }];
+  render();
+  const note = await screen.findByText('通常の送金で支払われた注文です。品物はお客様と確かめてから渡してください。');
+  expect(screen.getAllByText('通常の送金で支払われた注文です。品物はお客様と確かめてから渡してください。')).toHaveLength(1);
+  expect(note).not.toHaveAttribute('role', 'alert');
+  expect(screen.queryByRole('alert')).toBeNull();
 });

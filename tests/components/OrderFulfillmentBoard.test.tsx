@@ -769,6 +769,12 @@ it.each(['kitchen', 'hall'] as const)('A2c %s keeps the manual handover warning 
   feedHold.data = [order({ bindingMissing: true }), order({ orderId: 'other', txHash: TX2 })];
   renderWithIntl(<OrderFulfillmentBoard mode={mode} />);
   expect(screen.getByRole('alert')).toHaveTextContent('支払いと注文の結びつき未確認 — 受け渡し前に手動確認が必要');
-  expect(screen.getAllByText(/暗号学的/)).toHaveLength(1);
-  expect(screen.getByText(/暗号学的/)).toHaveClass('text-slate-800', 'bg-slate-50');
+  expect(screen.queryByText(/暗号学的/)).toBeNull();
+});
+
+it.each(['kitchen', 'hall'] as const)('%s: 通常の送金で届いた注文のカードにだけ確認の注記を出す', (mode) => {
+  feedHold.data = [order({ unboundPayment: true }), order({ orderId: 'other', txHash: TX2 })];
+  renderWithIntl(<OrderFulfillmentBoard mode={mode} />);
+  expect(screen.getAllByText('通常の送金で支払われた注文です。品物はお客様と確かめてから渡してください。')).toHaveLength(1);
+  expect(screen.queryByRole('alert')).toBeNull();
 });

@@ -3332,7 +3332,7 @@
   },
   "OrderBinding": {
     "unverified": "Payment/order association unverified — manual verification required before handover",
-    "scope": "Standard ERC-20 transfers and non-relay ERC-4337/7702 gasless payments do not cryptographically verify the association between payment and order."
+    "unboundPayment": "Paid by a regular transfer. Check the items with the customer before handing them over."
   },
   "UrlErrors": {
     "missingTo": "The recipient address (to) is missing.",

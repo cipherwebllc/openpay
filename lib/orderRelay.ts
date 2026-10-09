@@ -53,6 +53,9 @@ export type StoredOrderItem = {
 export type StoredOrder = {
   bindingMissing?: true; // Migration only: staff must manually verify before handover.
   bindingDigest?: string; // Verified v1 commitment, preserved through fulfillment/fee updates.
+  // 支払いと注文内容を結びつけられない経路 (通常の送金など・A2c で受容した残余) で届いた注文。金額は検証済みで、
+  // 品物 (顧客申告) をお客様と確かめてから渡すよう、その注文のカードにだけ出す (表示用・true のときだけ持つ)。
+  unboundPayment?: true;
   orderId: string;
   items: StoredOrderItem[]; // 顧客申告 (表示用・突合は店主)
   table: string | null; // 顧客申告: テーブル番号ラベル (description 由来)。テイクアウトは null。
@@ -383,6 +386,7 @@ export function parseStoredOrder(raw: string): StoredOrder | null {
     }
   }
   if (o.bindingMissing === true) order.bindingMissing = true;
+  if (o.unboundPayment === true) order.unboundPayment = true;
   if (typeof o.bindingDigest === 'string' && /^0x[0-9a-fA-F]{64}$/.test(o.bindingDigest)) order.bindingDigest = o.bindingDigest;
   if (o.amountMismatch === true) order.amountMismatch = true;
   if (o.amountUnchecked === true) order.amountUnchecked = true;
