@@ -1402,11 +1402,12 @@ export async function reconcileStoreUsdcIntent(
     raw = JSON.stringify(consumed);
   }
 
-  // null = この候補は結論なし (次の候補へ) / deferredPageStart = 候補は pending で採らず、そのページ位置を保留。
+  // null = この候補は結論なし (次の候補へ) / deferredPageStart = 候補は pending で採らず、そのページ位置を保留 /
+  // retryFromPage = 候補の読み取り障害。ループを中断し、保留済みのページと比べて早い方から再試行。
   const finalizeCandidate = async (
     txHash: Hex,
     candidatePageStart?: bigint,
-  ): Promise<ReconcileStoreUsdcResult | null | { deferredPageStart: bigint }> => {
+  ): Promise<ReconcileStoreUsdcResult | null | { deferredPageStart: bigint } | { retryFromPage: bigint }> => {
     // 候補 1 件の照合の前に残り時間を見る。足りなければ照合せず、候補のページ (保存済み hash なら現 cursor) から延期。
     const verifyClient = rpcClient();
     if (verifyClient === null) return retry(candidatePageStart);
@@ -1417,11 +1418,13 @@ export async function reconcileStoreUsdcIntent(
       txHash,
       ...clientArg(verifyClient),
     });
-    // 候補の一時障害で証拠のページを飛ばすと、daily head が探索予算より速く進む間は
-    // 再発見できない。entitlement 未付与への波及を断つため、そのページから再試行する。
+    // 候補の一時障害 (RPC / claim 読み取り) で証拠のページを飛ばすと、daily head が探索予算より速く進む間は
+    // 再発見できない。entitlement 未付与への波及を断つため、候補ループを即時中断してそのページから再試行する —
+    // ただし再試行位置は呼び出し側が「先に保留した候補のページ」と比べて早い方にする (先の保留が後の障害の
+    // ページ位置で上書きされ、先の候補が読めるようになっても再検証されない波及を断つ・Codex 3 回目 P2)。
     if (!verification.ok) {
       return verification.reason === 'rpc_unavailable' && candidatePageStart !== undefined
-        ? retry(candidatePageStart)
+        ? { retryFromPage: candidatePageStart }
         : null;
     }
     if (verification.state === 'pending') {
@@ -1470,8 +1473,8 @@ export async function reconcileStoreUsdcIntent(
 
   if (intent.txHash) {
     const resolved = await finalizeCandidate(intent.txHash);
-    // 保存 hash はページ位置を持たないので保留にはならない (null か結論)。
-    if (resolved && !('deferredPageStart' in resolved)) return resolved;
+    // 保存 hash はページ位置を持たないので保留/中断にはならない (null か結論)。
+    if (resolved && !('deferredPageStart' in resolved) && !('retryFromPage' in resolved)) return resolved;
   }
   const headClient = rpcClient();
   if (headClient === null) return retry();
@@ -1504,6 +1507,8 @@ export async function reconcileStoreUsdcIntent(
       deferredPageStart ??= resolved.deferredPageStart;
       continue;
     }
+    // 読み取り障害は即時中断。再試行位置は先に保留した候補のページ (走査順なので常に早い) を優先する。
+    if ('retryFromPage' in resolved) return retry(deferredPageStart ?? resolved.retryFromPage);
     return resolved;
   }
   // 採用できる候補が無ければ、保留した候補の最も早いページから (保留が無ければ走査の続きから) 再試行する。

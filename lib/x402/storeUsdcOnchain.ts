@@ -125,9 +125,10 @@ export type StoreUsdcOnchainVerification =
   /**
    * pending の理由は呼び出し側の分岐に使う:
    *   'receipt'   = receipt が読めない (欠落/一時障害)
-   *   'finality'  = 正規チェーンにある receipt が safe 未到達・確認数不足 (同じ hash を待てばよい)
-   *   'canonical' = receipt のブロックが今の正規チェーンに無い (旧フォーク)。同じ hash を待っても解決しない —
-   *                 保存済み hash なら replacement 探索へ進む (#776 Codex P2)。
+   *   'finality'  = 正規チェーンとの一致を確認できた (または高さ不足で照合先に無く判別不能な) receipt が
+   *                 safe 未到達・確認数不足 (同じ hash を待てばよい)
+   *   'canonical' = receipt のブロックが今の正規チェーンに無い (旧フォーク)。高さに関係なく、同じ hash を待っても
+   *                 解決しない — 保存済み hash なら replacement 探索へ進む (#776 Codex P2)。
    */
   | { ok: true; state: 'pending'; reason: 'receipt' | 'finality' | 'canonical' }
   | {
@@ -255,15 +256,23 @@ export async function verifyStoreUsdcOnchain(input: {
   if (finality === 'unavailable') {
     return { ok: false, reason: 'rpc_unavailable' };
   }
-  if (!finality) return { ok: true, state: 'pending', reason: 'finality' };
-  // 条件7 (B6): 高さの条件を満たした receipt が今の正規チェーンのブロックに属すること。
+  // 条件7 (B6): receipt が今の正規チェーンのブロックに属すること。高さの判定 (finality 待ちの早期 return) より
+  // **前**に置く — 旧フォークの保存済み receipt が高さの条件を満たさないまま (safe の応答が停滞する等) だと
+  // 'finality' で同じ hash を待ち続け、正規チェーンで確定済みの replacement の探索へ進めない (Codex 3 回目 P2)。
+  // 'finality' を返すのは正規チェーンと一致を確認できた receipt だけ。
   const canonical = await receiptIsCanonical(client, receipt);
   if (canonical === 'unavailable') {
-    return { ok: false, reason: 'rpc_unavailable' };
+    // 高さが足りない receipt のブロックは、照合先のノードにまだ無いことがある (旧フォークか未到達か判別不能)
+    // → 従来どおり finality 待ちに倒す (次回、高さが揃ってから照合する)。高さを満たしているのに照会できないのは
+    // 読み取り障害 → rpc_unavailable (呼び出し側がそのページから再試行)。
+    return finality
+      ? { ok: false, reason: 'rpc_unavailable' }
+      : { ok: true, state: 'pending', reason: 'finality' };
   }
   // 通常の finality 待ちと区別する (同じ hash を待ち続けると、同じ nonce の replacement が正規チェーンで
-  // 支払い済みでも、古い receipt を返し続ける RPC のせいに解錠できない)。terminal にはしない。
+  // 支払い済みでも、古い receipt を返し続ける RPC のせいに解錠できない)。高さに関係なく・terminal にはしない。
   if (!canonical) return { ok: true, state: 'pending', reason: 'canonical' };
+  if (!finality) return { ok: true, state: 'pending', reason: 'finality' };
 
   const [claim, legacyBilling] = await Promise.all([
     kvGet(paymentClaimKey(STORE_USDC_CHAIN_ID, input.txHash)),

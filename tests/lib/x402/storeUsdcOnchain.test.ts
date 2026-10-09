@@ -292,12 +292,34 @@ describe('Store USDC on-chain entitlement gate', () => {
       ).resolves.toEqual({ ok: true, state: 'pending', reason: 'canonical' });
     });
 
-    it('safe 未到達 (通常の finality 待ち) は従来どおり finality で、正規ブロックは照会しない', async () => {
-      const rpc = client({ safe: null, latest: 113n, canonicalHash: FORK_HASH });
+    // 照合は高さの判定より前 (Codex 3 回目 P2): 旧フォークの receipt は高さが足りなくても 'canonical' で、
+    // 'finality' を返すのは正規チェーンと一致を確認できた receipt だけ。
+    it('safe 未到達でも正規チェーンと一致を確認できた receipt だけが finality (正規ブロックは照会する)', async () => {
+      const rpc = client({ safe: null, latest: 113n });
       await expect(
         verifyStoreUsdcOnchain({ intent: intent(), txHash: TX, client: rpc }),
       ).resolves.toEqual({ ok: true, state: 'pending', reason: 'finality' });
-      expect(rpc.getBlock).not.toHaveBeenCalledWith({ blockNumber: 100n });
+      expect(rpc.getBlock).toHaveBeenCalledWith({ blockNumber: 100n });
+    });
+
+    it('高さが足りなくても旧フォークの receipt は canonical (同じ hash を待たせない)', async () => {
+      await expect(
+        verifyStoreUsdcOnchain({
+          intent: intent(),
+          txHash: TX,
+          client: client({ safe: 99n, latest: 100n, canonicalHash: FORK_HASH }),
+        }),
+      ).resolves.toEqual({ ok: true, state: 'pending', reason: 'canonical' });
+    });
+
+    it('高さが足りず正規ブロックも取れない (旧フォークか未到達か判別不能) は finality 待ちに倒す', async () => {
+      await expect(
+        verifyStoreUsdcOnchain({
+          intent: intent(),
+          txHash: TX,
+          client: client({ safe: null, latest: 113n, canonicalHash: 'error' }),
+        }),
+      ).resolves.toEqual({ ok: true, state: 'pending', reason: 'finality' });
     });
 
     it('正規ブロックの照会が落ちたら rpc_unavailable (confirmed にも pending にもしない)', async () => {

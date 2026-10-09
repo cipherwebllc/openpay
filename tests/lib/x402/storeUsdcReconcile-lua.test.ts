@@ -344,6 +344,59 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     expect(h.store!.strings.has(`store:own:${PAYER.toLowerCase()}:${ID}`)).toBe(false);
   });
 
+  // OLD の receipt は block 100・TX の receipt は block 2,100 (fixture は 1 つの eventBlock しか持たないので上書き)。
+  function splitReceiptBlocks(client: StoreUsdcPublicClient) {
+    const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+    vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => ({
+      ...(await receipt(args)), blockNumber: args.hash === OLD ? 100n : 2_100n,
+    }));
+  }
+
+  // Codex 3 回目 P2 (1): 先のページの候補を保留した後、後の候補が読み取り障害で中断すると、再試行位置が後の
+  // ページ (2090) に進んで先の候補 (90) が再検証されない → 再試行位置は保留したページを優先する。
+  it.each(['rpc', 'claim'] as const)('keeps the earlier deferred page when a later candidate hits a transient %s failure', async (failure) => {
+    const intent = await active();
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, old: 'noncanonical' });
+    mixedPages(client);
+    splitReceiptBlocks(client);
+    let failCanonicalLookup = failure === 'rpc';
+    vi.mocked(client.getBlock).mockImplementation(async (args) => {
+      if ('blockNumber' in args) {
+        if (failCanonicalLookup && args.blockNumber === 2_100n) throw new Error('canonical lookup unavailable');
+        return { number: args.blockNumber, hash: BLOCK_HASH };
+      }
+      return { number: 50_090n };
+    });
+    // claim: OLD は canonical で止まるので claim を読まず、最初の claim 読み取り (= TX) だけが落ちる。
+    if (failure === 'claim') h.failClaimOnce = true;
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
+    expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
+    expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX });
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '90', nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
+    expect(rawIntent().txHash).toBeUndefined();
+    // 障害が解けた次回は、保留したページから両候補を見直して replacement で確定する。
+    failCanonicalLookup = false;
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 30_000, client })).toEqual({ ok: true, state: 'settled' });
+    await expectSettled();
+  });
+
+  // Codex 3 回目 P2 (2): 保存済みの旧フォーク receipt (block 101) が高さの条件を満たさない (safe=100 / latest=101) 間、
+  // 条件 7 を高さの後に置くと 'finality' で同じ hash を待ち続け、正規チェーンで確定済み (block 100) の replacement の
+  // 探索へ進まない → 照合を高さの前に置き、旧フォークは高さに関係なく replacement 探索へ。
+  it('scans for the replacement when the stored noncanonical receipt lacks finality while the replacement is final', async () => {
+    const intent = await active(OLD);
+    const client = chain(intent.nonce, { latest: 101n, eventBlock: 100n, old: 'noncanonical' });
+    const receipt = vi.mocked(client.getTransactionReceipt).getMockImplementation()!;
+    vi.mocked(client.getTransactionReceipt).mockImplementation(async (args) => ({
+      ...(await receipt(args)), blockNumber: args.hash === OLD ? 101n : 100n,
+    }));
+    vi.mocked(client.getBlock).mockImplementation(async (args) =>
+      'blockNumber' in args ? { number: args.blockNumber, hash: BLOCK_HASH } : { number: 100n });
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'settled' });
+    expect(client.getLogs).toHaveBeenCalled();
+    await expectSettled();
+  });
+
   it('advances past conclusively mismatched candidate evidence', async () => {
     const intent = await active();
     const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, bad: 'amount' });
