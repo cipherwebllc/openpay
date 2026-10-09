@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import { useTranslations } from 'next-intl';
 import dynamic from 'next/dynamic';
 import type { Address } from 'viem';
-import { getAddress, parseUnits } from 'viem';
+import { formatUnits, getAddress, parseUnits } from 'viem';
 import { AccountingSection } from './AccountingSection';
 import { QrPreviewModal } from './QrPreviewModal';
 import { PwaInstallHint } from './PwaInstallHint';
@@ -25,6 +25,8 @@ import { TokenChooser } from './TokenChooser';
 import { ChainChooser } from './ChainChooser';
 import { downloadPng, downloadSvg, fileSafe } from './qr/qrDownload';
 import { rememberTokenPrefs, useQrSettings } from '@/hooks/useQrSettings';
+import { useDiscountInput } from '@/hooks/useDiscountInput';
+import { taxDisplayDecimals } from '@/lib/tax';
 import {
   useReceiverAutofill,
   type ReceiverSource,
@@ -183,9 +185,36 @@ export function QrGenerator() {
   useEffect(() => {
     if (qrModalOpen) setSettingsOpen(false);
   }, [qrModalOpen]);
-  const amountValid =
+  // 入力した金額が使えるか (値引きを除く)。QR を出せない理由の「金額を入れてください」はこれで決める。
+  const amountInputValid =
     mode === 'static' ||
     (mode === 'amount' && DECIMAL_PATTERN.test(amount) && Number(amount) > 0);
+  // 値引き (任意・plans/discount-common.md)。金額ありの QR・為替換算なしのときだけ。入力欄の amount は値引き前で、
+  // QR・請求・着金の見張り・表示はすべて支払額 (chargeAmount = amount − 値引き) を使う。
+  const amountDecimals = deploymentForSlug(settings.token, settings.chain).decimals;
+  const listAmountWei = useMemo(() => {
+    if (mode !== 'amount' || !amountInputValid) return 0n;
+    try {
+      return parseUnits(amount, amountDecimals);
+    } catch {
+      return 0n;
+    }
+  }, [mode, amountInputValid, amount, amountDecimals]);
+  const discount = useDiscountInput(listAmountWei, amountDecimals, taxDisplayDecimals(settings.token));
+  const discountAvailable = mode === 'amount' && !convert;
+  const { reset: resetDiscount } = discount;
+  // 値引きを使えない QR に切り替えた・金額を消した (次の会計) ら外す。
+  useEffect(() => {
+    if (!discountAvailable || amount === '') resetDiscount();
+  }, [discountAvailable, amount, resetDiscount]);
+  // 通貨を変えたら外す (同じ入力が別の単位の値引きにならない: 20 JPYC → 20 USDC)。
+  useEffect(() => {
+    resetDiscount();
+  }, [settings.token, resetDiscount]);
+  // QR を出せる金額か (値引きを直している間は出さない = 値引き前の額を請求させない)。
+  const amountValid = amountInputValid && !discount.invalid;
+  const chargeAmount =
+    discount.wei !== null ? formatUnits(listAmountWei - discount.wei, amountDecimals) : amount;
   const payMode: PayMode = settings.payMode;
   const isStandard = payMode === 'standard';
 
@@ -250,12 +279,12 @@ export function QrGenerator() {
     if (!amountValid || mode !== 'amount' || settings.token !== 'jpyc') return null;
     const dep = deploymentForSlug(settings.token, settings.chain);
     try {
-      const wei = parseUnits(amount, dep.decimals);
+      const wei = parseUnits(chargeAmount, dep.decimals);
       return wei > 0n ? wei : null;
     } catch {
       return null;
     }
-  }, [amountValid, mode, settings, amount]);
+  }, [amountValid, mode, settings, chargeAmount]);
   const recoverGasMode: GasMode = effectiveGasMode;
 
   const payUrl = useMemo(() => {
@@ -267,7 +296,9 @@ export function QrGenerator() {
       // free 経路 (JPYC relay・無徴収) は customer 固定 / JPYC recover は merchant 固定
       // (確定モデル: 決済は店舗が手数料を吸収) / それ以外 (USDC 等) は店主の選択。
       gas: effectiveGasMode,
-      amount: mode === 'amount' ? amount : undefined,
+      amount: mode === 'amount' ? chargeAmount : undefined,
+      // 値引き (在るときだけ)。amount に含まれる額で、控え・履歴の小計と値引きに使う (請求額は amount のまま)。
+      discount: mode === 'amount' ? discount.param : undefined,
       mode: payMode,
       split: splitsForUrl,
       // crossChain は USDC のみ意味あり (JPYC は Gateway / CCTP V2 非対応)。
@@ -307,7 +338,8 @@ export function QrGenerator() {
     settings.taxCategory,
     receiptNo,
     mode,
-    amount,
+    chargeAmount,
+    discount.param,
     payMode,
     splitsForUrl,
     convert,
@@ -328,11 +360,11 @@ export function QrGenerator() {
   const storeBillWei = useMemo(() => {
     if (mode !== 'amount' || !amountValid) return 0n;
     try {
-      return parseUnits(amount, deploymentForSlug(settings.token, settings.chain).decimals);
+      return parseUnits(chargeAmount, deploymentForSlug(settings.token, settings.chain).decimals);
     } catch {
       return 0n;
     }
-  }, [mode, amountValid, amount, settings.token, settings.chain]);
+  }, [mode, amountValid, chargeAmount, settings.token, settings.chain]);
   // この会計のチェーンでお店負担に使う値 (受取先が OpenPay の受取口でないかの判定に使う)。
   const storeConfig = storeDeviceChainConfig(chainForSlug(settings.chain).id);
   const storeBlocked:
@@ -384,10 +416,12 @@ export function QrGenerator() {
             {
               name: settings.productName.trim() || t('storeDevice.itemName'),
               qty: 1,
+              // 値引き前の 1 行 + 値引き (#749 の /checkout の値引き・支払額 = 値引き後 = storeBillWei)。
               price: amount,
               ...(settings.memo.trim() ? { memo: settings.memo.trim() } : {}),
             },
           ],
+          ...(discount.param ? { discount: discount.param } : {}),
           taxRate: settings.taxRate ?? undefined,
           taxCategory: settings.taxCategory ?? undefined,
           receiptNo: receiptNo || undefined,
@@ -423,7 +457,7 @@ export function QrGenerator() {
   // ポスター / モーダル / オフライン QR で共有する表示ラベル (単一情報源)。
   const amountLabelText =
     mode === 'amount'
-      ? t('posterFixedAmount', { amount: groupAmountDigits(amount), symbol: deployment.displaySymbol })
+      ? t('posterFixedAmount', { amount: groupAmountDigits(chargeAmount), symbol: deployment.displaySymbol })
       : t('posterOpenAmount', { symbol: deployment.displaySymbol });
   const tokenChainLabelText = `${deployment.displaySymbol} · ${
     settings.token === 'usdc' && crossChainAllowed(settings.chain) && settings.crossChain
@@ -459,12 +493,12 @@ export function QrGenerator() {
   const billAmountWei = useMemo(() => {
     if (mode !== 'amount' || !amountValid) return 0n;
     try {
-      const wei = parseUnits(amount, deployment.decimals);
+      const wei = parseUnits(chargeAmount, deployment.decimals);
       return wei > 0n ? wei : 0n;
     } catch {
       return 0n;
     }
-  }, [mode, amountValid, amount, deployment.decimals]);
+  }, [mode, amountValid, chargeAmount, deployment.decimals]);
 
   // 着金監視は受取先である店舗残高を見るため、顧客請求額ではなく実経路の店舗純受取額を渡す。
   // JPYC recover は PaymentForm / useJpycEip3009Payment と同じ recoverFeeValue を使い、
@@ -509,7 +543,7 @@ export function QrGenerator() {
       ...(product ? [product] : []),
       settings.token,
       settings.chain,
-      mode === 'amount' && amount ? amount.replace('.', '-') : 'open',
+      mode === 'amount' && chargeAmount ? chargeAmount.replace('.', '-') : 'open',
     ];
     return parts.join('-');
   }, [
@@ -518,7 +552,7 @@ export function QrGenerator() {
     settings.token,
     settings.chain,
     mode,
-    amount,
+    chargeAmount,
   ]);
 
   // 互換 QR (EIP-681) — standard + amount のときだけ併発行 (gasless / split は
@@ -541,7 +575,7 @@ export function QrGenerator() {
       tokenAddress: deployment.address,
       chainId: deployment.chainId,
       to: effectiveReceiver,
-      amount,
+      amount: chargeAmount,
       decimals: deployment.decimals,
     });
   }, [
@@ -553,7 +587,7 @@ export function QrGenerator() {
     deployment.address,
     deployment.chainId,
     deployment.decimals,
-    amount,
+    chargeAmount,
   ]);
 
   function selectToken(tok: TokenSymbol) {
@@ -601,7 +635,7 @@ export function QrGenerator() {
   // (受取先未設定で convert すると入力が遅い間に「生成前に画面上の期限超過」となる QR を
   // 作れてしまう)。exp は未署名なのでサーバ強制の期限ではない。
   const canShowConvert =
-    receiverValid && mode === 'amount' && amountValid && !splitsForUrl && !convert && !storeRequested;
+    receiverValid && mode === 'amount' && amountValid && !splitsForUrl && !convert && !storeRequested && !discount.open;
   const convertAnchorDisplay = convert
     ? displaySymbolFor(convert.anchorSymbol)
     : convertTargetDisplay;
@@ -613,11 +647,11 @@ export function QrGenerator() {
   const fiatHint = useMemo(() => {
     if (mode !== 'amount' || settings.token !== 'usdc') return null;
     if (!marketRates || !rateIsSane(marketRates.usdcJpy)) return null;
-    const value = Number(amount);
+    const value = Number(chargeAmount);
     if (!Number.isFinite(value) || value <= 0) return null;
     const yen = Math.round(value * marketRates.usdcJpy);
     return t('fiatApprox', { yen: yen.toLocaleString('en-US') });
-  }, [mode, settings.token, marketRates, amount, t]);
+  }, [mode, settings.token, marketRates, chargeAmount, t]);
   // USDC のときだけ、金額の下に参考レートを添える (作成画面の上の市場レートの帯の代わり・表示だけ)。
   const rateHint = useMemo(() => {
     if (settings.token !== 'usdc' || !marketRates || !rateIsSane(marketRates.usdcJpy)) return null;
@@ -744,7 +778,7 @@ export function QrGenerator() {
         : undefined;
 
   // QR を出せない理由 (未入力の項目)。下部の会計バーと PC の会計パネルで同じものを出す。
-  const notReadyKey = payUrl ? null : qrNotReadyKey(amountValid, receiverValid);
+  const notReadyKey = payUrl ? null : qrNotReadyKey(amountInputValid, receiverValid, discount.invalid);
   // 下部バーは幅が狭いので短い言い方 (「受取先が未設定」・会計画面の要約と同じ言葉)。右の会計パネルは指示の文。
   const notReadyText = notReadyKey ? t(`notReadyShort.${notReadyKey}`) : null;
 
@@ -818,6 +852,8 @@ export function QrGenerator() {
           acknowledgeFxWarning={acknowledgeFxWarning}
           recoverBillAmount={recoverBillAmount}
           recoverGasMode={recoverGasMode}
+          discount={discountAvailable ? discount : null}
+          chargeText={discount.wei !== null ? amountLabelText : null}
         />
 
         {/* 受取先が未設定のときだけ、会計画面に受取先の欄を出す (QR を出す唯一の前提・設定済みならシートの中)。 */}
@@ -890,7 +926,8 @@ export function QrGenerator() {
       <QrPreviewSection
         payUrl={payUrl}
         receiverValid={receiverValid}
-        amountValid={amountValid}
+        amountValid={amountInputValid}
+        discountInvalid={discount.invalid}
         amountText={
           mode === 'static'
             ? amountLabelText
@@ -1072,7 +1109,7 @@ export function QrGenerator() {
           lg は右サイドバー CTA を使うので非表示。payUrl 真のときのみ (Step3 と同じゲート)。 */}
       <QrMobileBar
         payUrl={payUrl}
-        amount={amount}
+        amount={chargeAmount}
         mode={mode}
         deployment={deployment}
         amountLabelText={amountLabelText}

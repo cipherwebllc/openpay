@@ -2711,3 +2711,162 @@ describe('PaymentForm — R14 二重送信 (in-flight 後の再 click)', () => {
     expect(standardMutate).not.toHaveBeenCalled();
   });
 });
+
+// 決済QR の値引き (plans/discount-common.md PR2)。amount = 支払額・disc = それに含まれる値引き。
+// 必須条件: 決済金額 = 電子レシート (合計・小計・値引き) = 取引履歴 (saleAmount・明細の値引き)。
+describe('PaymentForm — 決済QR の値引き (disc)', () => {
+  it('支払額は amount のまま・控えと履歴は 値引き前の 1 行 + 値引き (小計 10 − 値引き 0.2 = 合計 9.8)', async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.2&pname=Coffee`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setPayment('idle');
+    setGasQuote('ready', 0n);
+    const { rerender } = render(<PaymentForm />);
+
+    expect(screen.getByText('10 USDC から 0.2 USDC 値引き')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /9\.8 USDC を支払う/ }));
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({ saleAmount: 9_800_000n }),
+    );
+
+    setPayment('success');
+    rerender(<PaymentForm />);
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    const [receipt] = loadPayerReceipts();
+    expect(receipt).toEqual(
+      expect.objectContaining({ totalAmount: '9.8', subtotalAmount: '10', discountAmount: '0.2' }),
+    );
+    expect(receipt.lineItems?.[0]).toEqual(
+      expect.objectContaining({ name: 'Coffee', unitPrice: '10', amount: '10', discount: '0.2' }),
+    );
+    const [history] = loadHistory();
+    expect(history.saleAmount).toBe('9800000');
+    expect(history.lineItems?.[0]).toEqual(
+      expect.objectContaining({ unitPrice: '10', amount: '10', discount: '0.2' }),
+    );
+  });
+
+  it('商品名が無くても値引きの明細を組む (店名 → 「お支払い」)', async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.2`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setPayment('idle');
+    setGasQuote('ready', 0n);
+    const { rerender } = render(<PaymentForm />);
+    await user.click(screen.getByRole('button', { name: /9\.8 USDC を支払う/ }));
+    setPayment('success');
+    rerender(<PaymentForm />);
+    await waitFor(() => expect(loadHistory()).toHaveLength(1));
+    expect(loadHistory()[0].lineItems?.[0]).toEqual(
+      expect.objectContaining({ name: 'お支払い', amount: '10', discount: '0.2' }),
+    );
+  });
+
+  it('cross-chain で払っても、控えは 小計 / 値引き / 合計 と明細の値引きを保つ', async () => {
+    window.localStorage.clear();
+    const mintTxHash = `0x${'e'.repeat(64)}` as const;
+    setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.2&pname=Coffee`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    setPayment('idle');
+    render(<PaymentForm />);
+
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const props = crossChainHintSpy.mock.lastCall?.[0] as {
+      requiredAtomic: bigint;
+      onAttemptStart: (amount: bigint) => void;
+      onSuccess: (result: Record<string, unknown>) => void;
+    };
+    expect(props.requiredAtomic).toBe(9_800_000n);
+    act(() => {
+      props.onAttemptStart(9_800_000n);
+      props.onSuccess({
+        path: 'gateway',
+        settlement: 'transaction',
+        transferSpecHash: keccak256(encodedSpec()),
+        attestation: gatewayAttestation().attestation,
+        attestationSignature: gatewayAttestation().signature,
+        mintTxHash,
+        destChainId: baseSepolia.id,
+      });
+    });
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    const [receipt] = loadPayerReceipts();
+    expect(receipt).toEqual(
+      expect.objectContaining({
+        paymentMode: 'cross-chain',
+        totalAmount: '9.8',
+        subtotalAmount: '10',
+        discountAmount: '0.2',
+      }),
+    );
+    expect(receipt.lineItems?.[0]).toEqual(
+      expect.objectContaining({ unitPrice: '10', amount: '10', discount: '0.2' }),
+    );
+  });
+
+  it('この画面で送っていない決済 (前の画面の確認待ちを再照会して確定) には、この画面の値引き明細を付けない', async () => {
+    window.localStorage.clear();
+    setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.2&pname=Coffee`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    // onSubmit を通らずに成功へ (Pimlico の pending record を retryReceipt で確定した状態)。
+    setPayment('success');
+    render(<PaymentForm />);
+    await waitFor(() => expect(loadHistory()).toHaveLength(1));
+    expect(loadHistory()[0].lineItems ?? null).toBeNull();
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    expect(loadPayerReceipts()[0].discountAmount).toBeUndefined();
+  });
+
+  it('cross-chain の完了までに URL の値引きが変わっても、控えは試みた時点の値引きでそろえる', async () => {
+    window.localStorage.clear();
+    setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.2&pname=Coffee`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    setPayment('idle');
+    const { rerender } = render(<PaymentForm />);
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const first = crossChainHintSpy.mock.lastCall?.[0] as { onAttemptStart: (amount: bigint) => void };
+    act(() => first.onAttemptStart(9_800_000n));
+
+    setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.1&pname=Coffee`);
+    rerender(<PaymentForm />);
+    const latest = crossChainHintSpy.mock.lastCall?.[0] as { onSuccess: (result: Record<string, unknown>) => void };
+    act(() =>
+      latest.onSuccess({
+        path: 'gateway',
+        settlement: 'transaction',
+        transferSpecHash: keccak256(encodedSpec()),
+        attestation: gatewayAttestation().attestation,
+        attestationSignature: gatewayAttestation().signature,
+        mintTxHash: `0x${'d'.repeat(64)}`,
+        destChainId: baseSepolia.id,
+      }),
+    );
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    expect(loadPayerReceipts()[0]).toEqual(
+      expect.objectContaining({ subtotalAmount: '10', discountAmount: '0.2', totalAmount: '9.8' }),
+    );
+  });
+
+  it('値引きが正しくない QR は支払わせない (この QR の値引きが正しくありません)', () => {
+    setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.005`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    render(<PaymentForm />);
+    expect(screen.getByText(/この QR の値引きが正しくありません/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /USDC を支払う/ })).toBeNull();
+  });
+});

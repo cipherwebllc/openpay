@@ -83,7 +83,7 @@ vi.mock('@/components/StoreDeviceProvider', () => ({
 }));
 
 import { QrGenerator } from '@/components/QrGenerator';
-import { parseCheckoutParams } from '@/lib/url';
+import { calcCheckoutPayable, parseCheckoutParams } from '@/lib/url';
 import { LAST_QR_KEY } from '@/lib/offlineQr';
 
 const VALID = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -280,6 +280,24 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       if (!parsed.ok) return;
       expect(parsed.params.items).toEqual([{ name: 'お支払い', qty: 1, price: '500' }]);
       expect(parsed.params.mode).toBe('gasless');
+    });
+
+    it('値引きがあれば、受け渡しは値引き後の額・/checkout は値引き前の 1 行 + disc (plans/discount-common.md)', async () => {
+      const user = userEvent.setup();
+      seed();
+      await ready(user, '1000');
+      await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
+      await user.type(screen.getByLabelText('値引きの金額'), '20');
+      const [btn] = screen.getAllByRole('button', { name: /QRコードを表示する/ });
+      await user.click(btn);
+      await waitFor(() => expect(shownQr()).not.toBeNull());
+      expect(sd.start).toHaveBeenCalledWith(VALID, 980n * 10n ** 18n, 80002);
+      const parsed = parseCheckoutParams(new URL(shownQr()!).searchParams);
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.params.items).toEqual([{ name: 'お支払い', qty: 1, price: '1000' }]);
+      expect(parsed.params.discount).toBe('20');
+      expect(calcCheckoutPayable(parsed.params, 18)).toBe(980n * 10n ** 18n);
     });
 
     it('Kaia を選んでいれば、受け渡しも QR も Kaia (QR の写しと同じチェーンで作る)', async () => {

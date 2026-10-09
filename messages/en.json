@@ -608,12 +608,15 @@
     "quickAmountsDone": "Done",
     "notReady": {
       "amount": "Enter an amount",
-      "receiver": "Set a receiving wallet"
+      "receiver": "Set a receiving wallet",
+      "discount": "Fix the discount"
     },
     "notReadyShort": {
       "amount": "No amount yet",
-      "receiver": "No receiver set"
-    }
+      "receiver": "No receiver set",
+      "discount": "Check the discount"
+    },
+    "amountLabelBeforeDiscount": "Amount before discount ({symbol})"
   },
   "RecoverFee": {
     "disclosureGasOnly": "Payment fee: {feeHuman} JPYC (gas equivalent)",
@@ -741,7 +744,9 @@
     "emptyLandingTitle": "This is the customer payment page",
     "emptyLandingBody": "Scan a merchant's OpenPay QR or open a payment URL shared by a merchant to make a payment here. There is nothing to pay on this page alone.",
     "emptyLandingToHome": "Open OpenPay (merchant)",
-    "emptyLandingToHistory": "View history on this browser"
+    "emptyLandingToHistory": "View history on this browser",
+    "discountLine": "{discount} {symbol} off {subtotal} {symbol}",
+    "discountItemName": "Payment"
   },
   "SignReassurance": {
     "headline": "All this payment asks for is a single signature, valid only for this one payment.",
@@ -2654,7 +2659,7 @@
     "amountInput": "Discount amount",
     "percentInput": "Discount rate (%)",
     "percentNote": "({percent}%)",
-    "errorAmount": "Enter an amount smaller than the subtotal, in steps of {unit}.",
+    "errorAmount": "Enter less than the amount before the discount, in steps of {unit}.",
     "errorPercent": "Enter a rate above 0 and below 100 (up to 2 decimals).",
     "errorPercentTooSmall": "At this rate the discount is less than {unit}."
   },

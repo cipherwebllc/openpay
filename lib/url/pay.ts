@@ -10,6 +10,8 @@
 //          旧名 "direct" は廃止。"direct" を受けたら "standard" に正規化する
 //          legacy alias を parser で提供 (既発行 QR の互換維持)。
 //   split  (任意, "0xB:30,0xC:20" 形式) — 追加受取人と分配 %。to が残余 % を取得
+//   disc   (任意) — amount に含まれる値引き (値引き前 = amount + disc)。表示と記録だけに使い、支払いの正本は
+//          amount のまま (plans/discount-common.md)。金額ありの QR だけ・為替換算 (refAmt) とは併用しない
 //
 // `gas` パラメタはネットワーク手数料の負担者 (gasless モード固有):
 //   gas=customer (default): 顧客がネットワーク手数料を上乗せ支払い (画面に明示表示)
@@ -18,14 +20,16 @@
 //   (build/parse 共に出力しない / 無視する)。
 //
 // 旧 `fee=include`/`fee=exclude` パラメタは廃止 (parser は silently ignore)。
-import { getAddress, isAddress } from 'viem';
+import { formatUnits, getAddress, isAddress, parseUnits } from 'viem';
 import type { Address } from 'viem';
 import type { ChainSlug } from '../chains';
+import { parseDiscountAmount } from '../discount';
 import type { GasMode, PayMode } from '../fee';
 import { rateIsSane } from '../fx';
-import { type TaxCategory } from '../tax';
+import { taxDisplayDecimals, type TaxCategory } from '../tax';
 import {
   DEFAULT_CHAIN_FOR_SYMBOL,
+  deploymentForSlug,
   isValidTokenSymbol,
   symbolHasDeployment,
   type TokenSymbol,
@@ -33,6 +37,7 @@ import {
 import {
   appendTaxReceiptParams,
   DECIMAL_PATTERN,
+  exceedsTokenPrecision,
   gaslessSupportError,
   parseGasParam,
   parseTaxReceiptParams,
@@ -66,6 +71,10 @@ export type PayParams = {
   chain?: ChainSlug;
   gas: GasMode;
   amount?: string;
+  // amount に含まれる値引き (トークン単位の 10 進・値引き前 = amount + discount)。控え・履歴・インボイスに
+  // 「小計 → 値引き → 合計」を出すための添え物で、請求額 (amount) は変えない (為替換算の priceRefAmount と同じ型)。
+  // 古い画面で開いても値引きの表示が出ないだけで、払う額は同じ。
+  discount?: string;
   mode: PayMode;
   split?: SplitEntry[];
   // cross-chain 受信を許可するかの flag (Circle Gateway / CCTP V2 経由)。
@@ -213,6 +222,7 @@ export function buildPayPath(params: PayParams): string {
   }
   if (params.amount && params.amount.length > 0) {
     sp.set('amount', params.amount);
+    if (params.discount) sp.set('disc', params.discount);
   }
   // gasless は既定値なので URL に出さず、旧 QR との互換性を保つ。
   if (params.mode === 'standard') {
@@ -270,6 +280,7 @@ const PAY_PARAM_KEYS = [
   'chain',
   'gas',
   'amount',
+  'disc',
   'mode',
   'split',
   'crossChain',
@@ -291,6 +302,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   const chainRaw = searchParams.get('chain');
   const gasRaw = searchParams.get('gas');
   const amount = searchParams.get('amount');
+  const discRaw = searchParams.get('disc');
   const mode = searchParams.get('mode');
   const split = searchParams.get('split');
   const crossChainRaw = searchParams.get('crossChain');
@@ -413,6 +425,24 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
   const fxRate =
     fxRateRaw && rateIsSane(Number(fxRateRaw)) ? fxRateRaw : undefined;
 
+  // 値引きは fail-closed: 金額ありの QR で、為替換算ではなく、形式・表示の最小単位 (JPYC 1 円・USDC 0.01) が
+  // 正しいときだけ。黙って捨てると控えの小計と値引きが消えるので「この QR の値引きが正しくありません」で止める。
+  let discount: string | undefined;
+  if (discRaw !== null) {
+    const decimals = deploymentForSlug(token, chainSlug).decimals;
+    const isTokenAmount = (v: string | null): v is string =>
+      v !== null && DECIMAL_PATTERN.test(v) && !exceedsTokenPrecision(v, decimals);
+    const amountWei = isTokenAmount(amount) ? parseUnits(amount, decimals) : 0n;
+    const discountWei =
+      amountWei > 0n && refAmtRaw === null && isTokenAmount(discRaw)
+        ? parseDiscountAmount(discRaw, amountWei + parseUnits(discRaw, decimals), decimals, taxDisplayDecimals(token))
+        : null;
+    if (discountWei === null) {
+      return { ok: false, errorKind: 'invalid', ...urlFail('invalidDiscount') };
+    }
+    discount = formatUnits(discountWei, decimals);
+  }
+
   // 記帳補助メタ (任意・sanitize + cap)。不正/欠落は undefined (= 従来 QR と同じ挙動)。
   const storeName = storeRaw ? sanitizeText(storeRaw, PAY_STORE_NAME_MAX) : undefined;
   const productName = pnameRaw
@@ -431,6 +461,7 @@ export function parsePayParams(searchParams: SearchParamsLike): ParsedPayParams 
       chain: chainSlug,
       gas,
       amount: amount && amount.length > 0 ? amount : undefined,
+      ...(discount ? { discount } : {}),
       mode: normalizedMode,
       split: parsedSplit,
       crossChain,

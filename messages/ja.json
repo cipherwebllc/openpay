@@ -608,12 +608,15 @@
     "quickAmountsDone": "完了",
     "notReady": {
       "amount": "金額を入れてください",
-      "receiver": "受取先を設定してください"
+      "receiver": "受取先を設定してください",
+      "discount": "値引きを直してください"
     },
     "notReadyShort": {
       "amount": "金額が未入力",
-      "receiver": "受取先が未設定"
-    }
+      "receiver": "受取先が未設定",
+      "discount": "値引きを確認"
+    },
+    "amountLabelBeforeDiscount": "値引き前の金額 ({symbol})"
   },
   "RecoverFee": {
     "disclosureGasOnly": "決済手数料: {feeHuman} JPYC（ガス相当）",
@@ -741,7 +744,9 @@
     "emptyLandingTitle": "ここは「顧客向け」決済ページです",
     "emptyLandingBody": "店舗の OpenPay QR を読み取るか、店舗から共有された決済 URL を開くとここで決済できます。決済情報がないため、このページ単体ではご利用いただけません。",
     "emptyLandingToHome": "OpenPay (店舗向け) を開く",
-    "emptyLandingToHistory": "このブラウザの履歴を見る"
+    "emptyLandingToHistory": "このブラウザの履歴を見る",
+    "discountLine": "{subtotal} {symbol} から {discount} {symbol} 値引き",
+    "discountItemName": "お支払い"
   },
   "SignReassurance": {
     "headline": "この支払いで求められるのは「署名」1回だけ。この1回のお支払いにだけ有効です。",
@@ -2654,7 +2659,7 @@
     "amountInput": "値引きの金額",
     "percentInput": "割引率 (%)",
     "percentNote": "（{percent}%）",
-    "errorAmount": "小計より小さい金額を、{unit} 単位で入れてください",
+    "errorAmount": "値引き前の金額より小さい金額を、{unit} 単位で入れてください",
     "errorPercent": "割引率は 0 より大きく 100 未満で入れてください（小数 2 桁まで）",
     "errorPercentTooSmall": "この割引率では値引きが {unit} 未満になります"
   },

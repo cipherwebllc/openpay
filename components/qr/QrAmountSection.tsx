@@ -15,6 +15,8 @@ import { useTranslations } from 'next-intl';
 import { RecoverFeeNotice } from '../RecoverFeeNotice';
 import { QuickAmountEditor } from './QuickAmountEditor';
 import { ConvertPanel } from './ConvertPanel';
+import { DiscountField } from '../DiscountField';
+import type { DiscountInput } from '@/hooks/useDiscountInput';
 import { QUICK_AMOUNT_MAX, type QrSettings } from '@/hooks/useQrSettings';
 import type { TokenDeployment } from '@/lib/tokens';
 import type { GasMode } from '@/lib/fee';
@@ -53,6 +55,8 @@ export function QrAmountSection({
   acknowledgeFxWarning,
   recoverBillAmount,
   recoverGasMode,
+  discount,
+  chargeText,
 }: {
   /** カードの先頭 (お店の設定の要約)。 */
   header: ReactNode;
@@ -81,9 +85,17 @@ export function QrAmountSection({
   acknowledgeFxWarning: () => void;
   recoverBillAmount: bigint | null;
   recoverGasMode: GasMode;
+  /** 値引き (任意・plans/discount-common.md)。金額ありの QR・為替換算なしのときだけ渡す (null = 出さない)。 */
+  discount: DiscountInput | null;
+  /** 値引き後の請求金額 (例「980 JPYC」)。使える値引きがあるときだけ。 */
+  chargeText: string | null;
 }) {
   const t = useTranslations('QrGenerator');
   const amountInputRef = useRef<HTMLInputElement>(null);
+  // 値引きを開いている間は、入力欄が「値引き前の金額」だと分かるように見出しを変える (請求金額は値引きの下に出す)。
+  const amountLabel = discount?.open
+    ? t('amountLabelBeforeDiscount', { symbol: deployment.displaySymbol })
+    : t('amountLabel', { symbol: deployment.displaySymbol });
   // 金額は桁区切りつきで見せる (1500 → 1,500・よく使う金額や QR の画面と同じ表記)。持つ値は区切りなしのまま
   // (QR の URL に入るのはこの値)。編集ごとに caret より左の文字の数 (区切りを除く) を覚えておき、描画後に同じ
   // 位置へ戻す (区切りが増減しても末尾へ飛ばない)。値が変わらない編集でも描画し直して置き直す。
@@ -159,7 +171,7 @@ export function QrAmountSection({
         {/* 狭い画面 (英語・360px) では切替を次の行の右へ回す (見出しを 2 行に割らない・カードからはみ出さない)。 */}
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
           <h2 id="qr-amount-heading" className="whitespace-nowrap text-sm font-semibold text-slate-700">
-            {t('amountLabel', { symbol: deployment.displaySymbol })}
+            {amountLabel}
           </h2>
           {/* 金額指定 / 据え置き (金額なし) の切替。金額が主役なので小さく右に置く。 */}
           <div className="ml-auto inline-flex shrink-0 rounded-full bg-slate-100 p-0.5">
@@ -221,9 +233,7 @@ export function QrAmountSection({
                   resetConvert();
                 }}
                 placeholder={settings.token === 'jpyc' ? '1,000' : '10.00'}
-                aria-label={t('amountLabel', {
-                  symbol: deployment.displaySymbol,
-                })}
+                aria-label={amountLabel}
                 className="min-w-0 flex-1 bg-transparent text-right text-4xl font-bold tabular-nums tracking-tight text-slate-900 placeholder:text-slate-300 focus:outline-none sm:text-5xl"
                 autoFocus
               />
@@ -240,6 +250,24 @@ export function QrAmountSection({
               <div className="mt-0.5 text-right text-xs text-slate-500">{rateHint}</div>
             )}
           </div>
+
+          {/* 値引き (任意)。使わない店には「値引きを追加」の 1 行だけ。使える値引きがあれば値引き後の請求金額を添える。 */}
+          {discount && (
+            <div className="space-y-2 text-sm">
+              <DiscountField
+                discount={discount}
+                idPrefix="qr"
+                symbol={deployment.displaySymbol}
+                decimals={deployment.decimals}
+              />
+              {chargeText && (
+                <p className="flex items-baseline justify-between px-1">
+                  <span className="font-semibold text-slate-700">{t('bottomAmountLabel')}</span>
+                  <span className="text-xl font-bold tabular-nums text-slate-900">{chargeText}</span>
+                </p>
+              )}
+            </div>
+          )}
 
           {/* よく使う金額: 1 行のチップ (通貨記号は金額欄に 1 度だけ・読み上げには付ける)。編集は右の小さなボタンから。 */}
           <div>
