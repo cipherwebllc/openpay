@@ -12,17 +12,28 @@ export function orderPaymentHoldUntil(record: OrderDelivery, loadedAt: number): 
     loadedAt + AUTHORIZATION_VALIDITY_WINDOW_SEC * 1000);
 }
 
+// How long to keep reading after the device-clock expiry checkpoint while the chain cannot yet prove
+// expiry (finality lag / unreadable status). The hold itself is never lifted without a chain result.
+const POST_EXPIRY_READ_MS = 15 * 60_000;
+
 // A background reader owns its timers/abort controller, never the current payment's recovery latch.
+// The same-merchant payment hold is lifted only by a chain result (onResolved: settled, or expired
+// proven at a finalized block). A device-clock expiry or an unreadable status never lifts it: the old
+// signature may still settle, and a second signature would double-pay (#767 Codex re-review P1).
 export function recoverOrderDelivery(
   record: OrderDelivery,
   waitForReceipt: (hash: Hex, timeout: number) => Promise<{ status: 'success' | 'reverted' }>,
   onResolved: (outcome: Exclude<RelayRecoveryOutcome, { kind: 'unknown' }>) => void,
-  { loadedAt, onHoldReleased }: { loadedAt: number; onHoldReleased: () => void },
+  { loadedAt }: { loadedAt: number },
 ): () => void {
   let active = true;
   let generation = 0;
   let cancelRound: (() => void) | undefined;
   const holdUntil = orderPaymentHoldUntil(record, loadedAt);
+  // Count the bounded wait from this page load too: a record restored long after its expiry must still
+  // get full ordinary rounds (two consecutive proven-expired reads) instead of stopping right after the
+  // single checkpoint read and holding the shop forever (#767 Codex 3rd review P1).
+  const readUntil = Math.max(holdUntil, loadedAt) + POST_EXPIRY_READ_MS;
   const run = async (singleRead: boolean) => {
     const current = ++generation;
     const isCurrent = () => active && current === generation;
@@ -32,8 +43,8 @@ export function recoverOrderDelivery(
       for (const [timer, wake] of sleeps) { clearTimeout(timer); wake(); }
       for (const [timer, controller] of requests) { clearTimeout(timer); controller.abort(); }
     };
-    // Retry live authorizations read-only. After the expiry checkpoint, keep one ordinary
-    // round for unused/revert evidence: a single unused read must not delete the opening.
+    // Retry read-only until a chain result. The device-clock checkpoint only starts a fresh read;
+    // past it, keep reading for a bounded time (finality catching up), then stop and keep the hold.
     do {
       const outcome = await resolveRelayIntent({
         intent: record.intent, isMounted: isCurrent,
@@ -50,17 +61,14 @@ export function recoverOrderDelivery(
         onResolved(outcome);
         return;
       }
-      if (singleRead) {
-        onHoldReleased();
-        singleRead = false;
-      } else if (Date.now() >= holdUntil) return;
+      singleRead = false;
+      if (Date.now() >= readUntil) return;
     } while (isCurrent());
   };
   const start = (singleRead: boolean) => {
     void run(singleRead).catch(() => {
-      // RPC/storage failures retain the opening rather than fabricate payment or abandonment.
-      // At expiry an unsuccessful read releases only the hold, with staff-assistance wording.
-      if (active && singleRead) onHoldReleased();
+      // RPC/storage failures retain the opening and the hold rather than fabricate payment or
+      // abandonment (a reload starts a fresh read).
     });
   };
   const expiryTimer = setTimeout(() => {

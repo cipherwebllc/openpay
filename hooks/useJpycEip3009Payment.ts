@@ -455,27 +455,14 @@ export function useJpycEip3009Payment(
                 // A background result only advances delivery; it cannot complete the current checkout.
                 backgroundOrdersRef.current = backgroundOrdersRef.current.flatMap((r) => r === record ? resolved ? [resolved] : [] : [r]);
                 setBackgroundOrderDeliveries(backgroundOrdersRef.current);
-              }, { loadedAt: backgroundLoadedAtRef.current, onHoldReleased: () => {
-                if (!active) return;
-                heldOrdersRef.current.delete(record);
-                updateOrderHold((v) => v + 1);
-              } }));
+              }, { loadedAt: backgroundLoadedAtRef.current }));
             }
           }).catch(() => {
-            // A failed chunk cannot read status. Keep the opening and expiry hold, then show
-            // staff advice; the loading failure must not strand payments at another checkout.
+            // A failed chunk cannot read status. Keep the opening and the same-merchant hold (only a
+            // chain result lifts it; a device-clock expiry would let a second signature double-pay —
+            // #767 Codex re-review P1) and show staff advice. Other merchants are not held.
             if (!active) return;
             setOrderDeliveryLoadError(true);
-            for (const record of previous.filter((r) => r.state === 'signed')) {
-              const until = Math.min(Number(record.intent.validBefore) * 1000,
-                record.intent.issuedAt + AUTHORIZATION_VALIDITY_WINDOW_SEC * 1000,
-                backgroundLoadedAtRef.current + AUTHORIZATION_VALIDITY_WINDOW_SEC * 1000);
-              const timer = setTimeout(() => {
-                heldOrdersRef.current.delete(record);
-                updateOrderHold((v) => v + 1);
-              }, Math.max(0, until - Date.now()));
-              cancelBackground.push(() => clearTimeout(timer));
-            }
           });
         }
         if (!intent) return;

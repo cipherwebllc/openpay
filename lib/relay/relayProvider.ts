@@ -42,6 +42,11 @@ import { env } from '@/lib/env';
 import { resolveDeployment } from '@/lib/tokens';
 import { isRecoverRequiredChain } from './forwarderConfig';
 import { findAuthorizationUsedInWindow, type AuthorizationWindow } from './authorizationUsedLookup';
+import {
+  observeAuthorizationExpiry,
+  type AuthorizationExpiryObserveClient,
+  type AuthorizationExpiryObservation,
+} from '@/lib/x402/authorizationExpiry';
 import type { Eip3009Authorization } from '@/lib/jpycEip3009';
 import {
   relayJpycAuthorization,
@@ -213,6 +218,26 @@ export async function readAuthorizationUsed(
     abi: AUTHORIZATION_STATE_ABI,
     functionName: 'authorizationState',
     args: [from, nonce],
+  });
+}
+
+/**
+ * 署名の「期限切れ未使用」をチェーンで観測する (relay status 用・第 7 回レビュー A6)。finalized ブロックの時刻と、
+ * その hash に固定した authorizationState (EIP-1898)・canonical hash で判定する (lib/x402/authorizationExpiry.ts)。
+ */
+export async function readAuthorizationExpiry(
+  chainId: number,
+  token: Address,
+  from: Address,
+  nonce: Hex,
+  validBefore: bigint,
+): Promise<AuthorizationExpiryObservation> {
+  return observeAuthorizationExpiry({
+    client: publicClientFor(chainId) as unknown as AuthorizationExpiryObserveClient,
+    token,
+    payer: from,
+    nonce,
+    validBefore,
   });
 }
 

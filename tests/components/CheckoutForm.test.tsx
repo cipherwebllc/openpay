@@ -3648,16 +3648,19 @@ describe('A2c saved-order-only notification', () => {
     expect(screen.getByText(kind === 'different-shop' ? '以前のお支払いを確認中です。このお店へのお支払いは続けられます。' : '前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
     await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(statusReadTimes.at(-1)).toBe(holdUntil);
-    expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeEnabled();
-    expect(screen.getByText(kind === 'different-shop' ? '以前のお支払いを確認中です。このお店へのお支払いは続けられます。' : '前回の支払いの状態を確認できませんでした。支払い直す前にお店のスタッフに確認してください。')).toBeInTheDocument();
+    // #767 Codex 再レビュー P1: 端末の時計の期限で読めない (indeterminate) 結果は、チェーンの結果ではないので同じ店の保留を
+    // 外さない (旧署名がまだ成立しうるのに新しい署名を許すと二重払い)。別の店は従来どおり払える。
+    if (kind === 'different-shop') expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeEnabled();
+    else expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeDisabled();
+    expect(screen.getByText(kind === 'different-shop' ? '以前のお支払いを確認中です。このお店へのお支払いは続けられます。' : '前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
     expect(screen.queryByText('お支払いが完了しました')).toBeNull();
     expect(loadOrderDelivery().kind).toBe('ready');
     expect(fetchSpy.mock.calls.every(([url]) => url === '/api/relay/jpyc/status')).toBe(true);
     page.unmount(); client.clear(); fetchSpy.mockRestore(); vi.useRealTimers();
   });
-  // Round 4 regression list: wake exactly at expiry, keep the button/confirming notice
-  // until the read finishes (including timeout), then show staff advice; a settled read
-  // delivers only the old order. Other merchants remain payable throughout.
+  // Round 4 regression list: wake exactly at expiry and keep the button/confirming notice while
+  // the read runs. A settled read delivers only the old order and lifts the hold; an unreadable
+  // or unproven read (no finalized expiry proof) keeps the hold (#767 Codex re-review P1).
   it.each(['unused', 'indeterminate', 'network', 'timeout', 'settled'] as const)('expiry read holds payment until %s completes and updates the notice', async (outcome) => {
     vi.useFakeTimers(); vi.setSystemTime(new Date('2026-09-24T00:00:00Z'));
     setupRelayReady(); const record = unresolvedRecord(); saveOrderDelivery(record);
@@ -3694,16 +3697,17 @@ describe('A2c saved-order-only notification', () => {
     await act(async () => vi.advanceTimersByTimeAsync(9999));
     expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeDisabled();
     await act(async () => outcome === 'timeout' ? vi.advanceTimersByTimeAsync(1) : finishRead());
-    expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeEnabled();
-    expect(screen.queryByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeNull();
     expect(screen.queryByText('お支払いが完了しました')).toBeNull();
     if (outcome === 'settled') {
+      expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeEnabled();
+      expect(screen.queryByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeNull();
       await act(async () => vi.advanceTimersByTimeAsync(0));
       const notify = fetchSpy.mock.calls.find(([url]) => url !== '/api/relay/jpyc/status');
       expect(notify?.[1]?.body).toBe(resolveOrderDelivery(record, `0x${'ab'.repeat(32)}`).notifyBody);
       expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
     } else {
-      expect(screen.getByText('前回の支払いの状態を確認できませんでした。支払い直す前にお店のスタッフに確認してください。')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /JPYC を支払う/ })).toBeDisabled();
+      expect(screen.getByText('前回の支払いを確認中です。まだ支払い直さないでください。')).toBeInTheDocument();
       expect(loadOrderDelivery().kind).toBe('ready');
     }
     page.unmount(); client.clear(); vi.mocked(usePublicClient).mockReset();

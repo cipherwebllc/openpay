@@ -30,8 +30,8 @@ describe('background order expiry checkpoint', () => {
       reads.push({ at: Date.now(), signal: init!.signal!, finish });
     }));
     const receipt = vi.fn().mockResolvedValue({ status: 'success' });
-    const resolved = vi.fn(); const released = vi.fn();
-    const cancel = recoverOrderDelivery(saved, receipt, resolved, { loadedAt: Date.now(), onHoldReleased: released });
+    const resolved = vi.fn();
+    const cancel = recoverOrderDelivery(saved, receipt, resolved, { loadedAt: Date.now()});
     await vi.advanceTimersByTimeAsync(3000);
     expect(reads).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(4000);
@@ -40,22 +40,84 @@ describe('background order expiry checkpoint', () => {
     expect(reads[0].signal.aborted).toBe(true);
     reads[0].finish(Response.json({ ok: true, state: 'settled', txHash }));
     await vi.advanceTimersByTimeAsync(0);
-    expect(released).not.toHaveBeenCalled(); expect(resolved).not.toHaveBeenCalled(); expect(receipt).not.toHaveBeenCalled();
+    expect(resolved).not.toHaveBeenCalled(); expect(receipt).not.toHaveBeenCalled();
     reads[1].finish(Response.json({ ok: true, state: 'indeterminate' }));
     await vi.advanceTimersByTimeAsync(0);
-    expect(released).toHaveBeenCalledOnce(); expect(resolved).not.toHaveBeenCalled();
+    // An unreadable checkpoint is not a chain result: nothing is resolved (the hold stays — #767 P1).
+    expect(resolved).not.toHaveBeenCalled();
     cancel();
   });
 
-  it('checks an already expired record immediately, then still requires two unused reads to abandon it', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'unused' }));
-    const resolved = vi.fn(); const released = vi.fn();
-    const cancel = recoverOrderDelivery(record(-1), vi.fn(), resolved, { loadedAt: Date.now(), onHoldReleased: released });
+  it('checks an already expired record immediately, then still requires two unused reads (with on-chain expiry proof) to abandon it', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'unused', expiry: 'expired' }));
+    const resolved = vi.fn();
+    const cancel = recoverOrderDelivery(record(-1), vi.fn(), resolved, { loadedAt: Date.now()});
     await vi.advanceTimersByTimeAsync(0);
-    expect(fetchSpy).toHaveBeenCalledOnce(); expect(released).toHaveBeenCalledOnce(); expect(resolved).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledOnce(); expect(resolved).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(3000);
     expect(resolved).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(6000);
+    expect(resolved).toHaveBeenCalledWith({ kind: 'expired' });
+    cancel();
+  });
+
+  // 第 7 回レビュー A6 (再レビュー反映): 端末の時計の holdUntil で読んだ結果がチェーン上でまだ期限前 (live) なら、
+  // 保留を外さずに照会を続ける (旧署名がまだ成立しうる間に同じ店の新しい署名を許さない)。
+  it('keeps the hold while the chain reports the signature live, then abandons once finality proves expiry', async () => {
+    let expiry: 'live' | 'expired' = 'live';
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'unused', expiry }));
+    const resolved = vi.fn();
+    const cancel = recoverOrderDelivery(record(-1), vi.fn(), resolved, { loadedAt: Date.now()});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledOnce(); expect(resolved).not.toHaveBeenCalled();
+    // The ordinary rounds continue while live, still without resolving.
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetchSpy).toHaveBeenCalledTimes(2); expect(resolved).not.toHaveBeenCalled();
+    expiry = 'expired';
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(resolved).toHaveBeenCalledWith({ kind: 'expired' });
+    cancel();
+  });
+
+  it('does not abandon on a plain unused read without on-chain expiry proof, even after the device clock passed expiry', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'unused' }));
+    const resolved = vi.fn();
+    const cancel = recoverOrderDelivery(record(-1), vi.fn(), resolved, { loadedAt: Date.now()});
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(resolved).not.toHaveBeenCalled();
+    cancel();
+  });
+
+  // #767 Codex 再レビュー P1: 端末の時計の期限を過ぎ、チェーンが読めない (live の後でも) ときに保留を外すと、旧署名が
+  // まだ成立しうるのに同じ店の新しい署名を許して二重払いになりうる。チェーンの結果 (onResolved) 以外では外さない。
+  it('never resolves on unreadable rounds after expiry (live → indeterminate), and stops reading after the bounded wait', async () => {
+    let live = true;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      Response.json(live ? { ok: true, state: 'unused', expiry: 'live' } : { ok: true, state: 'indeterminate' }));
+    const resolved = vi.fn();
+    const cancel = recoverOrderDelivery(record(-1), vi.fn(), resolved, { loadedAt: Date.now() });
+    await vi.advanceTimersByTimeAsync(0);
+    live = false;
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(resolved).not.toHaveBeenCalled();
+    // Reads continue (finality may still catch up) for the bounded wait after the checkpoint, then stop.
+    await vi.advanceTimersByTimeAsync(7 * 60_000);
+    const readsAtCap = fetchSpy.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(fetchSpy.mock.calls.length).toBe(readsAtCap);
+    expect(resolved).not.toHaveBeenCalled();
+    cancel();
+  });
+
+  it('a record restored long after its expiry still completes ordinary rounds and abandons on proven expiry (#767 P1)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'unused', expiry: 'expired' }));
+    const resolved = vi.fn();
+    const cancel = recoverOrderDelivery(record(-20 * 60), vi.fn(), resolved, { loadedAt: Date.now() });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledOnce(); expect(resolved).not.toHaveBeenCalled();
+    // The single checkpoint read alone cannot abandon (two consecutive proven reads are required): the
+    // ordinary round that follows (3 s + 6 s backoff) must still run even though expiry + 15 min has passed.
+    await vi.advanceTimersByTimeAsync(9000);
     expect(resolved).toHaveBeenCalledWith({ kind: 'expired' });
     cancel();
   });
@@ -68,15 +130,13 @@ describe('background order expiry checkpoint', () => {
     const receipt = vi.fn((_hash, timeout: number) => new Promise<{ status: 'success' }>((_resolve, reject) => {
       setTimeout(() => reject(new Error('receipt unavailable')), timeout);
     }));
-    const resolved = vi.fn(); const released = vi.fn();
-    const cancel = recoverOrderDelivery(saved, receipt, resolved, { loadedAt: Date.now(), onHoldReleased: released });
+    const resolved = vi.fn();
+    const cancel = recoverOrderDelivery(saved, receipt, resolved, { loadedAt: Date.now()});
     await vi.advanceTimersByTimeAsync(10_000);
     expect(receipt).toHaveBeenCalledWith(txHash, 1000);
-    expect(released).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(999);
-    expect(released).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    expect(released).toHaveBeenCalledOnce(); expect(resolved).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    // A receipt that cannot be read within the checkpoint budget is not a chain result.
+    expect(resolved).not.toHaveBeenCalled();
     cancel();
   });
 
@@ -86,13 +146,13 @@ describe('background order expiry checkpoint', () => {
       signal = init!.signal!;
       signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
     }));
-    const resolved = vi.fn(); const released = vi.fn();
-    const cancel = recoverOrderDelivery(record(1), vi.fn(), resolved, { loadedAt: Date.now(), onHoldReleased: released });
+    const resolved = vi.fn();
+    const cancel = recoverOrderDelivery(record(1), vi.fn(), resolved, { loadedAt: Date.now()});
     await vi.advanceTimersByTimeAsync(1000);
     cancel();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(signal!.aborted).toBe(true);
-    expect(released).not.toHaveBeenCalled(); expect(resolved).not.toHaveBeenCalled();
+    expect(resolved).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
 });
