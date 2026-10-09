@@ -70,12 +70,12 @@ export async function resolveAddress(
   throw new ResolveAddressError(INPUT_FORMAT_MESSAGE);
 }
 
-// viem の既定 (strict でない) の getEnsAddress は、Universal Resolver の HttpError (CCIP-Read のゲートウェイの失敗) まで
-// 「登録されていない = null」にする。それでは一時的な 5xx・429 が確定した失敗 (ResolveAddressError = 再試行しない) に
-// 化け、会計中の QR を閉じる。strict で例外を受け、確定した「無い」だけを分ける (viem の isNullUniversalResolverError の
-// 一覧から HttpError を外し、HttpError はゲートウェイが 404 = その名前を知らないと答えたときだけ確定とする)。
+// viem の既定 (strict でない) の getEnsAddress は、Universal Resolver の HttpError (CCIP-Read のゲートウェイの失敗) や
+// ResolverError (resolver 自身の revert) まで「登録されていない = null」にする。それでは一時的な失敗 (ゲートウェイの 5xx・
+// 429・404 (ERC-3668: その sender に対応しないゲートウェイも 404 を返す)・Basenames の CCIP proof の期限切れ) が確定した
+// 失敗 (ResolveAddressError = 再試行しない) に化け、会計中の QR を閉じる。strict で例外を受け、名前に resolver が無い・
+// resolver が契約でない・addr に対応しない、の「無い」と確かめられるものだけを確定とする (他は再試行に回す)。
 const UNREGISTERED_RESOLVER_ERRORS = new Set([
-  'ResolverError',
   'ResolverNotContract',
   'ResolverNotFound',
   'UnsupportedResolverProfile',
@@ -86,6 +86,5 @@ function isDefinitelyUnregistered(err: unknown): boolean {
   const cause = err.walk((e) => e instanceof ContractFunctionRevertedError);
   if (!(cause instanceof ContractFunctionRevertedError)) return false;
   const errorName = cause.data?.errorName;
-  if (errorName === 'HttpError') return Number(cause.data?.args?.[0]) === 404;
   return errorName !== undefined && UNREGISTERED_RESOLVER_ERRORS.has(errorName);
 }

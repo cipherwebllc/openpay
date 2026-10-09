@@ -161,11 +161,12 @@ describe('resolveAddress (ENS / Basenames を mainnet Universal Resolver で解�
 
   // viem の非 strict は Universal Resolver の HttpError (CCIP-Read のゲートウェイの失敗) まで null にする。
   // 実際の viem のエラー (ContractFunctionRevertedError を ContractFunctionExecutionError で包んだ形) で分類を固定する。
-  async function resolverRevert(errorName: 'HttpError' | 'ResolverNotFound', args: readonly unknown[]) {
+  async function resolverRevert(errorName: 'HttpError' | 'ResolverNotFound' | 'ResolverError', args: readonly unknown[]) {
     const actual = await vi.importActual<typeof import('viem')>('viem');
     const abi = [
       { type: 'error', name: 'HttpError', inputs: [{ name: 'status', type: 'uint16' }, { name: 'message', type: 'string' }] },
       { type: 'error', name: 'ResolverNotFound', inputs: [{ name: 'name', type: 'bytes' }] },
+      { type: 'error', name: 'ResolverError', inputs: [{ name: 'errorData', type: 'bytes' }] },
     ] as const;
     const data = actual.encodeErrorResult({ abi, errorName, args } as Parameters<typeof actual.encodeErrorResult>[0]);
     const reverted = new actual.ContractFunctionRevertedError({ abi, data, functionName: 'resolve' });
@@ -181,7 +182,6 @@ describe('resolveAddress (ENS / Basenames を mainnet Universal Resolver で解�
   }
 
   it.each([
-    ['ゲートウェイの 404 (その名前を知らない)', 'HttpError', [404, 'Not Found']],
     ['resolver が無い', 'ResolverNotFound', ['0x00']],
   ] as const)('%s は「登録されていません」の ResolveAddressError (再試行しない)', async (_label, errorName, args) => {
     const error = await resolverRevert(errorName, args);
@@ -198,7 +198,8 @@ describe('resolveAddress (ENS / Basenames を mainnet Universal Resolver で解�
     expect(getEnsAddress.mock.calls[0][0]).toMatchObject({ strict: true });
   });
 
-  it.each([502, 429, 500])('ゲートウェイの一時的な失敗 (HttpError %i) は ResolveAddressError にしない (再試行される)', async (status) => {
+  // 404 も確定にしない: ERC-3668 ではその sender に対応しないゲートウェイも 404 を返し、別のゲートウェイで解決できることがある。
+  it.each([502, 429, 500, 404])('ゲートウェイの失敗 (HttpError %i) は ResolveAddressError にしない (再試行される)', async (status) => {
     const error = await resolverRevert('HttpError', [status, 'gateway failure']);
     const getEnsAddress = viemLikeGetEnsAddress(error);
     vi.doMock('viem', async () => {
@@ -208,6 +209,22 @@ describe('resolveAddress (ENS / Basenames を mainnet Universal Resolver で解�
     const { resolveAddress } = await import('@/lib/resolveAddress');
     const { ResolveAddressError } = await import('@/lib/resolveAddressError');
     const err = await resolveAddress('vitalik.eth').catch((e: unknown) => e);
+    expect(err).toBe(error);
+    expect(err).not.toBeInstanceOf(ResolveAddressError);
+  });
+
+  // ResolverError は resolver の revert を包むだけで、Basenames の CCIP proof の期限切れ (SignatureExpired) のような一時的な
+  // 失敗も含む。登録済みの名前を「登録されていません」にしないよう、再試行に回す。
+  it('resolver の revert (ResolverError・proof の期限切れ等) は ResolveAddressError にしない (再試行される)', async () => {
+    const error = await resolverRevert('ResolverError', ['0x0819bdcd']);
+    const getEnsAddress = viemLikeGetEnsAddress(error);
+    vi.doMock('viem', async () => {
+      const actual = await vi.importActual<typeof import('viem')>('viem');
+      return { ...actual, createPublicClient: () => ({ getEnsAddress }) };
+    });
+    const { resolveAddress } = await import('@/lib/resolveAddress');
+    const { ResolveAddressError } = await import('@/lib/resolveAddressError');
+    const err = await resolveAddress('jesse.base.eth').catch((e: unknown) => e);
     expect(err).toBe(error);
     expect(err).not.toBeInstanceOf(ResolveAddressError);
   });
