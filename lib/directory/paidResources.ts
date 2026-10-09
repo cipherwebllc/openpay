@@ -322,7 +322,7 @@ const PAYMENT_MONITOR_OUTPUT = {
           slug: {
             type: 'string',
             description:
-              'Stable directory slug, present only when the event is tied to a directory entry. Unlike provider it never changes on rename. Dedupe key: slug (provider when slug is absent) + date + changeCategory.',
+              'Stable directory slug, present only when the event is tied to a directory entry; unlike provider it never changes on rename. Key: dedupe by slug+date+changeCategory, using provider when slug is absent. Events stored before slug was added are keyed by provider: when a row with slug arrives, also match provider+date+changeCategory built from the provider on the same row.',
           },
           changeType: {
             type: 'string',

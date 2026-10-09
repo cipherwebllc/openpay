@@ -5,7 +5,13 @@
 
 import { describe, expect, it } from 'vitest';
 import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
+import { JPYC_PAYMENTS_RESOURCE } from '@/lib/directory/paidResources';
 import { createPaymentMonitorEnvelope } from '@/lib/directory/paymentMonitor';
+import { USDC_PAYMENT_MONITOR } from '@/lib/directory/usdcResource';
+import {
+  JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS,
+  VANILLA_DIRECTORY_OPENAPI_PATHS,
+} from '@/lib/openapi/monitor';
 import {
   createServiceMonitorEnvelope,
   SERVICE_MONITOR_MAX_LIMIT,
@@ -231,6 +237,57 @@ describe('createPaymentMonitorEnvelope', () => {
     // snapshot と delta の和集合を dedupe すると、ちょうど全イベント数になる (二重登録も取りこぼしも無い)。
     const seen = new Set([...snapshot.changes, ...delta.changes].map(key));
     expect(seen.size).toBe(total);
+  });
+
+  // 同 follow-up (Codex 2 回目 P2): slug を足す前の版で保存したイベントは provider + date + changeCategory の
+  // 鍵で残っている。新しい版の delta で同じイベントが slug つきで再配信されると鍵が変わり、29 件が 30 件に
+  // なる。移行の手順は「slug つきの行は、同じ行の provider で組んだ旧い鍵とも照合する」(同じ行に provider と
+  // slug の両方が載る)。旧い応答 → 新しい応答をまたいでも、この読み替えで全件が一致すること。
+  it('E17 follow-up: slug を足す前の応答 → 足した後の応答をまたいでも、同じ行の provider で旧い鍵を読み替えると全件一致', () => {
+    const oldKey = (c: { provider: string; date: string; changeCategory?: string }) =>
+      `${c.provider}|${c.date}|${c.changeCategory ?? ''}`;
+    const newKey = (c: { slug?: string; provider: string; date: string; changeCategory?: string }) =>
+      `${c.slug ?? c.provider}|${c.date}|${c.changeCategory ?? ''}`;
+    const total = createPaymentMonitorEnvelope(Q, NOW).totalEvents;
+    // 旧い版の snapshot = slug の無い行 (provider で保存されている)。
+    const oldSnapshot = createPaymentMonitorEnvelope({ limit: total - 1 }, NOW);
+    expect(oldSnapshot.hasMore).toBe(true);
+    const stored = oldSnapshot.changes.map(({ slug: _slug, ...row }) => row);
+    const delta = createPaymentMonitorEnvelope(
+      { changedSince: oldSnapshot.nextChangedSince, limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+    );
+    expect(delta.hasMore).toBe(false);
+    const slugged = delta.changes.filter((c) => c.slug !== undefined);
+    expect(slugged.length).toBeGreaterThan(0); // 実際に slug つきの行が再配信される前提
+
+    // 読み替えなし: 旧い鍵と新しい鍵が混ざり、同じイベントを二重に数える (この回帰の再現)。
+    const naive = new Set([...stored.map(oldKey), ...delta.changes.map(newKey)]);
+    expect(naive.size).toBeGreaterThan(total);
+
+    // 読み替えあり: slug つきの行は同じ行の provider で旧い鍵を組めるので、保存済みの旧い鍵を新しい鍵へ移す。
+    const rekey = new Map(slugged.map((c) => [oldKey(c), newKey(c)]));
+    const migrated = new Set([
+      ...stored.map((o) => rekey.get(oldKey(o)) ?? oldKey(o)),
+      ...delta.changes.map(newKey),
+    ]);
+    expect(migrated.size).toBe(total);
+  });
+
+  it('E17 follow-up: 移行の手順 (slug つきの行は同じ行の provider で組んだ旧い鍵とも照合) を schema と OpenAPI に書いている', () => {
+    const changes = JPYC_PAYMENTS_RESOURCE.outputSchema.output.properties.changes as {
+      items: { properties: { slug: { description: string } } };
+    };
+    const texts = [
+      changes.items.properties.slug.description,
+      VANILLA_DIRECTORY_OPENAPI_PATHS[USDC_PAYMENT_MONITOR.path].get['x-agent-usage'],
+      JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS['/api/paid/stablecoin-payments'].get['x-agent-usage'],
+    ];
+    for (const text of texts) {
+      expect(text).toContain('dedupe by slug+date+changeCategory');
+      expect(text).toContain('stored before slug was added');
+      expect(text).toContain('provider on the same row');
+    }
   });
 
   // E17 (第 7 回レビュー): Service Monitor と同じ。打ち切った snapshot の nextChangedSince を

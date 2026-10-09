@@ -211,6 +211,26 @@ describe('public/llms.txt 開示同期 (掟 14③)', () => {
     }
   });
 
+  // 第 7 回レビュー E17 follow-up (Codex): 「1 日が分割されない」は delta の limit だけの保証。snapshot は
+  // 直近 limit 件で切るので同じ日の途中で切れる。両商品の行で区別して書き、続きの再送の扱いも分ける。
+  it('Monitor の limit は delta = 日付境界・snapshot = 直近 limit 件と書き分け、再送なしは delta のページ間に限る', () => {
+    for (const paid of [JPYC_SERVICES_RESOURCE.path, JPYC_PAYMENTS_RESOURCE.path]) {
+      const line = lineMentioning(paid);
+      expect(line).toContain('delta の `limit` は日付境界で丸められ 1 日が分割されることはない');
+      expect(line).toContain('スナップショットは直近 `limit` 件で、同じ日の途中で切れることがある');
+      expect(line).toContain('delta のページ間では再送も取りこぼしもなし');
+      expect(line).not.toMatch(/(?<!delta の )`limit` は日付境界で丸められ/); // 限定なしの書き方に戻さない
+    }
+  });
+
+  // 同 follow-up: Payment Monitor の重複排除キーは slug (無いときは provider)。slug が付く前に保存した
+  // イベントは provider の鍵なので、slug つきの行は同じ行の provider で組んだ旧い鍵とも照合する。
+  it('Payment Monitor の行に重複排除キーと slug 移行の手順が載っている', () => {
+    const line = lineMentioning(JPYC_PAYMENTS_RESOURCE.path);
+    expect(line).toContain('重複排除は slug+date+changeCategory');
+    expect(line).toContain('slug が付く前に保存したイベントは provider で保存されているので、slug つきの行は同じ行の provider で組んだ旧い鍵とも照合する');
+  });
+
   it('Activity は独立した価格・preview・observedAt/expiresAt の再購入ルールを持つ', () => {
     const line = lineMentioning(USDC_JPYC_ACTIVITY.path);
     expect(line).toContain(USDC_JPYC_ACTIVITY.priceUsd + ' USDC');

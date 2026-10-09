@@ -92,37 +92,38 @@ const PROFILES: Profile[] = [
 // 含む構成を再採取 (整形した JSON の差分は 3 つの operation の status enum から draft/review/rejected/archived が消えただけ)。
 // 同レビュー E17 の follow-up で Payment Monitor の行に不変の slug を足し dedupe キーを改めたので、Monitor を含む構成を
 // 再採取 (差分は 200 応答の schema/example への slug の追加と、x-agent-usage の dedupe キーの説明だけ)。
+// 続けて x-agent-usage に slug が付く前に保存したイベントの照合手順を足したので再採取 (差分は Payment Monitor の x-agent-usage 2 本だけ)。
 const EXPECTED_SHA256: Record<string, string> = {
   'all-on':
-    'a20191f764a507fc4197d82558a193f07323f76030d8564dce3b858fb0f3bc6b',
+    '365c2e8ea8dc08df76386821d806ff1ba7eb62a289eaf7ae60222160c534672e',
   'all-on+arc':
-    '30211da5bfca610f4a7de1c9029f3bec21c506bf817381f5365f28e9c745f821',
+    '1d0eacd5f0dcc453c881f98ee9bf3ab77528dde15f460efc7b15d67921f7b7c3',
   'all-on+mainnet':
-    '86df962d6eef6f62e30b34a5e5a86b054b65939bc4eb37aad3b1d9d8e60ed95e',
+    'cac599638c939e212063a9674034a15f843c94c966d93eb5ca593894f67fde13',
   'all-on+mainnet+avalanche+ethereum':
-    'c4bd74fdf2822262e722d06afba39557eecd72ccdf684d3a63eb46132c8f6da5',
+    '2e3f10ede7aae81cc1cf3553e7b3ad70551ea5ed5b48eb08d423de94022fa543',
   'all-on+fee':
-    'a03c5c5a6423e65930b22364fa3787d28cb28e9831f4ddaaf4648643fb110451',
+    'b96fa6efb6710ff70962da8d4cfd5f2aaf632f0eea074da6f08388606e3bc0ac',
   'all-on+default-hello-price':
-    'f3a113f473f9b8c45573fea22bc95f3630f682ed1eb1358f1ef04dab162db23e',
+    '97594b5af10b38d57e2e1ff722bc9e1d6bbcd2ffc526d6053557ae82eed8ea8f',
   'all-on+invalid-hello-price-unlisted':
-    'a185f85de262d85a3b7618d57da001d69dd55e82d0e21a6e2405227416797e67',
+    '456de21f2f86c983ea14e63292f03c086665a527f3403ad22b6c81a5c97c5f59',
   'directory-only':
-    '2852604fa7d64f41cb78afc0229e1053f443dee209952caa77da582a80df266e',
+    '34bed8dea7333229fa387867b629c3e9888742619a068017789d5cb835db6a34',
   'facilitator-only':
     '21ac634fe16c274ca3f1d66ef903d77839c67a4c92963b11b168d71418a191e0',
   'facilitator+shops':
     '935bca12f86224bafc76c3761bd32e5faaeda7398fde7ba557ab68b5618ee3b7',
   'directory+facilitator':
-    '485ad8e5046c107149f2d5d5150a46f5704914ff888bb12b6909e3cd48d2ad88',
+    '90fb8a1cb132c86b1af8e0887dc1e3983dd9815be2e63da34a7b1ad6d3512a12',
   'license-only':
     'bdf3b0b4b901d5174663e0a74ebd070fb202326f20cee6bf9c193779fa2ac250',
   'directory+license-child-only':
-    '2852604fa7d64f41cb78afc0229e1053f443dee209952caa77da582a80df266e',
+    '34bed8dea7333229fa387867b629c3e9888742619a068017789d5cb835db6a34',
   'late-mutation':
     '2e63ea53cf8c0c69e29f523b0c99f2d75f39456995e9d9a22c282f3918bb7dee',
   'late-facilitator':
-    '7259c2119e234d63e02585bdd51a32a8938c372c23587ce22a5b5ca7d6351893',
+    'ba70449cf40652b9f8c3ea9b00a0e268142febc4513b4ebc2920105814459393',
 };
 
 // all-on の paths の key 順 (spread 順の固定)。
