@@ -86,37 +86,38 @@ const PROFILES: Profile[] = [
 ];
 
 // B-R9d の文書修正後に再採取した sha256 (JSON.stringify の生出力・key 未整列)。
+// 第 7 回レビュー E3 で Error の enum と 503 の説明に signer_unavailable を足したので全構成を再採取。
 const EXPECTED_SHA256: Record<string, string> = {
   'all-on':
-    'ee21eaad787fe97b26f640b52d6512139c7c5aee9bf31e8f3f3569326e385f35',
+    'e02e5c47cd7a0ca102db8bc946986d584d6ae087fd64b127fb5971a794da8e4d',
   'all-on+arc':
-    '38f750d78734147ebd3a8b2deb72642476811e6e08008f02703b681adc856dfd',
+    'a7ea568b7fb696445db54585100bde0c097bac44074cea5c1d049ce114ebd358',
   'all-on+mainnet':
-    'ffeae779d1cafb927f4ed5d0fa78e3c9c9c64cd0241b65449d1032fdf4c02f9b',
+    'f0b2684135ed650d588b1ba8e07595a15555ce79ac26dd911124eb3e6ff46cc5',
   'all-on+mainnet+avalanche+ethereum':
-    '60fdccc805c3978b860332cffad8a4f0bfcaebeaf48da8a23562610d5ff94d53',
+    'd60f87e7e059ad72042752c3720953c3c12350102224c792f350a5ce2b8e29e4',
   'all-on+fee':
-    'aefdff41f7fffa319d4025d48f51dfcbf4bf6103f56bdf397d0dc98a7d16a8a3',
+    'dcf8117a5eaee25c61388100c30a7764f2eced5ce2158d1f2db39f341d3f31b5',
   'all-on+default-hello-price':
-    'a65c97abf7762f845bcc36b2ba7848468a5809779991d3e8aa243e4fec7946e3',
+    'f3ab849dab5382cb2aa14f36c3f2cf3b450986d800218f7e6acd936906e6c46c',
   'all-on+invalid-hello-price-unlisted':
-    '4ea047ed23abfb8eea041dc00cbeea5aef8fafcd97d5dc3921666589ef7db1a1',
+    '3e41ecfd48911d765eceaac69a84efd21eb1db5bfd27649112e388a357c3481f',
   'directory-only':
-    '065ba3c26f996b54fbd1530812d78eb3cb4486c29bea3778585799a73c0bfcd9',
+    'c8af1ca62c5702ce7ac25ecbea6debeabcde5bd07e9b3967a1d97b3b47abcdcc',
   'facilitator-only':
-    '9b67a5dda6b5ebc7ca9421c329bd911d4f8fcee9c8c83a9603fd1832fc01c265',
+    '21ac634fe16c274ca3f1d66ef903d77839c67a4c92963b11b168d71418a191e0',
   'facilitator+shops':
-    '5baa7e721449b0f3b3cdcc1be9b01117cd8aa7a55eb9e014cf13828ab286e887',
+    '935bca12f86224bafc76c3761bd32e5faaeda7398fde7ba557ab68b5618ee3b7',
   'directory+facilitator':
-    'f00d900be605d099483eeeb63bac49d9e79732c9a301de71f733718daab8044e',
+    'df43b5b6c9fdf6410f4794b74b508075ad7ef953c1bca5ccad3588d026797573',
   'license-only':
-    'c41e879807807f32d55b07731bc6a90f226abca9aff1f9f2f49f89250c9537c1',
+    '14697c5d7c4ab9d15e8b2f68648a17abff5a812f5201595799b5eb1cdb5f89f5',
   'directory+license-child-only':
-    '065ba3c26f996b54fbd1530812d78eb3cb4486c29bea3778585799a73c0bfcd9',
+    'c8af1ca62c5702ce7ac25ecbea6debeabcde5bd07e9b3967a1d97b3b47abcdcc',
   'late-mutation':
-    'a99572780ecd725cd1c2cb198c84e70703bb7c456e9d994f6fd684327cc809b4',
+    '2e63ea53cf8c0c69e29f523b0c99f2d75f39456995e9d9a22c282f3918bb7dee',
   'late-facilitator':
-    '65facd6b265dfa1ecef0fb542d1a7d06062c8eef5ef9cd397ac6a27e7d5a2c7a',
+    '87bd4c8243491235c9ea8680ccfdef88c4ec52bbd31adfd035066985a9ce0b89',
 };
 
 // all-on の paths の key 順 (spread 順の固定)。

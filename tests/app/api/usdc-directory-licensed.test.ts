@@ -174,7 +174,12 @@ describe('licensed directory route', () => {
     const route = await load({ key });
     const response = await route.GET(req({ 'x-payment': b64(V1_PAYLOAD) }));
     expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({ ok: false, error: 'signer_unavailable' });
+    const body = await response.json();
+    expect(body).toEqual({ ok: false, error: 'signer_unavailable' });
+    // 公開 OpenAPI の 503 (StorageUnavailable → Error) に適合する
+    const { default: Ajv2020 } = await import('ajv/dist/2020');
+    const { BASE_OPENAPI_SCHEMAS } = await import('@/lib/openapi/components');
+    expect(new Ajv2020({ strict: false }).compile(BASE_OPENAPI_SCHEMAS.Error)(body)).toBe(true);
     expect(verificationMocks.events).toEqual(['verify']);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
