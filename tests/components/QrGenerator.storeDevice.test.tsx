@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithIntl as render } from '../_helpers/i18n';
@@ -554,6 +554,72 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(JSON.parse(window.localStorage.getItem(KEY)!).storePays).toBe(true);
       // 選んでいる状態は保つ (送る設定は OFF にしない = 送れなかった支払いの「もう一度送る」を消さない)
       expect(sd.setOn).toHaveBeenLastCalledWith(true);
+    });
+  });
+
+  // 第 7 回レビュー G1 (Codex P1): 受取先の名前 (shop.eth 等) は QrGenerator 自身が解決結果を常時見る。設定シートを
+  // 閉じて AddressInput が消えた後に再解決が失敗しても (react-query は前回の data を残す)、前回の解決結果で
+  // 通常の QR もお店負担の受け渡し (device.start) も作らない。
+  describe('受取先の名前 (ENS) の再解決に失敗している間', () => {
+    const ens = { data: null as unknown, error: null as Error | null, isFetching: false };
+    beforeEach(async () => {
+      ens.data = { address: VALID, name: 'shop.eth' };
+      ens.error = null;
+      ens.isFetching = false;
+      const { useResolveAddress } = await import('@/hooks/useResolveAddress');
+      vi.mocked(useResolveAddress).mockImplementation(
+        (input: string) => (input ? { ...ens } : { data: null, isFetching: false, error: null }) as never,
+      );
+    });
+    afterEach(async () => {
+      // 既定 (未解決) に戻して、ほかのテストに解決結果を漏らさない
+      const { useResolveAddress } = await import('@/hooks/useResolveAddress');
+      vi.mocked(useResolveAddress).mockImplementation(() => ({ data: null, isFetching: false, error: null }) as never);
+    });
+
+    // 解決成功 → 設定シートを開く (再解決の開始) → 「完了」で閉じる (AddressInput が消える) → 再解決の失敗 (data は残る)。
+    async function resolveThenFailAfterSheetClosed(user: ReturnType<typeof userEvent.setup>) {
+      await ready(user);
+      await user.click(screen.getByRole('button', { name: /^設定$/ }));
+      const sheet = await screen.findByRole('dialog', { name: 'お店の設定' });
+      ens.isFetching = true;
+      await user.click(within(sheet).getByRole('button', { name: '完了' }));
+      await waitFor(() => expect(screen.queryByRole('dialog', { name: 'お店の設定' })).toBeNull());
+      ens.isFetching = false;
+      ens.error = new Error('rpc down');
+      // 再描画のきっかけ (会計の金額を打ち足す)
+      await user.type(screen.getByPlaceholderText('1,000'), '0');
+      return screen.getAllByRole('button', { name: /QRコードを表示する/ });
+    }
+
+    it('解決できていれば、解決したアドレスで受け渡しを作り QR を出す', async () => {
+      const user = userEvent.setup();
+      seed({ receiver: 'shop.eth' });
+      const [btn] = await ready(user);
+      await user.click(btn);
+      await waitFor(() => expect(shownQr()).not.toBeNull());
+      expect(sd.start).toHaveBeenCalledWith(VALID, 500n * 10n ** 18n, 80002);
+      expect(new URL(shownQr()!).searchParams.get('to')?.toLowerCase()).toBe(VALID.toLowerCase());
+    });
+
+    it('お店負担: 前回の解決結果が残っていても受け渡し (device.start) を作らず QR も出さない', async () => {
+      const user = userEvent.setup();
+      seed({ receiver: 'shop.eth' });
+      const btns = await resolveThenFailAfterSheetClosed(user);
+      for (const b of btns) expect(b).toBeDisabled();
+      await user.click(btns[0]);
+      expect(sd.start).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+    it('通常の QR: 前回の解決結果が残っていても QR を出さない', async () => {
+      const user = userEvent.setup();
+      seed({ receiver: 'shop.eth', storePays: false });
+      const btns = await resolveThenFailAfterSheetClosed(user);
+      for (const b of btns) expect(b).toBeDisabled();
+      await user.click(btns[0]);
+      expect(sd.releaseForNormal).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).toBeNull();
     });
   });
 });
