@@ -70,7 +70,10 @@ it('stock storage failures remain unknown; product or handle storage failures re
 it('resolves paused/pending licenses and uses the current owned handle fallback', async () => {
   h.product.mockResolvedValue({ ...product, saleActive: false, registration: { status: 'pending' }, handle: 'released' });
   expect(await (await get()).json()).toMatchObject({ saleActive: false, registered: false, productUrl: 'https://open-pay.jp/@other?product=' + ID });
-  h.handles.mockResolvedValue([]); expect((await get()).status).toBe(404);
+  // 第 7 回レビュー B8: 最後の @handle を手放しても定義は返す (権利確認・SDK の gate が使う)。売り場のリンクだけ null。
+  h.handles.mockResolvedValue([]);
+  const response = await get(); const body = await response.json();
+  expect(response.status).toBe(200); expect(body).toMatchObject({ productId: ID, productUrl: null }); expect(validate(body)).toBe(true);
 });
 it('rate limits before product or stock reads', async () => {
   h.limit.mockResolvedValue(false); const response = await get(); expect(response.status).toBe(429);

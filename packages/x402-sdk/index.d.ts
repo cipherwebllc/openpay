@@ -382,7 +382,8 @@ export interface LicenseDescriptor {
   remaining: number | null;
   saleActive: boolean;
   registered: boolean;
-  productUrl: string;
+  /** Store page link; null when the seller no longer has a public @handle (the license identity stays valid). */
+  productUrl: string | null;
   /** Append the wallet address query parameter to check rights. */
   verifyUrl: string;
   sellerRole: 'operator' | 'third_party';

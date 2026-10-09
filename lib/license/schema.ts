@@ -16,7 +16,7 @@ export const LICENSE_DESCRIPTOR_SCHEMA = {
     remaining: { type: ['integer', 'null'], minimum: 0, maximum: 10000, description: 'supply minus sold and reserved; null when stock is unknown. Display only, not a reservation.' },
     protectedDelivery: { type: 'boolean', description: 'Seller configured ticket delivery; not a protection or availability guarantee.' },
     saleActive: { type: 'boolean' }, registered: { type: 'boolean' },
-    productUrl: { type: 'string', pattern: '^https://open-pay\\.jp/@[^/?#]+\\?product=h_[0-9a-f]{32}$' },
+    productUrl: { type: ['string', 'null'], pattern: '^https://open-pay\\.jp/@[^/?#]+\\?product=h_[0-9a-f]{32}$', description: 'Store page link; null when the seller no longer has a public @handle (the license identity stays valid).' },
     verifyUrl: { type: 'string', pattern: '^https://open-pay\\.jp/api/license/verify\\?product=h_[0-9a-f]{32}$', description: 'Append address to check wallet rights.' },
     sellerRole: { type: 'string', enum: ['operator', 'third_party'] },
   },
