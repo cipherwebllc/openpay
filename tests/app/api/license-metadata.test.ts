@@ -38,8 +38,17 @@ it.each([null, { ...product, registration: undefined }, { ...product, registrati
   { ...product, productKind: 'digital' }, { ...product, license: undefined }, { ...product, id: 'h_' + 'b'.repeat(32) }])('returns 404 for unavailable product', async (value) => {
   h.product.mockResolvedValue(value); expect((await get()).status).toBe(404); expect(h.handles).not.toHaveBeenCalled();
 });
-it('returns 404 without a public handle and uncached 503 for storage failures', async () => {
-  h.handles.mockResolvedValue([]); expect((await get()).status).toBe(404);
+// 第 7 回レビュー B8: 契約に登録した恒久 URI は、売り手が最後の @handle を手放しても識別情報を返す。
+it.each([[product.imageUrl, product.imageUrl], [undefined, 'https://open-pay.jp/icon-512.png']])(
+  'keeps the token metadata without a public handle (image %s), omitting only the store link', async (imageUrl, image) => {
+    h.handles.mockResolvedValue([]); h.product.mockResolvedValue({ ...product, imageUrl });
+    const response = await get();
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ name: product.title, image, attributes: expect.arrayContaining([{ trait_type: 'Supply', value: 10 }]) });
+    expect(body).not.toHaveProperty('external_url');
+  });
+it('returns uncached 503 for storage failures', async () => {
   h.handles.mockResolvedValue(null); expect((await get()).status).toBe(503);
   h.product.mockResolvedValue('storage'); const response = await get(); expect(response.status).toBe(503); expect(response.headers.get('Cache-Control')).toBe('no-store');
 });

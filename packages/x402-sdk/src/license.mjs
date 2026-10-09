@@ -146,10 +146,11 @@ export async function resolveLicense({ product, origin = DEFAULT_LICENSE_ORIGIN,
       (body.remaining !== null && (!Number.isSafeInteger(body.remaining) || body.remaining < 0 || body.remaining > body.supply)) ||
       !['operator', 'third_party'].includes(body.sellerRole)) throw new Error('Invalid descriptor fields');
     httpsUrl(body.termsUrl);
-    const productUrl = httpsUrl(body.productUrl);
+    // productUrl is null when the seller no longer has a public @handle; the license identity stays valid.
+    const productUrl = body.productUrl === null ? null : httpsUrl(body.productUrl);
     const verifyUrl = httpsUrl(body.verifyUrl);
-    if (productUrl.origin !== DEFAULT_LICENSE_ORIGIN || !/^\/@[^/]+$/.test(productUrl.pathname) || productUrl.hash ||
-      productUrl.search !== `?product=${product}` || verifyUrl.origin !== DEFAULT_LICENSE_ORIGIN ||
+    if ((productUrl && (productUrl.origin !== DEFAULT_LICENSE_ORIGIN || !/^\/@[^/]+$/.test(productUrl.pathname) || productUrl.hash ||
+      productUrl.search !== `?product=${product}`)) || verifyUrl.origin !== DEFAULT_LICENSE_ORIGIN ||
       verifyUrl.pathname !== '/api/license/verify' || verifyUrl.search !== `?product=${product}` || verifyUrl.hash) {
       throw new Error('Invalid descriptor links');
     }

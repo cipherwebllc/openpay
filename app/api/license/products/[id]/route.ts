@@ -30,8 +30,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   // 販売停止・allowlist からの除外は既存ライセンスの識別情報を消さない。
   const handles = await listHandlesForOwner(product.owner);
   if (handles === null) return error('storage_unavailable', 503);
-  const handle = product.handle && handles.includes(product.handle) ? product.handle : handles[0];
-  if (!handle) return error('not_found', 404);
+  // 売り手が @handle を手放しても、既発行ライセンスの定義 (権利確認・SDK の gate が使う) は返し続ける
+  // (第 7 回レビュー B8)。handle が無いときは売り場のリンク productUrl だけ null。
+  const handle: string | undefined = product.handle && handles.includes(product.handle) ? product.handle : handles[0];
   let remaining: number | null = null;
   try {
     const summaries = await licenseSummariesFor([product]);
@@ -46,7 +47,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     protectedDelivery: parseDeliveryUrl(product.deliveryUrl).ok,
     supply: d.supply, remaining, saleActive: product.saleActive,
     registered: product.registration?.status === 'registered',
-    productUrl: 'https://open-pay.jp' + storeProductPath(handle, id),
+    productUrl: handle ? 'https://open-pay.jp' + storeProductPath(handle, id) : null,
     verifyUrl: 'https://open-pay.jp/api/license/verify?product=' + id,
     sellerRole: sellerRoleFor(product.owner),
   }, { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300' } });

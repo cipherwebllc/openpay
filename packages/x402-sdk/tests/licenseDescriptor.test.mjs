@@ -14,6 +14,9 @@ test('resolveLicense validates and projects a descriptor, including unknown stoc
     } });
     assert.deepEqual(value, expected);
   }
+  // The seller released their last @handle: the identity stays valid, only the store link is absent.
+  const unlinked = descriptor({ productUrl: null });
+  assert.deepEqual(await resolveLicense({ product, fetch: async () => Response.json(unlinked) }), unlinked);
   await resolveLicense({ product, origin: 'https://mirror.example', fetch: async (url) => {
     assert.equal(new URL(url).origin, 'https://mirror.example'); return Response.json(descriptor());
   } });
@@ -38,7 +41,7 @@ test('resolveLicense rejects missing fields, malformed schema and product/token 
       { termsVersion: ' ' }, { termsVersion: 'x'.repeat(129) }, { termsUrl: 'http://seller.example' },
       { termsUrl: 'https://user:pass@seller.example' }, { sellerRole: 'official' },
       { productUrl: 'https://evil.example/@seller?product=' + product },
-      { productUrl: 'https://open-pay.jp/ja/@seller?product=' + product },
+      { productUrl: 'https://open-pay.jp/ja/@seller?product=' + product }, { productUrl: '' }, { productUrl: false },
       { verifyUrl: 'https://open-pay.jp/api/license/verify?product=h_' + 'b'.repeat(32) },
     ].map((patch) => descriptor(patch))];
   for (const body of invalid) await assert.rejects(resolveLicense({ product, fetch: async () => Response.json(body) }), { code: 'invalid_response' });

@@ -8,7 +8,7 @@ export const LICENSE_OPENAPI_PATHS = {
     get: {
       operationId: 'licenseMetadata', tags: ['Licenses'], security: [],
       summary: 'ERC-1155 wallet metadata for a registered license product',
-      description: 'Public JSON with Japanese product name, image and terms. Feature OFF, invalid/unknown/unregistered products or no public seller handle return 404. Paused licenses remain resolvable.',
+      description: 'Public JSON with Japanese product name, image and terms. Feature OFF or invalid/unknown/unregistered products return 404. Paused licenses remain resolvable; when the seller no longer has a public handle the metadata is still returned without external_url.',
       parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', pattern: '^h_[0-9a-f]{32}$' } }],
       responses: {
         '200': { description: 'ERC-1155 metadata with OpenSea attributes',
@@ -30,7 +30,7 @@ export const LICENSE_OPENAPI_PATHS = {
     get: {
       operationId: 'resolveLicense', tags: ['Licenses'], security: [],
       summary: 'Resolve a license product to its immutable ERC-1155 identity',
-      description: 'Public HTTPS descriptor; feature OFF, unknown/digital products or no public seller handle return 404. Paused licenses remain resolvable. Stock is display-only and can be null.',
+      description: 'Public HTTPS descriptor; feature OFF or unknown/digital products return 404. Paused licenses remain resolvable; when the seller no longer has a public handle, productUrl is null. Stock is display-only and can be null.',
       parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', pattern: '^h_[0-9a-f]{32}$' } }],
       responses: {
         '200': { description: 'Version 1 license product descriptor',

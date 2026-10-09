@@ -2,6 +2,11 @@
 
 ## 0.10.2 — unreleased
 
+- `resolveLicense` accepts `productUrl: null` (the seller released their last
+  @handle). The descriptor keeps the license identity, so gates keep working;
+  only the store page link is absent. Any non-null `productUrl` is validated as
+  before. `LicenseDescriptor.productUrl` is now `string | null`.
+
 - Fix `createDualGate` USDC authorization reuse before settlement. Reuse JPYC's
   local claim manager for v1/v2 payments, keyed by pinned chain, asset, payer and
   nonce; share the USDC ledger across gate instances and endpoints in one process
