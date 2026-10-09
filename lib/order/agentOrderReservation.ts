@@ -35,6 +35,9 @@ type ReservationRecord = {
   facilitatorBody: Record<string, unknown>;
   tuple: AgentSettlementTuple;
   feeConfig: StandardFeeConfig | null;
+  // 手数料の徴収方式 (第 7 回レビュー B2)。'x402' = 買い手上乗せの x402 料金を Settled tuple で照合済み。
+  // 無い (この field を足す前の予約) は従来どおり人払いの料金式で判定する。digest には在るときだけ入れる (旧予約の digest は不変)。
+  feeModel?: 'x402';
   digest: string;
   createdAt: number;
 };
@@ -119,8 +122,11 @@ function digestFor(
   snapshot: AgentOrderSnapshot,
   tuple: AgentSettlementTuple,
   feeConfig: StandardFeeConfig | null,
+  feeModel?: 'x402',
 ): string {
-  return createHash('sha256').update(JSON.stringify({ identity, snapshot, tuple, feeConfig })).digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify({ identity, snapshot, tuple, feeConfig, ...(feeModel ? { feeModel } : {}) }))
+    .digest('hex');
 }
 function decodeReservation(key: string, raw: string): AgentOrderReservation | null {
   try {
@@ -141,9 +147,10 @@ function decodeReservation(key: string, raw: string): AgentOrderReservation | nu
       !value.feeConfig || !['storefront', 'preorder'].includes(value.feeConfig.kind) ||
       !['merchant', 'customer'].includes(value.feeConfig.feePayer)
     )) return null;
+    if (value.feeModel !== undefined && value.feeModel !== 'x402') return null;
     if (
       JSON.stringify(tuple) !== JSON.stringify(value.tuple) ||
-      digestFor(value.identity, snapshot, tuple, value.feeConfig) !== value.digest
+      digestFor(value.identity, snapshot, tuple, value.feeConfig, value.feeModel) !== value.digest
     ) return null;
     return { key, raw, record: { ...value, snapshot, tuple } };
   } catch {
@@ -210,13 +217,14 @@ export async function reservationForBinding(
   const stored = await readAgentOrderReservation(key);
   if (stored.kind !== 'match') return stored;
   const r = stored.reservation.record;
-  return digestFor(identity, snapshot, tuple, r.feeConfig) === r.digest ? stored : { kind: 'conflict' };
+  return digestFor(identity, snapshot, tuple, r.feeConfig, r.feeModel) === r.digest ? stored : { kind: 'conflict' };
 }
 export async function reserveAgentOrder(input: {
   identity: PaymentRedeliveryIdentity;
   snapshot: AgentOrderSnapshot;
   facilitatorBody: Record<string, unknown>;
   feeConfig: StandardFeeConfig | null;
+  feeModel?: 'x402';
 }): Promise<{ kind: 'created'; reservation: AgentOrderReservation; owner: string } | Lookup> {
   const tuple = tupleFor(input.facilitatorBody);
   if (!tuple || !parseBoundAgentOrderSnapshot({
@@ -228,7 +236,7 @@ export async function reserveAgentOrder(input: {
   const key = agentReservationKey(tuple.chainId, tuple.token, tuple.authorizer, tuple.nonce);
   const record: ReservationRecord = {
     v: 1, ...input, tuple,
-    digest: digestFor(input.identity, input.snapshot, tuple, input.feeConfig),
+    digest: digestFor(input.identity, input.snapshot, tuple, input.feeConfig, input.feeModel),
     createdAt: Date.now(),
   };
   const raw = JSON.stringify(record);

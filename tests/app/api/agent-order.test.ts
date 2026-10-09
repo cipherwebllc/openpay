@@ -545,6 +545,17 @@ describe('agent-order pay route', () => {
     expect(body.accepts[0].extra.openpay.merchantValue).toBe((1600n * JPYC).toString());
   });
 
+  it('合計が 1 JPYC 未満の注文は 402 を出さずに 422 order_below_minimum (支払い後に受注が残らない注文を作らない・B1)', async () => {
+    const base = record();
+    store.record = record({ storefront: { ...base.storefront!, menu: [{ id: 'karaage', name: '唐揚げ', price: '0.5' }] } });
+    const { pay } = await load();
+    const res = await pay.GET(payReq(`h=shop&cart=${Buffer.from(JSON.stringify([{ id: 'karaage', qty: 1 }])).toString('base64url')}`));
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'order_below_minimum' });
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+    expect(routeMocks.settle).not.toHaveBeenCalled();
+  });
+
   it('payment ヘッダ無し → 402 + accepts (payTo=config.to / amount=合計 / resource 正規)', async () => {
     const { pay } = await load();
     const res = await pay.GET(payReq(`h=shop&cart=${CART}`));
