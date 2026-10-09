@@ -216,6 +216,12 @@ export async function readAuthorizationUsed(
   });
 }
 
+/** 最新ブロックの時刻 (unix 秒)。署名の期限切れをチェーンの時計で判定するために使う (第 7 回レビュー A6)。 */
+export async function readLatestBlockTimestamp(chainId: number): Promise<bigint> {
+  const block = await publicClientFor(chainId).getBlock({ blockTag: 'latest' });
+  return block.timestamp;
+}
+
 // authorizationState=true だが KV に hash が残っていない場合の read-only recovery。
 // EIP-3009 の AuthorizationUsed(authorizer,nonce) は両値 indexed なので、対象 intent のログだけを
 // RPC 側で絞る。走査は署名の通常有効窓を十分上回る直近 10,000 block に限定する。

@@ -3,7 +3,7 @@ import type { RelayIntentMetadata } from '@/lib/paymentIntentStorage';
 
 type RelayStatusResponse =
   | { ok: true; state: 'settled'; txHash: Hex | null }
-  | { ok: true; state: 'unused' }
+  | { ok: true; state: 'unused'; chainTime?: string }
   | { ok: true; state: 'indeterminate' };
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -35,7 +35,10 @@ function isRelayStatusResponse(value: unknown): value is RelayStatusResponse {
   }
   const body = value as Record<string, unknown>;
   if (body.ok !== true) return false;
-  if (body.state === 'unused' || body.state === 'indeterminate') return true;
+  if (body.state === 'unused') {
+    return body.chainTime === undefined || (typeof body.chainTime === 'string' && /^\d{1,20}$/.test(body.chainTime));
+  }
+  if (body.state === 'indeterminate') return true;
   return (
     body.state === 'settled' &&
     (body.txHash === null ||
@@ -113,10 +116,12 @@ export async function resolveRelayIntent(
     }
     if (status.state === 'unused') {
       consecutiveUnused++;
-      if (
-        consecutiveUnused >= 2 &&
-        Math.floor(Date.now() / 1000) >= Number(runtime.intent.validBefore)
-      ) {
+      // 期限切れはチェーンの時計で判定する (端末の時計が進んでいると、まだ有効な署名のラッチを外して
+      // 二重払いを許しうる・第 7 回レビュー A6)。サーバが時刻を返せなかったときだけ従来どおり端末の時計。
+      const now = status.chainTime !== undefined
+        ? Number(status.chainTime)
+        : Math.floor(Date.now() / 1000);
+      if (consecutiveUnused >= 2 && now >= Number(runtime.intent.validBefore)) {
         return { kind: 'expired' };
       }
       continue;

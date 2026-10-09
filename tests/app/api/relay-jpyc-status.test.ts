@@ -24,6 +24,7 @@ const h = vi.hoisted(() => ({
   used: false,
   logHash: null as Hex | null,
   rpcThrows: false,
+  chainTime: null as bigint | null,
   receipt: { status: 'success', logs: [] } as Receipt,
   receipts: new Map<Hex, Receipt | Error>(),
   getReceipt: vi.fn(),
@@ -65,6 +66,10 @@ vi.mock('@/lib/relay/relayProvider', () => ({
     return h.used;
   }),
   findAuthorizationUsedTransactionHash: vi.fn(async () => h.logHash),
+  readLatestBlockTimestamp: vi.fn(async () => {
+    if (h.chainTime === null) throw new Error('block read failed');
+    return h.chainTime;
+  }),
 }));
 vi.mock('@/lib/relay/forwarderConfig', () => ({
   jpycForwarderFor: () => h.forwarder,
@@ -98,6 +103,7 @@ import {
 } from '@/lib/relay/relayGuards';
 import {
   readAuthorizationUsed,
+  readLatestBlockTimestamp,
   findAuthorizationUsedTransactionHash,
 } from '@/lib/relay/relayProvider';
 import { recoverTransferAuthorizationSigner } from '@/lib/jpycEip3009';
@@ -236,6 +242,7 @@ beforeEach(() => {
   h.enabled = true;
   h.provider = 'self-host';
   h.rateAllowed = true;
+  h.chainTime = null;
   h.idem = { state: 'missing' };
   h.used = false;
   h.logHash = null;
@@ -295,6 +302,23 @@ describe('POST /api/relay/jpyc/status', () => {
   it('authorization unused を返す', async () => {
     const res = await POST(req());
     expect(await res.json()).toEqual({ ok: true, state: 'unused' });
+  });
+
+  // 第 7 回レビュー A6: 期限切れを端末の時計でなくチェーンの時刻で判定できるよう、unused に
+  // 「used を読む前の最新ブロック時刻」を付ける (読めなければ付けない = 従来の応答)。
+  it('unused には used を読む前に取った最新ブロック時刻 (chainTime) を付ける', async () => {
+    h.chainTime = 1_800_000_000n;
+    const res = await POST(req());
+    expect(await res.json()).toEqual({ ok: true, state: 'unused', chainTime: '1800000000' });
+    expect(vi.mocked(readLatestBlockTimestamp).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(readAuthorizationUsed).mock.invocationCallOrder[0]);
+  });
+
+  it('hash 記録があって unused (置換/未確定) は chainTime があっても indeterminate のまま', async () => {
+    h.chainTime = 1_800_000_000n;
+    h.idem = { state: 'hash', txHash: HASH };
+    const res = await POST(req());
+    expect(await res.json()).toEqual({ ok: true, state: 'indeterminate' });
   });
 
   it('nonce lookup は署名なしで同じ read-only 状態を照会する', async () => {

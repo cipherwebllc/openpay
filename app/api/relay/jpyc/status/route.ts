@@ -22,6 +22,7 @@ import {
   jpycAddressFor,
   PROVIDER,
   readAuthorizationUsed,
+  readLatestBlockTimestamp,
   findAuthorizationUsedTransactionHash,
   SUPPORTED_CHAINS,
 } from '@/lib/relay/relayProvider';
@@ -58,10 +59,22 @@ type ParsedIntent = {
 
 type StatusBody =
   | { ok: true; state: 'settled'; txHash: Hex | null }
-  | { ok: true; state: 'unused' }
+  // chainTime: authorizationState を読む前の最新ブロック時刻 (unix 秒・10 進)。読めなかったときは付けない。
+  | { ok: true; state: 'unused'; chainTime?: string }
   | { ok: true; state: 'indeterminate' };
 
 const json = (body: StatusBody) => NextResponse.json(body, { status: 200 });
+
+// 署名の期限切れはチェーンの時計で判定させる (端末の時計が進んでいると、まだ有効な署名を期限切れと
+// 誤って二重払いの防止を外す・第 7 回レビュー A6)。読めなくても status の本体は従来どおり返す
+// (クライアントは端末の時計に戻る = 時刻の付帯読み取りの障害を status へ波及させない)。
+async function chainTimeOrNull(chainId: number): Promise<bigint | null> {
+  try {
+    return await readLatestBlockTimestamp(chainId);
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req: Request): Promise<NextResponse> {
   // Client が relay を選び得る既存 flag と実 provider の双方に相乗りする。OFF/未構成時は endpoint
@@ -115,6 +128,9 @@ export async function POST(req: Request): Promise<NextResponse> {
         { status: 400 },
       );
     }
+    // used を読む「前」の最新ブロック時刻。これが validBefore 以上で、その後に読んだ used が false なら、
+    // 以後のどのブロックでもこの署名は使えない (ブロック時刻は単調増加・期限後は transferWithAuthorization が revert)。
+    const chainTime = await chainTimeOrNull(parsed.chainId);
     const used = await readAuthorizationUsed(
       parsed.chainId,
       token,
@@ -124,7 +140,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (!used) {
       // broadcast 済み hash がある場合、unused を新しい支払いの許可に使うと二重払いへ
       // 波及しうる。未確定/置換を区別できない間は既存 indeterminate に閉じる。
-      return json({ ok: true, state: idem.state === 'hash' ? 'indeterminate' : 'unused' });
+      if (idem.state === 'hash') return json({ ok: true, state: 'indeterminate' });
+      return json({ ok: true, state: 'unused', ...(chainTime !== null ? { chainTime: chainTime.toString() } : {}) });
     }
 
     if (idem.state === 'hash' && await receiptMatchesIntent(parsed, token, idem.txHash)) {

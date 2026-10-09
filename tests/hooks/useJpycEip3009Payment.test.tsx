@@ -483,6 +483,49 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
     vi.useRealTimers();
   });
 
+  // 第 7 回レビュー A6: 期限切れはサーバが返すチェーンの時刻 (chainTime) で判定し、端末の時計のずれで
+  // まだ有効な署名のラッチを外さない (外すと旧 tx が後から成立して二重払いになりうる)。
+  it.each([
+    ['端末の時計が進んでいても、チェーンの時刻が期限前なら latch を外さない', +600, -120, false],
+    ['端末の時計が遅れていても、チェーンの時刻が期限を過ぎていれば latch を外す', -600, +1, true],
+  ] as const)('%s', async (_label, deviceOffsetSec, chainOffsetSec, released) => {
+    vi.useFakeTimers();
+    fetchSpy
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true, state: 'indeterminate' })),
+      );
+    const result = await submit();
+    await act(async () => vi.advanceTimersByTimeAsync(90_001));
+    expect(result.current.recoveryState).toBe('exhausted');
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+
+    const signedPayload = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    ) as { validBefore: string };
+    const validBefore = Number(signedPayload.validBefore);
+    vi.setSystemTime((validBefore + deviceOffsetSec) * 1000);
+    fetchSpy.mockImplementation(async () =>
+      new Response(JSON.stringify({ ok: true, state: 'unused', chainTime: String(validBefore + chainOffsetSec) })),
+    );
+    act(() => result.current.retrySamePayload());
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    await act(async () => vi.advanceTimersByTimeAsync(3_000));
+    await act(async () => vi.advanceTimersByTimeAsync(6_000));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    await flushStorageLoad();
+
+    if (released) {
+      expect(result.current.error?.message).toBe('relay_unused');
+      expect(result.current.recoveryState).toBeNull();
+    } else {
+      expect(result.current.error?.message).not.toBe('relay_unused');
+      expect(result.current.recoveryState).toBe('auto');
+    }
+    expect(signTypedData).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
   it('status fetch hang は 10s AbortController timeout 後も次の backoff へ進む', async () => {
     vi.useFakeTimers();
     let aborted = false;
