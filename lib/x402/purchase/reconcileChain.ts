@@ -11,6 +11,7 @@ import {
 } from 'viem';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { authorizationExpiredUnused } from '@/lib/x402/authorizationExpiry';
+import type { PageFetchOptions } from '@/lib/x402/reconcilePaging';
 import type { ClaimedPurchaseIntentBase } from './types';
 
 const AUTHORIZATION_STATE_ABI = parseAbi([
@@ -30,10 +31,13 @@ export type PurchaseReconcileChain = {
     intent: ClaimedPurchaseIntentBase,
   ) => Promise<boolean>;
   latestBlock: (intent: ClaimedPurchaseIntentBase) => Promise<bigint>;
+  // options.timeoutMs = deadline 付き (cron) のページ取得だけ、retry なし・この timeout で RPC を呼ぶ
+  // (第 7 回レビュー B4 follow-up)。省略時は既定の transport (status route 等)。
   authorizationUsedTransactions: (
     intent: ClaimedPurchaseIntentBase,
     fromBlock: bigint,
     toBlock: bigint,
+    options?: PageFetchOptions,
   ) => Promise<Hex[]>;
   receiptMatches: (
     intent: ClaimedPurchaseIntentBase,
@@ -41,12 +45,14 @@ export type PurchaseReconcileChain = {
   ) => Promise<boolean>;
 };
 
-function clientForIntent(intent: ClaimedPurchaseIntentBase) {
+function clientForIntent(intent: ClaimedPurchaseIntentBase, options?: PageFetchOptions) {
   const chain = chainObjectForId(intent.chainId);
   if (!chain) throw new Error('unsupported chain');
   return createPublicClient({
     chain,
-    transport: transportForChain(intent.chainId),
+    transport: options
+      ? transportForChain(intent.chainId, { timeout: options.timeoutMs, retryCount: 0 })
+      : transportForChain(intent.chainId),
   });
 }
 
@@ -68,8 +74,8 @@ export const defaultPurchaseReconcileChain: PurchaseReconcileChain = {
     }),
   latestBlock: async (intent) =>
     clientForIntent(intent).getBlockNumber(),
-  authorizationUsedTransactions: async (intent, fromBlock, toBlock) => {
-    const logs = await clientForIntent(intent).getLogs({
+  authorizationUsedTransactions: async (intent, fromBlock, toBlock, options) => {
+    const logs = await clientForIntent(intent, options).getLogs({
       address: intent.token,
       event: AUTHORIZATION_USED_EVENT,
       args: {

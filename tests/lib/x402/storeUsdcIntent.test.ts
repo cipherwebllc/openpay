@@ -30,6 +30,7 @@ import {
   type QuotedStoreUsdcIntent, type SettledStoreUsdcIntent, type SettlingStoreUsdcIntent,
 } from '@/lib/x402/storeUsdcIntent';
 import { hostedPurchaseRecordKey, purchaseOwnershipKey } from '@/lib/x402/purchaseIntent';
+import { STORE_RECONCILE_CURSOR_RESERVE_MS, STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS } from '@/lib/x402/reconcileBudget';
 import { paymentClaimKey } from '@/lib/paymentClaim';
 
 const quoted = fixture.quoted as QuotedStoreUsdcIntent;
@@ -265,6 +266,27 @@ describe('Store USDC reconciler decisions (no Lua)', () => {
     }
     expect(h.transactions).toHaveBeenCalledTimes(3);
     expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: String(Number(active.anchorBlock) + 6_000), nextReconcileAt: NOW + 30_000 });
+  });
+
+  // 第 7 回レビュー B4 (follow-up): 残り時間 − 予約が 1 回の RPC の最小に足りなければ取得せず cursor を保存し、
+  // 取得するときは残り時間で切った timeout を渡す。
+  it('does not start a page fetch that cannot finish before the reserve, and bounds each fetch by the remaining time', async () => {
+    h.anchor.mockResolvedValue(50_090n);
+    expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: Date.now() + STORE_RECONCILE_CURSOR_RESERVE_MS + 1_000 })).toEqual({ ok: true, state: 'pending' });
+    expect(h.transactions).not.toHaveBeenCalled();
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: active.anchorBlock });
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    h.transactions.mockImplementation(async () => { clock += 15_000; return []; });
+    try {
+      expect(await reconcileStoreUsdcIntent(SALT, { now: NOW, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(h.transactions).toHaveBeenCalledTimes(2);
+    expect(h.transactions).toHaveBeenNthCalledWith(1, expect.objectContaining({ fromBlock: 90n, timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS }));
+    expect(h.transactions).toHaveBeenNthCalledWith(2, expect.objectContaining({ fromBlock: 2_090n, timeoutMs: 7_000 }));
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][4])).toMatchObject({ reconcileFromBlock: '4090' });
   });
 
   it('a batch past its deadline defers the remaining due members without touching them', async () => {

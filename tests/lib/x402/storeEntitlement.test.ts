@@ -502,3 +502,44 @@ it('shares one page deadline and one RPC admission across every license rights l
   expect(starved.page.nextCursor).toBeNull();
   expect(rightsBudget.acquire).toHaveBeenCalledTimes(1); expect(rightsBudget.release).not.toHaveBeenCalled();
 });
+
+// 第 7 回レビュー B13 (follow-up): ページ期限の到達は RPC 障害と区別し、確認済みの項目と「未処理項目の直前」の cursor を
+// 部分ページとして返す (holders と同じ形)。続きの呼び出しで前進して全件そろう。
+it('returns a partial page with a resumable cursor when the page deadline is reached mid-page', async () => {
+  licenseState.enabled = true;
+  const { resolveLicenseRights } = await import('@/lib/license/rights');
+  const ids = [resource(4), resource(3), resource(2), resource(1)];
+  const license = (id: string) => {
+    const own = JSON.parse(ownership(id));
+    own.latestGrant.metadata = { ...own.latestGrant.metadata, productKind: 'license', license: { tokenChainId: 80002 } };
+    own.grants[0].metadata = own.latestGrant.metadata;
+    return JSON.stringify(own);
+  };
+  const rows: Record<string, string> = { [ids[0]!]: license(ids[0]!), [ids[1]!]: ownership(ids[1]!), [ids[2]!]: license(ids[2]!), [ids[3]!]: license(ids[3]!) };
+  kvEval.mockImplementation(async (_script: string, _keys: string[], args: string[]) => ({ ok: true, value: flatIndex(args[0] === '1' ? ids.slice(ids.indexOf(args[2]!) + 1) : ids) }));
+  kvMget.mockImplementation(async (keys: string[]) => ({ ok: true, value: keys.map((key) => rows[key.slice(key.lastIndexOf(':') + 1)]!) }));
+  let clock = 1_700_000_000_000;
+  const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+  let resolved = 0; let tripped = false;
+  vi.mocked(resolveLicenseRights).mockImplementation(async () => {
+    resolved += 1;
+    // 最初の呼び出しの 2 つ目のライセンス項目 (ids[2]) の途中で 15 秒の期限を越える。
+    if (!tripped && resolved === 2) { tripped = true; clock += 16_000; return { entitled: null, basis: null, nft: { status: 'unknown' } }; }
+    return { entitled: true, basis: 'purchase', nft: { status: 'minted' } };
+  });
+  try {
+    const first = await listStoreLibraryPage({ payer: PAYER, cursor: null });
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error('expected page');
+    expect(first.page.items.map((item) => [item.resourceId, item.entitled])).toEqual([[ids[0], true], [ids[1], undefined]]);
+    expect(JSON.parse(Buffer.from(first.page.nextCursor!, 'base64url').toString('utf8'))).toEqual({ score: SCORE, member: ids[1] });
+    clock += 1; resolved = 0;
+    const second = await listStoreLibraryPage({ payer: PAYER, cursor: first.page.nextCursor });
+    expect(second.ok).toBe(true);
+    if (!second.ok) throw new Error('expected page');
+    expect(second.page.items.map((item) => [item.resourceId, item.entitled])).toEqual([[ids[2], true], [ids[3], true]]);
+    expect(second.page.nextCursor).toBeNull();
+  } finally {
+    spy.mockRestore();
+  }
+});

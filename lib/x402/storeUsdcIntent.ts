@@ -35,6 +35,7 @@ import {
   PURCHASE_INTENT_VERSION,
   PURCHASE_REVISION_POLICY,
 } from '@/lib/x402/purchaseIntent';
+import { pageFetchTimeout } from '@/lib/x402/reconcileBudget';
 import { scanReconcileBlockPages } from '@/lib/x402/reconcilePaging';
 import {
   associateStoreRailIntent,
@@ -1447,13 +1448,14 @@ export async function reconcileStoreUsdcIntent(
     latest,
     pageBlocks: STORE_USDC_RECONCILE_PAGE_BLOCKS,
     maxPages: STORE_USDC_RECONCILE_MAX_PAGES,
-    ...(input.deadline === undefined ? {} : { deadline: input.deadline }),
-  }, (fromBlock, toBlock) => findStoreUsdcAuthorizationTransactions({
+    ...(input.deadline === undefined ? {} : { pageTimeout: () => pageFetchTimeout(input.deadline) ?? null }),
+  }, (fromBlock, toBlock, options) => findStoreUsdcAuthorizationTransactions({
     payer: intent.claim.payer,
     nonce: intent.nonce,
     fromBlock,
     toBlock,
     ...(input.client ? { client: input.client } : {}),
+    ...(options ? { timeoutMs: options.timeoutMs } : {}),
   }));
   // 途中ページの RPC 障害で未検証の候補を飛ばし、entitlement 未付与へ波及させない。
   if (scan === 'unavailable') return retry();

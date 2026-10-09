@@ -10,10 +10,11 @@ const h = vi.hoisted(() => ({
   reads: new Map<string, (string | null)[]>(),
   kvGet: vi.fn(), kvSet: vi.fn(), kvEval: vi.fn(), warn: vi.fn(),
   client: { readContract: vi.fn(), getBlock: vi.fn(), getBlockNumber: vi.fn(), getLogs: vi.fn(), getTransactionReceipt: vi.fn() },
+  transportForChain: vi.fn(() => ({})),
 }));
 vi.mock('@/lib/kv', () => ({ kvGet: h.kvGet, kvSet: h.kvSet, kvEval: h.kvEval }));
 vi.mock('@/lib/logger', () => ({ logger: { warn: h.warn } }));
-vi.mock('@/lib/chains', () => ({ chainObjectForId: () => ({}), transportForChain: () => ({}) }));
+vi.mock('@/lib/chains', () => ({ chainObjectForId: () => ({}), transportForChain: h.transportForChain }));
 vi.mock('@/lib/x402/hostedStore', () => ({ hostedContentKey: (id: string, rev: number) => `store:hosted:content:${id}:${rev}` }));
 vi.mock('@/lib/x402/facilitatorSettle', () => ({ parseFacilitatorRequest: vi.fn() }));
 vi.mock('@/lib/x402/paymentRedelivery', () => ({ paymentRedeliveryIdentity: vi.fn() }));
@@ -30,6 +31,7 @@ import {
   type PurchaseAuthorizationClaim, type PurchaseReconcileChain, type QuotedPurchaseIntent,
   type SettledPurchaseIntent, type SettlingPurchaseIntent,
 } from '@/lib/x402/purchaseIntent';
+import { STORE_RECONCILE_CURSOR_RESERVE_MS, STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS } from '@/lib/x402/reconcileBudget';
 
 const quoted = fixture.quoted as QuotedPurchaseIntent;
 const active = fixture.active as SettlingPurchaseIntent;
@@ -279,6 +281,41 @@ describe('PurchaseIntent reconciler decisions (no Lua)', () => {
     }
     expect(adapter.authorizationUsedTransactions).toHaveBeenCalledTimes(3);
     expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3])).toMatchObject({ reconcileFromBlock: '16000' });
+  });
+
+  // 第 7 回レビュー B4 (follow-up): 残り時間 − cursor 保存の予約が 1 回の RPC の最小に足りなければ取得せず cursor を保存する。
+  it('does not start a page fetch that cannot finish before the cursor-save reserve, and persists the cursor', async () => {
+    const adapter = chain({ latestBlock: async () => BigInt(active.anchorBlock) + 50_000n });
+    expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter, deadline: Date.now() + STORE_RECONCILE_CURSOR_RESERVE_MS + 1_000 })).toEqual({ ok: true, state: 'pending' });
+    expect(adapter.authorizationUsedTransactions).not.toHaveBeenCalled();
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3])).toMatchObject({ reconcileFromBlock: active.anchorBlock, state: 'indeterminate' });
+  });
+
+  it('bounds every page fetch by the remaining time so a slow RPC cannot outlive the deadline', async () => {
+    let clock = NOW;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const adapter = chain({
+      latestBlock: async () => BigInt(active.anchorBlock) + 50_000n,
+      authorizationUsedTransactions: vi.fn(async () => { clock += 15_000; return []; }),
+    });
+    try {
+      expect(await reconcilePurchaseIntent(SALT, { now: NOW, chain: adapter, deadline: NOW + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    // 1 ページ目は上限 10 秒・2 ページ目は残り 10 秒 − 予約 3 秒 = 7 秒・3 ページ目は始めない。
+    expect(adapter.authorizationUsedTransactions).toHaveBeenCalledTimes(2);
+    expect(adapter.authorizationUsedTransactions).toHaveBeenNthCalledWith(1, expect.anything(), 10_000n, 11_999n, { timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS });
+    expect(adapter.authorizationUsedTransactions).toHaveBeenNthCalledWith(2, expect.anything(), 12_000n, 13_999n, { timeoutMs: 7_000 });
+    expect(JSON.parse(h.kvEval.mock.calls.at(-1)![2][3])).toMatchObject({ reconcileFromBlock: '14000' });
+  });
+
+  it('the default adapter builds a retry-free transport bounded by the page timeout only when one is given', async () => {
+    h.client.getLogs.mockResolvedValue([]);
+    await defaultPurchaseReconcileChain.authorizationUsedTransactions(active, 10_000n, 11_999n, { timeoutMs: 1_234 });
+    expect(h.transportForChain).toHaveBeenLastCalledWith(active.chainId, { timeout: 1_234, retryCount: 0 });
+    await defaultPurchaseReconcileChain.authorizationUsedTransactions(active, 10_000n, 11_999n);
+    expect(h.transportForChain).toHaveBeenLastCalledWith(active.chainId);
   });
 
   it('a batch past its deadline defers the remaining due members to the next run without touching them', async () => {

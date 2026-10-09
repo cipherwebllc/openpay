@@ -15,6 +15,12 @@ const claimState = vi.hoisted(() => ({
 }));
 
 vi.mock('server-only', () => ({}));
+const chainsMock = vi.hoisted(() => ({ transportForChain: vi.fn() }));
+vi.mock('@/lib/chains', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/chains')>();
+  chainsMock.transportForChain.mockImplementation(actual.transportForChain);
+  return { ...actual, transportForChain: chainsMock.transportForChain };
+});
 vi.mock('@/lib/kv', () => ({
   kvGet: vi.fn(async (key: string) =>
     claimState.fail
@@ -29,10 +35,31 @@ vi.mock('@/lib/kv', () => ({
 }));
 
 import {
+  findStoreUsdcAuthorizationTransactions,
   STORE_USDC_ADDRESS,
   type StoreUsdcPublicClient,
   verifyStoreUsdcOnchain,
 } from '@/lib/x402/storeUsdcOnchain';
+
+// 第 7 回レビュー B4 (follow-up): deadline 付きの page 取得だけ、retry なし・残り時間で切った timeout の client を使う。
+describe('Store USDC page fetch transport bound', () => {
+  it('builds a retry-free transport bounded by timeoutMs only when one is given; a custom client is used as-is', async () => {
+    const getLogs = vi.fn(async () => []);
+    const client = { getLogs } as unknown as StoreUsdcPublicClient;
+    chainsMock.transportForChain.mockClear();
+    await findStoreUsdcAuthorizationTransactions({ payer: PAYER, nonce: NONCE, fromBlock: 1n, toBlock: 2n, client, timeoutMs: 1_234 });
+    expect(getLogs).toHaveBeenCalledTimes(1); expect(chainsMock.transportForChain).not.toHaveBeenCalled();
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
+    try {
+      expect(await findStoreUsdcAuthorizationTransactions({ payer: PAYER, nonce: NONCE, fromBlock: 1n, toBlock: 2n, timeoutMs: 1_234 })).toBe('unavailable');
+      expect(chainsMock.transportForChain).toHaveBeenLastCalledWith(8453, { timeout: 1_234, retryCount: 0 });
+      expect(await findStoreUsdcAuthorizationTransactions({ payer: PAYER, nonce: NONCE, fromBlock: 1n, toBlock: 2n })).toBe('unavailable');
+      expect(chainsMock.transportForChain).toHaveBeenLastCalledWith(8453);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 const EVENTS = parseAbi([
   'event Transfer(address indexed from, address indexed to, uint256 value)',

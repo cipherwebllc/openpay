@@ -12,6 +12,7 @@ import {
   JPYC_CHAINS,
   slugForChain,
   supportedChains,
+  transportForChain,
   txExplorerUrl,
 } from '@/lib/chains';
 import {
@@ -337,5 +338,26 @@ describe('chainSupportsCanonical7702', () => {
 
   it('未知 chain は既定 true (blocklist 方式・新 chain はゲートで要確認)', () => {
     expect(chainSupportsCanonical7702(999_999)).toBe(true);
+  });
+});
+
+// 第 7 回レビュー B4 (follow-up): reconciler の deadline 付き page 取得は、RPC の timeout と retry を呼び出しごとに絞る。
+describe('transportForChain のオプション (timeout / retryCount)', () => {
+  type HttpConfig = { config: { timeout?: number; retryCount?: number; type: string } };
+  it('既定は viem の既定 (timeout 10 秒・retry 3) のまま', () => {
+    const transport = transportForChain(polygon.id)({ chain: polygon }) as unknown as HttpConfig;
+    expect(transport.config).toMatchObject({ timeout: 10_000, retryCount: 3 });
+  });
+  it('単一 endpoint の chain は timeout/retryCount をそのまま http に渡す', () => {
+    const transport = transportForChain(polygon.id, { timeout: 1_234, retryCount: 0 })({ chain: polygon }) as unknown as HttpConfig;
+    expect(transport.config).toMatchObject({ timeout: 1_234, retryCount: 0 });
+  });
+  it('fallback の chain (Ethereum) は endpoint 数で timeout を割り、全体が上限内に収まる', () => {
+    const transport = transportForChain(mainnet.id, { timeout: 4_000, retryCount: 0 })({ chain: mainnet }) as unknown as HttpConfig & { value: { transports: HttpConfig[] } };
+    expect(transport.config.type).toBe('fallback');
+    expect(transport.config.retryCount).toBe(0);
+    const inner = transport.value.transports;
+    expect(inner.length).toBeGreaterThan(1);
+    for (const t of inner) expect(t.config).toMatchObject({ timeout: Math.floor(4_000 / inner.length), retryCount: 0 });
   });
 });

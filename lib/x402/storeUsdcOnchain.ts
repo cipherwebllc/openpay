@@ -75,10 +75,13 @@ export type StoreUsdcPublicClient = {
   }) => Promise<readonly { transactionHash: Hex | null }[]>;
 };
 
-function baseClient(): StoreUsdcPublicClient {
+// timeoutMs = deadline 付き (cron) のページ取得だけ retry なし・この timeout で呼ぶ (第 7 回レビュー B4 follow-up)。
+function baseClient(timeoutMs?: number): StoreUsdcPublicClient {
   return createPublicClient({
     chain: base,
-    transport: transportForChain(base.id),
+    transport: timeoutMs === undefined
+      ? transportForChain(base.id)
+      : transportForChain(base.id, { timeout: timeoutMs, retryCount: 0 }),
   }) as unknown as StoreUsdcPublicClient;
 }
 
@@ -256,9 +259,11 @@ export async function findStoreUsdcAuthorizationTransactions(input: {
   fromBlock: bigint;
   toBlock: bigint;
   client?: StoreUsdcPublicClient;
+  // deadline 付き (cron) のページ取得の RPC 上限。client を渡す呼出 (テスト) はそのまま使う。
+  timeoutMs?: number;
 }): Promise<Hex[] | 'unavailable'> {
   try {
-    const logs = await (input.client ?? baseClient()).getLogs({
+    const logs = await (input.client ?? baseClient(input.timeoutMs)).getLogs({
       address: STORE_USDC_ADDRESS,
       event: USDC_EVENTS_ABI[1],
       args: { authorizer: input.payer, nonce: input.nonce },

@@ -435,7 +435,12 @@ const SEPOLIA_PUBLIC_FALLBACKS = [
 //   - mainnet/sepolia: 公開 fallback 列。NEXT_PUBLIC_{ETHEREUM,SEPOLIA}_RPC_URL
 //     が設定されていればそれを primary に前置 (専用 RPC 優先)。
 //   - その他 chain: custom RPC があればそれ、無ければ viem default (http())。
-export function transportForChain(chainId: number): Transport {
+// options = 呼び出しごとに RPC の timeout / retryCount を絞る (第 7 回レビュー B4 follow-up: reconciler の deadline
+// 付きページ取得)。省略時は viem の既定 (timeout 10 秒・retry 3 回) のまま。fallback (Ethereum) は endpoint を順に
+// 試すので、timeout を endpoint 数で割って全体が options.timeout に収まるようにする。
+export type TransportOptions = { timeout?: number; retryCount?: number };
+
+export function transportForChain(chainId: number, options?: TransportOptions): Transport {
   const customUrl = customRpcUrlForChain(chainId);
   if (chainId === mainnet.id || chainId === sepolia.id) {
     const fallbacks =
@@ -443,9 +448,18 @@ export function transportForChain(chainId: number): Transport {
         ? ETHEREUM_PUBLIC_FALLBACKS
         : SEPOLIA_PUBLIC_FALLBACKS;
     const endpoints = customUrl ? [customUrl, ...fallbacks] : [...fallbacks];
-    return fallback(endpoints.map((u) => http(u)));
+    if (!options) return fallback(endpoints.map((u) => http(u)));
+    const perEndpoint = {
+      ...(options.timeout === undefined ? {} : { timeout: Math.floor(options.timeout / endpoints.length) }),
+      ...(options.retryCount === undefined ? {} : { retryCount: options.retryCount }),
+    };
+    return fallback(
+      endpoints.map((u) => http(u, perEndpoint)),
+      options.retryCount === undefined ? {} : { retryCount: options.retryCount },
+    );
   }
-  return customUrl ? http(customUrl) : http();
+  if (!options) return customUrl ? http(customUrl) : http();
+  return customUrl ? http(customUrl, options) : http(undefined, options);
 }
 
 /** Buyer-only chain (phase 4b-1) を含めた Chain 解決。CROSS_CHAIN_TARGETS から

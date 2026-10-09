@@ -46,6 +46,53 @@ describe('authenticated incoming license holders', () => {
     // 第 7 回レビュー B13: holders ページの期限を商品ごとの RPC 期限に共有する。
     expect(h.rights).toHaveBeenCalledWith(expect.objectContaining({ address: ADDRESS, productId: ID, ownership: null, deadline: expect.any(Number) }));
   });
+  // 第 7 回レビュー B13 (follow-up): ページ期限の到達は RPC 障害と区別し、確認済みの holder と「未処理商品の直前」の
+  // cursor を部分ページとして返す (未処理商品は飛ばさない)。続きの呼び出しで前進して全件そろう。
+  describe('page deadline reached mid-page', () => {
+    const IDS = Array.from({ length: 8 }, (_, i) => 'h_' + i.toString(16).padStart(32, '0'));
+    const getLibraryFrom = (cursor: string | null) => library(new Request('https://open-pay.jp/api/store/library?source=holders' + (cursor ? '&cursor=' + cursor : '')));
+    beforeEach(() => {
+      h.eval.mockImplementation(async (_script: string, _keys: string[], args: string[]) => ({ ok: true, value: args[0] === '' ? IDS : IDS.slice(IDS.indexOf(args[0]!) + 1) }));
+      h.product.mockImplementation(async (id: string) => ({ id, productKind: 'license', license: d, title: 'License ' + id.slice(-1), registration: { status: 'registered' }, contentAvailable: true }));
+    });
+    it('returns the confirmed holders with a resumable cursor, and the next call completes the set', async () => {
+      let clock = 1_700_000_000_000;
+      const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      let resolved = 0;
+      h.rights.mockImplementation(async (input: { productId: string }) => {
+        resolved += 1;
+        // 5 商品目の途中で 15 秒の期限を越える: 実物の resolver は共有期限で RPC を拒否し unknown を返す。
+        if (resolved === 5) { clock += 16_000; return { entitled: null, basis: null, nft: { status: 'unknown' } }; }
+        return { entitled: true, basis: 'holder', nft: { status: 'minted' }, observedBlock: '100', productId: input.productId };
+      });
+      try {
+        const first = await (await getLibraryFrom(null)).json();
+        expect(first).toMatchObject({ ok: true, source: 'holders', nextCursor: IDS[3] });
+        expect(first.items.map((item: { resourceId: string }) => item.resourceId)).toEqual(IDS.slice(0, 4));
+        clock += 1; resolved = 0;
+        const second = await (await getLibraryFrom(first.nextCursor)).json();
+        expect(second.items.map((item: { resourceId: string }) => item.resourceId)).toEqual(IDS.slice(4));
+        expect(second.nextCursor).toBeNull();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+    it('a deadline hit before any product was confirmed is still rights unknown (the retry could not progress)', async () => {
+      let clock = 1_700_000_000_000;
+      const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+      h.rights.mockImplementation(async () => { clock += 16_000; return { entitled: null, basis: null, nft: { status: 'unknown' } }; });
+      try {
+        const response = await getLibraryFrom(null);
+        expect(response.status).toBe(503); expect(await response.json()).toEqual({ ok: false, error: 'license_rights_unknown' });
+      } finally {
+        spy.mockRestore();
+      }
+    });
+    it('an RPC failure before the deadline stays a 503 (not a silently shortened page)', async () => {
+      h.rights.mockResolvedValueOnce({ entitled: true, basis: 'holder', nft: { status: 'minted' } }).mockResolvedValueOnce({ entitled: null, basis: null, nft: { status: 'unknown' } });
+      expect((await getLibraryFrom(null)).status).toBe(503);
+    });
+  });
   it('admission exhaustion is rights unknown (503), never a denial, and releases nothing', async () => {
     h.acquire.mockResolvedValue(null);
     const response = await getContent();

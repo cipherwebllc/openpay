@@ -36,6 +36,7 @@ import { LICENSE_DUE_INDEX, LICENSE_HOLD_INDEX, LICENSE_OBLIGATION_INDEX, licens
 import { repairLicenseIndexes } from '@/lib/license/repair';
 import { type LicenseReconcileChain } from '@/lib/license/reconcile';
 import { computeLicensePaymentKey } from '@/lib/license/paymentKey';
+import { STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS } from '@/lib/x402/reconcileBudget';
 import { JPYC_V3_ASSET } from '@/lib/x402/types';
 
 const ID = 'h_' + 'a'.repeat(32);
@@ -484,6 +485,28 @@ describe('第 7 回レビュー B3/B4: license reconcile の候補ページ再�
     }
     expect(rpc.transactions).toHaveBeenCalledTimes(3);
     expect(JSON.parse(h.store!.strings.get(purchaseIntentKey(i.intentSalt))!)).toMatchObject({ reconcileFromBlock: '6001' });
+    expect(stock()).toMatchObject({ reserved: 1, sold: 0 });
+  });
+  // B4 follow-up: 1 回の RPC を「残り時間 − cursor 保存の予約」で切り、足りなければ取得せず cursor を保存する。
+  it('ページ取得の RPC は残り時間で上限化し、予約に食い込むなら始めずに cursor を保存する', async () => {
+    const input = await quote(); const i = await settling(input);
+    const now = i.leaseUntil + 10_000;
+    let clock = now;
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const rpc: LicenseReconcileChain = {
+      observe: vi.fn(async () => finalized(50_000n)),
+      transactions: vi.fn(async () => { clock += 15_000; return []; }),
+      receiptMatches: vi.fn(async () => true),
+    };
+    try {
+      expect(await reconcilePurchaseIntent(i.intentSalt, { now, licenseChain: rpc, deadline: now + 25_000 })).toEqual({ ok: true, state: 'pending' });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(rpc.transactions).toHaveBeenCalledTimes(2);
+    expect(rpc.transactions).toHaveBeenNthCalledWith(1, expect.anything(), 1n, 2_000n, { timeoutMs: STORE_RECONCILE_PAGE_RPC_TIMEOUT_MS });
+    expect(rpc.transactions).toHaveBeenNthCalledWith(2, expect.anything(), 2_001n, 4_000n, { timeoutMs: 7_000 });
+    expect(JSON.parse(h.store!.strings.get(purchaseIntentKey(i.intentSalt))!)).toMatchObject({ reconcileFromBlock: '4001' });
     expect(stock()).toMatchObject({ reserved: 1, sold: 0 });
   });
 });

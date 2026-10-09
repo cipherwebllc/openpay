@@ -9,6 +9,8 @@ import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
 import type {
   PurchaseIntent, IndeterminatePurchaseIntent, ReconcilePurchaseIntentResult, finalizeHostedPurchase,
 } from '@/lib/x402/purchaseIntent';
+import { pageFetchTimeout } from '@/lib/x402/reconcileBudget';
+import type { PageFetchOptions } from '@/lib/x402/reconcilePaging';
 import { licenseEvalContext, licenseLuaVariant, type LicenseExpiryEvidence } from './stock';
 
 const AUTH_ABI = parseAbi(['function authorizationState(address authorizer, bytes32 nonce) view returns (bool)']);
@@ -19,12 +21,14 @@ export type LicenseFinalizedBlock = { number: bigint; hash: Hex; timestamp: bigi
 export type LicenseReconcileChain = {
   observe(intent: Claimed): Promise<LicenseFinalizedBlock>;
   receiptMatches(intent: Claimed, txHash: Hex, block: LicenseFinalizedBlock): Promise<boolean>;
-  transactions(intent: Claimed, from: bigint, to: bigint): Promise<Hex[]>;
+  // options.timeoutMs = deadline 付き (cron) のページ取得だけ retry なし・この timeout で呼ぶ (第 7 回レビュー B4 follow-up)。
+  transactions(intent: Claimed, from: bigint, to: bigint, options?: PageFetchOptions): Promise<Hex[]>;
 };
-function client(intent: Claimed) {
+function client(intent: Claimed, options?: PageFetchOptions) {
   const chain = chainObjectForId(intent.chainId);
   if (!chain) throw new Error('unsupported license chain');
-  return createPublicClient({ chain, transport: transportForChain(intent.chainId) });
+  const transport = options ? transportForChain(intent.chainId, { timeout: options.timeoutMs, retryCount: 0 }) : transportForChain(intent.chainId);
+  return createPublicClient({ chain, transport });
 }
 export const defaultLicenseReconcileChain: LicenseReconcileChain = {
   observe: async (intent) => {
@@ -48,8 +52,8 @@ export const defaultLicenseReconcileChain: LicenseReconcileChain = {
       isAddressEqual(args.merchant, intent.merchant) && args.merchantValue === BigInt(intent.merchantValue) &&
       isAddressEqual(args.feeReceiver, intent.feeReceiver) && args.feeValue === BigInt(intent.feeValue));
   },
-  transactions: async (intent, fromBlock, toBlock) => {
-    const logs = await client(intent).getLogs({ address: intent.token, event: USED, args: { authorizer: intent.claim.payer, nonce: intent.claim.nonce }, fromBlock, toBlock });
+  transactions: async (intent, fromBlock, toBlock, options) => {
+    const logs = await client(intent, options).getLogs({ address: intent.token, event: USED, args: { authorizer: intent.claim.payer, nonce: intent.claim.nonce }, fromBlock, toBlock });
     return logs.map((l) => l.transactionHash).filter((h): h is Hex => h !== null);
   },
 };
@@ -129,11 +133,14 @@ export async function reconcileLicensePurchase(current: PurchaseIntent, raw: str
       const result = await finalize(leased.txHash); if (result) return result;
     }
     for (let page = 0; page < 20 && fromBlock <= block.number; page++) {
-      // 時間予算の到達は取得前に見て、未取得ページの先頭を cursor に残す (打ち切りは失敗でも未払いでもない)。
-      if (deadline !== undefined && Date.now() >= deadline) return reschedule();
+      // 時間予算は取得前に「残り時間 − cursor 保存の予約」で見て、1 回の RPC に足りなければ未取得ページの先頭を
+      // cursor に残す (打ち切りは失敗でも未払いでもない)。取るときは残り時間で切った timeout で RPC を呼ぶ。
+      const timeoutMs = pageFetchTimeout(deadline);
+      if (timeoutMs === null) return reschedule();
       const to = fromBlock + 1999n < block.number ? fromBlock + 1999n : block.number;
       const pageStart = fromBlock;
-      for (const hash of await chain.transactions(leased, pageStart, to)) {
+      const hashes = timeoutMs === undefined ? await chain.transactions(leased, pageStart, to) : await chain.transactions(leased, pageStart, to, { timeoutMs });
+      for (const hash of hashes) {
         const result = await finalize(hash, pageStart); if (result) return result;
       }
       fromBlock = to + 1n;
