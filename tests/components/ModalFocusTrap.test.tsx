@@ -189,3 +189,28 @@ it('QR の閉じた details は summary で循環し、展開後は内部のボ�
   await user.tab();
   expect(first).toHaveFocus();
 });
+
+// 上に重なった別のモーダル (ウォレット接続の QR = Reown AppKit の w3m-modal 等) が focus を持つ間は、
+// 下の modal が Tab で focus を引き戻したり Escape で一緒に閉じたりしない (useModalFocus・D11)。
+it.each([
+  ['light DOM', false],
+  ['shadow DOM', true],
+] as const)('上に重なった別の aria-modal (%s) のキーは奪わない', (_label, shadow) => {
+  const onClose = vi.fn();
+  render(<CsvPassModal open onClose={onClose} />);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = shadow ? host.attachShadow({ mode: 'open' }) : host;
+  const card = document.createElement('div');
+  card.setAttribute('role', 'alertdialog');
+  card.setAttribute('aria-modal', 'true');
+  const inner = document.createElement('button');
+  card.appendChild(inner);
+  root.appendChild(card);
+  inner.focus();
+  expect(fireEvent.keyDown(inner, { key: 'Tab' })).toBe(true);
+  expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(false);
+  fireEvent.keyDown(inner, { key: 'Escape' });
+  expect(onClose).not.toHaveBeenCalled();
+  host.remove();
+});

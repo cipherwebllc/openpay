@@ -15,7 +15,7 @@
 // するので通常の印刷には影響しない。
 //
 // a11y: 開いたら閉じるボタンへフォーカス・ESC / 背景クリックで閉じる・Tab はダイアログ内の
-// ボタン (閉じる/印刷/コピー) を循環 (背後へ抜けない)・閉じたら元の要素へフォーカス復元。
+// 操作 (閉じる/印刷/コピー) を循環 (背後へ抜けない)・閉じたら元の要素へフォーカス復元 (共通の useModalFocus)。
 // 状態は印刷フラグのみ・他は labels-as-props で受ける (i18n は呼び出し側)。
 
 import { useEffect, useRef, useState } from 'react';
@@ -24,6 +24,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { TokenLogo, ChainLogo } from '@/components/AssetLogo';
 import type { ChainSlug } from '@/lib/chains';
 import { Printer, X } from 'lucide-react';
+import { useModalFocus } from '@/hooks/useModalFocus';
 
 const PRINT_BODY_CLASS = 'openpay-printing-placard';
 
@@ -75,49 +76,10 @@ export function MobileOrderPlacardModal({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
   // 印刷中だけ印刷専用ポスターを body 直下へ portal する (画面では hidden)。
   const [printing, setPrinting] = useState(false);
-  // onClose を ref 経由で読む (inline arrow の identity 変化で effect が再実行され
-  // returnFocus を上書きするのを防ぐ・LinkQrModal と同じ理由)。
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    if (!open) return;
-    returnFocusRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onCloseRef.current();
-        return;
-      }
-      // フォーカストラップ: ダイアログ内のボタン (閉じる/印刷/コピー) を循環させ、
-      // aria-modal の背後へ Tab で抜けないようにする。
-      if (e.key === 'Tab' && dialogRef.current) {
-        const focusables = dialogRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled])',
-        );
-        if (focusables.length === 0) return;
-        const first = focusables[0];
-        const last = focusables[focusables.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      returnFocusRef.current?.focus?.();
-      returnFocusRef.current = null;
-    };
-  }, [open]);
+  // 開いたら閉じるボタンへ focus・Tab はダイアログの中だけを回る・閉じたら元の要素へ戻す (共通の useModalFocus)。
+  useModalFocus(dialogRef, { open, onEscape: onClose, initialFocusRef: closeRef });
 
   // 印刷フロー: printing=true で印刷ポスターが DOM に commit された後 (effect は commit 後に
   // 走る) に body マーカーを付けて window.print()。afterprint で解除する。発火しないブラウザや

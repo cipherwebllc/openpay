@@ -1361,13 +1361,14 @@ describe('i18n: PayerReceipt keys (顧客向け電子レシート, ja/en parity)
     }
   });
 
-  it('SuccessOverlay 完了音トグルの aria-label (muteSound/unmuteSound) が ja/en に存在', () => {
+  it('SuccessOverlay 完了音トグルの名前 (soundToggle・状態は aria-pressed で伝える) が ja/en に存在', () => {
     for (const m of [ja, en]) {
-      for (const key of ['muteSound', 'unmuteSound'] as const) {
-        const v = (m.SuccessOverlay as Record<string, unknown>)[key];
-        expect(typeof v).toBe('string');
-        expect(v).not.toBe('');
-      }
+      const overlay = m.SuccessOverlay as Record<string, unknown>;
+      expect(typeof overlay.soundToggle).toBe('string');
+      expect(overlay.soundToggle).not.toBe('');
+      // 名前を状態で切り替えていた旧キー (二重否定の読み上げ) は残さない (D5)。
+      expect(overlay).not.toHaveProperty('muteSound');
+      expect(overlay).not.toHaveProperty('unmuteSound');
     }
   });
 });

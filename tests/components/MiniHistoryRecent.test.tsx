@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import type { HistoryEntry } from '@/lib/history';
 
@@ -237,50 +237,50 @@ describe('MiniHistoryRecent: standard-fee (OpenPay 利用手数料 tx) は除外
   });
 });
 
-describe('MiniHistoryRecent: status 別ドット色 + a11y label', () => {
-  it('success entry → 緑 (bg-emerald-500) + aria-label "成功"', () => {
+// D2: 状態は色の点だけでなく文字でも出す (色覚に頼らない・読み上げにも乗る)。点は飾り (aria-hidden)。
+// 成功以外は「受け取った」と読める緑の ↓ にしない。
+describe('MiniHistoryRecent: 状態の文字ラベル + 色の点', () => {
+  it.each([
+    ['success', '成功', 'bg-emerald-500'],
+    ['reverted', '差し戻し', 'bg-amber-500'],
+    ['error', 'エラー', 'bg-red-500'],
+    ['pending', '確認待ち', 'bg-sky-500'],
+  ] as const)('%s → 文字「%s」を行の中に出し、点 (%s) は読み上げない', (status, label, dotClass) => {
     useHistoryMock.mockReturnValue({
-      entries: [entry({ id: 's1', status: 'success' })],
+      entries: [entry({ id: status, status })],
       hydrated: true,
     });
     const { container } = renderWithIntl(<MiniHistoryRecent />);
-    expect(container.querySelector('.bg-emerald-500')).not.toBeNull();
-    expect(screen.getByLabelText('成功')).toBeInTheDocument();
+    const row = screen.getByRole('listitem');
+    expect(within(row).getByText(label)).toBeVisible();
+    const dot = container.querySelector(`.${dotClass}`);
+    expect(dot).not.toBeNull();
+    expect(dot).toHaveAttribute('aria-hidden', 'true');
+    expect(dot).not.toHaveAttribute('aria-label');
   });
 
-  it('reverted entry → 琥珀 (bg-amber-500) + aria-label "差し戻し"', () => {
-    useHistoryMock.mockReturnValue({
-      entries: [entry({ id: 'r1', status: 'reverted' })],
-      hydrated: true,
-    });
-    const { container } = renderWithIntl(<MiniHistoryRecent />);
-    expect(container.querySelector('.bg-amber-500')).not.toBeNull();
-    expect(screen.getByLabelText('差し戻し')).toBeInTheDocument();
-  });
-
-  it('error entry → 赤 (bg-red-500) + aria-label "エラー"', () => {
-    useHistoryMock.mockReturnValue({
-      entries: [entry({ id: 'e1', status: 'error' })],
-      hydrated: true,
-    });
-    const { container } = renderWithIntl(<MiniHistoryRecent />);
-    expect(container.querySelector('.bg-red-500')).not.toBeNull();
-    expect(screen.getByLabelText('エラー')).toBeInTheDocument();
-  });
-
-  it('混在 3 entries (success/reverted/error) → ドット 3 色すべて存在', () => {
+  it('成功は緑の ↓・成功以外は灰色の ↓ (受け取ったように見せない)', () => {
     useHistoryMock.mockReturnValue({
       entries: [
-        entry({ id: 's', status: 'success' }),
-        entry({ id: 'r', status: 'reverted' }),
-        entry({ id: 'e', status: 'error' }),
+        entry({ id: 's', status: 'success', merchantAmount: '1000000000000000000' }),
+        entry({ id: 'e', status: 'error', merchantAmount: '2000000000000000000' }),
       ],
       hydrated: true,
     });
-    const { container } = renderWithIntl(<MiniHistoryRecent />);
-    expect(container.querySelector('.bg-emerald-500')).not.toBeNull();
-    expect(container.querySelector('.bg-amber-500')).not.toBeNull();
-    expect(container.querySelector('.bg-red-500')).not.toBeNull();
+    renderWithIntl(<MiniHistoryRecent />);
+    const [okRow, errorRow] = screen.getAllByRole('listitem');
+    expect(okRow.querySelector('svg.text-emerald-600')).not.toBeNull();
+    expect(errorRow.querySelector('svg.text-emerald-600')).toBeNull();
+    expect(errorRow.querySelector('svg.text-slate-400')).not.toBeNull();
+  });
+
+  it('en: 状態の文字も英語 (History の状態ラベルを再利用)', () => {
+    useHistoryMock.mockReturnValue({
+      entries: [entry({ id: 'p', status: 'pending' })],
+      hydrated: true,
+    });
+    renderWithIntl(<MiniHistoryRecent />, { locale: 'en' });
+    expect(within(screen.getByRole('listitem')).getByText('Pending')).toBeVisible();
   });
 });
 

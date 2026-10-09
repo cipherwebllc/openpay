@@ -660,6 +660,30 @@ describe('HandleClaimPanel', () => {
     ).toBe(false);
   });
 
+  // 共通の focus 管理 (useModalFocus) へ寄せる前の挙動を固定する (D11): 初期 focus は安全側の
+  // キャンセル・Tab / Shift+Tab は 2 ボタンの間を回る・閉じたら押した「削除」へ戻る。
+  it('確認モーダルの focus: 初期はキャンセル・Tab は 2 ボタンを循環・閉じたら「削除」へ戻る', async () => {
+    h.isSignedIn = true;
+    stubMine([{ handle: 'alice', config: CONFIG }]);
+    renderPanel(CONFIG);
+    const releaseButton = await screen.findByRole('button', { name: '削除' });
+    releaseButton.focus();
+    fireEvent.click(releaseButton);
+    const dialog = screen.getByRole('dialog');
+    const cancel = within(dialog).getByRole('button', { name: 'キャンセル' });
+    const confirm = within(dialog).getByRole('button', { name: '解放する' });
+    expect(cancel).toHaveFocus();
+    fireEvent.keyDown(cancel, { key: 'Tab' });
+    expect(confirm).toHaveFocus();
+    fireEvent.keyDown(confirm, { key: 'Tab' });
+    expect(cancel).toHaveFocus();
+    fireEvent.keyDown(cancel, { key: 'Tab', shiftKey: true });
+    expect(confirm).toHaveFocus();
+    fireEvent.click(cancel);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '削除' })).toHaveFocus();
+  });
+
   it('「解放する」で DELETE fetch が発火 → 失敗は無言にせずエラー表示', async () => {
     h.isSignedIn = true;
     const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {

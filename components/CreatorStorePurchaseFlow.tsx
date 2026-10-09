@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { AlertTriangle, Copy, Loader2, Share2, X } from 'lucide-react';
 import { useAccount, useSwitchChain } from 'wagmi';
@@ -17,6 +17,7 @@ import { CreatorStorePurchaseConfirmation } from '@/components/CreatorStorePurch
 import { CreatorStorePurchaseState } from '@/components/CreatorStorePurchaseState';
 import { ExternalImage } from '@/components/ExternalImage';
 import { useHostedStorePurchase } from '@/hooks/useHostedStorePurchase';
+import { useModalFocus } from '@/hooks/useModalFocus';
 import { useSiweSession } from '@/hooks/useSiweSession';
 import { useStoreCacheScope } from '@/hooks/useStoreCacheScope';
 import { buildHostedPurchaseSignPreview } from '@/lib/x402/hostedPurchaseWire';
@@ -115,7 +116,14 @@ export function CreatorStorePurchaseFlow({
     [buyer.quote, effectivePreviewNowSec],
   );
 
-  if (!open || (product.productKind === 'license' && !env.enableLicenseNftUi)) return null;
+  const visible = open && !(product.productKind === 'license' && !env.enableLicenseNftUi);
+  // aria-modal を名乗るので実挙動も揃える (D1): 開いたら dialog へ focus・Tab は中だけ・閉じたら購入ボタンへ戻す。
+  // Escape は閉じるボタンと同じ。ただし署名・送信の途中は Escape では閉じない (誤打で進行中の購入を隠さない)。
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const purchaseInFlight = buyer.phase === 'signing' || buyer.phase === 'submitting';
+  useModalFocus(dialogRef, { open: visible, onEscape: purchaseInFlight ? undefined : onClose });
+
+  if (!visible) return null;
 
   const closeAndResetReview = () => {
     buyer.reset();
@@ -197,10 +205,12 @@ export function CreatorStorePurchaseFlow({
 
   return (
     <div
-      className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/55 px-3 py-6 backdrop-blur-sm sm:px-6"
+      ref={dialogRef}
+      className="fixed inset-0 z-[70] overflow-y-auto bg-slate-950/55 px-3 py-6 outline-none backdrop-blur-sm sm:px-6"
       role="dialog"
       aria-modal="true"
       aria-labelledby="creator-store-purchase-dialog-heading"
+      tabIndex={-1}
     >
       <div className="mx-auto w-full max-w-2xl">
         <div className="mb-3 flex items-center justify-between gap-3">

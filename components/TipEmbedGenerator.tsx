@@ -885,9 +885,12 @@ export function TipEmbedGenerator() {
         {/* 公開する: リンク共有 / サイト埋め込み の 2 択 */}
         <SectionCard title={t('step3Title')} headingId="tip-publish-heading" icon={Share2}>
 
+          {/* 2 択の切替は aria-pressed のボタン (値引きの金額/率と同じ)。tab を名乗ると tabpanel・矢印キー操作が
+              要るのに無かった (D7)。まとまりの名前は節の見出し「公開する」。 */}
           <div
             className="mb-3 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1"
-            role="tablist"
+            role="group"
+            aria-labelledby="tip-publish-heading"
           >
             {(
               [
@@ -898,8 +901,7 @@ export function TipEmbedGenerator() {
               <button
                 key={mode}
                 type="button"
-                role="tab"
-                aria-selected={publishMode === mode}
+                aria-pressed={publishMode === mode}
                 onClick={() => setPublishMode(mode)}
                 className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
                   publishMode === mode
@@ -982,10 +984,7 @@ export function TipEmbedGenerator() {
           ) : (
             <div>
               {/* 形式切替: iframe (全画面ウィジェット) / button (リンク貼付)。default iframe。 */}
-              <div
-                className="mb-2 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1"
-                role="tablist"
-              >
+              <div className="mb-2 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1">
                 {(
                   [
                     ['iframe', t('embedIframeTab')],
@@ -995,8 +994,7 @@ export function TipEmbedGenerator() {
                   <button
                     key={fmt}
                     type="button"
-                    role="tab"
-                    aria-selected={embedFormat === fmt}
+                    aria-pressed={embedFormat === fmt}
                     onClick={() => setEmbedFormat(fmt)}
                     className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
                       embedFormat === fmt

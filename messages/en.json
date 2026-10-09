@@ -1683,8 +1683,7 @@
     "viewReceiptsLink": "View payment receipts ↗",
     "dismiss": "Close",
     "dismissHelp": "Close after the merchant has confirmed",
-    "muteSound": "Mute completion sound",
-    "unmuteSound": "Enable completion sound"
+    "soundToggle": "Completion sound"
   },
   "NonCustodialNotice": {
     "shortTitle": "Settlement lives on-chain",

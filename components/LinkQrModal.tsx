@@ -3,10 +3,11 @@
 // リンク共有用のシンプルな QR ポップアップ (プロフの所有ハンドル一覧 / チップタブ共用)。
 // 一覧やフォームに QR を常時並べると縦長で読みにくいため、ボタン経由のモーダル提示にする。
 // a11y: 開いたら閉じるボタンへフォーカス・Tab は背後のページへ抜けないようトラップ・
-// 閉じたら元の要素へ復元 (aria-modal を実挙動で担保)。ESC / 背景クリックでも閉じる。
+// 閉じたら元の要素へ復元 (aria-modal を実挙動で担保・共通の useModalFocus)。ESC / 背景クリックでも閉じる。
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
+import { useModalFocus } from '@/hooks/useModalFocus';
 
 export function LinkQrModal({
   open,
@@ -23,44 +24,16 @@ export function LinkQrModal({
   closeLabel: string;
   onClose: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
-  // onClose を ref 経由で読む。inline arrow は毎レンダ別 identity なので、これを effect の
-  // dep にすると表示中の親再レンダで effect が再実行され returnFocusRef を閉じるボタン自身で
-  // 上書きしてしまう (閉じた後の復元 focus が detach ノードへの no-op になり a11y 退行)。
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  // 捕捉/復元は open の遷移時のみ走らせる (deps は [open] に限定)。
-  useEffect(() => {
-    if (!open) return;
-    returnFocusRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    closeRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCloseRef.current();
-      // ダイアログ内のフォーカス可能要素は閉じるボタンのみ → Tab で背後のページへ
-      // 抜けないよう閉じるボタンに留める。
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        closeRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    // cleanup (= 閉じる/unmount 時) に元の要素へフォーカスを復元する。
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      returnFocusRef.current?.focus?.();
-      returnFocusRef.current = null;
-    };
-  }, [open]);
+  // 開いたら閉じるボタンへ focus (中の操作はこれだけ)・Tab は中だけ・閉じたら元の要素へ戻す。
+  useModalFocus(dialogRef, { open, onEscape: onClose, initialFocusRef: closeRef });
 
   if (!open) return null;
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label={title}

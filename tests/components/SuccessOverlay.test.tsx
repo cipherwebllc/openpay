@@ -124,7 +124,7 @@ describe('SuccessOverlay', () => {
       <SuccessOverlay amountDisplay="100 USDC" txHash={TX_HASH} onDismiss={() => undefined} />
       <button>Outside</button>
     </>);
-    const first = screen.getByRole('button', { name: '完了音をオフにする' });
+    const first = screen.getByRole('button', { name: '完了音' });
     const copy = screen.getByRole('button', { name: /Tx Hash をコピー/ });
     const last = screen.getByRole('button', { name: '閉じる' });
     await user.tab();
@@ -386,7 +386,9 @@ describe('SuccessOverlay: 完了音トグル (PayPay 風チャイム)', () => {
     }
   });
 
-  it('ja: 既定で音ON → 「完了音をオフにする」トグルを表示', () => {
+  // D5: 名前は固定 (「完了音」) し、状態は aria-pressed だけで伝える。名前と aria-pressed を同時に
+  // 切り替えると「完了音をオフにする・押されている」= 消音中と読まれ、実際 (鳴る) と逆に聞こえる。
+  it('ja: 既定で音ON → 名前は「完了音」・aria-pressed=true', () => {
     render(
       <SuccessOverlay
         amountDisplay="100 USDC"
@@ -394,12 +396,12 @@ describe('SuccessOverlay: 完了音トグル (PayPay 風チャイム)', () => {
         onDismiss={() => undefined}
       />,
     );
-    expect(
-      screen.getByRole('button', { name: '完了音をオフにする' }),
-    ).toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: '完了音' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    expect(toggle).toHaveAttribute('title', '完了音');
   });
 
-  it('クリックで OFF へ切替 → ラベルが「完了音をオンにする」+ localStorage に永続', async () => {
+  it('クリックで OFF へ切替 → 名前は変えず aria-pressed=false + localStorage に永続', async () => {
     const user = userEvent.setup();
     render(
       <SuccessOverlay
@@ -408,14 +410,14 @@ describe('SuccessOverlay: 完了音トグル (PayPay 風チャイム)', () => {
         onDismiss={() => undefined}
       />,
     );
-    await user.click(screen.getByRole('button', { name: '完了音をオフにする' }));
-    expect(
-      screen.getByRole('button', { name: '完了音をオンにする' }),
-    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '完了音' }));
+    const toggle = screen.getByRole('button', { name: '完了音' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(toggle).toHaveAttribute('title', '完了音');
     expect(window.localStorage.getItem(SOUND_KEY)).toBe('0');
   });
 
-  it('永続値 OFF を初期反映 (mount 後に OFF ラベル)', () => {
+  it('永続値 OFF を初期反映 (mount 後に aria-pressed=false)', () => {
     window.localStorage.setItem(SOUND_KEY, '0');
     render(
       <SuccessOverlay
@@ -424,12 +426,10 @@ describe('SuccessOverlay: 完了音トグル (PayPay 風チャイム)', () => {
         onDismiss={() => undefined}
       />,
     );
-    expect(
-      screen.getByRole('button', { name: '完了音をオンにする' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '完了音' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('en: トグルの aria-label が英訳 (Mute completion sound)', () => {
+  it('en: トグルの名前が英訳 (Completion sound)', () => {
     render(
       <SuccessOverlay
         amountDisplay="100 USDC"
@@ -439,7 +439,7 @@ describe('SuccessOverlay: 完了音トグル (PayPay 風チャイム)', () => {
       { locale: 'en' },
     );
     expect(
-      screen.getByRole('button', { name: 'Mute completion sound' }),
-    ).toBeInTheDocument();
+      screen.getByRole('button', { name: 'Completion sound' }),
+    ).toHaveAttribute('aria-pressed', 'true');
   });
 });

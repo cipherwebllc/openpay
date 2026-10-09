@@ -20,8 +20,10 @@ describe('LinkQrModal', () => {
     // open は最初から true なので、mount effect 後フォーカスは閉じるボタンへ。
     const close = screen.getByRole('button', { name: '閉じる' });
     expect(document.activeElement).toBe(close);
-    // Tab は背後へ抜けず閉じるボタンに留まる。
+    // Tab / Shift+Tab は背後へ抜けず閉じるボタンに留まる。
     fireEvent.keyDown(window, { key: 'Tab' });
+    expect(document.activeElement).toBe(close);
+    fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
     expect(document.activeElement).toBe(close);
     // ESC で onClose。
     fireEvent.keyDown(window, { key: 'Escape' });

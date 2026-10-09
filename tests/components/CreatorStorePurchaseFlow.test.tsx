@@ -524,6 +524,72 @@ describe('CreatorStorePurchaseFlow', () => {
   });
 });
 
+// D1: aria-modal を名乗る購入ダイアログの focus 管理 (共通の useModalFocus)。
+describe('CreatorStorePurchaseFlow: focus 管理', () => {
+  function renderOpenable(onClose = vi.fn()) {
+    const opener = document.createElement('button');
+    opener.textContent = '購入';
+    document.body.appendChild(opener);
+    opener.focus();
+    const props = { product: PRODUCT, sellerDisclosureHref: '/ja/store/seller/0xseller', onClose };
+    const utils = renderWithIntl(<CreatorStorePurchaseFlow open {...props} />);
+    const close = () => utils.rerender(<CreatorStorePurchaseFlow open={false} {...props} />);
+    return { ...utils, opener, onClose, close };
+  }
+
+  it('開くと dialog へ focus・外へ移った focus は Tab で中へ戻る・閉じたら押したボタンへ戻る', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const { opener, close } = renderOpenable();
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveFocus();
+    opener.focus();
+    expect(fireEvent.keyDown(opener, { key: 'Tab' })).toBe(false);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    close();
+    expect(opener).toHaveFocus();
+    opener.remove();
+  });
+
+  it('Escape は閉じるボタンと同じく onClose を呼ぶ', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const { onClose, opener } = renderOpenable();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledOnce();
+    opener.remove();
+  });
+
+  it.each(['signing', 'submitting'] as const)('%s 中の Escape では閉じない (進行中の購入を誤って隠さない)', (phase) => {
+    state.phase = phase;
+    state.isBusy = true;
+    const { onClose, opener } = renderOpenable();
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    opener.remove();
+  });
+
+  it('上に重なった別のモーダル (ウォレット接続の QR 等) のキーは奪わない', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const { onClose, opener } = renderOpenable();
+    // Reown AppKit の w3m-modal は body 直下に aria-modal の card を出し、自前で focus と Escape を扱う。
+    const walletModal = document.createElement('div');
+    walletModal.setAttribute('role', 'alertdialog');
+    walletModal.setAttribute('aria-modal', 'true');
+    const walletButton = document.createElement('button');
+    walletModal.appendChild(walletButton);
+    document.body.appendChild(walletModal);
+    walletButton.focus();
+    expect(fireEvent.keyDown(walletButton, { key: 'Tab' })).toBe(true);
+    expect(walletButton).toHaveFocus();
+    fireEvent.keyDown(walletButton, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    walletModal.remove();
+    opener.remove();
+  });
+});
+
 
 describe('license purchase flow', () => {
   const licenseProduct = { ...PRODUCT, productKind: 'license' as const, priceJpyc: '1000', license: { supply: 10, transferable: false, termsUrl: 'https://example.com/terms', termsVersion: '1' } };

@@ -91,7 +91,7 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
         .first(),
     ).toBeVisible();
     // iframe スニペットは「サイトに埋め込む」タブを開くと出る (default は共有リンク)
-    await page.getByRole('tab', { name: 'サイトに埋め込む' }).click();
+    await page.getByRole('button', { name: 'サイトに埋め込む', exact: true }).click();
     await expect(page.getByText(/width="380"/)).toBeVisible();
   });
 

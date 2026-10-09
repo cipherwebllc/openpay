@@ -2,6 +2,7 @@
 // 押すまでは自前のサムネイルだけ (YouTube の iframe を作らない)・押すと youtube-nocookie の iframe に替わる。
 import { describe, it, expect } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { GuideVideo } from '@/components/guide/GuideVideo';
 import { HOWTO_VIDEOS, HOWTO_VIDEO_UI } from '@/lib/howtoVideos';
 
@@ -35,5 +36,17 @@ describe('GuideVideo', () => {
     expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-presentation');
     expect(iframe!.getAttribute('allow')).toContain('autoplay');
     expect(iframe).toHaveAttribute('allowfullscreen');
+  });
+
+  // D6: 押したボタンが消えると focus が body に落ち、キーボードでは動画まで辿り直しになる。
+  it('キーボードで再生すると、focus は置き換わった iframe (動画) へ移る', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<GuideVideo video={video} />);
+    await user.tab();
+    expect(screen.getByRole('button')).toHaveFocus();
+    await user.keyboard('{Enter}');
+    const iframe = container.querySelector('iframe');
+    expect(iframe).not.toBeNull();
+    expect(iframe).toHaveFocus();
   });
 });

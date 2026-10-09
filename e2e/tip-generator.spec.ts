@@ -25,7 +25,7 @@ test.describe('Tip widget generator (creator UX)', () => {
     await expect(page.getByText(new RegExp(`/tip/${TO}`)).first()).toBeVisible();
 
     // embed タブへ → iframe snippet が出て URL 見出しは消える
-    await page.getByRole('tab', { name: 'サイトに埋め込む' }).click();
+    await page.getByRole('button', { name: 'サイトに埋め込む', exact: true }).click();
     await expect(page.getByText(/<iframe/)).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Tip URL' })).toHaveCount(0);
   });
