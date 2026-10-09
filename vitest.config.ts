@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
+import { COVERAGE_THRESHOLDS } from './scripts/lib/coverageThresholds.mjs';
 
 export default defineConfig({
   plugins: [react()],
@@ -39,16 +40,13 @@ export default defineConfig({
       // 加えたため以前の数字 (lib 中心で 95 台) からは下がっている — 実測が下がった
       // のではなく計測範囲が広がった。
       // 実測 -2pt を下限にして回帰のみ検出 (新規コードに無理なテスト追加を強要しない)。
-      // CI の Coverage ステップは continue-on-error を外したので、この下限割れは fail する。
+      // CI は run-tests.mjs が coverage-summary.json とこの下限 (scripts/lib/coverageThresholds.mjs) を比べて fail させる。
       // 2026-09-12: CI の Coverage は本物の Lua (wasmoon) を使う 11 file を除外して計測する
       // (scripts/lib/luaRealTests.mjs・lua-real job で別途実行)。除外による実測差は
       // statements 90.98→90.30 / branches 87.17→86.75 / functions 91.46→90.74 で、閾値は据え置き。
-      thresholds: {
-        statements: 87,
-        branches: 84,
-        functions: 88,
-        lines: 87,
-      },
+      thresholds: { ...COVERAGE_THRESHOLDS },
+      // json-summary = run-tests.mjs が下限と比べる要約 (既定の 4 つは手元で見るため残す)。
+      reporter: ['text', 'html', 'clover', 'json', 'json-summary'],
     },
     // 環境変数はモジュール評価より前にセットされる必要があるため、
     // setupFiles ではなくここで定義する。

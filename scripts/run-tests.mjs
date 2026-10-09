@@ -11,6 +11,10 @@
 //      範囲外 (= 新規 partial silent skip。regression 検知用 fence)
 //   4. ディスク上の tests/**/*.test.{ts,tsx} のうち reporter に 1 件も現れないファイルがある
 //      (= collection 前に worker が死んだ / 誤除外。3. は test 数ベースなのでこの経路を見逃す)
+//   5. RUN_TESTS_COVERAGE=1 のとき、coverage-summary.json が無い・下限
+//      (scripts/lib/coverageThresholds.mjs) を割る (CI は full vitest を coverage 付きの 1 回だけ走らせる)
+//   6. assertion の外の未処理エラー (Unhandled Rejection / Uncaught Exception) が 1 件でもある
+//      (numFailedTests に載らない。scripts/lib/unhandledErrorsReporter.mjs が数える)
 //
 // KNOWN_BROKEN_FILES: worker OOM 等で collect 後に run されないファイルを file→期待 missing
 // test 数の Map で登録する暫定 allowlist。KNOWN_MAX_MISSING はこの Map から導出するので、
@@ -33,6 +37,8 @@ import {
   normalizeReportedFiles,
 } from './lib/testFileFence.mjs';
 import { LUA_REAL_TEST_FILES } from './lib/luaRealTests.mjs';
+import { evaluateCoverage } from './lib/coverageThresholds.mjs';
+import { evaluateUnhandled } from './lib/unhandledErrorsReporter.mjs';
 
 // 既知の worker-OOM 等で未 run のファイル → 期待 missing test 数 (Map)。空 = 全ファイル run 前提
 // (missing が 1 件でも出れば fail)。ここに足す操作は PR レビューで明示同意が必要。
@@ -53,9 +59,35 @@ const KNOWN_UNREPORTED_FILES = skipLuaReal ? LUA_REAL_TEST_FILES : [];
 
 const tmp = mkdtempSync(join(tmpdir(), 'vitest-out-'));
 const jsonOut = join(tmp, 'result.json');
+const unhandledOut = join(tmp, 'unhandled.json');
 
 // CLI から渡された追加引数 (path / -t 等の絞り込み)。空 = full run。
 const extraArgs = process.argv.slice(2);
+// CI: full vitest を coverage 付きの 1 回にまとめる (第 7 回レビュー E13・以前は coverage なし + coverage の 2 回)。
+const withCoverage = process.env.RUN_TESTS_COVERAGE === '1';
+const coverageSummary = join(process.cwd(), 'coverage', 'coverage-summary.json');
+if (withCoverage) rmSync(coverageSummary, { force: true });
+
+// coverage の要約を下限と比べる (無い・読めない・下限割れは fail)。vitest の終了コードに任せない理由は
+// scripts/lib/coverageThresholds.mjs の冒頭。
+function checkCoverage() {
+  let text = null;
+  try {
+    text = readFileSync(coverageSummary, 'utf8');
+  } catch {
+    text = null;
+  }
+  const verdict = evaluateCoverage(text);
+  if (!verdict.readable) {
+    console.error(`[run-tests] FAIL: coverage の要約 (${coverageSummary}) が読めない`);
+    return false;
+  }
+  for (const { metric, pct, min, pass } of verdict.results) {
+    console.log(`[run-tests] coverage ${metric}: ${pct}% (下限 ${min}%) ${pass ? 'ok' : 'NG'}`);
+  }
+  if (!verdict.ok) console.error('[run-tests] FAIL: coverage が下限を割った (テストの無い分岐が増えた)');
+  return verdict.ok;
+}
 
 const args = [
   '--max-old-space-size=6144',
@@ -66,7 +98,9 @@ const args = [
   '--poolOptions.forks.maxForks=2',
   '--reporter=default',
   '--reporter=json',
+  '--reporter=./scripts/lib/unhandledErrorsReporter.mjs',
   `--outputFile=${jsonOut}`,
+  ...(withCoverage ? ['--coverage'] : []),
   ...(skipLuaReal && extraArgs.length === 0
     ? LUA_REAL_TEST_FILES.flatMap((f) => ['--exclude', f])
     : []),
@@ -76,16 +110,25 @@ if (skipLuaReal && extraArgs.length === 0) {
   console.log(`[run-tests] SKIP_LUA_REAL=1: ${LUA_REAL_TEST_FILES.length} 件の Lua 実行系 test は lua-real job に委ねる`);
 }
 
-const child = spawn('node', args, { stdio: 'inherit' });
+const child = spawn('node', args, {
+  stdio: 'inherit',
+  env: { ...process.env, RUN_TESTS_UNHANDLED_OUT: unhandledOut },
+});
 
 child.on('exit', (code) => {
   let report;
   try {
     report = JSON.parse(readFileSync(jsonOut, 'utf8'));
-  } catch (e) {
+  } catch {
     console.error('\n[run-tests] JSON report unreadable, falling back to vitest exit code:', code);
     rmSync(tmp, { recursive: true, force: true });
     process.exit(code ?? 1);
+  }
+  let unhandledText = null;
+  try {
+    unhandledText = readFileSync(unhandledOut, 'utf8');
+  } catch {
+    unhandledText = null;
   }
   rmSync(tmp, { recursive: true, force: true });
 
@@ -100,6 +143,18 @@ child.on('exit', (code) => {
   }
   if (numTotalTests === 0) {
     console.error('[run-tests] FAIL: 0 tests ran');
+    process.exit(1);
+  }
+  // assertion の外の未処理エラーは numFailedTests に載らない。下の「post-teardown crash なら
+  // 終了コード非 0 でも通す」扱いに紛れさせないよう、ここで別に数えて 1 件でもあれば fail。
+  const unhandled = evaluateUnhandled(unhandledText);
+  if (!unhandled.ok) {
+    console.error(
+      unhandled.readable
+        ? `[run-tests] FAIL: assertion の外の未処理エラーが ${unhandled.count} 件 (Unhandled Rejection / Uncaught Exception)`
+        : '[run-tests] FAIL: 未処理エラーの集計 (unhandledErrorsReporter) が書かれていない (vitest が最後まで進まなかった)',
+    );
+    for (const m of unhandled.messages) console.error(`  - ${m}`);
     process.exit(1);
   }
   // ファイル数フェンス: worker が **collection の前に** 死んだファイルは numTotalTests にも
@@ -190,13 +245,13 @@ child.on('exit', (code) => {
           '(testResults entry が空)。stdout 上の "Errors N errors" に相当。',
       );
     }
-    process.exit(0);
+    process.exit(withCoverage && !checkCoverage() ? 1 : 0);
   }
   if (code !== 0) {
     console.warn(
-      `[run-tests] PASS with warning: vitest exit=${code} (likely worker post-teardown crash)。` +
-        '全 assertion 数 (passed+failed) が total と一致しているため exit 0 で扱う。',
+      `[run-tests] vitest exit=${code} だが、未処理エラーは 0 件で全 assertion 数 (passed+failed) が total と一致。` +
+        'coverage の下限はこの後で判定する (vitest の終了コードは理由を区別できないので合否に使わない)。',
     );
   }
-  process.exit(0);
+  process.exit(withCoverage && !checkCoverage() ? 1 : 0);
 });

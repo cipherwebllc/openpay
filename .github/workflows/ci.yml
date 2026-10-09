@@ -56,68 +56,33 @@ jobs:
           tests/components/X402DiscoveryView.test.tsx
       # scripts/run-tests.mjs は vitest を forks pool / maxForks=2 で起動し、
       # JSON reporter の numFailedTests を真の合否ソースとして使う。
-      # PaymentForm / CheckoutForm / TipForm 系で観測される post-teardown
-      # "Worker exited unexpectedly" は全 assertion が pass している状態の
-      # cleanup OOM なので fail とは扱わない (script 内で別途 warning を残す)。
+      # assertion の外の未処理エラー (worker の異常終了 "Worker exited unexpectedly" を含む) は
+      # scripts/lib/unhandledErrorsReporter.mjs が数えて fail にする (第 7 回レビュー #759)。かつての
+      # PaymentForm 系の post-teardown OOM は 2026-06-03 に真因を直したので通さない。再発したら真因を調べる
+      # (continue-on-error に戻さない)。
       # 本物の Lua (wasmoon) を使う test は非決定的に WASM heap が壊れる (memory:
-      # feedback_wasmoon_oob_flaky) ので、ここと Coverage から外し lua-real job に任せる
-      # (2026-09-12 案 1)。除外一覧は scripts/lib/luaRealTests.mjs が単一情報源。
-      - run: node scripts/run-tests.mjs
+      # feedback_wasmoon_oob_flaky) ので外し lua-real job に任せる (2026-09-12 案 1)。
+      # 除外一覧は scripts/lib/luaRealTests.mjs が単一情報源 (run-tests.mjs が --exclude を付ける)。
+      # カバレッジは gate (2026-09-02)。full vitest は coverage 付きの 1 回だけ走らせ (第 7 回レビュー E13・
+      # 以前は coverage なしと coverage ありの 2 回)、下限 (scripts/lib/coverageThresholds.mjs) は run-tests.mjs が
+      # coverage-summary.json と比べて fail させる (実測 -2pt・割れたら「テストの無い分岐が増えた」の合図)。
+      - name: Tests + coverage
+        run: node scripts/run-tests.mjs
         env:
           SKIP_LUA_REAL: '1'
+          RUN_TESTS_COVERAGE: '1'
       # 売り手が自分のサーバーで使う SDK の保護配布 verifier・license gate の node:test (vitest の include の外)。
       # ここで走らせないと SDK を変えても壊れたまま CI が green になる (第 7 回レビュー F16)。依存は root の node_modules。
       - name: SDK tests (node:test)
         run: npm --prefix packages/x402-sdk test
-      # カバレッジは gate (2026-09-02): 以前は continue-on-error で赤くならず、
-      # 閾値 (vitest.config.ts の coverage.thresholds) が事実上無効だった。
-      # 閾値は実測 -2pt で回帰のみを検出する設定なので、割れたら「テストの無い分岐が増えた」の合図。
-      - name: Coverage
-        # --exclude は scripts/lib/luaRealTests.mjs の一覧と同一 (tests/scripts/workflow-guards.test.ts が照合)。
-        run: >-
-          node --max-old-space-size=6144 ./node_modules/.bin/vitest run --coverage
-          --pool=forks --poolOptions.forks.minForks=1 --poolOptions.forks.maxForks=2
-          --exclude tests/_helpers/redisLua.test.ts
-          --exclude tests/lib/order/agentOrderReservation-lua.test.ts
-          --exclude tests/lib/order/agentOrderPending-lua.test.ts
-          --exclude tests/lib/order/agentOrderRecovery-lua.test.ts
-          --exclude tests/lib/order/agentOrderFinalize-lua.test.ts
-          --exclude tests/lib/order/agentOrderLifecycle-lua.test.ts
-          --exclude tests/lib/order/agentOrderPersistence-lua.test.ts
-          --exclude tests/lib/order/agentOrderReview-lua.test.ts
-          --exclude tests/lib/order/agentOrderOrigin-lua.test.ts
-          --exclude tests/app/api/agentPurchases.test.ts
-          --exclude tests/app/api/freee-routes-integration.test.ts
-          --exclude tests/app/api/store-delivery-metadata.test.ts
-          --exclude tests/app/api/store-products-license-terms.test.ts
-          --exclude tests/lib/license/minter.test.ts
-          --exclude tests/lib/license/product.test.ts
-          --exclude tests/lib/license/stock.test.ts
-          --exclude tests/lib/agent/bindings.test.ts
-          --exclude tests/lib/license/verifyBudget.test.ts
-          --exclude tests/lib/store/deliveryBudget.test.ts
-          --exclude tests/lib/x402/purchaseIntent-lua.test.ts
-          --exclude tests/lib/x402/purchaseIntent-lua-machine.test.ts
-          --exclude tests/lib/x402/storeUsdcIntent-lua-machine.test.ts
-          --exclude tests/lib/x402/purchaseIntent-expiry-lua.test.ts
-          --exclude tests/lib/x402/hostedTakedown-lua.test.ts
-          --exclude tests/lib/x402/purchaseQuoteRateLimit-lua.test.ts
-          --exclude tests/lib/x402/registry-lua.test.ts
-          --exclude tests/lib/x402/registry-moderation-lua.test.ts
-          --exclude tests/lib/x402/registry-legacy-claims-lua.test.ts
-          --exclude tests/lib/x402/registry-url-claims-lua.test.ts
-          --exclude tests/lib/x402/registry-url-claims-lifecycle-lua.test.ts
-          --exclude tests/lib/x402/reverify-cas.test.ts
-          --exclude tests/lib/x402/reverify-url-claims-lua.test.ts
-          --exclude tests/lib/x402/storeIndex-lua.test.ts
-          --exclude tests/lib/x402/storeUsdcReconcile-lua.test.ts
-          --exclude tests/scripts/kv-restore-lua.test.ts
       - name: Build (production) + bundle budget check
         env:
           NEXT_PUBLIC_NETWORK_ENV: testnet
           NEXT_PUBLIC_PIMLICO_API_KEY: ci_dummy_key
           NEXT_PUBLIC_FEE_RECEIVER_ADDRESS: '0x000000000000000000000000000000000000dEaD'
         run: |
+          # build の失敗を tee の終了コードで隠さない (pipefail が無いと予算スクリプトのパース失敗頼みになる・第 7 回レビュー E12)
+          set -o pipefail
           # build ログを保存して、後で bundle 予算チェックに食わせる
           npm run build 2>&1 | tee build.log
           # Route 別 First Load JS の予算超過を fail させる
