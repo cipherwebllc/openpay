@@ -12,25 +12,24 @@ export function orderPaymentHoldUntil(record: OrderDelivery, loadedAt: number): 
     loadedAt + AUTHORIZATION_VALIDITY_WINDOW_SEC * 1000);
 }
 
+// How long to keep reading after the device-clock expiry checkpoint while the chain cannot yet prove
+// expiry (finality lag / unreadable status). The hold itself is never lifted without a chain result.
+const POST_EXPIRY_READ_MS = 15 * 60_000;
+
 // A background reader owns its timers/abort controller, never the current payment's recovery latch.
+// The same-merchant payment hold is lifted only by a chain result (onResolved: settled, or expired
+// proven at a finalized block). A device-clock expiry or an unreadable status never lifts it: the old
+// signature may still settle, and a second signature would double-pay (#767 Codex re-review P1).
 export function recoverOrderDelivery(
   record: OrderDelivery,
   waitForReceipt: (hash: Hex, timeout: number) => Promise<{ status: 'success' | 'reverted' }>,
   onResolved: (outcome: Exclude<RelayRecoveryOutcome, { kind: 'unknown' }>) => void,
-  { loadedAt, onHoldReleased }: { loadedAt: number; onHoldReleased: () => void },
+  { loadedAt }: { loadedAt: number },
 ): () => void {
   let active = true;
   let generation = 0;
   let cancelRound: (() => void) | undefined;
   const holdUntil = orderPaymentHoldUntil(record, loadedAt);
-  // The hold is released at most once: the expiry checkpoint, a later unreadable round after a
-  // live read, and the checkpoint's failure path can all reach it (staff wording must not repeat).
-  let holdReleased = false;
-  const releaseHold = () => {
-    if (holdReleased) return;
-    holdReleased = true;
-    onHoldReleased();
-  };
   const run = async (singleRead: boolean) => {
     const current = ++generation;
     const isCurrent = () => active && current === generation;
@@ -40,8 +39,8 @@ export function recoverOrderDelivery(
       for (const [timer, wake] of sleeps) { clearTimeout(timer); wake(); }
       for (const [timer, controller] of requests) { clearTimeout(timer); controller.abort(); }
     };
-    // Retry live authorizations read-only. After the expiry checkpoint, keep one ordinary
-    // round for unused/revert evidence: a single unused read must not delete the opening.
+    // Retry read-only until a chain result. The device-clock checkpoint only starts a fresh read;
+    // past it, keep reading for a bounded time (finality catching up), then stop and keep the hold.
     do {
       const outcome = await resolveRelayIntent({
         intent: record.intent, isMounted: isCurrent,
@@ -58,29 +57,14 @@ export function recoverOrderDelivery(
         onResolved(outcome);
         return;
       }
-      if (outcome.live) {
-        // The chain's finalized clock has not passed validBefore yet (the device clock has): the old
-        // signature can still settle, so keep the hold and keep reading in ordinary rounds until
-        // finality catches up and the read turns expired (or settled).
-        singleRead = false;
-        continue;
-      }
-      if (singleRead) {
-        releaseHold();
-        singleRead = false;
-      } else if (Date.now() >= holdUntil) {
-        // Past expiry without a live reading (unreadable): release the hold as before, with one more
-        // ordinary round for unused/revert evidence when this is the first such round.
-        if (holdReleased) return;
-        releaseHold();
-      }
+      singleRead = false;
+      if (Date.now() >= holdUntil + POST_EXPIRY_READ_MS) return;
     } while (isCurrent());
   };
   const start = (singleRead: boolean) => {
     void run(singleRead).catch(() => {
-      // RPC/storage failures retain the opening rather than fabricate payment or abandonment.
-      // At expiry an unsuccessful read releases only the hold, with staff-assistance wording.
-      if (active && singleRead) releaseHold();
+      // RPC/storage failures retain the opening and the hold rather than fabricate payment or
+      // abandonment (a reload starts a fresh read).
     });
   };
   const expiryTimer = setTimeout(() => {

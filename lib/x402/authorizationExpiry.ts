@@ -74,6 +74,19 @@ export async function authorizationExpiredUnused(input: {
 
 export type AuthorizationExpiryObservation = 'expired' | 'live' | 'unknown';
 
+/** observeAuthorizationExpiry 用。state は finalized ブロックの hash に固定して読む (EIP-1898)。 */
+export type AuthorizationExpiryObserveClient = {
+  getBlock: AuthorizationExpiryClient['getBlock'];
+  readContract: (args: {
+    address: Address;
+    abi: typeof AUTHORIZATION_STATE_ABI;
+    functionName: 'authorizationState';
+    args: readonly [Address, Hex];
+    blockHash: Hex;
+    requireCanonical: true;
+  }) => Promise<boolean>;
+};
+
 /**
  * relay status 用の「期限切れ未使用」の観測 (tri-state)。手順は authorizationExpiredUnused と同じ
  * (finalized ブロック → その番号に固定した authorizationState → canonical hash の再確認) で、結果を 3 値で返す:
@@ -85,7 +98,7 @@ export type AuthorizationExpiryObservation = 'expired' | 'live' | 'unknown';
  * (relay status は idem に hash 記録が無い分岐でだけ呼ぶ)。
  */
 export async function observeAuthorizationExpiry(input: {
-  client: AuthorizationExpiryClient;
+  client: AuthorizationExpiryObserveClient;
   token: Address;
   payer: Address;
   nonce: Hex;
@@ -100,12 +113,16 @@ export async function observeAuthorizationExpiry(input: {
     ) return 'unknown';
     // authorizationExpiredUnused と同じ厳密な比較 (timestamp == validBefore はまだ期限前)。
     if (block.timestamp <= input.validBefore) return 'live';
+    // state は finalized の「番号」ではなく「hash」に固定して読む (EIP-1898 blockHash + requireCanonical)。番号指定だと
+    // reorg の反映が遅れた RPC ノードが混在したとき、finalized(A) → state(別フォーク B)=unused → canonical(A) が揃い、
+    // A では支払い済みなのに expired と証明しうる (第 7 回レビュー #767 Codex 再レビュー P1)。非対応・非 canonical は throw → unknown。
     const used = await input.client.readContract({
       address: input.token,
       abi: AUTHORIZATION_STATE_ABI,
       functionName: 'authorizationState',
       args: [input.payer, input.nonce],
-      blockNumber: block.number,
+      blockHash: block.hash as Hex,
+      requireCanonical: true,
     });
     const canonical = await input.client.getBlock({ blockNumber: block.number });
     if (canonical.hash !== block.hash || used !== false) return 'unknown';

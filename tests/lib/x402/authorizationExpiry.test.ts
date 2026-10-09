@@ -57,8 +57,23 @@ describe('observeAuthorizationExpiry (tri-state proof for relay status)', () => 
   it('finalized の時刻が期限を過ぎ、その番号の state が unused で hash が同じなら expired', async () => {
     const { client } = fixture();
     expect(await observe(client)).toBe('expired');
-    expect(client.readContract).toHaveBeenCalledWith(expect.objectContaining({ address: TOKEN, args: [PAYER, NONCE], blockNumber: 500n }));
+    // state は finalized の hash に固定して読む (EIP-1898)。番号では読まない。
+    expect(client.readContract).toHaveBeenCalledWith(expect.objectContaining({ address: TOKEN, args: [PAYER, NONCE], blockHash: HASH, requireCanonical: true }));
+    expect(client.readContract.mock.calls[0][0]).not.toHaveProperty('blockNumber');
     expect(client.getBlock.mock.calls).toEqual([[{ blockTag: 'finalized' }], [{ blockNumber: 500n }]]);
+  });
+
+  // #767 Codex 再レビュー P1: reorg の反映が遅れたノードが混在すると、前後の読み取り (finalized・canonical) は A なのに
+  // 中間の state だけ別フォーク B を読むことがある。番号指定ならその B の unused で expired と証明してしまう。
+  it('前後は A・中間の state だけ別フォーク B のノードに当たっても expired と言わない (hash に固定・非 canonical は throw)', async () => {
+    const { client } = fixture();
+    client.readContract.mockImplementation(async (args: { blockHash?: string; blockNumber?: bigint }) => {
+      // 中間で当たったノードは B を canonical としている: A の hash を指定されたら EIP-1898 の requireCanonical で拒否。
+      if (args.blockHash === HASH) throw new Error('block not canonical');
+      // 番号指定なら B の state (未使用) を返してしまう。
+      return false;
+    });
+    expect(await observe(client)).toBe('unknown');
   });
 
   it.each([
