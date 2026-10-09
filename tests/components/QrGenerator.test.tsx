@@ -2716,6 +2716,32 @@ describe('QrGenerator: 値引き (任意)', () => {
     expect(screen.getByText('値引きを確認')).toBeInTheDocument();
   });
 
+  it('金額を消したら (次の会計) 値引きを外す', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    const input = await screen.findByPlaceholderText('1,000');
+    await user.type(input, '1000');
+    await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
+    await user.type(screen.getByLabelText('値引きの金額'), '20');
+    await user.clear(input);
+    await user.type(input, '500');
+    expect(screen.getByRole('button', { name: '＋ 値引きを追加' })).toBeInTheDocument();
+    await openQrModal(user);
+    await waitFor(() => expect(payUrlText()).toContain('amount=500'));
+    expect(payUrlText()).not.toContain('disc=');
+  });
+
+  it('通貨を変えたら値引きを外す (20 JPYC 引きが 20 USDC 引きにならない)', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
+    await user.type(screen.getByLabelText('値引きの金額'), '20');
+    await pickInSettings(user, /^USDC$/);
+    expect(await screen.findByRole('button', { name: '＋ 値引きを追加' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('値引きの金額')).toBeNull();
+  });
+
   it('値引き中は為替換算を出さない・金額なし (据え置き) に切り替えると値引きを外す', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);

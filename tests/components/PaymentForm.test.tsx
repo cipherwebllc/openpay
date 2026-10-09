@@ -2813,6 +2813,55 @@ describe('PaymentForm — 決済QR の値引き (disc)', () => {
     );
   });
 
+  it('この画面で送っていない決済 (前の画面の確認待ちを再照会して確定) には、この画面の値引き明細を付けない', async () => {
+    window.localStorage.clear();
+    setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.2&pname=Coffee`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    // onSubmit を通らずに成功へ (Pimlico の pending record を retryReceipt で確定した状態)。
+    setPayment('success');
+    render(<PaymentForm />);
+    await waitFor(() => expect(loadHistory()).toHaveLength(1));
+    expect(loadHistory()[0].lineItems ?? null).toBeNull();
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    expect(loadPayerReceipts()[0].discountAmount).toBeUndefined();
+  });
+
+  it('cross-chain の完了までに URL の値引きが変わっても、控えは試みた時点の値引きでそろえる', async () => {
+    window.localStorage.clear();
+    setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.2&pname=Coffee`);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(20_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    setPayment('idle');
+    const { rerender } = render(<PaymentForm />);
+    await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
+    const first = crossChainHintSpy.mock.lastCall?.[0] as { onAttemptStart: (amount: bigint) => void };
+    act(() => first.onAttemptStart(9_800_000n));
+
+    setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.1&pname=Coffee`);
+    rerender(<PaymentForm />);
+    const latest = crossChainHintSpy.mock.lastCall?.[0] as { onSuccess: (result: Record<string, unknown>) => void };
+    act(() =>
+      latest.onSuccess({
+        path: 'gateway',
+        settlement: 'transaction',
+        transferSpecHash: keccak256(encodedSpec()),
+        attestation: gatewayAttestation().attestation,
+        attestationSignature: gatewayAttestation().signature,
+        mintTxHash: `0x${'d'.repeat(64)}`,
+        destChainId: baseSepolia.id,
+      }),
+    );
+    await waitFor(() => expect(loadPayerReceipts()).toHaveLength(1));
+    expect(loadPayerReceipts()[0]).toEqual(
+      expect.objectContaining({ subtotalAmount: '10', discountAmount: '0.2', totalAmount: '9.8' }),
+    );
+  });
+
   it('値引きが正しくない QR は支払わせない (この QR の値引きが正しくありません)', () => {
     setURL(`to=${MERCHANT}&token=usdc&amount=9.8&disc=0.005`);
     setAccount({ connected: true, chainId: baseSepolia.id });

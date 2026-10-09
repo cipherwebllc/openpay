@@ -203,9 +203,14 @@ export function QrGenerator() {
   const discount = useDiscountInput(listAmountWei, amountDecimals, taxDisplayDecimals(settings.token));
   const discountAvailable = mode === 'amount' && !convert;
   const { reset: resetDiscount } = discount;
+  // 値引きを使えない QR に切り替えた・金額を消した (次の会計) ら外す。
   useEffect(() => {
-    if (!discountAvailable) resetDiscount();
-  }, [discountAvailable, resetDiscount]);
+    if (!discountAvailable || amount === '') resetDiscount();
+  }, [discountAvailable, amount, resetDiscount]);
+  // 通貨を変えたら外す (同じ入力が別の単位の値引きにならない: 20 JPYC → 20 USDC)。
+  useEffect(() => {
+    resetDiscount();
+  }, [settings.token, resetDiscount]);
   // QR を出せる金額か (値引きを直している間は出さない = 値引き前の額を請求させない)。
   const amountValid = amountInputValid && !discount.invalid;
   const chargeAmount =

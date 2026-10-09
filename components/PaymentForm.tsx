@@ -113,6 +113,7 @@ import {
 } from '@/lib/signPreview';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
 import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
+import { lineItemsDiscountWei } from '@/lib/discount';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 type PaymentAttemptSnapshot = {
@@ -733,8 +734,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
   const standardForHistory = restoredStandardPayment
     ? { phase: 'idle', error: null }
     : standard;
+  // この画面で送っていない決済 (前の画面で確認待ちになった Pimlico の UserOp を、ここで再照会して確定した等) には、
+  // この画面の明細 (値引きを含む) を付けない。金額の違う会計の明細を付けると、控えの 小計 / 値引き / 合計 と
+  // インボイスの対価が支払額と食い違う (明細が無ければ控えは支払額の 1 行で組まれる)。
+  const unattributedHistoryCtx = useMemo(() => ({ ...historyCtx, lineItems: null }), [historyCtx]);
   usePaymentHistory(
-    directAttemptSnapshotRef.current?.historyCtx ?? historyCtx,
+    directAttemptSnapshotRef.current?.historyCtx ?? unattributedHistoryCtx,
     gaslessForHistory,
     standardForHistory,
   );
@@ -778,6 +783,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       const snapshot = crossChainAttemptSnapshotRef.current;
       if (!snapshot) return;
       const ctx = snapshot.historyCtx;
+      const snapshotDiscount = lineItemsDiscountWei(ctx.lineItems ?? undefined, deployment.decimals) ?? 0n;
       // localStorage 控えの失敗を成立済み cross-chain 決済へ波及させない処理は、
       // appendPayerReceipt 内の既存 no-throw storage 境界に委ねる。
       appendPayerReceipt(
@@ -794,11 +800,12 @@ function PaymentDetails({ params }: { params: PayParams }) {
           paymentMode: 'cross-chain',
           gasMode: 'customer',
           lineItems: ctx.lineItems,
-          // 値引きがあれば 小計 = 支払額 + 値引き (明細に配った値引きの合計と一致)。
-          subtotalAmount: params.discount
-            ? formatUnits(parseUnits(snapshot.amountHuman, deployment.decimals) + parseUnits(params.discount, deployment.decimals), deployment.decimals)
+          // 値引きがあれば 小計 = 支払額 + 値引き。値引きは試みた時点で固定した明細から取る (完了までに URL が
+          // 変わっても、明細の値引き・小計・値引き額がそろう)。
+          subtotalAmount: snapshotDiscount > 0n
+            ? formatUnits(parseUnits(snapshot.amountHuman, deployment.decimals) + snapshotDiscount, deployment.decimals)
             : snapshot.amountHuman,
-          ...(params.discount ? { discountAmount: params.discount } : {}),
+          ...(snapshotDiscount > 0n ? { discountAmount: formatUnits(snapshotDiscount, deployment.decimals) } : {}),
           totalAmount: snapshot.amountHuman,
           memo: params.memo ?? null,
           receiptNo: params.receiptNo ?? null,
@@ -817,7 +824,6 @@ function PaymentDetails({ params }: { params: PayParams }) {
       deployment.address,
       deployment.decimals,
       locale,
-      params.discount,
       params.memo,
       params.receiptNo,
       params.storeName,
