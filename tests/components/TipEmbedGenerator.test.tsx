@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { renderWithIntl as render } from '../_helpers/i18n';
 import userEvent from '@testing-library/user-event';
@@ -94,6 +94,7 @@ vi.mock('@/components/TipForm', () => ({
 }));
 
 import { TipEmbedGenerator } from '@/components/TipEmbedGenerator';
+import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { chainForSlug } from '@/lib/chains';
 import { useAccount } from 'wagmi';
 
@@ -155,8 +156,11 @@ async function openEmbedTab(user: ReturnType<typeof userEvent.setup>) {
 
 // 「高度な設定」は USDC のみで表示する折りたたみ (default 閉・button+条件描画)。
 // crossChain toggle にアクセスするテストは先に USDC を選択してから開く。
+// 他チェーンの USDC (cross-chain) は「受け取り」の中 (2026-10 磨き上げ P4)。受取先が未設定の間はカードに直接、
+// 決まった後は「設定」シートの中。チェックが見えていなければシートを開く。
 async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: /高度な設定/ }));
+  if (screen.queryByRole('checkbox', { name: /他チェーンからの tip を許可/ })) return;
+  await user.click(screen.getByRole('button', { name: '設定' }));
 }
 
 describe('TipEmbedGenerator — 初期表示', () => {
@@ -186,12 +190,13 @@ describe('TipEmbedGenerator — 初期表示', () => {
     expect(screen.getByText('3000 JPYC')).toBeInTheDocument();
   });
 
-  it('step 見出し (受取先 / 表示をカスタマイズ / 公開する) が出る', async () => {
+  it('番号なしの見出し (受け取り / 表示をカスタマイズ / プレビュー / 公開する) が出る', async () => {
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-    expect(screen.getByText('受取先')).toBeInTheDocument();
-    expect(screen.getByText('表示をカスタマイズ')).toBeInTheDocument();
-    expect(screen.getByText('公開する')).toBeInTheDocument();
+    for (const name of ['受け取り', '表示をカスタマイズ', 'プレビュー', '公開する']) {
+      expect(screen.getByRole('heading', { name })).toBeInTheDocument();
+    }
+    expect(document.querySelector('[id^="step-"]')).toBeNull();
   });
 });
 
@@ -768,10 +773,10 @@ describe('TipEmbedGenerator — P2 共有UX (X シェア / QR / ボタン埋め�
 });
 
 describe('TipEmbedGenerator — Step 1 returning-user 折りたたみ', () => {
-  it('初回訪問は展開、保存済み有効アドレスは要約表示し「変更」で再展開', async () => {
+  it('初回訪問は受取先の欄を出し、保存済み有効アドレスは要約 + 「設定」シートで変更', async () => {
     const first = render(<TipEmbedGenerator />);
-    const initialToggle = await screen.findByRole('button', { name: /^受取先/ });
-    expect(initialToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByPlaceholderText(/0x\.\.\./)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '設定' })).toBeNull();
     first.unmount();
 
     window.localStorage.setItem(
@@ -780,52 +785,41 @@ describe('TipEmbedGenerator — Step 1 returning-user 折りたたみ', () => {
     );
     const user = userEvent.setup();
     render(<TipEmbedGenerator />);
-    const toggle = await screen.findByRole('button', { name: /受取先.*変更/ });
-    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
-    expect(toggle).toHaveTextContent('0x8335…2913');
-    expect(toggle).toHaveTextContent(/JPYC \/ Polygon/);
+    const receive = screen.getByRole('region', { name: '受け取り' });
+    await waitFor(() => expect(within(receive).getByText('0x8335…2913')).toBeInTheDocument());
+    expect(receive).toHaveTextContent(/JPYC · Polygon/);
     expect(screen.queryByPlaceholderText(/0x\.\.\./)).toBeNull();
 
-    await user.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByPlaceholderText(/0x\.\.\./)).toHaveValue(VALID);
+    await user.click(within(receive).getByRole('button', { name: '設定' }));
+    const sheet = screen.getByRole('dialog', { name: '受け取りの設定' });
+    expect(within(sheet).getByPlaceholderText(/0x\.\.\./)).toHaveValue(VALID);
   });
 
-  it('接続ウォレット自動初期化後も折りたたむ', async () => {
+  it('接続ウォレット自動初期化後も要約にする (接続中のウォレット)', async () => {
     vi.mocked(useAccount).mockReturnValue({
       address: VALID,
       isConnected: true,
     } as unknown as ReturnType<typeof useAccount>);
     render(<TipEmbedGenerator />);
-    const toggle = await screen.findByRole('button', { name: /受取先.*変更/ });
-    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
-    expect(toggle).toHaveTextContent('0x8335…2913');
+    const receive = screen.getByRole('region', { name: '受け取り' });
+    await waitFor(() => expect(within(receive).getByText('0x8335…2913')).toBeInTheDocument());
+    expect(within(receive).getByText('接続中のウォレット')).toBeInTheDocument();
   });
 });
 
 describe('TipEmbedGenerator — 開発者向け設定 (折りたたみ)', () => {
-  it('default 閉。開くと thanks / thanksUrl / webhook 入力が出る', async () => {
+  it('default 閉 (表示のカードの中の任意のまとまり)。開くと thanks / thanksUrl / webhook 入力が出る', async () => {
     const user = userEvent.setup();
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
 
-    const toggle = screen.getByRole('button', { name: /開発者向け設定/ });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(
-      screen.queryByPlaceholderText(/discord\.com\/api\/webhooks/),
-    ).toBeNull();
-
-    await user.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(
-      screen.getByPlaceholderText(/discord\.com\/api\/webhooks/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText(/discord\.gg/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText(/限定 Discord に招待します/),
-    ).toBeInTheDocument();
+    const details = screen.getByText(/開発者向け設定/, { selector: 'summary span' }).closest('details')!;
+    expect(details.open).toBe(false);
+    await user.click(screen.getByText(/開発者向け設定/, { selector: 'summary span' }));
+    expect(details.open).toBe(true);
+    expect(within(details).getByPlaceholderText(/discord\.com\/api\/webhooks/)).toBeInTheDocument();
+    expect(within(details).getByPlaceholderText(/discord\.gg/)).toBeInTheDocument();
+    expect(within(details).getByPlaceholderText(/限定 Discord に招待します/)).toBeInTheDocument();
   });
 
   it('折りたたんだままでも保存済み webhook / thanks が URL に直列化される', async () => {
@@ -844,8 +838,8 @@ describe('TipEmbedGenerator — 開発者向け設定 (折りたたみ)', () => 
     render(<TipEmbedGenerator />);
 
     expect(
-      screen.getByRole('button', { name: /開発者向け設定/ }),
-    ).toHaveAttribute('aria-expanded', 'false');
+      screen.getByText(/開発者向け設定/, { selector: 'summary span' }).closest('details')!.open,
+    ).toBe(false);
 
     await waitFor(() => expectInUrl(/webhook=/));
     expectInUrl(/thanks=/);
@@ -958,19 +952,18 @@ describe('TipEmbedGenerator — cross-chain toggle (USDC)', () => {
     ).toBeNull();
   });
 
-  it('USDC の高度な設定は cross-chain だけを表示し、固定の決済方法表示は出さない', async () => {
+  it('USDC の他チェーン受取は受け取りの中に出し、固定の決済方法表示は出さない', async () => {
     const user = userEvent.setup();
     render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
     await user.click(screen.getByRole('button', { name: /USDC/ }));
-    expect(screen.getByText('高度な設定 (任意)')).toBeInTheDocument();
-    await openAdvanced(user);
-    expect(screen.getByText('別チェーンからの受取 (USDC のみ)')).toBeInTheDocument();
+    const receive = screen.getByRole('region', { name: '受け取り' });
+    expect(within(receive).getByText('別チェーンからの受取 (USDC のみ)')).toBeInTheDocument();
+    expect(screen.queryByText('高度な設定 (任意)')).toBeNull();
     expect(screen.queryByText('決済方法')).toBeNull();
   });
 
-  it('高度な設定を開かなくても (折りたたみのまま) crossChain=false が URL に直列化される', async () => {
-    // 折りたたみを button+条件描画へ統一したリファクタの load-bearing 前提を検証:
+  it('設定シートを開かなくても crossChain=false が URL に直列化される', async () => {
     // crossChain は settings 駆動で URL 化される (checkbox の描画有無に依存しない)。
     window.localStorage.setItem(
       KEY,
@@ -983,10 +976,8 @@ describe('TipEmbedGenerator — cross-chain toggle (USDC)', () => {
     );
     render(<TipEmbedGenerator />);
 
-    // 高度な設定は閉じたまま = crossChain チェックボックスは DOM 不在。
-    expect(
-      screen.getByRole('button', { name: /高度な設定/ }),
-    ).toHaveAttribute('aria-expanded', 'false');
+    // 受取先が決まっているので受け取りは要約 (シートは閉じている) = crossChain チェックボックスは DOM 不在。
+    await waitFor(() => expect(screen.getByRole('button', { name: '設定' })).toBeInTheDocument());
     expect(
       screen.queryByRole('checkbox', { name: /他チェーンからの tip を許可/ }),
     ).toBeNull();
@@ -1047,11 +1038,7 @@ describe('TipEmbedGenerator — end-to-end フロー (実 hook / 実 localStorag
 
     unmount();
     render(<TipEmbedGenerator />);
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: /受取先.*変更/ }),
-      ).toHaveAttribute('aria-expanded', 'false'),
-    );
+    await screen.findByRole('button', { name: '設定' });
     await openAdvanced(user);
     const restored = screen.getByRole('checkbox', {
       name: /他チェーンからの tip を許可/,
@@ -1095,39 +1082,61 @@ describe('TipEmbedGenerator — end-to-end フロー (実 hook / 実 localStorag
 describe('TipEmbedGenerator — レイアウト (mobile overflow / preview 位置)', () => {
   // 旧: grid item の min-width:auto が長い tip URL で track を押し広げ overflow して
   // いた。新レイアウトは 2 カラム grid + 左 div / 右 aside の両方に min-w-0。
-  it('grid 直下の左カラム div と右カラム aside が min-w-0 を持つ', async () => {
+  it('grid 直下の子はすべて min-w-0 を持つ (長い URL で横にはみ出さない)', async () => {
     const { container } = render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
     const grid = container.querySelector('div.lg\\:grid');
     expect(grid).not.toBeNull();
-    const children = Array.from(grid!.children);
-    const left = children.find((el) => el.tagName === 'DIV');
-    const right = children.find((el) => el.tagName === 'ASIDE');
-    expect(left?.className).toMatch(/\bmin-w-0\b/);
-    expect(right?.className).toMatch(/\bmin-w-0\b/);
+    for (const child of Array.from(grid!.children)) {
+      expect(child.className).toMatch(/\bmin-w-0\b/);
+    }
   });
 
-  it('mobile の表示順は Step1 → Step2 → プレビュー → 高度な設定 → Step3', async () => {
-    const user = userEvent.setup();
+  it('並びは DOM の順 = スマホの見た目の順: 受け取り → 表示 → プレビュー → 公開する (contents/order で並べ替えない)', async () => {
     const { container } = render(<TipEmbedGenerator />);
     await waitFor(() => screen.getByPlaceholderText(/0x\.\.\./));
-    await user.click(screen.getByRole('button', { name: /USDC/ }));
-    const grid = container.querySelector('div.lg\\:grid')!;
-    const children = Array.from(grid.children);
-    expect(children[0].tagName).toBe('DIV');
-    expect(children[1].tagName).toBe('ASIDE');
-    expect(children[0]).toHaveClass('contents');
-    expect(children[1]).toHaveClass('contents');
+    expect(container.querySelector('.contents')).toBeNull();
+    const ids = ['tip-receive-heading', 'tip-customize-heading', 'tip-preview-heading', 'tip-publish-heading'];
+    const headings = ids.map((id) => document.getElementById(id) as HTMLElement);
+    headings.slice(0, -1).forEach((heading, index) => {
+      expect(heading.compareDocumentPosition(headings[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
+});
 
-    const left = children[0] as HTMLElement;
-    const aside = children[1] as HTMLElement;
-    expect(left.className).toContain('[&>section:first-child]:order-1');
-    expect(left.className).toContain('[&>section:nth-child(2)]:order-2');
-    expect(within(aside).getByText('プレビュー').closest('.order-3')).not.toBeNull();
-    expect(
-      within(left).getByText('高度な設定 (任意)').closest('.order-4'),
-    ).not.toBeNull();
-    expect(aside.className).toContain('[&>section]:order-5');
-    expect(within(aside).getByText('公開する')).toBeInTheDocument();
+describe('TipEmbedGenerator — ENS 名の受取先', () => {
+  const OTHER = '0x000000000000000000000000000000000000dEaD';
+  // 名前ごとの解決先 (AddressInput と builder は同じ hook = 同じ結果を見る)。
+  const resolveTo = (map: Record<string, string>) =>
+    vi.mocked(useResolveAddress).mockImplementation(((input: string) => {
+      const address = map[input.trim().toLowerCase()];
+      return { data: address ? { address } : null, isFetching: false, error: null };
+    }) as unknown as typeof useResolveAddress);
+  afterEach(() => resolveTo({}));
+
+  it('設定シートを閉じた後に名前の解決先が変わったら、リンクも新しい解決先を指す (古い解決値を使わない)', async () => {
+    resolveTo({ 'alice.eth': VALID });
+    window.localStorage.setItem(KEY, JSON.stringify({ receiver: 'alice.eth' }));
+    const user = userEvent.setup();
+    render(<TipEmbedGenerator />);
+    await waitFor(() => expectInUrl(new RegExp(`/tip/${VALID}`)));
+    await user.click(screen.getByRole('button', { name: '設定' }));
+    await user.click(screen.getByRole('button', { name: '完了' }));
+    resolveTo({ 'alice.eth': OTHER });
+    await user.type(screen.getByPlaceholderText('例: 山田太郎'), 'A');
+    await waitFor(() => expectInUrl(new RegExp(`/tip/${OTHER}`)));
+  });
+
+  it('保存済みの名前が解決できない間に打ち直しても、入力欄は消えず focus を保つ', async () => {
+    resolveTo({ 'alice.eth': VALID });
+    window.localStorage.setItem(KEY, JSON.stringify({ receiver: 'pending.eth' }));
+    render(<TipEmbedGenerator />);
+    const input = await screen.findByDisplayValue('pending.eth');
+    // 全選択して貼り付けた想定 (1 回の変更で、解決できる名前に置き換わる)。
+    input.focus();
+    fireEvent.change(input, { target: { value: 'alice.eth' } });
+    await waitFor(() => expectInUrl(new RegExp(`/tip/${VALID}`)));
+    expect(screen.getByDisplayValue('alice.eth')).toBe(input);
+    expect(input).toHaveFocus();
   });
 });

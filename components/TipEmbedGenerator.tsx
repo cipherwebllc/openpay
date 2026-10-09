@@ -10,15 +10,21 @@ import {
   ChevronDown,
   Code2,
   ExternalLink,
+  Inbox,
   QrCode,
+  Eye,
   Share2,
+  SlidersHorizontal,
   Sparkles,
   Wallet,
 } from 'lucide-react';
 import { LinkQrModal } from './LinkQrModal';
 import { ReceiverBlock } from './ReceiverBlock';
 import { Field } from './Field';
-import { StepCard } from './StepCard';
+import { OptionalGroup } from './OptionalGroup';
+import { SectionCard } from './SectionCard';
+import { ShopSettingsSection, ShopSettingsSheet } from './ShopSettingsSheet';
+import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { HandleThemePicker } from './HandleThemePicker';
 import { useTipSettings } from '@/hooks/useTipSettings';
 import {
@@ -142,16 +148,22 @@ function TipMessageInbox() {
   const items = inbox.data ?? [];
 
   return (
+    // 見た目は上のカード (SectionCard) に揃える。data-testid を付けるため section は自前で書く。
     <section
       data-testid="tip-message-inbox"
-      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-card"
+      aria-labelledby="tip-inbox-heading"
+      className="rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-800">
+          <h2
+            id="tip-inbox-heading"
+            className="flex items-center gap-2 text-sm font-semibold text-slate-700"
+          >
+            <Inbox className="h-4 w-4 text-slate-400" aria-hidden />
             {t('tipInboxTitle')}
           </h2>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-xs text-slate-500">
             {t('tipInboxDescription')}
           </p>
         </div>
@@ -192,7 +204,7 @@ function TipMessageInbox() {
           </button>
         </div>
       ) : items.length === 0 ? (
-        <p className="mt-4 rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
+        <p className="mt-3 rounded-xl bg-slate-50 px-4 py-4 text-center text-sm text-slate-500">
           {t('tipInboxEmpty')}
         </p>
       ) : (
@@ -238,22 +250,26 @@ export function TipEmbedGenerator() {
   const origin = useOrigin();
   const urlCopy = useCopyToClipboard();
   const iframeCopy = useCopyToClipboard();
-  const [resolvedReceiver, setResolvedReceiver] = useState<Address | null>(null);
   const [publishMode, setPublishMode] = useState<PublishMode>('share');
   const [embedFormat, setEmbedFormat] = useState<EmbedFormat>('iframe');
-  const [devOpen, setDevOpen] = useState(false);
   const [qrOpen, setQrOpen] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  // QR generator の returning-user pattern と同じく、hydrate 後に一度だけ
-  // 「受取先未確定なら開く / 確定済みなら閉じる」を決める。以後は手動操作を尊重する。
-  const [step1Open, setStep1Open] = useState(true);
-  const [step1Initialized, setStep1Initialized] = useState(false);
+  // 受け取り (受取先・通貨・チェーン・他チェーンの USDC) の設定シート。
+  const [receiveOpen, setReceiveOpen] = useState(false);
+  // 受取先が決まっていない間は、受け取りのカードに入力欄を直接出す (決済QR と同じ型)。読み込み後に一度だけ決め
+  // (空欄 + 接続中のウォレットは自動補完を、保存済みの ENS 名は解決を待つ)、入力の途中で消さない。
+  const [receiverInline, setReceiverInline] = useState(true);
+  const [receiverChecked, setReceiverChecked] = useState(false);
   const t = useTranslations('TipEmbedGenerator');
   const tProfile = useTranslations('HandleProfile');
 
+  // 受取先が ENS 名のときは、設定シート (その中の AddressInput) を開いていなくても名前を解決しておき、この解決結果
+  // だけを使う (シートの AddressInput も同じ query を見る)。シートから受け取った解決値を別に持つと、閉じた後の
+  // 再解決が届かず、リンクと埋め込みコードが古いアドレスを指したままになる (着金先のずれ)。
+  const receiverName = settings.receiver.trim();
+  const ens = useResolveAddress(isLikelyName(receiverName) ? receiverName : '');
   const effectiveReceiver = useMemo(
-    () => pickEffectiveAddress(settings.receiver, resolvedReceiver),
-    [settings.receiver, resolvedReceiver],
+    () => pickEffectiveAddress(settings.receiver, ens.data?.address ?? null),
+    [settings.receiver, ens.data],
   );
 
   const setReceiver = useCallback(
@@ -270,20 +286,25 @@ export function TipEmbedGenerator() {
   });
 
   useEffect(() => {
-    if (!hydrated || step1Initialized) return;
+    if (!hydrated || receiverChecked) return;
     // 空欄 + 接続ウォレットは useReceiverAutofill が直後に自動補完するので、その確定を待つ。
     if (settings.receiver.trim() === '' && autofill.connected) return;
-    // 保存済み ENS / Base 名は解決結果を待つ。失敗時は初期値 true のままなので入力を失わない。
+    // 保存済み ENS / Base 名は解決結果を待つ。失敗時は入力欄のまま (入力を失わない)。
     if (isLikelyName(settings.receiver) && !effectiveReceiver) return;
-    setStep1Open(effectiveReceiver === null);
-    setStep1Initialized(true);
-  }, [
-    hydrated,
-    step1Initialized,
-    settings.receiver,
-    autofill.connected,
-    effectiveReceiver,
-  ]);
+    setReceiverInline(effectiveReceiver === null);
+    setReceiverChecked(true);
+  }, [hydrated, receiverChecked, settings.receiver, autofill.connected, effectiveReceiver]);
+
+  // 受取先を触り始めたら、入力欄を出すか要約にするかの初回の判定はもう行わない (保存済みの ENS 名の解決待ちの間に
+  // 打ち直した名前が解決した瞬間、触っている入力欄が要約に置き換わって focus を失わないように)。
+  const onReceiverInput = (value: string) => {
+    setReceiverChecked(true);
+    autofill.handleManualChange(value);
+  };
+  const onUseConnectedWallet = () => {
+    setReceiverChecked(true);
+    autofill.useConnectedWallet();
+  };
 
   const colorValid = COLOR_PATTERN.test(settings.color);
   const deployment = deploymentForSlug(settings.token, settings.chain);
@@ -369,10 +390,6 @@ export function TipEmbedGenerator() {
     settings.webhook,
     settings.crossChain,
   ]);
-
-  const handleResolved = useCallback((addr: Address | null) => {
-    setResolvedReceiver(addr);
-  }, []);
 
   const iframeSnippet = useMemo(() => {
     if (!tipUrl) return '';
@@ -512,75 +529,185 @@ export function TipEmbedGenerator() {
 
   return (
     <div className="space-y-5">
-    <div className="grid grid-cols-1 gap-5 lg:grid lg:grid-cols-[1fr_minmax(300px,360px)] lg:items-start lg:gap-6">
-      {/* 左カラム: 入力 (Step 1 受取先 / Step 2 カスタマイズ) */}
-      <div className="contents min-w-0 lg:block lg:space-y-5 [&>section:first-child]:order-1 [&>section:nth-child(2)]:order-2">
-        <StepCard
-          step={1}
+    {/* 並び: スマホは「受け取り → 表示 → プレビュー → 公開する」(DOM の順 = 見た目の順 = focus の順)。
+        PC は左に受け取りと表示、右にプレビューと公開する (追従)。番号付き手順は使わない (user 裁定 C)。 */}
+    <div className="flex flex-col gap-5 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:grid-rows-[auto_1fr] lg:items-start lg:gap-6">
+      <div className="min-w-0 lg:col-start-1 lg:row-start-1">
+        <SectionCard
+          title={t('receiveHeading')}
+          headingId="tip-receive-heading"
           icon={Wallet}
-          title={t('step1Title')}
-          collapsible
-          open={step1Open}
-          onToggle={() => setStep1Open((open) => !open)}
-          collapsedSummary={
-            effectiveReceiver ? (
-              <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="truncate font-mono">
-                  {shortAddress(effectiveReceiver)}
-                </span>
-                <span className="whitespace-nowrap text-slate-500">
-                  {deployment.displaySymbol} / {chainForSlug(settings.chain).name}
-                </span>
-                <span className="ml-auto whitespace-nowrap rounded-md border border-slate-200 bg-white px-2 py-1 font-semibold text-brand-dark shadow-sm">
-                  {t('changeButton')}
-                </span>
-              </span>
-            ) : undefined
+          action={
+            receiverInline ? undefined : (
+              <button
+                type="button"
+                onClick={() => setReceiveOpen(true)}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-brand hover:text-brand-dark"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden />
+                {t('receiveEdit')}
+              </button>
+            )
           }
         >
-          <div className="space-y-4">
-            <ReceiverBlock
-              receiver={settings.receiver}
-              onReceiverChange={autofill.handleManualChange}
-              onResolved={handleResolved}
-              showAddressInvalid={
-                !!settings.receiver &&
-                !effectiveReceiver &&
-                !isLikelyName(settings.receiver)
-              }
-              wallet={{
-                canUse: autofill.canUseConnected,
-                matches: autofill.matchesConnected,
-                onUse: autofill.useConnectedWallet,
-              }}
-              token={settings.token}
-              chain={settings.chain}
-              availableChains={
-                settings.token === 'usdc'
-                  ? receivableUsdcChains()
-                  : RECEIVABLE_JPYC_CHAINS
-              }
-              onTokenChange={selectToken}
-              onChainChange={selectChain}
-              mode="editable"
-              chainGridClassName={
-                settings.token === 'usdc'
-                  ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
-                  : 'grid grid-cols-2 gap-2'
-              }
-              labels={{
-                receiver: t('receiverLabel'),
-                currency: t('tokenLabel'),
-                chain: t('chainLabel', { symbol: deployment.displaySymbol }),
-                useConnectedWallet: t('useConnectedWallet'),
-                receiverMatchesWallet: t('receiverMatchesWallet'),
-                addressInvalid: t('addressInvalid'),
-              }}
-            />
-          </div>
-        </StepCard>
+          {receiverInline ? (
+            <div className="space-y-4">
+              <ReceiverBlock
+                receiver={settings.receiver}
+                onReceiverChange={onReceiverInput}
+                showAddressInvalid={
+                  !!settings.receiver &&
+                  !effectiveReceiver &&
+                  !isLikelyName(settings.receiver)
+                }
+                wallet={{
+                  canUse: autofill.canUseConnected,
+                  matches: autofill.matchesConnected,
+                  onUse: onUseConnectedWallet,
+                }}
+                token={settings.token}
+                chain={settings.chain}
+                availableChains={
+                  settings.token === 'usdc'
+                    ? receivableUsdcChains()
+                    : RECEIVABLE_JPYC_CHAINS
+                }
+                onTokenChange={selectToken}
+                onChainChange={selectChain}
+                mode="editable"
+                chainGridClassName={
+                  settings.token === 'usdc'
+                    ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
+                    : 'grid grid-cols-2 gap-2'
+                }
+                labels={{
+                  receiver: t('receiverLabel'),
+                  currency: t('tokenLabel'),
+                  chain: t('chainLabel', { symbol: deployment.displaySymbol }),
+                  useConnectedWallet: t('useConnectedWallet'),
+                  receiverMatchesWallet: t('receiverMatchesWallet'),
+                  addressInvalid: t('addressInvalid'),
+                }}
+              />
+              {settings.token === 'usdc' && crossChainAllowed(settings.chain) && (
+                <Field label={t('crossChainHeading')}>
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={settings.crossChain}
+                      onChange={(e) =>
+                        setSettings((s) => ({
+                          ...s,
+                          crossChain: e.target.checked,
+                        }))
+                      }
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                    />
+                    <span className="text-xs">
+                      <span className="font-semibold text-slate-700">
+                        {t('crossChainToggleLabel')}
+                      </span>
+                      <span className="block text-slate-500">
+                        {t('crossChainToggleDescription')}
+                      </span>
+                    </span>
+                  </label>
+                </Field>
+              )}
+            </div>
+          ) : (
+            <>
+              <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                <span className="font-mono text-slate-900">{effectiveReceiver ? shortAddress(effectiveReceiver) : ''}</span>
+                {autofill.matchesConnected ? (
+                  <span className="text-xs text-emerald-700">{t('receiverIsWallet')}</span>
+                ) : null}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                {deployment.displaySymbol} · {chainForSlug(settings.chain).name}
+              </p>
+            </>
+          )}
+        </SectionCard>
+        <ShopSettingsSheet
+          open={receiveOpen}
+          onClose={() => {
+            setReceiveOpen(false);
+            // 受取先が決まっていなければ、受け取りのカードに入力欄を戻す (QR を作れない状態を要約で隠さない)。
+            if (!effectiveReceiver) setReceiverInline(true);
+          }}
+          title={t('receiveSettingsTitle')}
+          doneLabel={t('receiveDone')}
+        >
+          <ShopSettingsSection title={t('receiveHeading')}>
+          <ReceiverBlock
+            receiver={settings.receiver}
+            onReceiverChange={onReceiverInput}
+            showAddressInvalid={
+              !!settings.receiver &&
+              !effectiveReceiver &&
+              !isLikelyName(settings.receiver)
+            }
+            wallet={{
+              canUse: autofill.canUseConnected,
+              matches: autofill.matchesConnected,
+              onUse: onUseConnectedWallet,
+            }}
+            token={settings.token}
+            chain={settings.chain}
+            availableChains={
+              settings.token === 'usdc'
+                ? receivableUsdcChains()
+                : RECEIVABLE_JPYC_CHAINS
+            }
+            onTokenChange={selectToken}
+            onChainChange={selectChain}
+            mode="editable"
+            chainGridClassName={
+              settings.token === 'usdc'
+                ? 'grid grid-cols-2 gap-2 sm:grid-cols-3'
+                : 'grid grid-cols-2 gap-2'
+            }
+            labels={{
+              receiver: t('receiverLabel'),
+              currency: t('tokenLabel'),
+              chain: t('chainLabel', { symbol: deployment.displaySymbol }),
+              useConnectedWallet: t('useConnectedWallet'),
+              receiverMatchesWallet: t('receiverMatchesWallet'),
+              addressInvalid: t('addressInvalid'),
+            }}
+          />
+          {settings.token === 'usdc' && crossChainAllowed(settings.chain) && (
+            <Field label={t('crossChainHeading')}>
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={settings.crossChain}
+                  onChange={(e) =>
+                    setSettings((s) => ({
+                      ...s,
+                      crossChain: e.target.checked,
+                    }))
+                  }
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                />
+                <span className="text-xs">
+                  <span className="font-semibold text-slate-700">
+                    {t('crossChainToggleLabel')}
+                  </span>
+                  <span className="block text-slate-500">
+                    {t('crossChainToggleDescription')}
+                  </span>
+                </span>
+              </label>
+            </Field>
+          )}
+          </ShopSettingsSection>
+        </ShopSettingsSheet>
+      </div>
 
-        <StepCard step={2} icon={Sparkles} title={t('step2Title')}>
+      <div className="min-w-0 lg:col-start-1 lg:row-start-2">
+        <SectionCard title={t('step2Title')} headingId="tip-customize-heading" icon={Sparkles}>
           <div className="space-y-4">
             <Field label={t('nameLabel')}>
               <input
@@ -647,30 +774,28 @@ export function TipEmbedGenerator() {
             </Field>
 
             {/* チップ金額プリセット: token ごと独立のボタン編集 UI */}
-            <Field label={t('presetsLabel')}>
+            <Field label={t('presetsLabelWithSymbol', { symbol: deployment.displaySymbol })}>
               <div className="space-y-2">
                 {tokenPresets.map((p, i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <div className="grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-2">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={p}
-                        onChange={(e) => updatePreset(i, e.target.value)}
-                        placeholder={t('presetAmountPlaceholder')}
-                        className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                      />
-                      <input
-                        type="text"
-                        value={tokenPresetLabels[i] ?? ''}
-                        onChange={(e) => updatePresetLabel(i, e.target.value)}
-                        placeholder={t('presetLabelPlaceholder')}
-                        className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
-                      />
-                    </div>
-                    <span className="flex h-10 items-center px-1 text-xs text-slate-500">
-                      {deployment.displaySymbol}
-                    </span>
+                  // 1 行に「金額・ラベル・×」(2 段に分けると 3 件で縦に長い)。通貨は見出しに 1 回。
+                  <div key={i} className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)_auto] items-center gap-2">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={p}
+                      onChange={(e) => updatePreset(i, e.target.value)}
+                      placeholder={t('presetAmountPlaceholder')}
+                      aria-label={t('presetAmountItem', { n: i + 1, symbol: deployment.displaySymbol })}
+                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-right text-sm tabular-nums focus:border-brand focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={tokenPresetLabels[i] ?? ''}
+                      onChange={(e) => updatePresetLabel(i, e.target.value)}
+                      placeholder={t('presetLabelPlaceholder')}
+                      aria-label={t('presetLabelItem', { n: i + 1 })}
+                      className="min-w-0 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-brand focus:outline-none"
+                    />
                     <button
                       type="button"
                       onClick={() => removePreset(i)}
@@ -695,80 +820,13 @@ export function TipEmbedGenerator() {
                 {t('presetsHint', { defaults: defaultPresetsList })}
               </p>
             </Field>
-          </div>
-        </StepCard>
-
-        {/* 高度な設定は変更可能な cross-chain 設定がある USDC でのみ表示する。 */}
-        {settings.token === 'usdc' && crossChainAllowed(settings.chain) && (
-          <div className="order-4 rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
-            <button
-              type="button"
-              onClick={() => setAdvancedOpen((o) => !o)}
-              aria-expanded={advancedOpen}
-              className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-medium text-slate-700"
+            {/* 開発者向け (成功画面の文・リンク・webhook) は任意なので閉じた折りたたみ。 */}
+            <OptionalGroup
+              icon={Code2}
+              title={t('devSettingsToggle')}
+              filled={[settings.thanks, settings.thanksUrl, settings.webhook].filter((v) => v.trim()).length}
+              filledLabel={(count) => t('optionalFilled', { count })}
             >
-              <span>{t('advancedTitle')}</span>
-              <ChevronDown
-                className={`h-4 w-4 flex-none text-slate-500 transition-transform ${
-                  advancedOpen ? 'rotate-180' : ''
-                }`}
-                aria-hidden
-              />
-            </button>
-            {advancedOpen && (
-              <div className="border-t border-slate-200 px-4 py-4">
-                {/* Default ON。OFF で creator が指定 chain での同一 chain 送金のみ受け付ける。 */}
-                <Field label={t('crossChainHeading')}>
-                  <label className="flex cursor-pointer items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={settings.crossChain}
-                      onChange={(e) =>
-                        setSettings((s) => ({
-                          ...s,
-                          crossChain: e.target.checked,
-                        }))
-                      }
-                      className="mt-0.5 h-4 w-4 rounded border-slate-300"
-                    />
-                    <span className="text-xs">
-                      <span className="font-semibold text-slate-700">
-                        {t('crossChainToggleLabel')}
-                      </span>
-                      <span className="block text-slate-500">
-                        {t('crossChainToggleDescription')}
-                      </span>
-                    </span>
-                  </label>
-                </Field>
-              </div>
-            )}
-          </div>
-        )}
-        {/* 開発者向け設定 (折りたたみ、default 閉): 成功画面 + webhook。
-            右カラム (sticky) から左へ移設 (2026-07-29): 右列の総高が視界を超えると
-            aside 自身のスクロールバーがプレビュー内側バーと隣接して二重に見えるため、
-            右列は「プレビュー + 公開する」だけに保つ (プロフタブと同じ収まり)。 */}
-        <div className="order-6 rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70">
-          <button
-            type="button"
-            onClick={() => setDevOpen((o) => !o)}
-            aria-expanded={devOpen}
-            className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
-          >
-            <span className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-              <Code2 className="h-4 w-4 text-slate-500" aria-hidden />
-              {t('devSettingsToggle')}
-            </span>
-            <ChevronDown
-              className={`h-4 w-4 flex-none text-slate-500 transition-transform ${
-                devOpen ? 'rotate-180' : ''
-              }`}
-              aria-hidden
-            />
-          </button>
-          {devOpen && (
-            <div className="space-y-4 border-t border-slate-100 px-4 py-4">
               <Field label={t('thanksLabel')}>
                 <textarea
                   value={settings.thanks}
@@ -814,18 +872,14 @@ export function TipEmbedGenerator() {
                   })}
                 </p>
               </Field>
-            </div>
-          )}
-        </div>
+            </OptionalGroup>
+          </div>
+        </SectionCard>
       </div>
 
-      {/* mobile は contents + order で preview を高度な設定より前へ。desktop は従来の sticky 右カラム。 */}
-      <aside className="contents min-w-0 self-start lg:sticky lg:top-4 lg:block lg:max-h-[calc(100vh-2rem)] lg:space-y-4 lg:overflow-y-auto [&>section]:order-5">
-        {/* 実 TipForm を MobileOrderBuilder / プロフと同じスマホ枠で描く。 */}
-        <div className="order-3 rounded-2xl border border-brand/30 bg-white p-4 shadow-sm ring-1 ring-brand/10">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-            {t('previewTitle')}
-          </h3>
+      {/* 右 (PC は追従): 実 TipForm をスマホ枠で描くプレビュー + 公開する。 */}
+      <div className="min-w-0 space-y-5 lg:sticky lg:top-4 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
+        <SectionCard title={t('previewTitle')} headingId="tip-preview-heading" icon={Eye}>
           <div
             data-testid="tip-preview-frame"
             className="mx-auto max-w-[360px] overflow-hidden rounded-[2rem] border-[6px] border-slate-900 bg-white shadow-xl ring-1 ring-black/5"
@@ -844,10 +898,11 @@ export function TipEmbedGenerator() {
               />}
             </div>
           </div>
-        </div>
+        </SectionCard>
 
-        {/* Step 3 公開する: リンク共有 / サイト埋め込み の 2 択 */}
-        <StepCard step={3} icon={Share2} title={t('step3Title')}>
+        {/* 公開する: リンク共有 / サイト埋め込み の 2 択 */}
+        <SectionCard title={t('step3Title')} headingId="tip-publish-heading" icon={Share2}>
+
           <div
             className="mb-3 inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1"
             role="tablist"
@@ -1004,12 +1059,8 @@ export function TipEmbedGenerator() {
           )}
 
           <p className="mt-3 text-xs text-slate-500">{t('feeNote')}</p>
-        </StepCard>
-
-        {/* @handle 恒久リンクは「プロフ」タブ (HandleProfileBuilder) へ移設。チップタブは
-            単一チップの生成に専念する。 */}
-
-      </aside>
+        </SectionCard>
+      </div>
     </div>
 
       {/* flag OFF では子を mount せず、SIWE / React Query / fetch を完全に不活性化する。

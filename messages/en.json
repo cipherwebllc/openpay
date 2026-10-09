@@ -425,10 +425,6 @@
     },
     "storeDeviceTabLocked": "The shop's device is sending a payment (or checking its result). You can't switch tabs until the result is shown.",
     "storeDeviceStatusLabel": "Payment sent with the store paying gas",
-    "tipPanel": {
-      "heading": "Create a Tip widget to receive support",
-      "subheading": "Add it to your blog, portfolio, or stream page to receive JPYC / USDC tips."
-    },
     "offramp": {
       "heading": "Off-ramp received tokens",
       "subheading": "Exchanges to convert received JPYC / USDC into fiat.",
@@ -905,11 +901,19 @@
     "poweredBy": "powered by"
   },
   "TipEmbedGenerator": {
-    "step1Title": "Recipient",
+    "receiveHeading": "Receiving",
+    "receiveEdit": "Settings",
+    "receiveSettingsTitle": "Receiving settings",
+    "receiveDone": "Done",
+    "receiverIsWallet": "Connected wallet",
+    "presetsLabelWithSymbol": "Tip amount presets ({symbol})",
+    "presetAmountItem": "Amount {n} ({symbol})",
+    "presetLabelItem": "Label {n}",
+    "optionalFilled": "{count} filled",
     "step2Title": "Customize appearance",
     "step3Title": "Publish",
     "tipInboxTitle": "Questions received",
-    "tipInboxDescription": "They are not public. They appear only on a screen signed in with the receiving wallet.",
+    "tipInboxDescription": "Private. Sign in with the receiving wallet to see them.",
     "tipInboxSignInCta": "Sign in with receiving wallet",
     "tipInboxLoading": "Loading received questions…",
     "tipInboxError": "Could not load received questions.",
@@ -937,7 +941,6 @@
     "messageCounter": "{count} / 200",
     "colorLabel": "Theme color",
     "colorInvalid": "Color must be in #rrggbb format",
-    "presetsLabel": "Tip amount presets",
     "presetsHint": "e.g. {defaults}",
     "presetAmountPlaceholder": "e.g. 1000",
     "presetLabelPlaceholder": "☕ One coffee",
@@ -977,8 +980,7 @@
     "buttonSnippetHint": "A \"Tip\" button for note, Linktree, or your blog.",
     "buttonLabelNamed": "Tip {name}",
     "buttonLabelGeneric": "Send a tip",
-    "qrClose": "Close",
-    "changeButton": "Change"
+    "qrClose": "Close"
   },
   "HandleClaim": {
     "barPublish": "Publish",

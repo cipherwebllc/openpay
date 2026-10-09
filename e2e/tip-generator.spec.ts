@@ -9,9 +9,8 @@ async function openTipTab(page: Page) {
   await page.goto('/ja/create');
   // タブラベルは短縮済み (旧「Tip widget (クリエイター)」→「チップ」)。
   await page.getByRole('button', { name: 'チップ' }).click();
-  await expect(
-    page.getByRole('heading', { name: /応援を受け取る Tip widget を作成/ }),
-  ).toBeVisible();
+  // 見出しはタブ名に任せる (2026-10 磨き上げ P4)。最初のカード「受け取り」で開いたことを確かめる。
+  await expect(page.getByRole('heading', { name: '受け取り', exact: true })).toBeVisible();
 }
 
 test.describe('Tip widget generator (creator UX)', () => {
@@ -35,14 +34,13 @@ test.describe('Tip widget generator (creator UX)', () => {
     page,
   }) => {
     await openTipTab(page);
-    const toggle = page.getByRole('button', { name: /開発者向け設定/ });
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(
-      page.getByPlaceholder(/discord\.com\/api\/webhooks/),
-    ).toHaveCount(0);
+    // 「表示をカスタマイズ」の中の閉じた任意のまとまり。見出しを押すと開く。
+    const details = page.locator('details', { hasText: '開発者向け設定' });
+    await expect(details).not.toHaveAttribute('open', '');
+    await expect(page.getByPlaceholder(/discord\.com\/api\/webhooks/)).toBeHidden();
 
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await details.locator('summary').click();
+    await expect(details).toHaveAttribute('open', '');
     await expect(
       page.getByPlaceholder(/discord\.com\/api\/webhooks/),
     ).toBeVisible();
@@ -75,7 +73,7 @@ test.describe('Tip widget generator (creator UX)', () => {
     await expect(page.getByPlaceholder('例: 1000').nth(0)).toHaveValue('5');
   });
 
-  test('受取先入力 → reload で Step1 折りたたみ、変更で入力値を保ったまま展開', async ({
+  test('受取先入力 → reload で要約、「設定」シートで入力値を保ったまま変更できる', async ({
     page,
   }) => {
     await openTipTab(page);
@@ -88,19 +86,13 @@ test.describe('Tip widget generator (creator UX)', () => {
 
     await page.reload();
     await page.getByRole('button', { name: 'チップ' }).click();
-    // toggle の accessible name は折りたたみ中のみ summary (アドレス+変更) を含む。
-    // 展開すると「受取先」だけに戻るため、両状態で一致する ^受取先 で特定する。
-    const toggle = page.getByRole('button', { name: /^受取先/ });
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(toggle).toContainText('0x52d4…cA81');
-    await expect(toggle).toContainText('変更');
+    const receive = page.getByRole('region', { name: '受け取り' });
+    await expect(receive).toContainText('0x52d4…cA81');
     await expect(receiver).toHaveCount(0);
 
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await expect(
-      page.getByPlaceholder(/0x\.\.\. または vitalik\.eth/),
-    ).toHaveValue(TO);
+    await receive.getByRole('button', { name: '設定' }).click();
+    const sheet = page.getByRole('dialog', { name: '受け取りの設定' });
+    await expect(sheet.getByPlaceholder(/0x\.\.\. または vitalik\.eth/)).toHaveValue(TO);
   });
 
   test('リンク共有はコピー主 CTA + QR/X/新しいタブのセカンダリ行', async ({
@@ -152,22 +144,21 @@ test.describe('Tip widget generator (creator UX)', () => {
     await expect(page.getByText(/theme=night/).first()).toBeVisible();
   });
 
-  test('mobile は Step1 → Step2 → プレビュー → 高度な設定 → Step3、設定は USDC のみ', async ({
+  test('mobile は 受け取り → 表示 → プレビュー → 公開する、他チェーンの USDC は受け取りの中 (USDC のみ)', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openTipTab(page);
 
     await expect(
-      page.getByRole('button', { name: /高度な設定/ }),
+      page.getByRole('checkbox', { name: /他チェーンからの tip を許可/ }),
     ).toHaveCount(0);
     await page.getByRole('button', { name: /^USDC/ }).click();
 
     const items = [
-      page.getByRole('heading', { name: '受取先' }),
+      page.getByRole('heading', { name: '受け取り', exact: true }),
       page.getByRole('heading', { name: '表示をカスタマイズ' }),
       page.getByRole('heading', { name: 'プレビュー' }),
-      page.getByRole('button', { name: /高度な設定/ }),
       page.getByRole('heading', { name: '公開する' }),
     ];
     const positions = await Promise.all(
@@ -176,10 +167,9 @@ test.describe('Tip widget generator (creator UX)', () => {
     expect(positions.every((position) => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
 
-    await items[3].click();
     await expect(page.getByText('決済方法')).toHaveCount(0);
     await expect(
-      page.getByRole('checkbox', { name: /他チェーンからの tip を許可/ }),
+      page.getByRole('region', { name: '受け取り' }).getByRole('checkbox', { name: /他チェーンからの tip を許可/ }),
     ).toBeVisible();
   });
 });
