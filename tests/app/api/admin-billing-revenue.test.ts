@@ -7,7 +7,7 @@ const { kvMod, store } = vi.hoisted(() => {
   const lists = new Map<string, string[]>();
   const kvMod = {
     isKvConfigured: () => true,
-    kvIncr: vi.fn(async (k: string): Promise<{ ok: true; value: number } | { ok: false; reason: string }> => {
+    kvIncr: vi.fn(async (k: string) => {
       const value = Number(vals.get(k) ?? 0) + 1;
       vals.set(k, String(value));
       return { ok: true as const, value };
@@ -118,8 +118,7 @@ describe('admin billing revenue route', () => {
 
   it('IP limiter KV outage fails open and keeps the admin JSON response', async () => {
     vi.stubEnv('IP_HASH_SECRET', '0123456789abcdef0123456789abcdef');
-    // lib/kv は KV 障害を reject せず ok:false で返す (tests/lib/kv.test.ts の no-throw 契約)。
-    kvMod.kvIncr.mockResolvedValueOnce({ ok: false, reason: 'network_error' });
+    kvMod.kvIncr.mockRejectedValueOnce(new Error('KV unavailable'));
     const res = await GET(req('', '203.0.113.10'));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, count: 0, totalWei: '0' });

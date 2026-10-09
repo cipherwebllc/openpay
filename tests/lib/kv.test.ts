@@ -654,9 +654,9 @@ describe('lib/kv', () => {
 });
 
 // 第 7 回レビュー C3: lib/kv の helper は保存先の失敗をすべて { ok: false } で返し、reject しない (no-throw)。
-// 呼び出し側 (limiter・チップのメッセージ・Agent の nonce 等) はこの契約に乗って try で包まない。
-// 送信の失敗・HTTP の失敗・壊れた本文を helper ごとに流し、どれも resolve して ok:false になることを固定する。
-describe('lib/kv の no-throw 契約 (呼び出し側は try で包まない)', () => {
+// 呼び出し側 (limiter・チップのメッセージ・Agent の nonce 等) は波及を断つ catch も持つ (掟 13) が、helper 自身の
+// no-throw をここで固定する。送信の失敗・投げられた値・HTTP の失敗・壊れた本文・想定外の型・警告出力の例外を流す。
+describe('lib/kv の no-throw 契約', () => {
   function erroredBody(): Response {
     return new Response(new ReadableStream({ start(controller) { controller.error(new Error('stream broke')); } }));
   }
@@ -669,6 +669,10 @@ describe('lib/kv の no-throw 契約 (呼び出し側は try で包まない)', 
     ['fetch が null で reject', () => Promise.reject(null)],
     ['fetch が undefined で reject', () => Promise.reject(undefined)],
     ['fetch がただの object で reject', () => Promise.reject({ code: 'ECONNRESET' })],
+    // errInfo の読み取り・文字列化が投げる値 (Codex: String(Object.create(null)) は TypeError)。
+    ['fetch が prototype の無い object で reject', () => Promise.reject(Object.create(null))],
+    ['fetch が message の getter で投げる値で reject', () => Promise.reject({ get message() { throw new Error('getter'); } })],
+    ['fetch が toString で投げる値で reject', () => Promise.reject({ toString() { throw new Error('toString'); } })],
     ['HTTP 503 の JSON error', () => Promise.resolve(new Response('{"error":"unavailable"}', { status: 503 }))],
     ['HTTP 502 の HTML', () => Promise.resolve(new Response('<html>bad gateway</html>', { status: 502 }))],
     ['HTTP 500 の本文 null', () => Promise.resolve(new Response('null', { status: 500 }))],
@@ -722,6 +726,77 @@ describe('lib/kv の no-throw 契約 (呼び出し側は try で包まない)', 
         () => ({ name, rejected: true, ok: undefined }),
       );
       expect(settled).toEqual({ name, rejected: false, ok: false });
+    }
+  });
+
+  it('errInfo が読めない値でも reason を保ったまま detail を返す', async () => {
+    const kv = await import('@/lib/kv');
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(Object.create(null))));
+    expect(await kv.kvGet('k')).toEqual({ ok: false, reason: 'network_error', detail: 'unprintable thrown value' });
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject({ name: 'TimeoutError', get message() { throw new Error('getter'); } })));
+    expect(await kv.kvGet('k')).toEqual({ ok: false, reason: 'timeout', detail: '[object Object]' });
+  });
+
+  // Codex: 応答の形が宣言と違うと、呼出側の .map や文字列メソッドが TypeError を投げる。配列・文字列を返す helper は
+  // ok:true の value を実行時に検証し、違えば parse_error にする。
+  it.each([
+    ['kvLrange', '{"result":{}}'],
+    ['kvLrange', '{"result":"x"}'],
+    ['kvLrange', '{"result":[1]}'],
+    ['kvMget', '{"result":{}}'],
+    ['kvMget', '{"result":["a"]}'],
+    ['kvMget', '{"result":["a",{}]}'],
+    ['kvGet', '{"result":{}}'],
+    ['kvGet', '{"result":5}'],
+    ['kvGetDel', '{"result":[]}'],
+    ['kvSetNxGet', '{"result":{}}'],
+  ] as const)('%s: 応答 %s は parse_error (型を偽った ok:true にしない)', async (helper, body) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    const kv = await import('@/lib/kv');
+    const run = {
+      kvLrange: () => kv.kvLrange('k', 0, 9),
+      kvMget: () => kv.kvMget(['a', 'b']),
+      kvGet: () => kv.kvGet('k'),
+      kvGetDel: () => kv.kvGetDel('k'),
+      kvSetNxGet: () => kv.kvSetNxGet('k', 'v', 60),
+    }[helper];
+    expect(await run()).toEqual({ ok: false, reason: 'parse_error', detail: 'unexpected result type' });
+  });
+
+  it.each([
+    ['kvLrange', '{"result":["a","b"]}', ['a', 'b']],
+    ['kvLrange', '{"result":[]}', []],
+    ['kvMget', '{"result":["a",null]}', ['a', null]],
+    ['kvGet', '{"result":null}', null],
+    ['kvGetDel', '{"result":"v"}', 'v'],
+    ['kvSetNxGet', '{"result":null}', null],
+  ] as const)('%s: 宣言どおりの応答 %s はそのまま返す', async (helper, body, value) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    const kv = await import('@/lib/kv');
+    const run = {
+      kvLrange: () => kv.kvLrange('k', 0, 9),
+      kvMget: () => kv.kvMget(['a', 'b']),
+      kvGet: () => kv.kvGet('k'),
+      kvGetDel: () => kv.kvGetDel('k'),
+      kvSetNxGet: () => kv.kvSetNxGet('k', 'v', 60),
+    }[helper];
+    expect(await run()).toEqual({ ok: true, value });
+  });
+
+  // Codex: INCR 成功・EXPIRE NX 失敗のときの警告出力 (logger → console / Sentry) が投げても kvIncr を reject させず、
+  // 取得済みの数 (超過の判定) を返す。logger を本物の代わりに「投げる logger」に差し替えて流す。
+  it('期限だけ失敗した警告の出力が投げても、kvIncr は INCR の数を返す', async () => {
+    vi.resetModules();
+    const warn = vi.fn(() => { throw new Error('sentry transport down'); });
+    vi.doMock('@/lib/logger', () => ({ logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
+    try {
+      vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('[{"result":61},{"error":"ERR injected"}]'))));
+      const kv = await import('@/lib/kv');
+      await expect(kv.kvIncr('iprl:v1:scope:hash', { initialTtlSec: 60 })).resolves.toEqual({ ok: true, value: 61 });
+      expect(warn).toHaveBeenCalledOnce();
+    } finally {
+      vi.doUnmock('@/lib/logger');
+      vi.resetModules();
     }
   });
 });

@@ -48,13 +48,18 @@ export function agentProofTypedData(address: Address, challenge: AgentProofChall
 export async function issueAgentProofChallenge(address: string): Promise<({ ok: true } & AgentProofChallenge) | Failure> {
   const normalized = normalizeAgentAddress(address);
   if (!normalized) return { ok: false, reason: 'malformed' };
-  const nonce = `0x${randomBytes(32).toString('hex')}` as Hex;
-  const issuedAt = nowSec();
-  const expiresAt = issuedAt + AGENT_PROOF_TTL_SEC;
-  const saved = await kvSetNxGet(nonceKey(normalized, nonce), JSON.stringify({ issuedAt, expiresAt }), AGENT_PROOF_TTL_SEC);
-  // No challenge may be issued without a confirmed server-side nonce record (KV failures resolve as ok:false).
-  if (!saved.ok || saved.value !== null) return { ok: false, reason: 'storage_error' };
-  return { ok: true, nonce, issuedAt, expiresAt };
+  try {
+    const nonce = `0x${randomBytes(32).toString('hex')}` as Hex;
+    const issuedAt = nowSec();
+    const expiresAt = issuedAt + AGENT_PROOF_TTL_SEC;
+    const saved = await kvSetNxGet(nonceKey(normalized, nonce), JSON.stringify({ issuedAt, expiresAt }), AGENT_PROOF_TTL_SEC);
+    if (!saved.ok || saved.value !== null) return { ok: false, reason: 'storage_error' };
+    return { ok: true, nonce, issuedAt, expiresAt };
+  } catch {
+    // No challenge may be issued without a confirmed server-side nonce record. Random generation
+    // (randomBytes can throw) and KV helper internals fail closed as the API's storage_error (503).
+    return { ok: false, reason: 'storage_error' };
+  }
 }
 
 export async function verifyAgentProof(encoded: unknown): Promise<{ ok: true; address: Address } | Failure> {

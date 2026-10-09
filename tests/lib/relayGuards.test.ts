@@ -27,8 +27,6 @@ const { kvMod, store } = vi.hoisted(() => {
   const flags = {
     kvConfigured: true,
     incrOk: true,
-    // 本物の lib/kv は reject しない (no-throw 契約)。「起こり得ない reject を握りつぶさない」ことを見るためだけの注入。
-    incrThrows: false,
     lpushOk: true,
     getOk: true,
     setFailPrefix: null as string | null,
@@ -55,7 +53,6 @@ const { kvMod, store } = vi.hoisted(() => {
     kvDel: async (k: string) => ({ ok: true as const, value: vals.delete(k) ? 1 : 0 }),
     kvIncr: async (k: string, opts?: { initialTtlSec: number }) => {
       incrCalls.push({ key: k, opts });
-      if (flags.incrThrows) throw new Error('kv incr rejected');
       if (!flags.incrOk) return { ok: false as const, reason: 'network_error' as const };
       const n = (counters.get(k) ?? 0) + 1;
       counters.set(k, n);
@@ -156,7 +153,6 @@ beforeEach(() => {
   store.expireCalls.length = 0;
   store.flags.kvConfigured = true;
   store.flags.incrOk = true;
-  store.flags.incrThrows = false;
   store.flags.lpushOk = true;
   store.flags.getOk = true;
   store.flags.setFailPrefix = null;
@@ -263,13 +259,6 @@ describe('relayGuards checkIpRateLimit (HMAC IP・scope 分離)', () => {
     store.flags.kvConfigured = true;
     store.flags.incrOk = false;
     expect(await checkIpRateLimit('siwe-nonce', HASHED_IP, 1, 60)).toBe(true);
-  });
-
-  // C3: KV 障害の fail-open は ok:false の分岐が担う (上の test と tests/lib/fixedWindowLimiters-characterization が
-  // 本物の transport で固定)。lib/kv は reject しないので、checkReadRateLimit と同じく自分の中で try を重ねない。
-  it('kvIncr の reject は握りつぶさない (no-throw は lib/kv の契約で担保)', async () => {
-    store.flags.incrThrows = true;
-    await expect(checkIpRateLimit('siwe-nonce', HASHED_IP, 1, 60)).rejects.toThrow('kv incr rejected');
   });
 });
 

@@ -170,25 +170,28 @@ export async function storeTipMessage(
     return false;
   }
 
-  // KV failures resolve as ok:false (lib/kv's no-throw contract, pinned in
-  // tests/lib/kv.test.ts), so a storage outage reports false here. The relay
-  // route keeps its own after() boundary that isolates this ancillary write
-  // from the already-successful payment.
-  const result = await kvEval<number>(
-    STORE_TIP_MESSAGE,
-    [tipMessageInboxKey(to)],
-    [
-      from,
-      to,
-      input.amountWei.toString(),
-      String(input.chainId),
-      input.txHash,
-      message,
-      String(ts),
-      String(TIP_MESSAGE_TTL_SEC),
-    ],
-  );
-  return result.ok && result.value === 1;
+  try {
+    const result = await kvEval<number>(
+      STORE_TIP_MESSAGE,
+      [tipMessageInboxKey(to)],
+      [
+        from,
+        to,
+        input.amountWei.toString(),
+        String(input.chainId),
+        input.txHash,
+        message,
+        String(ts),
+        String(TIP_MESSAGE_TTL_SEC),
+      ],
+    );
+    return result.ok && result.value === 1;
+  } catch {
+    // Private-message storage is ancillary: an unexpected exception from inside
+    // the KV helper (warning output, malformed reply) must never propagate into
+    // the already-successful payment path, whichever caller schedules it.
+    return false;
+  }
 }
 
 export async function listTipMessages(
@@ -196,21 +199,27 @@ export async function listTipMessages(
 ): Promise<StoredTipMessage[] | null> {
   const owner = parseAddress(to);
   if (!owner) return null;
-  const result = await kvLrange(
-    tipMessageInboxKey(owner),
-    0,
-    TIP_MESSAGE_LIST_MAX - 1,
-  );
-  // A read-side KV failure is reported as unavailable, not as an empty inbox,
-  // so an outage cannot erase the owner's visible state.
-  if (!result.ok) return null;
-  const ownerLower = owner.toLowerCase();
-  return (result.value ?? [])
-    .map(parseStoredTipMessage)
-    .filter(
-      (item): item is StoredTipMessage =>
-        item !== null && item.to.toLowerCase() === ownerLower,
+  try {
+    const result = await kvLrange(
+      tipMessageInboxKey(owner),
+      0,
+      TIP_MESSAGE_LIST_MAX - 1,
     );
+    if (!result.ok) return null;
+    const ownerLower = owner.toLowerCase();
+    return (result.value ?? [])
+      .map(parseStoredTipMessage)
+      .filter(
+        (item): item is StoredTipMessage =>
+          item !== null && item.to.toLowerCase() === ownerLower,
+      );
+  } catch {
+    // A read-side exception (KV helper internals, or a reply that is not the
+    // list LRANGE promises) is reported as unavailable (API 503), not as an
+    // empty inbox or an opaque 500, so an outage cannot erase the owner's
+    // visible state.
+    return null;
+  }
 }
 
 export async function deleteTipMessages(
@@ -218,9 +227,15 @@ export async function deleteTipMessages(
 ): Promise<boolean> {
   const owner = parseAddress(to);
   if (!owner) return false;
-  // A deletion storage failure is surfaced by the API as unavailable.
-  const result = await kvDel(tipMessageInboxKey(owner));
-  return result.ok;
+  try {
+    const result = await kvDel(tipMessageInboxKey(owner));
+    return result.ok;
+  } catch {
+    // A deletion storage exception (KV helper internals) must stay within inbox
+    // maintenance and be surfaced by the API as unavailable (503) rather than
+    // escaping as an opaque 500.
+    return false;
+  }
 }
 
 function parseAddress(value: unknown): Address | null {

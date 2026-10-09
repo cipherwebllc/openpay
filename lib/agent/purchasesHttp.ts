@@ -19,14 +19,17 @@ export async function purchasesGate(req: Request, route: PurchasesRoute): Promis
   return window === null ? null : purchasesJson({ reason: 'rate_limited' }, 429, { 'Retry-After': String(window) });
 }
 
-// readSession reports KV failures as storage-error (lib/kv never rejects), and every caller is a
-// force-dynamic route, so cookies() is always in request scope. Not wrapping it also keeps Next's
-// dynamic-rendering signal from cookies() from being turned into a 503.
 export async function purchasesSession() {
-  const session = await readSession();
-  if (session.status === 'storage-error') return { ok: false as const, response: purchasesJson({ reason: 'storage_error' }, 503) };
-  if (session.status === 'missing') return { ok: false as const, response: purchasesJson({ reason: 'not_signed_in' }, 401) };
-  return { ok: true as const, address: session.address };
+  try {
+    const session = await readSession();
+    if (session.status === 'storage-error') return { ok: false as const, response: purchasesJson({ reason: 'storage_error' }, 503) };
+    if (session.status === 'missing') return { ok: false as const, response: purchasesJson({ reason: 'not_signed_in' }, 401) };
+    return { ok: true as const, address: session.address };
+  } catch {
+    // Session read exceptions (KV helper internals such as error formatting, cookies()) must fail
+    // closed with the same private 503 instead of escaping as an uncached-header 500.
+    return { ok: false as const, response: purchasesJson({ reason: 'storage_error' }, 503) };
+  }
 }
 
 export function queryAgentAddress(req: Request) {

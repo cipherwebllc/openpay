@@ -43,11 +43,11 @@ describe('purchasesSession', () => {
     });
   });
 
-  // C3: readSession は KV 障害を storage-error で返し reject しない (lib/kv の no-throw 契約)。残る throw は
-  // cookies() を request の外で呼んだ誤用だけで、呼び出し元はすべて force-dynamic の route。その例外を 503 に
-  // 化かす保険は持たない (Next が cookies() で投げる dynamic の合図も握りつぶさない)。
-  it('readSession の reject は 503 に化かさない', async () => {
-    h.readSession.mockRejectedValue(new Error('cookies was called outside a request scope'));
-    await expect(purchasesSession()).rejects.toThrow('outside a request scope');
+  // セッション読み取りの想定外の例外 (KV helper の内部・cookies()) は、500 にせず同じ private な 503 に閉じ込める。
+  it('readSession の reject も private な 503 (storage_error)', async () => {
+    h.readSession.mockRejectedValue(new Error('unexpected session read failure'));
+    expect(await failure(await purchasesSession())).toEqual({
+      status: 503, body: { reason: 'storage_error' }, cacheControl: 'private, no-store',
+    });
   });
 });

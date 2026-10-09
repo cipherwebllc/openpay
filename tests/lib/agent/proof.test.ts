@@ -146,13 +146,8 @@ describe('Agent proof', () => {
       kv.kvSetNxGet.mockResolvedValueOnce(result);
       expect(await issueAgentProofChallenge(address)).toEqual({ ok: false, reason: 'storage_error' });
     }
-  });
-
-  // C3: lib/kv は失敗を { ok:false } で返し reject しない (tests/lib/kv.test.ts の no-throw 契約)。nonce を保存できない
-  // ときに challenge を出さないことは上の ok:false の分岐が担う。起こり得ない reject を storage_error に化かす保険は持たない。
-  it('kvSetNxGet の reject は握りつぶさず、challenge も出さない', async () => {
     kv.kvSetNxGet.mockRejectedValueOnce(new Error('down'));
-    await expect(issueAgentProofChallenge(address)).rejects.toThrow('down');
+    expect(await issueAgentProofChallenge(address)).toEqual({ ok: false, reason: 'storage_error' });
   });
 
   it.each(['{', 'null', '{}', '{"issuedAt":1,"expiresAt":2}'])('corrupt nonce record %s fails closed', async (raw) => {

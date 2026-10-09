@@ -132,8 +132,6 @@ export async function checkReadRateLimit(
 
 // 生 IP を保存しない write/auth endpoint 用の固定窓 limiter。呼出側で HMAC 済み IP を渡し、
 // scope ごとに bucket を分離する。IP hash 無しは共有 unknown bucket に寄せず skip する。
-// no-throw: lib/kv は保存先の失敗を ok:false で返し reject しない (tests/lib/kv.test.ts の契約) ので、ここでも
-// 呼び出し側でも try で包まない (checkReadRateLimit と同じ方針)。
 export async function checkIpRateLimit(
   scope: string,
   hashedIp: string | null,
@@ -141,12 +139,19 @@ export async function checkIpRateLimit(
   windowSec: number,
 ): Promise<boolean> {
   if (hashedIp === null) return true;
-  if (!isKvConfigured()) return true;
-  const key = `iprl:v1:${scope}:${hashedIp}`;
-  const r = await kvIncr(key, { initialTtlSec: windowSec });
-  // rate-limit storage の障害を auth/resource 管理本体へ波及させない (fail-open)。
-  if (!r.ok) return true;
-  return r.value <= max;
+
+  try {
+    if (!isKvConfigured()) return true;
+    const key = `iprl:v1:${scope}:${hashedIp}`;
+    const r = await kvIncr(key, { initialTtlSec: windowSec });
+    // rate-limit storage の障害 (ok:false) を auth/resource 管理本体へ波及させない (fail-open)。
+    if (!r.ok) return true;
+    return r.value <= max;
+  } catch {
+    // lib/kv は失敗を ok:false で返す契約だが、helper の中の想定外の例外 (期限だけ失敗したときの警告出力 =
+    // console/Sentry、応答の形など) が relay・SIWE 等の入口を 500 にする波及を断つ。向きは ok:false と同じ fail-open。
+    return true;
+  }
 }
 
 // 日次予算カウンタのキー導出。check が導出した UTC 日付込み key を refundToken として返し、

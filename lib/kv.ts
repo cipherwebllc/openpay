@@ -24,12 +24,31 @@ const KV_TIMEOUT_MS = 5_000;
 
 // 投げられた値から name/detail を抽出する (Error / DOMException / 非Error を一様に扱う・
 // realm 差異で instanceof Error が一致しないケースに依存しない)。
+// 読み取りと文字列化そのものも throw しない: Object.create(null) は String() で TypeError になり、getter や
+// toString が投げる値もある。ここで投げると、失敗を ok:false に畳むはずの catch 節から例外が漏れて呼出側
+// (relay の入口・セッションの 503 等) を 500 にする波及を断つ。
 function errInfo(e: unknown): { name: string; detail: string } {
-  const o = e as { name?: unknown; message?: unknown };
   return {
-    name: typeof o?.name === 'string' ? o.name : '',
-    detail: typeof o?.message === 'string' ? o.message : String(e),
+    name: readStringProp(e, 'name') ?? '',
+    detail: readStringProp(e, 'message') ?? describeThrown(e),
   };
+}
+
+function readStringProp(e: unknown, key: 'name' | 'message'): string | undefined {
+  try {
+    const value = (e as Record<string, unknown> | null | undefined)?.[key];
+    return typeof value === 'string' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function describeThrown(e: unknown): string {
+  try {
+    return String(e);
+  } catch {
+    return 'unprintable thrown value';
+  }
 }
 
 // 接続先の解決順: UPSTASH_REDIS_REST_URL/TOKEN (Upstash 直結・優先) → KV_REST_API_URL/TOKEN (互換)。
@@ -117,7 +136,18 @@ async function post(path: '' | 'pipeline', body: unknown): Promise<KvResult<unkn
   }
 }
 
-async function call<T>(body: unknown[]): Promise<KvResult<T>> {
+// ok:true の value が宣言した型であることを実行時に確かめる guard。Upstash が想定外の形 ({"result":{}} 等) を
+// 返したとき、型を偽った値が呼出側の .map / 文字列メソッドで TypeError を投げる波及を断ち、parse_error にする。
+// 配列と文字列を返す helper だけに付ける (数値を返す helper は比較・算術で throw しない・kvEval は呼出側が検証)。
+type ResultGuard<T> = (value: unknown) => value is T;
+
+const isStringOrNull: ResultGuard<string | null> = (value): value is string | null =>
+  value === null || typeof value === 'string';
+
+const isStringArray: ResultGuard<string[]> = (value): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string');
+
+async function call<T>(body: unknown[], guard?: ResultGuard<T>): Promise<KvResult<T>> {
   const sent = await post('', body);
   if (!sent.ok) return sent;
   try {
@@ -131,6 +161,9 @@ async function call<T>(body: unknown[]): Promise<KvResult<T>> {
     // (kvGet の miss は {result: null} で届くため 'result' in json は true)。
     if (!('result' in json)) {
       return { ok: false, reason: 'parse_error', detail: 'missing result key' };
+    }
+    if (guard && !guard(json.result)) {
+      return { ok: false, reason: 'parse_error', detail: 'unexpected result type' };
     }
     return { ok: true, value: json.result as T };
   } catch (e) {
@@ -174,7 +207,7 @@ export function kvLrange(
   start: number,
   stop: number,
 ): Promise<KvResult<string[]>> {
-  return call<string[]>(['LRANGE', key, String(start), String(stop)]);
+  return call<string[]>(['LRANGE', key, String(start), String(stop)], isStringArray);
 }
 
 export function kvLlen(key: string): Promise<KvResult<number>> {
@@ -250,9 +283,14 @@ function noteExpireFailure(error: unknown): void {
   const now = Date.now();
   if (now - lastExpireFailureLogAt < EXPIRE_FAILURE_LOG_INTERVAL_MS) return;
   lastExpireFailureLogAt = now;
-  logger.warn('kv.incr_expire_failed', {
-    detail: typeof error === 'string' ? error.slice(0, 120) : 'unexpected pipeline result',
-  });
+  try {
+    logger.warn('kv.incr_expire_failed', {
+      detail: typeof error === 'string' ? error.slice(0, 120) : 'unexpected pipeline result',
+    });
+  } catch {
+    // 警告の出力 (console / Sentry) の例外で kvIncr を reject させない。取得済みの INCR の数 (超過の判定) を
+    // 捨てて、limiter の入口 (relay・SIWE 等) を 500 にする波及を断つ。
+  }
 }
 
 // 原子デクリメント (gas budget の refund 等)。INCR で消費した枠を戻すのに使う。
@@ -262,7 +300,7 @@ export function kvDecr(key: string): Promise<KvResult<number>> {
 
 // 値取得。未存在は null。
 export function kvGet(key: string): Promise<KvResult<string | null>> {
-  return call<string | null>(['GET', key]);
+  return call<string | null>(['GET', key], isStringOrNull);
 }
 
 // 複数 key を 1 round-trip で読む。shops の materialized summary / live snapshot のように
@@ -274,7 +312,10 @@ export function kvMget(
   if (keys.length === 0) {
     return Promise.resolve({ ok: true, value: [] });
   }
-  return call<(string | null)[]>(['MGET', ...keys]);
+  // 位置で引く呼出側 (values[i]) のため、要素数も入力と一致することを確かめる。
+  const isMgetReply = (value: unknown): value is (string | null)[] =>
+    Array.isArray(value) && value.length === keys.length && value.every(isStringOrNull);
+  return call<(string | null)[]>(['MGET', ...keys], isMgetReply);
 }
 
 // SET key value [EX ttl] [NX]。nx 時、既存キーなら null (set されず)、新規なら 'OK'。
@@ -308,7 +349,7 @@ export function kvDel(key: string): Promise<KvResult<number>> {
 // GETDEL: 値取得と削除を atomic に行う (Redis 6.2+)。one-time トークン (OAuth state 等) の
 // 消費で get→del の TOCTOU を避けるために使う。未存在は null。
 export function kvGetDel(key: string): Promise<KvResult<string | null>> {
-  return call<string | null>(['GETDEL', key]);
+  return call<string | null>(['GETDEL', key], isStringOrNull);
 }
 
 // SET key value EX ttl NX GET — 原子的 claim。成功 (キー新設) なら null、既存なら旧値。
@@ -318,5 +359,5 @@ export function kvSetNxGet(
   value: string,
   ttlSec: number,
 ): Promise<KvResult<string | null>> {
-  return call<string | null>(['SET', key, value, 'EX', String(ttlSec), 'NX', 'GET']);
+  return call<string | null>(['SET', key, value, 'EX', String(ttlSec), 'NX', 'GET'], isStringOrNull);
 }

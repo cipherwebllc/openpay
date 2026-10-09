@@ -331,12 +331,10 @@ describe('共有 API 予算・同時取得', () => {
     },
   );
 
-  // C3: lib/kv は失敗を { ok:false } で返し reject しない (tests/lib/kv.test.ts の no-throw 契約)。KV 障害の
-  // fail-open は上の ok:false の分岐が担う。起こり得ない reject を通すための保険は持たない。
-  it('kvIncr の reject は握りつぶさない (no-throw は lib/kv の契約で担保)', async () => {
+  it('KV の例外 (カウントが取れない) は fail-open', async () => {
     vi.mocked(kvIncr).mockRejectedValue(new Error('KV down'));
-    await expect(fetchAgentActivity(ADDRESS)).rejects.toThrow('KV down');
-    expect(mockFetch).not.toHaveBeenCalled();
+    expect(await fetchAgentActivity(ADDRESS)).toMatchObject({ ok: true });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('超過の判定は TTL 側の事情で捨てない (EXPIRE を別コマンドにしない)', async () => {

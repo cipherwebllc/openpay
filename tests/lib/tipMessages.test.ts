@@ -277,7 +277,7 @@ describe('storeTipMessage: atomic Lua', () => {
     expect(kv.evalSpy).not.toHaveBeenCalled();
   });
 
-  it('KV error は false (保存できなかった)', async () => {
+  it('KV error/throw は false に隔離して throw しない', async () => {
     const input = {
       from: FROM,
       to: TO,
@@ -289,23 +289,9 @@ describe('storeTipMessage: atomic Lua', () => {
     };
     kv.evalFailure = true;
     await expect(storeTipMessage(input)).resolves.toBe(false);
-  });
-
-  // C3: lib/kv は失敗を { ok:false } で返し reject しない (tests/lib/kv.test.ts の no-throw 契約)。
-  // 起こり得ない reject を false に化かす保険は持たない。決済への波及は relay route の after() 側で断つ。
-  it('KV helper の reject は握りつぶさない (no-throw は lib/kv の契約で担保)', async () => {
+    kv.evalFailure = false;
     kv.evalThrows = true;
-    await expect(
-      storeTipMessage({
-        from: FROM,
-        to: TO,
-        amountWei: TIP_MESSAGE_MIN_AMOUNT_WEI,
-        chainId: 137,
-        txHash: TX,
-        message: 'valid',
-        ts: 1,
-      }),
-    ).rejects.toThrow('eval failed');
+    await expect(storeTipMessage(input)).resolves.toBe(false);
   });
 });
 
@@ -367,14 +353,12 @@ describe('parse/listTipMessages: KV untrusted schema', () => {
     );
   });
 
-  it('KV failure は空配列と区別して null', async () => {
+  it('KV failure/throw は空配列と区別して null', async () => {
     kv.rangeFailure = true;
     await expect(listTipMessages(TO)).resolves.toBeNull();
-  });
-
-  it('KV helper の reject は握りつぶさない (no-throw は lib/kv の契約で担保)', async () => {
+    kv.rangeFailure = false;
     kv.rangeThrows = true;
-    await expect(listTipMessages(TO)).rejects.toThrow('range failed');
+    await expect(listTipMessages(TO)).resolves.toBeNull();
   });
 });
 
@@ -387,13 +371,11 @@ describe('deleteTipMessages', () => {
     expect(kv.delSpy).toHaveBeenNthCalledWith(2, tipMessageInboxKey(TO));
   });
 
-  it('KV failure は false', async () => {
+  it('KV failure/throw は false', async () => {
     kv.delFailure = true;
     await expect(deleteTipMessages(TO)).resolves.toBe(false);
-  });
-
-  it('KV helper の reject は握りつぶさない (no-throw は lib/kv の契約で担保)', async () => {
+    kv.delFailure = false;
     kv.delThrows = true;
-    await expect(deleteTipMessages(TO)).rejects.toThrow('delete failed');
+    await expect(deleteTipMessages(TO)).resolves.toBe(false);
   });
 });
