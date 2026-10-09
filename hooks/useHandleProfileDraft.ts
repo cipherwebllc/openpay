@@ -96,6 +96,23 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
   theme: 'clean',
 };
 
+/** 既定値を持たない任意の文字列項目 (高度な設定)。空のままなら手付かず。 */
+const OPTIONAL_TEXT_KEYS = ['message', 'thanks', 'thanksUrl', 'webhook'] as const satisfies readonly (keyof HandleProfileDraft)[];
+
+/** 下書きが既定のまま (この端末でまだプロフィールを作っていない) か。持っている @handle を自動で編集に入る判定に使う。
+ *  受取先 (to) は空か、接続中のウォレット (自動で入る値) のときだけ手付かずと見なす (別の宛先を打った人の入力を消さない)。 */
+export function isPristineProfileDraft(d: HandleProfileDraft, wallet?: string): boolean {
+  const to = d.to.trim();
+  const toUntouched = to === '' || (!!wallet && to.toLowerCase() === wallet.toLowerCase());
+  return (
+    toUntouched &&
+    OPTIONAL_TEXT_KEYS.every((k) => !d[k]?.trim()) &&
+    (Object.keys(DEFAULT_PROFILE_DRAFT) as (keyof HandleProfileDraft)[]).every(
+      (k) => k === 'to' || JSON.stringify(d[k]) === JSON.stringify(DEFAULT_PROFILE_DRAFT[k]),
+    )
+  );
+}
+
 function sanitizePresetList(loaded: unknown, fallback: string[]): string[] {
   if (!Array.isArray(loaded)) return [...fallback];
   const seen = new Set<string>();
@@ -209,6 +226,12 @@ function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
     links: sanitizeLinks(loaded.links),
     theme: resolveHandleTheme(loaded.theme),
   };
+}
+
+/** 2 つの下書きが (保存時と同じ正規化のうえで) すべての項目で同じか。公開に載らない入力途中の値 (空の URL の
+ *  リンク行・ENS 名の受取先など) も比べる。持っている @handle の編集に自動で入っても失うものが無いかの判定に使う。 */
+export function sameProfileDraft(a: HandleProfileDraft, b: HandleProfileDraft): boolean {
+  return JSON.stringify(sanitize(a)) === JSON.stringify(sanitize(b));
 }
 
 export function useHandleProfileDraft() {
