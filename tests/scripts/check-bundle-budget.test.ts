@@ -173,6 +173,46 @@ describe('check-bundle-budget CLI', () => {
     });
   });
 
+  // Next 15 は生成に 300 ms を超えた route の名前の直後に "(301 ms)" を出す (next/dist/build/utils.js の
+  // MIN_DURATION)。この注記を許容しないと、注記付きの予算対象は [MISSING]・予算外の重い route は素通りになる (Codex #789 2 回目 P2)。
+  describe('rows with a generation-time note after the route name', () => {
+    it('reads a budgeted route with a note within budget', () => {
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay (301 ms)                        10.3 kB         426 kB'));
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('[OK] /[locale]/pay: 426 kB / 予算 426 kB');
+      expect(result.stdout).not.toContain('[MISSING]');
+    });
+
+    it('fails a budgeted route with a note over budget', () => {
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ● /[locale]/pay (1.2 s)                         10.3 kB         427 kB'));
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 427 kB / 予算 426 kB');
+    });
+
+    it('fails an unbudgeted route with a note above 300 kB', () => {
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, `${PAY_ROW}\n├ ● /[locale]/new-page (301 ms)                   12 kB           301 kB`));
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain('[UNBUDGETED] /[locale]/new-page: 301 kB > 300 kB');
+    });
+
+    it('reads a note together with ISR columns', () => {
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace(PAY_ROW, '├ ◐ /[locale]/pay (2345 ms)                       10.3 kB         427 kB          5m      1y'));
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain('[OVER] /[locale]/pay: 427 kB / 予算 426 kB');
+    });
+
+    it('does not count a child path with a note (no sizes) as a route', () => {
+      const result = runGate(NORMAL_BUILD_OUTPUT.replace('├   ├ /ja/pay', '├   ├ /ja/pay (450 ms)'));
+
+      expect(result.status).toBe(0);
+      expect(result.stdout.match(/\[OK\]/g)).toHaveLength(BUDGETED.length);
+    });
+  });
+
   it('accepts a route with zero-byte First Load JS', () => {
     const result = runGate(NORMAL_BUILD_OUTPUT.replace(MANIFEST_ROW, '├ ○ /manifest.webmanifest   0 B   0 B'));
 

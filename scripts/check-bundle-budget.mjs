@@ -14,8 +14,10 @@
 import { stdin } from 'node:process';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
-import { budgetBuildEnv, publicFeatureFlagKeys } from './lib/bundleBudgetEnv.mjs';
+import { budgetBuildEnv, publicFeatureFlagKeys, sourceTextsUnder } from './lib/bundleBudgetEnv.mjs';
 
 // 2026-10-10 第 7 回レビュー F2/E22: 予算を「実測 + 5 kB」に締め直した。実測 = origin/main 9f80dfda を本番 flag
 // (e2e/prodFlags.env) で build した Route 表 (flag OFF の最小 env でも全 route 同値だった)。22〜34 kB 緩んでいた
@@ -111,12 +113,14 @@ async function readStdin() {
 function runBuild() {
   // CI (ci.yml) と同じ本番 flag のベクターで build する。shell や .env.local に残った ON (ベクターは OFF の flag を
   // 載せない) が混ざらないよう、公開 flag を全部 OFF で明示してからベクターを重ねる (scripts/lib/bundleBudgetEnv.mjs)。
-  const repo = (file) => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const repo = (file) => readFileSync(join(root, file), 'utf8');
   const r = spawnSync('npm', ['run', 'build'], {
     env: budgetBuildEnv({
       parentEnv: process.env,
       prodFlagsText: repo('e2e/prodFlags.env'),
-      flagKeys: publicFeatureFlagKeys([repo('.env.local.example'), repo('lib/env.ts')]),
+      // 接頭辞 ENABLE_ の flag と parseBoolFlag で読む flag の両方を、実装全体から拾う
+      flagKeys: publicFeatureFlagKeys([repo('.env.local.example'), ...sourceTextsUnder(root, ['lib', 'app', 'components', 'hooks'])]),
     }),
     encoding: 'utf8',
     maxBuffer: 50 * 1024 * 1024,
@@ -138,8 +142,11 @@ function parseSizeBytes(line) {
 // (例 "… 426 kB   5m   1y") を足すので、行末ではなく「route の後ろの 2 つ目のサイズ」を取り、後ろの列は許容する
 // (行末のサイズを要求すると ISR 行が落ちて、予算内は [MISSING]・予算外の重い route は素通りになる)。
 // 行頭の box 文字から始まらない行 (shared chunk の "  ├ chunks/…  130 kB"・子ルート "├   ├ /ja") は route にしない。
+// 生成に 300 ms を超えた route は名前の直後に "(301 ms)" が付く (next/dist/build/utils.js の MIN_DURATION・
+// 秒表記が来ても許容)。これを許容しないと注記付きの予算対象は [MISSING]・予算外の重い route は素通りになる。
 const SIZE = '(\\d+(?:\\.\\d+)?)\\s*(B|kB|MB|GB|TB|PB|EB|ZB|YB)';
-const ROUTE_ROW_RE = new RegExp(`^[┌├└]\\s*[^\\s/]*\\s*(\\/[^\\s│┌├└─]*)\\s+${SIZE}\\s+${SIZE}(?:\\s+\\S+)*\\s*$`);
+const DURATION_NOTE = '(?:\\s*\\(\\d+(?:\\.\\d+)?\\s*(?:ms|s)\\))?';
+const ROUTE_ROW_RE = new RegExp(`^[┌├└]\\s*[^\\s/]*\\s*(\\/[^\\s│┌├└─]*)${DURATION_NOTE}\\s+${SIZE}\\s+${SIZE}(?:\\s+\\S+)*\\s*$`);
 
 function parseRoute(line) {
   const m = line.match(ROUTE_ROW_RE);
