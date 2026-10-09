@@ -47,7 +47,9 @@ export type RulePlan = {
     name: string;
     previousName?: string;
     changes: string[];
-    payload: SentryRulePayload;
+    /** 既存 rule から引き継いだ actions の class 名 (PUT で通知先を消さない)。 */
+    keptActions: string[];
+    payload: SentryRulePayload & { actions: Array<{ id: string; [k: string]: unknown }> };
   }>;
   unchanged: Array<{ id: string; name: string }>;
   retire: Array<{ id: string; name: string }>;

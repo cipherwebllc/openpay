@@ -1034,7 +1034,10 @@ operator demo の Gateway total は API の預入残高であり、経路の利�
       `node scripts/setup-sentry-alerts.mjs --dry-run` で計画 (create / update / keep / retire)
       を確認 (GET だけ・何も変えない)
 - [ ] `node scripts/setup-sentry-alerts.mjs` で適用 (無い rule は POST、同名または旧名
-      `legacyNames` の rule は閾値・filter・environment が違えば PUT で更新 = 再実行で収束)
+      `legacyNames` の rule は conditions / filters / environment / actionMatch / filterMatch が
+      違えば PUT で更新 = 再実行で収束)。PUT は rule 全体を上書きするので、既存の通知先
+      (Slack 等の actions) は script が引き継ぐ (計画の `[actions 保持: …]`)。通知先を変えるのは
+      Dashboard で
 - [ ] `retire` に出た rule (発火元が無くなったもの・`RETIRED_RULE_NAMES`) は script が削除しない
       ので Sentry Dashboard → Alerts で手動削除
 - [ ] Sentry Dashboard → Alerts で `RULES` と同数の rule・environment=mainnet を目視確認

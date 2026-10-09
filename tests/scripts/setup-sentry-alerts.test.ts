@@ -6,6 +6,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import ts from 'typescript';
+import { makeRespond } from '@/lib/relay/relayRoute';
+import { logger } from '@/lib/logger';
 import {
   RULES,
   RETIRED_RULE_NAMES,
@@ -17,7 +20,76 @@ import {
   type TagMatch,
 } from '../../scripts/setup-sentry-alerts.mjs';
 
+// lib/logger を spy 化 (Sentry / console へは出さない)。実配線 (makeRespond) を通した tag の確認に使う。
+vi.mock('@/lib/logger', () => ({
+  logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
 const byTag = (t: string) => RULES.find((r) => r.eventTags.includes(t));
+
+const SLACK_ACTION = {
+  id: 'sentry.rules.actions.notify_event_service.SlackNotifyServiceAction',
+  workspace: 12345,
+  channel: '#openpay-alerts',
+  tags: 'event',
+};
+
+// app/lib/components/hooks の TypeScript AST から logger.warn / logger.error の第 1 引数 (文字列リテラル) を集める。
+// コメントは AST に乗らないので根拠にならない。テンプレートリテラル (`${prefix}.suffix`) は集めない
+// (実配線を通した wiredTags で確かめる)。
+function collectLoggerLiteralTags(): { tags: Set<string>; respondPrefixes: Set<string> } {
+  const tags = new Set<string>();
+  // makeRespond('<prefix>') の実引数 (route の配線)。コメントではなく呼び出し式から取る。
+  const respondPrefixes = new Set<string>();
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node)) {
+      const arg = node.arguments[0];
+      const isStr = arg && (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg));
+      if (
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        node.expression.expression.text === 'logger' &&
+        (node.expression.name.text === 'warn' || node.expression.name.text === 'error') &&
+        isStr
+      ) {
+        tags.add(arg.text);
+      }
+      if (ts.isIdentifier(node.expression) && node.expression.text === 'makeRespond' && isStr) {
+        respondPrefixes.add(arg.text);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  for (const root of ['app', 'lib', 'components', 'hooks']) {
+    const files = readdirSync(root, { recursive: true }).filter(
+      (f): f is string => typeof f === 'string' && /\.(?:ts|tsx|mjs|js)$/.test(f),
+    );
+    for (const f of files) {
+      const path = join(root, f);
+      const sf = ts.createSourceFile(path, readFileSync(path, 'utf8'), ts.ScriptTarget.Latest, true);
+      visit(sf);
+    }
+  }
+  return { tags, respondPrefixes };
+}
+
+// 動的な tag は実配線で確かめる: route が呼ぶ makeRespond(<AST から取った実引数の prefix>) に各 RelayResult を
+// 通し、spy 化した logger が受け取った tag を集める (prefix の綴りは route の実引数・suffix の組み立ては
+// relayRoute の実コードで検証。コメントや別の文字列は根拠にならない)。
+function wiredTags(respondPrefixes: Set<string>): Set<string> {
+  const warn = vi.mocked(logger.warn);
+  warn.mockClear();
+  for (const prefix of respondPrefixes) {
+    const respond = makeRespond(prefix);
+    respond({ kind: 'reverted', txHash: '0xabc' }, 137);
+    respond({ kind: 'pending', txHash: '0xabc' }, 137);
+    respond({ kind: 'relay_error', detail: 'relayer_unfunded' }, 137);
+    respond({ kind: 'success', txHash: '0xabc' }, 137);
+  }
+  const tags = new Set(warn.mock.calls.map(([tag]) => tag));
+  warn.mockClear();
+  return tags;
+}
 
 // 第 7 回レビュー E6 以前の 14 rule が Sentry に登録されている状態 (name・閾値・tag は旧 RULES のまま)。
 // planRules の fixture と dry-run 出力の固定に使う。
@@ -96,12 +168,10 @@ describe('setup-sentry-alerts: RULES schema', () => {
       'relay.relayer.balance_low',
       'relay.jpyc.relay_error',
       'relay.jpyc.reverted',
-      'relay.jpyc.pending',
       'relay.jpyc.misconfig',
       'relay.jpyc.forwarder_invalid',
       'x402.facilitator.relay_error',
       'x402.facilitator.reverted',
-      'x402.facilitator.pending',
       'x402.facilitator.gas_ceiling_required',
       'x402.facilitator.kv_required',
       'x402.facilitator.settlement_record_failed',
@@ -138,6 +208,17 @@ describe('setup-sentry-alerts: RULES schema', () => {
     expect(byTag('payment.failed')?.threshold).toBe(3);
     expect(byTag('cross-chain.execute.failed')?.threshold).toBe(1);
     expect(byTag('smart-account.init-failed')?.threshold).toBe(2);
+  });
+
+  it('pending (結論待ち) は確定失敗の rule から分け、1h に 3 回より多いときだけ通知する', () => {
+    // relay.jpyc.pending / x402.facilitator.pending は障害専用ではない: 重複 claim (relayBroadcast の
+    // idempotency duplicate) や既使用 authorization (jpycRelay の used guard) という正常な防御経路でも出る。
+    // 閾値 0 だと客の正当な再送 (double-click / retry) のたびに通知が繰り返される (Codex P2)。
+    const pending = byTag('relay.jpyc.pending');
+    expect(pending?.eventTags).toEqual(['relay.jpyc.pending', 'x402.facilitator.pending']);
+    expect(pending?.threshold).toBe(3);
+    expect(byTag('relay.jpyc.relay_error')?.eventTags).not.toContain('relay.jpyc.pending');
+    expect(byTag('x402.facilitator.relay_error')?.eventTags).not.toContain('x402.facilitator.pending');
   });
 
   it('支払いフォームの失敗は payment / tip / checkout を 1 rule にまとめ、smart-account.init-failed は接尾一致で 3 フォームを拾う', () => {
@@ -180,37 +261,33 @@ describe('setup-sentry-alerts: RULES schema', () => {
   it('全 eventTag は app/lib/components/hooks のソースで実際に emit されている (tag タイポでアラート不発を防ぐ)', () => {
     // 過去バグ (Codex review で検出): 'billing.settle.grant' を指定したが実 emit は
     // 'billing.settle.grant-failed' で、アラートが永久に発火しなかった。第 7 回レビュー E6 では
-    // 'x402.middleware.error' がどこからも emit されていなかった。RULES の全 tag が実 logger.warn/error
-    // 文字列 (または makeRespond / logPrefix による `${prefix}.suffix` 形) に存在することを恒久 fence する。
-    const literal = new Set<string>();
-    const dynamicSuffix = new Set<string>();
-    const sources: string[] = [];
-    const literalRe = /logger\.(?:warn|error)\(\s*['"]([A-Za-z0-9._: -]+)['"]/g;
-    const dynamicRe = /logger\.(?:warn|error)\(\s*`\$\{[A-Za-z0-9_.]+\}\.([A-Za-z0-9_-]+)`/g;
-    for (const root of ['app', 'lib', 'components', 'hooks']) {
-      const files = readdirSync(root, { recursive: true }).filter(
-        (f): f is string => typeof f === 'string' && /\.(?:ts|tsx|mjs|js)$/.test(f),
-      );
-      for (const f of files) {
-        const src = readFileSync(join(root, f), 'utf8');
-        sources.push(src);
-        for (const m of src.matchAll(literalRe)) literal.add(m[1]);
-        for (const m of src.matchAll(dynamicRe)) dynamicSuffix.add(m[1]);
-      }
-    }
+    // 'x402.middleware.error' がどこからも emit されていなかった。
+    // 検査の根拠は AST 上の logger.warn / logger.error 呼び出しの第 1 引数だけ (コメントや無関係な文字列は
+    // 根拠にしない)。`${prefix}.suffix` 形の動的な tag (makeRespond) は実配線を通した logger spy で確かめる
+    // (下の WIRED_TAGS)。
+    const { tags: literal, respondPrefixes } = collectLoggerLiteralTags();
     // sanity: 走査が機能している保証。
     expect(literal.size).toBeGreaterThan(50);
-    expect(dynamicSuffix.has('reverted')).toBe(true);
+    // コメント中の 'relay.jpyc.reverted' (relayRoute.ts の説明文) は根拠にならない。
+    expect(literal.has('relay.jpyc.reverted')).toBe(false);
+    // route の実引数: /api/relay/jpyc = 'relay.jpyc'・/api/csv-pass/relay = 'csvpass.relay'。
+    expect(respondPrefixes).toEqual(new Set(['relay.jpyc', 'csvpass.relay']));
+    const wired = wiredTags(respondPrefixes);
+    expect(wired).toEqual(
+      new Set([
+        'relay.jpyc.reverted',
+        'relay.jpyc.pending',
+        'relay.jpyc.relay_error',
+        'csvpass.relay.reverted',
+        'csvpass.relay.pending',
+        'csvpass.relay.relay_error',
+      ]),
+    );
     const emitted = (tag: string, match: TagMatch): boolean => {
       if (match === 'ew') return [...literal].some((l) => l.endsWith(tag));
       // sw / co の rule は今は無い。足すときはここに判定を追加する (黙って通さない)。
       expect(match, `match=${match} の emit 判定は未実装`).toBe('eq');
-      if (literal.has(tag)) return true;
-      const dot = tag.lastIndexOf('.');
-      if (dot < 0) return false;
-      const prefix = tag.slice(0, dot);
-      const suffix = tag.slice(dot + 1);
-      return dynamicSuffix.has(suffix) && sources.some((s) => s.includes(`'${prefix}'`));
+      return literal.has(tag) || wired.has(tag);
     };
     for (const rule of RULES) {
       for (const tag of rule.eventTags) {
@@ -329,6 +406,116 @@ describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固�
     expect(plan.update[0].changes).toEqual(['environment production → mainnet']);
   });
 
+  describe('update は既存の通知先 (actions) を保持する (PUT は rule 全体を上書きするため・Codex P1)', () => {
+    const rule = RULES.find((r) => r.eventTags[0] === 'history.load.unreadable-entries-preserved')!;
+    const withActions = (actions: ExistingRule['actions']): ExistingRule => ({
+      id: '7',
+      ...buildRulePayload(rule, 'mainnet'),
+      conditions: [{ id: 'sentry.rules.conditions.event_frequency.EventFrequencyCondition', value: 100, interval: '1h' }],
+      actions,
+    });
+
+    it('Slack 等の既存 actions を PUT payload にそのまま載せ、計画にも出す', () => {
+      const plan = planRules([withActions([SLACK_ACTION, { id: 'sentry.rules.actions.notify_event.NotifyEventAction' }])], RULES, 'mainnet');
+      expect(plan.update).toHaveLength(1);
+      const u = plan.update[0];
+      expect(u.changes).toEqual(['threshold 100 → 10']);
+      expect(u.payload.actions).toEqual([
+        SLACK_ACTION,
+        { id: 'sentry.rules.actions.notify_event.NotifyEventAction' },
+      ]);
+      expect(u.keptActions).toEqual(['SlackNotifyServiceAction', 'NotifyEventAction']);
+      expect(formatPlan(plan, 'mainnet')).toContain(
+        '  ~ update  OpenPay: history.load.unreadable-entries-preserved spike (id=7): threshold 100 → 10 ' +
+          '[actions 保持: SlackNotifyServiceAction, NotifyEventAction]',
+      );
+    });
+
+    it('既存 rule に actions が無い (空) ときだけ既定の NotifyEventAction を付け、計画に明示する', () => {
+      const plan = planRules([withActions([])], RULES, 'mainnet');
+      expect(plan.update[0].payload.actions).toEqual([
+        { id: 'sentry.rules.actions.notify_event.NotifyEventAction' },
+      ]);
+      expect(plan.update[0].changes).toEqual(['threshold 100 → 10', 'actions (none) → NotifyEventAction']);
+    });
+
+    it('create の actions は既定の NotifyEventAction', () => {
+      const plan = planRules([], RULES, 'mainnet');
+      for (const c of plan.create) {
+        expect(c.payload.actions).toEqual([{ id: 'sentry.rules.actions.notify_event.NotifyEventAction' }]);
+      }
+    });
+  });
+
+  describe('比較は conditions / filters 全体と論理条件 (actionMatch / filterMatch) を見る (Codex P2)', () => {
+    const rule = RULES.find((r) => r.eventTags[0] === 'billing.settle.grant-failed')!;
+    const base = (): ExistingRule => ({ id: '9', ...buildRulePayload(rule, 'mainnet') });
+
+    it('同じ内容なら unchanged (表示用の name / label は無視)', () => {
+      const existing = base();
+      existing.conditions = existing.conditions!.map((c) => ({ ...c, name: 'The issue is seen more than 0 times in 1h' }));
+      existing.filters = existing.filters!.map((f) => ({ ...f, name: "The event's tags match event eq billing.settle.grant-failed", label: 'x' }));
+      existing.conditions[0].value = '0';
+      const plan = planRules([existing], RULES, 'mainnet');
+      expect(plan.unchanged).toHaveLength(1);
+    });
+
+    it('追加の condition があれば update (発火条件が変わっている)', () => {
+      const existing = base();
+      existing.conditions = [
+        ...existing.conditions!,
+        { id: 'sentry.rules.conditions.first_seen_event.FirstSeenEventCondition' },
+      ];
+      const plan = planRules([existing], RULES, 'mainnet');
+      expect(plan.update[0]?.changes).toEqual([
+        'conditions EventFrequencyCondition + FirstSeenEventCondition → EventFrequencyCondition',
+      ]);
+    });
+
+    it('別キーの filter (level 等) が混ざっていれば update', () => {
+      const existing = base();
+      existing.filters = [
+        ...existing.filters!,
+        { id: 'sentry.rules.filters.level.LevelFilter', match: 'gte', level: '40' },
+      ];
+      const plan = planRules([existing], RULES, 'mainnet');
+      expect(plan.update[0]?.changes).toEqual([
+        'filters billing.settle.grant-failed + LevelFilter → billing.settle.grant-failed',
+      ]);
+    });
+
+    it('同じ tag でも match (eq / ew) が違えば update', () => {
+      const existing = base();
+      existing.filters![0].match = 'co';
+      const plan = planRules([existing], RULES, 'mainnet');
+      expect(plan.update[0]?.changes).toEqual([
+        'filters contains billing.settle.grant-failed → billing.settle.grant-failed',
+      ]);
+    });
+
+    it('actionMatch が違えば update', () => {
+      const existing = base();
+      existing.actionMatch = 'any';
+      const plan = planRules([existing], RULES, 'mainnet');
+      expect(plan.update[0]?.changes).toEqual(['actionMatch any → all']);
+    });
+
+    it('filter が 1 つのとき all と any は同等とみなすが、none (通知対象の反転) は update', () => {
+      const same = base();
+      same.filterMatch = 'all';
+      expect(planRules([same], RULES, 'mainnet').unchanged).toHaveLength(1);
+      const inverted = base();
+      inverted.filterMatch = 'none';
+      expect(planRules([inverted], RULES, 'mainnet').update[0]?.changes).toEqual(['filterMatch none → any']);
+    });
+
+    it('filter が複数の rule は all / any の違いも update (OR と AND で意味が変わる)', () => {
+      const multi = RULES.find((r) => r.eventTags.length > 1)!;
+      const existing: ExistingRule = { id: '10', ...buildRulePayload(multi, 'mainnet'), filterMatch: 'all' };
+      expect(planRules([existing], RULES, 'mainnet').update[0]?.changes).toEqual(['filterMatch all → any']);
+    });
+  });
+
   it('formatPlan は dry-run の出力 (何をどう変えるか) を 1 行 1 rule で出す', () => {
     const lines = formatPlan(planRules(LEGACY_SENTRY_RULES, RULES, 'mainnet'), 'mainnet');
     expect(lines[0]).toBe(
@@ -337,15 +524,17 @@ describe('setup-sentry-alerts: planRules / formatPlan (dry-run の出力を固�
     expect(lines).toContain(
       '  ~ update  OpenPay: 支払いフォームの失敗 (payment / tip / checkout) (id=100): ' +
         'rename from "OpenPay: payment.failed rate exceeded (alpha threshold)"; threshold 50 → 3; ' +
-        'filters payment.failed → payment.failed | tip.failed | checkout.failed; filterMatch all → any',
+        'filters payment.failed → payment.failed + tip.failed + checkout.failed; filterMatch all → any ' +
+        '[actions 保持: NotifyEventAction]',
     );
     expect(lines).toContain(
       '  ~ update  OpenPay: smart-account.init-failed (全フォーム・接尾一致) (id=101): ' +
         'rename from "OpenPay: smart-account.init-failed rate exceeded"; threshold 10 → 2; ' +
-        'filters smart-account.init-failed → ends-with smart-account.init-failed',
+        'filters smart-account.init-failed → ends-with smart-account.init-failed [actions 保持: NotifyEventAction]',
     );
     expect(lines).toContain(
-      '  ~ update  OpenPay: billing.meter.record-failed (usage volume undercount) (id=112): threshold 5 → 2',
+      '  ~ update  OpenPay: billing.meter.record-failed (usage volume undercount) (id=112): threshold 5 → 2 ' +
+        '[actions 保持: NotifyEventAction]',
     );
     expect(lines).toContain(
       '  + create  OpenPay: relayer の残高不足 (relay.relayer.balance_low) [relay.relayer.balance_low > 0 / 1h]',
@@ -424,6 +613,24 @@ describe('setup-sentry-alerts: main (fetch mock 経由の挙動検証)', () => {
     expect(put).toBeDefined();
     const putInit = fetchSpy.mock.calls.find(([url]) => String(url).endsWith('/rules/100/'))![1];
     expect(JSON.parse(putInit!.body as string).name).toBe('OpenPay: 支払いフォームの失敗 (payment / tip / checkout)');
+  });
+
+  it('PUT の body は既存の Slack 通知先を保持し、POST の body は既定の NotifyEventAction だけ', async () => {
+    const existing = LEGACY_SENTRY_RULES.map((r) => ({ ...r, actions: [SLACK_ACTION] }));
+    fetchSpy.mockImplementation(async (_url, init) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ id: 'new' }), { status: 201 });
+      if (init?.method === 'PUT') return new Response(JSON.stringify({ id: 'upd' }), { status: 200 });
+      return new Response(JSON.stringify(existing), { status: 200 });
+    });
+    const mod = await import('../../scripts/setup-sentry-alerts.mjs');
+    await mod.main([]);
+    const bodies = (method: string) =>
+      fetchSpy.mock.calls.filter(([, init]) => init?.method === method).map(([, init]) => JSON.parse(init!.body as string));
+    expect(bodies('PUT')).toHaveLength(13);
+    for (const body of bodies('PUT')) expect(body.actions).toEqual([SLACK_ACTION]);
+    for (const body of bodies('POST')) {
+      expect(body.actions).toEqual([{ id: 'sentry.rules.actions.notify_event.NotifyEventAction' }]);
+    }
   });
 
   it('--dry-run は GET だけで計画を出し、書き込みを一切しない', async () => {

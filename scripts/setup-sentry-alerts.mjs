@@ -155,31 +155,42 @@ export const RULES = [
     name: 'OpenPay: JPYC ガスレス中継の失敗 (relay.jpyc.*)',
     description:
       '/api/relay/jpyc の中継失敗: relay_error (broadcast 前の失敗・relayer_unfunded や RPC 障害・客は ' +
-      'standard へ fallback) / reverted (relayer の gas を使って失敗) / pending (結論不明・自動解決待ち) / ' +
+      'standard へ fallback) / reverted (relayer の gas を使って失敗) / ' +
       'misconfig (起動時の構成不備) / forwarder_invalid (recover 用 forwarder の bytecode 無し)。' +
-      '事前の残高・nonce・期限チェックを通った後の失敗なので客側の原因はほぼ無く、1 件目で通知。',
+      '事前の残高・nonce・期限チェックを通った後の失敗なので客側の原因はほぼ無く、1 件目で通知。' +
+      'pending (結論待ち) は正常な再送でも出るので別 rule。',
     eventTags: [
       'relay.jpyc.relay_error',
       'relay.jpyc.reverted',
-      'relay.jpyc.pending',
       'relay.jpyc.misconfig',
       'relay.jpyc.forwarder_invalid',
     ],
     threshold: 0,
     interval: '1h',
   },
+  {
+    name: 'OpenPay: 中継の結論待ちが続く (relay.jpyc.pending / x402.facilitator.pending)',
+    description:
+      '中継の結論が出ない (pending・202)。障害専用ではなく、同じ authorization の重複 claim (relayBroadcast の ' +
+      'idempotency duplicate = 客の double-click / retry) や既使用 authorization の防御経路でも出る正常な応答。' +
+      '1 件では鳴らさず 1 時間に 3 件超で通知 (RPC timeout の連続 = 結論不明が溜まっているサイン)。' +
+      '決済の制御フローは変えない (status 照会の自動解決で結論が付く)。',
+    eventTags: ['relay.jpyc.pending', 'x402.facilitator.pending'],
+    threshold: 3,
+    interval: '1h',
+  },
   // ---- x402 (JPYC facilitator・USDC rail) ---------------------------------------------------------
   {
     name: 'OpenPay: x402 JPYC facilitator の settle 失敗 (x402.facilitator.*)',
     description:
-      '/api/facilitator/settle の失敗: relay_error / reverted / pending (中継と同じ区分) / ' +
+      '/api/facilitator/settle の失敗: relay_error / reverted (中継と同じ区分) / ' +
       'gas_ceiling_required・kv_required (mainnet の必須 env 不足で全 settle が 503) / ' +
       'settlement_record_failed (settle 成功後の receipt 記録失敗 = 払ったのに控えが無い)。' +
-      'AI エージェントの JPYC 購入が止まる・払ったのに届かない事象なので 1 件目で通知。',
+      'AI エージェントの JPYC 購入が止まる・払ったのに届かない事象なので 1 件目で通知。' +
+      'pending は正常な再送でも出るので中継側と同じ別 rule。',
     eventTags: [
       'x402.facilitator.relay_error',
       'x402.facilitator.reverted',
-      'x402.facilitator.pending',
       'x402.facilitator.gas_ceiling_required',
       'x402.facilitator.kv_required',
       'x402.facilitator.settlement_record_failed',
@@ -401,46 +412,100 @@ export function buildRulePayload(
   };
 }
 
-// 既存 rule (API の応答) から比較に使う部分だけを取り出す。API は conditions/filters に name 等の
-// 表示用 field を足して返すので、本 script が設定する field だけで比べる。
-function comparable(rule) {
-  const freq = (rule.conditions ?? []).find((c) => c.id === EVENT_FREQUENCY_CONDITION);
-  const filters = (rule.filters ?? [])
-    .filter((f) => f.id === TAGGED_EVENT_FILTER && f.key === 'event')
-    .map((f) => ({ match: f.match ?? 'eq', value: String(f.value) }));
-  return {
-    name: rule.name,
-    environment: rule.environment ?? null,
-    frequency: Number(rule.frequency),
-    filterMatch: rule.filterMatch,
-    threshold: freq ? Number(freq.value) : null,
-    interval: freq ? freq.interval : null,
-    filters,
-  };
+// ---- 比較 ------------------------------------------------------------------------------------
+// 既存 rule (API の応答) と desired (buildRulePayload) を、本 script が意味を持たせている field で比べる。
+// API は conditions / filters に name・label 等の表示用 field を足して返すので、それだけを落として
+// **conditions / filters 全体** (追加の condition・別キーの filter・match の違いも含む) と論理条件
+// (actionMatch / filterMatch) を比べる。最初の frequency condition と event filter だけを見ると、
+// 意味の違う rule (例: filterMatch=none で通知対象が反転・FirstSeen が足されている) を unchanged に
+// してしまう (Codex P2)。
+const DISPLAY_ONLY_KEYS = new Set(['name', 'label', 'prompt', 'formFields']);
+
+function normalizeNode(node) {
+  const out = {};
+  for (const key of Object.keys(node).sort()) {
+    if (DISPLAY_ONLY_KEYS.has(key)) continue;
+    const v = node[key];
+    if (v === undefined || v === null || v === '') continue;
+    // API は数値を文字列で返すことがある ("100" / 100)。意味は同じなので文字列に揃える。
+    out[key] = typeof v === 'object' ? v : String(v);
+  }
+  if (node.id === TAGGED_EVENT_FILTER && out.match === undefined) out.match = 'eq';
+  return out;
 }
 
-const MATCH_LABEL = { ew: 'ends-with', sw: 'starts-with', co: 'contains' };
+function normalizeList(list) {
+  return (list ?? []).map((n) => JSON.stringify(normalizeNode(n))).sort();
+}
+
+const MATCH_LABEL = { ew: 'ends-with', sw: 'starts-with', co: 'contains', ne: 'not', nc: 'not-contains' };
+const shortId = (id) => String(id).split('.').pop();
+
+// 人が読む filters の要約: event tag filter は値 (eq 以外は match 付き)・他の filter は class 名。
 function describeFilters(filters) {
-  return filters
-    .map((f) => (f.match === 'eq' ? f.value : `${MATCH_LABEL[f.match] ?? f.match} ${f.value}`))
+  return (filters ?? [])
+    .map((f) => {
+      if (f.id !== TAGGED_EVENT_FILTER || f.key !== 'event') return shortId(f.id);
+      const match = f.match ?? 'eq';
+      return match === 'eq' ? String(f.value) : `${MATCH_LABEL[match] ?? match} ${f.value}`;
+    })
     .join(' | ');
+}
+const describeConditions = (conditions) => (conditions ?? []).map((c) => shortId(c.id)).join(' + ');
+const describeFiltersForDiff = (filters) =>
+  (filters ?? [])
+    .map((f) =>
+      f.id === TAGGED_EVENT_FILTER && f.key === 'event'
+        ? describeFilters([f])
+        : shortId(f.id),
+    )
+    .join(' + ');
+
+function frequencyCondition(rule) {
+  return (rule.conditions ?? []).find((c) => c.id === EVENT_FREQUENCY_CONDITION);
+}
+
+// filterMatch: filter が 1 つ以下なら all と any は同じ意味。none は通知対象の反転なので常に別物。
+function sameFilterMatch(a, b, aCount, bCount) {
+  if (a === b) return true;
+  const both = aCount <= 1 && bCount <= 1;
+  return both && ['all', 'any'].includes(a) && ['all', 'any'].includes(b);
 }
 
 function diffRule(existing, desired) {
-  const a = comparable(existing);
-  const b = comparable(desired);
   const changes = [];
-  if (a.name !== b.name) changes.push(`rename from "${a.name}"`);
-  if (a.environment !== b.environment) changes.push(`environment ${a.environment} → ${b.environment}`);
-  if (a.threshold !== b.threshold) changes.push(`threshold ${a.threshold} → ${b.threshold}`);
-  if (a.interval !== b.interval) changes.push(`interval ${a.interval} → ${b.interval}`);
-  if (a.frequency !== b.frequency) changes.push(`frequency ${a.frequency} → ${b.frequency}`);
-  const fa = describeFilters(a.filters);
-  const fb = describeFilters(b.filters);
-  if (fa !== fb) changes.push(`filters ${fa} → ${fb}`);
-  // filterMatch は filter が 1 つなら all/any どちらでも意味が同じなので、複数になるときだけ比べる。
-  if (b.filters.length > 1 && a.filterMatch !== b.filterMatch) {
-    changes.push(`filterMatch ${a.filterMatch} → ${b.filterMatch}`);
+  if (existing.name !== desired.name) changes.push(`rename from "${existing.name}"`);
+  const envA = existing.environment ?? null;
+  if (envA !== desired.environment) changes.push(`environment ${envA} → ${desired.environment}`);
+
+  const freqA = frequencyCondition(existing);
+  const freqB = frequencyCondition(desired);
+  const thresholdA = freqA ? Number(freqA.value) : null;
+  const thresholdB = Number(freqB.value);
+  if (thresholdA !== thresholdB) changes.push(`threshold ${thresholdA} → ${thresholdB}`);
+  const intervalA = freqA ? freqA.interval : null;
+  if (intervalA !== freqB.interval) changes.push(`interval ${intervalA} → ${freqB.interval}`);
+  // threshold / interval 以外 (追加の condition・別の比較種別 等) の違い。
+  const condA = normalizeList(existing.conditions);
+  const condB = normalizeList(desired.conditions);
+  const condOnlyFreqDiff =
+    condA.length === 1 && condB.length === 1 && freqA && (thresholdA !== thresholdB || intervalA !== freqB.interval);
+  if (!condOnlyFreqDiff && JSON.stringify(condA) !== JSON.stringify(condB)) {
+    changes.push(`conditions ${describeConditions(existing.conditions)} → ${describeConditions(desired.conditions)}`);
+  }
+  if (Number(existing.frequency) !== desired.frequency) {
+    changes.push(`frequency ${existing.frequency} → ${desired.frequency}`);
+  }
+  if (existing.actionMatch !== desired.actionMatch) {
+    changes.push(`actionMatch ${existing.actionMatch} → ${desired.actionMatch}`);
+  }
+  if (JSON.stringify(normalizeList(existing.filters)) !== JSON.stringify(normalizeList(desired.filters))) {
+    changes.push(`filters ${describeFiltersForDiff(existing.filters)} → ${describeFiltersForDiff(desired.filters)}`);
+  }
+  const fa = (existing.filters ?? []).length;
+  const fb = desired.filters.length;
+  if (!sameFilterMatch(existing.filterMatch, desired.filterMatch, fa, fb)) {
+    changes.push(`filterMatch ${existing.filterMatch} → ${desired.filterMatch}`);
   }
   return changes;
 }
@@ -459,6 +524,17 @@ export function planRules(existing, rules = RULES, env = ALERT_ENV) {
       continue;
     }
     const changes = diffRule(found, desired);
+    // PUT は rule 全体を上書きする。既存の通知先 (Slack / PagerDuty 等の actions) は本 script の
+    // 管轄外なので desired で置き換えず、既存をそのまま載せる (閾値だけ変える更新で通知先が消える
+    // 波及を断つ・Codex P1)。既存に actions が無いときだけ既定の NotifyEventAction を付け、計画に明示する。
+    const keptActions = (found.actions ?? []).filter((a) => a && a.id);
+    let actions = desired.actions;
+    if (keptActions.length > 0) {
+      actions = keptActions;
+    } else {
+      // 通知先の無い rule は何も知らせない = 無いのと同じなので、既定の通知先を付ける更新にする。
+      changes.push('actions (none) → NotifyEventAction');
+    }
     if (changes.length === 0) {
       plan.unchanged.push({ id: String(found.id), name: rule.name });
     } else {
@@ -467,7 +543,8 @@ export function planRules(existing, rules = RULES, env = ALERT_ENV) {
         name: rule.name,
         previousName: found.name !== rule.name ? found.name : undefined,
         changes,
-        payload: desired,
+        keptActions: keptActions.map((a) => shortId(a.id)),
+        payload: { ...desired, actions },
       });
     }
   }
@@ -487,11 +564,13 @@ export function formatPlan(plan, env = ALERT_ENV) {
   for (const c of plan.create) {
     const cond = c.payload.conditions[0];
     lines.push(
-      `  + create  ${c.name} [${describeFilters(comparable(c.payload).filters)} > ${cond.value} / ${cond.interval}]`,
+      `  + create  ${c.name} [${describeFilters(c.payload.filters)} > ${cond.value} / ${cond.interval}]`,
     );
   }
   for (const u of plan.update) {
-    lines.push(`  ~ update  ${u.name} (id=${u.id}): ${u.changes.join('; ')}`);
+    // 通知先は変えない (既存を保持)。何を保持したかを計画に出し、変えたいときは Dashboard で行う。
+    const kept = u.keptActions.length > 0 ? ` [actions 保持: ${u.keptActions.join(', ')}]` : '';
+    lines.push(`  ~ update  ${u.name} (id=${u.id}): ${u.changes.join('; ')}${kept}`);
   }
   for (const k of plan.unchanged) {
     lines.push(`  = keep    ${k.name} (id=${k.id})`);
