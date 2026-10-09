@@ -11,7 +11,7 @@ import 'server-only';
 // 判定に使うのはチェーンだけ。nonce は署名した時点の forwarder・手数料受取口でお客様が計算した値を受け取り、
 // それがサーバの今の設定と一致し、かつ同じ値から計算し直した nonce と一致するときだけ判定する。
 
-import { getAddress, isAddress, isHex, type Address, type Hex, type Log } from 'viem';
+import { getAddress, isAddress, isHex, maxUint256, type Address, type Hex, type Log } from 'viem';
 import { buildForwarderNonce, type ForwarderSettleParams } from '@/lib/relay/forwarderIntent';
 import type { AuthorizationWindow } from '@/lib/relay/authorizationUsedLookup';
 import {
@@ -73,9 +73,12 @@ export type StoreHandoffResolveFailure = { ok: false; status: number; error: str
 /** 使用済みなのに Settled が見つからないとき、期限からこれだけ待ってから used_unresolved にする (ログの遅れ)。 */
 export const USED_UNRESOLVED_AFTER_SEC = 300;
 
+// 78 桁の数字は uint256 を超えうる。範囲外は nonce の計算 (uint256 の ABI encode) で例外 (= 500) になるので、
+// ここで形の違う本文 (400) として弾く。
 function parseWei(value: unknown): bigint | null {
   if (typeof value !== 'string' || !/^\d{1,78}$/.test(value)) return null;
-  return BigInt(value);
+  const n = BigInt(value);
+  return n <= maxUint256 ? n : null;
 }
 
 function isTxHash(value: unknown): value is Hex {
@@ -145,6 +148,8 @@ export async function resolveStoreHandoff(
     typeof body.merchant !== 'string' ||
     !isAddress(body.merchant, { strict: false }) ||
     merchantValue === null ||
+    // お客様が署名する額は請求額 + 1 wei。それが uint256 に収まらない請求額の署名は存在しない。
+    merchantValue > maxUint256 - STORE_DEVICE_FEE_WEI ||
     validBefore === null ||
     typeof body.intentSalt !== 'string' ||
     !isHex(body.intentSalt) ||

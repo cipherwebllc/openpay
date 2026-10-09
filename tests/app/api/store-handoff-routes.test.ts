@@ -20,6 +20,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
 });
 vi.mock('@/lib/relay/relayGuards', () => ({
   checkIpRateLimit: vi.fn(async () => hold.rateOk),
+  checkReadRateLimit: vi.fn(async () => hold.rateOk),
 }));
 vi.mock('@/lib/storeHandoffDeps', () => ({ handoffDeps: () => ({}), resolveDeps: () => ({}) }));
 vi.mock('@/lib/storeHandoffResolve', () => ({
@@ -41,6 +42,8 @@ vi.mock('@/lib/storeHandoff', () => ({
     hold.calls.push({ fn: 'read', args });
     return { ok: true, state: 'open', expiresAt: 1, txHash: null };
   }),
+  // id の HMAC とトークンの照合は route が本文の前に呼ぶ (実物は tests/app/api/store-handoff-route-hardening.test.ts)。
+  deviceAccessFailure: vi.fn(() => null),
   recordHandoffTx: vi.fn(async (...args: unknown[]) => {
     hold.calls.push({ fn: 'tx', args });
     return { ok: true };
@@ -74,7 +77,7 @@ describe('/api/register/handoff/*', () => {
     hold.calls.length = 0;
   });
 
-  it('flag OFF ではすべて 404 (完全 inert)', async () => {
+  it('flag OFF では受け渡しの入口はすべて 404 (結論の照会 resolve だけは答える = C7)', async () => {
     hold.enabled = false;
     for (const res of [
       await createPost(json({})),
@@ -82,11 +85,13 @@ describe('/api/register/handoff/*', () => {
       await authPost(json({}), params),
       await txPost(json({}), params),
       await closePost(json({}), params),
-      await resolvePost(json({})),
     ]) {
       expect(res.status).toBe(404);
     }
     expect(hold.calls).toHaveLength(0);
+    // 読むだけで資金を動かさない結論の照会は、止めた時点で署名済み・送信中の会計のために開けておく。
+    expect((await resolvePost(json({}))).status).toBe(200);
+    expect(hold.calls.map((c) => c.fn)).toEqual(['resolve']);
   });
 
   it('作成と署名の受け取りは IP ごとの回数制限 (超えたら 429・本体に届かない)', async () => {

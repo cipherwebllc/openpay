@@ -4,6 +4,7 @@ import 'server-only';
 
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { MAX_BODY_BYTES } from '@/lib/relay/relayRoute';
 import type { HandoffFailure } from '@/lib/storeHandoff';
 
@@ -23,24 +24,17 @@ export function handoffFailure(f: HandoffFailure): NextResponse {
   return handoffJson({ ok: false, error: f.error }, f.status);
 }
 
+// 本文は読みながら上限 (4 KB) を数え、超えた時点で読むのをやめる (全部読んでから測ると、上限がメモリ確保を止めない)。
 export async function readHandoffBody(
   req: Request,
 ): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; res: NextResponse }> {
-  let text: string;
-  try {
-    text = await req.text();
-  } catch {
-    return { ok: false, res: handoffJson({ ok: false, error: 'invalid_json' }, 400) };
+  const read = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+  if (!read.ok) {
+    return read.reason === 'too_large'
+      ? { ok: false, res: handoffJson({ ok: false, error: 'payload_too_large' }, 413) }
+      : { ok: false, res: handoffJson({ ok: false, error: 'invalid_json' }, 400) };
   }
-  if (Buffer.byteLength(text, 'utf8') > MAX_BODY_BYTES) {
-    return { ok: false, res: handoffJson({ ok: false, error: 'payload_too_large' }, 413) };
-  }
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return { ok: false, res: handoffJson({ ok: false, error: 'invalid_json' }, 400) };
-  }
+  const raw = read.value;
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return { ok: false, res: handoffJson({ ok: false, error: 'invalid_body' }, 400) };
   }

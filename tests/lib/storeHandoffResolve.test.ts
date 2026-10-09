@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getAddress, type Hex } from 'viem';
+import { getAddress, maxUint256, type Hex } from 'viem';
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
 import {
   USED_UNRESOLVED_AFTER_SEC,
@@ -202,6 +202,35 @@ describe('resolveStoreHandoff (お店の端末で送る 1 件の結論)', () => 
     spy.used.mockClear();
     expect(await resolveStoreHandoff(body(), deps())).toEqual({ ok: true, state: 'expired_unused' });
     expect(spy.used).not.toHaveBeenCalled();
+  });
+
+  // A13/G9: 78 桁の数字は uint256 を超えうる。nonce の計算 (uint256 の ABI encode) で例外 → 500 にせず、形の違う本文 (400) にする。
+  // お客様が署名する額は請求額 + 1 wei なので、それが uint256 に収まらない請求額も実在しない (400)。
+  it('uint256 を超える数・請求額 + 1 wei が溢れる請求額は 400 (nonce の計算で例外にしない)', async () => {
+    for (const over of [
+      { merchantValue: '9'.repeat(78) },
+      { merchantValue: (maxUint256 + 1n).toString() },
+      { merchantValue: maxUint256.toString() },
+      { validBefore: '9'.repeat(78) },
+      { validBefore: (maxUint256 + 1n).toString() },
+    ]) {
+      await expect(resolveStoreHandoff(body(over), deps())).resolves.toEqual({
+        ok: false,
+        status: 400,
+        error: 'invalid_body',
+      });
+    }
+    expect(spy.used).not.toHaveBeenCalled();
+  });
+
+  it('uint256 の範囲ちょうど (請求額 + 1 wei = 上限・期限 = 上限) は形として受け、nonce の照合へ進む', async () => {
+    for (const over of [{ merchantValue: (maxUint256 - 1n).toString() }, { validBefore: maxUint256.toString() }]) {
+      await expect(resolveStoreHandoff(body(over), deps())).resolves.toEqual({
+        ok: false,
+        status: 400,
+        error: 'nonce_mismatch',
+      });
+    }
   });
 
   it.each([

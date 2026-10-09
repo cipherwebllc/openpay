@@ -17,7 +17,7 @@ import 'server-only';
 //     署名が先なら端末はそれを受け取って送る・締め切りが先ならお客様には「期限切れ」(410) を返す。
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { getAddress, isAddress, isHex, type Address, type Hex } from 'viem';
+import { getAddress, isAddress, isHex, maxUint256, type Address, type Hex } from 'viem';
 import {
   verifyForwarderSettle,
   type ForwarderVerifyDeps,
@@ -178,9 +178,26 @@ function tokenMatches(token: string | null, id: string, mac: HandoffDeps['mac'])
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * お店の端末の要求か (id の HMAC と端末のトークン)。KV にも本文にも触れずに決まるので、route は本文を読む前に使う
+ * (無認証の要求で本文を読まない)。偽の id は 404・トークンが無い / 違うは 403 (recordHandoffTx と同じ応答)。
+ */
+export function deviceAccessFailure(
+  id: string,
+  token: string | null,
+  mac: HandoffDeps['mac'],
+): HandoffFailure | null {
+  if (!isGenuineHandoffId(id, mac)) return fail(404, 'not_found');
+  if (!tokenMatches(token, id, mac)) return fail(403, 'bad_token');
+  return null;
+}
+
+// 78 桁の数字は uint256 を超えうる。範囲外は nonce の計算 (uint256 の ABI encode) で例外 (= 500) になるので、
+// ここで形の違う本文 (400) として弾く。
 function parseWei(value: unknown): bigint | null {
   if (typeof value !== 'string' || !/^\d{1,78}$/.test(value)) return null;
-  return BigInt(value);
+  const n = BigInt(value);
+  return n <= maxUint256 ? n : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -426,8 +443,8 @@ export async function recordHandoffTx(
   body: Record<string, unknown>,
   deps: Pick<HandoffDeps, 'store' | 'nowSec' | 'mac'>,
 ): Promise<{ ok: true; txHash: Hex } | HandoffFailure> {
-  if (!isGenuineHandoffId(id, deps.mac)) return fail(404, 'not_found');
-  if (!tokenMatches(token, id, deps.mac)) return fail(403, 'bad_token');
+  const denied = deviceAccessFailure(id, token, deps.mac);
+  if (denied) return denied;
   const txHash = body.txHash;
   if (typeof txHash !== 'string' || !isHex(txHash) || txHash.length !== 66) {
     return fail(400, 'invalid_tx');

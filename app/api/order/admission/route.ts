@@ -10,9 +10,14 @@ import { chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
+import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import type { FeePayer, MobileOrderMode } from '@/lib/mobileOrder';
 import { storefrontDiscountWei } from '@/lib/mobileOrderDiscount';
-import { declaredItemsTotalMinor, sanitizeOrderItems } from '@/lib/orderRelay';
+import {
+  ORDER_ADMISSION_MAX_BODY_BYTES,
+  declaredItemsTotalMinor,
+  sanitizeOrderItems,
+} from '@/lib/orderRelay';
 import { resolveDeployment } from '@/lib/tokens';
 import { clientIp } from '@/lib/net/ipHash';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
@@ -95,13 +100,15 @@ export async function POST(req: Request): Promise<NextResponse> {
     return json({ ok: false, error: 'rate_limited' }, 429);
   }
 
-  let raw: unknown;
-  try {
-    raw = await req.json();
-  } catch {
-    return json({ ok: false, error: 'invalid_json' }, 400);
+  // 本文は読みながら数え、上限 (最大の正規の本文の 2 倍以上) を超えたら打ち切る。無認証の入口で、大きな本文を
+  // 全部読んで JSON にしてから検証する処理量を、正規の注文の受付確認に波及させない。
+  const read = await readJsonBodyCapped(req, ORDER_ADMISSION_MAX_BODY_BYTES);
+  if (!read.ok) {
+    return read.reason === 'too_large'
+      ? json({ ok: false, error: 'payload_too_large' }, 413)
+      : json({ ok: false, error: 'invalid_json' }, 400);
   }
-  const body = parseBody(raw);
+  const body = parseBody(read.value);
   if (!body) return json({ ok: false, error: 'invalid_request' }, 400);
 
   const handle = normalizeHandle(body.handle);
