@@ -5,11 +5,15 @@
 // MobileOrderView の CTA と CheckoutForm の submit が同じ API を使うため、CTA だけに依存しない。
 
 import { NextResponse } from 'next/server';
-import { getAddress, isAddress } from 'viem';
+import { getAddress, isAddress, parseUnits } from 'viem';
+import { chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import type { FeePayer, MobileOrderMode } from '@/lib/mobileOrder';
+import { storefrontDiscountWei } from '@/lib/mobileOrderDiscount';
+import { declaredItemsTotalMinor, sanitizeOrderItems, type StoredOrderItem } from '@/lib/orderRelay';
+import { resolveDeployment } from '@/lib/tokens';
 import { clientIp } from '@/lib/net/ipHash';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
@@ -25,6 +29,12 @@ type AdmissionBody = {
   pickupAt?: number;
   /** URL 発行時点の手数料負担者 (任意)。古い client は送らないので absent = 従来動作。 */
   feePayer?: FeePayer;
+  /**
+   * 注文の明細と、URL の値引き (任意・plans/discount-common.md)。明細を送ってきたときだけ、店舗の値引き (公開設定)
+   * と照合する。CTA からの呼び出し・古い client は送らないので absent = 従来動作。
+   */
+  items?: StoredOrderItem[];
+  discount?: string;
 };
 
 function json(body: Record<string, unknown>, status: number): NextResponse {
@@ -60,12 +70,18 @@ function parseBody(value: unknown): AdmissionBody | null {
   ) {
     return null;
   }
+  if (raw.items !== undefined && !Array.isArray(raw.items)) return null;
+  if (raw.discount !== undefined && (typeof raw.discount !== 'string' || !/^\d+(\.\d+)?$/.test(raw.discount))) {
+    return null;
+  }
   return {
     handle: raw.handle,
     merchant: raw.merchant,
     mode: raw.mode,
     ...(raw.pickupAt !== undefined ? { pickupAt: raw.pickupAt } : {}),
     ...(raw.feePayer !== undefined ? { feePayer: raw.feePayer } : {}),
+    ...(raw.items !== undefined ? { items: sanitizeOrderItems(raw.items) } : {}),
+    ...(raw.discount !== undefined ? { discount: raw.discount } : {}),
   };
 }
 
@@ -141,6 +157,26 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   if (storefront.acceptingOrders === false) {
     return json({ ok: false, error: 'store_not_accepting' }, 409);
+  }
+  // 店舗の値引きのドリフト検出 (plans/discount-common.md)。URL の値引きが、明細の小計に公開設定の値引きを当てた額と
+  // 違えば (URL 発行後に店舗が値引きを変えた・URL を書き換えた) 署名前に止めて開き直してもらう (feePayer と同じ 409)。
+  // 明細を送ってきたときだけ (CTA・古い client は従来どおり)。時間系の flag に関係なく照合する。値引きがどちらにも
+  // 無い注文 (値引きを使わない店の注文) は照合しない = 従来の受付に新しい止まり方を足さない (掟 12)。
+  if (body.items !== undefined && (body.discount !== undefined || storefront.discount !== undefined)) {
+    const deployment = resolveDeployment('jpyc', chainForSlug(storefront.chain).id);
+    const subtotal = deployment ? declaredItemsTotalMinor(body.items, deployment.decimals) : null;
+    if (!deployment || subtotal === null) {
+      return json({ ok: false, error: 'invalid_request' }, 400);
+    }
+    let declared: bigint;
+    try {
+      declared = body.discount ? parseUnits(body.discount, deployment.decimals) : 0n;
+    } catch {
+      return json({ ok: false, error: 'invalid_request' }, 400);
+    }
+    if (declared !== storefrontDiscountWei(storefront.discount, subtotal, deployment.decimals)) {
+      return json({ ok: false, error: 'storefront_changed' }, 409);
+    }
   }
 
   if (!env.enablePreorderTime) {

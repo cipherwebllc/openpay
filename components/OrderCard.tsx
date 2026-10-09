@@ -266,6 +266,12 @@ function OrderCardInner({
           <span className={amountWarning ? 'text-sm font-bold text-slate-900' : ''}>
             {formattedAmount} JPYC
           </span>
+          {/* 店舗の値引き (受注時に公開設定から計算・金額が合う注文だけ)。実着金が明細の合計より少ない理由。 */}
+          {o.discount ? (
+            <span className="block text-[10px] font-semibold text-rose-700">
+              {t('discountApplied', { amount: formatUnits(BigInt(o.discount), JPYC_DECIMALS) })}
+            </span>
+          ) : null}
           {formattedDeclaredAmount !== null ? (
             <span className="block text-[10px] font-semibold text-slate-500">
               {t('declaredAmount')}: {formattedDeclaredAmount} JPYC

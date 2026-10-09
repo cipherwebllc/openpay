@@ -338,3 +338,57 @@ describe('POST /api/order/admission', () => {
     expect((await POST(request({ pickupAt: 0 }))).status).toBe(400);
   });
 });
+
+// 店舗の値引き (plans/discount-common.md): 明細を送ってきたときだけ、URL の値引きを公開設定の値引きと照合する。
+describe('POST /api/order/admission — 店舗の値引き', () => {
+  const items = [{ name: 'コーヒー', qty: 2, price: '500' }]; // 小計 1,000
+
+  it('5% 引きの店: URL の値引き 50 が一致すれば通す', async () => {
+    hold.resolved = { ok: true, record: record(preorder({ discount: { kind: 'percent', value: '5' } })) };
+    const response = await POST(request({ items, discount: '50' }));
+    expect(response.status).toBe(200);
+  });
+
+  it('値引きが変わった・書き換えた URL は署名前に 409 storefront_changed', async () => {
+    hold.resolved = { ok: true, record: record(preorder({ discount: { kind: 'percent', value: '5' } })) };
+    for (const discount of ['40', '100']) {
+      const response = await POST(request({ items, discount }));
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ ok: false, error: 'storefront_changed' });
+    }
+    // 値引きを付けずに開いた URL (値引きを始める前に発行) も開き直してもらう。
+    expect((await POST(request({ items }))).status).toBe(409);
+  });
+
+  it('値引きをやめた店に値引き付きの URL → 409', async () => {
+    expect((await POST(request({ items, discount: '50' }))).status).toBe(409);
+  });
+
+  it('1 注文 100 円引きの店: 小計が 100 円以下の注文には付かない (値引きなしで一致)', async () => {
+    hold.resolved = { ok: true, record: record(preorder({ discount: { kind: 'amount', value: '100' } })) };
+    expect((await POST(request({ items, discount: '100' }))).status).toBe(200);
+    expect((await POST(request({ items: [{ name: 'あめ', qty: 1, price: '100' }] }))).status).toBe(200);
+  });
+
+  it('時間系の flag が OFF でも照合する', async () => {
+    hold.preorderTime = false;
+    hold.resolved = { ok: true, record: record(preorder({ discount: { kind: 'percent', value: '5' } })) };
+    expect((await POST(request({ items, discount: '40' }))).status).toBe(409);
+    expect((await POST(request({ items, discount: '50' }))).status).toBe(200);
+  });
+
+  it('値引きのない店・値引きのない URL は明細を見ない (従来どおり通す)', async () => {
+    expect((await POST(request({ items: [{ name: 'x', qty: 1, price: 'abc' }] }))).status).toBe(200);
+  });
+
+  it('明細を送らない呼び出し (CTA・旧 client) は照合しない', async () => {
+    hold.resolved = { ok: true, record: record(preorder({ discount: { kind: 'percent', value: '5' } })) };
+    expect((await POST(request())).status).toBe(200);
+  });
+
+  it('値引きの形が不正なら KV を読まず 400', async () => {
+    expect((await POST(request({ items, discount: '-1' }))).status).toBe(400);
+    expect((await POST(request({ items: 'nope' }))).status).toBe(400);
+    expect(hold.resolveHandle).not.toHaveBeenCalled();
+  });
+});

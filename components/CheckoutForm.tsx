@@ -1320,6 +1320,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             ...(params.feePayer === undefined
               ? {}
               : { feePayer: params.feePayer }),
+            // 明細と URL の値引き。server が明細の小計に店舗の値引き (公開設定) を当てた額と突合し、
+            // 値引きが変わっていれば署名前に 409 で止める (plans/discount-common.md)。
+            items: params.items.map(({ name, qty, price }) => ({ name, qty, price })),
+            ...(params.discount ? { discount: params.discount } : {}),
           }),
         });
         const body = (await response.json().catch(() => null)) as {

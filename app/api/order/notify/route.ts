@@ -36,6 +36,7 @@ import { clientIp } from '@/lib/net/ipHash';
 import { anonymizeIp } from '@/lib/relay/relayRoute';
 import { resolveHandle } from '@/lib/handleStore';
 import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
+import { storefrontDiscountWei } from '@/lib/mobileOrderDiscount';
 import {
   orderListKey,
   orderUsedKey,
@@ -523,8 +524,14 @@ export async function POST(req: Request): Promise<NextResponse> {
         : txHash); // orderId 無し時は txHash で代替 (一意)
     const items = snapshot?.items ?? sanitizeOrderItems(o.items);
     const declaredMinor = declaredItemsTotalMinor(items, deployment.decimals);
+    // 店舗の値引き (plans/discount-common.md)。正本は公開 storefront (body の値引きは使わない)。金額確認の期待額は
+    // 申告明細の合計 − 値引き。値引きの無い店は 0 で従来どおり (advisory の判定式は変えない)。
+    const discountMinor =
+      declaredMinor === null
+        ? 0n
+        : storefrontDiscountWei(record.storefront?.discount, declaredMinor, deployment.decimals);
     const amountAdvisory = evaluateOrderAmount(
-      declaredMinor,
+      declaredMinor === null ? null : declaredMinor - discountMinor,
       receiptValue,
       relayGasFeeValue(chainId),
       AMOUNT_ADVISORY_BPS_CAP,
@@ -549,6 +556,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (binding.digest) order.bindingDigest = binding.digest;
     if (amountAdvisory.mismatch) order.amountMismatch = true;
     if (amountAdvisory.unchecked) order.amountUnchecked = true;
+    // 受注カードの「値引き −X」。金額が合わない注文には出さない (既存の 申告合計 / 実着金 の表示に任せる)。
+    if (discountMinor > 0n && !amountAdvisory.mismatch) order.discount = discountMinor.toString();
     const feeObligation = standardFeeObligationFromReceipt({
       receiptValue,
       sameSourceFeeValue: binding.sameSourceFeeValue ?? result.sameSourceFeeValue,

@@ -64,11 +64,23 @@ describe('値引き (disc) の URL', () => {
     ['fee_kind=preorder', 'fee_kind=preorder'],
     ['order_id', 'order_id=abc'],
     ['store_handle', 'store_handle=shop'],
-  ])('モバイル注文の URL (%s) とは併用できない', (_label, extra) => {
+    ['order_id + fee_kind (store_handle なし)', 'order_id=abc&fee_kind=storefront'],
+  ])('店舗の値引きと照合できないモバイル注文の URL (%s) とは併用できない', (_label, extra) => {
     const r = parse(`${queryOf(pathOf())}&disc=20&${extra}`);
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.urlError.code).toBe('invalidDiscount');
+  });
+
+  it.each([
+    ['store_handle + fee_kind=storefront', 'store_handle=shop&fee_kind=storefront'],
+    ['store_handle + fee_kind=preorder + order_id', 'store_handle=shop&fee_kind=preorder&order_id=abc'],
+  ])('@handle のモバイル注文 (%s) は店舗の値引きを載せられる (署名前に公開設定と照合)', (_label, extra) => {
+    const r = parse(`${queryOf(pathOf())}&disc=20&${extra}`);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.params.discount).toBe('20');
+    expect(calcCheckoutPayable(r.params, 18)).toBe(J('980'));
   });
 
   it('USDC は 0.01 単位', () => {

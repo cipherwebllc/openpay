@@ -172,6 +172,12 @@ export function OrderFeedPanel({
                 {formattedAmount}
               </span>{' '}
               <span className="text-[10px] font-medium text-slate-500">JPYC</span>
+              {/* 店舗の値引き (受注時に公開設定から計算・金額が合う注文だけ)。実着金が明細の合計より少ない理由。 */}
+              {o.discount ? (
+                <span className="block text-[10px] font-semibold text-rose-700">
+                  {t('discountApplied', { amount: groupAmountDigits(formatUnits(BigInt(o.discount), JPYC_DECIMALS)) })}
+                </span>
+              ) : null}
             </span>
           </div>
         </div>
