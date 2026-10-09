@@ -255,6 +255,37 @@ describe('paid Japan Web3 Directory APIs', () => {
     expect(routeMocks.verify).not.toHaveBeenCalled();
   });
 
+  // Codex P2: 支払いの識別子は取れるが、コアが v2PayloadToV1Body で拒否する v2 header (v1 の payload を
+  // PAYMENT-SIGNATURE に載せる・accepted の必須項目が欠けた v2) でも KV を読まない。応答は従来どおり。
+  it.each([
+    ['v1 の payload を PAYMENT-SIGNATURE に載せる', paymentHeader()],
+    [
+      'accepted の必須項目が欠けた v2',
+      Buffer.from(
+        JSON.stringify({
+          x402Version: 2,
+          accepted: { network: 'eip155:80002' },
+          payload: paymentPayload().payload,
+        }),
+        'utf8',
+      ).toString('base64'),
+    ],
+  ])('verify まで進めない v2 header (%s) は KV を読まずに 402 invalid_payment_payload', async (_label, value) => {
+    const { list, search, detail } = await load();
+    const headers = { 'PAYMENT-SIGNATURE': value };
+    const responses = [
+      await list.GET(new Request('https://open-pay.jp/api/paid/japan-web3-directory', { headers })),
+      await search.GET(new Request('https://open-pay.jp/api/paid/japan-web3-directory/search?category=wallet', { headers })),
+      await detail.GET(new Request('https://open-pay.jp/api/paid/japan-web3-directory/jpyc', { headers }), { params: Promise.resolve({ slug: 'jpyc' }) }),
+    ];
+    for (const res of responses) {
+      expect(res.status).toBe(402);
+      expect(await res.json()).toMatchObject({ error: 'invalid_payment_payload' });
+    }
+    expect(verificationMocks.read).not.toHaveBeenCalled();
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+  });
+
   it('KV snapshot 障害は verify/settle 前に未課金503', async () => {
     verificationMocks.snapshot = null;
     const { list } = await load();

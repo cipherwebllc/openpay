@@ -170,7 +170,8 @@ function isPaymentRequirementsV2(value: unknown): value is PaymentRequirementsV2
   return extra === undefined || extra === null || isRecord(extra);
 }
 
-function isPaymentPayloadV2(value: unknown): value is PaymentPayloadV2 {
+/** v2 payload の構造 (x402Version === 2・accepted が PaymentRequirementsV2・payload が record)。v2PayloadToV1Body と同じ検査。 */
+export function isPaymentPayloadV2(value: unknown): value is PaymentPayloadV2 {
   if (!isRecord(value)) return false;
   return (
     value.x402Version === 2 &&

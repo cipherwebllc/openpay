@@ -32,6 +32,7 @@ import {
   decodePaymentSignatureHeaderValue,
   encodePaymentRequiredHeaderValue,
   encodePaymentResponseHeaderValue,
+  isPaymentPayloadV2,
   toV2Accept,
   v2PayloadToV1Body,
 } from '@/lib/x402/v2';
@@ -157,9 +158,17 @@ function readPaymentHeader(req: Request): PaymentHeaderRead {
  * 支払い header があり、コアが verify まで進める形か (無い・壊れている・識別子が取れないなら false =
  * コアは content を呼ばずに 402 を返す)。支払いの前に KV を先読みする route は、これが true のときだけ
  * 読む (中身の無い header の連打で KV を読ませない・第 7 回レビュー E1)。
+ *
+ * v2 header (PAYMENT-SIGNATURE) は識別子が取れても、コアが v2PayloadToV1Body で拒否する形 (v1 の payload を
+ * 載せる・accepted の必須項目が欠ける等) があるので、同じ構造検査 (isPaymentPayloadV2) も通ったときだけ true
+ * (Codex P2)。accepted と要件の一致はコアが descriptor を解決してから見るので、ここでは見ない。
+ * v1 header (x-payment) は識別子まででよい: コア自身がこの後に KV の再配信 lookup を読むので、これ以上の
+ * 先読み抑止は効果が小さい。この判定はコアの順序・応答を変えない (コアは readPaymentHeader だけを使う)。
  */
 export function paymentHeaderUsable(req: Request): boolean {
-  return readPaymentHeader(req).kind === 'ok';
+  const header = readPaymentHeader(req);
+  if (header.kind !== 'ok') return false;
+  return !header.usesV2Header || isPaymentPayloadV2(header.payload);
 }
 
 function paymentBody(
