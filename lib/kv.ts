@@ -136,18 +136,52 @@ async function post(path: '' | 'pipeline', body: unknown): Promise<KvResult<unkn
   }
 }
 
-// ok:true の value が宣言した型であることを実行時に確かめる guard。Upstash が想定外の形 ({"result":{}} 等) を
-// 返したとき、型を偽った値が呼出側の .map / 文字列メソッドで TypeError を投げる波及を断ち、parse_error にする。
-// 配列と文字列を返す helper だけに付ける (数値を返す helper は比較・算術で throw しない・kvEval は呼出側が検証)。
-type ResultGuard<T> = (value: unknown) => value is T;
+// ok:true の value が宣言した型であることを、コマンドごとに実行時に確かめる parser。Upstash が想定外の形
+// ({"result":{}}・toString の無い object 等) を返したとき、型を偽った値が呼出側の .map・文字列メソッド・大小比較で
+// TypeError を投げたり、確認できていない claim を成功と読ませたり (偽成功) する波及を断ち、parse_error にする。
+// 受理した値を返し、受理しないときは undefined。
+type ResultParser<T> = (value: unknown) => { value: T } | undefined;
 
-const isStringOrNull: ResultGuard<string | null> = (value): value is string | null =>
-  value === null || typeof value === 'string';
+const parseStringOrNull: ResultParser<string | null> = (value) =>
+  value === null || typeof value === 'string' ? { value } : undefined;
 
-const isStringArray: ResultGuard<string[]> = (value): value is string[] =>
-  Array.isArray(value) && value.every((item) => typeof item === 'string');
+const parseStringArray: ResultParser<string[]> = (value) =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string')
+    ? { value: value as string[] }
+    : undefined;
 
-async function call<T>(body: unknown[], guard?: ResultGuard<T>): Promise<KvResult<T>> {
+// Redis の整数応答 (INCR・DECR・LPUSH・LLEN・LREM・EXPIRE・EXISTS・DEL)。Upstash の REST は JSON の数値で返す。
+// 整数の文字列 ("5") も、検証を足す前に通していた形として受け入れ、number に揃える (=== 1 等の比較が型どおりに効く)。
+// それ以外 (object・真偽値・null・小数の文字列・安全な整数を超える文字列) は parse_error。
+const INTEGER_STRING_RE = /^-?(0|[1-9][0-9]*)$/;
+const parseInteger: ResultParser<number> = (value) => {
+  if (typeof value === 'number') return Number.isFinite(value) ? { value } : undefined;
+  if (typeof value === 'string' && INTEGER_STRING_RE.test(value)) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) ? { value: parsed } : undefined;
+  }
+  return undefined;
+};
+
+// SET (NX なし)・LTRIM の状態応答は 'OK' だけ。
+const parseOk: ResultParser<'OK'> = (value) => (value === 'OK' ? { value: 'OK' } : undefined);
+
+// SET NX は取れたら 'OK'、既存で取れなかったら null。それ以外を「取れた」と読ませない (idempotency claim の偽成功を断つ)。
+const parseOkOrNull: ResultParser<'OK' | null> = (value) =>
+  value === 'OK' || value === null ? { value } : undefined;
+
+// EVAL の応答は Lua の戻り値を Redis が変換した値に限られる: 整数・文字列・null (nil / false)・それらの (入れ子の) 配列。
+// JSON の object・真偽値はどの script からも返らないので parse_error にする。script ごとの意味 (戻り値の種類) は
+// 呼出側が検証する。
+function isRedisReply(value: unknown): boolean {
+  if (value === null || typeof value === 'string') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  return Array.isArray(value) && value.every(isRedisReply);
+}
+const parseRedisReply = <T>(value: unknown): { value: T } | undefined =>
+  isRedisReply(value) ? { value: value as T } : undefined;
+
+async function call<T>(body: unknown[], parse: ResultParser<T>): Promise<KvResult<T>> {
   const sent = await post('', body);
   if (!sent.ok) return sent;
   try {
@@ -162,10 +196,11 @@ async function call<T>(body: unknown[], guard?: ResultGuard<T>): Promise<KvResul
     if (!('result' in json)) {
       return { ok: false, reason: 'parse_error', detail: 'missing result key' };
     }
-    if (guard && !guard(json.result)) {
+    const parsed = parse(json.result);
+    if (!parsed) {
       return { ok: false, reason: 'parse_error', detail: 'unexpected result type' };
     }
-    return { ok: true, value: json.result as T };
+    return { ok: true, value: parsed.value };
   } catch (e) {
     return { ok: false, reason: 'parse_error', detail: errInfo(e).detail };
   }
@@ -192,14 +227,14 @@ export function kvLpush(
   opts?: KvLpushAtomicOptions,
 ): Promise<KvResult<number>> {
   if (opts) {
-    return kvEval<number>(LPUSH_TRIM_EXPIRE, [key], [
-      value,
-      String(opts.trimStart),
-      String(opts.trimStop),
-      String(opts.ttlSec),
-    ]);
+    return evalScript(
+      LPUSH_TRIM_EXPIRE,
+      [key],
+      [value, String(opts.trimStart), String(opts.trimStop), String(opts.ttlSec)],
+      parseInteger,
+    );
   }
-  return call<number>(['LPUSH', key, value]);
+  return call(['LPUSH', key, value], parseInteger);
 }
 
 export function kvLrange(
@@ -207,11 +242,11 @@ export function kvLrange(
   start: number,
   stop: number,
 ): Promise<KvResult<string[]>> {
-  return call<string[]>(['LRANGE', key, String(start), String(stop)], isStringArray);
+  return call(['LRANGE', key, String(start), String(stop)], parseStringArray);
 }
 
 export function kvLlen(key: string): Promise<KvResult<number>> {
-  return call<number>(['LLEN', key]);
+  return call(['LLEN', key], parseInteger);
 }
 
 // LPUSH 直後の cap 用: 0..stop で先頭側を残し古い entry を捨てる。
@@ -220,17 +255,27 @@ export function kvLtrim(
   start: number,
   stop: number,
 ): Promise<KvResult<'OK'>> {
-  return call<'OK'>(['LTRIM', key, String(start), String(stop)]);
+  return call(['LTRIM', key, String(start), String(stop)], parseOk);
 }
 
 // EVAL: Lua スクリプトを原子実行する。compare-and-set (例: 所有者一致時のみ更新/削除) など
 // nx/incr で表せない原子操作に使う。Upstash REST は EVAL + 標準 Lua (cjson 含む) を提供。
+// 応答は Redis の値の形 (整数・文字列・null・配列) だけを受理する。script ごとの戻り値の意味は呼出側が検証する。
 export function kvEval<T = unknown>(
   script: string,
   keys: string[],
   args: string[],
 ): Promise<KvResult<T>> {
-  return call<T>(['EVAL', script, String(keys.length), ...keys, ...args]);
+  return evalScript<T>(script, keys, args, (value) => parseRedisReply<T>(value));
+}
+
+function evalScript<T>(
+  script: string,
+  keys: string[],
+  args: string[],
+  parse: ResultParser<T>,
+): Promise<KvResult<T>> {
+  return call(['EVAL', script, String(keys.length), ...keys, ...args], parse);
 }
 
 // --- Phase B hardening 用の原子プリミティブ (nonce 採番 / idempotency / gas budget) ---
@@ -254,7 +299,7 @@ export async function kvIncr(
   key: string,
   opts?: KvIncrAtomicOptions,
 ): Promise<KvResult<number>> {
-  if (!opts) return call<number>(['INCR', key]);
+  if (!opts) return call(['INCR', key], parseInteger);
   const sent = await post('pipeline', [
     ['INCR', key],
     ['EXPIRE', key, String(opts.initialTtlSec), 'NX'],
@@ -295,12 +340,12 @@ function noteExpireFailure(error: unknown): void {
 
 // 原子デクリメント (gas budget の refund 等)。INCR で消費した枠を戻すのに使う。
 export function kvDecr(key: string): Promise<KvResult<number>> {
-  return call<number>(['DECR', key]);
+  return call(['DECR', key], parseInteger);
 }
 
 // 値取得。未存在は null。
 export function kvGet(key: string): Promise<KvResult<string | null>> {
-  return call<string | null>(['GET', key], isStringOrNull);
+  return call(['GET', key], parseStringOrNull);
 }
 
 // 複数 key を 1 round-trip で読む。shops の materialized summary / live snapshot のように
@@ -313,9 +358,13 @@ export function kvMget(
     return Promise.resolve({ ok: true, value: [] });
   }
   // 位置で引く呼出側 (values[i]) のため、要素数も入力と一致することを確かめる。
-  const isMgetReply = (value: unknown): value is (string | null)[] =>
-    Array.isArray(value) && value.length === keys.length && value.every(isStringOrNull);
-  return call<(string | null)[]>(['MGET', ...keys], isMgetReply);
+  const parseMgetReply: ResultParser<(string | null)[]> = (value) =>
+    Array.isArray(value) &&
+    value.length === keys.length &&
+    value.every((item) => item === null || typeof item === 'string')
+      ? { value: value as (string | null)[] }
+      : undefined;
+  return call(['MGET', ...keys], parseMgetReply);
 }
 
 // SET key value [EX ttl] [NX]。nx 時、既存キーなら null (set されず)、新規なら 'OK'。
@@ -328,28 +377,28 @@ export function kvSet(
   const cmd: string[] = ['SET', key, value];
   if (opts.ttlSec !== undefined) cmd.push('EX', String(opts.ttlSec));
   if (opts.nx) cmd.push('NX');
-  return call<'OK' | null>(cmd);
+  return call<'OK' | null>(cmd, opts.nx ? parseOkOrNull : parseOk);
 }
 
 // TTL 設定 (採番カウンタ等の自然失効)。設定できれば 1、キー無しは 0。
 export function kvExpire(key: string, ttlSec: number): Promise<KvResult<number>> {
-  return call<number>(['EXPIRE', key, String(ttlSec)]);
+  return call(['EXPIRE', key, String(ttlSec)], parseInteger);
 }
 
 // EXISTS k1 k2 …: 存在するキーの数 (1 コマンド)。空振りの多い定期処理を、対象が在るときだけ動かす判定に使う。
 export function kvExists(keys: readonly string[]): Promise<KvResult<number>> {
-  return call<number>(['EXISTS', ...keys]);
+  return call(['EXISTS', ...keys], parseInteger);
 }
 
 // キー削除 (idempotency claim の解放等)。削除数を返す (無ければ 0)。
 export function kvDel(key: string): Promise<KvResult<number>> {
-  return call<number>(['DEL', key]);
+  return call(['DEL', key], parseInteger);
 }
 
 // GETDEL: 値取得と削除を atomic に行う (Redis 6.2+)。one-time トークン (OAuth state 等) の
 // 消費で get→del の TOCTOU を避けるために使う。未存在は null。
 export function kvGetDel(key: string): Promise<KvResult<string | null>> {
-  return call<string | null>(['GETDEL', key], isStringOrNull);
+  return call(['GETDEL', key], parseStringOrNull);
 }
 
 // SET key value EX ttl NX GET — 原子的 claim。成功 (キー新設) なら null、既存なら旧値。
@@ -359,5 +408,5 @@ export function kvSetNxGet(
   value: string,
   ttlSec: number,
 ): Promise<KvResult<string | null>> {
-  return call<string | null>(['SET', key, value, 'EX', String(ttlSec), 'NX', 'GET'], isStringOrNull);
+  return call(['SET', key, value, 'EX', String(ttlSec), 'NX', 'GET'], parseStringOrNull);
 }

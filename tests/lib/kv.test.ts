@@ -706,7 +706,6 @@ describe('lib/kv の no-throw 契約', () => {
       ['kvLrange', () => kv.kvLrange('k', 0, 9)],
       ['kvLlen', () => kv.kvLlen('k')],
       ['kvLtrim', () => kv.kvLtrim('k', 0, 9)],
-      ['kvLrem', () => kv.kvLrem('k', 'v')],
       ['kvEval', () => kv.kvEval('return 1', ['k'], ['a'])],
       ['kvIncr', () => kv.kvIncr('k')],
       ['kvIncr(atomic)', () => kv.kvIncr('k', { initialTtlSec: 60 })],
@@ -781,6 +780,105 @@ describe('lib/kv の no-throw 契約', () => {
       kvSetNxGet: () => kv.kvSetNxGet('k', 'v', 60),
     }[helper];
     expect(await run()).toEqual({ ok: true, value });
+  });
+
+  // Codex 2 回目: 数値・'OK'・EVAL の応答も宣言した形かを確かめる。数値の helper は object や toString の無い値を
+  // parse_error にし (大小比較の TypeError・{} の「拒否」への化けを断つ)、整数の文字列は number に揃えて受け入れる。
+  type HelperName =
+    | 'kvLpush' | 'kvLpush(atomic)' | 'kvLlen' | 'kvIncr' | 'kvDecr' | 'kvExpire' | 'kvExists' | 'kvDel'
+    | 'kvSet' | 'kvSet(nx)' | 'kvLtrim' | 'kvEval';
+  async function runHelper(name: HelperName): Promise<unknown> {
+    const kv = await import('@/lib/kv');
+    return {
+      kvLpush: () => kv.kvLpush('k', 'v'),
+      'kvLpush(atomic)': () => kv.kvLpush('k', 'v', { trimStart: 0, trimStop: 9, ttlSec: 60 }),
+      kvLlen: () => kv.kvLlen('k'),
+      kvIncr: () => kv.kvIncr('k'),
+      kvDecr: () => kv.kvDecr('k'),
+      kvExpire: () => kv.kvExpire('k', 60),
+      kvExists: () => kv.kvExists(['a']),
+      kvDel: () => kv.kvDel('k'),
+      kvSet: () => kv.kvSet('k', 'v'),
+      'kvSet(nx)': () => kv.kvSet('k', 'v', { nx: true, ttlSec: 60 }),
+      kvLtrim: () => kv.kvLtrim('k', 0, 9),
+      kvEval: () => kv.kvEval('return 1', ['k'], ['a']),
+    }[name]();
+  }
+  const numericHelpers = [
+    'kvLpush', 'kvLpush(atomic)', 'kvLlen', 'kvIncr', 'kvDecr', 'kvExpire', 'kvExists', 'kvDel',
+  ] as const;
+
+  it.each(numericHelpers.flatMap((helper) => [
+    [helper, '{"result":{}}'],
+    [helper, '{"result":{"toString":null,"valueOf":null}}'],
+    [helper, '{"result":true}'],
+    [helper, '{"result":null}'],
+    [helper, '{"result":[1]}'],
+    [helper, '{"result":"x"}'],
+    [helper, '{"result":"1.5"}'],
+    [helper, '{"result":"9007199254740993"}'],
+  ] as const))('%s: 応答 %s は parse_error (数値でない値を ok:true にしない)', async (helper, body) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper(helper)).toEqual({ ok: false, reason: 'parse_error', detail: 'unexpected result type' });
+  });
+
+  it.each(numericHelpers.flatMap((helper) => [
+    [helper, '{"result":5}', 5],
+    [helper, '{"result":0}', 0],
+    [helper, '{"result":-1}', -1],
+    [helper, '{"result":"5"}', 5],
+    [helper, '{"result":"-2"}', -2],
+  ] as const))('%s: 整数の応答 %s は number で返す (整数の文字列も受け入れる)', async (helper, body, value) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper(helper)).toEqual({ ok: true, value });
+  });
+
+  // Codex 2 回目: SET NX に {"result":{}} が来ても claim を「取れた」と読ませない (idempotency の偽成功を断つ)。
+  it.each([
+    ['kvSet(nx)', '{"result":{}}'],
+    ['kvSet(nx)', '{"result":"QUEUED"}'],
+    ['kvSet(nx)', '{"result":1}'],
+    ['kvSet', '{"result":{}}'],
+    ['kvSet', '{"result":null}'],
+    ['kvLtrim', '{"result":{}}'],
+    ['kvLtrim', '{"result":null}'],
+  ] as const)('%s: 応答 %s は parse_error', async (helper, body) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper(helper)).toEqual({ ok: false, reason: 'parse_error', detail: 'unexpected result type' });
+  });
+
+  it.each([
+    ['kvSet(nx)', '{"result":"OK"}', 'OK'],
+    ['kvSet(nx)', '{"result":null}', null],
+    ['kvSet', '{"result":"OK"}', 'OK'],
+    ['kvLtrim', '{"result":"OK"}', 'OK'],
+  ] as const)('%s: 正当な応答 %s はそのまま返す', async (helper, body, value) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper(helper)).toEqual({ ok: true, value });
+  });
+
+  // EVAL の応答は Redis の値 (整数・文字列・null・入れ子の配列) だけ。JSON の object・真偽値はどの script からも返らない。
+  it.each([
+    '{"result":{}}',
+    '{"result":{"toString":null,"valueOf":null}}',
+    '{"result":true}',
+    '{"result":[1,{}]}',
+    '{"result":[["a",[false]]]}',
+  ])('kvEval: 応答 %s は parse_error', async (body) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper('kvEval')).toEqual({ ok: false, reason: 'parse_error', detail: 'unexpected result type' });
+  });
+
+  it.each([
+    ['{"result":1}', 1],
+    ['{"result":-3}', -3],
+    ['{"result":"raw"}', 'raw'],
+    ['{"result":null}', null],
+    ['{"result":[]}', []],
+    ['{"result":[1,"a",[null,["b",2]]]}', [1, 'a', [null, ['b', 2]]]],
+  ] as const)('kvEval: Redis の値 %s はそのまま返す', async (body, value) => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(body))));
+    expect(await runHelper('kvEval')).toEqual({ ok: true, value });
   });
 
   // Codex: INCR 成功・EXPIRE NX 失敗のときの警告出力 (logger → console / Sentry) が投げても kvIncr を reject させず、

@@ -122,6 +122,55 @@ describe('Codex 3: challenge の乱数生成 (randomBytes) が投げる', () => 
   });
 });
 
+// --- Codex 2 回目: 型検証の掛け漏れ (数値・SET の 'OK'・EVAL の応答) ---
+const reply = (body: string) => () => Promise.resolve(new Response(body));
+
+describe('Codex 2-1: 単発 INCR の応答が数値でない', () => {
+  it('{"result":{}} で read limiter は KV 障害と同じく通す (拒否に化けない)', async () => {
+    kvReplies(reply('{"result":{}}'));
+    const { checkReadRateLimit } = await import('@/lib/relay/relayGuards');
+    await expect(checkReadRateLimit('logpay:unknown', 60, 60)).resolves.toBe(true);
+  });
+
+  it('toString / valueOf の無い object でも、read limiter と relay の日次予算は大小比較で投げない', async () => {
+    kvReplies(reply('{"result":{"toString":null,"valueOf":null}}'));
+    const { checkReadRateLimit, checkGasBudget } = await import('@/lib/relay/relayGuards');
+    await expect(checkReadRateLimit('logpay:unknown', 60, 60)).resolves.toBe(true);
+    // 日次予算は INCR 失敗と同じ fail-open (数えていないので refund もしない)。
+    await expect(checkGasBudget(137)).resolves.toEqual({ allowed: true, consumed: false, refundToken: null });
+  });
+});
+
+describe('Codex 2-2: SET NX の応答が "OK" でも null でもない', () => {
+  it('relay の idempotency claim を「取れた」(first) と読まず、fail-safe の duplicate にする', async () => {
+    kvReplies(reply('{"result":{}}'));
+    const { makeIdempotency } = await import('@/lib/relay/relayGuards');
+    const { claimIdempotency } = makeIdempotency('relay:idem:');
+    await expect(claimIdempotency(137, `0x${'1'.repeat(40)}`, `0x${'2'.repeat(64)}`)).resolves.toEqual({
+      status: 'duplicate',
+      txHash: null,
+    });
+  });
+});
+
+describe('Codex 2-3: pending intent の列挙 (EVAL) の応答が配列でない', () => {
+  it.each(['{"result":{}}', '{"result":"x"}', '{"result":[1]}'])(
+    '%s で reconcilePendingPurchases は TypeError で落ちず storage を返す',
+    async (body) => {
+      kvReplies(reply(body));
+      const { reconcilePendingPurchases } = await import('@/lib/x402/purchaseIntent');
+      await expect(reconcilePendingPurchases({ now: 1_800_000_000_000 })).resolves.toBe('storage');
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('正当な空の列挙 ([]) は storage にしない', async () => {
+    kvReplies(reply('{"result":[]}'));
+    const { reconcilePendingPurchases } = await import('@/lib/x402/purchaseIntent');
+    await expect(reconcilePendingPurchases({ now: 1_800_000_000_000 })).resolves.toMatchObject({ checked: 0 });
+  });
+});
+
 describe('Codex 4: KV の送信が文字列化できない値で reject する (errInfo の String(Object.create(null)))', () => {
   it('Agent 購入履歴のセッションは private な 503 (storage_error)', async () => {
     kvReplies(() => Promise.reject(Object.create(null)));
