@@ -214,3 +214,38 @@ it.each([
   expect(onClose).not.toHaveBeenCalled();
   host.remove();
 });
+
+// 上のモーダルが開いていても focus が下 (または body) に残ることがある (AppKit は再表示のとき card の描画前に
+// focus を試みる)。focus の位置ではなく「上に開いたモーダルがあるか」で止め、上が閉じたら元に戻す。
+it.each([
+  ['shadow DOM (body 直下の host)', true],
+  ['light DOM (後ろに描画された portal)', false],
+] as const)('上に開いた aria-modal (%s) がある間は、focus が下や body にあっても Tab / Escape を処理しない', (_label, shadow) => {
+  const onClose = vi.fn();
+  render(<CsvPassModal open onClose={onClose} />);
+  const dialog = screen.getByRole('dialog');
+  const close = within(dialog).getByRole('button', { name: '閉じる' });
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = shadow ? host.attachShadow({ mode: 'open' }) : host;
+  const card = document.createElement('div');
+  card.setAttribute('role', 'alertdialog');
+  card.setAttribute('aria-modal', 'true');
+  card.appendChild(document.createElement('button'));
+  root.appendChild(card);
+
+  for (const target of [close, document.body]) {
+    if (target === close) close.focus();
+    else (document.activeElement as HTMLElement | null)?.blur();
+    expect(fireEvent.keyDown(target, { key: 'Tab' })).toBe(true);
+    fireEvent.keyDown(target, { key: 'Escape' });
+  }
+  expect(onClose).not.toHaveBeenCalled();
+
+  // 上のモーダルが閉じたら (DOM から外れたら)、下の Tab / Escape が戻る。
+  host.remove();
+  close.focus();
+  expect(fireEvent.keyDown(close, { key: 'Tab' })).toBe(false);
+  fireEvent.keyDown(close, { key: 'Escape' });
+  expect(onClose).toHaveBeenCalledOnce();
+});

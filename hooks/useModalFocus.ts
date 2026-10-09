@@ -8,13 +8,27 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
 import { trapModalFocus } from '@/lib/trapModalFocus';
 
-// 上に重なった別のモーダルが focus を持つ間のキーは、そのモーダルに任せる。ウォレット接続の QR
-// (Reown AppKit の w3m-modal・body 直下の shadow DOM に aria-modal の card) は自前で focus と Escape を
-// 扱うので、ここで Tab を引き戻したり Escape で下の購入ダイアログまで閉じたりすると操作できなくなる。
-function ownedByAnotherModal(event: KeyboardEvent, dialog: HTMLElement): boolean {
+const ARIA_MODAL = '[aria-modal="true"]';
+
+// 上に別のモーダルが開いている間のキーは、そのモーダルに任せる。ウォレット接続の QR (Reown AppKit の
+// w3m-modal・body 直下の shadow DOM に aria-modal の card) は自前で focus と Escape を扱うので、ここで Tab を
+// 引き戻したり Escape で下の購入ダイアログまで閉じたりすると操作できなくなる。
+// focus の位置だけでは決められない: AppKit は開き直すとき card の描画前に focus を試みるので、focus が下の
+// ダイアログや body に残ることがある。そこで「自分より上に開いた aria-modal が DOM にあるか」でも見る
+// (このリポのダイアログは閉じたら DOM から外す・AppKit も閉じると card を描画しない)。
+function anotherModalOnTop(event: KeyboardEvent, dialog: HTMLElement): boolean {
+  // focus が別の aria-modal の中にある (shadow DOM の中も composedPath で辿る)。
   for (const node of event.composedPath()) {
-    if (node === dialog) return false;
+    if (node === dialog) break;
     if (node instanceof Element && node.getAttribute('aria-modal') === 'true') return true;
+  }
+  // 自分より後ろ (上に重なる portal・中で開いた入れ子) に aria-modal がある。
+  for (const other of document.querySelectorAll(ARIA_MODAL)) {
+    if (other !== dialog && dialog.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING) return true;
+  }
+  // body 直下の要素の shadow DOM に aria-modal がある (AppKit の w3m-modal は body の末尾に置かれる)。
+  for (const element of document.body.children) {
+    if (element.shadowRoot?.querySelector(ARIA_MODAL)) return true;
   }
   return false;
 }
@@ -49,7 +63,7 @@ export function useModalFocus(
     function onKey(e: KeyboardEvent) {
       // IME の変換操作 (候補の取り消し等) でダイアログを閉じない・Tab を奪わない。
       if (e.isComposing || e.keyCode === 229) return;
-      if (!dialog || ownedByAnotherModal(e, dialog)) return;
+      if (!dialog || anotherModalOnTop(e, dialog)) return;
       if (e.key === 'Escape') onEscapeRef.current?.();
       trapModalFocus(e, dialog);
     }

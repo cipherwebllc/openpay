@@ -588,6 +588,32 @@ describe('CreatorStorePurchaseFlow: focus 管理', () => {
     walletModal.remove();
     opener.remove();
   });
+
+  it('ウォレット接続の QR を開き直して focus が購入側に残っても、QR が開いている間は Tab / Escape を処理しない', () => {
+    state.phase = 'idle';
+    state.quote = null;
+    const { onClose, opener } = renderOpenable();
+    const close = screen.getByRole('button', { name: '閉じる' });
+    // AppKit は body 直下の w3m-modal (shadow DOM) に aria-modal の card を出す。再表示では card の描画前に
+    // focus を試みるため、focus は購入ダイアログに残る。
+    const host = document.createElement('w3m-modal');
+    const card = document.createElement('div');
+    card.setAttribute('role', 'alertdialog');
+    card.setAttribute('aria-modal', 'true');
+    card.tabIndex = 0;
+    host.attachShadow({ mode: 'open' }).appendChild(card);
+    document.body.appendChild(host);
+    close.focus();
+    expect(fireEvent.keyDown(close, { key: 'Tab' })).toBe(true);
+    expect(close).toHaveFocus();
+    fireEvent.keyDown(close, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+    // QR を閉じたら購入ダイアログの Escape が戻る。
+    host.remove();
+    fireEvent.keyDown(close, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledOnce();
+    opener.remove();
+  });
 });
 
 
