@@ -210,10 +210,12 @@ function RegisterModeContent({
     : '';
   const resolveQuery = useResolveAddress(receiverName);
   useEffect(() => {
+    // 再解決に失敗しても react-query は前回の解決結果 (data) を残す。名前の向き先が変わったあとに
+    // 失敗した場合の古いアドレスを着金先にしない (AddressInput と同じ扱い・第 7 回レビュー G1)。
     setResolvedReceiver(
-      receiverName && resolveQuery.data ? resolveQuery.data.address : null,
+      receiverName && !resolveQuery.error && resolveQuery.data ? resolveQuery.data.address : null,
     );
-  }, [receiverName, resolveQuery.data]);
+  }, [receiverName, resolveQuery.data, resolveQuery.error]);
   // 受取先の欄 (AddressInput) も名前を解決して知らせてくるが、レジは上の useResolveAddress を正本にする
   // (同じ hook で同じ値・二重に state を持たない)。
   const ignoreResolved = useCallback(() => {}, []);
