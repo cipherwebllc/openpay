@@ -5,6 +5,22 @@ import { describe, expect, it } from 'vitest';
 
 const read = (file: string) => readFileSync(file, 'utf8');
 
+// Collect flags from README lines by their production declaration. ON wording (live on mainnet / live in
+// production / production sets …) is kept apart from OFF wording (production sets `0` / off in production /
+// off on mainnet): a bare `production sets` match counted "production sets `0`" as ON (found when the
+// register standard-payment fee was abolished on 2026-10-07).
+const ON_DECLARATION = /live on mainnet|live in production|production sets (?!`0`)/i;
+const OFF_DECLARATION = /production sets? (?:`[A-Z0-9_]+` to )?`0`|off in production|off on mainnet/i;
+const flagsDeclared = (readme: string, declaration: RegExp) =>
+  [
+    ...new Set(
+      readme
+        .split('\n')
+        .filter((line) => declaration.test(line))
+        .flatMap((line) => line.match(/NEXT_PUBLIC_ENABLE_[A-Z0-9_]+/g) ?? []),
+    ),
+  ].sort();
+
 describe('production-flag Playwright coverage (F13)', () => {
   it('builds and tests a second CI job that fails on production-flag regressions', () => {
     const workflow = read('.github/workflows/e2e.yml');
@@ -34,10 +50,7 @@ describe('production-flag Playwright coverage (F13)', () => {
       expect(example).toMatch(new RegExp(`^${key}=`, 'm'));
     }
     // Both the curated env table and feature prose document production light-up.
-    const liveFlags = read('README.md').split('\n')
-      .filter((line) => /live on mainnet|live in production|production sets/i.test(line))
-      .flatMap((line) => line.match(/NEXT_PUBLIC_ENABLE_[A-Z0-9_]+/g) ?? []);
-    const expectedFlags = [...new Set(liveFlags)].sort();
+    const expectedFlags = flagsDeclared(read('README.md'), ON_DECLARATION);
     const enabledFlags = Object.keys(vector).filter((key) => key.startsWith('NEXT_PUBLIC_ENABLE_')).sort();
     // README can lag the user-confirmed production vector; require a superset.
     expect(enabledFlags).toEqual(expect.arrayContaining(expectedFlags));
@@ -46,6 +59,31 @@ describe('production-flag Playwright coverage (F13)', () => {
     expect(vector.NEXT_PUBLIC_RECOVER_FEE_BPS).toBe('100');
     expect(vector.NEXT_PUBLIC_RELAY_GAS_FEE_JPYC).toBe('2');
     expect(vector.NEXT_PUBLIC_JPYC_FORWARDER_AMOY).toMatch(/^0x[0-9a-f]{40}$/);
+  });
+
+  it('keeps flags the README declares OFF in production out of the vector', () => {
+    // Reverse fence: building a production-OFF flag (e.g. the register fee abolished on 2026-10-07) with '1'
+    // would pin UI that production no longer renders (such as the abolished fee row) as the production shape.
+    const readme = read('README.md');
+    const offFlags = flagsDeclared(readme, OFF_DECLARATION);
+    expect(offFlags, 'the README states at least one production-OFF flag').toContain('NEXT_PUBLIC_ENABLE_REGISTER_FEE');
+    // A flag declared both ON and OFF is ambiguous: fix the README wording rather than guess.
+    const onFlags = flagsDeclared(readme, ON_DECLARATION);
+    expect(offFlags.filter((flag) => onFlags.includes(flag))).toEqual([]);
+    const vector = parseEnv(read('e2e/prodFlags.env'));
+    for (const flag of offFlags) expect(vector[flag], `${flag} is OFF in production`).toBeUndefined();
+  });
+
+  it('separates ON declarations from OFF ones in the README wording', () => {
+    const on = (line: string) => ON_DECLARATION.test(line);
+    const off = (line: string) => OFF_DECLARATION.test(line);
+    expect(on('**Live on mainnet** (production sets `1`); code default **off**.')).toBe(true);
+    expect(on('**live in production** (production sets the flag + VAPID keys)')).toBe(true);
+    expect(on('**Off on mainnet since 2026-10-07** (that fee was abolished; production sets `0`)')).toBe(false);
+    expect(off('**Off on mainnet since 2026-10-07** (that fee was abolished; production sets `0`)')).toBe(true);
+    expect(off('(flag-gated; off in production since 2026-10-07)')).toBe(true);
+    expect(off('production set `NEXT_PUBLIC_ENABLE_REGISTER_FEE` to `0`')).toBe(true);
+    expect(off('**Live on mainnet** (production sets `1`); code default **off**.')).toBe(false);
   });
 
   it('uses unquoted single-line values so GITHUB_ENV and parseEnv agree', () => {
