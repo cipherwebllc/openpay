@@ -621,5 +621,58 @@ describe('QrGenerator × お店の端末で送る (flag ON)', () => {
       expect(sd.releaseForNormal).not.toHaveBeenCalled();
       expect(screen.queryByRole('dialog')).toBeNull();
     });
+
+    // Codex 再レビュー P1: QR を出した後に再解決が失敗したら、画面から消えるだけ (qrModalOpen・storeQr・受け渡しが残る)
+    // にせず「閉じる」と同じ終了処理を通す。残すと、受取先を B に直した瞬間に A 宛の受け渡しの QR が勝手に出直る。
+    const OTHER = '0x1111111111111111111111111111111111111111';
+    async function openThenFail(user: ReturnType<typeof userEvent.setup>) {
+      const r = render(<QrGenerator />);
+      await user.type(await screen.findByPlaceholderText('1,000'), '500');
+      await user.click((await screen.findAllByRole('button', { name: /QRコードを表示する/ }))[0]);
+      await waitFor(() => expect(shownQr()).not.toBeNull());
+      // 再解決の失敗 (react-query は前回の data を残す)
+      ens.error = new Error('rpc down');
+      r.rerender(<QrGenerator />);
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    }
+    async function changeReceiverTo(user: ReturnType<typeof userEvent.setup>, addr: string) {
+      // 解決できていないので会計画面に受取先の欄が出る → そこで直す
+      const field = await screen.findByPlaceholderText(/0x\.\.\./);
+      await user.clear(field);
+      await user.paste(addr);
+      await new Promise((r) => setTimeout(r, 0));
+    }
+
+    it('お店負担: QR を出した後に再解決が失敗したら受け渡しを締め切り、受取先を B に直しても A 宛の QR を出し直さない', async () => {
+      const user = userEvent.setup();
+      seed({ receiver: 'shop.eth' });
+      await openThenFail(user);
+      expect(sd.start).toHaveBeenCalledTimes(1);
+      // 閉じたときと同じ終了処理 (受け渡しの締め切りは 1 回だけ)
+      await waitFor(() => expect(sd.stop).toHaveBeenCalledTimes(1));
+      await changeReceiverTo(user, OTHER);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(shownQr()).toBeNull();
+      expect(sd.start).toHaveBeenCalledTimes(1);
+      expect(sd.stop).toHaveBeenCalledTimes(1);
+      // 押し直したら B 宛で新しい受け渡しを作る (正常時の順序は変えない)
+      await user.click(screen.getAllByRole('button', { name: /QRコードを表示する/ })[0]);
+      await waitFor(() => expect(shownQr()).not.toBeNull());
+      expect(sd.start).toHaveBeenLastCalledWith(OTHER, 500n * 10n ** 18n, 80002);
+      expect(new URL(shownQr()!).searchParams.get('to')?.toLowerCase()).toBe(OTHER.toLowerCase());
+    });
+
+    it('通常の QR: 出した後に再解決が失敗したら閉じ、受取先を直しても勝手に開き直さない', async () => {
+      const user = userEvent.setup();
+      seed({ receiver: 'shop.eth', storePays: false });
+      await openThenFail(user);
+      expect(sd.releaseForNormal).toHaveBeenCalledTimes(1);
+      await changeReceiverTo(user, OTHER);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(shownQr()).toBeNull();
+      // 受け渡しは無いので締め切るものがない・押し直すまで開かない
+      expect(sd.stop).not.toHaveBeenCalled();
+      expect(sd.releaseForNormal).toHaveBeenCalledTimes(1);
+    });
   });
 });

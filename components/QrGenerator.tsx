@@ -732,6 +732,18 @@ export function QrGenerator() {
       setStoreQr(null);
     }
   }
+  // QR の画面を出せる条件 (下の QrPreviewModal の描画と同じ 1 つの判断)。
+  const qrShowable = !!payUrl && (!storeQrMode || storeQr !== null);
+  // 出している間に QR を出せなくなった (受取先の名前の再解決の失敗 = 着金先を確かめられない等) ときは、画面から消える
+  // だけにせず「閉じる」と同じ終了処理を通す (モーダルの状態・お店負担の QR の写し・受け渡しの締め切り)。残したままだと、
+  // 受取先を直した瞬間に前の受取先宛の受け渡しの QR が勝手に出直る (Codex 再レビュー P1)。閉じると qrModalOpen が
+  // false になるので、同じ失敗で 2 回は走らない。
+  useEffect(() => {
+    if (!qrModalOpen || qrShowable) return;
+    closeQrModal();
+    // closeQrModal は描画ごとに作り直すが、中身は state の setter・ref・device だけを使う。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrModalOpen, qrShowable]);
   async function reissueStoreQr() {
     // 出し直す間は前の (薄くした) QR のまま。出せなければ閉じる (通常の QR に変えない)。
     const opened =
@@ -1004,8 +1016,8 @@ export function QrGenerator() {
       </ShopSettingsSheet>
 
       {/* 全画面プレビュー (ポスター調 + 印刷/コピー/SVG/PNG + × 閉じる)。決済QR/レジ共通。 */}
-      {/* お店負担を選んでいる間は、お店負担の QR (受け渡し済み) か、店員が選んだ通常の QR だけを出す。 */}
-      {payUrl && (!storeQrMode || storeQr) && (
+      {/* お店負担を選んでいる間は、お店負担の QR (受け渡し済み) か、店員が選んだ通常の QR だけを出す (qrShowable)。 */}
+      {qrShowable && (
         <QrPreviewModal
           open={qrModalOpen}
           convertExpired={convertExpired || storeQrDimmed}
