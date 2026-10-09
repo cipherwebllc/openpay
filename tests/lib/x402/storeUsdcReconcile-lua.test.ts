@@ -311,6 +311,39 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     await expectSettled();
   });
 
+  // Codex 2 回目 P2: RPC のページ読み取りが混在し、先のページに旧 hash (旧フォーク)・後のページに正規チェーンで
+  // 支払い済みの replacement が返る。先の候補の pending で打ち切ると replacement が検証されず、課金済みの購入が
+  // pending のまま残る → pending の候補は保留して残りを検証し、採用できる候補で確定する。
+  function mixedPages(client: StoreUsdcPublicClient) {
+    vi.mocked(client.getLogs).mockImplementation(async ({ fromBlock, toBlock }) => {
+      if (100n >= fromBlock && 100n <= toBlock) return [{ transactionHash: OLD }];
+      if (2_100n >= fromBlock && 2_100n <= toBlock) return [{ transactionHash: TX }];
+      return [];
+    });
+  }
+
+  it('verifies a later-page replacement even when an earlier-page candidate is noncanonical', async () => {
+    const intent = await active();
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, old: 'noncanonical' });
+    mixedPages(client);
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'settled' });
+    expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
+    expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX });
+    await expectSettled();
+  });
+
+  it('retries from the earliest deferred candidate page when every candidate is pending', async () => {
+    const intent = await active();
+    const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, old: 'noncanonical', bad: 'canonical' });
+    mixedPages(client);
+    expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
+    expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: OLD });
+    expect(client.getTransactionReceipt).toHaveBeenCalledWith({ hash: TX });
+    expect(await getStoreUsdcIntent(SALT)).toMatchObject({ state: 'indeterminate', reconcileFromBlock: '90', nextReconcileAt: CHECKED_AT + STORE_USDC_RECONCILE_RETRY_MS });
+    expect(rawIntent().txHash).toBeUndefined();
+    expect(h.store!.strings.has(`store:own:${PAYER.toLowerCase()}:${ID}`)).toBe(false);
+  });
+
   it('advances past conclusively mismatched candidate evidence', async () => {
     const intent = await active();
     const client = chain(intent.nonce, { latest: 50_090n, eventBlock: 2_100n, bad: 'amount' });

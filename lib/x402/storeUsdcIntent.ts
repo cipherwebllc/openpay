@@ -1402,10 +1402,11 @@ export async function reconcileStoreUsdcIntent(
     raw = JSON.stringify(consumed);
   }
 
+  // null = この候補は結論なし (次の候補へ) / deferredPageStart = 候補は pending で採らず、そのページ位置を保留。
   const finalizeCandidate = async (
     txHash: Hex,
     candidatePageStart?: bigint,
-  ): Promise<ReconcileStoreUsdcResult | null> => {
+  ): Promise<ReconcileStoreUsdcResult | null | { deferredPageStart: bigint }> => {
     // 候補 1 件の照合の前に残り時間を見る。足りなければ照合せず、候補のページ (保存済み hash なら現 cursor) から延期。
     const verifyClient = rpcClient();
     if (verifyClient === null) return retry(candidatePageStart);
@@ -1424,14 +1425,17 @@ export async function reconcileStoreUsdcIntent(
         : null;
     }
     if (verification.state === 'pending') {
+      // 候補 (ページ走査中) は理由を問わず採らない (未払いを解錠しない・terminal にしない)。ただしここで
+      // 再試行に入らず、候補のページ位置を保留して**残りの候補の検証を続ける** — RPC のページ読み取りが混在し、
+      // 先のページに旧 hash (旧フォーク/finality 待ち)・後のページに正規チェーンで支払い済みの replacement が
+      // 返るとき、先の候補で打ち切ると発見済みの replacement が検証されず、同じ応答が続く間は課金済みの購入が
+      // pending のまま残る波及を断つ (Codex 2 回目 P2)。採用できる候補が無ければ呼び出し側が最も早い保留ページから再試行する。
+      if (candidatePageStart !== undefined) return { deferredPageStart: candidatePageStart };
       // 保存 hash の完全一致 receipt が finality 待ち ('finality') なら、同じ hash の再探索は不要。
       // receipt 欠落 ('receipt') と「receipt のブロックが今の正規チェーンに無い」('canonical'・旧フォーク) の
       // 保存 hash は replacement 探索へ進める — 同じ nonce の replacement が正規チェーンで支払い済みなのに、
-      // 古い receipt を返し続ける RPC のせいで課金済みの購入を解錠できない波及を断つ (#776 Codex P2)。
-      // 候補 (ページ走査中) は理由を問わず採らずに、そのページから再試行する (未払いを解錠しない・terminal にしない)。
-      return candidatePageStart !== undefined || verification.reason === 'finality'
-        ? retry(candidatePageStart)
-        : null;
+      // 古い receipt を返し続ける RPC のせいで課金済みの購入を解錠できない波及を断つ (Codex 1 回目 P2)。
+      return verification.reason === 'finality' ? retry() : null;
     }
     if (intent.txHash !== txHash) {
       const adopted = await adoptReconciledTransaction({ intent, txHash, now });
@@ -1466,7 +1470,8 @@ export async function reconcileStoreUsdcIntent(
 
   if (intent.txHash) {
     const resolved = await finalizeCandidate(intent.txHash);
-    if (resolved) return resolved;
+    // 保存 hash はページ位置を持たないので保留にはならない (null か結論)。
+    if (resolved && !('deferredPageStart' in resolved)) return resolved;
   }
   const headClient = rpcClient();
   if (headClient === null) return retry();
@@ -1490,11 +1495,19 @@ export async function reconcileStoreUsdcIntent(
   }));
   // 途中ページの RPC 障害/timeout では、取得済みページの候補を照合してから失敗したページの先頭 (nextFromBlock) を
   // cursor に保存する (未検証の候補を飛ばさず、同じ範囲での停滞もしない・B4 follow-up 2)。
+  // 候補は走査順 (早いページから) に並ぶので、最初に保留した候補のページが最も早い再試行位置。
+  let deferredPageStart: bigint | undefined;
   for (const [txHash, candidatePageStart] of scan.candidates) {
     const resolved = await finalizeCandidate(txHash, candidatePageStart);
-    if (resolved) return resolved;
+    if (resolved === null) continue;
+    if ('deferredPageStart' in resolved) {
+      deferredPageStart ??= resolved.deferredPageStart;
+      continue;
+    }
+    return resolved;
   }
-  return retry(scan.nextFromBlock);
+  // 採用できる候補が無ければ、保留した候補の最も早いページから (保留が無ければ走査の続きから) 再試行する。
+  return retry(deferredPageStart ?? scan.nextFromBlock);
 }
 
 // 両 ZSET の型/score を書込前に検査し、隔離先の障害が pending 証拠の消失へ波及しないようにする。
