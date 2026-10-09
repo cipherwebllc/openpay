@@ -9,6 +9,7 @@
 export type NewsIndexEntry = { id: string; date: string };
 
 export const NEWS_INDEX: readonly NewsIndexEntry[] = [
+  { id: 'discount-register-qr-mobile-order-2026-10-09', date: '2026-10-09' },
   { id: 'store-pays-gas-kaia-avalanche-2026-10-08', date: '2026-10-08' },
   { id: 'store-pays-gas-2026-10-08', date: '2026-10-08' },
   { id: 'invoice-receipt-2026-10-07', date: '2026-10-07' },
