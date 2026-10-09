@@ -14,11 +14,12 @@ export type StorefrontDiscount =
 export const STOREFRONT_DISCOUNT_AMOUNT_MAX = 100_000;
 
 /**
- * 値引き後に残す支払額の下限 (JPYC wei = 2 JPYC)。受注 (notify) は店舗の着金が 1 JPYC (ORDER_DUST_FLOOR_WEI) 未満の
- * 注文を受け付けない。店舗負担の利用料 (最大 3%) を引かれても着金が 1 JPYC を割らないよう、値引きで支払額を
- * 2 JPYC 未満にしない (払ったのに受注が残らない注文を値引きで作らない)。
+ * 値引き後に残す支払額の下限 (JPYC wei = 10 JPYC)。受注 (notify) は店舗の着金が 1 JPYC (ORDER_DUST_FLOOR_WEI) 未満の
+ * 注文を受け付けない。店舗負担の利用料 (モバイル注文の 1〜3%・利用料 flag OFF の recover では固定 2 JPYC のフロア) を
+ * 引かれても着金が 1 JPYC を割らないよう、値引きで支払額を 10 JPYC 未満にしない (払ったのに受注が残らない注文を
+ * 値引きで作らない)。
  */
-export const STOREFRONT_DISCOUNT_MIN_PAYABLE_WEI = 2n * ORDER_DUST_FLOOR_WEI;
+export const STOREFRONT_DISCOUNT_MIN_PAYABLE_WEI = 10n * ORDER_DUST_FLOOR_WEI;
 
 /** untrusted な値 (POST /api/handle・KV) を店舗の値引きへ。形が正しければ正規化した値、それ以外は null。 */
 export function validStorefrontDiscount(raw: unknown): StorefrontDiscount | null {
@@ -44,7 +45,7 @@ export function validStorefrontDiscount(raw: unknown): StorefrontDiscount | null
 
 /**
  * 小計 (wei) に店舗の値引きを当てた額 (wei)。率は円未満切り捨て・額は小計を下回るときだけ。値引き後の支払額が
- * 2 JPYC (STOREFRONT_DISCOUNT_MIN_PAYABLE_WEI) 未満になるなら当てない。値引きが無い・当てられないときは 0n (= 定価)。
+ * 10 JPYC (STOREFRONT_DISCOUNT_MIN_PAYABLE_WEI) 未満になるなら当てない。値引きが無い・当てられないときは 0n (= 定価)。
  * モバイル注文は JPYC (18 桁) だけ。
  */
 export function storefrontDiscountWei(
