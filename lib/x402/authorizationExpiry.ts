@@ -71,3 +71,47 @@ export async function authorizationExpiredUnused(input: {
     return false;
   }
 }
+
+export type AuthorizationExpiryObservation = 'expired' | 'live' | 'unknown';
+
+/**
+ * relay status 用の「期限切れ未使用」の観測 (tri-state)。手順は authorizationExpiredUnused と同じ
+ * (finalized ブロック → その番号に固定した authorizationState → canonical hash の再確認) で、結果を 3 値で返す:
+ *   'expired' = finalized の時刻が validBefore を過ぎ、その時点で nonce は未使用 (以後どのブロックでも成立しない)
+ *   'live'    = finalized の時刻がまだ validBefore 以下 (チェーン上ではまだ期限前・state は読まない)
+ *   'unknown' = 読めない・揃わない・不整合 (証明にならない)
+ * 端末の時計も latest ブロックも使わない (latest は used と別の読み取りになり、バックエンドの遅れや reorg で
+ * 「期限後の時刻」と「期限前の unused」が混ざる・第 7 回レビュー A6 再レビュー)。txHash の照合は持たない
+ * (relay status は idem に hash 記録が無い分岐でだけ呼ぶ)。
+ */
+export async function observeAuthorizationExpiry(input: {
+  client: AuthorizationExpiryClient;
+  token: Address;
+  payer: Address;
+  nonce: Hex;
+  validBefore: bigint;
+}): Promise<AuthorizationExpiryObservation> {
+  try {
+    const block = await input.client.getBlock({ blockTag: 'finalized' });
+    if (
+      typeof block.number !== 'bigint' ||
+      typeof block.hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(block.hash) ||
+      typeof block.timestamp !== 'bigint'
+    ) return 'unknown';
+    // authorizationExpiredUnused と同じ厳密な比較 (timestamp == validBefore はまだ期限前)。
+    if (block.timestamp <= input.validBefore) return 'live';
+    const used = await input.client.readContract({
+      address: input.token,
+      abi: AUTHORIZATION_STATE_ABI,
+      functionName: 'authorizationState',
+      args: [input.payer, input.nonce],
+      blockNumber: block.number,
+    });
+    const canonical = await input.client.getBlock({ blockNumber: block.number });
+    if (canonical.hash !== block.hash || used !== false) return 'unknown';
+    return 'expired';
+  } catch {
+    // finality/archive/canonical の読み取り障害は証明にしない (呼出元は従来の unused 応答を返す)。
+    return 'unknown';
+  }
+}

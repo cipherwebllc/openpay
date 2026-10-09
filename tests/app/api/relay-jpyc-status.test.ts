@@ -24,7 +24,9 @@ const h = vi.hoisted(() => ({
   used: false,
   logHash: null as Hex | null,
   rpcThrows: false,
-  chainTime: null as bigint | null,
+  expiry: 'unknown' as 'expired' | 'live' | 'unknown',
+  expiryDelayMs: 0,
+  expiryThrows: false,
   receipt: { status: 'success', logs: [] } as Receipt,
   receipts: new Map<Hex, Receipt | Error>(),
   getReceipt: vi.fn(),
@@ -66,9 +68,10 @@ vi.mock('@/lib/relay/relayProvider', () => ({
     return h.used;
   }),
   findAuthorizationUsedTransactionHash: vi.fn(async () => h.logHash),
-  readLatestBlockTimestamp: vi.fn(async () => {
-    if (h.chainTime === null) throw new Error('block read failed');
-    return h.chainTime;
+  readAuthorizationExpiry: vi.fn(async () => {
+    if (h.expiryThrows) throw new Error('finality unavailable');
+    if (h.expiryDelayMs > 0) await new Promise((r) => setTimeout(r, h.expiryDelayMs));
+    return h.expiry;
   }),
 }));
 vi.mock('@/lib/relay/forwarderConfig', () => ({
@@ -103,7 +106,7 @@ import {
 } from '@/lib/relay/relayGuards';
 import {
   readAuthorizationUsed,
-  readLatestBlockTimestamp,
+  readAuthorizationExpiry,
   findAuthorizationUsedTransactionHash,
 } from '@/lib/relay/relayProvider';
 import { recoverTransferAuthorizationSigner } from '@/lib/jpycEip3009';
@@ -242,7 +245,9 @@ beforeEach(() => {
   h.enabled = true;
   h.provider = 'self-host';
   h.rateAllowed = true;
-  h.chainTime = null;
+  h.expiry = 'unknown';
+  h.expiryDelayMs = 0;
+  h.expiryThrows = false;
   h.idem = { state: 'missing' };
   h.used = false;
   h.logHash = null;
@@ -304,21 +309,75 @@ describe('POST /api/relay/jpyc/status', () => {
     expect(await res.json()).toEqual({ ok: true, state: 'unused' });
   });
 
-  // 第 7 回レビュー A6: 期限切れを端末の時計でなくチェーンの時刻で判定できるよう、unused に
-  // 「used を読む前の最新ブロック時刻」を付ける (読めなければ付けない = 従来の応答)。
-  it('unused には used を読む前に取った最新ブロック時刻 (chainTime) を付ける', async () => {
-    h.chainTime = 1_800_000_000n;
-    const res = await POST(req());
-    expect(await res.json()).toEqual({ ok: true, state: 'unused', chainTime: '1800000000' });
-    expect(vi.mocked(readLatestBlockTimestamp).mock.invocationCallOrder[0])
-      .toBeLessThan(vi.mocked(readAuthorizationUsed).mock.invocationCallOrder[0]);
-  });
+  // 第 7 回レビュー A6 (再レビュー反映): 期限切れの判定を端末の時計から外すため、nonce lookup に署名の期限
+  // (validBefore) を受け、unused かつ hash 記録が無いときだけ「期限切れ未使用の証明」(finalized の時刻 → その番号に
+  // 固定した authorizationState → canonical hash) を取り expiry: 'expired' | 'live' を付ける。証明が取れなければ付けない。
+  describe('unused の期限切れ証明 (expiry)', () => {
+    const VALID_BEFORE = '1800000000';
+    const withExpiry = () => req({ ...nonceIntent(), validBefore: VALID_BEFORE });
 
-  it('hash 記録があって unused (置換/未確定) は chainTime があっても indeterminate のまま', async () => {
-    h.chainTime = 1_800_000_000n;
-    h.idem = { state: 'hash', txHash: HASH };
-    const res = await POST(req());
-    expect(await res.json()).toEqual({ ok: true, state: 'indeterminate' });
+    it.each(['expired', 'live'] as const)('証明が %s なら unused に expiry を付け、署名の期限をそのまま渡す', async (expiry) => {
+      h.expiry = expiry;
+      const res = await POST(withExpiry());
+      expect(await res.json()).toEqual({ ok: true, state: 'unused', expiry });
+      expect(readAuthorizationExpiry).toHaveBeenCalledWith(80002, TOKEN, FROM, NONCE, 1800000000n);
+    });
+
+    it('証明が unknown なら従来どおりの unused (expiry なし)', async () => {
+      const res = await POST(withExpiry());
+      expect(await res.json()).toEqual({ ok: true, state: 'unused' });
+    });
+
+    it('validBefore の無い nonce lookup は証明を読まず従来どおり', async () => {
+      const res = await POST(req(nonceIntent()));
+      expect(await res.json()).toEqual({ ok: true, state: 'unused' });
+      expect(readAuthorizationExpiry).not.toHaveBeenCalled();
+    });
+
+    it('証明の読み取りが遅い (3 秒超) ときは証明なしの unused を従来どおり返す', async () => {
+      vi.useFakeTimers();
+      try {
+        h.expiry = 'expired';
+        h.expiryDelayMs = 60_000;
+        const pending = POST(withExpiry());
+        await vi.advanceTimersByTimeAsync(3_000);
+        const res = await pending;
+        expect(await res.json()).toEqual({ ok: true, state: 'unused' });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('証明の読み取りが失敗しても unused を従来どおり返す (status 本体へ波及させない)', async () => {
+      h.expiryThrows = true;
+      const res = await POST(withExpiry());
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, state: 'unused' });
+    });
+
+    it('hash 記録があって unused (置換/未確定) は証明を読まず indeterminate のまま', async () => {
+      h.expiry = 'expired';
+      h.idem = { state: 'hash', txHash: HASH };
+      const res = await POST(withExpiry());
+      expect(await res.json()).toEqual({ ok: true, state: 'indeterminate' });
+      expect(readAuthorizationExpiry).not.toHaveBeenCalled();
+    });
+
+    it('settled 経路 (used) は証明を読まない', async () => {
+      h.expiry = 'expired';
+      h.used = true;
+      h.logHash = LOG_HASH;
+      const res = await POST(withExpiry());
+      expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: LOG_HASH });
+      expect(readAuthorizationExpiry).not.toHaveBeenCalled();
+    });
+
+    it.each([['abc'], [12], ['-1'], ['']])('不正な validBefore (%j) は 400', async (validBefore) => {
+      const res = await POST(req({ ...nonceIntent(), validBefore }));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error: 'invalid_payload' });
+      expect(readIdempotency).not.toHaveBeenCalled();
+    });
   });
 
   it('nonce lookup は署名なしで同じ read-only 状態を照会する', async () => {

@@ -22,7 +22,7 @@ import {
   jpycAddressFor,
   PROVIDER,
   readAuthorizationUsed,
-  readLatestBlockTimestamp,
+  readAuthorizationExpiry,
   findAuthorizationUsedTransactionHash,
   SUPPORTED_CHAINS,
 } from '@/lib/relay/relayProvider';
@@ -54,26 +54,52 @@ type ParsedIntent = {
   transfer?: Pick<Eip3009Authorization, 'to' | 'value'>;
   // 署名の有効期限 (tx 探しを、署名が使われうる時刻のブロックに絞るため)。再読み込み後の照会 (nonce だけ) には無い。
   validity?: { validAfter: bigint; validBefore: bigint };
+  // nonce lookup が任意で送る署名の期限。unused のとき「期限切れ未使用の証明」(expiry) をチェーンで取るためだけに使う。
+  expiryValidBefore?: bigint;
   verifySignature: () => Promise<Address>;
 };
 
 type StatusBody =
   | { ok: true; state: 'settled'; txHash: Hex | null }
-  // chainTime: authorizationState を読む前の最新ブロック時刻 (unix 秒・10 進)。読めなかったときは付けない。
-  | { ok: true; state: 'unused'; chainTime?: string }
+  // expiry: 署名の期限切れをチェーンで観測した結果。'expired' = finalized の時刻が validBefore を過ぎ、その番号で
+  // nonce が未使用 (以後どのブロックでも成立しない) / 'live' = finalized の時刻がまだ期限前。証明が取れないときは付けない。
+  | { ok: true; state: 'unused'; expiry?: 'expired' | 'live' }
   | { ok: true; state: 'indeterminate' };
 
 const json = (body: StatusBody) => NextResponse.json(body, { status: 200 });
 
-// 署名の期限切れはチェーンの時計で判定させる (端末の時計が進んでいると、まだ有効な署名を期限切れと
-// 誤って二重払いの防止を外す・第 7 回レビュー A6)。読めなくても status の本体は従来どおり返す
-// (クライアントは端末の時計に戻る = 時刻の付帯読み取りの障害を status へ波及させない)。
-async function chainTimeOrNull(chainId: number): Promise<bigint | null> {
+// 期限切れ未使用の証明 (finalized → 番号固定の state → canonical hash) にかける上限。used/settled の経路とは別で、
+// unused かつ hash 記録が無い分岐でだけ読む。
+const EXPIRY_PROOF_TIMEOUT_MS = 3_000;
+
+// 署名の期限切れは端末の時計でなくチェーンで証明する (端末の時計が進んでいると、まだ有効な署名を期限切れと
+// 誤って二重払いの防止を外す・第 7 回レビュー A6)。この付帯読み取り (finality/archive の RPC) が遅い・失敗しても
+// status 本体の unused 応答へ波及させない: 上限で打ち切り、証明なしの従来の unused を返す (クライアントは端末の
+// 時計に戻らず期限まで unknown のまま = 安全側)。
+async function expiryProofOrUndefined(
+  parsed: ParsedIntent & { expiryValidBefore: bigint },
+  token: Address,
+): Promise<'expired' | 'live' | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<'unknown'>((resolve) => {
+    timer = setTimeout(() => resolve('unknown'), EXPIRY_PROOF_TIMEOUT_MS);
+  });
   try {
-    return await readLatestBlockTimestamp(chainId);
-  } catch {
-    return null;
+    const observed = await Promise.race([
+      readAuthorizationExpiry(parsed.chainId, token, parsed.from, parsed.nonce, parsed.expiryValidBefore),
+      timeout,
+    ]);
+    return observed === 'unknown' ? undefined : observed;
+  } catch (error) {
+    logger.warn('relay.jpyc.status.expiry_unreadable', { chainId: parsed.chainId, error });
+    return undefined;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+function hasExpiryValidBefore(parsed: ParsedIntent): parsed is ParsedIntent & { expiryValidBefore: bigint } {
+  return parsed.expiryValidBefore !== undefined;
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
@@ -128,9 +154,6 @@ export async function POST(req: Request): Promise<NextResponse> {
         { status: 400 },
       );
     }
-    // used を読む「前」の最新ブロック時刻。これが validBefore 以上で、その後に読んだ used が false なら、
-    // 以後のどのブロックでもこの署名は使えない (ブロック時刻は単調増加・期限後は transferWithAuthorization が revert)。
-    const chainTime = await chainTimeOrNull(parsed.chainId);
     const used = await readAuthorizationUsed(
       parsed.chainId,
       token,
@@ -141,7 +164,9 @@ export async function POST(req: Request): Promise<NextResponse> {
       // broadcast 済み hash がある場合、unused を新しい支払いの許可に使うと二重払いへ
       // 波及しうる。未確定/置換を区別できない間は既存 indeterminate に閉じる。
       if (idem.state === 'hash') return json({ ok: true, state: 'indeterminate' });
-      return json({ ok: true, state: 'unused', ...(chainTime !== null ? { chainTime: chainTime.toString() } : {}) });
+      // 署名の期限が分かるときだけ、期限切れ未使用の証明をチェーンで取る (端末の時計には委ねない)。
+      const expiry = hasExpiryValidBefore(parsed) ? await expiryProofOrUndefined(parsed, token) : undefined;
+      return json({ ok: true, state: 'unused', ...(expiry ? { expiry } : {}) });
     }
 
     if (idem.state === 'hash' && await receiptMatchesIntent(parsed, token, idem.txHash)) {
@@ -261,7 +286,9 @@ function parseIntent(raw: Record<string, unknown>): ParsedIntent | null {
       !(raw.chainId in SUPPORTED_CHAINS) ||
       !isAddress(raw.from as string) ||
       typeof raw.nonce !== 'string' ||
-      !/^0x[0-9a-fA-F]{64}$/.test(raw.nonce)
+      !/^0x[0-9a-fA-F]{64}$/.test(raw.nonce) ||
+      // 任意の署名の期限 (10 進文字列)。与えるなら形式は署名付き照会の validBefore と同じ (不正は 400)。
+      (raw.validBefore !== undefined && !isDec(raw.validBefore))
     ) {
       return null;
     }
@@ -271,6 +298,7 @@ function parseIntent(raw: Record<string, unknown>): ParsedIntent | null {
       from,
       nonce: raw.nonce as Hex,
       forwarder: jpycForwarderFor(raw.chainId) ?? undefined,
+      expiryValidBefore: raw.validBefore === undefined ? undefined : BigInt(raw.validBefore as string),
       // nonce は 32-byte random/forwarder commitment で列挙不能、route は rate-limit 済みかつ
       // read-only。リロード後に署名を再保存せず結果照会できるよう signer は from に固定する。
       verifySignature: async () => from,

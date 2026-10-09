@@ -463,8 +463,9 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
       (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
     ) as { validBefore: string };
     vi.setSystemTime((Number(signedPayload.validBefore) + 1) * 1000);
+    // 期限切れはサーバがチェーン上で証明する (expiry: 'expired')。端末の時計だけでは外さない (下の A6 テスト)。
     fetchSpy.mockImplementation(async () =>
-      new Response(JSON.stringify({ ok: true, state: 'unused' })),
+      new Response(JSON.stringify({ ok: true, state: 'unused', expiry: 'expired' })),
     );
     act(() => result.current.retrySamePayload());
     await act(async () => vi.advanceTimersByTimeAsync(0));
@@ -479,16 +480,31 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
     expect(
       fetchSpy.mock.calls.slice(1).every(([url]) => url === '/api/relay/jpyc/status'),
     ).toBe(true);
+    // status の照会には署名の期限を送り、サーバがチェーン上の期限切れを証明できるようにする
+    expect(JSON.parse((fetchSpy.mock.calls.at(-1)![1] as RequestInit).body as string)).toEqual({
+      lookup: 'nonce',
+      chainId: jpycDep.chainId,
+      from: CUSTOMER,
+      nonce: expect.stringMatching(/^0x[0-9a-f]{64}$/),
+      validBefore: signedPayload.validBefore,
+    });
     expect(signTypedData).toHaveBeenCalledOnce();
     vi.useRealTimers();
   });
 
-  // 第 7 回レビュー A6: 期限切れはサーバが返すチェーンの時刻 (chainTime) で判定し、端末の時計のずれで
-  // まだ有効な署名のラッチを外さない (外すと旧 tx が後から成立して二重払いになりうる)。
+  // 第 7 回レビュー A6 (再レビュー反映): ラッチ解除 (= 新しい署名を許す) は「連続 unused かつ最新の応答がチェーン上で
+  // 期限切れと証明済み (expiry: 'expired')」のときだけ。端末の時計には戻らない (証明が無い・live なら期限まで unknown)。
+  type Unused = { ok: true; state: 'unused'; expiry?: 'expired' | 'live' };
+  const unused = (expiry?: 'expired' | 'live'): Unused => ({ ok: true, state: 'unused', ...(expiry ? { expiry } : {}) });
+  const FAIL = 'fetch-failure' as const;
   it.each([
-    ['端末の時計が進んでいても、チェーンの時刻が期限前なら latch を外さない', +600, -120, false],
-    ['端末の時計が遅れていても、チェーンの時刻が期限を過ぎていれば latch を外す', -600, +1, true],
-  ] as const)('%s', async (_label, deviceOffsetSec, chainOffsetSec, released) => {
+    ['端末の時計が進んでいても、証明の無い unused では latch を外さない', +600, [unused(), unused()], false],
+    ['端末の時計が進んでいても、チェーン上で期限前 (live) なら latch を外さない', +600, [unused('live'), unused('live')], false],
+    ['証明あり → 証明なし (欠落) の順では latch を外さない (最新の応答が expired のときだけ)', +600, [unused('expired'), unused()], false],
+    ['証明あり → live の順でも latch を外さない', +600, [unused('expired'), unused('live')], false],
+    ['証明あり → fetch 失敗 → 証明あり は連続 unused でないので latch を外さない', +600, [unused('expired'), FAIL, unused('expired')], false],
+    ['端末の時計が遅れていても、チェーン上で期限切れと証明されれば latch を外す', -600, [unused(), unused('expired')], true],
+  ] as const)('%s', async (_label, deviceOffsetSec, responses, released) => {
     vi.useFakeTimers();
     fetchSpy
       .mockRejectedValueOnce(new TypeError('Failed to fetch'))
@@ -503,15 +519,19 @@ describe('useJpycEip3009Payment — relay POST 応答分類 (D1)', () => {
     const signedPayload = JSON.parse(
       (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
     ) as { validBefore: string };
-    const validBefore = Number(signedPayload.validBefore);
-    vi.setSystemTime((validBefore + deviceOffsetSec) * 1000);
-    fetchSpy.mockImplementation(async () =>
-      new Response(JSON.stringify({ ok: true, state: 'unused', chainTime: String(validBefore + chainOffsetSec) })),
-    );
+    vi.setSystemTime((Number(signedPayload.validBefore) + deviceOffsetSec) * 1000);
+    const queue: (Unused | typeof FAIL)[] = [...responses];
+    fetchSpy.mockImplementation(async () => {
+      const next = queue.length > 1 ? queue.shift() : queue[0];
+      if (next === FAIL) throw new TypeError('Failed to fetch');
+      return new Response(JSON.stringify(next));
+    });
     act(() => result.current.retrySamePayload());
     await act(async () => vi.advanceTimersByTimeAsync(0));
     await act(async () => vi.advanceTimersByTimeAsync(3_000));
     await act(async () => vi.advanceTimersByTimeAsync(6_000));
+    // 3 応答のケースは 3 回目の照会 (backoff 12 秒) まで進める
+    if (responses.length > 2) await act(async () => vi.advanceTimersByTimeAsync(12_000));
     await act(async () => vi.advanceTimersByTimeAsync(0));
     await flushStorageLoad();
 
@@ -836,6 +856,7 @@ describe('useJpycEip3009Payment — reload intent 復元', () => {
       chainId: jpycDep.chainId,
       from: CUSTOMER,
       nonce: RESTORED_NONCE,
+      validBefore: expect.stringMatching(/^\d+$/),
     });
     expect(
       window.sessionStorage.getItem(RELAY_INTENT_STORAGE_KEY),
@@ -889,12 +910,13 @@ describe('useJpycEip3009Payment — reload intent 復元', () => {
       }),
     );
     const newTxHash = `0x${'6'.repeat(64)}` as Hex;
+    // 期限切れはサーバがチェーン上で証明する (expiry: 'expired')。端末の時計だけでは破棄しない。
     fetchSpy
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ ok: true, state: 'unused' })),
+        new Response(JSON.stringify({ ok: true, state: 'unused', expiry: 'expired' })),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ ok: true, state: 'unused' })),
+        new Response(JSON.stringify({ ok: true, state: 'unused', expiry: 'expired' })),
       )
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ ok: true, txHash: newTxHash })),
@@ -948,14 +970,15 @@ describe('useJpycEip3009Payment — reload intent 復元', () => {
     const storedChainId = polygon.id === jpycDep.chainId
       ? 80002
       : polygon.id;
+    const storedValidBefore = String(Math.floor(Date.now() / 1000) - 1);
     storeRelayIntent(
       restoredRelayIntent({
         chainId: storedChainId,
-        validBefore: String(Math.floor(Date.now() / 1000) - 1),
+        validBefore: storedValidBefore,
       }),
     );
     fetchSpy.mockImplementation(async () =>
-      new Response(JSON.stringify({ ok: true, state: 'unused' })),
+      new Response(JSON.stringify({ ok: true, state: 'unused', expiry: 'expired' })),
     );
     mount();
     const { result } = renderHook(
@@ -976,6 +999,7 @@ describe('useJpycEip3009Payment — reload intent 復元', () => {
         chainId: storedChainId,
         from: CUSTOMER,
         nonce: RESTORED_NONCE,
+        validBefore: storedValidBefore,
       });
     }
     expect(waitForTransactionReceipt).not.toHaveBeenCalled();
@@ -1059,7 +1083,7 @@ describe('useJpycEip3009Payment — reload intent 復元', () => {
     expect(result.current.restoredIntent).not.toBeNull();
 
     fetchSpy.mockImplementation(async () =>
-      new Response(JSON.stringify({ ok: true, state: 'unused' })),
+      new Response(JSON.stringify({ ok: true, state: 'unused', expiry: 'expired' })),
     );
     act(() => result.current.retrySamePayload());
     await act(async () => vi.advanceTimersByTimeAsync(0));
@@ -1460,7 +1484,7 @@ describe('A2c recovery and storage failure transitions', () => {
     const { saveOrderDelivery, loadOrderDelivery } = await import('@/lib/orderDelivery');
     const f = await fixture(); saveOrderDelivery(f.record);
     vi.useFakeTimers(); mount();
-    fetchSpy.mockImplementation(async () => Response.json(outcome === 'unused' ? { ok: true, state: 'unused' } : { ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
+    fetchSpy.mockImplementation(async () => Response.json(outcome === 'unused' ? { ok: true, state: 'unused', expiry: 'expired' } : { ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
     waitForTransactionReceipt.mockResolvedValue({ status: 'reverted' });
     renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: ORDER_CONTEXT }), { wrapper: makeWrapper() });
     await flushStorageLoad();
@@ -1717,7 +1741,7 @@ describe('A2c background signed-order recovery', () => {
     await signed(); const { loadOrderDelivery } = await import('@/lib/orderDelivery');
     if (outcome === 'expired') vi.advanceTimersByTime(300_000);
     waitForTransactionReceipt.mockResolvedValue({ status: 'reverted' });
-    fetchSpy.mockImplementation(async () => Response.json(outcome === 'expired' ? { ok: true, state: 'unused' } : { ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
+    fetchSpy.mockImplementation(async () => Response.json(outcome === 'expired' ? { ok: true, state: 'unused', expiry: 'expired' } : { ok: true, state: 'settled', txHash: `0x${'ab'.repeat(32)}` }));
     const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, orderId: 'new' } }), { wrapper: makeWrapper() });
     await vi.waitFor(async () => {
       await act(async () => vi.advanceTimersByTimeAsync(9000));
@@ -1730,6 +1754,32 @@ describe('A2c background signed-order recovery', () => {
     act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n }));
     await act(async () => vi.advanceTimersByTimeAsync(1));
     expect(signTypedData).toHaveBeenCalledOnce(); vi.useRealTimers();
+  });
+  // 第 7 回レビュー A6 (再レビュー反映): 端末の時計で期限を過ぎても、チェーン上でまだ期限前 (live) の間は保留を外さず、
+  // 同じ店の新しい署名を許さない。チェーンの期限が過ぎて expired が証明されたら従来どおり放棄して新しい署名を許す。
+  it('keeps the same-shop hold while the chain still reports the old signature live, then abandons on proven expiry', async () => {
+    const record = await signed(); const { loadOrderDelivery } = await import('@/lib/orderDelivery');
+    vi.advanceTimersByTime(300_000);
+    let expiry: 'live' | 'expired' = 'live';
+    fetchSpy.mockImplementation(async () => Response.json({ ok: true, state: 'unused', expiry }));
+    const { result } = renderHook(() => useJpycEip3009Payment(jpycDep, { restoreOrderDelivery: true, orderContext: { ...ORDER_CONTEXT, orderId: 'new' } }), { wrapper: makeWrapper() });
+    await flushStorageLoad();
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    await act(async () => vi.advanceTimersByTimeAsync(9_000));
+    expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(result.current.orderPaymentHold).toBe(true);
+    expect(loadOrderDelivery()).toEqual({ kind: 'ready', record });
+    act(() => result.current.mutate({ merchant: MERCHANT, value: 300n * 10n ** 18n }));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(signTypedData).not.toHaveBeenCalled();
+
+    expiry = 'expired';
+    await vi.waitFor(async () => {
+      await act(async () => vi.advanceTimersByTimeAsync(9_000));
+      expect(loadOrderDelivery()).toEqual({ kind: 'empty' });
+    }, { timeout: 2000, interval: 10 });
+    expect(result.current.orderPaymentHold).toBe(false);
+    vi.useRealTimers();
   });
   it('unmounting a background receipt reader preserves the unresolved opening', async () => {
     const record = await signed(); const { loadOrderDelivery } = await import('@/lib/orderDelivery');

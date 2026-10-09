@@ -47,8 +47,8 @@ describe('background order expiry checkpoint', () => {
     cancel();
   });
 
-  it('checks an already expired record immediately, then still requires two unused reads to abandon it', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'unused' }));
+  it('checks an already expired record immediately, then still requires two unused reads (with on-chain expiry proof) to abandon it', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'unused', expiry: 'expired' }));
     const resolved = vi.fn(); const released = vi.fn();
     const cancel = recoverOrderDelivery(record(-1), vi.fn(), resolved, { loadedAt: Date.now(), onHoldReleased: released });
     await vi.advanceTimersByTimeAsync(0);
@@ -57,6 +57,61 @@ describe('background order expiry checkpoint', () => {
     expect(resolved).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(6000);
     expect(resolved).toHaveBeenCalledWith({ kind: 'expired' });
+    cancel();
+  });
+
+  // 第 7 回レビュー A6 (再レビュー反映): 端末の時計の holdUntil で読んだ結果がチェーン上でまだ期限前 (live) なら、
+  // 保留を外さずに照会を続ける (旧署名がまだ成立しうる間に同じ店の新しい署名を許さない)。
+  it('keeps the hold while the chain reports the signature live, then abandons once finality proves expiry', async () => {
+    let expiry: 'live' | 'expired' = 'live';
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'unused', expiry }));
+    const resolved = vi.fn(); const released = vi.fn();
+    const cancel = recoverOrderDelivery(record(-1), vi.fn(), resolved, { loadedAt: Date.now(), onHoldReleased: released });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(released).not.toHaveBeenCalled(); expect(resolved).not.toHaveBeenCalled();
+    // The ordinary rounds continue while live, still without releasing the hold.
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(released).not.toHaveBeenCalled(); expect(resolved).not.toHaveBeenCalled();
+    expiry = 'expired';
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(resolved).toHaveBeenCalledWith({ kind: 'expired' });
+    expect(released).not.toHaveBeenCalled();
+    cancel();
+  });
+
+  it('does not abandon on a plain unused read without on-chain expiry proof, even after the device clock passed expiry', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'unused' }));
+    const resolved = vi.fn(); const released = vi.fn();
+    const cancel = recoverOrderDelivery(record(-1), vi.fn(), resolved, { loadedAt: Date.now(), onHoldReleased: released });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(released).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(resolved).not.toHaveBeenCalled();
+    expect(released).toHaveBeenCalledOnce();
+    cancel();
+  });
+
+  it('releases the hold exactly once when a live read is followed by unreadable rounds after expiry', async () => {
+    let live = true;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      Response.json(live ? { ok: true, state: 'unused', expiry: 'live' } : { ok: true, state: 'indeterminate' }));
+    const resolved = vi.fn(); const released = vi.fn();
+    const cancel = recoverOrderDelivery(record(-1), vi.fn(), resolved, { loadedAt: Date.now(), onHoldReleased: released });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(released).not.toHaveBeenCalled();
+    live = false;
+    // One full ordinary round (5 backoff reads, 90 s) that cannot read the chain: release the hold once ...
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(released).toHaveBeenCalledOnce();
+    const readsAfterRelease = fetchSpy.mock.calls.length;
+    // ... then one more ordinary round for unused/revert evidence, and no further rounds after it.
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(fetchSpy.mock.calls.length).toBe(readsAfterRelease + 5);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(fetchSpy.mock.calls.length).toBe(readsAfterRelease + 5);
+    expect(released).toHaveBeenCalledOnce(); expect(resolved).not.toHaveBeenCalled();
     cancel();
   });
 

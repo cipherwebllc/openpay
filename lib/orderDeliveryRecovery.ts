@@ -23,6 +23,14 @@ export function recoverOrderDelivery(
   let generation = 0;
   let cancelRound: (() => void) | undefined;
   const holdUntil = orderPaymentHoldUntil(record, loadedAt);
+  // The hold is released at most once: the expiry checkpoint, a later unreadable round after a
+  // live read, and the checkpoint's failure path can all reach it (staff wording must not repeat).
+  let holdReleased = false;
+  const releaseHold = () => {
+    if (holdReleased) return;
+    holdReleased = true;
+    onHoldReleased();
+  };
   const run = async (singleRead: boolean) => {
     const current = ++generation;
     const isCurrent = () => active && current === generation;
@@ -50,17 +58,29 @@ export function recoverOrderDelivery(
         onResolved(outcome);
         return;
       }
-      if (singleRead) {
-        onHoldReleased();
+      if (outcome.live) {
+        // The chain's finalized clock has not passed validBefore yet (the device clock has): the old
+        // signature can still settle, so keep the hold and keep reading in ordinary rounds until
+        // finality catches up and the read turns expired (or settled).
         singleRead = false;
-      } else if (Date.now() >= holdUntil) return;
+        continue;
+      }
+      if (singleRead) {
+        releaseHold();
+        singleRead = false;
+      } else if (Date.now() >= holdUntil) {
+        // Past expiry without a live reading (unreadable): release the hold as before, with one more
+        // ordinary round for unused/revert evidence when this is the first such round.
+        if (holdReleased) return;
+        releaseHold();
+      }
     } while (isCurrent());
   };
   const start = (singleRead: boolean) => {
     void run(singleRead).catch(() => {
       // RPC/storage failures retain the opening rather than fabricate payment or abandonment.
       // At expiry an unsuccessful read releases only the hold, with staff-assistance wording.
-      if (active && singleRead) onHoldReleased();
+      if (active && singleRead) releaseHold();
     });
   };
   const expiryTimer = setTimeout(() => {
