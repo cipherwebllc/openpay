@@ -109,6 +109,19 @@ describe('background order expiry checkpoint', () => {
     cancel();
   });
 
+  it('a record restored long after its expiry still completes ordinary rounds and abandons on proven expiry (#767 P1)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({ ok: true, state: 'unused', expiry: 'expired' }));
+    const resolved = vi.fn();
+    const cancel = recoverOrderDelivery(record(-20 * 60), vi.fn(), resolved, { loadedAt: Date.now() });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledOnce(); expect(resolved).not.toHaveBeenCalled();
+    // The single checkpoint read alone cannot abandon (two consecutive proven reads are required): the
+    // ordinary round that follows (3 s + 6 s backoff) must still run even though expiry + 15 min has passed.
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(resolved).toHaveBeenCalledWith({ kind: 'expired' });
+    cancel();
+  });
+
   it('shares the ten-second checkpoint budget between status and receipt reads', async () => {
     const saved = record(1);
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise((resolve) => {

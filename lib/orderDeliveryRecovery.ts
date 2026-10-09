@@ -30,6 +30,10 @@ export function recoverOrderDelivery(
   let generation = 0;
   let cancelRound: (() => void) | undefined;
   const holdUntil = orderPaymentHoldUntil(record, loadedAt);
+  // Count the bounded wait from this page load too: a record restored long after its expiry must still
+  // get full ordinary rounds (two consecutive proven-expired reads) instead of stopping right after the
+  // single checkpoint read and holding the shop forever (#767 Codex 3rd review P1).
+  const readUntil = Math.max(holdUntil, loadedAt) + POST_EXPIRY_READ_MS;
   const run = async (singleRead: boolean) => {
     const current = ++generation;
     const isCurrent = () => active && current === generation;
@@ -58,7 +62,7 @@ export function recoverOrderDelivery(
         return;
       }
       singleRead = false;
-      if (Date.now() >= holdUntil + POST_EXPIRY_READ_MS) return;
+      if (Date.now() >= readUntil) return;
     } while (isCurrent());
   };
   const start = (singleRead: boolean) => {
