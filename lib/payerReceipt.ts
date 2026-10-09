@@ -23,7 +23,7 @@ import {
   type HistoryLineItem,
 } from './history';
 import { displaySymbolFor, type TokenSymbol } from './tokens';
-import { taxAmountDecimal, taxDisplayDecimals } from './tax';
+import { lineItemsTax, taxDisplayDecimals } from './tax';
 import {
   invoiceLookupUrl,
   invoiceReceiptView,
@@ -196,11 +196,12 @@ function singleReceiptLine(
   merchantName?: string | null,
 ): HistoryLineItem[] {
   if (!entry.productName && entry.taxRate == null) return [];
-  const taxAmount = taxAmountDecimal(
-    Number(grossTotal),
-    entry.taxRate,
+  // 税額は店舗の履歴・インボイスと同じ関数で (1 行なので税率ごとの税額そのもの)。
+  const taxAmount = lineItemsTax(
+    [{ amount: grossTotal, taxRate: entry.taxRate }],
+    HISTORY_ASSET_DECIMALS[entry.asset],
     taxDisplayDecimals(entry.asset),
-  );
+  ).totalTax;
   return [
     {
       id: `${entry.id}-0`,
@@ -215,7 +216,7 @@ function singleReceiptLine(
       currency: entry.asset,
       taxRate: entry.taxRate,
       taxCategory: entry.taxCategory,
-      taxAmount: taxAmount == null ? '0' : String(taxAmount),
+      taxAmount,
       memo: entry.memo,
     },
   ];
@@ -547,7 +548,7 @@ export function payerReceiptCopyText(r: PayerReceipt, locale?: string): string {
   }
   if (invoice) {
     // インボイス欄: 税率ごとの税込合計と消費税額 (円・税率ごとに 1 回の端数処理)。
-    // 行ごとに丸めた税額の合計 (totalTaxAmount) は並べない (同じ控えで数字が食い違うため)。
+    // 消費税の合計 (totalTaxAmount) は並べない (修正前に保存された控えは行ごとに丸めた合計で、同じ控えで数字が食い違うため)。
     for (const g of invoice.groups) {
       lines.push(invoiceGroupCopyLine(g.rate, g.total, g.tax, r.currency, en));
     }
@@ -607,7 +608,8 @@ function invoiceGroupCopyLine(
 }
 
 /** JSON エクスポート (レシートそのまま・秘密情報なし)。インボイス欄を出せる控えは税率別の集計も添える
- *  (行ごとの taxAmount を第三者が足すと税率ごとの 1 回の端数処理とずれるため)。 */
+ *  (税率ごとの対価と消費税額はインボイスの記載事項。修正前に保存された控えの行の taxAmount は行ごとに丸めた値で、
+ *  足しても税率ごとの 1 回の端数処理と合わないことがある)。 */
 export function payerReceiptToJson(r: PayerReceipt): string {
   const invoice = invoiceReceiptView(r);
   return JSON.stringify(invoice ? { ...r, invoice } : r, null, 2);

@@ -23,14 +23,10 @@ import {
   HISTORY_ASSET_DISPLAY,
   networkFeeEquivalentOf,
 } from './history';
+import { lineChargedWei } from './discount';
 import { isIncomeSaleEntry } from './historyFilters';
 import { entryYenValue } from './historyYen';
-import { lineItemChargedAmount } from './lineItemsCsv';
-import {
-  taxAmountDecimal,
-  taxAmountYen,
-  taxCategoryShortLabel,
-} from './tax';
+import { innerTaxUnits, taxByRate, taxCategoryShortLabel } from './tax';
 
 const HEADER: readonly string[] = [
   '日時',
@@ -158,10 +154,11 @@ function breakdownVersionLabel(e: HistoryEntry): string {
 // v5 税額(円): 内税を円換算値 (entryYenValue) から算出。円換算不能 (USDC レート無) /
 // 税率未指定は空 (USDC を無理に税JPY変換しない方針)。
 //
-// 明細 (entryLineItems) がある entry は **行ごとの税率** で按分して合算する。以前は entry 単位の
-// 単一税率を合計額に掛けていたため、10% と 8% が混在する取引で明細CSV (lineItemsCsv) /
-// 仕訳CSV (accountingCsv) / 履歴表示 (entryTotals) と税額が食い違っていた。按分の基準は
-// 明細の税込額の合計。分子と分母を同じ通貨・gross 基準に揃え、円換算値も gross で配分する。
+// 明細 (entryLineItems) がある entry は取引の円額を **税率ごとの対価 (値引き後) の比** で税率に配り、
+// 税率ごとに 1 回だけ四捨五入して足す (lib/tax.ts の taxByRate・インボイス・店舗の履歴 entryTotals・
+// 明細CSV と同じ規則。行ごとに丸めて足すと ±1 円ずれる)。以前は entry 単位の単一税率を合計額に掛けて
+// いたため、10% と 8% が混在する取引で明細CSV / 仕訳CSV / 履歴表示と食い違っていた。分子と分母を同じ
+// 通貨・gross 基準に揃え、円換算値も gross で配分する。
 function taxAmountCell(e: HistoryEntry, usdcJpy: number | undefined): string {
   if (!isIncomeSaleEntry(e)) return '';
   const yv = entryYenValue(e, usdcJpy);
@@ -171,25 +168,30 @@ function taxAmountCell(e: HistoryEntry, usdcJpy: number | undefined): string {
   if (items.length === 0) {
     // 明細も商品名も無い legacy → entry 単位の税率のみ (従来どおり)。
     if (e.taxRate == null) return '';
-    const amt = taxAmountYen(yv.yen, e.taxRate);
+    const amt = innerTaxUnits(BigInt(yv.yen), 1n, e.taxRate, 0);
     return amt == null ? '' : String(amt);
   }
   if (items.every((li) => li.taxRate == null)) return '';
 
-  // 重みは値引き後の行額 (レジの値引き後の税率ごとの対価に揃える・値引きの無い行は税込額そのもの)。
-  const totalGross = items.reduce((sum, li) => sum + (lineItemChargedAmount(li) ?? 0), 0);
-  // 壊れた明細の按分不能な分母が NaN/Infinity の税額として CSV へ波及するのを防ぐ。
-  if (!Number.isFinite(totalGross) || totalGross <= 0) return '';
-  let tax = 0;
+  const decimals = HISTORY_ASSET_DECIMALS[e.asset];
+  const lines: Array<{ charged: bigint; taxRate: number | null }> = [];
   for (const li of items) {
-    const gross = lineItemChargedAmount(li);
+    // 重みは値引き後の行額 (レジの値引き後の税率ごとの対価に揃える・値引きの無い行は税込額そのもの)。
+    const charged = lineChargedWei(li, decimals);
     // 金額不明行の円額が他行へ再配分され税額を過大表示するのを防ぐため、取引の税額は出さない。
-    if (gross === null) return '';
-    // 行円額 = 行 gross / Σ行 gross × 取引 gross 円額。例: gross 4000・net 3880 でも
-    // 1000円(10%) + 3000円(8%) → round(1000×10/110) + round(3000×8/108) = 313円。
-    // net を分母にすると 4000/3880 倍に膨らむ。anchor 建てでも比率の通貨単位は約分される。
-    const lineYen = (gross / totalGross) * yv.yen;
-    tax += taxAmountDecimal(lineYen, li.taxRate, 0) ?? 0;
+    if (charged === null) return '';
+    lines.push({ charged, taxRate: li.taxRate });
+  }
+  const { groups } = taxByRate(lines, decimals, 0);
+  const totalCharged = groups.reduce((sum, g) => sum + g.charged, 0n);
+  // 全行 0 円の明細は按分の分母が 0 (BigInt の 0 除算の例外で CSV の書き出し全体を止めない)。税額は出さない。
+  if (totalCharged <= 0n) return '';
+  // 税率の円額 = 税率の対価 / Σ対価 × 取引 gross 円額 (分数のまま税額へ・途中で丸めない)。例: gross 4000・
+  // net 3880 でも 1000円(10%) + 3000円(8%) → round(1000×10/110) + round(3000×8/108) = 313円。
+  // net を分母にすると 4000/3880 倍に膨らむ。anchor 建てでも比率の通貨単位は約分される。
+  let tax = 0n;
+  for (const g of groups) {
+    tax += innerTaxUnits(g.charged * BigInt(yv.yen), totalCharged, g.rate, 0) ?? 0n;
   }
   return String(tax);
 }

@@ -70,7 +70,7 @@ import {
   type CheckoutItem,
 } from '@/lib/url';
 import { groupAmountDigits } from '@/lib/amount';
-import { taxAmountDecimal, taxDisplayDecimals, type TaxCategory } from '@/lib/tax';
+import { lineItemsTax, taxDisplayDecimals, type TaxCategory } from '@/lib/tax';
 import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
 import { useDiscountInput } from '@/hooks/useDiscountInput';
 import { categoryColorClasses } from '@/lib/categoryColor';
@@ -428,10 +428,7 @@ function RegisterModeContent({
         )
       : 0n;
     const amountHuman = formatUnits(amountWei, deployment.decimals);
-    const lineTax = valid
-      ? taxAmountDecimal(Number(amountHuman), l.taxRate, taxDec)
-      : null;
-    return { l, valid, amountHuman, lineTax };
+    return { l, valid, amountHuman };
   });
 
   // 右サマリ用: 確定 (valid) 行のみの読み取りリスト。
@@ -457,13 +454,18 @@ function RegisterModeContent({
   const totalWei = subtotalWei - (discountWei ?? 0n);
   const totalHuman = formatUnits(totalWei, deployment.decimals);
   const subtotalHuman = formatUnits(subtotalWei, deployment.decimals);
-  // うち税額: 値引きがあれば税率ごと → 明細へ按分した後の行額から (控え・履歴と同じ計算)。
-  const totalTax = discountParam
-    ? buildCheckoutLineItems({ items: validItems, discount: discountParam, token: settings.token, decimals: deployment.decimals })
-        .reduce((s, li) => s + Number(li.taxAmount ?? 0), 0)
-    : lines.reduce((s, x) => s + (x.lineTax ?? 0), 0);
-  const totalTaxRounded =
-    Math.round(totalTax * 10 ** taxDec) / 10 ** taxDec;
+  // うち税額: 値引きを税率ごと → 明細へ按分した後の、税率ごとの合計から税率ごとに 1 回丸める
+  // (控え・インボイス・履歴・CSV と同じ関数・lib/tax.ts の lineItemsTax)。
+  const totalTax = lineItemsTax(
+    buildCheckoutLineItems({
+      items: validItems,
+      ...(discountParam ? { discount: discountParam } : {}),
+      token: settings.token,
+      decimals: deployment.decimals,
+    }),
+    deployment.decimals,
+    taxDec,
+  ).totalTax;
   // 会計が空になったら (次のお客様) 値引きを外す。
   useEffect(() => {
     if (cart.length > 0) return;
@@ -482,7 +484,7 @@ function RegisterModeContent({
       if (el) el.style.transform = '';
     });
     return () => cancelAnimationFrame(id);
-  }, [totalHuman, totalTaxRounded]);
+  }, [totalHuman, totalTax]);
 
   const checkoutUrl =
     hydrated && effectiveReceiver && origin && validItems.length > 0 && !discountInvalid
@@ -964,11 +966,11 @@ function RegisterModeContent({
                 </div>
                 {/* 値引き (任意)。使わない店には「値引きを追加」の 1 行だけ (DiscountField)。 */}
                 <DiscountField discount={discount} idPrefix="register" symbol={symbol} decimals={deployment.decimals} />
-                {totalTaxRounded > 0 && !discountInvalid && (
+                {totalTax !== '0' && !discountInvalid && (
                   <div className="flex justify-between">
                     <dt className="text-slate-500">{t('taxAmount')}</dt>
                     <dd className="tabular-nums text-slate-600">
-                      {groupAmountDigits(String(totalTaxRounded))} {symbol}
+                      {groupAmountDigits(totalTax)} {symbol}
                     </dd>
                   </div>
                 )}

@@ -21,7 +21,6 @@ import { addressExplorerUrl, chainForSlug, slugForChain, txExplorerUrl } from '@
 import { env } from '@/lib/env';
 import { formatTokenAmount } from '@/lib/format';
 import { STORE_DEVICE_FEE_WEI } from '@/lib/storeDevicePayment';
-import { taxAmountDecimal, taxDisplayDecimals } from '@/lib/tax';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug, resolveDeployment } from '@/lib/tokens';
 import { calcCheckoutPayable, calcCheckoutTotal, type CheckoutParams } from '@/lib/url';
 import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';

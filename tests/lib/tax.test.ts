@@ -5,8 +5,9 @@ import {
   TAX_RATE_MAX,
   isTaxCategory,
   defaultRateForCategory,
-  taxAmountYen,
-  taxAmountDecimal,
+  innerTaxUnits,
+  lineItemsTax,
+  taxByRate,
   taxDisplayDecimals,
   freeeTaxLabel,
   mfCreditTaxLabel,
@@ -42,49 +43,137 @@ describe('TAX_OPTIONS / isTaxCategory', () => {
   });
 });
 
-describe('taxAmountYen (内税)', () => {
-  it('税込 1100・10% → 100', () => {
-    expect(taxAmountYen(1100, 10)).toBe(100);
+describe('innerTaxUnits (内税・表示の最小単位で 1 回だけ四捨五入)', () => {
+  const yen = (n: number) => BigInt(n);
+  it('JPYC (円): 1100@10% → 100 / 1080@8% → 80 / 1000@10% → 91 (90.9 を四捨五入)', () => {
+    expect(innerTaxUnits(yen(1100), 1n, 10, 0)).toBe(100n);
+    expect(innerTaxUnits(yen(1080), 1n, 8, 0)).toBe(80n);
+    expect(innerTaxUnits(yen(1000), 1n, 10, 0)).toBe(91n);
   });
-  it('税込 1080・8% → 80', () => {
-    expect(taxAmountYen(1080, 8)).toBe(80);
+  it('0.5 は切り上げ (6.75@8% = 0.5 → 1・5.5@10% = 0.5 → 1)', () => {
+    expect(innerTaxUnits(675n, 100n, 8, 0)).toBe(1n);
+    expect(innerTaxUnits(55n, 10n, 10, 0)).toBe(1n);
   });
-  it('端数は round (税込 1000・10% → 91)', () => {
-    expect(taxAmountYen(1000, 10)).toBe(91); // 1000*10/110 = 90.9..
+  it('USDC (セント): 6.40@10% → 58 セント / 11.00@10% → 100 セント', () => {
+    expect(innerTaxUnits(6_400_000n, 1_000_000n, 10, 2)).toBe(58n); // 0.5818.. → 0.58
+    expect(innerTaxUnits(11_000_000n, 1_000_000n, 10, 2)).toBe(100n);
   });
-  it('rate 0 (非課税/対象外) → 0', () => {
-    expect(taxAmountYen(1000, 0)).toBe(0);
+  it('任意税率の小数 (7.5%) も浮動小数の誤差なく (1075 → 75)', () => {
+    expect(innerTaxUnits(yen(1075), 1n, 7.5, 0)).toBe(75n);
   });
-  it('rate null (未指定) → null', () => {
-    expect(taxAmountYen(1000, null)).toBeNull();
+  it('分数の額 (取引の円額を税率の比で配った額) を途中で丸めない', () => {
+    // 1000 円 × 3/4 = 750 円 → 750 × 10/110 = 68.18 → 68
+    expect(innerTaxUnits(3000n, 4n, 10, 0)).toBe(68n);
   });
-  it('yen 非有限 (USDC レート無) → null', () => {
-    expect(taxAmountYen(Number.NaN, 10)).toBeNull();
-    expect(taxAmountYen(Number.POSITIVE_INFINITY, 10)).toBeNull();
-  });
-});
-
-describe('taxAmountDecimal / taxDisplayDecimals (token 単位)', () => {
-  it('JPYC (0桁): 1100@10% → 100 / 1080@8% → 80 / 1000@10% → 91(round)', () => {
-    expect(taxAmountDecimal(1100, 10, 0)).toBe(100);
-    expect(taxAmountDecimal(1080, 8, 0)).toBe(80);
-    expect(taxAmountDecimal(1000, 10, 0)).toBe(91);
-  });
-  it('USDC (2桁): 6.40@10% → 0.58 / 11.00@10% → 1.0', () => {
-    expect(taxAmountDecimal(6.4, 10, 2)).toBe(0.58); // 0.58181.. → 0.58
-    expect(taxAmountDecimal(11, 10, 2)).toBe(1);
-  });
-  it('rate 0/null/非有限 amount', () => {
-    expect(taxAmountDecimal(1000, 0, 0)).toBe(0);
-    expect(taxAmountDecimal(1000, null, 0)).toBeNull();
-    expect(taxAmountDecimal(Number.NaN, 10, 0)).toBeNull();
+  it('rate 0 以下 (非課税/対象外) → 0・null / 非有限 (未指定) → null', () => {
+    expect(innerTaxUnits(yen(1000), 1n, 0, 0)).toBe(0n);
+    expect(innerTaxUnits(yen(1000), 1n, -5, 0)).toBe(0n);
+    expect(innerTaxUnits(yen(1000), 1n, null, 0)).toBeNull();
+    expect(innerTaxUnits(yen(1000), 1n, Number.NaN, 0)).toBeNull();
   });
   it('taxDisplayDecimals: jpyc=0 / usdc=2', () => {
     expect(taxDisplayDecimals('jpyc')).toBe(0);
     expect(taxDisplayDecimals('usdc')).toBe(2);
   });
-  it('taxAmountYen は decimals=0 版 (委譲)', () => {
-    expect(taxAmountYen(1100, 10)).toBe(taxAmountDecimal(1100, 10, 0));
+});
+
+describe('taxByRate (税率ごとに 1 回の端数処理・第 7 回レビュー A8)', () => {
+  const E18 = 10n ** 18n;
+  const jpyc = (n: number) => BigInt(n) * E18;
+
+  it('税率ごとに束ねて 1 回だけ丸める (行ごとに丸めて足さない)', () => {
+    // 6 + 6 円 (10%): 行ごとなら 1 + 1 = 2・税率ごとなら 12 × 10/110 = 1.09 → 1。
+    const { groups, lineTax } = taxByRate(
+      [{ charged: jpyc(6), taxRate: 10 }, { charged: jpyc(6), taxRate: 10 }],
+      18,
+      0,
+    );
+    expect(groups).toEqual([{ rate: 10, charged: jpyc(12), tax: 1n }]);
+    expect(lineTax).toEqual([1n, 0n]);
+  });
+
+  it('行へ配る額: 行ごとの端数を切り捨て、残りを端数の大きい順に 1 単位ずつ (合計 = 税率ごとの税額)', () => {
+    // 500 → 45.45・2997 → 272.45・999 → 90.82: 切り捨て 45 + 272 + 90 = 407・税率ごと 4496/11 = 408.7 → 409。
+    // 残り 2 円は端数の大きい 999 の行 (0.82) → 端数が同じ (0.45) 500 と 2997 は金額の大きい 2997 の行。
+    const { groups, lineTax } = taxByRate(
+      [{ charged: jpyc(500), taxRate: 10 }, { charged: jpyc(2997), taxRate: 10 }, { charged: jpyc(999), taxRate: 10 }],
+      18,
+      0,
+    );
+    expect(groups[0].tax).toBe(409n);
+    expect(lineTax).toEqual([45n, 273n, 91n]);
+  });
+
+  it('端数が同じなら金額の大きい行 → 先の行', () => {
+    const { lineTax } = taxByRate(
+      [{ charged: jpyc(6), taxRate: 10 }, { charged: jpyc(17), taxRate: 10 }, { charged: jpyc(6), taxRate: 10 }],
+      18,
+      0,
+    );
+    // 6/11 = 0.545・17/11 = 1.545 (端数同じ)・合計 29/11 = 2.64 → 3: 切り捨て 0 + 1 + 0 = 1・残り 2 → 17 円の行 → 先の 6 円の行。
+    expect(lineTax).toEqual([1n, 2n, 0n]);
+  });
+
+  it('税率が混ざれば税率ごと (登場順)・税率なしは null・0% は 0', () => {
+    const { groups, lineTax } = taxByRate(
+      [
+        { charged: jpyc(1000), taxRate: 10 },
+        { charged: jpyc(3000), taxRate: 8 },
+        { charged: jpyc(300), taxRate: 0 },
+        { charged: jpyc(50), taxRate: null },
+      ],
+      18,
+      0,
+    );
+    expect(groups).toEqual([
+      { rate: 10, charged: jpyc(1000), tax: 91n },
+      { rate: 8, charged: jpyc(3000), tax: 222n },
+      { rate: 0, charged: jpyc(300), tax: 0n },
+      { rate: null, charged: jpyc(50), tax: null },
+    ]);
+    expect(lineTax).toEqual([91n, 222n, 0n, null]);
+  });
+});
+
+describe('lineItemsTax (明細の消費税額・保存された taxAmount は読まない)', () => {
+  it('値引き後の額から税率ごとに 1 回・行の税額は 10 進の文字列', () => {
+    const r = lineItemsTax(
+      [
+        { amount: '7', discount: '1', taxRate: 10 },
+        { amount: '7', discount: '1', taxRate: 10 },
+      ],
+      18,
+      0,
+    );
+    expect(r.lineTax).toEqual(['1', '0']);
+    expect(r.totalTax).toBe('1');
+  });
+
+  it('USDC はセントの 10 進 (0.14 USDC @10% → 0.01)', () => {
+    const r = lineItemsTax(
+      [
+        { amount: '0.07', taxRate: 10 },
+        { amount: '0.07', taxRate: 10 },
+      ],
+      6,
+      2,
+    );
+    expect(r.lineTax).toEqual(['0.01', '0']);
+    expect(r.totalTax).toBe('0.01');
+  });
+
+  it('金額や値引きが読めない行は税額 0 で、ほかの行の税額は変えない', () => {
+    const r = lineItemsTax(
+      [
+        { amount: 'abc', taxRate: 10 },
+        { amount: '1100', taxRate: 10 },
+        { amount: '100', discount: '200', taxRate: 10 },
+      ],
+      18,
+      0,
+    );
+    expect(r.lineTax).toEqual(['0', '100', '0']);
+    expect(r.totalTax).toBe('100');
   });
 });
 

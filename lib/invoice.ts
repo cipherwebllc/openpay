@@ -4,15 +4,16 @@
 // 記載事項 (国税庁 インボイス Q&A): ① 発行事業者の名称と登録番号 ② 取引年月日 ③ 取引内容 (軽減税率の
 // 対象品目である旨) ④ 税率ごとに区分した対価の額の合計 ⑤ 税率ごとに区分した消費税額等 (又は適用税率)。
 //   - 消費税額等は「1 枚につき税率ごとに 1 回」の端数処理 (問57)。商品ごとに丸めた税額の合計は不可。
-//     端数処理の方法は任意なので、既存 lib/tax.ts と同じ四捨五入にする。
+//     端数処理の方法は任意なので四捨五入。計算は lib/tax.ts の taxByRate (店舗の履歴・CSV・控え・レジと同じ関数)。
 //   - 消費税額等は円で記載 (問68)。対象は JPYC (1 JPYC = 1 円) のみ。USDC は換算が要るので出さない。
 //   - 登録番号は「T + 13 桁」(問18)。個人事業者の番号の検査用数字の算式は公表されていないので形式だけ見る。
 // 店舗が設定した値をそのまま出すだけで、OpenPay は登録状況を確かめない (控えの免責文で明示)。
 
 import { parseUnits } from 'viem';
-import { lineDiscountWei } from './discount';
+import { lineChargedWei } from './discount';
 import type { HistoryLineItem } from './history';
 import type { PayerReceipt } from './payerReceipt';
+import { taxByRate } from './tax';
 
 export const INVOICE_REGISTRATION_NUMBER_PATTERN = /^T\d{13}$/;
 // 設定欄の生入力の上限 (区切りや空白を含む書き方を受けるため 14 字より長めに取る)。
@@ -62,14 +63,6 @@ function minorToDecimal(v: bigint): string {
   return frac ? `${whole}.${frac}` : String(whole);
 }
 
-// 内税額 (円) = 税込合計 × rate / (100 + rate) を 1 回だけ四捨五入。整数演算で丸め誤差を出さない。
-function innerTaxYen(totalMinor: bigint, rate: InvoiceRate): bigint {
-  if (rate === 0) return 0n;
-  const num = totalMinor * BigInt(rate);
-  const den = BigInt(100 + rate) * 10n ** BigInt(JPYC_DECIMALS);
-  return (num * 2n + den) / (den * 2n);
-}
-
 // 税率と税区分の組み合わせ。税率が未指定 (null)・10/8/0 以外・税区分と食い違う (任意税率の 8% 等)
 // 行は null。軽減税率は税区分 taxable_8 で明示された 8% だけ (※ の判定を税区分に揃える)。
 function invoiceRateOf(li: HistoryLineItem): InvoiceRate | null {
@@ -91,29 +84,23 @@ export function invoiceRateGroups(
   lineItems: readonly HistoryLineItem[] | undefined,
 ): InvoiceRateGroup[] | null {
   if (!lineItems || lineItems.length === 0) return null;
-  const sums = new Map<InvoiceRate, bigint>();
+  const lines: Array<{ charged: bigint; taxRate: InvoiceRate }> = [];
   for (const li of lineItems) {
     const rate = invoiceRateOf(li);
     if (rate == null) return null;
-    const minor = toMinor(li.amount);
-    if (minor == null) return null;
     // レジの値引きは支払い時に税率ごと → 明細へ按分して行に固定してある。税率ごとの対価は値引き後の額
-    // (一括値引きの按分)。壊れた値引き (形が不正・行の金額を超える) の控えにはインボイス欄を出さない。
-    const discount = lineDiscountWei(li, JPYC_DECIMALS);
-    if (discount == null) return null;
-    sums.set(rate, (sums.get(rate) ?? 0n) + minor - discount);
+    // (一括値引きの按分)。金額や値引きが読めない (形が不正・行の金額を超える) 控えにはインボイス欄を出さない。
+    const charged = lineChargedWei(li, JPYC_DECIMALS);
+    if (charged == null) return null;
+    lines.push({ charged, taxRate: rate });
   }
+  // 消費税額 (円) は税率ごとに 1 回だけ四捨五入 (店舗の履歴・CSV・控えと同じ関数)。
+  const { groups } = taxByRate(lines, JPYC_DECIMALS, 0);
   const order: InvoiceRate[] = [10, 8, 0];
-  return order
-    .filter((rate) => sums.has(rate))
-    .map((rate) => {
-      const totalMinor = sums.get(rate) as bigint;
-      return {
-        rate,
-        total: minorToDecimal(totalMinor),
-        tax: String(innerTaxYen(totalMinor, rate)),
-      };
-    });
+  return order.flatMap((rate) => {
+    const g = groups.find((x) => x.rate === rate);
+    return g ? [{ rate, total: minorToDecimal(g.charged), tax: String(g.tax ?? 0n) }] : [];
+  });
 }
 
 export type InvoiceReceiptView = {

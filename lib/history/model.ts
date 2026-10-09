@@ -112,7 +112,8 @@ export type HistoryLineItem = {
   id?: string;
   /** 行の通貨 (同一カート単一通貨。省略時は entry.asset)。 */
   currency?: TokenSymbol;
-  /** 内税 (token 単位・cart 確定時に算出)。省略時は表示/CSV で taxRate から算出。 */
+  /** 内税 (token 単位・cart 確定時に算出・税率ごとの税額を行へ配った額)。店舗の履歴の表示/CSV は保存値を読まず、
+   *  金額と税率から税率ごとに 1 回の端数処理で出し直す (lib/tax.ts の lineItemsTax・旧い行ごとの丸めの値も揃う)。 */
   taxAmount?: string;
   /** 由来プリセット id (任意)。 */
   presetId?: string;
