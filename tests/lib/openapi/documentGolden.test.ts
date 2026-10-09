@@ -87,21 +87,22 @@ const PROFILES: Profile[] = [
 
 // B-R9d の文書修正後に再採取した sha256 (JSON.stringify の生出力・key 未整列)。
 // 第 7 回レビュー E3 で Error の enum と 503 の説明に signer_unavailable を足したので全構成を再採取。
+// 第 7 回レビュー B8 で license descriptor の productUrl を string | null・説明を 200 にしたので license を含む構成を再採取。
 const EXPECTED_SHA256: Record<string, string> = {
   'all-on':
-    'e02e5c47cd7a0ca102db8bc946986d584d6ae087fd64b127fb5971a794da8e4d',
+    '2995790bbfb946ef7c76f68b500f729d1349e42ce622f33989bdd5bd0e33ae4f',
   'all-on+arc':
-    'a7ea568b7fb696445db54585100bde0c097bac44074cea5c1d049ce114ebd358',
+    'a22c885fce988671745760e9863bd6b2b13d067f83999ac3c1a7895b8aa370e2',
   'all-on+mainnet':
-    'f0b2684135ed650d588b1ba8e07595a15555ce79ac26dd911124eb3e6ff46cc5',
+    'ef09d40b4b9f957a44f713e72f38f04fd2effdd901183223a345bb738ae3e097',
   'all-on+mainnet+avalanche+ethereum':
-    'd60f87e7e059ad72042752c3720953c3c12350102224c792f350a5ce2b8e29e4',
+    '927e735f820394e5d3b17a58bd903fe21d40c45defd74cf00c310c9f5f4cfe42',
   'all-on+fee':
-    'dcf8117a5eaee25c61388100c30a7764f2eced5ce2158d1f2db39f341d3f31b5',
+    '2e911d366dad9abfa386fd2f1dd20f68977c7b4018690fa92c1bfc82d6c652c8',
   'all-on+default-hello-price':
-    'f3ab849dab5382cb2aa14f36c3f2cf3b450986d800218f7e6acd936906e6c46c',
+    'e99747c6da94873c8f6e5237a4684c4fb51245c9fcc31a6f4d383ee6b4232de9',
   'all-on+invalid-hello-price-unlisted':
-    '3e41ecfd48911d765eceaac69a84efd21eb1db5bfd27649112e388a357c3481f',
+    '3bb2ac6276d9858464fa39752976119653293619e734c3461a16a3a7264f291d',
   'directory-only':
     'c8af1ca62c5702ce7ac25ecbea6debeabcde5bd07e9b3967a1d97b3b47abcdcc',
   'facilitator-only':
@@ -111,13 +112,13 @@ const EXPECTED_SHA256: Record<string, string> = {
   'directory+facilitator':
     'df43b5b6c9fdf6410f4794b74b508075ad7ef953c1bca5ccad3588d026797573',
   'license-only':
-    '14697c5d7c4ab9d15e8b2f68648a17abff5a812f5201595799b5eb1cdb5f89f5',
+    'bdf3b0b4b901d5174663e0a74ebd070fb202326f20cee6bf9c193779fa2ac250',
   'directory+license-child-only':
     'c8af1ca62c5702ce7ac25ecbea6debeabcde5bd07e9b3967a1d97b3b47abcdcc',
   'late-mutation':
     '2e63ea53cf8c0c69e29f523b0c99f2d75f39456995e9d9a22c282f3918bb7dee',
   'late-facilitator':
-    '87bd4c8243491235c9ea8680ccfdef88c4ec52bbd31adfd035066985a9ce0b89',
+    '78639af237a42aac85a5534c08bd913eee57c02fd28bb58262b95ff6e6ada309',
 };
 
 // all-on の paths の key 順 (spread 順の固定)。
