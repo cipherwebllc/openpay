@@ -190,6 +190,23 @@ describe('消費税額は税率ごとに 1 回の端数処理 (A8)', () => {
     }
   });
 
+  // Codex 指摘 (#790): JPYC の総額を先に整数円へ丸めてから税額を出すと、6.5 円が 7 円になって履歴 CSV だけ 1 円ずれる。
+  it('小数の JPYC (8% の 3.25 JPYC × 2 = 6.5) は円へ丸めずに税額を出す (どの面も 0 円)', () => {
+    // 6.5 × 8/108 = 0.48 → 0 円。総額を 7 円に丸めてから出すと 7 × 8/108 = 0.52 → 1 円になる。
+    const items: CheckoutItem[] = [
+      { name: 'A', qty: 1, price: '3.25', taxRate: 8, taxCategory: 'taxable_8' },
+      { name: 'B', qty: 1, price: '3.25', taxRate: 8, taxCategory: 'taxable_8' },
+    ];
+    const lines = buildCheckoutLineItems({ items, token: 'jpyc', decimals: 18 });
+    expect(Object.values(surfaces(entry(lines, '6.5')))).toEqual(Array(7).fill('0'));
+  });
+
+  it('明細の無い小数の JPYC (税だけの単品 6.5 JPYC・8%) も、履歴 CSV と履歴画面の税額がそろう', () => {
+    const e = { ...entry([], '6.5'), lineItems: null, taxRate: 8, taxCategory: 'taxable_8' as const };
+    expect(entryTotals(e).totalTax).toBe('0');
+    expect(column(toCsv([e]), '税額(円)')[0]).toBe('0');
+  });
+
   it('USDC もセント単位で税率ごとに 1 回 (0.07 + 0.07 → 0.01 USDC)', () => {
     // 行ごと: 0.07 × 10/110 = 0.0064 → 0.01 を 2 行で 0.02・税率ごと: 0.14 × 10/110 = 0.0127 → 0.01。
     const items: CheckoutItem[] = [

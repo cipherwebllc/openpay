@@ -163,12 +163,13 @@ function taxAmountCell(e: HistoryEntry, usdcJpy: number | undefined): string {
   if (!isIncomeSaleEntry(e)) return '';
   const yv = entryYenValue(e, usdcJpy);
   if (yv.kind === 'unavailable') return '';
+  const base = taxBaseYen(e, yv.yen);
 
   const items = entryLineItems(e);
   if (items.length === 0) {
     // 明細も商品名も無い legacy → entry 単位の税率のみ (従来どおり)。
     if (e.taxRate == null) return '';
-    const amt = innerTaxUnits(BigInt(yv.yen), 1n, e.taxRate, 0);
+    const amt = innerTaxUnits(base.num, base.den, e.taxRate, 0);
     return amt == null ? '' : String(amt);
   }
   if (items.every((li) => li.taxRate == null)) return '';
@@ -191,9 +192,22 @@ function taxAmountCell(e: HistoryEntry, usdcJpy: number | undefined): string {
   // net を分母にすると 4000/3880 倍に膨らむ。anchor 建てでも比率の通貨単位は約分される。
   let tax = 0n;
   for (const g of groups) {
-    tax += innerTaxUnits(g.charged * BigInt(yv.yen), totalCharged, g.rate, 0) ?? 0n;
+    tax += innerTaxUnits(g.charged * base.num, totalCharged * base.den, g.rate, 0) ?? 0n;
   }
   return String(tax);
+}
+
+// 税額の元にする取引の円額 (分数 num / den・円)。JPYC は 1 JPYC = 1 円なので総額 (gross = saleAmount ?? merchantAmount)
+// をトークンの最小単位のまま使う。entryYenValue の整数円 (6.5 円 → 7 円) から出すと、インボイス・履歴画面・明細 CSV
+// (lib/tax.ts の lineItemsTax) と税額がずれる。USDC は円換算値 (anchor か現レートの整数円) のまま。
+function taxBaseYen(e: HistoryEntry, yen: number): { num: bigint; den: bigint } {
+  if (e.asset !== 'jpyc') return { num: BigInt(yen), den: 1n };
+  const gross = e.saleAmount ?? e.merchantAmount;
+  // entryYenValue と同じく、数字でない保存値は 0 円として扱う。
+  return {
+    num: /^\d+$/.test(gross) ? BigInt(gross) : 0n,
+    den: 10n ** BigInt(HISTORY_ASSET_DECIMALS.jpyc),
+  };
 }
 
 // 単一明細の数量/単価のみセル化 (複数明細は「明細」列に要約)。
