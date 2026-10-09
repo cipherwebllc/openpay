@@ -5,7 +5,7 @@
 // 受注は **advisory**: 実着金額を権威保存・商品/テーブルは顧客申告。flag OFF は 404 (本番 inert)。
 // 設計: plans/swift-puzzling-sky.md。
 import { receiptHasRelayEvidence, verifyOrderBinding } from '@/lib/order/orderBindingVerify';
-import { recordMetric } from '@/lib/metrics';
+import { recordMetricAfterResponse } from '@/lib/metrics';
 import { NextResponse, after } from 'next/server';
 import { createPublicClient, getAddress, isAddress, parseUnits, type Address, type Hex } from 'viem';
 import { env, isMainnet } from '@/lib/env';
@@ -640,8 +640,8 @@ export async function POST(req: Request): Promise<NextResponse> {
         }
       }
       orderStored = true; // 受注は KV に確定。以降 pending クレームは消さない (下記 catch 参照)。
-      // 月次メトリクス (運営ヒント・no-throw)。
-      void recordMetric('order');
+      // 月次メトリクス (運営ヒント・no-throw)。応答後に after() で完了させる (投げっぱなしは凍結で途切れる・第 7 回レビュー F9)。
+      recordMetricAfterResponse('order');
       // ステージ2 = pending → done 昇格 (恒久・TTL 上書きで EX を落とす)。**保存確定の後**に昇格するのが肝:
       // 逆順 (昇格→保存) だと昇格後に保存失敗した tx が恒久ブロックのまま永久喪失する (P1-F を悪化)。
       // 保存→昇格の順なら最悪でも「未昇格 pending の自然失効 → 再 POST で復旧」に倒れる (喪失より二重が安全)。

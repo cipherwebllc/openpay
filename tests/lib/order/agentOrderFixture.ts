@@ -24,7 +24,7 @@ vi.mock('@/app/api/facilitator/settle/route', () => ({ POST: h.settle }));
 vi.mock('@/lib/x402/facilitatorStatus', () => ({ resolveFacilitatorPaymentStatus: h.status }));
 vi.mock('@/lib/x402/facilitatorStatusRateLimit', () => ({ checkFacilitatorStatusRateLimit: h.statusAllowed }));
 vi.mock('@/lib/push/notify', () => ({ notifyPaymentReceived: h.push }));
-vi.mock('@/lib/metrics', () => ({ recordMetric: h.metric }));
+vi.mock('@/lib/metrics', () => ({ recordMetric: h.metric, recordMetricAfterResponse: (kind: string) => { h.tasks.push(() => h.metric(kind)); } }));
 vi.mock('@/lib/logger', () => ({ logger: { info: vi.fn(), warn: h.warn, error: h.error } }));
 vi.mock('viem', async (original) => ({ ...await original<typeof import('viem')>(), createPublicClient: () => ({
   getTransactionReceipt: h.receipt,

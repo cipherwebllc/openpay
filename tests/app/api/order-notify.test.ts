@@ -988,7 +988,8 @@ describe('POST /api/order/notify', () => {
     expect('amountUnchecked' in stored).toBe(false);
     expect('feeUncollected' in stored).toBe(false);
     expect('feeExpectedAmount' in stored).toBe(false);
-    expect(pushNotify.after).toHaveBeenCalledTimes(1);
+    // 応答後の付帯処理 = 月次メトリクスと push の 2 本 (どちらも after() で完了させる・第 7 回レビュー F9)。
+    expect(pushNotify.after).toHaveBeenCalledTimes(2);
     expect(pushNotify.notify).toHaveBeenCalledWith(MERCHANT, 'order');
   });
 

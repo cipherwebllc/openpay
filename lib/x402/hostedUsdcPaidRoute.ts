@@ -607,15 +607,17 @@ async function submittedResponse(input: {
     return errorResponse('purchase_provisioning', 503);
   }
   if (finalized.kind === 'finalized') {
-    scheduleAfterResponse(() => {
-      void recordHostedPurchase(finalized.intent.resourceId);
-      void recordMetric('store_purchase');
-      void notifyPaymentReceived(
-        finalized.intent.merchant,
-        'store',
-        `${formatUnits(BigInt(finalized.intent.usdcQuoteAtomic), 6)} USDC`,
-      );
-    });
+    scheduleAfterResponse(() =>
+      Promise.allSettled([
+        recordHostedPurchase(finalized.intent.resourceId),
+        recordMetric('store_purchase'),
+        notifyPaymentReceived(
+          finalized.intent.merchant,
+          'store',
+          `${formatUnits(BigInt(finalized.intent.usdcQuoteAtomic), 6)} USDC`,
+        ),
+      ]),
+    );
   }
   return settledResponse(finalized.intent, settle);
 }

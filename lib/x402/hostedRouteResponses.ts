@@ -18,12 +18,13 @@ export function pendingResponse(): NextResponse {
   );
 }
 
-// 応答後に付帯処理を予約する (掟 12)。after() はリクエストスコープ外 (テスト等) で
-// throw するため、その場合は直接 fire-and-forget に落とす (task は no-throw 前提)。
-export function scheduleAfterResponse(task: () => void): void {
+// 応答後に付帯処理を予約する (掟 12)。after() は task が返す Promise の完了まで実行環境を保つので、task は付帯処理の
+// Promise を返すこと (void で捨てると応答後の凍結で push・購入数・メトリクスが途中で切れる・第 7 回レビュー B11)。
+// after() はリクエストスコープ外 (テスト等) で throw するため、その場合は直接実行に落とす (task は no-throw 前提)。
+export function scheduleAfterResponse(task: () => Promise<unknown>): void {
   try {
     after(task);
   } catch {
-    task();
+    void task();
   }
 }
