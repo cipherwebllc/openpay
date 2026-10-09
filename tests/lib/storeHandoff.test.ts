@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { getAddress, type Address, type Hex } from 'viem';
+import { getAddress, maxUint256, type Address, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import {
   buildReceiveWithAuthorizationTypedData,
@@ -294,6 +294,29 @@ describe('お客様の署名を受け取る', () => {
     expect(await submitHandoffAuth(ID, await signedBody(), deps({ nowSec: () => NOW + 601 }))).toMatchObject({ ok: false, status: 410 });
     store.failRead = true;
     expect(await submitHandoffAuth(ID, await signedBody(), deps())).toMatchObject({ ok: false, status: 503, error: 'handoff_unavailable' });
+  });
+
+  // A13 と同根: 78 桁の数字は uint256 を超えうる。預かった署名との照合 (nonce の計算 = uint256 の ABI encode) で例外 → 500 に
+  // せず、形の違う本文 (400) にする。枠が空いているときも、検証の前に同じ 400 で止める。
+  it('uint256 を超える数は 400 (枠が埋まった後の冪等の照合でも nonce の計算で例外にしない)', async () => {
+    await openSession();
+    const body = await signedBody();
+    const tooBig = (maxUint256 + 1n).toString();
+    for (const key of ['feeValue', 'validAfter', 'validBefore', 'merchantValue'] as const) {
+      await expect(submitHandoffAuth(ID, { ...body, [key]: tooBig }, deps())).resolves.toEqual({
+        ok: false,
+        status: 400,
+        error: 'invalid_body',
+      });
+    }
+    expect(await submitHandoffAuth(ID, body, deps())).toMatchObject({ ok: true, idempotent: false });
+    for (const key of ['feeValue', 'validAfter', 'validBefore'] as const) {
+      await expect(submitHandoffAuth(ID, { ...body, [key]: '9'.repeat(78) }, deps())).resolves.toEqual({
+        ok: false,
+        status: 400,
+        error: 'invalid_body',
+      });
+    }
   });
 });
 

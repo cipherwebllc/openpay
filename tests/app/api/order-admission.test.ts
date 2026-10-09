@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getAddress } from 'viem';
+import { formatUnits, getAddress } from 'viem';
 import type { HandleRecord } from '@/lib/handle';
+import { storefrontDiscountWei } from '@/lib/mobileOrderDiscount';
+import {
+  ORDER_ADMISSION_MAX_BODY_BYTES,
+  ORDER_ITEMS_MAX,
+  ORDER_ITEM_NAME_MAX,
+  declaredItemsTotalMinor,
+  sanitizeOrderItems,
+} from '@/lib/orderRelay';
 
 const MERCHANT = getAddress('0x1234567890123456789012345678901234567890');
 const OTHER_MERCHANT = getAddress(
@@ -393,5 +401,111 @@ describe('POST /api/order/admission — 店舗の値引き', () => {
     hold.resolved = { ok: true, record: record(preorder({ discount: { kind: 'percent', value: '5' } })) };
     expect((await POST(request({ items: 'nope' }))).status).toBe(400);
     expect((await POST(request({ items, discount: 50 }))).status).toBe(400);
+  });
+});
+
+// 本文の上限 (第 7 回レビュー A14/C4)。上限は「最大の正規の本文」から算出する。先にその本文が通ることを固定する。
+describe('POST /api/order/admission — 本文の上限', () => {
+  // サーバが見る範囲いっぱいの正規の本文: 明細 ORDER_ITEMS_MAX 件 (client は 10 件まで)・名前は上限の文字数ぶん
+  // UTF-8 で 3 byte の文字・価格 80 桁・qty 999・値引きつき・handle 30 文字・preorder の受取時刻と手数料負担者。
+  function largestLegitBody() {
+    const items = Array.from({ length: ORDER_ITEMS_MAX }, () => ({
+      name: 'あ'.repeat(ORDER_ITEM_NAME_MAX),
+      qty: 999,
+      price: '9'.repeat(80),
+    }));
+    const discount = { kind: 'percent', value: '5' } as const;
+    const subtotal = declaredItemsTotalMinor(sanitizeOrderItems(items), 18)!;
+    return {
+      storefrontDiscount: discount,
+      body: {
+        handle: 'a'.repeat(30),
+        merchant: MERCHANT,
+        mode: 'preorder',
+        pickupAt: Date.UTC(2026, 6, 10, 3, 30),
+        feePayer: 'merchant',
+        items,
+        discount: formatUnits(storefrontDiscountWei(discount, subtotal, 18), 18),
+      },
+    };
+  }
+
+  it('最大の正規の本文 (約 7.5 KB) は通る (正規の注文を 413 にしない)', async () => {
+    const { body, storefrontDiscount } = largestLegitBody();
+    hold.resolved = { ok: true, record: record(preorder({ discount: storefrontDiscount })) };
+    const text = JSON.stringify(body);
+    expect(Buffer.byteLength(text, 'utf8')).toBeGreaterThan(7000);
+    // 上限は最大の正規の本文の 2 倍以上 (client の明細は 10 件まで = この半分ほど)。
+    expect(Buffer.byteLength(text, 'utf8') * 2).toBeLessThanOrEqual(ORDER_ADMISSION_MAX_BODY_BYTES);
+    const response = await POST(
+      new Request('https://open-pay.jp/api/order/admission', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: text,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+  });
+
+  // 公開・無認証の入口。本文を全部読んで (最大 4.5 MB) JSON にしてから検証しない: 読みながら数え、上限を超えたら打ち切る。
+  it('上限を超える本文は読み切る前に 413 (handle を解決しない・1 MiB を全部は読まない)', async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled >= 1024) {
+          controller.close();
+          return;
+        }
+        pulled += 1;
+        controller.enqueue(new Uint8Array(1024).fill(0x20));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const response = await POST(
+      new Request('https://open-pay.jp/api/order/admission', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: stream,
+        duplex: 'half',
+      } as RequestInit),
+    );
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ ok: false, error: 'payload_too_large' });
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(pulled).toBeLessThan(ORDER_ADMISSION_MAX_BODY_BYTES / 1024 + 16);
+    expect(cancelled).toBe(true);
+    expect(hold.resolveHandle).not.toHaveBeenCalled();
+  });
+
+  it('上限ちょうどまでは読む・1 byte 超えると 413', async () => {
+    const base = JSON.stringify({ handle: 'coffee_shop', merchant: MERCHANT, mode: 'preorder', pad: '' });
+    const pad = 'x'.repeat(ORDER_ADMISSION_MAX_BODY_BYTES - base.length);
+    const at = JSON.stringify({ handle: 'coffee_shop', merchant: MERCHANT, mode: 'preorder', pad });
+    expect(Buffer.byteLength(at)).toBe(ORDER_ADMISSION_MAX_BODY_BYTES);
+    const send = (body: string) =>
+      POST(
+        new Request('https://open-pay.jp/api/order/admission', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body,
+        }),
+      );
+    expect((await send(at)).status).toBe(200);
+    expect((await send(at.replace('"pad":"', '"pad":"x'))).status).toBe(413);
+  });
+
+  it('壊れた JSON・本文なしは従来どおり 400 invalid_json', async () => {
+    for (const init of [{ body: '{not json' }, {}]) {
+      const response = await POST(
+        new Request('https://open-pay.jp/api/order/admission', { method: 'POST', ...init }),
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ ok: false, error: 'invalid_json' });
+    }
+    expect(hold.resolveHandle).not.toHaveBeenCalled();
   });
 });

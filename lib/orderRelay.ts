@@ -179,6 +179,17 @@ const UINT256_MAX = (1n << 256n) - 1n;
 const ORDER_ITEM_PRICE_MAX = 80;
 const ORDER_ITEM_DECIMALS_MAX = 36;
 
+/**
+ * 署名前の受付確認 (POST /api/order/admission) の本文の上限 (byte)。読みながら数え、超えたら 413 で打ち切る。
+ * 最大の正規の本文から算出する: 明細はサーバが見る ORDER_ITEMS_MAX (20) 件 (client = CheckoutForm は 10 件まで)、
+ * 1 件 {"name":"…","qty":999,"price":"…"} = 名前 ORDER_ITEM_NAME_MAX (80) 文字 × 3 byte (UTF-8 の BMP が最大。
+ * JSON でエスケープされる引用符・バックスラッシュは 2 byte・制御文字と孤立サロゲートは URL の parse で落ちる)
+ * + 価格 ORDER_ITEM_PRICE_MAX (80) 桁 + 記号 32 = 352 byte → 20 件 7,061 byte。handle・merchant・mode・pickupAt・
+ * feePayer・値引き (最大 83 桁)・鍵を足して 7,331 byte (tests/app/api/order-admission.test.ts の最大の本文)。
+ * その 2 倍以上 = 16 KiB。
+ */
+export const ORDER_ADMISSION_MAX_BODY_BYTES = 16 * 1024;
+
 export function isTxHashLike(v: unknown): v is string {
   return typeof v === 'string' && HEX64.test(v);
 }
