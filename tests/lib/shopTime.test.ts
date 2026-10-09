@@ -10,6 +10,7 @@ import {
   isPastLastOrder,
   earliestPickup,
   pickupSlots,
+  nearestPickupSlot,
   sanitizeMinLead,
   PICKUP_SLOT_MIN,
   PICKUP_MAX_SLOTS,
@@ -140,6 +141,27 @@ describe('pickupSlots', () => {
       Date.UTC(2024, 0, 15, 3, 45),
       Date.UTC(2024, 0, 15, 4, 0),
     ]);
+  });
+});
+
+describe('nearestPickupSlot (エージェント注文の受取時刻の正規化・B12)', () => {
+  // 12:30 / 12:45 / 13:00 (Tokyo)
+  const slots = pickupSlots(TOKYO_NOON, 30, '13:00');
+  it('候補より前の時刻 (最短準備時間より早い) は最初の枠へ', () => {
+    expect(nearestPickupSlot(slots, TOKYO_NOON + 5 * 60_000)).toBe(slots[0]);
+  });
+  it('候補より後の時刻は最後の枠へ', () => {
+    expect(nearestPickupSlot(slots, TOKYO_NOON + 3 * 3600_000)).toBe(slots[2]);
+  });
+  it('枠の間は近い方へ、同距離なら早い方へ', () => {
+    expect(nearestPickupSlot(slots, TOKYO_NOON + 52 * 60_000)).toBe(slots[1]); // 12:52 → 12:45
+    expect(nearestPickupSlot(slots, TOKYO_NOON + 37.5 * 60_000)).toBe(slots[0]); // 12:37:30 → 12:30
+  });
+  it('枠そのものはそのまま', () => {
+    expect(nearestPickupSlot(slots, slots[1])).toBe(slots[1]);
+  });
+  it('候補が無ければ正規化できないので requested をそのまま返す', () => {
+    expect(nearestPickupSlot([], 123)).toBe(123);
   });
 });
 

@@ -687,6 +687,116 @@ describe('agent-order pay route', () => {
     expect(routeMocks.settle).not.toHaveBeenCalled();
   });
 
+  // 第 7 回レビュー B12・user 裁定 R3: 候補枠にない受取時刻は拒否せず最寄りの枠へ正規化し、
+  // quote (402)・予約 snapshot・settle 応答 (200) で同じ時刻を使う。指定値は pickupAtRequested で分かる。
+  describe('受取時刻の正規化 (B12)', () => {
+    const preorderShop = () =>
+      record({
+        storefront: {
+          chain: 'polygon',
+          mode: 'preorder',
+          feePayer: 'merchant',
+          menu: [
+            { id: 'karaage', name: '唐揚げ', price: '500' },
+            { id: 'beer', name: 'ビール', price: '600' },
+          ],
+          minLeadMinutes: 60,
+          lastOrder: '18:00',
+        },
+      } as Partial<HandleRecord>);
+    const REQUESTED = Date.UTC(2026, 6, 10, 3, 5); // Asia/Tokyo 12:05 (最短 13:00 より早い)
+    const NEAREST = Date.UTC(2026, 6, 10, 4, 0); // Asia/Tokyo 13:00 (= 12:00 + lead 60)
+
+    it('候補枠にない pickupAt は最寄りの枠へ正規化し、quote・予約・応答で同じ時刻を使う', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z')); // Asia/Tokyo 12:00
+      store.record = preorderShop();
+      const { pay } = await load({ preorderTime: '1' });
+      const query = `h=shop&cart=${CART}&pickupAt=${REQUESTED}`;
+
+      const quote = await pay.GET(payReq(query));
+      expect(quote.status).toBe(402);
+      const quoteBody = await quote.json();
+      expect(quoteBody.error).toBe('payment_required');
+      expect(quoteBody.pickupAt).toBe(NEAREST);
+      expect(quoteBody.pickupAtRequested).toBe(REQUESTED);
+      // accepts.resource はエージェントが組んだ URL のまま (MCP の resource 照合を壊さない)。
+      expect(quoteBody.accepts[0].resource).toContain(`pickupAt=${REQUESTED}`);
+
+      routeMocks.verify.mockResolvedValue(NextResponse.json({ isValid: true, payer: PAYER }));
+      routeMocks.settle.mockResolvedValue(
+        NextResponse.json({ success: true, transaction: TX_HASH, payer: PAYER }),
+      );
+      routeMocks.finalize.mockResolvedValue({ ok: true, duplicate: false });
+      const res = await pay.GET(payReq(query, { 'X-PAYMENT': paymentHeader() }));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toMatchObject({ ok: true, orderRegistered: true, pickupAt: NEAREST, pickupAtRequested: REQUESTED });
+      const snapshot = routeMocks.finalize.mock.calls[0][0].reservation.record.snapshot;
+      expect(snapshot.pickupAt).toBe(NEAREST);
+      expect(snapshot.pickupAtRequested).toBe(REQUESTED);
+      expect(snapshot.resource).toContain(`pickupAt=${REQUESTED}`);
+    });
+
+    it('候補枠どおりの pickupAt はそのまま (pickupAtRequested を持たない = 従来の snapshot の形)', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z'));
+      store.record = preorderShop();
+      const { pay } = await load({ preorderTime: '1' });
+      const onSlot = Date.UTC(2026, 6, 10, 4, 15); // Asia/Tokyo 13:15
+      const quote = await pay.GET(payReq(`h=shop&cart=${CART}&pickupAt=${onSlot}`));
+      expect(quote.status).toBe(402);
+      const quoteBody = await quote.json();
+      expect(quoteBody.pickupAt).toBe(onSlot);
+      expect('pickupAtRequested' in quoteBody).toBe(false);
+
+      routeMocks.verify.mockResolvedValue(NextResponse.json({ isValid: true, payer: PAYER }));
+      routeMocks.settle.mockResolvedValue(
+        NextResponse.json({ success: true, transaction: TX_HASH, payer: PAYER }),
+      );
+      routeMocks.finalize.mockResolvedValue({ ok: true, duplicate: false });
+      const res = await pay.GET(
+        payReq(`h=shop&cart=${CART}&pickupAt=${onSlot}`, { 'X-PAYMENT': paymentHeader() }),
+      );
+      expect(res.status).toBe(200);
+      const snapshot = routeMocks.finalize.mock.calls[0][0].reservation.record.snapshot;
+      expect(snapshot.pickupAt).toBe(onSlot);
+      expect('pickupAtRequested' in snapshot).toBe(false);
+    });
+
+    it('preorder-time OFF (または storefront モード) では正規化せず指定値のまま', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z'));
+      store.record = preorderShop();
+      const { pay } = await load({ preorderTime: '' });
+      const quote = await pay.GET(payReq(`h=shop&cart=${CART}&pickupAt=${REQUESTED}`));
+      expect(quote.status).toBe(402);
+      const quoteBody = await quote.json();
+      expect(quoteBody.pickupAt).toBe(REQUESTED);
+      expect('pickupAtRequested' in quoteBody).toBe(false);
+
+      store.record = record({
+        storefront: {
+          chain: 'polygon', mode: 'storefront', feePayer: 'merchant',
+          menu: [{ id: 'karaage', name: '唐揚げ', price: '500' }, { id: 'beer', name: 'ビール', price: '600' }],
+          minLeadMinutes: 60, lastOrder: '18:00',
+        },
+      } as Partial<HandleRecord>);
+      const { pay: payTimed } = await load({ preorderTime: '1' });
+      const storefrontQuote = await payTimed.GET(payReq(`h=shop&cart=${CART}&pickupAt=${REQUESTED}`));
+      expect(storefrontQuote.status).toBe(402);
+      expect((await storefrontQuote.json()).pickupAt).toBe(REQUESTED);
+    });
+
+    it('pickupAt 無しの quote / 応答には pickupAt を出さない (従来の形)', async () => {
+      const { pay } = await load();
+      const quote = await pay.GET(payReq(`h=shop&cart=${CART}`));
+      const quoteBody = await quote.json();
+      expect(quote.status).toBe(402);
+      expect('pickupAt' in quoteBody).toBe(false);
+    });
+  });
+
   it('preorder-time ON で開店前なら支払いヘッダがあっても plain 409 で settle しない', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z')); // Asia/Tokyo 12:00

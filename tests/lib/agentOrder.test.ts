@@ -5,7 +5,7 @@ import {
   computeAgentOrder,
   type AgentCartItem,
 } from '@/lib/agentOrder';
-import { ORDER_ITEMS_MAX, ORDER_ITEM_QTY_MAX } from '@/lib/orderRelay';
+import { ORDER_ITEMS_MAX, ORDER_ITEM_QTY_MAX, sanitizeOrderItems } from '@/lib/orderRelay';
 import type { StorefrontParts } from '@/lib/mobileOrder';
 import type { MenuItem } from '@/lib/mobileOrder';
 
@@ -176,6 +176,24 @@ describe('computeAgentOrder', () => {
     const before = JSON.stringify(cart);
     computeAgentOrder(storefront(OPTION_MENU), cart, 18);
     expect(JSON.stringify(cart)).toBe(before); // options が正規化で書き換わっていない
+  });
+
+  it('options: 絵文字ラベルで合成名が上限近くでも、保存 (sanitizeOrderItems) で料金に含む選択内容が欠けない (B10)', () => {
+    const sushi = '🍣'.repeat(12); // OPTION_NAME_MAX ちょうど (UTF-16 24 単位)
+    const menu: MenuItem[] = [{
+      id: 'set', name: 'a'.repeat(50), price: '100',
+      options: [{ id: 'top', name: 'トッピング', type: 'multi', choices: [
+        { id: 'a', label: sushi, priceDelta: '10' },
+        { id: 'b', label: sushi, priceDelta: '10' },
+      ] }],
+    }];
+    const res = computeAgentOrder(storefront(menu), [{ id: 'set', qty: 1, options: { top: ['a', 'b'] } }], 18);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.totalMinor).toBe(120n * JPYC); // 料金は両方の選択を含む
+    const stored = sanitizeOrderItems(res.items); // 予約 snapshot / 受注はこの関数を通して保存する
+    expect(stored).toEqual(res.items);
+    expect(stored[0]?.name.endsWith(`（${sushi}・${sushi}）`)).toBe(true);
   });
 
   it('options: required グループ未指定は missing_required_option', () => {

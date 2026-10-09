@@ -10,6 +10,7 @@ import {
   OPTION_GROUPS_MAX,
   type OptionGroup,
 } from '@/lib/menuOptions';
+import { ORDER_ITEM_NAME_MAX, sanitizeOrderItems } from '@/lib/orderRelay';
 
 const size: OptionGroup = {
   id: 'g1',
@@ -220,5 +221,32 @@ describe('Codex 指摘の回帰ガード', () => {
     ]);
     const oneCrafted = selectionKey('i', [{ groupId: 'a', choiceId: 'b,c:d' }]);
     expect(twoChoices).not.toBe(oneCrafted);
+  });
+});
+
+// 第 7 回レビュー B10: 合成名の上限は保存側 (sanitizeOrderItems の .slice) と同じ UTF-16 単位で数える。
+// code point で数えると絵文字 (サロゲートペア) を含む名前が保存時に末尾 (選択内容・閉じ括弧) から切れる。
+describe('composeLineName の切り詰め単位 (B10)', () => {
+  const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  it('UTF-16 80 単位 (保存上限) に収め、絵文字ラベルでも選択内容と閉じ括弧が保存後も残る', () => {
+    const sushi = '🍣'.repeat(12); // OPTION_NAME_MAX (24 UTF-16 単位) ちょうど・code point は 12
+    const out = composeLineName('a'.repeat(50), [
+      { id: 'a', label: sushi, priceDelta: '10' },
+      { id: 'b', label: sushi, priceDelta: '10' },
+    ]);
+    expect(out.length).toBeLessThanOrEqual(ORDER_ITEM_NAME_MAX);
+    expect(out.endsWith(`（${sushi}・${sushi}）`)).toBe(true);
+    expect(sanitizeOrderItems([{ name: out, qty: 1, price: '120' }])[0]?.name).toBe(out);
+  });
+  it('基底名の切り詰めでサロゲートペアを分断しない', () => {
+    const out = composeLineName('🍣'.repeat(40), [{ id: 'l', label: '大盛り', priceDelta: '0' }]);
+    expect(out.length).toBeLessThanOrEqual(ORDER_ITEM_NAME_MAX);
+    expect(out.endsWith('（大盛り）')).toBe(true);
+    expect(LONE_SURROGATE.test(out)).toBe(false);
+  });
+  it('サフィックスだけで上限を超えるときもサロゲートを分断せず上限内に収める', () => {
+    const out = composeLineName('丼', [{ id: 'x', label: '🍣'.repeat(12), priceDelta: '0' }, { id: 'y', label: '🍣'.repeat(12), priceDelta: '0' }, { id: 'z', label: '🍣'.repeat(12), priceDelta: '0' }, { id: 'w', label: '🍣'.repeat(12), priceDelta: '0' }]);
+    expect(out.length).toBeLessThanOrEqual(ORDER_ITEM_NAME_MAX);
+    expect(LONE_SURROGATE.test(out)).toBe(false);
   });
 });

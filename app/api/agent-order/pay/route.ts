@@ -21,7 +21,7 @@ import { chainForSlug } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { readShopLive } from '@/lib/shopLiveStore';
-import { isBeforeOpen, isPastLastOrder, pickupSlots } from '@/lib/shopTime';
+import { isBeforeOpen, isPastLastOrder, nearestPickupSlot, pickupSlots } from '@/lib/shopTime';
 import { createJpycPaymentRequirements } from '@/lib/x402/requirements';
 import { parseFacilitatorRequest } from '@/lib/x402/facilitatorSettle';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
@@ -133,6 +133,21 @@ function canonicalResourceUrl(
   return `${OPENPAY_CANONICAL_ORIGIN}/api/agent-order/pay?${params.toString()}`;
 }
 
+// 応答に載せる受取時刻 (第 7 回レビュー B12・user 裁定 R3)。pickupAt = 受注・予約で使う正規化後の値、
+// pickupAtRequested = エージェントの指定値 (正規化で変わったときだけ)。指定が無ければ何も足さない (従来の形)。
+function pickupFields(
+  pickupAt: number | null,
+  requested: number | null | undefined,
+): { pickupAt?: number; pickupAtRequested?: number } {
+  if (pickupAt === null) return {};
+  return {
+    pickupAt,
+    ...(requested !== undefined && requested !== null && requested !== pickupAt
+      ? { pickupAtRequested: requested }
+      : {}),
+  };
+}
+
 function paymentInvalidResponse(): NextResponse {
   return NextResponse.json(
     { x402Version: 1, error: 'payment_invalid' },
@@ -165,7 +180,10 @@ async function authorizationOriginFailure(
   }
   if (origin === 'indeterminate') return pendingRecoveryResponse(snapshot);
   const accepts = [facilitatorBody.paymentRequirements] as Accepts;
-  return challenge(snapshot.resource, accepts[0].description, accepts, 'payment_invalid');
+  return challenge(
+    snapshot.resource, accepts[0].description, accepts, 'payment_invalid',
+    pickupFields(snapshot.pickupAt, snapshot.pickupAtRequested),
+  );
 }
 
 function unusedExpiredChallenge(
@@ -178,7 +196,10 @@ function unusedExpiredChallenge(
   }
   // Call only on positive unused status: unknown settlement must never prompt another payment.
   const accepts = [facilitatorBody.paymentRequirements] as Accepts;
-  return challenge(snapshot.resource, accepts[0].description, accepts, 'expired');
+  return challenge(
+    snapshot.resource, accepts[0].description, accepts, 'expired',
+    pickupFields(snapshot.pickupAt, snapshot.pickupAtRequested),
+  );
 }
 
 async function settledOrderResponse(input: {
@@ -255,6 +276,7 @@ async function settledOrderResponse(input: {
       snapshot.decimals,
     ),
     orderRegistered,
+    ...pickupFields(snapshot.pickupAt, snapshot.pickupAtRequested),
     ...(!orderRegistered && (reservation || input.allowLegacy === false) ? {
       paymentSettled: true,
       repair: { action: 'do_not_pay_again', retryWithSameHeader, txHash },
@@ -319,6 +341,7 @@ async function recoverMatchedPayment(input: {
         return challenge(
           snapshot.resource, accepts[0].description, accepts,
           verified.invalidReason ?? 'payment_invalid',
+          pickupFields(snapshot.pickupAt, snapshot.pickupAtRequested),
         );
       }
       const accepts = [record.facilitatorBody.paymentRequirements] as Accepts;
@@ -411,10 +434,11 @@ function challenge(
   description: string,
   accepts: Accepts,
   error: string,
+  extra: Record<string, unknown> = {},
   status = 402,
 ): NextResponse {
   return paymentRequired(
-    NextResponse.json({ x402Version: 1, accepts, error }, { status }),
+    NextResponse.json({ x402Version: 1, accepts, error, ...extra }, { status }),
     resourceUrl,
     description,
     accepts,
@@ -570,17 +594,24 @@ export async function GET(req: Request): Promise<NextResponse> {
   ) {
     return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
   }
-  if (
-    env.enablePreorderTime &&
-    record.storefront.mode === 'preorder' &&
-    pickupSlots(
+  // 受取時刻: エージェントの指定値 (resource の pickupAt) を、preorder 店では人間の注文画面と同じ候補枠
+  // (最短準備時間・ラストオーダー・15 分刻み) の最寄りへ正規化する。人間の admission のように拒否はしない
+  // (第 7 回レビュー B12・user 裁定 R3)。正規化後の値を quote (402)・予約 snapshot・受注・応答で一貫して使い、
+  // 指定値と違えば応答の pickupAtRequested で分かる。
+  const pickupAtRequested = pickupAtForAgentOrderSnapshot(pickupAtParam);
+  let pickupAt = pickupAtRequested;
+  if (env.enablePreorderTime && record.storefront.mode === 'preorder') {
+    const slots = pickupSlots(
       Date.now(),
       record.storefront.minLeadMinutes,
       record.storefront.lastOrder,
-    ).length === 0
-  ) {
-    return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
+    );
+    if (slots.length === 0) {
+      return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
+    }
+    if (pickupAtRequested !== null) pickupAt = nearestPickupSlot(slots, pickupAtRequested);
   }
+  const pickup = pickupFields(pickupAt, pickupAtRequested);
   if (soldOut && cartItems.some((item) => soldOut.has(item.id))) {
     return NextResponse.json({ error: 'item_sold_out' }, { status: 409 });
   }
@@ -612,10 +643,10 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
 
   if (!paymentSignatureHeader && !paymentHeader) {
-    return challenge(resourceUrl, description, accepts, 'payment_required');
+    return challenge(resourceUrl, description, accepts, 'payment_required', pickup);
   }
   if (paymentScopeConflict) {
-    return challenge(resourceUrl, description, accepts, 'payment_invalid');
+    return challenge(resourceUrl, description, accepts, 'payment_invalid', pickup);
   }
   if (decodedPaymentPayloadReady && paymentIdentity === null) {
     return challenge(
@@ -623,6 +654,7 @@ export async function GET(req: Request): Promise<NextResponse> {
       description,
       accepts,
       'invalid_payment_payload',
+      pickup,
     );
   }
 
@@ -640,6 +672,7 @@ export async function GET(req: Request): Promise<NextResponse> {
         description,
         accepts,
         'invalid_payment_payload',
+        pickup,
       );
     }
     const v1Body = v2PayloadToV1Body(payloadV2, accepts);
@@ -649,6 +682,7 @@ export async function GET(req: Request): Promise<NextResponse> {
         description,
         accepts,
         'invalid_payment_payload',
+        pickup,
       );
     }
     facilitatorBody = { ...v1Body };
@@ -664,6 +698,7 @@ export async function GET(req: Request): Promise<NextResponse> {
         description,
         accepts,
         'invalid_payment_payload',
+        pickup,
       );
     }
     facilitatorBody = {
@@ -693,17 +728,18 @@ export async function GET(req: Request): Promise<NextResponse> {
       description,
       accepts,
       verifyBody.invalidReason ?? 'payment_invalid',
+      pickup,
     );
   }
 
   if (paymentIdentity === null) {
-    return challenge(resourceUrl, description, accepts, 'payment_invalid');
+    return challenge(resourceUrl, description, accepts, 'payment_invalid', pickup);
   }
   let payer: Address;
   try {
     payer = getAddress(verifyBody.payer ?? '');
   } catch {
-    return challenge(resourceUrl, description, accepts, 'payment_invalid');
+    return challenge(resourceUrl, description, accepts, 'payment_invalid', pickup);
   }
 
   const snapshot = createAgentOrderSnapshot({
@@ -716,7 +752,8 @@ export async function GET(req: Request): Promise<NextResponse> {
     totalMinor: order.totalMinor,
     resource: resourceUrl,
     table: sanitizeTable(tableParam),
-    pickupAt: pickupAtForAgentOrderSnapshot(pickupAtParam),
+    pickupAt,
+    pickupAtRequested,
   });
   if (
     snapshot === null ||
@@ -727,7 +764,7 @@ export async function GET(req: Request): Promise<NextResponse> {
       identity: paymentIdentity,
     }) === null
   ) {
-    return challenge(resourceUrl, description, accepts, 'payment_invalid');
+    return challenge(resourceUrl, description, accepts, 'payment_invalid', pickup);
   }
 
   // Check before either pre-broadcast record is created: a rejected human authorization must
@@ -742,7 +779,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     context: snapshot,
   });
   if (claim.kind === 'conflict') {
-    return challenge(resourceUrl, description, accepts, 'payment_invalid');
+    return challenge(resourceUrl, description, accepts, 'payment_invalid', pickup);
   }
   if (claim.kind === 'match') {
     return recoverMatchedPayment({
@@ -773,7 +810,7 @@ export async function GET(req: Request): Promise<NextResponse> {
       });
     }
     if (reserved.kind === 'conflict') {
-      return challenge(resourceUrl, description, accepts, 'payment_invalid');
+      return challenge(resourceUrl, description, accepts, 'payment_invalid', pickup);
     }
     return NextResponse.json({ error: 'storage_unavailable' }, { status: 503 });
   }
@@ -884,6 +921,7 @@ async function settleBoundOrder(input: {
         description,
         accepts,
         settleBody.errorReason ?? 'settlement_failed',
+        pickupFields(snapshot.pickupAt, snapshot.pickupAtRequested),
       );
     }
     return NextResponse.json(settleBody, { status: settleRes.status });
