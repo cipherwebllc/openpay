@@ -1250,6 +1250,8 @@ describe('POST /api/order/notify', () => {
     delete (body as Record<string, unknown>).txHash;
     (body as Record<string, unknown>).merchantTxHash = TXHASH;
     expect((await POST(req(body))).status).toBe(200);
+    // relay の証拠が無い (通常の送金) 注文は、受け渡し時の確認を促す印を付けて保存する (追加のみ)。
+    expect(latestStoredOrder().unboundPayment).toBe(true);
   });
 
   it('statusToken あり + enableOrderPickup ON → 注文状況の逆引きポインタ保存 (order:sv:<token>=所在・nx)', async () => {
@@ -1336,6 +1338,8 @@ for (const mode of ['free', 'recover'] as const) {
       expect((await POST(req(f.body))).status).toBe(200);
       expect(latestStoredOrder()).toMatchObject({ orderId: f.order.orderId, amount: String(1000n * JPYC), customerMemo: 'no ice', table: f.order.description });
       expect(latestStoredOrder().bindingDigest).toMatch(/^0x[0-9a-f]{64}$/);
+      // 注文に結びついた relay の支払いには印を付けない。
+      expect(latestStoredOrder()).not.toHaveProperty('unboundPayment');
       hold.claimValue = null;
       expect(await (await POST(req(f.body))).json()).toEqual({ ok: true, duplicate: true });
     });
@@ -1359,7 +1363,11 @@ for (const mode of ['free', 'recover'] as const) {
       const { bind: _bind, ...body } = f.body;
       const res = await POST(req(body));
       expect(res.status).toBe(enforce ? 422 : 200);
-      if (!enforce) expect(latestStoredOrder().bindingMissing).toBe(true);
+      if (!enforce) {
+        expect(latestStoredOrder().bindingMissing).toBe(true);
+        // relay の移行扱いは赤い警告 (bindingMissing) だけ。通常の送金の注記は重ねない。
+        expect(latestStoredOrder()).not.toHaveProperty('unboundPayment');
+      }
       else expect(lpushSpy).not.toHaveBeenCalled();
     });
     it.each([false, true])('rejects incomplete binding under enforce=%s', async (enforce) => {

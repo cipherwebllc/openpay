@@ -340,6 +340,14 @@ describe('orderRelay: serialize/parse (KV は untrusted・read 時も検証)', (
     expect(parseStoredOrder(JSON.stringify(noField))?.fulfilled).toBe(false);
   });
 
+  it('unboundPayment (結びつけられない経路で届いた注文) は true のときだけ復元し、操作でも保持する', () => {
+    const u = parseStoredOrder(serializeOrder(order({ unboundPayment: true })));
+    expect(u?.unboundPayment).toBe(true);
+    expect(parseStoredOrder(JSON.stringify({ ...order(), unboundPayment: 'yes' }))?.unboundPayment).toBeUndefined();
+    expect(parseStoredOrder(serializeOrder(order()))?.unboundPayment).toBeUndefined();
+    expect(applyOrderOp(u!, { kind: 'fulfill', value: true }).unboundPayment).toBe(true);
+  });
+
   it('kitchenDone は true のときだけ復元 (旧データ=未設定)', () => {
     const k = parseStoredOrder(serializeOrder(order({ kitchenDone: true })));
     expect(k?.kitchenDone).toBe(true);
