@@ -130,10 +130,24 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   if (!env.enableX402Facilitator) return notFound();
+  // POST/PATCH と同じ IP limiter (取り下げの連打で KV を使わせない・第 7 回レビュー X1)。
+  if (
+    !(await checkIpRateLimit(
+      'x402-resource-write',
+      hashIpBucket(clientIp(req)),
+      30,
+      60,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: 'rate_limited' },
+      { status: 429, headers: { 'Retry-After': '60' } },
+    );
+  }
   const session = await requireSession();
   if (!session.ok) return session.response;
   const { id } = await params;

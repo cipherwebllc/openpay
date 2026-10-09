@@ -214,6 +214,7 @@ describe('SIWE routes', () => {
 
   it.each(['same-origin', 'same-site', null])('verify: valid JSON login issues a session for %s', async (site) => {
     h.kvConfigured = true;
+    h.kvGet.mockResolvedValue({ ok: true, value: '1' }); // 発行済みの nonce (存在だけを読む・C8)
     h.kvDel.mockResolvedValue({ ok: true, value: 1 });
     h.kvSet.mockResolvedValue({ ok: true, value: 'OK' });
     // Fixed, test-only account; no real wallet, keystore, or RPC is used for this EOA signature.
@@ -233,6 +234,7 @@ describe('SIWE routes', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, address: account.address });
     expect(res.headers.get('set-cookie')).toContain('op_sess=');
+    expect(h.kvGet).toHaveBeenCalledWith('siwe:nonce:csrf1234');
     expect(h.kvDel).toHaveBeenCalledWith('siwe:nonce:csrf1234');
     expect(h.kvSet).toHaveBeenCalledOnce();
   });

@@ -129,6 +129,8 @@ export type SiweVerifyDeps = {
     nonce: string;
     chainId: number;
   }) => Promise<boolean>;
+  /** nonce が発行済みで未消費か (消費はしない)。読めない (KV 障害) も false。 */
+  nonceExists: (nonce: string) => Promise<boolean>;
   /** nonce を atomic に消費 (存在し消せたら true・二重/期限切れは false)。 */
   consumeNonce: (nonce: string) => Promise<boolean>;
   /** セッションを作成しトークンを返す。 */
@@ -137,8 +139,10 @@ export type SiweVerifyDeps = {
 
 /**
  * SIWE ログインの検証フロー (純粋コア)。
- * 順序: 構造検証 (400) → domain 一致 → uri 束縛 → 署名検証 → nonce 消費 → セッション発行。
+ * 順序: 構造検証 (400) → domain 一致 → uri 束縛 → nonce の存在 → 署名検証 → nonce 消費 → セッション発行。
  * 署名検証を nonce 消費より前に置くのは、署名失敗で nonce を焼かない (再送可能) ため。
+ * 存在の確認 (消費しない) を署名検証より前に置くのは、署名検証が ERC-6492 の eth_call (RPC) を
+ * 投げうるので、存在しない nonce の要求でサーバの RPC を使わせないため (第 7 回レビュー C8)。
  * replay は「有効な (message,signature) の 2 回目」で consumeNonce が false になり弾かれる。
  */
 export async function verifySiweLogin(
@@ -205,6 +209,10 @@ export async function verifySiweLogin(
   const validityMs = expirationTime.getTime() - issuedAt.getTime();
   if (validityMs <= 0 || validityMs > MAX_SIWE_VALIDITY_MS) {
     return { ok: false, status: 400, error: 'invalid_message' };
+  }
+
+  if (!(await deps.nonceExists(nonce))) {
+    return { ok: false, status: 401, error: 'nonce_invalid' };
   }
 
   const checksum = getAddress(address);

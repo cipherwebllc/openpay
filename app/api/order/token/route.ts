@@ -16,6 +16,7 @@ import { requireSession } from '../../auth/siwe/_session';
 import { kvGet, kvSet, kvDel, isKvConfigured } from '@/lib/kv';
 import { orderTokenKey, orderTokenRevKey, ORDER_TOKEN_BYTES } from '@/lib/orderToken';
 import { logger } from '@/lib/logger';
+import { checkClientIpBucketRateLimit } from '@/lib/net/clientRateLimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,6 +32,10 @@ function kvError() {
 }
 
 /** 現行トークンの再表示 (オーナーがリンクをいつでもコピーできるように)。未発行は token:null。 */
+function rateLimited(): NextResponse {
+  return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429, headers: { 'Retry-After': '60' } });
+}
+
 export async function GET(): Promise<NextResponse> {
   if (!env.enableOrderToken) return notFound();
   const session = await requireSession();
@@ -50,8 +55,11 @@ export async function GET(): Promise<NextResponse> {
 }
 
 /** 発行 / 再発行 (rotate)。旧トークンは現行一致検証で即失効する。新トークンを 1 度だけ返す。 */
-export async function POST(): Promise<NextResponse> {
+export async function POST(req: Request): Promise<NextResponse> {
   if (!env.enableOrderToken) return notFound();
+  // SIWE は誰でも無料で取れるので、書き込みごとの KV/外部 fetch をサーバに使わせる連打を IP で止める
+  // (兄弟の SIWE 書き込み route と同じ形・第 7 回レビュー C9)。
+  if (!(await checkClientIpBucketRateLimit(req, 'order-token-write', 30, 60))) return rateLimited();
   const session = await requireSession();
   if (!session.ok) return session.response;
   if (!isKvConfigured()) return kvUnavailable();
@@ -87,8 +95,11 @@ export async function POST(): Promise<NextResponse> {
 }
 
 /** 取消 (revoke)。受取アドレスの現行トークンを消す → 以後どのトークンも feed で弾かれる。 */
-export async function DELETE(): Promise<NextResponse> {
+export async function DELETE(req: Request): Promise<NextResponse> {
   if (!env.enableOrderToken) return notFound();
+  // SIWE は誰でも無料で取れるので、書き込みごとの KV/外部 fetch をサーバに使わせる連打を IP で止める
+  // (兄弟の SIWE 書き込み route と同じ形・第 7 回レビュー C9)。
+  if (!(await checkClientIpBucketRateLimit(req, 'order-token-write', 30, 60))) return rateLimited();
   const session = await requireSession();
   if (!session.ok) return session.response;
   if (!isKvConfigured()) return kvUnavailable();

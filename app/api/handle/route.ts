@@ -26,6 +26,7 @@ import {
   reserveOrUpdateHandle,
   listHandleRecordsForOwner,
 } from '@/lib/handleStore';
+import { checkClientIpBucketRateLimit } from '@/lib/net/clientRateLimit';
 
 export const runtime = 'nodejs';
 export const maxDuration = 10;
@@ -155,6 +156,10 @@ async function resolveAudiusEmbeds(rawProfile: unknown): Promise<ResolvedAudiusP
   };
 }
 
+function rateLimited(): NextResponse {
+  return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429, headers: { 'Retry-After': '60' } });
+}
+
 export async function GET() {
   if (!env.enableHandles) return notFound();
   const session = await requireSession();
@@ -183,6 +188,9 @@ export async function GET() {
 
 export async function POST(req: Request) {
   if (!env.enableHandles) return notFound();
+  // SIWE は誰でも無料で取れるので、書き込みごとの KV/外部 fetch をサーバに使わせる連打を IP で止める
+  // (兄弟の SIWE 書き込み route と同じ形・第 7 回レビュー C9)。
+  if (!(await checkClientIpBucketRateLimit(req, 'handle-write', 30, 60))) return rateLimited();
   const session = await requireSession();
   if (!session.ok) return session.response;
 

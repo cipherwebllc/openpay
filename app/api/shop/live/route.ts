@@ -12,6 +12,7 @@ import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import { parseShopLivePatch } from '@/lib/shopLive';
 import { readShopLive, applyShopLive } from '@/lib/shopLiveStore';
 import { logger } from '@/lib/logger';
+import { checkClientIpBucketRateLimit } from '@/lib/net/clientRateLimit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,6 +30,10 @@ function handleFromReq(req: Request): string {
   return normalizeHandle(new URL(req.url).searchParams.get('h') ?? '');
 }
 
+function rateLimited(): NextResponse {
+  return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429, headers: { 'Retry-After': '60' } });
+}
+
 export async function GET(req: Request): Promise<NextResponse> {
   if (!env.enableShopLive) return notFound();
   const handle = handleFromReq(req);
@@ -43,6 +48,9 @@ export async function GET(req: Request): Promise<NextResponse> {
 
 export async function PATCH(req: Request): Promise<NextResponse> {
   if (!env.enableShopLive) return notFound();
+  // SIWE は誰でも無料で取れるので、書き込みごとの KV/外部 fetch をサーバに使わせる連打を IP で止める
+  // (兄弟の SIWE 書き込み route と同じ形・第 7 回レビュー C9)。
+  if (!(await checkClientIpBucketRateLimit(req, 'shop-live-write', 30, 60))) return rateLimited();
   const session = await requireSession();
   if (!session.ok) return session.response;
   const handle = handleFromReq(req);

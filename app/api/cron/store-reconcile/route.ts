@@ -19,12 +19,13 @@ function noStore(response: NextResponse): NextResponse {
 }
 
 async function handleReconcile(req: Request): Promise<NextResponse> {
-  if (!env.enableCreatorStore) {
-    return NextResponse.json({ error: 'not_found' }, { status: 404 });
-  }
-  // cron 認証は lib/cronAuth に集約 (CRON_SECRET は server 専用・比較は timing-safe)。
+  // cron 認証は lib/cronAuth に集約 (CRON_SECRET は server 専用・比較は timing-safe)。他の cron と同じく
+  // 認証を flag より先に見る (無認証で 404/401 を見分けて server flag の状態を知られない・第 7 回レビュー C14)。
   if (!requireCronAuth(req)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+  if (!env.enableCreatorStore) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 });
   }
 
   // license の index 復旧障害を既存デジタル/USDC reconciler へ波及させない。
