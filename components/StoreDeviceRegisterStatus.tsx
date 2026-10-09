@@ -151,7 +151,8 @@ export function StoreDeviceRegisterStatus({
           </p>
           {state.finalized && <p className="text-xs">{t('finalized')}</p>}
           <div className="flex flex-wrap items-center gap-2">
-            {txLink(state.mark.chainId, state.mark.hash)}
+            {/* 実際に成立した tx (サーバの判定が見つけた tx。第三者が同じ署名を先に送ったときは端末が送った tx と違う)。 */}
+            {txLink(state.mark.chainId, state.txHash ?? state.mark.hash)}
             {dismiss}
           </div>
         </div>

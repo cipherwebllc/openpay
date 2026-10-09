@@ -48,6 +48,8 @@ const FINALITY_WATCH_MS = 5 * 60_000;
 const UNKNOWN_WATCH_MS = 15 * 60_000;
 // 再読み込み後に結果を出す送信の新しさ。
 const RECENT_MARK_MS = 15 * 60_000;
+// 店の tx の revert の後に 1 回だけ引くサーバの判定を待つ上限 (route の maxDuration 20 秒 + 余裕)。
+const REVERT_RESOLVE_TIMEOUT_MS = 25_000;
 
 export type DeviceSession = {
   id: string;
@@ -74,7 +76,9 @@ export type StoreDeviceRegisterState =
   | { phase: 'not_sent'; reason: DeviceNotSentReason; canRetry: boolean }
   | { phase: 'sent'; mark: DeviceSentMark; previous: boolean }
   // 入金を確認 (この支払いの Settled が receipt にある = 品物を渡す合図)。finalized = サーバの判定で確定。
-  | { phase: 'received'; mark: DeviceSentMark; finalized: boolean; previous: boolean }
+  // txHash = サーバの判定が見つけた、実際に成立した tx (第三者が同じ署名を先に送ったときは mark.hash と違う・
+  // 第 7 回レビュー A11)。無ければ mark.hash (端末が送った tx) が成立した tx。
+  | { phase: 'received'; mark: DeviceSentMark; finalized: boolean; previous: boolean; txHash?: Hex }
   | { phase: 'reverted'; mark: DeviceSentMark; previous: boolean }
   // 送った tx が期限までに成立しなかったとサーバの判定で確かめた (お支払いは行われていない)
   | { phase: 'failed'; mark: DeviceSentMark; previous: boolean }
@@ -157,6 +161,77 @@ async function readDeviceView(s: DeviceSession): Promise<{ status: number; body:
     cache: 'no-store',
   });
   return { status: res.status, body: (await res.json().catch(() => null)) as DeviceView | null };
+}
+
+type ResolveBody = { ok?: boolean; state?: string; txHash?: unknown } | null;
+
+const isTxHash = (v: unknown): v is Hex => typeof v === 'string' && /^0x[0-9a-fA-F]{64}$/.test(v);
+
+/** この送信 (mark) の支払いの結論をサーバの判定に問う (/api/register/handoff/resolve)。通信の失敗は throw。 */
+async function postResolve(
+  mark: DeviceSentMark,
+  config: { forwarder: Address; feeReceiver: Address },
+  signal?: AbortSignal,
+): Promise<ResolveBody> {
+  const res = await fetch('/api/register/handoff/resolve', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chainId: mark.chainId,
+      from: mark.from,
+      merchant: mark.merchant,
+      merchantValue: mark.amount,
+      validBefore: mark.validBefore,
+      intentSalt: mark.intentSalt,
+      nonce: mark.nonce,
+      forwarder: config.forwarder,
+      feeReceiver: config.feeReceiver,
+      txHash: mark.hash,
+    }),
+    ...(signal ? { signal } : {}),
+  });
+  return (await res.json().catch(() => null)) as ResolveBody;
+}
+
+/**
+ * 店の tx が revert した支払いを、サーバの判定で 1 回だけ確かめる (第 7 回レビュー A3)。forwarder の settle は誰でも
+ * 送れるので、お客様の端末などが同じ署名を先に成立させると店の tx だけが revert する (revert は「お支払いは行われて
+ * いない」の証明ではない)。成立 (確定済みの Settled) ならその tx の hash、それ以外 (確認中・未使用・読めない) は null。
+ */
+async function settledTxAfterRevert(
+  mark: DeviceSentMark,
+  config: { forwarder: Address; feeReceiver: Address },
+): Promise<Hex | null> {
+  const abort = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  // 応答が返らなくても「送信しました」(次の QR を出せない) のまま止めない (上限で従来の reverted へ進む)。
+  const timedOut = new Promise<null>((resolve) => {
+    timer = setTimeout(() => {
+      abort.abort();
+      resolve(null);
+    }, REVERT_RESOLVE_TIMEOUT_MS);
+  });
+  try {
+    const body = await Promise.race([postResolve(mark, config, abort.signal), timedOut]);
+    return body?.ok && body.state === 'settled' && isTxHash(body.txHash) ? body.txHash : null;
+  } catch {
+    // 判定の照会は付帯: 通信の失敗は「成立を確かめられない」= 従来どおり reverted (結果の表示に波及させない)。
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * 送った印の一覧から、この署名 (nonce) の印を探す。送信 (sendStoreDeviceSettle) は印を残して読み戻してから送るので、
+ * 印が無い = 送っていない。一覧を読めないときも null (印を書けない・読めない端末では送信が not_sent で止まる)。
+ */
+function findSentMark(
+  read: { ok: true; marks: DeviceSentMark[] } | { ok: false },
+  nonce: string,
+): DeviceSentMark | null {
+  if (!read.ok) return null;
+  return read.marks.find((m) => m.nonce.toLowerCase() === nonce.toLowerCase()) ?? null;
 }
 
 /** 締め切る。署名が先に入っていればそれを返す。通信の失敗は null (締め切れたか分からない)。 */
@@ -297,25 +372,18 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       const tick = async () => {
         if (stopped || gen !== genRef.current) return;
         try {
-          const res = await fetch('/api/register/handoff/resolve', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              chainId: mark.chainId,
-              from: mark.from,
-              merchant: mark.merchant,
-              merchantValue: mark.amount,
-              validBefore: mark.validBefore,
-              intentSalt: mark.intentSalt,
-              nonce: mark.nonce,
-              forwarder: config.forwarder,
-              feeReceiver: config.feeReceiver,
-              txHash: mark.hash,
-            }),
-          });
-          const body = (await res.json().catch(() => null)) as { ok?: boolean; state?: string } | null;
+          const body = await postResolve(mark, config);
           if (!stopped && body?.ok && body.state === 'settled') {
-            if (showsMark(mark)) setIf(gen, { phase: 'received', mark, finalized: true, previous });
+            if (showsMark(mark)) {
+              // 判定が見つけた tx (実際に成立した tx) も持つ (端末が送った tx と違うことがある・第 7 回レビュー A11)。
+              setIf(gen, {
+                phase: 'received',
+                mark,
+                finalized: true,
+                previous,
+                ...(isTxHash(body.txHash) ? { txHash: body.txHash } : {}),
+              });
+            }
             return;
           }
           if (!stopped && fromUnknown && body?.ok && body.state === 'expired_unused') {
@@ -338,13 +406,13 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
 
   // receipt で結果を出す (成功 + この支払いの Settled = 入金を確認)。
   const showReceipt = useCallback(
-    (
+    async (
       mod: typeof import('@/lib/storeDeviceSend'),
       mark: DeviceSentMark,
       receipt: DeviceReceipt,
       previous: boolean,
       gen: number,
-    ) => {
+    ): Promise<void> => {
       if (gen !== genRef.current) return;
       const config = storeDeviceChainConfig(mark.chainId);
       if (!receipt || !config) {
@@ -353,7 +421,15 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         return;
       }
       if (receipt.status === 'reverted') {
-        set({ phase: 'reverted', mark, previous });
+        // 第 7 回レビュー A3: 店の tx の revert だけで「お支払いは行われていません」と言わない。サーバの判定を 1 回引き、
+        // 別の tx (同じ署名) で成立していれば入金の確認 (確定済み・実際に成立した tx) にする。それ以外は従来どおり reverted。
+        // 判定を待つ間は今の表示 (送信しました・結果が分からない = 次の QR を出せない) のまま。
+        const shown = stateRef.current;
+        const settledTx = await settledTxAfterRevert(mark, config);
+        // 待つ間に表示が変わった (閉じた・次の会計・別の確認が結論を出した) なら、遅れた判定で上書きしない。
+        if (stateRef.current !== shown) return;
+        if (settledTx) set({ phase: 'received', mark, finalized: true, previous, txHash: settledTx });
+        else set({ phase: 'reverted', mark, previous });
         return;
       }
       if (mod.receiptHasSettlement(receipt.logs, config.forwarder, mark, config.feeReceiver)) {
@@ -380,7 +456,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         // (出さないと次の QR を出せないまま残る)。別の表示に変わっていたら上書きしない。
         const cur = stateRef.current;
         if (cur.phase !== 'sent' || cur.mark.hash !== mark.hash) return;
-        showReceipt(loaded.mod, mark, receipt, previous, genRef.current);
+        await showReceipt(loaded.mod, mark, receipt, previous, genRef.current);
       })();
     },
     [loadWatch, set, showReceipt],
@@ -409,6 +485,10 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       genRef.current += 1;
       finalityStopRef.current?.();
       set({ phase: 'processing' });
+      // 例外の行き先を分ける境界 (下の catch・第 7 回レビュー A12): 送信を呼んだか・送った印を受け取ったか。
+      let sendMod: typeof import('@/lib/storeDeviceSend') | null = null;
+      let sendCalled = false;
+      let sentMark: DeviceSentMark | null = null;
       try {
         const loaded = await loadIo(session.chainId);
         if (!loaded) {
@@ -416,6 +496,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
           return;
         }
         const { mod, io, config } = loaded;
+        sendMod = mod;
         const verified = await mod.verifyDeviceAuth(
           { merchant: view.merchant, amount: view.amount, auth: view.auth },
           {
@@ -436,6 +517,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
           set({ phase: 'idle' });
           return;
         }
+        sendCalled = true;
         const r = await mod.sendStoreDeviceSettle(
           verified.value,
           { handoffId: session.id, chainId: session.chainId, forwarder: config.forwarder },
@@ -449,6 +531,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
           set({ phase: 'not_sent', reason: r.reason, canRetry });
           return;
         }
+        sentMark = r.mark;
         retryRef.current = null;
         // 送った tx をお客様の画面に知らせる (付帯・失敗しても送信は成立している)。
         void fetch(`/api/register/handoff/${encodeURIComponent(session.id)}/tx`, {
@@ -458,12 +541,33 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         }).catch(() => undefined);
         set({ phase: 'sent', mark: r.mark, previous: false });
         const receipt = await io.waitReceipt(r.hash, RECEIPT_TIMEOUT_MS);
-        showReceipt(mod, r.mark, receipt, false, genRef.current);
+        await showReceipt(mod, r.mark, receipt, false, genRef.current);
+      } catch {
+        // 第 7 回レビュー A12: 店側の処理の例外 (送信の部品 = 動的 import の chunk の読み込み失敗など) で「確かめて
+        // 送っています」のまま止めない (次の QR・通常の QR・閉じる操作を止め続けない・受け渡しは retire 済み)。
+        // 送った可能性がある支払いを「送っていない」とは言わない: 送信は印を残してから送る (lib/storeDeviceSend) ので、
+        // この署名の印があれば結果が分からない (unknown) としてサーバの判定を待ち、印の前 (印が無い) なら送っていない。
+        const mark =
+          sentMark ??
+          (sendCalled && sendMod ? findSentMark(sendMod.readSentMarks(), view.auth.nonce) : null);
+        if (mark) {
+          const cur = stateRef.current;
+          // 結果 (入金の確認など) を出した後の例外なら、その表示のまま。
+          if (cur.phase === 'processing' || (cur.phase === 'sent' && cur.mark.hash === mark.hash)) {
+            set({ phase: 'unknown', mark, previous: false });
+            watchFinality(mark, false, genRef.current, true);
+          }
+        } else {
+          // 送っていない (印の前)。同じ署名は印で二度送られないので「もう一度送る」を出せる。
+          retryRef.current = { view, session };
+          processingRef.current = null;
+          set({ phase: 'not_sent', reason: 'rpc', canRetry: true });
+        }
       } finally {
         if (activeRef.current === view.auth.nonce) activeRef.current = null;
       }
     },
-    [loadIo, retire, set, showReceipt],
+    [loadIo, retire, set, showReceipt, watchFinality],
   );
 
   // セッションを締め切る (署名が入っていれば送る)。同じセッションの締め切りは一つの応答を共有する。
@@ -780,7 +884,7 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
     // 待つ間に閉じた (取引を確かめた)・次の会計に進んだ → 遅れた結果で「次の QR を出せない」に戻さない。
     const now = stateRef.current;
     if (now.phase !== 'unknown' || now.mark.hash !== cur.mark.hash) return;
-    showReceipt(loaded.mod, cur.mark, receipt, cur.previous, genRef.current);
+    await showReceipt(loaded.mod, cur.mark, receipt, cur.previous, genRef.current);
   }, [loadWatch, showReceipt]);
 
   /** 「もう一度送る」(一時的な理由で送らなかったとき・お客様の署名が有効な間)。 */

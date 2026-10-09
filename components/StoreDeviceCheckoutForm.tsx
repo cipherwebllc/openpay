@@ -17,12 +17,12 @@ import {
   type StoreDeviceIntent,
   type StoreDevicePaymentSnapshot,
 } from '@/hooks/useStoreDevicePayment';
-import { addressExplorerUrl, chainForSlug, txExplorerUrl } from '@/lib/chains';
+import { addressExplorerUrl, chainForSlug, slugForChain, txExplorerUrl } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { formatTokenAmount } from '@/lib/format';
 import { STORE_DEVICE_FEE_WEI } from '@/lib/storeDevicePayment';
 import { taxAmountDecimal, taxDisplayDecimals } from '@/lib/tax';
-import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
+import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug, resolveDeployment } from '@/lib/tokens';
 import { calcCheckoutPayable, calcCheckoutTotal, type CheckoutParams } from '@/lib/url';
 import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
 import type { Address } from 'viem';
@@ -50,6 +50,16 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
       : null;
   // 結論待ちの間 (この会計でも前の会計でも) は、別の支払いを勧める案内を出さない。
   const unresolved = status.phase === 'waiting';
+  // 履歴・控え・取引のリンクのチェーンは、署名した支払い (frozen) のチェーン (第 7 回レビュー A7)。端末に残った
+  // 前の会計の支払いを別チェーンの QR で開いても、前の会計のチェーンで記録する。送る経路 (pay) は今の QR のまま。
+  // frozen の chainId をこのビルドで引けない (対応外のチェーン) ときだけ、今の QR の値 (従来の動き) を組ごと使う。
+  const record = useMemo(() => {
+    const frozenDeployment = frozen ? resolveDeployment(params.token, frozen.chainId) : undefined;
+    const frozenSlug = frozen ? slugForChain(frozen.chainId) : undefined;
+    return frozenDeployment && frozenSlug
+      ? { deployment: frozenDeployment, chainSlug: frozenSlug }
+      : { deployment, chainSlug };
+  }, [frozen, params.token, deployment, chainSlug]);
 
   // 請求額 = 明細の合計 − レジの値引き (お店の端末が受け渡しに登録した額と一致しなければサーバーが止める)。
   const bill = useMemo(
@@ -90,16 +100,17 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
     };
     const merchantValue = frozen ? BigInt(frozen.merchantValue) : bill;
     return {
-      chainId: deployment.chainId,
-      chainSlug,
+      chainId: record.deployment.chainId,
+      chainSlug: record.chainSlug,
       asset: params.token,
-      tokenAddress: deployment.address,
+      tokenAddress: record.deployment.address,
       payMode: 'gasless' as const,
       gasMode: 'merchant' as const,
       merchant: (frozen?.merchant ?? params.to) as Address,
       merchantAmount: merchantValue,
       customer: (frozen?.from ?? address) as Address | undefined,
-      feeReceiver: env.feeReceiver,
+      // 署名した手数料受取口 (後から設定が変わっても、署名した支払いの値で記録する)。
+      feeReceiver: frozen?.feeReceiver ?? env.feeReceiver,
       feeAmount: STORE_DEVICE_FEE_WEI,
       saleAmount: merchantValue,
       networkFeeEquivalent: null,
@@ -117,14 +128,14 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
         items: snap.items,
         discount: snap.discount,
         token: params.token,
-        decimals: deployment.decimals,
+        decimals: record.deployment.decimals,
         taxRate: snap.taxRate,
         taxCategory: snap.taxCategory,
       }),
       sourceRoute: '/checkout',
       locale,
     };
-  }, [frozen, deployment, chainSlug, params, bill, address, locale]);
+  }, [frozen, record, params, bill, address, locale]);
   // 記録するのは「支払い済み」の結論だけ (前の会計の結論も、その会計の値で記録する)。
   const successTx =
     status.phase === 'success'
@@ -291,9 +302,10 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
               {t('storeDevice.checkNow')}
             </button>
             {(() => {
+              // 確かめている支払い (前の会計を含む) のチェーンの explorer。
               const href = status.txHint
-                ? txExplorerUrl(deployment.chainId, status.txHint)
-                : addressExplorerUrl(deployment.chainId, status.intent.from);
+                ? txExplorerUrl(record.deployment.chainId, status.txHint)
+                : addressExplorerUrl(record.deployment.chainId, status.intent.from);
               return href ? (
                 <a
                   href={href}
@@ -331,9 +343,9 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
             </p>
           )}
           <div className="flex flex-wrap items-center gap-3">
-            {addressExplorerUrl(deployment.chainId, status.intent.from) && (
+            {addressExplorerUrl(record.deployment.chainId, status.intent.from) && (
               <a
-                href={addressExplorerUrl(deployment.chainId, status.intent.from)}
+                href={addressExplorerUrl(record.deployment.chainId, status.intent.from)}
                 target="_blank"
                 rel="noreferrer noopener"
                 className="text-xs underline underline-offset-2"
@@ -355,9 +367,9 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
       {status.phase === 'success' && (
         <section role="status" className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
           <p className="text-base font-bold text-emerald-900">{t('storeDevice.success')}</p>
-          {status.txHash && txExplorerUrl(deployment.chainId, status.txHash) && (
+          {status.txHash && txExplorerUrl(record.deployment.chainId, status.txHash) && (
             <a
-              href={txExplorerUrl(deployment.chainId, status.txHash)}
+              href={txExplorerUrl(record.deployment.chainId, status.txHash)}
               target="_blank"
               rel="noreferrer noopener"
               className="text-xs text-emerald-800 underline underline-offset-2"

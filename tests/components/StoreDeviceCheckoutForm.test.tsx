@@ -35,6 +35,8 @@ vi.mock('@/hooks/usePaymentHistory', () => ({
 }));
 
 import { StoreDeviceCheckoutForm } from '@/components/StoreDeviceCheckoutForm';
+import { addressExplorerUrl, txExplorerUrl } from '@/lib/chains';
+import { resolveDeployment } from '@/lib/tokens';
 import type { CheckoutParams } from '@/lib/url';
 
 const INTENT = {
@@ -227,6 +229,49 @@ describe('StoreDeviceCheckoutForm', () => {
     render(<StoreDeviceCheckoutForm params={params} />);
     expect(screen.getByRole('alert')).toHaveTextContent(/前のお支払い: Prev Shop/);
     expect(screen.queryByRole('button', { name: /を支払う/ })).toBeNull();
+  });
+
+  describe('前の会計の支払いを別チェーンの QR で開いたとき (第 7 回レビュー A7・G6)', () => {
+    // 前の会計 = Kairos (1001) で署名・いま開いている QR = Polygon (testnet では Amoy 80002)
+    const TX = `0x${'ab'.repeat(32)}`;
+    const PREV = { ...INTENT, chainId: 1001, handoffId: 'ZZZZZZZZZZZZZZZZZZZZZZ' };
+
+    it('履歴・控えは前の会計 (署名した) チェーンで記録する (今の QR のチェーンにしない)', () => {
+      hold.status = { phase: 'previous', outcome: 'success', intent: PREV, txHash: TX };
+      render(<StoreDeviceCheckoutForm params={params} />);
+      const [ctx, gasless] = hold.history.at(-1) as [Record<string, unknown>, Record<string, unknown>];
+      expect(ctx).toMatchObject({
+        chainId: 1001,
+        chainSlug: 'kaia',
+        tokenAddress: resolveDeployment('jpyc', 1001)!.address,
+        feeReceiver: PREV.feeReceiver,
+        merchant: PREV.merchant,
+        customer: PREV.from,
+      });
+      expect(gasless).toMatchObject({ data: { txHash: TX, success: true } });
+    });
+
+    it('確認中の「取引を見る」も前の会計のチェーンの explorer', () => {
+      hold.status = { phase: 'waiting', intent: PREV, otherCheckout: true, txHint: TX, confirming: false, autoStopped: false };
+      render(<StoreDeviceCheckoutForm params={params} />);
+      expect(txExplorerUrl(1001, TX)).not.toBe(txExplorerUrl(80002, TX));
+      expect(screen.getByRole('link', { name: '取引を見る' }).getAttribute('href')).toBe(txExplorerUrl(1001, TX));
+    });
+
+    it('結果を確かめられないときの「ウォレットを見る」も前の会計のチェーン', () => {
+      hold.status = { phase: 'used_unresolved', intent: PREV, otherCheckout: true };
+      render(<StoreDeviceCheckoutForm params={params} />);
+      expect(screen.getByRole('link', { name: 'ウォレットの取引履歴を見る' }).getAttribute('href')).toBe(
+        addressExplorerUrl(1001, PREV.from),
+      );
+    });
+
+    it('前の会計が無い (新しい支払い) は、いま開いている QR のチェーンで記録する (従来どおり)', () => {
+      hold.status = { phase: 'success', txHash: TX, intent: INTENT };
+      render(<StoreDeviceCheckoutForm params={params} />);
+      const [ctx] = hold.history.at(-1) as [Record<string, unknown>];
+      expect(ctx).toMatchObject({ chainId: 80002, chainSlug: 'polygon' });
+    });
   });
 
   it('前の会計の結論は前の会計の店名・金額で出し、この会計は払える', () => {

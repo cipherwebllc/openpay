@@ -44,6 +44,19 @@ describe('StoreDeviceRegisterStatus (店員向けの表示)', () => {
     expect(h.onRetry).toHaveBeenCalled();
   });
 
+  it('入金の確認の「取引を見る」は、判定が見つけた実際の tx (第三者が同じ署名を先に送ったときは端末の tx と違う・第 7 回レビュー A11)', () => {
+    const SETTLED = `0x${'ef'.repeat(32)}` as const;
+    show({ phase: 'received', mark: MARK, finalized: true, previous: false, txHash: SETTLED });
+    const href = screen.getByRole('link', { name: '取引を見る' }).getAttribute('href') ?? '';
+    expect(href).toContain(SETTLED);
+    expect(href).not.toContain(HASH);
+  });
+
+  it('判定の tx が無い入金の確認は、端末が送った tx へのリンク (従来どおり)', () => {
+    show({ phase: 'received', mark: MARK, finalized: false, previous: false });
+    expect(screen.getByRole('link', { name: '取引を見る' }).getAttribute('href')).toContain(HASH);
+  });
+
   it('使用済みは「行われていません」と言わない (お客様の画面で確かめる)', () => {
     show({ phase: 'not_sent', reason: 'used', canRetry: false });
     expect(screen.getByRole('alert')).not.toHaveTextContent(/お支払いは行われていません/);
