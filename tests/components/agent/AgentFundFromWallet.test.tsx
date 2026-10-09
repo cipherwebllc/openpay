@@ -412,15 +412,22 @@ describe('AgentFundFromWallet', () => {
   });
 
   it.each(['cancelled', 'replaced', 'repriced'])('handles a %s transaction without confusing cancellation with funding', (reason) => {
-    const { rerender } = render(ui());
+    const busy = vi.fn();
+    // 同じ要素の参照を渡すと React が再描画を省くので、描画ごとに作る。
+    const element = () => <AgentFundFromWallet locale="en" c={C} agentAddress={agentAddress} onSent={onSent} onBusyChange={busy} />;
+    const { rerender } = render(element());
     sendAmount();
     state.hash = hash;
     settleWrite();
     const replacementHash = `0x${'b'.repeat(64)}`;
     act(() => state.wait.mock.calls.at(-1)?.[0].onReplaced({ reason, transactionReceipt: { transactionHash: replacementHash } }));
+    // 置き換えを知っただけ (置き換えた取引の receipt はまだ) では結果が確定していない: 戻れない・busy のまま。
+    rerender(element());
+    expect(screen.getByRole('button', { name: C.back })).toBeDisabled();
+    expect(busy).toHaveBeenLastCalledWith(true);
     state.receiptSuccess = true;
     state.receiptStatus = 'success';
-    rerender(ui());
+    rerender(element());
     expect(screen.getByRole('link', { name: `${C.viewTx}: ${replacementHash}` })).toHaveAttribute('href', txExplorerUrl(deployment.chainId, replacementHash));
     if (reason === 'repriced') {
       expect(screen.getByRole('status')).toHaveTextContent(C.confirmed);
@@ -432,6 +439,28 @@ describe('AgentFundFromWallet', () => {
       expect(onSent).not.toHaveBeenCalled();
       expect(track).not.toHaveBeenCalled();
     }
+    // 取消・置換の receipt が確定したら結果は出ている (入金は送られていない): 「戻る」で入力に戻れ、親の busy も外れる。
+    expect(screen.getByRole('button', { name: C.back })).toBeEnabled();
+    expect(busy).toHaveBeenLastCalledWith(false);
+    fireEvent.click(screen.getByRole('button', { name: C.back }));
+    expect(state.resetWrite).toHaveBeenCalled(); // 戻ると送金の記録を消す (wagmi の reset が write.data を空にする)
+  });
+
+  it('unlocks the form when the wallet rejects the signature (nothing was sent)', () => {
+    const busy = vi.fn();
+    const element = () => <AgentFundFromWallet locale="en" c={C} agentAddress={agentAddress} onSent={onSent} onBusyChange={busy} />;
+    const { rerender } = render(element());
+    sendAmount();
+    expect(busy).toHaveBeenLastCalledWith(true);
+    state.writeError = Object.assign(new Error('User rejected the request.'), { name: 'UserRejectedRequestError' });
+    settleWrite();
+    rerender(element());
+    expect(screen.getByRole('status')).toHaveTextContent(C.rejected);
+    expect(busy).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole('button', { name: C.back })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: C.back }));
+    expect(screen.getByLabelText(C.amountLabel)).toBeEnabled();
+    expect(onSent).not.toHaveBeenCalled();
   });
 
   it('isolates analytics failure from the confirmed transfer and balance refresh', () => {

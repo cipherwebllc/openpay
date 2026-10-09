@@ -1403,6 +1403,28 @@ describe('handleStorefrontConfig', () => {
     expect(handleStorefrontConfig(noName, 'shop')?.shopName).toBe('@shop');
   });
 
+  // インボイス登録番号は「発行事業者の名称」と組で意味を持つ。店名が @handle の代用名 (店が付けた名前ではない) のときは
+  // 公開設定に載せない = 代用名かどうかは出所で決める (文字列の形 (「@」始まり) では決めない)。
+  it('店名が @handle の代用名のときは登録番号を載せない・店が付けた「@」始まりの店名なら載せる', () => {
+    const sfWithInvoice = { ...base.storefront!, invoiceNo: 'T1234567890123' };
+    const noName: HandleRecord = { ...base, config: { ...base.config, name: undefined }, storefront: sfWithInvoice };
+    const substituted = handleStorefrontConfig(noName, 'shop');
+    expect(substituted?.shopName).toBe('@shop');
+    expect(substituted?.invoiceNo).toBeUndefined();
+
+    const named = handleStorefrontConfig({ ...base, storefront: sfWithInvoice }, 'shop');
+    expect(named?.invoiceNo).toBe('T1234567890123');
+
+    const atName: HandleRecord = {
+      ...base,
+      config: { ...base.config, name: undefined },
+      storefront: { ...sfWithInvoice, shopName: '@カフェ 銀座' },
+    };
+    const atNamed = handleStorefrontConfig(atName, 'shop');
+    expect(atNamed?.shopName).toBe('@カフェ 銀座');
+    expect(atNamed?.invoiceNo).toBe('T1234567890123');
+  });
+
   it('受取先が不正なら null (validateOrderConfig 委譲)', () => {
     const badTo: HandleRecord = { ...base, config: { ...base.config, to: 'not-an-address' } };
     expect(handleStorefrontConfig(badTo, 'shop')).toBeNull();

@@ -6,11 +6,12 @@
 // 残高があれば見せて戻せるようにする (開示や設定から外したチェーンに残ったガス代を見失わない)。
 
 import { useEffect, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { AlertTriangle, ChevronRight, Fuel, Plus, RefreshCw, ShieldAlert } from 'lucide-react';
 import { formatEther, type Address, type Hex } from 'viem';
 import { nativeSymbolForChainId, txExplorerUrl } from '@/lib/chains';
-import { estimateRemainingSends, storeGasFundGuide } from '@/lib/storeGasWallet';
+import { estimateRemainingSends, storeGasFundRange } from '@/lib/storeGasWallet';
+import { formatLocaleList } from '@/lib/localeList';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
 import { usePwaDisplayMode } from '@/hooks/usePwaDisplayMode';
 import { useStoreGasWallet } from '@/hooks/useStoreGasWallet';
@@ -60,6 +61,7 @@ export function StoreGasWalletPanel({
 } = {}) {
   const t = useTranslations('RegisterMode');
   const tScan = useTranslations('Scan');
+  const locale = useLocale();
   const g = useStoreGasWallet();
   // iPhone・iPad のブラウザ (ホーム画面に追加したアプリでない) は、7 日ほど開かないとサイトのデータ (= 鍵) を消す。
   // ホーム画面のアプリはこの消去の対象外で保存場所も別なので、アプリで作るよう案内する (描画後に判定 = hydration 安全)。
@@ -101,8 +103,15 @@ export function StoreGasWalletPanel({
   // 一度も読めていないチェーン (残高が分からない)。消す前に知らせる (残っているかもしれない)。
   const unread = g.chains.some((c) => c.readFailed && c.balance == null);
   const shown = g.chains.filter((c) => c.active || funded.includes(c));
-  const fundGuide = active.map((c) => `${symbolOf(c.chainId)} ${storeGasFundGuide(c.chainId)}`).join('・');
-  const fundSymbols = active.map((c) => symbolOf(c.chainId)).join('・');
+  // 目安の範囲 (「1〜2」「1–2」) と並びの区切り (「・」「, and」) は locale に従う (英語の文に日本語の記号を混ぜない)。
+  const fundGuide = formatLocaleList(
+    locale,
+    active.map((c) => {
+      const r = storeGasFundRange(c.chainId);
+      return r ? `${symbolOf(c.chainId)} ${t('storeGasWallet.fundRange', r)}` : symbolOf(c.chainId);
+    }),
+  );
+  const fundSymbols = formatLocaleList(locale, active.map((c) => symbolOf(c.chainId)));
   // チェーンごとの「あと何回送れるか」と「少ないか」(見出しのチップと行で同じ値を使う)。
   const remainingOf = (c: (typeof g.chains)[number]) =>
     !c.readFailed && c.balance != null && c.gasPrice != null ? estimateRemainingSends(c.balance, c.gasPrice) : null;
@@ -110,7 +119,7 @@ export function StoreGasWalletPanel({
     const r = remainingOf(c);
     return c.active && r != null && r < LOW_REMAINING_SENDS;
   };
-  const amountsLabel = funded.map((c) => `${formatNative(c.balance!)} ${symbolOf(c.chainId)}`).join('・');
+  const amountsLabel = formatLocaleList(locale, funded.map((c) => `${formatNative(c.balance!)} ${symbolOf(c.chainId)}`));
   const targetChainId =
     (withdrawChainId !== null && shown.some((c) => c.chainId === withdrawChainId) ? withdrawChainId : null) ??
     shown[0]?.chainId ??

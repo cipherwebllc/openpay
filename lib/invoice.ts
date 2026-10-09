@@ -128,9 +128,11 @@ export type InvoiceReceiptView = {
 
 /**
  * 控えにインボイス欄を出せるなら、その表示用の値を返す。出せなければ null (従来の控えのまま)。
- * 条件: 支払いが確定 (confirmed)・JPYC・登録番号が形式どおり・店名が実際に設定されている
- * (@handle の代用名ではない)・全行の税率と税区分が 10/8/0 で整合・課税の行が 1 つ以上・
- * 明細の合計が支払総額と一致。
+ * 条件: 支払いが確定 (confirmed)・JPYC・登録番号が形式どおり・店名がある・全行の税率と税区分が
+ * 10/8/0 で整合・課税の行が 1 つ以上・明細の合計が支払総額と一致。
+ * @handle の代用名 (店が付けた名前ではない) の店は、公開設定を組む側 (lib/handle/record.ts) が
+ * invoiceNo を載せないので、ここまで登録番号が来ない。店名の形 (「@」始まり) では判定しない
+ * (店が「@」始まりの名前を付けたなら本物の名称)。
  */
 export function invoiceReceiptView(r: PayerReceipt): InvoiceReceiptView | null {
   // 失敗・未確定の控えを「支払い済みのインボイス」として共有させない。
@@ -139,7 +141,7 @@ export function invoiceReceiptView(r: PayerReceipt): InvoiceReceiptView | null {
   const registrationNumber = normalizeInvoiceRegistrationNumber(r.merchantInvoiceNo);
   if (!registrationNumber) return null;
   const issuerName = typeof r.merchantName === 'string' ? r.merchantName.trim() : '';
-  if (!issuerName || issuerName.startsWith('@')) return null;
+  if (!issuerName) return null;
   const groups = invoiceRateGroups(r.lineItems);
   if (!groups || !groups.some((g) => g.rate !== 0)) return null;
   // 明細の合計と支払総額が食い違う控え (店主がガス代を負担した旧い控え等) に、もっともらしい

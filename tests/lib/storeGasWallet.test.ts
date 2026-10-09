@@ -10,7 +10,6 @@ import {
   readStoreGasWalletKey,
   removeStoreGasWallet,
   requestStoreGasWalletPersistence,
-  storeGasFundGuide,
   storeGasFundRange,
   withStoreGasWalletLock,
   withdrawableAmount,
@@ -144,18 +143,16 @@ describe('storeGasWallet: 残り回数と戻せる額', () => {
 });
 
 describe('storeGasWallet: 入れておく目安', () => {
-  it('表示 (1〜2) と数値 (補充の既定額・1 回の上限) は同じ表から・表に無いチェーンは空/null', () => {
+  // 表示の記号 (範囲・区切り) は画面側が locale に従って付ける (lib は数値だけ返す)。
+  it('数値 (補充の既定額・1 回の上限・表示の目安) は同じ表から・表に無いチェーンは null', () => {
     expect(storeGasFundRange(137)).toEqual({ min: '1', max: '2' });
-    expect(storeGasFundGuide(137)).toBe('1〜2');
     expect(storeGasFundRange(43114)).toEqual({ min: '0.05', max: '0.1' });
-    expect(storeGasFundGuide(43114)).toBe('0.05〜0.1');
     for (const id of [137, 80002, 8217, 1001, 43114, 43113]) {
       const r = storeGasFundRange(id)!;
       expect(Number(r.min)).toBeGreaterThan(0);
       expect(Number(r.max)).toBeGreaterThanOrEqual(Number(r.min));
     }
     expect(storeGasFundRange(1)).toBeNull();
-    expect(storeGasFundGuide(1)).toBe('');
   });
 });
 

@@ -28,11 +28,13 @@ export function handleStorefrontConfig(
   if (!sf) return null;
   // ブランディングは storefront (ビルダー由来) を優先し、無ければ @handle 側へフォールバック。
   // 受取先 (receiver) は @handle が権威 (config.to)。
+  // 店が付けた店名 (storefront か @handle の名前)。無ければ表示用に @handle を代用する。
+  const configuredName = sf.shopName || record.config.name?.trim() || '';
   const config = validateOrderConfig({
     receiver: record.config.to,
     chain: sf.chain,
     chains: sf.chains, // 受取チェーン集合 (2 件以上で注文ページに選択 UI)
-    shopName: sf.shopName || record.config.name?.trim() || `@${handle}`,
+    shopName: configuredName || `@${handle}`,
     tagline: sf.tagline, // 店名下のひとこと (ビルダー由来のみ・任意・validateOrderConfig が再検証)
     accent: record.config.color, // テーマ色 = @handle のプロフィール色を店舗ページにも適用 (validateOrderConfig が再検証)
     avatar: sf.avatar ?? record.profile?.avatar,
@@ -45,7 +47,10 @@ export function handleStorefrontConfig(
     address: sf.address,
     hours: sf.hours,
     phone: sf.phone,
-    invoiceNo: sf.invoiceNo, // インボイス登録番号 (任意・validateOrderConfig が再検証)
+    // インボイス登録番号 (任意・validateOrderConfig が再検証)。発行事業者の名称と組で意味を持つので、店名が @handle の
+    // 代用名 (店が付けた名前ではない) のときは載せない。代用名かどうかは出所で決める (店名の文字列の形では決めない =
+    // 店が「@」始まりの名前を付けたなら本物の名称)。
+    invoiceNo: configuredName ? sf.invoiceNo : undefined,
     acceptingOrders: sf.acceptingOrders,
     dineIn: sf.dineIn, // 提供形態 (店内ならテーブル番号入力・validateOrderConfig が再検証)
     // 時間系 (任意)。@handle 公開ページも self-contained 注文 URL と同じ受付制御を使う。

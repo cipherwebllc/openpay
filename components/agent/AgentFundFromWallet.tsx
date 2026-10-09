@@ -67,9 +67,10 @@ export function AgentFundFromWallet({ locale, c, agentAddress, onSent, onBusyCha
   const failed = replacement?.invalid || receipt.isError || receipt.data?.status === 'reverted' || (!write.data && balance.isError);
   const walletError = write.error ?? switcher.error;
   const status = confirmed ? c.confirmed : walletError ? (isUserRejection(walletError) ? c.rejected : c.failed) : failed ? c.failed : write.data ? c.sent : waitingWallet ? c.waitingWallet : null;
-  // 結果が確定した送金 (成功 / revert) の後だけ「戻る」で入力に戻れる。receipt を取れなかった (RPC エラー) 送金は
-  // 成否が不明で、戻して再送させると二重送金になり得るので固定したままにする (explorer で確かめてもらう)。
-  const settled = confirmed || receipt.data?.status === 'reverted';
+  // 結果が確定した送金 (成功 / revert / 取消・別取引への置換の receipt が確定) の後だけ「戻る」で入力に戻れる。
+  // receipt を取れなかった (RPC エラー) 送金は成否が不明で、戻して再送させると二重送金になり得るので固定したままにする
+  // (explorer で確かめてもらう)。置換を知っただけ (置換 tx の receipt がまだ) のときも同じく固定する。
+  const settled = confirmed || receipt.data?.status === 'reverted' || (Boolean(replacement?.invalid) && receipt.data !== undefined);
   const inFlight = waitingWallet || (Boolean(write.data) && !settled);
   const txHash = replacement?.hash ?? write.data;
   const explorerUrl = txHash ? txExplorerUrl(deployment.chainId, txHash) : undefined;

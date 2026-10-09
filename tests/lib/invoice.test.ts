@@ -186,9 +186,15 @@ describe('invoiceReceiptView', () => {
     expect(invoiceReceiptView({ ...receipt(), merchantInvoiceNo: 'T123' })).toBeNull();
   });
 
-  it('店名が無い・@handle の代用名は出さない', () => {
+  it('店名が無い控えは出さない', () => {
     expect(invoiceReceiptView(receipt({ merchantName: null }))).toBeNull();
-    expect(invoiceReceiptView(receipt({ merchantName: '@cafe' }))).toBeNull();
+    expect(invoiceReceiptView(receipt({ merchantName: '   ' }))).toBeNull();
+  });
+
+  // @handle の代用名は公開設定を組む側 (lib/handle/record.ts) が invoiceNo を載せないことで除外する。
+  // 控えに店名と登録番号が両方あるなら、店が「@」始まりの名前を付けていても発行事業者の名称として出す。
+  it('店が付けた「@」始まりの店名は発行事業者の名称として出す', () => {
+    expect(invoiceReceiptView(receipt({ merchantName: '@カフェ 銀座' }))?.issuerName).toBe('@カフェ 銀座');
   });
 
   it('任意税率の行がある・税率なしの行がある (チップ・旧 QR の仮想行) は出さない', () => {

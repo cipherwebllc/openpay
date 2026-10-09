@@ -199,6 +199,18 @@ describe('StoreGasWalletPanel', () => {
     expect(screen.queryByText('残りわずか・POL を入れてください')).toBeNull();
     // 入金の案内に、対象のチェーンの通貨を並べる (チェーン名は残高の行にマーク付きで出る)
     expect(screen.getByText('ここに POL・KAIA を送って入れます。')).toBeTruthy();
+    expect(screen.getByText('少額だけ入れてください（目安: POL 1〜2・KAIA 1〜2）。JPYC は入れないでください。')).toBeTruthy();
+  });
+
+  it('英語画面: 目安の範囲と並びは英語の記号 (〜・を混ぜない)', () => {
+    hold.state = ready({
+      chains: [chain(AMOY, { balance: 10n ** 18n, gasPrice: 1n }), chain(KAIROS, { balance: 10n ** 17n, gasPrice: 1n })],
+    });
+    render(<StoreGasWalletPanel />, { locale: 'en' });
+    expect(screen.getByText('Keep only a small amount (about POL 1–2 and KAIA 1–2). Never send JPYC to it.')).toBeTruthy();
+    expect(screen.getByText('Send POL and KAIA here to add funds.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove from this device' }));
+    expect(screen.getByText(/^1 POL and 0\.1 KAIA is still left\./)).toBeTruthy();
   });
 
   it('複数チェーン: 戻すチェーンを選び、確認文とお金の動きはそのチェーン', () => {
