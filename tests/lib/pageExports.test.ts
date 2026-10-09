@@ -96,6 +96,24 @@ function bindingNames(name: ts.BindingName, out: string[]): void {
   }
 }
 
+// `declare namespace` / 中身が型宣言だけ (interface / type / declare / 入れ子の型だけの namespace) の namespace は
+// 値を生まない (TS が JS を出さない) ので規定外 value export に数えない。
+function isTypeOnlyNamespace(node: ts.ModuleDeclaration): boolean {
+  if (hasModifier(node, ts.SyntaxKind.DeclareKeyword)) return true;
+  const body = node.body;
+  if (!body) return true;
+  if (ts.isModuleDeclaration(body)) return isTypeOnlyNamespace(body); // namespace A.B {…}
+  if (!ts.isModuleBlock(body)) return false;
+  return body.statements.every(
+    (s) =>
+      ts.isInterfaceDeclaration(s) ||
+      ts.isTypeAliasDeclaration(s) ||
+      hasModifier(s, ts.SyntaxKind.DeclareKeyword) ||
+      (ts.isModuleDeclaration(s) && isTypeOnlyNamespace(s)) ||
+      (ts.isExportDeclaration(s) && s.isTypeOnly),
+  );
+}
+
 function extractExports(source: string, fileName: string): { values: string[]; stars: string[] } {
   const sf = ts.createSourceFile(
     fileName,
@@ -124,7 +142,7 @@ function extractExports(source: string, fileName: string): { values: string[]; s
     }
     if (!hasModifier(st, ts.SyntaxKind.ExportKeyword)) continue;
     if (ts.isInterfaceDeclaration(st) || ts.isTypeAliasDeclaration(st)) continue;
-    if (ts.isModuleDeclaration(st) && hasModifier(st, ts.SyntaxKind.DeclareKeyword)) continue;
+    if (ts.isModuleDeclaration(st) && isTypeOnlyNamespace(st)) continue;
     if (ts.isVariableStatement(st)) {
       for (const declaration of st.declarationList.declarations) bindingNames(declaration.name, values);
       continue;
@@ -195,6 +213,16 @@ describe('export 抽出器 (regex で見逃した形を AST で拾う)', () => {
     );
     expect(values).toEqual(['dynamic']);
     expect(stars).toEqual([]);
+  });
+
+  it('中身が型だけの namespace は値を生まないので数えず、値を含む namespace は数える', () => {
+    expect(extract('export namespace Types { export interface Props {} export type Id = string; }').values).toEqual([]);
+    expect(extract('export namespace Outer { export namespace Inner { export interface I {} } }').values).toEqual([]);
+    expect(extract('export namespace A.B { export type T = 1; }').values).toEqual([]);
+    expect(extract('export declare namespace D { const v: number; }').values).toEqual([]);
+    expect(extract('export namespace Empty {}').values).toEqual([]);
+    expect(extract('export namespace Mixed { export interface I {} export const v = 1; }').values).toEqual(['Mixed']);
+    expect(extract('export namespace Outer { export namespace Inner { export function f() {} } }').values).toEqual(['Outer']);
   });
 });
 

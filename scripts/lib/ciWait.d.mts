@@ -42,6 +42,8 @@ export interface CheckVerdict {
 
 export function parseWorkflow(source: string): ParsedWorkflow;
 export function analyzeWorkflows(workflowsDir: string): { required: string[]; excluded: WorkflowNote[]; unsupported: WorkflowNote[] };
+export function parseExpectedChecks(source: string): string[] | null;
+export function blobSha(content: string): string;
 export function normalizeRollup(rollup: unknown[] | null | undefined): NormalizedCheck[];
 export function expectedChecksFor(baseRefName: string | null | undefined): string[];
 export function evaluateChecks(checks: readonly NormalizedCheck[], expected: readonly string[]): CheckVerdict;

@@ -11,12 +11,18 @@
 // 監視すると旧集合で exit 0) ので、定数にして tests/scripts/ci-wait.test.ts が workflow とのドリフトを
 // 検出する: analyzeWorkflows() が .github/workflows を解析し、PR で必ず走る job 名の集合が定数と
 // 一致すること・解析できない形 (未対応の on の形・matrix・reusable workflow・式や複数行の name・
-// if/needs の組み合わせ) が PR trigger の workflow に現れたら unsupported として test を落とす
-// (fail-closed・黙って除外しない)。
+// if/needs の組み合わせ・flow 形式の jobs) が PR trigger の workflow に現れたら unsupported として
+// test を落とす (fail-closed・黙って除外しない)。
+//
+// CLI は定数を「対象 PR の HEAD にあるこのファイル」から読む (parseExpectedChecks): 必須 job と定数を
+// 同時に足した PR を main 側のスクリプトで監視しても、PR 側の集合で判定するため。配列リテラルの形は
+// parseExpectedChecks が読めるもの (quote 付き文字列の配列・行コメント可) に固定し、test が自分自身を
+// 読んで定数と一致することを確かめる。
 //
 // 期待集合を適用するのは PR の base が main のときだけ。積み上げ PR (base が main 以外) では
 // 届かない check を待ち続けないよう、従来の判定 (出てきた check が全部 SUCCESS/NEUTRAL/SKIPPED) に戻す。
 
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -291,6 +297,11 @@ function readJobs(lines, unsupported) {
     unsupported.push('jobs: missing');
     return jobs;
   }
+  // `jobs: {a: {...}}` (flow 形式) は job 名を読めないので unsupported (黙って jobs=[] にしない)
+  if (block.head.value) {
+    unsupported.push(`jobs: inline value (${block.head.value})`);
+    return jobs;
+  }
   let current = null;
   for (let i = 0; i < block.body.length; i++) {
     const line = block.body[i];
@@ -304,6 +315,8 @@ function readJobs(lines, unsupported) {
         continue;
       }
       current = { id: entry.key, name: entry.key, conditional: null, needs: [] };
+      // `test: {name: x, runs-on: y}` (flow 形式の job) は name: 等を読めないので unsupported
+      if (entry.value) current.conditional = 'inline value';
       jobs.push(current);
       continue;
     }
@@ -432,6 +445,37 @@ export function analyzeWorkflows(workflowsDir) {
     }
   }
   return { required, excluded, unsupported };
+}
+
+// ---------------------------------------------------------------------------
+// 対象 PR の HEAD にあるこのファイルから定数を読む
+// ---------------------------------------------------------------------------
+
+/**
+ * このファイルのソースから EXPECTED_PR_CHECKS の配列リテラルを読む。読めなければ null。
+ * 形は `EXPECTED_PR_CHECKS = Object.freeze([ 'a', // comment \n 'b' ])` (quote 付き文字列のみ)。
+ * @param {string} source
+ * @returns {string[] | null}
+ */
+export function parseExpectedChecks(source) {
+  const stripped = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  const m = stripped.match(/EXPECTED_PR_CHECKS\s*=\s*Object\.freeze\(\s*\[([^\]]*)\]\s*\)/);
+  if (!m) return null;
+  const items = m[1].split(',').map((s) => s.trim()).filter(Boolean);
+  const names = [];
+  for (const item of items) {
+    const q = item.match(/^(['"])([^'"]+)\1$/);
+    if (!q) return null;
+    names.push(q[2]);
+  }
+  if (names.length === 0 || new Set(names).size !== names.length) return null;
+  return names;
+}
+
+/** git の blob hash (GitHub contents API の sha と同じ)。 */
+export function blobSha(content) {
+  const bytes = Buffer.from(content, 'utf8');
+  return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 }
 
 // ---------------------------------------------------------------------------

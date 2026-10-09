@@ -12,6 +12,12 @@
 // ならないよう、期待 check が全部そろって SUCCESS のときだけ 0 を返す。期待集合を適用するのは
 // PR の base が main のときだけで、積み上げ PR (base が main 以外) は従来の判定
 // (出てきた check が全部 SUCCESS/NEUTRAL/SKIPPED) に戻し、先頭行に expected=skipped(base=…) と出す。
+// base が取れない (gh の応答に無い・空) ときは曖昧な fallback をせず exit 3 (掟 13)。
+//
+// 期待集合は「対象 PR の HEAD にある scripts/lib/ciWait.mjs」から読む (gh api contents)。必須 job と
+// 定数を同時に足した PR を main 側のスクリプトで監視しても PR 側の集合で判定するため。PR 側に
+// ファイルが無い・読めない・取得できないときは、blob hash がローカルと同一なときだけローカルの定数を
+// 使い、それ以外は exit 3 (fail-closed)。
 //
 // 使い方:
 //   node scripts/ci-wait.mjs <PR番号>            # settle まで待つ (既定 30 分)
@@ -23,16 +29,25 @@
 // 出力 (stdout): SETTLED/PENDING/TIMEOUT 行 (headSha 付き・missing=期待 check のうち未登録の数・
 //   expected=期待 check 数 か skipped(base=<base>)) + check 一覧 TSV (未登録の期待 check は `<name>\tMISSING`)。
 // exit code: 0 = 期待 check 全部 SUCCESS (他も合格)・1 = 失敗 check あり・2 = timeout / 未 settle・
-//   3 = 引数/gh エラー・--head 不一致 (解決できない短縮 SHA を含む)。
+//   3 = 引数/gh エラー・base 不明・期待集合を PR 側から読めない・--head 不一致 (解決できない短縮 SHA を含む)。
 // vercel の deploy check は判定から除外する (merge 条件は repo CI のみ)。
 
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { evaluateChecks, expectedChecksFor, normalizeRollup } from './lib/ciWait.mjs';
+import {
+  EXPECTED_PR_CHECKS,
+  MAIN_BRANCH,
+  blobSha,
+  evaluateChecks,
+  normalizeRollup,
+  parseExpectedChecks,
+} from './lib/ciWait.mjs';
 
 const POLL_INTERVAL_MS = 40_000;
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const LIB_PATH = 'scripts/lib/ciWait.mjs';
 
 function usageExit(msg) {
   console.error(msg);
@@ -84,15 +99,62 @@ function fetchPr() {
     console.error(`HEAD 不一致: --head ${expectedHead} に対して PR の head は ${headRefOid || '(不明)'} (stale run か push 漏れ)`);
     process.exit(3);
   }
+  // base が分からなければ「main 以外」とみなして従来判定に落とさない (掟 13: 仕様を曖昧にする fallback の禁止)
+  const baseRefName = data.baseRefName;
+  if (typeof baseRefName !== 'string' || baseRefName.trim() === '') {
+    console.error(`PR の base branch が取れません (baseRefName=${JSON.stringify(baseRefName ?? null)})。gh の応答を確認すること`);
+    process.exit(3);
+  }
   return {
+    headRefOid,
     headSha: headRefOid.slice(0, 7),
-    baseRefName: data.baseRefName ?? '',
+    baseRefName,
     checks: normalizeRollup(data.statusCheckRollup),
   };
 }
 
+/**
+ * 対象 PR の HEAD にある scripts/lib/ciWait.mjs から期待集合を読む。
+ * 取れない / 読めないときは blob hash がローカルと同じときだけローカルの定数、それ以外は exit 3。
+ */
+const expectedCache = new Map();
+function loadExpectedChecks(headRefOid) {
+  if (expectedCache.has(headRefOid)) return expectedCache.get(headRefOid);
+  const res = spawnSync('gh', ['api', `repos/{owner}/{repo}/contents/${LIB_PATH}?ref=${headRefOid}`], {
+    encoding: 'utf8',
+  });
+  let remote = null;
+  if (res.status === 0) {
+    try {
+      const body = JSON.parse(res.stdout);
+      remote = {
+        sha: typeof body.sha === 'string' ? body.sha : '',
+        content: Buffer.from(String(body.content ?? ''), 'base64').toString('utf8'),
+      };
+    } catch {
+      remote = null;
+    }
+  }
+  const localSource = readFileSync(resolve(REPO_ROOT, LIB_PATH), 'utf8');
+  const localSha = blobSha(localSource);
+  let expected = remote ? parseExpectedChecks(remote.content) : null;
+  if (!expected) {
+    if (remote && remote.sha === localSha) {
+      expected = [...EXPECTED_PR_CHECKS];
+    } else {
+      const why = !remote
+        ? `PR の HEAD ${headRefOid.slice(0, 7)} から ${LIB_PATH} を取得できません (${res.stderr?.trim() || res.stdout?.trim() || 'gh api 失敗'})`
+        : `PR の HEAD ${headRefOid.slice(0, 7)} の ${LIB_PATH} から EXPECTED_PR_CHECKS を読めず、ローカル (${localSha.slice(0, 7)}) とも一致しません (${remote.sha.slice(0, 7)})`;
+      console.error(`${why}。PR を main に rebase するか、ローカルを PR の branch に合わせてから再実行すること`);
+      process.exit(3);
+    }
+  }
+  expectedCache.set(headRefOid, expected);
+  return expected;
+}
+
 function report(label, { headSha, baseRefName, checks }, expected, verdict) {
-  const expectedLabel = expected.length > 0 ? String(expected.length) : `skipped(base=${baseRefName || '?'})`;
+  const expectedLabel = expected.length > 0 ? String(expected.length) : `skipped(base=${baseRefName})`;
   console.log(
     `${label} head=${headSha} checks=${checks.length} nonSUCCESS=${verdict.failed.length} missing=${verdict.missing.length} expected=${expectedLabel}`,
   );
@@ -103,7 +165,7 @@ function report(label, { headSha, baseRefName, checks }, expected, verdict) {
 const deadline = Date.now() + timeoutMin * 60_000;
 for (;;) {
   const pr = fetchPr();
-  const expected = expectedChecksFor(pr.baseRefName);
+  const expected = pr.baseRefName === MAIN_BRANCH ? loadExpectedChecks(pr.headRefOid) : [];
   const verdict = evaluateChecks(pr.checks, expected);
   if (verdict.settled) {
     report('SETTLED', pr, expected, verdict);

@@ -8,22 +8,26 @@
 // しないこと (3) 期待 check は SUCCESS のみ合格であること (4) base が main 以外では期待集合を使わないこと
 // (5) --head は完全 OID で比較することを固定する。
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   EXPECTED_PR_CHECKS,
   analyzeWorkflows,
+  blobSha,
   evaluateChecks,
   expectedChecksFor,
   normalizeRollup,
+  parseExpectedChecks,
   parseWorkflow,
 } from '../../scripts/lib/ciWait.mjs';
 
 const SCRIPT = resolve('scripts/ci-wait.mjs');
+const LIB = resolve('scripts/lib/ciWait.mjs');
 const WORKFLOWS = resolve('.github/workflows');
 const FULL_HEAD = '4981cc5deadbeef0000000000000000000000000';
+const LOCAL_LIB_SOURCE = readFileSync(LIB, 'utf8');
 
 function run(name: string, status: string, conclusion: string) {
   return { __typename: 'CheckRun', name, status, conclusion, context: null, state: null };
@@ -199,6 +203,53 @@ describe('期待 check 集合の定数と workflow のドリフト検出 (fail-c
   });
 });
 
+describe('flow 形式の jobs は unsupported (黙って jobs=[] や誤った名前にしない)', () => {
+  it('jobs: {added-required: {...}} は jobs=[] ではなく unsupported', () => {
+    const wf = parseWorkflow('on: pull_request\njobs: {added-required: {runs-on: x}}\n');
+    expect(wf.jobs).toEqual([]);
+    expect(wf.unsupported).toEqual(['jobs: inline value ({added-required: {runs-on: x}})']);
+  });
+
+  it('test: {name: actual-check, runs-on: x} は name を test と誤読せず unsupported', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ci-wait-flowjob-'));
+    try {
+      writeFileSync(join(dir, 'a.yml'), 'on: pull_request\njobs:\n  test: {name: actual-check, runs-on: x}\n  plain:\n    runs-on: x\n');
+      writeFileSync(join(dir, 'b.yml'), 'on: pull_request\njobs: {added-required: {runs-on: x}}\n');
+      const r = analyzeWorkflows(dir);
+      expect(r.required).toEqual(['plain']);
+      expect(r.unsupported).toEqual([
+        { workflow: 'a.yml', job: 'test', reason: 'job has inline value' },
+        { workflow: 'b.yml', reason: 'jobs: inline value ({added-required: {runs-on: x}})' },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('対象 PR の HEAD の定数を読む (parseExpectedChecks / blobSha)', () => {
+  it('このファイル自身から読んだ配列が定数と一致する (リテラルの形の固定)', () => {
+    expect(parseExpectedChecks(LOCAL_LIB_SOURCE)).toEqual([...EXPECTED_PR_CHECKS]);
+  });
+
+  it('quote 付き文字列の配列だけを受け付け、それ以外 (識別子・spread・空・重複・定数が無い) は null', () => {
+    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = Object.freeze(['a', \"b\"]);")).toEqual(['a', 'b']);
+    expect(parseExpectedChecks('const EXPECTED_PR_CHECKS = Object.freeze([\n  // c\n  "a", /* x */ "b",\n]);')).toEqual(['a', 'b']);
+    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = Object.freeze([a, 'b']);")).toBeNull();
+    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = Object.freeze([...BASE, 'b']);")).toBeNull();
+    expect(parseExpectedChecks('const EXPECTED_PR_CHECKS = Object.freeze([]);')).toBeNull();
+    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = Object.freeze(['a', 'a']);")).toBeNull();
+    expect(parseExpectedChecks("const EXPECTED_PR_CHECKS = ['a'];")).toBeNull();
+    expect(parseExpectedChecks('export const OTHER = 1;')).toBeNull();
+  });
+
+  it('blobSha は git の blob hash と同じ (GitHub contents API の sha と突き合わせられる)', () => {
+    // `printf 'hello\n' | git hash-object --stdin` = ce013625030ba8dba906f756967f9e9ca394464a
+    expect(blobSha('hello\n')).toBe('ce013625030ba8dba906f756967f9e9ca394464a');
+    expect(blobSha('')).toBe('e69de29bb2d1d6434b8b29ae775ad8c2e48c5391');
+  });
+});
+
 describe('判定 (evaluateChecks / expectedChecksFor)', () => {
   const expected = EXPECTED_PR_CHECKS;
 
@@ -264,18 +315,56 @@ describe('CLI (gh と git を偽物に差し替えて end-to-end)', () => {
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  function cli(
-    rollup: unknown[],
-    args: string[],
-    { headRefOid = FULL_HEAD, baseRefName = 'main', ghExit = 0, gitResolves = null as string | null } = {},
-  ) {
+  type CliOptions = {
+    /** gh pr view の headRefOid */
+    headRefOid?: string;
+    /** gh pr view の baseRefName (undefined = キー自体を出さない・null = null を返す) */
+    baseRefName?: string | null;
+    /** gh pr view を失敗させる exit code */
+    ghExit?: number;
+    /** git rev-parse が返す完全 OID (null = 失敗) */
+    gitResolves?: string | null;
+    /** gh api contents が返す PR 側の scripts/lib/ciWait.mjs (既定 = ローカルと同一) */
+    prLib?: string;
+    /** gh api contents が返す blob sha (既定 = prLib の blob hash) */
+    prLibSha?: string;
+    /** gh api contents を失敗させる exit code (404 等) */
+    apiExit?: number;
+  };
+
+  function cli(rollup: unknown[], args: string[], options: CliOptions = {}) {
+    const {
+      headRefOid = FULL_HEAD,
+      ghExit = 0,
+      gitResolves = null,
+      prLib = LOCAL_LIB_SOURCE,
+      prLibSha = blobSha(prLib),
+      apiExit = 0,
+    } = options;
+    const baseRefName = 'baseRefName' in options ? options.baseRefName : 'main';
     dir = mkdtempSync(join(tmpdir(), 'ci-wait-cli-'));
     const bin = join(dir, 'bin');
     mkdirSync(bin);
     const fixture = join(dir, 'pr.json');
-    writeFileSync(fixture, JSON.stringify({ headRefOid, baseRefName, statusCheckRollup: rollup }));
-    // 本物の gh の代わり: 固定 JSON を返す
-    writeFileSync(join(bin, 'gh'), `#!/bin/sh\nif [ "${ghExit}" != "0" ]; then echo "fake gh failure" >&2; exit ${ghExit}; fi\ncat "${fixture}"\n`);
+    const pr: Record<string, unknown> = { headRefOid, statusCheckRollup: rollup };
+    if (baseRefName !== undefined) pr.baseRefName = baseRefName;
+    writeFileSync(fixture, JSON.stringify(pr));
+    const api = join(dir, 'api.json');
+    writeFileSync(api, JSON.stringify({ sha: prLibSha, encoding: 'base64', content: Buffer.from(prLib, 'utf8').toString('base64') }));
+    const apiArgs = join(dir, 'api.args');
+    // 本物の gh の代わり: `gh pr view` は固定 JSON、`gh api …/contents/…` は PR 側のファイル (base64) を返す
+    writeFileSync(
+      join(bin, 'gh'),
+      [
+        '#!/bin/sh',
+        'case "$1" in',
+        `  pr) if [ "${ghExit}" != "0" ]; then echo "fake gh failure" >&2; exit ${ghExit}; fi; cat "${fixture}" ;;`,
+        `  api) printf '%s\\n' "$2" >> "${apiArgs}"; if [ "${apiExit}" != "0" ]; then echo '{"message":"Not Found","status":"404"}' >&2; exit ${apiExit}; fi; cat "${api}" ;;`,
+        '  *) echo "unexpected gh $*" >&2; exit 9 ;;',
+        'esac',
+        '',
+      ].join('\n'),
+    );
     chmodSync(join(bin, 'gh'), 0o755);
     // 本物の git の代わり: rev-parse を固定の OID で答える (gitResolves が null なら失敗)
     writeFileSync(
@@ -287,7 +376,13 @@ describe('CLI (gh と git を偽物に差し替えて end-to-end)', () => {
       encoding: 'utf8',
       env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ''}` },
     });
-    return { status: res.status, stdout: res.stdout, stderr: res.stderr };
+    let apiCalls: string[] = [];
+    try {
+      apiCalls = readFileSync(apiArgs, 'utf8').split('\n').filter(Boolean);
+    } catch {
+      apiCalls = [];
+    }
+    return { status: res.status, stdout: res.stdout, stderr: res.stderr, apiCalls };
   }
 
   it('期待 check が全部 SUCCESS → SETTLED nonSUCCESS=0 missing=0 で exit 0 (既存の出力形式を保つ)', () => {
@@ -338,6 +433,47 @@ describe('CLI (gh と git を偽物に差し替えて end-to-end)', () => {
     expect(mismatch.status).toBe(3);
     expect(mismatch.stderr).toContain('HEAD 不一致');
     expect(mismatch.stderr).toContain(FULL_HEAD);
+  });
+
+  it('base が取れない (キー欠落 / null / 空文字) → 曖昧に「main 以外」へ落とさず exit 3', () => {
+    for (const baseRefName of [undefined, null, '', '  ']) {
+      const r = cli(rollupOf(['test']), ['--once'], { baseRefName });
+      expect(r.status, JSON.stringify(baseRefName)).toBe(3);
+      expect(r.stderr, JSON.stringify(baseRefName)).toContain('base branch');
+      expect(r.stdout, JSON.stringify(baseRefName)).not.toContain('SETTLED');
+    }
+  });
+
+  it('期待集合は対象 PR の HEAD にある scripts/lib/ciWait.mjs から読む (PR 側が 7 件ならそれを期待する)', () => {
+    const prLib = LOCAL_LIB_SOURCE.replace("'test', // ci.yml", "'test', // ci.yml\n  'added-required', // new.yml");
+    expect(parseExpectedChecks(prLib)).toEqual([...EXPECTED_PR_CHECKS, 'added-required']);
+    const seven = [...EXPECTED_PR_CHECKS, 'added-required'];
+    const ok = cli(rollupOf(seven), ['--once'], { prLib });
+    expect(ok.stdout.split('\n')[0]).toBe('SETTLED head=4981cc5 checks=7 nonSUCCESS=0 missing=0 expected=7');
+    expect(ok.status).toBe(0);
+    expect(ok.apiCalls).toEqual([`repos/{owner}/{repo}/contents/scripts/lib/ciWait.mjs?ref=${FULL_HEAD}`]);
+    // ローカル (6 件) では全部そろっていても、PR 側の 7 件目が無ければ settle しない
+    const missing = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { prLib });
+    expect(missing.stdout.split('\n')[0]).toBe('PENDING head=4981cc5 checks=6 nonSUCCESS=0 missing=1 expected=7');
+    expect(missing.stdout).toContain('added-required\tMISSING');
+    expect(missing.status).toBe(2);
+  });
+
+  it('PR 側のファイルが取れない / 読めない → blob hash がローカルと同じときだけローカルの定数・それ以外は exit 3', () => {
+    const notFound = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { apiExit: 1 });
+    expect(notFound.status).toBe(3);
+    expect(notFound.stderr).toContain('取得できません');
+    const unreadable = 'export const EXPECTED_PR_CHECKS = somethingElse();\n';
+    const differs = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { prLib: unreadable });
+    expect(differs.status).toBe(3);
+    expect(differs.stderr).toContain('読めず');
+    const sameBlob = cli(rollupOf(EXPECTED_PR_CHECKS), ['--once'], { prLib: unreadable, prLibSha: blobSha(LOCAL_LIB_SOURCE) });
+    expect(sameBlob.stdout.split('\n')[0]).toBe('SETTLED head=4981cc5 checks=6 nonSUCCESS=0 missing=0 expected=6');
+    expect(sameBlob.status).toBe(0);
+    // base が main 以外なら PR 側のファイルは読まない (積み上げ PR で contents API を叩かない)
+    const stacked = cli(rollupOf(['test']), ['--once'], { baseRefName: 'feat/x', apiExit: 1 });
+    expect(stacked.status).toBe(0);
+    expect(stacked.apiCalls).toEqual([]);
   });
 
   it('引数不正・gh 失敗は exit 3 のまま', () => {
