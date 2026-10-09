@@ -196,6 +196,13 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   const [feeReplacedTo, setFeeReplacedTo] = useState<ReplacedLink | null>(null);
   // 取消・別内容の置換を確かめた試行 (送った hash → 置換 tx)。receipt の isSuccess に依る一時的な判定のままだと、
   // 再接続の再照会が RPC error になった瞬間に消えて unknown に戻り、次の決済 / fee 再送を封鎖する (#764 Codex P2)。
+  // 置換先の revert を onReplaced の receipt で確かめた試行 (送った hash)。receipt query の retry の判断は fetch の
+  // 開始時に渡した関数で行われ、enabled を後から false にしても進行中の retryer は止まらない。state ではなく ref に
+  // 同期的に記録し (onReplaced は wagmi が throw する前に呼ばれる)、retry の関数がそれを見て元 hash を待ち直さない
+  // (消えた元 tx を timeout=0 で待ち続けて新しい決済と並走させない・#764 Codex 4 回目 P3)。
+  const finalFailedSentRef = useRef(new Set<string>());
+  const receiptRetry = (hash: Hex | undefined) => (failureCount: number) =>
+    !(hash && finalFailedSentRef.current.has(hash.toLowerCase())) && failureCount < 3;
   const [merchantReplacedOtherLink, setMerchantReplacedOtherLink] =
     useState<AttemptHashLink | null>(null);
   const [feeReplacedOtherLink, setFeeReplacedOtherLink] =
@@ -218,30 +225,39 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     !!linkedHash(feeReplacedOtherLink, chainId, feeTxHash);
 
   const merchantReceipt = useWaitForTransactionReceipt({
-    query: { enabled: enabled && !!merchantTxHash && !merchantAttemptFailed },
+    // retry の回数は TanStack Query の既定 (3) のまま。確定失敗を確かめた試行だけ retry しない。
+    query: { enabled: enabled && !!merchantTxHash && !merchantAttemptFailed, retry: receiptRetry(merchantTxHash) },
     hash: merchantTxHash,
     chainId,
     // wagmi はこの callback を viem の waitForTransactionReceipt へ渡す (query key には含めない)。
     // viem は同じ nonce の置換を見つけると、置換先が revert していても resolve の前にこれを呼ぶ。
-    onReplaced: (replacement) =>
+    onReplaced: (replacement) => {
+      if (replacement.transactionReceipt.status === 'reverted') {
+        finalFailedSentRef.current.add(replacement.replacedTransaction.hash.toLowerCase());
+      }
       setMerchantReplacedTo({
         chainId,
         sent: replacement.replacedTransaction.hash,
         linked: replacement.transaction.hash,
         reverted: replacement.transactionReceipt.status === 'reverted',
-      }),
+      });
+    },
   });
   const feeReceipt = useWaitForTransactionReceipt({
-    query: { enabled: enabled && !!feeTxHash && !feeAttemptFailed },
+    query: { enabled: enabled && !!feeTxHash && !feeAttemptFailed, retry: receiptRetry(feeTxHash) },
     hash: feeTxHash,
     chainId,
-    onReplaced: (replacement) =>
+    onReplaced: (replacement) => {
+      if (replacement.transactionReceipt.status === 'reverted') {
+        finalFailedSentRef.current.add(replacement.replacedTransaction.hash.toLowerCase());
+      }
       setFeeReplacedTo({
         chainId,
         sent: replacement.replacedTransaction.hash,
         linked: replacement.transaction.hash,
         reverted: replacement.transactionReceipt.status === 'reverted',
-      }),
+      });
+    },
   });
   const refetchMerchantReceipt = merchantReceipt.refetch;
   const refetchFeeReceipt = feeReceipt.refetch;

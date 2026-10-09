@@ -217,6 +217,8 @@ import { useStandardPayment } from '@/hooks/useStandardPayment';
 // 実際の viem の polling (pollingInterval 10ms) と TanStack Query を走らせるので、full suite の負荷下では既定の
 // 1 秒を超えうる (単体では通るが並走で時間切れになって揺れた)。待ちの上限だけ広げる (判定の条件は変えない)。
 const waitFor: typeof rtlWaitFor = (callback, options) => rtlWaitFor(callback, { timeout: 5_000, ...options });
+// polling (10ms) が何周も回る実時間を待つ (この間に元 hash の照会が増えないことを見る)。
+const settleRealTime = () => act(async () => { await new Promise((r) => setTimeout(r, 300)); });
 
 const params = {
   tokenAddress: TOKEN,
@@ -313,10 +315,11 @@ describe('useStandardPayment: 置換先の revert を query の retry 完了を�
     expect(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)).toBeNull();
     expect(result.current.hasActiveIntent).toBe(false);
 
-    // retry は確かに元の hash を再び待っている (= query の error は立たない) が、確定は揺らがない。
-    await waitFor(() =>
-      expect(requestsOf('eth_getTransactionReceipt', MERCHANT_TX).length).toBeGreaterThanOrEqual(2),
-    );
+    // 確定失敗を確かめた試行は retry しない: 消えた元 hash を待ち直さない (#764 Codex 4 回目 P3)。
+    await settleRealTime();
+    const merchantReads = (requestsOf('eth_getTransactionReceipt', MERCHANT_TX).length + requestsOf('eth_getTransactionByHash', MERCHANT_TX).length);
+    await settleRealTime();
+    expect((requestsOf('eth_getTransactionReceipt', MERCHANT_TX).length + requestsOf('eth_getTransactionByHash', MERCHANT_TX).length)).toBe(merchantReads);
     rerender();
     expect(result.current.phase).toBe('merchant-error');
     expect(result.current.isUnknown).toBe(false);
@@ -370,9 +373,10 @@ describe('useStandardPayment: 置換先の revert を query の retry 完了を�
       merchantBlockNumber: String(BLOCK_NUMBER),
     });
 
-    await waitFor(() =>
-      expect(requestsOf('eth_getTransactionReceipt', FEE_TX).length).toBeGreaterThanOrEqual(2),
-    );
+    await settleRealTime();
+    const feeReads = (requestsOf('eth_getTransactionReceipt', FEE_TX).length + requestsOf('eth_getTransactionByHash', FEE_TX).length);
+    await settleRealTime();
+    expect((requestsOf('eth_getTransactionReceipt', FEE_TX).length + requestsOf('eth_getTransactionByHash', FEE_TX).length)).toBe(feeReads);
     rerender();
     expect(result.current.phase).toBe('fee-error');
 
