@@ -68,7 +68,7 @@ type StatusBody =
 
 const json = (body: StatusBody) => NextResponse.json(body, { status: 200 });
 
-// 期限切れ未使用の証明 (finalized → 番号固定の state → canonical hash) にかける上限。used/settled の経路とは別で、
+// 期限切れ未使用の証明 (finalized → hash 固定の state → canonical hash) にかける上限。used/settled の経路とは別で、
 // unused かつ hash 記録が無い分岐でだけ読む。
 const EXPIRY_PROOF_TIMEOUT_MS = 3_000;
 

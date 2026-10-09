@@ -69,6 +69,7 @@ const CHECKED_AT = NOW + 200_000;
 const SALT = `0x${'33'.repeat(32)}` as Hex;
 const OLD = `0x${'44'.repeat(32)}` as Hex;
 const TX = `0x${'55'.repeat(32)}` as Hex;
+const BLOCK_HASH = `0x${'88'.repeat(32)}` as Hex;
 const PAYER = getAddress('0x1111111111111111111111111111111111111111');
 const MERCHANT = getAddress('0x2222222222222222222222222222222222222222');
 const ID = `h_${'a'.repeat(32)}`;
@@ -122,12 +123,17 @@ function chain(nonce: Hex, input: {
   return {
     readContract: vi.fn(async () => true),
     getBlockNumber: vi.fn(async () => latest),
-    getBlock: vi.fn(async () => ({ number: input.bad === 'finality' ? eventBlock - 1n : latest })),
+    // 番号指定は「同じ番号の正規ブロック」(B6 の hash 照合) → receipt と同じ hash を返す。tag 指定は safe head。
+    getBlock: vi.fn(async (args: { blockTag: 'safe' | 'finalized' } | { blockNumber: bigint }) =>
+      'blockNumber' in args
+        ? { number: args.blockNumber, hash: BLOCK_HASH }
+        : { number: input.bad === 'finality' ? eventBlock - 1n : latest }),
     getTransactionReceipt: vi.fn(async ({ hash }) => {
       if (hash === OLD && input.old !== 'reverted') throw new Error('receipt missing');
       return {
         status: hash === OLD ? 'reverted' as const : 'success' as const,
         blockNumber: eventBlock,
+        blockHash: BLOCK_HASH,
         logs: [
           {
             address: input.bad === 'emitter' ? MERCHANT : STORE_USDC_ADDRESS,
@@ -315,7 +321,8 @@ describe('USDC reconciliation with real Lua and receipt verification', () => {
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT, client })).toEqual({ ok: true, state: 'pending' });
     expect(client.getLogs).toHaveBeenCalledWith(expect.objectContaining({ fromBlock: 90n, toBlock: 100n }));
     expect(await getStoreUsdcIntent(SALT)).toMatchObject({ reconcileFromBlock: '90' });
-    vi.mocked(client.getBlock).mockResolvedValue({ number: 100n });
+    vi.mocked(client.getBlock).mockImplementation(async (args) =>
+      'blockNumber' in args ? { number: args.blockNumber, hash: BLOCK_HASH } : { number: 100n });
     expect(await reconcileStoreUsdcIntent(SALT, { now: CHECKED_AT + 30_000, client })).toEqual({ ok: true, state: 'settled' });
   });
 

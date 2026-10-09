@@ -34,6 +34,7 @@ vi.mock('@/lib/kv', () => ({
   ),
 }));
 
+import { kvGet } from '@/lib/kv';
 import {
   findStoreUsdcAuthorizationTransactions,
   STORE_USDC_ADDRESS,
@@ -84,6 +85,9 @@ const NONCE = `0x${'44'.repeat(32)}` as Hex;
 const OTHER_NONCE = `0x${'55'.repeat(32)}` as Hex;
 const TX = `0x${'66'.repeat(32)}` as Hex;
 const SALT = `0x${'77'.repeat(32)}` as Hex;
+// receipt が属するブロックの hash と、同じ番号の「別フォーク」の hash (B6)。
+const BLOCK_HASH = `0x${'88'.repeat(32)}` as Hex;
+const FORK_HASH = `0x${'99'.repeat(32)}` as Hex;
 
 function transferLog(input: {
   emitter?: Address;
@@ -132,14 +136,21 @@ function client(input: {
   logs?: ReturnType<typeof transferLog>[];
   safe?: bigint | null | 'error';
   latest?: bigint;
+  /** 同じ番号の正規ブロックの hash (既定 = receipt と同じ)。'error' は照会障害。 */
+  canonicalHash?: Hex | 'error';
 } = {}): StoreUsdcPublicClient {
   return {
     getTransactionReceipt: vi.fn(async () => ({
       status: input.status ?? 'success',
       blockNumber: 100n,
+      blockHash: BLOCK_HASH,
       logs: input.logs ?? [transferLog(), authorizationLog()],
     })),
-    getBlock: vi.fn(async () => {
+    getBlock: vi.fn(async (args: { blockTag: 'safe' | 'finalized' } | { blockNumber: bigint }) => {
+      if ('blockNumber' in args) {
+        if (input.canonicalHash === 'error') throw new Error('canonical lookup unavailable');
+        return { number: args.blockNumber, hash: input.canonicalHash ?? BLOCK_HASH };
+      }
       if (input.safe === 'error') throw new Error('safe unsupported');
       return { number: input.safe === undefined ? 100n : input.safe };
     }),
@@ -166,6 +177,7 @@ beforeEach(() => {
   claimState.value = null;
   claimState.legacy = null;
   claimState.fail = false;
+  vi.mocked(kvGet).mockClear();
 });
 
 describe('Store USDC on-chain entitlement gate', () => {
@@ -253,5 +265,51 @@ describe('Store USDC on-chain entitlement gate', () => {
         client: client({ safe: 'error', latest: 114n }),
       }),
     ).resolves.toMatchObject({ ok: true, state: 'confirmed' });
+  });
+
+  // 第 7 回レビュー B6: finality は「高さ」だけで判定していた。RPC が旧フォークの成功 receipt (同じ番号・別 hash)
+  // を返しても、safe 到達や 15 confirmations は高さの条件を満たすので confirmed になりうる。receipt の blockHash が
+  // 今の正規チェーンの同じ番号のブロックと一致することを、confirmed の前の追加条件にする (license reconcile と同じ)。
+  describe('条件7: receipt のブロックが今の正規チェーンに属する (blockHash の照合)', () => {
+    it('safe 到達でも receipt の blockHash が同じ番号の正規ブロックと違えば pending (finality)・terminal にせず claim も読まない', async () => {
+      const rpc = client({ safe: 100n, latest: 100n, canonicalHash: FORK_HASH });
+      await expect(
+        verifyStoreUsdcOnchain({ intent: intent(), txHash: TX, client: rpc }),
+      ).resolves.toEqual({ ok: true, state: 'pending', reason: 'finality' });
+      expect(rpc.getBlock).toHaveBeenCalledWith({ blockNumber: 100n });
+      expect(kvGet).not.toHaveBeenCalled();
+    });
+
+    it('15 confirmations でも同じ (高さの条件は hash の照合を代替しない)', async () => {
+      await expect(
+        verifyStoreUsdcOnchain({
+          intent: intent(),
+          txHash: TX,
+          client: client({ safe: null, latest: 114n, canonicalHash: FORK_HASH }),
+        }),
+      ).resolves.toEqual({ ok: true, state: 'pending', reason: 'finality' });
+    });
+
+    it('正規ブロックの照会が落ちたら rpc_unavailable (confirmed にも pending にもしない)', async () => {
+      await expect(
+        verifyStoreUsdcOnchain({
+          intent: intent(),
+          txHash: TX,
+          client: client({ safe: 100n, canonicalHash: 'error' }),
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'rpc_unavailable' });
+      expect(kvGet).not.toHaveBeenCalled();
+    });
+
+    it('confirmed は finality の後に receipt の番号を hash で照合してから (照会順を固定)', async () => {
+      const rpc = client({ safe: 100n });
+      await expect(
+        verifyStoreUsdcOnchain({ intent: intent(), txHash: TX, client: rpc }),
+      ).resolves.toEqual({ ok: true, state: 'confirmed', blockNumber: 100n });
+      expect(vi.mocked(rpc.getBlock).mock.calls.map(([args]) => args)).toEqual([
+        { blockTag: 'safe' },
+        { blockNumber: 100n },
+      ]);
+    });
   });
 });

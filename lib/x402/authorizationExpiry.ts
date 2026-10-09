@@ -6,7 +6,12 @@ const AUTHORIZATION_STATE_ABI = parseAbi([
   'function authorizationState(address authorizer, bytes32 nonce) view returns (bool)',
 ]);
 
-export type AuthorizationExpiryClient = {
+/**
+ * 期限切れ未使用の証明が読む RPC。state は finalized ブロックの **hash** に固定して読む (EIP-1898 blockHash +
+ * requireCanonical・番号指定は使わない)。viem の readContract は blockHash/requireCanonical をそのまま eth_call の
+ * block 引数に載せる (2.56)。本番 RPC の対応は Polygon/Kaia/Avalanche (#767) と Base (公開 RPC・本 PR) で実測済み。
+ */
+export type AuthorizationExpiryObserveClient = {
   getBlock: (args: { blockTag: 'finalized' } | { blockNumber: bigint }) => Promise<{
     number: bigint | null;
     hash?: Hex | null;
@@ -17,8 +22,12 @@ export type AuthorizationExpiryClient = {
     abi: typeof AUTHORIZATION_STATE_ABI;
     functionName: 'authorizationState';
     args: readonly [Address, Hex];
-    blockNumber: bigint;
+    blockHash: Hex;
+    requireCanonical: true;
   }) => Promise<boolean>;
+};
+
+export type AuthorizationExpiryClient = AuthorizationExpiryObserveClient & {
   getTransactionReceipt: (args: { hash: Hex }) => Promise<{ status: 'success' | 'reverted' }>;
 };
 
@@ -40,14 +49,19 @@ export async function authorizationExpiredUnused(input: {
       typeof block.hash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(block.hash) ||
       typeof block.timestamp !== 'bigint' || block.timestamp <= input.validBefore
     ) return false;
+    // state は finalized の「番号」ではなく「hash」に固定して読む (EIP-1898 blockHash + requireCanonical)。番号指定だと
+    // reorg の反映が遅れた RPC ノードが混在したとき、finalized(A) → state(別フォーク B)=unused → canonical(A) が揃い、
+    // A では支払い済みなのに期限切れ未使用と証明しうる (observeAuthorizationExpiry と同じ・#767 / 第 7 回レビュー持ち越し①)。
+    // 非対応・非 canonical は throw → false (証明しない)。
     const used = await input.client.readContract({
       address: input.token,
       abi: AUTHORIZATION_STATE_ABI,
       functionName: 'authorizationState',
       args: [input.payer, input.nonce],
-      blockNumber: block.number,
+      blockHash: block.hash as Hex,
+      requireCanonical: true,
     });
-    // As in license reconciliation, recheck the canonical hash after the numbered
+    // As in license reconciliation, recheck the canonical hash after the hash-pinned
     // state read so an orphaned unused-state response cannot release a payment lock.
     const canonical = await input.client.getBlock({ blockNumber: block.number });
     if (canonical.hash !== block.hash || used !== false) return false;
@@ -74,22 +88,9 @@ export async function authorizationExpiredUnused(input: {
 
 export type AuthorizationExpiryObservation = 'expired' | 'live' | 'unknown';
 
-/** observeAuthorizationExpiry 用。state は finalized ブロックの hash に固定して読む (EIP-1898)。 */
-export type AuthorizationExpiryObserveClient = {
-  getBlock: AuthorizationExpiryClient['getBlock'];
-  readContract: (args: {
-    address: Address;
-    abi: typeof AUTHORIZATION_STATE_ABI;
-    functionName: 'authorizationState';
-    args: readonly [Address, Hex];
-    blockHash: Hex;
-    requireCanonical: true;
-  }) => Promise<boolean>;
-};
-
 /**
  * relay status 用の「期限切れ未使用」の観測 (tri-state)。手順は authorizationExpiredUnused と同じ
- * (finalized ブロック → その番号に固定した authorizationState → canonical hash の再確認) で、結果を 3 値で返す:
+ * (finalized ブロック → その hash に固定した authorizationState → canonical hash の再確認) で、結果を 3 値で返す:
  *   'expired' = finalized の時刻が validBefore を過ぎ、その時点で nonce は未使用 (以後どのブロックでも成立しない)
  *   'live'    = finalized の時刻がまだ validBefore 以下 (チェーン上ではまだ期限前・state は読まない)
  *   'unknown' = 読めない・揃わない・不整合 (証明にならない)

@@ -46,6 +46,8 @@ export type StoreUsdcPublicClient = {
   getTransactionReceipt: (args: { hash: Hex }) => Promise<{
     status: 'success' | 'reverted';
     blockNumber: bigint;
+    /** receipt が属するブロックの hash。confirmed の前に同じ番号の正規ブロックと照合する (B6)。 */
+    blockHash: Hex;
     logs: readonly {
       address: Address;
       data: Hex;
@@ -64,7 +66,9 @@ export type StoreUsdcPublicClient = {
     abi: typeof AUTHORIZATION_STATE_ABI;
     functionName: 'authorizationState';
     args: readonly [Address, Hex];
-    blockNumber?: bigint;
+    /** 期限切れ未使用の証明 (authorizationExpiredUnused) は finalized の hash に固定して読む (EIP-1898)。 */
+    blockHash?: Hex;
+    requireCanonical?: true;
   }) => Promise<boolean>;
   getLogs: (args: {
     address: Address;
@@ -190,7 +194,26 @@ async function hasRequiredFinality(
   }
 }
 
-/** entitlement 発行前の Base receipt 6 条件。global claim の確定 CAS は finalizer 内で再検査する。 */
+/**
+ * receipt のブロックが**今の**正規チェーンに属するか (同じ番号の正規ブロックの hash と一致するか)。
+ * hasRequiredFinality は高さしか見ないので、RPC が旧フォークの成功 receipt (同じ番号・別 hash) を返すと
+ * safe 到達や 15 confirmations を満たしたまま confirmed にできてしまう (第 7 回レビュー B6)。license の
+ * reconcile (lib/license/reconcile.ts) と同じ照合を confirmed の前に置く。不一致は terminal にしない
+ * (正当な購入を失敗化しない) — 次回の reconcile が正規チェーンの receipt で判定し直す。
+ */
+async function receiptIsCanonical(
+  client: StoreUsdcPublicClient,
+  receipt: { blockNumber: bigint; blockHash: Hex },
+): Promise<boolean | 'unavailable'> {
+  try {
+    const canonical = await client.getBlock({ blockNumber: receipt.blockNumber });
+    return canonical.hash === receipt.blockHash;
+  } catch {
+    return 'unavailable';
+  }
+}
+
+/** entitlement 発行前の Base receipt 7 条件。global claim の確定 CAS は finalizer 内で再検査する。 */
 export async function verifyStoreUsdcOnchain(input: {
   intent: StoreUsdcOnchainIntent;
   txHash: Hex;
@@ -225,6 +248,12 @@ export async function verifyStoreUsdcOnchain(input: {
     return { ok: false, reason: 'rpc_unavailable' };
   }
   if (!finality) return { ok: true, state: 'pending', reason: 'finality' };
+  // 条件7 (B6): 高さの条件を満たした receipt が今の正規チェーンのブロックに属すること。
+  const canonical = await receiptIsCanonical(client, receipt);
+  if (canonical === 'unavailable') {
+    return { ok: false, reason: 'rpc_unavailable' };
+  }
+  if (!canonical) return { ok: true, state: 'pending', reason: 'finality' };
 
   const [claim, legacyBilling] = await Promise.all([
     kvGet(paymentClaimKey(STORE_USDC_CHAIN_ID, input.txHash)),
