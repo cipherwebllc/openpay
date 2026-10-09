@@ -35,6 +35,9 @@ type ReservationRecord = {
   facilitatorBody: Record<string, unknown>;
   tuple: AgentSettlementTuple;
   feeConfig: StandardFeeConfig | null;
+  // 手数料の徴収方式 (第 7 回レビュー B2)。'x402' = 買い手上乗せの x402 料金を Settled tuple で照合済み。
+  // 無い (この field を足す前の予約) は従来どおり人払いの料金式で判定する。digest には在るときだけ入れる (旧予約の digest は不変)。
+  feeModel?: 'x402';
   digest: string;
   createdAt: number;
 };
@@ -119,8 +122,11 @@ function digestFor(
   snapshot: AgentOrderSnapshot,
   tuple: AgentSettlementTuple,
   feeConfig: StandardFeeConfig | null,
+  feeModel?: 'x402',
 ): string {
-  return createHash('sha256').update(JSON.stringify({ identity, snapshot, tuple, feeConfig })).digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify({ identity, snapshot, tuple, feeConfig, ...(feeModel ? { feeModel } : {}) }))
+    .digest('hex');
 }
 function decodeReservation(key: string, raw: string): AgentOrderReservation | null {
   try {
@@ -141,9 +147,10 @@ function decodeReservation(key: string, raw: string): AgentOrderReservation | nu
       !value.feeConfig || !['storefront', 'preorder'].includes(value.feeConfig.kind) ||
       !['merchant', 'customer'].includes(value.feeConfig.feePayer)
     )) return null;
+    if (value.feeModel !== undefined && value.feeModel !== 'x402') return null;
     if (
       JSON.stringify(tuple) !== JSON.stringify(value.tuple) ||
-      digestFor(value.identity, snapshot, tuple, value.feeConfig) !== value.digest
+      digestFor(value.identity, snapshot, tuple, value.feeConfig, value.feeModel) !== value.digest
     ) return null;
     return { key, raw, record: { ...value, snapshot, tuple } };
   } catch {
@@ -158,7 +165,7 @@ const RESERVE = [
   "for i=1,3 do local t=redis.call('TYPE',KEYS[i]).ok; if t~='none' and t~='string' then return {-2,''} end end",
   "local indexed=redis.call('GET',KEYS[2]); if indexed and indexed~=KEYS[1] then return {-1,''} end",
   "local current=redis.call('GET',KEYS[1])",
-  "if current then local ok,r=pcall(cjson.decode,current); if not ok or type(r)~='table' or r.digest~=ARGV[2] then return {-1,''} end; return {0,current} end",
+  "if current then local ok,r=pcall(cjson.decode,current); if not ok or type(r)~='table' or (r.digest~=ARGV[2] and r.digest~=ARGV[5]) then return {-1,''} end; return {0,current} end",
   "if indexed then return {-2,''} end",
   "local ttl=tonumber(ARGV[3]); if not ttl or ttl<=0 then return {-2,''} end",
   "redis.call('SET',KEYS[1],ARGV[1],'EX',ttl)",
@@ -210,13 +217,14 @@ export async function reservationForBinding(
   const stored = await readAgentOrderReservation(key);
   if (stored.kind !== 'match') return stored;
   const r = stored.reservation.record;
-  return digestFor(identity, snapshot, tuple, r.feeConfig) === r.digest ? stored : { kind: 'conflict' };
+  return digestFor(identity, snapshot, tuple, r.feeConfig, r.feeModel) === r.digest ? stored : { kind: 'conflict' };
 }
 export async function reserveAgentOrder(input: {
   identity: PaymentRedeliveryIdentity;
   snapshot: AgentOrderSnapshot;
   facilitatorBody: Record<string, unknown>;
   feeConfig: StandardFeeConfig | null;
+  feeModel?: 'x402';
 }): Promise<{ kind: 'created'; reservation: AgentOrderReservation; owner: string } | Lookup> {
   const tuple = tupleFor(input.facilitatorBody);
   if (!tuple || !parseBoundAgentOrderSnapshot({
@@ -228,15 +236,18 @@ export async function reserveAgentOrder(input: {
   const key = agentReservationKey(tuple.chainId, tuple.token, tuple.authorizer, tuple.nonce);
   const record: ReservationRecord = {
     v: 1, ...input, tuple,
-    digest: digestFor(input.identity, input.snapshot, tuple, input.feeConfig),
+    digest: digestFor(input.identity, input.snapshot, tuple, input.feeConfig, input.feeModel),
     createdAt: Date.now(),
   };
   const raw = JSON.stringify(record);
   const owner = randomBytes(32).toString('hex');
+  // feeModel を足す前に作られた同じ内容の予約は、その digest (feeModel なし) のまま同一とみなして返す
+  // (再予約が conflict = 402 に化けない・旧予約は旧い手数料判定のまま・第 7 回レビュー B2 の互換読み)。
+  const legacyDigest = digestFor(input.identity, input.snapshot, tuple, input.feeConfig);
   const result = await kvEval<[number, string]>(
     RESERVE,
     [key, bindingKey(input.identity), attemptKey(key)],
-    [raw, record.digest, String(AGENT_RESERVATION_TTL_SEC), owner],
+    [raw, record.digest, String(AGENT_RESERVATION_TTL_SEC), owner, legacyDigest],
   );
   if (!result.ok || !result.value || result.value[0] === -2) {
     // A lost reserve ack must not strand an unused payment. This request has not broadcast;

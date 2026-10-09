@@ -118,7 +118,8 @@ async function prepareReceipt(body: Record<string, unknown>) {
   if (!parsed.ok) throw new Error(parsed.reason);
   const p = parsed.parsed.params;
   nonce = buildForwarderNonce(p, CHAIN, FORWARDER);
-  h.logs = [transfer(), transfer(FORWARDER, FEE, p.feeValue), authorization(), {
+  // 店舗・手数料の Transfer は Settled と同じ tuple から作る (固定 100 JPYC だと小額・floor 境界の着金を再現できない・第 7 回レビュー B15)。
+  h.logs = [transfer(FORWARDER, SELLER, p.merchantValue), transfer(FORWARDER, FEE, p.feeValue), authorization(), {
     address: FORWARDER,
     topics: encodeEventTopics({ abi: ABI, eventName: 'Settled', args: { from: p.from, nonce, merchant: p.merchant } }),
     data: encodeAbiParameters([{ type: 'uint256' }, { type: 'address' }, { type: 'uint256' }], [p.merchantValue, p.feeReceiver, p.feeValue]),

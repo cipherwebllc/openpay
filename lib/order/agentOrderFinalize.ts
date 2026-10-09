@@ -47,7 +47,7 @@ export async function finalizeAgentOrder(input: { reservation: AgentOrderReserva
   // Re-read immutable ownership after settlement: redelivery promotion may have conflicted.
   const stored = await readAgentOrderReservation(reservation.key);
   if (stored.kind !== 'match' || stored.reservation.raw !== reservation.raw) return { ok: false, reason: stored.kind === 'unavailable' ? 'storage_unavailable' : 'conflict' };
-  const { snapshot, tuple, digest, feeConfig } = stored.reservation.record;
+  const { snapshot, tuple, digest, feeConfig, feeModel } = stored.reservation.record;
   if (!parseAgentOrderSettlement(settlement, snapshot)) return { ok: false, reason: 'settlement_mismatch' };
   const completionKey = agentCompletionKey(reservation.key);
   const owner = 'pending:' + randomBytes(32).toString('hex');
@@ -76,7 +76,12 @@ export async function finalizeAgentOrder(input: { reservation: AgentOrderReserva
     const at = snapshot.pickupAt;
     // Same advisory near-future window as public notify; stale pickup metadata must not pollute boards.
     if (at !== null && at > Date.now() - 3600_000 && at < Date.now() + 14 * 86400_000) order.pickupAt = at;
-    const obligation = standardFeeObligationFromReceipt({ receiptValue: amount, sameSourceFeeValue: BigInt(tuple.feeValue), config: feeConfig });
+    // x402 の注文は、手数料を x402 料金 (server が requirements で決め、上の matchesAgentSettlement が Settled の
+    // feeValue を照合済み) で同じ settle の中で徴収している → 人払いの料金式で判定し直さず「徴収済み」とする
+    // (第 7 回レビュー B2)。モバイル注文の利用料が OFF (feeConfig なし) のときは従来どおり義務を作らない。
+    const obligation = feeModel === 'x402'
+      ? (feeConfig ? { expected: BigInt(tuple.feeValue), collectedInline: true } : null)
+      : standardFeeObligationFromReceipt({ receiptValue: amount, sameSourceFeeValue: BigInt(tuple.feeValue), config: feeConfig });
     const unpaid = { ...order };
     if (obligation) {
       unpaid.feeUncollected = true;

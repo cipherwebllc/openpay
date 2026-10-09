@@ -29,7 +29,7 @@ import { resolveFacilitatorPaymentStatus } from '@/lib/x402/facilitatorStatus';
 import { OPENPAY_CANONICAL_ORIGIN } from '@/lib/x402/firstParty';
 import { caip2ForChainId } from '@/lib/x402/network';
 import { decodeAgentCart, computeAgentOrder } from '@/lib/agentOrder';
-import { sanitizeTable } from '@/lib/orderRelay';
+import { ORDER_DUST_FLOOR_WEI, sanitizeTable } from '@/lib/orderRelay';
 import {
   createAgentOrderSnapshot,
   parseAgentOrderSettlement,
@@ -294,6 +294,12 @@ async function recoverMatchedPayment(input: {
   if (reservation && record.state !== 'settled') {
     const owner = await claimAgentOrderRetry(reservation);
     if (owner) {
+      // 下限 (B1) を入れる前に予約された 1 JPYC 未満の注文は、支払うと受注が残らない。未送信が確定した
+      // 再試行でだけ断る (送った可能性がある・成立済みの復旧応答は下の従来どおり)。
+      if (BigInt(snapshot.totalMinor) < ORDER_DUST_FLOOR_WEI) {
+        await releaseAgentOrderAttempt(reservation, owner);
+        return NextResponse.json({ error: 'order_below_minimum' }, { status: 422 });
+      }
       // Only a proven pre-broadcast rejection resumes settlement. Use the saved binding,
       // never today's menu/handle; an ambiguous prior attempt remains status-only.
       const verifyRes = await verifyPayment(
@@ -532,6 +538,11 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (!order.ok) {
     return NextResponse.json({ error: order.reason }, { status: 422 });
   }
+  // 受注は店舗の着金が 1 JPYC (ORDER_DUST_FLOOR_WEI) 未満の注文を保存しない (人間の notify と同じ下限)。支払い後に
+  // 受注が残らない注文を作らないよう、challenge を出す前に断る (第 7 回レビュー B1・user 裁定 R3・掟 12 の例外)。
+  if (order.totalMinor < ORDER_DUST_FLOOR_WEI) {
+    return NextResponse.json({ error: 'order_below_minimum' }, { status: 422 });
+  }
 
   // 不可逆な支払い challenge を作る前に、人間経路と同じ店舗受付状態を検証する。
   // 静的停止は live flag 非依存。live 読取の KV 障害は readShopLive が EMPTY へ fail-open し、
@@ -749,6 +760,9 @@ export async function GET(req: Request): Promise<NextResponse> {
   const reserved = await reserveAgentOrder({
     identity: paymentIdentity, snapshot, facilitatorBody,
     feeConfig: resolveStandardFeeConfig(record.storefront, chainId),
+    // 手数料は x402 の料金 (買い手上乗せ・server の requirements が決めた額を Settled で照合) で徴収済み。人払いの
+    // モバイル注文の料金式で判定し直さない (第 7 回レビュー B2・user 裁定 R3)。
+    feeModel: 'x402',
   });
   if (reserved.kind !== 'created' && reserved.kind !== 'match') {
     // Unbound payment must never broadcast. Release only our pre-broadcast cache claim so a
