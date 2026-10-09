@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import ts from 'typescript';
 
 // app/**/page.tsx + app/**/layout.tsx + app/**/route.ts の「規定外 value export」ガード (CLAUDE.md 掟 3)。
 // Next.js の Page / Layout / Route ファイルは default / generateMetadata 等の規定 export 以外の
@@ -71,48 +72,88 @@ function collectFiles(dir: string, names: ReadonlySet<string>, out: string[] = [
   return out;
 }
 
-// export される value 名を列挙する (型 export は除外)。
-//   export default …                  → 'default'
-//   export (async) function NAME      → NAME
-//   export const/let/var NAME         → NAME
-//   export class NAME                 → NAME
-//   export { A, B as C }              → A, C ('export type {…}' は除外)
-function extractValueExports(source: string): string[] {
-  const names: string[] = [];
-  if (/^export\s+default\b/m.test(source)) names.push('default');
-  for (const m of source.matchAll(
-    /^export\s+(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z0-9_$]+)/gm,
-  )) {
-    names.push(m[1]);
-  }
-  for (const m of source.matchAll(/^export\s+\{([^}]+)\}/gm)) {
-    for (const raw of m[1].split(',')) {
-      const part = raw.trim();
-      if (!part || part.startsWith('type ')) continue;
-      const asMatch = part.match(/\bas\s+([A-Za-z0-9_$]+)\s*$/);
-      names.push(asMatch ? asMatch[1] : part.split(/\s+/)[0]);
-    }
-  }
-  return names;
+// export される value 名を TypeScript の AST から列挙する (型 export は除外)。
+// 正規表現では `export const GET = …, extra = 1` の 2 つ目や `export enum` を見逃した (第 7 回レビュー Codex 指摘)。
+//   export default … / export default function|class   → 'default'
+//   export (async) function NAME / class / enum / namespace → NAME
+//   export const/let/var A = …, B = … / const { a, b } = … → A, B / a, b
+//   export { A, B as C } (from も可)                      → A, C (type-only は除外)
+//   export * from / export * as ns from                  → stars (再 export 名が静的に読めないので行ごと拒否)
+//   export interface / export type / export type {…}     → 型なので無視
+//   上記以外の export 文                                   → `(SyntaxKind)` として規定外に数える (黙って通さない)
+function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
+  const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) ?? [] : [];
+  return modifiers.some((m) => m.kind === kind);
 }
 
-// `export * from './x'` / `export * as ns from './x'` は再 export される名前が
-// 静的に読めないため、上の extractValueExports では規定外 export を見逃す
-// (次に './x' へ value を足した時点で next build だけが落ちる)。行ごと拒否する。
-// `export type * from …` は型のみなので対象外。
-function extractExportStars(source: string): string[] {
-  return [...source.matchAll(/^export\s+\*.*$/gm)].map((m) => m[0].trim());
+function bindingNames(name: ts.BindingName, out: string[]): void {
+  if (ts.isIdentifier(name)) {
+    out.push(name.text);
+    return;
+  }
+  for (const element of name.elements) {
+    if (ts.isBindingElement(element)) bindingNames(element.name, out);
+  }
+}
+
+function extractExports(source: string, fileName: string): { values: string[]; stars: string[] } {
+  const sf = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    fileName.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const values: string[] = [];
+  const stars: string[] = [];
+  for (const st of sf.statements) {
+    if (ts.isExportAssignment(st)) {
+      values.push('default'); // export default <expr> / export = x
+      continue;
+    }
+    if (ts.isExportDeclaration(st)) {
+      if (st.isTypeOnly) continue;
+      if (!st.exportClause || ts.isNamespaceExport(st.exportClause)) {
+        stars.push(st.getText(sf).trim());
+        continue;
+      }
+      for (const element of st.exportClause.elements) {
+        if (!element.isTypeOnly) values.push(element.name.text);
+      }
+      continue;
+    }
+    if (!hasModifier(st, ts.SyntaxKind.ExportKeyword)) continue;
+    if (ts.isInterfaceDeclaration(st) || ts.isTypeAliasDeclaration(st)) continue;
+    if (ts.isModuleDeclaration(st) && hasModifier(st, ts.SyntaxKind.DeclareKeyword)) continue;
+    if (ts.isVariableStatement(st)) {
+      for (const declaration of st.declarationList.declarations) bindingNames(declaration.name, values);
+      continue;
+    }
+    if (
+      ts.isFunctionDeclaration(st) ||
+      ts.isClassDeclaration(st) ||
+      ts.isEnumDeclaration(st) ||
+      ts.isModuleDeclaration(st)
+    ) {
+      if (hasModifier(st, ts.SyntaxKind.DefaultKeyword)) values.push('default');
+      else if (st.name) values.push(ts.isIdentifier(st.name) ? st.name.text : st.name.getText(sf));
+      else values.push('default');
+      continue;
+    }
+    values.push(`(${ts.SyntaxKind[st.kind]})`);
+  }
+  return { values, stars };
 }
 
 function assertOnlyAllowedExports(rel: string, allowed: ReadonlySet<string>, moveTo: string) {
   const source = readFileSync(join(process.cwd(), rel), 'utf8');
-  const offenders = extractValueExports(source).filter((n) => !allowed.has(n));
+  const { values, stars } = extractExports(source, rel);
+  const offenders = values.filter((n) => !allowed.has(n));
   expect(
     offenders,
     `${rel} が規定外の value export を持つ (next build が落ちる)。${moveTo} へ移動すること: ${offenders.join(', ')}`,
   ).toEqual([]);
 
-  const stars = extractExportStars(source);
   expect(
     stars,
     `${rel} が export * を持つ (再 export される名前が静的に読めず、規定外 export を検出できない)。名前を明示するか ${moveTo} へ移動すること: ${stars.join(', ')}`,
@@ -120,6 +161,42 @@ function assertOnlyAllowedExports(rel: string, allowed: ReadonlySet<string>, mov
 }
 
 const toRel = (p: string) => [p.replace(process.cwd() + '/', '')] as const;
+
+describe('export 抽出器 (regex で見逃した形を AST で拾う)', () => {
+  const extract = (src: string) => extractExports(src, 'probe/route.ts');
+
+  it('複数宣言・分割代入・enum・abstract class・namespace・default function/class を value export として列挙する', () => {
+    expect(extract('export const GET = handler(a, b), extra = 1;').values).toEqual(['GET', 'extra']);
+    expect(extract('export let a = 1, b = 2;\nexport var c = 3;').values).toEqual(['a', 'b', 'c']);
+    expect(extract('export const { x, y: z } = obj;\nexport const [first] = arr;').values).toEqual(['x', 'z', 'first']);
+    expect(extract('export enum Internal { A }').values).toEqual(['Internal']);
+    expect(extract('export const enum Flags { A }').values).toEqual(['Flags']);
+    expect(extract('export abstract class Base {}\nexport class Impl extends Base {}').values).toEqual(['Base', 'Impl']);
+    expect(extract('export namespace NS { export const v = 1; }').values).toEqual(['NS']);
+    expect(extract('export default function Page() { return null; }').values).toEqual(['default']);
+    expect(extract('export default async function () {}').values).toEqual(['default']);
+    expect(extract('export default class {}').values).toEqual(['default']);
+    expect(extract('const x = 1;\nexport default x;').values).toEqual(['default']);
+    expect(extract('export async function GET() {}\nexport function POST() {}').values).toEqual(['GET', 'POST']);
+  });
+
+  it('名前付き re-export は type-only を除いて列挙し、export * は stars として拒否する', () => {
+    expect(extract("export { a as b, type T, c } from './x';").values).toEqual(['b', 'c']);
+    expect(extract('const a = 1;\nexport { a };').values).toEqual(['a']);
+    expect(extract("export type { X } from './x';").values).toEqual([]);
+    expect(extract("export * from './x';").stars).toEqual(["export * from './x';"]);
+    expect(extract("export * as ns from './x';").stars).toEqual(["export * as ns from './x';"]);
+    expect(extract("export type * from './x';").stars).toEqual([]);
+  });
+
+  it('型だけの export (interface / type alias / declare module) は数えない', () => {
+    const { values, stars } = extract(
+      "export interface Props { a: string }\nexport type Id = string;\ndeclare module 'x' { export const q: number; }\nexport const dynamic = 'force-dynamic';",
+    );
+    expect(values).toEqual(['dynamic']);
+    expect(stars).toEqual([]);
+  });
+});
 
 describe('app/**/{page,layout}.tsx の export ガード (next build でしか落ちない罠の前倒し)', () => {
   const pages = collectFiles(join(process.cwd(), 'app'), PAGE_FILE_NAMES);

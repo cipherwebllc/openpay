@@ -167,48 +167,112 @@ describe('env ドキュメントのドリフト検出 (掟 9)', () => {
 
 // 配布パッケージが読む env は、利用者が見るのは各パッケージの README なので、そちらを正本にする
 // (第 7 回レビュー E9: packages/ は以前どのフェンスにも入っていなかった)。
+//
+// パッケージは `process.env` を注入可能な `env` として引き回し、helper (`requireEnv(env, 'X')` /
+// `required(env, 'X')`) 経由でも読むので、`env.X` / `env['X']` / helper の文字列引数も拾う
+// (Codex 指摘: `process.env.X` だけでは README 行を消しても欠落 0 件だった)。
+const PACKAGE_ENV_PATTERNS = [
+  /process\.env\.([A-Z][A-Z0-9_]*)/g,
+  /\benv\.([A-Z][A-Z0-9_]*)/g,
+  /\benv\[['"]([A-Z][A-Z0-9_]*)['"]\]/g,
+  /\b[A-Za-z_$][\w$]*\(\s*env\s*,\s*['"]([A-Z][A-Z0-9_]*)['"]/g,
+];
+// 実行環境が与える変数 (ホームディレクトリ等) は対象外。
+const PACKAGE_PLATFORM = new Set(['HOME', 'PATH', 'USERPROFILE', 'NODE_ENV']);
+
+function packageEnvKeys(files: readonly string[]): string[] {
+  const keys = new Set<string>();
+  for (const pattern of PACKAGE_ENV_PATTERNS) {
+    for (const key of envKeysIn(files, pattern, PACKAGE_PLATFORM).keys()) keys.add(key);
+  }
+  return [...keys].sort();
+}
+
+/** `## Environment` テーブルの第 1 列に書かれた変数名 (MCP README の書式)。 */
+function environmentTableKeys(readmeText: string): Set<string> {
+  const lines = readmeText.split('\n');
+  const start = lines.findIndex((l) => l.trim() === '## Environment');
+  if (start === -1) return new Set();
+  const length = lines.slice(start + 1).findIndex((l) => l.startsWith('## '));
+  return new Set(
+    lines
+      .slice(start, length === -1 ? lines.length : start + 1 + length)
+      .filter((l) => l.startsWith('|'))
+      .flatMap((l) => [...(l.split('|')[1] ?? '').matchAll(/`([A-Z][A-Z0-9_]*)`/g)].map((m) => m[1])),
+  );
+}
+
+/** 本文のどこかで `` `KEY` `` と書かれた変数名 (SDK README・example README の書式)。 */
+function backtickedKeys(readmeText: string): Set<string> {
+  return new Set([...readmeText.matchAll(/`([A-Z][A-Z0-9_]{2,})`/g)].map((m) => m[1]));
+}
+
+const readText = (rel: string) => readFileSync(resolve(root, rel), 'utf8');
+const MCP_README = 'packages/x402-mcp/README.md';
+const SDK_README = 'packages/x402-sdk/README.md';
+const MCP_SRC = () => sourceFiles('packages/x402-mcp/src', /\.mjs$/);
+const SDK_SRC = () => sourceFiles('packages/x402-sdk/src', /\.(m?js|ts)$/);
+
+function missingMcpEnv(files: readonly string[], mcpReadme: string): string[] {
+  const documented = environmentTableKeys(mcpReadme);
+  return packageEnvKeys(files).filter((k) => !documented.has(k));
+}
+
+// SDK の src は売り手向け (README) と買い手向け (guards / signer = MCP の設定・MCP README の Environment テーブル) の
+// 両方を含むので、どちらかに書かれていればよい。
+function missingSdkEnv(files: readonly string[], sdkReadme: string, mcpReadme: string, extraDocs: string[] = []): string[] {
+  const documented = new Set([
+    ...backtickedKeys(sdkReadme),
+    ...environmentTableKeys(mcpReadme),
+    ...extraDocs.flatMap((text) => [...backtickedKeys(text)]),
+  ]);
+  return packageEnvKeys(files).filter((k) => !documented.has(k));
+}
+
+function withoutLines(text: string, needle: string): string {
+  return text.split('\n').filter((l) => !l.includes(needle)).join('\n');
+}
+
 describe('packages/ の env ドキュメント (各パッケージの README が正本)', () => {
-  // 実行環境が与える変数 (ホームディレクトリ等) は対象外。
-  const PACKAGE_PLATFORM = new Set(['HOME', 'PATH', 'USERPROFILE', 'NODE_ENV']);
-
-  it('openpay-x402-mcp が読む env は README の Environment テーブル (第 1 列) にある', () => {
-    // MCP は `process.env` を注入可能な `env` として引き回すので `env.X` の形も読む。
-    const keys = [
-      ...envKeysIn(
-        sourceFiles('packages/x402-mcp/src', /\.mjs$/),
-        /\benv\.([A-Z][A-Z0-9_]*)/g,
-        PACKAGE_PLATFORM,
-      ).keys(),
-    ].sort();
-    expect(keys.length).toBeGreaterThan(5);
-    expect(keys).toContain('SIGNER_MODE');
-
-    const readme = readFileSync(resolve(root, 'packages/x402-mcp/README.md'), 'utf8').split('\n');
-    const start = readme.findIndex((l) => l.trim() === '## Environment');
-    expect(start).toBeGreaterThan(-1);
-    const length = readme.slice(start + 1).findIndex((l) => l.startsWith('## '));
-    const documented = new Set(
-      readme
-        .slice(start, length === -1 ? readme.length : start + 1 + length)
-        .filter((l) => l.startsWith('|'))
-        .flatMap((l) => [...(l.split('|')[1] ?? '').matchAll(/`([A-Z][A-Z0-9_]*)`/g)].map((m) => m[1])),
-    );
-    expect(documented.size).toBeGreaterThan(10);
-    const missing = keys.filter((k) => !documented.has(k));
-    expect(missing, `packages/x402-mcp/README.md の Environment テーブルに未記載の env: ${missing.join(', ')}`).toEqual([]);
+  it('抽出そのものが壊れていない (helper の文字列引数・env.X を拾えている)', () => {
+    const mcpKeys = packageEnvKeys(MCP_SRC());
+    expect(mcpKeys).toContain('SIGNER_MODE'); // env.X
+    expect(mcpKeys).toContain('KOVA_WALLET'); // required(env, 'KOVA_WALLET')
+    const sdkKeys = packageEnvKeys(SDK_SRC());
+    expect(sdkKeys).toContain('STEWARD_URL'); // requireEnv(env, 'STEWARD_URL')
+    expect(sdkKeys).toContain('MAX_PER_CALL_JPYC'); // env.MAX_PER_CALL_JPYC
+    expect(environmentTableKeys(readText(MCP_README)).size).toBeGreaterThan(10);
   });
 
-  it('openpay-x402-sdk (src + examples) が読む env は README で説明されている', () => {
-    const keys = [
-      ...envKeysIn(
-        [...sourceFiles('packages/x402-sdk/src', /\.(m?js|ts)$/), ...sourceFiles('packages/x402-sdk/examples', /\.(m?js|ts)$/)],
-        /process\.env\.([A-Z][A-Z0-9_]*)/g,
-        PACKAGE_PLATFORM,
-      ).keys(),
-    ].sort();
-    expect(keys.length).toBeGreaterThan(0);
-    const readme = readFileSync(resolve(root, 'packages/x402-sdk/README.md'), 'utf8');
-    const missing = keys.filter((k) => !readme.includes(`\`${k}\``));
-    expect(missing, `packages/x402-sdk/README.md に未記載の env: ${missing.join(', ')}`).toEqual([]);
+  it('openpay-x402-mcp が読む env は README の Environment テーブル (第 1 列) にある', () => {
+    const missing = missingMcpEnv(MCP_SRC(), readText(MCP_README));
+    expect(missing, `${MCP_README} の Environment テーブルに未記載の env: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('openpay-x402-sdk の src が読む env は SDK README か MCP README の Environment テーブルにある', () => {
+    const missing = missingSdkEnv(SDK_SRC(), readText(SDK_README), readText(MCP_README));
+    expect(missing, `${SDK_README} / ${MCP_README} に未記載の env: ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('openpay-x402-sdk の examples が読む env / binding は SDK README か example の README にある', () => {
+    const examplesDir = 'packages/x402-sdk/examples';
+    const files = sourceFiles(examplesDir, /\.(m?js|ts)$/);
+    expect(files.length).toBeGreaterThan(0);
+    const sdkReadme = readText(SDK_README);
+    for (const file of files) {
+      const dir = file.slice(0, file.lastIndexOf('/'));
+      const localReadme = dir !== examplesDir && existsSync(resolve(root, dir, 'README.md')) ? [readText(join(dir, 'README.md'))] : [];
+      const missing = missingSdkEnv([file], sdkReadme, '', localReadme);
+      expect(missing, `${file} が読む env が README に無い: ${missing.join(', ')}`).toEqual([]);
+    }
+  });
+
+  it('README の行を消すと欠落として検出する (フェンスが生きていることの確認)', () => {
+    const mcp = readText(MCP_README);
+    expect(missingMcpEnv(MCP_SRC(), withoutLines(mcp, '`KOVA_WALLET`'))).toEqual(['KOVA_WALLET']);
+    expect(missingSdkEnv(SDK_SRC(), readText(SDK_README), withoutLines(mcp, '`STEWARD_URL`'))).toEqual(['STEWARD_URL']);
+    const sdk = readText(SDK_README);
+    const nodeExample = ['packages/x402-sdk/examples/node-delivery-gate.mjs'];
+    expect(missingSdkEnv(nodeExample, withoutLines(sdk, '`OPENPAY_PRODUCT_ID`'), '')).toContain('OPENPAY_PRODUCT_ID');
   });
 });
