@@ -180,7 +180,7 @@ function cctpHarness(o: {
     waitForTransactionReceipt: vi.fn(async (a: { hash: Hex }) => {
       trace.push(`${role}.wait(${show(a.hash)})`);
       if (a.hash === approveHash) await o.approveGate?.();
-      return { status: 'success' };
+      return { status: 'success', transactionHash: a.hash };
     }),
     getCode: vi.fn(async (a: { address: Address }) => {
       trace.push(`${role}.getCode(${contract(a.address)})`);

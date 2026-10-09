@@ -7,10 +7,12 @@ import {
   type Chain,
   type Hex,
   type PublicClient,
+  type TransactionReceipt,
   type WalletClient,
 } from 'viem';
 import { chainObjectForId } from '../chains';
 import { logger } from '../logger';
+import { cctpReceiptShowsMint } from './cctp';
 import type { OnMerchantMint, SwitchChainFn } from './executeTypes';
 
 // onMerchantMint を隔離して呼ぶ。会計ログ (best-effort) の例外で、確定済の merchant mint
@@ -91,13 +93,34 @@ async function waitForReceiptOrThrow(
   client: PublicClient,
   hash: Hex,
   label: string,
-): Promise<void> {
+): Promise<TransactionReceipt> {
   const receipt = await client.waitForTransactionReceipt({ hash });
   if (receipt.status !== 'success') {
     throw new Error(
       `cross-chain execute: ${label} tx が revert しました (status=${receipt.status}, ${hash})`,
     );
   }
+  return receipt;
+}
+
+// 第 7 回レビュー A2: 宛先 mint の receipt を待ち、実際に mine された mint の hash を返す。
+// viem は同じ nonce の置換 (wallet の高速化 / 取消) を見つけると置換 tx の receipt で resolve する。
+// status だけ見ると取消 tx の成功を mint 成功と取り違え、会計通知を撃ち、再開記録まで消してしまう。
+// receipt.transactionHash が送った hash と違うときは、置換 tx の log にこの message の mint が
+// あるときだけ同内容 (高速化) として実 hash を返し、無ければ throw して再開記録を残す
+// (既存の revert と同じ失敗経路・resume は送った hash を未発見として再 mint する)。
+async function waitForMintReceiptOrThrow(
+  client: PublicClient,
+  hash: Hex,
+  label: string,
+  expected: { message: Hex; burnToken: Address; recipient: Address; amount: bigint },
+): Promise<Hex> {
+  const receipt = await waitForReceiptOrThrow(client, hash, label);
+  if (receipt.transactionHash.toLowerCase() === hash.toLowerCase()) return hash;
+  if (cctpReceiptShowsMint(receipt.logs, expected)) return receipt.transactionHash;
+  throw new Error(
+    `cross-chain execute: ${label} tx が別の tx (${receipt.transactionHash}) に置き換えられ、mint を確認できません (${hash})`,
+  );
 }
 
 // 既に broadcast 済の hash が on-chain で成功確定しているかを確認する。「未発見」
@@ -169,5 +192,6 @@ export {
   isFeeReceiverBridgeable,
   resolveChainOrThrow,
   txAlreadySucceeded,
+  waitForMintReceiptOrThrow,
   waitForReceiptOrThrow,
 };

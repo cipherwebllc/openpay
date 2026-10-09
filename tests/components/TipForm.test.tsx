@@ -2112,7 +2112,8 @@ describe('Arc standard tip attribution', () => {
   let walletWrite: ReturnType<typeof vi.fn>;
   let receiptRetry: ReturnType<typeof vi.fn>;
   let writeState: { data: typeof tx | undefined; error: Error | null; isPending: boolean };
-  let receiptState: { data: { status: 'success' | 'reverted'; blockNumber: bigint } | undefined; error: Error | null; isSuccess: boolean; isError: boolean };
+  // 実際の viem receipt の形 (送った tx の receipt は transactionHash = 送信 hash)。
+  let receiptState: { data: { status: 'success' | 'reverted'; blockNumber: bigint; transactionHash: typeof tx; from: string; logs: [] } | undefined; error: Error | null; isSuccess: boolean; isError: boolean };
 
   beforeEach(async () => {
     window.sessionStorage.clear();
@@ -2124,6 +2125,8 @@ describe('Arc standard tip attribution', () => {
     receiptRetry = vi.fn();
     writeState = { data: undefined, error: null, isPending: false };
     receiptState = { data: undefined, error: null, isSuccess: false, isError: false };
+    // 既定: receipt query error 時の生 receipt も取れない (RPC 障害)。revert を確かめる test だけ上書き。
+    mockHook(usePublicClient, { getTransactionReceipt: vi.fn().mockRejectedValue(new Error('rpc down')) } as never);
     const wagmi = await import('wagmi');
     vi.mocked(wagmi.useWriteContract).mockImplementation(() => ({ ...writeState, writeContract: walletWrite, reset: vi.fn() }) as never);
     vi.mocked(wagmi.useWaitForTransactionReceipt).mockImplementation(({ query, hash } = {}) => ({
@@ -2277,7 +2280,7 @@ describe('Arc standard tip attribution', () => {
     expect(useSmartAccount).toHaveBeenLastCalledWith(expect.anything(), false);
     expect(useBatchPayment).toHaveBeenLastCalledWith(expect.anything(), false);
     mockHook(useAccount, { address: '0x8888888888888888888888888888888888888888', isConnected: true, chainId: 5042002 });
-    receiptState = { data: { status: 'success', blockNumber: 123n }, error: null, isSuccess: true, isError: false };
+    receiptState = { data: { status: 'success', blockNumber: 123n, transactionHash: tx, from: FAN, logs: [] }, error: null, isSuccess: true, isError: false };
     view.rerender(<TipForm params={arcParams} />);
     await screen.findByText('Arc thanks');
     expect(webhookCalls()).toHaveLength(1);
@@ -2295,7 +2298,12 @@ describe('Arc standard tip attribution', () => {
     const view = render(<TipForm params={arcParams} />);
     await submit();
     if (kind === 'reject') writeState.error = new Error('User rejected request');
-    else receiptState = { data: { status: 'reverted', blockNumber: 123n }, error: null, isSuccess: true, isError: false };
+    else {
+      // 実際の wagmi は reverted receipt を data で返さず throw する。useStandardPayment は生の
+      // receipt で reverted を確かめてから確定失敗にする (第 7 回レビュー A4)。
+      mockHook(usePublicClient, { getTransactionReceipt: vi.fn().mockResolvedValue({ status: 'reverted', blockNumber: 123n, transactionHash: tx }) } as never);
+      receiptState = { data: undefined, error: new Error('execution reverted'), isSuccess: false, isError: true };
+    }
     view.rerender(<TipForm params={arcParams} />);
     await waitFor(() => expect(screen.getByRole('button', { name: /0.5 USDC.*送る/ })).toBeEnabled());
     expect(webhookCalls()).toHaveLength(0);
@@ -2314,7 +2322,7 @@ describe('Arc standard tip attribution', () => {
     expect(receiptRetry).toHaveBeenCalledTimes(1);
     expect(walletWrite).toHaveBeenCalledTimes(1);
     vi.mocked(fetch).mockRejectedValue(new Error('notification unavailable'));
-    receiptState = { data: { status: 'success', blockNumber: 123n }, error: null, isSuccess: true, isError: false };
+    receiptState = { data: { status: 'success', blockNumber: 123n, transactionHash: tx, from: FAN, logs: [] }, error: null, isSuccess: true, isError: false };
     view.rerender(<TipForm params={arcParams} />);
     await screen.findByText('Arc thanks');
     await waitFor(() => expect(loggerWarn).toHaveBeenCalledWith('tip.webhook.failed', expect.anything()));
@@ -2328,7 +2336,7 @@ describe('Arc standard tip attribution', () => {
     const previous = await screen.findByText('以前の送信の確認');
     expect(previous).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Explorer で確認/ }).getAttribute('href')).toContain(chainId === 84532 ? 'sepolia.basescan.org' : 'explorer.testnet.arc.io');
-    receiptState = { data: { status: 'success', blockNumber: 123n }, error: null, isSuccess: true, isError: false };
+    receiptState = { data: { status: 'success', blockNumber: 123n, transactionHash: tx, from: FAN, logs: [] }, error: null, isSuccess: true, isError: false };
     view.rerender(<TipForm params={arcParams} />);
     await waitFor(() => expect(screen.getByRole('button', { name: /0.5 USDC.*送る/ })).toBeEnabled());
     expect(webhookCalls()).toHaveLength(0);
@@ -2339,7 +2347,7 @@ describe('Arc standard tip attribution', () => {
     fireEvent.click(screen.getByRole('button', { name: /1 USDC.*送る/ }));
     expect(walletWrite).toHaveBeenCalledTimes(1);
     expect(walletWrite.mock.calls[0][0].args).toEqual([CREATOR, 1000000n]);
-    receiptState = { data: { status: 'success', blockNumber: 124n }, error: null, isSuccess: true, isError: false };
+    receiptState = { data: { status: 'success', blockNumber: 124n, transactionHash: tx, from: FAN, logs: [] }, error: null, isSuccess: true, isError: false };
     view.rerender(<TipForm params={arcParams} />);
     await screen.findByText('Arc thanks');
     expect(webhookCalls()).toHaveLength(1);

@@ -108,7 +108,7 @@ function makePublicClient(opts: { blockNumber?: bigint } = {}) {
   return {
     getBlockNumber: vi.fn(async () => opts.blockNumber ?? 1000n),
     readContract: vi.fn().mockResolvedValue(302_400n),
-    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => { for (const m of gatewayMints.values()) if (m.hash === hash) m.finalized = true; return { status: 'success' }; }),
+    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => { for (const m of gatewayMints.values()) if (m.hash === hash) m.finalized = true; return { status: 'success', transactionHash: hash }; }),
     request: vi.fn(async (a: { method: string; params: unknown[] }) => a.method === 'eth_call'
       ? pad(gatewayMints.get(`0x${(a.params[0] as { data: string }).data.slice(-64)}`)?.finalized ? '0x01' : '0x00')
       : { hash: gatewayBlockHash, number: '0x3e8' }),
@@ -1812,7 +1812,7 @@ describe('lib/crossChain/execute: mint hash を broadcast 時に永続化 + resu
       getBlockNumber: vi.fn(),
       // 前回 broadcast した mint は revert 済 → landed=false → 再 mint されるべき。
       getTransactionReceipt: vi.fn(async () => ({ status: 'reverted' })),
-      waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+      waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => ({ status: 'success', transactionHash: hash })),
       getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const mockFetch = vi.fn(
@@ -1943,7 +1943,7 @@ describe('lib/crossChain/execute: resume の receipt 障害区別 (transport vs 
       getTransactionReceipt: vi.fn(async () => {
         throw notFoundError();
       }),
-      waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+      waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => ({ status: 'success', transactionHash: hash })),
       getCode: vi.fn(async () => '0x60016000' as Hex),
     };
     const mockFetch = vi.fn(
@@ -2000,7 +2000,7 @@ describe('lib/crossChain/execute: resume の receipt 障害区別 (transport vs 
       getTransactionReceipt: vi.fn(async () => {
         throw new Error('fetch failed: ECONNREFUSED'); // name は既定の "Error"
       }),
-      waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+      waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => ({ status: 'success', transactionHash: hash })),
     };
     const mockFetch = vi.fn(
       async () =>
@@ -2411,7 +2411,7 @@ function makeA1Fixture(opts: {
   const receiptQueries: Hex[] = [];
   const sourcePublic = {
     getBlockNumber: vi.fn(async () => opts.head ?? 1_100n),
-    waitForTransactionReceipt: vi.fn(async () => ({ status: 'success' })),
+    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => ({ status: 'success', transactionHash: hash })),
     receiptQueries,
     getTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => {
       receiptQueries.push(hash);

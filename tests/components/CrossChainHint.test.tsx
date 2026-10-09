@@ -164,7 +164,7 @@ function makePublicClient() {
     request: vi.fn(async (a: { method: string }) => a.method === 'eth_call' ? pad(mintedHash ? '0x01' : '0x00') : { hash: blockHash, number: '0x3e8', l1BlockNumber: '0x3e8' }),
     getLogs: vi.fn(async () => mintedHash ? [{ transactionHash: mintedHash, blockHash, blockNumber: 1000n, removed: false }] : []),
     getBlockNumber: vi.fn(async () => 1000n),
-    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => { mintedHash = hash; return { status: 'success' }; }),
+    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: Hex }) => { mintedHash = hash; return { status: 'success', transactionHash: hash }; }),
     // assertContractDeployed (CCTP/Gateway 存在確認) 用。deploy 済扱い。
     getCode: vi.fn(async () => '0x60016000'),
   };
@@ -642,7 +642,7 @@ describe('CrossChainHint: execute click → success / error flow', () => {
     });
     const publicClient = makePublicClient();
     publicClient.waitForTransactionReceipt
-      .mockResolvedValueOnce({ status: 'success' })
+      .mockResolvedValueOnce({ status: 'success', transactionHash: pad('0x0a') })
       .mockRejectedValueOnce(new Error('burn receipt unavailable'));
     setupConnected({ publicClient });
     vi.stubGlobal(

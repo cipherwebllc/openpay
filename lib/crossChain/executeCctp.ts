@@ -31,6 +31,7 @@ import {
   isFeeReceiverBridgeable,
   resolveChainOrThrow,
   txAlreadySucceeded,
+  waitForMintReceiptOrThrow,
   waitForReceiptOrThrow,
 } from './executeShared';
 import { executeForwardTransfer } from './executeForward';
@@ -382,10 +383,24 @@ export async function executeCctpTransfer(
       });
       persist({ mintTxHash: mintHash });
       onProgress({ kind: 'dest_tx_pending', hash: mintHash });
-      await waitForReceiptOrThrow(args.destPublicClient, mintHash, 'cctp mint');
+      // A2: 置換 (取消・別内容) の receipt は throw (再開記録は送った hash のまま残る)。
+      // 同内容の置換 (高速化) なら実際に mine された hash が返る。
+      const minedMintHash = await waitForMintReceiptOrThrow(
+        args.destPublicClient,
+        mintHash,
+        'cctp mint',
+        {
+          message: merchantIris.message,
+          burnToken: args.sourceToken,
+          recipient: args.recipient,
+          amount: args.valueAtomic,
+        },
+      );
+      // 再開記録・会計ログ・結果には実際に mine された hash を使う (送った hash は mine されていない)。
+      if (minedMintHash !== mintHash) persist({ mintTxHash: minedMintHash });
       // fresh merchant mint 確定 → 会計ログ発火 (下の fee mint より前)。
       fireMerchantMint(args.onMerchantMint, {
-        mintTxHash: mintHash,
+        mintTxHash: minedMintHash,
         burnTxHash: burnHash,
       });
     }
@@ -402,11 +417,19 @@ export async function executeCctpTransfer(
       });
       persist({ feeMintTxHash: feeMintHash });
       onProgress({ kind: 'fee_dest_tx_pending', hash: feeMintHash });
-      await waitForReceiptOrThrow(
+      // A2: merchant mint と同じ。feeIris がある = needFeePoll = bridgeFee なので feeReceiver は定義済み。
+      const minedFeeMintHash = await waitForMintReceiptOrThrow(
         args.destPublicClient,
         feeMintHash,
         'cctp fee mint',
+        {
+          message: feeIris.message,
+          burnToken: args.sourceToken,
+          recipient: feeReceiver!,
+          amount: feeAmount,
+        },
       );
+      if (minedFeeMintHash !== feeMintHash) persist({ feeMintTxHash: minedFeeMintHash });
     }
 
     // 片方だけ取得できたケース: 取得できた mint を完了させた後で、取得できなかった側の

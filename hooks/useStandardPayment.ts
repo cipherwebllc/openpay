@@ -6,14 +6,16 @@
 // fee=0 のとき (Phase 1 alpha 期間中の常態) は fee tx を skip、merchant tx 1 件のみ実行。
 // fee>0 のときは merchant → fee の 2 件直列実行 (fee tx 単独失敗時は UI に retry 出す)。
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { erc20Abi, type Address, type Hex } from 'viem';
 import {
   useAccount,
+  usePublicClient,
   useWaitForTransactionReceipt,
   useWriteContract,
 } from 'wagmi';
 import { notifyRegisterStandardFee } from '@/lib/registerFeeNotify';
+import { classifyTransferReceipt } from '@/lib/replacedTransferReceipt';
 import type {
   StandardPaymentIntentParams,
   StandardIntentStage,
@@ -56,6 +58,97 @@ export type StandardPhase =
   | 'merchant-unknown'
   | 'fee-unknown';
 
+type PublicClientLike = ReturnType<typeof usePublicClient>;
+
+// 決済ログ用: 取消・別内容の置換を「送った hash の error」として残す (A1)。
+function replacedTransferError(replacedBy: Hex | undefined): Error | null {
+  return replacedBy
+    ? new Error(`transfer tx was replaced by ${replacedBy} without the same Transfer`)
+    : null;
+}
+
+// 置換先が revert した = 同じ nonce は消費済みで元の送金は永久に mine されない (決済ログ用の error)。
+function replacedRevertedError(revertedBy: Hex | undefined): Error | null {
+  return revertedBy
+    ? new Error(`transfer tx was replaced by ${revertedBy} which reverted`)
+    : null;
+}
+
+// 試行 (chain・送った hash) に結び付けた別の hash (置換先・確認済みの実 hash)。
+type AttemptHashLink = { chainId: number | undefined; sent: Hex; linked: Hex };
+// viem の onReplaced で受け取った置換先。reverted = 置換先の receipt (onReplaced が渡す) が revert。
+type ReplacedLink = AttemptHashLink & { reverted: boolean };
+
+function linkedHash(
+  link: AttemptHashLink | null,
+  chainId: number | undefined,
+  sent: Hex | undefined,
+): Hex | undefined {
+  return link &&
+    sent &&
+    link.chainId === chainId &&
+    link.sent.toLowerCase() === sent.toLowerCase()
+    ? link.linked
+    : undefined;
+}
+
+// この試行 (chain・送った hash) の置換先が revert していれば、その置換先の hash。
+function replacedRevertedBy(
+  link: ReplacedLink | null,
+  chainId: number | undefined,
+  sent: Hex | undefined,
+): Hex | undefined {
+  return link?.reverted ? linkedHash(link, chainId, sent) : undefined;
+}
+
+// 第 7 回レビュー A4: 実際の wagmi (@wagmi/core の waitForTransactionReceipt) は reverted receipt を
+// data で返さず、revert 理由の Error を throw する。そのため receipt query の error だけでは
+// 「RPC 障害」と「on-chain revert」を区別できず、revert しても unknown から抜けられない。
+// query error のときだけ生の receipt を 1 回引き、status==='reverted' を確かめた hash だけを返す。
+// 取れない・未 mine・RPC 障害は返さない = 従来どおり unknown (通信障害を確定失敗と取り違えて
+// 新規送金・fee 再送を開け、二重送金へ波及するのを断つ)。
+// replacementHash: viem の onReplaced で受け取った置換先 (同じ nonce で mine された tx)。置換先が
+// revert すると送った hash の receipt は永久に無いので、置換先の hash で確かめる (置換先の revert は
+// onReplaced の receipt で先に確定する。ここは query の error が立った後の確認)。
+function useConfirmedRevert(
+  enabled: boolean,
+  publicClient: PublicClientLike,
+  chainId: number | undefined,
+  hash: Hex | undefined,
+  replacementHash: Hex | undefined,
+  receiptError: Error | null,
+): Hex | undefined {
+  const [reverted, setReverted] = useState<{
+    chainId: number | undefined;
+    hash: Hex;
+  } | null>(null);
+  const probedRef = useRef<{ error: Error; probeHash: Hex } | null>(null);
+  // 確認ごとに世代を振る。遅れて返った古い確認 (前の試行・前の照会) で、新しい確認の結果を
+  // 上書きして次の試行を unknown に戻し、再送を封鎖する波及を断つ。
+  const generationRef = useRef(0);
+  useEffect(() => {
+    if (!enabled || !publicClient || !hash || !receiptError) return;
+    const probeHash = replacementHash ?? hash;
+    // 同じ query error・同じ確認先では 1 回だけ引く (再照会で新しい error・置換先が判明したら引き直す)。
+    const probed = probedRef.current;
+    if (probed && probed.error === receiptError && probed.probeHash === probeHash) {
+      return;
+    }
+    probedRef.current = { error: receiptError, probeHash };
+    const generation = ++generationRef.current;
+    void publicClient.getTransactionReceipt({ hash: probeHash }).then(
+      (receipt) => {
+        if (generation !== generationRef.current) return;
+        if (receipt.status === 'reverted') setReverted({ chainId, hash });
+      },
+      () => {
+        // 未 mine・RPC 障害は revert の証拠ではない。unknown (receipt 再照会のみ) のままにする。
+      },
+    );
+  }, [enabled, publicClient, chainId, hash, replacementHash, receiptError]);
+  return reverted && reverted.chainId === chainId ? reverted.hash : undefined;
+}
+
 export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {}) {
   const [chainId, setChainId] = useState<number | undefined>(undefined);
   const [externalError, setExternalError] = useState<Error | null>(null);
@@ -87,23 +180,187 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   const merchantWrite = useWriteContract();
   const feeWrite = useWriteContract();
 
-  const merchantTxHash = merchantWrite.data ?? restoredMerchantTxHashRef.current;
-  const feeTxHash = feeWrite.data ?? restoredFeeTxHashRef.current;
+  // 同内容の置換 (高速化) で確認済みの実 hash を、試行 (chain・送った hash) に結び付けて保持する。
+  // isSuccess に依存した一時的な算出値だと、成功後の再照会が RPC エラーになった時点で mine されて
+  // いない元 hash に戻り、fee の成功通知・結果・intent 保存へ波及する。以後の照会も実 hash で行う。
+  const [merchantMinedLink, setMerchantMinedLink] =
+    useState<AttemptHashLink | null>(null);
+  const [feeMinedLink, setFeeMinedLink] = useState<AttemptHashLink | null>(null);
+  // viem の onReplaced で受け取った置換先 hash (送った hash に結び付ける) と、その receipt の revert。
+  // 置換先が revert すると wagmi は throw するが、receipt query は TanStack Query の既定 retry (3 回) が
+  // 終わるまで error にならず、retry は送った元の hash を再び待つ。元 tx が RPC から消えていると
+  // (wagmi の timeout=0 で) 永久に待ち、query error を待つ確認 (useConfirmedRevert) には届かない。
+  // onReplaced が渡す置換先の receipt が reverted なら、retry の完了を待たずにこの試行を確定失敗にする。
+  const [merchantReplacedTo, setMerchantReplacedTo] =
+    useState<ReplacedLink | null>(null);
+  const [feeReplacedTo, setFeeReplacedTo] = useState<ReplacedLink | null>(null);
+  // 取消・別内容の置換を確かめた試行 (送った hash → 置換 tx)。receipt の isSuccess に依る一時的な判定のままだと、
+  // 再接続の再照会が RPC error になった瞬間に消えて unknown に戻り、次の決済 / fee 再送を封鎖する (#764 Codex P2)。
+  // 置換先の revert を onReplaced の receipt で確かめた試行 (送った hash)。receipt query の retry の判断は fetch の
+  // 開始時に渡した関数で行われ、enabled を後から false にしても進行中の retryer は止まらない。state ではなく ref に
+  // 同期的に記録し (onReplaced は wagmi が throw する前に呼ばれる)、retry の関数がそれを見て元 hash を待ち直さない
+  // (消えた元 tx を timeout=0 で待ち続けて新しい決済と並走させない・#764 Codex 4 回目 P3)。
+  const finalFailedSentRef = useRef(new Set<string>());
+  const receiptRetry = (hash: Hex | undefined) => (failureCount: number) =>
+    !(hash && finalFailedSentRef.current.has(hash.toLowerCase())) && failureCount < 3;
+  const [merchantReplacedOtherLink, setMerchantReplacedOtherLink] =
+    useState<AttemptHashLink | null>(null);
+  const [feeReplacedOtherLink, setFeeReplacedOtherLink] =
+    useState<AttemptHashLink | null>(null);
+
+  const merchantSentHash = merchantWrite.data ?? restoredMerchantTxHashRef.current;
+  const feeSentHash = feeWrite.data ?? restoredFeeTxHashRef.current;
+  const merchantTxHash =
+    linkedHash(merchantMinedLink, chainId, merchantSentHash) ?? merchantSentHash;
+  const feeTxHash = linkedHash(feeMinedLink, chainId, feeSentHash) ?? feeSentHash;
   const restoredMerchantBlockNumber =
     restoredMerchantBlockNumberRef.current;
+  // この試行の確定失敗 (置換先の revert・取消/別内容の置換) を確かめた後は、元の hash の receipt を照会し直さない
+  // (消えた元 tx を retry・再接続で待ち続けて新しい決済と並走させない・#764 Codex P3)。
+  const merchantAttemptFailed =
+    !!replacedRevertedBy(merchantReplacedTo, chainId, merchantTxHash) ||
+    !!linkedHash(merchantReplacedOtherLink, chainId, merchantTxHash);
+  const feeAttemptFailed =
+    !!replacedRevertedBy(feeReplacedTo, chainId, feeTxHash) ||
+    !!linkedHash(feeReplacedOtherLink, chainId, feeTxHash);
 
   const merchantReceipt = useWaitForTransactionReceipt({
-    query: { enabled: enabled && !!merchantTxHash },
+    // retry の回数は TanStack Query の既定 (3) のまま。確定失敗を確かめた試行だけ retry しない。
+    query: { enabled: enabled && !!merchantTxHash && !merchantAttemptFailed, retry: receiptRetry(merchantTxHash) },
     hash: merchantTxHash,
     chainId,
+    // wagmi はこの callback を viem の waitForTransactionReceipt へ渡す (query key には含めない)。
+    // viem は同じ nonce の置換を見つけると、置換先が revert していても resolve の前にこれを呼ぶ。
+    onReplaced: (replacement) => {
+      if (replacement.transactionReceipt.status === 'reverted') {
+        finalFailedSentRef.current.add(replacement.replacedTransaction.hash.toLowerCase());
+      }
+      setMerchantReplacedTo({
+        chainId,
+        sent: replacement.replacedTransaction.hash,
+        linked: replacement.transaction.hash,
+        reverted: replacement.transactionReceipt.status === 'reverted',
+      });
+    },
   });
   const feeReceipt = useWaitForTransactionReceipt({
-    query: { enabled: enabled && !!feeTxHash },
+    query: { enabled: enabled && !!feeTxHash && !feeAttemptFailed, retry: receiptRetry(feeTxHash) },
     hash: feeTxHash,
     chainId,
+    onReplaced: (replacement) => {
+      if (replacement.transactionReceipt.status === 'reverted') {
+        finalFailedSentRef.current.add(replacement.replacedTransaction.hash.toLowerCase());
+      }
+      setFeeReplacedTo({
+        chainId,
+        sent: replacement.replacedTransaction.hash,
+        linked: replacement.transaction.hash,
+        reverted: replacement.transactionReceipt.status === 'reverted',
+      });
+    },
   });
   const refetchMerchantReceipt = merchantReceipt.refetch;
   const refetchFeeReceipt = feeReceipt.refetch;
+
+  const publicClient = usePublicClient({ chainId });
+  const merchantRevertedHash = useConfirmedRevert(
+    enabled,
+    publicClient,
+    chainId,
+    merchantTxHash,
+    linkedHash(merchantReplacedTo, chainId, merchantTxHash),
+    merchantReceipt.error,
+  );
+  const feeRevertedHash = useConfirmedRevert(
+    enabled,
+    publicClient,
+    chainId,
+    feeTxHash,
+    linkedHash(feeReplacedTo, chainId, feeTxHash),
+    feeReceipt.error,
+  );
+  // この試行の置換先が revert した (onReplaced の receipt で確認) ときの置換先 hash。
+  const merchantReplacedRevertedBy = replacedRevertedBy(
+    merchantReplacedTo,
+    chainId,
+    merchantTxHash,
+  );
+  const feeReplacedRevertedBy = replacedRevertedBy(feeReplacedTo, chainId, feeTxHash);
+
+  // 第 7 回レビュー A1: success receipt の transactionHash が送った hash と違う = 同じ nonce の置換。
+  // 置換 tx の log に同じ Transfer があれば同内容 (高速化)・無ければ取消/別内容 (元の送金は不成立)。
+  const attemptParams = lastParamsRef.current;
+  const merchantReplacement =
+    merchantTxHash &&
+    attemptParams &&
+    merchantReceipt.isSuccess &&
+    merchantReceipt.data?.status === 'success'
+      ? classifyTransferReceipt(merchantReceipt.data, merchantTxHash, {
+          token: attemptParams.tokenAddress,
+          to: attemptParams.merchant,
+          value: attemptParams.merchantAmount,
+        })
+      : undefined;
+  const feeReplacement =
+    feeTxHash &&
+    attemptParams &&
+    feeReceipt.isSuccess &&
+    feeReceipt.data?.status === 'success'
+      ? classifyTransferReceipt(feeReceipt.data, feeTxHash, {
+          token: attemptParams.tokenAddress,
+          to: attemptParams.feeReceiver,
+          value: attemptParams.feeAmount,
+        })
+      : undefined;
+  // 取消・別内容に置き換えた tx の hash (= 元の送金は永久に mine されない)。一度確かめたら試行に結び付けて保つ。
+  const merchantReplacedOtherNow =
+    merchantReplacement?.kind === 'replaced-other'
+      ? merchantReplacement.minedTxHash
+      : undefined;
+  const feeReplacedOtherNow =
+    feeReplacement?.kind === 'replaced-other'
+      ? feeReplacement.minedTxHash
+      : undefined;
+  const merchantReplacedBy =
+    merchantReplacedOtherNow ??
+    linkedHash(merchantReplacedOtherLink, chainId, merchantTxHash);
+  const feeReplacedBy =
+    feeReplacedOtherNow ?? linkedHash(feeReplacedOtherLink, chainId, feeTxHash);
+  useEffect(() => {
+    if (!merchantReplacedOtherNow || !merchantTxHash) return;
+    setMerchantReplacedOtherLink({ chainId, sent: merchantTxHash, linked: merchantReplacedOtherNow });
+  }, [chainId, merchantTxHash, merchantReplacedOtherNow]);
+  useEffect(() => {
+    if (!feeReplacedOtherNow || !feeTxHash) return;
+    setFeeReplacedOtherLink({ chainId, sent: feeTxHash, linked: feeReplacedOtherNow });
+  }, [chainId, feeTxHash, feeReplacedOtherNow]);
+  // 同内容の置換 (高速化) で実際に mine された tx の hash。
+  const merchantMinedTxHash =
+    merchantReplacement?.kind === 'replaced-same'
+      ? merchantReplacement.minedTxHash
+      : undefined;
+  const feeMinedTxHash =
+    feeReplacement?.kind === 'replaced-same'
+      ? feeReplacement.minedTxHash
+      : undefined;
+  // 以後の結果・保存・履歴・控え・注文通知に使う hash = 実際に mine された hash
+  // (同内容の置換なら置換 tx の hash・置換が無ければ送った hash)。
+  const merchantSettledTxHash = merchantMinedTxHash ?? merchantTxHash;
+  const feeSettledTxHash = feeMinedTxHash ?? feeTxHash;
+
+  // 同内容の置換を確認した時点で実 hash を試行に結び付ける (以後の照会・結果は実 hash)。
+  useEffect(() => {
+    if (!merchantMinedTxHash || !merchantSentHash) return;
+    setMerchantMinedLink({
+      chainId,
+      sent: merchantSentHash,
+      linked: merchantMinedTxHash,
+    });
+  }, [chainId, merchantSentHash, merchantMinedTxHash]);
+  useEffect(() => {
+    if (!feeMinedTxHash || !feeSentHash) return;
+    setFeeMinedLink({ chainId, sent: feeSentHash, linked: feeMinedTxHash });
+  }, [chainId, feeSentHash, feeMinedTxHash]);
 
   const persistIntent = useCallback(
     (
@@ -309,9 +566,11 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   const retryFee = useCallback(() => {
     if (!enabled) return;
     const params = lastParamsRef.current;
+    // A1: 取消・別内容の置換 receipt の block は店舗着金の証拠ではない (fee を送らせない)。
     const merchantBlockNumber =
       merchantReceipt.isSuccess &&
-      merchantReceipt.data?.status === 'success'
+      merchantReceipt.data?.status === 'success' &&
+      !merchantReplacedBy
         ? merchantReceipt.data.blockNumber
         : restoredMerchantBlockNumber;
     // R: fee hash ありの receipt 不明は、fee 着金済みの可能性がある。
@@ -324,7 +583,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
       !isOriginalPayerConnected() ||
       !params ||
       params.feeAmount <= 0n ||
-      !merchantTxHash ||
+      !merchantSettledTxHash ||
       merchantBlockNumber === undefined
     ) {
       return;
@@ -335,14 +594,15 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     restoredFeeTxHashRef.current = undefined;
     restoredFromStorageRef.current = false;
     setExternalError(null);
-    persistIntent('fee-awaiting', params, merchantTxHash, {
+    persistIntent('fee-awaiting', params, merchantSettledTxHash, {
       merchantBlockNumber,
     });
-    submitFee(params, merchantTxHash, merchantBlockNumber);
+    submitFee(params, merchantSettledTxHash, merchantBlockNumber);
   }, [
     enabled,
     phase,
-    merchantTxHash,
+    merchantSettledTxHash,
+    merchantReplacedBy,
     merchantReceipt.isSuccess,
     merchantReceipt.data,
     restoredMerchantBlockNumber,
@@ -371,11 +631,39 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
       setPhase('merchant-error');
       return;
     }
+    if (merchantReplacedRevertedBy) {
+      // P2 (#764 再レビュー): 置換先の revert を onReplaced の receipt で確かめた = 同じ nonce は消費済みで
+      // 元の送金は永久に mine されない。receipt query の retry (元 hash を待ち続ける) の完了を待たず、
+      // 下の既存 reverted 分岐と同じ後片付けをして mining に留めない。
+      clearPersistedIntent();
+      restoredMerchantTxHashRef.current = undefined;
+      restoredMerchantBlockNumberRef.current = undefined;
+      setPhase('merchant-error');
+      return;
+    }
+    if (merchantReplacedBy) {
+      // A1: 取消・別内容の置換 = 元の送金は同じ nonce を失い永久に mine されない。下の既存 reverted
+      // 分岐と同じ後片付けをし、成功遷移・fee 起動へ進ませない。試行に結び付けて保った判定なので、確定後の再照会の
+      // RPC error (isSuccess が落ちる) でも unknown に戻さない (#764 Codex P2)。
+      clearPersistedIntent();
+      restoredMerchantTxHashRef.current = undefined;
+      restoredMerchantBlockNumberRef.current = undefined;
+      setPhase('merchant-error');
+      return;
+    }
     if (merchantTxHash && !merchantReceipt.isSuccess && !merchantReceipt.isError) {
       setPhase((prev) => (prev === 'merchant-sending' ? 'merchant-mining' : prev));
       return;
     }
     if (merchantReceipt.error) {
+      // A4: 生の receipt で revert を確かめた hash だけ、下の既存 reverted 分岐と同じ後片付けをする。
+      if (merchantTxHash && merchantRevertedHash === merchantTxHash) {
+        clearPersistedIntent();
+        restoredMerchantTxHashRef.current = undefined;
+        restoredMerchantBlockNumberRef.current = undefined;
+        setPhase('merchant-error');
+        return;
+      }
       // useWaitForTransactionReceipt は hash ありのときだけ有効。RPC error は
       // tx 自体の revert ではないため、確定失敗には倒さない。
       if (merchantTxHash) setPhase('merchant-unknown');
@@ -383,12 +671,14 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     }
     if (merchantReceipt.isSuccess && merchantReceipt.data?.status === 'success') {
       if (!merchantTxHash) return;
+      // A1: 同内容の置換 (高速化) なら実際に mine された hash を保存・fee 起動に使う。
+      const merchantHash = merchantMinedTxHash ?? merchantTxHash;
       const merchantBlockNumber = merchantReceipt.data.blockNumber;
       restoredMerchantBlockNumberRef.current = merchantBlockNumber;
       // merchant 確定 → fee > 0 なら自動で fee tx を 1 度だけ起動
       if (params.feeAmount > 0n && !feeStartedRef.current) {
         feeStartedRef.current = true;
-        persistIntent('fee-awaiting', params, merchantTxHash, {
+        persistIntent('fee-awaiting', params, merchantHash, {
           merchantBlockNumber,
         });
         if (restoredFromStorageRef.current) {
@@ -399,7 +689,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
           // できる fee-awaiting latch を維持する。
           setPhase('fee-error');
         } else {
-          submitFee(params, merchantTxHash, merchantBlockNumber);
+          submitFee(params, merchantHash, merchantBlockNumber);
         }
       } else if (params.feeAmount === 0n) {
         clearPersistedIntent();
@@ -423,6 +713,10 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     merchantReceipt.isError,
     merchantReceipt.data,
     merchantReceipt.error,
+    merchantRevertedHash,
+    merchantReplacedRevertedBy,
+    merchantReplacedBy,
+    merchantMinedTxHash,
     clearPersistedIntent,
     isOriginalPayerConnected,
     persistIntent,
@@ -437,11 +731,37 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
 
     if (feeWrite.isPending) return;
     if (feeWrite.error) {
-      if (merchantTxHash && restoredMerchantBlockNumber !== undefined) {
-        persistIntent('fee-awaiting', params, merchantTxHash, {
+      if (merchantSettledTxHash && restoredMerchantBlockNumber !== undefined) {
+        persistIntent('fee-awaiting', params, merchantSettledTxHash, {
           merchantBlockNumber: restoredMerchantBlockNumber,
         });
       }
+      setPhase('fee-error');
+      return;
+    }
+    if (feeReplacedRevertedBy) {
+      // P2 (#764 再レビュー): merchant 側と同じく、置換先の revert を onReplaced の receipt で確かめたら
+      // query の retry 完了を待たず、下の既存 reverted 分岐と同じ後片付け (fee-awaiting へ戻して
+      // fee 再送を許す) をして fee-mining に留めない。
+      if (merchantSettledTxHash && restoredMerchantBlockNumber !== undefined) {
+        persistIntent('fee-awaiting', params, merchantSettledTxHash, {
+          merchantBlockNumber: restoredMerchantBlockNumber,
+        });
+      }
+      restoredFeeTxHashRef.current = undefined;
+      setPhase('fee-error');
+      return;
+    }
+    if (feeReplacedBy) {
+      // A1: 取消・別内容の置換 = 元の fee 送金は永久に mine されない。下の既存 reverted 分岐と同じ
+      // 後片付け (fee-awaiting へ戻して fee 再送を許す) をし、success・用途通知へ進ませない。試行に結び付けて
+      // 保った判定なので、確定後の再照会の RPC error でも unknown に戻さない (#764 Codex P2)。
+      if (merchantSettledTxHash && restoredMerchantBlockNumber !== undefined) {
+        persistIntent('fee-awaiting', params, merchantSettledTxHash, {
+          merchantBlockNumber: restoredMerchantBlockNumber,
+        });
+      }
+      restoredFeeTxHashRef.current = undefined;
       setPhase('fee-error');
       return;
     }
@@ -450,6 +770,17 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
       return;
     }
     if (feeReceipt.error) {
+      // A4: 生の receipt で revert を確かめた hash だけ、下の既存 reverted 分岐と同じ後片付けをする。
+      if (feeTxHash && feeRevertedHash === feeTxHash) {
+        if (merchantSettledTxHash && restoredMerchantBlockNumber !== undefined) {
+          persistIntent('fee-awaiting', params, merchantSettledTxHash, {
+            merchantBlockNumber: restoredMerchantBlockNumber,
+          });
+        }
+        restoredFeeTxHashRef.current = undefined;
+        setPhase('fee-error');
+        return;
+      }
       // merchant 側と同様、receipt RPC error は fee tx の確定失敗ではない。
       if (feeTxHash) setPhase('fee-unknown');
       return;
@@ -457,16 +788,17 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     if (feeReceipt.isSuccess && feeReceipt.data?.status === 'success') {
       // 2 tx とも確定した後にだけ用途通知を撃つ (no-throw・応答は待たない)。既存の
       // clearPersistedIntent → success 遷移は不変で、通知の成否は phase に影響させない。
-      if (merchantTxHash && feeTxHash) {
-        notifyRegisterFee(params, merchantTxHash, feeTxHash);
+      // A1: hash は実際に mine された hash (同内容の置換なら置換 tx の hash)。
+      if (merchantSettledTxHash && feeSettledTxHash) {
+        notifyRegisterFee(params, merchantSettledTxHash, feeSettledTxHash);
       }
       clearPersistedIntent();
       setPhase('success');
       return;
     }
     if (feeReceipt.isSuccess && feeReceipt.data?.status === 'reverted') {
-      if (merchantTxHash && restoredMerchantBlockNumber !== undefined) {
-        persistIntent('fee-awaiting', params, merchantTxHash, {
+      if (merchantSettledTxHash && restoredMerchantBlockNumber !== undefined) {
+        persistIntent('fee-awaiting', params, merchantSettledTxHash, {
           merchantBlockNumber: restoredMerchantBlockNumber,
         });
       }
@@ -479,7 +811,11 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     feeWrite.data,
     feeWrite.error,
     feeTxHash,
-    merchantTxHash,
+    merchantSettledTxHash,
+    feeSettledTxHash,
+    feeRevertedHash,
+    feeReplacedRevertedBy,
+    feeReplacedBy,
     restoredMerchantBlockNumber,
     feeReceipt.isSuccess,
     feeReceipt.isError,
@@ -490,18 +826,34 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     persistIntent,
   ]);
 
+  // A1: 取消・別内容の置換は決済ログに success として残さない (送った hash の error として残す)。
+  // P2: 置換先の revert も同じく送った hash の error として残す (query の error は retry 中で立たない)。
+  const merchantReplacedError = useMemo(
+    () =>
+      replacedTransferError(merchantReplacedBy) ??
+      replacedRevertedError(merchantReplacedRevertedBy),
+    [merchantReplacedBy, merchantReplacedRevertedBy],
+  );
+  const feeReplacedError = useMemo(
+    () =>
+      replacedTransferError(feeReplacedBy) ??
+      replacedRevertedError(feeReplacedRevertedBy),
+    [feeReplacedBy, feeReplacedRevertedBy],
+  );
+
   // R: wagmi hook 戻り値は毎 render で新規オブジェクトになり得るため、deps array には
   //    object を渡さず必要 field のみ抽出 (exhaustive-deps を field 単位で正確に申告)。
-  const mwData = merchantTxHash;
+  // A1: ログの hash も実際に mine された hash (同内容の置換なら置換 tx の hash)。
+  const mwData = merchantSettledTxHash;
   const mwError = merchantWrite.error;
-  const mrData = merchantReceipt.data;
-  const mrError = merchantReceipt.error;
-  const mrIsSuccess = merchantReceipt.isSuccess;
-  const fwData = feeTxHash;
+  const mrData = merchantReplacedError ? undefined : merchantReceipt.data;
+  const mrError = merchantReplacedError ?? merchantReceipt.error;
+  const mrIsSuccess = merchantReplacedError ? false : merchantReceipt.isSuccess;
+  const fwData = feeSettledTxHash;
   const fwError = feeWrite.error;
-  const frData = feeReceipt.data;
-  const frError = feeReceipt.error;
-  const frIsSuccess = feeReceipt.isSuccess;
+  const frData = feeReplacedError ? undefined : feeReceipt.data;
+  const frError = feeReplacedError ?? feeReceipt.error;
+  const frIsSuccess = feeReplacedError ? false : feeReceipt.isSuccess;
 
   useEffect(() => {
     if (!enabled) return;
@@ -561,16 +913,20 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     feeWrite.error ??
     feeReceipt.error;
 
+  // A1: 取消・別内容の置換 receipt の block は店舗着金の block として外へ出さない。
   const merchantBlockNumber =
-    merchantReceipt.isSuccess && merchantReceipt.data?.status === 'success'
+    merchantReceipt.isSuccess &&
+    merchantReceipt.data?.status === 'success' &&
+    !merchantReplacedBy
       ? merchantReceipt.data.blockNumber
       : restoredMerchantBlockNumber;
 
+  // A1: 結果・履歴・控え・注文通知へ渡す hash は実際に mine された hash。
   const data: StandardPaymentResult | undefined =
-    isSuccess && merchantTxHash && merchantBlockNumber !== undefined
+    isSuccess && merchantSettledTxHash && merchantBlockNumber !== undefined
       ? {
-          merchantTxHash,
-          feeTxHash,
+          merchantTxHash: merchantSettledTxHash,
+          feeTxHash: feeSettledTxHash,
           blockNumber: merchantBlockNumber,
         }
       : undefined;
@@ -591,8 +947,9 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     isUnknown: phase === 'merchant-unknown' || phase === 'fee-unknown',
     isMerchantUnknown: phase === 'merchant-unknown',
     isFeeUnknown: phase === 'fee-unknown',
-    merchantTxHash,
-    feeTxHash,
+    // A1: 同内容の置換で mine されたら置換 tx の hash (fee-error 時の履歴補完・注文通知もこれを読む)。
+    merchantTxHash: merchantSettledTxHash,
+    feeTxHash: feeSettledTxHash,
     // R: fee-error 時にも merchant 着金記録を残せるよう、phase に依らず merchant
     //    receipt 単独で公開する。usePaymentHistory が fee-error 検知時に
     //    merchant success 行を独立して append するために参照する。
