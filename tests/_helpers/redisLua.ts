@@ -30,6 +30,7 @@
 //    この bridge を通さない fake fetch テストで行う。
 // 5. Lua 数値をコマンド引数に渡すと実 Redis は整数へ切り捨てて文字列化する。ここでも同じ
 //    挙動を実装しているが、丸めモードの端の差は保証しない。
+import { appendFileSync } from 'node:fs';
 import { LuaFactory } from 'wasmoon';
 
 // Redis が Lua に返す値の形。status reply は {ok=...}、error reply は {err=...}。
@@ -378,6 +379,23 @@ export function dispatchRedisCommand(
     }
     case 'LLEN':
       return store.lists.get(key)?.length ?? 0;
+    case 'LPOS': {
+      // 先頭からの最初の一致位置 (RANK / COUNT / MAXLEN は未対応: 黙って無視して意味を取り違えない)。
+      if (args.length !== 2) throw new Error('LPOS: options are not supported by this harness');
+      requireType('list');
+      const index = (store.lists.get(key) ?? []).indexOf(args[1]);
+      return index === -1 ? false : index;
+    }
+    case 'LSET': {
+      if (args.length !== 3 || !/^-?\d+$/.test(args[1])) throw new Error('wrong number of arguments');
+      requireType('list');
+      const list = store.lists.get(key);
+      if (!list) throw new Error('no such key');
+      const index = Number(args[1]) < 0 ? list.length + Number(args[1]) : Number(args[1]);
+      if (index < 0 || index >= list.length) throw new Error('index out of range');
+      list[index] = args[2];
+      return { ok: 'OK' };
+    }
     case 'LPUSH': {
       const list = store.lists.get(key) ?? [];
       for (const value of args.slice(1)) list.unshift(value);
@@ -557,6 +575,22 @@ function stripNulls(value: unknown): unknown {
 // 呼び出し元が並行実行しても、Redis EVAL の順序と原子性を保つ。
 let queue: Promise<unknown> = Promise.resolve();
 
+// scripts/run-lua-tests.mjs が渡す記録先。実 Lua で実行した script 本文を 1 行 1 JSON で書き、
+// 「実 Lua テストが 1 本も無い Lua」を run-lua-tests.mjs が検出する (第 7 回レビュー F10・C5)。
+const coverageFile = process.env.LUA_REAL_COVERAGE_FILE;
+const recordedScripts = new Set<string>();
+
+function recordExecutedScript(script: string): void {
+  if (!coverageFile || recordedScripts.has(script)) return;
+  recordedScripts.add(script);
+  try {
+    appendFileSync(coverageFile, JSON.stringify(script) + '\n');
+  } catch {
+    // 記録の失敗を Lua の実行結果 (= test の合否) へ波及させない。記録が欠けた Lua は
+    // run-lua-tests.mjs の検査で「実 Lua テストが無い」と表に出る (黙って通ることはない)。
+  }
+}
+
 /** 既存の teardown hook では待機中の EVAL の完了を待つ。engine は各 EVAL が閉じる。 */
 export async function closeRedisLuaEngine(): Promise<void> {
   await queue;
@@ -579,12 +613,59 @@ export function runRedisPipeline(store: FakeRedisStore, steps: unknown[][]): ({ 
   });
 }
 
+/**
+ * Lua の構文だけを検査する (実行しない)。通れば null、通らなければ Lua のエラー文。Redis と同じく script 全体を
+ * 1 つの関数本体として読む。EVAL と同じく engine を毎回作って閉じる (stack の蓄積を後続へ波及させない)。
+ * ⚠️ Lua 5.4 の文法で読むので、5.1 (Upstash) に無い構文 (`//`・`goto`・ビット演算子) は通ってしまう。
+ */
+export async function compileRedisLua(source: string): Promise<string | null> {
+  const lua = await new LuaFactory().createEngine({ enableProxy: false });
+  try {
+    lua.global.set('SOURCE', source);
+    await lua.doString("local _, err = load(SOURCE, '=script'); COMPILE_ERROR = err");
+    const error = lua.global.get('COMPILE_ERROR') as unknown;
+    return typeof error === 'string' ? error : null;
+  } finally {
+    lua.global.close();
+  }
+}
+
+/**
+ * 本物の lib/kv.ts が送る Upstash REST (fetch) を fake store に繋ぐ。EVAL は実 Lua、/pipeline は
+ * runRedisPipeline、それ以外の単発コマンドは dispatchRedisCommand。lib/kv.ts の組み立て (EVAL の KEYS 数・
+ * SET の EX/NX) ごと検査するため、kvEval を mock せずにこれを `vi.stubGlobal('fetch', ...)` に渡す。
+ * Upstash と同じく、コマンドのエラーは HTTP 400 + {error} で返す。
+ */
+export function fakeUpstashFetch(store: FakeRedisStore) {
+  return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const body = JSON.parse(String(init?.body)) as unknown[];
+    if (String(url).endsWith('/pipeline')) {
+      return Response.json(runRedisPipeline(store, body as unknown[][]));
+    }
+    const [command, ...args] = body;
+    try {
+      if (String(command).toUpperCase() === 'EVAL') {
+        const [script, keyCount, ...rest] = args.map(String);
+        const count = Number(keyCount);
+        return Response.json({ result: await runRedisLua(script, rest.slice(0, count), rest.slice(count), store) });
+      }
+      const reply = dispatchRedisCommand(store, String(command), args);
+      const result = reply === false ? null
+        : typeof reply === 'object' && !Array.isArray(reply) && 'ok' in reply ? reply.ok : reply;
+      return Response.json({ result });
+    } catch (e) {
+      return Response.json({ error: 'ERR ' + (e instanceof Error ? e.message : String(e)) }, { status: 400 });
+    }
+  };
+}
+
 export function runRedisLua(
   script: string,
   keys: string[],
   argv: string[],
   store: FakeRedisStore,
 ): Promise<RedisLuaValue> {
+  recordExecutedScript(script);
   const run = queue.then(async () => {
     // Wasmoon 1.16 の doString は返り値を global の Lua stack に残す。同じ engine を使い続けると
     // 蓄積した返り値が stack の範囲外書き込みを起こし、WASM heap を壊す。

@@ -63,7 +63,9 @@ vitest (wasmoon)・dev DB・本番 DB への直接 EVAL は全部「ソースの
   - 対策: `lib/x402/reverify.ts` は閾値を `String()` で普通の連結に (テンプレート禁止)。
     `scripts/check-lua-bundle.mjs` が `next build` 直後にバンドル内の Lua 断片を検査 (CI の build ステップ・
     `>=3if` 型の連結崩れも検出)。`tests/lib/x402/reverify-cas.test.ts` がソースにテンプレートリテラルが
-    無いことをフェンス。
+    無いことをフェンス。2026-10 (第 7 回レビュー F17 / E11) から、`scripts/lib/luaSources.mjs` が構文木から
+    列挙した lib/・app/ の **全 Lua** の片をバンドルで検査し、`tests/scripts/lua-sources.test.ts` が全 Lua の
+    `${}` テンプレートを禁止する。
   - 教訓: 「本番だけ壊れる・ソースは正しい」ときは **バンドルの実物** を最初に見る (`npm run build` →
     `.next/server` を grep)。storage 失敗の内訳は cron 応答 `storageFailures[].detail`、接続先は
     `kv.host` / `kv.source` に出る。

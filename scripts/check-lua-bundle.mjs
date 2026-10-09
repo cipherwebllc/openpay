@@ -12,10 +12,15 @@
 //   (1) 期待断片 (ソースの reverifyThresholds.ts から閾値を読んで組み立て) が .next/server 配下の
 //       いずれかの chunk に **そのまま** 含まれること
 //   (2) 壊れ方の典型 (`>=<数字>if ` のように文が連結される) が server 配下に無いこと
+//   (3) lib/・app/ の **全 Lua** (scripts/lib/luaSources.mjs が構文木から列挙・第 7 回レビュー F17 / E11) について、
+//       その Lua が入っている chunk に、ソースの静的な片 (引用符・改行・エスケープで切った部分文字列) が全部残ること。
+//       一部だけ残る = minifier が片を落とした。丸ごと無い Lua は flag OFF の build で tree-shake されたものとして
+//       一覧だけ出す (壊れようがない)。(1)(2) の手書きの断片は reverify の閾値 (値の分からない部品) の形も見るので残す。
 // 使い方: `npm run build` の後に `node scripts/check-lua-bundle.mjs` (CI の build ステップで実行)。
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { checkLuaInBundle, listLuaScripts } from './lib/luaSources.mjs';
 
 const root = process.cwd();
 const thresholdsSrc = readFileSync(join(root, 'lib/x402/reverifyThresholds.ts'), 'utf8');
@@ -76,8 +81,10 @@ try {
 const found = EXPECTED.map(() => null);
 const thresholdFound = THRESHOLD_FORMS.map(() => null);
 const broken = [];
+const bundleFiles = [];
 for (const file of files) {
   const src = readFileSync(file, 'utf8');
+  bundleFiles.push({ name: file.replace(root + '/', ''), text: src });
   EXPECTED.forEach((fragment, i) => {
     if (found[i] === null && src.includes(fragment)) found[i] = file;
   });
@@ -111,6 +118,22 @@ for (const b of broken) {
   console.error(`[NG] 文が連結された Lua を検出: ${b.file.replace(root + '/', '')}`);
   console.error(`     ...${b.sample}...`);
 }
+
+// (3) 全 Lua の静的な片。next build に入るのは lib/・app/ の Lua (scripts/ は node で直接動く)。
+const scripts = listLuaScripts(root, ['lib', 'app']);
+const lua = checkLuaInBundle(scripts, bundleFiles);
+for (const entry of lua.broken) {
+  failed = true;
+  console.error(`[NG] Lua の片がバンドルから欠けています (minifier が落とした疑い): ${entry.ids.join(', ')} @ ${entry.file}`);
+  for (const probe of entry.missing.slice(0, 5)) console.error(`     欠けた片: ${probe.slice(0, 120)}`);
+}
+if (lua.present.length === 0) {
+  // 0 本 = 抽出か walk が壊れている。検査したことにして通さない。
+  failed = true;
+  console.error(`[NG] lib/・app/ の Lua (${scripts.length} 本) が 1 本もバンドルに見つかりません (検査の前提が壊れている)`);
+}
+console.log(`[INFO] lib/・app/ の Lua ${scripts.length} 本: 無傷 ${lua.present.length} 組・部品のみ ${lua.shared.length} 組・バンドルに無い ${lua.absent.length} 組`);
+for (const ids of lua.absent) console.log(`[INFO] バンドルに無い Lua (flag OFF 等で未使用): ${ids.join(', ')}`);
 if (failed) {
   console.error('check-lua-bundle: FAIL — Lua 連結にテンプレートリテラルを使わない (lib/x402/reverify.ts 冒頭の注意)');
   process.exit(1);

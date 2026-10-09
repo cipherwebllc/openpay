@@ -6,10 +6,15 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LuaFactory, type LuaEngine } from 'wasmoon';
 
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   closeRedisLuaEngine,
+  compileRedisLua,
   createFakeRedisStore,
   dispatchRedisCommand,
+  fakeUpstashFetch,
   runRedisLua,
   type FakeRedisStore,
 } from './redisLua';
@@ -181,6 +186,27 @@ describe('fake store: リストコマンド', () => {
     call('LPUSH', 'l', 'a', 'b', 'c');
     call('LTRIM', 'l', '0', '-2');
     expect(store.lists.get('l')).toEqual(['c', 'b']);
+  });
+
+  it('LPOS は先頭からの最初の一致位置 / 無ければ false。option は黙って無視せず例外', () => {
+    call('LPUSH', 'l', 'x', 'b', 'a', 'b');
+    expect(call('LPOS', 'l', 'b')).toBe(0);
+    expect(call('LPOS', 'l', 'x')).toBe(3);
+    expect(call('LPOS', 'l', 'none')).toBe(false);
+    expect(call('LPOS', 'missing', 'b')).toBe(false);
+    expect(() => call('LPOS', 'l', 'b', 'RANK', '2')).toThrow();
+  });
+
+  it('LSET は位置の要素だけを置き換え、TTL を保つ。範囲外・未存在は例外で何も書かない', () => {
+    call('LPUSH', 'l', 'c', 'b', 'a');
+    call('EXPIRE', 'l', '60');
+    expect(call('LSET', 'l', '1', 'B')).toEqual({ ok: 'OK' });
+    expect(call('LSET', 'l', '-1', 'C')).toEqual({ ok: 'OK' });
+    expect(store.lists.get('l')).toEqual(['a', 'B', 'C']);
+    expect(store.getTtl('l')).toBe(60);
+    expect(() => call('LSET', 'l', '3', 'x')).toThrow('index out of range');
+    expect(() => call('LSET', 'missing', '0', 'x')).toThrow('no such key');
+    expect(store.lists.get('l')).toEqual(['a', 'B', 'C']);
   });
 });
 
@@ -562,5 +588,59 @@ describe('restore commands', () => {
     }
     expect(call('DBSIZE')).toBe(1);
     expect(call('GET', 'v')).toBe('original');
+  });
+});
+
+describe('fakeUpstashFetch: 本物の lib/kv.ts が送る REST を fake store に繋ぐ', () => {
+  const post = (body: unknown[], path = '') =>
+    fakeUpstashFetch(store)(`https://redis.example/${path}`, { method: 'POST', body: JSON.stringify(body) });
+
+  it('単発コマンドは Upstash の {result} 形 (nil は null・status reply は文字列)', async () => {
+    expect(await (await post(['SET', 'k', 'v', 'EX', '60', 'NX'])).json()).toEqual({ result: 'OK' });
+    expect(await (await post(['SET', 'k', 'w', 'NX'])).json()).toEqual({ result: null });
+    expect(await (await post(['GET', 'k'])).json()).toEqual({ result: 'v' });
+    expect(store.getTtl('k')).toBe(60);
+  });
+
+  it('EVAL は実 Lua で KEYS 数どおりに KEYS / ARGV を分け、pipeline は要素ごとに返す', async () => {
+    expect(await (await post(['EVAL', 'return {KEYS[1], ARGV[1], #KEYS, #ARGV}', '1', 'key', 'arg'])).json())
+      .toEqual({ result: ['key', 'arg', 1, 1] });
+    expect(await (await post([['INCR', 'n'], ['EXPIRE', 'n', '10', 'NX']], 'pipeline')).json())
+      .toEqual([{ result: 1 }, { result: 1 }]);
+  });
+
+  it('コマンドの失敗は HTTP 400 + {error} (Upstash と同じ)', async () => {
+    const res = await post(['NOPE', 'k']);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: expect.stringMatching(/^ERR /) });
+  });
+});
+
+describe('compileRedisLua', () => {
+  it('構文だけを見て実行しない (未知コマンドの script も通る)', async () => {
+    expect(await compileRedisLua("redis.call('NOPE'); return 1")).toBeNull();
+    expect(await compileRedisLua('if x then return 1')).toMatch(/expected/);
+  });
+});
+
+describe('実行した Lua の記録 (env LUA_REAL_COVERAGE_FILE・scripts/run-lua-tests.mjs の網)', () => {
+  it('env があれば本文を 1 行 1 JSON で重複なく追記する', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'redis-lua-coverage-'));
+    const file = join(dir, 'executed.jsonl');
+    try {
+      vi.resetModules();
+      vi.stubEnv('LUA_REAL_COVERAGE_FILE', file);
+      const harness = await import('./redisLua');
+      const local = harness.createFakeRedisStore(0);
+      await harness.runRedisLua('return 1', [], [], local);
+      await harness.runRedisLua('return 1', [], [], local);
+      await harness.runRedisLua("return 'a\\nb'", [], [], local);
+      await harness.closeRedisLuaEngine();
+      expect(readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as string))
+        .toEqual(['return 1', "return 'a\\nb'"]);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

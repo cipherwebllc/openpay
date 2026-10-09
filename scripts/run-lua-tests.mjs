@@ -8,6 +8,11 @@
 // 1 回でも「全ファイルが報告され・failed=0・total>0」になれば成功、MAX_ATTEMPTS 回すべて
 // 失敗したら exit 1 (= 本当に壊れているか、flaky が悪化している)。
 //
+// 実 Lua テストの網 (第 7 回レビュー C5 / F10): 成功した attempt で実 Lua が実行した本文を
+// tests/_helpers/redisLua に記録させ (env LUA_REAL_COVERAGE_FILE)、repo の Lua (scripts/lib/luaSources.mjs が
+// 構文木から列挙) と突き合わせる。1 度も実行されず LUA_WITHOUT_REAL_TEST にも無い Lua があれば exit 1
+// (決定的なので再試行しない)。一覧に残っているのに実行された Lua は warning で行の削除を促す。
+//
 // 使い方: node scripts/run-lua-tests.mjs (CI の lua-real job・ローカルでも可)
 // env: LUA_TESTS_MAX_ATTEMPTS (既定 3) / LUA_TESTS_ATTEMPT_TIMEOUT_MS (既定 600000)
 
@@ -15,7 +20,8 @@ import { spawn } from 'node:child_process';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { LUA_REAL_TEST_FILES } from './lib/luaRealTests.mjs';
+import { LUA_REAL_TEST_FILES, LUA_WITHOUT_REAL_TEST } from './lib/luaRealTests.mjs';
+import { checkLuaRealCoverage, readExecutedLua } from './lib/luaSources.mjs';
 import { checkTestFileCoverage, normalizeReportedFiles } from './lib/testFileFence.mjs';
 
 const MAX_ATTEMPTS = Number(process.env.LUA_TESTS_MAX_ATTEMPTS ?? 3);
@@ -30,6 +36,7 @@ function runOnce(attempt) {
   return new Promise((resolve) => {
     const tmp = mkdtempSync(join(tmpdir(), 'vitest-lua-'));
     const jsonOut = join(tmp, 'result.json');
+    const coverageFile = join(tmp, 'lua-coverage.jsonl');
     const args = [
       '--max-old-space-size=4096',
       './node_modules/.bin/vitest',
@@ -46,7 +53,11 @@ function runOnce(attempt) {
     console.log(`\n[run-lua-tests] attempt ${attempt}/${MAX_ATTEMPTS}`);
     // detached: 子 (vitest) が起動する fork worker も同じプロセスグループに入るので、timeout 時に
     // グループごと SIGKILL できる (worker だけ生き残る事故を防ぐ)。
-    const child = spawn('node', args, { stdio: 'inherit', detached: process.platform !== 'win32' });
+    const child = spawn('node', args, {
+      stdio: 'inherit',
+      detached: process.platform !== 'win32',
+      env: { ...process.env, LUA_REAL_COVERAGE_FILE: coverageFile },
+    });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -70,6 +81,7 @@ function runOnce(attempt) {
       } catch {
         console.error(`[run-lua-tests] attempt ${attempt}: JSON report unreadable (vitest exit=${code})`);
       }
+      const executedLua = report ? readExecutedLua(coverageFile) : [];
       rmSync(tmp, { recursive: true, force: true });
       if (!report) return resolve({ ok: false, reason: 'no-report' });
       const { numFailedTests, numTotalTests, numPassedTests, testResults } = report;
@@ -84,9 +96,26 @@ function runOnce(attempt) {
         return resolve({ ok: false, reason: 'partial silent skip (worker died)' });
       }
       if (!files.ok) return resolve({ ok: false, reason: `files missing: ${files.missing.join(', ')}` });
-      resolve({ ok: true });
+      resolve({ ok: true, executedLua });
     });
   });
+}
+
+// 実 Lua テストの網。test が全部通った attempt でだけ判定する (落ちた attempt の記録は欠けている)。
+function checkLuaNet(executedLua) {
+  const net = checkLuaRealCoverage({ root: process.cwd(), executed: executedLua, allowlist: LUA_WITHOUT_REAL_TEST });
+  console.log(
+    `[run-lua-tests] Lua net: executed=${net.executed} missing=${net.missing.length} allowlisted=${LUA_WITHOUT_REAL_TEST.length}`,
+  );
+  for (const id of net.stale) {
+    console.warn(`::warning::[run-lua-tests] ${id} は実 Lua で実行された (またはもう無い) ので、scripts/lib/luaRealTests.mjs の LUA_WITHOUT_REAL_TEST から消す`);
+  }
+  if (net.missing.length === 0) return true;
+  console.error('[run-lua-tests] FAIL: 実 Lua テストで 1 度も実行されなかった Lua (scripts/lib/luaSources.mjs の id):');
+  for (const id of net.missing) console.error(`  - ${id}`);
+  console.error('  → tests/_helpers/redisLua で実行する test を足して scripts/lib/luaRealTests.mjs に登録する。' +
+    '足せない理由があるときだけ、理由を添えて LUA_WITHOUT_REAL_TEST に足す。');
+  return false;
 }
 
 for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -95,6 +124,8 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
   }
   const result = await runOnce(attempt);
   if (result.ok) {
+    // 網の不足は決定的 (再試行しても変わらない) ので、ここで終える。
+    if (!checkLuaNet(result.executedLua)) process.exit(1);
     console.log(`[run-lua-tests] OK (attempt ${attempt})`);
     process.exit(0);
   }
