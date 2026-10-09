@@ -512,7 +512,11 @@ export function StorefrontPublishPanel({
             {createPortal(
             <div className="flex items-center gap-3">
               <div className="min-w-0 flex-1">
-                {publish.isError && !publish.isPending ? (
+                {blockedReason ? (
+                  // 下書きに直すところ (値引きが範囲外など) があるときは、前の公開の失敗より先にそれを出す
+                  // (押せない理由が見えないまま古いエラーだけが残らないように)。
+                  <p className="truncate text-sm font-medium text-slate-500">{barReason ?? blockedReason}</p>
+                ) : publish.isError && !publish.isPending ? (
                   // 帯から押して失敗したとき、画面の上のカードの文言だけでは気づけないので帯にも出す。
                   <p role="alert" className="line-clamp-2 text-sm font-medium text-red-600">{t('publishError')}</p>
                 ) : barReason ? (

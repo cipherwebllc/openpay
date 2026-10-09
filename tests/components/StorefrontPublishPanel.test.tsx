@@ -187,6 +187,32 @@ describe('StorefrontPublishPanel', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('公開に失敗しました。時間をおいて再度お試しください。');
   });
 
+  it('公開に失敗した後に直すところ (値引き) ができたら、帯は前の失敗より先にその理由を出す', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? { ok: false, status: 500, json: async () => ({ ok: false, error: 'kv' }) }
+        : { ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }) },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = renderPanel({ qc });
+    fireEvent.click(await readyButton('公開する'));
+    expect(await within(view.slot).findByRole('alert')).toHaveTextContent('公開に失敗しました');
+    view.rerender(
+      <QueryClientProvider client={qc}>
+        <StorefrontPublishPanel
+          storefront={STORE}
+          receiver={null}
+          barSlots={[view.slot]}
+          blockedReason="値引きを直すか「なし」にしてください"
+        />
+      </QueryClientProvider>,
+    );
+    expect(within(view.slot).getByText('値引きを直すか「なし」にしてください')).toBeInTheDocument();
+    expect(within(view.slot).queryByRole('alert')).toBeNull();
+    expect(within(view.slot).getByRole('button', { name: '公開する' })).toBeDisabled();
+  });
+
   it('受取先が変わる公開は、帯にも「受取先が変わります」と変更前 → 後を出す', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
