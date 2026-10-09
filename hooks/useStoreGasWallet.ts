@@ -22,8 +22,10 @@ import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { storeDeviceChainIds, storeGasWalletChainIds } from '@/lib/storeDevicePayment';
 import {
   STORE_GAS_TOPUP_KEY,
+  TOPUP_SENT_TTL_MS,
   finishStoreGasTopUp,
   liveStoreGasTopUps,
+  markStoreGasTopUpSuspect,
   noteStoreGasTopUpSender,
   resolveStoreGasTopUp,
   staleStoreGasTopUps,
@@ -132,18 +134,46 @@ export function useStoreGasWallet() {
 
   const address = walletState?.state === 'ok' ? walletState.info.address : null;
 
-  // 送って 1 日たっても結果を確かめられていない補充 (消すのは止めないが、消す前に注意する)。別のタブの記録の変化も読む。
+  // 結果を確かめられていない補充 (送って 1 日・置き換えられた可能性)。消すのは止めないが、消す前に注意する。
+  // 読み直すのは: 鍵が変わったとき・別のタブの記録の変化・残高の読み直し・1 日の境界 (タイマー)・削除確認を開くとき。
   const [staleTopUps, setStaleTopUps] = useState<StoreGasTopUpRecord[]>([]);
+  // 境界のタイマーを張り直す合図。
+  const [staleTick, setStaleTick] = useState(0);
+  // 画面に知らせた (警告に出した) 記録の id。remove は、これに無い記録が保存にあれば消さない (古い state で消さない)。
+  const warnedStaleIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
+    warnedStaleIdsRef.current = new Set(staleTopUps.map((r) => r.id));
+  }, [staleTopUps]);
+  const refreshStaleTopUps = useCallback(() => {
     setStaleTopUps(address ? staleStoreGasTopUps(address) : []);
-    if (!address) return;
+    setStaleTick((t) => t + 1);
+  }, [address]);
+  useEffect(() => {
+    if (!address) {
+      setStaleTopUps([]);
+      return;
+    }
     const own = address;
+    const update = () => {
+      setStaleTopUps(staleStoreGasTopUps(own));
+      setStaleTick((t) => t + 1);
+    };
+    setStaleTopUps(staleStoreGasTopUps(own));
+    // 送った記録が 1 日の境界をまたぐ時刻に読み直す (同じタブで開いたままでも警告が出る)。
+    const now = Date.now();
+    const edges = liveStoreGasTopUps(own, now)
+      .filter((r) => r.hash)
+      .map((r) => r.at + TOPUP_SENT_TTL_MS - now);
+    const timer = edges.length > 0 ? setTimeout(update, Math.max(0, Math.min(...edges)) + 1_000) : null;
     function onStorage(e: StorageEvent) {
-      if (e.key === STORE_GAS_TOPUP_KEY || e.key === null) setStaleTopUps(staleStoreGasTopUps(own));
+      if (e.key === STORE_GAS_TOPUP_KEY || e.key === null) update();
     }
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, [address]);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, [address, staleTick]);
 
   // 鍵があるときは、ブラウザに消されにくい保存を頼む (作った直後・開いたとき)。結果は画面の案内に使うだけ。
   const [persisted, setPersisted] = useState<boolean | null>(null);
@@ -194,24 +224,25 @@ export function useStoreGasWallet() {
     if (gen !== walletGenRef.current) return;
     // 送ってから時間のたった補充の結果を片付ける (補充の欄が出ていない間に取引が入っても、記録を外す = 鍵を消せない
     // 状態を残さない)。新しい記録は補充の欄が結果を出すので触らない (先に片付けて結果の表示を消さない)。
-    // 証拠は receipt と送り手の nonce の消費 (置き換え確定) だけで、時間の経過では片付けない (A5/G3)。1 日たって
-    // 「確かめられていない」に変わった記録も同じに見る (証拠が出れば片付く)。
+    // 片付けてよい証拠は自分の hash の receipt だけで、時間の経過でも送り手の nonce の消費でも片付けない (A5/G3)。
+    // nonce が消費されたのに receipt が無ければ「置き換えられた可能性」として警告に変える (記録は残す・receipt が後から
+    // 見えれば片付く)。1 日たって「確かめられていない」に変わった記録も同じに見る。
     for (const op of [...liveStoreGasTopUps(address), ...staleStoreGasTopUps(address)]) {
       const client = op.hash ? clients.get(op.chainId) : undefined;
       if (!op.hash || !client || Date.now() - op.at < TOPUP_SETTLE_BY_PANEL_MS) continue;
       try {
         const res = await resolveStoreGasTopUp(client, { ...op, hash: op.hash });
         if (res.kind === 'pending') {
-          // まだ証拠が無い。記録は残す (補充の画面が結果を見る・次の読み直しで片付ける)。分かった nonce は足す。
-          const { nonce } = res;
-          const { from } = op;
-          if (nonce !== undefined && from) {
-            await withStoreGasWalletLock(async () => noteStoreGasTopUpSender(op.id, { from, nonce }));
-          }
+          // まだ証拠が無い。記録は残す (補充の画面が結果を見る・次の読み直しで片付ける)。tx から読めた送り手と nonce の組は足す。
+          const { sender } = res;
+          if (sender) await withStoreGasWalletLock(async () => noteStoreGasTopUpSender(op.id, sender));
           continue;
         }
-        // 記録を外す前に、そのチェーンの残高を読み直す (入った補充 = 置き換え先が同じ宛先の場合を含む = を 0 のまま
-        // 見せて、注意なしに消させない)。
+        if (res.kind === 'nonce_consumed') {
+          if (!op.suspect) await withStoreGasWalletLock(async () => markStoreGasTopUpSuspect(op.id));
+          continue;
+        }
+        // 記録を外す前に、そのチェーンの残高を読み直す (入った補充を 0 のまま見せて、注意なしに消させない)。
         const [b, g] = await Promise.all([client.getBalance({ address }), client.getGasPrice()]);
         if (gen !== walletGenRef.current) return;
         setReads((prev) => ({ ...prev, [op.chainId]: { balance: b, gasPrice: g, readFailed: false } }));
@@ -222,6 +253,7 @@ export function useStoreGasWallet() {
     }
     if (gen !== walletGenRef.current) return;
     setStaleTopUps(staleStoreGasTopUps(address));
+    setStaleTick((t) => t + 1);
     // 「不明」の出口: hash があれば receipt で確定/取り消しを確かめる。hash が無い (送信中に切れた) ときは
     // そのチェーンの残高を読めた時点で解除する (残高が残っていれば「消す」の確認で先に戻すよう出る)。
     const unknown = unknownRef.current;
@@ -269,6 +301,8 @@ export function useStoreGasWallet() {
 
   const remove = useCallback(async (): Promise<boolean> => {
     if (removeBlocked) return false;
+    // 画面にまだ知らせていない「確かめられていない」補充 (消さずに、警告に出してから消させる)。
+    let unwarned: StoreGasTopUpRecord[] | null = null;
     // 消すのは、いま保存されている鍵が表示中のものと同じで、その鍵への補充が途中 (このタブ・別のタブ) でないときだけ
     // (別のタブで作り直された鍵を古い表示のまま消さない・届く途中の補充の宛先の鍵を消さない)。
     const removed = await withStoreGasWalletLock(async () => {
@@ -280,13 +314,21 @@ export function useStoreGasWallet() {
         return false;
       }
       if (liveStoreGasTopUps(current.info.address).length > 0) return false;
-      // 結果を確かめられていない補充 (1 日以上) は止めない (画面が注意を出す)。消したら、その鍵の記録は片付ける
-      // (消した鍵の注意が残り続けない)。
+      // 結果を確かめられていない補充は止めないが、消す時点で記録を読み直し、警告に出していないものがあれば消さない
+      // (古い state のまま、警告なしに消さない)。消したら、その鍵の記録は片付ける (消した鍵の注意が残り続けない)。
       const stale = staleStoreGasTopUps(current.info.address);
+      if (stale.some((r) => !warnedStaleIdsRef.current.has(r.id))) {
+        unwarned = stale;
+        return false;
+      }
       const ok = removeStoreGasWallet();
       if (ok) for (const r of stale) finishStoreGasTopUp(r.id);
       return ok;
     });
+    if (unwarned) {
+      setStaleTopUps(unwarned);
+      return false;
+    }
     // 消えたかどうかは保存状態を読み直して決める (消せなかったのに「未作成」に戻さない)。
     setWalletState(loadStoreGasWallet());
     if (removed) {
@@ -420,6 +462,7 @@ export function useStoreGasWallet() {
     withdrawStatus,
     removeBlocked,
     staleTopUps,
+    refreshStaleTopUps,
     refresh,
     create,
     remove,

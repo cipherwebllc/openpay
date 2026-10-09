@@ -61,6 +61,7 @@ function base({ balance, gasPrice, readFailed, ...over }: Record<string, unknown
     withdrawStatus: { phase: 'idle' },
     removeBlocked: false,
     staleTopUps: [],
+    refreshStaleTopUps: vi.fn(),
     refresh: vi.fn(),
     create: vi.fn(async () => ({ ok: true })),
     remove: vi.fn(async () => true),
@@ -357,6 +358,8 @@ describe('StoreGasWalletPanel', () => {
     const button = screen.getByRole('button', { name: 'この端末から消す' });
     expect(button).not.toBeDisabled();
     fireEvent.click(button);
+    // 確認を開く時点で記録を読み直す (古い state で警告を出し損ねない)
+    expect(hold.state.refreshStaleTopUps).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/結果を確かめられていない補充があります/)).toBeTruthy();
     expect(screen.getByRole('link', { name: '取引を見る' }).getAttribute('href')).toContain(TX);
   });

@@ -10,6 +10,7 @@ import {
   attachStoreGasTopUpHash,
   finishStoreGasTopUp,
   liveStoreGasTopUps,
+  markStoreGasTopUpSuspect,
   noteStoreGasTopUpSender,
   reserveStoreGasTopUp,
   resolveStoreGasTopUp,
@@ -115,13 +116,30 @@ describe('storeGasTopUp', () => {
     expect(window.localStorage.getItem(STORE_GAS_TOPUP_KEY)).not.toContain(`"${id}"`);
   });
 
-  it('送り手と nonce は後から足せる (時刻は延ばさない・送った記録だけ)', () => {
+  it('送り手と nonce は後から足せる (時刻は延ばさない・送った記録だけ・記録の送り手と違う tx の値は足さない)', () => {
     const id = reserve(A, T0);
     noteStoreGasTopUpSender(id, { from: B, nonce: 3 }, T0 + 1_000);
     expect(liveStoreGasTopUps(A, T0 + 1_000)[0].nonce).toBeUndefined();
     attachStoreGasTopUpHash({ id, address: A, chainId: 80002, from: B }, TX, T0);
+    // 記録の送り手 (B) と違う送り手の組は足さない (別の tx の nonce を組にしない)
+    noteStoreGasTopUpSender(id, { from: A, nonce: 9 }, T0 + 1_000);
+    expect(liveStoreGasTopUps(A, T0 + 1_000)[0]).toMatchObject({ at: T0, hash: TX, from: B });
+    expect(liveStoreGasTopUps(A, T0 + 1_000)[0].nonce).toBeUndefined();
     noteStoreGasTopUpSender(id, { from: B, nonce: 3 }, T0 + 1_000);
     expect(liveStoreGasTopUps(A, T0 + 1_000)[0]).toMatchObject({ at: T0, hash: TX, from: B, nonce: 3 });
+  });
+
+  it('「置き換えられた可能性」の印: 1 日たっていなくても途中ではなく「確かめられていない」になる (消さない・7 日で捨てる)', () => {
+    const id = reserve(A, T0);
+    attachStoreGasTopUpHash({ id, address: A, chainId: 80002, from: B, nonce: 7 }, TX, T0);
+    markStoreGasTopUpSuspect(id, T0 + 1_000);
+    expect(liveStoreGasTopUps(A, T0 + 1_000)).toHaveLength(0);
+    expect(staleStoreGasTopUps(A, T0 + 1_000)).toEqual([expect.objectContaining({ id, hash: TX, suspect: true })]);
+    expect(staleStoreGasTopUps(A, T0 + TOPUP_SENT_KEEP_MS)).toHaveLength(0);
+    // 送っていない記録には付かない
+    const approving = reserve(B, T0);
+    markStoreGasTopUpSuspect(approving, T0 + 1_000);
+    expect(liveStoreGasTopUps(B, T0 + 1_000).map((r) => r.id)).toEqual([approving]);
   });
 
   it('tx を記録に残せなかったら false を返す (呼び出し側が画面で見張る)', () => {
@@ -168,9 +186,9 @@ describe('resolveStoreGasTopUp', () => {
     expect(c.getTransactionCount).not.toHaveBeenCalled();
   });
 
-  it('receipt が無く、送り手の nonce が消費されていれば置き換え確定 (元の tx はもう入らない)', async () => {
+  it('receipt が無く、送り手の nonce が消費されていれば「置き換えられた可能性」(片付ける証拠ではない = 自分の tx の成功でも nonce は消費される)', async () => {
     await expect(resolveStoreGasTopUp(client({ count: 8 }), { ...REC, from: B, nonce: 7 })).resolves.toEqual({
-      kind: 'replaced',
+      kind: 'nonce_consumed',
     });
     // nonce がまだなら途中のまま
     await expect(resolveStoreGasTopUp(client({ count: 7 }), { ...REC, from: B, nonce: 7 })).resolves.toEqual({
@@ -178,21 +196,21 @@ describe('resolveStoreGasTopUp', () => {
     });
   });
 
-  it('nonce が分からなければ tx を読んで覚える (読めなければ途中のまま)', async () => {
+  it('送り手と nonce が無ければ tx を読んで同じ tx の組として覚える (読めなければ途中のまま)', async () => {
     const c = client({ count: 7, tx: { nonce: 7 } });
-    await expect(resolveStoreGasTopUp(c, { ...REC, from: B })).resolves.toEqual({ kind: 'pending', nonce: 7 });
+    await expect(resolveStoreGasTopUp(c, REC)).resolves.toEqual({ kind: 'pending', sender: { from: B, nonce: 7 } });
     expect(c.getTransactionCount).toHaveBeenCalledWith({ address: B, blockTag: 'latest' });
-    await expect(resolveStoreGasTopUp(client({ count: 8, tx: { nonce: 7 } }), { ...REC, from: B })).resolves.toEqual({
-      kind: 'replaced',
+    await expect(resolveStoreGasTopUp(client({ count: 8, tx: { nonce: 7 } }), REC)).resolves.toEqual({
+      kind: 'nonce_consumed',
     });
-    await expect(resolveStoreGasTopUp(client({ count: 8, tx: null }), { ...REC, from: B })).resolves.toEqual({
-      kind: 'pending',
-    });
-    // 送り手が分からなければ nonce は見ない
-    await expect(resolveStoreGasTopUp(client({ count: 8, tx: { nonce: 7 } }), REC)).resolves.toEqual({ kind: 'pending' });
+    await expect(resolveStoreGasTopUp(client({ count: 8, tx: null }), REC)).resolves.toEqual({ kind: 'pending' });
+    // 記録の送り手 (A) と tx の送り手 (B) が違えば、その nonce は使わない (別の tx の組にしない)
+    const mismatch = client({ count: 8, tx: { nonce: 7 } });
+    await expect(resolveStoreGasTopUp(mismatch, { ...REC, from: A })).resolves.toEqual({ kind: 'pending' });
+    expect(mismatch.getTransactionCount).not.toHaveBeenCalled();
   });
 
-  it('RPC の障害 (receipt を読めない・nonce を読めない) は置き換えと見なさない', async () => {
+  it('RPC の障害 (receipt を読めない・nonce を読めない) は置き換えの可能性とも見なさない', async () => {
     await expect(resolveStoreGasTopUp(client({ receipt: 'down', count: 8 }), { ...REC, from: B, nonce: 7 })).resolves.toEqual(
       { kind: 'pending' },
     );

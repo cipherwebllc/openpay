@@ -12,9 +12,10 @@
 //   - 結果は receipt で決める。確認が失敗しても途中のまま (tx へのリンクと「結果を確かめ直す」)。取引が失敗
 //     (revert) しても結果として扱う。ウォレットで取り消し・ガス用ウォレット以外への置き換えなら「補充しました」と
 //     言わない。
-//   - 送った tx には送り手と nonce も残す (画面を離れた後も、receipt か nonce の消費で結果を確かめる = 時間の経過で
-//     「入らなかった」と決めない・hooks/useStoreGasWallet.ts)。送信の失敗は、ウォレットで断ったときだけ記録を片付け、
-//     それ以外 (送った後に応答を失った可能性) は「送れたか分からない」として記録を残す (30 分で切れる)。
+//   - 送った tx は hash が返った瞬間に記録へ残し、送り手と nonce は同じ tx から読んだ組を後から足す (画面を離れた後も
+//     receipt で結果を確かめ、nonce の消費で置き換えの可能性を見る = 時間の経過で「入らなかった」と決めない・
+//     hooks/useStoreGasWallet.ts)。送信の失敗は、ウォレットで断ったときだけ記録を片付け、それ以外 (送った後に応答を
+//     失った可能性) は「送れたか分からない」として記録を残す (30 分で切れる)。
 //   - 別のタブとの排他 (Web Locks) が無いブラウザでは補充を始めない (記録の読み書きの交差を止められない)。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -41,6 +42,7 @@ import {
   attachStoreGasTopUpHash,
   finishStoreGasTopUp,
   liveStoreGasTopUps,
+  noteStoreGasTopUpSender,
   reserveStoreGasTopUp,
   touchStoreGasTopUp,
   type StoreGasTopUpRecord,
@@ -266,16 +268,9 @@ export function StoreGasWalletTopUp({
       let keepHeartbeat = false;
       try {
         const hash = await sendTransactionAsync({ to: gasAddress, value, chainId: sendChainId });
-        // 送った tx の nonce (receipt が無くても、nonce の消費で「もう入らない」を確かめるため)。読めなくても送る本体は
-        // 止めない (RPC にまだ届いていない等・後の読み直しで足す)。
-        let nonce: number | undefined;
-        try {
-          nonce = (await sendClient?.getTransaction({ hash }))?.nonce;
-        } catch {
-          // 付帯の読み取り。失敗を本体に波及させない。
-        }
+        // hash が返った瞬間に記録へ残す (本体)。送り手と nonce は後から別に足す (下)。
         const saved = await withStoreGasWalletLock(async () =>
-          attachStoreGasTopUpHash({ id, address: gasAddress, chainId: sendChainId, from: wallet, nonce }, hash),
+          attachStoreGasTopUpHash({ id, address: gasAddress, chainId: sendChainId }, hash),
         );
         if (!saved) {
           // tx を記録に残せない。この画面で見張り、確認中の記録を延ばし続ける (届く途中の宛先を消させない)。
@@ -283,6 +278,20 @@ export function StoreGasWalletTopUp({
           heartbeatRef.current = heartbeat;
           keepHeartbeat = true;
         }
+        // 付帯: 送った tx の送り手と nonce を同じ tx から読んで記録に足す (receipt が無くても nonce の消費で置き換えの
+        // 可能性を見るため)。画面の接続先 (React の値) は使わない (ロック待ちの間に接続先が変わると、別の財布の nonce と
+        // 組になる)。待たずに走らせる = 読み取りの遅れ・失敗・タブを閉じる中断が、上の hash の記録 (本体) を巻き込まない。
+        // 読めなければ hooks/useStoreGasWallet.ts の読み直しが後から足す。
+        void (async () => {
+          try {
+            const tx = await sendClient?.getTransaction({ hash });
+            if (!tx) return;
+            await withStoreGasWalletLock(async () => noteStoreGasTopUpSender(id, { from: tx.from, nonce: tx.nonce }));
+            reload();
+          } catch {
+            // 付帯の読み取り。失敗を本体に波及させない。
+          }
+        })();
       } catch (e) {
         if (isUserRejection(e)) {
           // 送っていない (ウォレットで断った)。記録を片付ける。

@@ -159,6 +159,8 @@ export function StoreGasWalletPanel({
           className={DANGER_BTN}
           disabled={removeBlocked}
           onClick={() => {
+            // 確認を開く時点で、結果を確かめられていない補充の記録を読み直す (古い state のまま警告を出し損ねない)。
+            g.refreshStaleTopUps();
             setConfirmingRemove(true);
             setRemoveFailed(false);
           }}

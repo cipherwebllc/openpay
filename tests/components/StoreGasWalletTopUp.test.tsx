@@ -118,18 +118,49 @@ describe('StoreGasWalletTopUp', () => {
     expect(w.sendAsync).toHaveBeenCalledWith({ to: gas, value: 10n ** 18n, chainId: 80002 });
     expect(duringApproval).toHaveLength(1);
     expect(duringApproval[0].hash).toBeUndefined();
-    // 送り手と nonce も残す (1 日たっても、nonce の消費で「もう入らない」を確かめられる)
-    expect(records()[0]).toMatchObject({ hash: TX, chainId: 80002, from: SHOP, nonce: 5 });
+    expect(records()[0]).toMatchObject({ hash: TX, chainId: 80002 });
+    // 送り手と nonce は同じ tx から読んだ組だけを残す (1 日たっても、nonce の消費で置き換えの可能性を確かめられる)
+    await waitFor(() => expect(records()[0]).toMatchObject({ from: SHOP, nonce: 5 }));
     expect(w.rawTx).toHaveBeenCalledWith({ hash: TX });
   });
 
-  it('送った直後に tx を読めなくても (RPC にまだ届いていない)、送り手だけ残して送る本体は止めない', async () => {
+  it('送り手は画面の接続先ではなく、送った tx の from (ロック待ちの間に接続先を変えても、別の財布の nonce と組にしない) (P1-1)', async () => {
+    // 画面の接続先は SHOP のまま、実際に送った tx の from は OTHER (wagmi は送信時の接続先から送る)
+    w.rawTx.mockResolvedValue({ nonce: 5, from: OTHER });
+    show();
+    await act(async () => {
+      fireEvent.click(sendButton());
+    });
+    await waitFor(() => expect(records()[0]).toMatchObject({ hash: TX, from: OTHER, nonce: 5 }));
+  });
+
+  it('hash が返った瞬間に記録へ残し、送り手と nonce の読み取りが終わらなくても追跡を巻き込まない (P1-2)', async () => {
+    let release!: () => void;
+    w.rawTx.mockImplementation(
+      () => new Promise<{ nonce: number; from: string }>((r) => { release = () => r({ nonce: 5, from: SHOP }); }),
+    );
+    show();
+    await act(async () => {
+      fireEvent.click(sendButton());
+    });
+    // 読み取りが終わる前から hash 付きの記録 (タブを閉じても「送った」として残る)
+    expect(records()[0]).toMatchObject({ hash: TX });
+    expect(records()[0].nonce).toBeUndefined();
+    expect(screen.getByRole('status')).toHaveTextContent('送っています。確定を待っています');
+    await act(async () => {
+      release();
+    });
+    await waitFor(() => expect(records()[0]).toMatchObject({ hash: TX, from: SHOP, nonce: 5 }));
+  });
+
+  it('送った直後に tx を読めなくても (RPC にまだ届いていない)、hash だけ残して送る本体は止めない', async () => {
     w.rawTx.mockRejectedValue(new Error('not found'));
     show();
     await act(async () => {
       fireEvent.click(sendButton());
     });
-    expect(records()[0]).toMatchObject({ hash: TX, from: SHOP });
+    expect(records()[0]).toMatchObject({ hash: TX });
+    expect(records()[0].from).toBeUndefined();
     expect(records()[0].nonce).toBeUndefined();
     expect(screen.getByRole('status')).toHaveTextContent('送っています。確定を待っています');
   });
