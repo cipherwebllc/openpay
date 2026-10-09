@@ -109,6 +109,8 @@ function sanitizeLineItems(
     if (ta) out.taxAmount = ta;
     const presetId = cappedOrNull(it.presetId, 64);
     if (presetId) out.presetId = presetId;
+    const discount = cappedOrNull(it.discount, HISTORY_UNIT_AMOUNT_MAX);
+    if (discount) out.discount = discount;
     return out;
   });
 }

@@ -1508,6 +1508,7 @@
     "modeBadgeStandard": "通常決済（ガス代は自分で負担）",
     "itemsTitle": "商品",
     "subtotalRow": "小計",
+    "discountRow": "値引き",
     "feeRow": "OpenPay 利用手数料",
     "feeRowMerchant": "OpenPay 利用手数料 (店舗負担)",
     "gasRow": "ネットワーク手数料見積",
@@ -1978,6 +1979,7 @@
     "columnReceiptNo": "管理番号",
     "columnMemo": "会計メモ",
     "lineItemsLabel": "売上明細",
+    "discountLabel": "値引き",
     "itemCountMore": "ほか{count}点",
     "exportLineItemsCsv": "会計明細CSV"
   },
@@ -2687,6 +2689,7 @@
     "lineItemsLabel": "商品明細",
     "anchorLabel": "元の価格 (請求建て)",
     "subtotalLabel": "小計",
+    "discountLabel": "値引き",
     "taxLabel": "消費税",
     "totalLabel": "合計",
     "txHashLabel": "取引ハッシュ (txHash)",
@@ -3354,6 +3357,7 @@
     "invalidItems": "items は \"name:qty:price,...\" 形式 (qty 1〜999、price は token decimals 以内、最大 10 件) で指定してください",
     "tipWidgetUnsupported": "{token} on {chain} は tip widget 非対応です (gasless mode 必須のため)",
     "invalidNative": "native は polygon または kaia を指定してください",
-    "storeDeviceUnavailable": "この QR は使えません。お店で QR を出し直してもらってください"
+    "storeDeviceUnavailable": "この QR は使えません。お店で QR を出し直してもらってください",
+    "invalidDiscount": "この QR の値引きが正しくありません。お店で QR を出し直してもらってください"
   }
 }

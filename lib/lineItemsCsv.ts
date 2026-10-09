@@ -35,6 +35,8 @@ const HEADER: readonly string[] = [
   '税額',
   '取引合計',
   'メモ',
+  // レジの値引きのうち、この行に配った額 (明細金額は値引き前・税額は値引き後の行額から)。値引きの無い行は空欄。
+  '値引き',
 ];
 
 /**
@@ -46,6 +48,18 @@ const HEADER: readonly string[] = [
 export function lineItemGrossAmount(li: HistoryLineItem): number | null {
   const n = Number(li.amount);
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * 明細 1 行の実際の請求額 (= 税込額 − この行に配ったレジの値引き)。値引きの無い行は lineItemGrossAmount と同じ。
+ * 仕訳 CSV・履歴 CSV が取引の円額を行・税区分へ按分するときの重み (値引き後の税率ごとの対価に揃える)。
+ */
+export function lineItemChargedAmount(li: HistoryLineItem): number | null {
+  const gross = lineItemGrossAmount(li);
+  if (gross === null) return null;
+  if (li.discount === undefined) return gross;
+  const d = Number(li.discount);
+  return Number.isFinite(d) && d >= 0 && d <= gross ? gross - d : null;
 }
 
 function rowsForEntry(e: HistoryEntry): string[][] {
@@ -72,6 +86,7 @@ function rowsForEntry(e: HistoryEntry): string[][] {
         '',
         totals.total,
         e.memo ?? '',
+        '',
       ],
     ];
   }
@@ -90,6 +105,7 @@ function rowsForEntry(e: HistoryEntry): string[][] {
     li.taxAmount ?? '',
     totals.total,
     li.memo ?? '',
+    li.discount ?? '',
   ]);
 }
 

@@ -238,3 +238,34 @@ describe('invoiceReceiptView', () => {
     expect(invoiceReceiptView(receipt({ amount: '1700', totalAmount: '1700' }))).toBeNull();
   });
 });
+
+describe('レジの値引き (明細に配った discount)', () => {
+  const discounted = (over: Partial<BuildPayerReceiptInput> = {}) =>
+    receipt({
+      amount: '980',
+      totalAmount: '980',
+      lineItems: [
+        line({ name: 'コーヒー', unitPrice: '600', amount: '600', discount: '12' }),
+        line({ name: 'パン', unitPrice: '400', amount: '400', discount: '8', taxRate: 8, taxCategory: 'taxable_8' }),
+      ],
+      ...over,
+    });
+
+  it('税率ごとの対価は値引き後 (588・392)、消費税は税率ごとに 1 回丸める (53・29)', () => {
+    const view = invoiceReceiptView(discounted());
+    expect(view?.groups).toEqual([
+      { rate: 10, total: '588', tax: '53' },
+      { rate: 8, total: '392', tax: '29' },
+    ]);
+    expect(view?.totalTax).toBe('82');
+  });
+
+  it('値引き後の税率ごとの合計が支払額と食い違えば出さない', () => {
+    expect(invoiceReceiptView(discounted({ amount: '1000', totalAmount: '1000' }))).toBeNull();
+  });
+
+  it('壊れた値引き (行の金額を超える・形が不正) の控えには出さない', () => {
+    expect(invoiceRateGroups([line({ amount: '100', discount: '101' })])).toBeNull();
+    expect(invoiceRateGroups([line({ amount: '100', discount: 'abc' })])).toBeNull();
+  });
+});

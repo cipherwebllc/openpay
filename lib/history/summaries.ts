@@ -40,8 +40,9 @@ function normalizeLineItem(
   const currency = li.currency ?? entry.asset;
   let taxAmount = li.taxAmount;
   if (taxAmount == null) {
+    // 税額は値引き後の行額から (レジの値引きを配った行・値引きの無い行は amount そのもの)。
     const t = taxAmountDecimal(
-      Number(li.amount),
+      Number(li.amount) - (li.discount !== undefined ? Number(li.discount) : 0),
       li.taxRate,
       taxDisplayDecimals(currency),
     );

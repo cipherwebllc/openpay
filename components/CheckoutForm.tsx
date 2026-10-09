@@ -77,12 +77,13 @@ import { useRelayHealth } from '@/hooks/useRelayHealth';
 import { resolvePaymasterMode } from '@/lib/pimlico';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
 import {
+  calcCheckoutPayable,
   calcCheckoutTotal,
   offOriginCallbackHosts,
   type CheckoutParams,
 } from '@/lib/url';
 import { useOrigin } from '@/hooks/useOrigin';
-import { taxAmountDecimal, taxDisplayDecimals } from '@/lib/tax';
+import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
 import {
   buildJpycRelaySignPreview,
@@ -233,9 +234,10 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   //   - recover: forwarder 設定済 chain は gas 相当額を JPYC 回収 (gasMode で顧客上乗せ/店主吸収)。
   //     未設定は free (OpenPay 負担)。
   //   - USDC ガスレスが Circle に解決される場合は surcharge 込み quote + permit allowance。
+  // 支払額 = 明細の合計 − レジの値引き (値引きが無ければ合計そのまま・plans/register-discount.md)。
   const totalWei = useMemo(
-    () => calcCheckoutTotal(params.items, deployment.decimals),
-    [params.items, deployment.decimals],
+    () => calcCheckoutPayable(params, deployment.decimals),
+    [params, deployment.decimals],
   );
   const mobileFeeKind: MobileOrderFeeKind | null =
     env.enableMobileOrderFee &&
@@ -1195,32 +1197,14 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       receiptNo: params.receiptNo ?? null,
       invoiceNo: params.invoiceNo ?? null,
       ...(params.orderId ? { orderId: params.orderId } : {}),
-      lineItems: params.items.map((it, i) => {
-        // amount = price × qty を人間可読 decimal で (raw wei ではない)。
-        const amount = formatUnits(
-          calcCheckoutTotal([it], deployment.decimals),
-          deployment.decimals,
-        );
-        // per-item 税を優先 (混在税率カート)、無ければ checkout 単位 (単一税率) に fallback。
-        const taxRate = it.taxRate ?? params.taxRate ?? null;
-        const taxCategory = it.taxCategory ?? params.taxCategory ?? null;
-        const taxAmt = taxAmountDecimal(
-          Number(amount),
-          taxRate,
-          taxDisplayDecimals(params.token),
-        );
-        return {
-          id: String(i),
-          name: it.name,
-          quantity: it.qty,
-          unitPrice: it.price,
-          amount,
-          currency: params.token,
-          taxRate,
-          taxCategory,
-          taxAmount: taxAmt == null ? '0' : String(taxAmt),
-          memo: it.memo ?? null,
-        };
+      // 売上明細 (値引きは税率ごと → 明細の順に按分して行に固定・税額は値引き後の行額から)。
+      lineItems: buildCheckoutLineItems({
+        items: params.items,
+        discount: params.discount,
+        token: params.token,
+        decimals: deployment.decimals,
+        taxRate: params.taxRate,
+        taxCategory: params.taxCategory,
       }),
       // 顧客向け電子レシート (PayerReceipt) の発生元 / 表示 locale。
       sourceRoute: '/checkout',
@@ -1237,6 +1221,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       params.description,
       params.orderId,
       params.items,
+      params.discount,
       params.taxRate,
       params.taxCategory,
       params.receiptNo,
@@ -1614,7 +1599,18 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         </ul>
         <div className="mt-3 border-t border-slate-200 pt-3">
           <dl className="space-y-1.5">
-            {breakdownRow({ label: t('subtotalRow'), value: fmt(totalWei) })}
+            {/* レジの値引き: 小計 (値引き前) → 値引き の 2 行。以降の手数料・お支払い額は値引き後の額。 */}
+            {params.discount
+              ? (() => {
+                const subtotalWei = calcCheckoutTotal(params.items, deployment.decimals);
+                return (
+                  <>
+                    {breakdownRow({ label: t('subtotalRow'), value: fmt(subtotalWei) }, 'subtotal')}
+                    {breakdownRow({ label: t('discountRow'), value: `−${fmt(subtotalWei - totalWei)}` }, 'discount')}
+                  </>
+                );
+              })()
+              : breakdownRow({ label: t('subtotalRow'), value: fmt(totalWei) })}
             {/* fee=0 のとき手数料行は非表示 (Phase 1 alpha)。負担者でラベルを出し分ける:
                 店舗が受取から吸収した (merchantReceives < 請求額) なら「(店舗負担)」を補足、
                 顧客上乗せ (事前モバイルオーダーの顧客負担) なら補足なし。 */}

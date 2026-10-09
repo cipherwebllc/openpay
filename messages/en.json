@@ -1508,6 +1508,7 @@
     "modeBadgeStandard": "Standard (you pay gas)",
     "itemsTitle": "Items",
     "subtotalRow": "Subtotal",
+    "discountRow": "Discount",
     "feeRow": "OpenPay service fee",
     "feeRowMerchant": "OpenPay service fee (merchant pays)",
     "gasRow": "Estimated network fee",
@@ -1978,6 +1979,7 @@
     "columnReceiptNo": "Receipt no.",
     "columnMemo": "Memo",
     "lineItemsLabel": "Line items",
+    "discountLabel": "Discount",
     "itemCountMore": "+{count} more",
     "exportLineItemsCsv": "Line-item CSV"
   },
@@ -2687,6 +2689,7 @@
     "lineItemsLabel": "Items",
     "anchorLabel": "Original price (as billed)",
     "subtotalLabel": "Subtotal",
+    "discountLabel": "Discount",
     "taxLabel": "Tax",
     "totalLabel": "Total",
     "txHashLabel": "Transaction hash (txHash)",
@@ -3354,6 +3357,7 @@
     "invalidItems": "Set items in the form \"name:qty:price,...\" (qty 1–999, price within the token's decimals, up to 10 items).",
     "tipWidgetUnsupported": "{token} on {chain} is not supported by the tip widget (it requires gasless payments).",
     "invalidNative": "Set native to polygon or kaia.",
-    "storeDeviceUnavailable": "This QR code can't be used. Ask the shop to show a new one."
+    "storeDeviceUnavailable": "This QR code can't be used. Ask the shop to show a new one.",
+    "invalidDiscount": "This QR code's discount is invalid. Ask the shop to show a new one."
   }
 }

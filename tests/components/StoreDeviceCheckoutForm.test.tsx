@@ -90,6 +90,19 @@ describe('StoreDeviceCheckoutForm', () => {
     );
   });
 
+  it('レジの値引き: 小計 → 値引き を出し、署名する請求額は値引き後 (1100 − 100 = 1000)・控え用に値引きも固定', () => {
+    render(<StoreDeviceCheckoutForm params={{ ...params, discount: '100' }} />);
+    expect(screen.getByText('値引き')).toBeTruthy();
+    expect(screen.getByText(/−100/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /1000 JPYC を支払う|1,000 JPYC を支払う/ }));
+    expect(hold.pay).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bill: 1000n * 10n ** 18n,
+        snapshot: expect.objectContaining({ items: params.items, discount: '100' }),
+      }),
+    );
+  });
+
   it('残高が請求額 + 1 wei に足りなければ押せず、通常の決済を案内する', () => {
     hold.balance = { balance: 1100n * 10n ** 18n, insufficientBalance: true, wrongChain: false };
     render(<StoreDeviceCheckoutForm params={params} />);

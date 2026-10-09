@@ -4,6 +4,7 @@
 
 import { useTranslations } from 'next-intl';
 import { formatUnits } from 'viem';
+import { lineItemsDiscountWei } from '@/lib/discount';
 import { ArrowDown, ChevronDown } from 'lucide-react';
 import {
   addressExplorerUrl,
@@ -127,6 +128,7 @@ export function HistoryRow({
   // USDC でも JPY へ強制変換しない (JPY 換算は GMV サマリ側の責務)。
   const items = entryLineItems(entry);
   const totals = entryTotals(entry);
+  const discountWei = lineItemsDiscountWei(entry.lineItems, HISTORY_ASSET_DECIMALS[entry.asset]) ?? 0n;
   const tokenSymbol = HISTORY_ASSET_DISPLAY[entry.asset];
   const repName = items.length > 0 ? items[0].name : '';
   const showTax =
@@ -348,6 +350,15 @@ export function HistoryRow({
                   </li>
                 ))}
               </ul>
+            </dd>
+          </div>
+        )}
+        {/* レジの値引き (明細に配った額の合計)。明細の金額は値引き前・受取額は値引き後。 */}
+        {discountWei > 0n && (
+          <div>
+            <dt className="text-slate-500">{t('discountLabel')}</dt>
+            <dd className="font-mono">
+              −{formatUnits(discountWei, HISTORY_ASSET_DECIMALS[entry.asset])} {tokenSymbol}
             </dd>
           </div>
         )}

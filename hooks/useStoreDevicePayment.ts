@@ -58,6 +58,8 @@ export type StoreDevicePaymentSnapshot = {
   taxRate?: number;
   taxCategory?: CheckoutItem['taxCategory'];
   receiptNo?: string;
+  /** レジの値引き (token 単位の 10 進)。不在 = 値引きなし。 */
+  discount?: string;
 };
 
 export type StoreDeviceIntent = {

@@ -23,7 +23,8 @@ import { formatTokenAmount } from '@/lib/format';
 import { STORE_DEVICE_FEE_WEI } from '@/lib/storeDevicePayment';
 import { taxAmountDecimal, taxDisplayDecimals } from '@/lib/tax';
 import { DEFAULT_CHAIN_FOR_SYMBOL, deploymentForSlug } from '@/lib/tokens';
-import { calcCheckoutTotal, type CheckoutItem, type CheckoutParams } from '@/lib/url';
+import { calcCheckoutPayable, calcCheckoutTotal, type CheckoutParams } from '@/lib/url';
+import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
 import type { Address } from 'viem';
 
 const IDLE_STANDARD = { phase: 'idle', error: null } as const;
@@ -50,9 +51,10 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
   // 結論待ちの間 (この会計でも前の会計でも) は、別の支払いを勧める案内を出さない。
   const unresolved = status.phase === 'waiting';
 
+  // 請求額 = 明細の合計 − レジの値引き (お店の端末が受け渡しに登録した額と一致しなければサーバーが止める)。
   const bill = useMemo(
-    () => calcCheckoutTotal(params.items, deployment.decimals),
-    [params.items, deployment.decimals],
+    () => calcCheckoutPayable(params, deployment.decimals),
+    [params, deployment.decimals],
   );
   // お客様の送金 = 請求額 + 1 wei (手数料欄・user 裁定)。残高の判定もこの額で行う。
   const customerPays = bill + STORE_DEVICE_FEE_WEI;
@@ -84,6 +86,7 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
       taxRate: params.taxRate,
       taxCategory: params.taxCategory,
       receiptNo: params.receiptNo,
+      ...(params.discount ? { discount: params.discount } : {}),
     };
     const merchantValue = frozen ? BigInt(frozen.merchantValue) : bill;
     return {
@@ -109,22 +112,14 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
       taxRate: snap.taxRate ?? null,
       taxCategory: snap.taxCategory ?? null,
       receiptNo: snap.receiptNo ?? null,
-      lineItems: snap.items.map((it: CheckoutItem, i: number) => {
-        const amount = formatUnits(calcCheckoutTotal([it], deployment.decimals), deployment.decimals);
-        const taxRate = it.taxRate ?? snap.taxRate ?? null;
-        const taxAmt = taxAmountDecimal(Number(amount), taxRate, taxDisplayDecimals(params.token));
-        return {
-          id: String(i),
-          name: it.name,
-          quantity: it.qty,
-          unitPrice: it.price,
-          amount,
-          currency: params.token,
-          taxRate,
-          taxCategory: it.taxCategory ?? snap.taxCategory ?? null,
-          taxAmount: taxAmt == null ? '0' : String(taxAmt),
-          memo: it.memo ?? null,
-        };
+      // 売上明細 (値引きは税率ごと → 明細の順に按分して行に固定・税額は値引き後の行額から)。署名した時点の値。
+      lineItems: buildCheckoutLineItems({
+        items: snap.items,
+        discount: snap.discount,
+        token: params.token,
+        decimals: deployment.decimals,
+        taxRate: snap.taxRate,
+        taxCategory: snap.taxCategory,
       }),
       sourceRoute: '/checkout',
       locale,
@@ -183,6 +178,19 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
             </li>
           ))}
         </ul>
+        {/* レジの値引き: 小計 (値引き前) → 値引き の 2 行。お支払い額は値引き後の額。 */}
+        {params.discount && (
+          <dl className="mt-3 space-y-1 border-t border-slate-100 pt-2 text-sm text-slate-600">
+            <div className="flex justify-between gap-2">
+              <dt>{t('subtotalRow')}</dt>
+              <dd className="font-mono">{fmt(calcCheckoutTotal(params.items, deployment.decimals))}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt>{t('discountRow')}</dt>
+              <dd className="font-mono">−{fmt(calcCheckoutTotal(params.items, deployment.decimals) - bill)}</dd>
+            </div>
+          </dl>
+        )}
         <div className="mt-3 flex justify-between border-t border-slate-100 pt-2 text-base font-bold text-slate-900">
           <span>{t('storeDevice.totalLabel')}</span>
           <span className="font-mono">{fmt(bill)}</span>
@@ -237,6 +245,7 @@ export function StoreDeviceCheckoutForm({ params }: { params: CheckoutParams }) 
                   taxRate: params.taxRate,
                   taxCategory: params.taxCategory,
                   receiptNo: params.receiptNo,
+                  ...(params.discount ? { discount: params.discount } : {}),
                 },
               })
             }

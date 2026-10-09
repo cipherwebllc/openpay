@@ -60,7 +60,8 @@ export type UrlErrorCode =
   | 'invalidItems'
   | 'tipWidgetUnsupported'
   | 'invalidNative'
-  | 'storeDeviceUnavailable';
+  | 'storeDeviceUnavailable'
+  | 'invalidDiscount';
 export type UrlError = { code: UrlErrorCode; values?: Record<string, string> };
 
 const URL_ERROR_JA: Record<UrlErrorCode, (v: Record<string, string>) => string> = {
@@ -80,6 +81,7 @@ const URL_ERROR_JA: Record<UrlErrorCode, (v: Record<string, string>) => string> 
   tipWidgetUnsupported: (v) => `${v.token} on ${v.chain} は tip widget 非対応です (gasless mode 必須のため)`,
   invalidNative: () => 'native は polygon または kaia を指定してください',
   storeDeviceUnavailable: () => 'この QR は使えません。お店で QR を出し直してもらってください',
+  invalidDiscount: () => 'この QR の値引きが正しくありません。お店で QR を出し直してもらってください',
 };
 
 /** 失敗の戻り値の共通部分: 日本語の固定文 (error) と、画面で locale の文に引くための種類 (urlError)。 */

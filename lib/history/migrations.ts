@@ -39,6 +39,7 @@ function isValidLineItems(value: unknown): boolean {
       return false;
     if (o.taxAmount !== undefined && typeof o.taxAmount !== 'string') return false;
     if (o.presetId !== undefined && typeof o.presetId !== 'string') return false;
+    if (o.discount !== undefined && typeof o.discount !== 'string') return false;
     return true;
   });
 }
