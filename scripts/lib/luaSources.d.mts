@@ -1,54 +1,67 @@
 // TypeScript 型宣言 — テストから import するとき型補完を効かせるため。
 // 実装は scripts/lib/luaSources.mjs (node native ESM)。tsc は declaration only として読む。
 
-export type LuaPart = { text: string } | { expr: string };
+/** 送る本文の片。text は静的な文字列 (literal = ソースの文字列リテラル由来)、dyn は値の分からない式。 */
+export type LuaPart = { text: string; literal: boolean } | { dyn: string; param?: boolean };
 
-export type LuaScript = {
-  /** `<repo-relative file>#<定数名>` (関数の中で組み立てる Lua は `<関数名>()`)。 */
+export type LuaSite = { file: string; line: number; evidence: string[] };
+
+/** 送られる Lua 1 本 (送信式の script の 1 通りの値)。 */
+export type LuaUnit = {
+  /** `<file>#<定数名>`・`<file>#<包む関数>(<引数>)`・`<file>#<囲む関数名>()`。 */
   id: string;
-  file: string;
-  name: string;
-  line: number;
   parts: LuaPart[];
-  fragments: string[];
-  dynamic: string[];
-  /** 組み立て式の中にある `${}` 付きテンプレートの式 (外部送信する Lua では禁止)。 */
-  templateSubstitutions: string[];
+  /** 組み立てに使った式 (expr) の id。 */
+  exprs: string[];
+  /** 組み立ての中にある `${}` 付きテンプレートの式 (外部送信する Lua では禁止)。 */
+  templates: string[];
+  sites: LuaSite[];
+  /** 送信式が lib/・app/ にある (= next build に入る)。 */
+  bundled: boolean;
+};
+
+/** 組み立てに使った式 (定数の初期化式・包む関数の return 式・その場の文字列)。 */
+export type LuaExpr = { id: string; file: string; line: number; runs: string[] };
+
+export type LuaAnalysis = {
+  sites: (LuaSite & { unitIds: string[] })[];
+  units: LuaUnit[];
+  exprs: LuaExpr[];
+  errors: { file: string; line: number; reason: string; expr?: string; id?: string }[];
+  orphans: { file: string; line: number; text: string }[];
 };
 
 export const LUA_SOURCE_DIRS: readonly string[];
+export const BUNDLED_DIRS: readonly string[];
 export const LUA_MARKER: RegExp;
-export function listLuaScripts(root: string, dirs?: readonly string[]): LuaScript[];
-export function listLuaSourceFiles(root: string, dirs?: readonly string[]): string[];
-export function extractLuaScripts(file: string, text: string): LuaScript[];
+export function analyzeLua(root: string, options?: { dirs?: readonly string[] }): LuaAnalysis;
+export function unitSource(unit: Pick<LuaUnit, 'parts'>, placeholder?: string): string;
 export function luaRealCoverage(
-  scripts: readonly LuaScript[],
+  units: readonly Pick<LuaUnit, 'id' | 'parts'>[],
   executed: readonly string[],
 ): { covered: string[]; uncovered: string[] };
 export function evaluateLuaRealCoverage(args: {
-  scripts: readonly LuaScript[];
+  units: readonly Pick<LuaUnit, 'id' | 'parts'>[];
   executed: readonly string[];
   allowlist: readonly string[];
 }): { missing: string[]; stale: string[] };
+export function checkLuaAllowlist(
+  allowlist: readonly string[],
+  unitIds: readonly string[],
+): { blocking: string[]; gone: string[] };
 export function readExecutedLua(coverageFile: string): string[];
 export function checkLuaRealCoverage(args: {
   root: string;
   executed: readonly string[];
   allowlist: readonly string[];
-}): { executed: number; missing: string[]; stale: string[] };
-export function resolveLuaSource(
-  script: LuaScript,
-  scripts: readonly LuaScript[],
-  placeholder?: string,
-): string;
-export function luaProbes(fragments: readonly string[], minLength?: number): string[];
+}): { executed: number; missing: string[]; stale: string[]; errors: { file: string; line: number; reason: string }[] };
+export function bundleStrings(text: string, name?: string): string[];
 export function checkLuaInBundle(
-  scripts: readonly Pick<LuaScript, 'id' | 'fragments'>[],
-  bundleFiles: readonly { name: string; text: string }[],
-  minLength?: number,
+  analysis: Pick<LuaAnalysis, 'units' | 'exprs'>,
+  bundleFiles: readonly { name: string; strings: readonly string[] }[],
 ): {
-  present: string[][];
-  absent: string[][];
-  shared: string[][];
-  broken: { ids: string[]; file: string; missing: string[] }[];
+  checked: string[];
+  broken: { id: string; file: string; missing: string[] }[];
+  missing: string[];
+  absent: string[];
 };

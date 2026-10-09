@@ -22,7 +22,7 @@ vi.mock('../../scripts/lib/luaSources.mjs', () => ({
 
 beforeEach(() => {
   h.readExecutedLua.mockReturnValue(["return redis.call('GET', KEYS[1])"]);
-  h.checkLuaRealCoverage.mockReturnValue({ executed: 1, missing: [], stale: [] });
+  h.checkLuaRealCoverage.mockReturnValue({ executed: 1, missing: [], stale: [], errors: [] });
 });
 
 afterEach(() => {
@@ -119,7 +119,7 @@ describe('real-Lua net (Lua executed by the real-Lua tests)', () => {
   });
 
   it('実 Lua テストの無い Lua が一覧の外にあれば、再試行せずに exit 1 で id を出す', async () => {
-    h.checkLuaRealCoverage.mockReturnValue({ executed: 3, missing: ['lib/new.ts#NEW_LUA'], stale: [] });
+    h.checkLuaRealCoverage.mockReturnValue({ executed: 3, missing: ['lib/new.ts#NEW_LUA'], stale: [], errors: [] });
     const { exit, error } = await run([true]);
     expect(exit).toHaveBeenCalledWith(1);
     expect(h.spawn).toHaveBeenCalledTimes(1);
@@ -127,9 +127,18 @@ describe('real-Lua net (Lua executed by the real-Lua tests)', () => {
   });
 
   it('一覧に残っているのに実行された Lua は warning で消すよう促し、成功は変えない', async () => {
-    h.checkLuaRealCoverage.mockReturnValue({ executed: 3, missing: [], stale: ['lib/old.ts#COVERED_NOW'] });
+    h.checkLuaRealCoverage.mockReturnValue({ executed: 3, missing: [], stale: ['lib/old.ts#COVERED_NOW'], errors: [] });
     const { exit, warn } = await run([true]);
     expect(exit).toHaveBeenCalledWith(0);
     expect(warn.mock.calls.flat()).toEqual([expect.stringMatching(/^::warning::.*lib\/old\.ts#COVERED_NOW.*LUA_WITHOUT_REAL_TEST/)]);
+  });
+
+  it('解析できない送信式があれば (網の外に Lua がある) exit 1 にする (fail-closed)', async () => {
+    h.checkLuaRealCoverage.mockReturnValue({
+      executed: 3, missing: [], stale: [], errors: [{ file: 'lib/x.ts', line: 3, reason: 'unresolved_script' }],
+    });
+    const { exit, error } = await run([true]);
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(error.mock.calls.flat().join('\n')).toContain('lib/x.ts:3');
   });
 });

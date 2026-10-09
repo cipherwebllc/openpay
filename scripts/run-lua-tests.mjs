@@ -110,11 +110,17 @@ function checkLuaNet(executedLua) {
   for (const id of net.stale) {
     console.warn(`::warning::[run-lua-tests] ${id} は実 Lua で実行された (またはもう無い) ので、scripts/lib/luaRealTests.mjs の LUA_WITHOUT_REAL_TEST から消す`);
   }
-  if (net.missing.length === 0) return true;
-  console.error('[run-lua-tests] FAIL: 実 Lua テストで 1 度も実行されなかった Lua (scripts/lib/luaSources.mjs の id):');
-  for (const id of net.missing) console.error(`  - ${id}`);
-  console.error('  → tests/_helpers/redisLua で実行する test を足して scripts/lib/luaRealTests.mjs に登録する。' +
-    '足せない理由があるときだけ、理由を添えて LUA_WITHOUT_REAL_TEST に足す。');
+  // 送信式を解析できない・送信式から辿れない Lua は網の外になる。数えたことにしない (fail-closed)。
+  for (const error of net.errors) {
+    console.error(`[run-lua-tests] FAIL: 解析できない Lua の送信式: ${error.file}:${error.line} (${error.reason})`);
+  }
+  if (net.missing.length === 0 && net.errors.length === 0) return true;
+  if (net.missing.length > 0) {
+    console.error('[run-lua-tests] FAIL: 実 Lua テストで 1 度も実行されなかった Lua (scripts/lib/luaSources.mjs の id):');
+    for (const id of net.missing) console.error(`  - ${id}`);
+    console.error('  → tests/_helpers/redisLua で実行する test を足して scripts/lib/luaRealTests.mjs に登録する。' +
+      '足せない理由があるときだけ、理由を添えて LUA_WITHOUT_REAL_TEST に足す。');
+  }
   return false;
 }
 

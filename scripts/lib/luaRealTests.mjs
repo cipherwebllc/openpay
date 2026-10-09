@@ -58,18 +58,18 @@ export const LUA_REAL_TEST_FILES = [
   'tests/lib/kvLpushAtomic-lua.test.ts',
 ];
 
-// 実 Lua テストがまだ 1 本も無い Lua (id = scripts/lib/luaSources.mjs の `<file>#<定数名>`)。
-// run-lua-tests.mjs は上の test を実行したときに実 Lua で実行された本文を集め、ここに無い Lua が
-// 1 度も実行されていなければ fail する (新しい Lua には実 Lua テストを足す・第 7 回レビュー C5 / F10)。
+// 実 Lua テストがまだ 1 本も無い、送られる Lua (id = scripts/lib/luaSources.mjs の unit id: 送る定数は `<file>#<定数名>`)。
+// run-lua-tests.mjs は上の test を実行したときに実 Lua で実行された本文を集め、部品を展開した本文と照合して、
+// ここに無い Lua が 1 度も実行されていなければ fail する (新しい Lua には実 Lua テストを足す・第 7 回レビュー C5 / F10)。
 // テストを足して実行されるようになったら行を消す (残っていれば warning で知らせる)。
 // money-path の Lua はここに置かない (2026-10-10 時点で全部に実 Lua テストがある)。
 export const LUA_WITHOUT_REAL_TEST = [
-  // 面 C (money-path 外) の受注ボードの状態更新・スタッフ呼び出し・handle・push 購読・営業中表示・チップの質問箱・
-  // x402 の funnel 計測。第 7 回レビュー C5 の残り (構文は tests/scripts/lua-compile-lua.test.ts が全 Lua で検査する)。
+  // 面 C (money-path 外) の受注ボードの状態更新・スタッフ呼び出し・handle (掲載 index の同期を含む)・push 購読・
+  // 営業中表示・チップの質問箱・x402 の funnel 計測。第 7 回レビュー C5 の残り
+  // (構文は tests/scripts/lua-compile-lua.test.ts が全 Lua で検査する)。
   'app/api/order/call/route.ts#COMMIT_CALL',
   'app/api/order/calls/route.ts#REMOVE_CALL',
   'app/api/order/feed/route.ts#REPLACE_ELEM',
-  'lib/handleStore.ts#AGENT_LISTING_LUA',
   'lib/handleStore.ts#CAS_UPDATE',
   'lib/handleStore.ts#CLAIM_HANDLE',
   'lib/handleStore.ts#RELEASE_HANDLE',
