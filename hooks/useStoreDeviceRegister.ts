@@ -163,7 +163,7 @@ async function readDeviceView(s: DeviceSession): Promise<{ status: number; body:
   return { status: res.status, body: (await res.json().catch(() => null)) as DeviceView | null };
 }
 
-type ResolveBody = { ok?: boolean; state?: string; txHash?: unknown } | null;
+type ResolveBody = { ok?: boolean; state?: string; txHash?: unknown; confirming?: unknown } | null;
 
 const isTxHash = (v: unknown): v is Hex => typeof v === 'string' && /^0x[0-9a-fA-F]{64}$/.test(v);
 
@@ -196,12 +196,15 @@ async function postResolve(
 /**
  * 店の tx が revert した支払いを、サーバの判定で 1 回だけ確かめる (第 7 回レビュー A3)。forwarder の settle は誰でも
  * 送れるので、お客様の端末などが同じ署名を先に成立させると店の tx だけが revert する (revert は「お支払いは行われて
- * いない」の証明ではない)。成立 (確定済みの Settled) ならその tx の hash、それ以外 (確認中・未使用・読めない) は null。
+ * いない」の証明ではない)。
+ *   - settled: 成立 (確定済みの Settled) → その tx の hash
+ *   - confirming: この支払いの Settled を含む成功 tx があり、確定待ち
+ *   - null: それ以外 (この支払いの tx がまだ無い確認中・期限切れ未使用・読めない応答・通信断・上限まで応答なし)
  */
-async function settledTxAfterRevert(
+async function resolveAfterRevert(
   mark: DeviceSentMark,
   config: { forwarder: Address; feeReceiver: Address },
-): Promise<Hex | null> {
+): Promise<{ state: 'settled'; txHash: Hex } | { state: 'confirming' } | null> {
   const abort = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   // 応答が返らなくても「送信しました」(次の QR を出せない) のまま止めない (上限で従来の reverted へ進む)。
@@ -213,7 +216,10 @@ async function settledTxAfterRevert(
   });
   try {
     const body = await Promise.race([postResolve(mark, config, abort.signal), timedOut]);
-    return body?.ok && body.state === 'settled' && isTxHash(body.txHash) ? body.txHash : null;
+    if (!body?.ok) return null;
+    if (body.state === 'settled' && isTxHash(body.txHash)) return { state: 'settled', txHash: body.txHash };
+    if (body.state === 'pending' && body.confirming === true) return { state: 'confirming' };
+    return null;
   } catch {
     // 判定の照会は付帯: 通信の失敗は「成立を確かめられない」= 従来どおり reverted (結果の表示に波及させない)。
     return null;
@@ -422,14 +428,23 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       }
       if (receipt.status === 'reverted') {
         // 第 7 回レビュー A3: 店の tx の revert だけで「お支払いは行われていません」と言わない。サーバの判定を 1 回引き、
-        // 別の tx (同じ署名) で成立していれば入金の確認 (確定済み・実際に成立した tx) にする。それ以外は従来どおり reverted。
-        // 判定を待つ間は今の表示 (送信しました・結果が分からない = 次の QR を出せない) のまま。
+        // 別の tx (同じ署名) で成立していれば入金の確認 (確定済み・実際に成立した tx) にする。別の tx が成立済みで確定待ち
+        // なら、結果が分からない (unknown) として既存の確定待ちの監視に回す (「未払い」と言うと、店員が出し直して二重払いを
+        // 誘発しうる)。それ以外は従来どおり reverted。判定を待つ間は今の表示 (送信しました・結果が分からない = 次の QR を
+        // 出せない) のまま。
         const shown = stateRef.current;
-        const settledTx = await settledTxAfterRevert(mark, config);
+        const r = await resolveAfterRevert(mark, config);
         // 待つ間に表示が変わった (閉じた・次の会計・別の確認が結論を出した) なら、遅れた判定で上書きしない。
         if (stateRef.current !== shown) return;
-        if (settledTx) set({ phase: 'received', mark, finalized: true, previous, txHash: settledTx });
-        else set({ phase: 'reverted', mark, previous });
+        if (r?.state === 'settled') {
+          set({ phase: 'received', mark, finalized: true, previous, txHash: r.txHash });
+        } else if (r?.state === 'confirming') {
+          // 監視の結論は既存の unknown と同じ (成立 = 入金の確認・期限切れ未使用 = 成立しなかった)。
+          set({ phase: 'unknown', mark, previous });
+          watchFinality(mark, previous, genRef.current, true);
+        } else {
+          set({ phase: 'reverted', mark, previous });
+        }
         return;
       }
       if (mod.receiptHasSettlement(receipt.logs, config.forwarder, mark, config.feeReceiver)) {
