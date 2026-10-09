@@ -9,7 +9,7 @@ import { rejectSiweCsrf } from '../_csrf';
 import { createPublicClient } from 'viem';
 import { verifySiweMessage } from 'viem/siwe';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
-import { isKvConfigured, kvDel, kvSet } from '@/lib/kv';
+import { isKvConfigured, kvDel, kvGet, kvSet } from '@/lib/kv';
 import { chainObjectForId, isSupportedChainId, transportForChain } from '@/lib/chains';
 import { logger } from '@/lib/logger';
 import { checkClientIpBucketRateLimit } from '@/lib/net/clientRateLimit';
@@ -86,6 +86,11 @@ export async function POST(req: Request): Promise<NextResponse> {
           domain,
           nonce,
         });
+      },
+      // 存在だけを読む (消費は署名検証の後の DEL)。KV 障害は false = nonce_invalid (consume と同じ扱い)。
+      nonceExists: async (nonce) => {
+        const got = await kvGet(nonceKey(nonce));
+        return got.ok && got.value !== null;
       },
       // DEL は atomic: 同時送信でも count===1 を得るのは 1 つだけ → replay 安全。
       consumeNonce: async (nonce) => {

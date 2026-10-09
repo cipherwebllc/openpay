@@ -41,6 +41,7 @@ function deps(overrides: Partial<SiweVerifyDeps> = {}): SiweVerifyDeps {
     isSupportedChainId: (id) => id === 137,
     isAllowedDomain: (d) => d === DOMAIN,
     verify: vi.fn().mockResolvedValue(true),
+    nonceExists: vi.fn().mockResolvedValue(true),
     consumeNonce: vi.fn().mockResolvedValue(true),
     createSession: vi.fn().mockResolvedValue('tok-123'),
     ...overrides,
@@ -238,6 +239,20 @@ describe('verifySiweLogin (DI core)', () => {
     expect(d.createSession).not.toHaveBeenCalled();
   });
 
+  // 第 7 回レビュー C8: 存在しない nonce では署名検証 (ERC-6492 の eth_call = RPC) を走らせない。消費もしない。
+  it('nonce_invalid: 発行されていない/期限切れの nonce は署名検証の前に断る (RPC を使わせない)', async () => {
+    const d = deps({ nonceExists: vi.fn().mockResolvedValue(false) });
+    const r = await verifySiweLogin(
+      { message: message(), signature: '0xdead' },
+      d,
+    );
+    expect(r).toMatchObject({ ok: false, status: 401, error: 'nonce_invalid' });
+    expect(d.nonceExists).toHaveBeenCalledWith('abc12345');
+    expect(d.verify).not.toHaveBeenCalled();
+    expect(d.consumeNonce).not.toHaveBeenCalled();
+    expect(d.createSession).not.toHaveBeenCalled();
+  });
+
   // --- REM-21: expirationTime 必須化 + 15 分 cap ---
   it('expirationTime 無し → 400 invalid_message (署名検証に到達しない)', async () => {
     const d = deps();
@@ -328,6 +343,7 @@ describe('verifySiweLogin: 実 EOA 署名の統合 (viem 本物・network 不要
             domain: p.domain,
             nonce: p.nonce,
           }),
+        nonceExists: async () => true,
         consumeNonce: async () => true,
         createSession: async (addr) => `sess-${addr}`,
       },
@@ -361,6 +377,7 @@ describe('verifySiweLogin: 実 EOA 署名の統合 (viem 本物・network 不要
         isSupportedChainId,
         isAllowedDomain: isAllowedSiweDomain,
         verify,
+        nonceExists: async () => true,
         consumeNonce: async () => true,
         createSession: async () => 't',
       },

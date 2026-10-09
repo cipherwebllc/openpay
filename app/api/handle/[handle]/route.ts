@@ -10,12 +10,17 @@ import { requireSession } from '../../auth/siwe/_session';
 import { validateHandle } from '@/lib/handle';
 import { resolveHandle, releaseHandle } from '@/lib/handleStore';
 import { checkClientIpPrefixRateLimit } from '@/lib/net/clientRateLimit';
+import { checkClientIpBucketRateLimit } from '@/lib/net/clientRateLimit';
 
 export const runtime = 'nodejs';
 export const maxDuration = 10;
 
 function notFound() {
   return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
+}
+
+function rateLimited(): NextResponse {
+  return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429, headers: { 'Retry-After': '60' } });
 }
 
 export async function GET(
@@ -54,10 +59,13 @@ export async function GET(
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ handle: string }> },
 ) {
   if (!env.enableHandles) return notFound();
+  // SIWE は誰でも無料で取れるので、書き込みごとの KV/外部 fetch をサーバに使わせる連打を IP で止める
+  // (兄弟の SIWE 書き込み route と同じ形・第 7 回レビュー C9)。
+  if (!(await checkClientIpBucketRateLimit(req, 'handle-write', 30, 60))) return rateLimited();
   const session = await requireSession();
   if (!session.ok) return session.response;
   const { handle: raw } = await params;

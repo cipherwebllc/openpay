@@ -157,9 +157,10 @@ describe('Agent purchases routes', () => {
     expect(kv.kvSetNxGet).not.toHaveBeenCalled();
   });
 
+  // 第 7 回レビュー C13: 形の崩れた本文は認証の失敗ではない (400)・上限到達は 409。画面は reason で分岐する。
   it.each([{}, { proof: 'a'.repeat(1025) }, { proof: 'e30' }, { proof: SHAPED_PROOF, extra: true }, null, []])('malformed verify body %j is rejected before SIWE', async (body) => {
     const response = await verifyPOST(post('proof/verify', body));
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ reason: 'malformed' });
     noStore(response);
     expect(kv.kvGet).not.toHaveBeenCalled();
@@ -172,7 +173,7 @@ describe('Agent purchases routes', () => {
       new Request('https://test.local/api/agent/proof/verify', { method: 'POST', headers: POST_HEADERS, body: '{' }),
     ]) {
       const response = await verifyPOST(request);
-      expect(response.status).toBe(401);
+      expect(response.status).toBe(400);
       noStore(response);
     }
     expect(kv.kvGet).not.toHaveBeenCalled();
@@ -295,7 +296,7 @@ describe('Agent purchases routes', () => {
     await bindAgent(A, OTHER);
     store.strings.set(`agent:owner:${O}`, JSON.stringify(Array.from({ length: 20 }, (_, i) => `0x${i.toString(16).padStart(40, '0')}`)));
     const response = await verifyPOST(post('proof/verify', { proof: await signedProof() }));
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ reason: 'binding_limit' });
     noStore(response);
     expect(JSON.parse(store.strings.get(`agent:bound:${A}`)!).owner).toBe(OTHER);

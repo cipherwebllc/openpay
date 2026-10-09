@@ -65,6 +65,8 @@ vi.mock('@/lib/logger', () => ({
 
 import { GET, POST, DELETE } from '@/app/api/order/token/route';
 
+const tokenReq = () => new Request('https://test.local/api/order/token', { method: 'POST' });
+
 beforeEach(() => {
   hold.enableOrderToken = true;
   hold.session = { ok: true, address: SESSION };
@@ -109,14 +111,14 @@ describe('GET /api/order/token (現行トークンの再表示)', () => {
 describe('POST /api/order/token (発行 / 再発行)', () => {
   it('flag OFF → 404 / 未ログイン → 401', async () => {
     hold.enableOrderToken = false;
-    expect((await POST()).status).toBe(404);
+    expect((await POST(tokenReq())).status).toBe(404);
     hold.enableOrderToken = true;
     hold.session = { ok: false };
-    expect((await POST()).status).toBe(401);
+    expect((await POST(tokenReq())).status).toBe(401);
   });
 
   it('発行: 有効形式トークンを返し、key(merchant)=token と rev(token)=merchant を書く', async () => {
-    const res = await POST();
+    const res = await POST(tokenReq());
     expect(res.status).toBe(200);
     const { ok, token } = await res.json();
     expect(ok).toBe(true);
@@ -129,7 +131,7 @@ describe('POST /api/order/token (発行 / 再発行)', () => {
     const old = 'o'.repeat(43);
     hold.store[orderTokenKey(SESSION)] = old;
     hold.store[orderTokenRevKey(old)] = SESSION;
-    const res = await POST();
+    const res = await POST(tokenReq());
     const { token } = await res.json();
     expect(token).not.toBe(old);
     expect(hold.store[orderTokenKey(SESSION)]).toBe(token); // 現行は新トークン
@@ -139,7 +141,7 @@ describe('POST /api/order/token (発行 / 再発行)', () => {
 
   it('KV 障害 → 503', async () => {
     hold.kvOk = false;
-    expect((await POST()).status).toBe(503);
+    expect((await POST(tokenReq())).status).toBe(503);
   });
 
   it('部分失敗 fail-safe: pointer 書込だけ失敗 → 503 かつ旧トークンは生存 (rev 先行ゆえロックアウトしない)', async () => {
@@ -147,7 +149,7 @@ describe('POST /api/order/token (発行 / 再発行)', () => {
     hold.store[orderTokenKey(SESSION)] = old;
     hold.store[orderTokenRevKey(old)] = SESSION;
     hold.failSetKey = orderTokenKey(SESSION); // pointer への SET だけ失敗 (rev は先に成功)
-    const res = await POST();
+    const res = await POST(tokenReq());
     expect(res.status).toBe(503);
     // pointer は旧トークンのまま = 旧トークンは feed の現行一致検証を通る (= 失効していない・運用継続可)。
     expect(hold.store[orderTokenKey(SESSION)]).toBe(old);
@@ -158,17 +160,17 @@ describe('POST /api/order/token (発行 / 再発行)', () => {
 describe('DELETE /api/order/token (取消)', () => {
   it('flag OFF → 404 / 未ログイン → 401', async () => {
     hold.enableOrderToken = false;
-    expect((await DELETE()).status).toBe(404);
+    expect((await DELETE(tokenReq())).status).toBe(404);
     hold.enableOrderToken = true;
     hold.session = { ok: false };
-    expect((await DELETE()).status).toBe(401);
+    expect((await DELETE(tokenReq())).status).toBe(401);
   });
 
   it('取消: key(merchant) を削除 = 以後どのトークンも失効 (rev も掃除)', async () => {
     const tok = 't'.repeat(43);
     hold.store[orderTokenKey(SESSION)] = tok;
     hold.store[orderTokenRevKey(tok)] = SESSION;
-    const res = await DELETE();
+    const res = await DELETE(tokenReq());
     expect(res.status).toBe(200);
     expect(orderTokenKey(SESSION) in hold.store).toBe(false); // 現行ポインタ消滅 = 失効成立
     expect(orderTokenRevKey(tok) in hold.store).toBe(false); // rev も掃除
@@ -177,6 +179,6 @@ describe('DELETE /api/order/token (取消)', () => {
   it('KV del 失敗 → 503 (失効が成立しないので成功扱いしない)', async () => {
     hold.store[orderTokenKey(SESSION)] = 't'.repeat(43);
     hold.kvOk = false;
-    expect((await DELETE()).status).toBe(503);
+    expect((await DELETE(tokenReq())).status).toBe(503);
   });
 });

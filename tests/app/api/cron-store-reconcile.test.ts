@@ -66,10 +66,23 @@ afterEach(() => {
 });
 
 describe('GET /api/cron/store-reconcile', () => {
-  it('creator-store flag OFF は認証より先に 404 + no-store で停止する', async () => {
+  // 第 7 回レビュー C14: 他の cron と同じく認証を flag より先に見る (無認証で 404/401 を見分けて
+  // server flag の状態を知られない)。
+  it('creator-store flag OFF でも無認証は 401 (flag の状態を出さない)', async () => {
     hold.enabled = false;
 
     const response = await GET(request());
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(reconcilePendingSpy).not.toHaveBeenCalled();
+    expect(reconcileUsdcSpy).not.toHaveBeenCalled();
+  });
+
+  it('creator-store flag OFF は認証のあとに 404 + no-store で停止する', async () => {
+    hold.enabled = false;
+
+    const response = await GET(request('cron-test-secret'));
 
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: 'not_found' });

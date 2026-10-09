@@ -15,6 +15,7 @@ vi.mock('@/lib/env', async (importOriginal) => {
   return { ...actual, env: { ...actual.env,
     enableTipMessage: true, enableWeb3Directory: true, enableShopsApi: true,
     enableX402Facilitator: true, enableOrderRelay: true, enableAgentOrder: true,
+    enableHandles: true, enableShopLive: true, enableOrderToken: true,
   } };
 });
 vi.mock('@/app/api/auth/siwe/_session', () => ({
@@ -75,6 +76,13 @@ const routes: RouteCase[] = [
   { name: 'discovery resource', scope: 'x402-discovery-resource', max: 60, call: async (r) => (await import('@/app/api/discovery/[id]/route')).GET(r, context) },
   { name: 'resource POST', scope: 'x402-resource-write', max: 30, call: async (r) => (await import('@/app/api/facilitator/resources/route')).POST(r) },
   { name: 'resource PATCH', scope: 'x402-resource-write', max: 30, call: async (r) => (await import('@/app/api/facilitator/resources/[id]/route')).PATCH(r, context) },
+  // 第 7 回レビュー C9 / X1: SIWE 必須の書き込みにも IP limiter (SIWE は誰でも無料で取れる)。
+  { name: 'resource DELETE', scope: 'x402-resource-write', max: 30, call: async (r) => (await import('@/app/api/facilitator/resources/[id]/route')).DELETE(r, context) },
+  { name: 'handle POST', scope: 'handle-write', max: 30, call: async (r) => (await import('@/app/api/handle/route')).POST(r) },
+  { name: 'handle DELETE', scope: 'handle-write', max: 30, call: async (r) => (await import('@/app/api/handle/[handle]/route')).DELETE(r, { params: Promise.resolve({ handle: 'shop' }) }) },
+  { name: 'shop live PATCH', scope: 'shop-live-write', max: 30, call: async (r) => (await import('@/app/api/shop/live/route')).PATCH(r) },
+  { name: 'order token POST', scope: 'order-token-write', max: 30, call: async (r) => (await import('@/app/api/order/token/route')).POST(r) },
+  { name: 'order token DELETE', scope: 'order-token-write', max: 30, call: async (r) => (await import('@/app/api/order/token/route')).DELETE(r) },
   { name: 'directory', scope: 'directory', max: 30, call: async (r) => (await import('@/app/api/directory/route')).GET(new Request('https://test.local/api/directory', { headers: r.headers })) },
   { name: 'directory categories', scope: 'directory', max: 30, call: async (r) => (await import('@/app/api/directory/categories/route')).GET(r) },
   { name: 'directory tags', scope: 'directory', max: 30, call: async (r) => (await import('@/app/api/directory/tags/route')).GET(r) },
