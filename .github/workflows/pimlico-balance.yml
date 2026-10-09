@@ -58,6 +58,11 @@ jobs:
         # (sh: husky: not found) を防ぐ。CI で git hooks は不要。
         run: npm ci --omit=dev --ignore-scripts
 
+      # --ignore-scripts でも実体の走査は同じ (allowlist 外の install script 付きが入ったら検出する)。
+      - name: Check installed packages for install-time scripts
+        if: steps.secrets.outputs.skip != 'true'
+        run: node scripts/installed-scripts-gate.mjs node_modules
+
       - name: Check Pimlico balance
         if: steps.secrets.outputs.skip != 'true'
         env:

@@ -20,12 +20,28 @@ describe('GitHub Actions operation guards', () => {
     expect(source).not.toMatch(/npx\b/);
     expect(source).not.toMatch(/@lhci\/cli@/);
     expect(source).toMatch(/^\s*run: npm --prefix tools\/lighthouse ci --ignore-scripts\s*$/m);
-    expect(source).toMatch(/^\s*run: tools\/lighthouse\/node_modules\/\.bin\/lhci autorun\s*$/m);
     // lockfile-gate (install script allowlist を含む) → npm ci (本体) → lhci の install の順
     const gate = source.indexOf('run: node scripts/lockfile-gate.mjs');
     const lhciInstall = source.indexOf('run: npm --prefix tools/lighthouse ci');
     expect(gate).toBeGreaterThan(-1);
     expect(lhciInstall).toBeGreaterThan(gate);
+    // Codex レビュー (PR #778) 6: autorun は collect (= .lighthouserc.json の `npm run start` でアプリと依存を起動) と
+    // upload を同じ env で回すので、LHCI_GITHUB_APP_TOKEN がアプリ側の process にも渡っていた。
+    // token は upload の step だけに渡し、collect / assert の step には env を付けない。
+    expect(source).not.toMatch(/lhci autorun/);
+    const steps = source.split(/\n(?=\s+- name: )/).filter((step) => /\blhci (collect|assert|upload)\b/.test(step));
+    const byCommand = Object.fromEntries(steps.map((step) => [step.match(/\blhci (collect|assert|upload)\b/)![1], step]));
+    expect(Object.keys(byCommand).sort()).toEqual(['assert', 'collect', 'upload']);
+    expect(byCommand.collect).not.toContain('LHCI_GITHUB_APP_TOKEN');
+    expect(byCommand.assert).not.toContain('LHCI_GITHUB_APP_TOKEN');
+    expect(byCommand.upload).toContain('LHCI_GITHUB_APP_TOKEN: ${{ secrets.LHCI_GITHUB_APP_TOKEN }}');
+    // job 全体の env に token を置かない (step の env だけ)
+    const jobEnv = source.slice(source.indexOf('\njobs:'), source.indexOf('    steps:'));
+    expect(jobEnv).not.toContain('LHCI_GITHUB_APP_TOKEN');
+    // collect が失敗したら以降は走らない (autorun と同じ)。upload の失敗は autorun と同じく警告止まり。
+    expect(source.indexOf('lhci collect')).toBeLessThan(source.indexOf('lhci upload'));
+    expect(byCommand.upload).toMatch(/continue-on-error:\s*true/);
+    expect(byCommand.assert).not.toMatch(/continue-on-error/);
     // 版は tools/lighthouse/package.json の exact pin と lockfile の実体で固定する (承認済み 0.14.0)。
     const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'tools/lighthouse/package.json'), 'utf8'));
     expect(pkg.private).toBe(true);
@@ -54,6 +70,27 @@ describe('GitHub Actions operation guards', () => {
       expect(gate, `${name}: pre-install source gate`).toBeGreaterThan(-1);
       expect(gate, `${name}: pre-install source gate`).toBeLessThan(install);
       expect(job.slice(0, gate)).not.toMatch(/continue-on-error:\s*true/);
+    }
+  });
+
+  // Codex レビュー (PR #778) 3: lockfile の hasInstallScript だけでは binding.gyp の暗黙 node-gyp rebuild・
+  // bundled 依存の実体の script・link の prepare を実行前に知れない。npm ci の直後に node_modules の実体を
+  // 走査する検出 (scripts/installed-scripts-gate.mjs) を、全 workflow の全 install の次の step に置く。
+  it.each(workflowFiles)('%s scans installed packages for scripts right after every dependency install', (name) => {
+    const source = workflow(name);
+    const jobs = source.slice(source.indexOf('\njobs:\n')).split(/\n  [\w-]+:\n/).slice(1);
+    for (const job of jobs) {
+      const steps = job.split(/\n\s+- (?=name:|run:|uses:)/);
+      steps.forEach((step, index) => {
+        const install = step.match(/\brun:\s*npm (?:--prefix (\S+) )?ci\b/);
+        if (!install) return;
+        const root = install[1] ? `${install[1]}/node_modules` : 'node_modules';
+        const next = steps[index + 1] ?? '';
+        expect(next, `${name}: installed scripts gate after "${install[0]}"`).toMatch(
+          new RegExp(`run:\\s*node scripts/installed-scripts-gate\\.mjs ${root.replace(/[./]/g, '\\$&')}\\s*$`, 'm'),
+        );
+        expect(next).not.toMatch(/continue-on-error:\s*true/);
+      });
     }
   });
 

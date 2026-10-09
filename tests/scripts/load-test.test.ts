@@ -23,8 +23,17 @@ describe('load-test production guard', () => {
     'https://www.open-pay.jp',
     'HTTPS://OPEN-PAY.JP',
     'https://open-pay.jp:443',
+    // Codex レビュー (PR #778) 7: FQDN の末尾ドットは同じホストに解決される。
+    'https://open-pay.jp.',
+    'https://www.open-pay.jp./',
+    'HTTPS://OPEN-PAY.JP.:443/ja',
   ])('refuses %s without --allow-prod', (url) => {
     expect(() => parseArgs(['--url', url])).toThrow(/--allow-prod/);
+  });
+
+  it('caps production concurrency for the trailing-dot spelling too', () => {
+    expect(() => parseArgs(['--url', 'https://open-pay.jp.', '--allow-prod', '-c', String(MAX_PRODUCTION_CONCURRENCY + 1)]))
+      .toThrow(new RegExp(`--concurrency .*${MAX_PRODUCTION_CONCURRENCY}`));
   });
 
   it('accepts the production origin with --allow-prod and a small concurrency', () => {

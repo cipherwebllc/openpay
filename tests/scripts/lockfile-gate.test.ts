@@ -151,10 +151,121 @@ describe('lockfile-gate CLI', () => {
   });
 
   it('still permits workspace links and packages with no resolved URL', () => {
-    fixture('package-lock.json', JSON.stringify({ packages: {
+    fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: {
       '': {}, 'node_modules/local': { link: true, resolved: 'packages/local' }, 'node_modules/bundled': {},
     } }));
     expect(runGate().status).toBe(0);
+  });
+
+  // Codex レビュー (PR #778) 4: 隠しディレクトリの lockfile と npm-shrinkwrap.json も npm ci が読む。
+  describe('lockfile enumeration', () => {
+    it.each([
+      '.config/example/package-lock.json',
+      'packages/.hidden/package-lock.json',
+      'npm-shrinkwrap.json',
+      'packages/example/npm-shrinkwrap.json',
+    ])('checks the tracked lockfile %s', (path) => {
+      fixture(path, lockfile('https://evil.example/example.tgz'));
+      const result = runGate();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(path);
+    });
+
+    it('ignores an untracked lockfile left in the checkout (npm ci in CI only sees committed files)', () => {
+      fixture('scratch/package-lock.json', lockfile('https://evil.example/example.tgz'), false);
+      expect(runGate().status).toBe(0);
+    });
+  });
+
+  // Codex レビュー (PR #778) 5: lockfileVersion 1 は packages が無く、旧実装は "-1 entries checked" で成功していた。
+  describe('lockfile format', () => {
+    it.each([
+      ['lockfileVersion 1 (dependencies only)', { lockfileVersion: 1, dependencies: { example: { version: '1.0.0', resolved: 'https://evil.example/example.tgz' } } }],
+      ['missing lockfileVersion', { packages: { '': {} } }],
+      ['missing packages', { lockfileVersion: 3 }],
+      ['packages is not an object', { lockfileVersion: 3, packages: [] }],
+      ['lockfileVersion 2 without packages', { lockfileVersion: 2, dependencies: {} }],
+    ])('fails closed for %s', (_label, lock) => {
+      fixture('package-lock.json', JSON.stringify(lock));
+      const result = runGate();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('lockfileVersion');
+      expect(result.stdout).not.toContain('entries checked');
+    });
+
+    it('accepts lockfileVersion 2 with packages', () => {
+      fixture('package-lock.json', JSON.stringify({ lockfileVersion: 2, packages: { '': {}, 'node_modules/example': { resolved: `${OFFICIAL}example/-/example-1.0.0.tgz` } }, dependencies: {} }));
+      expect(runGate().status).toBe(0);
+    });
+  });
+
+  // Codex レビュー (PR #778) 1: URL 正規化前に名前を取ると、dot segment で allowlist の名前を借用できる。
+  // 取得元は `https://registry.npmjs.org/<name>/-/<basename>-<version>.tgz` の形だけを許す。
+  describe('registry tarball URL shape', () => {
+    it.each([
+      `${OFFICIAL}esbuild/-/../../evil-postinstall/-/evil-postinstall-1.0.0.tgz`,
+      `${OFFICIAL}esbuild/-/%2e%2e/%2e%2e/evil-postinstall/-/evil-postinstall-1.0.0.tgz`,
+      `${OFFICIAL}esbuild/-/%2E%2E/evil-1.0.0.tgz`,
+      `${OFFICIAL}esbuild/./-/esbuild-1.0.0.tgz`,
+      `${OFFICIAL}esbuild/-/evil-postinstall-1.0.0.tgz`,
+      `${OFFICIAL}esbuild/-/esbuild-1.0.0.tgz?x=1`,
+      `${OFFICIAL}esbuild/-/esbuild-1.0.0.tgz#frag`,
+      `${OFFICIAL}esbuild/-/esbuild-1.0.0.zip`,
+      `${OFFICIAL}esbuild//-/esbuild-1.0.0.tgz`,
+      `${OFFICIAL}esbuild/-/sub/esbuild-1.0.0.tgz`,
+      `${OFFICIAL}-/esbuild-1.0.0.tgz`,
+      `${OFFICIAL}@scope/-/scope-1.0.0.tgz`,
+      `${OFFICIAL}@scope/esbuild/x/-/esbuild-1.0.0.tgz`,
+      'https://registry.npmjs.org:443/esbuild/-/esbuild-1.0.0.tgz',
+      'https://user@registry.npmjs.org/esbuild/-/esbuild-1.0.0.tgz',
+      'https://REGISTRY.NPMJS.ORG/esbuild/-/esbuild-1.0.0.tgz',
+    ])('rejects a malformed or traversing tarball URL as a source violation: %s', (url) => {
+      fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: { '': {}, 'node_modules/esbuild': { resolved: url } } }));
+      const result = runGate();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('node_modules/esbuild');
+    });
+
+    it('rejects an install script package whose tarball URL borrows an allowlisted name through dot segments', () => {
+      fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: {
+        '': {},
+        'node_modules/esbuild': { hasInstallScript: true, resolved: `${OFFICIAL}esbuild/-/../../evil-postinstall/-/evil-postinstall-1.0.0.tgz` },
+      } }));
+      const result = runGate();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('node_modules/esbuild');
+    });
+
+    it.each([
+      ['unscoped', 'node_modules/esbuild', `${OFFICIAL}esbuild/-/esbuild-0.21.5.tgz`],
+      ['scoped with a slash', 'node_modules/@parcel/watcher', `${OFFICIAL}@parcel/watcher/-/watcher-2.5.6.tgz`],
+      ['scoped with %2f', 'node_modules/@parcel/watcher', `${OFFICIAL}@parcel%2fwatcher/-/watcher-2.5.6.tgz`],
+      ['scoped with %2F', 'node_modules/@parcel/watcher', `${OFFICIAL}@parcel%2Fwatcher/-/watcher-2.5.6.tgz`],
+      ['prerelease version', 'node_modules/esbuild', `${OFFICIAL}esbuild/-/esbuild-1.0.0-beta.1.tgz`],
+    ])('accepts a well-formed %s tarball URL', (_label, path, url) => {
+      fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: { '': {}, [path]: { hasInstallScript: true, resolved: url } } }));
+      expect(runGate().status).toBe(0);
+    });
+  });
+
+  // Codex レビュー (PR #778) 2: npm は hasInstallScript を truthy で見るので、"true" (文字列) でも script は走る。
+  describe('hasInstallScript type', () => {
+    it.each(['true', 'false', 1, 0, {}, [], null])('fails closed when hasInstallScript is %j instead of a boolean', (value) => {
+      fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: {
+        '': {}, 'node_modules/evil-postinstall': { hasInstallScript: value, resolved: `${OFFICIAL}evil-postinstall/-/evil-postinstall-1.0.0.tgz` },
+      } }));
+      const result = runGate();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('node_modules/evil-postinstall');
+      expect(result.stderr).toContain('hasInstallScript');
+    });
+
+    it('still accepts an explicit false', () => {
+      fixture('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: {
+        '': {}, 'node_modules/evil-postinstall': { hasInstallScript: false, resolved: `${OFFICIAL}evil-postinstall/-/evil-postinstall-1.0.0.tgz` },
+      } }));
+      expect(runGate().status).toBe(0);
+    });
   });
 
   // 第 7 回レビュー E4 (user 裁定 R4): install script (preinstall/install/postinstall) を持つ

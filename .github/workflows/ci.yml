@@ -31,6 +31,7 @@ jobs:
       # .npmrc の redirect は npm ci が読む前に止める (Node 標準 API + Git のみ)。
       - run: node scripts/lockfile-gate.mjs
       - run: npm ci
+      - run: node scripts/installed-scripts-gate.mjs node_modules
       - name: Cache Next.js build
         uses: actions/cache@v4
         with:
@@ -110,6 +111,7 @@ jobs:
           cache: npm
       - run: node scripts/lockfile-gate.mjs
       - run: npm ci
+      - run: node scripts/installed-scripts-gate.mjs node_modules
       - run: node scripts/run-lua-tests.mjs
 
   audit:

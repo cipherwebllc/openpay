@@ -74,10 +74,12 @@ export function parseArgs(argv) {
   if (target.protocol !== 'http:' && target.protocol !== 'https:') {
     throw new Error(`--url must be an http(s) URL (got ${opts.url})`);
   }
-  const isProduction = PRODUCTION_HOSTS.has(target.hostname);
+  // FQDN の末尾ドット (open-pay.jp.) は同じホストに解決されるので、外してから比べる (大文字は URL が小文字化済み)。
+  const hostname = target.hostname.toLowerCase().replace(/\.$/, '');
+  const isProduction = PRODUCTION_HOSTS.has(hostname);
   if (isProduction && !opts.allowProd) {
     throw new Error(
-      `${target.hostname} is the production origin; refusing to load-test it without --allow-prod ` +
+      `${hostname} is the production origin; refusing to load-test it without --allow-prod ` +
         `(use a local build or a preview URL; production is capped at -c ${MAX_PRODUCTION_CONCURRENCY})`,
     );
   }
