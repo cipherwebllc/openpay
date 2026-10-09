@@ -148,17 +148,17 @@ describe('resolveHandle', () => {
 describe('reserveOrUpdateHandle', () => {
   const base = { handle: 'alice', owner: OWNER, config: CONFIG, nowMs: 100 };
 
-  describe.each(['message', 'thanks', 'thanksUrl', 'webhook'] as const)('%s updates', (field) => {
+  describe.each(['message', 'thanks', 'thanksUrl'] as const)('%s updates', (field) => {
     const metadata = {
       message: 'Hello', thanks: 'Thank you',
-      thanksUrl: 'https://example.com/thanks', webhook: 'https://example.com/hook',
+      thanksUrl: 'https://example.com/thanks',
     };
     it.each(['clear', 'keep', 'set'] as const)('%s persists without changing other fields', async (action) => {
       setExisting(JSON.stringify({
         owner: OWNER, config: { ...CONFIG, ...metadata, name: 'Old name' },
         profile: { bio: 'Keep profile' }, createdAt: 5, updatedAt: 5,
       }));
-      const value = field.endsWith('Url') || field === 'webhook' ? 'https://example.com/new' : 'New text';
+      const value = field.endsWith('Url') ? 'https://example.com/new' : 'New text';
       const res = await reserveOrUpdateHandle({
         ...base, expectedUpdatedAt: 5,
         config: { ...CONFIG, ...(action === 'set' ? { [field]: value } : {}) },
@@ -236,7 +236,7 @@ describe('reserveOrUpdateHandle', () => {
     ).toBe('conflict');
   });
 
-  it('update は省略された tip メタ (message/webhook) を既存から保持', async () => {
+  it('update は省略された tip メタ (message) を既存から保持し、退役した webhook は KV から消す', async () => {
     const existing = JSON.stringify({
       owner: OWNER,
       config: {
@@ -249,11 +249,13 @@ describe('reserveOrUpdateHandle', () => {
       updatedAt: 5,
     });
     setExisting(existing);
-    // base.config は message/webhook を持たない (旧 client/API の省略) → 既存値を保持。
+    // base.config は message を持たない (旧 client/API の省略) → 既存値を保持。
     const res = await reserveOrUpdateHandle({ ...base, expectedUpdatedAt: 5 });
     expect(res.status).toBe('updated');
     expect(res.record?.config.message).toBe('thx');
-    expect(res.record?.config.webhook).toBe('https://hook.example');
+    // 第三者 webhook (R1) は退役: 旧レコードの値は読み出しで捨て、次の保存で KV からも消える。
+    expect(res.record?.config).not.toHaveProperty('webhook');
+    expect(JSON.parse(store.values.get('handle:alice')!).config).not.toHaveProperty('webhook');
   });
 
   it('update で profile 省略 → 既存 profile を保持 (config-only update が消さない)', async () => {

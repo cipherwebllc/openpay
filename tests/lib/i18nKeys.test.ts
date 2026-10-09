@@ -1123,12 +1123,26 @@ describe('i18n: 動的 QR / FX 換算 keys (ja/en parity)', () => {
 });
 
 describe('i18n: F7 off-origin callback 開示 keys (ja/en parity)', () => {
-  // CheckoutForm / TipForm の payer 向け開示 (webhook/redirect が第三者ホストのとき)。
+  // CheckoutForm / TipForm の payer 向け開示 (redirect / サンクスリンクが第三者ホストのとき)。
   // Scan interstitial は上の Scan describe で fence 済 (callbackWarn*)。
   for (const loc of [
     { name: 'ja', m: ja },
     { name: 'en', m: en },
   ] as const) {
+    it(`${loc.name}: 第三者 webhook は退役 (R1) — 入力欄の文言キーも「通知する」開示も残さない`, () => {
+      const generator = loc.m.TipEmbedGenerator as Record<string, unknown>;
+      for (const key of ['webhookLabel', 'webhookPlaceholder', 'webhookHint']) {
+        expect(generator, key).not.toHaveProperty(key);
+      }
+      for (const v of [
+        (loc.m.CheckoutForm as Record<string, unknown>).offOriginCallbackNote,
+        (loc.m.TipForm as Record<string, unknown>).offOriginCallbackNote,
+        (loc.m.Scan as Record<string, unknown>).callbackWarnBody,
+      ]) {
+        expect(v as string).not.toMatch(/通知|notif/i);
+      }
+    });
+
     for (const ns of ['CheckoutForm', 'TipForm'] as const) {
       it(`${loc.name}.${ns}.offOriginCallbackNote は非空文字列 + {host} を含む`, () => {
         const v = (loc.m[ns] as Record<string, unknown>).offOriginCallbackNote;

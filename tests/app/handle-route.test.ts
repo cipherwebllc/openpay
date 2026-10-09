@@ -105,10 +105,10 @@ afterEach(() => {
 });
 
 describe('POST /api/handle', () => {
-  describe.each(['message', 'thanks', 'thanksUrl', 'webhook'] as const)('%s tri-state input', (field) => {
+  describe.each(['message', 'thanks', 'thanksUrl'] as const)('%s tri-state input', (field) => {
     it.each(['clear', 'keep', 'set'] as const)('%s is passed through validation to storage', async (action) => {
       store.reserveOrUpdateHandle.mockResolvedValue({ status: 'updated', record: savedRecord(102) });
-      const value = field.endsWith('Url') || field === 'webhook' ? 'https://example.com/new' : 'New text';
+      const value = field.endsWith('Url') ? 'https://example.com/new' : 'New text';
       const res = await POST(postReq({
         handle: 'alice', expectedUpdatedAt: 101,
         config: { ...CFG, ...(action === 'keep' ? {} : { [field]: action === 'clear' ? null : value }) },
@@ -119,6 +119,15 @@ describe('POST /api/handle', () => {
       expect(call.config[field]).toBe(action === 'set' ? value : undefined);
       expect(call.expectedUpdatedAt).toBe(101);
     });
+  });
+
+  it.each(['https://discord.com/api/webhooks/1/x', null, 'not a url'])('退役した webhook (R1) を送る旧 client も 200 で通し、保存も clear もしない (%j)', async (webhook) => {
+    store.reserveOrUpdateHandle.mockResolvedValue({ status: 'updated', record: savedRecord(102) });
+    const res = await POST(postReq({ handle: 'alice', expectedUpdatedAt: 101, config: { ...CFG, webhook } }));
+    expect(res.status).toBe(200);
+    const call = store.reserveOrUpdateHandle.mock.calls[0][0];
+    expect(Object.hasOwn(call.config, 'webhook')).toBe(false);
+    expect(call.clear).toEqual(new Set());
   });
 
   it('lets the store authorize an existing reserved handle update, but rejects a new claim with a forged version', async () => {

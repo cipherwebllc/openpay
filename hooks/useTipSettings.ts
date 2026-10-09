@@ -38,7 +38,7 @@ type TipSettings = {
   presetLabels: Record<TokenSymbol, string[]>;
   thanks: string;
   thanksUrl: string;
-  webhook: string;
+  // 旧 `webhook` は退役 (2026-10 user 裁定 R1)。保存済みの値は sanitize で読まずに捨てる。
   // creator が cross-chain (Circle Gateway / CCTP V2) で fan からの tip を受け取れる
   // ようにするかの opt-out flag。default true (= 受け取る)。USDC のみ意味あり、
   // JPYC では URL 出力時に無視される。false 時のみ URL に `crossChain=false` 出力。
@@ -79,7 +79,6 @@ const DEFAULT_SETTINGS: TipSettings = {
   presetLabels: emptyPresetLabels(defaultPresets),
   thanks: '',
   thanksUrl: '',
-  webhook: '',
   crossChain: true,
 };
 
@@ -216,10 +215,6 @@ function sanitize(loaded: Partial<TipSettings>): TipSettings {
       typeof loaded.thanksUrl === 'string'
         ? loaded.thanksUrl
         : DEFAULT_SETTINGS.thanksUrl,
-    webhook:
-      typeof loaded.webhook === 'string'
-        ? loaded.webhook
-        : DEFAULT_SETTINGS.webhook,
     // boolean を厳密 check。旧 schema (crossChain 未定義) は true に倒す (default ON)。
     crossChain:
       typeof loaded.crossChain === 'boolean'

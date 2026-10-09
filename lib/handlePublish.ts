@@ -166,7 +166,6 @@ export function buildPublishPayload(
       ...(draft.message !== undefined ? { message: draft.message.trim() || null } : {}),
       ...(draft.thanks !== undefined ? { thanks: draft.thanks.trim() || null } : {}),
       ...(draft.thanksUrl !== undefined ? { thanksUrl: draft.thanksUrl.trim() || null } : {}),
-      ...(draft.webhook !== undefined ? { webhook: draft.webhook.trim() || null } : {}),
     },
     profile: buildPublishProfile(draft),
   };

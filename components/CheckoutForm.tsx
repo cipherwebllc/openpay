@@ -1,8 +1,11 @@
 'use client';
 
-// セキュリティ: webhook payload と success_url の query は顧客側で改ざん可能
-// (Stripe の whsec_ 署名相当の保証はない)。マーチャントは tx_hash を必ず
-// on-chain で再検証してから注文を確定する責務を負う。
+// セキュリティ: 受注 notify の payload と success_url の query は顧客側で改ざん可能
+// (Stripe の whsec_ 署名相当の保証はない)。受注 notify (/api/order/notify) は tx_hash を
+// on-chain で再検証してから受注を確定し、success_url を受けるマーチャントも同じ責務を負う。
+// 第三者 webhook (URL の `webhook=` が外部 origin を指す POST) は退役済み (2026-10 user 裁定 R1):
+// #655 の CSP (connect-src) でブラウザがすべて遮断していたため送らず、値が残っていても無視する。
+// `webhook=` は OpenPay 自身の受注 notify (同一 origin の `/api/order/notify?h=`) の搬送にだけ使う。
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -126,7 +129,7 @@ function orderStatusTokenForMerchantTx(merchantTxHash: string): string {
   }
 }
 
-async function postCheckoutWebhook(
+async function postOrderNotify(
   url: string,
   init: RequestInit,
   retryOrderProcessing: boolean,
@@ -207,20 +210,21 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // standard の receipt 復元を本線に固定する。storage 読込中は下の readiness で全経路を止める。
   const standard = useStandardPayment();
 
-  // F7: webhook / success_url / cancel_url のうち、現在の origin と host が異なる第三者ホスト。
-  // これらは決済者データの POST 先 / 決済後の遷移先になり得るため、支払い前に payer へ明示開示する
-  // (block はしない — 正当な off-origin マーチャント webhook / redirect が存在する)。origin 未確定
-  // (SSR / hydrate 前) は空配列 = 開示なし (false-positive 防止)。
+  // F7: success_url / cancel_url のうち、現在の origin と host が異なる第三者ホスト。
+  // これらは決済後 (または中止時) の遷移先になり得るため、支払い前に payer へ明示開示する
+  // (block はしない — 正当な off-origin マーチャント redirect が存在する)。`webhook=` は第三者へ
+  // 送らなくなった (退役) ので開示の対象から外す。origin 未確定 (SSR / hydrate 前) は空配列 =
+  // 開示なし (false-positive 防止)。
   const origin = useOrigin();
   const offOriginHosts = useMemo(
     () =>
       origin
         ? offOriginCallbackHosts(
-            [params.webhook, params.successUrl, params.cancelUrl],
+            [params.successUrl, params.cancelUrl],
             new URL(origin).host,
           )
         : [],
-    [origin, params.webhook, params.successUrl, params.cancelUrl],
+    [origin, params.successUrl, params.cancelUrl],
   );
 
   // 決済経路の単一情報源 (Phase 1.1)。散在していた isStandard / useRelay / useRecover / isCircle を
@@ -733,26 +737,20 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
 
     if (useRelay && boundOrderRef.current) return;
 
-    // webhook 失敗 (CORS 等) は logger.warn のみ。自社 notify の期限外だけはスタッフへの確認を案内する。
-    if (params.webhook) {
+    // 受注 notify を送るのは OpenPay 自身の notify (= モバイル注文・MobileOrderView が同一 origin の
+    // `/api/order/notify?h=` を指す) のときだけ。第三者 webhook は退役 (R1): 外部 URL は送らず、
+    // URL に残っていても黙って無視する (支払いは成立済み・旧リンクを壊さない)。URL を parse し
+    // **same-origin かつ pathname 完全一致**で判定する: substring 一致だと第三者 URL
+    // (`https://shop/hook?next=/api/order/notify` 等) へ payload / statusToken を送りうる (Codex)。
+    // 不正 URL は送らない。notify 失敗は logger.warn のみ。期限外だけはスタッフへの確認を案内する。
+    if (params.webhook && isOwnOrderNotifyUrl(params.webhook, window.location.origin)) {
+      const orderNotifyUrl = params.webhook;
       // hash は fetch と並行に開始し、失敗 telemetry が必要な場合だけ await する。
-      const webhookTelemetry = redactUrlForTelemetry(params.webhook);
+      const webhookTelemetry = redactUrlForTelemetry(orderNotifyUrl);
       // お渡し準備完了通知 (flag ENABLE_ORDER_PICKUP): status トークンを 1 度だけ生成し payload に同梱。
       // notify が order:sv:<token> ポインタを保存し、顧客の /order/status?t= がそれを逆引きする。
-      // webhook が OpenPay 自身の受注 notify (= モバイル注文・MobileOrderView が同一 origin の
-      // `/api/order/notify?h=` を指す) のときだけ生成する。URL を parse し **same-origin かつ pathname
-      // 完全一致**で判定する: substring 一致だと第三者 URL (`https://shop/hook?next=/api/order/notify`
-      // 等) に statusToken を漏らしうる (Codex)。不正 URL は false。
-      let isOrderNotifyWebhook = false;
-      try {
-        const wh = new URL(params.webhook);
-        isOrderNotifyWebhook =
-          wh.origin === window.location.origin && wh.pathname === '/api/order/notify';
-      } catch {
-        isOrderNotifyWebhook = false; // 不正 URL = notify ではない
-      }
       const statusTokenForOrder =
-        env.enableOrderPickup && isOrderNotifyWebhook
+        env.enableOrderPickup
           ? (statusTokenRef.current ??
             (completion.mode === 'standard'
               ? orderStatusTokenForMerchantTx(completion.key)
@@ -763,14 +761,14 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         setStatusToken(statusTokenForOrder);
       }
       let customerMemo: string | undefined;
-      if (isOrderNotifyWebhook && params.orderId) {
+      if (params.orderId) {
         try {
           customerMemo =
             window.sessionStorage.getItem(
               `${ORDER_MEMO_STORAGE_PREFIX}${params.orderId}`,
             ) || undefined;
         } catch {
-          // sessionStorage 障害を webhook/決済完了処理へ波及させない (メモは advisory)。
+          // sessionStorage 障害を受注通知/決済完了処理へ波及させない (メモは advisory)。
         }
       }
       const payload = {
@@ -809,9 +807,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
           : {}),
         ts: Date.now(),
       };
-      const sendWebhook = () =>
-        postCheckoutWebhook(
-          params.webhook!,
+      const sendOrderNotify = () =>
+        postOrderNotify(
+          orderNotifyUrl,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -819,13 +817,13 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
             mode: 'cors',
             keepalive: true,
           },
-          isOrderNotifyWebhook,
+          true,
         )
           .then(async (res) => {
             if (!res.ok) {
               // 中継層の非 JSON 応答が既存の HTTP status 記録を飛ばす波及を断つ。
               if (
-                isOrderNotifyWebhook && res.status === 422 &&
+                res.status === 422 &&
                 (await res.json().catch(() => null))?.error === 'tx_too_old'
               ) {
                 // 受注拒否を決済失敗や再支払いへ波及させず、支払い済みのまま手動確認へ案内する。
@@ -857,9 +855,9 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       // merchant 確定通知の KV claim が処理中のまま通常成功通知と競合し、後者が 409 で失われる
       // 波及を断つ。部分通知の成否にかかわらず完了後に従来 payload を同じ byte で送る。
       if (partial) {
-        void partial.then(sendWebhook, sendWebhook);
+        void partial.then(sendOrderNotify, sendOrderNotify);
       } else {
-        void sendWebhook();
+        void sendOrderNotify();
       }
       if (customerMemo && params.orderId) {
         try {
@@ -917,7 +915,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       notices.set(key, 'pending');
       const url = new URL('/api/order/notify', window.location.origin);
       url.searchParams.set('h', record.order.handle);
-      void postCheckoutWebhook(url.toString(), {
+      void postOrderNotify(url.toString(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: record.notifyBody, keepalive: true,
       }, true).then(async (res) => {
         // Missing acknowledgement cannot be treated as registration of a previous order.
@@ -950,7 +948,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     setBoundNotifyRetryable(false);
     const url = new URL('/api/order/notify', window.location.origin);
     url.searchParams.set('h', record.order.handle);
-    void postCheckoutWebhook(url.toString(), {
+    void postOrderNotify(url.toString(), {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: record.notifyBody, keepalive: true,
     }, true).then(async (res) => {
@@ -992,8 +990,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   }, [relay.orderDelivery, relay.data, relay.restoredIntent, matchingDelivery, boundNotifyRetry, params.successUrl]);
 
   // standard の merchant leg が確定した時点で、独立 fee leg の wallet 操作を待たず受注を届ける。
-  // 第三者 webhook の成功契約は広げず、OpenPay 自身の same-origin `/api/order/notify` だけを
-  // additive に発火し、後続 fee 成功は従来の通常成功 payload で未収状態を解消する。
+  // OpenPay 自身の same-origin `/api/order/notify` だけを additive に発火し (第三者 webhook は退役)、
+  // 後続 fee 成功は従来の通常成功 payload で未収状態を解消する。
   useEffect(() => {
     const submitted = standard.lastSubmittedParams;
     const submittedFeeAmount =
@@ -1095,7 +1093,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       feeUncollected: true,
       ts: Date.now(),
     };
-    const request = postCheckoutWebhook(
+    const request = postOrderNotify(
       params.webhook,
       {
         method: 'POST',
@@ -1706,8 +1704,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         )}
       </section>
 
-      {/* F7: off-origin コールバック開示 (支払い前・payer 向け)。webhook/success_url/cancel_url が
-          第三者ホストを指すとき、決済後に通知/遷移する先を明示する (情報提供のみ・決済は妨げない)。 */}
+      {/* F7: off-origin コールバック開示 (支払い前・payer 向け)。success_url/cancel_url が
+          第三者ホストを指すとき、決済後 (または中止時) に移る先を明示する (情報提供のみ・決済は妨げない)。 */}
       {!completed && offOriginHosts.length > 0 && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
           <p>{t('offOriginCallbackNote', { host: offOriginHosts.join('、') })}</p>

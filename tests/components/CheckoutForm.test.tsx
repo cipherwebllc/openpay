@@ -458,7 +458,15 @@ function setStandardPayment(
   } as Partial<ReturnType<typeof useStandardPayment>>);
 }
 
-// webhook / redirect は submit 時点の snapshot を真実とするため、成功 data を mock するだけでは
+// 第三者 webhook (2026-10 user 裁定 R1) は退役: 外部 origin への fetch が 1 件も無いことを確かめる。
+// 相対 URL (/api/log/payment 等) と同一 origin の受注 notify は対象外。
+function externalFetchUrls(spy: { mock: { calls: unknown[][] } }): string[] {
+  return spy.mock.calls
+    .map(([url]) => String(url))
+    .filter((url) => /^https?:\/\//.test(url) && !url.startsWith(window.location.origin));
+}
+
+// 受注 notify / redirect は submit 時点の snapshot を真実とするため、成功 data を mock するだけでは
 // 発火しない (submit を経て snapshot ref が固定される必要がある)。これらの helper は idle→submit→
 // success を 1 component インスタンスで踏み、snapshot を正しく固定したうえで成功描画させる。
 // (success data を直接 mock するのは「submit 無しで mutation data が存在する」= 本番では起こらない
@@ -1045,7 +1053,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     expect(url.searchParams.get('token')).toBe('usdc');
   });
 
-  it('webhook 指定 → POST が発火 (Tip と互換シェイプ + items・customerEmail は不在)', async () => {
+  it('同一 origin の受注 notify 指定 → POST が発火 (items・customerEmail は不在)', async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
@@ -1059,17 +1067,17 @@ describe('CheckoutForm — 成功時の挙動', () => {
           ...USDC_PARAMS,
           // customerEmail を URL に持つ状態でも payload には載らないことを確認する。
           customerEmail: 'alice@example.com',
-          webhook: 'https://shop.example.com/hook',
+          webhook: `${window.location.origin}/api/order/notify?h=alice`,
         }}
       />
     );
     const { rerender } = render(makeUi());
-    // submit を経て snapshot を固定 → 成功描画で webhook 発火。
+    // submit を経て snapshot を固定 → 成功描画で受注 notify 発火。
     await submitGaslessThenSucceed(user, rerender, makeUi);
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const [url, opts] = fetchSpy.mock.calls[0];
-    expect(url).toBe('https://shop.example.com/hook');
+    expect(url).toBe(`${window.location.origin}/api/order/notify?h=alice`);
     expect(opts.method).toBe('POST');
     const payload = JSON.parse(opts.body);
     expect(payload.type).toBe('openpay.checkout.success');
@@ -1088,7 +1096,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     vi.unstubAllGlobals();
   });
 
-  it('レジの値引き: webhook payload に discount を足す (items の合計 − discount = amount)', async () => {
+  it('レジの値引き: 受注 notify payload に discount を足す (items の合計 − discount = amount)', async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
@@ -1098,7 +1106,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     setGasQuote('ready', 100_000n);
     const makeUi = () => (
       <CheckoutForm
-        params={{ ...USDC_PARAMS, orderId: undefined, discount: '5', webhook: 'https://shop.example.com/hook' }}
+        params={{ ...USDC_PARAMS, orderId: undefined, discount: '5', webhook: `${window.location.origin}/api/order/notify?h=alice` }}
       />
     );
     const { rerender } = render(makeUi());
@@ -1178,7 +1186,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     vi.unstubAllGlobals();
   });
 
-  it('第三者 webhook には sessionStorage の注文メモを含めず、削除もしない', async () => {
+  it('第三者 webhook (退役・R1) へは送らず、sessionStorage の注文メモも削除しない', async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
@@ -1194,9 +1202,11 @@ describe('CheckoutForm — 成功時の挙動', () => {
     );
     const { rerender } = render(makeUi());
     await submitGaslessThenSucceed(user, rerender, makeUi);
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(await screen.findByText(/お支払いが完了しました/)).toBeInTheDocument();
+    await act(async () => Promise.resolve());
 
-    expect('customerMemo' in JSON.parse(fetchSpy.mock.calls[0][1].body)).toBe(false);
+    expect(externalFetchUrls(fetchSpy)).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(window.sessionStorage.getItem('openpay:order-memo:ord-42')).toBe('卵なし');
     vi.unstubAllGlobals();
   });
@@ -1230,7 +1240,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     vi.unstubAllGlobals();
   });
 
-  it('お渡し準備完了 ON + 非 notify webhook (第三者) → statusToken 無し・リンク無し (Codex #1)', async () => {
+  it('お渡し準備完了 ON + 第三者 webhook (退役) → 送らず statusToken も作らない・リンク無し (Codex #1)', async () => {
     feeFlags.enableOrderPickup = true;
     const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
@@ -1239,20 +1249,20 @@ describe('CheckoutForm — 成功時の挙動', () => {
     setBalance(200_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
-    // 第三者 webhook (= 通常 checkout)。OpenPay 受注 notify ではないので statusToken は生成しない。
+    // 第三者 webhook (= 通常 checkout)。OpenPay 受注 notify ではないので送らず、statusToken も生成しない。
     const makeUi = () => (
       <CheckoutForm params={{ ...USDC_PARAMS, webhook: 'https://shop.example.com/hook' }} />
     );
     const { rerender } = render(makeUi());
     await submitGaslessThenSucceed(user, rerender, makeUi);
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect('statusToken' in payload).toBe(false);
+    expect(await screen.findByText(/お支払いが完了しました/)).toBeInTheDocument();
+    await act(async () => Promise.resolve());
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(screen.queryByRole('link', { name: '注文状況を見る' })).toBeNull();
     vi.unstubAllGlobals();
   });
 
-  it('お渡し準備完了 ON + 別 origin で substring を含む webhook → statusToken 無し (URL 厳密判定・Codex)', async () => {
+  it('お渡し準備完了 ON + 別 origin で substring を含む webhook → 送らず statusToken 無し (URL 厳密判定・Codex)', async () => {
     feeFlags.enableOrderPickup = true;
     const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
@@ -1261,7 +1271,8 @@ describe('CheckoutForm — 成功時の挙動', () => {
     setBalance(200_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
-    // 第三者 origin が path/query に '/api/order/notify' を仕込んでも same-origin でないので token を出さない。
+    // 第三者 origin が path/query に '/api/order/notify' を仕込んでも same-origin でないので
+    // 送らず (退役した第三者 webhook)、token も出さない。
     const makeUi = () => (
       <CheckoutForm
         params={{ ...USDC_PARAMS, webhook: 'https://shop.example.com/hook?next=/api/order/notify' }}
@@ -1269,14 +1280,14 @@ describe('CheckoutForm — 成功時の挙動', () => {
     );
     const { rerender } = render(makeUi());
     await submitGaslessThenSucceed(user, rerender, makeUi);
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect('statusToken' in payload).toBe(false);
+    expect(await screen.findByText(/お支払いが完了しました/)).toBeInTheDocument();
+    await act(async () => Promise.resolve());
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(screen.queryByRole('link', { name: '注文状況を見る' })).toBeNull();
     vi.unstubAllGlobals();
   });
 
-  it('[regression] 異なる userOpHash (新規送金) では webhook が再発火する (ref が永久 lock しない)', async () => {
+  it('[regression] 異なる userOpHash (新規送金) では受注 notify が再発火する (ref が永久 lock しない)', async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
@@ -1288,7 +1299,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
       <CheckoutForm
         params={{
           ...USDC_PARAMS,
-          webhook: 'https://shop.example.com/hook',
+          webhook: `${window.location.origin}/api/order/notify?h=alice`,
         }}
       />
     );
@@ -1330,7 +1341,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     vi.unstubAllGlobals();
   });
 
-  it('[regression] 同一 userOpHash で再 render が起きても webhook は 1 回しか POST されない (gasQuote refetch 耐性)', async () => {
+  it('[regression] 同一 userOpHash で再 render が起きても受注 notify は 1 回しか POST されない (gasQuote refetch 耐性)', async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
@@ -1343,7 +1354,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
       <CheckoutForm
         params={{
           ...USDC_PARAMS,
-          webhook: 'https://shop.example.com/hook',
+          webhook: `${window.location.origin}/api/order/notify?h=alice`,
         }}
       />
     );
@@ -1364,7 +1375,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     vi.unstubAllGlobals();
   });
 
-  it('[regression] webhook payload の amount/customerPays は submit 時点の値 (成功後の gas quote 変動を反映しない)', async () => {
+  it('[regression] 受注 notify payload の amount/customerPays は submit 時点の値 (成功後の gas quote 変動を反映しない)', async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
@@ -1377,7 +1388,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
       <CheckoutForm
         params={{
           ...USDC_PARAMS,
-          webhook: 'https://shop.example.com/hook',
+          webhook: `${window.location.origin}/api/order/notify?h=alice`,
         }}
       />
     );
@@ -1443,18 +1454,18 @@ describe('CheckoutForm — 成功時の挙動', () => {
     vi.useRealTimers();
   });
 
-  it('webhook 失敗 (CORS 等) → UI には影響しない (logger.warn のみ)', async () => {
+  it('受注 notify 失敗 (network) → UI には影響しない (logger.warn のみ・URL は origin + hash)', async () => {
     const user = userEvent.setup();
     const fetchSpy = vi
       .fn()
-      .mockRejectedValue(new Error('CORS blocked'));
+      .mockRejectedValue(new Error('network down'));
     vi.stubGlobal('fetch', fetchSpy);
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
     const secret = 'Bearer-checkout-failed-secret';
-    const webhook = `https://user:${secret}@shop.example.com/hook/${secret}?token=${secret}`;
+    const webhook = `${window.location.origin}/api/order/notify?h=alice&token=${secret}`;
     const makeUi = () => (
       <CheckoutForm
         params={{
@@ -1469,7 +1480,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
       expect(loggerWarn).toHaveBeenCalledWith(
         'checkout.webhook.failed',
         expect.objectContaining({
-          webhookOrigin: 'https://shop.example.com',
+          webhookOrigin: window.location.origin,
           webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
         }),
       ),
@@ -1484,7 +1495,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     vi.unstubAllGlobals();
   });
 
-  it('webhook non-OK → origin + hash のみ記録し bearer を残さない', async () => {
+  it('受注 notify non-OK → origin + hash のみ記録し query の秘密を残さない', async () => {
     const user = userEvent.setup();
     const fetchSpy = vi
       .fn()
@@ -1495,7 +1506,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
     const secret = 'Bearer-checkout-non-ok-secret';
-    const webhook = `https://shop.example.com/hook/${secret}?token=${secret}`;
+    const webhook = `${window.location.origin}/api/order/notify?h=alice&token=${secret}`;
     const makeUi = () => (
       <CheckoutForm params={{ ...USDC_PARAMS, webhook }} />
     );
@@ -1506,7 +1517,7 @@ describe('CheckoutForm — 成功時の挙動', () => {
       expect(loggerWarn).toHaveBeenCalledWith(
         'checkout.webhook.non_ok',
         expect.objectContaining({
-          webhookOrigin: 'https://shop.example.com',
+          webhookOrigin: window.location.origin,
           webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
         }),
       ),
@@ -1763,7 +1774,7 @@ describe('CheckoutForm — mode=standard 統合', () => {
     expect(call.chainId).toBe(baseSepolia.id);
   });
 
-  it('mode=standard 成功時の webhook payload に mode/merchantTxHash/feeTxHash が含まれる (customerEmail は不在)', async () => {
+  it('mode=standard 成功時の受注 notify payload に mode/merchantTxHash/feeTxHash が含まれる (customerEmail は不在)', async () => {
     const user = userEvent.setup();
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -1775,16 +1786,16 @@ describe('CheckoutForm — mode=standard 統合', () => {
         params={{
           ...STANDARD_USDC_PARAMS,
           customerEmail: 'alice@example.com',
-          webhook: 'https://shop.example.com/hook',
+          webhook: `${window.location.origin}/api/order/notify?h=alice`,
         }}
       />
     );
     const { rerender } = render(makeUi());
-    // submit を経て snapshot を固定 → 成功描画で webhook 発火。
+    // submit を経て snapshot を固定 → 成功描画で受注 notify 発火。
     await submitStandardThenSucceed(user, rerender, makeUi);
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     const [url, init] = fetchSpy.mock.calls[0];
-    expect(url).toBe('https://shop.example.com/hook');
+    expect(url).toBe(`${window.location.origin}/api/order/notify?h=alice`);
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body.type).toBe('openpay.checkout.success');
     expect(body.mode).toBe('standard');
@@ -1802,7 +1813,7 @@ describe('CheckoutForm — mode=standard 統合', () => {
     fetchSpy.mockRestore();
   });
 
-  it('mode=standard 成功時の webhook が同一 merchantTxHash で再 render しても 1 回しか発火しない (dedup)', async () => {
+  it('mode=standard 成功時の受注 notify が同一 merchantTxHash で再 render しても 1 回しか発火しない (dedup)', async () => {
     const user = userEvent.setup();
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
@@ -1813,7 +1824,7 @@ describe('CheckoutForm — mode=standard 統合', () => {
       <CheckoutForm
         params={{
           ...STANDARD_USDC_PARAMS,
-          webhook: 'https://shop.example.com/hook',
+          webhook: `${window.location.origin}/api/order/notify?h=alice`,
         }}
       />
     );
@@ -2123,7 +2134,7 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     expect(e?.blockNumber).toBeNull();
   });
 
-  it('auto recovery→成功で成功描画/webhook/控え/履歴を各 1 回だけ確定する', async () => {
+  it('auto recovery→成功で成功描画/控え/履歴を各 1 回だけ確定し、第三者 webhook (退役) へは送らない', async () => {
     window.localStorage.clear();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
@@ -2145,11 +2156,14 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
 
     setRelayPayment('success', { txHash, variables });
     rendered.rerender(<CheckoutForm params={params} />);
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const successLogs = () =>
+      vi.mocked(logger.info).mock.calls.filter(([event]) => event === 'checkout.success');
+    await waitFor(() => expect(successLogs()).toHaveLength(1));
     expect(screen.getByText(/お支払いが完了しました/)).toBeInTheDocument();
     rendered.rerender(<CheckoutForm params={params} />);
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(successLogs()).toHaveLength(1);
+    expect(externalFetchUrls(fetchSpy)).toEqual([]);
     expect(loadPayerReceipts().filter((r) => r.receiptId === txHash)).toHaveLength(1);
     expect(loadHistory().filter((e) => e.txHash === txHash)).toHaveLength(1);
   });
@@ -2470,7 +2484,7 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     expect(relayMutate).not.toHaveBeenCalled();
   });
 
-  it('relay 成功 + webhook: payload に txHash あり・blockNumber は省略 (null を直列化しない)', async () => {
+  it('relay 成功 + 第三者 webhook (退役): 外部へ送らず完了表示と checkout.success は通常どおり', async () => {
     const user = userEvent.setup();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
@@ -2482,22 +2496,22 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
       />
     );
     const { rerender } = render(makeUi());
-    // submit を経て snapshot を固定 → 成功描画で webhook 発火。
     await submitRelayThenSucceed(user, rerender, makeUi, {
       txHash: `0x${'e'.repeat(64)}`,
       variables: { merchant: MERCHANT, value: JPYC_TOTAL, gasMode: 'customer' },
     });
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
-    const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
-    expect(payload.txHash).toBe(`0x${'e'.repeat(64)}`);
-    expect(payload.mode).toBe('gasless');
-    // amount = 注文小計 3000 JPYC・merchant 着金は満額 (free/customer)。submit snapshot 由来。
-    expect(payload.amount).toBe('3000');
-    expect(payload.merchantAmount).toBe(JPYC_TOTAL.toString());
-    expect(payload.customerPays).toBe(JPYC_TOTAL.toString());
-    // relay は block 不明 → payload から省略 (key 自体が無い・"null" 文字列にしない)。
-    expect('blockNumber' in payload).toBe(false);
-    expect(payload.userOpHash).toBeUndefined();
+    await waitFor(() =>
+      expect(logger.info).toHaveBeenCalledWith(
+        'checkout.success',
+        expect.objectContaining({ mode: 'gasless', txHash: `0x${'e'.repeat(64)}` }),
+      ),
+    );
+    expect(screen.getByText('お支払いが完了しました')).toBeInTheDocument();
+    await act(async () => Promise.resolve());
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      loggerWarn.mock.calls.filter(([event]) => String(event).startsWith('checkout.webhook')),
+    ).toEqual([]);
     vi.unstubAllGlobals();
   });
 
@@ -2526,12 +2540,15 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
       expect(screen.queryByRole('button', { name: '今すぐ確認ページへ' })).toBeNull();
     } else {
-      await waitFor(() => expect(loggerWarn).toHaveBeenCalledWith('checkout.webhook.non_ok', expect.anything()));
+      // 第三者 origin の「/api/order/notify」は自社 notify ではない (退役した第三者 webhook) → 送らない。
+      expect(await screen.findByText('お支払いが完了しました')).toBeInTheDocument();
+      await act(async () => Promise.resolve());
+      expect(loggerWarn).not.toHaveBeenCalledWith('checkout.webhook.non_ok', expect.anything());
       expect(screen.queryByText(/支払い履歴またはトランザクションをお店のスタッフに提示/)).toBeNull();
     }
     expect(screen.getByText('お支払いが完了しました')).toBeInTheDocument();
     expect(relayMutate).not.toHaveBeenCalled(); // success 後の新しい mutate は呼ばない
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(sameOrigin ? 1 : 0);
     fetchSpy.mockRestore();
   });
 
@@ -2586,7 +2603,7 @@ describe('CheckoutForm — JPYC EIP-3009 relay 経路', () => {
     expect(url.searchParams.get('user_op_hash')).toBeNull();
   });
 
-  it('relay pending: webhook も redirect も発火しない (未確定 = completion なし)', async () => {
+  it('relay pending: 通知も redirect も発火しない (未確定 = completion なし)', async () => {
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
     const assignSpy = vi.fn();
@@ -3548,7 +3565,7 @@ describe('CheckoutForm — モバイル注文 / レジ システム利用料 (fl
 });
 
 describe('CheckoutForm — F7 off-origin callback 開示', () => {
-  it('第三者 host の webhook/success_url → 開示ノートに host を表示', () => {
+  it('第三者 host の success_url → 開示ノートに host を表示 (退役した webhook の host は出さない)', () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(200_000_000n);
     setSmartAccount(true);
@@ -3562,10 +3579,21 @@ describe('CheckoutForm — F7 off-origin callback 開示', () => {
         }}
       />,
     );
-    const note = screen.getByText(/に通知・遷移します/);
+    const note = screen.getByText(/に移動します/);
     expect(note).toBeInTheDocument();
-    expect(note.textContent).toContain('shop.example.com');
+    expect(note.textContent).not.toContain('shop.example.com');
     expect(note.textContent).toContain('thanks.evil.test');
+  });
+
+  it('第三者 host が退役した webhook だけなら開示ノートは出さない (送らないので開示対象外)', () => {
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    render(
+      <CheckoutForm params={{ ...USDC_PARAMS, webhook: 'https://shop.example.com/hook' }} />,
+    );
+    expect(screen.queryByText(/に移動します/)).toBeNull();
   });
 
   it('callback が無ければ開示ノートは出さない', () => {
@@ -3574,7 +3602,7 @@ describe('CheckoutForm — F7 off-origin callback 開示', () => {
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
     render(<CheckoutForm params={USDC_PARAMS} />);
-    expect(screen.queryByText(/に通知・遷移します/)).toBeNull();
+    expect(screen.queryByText(/に移動します/)).toBeNull();
   });
 
   it('同一 origin の callback のみ → 開示ノートは出さない', () => {
@@ -3590,7 +3618,7 @@ describe('CheckoutForm — F7 off-origin callback 開示', () => {
         }}
       />,
     );
-    expect(screen.queryByText(/に通知・遷移します/)).toBeNull();
+    expect(screen.queryByText(/に移動します/)).toBeNull();
   });
 });
 
@@ -3989,7 +4017,7 @@ describe('A2c saved-order-only notification', () => {
     expect(await screen.findByRole('button', { name: '今すぐ確認ページへ' })).toBeInTheDocument();
     expect(loadOrderDelivery()).toEqual({ kind: 'empty' }); fetchSpy.mockRestore();
   });
-  it('a lingering record does not suppress this attempt’s third-party callback or successUrl', async () => {
+  it('a lingering record does not suppress this attempt’s successUrl, and the retired third-party webhook is never sent', async () => {
     const user = userEvent.setup(); setupRelayReady();
     const record = savedRecord();
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ ok: true }));
@@ -3998,10 +4026,11 @@ describe('A2c saved-order-only notification', () => {
     await user.click(screen.getByRole('button', { name: /を支払う/ }));
     setRelayPayment('success', { txHash: `0x${'e'.repeat(64)}`, orderDelivery: record });
     rerender(makeUi());
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
-    expect(fetchSpy.mock.calls[0][0]).toBe('https://third.example/hook');
-    expect(fetchSpy.mock.calls[0][1]?.body).not.toContain(record.bind.secret);
-    expect(screen.getByRole('button', { name: '今すぐ確認ページへ' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '今すぐ確認ページへ' })).toBeInTheDocument();
+    await act(async () => Promise.resolve());
+    // 第三者 webhook (R1) は退役: 外部 URL へは送らない (saved record の secret の漏れ先も無い)。
+    expect(externalFetchUrls(fetchSpy)).toEqual([]);
+    expect(JSON.stringify(fetchSpy.mock.calls)).not.toContain(record.bind.secret);
     fetchSpy.mockRestore();
   });
   it('409 processing retries only identical persisted bytes', async () => {

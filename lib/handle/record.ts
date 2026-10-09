@@ -59,13 +59,14 @@ export function handleStorefrontConfig(
   return config;
 }
 
+// 旧 'webhook' は退役 (2026-10 user 裁定 R1) したので検査しない: 保存済み record に残っていても
+// 型を問わず読まずに捨てる (旧レコードの @handle を読めなくしない)。次の保存で KV からも消える。
 const STRING_KEYS = [
   'name',
   'message',
   'color',
   'thanks',
   'thanksUrl',
-  'webhook',
 ] as const;
 
 // token 別 presets を構造のみ検証 (旧形 = 単一 string[] / 新形 = token→string[])。
@@ -159,7 +160,6 @@ function normalizeStoredConfig(raw: unknown): HandleTipConfig | null {
     ...(isHandleTheme(c.theme) ? { theme: c.theme } : {}),
     thanks: c.thanks as string | undefined,
     thanksUrl: c.thanksUrl as string | undefined,
-    webhook: c.webhook as string | undefined,
     methods,
     presets: normalizeStoredPresets(c.presets, presetFallbackToken),
   };

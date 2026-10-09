@@ -165,8 +165,8 @@ export function exceedsTokenPrecision(
 }
 
 // http/https のみ許可。URL.canParse を使うので try/catch 不要。
-// localhost / 127.0.0.1 は webhook テスト用途で許可するが、本番では
-// クリエイターが制御していない URL を貼ると意図しない POST 先になり得る点に注意。
+// localhost / 127.0.0.1 も許可する (ローカル検証用)。本番ではクリエイター/店舗が制御していない
+// URL を貼ると意図しない遷移先になり得る点に注意 (payer 向けの off-origin 開示で補う)。
 export function sanitizeUrl(raw: string): string | undefined {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return undefined;
@@ -244,12 +244,13 @@ export function parseTaxReceiptParams(searchParams: SearchParamsLike): {
   };
 }
 
-// checkout/tip の callback URL (webhook / success_url / cancel_url / thanksUrl) のうち、
+// checkout/tip の callback URL (success_url / cancel_url / thanksUrl) のうち、
 // 現在の origin と host が異なる「第三者ホスト」の重複なし一覧を返す。攻撃者が仕込んだ
-// off-origin コールバックは (a) 決済者データを第三者へ POST し (b) 決済後に第三者ページへ
-// 遷移し得るため、CheckoutForm/TipForm の payer 向け開示と /scan の interstitial 判定で
-// この 1 実装を共有する (SoT)。host 比較は new URL でパースし小文字化・大小無視。空/不正/
-// 同一 host は無視する。originHost は "example.com:3000" のような host (protocol/path なし)。
+// off-origin コールバックは決済後に第三者ページへ遷移し得るため、CheckoutForm/TipForm の
+// payer 向け開示と /scan の interstitial 判定でこの 1 実装を共有する (SoT)。第三者 webhook
+// (決済者データの外部 POST) は退役済みで送らないため、呼出側は webhook を渡さない。
+// host 比較は new URL でパースし小文字化・大小無視。空/不正/同一 host は無視する。
+// originHost は "example.com:3000" のような host (protocol/path なし)。
 export function offOriginCallbackHosts(
   urls: ReadonlyArray<string | undefined | null>,
   originHost: string,

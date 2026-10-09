@@ -206,6 +206,24 @@ describe('next.config.mjs headers() — baseline and enforced CSP (C17)', () => 
     expect(connect).not.toContain('https:');
   });
 
+  it('第三者 webhook は退役 (R1): connect-src は明示 origin だけの閉じた許可リストで、任意の外部 POST を通す source を持たない', async () => {
+    // TipForm/CheckoutForm の「成功時に任意 URL へ POST」を CSP 側で開けて復活させないためのフェンス。
+    // 受注通知は同一 origin の /api/order/notify ('self') で届く。
+    for (const nodeEnv of ['production', 'development'] as const) {
+      vi.stubEnv('NODE_ENV', nodeEnv);
+      for (const path of ['/ja/tip/0xabc', '/en/checkout', '/ja/order', '/']) {
+        const connect = (await enforcedDirectives(path)).get('connect-src')!;
+        expect(connect[0], `${nodeEnv} ${path}`).toBe("'self'");
+        for (const source of connect.slice(1)) {
+          // next dev の HMR websocket (ws://localhost:* / ws://127.0.0.1:*) だけは開発時のみ port を問わない。
+          if (nodeEnv === 'development' && /^ws:\/\/(localhost|127\.0\.0\.1):\*$/.test(source)) continue;
+          // scheme 単体 (https: / http: / wss:)・ワイルドカード・path 付きを許さず、明示 origin だけ。
+          expect(source, `${nodeEnv} ${path}`).toMatch(/^(https|wss):\/\/[a-z0-9_.-]+(:\d+)?$/i);
+        }
+      }
+    }
+  });
+
   it('allows every rebuilt handle iframe origin and WalletConnect verification frames', async () => {
     const csp = await enforcedDirectives();
     // facade + lib/handle/ 配下の全ファイル (iframe builder が別モジュールへ移っても取りこぼさない)。

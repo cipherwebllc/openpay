@@ -245,7 +245,7 @@ export async function reserveOrUpdateHandle(input: {
       message: clear?.has('message') ? undefined : config.message ?? existing.config.message,
       thanks: clear?.has('thanks') ? undefined : config.thanks ?? existing.config.thanks,
       thanksUrl: clear?.has('thanksUrl') ? undefined : config.thanksUrl ?? existing.config.thanksUrl,
-      webhook: clear?.has('webhook') ? undefined : config.webhook ?? existing.config.webhook,
+      // 旧 webhook (退役) は existing の読み出しで既に捨てているので、この置換で KV からも消える。
     };
     // omit (undefined) なら既存 profile を保持、provided なら置換 (空はクリア)。
     const nextProfile = profileProvided ? cleanedProfile : existing.profile;

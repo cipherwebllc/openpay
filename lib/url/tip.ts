@@ -75,8 +75,8 @@ export type TipParams = {
   thanks?: string;
   // 送信成功時に表示するリンク URL (例: 限定 Discord 招待 / Patreon ページ)
   thanksUrl?: string;
-  // 送信成功時に POST する webhook URL
-  webhook?: string;
+  // 旧 `webhook` (送信成功時に外部 URL へ POST) は退役 (2026-10 user 裁定 R1)。#655 の CSP
+  // (connect-src) でブラウザがすべて遮断していた。旧リンクの `webhook=` は parse で読まずに無視する。
   // cross-chain 受信を許可するかの flag (Circle Gateway / CCTP V2 経由)。
   // default true (creator 側で許可、fan が target chain 以外で USDC を持っている
   // 時に TipForm が代替 path を提示する)。false 時のみ URL に `crossChain=false`
@@ -200,10 +200,6 @@ export function buildTipPath(params: TipLinkParams): string {
     const v = sanitizeUrl(params.thanksUrl);
     if (v) sp.set('thanksUrl', v);
   }
-  if (params.webhook) {
-    const v = sanitizeUrl(params.webhook);
-    if (v) sp.set('webhook', v);
-  }
   // PayParams と同型: default (undefined / true) は URL に出さず旧 embed と互換、
   // false (= creator が cross-chain 拒否) を明示するときだけ出力。
   // Arc は cross-chain flag OFF のときだけ強制 false (ON なら他チェーン → Arc の forwarding を受ける)。
@@ -254,7 +250,7 @@ export function parseTipParams(
   const preset = searchParams.get('preset');
   const thanks = searchParams.get('thanks');
   const thanksUrl = searchParams.get('thanksUrl');
-  const webhook = searchParams.get('webhook');
+  // `webhook=` (退役) は読まない: 配布済みの QR / 埋め込みリンクはエラーにせずそのまま開ける。
   const crossChainRaw = searchParams.get('crossChain');
 
   const sanitizedColor =
@@ -279,7 +275,6 @@ export function parseTipParams(
       presets: preset ? sanitizePresets(preset) : undefined,
       thanks: thanks ? sanitizeText(thanks, TIP_THANKS_MAX) : undefined,
       thanksUrl: thanksUrl ? sanitizeUrl(thanksUrl) : undefined,
-      webhook: webhook ? sanitizeUrl(webhook) : undefined,
       crossChain,
     },
   };

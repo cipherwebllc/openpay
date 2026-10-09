@@ -49,7 +49,7 @@ export interface HandleProfileDraft {
   message?: string;
   thanks?: string;
   thanksUrl?: string;
-  webhook?: string;
+  // 旧 `webhook` は退役 (2026-10 user 裁定 R1)。保存済み下書きの値は sanitize で読まずに捨てる。
   color: string;
   jpycPolygon: boolean;
   /** USDC (Base) チップの受け入れ (2026-08-17 復活・Base 固定は user 決定)。 */
@@ -97,7 +97,7 @@ export const DEFAULT_PROFILE_DRAFT: HandleProfileDraft = {
 };
 
 /** 既定値を持たない任意の文字列項目 (高度な設定)。空のままなら手付かず。 */
-const OPTIONAL_TEXT_KEYS = ['message', 'thanks', 'thanksUrl', 'webhook'] as const satisfies readonly (keyof HandleProfileDraft)[];
+const OPTIONAL_TEXT_KEYS = ['message', 'thanks', 'thanksUrl'] as const satisfies readonly (keyof HandleProfileDraft)[];
 
 /** 下書きが既定のまま (この端末でまだプロフィールを作っていない) か。持っている @handle を自動で編集に入る判定に使う。
  *  受取先 (to) は空か、接続中のウォレット (自動で入る値) のときだけ手付かずと見なす (別の宛先を打った人の入力を消さない)。 */
@@ -206,7 +206,6 @@ function sanitize(loaded: Partial<HandleProfileDraft>): HandleProfileDraft {
     message: typeof loaded.message === 'string' ? loaded.message : undefined,
     thanks: typeof loaded.thanks === 'string' ? loaded.thanks : undefined,
     thanksUrl: typeof loaded.thanksUrl === 'string' ? loaded.thanksUrl : undefined,
-    webhook: typeof loaded.webhook === 'string' ? loaded.webhook : undefined,
     color:
       typeof loaded.color === 'string' && COLOR_PATTERN.test(loaded.color)
         ? loaded.color.toLowerCase()

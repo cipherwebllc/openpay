@@ -14,7 +14,7 @@ describe('useHandleProfileDraft', () => {
     window.localStorage.clear();
   });
 
-  it.each(['message', 'thanks', 'thanksUrl', 'webhook'] as const)('restores %s values and intentional empty strings without treating a legacy omission as clear', async (field) => {
+  it.each(['message', 'thanks', 'thanksUrl'] as const)('restores %s values and intentional empty strings without treating a legacy omission as clear', async (field) => {
     for (const value of [undefined, 'Saved value', '']) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ [field]: value }));
       const restored = renderHook(() => useHandleProfileDraft());
@@ -22,6 +22,19 @@ describe('useHandleProfileDraft', () => {
       expect(restored.result.current.settings[field]).toBe(value);
       restored.unmount();
     }
+  });
+
+  it('退役した webhook (R1) が残る旧下書きもエラーにせず読み、webhook は捨てて手付かず判定にも数えない', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ name: 'Alice', webhook: 'https://discord.com/api/webhooks/1/x' }));
+    const first = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(first.result.current.hydrated).toBe(true));
+    expect(first.result.current.settings.name).toBe('Alice');
+    expect(Object.hasOwn(first.result.current.settings, 'webhook')).toBe(false);
+    first.unmount();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ webhook: 'https://discord.com/api/webhooks/1/x' }));
+    const legacyOnly = renderHook(() => useHandleProfileDraft());
+    await waitFor(() => expect(legacyOnly.result.current.hydrated).toBe(true));
+    expect(isPristineProfileDraft(legacyOnly.result.current.settings)).toBe(true);
   });
 
 
@@ -357,7 +370,7 @@ describe('isPristineProfileDraft (持っている @handle の編集に自動で�
     expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, to: 'alice.eth' }, WALLET)).toBe(false);
   });
 
-  it.each(['message', 'thanks', 'thanksUrl', 'webhook'] as const)('高度な設定 (%s) だけ書いた下書きも手付かずではない', (key) => {
+  it.each(['message', 'thanks', 'thanksUrl'] as const)('高度な設定 (%s) だけ書いた下書きも手付かずではない', (key) => {
     expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, [key]: 'x' })).toBe(false);
     expect(isPristineProfileDraft({ ...DEFAULT_PROFILE_DRAFT, [key]: '' })).toBe(true);
   });

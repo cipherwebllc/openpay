@@ -396,7 +396,7 @@ describe('parseScannedUrl: buildPayUrl 往復統合', () => {
 });
 
 describe('parseScannedUrl: buildTipUrl 往復統合', () => {
-  it('全 option (color + preset + name + message + thanks + thanksUrl + webhook)', () => {
+  it('全 option (color + preset + name + message + thanks + thanksUrl)', () => {
     const url = buildTipUrl(ORIGIN, {
       to: TO,
       token: 'jpyc',
@@ -407,7 +407,6 @@ describe('parseScannedUrl: buildTipUrl 往復統合', () => {
       presets: ['100', '500', '1000'],
       thanks: 'Thanks!',
       thanksUrl: 'https://example.com/thanks',
-      webhook: 'https://example.com/hook',
     });
     const r = parseScannedUrl(url, ORIGIN, 'en');
     expect(r.kind).toBe('tip');
@@ -420,7 +419,6 @@ describe('parseScannedUrl: buildTipUrl 往復統合', () => {
     expect(r.params.presets).toEqual(['100', '500', '1000']);
     expect(r.params.thanks).toBe('Thanks!');
     expect(r.params.thanksUrl).toBe('https://example.com/thanks');
-    expect(r.params.webhook).toBe('https://example.com/hook');
     // href は en で正規化
     expect(r.href).toMatch(/^\/en\/tip\/0x/);
   });
@@ -884,16 +882,40 @@ describe('parseScannedUrl: F7 off-origin callback 分類', () => {
     expect(r.offOriginHosts).toEqual([]);
   });
 
-  it('checkout: 第三者 webhook + success_url → interstitial 対象 (host を列挙)', () => {
-    const wh = encodeURIComponent('https://shop.example.com/hook');
+  it('checkout: 第三者 success_url / cancel_url → interstitial 対象 (host を列挙)', () => {
     const su = encodeURIComponent('https://thanks.evil.test/done');
+    const cu = encodeURIComponent('https://shop.example.com/cart');
     const r = parseScannedUrl(
-      `${ORIGIN}/checkout?to=${TO}&token=usdc&items=${items}&webhook=${wh}&success_url=${su}`,
+      `${ORIGIN}/checkout?to=${TO}&token=usdc&items=${items}&success_url=${su}&cancel_url=${cu}`,
       ORIGIN,
       'ja',
     );
     if (r.kind !== 'checkout') throw new Error();
-    expect(r.offOriginHosts).toEqual(['shop.example.com', 'thanks.evil.test']);
+    expect(r.offOriginHosts).toEqual(['thanks.evil.test', 'shop.example.com']);
+  });
+
+  it('checkout: 第三者 webhook (退役・送られない) だけなら interstitial 対象外・URL はそのまま開ける', () => {
+    const wh = encodeURIComponent('https://shop.example.com/hook');
+    const r = parseScannedUrl(
+      `${ORIGIN}/checkout?to=${TO}&token=usdc&items=${items}&webhook=${wh}`,
+      ORIGIN,
+      'ja',
+    );
+    if (r.kind !== 'checkout') throw new Error();
+    expect(r.offOriginHosts).toEqual([]);
+  });
+
+  it('tip: 第三者 webhook (退役) 付きの旧 URL も tip として開け、interstitial 対象外', () => {
+    const wh = encodeURIComponent('https://discord.com/api/webhooks/1/x');
+    const r = parseScannedUrl(
+      `${ORIGIN}/tip/${TO}?token=jpyc&webhook=${wh}`,
+      ORIGIN,
+      'ja',
+    );
+    expect(r.kind).toBe('tip');
+    if (r.kind !== 'tip') throw new Error();
+    expect(r.offOriginHosts).toEqual([]);
+    expect(Object.hasOwn(r.params, 'webhook')).toBe(false);
   });
 
   it('tip: 第三者 thanksUrl → interstitial 対象', () => {

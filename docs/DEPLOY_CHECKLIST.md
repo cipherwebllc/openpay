@@ -2265,7 +2265,7 @@ console.log(response.status, await response.json());
 - 点灯は **env → merge → deploy**。本番 Vercel で既存 `NEXT_PUBLIC_ENABLE_USDC_ARC=1` を確認し、**merge 前に** `NEXT_PUBLIC_ENABLE_USDC_ARC_TIP=1` を設定する。コードと開示を同一リリースで公開する。
 - 両 flag ON の testnet で #504 の EIP-1193 注入 script を使い、`/ja/tip/<address>?token=usdc&chain=arc&preset=0.5` を開く。Arc testnet (5042002)、ERC-20 USDC (6 桁)、ガスも USDC を確認する。
 - 0.5 USDC を標準送信し、サンクス、払い手控え (`paymentMode:standard`、`networkFeeEquivalent` なし)、Explorer、server log 1 件 (`tip:true`、`chainSlug:arc`、`mode:standard`) を確認する。
-- `/pay` の同額送金 intent を session に残して `/tip` を開き、以前の送信パネルのみでサンクス・控え・webhook・overlay が発火しないことを確認する。
+- `/pay` の同額送金 intent を session に残して `/tip` を開き、以前の送信パネルのみでサンクス・控え・overlay が発火しないことを確認する。
 - `/ja/create` のチップ preview はウォレット送信・intent 復元・ログが発火しない。Arc 選択時は cross-chain toggle がない。
 - @handle を Arc のみ／Base のみ／両方で公開して開き直し、方法が一致することを確認する。flag OFF では公開済み Arc を保持し「無効中」を表示、再公開は説明付きで停止する。
 - tip metadata が生成する `/og/tip?...&chain=arc` と handle OG を確認する。Arc のみでは「ガス不要」を表示しない。

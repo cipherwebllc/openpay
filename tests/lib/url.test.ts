@@ -1119,7 +1119,6 @@ describe('parseTipParams', () => {
       presets: ['1', '5', '10'],
       thanks: 'Thanks!',
       thanksUrl: 'https://example.com/thanks',
-      webhook: 'https://example.com/hook',
       crossChain: false,
     });
     expect(built).toContain('crossChain=false');
@@ -1136,7 +1135,6 @@ describe('parseTipParams', () => {
         presets: ['1', '5', '10'],
         thanks: 'Thanks!',
         thanksUrl: 'https://example.com/thanks',
-        webhook: 'https://example.com/hook',
         crossChain: false,
       });
     }
@@ -1262,7 +1260,7 @@ describe('PayParams: split (multi-recipient C1)', () => {
   });
 });
 
-describe('TipParams: thanks / thanksUrl / webhook', () => {
+describe('TipParams: thanks / thanksUrl (webhook は退役)', () => {
   function search(query: string) {
     return new URLSearchParams(query);
   }
@@ -1319,34 +1317,33 @@ describe('TipParams: thanks / thanksUrl / webhook', () => {
     expect(path).not.toContain('thanksUrl=');
   });
 
-  it('webhook も URL バリデーション同様', () => {
-    const okPath = buildTipPath({
-      to: VALID_TO,
-      token: 'jpyc',
-      webhook: 'https://example.com/hook',
-    });
-    expect(okPath).toContain('webhook=');
-
-    const badPath = buildTipPath({
-      to: VALID_TO,
-      token: 'jpyc',
-      webhook: 'ftp://nope/',
-    });
-    expect(badPath).not.toContain('webhook=');
-  });
-
   it('parser 側でも http(s) 以外は除外', () => {
     const r = parseTipParams(
       VALID_TO,
-      search(
-        'token=jpyc&thanksUrl=javascript%3Aalert(1)&webhook=ftp%3A%2F%2Ffoo',
-      ),
+      search('token=jpyc&thanksUrl=javascript%3Aalert(1)'),
     );
     expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.params.thanksUrl).toBeUndefined();
-      expect(r.params.webhook).toBeUndefined();
+    if (r.ok) expect(r.params.thanksUrl).toBeUndefined();
+  });
+
+  it('退役した webhook= 付きの旧リンクもエラーにせず開け、webhook は読まない (R1)', () => {
+    // 配布済みの QR / 埋め込みに残る `webhook=` (有効 URL・不正値・空) のどれでも同じ結果。
+    for (const webhook of ['https://hooks.example.com:8443/webhooks/tip?id=42', 'ftp://nope/', '']) {
+      const r = parseTipParams(
+        VALID_TO,
+        search(`token=jpyc&thanks=ok&webhook=${encodeURIComponent(webhook)}`),
+      );
+      expect(r.ok, webhook).toBe(true);
+      if (r.ok) {
+        expect(r.params.thanks).toBe('ok');
+        expect(Object.hasOwn(r.params, 'webhook')).toBe(false);
+      }
     }
+  });
+
+  it('build は webhook= を出さない (旧設定のオブジェクトに残っていても)', () => {
+    const legacy = { to: VALID_TO as Address, token: 'jpyc' as const, webhook: 'https://example.com/hook' };
+    expect(buildTipPath(legacy)).not.toContain('webhook');
   });
 });
 
@@ -1585,20 +1582,20 @@ describe('TipParams: Unicode + 制御文字 / URL エンコーディングのエ
     if (r.ok) expect(r.params.presets).toEqual(['001', '002']);
   });
 
-  it('webhook URL がポート + パス + クエリ込みでも保持', () => {
-    const url = 'https://hooks.example.com:8443/webhooks/tip?id=42';
+  it('thanksUrl がポート + パス + クエリ込みでも保持', () => {
+    const url = 'https://links.example.com:8443/thanks/tip?id=42';
     const path = buildTipPath({
       to: VALID_TO,
       token: 'jpyc',
-      webhook: url,
+      thanksUrl: url,
     });
     const sp = new URLSearchParams(path.split('?')[1]);
     const r = parseTipParams(VALID_TO, sp);
     expect(r.ok).toBe(true);
     if (r.ok) {
       // URL クラス経由で末尾に / が付与されない場合あり (toString の仕様)
-      expect(r.params.webhook).toContain('hooks.example.com:8443');
-      expect(r.params.webhook).toContain('id=42');
+      expect(r.params.thanksUrl).toContain('links.example.com:8443');
+      expect(r.params.thanksUrl).toContain('id=42');
     }
   });
 

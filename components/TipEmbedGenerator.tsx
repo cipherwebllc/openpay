@@ -73,7 +73,7 @@ const TipFormPreview = dynamic(
 const IFRAME_WIDTH = 380;
 const IFRAME_HEIGHT = 640;
 // QR を描く tipUrl の上限長。これを超えると qrcode.react が「Data too long」で throw し
-// share タブが落ちる (長い webhook/thanksUrl/preset で URL が肥大した場合)。容量に余裕を
+// share タブが落ちる (長い thanksUrl/preset で URL が肥大した場合)。容量に余裕を
 // 持たせた閾値で、超過時は QR を省略する (リンク/X シェアは長い URL でも機能する)。
 // color 入力が不正 (COLOR_PATTERN 不一致) のときのプレビュー/プレースホルダ既定色。
 const DEFAULT_PREVIEW_COLOR = '#2563eb';
@@ -366,7 +366,6 @@ export function TipEmbedGenerator() {
       presets: presetsForUrl,
       thanks: settings.thanks || undefined,
       thanksUrl: settings.thanksUrl || undefined,
-      webhook: settings.webhook || undefined,
       // crossChain は USDC でのみ意味がある。JPYC では URL 出力時に無視 (false 時の
       // URL bloat 回避)。default true なので false 時のみ URL に乗る。
       crossChain:
@@ -388,7 +387,6 @@ export function TipEmbedGenerator() {
     presetsForUrl,
     settings.thanks,
     settings.thanksUrl,
-    settings.webhook,
     settings.crossChain,
   ]);
 
@@ -821,11 +819,11 @@ export function TipEmbedGenerator() {
                 {t('presetsHint', { defaults: defaultPresetsList })}
               </p>
             </Field>
-            {/* 開発者向け (成功画面の文・リンク・webhook) は任意なので閉じた折りたたみ。 */}
+            {/* 開発者向け (成功画面の文・リンク) は任意なので閉じた折りたたみ。 */}
             <OptionalGroup
               icon={Code2}
               title={t('devSettingsToggle')}
-              filled={[settings.thanks, settings.thanksUrl, settings.webhook].filter((v) => v.trim()).length}
+              filled={[settings.thanks, settings.thanksUrl].filter((v) => v.trim()).length}
               filledLabel={(count) => t('optionalFilled', { count })}
             >
               <Field label={t('thanksLabel')}>
@@ -855,23 +853,6 @@ export function TipEmbedGenerator() {
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
                 />
                 <p className="mt-1 text-xs text-slate-500">{t('thanksUrlHint')}</p>
-              </Field>
-
-              <Field label={t('webhookLabel')}>
-                <input
-                  type="text"
-                  value={settings.webhook}
-                  onChange={(e) =>
-                    setSettings((s) => ({ ...s, webhook: e.target.value }))
-                  }
-                  placeholder={t('webhookPlaceholder')}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs focus:border-brand focus:outline-none"
-                />
-                <p className="mt-1 text-xs text-slate-500">
-                  {t('webhookHint', {
-                    payload: '{ txHash, amount, token, from, message }',
-                  })}
-                </p>
               </Field>
             </OptionalGroup>
           </div>

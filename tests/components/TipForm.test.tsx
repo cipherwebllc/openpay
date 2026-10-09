@@ -751,7 +751,7 @@ describe('TipForm — 送信', () => {
   });
 });
 
-describe('TipForm — thanks / webhook (B2 + B3)', () => {
+describe('TipForm — thanks / 第三者 webhook 退役 (B2 + R1)', () => {
   it('成功 + thanks あり → メッセージ表示', async () => {
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
@@ -813,7 +813,10 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     expect(link).toHaveAttribute('rel', 'noreferrer noopener');
   });
 
-  it('成功 + webhook あり → fetch が POST される', async () => {
+  it('第三者 webhook は退役 (R1): 旧リンク由来の webhook が params に残っていても外部 URL へ fetch しない', async () => {
+    // parseTipParams は `webhook=` を読まない (tests/lib/url.test.ts) が、型の外から値が紛れても
+    // 成功時に外部 POST が復活しないことを TipForm 側でも固定する。
+    window.localStorage.clear();
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response('ok', { status: 200 }));
@@ -822,36 +825,28 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     setBalance(20_000_000n);
     setSmartAccount(true);
     setBatchPayment('success');
-    render(
-      <TipForm
-        params={{
-          ...USDC_PARAMS,
-          webhook: 'https://example.com/hook',
-        }}
-      />,
-    );
+    const legacyParams = {
+      ...USDC_PARAMS,
+      webhook: 'https://discord.com/api/webhooks/1/legacy',
+    } as TipParams;
+    render(<TipForm params={legacyParams} />);
 
-    expect(fetchSpy).toHaveBeenCalledWith(
-      'https://example.com/hook',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-      }),
+    // 成功処理 (ログ・控え) は従来どおり走る。
+    await waitFor(() =>
+      expect(loggerInfo).toHaveBeenCalledWith('tip.success', expect.anything()),
     );
-    const body = JSON.parse(
-      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
-    );
-    expect(body.type).toBe('openpay.tip.success');
-    expect(body.creator.toLowerCase()).toBe(CREATOR.toLowerCase());
-    expect(body.token).toBe('usdc');
-    expect(body.txHash).toBe(`0x${'b'.repeat(64)}`);
+    expect(loadPayerReceipts()).toHaveLength(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(
+      loggerWarn.mock.calls.filter(([event]) => String(event).startsWith('tip.webhook')),
+    ).toEqual([]);
     fetchSpy.mockRestore();
   });
 
-  it('[regression] 同一 userOpHash で再 render が起きても webhook は 1 回 (gasQuote refetch 耐性)', async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response('ok', { status: 200 }));
+  it('[regression] 同一 userOpHash で再 render が起きても成功処理 (tip.success・控え) は 1 回 (gasQuote refetch 耐性)', async () => {
+    window.localStorage.clear();
+    const successLogs = () =>
+      loggerInfo.mock.calls.filter(([event]) => event === 'tip.success');
 
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
@@ -859,104 +854,18 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     setBatchPayment('success');
     // 初回 gasAmount = 100_000n
     setGasQuote('ready', 100_000n);
-    const { rerender } = render(
-      <TipForm
-        params={{ ...USDC_PARAMS, webhook: 'https://example.com/hook' }}
-      />,
-    );
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    const { rerender } = render(<TipForm params={USDC_PARAMS} />);
+    await waitFor(() => expect(successLogs()).toHaveLength(1));
 
     // gasQuote refetchInterval (30s) で gasAmount が変わったケースをシミュレート
     setGasQuote('ready', 200_000n);
-    rerender(
-      <TipForm
-        params={{ ...USDC_PARAMS, webhook: 'https://example.com/hook' }}
-      />,
-    );
+    rerender(<TipForm params={USDC_PARAMS} />);
     setGasQuote('ready', 300_000n);
-    rerender(
-      <TipForm
-        params={{ ...USDC_PARAMS, webhook: 'https://example.com/hook' }}
-      />,
-    );
+    rerender(<TipForm params={USDC_PARAMS} />);
 
-    // 同一 userOpHash の間は webhook は再発火しない
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    fetchSpy.mockRestore();
-  });
-
-  it('成功 + webhook が non-OK (500) → logger.warn 経路 (UI には影響なし)', async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response('Server error', { status: 500, statusText: 'Internal' }),
-      );
-
-    setAccount({ connected: true, chainId: baseSepolia.id });
-    setBalance(20_000_000n);
-    setSmartAccount(true);
-    setBatchPayment('success');
-    const secret = 'Bearer-tip-non-ok-secret';
-    const webhook = `https://user:${secret}@example.com/hook/${secret}?token=${secret}`;
-    render(
-      <TipForm
-        params={{ ...USDC_PARAMS, webhook }}
-      />,
-    );
-
-    await waitFor(() =>
-      expect(loggerWarn).toHaveBeenCalledWith(
-        'tip.webhook.non_ok',
-        expect.objectContaining({
-          webhookOrigin: 'https://example.com',
-          webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
-        }),
-      ),
-    );
-    const fields = loggerWarn.mock.calls.find(
-      ([event]) => event === 'tip.webhook.non_ok',
-    )?.[1];
-    expect(JSON.stringify(fields)).not.toContain(secret);
-    expect(fields).not.toHaveProperty('url');
-    // 完了 UI は影響を受けず通常表示
-    expect(screen.getAllByText(/UserOp/).length).toBeGreaterThan(0);
-    fetchSpy.mockRestore();
-  });
-
-  it('成功 + webhook が CORS エラー (reject) → catch 経路、UI に影響なし', async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockRejectedValue(new Error('CORS blocked by browser'));
-
-    setAccount({ connected: true, chainId: baseSepolia.id });
-    setBalance(20_000_000n);
-    setSmartAccount(true);
-    setBatchPayment('success');
-    const secret = 'Bearer-tip-failed-secret';
-    const webhook = `https://discord.com/api/webhooks/${secret}?token=${secret}`;
-    render(
-      <TipForm
-        params={{ ...USDC_PARAMS, webhook }}
-      />,
-    );
-
-    await waitFor(() =>
-      expect(loggerWarn).toHaveBeenCalledWith(
-        'tip.webhook.failed',
-        expect.objectContaining({
-          webhookOrigin: 'https://discord.com',
-          webhookHash: expect.stringMatching(/^[0-9a-f]{16}$/),
-        }),
-      ),
-    );
-    const fields = loggerWarn.mock.calls.find(
-      ([event]) => event === 'tip.webhook.failed',
-    )?.[1];
-    expect(JSON.stringify(fields)).not.toContain(secret);
-    expect(fields).not.toHaveProperty('url');
-    // 完了 UI は影響を受けない
-    expect(screen.getAllByText(/UserOp/).length).toBeGreaterThan(0);
-    fetchSpy.mockRestore();
+    // 同一 userOpHash の間は成功処理を再実行しない
+    expect(successLogs()).toHaveLength(1);
+    expect(loadPayerReceipts()).toHaveLength(1);
   });
 
   it('isSwitching=true 時に「チェーン切替中…」表示でボタン disabled', () => {
@@ -970,7 +879,7 @@ describe('TipForm — thanks / webhook (B2 + B3)', () => {
     ).toBeDisabled();
   });
 
-  it('成功 + webhook なし → fetch は呼ばれない', () => {
+  it('成功 → fetch は呼ばれない (第三者への通知は無い)', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response('ok', { status: 200 }));
@@ -1135,36 +1044,6 @@ describe('TipForm — ERC20 Paymaster mode (USDC mainnet)', () => {
     render(<TipForm params={USDC_PARAMS} />);
     expect(screen.getByText(/残高が不足/)).toBeInTheDocument();
   });
-
-  it('webhook payload: ERC20 mode でも customerPays は merchantAmount + feeAmount のみ (gas 含めない)', async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response('ok', { status: 200 }));
-
-    setAccount({ connected: true, chainId: baseSepolia.id });
-    setBalance(200_000_000n);
-    setSmartAccount(true);
-    setGasQuote('ready', 300_000n);
-    setBatchPayment('success');
-
-    render(
-      <TipForm
-        params={{
-          ...USDC_PARAMS,
-          webhook: 'https://example.com/hook',
-        }}
-      />,
-    );
-
-    const body = JSON.parse(
-      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
-    );
-    // preset 1 USDC, gas 0.3 → customerPays = 1.3, merchant = 1 (fee=0), fee = 0
-    expect(body.customerPays).toBe('1300000');
-    expect(body.merchantAmount).toBe('1000000');
-    expect(body.feeAmount).toBe('0');
-    fetchSpy.mockRestore();
-  });
 });
 
 describe('TipForm — CrossChainHint props 統合 (USDC cross-chain wiring)', () => {
@@ -1285,23 +1164,21 @@ describe('TipForm — CrossChainHint props 統合 (USDC cross-chain wiring)', ()
     expect(sendBtn).toBeEnabled();
   });
 
-  it('cross-chain 成功を親 overlay/webhook/控えへ1回だけ流し、開始時金額を固定する', async () => {
+  it('cross-chain 成功を親 overlay/控えへ1回だけ流し、開始時金額を固定する', async () => {
     window.localStorage.clear();
     const user = userEvent.setup();
     const mintTxHash = `0x${'e'.repeat(64)}` as const;
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(null, { status: 204 }));
+    const successLogs = () =>
+      loggerInfo.mock.calls.filter(([event]) => event === 'tip.success');
     setAccount({ connected: true, chainId: baseSepolia.id });
     setBalance(20_000_000n);
     setSmartAccount(true);
     setGasQuote('ready', 100_000n);
 
-    render(
-      <TipForm
-        params={{ ...USDC_PARAMS, webhook: 'https://example.com/tip-hook' }}
-      />,
-    );
+    render(<TipForm params={USDC_PARAMS} />);
 
     await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
     const props = crossChainHintSpy.mock.lastCall![0] as {
@@ -1325,25 +1202,23 @@ describe('TipForm — CrossChainHint props 統合 (USDC cross-chain wiring)', ()
       });
     });
 
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    await waitFor(() => expect(successLogs()).toHaveLength(1));
     expect(
       screen.getAllByText(/チップを送信しました|決済完了/).length,
     ).toBeGreaterThan(0);
     expect(screen.getAllByText(mintTxHash).length).toBeGreaterThan(0);
 
-    // 成功後に preset を変えて effect deps が再評価されても、通知/控えは再発火せず
+    // 成功後に preset を変えて effect deps が再評価されても、成功処理/控えは再発火せず
     // onAttemptStart 時点の 1 USDC が維持される。
     await user.click(screen.getByRole('button', { name: '5 USDC' }));
     await waitFor(() => {
-      expect(fetchSpy).toHaveBeenCalledOnce();
+      expect(successLogs()).toHaveLength(1);
       expect(loadPayerReceipts()).toHaveLength(1);
     });
-    const webhookBody = JSON.parse(
-      (fetchSpy.mock.calls[0]![1] as RequestInit).body as string,
-    );
-    expect(webhookBody.amount).toBe('1');
-    expect(webhookBody.txHash).toBe(mintTxHash);
+    expect(successLogs()[0][1]).toMatchObject({ amount: '1', txHash: mintTxHash });
     expect(loadPayerReceipts()[0]?.amount).toBe('1');
+    // 第三者 webhook (R1) は退役: 外部への通知は無い。
+    expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
 
@@ -1548,7 +1423,7 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     ).toBeInTheDocument();
   });
 
-  it('privateTipMessage は snapshot として relay だけへ渡し、webhook/logger/控え/URL へ混入しない', async () => {
+  it('privateTipMessage は snapshot として relay だけへ渡し、logger/控え/URL へ混入しない (外部通知も無い)', async () => {
     setTipMessageFlag(true);
     window.localStorage.clear();
     const fetchSpy = vi
@@ -1559,7 +1434,6 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     const params = {
       ...JPYC_PARAMS,
       message: publicCreatorMessage,
-      webhook: 'https://creator.example/hook',
     };
     const user = userEvent.setup();
     const rendered = render(<TipForm params={params} />);
@@ -1589,12 +1463,14 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
       },
     });
     rendered.rerender(<TipForm params={params} />);
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
-
-    const webhookBody = (fetchSpy.mock.calls[0][1] as RequestInit)
-      .body as string;
-    expect(JSON.parse(webhookBody).message).toBe(publicCreatorMessage);
-    expect(webhookBody).not.toContain(privateMessage);
+    await waitFor(() =>
+      expect(loggerInfo).toHaveBeenCalledWith('tip.success', expect.anything()),
+    );
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const receipts = loadPayerReceipts();
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0].memo).toBe(publicCreatorMessage);
+    expect(JSON.stringify(receipts)).not.toContain(privateMessage);
     const localStorageValues = Array.from(
       { length: window.localStorage.length },
       (_, index) =>
@@ -1658,7 +1534,7 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     expect(screen.queryByText('99')).toBeNull();
   });
 
-  it('auto recovery→成功で同一 mount の thanks/overlay/webhook/控えを各 1 回だけ確定する', async () => {
+  it('auto recovery→成功で同一 mount の thanks/overlay/控えを各 1 回だけ確定する', async () => {
     window.localStorage.clear();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
@@ -1668,8 +1544,9 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
       ...JPYC_PARAMS,
       thanks: '同一 mount のお礼',
       thanksUrl: 'https://creator.example/thanks',
-      webhook: 'https://creator.example/hook',
     };
+    const successLogs = () =>
+      loggerInfo.mock.calls.filter(([event]) => event === 'tip.success');
     const user = userEvent.setup();
     const rendered = render(<TipForm params={params} />);
 
@@ -1680,7 +1557,7 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
 
     setRelay('success', { variables });
     rendered.rerender(<TipForm params={params} />);
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(successLogs()).toHaveLength(1));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText('同一 mount のお礼')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /リンクを開く/ })).toHaveAttribute(
@@ -1691,7 +1568,8 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     rendered.rerender(<TipForm params={params} />);
 
     const txHash = `0x${'c'.repeat(64)}`;
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(successLogs()).toHaveLength(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
     expect(loadPayerReceipts().filter((r) => r.receiptId === txHash)).toHaveLength(1);
   });
 
@@ -1735,7 +1613,6 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
           message: currentMessage,
           thanks: currentThanks,
           thanksUrl: 'https://current.example/thanks',
-          webhook: 'https://current.example/hook',
         }}
       />,
     );
@@ -1758,7 +1635,7 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     expect(loadPayerReceipts()).toEqual([]);
   });
 
-  it('reload 復元結果の表示中に creator/name/message/webhook が変わっても副作用を発火しない', async () => {
+  it('reload 復元結果の表示中に creator/name/message が変わっても副作用を発火しない', async () => {
     window.localStorage.clear();
     const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
     vi.stubGlobal('fetch', fetchSpy);
@@ -1786,7 +1663,6 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
     });
     const initialParams = {
       ...JPYC_PARAMS,
-      webhook: 'https://restored-page.example/hook',
       thanks: '復元時ページのお礼',
       thanksUrl: 'https://restored-page.example/thanks',
     };
@@ -1802,7 +1678,6 @@ describe('TipForm — EIP-3009 relay (JPYC)', () => {
           message: '変更後の案内',
           thanks: '変更後のお礼',
           thanksUrl: 'https://changed.example/thanks',
-          webhook: 'https://changed.example/hook',
         }}
       />,
     );
@@ -2075,7 +1950,7 @@ describe('TipForm — 署名安心パネル (SignReassurance・P2)', () => {
 });
 
 describe('TipForm — F7 off-origin callback 開示', () => {
-  it('第三者 host の webhook/thanksUrl → 開示ノートに host を表示', () => {
+  it('第三者 host の thanksUrl → 開示ノートに host を表示 (退役した webhook の host は出さない)', () => {
     setAccount({ connected: true, chainId: polygonAmoy.id });
     setBalance(200_000_000_000_000_000_000n);
     setSmartAccount(true);
@@ -2086,12 +1961,12 @@ describe('TipForm — F7 off-origin callback 開示', () => {
           ...JPYC_PARAMS,
           webhook: 'https://shop.example.com/hook',
           thanksUrl: 'https://discord.gg/xyz',
-        }}
+        } as TipParams}
       />,
     );
-    const note = screen.getByText(/に通知・遷移します/);
+    const note = screen.getByText(/へのリンクが表示されます/);
     expect(note).toBeInTheDocument();
-    expect(note.textContent).toContain('shop.example.com');
+    expect(note.textContent).not.toContain('shop.example.com');
     expect(note.textContent).toContain('discord.gg');
   });
 
@@ -2101,14 +1976,27 @@ describe('TipForm — F7 off-origin callback 開示', () => {
     setSmartAccount(true);
     setGasQuote('ready', 0n);
     render(<TipForm params={JPYC_PARAMS} />);
-    expect(screen.queryByText(/に通知・遷移します/)).toBeNull();
+    expect(screen.queryByText(/へのリンクが表示されます/)).toBeNull();
+  });
+
+  it('退役した webhook だけが第三者 host でも開示ノートは出さない (送らないので開示対象外)', () => {
+    setAccount({ connected: true, chainId: polygonAmoy.id });
+    setBalance(200_000_000_000_000_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 0n);
+    render(
+      <TipForm
+        params={{ ...JPYC_PARAMS, webhook: 'https://shop.example.com/hook' } as TipParams}
+      />,
+    );
+    expect(screen.queryByText(/へのリンクが表示されます/)).toBeNull();
   });
 });
 
 // Real useStandardPayment + persisted intent; only wallet/RPC boundaries are mocked.
 describe('Arc standard tip attribution', () => {
   const tx = `0x${'e'.repeat(64)}` as const;
-  const arcParams: TipParams = { ...USDC_PARAMS, mode: 'standard', chain: 'arc', presets: ['0.5', '1'], thanks: 'Arc thanks', webhook: 'https://creator.example/tip' };
+  const arcParams: TipParams = { ...USDC_PARAMS, mode: 'standard', chain: 'arc', presets: ['0.5', '1'], thanks: 'Arc thanks' };
   let walletWrite: ReturnType<typeof vi.fn>;
   let receiptRetry: ReturnType<typeof vi.fn>;
   let writeState: { data: typeof tx | undefined; error: Error | null; isPending: boolean };
@@ -2148,7 +2036,8 @@ describe('Arc standard tip attribution', () => {
     await waitFor(() => expect(button).toBeEnabled());
     fireEvent.click(button);
   }
-  const webhookCalls = () => vi.mocked(fetch).mock.calls.filter(([url]) => url === arcParams.webhook);
+  // 成功処理 (控え・ログ) の発火回数。第三者 webhook (R1) の退役前はその POST 回数で数えていた。
+  const successLogs = () => loggerInfo.mock.calls.filter(([event]) => event === 'tip.success');
 
   describe.each([
     { locale: 'ja' as const, send: '0.5 USDC を送る', checking: '送信結果を確認中', sending: '送信中…' },
@@ -2211,7 +2100,7 @@ describe('Arc standard tip attribution', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /0.5 USDC.*送る/ })).toBeEnabled());
     expect(crossChainHintSpy.mock.lastCall?.[0].executionDisabled).toBe(false);
     expect(screen.queryByText('送信結果を確認中')).not.toBeInTheDocument();
-    expect(webhookCalls()).toHaveLength(0);
+    expect(successLogs()).toHaveLength(0);
     expect(loadPayerReceipts()).toHaveLength(0);
     expect(walletWrite).not.toHaveBeenCalled();
     await submit();
@@ -2261,7 +2150,7 @@ describe('Arc standard tip attribution', () => {
       }
       expect(signTypedData).not.toHaveBeenCalled();
       expect(walletWrite).not.toHaveBeenCalled();
-      expect(webhookCalls()).toHaveLength(0);
+      expect(successLogs()).toHaveLength(0);
       expect(loadPayerReceipts()).toHaveLength(0);
       expect(vi.mocked(fetch).mock.calls.every(([url]) => url === '/api/relay/jpyc/status')).toBe(true);
     } finally {
@@ -2283,14 +2172,16 @@ describe('Arc standard tip attribution', () => {
     receiptState = { data: { status: 'success', blockNumber: 123n, transactionHash: tx, from: FAN, logs: [] }, error: null, isSuccess: true, isError: false };
     view.rerender(<TipForm params={arcParams} />);
     await screen.findByText('Arc thanks');
-    expect(webhookCalls()).toHaveLength(1);
-    expect(JSON.parse(webhookCalls()[0][1]!.body as string)).toMatchObject({ from: FAN, amount: '0.5', blockNumber: '123' });
+    expect(successLogs()).toHaveLength(1);
+    expect(successLogs()[0][1]).toMatchObject({ mode: 'standard', amount: '0.5', txHash: tx });
+    // 同一 origin の決済ログ (/api/log/payment) だけ。外部 URL への通知 (退役した webhook) は無い。
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => String(url)).filter((url) => !url.startsWith('/'))).toEqual([]);
     const receipts = loadPayerReceipts();
     expect(receipts).toHaveLength(1);
     expect(receipts[0]).toMatchObject({ paymentMode: 'standard', payerAddress: FAN, amount: '0.5' });
     expect(receipts[0]).not.toHaveProperty('networkFeeEquivalent');
     view.rerender(<TipForm params={arcParams} />);
-    expect(webhookCalls()).toHaveLength(1);
+    expect(successLogs()).toHaveLength(1);
   });
 
   it.each(['reject', 'revert'] as const)('%s produces no success side effects and permits retry', async (kind) => {
@@ -2306,12 +2197,12 @@ describe('Arc standard tip attribution', () => {
     }
     view.rerender(<TipForm params={arcParams} />);
     await waitFor(() => expect(screen.getByRole('button', { name: /0.5 USDC.*送る/ })).toBeEnabled());
-    expect(webhookCalls()).toHaveLength(0);
+    expect(successLogs()).toHaveLength(0);
     expect(loadPayerReceipts()).toHaveLength(0);
     expect(screen.queryByText('Arc thanks')).not.toBeInTheDocument();
   });
 
-  it('unknown latches transfer, retries receipt only and recovers once; webhook failure stays isolated', async () => {
+  it('unknown latches transfer, retries receipt only and recovers once', async () => {
     const view = render(<TipForm params={arcParams} />);
     await submit();
     receiptState.error = new Error('RPC timeout');
@@ -2321,11 +2212,10 @@ describe('Arc standard tip attribution', () => {
     fireEvent.click(retry);
     expect(receiptRetry).toHaveBeenCalledTimes(1);
     expect(walletWrite).toHaveBeenCalledTimes(1);
-    vi.mocked(fetch).mockRejectedValue(new Error('notification unavailable'));
     receiptState = { data: { status: 'success', blockNumber: 123n, transactionHash: tx, from: FAN, logs: [] }, error: null, isSuccess: true, isError: false };
     view.rerender(<TipForm params={arcParams} />);
     await screen.findByText('Arc thanks');
-    await waitFor(() => expect(loggerWarn).toHaveBeenCalledWith('tip.webhook.failed', expect.anything()));
+    expect(successLogs()).toHaveLength(1);
     expect(loadPayerReceipts()).toHaveLength(1);
     expect(walletWrite).toHaveBeenCalledTimes(1);
   });
@@ -2339,7 +2229,7 @@ describe('Arc standard tip attribution', () => {
     receiptState = { data: { status: 'success', blockNumber: 123n, transactionHash: tx, from: FAN, logs: [] }, error: null, isSuccess: true, isError: false };
     view.rerender(<TipForm params={arcParams} />);
     await waitFor(() => expect(screen.getByRole('button', { name: /0.5 USDC.*送る/ })).toBeEnabled());
-    expect(webhookCalls()).toHaveLength(0);
+    expect(successLogs()).toHaveLength(0);
     expect(loadPayerReceipts()).toHaveLength(0);
     expect(screen.queryByText('Arc thanks')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '1 USDC' }));
@@ -2350,11 +2240,11 @@ describe('Arc standard tip attribution', () => {
     receiptState = { data: { status: 'success', blockNumber: 124n, transactionHash: tx, from: FAN, logs: [] }, error: null, isSuccess: true, isError: false };
     view.rerender(<TipForm params={arcParams} />);
     await screen.findByText('Arc thanks');
-    expect(webhookCalls()).toHaveLength(1);
+    expect(successLogs()).toHaveLength(1);
     expect(loadPayerReceipts()[0]).toMatchObject({ amount: '1', paymentMode: 'standard' });
   });
 
-  it('preview with a populated intent has zero restore, RPC, write, receipt, webhook and log effects', async () => {
+  it('preview with a populated intent has zero restore, RPC, write, receipt, notification and log effects', async () => {
     seed(5042002);
     const stored = window.sessionStorage.getItem('openpay:standard-intent:v1');
     render(<TipForm params={arcParams} preview />);
@@ -2369,12 +2259,12 @@ describe('Arc standard tip attribution', () => {
   });
 });
 
-it('Gateway hashless success keeps Tip paid and records a receipt without a transaction link or webhook', async () => {
+it('Gateway hashless success keeps Tip paid and records a receipt without a transaction link or external notification', async () => {
   window.localStorage.clear();
   const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 204 }));
   setAccount({ connected: true, chainId: baseSepolia.id });
   setBalance(20_000_000n); setSmartAccount(true); setGasQuote('ready', 100_000n);
-  render(<TipForm params={{ ...USDC_PARAMS, webhook: 'https://example.com/tip-hook' }} />);
+  render(<TipForm params={USDC_PARAMS} />);
   await waitFor(() => expect(crossChainHintSpy).toHaveBeenCalled());
   const props = crossChainHintSpy.mock.lastCall![0] as { onAttemptStart: (amount: bigint) => void; onSuccess: (result: import('@/hooks/useCrossChainPayment').ExecuteResult) => void };
   const { gatewayAttestation, encodedSpec } = await import('../fixtures/gateway');

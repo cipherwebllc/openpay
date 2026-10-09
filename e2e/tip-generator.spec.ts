@@ -30,20 +30,20 @@ test.describe('Tip widget generator (creator UX)', () => {
     await expect(page.getByRole('heading', { name: 'Tip URL' })).toHaveCount(0);
   });
 
-  test('開発者向け設定は default 閉、開くと webhook 入力が出る', async ({
+  test('開発者向け設定は default 閉、開くとサンクスリンク入力が出る (webhook 入力は退役)', async ({
     page,
   }) => {
     await openTipTab(page);
     // 「表示をカスタマイズ」の中の閉じた任意のまとまり。見出しを押すと開く。
     const details = page.locator('details', { hasText: '開発者向け設定' });
     await expect(details).not.toHaveAttribute('open', '');
-    await expect(page.getByPlaceholder(/discord\.com\/api\/webhooks/)).toBeHidden();
+    await expect(page.getByPlaceholder(/discord\.gg/)).toBeHidden();
 
     await details.locator('summary').click();
     await expect(details).toHaveAttribute('open', '');
-    await expect(
-      page.getByPlaceholder(/discord\.com\/api\/webhooks/),
-    ).toBeVisible();
+    await expect(page.getByPlaceholder(/discord\.gg/)).toBeVisible();
+    // 第三者 webhook (R1・退役) の入力欄は出さない。
+    await expect(page.getByPlaceholder(/discord\.com\/api\/webhooks/)).toHaveCount(0);
   });
 
   test('プリセット編集 → URL に preset= 反映、token 切替で独立リスト', async ({

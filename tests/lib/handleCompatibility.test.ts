@@ -145,10 +145,11 @@ describe('public handle facade compatibility', () => {
     expectTypeOf<HandleRegularLink['embedResolved']>().toEqualTypeOf<HandleEmbedResolved | undefined>();
     expectTypeOf<HandleProfile['font']>().toEqualTypeOf<HandleFont | undefined>();
     expectTypeOf<HandleProfile['linkLayout']>().toEqualTypeOf<HandleLinkLayout | undefined>();
-    expectTypeOf<ClearableHandleTipField>().toEqualTypeOf<'message' | 'thanks' | 'thanksUrl' | 'webhook'>();
+    // 'webhook' は 2026-10 (user 裁定 R1) に退役 (第三者 webhook の廃止)。
+    expectTypeOf<ClearableHandleTipField>().toEqualTypeOf<'message' | 'thanks' | 'thanksUrl'>();
     expectTypeOf<HandleTipConfigUpdate[ClearableHandleTipField]>().toEqualTypeOf<string | null | undefined>();
     expectTypeOf<HandleTipConfig[ClearableHandleTipField]>().toEqualTypeOf<string | undefined>();
-    expect(handle.CLEARABLE_HANDLE_TIP_FIELDS).toEqual(['message', 'thanks', 'thanksUrl', 'webhook']);
+    expect(handle.CLEARABLE_HANDLE_TIP_FIELDS).toEqual(['message', 'thanks', 'thanksUrl']);
   });
 
   it('keeps the facade runtime import graph free of KV, SIWE/auth, server-only and Node dependencies', () => {

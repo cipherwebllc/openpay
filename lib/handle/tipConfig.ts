@@ -22,11 +22,12 @@ export interface PublishableTipConfig {
   presets?: string[];
   thanks?: string;
   thanksUrl?: string;
-  webhook?: string;
   crossChain?: boolean;
 }
 
-export const CLEARABLE_HANDLE_TIP_FIELDS = ['message', 'thanks', 'thanksUrl', 'webhook'] as const;
+// 旧 'webhook' は退役 (2026-10 user 裁定 R1)。旧 client が送る `webhook` (値 / null) は検証で
+// 読まずに無視する (エラーにしない・保存しない)。
+export const CLEARABLE_HANDLE_TIP_FIELDS = ['message', 'thanks', 'thanksUrl'] as const;
 export type ClearableHandleTipField = (typeof CLEARABLE_HANDLE_TIP_FIELDS)[number];
 
 // wire 専用: 保存/描画用 HandleTipConfig には null を持ち込まない。
@@ -93,7 +94,6 @@ export function validateTipConfig(raw: unknown): ValidatedConfig {
       : undefined,
     thanks: str(r.thanks),
     thanksUrl: str(r.thanksUrl),
-    webhook: str(r.webhook),
     crossChain: typeof r.crossChain === 'boolean' ? r.crossChain : undefined,
   };
   // configToSearchParams + parseTipParams で tip URL と全く同じ検証を通す。
@@ -119,7 +119,6 @@ export function methodToPublishableConfig(
     presets: config.presets?.[method.token],
     thanks: config.thanks,
     thanksUrl: config.thanksUrl,
-    webhook: config.webhook,
     crossChain: method.token === 'usdc' ? method.crossChain : undefined,
   };
 }
@@ -159,7 +158,6 @@ export function validateHandleTipConfig(raw: unknown): ValidatedHandleConfig {
     theme: isHandleTheme(r.theme) ? r.theme : undefined,
     thanks: str(r.thanks),
     thanksUrl: str(r.thanksUrl),
-    webhook: str(r.webhook),
   };
 
   const seen = new Set<string>();
@@ -212,7 +210,6 @@ export function validateHandleTipConfig(raw: unknown): ValidatedHandleConfig {
     ...(canonical.theme ? { theme: canonical.theme } : {}),
     thanks: canonical.thanks,
     thanksUrl: canonical.thanksUrl,
-    webhook: canonical.webhook,
     methods,
     presets: Object.keys(presetsOut).length > 0 ? presetsOut : undefined,
   };
