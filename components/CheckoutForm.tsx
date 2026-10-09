@@ -786,6 +786,8 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // (成功描画時の live 値ではない)。
         amount: formatUnits(snapshot.totalWei, deployment.decimals),
         items: params.items,
+        // レジの値引き (在るときだけ・追加のみ)。items の合計 − discount = amount で突き合わせられるように。
+        ...(params.discount ? { discount: params.discount } : {}),
         merchantAmount: snapshot.merchantReceives.toString(),
         feeAmount: snapshot.feeAmount.toString(),
         customerPays: snapshot.customerPays.toString(),
@@ -881,6 +883,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     params.token,
     chainSlug,
     params.items,
+    params.discount,
     params.orderId,
     params.description,
     params.pickupAt,
@@ -1077,6 +1080,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
       chainId: deployment.chainId,
       amount: formatUnits(snapshot.totalWei, deployment.decimals),
       items: params.items,
+      ...(params.discount ? { discount: params.discount } : {}),
       merchantAmount: snapshot.merchantReceives.toString(),
       feeAmount: snapshot.feeAmount.toString(),
       customerPays: snapshot.customerPays.toString(),
@@ -1151,6 +1155,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     deployment.decimals,
     isStandard,
     params.description,
+    params.discount,
     params.items,
     params.orderId,
     params.pickupAt,

@@ -1043,12 +1043,39 @@ describe('CheckoutForm — 成功時の挙動', () => {
     expect(payload.token).toBe('usdc');
     expect(payload.chain).toBe('base');
     expect(payload.items).toEqual(USDC_PARAMS.items);
+    // 値引きの無い会計の payload に discount は出ない (追加のみ・従来の形のまま)。
+    expect('discount' in payload).toBe(false);
     expect(payload.orderId).toBe('ord-42');
     expect(payload.txHash).toBe(`0x${'b'.repeat(64)}`);
     // URL 仕様で customerEmail は prefill 専用・クライアントから送信しない → payload に不在。
     expect('customerEmail' in payload).toBe(false);
     // お渡し準備完了 flag OFF (既定) → statusToken は payload に不在 (完全 inert)。
     expect('statusToken' in payload).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it('レジの値引き: webhook payload に discount を足す (items の合計 − discount = amount)', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchSpy);
+    setAccount({ connected: true, chainId: baseSepolia.id });
+    setBalance(200_000_000n);
+    setSmartAccount(true);
+    setGasQuote('ready', 100_000n);
+    const makeUi = () => (
+      <CheckoutForm
+        params={{ ...USDC_PARAMS, orderId: undefined, discount: '5', webhook: 'https://shop.example.com/hook' }}
+      />
+    );
+    const { rerender } = render(makeUi());
+    await submitGaslessThenSucceed(user, rerender, makeUi);
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    const payload = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(payload.discount).toBe('5');
+    expect(payload.items).toEqual(USDC_PARAMS.items);
+    expect(Number(payload.amount)).toBe(
+      USDC_PARAMS.items.reduce((a, it) => a + Number(it.price) * it.qty, 0) - 5,
+    );
     vi.unstubAllGlobals();
   });
 
