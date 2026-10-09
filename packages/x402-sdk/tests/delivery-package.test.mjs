@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { fixture } from './delivery.fixture.mjs';
@@ -22,7 +23,8 @@ test('workspace root keeps existing exports and does not expose delivery; subpat
 });
 
 test('actual npm tarball includes types/examples and verifies through installed export map without Node globals', () => {
-  const dir = mkdtempSync('/private/tmp/openpay-delivery-package-');
+  // OS の一時フォルダ (macOS 固定の /private/tmp は CI の Linux に無い)。
+  const dir = mkdtempSync(join(tmpdir(), 'openpay-delivery-package-'));
   try {
     const npm = ['pack', '--json', '--ignore-scripts', '--cache', join(dir, 'npm-cache')];
     const dry = manifestOf(execFileSync('npm', [...npm, '--dry-run'], { cwd: packageDir, encoding: 'utf8' }));
