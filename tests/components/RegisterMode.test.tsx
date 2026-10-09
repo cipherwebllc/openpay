@@ -564,7 +564,7 @@ describe('RegisterMode', () => {
       await cartWithCoffeeAndShirt(user);
       await user.click(orderPanel().getByRole('button', { name: '＋ 値引きを追加' }));
       await user.type(orderPanel().getByLabelText('値引きの金額'), '3500');
-      expect(orderPanel().getByText(/小計より小さい金額を、1 JPYC 単位で入れてください/)).toBeInTheDocument();
+      expect(orderPanel().getByText(/値引き前の金額より小さい金額を、1 JPYC 単位で入れてください/)).toBeInTheDocument();
       for (const btn of screen.getAllByRole('button', { name: /QRコードを表示する/ })) expect(btn).toBeDisabled();
       expect(screen.getAllByText(/値引きを直してください|値引きを確認/).length).toBeGreaterThan(0);
     });

@@ -2705,6 +2705,18 @@ describe('QrGenerator: 値引き (任意)', () => {
     await waitFor(() => expect(payUrlText()).toContain('amount=1210&disc=24'));
   });
 
+  it('通常決済の互換 QR (EIP-681・ウォレットが直接読む) も値引き後の額 (980 JPYC)', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
+    await user.type(screen.getByLabelText('値引きの金額'), '20');
+    await pickInSettings(user, /通常決済（ガス代は顧客負担）/);
+    await openQrModal(user);
+    const uri = (await screen.findByText((t) => t.startsWith('ethereum:'))).textContent!;
+    expect(uri).toContain('uint256=980000000000000000000');
+  });
+
   it('値引き前の金額以上の値引きは QR を出さず、理由を出す', async () => {
     const user = userEvent.setup();
     render(<QrGenerator />);
@@ -2712,6 +2724,7 @@ describe('QrGenerator: 値引き (任意)', () => {
     await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
     await user.type(screen.getByLabelText('値引きの金額'), '1000');
     screen.getAllByRole('button', { name: /QRコードを表示する/ }).forEach((b) => expect(b).toBeDisabled());
+    expect(screen.getByText('値引き前の金額より小さい金額を、1 JPYC 単位で入れてください')).toBeInTheDocument();
     expect(screen.getByText('値引きを直してください')).toBeInTheDocument();
     expect(screen.getByText('値引きを確認')).toBeInTheDocument();
   });
