@@ -2004,19 +2004,23 @@ describe('useStandardPayment: 置換先の revert・実 hash の保持・遅れ�
     await waitFor(() => expect(result.current.phase).toBe('merchant-error'));
 
     // 試行 B: receipt query が RPC 障害。B 自身の receipt は無い → unknown のまま (A の置換先で確定しない)。
+    act(() => result.current.mutate(params));
+    expect(useWriteContractMockA.writeContract).toHaveBeenCalledTimes(2);
+    // B の送信が返す hash と、その receipt query の RPC 障害を、送信の成功通知と同じ act で揃えて渡す
+    // (mock の wagmi は状態を書き換えても再描画しないので、途中の状態を読ませない)。待つ間は再描画を挟む
+    // (本物の wagmi は query の状態変化で再描画する)。
     act(() => {
-      result.current.mutate(params);
       useWriteContractMockState.a.data = NEXT_MERCHANT_TX;
       useWaitMockState.a.error = new Error('rpc timeout');
       useWaitMockState.a.isError = true;
+      onSuccessOf(useWriteContractMockA.writeContract, 1)!(NEXT_MERCHANT_TX);
     });
-    act(() => onSuccessOf(useWriteContractMockA.writeContract, 1)?.(NEXT_MERCHANT_TX));
-    rerender();
-    await waitFor(() =>
+    await waitFor(() => {
+      rerender();
       expect(publicClientMock.getTransactionReceipt).toHaveBeenCalledWith({
         hash: NEXT_MERCHANT_TX,
-      }),
-    );
+      });
+    });
     await act(async () => {
       await Promise.resolve();
     });
