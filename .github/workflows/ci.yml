@@ -56,9 +56,10 @@ jobs:
           tests/components/X402DiscoveryView.test.tsx
       # scripts/run-tests.mjs は vitest を forks pool / maxForks=2 で起動し、
       # JSON reporter の numFailedTests を真の合否ソースとして使う。
-      # PaymentForm / CheckoutForm / TipForm 系で観測される post-teardown
-      # "Worker exited unexpectedly" は全 assertion が pass している状態の
-      # cleanup OOM なので fail とは扱わない (script 内で別途 warning を残す)。
+      # assertion の外の未処理エラー (worker の異常終了 "Worker exited unexpectedly" を含む) は
+      # scripts/lib/unhandledErrorsReporter.mjs が数えて fail にする (第 7 回レビュー #759)。かつての
+      # PaymentForm 系の post-teardown OOM は 2026-06-03 に真因を直したので通さない。再発したら真因を調べる
+      # (continue-on-error に戻さない)。
       # 本物の Lua (wasmoon) を使う test は非決定的に WASM heap が壊れる (memory:
       # feedback_wasmoon_oob_flaky) ので外し lua-real job に任せる (2026-09-12 案 1)。
       # 除外一覧は scripts/lib/luaRealTests.mjs が単一情報源 (run-tests.mjs が --exclude を付ける)。

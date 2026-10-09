@@ -249,8 +249,8 @@ child.on('exit', (code) => {
   }
   if (code !== 0) {
     console.warn(
-      `[run-tests] PASS with warning: vitest exit=${code} (likely worker post-teardown crash)。` +
-        '全 assertion 数 (passed+failed) が total と一致しているため exit 0 で扱う。',
+      `[run-tests] vitest exit=${code} だが、未処理エラーは 0 件で全 assertion 数 (passed+failed) が total と一致。` +
+        'coverage の下限はこの後で判定する (vitest の終了コードは理由を区別できないので合否に使わない)。',
     );
   }
   process.exit(withCoverage && !checkCoverage() ? 1 : 0);
