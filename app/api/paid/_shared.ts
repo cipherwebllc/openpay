@@ -22,6 +22,7 @@ import {
   promotePaymentRedelivery,
   releasePaymentRedelivery,
   type PaymentRedeliveryBinding,
+  type PaymentRedeliveryIdentity,
   type PaymentSettlement,
 } from '@/lib/x402/paymentRedelivery';
 import { checkFacilitatorStatusRateLimit } from '@/lib/x402/facilitatorStatusRateLimit';
@@ -31,6 +32,7 @@ import {
   decodePaymentSignatureHeaderValue,
   encodePaymentRequiredHeaderValue,
   encodePaymentResponseHeaderValue,
+  isPaymentPayloadV2,
   toV2Accept,
   v2PayloadToV1Body,
 } from '@/lib/x402/v2';
@@ -126,6 +128,79 @@ function encodeJsonBase64(value: unknown): string {
 function decodePaymentHeader(raw: string): unknown {
   const json = Buffer.from(raw, 'base64').toString('utf8');
   return JSON.parse(json) as unknown;
+}
+
+type PaymentHeaderRead =
+  | { kind: 'missing' }
+  | { kind: 'invalid' }
+  | { kind: 'ok'; payload: unknown; usesV2Header: boolean; identity: PaymentRedeliveryIdentity };
+
+// 支払い header の読み取り (有無・復号・支払いの識別子)。有料 GET のコアと、コアの前に KV を先読みする
+// route (paymentHeaderUsable) が同じ判定を使う。
+function readPaymentHeader(req: Request): PaymentHeaderRead {
+  const paymentSignatureHeader = req.headers.get('PAYMENT-SIGNATURE');
+  const paymentHeader = req.headers.get('x-payment');
+  if (!paymentSignatureHeader && !paymentHeader) return { kind: 'missing' };
+  let payload: unknown;
+  try {
+    payload = paymentSignatureHeader
+      ? decodePaymentSignatureHeaderValue(paymentSignatureHeader)
+      : decodePaymentHeader(paymentHeader!);
+  } catch {
+    return { kind: 'invalid' };
+  }
+  const identity = paymentRedeliveryIdentity(payload);
+  if (!identity) return { kind: 'invalid' };
+  return { kind: 'ok', payload, usesV2Header: paymentSignatureHeader !== null, identity };
+}
+
+/**
+ * 支払い header があり、コアが verify まで進める形か (無い・壊れている・識別子が取れないなら false =
+ * コアは content を呼ばずに 402 を返す)。支払いの前に KV を先読みする route は、これが true のときだけ
+ * 読む (中身の無い header の連打で KV を読ませない・第 7 回レビュー E1)。
+ *
+ * v2 header (PAYMENT-SIGNATURE) は識別子が取れても、コアが v2PayloadToV1Body で拒否する形 (v1 の payload を
+ * 載せる・accepted の必須項目が欠ける等) があるので、同じ構造検査 (isPaymentPayloadV2) も通ったときだけ true
+ * (Codex P2)。accepted と要件の一致はコアが descriptor を解決してから見るので、ここでは見ない。
+ * v1 header (x-payment) は識別子まででよい: コア自身がこの後に KV の再配信 lookup を読むので、これ以上の
+ * 先読み抑止は効果が小さい。この判定はコアの順序・応答を変えない (コアは readPaymentHeader だけを使う)。
+ *
+ * ⚠️ false は「この要求で content が呼ばれない」を意味しない: コアは v2 の構造検査より先に再配信 lookup を
+ * 行い、同じ identity・credential の settled レコード (pending からの復旧を含む) があれば content を呼ぶ。
+ * 先読みを抑止する route は content を lazy に組む (handleFirstPartyPaidGetFromSnapshot)。
+ */
+function paymentHeaderUsable(req: Request): boolean {
+  const header = readPaymentHeader(req);
+  if (header.kind !== 'ok') return false;
+  return !header.usesV2Header || isPaymentPayloadV2(header.payload);
+}
+
+/**
+ * KV の snapshot から content を組む first-party route (directory 一覧・検索・詳細・JPYC Service Monitor・
+ * JPYC Shops 検索) の共通形。`buildContent` は snapshot を読んで content (200) を組み、読めなければその route の
+ * 503 storage_unavailable を返す。
+ *
+ * - 支払い header が verify まで進める形 (paymentHeaderUsable) なら **先読み**: settle 後の KV 障害を
+ *   「課金済み・データ無し」へ波及させないため、verify/settle より先に content を完成させる。読めなければ
+ *   verify/settle を呼ばずにその 503 を返す (未課金)。
+ * - それ以外は **lazy**: `buildContent` をそのままコアに渡し、コアが content を呼んだとき (= 同じ支払いの
+ *   settled 再配信・pending からの復旧が成立したとき) だけ snapshot を 1 回読む。コアが 402 で終わるなら KV は
+ *   読まない (中身の無い header の連打で KV を読ませない・第 7 回レビュー E1)。再配信時に snapshot が読めなければ
+ *   503 storage_unavailable (課金は成立済み・settle は走らない)。支払い済みの再配信を 503 に変えない (Codex P2)。
+ *
+ * コアの順序・応答は変えない (handleFirstPartyPaidGet の中身は不変・paid-golden-wire / monitor-wire-golden が担保)。
+ */
+export async function handleFirstPartyPaidGetFromSnapshot(
+  req: Request,
+  resource: FirstPartyResource,
+  buildContent: () => Promise<NextResponse>,
+): Promise<NextResponse> {
+  if (!paymentHeaderUsable(req)) {
+    return handleFirstPartyPaidGet(req, resource, buildContent);
+  }
+  const content = await buildContent();
+  if (!content.ok) return content;
+  return handleFirstPartyPaidGet(req, resource, () => content);
 }
 
 function paymentBody(
@@ -350,31 +425,14 @@ async function handlePaidGetWithDescriptor(
         resolve: () => ({ ...canonical.resolve(), url: `${canonical.url}${requestSearch}` }),
       };
 
-  const paymentSignatureHeader = req.headers.get('PAYMENT-SIGNATURE');
-  const paymentHeader = req.headers.get('x-payment');
-  if (!paymentSignatureHeader && !paymentHeader) {
+  const header = readPaymentHeader(req);
+  if (header.kind === 'missing') {
     return paymentChallenge(source.resolve, 'payment_required');
   }
-
-  let paymentPayload: unknown;
-  const usesV2Header = paymentSignatureHeader !== null;
-  if (paymentSignatureHeader) {
-    try {
-      paymentPayload = decodePaymentSignatureHeaderValue(paymentSignatureHeader);
-    } catch {
-      return paymentChallenge(source.resolve, 'invalid_payment_payload');
-    }
-  } else {
-    try {
-      paymentPayload = decodePaymentHeader(paymentHeader!);
-    } catch {
-      return paymentChallenge(source.resolve, 'invalid_payment_payload');
-    }
-  }
-  const redeliveryIdentity = paymentRedeliveryIdentity(paymentPayload);
-  if (!redeliveryIdentity) {
+  if (header.kind === 'invalid') {
     return paymentChallenge(source.resolve, 'invalid_payment_payload');
   }
+  const { payload: paymentPayload, usesV2Header, identity: redeliveryIdentity } = header;
 
   // 検索 API の query が違う別コンテンツまで同じ支払いで解錠される波及を断つため、
   // payment identity の原子的 claim を resource path + 実リクエスト query へ束縛する。

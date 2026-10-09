@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { handleFirstPartyPaidGet } from '@/app/api/paid/_shared';
+import { handleFirstPartyPaidGetFromSnapshot } from '@/app/api/paid/_shared';
 import { guardPaidShopsApi, shopsError } from '@/app/api/shops/_shared';
 import { chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
@@ -23,12 +23,6 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function paymentHeaderPresent(req: Request): boolean {
-  return Boolean(
-    req.headers.get('PAYMENT-SIGNATURE') || req.headers.get('x-payment'),
-  );
-}
 
 function forwarderConfigured(summary: ShopSummary): boolean | null {
   if (!summary.chain) return null;
@@ -92,47 +86,38 @@ export async function GET(req: Request): Promise<NextResponse> {
   const guarded = await guardPaidShopsApi(req);
   if (guarded) return guarded;
 
-  // 未払いは KV を読まず既存 helper の 402 challenge を返す。支払い header がある場合だけ、
-  // verify/settle より先に summary + live の content snapshot を完成させる。
-  if (!paymentHeaderPresent(req)) {
-    return handleFirstPartyPaidGet(req, JPYC_SHOPS_SEARCH_RESOURCE, () =>
-      shopsError('snapshot_required', 503),
-    );
-  }
-
-  const snapshot = await readShopSummarySnapshot();
-  if (snapshot === null) return shopsError('storage_unavailable', 503);
-  const liveByHandle = env.enableShopLive
-    ? await readShopLiveSnapshot(
-        snapshot.summaries.map((summary) => summary.handle),
-      )
-    : new Map<string, ShopLiveState>(
-        snapshot.summaries.map((summary) => [
-          summary.handle,
-          { ...EMPTY_SHOP_LIVE },
-        ]),
-      );
-  const nowMs = Date.now();
-  const candidates = snapshot.summaries.map((summary) =>
-    searchItem(summary, liveByHandle.get(summary.handle) ?? null, nowMs),
-  );
-  const result = queryShops(candidates, parsed.value);
-  const items = result.items.map(publicShopSearchItem);
-  const envelope = createShopsEnvelope(
-    parsed.value,
-    { items, total: result.total },
-    new Date(nowMs).toISOString(),
-    result.items.map((item) => ({
-      updatedAt: item.sourceUpdatedAt,
-      pageUrl: item.pageUrl,
-    })),
-  );
-
-  // content は KV を再読せず、この時点で確定済みの snapshot だけを返す。settle 後の storage
+  // 未払いは KV を読まず既存 helper の 402 challenge を返す。支払い header が verify まで進める形の
+  // ときだけ、verify/settle より先に summary + live の content snapshot を完成させる (helper が判定)。
+  // 先読みしたときの content は KV を再読せず、確定済みの snapshot だけを返す。settle 後の storage
   // 障害で「支払い済み・データ無し」になる経路を構造的に持たない。
-  return handleFirstPartyPaidGet(
-    req,
-    JPYC_SHOPS_SEARCH_RESOURCE,
-    () => NextResponse.json(envelope),
-  );
+  return handleFirstPartyPaidGetFromSnapshot(req, JPYC_SHOPS_SEARCH_RESOURCE, async () => {
+    const snapshot = await readShopSummarySnapshot();
+    if (snapshot === null) return shopsError('storage_unavailable', 503);
+    const liveByHandle = env.enableShopLive
+      ? await readShopLiveSnapshot(
+          snapshot.summaries.map((summary) => summary.handle),
+        )
+      : new Map<string, ShopLiveState>(
+          snapshot.summaries.map((summary) => [
+            summary.handle,
+            { ...EMPTY_SHOP_LIVE },
+          ]),
+        );
+    const nowMs = Date.now();
+    const candidates = snapshot.summaries.map((summary) =>
+      searchItem(summary, liveByHandle.get(summary.handle) ?? null, nowMs),
+    );
+    const result = queryShops(candidates, parsed.value);
+    const items = result.items.map(publicShopSearchItem);
+    const envelope = createShopsEnvelope(
+      parsed.value,
+      { items, total: result.total },
+      new Date(nowMs).toISOString(),
+      result.items.map((item) => ({
+        updatedAt: item.sourceUpdatedAt,
+        pageUrl: item.pageUrl,
+      })),
+    );
+    return NextResponse.json(envelope);
+  });
 }

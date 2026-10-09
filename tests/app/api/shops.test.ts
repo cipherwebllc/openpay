@@ -484,6 +484,53 @@ describe('GET /api/paid/jpyc-shops/search', () => {
     expect(payment.settle).toHaveBeenCalledOnce();
   });
 
+  // Codex P2 (再レビュー): 先読みしない header (v1 payload を PAYMENT-SIGNATURE に載せた再送) でも、同じ
+  // identity・credential の settled レコードが KV にあれば実コンテンツ。snapshot はコアが content を呼ぶときに 1 回。
+  it('settled の再配信は v1 payload を PAYMENT-SIGNATURE に載せた再送でも実コンテンツ', async () => {
+    const { paymentRedeliveryIdentity } = await import('@/lib/x402/paymentRedelivery');
+    const header = paymentHeader();
+    const identity = paymentRedeliveryIdentity(JSON.parse(Buffer.from(header, 'base64').toString('utf8')))!;
+    const settlement = {
+      success: true,
+      transaction: `0x${'cd'.repeat(32)}`,
+      network: 'eip155:80002',
+      payer: PAYER,
+    };
+    kvMocks.get.mockImplementation(async (key: string) =>
+      key === identity.keyIdentity
+        ? {
+            ok: true as const,
+            value: JSON.stringify({
+              version: 1,
+              scope: 'first-party',
+              resource: 'https://open-pay.jp/api/paid/jpyc-shops/search?q=alpha',
+              credential: identity.credential,
+              facilitatorBody: {},
+              state: 'settled',
+              settlement,
+            }),
+          }
+        : { ok: true as const, value: null },
+    );
+    const { paid } = await load();
+    const res = await paid.GET(
+      new Request('https://open-pay.jp/api/paid/jpyc-shops/search?q=alpha', {
+        headers: { 'PAYMENT-SIGNATURE': header },
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { items: Array<{ handle: string }>; total: number };
+    expect(body.total).toBe(1);
+    expect(body.items[0]).toMatchObject({ handle: 'alpha', pageUrl: 'https://open-pay.jp/@alpha' });
+    expect(
+      JSON.parse(Buffer.from(res.headers.get('x-payment-response')!, 'base64').toString('utf8')),
+    ).toEqual(settlement);
+    expect(kvMocks.lrange).toHaveBeenCalledOnce();
+    expect(kvMocks.mget).toHaveBeenCalledTimes(2);
+    expect(payment.verify).not.toHaveBeenCalled();
+    expect(payment.settle).not.toHaveBeenCalled();
+  });
+
   it('専用 limiter は読取前に shops-paid 10/分、超過は429', async () => {
     rate.allowed = false;
     const { paid } = await load();

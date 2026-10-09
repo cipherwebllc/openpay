@@ -203,6 +203,24 @@ describe('GET /api/paid/jpyc/services (facilitator gate)', () => {
     expect(paidMocks.settle).toHaveBeenCalledTimes(1);
   });
 
+  // Codex P2 (再レビュー): 先読みしない header (v1 payload を PAYMENT-SIGNATURE に載せた再送) でも、
+  // settled の再配信レコードがあれば実コンテンツ。snapshot はコアが content を呼ぶときに 1 回だけ読む。
+  it('settled の再配信は v1 payload を PAYMENT-SIGNATURE に載せた再送でも実コンテンツ', async () => {
+    const route = await loadJpyc();
+    const paid = await paidReq(route, 'X-PAYMENT');
+    paidMocks.lookup.mockResolvedValue({ kind: 'match', record: { state: 'settled', settlement: SETTLEMENT } });
+    verificationMocks.read.mockClear();
+    const res = await route.GET(
+      new Request(paid.url, { headers: { 'PAYMENT-SIGNATURE': paid.headers.get('X-PAYMENT')! } }),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ mode: 'delta' });
+    expect(JSON.parse(Buffer.from(res.headers.get('X-PAYMENT-RESPONSE')!, 'base64').toString())).toEqual(SETTLEMENT);
+    expect(verificationMocks.read).toHaveBeenCalledTimes(1);
+    expect(paidMocks.verify).not.toHaveBeenCalled();
+    expect(paidMocks.settle).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['directory OFF', '', '1'],
     ['facilitator OFF', '1', ''],

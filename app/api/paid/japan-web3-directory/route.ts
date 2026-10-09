@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { handleFirstPartyPaidGet } from '@/app/api/paid/_shared';
+import { handleFirstPartyPaidGetFromSnapshot } from '@/app/api/paid/_shared';
 import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
 import { DIRECTORY_LIST_RESOURCE } from '@/lib/directory/paidResources';
 import {
@@ -19,37 +19,26 @@ const LIST_QUERY: DirectoryQuery = {
   offset: 0,
 };
 
-function paymentHeaderPresent(req: Request): boolean {
-  return Boolean(
-    req.headers.get('PAYMENT-SIGNATURE') || req.headers.get('x-payment'),
-  );
-}
-
 export async function GET(req: Request): Promise<NextResponse> {
   const guarded = guardPaidDirectoryApi();
   if (guarded) return guarded;
 
-  if (!paymentHeaderPresent(req)) {
-    return handleFirstPartyPaidGet(req, DIRECTORY_LIST_RESOURCE, () =>
-      NextResponse.json({ error: 'snapshot_required' }, { status: 503 }),
+  // snapshot の先読み / lazy の切り替えは helper (支払い前に KV を読む条件・再配信時の扱い) に集約。
+  return handleFirstPartyPaidGetFromSnapshot(req, DIRECTORY_LIST_RESOURCE, async () => {
+    const verificationSnapshot = await readDirectoryVerificationSnapshot();
+    if (verificationSnapshot === null) {
+      return NextResponse.json(
+        { ok: false, error: 'storage_unavailable' },
+        { status: 503 },
+      );
+    }
+    const result = queryDirectory(DIRECTORY_ENTRIES, LIST_QUERY);
+    const envelope = createDirectoryEnvelope(
+      LIST_QUERY,
+      result,
+      new Date().toISOString(),
+      verificationSnapshot,
     );
-  }
-
-  const verificationSnapshot = await readDirectoryVerificationSnapshot();
-  if (verificationSnapshot === null) {
-    return NextResponse.json(
-      { ok: false, error: 'storage_unavailable' },
-      { status: 503 },
-    );
-  }
-  const result = queryDirectory(DIRECTORY_ENTRIES, LIST_QUERY);
-  const envelope = createDirectoryEnvelope(
-    LIST_QUERY,
-    result,
-    new Date().toISOString(),
-    verificationSnapshot,
-  );
-  return handleFirstPartyPaidGet(req, DIRECTORY_LIST_RESOURCE, () =>
-    NextResponse.json(envelope),
-  );
+    return NextResponse.json(envelope);
+  });
 }
