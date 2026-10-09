@@ -2648,3 +2648,88 @@ describe('QrGenerator: モバイル下部バー (請求金額 + QR ボタン重�
     expect(bar?.textContent).toContain('JPYC で金額を入力');
   });
 });
+
+// 決済QR の値引き (plans/discount-common.md PR2)。入力欄は値引き前、QR の amount は支払額・disc は含まれる値引き。
+describe('QrGenerator: 値引き (任意)', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      'openpay:qr-settings:v2',
+      JSON.stringify({ receiver: VALID, token: 'jpyc', chain: 'polygon' }),
+    );
+    useOriginMock.mockReturnValue('https://test.local');
+    marketRatesData.mockReturnValue({
+      data: { usdcJpy: 150, updatedAt: '2026-06-03T00:00:00.000Z' },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+  });
+
+  const payUrlText = () => screen.getByText((t) => t.includes('/pay?')).textContent ?? '';
+
+  it('使わない会計には付けない: 「＋ 値引きを追加」の 1 行だけ・URL に disc なし', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    expect(screen.getByRole('button', { name: '＋ 値引きを追加' })).toBeInTheDocument();
+    await openQrModal(user);
+    await waitFor(() => expect(payUrlText()).toContain('amount=1000'));
+    expect(payUrlText()).not.toContain('disc=');
+  });
+
+  it('金額指定: 1,000 から 20 引き → 請求金額 980・QR は amount=980&disc=20', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
+    await user.type(screen.getByLabelText('値引きの金額'), '20');
+    // 入力欄は「値引き前の金額」・値引きの下に値引き後の請求金額。
+    expect(screen.getByRole('heading', { name: '値引き前の金額 (JPYC)' })).toBeInTheDocument();
+    expect(screen.getByText('−20 JPYC')).toBeInTheDocument();
+    const btns = screen.getAllByRole('button', { name: /QRコードを表示する/ });
+    expect(btns[1].closest('div')?.textContent).toContain('980 JPYC');
+    await openQrModal(user);
+    await waitFor(() => expect(payUrlText()).toContain('amount=980&disc=20'));
+  });
+
+  it('割引率: 1,234 の 2% → 24 (円未満切り捨て) → amount=1210&disc=24', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await user.type(await screen.findByPlaceholderText('1,000'), '1234');
+    await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
+    await user.click(screen.getByRole('button', { name: '割引率' }));
+    await user.type(screen.getByLabelText('割引率 (%)'), '2');
+    expect(screen.getByText('（2%）')).toBeInTheDocument();
+    await openQrModal(user);
+    await waitFor(() => expect(payUrlText()).toContain('amount=1210&disc=24'));
+  });
+
+  it('値引き前の金額以上の値引きは QR を出さず、理由を出す', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
+    await user.type(screen.getByLabelText('値引きの金額'), '1000');
+    screen.getAllByRole('button', { name: /QRコードを表示する/ }).forEach((b) => expect(b).toBeDisabled());
+    expect(screen.getByText('値引きを直してください')).toBeInTheDocument();
+    expect(screen.getByText('値引きを確認')).toBeInTheDocument();
+  });
+
+  it('値引き中は為替換算を出さない・金額なし (据え置き) に切り替えると値引きを外す', async () => {
+    const user = userEvent.setup();
+    render(<QrGenerator />);
+    await user.type(await screen.findByPlaceholderText('1,000'), '1000');
+    expect(await screen.findByRole('button', { name: /USDC 建てで受取る/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
+    await user.type(screen.getByLabelText('値引きの金額'), '20');
+    expect(screen.queryByRole('button', { name: /USDC 建てで受取る/ })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: /据え置き|金額未指定|static/i }));
+    await user.click(screen.getByRole('button', { name: /^金額指定$|金額を指定/ }));
+    expect(screen.getByRole('button', { name: '＋ 値引きを追加' })).toBeInTheDocument();
+    await openQrModal(user);
+    await waitFor(() => expect(payUrlText()).toContain('amount=1000'));
+    expect(payUrlText()).not.toContain('disc=');
+  });
+});

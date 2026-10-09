@@ -112,6 +112,7 @@ import {
   buildJpycRecoverSignPreview,
 } from '@/lib/signPreview';
 import { appendPayerReceipt, buildPayerReceipt } from '@/lib/payerReceipt';
+import { buildCheckoutLineItems } from '@/lib/checkoutLineItems';
 import { RecoverFeeNotice } from './RecoverFeeNotice';
 
 type PaymentAttemptSnapshot = {
@@ -299,6 +300,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
     if (exceedsTokenPrecision(amountStr, deployment.decimals)) return 0n;
     return parseUnits(amountStr, deployment.decimals);
   }, [amountStr, deployment.decimals]);
+  // 決済QR の値引き (plans/discount-common.md)。amount (= 支払額) に含まれる値引きで、parse 済み (金額ありの QR だけ)。
+  // 請求額は amountWei のまま。控え・履歴の「小計 → 値引き → 合計」にだけ使う (値引き前 = 支払額 + 値引き)。
+  const discountWei = params.discount ? parseUnits(params.discount, deployment.decimals) : 0n;
+  const listAmountHuman = discountWei > 0n ? formatUnits(amountWei + discountWei, deployment.decimals) : null;
   // 精度超過を UI で明示するためのフラグ (amountWei は 0n になるが理由を伝える)。
   const amountPrecisionError =
     !!amountStr &&
@@ -637,7 +642,24 @@ function PaymentDetails({ params }: { params: PayParams }) {
       taxCategory: params.taxCategory ?? null,
       receiptNo: params.receiptNo ?? null,
       invoiceNo: params.invoiceNo ?? null,
-      lineItems: params.productName
+      // 値引きがあれば 値引き前の 1 行 + 値引き (レジと同じ組み方・税額は値引き後の額から)。
+      lineItems: listAmountHuman && params.discount
+        ? buildCheckoutLineItems({
+            items: [
+              {
+                name: params.productName || params.storeName || t('discountItemName'),
+                qty: 1,
+                price: listAmountHuman,
+                ...(params.memo ? { memo: params.memo } : {}),
+              },
+            ],
+            discount: params.discount,
+            token: params.token,
+            decimals: deployment.decimals,
+            taxRate: params.taxRate ?? null,
+            taxCategory: params.taxCategory ?? null,
+          })
+        : params.productName
         ? [
             {
               name: params.productName,
@@ -666,6 +688,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
       breakdown.feeAmount,
       amountWei,
       amountStr,
+      listAmountHuman,
+      params.discount,
+      deployment.decimals,
+      t,
       networkFeeEquivalent,
       address,
       params.priceRefAmount,
@@ -722,11 +748,15 @@ function PaymentDetails({ params }: { params: PayParams }) {
         feeAmount: 0n,
         saleAmount: attemptAmount,
         networkFeeEquivalent: null,
-        lineItems: historyCtx.lineItems?.map((item) => ({
-          ...item,
-          unitPrice: amountHuman,
-          amount: amountHuman,
-        })) ?? null,
+        // 値引きのある会計は 値引き前の 1 行 + 値引き のまま (支払額で上書きすると 小計 − 値引き = 合計 が崩れる)。
+        // 値引きは金額ありの QR だけなので、試みる額は historyCtx を組んだ支払額と同じ。
+        lineItems: params.discount
+          ? historyCtx.lineItems
+          : historyCtx.lineItems?.map((item) => ({
+              ...item,
+              unitPrice: amountHuman,
+              amount: amountHuman,
+            })) ?? null,
       });
       crossChainAttemptSnapshotRef.current = {
         amountDisplay: formatTokenAmount(attemptAmount, deployment),
@@ -735,7 +765,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
       };
       setCrossChainLocked(true);
     },
-    [deployment, historyCtx],
+    [deployment, historyCtx, params.discount],
   );
   const onCrossChainExecutingChange = useCallback((executing: boolean) => {
     setCrossChainLocked(executing);
@@ -764,7 +794,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
           paymentMode: 'cross-chain',
           gasMode: 'customer',
           lineItems: ctx.lineItems,
-          subtotalAmount: snapshot.amountHuman,
+          // 値引きがあれば 小計 = 支払額 + 値引き (明細に配った値引きの合計と一致)。
+          subtotalAmount: params.discount
+            ? formatUnits(parseUnits(snapshot.amountHuman, deployment.decimals) + parseUnits(params.discount, deployment.decimals), deployment.decimals)
+            : snapshot.amountHuman,
+          ...(params.discount ? { discountAmount: params.discount } : {}),
           totalAmount: snapshot.amountHuman,
           memo: params.memo ?? null,
           receiptNo: params.receiptNo ?? null,
@@ -781,7 +815,9 @@ function PaymentDetails({ params }: { params: PayParams }) {
     [
       address,
       deployment.address,
+      deployment.decimals,
       locale,
+      params.discount,
       params.memo,
       params.receiptNo,
       params.storeName,
@@ -1009,9 +1045,21 @@ function PaymentDetails({ params }: { params: PayParams }) {
         <div className="mt-4">
           <p className="text-xs opacity-80">{t('amountHeader')}</p>
           {isFixed ? (
-            <p className="mt-1 text-4xl font-bold tracking-tight">
-              {fixedAmount} {deployment.displaySymbol}
-            </p>
+            <>
+              <p className="mt-1 text-4xl font-bold tracking-tight">
+                {fixedAmount} {deployment.displaySymbol}
+              </p>
+              {/* 決済QR の値引き: 値引き前の額と値引き額 (払う額は上の額のまま)。 */}
+              {listAmountHuman && params.discount && (
+                <p className="mt-1 text-sm opacity-90">
+                  {t('discountLine', {
+                    subtotal: listAmountHuman,
+                    discount: params.discount,
+                    symbol: deployment.displaySymbol,
+                  })}
+                </p>
+              )}
+            </>
           ) : (
             <div className="mt-2">
               <input

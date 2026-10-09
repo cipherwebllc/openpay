@@ -11,14 +11,16 @@ import { QrCode as QrCodeIcon } from 'lucide-react';
 import type { TokenDeployment } from '@/lib/tokens';
 import type { Mode } from './QrAmountSection';
 
-// QR を出せない理由 (未入力の項目) のキー。受取先 → 金額の順に 1 つだけ出す (受取先が無いのが初めての店の本当の壁・
-// 2026-10 磨き上げ P5)。
+// QR を出せない理由 (未入力の項目) のキー。受取先 → 金額 → 値引きの順に 1 つだけ出す (受取先が無いのが初めての店の
+// 本当の壁・2026-10 磨き上げ P5)。amountValid は入力した金額 (値引きを除く) が使えるか。
 export function qrNotReadyKey(
   amountValid: boolean,
   receiverValid: boolean,
-): 'amount' | 'receiver' | null {
+  discountInvalid = false,
+): 'amount' | 'receiver' | 'discount' | null {
   if (!receiverValid) return 'receiver';
   if (!amountValid) return 'amount';
+  if (discountInvalid) return 'discount';
   return null;
 }
 
@@ -29,6 +31,7 @@ export function QrPreviewSection({
   payUrl,
   receiverValid,
   amountValid,
+  discountInvalid = false,
   amountText,
   fiatHint,
   sampleAmount,
@@ -39,7 +42,10 @@ export function QrPreviewSection({
 }: {
   payUrl: string;
   receiverValid: boolean;
+  /** 入力した金額 (値引きを除く) が使えるか。 */
   amountValid: boolean;
+  /** 値引きを直している途中か (QR を出せない理由に「値引き」を出す)。 */
+  discountInvalid?: boolean;
   /** 表示する請求金額 (例「1,000 JPYC」・据え置きは「金額はお客様が入力」)。未入力は null。 */
   amountText: string | null;
   fiatHint: string | null;
@@ -53,7 +59,7 @@ export function QrPreviewSection({
   secondaryAction?: { label: string; onClick: () => void };
 }) {
   const t = useTranslations('QrGenerator');
-  const notReadyKey = payUrl ? null : qrNotReadyKey(amountValid, receiverValid);
+  const notReadyKey = payUrl ? null : qrNotReadyKey(amountValid, receiverValid, discountInvalid);
   const notReady = notReadyKey ? t(`notReady.${notReadyKey}`) : null;
   const disabled = !payUrl || showQrBlocked !== undefined;
   return (
