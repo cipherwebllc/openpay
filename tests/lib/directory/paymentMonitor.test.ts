@@ -4,6 +4,7 @@
 // (4) delta と「変更なし = changes:[]」。
 
 import { describe, expect, it } from 'vitest';
+import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
 import { createPaymentMonitorEnvelope } from '@/lib/directory/paymentMonitor';
 import {
   createServiceMonitorEnvelope,
@@ -181,12 +182,12 @@ describe('createPaymentMonitorEnvelope', () => {
     expect([...seen].sort()).toEqual(all.map(key).sort()); // 取りこぼしゼロ
   });
 
-  // N4: 公開している重複排除キー (provider + date + changeCategory) が実データ上も一意
-  // でなければ、エージェントは正しく dedupe しても取りこぼす。
-  it('dedupe キー provider+date+changeCategory は snapshot 全件で一意', () => {
+  // N4: 公開している重複排除キー (slug (無いときは provider) + date + changeCategory) が実データ上も
+  // 一意でなければ、エージェントは正しく dedupe しても取りこぼす。
+  it('dedupe キー slug(無いときは provider)+date+changeCategory は snapshot 全件で一意', () => {
     const rows = createPaymentMonitorEnvelope(Q, NOW).changes;
     expect(rows.length).toBeGreaterThan(0);
-    const keys = rows.map((c) => `${c.provider}|${c.date}|${c.changeCategory ?? ''}`);
+    const keys = rows.map((c) => `${c.slug ?? c.provider}|${c.date}|${c.changeCategory ?? ''}`);
     expect(new Set(keys).size, `重複キー: ${keys.filter((k, i) => keys.indexOf(k) !== i)}`).toBe(
       keys.length,
     );
@@ -198,6 +199,38 @@ describe('createPaymentMonitorEnvelope', () => {
     if (!full.hasMore) expect(full.nextChangedSince).toBe(NOW.slice(0, 10));
     const capped = createPaymentMonitorEnvelope({ limit: 1 }, NOW);
     expect(capped.hasMore).toBe(total > 1);
+  });
+
+  // 第 7 回レビュー E17 の follow-up (Codex P2): provider はディレクトリ掲載の事業者だと entry の表示名
+  // (entry.name) から導出されるので、取得の間に名前が変わると、snapshot の続きで再配信された同じイベントが
+  // 別の provider 名で届き、provider をキーにした dedupe では二重登録になる。行に不変の slug を足し、
+  // 公開の dedupe キーを slug (無いときは provider) + date + changeCategory にする。
+  it('E17 follow-up: snapshot → 表示名の変更 → delta でも、再配信されたイベントの dedupe キーが一致する', () => {
+    const key = (c: { slug?: string; provider: string; date: string; changeCategory?: string }) =>
+      `${c.slug ?? c.provider}|${c.date}|${c.changeCategory ?? ''}`;
+    const total = createPaymentMonitorEnvelope(Q, NOW).totalEvents;
+    const snapshot = createPaymentMonitorEnvelope({ limit: total - 1 }, NOW);
+    expect(snapshot.hasMore).toBe(true);
+    // 表示名の変わる事業者 (ディレクトリ掲載) のイベントが snapshot に入っている前提を確かめる。
+    const dgBefore = snapshot.changes.find((c) => c.provider === 'DG Stablecoin Payment Service');
+    expect(dgBefore).toBeDefined();
+
+    const renamed = DIRECTORY_ENTRIES.map((entry) =>
+      entry.slug === 'dg-sps' ? { ...entry, name: 'DG Stablecoin Payment Service (renamed)' } : entry,
+    );
+    const delta = createPaymentMonitorEnvelope(
+      { changedSince: snapshot.nextChangedSince, limit: SERVICE_MONITOR_MAX_LIMIT },
+      NOW,
+      renamed,
+    );
+    expect(delta.hasMore).toBe(false);
+    const dgAfter = delta.changes.find((c) => c.provider === 'DG Stablecoin Payment Service (renamed)');
+    expect(dgAfter).toBeDefined(); // 同じイベントが新しい表示名で再配信される
+    expect(key(dgAfter!)).toBe(key(dgBefore!));
+
+    // snapshot と delta の和集合を dedupe すると、ちょうど全イベント数になる (二重登録も取りこぼしも無い)。
+    const seen = new Set([...snapshot.changes, ...delta.changes].map(key));
+    expect(seen.size).toBe(total);
   });
 
   // E17 (第 7 回レビュー): Service Monitor と同じ。打ち切った snapshot の nextChangedSince を

@@ -37,8 +37,15 @@ export type PaymentChangeRow = {
   date: string;
   /** YYYY-MM-DD = こちらが記録した日 (収集日)。発表日と乖離する場合の監査用・任意。 */
   collectedAt?: string;
-  /** 事業者/主体の表示名。 */
+  /** 事業者/主体の表示名。ディレクトリ掲載の事業者は entry の表示名から導出するので、名前の変更で変わる。 */
   provider: string;
+  /**
+   * ディレクトリエントリに紐づくイベントだけに付く不変の識別子 (changelog の slug)。表示名 provider が
+   * 変わっても変わらない。公開の dedupe キー = slug (無いときは provider) + date + changeCategory
+   * (第 7 回レビュー E17 の follow-up: snapshot の続きで再配信されたイベントが改名後の provider で
+   * 届いても二重登録にしない)。
+   */
+  slug?: string;
   changeType: ServiceChangeType;
   changeCategory?: ServiceChangeCategory;
   /** 対象ステーブルコイン (例 ['USDC','JPYC'])。 */
@@ -90,6 +97,7 @@ function toRow(
     date: event.date,
     ...(event.collectedAt ? { collectedAt: event.collectedAt } : {}),
     provider: event.provider ?? entry?.name ?? event.slug ?? 'unknown',
+    ...(event.slug ? { slug: event.slug } : {}),
     changeType: event.changeType,
     ...(event.changeCategory ? { changeCategory: event.changeCategory } : {}),
     assets:

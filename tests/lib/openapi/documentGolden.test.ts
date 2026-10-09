@@ -90,37 +90,39 @@ const PROFILES: Profile[] = [
 // 第 7 回レビュー B8 で license descriptor の productUrl を string | null・説明を 200 にしたので license を含む構成を再採取。
 // 第 7 回レビュー E16 (user 裁定 R7) で directory の status クエリの enum を published だけにしたので、directory を
 // 含む構成を再採取 (整形した JSON の差分は 3 つの operation の status enum から draft/review/rejected/archived が消えただけ)。
+// 同レビュー E17 の follow-up で Payment Monitor の行に不変の slug を足し dedupe キーを改めたので、Monitor を含む構成を
+// 再採取 (差分は 200 応答の schema/example への slug の追加と、x-agent-usage の dedupe キーの説明だけ)。
 const EXPECTED_SHA256: Record<string, string> = {
   'all-on':
-    'af864fa0e16b837f4236308fc61863aca93970bdc71892c9381eaae2c590a4eb',
+    'a20191f764a507fc4197d82558a193f07323f76030d8564dce3b858fb0f3bc6b',
   'all-on+arc':
-    '7c9778ac2a047fb78cb73c250fa1f762b28e7acd7c0b7016dae9c535990f5d7b',
+    '30211da5bfca610f4a7de1c9029f3bec21c506bf817381f5365f28e9c745f821',
   'all-on+mainnet':
-    '1ccd7c2e298c7cdf94e9f5067920cc8c223436627b1eb6689f74b818c9211b47',
+    '86df962d6eef6f62e30b34a5e5a86b054b65939bc4eb37aad3b1d9d8e60ed95e',
   'all-on+mainnet+avalanche+ethereum':
-    'c8f1603cfc84b47cc32cf5249dde055cfe7420b13676286ecc848ca45a755159',
+    'c4bd74fdf2822262e722d06afba39557eecd72ccdf684d3a63eb46132c8f6da5',
   'all-on+fee':
-    '0808c23eff967111ca9ef97bf6f8c18c11cbb9b21e979f239a0a4ce3c7042ade',
+    'a03c5c5a6423e65930b22364fa3787d28cb28e9831f4ddaaf4648643fb110451',
   'all-on+default-hello-price':
-    '0daa8aa53d5754b1eb11efe2c4ca2be0177fa58b138e2d6d297eb376150761ec',
+    'f3a113f473f9b8c45573fea22bc95f3630f682ed1eb1358f1ef04dab162db23e',
   'all-on+invalid-hello-price-unlisted':
-    'ee116726f616d568f9ab4a1e7d60115d9fc5a86610d53cd6f8d0c380c588217c',
+    'a185f85de262d85a3b7618d57da001d69dd55e82d0e21a6e2405227416797e67',
   'directory-only':
-    '9b69320610950dc6ff52dd0a80f291e4583e6edd3b81e4dc5ab8a347f57657c0',
+    '2852604fa7d64f41cb78afc0229e1053f443dee209952caa77da582a80df266e',
   'facilitator-only':
     '21ac634fe16c274ca3f1d66ef903d77839c67a4c92963b11b168d71418a191e0',
   'facilitator+shops':
     '935bca12f86224bafc76c3761bd32e5faaeda7398fde7ba557ab68b5618ee3b7',
   'directory+facilitator':
-    '14e2d4e9786105e98fc369ae290e30886d40ca0e76439f813db446c863340e66',
+    '485ad8e5046c107149f2d5d5150a46f5704914ff888bb12b6909e3cd48d2ad88',
   'license-only':
     'bdf3b0b4b901d5174663e0a74ebd070fb202326f20cee6bf9c193779fa2ac250',
   'directory+license-child-only':
-    '9b69320610950dc6ff52dd0a80f291e4583e6edd3b81e4dc5ab8a347f57657c0',
+    '2852604fa7d64f41cb78afc0229e1053f443dee209952caa77da582a80df266e',
   'late-mutation':
     '2e63ea53cf8c0c69e29f523b0c99f2d75f39456995e9d9a22c282f3918bb7dee',
   'late-facilitator':
-    'cd0e76bbcf2aac6f95b08355042d85e00e9d3c7b9bfb20f45f90d6ff6ad64f0b',
+    '7259c2119e234d63e02585bdd51a32a8938c372c23587ce22a5b5ca7d6351893',
 };
 
 // all-on の paths の key 順 (spread 順の固定)。

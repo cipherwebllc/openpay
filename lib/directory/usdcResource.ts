@@ -287,6 +287,7 @@ const PAYMENT_MONITOR_DELTA_EXAMPLE = {
     {
       date: '2026-08-10',
       provider: 'DG Stablecoin Payment Service',
+      slug: 'dg-sps',
       changeType: 'added',
       changeCategory: 'service_launch',
       assets: ['USDC'],

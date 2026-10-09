@@ -124,7 +124,7 @@ export const VANILLA_DIRECTORY_OPENAPI_PATHS = {
       description: `${USDC_PAYMENT_MONITOR.description} Payment: standard x402 (exact scheme) in USDC on Base mainnet; no OpenPay fee is added.`,
       parameters: SERVICE_MONITOR_PARAMS,
       'x-agent-usage':
-        'Run on a weekly schedule when monitoring Japanese stablecoin payment providers. Before paying, GET the free /api/stablecoin-payments/teaser and compare latestRecordedAt (max(date, collectedAt), with date used when collectedAt is absent) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; dedupe by provider+date+changeCategory. When changes is empty, report "no significant change". Verify with each event sourceUrl before acting on a change.',
+        'Run on a weekly schedule when monitoring Japanese stablecoin payment providers. Before paying, GET the free /api/stablecoin-payments/teaser and compare latestRecordedAt (max(date, collectedAt), with date used when collectedAt is absent) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; dedupe by slug+date+changeCategory, using provider when slug is absent (provider is a display name and can change on rename). When changes is empty, report "no significant change". Verify with each event sourceUrl before acting on a change.',
       'x-payment-info': usdcPaymentInfo(USDC_PAYMENT_MONITOR.priceUsd),
       'x-payment-protocol': 'x402',
       'x-payment-asset': 'USDC',
@@ -190,7 +190,7 @@ export const JPYC_DIRECTORY_MONITOR_OPENAPI_PATHS = {
         'Same data and contract as the USDC variant: dated, categorized events (launches, pilots, partnerships, fee changes, closures) for stablecoin payment services in Japan, each tied to an official source URL. Pass changedSince=YYYY-MM-DD to fetch only new events; an empty changes list explicitly means no change. Paid in JPYC via the OpenPay facilitator (buyer pays price + x402 facilitator fee).',
       parameters: SERVICE_MONITOR_PARAMS,
       'x-agent-usage':
-        'Run on a weekly schedule when monitoring Japanese stablecoin payment providers. Before paying, GET the free /api/stablecoin-payments/teaser and compare latestRecordedAt (max(date, collectedAt), with date used when collectedAt is absent) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; report "no significant change" when changes is empty.',
+        'Run on a weekly schedule when monitoring Japanese stablecoin payment providers. Before paying, GET the free /api/stablecoin-payments/teaser and compare latestRecordedAt (max(date, collectedAt), with date used when collectedAt is absent) with your stored nextChangedSince: if it is before that date, skip the purchase (the paid delta would be empty). Otherwise echo nextChangedSince as changedSince; dedupe by slug+date+changeCategory, using provider when slug is absent. Report "no significant change" when changes is empty.',
       'x-payment-info': paymentInfo(JPYC_PAYMENTS_RESOURCE.priceJpyc),
       responses: {
         '200': {

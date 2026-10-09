@@ -201,7 +201,7 @@ const SERVICE_MONITOR_OUTPUT = {
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the recorded date (max(date, collectedAt), or date when collectedAt is absent) of the first event NOT returned here. In delta mode that is strictly later than the last returned recorded date because a single recorded day is never split across pages; in snapshot mode (the most recent events) the following delta pages can repeat events already returned here, so dedupe them by the documented key.',
+        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). Recorded date = max(date, collectedAt), or date when collectedAt is absent. When hasMore is true in delta mode, it is the recorded date of the first event NOT returned here, which is strictly later than the last returned recorded date because a single recorded day is never split across pages, so delta pages never repeat an event. When hasMore is true in snapshot mode (which returns the most recent events), it is the earliest recorded date among all events omitted here; the delta pages that follow can repeat events already returned in this snapshot, so dedupe them by the documented key.',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },
@@ -314,7 +314,16 @@ const PAYMENT_MONITOR_OUTPUT = {
             description:
               'YYYY-MM-DD when this change was recorded, present when it differs from the announcement date.',
           },
-          provider: { type: 'string' },
+          provider: {
+            type: 'string',
+            description:
+              'Display name of the provider. For providers listed in the directory it follows the current directory name, so it can change when renamed.',
+          },
+          slug: {
+            type: 'string',
+            description:
+              'Stable directory slug, present only when the event is tied to a directory entry. Unlike provider it never changes on rename. Dedupe key: slug (provider when slug is absent) + date + changeCategory.',
+          },
           changeType: {
             type: 'string',
             enum: ['added', 'updated', 'removed', 'verified'],
@@ -371,7 +380,7 @@ const PAYMENT_MONITOR_OUTPUT = {
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the recorded date (max(date, collectedAt), or date when collectedAt is absent) of the first event NOT returned here. In delta mode that is strictly later than the last returned recorded date because a single recorded day is never split across pages; in snapshot mode (the most recent events) the following delta pages can repeat events already returned here, so dedupe them by the documented key.',
+        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). Recorded date = max(date, collectedAt), or date when collectedAt is absent. When hasMore is true in delta mode, it is the recorded date of the first event NOT returned here, which is strictly later than the last returned recorded date because a single recorded day is never split across pages, so delta pages never repeat an event. When hasMore is true in snapshot mode (which returns the most recent events), it is the earliest recorded date among all events omitted here; the delta pages that follow can repeat events already returned in this snapshot, so dedupe them by the documented key.',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },

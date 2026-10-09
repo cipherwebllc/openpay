@@ -171,6 +171,8 @@ const QUERIES = [
 // 第 7 回レビュー E17 で、打ち切った snapshot (long の既定 limit と limit=2) の nextChangedSince を
 // 「返さなかったイベントの実効日の最小値」に変えたので、その 5 件だけ再採取した (raw text の差分は
 // nextChangedSince の 1 行だけ)。
+// E17 の follow-up (表示名の変更で dedupe キーがずれる) で Payment Monitor の行に不変の slug を足したので、slug つきイベントを含む 8 件を再採取した
+// (raw text の差分は "slug" 行の追加だけ)。
 const GOLDEN: Record<string, string> = {
   'empty /api/jpyc/services/teaser':
     'b824d113487f6e33fd43b8adfd1578d3194aaa8e44ef6e652f2cb9c3178e66ad',
@@ -233,19 +235,19 @@ const GOLDEN: Record<string, string> = {
   'long /api/paid/usdc/jpyc/services?limit=2':
     '30be012fad6fa315b005fe6e3dc3d2544b92861c97d79a8cc015e11fd42283f1',
   'long /api/paid/usdc/stablecoin-payments':
-    '9aa903c65067f5c972585d5114790fdf4a2e3a486113b6febf6f1f3ee4745934',
+    'f6342a2bda3c5a6f50e798bbc08971c3ecd57e4492ed066594272530df0d25b3',
   'long /api/paid/usdc/stablecoin-payments?changedSince=2020-01-01':
-    'b1c2af66f81073492f1eab46ce71592a09bf70245120b6589527dae000d8e4c1',
+    'da5a18ce2c3f84115e443f1b3a641a5dd88abba52a6deb2d36467c342910ddbc',
   'long /api/paid/usdc/stablecoin-payments?changedSince=2020-01-01&limit=1':
     'c6841f0413e547fcb06cbbf786da3623962b442c658099b35e0c2ff9fc4bcc2f',
   'long /api/paid/usdc/stablecoin-payments?changedSince=2026-08-10':
-    'b50fbddd998f3ea8d5c262c82fb564744490e2b579607b52481532461d88c451',
+    'c8fc9ae433dd8e5b4219f8402ca87224ecdcaa6a7a9b87fd87ad7bd2d4d86ae8',
   'long /api/paid/usdc/stablecoin-payments?changedSince=2026-08-11&limit=1':
     'f0d568090b4a01acddec443929fb1082181220db95f3a86b45ed9d7c6ff00140',
   'long /api/paid/usdc/stablecoin-payments?changedSince=2026-08-20':
-    'd8a2e4b349104d391319c654d3efe34fa554aa81ed48c02cf1bb62086a76a60a',
+    '1126cc4b0313aaf98d0d69986f5c9c926de86a8396d9211f882cfeb22cd8ecff',
   'long /api/paid/usdc/stablecoin-payments?changedSince=2026-08-21':
-    '7af09af43177d3801a0ad15c5e8d6d92de4e46eb8f23791315e1d3c4c8032854',
+    '44af92a6a50d91315c52ec68275d75a68b5ec3a50fa334dce147d1c2a15dcd55',
   'long /api/paid/usdc/stablecoin-payments?changedSince=2026-09-11':
     'c45663696754d6a90ff51f9243ae85a992e257954f6c325166781480c7a5d661',
   'long /api/paid/usdc/stablecoin-payments?limit=2':
@@ -273,13 +275,13 @@ const GOLDEN: Record<string, string> = {
   'small /api/paid/usdc/jpyc/services?limit=2':
     '6ad5484ab1dca221be417b9ca755346b69ede35b1f576c6b6854055fc6514d75',
   'small /api/paid/usdc/stablecoin-payments':
-    '3a81c6e0b03c43a7c5df23442a30daae905bb71d13e60339a70247282777420e',
+    '9a481eb55e2fab03aa33ab924a5556f8855846892840330d8e18686fcca41459',
   'small /api/paid/usdc/stablecoin-payments?changedSince=2020-01-01':
-    'c42bec3bace5c80872703d4e90646c4b41f584bd5d8ce520d201a6b9c6c4d69d',
+    '3600e9bad2034b8fc57db8cbad953bb140cc3b2b5a469eac551ad712bd7ba6b9',
   'small /api/paid/usdc/stablecoin-payments?changedSince=2020-01-01&limit=1':
     '352f380ef116ee906454a33e86108b75b5303f2c4388b6223ff0026cd2419e85',
   'small /api/paid/usdc/stablecoin-payments?changedSince=2026-08-10':
-    'f6f5f95ba8c6f416a6c9526e3b7ded874c2bb5695311c881b77b32b53be63b7a',
+    'f0dabac66c838c804e0bbcfc0a8faa02ff567bbafa69a07320982ff6a9e43578',
   'small /api/paid/usdc/stablecoin-payments?changedSince=2026-08-11&limit=1':
     '0aa736786af7e27e87e39ca5edda93e1b558189a2aa8e84124fa8ad34c90243b',
   'small /api/paid/usdc/stablecoin-payments?changedSince=2026-08-20':
@@ -429,8 +431,9 @@ describe('teaser の意味 (small history)', () => {
     const rawA = teaser.latestChanges[0];
     expect(rawA).toEqual({ date: '2026-08-10', slug: 'svc-a', changeType: 'updated', summary: 'A updated.', summaryJa: 'A 更新。', sourceUrl: 'https://example.com/a-news' });
     const rowA = paid.changes.find((c: { date: string; changeType: string }) => c.date === '2026-08-10' && c.changeType === 'updated');
-    expect(rowA).toMatchObject({ provider: 'Name svc-a', assets: ['USDC', 'JPYC'], chains: ['base', 'polygon'] });
-    expect(rowA).not.toHaveProperty('slug');
+    // 有料版は provider/assets/chains を entry から投影する。第 7 回レビュー E17 の follow-up で、表示名が
+    // 変わっても dedupe キーがずれないよう不変の slug も行に載せる (追加のみ)。
+    expect(rowA).toMatchObject({ provider: 'Name svc-a', slug: 'svc-a', assets: ['USDC', 'JPYC'], chains: ['base', 'polygon'] });
     expect(teaser.latestRecordedAt).toBe('2026-08-25');
     expect(teaser.totalEvents).toBe(paid.totalEvents);
     expect(teaser.totalEvents).toBe(5);

@@ -31,7 +31,9 @@ A weekly change feed for Japan-related JPYC/Web3 services, designed to be wired 
 - 重複排除キーは `slug + date + changeType`
 - **日付の定義**: `date` は**一次ソースの発表日**、`collectedAt` は**こちらが記録した日**(収集日・発表日と異なるときだけ付きます)。2026-09-03 に過去イベントの `date` を発表日基準へ訂正しました
 - 重複排除の鍵は `slug + date + changeType`。**同じ鍵のイベントが再び届いたら、後から届いた本文で置き換えてください**(記録を統合・訂正したときに再配信します)
-- `limit` は**日付境界で丸められます**(1 日が途中で分割されることはないため、1 日の件数が `limit` を超える場合は `changes` が `limit` を超えます)。`hasMore` が `true` なら応答の `nextChangedSince`(= まだ返していない最初のイベントの記録日・返した最後の記録日より必ず後)で続きを購入してください — 同じ範囲が再送されることも、取りこぼされることもありません
+- `limit` は**日付境界で丸められます**(1 日が途中で分割されることはないため、1 日の件数が `limit` を超える場合は `changes` が `limit` を超えます)。`hasMore` が `true` なら応答の `nextChangedSince` で続きを購入してください
+  - delta(`changedSince` あり)の続き: `nextChangedSince` = まだ返していない最初のイベントの記録日(返した最後の記録日より必ず後)。delta のページ間では同じ範囲が再送されることも、取りこぼされることもありません
+  - スナップショット(`changedSince` なし・直近のイベントを返す)の続き: `nextChangedSince` = 省略したイベントのうち最も古い記録日。取りこぼしはありませんが、スナップショットで受け取ったイベントが続きの delta で再び届くので、重複排除の鍵で除いてください
 - OpenAPI(機械可読・`x-agent-usage` つき): `https://open-pay.jp/api/openapi.json`(operationId: `getJpycServiceMonitor` / `getJpycServiceMonitorUsdc`)
 - 外部カタログ: [x402 Bazaar / agentic.market](https://agentic.market/services/open-pay-jp) に掲載(USDC 面)
 
@@ -144,6 +146,7 @@ Claude Code なら `/schedule`(cron)や Hermes Agent の定期ジョブに上の
 A second monitor generated from the same weekly collection: it completes a different job — watching Japan's stablecoin **payment providers** (launches, pilots, partnerships, fee changes, supported assets/chains, closures).
 
 - イベントは `provider` 中心で、`changeCategory`(service_launch / pilot / partnership / fee_change / assets_change / chains_change / closure)と `assets` / `chains` が付きます
+- 重複排除の鍵は `slug + date + changeCategory`(`slug` はディレクトリ掲載の事業者のイベントだけに付く不変の識別子。無いイベントは `provider` で代用)。`provider` は表示名なので、ディレクトリ側の名称変更で変わることがあります
 - ディレクトリに載らない業界イベント(実証実験・提携)も対象です(例: JCB×Circle MOU、DG・JCB・りそなの実店舗実証)
 - 履歴は 2025 年 11 月まで遡って収録済み。実購入検証済み(settle tx `0xef1f0969…546b`)
 - **事業者の現況行 `providers`**(固定項目・毎週再確認): stage(partnership / pilot / commercial / closed)・assets・chains・settlementCurrency・merchantFee・integrations(api / in-store / ec / wallet)・posIntegration・region・announcedAt・startedAt・plannedPeriod・sourceUrl・verifiedAt・lastEventDate。**null は「確認したが一次ソースに公表がない」**という確認結果です(推測で埋めません)。snapshot は全社、delta は変更のあった社のみ・`totalProviders` で母数を開示
@@ -206,6 +209,7 @@ A second monitor generated from the same weekly collection: it completes a diffe
     {
       "date": "2026-08-10",
       "provider": "DG Stablecoin Payment Service",
+      "slug": "dg-sps",
       "changeType": "added",
       "changeCategory": "service_launch",
       "assets": ["USDC"],
