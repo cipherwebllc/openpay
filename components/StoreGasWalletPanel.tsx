@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { ChevronRight } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Fuel, Plus, RefreshCw, ShieldAlert } from 'lucide-react';
 import { formatEther, type Address, type Hex } from 'viem';
 import { nativeSymbolForChainId, txExplorerUrl } from '@/lib/chains';
 import { estimateRemainingSends, storeGasFundGuide } from '@/lib/storeGasWallet';
@@ -16,12 +16,16 @@ import { usePwaDisplayMode } from '@/hooks/usePwaDisplayMode';
 import { useStoreGasWallet } from '@/hooks/useStoreGasWallet';
 import { detectMobilePlatform } from '@/lib/walletDeepLink';
 import { StoreGasWalletTopUp } from './StoreGasWalletTopUp';
+import { NativeTokenLogo } from './AssetLogo';
 
 // 残り回数がこれを下回ったら補充を促す。
 const LOW_REMAINING_SENDS = 20;
 
 const BTN =
   'rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark disabled:cursor-not-allowed disabled:opacity-50';
+// 「作る」は、この枠でいちばん大事な一歩なので主ボタンの見た目にする。
+const PRIMARY_BTN =
+  'inline-flex items-center gap-1.5 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white transition-transform hover:bg-brand-dark active:scale-[0.98]';
 const DANGER_BTN =
   'rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -97,8 +101,15 @@ export function StoreGasWalletPanel({
   // 一度も読めていないチェーン (残高が分からない)。消す前に知らせる (残っているかもしれない)。
   const unread = g.chains.some((c) => c.readFailed && c.balance == null);
   const shown = g.chains.filter((c) => c.active || funded.includes(c));
-  const chainsLabel = active.map((c) => `${c.chain.name} (${symbolOf(c.chainId)})`).join('・');
   const fundGuide = active.map((c) => `${symbolOf(c.chainId)} ${storeGasFundGuide(c.chainId)}`).join('・');
+  const fundSymbols = active.map((c) => symbolOf(c.chainId)).join('・');
+  // チェーンごとの「あと何回送れるか」と「少ないか」(見出しのチップと行で同じ値を使う)。
+  const remainingOf = (c: (typeof g.chains)[number]) =>
+    !c.readFailed && c.balance != null && c.gasPrice != null ? estimateRemainingSends(c.balance, c.gasPrice) : null;
+  const isLow = (c: (typeof g.chains)[number]) => {
+    const r = remainingOf(c);
+    return c.active && r != null && r < LOW_REMAINING_SENDS;
+  };
   const amountsLabel = funded.map((c) => `${formatNative(c.balance!)} ${symbolOf(c.chainId)}`).join('・');
   const targetChainId =
     (withdrawChainId !== null && shown.some((c) => c.chainId === withdrawChainId) ? withdrawChainId : null) ??
@@ -189,54 +200,78 @@ export function StoreGasWalletPanel({
     </div>
   );
 
+  // 端末・ブラウザで違う「鍵が消える場面」の注意 (iPhone・iPad = 下の案内 / Safari = 7 日の消去 / それ以外 = 閉じるときの削除設定)。
+  const deviceRisk = isIos
+    ? iosBrowser && g.walletState.state === 'ok'
+      ? t('storeGasWallet.iosBrowserKeptNote')
+      : null
+    : isSafari
+      ? t('storeGasWallet.safariNote')
+      : t('storeGasWallet.browserClearNote');
+
   return (
-    // 見た目は会計画面の他の行 (明細・換金) と同じ折りたたみの行 (2026-10 磨き上げ P2・中身と文言は不変)。
+    // 見た目は会計画面の他の行 (明細・換金) と同じ折りたたみの行。見出しにチェーンごとの残高をトークンのマーク付きで出す。
     <details className="group/gas rounded-2xl bg-white p-4 text-sm text-slate-700 shadow-card ring-1 ring-slate-200/70">
-      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium text-slate-700 [&::-webkit-details-marker]:hidden">
-        <span className="flex-1">
-        {t('storeGasWallet.title')}
-        <span className="ml-2 text-xs font-normal text-slate-500">
-          {g.walletState.state === 'ok'
-            ? shown
+      <summary className="flex cursor-pointer list-none items-start gap-2 [&::-webkit-details-marker]:hidden">
+        <Fuel className="mt-0.5 h-4 w-4 flex-none text-slate-400" aria-hidden />
+        <span className="min-w-0 flex-1">
+          <span className="font-medium text-slate-700">{t('storeGasWallet.title')}</span>
+          {g.walletState.state === 'none' ? (
+            <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+              {t('storeGasWallet.badgeNone')}
+            </span>
+          ) : null}
+          {g.walletState.state === 'ok' ? (
+            <span className="mt-1.5 flex flex-wrap gap-1.5">
+              {shown
                 // 読めていない間は前に読めた値を見出しに出さない (行には「読めませんでした」が出る)
                 .filter((c) => c.balance != null && !c.readFailed)
-                .map((c) => t('storeGasWallet.balanceValue', { amount: formatNative(c.balance!), symbol: symbolOf(c.chainId) }))
-                .join('・')
-            : g.walletState.state === 'none'
-              ? t('storeGasWallet.badgeNone')
-              : ''}
-        </span>
+                .map((c) => (
+                  <span
+                    key={c.chainId}
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono text-[11px] font-medium ring-1 ${
+                      isLow(c) ? 'bg-amber-50 text-amber-800 ring-amber-200' : 'bg-slate-50 text-slate-600 ring-slate-200'
+                    }`}
+                  >
+                    <NativeTokenLogo chainId={c.chainId} size={12} />
+                    {t('storeGasWallet.balanceValue', { amount: formatNative(c.balance!), symbol: symbolOf(c.chainId) })}
+                  </span>
+                ))}
+            </span>
+          ) : null}
         </span>
         <ChevronRight
-          className="h-4 w-4 flex-none text-slate-400 transition-transform group-open/gas:rotate-90"
+          className="mt-0.5 h-4 w-4 flex-none text-slate-400 transition-transform group-open/gas:rotate-90"
           aria-hidden
         />
       </summary>
 
-      <p className="mt-3 text-xs leading-relaxed text-slate-600">
-        {t('storeGasWallet.intro', { chains: chainsLabel })}
-      </p>
-      <p className="mt-2 text-xs leading-relaxed text-amber-800">
-        {t('storeGasWallet.keyNote', { guide: fundGuide })}
-      </p>
-      {/* 鍵が消える場面は端末・ブラウザで違う: iPhone・iPad = 下の案内 / Safari = 7 日の消去 / それ以外 = 閉じるときの削除設定 */}
-      {isIos ? (
-        isStandalone && (
-          <p className="mt-1 text-xs leading-relaxed text-emerald-700">{t('storeGasWallet.iosAppNote')}</p>
-        )
-      ) : (
-        <p className="mt-1 text-xs leading-relaxed text-slate-500">
-          {isSafari ? t('storeGasWallet.safariNote') : t('storeGasWallet.browserClearNote')}
+      <p className="mt-3 text-xs leading-relaxed text-slate-600">{t('storeGasWallet.intro')}</p>
+
+      {/* 鍵の扱いのリスク。いちばん大事なので、見出し + 箇条書きの囲みにして「戻せません」を強める。 */}
+      <div role="note" className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
+        <p className="flex items-start gap-2 text-sm font-semibold text-amber-950">
+          <ShieldAlert className="mt-0.5 h-4 w-4 flex-none text-amber-600" aria-hidden />
+          {t('storeGasWallet.keyTitle')}
         </p>
+        <ul className="mt-2 list-disc space-y-1 pl-6 text-xs leading-relaxed text-amber-950">
+          <li>
+            {t.rich('storeGasWallet.keyLose', {
+              b: (chunks) => <strong className="font-bold text-red-700">{chunks}</strong>,
+            })}
+          </li>
+          <li>{t('storeGasWallet.keyPrivate')}</li>
+          <li>{t('storeGasWallet.keySmall', { guide: fundGuide })}</li>
+          {deviceRisk ? <li>{deviceRisk}</li> : null}
+        </ul>
+      </div>
+      {/* iPhone・iPad のアプリは 7 日の消去の対象外 (安心材料は囲みの外に、緑で短く)。 */}
+      {isIos && isStandalone && (
+        <p className="mt-2 text-xs leading-relaxed text-emerald-700">{t('storeGasWallet.iosAppNote')}</p>
       )}
       {/* iPhone・iPad では出さない (消されにくい保存が 7 日の消去を防ぐ根拠は無い = 偽の安心にしない) */}
       {g.persisted === true && !isIos && (
-        <p className="mt-1 text-xs leading-relaxed text-slate-500">{t('storeGasWallet.persistedNote')}</p>
-      )}
-      {iosBrowser && g.walletState.state === 'ok' && (
-        <p role="note" className="mt-2 rounded-lg bg-amber-50 p-2 text-xs leading-relaxed text-amber-900">
-          {t('storeGasWallet.iosBrowserKeptNote')}
-        </p>
+        <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('storeGasWallet.persistedNote')}</p>
       )}
 
       {g.walletState.state === 'unavailable' && (
@@ -255,7 +290,7 @@ export function StoreGasWalletPanel({
       )}
 
       {g.walletState.state === 'none' && (
-        <div className="mt-3">
+        <div className="mt-4">
           {iosBrowser && (
             <div role="note" className="mb-3 rounded-lg bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
               <p className="font-semibold">{t('storeGasWallet.iosBrowserTitle')}</p>
@@ -272,7 +307,8 @@ export function StoreGasWalletPanel({
               {t('storeGasWallet.iosBrowserCreateAnyway')}
             </button>
           ) : (
-            <button type="button" className={BTN} onClick={() => void handleCreate()}>
+            <button type="button" className={PRIMARY_BTN} onClick={() => void handleCreate()}>
+              <Plus className="h-4 w-4" aria-hidden />
               {t('storeGasWallet.createButton')}
             </button>
           )}
@@ -287,67 +323,87 @@ export function StoreGasWalletPanel({
       )}
 
       {g.walletState.state === 'ok' && g.address && (
-        <div className="mt-3 space-y-3">
-          <div>
-            <p className="text-xs text-slate-500">
-              {t('storeGasWallet.addressLabel', { chain: active.map((c) => c.chain.name).join('・') })}
+        <div className="mt-4 space-y-4">
+          {/* 残高: チェーンごとに、トークンのマーク・残高 (太字)・あと何回送れるか。少ないチェーンにだけ印。 */}
+          <section aria-labelledby="store-gas-balance-heading">
+            <div className="flex items-center justify-between gap-2">
+              <h3 id="store-gas-balance-heading" className="text-sm font-semibold text-slate-800">
+                {t('storeGasWallet.balanceLabel')}
+              </h3>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand"
+                onClick={() => void g.refresh()}
+              >
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                {t('storeGasWallet.refresh')}
+              </button>
+            </div>
+            <ul className="mt-2 divide-y divide-slate-100 rounded-xl ring-1 ring-slate-200">
+              {shown.map((c) => {
+                const remaining = remainingOf(c);
+                // まだ入れていない (残高 0) は「残りわずか」ではなく「未入金」。回数 (あと約 0 回) も出さない。
+                const empty = !c.readFailed && c.balance === 0n;
+                return (
+                  <li key={c.chainId} className="px-3 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <NativeTokenLogo chainId={c.chainId} size={24} />
+                      <p className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800">{c.chain.name}</p>
+                      {c.readFailed ? (
+                        <p className="shrink-0 text-xs font-medium text-amber-700">{t('storeGasWallet.balanceUnknown')}</p>
+                      ) : c.balance != null ? (
+                        <p className="shrink-0 font-mono text-sm font-semibold text-slate-900">
+                          {t('storeGasWallet.balanceValue', {
+                            amount: formatNative(c.balance),
+                            symbol: symbolOf(c.chainId),
+                          })}
+                        </p>
+                      ) : (
+                        <p className="shrink-0 text-slate-400">…</p>
+                      )}
+                    </div>
+                    {/* 2 行目 (マークの下にそろえる): あと何回送れるか・少ない/未入金の印・使えないチェーンの注記 */}
+                    {(remaining != null && !empty) || isLow(c) || !c.active ? (
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 pl-9">
+                        {remaining != null && !empty && (
+                          <p className="text-xs text-slate-500">{t('storeGasWallet.remaining', { count: remaining })}</p>
+                        )}
+                        {isLow(c) && (
+                          <p className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                            <AlertTriangle className="h-3 w-3" aria-hidden />
+                            {empty
+                              ? t('storeGasWallet.emptyBalance', { symbol: symbolOf(c.chainId) })
+                              : t('storeGasWallet.lowBalance', { symbol: symbolOf(c.chainId) })}
+                          </p>
+                        )}
+                        {!c.active && (
+                          <p className="text-xs text-slate-500">{t('storeGasWallet.inactiveNote')}</p>
+                        )}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+
+          {/* 入れるためのアドレス (どのチェーンも同じ)。 */}
+          <section aria-labelledby="store-gas-address-heading">
+            <h3 id="store-gas-address-heading" className="text-sm font-semibold text-slate-800">
+              {t('storeGasWallet.addressLabel')}
+            </h3>
+            <p className="mt-1.5 break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-800 ring-1 ring-slate-200">
+              {g.address}
             </p>
-            <p className="break-all font-mono text-xs text-slate-800">{g.address}</p>
-            <div className="mt-1 flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
               {copyAvailable && (
                 <button type="button" className={BTN} onClick={() => copy(g.address!)}>
                   {copied ? t('storeGasWallet.copied') : t('storeGasWallet.copy')}
                 </button>
               )}
-              <button type="button" className={BTN} onClick={() => void g.refresh()}>
-                {t('storeGasWallet.refresh')}
-              </button>
+              <p className="text-xs text-slate-500">{t('storeGasWallet.fundHint', { symbols: fundSymbols })}</p>
             </div>
-            <p className="mt-1 text-xs text-slate-500">
-              {t('storeGasWallet.fundHint', { chains: chainsLabel })}
-            </p>
-          </div>
-
-          <div className="space-y-1 text-xs">
-            {shown.map((c) => {
-              const remaining =
-                !c.readFailed && c.balance != null && c.gasPrice != null
-                  ? estimateRemainingSends(c.balance, c.gasPrice)
-                  : null;
-              return (
-                <div key={c.chainId}>
-                  <span className="text-slate-500">
-                    {t('storeGasWallet.balanceLabel')} ({c.chain.name}):{' '}
-                  </span>
-                  {c.readFailed ? (
-                    <span className="text-amber-700">{t('storeGasWallet.balanceUnknown')}</span>
-                  ) : c.balance != null ? (
-                    <span className="font-mono">
-                      {t('storeGasWallet.balanceValue', {
-                        amount: formatNative(c.balance),
-                        symbol: symbolOf(c.chainId),
-                      })}
-                    </span>
-                  ) : (
-                    <span className="text-slate-400">…</span>
-                  )}
-                  {remaining != null && (
-                    <span className="ml-2 text-slate-500">
-                      {t('storeGasWallet.remaining', { count: remaining })}
-                    </span>
-                  )}
-                  {c.active && remaining != null && remaining < LOW_REMAINING_SENDS && (
-                    <p className="mt-1 text-amber-700">
-                      {t('storeGasWallet.lowBalance', { symbol: symbolOf(c.chainId) })}
-                    </p>
-                  )}
-                  {!c.active && (
-                    <p className="mt-1 text-slate-500">{t('storeGasWallet.inactiveNote')}</p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          </section>
 
           {active.length > 0 && (
             <StoreGasWalletTopUp
@@ -359,15 +415,16 @@ export function StoreGasWalletPanel({
           )}
 
           <div className="border-t border-slate-100 pt-3">
-            <label htmlFor={WITHDRAW_INPUT_ID} className="text-xs font-semibold text-slate-700">
+            <label htmlFor={WITHDRAW_INPUT_ID} className="text-sm font-semibold text-slate-800">
               {t('storeGasWallet.withdrawTitle')}
             </label>
             <p className="text-xs text-slate-500">{t('storeGasWallet.withdrawToHint')}</p>
             {shown.length > 1 && (
-              <div className="mt-1">
-                <label htmlFor={WITHDRAW_CHAIN_ID} className="mr-2 text-xs text-slate-600">
+              <div className="mt-1 flex items-center gap-2">
+                <label htmlFor={WITHDRAW_CHAIN_ID} className="text-xs text-slate-600">
                   {t('storeGasWallet.withdrawChainLabel')}
                 </label>
+                {targetChainId !== null && <NativeTokenLogo chainId={targetChainId} size={16} />}
                 <select
                   id={WITHDRAW_CHAIN_ID}
                   value={targetChainId ?? ''}

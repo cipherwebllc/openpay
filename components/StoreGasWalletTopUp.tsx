@@ -38,6 +38,7 @@ import {
 } from '@/lib/storeGasTopUp';
 import { isUserRejection } from '@/lib/walletErrors';
 import type { StoreGasChainState } from '@/hooks/useStoreGasWallet';
+import { NativeTokenLogo } from './AssetLogo';
 
 const BTN =
   'rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark disabled:cursor-not-allowed disabled:opacity-50';
@@ -283,16 +284,17 @@ export function StoreGasWalletTopUp({
 
   return (
     <div className="border-t border-slate-100 pt-3">
-      <p className="text-xs font-semibold text-slate-700">{t('topUpTitle')}</p>
+      <p className="text-sm font-semibold text-slate-800">{t('topUpTitle')}</p>
       {!isConnected ? (
         <p className="mt-1 text-xs text-slate-500">{t('topUpConnectHint')}</p>
       ) : (
         <div className="mt-1 space-y-2 text-xs">
           {chains.length > 1 && (
-            <div>
-              <label htmlFor={CHAIN_ID} className="mr-2 text-slate-600">
+            <div className="flex items-center gap-2">
+              <label htmlFor={CHAIN_ID} className="text-slate-600">
                 {t('topUpChainLabel')}
               </label>
+              <NativeTokenLogo chainId={target.chainId} size={16} />
               <select
                 id={CHAIN_ID}
                 value={target.chainId}
@@ -313,7 +315,8 @@ export function StoreGasWalletTopUp({
             </div>
           )}
           <div>
-            <label htmlFor={AMOUNT_ID} className="text-slate-600">
+            <label htmlFor={AMOUNT_ID} className="flex items-center gap-1.5 text-slate-600">
+              <NativeTokenLogo chainId={target.chainId} size={14} />
               {t('topUpAmountLabel', { symbol })}
             </label>
             <input

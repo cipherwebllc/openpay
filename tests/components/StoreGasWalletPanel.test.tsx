@@ -130,7 +130,7 @@ describe('StoreGasWalletPanel', () => {
     expect(screen.getByText(ADDR)).toBeTruthy();
     expect(screen.getAllByText('0.01 POL').length).toBeGreaterThan(0);
     expect(screen.getByText('あと約 1 回送れます')).toBeTruthy();
-    expect(screen.getByText(/残高が少なくなっています/)).toBeTruthy();
+    expect(screen.getByText('残りわずか・POL を入れてください')).toBeTruthy();
   });
 
   it('残高を読めないときは 0 と見せず「読めませんでした」', () => {
@@ -195,10 +195,10 @@ describe('StoreGasWalletPanel', () => {
     render(<StoreGasWalletPanel />);
     expect(screen.getAllByText('1 POL').length).toBeGreaterThan(0);
     expect(screen.getAllByText('0.01 KAIA').length).toBeGreaterThan(0);
-    expect(screen.getByText('残高が少なくなっています。KAIA を入れてください。')).toBeTruthy();
-    expect(screen.queryByText('残高が少なくなっています。POL を入れてください。')).toBeNull();
-    // 説明と入金の案内に、対象のチェーンと通貨を並べる
-    expect(screen.getAllByText(/Polygon Amoy \(POL\)・Kairos \(KAIA\)/, { selector: 'p' })).toHaveLength(2);
+    expect(screen.getByText('残りわずか・KAIA を入れてください')).toBeTruthy();
+    expect(screen.queryByText('残りわずか・POL を入れてください')).toBeNull();
+    // 入金の案内に、対象のチェーンの通貨を並べる (チェーン名は残高の行にマーク付きで出る)
+    expect(screen.getByText('ここに POL・KAIA を送って入れます。')).toBeTruthy();
   });
 
   it('複数チェーン: 戻すチェーンを選び、確認文とお金の動きはそのチェーン', () => {
@@ -229,7 +229,8 @@ describe('StoreGasWalletPanel', () => {
     expect(screen.getAllByText('2 KAIA').length).toBeGreaterThan(0);
     expect(screen.getByText(/このチェーンでは今は送れません/)).toBeTruthy();
     expect(screen.queryByText(/Avalanche Fuji/)).toBeNull(); // 残高 0 の使えないチェーンは出さない
-    expect(screen.getAllByText(/Polygon Amoy \(POL\)/, { selector: 'p' })[0].textContent).not.toContain('Kairos');
+    // 入金の案内には使えるチェーンの通貨だけ (使えない Kairos の KAIA は出さない)
+    expect(screen.getByText('ここに POL を送って入れます。')).toBeTruthy();
     const options = within(screen.getByRole('combobox', { name: '戻すチェーン' })).getAllByRole('option');
     expect(options.map((o) => o.textContent)).toEqual(['Polygon Amoy (POL)', 'Kairos (KAIA)']);
   });
