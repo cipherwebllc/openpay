@@ -31,6 +31,7 @@ import {
   type StorefrontParts,
 } from '@/lib/mobileOrder';
 import { INVOICE_REGISTRATION_INPUT_MAX } from '@/lib/invoice';
+import { validStorefrontDiscount, type StorefrontDiscount } from '@/lib/mobileOrderDiscount';
 import type { ProductPreset } from './useProductPresets';
 import type { ReceiverSource } from './useReceiverAutofill';
 import { useLocalStorageSettings } from './useLocalStorageSettings';
@@ -56,6 +57,10 @@ export interface MobileOrderDraft {
   openFrom: string; // 受付開始 "HH:mm" (空=制限なし)
   lastOrder: string; // ラストオーダー "HH:mm" (空=無制限)
   minLeadMinutes: string; // 最短受け渡し分 (数値文字列・空=即時)
+  // 店舗の値引き (任意・plans/discount-common.md)。なし / 割引率 / 1 注文の割引額 と、その値 (生入力)。
+  // 検証と正規化は validateStorefrontParts (validStorefrontDiscount) が行う。
+  discountKind: 'none' | 'percent' | 'amount';
+  discountValue: string;
 }
 
 const STORAGE_KEY = 'openpay:mobile-order-draft:v1';
@@ -86,6 +91,8 @@ export const DEFAULT_MOBILE_ORDER_DRAFT: MobileOrderDraft = {
   openFrom: '', // 既定は制限なし (受付開始指定なし)
   lastOrder: '', // 既定は無制限 (ラストオーダーなし)
   minLeadMinutes: '', // 既定は即時 (最短受け渡し指定なし)
+  discountKind: 'none', // 既定は値引きなし
+  discountValue: '',
 };
 
 /** 下書きが既定のまま (この端末でまだ何も設定していない) か。接続ウォレットから自動で入った受取先
@@ -111,7 +118,9 @@ export function isPristineMobileOrderDraft(d: MobileOrderDraft): boolean {
     d.dineIn === base.dineIn &&
     d.openFrom === base.openFrom &&
     d.lastOrder === base.lastOrder &&
-    d.minLeadMinutes === base.minLeadMinutes
+    d.minLeadMinutes === base.minLeadMinutes &&
+    d.discountKind === base.discountKind &&
+    d.discountValue === base.discountValue
   );
 }
 
@@ -160,7 +169,16 @@ function sanitize(loaded: Partial<MobileOrderDraft>): MobileOrderDraft {
     openFrom: clampStr(loaded.openFrom, 5),
     lastOrder: clampStr(loaded.lastOrder, 5),
     minLeadMinutes: clampStr(loaded.minLeadMinutes, 4),
+    discountKind:
+      loaded.discountKind === 'percent' || loaded.discountKind === 'amount' ? loaded.discountKind : 'none',
+    discountValue: clampStr(loaded.discountValue, 8),
   };
+}
+
+/** 下書きの値引き → 店舗設定の値引き (正規化済み)。なし・形が正しくなければ undefined (= 値引きなし)。 */
+export function draftDiscount(draft: MobileOrderDraft): StorefrontDiscount | undefined {
+  if (draft.discountKind === 'none') return undefined;
+  return validStorefrontDiscount({ kind: draft.discountKind, value: draft.discountValue.trim() }) ?? undefined;
 }
 
 const POSITIVE_DECIMAL = /^\d+(\.\d+)?$/;
@@ -296,6 +314,8 @@ export function storefrontPartsToDraft(
     openFrom: parts.openFrom ?? '',
     lastOrder: parts.lastOrder ?? '',
     minLeadMinutes: parts.minLeadMinutes != null ? String(parts.minLeadMinutes) : '',
+    discountKind: parts.discount?.kind ?? 'none',
+    discountValue: parts.discount?.value ?? '',
   };
 }
 

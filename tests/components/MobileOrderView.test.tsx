@@ -1459,3 +1459,72 @@ describe('MobileOrderView 前回と同じ注文', () => {
     ).not.toBeNull();
   });
 });
+
+// 店舗の値引き (plans/discount-common.md PR4)。@handle の公開設定の値引きを、署名前の確認・受注と同じ関数で当てる。
+describe('MobileOrderView — 店舗の値引き', () => {
+  function add(index: number, times = 1) {
+    for (let i = 0; i < times; i++) {
+      fireEvent.click(screen.getAllByRole('button', { name: '数量を増やす' })[index]);
+    }
+  }
+  function payUrl() {
+    return new URL(
+      screen.getByRole('link', { name: '支払いへ進む' }).getAttribute('href') ?? '',
+      'http://localhost',
+    );
+  }
+
+  it('10% 引きの店: 入口に「10% 引き」・合計 900・URL の disc=100 は /checkout の支払額 900 と一致', () => {
+    renderWithIntl(
+      <MobileOrderView config={{ ...config, discount: { kind: 'percent', value: '10' } }} handle="shop" />,
+    );
+    expect(screen.getByText('モバイルオーダーで 10% 引き')).toBeInTheDocument();
+    add(0, 2); // ブレンド 500 × 2 = 1,000
+    expect(screen.getByText('900 JPYC')).toBeInTheDocument();
+    expect(screen.getByText('小計 1000 JPYC から 100 JPYC 値引き')).toBeInTheDocument();
+    const url = payUrl();
+    expect(url.searchParams.get('disc')).toBe('100');
+    expect(url.searchParams.get('store_handle')).toBe('shop');
+    const parsed = parseCheckoutParams(url.searchParams);
+    expect(parsed.ok).toBe(true);
+  });
+
+  it('事前注文・顧客上乗せ: 利用料 3% は値引き後の額から (1,000 − 100 = 900 → 27 → 合計 927)', () => {
+    envHold.enableMobileOrderFee = true;
+    renderWithIntl(
+      <MobileOrderView
+        config={{ ...config, mode: 'preorder', feePayer: 'customer', discount: { kind: 'percent', value: '10' } }}
+        handle="shop"
+      />,
+    );
+    add(0, 2);
+    expect(screen.getByText('927 JPYC')).toBeInTheDocument();
+    expect(screen.getByText(/システム利用料 27 JPYC/)).toBeInTheDocument();
+  });
+
+  it('1 注文 100 円引き: 小計が 100 以下の注文には付かない', () => {
+    renderWithIntl(
+      <MobileOrderView config={{ ...config, discount: { kind: 'amount', value: '100' } }} handle="shop" />,
+    );
+    expect(screen.getByText('モバイルオーダーで 1 注文 100 JPYC 引き')).toBeInTheDocument();
+    add(2); // 水 100
+    expect(screen.getByText('100 JPYC')).toBeInTheDocument();
+    expect(payUrl().searchParams.get('disc')).toBeNull();
+    add(2); // 水 200
+    expect(payUrl().searchParams.get('disc')).toBe('100');
+  });
+
+  it('値引きのない店は従来どおり (disc なし・注記なし)', () => {
+    renderWithIntl(<MobileOrderView config={config} handle="shop" />);
+    add(0);
+    expect(payUrl().searchParams.get('disc')).toBeNull();
+    expect(screen.queryByText(/値引き/)).toBeNull();
+  });
+
+  it('照合先の無いページ (ビルダーのプレビュー) では、値引き後の額のまま定価の支払いへ進ませない', () => {
+    renderWithIntl(<MobileOrderView config={{ ...config, discount: { kind: 'percent', value: '10' } }} />);
+    add(0);
+    expect(screen.getByText('450 JPYC')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '支払いへ進む' })).toBeNull();
+  });
+});

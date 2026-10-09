@@ -43,6 +43,7 @@ import {
   mobileOrderFeeValue,
   mobileOrderGasMode,
 } from '@/lib/mobileOrderFee';
+import { storefrontDiscountWei } from '@/lib/mobileOrderDiscount';
 import {
   composeLineName,
   effectiveUnitPrice,
@@ -453,13 +454,17 @@ export function MobileOrderView({
   // モバイル注文システム利用料 (flag ON のときのみ)。顧客上乗せ (preorder + feePayer=customer) では
   // 客の表示総額に上乗せする (店頭/店舗負担は原価のみ表示・店舗が受取から吸収するので客には出さない)。
   // 料率は店舗モード (config.mode) 由来。flag OFF は 0n = 従来どおり原価のみ表示。
+  // 店舗の値引き (公開設定・@handle の店だけ・plans/discount-common.md)。署名前の確認 (admission)・受注 (notify) と
+  // 同じ関数で出す。支払額 = 小計 − 値引き・利用料は支払額から。
+  const discountWei = storefrontDiscountWei(config.discount, orderWei, decimals);
+  const payableWei = orderWei - discountWei;
   const feeUpcharge =
     env.enableMobileOrderFee &&
     mobileOrderGasMode(config.mode, config.feePayer) === 'customer'
-      ? mobileOrderFeeValue(orderWei, config.mode)
+      ? mobileOrderFeeValue(payableWei, config.mode)
       : 0n;
   const totalHuman =
-    orderWei > 0n ? formatUnits(orderWei + feeUpcharge, decimals) : '0';
+    orderWei > 0n ? formatUnits(payableWei + feeUpcharge, decimals) : '0';
   // カートマークのバッジ点数 (合計数量)。
   const cartCount = cartItems.reduce((sum, it) => sum + it.qty, 0);
   // 店内 (dineIn) 時: テーブル番号を /checkout の description (→ 控え/履歴 memo) に載せ、
@@ -480,7 +485,10 @@ export function MobileOrderView({
     cartItems.length > 0 &&
     !tooMany &&
     !awaitsOrderId &&
-    !noPickupSlots
+    !noPickupSlots &&
+    // 値引きは @handle の店だけ (署名前に公開設定と照合する)。照合先の無いページ (ビルダーのプレビュー) では
+    // 値引き後の額を表示したまま定価の支払いへ進ませない。
+    (discountWei === 0n || Boolean(handle))
       ? buildCheckoutUrl(origin, {
           to: config.receiver,
           token: 'jpyc',
@@ -512,6 +520,8 @@ export function MobileOrderView({
             : {}),
           // 受取予定時刻 (Phase 4・preorder で顧客が選んだスロット・flag OFF/未選択は付かない)。
           ...(timeEnabled && isPreorder && pickupAt ? { pickupAt } : {}),
+          // 店舗の値引き (在るときだけ)。/checkout の支払額 = 小計 − 値引き・署名前に公開設定と照合される。
+          ...(discountWei > 0n ? { discount: formatUnits(discountWei, decimals) } : {}),
         })
       : '';
   // /checkout の「←」を店舗へ戻すため back/backName を付与 (@handle 公開時に backHref が渡る)。
@@ -686,6 +696,14 @@ export function MobileOrderView({
         <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">{config.shopName}</h1>
         {config.tagline && (
           <p className="mt-1.5 text-sm text-slate-500">{config.tagline}</p>
+        )}
+        {/* 店舗の値引き (公開設定)。JPYC のモバイルオーダーで得をすることを入口で伝える。 */}
+        {config.discount && (
+          <p className="mt-2 inline-flex rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700 ring-1 ring-rose-200">
+            {config.discount.kind === 'percent'
+              ? t('discountBadgePercent', { percent: config.discount.value })
+              : t('discountBadgeAmount', { amount: config.discount.value })}
+          </p>
         )}
         {offeredChains.length > 1 ? (
           // 複数チェーン: 顧客が支払うチェーンを選ぶ (受取先は全チェーン共通の 1 アドレス)。
@@ -908,6 +926,8 @@ export function MobileOrderView({
             decimals,
             count: cartCount,
             totalHuman,
+            subtotalHuman: formatUnits(orderWei, decimals),
+            discount: discountWei,
             feeUpcharge,
             feeBps: mobileOrderFeeBps(config.mode),
             onItemQtyChange: setItemQty,

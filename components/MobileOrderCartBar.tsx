@@ -53,6 +53,10 @@ export function MobileOrderCartBar({
     decimals: number;
     count: number;
     totalHuman: string;
+    /** 小計 (値引き前・人間可読)。値引きがあるときの注記に使う。 */
+    subtotalHuman: string;
+    /** 店舗の値引き (wei・無ければ 0n)。 */
+    discount: bigint;
     feeUpcharge: bigint;
     feeBps: number;
     onItemQtyChange: (id: string, n: number) => void;
@@ -192,6 +196,14 @@ export function MobileOrderCartBar({
               </span>
               <span className="text-base font-semibold text-slate-900">{cart.totalHuman} JPYC</span>
             </button>
+            {cart.discount > 0n && (
+              <p className="text-xs font-medium text-rose-700">
+                {t('discountNote', {
+                  subtotal: cart.subtotalHuman,
+                  discount: formatUnits(cart.discount, cart.decimals),
+                })}
+              </p>
+            )}
             {cart.feeUpcharge > 0n && (
               <p className="text-xs text-slate-500">
                 {t('feeIncludedNote', {
