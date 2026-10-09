@@ -738,6 +738,45 @@ describe('agent-order pay route', () => {
       expect(snapshot.resource).toContain(`pickupAt=${REQUESTED}`);
     });
 
+    it('402 で示した枠は、その 402 の有効時間 (maxTimeoutSeconds=600s) 内に払えば動かない・過ぎたら後ろの枠を 200 が返す', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z')); // Asia/Tokyo 12:00:00.000 (枠の境界)
+      store.record = preorderShop();
+      const { pay } = await load({ preorderTime: '1' });
+      const query = `h=shop&cart=${CART}&pickupAt=${REQUESTED}`;
+      const quote = await pay.GET(payReq(query));
+      const quoteBody = await quote.json();
+      expect(quoteBody.pickupAt).toBe(NEAREST);
+      expect(quoteBody.accepts[0].maxTimeoutSeconds).toBe(600);
+
+      // 2 回払うので応答は呼び出しごとに作る (Response の body は 1 回しか読めない)
+      routeMocks.verify.mockImplementation(async () => NextResponse.json({ isValid: true, payer: PAYER }));
+      routeMocks.settle.mockImplementation(
+        async () => NextResponse.json({ success: true, transaction: TX_HASH, payer: PAYER }),
+      );
+      routeMocks.finalize.mockResolvedValue({ ok: true, duplicate: false });
+      // 境界を 1ms 越えても 402 と同じ枠
+      vi.setSystemTime(new Date('2026-07-10T03:00:00.001Z'));
+      const paid = await pay.GET(payReq(query, { 'X-PAYMENT': paymentHeader() }));
+      expect(paid.status).toBe(200);
+      expect((await paid.json()).pickupAt).toBe(NEAREST);
+      expect(routeMocks.finalize.mock.calls[0][0].reservation.record.snapshot.pickupAt).toBe(NEAREST);
+      // 有効時間 (10 分) の途中でも同じ枠
+      vi.setSystemTime(new Date('2026-07-10T03:09:59.000Z'));
+      expect((await (await pay.GET(payReq(query))).json()).pickupAt).toBe(NEAREST);
+      // 過ぎたら後ろの枠 (12:11 + lead 60 = 13:11 → 13:15) になり、200 がそれを返す。
+      // (同じ署名の再提示は settled 済み record から最初の snapshot を返すので、ここでは新しい支払いとして扱う)
+      vi.setSystemTime(new Date('2026-07-10T03:11:00.000Z'));
+      redeliveryMocks.record = null;
+      routeMocks.finalize.mockClear();
+      const late = await pay.GET(payReq(query, { 'X-PAYMENT': paymentHeader() }));
+      expect(late.status).toBe(200);
+      const lateBody = await late.json();
+      expect(lateBody.pickupAt).toBe(Date.UTC(2026, 6, 10, 4, 15));
+      expect(lateBody.pickupAtRequested).toBe(REQUESTED);
+      expect(routeMocks.finalize.mock.calls[0][0].reservation.record.snapshot.pickupAt).toBe(Date.UTC(2026, 6, 10, 4, 15));
+    });
+
     it('候補枠どおりの pickupAt はそのまま (pickupAtRequested を持たない = 従来の snapshot の形)', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-07-10T03:00:00.000Z'));

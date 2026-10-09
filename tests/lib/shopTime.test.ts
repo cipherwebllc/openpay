@@ -11,6 +11,7 @@ import {
   earliestPickup,
   pickupSlots,
   nearestPickupSlot,
+  pickupSlotCandidates,
   sanitizeMinLead,
   PICKUP_SLOT_MIN,
   PICKUP_MAX_SLOTS,
@@ -162,6 +163,24 @@ describe('nearestPickupSlot (エージェント注文の受取時刻の正規化
   });
   it('候補が無ければ正規化できないので requested をそのまま返す', () => {
     expect(nearestPickupSlot([], 123)).toBe(123);
+  });
+});
+
+describe('pickupSlotCandidates (402 の有効時間内は同じ枠へ正規化する猶予)', () => {
+  it('今の候補枠に、猶予分だけ前の時点なら出ていた枠を前置する', () => {
+    // 12:00 + lead 60 → 13:00 から。猶予 10 分 → 11:50 基準なら 12:50 → ceil 13:00 (同じ)。12:07 では 13:15 からだが
+    // 11:57 基準なら 12:57 → ceil 13:00 が前置される。
+    expect(pickupSlotCandidates(TOKYO_NOON, 10 * 60_000, 60, '14:00')[0]).toBe(Date.UTC(2024, 0, 15, 4, 0));
+    const later = pickupSlotCandidates(TOKYO_NOON + 7 * 60_000, 10 * 60_000, 60, '14:00');
+    expect(later.slice(0, 2)).toEqual([Date.UTC(2024, 0, 15, 4, 0), Date.UTC(2024, 0, 15, 4, 15)]);
+    expect(later).toEqual([...new Set(later)]); // 重複なし
+    expect(later[later.length - 1]).toBe(Date.UTC(2024, 0, 15, 5, 0)); // 終端は lastOrder のまま
+  });
+  it('今の候補枠が空なら空 (受付可否は変えない)', () => {
+    expect(pickupSlotCandidates(TOKYO_NOON, 10 * 60_000, 90, '13:00')).toEqual([]);
+  });
+  it('猶予 0 なら pickupSlots と同じ', () => {
+    expect(pickupSlotCandidates(TOKYO_NOON, 0, 30, '13:00')).toEqual(pickupSlots(TOKYO_NOON, 30, '13:00'));
   });
 });
 

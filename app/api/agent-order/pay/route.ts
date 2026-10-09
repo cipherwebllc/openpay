@@ -21,7 +21,9 @@ import { chainForSlug } from '@/lib/chains';
 import { resolveDeployment } from '@/lib/tokens';
 import { configuredJpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { readShopLive } from '@/lib/shopLiveStore';
-import { isBeforeOpen, isPastLastOrder, nearestPickupSlot, pickupSlots } from '@/lib/shopTime';
+import {
+  isBeforeOpen, isPastLastOrder, nearestPickupSlot, pickupSlotCandidates, pickupSlots, PICKUP_SLOT_MIN,
+} from '@/lib/shopTime';
 import { createJpycPaymentRequirements } from '@/lib/x402/requirements';
 import { parseFacilitatorRequest } from '@/lib/x402/facilitatorSettle';
 import { x402FacilitatorConfig } from '@/lib/x402/facilitatorConfig';
@@ -594,24 +596,17 @@ export async function GET(req: Request): Promise<NextResponse> {
   ) {
     return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
   }
-  // 受取時刻: エージェントの指定値 (resource の pickupAt) を、preorder 店では人間の注文画面と同じ候補枠
-  // (最短準備時間・ラストオーダー・15 分刻み) の最寄りへ正規化する。人間の admission のように拒否はしない
-  // (第 7 回レビュー B12・user 裁定 R3)。正規化後の値を quote (402)・予約 snapshot・受注・応答で一貫して使い、
-  // 指定値と違えば応答の pickupAtRequested で分かる。
-  const pickupAtRequested = pickupAtForAgentOrderSnapshot(pickupAtParam);
-  let pickupAt = pickupAtRequested;
-  if (env.enablePreorderTime && record.storefront.mode === 'preorder') {
-    const slots = pickupSlots(
+  if (
+    env.enablePreorderTime &&
+    record.storefront.mode === 'preorder' &&
+    pickupSlots(
       Date.now(),
       record.storefront.minLeadMinutes,
       record.storefront.lastOrder,
-    );
-    if (slots.length === 0) {
-      return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
-    }
-    if (pickupAtRequested !== null) pickupAt = nearestPickupSlot(slots, pickupAtRequested);
+    ).length === 0
+  ) {
+    return NextResponse.json({ error: 'store_not_accepting' }, { status: 409 });
   }
-  const pickup = pickupFields(pickupAt, pickupAtRequested);
   if (soldOut && cartItems.some((item) => soldOut.has(item.id))) {
     return NextResponse.json({ error: 'item_sold_out' }, { status: 409 });
   }
@@ -641,6 +636,30 @@ export async function GET(req: Request): Promise<NextResponse> {
       { status: 503 },
     );
   }
+
+  // 受取時刻: エージェントの指定値 (resource の pickupAt) を、preorder 店では人間の注文画面と同じ候補枠
+  // (最短準備時間・ラストオーダー・15 分刻み) の最寄りへ正規化する。人間の admission のように拒否はしない
+  // (第 7 回レビュー B12・user 裁定 R3)。正規化後の値を quote (402)・予約 snapshot・受注・応答で一貫して使い、
+  // 指定値と違えば応答の pickupAtRequested で分かる。候補枠には 402 の有効時間 (maxTimeoutSeconds) と
+  // 1 枠 (15 分) の小さい方だけ前の時点の枠も含める = 402 で示した枠は有効時間内に払えば動かない (quote を
+  // server に保存しない・PR #775 P2-1)。有効時間を過ぎた支払いは後ろの枠に動きうるので、200 の pickupAt が正。
+  const pickupAtRequested = pickupAtForAgentOrderSnapshot(pickupAtParam);
+  let pickupAt = pickupAtRequested;
+  if (
+    env.enablePreorderTime &&
+    record.storefront.mode === 'preorder' &&
+    pickupAtRequested !== null
+  ) {
+    const graceMs = Math.min(accepts[0].maxTimeoutSeconds, PICKUP_SLOT_MIN * 60) * 1000;
+    const candidates = pickupSlotCandidates(
+      Date.now(),
+      graceMs,
+      record.storefront.minLeadMinutes,
+      record.storefront.lastOrder,
+    );
+    pickupAt = nearestPickupSlot(candidates, pickupAtRequested);
+  }
+  const pickup = pickupFields(pickupAt, pickupAtRequested);
 
   if (!paymentSignatureHeader && !paymentHeader) {
     return challenge(resourceUrl, description, accepts, 'payment_required', pickup);
