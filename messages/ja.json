@@ -2961,7 +2961,7 @@
     "discountAmountLabel": "1 注文あたりの割引額（JPYC）",
     "discountPercentInvalid": "割引率は 0 より大きく 100 未満で入れてください（小数 2 桁まで）",
     "discountAmountInvalid": "割引額は 1〜{max} の整数で入れてください",
-    "discountHint": "全品に付きます（1 注文に 1 つ）。割引率は 1 円未満を切り捨てます。値引き後の支払額が 2 JPYC 未満になる注文には付きません。システム利用料は値引き後の額にかかります。AI エージェントが自分で払う注文（x402）には付きません。",
+    "discountHint": "全品に付きます（1 注文に 1 つ）。割引率は 1 円未満を切り捨てます。値引き後の支払額が 10 JPYC 未満になる注文には付きません。システム利用料は値引き後の額にかかります。AI エージェントが自分で払う注文（x402）には付きません。",
     "discountBadgePercent": "モバイルオーダーで {percent}% 引き",
     "discountBadgeAmount": "モバイルオーダーで 1 注文 {amount} JPYC 引き",
     "discountNote": "小計 {subtotal} JPYC から {discount} JPYC 値引き"

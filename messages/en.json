@@ -2961,7 +2961,7 @@
     "discountAmountLabel": "Discount per order (JPYC)",
     "discountPercentInvalid": "Enter a rate above 0 and below 100 (up to 2 decimals).",
     "discountAmountInvalid": "Enter a whole number from 1 to {max}.",
-    "discountHint": "Applies to every item (one discount per order). A rate is rounded down to the yen. No discount is applied if less than 2 JPYC would remain to pay. The system fee is charged on the discounted amount. Orders an AI agent pays for itself (x402) get no discount.",
+    "discountHint": "Applies to every item (one discount per order). A rate is rounded down to the yen. No discount is applied if less than 10 JPYC would remain to pay. The system fee is charged on the discounted amount. Orders an AI agent pays for itself (x402) get no discount.",
     "discountBadgePercent": "{percent}% off mobile orders",
     "discountBadgeAmount": "{amount} JPYC off each mobile order",
     "discountNote": "{discount} JPYC off the {subtotal} JPYC subtotal"

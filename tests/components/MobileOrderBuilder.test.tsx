@@ -132,6 +132,10 @@ describe('MobileOrderBuilder', () => {
     expect(input).toHaveAttribute('aria-invalid', 'true');
     expect(screen.queryByText(/モバイルオーダーで .*引き/)).toBeNull();
 
+    // 選んでいる種類をもう一度押しても値は消さない。
+    fireEvent.change(input, { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: '割引率' }));
+    expect(screen.getByLabelText('割引率（%）')).toHaveValue('5');
     // 種類を変えたら値を持ち越さない (5% のつもりが 5 JPYC にならない)。
     fireEvent.click(screen.getByRole('button', { name: '割引額' }));
     expect(screen.getByLabelText('1 注文あたりの割引額（JPYC）')).toHaveValue('');

@@ -734,8 +734,11 @@ export function MobileOrderBuilder({
                         <button
                           key={kind}
                           type="button"
-                          // 種類を変えたら値を持ち越さない (5% のつもりが 5 JPYC にならない)。
-                          onClick={() => update({ discountKind: kind, discountValue: '' })}
+                          // 種類を変えたら値を持ち越さない (5% のつもりが 5 JPYC にならない)。選んでいる種類をもう一度
+                          // 押しても値は消さない (公開中の値引きを黙って外さない)。
+                          onClick={() => {
+                            if (kind !== draft.discountKind) update({ discountKind: kind, discountValue: '' });
+                          }}
                           aria-pressed={draft.discountKind === kind}
                           className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
                             draft.discountKind === kind
