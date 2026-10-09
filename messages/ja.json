@@ -2641,22 +2641,22 @@
       "cta": "モバイル注文を始める",
       "dismiss": "閉じる",
       "sheetNote": "ここで編集した商品は、モバイル注文のメニューにもなります。"
-    },
-    "discount": {
-      "add": "＋ 値引きを追加",
-      "label": "値引き",
-      "remove": "外す",
-      "mode": {
-        "amount": "金額",
-        "percent": "割引率"
-      },
-      "amountInput": "値引きの金額",
-      "percentInput": "割引率 (%)",
-      "percentNote": "（{percent}%）",
-      "errorAmount": "小計より小さい金額を、{unit} 単位で入れてください",
-      "errorPercent": "割引率は 0 より大きく 100 未満で入れてください（小数 2 桁まで）",
-      "errorPercentTooSmall": "この割引率では値引きが {unit} 未満になります"
     }
+  },
+  "Discount": {
+    "add": "＋ 値引きを追加",
+    "label": "値引き",
+    "remove": "外す",
+    "mode": {
+      "amount": "金額",
+      "percent": "割引率"
+    },
+    "amountInput": "値引きの金額",
+    "percentInput": "割引率 (%)",
+    "percentNote": "（{percent}%）",
+    "errorAmount": "小計より小さい金額を、{unit} 単位で入れてください",
+    "errorPercent": "割引率は 0 より大きく 100 未満で入れてください（小数 2 桁まで）",
+    "errorPercentTooSmall": "この割引率では値引きが {unit} 未満になります"
   },
   "ProductPresetManager": {
     "empty": "プリセットがありません。下のフォームから追加できます。",

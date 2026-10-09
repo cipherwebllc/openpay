@@ -90,6 +90,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'CrossChainForwardPendingPanel',
     'CrossChainHint',
     'CrossChainSourceChooser',
+    'Discount',
     'HandleClaim',
     'HandleProfile',
     'HandleProfileBuilder',
