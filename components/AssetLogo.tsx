@@ -90,3 +90,28 @@ export function TokenOnChainBadge({
     </span>
   );
 }
+
+/** チェーンのネイティブトークン (ガス代の POL・KAIA・AVAX 等) のロゴ。チェーンのロゴで表す。ロゴの無いチェーンは何も出さない。
+ *  隣にトークン記号のテキストがある前提で aria-hidden。 */
+export function NativeTokenLogo({
+  chainId,
+  size = 20,
+  className,
+}: {
+  chainId: number;
+  size?: number;
+  className?: string;
+}) {
+  const src = chainLogoPathForId(chainId);
+  if (!src) return null;
+  return (
+    <NextImage
+      src={src}
+      alt=""
+      width={size}
+      height={size}
+      className={className ?? 'shrink-0'}
+      aria-hidden
+    />
+  );
+}
