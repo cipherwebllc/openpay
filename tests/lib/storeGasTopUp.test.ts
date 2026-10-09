@@ -5,13 +5,16 @@ import { TransactionNotFoundError, TransactionReceiptNotFoundError } from 'viem'
 import {
   STORE_GAS_TOPUP_KEY,
   TOPUP_APPROVAL_TTL_MS,
-  TOPUP_SENT_KEEP_MS,
+  TOPUP_MAX_UNRESOLVED,
   TOPUP_SENT_TTL_MS,
   attachStoreGasTopUpHash,
   finishStoreGasTopUp,
   liveStoreGasTopUps,
   markStoreGasTopUpSuspect,
+  markStoreGasTopUpUnknown,
   noteStoreGasTopUpSender,
+  onStoreGasTopUpChange,
+  readStoreGasTopUpSender,
   reserveStoreGasTopUp,
   resolveStoreGasTopUp,
   staleStoreGasTopUps,
@@ -99,7 +102,7 @@ describe('storeGasTopUp', () => {
     expect(reserveStoreGasTopUp(A, 80002, T0).ok).toBe(true);
   });
 
-  it('送った記録は 1 日たっても捨てず「結果を確かめられていない」として 7 日残す・新しい補充は止めない (A5/G3)', () => {
+  it('送った記録は 1 日たっても捨てず「結果を確かめられていない」として残す (時間では消えない)・新しい補充は止めない (A5/G3)', () => {
     const id = reserve(A, T0);
     attachStoreGasTopUpHash({ id, address: A, chainId: 80002, from: B, nonce: 7 }, TX, T0);
     expect(liveStoreGasTopUps(A, T0)[0]).toMatchObject({ from: B, nonce: 7 });
@@ -109,11 +112,56 @@ describe('storeGasTopUp', () => {
     // 新しい補充は置ける。置いても (切れた記録の掃除で) 古い記録は消えない
     expect(reserveStoreGasTopUp(A, 80002, later).ok).toBe(true);
     expect(staleStoreGasTopUps(A, later).map((r) => r.id)).toEqual([id]);
-    // 7 日で捨てる (壊れた記録・確かめられない記録で、注意が永久に残らない)
-    const dropAt = T0 + TOPUP_SENT_KEEP_MS;
-    expect(staleStoreGasTopUps(A, dropAt)).toHaveLength(0);
-    reserveStoreGasTopUp(B, 80002, dropAt);
-    expect(window.localStorage.getItem(STORE_GAS_TOPUP_KEY)).not.toContain(`"${id}"`);
+    // 何日たっても捨てない (片付けるのは receipt か、警告を見せたうえでの鍵の削除だけ)
+    const muchLater = T0 + 30 * 24 * 60 * 60_000;
+    expect(staleStoreGasTopUps(A, muchLater).map((r) => r.id)).toEqual([id]);
+    reserveStoreGasTopUp(B, 80002, muchLater);
+    expect(staleStoreGasTopUps(A, muchLater).map((r) => r.id)).toEqual([id]);
+  });
+
+  it('送れたか分からない (送信の失敗) 記録: 30 分は補充を止め、その後は「確かめられていない」として警告に残る (消えない)', () => {
+    const id = reserve(A, T0);
+    markStoreGasTopUpUnknown(id, T0 + 1_000);
+    expect(liveStoreGasTopUps(A, T0 + 1_000)).toEqual([expect.objectContaining({ id, unknown: true })]);
+    expect(reserveStoreGasTopUp(A, 80002, T0 + 1_000)).toEqual({ ok: false, reason: 'busy' });
+    const later = T0 + TOPUP_APPROVAL_TTL_MS;
+    expect(liveStoreGasTopUps(A, later)).toHaveLength(0);
+    expect(staleStoreGasTopUps(A, later)).toEqual([expect.objectContaining({ id, unknown: true })]);
+    // 次の補充は置けるが、記録は消えない
+    expect(reserveStoreGasTopUp(A, 80002, later).ok).toBe(true);
+    expect(staleStoreGasTopUps(A, later).map((r) => r.id)).toEqual([id]);
+    // 送った記録には付けない (hash が真実)
+    const sent = reserve(B, T0);
+    attachStoreGasTopUpHash({ id: sent, address: B, chainId: 80002 }, TX, T0);
+    markStoreGasTopUpUnknown(sent, T0 + 1_000);
+    expect(liveStoreGasTopUps(B, T0 + 1_000)[0].unknown).toBeUndefined();
+  });
+
+  it('確かめられていない記録は宛先ごとに上限まで残し、溢れた分は最古から捨てる (無限に溜まらない)', () => {
+    for (let i = 0; i < TOPUP_MAX_UNRESOLVED + 2; i += 1) {
+      const at = T0 + i * 1_000;
+      attachStoreGasTopUpHash({ id: `h${i}`, address: A, chainId: 80002 }, TX, at);
+    }
+    const later = T0 + TOPUP_SENT_TTL_MS + 60_000;
+    expect(staleStoreGasTopUps(A, later)).toHaveLength(TOPUP_MAX_UNRESOLVED + 2);
+    reserveStoreGasTopUp(B, 80002, later); // 書くときに整理する
+    const kept = staleStoreGasTopUps(A, later).map((r) => r.id);
+    expect(kept).toHaveLength(TOPUP_MAX_UNRESOLVED);
+    expect(kept).not.toContain('h0');
+    expect(kept).not.toContain('h1');
+    expect(kept).toContain(`h${TOPUP_MAX_UNRESOLVED + 1}`);
+  });
+
+  it('同じタブの記録の変化を購読できる (storage イベントは自タブに届かない)', () => {
+    const seen: number[] = [];
+    const off = onStoreGasTopUpChange(() => seen.push(1));
+    const id = reserve(A, T0);
+    expect(seen).toHaveLength(1);
+    attachStoreGasTopUpHash({ id, address: A, chainId: 80002 }, TX, T0);
+    expect(seen).toHaveLength(2);
+    off();
+    finishStoreGasTopUp(id);
+    expect(seen).toHaveLength(2);
   });
 
   it('送り手と nonce は後から足せる (時刻は延ばさない・送った記録だけ・記録の送り手と違う tx の値は足さない)', () => {
@@ -129,13 +177,12 @@ describe('storeGasTopUp', () => {
     expect(liveStoreGasTopUps(A, T0 + 1_000)[0]).toMatchObject({ at: T0, hash: TX, from: B, nonce: 3 });
   });
 
-  it('「置き換えられた可能性」の印: 1 日たっていなくても途中ではなく「確かめられていない」になる (消さない・7 日で捨てる)', () => {
+  it('「置き換えられた可能性」の印: 1 日たっていなくても途中ではなく「確かめられていない」になる (消さない)', () => {
     const id = reserve(A, T0);
     attachStoreGasTopUpHash({ id, address: A, chainId: 80002, from: B, nonce: 7 }, TX, T0);
     markStoreGasTopUpSuspect(id, T0 + 1_000);
     expect(liveStoreGasTopUps(A, T0 + 1_000)).toHaveLength(0);
     expect(staleStoreGasTopUps(A, T0 + 1_000)).toEqual([expect.objectContaining({ id, hash: TX, suspect: true })]);
-    expect(staleStoreGasTopUps(A, T0 + TOPUP_SENT_KEEP_MS)).toHaveLength(0);
     // 送っていない記録には付かない
     const approving = reserve(B, T0);
     markStoreGasTopUpSuspect(approving, T0 + 1_000);
@@ -177,13 +224,19 @@ describe('resolveStoreGasTopUp', () => {
     };
   }
 
-  it('receipt があれば結果 (送り手が分からなくても)', async () => {
+  it('receipt があれば結果 (送り手が分からなくても)・receipt の判定は tx の読み取りを待たない (補助 RPC が遅くても先に返す)', async () => {
     const c = client({ receipt: 'found' });
     await expect(resolveStoreGasTopUp(c, REC)).resolves.toEqual({
       kind: 'receipt',
       receipt: { status: 'success', transactionHash: TX },
     });
     expect(c.getTransactionCount).not.toHaveBeenCalled();
+    expect(c.getTransaction).not.toHaveBeenCalled();
+    // getTransaction が永久に返らなくても receipt の判定は終わる
+    const slow = { ...client({ receipt: 'found' }), getTransaction: vi.fn(() => new Promise<never>(() => {})) };
+    await expect(
+      Promise.race([resolveStoreGasTopUp(slow, REC), new Promise((r) => setTimeout(() => r('timeout'), 500))]),
+    ).resolves.toEqual({ kind: 'receipt', receipt: { status: 'success', transactionHash: TX } });
   });
 
   it('receipt が無く、送り手の nonce が消費されていれば「置き換えられた可能性」(片付ける証拠ではない = 自分の tx の成功でも nonce は消費される)', async () => {
@@ -196,18 +249,19 @@ describe('resolveStoreGasTopUp', () => {
     });
   });
 
-  it('送り手と nonce が無ければ tx を読んで同じ tx の組として覚える (読めなければ途中のまま)', async () => {
-    const c = client({ count: 7, tx: { nonce: 7 } });
-    await expect(resolveStoreGasTopUp(c, REC)).resolves.toEqual({ kind: 'pending', sender: { from: B, nonce: 7 } });
-    expect(c.getTransactionCount).toHaveBeenCalledWith({ address: B, blockTag: 'latest' });
-    await expect(resolveStoreGasTopUp(client({ count: 8, tx: { nonce: 7 } }), REC)).resolves.toEqual({
-      kind: 'nonce_consumed',
+  it('送り手と nonce の組が無ければ nonce は見ない (途中のまま)・組の読み取りは別 (readStoreGasTopUpSender)', async () => {
+    const c = client({ count: 8, tx: { nonce: 7 } });
+    await expect(resolveStoreGasTopUp(c, REC)).resolves.toEqual({ kind: 'pending' });
+    expect(c.getTransactionCount).not.toHaveBeenCalled();
+    // 組は tx から読む
+    await expect(readStoreGasTopUpSender(client({ tx: { nonce: 7 } }), REC)).resolves.toEqual({ from: B, nonce: 7 });
+    await expect(readStoreGasTopUpSender(client({ tx: null }), REC)).resolves.toBeNull();
+    // 記録の送り手 (A) と tx の送り手 (B) が違えば、その組は使わない (別の tx の nonce を組にしない)
+    await expect(readStoreGasTopUpSender(client({ tx: { nonce: 7 } }), { ...REC, from: A })).resolves.toBeNull();
+    await expect(readStoreGasTopUpSender(client({ tx: { nonce: 7 } }), { ...REC, from: B })).resolves.toEqual({
+      from: B,
+      nonce: 7,
     });
-    await expect(resolveStoreGasTopUp(client({ count: 8, tx: null }), REC)).resolves.toEqual({ kind: 'pending' });
-    // 記録の送り手 (A) と tx の送り手 (B) が違えば、その nonce は使わない (別の tx の組にしない)
-    const mismatch = client({ count: 8, tx: { nonce: 7 } });
-    await expect(resolveStoreGasTopUp(mismatch, { ...REC, from: A })).resolves.toEqual({ kind: 'pending' });
-    expect(mismatch.getTransactionCount).not.toHaveBeenCalled();
   });
 
   it('RPC の障害 (receipt を読めない・nonce を読めない) は置き換えの可能性とも見なさない', async () => {

@@ -42,7 +42,9 @@ import {
   attachStoreGasTopUpHash,
   finishStoreGasTopUp,
   liveStoreGasTopUps,
+  markStoreGasTopUpUnknown,
   noteStoreGasTopUpSender,
+  readStoreGasTopUpSender,
   reserveStoreGasTopUp,
   touchStoreGasTopUp,
   type StoreGasTopUpRecord,
@@ -113,8 +115,16 @@ export function StoreGasWalletTopUp({
   // 送った tx を記録に残せなかった (端末の保存容量など) ときは、この画面で見張る (tx を見失わない)。
   const [localSent, setLocalSent] = useState<Watched | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => () => {
-    if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+  // 画面が生きているか。閉じた後に heartbeat を張らない (閉じた画面が確認中の記録を延ばし続けると、補充と鍵の削除が
+  // 止まったままになる)。
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      heartbeatRef.current = null;
+    };
   }, []);
   const reload = useCallback(() => {
     const next = liveStoreGasTopUps(gasAddress)[0] ?? null;
@@ -268,12 +278,13 @@ export function StoreGasWalletTopUp({
       let keepHeartbeat = false;
       try {
         const hash = await sendTransactionAsync({ to: gasAddress, value, chainId: sendChainId });
-        // hash が返った瞬間に記録へ残す (本体)。送り手と nonce は後から別に足す (下)。
-        const saved = await withStoreGasWalletLock(async () =>
-          attachStoreGasTopUpHash({ id, address: gasAddress, chainId: sendChainId }, hash),
-        );
-        if (!saved) {
-          // tx を記録に残せない。この画面で見張り、確認中の記録を延ばし続ける (届く途中の宛先を消させない)。
+        // hash が返った瞬間に記録へ残す (本体)。送り手と nonce は後から別に足す (下)。残せなければ一度だけやり直す。
+        const attach = () =>
+          withStoreGasWalletLock(async () => attachStoreGasTopUpHash({ id, address: gasAddress, chainId: sendChainId }, hash));
+        const saved = (await attach()) || (await attach());
+        if (!saved && mountedRef.current) {
+          // tx を記録に残せない。この画面で見張り、確認中の記録を延ばし続ける (届く途中の宛先を消させない)。画面を閉じて
+          // いたら張らない (閉じた画面の interval が記録を延ばし続け、補充と鍵の削除を止めたままにしない)。
           setLocalSent({ id, address: gasAddress, chainId: sendChainId, at: Date.now(), hash });
           heartbeatRef.current = heartbeat;
           keepHeartbeat = true;
@@ -282,23 +293,21 @@ export function StoreGasWalletTopUp({
         // 可能性を見るため)。画面の接続先 (React の値) は使わない (ロック待ちの間に接続先が変わると、別の財布の nonce と
         // 組になる)。待たずに走らせる = 読み取りの遅れ・失敗・タブを閉じる中断が、上の hash の記録 (本体) を巻き込まない。
         // 読めなければ hooks/useStoreGasWallet.ts の読み直しが後から足す。
-        void (async () => {
-          try {
-            const tx = await sendClient?.getTransaction({ hash });
-            if (!tx) return;
-            await withStoreGasWalletLock(async () => noteStoreGasTopUpSender(id, { from: tx.from, nonce: tx.nonce }));
-            reload();
-          } catch {
-            // 付帯の読み取り。失敗を本体に波及させない。
-          }
-        })();
+        if (sendClient) {
+          void readStoreGasTopUpSender(sendClient, { hash }).then(async (sender) => {
+            if (!sender) return;
+            await withStoreGasWalletLock(async () => noteStoreGasTopUpSender(id, sender));
+            if (mountedRef.current) reload();
+          });
+        }
       } catch (e) {
         if (isUserRejection(e)) {
           // 送っていない (ウォレットで断った)。記録を片付ける。
           await withStoreGasWalletLock(async () => finishStoreGasTopUp(id));
         } else {
-          // 送れたかどうか分からない (送った後に hash の応答を失った可能性がある)。記録は残し (30 分で切れる)、その間は
-          // 同じ宛先への補充と鍵の削除を止める (届く途中の宛先の鍵を消させない・A5/G2)。
+          // 送れたかどうか分からない (送った後に hash の応答を失った可能性がある)。記録に印を付けて残す。30 分は同じ宛先への
+          // 補充と鍵の削除を止め、その後は消す前の警告に残る (時間では消えない = 届く途中の宛先の鍵を警告なしに消させない・A5/G2)。
+          await withStoreGasWalletLock(async () => markStoreGasTopUpUnknown(id));
           setLocalError('unknown');
         }
       } finally {

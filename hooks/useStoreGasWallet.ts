@@ -22,11 +22,14 @@ import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { storeDeviceChainIds, storeGasWalletChainIds } from '@/lib/storeDevicePayment';
 import {
   STORE_GAS_TOPUP_KEY,
+  TOPUP_APPROVAL_TTL_MS,
   TOPUP_SENT_TTL_MS,
   finishStoreGasTopUp,
   liveStoreGasTopUps,
   markStoreGasTopUpSuspect,
   noteStoreGasTopUpSender,
+  onStoreGasTopUpChange,
+  readStoreGasTopUpSender,
   resolveStoreGasTopUp,
   staleStoreGasTopUps,
   type StoreGasTopUpRecord,
@@ -134,16 +137,12 @@ export function useStoreGasWallet() {
 
   const address = walletState?.state === 'ok' ? walletState.info.address : null;
 
-  // 結果を確かめられていない補充 (送って 1 日・置き換えられた可能性)。消すのは止めないが、消す前に注意する。
-  // 読み直すのは: 鍵が変わったとき・別のタブの記録の変化・残高の読み直し・1 日の境界 (タイマー)・削除確認を開くとき。
+  // 結果を確かめられていない補充 (送って 1 日・置き換えられた可能性・送れたか分からないまま 30 分)。消すのは止めないが、
+  // 消す前に警告する。読み直すのは: 鍵が変わったとき・記録の変化 (同じタブ = onStoreGasTopUpChange・別のタブ = storage
+  // イベント)・残高の読み直し・途中 → 警告の境界 (タイマー)・削除確認を開くとき。
   const [staleTopUps, setStaleTopUps] = useState<StoreGasTopUpRecord[]>([]);
   // 境界のタイマーを張り直す合図。
   const [staleTick, setStaleTick] = useState(0);
-  // 画面に知らせた (警告に出した) 記録の id。remove は、これに無い記録が保存にあれば消さない (古い state で消さない)。
-  const warnedStaleIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    warnedStaleIdsRef.current = new Set(staleTopUps.map((r) => r.id));
-  }, [staleTopUps]);
   const refreshStaleTopUps = useCallback(() => {
     setStaleTopUps(address ? staleStoreGasTopUps(address) : []);
     setStaleTick((t) => t + 1);
@@ -159,19 +158,22 @@ export function useStoreGasWallet() {
       setStaleTick((t) => t + 1);
     };
     setStaleTopUps(staleStoreGasTopUps(own));
-    // 送った記録が 1 日の境界をまたぐ時刻に読み直す (同じタブで開いたままでも警告が出る)。
+    // 途中の記録が警告に変わる時刻 (送った = 1 日・送れたか分からない = 30 分) に読み直す (同じタブで開いたままでも
+    // 警告が出る)。記録が変わるたび (update) に張り直す。
     const now = Date.now();
-    const edges = liveStoreGasTopUps(own, now)
-      .filter((r) => r.hash)
-      .map((r) => r.at + TOPUP_SENT_TTL_MS - now);
+    const edges = liveStoreGasTopUps(own, now).flatMap((r) =>
+      r.hash ? [r.at + TOPUP_SENT_TTL_MS - now] : r.unknown ? [r.at + TOPUP_APPROVAL_TTL_MS - now] : [],
+    );
     const timer = edges.length > 0 ? setTimeout(update, Math.max(0, Math.min(...edges)) + 1_000) : null;
     function onStorage(e: StorageEvent) {
       if (e.key === STORE_GAS_TOPUP_KEY || e.key === null) update();
     }
     window.addEventListener('storage', onStorage);
+    const offOwn = onStoreGasTopUpChange(update);
     return () => {
       if (timer) clearTimeout(timer);
       window.removeEventListener('storage', onStorage);
+      offOwn();
     };
   }, [address, staleTick]);
 
@@ -233,9 +235,16 @@ export function useStoreGasWallet() {
       try {
         const res = await resolveStoreGasTopUp(client, { ...op, hash: op.hash });
         if (res.kind === 'pending') {
-          // まだ証拠が無い。記録は残す (補充の画面が結果を見る・次の読み直しで片付ける)。tx から読めた送り手と nonce の組は足す。
-          const { sender } = res;
-          if (sender) await withStoreGasWalletLock(async () => noteStoreGasTopUpSender(op.id, sender));
+          // まだ証拠が無い。記録は残す (補充の画面が結果を見る・次の読み直しで片付ける)。
+          if (op.from === undefined || op.nonce === undefined) {
+            // 付帯: 送り手と nonce の組を tx から読んで記録に足す。待たない = 補助 RPC の遅れやロック待ちが、他の記録の
+            // 整理・出金の「不明」の解除 (この後段) を止めない。読めなければ次の読み直しでまた試す。
+            const hash = op.hash;
+            const id = op.id;
+            void readStoreGasTopUpSender(client, { from: op.from, hash }).then(async (sender) => {
+              if (sender) await withStoreGasWalletLock(async () => noteStoreGasTopUpSender(id, sender));
+            });
+          }
           continue;
         }
         if (res.kind === 'nonce_consumed') {
@@ -299,10 +308,20 @@ export function useStoreGasWallet() {
     withdrawStatus.phase === 'pending' ||
     withdrawStatus.phase === 'unknown';
 
-  const remove = useCallback(async (): Promise<boolean> => {
+  /**
+   * 鍵を消す。seen = 削除をクリックした時点で画面が警告として見せていた「確かめられていない」補充の記録 (id と状態)。
+   * ロック内で読み直した記録に、seen に無い・状態 (hash・置き換えの可能性・送信不明) が違うものがあれば消さず、
+   * 一覧を出し直して再確認させる (クリック後に増えた・変わった記録を、見せないまま消さない)。
+   */
+  const remove = useCallback(async (seen: readonly StoreGasTopUpRecord[] = []): Promise<boolean> => {
     if (removeBlocked) return false;
     // 画面にまだ知らせていない「確かめられていない」補充 (消さずに、警告に出してから消させる)。
     let unwarned: StoreGasTopUpRecord[] | null = null;
+    const shown = new Map(seen.map((r) => [r.id, r]));
+    const acknowledged = (r: StoreGasTopUpRecord) => {
+      const s = shown.get(r.id);
+      return !!s && s.hash === r.hash && !!s.suspect === !!r.suspect && !!s.unknown === !!r.unknown;
+    };
     // 消すのは、いま保存されている鍵が表示中のものと同じで、その鍵への補充が途中 (このタブ・別のタブ) でないときだけ
     // (別のタブで作り直された鍵を古い表示のまま消さない・届く途中の補充の宛先の鍵を消さない)。
     const removed = await withStoreGasWalletLock(async () => {
@@ -314,10 +333,11 @@ export function useStoreGasWallet() {
         return false;
       }
       if (liveStoreGasTopUps(current.info.address).length > 0) return false;
-      // 結果を確かめられていない補充は止めないが、消す時点で記録を読み直し、警告に出していないものがあれば消さない
-      // (古い state のまま、警告なしに消さない)。消したら、その鍵の記録は片付ける (消した鍵の注意が残り続けない)。
+      // 結果を確かめられていない補充は止めないが、消す時点で記録を読み直し、クリック時に見せていた集合に無い・状態の
+      // 違うものがあれば消さない (古い state のまま、警告なしに消さない)。消したら、その鍵の記録は片付ける (消した鍵の
+      // 注意が残り続けない)。
       const stale = staleStoreGasTopUps(current.info.address);
-      if (stale.some((r) => !warnedStaleIdsRef.current.has(r.id))) {
+      if (stale.some((r) => !acknowledged(r))) {
         unwarned = stale;
         return false;
       }

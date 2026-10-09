@@ -362,6 +362,9 @@ describe('StoreGasWalletPanel', () => {
     expect(hold.state.refreshStaleTopUps).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/結果を確かめられていない補充があります/)).toBeTruthy();
     expect(screen.getByRole('link', { name: '取引を見る' }).getAttribute('href')).toContain(TX);
+    // 消すときは、見せていた記録の集合を渡す (ロック待ちの間に増えた・変わった記録は hook が止める)
+    fireEvent.click(screen.getByRole('button', { name: '消す' }));
+    expect(hold.state.remove).toHaveBeenCalledWith((hold.state as { staleTopUps: unknown }).staleTopUps);
   });
 
   it('補充の結果が出るまでは消せない (届く途中の宛先の鍵を消さない)', () => {

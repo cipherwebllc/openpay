@@ -135,7 +135,8 @@ export function StoreGasWalletPanel({
   }
 
   async function handleRemove() {
-    const ok = await g.remove();
+    // クリック時に見せていた「確かめられていない」補充の集合を渡す (ロック待ちの間に増えた・変わった記録は hook が止める)。
+    const ok = await g.remove(g.staleTopUps);
     setRemoveFailed(!ok);
     if (ok) setConfirmingRemove(false);
   }

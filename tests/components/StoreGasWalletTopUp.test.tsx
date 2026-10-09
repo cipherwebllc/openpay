@@ -50,7 +50,12 @@ function removeLocks() {
 
 import { StoreGasWalletTopUp } from '@/components/StoreGasWalletTopUp';
 import { createStoreGasWallet, loadStoreGasWallet } from '@/lib/storeGasWallet';
-import { attachStoreGasTopUpHash, liveStoreGasTopUps, reserveStoreGasTopUp } from '@/lib/storeGasTopUp';
+import {
+  TOPUP_HEARTBEAT_MS,
+  attachStoreGasTopUpHash,
+  liveStoreGasTopUps,
+  reserveStoreGasTopUp,
+} from '@/lib/storeGasTopUp';
 
 const SHOP = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const OTHER = '0x1111111111111111111111111111111111111111';
@@ -400,8 +405,42 @@ describe('StoreGasWalletTopUp', () => {
     expect(screen.queryByRole('status')).toBeNull(); // 「ウォレットで確認してください…」は出さない
     expect(records()).toHaveLength(1);
     expect(records()[0].hash).toBeUndefined();
+    // 「送れたか分からない」の印 (30 分の後も、消えずに警告として残る)
+    expect(records()[0].unknown).toBe(true);
     expect(sendButton()).toBeDisabled();
     expect(v.onPendingChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it('送信待ちの間に画面を離れ、その後 tx を記録に残せなくても、閉じた画面の heartbeat を残さない (2 回目 P2)', async () => {
+    let approve!: (h: string) => void;
+    w.sendAsync.mockImplementation(() => new Promise((r) => { approve = r; }));
+    const realSetItem = Storage.prototype.setItem;
+    // hash を含む書き込み (tx を残す) だけ失敗させる。確認中の記録の延長 (hash なし) は通す
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, k: string, val: string) {
+      if (k === 'openpay:store-gas-wallet:topup:v2' && val.includes(TX)) throw new Error('QuotaExceededError');
+      return realSetItem.call(this, k, val);
+    });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const v = show();
+      await act(async () => {
+        fireEvent.click(sendButton());
+      });
+      v.unmount();
+      await act(async () => {
+        approve(TX);
+      });
+      const before = records()[0]?.at;
+      expect(before).toBeDefined();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(TOPUP_HEARTBEAT_MS * 2 + 100);
+      });
+      // 閉じた画面が確認中の記録を延ばし続けない (延ばすと、補充と鍵の削除が止まったままになる)
+      expect(records()[0]?.at).toBe(before);
+    } finally {
+      vi.useRealTimers();
+      spy.mockRestore();
+    }
   });
 
   it('1 回の上限 (目安の上限) を超える額・数字でない額は送らない', () => {

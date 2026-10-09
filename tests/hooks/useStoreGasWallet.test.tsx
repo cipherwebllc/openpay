@@ -14,6 +14,8 @@ const rpc = vi.hoisted(() => ({
   // 送り手の確定済み nonce (eth_getTransactionCount) と hash で読む tx (null = まだ見えない)。
   txCount: 0,
   txByHash: null as { nonce: number } | null,
+  // hash で読む tx の応答を止める (補助 RPC が遅くても receipt の判定を止めないことの確認用)。
+  hangTx: false,
   chainIds: [80002] as number[],
   // この宛先の残高の応答を止める (古い鍵の読み取りが遅れて返る競合の再現用)。
   hold: null as { address: string; gate: Promise<void> } | null,
@@ -56,6 +58,7 @@ vi.mock('@/lib/chains', async (importOriginal) => {
             case 'eth_getTransactionCount':
               return `0x${rpc.txCount.toString(16)}`;
             case 'eth_getTransactionByHash':
+              if (rpc.hangTx) return new Promise<never>(() => {});
               return rpc.txByHash === null
                 ? null
                 : {
@@ -111,6 +114,7 @@ import {
   attachStoreGasTopUpHash,
   finishStoreGasTopUp,
   liveStoreGasTopUps,
+  markStoreGasTopUpSuspect,
   reserveStoreGasTopUp,
   staleStoreGasTopUps,
 } from '@/lib/storeGasTopUp';
@@ -135,6 +139,7 @@ describe('useStoreGasWallet', () => {
     rpc.receiptStatus = '0x1';
     rpc.txCount = 0;
     rpc.txByHash = null;
+    rpc.hangTx = false;
     rpc.chainIds = [80002];
     rpc.balanceByChain = {};
     rpc.failChains = new Set();
@@ -420,14 +425,86 @@ describe('useStoreGasWallet', () => {
     await act(async () => {
       await result.current.refresh();
     });
-    expect(result.current.staleTopUps[0]).toMatchObject({ id: 'stale', nonce: 7, at });
+    // 組の読み取りは待たない付帯処理なので、記録に足されるのを待つ
+    await waitFor(() => expect(result.current.staleTopUps[0]).toMatchObject({ id: 'stale', nonce: 7, at }));
     expect(result.current.staleTopUps[0].from?.toLowerCase()).toBe(DEST.toLowerCase());
     // 消すのは止めない (警告は画面が出す)。消したら、その鍵の記録は片付ける
     await act(async () => {
-      expect(await result.current.remove()).toBe(true);
+      expect(await result.current.remove(result.current.staleTopUps)).toBe(true);
     });
     expect(staleStoreGasTopUps(address)).toEqual([]);
     expect(result.current.staleTopUps).toEqual([]);
+  });
+
+  it('receipt の判定は、送り手と nonce を読む補助 RPC が返らなくても止まらない (片付けと後段の処理が進む) (2 回目 P2)', async () => {
+    const { result } = await setup();
+    const address = result.current.address!;
+    rpc.hangTx = true; // eth_getTransactionByHash が永久に返らない
+    rpc.receiptStatus = '0x1';
+    attachStoreGasTopUpHash({ id: 'old', address, chainId: 80002 }, TX as `0x${string}`, Date.now() - 11 * 60_000);
+    const outcome = await act(async () =>
+      Promise.race([
+        result.current.refresh().then(() => 'done'),
+        new Promise<string>((r) => setTimeout(() => r('timeout'), 1_500)),
+      ]),
+    );
+    expect(outcome).toBe('done');
+    expect(liveStoreGasTopUps(address)).toEqual([]);
+    expect(staleStoreGasTopUps(address)).toEqual([]);
+  });
+
+  it('同じタブで hash を保存した記録も (手動の読み直しなしで) 1 日の境界で警告に変わる (2 回目 P2)', async () => {
+    const { result } = await setup();
+    const address = result.current.address!;
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      // 記録が無い状態で開いたタブで、あと 5 秒で 1 日になる記録を保存する (storage イベントは自タブに出ない)
+      attachStoreGasTopUpHash(
+        { id: 'same-tab', address, chainId: 80002 },
+        TX as `0x${string}`,
+        Date.now() - TOPUP_SENT_TTL_MS + 5_000,
+      );
+      expect(result.current.staleTopUps).toEqual([]);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(7_000);
+      });
+      expect(result.current.staleTopUps.map((r) => r.id)).toEqual(['same-tab']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('消すときは、クリック時に見せていた記録の集合を渡し、ロック待ちの間に増えた・変わった記録があれば消さない (2 回目 P1)', async () => {
+    const { result } = await setup();
+    const address = result.current.address!;
+    attachStoreGasTopUpHash({ id: 'a', address, chainId: 80002 }, TX as `0x${string}`, Date.now() - TOPUP_SENT_TTL_MS - 1);
+    act(() => {
+      result.current.refreshStaleTopUps();
+    });
+    const seen = result.current.staleTopUps;
+    expect(seen.map((r) => r.id)).toEqual(['a']);
+    // クリック後 (ロック待ちの間) に別の記録が増え、storage イベントで一覧も更新された
+    attachStoreGasTopUpHash({ id: 'b', address, chainId: 80002 }, TX as `0x${string}`, Date.now() - TOPUP_SENT_TTL_MS - 1);
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'openpay:store-gas-wallet:topup:v2' }));
+    });
+    expect(result.current.staleTopUps).toHaveLength(2);
+    await act(async () => {
+      expect(await result.current.remove(seen)).toBe(false);
+    });
+    expect(window.localStorage.getItem(STORE_GAS_WALLET_STORAGE_KEY)).not.toBeNull();
+    // 状態が変わった (置き換えの可能性の印) 記録も、見せ直すまで消さない
+    const seen2 = result.current.staleTopUps;
+    markStoreGasTopUpSuspect('a');
+    await act(async () => {
+      expect(await result.current.remove(seen2)).toBe(false);
+    });
+    act(() => {
+      result.current.refreshStaleTopUps();
+    });
+    await act(async () => {
+      expect(await result.current.remove(result.current.staleTopUps)).toBe(true);
+    });
   });
 
   it('同じタブで 1 日の境界をまたいだら、警告の一覧を自動で更新する (P2)', async () => {
@@ -475,7 +552,7 @@ describe('useStoreGasWallet', () => {
     expect(result.current.staleTopUps.map((r) => r.id).sort()).toEqual(['late', 'late2']);
     // 警告に出した上でなら消せる (記録も片付く)
     await act(async () => {
-      expect(await result.current.remove()).toBe(true);
+      expect(await result.current.remove(result.current.staleTopUps)).toBe(true);
     });
     expect(staleStoreGasTopUps(address)).toEqual([]);
   });

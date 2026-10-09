@@ -3,22 +3,26 @@
 // 目的: 届く途中の補充の宛先 (ガス用ウォレットの鍵) を消させない・同じ宛先への補充を重ねない・画面を離れて戻っても
 // 途中の補充を見失わない。記録は 1 件ずつ id を持ち、自分の記録だけを片付ける (別のタブの記録を消さない)。
 //
-// 記録の寿命:
-//   - ウォレットで確認中 (tx が無い): 30 分。確認中のタブは 1 分ごとに延ばす (タブが生きている間は切れない・
-//     タブを閉じた確認はいずれ切れる = 鍵を永久に消せなくしない)。
-//   - 送った (tx がある): 自分の hash の receipt が見つかったときだけ片付ける (resolveStoreGasTopUp)。受け取れないまま
-//     1 日たつか、送り手の nonce が消費されたのに receipt が無い (置き換えられた可能性) なら「結果を確かめられていない」
-//     (stale) に変わり、次の補充と鍵を消すのは止めず、消す前の注意だけに使う (時間の経過も nonce の消費も「入らなかった」
-//     の証拠ではない・まだ入りうる)。7 日で捨てる (壊れた記録・証拠を取れない記録で注意が永久に残らない)。
-// 読み書きは鍵の Web Lock の中で呼ぶこと (lib/storeGasWallet.ts の withStoreGasWalletLock)。
+// 記録の状態 (時間の経過は「操作のブロック解除」にだけ使い、「入らなかった」の証拠にはしない):
+//   - 途中 (alive・次の補充と鍵の削除を止める): ウォレットで確認中 (tx が無い) は 30 分 (確認中のタブは 1 分ごとに延ばす)。
+//     送った (tx がある) は 1 日。
+//   - 確かめられていない (stale・止めないが、消す前に警告する): 送って 1 日たっても receipt が無い・送り手の nonce が
+//     消費されたのに receipt が無い (置き換えられた可能性)・送れたか分からない (送信の失敗) まま 30 分たった。
+//     時間では消えない。
+//   - 片付ける (消す) のは: 自分の hash の receipt が取れた・ウォレットで断った (送っていない)・警告を見せたうえでの
+//     鍵の削除、だけ。ウォレットで確認中のまま切れた記録 (送った印も失敗の印も無い) は次の記録を置くときに掃除する。
+//     無限に溜まらないよう、確かめられていない記録は宛先ごとに最新 TOPUP_MAX_UNRESOLVED 件まで残し、溢れた分は最古から
+//     捨てる (警告の対象から外れる)。
+// 読み書きは鍵の Web Lock の中で呼ぶこと (lib/storeGasWallet.ts の withStoreGasWalletLock)。同じタブの変化は
+// onStoreGasTopUpChange で購読する (storage イベントは自タブに届かない)。
 
 import { TransactionReceiptNotFoundError, isAddress, isHex, type Address, type Hex } from 'viem';
 
 export const STORE_GAS_TOPUP_KEY = 'openpay:store-gas-wallet:topup:v2';
 export const TOPUP_APPROVAL_TTL_MS = 30 * 60 * 1000;
 export const TOPUP_SENT_TTL_MS = 24 * 60 * 60 * 1000;
-export const TOPUP_SENT_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 export const TOPUP_HEARTBEAT_MS = 60 * 1000;
+export const TOPUP_MAX_UNRESOLVED = 20;
 // 端末の時計の小さなずれは許し、それより先の時刻の記録は捨てる (先の時刻で切れずに残り続けない)。
 const FUTURE_SKEW_MS = 5 * 60 * 1000;
 
@@ -37,6 +41,8 @@ export type StoreGasTopUpRecord = {
   nonce?: number;
   /** 送り手の nonce が消費されたのに receipt が無い (置き換えられた可能性)。途中ではなく「確かめられていない」として扱う。 */
   suspect?: true;
+  /** 送れたかどうか分からない (ウォレットで断った以外の送信の失敗)。30 分は途中、その後は「確かめられていない」。 */
+  unknown?: true;
 };
 
 function isRecord(v: unknown, now: number): v is StoreGasTopUpRecord {
@@ -53,8 +59,20 @@ function isRecord(v: unknown, now: number): v is StoreGasTopUpRecord {
     (r.hash === undefined || (typeof r.hash === 'string' && isHex(r.hash) && r.hash.length === 66)) &&
     (r.from === undefined || (typeof r.from === 'string' && isAddress(r.from, { strict: false }))) &&
     (r.nonce === undefined || (typeof r.nonce === 'number' && Number.isInteger(r.nonce) && r.nonce >= 0)) &&
-    (r.suspect === undefined || r.suspect === true)
+    (r.suspect === undefined || r.suspect === true) &&
+    (r.unknown === undefined || r.unknown === true)
   );
+}
+
+// 同じタブの購読者 (storage イベントは自タブに届かないため)。書き込みが成功したときに呼ぶ。
+const listeners = new Set<() => void>();
+
+/** 記録の変化 (このタブの書き込み) を購読する。戻り値で解除。別のタブの変化は storage イベントで読む。 */
+export function onStoreGasTopUpChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 /** 記録をすべて読む。壊れた値・形の違う記録・先の時刻の記録は捨てる (壊れた記録で鍵を永久に消せなくしない)。 */
@@ -82,30 +100,58 @@ function writeAll(records: Record<string, StoreGasTopUpRecord>): boolean {
   try {
     if (Object.keys(records).length === 0) window.localStorage.removeItem(STORE_GAS_TOPUP_KEY);
     else window.localStorage.setItem(STORE_GAS_TOPUP_KEY, JSON.stringify(records));
-    return true;
   } catch {
     return false;
   }
+  for (const l of listeners) l();
+  return true;
 }
 
-/** 途中 (次の補充と鍵の削除を止める)。 */
+/** 途中 (次の補充と鍵の削除を止める)。時間が過ぎると止めなくなるだけで、記録の意味は変わらない。 */
 function alive(r: StoreGasTopUpRecord, now: number): boolean {
   return !r.suspect && now - r.at < (r.hash ? TOPUP_SENT_TTL_MS : TOPUP_APPROVAL_TTL_MS);
 }
 
-/** 送って 1 日たっても結果を確かめられていない・置き換えられた可能性がある (止めないが、消す前に注意する)。 */
+/**
+ * 結果を確かめられていない (止めないが、消す前に警告する): 送った (1 日たった・置き換えの可能性) と、送れたか分からない
+ * (30 分たった)。時間では消えない。
+ */
 function stale(r: StoreGasTopUpRecord, now: number): boolean {
-  return !!r.hash && !alive(r, now) && now - r.at < TOPUP_SENT_KEEP_MS;
+  return (!!r.hash || !!r.unknown) && !alive(r, now);
+}
+
+/** 掃除してよい: ウォレットで確認中のまま切れた (送った印も失敗の印も無い = 送ったことを示すものが無い)。 */
+function expired(r: StoreGasTopUpRecord, now: number): boolean {
+  return !r.hash && !r.unknown && !alive(r, now);
 }
 
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+/**
+ * 書く前の整理: 確認中のまま切れた記録を捨て、確かめられていない記録は宛先ごとに最新 TOPUP_MAX_UNRESOLVED 件まで残して
+ * 溢れた分は最古から捨てる (無限に溜まらない)。途中の記録と確かめられていない記録はそれ以外では捨てない。
+ */
+function prune(records: Record<string, StoreGasTopUpRecord>, now: number): void {
+  for (const [id, r] of Object.entries(records)) if (expired(r, now)) delete records[id];
+  const byAddress = new Map<string, StoreGasTopUpRecord[]>();
+  for (const r of Object.values(records)) {
+    if (!stale(r, now)) continue;
+    const key = r.address.toLowerCase();
+    byAddress.set(key, [...(byAddress.get(key) ?? []), r]);
+  }
+  for (const list of byAddress.values()) {
+    if (list.length <= TOPUP_MAX_UNRESOLVED) continue;
+    list.sort((a, b) => b.at - a.at);
+    for (const r of list.slice(TOPUP_MAX_UNRESOLVED)) delete records[r.id];
+  }
+}
 
 /** このアドレスへの途中の補充 (確認中・送った) の記録。 */
 export function liveStoreGasTopUps(address: Address, now: number = Date.now()): StoreGasTopUpRecord[] {
   return Object.values(readAll(now)).filter((r) => same(r.address, address) && alive(r, now));
 }
 
-/** このアドレスへの、送って 1 日たっても結果を確かめられていない補充の記録 (7 日まで)。 */
+/** このアドレスへの、結果を確かめられていない補充の記録 (消す前に警告する)。 */
 export function staleStoreGasTopUps(address: Address, now: number = Date.now()): StoreGasTopUpRecord[] {
   return Object.values(readAll(now)).filter((r) => same(r.address, address) && stale(r, now));
 }
@@ -120,8 +166,7 @@ export function reserveStoreGasTopUp(
   now: number = Date.now(),
 ): { ok: true; id: string } | { ok: false; reason: 'busy' | 'storage' } {
   const records = readAll(now);
-  // 切れた記録は掃除する (この端末の記録が溜まり続けない)。結果を確かめられていない記録は残す (消す前の注意に使う)。
-  for (const [id, r] of Object.entries(records)) if (!alive(r, now) && !stale(r, now)) delete records[id];
+  prune(records, now);
   if (Object.values(records).some((r) => same(r.address, address) && alive(r, now))) {
     return { ok: false, reason: 'busy' };
   }
@@ -149,6 +194,7 @@ export function attachStoreGasTopUpHash(
   now: number = Date.now(),
 ): boolean {
   const records = readAll(now);
+  prune(records, now);
   records[op.id] = {
     id: op.id,
     address: op.address,
@@ -159,6 +205,18 @@ export function attachStoreGasTopUpHash(
     ...(op.nonce !== undefined ? { nonce: op.nonce } : {}),
   };
   return writeAll(records);
+}
+
+/**
+ * 確認中の記録に「送れたかどうか分からない」の印を付ける (ウォレットで断った以外の送信の失敗)。30 分は途中として止め、
+ * その後は「確かめられていない」として警告に残る (時間では消えない)。送った記録 (hash が真実) には付けない。
+ */
+export function markStoreGasTopUpUnknown(id: string, now: number = Date.now()): void {
+  const records = readAll(now);
+  const r = records[id];
+  if (!r || r.hash) return;
+  records[id] = { ...r, unknown: true };
+  writeAll(records);
 }
 
 /**
@@ -195,10 +253,13 @@ export function finishStoreGasTopUp(id: string, now: number = Date.now()): void 
   writeAll(records);
 }
 
-/** resolveStoreGasTopUp が使う RPC の読み取り (viem の PublicClient の一部)。 */
+/** resolveStoreGasTopUp・readStoreGasTopUpSender が使う RPC の読み取り (viem の PublicClient の一部)。 */
 export type StoreGasTopUpEvidenceClient = {
   getTransactionReceipt(args: { hash: Hex }): Promise<{ status: 'success' | 'reverted'; transactionHash: Hex }>;
   getTransactionCount(args: { address: Address; blockTag: 'latest' }): Promise<number>;
+};
+
+export type StoreGasTopUpSenderClient = {
   getTransaction(args: { hash: Hex }): Promise<{ nonce: number; from: Address }>;
 };
 
@@ -212,50 +273,51 @@ export type StoreGasTopUpResolution =
    * nonce は消費される・ノードの食い違いで receipt が遅れて見えることもある)。
    */
   | { kind: 'nonce_consumed' }
-  /** まだ証拠が無い。sender はこの呼び出しで tx から読んだ送り手と nonce の組 (記録に足す)。 */
-  | { kind: 'pending'; sender?: StoreGasTopUpSender };
+  /** まだ証拠が無い。 */
+  | { kind: 'pending' };
 
 /**
- * 送った補充の結果の証拠を集める。時間の経過は証拠にしない (A5/G3): receipt があれば結果。無くても送り手の nonce が
- * 消費されていれば「置き換えられた可能性」(記録は消さない・警告に変える)。読む順は nonce → receipt (nonce が消費された
- * 後に receipt を探すので、その間に入った自分の tx を見落とさない)。送り手と nonce は同じ tx から読んだ組だけを使う
- * (記録の送り手と違う tx の nonce は使わない)。RPC の障害 (receipt を読めない等) は証拠にせず途中のまま。
+ * 送った補充の結果の証拠を集める。時間の経過は証拠にしない (A5/G3): receipt があれば結果 (先に読み、他の読み取りを
+ * 待たない = 補助 RPC が遅くても片付けが止まらない)。無くても、記録に送り手と nonce の組があり、その nonce が消費されて
+ * いれば「置き換えられた可能性」(記録は消さない・警告に変える。自分の tx が receipt と count の読み取りの間に入った場合も
+ * 警告止まりで、次の読み直しの receipt で片付く)。組が無ければ nonce は見ない (組は readStoreGasTopUpSender で別に読む)。
+ * RPC の障害 (receipt を読めない等) は証拠にせず途中のまま。
  */
 export async function resolveStoreGasTopUp(
   client: StoreGasTopUpEvidenceClient,
   r: StoreGasTopUpRecord & { hash: Hex },
 ): Promise<StoreGasTopUpResolution> {
-  let from = r.from;
-  let nonce = r.nonce;
-  let learned: StoreGasTopUpSender | undefined;
-  const pending = (): StoreGasTopUpResolution => (learned ? { kind: 'pending', sender: learned } : { kind: 'pending' });
-  if (from === undefined || nonce === undefined) {
-    try {
-      const tx = await client.getTransaction({ hash: r.hash });
-      if (from === undefined || same(from, tx.from)) {
-        from = tx.from;
-        nonce = tx.nonce;
-        learned = { from: tx.from, nonce: tx.nonce };
-      }
-    } catch {
-      // まだ RPC に見えない・読めない。nonce なしで receipt だけ見る。
-    }
-  }
-  let count: number | undefined;
-  if (from !== undefined && nonce !== undefined) {
-    try {
-      count = await client.getTransactionCount({ address: from, blockTag: 'latest' });
-    } catch {
-      // 読めなければ nonce では判定しない。
-    }
-  }
   try {
     const receipt = await client.getTransactionReceipt({ hash: r.hash });
     return { kind: 'receipt', receipt: { status: receipt.status, transactionHash: receipt.transactionHash } };
   } catch (e) {
     // 「見つからない」以外 (RPC の障害) は判定できない → 途中のまま。
-    if (!(e instanceof TransactionReceiptNotFoundError)) return pending();
+    if (!(e instanceof TransactionReceiptNotFoundError)) return { kind: 'pending' };
   }
-  if (count !== undefined && nonce !== undefined && count > nonce) return { kind: 'nonce_consumed' };
-  return pending();
+  if (r.from === undefined || r.nonce === undefined) return { kind: 'pending' };
+  try {
+    const count = await client.getTransactionCount({ address: r.from, blockTag: 'latest' });
+    if (count > r.nonce) return { kind: 'nonce_consumed' };
+  } catch {
+    // 読めなければ nonce では判定しない。
+  }
+  return { kind: 'pending' };
+}
+
+/**
+ * 送った tx から送り手と nonce の組を読む (付帯の読み取り・receipt の判定とは別に、待たずに呼ぶ)。記録に送り手があり、
+ * それと tx の送り手が違えば null (別の tx の nonce を組にしない)。まだ RPC に見えない・読めないときも null。
+ */
+export async function readStoreGasTopUpSender(
+  client: StoreGasTopUpSenderClient,
+  r: Pick<StoreGasTopUpRecord, 'from'> & { hash: Hex },
+): Promise<StoreGasTopUpSender | null> {
+  try {
+    const tx = await client.getTransaction({ hash: r.hash });
+    if (r.from !== undefined && !same(r.from, tx.from)) return null;
+    return { from: tx.from, nonce: tx.nonce };
+  } catch {
+    // まだ RPC に見えない (TransactionNotFoundError)・読めない。付帯の読み取りなので失敗を上に伝えない。
+    return null;
+  }
 }
