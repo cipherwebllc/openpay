@@ -341,6 +341,7 @@ export function parseCheckoutParams(
   const feeKindRaw = searchParams.get('fee_kind');
   const feePayerRaw = searchParams.get('fee_payer');
   const storeHandle = searchParams.get('store_handle');
+  const storeHandleParam = storeHandle ? sanitizeText(storeHandle, CHECKOUT_STORE_HANDLE_MAX) : undefined;
   const storeNameRaw = searchParams.get('store');
   const pickupAtRaw = searchParams.get('pickup_at');
   const submitRaw = searchParams.get('submit');
@@ -407,7 +408,9 @@ export function parseCheckoutParams(
       taxDisplayDecimals(token),
     );
     const mobileOrderUrl = isMobileOrderFeeKind(feeKindRaw) || orderId !== null || storeHandle !== null;
-    const handleOrder = storeHandle !== null && isMobileOrderFeeKind(feeKindRaw);
+    // 「@handle の注文」は parse 後の store_handle が空でないこと (CheckoutForm が admission を呼ぶのと同じ値で判定・
+    // store_handle= の空値で照合を飛ばさせない)。
+    const handleOrder = Boolean(storeHandleParam) && isMobileOrderFeeKind(feeKindRaw);
     if (discountWei === null || (mobileOrderUrl && !handleOrder)) {
       return { ok: false, ...urlFail('invalidDiscount') };
     }
@@ -460,9 +463,7 @@ export function parseCheckoutParams(
           ? feePayerRaw
           : undefined,
       // handle の形式・最新 storefront との束縛は署名前 admission API が権威的に検証する。
-      storeHandle: storeHandle
-        ? sanitizeText(storeHandle, CHECKOUT_STORE_HANDLE_MAX)
-        : undefined,
+      storeHandle: storeHandleParam,
       // 受取予定時刻 (任意・正の安全整数 ms のみ・0/不正は undefined = serialize の > 0 と対称)。
       pickupAt:
         pickupAtRaw &&

@@ -4,6 +4,7 @@
 // 額は整数円・率は小数 2 桁まで (レジの値引きと同じ)。AI エージェントが x402 で払う注文には付けない (定価)。
 
 import { discountFromPercent, discountPercentBps, parseDiscountAmount } from './discount';
+import { ORDER_DUST_FLOOR_WEI } from './orderRelay';
 
 export type StorefrontDiscount =
   | { kind: 'percent'; value: string }
@@ -11,6 +12,13 @@ export type StorefrontDiscount =
 
 /** 1 注文の値引き額の上限 (円)。打ち間違いで桁を増やした設定を公開させない。 */
 export const STOREFRONT_DISCOUNT_AMOUNT_MAX = 100_000;
+
+/**
+ * 値引き後に残す支払額の下限 (JPYC wei = 2 JPYC)。受注 (notify) は店舗の着金が 1 JPYC (ORDER_DUST_FLOOR_WEI) 未満の
+ * 注文を受け付けない。店舗負担の利用料 (最大 3%) を引かれても着金が 1 JPYC を割らないよう、値引きで支払額を
+ * 2 JPYC 未満にしない (払ったのに受注が残らない注文を値引きで作らない)。
+ */
+export const STOREFRONT_DISCOUNT_MIN_PAYABLE_WEI = 2n * ORDER_DUST_FLOOR_WEI;
 
 /** untrusted な値 (POST /api/handle・KV) を店舗の値引きへ。形が正しければ正規化した値、それ以外は null。 */
 export function validStorefrontDiscount(raw: unknown): StorefrontDiscount | null {
@@ -35,8 +43,9 @@ export function validStorefrontDiscount(raw: unknown): StorefrontDiscount | null
 }
 
 /**
- * 小計 (wei) に店舗の値引きを当てた額 (wei)。率は円未満切り捨て・額は小計を下回るときだけ (支払額が 1 円以上残る)。
- * 値引きが無い・当てられないときは 0n (= 定価)。
+ * 小計 (wei) に店舗の値引きを当てた額 (wei)。率は円未満切り捨て・額は小計を下回るときだけ。値引き後の支払額が
+ * 2 JPYC (STOREFRONT_DISCOUNT_MIN_PAYABLE_WEI) 未満になるなら当てない。値引きが無い・当てられないときは 0n (= 定価)。
+ * モバイル注文は JPYC (18 桁) だけ。
  */
 export function storefrontDiscountWei(
   discount: StorefrontDiscount | undefined,
@@ -48,5 +57,6 @@ export function storefrontDiscountWei(
     discount.kind === 'percent'
       ? discountFromPercent(subtotalWei, discount.value, decimals, 0)
       : parseDiscountAmount(discount.value, subtotalWei, decimals, 0);
-  return wei ?? 0n;
+  if (wei === null || subtotalWei - wei < STOREFRONT_DISCOUNT_MIN_PAYABLE_WEI) return 0n;
+  return wei;
 }

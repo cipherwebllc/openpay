@@ -7,7 +7,7 @@
 import { receiptHasRelayEvidence, verifyOrderBinding } from '@/lib/order/orderBindingVerify';
 import { recordMetric } from '@/lib/metrics';
 import { NextResponse, after } from 'next/server';
-import { createPublicClient, getAddress, isAddress, type Address, type Hex } from 'viem';
+import { createPublicClient, getAddress, isAddress, parseUnits, type Address, type Hex } from 'viem';
 import { env, isMainnet } from '@/lib/env';
 import {
   chainObjectForId,
@@ -83,6 +83,16 @@ const ORDER_PAYMENT_MAX_AGE_MS = 30n * 60n * 1000n;
 const ORDER_PAYMENT_FUTURE_TOLERANCE_MS = 2n * 60n * 1000n;
 
 const AMOUNT_ADVISORY_BPS_CAP = 300;
+
+/** webhook の値引き (お客様の画面が URL から付けた額・token 単位の 10 進)。形が正しくなければ null。 */
+function declaredDiscountMinor(raw: unknown, decimals: number): bigint | null {
+  if (typeof raw !== 'string' || !/^\d+(\.\d+)?$/.test(raw)) return null;
+  try {
+    return parseUnits(raw, decimals);
+  } catch {
+    return null;
+  }
+}
 const FEE_RECONCILE_RETRY_MS = [0, 1_000, 4_000, 10_000] as const;
 
 // 既存 raw が残っているときだけ同じ位置へ置換し、Pro/CSV/billing と共有する fee tx の恒久
@@ -556,8 +566,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (binding.digest) order.bindingDigest = binding.digest;
     if (amountAdvisory.mismatch) order.amountMismatch = true;
     if (amountAdvisory.unchecked) order.amountUnchecked = true;
-    // 受注カードの「値引き −X」。金額が合わない注文には出さない (既存の 申告合計 / 実着金 の表示に任せる)。
-    if (discountMinor > 0n && !amountAdvisory.mismatch) order.discount = discountMinor.toString();
+    // 受注カードの「値引き −X」。金額が合い、お客様の画面も同じ値引きで払った (webhook の値引きが公開設定から出した額と
+    // 一致する) 注文だけ。定価で払った注文 (値引き前に開いた画面など) に、当てていない値引きを出さない。表示だけの
+    // 判定で、受付・金額確認には使わない (body の値引きは正本ではない)。
+    if (discountMinor > 0n && !amountAdvisory.mismatch && declaredDiscountMinor(o.discount, deployment.decimals) === discountMinor) {
+      order.discount = discountMinor.toString();
+    }
     const feeObligation = standardFeeObligationFromReceipt({
       receiptValue,
       sameSourceFeeValue: binding.sameSourceFeeValue ?? result.sameSourceFeeValue,

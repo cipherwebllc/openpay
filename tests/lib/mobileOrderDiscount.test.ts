@@ -52,11 +52,16 @@ describe('storefrontDiscountWei (小計に当てる)', () => {
   it('率は円未満切り捨て (1,234 の 5% = 61.7 → 61)', () => {
     expect(storefrontDiscountWei({ kind: 'percent', value: '5' }, J('1234'), 18)).toBe(J('61'));
   });
-  it('額は小計を下回るときだけ (支払額が 1 円以上残る)', () => {
+  it('額は値引き後に 2 JPYC 以上残るときだけ (受注の最低着金 1 JPYC を利用料の控除後も割らない)', () => {
     const rule = { kind: 'amount', value: '100' } as const;
-    expect(storefrontDiscountWei(rule, J('101'), 18)).toBe(J('100'));
+    expect(storefrontDiscountWei(rule, J('102'), 18)).toBe(J('100'));
+    expect(storefrontDiscountWei(rule, J('101'), 18)).toBe(0n);
     expect(storefrontDiscountWei(rule, J('100'), 18)).toBe(0n);
     expect(storefrontDiscountWei(rule, J('50'), 18)).toBe(0n);
+  });
+  it('率も値引き後に 2 JPYC 未満なら当てない (100 の 99% = 99 → 残り 1)', () => {
+    expect(storefrontDiscountWei({ kind: 'percent', value: '99' }, J('100'), 18)).toBe(0n);
+    expect(storefrontDiscountWei({ kind: 'percent', value: '98' }, J('100'), 18)).toBe(J('98'));
   });
   it('値引きなし・小計 0・切り捨てて 0 になる率は 0', () => {
     expect(storefrontDiscountWei(undefined, J('1000'), 18)).toBe(0n);

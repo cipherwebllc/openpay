@@ -65,6 +65,7 @@ describe('値引き (disc) の URL', () => {
     ['order_id', 'order_id=abc'],
     ['store_handle', 'store_handle=shop'],
     ['order_id + fee_kind (store_handle なし)', 'order_id=abc&fee_kind=storefront'],
+    ['空の store_handle + fee_kind (admission を飛ばさせない)', 'store_handle=&fee_kind=storefront'],
   ])('店舗の値引きと照合できないモバイル注文の URL (%s) とは併用できない', (_label, extra) => {
     const r = parse(`${queryOf(pathOf())}&disc=20&${extra}`);
     expect(r.ok).toBe(false);

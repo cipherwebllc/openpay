@@ -1464,11 +1464,25 @@ describe('POST /api/order/notify — 店舗の値引き', () => {
   it('10% 引きの店: 1,000 の注文に 873 着金 (900 − 3%) は金額一致・受注に値引き 100 を残す', async () => {
     withDiscount({ kind: 'percent', value: '10' });
     hold.verify = { ok: true, value: 873n * JPYC };
-    const res = await POST(req(goodBody({ discount: '999' }))); // body の値引きは使わない
+    const res = await POST(req(goodBody({ discount: '100' })));
     expect(res.status).toBe(200);
     const stored = latestStoredOrder();
     expect('amountMismatch' in stored).toBe(false);
     expect(stored.discount).toBe((100n * JPYC).toString());
+  });
+
+  it('定価で払った注文 (お客様の画面に値引きが無い・違う) には値引きを出さない (金額確認は公開設定のまま)', async () => {
+    withDiscount({ kind: 'percent', value: '10' });
+    hold.verify = { ok: true, value: 970n * JPYC };
+    await POST(req(goodBody()));
+    let stored = latestStoredOrder();
+    expect('amountMismatch' in stored).toBe(false);
+    expect('discount' in stored).toBe(false);
+    setSpy.mockClear();
+    hold.listValues = [];
+    await POST(req(goodBody({ txHash: `0x${'d'.repeat(64)}`, discount: '999' })));
+    stored = latestStoredOrder();
+    expect('discount' in stored).toBe(false);
   });
 
   it('値引きのない店で同じ着金なら従来どおり金額不一致 (値引きは付けない)', async () => {

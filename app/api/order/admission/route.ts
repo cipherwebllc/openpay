@@ -12,7 +12,7 @@ import { isValidHandleFormat, normalizeHandle } from '@/lib/handle';
 import { resolveHandle } from '@/lib/handleStore';
 import type { FeePayer, MobileOrderMode } from '@/lib/mobileOrder';
 import { storefrontDiscountWei } from '@/lib/mobileOrderDiscount';
-import { declaredItemsTotalMinor, sanitizeOrderItems, type StoredOrderItem } from '@/lib/orderRelay';
+import { declaredItemsTotalMinor, sanitizeOrderItems } from '@/lib/orderRelay';
 import { resolveDeployment } from '@/lib/tokens';
 import { clientIp } from '@/lib/net/ipHash';
 import { checkReadRateLimit } from '@/lib/relay/relayGuards';
@@ -30,11 +30,11 @@ type AdmissionBody = {
   /** URL 発行時点の手数料負担者 (任意)。古い client は送らないので absent = 従来動作。 */
   feePayer?: FeePayer;
   /**
-   * 注文の明細と、URL の値引き (任意・plans/discount-common.md)。明細を送ってきたときだけ、店舗の値引き (公開設定)
-   * と照合する。CTA からの呼び出し・古い client は送らないので absent = 従来動作。
+   * 注文の明細と、URL の値引き (任意・plans/discount-common.md)。値引きがどちらか (URL・公開設定) にあり、明細を
+   * 送ってきたときだけ店舗の値引きと照合する。形の検証も照合するときだけ (値引きの無い注文の応答を変えない)。
    */
-  items?: StoredOrderItem[];
-  discount?: string;
+  items?: unknown;
+  discount?: unknown;
 };
 
 function json(body: Record<string, unknown>, status: number): NextResponse {
@@ -70,17 +70,13 @@ function parseBody(value: unknown): AdmissionBody | null {
   ) {
     return null;
   }
-  if (raw.items !== undefined && !Array.isArray(raw.items)) return null;
-  if (raw.discount !== undefined && (typeof raw.discount !== 'string' || !/^\d+(\.\d+)?$/.test(raw.discount))) {
-    return null;
-  }
   return {
     handle: raw.handle,
     merchant: raw.merchant,
     mode: raw.mode,
     ...(raw.pickupAt !== undefined ? { pickupAt: raw.pickupAt } : {}),
     ...(raw.feePayer !== undefined ? { feePayer: raw.feePayer } : {}),
-    ...(raw.items !== undefined ? { items: sanitizeOrderItems(raw.items) } : {}),
+    ...(raw.items !== undefined ? { items: raw.items } : {}),
     ...(raw.discount !== undefined ? { discount: raw.discount } : {}),
   };
 }
@@ -164,13 +160,21 @@ export async function POST(req: Request): Promise<NextResponse> {
   // 無い注文 (値引きを使わない店の注文) は照合しない = 従来の受付に新しい止まり方を足さない (掟 12)。
   if (body.items !== undefined && (body.discount !== undefined || storefront.discount !== undefined)) {
     const deployment = resolveDeployment('jpyc', chainForSlug(storefront.chain).id);
-    const subtotal = deployment ? declaredItemsTotalMinor(body.items, deployment.decimals) : null;
-    if (!deployment || subtotal === null) {
+    const subtotal =
+      deployment && Array.isArray(body.items)
+        ? declaredItemsTotalMinor(sanitizeOrderItems(body.items), deployment.decimals)
+        : null;
+    if (
+      !deployment ||
+      subtotal === null ||
+      (body.discount !== undefined &&
+        (typeof body.discount !== 'string' || !/^\d+(\.\d+)?$/.test(body.discount)))
+    ) {
       return json({ ok: false, error: 'invalid_request' }, 400);
     }
     let declared: bigint;
     try {
-      declared = body.discount ? parseUnits(body.discount, deployment.decimals) : 0n;
+      declared = typeof body.discount === 'string' ? parseUnits(body.discount, deployment.decimals) : 0n;
     } catch {
       return json({ ok: false, error: 'invalid_request' }, 400);
     }

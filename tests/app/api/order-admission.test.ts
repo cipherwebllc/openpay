@@ -377,8 +377,10 @@ describe('POST /api/order/admission — 店舗の値引き', () => {
     expect((await POST(request({ items, discount: '50' }))).status).toBe(200);
   });
 
-  it('値引きのない店・値引きのない URL は明細を見ない (従来どおり通す)', async () => {
+  it('値引きのない店・値引きのない URL は明細を見ない (形が違っても従来どおり通す)', async () => {
     expect((await POST(request({ items: [{ name: 'x', qty: 1, price: 'abc' }] }))).status).toBe(200);
+    expect((await POST(request({ items: null }))).status).toBe(200);
+    expect((await POST(request({ items: 'nope' }))).status).toBe(200);
   });
 
   it('明細を送らない呼び出し (CTA・旧 client) は照合しない', async () => {
@@ -386,9 +388,10 @@ describe('POST /api/order/admission — 店舗の値引き', () => {
     expect((await POST(request())).status).toBe(200);
   });
 
-  it('値引きの形が不正なら KV を読まず 400', async () => {
+  it('照合するときに値引き・明細の形が不正なら 400', async () => {
     expect((await POST(request({ items, discount: '-1' }))).status).toBe(400);
+    hold.resolved = { ok: true, record: record(preorder({ discount: { kind: 'percent', value: '5' } })) };
     expect((await POST(request({ items: 'nope' }))).status).toBe(400);
-    expect(hold.resolveHandle).not.toHaveBeenCalled();
+    expect((await POST(request({ items, discount: 50 }))).status).toBe(400);
   });
 });
