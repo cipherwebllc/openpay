@@ -52,6 +52,35 @@ describe('StoreDeviceRegisterStatus (店員向けの表示)', () => {
     expect(href).not.toContain(HASH);
   });
 
+  describe('店の tx が revert した後の「結果が分からない」(第 7 回レビュー A3)', () => {
+    it('店の revert 済みの tx を確認先として出さず、「確かめた（閉じる）」も出さない (店の tx の確認だけで次の QR を出させない)', () => {
+      const h = show({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
+      expect(screen.getByRole('status')).toHaveTextContent('お店の端末の送信は失敗しましたが');
+      expect(screen.queryByRole('link', { name: '取引を見る' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '取引を確かめた（閉じる）' })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'いま確認する' }));
+      expect(h.onCheckNow).toHaveBeenCalled();
+      expect(h.onDismiss).not.toHaveBeenCalled();
+    });
+
+    it('判定が見つけた確定待ちの tx があれば、確認先はその tx (店の revert 済みの tx ではない)', () => {
+      const PENDING = `0x${'ef'.repeat(32)}` as const;
+      show({ phase: 'unknown', mark: MARK, previous: true, storeTxReverted: true, txHash: PENDING });
+      expect(screen.getByRole('status')).toHaveTextContent(/前回の送信:.*お店の端末の送信は失敗しましたが/);
+      const href = screen.getByRole('link', { name: '取引を見る' }).getAttribute('href') ?? '';
+      expect(href).toContain(PENDING);
+      expect(href).not.toContain(HASH);
+      expect(screen.queryByRole('button', { name: '取引を確かめた（閉じる）' })).toBeNull();
+    });
+
+    it('通常の「結果が分からない」は従来どおり (端末の tx へのリンクと「取引を確かめた（閉じる）」)', () => {
+      const h = show({ phase: 'unknown', mark: MARK, previous: false });
+      expect(screen.getByRole('link', { name: '取引を見る' }).getAttribute('href')).toContain(HASH);
+      fireEvent.click(screen.getByRole('button', { name: '取引を確かめた（閉じる）' }));
+      expect(h.onDismiss).toHaveBeenCalled();
+    });
+  });
+
   it('判定の tx が無い入金の確認は、端末が送った tx へのリンク (従来どおり)', () => {
     show({ phase: 'received', mark: MARK, finalized: false, previous: false });
     expect(screen.getByRole('link', { name: '取引を見る' }).getAttribute('href')).toContain(HASH);

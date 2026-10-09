@@ -96,10 +96,28 @@ describe('resolveStoreHandoff (お店の端末で送る 1 件の結論)', () => 
     expect(await resolveStoreHandoff(body({ txHash: TX }), deps())).toEqual({ ok: true, state: 'settled', txHash: TX });
   });
 
-  it('一致しても未確定 (finalized 前・reorg の可能性) なら「確定待ち」の確認中', async () => {
+  it('一致しても未確定 (finalized 前・reorg の可能性) なら「確定待ち」の確認中 (確定待ちの tx を添える)', async () => {
     matchTx = TX;
     finalized = false;
-    expect(await resolveStoreHandoff(body({ txHash: TX }), deps())).toEqual({ ok: true, state: 'pending', confirming: true });
+    expect(await resolveStoreHandoff(body({ txHash: TX }), deps())).toEqual({
+      ok: true,
+      state: 'pending',
+      confirming: true,
+      txHash: TX,
+    });
+  });
+
+  it('nonce から探した tx がこの支払いの Settled を含むが未確定なら、確定待ちの tx を添える (店の端末の確認先・第 7 回レビュー A3)', async () => {
+    used = true;
+    foundTx = TX;
+    matchTx = TX;
+    finalized = false;
+    expect(await resolveStoreHandoff(body({ txHash: OTHER_TX }), deps())).toEqual({
+      ok: true,
+      state: 'pending',
+      confirming: true,
+      txHash: TX,
+    });
   });
 
   it('別の取引のヒントは無視し、この nonce の tx を探し直す', async () => {

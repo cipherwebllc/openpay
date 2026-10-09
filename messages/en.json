@@ -2607,6 +2607,7 @@
       "reverted": "The transaction failed (reverted). No payment was made.",
       "unknown": "We can't confirm the result yet. To avoid charging the same checkout twice if it went through, you can't show the next QR until it's confirmed. Check it with “View transaction”, then close this.",
       "unknownAck": "I checked the transaction (close)",
+      "unknownAfterRevert": "The store device's transaction failed, but the customer's payment may have gone through (or may still go through) with the same signature. You can't show the next QR until the result is confirmed.",
       "failed": "The transaction didn't go through. No payment was made.",
       "checkNow": "Check now",
       "notSent": {

@@ -24,7 +24,9 @@ export type StoreHandoffResolution =
   | { ok: true; state: 'settled'; txHash: Hex }
   | { ok: true; state: 'expired_unused' }
   | { ok: true; state: 'used_unresolved' }
-  | { ok: true; state: 'pending'; confirming?: boolean };
+  // confirming = この支払いの Settled を含む成功 tx があり確定待ち。txHash はその tx (店の端末の確認先に使う・
+  // 結論ではない = 支払い済みとは言わない)。
+  | { ok: true; state: 'pending'; confirming?: boolean; txHash?: Hex };
 
 export type SuccessfulReceipt = { logs: Log[]; blockNumber: bigint; blockHash: Hex };
 
@@ -207,7 +209,7 @@ export async function resolveStoreHandoff(
     if (hint) {
       const r = await checkTx(hint);
       if (r === 'settled') return remember(key, { ok: true, state: 'settled', txHash: hint });
-      if (r === 'unconfirmed') return remember(key, { ok: true, state: 'pending', confirming: true });
+      if (r === 'unconfirmed') return remember(key, { ok: true, state: 'pending', confirming: true, txHash: hint });
     }
   } catch {
     return { ok: true, state: 'pending' }; // RPC 障害は結論を出さず覚えない
@@ -232,7 +234,7 @@ export async function resolveStoreHandoff(
         if (found) {
           const r = await checkTx(found);
           if (r === 'settled') return remember(key, { ok: true, state: 'settled', txHash: found });
-          if (r === 'unconfirmed') return remember(key, { ok: true, state: 'pending', confirming: true });
+          if (r === 'unconfirmed') return remember(key, { ok: true, state: 'pending', confirming: true, txHash: found });
         }
         // 見つからない (検索範囲より前・取消)。確定ブロックでも使用済みで、期限から十分たったときだけ、
         // 「この署名はもう使えない (結果は不明)」を返す。支払い済みとも、行われていないとも言わない。

@@ -224,6 +224,8 @@ describe('useStoreDeviceRegister (レジ端末: 受け渡し → 確かめて送
     await advance(3_000);
     expect(result.current.state).toMatchObject({ phase: 'unknown' });
     send.getReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
+    // revert の後に「行われていません」と言うのは、判定が期限切れ・未使用を返したときだけ (第 7 回レビュー A3)
+    resolveRes = () => json({ ok: true, state: 'expired_unused' });
     await act(async () => {
       await result.current.checkNow();
     });
@@ -1013,16 +1015,9 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     expect(of('/resolve')).toHaveLength(1);
   });
 
-  it.each([
-    ['確認中 (pending・この支払いの tx がまだ無い)', () => json({ ok: true, state: 'pending' })],
-    ['確認中 (pending・confirming: false)', () => json({ ok: true, state: 'pending', confirming: false })],
-    ['期限切れ・未使用', () => json({ ok: true, state: 'expired_unused' })],
-    ['成立だが tx hash が読めない応答', () => json({ ok: true, state: 'settled', txHash: 'nope' })],
-    ['判定を引けない (503)', () => json({ ok: false, error: 'unavailable' }, 503)],
-    ['通信断', () => Promise.reject(new TypeError('Failed to fetch'))],
-  ])('A3: revert の後の判定が %s なら、従来どおり reverted (追いかけない)', async (_label, res) => {
+  it('A3: revert の後の判定が「期限切れ・未使用」(この署名がもう使えない証明) のときだけ reverted (お支払いは行われていない・追いかけない)', async () => {
     send.waitReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
-    resolveRes = res as () => Promise<Response>;
+    resolveRes = () => json({ ok: true, state: 'expired_unused' });
     readRes = signed;
     const { result } = renderHook(() => useStoreDeviceRegister(input));
     await started(result);
@@ -1034,6 +1029,93 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     expect(of('/resolve')).toHaveLength(1);
   });
 
+  // revert した tx の calldata には署名が載っているので、期限までは誰でも送り直せる (pending は未払いの証明ではない)。
+  it.each([
+    ['確認中 (pending・この支払いの tx がまだ無い)', () => json({ ok: true, state: 'pending' })],
+    ['確認中 (pending・confirming: false)', () => json({ ok: true, state: 'pending', confirming: false })],
+    ['成立だが tx hash が読めない応答', () => json({ ok: true, state: 'settled', txHash: 'nope' })],
+    ['判定を引けない (503)', () => json({ ok: false, error: 'unavailable' }, 503)],
+    ['通信断', () => Promise.reject(new TypeError('Failed to fetch'))],
+  ])('A3: revert の後の判定が %s なら「行われていません」と言わず、店の tx は失敗・結果が分からない (unknown) として監視 → 期限切れ・未使用で成立しなかった (failed)', async (_label, res) => {
+    send.waitReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
+    resolveRes = res as () => Promise<Response>;
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
+    expect(result.current.busy).toBe(true);
+    expect(await started(result)).toBeNull();
+    // 店の revert 済みの tx の確認だけで外させない (閉じても次の QR を出せないまま)
+    act(() => {
+      result.current.dismiss();
+    });
+    expect(result.current.state).toMatchObject({ phase: 'unknown', storeTxReverted: true });
+    expect(result.current.busy).toBe(true);
+    resolveRes = () => json({ ok: true, state: 'expired_unused' });
+    await advance(10_000);
+    expect(result.current.state).toEqual({ phase: 'failed', mark: MARK, previous: false });
+    expect(result.current.busy).toBe(false);
+  });
+
+  it('A3: revert の後の判定が確定待ち (confirming) で tx が分かれば、確認先は判定が見つけた tx (店の revert 済みの tx ではない)', async () => {
+    send.waitReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
+    resolveRes = () => json({ ok: true, state: 'pending', confirming: true, txHash: HASH_B });
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toEqual({
+      phase: 'unknown',
+      mark: MARK,
+      previous: false,
+      storeTxReverted: true,
+      txHash: HASH_B,
+    });
+  });
+
+  it('A3:「いま確認する」は店の revert 済みの tx を読み直さず判定だけ引き直す (読み取りの失敗で、閉じられる「結果が分からない」に戻さない)', async () => {
+    send.waitReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toMatchObject({ phase: 'unknown', storeTxReverted: true });
+    send.getReceipt.mockClear().mockResolvedValue(null);
+    await act(async () => {
+      await result.current.checkNow();
+    });
+    expect(send.getReceipt).not.toHaveBeenCalled();
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
+    resolveRes = () => json({ ok: true, state: 'settled', txHash: HASH_B });
+    await act(async () => {
+      await result.current.checkNow();
+    });
+    expect(result.current.state).toMatchObject({ phase: 'received', finalized: true, txHash: HASH_B });
+  });
+
+  it('A3: 照会を待つ間にアンマウントしたら照会を中止し、確定待ちの監視を始めない (戻った後の新しい監視と重ならない)', async () => {
+    send.waitReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
+    let openResolve!: () => void;
+    const gate = new Promise<void>((r) => { openResolve = r; });
+    resolveRes = () => gate.then(() => json({ ok: true, state: 'pending', confirming: true }));
+    readRes = signed;
+    const { result, unmount } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toMatchObject({ phase: 'sent' });
+    expect(of('/resolve')).toHaveLength(1);
+    const signal = of('/resolve')[0].init!.signal;
+    unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      openResolve();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await advance(16 * 60_000);
+    expect(of('/resolve')).toHaveLength(1);
+  });
+
   it('A3: revert の後の判定が確定待ち (confirming = 同じ署名の別の tx が成立済みで確定待ち) なら「行われていません」と言わず、結果が分からない (unknown) として確定を待つ → 成立で入金の確認 (実際の tx)', async () => {
     send.waitReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
     resolveRes = () => json({ ok: true, state: 'pending', confirming: true });
@@ -1041,7 +1123,7 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     const { result } = renderHook(() => useStoreDeviceRegister(input));
     await started(result);
     await advance(3_000);
-    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false });
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
     // 確定を待つ間は次の QR を出さない (成立していれば二重払いになる)
     expect(result.current.busy).toBe(true);
     expect(await started(result)).toBeNull();
@@ -1088,7 +1170,7 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     expect(result.current.state).toMatchObject({ phase: 'received', previous: true, finalized: true, txHash: HASH_B });
   });
 
-  it('A3: 判定の応答が返らなくても「送信しました」のまま止めない (上限の後は reverted)', async () => {
+  it('A3: 判定の応答が返らなくても「送信しました」のまま止めない (上限の後は unknown として確定待ちの監視へ)', async () => {
     send.waitReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
     resolveRes = () => new Promise<Response>(() => {});
     readRes = signed;
@@ -1097,8 +1179,11 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     await advance(3_000);
     expect(result.current.state).toMatchObject({ phase: 'sent' });
     await advance(30_000);
-    expect(result.current.state).toEqual({ phase: 'reverted', mark: MARK, previous: false });
-    expect(result.current.busy).toBe(false);
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
+    expect(result.current.busy).toBe(true);
+    resolveRes = () => json({ ok: true, state: 'expired_unused' });
+    await advance(10_000);
+    expect(result.current.state).toEqual({ phase: 'failed', mark: MARK, previous: false });
   });
 
   it('A3: 再読み込みの後の「前回の送信」が revert でも、判定で成立していれば入金の確認 (前回の送信・実際の tx)', async () => {
