@@ -8,6 +8,7 @@ import { computeLicensePaymentKey } from './paymentKey';
 import { JPYC_V3_ASSET } from '@/lib/x402/types';
 import { licenseRpc } from './rpc';
 import { readLicenseProof, type LicenseProof } from './jobs';
+import type { LicenseRightsAdmission } from './rightsAdmission';
 
 const ABI = parseAbi([
   'function balanceOf(address account,uint256 id) view returns (uint256)',
@@ -37,7 +38,7 @@ const UNKNOWN: LicenseRights = { entitled: null, basis: null, nft: { status: 'un
  * 購入済み本人の burn は不可譲渡なら証明放棄のみ。譲渡可は mint 後の balance が権威。
  * job の status は根拠にしない (receipt 保存直前 crash でも元購入者へ権利を戻さない)。
  */
-export async function resolveLicenseRights(input: { address: Address; productId: string; definition: LicenseDefinition; ownership: PurchaseOwnership | null; chain?: LicenseRightsChain; deadline?: number }): Promise<LicenseRights> {
+export async function resolveLicenseRights(input: { address: Address; productId: string; definition: LicenseDefinition; ownership: PurchaseOwnership | null; chain?: LicenseRightsChain; deadline?: number; admission?: LicenseRightsAdmission }): Promise<LicenseRights> {
   if (!licenseNftEnabled()) return UNKNOWN;
   const { definition, ownership } = input;
   const grants = ownership && ownership.resourceId === input.productId && isAddressEqual(ownership.payer, input.address)
@@ -52,7 +53,14 @@ export async function resolveLicenseRights(input: { address: Address; productId:
     }
   }
   if (!definition.transferable) return { entitled: grants.length > 0, basis: grants.length ? 'purchase' : null, nft: proof };
+  // 第 7 回レビュー B9: RPC の同時実行枠は「実際に RPC を始める直前」にだけ取る。譲渡不可・flag OFF は
+  // ここに来ないので枠にも枠の KV 障害にも触れない。枠が取れなければ RPC 不明と同じ unknown (denied にしない)。
+  let lease: string | null | undefined;
   try {
+    if (input.admission) {
+      lease = await input.admission.acquire();
+      if (!lease) return { ...UNKNOWN, nft: { ...proof, status: 'unknown' } };
+    }
     const chain = input.chain ?? defaultChain(definition, input.deadline);
     const block = await chain.block();
     if (await chain.balance(input.address, definition, block) > 0n) return { entitled: true, basis: 'holder', nft: { ...proof, status: 'minted' }, observedBlock: block.toString() };
@@ -72,5 +80,10 @@ export async function resolveLicenseRights(input: { address: Address; productId:
   } catch {
     // RPC 不明を元購入者の fallback 権利/非所有へ変換して誤配信する波及を断つ。
     return { ...UNKNOWN, nft: { ...proof, status: 'unknown' } };
+  } finally {
+    // 返却の失敗は権利の応答に波及させない (60 秒 lease で回収される)。
+    if (lease && input.admission) {
+      try { await input.admission.release(lease); } catch { /* lease 失効で回収 */ }
+    }
   }
 }

@@ -19,7 +19,6 @@ import {
 export const STORE_LIBRARY_PAGE_SIZE = 24;
 // 1 ページの権利照合 (license) 全体の期限。holders ページ (lib/license/holders.ts) と同じ 15 秒。
 const STORE_LIBRARY_RIGHTS_DEADLINE_MS = 15_000;
-const LIBRARY_RIGHTS_UNKNOWN = { entitled: null, basis: null, nft: { status: 'unknown' as const } };
 
 type LibraryCursor = {
   score: number;
@@ -352,30 +351,27 @@ export async function listStoreLibraryPage(input: {
   const items: StoreLibraryItem[] = [];
   // ページ全体の権利照合に 1 つの期限を共有する (第 7 回レビュー B13: 商品ごとの 6 秒窓はページ全体の上限に
   // ならず、24 商品で約 90 秒の直列待機になり得た)。期限内に確認できない商品は entitled: null のまま項目と
-  // cursor を残す。枠 (第 7 回レビュー B9) は最初の RPC の直前に 1 request 1 枠で取り、ページ全体で持つ。
+  // cursor を残す。枠 (第 7 回レビュー B9) は resolver が最初の RPC の直前に 1 request 1 枠で取りページ全体で
+  // 持つ。譲渡不可など RPC を使わない項目は枠にも枠の KV 障害にも触れない。
   const deadline = Date.now() + STORE_LIBRARY_RIGHTS_DEADLINE_MS;
-  let lease: string | null | undefined;
+  let page: Awaited<ReturnType<typeof import('@/lib/license/rightsAdmission').pageScopedLicenseRightsAdmission>> | undefined;
   try {
     for (const ownership of ownerships) {
       const definition = ownership.latestGrant.metadata.license;
       if (!definition) { items.push(libraryItem(ownership)); continue; }
-      const base = { ...libraryItem(ownership), productKind: 'license' as const, tokenChainId: definition.tokenChainId };
-      if (lease === undefined) {
-        const { acquireLicenseRightsBudget } = await import('@/lib/license/rightsBudget');
-        lease = await acquireLicenseRightsBudget();
+      if (!page) {
+        const [{ pageScopedLicenseRightsAdmission }, { acquireLicenseRightsBudget, releaseLicenseRightsBudget }] = await Promise.all([
+          import('@/lib/license/rightsAdmission'), import('@/lib/license/rightsBudget'),
+        ]);
+        page = pageScopedLicenseRightsAdmission({ acquire: acquireLicenseRightsBudget, release: releaseLicenseRightsBudget });
       }
-      // 枠不足/枠の KV 障害は RPC 不明と同じ unknown (購入項目は落とさず、false にもしない)。
-      if (!lease) { items.push({ ...base, ...LIBRARY_RIGHTS_UNKNOWN }); continue; }
       const { resolveLicenseRights } = await import('@/lib/license/rights');
-      const rights = await resolveLicenseRights({ address: ownership.payer, productId: ownership.resourceId, definition, ownership, deadline });
+      const rights = await resolveLicenseRights({ address: ownership.payer, productId: ownership.resourceId, definition, ownership, deadline, admission: page.admission });
       // 発行 tx のリンク先は購入時の定義から返し、現在の環境設定で推測させない。
-      items.push({ ...base, ...rights });
+      items.push({ ...libraryItem(ownership), productKind: 'license', tokenChainId: definition.tokenChainId, ...rights });
     }
   } finally {
-    if (lease) {
-      const { releaseLicenseRightsBudget } = await import('@/lib/license/rightsBudget');
-      await releaseLicenseRightsBudget(lease);
-    }
+    if (page) await page.close();
   }
   const last = visible.at(-1)!;
   return {

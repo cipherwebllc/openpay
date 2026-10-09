@@ -4,7 +4,7 @@ import type { Address } from 'viem';
 import { licenseNftEnabled, licenseVisible } from '@/lib/license/config';
 import type { LicenseDefinition } from '@/lib/license/definition';
 import type { LicenseRights } from '@/lib/license/rights';
-import type { LicenseRightsAdmission } from '@/lib/license/rightsBudget';
+import type { LicenseRightsAdmission } from '@/lib/license/rightsAdmission';
 import {
   getHostedContent,
   getHostedProduct,
@@ -65,32 +65,14 @@ export type StoreContentAccess =
   | ({ kind: 'ended' } & StoreContentProvenance)
   | ({ kind: 'ready'; content: HostedContent } & StoreContentProvenance);
 
-type ResolveRights = typeof import('@/lib/license/rights').resolveLicenseRights;
-
-// 権利照合 (RPC) を admission の枠の中だけで行う (第 7 回レビュー B9)。枠が取れない/枠の KV 障害は
-// rights_unknown (503) に倒し、denied に変換しない。delivery route は自前の lease を持つので admission を
-// 渡さず、ここで二重取得しない。
-async function resolveRightsAdmitted(
-  admission: LicenseRightsAdmission | undefined,
-  resolve: ResolveRights,
-  input: Parameters<ResolveRights>[0],
-): Promise<LicenseRights | 'admission_exhausted'> {
-  if (!admission) return resolve(input);
-  const lease = await admission.acquire();
-  if (!lease) return 'admission_exhausted';
-  try {
-    return await resolve(input);
-  } finally {
-    await admission.release(lease);
-  }
-}
-
 /** 認証済み address の content 権利・固定 revision を解決する。HTTP 応答は呼出側で直列化する。 */
 export async function resolveStoreContentAccess({ address, resourceId, selector, admission }: {
   address: Address;
   resourceId: string;
   selector: StoreContentSelector;
-  // 権利照合 RPC の同時実行枠。自前の lease を持つ呼出側 (delivery) は渡さない。
+  // 権利照合 RPC の同時実行枠 (第 7 回レビュー B9)。resolver が RPC の直前にだけ取る (譲渡不可は触れない) ので、
+  // 枠不足は RPC 不明と同じ rights_unknown になり denied にはならない。自前の lease を持つ呼出側 (delivery) は
+  // 渡さず、二重取得しない。
   admission?: LicenseRightsAdmission;
 }): Promise<StoreContentAccess> {
   // 商品/content の存在を先に見ると、未所有者へ resource の存在を漏らすため own が先。
@@ -102,8 +84,8 @@ export async function resolveStoreContentAccess({ address, resourceId, selector,
     if (product === 'storage') return { kind: 'storage' };
     if (!product || product.id !== resourceId || product.productKind !== 'license' || !product.license?.transferable) return { kind: 'denied' };
     const { resolveLicenseRights } = await import('@/lib/license/rights');
-    const rights = await resolveRightsAdmitted(admission, resolveLicenseRights, { address, productId: resourceId, definition: product.license, ownership: null });
-    if (rights === 'admission_exhausted' || rights.entitled === null) return { kind: 'rights_unknown' };
+    const rights = await resolveLicenseRights({ address, productId: resourceId, definition: product.license, ownership: null, ...(admission ? { admission } : {}) });
+    if (rights.entitled === null) return { kind: 'rights_unknown' };
     if (!rights.entitled) return { kind: 'denied' };
     const held: StoreContentProvenance = {
       source: 'holder', resourceId, product, contentRevision: 1, license: product.license, rights,
@@ -131,10 +113,9 @@ export async function resolveStoreContentAccess({ address, resourceId, selector,
   let rights: LicenseRights | null = null;
   if (grant.metadata.license) {
     const { resolveLicenseRights } = await import('@/lib/license/rights');
-    const admitted = await resolveRightsAdmitted(admission, resolveLicenseRights, { address, productId: resourceId, definition: grant.metadata.license, ownership: owned.ownership });
-    if (admitted === 'admission_exhausted' || admitted.entitled === null) return { kind: 'rights_unknown' };
-    if (!admitted.entitled) return { kind: 'denied' };
-    rights = admitted;
+    rights = await resolveLicenseRights({ address, productId: resourceId, definition: grant.metadata.license, ownership: owned.ownership, ...(admission ? { admission } : {}) });
+    if (rights.entitled === null) return { kind: 'rights_unknown' };
+    if (!rights.entitled) return { kind: 'denied' };
   }
   const purchased: StoreContentProvenance = {
     source: 'purchase', resourceId, product, grant, rights,

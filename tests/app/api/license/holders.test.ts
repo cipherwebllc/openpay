@@ -19,38 +19,45 @@ const getLibrary = () => library(new Request('https://open-pay.jp/api/store/libr
 beforeEach(() => {
   vi.clearAllMocks(); h.enabled = true; h.auth.mockResolvedValue({ ok: true, address: ADDRESS }); h.own.mockResolvedValue({ ok: true, ownership: null });
   h.product.mockResolvedValue({ id: ID, productKind: 'license', license: d, title: 'License', registration: { status: 'registered' }, contentAvailable: true });
-  h.content.mockResolvedValue({ kind: 'text', value: 'Private instructions' }); h.rights.mockResolvedValue({ entitled: true, basis: 'holder', nft: { status: 'minted' }, observedBlock: '100' }); h.eval.mockResolvedValue({ ok: true, value: [ID] });
+  h.content.mockResolvedValue({ kind: 'text', value: 'Private instructions' }); h.eval.mockResolvedValue({ ok: true, value: [ID] });
   h.acquire.mockResolvedValue('lease'); h.release.mockResolvedValue(undefined);
+  // resolver の実物 (lib/license/rights.ts) は「RPC の直前に admission.acquire → 取れなければ unknown → 返却」
+  // をする (tests/lib/license/rights.test.ts で固定)。ここでは route が admission を渡すことと、その結果の
+  // HTTP への写し方だけを見る。
+  h.rights.mockImplementation(async (input: { admission?: { acquire(): Promise<string | null>; release(t: string): Promise<void> } }) => {
+    if (input.admission) {
+      const lease = await input.admission.acquire();
+      if (!lease) return { entitled: null, basis: null, nft: { status: 'unknown' } };
+      await input.admission.release(lease);
+    }
+    return { entitled: true, basis: 'holder', nft: { status: 'minted' }, observedBlock: '100' };
+  });
 });
 describe('authenticated incoming license holders', () => {
   // 第 7 回レビュー B9: content・holders の権利照合も verify/delivery と同じ型の RPC 同時実行枠を通す。
-  it('resolves rights only inside the shared RPC admission and releases it afterwards', async () => {
+  // 枠は resolver が RPC の直前に取る (route は admission を渡すだけ)。holders は 1 ページ 1 枠。
+  it('passes the shared RPC admission to the resolver and releases the page slot afterwards', async () => {
     expect((await getContent()).status).toBe(200);
+    expect(h.rights).toHaveBeenCalledWith(expect.objectContaining({ ownership: null, admission: expect.objectContaining({ acquire: expect.any(Function) }) }));
     expect(h.acquire).toHaveBeenCalledTimes(1); expect(h.release).toHaveBeenCalledWith('lease');
-    expect(h.acquire.mock.invocationCallOrder[0]!).toBeLessThan(h.rights.mock.invocationCallOrder[0]!);
     h.acquire.mockClear(); h.release.mockClear(); h.rights.mockClear();
     expect((await getLibrary()).status).toBe(200);
     expect(h.acquire).toHaveBeenCalledTimes(1); expect(h.release).toHaveBeenCalledWith('lease');
     // 第 7 回レビュー B13: holders ページの期限を商品ごとの RPC 期限に共有する。
     expect(h.rights).toHaveBeenCalledWith(expect.objectContaining({ address: ADDRESS, productId: ID, ownership: null, deadline: expect.any(Number) }));
   });
-  it('admission exhaustion is rights unknown (503), never a denial, and starts no RPC', async () => {
+  it('admission exhaustion is rights unknown (503), never a denial, and releases nothing', async () => {
     h.acquire.mockResolvedValue(null);
     const response = await getContent();
     expect(response.status).toBe(503); expect(await response.json()).toEqual({ ok: false, error: 'license_rights_unknown' });
     expect((await getLibrary()).status).toBe(503);
-    expect(h.rights).not.toHaveBeenCalled(); expect(h.release).not.toHaveBeenCalled();
-  });
-  it('releases the admission even when the rights resolver throws', async () => {
-    h.rights.mockRejectedValue(new Error('boom'));
-    await expect(getContent()).rejects.toThrow('boom');
-    expect(h.release).toHaveBeenCalledWith('lease');
+    expect(h.release).not.toHaveBeenCalled();
   });
   it('delivers fixed revision 1 without fabricating a purchase or transaction', async () => {
     const response = await getContent(); const body = await response.json();
     expect(body).toMatchObject({ state: 'ready', kind: 'text', value: 'Private instructions', basis: 'holder', contentRevision: 1 });
     for (const field of ['purchasedAt', 'txHash', 'intentSalt', 'revisions']) expect(body).not.toHaveProperty(field);
-    expect(h.rights).toHaveBeenCalledWith({ address: ADDRESS, productId: ID, definition: d, ownership: null }); expect(h.content).toHaveBeenCalledWith(ID, 1);
+    expect(h.rights).toHaveBeenCalledWith({ address: ADDRESS, productId: ID, definition: d, ownership: null, admission: expect.any(Object) }); expect(h.content).toHaveBeenCalledWith(ID, 1);
     expect(response.headers.get('Vary')).toBe('Cookie');
   });
   it('discovers transferable holdings independently of the purchase library', async () => {

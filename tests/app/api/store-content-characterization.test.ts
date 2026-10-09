@@ -401,7 +401,8 @@ describe('store content HTTP characterization: purchased content', () => {
     h.product.mockResolvedValue({ ...licenseProduct, license: { ...definition, termsVersion: 'current' } });
     h.rights.mockResolvedValue({ ...holderRights, basis });
     await expectHttp(await request('?revision=1'), 200, purchaseBody(licenseGrant));
-    expect(h.rights).toHaveBeenCalledWith({ address: ADDRESS, productId: ID, definition, ownership: own });
+    // 第 7 回レビュー B9: route は RPC 枠 (admission) を渡し、resolver が RPC の直前にだけ取る。
+    expect(h.rights).toHaveBeenCalledWith({ address: ADDRESS, productId: ID, definition, ownership: own, admission: expect.any(Object) });
   });
 
   it.each([
@@ -427,7 +428,7 @@ describe('store content HTTP characterization: incoming holder', () => {
 
   it.each(['', '?revision=1'])('selector %s returns holder fields without purchase provenance', async (query) => {
     await expectHttp(await request(query), 200, holderBody());
-    expect(h.rights).toHaveBeenCalledWith({ address: ADDRESS, productId: ID, definition, ownership: null });
+    expect(h.rights).toHaveBeenCalledWith({ address: ADDRESS, productId: ID, definition, ownership: null, admission: expect.any(Object) });
     expect(h.content).toHaveBeenCalledWith(ID, 1);
   });
 

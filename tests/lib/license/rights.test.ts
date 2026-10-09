@@ -61,6 +61,34 @@ describe('shared rights resolver', () => {
     expect(f.chain.consumed).toHaveBeenCalledTimes(40);
     expect(f.chain.consumed).not.toHaveBeenCalledWith(paymentKey(grants[0]!.nonce), f.definition, 100n);
   });
+  // 第 7 回レビュー B9 (follow-up): 枠 (admission) は RPC の直前にだけ取る。譲渡不可は RPC も枠も使わず、
+  // 枠の取得失敗 (KV 障害) で「不明」にならない。譲渡可で枠が取れなければ unknown (false にしない)。
+  describe('RPC admission', () => {
+    const admission = (lease: string | null) => ({ acquire: vi.fn(async () => lease), release: vi.fn(async () => undefined) });
+    it('nontransferable purchase rights never touch the admission, even when it would fail', async () => {
+      const f = fixture(false); const a = admission(null);
+      expect(await resolveLicenseRights({ ...f, admission: a })).toMatchObject({ entitled: true, basis: 'purchase' });
+      expect(a.acquire).not.toHaveBeenCalled(); expect(f.chain.block).not.toHaveBeenCalled();
+    });
+    it('transferable rights acquire right before the first RPC and release afterwards, also on RPC failure', async () => {
+      const f = fixture(); const a = admission('lease');
+      expect(await resolveLicenseRights({ ...f, admission: a })).toMatchObject({ entitled: false, basis: 'holder' });
+      expect(a.acquire.mock.invocationCallOrder[0]!).toBeLessThan(vi.mocked(f.chain.block).mock.invocationCallOrder[0]!);
+      expect(a.release).toHaveBeenCalledWith('lease');
+      vi.mocked(f.chain.balance).mockRejectedValue(new Error('unavailable')); a.release.mockClear();
+      expect(await resolveLicenseRights({ ...f, admission: a })).toMatchObject({ entitled: null });
+      expect(a.release).toHaveBeenCalledWith('lease');
+    });
+    it('an exhausted admission is unknown without any RPC and never a denial', async () => {
+      const f = fixture(); const a = admission(null);
+      expect(await resolveLicenseRights({ ...f, admission: a })).toMatchObject({ entitled: null, basis: null, nft: { status: 'unknown' } });
+      expect(f.chain.block).not.toHaveBeenCalled(); expect(a.release).not.toHaveBeenCalled();
+    });
+    it('OFF never acquires', async () => {
+      h.enabled = false; const f = fixture(); const a = admission('lease');
+      await resolveLicenseRights({ ...f, admission: a }); expect(a.acquire).not.toHaveBeenCalled();
+    });
+  });
   // 第 7 回レビュー B13: ページ全体の deadline を RPC client の期限に共有する (商品ごとの 6 秒でリセットしない)。
   it('shares the caller deadline with the RPC client instead of a fresh per-product window', async () => {
     const { address, productId, definition, ownership } = fixture();

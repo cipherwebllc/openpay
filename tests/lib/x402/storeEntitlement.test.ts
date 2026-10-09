@@ -12,7 +12,12 @@ vi.mock('@/lib/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/env')>();
   return { ...actual, env: { ...actual.env, enableCreatorStore: true, get enableLicenseNft() { return licenseState.enabled; } } };
 });
-vi.mock('@/lib/license/rights', () => ({ resolveLicenseRights: vi.fn(async () => ({ entitled: true, basis: 'purchase', nft: { status: 'minted' } })) }));
+// resolver の実物は「RPC の直前に admission.acquire → 取れなければ unknown」(tests/lib/license/rights.test.ts で固定)。
+// ここでは library が 1 ページ 1 枠の admission と deadline を渡し、結果を項目に写すことだけを見る。
+vi.mock('@/lib/license/rights', () => ({ resolveLicenseRights: vi.fn(async (input: { admission?: { acquire(): Promise<string | null> } }) => {
+  if (input.admission && !await input.admission.acquire()) return { entitled: null, basis: null, nft: { status: 'unknown' } };
+  return { entitled: true, basis: 'purchase', nft: { status: 'minted' } };
+}) }));
 const rightsBudget = vi.hoisted(() => ({ acquire: vi.fn<() => Promise<string | null>>(async () => 'lease'), release: vi.fn(async () => undefined) }));
 vi.mock('@/lib/license/rightsBudget', () => ({ acquireLicenseRightsBudget: rightsBudget.acquire, releaseLicenseRightsBudget: rightsBudget.release }));
 
@@ -478,18 +483,22 @@ it('shares one page deadline and one RPC admission across every license rights l
   expect(result.ok).toBe(true);
   if (!result.ok) throw new Error('expected page');
   expect(vi.mocked(resolveLicenseRights)).toHaveBeenCalledTimes(2);
-  const deadlines = vi.mocked(resolveLicenseRights).mock.calls.map(([input]) => (input as { deadline?: number }).deadline);
-  expect(deadlines[0]).toEqual(expect.any(Number));
-  expect(deadlines[1]).toBe(deadlines[0]);
-  expect(deadlines[0]!).toBeGreaterThan(before);
-  expect(deadlines[0]!).toBeLessThanOrEqual(Date.now() + 15_000);
+  const inputs = vi.mocked(resolveLicenseRights).mock.calls.map(([input]) => input as { deadline?: number; admission?: object });
+  expect(inputs[0]!.deadline).toEqual(expect.any(Number));
+  expect(inputs[1]!.deadline).toBe(inputs[0]!.deadline);
+  expect(inputs[0]!.deadline!).toBeGreaterThan(before);
+  expect(inputs[0]!.deadline!).toBeLessThanOrEqual(Date.now() + 15_000);
+  // 同じページの全項目に同じ admission (1 ページ 1 枠) を渡し、実体の枠は 1 回だけ取って close で 1 回返す。
+  expect(inputs[0]!.admission).toBeDefined(); expect(inputs[1]!.admission).toBe(inputs[0]!.admission);
   expect(rightsBudget.acquire).toHaveBeenCalledTimes(1); expect(rightsBudget.release).toHaveBeenCalledTimes(1);
 
-  // 枠が取れないときは権利 unknown (null) で項目と cursor を落とさず、RPC (resolver) を始めない。
-  vi.mocked(resolveLicenseRights).mockClear(); rightsBudget.acquire.mockResolvedValueOnce(null);
+  // 枠が取れないときは権利 unknown (null) で項目と cursor を落とさない。ページ内で枠を取り直さず、返すものもない。
+  vi.mocked(resolveLicenseRights).mockClear(); rightsBudget.acquire.mockClear(); rightsBudget.release.mockClear();
+  rightsBudget.acquire.mockResolvedValueOnce(null);
   const starved = await listStoreLibraryPage({ payer: PAYER, cursor: null });
   expect(starved.ok).toBe(true);
   if (!starved.ok) throw new Error('expected page');
   expect(starved.page.items.map((item) => [item.resourceId, item.entitled])).toEqual([[ids[0], null], [ids[1], undefined], [ids[2], null]]);
-  expect(vi.mocked(resolveLicenseRights)).not.toHaveBeenCalled();
+  expect(starved.page.nextCursor).toBeNull();
+  expect(rightsBudget.acquire).toHaveBeenCalledTimes(1); expect(rightsBudget.release).not.toHaveBeenCalled();
 });
