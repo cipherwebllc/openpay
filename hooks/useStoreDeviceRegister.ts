@@ -550,9 +550,8 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
       genRef.current += 1;
       finalityStopRef.current?.();
       set({ phase: 'processing' });
-      // 例外の行き先を分ける境界 (下の catch・第 7 回レビュー A12): 送信を呼んだか・送った印を受け取ったか。
+      // 例外の行き先を分ける境界 (下の catch・第 7 回レビュー A12): 送った印を受け取ったか (印は catch でも読み直す)。
       let sendMod: typeof import('@/lib/storeDeviceSend') | null = null;
-      let sendCalled = false;
       let sentMark: DeviceSentMark | null = null;
       try {
         const loaded = await loadIo(session.chainId);
@@ -582,7 +581,6 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
           set({ phase: 'idle' });
           return;
         }
-        sendCalled = true;
         const r = await mod.sendStoreDeviceSettle(
           verified.value,
           { handoffId: session.id, chainId: session.chainId, forwarder: config.forwarder },
