@@ -53,6 +53,7 @@ import {
   ORDER_LIST_MAX,
   ORDER_LIST_TTL_SEC,
   ORDER_MARK_PENDING,
+  ORDER_DONE_TTL_SEC,
   ORDER_MARK_DONE,
   ORDER_PENDING_TTL_SEC,
   ORDER_ID_MAX,
@@ -409,7 +410,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     });
     if (!claim.ok) return fail('kv_error', 503);
     if (claim.value === null) {
-      // nx 失敗 = 既存マーカーあり。done (恒久) と pending (検証中) を読み分ける。
+      // nx 失敗 = 既存マーカーあり。done (ORDER_DONE_TTL_SEC) と pending (検証中) を読み分ける。
       const existing = await kvGet(usedKey);
       if (!existing.ok) return fail('kv_error', 503);
       existingMarker = existing.value === ORDER_MARK_DONE ? 'done' : 'pending';
@@ -642,10 +643,11 @@ export async function POST(req: Request): Promise<NextResponse> {
       orderStored = true; // 受注は KV に確定。以降 pending クレームは消さない (下記 catch 参照)。
       // 月次メトリクス (運営ヒント・no-throw)。応答後に after() で完了させる (投げっぱなしは凍結で途切れる・第 7 回レビュー F9)。
       recordMetricAfterResponse('order');
-      // ステージ2 = pending → done 昇格 (恒久・TTL 上書きで EX を落とす)。**保存確定の後**に昇格するのが肝:
-      // 逆順 (昇格→保存) だと昇格後に保存失敗した tx が恒久ブロックのまま永久喪失する (P1-F を悪化)。
+      // ステージ2 = pending → done 昇格 (TTL を ORDER_DONE_TTL_SEC = 7 日へ上書き)。**保存確定の後**に昇格するのが肝:
+      // 逆順 (昇格→保存) だと昇格後に保存失敗した tx が 7 日ブロックのまま喪失する (P1-F を悪化)。
       // 保存→昇格の順なら最悪でも「未昇格 pending の自然失効 → 再 POST で復旧」に倒れる (喪失より二重が安全)。
-      const promote = await kvSet(usedKey, ORDER_MARK_DONE); // ttl 無し = 恒久ブロック (無期限リプレイ拒否)
+      // マーカーが消えた後の同じ tx は上の 30 分窓 (tx_too_old) が弾く (C10/R6・tests の characterization)。
+      const promote = await kvSet(usedKey, ORDER_MARK_DONE, { ttlSec: ORDER_DONE_TTL_SEC });
       if (!promote.ok) {
         // finalize 失敗。受注は保存済ゆえ本体は止めない (fail-quiet) が、昇格漏れは pending 失効後の
         // 再 POST を許し二重注文になり得るため observable にする (掟13: 波及は断つが黙殺はしない)。

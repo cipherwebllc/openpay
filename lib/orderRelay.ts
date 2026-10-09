@@ -13,12 +13,21 @@ export const ORDER_LIST_TTL_SEC = 72 * 60 * 60; // 受注リストの寿命 (72h
 //   - pending = 検証中の **短命クレーム** (ORDER_PENDING_TTL_SEC で自然失効)。maxDuration タイムアウトで
 //     done 昇格前にプロセスが強制終了しても pending は自動失効する = 正規注文が最大 72h ロックされ消失する
 //     事故 (P1-F) を断ち、短時間後の同一 txHash 再 POST で復旧できる。
-//   - done = 検証 + 保存が完了した **恒久ブロック** (TTL 無し)。同一 txHash の **無期限リプレイを永久拒否** し
-//     「1 決済 1 注文」を恒久保証する (P1-E)。72h 失効で過去着金 tx を再送する偽注文流入を塞ぐ。
-// 昇格は route が保存確定後に kvSet(usedKey, ORDER_MARK_DONE) で値と TTL を上書き (pending→done・EX を落とす)。
+//   - done = 検証 + 保存が完了した **ブロック** (ORDER_DONE_TTL_SEC)。同一 txHash のリプレイを拒否し
+//     「1 決済 1 注文」を保証する (P1-E)。72h 失効で過去着金 tx を再送する偽注文流入を塞ぐ。
+// 昇格は route が保存確定後に kvSet(usedKey, ORDER_MARK_DONE, { ttlSec: ORDER_DONE_TTL_SEC }) で値と TTL を
+// 上書きする (pending→done)。
 export const ORDER_MARK_PENDING = 'pending';
 export const ORDER_MARK_DONE = 'done';
 export const ORDER_PENDING_TTL_SEC = 120; // pending クレームの寿命 (秒)。検証 + 保存の想定所要 << 120s。
+// done マーカーの寿命 = 7 日 (第 7 回レビュー C10・user 裁定 R6)。P1-E の時点では TTL 無し (恒久) だったが、
+// A2a で notify に 30 分の受理窓 (block 時刻・app/api/order/notify の ORDER_PAYMENT_MAX_AGE_MS) が入り、
+// 窓の外の tx は done マーカーが無くても tx_too_old で受理されない。agent 注文の finalize も 24h の予約
+// (AGENT_RESERVATION_TTL_SEC) が生きている間しか走らず、Settled の照合が合わない旧 tx は settlement_mismatch。
+// よってマーカーは「30 分窓 + 時計のずれ (2 分) + 再送の余裕 + 24h の予約 + 72h の受注リスト」を大きく上回れば
+// よく、受注 1 件ごとに KV へ永久に残す必要はない。7 日はそれらの最大 (72h) の 2 倍超。
+// 同じ Lua / route が書く paymentClaimKey・legacyBillingPaymentKey・agent の完了マーカー (digest) は TTL 無しのまま。
+export const ORDER_DONE_TTL_SEC = 7 * 24 * 60 * 60;
 export const ORDER_LIST_MAX = 200; // 1 merchant あたり保持上限 (kvLtrim)
 // 最低着金フロア = 1 JPYC (decimals 18)。dust/誤検出を弾く最小値。**権威額は実着金合計**で、
 // minValue はあくまで「正の着金があったか」のフロア (申告額には依存しない・advisory 原則)。

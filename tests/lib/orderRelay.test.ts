@@ -24,6 +24,9 @@ import {
   ORDER_ITEM_NAME_MAX,
   ORDER_TABLE_MAX,
   ORDER_MEMO_MAX,
+  ORDER_DONE_TTL_SEC,
+  ORDER_PENDING_TTL_SEC,
+  ORDER_LIST_TTL_SEC,
   declaredItemsTotalMinor,
   evaluateOrderAmount,
   orderDeadlineKey,
@@ -67,6 +70,12 @@ describe('orderRelay: KV キー', () => {
     expect(callListKey('0xABCdef0000000000000000000000000000000000')).toBe(
       'order:call:0xabcdef0000000000000000000000000000000000',
     );
+  });
+  it('done マーカーの寿命は 7 日 (30 分の受理窓 + 24h の agent 予約 + 72h の受注リストを大きく上回る・C10/R6)', () => {
+    expect(ORDER_DONE_TTL_SEC).toBe(7 * 24 * 60 * 60);
+    expect(ORDER_DONE_TTL_SEC).toBeGreaterThan(ORDER_LIST_TTL_SEC);
+    expect(ORDER_DONE_TTL_SEC).toBeGreaterThan(24 * 60 * 60); // AGENT_RESERVATION_TTL_SEC (server-only module なので値を直書き)
+    expect(ORDER_DONE_TTL_SEC).toBeGreaterThan(ORDER_PENDING_TTL_SEC);
   });
 });
 

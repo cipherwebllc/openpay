@@ -12,7 +12,7 @@ import { recordMetric } from '@/lib/metrics';
 import { notifyPaymentReceived } from '@/lib/push/notify';
 import { relayGasFeeValue } from '@/lib/relay/forwarderConfig';
 import { legacyBillingPaymentKey, paymentClaimKey, paymentClaimResultValue } from '@/lib/paymentClaim';
-import { declaredItemsTotalMinor, evaluateOrderAmount, orderListKey, orderUsedKey, sanitizeOrderItems, sanitizeTable, serializeOrder, ORDER_DUST_FLOOR_WEI, ORDER_LIST_MAX, ORDER_LIST_TTL_SEC, ORDER_PENDING_TTL_SEC, type StoredOrder } from '@/lib/orderRelay';
+import { declaredItemsTotalMinor, evaluateOrderAmount, orderListKey, orderUsedKey, sanitizeOrderItems, sanitizeTable, serializeOrder, ORDER_DONE_TTL_SEC, ORDER_DUST_FLOOR_WEI, ORDER_LIST_MAX, ORDER_LIST_TTL_SEC, ORDER_PENDING_TTL_SEC, type StoredOrder } from '@/lib/orderRelay';
 import { parseAgentOrderSettlement, type AgentOrderSettlement } from '@/lib/x402/agentOrderRecovery';
 import { agentCompletionKey, agentTransactionKey, readAgentOrderReservation, type AgentOrderReservation } from './agentOrderReservation';
 import { matchesAgentSettlement } from './agentOrderReceipt';
@@ -20,7 +20,10 @@ import { standardFeeObligationFromReceipt } from './orderFeeObligation';
 
 // KEYS: reservation, authorization completion, public tx claim, agent tx marker, list,
 // global fee claim, legacy fee claim. ARGV: immutable reservation, owner, digest, unpaid order,
-// paid order, inline fee flag, fee claim value, list limit, list TTL.
+// paid order, inline fee flag, fee claim value, list limit, list TTL, done marker TTL.
+// The public tx claim ('done') and its agent tx marker share ORDER_DONE_TTL_SEC (C10/R6): both are read
+// together (public=='done' needs agent=='agent'), so they must expire together. Fee claims and the
+// completion digest keep no TTL.
 // Redis Lua does not roll back runtime errors: validate every type/argument and decode before
 // the first write. JSON orders remain bytes, without cjson table aliases or null conversion.
 const SAVE = [
@@ -29,14 +32,14 @@ const SAVE = [
   "local complete=redis.call('GET',KEYS[2]); if complete==ARGV[3] then return 2 end; if complete~=ARGV[2] then return 0 end",
   "local public=redis.call('GET',KEYS[3]); if public and public~='done' then return 0 end",
   "if public=='done' and redis.call('GET',KEYS[4])~='agent' then return -1 end",
-  "local limit=tonumber(ARGV[8]); local ttl=tonumber(ARGV[9]); if not limit or limit<1 or not ttl or ttl<1 then return -2 end",
+  "local limit=tonumber(ARGV[8]); local ttl=tonumber(ARGV[9]); local doneTtl=tonumber(ARGV[10]); if not limit or limit<1 or not ttl or ttl<1 or not doneTtl or doneTtl<1 then return -2 end",
   "local ok,order=pcall(cjson.decode,ARGV[4]); if not ok or type(order)~='table' or not order.orderId then return -2 end",
   "local paidOk,paid=pcall(cjson.decode,ARGV[5]); if not paidOk or type(paid)~='table' or paid.orderId~=order.orderId then return -2 end",
   "local inline=ARGV[6]=='1' and redis.call('EXISTS',KEYS[6])==0 and redis.call('EXISTS',KEYS[7])==0",
   // LPUSH precedes completion. Type/ARGV preflight above removes deterministic partial errors.
   "if inline then redis.call('LPUSH',KEYS[5],ARGV[5]); redis.call('SET',KEYS[6],ARGV[7]); else redis.call('LPUSH',KEYS[5],ARGV[4]); end",
   "redis.call('LTRIM',KEYS[5],0,limit-1); redis.call('EXPIRE',KEYS[5],ttl)",
-  "redis.call('SET',KEYS[4],'agent'); redis.call('SET',KEYS[3],'done'); redis.call('SET',KEYS[2],ARGV[3]); return 1",
+  "redis.call('SET',KEYS[4],'agent','EX',doneTtl); redis.call('SET',KEYS[3],'done','EX',doneTtl); redis.call('SET',KEYS[2],ARGV[3]); return 1",
 ].join('\n');
 const RELEASE = "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end; return 0";
 
@@ -90,7 +93,7 @@ export async function finalizeAgentOrder(input: { reservation: AgentOrderReserva
     }
     const result = await kvEval<number>(SAVE, [reservation.key, completionKey, orderUsedKey(tuple.chainId, settlement.transaction), agentTransactionKey(tuple.chainId, settlement.transaction),
       orderListKey(snapshot.merchant), paymentClaimKey(tuple.chainId, settlement.transaction), legacyBillingPaymentKey(tuple.chainId, settlement.transaction)],
-    [reservation.raw, owner, digest, serializeOrder(unpaid), serializeOrder(order), obligation?.collectedInline ? '1' : '0', paymentClaimResultValue('order'), String(ORDER_LIST_MAX), String(ORDER_LIST_TTL_SEC)]);
+    [reservation.raw, owner, digest, serializeOrder(unpaid), serializeOrder(order), obligation?.collectedInline ? '1' : '0', paymentClaimResultValue('order'), String(ORDER_LIST_MAX), String(ORDER_LIST_TTL_SEC), String(ORDER_DONE_TTL_SEC)]);
     if (!result.ok || result.value === -2) return { ok: false, reason: 'storage_unavailable' };
     if (result.value === -1) {
       logger.error('order.agent.finalize_conflict', { chainId: tuple.chainId, txHash: settlement.transaction });

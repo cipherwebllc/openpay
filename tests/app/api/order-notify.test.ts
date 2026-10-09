@@ -5,6 +5,7 @@
 import type { FeeReceiptLog } from '@/lib/feeVerify';
 import { bindingFixture, BIND_FORWARDER, BIND_PAYER, bindTransfer } from '../../_helpers/orderBinding';
 import { resolveDeployment } from '@/lib/tokens';
+import { ORDER_DONE_TTL_SEC } from '@/lib/orderRelay';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const JPYC = 10n ** 18n;
@@ -184,7 +185,7 @@ vi.mock('@/lib/kv', () => ({
     if (hold.pointerSetFails && String(a[0]).startsWith('order:sv:')) {
       return Promise.resolve({ ok: false, reason: 'network_error' });
     }
-    // done 昇格 (order:used:*, 値 'done'・ttl なし) は常に成功させる。pending nx クレーム / pointer は
+    // done 昇格 (order:used:*, 値 'done'・ttl 7 日) は常に成功させる。pending nx クレーム / pointer は
     // hold.claimValue に従う (nx: 'OK'=fresh / null=衝突)。
     if (String(a[0]).startsWith('order:used:') && a[1] === 'done') {
       return Promise.resolve({ ok: true, value: 'OK' });
@@ -963,13 +964,14 @@ describe('POST /api/order/notify', () => {
       'pending',
       { nx: true, ttlSec: 120 },
     );
-    // ステージ2: 保存確定後に done へ昇格。**ttl 引数なし = 恒久** (P1-E: 無期限リプレイを永久拒否)。
+    // ステージ2: 保存確定後に done へ昇格。寿命は ORDER_DONE_TTL_SEC (7 日・第 7 回レビュー C10/R6)。
+    // 30 分の受理窓 (A2a) の外の tx はマーカーが無くても tx_too_old で受理されないので、恒久である必要はない。
     const promote = setSpy.mock.calls.find(
       (c) => String(c[0]).startsWith('order:used:') && c[1] === 'done',
     );
     expect(promote).toBeDefined();
     expect(promote![0]).toBe(`order:used:80002:${TXHASH}`);
-    expect(promote![2]).toBeUndefined(); // TTL 無し = 恒久ブロック
+    expect(promote![2]).toEqual({ ttlSec: ORDER_DONE_TTL_SEC });
     // 受注を merchant のリストへ。保存値は実着金 (verify.value)・table は description 由来。
     expect(evalSpy).toHaveBeenCalledWith(
       expect.stringContaining("redis.call('LPUSH'"),
