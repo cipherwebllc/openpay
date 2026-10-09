@@ -506,14 +506,26 @@ describe('historyCsvFilename', () => {
   });
 
   it('openpay-history-yyyy-MM-dd.csv 形式', () => {
-    const out = historyCsvFilename(new Date(2026, 4, 17));
+    const out = historyCsvFilename(new Date('2026-05-17T12:00:00+09:00'));
     expect(out).toBe('openpay-history-2026-05-17.csv');
   });
 
-  it('引数なしのときは今日の日付', () => {
+  it('引数なしのときは今日の日付 (JST)', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date(2026, 11, 31, 23, 59, 59));
+    vi.setSystemTime(new Date('2026-12-31T23:59:59+09:00'));
     expect(historyCsvFilename()).toBe('openpay-history-2026-12-31.csv');
+  });
+
+  // E15 (第 7 回レビュー): 会計仕訳CSV・会計明細CSV と同じ JST の暦日にそろえる。端末の時刻帯
+  // (海外・UTC 設定) で 00:00〜09:00 JST に書き出すと、履歴CSV だけ前日の日付になっていた。
+  // JST ホストでは退行を検出できないため、CI の「JST date regressions (non-JST host)」で
+  // TZ=America/Los_Angeles のまま実行する (ローカルでも TZ を指定して確認すること)。
+  it.each([
+    ['2026-09-30T14:59:59.999Z', '2026-09-30'],
+    ['2026-09-30T15:00:00.000Z', '2026-10-01'],
+    ['2026-12-31T15:00:00.000Z', '2027-01-01'],
+  ])('%s に書き出したファイル名は JST の %s', (instant, expected) => {
+    expect(historyCsvFilename(new Date(instant))).toBe(`openpay-history-${expected}.csv`);
   });
 });
 

@@ -2,7 +2,7 @@ import {
   DIRECTORY_CATEGORIES,
   DIRECTORY_CHAINS,
   DIRECTORY_LANGUAGES,
-  DIRECTORY_STATUSES,
+  DIRECTORY_PUBLIC_STATUSES,
   DIRECTORY_TOKENS,
   type DirectoryCategory,
   type DirectoryChain,
@@ -100,7 +100,8 @@ export function validateDirectoryQuery(
     searchParams.get('language'),
     DIRECTORY_LANGUAGES,
   );
-  const status = allowlisted(searchParams.get('status'), DIRECTORY_STATUSES);
+  // 公開 API は published しか返さない。draft 等は必ず空になるので、支払い要求の前に 400 (E16)。
+  const status = allowlisted(searchParams.get('status'), DIRECTORY_PUBLIC_STATUSES);
   const supportsJpyc = booleanFilter(searchParams.get('supportsJpyc'));
   const supportsUsdc = booleanFilter(searchParams.get('supportsUsdc'));
   const supportsX402 = booleanFilter(searchParams.get('supportsX402'));

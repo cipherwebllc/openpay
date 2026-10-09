@@ -192,11 +192,37 @@ describe('createPaymentMonitorEnvelope', () => {
     );
   });
 
-  it('E3: snapshot の hasMore は「全イベント数 > limit」・nextChangedSince は常に generatedAt', () => {
-    const total = createPaymentMonitorEnvelope(Q, NOW).totalEvents;
+  it('E3: snapshot の hasMore は「全イベント数 > limit」・打ち切りが無ければ nextChangedSince は generatedAt', () => {
+    const full = createPaymentMonitorEnvelope(Q, NOW);
+    const total = full.totalEvents;
+    if (!full.hasMore) expect(full.nextChangedSince).toBe(NOW.slice(0, 10));
     const capped = createPaymentMonitorEnvelope({ limit: 1 }, NOW);
     expect(capped.hasMore).toBe(total > 1);
-    expect(capped.nextChangedSince).toBe(NOW.slice(0, 10));
+  });
+
+  // E17 (第 7 回レビュー): Service Monitor と同じ。打ち切った snapshot の nextChangedSince を
+  // changedSince に渡して delta をたどれば、返さなかったイベントを全部取れる。
+  it('E17: 打ち切った snapshot の nextChangedSince から delta をたどると取りこぼしゼロ', () => {
+    const key = (c: { provider: string; date: string; changeCategory?: string }) =>
+      `${c.provider}|${c.date}|${c.changeCategory ?? ''}`;
+    const all = new Set(createPaymentMonitorEnvelope(Q, NOW).changes.map(key));
+    const limit = 3;
+    expect(all.size).toBeGreaterThan(limit); // 実際に打ち切りが起きる前提
+
+    const snapshot = createPaymentMonitorEnvelope({ limit }, NOW);
+    expect(snapshot.hasMore).toBe(true);
+    const seen = new Set(snapshot.changes.map(key));
+    let cursor = snapshot.nextChangedSince;
+    let pages = 0;
+    for (; pages < 50; pages++) {
+      const page = createPaymentMonitorEnvelope({ changedSince: cursor, limit }, NOW);
+      for (const change of page.changes) seen.add(key(change));
+      if (!page.hasMore) break;
+      expect(page.nextChangedSince > cursor).toBe(true);
+      cursor = page.nextChangedSince;
+    }
+    expect(pages).toBeLessThan(50);
+    expect([...seen].sort()).toEqual([...all].sort());
   });
 });
 

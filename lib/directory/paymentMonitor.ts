@@ -13,6 +13,7 @@ import {
   type ServiceChangeDiff,
   scopedChangelog,
   takeDeltaSince,
+  takeSnapshotTail,
   type ServiceChangeCategory,
   type ServiceChangeType,
   type ServiceMonitorQuery,
@@ -72,7 +73,9 @@ export type PaymentMonitorEnvelope = {
    * delta: 日付境界で切り上げても入り切らないイベントがある)。 */
   hasMore: boolean;
   /** 次回の delta 購入でそのまま changedSince に渡す値。hasMore=true の delta では
-   * **最初の未返却イベントの deltaEffectiveDate = max(date, collectedAt ?? date)** (返した最後の deltaEffectiveDate より必ず後 = 前進が保証され再配信なし)。 */
+   * **最初の未返却イベントの deltaEffectiveDate = max(date, collectedAt ?? date)** (返した最後の deltaEffectiveDate より必ず後 = 前進が保証され再配信なし)。
+   * hasMore=true の snapshot では返さなかったイベントの deltaEffectiveDate の最小値 (takeSnapshotTail・返したイベントが再び返ることはある)。
+   * それ以外は generatedAt の UTC 日付。 */
   nextChangedSince: string;
   notice: { code: string; detail: string; termsUrl: string };
   licenseNotice: string;
@@ -132,12 +135,17 @@ export function createPaymentMonitorEnvelope(
   const mode = query.changedSince === undefined ? 'snapshot' : 'delta';
   let filtered: ReturnType<typeof scopedChangelog>;
   let hasMore: boolean;
-  // 既定は UTC 日付 (serviceMonitor.ts と同じ inclusive 比較の理屈)。打ち切られた delta だけ
+  // 既定は UTC 日付 (serviceMonitor.ts と同じ inclusive 比較の理屈)。打ち切られた delta は
   // 「最初の未返却イベントの deltaEffectiveDate = max(date, collectedAt ?? date)」に差し替える (打ち切り分の永久ロス防止・前進の保証)。
+  // 打ち切られた snapshot は返さなかったイベントの実効日の最小値に差し替える (下の takeSnapshotTail・E17)。
   let nextChangedSince = generatedAtIso.slice(0, 10);
   if (mode === 'snapshot') {
-    hasMore = changelog.length > query.limit;
-    filtered = changelog.slice(-query.limit);
+    // 打ち切ったら返さなかったイベントの実効日の最小値を cursor にする (serviceMonitor.ts の
+    // takeSnapshotTail が単一情報源・E17)。
+    const page = takeSnapshotTail(changelog, query.limit);
+    filtered = page.taken;
+    hasMore = page.hasMore;
+    if (page.nextChangedSince !== null) nextChangedSince = page.nextChangedSince;
   } else {
     // 実効日 (max(date, collectedAt)) で照合 — 後から記録した古い date のイベントを取りこぼさない。
     // 同一実効日のグループは分割しない (serviceMonitor.ts の takeDeltaSince が単一情報源)。

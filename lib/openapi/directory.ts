@@ -65,7 +65,7 @@ const DIRECTORY_QUERY_PARAMETERS = [
     description: 'Only published entries can be returned, regardless of this filter.',
     schema: {
       type: 'string',
-      enum: ['draft', 'review', 'published', 'rejected', 'archived'],
+      enum: ['published'],
     },
   },
   { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50 } },

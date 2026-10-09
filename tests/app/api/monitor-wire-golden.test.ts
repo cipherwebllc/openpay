@@ -168,6 +168,9 @@ const QUERIES = [
 ];
 
 // 期待値 = 分割前 (origin b13da8c2 のロジック) で記録した raw text の sha256 (GOLDEN_RECORD で生成)。
+// 第 7 回レビュー E17 で、打ち切った snapshot (long の既定 limit と limit=2) の nextChangedSince を
+// 「返さなかったイベントの実効日の最小値」に変えたので、その 5 件だけ再採取した (raw text の差分は
+// nextChangedSince の 1 行だけ)。
 const GOLDEN: Record<string, string> = {
   'empty /api/jpyc/services/teaser':
     'b824d113487f6e33fd43b8adfd1578d3194aaa8e44ef6e652f2cb9c3178e66ad',
@@ -212,7 +215,7 @@ const GOLDEN: Record<string, string> = {
   'long /api/jpyc/services/teaser':
     '49c70329b7dbc3da5a35ce6d327a7cef77a8819886452262c5243def37ca01e9',
   'long /api/paid/usdc/jpyc/services':
-    '2c5b3cdaca49cc2255e41aca36887c6ea7ac0ff9e46488dbb74c889085303a4d',
+    '2c4505cda5d5e5ef9bfdb2a4eb0fa515116558cd9b33cf0e6d29f0a89a813cfe',
   'long /api/paid/usdc/jpyc/services?changedSince=2020-01-01':
     'afafd2958656f1ed62741b30035c84601b84c269a0d800d4b95af471846f58c6',
   'long /api/paid/usdc/jpyc/services?changedSince=2020-01-01&limit=1':
@@ -228,7 +231,7 @@ const GOLDEN: Record<string, string> = {
   'long /api/paid/usdc/jpyc/services?changedSince=2026-09-11':
     '4a14550685f3b1fe3b30789528a0de3bef432d9e300ea7bf2d11a80eeb738242',
   'long /api/paid/usdc/jpyc/services?limit=2':
-    '30072bc8583efc1356e1cdee27b3b933da38274eb16191a3d51b08d6e8a13edc',
+    '30be012fad6fa315b005fe6e3dc3d2544b92861c97d79a8cc015e11fd42283f1',
   'long /api/paid/usdc/stablecoin-payments':
     '9aa903c65067f5c972585d5114790fdf4a2e3a486113b6febf6f1f3ee4745934',
   'long /api/paid/usdc/stablecoin-payments?changedSince=2020-01-01':
@@ -246,7 +249,7 @@ const GOLDEN: Record<string, string> = {
   'long /api/paid/usdc/stablecoin-payments?changedSince=2026-09-11':
     'c45663696754d6a90ff51f9243ae85a992e257954f6c325166781480c7a5d661',
   'long /api/paid/usdc/stablecoin-payments?limit=2':
-    '7bf4363670d9b811ad2b3f17103f1f8fdafbec18fa4133cee1063f342a6c6106',
+    '0f1ce5ae19ea2200fa5cc6cf4ca392440e68593b013b8582e6356c7e212d0102',
   'long /api/stablecoin-payments/teaser':
     '169c41a21f67fddb9d9a8e6c7f9dbfc8b3dbbc964073bd6bf821841153dbedf9',
   'small /api/jpyc/services/teaser':
@@ -268,7 +271,7 @@ const GOLDEN: Record<string, string> = {
   'small /api/paid/usdc/jpyc/services?changedSince=2026-09-11':
     'c2c42e31c3016926fd123b9d3a8e403a3ca4d6e1d3a8fe4b24088662f50807dd',
   'small /api/paid/usdc/jpyc/services?limit=2':
-    'dcb2a2364806f51eca814ca7b59c68700e58b453430cdb28b999a21f900a0b47',
+    '6ad5484ab1dca221be417b9ca755346b69ede35b1f576c6b6854055fc6514d75',
   'small /api/paid/usdc/stablecoin-payments':
     '3a81c6e0b03c43a7c5df23442a30daae905bb71d13e60339a70247282777420e',
   'small /api/paid/usdc/stablecoin-payments?changedSince=2020-01-01':
@@ -286,7 +289,7 @@ const GOLDEN: Record<string, string> = {
   'small /api/paid/usdc/stablecoin-payments?changedSince=2026-09-11':
     '8961f0650836b88f4c580149355acd4d2d00fdab89d88d9bd18aa2393c971869',
   'small /api/paid/usdc/stablecoin-payments?limit=2':
-    '8149806b3135aead3dc9b5080441151327c19dbfb57f1b0c722e6407936a2416',
+    'fd0a78d4521c7b64205965809846a75f702cfd7e19ff58c066e4ac958d04e6d3',
   'small /api/stablecoin-payments/teaser':
     'f1ad9474e0de4c4218a0d718fd21eb1562aeafd94d6d2f1ecd2084fa499bd998',
 };

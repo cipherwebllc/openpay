@@ -298,6 +298,19 @@ describe('GET /api/paid/usdc/japan-web3-directory/search', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // E16 (user 裁定 R7): 公開 API は published しか返さない。内部の審査段階を指定した検索は
+  // 必ず空になるので、支払いを求める前に 400 にする (空の結果に払わせない)。
+  it.each(['draft', 'review', 'rejected', 'archived'])(
+    'E16: status=%s は支払い要求より先に 400',
+    async (status) => {
+      const route = await loadSearch();
+      const res = await route.GET(new Request(`${SEARCH}?status=${status}`));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error: 'invalid_query' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
   it('支払いなし → dual-stack 402 (resource は search の canonical URL)', async () => {
     const route = await loadSearch();
     const res = await route.GET(new Request(`${SEARCH}?category=stablecoin`));

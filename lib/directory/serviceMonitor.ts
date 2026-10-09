@@ -202,6 +202,29 @@ export function takeDeltaSince<T extends { date: string; collectedAt?: string }>
   return takeDeltaByDateGroups(matched, limit);
 }
 
+/**
+ * snapshot の 1 ページ = changelog (date 昇順) の末尾 limit 件 (直近のイベント)。Service Monitor・
+ * Payment Monitor の共通手順 (第 7 回レビュー E17)。
+ *
+ * 打ち切ったときの nextChangedSince = **返さなかったイベントの実効日の最小値**。返さなかったイベントは
+ * 全て実効日がそれ以上なので、これを changedSince に渡して delta を nextChangedSince でたどれば取りこぼさない
+ * (以前は generatedAt の日付で、返さなかった古いイベントへ続きを取る手段が無かった)。この snapshot で返した
+ * イベントも実効日がそれ以降なら delta で再び返る — 文書化済みの dedupe キーで除く。
+ * 打ち切りが無ければ null (呼び元は既定の generatedAt の日付を使う)。
+ */
+export function takeSnapshotTail<T extends { date: string; collectedAt?: string }>(
+  events: readonly T[],
+  limit: number,
+): { taken: T[]; hasMore: boolean; nextChangedSince: string | null } {
+  const omitted = events.slice(0, Math.max(0, events.length - limit));
+  let earliest: string | null = null;
+  for (const event of omitted) {
+    const key = deltaEffectiveDate(event);
+    if (earliest === null || key < earliest) earliest = key;
+  }
+  return { taken: events.slice(omitted.length), hasMore: omitted.length > 0, nextChangedSince: earliest };
+}
+
 /** 監視ビュー 1 行 (editorial の全文は含めない — 詳細は directory 本体商品の領分)。 */
 export type ServiceMonitorRow = {
   slug: string;
@@ -261,7 +284,8 @@ export type ServiceMonitorEnvelope = {
   hasMore: boolean;
   /** 次回の delta 購入でそのまま changedSince に渡す値 (当日含む契約なので取りこぼしなし)。
    * hasMore=true の delta では**最初の未返却イベントの deltaEffectiveDate = max(date, collectedAt ?? date)** (返した最後の deltaEffectiveDate より必ず後 =
-   * 前進が保証され、再配信も起きない)。それ以外は generatedAt の UTC 日付。 */
+   * 前進が保証され、再配信も起きない)。hasMore=true の snapshot では返さなかったイベントの deltaEffectiveDate の
+   * 最小値 (takeSnapshotTail・返したイベントが再び返ることはある)。それ以外は generatedAt の UTC 日付。 */
   nextChangedSince: string;
   notice: { code: string; detail: string; termsUrl: string };
   licenseNotice: string;
@@ -295,11 +319,14 @@ export function createServiceMonitorEnvelope(
   // 既定は UTC 日付。取りこぼしゼロが成り立つのは「後から本番に載るイベントの実効日 ≥ その本番反映日の
   // UTC 日付」のとき = **collectedAt は本番 merge 日の JST 日付以上で書く** (merge が遅れたら merge 直前に
   // 更新する・runbook)。同日イベントの重複は slug+date+changeType の dedupe が吸収する。打ち切られた delta
-  // だけは下で「最初の未返却イベントの実効日」に差し替える (打ち切り分の永久ロス防止・前進の保証)。
+  // は下で「最初の未返却イベントの実効日」に差し替える (打ち切り分の永久ロス防止・前進の保証)。
+  // 打ち切られた snapshot は「返さなかったイベントの実効日の最小値」に差し替える (takeSnapshotTail・E17)。
   let nextChangedSince = generatedAtIso.slice(0, 10);
   if (mode === 'snapshot') {
-    hasMore = changelog.length > query.limit;
-    changes = changelog.slice(-query.limit);
+    const page = takeSnapshotTail(changelog, query.limit);
+    changes = page.taken;
+    hasMore = page.hasMore;
+    if (page.nextChangedSince !== null) nextChangedSince = page.nextChangedSince;
     services = published.map((entry) => toRow(entry, snapshot));
   } else {
     const page = takeDeltaSince(changelog, query.changedSince as string, query.limit);

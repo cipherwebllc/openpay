@@ -21,9 +21,11 @@ import {
   DIRECTORY_CATEGORIES,
   DIRECTORY_CHAINS,
   DIRECTORY_LANGUAGES,
+  DIRECTORY_PUBLIC_STATUSES,
   DIRECTORY_STATUSES,
   DIRECTORY_TOKENS,
 } from '@/lib/directory/types';
+import { DIRECTORY_OPENAPI_PATHS } from '@/lib/openapi/directory';
 import { buildBazaarQueryExtensionV2 } from '@/lib/x402/v2';
 
 type PropSchema = { enum?: readonly string[] };
@@ -48,8 +50,35 @@ describe('USDC directory の bazaar 宣言は実装と一致する', () => {
     expect([...props.token.enum!].sort()).toEqual([...DIRECTORY_TOKENS].sort());
     expect([...props.chain.enum!].sort()).toEqual([...DIRECTORY_CHAINS].sort());
     expect([...props.language.enum!].sort()).toEqual([...DIRECTORY_LANGUAGES].sort());
-    // status も types.ts が SoT (宣言だけ増減すると「宣言どおりに呼んで 400」が起きる)。
-    expect([...props.status.enum!].sort()).toEqual([...DIRECTORY_STATUSES].sort());
+    // status は公開 API が受け付ける値 (DIRECTORY_PUBLIC_STATUSES) が SoT。内部の審査段階
+    // (DIRECTORY_STATUSES) を宣言すると、エージェントが draft 等を指定して空の結果に支払う (E16)。
+    expect([...props.status.enum!].sort()).toEqual([...DIRECTORY_PUBLIC_STATUSES].sort());
+  });
+
+  // E16 (第 7 回レビュー・user 裁定 R7): 公開 API は published しか返さないので、status の宣言と
+  // 受理は published だけ。それ以外の値は支払い要求の前に 400 (空の結果に払わせない)。
+  it('E16: status の宣言は published だけ・内部の審査段階は宣言も受理もしない', () => {
+    expect(props.status.enum).toEqual(['published']);
+    const published = new URLSearchParams({ status: 'published' });
+    expect(validateDirectoryQuery(published).ok).toBe(true);
+    const internal = DIRECTORY_STATUSES.filter((s) => s !== 'published');
+    expect(internal.length).toBeGreaterThan(0);
+    for (const status of internal) {
+      expect(validateDirectoryQuery(new URLSearchParams({ status })).ok, status).toBe(false);
+    }
+  });
+
+  it('E16: OpenAPI の directory 系 operation も status は published だけを宣言する', () => {
+    const operations = Object.values(DIRECTORY_OPENAPI_PATHS).map(
+      (path) => (path as { get: { parameters?: readonly { name: string; schema?: { enum?: readonly string[] } }[] } }).get,
+    );
+    const statusParams = operations.flatMap((op) =>
+      (op.parameters ?? []).filter((p) => p.name === 'status'),
+    );
+    expect(statusParams.length).toBeGreaterThan(0);
+    for (const param of statusParams) {
+      expect(param.schema?.enum).toEqual(['published']);
+    }
   });
 
   it('queryParams の例示値はそのまま有効なクエリである', () => {

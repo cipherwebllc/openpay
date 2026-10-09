@@ -201,7 +201,7 @@ const SERVICE_MONITOR_OUTPUT = {
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the recorded date (max(date, collectedAt), or date when collectedAt is absent) of the first event NOT returned here, which is strictly later than the last returned recorded date because a single recorded day is never split across pages.',
+        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the recorded date (max(date, collectedAt), or date when collectedAt is absent) of the first event NOT returned here. In delta mode that is strictly later than the last returned recorded date because a single recorded day is never split across pages; in snapshot mode (the most recent events) the following delta pages can repeat events already returned here, so dedupe them by the documented key.',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },
@@ -371,7 +371,7 @@ const PAYMENT_MONITOR_OUTPUT = {
     nextChangedSince: {
       type: 'string',
       description:
-        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the recorded date (max(date, collectedAt), or date when collectedAt is absent) of the first event NOT returned here, which is strictly later than the last returned recorded date because a single recorded day is never split across pages.',
+        'Echo this value as changedSince on your next call (inclusive; dedupe by the documented key). When hasMore is true it is the recorded date (max(date, collectedAt), or date when collectedAt is absent) of the first event NOT returned here. In delta mode that is strictly later than the last returned recorded date because a single recorded day is never split across pages; in snapshot mode (the most recent events) the following delta pages can repeat events already returned here, so dedupe them by the documented key.',
     },
     notice: { type: 'object' },
     licenseNotice: { type: 'string' },

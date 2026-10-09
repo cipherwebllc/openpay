@@ -51,10 +51,13 @@ export type AccountingCsvResult =
       ok: true;
       csv: string;
       charset: AccountingCharset;
+      /** 書き出した取引 (売上) の件数。税区分で分割した仕訳行数ではない。 */
       rowCount: number;
       approxCount: number;
     }
   | { ok: false; reason: 'no-rows' }
+  /** rowCount = 書き出すはずだった仕訳行数 (ヘッダ除く・税区分で分割した後の行数)。
+   * 取引数だけで上限を超える場合は行を組まずに止めるため、その取引数 (= 行数の下限)。 */
   | { ok: false; reason: 'too-many-rows'; rowCount: number }
   | { ok: false; reason: 'rate-unavailable'; blockingRowCount: number };
 
@@ -193,6 +196,7 @@ function partner(e: HistoryEntry): string {
 }
 
 // freee 取引(収入) 形式: ヘッダ + 1 行 1 取引。勘定科目/税区分はデフォルト値 (取込時に再マッピング可)。
+// 行生成関数はデータ行だけを返し、ヘッダは FORMAT_SPEC が付ける (上限判定をデータ行数で行うため・E14)。
 const FREEE_HEADER = [
   '収支区分',
   '発生日',
@@ -204,7 +208,7 @@ const FREEE_HEADER = [
 ] as const;
 
 function freeeRows(valued: ReadonlyArray<Valued>): string[][] {
-  const rows: string[][] = [[...FREEE_HEADER]];
+  const rows: string[][] = [];
   for (const { e, yv } of valued) {
     const groups = taxGroupsForEntry(e, yv); // 混在税率は税区分別に分割 (合計 === yv.yen)
     groups.forEach((g, gi) => {
@@ -287,7 +291,7 @@ const MF_HEADER = [
 
 // 混在税率は税区分別に分割し、分割行も独立仕訳として取引No を連番採番する。
 function mfRows(valued: ReadonlyArray<Valued>): string[][] {
-  const rows: string[][] = [[...MF_HEADER]];
+  const rows: string[][] = [];
   let txNo = 0; // 取引No (分割行も独立仕訳として連番継続)
   for (const { e, yv } of valued) {
     const groups = taxGroupsForEntry(e, yv);
@@ -316,15 +320,20 @@ function mfRows(valued: ReadonlyArray<Valued>): string[][] {
   return rows;
 }
 
-// 形式ごとの行生成 + 文字コード。yayoi-native は yayoi と同一列で Shift_JIS のみ違う。
+// 形式ごとのヘッダ (弥生はヘッダ無し) + データ行生成 + 文字コード。yayoi-native は yayoi と同一列で
+// Shift_JIS のみ違う。
 const FORMAT_SPEC: Record<
   AccountingFormat,
-  { rows: (valued: ReadonlyArray<Valued>) => string[][]; charset: AccountingCharset }
+  {
+    header: readonly string[] | null;
+    rows: (valued: ReadonlyArray<Valued>) => string[][];
+    charset: AccountingCharset;
+  }
 > = {
-  freee: { rows: freeeRows, charset: 'utf-8' },
-  yayoi: { rows: yayoiRows, charset: 'utf-8' },
-  mf: { rows: mfRows, charset: 'utf-8' },
-  'yayoi-native': { rows: yayoiRows, charset: 'shift_jis' },
+  freee: { header: FREEE_HEADER, rows: freeeRows, charset: 'utf-8' },
+  yayoi: { header: null, rows: yayoiRows, charset: 'utf-8' },
+  mf: { header: MF_HEADER, rows: mfRows, charset: 'utf-8' },
+  'yayoi-native': { header: null, rows: yayoiRows, charset: 'shift_jis' },
 };
 
 export function toAccountingCsv(
@@ -333,6 +342,8 @@ export function toAccountingCsv(
 ): AccountingCsvResult {
   const income = entries.filter(isIncomeSaleEntry);
   if (income.length === 0) return { ok: false, reason: 'no-rows' };
+  // 1 取引は 1 行以上になるので、取引数で既に超えるなら円換算と行生成の前に止める
+  // (行数の判定は下で行う・ここは早期終了)。
   if (income.length > ACCOUNTING_MAX_ROWS) {
     return { ok: false, reason: 'too-many-rows', rowCount: income.length };
   }
@@ -348,7 +359,13 @@ export function toAccountingCsv(
     return { ok: false, reason: 'rate-unavailable', blockingRowCount: blocking };
   }
   const spec = FORMAT_SPEC[opts.format];
-  const rows = spec.rows(valued);
+  const dataRows = spec.rows(valued);
+  // 混在税率の取引は税区分ごとに複数行へ分かれる。会計ソフトが弾くのは書き出した行数なので、
+  // 取引数ではなく実際の仕訳行数 (ヘッダ除く) で判定する (会計明細CSV と同じ基準・E14)。
+  if (dataRows.length > ACCOUNTING_MAX_ROWS) {
+    return { ok: false, reason: 'too-many-rows', rowCount: dataRows.length };
+  }
+  const rows = spec.header ? [[...spec.header], ...dataRows] : dataRows;
   const approxCount = valued.filter((v) => v.yv.kind === 'approx').length;
   return {
     ok: true,

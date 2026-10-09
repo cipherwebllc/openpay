@@ -249,12 +249,14 @@ describe('createServiceMonitorEnvelope', () => {
   });
 
   it('E3: snapshot の hasMore は「全イベント数 > limit」', () => {
-    const total = serviceChangelog().length;
+    const all = scopedChangelog('jpyc-services');
+    const total = all.length;
     const capped = createServiceMonitorEnvelope({ limit: 1 }, {}, NOW);
     expect(capped.hasMore).toBe(total > 1);
-    // snapshot は打ち切られても nextChangedSince を generatedAt のまま維持する
-    // (snapshot に changedSince の概念が無いため、changes の date に差し替える意味が無い)。
-    expect(capped.nextChangedSince).toBe(NOW.slice(0, 10));
+    // E17: 打ち切った snapshot の nextChangedSince は「返さなかったイベントの実効日の最小値」
+    // (generatedAt の日付のままだと、返さなかった古いイベントへ続きを取る手段が無かった)。
+    const omitted = all.slice(0, total - 1).map(deltaEffectiveDate).sort();
+    expect(capped.nextChangedSince).toBe(omitted[0]);
 
     const uncapped = createServiceMonitorEnvelope(
       { limit: SERVICE_MONITOR_MAX_LIMIT },
@@ -262,6 +264,37 @@ describe('createServiceMonitorEnvelope', () => {
       NOW,
     );
     expect(uncapped.hasMore).toBe(total > SERVICE_MONITOR_MAX_LIMIT);
+    // 打ち切りが無い snapshot の nextChangedSince は従来どおり generatedAt の UTC 日付。
+    if (!uncapped.hasMore) expect(uncapped.nextChangedSince).toBe(NOW.slice(0, 10));
+  });
+
+  // E17 (第 7 回レビュー): snapshot は直近 limit 件を返し hasMore=true でも、続きを取る手段が無かった
+  // (nextChangedSince = 今日 → 返さなかった古いイベントは delta で永久に取れない)。応答の
+  // nextChangedSince を changedSince に渡して delta をたどれば、返さなかったイベントを全部取れること。
+  it('E17: 打ち切った snapshot の nextChangedSince から delta をたどると取りこぼしゼロ', () => {
+    const key = (e: { slug?: string; date: string; changeType: string }) =>
+      `${e.slug ?? ''}|${e.date}|${e.changeType}`;
+    const all = new Set(scopedChangelog('jpyc-services').map(key));
+    const limit = 10;
+    expect(all.size).toBeGreaterThan(limit); // 実際に打ち切りが起きる前提
+
+    const snapshot = createServiceMonitorEnvelope({ limit }, {}, NOW);
+    expect(snapshot.mode).toBe('snapshot');
+    expect(snapshot.hasMore).toBe(true);
+    const seen = new Set(snapshot.changes.map(key));
+
+    // 買い手の週次ジョブと同じ回し方: 応答の nextChangedSince をそのままエコーする。
+    let cursor = snapshot.nextChangedSince;
+    let pages = 0;
+    for (; pages < 50; pages++) {
+      const page = createServiceMonitorEnvelope({ changedSince: cursor, limit }, {}, NOW);
+      for (const event of page.changes) seen.add(key(event));
+      if (!page.hasMore) break;
+      expect(page.nextChangedSince > cursor).toBe(true); // delta は必ず前進する
+      cursor = page.nextChangedSince;
+    }
+    expect(pages).toBeLessThan(50);
+    expect([...seen].sort()).toEqual([...all].sort());
   });
 
   it('検証スナップショットの sourceCheckedAt/sourceOk が行に載る (URL 一致時のみ)', () => {

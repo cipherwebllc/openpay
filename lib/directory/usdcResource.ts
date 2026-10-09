@@ -107,7 +107,7 @@ export const USDC_DIRECTORY_SEARCH_BAZAAR = {
       status: {
         type: 'string',
         description: 'Only published entries can be returned, regardless of this filter.',
-        enum: ['draft', 'review', 'published', 'rejected', 'archived'],
+        enum: ['published'],
       },
       limit: { type: 'string', description: '1-50 (default 20)' },
       offset: { type: 'string', description: '0-1000 (default 0)' },

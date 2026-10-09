@@ -52,6 +52,7 @@ jobs:
           tests/lib/freeeSync.test.ts
           tests/lib/accountingCsv.test.ts
           tests/lib/lineItemsCsv.test.ts
+          tests/lib/historyCsv.test.ts
           tests/app/store-seller-disclosure.test.tsx
           tests/components/X402DiscoveryView.test.tsx
       # scripts/run-tests.mjs は vitest を forks pool / maxForks=2 で起動し、

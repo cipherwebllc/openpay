@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { convert, codeToString } from 'encoding-japanese';
 import {
+  ACCOUNTING_MAX_ROWS,
   toAccountingCsv,
   accountingCsvFilename,
   type AccountingFormat,
@@ -317,6 +318,42 @@ describe('取引先 / 備考 のエッジケース', () => {
     });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.rowCount).toBe(5000);
+  });
+});
+
+// E14 (第 7 回レビュー): 混在税率の取引は税区分ごとに 2 行へ分かれる。会計ソフトが弾くのは
+// 書き出した行数なので、取引 (entry) 数ではなく実際の仕訳行数 (ヘッダ除く) で上限を判定する
+// (会計明細CSV の lineItemsCsv と同じ基準)。
+describe('toAccountingCsv: 上限は税区分分割後の仕訳行数で判定 (E14)', () => {
+  const MIXED = entry({
+    lineItems: [
+      { name: '食品', quantity: 1, unitPrice: '400', amount: '400', taxRate: 8, taxCategory: 'taxable_8', memo: null },
+      { name: '雑貨', quantity: 1, unitPrice: '600', amount: '600', taxRate: 10, taxCategory: 'taxable_10', memo: null },
+    ],
+  });
+  const formats: AccountingFormat[] = ['freee', 'yayoi', 'mf', 'yayoi-native'];
+
+  it.each(formats)('%s: 2501 取引 (= 5002 仕訳行) は too-many-rows・rowCount は行数', (format) => {
+    const r = toAccountingCsv(
+      Array.from({ length: ACCOUNTING_MAX_ROWS / 2 + 1 }, () => MIXED),
+      { format, usdcJpy: 150 },
+    );
+    expect(r).toEqual({ ok: false, reason: 'too-many-rows', rowCount: ACCOUNTING_MAX_ROWS + 2 });
+  });
+
+  it.each(formats)('%s: 2500 取引 (= 5000 仕訳行ちょうど) は ok', (format) => {
+    const r = toAccountingCsv(
+      Array.from({ length: ACCOUNTING_MAX_ROWS / 2 }, () => MIXED),
+      { format, usdcJpy: 150 },
+    );
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    // ok 時の rowCount は従来どおり取引件数 (書き出した仕訳行はヘッダを除き 5000 行)。
+    expect(r.rowCount).toBe(ACCOUNTING_MAX_ROWS / 2);
+    const body = r.csv.startsWith(CSV_BOM) ? r.csv.slice(CSV_BOM.length) : r.csv;
+    const lines = body.split(CSV_NEWLINE).filter(Boolean);
+    const header = format === 'freee' || format === 'mf' ? 1 : 0;
+    expect(lines.length - header).toBe(ACCOUNTING_MAX_ROWS);
   });
 });
 
