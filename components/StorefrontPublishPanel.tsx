@@ -8,7 +8,8 @@
 // react-query を使うため、親 (MobileOrderBuilder) は env.enableHandles でこのパネルの**マウント自体**
 // をゲートする (handles OFF の単体テストで QueryClient を要求しないため)。
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLocale, useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '@/lib/env';
@@ -39,6 +40,10 @@ export function StorefrontPublishPanel({
   receiver,
   onGetHandle,
   onLoadStorefront,
+  canAutoLoad = false,
+  accepting,
+  onToggleAccepting,
+  barSlots = [],
 }: {
   /** 公開する店舗固有部分。メニュー未充足など公開不可なら null (公開ボタンを無効化)。 */
   storefront: StorefrontParts | null;
@@ -51,6 +56,15 @@ export function StorefrontPublishPanel({
   /** 公開済み storefront をビルダー (下書き + 商品カタログ) へ読み込む (別端末での編集用)。
    *  受取先は @handle config.to を渡す。破壊的なので本パネルが確認を取ってから呼ぶ。 */
   onLoadStorefront?: (parts: StorefrontParts, receiver: string) => void;
+  /** この端末の下書きとレジの商品がまだ手付かず (既定・見本のまま) なら true。公開中の店が 1 つだけなら
+   *  確認なしで読み込む (戻ってきた店主に空の編集画面を見せない・失うものが無いときだけ)。 */
+  canAutoLoad?: boolean;
+  /** 注文の受付 (下書き)。渡されたときだけ状態カードに切替を出す。公開を更新するとお店のページに反映される。 */
+  accepting?: boolean;
+  onToggleAccepting?: () => void;
+  /** 公開ボタンの帯を描く場所 (スマホ: ビルダーの末尾の sticky な枠 / PC: プレビューの下)。同じ公開処理を
+   *  どこからでも押せるよう、この部品がそこへ描く。 */
+  barSlots?: ReadonlyArray<HTMLElement | null>;
 }) {
   const t = useTranslations('MobileOrder');
   const locale = useLocale();
@@ -127,6 +141,27 @@ export function StorefrontPublishPanel({
       ? t('publishStatusJustNow')
       : relativePublishedAt?.label;
 
+  // 戻ってきた店主: この端末がまだ手付かずなら、公開中の店 (1 つだけのとき) を確認なしで読み込む。
+  // セッションごとに 1 回だけ試す (12s の再取得や下書きの変化で何度も走らせない)。2 つ以上公開している
+  // ときはどれを読むか店主が選ぶ (従来どおり「編集」から)。
+  const autoLoadTried = useRef<string | null>(null);
+  const [autoLoaded, setAutoLoaded] = useState(false);
+  // 「読み込みました」は読み込んだ直後の確認。下書きに手を入れたら消す (状態カードを @handle と公開状態だけに戻す)。
+  useEffect(() => {
+    if (autoLoaded && hasUnpublishedChanges) setAutoLoaded(false);
+  }, [autoLoaded, hasUnpublishedChanges]);
+  useEffect(() => {
+    // isSignedIn = セッションと接続中のウォレットが一致 (別のウォレットのセッション・キャッシュから読み込まない)。
+    if (!canAutoLoad || !onLoadStorefront || !isSignedIn || !sessionAddress || !mine.isSuccess) return;
+    if (autoLoadTried.current === sessionAddress) return;
+    autoLoadTried.current = sessionAddress;
+    const live = handles.filter((hh) => hh.storefront);
+    if (live.length !== 1 || !live[0].storefront) return;
+    setSelected(live[0].handle);
+    onLoadStorefront(live[0].storefront, live[0].config.to);
+    setAutoLoaded(true);
+  }, [canAutoLoad, onLoadStorefront, isSignedIn, sessionAddress, mine.isSuccess, handles]);
+
   const publish = useMutation({
     mutationFn: async () => {
       if (!selectedHandle || !publishedStorefront) throw new Error('not_ready');
@@ -198,221 +233,316 @@ export function StorefrontPublishPanel({
     placardParts?.chains ?? (placardParts?.chain ? [placardParts.chain] : [])
   ).map((c) => ({ slug: c, label: JPYC_CHAIN_LABEL[c] }));
 
+  // 公開中の受付状態 (未設定は受付中)。下書きの切替が公開中と違うときだけ「公開を更新で反映」を出す。
+  const publishedAccepting = selectedHandle?.storefront
+    ? selectedHandle.storefront.acceptingOrders !== false
+    : null;
+  const canPublish = isSignedIn && !!storefront && !!selectedHandle && !publish.isPending;
+  const publishLabel = publish.isPending
+    ? t('publishing')
+    : selectedHandle?.storefront
+      ? t('publishUpdateButton')
+      : t('publishButton');
+  // スマホの下部バー: 押せない理由を 1 行 (サインイン / @handle / メニュー)、押せるときは状態。
+  const barReason = !isSignedIn
+    ? t('barReasonSignIn')
+    : mine.isLoading
+      ? t('publishLoading')
+      : mine.isError
+        ? t('publishLoadError')
+        : handles.length === 0
+          ? t('barReasonNoHandle')
+          : !storefront
+            ? t('barReasonNoMenu')
+            : null;
+  const barStatus = hasUnpublishedChanges
+    ? t('publishStatusUnpublishedChanges')
+    : selectedHandle?.storefront
+      ? `${t('publishStatusLive')}${relativePublishedLabel ? ` · ${relativePublishedLabel}` : ''}`
+      : t('publishStatusUnpublished');
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <h3 className="text-sm font-semibold text-slate-800">{t('publishHeading')}</h3>
-      <p className="mt-1 text-xs text-slate-500">{t('publishIntro')}</p>
-
-      {!isSignedIn ? (
-        <SignInGate className="mt-3" statement={t('publishSignInStatement')} cta={t('publishSignIn')} />
-      ) : mine.isLoading ? (
-        <p className="mt-3 text-xs text-slate-500">{t('publishLoading')}</p>
-      ) : mine.isError ? (
-        <p className="mt-3 text-xs text-red-600">{t('publishLoadError')}</p>
-      ) : handles.length === 0 ? (
-        <div className="mt-3 text-xs text-slate-600">
-          <p>{t('publishNoHandle')}</p>
-          {onGetHandle && (
-            <button
-              type="button"
-              onClick={onGetHandle}
-              className="mt-1 font-medium text-brand hover:underline"
-            >
-              {t('publishGetHandle')}
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="mt-3 space-y-2">
-          {handles.length > 1 ? (
-            <label className="block text-xs text-slate-600">
-              {t('publishSelectHandle')}
-              <select
-                value={effectiveSelected}
-                onChange={(e) => setSelected(e.target.value)}
-                aria-label={t('publishSelectHandle')}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
-              >
-                {handles.map((h) => (
-                  <option key={h.handle} value={h.handle}>
-                    @{h.handle}
-                    {h.storefront ? ` ${t('publishAlready')}` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
+    <>
+      <section
+        aria-labelledby="storefront-status-heading"
+        className="rounded-2xl bg-white shadow-card ring-1 ring-slate-200/70"
+      >
+        <div className="px-5 py-4">
+          <h2 id="storefront-status-heading" className="text-sm font-semibold text-slate-700">
+            {t('statusHeading')}
+          </h2>
+          {!isSignedIn ? (
+            <>
+              <p className="mt-1 text-sm text-slate-500">{t('publishIntro')}</p>
+              <SignInGate className="mt-3" statement={t('publishSignInStatement')} cta={t('publishSignIn')} />
+            </>
+          ) : mine.isLoading ? (
+            <p className="mt-2 text-sm text-slate-500">{t('publishLoading')}</p>
+          ) : mine.isError ? (
+            <p className="mt-2 text-sm text-red-600">{t('publishLoadError')}</p>
+          ) : handles.length === 0 ? (
+            <>
+              <p className="mt-1 text-sm text-slate-600">{t('publishNoHandle')}</p>
+              {onGetHandle && (
+                <button
+                  type="button"
+                  onClick={onGetHandle}
+                  className="mt-3 inline-flex items-center justify-center rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark"
+                >
+                  {t('publishGetHandle')}
+                </button>
+              )}
+            </>
           ) : (
-            <p className="text-xs text-slate-600">
-              @{handles[0].handle}
-              {selectedHandle?.storefront ? ` ${t('publishAlready')}` : ''}
-            </p>
-          )}
-
-          <div
-            data-testid="storefront-publish-status"
-            className="flex flex-wrap items-center gap-2"
-          >
-            {selectedHandle?.storefront ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                <span>{t('publishStatusLive')}</span>
-                <span aria-hidden>·</span>
-                {relativePublishedAt && relativePublishedLabel ? (
-                  <time dateTime={relativePublishedAt.dateTime}>{relativePublishedLabel}</time>
+            <>
+              <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                {handles.length > 1 ? (
+                  <select
+                    value={effectiveSelected}
+                    onChange={(e) => setSelected(e.target.value)}
+                    aria-label={t('publishSelectHandle')}
+                    className="min-w-0 max-w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold"
+                  >
+                    {handles.map((h) => (
+                      <option key={h.handle} value={h.handle}>
+                        @{h.handle}
+                        {h.storefront ? ` ${t('publishAlready')}` : ''}
+                      </option>
+                    ))}
+                  </select>
                 ) : (
-                  <span>{t('publishStatusUpdatedUnknown')}</span>
+                  <p className="min-w-0 truncate text-lg font-bold text-slate-900">@{handles[0].handle}</p>
                 )}
-              </span>
-            ) : (
-              <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
-                {t('publishStatusUnpublished')}
-              </span>
-            )}
-            {hasUnpublishedChanges && (
-              <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
-                {t('publishStatusUnpublishedChanges')}
-              </span>
-            )}
-          </div>
-
-          {/* 別端末で編集するための「読み込み」: 公開中の @handle の店舗設定 + メニューを
-              ビルダーへ復元する。破壊的 (この端末の下書き/商品カタログを上書き) なので確認を挟む。 */}
-          {selectedHandle?.storefront &&
-            onLoadStorefront &&
-            (confirmLoad ? (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                <p>{t('editLoadConfirm')}</p>
-                <div className="mt-1 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!selectedHandle?.storefront) return;
-                      onLoadStorefront(selectedHandle.storefront, selectedHandle.config.to);
-                      setConfirmLoad(false);
-                    }}
-                    className="font-semibold text-amber-900 hover:underline"
-                  >
-                    {t('editLoadConfirmYes')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmLoad(false)}
-                    className="text-amber-700 hover:underline"
-                  >
-                    {t('editLoadCancel')}
-                  </button>
+                <div
+                  data-testid="storefront-publish-status"
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  {selectedHandle?.storefront ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200">
+                      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      <span>{t('publishStatusLive')}</span>
+                      <span aria-hidden>·</span>
+                      {relativePublishedAt && relativePublishedLabel ? (
+                        <time dateTime={relativePublishedAt.dateTime}>{relativePublishedLabel}</time>
+                      ) : (
+                        <span>{t('publishStatusUpdatedUnknown')}</span>
+                      )}
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+                      {t('publishStatusUnpublished')}
+                    </span>
+                  )}
+                  {hasUnpublishedChanges && (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
+                      {t('publishStatusUnpublishedChanges')}
+                    </span>
+                  )}
                 </div>
               </div>
-            ) : (
+              {/* 公開済み (今 publish した or 既に storefront あり) なら固定店舗 URL を常に提示
+                  (コピー/開く/QR)。@handle が唯一の共有導線なので、再公開せずとも取り出せるように。 */}
+              {(publish.isSuccess || selectedHandle?.storefront) && shopUrl && (
+                <div className="mt-2">
+                  {publish.isSuccess ? (
+                    <p className="text-sm font-semibold text-emerald-700">{t('published')}</p>
+                  ) : null}
+                  <p className="break-all text-xs text-slate-500">{shopUrl}</p>
+                  <div className="mt-1.5 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void linkCopy.copy(shopUrl)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-brand hover:text-brand-dark"
+                    >
+                      {linkCopy.copied ? t('copied') : t('copy')}
+                    </button>
+                    <a
+                      href={shopUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-brand hover:text-brand-dark"
+                    >
+                      {t('openShop')}
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => setShowQr(true)}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-brand hover:text-brand-dark"
+                    >
+                      {t('showQr')}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {autoLoaded && !publish.isSuccess ? (
+                <p className="mt-2 text-xs text-emerald-700">{t('autoLoaded')}</p>
+              ) : null}
+            </>
+          )}
+        </div>
+
+        {/* 注文の受付 (開店=受付中 / 閉店=停止中)。停止中は公開ページの支払いを止める (不可逆決済の事故防止)。
+            下書きの値なので、公開中と違うときだけ「公開を更新で反映」を出す。 */}
+        {/* サインインして公開先の @handle が決まってから出す (それまでは押しても公開で反映できない下書きの値)。 */}
+        {onToggleAccepting && accepting !== undefined && isSignedIn && !mine.isLoading && !mine.isError && selectedHandle && (
+          <div className="border-t border-slate-100 px-5 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p id="storefront-accepting-label" className="text-sm font-medium text-slate-700">{t('acceptingLabel')}</p>
+                <p className="mt-0.5 text-xs text-slate-500">{t('acceptingHint')}</p>
+              </div>
+              {/* 名前は「注文の受付 受付中」(見えている文字を含める・掟 8)。 */}
               <button
                 type="button"
-                onClick={() => setConfirmLoad(true)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand-dark"
+                role="switch"
+                aria-checked={accepting}
+                aria-labelledby="storefront-accepting-label storefront-accepting-state"
+                onClick={onToggleAccepting}
+                className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-semibold transition ${
+                  accepting ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'
+                }`}
               >
-                {t('editLoadButton')}
+                <span id="storefront-accepting-state">{accepting ? t('acceptingOn') : t('acceptingOff')}</span>
               </button>
-            ))}
-
-          {/* 受取先は @handle 共通 (config.to)。公開更新でビルダーの受取先に同期する旨を明示し、
-              現受取先と異なるときは「X→Y に更新」を目立たせる (誤送金トラップの回避)。 */}
-          {selectedHandle && (
-            <p className="text-[11px] leading-snug text-slate-500">
-              {t('publishReceiverShared')}
-            </p>
-          )}
-          {receiverWillChange && receiver && selectedHandle && (
-            <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              {t('publishReceiverWillChange', {
-                from: shortAddress(selectedHandle.config.to),
-                to: shortAddress(receiver),
-              })}
-            </p>
-          )}
-          {env.enableShopsApi && selectedHandle && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-              <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={agentListing}
-                  onChange={(event) => {
-                    const checked = event.target.checked;
-                    setAgentListingOverrides((current) => ({
-                      ...current,
-                      [effectiveSelected]: checked,
-                    }));
-                  }}
-                  className="mt-0.5"
-                />
-                <span>{t('agentListingLabel')}</span>
-              </label>
-              {/* 同意の詳細 (提供項目/解除方法) は折りたたみに格納する。常時展開だと右カラムが
-                  縦長になり、サイド列とプレビューのスクロールバーが並走して見づらい (実報告)。
-                  法的文言は一字不変で DOM に常在させる (フェンステストあり)。 */}
-              <details className="mt-1 group">
-                <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 hover:text-slate-700 [&::-webkit-details-marker]:hidden">
-                  <span className="underline decoration-dotted underline-offset-2">
-                    {t('agentListingConsentToggle')}
-                  </span>
-                </summary>
-                <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                  {t('agentListingConsent')}
-                </p>
-              </details>
             </div>
-          )}
-          <button
-            type="button"
-            disabled={!storefront || !selectedHandle || publish.isPending}
-            onClick={() => publish.mutate()}
-            className="w-full rounded-lg bg-brand px-3 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
-          >
-            {publish.isPending
-              ? t('publishing')
-              : selectedHandle?.storefront
-                ? t('publishUpdateButton')
-                : t('publishButton')}
-          </button>
-          {!storefront && <p className="text-xs text-amber-700">{t('publishNeedMenu')}</p>}
-          {publish.isError && <p className="text-xs text-red-600">{t('publishError')}</p>}
-          {/* 公開済み (今 publish した or 既に storefront あり) なら固定店舗 URL を常に提示
-              (コピー/開く/QR)。@handle が唯一の共有導線なので、再公開せずとも取り出せるように。 */}
-          {(publish.isSuccess || selectedHandle?.storefront) && shopUrl && (
-            <div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-              <p className="font-semibold">
-                {publish.isSuccess ? t('published') : t('publishedAlready')}
+            {publishedAccepting !== null && publishedAccepting !== accepting ? (
+              <p className="mt-1.5 text-xs font-medium text-amber-700">{t('acceptingApplyNote')}</p>
+            ) : null}
+          </div>
+        )}
+
+        {isSignedIn && !mine.isLoading && !mine.isError && selectedHandle && (
+          <div className="space-y-2 border-t border-slate-100 px-5 py-4">
+            {/* 受取先は @handle 共通 (config.to)。公開更新でビルダーの受取先に同期する旨を明示し、
+                現受取先と異なるときは「X→Y に更新」を目立たせる (誤送金トラップの回避)。 */}
+            {receiverWillChange && receiver ? (
+              <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {t('publishReceiverWillChange', {
+                  from: shortAddress(selectedHandle.config.to),
+                  to: shortAddress(receiver),
+                })}
               </p>
-              <p className="mt-1 break-all">{shopUrl}</p>
-              <div className="mt-1 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => void linkCopy.copy(shopUrl)}
-                  className="font-medium text-emerald-700 hover:underline"
-                >
-                  {linkCopy.copied ? t('copied') : t('copy')}
-                </button>
-                <a
-                  href={shopUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-emerald-700 hover:underline"
-                >
-                  {t('openShop')}
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setShowQr(true)}
-                  className="font-medium text-emerald-700 hover:underline"
-                >
-                  {t('showQr')}
-                </button>
+            ) : null}
+            {env.enableShopsApi && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <label className="flex items-start gap-2 text-sm font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={agentListing}
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setAgentListingOverrides((current) => ({
+                        ...current,
+                        [effectiveSelected]: checked,
+                      }));
+                    }}
+                    className="mt-0.5"
+                  />
+                  <span>{t('agentListingLabel')}</span>
+                </label>
+                {/* 同意の詳細 (提供項目/解除方法) は折りたたみに格納する。常時展開だと右カラムが
+                    縦長になり、サイド列とプレビューのスクロールバーが並走して見づらい (実報告)。
+                    法的文言は一字不変で DOM に常在させる (フェンステストあり)。 */}
+                <details className="mt-1 group">
+                  <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 hover:text-slate-700 [&::-webkit-details-marker]:hidden">
+                    <span className="underline decoration-dotted underline-offset-2">
+                      {t('agentListingConsentToggle')}
+                    </span>
+                  </summary>
+                  <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                    {t('agentListingConsent')}
+                  </p>
+                </details>
               </div>
-            </div>
-          )}
+            )}
+            {/* 別端末で編集した内容を捨てて公開中に戻す (下書きが公開中と違う・この端末のメニューが空のとき)。
+                破壊的なので確認を挟む。 */}
+            {selectedHandle.storefront &&
+              onLoadStorefront &&
+              (hasUnpublishedChanges || !storefront) &&
+              (confirmLoad ? (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <p>{t('editLoadConfirm')}</p>
+                  <div className="mt-1 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!selectedHandle?.storefront) return;
+                        onLoadStorefront(selectedHandle.storefront, selectedHandle.config.to);
+                        setConfirmLoad(false);
+                      }}
+                      className="font-semibold text-amber-900 hover:underline"
+                    >
+                      {t('editLoadConfirmYes')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmLoad(false)}
+                      className="text-amber-700 hover:underline"
+                    >
+                      {t('editLoadCancel')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setConfirmLoad(true)}
+                  className="text-xs font-medium text-slate-500 underline underline-offset-2 hover:text-slate-700"
+                >
+                  {t('editLoadButton')}
+                </button>
+              ))}
+            {/* 公開ボタンは帯 (スマホは画面下・PC はプレビューの下) から押す (同じ処理)。 */}
+            {!storefront && <p className="text-xs text-amber-700">{t('publishNeedMenu')}</p>}
+            {publish.isError && <p className="text-xs text-red-600">{t('publishError')}</p>}
+          </div>
+        )}
+      </section>
 
-          {/* 営業中の操作 (売り切れ / 受付一時停止) は「受注」タブへ移設した
-              (OrderFeedPanel・営業中に開く運用導線のため)。ビルダーは公開設定に専念。 */}
-        </div>
+      {/* スマホの下部バー: いちばん大事な「公開」を編集中いつでも押せるように (決済QR・レジの会計バーと同じ
+          見た目・同じ公開処理)。常に出し、押せないときは理由を 1 行。 */}
+      {barSlots.map((slot, i) =>
+        slot ? (
+          <span key={i} hidden>
+            {createPortal(
+            <div className="flex items-center gap-3">
+              <div className="min-w-0 flex-1">
+                {publish.isError && !publish.isPending ? (
+                  // 帯から押して失敗したとき、画面の上のカードの文言だけでは気づけないので帯にも出す。
+                  <p role="alert" className="line-clamp-2 text-sm font-medium text-red-600">{t('publishError')}</p>
+                ) : barReason ? (
+                  <p className="truncate text-sm font-medium text-slate-500">{barReason}</p>
+                ) : receiverWillChange && receiver && selectedHandle ? (
+                  // 受取先が変わる公開は、押す場所 (帯) で気づけるように。全文の注意は状態カードにも出す。
+                  <>
+                    <p className="truncate text-[11px] font-semibold text-amber-700">{t('barReceiverWillChange')}</p>
+                    <p className="truncate font-mono text-xs text-amber-900">
+                      {shortAddress(selectedHandle.config.to)} → {shortAddress(receiver)}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="truncate text-[11px] text-slate-500">@{effectiveSelected}</p>
+                    <p className="truncate text-sm font-semibold text-slate-900">{barStatus}</p>
+                  </>
+                )}
+              </div>
+              <button
+                type="button"
+                disabled={!canPublish}
+                onClick={() => publish.mutate()}
+                className="inline-flex shrink-0 items-center justify-center rounded-xl bg-brand px-5 py-3 text-base font-bold text-white transition-transform hover:bg-brand-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+              >
+                {publishLabel}
+              </button>
+            </div>,
+            slot,
+            )}
+          </span>
+        ) : null,
       )}
+
       <MobileOrderPlacardModal
         open={showQr && shopUrl !== ''}
         onClose={() => setShowQr(false)}
@@ -436,6 +566,6 @@ export function StorefrontPublishPanel({
           close: t('qrClose'),
         }}
       />
-    </div>
+    </>
   );
 }

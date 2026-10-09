@@ -10,7 +10,7 @@ import type { Address } from 'viem';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const ADDR2 = '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2';
-const h = vi.hoisted(() => ({ isSignedIn: true, enableShopsApi: false, isConnected: true }));
+const h = vi.hoisted(() => ({ isSignedIn: true, enableShopsApi: false, isConnected: true, sessionAddress: undefined as string | undefined }));
 vi.mock('wagmi', () => ({
   useAccount: () => ({ isConnected: h.isConnected, address: h.isConnected ? ADDR : undefined }),
 }));
@@ -37,7 +37,8 @@ vi.mock('@/hooks/useOrigin', () => ({ useOrigin: () => 'https://open-pay.jp' }))
 vi.mock('@/hooks/useSiweSession', () => ({
   useSiweSession: () => ({
     isSignedIn: h.isSignedIn,
-    sessionAddress: h.isSignedIn ? ADDR : null,
+    // sessionAddress だけ残って isSignedIn=false = 別のウォレットのセッション (ウォレット切替直後) を表せる。
+    sessionAddress: h.sessionAddress ?? (h.isSignedIn ? ADDR : null),
     signIn: vi.fn(),
     isSigningIn: false,
     signInError: null,
@@ -69,23 +70,43 @@ function renderPanel(
     receiver: Address | null;
     onGetHandle: () => void;
     onLoadStorefront: (parts: StorefrontParts, receiver: string) => void;
+    canAutoLoad: boolean;
+    accepting: boolean;
+    onToggleAccepting: () => void;
+    qc: QueryClient;
   }> = {},
 ) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithIntl(
+  const qc = props.qc ?? new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // 公開ボタンは帯 (スマホ: 画面下・PC: プレビュー下) に描かれる。テストでは帯の置き場所を 1 つ渡す。
+  const slot = document.createElement('div');
+  document.body.appendChild(slot);
+  const view = renderWithIntl(
     <QueryClientProvider client={qc}>
       <StorefrontPublishPanel
         storefront={props.storefront === undefined ? STORE : props.storefront}
         receiver={props.receiver ?? null}
         onGetHandle={props.onGetHandle}
         onLoadStorefront={props.onLoadStorefront}
+        canAutoLoad={props.canAutoLoad}
+        accepting={props.accepting}
+        onToggleAccepting={props.onToggleAccepting}
+        barSlots={[slot]}
       />
     </QueryClientProvider>,
   );
+  return Object.assign(view, { slot });
+}
+
+// 公開ボタンは帯に常に出る (読み込み中は押せない)。@handle の読み込みが終わって押せるようになるまで待つ。
+async function readyButton(name: string) {
+  const btn = await screen.findByRole('button', { name });
+  await waitFor(() => expect(btn).toBeEnabled());
+  return btn;
 }
 
 beforeEach(() => {
   h.isSignedIn = true;
+  h.sessionAddress = undefined;
   h.enableShopsApi = false;
   h.isConnected = true;
   vi.unstubAllGlobals();
@@ -133,7 +154,7 @@ describe('StorefrontPublishPanel', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     renderPanel({ storefront: STORE_WITH_TIME });
-    const btn = await screen.findByRole('button', { name: 'この @handle に公開' });
+    const btn = await readyButton('公開する');
     fireEvent.click(btn);
     await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
     // POST body: handle + 既存 config 再送 + storefront。
@@ -152,6 +173,43 @@ describe('StorefrontPublishPanel', () => {
     expect(screen.getByText('https://open-pay.jp/@shop')).toBeInTheDocument();
   });
 
+  it('公開に失敗したら帯にも 1 行出す (画面下の帯から押した人が気づける)', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? { ok: false, status: 500, json: async () => ({ ok: false, error: 'kv' }) }
+        : { ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }) },
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    renderPanel();
+    fireEvent.click(await readyButton('公開する'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('公開に失敗しました。時間をおいて再度お試しください。');
+  });
+
+  it('受取先が変わる公開は、帯にも「受取先が変わります」と変更前 → 後を出す', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ handles: [{ handle: 'shop', config: CFG, storefront: STORE, updatedAt: 100 }] }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { slot } = renderPanel({ receiver: ADDR2 as Address });
+    await readyButton('公開を更新');
+    expect(within(slot).getByText('受取先が変わります')).toBeInTheDocument();
+    expect(within(slot).getByText('0x52d4…cA81 → 0xC02a…6Cc2')).toBeInTheDocument();
+  });
+
+  it('注文の受付のスイッチは、サインインして公開先の @handle が決まるまで出さない', () => {
+    h.isSignedIn = false;
+    renderPanel({ accepting: true, onToggleAccepting: vi.fn() });
+    expect(screen.queryByRole('switch')).toBeNull();
+  });
+
+  it('サインイン後は注文の受付のスイッチを出し、名前に見えている文字を含める (掟 8)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ handles: [{ handle: 'shop', config: CFG, updatedAt: 100 }] }) })));
+    renderPanel({ accepting: false, onToggleAccepting: vi.fn() });
+    expect(await screen.findByRole('switch', { name: '注文の受付 停止中' })).toHaveAttribute('aria-checked', 'false');
+  });
+
   it('時間系未設定の店は従来の POST 生バイトから不変', async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
       init?.method === 'POST'
@@ -160,7 +218,7 @@ describe('StorefrontPublishPanel', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     renderPanel({ storefront: STORE });
-    fireEvent.click(await screen.findByRole('button', { name: 'この @handle に公開' }));
+    fireEvent.click(await readyButton('公開する'));
     await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
 
     const post = fetchMock.mock.calls.find(
@@ -179,7 +237,7 @@ describe('StorefrontPublishPanel', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     renderPanel({ storefront: STORE });
-    const publishButton = await screen.findByRole('button', { name: 'この @handle に公開' });
+    const publishButton = await readyButton('公開する');
     expect(
       screen.queryByRole('checkbox', {
         name: 'AI エージェント検索に掲載する（Shops API）',
@@ -213,7 +271,7 @@ describe('StorefrontPublishPanel', () => {
         '掲載すると、店名・紹介文・住所・営業時間・メニュー概要・受付状況が、OpenPay の有料 API を通じて第三者の AI エージェントやアプリに提供されます。電話番号は提供されません。解除はこのチェックを外して公開を更新（反映まで最大 60 秒）。住所が自宅を兼ねる場合は掲載前にご確認ください。',
       ),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'この @handle に公開' }));
+    fireEvent.click(screen.getByRole('button', { name: '公開する' }));
     await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
     const post = fetchMock.mock.calls.find(
       (call) => (call[1] as RequestInit | undefined)?.method === 'POST',
@@ -237,7 +295,7 @@ describe('StorefrontPublishPanel', () => {
         name: 'AI エージェント検索に掲載する（Shops API）',
       }),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'この @handle に公開' }));
+    fireEvent.click(screen.getByRole('button', { name: '公開する' }));
     await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
     const post = fetchMock.mock.calls.find(
       (call) => (call[1] as RequestInit | undefined)?.method === 'POST',
@@ -259,7 +317,7 @@ describe('StorefrontPublishPanel', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     renderPanel({ storefront: STORE, receiver: ADDR2 });
-    const btn = await screen.findByRole('button', { name: 'この @handle に公開' });
+    const btn = await readyButton('公開する');
     // 現 config.to (ADDR) と異なるので「X→Y に更新」注記が出る。
     expect(screen.getByText(/更新して公開します/)).toBeInTheDocument();
     fireEvent.click(btn);
@@ -285,7 +343,7 @@ describe('StorefrontPublishPanel', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
     renderPanel({ storefront: STORE, receiver: ADDR }); // = 現 config.to と同一
-    const btn = await screen.findByRole('button', { name: 'この @handle に公開' });
+    const btn = await readyButton('公開する');
     fireEvent.click(btn);
     await waitFor(() => expect(screen.getByText('公開しました 🎉')).toBeInTheDocument());
     const post = fetchMock.mock.calls.find(
@@ -295,7 +353,7 @@ describe('StorefrontPublishPanel', () => {
     expect(body.config).toEqual(CFG);
   });
 
-  it('公開済み handle は「公開を更新」+ (公開済み) を出す', async () => {
+  it('公開済み handle は「公開を更新」+ 公開中のチップを出す', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -305,8 +363,8 @@ describe('StorefrontPublishPanel', () => {
       }),
     );
     renderPanel({ storefront: STORE });
-    expect(await screen.findByRole('button', { name: '公開を更新' })).toBeInTheDocument();
-    expect(screen.getByText(/公開済み/)).toBeInTheDocument();
+    expect(await readyButton('公開を更新')).toBeInTheDocument();
+    expect(within(screen.getByTestId('storefront-publish-status')).getByText('公開中')).toBeInTheDocument();
   });
 
   it('公開済み + 下書き同値 → 公開中チップのみ (正規化後の偽差分なし)', async () => {
@@ -469,7 +527,7 @@ describe('StorefrontPublishPanel', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     renderPanel({ storefront: STORE });
-    fireEvent.click(await screen.findByRole('button', { name: 'この @handle に公開' }));
+    fireEvent.click(await readyButton('公開する'));
     const status = await screen.findByTestId('storefront-publish-status');
     await waitFor(() => expect(within(status).getByText('公開中')).toBeInTheDocument());
     expect(within(status).getByText('たった今')).toBeInTheDocument();
@@ -486,8 +544,7 @@ describe('StorefrontPublishPanel', () => {
       }),
     );
     renderPanel({ storefront: STORE });
-    expect(await screen.findByText('公開中の店舗 URL')).toBeInTheDocument();
-    expect(screen.getByText('https://open-pay.jp/@shop')).toBeInTheDocument();
+    expect(await screen.findByText('https://open-pay.jp/@shop')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'QR を表示' })).toBeInTheDocument();
   });
 
@@ -525,9 +582,10 @@ describe('StorefrontPublishPanel', () => {
       }),
     );
     renderPanel({ storefront: null });
-    const btn = await screen.findByRole('button', { name: 'この @handle に公開' });
-    expect(btn).toBeDisabled();
-    expect(screen.getByText(/公開するには有効な JPYC 商品/)).toBeInTheDocument();
+    // 読み込みが終わってもメニューが無いので押せないまま (理由は帯とカードに出る)。
+    expect(await screen.findByText(/公開するには有効な JPYC 商品/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '公開する' })).toBeDisabled();
+    expect(screen.getByText('レジで商品を 1 つ追加すると公開できます')).toBeInTheDocument();
   });
 
   it('HandleClaim が先に埋めた {handles,max} 形の共有 cache を読んでも落ちない (キー共有・回帰)', async () => {
@@ -543,13 +601,15 @@ describe('StorefrontPublishPanel', () => {
         json: async () => ({ handles: [{ handle: 'shop', config: CFG }], max: 3 }),
       }),
     );
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
     renderWithIntl(
       <QueryClientProvider client={qc}>
-        <StorefrontPublishPanel storefront={STORE} receiver={null} />
+        <StorefrontPublishPanel storefront={STORE} receiver={null} barSlots={[slot]} />
       </QueryClientProvider>,
     );
-    // クラッシュせず公開ボタンが出る (handles は配列として読まれる)。
-    expect(await screen.findByRole('button', { name: 'この @handle に公開' })).toBeInTheDocument();
+    // クラッシュせず公開ボタンが押せる (handles は配列として読まれる)。
+    expect(await readyButton('公開する')).toBeInTheDocument();
   });
 
   it('handle 読み込みエラー (502) は正直にエラー表示 (0件と偽装しない)', async () => {
@@ -558,10 +618,12 @@ describe('StorefrontPublishPanel', () => {
       vi.fn().mockResolvedValue({ ok: false, status: 502, json: async () => ({ error: 'kv_error' }) }),
     );
     renderPanel();
-    expect(await screen.findByText(/読み込みに失敗/)).toBeInTheDocument();
+    // カードと帯の両方に出る (0 件と偽装しない)。
+    expect((await screen.findAllByText(/読み込みに失敗/)).length).toBeGreaterThan(0);
+    expect(screen.queryByText('先に @handle（恒久リンク）を取得してください。')).toBeNull();
   });
 
-  it('公開済み handle は「編集（読み込む）」→確認→onLoadStorefront(parts, receiver) を呼ぶ', async () => {
+  it('下書きが公開中と違うときは「編集（読み込む）」→確認→onLoadStorefront(parts, receiver) を呼ぶ', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -571,9 +633,122 @@ describe('StorefrontPublishPanel', () => {
       }),
     );
     const onLoadStorefront = vi.fn();
-    renderPanel({ storefront: STORE, onLoadStorefront });
+    renderPanel({ storefront: { ...STORE, shopName: '別の端末の下書き' }, onLoadStorefront });
     fireEvent.click(await screen.findByRole('button', { name: '編集（公開中の内容を読み込む）' }));
     // 確認 → 読み込む。
+    fireEvent.click(screen.getByRole('button', { name: '読み込む' }));
+    expect(onLoadStorefront).toHaveBeenCalledWith(STORE, CFG.to);
+  });
+
+  it('下書きが公開中と同じなら「編集（読み込む）」は出さない (戻す必要が無い)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG, storefront: STORE }] }),
+      }),
+    );
+    renderPanel({ storefront: STORE, onLoadStorefront: vi.fn() });
+    expect(await readyButton('公開を更新')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '編集（公開中の内容を読み込む）' })).toBeNull();
+  });
+
+  it('この端末が手付かずなら、公開中の店 (1 つ) を確認なしで 1 回だけ読み込む', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG, storefront: STORE }] }),
+      }),
+    );
+    const onLoadStorefront = vi.fn();
+    renderPanel({ storefront: null, onLoadStorefront, canAutoLoad: true });
+    await waitFor(() => expect(onLoadStorefront).toHaveBeenCalledWith(STORE, CFG.to));
+    expect(onLoadStorefront).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('公開中の内容をこの端末に読み込みました。')).toBeInTheDocument();
+  });
+
+  it('読み込みの確認は、下書きに手を入れたら消す (状態カードを公開状態だけに戻す)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG, storefront: STORE }] }),
+      }),
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    const panel = (storefront: StorefrontParts) => (
+      <QueryClientProvider client={qc}>
+        <StorefrontPublishPanel storefront={storefront} receiver={null} onLoadStorefront={vi.fn()} canAutoLoad barSlots={[slot]} />
+      </QueryClientProvider>
+    );
+    const view = renderWithIntl(panel(STORE));
+    expect(await screen.findByText('公開中の内容をこの端末に読み込みました。')).toBeInTheDocument();
+    view.rerender(panel({ ...STORE, menu: [{ id: 'a', name: 'ブレンド', price: '550' }] }));
+    await waitFor(() => expect(screen.queryByText('公開中の内容をこの端末に読み込みました。')).toBeNull());
+    expect(screen.getAllByText('未公開の変更があります').length).toBeGreaterThan(0);
+  });
+
+  it('この端末に手が入っている・公開中の店が 2 つ以上なら、自動では読み込まない', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          handles: [
+            { handle: 'shop', config: CFG, storefront: STORE },
+            { handle: 'shop2', config: CFG, storefront: STORE },
+          ],
+        }),
+      }),
+    );
+    const onLoadStorefront = vi.fn();
+    const first = renderPanel({ storefront: null, onLoadStorefront, canAutoLoad: true });
+    expect(await screen.findByRole('combobox', { name: '公開先の @handle' })).toBeInTheDocument();
+    expect(onLoadStorefront).not.toHaveBeenCalled();
+    first.unmount();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG, storefront: STORE }] }),
+      }),
+    );
+    renderPanel({ storefront: null, onLoadStorefront, canAutoLoad: false });
+    expect(await screen.findByText('https://open-pay.jp/@shop')).toBeInTheDocument();
+    expect(onLoadStorefront).not.toHaveBeenCalled();
+  });
+
+  it('別のウォレットのセッション (接続中と一致しない) では、残っている一覧から自動で読み込まない', async () => {
+    h.isSignedIn = false;
+    h.sessionAddress = ADDR;
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(['handle-mine', ADDR], { handles: [{ handle: 'shop', config: CFG, storefront: STORE }], max: 3 });
+    const onLoadStorefront = vi.fn();
+    renderPanel({ storefront: null, onLoadStorefront, canAutoLoad: true, qc });
+    await screen.findByRole('button', { name: 'サインインして公開' });
+    expect(onLoadStorefront).not.toHaveBeenCalled();
+  });
+
+  it('この端末のメニューが空でも、公開中の内容を読み込んで戻せる', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG, storefront: STORE }] }),
+      }),
+    );
+    const onLoadStorefront = vi.fn();
+    renderPanel({ storefront: null, onLoadStorefront });
+    fireEvent.click(await screen.findByRole('button', { name: '編集（公開中の内容を読み込む）' }));
     fireEvent.click(screen.getByRole('button', { name: '読み込む' }));
     expect(onLoadStorefront).toHaveBeenCalledWith(STORE, CFG.to);
   });
@@ -588,7 +763,7 @@ describe('StorefrontPublishPanel', () => {
       }),
     );
     renderPanel({ storefront: STORE, onLoadStorefront: vi.fn() });
-    await screen.findByRole('button', { name: 'この @handle に公開' });
+    await readyButton('公開する');
     expect(
       screen.queryByRole('button', { name: '編集（公開中の内容を読み込む）' }),
     ).not.toBeInTheDocument();

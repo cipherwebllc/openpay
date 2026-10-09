@@ -2,7 +2,7 @@
 // 料率 (1%・3% 等) を UI に露出しない (P1.2 は設定/URL のみ・課金は P2/P0 ゲート後)。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent } from '@testing-library/react';
+import { screen, fireEvent, within } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
@@ -35,6 +35,10 @@ vi.mock('@/components/StorefrontPublishPanel', () => ({
   StorefrontPublishPanel: ({ storefront }: { storefront: unknown }) => (
     <output data-testid="storefront-publish-parts">{JSON.stringify(storefront)}</output>
   ),
+}));
+// ENS 名の解決 (シートを閉じていても受取先を解決する): 'shop.eth' だけ ADDR に解決する。
+vi.mock('@/hooks/useResolveAddress', () => ({
+  useResolveAddress: (input: string) => ({ data: input === 'shop.eth' ? { address: ADDR } : null }),
 }));
 // AddressInput: 入力時に onChange + onResolved(ADDR) を発火する軽量スタブ。
 vi.mock('@/components/AddressInput', () => ({
@@ -124,7 +128,7 @@ describe('MobileOrderBuilder', () => {
 
   it('flag ON で見出し + レジ商品由来メニューを描画 (?s= 注文URLは前面に出さない)', () => {
     renderWithIntl(<MobileOrderBuilder />);
-    expect(screen.getByText('モバイルオーダーを作成')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '受け取り' })).toBeInTheDocument();
     // メニューはレジの有効な JPYC 商品 (useProductPresets の seed: コーヒー等) を読み取り表示。
     expect(
       screen.getByText('メニューは「レジ」タブの有効な JPYC 商品です（画像・税率も共有）。'),
@@ -139,6 +143,9 @@ describe('MobileOrderBuilder', () => {
 
   it('受取チェーンは複数選択 (チェックボックス)・既定 Polygon・最低1件を維持', () => {
     renderWithIntl(<MobileOrderBuilder />);
+    // 受取先と受取チェーンは「受け取りの設定」シートの中 (一度決めたら変えない設定・2026-10 磨き上げ P3)。
+    fireEvent.click(screen.getByRole('button', { name: '設定' }));
+    expect(screen.getByRole('dialog', { name: '受け取りの設定' })).toBeInTheDocument();
     const polygon = screen.getByRole('checkbox', { name: 'JPYC (Polygon)' }) as HTMLInputElement;
     const kaia = screen.getByRole('checkbox', { name: 'JPYC (Kaia)' }) as HTMLInputElement;
     expect(polygon.checked).toBe(true); // 既定
@@ -154,11 +161,39 @@ describe('MobileOrderBuilder', () => {
 
   it('受取先 + 店名を入力しても ?s= 注文 URL は前面に出さない (@handle 公開のみ)', () => {
     renderWithIntl(<MobileOrderBuilder />);
+    fireEvent.click(screen.getByRole('button', { name: '設定' }));
     fireEvent.change(screen.getByTestId('addr'), { target: { value: ADDR } });
+    fireEvent.click(screen.getByRole('button', { name: '完了' }));
+    // 受け取りの要約に短いアドレスが出る (設定はシートの中)。
+    const receive = screen.getByRole('region', { name: '受け取り' });
+    expect(within(receive).getByText('0x52d4…cA81')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText(/珈琲スタンド/), {
       target: { value: 'テスト店舗' },
     });
     expect(screen.queryByText(/\/order\?s=/)).toBeNull();
+  });
+
+  it('受取先が ENS 名なら、設定シートを開かなくても解決した受取先で公開する (受取先のずれを防ぐ)', () => {
+    window.localStorage.setItem(
+      'openpay:mobile-order-draft:v1',
+      JSON.stringify({ receiver: 'shop.eth', receiverSource: 'manual', chains: ['polygon'] }),
+    );
+    renderWithIntl(<MobileOrderBuilder />);
+    const receive = screen.getByRole('region', { name: '受け取り' });
+    expect(within(receive).getByText('0x52d4…cA81')).toBeInTheDocument();
+  });
+
+  it('ENS 名の受取先は名前の解決結果だけを使う (シートで受け取った古い解決値で公開しない)', () => {
+    window.localStorage.setItem(
+      'openpay:mobile-order-draft:v1',
+      JSON.stringify({ receiver: 'shop.eth', receiverSource: 'manual', chains: ['polygon'] }),
+    );
+    renderWithIntl(<MobileOrderBuilder />);
+    const receive = screen.getByRole('region', { name: '受け取り' });
+    fireEvent.click(within(receive).getByRole('button', { name: '設定' }));
+    // スタブの AddressInput は打つたびに ADDR を「解決できた」と知らせるが、'nobody.eth' は解決できない名前。
+    fireEvent.change(screen.getByTestId('addr'), { target: { value: 'nobody.eth' } });
+    expect(within(receive).queryByText('0x52d4…cA81')).toBeNull();
   });
 
   it('店舗情報 (住所/営業時間/電話) の入力欄を描画する', () => {
@@ -168,16 +203,34 @@ describe('MobileOrderBuilder', () => {
     expect(screen.getByPlaceholderText('例: 03-1234-5678')).toBeInTheDocument();
   });
 
-  it('店舗設定を 5 つの小グループ見出しで順番どおりに区分する', () => {
+  it('番号なしのカードを 受け取り → お店の情報 → 受け渡し → メニュー の順に並べ、任意の項目は畳む', () => {
     renderWithIntl(<MobileOrderBuilder />);
-    const headings = ['基本', '画像（任意）', '店舗情報（任意）', '受け渡し', 'SNS（任意）'].map(
-      (name) => screen.getByRole('heading', { level: 3, name }),
-    );
+    // プレビュー (実際の店舗ページ) にも「メニュー」見出しがあるので、カードの見出しは id で引く。
+    const headings = [
+      ['mobile-order-receive-heading', '受け取り'],
+      ['mobile-order-shop-heading', 'お店の情報'],
+      ['mobile-order-handoff-heading', '受け渡し'],
+      ['mobile-order-menu-heading', 'メニュー'],
+    ].map(([id, name]) => {
+      const el = document.getElementById(id) as HTMLElement;
+      expect(el).toHaveTextContent(name);
+      return el;
+    });
     headings.slice(0, -1).forEach((heading, index) => {
       expect(
         heading.compareDocumentPosition(headings[index + 1]) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy();
     });
+    // ①〜④ の番号バッジは出さない。
+    expect(document.querySelector('[id^="step-"]')).toBeNull();
+    // 任意の項目 (画像・店舗情報・SNS・受付時間) は閉じた折りたたみ。入れた数を見出しの右に出す。
+    for (const name of ['画像（任意）', '店舗情報（任意）', 'SNS（任意）']) {
+      const details = screen.getByText(name).closest('details');
+      expect(details).not.toBeNull();
+      expect(details?.open).toBe(false);
+    }
+    fireEvent.change(screen.getByPlaceholderText(/東京都渋谷区/), { target: { value: '東京都' } });
+    expect(screen.getByText('1 件入力済み')).toBeInTheDocument();
   });
 
   it('@handle 公開 parts に lastOrder / minLeadMinutes を載せる', () => {
@@ -225,12 +278,21 @@ describe('MobileOrderBuilder', () => {
 
   it('受付トグルを切替えると aria-checked と表示が変わる (既定=受付中)', () => {
     renderWithIntl(<MobileOrderBuilder />);
-    const sw = screen.getByRole('switch', { name: '注文の受付' });
+    // 名前は見えている文字を含める (掟 8): 「注文の受付 受付中」。
+    const sw = screen.getByRole('switch', { name: '注文の受付 受付中' });
     expect(sw).toHaveAttribute('aria-checked', 'true');
     expect(sw).toHaveTextContent('受付中');
     fireEvent.click(sw);
     expect(sw).toHaveAttribute('aria-checked', 'false');
     expect(sw).toHaveTextContent('停止中');
+    expect(sw).toHaveAccessibleName('注文の受付 停止中');
+  });
+
+  it('店名が空のプレビューは仮の店名の 1 文字を頭文字にせず、お店のマークを出す', () => {
+    renderWithIntl(<MobileOrderBuilder />);
+    expect(screen.getAllByText('（店名未設定）').length).toBeGreaterThan(0);
+    expect(screen.queryByText('店', { exact: true })).toBeNull();
+    expect(screen.getAllByText('🏪').length).toBeGreaterThan(0);
   });
 
   it('③メニュー一覧は既定で折りたたみ、トグルで開閉できる (レジ管理・長くなる対策)', () => {
