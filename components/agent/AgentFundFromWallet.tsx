@@ -9,6 +9,7 @@ import { chainNameForId, txExplorerUrl } from '@/lib/chains';
 import { defaultDeploymentForSymbol } from '@/lib/tokens';
 import { formatJpyc } from '@/lib/agent/activityView';
 import { isUserRejection } from '@/lib/walletErrors';
+import { replacementDeliveredTransfer, type ReplacementReceiptLike } from '@/lib/agent/fundReplacement';
 
 // よく使う額。入力欄に入れるだけで、検証・確認・送金の流れは手入力と同じ (確認画面を飛ばさない)。
 const QUICK_AMOUNTS = ['100', '500', '1000'] as const;
@@ -35,14 +36,23 @@ export function AgentFundFromWallet({ locale, c, agentAddress, onSent, onBusyCha
   });
   const write = useWriteContract();
   const switcher = useSwitchChain();
-  const [replacement, setReplacement] = useState<{ hash: Hash; invalid: boolean } | null>(null);
+  // 置き換えられた取引 (同じ nonce の別の取引) の receipt。viem の onReplaced で受け取り、終端の判定に使う
+  // (wagmi は置換 receipt が reverted だと onReplaced の後に例外を投げるので、hook の data には残らない)。
+  // delivered = その receipt に期待どおりの Transfer (token・from・to・金額) がある = 入金は届いた。
+  const [replacement, setReplacement] = useState<{ hash: Hash; receipt: ReplacementReceiptLike; delivered: boolean } | null>(null);
+  // ウォレットへ依頼した送金の内容 (置換 receipt の照合用。state の review は「戻る」で消えるので ref に写す)。
+  const sentRef = useRef<Review | null>(null);
   const receipt = useWaitForTransactionReceipt({
     hash: write.data,
     chainId: deployment.chainId,
-    onReplaced: ({ reason, transactionReceipt }) => {
-      // キャンセルや別取引への置換の成功 receipt を、元の送金の成功にしない。
-      // ガス代だけを変更した speed-up (repriced) は同じ送金として追跡する。
-      setReplacement((previous) => ({ hash: transactionReceipt.transactionHash, invalid: Boolean(previous?.invalid) || reason !== 'repriced' }));
+    onReplaced: ({ transactionReceipt }) => {
+      // reason (repriced / cancelled / replaced) ではなく receipt のログで「届いたか」を決める: calldata が違う置換でも
+      // 同じ送金が実行されていれば届いており、失敗扱いで再入力させると二重入金になる。
+      const sent = sentRef.current;
+      const delivered =
+        sent !== null &&
+        replacementDeliveredTransfer(transactionReceipt, { token: deployment.address, from: sent.sender, to: sent.recipient, amount: sent.amount });
+      setReplacement({ hash: transactionReceipt.transactionHash, receipt: transactionReceipt, delivered });
     },
   });
   const [value, setValue] = useState('');
@@ -63,14 +73,15 @@ export function AgentFundFromWallet({ locale, c, agentAddress, onSent, onBusyCha
   const canReview = isConnected && Boolean(address) && !sameWallet && validAmount && balance.data !== undefined && !balance.isError && !insufficient && !locked;
   // 確認中に送り手や送り先が変わったら、改めて確認を求める。旧確認で別の送金をしない。
   const currentReview = review && review.sender.toLowerCase() === address?.toLowerCase() && review.recipient.toLowerCase() === agentAddress.toLowerCase() && review.amount === amount;
-  const confirmed = Boolean(write.data) && !replacement?.invalid && receipt.isSuccess && receipt.data?.status === 'success';
-  const failed = replacement?.invalid || receipt.isError || receipt.data?.status === 'reverted' || (!write.data && balance.isError);
+  // 置換があれば置換 receipt の照合 (delivered) が真実。無ければ元の hash の receipt。
+  const confirmed = Boolean(write.data) && (replacement ? replacement.delivered : receipt.isSuccess && receipt.data?.status === 'success');
+  const failed = replacement ? !replacement.delivered : receipt.isError || receipt.data?.status === 'reverted' || (!write.data && balance.isError);
   const walletError = write.error ?? switcher.error;
   const status = confirmed ? c.confirmed : walletError ? (isUserRejection(walletError) ? c.rejected : c.failed) : failed ? c.failed : write.data ? c.sent : waitingWallet ? c.waitingWallet : null;
-  // 結果が確定した送金 (成功 / revert / 取消・別取引への置換の receipt が確定) の後だけ「戻る」で入力に戻れる。
-  // receipt を取れなかった (RPC エラー) 送金は成否が不明で、戻して再送させると二重送金になり得るので固定したままにする
-  // (explorer で確かめてもらう)。置換を知っただけ (置換 tx の receipt がまだ) のときも同じく固定する。
-  const settled = confirmed || receipt.data?.status === 'reverted' || (Boolean(replacement?.invalid) && receipt.data !== undefined);
+  // 結果が確定した送金 (成功 / revert / 置換 tx の receipt を持っている = 届いた・届いていないが決まった) の後だけ
+  // 「戻る」で入力に戻れる。receipt を取れなかった (RPC エラー) 送金は成否が不明で、戻して再送させると二重送金に
+  // なり得るので固定したままにする (explorer で確かめてもらう)。
+  const settled = confirmed || receipt.data?.status === 'reverted' || replacement !== null;
   const inFlight = waitingWallet || (Boolean(write.data) && !settled);
   const txHash = replacement?.hash ?? write.data;
   const explorerUrl = txHash ? txExplorerUrl(deployment.chainId, txHash) : undefined;
@@ -99,6 +110,7 @@ export function AgentFundFromWallet({ locale, c, agentAddress, onSent, onBusyCha
     // React の再描画前に連続クリックされても、ウォレットへの依頼は 1 回に限定する。
     submittingRef.current = true;
     setIsSubmitting(true);
+    sentRef.current = review;
     write.writeContract({
       abi: erc20Abi,
       address: deployment.address,

@@ -2,7 +2,7 @@ import { StrictMode, type ComponentProps } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { track } from '@vercel/analytics';
-import { erc20Abi, maxUint256, parseUnits, type Address, type Hash } from 'viem';
+import { encodeAbiParameters, encodeEventTopics, erc20Abi, maxUint256, parseUnits, type Address, type Hash } from 'viem';
 import type { AgentActivity } from '@/components/agent/AgentActivity';
 import { AgentWalletCard } from '@/components/agent/AgentWalletCard';
 import { AgentFundFromWallet } from '@/components/agent/AgentFundFromWallet';
@@ -411,7 +411,21 @@ describe('AgentFundFromWallet', () => {
     expect(track).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['cancelled', 'replaced', 'repriced'])('handles a %s transaction without confusing cancellation with funding', (reason) => {
+  // 置換 tx の receipt (viem の onReplaced が渡す transactionReceipt)。logs に ERC-20 Transfer を載せられる。
+  function replacementReceipt(status: 'success' | 'reverted', transfers: { from: Address; to: Address; value: bigint; token?: Address }[] = []) {
+    return {
+      transactionHash: `0x${'b'.repeat(64)}` as Hash,
+      status,
+      logs: transfers.map((tr) => ({
+        address: tr.token ?? deployment.address,
+        topics: encodeEventTopics({ abi: erc20Abi, eventName: 'Transfer', args: { from: tr.from, to: tr.to } }),
+        data: encodeAbiParameters([{ type: 'uint256' }], [tr.value]),
+      })),
+    };
+  }
+  const amount = parseUnits('12.5', deployment.decimals);
+
+  it.each(['cancelled', 'replaced'])('treats a %s transaction whose receipt carries no matching transfer as failed and unlocks the form', (reason) => {
     const busy = vi.fn();
     // 同じ要素の参照を渡すと React が再描画を省くので、描画ごとに作る。
     const element = () => <AgentFundFromWallet locale="en" c={C} agentAddress={agentAddress} onSent={onSent} onBusyChange={busy} />;
@@ -419,31 +433,92 @@ describe('AgentFundFromWallet', () => {
     sendAmount();
     state.hash = hash;
     settleWrite();
-    const replacementHash = `0x${'b'.repeat(64)}`;
-    act(() => state.wait.mock.calls.at(-1)?.[0].onReplaced({ reason, transactionReceipt: { transactionHash: replacementHash } }));
-    // 置き換えを知っただけ (置き換えた取引の receipt はまだ) では結果が確定していない: 戻れない・busy のまま。
-    rerender(element());
-    expect(screen.getByRole('button', { name: C.back })).toBeDisabled();
-    expect(busy).toHaveBeenLastCalledWith(true);
+    // 取消 (自分宛て 0 送金)・別の送金 (別の宛先への Transfer) に置き換わった。
+    const receipt = replacementReceipt('success', reason === 'replaced' ? [{ from: sender, to: sender, value: amount }] : []);
+    act(() => state.wait.mock.calls.at(-1)?.[0].onReplaced({ reason, transactionReceipt: receipt }));
     state.receiptSuccess = true;
     state.receiptStatus = 'success';
     rerender(element());
-    expect(screen.getByRole('link', { name: `${C.viewTx}: ${replacementHash}` })).toHaveAttribute('href', txExplorerUrl(deployment.chainId, replacementHash));
-    if (reason === 'repriced') {
-      expect(screen.getByRole('status')).toHaveTextContent(C.confirmed);
-      expect(onSent).toHaveBeenCalledTimes(1);
-      expect(track).toHaveBeenCalledWith('agent_fund_send', { locale: 'en' });
-    } else {
-      expect(screen.getByRole('status')).toHaveTextContent(C.failed);
-      expect(screen.queryByText(C.confirmed)).toBeNull();
-      expect(onSent).not.toHaveBeenCalled();
-      expect(track).not.toHaveBeenCalled();
-    }
-    // 取消・置換の receipt が確定したら結果は出ている (入金は送られていない): 「戻る」で入力に戻れ、親の busy も外れる。
+    expect(screen.getByRole('link', { name: `${C.viewTx}: ${receipt.transactionHash}` })).toHaveAttribute('href', txExplorerUrl(deployment.chainId, receipt.transactionHash));
+    expect(screen.getByRole('status')).toHaveTextContent(C.failed);
+    expect(screen.queryByText(C.confirmed)).toBeNull();
+    expect(onSent).not.toHaveBeenCalled();
+    expect(track).not.toHaveBeenCalled();
+    // 置換 tx の receipt が確定したら結果は出ている (入金は送られていない): 「戻る」で入力に戻れ、親の busy も外れる。
     expect(screen.getByRole('button', { name: C.back })).toBeEnabled();
     expect(busy).toHaveBeenLastCalledWith(false);
     fireEvent.click(screen.getByRole('button', { name: C.back }));
     expect(state.resetWrite).toHaveBeenCalled(); // 戻ると送金の記録を消す (wagmi の reset が write.data を空にする)
+  });
+
+  it.each(['repriced', 'replaced'])('confirms a %s transaction whose receipt carries the same transfer (token, sender, agent, amount) and notifies once', (reason) => {
+    const busy = vi.fn();
+    const element = () => <AgentFundFromWallet locale="en" c={C} agentAddress={agentAddress} onSent={onSent} onBusyChange={busy} />;
+    const { rerender } = render(element());
+    sendAmount();
+    state.hash = hash;
+    settleWrite();
+    // calldata が違う置換 (例: ガス上限も変えた) でも同じ送金が実行された = 入金は届いている。再入力させると二重入金になる。
+    const receipt = replacementReceipt('success', [{ from: sender, to: agentAddress, value: amount }]);
+    act(() => state.wait.mock.calls.at(-1)?.[0].onReplaced({ reason, transactionReceipt: receipt }));
+    state.receiptSuccess = true;
+    state.receiptStatus = 'success';
+    rerender(element());
+    expect(screen.getByRole('status')).toHaveTextContent(C.confirmed);
+    expect(onSent).toHaveBeenCalledTimes(1);
+    expect(track).toHaveBeenCalledWith('agent_fund_send', { locale: 'en' });
+    expect(screen.getByRole('button', { name: C.back })).toBeEnabled();
+    expect(busy).toHaveBeenLastCalledWith(false);
+    rerender(element());
+    expect(onSent).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['another token', { from: sender, to: agentAddress, value: amount, token: '0x9999999999999999999999999999999999999999' as Address }],
+    ['another sender', { from: agentAddress, to: agentAddress, value: amount }],
+    ['a different amount', { from: sender, to: agentAddress, value: amount - 1n }],
+  ])('does not confirm a replaced transaction whose transfer differs by %s', (_label, transfer) => {
+    const { rerender } = render(ui());
+    sendAmount();
+    state.hash = hash;
+    settleWrite();
+    act(() => state.wait.mock.calls.at(-1)?.[0].onReplaced({ reason: 'replaced', transactionReceipt: replacementReceipt('success', [transfer]) }));
+    state.receiptSuccess = true;
+    state.receiptStatus = 'success';
+    rerender(ui());
+    expect(screen.getByRole('status')).toHaveTextContent(C.failed);
+    expect(onSent).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: C.back })).toBeEnabled();
+  });
+
+  it('unlocks the form when the replacement reverted (wagmi throws after onReplaced, so the hook holds no receipt)', () => {
+    const busy = vi.fn();
+    const element = () => <AgentFundFromWallet locale="en" c={C} agentAddress={agentAddress} onSent={onSent} onBusyChange={busy} />;
+    const { rerender } = render(element());
+    sendAmount();
+    state.hash = hash;
+    settleWrite();
+    const receipt = replacementReceipt('reverted', [{ from: sender, to: agentAddress, value: amount }]);
+    act(() => state.wait.mock.calls.at(-1)?.[0].onReplaced({ reason: 'replaced', transactionReceipt: receipt }));
+    // wagmi の waitForTransactionReceipt は status reverted のとき (onReplaced の後に) 例外を投げる → data は無いまま isError。
+    state.receiptError = true;
+    state.receiptStatus = undefined;
+    rerender(element());
+    expect(screen.getByRole('status')).toHaveTextContent(C.failed);
+    expect(onSent).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: `${C.viewTx}: ${receipt.transactionHash}` })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: C.back })).toBeEnabled();
+    expect(busy).toHaveBeenLastCalledWith(false);
+  });
+
+  it('keeps the form locked while the replacement receipt is still unknown', () => {
+    const { rerender } = render(ui());
+    sendAmount();
+    state.hash = hash;
+    settleWrite();
+    state.receiptError = true; // 元の hash の receipt を取れない (置換の有無も不明)
+    rerender(ui());
+    expect(screen.getByRole('button', { name: C.back })).toBeDisabled();
   });
 
   it('unlocks the form when the wallet rejects the signature (nothing was sent)', () => {

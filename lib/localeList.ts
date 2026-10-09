@@ -4,5 +4,12 @@
 
 export function formatLocaleList(locale: string, items: readonly string[]): string {
   if (locale === 'ja') return items.join('・');
-  return new Intl.ListFormat(locale, { type: 'conjunction', style: 'long' }).format(items);
+  // Intl.ListFormat が無い (古いブラウザ)・locale を受け付けない (throw) ときは「, 」で並べる。表示の整形の失敗で
+  // レジのガス用ウォレットのパネル全体 (残高・残りを戻す) を落とさない = 付帯の整形を本体の操作に波及させない。
+  try {
+    if (typeof Intl.ListFormat !== 'function') return items.join(', ');
+    return new Intl.ListFormat(locale, { type: 'conjunction', style: 'long' }).format(items);
+  } catch {
+    return items.join(', ');
+  }
 }
