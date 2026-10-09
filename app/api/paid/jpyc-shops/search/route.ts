@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { handleFirstPartyPaidGet } from '@/app/api/paid/_shared';
+import { handleFirstPartyPaidGet, paymentHeaderUsable } from '@/app/api/paid/_shared';
 import { guardPaidShopsApi, shopsError } from '@/app/api/shops/_shared';
 import { chainForSlug } from '@/lib/chains';
 import { env } from '@/lib/env';
@@ -23,12 +23,6 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function paymentHeaderPresent(req: Request): boolean {
-  return Boolean(
-    req.headers.get('PAYMENT-SIGNATURE') || req.headers.get('x-payment'),
-  );
-}
 
 function forwarderConfigured(summary: ShopSummary): boolean | null {
   if (!summary.chain) return null;
@@ -94,7 +88,7 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   // 未払いは KV を読まず既存 helper の 402 challenge を返す。支払い header がある場合だけ、
   // verify/settle より先に summary + live の content snapshot を完成させる。
-  if (!paymentHeaderPresent(req)) {
+  if (!paymentHeaderUsable(req)) {
     return handleFirstPartyPaidGet(req, JPYC_SHOPS_SEARCH_RESOURCE, () =>
       shopsError('snapshot_required', 503),
     );

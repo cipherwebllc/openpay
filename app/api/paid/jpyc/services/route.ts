@@ -4,7 +4,7 @@
 // USDC (Base) 版は /api/paid/usdc/jpyc/services (別 money-path・掟 12 追加のみ)。
 
 import { NextResponse } from 'next/server';
-import { handleFirstPartyPaidGet } from '@/app/api/paid/_shared';
+import { handleFirstPartyPaidGet, paymentHeaderUsable } from '@/app/api/paid/_shared';
 import { guardPaidDirectoryApi } from '@/app/api/paid/japan-web3-directory/_shared';
 import { JPYC_SERVICES_RESOURCE } from '@/lib/directory/paidResources';
 import {
@@ -26,7 +26,7 @@ export async function GET(req: Request): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: 'invalid_query' }, { status: 400 });
   }
 
-  if (!req.headers.get('PAYMENT-SIGNATURE') && !req.headers.get('x-payment')) {
+  if (!paymentHeaderUsable(req)) {
     return handleFirstPartyPaidGet(req, JPYC_SERVICES_RESOURCE, () =>
       NextResponse.json({ error: 'snapshot_required' }, { status: 503 }),
     );

@@ -233,6 +233,28 @@ describe('paid Japan Web3 Directory APIs', () => {
     expect(routeMocks.settle).toHaveBeenCalledTimes(1);
   });
 
+  // 第 7 回レビュー E1: 中身の無い・壊れた支払い header の連打で KV (verification snapshot) を読ませない。
+  // 先読みは「コアが verify まで進める header」のときだけ。応答は従来どおりの 402 invalid_payment_payload。
+  it.each([
+    ['X-PAYMENT', 'x'],
+    ['PAYMENT-SIGNATURE', 'x'],
+    ['X-PAYMENT', Buffer.from(JSON.stringify({ x402Version: 1 }), 'utf8').toString('base64')],
+  ])('壊れた支払い header (%s: %s) は KV を読まずに 402 invalid_payment_payload', async (name, value) => {
+    const { list, search, detail } = await load();
+    const headers = { [name]: value };
+    const responses = [
+      await list.GET(new Request('https://open-pay.jp/api/paid/japan-web3-directory', { headers })),
+      await search.GET(new Request('https://open-pay.jp/api/paid/japan-web3-directory/search?category=wallet', { headers })),
+      await detail.GET(new Request('https://open-pay.jp/api/paid/japan-web3-directory/jpyc', { headers }), { params: Promise.resolve({ slug: 'jpyc' }) }),
+    ];
+    for (const res of responses) {
+      expect(res.status).toBe(402);
+      expect(await res.json()).toMatchObject({ error: 'invalid_payment_payload' });
+    }
+    expect(verificationMocks.read).not.toHaveBeenCalled();
+    expect(routeMocks.verify).not.toHaveBeenCalled();
+  });
+
   it('KV snapshot 障害は verify/settle 前に未課金503', async () => {
     verificationMocks.snapshot = null;
     const { list } = await load();

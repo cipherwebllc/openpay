@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { handleFirstPartyPaidGet } from '@/app/api/paid/_shared';
+import { handleFirstPartyPaidGet, paymentHeaderUsable } from '@/app/api/paid/_shared';
 import { DIRECTORY_ENTRIES } from '@/lib/directory/data';
 import { DIRECTORY_SEARCH_RESOURCE } from '@/lib/directory/paidResources';
 import {
@@ -13,12 +13,6 @@ import { guardPaidDirectoryApi, paidDirectoryError } from '../_shared';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function paymentHeaderPresent(req: Request): boolean {
-  return Boolean(
-    req.headers.get('PAYMENT-SIGNATURE') || req.headers.get('x-payment'),
-  );
-}
-
 export async function GET(req: Request): Promise<NextResponse> {
   const guarded = guardPaidDirectoryApi();
   if (guarded) return guarded;
@@ -26,7 +20,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   const parsed = validateDirectoryQuery(new URL(req.url).searchParams);
   if (!parsed.ok) return paidDirectoryError(parsed.error, 400);
 
-  if (!paymentHeaderPresent(req)) {
+  if (!paymentHeaderUsable(req)) {
     return handleFirstPartyPaidGet(req, DIRECTORY_SEARCH_RESOURCE, () =>
       NextResponse.json({ error: 'snapshot_required' }, { status: 503 }),
     );
