@@ -306,15 +306,18 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
   const genRef = useRef(0);
   const enabledRef = useRef(enabled);
   const mountedRef = useRef(true);
-  // 店の tx の revert の後の判定の照会 (アンマウントで中止する = 外れた画面の照会・監視を残さない)。
-  const revertQueriesRef = useRef(new Set<AbortController>());
+  // 店の tx の revert の後の判定の照会 (アンマウントで中止する = 外れた画面の照会・監視を残さない)。値 = その送信の
+  // tx hash (同じ送信の照会を重ねない)。
+  const revertQueriesRef = useRef(new Map<AbortController, Hex>());
+  // 「いま確認する」の進行中の照会 (連打は 1 本に合流する = 先の遅い結果で後の結果を上書きしない)。
+  const checkingRef = useRef<Promise<void> | null>(null);
   useEffect(() => {
     mountedRef.current = true;
     const revertQueries = revertQueriesRef.current;
     return () => {
       mountedRef.current = false;
       finalityStopRef.current?.();
-      for (const q of revertQueries) q.abort();
+      for (const q of revertQueries.keys()) q.abort();
       revertQueries.clear();
     };
   }, []);
@@ -402,16 +405,12 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         if (stopped || gen !== genRef.current) return;
         try {
           const body = await postResolve(mark, config);
-          if (!stopped && body?.ok && body.state === 'settled') {
+          // 「成立」は判定が見つけた tx (実際に成立した tx・端末が送った tx と違うことがある・第 7 回レビュー A11) が
+          // 読めるときだけ採る (サーバの settled は必ず txHash を持つ)。読めない応答は結論にしない (次の回へ): 端末の tx が
+          // revert した後に「入金を確認・確定」と言って確認先を端末の revert 済みの tx に戻さない (Codex 再レビュー P2)。
+          if (!stopped && body?.ok && body.state === 'settled' && isTxHash(body.txHash)) {
             if (showsMark(mark)) {
-              // 判定が見つけた tx (実際に成立した tx) も持つ (端末が送った tx と違うことがある・第 7 回レビュー A11)。
-              setIf(gen, {
-                phase: 'received',
-                mark,
-                finalized: true,
-                previous,
-                ...(isTxHash(body.txHash) ? { txHash: body.txHash } : {}),
-              });
+              setIf(gen, { phase: 'received', mark, finalized: true, previous, txHash: body.txHash });
             }
             return;
           }
@@ -456,10 +455,20 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         //   - 期限切れ・未使用 (この署名はもう使えない証明) → reverted (お支払いは行われていない)
         //   - それ以外 (確定待ち・tx がまだ無い・読めない・通信断・上限) → 結果が分からない (端末の tx は失敗) として既存の
         //     確定待ちの監視へ (結論は既存の unknown と同じ: 成立 = 入金の確認・期限切れ未使用 = 成立しなかった)
-        // 判定を待つ間は今の表示 (送信しました・結果が分からない = 次の QR を出せない) のまま。
-        const shown = stateRef.current;
+        // 同じ送信の照会が進んでいる (送信直後の照会中の「いま確認する」) なら重ねない (遅い方の結果で先の結果を
+        // 上書きしない)。
+        for (const hash of revertQueriesRef.current.values()) if (hash === mark.hash) return;
+        // revert を検出した時点で「結果が分からない (端末の tx は revert)」へ (Codex 再レビュー P1): 判定を待つ間も
+        // 閉じる操作 (dismiss) を効かせず・端末の revert 済みの tx を確認先に出さない (expired_unused の証明なしに次の
+        // QR を出させない)。すでにその表示 (前の照会の確定待ちの tx 付き) ならそのまま。
+        const cur = stateRef.current;
+        const shown: StoreDeviceRegisterState =
+          cur.phase === 'unknown' && cur.storeTxReverted && cur.mark.hash === mark.hash
+            ? cur
+            : { phase: 'unknown', mark, previous, storeTxReverted: true };
+        if (shown !== cur) set(shown);
         const query = new AbortController();
-        revertQueriesRef.current.add(query);
+        revertQueriesRef.current.set(query, mark.hash);
         let r: RevertResolution;
         try {
           r = await resolveAfterRevert(mark, config, query.signal);
@@ -927,21 +936,33 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
     [withTransition, set, settlePrevious, retire],
   );
 
-  /** 「いま確認する」(結果が分からないとき)。 */
-  const checkNow = useCallback(async () => {
+  /**
+   * 「いま確認する」(結果が分からないとき)。連打は進行中の 1 本の照会に合流する (Codex 再レビュー P1: 並行した先の
+   * 遅い照会の「読めない」で、後の照会が出した「端末の tx は revert」の表示を、閉じられる通常の「結果が分からない」に
+   * 戻さない)。
+   */
+  const checkNow = useCallback((): Promise<void> => {
+    const running = checkingRef.current;
+    if (running) return running;
     const cur = stateRef.current;
-    if (cur.phase !== 'unknown') return;
-    const loaded = await loadWatch(cur.mark.chainId);
-    if (!loaded) return;
-    // 端末の tx の revert は分かっている → 読み直さずサーバの判定だけ引き直す (receipt の読み取りの失敗で、店員が
-    // 閉じられる通常の「結果が分からない」に戻さない・第 7 回レビュー A3)。
-    const receipt: DeviceReceipt = cur.storeTxReverted
-      ? { status: 'reverted', logs: [] }
-      : await loaded.io.getReceipt(cur.mark.hash);
-    // 待つ間に閉じた (取引を確かめた)・次の会計に進んだ → 遅れた結果で「次の QR を出せない」に戻さない。
-    const now = stateRef.current;
-    if (now.phase !== 'unknown' || now.mark.hash !== cur.mark.hash) return;
-    await showReceipt(loaded.mod, cur.mark, receipt, cur.previous, genRef.current);
+    if (cur.phase !== 'unknown') return Promise.resolve();
+    const p = (async () => {
+      const loaded = await loadWatch(cur.mark.chainId);
+      if (!loaded) return;
+      // 端末の tx の revert は分かっている → 読み直さずサーバの判定だけ引き直す (receipt の読み取りの失敗で、店員が
+      // 閉じられる通常の「結果が分からない」に戻さない・第 7 回レビュー A3)。
+      const receipt: DeviceReceipt = cur.storeTxReverted
+        ? { status: 'reverted', logs: [] }
+        : await loaded.io.getReceipt(cur.mark.hash);
+      // 待つ間に表示が変わった (閉じた・次の会計に進んだ・別の確認が結論を出した) → 遅れた結果で上書きしない
+      // (開始時の状態そのもの = 同じ送信でも revert が分かった後の表示を戻さない)。
+      if (stateRef.current !== cur) return;
+      await showReceipt(loaded.mod, cur.mark, receipt, cur.previous, genRef.current);
+    })().finally(() => {
+      if (checkingRef.current === p) checkingRef.current = null;
+    });
+    checkingRef.current = p;
+    return p;
   }, [loadWatch, showReceipt]);
 
   /** 「もう一度送る」(一時的な理由で送らなかったとき・お客様の署名が有効な間)。 */

@@ -986,8 +986,9 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     const { result } = renderHook(() => useStoreDeviceRegister(input));
     await started(result);
     await advance(3_000);
-    // 判定を待つ間は「送信しました」のまま (次の QR を出せない)
-    expect(result.current.state).toMatchObject({ phase: 'sent', mark: { hash: HASH } });
+    // 判定を待つ間は、端末の tx の revert が分かった「結果が分からない」(次の QR を出せない・閉じられない・端末の tx は
+    // 確認先にしない)
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
     expect(result.current.busy).toBe(true);
     expect(of('/resolve')).toHaveLength(1);
     expect(JSON.parse(String(of('/resolve')[0].init!.body))).toMatchObject({
@@ -1103,7 +1104,7 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     const { result, unmount } = renderHook(() => useStoreDeviceRegister(input));
     await started(result);
     await advance(3_000);
-    expect(result.current.state).toMatchObject({ phase: 'sent' });
+    expect(result.current.state).toMatchObject({ phase: 'unknown', storeTxReverted: true });
     expect(of('/resolve')).toHaveLength(1);
     const signal = of('/resolve')[0].init!.signal;
     unmount();
@@ -1170,17 +1171,20 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     expect(result.current.state).toMatchObject({ phase: 'received', previous: true, finalized: true, txHash: HASH_B });
   });
 
-  it('A3: 判定の応答が返らなくても「送信しました」のまま止めない (上限の後は unknown として確定待ちの監視へ)', async () => {
+  it('A3: 判定の応答が返らなくても止めない (上限の後は確定待ちの監視へ)', async () => {
     send.waitReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
     resolveRes = () => new Promise<Response>(() => {});
     readRes = signed;
     const { result } = renderHook(() => useStoreDeviceRegister(input));
     await started(result);
     await advance(3_000);
-    expect(result.current.state).toMatchObject({ phase: 'sent' });
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
+    expect(of('/resolve')).toHaveLength(1);
+    // 上限 (25 秒) までは 1 本の照会だけ・上限の後は監視 (10 秒おき) が引き直す
     await advance(30_000);
     expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
     expect(result.current.busy).toBe(true);
+    expect(of('/resolve')).toHaveLength(1);
     resolveRes = () => json({ ok: true, state: 'expired_unused' });
     await advance(10_000);
     expect(result.current.state).toEqual({ phase: 'failed', mark: MARK, previous: false });
@@ -1210,7 +1214,7 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     expect(result.current.state).toMatchObject({ phase: 'received', finalized: true, txHash: HASH_B });
   });
 
-  it('A3: 判定を待つ間に閉じた (前回の送信) なら、遅れた判定で表示を戻さない', async () => {
+  it('A3: 判定を待つ間 (前回の送信) も閉じられない (revert を検出した時点で unknown + storeTxReverted)・遅れた判定の成立で入金の確認', async () => {
     send.readSentMarks.mockReturnValue({ ok: true, marks: [{ ...MARK, at: Date.now() - 60_000 }] });
     send.waitReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
     let openResolve!: () => void;
@@ -1218,15 +1222,180 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     resolveRes = () => gate.then(() => json({ ok: true, state: 'settled', txHash: HASH_B }));
     const { result } = renderHook(() => useStoreDeviceRegister(input));
     await advance(0);
-    expect(result.current.state).toMatchObject({ phase: 'sent', previous: true });
+    const prevMark = { ...MARK, at: Date.now() - 60_000 };
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: prevMark, previous: true, storeTxReverted: true });
+    expect(result.current.busy).toBe(true);
     act(() => {
       result.current.dismiss();
     });
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: prevMark, previous: true, storeTxReverted: true });
+    expect(result.current.busy).toBe(true);
     await act(async () => {
       openResolve();
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(result.current.state).toEqual({ phase: 'idle' });
+    expect(result.current.state).toEqual({ phase: 'received', mark: prevMark, finalized: true, previous: true, txHash: HASH_B });
+    expect(result.current.busy).toBe(false);
+  });
+
+  // Codex 再レビュー P1: 通常の「結果が分からない」から「いま確認する」が revert を読んだ後、判定の応答を待つ間も
+  // 閉じられない (expired_unused の証明なしに次の QR を出さない)・端末の revert 済みの tx を確認先にしない。
+  it('A3 再レビュー: 通常の unknown から「いま確認する」が revert を読んだら、判定を待つ間から unknown + storeTxReverted (閉じられない・端末の tx は確認先にしない)', async () => {
+    send.waitReceipt.mockResolvedValueOnce(null);
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false });
+    send.getReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
+    let openResolve!: () => void;
+    const gate = new Promise<void>((r) => { openResolve = r; });
+    resolveRes = () => gate.then(() => json({ ok: true, state: 'pending', confirming: true, txHash: HASH_B }));
+    let checking!: Promise<void>;
+    await act(async () => {
+      checking = result.current.checkNow();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(of('/resolve')).toHaveLength(1);
+    // 応答待ちの間: 端末の tx の revert は分かっている → 閉じる操作は無効・確認先 (txHash) は無い (端末の tx を出さない)
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
+    act(() => {
+      result.current.dismiss();
+    });
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
+    expect(result.current.busy).toBe(true);
+    expect(await started(result)).toBeNull();
+    await act(async () => {
+      openResolve();
+      await checking;
+    });
+    // 遅れた判定は捨てない (確定待ちの tx を確認先に・監視へ)
+    expect(result.current.state).toEqual({
+      phase: 'unknown',
+      mark: MARK,
+      previous: false,
+      storeTxReverted: true,
+      txHash: HASH_B,
+    });
+    resolveRes = () => json({ ok: true, state: 'settled', txHash: HASH_B });
+    await advance(10_000);
+    expect(result.current.state).toMatchObject({ phase: 'received', finalized: true, txHash: HASH_B });
+  });
+
+  // Codex 再レビュー P1: 「いま確認する」の連打で receipt の照会を並行させない (先の遅い照会の「読めない」で、後の照会が
+  // 出した revert 済みの表示を、閉じられる通常の unknown に戻さない)。
+  it('A3 再レビュー:「いま確認する」の連打は 1 本の照会に合流する (receipt の読み取りを重ねない)', async () => {
+    send.waitReceipt.mockResolvedValueOnce(null);
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false });
+    let release!: (v: unknown) => void;
+    send.getReceipt
+      .mockClear()
+      .mockReturnValueOnce(new Promise((r) => { release = r; }))
+      .mockResolvedValueOnce({ status: 'reverted', logs: [] });
+    resolveRes = () => json({ ok: true, state: 'pending', confirming: true });
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = result.current.checkNow();
+    });
+    act(() => {
+      second = result.current.checkNow();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(send.getReceipt).toHaveBeenCalledTimes(1);
+    expect(of('/resolve')).toHaveLength(0);
+    await act(async () => {
+      release(null);
+      await first;
+      await second;
+    });
+    // 1 本の照会の結果 (読めない) だけ
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false });
+    // 次の照会は改めて読む → revert を検出
+    await act(async () => {
+      await result.current.checkNow();
+    });
+    expect(send.getReceipt).toHaveBeenCalledTimes(2);
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
+    expect(of('/resolve')).toHaveLength(1);
+  });
+
+  it('A3 再レビュー: 送信直後の revert の判定を待つ間に「いま確認する」を押しても照会を重ねない', async () => {
+    send.waitReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
+    let openResolve!: () => void;
+    const gate = new Promise<void>((r) => { openResolve = r; });
+    resolveRes = () => gate.then(() => json({ ok: true, state: 'pending', confirming: true, txHash: HASH_B }));
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true });
+    expect(of('/resolve')).toHaveLength(1);
+    await act(async () => {
+      await result.current.checkNow();
+    });
+    expect(of('/resolve')).toHaveLength(1);
+    expect(send.getReceipt).not.toHaveBeenCalled();
+    await act(async () => {
+      openResolve();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.state).toEqual({
+      phase: 'unknown',
+      mark: MARK,
+      previous: false,
+      storeTxReverted: true,
+      txHash: HASH_B,
+    });
+    expect(of('/resolve')).toHaveLength(1);
+  });
+
+  // Codex 再レビュー P2: 引き継いだ監視も、tx hash の読めない「成立」を採らない (不正な応答が続いても「入金を確認・
+  // 確定」と言わず、確認先を端末の revert 済みの tx に戻さない)。
+  it('A3 再レビュー: 確定待ちの監視は tx hash の読めない「成立」を採らない (不正な応答が続いても unknown + 監視のまま)', async () => {
+    send.waitReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
+    resolveRes = () => json({ ok: true, state: 'pending', confirming: true, txHash: HASH_B });
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    const expected = { phase: 'unknown', mark: MARK, previous: false, storeTxReverted: true, txHash: HASH_B };
+    expect(result.current.state).toEqual(expected);
+    resolveRes = () => json({ ok: true, state: 'settled', txHash: 'nope' });
+    await advance(10_000);
+    expect(result.current.state).toEqual(expected);
+    await advance(10_000);
+    expect(result.current.state).toEqual(expected);
+    expect(result.current.busy).toBe(true);
+    expect(of('/resolve')).toHaveLength(3);
+    act(() => {
+      result.current.dismiss();
+    });
+    expect(result.current.state).toEqual(expected);
+    resolveRes = () => json({ ok: true, state: 'settled', txHash: HASH_B });
+    await advance(10_000);
+    expect(result.current.state).toEqual({ phase: 'received', mark: MARK, finalized: true, previous: false, txHash: HASH_B });
+    expect(result.current.busy).toBe(false);
+  });
+
+  it('A3 再レビュー: 入金の確認 (未確定) の監視も tx hash の読めない「成立」では確定と言わない', async () => {
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toEqual({ phase: 'received', mark: MARK, finalized: false, previous: false });
+    resolveRes = () => json({ ok: true, state: 'settled', txHash: 'nope' });
+    await advance(10_000);
+    expect(result.current.state).toEqual({ phase: 'received', mark: MARK, finalized: false, previous: false });
+    resolveRes = () => json({ ok: true, state: 'settled', txHash: HASH });
+    await advance(10_000);
+    expect(result.current.state).toEqual({ phase: 'received', mark: MARK, finalized: true, previous: false, txHash: HASH });
   });
 
   it('A11: 結果が分からない送信を判定が「成立」で返したら、判定が見つけた tx (実際に成立した tx) を持つ', async () => {
