@@ -140,11 +140,22 @@ describe('JPYC attestation gate and RPC record', () => {
       expect(res.headers.get('cache-control')).toBe('no-store');
     });
   }
-  it('no key produces null attestation and signer', async () => {
+  // 第 7 回レビュー E3: 署名付きの証明が商品なので、署名鍵が無い・不正なら課金しない (503 = settle しない)。
+  it.each(['', '0xnothex'])('signing key %j: paid request is 503 signer_unavailable before any RPC read, never settles', async (key) => {
+    vi.stubEnv('X402_RECEIPT_SIGNING_KEY', key); vi.resetModules();
+    route = await import('@/app/api/paid/usdc/jpyc/attest/route') as unknown as typeof route;
+    const res = await route.GET(request());
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: 'signer_unavailable' });
+    onlyVerify();
+    expect(mocks.receipt).not.toHaveBeenCalled();
+  });
+  it('signing key missing: unpaid request still gets the 402 offer', async () => {
     vi.stubEnv('X402_RECEIPT_SIGNING_KEY', ''); vi.resetModules();
     route = await import('@/app/api/paid/usdc/jpyc/attest/route') as unknown as typeof route;
-    const body = await (await route.GET(request())).json();
-    expect(body.attestation).toBeNull(); expect(body.signer).toBeNull(); expect(validate(body)).toBe(true);
+    const res = await route.GET(request(undefined, 0));
+    expect(res.status).toBe(402);
+    expect(mocks.fetch).not.toHaveBeenCalled();
   });
   it('unknown payer uses null licensee and signs zero address', async () => {
     mocks.fetch.mockImplementation(async (url) => Response.json(String(url).endsWith('/verify') ? { isValid: true } : { success: true, transaction: TX, network: 'base' }));

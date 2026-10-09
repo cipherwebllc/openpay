@@ -1529,7 +1529,9 @@ Polygon (mainnet) / Amoy (testnet)。
 5. `NEXT_PUBLIC_JPYC_FORWARDER_POLYGON` 設定済 (未設定は readiness 503 `forwarder_unconfigured`)。
 6. **専用 receipt 署名鍵**: `X402_RECEIPT_SIGNING_KEY` (server-only・relayer 鍵とは**別の専用鍵**) を投入。
    未設定でも settle は成立するが receipt は null (オフライン検証を提供しない)。公開 signer は
-   `/api/facilitator/supported` の `receiptSigner` で配布。
+   `/api/facilitator/supported` の `receiptSigner` で配布。署名付きの有料商品 (JPYC 支払い証明・
+   Directory ライセンス版) は未設定/不正だと支払いを受けずに 503 `signer_unavailable` を返す
+   (`node scripts/verify-production-config.mjs` の「x402 receipt signer」で確認)。
 7. **optional reservation / mainnet hardening の前提**:
    - `/verify` の reservation は best-effort。KV が利用可能で記録に成功した場合だけ
      `reservationToken` を追加する。KV 未設定・障害・予約競合でも、従来の verify 成功条件と応答を

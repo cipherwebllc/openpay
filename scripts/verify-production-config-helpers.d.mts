@@ -19,3 +19,6 @@ export function assessReverifyRun(
 
 /** Pimlico 残高 cron の最新 run のログから、実際に残高を読んだかを判定する。 */
 export function assessPimlicoRun(log: string): { ok: boolean; detail: string };
+
+/** /api/facilitator/supported の receiptSigner が入っているか (署名付きの有料商品が売れる状態か)。 */
+export function assessReceiptSigner(status: number, body: unknown): { ok: boolean; detail: string };

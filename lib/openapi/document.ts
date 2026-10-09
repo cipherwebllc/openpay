@@ -104,7 +104,7 @@ export function buildOpenApiDocument(): Record<string, unknown> | null {
         ...OPENAPI_DOCUMENT.components.responses,
         StorageUnavailable: {
           description:
-            'The request could not be completed because required data or storage is temporarily unavailable.',
+            'The request could not be completed because required data or storage is temporarily unavailable (storage_unavailable), or a signed product cannot be signed right now (signer_unavailable). Payment is not settled.',
           content: {
             'application/json': {
               schema: { $ref: '#/components/schemas/Error' },

@@ -217,6 +217,8 @@ export const BASE_OPENAPI_SCHEMAS = {
           'storage_unavailable',
           'snapshot_required',
           'payment_facility_unavailable',
+          // 署名付きの有料商品 (Directory ライセンス版) は署名鍵が無いと支払いを受けずに 503 (第 7 回レビュー E3)
+          'signer_unavailable',
         ],
       },
     },

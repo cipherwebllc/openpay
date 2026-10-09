@@ -52,3 +52,22 @@ export function assessReverifyRun(run, log, nowMs = Date.now()) {
     detail: `run #${run.databaseId} HTTP 200 (${run.createdAt})`,
   };
 }
+
+/**
+ * /api/facilitator/supported の receiptSigner (X402_RECEIPT_SIGNING_KEY から導いた公開アドレス) が入っているか。
+ * 鍵が無い・不正だと x402 の受領証明が出ず、署名付きの有料商品 (JPYC 支払い証明・Directory ライセンス版) は
+ * 支払いを受けずに 503 を返し続ける (第 7 回レビュー E3) → 売れない状態を外から検出する。
+ */
+export function assessReceiptSigner(status, body) {
+  if (status !== 200) {
+    return { ok: false, detail: `HTTP ${status} (/api/facilitator/supported が読めない)` };
+  }
+  const signer = body && typeof body === 'object' ? body.receiptSigner : undefined;
+  if (typeof signer === 'string' && /^0x[0-9a-fA-F]{40}$/.test(signer)) {
+    return { ok: true, detail: `receiptSigner ${signer}` };
+  }
+  return {
+    ok: false,
+    detail: 'receiptSigner が null — X402_RECEIPT_SIGNING_KEY 未設定/不正。受領証明が出ず、署名付きの有料商品は 503 で売れない',
+  };
+}

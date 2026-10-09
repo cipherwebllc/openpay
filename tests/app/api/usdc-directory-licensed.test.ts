@@ -168,17 +168,28 @@ describe('licensed directory route', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('unset signing key still delivers the license with null attestation and signer', async () => {
+  // 第 7 回レビュー E3: 署名付きのライセンスが商品なので、署名鍵が無い・不正なら課金しない (503 = settle しない)。
+  it.each(['', '0xnothex'])('signing key %j: paid request is 503 signer_unavailable before reading the snapshot, never settles', async (key) => {
+    facilitatorOk();
+    const route = await load({ key });
+    const response = await route.GET(req({ 'x-payment': b64(V1_PAYLOAD) }));
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toEqual({ ok: false, error: 'signer_unavailable' });
+    // 公開 OpenAPI の 503 (StorageUnavailable → Error) に適合する
+    const { default: Ajv2020 } = await import('ajv/dist/2020');
+    const { BASE_OPENAPI_SCHEMAS } = await import('@/lib/openapi/components');
+    expect(new Ajv2020({ strict: false }).compile(BASE_OPENAPI_SCHEMAS.Error)(body)).toBe(true);
+    expect(verificationMocks.events).toEqual(['verify']);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('signing key missing: unpaid request still gets the 402 offer', async () => {
     facilitatorOk();
     const route = await load({ key: '' });
-    const response = await route.GET(req({ 'x-payment': b64(V1_PAYLOAD) }));
-    expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(body.license.licensee).toBe(V1_PAYLOAD.payload.authorization.from);
-    expect(body.attestation).toBeNull();
-    expect(body.signer).toBeNull();
-    expect(body.verify.method).toBe('EIP-712 recoverTypedDataAddress');
-    expect(verificationMocks.events).toEqual(['verify', 'snapshot', 'content 200', 'settle']);
+    const response = await route.GET(req());
+    expect(response.status).toBe(402);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('unknown verified payer remains null and signs the zero address', async () => {
