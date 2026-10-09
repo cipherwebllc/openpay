@@ -60,6 +60,7 @@ function base({ balance, gasPrice, readFailed, ...over }: Record<string, unknown
     address: null,
     withdrawStatus: { phase: 'idle' },
     removeBlocked: false,
+    staleTopUps: [],
     refresh: vi.fn(),
     create: vi.fn(async () => ({ ok: true })),
     remove: vi.fn(async () => true),
@@ -159,6 +160,7 @@ describe('StoreGasWalletPanel', () => {
       [{ phase: 'unknown', chainId: 80002, hash: TX }, /確かめられませんでした/, 'alert'],
       [{ phase: 'reverted', chainId: 80002, hash: TX }, /失敗しました/, 'alert'],
       [{ phase: 'rejected', reason: 'contract_recipient' }, /コントラクトのアドレスには戻せません/, 'alert'],
+      [{ phase: 'rejected', reason: 'delegated_recipient' }, /スマートアカウント（委任）になっているため戻せません/, 'alert'],
     ];
     for (const [status, text, role] of cases) {
       hold.state = ready({ withdrawStatus: status });
@@ -343,6 +345,20 @@ describe('StoreGasWalletPanel', () => {
     render(<StoreGasWalletPanel />);
     expect(screen.getByTestId('topup')).toHaveTextContent('80002');
     expect(screen.getByTestId('topup')).not.toHaveTextContent('1001');
+  });
+
+  it('結果を確かめられていない補充 (1 日以上) があれば、消す前にそれを知らせる (取引へのリンクつき・消すのは止めない)', () => {
+    hold.state = ready({
+      balance: 0n,
+      gasPrice: 1n,
+      staleTopUps: [{ id: 's', address: ADDR, chainId: 80002, at: 1, hash: TX }],
+    });
+    render(<StoreGasWalletPanel />);
+    const button = screen.getByRole('button', { name: 'この端末から消す' });
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    expect(screen.getByText(/結果を確かめられていない補充があります/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: '取引を見る' }).getAttribute('href')).toContain(TX);
   });
 
   it('補充の結果が出るまでは消せない (届く途中の宛先の鍵を消さない)', () => {

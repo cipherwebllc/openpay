@@ -11,6 +11,9 @@ const rpc = vi.hoisted(() => ({
   failChains: new Set<number>(),
   code: '0x',
   receiptStatus: '0x1' as string | null,
+  // 送り手の確定済み nonce (eth_getTransactionCount) と hash で読む tx (null = まだ見えない)。
+  txCount: 0,
+  txByHash: null as { nonce: number } | null,
   chainIds: [80002] as number[],
   // この宛先の残高の応答を止める (古い鍵の読み取りが遅れて返る競合の再現用)。
   hold: null as { address: string; gate: Promise<void> } | null,
@@ -51,7 +54,27 @@ vi.mock('@/lib/chains', async (importOriginal) => {
             case 'eth_blockNumber':
               return '0x2';
             case 'eth_getTransactionCount':
-              return '0x0';
+              return `0x${rpc.txCount.toString(16)}`;
+            case 'eth_getTransactionByHash':
+              return rpc.txByHash === null
+                ? null
+                : {
+                    hash: TX,
+                    nonce: `0x${rpc.txByHash.nonce.toString(16)}`,
+                    blockHash: null,
+                    blockNumber: null,
+                    transactionIndex: null,
+                    from: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+                    to: '0x0000000000000000000000000000000000000001',
+                    value: '0xde0b6b3a7640000',
+                    gas: '0x5208',
+                    gasPrice: '0x1',
+                    input: '0x',
+                    type: '0x0',
+                    v: '0x0',
+                    r: '0x0',
+                    s: '0x0',
+                  };
             case 'eth_sendRawTransaction':
               return TX;
             case 'eth_getTransactionReceipt':
@@ -83,7 +106,14 @@ vi.mock('@/lib/chains', async (importOriginal) => {
 
 import { useStoreGasWallet } from '@/hooks/useStoreGasWallet';
 import { STORE_GAS_WALLET_STORAGE_KEY, createStoreGasWallet } from '@/lib/storeGasWallet';
-import { attachStoreGasTopUpHash, finishStoreGasTopUp, liveStoreGasTopUps, reserveStoreGasTopUp } from '@/lib/storeGasTopUp';
+import {
+  TOPUP_SENT_TTL_MS,
+  attachStoreGasTopUpHash,
+  finishStoreGasTopUp,
+  liveStoreGasTopUps,
+  reserveStoreGasTopUp,
+  staleStoreGasTopUps,
+} from '@/lib/storeGasTopUp';
 
 const DEST = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
@@ -103,6 +133,8 @@ describe('useStoreGasWallet', () => {
     rpc.balance = 10n ** 18n;
     rpc.code = '0x';
     rpc.receiptStatus = '0x1';
+    rpc.txCount = 0;
+    rpc.txByHash = null;
     rpc.chainIds = [80002];
     rpc.balanceByChain = {};
     rpc.failChains = new Set();
@@ -162,6 +194,11 @@ describe('useStoreGasWallet', () => {
     rpc.code = '0x6080';
     await act(async () => {
       expect(await result.current.withdraw(80002, DEST)).toEqual({ phase: 'rejected', reason: 'contract_recipient' });
+    });
+    // EIP-7702 で委任済みの EOA (MetaMask のスマートアカウント化等) は、コントラクトではなく委任として理由を分ける (D8)
+    rpc.code = `0xef0100${'11'.repeat(20)}`;
+    await act(async () => {
+      expect(await result.current.withdraw(80002, DEST)).toEqual({ phase: 'rejected', reason: 'delegated_recipient' });
     });
     rpc.code = '0x';
     rpc.balance = 1_000n;
@@ -342,6 +379,46 @@ describe('useStoreGasWallet', () => {
     });
     expect(liveStoreGasTopUps(address).map((r) => r.id)).toEqual(['new']); // 新しい記録は補充の欄に任せる
     expect(result.current.chains[0]?.balance).toBe(5n * 10n ** 17n);
+  });
+
+  it('1 日たっても結果の出ない補充: 送り手の nonce が消費されていれば片付ける (元の tx はもう入らない) (A5/G3)', async () => {
+    const { result } = await setup();
+    const address = result.current.address!;
+    rpc.receiptStatus = null;
+    const at = Date.now() - TOPUP_SENT_TTL_MS - 60_000;
+    attachStoreGasTopUpHash({ id: 'stale', address, chainId: 80002, from: DEST, nonce: 7 }, TX as `0x${string}`, at);
+    rpc.txCount = 7; // まだ消費されていない → 残す
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.staleTopUps.map((r) => r.id)).toEqual(['stale']);
+    expect(liveStoreGasTopUps(address)).toHaveLength(0);
+    rpc.txCount = 8; // 消費された (receipt は無い = 置き換え)
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.staleTopUps).toEqual([]);
+    expect(staleStoreGasTopUps(address)).toEqual([]);
+  });
+
+  it('1 日たっても結果の出ない補充: nonce が分からなければ tx を読んで覚える・確かめられなければ警告つきで消せる (記録も片付く)', async () => {
+    const { result } = await setup();
+    const address = result.current.address!;
+    rpc.receiptStatus = null;
+    const at = Date.now() - TOPUP_SENT_TTL_MS - 60_000;
+    attachStoreGasTopUpHash({ id: 'stale', address, chainId: 80002, from: DEST }, TX as `0x${string}`, at);
+    rpc.txByHash = { nonce: 7 };
+    rpc.txCount = 7;
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.staleTopUps[0]).toMatchObject({ id: 'stale', nonce: 7, at });
+    // 消すのは止めない (警告は画面が出す)。消したら、その鍵の記録は片付ける
+    await act(async () => {
+      expect(await result.current.remove()).toBe(true);
+    });
+    expect(staleStoreGasTopUps(address)).toEqual([]);
+    expect(result.current.staleTopUps).toEqual([]);
   });
 
   it('別のタブで鍵を消す・作り直すと読み直す (古いアドレスを見せたままにしない)', async () => {

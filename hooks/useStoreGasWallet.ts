@@ -20,7 +20,15 @@ import {
 import { privateKeyToAccount } from 'viem/accounts';
 import { chainObjectForId, transportForChain } from '@/lib/chains';
 import { storeDeviceChainIds, storeGasWalletChainIds } from '@/lib/storeDevicePayment';
-import { finishStoreGasTopUp, liveStoreGasTopUps } from '@/lib/storeGasTopUp';
+import {
+  STORE_GAS_TOPUP_KEY,
+  finishStoreGasTopUp,
+  liveStoreGasTopUps,
+  noteStoreGasTopUpSender,
+  resolveStoreGasTopUp,
+  staleStoreGasTopUps,
+  type StoreGasTopUpRecord,
+} from '@/lib/storeGasTopUp';
 import {
   STORE_GAS_WITHDRAW_GAS,
   createStoreGasWallet,
@@ -41,6 +49,9 @@ export type WithdrawRejectReason =
   | 'zero_address'
   | 'same_address'
   | 'contract_recipient'
+  // EIP-7702 で委任済みの EOA (MetaMask のスマートアカウント化等)。コントラクトと同じく固定ガス 21,000 では送れないが、
+  // 店主にはウォレットのアドレスに見えるので理由を分ける (D8)。
+  | 'delegated_recipient'
   | 'insufficient'
   | 'read_failed';
 
@@ -121,6 +132,19 @@ export function useStoreGasWallet() {
 
   const address = walletState?.state === 'ok' ? walletState.info.address : null;
 
+  // 送って 1 日たっても結果を確かめられていない補充 (消すのは止めないが、消す前に注意する)。別のタブの記録の変化も読む。
+  const [staleTopUps, setStaleTopUps] = useState<StoreGasTopUpRecord[]>([]);
+  useEffect(() => {
+    setStaleTopUps(address ? staleStoreGasTopUps(address) : []);
+    if (!address) return;
+    const own = address;
+    function onStorage(e: StorageEvent) {
+      if (e.key === STORE_GAS_TOPUP_KEY || e.key === null) setStaleTopUps(staleStoreGasTopUps(own));
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [address]);
+
   // 鍵があるときは、ブラウザに消されにくい保存を頼む (作った直後・開いたとき)。結果は画面の案内に使うだけ。
   const [persisted, setPersisted] = useState<boolean | null>(null);
   useEffect(() => {
@@ -170,20 +194,34 @@ export function useStoreGasWallet() {
     if (gen !== walletGenRef.current) return;
     // 送ってから時間のたった補充の結果を片付ける (補充の欄が出ていない間に取引が入っても、記録を外す = 鍵を消せない
     // 状態を残さない)。新しい記録は補充の欄が結果を出すので触らない (先に片付けて結果の表示を消さない)。
-    for (const op of liveStoreGasTopUps(address)) {
+    // 証拠は receipt と送り手の nonce の消費 (置き換え確定) だけで、時間の経過では片付けない (A5/G3)。1 日たって
+    // 「確かめられていない」に変わった記録も同じに見る (証拠が出れば片付く)。
+    for (const op of [...liveStoreGasTopUps(address), ...staleStoreGasTopUps(address)]) {
       const client = op.hash ? clients.get(op.chainId) : undefined;
       if (!op.hash || !client || Date.now() - op.at < TOPUP_SETTLE_BY_PANEL_MS) continue;
       try {
-        await client.getTransactionReceipt({ hash: op.hash });
-        // 記録を外す前に、そのチェーンの残高を読み直す (入った補充を 0 のまま見せて、注意なしに消させない)。
+        const res = await resolveStoreGasTopUp(client, { ...op, hash: op.hash });
+        if (res.kind === 'pending') {
+          // まだ証拠が無い。記録は残す (補充の画面が結果を見る・次の読み直しで片付ける)。分かった nonce は足す。
+          const { nonce } = res;
+          const { from } = op;
+          if (nonce !== undefined && from) {
+            await withStoreGasWalletLock(async () => noteStoreGasTopUpSender(op.id, { from, nonce }));
+          }
+          continue;
+        }
+        // 記録を外す前に、そのチェーンの残高を読み直す (入った補充 = 置き換え先が同じ宛先の場合を含む = を 0 のまま
+        // 見せて、注意なしに消させない)。
         const [b, g] = await Promise.all([client.getBalance({ address }), client.getGasPrice()]);
         if (gen !== walletGenRef.current) return;
         setReads((prev) => ({ ...prev, [op.chainId]: { balance: b, gasPrice: g, readFailed: false } }));
         await withStoreGasWalletLock(async () => finishStoreGasTopUp(op.id));
       } catch {
-        // まだ見つからない・読めない。記録は残す (補充の画面が結果を見る・次の読み直しで片付ける)。
+        // 読めない (残高の読み直し等)。記録は残す (次の読み直しで片付ける)。
       }
     }
+    if (gen !== walletGenRef.current) return;
+    setStaleTopUps(staleStoreGasTopUps(address));
     // 「不明」の出口: hash があれば receipt で確定/取り消しを確かめる。hash が無い (送信中に切れた) ときは
     // そのチェーンの残高を読めた時点で解除する (残高が残っていれば「消す」の確認で先に戻すよう出る)。
     const unknown = unknownRef.current;
@@ -242,13 +280,19 @@ export function useStoreGasWallet() {
         return false;
       }
       if (liveStoreGasTopUps(current.info.address).length > 0) return false;
-      return removeStoreGasWallet();
+      // 結果を確かめられていない補充 (1 日以上) は止めない (画面が注意を出す)。消したら、その鍵の記録は片付ける
+      // (消した鍵の注意が残り続けない)。
+      const stale = staleStoreGasTopUps(current.info.address);
+      const ok = removeStoreGasWallet();
+      if (ok) for (const r of stale) finishStoreGasTopUp(r.id);
+      return ok;
     });
     // 消えたかどうかは保存状態を読み直して決める (消せなかったのに「未作成」に戻さない)。
     setWalletState(loadStoreGasWallet());
     if (removed) {
       walletGenRef.current += 1;
       setReads({});
+      setStaleTopUps([]);
       setWithdrawStatus({ phase: 'idle' });
     }
     return removed;
@@ -300,7 +344,10 @@ export function useStoreGasWallet() {
                 publicClient.estimateFeesPerGas(),
               ]);
               // 戻し先はウォレット (EOA) に限る (コントラクトは受け取りの処理でガスが 21,000 を超えうる)。
-              if (code && code !== '0x') return reject('contract_recipient');
+              // EIP-7702 の委任 (code = 0xef0100 + 委任先) も同じ理由で送らないが、ウォレットに見えるので理由を分ける (D8)。
+              if (code && code !== '0x') {
+                return reject(code.toLowerCase().startsWith('0xef0100') ? 'delegated_recipient' : 'contract_recipient');
+              }
               fees = estimated;
               value = withdrawableAmount(current, STORE_GAS_WITHDRAW_GAS, fees.maxFeePerGas);
             } catch {
@@ -372,6 +419,7 @@ export function useStoreGasWallet() {
     persisted,
     withdrawStatus,
     removeBlocked,
+    staleTopUps,
     refresh,
     create,
     remove,

@@ -12,6 +12,10 @@
 //   - 結果は receipt で決める。確認が失敗しても途中のまま (tx へのリンクと「結果を確かめ直す」)。取引が失敗
 //     (revert) しても結果として扱う。ウォレットで取り消し・ガス用ウォレット以外への置き換えなら「補充しました」と
 //     言わない。
+//   - 送った tx には送り手と nonce も残す (画面を離れた後も、receipt か nonce の消費で結果を確かめる = 時間の経過で
+//     「入らなかった」と決めない・hooks/useStoreGasWallet.ts)。送信の失敗は、ウォレットで断ったときだけ記録を片付け、
+//     それ以外 (送った後に応答を失った可能性) は「送れたか分からない」として記録を残す (30 分で切れる)。
+//   - 別のタブとの排他 (Web Locks) が無いブラウザでは補充を始めない (記録の読み書きの交差を止められない)。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
@@ -25,7 +29,12 @@ import {
   useWaitForTransactionReceipt,
 } from 'wagmi';
 import { nativeSymbolForChainId, txExplorerUrl } from '@/lib/chains';
-import { loadStoreGasWallet, storeGasFundRange, withStoreGasWalletLock } from '@/lib/storeGasWallet';
+import {
+  hasStoreGasWalletLock,
+  loadStoreGasWallet,
+  storeGasFundRange,
+  withStoreGasWalletLock,
+} from '@/lib/storeGasWallet';
 import {
   STORE_GAS_TOPUP_KEY,
   TOPUP_HEARTBEAT_MS,
@@ -64,7 +73,8 @@ function checkAmount(raw: string, max: string): AmountCheck {
 const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 type Result = { chainId: number; hash: Hex; result: 'success' | 'reverted' | 'cancelled' | 'replaced' };
-type LocalError = 'wallet_changed' | 'storage' | 'busy' | 'failed';
+// unknown = 送れたかどうか分からない (ウォレットで断った以外の失敗・記録は残る)。
+type LocalError = 'wallet_changed' | 'storage' | 'busy' | 'unknown';
 // 置き換えは操作 (記録の id) ごとに持つ (前の操作の置き換えを次の操作に持ち越さない)。
 type Replacement = { id: string; reason: 'cancelled' | 'replaced' | 'repriced'; to: Address | null; value: bigint };
 type Watched = StoreGasTopUpRecord & { hash: Hex };
@@ -129,6 +139,11 @@ export function StoreGasWalletTopUp({
   const { switchChain, isPending: isSwitching } = useSwitchChain();
   const { data: balance } = useBalance({ address: wallet, chainId: target?.chainId });
   const { sendTransactionAsync } = useSendTransaction();
+  // 別のタブとの排他が使えるか (描画後に読む = server と初回 client の描画を揃える)。null = まだ読んでいない。
+  const [locksOk, setLocksOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    setLocksOk(hasStoreGasWalletLock());
+  }, []);
   const watching: Watched | null = op?.hash ? (op as Watched) : localSent;
   const receipt = useWaitForTransactionReceipt({
     hash: watching?.hash,
@@ -136,13 +151,22 @@ export function StoreGasWalletTopUp({
     onReplaced: (r) => {
       if (!watching) return;
       replacedRef.current = { id: watching.id, reason: r.reason, to: r.transaction.to, value: r.transaction.value };
-      // 置き換え先の tx を記録に残す (置き換え先が失敗 = revert しても、その receipt で結果を出せる)。
-      const next = { id: watching.id, address: gasAddress, chainId: watching.chainId };
+      // 置き換え先の tx を記録に残す (置き換え先が失敗 = revert しても、その receipt で結果を出せる)。送り手と nonce も
+      // 置き換え先のもの (同じ送り手・同じ nonce)。
+      const next = {
+        id: watching.id,
+        address: gasAddress,
+        chainId: watching.chainId,
+        from: r.transaction.from,
+        nonce: r.transaction.nonce,
+      };
       void withStoreGasWalletLock(async () => attachStoreGasTopUpHash(next, r.transaction.hash)).then(reload);
       if (localSent?.id === watching.id) setLocalSent({ ...localSent, hash: r.transaction.hash });
     },
   });
   const publicClient = usePublicClient({ chainId: watching?.chainId });
+  // 送るチェーンの RPC (送った tx の nonce を読む)。
+  const sendClient = usePublicClient({ chainId: target?.chainId });
 
   const pending = submitting || op !== null || localSent !== null;
   useEffect(() => {
@@ -206,7 +230,9 @@ export function StoreGasWalletTopUp({
   const wrongChain = isConnected && walletChainId !== target.chainId;
   const sameAddress = !!wallet && same(wallet, gasAddress);
   const insufficient = check.ok && balance !== undefined && check.wei > balance.value;
-  const canSend = isConnected && !wrongChain && !sameAddress && check.ok && !insufficient && !pending;
+  // 排他 (Web Locks) が無いブラウザでは始めない (二重に送る・記録を失うのを止められない・G11)。
+  const canSend =
+    locksOk === true && isConnected && !wrongChain && !sameAddress && check.ok && !insufficient && !pending;
 
   async function onSend() {
     // 押した瞬間に止める (描画やロック待ちの間の二度押しで 2 回送らない)。
@@ -240,8 +266,16 @@ export function StoreGasWalletTopUp({
       let keepHeartbeat = false;
       try {
         const hash = await sendTransactionAsync({ to: gasAddress, value, chainId: sendChainId });
+        // 送った tx の nonce (receipt が無くても、nonce の消費で「もう入らない」を確かめるため)。読めなくても送る本体は
+        // 止めない (RPC にまだ届いていない等・後の読み直しで足す)。
+        let nonce: number | undefined;
+        try {
+          nonce = (await sendClient?.getTransaction({ hash }))?.nonce;
+        } catch {
+          // 付帯の読み取り。失敗を本体に波及させない。
+        }
         const saved = await withStoreGasWalletLock(async () =>
-          attachStoreGasTopUpHash({ id, address: gasAddress, chainId: sendChainId }, hash),
+          attachStoreGasTopUpHash({ id, address: gasAddress, chainId: sendChainId, from: wallet, nonce }, hash),
         );
         if (!saved) {
           // tx を記録に残せない。この画面で見張り、確認中の記録を延ばし続ける (届く途中の宛先を消させない)。
@@ -250,9 +284,14 @@ export function StoreGasWalletTopUp({
           keepHeartbeat = true;
         }
       } catch (e) {
-        // 送っていない (ウォレットで断った・送る前の失敗)。記録を片付ける。
-        await withStoreGasWalletLock(async () => finishStoreGasTopUp(id));
-        if (!isUserRejection(e)) setLocalError('failed');
+        if (isUserRejection(e)) {
+          // 送っていない (ウォレットで断った)。記録を片付ける。
+          await withStoreGasWalletLock(async () => finishStoreGasTopUp(id));
+        } else {
+          // 送れたかどうか分からない (送った後に hash の応答を失った可能性がある)。記録は残し (30 分で切れる)、その間は
+          // 同じ宛先への補充と鍵の削除を止める (届く途中の宛先の鍵を消させない・A5/G2)。
+          setLocalError('unknown');
+        }
       } finally {
         if (!keepHeartbeat) clearInterval(heartbeat);
         reload();
@@ -272,7 +311,13 @@ export function StoreGasWalletTopUp({
     : insufficient && !pending
       ? t('topUpError.insufficient', { symbol })
       : null;
-  const error = localError ? t(`topUpError.${localError}`) : inputError;
+  const error = localError
+    ? t(`topUpError.${localError}`)
+    : locksOk === false
+      ? t('topUpError.no_locks')
+      : inputError;
+  // 「送れたか分からない」の記録を残している間は、「ウォレットで確認してください…」を出さない (確認中ではない)。
+  const unknownHere = localError === 'unknown';
 
   const txLink = (chain: number, hash: Hex) => (
     <a href={txExplorerUrl(chain, hash)} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2">
@@ -354,7 +399,7 @@ export function StoreGasWalletTopUp({
               {error}
             </p>
           )}
-          {!watching && pending && (
+          {!watching && pending && !unknownHere && (
             <p role="status" className="text-slate-600">
               {approvingHere ? t('topUpConfirmInWallet') : t('topUpApprovingElsewhere')}
             </p>

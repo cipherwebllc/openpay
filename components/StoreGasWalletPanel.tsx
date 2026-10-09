@@ -122,7 +122,8 @@ export function StoreGasWalletPanel({
     (ws.reason === 'invalid_address' ||
       ws.reason === 'zero_address' ||
       ws.reason === 'same_address' ||
-      ws.reason === 'contract_recipient');
+      ws.reason === 'contract_recipient' ||
+      ws.reason === 'delegated_recipient');
 
   function refreshAfterTopUp() {
     void g.refresh();
@@ -172,6 +173,15 @@ export function StoreGasWalletPanel({
               : t('storeGasWallet.removeConfirm')}
             {unread && ` ${t('storeGasWallet.removeConfirmUnread')}`}
           </p>
+          {g.staleTopUps.length > 0 && (
+            // 送って 1 日たっても結果を確かめられていない補充 (まだ入りうる)。消すのは止めないが、取引を見てから決められるようにする。
+            <p className="mt-1">
+              {t('storeGasWallet.removeConfirmTopUpUnresolved')}{' '}
+              {g.staleTopUps.map((r) => (
+                <span key={r.id}>{r.hash && txLink(r.chainId, r.hash)} </span>
+              ))}
+            </p>
+          )}
           <div className="mt-2 flex gap-2">
             <button
               type="button"
