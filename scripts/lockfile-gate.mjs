@@ -85,6 +85,20 @@ const packageNameOf = (path) => {
   const at = path.lastIndexOf('node_modules/');
   return at === -1 ? path : path.slice(at + 'node_modules/'.length);
 };
+// 実際に取ってくる tarball のパッケージ名 (https://registry.npmjs.org/<name>/-/<file>.tgz の <name>)。
+// path の名前は依存の宣言側が付ける名前なので、npm の別名 ("esbuild": "npm:evil@1.0.0") で allowlist の名前を名乗った
+// 別のパッケージを install script ごと通しうる。allowlist は取得元の名前とも一致したときだけ効かせる。
+const registryNameOf = (resolved) => {
+  if (typeof resolved !== 'string' || !resolved.startsWith(ALLOWED_PREFIX)) return null;
+  const rest = resolved.slice(ALLOWED_PREFIX.length);
+  const at = rest.indexOf('/-/');
+  if (at <= 0) return null;
+  try {
+    return decodeURIComponent(rest.slice(0, at));
+  } catch {
+    return null;
+  }
+};
 
 for (const file of npmrcs) {
   const lines = readFileSync(file, 'utf8').split(/\r\n|[\r\n]/);
@@ -116,6 +130,18 @@ for (const file of lockfiles) {
             '(scripts/lib/installScriptAllowlist.mjs). Review the package before adding it (CLAUDE.md 掟 16).',
         );
         bad++;
+      } else {
+        // allowlist の名前でも、別名 (lockfile の name が違う) や別パッケージの tarball・取得元の分からない実体は通さない。
+        const fetchedName = registryNameOf(pkg.resolved);
+        const declaredName = typeof pkg.name === 'string' ? pkg.name : packageName;
+        if (fetchedName !== packageName || declaredName !== packageName) {
+          console.error(
+            `NG ${file}: ${name} has an install script and is allowlisted by name, but the package actually fetched is ` +
+              `${fetchedName ?? '(no official registry tarball)'} (lockfile name: ${declaredName}). ` +
+              'An npm alias or a non-registry source cannot borrow an allowlisted name (CLAUDE.md 掟 16).',
+          );
+          bad++;
+        }
       }
     }
     const resolved = pkg.resolved;

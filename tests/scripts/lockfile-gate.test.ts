@@ -163,7 +163,10 @@ describe('lockfile-gate CLI', () => {
     function lockWith(entries: Record<string, Record<string, unknown>>) {
       const packages: Record<string, Record<string, unknown>> = { '': {} };
       for (const [path, extra] of Object.entries(entries)) {
-        packages[path] = { resolved: `${OFFICIAL}x/-/x-1.0.0.tgz`, ...extra };
+        // 取得元の tarball は path のパッケージ名どおり (別名でない通常の依存)。
+        const name = path.slice(path.lastIndexOf('node_modules/') + 'node_modules/'.length);
+        const file = name.slice(name.lastIndexOf('/') + 1);
+        packages[path] = { resolved: `${OFFICIAL}${name}/-/${file}-1.0.0.tgz`, ...extra };
       }
       return JSON.stringify({ lockfileVersion: 3, packages });
     }
@@ -192,6 +195,27 @@ describe('lockfile-gate CLI', () => {
       expect(result.stderr).toContain(path);
       expect(result.stderr).toContain('install script');
       expect(result.stderr).toContain('INSTALL_SCRIPT_ALLOWLIST');
+    });
+
+    // npm の別名 ("esbuild": "npm:evil-postinstall@1.0.0") は path が allowlist の名前のまま、実体は別パッケージになる。
+    it.each([
+      ['a tarball of another package', { resolved: `${OFFICIAL}evil-postinstall/-/evil-postinstall-1.0.0.tgz` }],
+      ['an aliased lockfile name', { name: 'evil-postinstall' }],
+      ['a scoped package tarball', { resolved: `${OFFICIAL}@evil/esbuild/-/esbuild-1.0.0.tgz` }],
+      ['no resolved tarball', { resolved: undefined }],
+    ])('rejects an allowlisted name whose install script entry is %s', (_label, extra) => {
+      fixture('package-lock.json', lockWith({ 'node_modules/esbuild': { hasInstallScript: true, ...extra } }));
+      const result = runGate();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('node_modules/esbuild');
+      expect(result.stderr).toContain('allowlisted by name');
+    });
+
+    it('accepts an allowlisted scoped package fetched under its own (URL-encoded) name', () => {
+      fixture('package-lock.json', lockWith({
+        'node_modules/@parcel/watcher': { hasInstallScript: true, resolved: `${OFFICIAL}@parcel%2fwatcher/-/watcher-2.5.6.tgz` },
+      }));
+      expect(runGate().status).toBe(0);
     });
 
     it('rejects a workspace package (no node_modules/ in its path) that gains an install script', () => {
