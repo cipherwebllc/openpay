@@ -467,6 +467,42 @@ export function decodeBurnMessageBody(body: Hex) {
   };
 }
 
+/** 第 7 回レビュー A2: 宛先 mint (receiveMessage) の receipt が送った hash と別 tx (同じ nonce の置換 =
+ *  wallet の高速化 / 取消) で返ったとき、その置換 tx が同内容かを置換 tx 自身の log だけで判定する。
+ *  - MessageTransmitter の MessageReceived が「この message」(header の nonce・source domain 一致) を受信した
+ *  - TokenMessenger の MintAndWithdraw が期待 recipient へ、手数料込みで期待額 (= burn 額) を mint した
+ *  の両方があるときだけ true。取消 (log なし)・別内容・malformed は false (mint 成功にしない)。 */
+export function cctpReceiptShowsMint(
+  logs: readonly { address: Address; topics: readonly Hex[]; data: Hex }[],
+  expected: { message: Hex; recipient: Address; amount: bigint },
+): boolean {
+  // V2 message header = version(4) sourceDomain(4) destinationDomain(4) nonce(32) … の計 148 bytes。
+  if (size(expected.message) < 148) return false;
+  const sourceDomain = Number(BigInt(slice(expected.message, 4, 8)));
+  const nonce = slice(expected.message, 12, 44).toLowerCase();
+  let received = false;
+  let minted = false;
+  for (const log of logs) {
+    const address = log.address.toLowerCase();
+    const topics = log.topics as [Hex, ...Hex[]];
+    try {
+      if (address === CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS.toLowerCase() &&
+          topics[0] === CCTP_MESSAGE_RECEIVED_TOPIC0) {
+        const { args } = decodeEventLog({ abi: [CCTP_MESSAGE_RECEIVED_EVENT], data: log.data, topics });
+        if (args.nonce.toLowerCase() === nonce && args.sourceDomain === sourceDomain) received = true;
+      } else if (address === CCTP_V2_TOKEN_MESSENGER_ADDRESS.toLowerCase() &&
+          topics[0] === CCTP_MINT_AND_WITHDRAW_TOPIC0) {
+        const { args } = decodeEventLog({ abi: [CCTP_MINT_AND_WITHDRAW_EVENT], data: log.data, topics });
+        if (args.mintRecipient.toLowerCase() === expected.recipient.toLowerCase() &&
+            args.amount + args.feeCollected === expected.amount) minted = true;
+      }
+    } catch {
+      // malformed log を「同内容の mint」の証拠にしない (成功側へ倒さない)。
+    }
+  }
+  return received && minted;
+}
+
 /** bounded scan、カーソルは成功した窓のみ進める。RPC 障害を「mint なし」にしない。 */
 export async function findForwardMintByNonce(destClient: PublicClient, args: {
   nonce: Hex; sourceDomain: CircleDomain; fromBlock: bigint;

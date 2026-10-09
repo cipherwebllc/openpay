@@ -35,13 +35,27 @@ const receiptMocks = {
   byHash: new Map<
     Hex,
     {
-      data: { status: 'success' | 'reverted'; blockNumber: bigint } | undefined;
+      // 実際の viem receipt の形 (送った tx の receipt は transactionHash = 送信 hash)。
+      data:
+        | {
+            status: 'success' | 'reverted';
+            blockNumber: bigint;
+            transactionHash: Hex;
+            from: Address;
+            logs: [];
+          }
+        | undefined;
       error: Error | null;
       isSuccess: boolean;
       isError: boolean;
       refetch: ReturnType<typeof vi.fn>;
     }
   >(),
+};
+
+// useStandardPayment は receipt query error のときだけ生の receipt を引く (第 7 回レビュー A4)。
+const publicClientMock = {
+  getTransactionReceipt: vi.fn(),
 };
 
 let writeCallIdx = 0;
@@ -51,6 +65,7 @@ const readContractMock = vi.fn();
 
 vi.mock('wagmi', () => ({
   useAccount: () => accountMock(),
+  usePublicClient: () => publicClientMock,
   useReadContract: () => readContractMock(),
   useSwitchChain: () => ({ switchChain: switchChainMock, isPending: false }),
   useConnect: () => ({
@@ -244,7 +259,13 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
     // merchant receipt 確定 (status=success) → fee=0 なので fee tx を skip して success
     act(() => {
       receiptMocks.byHash.set(MERCHANT_TX, {
-        data: { status: 'success', blockNumber: 100n },
+        data: {
+          status: 'success',
+          blockNumber: 100n,
+          transactionHash: MERCHANT_TX,
+          from: CUSTOMER,
+          logs: [],
+        },
         error: null,
         isSuccess: true,
         isError: false,
@@ -274,7 +295,13 @@ describe('PaymentForm + real useStandardPayment (wagmi のみ mock)', () => {
     act(() => {
       writeMocks.merchant.data = MERCHANT_TX;
       receiptMocks.byHash.set(MERCHANT_TX, {
-        data: { status: 'success', blockNumber: 100n },
+        data: {
+          status: 'success',
+          blockNumber: 100n,
+          transactionHash: MERCHANT_TX,
+          from: CUSTOMER,
+          logs: [],
+        },
         error: null,
         isSuccess: true,
         isError: false,

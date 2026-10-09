@@ -37,7 +37,7 @@ const { publicClientFor, publicClients, connection, wallet, switchChainAsync, ga
       : { hash: blockHash, number: '0x01', l1BlockNumber: '0x01' }),
     getLogs: vi.fn(async () => gatewayMint.hash ? [{ transactionHash: gatewayMint.hash, blockHash, blockNumber: 1n, removed: false }] : []),
     getTransactionReceipt: vi.fn().mockResolvedValue({ status: 'success', logs: [] }),
-    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: `0x${string}` }) => { gatewayMint.hash = hash; return { status: 'success' }; }),
+    waitForTransactionReceipt: vi.fn(async ({ hash }: { hash: `0x${string}` }) => { gatewayMint.hash = hash; return { status: 'success', transactionHash: hash }; }),
   });
   const publicClients = new Map<number, ReturnType<typeof makeClient>>();
   const publicClientFor = (chainId: number) => {
