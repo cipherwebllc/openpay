@@ -163,6 +163,9 @@ export function MobileOrderBuilder({
   const discount = draftDiscount(draft);
   const discountInvalid =
     draft.discountKind !== 'none' && draft.discountValue.trim() !== '' && discount === undefined;
+  // 種類を選んだのに値が空・範囲外なら公開させない (値引きを付けたつもりの店に、値引きなしの公開をさせない・
+  // 公開中の値引きを黙って外さない)。レジ・決済QR が不正な値引きで QR を出さないのと同じ。
+  const discountBlocksPublish = draft.discountKind !== 'none' && discount === undefined;
 
   // @handle 公開用の店舗固有部分。受取先は @handle が権威だが、店名/アイコン/SNS は
   // ビルダーの設定をそのまま公開ページへ載せる (https 検証は validateStorefrontParts が行う)。
@@ -308,6 +311,7 @@ export function MobileOrderBuilder({
                 accepting={draft.acceptingOrders}
                 onToggleAccepting={() => update({ acceptingOrders: !draft.acceptingOrders })}
                 barSlots={[barSlot, desktopBarSlot]}
+                {...(discountBlocksPublish ? { blockedReason: t('barReasonDiscount') } : {})}
               />
             </div>
           )}

@@ -2853,6 +2853,7 @@
     "barReasonSignIn": "Sign in to publish",
     "barReasonNoHandle": "Get an @handle to publish",
     "barReasonNoMenu": "Add an item in Register to publish",
+    "barReasonDiscount": "Fix the discount or choose None",
     "barReceiverWillChange": "The receiver will change",
     "acceptingApplyNote": "Tap “Update” to apply this to your shop page.",
     "autoLoaded": "Loaded your published shop onto this device.",

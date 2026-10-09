@@ -73,6 +73,7 @@ function renderPanel(
     canAutoLoad: boolean;
     accepting: boolean;
     onToggleAccepting: () => void;
+    blockedReason: string;
     qc: QueryClient;
   }> = {},
 ) {
@@ -91,6 +92,7 @@ function renderPanel(
         accepting={props.accepting}
         onToggleAccepting={props.onToggleAccepting}
         barSlots={[slot]}
+        blockedReason={props.blockedReason}
       />
     </QueryClientProvider>,
   );
@@ -586,6 +588,20 @@ describe('StorefrontPublishPanel', () => {
     expect(await screen.findByText(/公開するには有効な JPYC 商品/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '公開する' })).toBeDisabled();
     expect(screen.getByText('レジで商品を 1 つ追加すると公開できます')).toBeInTheDocument();
+  });
+
+  it('下書きに直すところ (値引きが範囲外など) があれば、公開ボタンを無効化して理由を出す', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ handles: [{ handle: 'shop', config: CFG }] }),
+      }),
+    );
+    renderPanel({ blockedReason: '値引きを直すか「なし」にしてください' });
+    expect(await screen.findByText('値引きを直すか「なし」にしてください')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '公開する' })).toBeDisabled();
   });
 
   it('HandleClaim が先に埋めた {handles,max} 形の共有 cache を読んでも落ちない (キー共有・回帰)', async () => {

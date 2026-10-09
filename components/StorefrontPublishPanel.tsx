@@ -44,6 +44,7 @@ export function StorefrontPublishPanel({
   accepting,
   onToggleAccepting,
   barSlots = [],
+  blockedReason,
 }: {
   /** 公開する店舗固有部分。メニュー未充足など公開不可なら null (公開ボタンを無効化)。 */
   storefront: StorefrontParts | null;
@@ -65,6 +66,8 @@ export function StorefrontPublishPanel({
   /** 公開ボタンの帯を描く場所 (スマホ: ビルダーの末尾の sticky な枠 / PC: プレビューの下)。同じ公開処理を
    *  どこからでも押せるよう、この部品がそこへ描く。 */
   barSlots?: ReadonlyArray<HTMLElement | null>;
+  /** 下書きに直すところがあり公開させないときの理由 (例: 値引きが範囲外)。無ければ従来どおり。 */
+  blockedReason?: string;
 }) {
   const t = useTranslations('MobileOrder');
   const locale = useLocale();
@@ -237,7 +240,8 @@ export function StorefrontPublishPanel({
   const publishedAccepting = selectedHandle?.storefront
     ? selectedHandle.storefront.acceptingOrders !== false
     : null;
-  const canPublish = isSignedIn && !!storefront && !!selectedHandle && !publish.isPending;
+  const canPublish =
+    isSignedIn && !!storefront && !!selectedHandle && !publish.isPending && !blockedReason;
   const publishLabel = publish.isPending
     ? t('publishing')
     : selectedHandle?.storefront
@@ -254,7 +258,7 @@ export function StorefrontPublishPanel({
           ? t('barReasonNoHandle')
           : !storefront
             ? t('barReasonNoMenu')
-            : null;
+            : (blockedReason ?? null);
   const barStatus = hasUnpublishedChanges
     ? t('publishStatusUnpublishedChanges')
     : selectedHandle?.storefront
