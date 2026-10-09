@@ -21,6 +21,7 @@ import {
   payerReceiptToJson,
   type PayerReceipt,
 } from '@/lib/payerReceipt';
+import { SUMMARY_CASES } from '../_helpers/payerReceiptSummaryCases';
 
 const NOW = new Date('2026-06-04T01:42:00.000Z');
 const TX = `0x${'a'.repeat(64)}`;
@@ -435,5 +436,61 @@ describe('PayerReceiptDetail — インボイス (適格簡易請求書) の記�
     render(<PayerReceiptDetail receipt={invoiceReceipt({ asset: 'usdc' })} />);
     expect(screen.queryByText('登録番号')).toBeNull();
     expect(screen.queryByRole('link', { name: '登録番号を国税庁の公表サイトで確かめる' })).toBeNull();
+  });
+});
+
+// 第 7 回レビュー F20 の characterization: 合計欄 (小計 → 値引き → 税率ごと | 消費税 → 合計) の出し分け。
+// コピー文 (tests/lib/payerReceiptAssembly.test.ts) と同じ代表例で、画面の行をここで固定する。
+describe('PayerReceiptDetail — 合計欄の出し分け (characterization)', () => {
+  const expected: Record<string, { rows: string[][]; reducedNote: boolean }> = {
+    '税なし・値引きなし': { rows: [['合計', '4000 JPYC']], reducedNote: false },
+    '税あり・値引きなし': {
+      rows: [['小計', '4000 JPYC'], ['消費税', '364 JPYC'], ['合計', '4000 JPYC']],
+      reducedNote: false,
+    },
+    '値引き + 税 (インボイスなし)': {
+      rows: [['小計', '1000 JPYC'], ['値引き', '−20 JPYC'], ['消費税', '82 JPYC'], ['合計', '980 JPYC']],
+      reducedNote: false,
+    },
+    '値引き + インボイス': {
+      rows: [
+        ['小計', '1000 JPYC'],
+        ['値引き', '−20 JPYC'],
+        ['10% 対象', '588 JPYC (うち消費税 53 円)'],
+        ['8% 対象', '392 JPYC (うち消費税 29 円)'],
+        ['合計', '980 JPYC'],
+      ],
+      reducedNote: true,
+    },
+    'インボイス (軽減税率あり)・値引きなし': {
+      rows: [
+        ['10% 対象', '1100 JPYC (うち消費税 100 円)'],
+        ['8% 対象', '540 JPYC (うち消費税 40 円)'],
+        ['非課税・対象外', '0 JPYC'],
+        ['合計', '1640 JPYC'],
+      ],
+      reducedNote: true,
+    },
+    '値引きあり・税なし': {
+      rows: [['小計', '1000 JPYC'], ['値引き', '−20 JPYC'], ['合計', '980 JPYC']],
+      reducedNote: false,
+    },
+    '小計の無い旧い控え (税あり)': { rows: [['消費税', '364 JPYC'], ['合計', '4000 JPYC']], reducedNote: false },
+    '小計の無い旧い控え (値引きあり)': {
+      rows: [['値引き', '−20 JPYC'], ['消費税', '82 JPYC'], ['合計', '980 JPYC']],
+      reducedNote: false,
+    },
+  };
+
+  it.each(SUMMARY_CASES)('%s', (name, make) => {
+    const { container } = render(<PayerReceiptDetail receipt={make()} />);
+    const total = within(container).getByText('合計', { selector: 'dt' });
+    const dl = total.closest('dl') as HTMLElement;
+    const rows = Array.from(dl.children).map((row) => [
+      row.querySelector('dt')?.textContent ?? '',
+      row.querySelector('dd')?.textContent ?? '',
+    ]);
+    expect(rows).toEqual(expected[name].rows);
+    expect(screen.queryByText('※ は軽減税率 (8%) の対象です。') !== null).toBe(expected[name].reducedNote);
   });
 });

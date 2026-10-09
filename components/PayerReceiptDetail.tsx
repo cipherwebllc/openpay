@@ -18,8 +18,8 @@ import {
   payerReceiptCopyText,
   payerReceiptCsv,
   payerReceiptCsvFilename,
-  payerReceiptHasTax,
   payerReceiptJsonFilename,
+  payerReceiptSummaryRows,
   payerReceiptToJson,
   type PayerReceipt,
   type PayerReceiptStatus,
@@ -39,6 +39,13 @@ export const STATUS_I18N_KEY = {
   failed: 'statusFailed',
   unknown: 'statusUnknown',
 } as const satisfies Record<PayerReceiptStatus, string>;
+
+// 合計欄の金額行の見出し (messages の PayerReceipt namespace)。
+const SUMMARY_LABEL_KEY = {
+  subtotal: 'subtotalLabel',
+  discount: 'discountLabel',
+  tax: 'taxLabel',
+} as const;
 
 const ACTION_BTN_CLASS =
   'rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand hover:text-brand-dark';
@@ -62,7 +69,6 @@ export function PayerReceiptDetail({
 
   const items = receipt.lineItems ?? [];
   const currency = receipt.currency;
-  const hasTax = payerReceiptHasTax(receipt);
   // インボイス (適格簡易請求書) の記載事項を出せる控えだけ非 null。出せない控えは従来表示のまま。
   const invoice = invoiceReceiptView(receipt);
   const payerExplorerUrl =
@@ -203,66 +209,42 @@ export function PayerReceiptDetail({
         </div>
       )}
 
-      {/* 合計欄。インボイス欄を出せる控えは税率ごとの税込合計と消費税額 (円・税率ごとに 1 回の端数処理)。
-          それ以外は税額が計上されているときだけ小計/消費税を併記 (0 のときは合計のみ)。
-          消費税の合計 (totalTaxAmount) とインボイスの税額を同じ控えに並べない (修正前に保存された控えは行ごとに丸めた合計で、
-          数字が食い違うため)。 */}
+      {/* 合計欄 (小計 → 値引き → 税率ごと | 消費税 → 合計)。出し分けはコピー文と共有 (payerReceiptSummaryRows)。 */}
       <dl className="mt-3 space-y-0.5 text-xs">
-        {/* レジの値引き: 小計 (値引き前) → 値引き。以下の税率ごとの額・合計は値引き後。 */}
-        {receipt.discountAmount && (
-          <>
-            {receipt.subtotalAmount && (
-              <div className="flex justify-between">
-                <dt className="text-slate-500">{t('subtotalLabel')}</dt>
+        {payerReceiptSummaryRows(receipt, invoice).map((row) => {
+          if (row.kind === 'total') {
+            return (
+              <div key="total" className="flex justify-between text-sm font-semibold text-slate-900">
+                <dt>{t('totalLabel')}</dt>
                 <dd className="font-mono">
-                  {receipt.subtotalAmount} {currency}
+                  {row.amount} {currency}
                 </dd>
               </div>
-            )}
-            <div className="flex justify-between">
-              <dt className="text-slate-500">{t('discountLabel')}</dt>
-              <dd className="font-mono">
-                −{receipt.discountAmount} {currency}
-              </dd>
-            </div>
-          </>
-        )}
-        {invoice &&
-          invoice.groups.map((g) => (
-            <div key={g.rate} className="flex flex-wrap justify-between gap-x-2">
-              <dt className="text-slate-500">
-                {g.rate === 0 ? t('invoiceExemptGroup') : t('invoiceRateGroup', { rate: g.rate })}
-              </dt>
-              <dd className="font-mono">
-                {g.total} {currency}
-                {g.rate !== 0 && ` (${t('invoiceRateGroupTax', { tax: g.tax })})`}
-              </dd>
-            </div>
-          ))}
-        {!invoice && hasTax && (
-          <>
-            {receipt.subtotalAmount && !receipt.discountAmount && (
-              <div className="flex justify-between">
-                <dt className="text-slate-500">{t('subtotalLabel')}</dt>
+            );
+          }
+          if (row.kind === 'invoiceGroup') {
+            return (
+              <div key={`group-${row.rate}`} className="flex flex-wrap justify-between gap-x-2">
+                <dt className="text-slate-500">
+                  {row.rate === 0 ? t('invoiceExemptGroup') : t('invoiceRateGroup', { rate: row.rate })}
+                </dt>
                 <dd className="font-mono">
-                  {receipt.subtotalAmount} {currency}
+                  {row.total} {currency}
+                  {row.rate !== 0 && ` (${t('invoiceRateGroupTax', { tax: row.tax })})`}
                 </dd>
               </div>
-            )}
-            <div className="flex justify-between">
-              <dt className="text-slate-500">{t('taxLabel')}</dt>
+            );
+          }
+          return (
+            <div key={row.kind} className="flex justify-between">
+              <dt className="text-slate-500">{t(SUMMARY_LABEL_KEY[row.kind])}</dt>
               <dd className="font-mono">
-                {receipt.totalTaxAmount} {currency}
+                {row.kind === 'discount' && '−'}
+                {row.amount} {currency}
               </dd>
             </div>
-          </>
-        )}
-        <div className="flex justify-between text-sm font-semibold text-slate-900">
-          <dt>{t('totalLabel')}</dt>
-          <dd className="font-mono">
-            {receipt.totalAmount ?? receipt.amount} {currency}
-          </dd>
-        </div>
+          );
+        })}
       </dl>
       {invoice?.hasReducedRate && (
         <p className="mt-1 text-[11px] text-slate-500">{t('invoiceReducedNote')}</p>
