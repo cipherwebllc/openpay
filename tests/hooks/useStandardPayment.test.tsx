@@ -64,6 +64,8 @@ const useWaitMockState = {
 // hook が receipt query に渡した onReplaced (hash ごと) と、有効にした query の hash。
 const onReplacedByHash = new Map<Hex, ((replacement: unknown) => void) | undefined>();
 const receiptQueryHashes = new Set<Hex>();
+// hash ごとの最後の query.enabled (確定失敗の後に元 hash の照会を止めたかを見る)。
+const receiptQueryEnabled = new Map<Hex, boolean>();
 // useWriteContract は 2 回呼ばれる (merchant / fee 用)。順序で振り分け。
 let writeCallCount = 0;
 vi.mock('wagmi', () => ({
@@ -95,6 +97,7 @@ vi.mock('wagmi', () => ({
     if (hash !== undefined) {
       onReplacedByHash.set(hash, onReplaced);
       if (query?.enabled) receiptQueryHashes.add(hash);
+      receiptQueryEnabled.set(hash, !!query?.enabled);
     }
     // hash の値で a / b を識別 (merchant tx と fee tx で別)。置換先の hash も同じ試行の receipt。
     if (
@@ -238,6 +241,7 @@ function resetMocks() {
   writeCallCount = 0;
   onReplacedByHash.clear();
   receiptQueryHashes.clear();
+  receiptQueryEnabled.clear();
   useWriteContractMockA.writeContract = vi.fn();
   useWriteContractMockA.reset = vi.fn();
   useWriteContractMockB.writeContract = vi.fn();
@@ -1552,6 +1556,36 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
     expect(useWriteContractMockA.writeContract).toHaveBeenCalledTimes(2);
   });
 
+  // #764 Codex P2/P3: 取消・別内容の確定は試行に結び付けて保ち、確定後は元 hash の照会を止める。
+  it('取消の確定後に再照会が RPC error になっても unknown に戻さず、元 hash の receipt 照会は止める', async () => {
+    const { result, rerender } = await renderReadyStandardPayment();
+    act(() => result.current.mutate(params));
+    act(() => {
+      useWriteContractMockState.a.data = MERCHANT_TX;
+      useWaitMockState.a.data = minedReceipt(MERCHANT_REPLACEMENT_TX, 100n);
+      useWaitMockState.a.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('merchant-error'));
+    // 確定後は元 hash の receipt を照会し直さない (消えた元 tx を retry・再接続で待ち続けない)。
+    rerender();
+    expect(receiptQueryEnabled.get(MERCHANT_TX)).toBe(false);
+    // 再接続の再照会が RPC error になった (isSuccess が落ちる) としても確定は消えない。
+    act(() => {
+      useWaitMockState.a.data = undefined;
+      useWaitMockState.a.isSuccess = false;
+      useWaitMockState.a.error = new Error('rpc timeout');
+      useWaitMockState.a.isError = true;
+    });
+    rerender();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.phase).toBe('merchant-error');
+    act(() => result.current.mutate(params));
+    expect(useWriteContractMockA.writeContract).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ['別の宛先', transferLog(OTHER_CUSTOMER, 9_950_000n)],
     ['別の金額', transferLog(MERCHANT, 9_949_999n)],
@@ -1728,6 +1762,36 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
     });
     expect(useWriteContractMockB.writeContract).toHaveBeenCalledTimes(2);
     expect(useWriteContractMockA.writeContract).toHaveBeenCalledOnce();
+  });
+
+  it('fee の取消の確定後に再照会が RPC error になっても fee-unknown に戻さず、元 hash の照会を止め、fee 再送は開いたまま (#764 P2/P3)', async () => {
+    global.fetch = vi.fn().mockResolvedValue(new Response('{}'));
+    const { result, rerender } = await confirmMerchantThenSendFee();
+    act(() => {
+      useWriteContractMockState.b.data = FEE_TX;
+      useWaitMockState.b.data = minedReceipt(FEE_REPLACEMENT_TX, 101n);
+      useWaitMockState.b.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('fee-error'));
+    rerender();
+    expect(receiptQueryEnabled.get(FEE_TX)).toBe(false);
+    act(() => {
+      useWaitMockState.b.data = undefined;
+      useWaitMockState.b.isSuccess = false;
+      useWaitMockState.b.error = new Error('rpc timeout');
+      useWaitMockState.b.isError = true;
+    });
+    rerender();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.phase).toBe('fee-error');
+    act(() => {
+      useWriteContractMockState.b.error = null;
+      result.current.retryFee();
+    });
+    expect(useWriteContractMockB.writeContract).toHaveBeenCalledTimes(2);
   });
 
   it('fee tx の同内容置換は success・feeTxHash とレジ通知は実際に mine された hash', async () => {

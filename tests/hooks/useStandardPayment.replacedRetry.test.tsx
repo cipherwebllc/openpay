@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor as rtlWaitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   createConfig,
@@ -213,6 +213,10 @@ vi.mock('@/lib/paymentLog', () => ({
 }));
 
 import { useStandardPayment } from '@/hooks/useStandardPayment';
+
+// 実際の viem の polling (pollingInterval 10ms) と TanStack Query を走らせるので、full suite の負荷下では既定の
+// 1 秒を超えうる (単体では通るが並走で時間切れになって揺れた)。待ちの上限だけ広げる (判定の条件は変えない)。
+const waitFor: typeof rtlWaitFor = (callback, options) => rtlWaitFor(callback, { timeout: 5_000, ...options });
 
 const params = {
   tokenAddress: TOKEN,
