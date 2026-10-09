@@ -244,15 +244,15 @@ function RegisterModeContent({
     resolveJpycGaslessProvider(deployment, deployment.chainId) ===
       'eip3009-relay' &&
     jpycForwarderFor(deployment.chainId) === null;
-  // 通常の QR に OpenPay 利用料 (店舗負担・回収) が掛かるか。RecoverFeeNotice (buildRecoverFeeDisplay) と同じ条件
-  // (JPYC かつそのチェーンに forwarder がある) にして、開示と「利用料がかかります」の一文がずれないようにする。
-  const normalQrHasFee = settings.token === 'jpyc' && jpycForwarderFor(deployment.chainId) !== null;
   const isJpycRecover =
     settings.payMode === 'gasless' &&
     settings.token === 'jpyc' &&
     resolveJpycGaslessProvider(deployment, deployment.chainId) ===
       'eip3009-relay' &&
     jpycForwarderFor(deployment.chainId) !== null;
+  // 通常の QR に OpenPay 利用料 (店舗負担・回収) が掛かるか = 支払い側が回収の経路 (PaymentForm の useRecover) を通るか。
+  // forwarder があっても EIP-3009 relay が無効・標準なら回収しないので、「利用料がかかります」と言わない。
+  const normalQrHasFee = isJpycRecover;
   // URL・ポリシー表示の実効 gasMode (free=customer / JPYC recover=merchant / 他=店主選択)。
   const effectiveGasMode = isFreeGasless
     ? 'customer'

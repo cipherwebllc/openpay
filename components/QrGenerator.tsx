@@ -259,11 +259,6 @@ export function QrGenerator() {
   // 固定・per-QR 負担者トグルは撤去) になる。よってトグルを隠し gasMode を merchant に強制する
   // (URL params・読み戻しサマリ・RecoverFeeNotice すべて)。USDC や他トークンの recover では
   // トグルを従来どおり出す (この flag は JPYC かつ forwarder 設定済のときだけ true)。
-  // 通常の QR に OpenPay 利用料 (店舗負担・回収) が掛かるか。RecoverFeeNotice (buildRecoverFeeDisplay) と同じ条件
-  // (JPYC かつそのチェーンに forwarder がある) にして、開示と「利用料がかかります」の一文がずれないようにする。
-  const normalQrHasFee =
-    settings.token === 'jpyc' &&
-    jpycForwarderFor(deploymentForSlug(settings.token, settings.chain).chainId) !== null;
   const isJpycRecover = useMemo(() => {
     if (isStandard || splitsForUrl || settings.token !== 'jpyc') return false;
     const dep = deploymentForSlug(settings.token, settings.chain);
@@ -272,6 +267,9 @@ export function QrGenerator() {
       jpycForwarderFor(dep.chainId) !== null
     );
   }, [isStandard, splitsForUrl, settings.token, settings.chain]);
+  // 通常の QR に OpenPay 利用料 (店舗負担・回収) が掛かるか = 支払い側が回収の経路 (PaymentForm の useRecover) を通るか。
+  // forwarder があっても EIP-3009 relay が無効・標準・分配ありなら回収しないので、「利用料がかかります」と言わない。
+  const normalQrHasFee = isJpycRecover;
 
   // 負担者トグルを隠すべき経路 (free = 概念なし・customer 固定 / JPYC recover = merchant 固定)。
   // USDC や JPYC recover 以外では従来どおりトグルを出す。
@@ -290,6 +288,8 @@ export function QrGenerator() {
     // お店がガス代を肩代わりして送る QR を出すときは OpenPay の利用料がかからない (回収の開示を出さない)。店員が
     // 「通常の QR を出す」に切り替えたら、出る QR は回収 (利用料・店舗負担) なので開示を出す (第 7 回レビュー D4)。
     if (storePaysRequested(settings) && !forceNormalQr) return null;
+    // 支払い側 (PaymentForm) は回収の経路のときだけ利用料を取って開示する (useRecover)。同じ条件でだけ開示する。
+    if (!isJpycRecover) return null;
     if (!amountValid || mode !== 'amount' || settings.token !== 'jpyc') return null;
     const dep = deploymentForSlug(settings.token, settings.chain);
     try {
@@ -298,7 +298,7 @@ export function QrGenerator() {
     } catch {
       return null;
     }
-  }, [amountValid, mode, settings, chargeAmount, forceNormalQr]);
+  }, [amountValid, mode, settings, chargeAmount, forceNormalQr, isJpycRecover]);
   const recoverGasMode: GasMode = effectiveGasMode;
 
   const payUrl = useMemo(() => {

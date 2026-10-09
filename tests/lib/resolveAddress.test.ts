@@ -61,6 +61,14 @@ describe('resolveAddress (0x ショートサーキット)', () => {
       /0x アドレスまたは/,
     );
   });
+
+  it('名前として正規化できない .eth (空のラベル) は形式違いの ResolveAddressError (再試行しない側)', async () => {
+    const { resolveAddress } = await import('@/lib/resolveAddress');
+    const { ResolveAddressError } = await import('@/lib/resolveAddressError');
+    const err = await resolveAddress('a..eth').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ResolveAddressError);
+    expect((err as Error).message).toMatch(/0x アドレスまたは/);
+  });
 });
 
 describe('resolveAddress (ENS / Basenames を mainnet Universal Resolver で解決)', () => {

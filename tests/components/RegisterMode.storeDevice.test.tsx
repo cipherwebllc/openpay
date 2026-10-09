@@ -21,6 +21,8 @@ vi.mock('@/hooks/useSiweSession', () => ({
 
 const FEE = '0x428483FbA62eDCef1E3a100d3799F6d71759c560';
 const hold = vi.hoisted(() => ({
+  // JPYC のガスレスが EIP-3009 relay (= 通常の QR が回収・利用料あり) か。false は Pimlico 経路 (利用料なし)。
+  eip3009: true,
   gas: '0x0000000000000000000000000000000000000abc' as string | null,
   state: { phase: 'idle' } as Record<string, unknown>,
   start: vi.fn(),
@@ -42,6 +44,9 @@ vi.mock('@/lib/env', async (importOriginal) => {
       enableStoreGasWallet: true,
       networkEnv: 'testnet',
       feeReceiver: '0x428483FbA62eDCef1E3a100d3799F6d71759c560',
+      get enableJpycEip3009() {
+        return hold.eip3009;
+      },
     },
   };
 });
@@ -417,6 +422,22 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(screen.getByText(/ガス用ウォレットが無いため/)).toBeTruthy();
     // JPYC の通常の QR は回収 (OpenPay 利用料・店舗負担) なので、その旨を添える (第 7 回レビュー D4)。
     expect(screen.getByText(/OpenPay 利用料は店舗負担でかかります/)).toBeTruthy();
+  });
+
+  it('forwarder があっても EIP-3009 relay が無効なら、通常の QR に利用料の一文を付けない', async () => {
+    const user = userEvent.setup();
+    seed();
+    hold.gas = null;
+    hold.eip3009 = false;
+    try {
+      render(<RegisterMode />);
+      await addItemAndOpen(user, /通常の QR を出す/);
+      await waitFor(() => expect(shownCheckout()).not.toBeNull());
+      expect(screen.getByText(/ガス用ウォレットが無いため/)).toBeTruthy();
+      expect(screen.queryByText(/OpenPay 利用料/)).toBeNull();
+    } finally {
+      hold.eip3009 = true;
+    }
   });
 
   it('お店負担を選んでいて USDC の会計なら理由を出す (設定は消さない)', async () => {

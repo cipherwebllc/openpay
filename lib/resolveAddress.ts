@@ -24,6 +24,7 @@ const ensClient = createPublicClient({
 });
 
 const NAME_PATTERN = /\.eth$/i;
+const INPUT_FORMAT_MESSAGE = '0x アドレスまたは .eth / .base.eth を入力してください';
 
 export type ResolvedAddress = {
   address: Address;
@@ -42,7 +43,15 @@ export async function resolveAddress(
   }
 
   if (NAME_PATTERN.test(trimmed)) {
-    const name = normalize(trimmed);
+    // 名前として正規化できない (空のラベル `a..eth`・使えない文字) のは入力の形の誤りで、何度試しても同じ。
+    // 一時的な失敗 (RPC・CCIP-Read) と区別できるよう、形式違いと同じ ResolveAddressError にする
+    // (hooks/useResolveAddress は ResolveAddressError を再試行しない)。
+    let name: string;
+    try {
+      name = normalize(trimmed);
+    } catch {
+      throw new ResolveAddressError(INPUT_FORMAT_MESSAGE);
+    }
     const address = await ensClient.getEnsAddress({ name });
     if (!address) {
       throw new ResolveAddressError(`${trimmed} は登録されていません`);
@@ -50,5 +59,5 @@ export async function resolveAddress(
     return { address: getAddress(address), name: trimmed };
   }
 
-  throw new ResolveAddressError('0x アドレスまたは .eth / .base.eth を入力してください');
+  throw new ResolveAddressError(INPUT_FORMAT_MESSAGE);
 }
