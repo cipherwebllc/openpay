@@ -709,6 +709,43 @@ describe('useStandardPayment', () => {
     expect(result.current.data?.merchantTxHash).toBe(MERCHANT_TX);
     expect(result.current.data?.feeTxHash).toBe(FEE_TX);
     expect(result.current.data?.blockNumber).toBe(100n);
+    // 第 7 回レビュー A9: 手数料 tx の block は手数料 receipt 自身のもの (店舗送金の block を流用しない)。
+    expect(result.current.data?.feeBlockNumber).toBe(101n);
+  });
+
+  it('A9: 手数料を同内容の置換 (高速化) で mine したら、手数料の block は置換 tx の receipt のもの', async () => {
+    const { result, rerender } = await renderReadyStandardPayment();
+    act(() => {
+      result.current.mutate({
+        tokenAddress: TOKEN,
+        merchant: MERCHANT,
+        merchantAmount: 9_950_000n,
+        feeReceiver: FEE_RECEIVER,
+        feeAmount: 50_000n,
+        chainId: 84532,
+      });
+    });
+    act(() => {
+      useWriteContractMockState.a.data = MERCHANT_TX;
+      useWaitMockState.a.data = minedReceipt(MERCHANT_TX, 100n);
+      useWaitMockState.a.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() =>
+      expect(useWriteContractMockB.writeContract).toHaveBeenCalled(),
+    );
+    act(() => {
+      useWriteContractMockState.b.data = FEE_TX;
+      useWaitMockState.b.data = minedReceipt(FEE_REPLACEMENT_TX, 103n, {
+        logs: [transferLog(FEE_RECEIVER, 50_000n)],
+      });
+      useWaitMockState.b.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('success'));
+    expect(result.current.data?.feeTxHash).toBe(FEE_REPLACEMENT_TX);
+    expect(result.current.data?.feeBlockNumber).toBe(103n);
+    expect(result.current.data?.blockNumber).toBe(100n);
   });
 
   it('paymentLog: merchant tx 成功時に standard-merchant flow で 1 度発火', async () => {
@@ -1114,6 +1151,8 @@ describe('useStandardPayment', () => {
     expect(result.current.data?.merchantTxHash).toBe(MERCHANT_TX);
     expect(result.current.data?.feeTxHash).toBeUndefined();
     expect(result.current.data?.blockNumber).toBe(100n);
+    // A9: 手数料 tx が無ければ手数料の block も無い。
+    expect(result.current.data?.feeBlockNumber).toBeUndefined();
   });
 
   it('paymentLog: 同一 tx hash で再 render しても log は 1 回限り (dedup gate)', async () => {
@@ -1452,6 +1491,8 @@ describe('useStandardPayment', () => {
       merchantTxHash: MERCHANT_TX,
       feeTxHash: FEE_TX,
       blockNumber: 100n,
+      // A9: 復元した fee hash の receipt が取れたら、その block (店舗送金の block ではない)。
+      feeBlockNumber: 101n,
     });
     expect(
       window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY),
@@ -1670,6 +1711,7 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
       merchantTxHash: MERCHANT_REPLACEMENT_TX,
       feeTxHash: FEE_TX,
       blockNumber: 100n,
+      feeBlockNumber: 101n,
     });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     expect(
@@ -1814,6 +1856,7 @@ describe('useStandardPayment: 置換 tx の receipt (A1)', () => {
       merchantTxHash: MERCHANT_TX,
       feeTxHash: FEE_REPLACEMENT_TX,
       blockNumber: 100n,
+      feeBlockNumber: 101n,
     });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
     expect(

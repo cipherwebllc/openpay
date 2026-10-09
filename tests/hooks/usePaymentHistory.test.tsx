@@ -167,6 +167,46 @@ describe('usePaymentHistory', () => {
     ]);
   });
 
+  // 第 7 回レビュー A9: 手数料 leg の block は手数料 tx 自身のもの (店舗送金の block を流用しない)。
+  it('standard success: 手数料 leg の blockNumber は手数料 receipt の block・店舗 leg は店舗の block', () => {
+    renderHook(() =>
+      usePaymentHistory(CTX, NO_GASLESS, {
+        data: {
+          merchantTxHash: '0xMTxA9',
+          feeTxHash: '0xFTxA9',
+          blockNumber: 100n,
+          feeBlockNumber: 101n,
+        },
+        phase: 'success',
+        merchantTxHash: '0xMTxA9',
+        feeTxHash: '0xFTxA9',
+        error: null,
+      }),
+    );
+    const loaded = loadHistory();
+    expect(loaded.find((e) => e.flow === 'standard-merchant')?.blockNumber).toBe('100');
+    expect(loaded.find((e) => e.flow === 'standard-fee')?.blockNumber).toBe('101');
+  });
+
+  it('standard success: 手数料の block が取れていなければ、手数料 leg の blockNumber は空 (店舗の block を入れない)', () => {
+    renderHook(() =>
+      usePaymentHistory(CTX, NO_GASLESS, {
+        data: {
+          merchantTxHash: '0xMTxA9b',
+          feeTxHash: '0xFTxA9b',
+          blockNumber: 100n,
+        },
+        phase: 'success',
+        merchantTxHash: '0xMTxA9b',
+        feeTxHash: '0xFTxA9b',
+        error: null,
+      }),
+    );
+    const fee = loadHistory().find((e) => e.flow === 'standard-fee');
+    expect(fee?.txHash).toBe('0xFTxA9b');
+    expect(fee?.blockNumber).toBeNull();
+  });
+
   it('standard success (fee tx なし、極小 fee=0) → merchant のみ 1 件', () => {
     renderHook(() =>
       usePaymentHistory(CTX, NO_GASLESS, {

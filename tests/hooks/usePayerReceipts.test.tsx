@@ -10,8 +10,9 @@ import {
 import { reconcilePendingReceipts } from '@/lib/payerReceiptReconcile';
 
 // hydrate 後の on-chain 照合を no-op に差し替え (jsdom に実 RPC 無し)。spy で呼出を検証。
-vi.mock('@/lib/payerReceiptReconcile', () => ({
-  reconcilePendingReceipts: vi.fn(async () => 0),
+vi.mock('@/lib/payerReceiptReconcile', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/payerReceiptReconcile')>()),
+  reconcilePendingReceipts: vi.fn(async () => []),
   fetchReceiptTxStatus: vi.fn(async () => 'unknown' as const),
 }));
 
@@ -26,8 +27,9 @@ function receipt(txHash: string): PayerReceipt {
   );
 }
 
+// 照合の対象 (pending で txHash と chainId を持つ控え)。
 function pendingReceipt(txHash: string): PayerReceipt {
-  return { ...receipt(txHash), status: 'pending', paidAt: undefined };
+  return { ...receipt(txHash), chainId: 80002, status: 'pending', paidAt: undefined };
 }
 
 /** CHANGED_EVENT を介さず LocalStorage を直接書く (cross-tab storage event / reconcile seed 用)。 */
@@ -117,13 +119,14 @@ describe('usePayerReceipts: hydrate 後の pending 照合 (reconcile)', () => {
     expect(passed.map((r) => r.txHash)).toContain('0xrec-A');
   });
 
-  it('同一 receipt で再マウントしても fetcher (reconcile) は再発しない (module Set ガード)', () => {
+  it('照会中の receipt は再マウントしても重ねて照会しない (module の照会中ガード)', () => {
+    // 照会が終わらない (応答待ち) 間に再マウントしても、同じ控えへ 2 本目の照会を出さない。
+    reconcileMock.mockImplementationOnce(() => new Promise(() => {}));
     writeRaw([pendingReceipt('0xrec-B')]);
     const first = renderHook(() => usePayerReceipts());
     expect(reconcileMock).toHaveBeenCalledTimes(1);
     first.unmount();
     reconcileMock.mockClear();
-    // 同一 receiptId は照合済み Set に入っているため、再マウントで unchecked=0 → 再発火しない。
     renderHook(() => usePayerReceipts());
     expect(reconcileMock).not.toHaveBeenCalled();
   });

@@ -11,8 +11,9 @@ import {
 // usePayerReceipts は hydrate 後に pending 控えを on-chain 照合する。jsdom に実 RPC は
 // 無いので reconcile を no-op に差し替え、List 描画テストが実ネットワークを撃たないようにする
 // (reconcile 自体の検証は tests/lib/payerReceiptReconcile.test.ts / tests/hooks)。
-vi.mock('@/lib/payerReceiptReconcile', () => ({
-  reconcilePendingReceipts: vi.fn(async () => 0),
+vi.mock('@/lib/payerReceiptReconcile', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/payerReceiptReconcile')>()),
+  reconcilePendingReceipts: vi.fn(async () => []),
   fetchReceiptTxStatus: vi.fn(async () => 'unknown' as const),
 }));
 
