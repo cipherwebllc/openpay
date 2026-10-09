@@ -2628,17 +2628,33 @@
     "currencyFromProducts": "The currency follows your items (now {symbol}).",
     "notReady": {
       "items": "Pick an item",
-      "receiver": "Set a receiving wallet"
+      "receiver": "Set a receiving wallet",
+      "discount": "Fix the discount"
     },
     "notReadyShort": {
       "items": "No items yet",
-      "receiver": "No receiver set"
+      "receiver": "No receiver set",
+      "discount": "Check the discount"
     },
     "mobileOrderBridge": {
       "title": "Take mobile orders with this menu",
       "cta": "Start mobile ordering",
       "dismiss": "Dismiss",
       "sheetNote": "Items you edit here also appear on your mobile-order menu."
+    },
+    "discount": {
+      "add": "+ Add a discount",
+      "label": "Discount",
+      "remove": "Remove",
+      "mode": {
+        "amount": "Amount",
+        "percent": "Percent"
+      },
+      "amountInput": "Discount amount",
+      "percentInput": "Discount rate (%)",
+      "percentNote": "({percent}%)",
+      "errorAmount": "Enter an amount smaller than the subtotal, in steps of {unit}.",
+      "errorPercent": "Enter a rate above 0 and below 100 (up to 2 decimals)."
     }
   },
   "ProductPresetManager": {

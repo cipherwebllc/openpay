@@ -158,6 +158,26 @@ describe('RegisterMode × お店の端末で送る (flag ON)', () => {
     expect(screen.queryByText(/圏外でも/)).toBeNull();
   });
 
+  it('値引きを付けた会計: 受け渡しの額も QR の disc も値引き後 (500 − 20 = 480)', async () => {
+    const user = userEvent.setup();
+    seed();
+    hold.state = { phase: 'waiting', session: { id: HS }, stale: false, degraded: false };
+    render(<RegisterMode />);
+    await waitFor(() => screen.getAllByRole('button', { name: /コーヒー/ }));
+    await user.click(screen.getAllByRole('button', { name: /コーヒー/ })[0]);
+    await user.click(screen.getByRole('button', { name: '＋ 値引きを追加' }));
+    await user.type(screen.getByLabelText('値引きの金額'), '20');
+    await user.click(screen.getAllByRole('button', { name: /QRコードを表示する/ })[0]);
+    await waitFor(() => expect(hold.start).toHaveBeenCalledWith(VALID, 480n * 10n ** 18n, 80002));
+    const sp = await waitFor(() => {
+      const v = shownCheckout();
+      if (!v) throw new Error('not yet');
+      return v;
+    });
+    expect(sp.get('disc')).toBe('20');
+    expect(sp.get('submit')).toBe('store');
+  });
+
   it('受け渡しを作れなければ QR を開かない (黙って通常の QR に切り替えない)', async () => {
     const user = userEvent.setup();
     seed();

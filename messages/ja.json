@@ -2628,17 +2628,33 @@
     "currencyFromProducts": "通貨は商品の通貨に合わせて切り替わります（いまは {symbol}）。",
     "notReady": {
       "items": "商品を選んでください",
-      "receiver": "受取先を設定してください"
+      "receiver": "受取先を設定してください",
+      "discount": "値引きを直してください"
     },
     "notReadyShort": {
       "items": "商品が未選択",
-      "receiver": "受取先が未設定"
+      "receiver": "受取先が未設定",
+      "discount": "値引きを確認"
     },
     "mobileOrderBridge": {
       "title": "このメニューで、<wbr></wbr>モバイル注文も受けられます",
       "cta": "モバイル注文を始める",
       "dismiss": "閉じる",
       "sheetNote": "ここで編集した商品は、モバイル注文のメニューにもなります。"
+    },
+    "discount": {
+      "add": "＋ 値引きを追加",
+      "label": "値引き",
+      "remove": "外す",
+      "mode": {
+        "amount": "金額",
+        "percent": "割引率"
+      },
+      "amountInput": "値引きの金額",
+      "percentInput": "割引率 (%)",
+      "percentNote": "（{percent}%）",
+      "errorAmount": "小計より小さい金額を、{unit} 単位で入れてください",
+      "errorPercent": "割引率は 0 より大きく 100 未満で入れてください（小数 2 桁まで）"
     }
   },
   "ProductPresetManager": {

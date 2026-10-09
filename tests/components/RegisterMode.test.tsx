@@ -519,6 +519,68 @@ describe('RegisterMode', () => {
     });
   });
 
+  describe('値引き (任意・plans/register-discount.md)', () => {
+    async function cartWithCoffeeAndShirt(user: ReturnType<typeof userEvent.setup>) {
+      seedReceiver();
+      render(<RegisterMode />);
+      await waitFor(() => tiles().getByRole('button', { name: /コーヒー/ }));
+      await user.click(tiles().getByRole('button', { name: /コーヒー/ }));
+      await user.click(tiles().getByRole('button', { name: /Tシャツ/ }));
+    }
+
+    it('使わない会計には値引きを付けない (URL に disc が無い)', async () => {
+      const user = userEvent.setup();
+      await cartWithCoffeeAndShirt(user);
+      expect(orderPanel().getByRole('button', { name: '＋ 値引きを追加' })).toBeInTheDocument();
+      const r = await parsedCheckout();
+      expect(r.ok && r.params.discount).toBeUndefined();
+    });
+
+    it('金額指定: 3,500 円から 20 円引き → 合計 3,480・QR の URL は disc=20', async () => {
+      const user = userEvent.setup();
+      await cartWithCoffeeAndShirt(user);
+      await user.click(orderPanel().getByRole('button', { name: '＋ 値引きを追加' }));
+      await user.type(orderPanel().getByLabelText('値引きの金額'), '20');
+      expect(orderPanel().getByText('−20 JPYC')).toBeInTheDocument();
+      expect(orderPanel().getAllByText('3,480 JPYC').length).toBeGreaterThan(0);
+      const r = await parsedCheckout();
+      expect(r.ok && r.params.discount).toBe('20');
+    });
+
+    it('割引率指定: 3,500 円の 2% → 70 円引き (円未満切り捨て)・表示に (2%)', async () => {
+      const user = userEvent.setup();
+      await cartWithCoffeeAndShirt(user);
+      await user.click(orderPanel().getByRole('button', { name: '＋ 値引きを追加' }));
+      await user.click(orderPanel().getByRole('button', { name: '割引率' }));
+      await user.type(orderPanel().getByLabelText('割引率 (%)'), '2');
+      expect(orderPanel().getByText('（2%）')).toBeInTheDocument();
+      expect(orderPanel().getByText('−70 JPYC')).toBeInTheDocument();
+      const r = await parsedCheckout();
+      expect(r.ok && r.params.discount).toBe('70');
+    });
+
+    it('100% 値引き・小計以上は QR を出さず、理由を出す', async () => {
+      const user = userEvent.setup();
+      await cartWithCoffeeAndShirt(user);
+      await user.click(orderPanel().getByRole('button', { name: '＋ 値引きを追加' }));
+      await user.type(orderPanel().getByLabelText('値引きの金額'), '3500');
+      expect(orderPanel().getByText(/小計より小さい金額を、1 JPYC 単位で入れてください/)).toBeInTheDocument();
+      for (const btn of screen.getAllByRole('button', { name: /QRコードを表示する/ })) expect(btn).toBeDisabled();
+      expect(screen.getAllByText(/値引きを直してください|値引きを確認/).length).toBeGreaterThan(0);
+    });
+
+    it('「外す」で値引きをやめる', async () => {
+      const user = userEvent.setup();
+      await cartWithCoffeeAndShirt(user);
+      await user.click(orderPanel().getByRole('button', { name: '＋ 値引きを追加' }));
+      await user.type(orderPanel().getByLabelText('値引きの金額'), '20');
+      await user.click(orderPanel().getByRole('button', { name: '外す' }));
+      expect(orderPanel().queryByText('−20 JPYC')).toBeNull();
+      const r = await parsedCheckout();
+      expect(r.ok && r.params.discount).toBeUndefined();
+    });
+  });
+
   it('数量を増やすと合計 (items.qty) が再計算される', async () => {
     const user = userEvent.setup();
     seedReceiver();
