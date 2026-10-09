@@ -95,7 +95,9 @@ export type HandoffStore = {
   putTx(id: string, txHash: Hex, ttlSec: number): Promise<Hex | null>;
 };
 
-export type HandoffDeps = ForwarderVerifyDeps & {
+// 署名の検証 (verifyForwarderSettle) に効く手数料 (1 wei) と有効窓の上限 (180 秒) は lib/storeDevicePayment.ts の定数だけ
+// (submitHandoffAuth が渡す)。deps には置かない: 置くと「設定値」に見えて読み手を誤らせる (第 7 回レビュー C6)。
+export type HandoffDeps = Omit<ForwarderVerifyDeps, 'expectedFeeValue' | 'maxValidityWindowSec'> & {
   store: HandoffStore;
   /** 新しい受け渡しを作ってよいチェーンか (lib/storeDevicePayment.ts の isStoreDeviceChain = 開示した ∩ 設定済み)。 */
   isAllowedChain: (chainId: number) => boolean;
@@ -329,6 +331,7 @@ export async function submitHandoffAuth(
   if (validBefore < BigInt(deps.nowSec() + STORE_DEVICE_MIN_CLAIM_REMAINING_SEC)) {
     return fail(400, 'validity_too_short');
   }
+  // 手数料 (1 wei) と有効窓の上限 (180 秒) はここで渡す定数が唯一の出所 (HandoffDeps には無い)。
   const verified = await verifyForwarderSettle(
     { chainId: session.chainId, params, signature: body.signature as Hex, rateLimitKeys: [] },
     { ...deps, expectedFeeValue: STORE_DEVICE_FEE_WEI, maxValidityWindowSec: STORE_DEVICE_MAX_VALIDITY_SEC },

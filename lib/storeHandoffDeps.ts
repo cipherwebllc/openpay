@@ -6,8 +6,6 @@ import { createHmac, randomBytes } from 'node:crypto';
 import {
   TransactionReceiptNotFoundError,
   createPublicClient,
-  getAddress,
-  isAddress,
   parseAbi,
   type Address,
   type Hex,
@@ -115,20 +113,18 @@ export function handoffMac(message: string): string | null {
   return createHmac('sha256', secret).update(`store-handoff:${message}`).digest('hex');
 }
 
+// 検証に効く値の出所: 上限 (maxValue) は中継と同じ MAX_VALUE・受取口は中継と同じ feeReceiverFor (checksum 済み・
+// 未設定なら null)。手数料 (1 wei) と有効窓の上限 (180 秒) は lib/storeDevicePayment.ts の定数を submitHandoffAuth が
+// 渡す (ここには置かない)。
 export function handoffDeps(): HandoffDeps {
   return {
     store: kvHandoffStore,
     isAllowedChain: isStoreDeviceChain,
     nowSec: () => Math.floor(Date.now() / 1000),
-    expectedFeeValue: 1n,
     maxValue: MAX_VALUE,
-    maxValidityWindowSec: 180,
     jpycAddressFor,
     forwarderFor: jpycForwarderFor,
-    feeReceiverFor: (chainId: number) => {
-      const r = feeReceiverFor(chainId);
-      return r && isAddress(r) ? getAddress(r) : null;
-    },
+    feeReceiverFor,
     getBalance,
     readAuthorizationUsed,
     mac: handoffMac,
@@ -146,18 +142,13 @@ function publicClientFor(chainId: number) {
   return createPublicClient({ chain, transport: transportForChain(chainId) });
 }
 
-const handoffFeeReceiverFor = (chainId: number) => {
-  const r = feeReceiverFor(chainId);
-  return r && isAddress(r) ? getAddress(r) : null;
-};
-
 export function resolveDeps(): StoreHandoffResolveDeps {
   return {
     isConfiguredChain: (chainId: number) => storeDeviceChainConfig(chainId) !== null,
     nowSec: () => Math.floor(Date.now() / 1000),
     jpycAddressFor,
     forwarderFor: jpycForwarderFor,
-    feeReceiverFor: handoffFeeReceiverFor,
+    feeReceiverFor,
     async successfulReceipt(chainId: number, txHash: Hex) {
       try {
         const receipt = await publicClientFor(chainId).getTransactionReceipt({ hash: txHash });

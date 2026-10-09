@@ -10,6 +10,7 @@ import { recoverFeeValue } from '@/lib/relay/recoverFee';
 import { mobileOrderFeeValue } from '@/lib/mobileOrderFee';
 import {
   STORE_DEVICE_FEE_WEI,
+  STORE_DEVICE_MAX_VALIDITY_SEC,
   STORE_DEVICE_MIN_AMOUNT_WEI,
 } from '@/lib/storeDevicePayment';
 import {
@@ -100,9 +101,7 @@ function deps(over: Partial<HandoffDeps> = {}): HandoffDeps {
     store,
     isAllowedChain: (id) => id === CHAIN,
     nowSec: () => NOW,
-    expectedFeeValue: 1n,
     maxValue: 50_000n * 10n ** 18n,
-    maxValidityWindowSec: 180,
     jpycAddressFor: () => JPYC,
     forwarderFor: () => FWD,
     feeReceiverFor: () => FEE,
@@ -264,6 +263,50 @@ describe('お客様の署名を受け取る', () => {
   ])('%s → %s', async (_, over, error) => {
     await openSession();
     expect(await submitHandoffAuth(ID, await signedBody(over), deps())).toMatchObject({ ok: false, error });
+  });
+
+  // C6 (第 7 回レビュー): 検証に効く手数料 (1 wei) と有効窓の上限 (180 秒) の出所は lib/storeDevicePayment の定数だけ。
+  // deps に同名の値が紛れ込んでも効かない (本番の deps = lib/storeHandoffDeps.ts にはこの 2 つを置かない)。
+  it('手数料 1 wei と有効窓 180 秒の出所は lib/storeDevicePayment の定数 (deps の同名の値は効かない)', async () => {
+    const sabotaged = { ...deps(), expectedFeeValue: 2n, maxValidityWindowSec: 10 } as HandoffDeps;
+    await openSession();
+    expect(await submitHandoffAuth(ID, await signedBody({ feeValue: 2n }), sabotaged)).toMatchObject({
+      ok: false,
+      error: 'fee_value_mismatch',
+    });
+    expect(
+      await submitHandoffAuth(
+        ID,
+        await signedBody({ validBefore: BigInt(NOW + STORE_DEVICE_MAX_VALIDITY_SEC + 1) }),
+        sabotaged,
+      ),
+    ).toMatchObject({ ok: false, error: 'validity_too_far' });
+    expect(
+      await submitHandoffAuth(
+        ID,
+        await signedBody({ feeValue: STORE_DEVICE_FEE_WEI, validBefore: BigInt(NOW + STORE_DEVICE_MAX_VALIDITY_SEC) }),
+        sabotaged,
+      ),
+    ).toMatchObject({ ok: true, idempotent: false });
+  });
+
+  it('受取口 (feeReceiverFor) と上限 (maxValue) は deps の値が効く', async () => {
+    await openSession();
+    // 署名は FEE 宛て。deps の受取口が別なら署名の復元が合わない (お客様の署名を別の受取口で預からない)。
+    const otherReceiver = getAddress('0x1111111111111111111111111111111111111111');
+    expect(await submitHandoffAuth(ID, await signedBody(), deps({ feeReceiverFor: () => otherReceiver }))).toMatchObject({
+      ok: false,
+      error: 'signature_mismatch',
+    });
+    expect(await submitHandoffAuth(ID, await signedBody(), deps({ feeReceiverFor: () => null }))).toMatchObject({
+      ok: false,
+      error: 'unsupported_chain',
+    });
+    // 請求額 + 1 wei が上限を超える。
+    expect(await submitHandoffAuth(ID, await signedBody(), deps({ maxValue: AMOUNT }))).toMatchObject({
+      ok: false,
+      error: 'value_exceeds_max',
+    });
   });
 
   it('店がセッションと違う署名は受けない', async () => {

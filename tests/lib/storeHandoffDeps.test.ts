@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { getAddress } from 'viem';
 
 const kv = vi.hoisted(() => ({
   set: vi.fn(),
@@ -10,9 +11,33 @@ vi.mock('@/lib/kv', () => ({
   kvMget: kv.mget,
   kvSetNxGet: kv.setNxGet,
 }));
+const hold = vi.hoisted(() => ({
+  feeReceiver: '0x428483FbA62eDCef1E3a100d3799F6d71759c560' as string | undefined,
+}));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: {
+      ...actual.env,
+      get feeReceiver() {
+        return hold.feeReceiver;
+      },
+    },
+  };
+});
 
-import { kvHandoffStore } from '@/lib/storeHandoffDeps';
+import { handoffDeps, handoffMac, kvHandoffStore, resolveDeps } from '@/lib/storeHandoffDeps';
 import type { HandoffAuth, HandoffSession } from '@/lib/storeHandoff';
+import { isStoreDeviceChain } from '@/lib/storeDevicePayment';
+import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
+import { feeReceiverFor } from '@/lib/relay/forwarderSettleService';
+import {
+  MAX_VALUE,
+  getBalance,
+  jpycAddressFor,
+  readAuthorizationUsed,
+} from '@/lib/relay/relayProvider';
 
 const ID = 'AAAAAAAAAAAAAAAAAAAAAA';
 const session = { v: 1, chainId: 80002 } as unknown as HandoffSession;
@@ -99,5 +124,40 @@ describe('kvHandoffStore (Upstash への写像)', () => {
     expect(await kvHandoffStore.claimAuth(ID, auth, 300)).toBeNull();
     kv.setNxGet.mockResolvedValueOnce({ ok: true, value: 'null' });
     expect(await kvHandoffStore.claimAuth(ID, auth, 300)).toBeNull();
+  });
+});
+
+// C6 (第 7 回レビュー): 本番の依存で「検証に効く値」の出所を 1 か所に固定する。
+describe('handoffDeps / resolveDeps (本番の依存の出所)', () => {
+  afterEach(() => {
+    hold.feeReceiver = '0x428483FbA62eDCef1E3a100d3799F6d71759c560';
+  });
+
+  it('上限は中継と同じ MAX_VALUE・手数料 1 wei と有効窓 180 秒は deps に置かない (lib/storeDevicePayment の定数が効く)', () => {
+    const d = handoffDeps();
+    expect(d.maxValue).toBe(MAX_VALUE);
+    expect('expectedFeeValue' in d).toBe(false);
+    expect('maxValidityWindowSec' in d).toBe(false);
+    expect(d.store).toBe(kvHandoffStore);
+    expect(d.isAllowedChain).toBe(isStoreDeviceChain);
+    expect(d.jpycAddressFor).toBe(jpycAddressFor);
+    expect(d.forwarderFor).toBe(jpycForwarderFor);
+    expect(d.getBalance).toBe(getBalance);
+    expect(d.readAuthorizationUsed).toBe(readAuthorizationUsed);
+    expect(d.mac).toBe(handoffMac);
+  });
+
+  it('受取口は中継と同じ feeReceiverFor (checksum 済み・未設定は null) を、作成/署名と結論が同じ関数で使う', () => {
+    const checksummed = getAddress('0x428483fba62edcef1e3a100d3799f6d71759c560');
+    hold.feeReceiver = '0x428483fba62edcef1e3a100d3799f6d71759c560';
+    expect(handoffDeps().feeReceiverFor(137)).toBe(checksummed);
+    expect(resolveDeps().feeReceiverFor(137)).toBe(checksummed);
+    expect(handoffDeps().feeReceiverFor).toBe(feeReceiverFor);
+    expect(resolveDeps().feeReceiverFor).toBe(feeReceiverFor);
+    hold.feeReceiver = undefined;
+    expect(handoffDeps().feeReceiverFor(137)).toBeNull();
+    expect(resolveDeps().feeReceiverFor(137)).toBeNull();
+    hold.feeReceiver = 'not-an-address';
+    expect(handoffDeps().feeReceiverFor(137)).toBeNull();
   });
 });
