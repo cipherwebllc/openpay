@@ -42,8 +42,12 @@ vi.mock('wagmi', () => ({
 }));
 // AddressInput: 入力時に onResolved を ADDR で発火する軽量スタブ。
 // ENS 名の解決 (受け取りの設定シートを開いていなくても受取先を解決する): 'alice.eth' だけ ADDR に解決する。
+// 'stale.eth' は再解決に失敗した名前 (react-query は前回の解決結果 ADDR を data に残したまま error を立てる)。
 vi.mock('@/hooks/useResolveAddress', () => ({
-  useResolveAddress: (input: string) => ({ data: input === 'alice.eth' ? { address: ADDR } : null }),
+  useResolveAddress: (input: string) =>
+    input === 'stale.eth'
+      ? { data: { address: ADDR }, error: new Error('rpc down') }
+      : { data: input === 'alice.eth' ? { address: ADDR } : null },
 }));
 vi.mock('@/components/AddressInput', () => ({
   AddressInput: ({
@@ -760,6 +764,9 @@ describe('HandleProfileBuilder', () => {
     expect(screen.getByTestId('claim')).toHaveTextContent('no-config');
     fireEvent.change(screen.getByTestId('addr'), { target: { value: 'alice.eth' } });
     expect(screen.getByTestId('claim')).toHaveTextContent(`config-ready:${getAddress(ADDR)}`);
+    // 再解決に失敗している間は、前回の解決結果で公開しない。
+    fireEvent.change(screen.getByTestId('addr'), { target: { value: 'stale.eth' } });
+    expect(screen.getByTestId('claim')).toHaveTextContent('no-config');
   });
 
   it('受取先が未設定でも「設定」のシートの先頭に受取先の欄があり、開いている間はカードの欄を外す (同じ欄は 1 つ)', () => {

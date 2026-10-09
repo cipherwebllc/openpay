@@ -391,8 +391,10 @@ export function HandleClaimPanel({
   const owned = mine.data?.handles ?? [];
   const ownedNames = owned.map((o) => o.handle);
   const atLimit = owned.length >= max;
-  // @handle の入力欄を出すか (新規取得のとき・編集中に「新しいハンドルを取得」を押したとき)。
-  const showHandleInput = editingHandle === null || showNewHandle;
+  // 上限まで取得済みで、どれも編集していない (新しくは取れない・一覧の「編集」から更新する)。
+  const limitOnly = atLimit && editingHandle === null;
+  // @handle の入力欄を出すか (新規取得のとき・編集中に「新しいハンドルを取得」を押したとき)。上限なら新規は出さない。
+  const showHandleInput = editingHandle === null ? !limitOnly : showNewHandle;
   // 公開 (取得/更新) を押せるか。
   const publishDisabled =
     !isSignedIn ||
@@ -420,7 +422,9 @@ export function HandleClaimPanel({
   // 帯の左: 押せない理由を 1 行 (サインイン / 受取先 / @handle)、押せるときは対象の @handle と状態。
   const barReason = !isSignedIn
     ? t('barReasonSignIn')
-    : !config
+    : limitOnly
+      ? t('barReasonPick')
+      : !config
       ? t('barReasonReceiver')
       : !validation.ok
         ? t('barReasonHandle')
@@ -673,9 +677,11 @@ export function HandleClaimPanel({
                 </div>
               </div>
             )}
-            {atLimit && (
+            {limitOnly ? (
+              <p className="text-xs text-slate-600">{t('limitReachedPick', { max })}</p>
+            ) : atLimit ? (
               <p className="mt-2 text-xs text-amber-700">{t('limitReached', { max })}</p>
-            )}
+            ) : null}
             {publishBlockedReason && (
               <p role="alert" className="mt-2 text-xs text-red-600">{publishBlockedReason}</p>
             )}

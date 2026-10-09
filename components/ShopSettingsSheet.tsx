@@ -6,7 +6,7 @@
 // (設定の状態と更新の仕方は各タブの既存の handler をそのまま使う = 決済の値の作り方は変えない)。
 // スマホ (640px 未満) は全画面、それ以上は右から出るパネル。
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { trapModalFocus } from '@/lib/trapModalFocus';
 
 export function ShopSettingsSheet({
@@ -27,7 +27,9 @@ export function ShopSettingsSheet({
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  useEffect(() => {
+  // useLayoutEffect: 閉じたときの後始末を、シートが DOM から外れる「前」に同期で行う。useEffect だと外れた後に
+  // 非同期で走り、WebKit (CI の mobile-safari) では focus の行き先がまだ決まらず、設定ボタンへ戻らないことがあった。
+  useLayoutEffect(() => {
     if (!open) return;
     const previousFocus = document.activeElement;
     const panel = panelRef.current;

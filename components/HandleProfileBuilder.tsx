@@ -303,8 +303,9 @@ export function HandleProfileBuilder({
   const effectiveReceiver = useMemo<Address | null>(() => {
     const raw = draft.to.trim();
     if (isAddress(raw)) return getAddress(raw);
-    return ens.data?.address ?? null;
-  }, [draft.to, ens.data]);
+    // 再解決に失敗しても react-query は前回の解決結果を残すので、失敗中は使わない (古い着金先で公開しない)。
+    return ens.error ? null : ens.data?.address ?? null;
+  }, [draft.to, ens.data, ens.error]);
 
   // publish 送信と dirty 比較の単一情報源。旧 Builder のインライン trim/filter は
   // lib/handlePublish.ts へ移し、request body の形とキー順を保っている。

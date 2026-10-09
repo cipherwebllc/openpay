@@ -127,8 +127,9 @@ export function MobileOrderBuilder({
   const effectiveReceiver = useMemo<Address | null>(() => {
     const raw = draft.receiver.trim();
     if (isAddress(raw)) return getAddress(raw);
-    return ens.data?.address ?? null;
-  }, [draft.receiver, ens.data]);
+    // 再解決に失敗しても react-query は前回の解決結果を残すので、失敗中は使わない (古い着金先で公開しない)。
+    return ens.error ? null : ens.data?.address ?? null;
+  }, [draft.receiver, ens.data, ens.error]);
 
   // setReceiver は useMobileOrderDraft 側で useCallback 安定なのでそのまま渡す。
   const autofill = useReceiverAutofill({

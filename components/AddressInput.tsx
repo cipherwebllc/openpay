@@ -26,14 +26,13 @@ export function AddressInput({
   const looksLikeName = isLikelyName(trimmed);
   const query = useResolveAddress(looksLikeName ? trimmed : '');
 
+  // 再解決に失敗しても react-query は前回の解決結果 (data) を残す。失敗した名前の古いアドレスを着金先として
+  // 渡さない・表示しないため、失敗中は「解決できていない」と扱う。
+  const resolvedAddress = query.error ? null : query.data?.address ?? null;
   useEffect(() => {
     if (!onResolved) return;
-    if (query.data) {
-      onResolved(query.data.address);
-    } else {
-      onResolved(null);
-    }
-  }, [query.data, onResolved]);
+    onResolved(resolvedAddress);
+  }, [resolvedAddress, onResolved]);
 
   return (
     <div>
@@ -56,7 +55,7 @@ export function AddressInput({
           {query.error instanceof ResolveAddressError ? query.error.message : t('resolveFailed')}
         </p>
       )}
-      {looksLikeName && query.data?.name && (
+      {looksLikeName && !query.error && query.data?.name && (
         // R: span 直接に break-all を付ける。iOS Safari は font-family 切替時に
         //    親 <p> の word-break 継承が不安定で、0x アドレスが viewport を突き抜ける。
         <p className="mt-1 break-all text-xs text-emerald-700">

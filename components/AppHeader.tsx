@@ -56,7 +56,9 @@ export function AppHeader() {
           <WalletBadge />
           <NewsBell />
           <LocaleSwitcher />
-          <span className="hidden rounded-full bg-slate-200 px-2 py-1 font-mono text-slate-600 sm:inline">
+          {/* 接続後はアドレスとチェーン名が並ぶので、タブレット幅 (〜1023px) では環境の表示を外して横にはみ出さない
+              (チェーン名 (Polygon Amoy 等) で testnet だと分かる)。 */}
+          <span className="hidden rounded-full bg-slate-200 px-2 py-1 font-mono text-slate-600 lg:inline">
             {env.networkEnv}
           </span>
         </div>

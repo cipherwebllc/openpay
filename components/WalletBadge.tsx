@@ -99,8 +99,9 @@ export function WalletBadge() {
               <Check className="h-3 w-3 text-emerald-600" aria-label={t('signedIn')} />
             )}
             <span className="font-mono">{shortAddress(address)}</span>
+            {/* チェーン名は PC 幅だけ (タブレット幅では上部ナビと並んで横にはみ出し、ロゴが潰れるため・一覧を開けば出る)。 */}
             {chain && (
-              <span className="hidden text-[11px] text-slate-400 sm:inline">/ {chain.name}</span>
+              <span className="hidden text-[11px] text-slate-400 lg:inline">/ {chain.name}</span>
             )}
             <ChevronDown
               className="h-3 w-3 text-slate-400 transition-transform group-open:rotate-180"
