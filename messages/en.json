@@ -2968,8 +2968,11 @@
     "loadError": "Couldn't load calls."
   },
   "OrderRelay": {
-    "heading": "Orders",
-    "subheading": "See paid dine-in / pre-orders here (sign in with your receiving wallet).",
+    "openHeading": "Open orders",
+    "openCount": "<n>{count}</n> {count, plural, one {order} other {orders}}",
+    "callsChip": "🔔 {count, plural, one {# call} other {# calls}}",
+    "emptyHint": "Publish your mobile ordering page and customer orders will arrive here.",
+    "openMobileOrder": "Open mobile ordering",
     "completionHintRetail": "Mark an order \"done\" after handing it over to clear it from the list.",
     "completionHintRestaurant": "Retail: mark \"done\" here. Dining: marking \"served\" in the hall (after the kitchen) automatically marks it \"done\".",
     "signInPrompt": "Sign in with your receiving wallet to see your orders.",

@@ -240,7 +240,9 @@ function CreatePageBody() {
           onGetHandle={() => changeTab('profile')}
         />
       )}
-      {tab === 'orders' && (env.enableOrderRelay || env.enableShopLive) && <OrderFeedPanel />}
+      {tab === 'orders' && (env.enableOrderRelay || env.enableShopLive) && (
+        <OrderFeedPanel {...(env.enableMobileOrder ? { onOpenMobileOrder: () => changeTab('mobileOrder') } : {})} />
+      )}
 
       {/* 受注・プロフタブでは下部の参照系 (最近の取引 / 換金) を隠す。 */}
       {tab !== 'orders' && tab !== 'profile' && <MiniHistoryRecent />}

@@ -2,7 +2,7 @@
 // 明細/実着金額) / 空 / KV エラー / 「対応済み」で POST。useSiweSession と fetch をモック・QueryClient 注入。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithIntl } from '../_helpers/i18n';
 
@@ -158,8 +158,38 @@ describe('OrderFeedPanel', () => {
     render();
     expect(await screen.findByText('テーブル 3')).toBeInTheDocument();
     expect(screen.getByText('水 × 2')).toBeInTheDocument();
-    expect(screen.getByText('1')).toBeInTheDocument(); // 実着金 1 JPYC (formatUnits)
+    // 実着金 1 JPYC (formatUnits)。先頭の要約にも件数「1」が出るので、カードの中で確かめる。
+    const card = screen.getByText(/受付番号 #/).closest('li') as HTMLElement;
+    expect(within(card).getByText('1')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '対応済みにする' })).toBeInTheDocument();
+  });
+
+  it('先頭の要約に未対応の件数 (タブのバッジと同じ受注フィード)・顧客申告の注記は一覧に 1 回', async () => {
+    h.orders = [order, { ...order, txHash: `0x${'c'.repeat(64)}`, orderId: '8L4R' }, { ...order, txHash: `0x${'d'.repeat(64)}`, orderId: '9M5S', fulfilled: true }];
+    render();
+    const summary = await screen.findByRole('region', { name: '未対応の注文' });
+    await waitFor(() => expect(summary).toHaveTextContent('2 件'));
+    expect(screen.getAllByText('商品・テーブルは顧客申告です。金額はオンチェーンで検証済み（実着金額）。')).toHaveLength(1);
+  });
+
+  it('受注が無いときはモバイル注文への導線 (親が渡したときだけ)', async () => {
+    const onOpenMobileOrder = vi.fn();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithIntl(
+      <QueryClientProvider client={qc}>
+        <OrderFeedPanel onOpenMobileOrder={onOpenMobileOrder} />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText('まだ受注はありません。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'モバイル注文を開く' }));
+    expect(onOpenMobileOrder).toHaveBeenCalledOnce();
+  });
+
+  it('呼び出しが無いときは黄色の呼び出し欄を出さない (呼び出しがあれば先頭に出す)', async () => {
+    envHold.enableOrderCall = true;
+    render();
+    await screen.findByText('まだ受注はありません。');
+    expect(screen.queryByText('🔔 スタッフ呼び出し')).toBeNull();
   });
 
   it('実着金額は桁区切りで表示する (表示だけ・1650 → 1,650)', async () => {

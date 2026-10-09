@@ -13,6 +13,7 @@ export function OrderCallSection({
   isPending,
   onResolve,
   onNewCalls,
+  hideWhenEmpty = false,
 }: {
   calls: StoredCall[];
   subject: string | null | undefined;
@@ -22,6 +23,9 @@ export function OrderCallSection({
   isPending: boolean;
   onResolve: (id: string) => void;
   onNewCalls?: () => void;
+  /** 呼び出しが無い (読み込み中を含む) ときは何も描かない (受注タブ: 何も起きていないのに黄色の枠を出さない)。
+   *  部品は置いたままにして、最初の呼び出しでも新着の点滅・チャイムが効くようにする。 */
+  hideWhenEmpty?: boolean;
 }) {
   const t = useTranslations('OrderCall');
   const flashing = useNewOrderFlash(
@@ -29,6 +33,8 @@ export function OrderCallSection({
     subject,
     { enabled, onNewOrders: onNewCalls },
   );
+
+  if (hideWhenEmpty && !isError && (isLoading || calls.length === 0)) return null;
 
   return (
     <section className="rounded-2xl border border-amber-300 bg-amber-50/60 p-3">
