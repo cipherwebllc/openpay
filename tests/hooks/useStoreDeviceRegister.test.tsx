@@ -1285,6 +1285,33 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     expect(result.current.state).toMatchObject({ phase: 'received', finalized: true, txHash: HASH_B });
   });
 
+  // #762 Codex 4 回目 P3: 通常の unknown の確定待ちの監視が走っている間に「いま確認する」が revert を読み、判定が結論
+  // (settled / expired_unused) を返したら、先の監視を止める (結論の出た会計を上限まで照会し続けない)。
+  it.each([
+    ['settled', { ok: true, state: 'settled', txHash: HASH_B }, 'received'],
+    ['expired_unused', { ok: true, state: 'expired_unused' }, 'reverted'],
+  ] as const)('#762:「いま確認する」の判定が %s を返したら、先に始まっていた確定待ちの監視を止める', async (_label, body, phase) => {
+    send.waitReceipt.mockResolvedValueOnce(null);
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toMatchObject({ phase: 'unknown' });
+    send.getReceipt.mockResolvedValueOnce({ status: 'reverted', logs: [] });
+    resolveRes = () => json(body);
+    await act(async () => {
+      await result.current.checkNow();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.state).toMatchObject({ phase });
+    const calls = of('/resolve').length;
+    // 以後は結論が出ない応答を返しても、先の監視は照会を重ねない。
+    resolveRes = () => json({ ok: true, state: 'pending' });
+    await advance(5 * 60_000);
+    expect(of('/resolve')).toHaveLength(calls);
+    expect(result.current.state).toMatchObject({ phase });
+  });
+
   // Codex 再レビュー P1: 「いま確認する」の連打で receipt の照会を並行させない (先の遅い照会の「読めない」で、後の照会が
   // 出した revert 済みの表示を、閉じられる通常の unknown に戻さない)。
   it('A3 再レビュー:「いま確認する」の連打は 1 本の照会に合流する (receipt の読み取りを重ねない)', async () => {
@@ -1418,6 +1445,7 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     send.createDeviceIo.mockImplementationOnce(() => {
       throw new Error('Failed to fetch dynamically imported module');
     });
+    send.readSentMarks.mockReturnValue({ ok: true, marks: [] });
     readRes = signed;
     const { result } = renderHook(() => useStoreDeviceRegister(input));
     await started(result);
@@ -1433,8 +1461,24 @@ describe('useStoreDeviceRegister: 店の tx の revert・判定が返す tx・�
     expect(result.current.state).toMatchObject({ phase: 'received' });
   });
 
+  // #762 Codex 4 回目 P1: 送信を呼ぶ前の例外でも、同じ受け渡しを開いた別のタブがこの署名を送っていたら「送っていない」と言わない。
+  it('#762: 送信の部品の読み込みに失敗しても、この署名の印 (別のタブが送った) があれば unknown として判定を待つ', async () => {
+    send.createDeviceIo.mockImplementationOnce(() => {
+      throw new Error('Failed to fetch dynamically imported module');
+    });
+    send.readSentMarks.mockReturnValue({ ok: true, marks: [MARK] });
+    readRes = signed;
+    const { result } = renderHook(() => useStoreDeviceRegister(input));
+    await started(result);
+    await advance(3_000);
+    expect(result.current.state).toEqual({ phase: 'unknown', mark: MARK, previous: false });
+    expect(result.current.busy).toBe(true);
+    expect(send.sendStoreDeviceSettle).not.toHaveBeenCalled();
+  });
+
   it('A12: 署名の確認の途中の例外も送っていない (not_sent)', async () => {
     send.verifyDeviceAuth.mockRejectedValueOnce(new RangeError('boom'));
+    send.readSentMarks.mockReturnValue({ ok: true, marks: [] });
     readRes = signed;
     const { result } = renderHook(() => useStoreDeviceRegister(input));
     await started(result);

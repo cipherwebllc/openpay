@@ -479,8 +479,11 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         // 上書きしない・監視も始めない。
         if (!mountedRef.current || stateRef.current !== shown) return;
         if (r.state === 'settled') {
+          // 結論が出たので、先に始まっていた確定待ちの監視 (通常の unknown のもの) を止める (#762 Codex 4 回目 P3)。
+          finalityStopRef.current?.();
           set({ phase: 'received', mark, finalized: true, previous, txHash: r.txHash });
         } else if (r.state === 'expired_unused') {
+          finalityStopRef.current?.();
           set({ phase: 'reverted', mark, previous });
         } else {
           set({
@@ -611,11 +614,22 @@ export function useStoreDeviceRegister(input: StoreDeviceRegisterInput) {
         // この署名の印があれば結果が分からない (unknown) としてサーバの判定を待ち、印の前 (印が無い) なら送っていない。
         // 端末の保存領域が読めない (ok: false) ときも「印なし」とは読まない: このタブで書いた印の写しも見る
         // (送信は印を書いて読み戻してから送るので、写しが無ければ送っていない・第 7 回レビュー #762 Codex P1)。
+        // 送信を呼ぶ前の例外 (送信の部品の読み込み失敗など) でも、既にある印を見る: 同じ受け渡しを開いた別のタブが
+        // この署名を送っていたら「送っていない」と言わない (#762 Codex 4 回目 P1)。部品が無ければ印の部品だけ読み直す。
+        let marksMod = sendMod;
+        if (!marksMod) {
+          try {
+            marksMod = await import('@/lib/storeDeviceSend');
+          } catch {
+            // 印の部品も読めない = 印を確かめられない (送信の部品も無いので、このタブは送っていない)。
+            marksMod = null;
+          }
+        }
         const mark =
           sentMark ??
-          (sendCalled && sendMod
-            ? findSentMark(sendMod.readSentMarks(), view.auth.nonce) ??
-              sendMod.sentMarkWrittenThisTab(view.auth.nonce)
+          (marksMod
+            ? findSentMark(marksMod.readSentMarks(), view.auth.nonce) ??
+              marksMod.sentMarkWrittenThisTab(view.auth.nonce)
             : null);
         if (mark) {
           const cur = stateRef.current;
