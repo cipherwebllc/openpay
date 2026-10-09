@@ -61,6 +61,9 @@ const useWaitMockState = {
     refetch: vi.fn(),
   },
 };
+// hook が receipt query に渡した onReplaced (hash ごと) と、有効にした query の hash。
+const onReplacedByHash = new Map<Hex, ((replacement: unknown) => void) | undefined>();
+const receiptQueryHashes = new Set<Hex>();
 // useWriteContract は 2 回呼ばれる (merchant / fee 用)。順序で振り分け。
 let writeCallCount = 0;
 vi.mock('wagmi', () => ({
@@ -79,17 +82,34 @@ vi.mock('wagmi', () => ({
       ...useWriteContractMockState.b,
     };
   },
-  useWaitForTransactionReceipt: ({ hash }: { hash: Hex | undefined }) => {
-    // hash の値で a / b を識別 (merchant tx と fee tx で別)
+  useWaitForTransactionReceipt: ({
+    hash,
+    onReplaced,
+    query,
+  }: {
+    hash: Hex | undefined;
+    onReplaced?: (replacement: unknown) => void;
+    query?: { enabled?: boolean };
+  }) => {
+    // wagmi は onReplaced を viem の waitForTransactionReceipt へ渡す (置換を見つけたら resolve 前に呼ぶ)。
+    if (hash !== undefined) {
+      onReplacedByHash.set(hash, onReplaced);
+      if (query?.enabled) receiptQueryHashes.add(hash);
+    }
+    // hash の値で a / b を識別 (merchant tx と fee tx で別)。置換先の hash も同じ試行の receipt。
     if (
       hash !== undefined &&
-      (hash === useWriteContractMockState.a.data || hash === MERCHANT_TX)
+      (hash === useWriteContractMockState.a.data ||
+        hash === MERCHANT_TX ||
+        hash === MERCHANT_REPLACEMENT_TX)
     ) {
       return useWaitMockState.a;
     }
     if (
       hash !== undefined &&
-      (hash === useWriteContractMockState.b.data || hash === FEE_TX)
+      (hash === useWriteContractMockState.b.data ||
+        hash === FEE_TX ||
+        hash === FEE_REPLACEMENT_TX)
     ) {
       return useWaitMockState.b;
     }
@@ -123,6 +143,27 @@ const FEE_TX: Hex = `0x${'b'.repeat(64)}`;
 // 同じ nonce で送り直された置換 tx (wallet の高速化 / 取消) の hash。
 const MERCHANT_REPLACEMENT_TX: Hex = `0x${'c'.repeat(64)}`;
 const FEE_REPLACEMENT_TX: Hex = `0x${'d'.repeat(64)}`;
+// 前の試行の後に始めた次の試行の merchant tx。
+const NEXT_MERCHANT_TX: Hex = `0x${'e'.repeat(64)}`;
+
+// viem の onReplaced に渡る置換通知 (同じ nonce で mine された置換先 tx と、その receipt)。
+function replacedBy(sent: Hex, replacement: Hex, receipt: MockReceipt) {
+  return {
+    reason: 'repriced',
+    replacedTransaction: { hash: sent },
+    transaction: { hash: replacement },
+    transactionReceipt: receipt,
+  };
+}
+
+// 解決を test 側で決める Promise (遅れて返る RPC 応答を再現する)。
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
 
 // hash の tx が mine された success receipt (置換が無ければ transactionHash = 送信 hash)。
 function minedReceipt(
@@ -195,6 +236,8 @@ function seedStandardIntent(
 
 function resetMocks() {
   writeCallCount = 0;
+  onReplacedByHash.clear();
+  receiptQueryHashes.clear();
   useWriteContractMockA.writeContract = vi.fn();
   useWriteContractMockA.reset = vi.fn();
   useWriteContractMockB.writeContract = vi.fn();
@@ -1802,6 +1845,320 @@ describe('useStandardPayment: receipt query error の終端判定 (A4)', () => {
     expect(result.current.phase).toBe('fee-unknown');
     act(() => result.current.retryFee());
     expect(useWriteContractMockB.writeContract).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 第 7 回レビュー Codex 指摘 (PR #764): 置換先の revert・確認済み実 hash の保持・遅れて返る確認
+// ---------------------------------------------------------------------------
+describe('useStandardPayment: 置換先の revert・実 hash の保持・遅れた確認 (Codex)', () => {
+  const params = {
+    tokenAddress: TOKEN,
+    merchant: MERCHANT,
+    merchantAmount: 9_950_000n,
+    feeReceiver: FEE_RECEIVER,
+    feeAmount: 50_000n,
+    chainId: 84532,
+  };
+  const notFound = () =>
+    Promise.reject(
+      Object.assign(new Error('receipt not found'), {
+        name: 'TransactionReceiptNotFoundError',
+      }),
+    );
+  // 置換先だけが mine されて revert した chain (送った元の hash の receipt は無い)。
+  function replacementReverted(replacement: Hex, blockNumber: bigint) {
+    publicClientMock.getTransactionReceipt.mockImplementation(
+      ({ hash }: { hash: Hex }) =>
+        hash === replacement
+          ? Promise.resolve(minedReceipt(replacement, blockNumber, { status: 'reverted' }))
+          : notFound(),
+    );
+  }
+  function onSuccessOf(mock: { mock: { calls: unknown[][] } }, index: number) {
+    return (mock.mock.calls[index]?.[1] as { onSuccess?: (hash: Hex) => void })
+      ?.onSuccess;
+  }
+
+  it.each(['onReplaced が先', 'query error が先'] as const)(
+    'P2: 高速化した置換先が revert (wagmi は throw) → 置換先 hash で revert を確かめて merchant-error (%s)',
+    async (order) => {
+      replacementReverted(MERCHANT_REPLACEMENT_TX, 100n);
+      const { result, rerender } = await renderReadyStandardPayment();
+      act(() => result.current.mutate(params));
+      act(() => onSuccessOf(useWriteContractMockA.writeContract, 0)?.(MERCHANT_TX));
+      act(() => {
+        useWriteContractMockState.a.data = MERCHANT_TX;
+      });
+      rerender();
+      // viem は置換を見つけると resolve の前に onReplaced を呼び、wagmi は reverted で throw する。
+      const notifyReplaced = () =>
+        onReplacedByHash.get(MERCHANT_TX)?.(
+          replacedBy(
+            MERCHANT_TX,
+            MERCHANT_REPLACEMENT_TX,
+            minedReceipt(MERCHANT_REPLACEMENT_TX, 100n, { status: 'reverted' }),
+          ),
+        );
+      const failQuery = () => {
+        useWaitMockState.a.error = wagmiRevertError();
+        useWaitMockState.a.isError = true;
+      };
+      if (order === 'onReplaced が先') {
+        act(notifyReplaced);
+        act(failQuery);
+      } else {
+        act(failQuery);
+        rerender();
+        // 送った hash の receipt は無い → いったん unknown。
+        await waitFor(() => expect(result.current.phase).toBe('merchant-unknown'));
+        act(notifyReplaced);
+      }
+      rerender();
+
+      await waitFor(() => expect(result.current.phase).toBe('merchant-error'));
+      expect(publicClientMock.getTransactionReceipt).toHaveBeenCalledWith({
+        hash: MERCHANT_REPLACEMENT_TX,
+      });
+      expect(useWriteContractMockB.writeContract).not.toHaveBeenCalled();
+      expect(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)).toBeNull();
+      // 置換先の revert で同じ nonce は消費済み = 元の送金は永久に成立しない → 次の決済を塞がない。
+      act(() => result.current.mutate(params));
+      expect(useWriteContractMockA.writeContract).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('P2: fee の置換先が revert → 置換先 hash で確かめて fee-error (merchant は確定のまま・fee 再送は可)', async () => {
+    replacementReverted(FEE_REPLACEMENT_TX, 101n);
+    const { result, rerender } = await renderReadyStandardPayment();
+    act(() => result.current.mutate(params));
+    act(() => {
+      useWriteContractMockState.a.data = MERCHANT_TX;
+      useWaitMockState.a.data = minedReceipt(MERCHANT_TX, 100n);
+      useWaitMockState.a.isSuccess = true;
+    });
+    rerender();
+    await waitFor(() =>
+      expect(useWriteContractMockB.writeContract).toHaveBeenCalledOnce(),
+    );
+    act(() => {
+      useWriteContractMockState.b.data = FEE_TX;
+    });
+    rerender();
+    act(() =>
+      onReplacedByHash.get(FEE_TX)?.(
+        replacedBy(
+          FEE_TX,
+          FEE_REPLACEMENT_TX,
+          minedReceipt(FEE_REPLACEMENT_TX, 101n, { status: 'reverted' }),
+        ),
+      ),
+    );
+    act(() => {
+      useWaitMockState.b.error = wagmiRevertError();
+      useWaitMockState.b.isError = true;
+    });
+    rerender();
+
+    await waitFor(() => expect(result.current.phase).toBe('fee-error'));
+    expect(publicClientMock.getTransactionReceipt).toHaveBeenCalledWith({
+      hash: FEE_REPLACEMENT_TX,
+    });
+    expect(
+      JSON.parse(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)!),
+    ).toMatchObject({
+      stage: 'fee-awaiting',
+      merchantTxHash: MERCHANT_TX,
+      merchantBlockNumber: '100',
+    });
+    act(() => {
+      useWriteContractMockState.b.error = null;
+      result.current.retryFee();
+    });
+    expect(useWriteContractMockB.writeContract).toHaveBeenCalledTimes(2);
+  });
+
+  it('P2: 前の試行の置換通知は次の試行の revert 確認に使わない (試行に結び付ける)', async () => {
+    replacementReverted(MERCHANT_REPLACEMENT_TX, 100n);
+    const { result, rerender } = await renderReadyStandardPayment();
+    // 試行 A: 置換先が revert → merchant-error。
+    act(() => result.current.mutate(params));
+    act(() => {
+      useWriteContractMockState.a.data = MERCHANT_TX;
+    });
+    rerender();
+    act(() =>
+      onReplacedByHash.get(MERCHANT_TX)?.(
+        replacedBy(
+          MERCHANT_TX,
+          MERCHANT_REPLACEMENT_TX,
+          minedReceipt(MERCHANT_REPLACEMENT_TX, 100n, { status: 'reverted' }),
+        ),
+      ),
+    );
+    act(() => {
+      useWaitMockState.a.error = wagmiRevertError();
+      useWaitMockState.a.isError = true;
+    });
+    rerender();
+    await waitFor(() => expect(result.current.phase).toBe('merchant-error'));
+
+    // 試行 B: receipt query が RPC 障害。B 自身の receipt は無い → unknown のまま (A の置換先で確定しない)。
+    act(() => {
+      result.current.mutate(params);
+      useWriteContractMockState.a.data = NEXT_MERCHANT_TX;
+      useWaitMockState.a.error = new Error('rpc timeout');
+      useWaitMockState.a.isError = true;
+    });
+    act(() => onSuccessOf(useWriteContractMockA.writeContract, 1)?.(NEXT_MERCHANT_TX));
+    rerender();
+    await waitFor(() =>
+      expect(publicClientMock.getTransactionReceipt).toHaveBeenCalledWith({
+        hash: NEXT_MERCHANT_TX,
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    rerender();
+    expect(result.current.phase).toBe('merchant-unknown');
+    expect(result.current.hasActiveIntent).toBe(true);
+  });
+
+  it.each(['fee 成功', 'fee の wallet 失敗'] as const)(
+    'P2: 高速化の成功後に再照会が RPC エラーになっても実 hash を保持し、以後の照会と %s に使う',
+    async (outcome) => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(new Response('{"ok":true,"status":"claimed"}'));
+      global.fetch = fetchMock;
+      const { result, rerender } = await renderReadyStandardPayment();
+      act(() =>
+        result.current.mutate({
+          ...params,
+          saleAmount: 10_000_000n,
+          registerFee: true,
+        }),
+      );
+      act(() => {
+        useWriteContractMockState.a.data = MERCHANT_TX;
+        useWaitMockState.a.data = minedReceipt(MERCHANT_REPLACEMENT_TX, 100n, {
+          logs: [transferLog(MERCHANT, 9_950_000n)],
+        });
+        useWaitMockState.a.isSuccess = true;
+      });
+      rerender();
+      await waitFor(() =>
+        expect(useWriteContractMockB.writeContract).toHaveBeenCalledOnce(),
+      );
+      // 確認済みの実 hash を試行に結び付けて保持し、以後の receipt 照会も実 hash で行う。
+      await waitFor(() =>
+        expect(receiptQueryHashes.has(MERCHANT_REPLACEMENT_TX)).toBe(true),
+      );
+
+      // 再接続などで再照会が RPC エラー (react-query は data を残したまま isSuccess=false にする)。
+      act(() => {
+        useWaitMockState.a.error = new Error('rpc reconnect failed');
+        useWaitMockState.a.isError = true;
+        useWaitMockState.a.isSuccess = false;
+      });
+      rerender();
+      expect(result.current.merchantTxHash).toBe(MERCHANT_REPLACEMENT_TX);
+
+      // 注: merchant receipt が error の間は既存の分岐が phase を merchant-unknown に寄せる (本 PR で
+      // 変えない既存挙動)。ここでは error の間に起きた fee の結果へ渡る hash だけを確かめる。
+      if (outcome === 'fee 成功') {
+        act(() => onSuccessOf(useWriteContractMockB.writeContract, 0)?.(FEE_TX));
+        act(() => {
+          useWriteContractMockState.b.data = FEE_TX;
+          useWaitMockState.b.data = minedReceipt(FEE_TX, 101n);
+          useWaitMockState.b.isSuccess = true;
+        });
+        rerender();
+        // 2 tx の確定後に撃つ用途通知は、mine された実 hash で撃つ。
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+        expect(
+          JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body)),
+        ).toMatchObject({ merchantTxHash: MERCHANT_REPLACEMENT_TX, feeTxHash: FEE_TX });
+        expect(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)).toBeNull();
+        expect(result.current.merchantTxHash).toBe(MERCHANT_REPLACEMENT_TX);
+      } else {
+        act(() => {
+          useWriteContractMockState.b.error = new Error('user rejected fee tx');
+        });
+        rerender();
+        // fee 失敗時の intent 保存 (fee-awaiting) も実 hash に結び付ける。
+        await waitFor(() =>
+          expect(
+            JSON.parse(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)!),
+          ).toMatchObject({
+            stage: 'fee-awaiting',
+            merchantTxHash: MERCHANT_REPLACEMENT_TX,
+            merchantBlockNumber: '100',
+          }),
+        );
+      }
+    },
+  );
+
+  it('P2: 前の試行の遅れた revert 確認が、次の試行の確定 (merchant-error) を unknown に戻さない', async () => {
+    const probes: Array<{ hash: Hex; reply: ReturnType<typeof deferred<MockReceipt>> }> = [];
+    publicClientMock.getTransactionReceipt.mockImplementation(
+      ({ hash }: { hash: Hex }) => {
+        const reply = deferred<MockReceipt>();
+        probes.push({ hash, reply });
+        return reply.promise;
+      },
+    );
+    const { result, rerender } = await renderReadyStandardPayment();
+
+    // 試行 A: 1 回目の確認 (RPC が遅い) は返らないまま、再照会で 2 回目の確認が先に reverted を返す。
+    act(() => result.current.mutate(params));
+    act(() => onSuccessOf(useWriteContractMockA.writeContract, 0)?.(MERCHANT_TX));
+    act(() => {
+      useWriteContractMockState.a.data = MERCHANT_TX;
+      useWaitMockState.a.error = new Error('rpc timeout');
+      useWaitMockState.a.isError = true;
+    });
+    rerender();
+    await waitFor(() => expect(probes).toHaveLength(1));
+    act(() => result.current.retryReceipt());
+    act(() => {
+      useWaitMockState.a.error = wagmiRevertError();
+    });
+    rerender();
+    await waitFor(() => expect(probes).toHaveLength(2));
+    await act(async () => {
+      probes[1].reply.resolve(minedReceipt(MERCHANT_TX, 100n, { status: 'reverted' }));
+    });
+    await waitFor(() => expect(result.current.phase).toBe('merchant-error'));
+
+    // 試行 B: wagmi が revert で throw → 確認で reverted → merchant-error。
+    act(() => {
+      result.current.mutate(params);
+      useWriteContractMockState.a.data = NEXT_MERCHANT_TX;
+      useWaitMockState.a.error = wagmiRevertError();
+      useWaitMockState.a.isError = true;
+    });
+    act(() => onSuccessOf(useWriteContractMockA.writeContract, 1)?.(NEXT_MERCHANT_TX));
+    rerender();
+    await waitFor(() => expect(probes).toHaveLength(3));
+    expect(probes[2].hash).toBe(NEXT_MERCHANT_TX);
+    await act(async () => {
+      probes[2].reply.resolve(minedReceipt(NEXT_MERCHANT_TX, 101n, { status: 'reverted' }));
+    });
+    await waitFor(() => expect(result.current.phase).toBe('merchant-error'));
+    expect(result.current.isUnknown).toBe(false);
+
+    // A の 1 回目の確認が今ごろ返る (逆順)。古い結果で B を unknown に戻さない。
+    await act(async () => {
+      probes[0].reply.resolve(minedReceipt(MERCHANT_TX, 100n, { status: 'reverted' }));
+    });
+    rerender();
+    expect(result.current.phase).toBe('merchant-error');
+    expect(result.current.isUnknown).toBe(false);
+    act(() => result.current.mutate(params));
+    expect(useWriteContractMockA.writeContract).toHaveBeenCalledTimes(3);
   });
 });
 

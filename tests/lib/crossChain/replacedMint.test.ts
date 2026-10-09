@@ -11,7 +11,9 @@ import {
   encodeAbiParameters,
   encodeEventTopics,
   getAddress,
+  hexToNumber,
   pad,
+  slice,
   toHex,
   type Address,
   type Hex,
@@ -50,16 +52,21 @@ const MINT_M_RETRY = h(8);
 const NONCE_M = h(0x101);
 const NONCE_F = h(0x102);
 
-// CCTP V2 message (header 148 bytes + BurnMessageV2 body)。header の nonce は byte 12..44。
-function cctpMessage(nonce: Hex, recipient: Address, amount: bigint): Hex {
+// CCTP V2 message (header 148 bytes + BurnMessageV2 body)。header の nonce は byte 12..44・body は 148..。
+function cctpMessage(
+  nonce: Hex,
+  recipient: Address,
+  amount: bigint,
+  feeExecuted = 0n,
+): Hex {
   const body = concat([
     toHex(1, { size: 4 }),
     pad(SOURCE_TOKEN),
     pad(recipient),
     toHex(amount, { size: 32 }),
     pad(ACCOUNT),
-    toHex(0n, { size: 32 }),
-    toHex(0n, { size: 32 }),
+    toHex(feeExecuted, { size: 32 }),
+    toHex(feeExecuted, { size: 32 }),
     toHex(0n, { size: 32 }),
   ]);
   return concat([
@@ -75,24 +82,43 @@ function cctpMessage(nonce: Hex, recipient: Address, amount: bigint): Hex {
     body,
   ]);
 }
-const MESSAGE_M = cctpMessage(NONCE_M, RECIPIENT, VALUE);
+// merchant の message は Fast Transfer の手数料 1,000 を差し引いて mint される想定。
+const FEE_EXECUTED_M = 1_000n;
+const MESSAGE_M = cctpMessage(NONCE_M, RECIPIENT, VALUE, FEE_EXECUTED_M);
 const MESSAGE_F = cctpMessage(NONCE_F, FEE_RECEIVER, FEE);
 
-function messageReceivedLog(nonce: Hex, sourceDomain: number = CIRCLE_DOMAIN_BASE) {
+type Log = { address: Address; topics: Hex[]; data: Hex; logIndex: number };
+
+// この message を受信した MessageTransmitter の log (nonce・source domain・本文は message から取る)。
+function messageReceivedLog(
+  message: Hex,
+  logIndex: number,
+  override: { sourceDomain?: number; body?: Hex } = {},
+): Log {
   return {
     address: cctp.CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS,
     topics: encodeEventTopics({
       abi: [cctp.CCTP_MESSAGE_RECEIVED_EVENT],
-      args: { caller: ACCOUNT, nonce, finalityThresholdExecuted: 1000 },
+      args: { caller: ACCOUNT, nonce: slice(message, 12, 44), finalityThresholdExecuted: 1000 },
     }) as Hex[],
     data: encodeAbiParameters(
       [{ type: 'uint32' }, { type: 'bytes32' }, { type: 'bytes' }],
-      [sourceDomain, pad(cctp.CCTP_V2_TOKEN_MESSENGER_ADDRESS), '0x'],
+      [
+        override.sourceDomain ?? hexToNumber(slice(message, 4, 8)),
+        pad(cctp.CCTP_V2_TOKEN_MESSENGER_ADDRESS),
+        override.body ?? slice(message, 148),
+      ],
     ),
+    logIndex,
   };
 }
 
-function mintAndWithdrawLog(recipient: Address, net: bigint, feeCollected: bigint) {
+function mintAndWithdrawLog(
+  recipient: Address,
+  net: bigint,
+  feeCollected: bigint,
+  logIndex: number,
+): Log {
   return {
     address: cctp.CCTP_V2_TOKEN_MESSENGER_ADDRESS,
     topics: encodeEventTopics({
@@ -103,10 +129,22 @@ function mintAndWithdrawLog(recipient: Address, net: bigint, feeCollected: bigin
       [{ type: 'uint256' }, { type: 'uint256' }],
       [net, feeCollected],
     ),
+    logIndex,
   };
 }
 
-type Log = ReturnType<typeof messageReceivedLog>;
+// 1 回の receiveMessage の log の並び: CCTP は mint を emit してから MessageReceived を emit する。
+function delivery(
+  message: Hex,
+  mint: { recipient: Address; net: bigint; fee: bigint },
+  firstIndex: number,
+): Log[] {
+  return [
+    mintAndWithdrawLog(mint.recipient, mint.net, mint.fee, firstIndex),
+    messageReceivedLog(message, firstIndex + 1),
+  ];
+}
+
 const minedReceipt = (transactionHash: Hex, logs: Log[] = []) => ({
   status: 'success' as const,
   transactionHash,
@@ -215,11 +253,13 @@ describe('cctpReceiptShowsMint (置換 receipt の同内容判定)', () => {
     address: l.address as Address,
     topics: l.topics as Hex[],
     data: l.data as Hex,
+    logIndex: l.logIndex,
   }));
   const capturedMessage = selfMintIris.response.messages[0].message as Hex;
   const capturedBody = selfMintIris.response.messages[0].decodedMessage.decodedMessageBody;
   const expected = {
     message: capturedMessage,
+    burnToken: getAddress(capturedBody.burnToken),
     recipient: getAddress(capturedBody.mintRecipient),
     amount: BigInt(capturedBody.amount),
   };
@@ -229,19 +269,22 @@ describe('cctpReceiptShowsMint (置換 receipt の同内容判定)', () => {
       cctp.CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS.toLowerCase(),
     );
     expect(cctp.cctpReceiptShowsMint(capturedLogs, expected)).toBe(true);
+    // log の配列順ではなく logIndex で配送境界を決める。
+    expect(cctp.cctpReceiptShowsMint([...capturedLogs].reverse(), expected)).toBe(true);
   });
 
   it.each([
     ['recipient 違い', { ...expected, recipient: OTHER }],
     ['金額違い', { ...expected, amount: expected.amount + 1n }],
+    ['burnToken 違い', { ...expected, burnToken: OTHER }],
     [
       '別の message (nonce 違い)',
       {
         ...expected,
         message: concat([
-          capturedMessage.slice(0, 2 + 12 * 2) as Hex,
+          slice(capturedMessage, 0, 12),
           h(0xdead),
-          `0x${capturedMessage.slice(2 + 44 * 2)}` as Hex,
+          slice(capturedMessage, 44),
         ]),
       },
     ],
@@ -266,9 +309,73 @@ describe('cctpReceiptShowsMint (置換 receipt の同内容判定)', () => {
     expect(cctp.cctpReceiptShowsMint(onlyMessage, expected)).toBe(false);
     expect(cctp.cctpReceiptShowsMint(onlyMint, expected)).toBe(false);
   });
+
+  // 第 7 回レビュー Codex P1: 複数 message を 1 tx で受信した receipt で、message A の受信と
+  // 別 message B の mint を組み合わせて「A の mint」と取り違えない。
+  describe('複数 message が混在する receipt', () => {
+    const expectedM = {
+      message: MESSAGE_M,
+      burnToken: SOURCE_TOKEN,
+      recipient: RECIPIENT,
+      amount: VALUE,
+    };
+    const okMint = { recipient: RECIPIENT, net: VALUE - FEE_EXECUTED_M, fee: FEE_EXECUTED_M };
+    // 宛先・金額が expectedM と同じ mint を持つ別 message (nonce 違い)。
+    const MESSAGE_OTHER = cctpMessage(h(0xbeef), RECIPIENT, VALUE, FEE_EXECUTED_M);
+
+    it('A の受信 + A の mint 不一致 + 別 message B の一致 mint → 認めない', () => {
+      const logs = [
+        ...delivery(MESSAGE_M, { ...okMint, recipient: OTHER }, 0),
+        ...delivery(MESSAGE_OTHER, okMint, 2),
+      ];
+      expect(cctp.cctpReceiptShowsMint(logs, expectedM)).toBe(false);
+    });
+
+    it('B の mint が A の受信の直前にあっても、A の配送境界の外なら認めない', () => {
+      // [B の mint, B の受信, A の受信]: A の受信の前 (B の受信の後) に A 自身の mint が無い。
+      const logs = [
+        ...delivery(MESSAGE_OTHER, okMint, 0),
+        messageReceivedLog(MESSAGE_M, 2),
+      ];
+      expect(cctp.cctpReceiptShowsMint(logs, expectedM)).toBe(false);
+    });
+
+    it('別 message B の配送の後に、A 自身の一致した配送があれば認める', () => {
+      const logs = [
+        ...delivery(MESSAGE_OTHER, { ...okMint, recipient: OTHER }, 0),
+        ...delivery(MESSAGE_M, okMint, 2),
+      ];
+      expect(cctp.cctpReceiptShowsMint(logs, expectedM)).toBe(true);
+    });
+
+    it('A の配送境界の中に mint が 2 本あれば認めない', () => {
+      const logs = [
+        mintAndWithdrawLog(RECIPIENT, okMint.net, okMint.fee, 0),
+        mintAndWithdrawLog(RECIPIENT, okMint.net, okMint.fee, 1),
+        messageReceivedLog(MESSAGE_M, 2),
+      ];
+      expect(cctp.cctpReceiptShowsMint(logs, expectedM)).toBe(false);
+    });
+
+    it('nonce が同じでも受信した本文 (金額) が A の message と違えば認めない', () => {
+      const otherBody = slice(cctpMessage(NONCE_M, RECIPIENT, VALUE + 1n, FEE_EXECUTED_M), 148);
+      const logs = [
+        mintAndWithdrawLog(RECIPIENT, okMint.net, okMint.fee, 0),
+        messageReceivedLog(MESSAGE_M, 1, { body: otherBody }),
+      ];
+      expect(cctp.cctpReceiptShowsMint(logs, expectedM)).toBe(false);
+    });
+
+    it('mint の手数料が本文の feeExecuted と違えば認めない', () => {
+      const logs = delivery(MESSAGE_M, { recipient: RECIPIENT, net: VALUE, fee: 0n }, 0);
+      expect(cctp.cctpReceiptShowsMint(logs, expectedM)).toBe(false);
+    });
+  });
 });
 
 describe('executeCctpTransfer: 宛先 mint の置換 receipt (A2)', () => {
+  const okMint = { recipient: RECIPIENT, net: VALUE - FEE_EXECUTED_M, fee: FEE_EXECUTED_M };
+
   it('merchant mint が取消に置換されたら成功にせず throw・再開記録 (mint hash) を残し、resume で再 mint できる', async () => {
     const wallet = makeWalletClient([APPROVE, BURN_M, MINT_M]);
     const dest = makeDestClient(new Map([[MINT_M, minedReceipt(MINT_M_REPLACEMENT)]]));
@@ -311,10 +418,17 @@ describe('executeCctpTransfer: 宛先 mint の置換 receipt (A2)', () => {
   });
 
   it.each([
-    ['別 message (nonce 違い) の受信', [messageReceivedLog(h(0xbeef)), mintAndWithdrawLog(RECIPIENT, VALUE, 0n)]],
-    ['別 source domain の受信', [messageReceivedLog(NONCE_M, CIRCLE_DOMAIN_POLYGON), mintAndWithdrawLog(RECIPIENT, VALUE, 0n)]],
-    ['別 recipient への mint', [messageReceivedLog(NONCE_M), mintAndWithdrawLog(OTHER, VALUE, 0n)]],
-    ['金額違いの mint', [messageReceivedLog(NONCE_M), mintAndWithdrawLog(RECIPIENT, VALUE - 1n, 0n)]],
+    ['別 message (nonce 違い) の受信', delivery(cctpMessage(h(0xbeef), RECIPIENT, VALUE, FEE_EXECUTED_M), okMint, 0)],
+    ['別 source domain の受信', [mintAndWithdrawLog(RECIPIENT, okMint.net, okMint.fee, 0), messageReceivedLog(MESSAGE_M, 1, { sourceDomain: CIRCLE_DOMAIN_POLYGON })]],
+    ['別 recipient への mint', delivery(MESSAGE_M, { ...okMint, recipient: OTHER }, 0)],
+    ['金額違いの mint', delivery(MESSAGE_M, { ...okMint, net: okMint.net - 1n }, 0)],
+    [
+      '自分の受信 + 自分の mint 不一致 + 別 message の一致 mint',
+      [
+        ...delivery(MESSAGE_M, { ...okMint, recipient: OTHER }, 0),
+        ...delivery(cctpMessage(h(0xbeef), RECIPIENT, VALUE, FEE_EXECUTED_M), okMint, 2),
+      ],
+    ],
   ])('merchant mint の置換が別内容 (%s) なら throw・再開記録を残す', async (_label, logs) => {
     const wallet = makeWalletClient([APPROVE, BURN_M, MINT_M]);
     const dest = makeDestClient(new Map([[MINT_M, minedReceipt(MINT_M_REPLACEMENT, logs)]]));
@@ -333,14 +447,8 @@ describe('executeCctpTransfer: 宛先 mint の置換 receipt (A2)', () => {
     const wallet = makeWalletClient([APPROVE, BURN_M, MINT_M]);
     const dest = makeDestClient(
       new Map([
-        [
-          MINT_M,
-          minedReceipt(MINT_M_REPLACEMENT, [
-            // CCTP V2 は手数料を差し引いた額を mint し、手数料を feeCollected に出す。
-            mintAndWithdrawLog(RECIPIENT, VALUE - 1_000n, 1_000n),
-            messageReceivedLog(NONCE_M),
-          ]),
-        ],
+        // CCTP V2 は手数料を差し引いた額を mint し、手数料を feeCollected に出す。
+        [MINT_M, minedReceipt(MINT_M_REPLACEMENT, delivery(MESSAGE_M, okMint, 0))],
       ]),
     );
     const steps: CctpResumeState[] = [];
@@ -376,10 +484,10 @@ describe('executeCctpTransfer: 宛先 mint の置換 receipt (A2)', () => {
       new Map([
         [
           MINT_F,
-          minedReceipt(MINT_F_REPLACEMENT, [
-            mintAndWithdrawLog(FEE_RECEIVER, FEE, 0n),
-            messageReceivedLog(NONCE_F),
-          ]),
+          minedReceipt(
+            MINT_F_REPLACEMENT,
+            delivery(MESSAGE_F, { recipient: FEE_RECEIVER, net: FEE, fee: 0n }, 0),
+          ),
         ],
       ]),
     );

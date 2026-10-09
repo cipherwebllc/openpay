@@ -391,6 +391,7 @@ export async function executeCctpTransfer(
         'cctp mint',
         {
           message: merchantIris.message,
+          burnToken: args.sourceToken,
           recipient: args.recipient,
           amount: args.valueAtomic,
         },
@@ -421,7 +422,12 @@ export async function executeCctpTransfer(
         args.destPublicClient,
         feeMintHash,
         'cctp fee mint',
-        { message: feeIris.message, recipient: feeReceiver!, amount: feeAmount },
+        {
+          message: feeIris.message,
+          burnToken: args.sourceToken,
+          recipient: feeReceiver!,
+          amount: feeAmount,
+        },
       );
       if (minedFeeMintHash !== feeMintHash) persist({ feeMintTxHash: minedFeeMintHash });
     }

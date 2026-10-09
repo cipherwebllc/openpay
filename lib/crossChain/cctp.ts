@@ -469,38 +469,59 @@ export function decodeBurnMessageBody(body: Hex) {
 
 /** 第 7 回レビュー A2: 宛先 mint (receiveMessage) の receipt が送った hash と別 tx (同じ nonce の置換 =
  *  wallet の高速化 / 取消) で返ったとき、その置換 tx が同内容かを置換 tx 自身の log だけで判定する。
- *  - MessageTransmitter の MessageReceived が「この message」(header の nonce・source domain 一致) を受信した
- *  - TokenMessenger の MintAndWithdraw が期待 recipient へ、手数料込みで期待額 (= burn 額) を mint した
- *  の両方があるときだけ true。取消 (log なし)・別内容・malformed は false (mint 成功にしない)。 */
+ *  - MessageTransmitter の MessageReceived が「この message」(header の nonce・source domain 一致、
+ *    送り主 = TokenMessenger、受信した本文 = この message の本文) を受信し、
+ *  - その本文が期待どおり (burnToken・mintRecipient・amount = burn 額) で、
+ *  - 同じ配送境界 (前の MessageReceived の後〜この MessageReceived の前) に TokenMessenger の
+ *    MintAndWithdraw がちょうど 1 本あり、期待 recipient へ amount − feeExecuted を mint している
+ *  ときだけ true。取消 (log なし)・別内容・malformed は false (mint 成功にしない)。
+ *  複数 message を 1 tx で受信した receipt で、別 message の mint を借用させない (verifyForwardMint と同じ境界)。 */
 export function cctpReceiptShowsMint(
-  logs: readonly { address: Address; topics: readonly Hex[]; data: Hex }[],
-  expected: { message: Hex; recipient: Address; amount: bigint },
+  logs: readonly { address: Address; topics: readonly Hex[]; data: Hex; logIndex: number }[],
+  expected: { message: Hex; burnToken: Address; recipient: Address; amount: bigint },
 ): boolean {
-  // V2 message header = version(4) sourceDomain(4) destinationDomain(4) nonce(32) … の計 148 bytes。
-  if (size(expected.message) < 148) return false;
+  // V2 message = header 148 bytes (version 4・sourceDomain 4・destinationDomain 4・nonce 32 …) + BurnMessageV2 (228 bytes〜)。
+  if (size(expected.message) < 148 + 228) return false;
   const sourceDomain = Number(BigInt(slice(expected.message, 4, 8)));
   const nonce = slice(expected.message, 12, 44).toLowerCase();
-  let received = false;
-  let minted = false;
-  for (const log of logs) {
-    const address = log.address.toLowerCase();
-    const topics = log.topics as [Hex, ...Hex[]];
+  const messageBody = slice(expected.message, 148).toLowerCase();
+  const transmitter = CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS.toLowerCase();
+  const messenger = CCTP_V2_TOKEN_MESSENGER_ADDRESS.toLowerCase();
+  const sorted = [...logs].sort((a, b) => a.logIndex - b.logIndex);
+  let previousMessageIndex = -1;
+  for (let i = 0; i < sorted.length; i++) {
+    const log = sorted[i];
+    if (log.address.toLowerCase() !== transmitter || log.topics[0] !== CCTP_MESSAGE_RECEIVED_TOPIC0) continue;
+    // CCTP は mint を emit してから MessageReceived を emit する。この配送の mint は前の配送境界の後だけ。
+    const start = previousMessageIndex + 1;
+    previousMessageIndex = i;
     try {
-      if (address === CCTP_V2_MESSAGE_TRANSMITTER_ADDRESS.toLowerCase() &&
-          topics[0] === CCTP_MESSAGE_RECEIVED_TOPIC0) {
-        const { args } = decodeEventLog({ abi: [CCTP_MESSAGE_RECEIVED_EVENT], data: log.data, topics });
-        if (args.nonce.toLowerCase() === nonce && args.sourceDomain === sourceDomain) received = true;
-      } else if (address === CCTP_V2_TOKEN_MESSENGER_ADDRESS.toLowerCase() &&
-          topics[0] === CCTP_MINT_AND_WITHDRAW_TOPIC0) {
-        const { args } = decodeEventLog({ abi: [CCTP_MINT_AND_WITHDRAW_EVENT], data: log.data, topics });
-        if (args.mintRecipient.toLowerCase() === expected.recipient.toLowerCase() &&
-            args.amount + args.feeCollected === expected.amount) minted = true;
+      const { args: message } = decodeEventLog({
+        abi: [CCTP_MESSAGE_RECEIVED_EVENT], data: log.data, topics: log.topics as [Hex, ...Hex[]],
+      });
+      if (message.nonce.toLowerCase() !== nonce || message.sourceDomain !== sourceDomain) continue;
+      const body = decodeBurnMessageBody(message.messageBody);
+      if (message.messageBody.toLowerCase() !== messageBody ||
+          message.sender.toLowerCase() !== addressToBytes32(CCTP_V2_TOKEN_MESSENGER_ADDRESS).toLowerCase() ||
+          body.burnToken.toLowerCase() !== addressToBytes32(expected.burnToken).toLowerCase() ||
+          body.mintRecipient.toLowerCase() !== addressToBytes32(expected.recipient).toLowerCase() ||
+          body.amount !== expected.amount) {
+        return false;
       }
+      const mints = sorted.slice(start, i).filter((l) =>
+        l.address.toLowerCase() === messenger && l.topics[0] === CCTP_MINT_AND_WITHDRAW_TOPIC0);
+      if (mints.length !== 1) return false;
+      const { args: mint } = decodeEventLog({
+        abi: [CCTP_MINT_AND_WITHDRAW_EVENT], data: mints[0].data, topics: mints[0].topics as [Hex, ...Hex[]],
+      });
+      return mint.mintRecipient.toLowerCase() === expected.recipient.toLowerCase() &&
+        mint.amount === body.amount - body.feeExecuted && mint.feeCollected === body.feeExecuted;
     } catch {
       // malformed log を「同内容の mint」の証拠にしない (成功側へ倒さない)。
+      return false;
     }
   }
-  return received && minted;
+  return false;
 }
 
 /** bounded scan、カーソルは成功した窓のみ進める。RPC 障害を「mint なし」にしない。 */

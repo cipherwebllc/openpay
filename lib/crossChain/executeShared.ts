@@ -113,7 +113,7 @@ async function waitForMintReceiptOrThrow(
   client: PublicClient,
   hash: Hex,
   label: string,
-  expected: { message: Hex; recipient: Address; amount: bigint },
+  expected: { message: Hex; burnToken: Address; recipient: Address; amount: bigint },
 ): Promise<Hex> {
   const receipt = await waitForReceiptOrThrow(client, hash, label);
   if (receipt.transactionHash.toLowerCase() === hash.toLowerCase()) return hash;
