@@ -32,8 +32,11 @@ vi.mock('@/lib/env', async (importOriginal) => {
 });
 vi.mock('wagmi', () => ({ useAccount: () => ({ address: undefined }) }));
 vi.mock('@/components/StorefrontPublishPanel', () => ({
-  StorefrontPublishPanel: ({ storefront }: { storefront: unknown }) => (
-    <output data-testid="storefront-publish-parts">{JSON.stringify(storefront)}</output>
+  StorefrontPublishPanel: ({ storefront, blockedReason }: { storefront: unknown; blockedReason?: string }) => (
+    <>
+      <output data-testid="storefront-publish-parts">{JSON.stringify(storefront)}</output>
+      <output data-testid="storefront-publish-blocked">{blockedReason ?? ''}</output>
+    </>
   ),
 }));
 // ENS 名の解決 (シートを閉じていても受取先を解決する): 'shop.eth' だけ ADDR に解決する。
@@ -268,6 +271,30 @@ describe('MobileOrderBuilder', () => {
     }
     fireEvent.change(screen.getByPlaceholderText(/東京都渋谷区/), { target: { value: '東京都' } });
     expect(screen.getByText('1 件入力済み')).toBeInTheDocument();
+  });
+
+  it('値引き: 種類を選んだのに値が空・範囲外なら公開させない・正しい値なら公開 parts に載せる', () => {
+    h.enableHandles = true;
+    renderWithIntl(<MobileOrderBuilder />);
+    const blocked = () => screen.getByTestId('storefront-publish-blocked').textContent;
+    const parts = () => JSON.parse(screen.getByTestId('storefront-publish-parts').textContent ?? '{}');
+    expect(blocked()).toBe('');
+
+    fireEvent.click(screen.getByText('値引き（任意）'));
+    fireEvent.click(screen.getByRole('button', { name: '割引率' }));
+    expect(blocked()).toBe('値引きを直すか「なし」にしてください');
+
+    const input = screen.getByLabelText('割引率（%）');
+    fireEvent.change(input, { target: { value: '150' } });
+    expect(blocked()).toBe('値引きを直すか「なし」にしてください');
+
+    fireEvent.change(input, { target: { value: '5' } });
+    expect(blocked()).toBe('');
+    expect(parts()?.discount).toEqual({ kind: 'percent', value: '5' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'なし' }));
+    expect(blocked()).toBe('');
+    expect(parts()?.discount).toBeUndefined();
   });
 
   it('@handle 公開 parts に lastOrder / minLeadMinutes を載せる', () => {

@@ -2853,6 +2853,7 @@
     "barReasonSignIn": "サインインすると公開できます",
     "barReasonNoHandle": "@handle を取得すると公開できます",
     "barReasonNoMenu": "レジで商品を 1 つ追加すると公開できます",
+    "barReasonDiscount": "値引きを直すか「なし」にしてください",
     "barReceiverWillChange": "受取先が変わります",
     "acceptingApplyNote": "「公開を更新」でお店のページに反映されます。",
     "autoLoaded": "公開中の内容をこの端末に読み込みました。",
